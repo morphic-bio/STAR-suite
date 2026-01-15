@@ -1,0 +1,4 @@
+# link_path<TAB>target_path
+# Paths are relative to repo root. Use relative symlink targets.
+# Example:
+# core/source/STAR.cpp	core/legacy/source/STAR.cpp
