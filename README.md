@@ -29,7 +29,6 @@ tools/                   # Suite-level scripts/utilities
 
 ### Core Updates
 Recent updates to the Core module (STAR 2.7.11b and prior) include:
-- **STARdiploid**: New `--genomeTransformType Diploid` option for generating personal diploid genomes and transforming alignments back to reference coordinates.
 - **Transcriptome Output**: Replaced `--quantTranscriptomeBan` with `--quantTranscriptomeSAMoutput` for more explicit control (e.g., `BanSingleEnd_ExtendSoftclip`).
 - **Solo Features**:
   - `sF` BAM tag for feature type and gene counts.
