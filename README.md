@@ -1,8 +1,6 @@
 # STAR-suite
 
-STAR-suite reorganizes STAR into module-focused directories while keeping a
-single source of truth for shared code. Build outputs remain compatible with
-existing STAR workflows, and the new top-level `Makefile` exposes module targets.
+STAR-suite reorganizes STAR into module-focused directories while keeping a single source of truth for shared code. Build outputs remain compatible with existing STAR workflows, and the new top-level `Makefile` exposes module targets.
 
 ## Folder Structure
 
@@ -20,75 +18,108 @@ tools/                   # Suite-level scripts/utilities
 
 ## Modules
 
-- STAR-core (`core/`): Legacy STAR (indexing, bulk, Solo) plus shared utilities.
+- **STAR-core** (`core/`): Legacy STAR (indexing, bulk, Solo) plus shared utilities.
   Build: `make core` (binary at `core/legacy/source/STAR`).
-- STAR-Flex (`flex/`): FlexFilter pipeline and Flex-specific integrations.
+- **STAR-Flex** (`flex/`): FlexFilter pipeline and Flex-specific integrations.
   Build tools: `make flex` or `make flex-tools`.
-- STAR-SLAM (`slam/`): SLAM-seq quantification, SNP masking, trimming/QC.
+- **STAR-SLAM** (`slam/`): SLAM-seq quantification, SNP masking, trimming/QC.
   Build tools: `make slam` or `make slam-tools`.
 
-## Flags (high-level)
+## Technical Updates
 
-- Core (legacy): Standard STAR flags (`--runMode`, `--genomeDir`,
-  `--readFilesIn`, `--outSAMtype`, `--outSAMattributes`, etc.).
-  See `core/legacy/README.md`.
-- Flex: `--flex yes` to enable Flex mode; `--soloRunFlexFilter yes` to run the
-  filter-only pipeline on a MEX; `--soloType`, `--soloCB*`, `--soloUMI*` as in
-  STARsolo. See `flex/README_flex.md`.
-- SLAM: `--slamQuantMode`, `--slamSnpBed`, `--slamSnpDetect`,
-  `--slamCompatMode gedi`, `--slamCompatOverlapWeight`, and trimming options
-  like `--clip3pAdapterSeq`/`--clip3pAdapterMMp`. See `docs/SLAM_COMPATIBILITY_MODE.md`.
+### Core Updates
+Recent updates to the Core module (STAR 2.7.11b and prior) include:
+- **STARdiploid**: New `--genomeTransformType Diploid` option for generating personal diploid genomes and transforming alignments back to reference coordinates.
+- **Transcriptome Output**: Replaced `--quantTranscriptomeBan` with `--quantTranscriptomeSAMoutput` for more explicit control (e.g., `BanSingleEnd_ExtendSoftclip`).
+- **Solo Features**:
+  - `sF` BAM tag for feature type and gene counts.
+  - `--soloCBtype String` for arbitrary barcode strings.
+  - Improved cell filtering and statistics with `--soloCellReadStats Standard`.
+
+### Flex Updates
+STAR-Flex extends upstream STAR with features for 10x Flex, bulk RNA-seq, and reference management:
+- **Flex Pipeline**: Inline hash-based processing for 10x Genomics Flex (Fixed RNA Profiling). Includes sample tag detection, 1MM pseudocount correction for CBs, clique-based UMI deduplication, and occupancy filtering.
+- **Cutadapt Parity**: Native implementation of cutadapt v5.1 trimming algorithm (`--trimCutadapt Yes`) for bulk RNA-seq.
+- **TranscriptVB**: Variational Bayes and EM quantification for transcript-level abundance, offering parity with Salmon alignment-mode.
+- **Reference Building**:
+  - **AutoIndex**: CellRanger-style reference download and integrity verification (`--autoIndex`, `--cellrangerStyleIndex`).
+  - **Transcriptome FASTA**: Automatic generation of `transcriptome.fa` during indexing for Salmon/TranscriptVB compatibility.
+- **Y-Chromosome Splitting**: Split BAMs and FASTQs by Y-chromosome alignment (`--emitNoYBAM`, `--emitYNoYFastq`) for sex-specific analysis.
+
+### SLAM Updates
+Integrated SLAM-seq quantification with GRAND-SLAM parity:
+- **Quantification**: Full gene-level NTR estimation (Binomial/EM models).
+- **Compatibility Mode**: `--slamCompatMode gedi` enables GEDI-compatible behaviors (intronic classification, lenient overlap, overlap weighting) for parity testing.
+- **Auto-Trimming**: Variance-based detection of artifact-prone read ends (`--autoTrim variance`).
+- **QC**: Comprehensive reports for T->C rates and error modeling.
+
+## Summary of Flags
+
+### Core (Legacy)
+Standard STAR flags apply. See `core/legacy/README.md`.
+- `--runMode`: `alignReads`, `genomeGenerate`, `soloCellFiltering`
+- `--genomeDir`: Path to genome index
+- `--readFilesIn`: Input read files
+- `--outSAMtype`: Output SAM/BAM format (e.g., `BAM SortedByCoordinate`)
+- `--soloType`: Single-cell mode (e.g., `CB_UMI_Simple`, `SmartSeq`)
+
+### Flex
+See `flex/README_flex.md` for full reference.
+- **Pipeline**:
+  - `--flex yes`: Enable Flex pipeline.
+  - `--soloFlexExpectedCellsPerTag`: Expected cells per sample tag.
+  - `--soloSampleWhitelist`: TSV mapping sample tags to labels.
+- **Trimming**:
+  - `--trimCutadapt Yes`: Enable cutadapt-style trimming.
+  - `--trimCutadaptCompat`: Compatibility mode (e.g., `Cutadapt3`).
+- **Quantification**:
+  - `--quantMode TranscriptVB`: Enable VB/EM quantification.
+- **Y-Split**:
+  - `--emitNoYBAM yes`: Emit `_Y.bam` and `_noY.bam`.
+  - `--emitYNoYFastq yes`: Emit split FASTQ files.
+
+### SLAM
+See `slam/docs/SLAM_COMPATIBILITY_MODE.md` and `slam/docs/SLAM_seq.md`.
+- **Quantification**:
+  - `--slamQuantMode 1`: Enable SLAM quantification.
+  - `--slamGrandSlamOut 1`: Generate GRAND-SLAM compatible output.
+- **Compatibility**:
+  - `--slamCompatMode gedi`: Enable GEDI compatibility.
+  - `--slamCompatIntronic`, `--slamCompatLenientOverlap`: Fine-grained control.
+- **Trimming**:
+  - `--autoTrim variance`: Enable variance-based auto-trimming.
+  - `--slamTrim5p`, `--slamTrim3p`: Manual trim guards.
 
 ## Sample Commands
 
-Core alignment:
-
+**Flex Mode (10x Fixed RNA Profiling):**
 ```bash
 core/legacy/source/STAR \
   --runMode alignReads \
-  --genomeDir /path/to/genome_index \
-  --readFilesIn reads.fq.gz \
-  --readFilesCommand zcat \
-  --outFileNamePrefix out/ \
-  --outSAMtype BAM SortedByCoordinate \
-  --outSAMattributes NH HI AS nM MD
-```
-
-Flex mode (inline filtering):
-
-```bash
-core/legacy/source/STAR \
-  --runMode alignReads \
-  --genomeDir /path/to/genome_index \
-  --readFilesIn reads.fq.gz \
-  --readFilesCommand zcat \
-  --outFileNamePrefix out/ \
-  --outSAMtype BAM SortedByCoordinate \
+  --genomeDir /path/to/flex_index \
+  --readFilesIn reads_R2.fq.gz reads_R1.fq.gz \
+  --flex yes \
   --soloType CB_UMI_Simple \
-  --soloCBstart 1 --soloCBlen 16 \
-  --soloUMIstart 17 --soloUMIlen 12 \
-  --soloCBwhitelist /path/to/whitelist.txt \
-  --flex yes
+  --soloCBwhitelist /path/to/737K-fixed-rna-profiling.txt \
+  --soloSampleWhitelist sample_whitelist.tsv \
+  --outFileNamePrefix output/
 ```
 
-SLAM mode:
-
+**SLAM Mode (GEDI Compatibility):**
 ```bash
 core/legacy/source/STAR \
   --runMode alignReads \
   --genomeDir /path/to/genome_index \
   --readFilesIn reads.fq.gz \
-  --readFilesCommand zcat \
-  --outFileNamePrefix out/ \
-  --outSAMtype BAM SortedByCoordinate \
-  --outSAMattributes NH HI AS nM MD \
   --slamQuantMode 1 \
-  --slamSnpBed /path/to/snps.bed
+  --slamCompatMode gedi \
+  --autoTrim variance \
+  --outFileNamePrefix output/
 ```
 
 ## More Detail
 
-- Core usage: `core/legacy/README.md`
-- Flex pipeline: `flex/README_flex.md`
-- SLAM compatibility: `docs/SLAM_COMPATIBILITY_MODE.md`
-- SLAM tools: `slam/tools/slam_requant/README.md`, `slam/tools/pileup_snp/README.md`
+- Core usage: [core/legacy/README.md](core/legacy/README.md)
+- Flex pipeline: [flex/README_flex.md](flex/README_flex.md)
+- SLAM compatibility: [slam/docs/SLAM_COMPATIBILITY_MODE.md](slam/docs/SLAM_COMPATIBILITY_MODE.md)
+- SLAM methodology: [slam/docs/SLAM_seq.md](slam/docs/SLAM_seq.md)
