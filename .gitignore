@@ -36,6 +36,11 @@ Depend.list
 /source/libem/libem.a
 /source/libflex/libflex.a
 /source/libtrim/libtrim.a
+/core/legacy/source/STAR
+/core/legacy/source/STARlong
+/core/features/vbem/source/libem/libem.a
+/core/features/vbem/source/libtrim/libtrim.a
+/flex/source/libflex/libflex.a
 /tools/flexfilter/run_flexfilter_mex
 /tools/flexfilter/test_output/
 /bin/*

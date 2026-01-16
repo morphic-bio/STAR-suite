@@ -1,9 +1,11 @@
 # Makefile for run_flexfilter_mex standalone tool
 # Moved from reference/tools/Makefile.flexfilter
 
-LIBFLEX_DIR = ../../source/libflex
-LIBFLEX = $(LIBFLEX_DIR)/libflex.a
-HTSLIB_DIR = ../../source/htslib
+ROOT_DIR := $(abspath ../../..)
+LEGACY_SRC_DIR := $(ROOT_DIR)/core/legacy/source
+LIBFLEX_DIR := $(ROOT_DIR)/flex/source/libflex
+LIBFLEX := $(LIBFLEX_DIR)/libflex.a
+HTSLIB_DIR := $(LEGACY_SRC_DIR)/htslib
 
 CXX = g++
 # Keep -fopenmp for OccupancyGuard.cpp which still uses OpenMP
@@ -12,13 +14,12 @@ GLIB_CFLAGS = $(shell pkg-config --cflags glib-2.0)
 GLIB_LIBS = $(shell pkg-config --libs glib-2.0)
 
 CXXFLAGS = -O3 -std=c++11 -Wall -Wextra -fopenmp \
-           -I../../source -I../../source/libflex \
-           -I../../reference/tools/flex_debug/flex/third_party \
-           -I$(HTSLIB_DIR) \
+           -I$(ROOT_DIR)/flex/source -I$(LIBFLEX_DIR) \
+           -I$(LEGACY_SRC_DIR) -I$(HTSLIB_DIR) \
            $(GLIB_CFLAGS)
 
 # Link deps: libflex.a, MexWriter.o, htslib, glib, pthread, fopenmp
-LDFLAGS = $(LIBFLEX) ../../source/MexWriter.o \
+LDFLAGS = $(LIBFLEX) $(LEGACY_SRC_DIR)/MexWriter.o \
           -L$(HTSLIB_DIR) -lhts \
           $(GLIB_LIBS) -pthread -fopenmp
 

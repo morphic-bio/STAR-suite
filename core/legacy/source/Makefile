@@ -11,6 +11,33 @@ CXXFLAGSextra ?=
 # user may define the compiler
 CXX ?= g++
 
+# Repo layout (STAR-suite)
+ROOT_DIR := $(abspath ../../..)
+FLEX_DIR := $(ROOT_DIR)/flex
+SLAM_DIR := $(ROOT_DIR)/slam
+VBEM_DIR := $(ROOT_DIR)/core/features/vbem
+YREMOVE_FASTQ_DIR := $(ROOT_DIR)/core/features/yremove_fastq
+BAMSORT_DIR := $(ROOT_DIR)/core/features/bamsort
+
+FLEX_SRC_DIR := $(FLEX_DIR)/source
+SLAM_SRC_DIR := $(SLAM_DIR)/source
+VBEM_SRC_DIR := $(VBEM_DIR)/source
+BAMSORT_SRC_DIR := $(BAMSORT_DIR)/source
+
+LIBFLEX_DIR := $(FLEX_SRC_DIR)/libflex
+LIBTRIM_DIR := $(VBEM_SRC_DIR)/libtrim
+LIBEM_DIR := $(VBEM_SRC_DIR)/libem
+
+FLEXFILTER_DIR := $(FLEX_DIR)/tools/flexfilter
+REMOVE_Y_READS_DIR := $(YREMOVE_FASTQ_DIR)/tools/remove_y_reads
+TRIMVALIDATE_DIR := $(VBEM_DIR)/tools/trimvalidate
+
+LIBFLEX_LIB := $(LIBFLEX_DIR)/libflex.a
+LIBTRIM_LIB := $(LIBTRIM_DIR)/libtrim.a
+LIBEM_LIB := $(LIBEM_DIR)/libem.a
+
+VPATH := $(FLEX_SRC_DIR) $(SLAM_SRC_DIR) $(VBEM_SRC_DIR) $(BAMSORT_SRC_DIR)
+
 # pre-defined flags
 LDFLAGS_shared := -pthread -Lhtslib -Bstatic -lhts -Bdynamic -lz -lssl -lcrypto
 LDFLAGS_static := -static -static-libgcc -pthread -Lhtslib -lhts -lz
@@ -46,10 +73,9 @@ CXXFLAGS_SIMD ?= -mavx2
 
 # Unconditionally set essential flags and optimization options
 # Packed ReadInfo is the only supported path (legacy removed)
-# Include klib/khash (needed for inline hash build) from flex third_party
-# Include libflex headers for flexfilter integration
+# Include flex (klib/libflex), vbem (libtrim/libem), and slam headers
 # Include current directory for IncludeDefine.h and other source headers
-CXXFLAGS_common := -std=c++11 -fopenmp -I. -I../tools/flex_debug/flex/third_party -Ilibflex -Ilibem $(COMPTIMEPLACE) $(GIT_BRANCH_COMMIT_DIFF)
+CXXFLAGS_common := -std=c++11 -fopenmp -I. -I$(FLEX_SRC_DIR) -I$(LIBFLEX_DIR) -I$(VBEM_SRC_DIR) -I$(LIBEM_DIR) -I$(SLAM_SRC_DIR) -I$(BAMSORT_SRC_DIR) $(COMPTIMEPLACE) $(GIT_BRANCH_COMMIT_DIFF)
 CXXFLAGS_main := -O3 $(CXXFLAGS_common)
 CXXFLAGS_gdb := -O0 -g3 $(CXXFLAGS_common)
 
@@ -130,13 +156,13 @@ all: cleanCompileInfo STAR$(SFX)
 # Requires STAR to be built first (needs libflex.a and MexWriter.o)
 .PHONY: flexfilter
 flexfilter: STAR$(SFX)
-	$(MAKE) -C ../tools/flexfilter
+	$(MAKE) -C $(FLEXFILTER_DIR)
 
 # Standalone remove_y_reads FASTQ splitter tool (optional, not built by default)
 # Requires htslib to be built first
 .PHONY: remove_y_reads
 remove_y_reads: htslib/libhts.a
-	$(MAKE) -C ../tools/remove_y_reads
+	$(MAKE) -C $(REMOVE_Y_READS_DIR)
 
 # Convenience target to rebuild only the MEX writer components
 .PHONY: MexWriterObjs
@@ -284,12 +310,12 @@ test_gene_resolver: GeneResolver.o
 test_SamtoolsSorter: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
 test_SamtoolsSorter: LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS)
 test_SamtoolsSorter: Depend.list parametersDefault.xxd libflex libtrim libem $(filter-out STAR.o,$(OBJECTS))
-	$(CXX) $(CXXFLAGS) ../test/SamtoolsSorter_test.cpp $(filter-out STAR.o,$(OBJECTS)) libflex/libflex.a libtrim/libtrim.a libem/libem.a $(LDFLAGS) -o ../test/samtools_sorter_test
+	$(CXX) $(CXXFLAGS) ../test/SamtoolsSorter_test.cpp $(filter-out STAR.o,$(OBJECTS)) $(LIBFLEX_LIB) $(LIBTRIM_LIB) $(LIBEM_LIB) $(LDFLAGS) -o ../test/samtools_sorter_test
 	../test/samtools_sorter_test
 
 .PHONY: test_trim_parity
 test_trim_parity: libtrim
-	$(MAKE) -C ../tools/trimvalidate test
+	$(MAKE) -C $(TRIMVALIDATE_DIR) test
 
 .PHONY: test_trim_e2e
 test_trim_e2e: STAR
@@ -309,18 +335,20 @@ opal/opal.o : opal/opal.cpp opal/opal.h
 	cd opal && \
 	$(CXX) -c -I./ -std=c++11 $(CPPFLAGS) $(CXXFLAGS) $(CXXFLAGSextra) $(CXXFLAGS_SIMD) opal.cpp
 
-solo/CbCorrector.o : solo/CbCorrector.cpp solo/CbCorrector.h
-	$(CXX) -c $(CPPFLAGS) $(CXXFLAGS) $(CXXFLAGS_common) -I./ solo/CbCorrector.cpp -o solo/CbCorrector.o
+solo/CbCorrector.o : $(FLEX_SRC_DIR)/solo/CbCorrector.cpp $(FLEX_SRC_DIR)/solo/CbCorrector.h
+	@mkdir -p solo
+	$(CXX) -c $(CPPFLAGS) $(CXXFLAGS) $(CXXFLAGS_common) -I./ $(FLEX_SRC_DIR)/solo/CbCorrector.cpp -o solo/CbCorrector.o
 
-solo/CbBayesianResolver.o : solo/CbBayesianResolver.cpp solo/CbBayesianResolver.h
-	$(CXX) -c $(CPPFLAGS) $(CXXFLAGS) $(CXXFLAGS_common) -I./ solo/CbBayesianResolver.cpp -o solo/CbBayesianResolver.o
+solo/CbBayesianResolver.o : $(FLEX_SRC_DIR)/solo/CbBayesianResolver.cpp $(FLEX_SRC_DIR)/solo/CbBayesianResolver.h
+	@mkdir -p solo
+	$(CXX) -c $(CPPFLAGS) $(CXXFLAGS) $(CXXFLAGS_common) -I./ $(FLEX_SRC_DIR)/solo/CbBayesianResolver.cpp -o solo/CbBayesianResolver.o
 
 .PHONY: clean
 clean:
 	'rm' -f *.o opal/opal.o solo/*.o STAR STARstatic STARlong Depend.list parametersDefault.xxd
-	$(MAKE) -C libflex clean
-	$(MAKE) -C libtrim clean
-	$(MAKE) -C libem clean
+	$(MAKE) -C $(LIBFLEX_DIR) clean
+	$(MAKE) -C $(LIBTRIM_DIR) clean
+	$(MAKE) -C $(LIBEM_DIR) clean
 
 .PHONY: CLEAN
 CLEAN: clean
@@ -364,22 +392,22 @@ parametersDefault.xxd: parametersDefault
 # Ensure libflex is always rebuilt (sources may have changed)
 .PHONY: libflex
 libflex:
-	$(MAKE) -C libflex libflex.a
+	$(MAKE) -C $(LIBFLEX_DIR) libflex.a
 
 # Ensure libtrim is always rebuilt (sources may have changed)
 .PHONY: libtrim
 libtrim:
-	$(MAKE) -C libtrim libtrim.a
+	$(MAKE) -C $(LIBTRIM_DIR) libtrim.a
 
 # Ensure libem is always rebuilt (sources may have changed)
 .PHONY: libem
 libem:
-	$(MAKE) -C libem libem.a
+	$(MAKE) -C $(LIBEM_DIR) libem.a
 
 STAR$(SFX) : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
 STAR$(SFX) : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS) $(shell pkg-config --libs glib-2.0 2>/dev/null || echo "")
 STAR$(SFX) : Depend.list parametersDefault.xxd $(OBJECTS) libflex libtrim libem
-	$(CXX) -o STAR$(SFX) $(CXXFLAGS) $(OBJECTS) libflex/libflex.a libtrim/libtrim.a libem/libem.a $(LDFLAGS)
+	$(CXX) -o STAR$(SFX) $(CXXFLAGS) $(OBJECTS) $(LIBFLEX_LIB) $(LIBTRIM_LIB) $(LIBEM_LIB) $(LDFLAGS)
 
 STARstatic$(SFX) : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
 STARstatic$(SFX) : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_static) $(LDFLAGS)
@@ -406,12 +434,12 @@ POSIXSHARED : Depend.list parametersDefault.xxd $(OBJECTS)
 gdb : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_gdb) $(CXXFLAGS)
 gdb : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_gdb) $(LDFLAGS) $(shell pkg-config --libs glib-2.0 2>/dev/null || echo "")
 gdb : Depend.list parametersDefault.xxd $(OBJECTS) libflex libtrim libem
-	$(CXX) -o STAR $(CXXFLAGS) $(OBJECTS) libflex/libflex.a libtrim/libtrim.a libem/libem.a $(LDFLAGS)
+	$(CXX) -o STAR $(CXXFLAGS) $(OBJECTS) $(LIBFLEX_LIB) $(LIBTRIM_LIB) $(LIBEM_LIB) $(LDFLAGS)
 
 gdb-long : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_gdb) -D'COMPILE_FOR_LONG_READS' $(CXXFLAGS)
 gdb-long : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_gdb) $(LDFLAGS) $(shell pkg-config --libs glib-2.0 2>/dev/null || echo "")
 gdb-long : Depend.list parametersDefault.xxd $(OBJECTS) libflex libtrim libem
-	$(CXX) -o STARlong $(CXXFLAGS) $(OBJECTS) libflex/libflex.a libtrim/libtrim.a libem/libem.a $(LDFLAGS)
+	$(CXX) -o STARlong $(CXXFLAGS) $(OBJECTS) $(LIBFLEX_LIB) $(LIBTRIM_LIB) $(LIBEM_LIB) $(LDFLAGS)
 
 STARforMacStatic : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) -D'COMPILE_FOR_MAC' $(CXXFLAGS)
 STARforMacStatic : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_Mac_static) $(LDFLAGS)

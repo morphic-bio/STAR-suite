@@ -5,6 +5,10 @@ CXXFLAGS_common := -std=c++11 -O3 -march=native -fopenmp -Wall -Wextra
 CXXFLAGS ?= -pipe
 AR ?= ar
 
+ROOT_DIR := $(abspath ../../../../..)
+SLAM_LIBEM_DIR := $(ROOT_DIR)/slam/source/libem
+VPATH := $(SLAM_LIBEM_DIR)
+
 # OpenBLAS by default (not used in v1, but ready for future)
 LDFLAGS_BLAS ?= -lopenblas
 
@@ -17,7 +21,7 @@ libem.a: $(LIBEM_OBJECTS)
 	ranlib $@
 
 %.o: %.cpp
-	$(CXX) -c $(CXXFLAGS) $(CXXFLAGS_common) -I.. $< -o $@
+	$(CXX) -c $(CXXFLAGS) $(CXXFLAGS_common) -I.. -I$(SLAM_LIBEM_DIR) $< -o $@
 
 clean:
 	rm -f $(LIBEM_OBJECTS) libem.a
