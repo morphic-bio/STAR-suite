@@ -1,0 +1,18 @@
+# feature_path	core_path
+core/features/yremove_fastq/README_flex.md	flex/README_flex.md
+core/features/yremove_fastq/docs/flex_parameters.md	core/features/vbem/docs/flex_parameters.md
+core/features/yremove_fastq/source/InOutStreams.cpp	core/legacy/source/InOutStreams.cpp
+core/features/yremove_fastq/source/InOutStreams.h	core/legacy/source/InOutStreams.h
+core/features/yremove_fastq/source/Makefile	core/legacy/source/Makefile
+core/features/yremove_fastq/source/Parameters.cpp	core/legacy/source/Parameters.cpp
+core/features/yremove_fastq/source/Parameters.h	core/legacy/source/Parameters.h
+core/features/yremove_fastq/source/ReadAlign.cpp	core/legacy/source/ReadAlign.cpp
+core/features/yremove_fastq/source/ReadAlign.h	core/legacy/source/ReadAlign.h
+core/features/yremove_fastq/source/ReadAlignChunk.cpp	core/legacy/source/ReadAlignChunk.cpp
+core/features/yremove_fastq/source/ReadAlignChunk_processChunks.cpp	core/legacy/source/ReadAlignChunk_processChunks.cpp
+core/features/yremove_fastq/source/ReadAlign_outputAlignments.cpp	core/legacy/source/ReadAlign_outputAlignments.cpp
+core/features/yremove_fastq/source/STAR.cpp	core/legacy/source/STAR.cpp
+core/features/yremove_fastq/source/ThreadControl.h	core/legacy/source/ThreadControl.h
+core/features/yremove_fastq/source/parametersDefault	core/legacy/source/parametersDefault
+core/features/yremove_fastq/source/parametersDefault.xxd	flex/source/parametersDefault.xxd
+core/features/yremove_fastq/source/twoPassRunPass1.cpp	core/legacy/source/twoPassRunPass1.cpp

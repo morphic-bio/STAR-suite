@@ -1,0 +1,11 @@
+# feature_path	core_path
+core/features/bamsort/source/BAMoutput.cpp	core/legacy/source/BAMoutput.cpp
+core/features/bamsort/source/GlobalVariables.cpp	core/legacy/source/GlobalVariables.cpp
+core/features/bamsort/source/GlobalVariables.h	core/legacy/source/GlobalVariables.h
+core/features/bamsort/source/Makefile	core/legacy/source/Makefile
+core/features/bamsort/source/Parameters.cpp	core/legacy/source/Parameters.cpp
+core/features/bamsort/source/Parameters.h	core/legacy/source/Parameters.h
+core/features/bamsort/source/STAR.cpp	core/legacy/source/STAR.cpp
+core/features/bamsort/source/bamSortByCoordinate.cpp	core/legacy/source/bamSortByCoordinate.cpp
+core/features/bamsort/source/parametersDefault	core/legacy/source/parametersDefault
+core/features/bamsort/source/parametersDefault.xxd	flex/source/parametersDefault.xxd

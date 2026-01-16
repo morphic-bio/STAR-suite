@@ -1,0 +1,1 @@
+../../../core/legacy/extras/doc-latex/convertParDefToLatexTable.awk

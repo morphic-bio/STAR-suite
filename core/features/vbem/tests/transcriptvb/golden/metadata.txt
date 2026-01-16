@@ -1,0 +1,5 @@
+Generated: 2025-12-20T09:32:13+00:00
+STAR version: 2.7.11b
+STAR path: /mnt/pikachu/STAR-Flex/source/STAR
+Genome: /tmp/star_vb_test/star_new_index
+Reads: /mnt/pikachu/test-datasets-rnaseq/testdata/GSE110004/SRR6357070_1.fastq.gz /mnt/pikachu/test-datasets-rnaseq/testdata/GSE110004/SRR6357070_2.fastq.gz

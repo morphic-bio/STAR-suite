@@ -1,0 +1,10 @@
+docs/Y_CHROMOSOME_BAM_SPLIT.md
+tests/TEST_REPORT_REMOVE_Y_FASTQ.md
+tests/run_remove_y_reads_test.sh
+tests/run_y_removal_comprehensive_test.sh
+tests/run_ychrom_fastq_edge_cases.sh
+tests/run_ychrom_fastq_r3_ignore_test.sh
+tests/run_ychrom_fastq_se_test.sh
+tools/remove_y_reads/Makefile
+tools/remove_y_reads/remove_y_reads
+tools/remove_y_reads/remove_y_reads.c

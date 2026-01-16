@@ -1,0 +1,1 @@
+../../../flex/run_all.sh

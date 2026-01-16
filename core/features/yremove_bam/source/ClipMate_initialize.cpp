@@ -1,0 +1,1 @@
+../../../legacy/source/ClipMate_initialize.cpp

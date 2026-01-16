@@ -1,0 +1,1 @@
+../../../../legacy/extras/scripts/mergeSuperContig.awk

@@ -1,0 +1,187 @@
+--- a/src/SalmonQuantifyAlignments.cpp
++++ b/src/SalmonQuantifyAlignments.cpp
+@@ -336,6 +336,20 @@ void processAlignments(AlignmentLibraryT<FragT, AlignModelT>& alnLib,
+       // EQCLASS
+       std::vector<uint32_t> txpIDs;
+       std::vector<double> auxProbs;
++      // Trace information (if enabled via SALMON_TRACE_FILE env var)
++      std::vector<int32_t> trace_as_tags;
++      std::vector<double> trace_logFragProb;
++      std::vector<double> trace_errLike;
++      std::vector<double> trace_logCompat;
++      std::vector<bool> trace_isOrphan;
++      std::vector<double> trace_auxProb;
++      int32_t trace_bestAS = std::numeric_limits<int32_t>::min();
++      size_t trace_droppedIncompat = 0;
++      std::string trace_qname;
+       double auxDenom = salmon::math::LOG_0;
+ 
+       // The alignments must be sorted by transcript id. For minimap2
+@@ -356,6 +370,9 @@ void processAlignments(AlignmentLibraryT<FragT, AlignModelT>& alnLib,
+         std::exit(1);
+       }
+ 
++      // Get read name for tracing
++      const char* traceFile = std::getenv("SALMON_TRACE_FILE");
++      if (traceFile) {
++        trace_qname = std::string(alignments.front()->getName());
++      }
++
+       double sumOfAlignProbs{LOG_0};
+ 
+       // update the cluster-level properties
+@@ -404,6 +421,11 @@ void processAlignments(AlignmentLibraryT<FragT, AlignModelT>& alnLib,
+         auto transcriptID = aln->transcriptID();
+         auto& transcript = refs[transcriptID];
+         transcriptUnique =
+           transcriptUnique and (transcriptID == firstTranscriptID);
++        
++        // Store bestAS for trace
++        if (traceFile and useASWithoutCIGAR) {
++          trace_bestAS = bestAS;
++        }
+ 
+         double refLength =
+           transcript.RefLength > 0 ? transcript.RefLength : 1.0;
+@@ -502,6 +524,11 @@ void processAlignments(AlignmentLibraryT<FragT, AlignModelT>& alnLib,
+         bool isCompat = salmon::utils::isCompatible(
+                                                     aln->libFormat(), expectedLibraryFormat, aln->pos(), aln->fwd(),
+                                                     aln->mateStatus());
++        
++        // Track orphan status for trace
++        bool trace_orphan = isUnexpectedOrphan(aln, expectedLibraryFormat);
++        
+         double logAlignCompatProb = isCompat ? LOG_1 : incompatPrior;
+         if (!isCompat and salmonOpts.ignoreIncompat) {
+           aln->logProb = salmon::math::LOG_0;
++          if (traceFile) {
++            trace_droppedIncompat++;
++          }
+           continue;
+         }
+ 
+@@ -543,6 +570,20 @@ void processAlignments(AlignmentLibraryT<FragT, AlignModelT>& alnLib,
+         // The auxProb does *not* account for the start position
+         // probability!
+         double auxProb = logFragProb + errLike + logAlignCompatProb;
++        
++        // Collect trace information
++        if (traceFile and auxProb != LOG_0) {
++          int32_t alnAS = useASWithoutCIGAR ? aln->getAS() : 0;
++          trace_as_tags.push_back(alnAS);
++          trace_logFragProb.push_back(logFragProb);
++          trace_errLike.push_back(errLike);
++          trace_logCompat.push_back(logAlignCompatProb);
++          trace_isOrphan.push_back(trace_orphan);
++          trace_auxProb.push_back(auxProb);
++        }
+ 
+         // The overall mass of this transcript, which is used to
+         // account for this transcript's relaive abundance
+@@ -583,6 +624,60 @@ void processAlignments(AlignmentLibraryT<FragT, AlignModelT>& alnLib,
+         }
+         TranscriptGroup tg(txpIDs);
+         eqBuilder.addGroup(std::move(tg), auxProbs);
++        
++        // Output trace information (matching our CLI format)
++        if (traceFile and txpIDs.size() > 0) {
++          static std::ofstream traceOut(traceFile);
++          static std::mutex traceMutex;
++          static size_t traceLimit = 0;
++          static size_t traceCount = 0;
++          static bool traceLimitSet = false;
++          
++          if (!traceLimitSet) {
++            const char* limitStr = std::getenv("SALMON_TRACE_LIMIT");
++            if (limitStr) {
++              traceLimit = std::stoull(limitStr);
++            }
++            traceLimitSet = true;
++          }
++          
++          if (traceLimit == 0 or traceCount < traceLimit) {
++            std::lock_guard<std::mutex> lock(traceMutex);
++            
++            // Build EC label (after range factorization)
++            std::vector<uint32_t> final_txpIDs = txpIDs;
++            if (rangeFactorization > 0) {
++              // Remove range factorization bins for label (keep original txpIDs)
++              final_txpIDs.resize(txpsSize);
++            }
++            std::string ec_label;
++            for (size_t i = 0; i < final_txpIDs.size(); ++i) {
++              if (i > 0) ec_label += ",";
++              ec_label += std::to_string(final_txpIDs[i]);
++            }
++            
++            traceOut << std::setprecision(17);
++            traceOut << trace_qname << "\t";
++            traceOut << "txpIDs=";
++            for (size_t i = 0; i < txpIDs.size(); ++i) {
++              if (i > 0) traceOut << ",";
++              traceOut << txpIDs[i];
++            }
++            traceOut << ";";
++            
++            traceOut << "as=";
++            for (size_t i = 0; i < trace_as_tags.size(); ++i) {
++              if (i > 0) traceOut << ",";
++              traceOut << trace_as_tags[i];
++            }
++            traceOut << ";";
++            
++            traceOut << "bestAS=" << trace_bestAS << ";";
++            
++            traceOut << "logFragProb=";
++            for (size_t i = 0; i < trace_logFragProb.size(); ++i) {
++              if (i > 0) traceOut << ",";
++              traceOut << trace_logFragProb[i];
++            }
++            traceOut << ";";
++            
++            traceOut << "errLike=";
++            for (size_t i = 0; i < trace_errLike.size(); ++i) {
++              if (i > 0) traceOut << ",";
++              traceOut << trace_errLike[i];
++            }
++            traceOut << ";";
++            
++            traceOut << "logCompat=";
++            for (size_t i = 0; i < trace_logCompat.size(); ++i) {
++              if (i > 0) traceOut << ",";
++              traceOut << trace_logCompat[i];
++            }
++            traceOut << ";";
++            
++            traceOut << "droppedIncompat=" << trace_droppedIncompat << ";";
++            
++            traceOut << "orphan=";
++            for (size_t i = 0; i < trace_isOrphan.size(); ++i) {
++              if (i > 0) traceOut << ",";
++              traceOut << (trace_isOrphan[i] ? "1" : "0");
++            }
++            traceOut << ";";
++            
++            traceOut << "auxProb=";
++            for (size_t i = 0; i < trace_auxProb.size(); ++i) {
++              if (i > 0) traceOut << ",";
++              traceOut << trace_auxProb[i];
++            }
++            traceOut << ";";
++            
++            traceOut << "weight=";
++            for (size_t i = 0; i < auxProbs.size(); ++i) {
++              if (i > 0) traceOut << ",";
++              traceOut << auxProbs[i];
++            }
++            traceOut << ";";
++            
++            traceOut << "ec_label=" << ec_label;
++            traceOut << "\n";
++            
++            traceCount++;
++          }
++        }
+       }
+ 
+       // Are we doing bias correction?

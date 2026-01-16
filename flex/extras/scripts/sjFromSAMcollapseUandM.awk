@@ -1,0 +1,1 @@
+../../../core/legacy/extras/scripts/sjFromSAMcollapseUandM.awk

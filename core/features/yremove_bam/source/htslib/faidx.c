@@ -1,0 +1,1 @@
+../../../../legacy/source/htslib/faidx.c

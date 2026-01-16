@@ -1,0 +1,1 @@
+../../../../legacy/source/htslib/hfile_internal.h

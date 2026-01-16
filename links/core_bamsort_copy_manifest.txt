@@ -1,0 +1,7 @@
+IMPLEMENTATION_SUMMARY.md
+source/SamtoolsSorter.cpp
+source/SamtoolsSorter.h
+test/SamtoolsSorter_test.cpp
+test/samtools_sorter_test
+tests/run_solo_smoke.sh
+tests/run_ychrom_spill_sorter.sh

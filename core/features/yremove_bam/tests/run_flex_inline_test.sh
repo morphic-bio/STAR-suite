@@ -1,0 +1,1 @@
+../../../../flex/tests/run_flex_inline_test.sh

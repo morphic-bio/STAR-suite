@@ -1,0 +1,1 @@
+../../core/legacy/source/stitchWindowAligns.h

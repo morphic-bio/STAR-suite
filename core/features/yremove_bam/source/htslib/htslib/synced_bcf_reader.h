@@ -1,0 +1,1 @@
+../../../../../legacy/source/htslib/htslib/synced_bcf_reader.h

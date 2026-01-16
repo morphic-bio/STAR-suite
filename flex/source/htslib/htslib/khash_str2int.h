@@ -1,0 +1,1 @@
+../../../../core/legacy/source/htslib/htslib/khash_str2int.h

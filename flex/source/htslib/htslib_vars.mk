@@ -1,0 +1,1 @@
+../../../core/legacy/source/htslib/htslib_vars.mk

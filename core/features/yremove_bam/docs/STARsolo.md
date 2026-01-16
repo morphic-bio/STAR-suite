@@ -1,0 +1,1 @@
+../../../legacy/docs/STARsolo.md

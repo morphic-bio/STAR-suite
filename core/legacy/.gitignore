@@ -1,0 +1,84 @@
+## Local top-level scripts/docs
+/*.sh
+/HANDOFF_DOCUMENT.md
+/TEST_DOCUMENTATION.md
+/*_SUMMARY.md
+/*_FIX*.md
+
+## OS / editor / IDE files
+.DS_Store
+.project
+.kdev4/
+source.kdev4
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.cursorindexingignore
+.cursor
+*.xcworkspacedata
+*.pbxproj
+*.plist
+*.xcuserstate
+
+## Logs
+*log
+Log.out
+
+## Build artifacts
+*.o
+Depend.list
+/source/*.d
+/source/Depend.list
+/source/STAR
+/source/STARlong
+/source/libem/libem.a
+/source/libflex/libflex.a
+/source/libtrim/libtrim.a
+/tools/flexfilter/run_flexfilter_mex
+/tools/flexfilter/test_output/
+/bin/*
+/a.out
+
+## Documentation build outputs
+/extras/doc-latex/*.aux
+/extras/doc-latex/*.fdb_latexmk
+/extras/doc-latex/*.fls
+/extras/doc-latex/*.log
+/extras/doc-latex/*.out
+/extras/doc-latex/*.gz
+/extras/doc-latex/*.toc
+
+## Reference files
+/reference/*
+.specstory
+
+## Plans
+/plans/*
+
+## Data
+*.bam
+
+## Test binaries
+/test/test_*
+!/test/test_*.c
+!/test/test_*.cpp
+
+## Test outputs / temp
+/test_*/
+/chr21_probe*/
+/test/autoindex_pe_flex_mex_output/
+/test/nonflex_mex_smoke_output/
+/test/tmp_*/
+/test/integration/trim/nfcore_real/fastq_comparison/
+/tests/flex_cbub_validation_output/
+/tests/regress_100K_baseline/
+/tests/regress_100K_current/
+/tests/flex_inline_test_output/
+/tests/*/output
+/tests/*/tmp
+/tests/solo_smoke
+/tests/ychrom_test
+/tests/-/
+/tmp/samtools_sorter_test_*

@@ -1,0 +1,25 @@
+# slam_path	core_path
+slam/README_flex.md	flex/README_flex.md
+slam/source/BAMoutput.cpp	core/legacy/source/BAMoutput.cpp
+slam/source/Makefile	core/legacy/source/Makefile
+slam/source/Parameters.cpp	core/legacy/source/Parameters.cpp
+slam/source/Parameters.h	core/legacy/source/Parameters.h
+slam/source/ReadAlign.cpp	core/legacy/source/ReadAlign.cpp
+slam/source/ReadAlign.h	core/legacy/source/ReadAlign.h
+slam/source/ReadAlignChunk.cpp	core/legacy/source/ReadAlignChunk.cpp
+slam/source/ReadAlignChunk.h	core/legacy/source/ReadAlignChunk.h
+slam/source/ReadAlignChunk_processChunks.cpp	core/legacy/source/ReadAlignChunk_processChunks.cpp
+slam/source/ReadAlign_outputAlignments.cpp	core/legacy/source/ReadAlign_outputAlignments.cpp
+slam/source/ReadAlign_outputTranscriptSAM.cpp	core/legacy/source/ReadAlign_outputTranscriptSAM.cpp
+slam/source/ReadAnnotations.h	core/legacy/source/ReadAnnotations.h
+slam/source/STAR.cpp	core/legacy/source/STAR.cpp
+slam/source/ThreadControl.cpp	core/legacy/source/ThreadControl.cpp
+slam/source/ThreadControl.h	core/legacy/source/ThreadControl.h
+slam/source/Transcriptome.cpp	core/legacy/source/Transcriptome.cpp
+slam/source/Transcriptome.h	core/legacy/source/Transcriptome.h
+slam/source/Transcriptome_classifyAlign.cpp	core/legacy/source/Transcriptome_classifyAlign.cpp
+slam/source/libem/Makefile	core/features/vbem/source/libem/Makefile
+slam/source/parametersDefault	core/legacy/source/parametersDefault
+slam/source/parametersDefault.xxd	flex/source/parametersDefault.xxd
+slam/source/samHeaders.cpp	core/legacy/source/samHeaders.cpp
+slam/source/samHeaders.h	core/legacy/source/samHeaders.h

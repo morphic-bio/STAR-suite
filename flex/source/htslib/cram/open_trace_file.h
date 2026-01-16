@@ -1,0 +1,1 @@
+../../../../core/legacy/source/htslib/cram/open_trace_file.h
