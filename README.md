@@ -42,8 +42,10 @@ STAR-Flex extends upstream STAR with features for 10x Flex, bulk RNA-seq, and re
 - **Cutadapt Parity**: Native implementation of cutadapt v5.1 trimming algorithm (`--trimCutadapt Yes`) for bulk RNA-seq.
 - **TranscriptVB**: Variational Bayes and EM quantification for transcript-level abundance, offering parity with Salmon alignment-mode.
 - **Reference Building**:
-  - **AutoIndex**: CellRanger-style reference download and integrity verification (`--autoIndex`, `--cellrangerStyleIndex`).
+  - **AutoIndex**: Automated reference download (`--autoIndex`), checksum verification (`--autoCksumUpdate`), and CellRanger-style formatting (`--cellrangerStyleIndex`).
   - **Transcriptome FASTA**: Automatic generation of `transcriptome.fa` during indexing for Salmon/TranscriptVB compatibility.
+- **BAM Sorting**:
+  - **Samtools-style Sort**: Spill-to-disk sorting (`--outBAMsortMethod samtools`) reduces memory usage compared to the default bin-based sorter. Configurable with `--limitBAMsortRAM`.
 - **Y-Chromosome Splitting**: Split BAMs and FASTQs by Y-chromosome alignment (`--emitNoYBAM`, `--emitYNoYFastq`) for sex-specific analysis.
 
 ### SLAM Updates
@@ -52,6 +54,17 @@ Integrated SLAM-seq quantification with GRAND-SLAM parity:
 - **Compatibility Mode**: `--slamCompatMode gedi` enables GEDI-compatible behaviors (intronic classification, lenient overlap, overlap weighting) for parity testing.
 - **Auto-Trimming**: Variance-based detection of artifact-prone read ends (`--autoTrim variance`).
 - **QC**: Comprehensive reports for T->C rates and error modeling.
+
+### QC Outputs
+STAR-Flex and STAR-SLAM now generate detailed QC reports:
+- **SLAM QC** (`--slamQcReport <prefix>`): Generates an interactive HTML report (`.html`) and JSON metrics (`.json`) visualizing:
+  - T->C conversion rates per read position.
+  - Variance analysis for auto-trimming (Stdev curves, segmented regression fits).
+  - Trimming overlays showing chosen 5'/3' cut sites.
+- **FlexFilter QC** (`flexfilter_summary.tsv`):
+  - Cell calling statistics (EmptyDrops/OrdMag results).
+  - Cell counts, UMI thresholds, and filtering rates per sample.
+
 
 ## Summary of Flags
 
@@ -77,6 +90,11 @@ See `flex/README_flex.md` for full reference.
 - **Y-Split**:
   - `--emitNoYBAM yes`: Emit `_Y.bam` and `_noY.bam`.
   - `--emitYNoYFastq yes`: Emit split FASTQ files.
+- **Reference**:
+  - `--autoIndex Yes`: Enable automated reference download/build.
+  - `--cellrangerStyleIndex Yes`: Use CellRanger-style reference formatting.
+- **Sorting**:
+  - `--outBAMsortMethod samtools`: Enable spill-to-disk sorting.
 
 ### SLAM
 See `slam/docs/SLAM_COMPATIBILITY_MODE.md` and `slam/docs/SLAM_seq.md`.
