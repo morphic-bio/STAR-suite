@@ -109,6 +109,18 @@ See `slam/docs/SLAM_COMPATIBILITY_MODE.md` and `slam/docs/SLAM_seq.md`.
 
 ## Sample Commands
 
+**Core alignment:**
+```bash
+core/legacy/source/STAR \
+  --runMode alignReads \
+  --genomeDir /path/to/genome_index \
+  --readFilesIn reads.fq.gz \
+  --readFilesCommand zcat \
+  --outFileNamePrefix out/ \
+  --outSAMtype BAM SortedByCoordinate \
+  --outSAMattributes NH HI AS nM MD
+```
+
 **Flex Mode (10x Fixed RNA Profiling):**
 ```bash
 core/legacy/source/STAR \
@@ -120,6 +132,20 @@ core/legacy/source/STAR \
   --soloCBwhitelist /path/to/737K-fixed-rna-profiling.txt \
   --soloSampleWhitelist sample_whitelist.tsv \
   --outFileNamePrefix output/
+```
+
+**SLAM Mode (Standard):**
+```bash
+core/legacy/source/STAR \
+  --runMode alignReads \
+  --genomeDir /path/to/genome_index \
+  --readFilesIn reads.fq.gz \
+  --readFilesCommand zcat \
+  --outFileNamePrefix out/ \
+  --outSAMtype BAM SortedByCoordinate \
+  --outSAMattributes NH HI AS nM MD \
+  --slamQuantMode 1 \
+  --slamSnpBed /path/to/snps.bed
 ```
 
 **SLAM Mode (GEDI Compatibility):**
