@@ -6,6 +6,7 @@ LEGACY_SRC_DIR := $(ROOT_DIR)/core/legacy/source
 LIBFLEX_DIR := $(ROOT_DIR)/flex/source/libflex
 LIBFLEX := $(LIBFLEX_DIR)/libflex.a
 HTSLIB_DIR := $(LEGACY_SRC_DIR)/htslib
+HTSLIB := $(HTSLIB_DIR)/libhts.a
 
 CXX = g++
 # Keep -fopenmp for OccupancyGuard.cpp which still uses OpenMP
@@ -35,7 +36,7 @@ libflex_rebuild:
 
 all: $(TARGET)
 
-$(TARGET): libflex_rebuild $(OBJ) $(LIBFLEX)
+$(TARGET): libflex_rebuild $(OBJ) $(LIBFLEX) $(HTSLIB)
 	$(CXX) $(CXXFLAGS) -o $(TARGET) $(OBJ) $(LDFLAGS)
 
 %.o: %.cpp
@@ -43,5 +44,8 @@ $(TARGET): libflex_rebuild $(OBJ) $(LIBFLEX)
 
 clean:
 	rm -f $(OBJ) $(TARGET)
+
+$(HTSLIB):
+	$(MAKE) -C $(HTSLIB_DIR) lib-static
 
 .PHONY: all clean

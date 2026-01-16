@@ -1,16 +1,17 @@
 CXX ?= g++
 CXXFLAGS := -std=c++11 -O3 -Wall -Wextra
 
-SCRIPT_DIR := $(shell dirname $(abspath $(lastword $(MAKEFILE_LIST))))
-LIBEM := $(SCRIPT_DIR)/../../source/libem/libem.a
+ROOT_DIR := $(abspath ../../../../..)
+VBEM_SRC_DIR := $(ROOT_DIR)/core/features/vbem/source
+LIBEM := $(VBEM_SRC_DIR)/libem/libem.a
 
 all: compute_gc_bias
 
 compute_gc_bias: compute_gc_bias.cpp $(LIBEM)
-	$(CXX) $(CXXFLAGS) -I$(SCRIPT_DIR)/../../source compute_gc_bias.cpp $(LIBEM) -o compute_gc_bias
+	$(CXX) $(CXXFLAGS) -I$(VBEM_SRC_DIR) compute_gc_bias.cpp $(LIBEM) -o compute_gc_bias
 
 $(LIBEM):
-	$(MAKE) -C $(SCRIPT_DIR)/../../source/libem
+	$(MAKE) -C $(VBEM_SRC_DIR)/libem
 
 clean:
 	rm -f compute_gc_bias

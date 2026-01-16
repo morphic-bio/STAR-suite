@@ -12,10 +12,10 @@
 #include <iomanip>
 
 // htslib includes
-#include "../../source/htslib/htslib/sam.h"
-#include "../../source/htslib/htslib/faidx.h"
-#include "../../source/htslib/htslib/bgzf.h"
-#include "../../source/htslib/htslib/tbx.h"
+#include "htslib/htslib/sam.h"
+#include "htslib/htslib/faidx.h"
+#include "htslib/htslib/bgzf.h"
+#include "htslib/htslib/tbx.h"
 
 // Binomial math functions (defined in binomial_math.cpp)
 double log_binom_pmf(uint32_t n, uint32_t k, double p);

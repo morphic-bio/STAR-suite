@@ -2,6 +2,8 @@ CC = gcc
 CFLAGS = -O3 -Wall -Wextra
 LDFLAGS = -lm
 
+ROOT_DIR := $(abspath ../../../../..)
+
 TARGET = compute_expected_gc
 SOURCE = compute_expected_gc.c
 
@@ -14,6 +16,6 @@ clean:
 	rm -f $(TARGET)
 
 install: $(TARGET)
-	cp $(TARGET) ../../bin/
+	cp $(TARGET) $(ROOT_DIR)/bin/
 
 .PHONY: all clean install

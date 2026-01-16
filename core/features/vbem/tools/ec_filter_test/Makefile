@@ -4,20 +4,21 @@ CXX ?= g++
 CXXFLAGS := -std=c++11 -O3 -Wall -Wextra -pthread
 LDFLAGS :=
 
-SCRIPT_DIR := $(shell dirname $(abspath $(lastword $(MAKEFILE_LIST))))
-LIBEM := $(SCRIPT_DIR)/../../source/libem/libem.a
-HTSLIB_DIR := $(SCRIPT_DIR)/../../source/htslib
+ROOT_DIR := $(abspath ../../../../..)
+VBEM_SRC_DIR := $(ROOT_DIR)/core/features/vbem/source
+LIBEM := $(VBEM_SRC_DIR)/libem/libem.a
+HTSLIB_DIR := $(ROOT_DIR)/core/legacy/source/htslib
 
 all: ec_filter_cli
 
 ec_filter_cli: ec_filter_cli.cpp $(LIBEM) $(HTSLIB_DIR)/libhts.a
-	$(CXX) $(CXXFLAGS) -I$(SCRIPT_DIR)/../../source -I$(HTSLIB_DIR) ec_filter_cli.cpp $(LIBEM) -L$(HTSLIB_DIR) -lhts -lz -lpthread $(LDFLAGS) -o ec_filter_cli
+	$(CXX) $(CXXFLAGS) -I$(VBEM_SRC_DIR) -I$(HTSLIB_DIR) ec_filter_cli.cpp $(LIBEM) -L$(HTSLIB_DIR) -lhts -lz -lpthread $(LDFLAGS) -o ec_filter_cli
 
 $(HTSLIB_DIR)/libhts.a:
 	$(MAKE) -C $(HTSLIB_DIR) lib-static
 
 $(LIBEM):
-	$(MAKE) -C $(SCRIPT_DIR)/../../source/libem
+	$(MAKE) -C $(VBEM_SRC_DIR)/libem
 
 test: ec_filter_cli
 	@echo "Running unit tests..."

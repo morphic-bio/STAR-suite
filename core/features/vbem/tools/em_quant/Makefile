@@ -4,15 +4,17 @@ CXX ?= g++
 CXXFLAGS := -std=c++11 -O3 -march=native -fopenmp -Wall -Wextra
 LDFLAGS := -fopenmp
 
-LIBEM := ../../source/libem/libem.a
+ROOT_DIR := $(abspath ../../../../..)
+VBEM_SRC_DIR := $(ROOT_DIR)/core/features/vbem/source
+LIBEM := $(VBEM_SRC_DIR)/libem/libem.a
 
 all: em_quant
 
 em_quant: em_quant.cpp $(LIBEM)
-	$(CXX) $(CXXFLAGS) -I../../source $< $(LIBEM) $(LDFLAGS) -o $@
+	$(CXX) $(CXXFLAGS) -I$(VBEM_SRC_DIR) $< $(LIBEM) $(LDFLAGS) -o $@
 
 $(LIBEM):
-	$(MAKE) -C ../../source/libem
+	$(MAKE) -C $(VBEM_SRC_DIR)/libem
 
 test: em_quant
 	@./run_parity_test.sh
