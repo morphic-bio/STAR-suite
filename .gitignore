@@ -38,6 +38,8 @@ Depend.list
 /source/libtrim/libtrim.a
 /core/legacy/source/STAR
 /core/legacy/source/STARlong
+/core/legacy/source/Aligned.out.sam
+/core/legacy/source/Log.progress.out
 /core/features/vbem/source/libem/libem.a
 /core/features/vbem/source/libtrim/libtrim.a
 /flex/source/libflex/libflex.a
@@ -74,6 +76,7 @@ Depend.list
 
 ## Plans
 /plans/*
+!/plans/transfer_test_plan.md
 
 ## Data
 *.bam
@@ -94,6 +97,9 @@ Depend.list
 /tests/regress_100K_baseline/
 /tests/regress_100K_current/
 /tests/flex_inline_test_output/
+/tests/*_output/
+/tests/*.slam_qc.*
+/tests/tmp_*
 /tests/*/output
 /tests/*/tmp
 /tests/solo_smoke

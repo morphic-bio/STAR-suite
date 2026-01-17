@@ -1,1 +1,0 @@
-../../../../../flex/tests/flex_smoke/run_flex_smoke.sh

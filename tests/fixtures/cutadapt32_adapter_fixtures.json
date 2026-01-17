@@ -1,0 +1,243 @@
+[
+  {
+    "name": "exact_full_adapter_at_end",
+    "read": "ACGTACGTACGTACGTAGATCGGAAGAGC",
+    "adapter": "AGATCGGAAGAGC",
+    "min_overlap": 1,
+    "max_error_rate": 0.1,
+    "cutadapt_version": "3.2",
+    "expected_trim_pos": 16,
+    "match": {
+      "ref_start": 0,
+      "ref_stop": 13,
+      "query_start": 16,
+      "query_stop": 29,
+      "matches": 13,
+      "errors": 0
+    }
+  },
+  {
+    "name": "exact_3bp_prefix",
+    "read": "ACGTACGTACGTACGTACGTACGTAGA",
+    "adapter": "AGATCGGAAGAGC",
+    "min_overlap": 1,
+    "max_error_rate": 0.1,
+    "cutadapt_version": "3.2",
+    "expected_trim_pos": 24,
+    "match": {
+      "ref_start": 0,
+      "ref_stop": 3,
+      "query_start": 24,
+      "query_stop": 27,
+      "matches": 3,
+      "errors": 0
+    }
+  },
+  {
+    "name": "exact_1bp_prefix",
+    "read": "ACGTACGTACGTACGTACGTACGTA",
+    "adapter": "AGATCGGAAGAGC",
+    "min_overlap": 1,
+    "max_error_rate": 0.1,
+    "cutadapt_version": "3.2",
+    "expected_trim_pos": 24,
+    "match": {
+      "ref_start": 0,
+      "ref_stop": 1,
+      "query_start": 24,
+      "query_stop": 25,
+      "matches": 1,
+      "errors": 0
+    }
+  },
+  {
+    "name": "adapter_1_mismatch",
+    "read": "ACGTACGTACGTACGTAGATCGGTAGAGC",
+    "adapter": "AGATCGGAAGAGC",
+    "min_overlap": 1,
+    "max_error_rate": 0.1,
+    "cutadapt_version": "3.2",
+    "expected_trim_pos": 16,
+    "match": {
+      "ref_start": 0,
+      "ref_stop": 13,
+      "query_start": 16,
+      "query_stop": 29,
+      "matches": 12,
+      "errors": 1
+    }
+  },
+  {
+    "name": "no_adapter",
+    "read": "ACGTACGTACGTACGTACGTACGTACGT",
+    "adapter": "AGATCGGAAGAGC",
+    "min_overlap": 1,
+    "max_error_rate": 0.1,
+    "cutadapt_version": "3.2",
+    "expected_trim_pos": 28,
+    "match": null
+  },
+  {
+    "name": "adapter_in_middle",
+    "read": "ACGTACGTAGATCGGAAGAGCACGTACGT",
+    "adapter": "AGATCGGAAGAGC",
+    "min_overlap": 1,
+    "max_error_rate": 0.1,
+    "cutadapt_version": "3.2",
+    "expected_trim_pos": 8,
+    "match": {
+      "ref_start": 0,
+      "ref_stop": 13,
+      "query_start": 8,
+      "query_stop": 21,
+      "matches": 13,
+      "errors": 0
+    }
+  },
+  {
+    "name": "multiple_possible_matches",
+    "read": "AGATCGGAAGAGCACGTACGTAAGAGC",
+    "adapter": "AGATCGGAAGAGC",
+    "min_overlap": 1,
+    "max_error_rate": 0.1,
+    "cutadapt_version": "3.2",
+    "expected_trim_pos": 0,
+    "match": {
+      "ref_start": 0,
+      "ref_stop": 13,
+      "query_start": 0,
+      "query_stop": 13,
+      "matches": 13,
+      "errors": 0
+    }
+  },
+  {
+    "name": "short_overlap_2bp",
+    "read": "ACGTACGTACGTACGTACGTACGTAG",
+    "adapter": "AGATCGGAAGAGC",
+    "min_overlap": 1,
+    "max_error_rate": 0.1,
+    "cutadapt_version": "3.2",
+    "expected_trim_pos": 24,
+    "match": {
+      "ref_start": 0,
+      "ref_stop": 2,
+      "query_start": 24,
+      "query_stop": 26,
+      "matches": 2,
+      "errors": 0
+    }
+  },
+  {
+    "name": "entire_read_is_adapter",
+    "read": "AGATCGGAAGAGC",
+    "adapter": "AGATCGGAAGAGC",
+    "min_overlap": 1,
+    "max_error_rate": 0.1,
+    "cutadapt_version": "3.2",
+    "expected_trim_pos": 0,
+    "match": {
+      "ref_start": 0,
+      "ref_stop": 13,
+      "query_start": 0,
+      "query_stop": 13,
+      "matches": 13,
+      "errors": 0
+    }
+  },
+  {
+    "name": "adapter_with_insertion",
+    "read": "ACGTACGTACGTACGTAGAXTCGGAAGAGC",
+    "adapter": "AGATCGGAAGAGC",
+    "min_overlap": 1,
+    "max_error_rate": 0.15,
+    "cutadapt_version": "3.2",
+    "expected_trim_pos": 16,
+    "match": {
+      "ref_start": 0,
+      "ref_stop": 13,
+      "query_start": 16,
+      "query_stop": 30,
+      "matches": 13,
+      "errors": 1
+    }
+  },
+  {
+    "name": "adapter_with_deletion",
+    "read": "ACGTACGTACGTACGTAGATCGAAGAGC",
+    "adapter": "AGATCGGAAGAGC",
+    "min_overlap": 1,
+    "max_error_rate": 0.15,
+    "cutadapt_version": "3.2",
+    "expected_trim_pos": 16,
+    "match": {
+      "ref_start": 0,
+      "ref_stop": 13,
+      "query_start": 16,
+      "query_stop": 28,
+      "matches": 12,
+      "errors": 1
+    }
+  },
+  {
+    "name": "min_overlap_3_filter",
+    "read": "ACGTACGTACGTACGTACGTACGTAG",
+    "adapter": "AGATCGGAAGAGC",
+    "min_overlap": 3,
+    "max_error_rate": 0.1,
+    "cutadapt_version": "3.2",
+    "expected_trim_pos": 26,
+    "match": null
+  },
+  {
+    "name": "ambiguous_position_test",
+    "read": "AGATCGGACGTAAGAGCAGATCGGAAGAGC",
+    "adapter": "AGATCGGAAGAGC",
+    "min_overlap": 1,
+    "max_error_rate": 0.1,
+    "cutadapt_version": "3.2",
+    "expected_trim_pos": 17,
+    "match": {
+      "ref_start": 0,
+      "ref_stop": 13,
+      "query_start": 17,
+      "query_stop": 30,
+      "matches": 13,
+      "errors": 0
+    }
+  },
+  {
+    "name": "short_read_partial_adapter",
+    "read": "ACGTAGA",
+    "adapter": "AGATCGGAAGAGC",
+    "min_overlap": 1,
+    "max_error_rate": 0.1,
+    "cutadapt_version": "3.2",
+    "expected_trim_pos": 4,
+    "match": {
+      "ref_start": 0,
+      "ref_stop": 3,
+      "query_start": 4,
+      "query_stop": 7,
+      "matches": 3,
+      "errors": 0
+    }
+  },
+  {
+    "name": "lowercase_adapter",
+    "read": "ACGTACGTACGTACGTagatcggaagagc",
+    "adapter": "AGATCGGAAGAGC",
+    "min_overlap": 1,
+    "max_error_rate": 0.1,
+    "cutadapt_version": "3.2",
+    "expected_trim_pos": 16,
+    "match": {
+      "ref_start": 0,
+      "ref_stop": 13,
+      "query_start": 16,
+      "query_stop": 29,
+      "matches": 13,
+      "errors": 0
+    }
+  }
+]
