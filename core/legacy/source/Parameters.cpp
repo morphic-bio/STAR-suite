@@ -580,13 +580,20 @@ Parameters::Parameters() {//initalize parameters info
     // Minimal memory mode
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "soloFlexMinimalMemory", &pSolo.soloFlexMinimalMemoryStr));
 
+    // Cell Ranger multi config support
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "crMultiConfig", &crMulti.crMultiConfig));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "crWhitelist", &crMulti.crWhitelist));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "crFeatureRef", &crMulti.crFeatureRef));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "crFastqRoot", &crMulti.crFastqRoot));
+    parArray.push_back(new ParameterInfoVector<string>(-1, -1, "crFastqMap", &crMulti.crFastqMap));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "crMexUseGexBarcodes", &crMulti.crMexUseGexBarcodes));
+
     parameterInputName.push_back("Default");
     parameterInputName.push_back("Command-Line-Initial");
     parameterInputName.push_back("Command-Line");
     parameterInputName.push_back("genomeParameters.txt");
 
 };
-
 
 void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters: default, from files, from command line
     
@@ -605,6 +612,26 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
         if (p->nameString == "soloUMICorrectionUseTags" && p->inputLevel < 0) {
             // Conservative default mirrors the legacy behavior (ignore tags)
             pSolo.umiCorrectionUseTagsStr = "no";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "crMultiConfig" && p->inputLevel < 0) {
+            crMulti.crMultiConfig = "-";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "crWhitelist" && p->inputLevel < 0) {
+            crMulti.crWhitelist = "-";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "crFeatureRef" && p->inputLevel < 0) {
+            crMulti.crFeatureRef = "-";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "crFastqRoot" && p->inputLevel < 0) {
+            crMulti.crFastqRoot = "-";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "crFastqMap" && p->inputLevel < 0) {
+            crMulti.crFastqMap.clear();
             p->inputLevel = 0;
         }
     }

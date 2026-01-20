@@ -6,6 +6,7 @@
 #include <stdio.h>
 #define fstream_Chunk_Max 2147483647
 #include <cstring>
+#include <mutex>
 
 void createDirectory(const string dirPathIn, const mode_t dirPerm, const string dirParameter, Parameters &P)
 {
@@ -89,13 +90,18 @@ void fstreamWriteBig(std::ofstream &S, char* A, unsigned long long N, std::strin
 };
 
 std::ofstream &ofstrOpen (std::string fileName, std::string errorID, Parameters &P) {//open file 'fileName', generate error if cannot open
-    std::ofstream & ofStream = *new std::ofstream(fileName.c_str(), std::fstream::out | std::fstream::trunc);
+    std::ofstream *ofStreamP = new std::ofstream(fileName.c_str(), std::fstream::out | std::fstream::trunc);
+    std::ofstream &ofStream = *ofStreamP;
     if (ofStream.fail()) {//
         ostringstream errOut;
         errOut << errorID<<": exiting because of *OUTPUT FILE* error: could not create output file "<< fileName <<"\n";
         errOut << "SOLUTION: check that the path exists and you have write permission for this file. Also check ""ulimit -n"" and increase it to allow more open files.\n";
         exitWithError(errOut.str(),std::cerr, P.inOut->logMain, EXIT_CODE_FILE_OPEN, P);
     };
+    {
+        std::lock_guard<std::mutex> lock(P.inOut->ownedStreamsMutex);
+        P.inOut->ownedOfstreams.push_back(ofStreamP);
+    }
     return ofStream;
 };
 
@@ -108,8 +114,10 @@ std::fstream &fstrOpen (std::string fileName, std::string errorID, Parameters &P
         fStreamP = new std::fstream(fileName.c_str(), std::fstream::in | std::fstream::out | std::fstream::trunc);
     } else {//try to open exising file
         fStreamP=new std::fstream(fileName.c_str(), std::fstream::in | std::fstream::out );
-        if (fStreamP->fail()) //did not work <= file does not exist => open with trunc (the above command does not work on new file)
+        if (fStreamP->fail()) {//did not work <= file does not exist => open with trunc (the above command does not work on new file)
+            delete fStreamP;
             fStreamP = new std::fstream(fileName.c_str(), std::fstream::in | std::fstream::out | std::fstream::trunc);
+        }
     };
     
     if (fStreamP->fail()) {//
@@ -118,12 +126,17 @@ std::fstream &fstrOpen (std::string fileName, std::string errorID, Parameters &P
         errOut << "Solution: check that the path exists and you have write permission for this file\n";
         exitWithError(errOut.str(),std::cerr, P.inOut->logMain, EXIT_CODE_FILE_OPEN, P);
     };
+    {
+        std::lock_guard<std::mutex> lock(P.inOut->ownedStreamsMutex);
+        P.inOut->ownedFstreams.push_back(fStreamP);
+    }
     return *fStreamP;
 };
 
 std::ifstream & ifstrOpen (std::string fileName, std::string errorID, std::string solutionString, Parameters &P) {
     //open file 'fileName', generate error if cannot open
-    std::ifstream & ifStream = *new std::ifstream(fileName.c_str());
+    std::ifstream *ifStreamP = new std::ifstream(fileName.c_str());
+    std::ifstream &ifStream = *ifStreamP;
     if (ifStream.fail()) {//
         ostringstream errOut;
         errOut << errorID<<": exiting because of *INPUT FILE* error: could not open input file "<< fileName <<"\n";
@@ -133,6 +146,10 @@ std::ifstream & ifstrOpen (std::string fileName, std::string errorID, std::strin
         };
         exitWithError(errOut.str(),std::cerr, P.inOut->logMain, EXIT_CODE_FILE_OPEN, P);
     };
+    {
+        std::lock_guard<std::mutex> lock(P.inOut->ownedStreamsMutex);
+        P.inOut->ownedIfstreams.push_back(ifStreamP);
+    }
     return ifStream;
 };
 

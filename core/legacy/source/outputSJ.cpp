@@ -21,6 +21,8 @@ void outputSJ(ReadAlignChunk** RAchunk, Parameters& P) {//collapses junctions fr
 
     Junction oneSJ(RAchunk[0]->RA->genOut);
     char** sjChunks = new char* [P.runThreadN+1];
+    bool* sjFilter = nullptr;
+    uint* sjA = nullptr;
     #define OUTSJ_limitScale 2
     OutSJ allSJ (P.limitOutSJcollapsed*OUTSJ_limitScale, P, RAchunk[0]->RA->genOut);
 
@@ -82,10 +84,10 @@ void outputSJ(ReadAlignChunk** RAchunk, Parameters& P) {//collapses junctions fr
         sjChunks[icOut] += oneSJ.dataSize;//shift icOut-chunk by one junction
     };
 
-    bool* sjFilter=new bool[allSJ.N];
+    sjFilter=new bool[allSJ.N];
     if (P.outFilterBySJoutStage!=2) {
         //filter non-canonical junctions that are close to canonical
-        uint* sjA = new uint [allSJ.N*3];
+        sjA = new uint [allSJ.N*3];
         for (uint ii=0;ii<allSJ.N;ii++) {//scan through all junctions, filter by the donor ditance to a nearest donor, fill acceptor array
             oneSJ.junctionPointer(allSJ.data,ii);
 
@@ -160,4 +162,8 @@ void outputSJ(ReadAlignChunk** RAchunk, Parameters& P) {//collapses junctions fr
             };
         };
     };
+
+    delete[] sjA;
+    delete[] sjFilter;
+    delete[] sjChunks;
 };

@@ -10,6 +10,58 @@ ReadAlign::ReadAlign (Parameters& Pin, Genome &genomeIn, Transcriptome *TrIn, in
                       const libem::Transcriptome* libemTr)
                     : mapGen(genomeIn), genOut(*genomeIn.genomeOut.g), P(Pin), chunkTr(TrIn), quantEC(nullptr)
 {
+    alignTrAll = nullptr;
+    splGraph = nullptr;
+    winBin = nullptr;
+    splitR = nullptr;
+    PC = nullptr;
+    WC = nullptr;
+    nWA = nullptr;
+    nWAP = nullptr;
+    WALrec = nullptr;
+    WlastAnchor = nullptr;
+    WA = nullptr;
+    WAincl = nullptr;
+    swWinCov = nullptr;
+    swWinGleft = nullptr;
+    swWinGright = nullptr;
+    swWinRleft = nullptr;
+    swWinRright = nullptr;
+    swT = nullptr;
+    trAll = nullptr;
+    nWinTr = nullptr;
+    trArray = nullptr;
+    trArrayPointer = nullptr;
+    trInit = nullptr;
+    alignsGenOut.alMult = nullptr;
+    alignsGenOut.alBest = nullptr;
+    alignsGenOut.alN = 0;
+    alignsGenOut.yes = false;
+    Read0 = nullptr;
+    Qual0 = nullptr;
+    readNameMates = nullptr;
+    Read1 = nullptr;
+    outBAMoneAlign = nullptr;
+    outBAMoneAlignNbytes = nullptr;
+    outSAMstream = nullptr;
+    outBAMarray = nullptr;
+    waspRA = nullptr;
+    peMergeRA = nullptr;
+    chimDet = nullptr;
+    chunkOutChimJunction = nullptr;
+    ownsChunkOutChimJunction_ = false;
+    soloRead = nullptr;
+    sampleDet_ = nullptr;
+    scoreSeedToSeed = nullptr;
+    scoreSeedBest = nullptr;
+    scoreSeedBestInd = nullptr;
+    scoreSeedBestMM = nullptr;
+    seedChain = nullptr;
+    outBAMcoord = nullptr;
+    outBAMunsorted = nullptr;
+    outBAMquant = nullptr;
+    chunkOutSJ = nullptr;
+    chunkOutSJ1 = nullptr;
     readNmates=P.readNmates; //not readNends
     bamRecordIndexPtr = &g_bamRecordIndex;
     if (P.trimQcEnabled) {
@@ -129,6 +181,7 @@ ReadAlign::ReadAlign (Parameters& Pin, Genome &genomeIn, Transcriptome *TrIn, in
     
     //chim
     chunkOutChimJunction = new fstream;
+    ownsChunkOutChimJunction_ = true;
     chimDet = new ChimericDetection(P, trAll, nWinTr, Read1, mapGen, chunkOutChimJunction, this);
     
     //solo
@@ -168,6 +221,176 @@ ReadAlign::ReadAlign (Parameters& Pin, Genome &genomeIn, Transcriptome *TrIn, in
     #endif
     };
 };
+
+ReadAlign::~ReadAlign() {
+    delete waspRA;
+    waspRA = nullptr;
+
+    if (peMergeRA != nullptr) {
+        peMergeRA->outBAMunsorted = nullptr;
+        peMergeRA->outBAMcoord = nullptr;
+        peMergeRA->outBAMquant = nullptr;
+        peMergeRA->chunkOutSJ = nullptr;
+        peMergeRA->chunkOutSJ1 = nullptr;
+        peMergeRA->outSAMstream = nullptr;
+        peMergeRA->outBAMarray = nullptr;
+    }
+    delete peMergeRA;
+    peMergeRA = nullptr;
+
+    delete soloRead;
+    soloRead = nullptr;
+
+    delete sampleDet_;
+    sampleDet_ = nullptr;
+
+    delete chimDet;
+    chimDet = nullptr;
+
+    if (ownsChunkOutChimJunction_ && chunkOutChimJunction != nullptr) {
+        delete chunkOutChimJunction;
+    }
+    chunkOutChimJunction = nullptr;
+
+    delete quantEC;
+    quantEC = nullptr;
+
+    delete splGraph;
+    splGraph = nullptr;
+
+    delete[] alignTrAll;
+    alignTrAll = nullptr;
+
+    if (alignsGenOut.alMult != nullptr) {
+        for (uint32 ii = 0; ii < P.outFilterMultimapNmax; ++ii) {
+            delete alignsGenOut.alMult[ii];
+        }
+        delete[] alignsGenOut.alMult;
+        alignsGenOut.alMult = nullptr;
+    }
+
+    delete trInit;
+    trInit = nullptr;
+
+    delete[] trArrayPointer;
+    trArrayPointer = nullptr;
+
+    delete[] trArray;
+    trArray = nullptr;
+
+    delete[] nWinTr;
+    nWinTr = nullptr;
+
+    delete[] trAll;
+    trAll = nullptr;
+
+    if (winBin != nullptr) {
+        delete[] winBin[0];
+        delete[] winBin[1];
+        delete[] winBin;
+        winBin = nullptr;
+    }
+
+    if (splitR != nullptr) {
+        delete[] splitR[0];
+        delete[] splitR[1];
+        delete[] splitR[2];
+        delete[] splitR;
+        splitR = nullptr;
+    }
+
+    delete[] PC;
+    PC = nullptr;
+
+    delete[] WC;
+    WC = nullptr;
+
+    delete[] nWA;
+    nWA = nullptr;
+
+    delete[] nWAP;
+    nWAP = nullptr;
+
+    delete[] WALrec;
+    WALrec = nullptr;
+
+    delete[] WlastAnchor;
+    WlastAnchor = nullptr;
+
+    if (WA != nullptr) {
+        for (uint ii = 0; ii < P.alignWindowsPerReadNmax; ++ii) {
+            delete[] WA[ii];
+        }
+        delete[] WA;
+        WA = nullptr;
+    }
+
+    delete[] WAincl;
+    WAincl = nullptr;
+
+#ifdef COMPILE_FOR_LONG_READS
+    delete[] swWinCov;
+    swWinCov = nullptr;
+
+    delete[] scoreSeedToSeed;
+    scoreSeedToSeed = nullptr;
+
+    delete[] scoreSeedBest;
+    scoreSeedBest = nullptr;
+
+    delete[] scoreSeedBestInd;
+    scoreSeedBestInd = nullptr;
+
+    delete[] scoreSeedBestMM;
+    scoreSeedBestMM = nullptr;
+
+    delete[] seedChain;
+    seedChain = nullptr;
+#endif
+
+    if (Read0 != nullptr) {
+        for (uint32 ii = 0; ii < P.readNends; ++ii) {
+            delete[] Read0[ii];
+        }
+        delete[] Read0;
+        Read0 = nullptr;
+    }
+
+    if (Qual0 != nullptr) {
+        for (uint32 ii = 0; ii < P.readNends; ++ii) {
+            delete[] Qual0[ii];
+        }
+        delete[] Qual0;
+        Qual0 = nullptr;
+    }
+
+    if (readNameMates != nullptr) {
+        for (uint32 ii = 0; ii < P.readNends; ++ii) {
+            delete[] readNameMates[ii];
+        }
+        delete[] readNameMates;
+        readNameMates = nullptr;
+    }
+
+    if (Read1 != nullptr) {
+        for (uint32 ii = 0; ii < 3; ++ii) {
+            delete[] Read1[ii];
+        }
+        delete[] Read1;
+        Read1 = nullptr;
+    }
+
+    if (outBAMoneAlign != nullptr) {
+        for (uint32 ii = 0; ii < P.readNmates + 2; ++ii) {
+            delete[] outBAMoneAlign[ii];
+        }
+        delete[] outBAMoneAlign;
+        outBAMoneAlign = nullptr;
+    }
+
+    delete[] outBAMoneAlignNbytes;
+    outBAMoneAlignNbytes = nullptr;
+}
 
 void ReadAlign::resetN () {//reset resets the counters to 0 for a new read
     mapMarker=0;

@@ -9,6 +9,15 @@
 #include "solo/CbCorrector.h"
 #include "TranscriptQuantEC.h"
 #include <cstring>
+#include <cstdlib>
+// #region agent log
+#include <fstream>
+#include <chrono>
+#include <thread>
+// #endregion agent log
+
+// Forward declaration for Flex-only reject logging hook (defined in flex/SoloReadFeature_record_flex.cpp)
+extern "C" void storeQnameMapping(uint64_t iRead, const char* qname);
 
 namespace {
 inline const char* sanitizeQname(char** readNameMates, uint32_t readNmates, uint32_t mateIdx) {
@@ -46,11 +55,44 @@ inline void writeNormalizedQname(std::ostream& out, const char* raw) {
     }
     out.put('\n');
 }
+
+// #region agent log
+static inline uint64_t agentNowMs() {
+    using namespace std::chrono;
+    return (uint64_t)duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
+}
+static inline void agentDbgLog(const char* hypothesisId,
+                               const char* location,
+                               const char* message,
+                               const std::string& dataJson)
+{
+    std::ofstream ofs("/mnt/pikachu/STAR-suite/.cursor/debug.log", std::ios::app);
+    if (!ofs.good()) return;
+    ofs << "{\"sessionId\":\"debug-session\",\"runId\":\"pre-fix\",\"hypothesisId\":\""
+        << hypothesisId << "\",\"location\":\"" << location << "\",\"message\":\"" << message
+        << "\",\"data\":" << dataJson << ",\"timestamp\":" << agentNowMs() << "}\n";
+}
+// #endregion agent log
 }
 
 void ReadAlign::outputAlignments() {
   
     outBAMbytes=0;
+    // #region agent log
+    if (iReadAll < 200) {
+        agentDbgLog(
+            "H0",
+            "ReadAlign_outputAlignments.cpp:outputAlignments:entry",
+            "enter outputAlignments",
+            std::string("{\"iReadAll\":") + std::to_string((uint64_t)iReadAll) +
+                ",\"readNmates\":" + std::to_string((uint64_t)readNmates) +
+                ",\"unmapType\":" + std::to_string((int64_t)unmapType) +
+                ",\"nTr\":" + std::to_string((int64_t)nTr) +
+                ",\"sampleDetReady\":" + std::to_string((int64_t)sampleDetReady_) +
+                "}"
+        );
+    }
+    // #endregion agent log
         
     readAnnot.reset();
     
@@ -302,7 +344,35 @@ void ReadAlign::outputAlignments() {
         const int MAX_DEBUG_LOGS = 10;
         
         if (P.pSolo.cbCorrector && !readBar->cbSeq.empty()) {
+            // #region agent log
+            if (iReadAll < 200) {
+                agentDbgLog(
+                    "H1",
+                    "ReadAlign_outputAlignments.cpp:outputAlignments:before_cbCorrector",
+                    "before cbCorrector->correct",
+                    std::string("{\"iReadAll\":") + std::to_string((uint64_t)iReadAll) +
+                        ",\"cbSeqLen\":" + std::to_string((uint64_t)readBar->cbSeq.size()) +
+                        ",\"cbQualLen\":" + std::to_string((uint64_t)readBar->cbQual.size()) +
+                        "}"
+                );
+            }
+            // #endregion agent log
             CbMatch match = P.pSolo.cbCorrector->correct(readBar->cbSeq);
+            // #region agent log
+            if (iReadAll < 200) {
+                agentDbgLog(
+                    "H1",
+                    "ReadAlign_outputAlignments.cpp:outputAlignments:after_cbCorrector",
+                    "after cbCorrector->correct",
+                    std::string("{\"iReadAll\":") + std::to_string((uint64_t)iReadAll) +
+                        ",\"whitelistIdx\":" + std::to_string((uint64_t)match.whitelistIdx) +
+                        ",\"ambiguous\":" + std::to_string((int64_t)match.ambiguous) +
+                        ",\"ambiguousIdxSize\":" + std::to_string((uint64_t)match.ambiguousIdx.size()) +
+                        ",\"hammingDist\":" + std::to_string((int64_t)match.hammingDist) +
+                        "}"
+                );
+            }
+            // #endregion agent log
             
             // Extract UMI first (needed for ambiguous accumulation)
             uint32_t umi24 = 0;
@@ -315,7 +385,13 @@ void ReadAlign::outputAlignments() {
                 }
             }
             
-            if (match.ambiguous && !match.ambiguousIdx.empty() && umi24 != 0) {
+            static const bool disableAmbigResolve =
+                (std::getenv("STAR_DISABLE_AMBIG_CB_RESOLVE") != nullptr);
+
+            if (disableAmbigResolve && match.ambiguous) {
+                extractedCbIdxPlus1_ = 0;
+                extractedCbSeq_ = readBar->cbSeq;
+            } else if (match.ambiguous && !match.ambiguousIdx.empty() && umi24 != 0) {
                 // Ambiguous CB: accumulate UMI counts for Bayesian resolution
                 // This matches process_features: capture raw CB sequence (may contain Ns),
                 // quality scores, candidate whitelist indices, and UMI counts
@@ -368,6 +444,20 @@ void ReadAlign::outputAlignments() {
                                  << ", ambiguous=" << match.ambiguous
                                  << ", extractedCbIdxPlus1_=" << extractedCbIdxPlus1_ << endl;
             }
+            // #region agent log
+            if (iReadAll < 200) {
+                agentDbgLog(
+                    "H2",
+                    "ReadAlign_outputAlignments.cpp:outputAlignments:after_cb_resolution",
+                    "after CB resolution bookkeeping",
+                    std::string("{\"iReadAll\":") + std::to_string((uint64_t)iReadAll) +
+                        ",\"extractedCbIdxPlus1\":" + std::to_string((uint64_t)extractedCbIdxPlus1_) +
+                        ",\"extractedCbSeqLen\":" + std::to_string((uint64_t)extractedCbSeq_.size()) +
+                        ",\"pendingAmbiguousSize\":" + std::to_string((uint64_t)pendingAmbiguous_.size()) +
+                        "}"
+                );
+            }
+            // #endregion agent log
         } else {
             // Debug logging for why CbCorrector wasn't used
             if (debugCount++ < MAX_DEBUG_LOGS) {
@@ -375,6 +465,21 @@ void ReadAlign::outputAlignments() {
                                  << ", cbSeq.empty()=" << readBar->cbSeq.empty()
                                  << ", cbSeq=" << (readBar->cbSeq.empty() ? "(empty)" : readBar->cbSeq) << endl;
             }
+            // #region agent log
+            if (iReadAll < 200) {
+                agentDbgLog(
+                    "H3",
+                    "ReadAlign_outputAlignments.cpp:outputAlignments:cbCorrector_not_used",
+                    "cbCorrector not used",
+                    std::string("{\"iReadAll\":") + std::to_string((uint64_t)iReadAll) +
+                        ",\"cbCorrectorNonNull\":" + std::to_string((int64_t)(P.pSolo.cbCorrector != nullptr)) +
+                        ",\"cbSeqEmpty\":" + std::to_string((int64_t)readBar->cbSeq.empty()) +
+                        ",\"cbMatch\":" + std::to_string((int64_t)readBar->cbMatch) +
+                        ",\"cbMatchIndSize\":" + std::to_string((uint64_t)readBar->cbMatchInd.size()) +
+                        "}"
+                );
+            }
+            // #endregion agent log
             
             // Fallback to original SoloReadBarcode matching logic
             // cbMatch: 0=exact match, 1=one match with 1MM, -1=no match, -3=multiple matches (not allowed)
@@ -587,12 +692,13 @@ void ReadAlign::outputAlignments() {
         }
         
         // Set detected sample token in SoloReadBarcode for tag extraction in inline hash capture
-        if (soloRead && soloRead->readBar) {
+        if ((P.pSolo.flexMode || P.pSolo.inlineHashMode) && soloRead && soloRead->readBar) {
             soloRead->readBar->detectedSampleToken = detectedSampleByte_;
         }
 
-        // Populate optional MAPQ/CIGAR/score on transcripts for downstream consumers (inline resolver)
-        if (unmapType < 0 && nTr > 0) {
+        // Populate optional MAPQ/CIGAR/score on transcripts for downstream consumers (Flex resolver)
+        // Gate Flex-only side effects so non-Flex STARsolo behaves like upstream
+        if ((P.pSolo.flexMode || P.pSolo.inlineHashMode) && unmapType < 0 && nTr > 0) {
             int mapqUnique = P.outSAMmapqUnique;
             for (uint64 i = 0; i < nTr; i++) {
                 if (trMult[i] == nullptr) continue;
@@ -607,11 +713,12 @@ void ReadAlign::outputAlignments() {
             }
         }
 
-        // Store qname mapping for reject logging if enabled
-        // Forward declaration - function defined in SoloReadFeature_record.cpp
-        extern void storeQnameMapping(uint64_t iRead, const char* qname);
-        if (readName) {
-            storeQnameMapping(iReadAll, readName);
+        // Store qname mapping for reject logging if enabled (Flex-only)
+        // Forward declaration - function defined in flex/SoloReadFeature_record_flex.cpp
+        if (P.pSolo.flexMode || P.pSolo.inlineHashMode) {
+            if (readName) {
+                storeQnameMapping(iReadAll, readName);
+            }
         }
         
         soloRead->record((unmapType<0 ? nTr : 0), trMult, iReadAll, readAnnot); //need to supply nTr=0 for unmapped reads

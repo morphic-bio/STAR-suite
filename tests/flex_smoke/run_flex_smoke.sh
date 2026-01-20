@@ -102,7 +102,7 @@ if [[ -d "$FIXTURE_DIR/genome" ]] && [[ -d "$FIXTURE_DIR/SC2300771" ]]; then
         --soloFeatures Gene \
         --runThreadN 1 \
         --outSAMtype BAM Unsorted \
-        --soloOutFileNames Solo.out/ Gene/raw/ 2>&1; then
+        2>&1; then
         pass "STAR ran successfully with flex off"
         
         # Check that standard Solo output exists
@@ -128,9 +128,11 @@ if [[ -d "$FIXTURE_DIR/genome" ]] && [[ -d "$FIXTURE_DIR/SC2300771" ]]; then
         --soloCBlen 16 \
         --soloUMIlen 12 \
         --soloFeatures Gene \
+        --soloProbeList /storage/flex-genome-filtered-110-44/filtered_reference/filtered_probe_set.csv \
+        --soloFlexExpectedCellsTotal 1000 \
         --runThreadN 1 \
         --outSAMtype BAM Unsorted \
-        --soloOutFileNames Solo.out/ Gene/raw/ 2>&1; then
+        2>&1; then
         pass "STAR ran successfully with flex enabled"
         
         # Check for flex pipeline log message

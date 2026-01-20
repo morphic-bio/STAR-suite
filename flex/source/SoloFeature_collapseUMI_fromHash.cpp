@@ -15,6 +15,7 @@
 #include "solo/CbBayesianResolver.h"
 #include "solo/CbCorrector.h"
 #include <cstdio>
+#include <cstdlib>
 #include <vector>
 #include <algorithm>
 
@@ -79,7 +80,9 @@ void SoloFeature::collapseUMIall_fromHash()
     }
 
     // ========== Phase 2: Resolve accumulated ambiguous CBs ==========
-    if (!readFeatSum->pendingAmbiguous_.empty() && pSolo.cbCorrector) {
+    static const bool g_disableAmbigResolve =
+        (std::getenv("STAR_DISABLE_AMBIG_CB_RESOLVE") != nullptr);
+    if (!g_disableAmbigResolve && !readFeatSum->pendingAmbiguous_.empty() && pSolo.cbCorrector) {
         const std::vector<std::string> &whitelistSeqs = pSolo.cbCorrector->whitelist();
         CbBayesianResolver resolver(whitelistSeqs.size(), &whitelistSeqs);
         
@@ -140,9 +143,12 @@ void SoloFeature::collapseUMIall_fromHash()
         
         // Update hash size after resolution
         hashSize = kh_size(hash);
-    } else if (!readFeatSum->pendingAmbiguous_.empty()) {
+    } else if (!g_disableAmbigResolve && !readFeatSum->pendingAmbiguous_.empty()) {
         P.inOut->logMain << "[AMBIG-CB-RESOLVE] " << readFeatSum->pendingAmbiguous_.size() 
                          << " pending ambiguous CBs but CbCorrector not available, skipping" << endl;
+    } else if (g_disableAmbigResolve && !readFeatSum->pendingAmbiguous_.empty()) {
+        P.inOut->logMain << "[AMBIG-CB-RESOLVE] disabled by STAR_DISABLE_AMBIG_CB_RESOLVE, skipping "
+                         << readFeatSum->pendingAmbiguous_.size() << " pending ambiguous CBs" << endl;
     }
 
     // Instrumentation: total entries and counts pre-dedup

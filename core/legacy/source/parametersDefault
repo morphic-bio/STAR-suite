@@ -1681,6 +1681,25 @@ soloFlexMinimalMemory         no
     string:                 yes|no (default no)
                             yes         ... skip legacy Solo structures and eagerly free hashes in inline hash path (reduces memory usage)
 
+crMultiConfig               -
+    string:                 Cell Ranger multi config CSV (enables CR multi processing)
+
+crWhitelist                 -
+    string:                 override cell barcode whitelist for CR multi feature processing
+
+crFeatureRef                -
+    string:                 override feature reference CSV for CR multi feature processing
+
+crFastqRoot                 -
+    string:                 fallback root for FASTQ directories in multi config
+
+crFastqMap                  -
+    string(s):              map FASTQ paths from multi config to actual paths (key=value)
+
+crMexUseGexBarcodes        -
+    string:                 DEPRECATED: CR-compat MEX now always writes both raw_feature_bc_matrix and filtered_feature_bc_matrix using GEX barcodes
+                            This parameter is ignored and kept for backward compatibility only
+
 #####UnderDevelopment_begin : not supported - do not use
 soloClusterCBfile           -
     string:                 file containing the cluster information for cell barcodes, two columns: CB cluster_index. Only used with --soloFeatures Transcript3p

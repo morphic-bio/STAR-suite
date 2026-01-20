@@ -104,7 +104,7 @@ OBJECTS = systemFunctions.o funPrimaryAlignMark.o \
 	SoloFeature_statsOutput.o bamSortByCoordinate.o SamtoolsSorter.o SoloBarcode.o \
 	ParametersSolo.o SoloRead.o SoloRead_record.o \
 	SoloReadBarcode.o SoloReadBarcode_getCBandUMI.o SoloBarcode_extractBarcode.o \
-	SoloReadFeature.o SoloReadFeature_record.o SoloReadFeature_inputRecords.o \
+	SoloReadFeature.o SoloReadFeature_record.o SoloReadFeature_record_base.o flex/SoloReadFeature_record_flex.o SoloReadFeature_inputRecords.o \
 	Solo.o SoloFeature.o SoloFeature_outputResults.o SoloFeature_processRecords.o SoloFeature_prepareReadInfoOnly.o SoloReadInfoLoader.o SoloReadInfoSink.o \
 	PackedReadInfo.o InlineCBCorrection.o solo/CbCorrector.o solo/CbBayesianResolver.o GeneResolver.o \
 	ReadAlign_transformGenome.o Genome_transformGenome.o Transcript_convertGenomeCigar.o \
@@ -143,9 +143,20 @@ OBJECTS = systemFunctions.o funPrimaryAlignMark.o \
 	SoloBamParsing.o \
 	ZGZXTags.o \
 	FlexProbeIndex.o \
-	CellRangerFormatter.o
+	CellRangerFormatter.o \
+	CrMultiConfig.o CrMultiMexStub.o CrMultiAssign.o CrMultiMerge.o CrMultiProcess.o
 
-SOURCES := $(wildcard *.cpp) $(wildcard *.c)
+# Unit tests for CR-compat regression components (built as a single binary)
+OBJECTS_NO_MAIN := $(filter-out STAR.o,$(OBJECTS))
+COMPAT_UNIT_TEST_SRC := $(ROOT_DIR)/tests/compat/test_cr_compat_components.cpp
+
+.PHONY: compat-unit-tests
+compat-unit-tests : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
+compat-unit-tests : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS) $(shell pkg-config --libs glib-2.0 2>/dev/null || echo "")
+compat-unit-tests : Depend.list parametersDefault.xxd $(OBJECTS_NO_MAIN) libflex libtrim libem $(COMPAT_UNIT_TEST_SRC)
+	$(CXX) -o compat_unit_tests $(CXXFLAGS) $(COMPAT_UNIT_TEST_SRC) $(OBJECTS_NO_MAIN) $(LIBFLEX_LIB) $(LIBTRIM_LIB) $(LIBEM_LIB) $(LDFLAGS)
+
+SOURCES := $(wildcard *.cpp) $(wildcard *.c) $(wildcard flex/*.cpp)
 
 %.o : %.c
 	$(CXX) -c $(CPPFLAGS) $(CFLAGS) $<
@@ -327,8 +338,12 @@ ctest: test
 
 # Pattern rule for root-level .cpp files to ensure CXXFLAGS_common (including third_party) is used
 # This applies to files like SoloFeature_flexfilter.cpp that need the third_party include path
-# Subdirectories (opal/, solo/) have their own specific rules that take precedence
+# Subdirectories (opal/, solo/, flex/) have their own specific rules that take precedence
 %.o: %.cpp
+	$(CXX) -c $(CPPFLAGS) $(CXXFLAGS) $(CXXFLAGS_common) $< -o $@
+
+flex/%.o: flex/%.cpp
+	@mkdir -p flex
 	$(CXX) -c $(CPPFLAGS) $(CXXFLAGS) $(CXXFLAGS_common) $< -o $@
 
 opal/opal.o : opal/opal.cpp opal/opal.h

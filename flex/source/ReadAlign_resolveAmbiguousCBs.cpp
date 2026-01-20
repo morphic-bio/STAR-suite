@@ -2,6 +2,7 @@
 #include "solo/CbBayesianResolver.h"
 #include "solo/CbCorrector.h"
 #include "ParametersSolo.h"
+#include <cstdlib>
 
 // FNV-1a hash for CB sequence -> AmbigKey
 ReadAlign::AmbigKey ReadAlign::hashCbSeq(const std::string &cbSeq) {
@@ -19,14 +20,23 @@ ReadAlign::AmbigKey ReadAlign::hashCbSeq(const std::string &cbSeq) {
 
 // Phase 2: Resolve accumulated ambiguous CBs using Bayesian inference
 void ReadAlign::resolveAmbiguousCBs() {
+    static const bool g_disableAmbigResolve =
+        (std::getenv("STAR_DISABLE_AMBIG_CB_RESOLVE") != nullptr);
+    if (g_disableAmbigResolve) {
+        pendingAmbiguous_.clear();
+        return;
+    }
+
     if (pendingAmbiguous_.empty()) {
         return;
     }
     
     // Need whitelist sequences for Bayesian comparison
     if (!P.pSolo.cbCorrector) {
-        P.inOut->logMain << "resolveAmbiguousCBs: CbCorrector not available, skipping " 
-                         << pendingAmbiguous_.size() << " ambiguous CBs" << endl;
+        if (P.inOut && P.inOut->logMain.good()) {
+            P.inOut->logMain << "resolveAmbiguousCBs: CbCorrector not available, skipping " 
+                             << pendingAmbiguous_.size() << " ambiguous CBs" << endl;
+        }
         cbResolutionStats_.stillAmbiguous += pendingAmbiguous_.size();
         return;
     }
@@ -81,8 +91,9 @@ void ReadAlign::resolveAmbiguousCBs() {
     cbResolutionStats_.stillAmbiguous += stillAmbiguous;
     
     if (resolved > 0 || stillAmbiguous > 0) {
-        P.inOut->logMain << "resolveAmbiguousCBs: resolved " << resolved 
-                         << ", still ambiguous " << stillAmbiguous << endl;
+        if (P.inOut && P.inOut->logMain.good()) {
+            P.inOut->logMain << "resolveAmbiguousCBs: resolved " << resolved 
+                             << ", still ambiguous " << stillAmbiguous << endl;
+        }
     }
 }
-

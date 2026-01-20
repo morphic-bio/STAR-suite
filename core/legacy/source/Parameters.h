@@ -557,6 +557,16 @@ class Parameters {
         //solo
         ParametersSolo pSolo;
 
+        //Cell Ranger multi config support
+        struct {
+            string crMultiConfig;           // Path to Cell Ranger multi config CSV
+            string crWhitelist;            // Override whitelist (if config missing)
+            string crFeatureRef;            // Override feature reference (if config missing)
+            string crFastqRoot;            // Fallback root for FASTQ directories
+            vector<string> crFastqMap;     // Map config FASTQ paths to actual paths (key=value pairs)
+            string crMexUseGexBarcodes;    // DEPRECATED: CR-compat MEX now always uses GEX barcodes (ignored, kept for backward compatibility)
+        } crMulti;
+
         //chimeric
         ParametersChimeric pCh;
 

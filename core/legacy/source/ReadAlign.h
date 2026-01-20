@@ -39,6 +39,7 @@ class ReadAlign {
     public:
         ReadAlign (Parameters& Pin, Genome &genomeIn, Transcriptome *TrIn, int iChunk,
                    const libem::Transcriptome* libemTr = nullptr);//allocate arrays
+        ~ReadAlign();
         int oneRead();
 
         Genome &mapGen, &genOut; //mapped-to-genome structure
@@ -58,6 +59,7 @@ class ReadAlign {
         fstream chunkOutYFastqStream[MAX_N_MATES], chunkOutNoYFastqStream[MAX_N_MATES];  // Y/noY FASTQ streams (uncompressed)
         gzFile chunkOutYFastqGz[MAX_N_MATES], chunkOutNoYFastqGz[MAX_N_MATES];  // Y/noY FASTQ streams (gzip-compressed)
         OutSJ *chunkOutSJ, *chunkOutSJ1;
+        bool ownsChunkOutChimJunction_;  // true if chunkOutChimJunction is owned by this instance
 
         ostream* outSAMstream;
         uint outBAMbytes; //number of bytes output to SAM/BAM with oneRead

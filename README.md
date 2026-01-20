@@ -24,6 +24,8 @@ tools/                   # Suite-level scripts/utilities
   Build tools: `make flex` or `make flex-tools`.
 - **STAR-SLAM** (`slam/`): SLAM-seq quantification, SNP masking, trimming/QC.
   Build tools: `make slam` or `make slam-tools`.
+- **Feature Barcodes** (`core/features/feature_barcodes/`): Vendored `process_features` tools for perturb-seq testing (`assignBarcodes`, `demux_bam`, `demux_fastq`).
+  Build tools: `make feature-barcodes-tools`.
 
 ## Technical Updates
 
@@ -166,3 +168,4 @@ core/legacy/source/STAR \
 - Flex pipeline: [flex/README_flex.md](flex/README_flex.md)
 - SLAM compatibility: [slam/docs/SLAM_COMPATIBILITY_MODE.md](slam/docs/SLAM_COMPATIBILITY_MODE.md)
 - SLAM methodology: [slam/docs/SLAM_seq.md](slam/docs/SLAM_seq.md)
+- Cell Ranger multi smoke tool: [docs/cr_multi.md](docs/cr_multi.md)

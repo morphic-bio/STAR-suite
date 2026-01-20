@@ -1,0 +1,11 @@
+# LSAN suppressions for known baseline leaks that are not specific to the CR-compat
+# regression components under test.
+#
+# Keep this list as small as possible. The goal is to allow component-level tests
+# (Solo/SoloReadBarcode/Transcriptome/Genome/PackedReadInfo) to fail loudly if they
+# introduce new leaks, while tolerating existing leaks in the parameters plumbing.
+
+leak:Parameters::Parameters
+leak:ParameterInfoScalar
+leak:ParameterInfoVector
+leak:InOutStreams::InOutStreams

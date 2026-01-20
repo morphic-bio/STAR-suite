@@ -47,6 +47,7 @@
 #include "SlamVarianceAnalysis.h"
 #include "SlamQcOutput.h"
 #include "SnpMaskBuild.h"
+#include "CrMultiProcess.h"
 // Note: effective_length.h not included due to Transcriptome class name conflict
 // Use wrapper function instead
 #include "effective_length_wrapper.h"
@@ -259,13 +260,16 @@ int main(int argInN, char *argIn[])
         exit(1);
     };
 
-    // transcripome placeholder
-    Transcriptome *transcriptomeMain = NULL;
+    // transcriptome placeholder (loaded only if P.quant.yes)
+    Transcriptome *transcriptomeMain = nullptr;
     std::vector<double> vbGenePosterior;
     bool vbGenePosteriorReady = false;
 
-    // this will execute --runMode soloCellFiltering and exit
-    Solo soloCellFilter(P, *transcriptomeMain);
+    // --runMode soloCellFiltering executes and exits before genome/mapping
+    if (P.runMode == "soloCellFiltering") {
+        Transcriptome transcriptomeCellFilter(P);
+        Solo soloCellFilter(P, transcriptomeCellFilter);
+    }
 
     ////////////////////////////////////////////////////////////////////////
     ///////////////////////////////// Genome
@@ -1345,6 +1349,11 @@ int main(int argInN, char *argIn[])
         P.inOut->logMain << timeMonthDayTime() << " ..... skipping Solo processing (inline replayer already produced MEX)" << endl;
     }
 
+    // Process Cell Ranger multi config if enabled
+    if (!P.crMulti.crMultiConfig.empty()) {
+        processCrMultiConfig(P);
+    }
+
     // Note: Two-pass unsorted CB/UB tag injection removed - not used in inline flex path
 
     if (P.quant.geCount.yes)
@@ -1894,6 +1903,40 @@ int main(int argInN, char *argIn[])
             }
         }
     }
+
+    if (RAchunk != nullptr) {
+        for (int ichunk = 0; ichunk < P.runThreadN; ++ichunk) {
+            delete RAchunk[ichunk];
+            RAchunk[ichunk] = nullptr;
+        }
+        delete[] RAchunk;
+        RAchunk = nullptr;
+    }
+
+    if (transcriptomeMain != nullptr) {
+        delete transcriptomeMain;
+        transcriptomeMain = nullptr;
+    }
+
+    // Variation objects are heap-allocated and stored as raw pointers in Genome.
+    // Genome is copied in several places (e.g., 2-pass), so we avoid a Genome
+    // destructor and instead explicitly delete the Variation objects at shutdown.
+    if (genomeMain.Var != nullptr) {
+        delete genomeMain.Var;
+        genomeMain.Var = nullptr;
+    }
+    if (genomeMain.genomeOut.g != nullptr && genomeMain.genomeOut.g != &genomeMain) {
+        if (genomeMain.genomeOut.g->Var != nullptr) {
+            delete genomeMain.genomeOut.g->Var;
+            genomeMain.genomeOut.g->Var = nullptr;
+        }
+    }
+
+    // Free auxiliary genome index buffers after all outputs that require them (e.g., SJ).
+    delete[] genomeMain.chrBin;
+    genomeMain.chrBin = nullptr;
+    delete[] genomeMain.genomeSAindexStart;
+    genomeMain.genomeSAindexStart = nullptr;
 
     // wiggle output
     if (P.outWigFlags.yes)

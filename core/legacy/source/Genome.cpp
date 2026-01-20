@@ -13,8 +13,19 @@
 #include <sys/stat.h>
 #include <algorithm>
 
-Genome::Genome (Parameters &P, ParametersGenome &pGe): shmStart(NULL), P(P), pGe(pGe), sharedMemory(NULL)
+Genome::Genome (Parameters &P, ParametersGenome &pGe)
+    : shmStart(NULL),
+      P(P),
+      pGe(pGe),
+      sharedMemory(NULL)
 {
+    G=nullptr;
+    G1=nullptr;
+    chrBin=nullptr;
+    genomeSAindexStart=nullptr;
+    Var=nullptr;
+    superTr=nullptr;
+
     struct stat stbuf;
     stat(pGe.gDir.c_str(), &stbuf);
     shmKey=stbuf.st_ino;
@@ -24,12 +35,6 @@ Genome::Genome (Parameters &P, ParametersGenome &pGe): shmStart(NULL), P(P), pGe
     sjdbLength = pGe.sjdbOverhang==0 ? 0 : pGe.sjdbOverhang*2+1;
 };
 
-// Genome::~Genome()
-// {
-//     if (sharedMemory != NULL)
-//         delete sharedMemory;
-//     sharedMemory = NULL;
-// }
 
 void Genome::freeMemory(){//free big chunks of memory used by genome and suffix array
 

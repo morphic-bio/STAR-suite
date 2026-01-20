@@ -16,6 +16,7 @@
 
 class SoloFeature;
 class ProbeListIndex;
+class ReadSoloFeatures;
 
 class SoloReadFeature {
 public:
@@ -71,6 +72,14 @@ public:
 
 private:
     friend class SoloReadInfoLoader;
+    friend void record_base(SoloReadFeature *soloReadFeat, SoloReadBarcode &soloBar, uint nTr, Transcript **alignOut, uint64 iRead, ReadAnnotations &readAnnot);
+    friend void record_flex(SoloReadFeature *soloReadFeat, SoloReadBarcode &soloBar, uint nTr, Transcript **alignOut, uint64 iRead, ReadAnnotations &readAnnot);
+    friend uint32 outputReadCB_base(fstream *streamOut, const uint64 iRead, const int32 featureType, SoloReadBarcode &soloBar,
+                                    const ReadSoloFeatures &reFe, const ReadAnnotations &readAnnot, const SoloReadFlagClass &readFlag,
+                                    SoloReadFeature *soloReadFeat);
+    friend uint32 outputReadCB_flex(fstream *streamOut, const uint64 iRead, const int32 featureType, SoloReadBarcode &soloBar,
+                                    const ReadSoloFeatures &reFe, const ReadAnnotations &readAnnot, const SoloReadFlagClass &readFlag,
+                                    SoloReadFeature *soloReadFeat);
     friend const ProbeListIndex* getGlobalProbeIndex(const SoloReadFeature* rf);
     const int32 featureType;
 

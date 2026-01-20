@@ -1,0 +1,344 @@
+#!/usr/bin/env python3
+import argparse
+import csv
+import io
+import os
+import gzip
+import subprocess
+import sys
+
+
+def parse_multi_config(path):
+    sections = {}
+    current = None
+    buf = []
+    with open(path, "r", encoding="utf-8") as handle:
+        for raw in handle:
+            line = raw.strip()
+            if not line or line.startswith(("#", ";")):
+                continue
+            if line.startswith("[") and line.endswith("]"):
+                if current:
+                    sections[current] = buf
+                current = line[1:-1].strip().lower()
+                buf = []
+                continue
+            if current is None:
+                raise ValueError(f"line outside section: {raw.rstrip()}")
+            buf.append(line)
+    if current:
+        sections[current] = buf
+
+    config = {}
+    for section, lines in sections.items():
+        if section == "libraries":
+            reader = csv.reader(io.StringIO("\n".join(lines)))
+            try:
+                header = next(reader)
+            except StopIteration:
+                raise ValueError("libraries section is empty")
+            header_norm = [h.strip().lower() for h in header]
+            entries = []
+            for row in reader:
+                if not row:
+                    continue
+                entry = {}
+                for idx, key in enumerate(header_norm):
+                    if idx < len(row):
+                        entry[key] = row[idx].strip()
+                entries.append(entry)
+            config["libraries"] = entries
+        else:
+            kv = {}
+            for line in lines:
+                if "," not in line:
+                    raise ValueError(f"invalid entry in [{section}]: {line}")
+                key, value = line.split(",", 1)
+                kv[key.strip().lower()] = value.strip()
+            config[section] = kv
+    return config
+
+
+def normalize_feature_type(value):
+    return value.strip().lower()
+
+
+def classify_libraries(entries):
+    gex = []
+    features = []
+    for entry in entries:
+        ftype = normalize_feature_type(entry.get("feature_types", ""))
+        if "gene expression" in ftype:
+            gex.append(entry)
+        elif "crispr" in ftype:
+            features.append(entry)
+        else:
+            features.append(entry)
+    return gex, features
+
+
+def resolve_fastq_dir(path, fastq_root, fastq_map):
+    if path in fastq_map:
+        return fastq_map[path]
+    if os.path.isdir(path):
+        return path
+    if fastq_root:
+        candidate = os.path.join(fastq_root, os.path.basename(path.rstrip("/")))
+        if os.path.isdir(candidate):
+            return candidate
+    return path
+
+
+def read_lines(path):
+    opener = gzip.open if path.endswith(".gz") else open
+    with opener(path, "rt", encoding="utf-8") as handle:
+        return [line.rstrip("\n") for line in handle]
+
+
+def read_mtx(path):
+    entries = []
+    opener = gzip.open if path.endswith(".gz") else open
+    with opener(path, "rt", encoding="utf-8") as handle:
+        header = handle.readline().strip()
+        if not header.startswith("%%MatrixMarket"):
+            raise ValueError(f"invalid MatrixMarket header: {header}")
+        line = handle.readline().strip()
+        while line.startswith("%"):
+            line = handle.readline().strip()
+        if not line:
+            raise ValueError("missing matrix dimensions")
+        nrows, ncols, nnz = [int(x) for x in line.split()]
+        for raw in handle:
+            raw = raw.strip()
+            if not raw:
+                continue
+            parts = raw.split()
+            if len(parts) < 3:
+                continue
+            row = int(parts[0])
+            col = int(parts[1])
+            val = int(float(parts[2]))
+            entries.append((row, col, val))
+    return nrows, ncols, nnz, entries
+
+
+def resolve_mex_file(mex_dir, basename):
+    plain = os.path.join(mex_dir, basename)
+    gz = plain + ".gz"
+    if os.path.exists(plain):
+        return plain
+    if os.path.exists(gz):
+        return gz
+    raise ValueError(f"missing {basename}(.gz) in {mex_dir}")
+
+
+def find_assign_output(assign_out):
+    if os.path.isdir(assign_out):
+        try:
+            resolve_mex_file(assign_out, "matrix.mtx")
+            return assign_out
+        except ValueError:
+            pass
+        subdirs = [os.path.join(assign_out, d) for d in os.listdir(assign_out)]
+        subdirs = [d for d in subdirs if os.path.isdir(d)]
+        for subdir in subdirs:
+            try:
+                resolve_mex_file(subdir, "matrix.mtx")
+                return subdir
+            except ValueError:
+                continue
+    raise ValueError(f"no assignBarcodes outputs found in {assign_out}")
+
+
+def write_mtx(path, nrows, ncols, entries):
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write("%%MatrixMarket matrix coordinate integer general\n")
+        handle.write("% Generated by cr_multi.py\n")
+        handle.write(f"{nrows} {ncols} {len(entries)}\n")
+        for row, col, val in entries:
+            handle.write(f"{row} {col} {val}\n")
+
+
+def filter_mex_by_feature_type(mex_dir, feature_type, out_dir):
+    features = read_lines(resolve_mex_file(mex_dir, "features.tsv"))
+    barcodes = read_lines(resolve_mex_file(mex_dir, "barcodes.tsv"))
+    nrows, ncols, _, entries = read_mtx(resolve_mex_file(mex_dir, "matrix.mtx"))
+    if nrows != len(features):
+        raise ValueError("features.tsv row count does not match matrix")
+    if ncols != len(barcodes):
+        raise ValueError("barcodes.tsv col count does not match matrix")
+
+    keep_rows = []
+    row_map = {}
+    for idx, line in enumerate(features, start=1):
+        parts = line.split("\t")
+        ftype = parts[2] if len(parts) > 2 else ""
+        if ftype == feature_type:
+            row_map[idx] = len(keep_rows) + 1
+            keep_rows.append(line)
+
+    filtered_entries = []
+    for row, col, val in entries:
+        new_row = row_map.get(row)
+        if new_row is None:
+            continue
+        filtered_entries.append((new_row, col, val))
+
+    os.makedirs(out_dir, exist_ok=True)
+    write_mtx(os.path.join(out_dir, "matrix.mtx"), len(keep_rows), len(barcodes), filtered_entries)
+    with open(os.path.join(out_dir, "features.tsv"), "w", encoding="utf-8") as handle:
+        handle.write("\n".join(keep_rows) + "\n")
+    with open(os.path.join(out_dir, "barcodes.tsv"), "w", encoding="utf-8") as handle:
+        handle.write("\n".join(barcodes) + "\n")
+    return out_dir
+
+
+def merge_mex(gex_dir, feature_dir, out_dir):
+    gex_features = read_lines(resolve_mex_file(gex_dir, "features.tsv"))
+    gex_barcodes = read_lines(resolve_mex_file(gex_dir, "barcodes.tsv"))
+    gex_nrows, gex_ncols, _, gex_entries = read_mtx(resolve_mex_file(gex_dir, "matrix.mtx"))
+    if gex_nrows != len(gex_features):
+        raise ValueError("GEX features.tsv row count does not match matrix")
+    if gex_ncols != len(gex_barcodes):
+        raise ValueError("GEX barcodes.tsv col count does not match matrix")
+
+    feat_features = read_lines(resolve_mex_file(feature_dir, "features.tsv"))
+    feat_barcodes = read_lines(resolve_mex_file(feature_dir, "barcodes.tsv"))
+    feat_nrows, feat_ncols, _, feat_entries = read_mtx(resolve_mex_file(feature_dir, "matrix.mtx"))
+    if feat_nrows != len(feat_features):
+        raise ValueError("Feature features.tsv row count does not match matrix")
+    if feat_ncols != len(feat_barcodes):
+        raise ValueError("Feature barcodes.tsv col count does not match matrix")
+
+    barcode_map = {bc: idx + 1 for idx, bc in enumerate(gex_barcodes)}
+    missing = 0
+    merged_entries = list(gex_entries)
+    row_offset = len(gex_features)
+    for row, col, val in feat_entries:
+        bc = feat_barcodes[col - 1]
+        new_col = barcode_map.get(bc)
+        if new_col is None:
+            missing += 1
+            continue
+        merged_entries.append((row_offset + row, new_col, val))
+
+    if missing:
+        print(f"WARNING: {missing} feature entries dropped (barcode not in GEX)", file=sys.stderr)
+
+    os.makedirs(out_dir, exist_ok=True)
+    combined_features = gex_features + feat_features
+    write_mtx(os.path.join(out_dir, "matrix.mtx"), len(combined_features), len(gex_barcodes), merged_entries)
+    with open(os.path.join(out_dir, "features.tsv"), "w", encoding="utf-8") as handle:
+        handle.write("\n".join(combined_features) + "\n")
+    with open(os.path.join(out_dir, "barcodes.tsv"), "w", encoding="utf-8") as handle:
+        handle.write("\n".join(gex_barcodes) + "\n")
+
+
+def run_assign(assign_bin, whitelist, feature_ref, fastq_dir, assign_out):
+    if not os.path.isdir(fastq_dir):
+        raise ValueError(f"fastq directory not found: {fastq_dir}")
+    os.makedirs(assign_out, exist_ok=True)
+    cmd = [
+        assign_bin,
+        "--whitelist",
+        whitelist,
+        "--featurelist",
+        feature_ref,
+        "--directory",
+        assign_out,
+        fastq_dir,
+    ]
+    return cmd
+
+
+def run_cmd(cmd):
+    print("Running:", " ".join(cmd))
+    subprocess.run(cmd, check=True)
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Run feature barcode pipeline from Cell Ranger multi config.")
+    parser.add_argument("--multi-config", required=True, help="Cell Ranger multi config CSV")
+    parser.add_argument("--fastq-root", help="Fallback root for fastq directories")
+    parser.add_argument("--fastq-map", action="append", default=[], help="Map config fastq path to actual path")
+    parser.add_argument("--feature-ref", help="Override feature reference CSV")
+    parser.add_argument("--whitelist", help="Cell barcode whitelist for assignBarcodes")
+    parser.add_argument("--assign-barcodes", default="core/features/feature_barcodes/assignBarcodes")
+    parser.add_argument(
+        "--mex-stub",
+        default="tools/feature_barcodes/assignbarcodes_mex_stub.py",
+        help="assignBarcodes MEX stub helper",
+    )
+    parser.add_argument("--assign-out", help="assignBarcodes output directory")
+    parser.add_argument("--gex-mex", help="GEX MEX directory (matrix.mtx/features.tsv/barcodes.tsv)")
+    parser.add_argument("--gex-filter-type", default="", help="Filter GEX MEX to feature type")
+    parser.add_argument("--outdir", required=True, help="Output directory for combined MEX")
+    parser.add_argument("--skip-assign", action="store_true", help="Skip assignBarcodes execution")
+    args = parser.parse_args()
+
+    multi = parse_multi_config(args.multi_config)
+    libs = multi.get("libraries", [])
+    if not libs:
+        raise ValueError("no libraries found in multi config")
+
+    fastq_map = {}
+    for item in args.fastq_map:
+        if "=" not in item:
+            raise ValueError(f"invalid --fastq-map entry: {item}")
+        key, value = item.split("=", 1)
+        fastq_map[key] = value
+
+    gex_libs, feature_libs = classify_libraries(libs)
+    if not gex_libs:
+        raise ValueError("no Gene Expression libraries found")
+    if not feature_libs:
+        raise ValueError("no feature libraries found")
+
+    feature_ref = args.feature_ref
+    if not feature_ref:
+        feature_ref = multi.get("feature", {}).get("ref")
+    if not feature_ref:
+        raise ValueError("feature reference not provided")
+
+    feature_lib = feature_libs[0]
+    feature_fastqs = resolve_fastq_dir(feature_lib.get("fastqs", ""), args.fastq_root, fastq_map)
+    if not os.path.isdir(feature_fastqs):
+        raise ValueError(f"feature fastq directory not found: {feature_fastqs}")
+
+    assign_out = args.assign_out or os.path.join(args.outdir, "assign")
+    if not args.skip_assign:
+        if not args.whitelist:
+            raise ValueError("--whitelist is required to run assignBarcodes")
+        cmd = run_assign(args.assign_barcodes, args.whitelist, feature_ref, feature_fastqs, assign_out)
+        run_cmd(cmd)
+    else:
+        print("Skipping assignBarcodes; using existing outputs.")
+
+    assign_real = find_assign_output(assign_out)
+    mex_stub = args.mex_stub
+    if not os.path.exists(os.path.join(assign_real, "features.tsv")):
+        cmd = [sys.executable, mex_stub, "--assign-out", assign_real, "--feature-csv", feature_ref]
+        run_cmd(cmd)
+
+    feature_mex_dir = assign_real
+    gex_mex_dir = args.gex_mex
+    if not gex_mex_dir:
+        print("No GEX MEX provided; feature MEX available at:", feature_mex_dir)
+        return
+
+    if args.gex_filter_type:
+        gex_mex_dir = filter_mex_by_feature_type(
+            gex_mex_dir, args.gex_filter_type, os.path.join(args.outdir, "gex_filtered")
+        )
+
+    merge_out = os.path.join(args.outdir, "combined_mex")
+    merge_mex(gex_mex_dir, feature_mex_dir, merge_out)
+    print("Combined MEX written to:", merge_out)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        sys.exit(1)
