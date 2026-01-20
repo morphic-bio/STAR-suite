@@ -8,7 +8,8 @@
 set -e
 
 # Default paths (adjust for your environment)
-STAR_BIN=${1:-/mnt/pikachu/STAR-suite/core/legacy/source/STAR}
+# Use STAR_BIN env var if set, otherwise use first arg or default
+STAR_BIN=${STAR_BIN:-${1:-/mnt/pikachu/STAR-suite/core/legacy/source/STAR}}
 GENOME_DIR=${2:-/tmp/star_vb_test/star_new_index}
 READS_1=${3:-/mnt/pikachu/test-datasets-rnaseq/testdata/GSE110004/SRR6357070_1.fastq.gz}
 READS_2=${4:-/mnt/pikachu/test-datasets-rnaseq/testdata/GSE110004/SRR6357070_2.fastq.gz}

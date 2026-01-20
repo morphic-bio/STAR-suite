@@ -2,11 +2,21 @@
 # Test script for inline hash mode using --flexEnable yes
 # This tests the basic inline hash mechanism without sample tags
 
-set -e
+set -euo pipefail
 
-STAR_BIN="/mnt/pikachu/STAR-suite/core/legacy/source/STAR"
-OUT_DIR="/mnt/pikachu/STAR-suite/tests/flex_inline_test_output"
-TMP_DIR="/storage/100K/tmp/flex_inline_test"
+STAR_BIN="${STAR_BIN:-/mnt/pikachu/STAR-suite/core/legacy/source/STAR}"
+OUT_DIR="${OUT_DIR:-/mnt/pikachu/STAR-suite/tests/flex_inline_test_output}"
+TMP_DIR="${TMP_DIR:-${FLEX_INLINE_TMP_DIR:-/storage/100K/tmp/flex_inline_test}}"
+FLEX_INDEX="${FLEX_INDEX:-/storage/flex_filtered_reference/star_index}"
+FLEX_WHITELIST="${FLEX_WHITELIST:-/storage/scRNAseq_output/whitelists/737K-fixed-rna-profiling.txt}"
+FLEX_PROBE_LIST="${FLEX_PROBE_LIST:-/storage/flex_filtered_reference/filtered_reference/probe_list.txt}"
+FLEX_FASTQ_R2="${FLEX_FASTQ_R2:-/storage/downsampled_100K/SC2300771/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L001_R2_001.fastq.gz}"
+FLEX_FASTQ_R1="${FLEX_FASTQ_R1:-/storage/downsampled_100K/SC2300771/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L001_R1_001.fastq.gz}"
+
+skip() {
+  echo "SKIP: $*"
+  exit 0
+}
 
 # Clean up previous run
 rm -rf "$OUT_DIR"
@@ -18,15 +28,24 @@ echo "Binary: $STAR_BIN"
 echo "Output: $OUT_DIR"
 echo ""
 
+# Preflight checks
+[[ -x "$STAR_BIN" ]] || skip "STAR binary not found: $STAR_BIN"
+[[ -d "$FLEX_INDEX" ]] || skip "STAR index not found: $FLEX_INDEX"
+[[ -f "$FLEX_WHITELIST" ]] || skip "Whitelist not found: $FLEX_WHITELIST"
+[[ -f "$FLEX_PROBE_LIST" ]] || skip "Probe list not found: $FLEX_PROBE_LIST"
+[[ -f "$FLEX_FASTQ_R1" ]] || skip "FASTQ not found: $FLEX_FASTQ_R1"
+[[ -f "$FLEX_FASTQ_R2" ]] || skip "FASTQ not found: $FLEX_FASTQ_R2"
+
 # Run with just 2 threads and 1 lane for faster testing
 "$STAR_BIN" \
   --runThreadN 4 \
   --outTmpDir "$TMP_DIR" \
-  --genomeDir /storage/flex_filtered_reference/star_index \
+  --genomeDir "$FLEX_INDEX" \
   --soloType CB_UMI_Simple \
   --soloCBlen 16 --soloUMIlen 12 --soloUMIstart 17 --soloCBstart 1 --soloBarcodeReadLength 0 \
-  --soloCBwhitelist /storage/scRNAseq_output/whitelists/737K-fixed-rna-profiling.txt \
+  --soloCBwhitelist "$FLEX_WHITELIST" \
   --flex yes \
+  --soloProbeList "$FLEX_PROBE_LIST" \
   --soloFlexExpectedCellsPerTag 3000 \
   --limitIObufferSize 50000000 50000000 \
   --outSJtype None \
@@ -57,8 +76,8 @@ echo ""
   --outSAMtype BAM Unsorted \
   --readFilesCommand zcat \
   --readFilesIn \
-    /storage/downsampled_100K/SC2300771/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L001_R2_001.fastq.gz \
-    /storage/downsampled_100K/SC2300771/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L001_R1_001.fastq.gz \
+    "$FLEX_FASTQ_R2" \
+    "$FLEX_FASTQ_R1" \
   --outFileNamePrefix "$OUT_DIR/"
 
 echo ""
@@ -99,4 +118,3 @@ grep -i "inline\|hash\|flex\|direct hash\|inline-hash" "$OUT_DIR/Log.out" | head
 
 echo ""
 echo "✓ Test PASSED: Inline hash mode executed correctly (no MEX output expected)"
-

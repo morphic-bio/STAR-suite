@@ -12,6 +12,7 @@
 #include "streamFuns.h"
 #include <fstream>
 #include <cctype>
+#include <unordered_set>
 
 // Define global atomic counter for processed read groups (matches Salmon's processedReads)
 // Used for pre-burn-in gating: aux params are enabled when this count >= numPreBurninFrags (5000)
@@ -94,6 +95,7 @@ string adjustCompressionExt(const string& name, const string& compression) {
 Parameters::Parameters() {//initalize parameters info
 
     inOut = new InOutStreams;
+    ownsParInfo_ = true;  // Primary instance owns the parameter registry
 
     //versions
     parArray.push_back(new ParameterInfoScalar <string> (-1, -1, "versionGenome", &versionGenome));
@@ -2422,3 +2424,63 @@ int Parameters::scanOneLine (string &lineIn, int inputLevel, int inputLevelReque
     };
     return 0;
 };
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Copy constructor: compiler-generated (memberwise copy).
+// Copies are non-owning and must call disownParInfoRegistry() after construction.
+// This avoids brittleness of manual field-by-field copying and automatically handles
+// all members including arrays and complex types like pSolo (with reference members).
+//
+// WARNING: Copies have empty registries. Any code that attempts to use parameter parsing
+// (inputParameters, scanOneLine, scanAllLines) on a copy will fail silently or crash.
+// This is intentional: copies are value-only and must not use the registry.
+//
+// Note: Assignment operator is = delete in header to prevent accidental assignment.
+// (Copy constructor is compiler-generated, so no implementation needed here)
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Helper method to mark a copy as non-owning and clear its registry.
+// Must be called immediately after copy construction at the copy site.
+// This prevents accidental use of the registry in copies (registry pointers point
+// into the original instance's member fields).
+void Parameters::disownParInfoRegistry() {
+    ownsParInfo_ = false;
+    parArray.clear();
+    parArrayInitial.clear();
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Cleanup method for parameter registry (parArray/parArrayInitial).
+// Only the primary instance should call this; copies are non-owning and will return early.
+// This is idempotent (safe to call multiple times).
+void Parameters::cleanupParInfoForExit() {
+    if (!ownsParInfo_) {
+        return;  // Copy instance - do not free registry
+    }
+    
+    // De-duplicate pointers across parArray and parArrayInitial
+    // (defensive: in case the same pointer appears in both)
+    std::unordered_set<ParameterInfoBase*> seen;
+    seen.reserve(parArray.size() + parArrayInitial.size());
+    
+    for (auto* p : parArray) {
+        if (p != nullptr) {
+            seen.insert(p);
+        }
+    }
+    for (auto* p : parArrayInitial) {
+        if (p != nullptr) {
+            seen.insert(p);
+        }
+    }
+    
+    // Delete each unique ParameterInfo* allocation
+    for (auto* p : seen) {
+        delete p;
+    }
+    
+    // Clear vectors and mark as non-owning (idempotent)
+    parArray.clear();
+    parArrayInitial.clear();
+    ownsParInfo_ = false;
+}

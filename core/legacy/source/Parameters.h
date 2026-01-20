@@ -582,7 +582,16 @@ class Parameters {
 
     uint Lread;
 
+    // Ownership flag for parameter registry (parArray/parArrayInitial).
+    // Only the primary Parameters instance owns and should free these allocations.
+    // Copies (via copy constructor/assignment) are marked as non-owning and must not use the registry.
+    bool ownsParInfo_;
+
     Parameters();
+    Parameters(const Parameters& other) = default;  // Copy constructor: compiler-generated, copies are non-owning
+    Parameters& operator=(const Parameters& other) = delete;  // Assignment disabled: prevents foot-gun of losing registry state
+    void disownParInfoRegistry();  // Helper: clears registry in copies (call after copy construction)
+    void cleanupParInfoForExit();  // Cleanup parameter registry (idempotent, only primary instance)
     int readParsFromFile(ifstream*, ofstream*, int); //read parameters from one file
     int readPars(); // read parameters from all files
     int scanOneLine (string &lineIn, int inputLevel, int inputLevelRequested);

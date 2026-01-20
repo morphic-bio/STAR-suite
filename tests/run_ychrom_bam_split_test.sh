@@ -5,7 +5,7 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-STAR_BIN="${SCRIPT_DIR}/../core/legacy/source/STAR"
+STAR_BIN="${STAR_BIN:-${SCRIPT_DIR}/../core/legacy/source/STAR}"
 TEST_DIR="${SCRIPT_DIR}/ychrom_test"
 REF_DIR="${TEST_DIR}/ref"
 FASTQ_DIR="${TEST_DIR}/fastq"

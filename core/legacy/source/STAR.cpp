@@ -240,6 +240,7 @@ int main(int argInN, char *argIn[])
         sysRemoveDir(P.outFileTmp);
         P.inOut->logMain << "DONE: Genome generation, EXITING\n"
                          << flush;
+        P.cleanupParInfoForExit();
         exit(0);
     }
     else if (P.runMode == "liftOver")
@@ -250,6 +251,7 @@ int main(int argInN, char *argIn[])
             chain.liftOverGTF(P.pGe.sjdbGTFfile, P.outFileNamePrefix + "GTFliftOver_" + to_string(ii + 1) + ".gtf");
             P.inOut->logMain << "DONE: lift-over of GTF file, EXITING\n"
                              << flush;
+            P.cleanupParInfoForExit();
             exit(0);
         };
     }
@@ -257,6 +259,7 @@ int main(int argInN, char *argIn[])
     {
         P.inOut->logMain << "EXITING because of INPUT ERROR: unknown value of input parameter runMode=" << P.runMode << endl
                          << flush;
+        P.cleanupParInfoForExit();
         exit(1);
     };
 
@@ -378,6 +381,7 @@ int main(int argInN, char *argIn[])
             if (P.quant.slamSnpMask.buildOnly) {
                 P.inOut->logMain << "Exiting after mask build (--slamSnpMaskOnly)\n" << flush;
                 sysRemoveDir(P.outFileTmp);
+                P.cleanupParInfoForExit();
                 exit(0);
             }
 
@@ -546,6 +550,7 @@ int main(int argInN, char *argIn[])
             if (P.quant.slamSnpMask.buildOnly) {
                 P.inOut->logMain << "Exiting after mask build (--slamSnpMaskOnly)\n" << flush;
                 sysRemoveDir(P.outFileTmp);
+                P.cleanupParInfoForExit();
                 exit(0);
             }
             
@@ -1979,6 +1984,9 @@ int main(int argInN, char *argIn[])
         delete g_samtoolsSorter;
         g_samtoolsSorter = nullptr;
     }
+
+    // Cleanup parameter registry (only primary instance owns it)
+    P.cleanupParInfoForExit();
 
     delete P.inOut; // to close files
 

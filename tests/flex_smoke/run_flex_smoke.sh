@@ -8,7 +8,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 SOURCE_DIR="$PROJECT_ROOT/core/legacy/source"
 OUT_DIR="$SCRIPT_DIR/output"
-FIXTURE_DIR="$PROJECT_ROOT/reference/tests/100K"
+FIXTURE_DIR="${FLEX_FIXTURE_ROOT:-$PROJECT_ROOT/reference/tests/100K}"
 
 # Colors for output
 RED='\033[0;31m'
@@ -26,44 +26,33 @@ echo "Source dir: $SOURCE_DIR"
 echo "Fixture dir: $FIXTURE_DIR"
 echo ""
 
-# Test 1: Build STAR
-echo "=== Test 1: Build STAR with flex integration ==="
-cd "$SOURCE_DIR"
-make clean 2>/dev/null || true
-if [[ ! -f "$SOURCE_DIR/parametersDefault.xxd" ]] && [[ -f "$PROJECT_ROOT/flex/source/parametersDefault.xxd" ]]; then
-    cp "$PROJECT_ROOT/flex/source/parametersDefault.xxd" "$SOURCE_DIR/parametersDefault.xxd"
+# Test 1: Verify STAR exists (don't rebuild - runner handles that)
+echo "=== Test 1: Verify STAR binary ==="
+STAR_BIN="${STAR_BIN:-$SOURCE_DIR/STAR}"
+if [[ ! -f "$STAR_BIN" ]]; then
+    fail "STAR binary not found at $STAR_BIN (should be built by test runner)"
 fi
-if make -j$(nproc) 2>&1; then
-    pass "STAR built successfully"
-else
-    fail "STAR build failed"
-fi
-
-# Verify STAR binary exists
-if [[ ! -f "$SOURCE_DIR/STAR" ]]; then
-    fail "STAR binary not found after build"
-fi
-pass "STAR binary exists"
+pass "STAR binary exists at $STAR_BIN"
 
 # Test 2: STAR accepts --flex flag
 echo ""
 echo "=== Test 2: STAR accepts --flex flag ==="
 # Accept numeric version output as success
-if "$SOURCE_DIR/STAR" --version >/dev/null 2>&1; then
+if "$STAR_BIN" --version >/dev/null 2>&1; then
     pass "STAR --version works"
 else
     fail "STAR --version failed"
 fi
 
 # Test --flex (flex pipeline toggle) is recognized (should not error on unrecognized parameter)
-if "$SOURCE_DIR/STAR" --genomeDir /nonexistent --flex yes 2>&1 | grep -qi "unrecognized parameter name.*flex"; then
+if "$STAR_BIN" --genomeDir /nonexistent --flex yes 2>&1 | grep -qi "unrecognized parameter name.*flex"; then
     fail "--flex flag not recognized"
 else
     pass "--flex flag is recognized (no fatal error about unknown parameter)"
 fi
 
 # Test sample detection flags are recognized
-if "$SOURCE_DIR/STAR" --genomeDir /nonexistent --soloSampleProbeOffset 68 2>&1 | grep -qi "fatal.*soloSampleProbeOffset"; then
+if "$STAR_BIN" --genomeDir /nonexistent --soloSampleProbeOffset 68 2>&1 | grep -qi "fatal.*soloSampleProbeOffset"; then
     fail "--soloSampleProbeOffset flag not recognized"
 else
     pass "--soloSampleProbeOffset flag is recognized"
@@ -73,7 +62,7 @@ fi
 echo ""
 echo "=== Test 3: Default behavior verification ==="
 # Just verify STAR doesn't crash on normal parameter parsing
-if "$SOURCE_DIR/STAR" --version >/dev/null 2>&1; then
+if "$STAR_BIN" --version >/dev/null 2>&1; then
     pass "Default behavior intact"
 else
     fail "Default behavior broken"
@@ -91,7 +80,7 @@ if [[ -d "$FIXTURE_DIR/genome" ]] && [[ -d "$FIXTURE_DIR/SC2300771" ]]; then
     
     # Test 4a: Run with flex disabled (default)
     echo "Running STAR with flex disabled (default)..."
-    if "$SOURCE_DIR/STAR" \
+    if "$STAR_BIN" \
         --genomeDir "$FIXTURE_DIR/genome" \
         --readFilesIn "$FIXTURE_DIR/SC2300771/reads_R2.fastq" "$FIXTURE_DIR/SC2300771/reads_R1.fastq" \
         --outFileNamePrefix "$OUT_DIR/flex_off/" \
@@ -118,7 +107,7 @@ if [[ -d "$FIXTURE_DIR/genome" ]] && [[ -d "$FIXTURE_DIR/SC2300771" ]]; then
     # Test 4b: Run with flex enabled
     echo ""
     echo "Running STAR with flex enabled..."
-    if "$SOURCE_DIR/STAR" \
+    if "$STAR_BIN" \
         --genomeDir "$FIXTURE_DIR/genome" \
         --readFilesIn "$FIXTURE_DIR/SC2300771/reads_R2.fastq" "$FIXTURE_DIR/SC2300771/reads_R1.fastq" \
         --outFileNamePrefix "$OUT_DIR/flex_on/" \

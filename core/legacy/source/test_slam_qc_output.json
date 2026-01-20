@@ -1,0 +1,24 @@
+{
+  "version": "2.0",
+  "type": "comprehensive_qc",
+  "trim5p": 2,
+  "trim3p": 3,
+  "segmented_regression": null,
+  "positions": [
+    {
+      "position": 1,
+      "star_tc_cov": 2.00,
+      "star_tc_mm": 2.00,
+      "star_tc_rate": 100.000000,
+      "star_tc_stdev": 0.000000,
+      "star_ta_cov": 2.00,
+      "star_ta_mm": 0.00,
+      "star_ta_rate": 0.000000,
+      "mean_qual": 30.00,
+      "stddev_qual": 0.00,
+      "t_count": 2,
+      "mean_tc_rate": 0.500000,
+      "stddev_tc_rate": 0.500000
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 # Y/NoY Split Regression Test Report
 
-Generated: Wed Dec 24 06:32:30 AM UTC 2025
+Generated: Tue Jan 20 10:09:11 PM UTC 2026
 
 ## Overview
 
@@ -12,7 +12,7 @@ This report validates that STAR-Flex baseline behavior matches upstream STAR Sol
 
 ### Configuration
 
-- STAR-Flex Binary: `/mnt/pikachu/STAR-Flex/tests/../source/STAR`
+- STAR-Flex Binary: `/mnt/pikachu/STAR-suite/core/legacy/source/STAR.release`
 - STAR Solo Binary: `/usr/local/bin/STAR`
 - Dataset: `/storage/PE/downsampled/21033-09-01-13-01_S1_L007_R1_001.fastq.gz`
 - Reference: `/storage/flex_filtered_reference/star_index`
@@ -50,29 +50,14 @@ This report validates that STAR-Flex baseline behavior matches upstream STAR Sol
 
 ---
 
-## Test 2: Flex Regression (Previous vs Current)
+## Test 2: Flex Regression - BASELINE CREATED
 
-### Configuration
+Previous artifacts not found. Created new baseline at `/tmp/ychrom_flex_test_current`:
 
-- Previous artifacts: `/tmp/ychrom_flex_test`
-- Current run: `/tmp/ychrom_flex_test_current`
-- Dataset: `/storage/downsampled/SC2300771`
+- Y reads: 499
+- noY reads: 150790
 
-### Results
-
-| Metric | Previous | Current | Match |
-|--------|----------|---------|-------|
-| Y reads | 499 | 499 | ✓ |
-| noY reads | 150790 | 150790 | ✓ |
-| Y idxstats | - | - | ✓ |
-| noY idxstats | - | - | ✓ |
-
-### Conclusion
-
-- Y read counts: PASS
-- noY read counts: PASS
-- Y idxstats: PASS
-- noY idxstats: PASS
+Future runs will compare against this baseline.
 
 
 ---
@@ -81,8 +66,8 @@ This report validates that STAR-Flex baseline behavior matches upstream STAR Sol
 
 - Bulk RNA-seq regression checks passed: `4`
 - Bulk RNA-seq regression checks failed: `0`
-- Flex regression checks passed: `4`
+- Flex regression checks passed: `0`
 - Flex regression checks failed: `0`
-- **Total passed: `8`**
+- **Total passed: `4`**
 - **Total failed: `0`**
 

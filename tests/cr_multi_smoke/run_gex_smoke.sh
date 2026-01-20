@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="/storage/A375"
-FASTQ_ROOT="${ROOT}/fastqs/1k_CRISPR_5p_gemx_fastqs"
-GEX_DIR="${FASTQ_ROOT}/gex"
+ROOT="${CR_MULTI_ROOT:-/storage/A375}"
+FASTQ_ROOT="${CR_MULTI_FASTQ_ROOT:-${ROOT}/fastqs/1k_CRISPR_5p_gemx_fastqs}"
+GEX_DIR="${CR_MULTI_GEX_DIR:-${FASTQ_ROOT}/gex}"
 NREADS="10000"
-DOWN_SCRIPT="/mnt/pikachu/process_features/scripts/downsample_fastq_directory.sh"
+DOWN_SCRIPT="${CR_MULTI_DOWNSAMPLE_SCRIPT:-/mnt/pikachu/process_features/scripts/downsample_fastq_directory.sh}"
 
-WHITELIST_GZ="/home/lhhung/cellranger-9.0.1/lib/python/cellranger/barcodes/3M-5pgex-jan-2023.txt.gz"
-WHITELIST="${ROOT}/3M-5pgex-jan-2023.txt"
+WHITELIST_GZ="${CR_MULTI_WHITELIST_GZ:-/home/lhhung/cellranger-9.0.1/lib/python/cellranger/barcodes/3M-5pgex-jan-2023.txt.gz}"
+WHITELIST="${CR_MULTI_WHITELIST:-${ROOT}/3M-5pgex-jan-2023.txt}"
 GENOME_DIR="${CR_GENOME_DIR:-/storage/autoindex_110_44/bulk_index}"
 
-STAR_BIN="/mnt/pikachu/STAR-suite/core/legacy/source/STAR"
-OUTPREFIX="${ROOT}/star_gex_smoke/"
+STAR_BIN="${STAR_BIN:-/mnt/pikachu/STAR-suite/core/legacy/source/STAR}"
+OUTPREFIX="${CR_MULTI_GEX_OUTPREFIX:-${ROOT}/star_gex_smoke/}"
 
 if [[ ! -x "${DOWN_SCRIPT}" ]]; then
   echo "Missing downsample script: ${DOWN_SCRIPT}" >&2

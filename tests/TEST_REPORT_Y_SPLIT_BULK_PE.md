@@ -1,10 +1,10 @@
 # Bulk Paired-End Y/NoY Split Validation Test Report
 
-Generated: Wed Dec 24 06:32:30 AM UTC 2025
+Generated: Tue Jan 20 10:09:11 PM UTC 2026
 
 ## Test Configuration
 
-- STAR Binary: `/mnt/pikachu/STAR-Flex/tests/../source/STAR`
+- STAR Binary: `/mnt/pikachu/STAR-suite/core/legacy/source/STAR.release`
 - Dataset: `/storage/PE/downsampled/21033-09-01-13-01_S1_L007_R1_001.fastq.gz`, `/storage/PE/downsampled/21033-09-01-13-01_S1_L007_R2_001.fastq.gz`
 - Reference: `/storage/flex_filtered_reference/star_index`
 - Base Directory: `/tmp/ychrom_bulk_pe_test`

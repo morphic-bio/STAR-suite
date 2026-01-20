@@ -15,6 +15,7 @@ void twoPassRunPass1(Parameters &P, Genome &genomeMain, Transcriptome *transcrip
     Genome genomeMain1=genomeMain;
 
     Parameters P1=P;
+    P1.disownParInfoRegistry();  // Mark copy as non-owning (registry pointers point into P)
     //turn off unnecessary calculations
     P1.outSAMtype[0]="None";
     P1.outSAMbool=false;

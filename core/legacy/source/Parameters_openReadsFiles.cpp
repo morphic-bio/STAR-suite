@@ -4,6 +4,24 @@
 #include <sys/stat.h>
 void Parameters::openReadsFiles() 
 {
+    // Check number of mates BEFORE opening files
+    // Use readNends if available (set during readFilesInit), otherwise count readFilesIn
+    uint readFilesNmates = readNends;
+    if (readFilesNmates == 0) {
+        // Fallback: count from readFilesIn or readFilesNames
+        readFilesNmates = (readFilesCommandString=="") ? readFilesIn.size() : readFilesNames.size();
+    }
+    if (readFilesNmates > MAX_N_MATES) {
+        ostringstream errOut;
+        errOut << "EXITING: because of fatal INPUT error: number of read mates (" << readFilesNmates
+               << ") exceeds MAX_N_MATES=" << MAX_N_MATES << "\n";
+        errOut << "SOLUTION: --readFilesIn expects 1-3 read mates (R1/R2/optional barcode read). "
+               << "Multiple lanes must be comma-separated per mate, e.g. "
+               << "--readFilesIn R2_L1.fastq,R2_L2.fastq R1_L1.fastq,R1_L2.fastq.\n"
+               << "Do not include index reads (I1/I2) in --readFilesIn.\n";
+        exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+    };
+
     if (readFilesCommandString=="") {//read from file
         for (uint ii=0;ii<readFilesIn.size();ii++) {//open readIn files
             readFilesCommandPID[ii]=0;//no command process IDs
