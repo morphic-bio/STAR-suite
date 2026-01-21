@@ -8,6 +8,8 @@
 #include "UmiCodec.h"
 #include "solo/CbCorrector.h"
 #include "TranscriptQuantEC.h"
+#include <atomic>
+#include <mutex>
 #include <cstring>
 #include <cstdlib>
 // #region agent log
@@ -73,6 +75,41 @@ static inline void agentDbgLog(const char* hypothesisId,
         << "\",\"data\":" << dataJson << ",\"timestamp\":" << agentNowMs() << "}\n";
 }
 // #endregion agent log
+
+static const bool g_debugAmbigResolve =
+    (std::getenv("STAR_DEBUG_AMBIG_CB_RESOLVE") != nullptr);
+static std::atomic<uint64_t> g_debugAmbigCreateCount{0};
+static const uint64_t kMaxAmbigCreateLogs = 50;
+
+static const bool g_dumpAmbigReadNames =
+    (std::getenv("STAR_DUMP_AMBIG_READNAMES") != nullptr);
+static std::once_flag g_ambigReadNamesInit;
+static std::mutex g_ambigReadNamesMutex;
+static std::ofstream g_ambigReadNamesStream;
+static std::string g_ambigReadNamesPath;
+
+static void initAmbigReadNamesStream(const Parameters &P) {
+    const char* envPath = std::getenv("STAR_AMBIG_READNAMES_PATH");
+    if (envPath != nullptr && envPath[0] != '\0') {
+        g_ambigReadNamesPath = envPath;
+    } else {
+        g_ambigReadNamesPath = P.outFileNamePrefix + "ambig_cb_readnames.txt";
+    }
+    g_ambigReadNamesStream.open(g_ambigReadNamesPath.c_str(), std::ios::out | std::ios::trunc);
+    g_ambigReadNamesStream.setf(std::ios::unitbuf);
+}
+
+static void logAmbigReadName(const Parameters &P, const char* rawName) {
+    if (!g_dumpAmbigReadNames || rawName == nullptr) {
+        return;
+    }
+    std::call_once(g_ambigReadNamesInit, [&]() { initAmbigReadNamesStream(P); });
+    if (!g_ambigReadNamesStream.good()) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(g_ambigReadNamesMutex);
+    writeNormalizedQname(g_ambigReadNamesStream, rawName);
+}
 }
 
 void ReadAlign::outputAlignments() {
@@ -397,6 +434,7 @@ void ReadAlign::outputAlignments() {
                 // quality scores, candidate whitelist indices, and UMI counts
                 AmbigKey key = hashCbSeq(readBar->cbSeq);
                 auto &entry = pendingAmbiguous_[key];
+                bool entryWasEmpty = entry.candidateIdx.empty();
                 
                 if (entry.candidateIdx.empty()) {
                     // First time seeing this ambiguous CB: initialize candidates
@@ -419,6 +457,34 @@ void ReadAlign::outputAlignments() {
                 
                 // Accumulate UMI count (24-bit packed UMI -> count)
                 entry.umiCounts[umi24]++;
+
+                // Debug: dump read name for ambiguous CBs so we can reconstruct a minimal FASTQ set.
+                if (g_dumpAmbigReadNames) {
+                    const char* rawName = (readNameMates[0] != nullptr) ? readNameMates[0] : readName;
+                    logAmbigReadName(P, rawName);
+                }
+
+                if (g_debugAmbigResolve) {
+                    bool badSeq = entry.cbSeq.empty() || entry.cbQual.empty() ||
+                                  (entry.cbSeq.size() != entry.cbQual.size());
+                    uint64_t logNo = g_debugAmbigCreateCount.fetch_add(1);
+                    if (logNo < kMaxAmbigCreateLogs || badSeq) {
+                        if (P.inOut && P.inOut->logMain.good()) {
+                            P.inOut->logMain << "[AMBIG-CB-DEBUG] accumulate entry=" << logNo
+                                             << " key=0x" << std::hex << key << std::dec
+                                             << " first=" << (entryWasEmpty ? 1 : 0)
+                                             << " cbSeqLen=" << entry.cbSeq.size()
+                                             << " cbQualLen=" << entry.cbQual.size()
+                                             << " cbSeq=" << entry.cbSeq
+                                             << " cbQual=" << entry.cbQual
+                                             << " umi24=0x" << std::hex << umi24 << std::dec
+                                             << " candidates=" << entry.candidateIdx.size()
+                                             << " umiCounts=" << entry.umiCounts.size()
+                                             << " badSeq=" << badSeq
+                                             << endl;
+                        }
+                    }
+                }
                 
                 // Leave as 0 for now; will be resolved after mapping completes
                 // Store CB sequence for lookup when writing keys

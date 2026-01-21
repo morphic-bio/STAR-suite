@@ -504,12 +504,14 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloCellReadStats",&pSolo.readStats.type));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloCBtype",&pSolo.CBtype.typeString));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloAddTagsToUnsorted",&pSolo.addTagsToUnsortedStr));
+    parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloCbUbRequireTogether",&pSolo.requireCbUbTogetherStr));
     // legacy sidecar flag removed; tag-table export is always enabled via unified writer
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloWriteKeysBin",&pSolo.writeKeysBinStr));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloSkipProcessing",&pSolo.skipProcessingStr));
 
     // CR-compatible keys mode (handoff)
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloKeysCompat", &pSolo.keysCompatStr));
+    parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloCrGexFeature", &pSolo.crGexFeatureStr));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloProbeList", &pSolo.probeListPath));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloRemoveDeprecated", &pSolo.removeDeprecatedStr));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloSampleWhitelist", &pSolo.sampleWhitelistPath));

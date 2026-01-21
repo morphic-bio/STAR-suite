@@ -294,15 +294,44 @@ int processCrMultiConfig(Parameters& P) {
         // Read GEX MEX from STARsolo output (both raw and filtered if available)
         string soloOut = outPrefix + "/Solo.out";
         string geneOut = soloOut + "/Gene";
+        string geneFullOut = soloOut + "/GeneFull";
         string filteredOut = geneOut + "/filtered";
         string rawOut = geneOut + "/raw";
-        
+        string geneFullFiltered = geneFullOut + "/filtered";
+        string geneFullRaw = geneFullOut + "/raw";
+
+        if (P.pSolo.crGexFeature == ParametersSolo::CrGexGeneFull) {
+            rawOut = geneFullRaw;
+            filteredOut = geneFullFiltered;
+            P.inOut->logMain << "NOTICE: --soloCrGexFeature=genefull (using GeneFull MEX for CR-compat merge)\n";
+        } else if (P.pSolo.crGexFeature == ParametersSolo::CrGexGene) {
+            rawOut = geneOut + "/raw";
+            filteredOut = geneOut + "/filtered";
+            P.inOut->logMain << "NOTICE: --soloCrGexFeature=gene (using Gene MEX for CR-compat merge)\n";
+        }
+
         bool hasRaw = (P.pSolo.type != 0 && hasMexFiles(rawOut));
         bool hasFiltered = (P.pSolo.type != 0 && hasMexFiles(filteredOut));
-        
+
         if (!hasRaw && !hasFiltered) {
-            // Fallback to geneOut if it exists
-            if (P.pSolo.type != 0 && hasMexFiles(geneOut)) {
+            if (P.pSolo.crGexFeature == ParametersSolo::CrGexGeneFull) {
+                P.inOut->logMain << "ERROR: GeneFull MEX directory not found for CR-compat merge\n";
+                return 1;
+            }
+            if (P.pSolo.crGexFeature == ParametersSolo::CrGexGene) {
+                P.inOut->logMain << "ERROR: Gene MEX directory not found for CR-compat merge\n";
+                return 1;
+            }
+            // Fallback to GeneFull if Gene is absent (auto mode)
+            bool hasGeneFullRaw = (P.pSolo.type != 0 && hasMexFiles(geneFullRaw));
+            bool hasGeneFullFiltered = (P.pSolo.type != 0 && hasMexFiles(geneFullFiltered));
+            if (hasGeneFullRaw || hasGeneFullFiltered) {
+                rawOut = geneFullRaw;
+                filteredOut = geneFullFiltered;
+                hasRaw = hasGeneFullRaw;
+                hasFiltered = hasGeneFullFiltered;
+                P.inOut->logMain << "NOTICE: Using GeneFull MEX for CR-compat merge (Gene missing)\n";
+            } else if (P.pSolo.type != 0 && hasMexFiles(geneOut)) {
                 hasRaw = true;
                 rawOut = geneOut;
             } else {

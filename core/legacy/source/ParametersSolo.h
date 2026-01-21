@@ -214,6 +214,10 @@ public:
     //two-pass unsorted CB/UB injection
     string addTagsToUnsortedStr;//string parameter input
     bool addTagsToUnsorted;//whether to add CB/UB tags to unsorted BAM via two-pass mode
+
+    // CB/UB injection policy
+    string requireCbUbTogetherStr = "yes"; // yes|no (default yes)
+    bool requireCbUbTogether = true;
     
     //tag table export (always enabled; legacy CLI removed)
     bool writeTagTableEnabled = false;//whether to export CB/UB tags to sidecar table
@@ -228,6 +232,10 @@ public:
     // CR-compatible keys mode (handoff)
     string keysCompatStr = "raw"; // raw|cr
     enum KeysCompat : int32 { KeysRaw=0, KeysCR=1 } keysCompat = KeysRaw;
+
+    // CR-compatible GEX feature selection for merged MEX
+    string crGexFeatureStr = "auto"; // auto|gene|genefull
+    enum CrGexFeature : int32 { CrGexAuto=0, CrGexGene=1, CrGexGeneFull=2 } crGexFeature = CrGexAuto;
 
     // Probe list and sample detection resources
     string probeListPath;             // path to probe_list.txt

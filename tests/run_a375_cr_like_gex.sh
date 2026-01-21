@@ -26,6 +26,7 @@ OUTPREFIX="${A375_CRLIKE_OUTPREFIX:-/tmp/star_gex_cr_like/}"
 THREADS="${A375_THREADS:-4}"
 A375_WRITE_BAM="${A375_WRITE_BAM:-1}"
 SOLO_MULTIMAPPERS="${A375_SOLO_MULTIMAPPERS:-EM}"
+A375_REQUIRE_CBUB_TOGETHER="${A375_REQUIRE_CBUB_TOGETHER:-yes}"
 
 if [[ "${OUTPREFIX}" != */ ]]; then
   OUTPREFIX="${OUTPREFIX}/"
@@ -95,6 +96,7 @@ echo "Running A375 CR-like STARsolo (EM + EmptyDrops_CR)..."
   --soloUMIfiltering MultiGeneUMI_CR \
   --soloUMIdedup 1MM_CR \
   --soloMultiMappers "${SOLO_MULTIMAPPERS}" \
+  --soloCbUbRequireTogether "${A375_REQUIRE_CBUB_TOGETHER}" \
   --soloCellFilter EmptyDrops_CR \
   --soloStrand Unstranded \
   --soloAddTagsToUnsorted no \

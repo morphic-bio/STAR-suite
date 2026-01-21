@@ -7,7 +7,11 @@ GEX_DIR="${CR_MULTI_GEX_DIR:-${FASTQ_ROOT}/gex}"
 CRISPR_DIR="${CR_MULTI_CRISPR_DIR:-${FASTQ_ROOT}/crispr}"
 DOWN_SCRIPT="${CR_MULTI_DOWNSAMPLE_SCRIPT:-/mnt/pikachu/process_features/scripts/downsample_fastq_directory.sh}"
 TIER_SCRIPT="${CR_MULTI_TIER_SCRIPT:-/mnt/pikachu/STAR-suite/scripts/a375_make_downsample_tiers.sh}"
-TIERS=(10000 50000 100000 500000 1000000)
+DEFAULT_TIERS=(10000 50000 100000 500000 1000000)
+TIERS=("${DEFAULT_TIERS[@]}")
+if [[ -n "${CR_MULTI_TIERS:-}" ]]; then
+  IFS=',' read -r -a TIERS <<< "${CR_MULTI_TIERS}"
+fi
 
 FEATURE_REF="${CR_MULTI_FEATURE_REF:-${ROOT}/1k_CRISPR_5p_gemx_Multiplex_count_feature_reference.csv}"
 WHITELIST_GZ="${CR_MULTI_WHITELIST_GZ:-/home/lhhung/cellranger-9.0.1/lib/python/cellranger/barcodes/3M-5pgex-jan-2023.txt.gz}"
@@ -16,6 +20,9 @@ GENOME_DIR="${CR_GENOME_DIR:-/storage/autoindex_110_44/bulk_index}"
 
 STAR_BIN="${STAR_BIN:-/mnt/pikachu/STAR-suite/core/legacy/source/STAR}"
 OUTPREFIX="${CR_MULTI_OUTPREFIX:-${ROOT}/star_multi_smoke_cpp/}"
+SOLO_MULTIMAPPERS="${CR_MULTI_SOLO_MULTIMAPPERS:-Unique}"
+SOLO_CELL_FILTER="${CR_MULTI_SOLO_CELL_FILTER:-EmptyDrops_CR}"
+CR_MULTI_GEX_FEATURE="${CR_MULTI_GEX_FEATURE:-auto}"
 
 if [[ ! -x "${DOWN_SCRIPT}" ]]; then
   echo "Missing downsample script: ${DOWN_SCRIPT}" >&2
@@ -223,11 +230,12 @@ EOF
     --soloCBmatchWLtype 1MM_multi_Nbase_pseudocounts \
     --soloUMIdedup 1MM_CR \
     --soloUMIfiltering MultiGeneUMI_CR \
-    --soloMultiMappers Rescue \
+    --soloMultiMappers "${SOLO_MULTIMAPPERS}" \
     --soloStrand Unstranded \
     --soloAddTagsToUnsorted no \
     --soloFeatures GeneFull \
-    --soloCellFilter None \
+    --soloCellFilter "${SOLO_CELL_FILTER}" \
+    --soloCrGexFeature "${CR_MULTI_GEX_FEATURE}" \
     --crMultiConfig "${multi_config}" \
     --crFeatureRef "${FEATURE_REF}" \
     --crWhitelist "${WHITELIST}"

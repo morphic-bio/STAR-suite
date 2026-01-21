@@ -23,19 +23,14 @@ void SoloFeature::addBAMtags(char *&bam0, uint32 &size0, char *bam1) {
 // - When false: Allow UB-only or CB-only injection without hard-failure.
 //   CB lookup is only guarded when needCB is true, and UB decode failures are non-fatal.
 //
-// Policy control: Set environment variable STAR_REQUIRE_CBUB_TOGETHER=no to relax the policy.
-// Default: true (strict policy)
+// Policy control: --soloCbUbRequireTogether yes|no (default: yes).
 //
 // Policy exception: status==2 (invalid UMI) is an intentional exception - CB is emitted, UB is skipped.
 // This matches recordReadInfo semantics where CB is valid but UMI is invalid.
 void SoloFeature::addBAMtags(char *&bam0, uint32 &size0, char *bam1, uint32_t readId) {
     // Policy flag: require CB+UB together
-    // Can be relaxed via environment variable STAR_REQUIRE_CBUB_TOGETHER=no
     // Default: true (strict policy)
-    static const bool requireCbUbTogetherDefault = true;
-    static const bool requireCbUbTogether = (std::getenv("STAR_REQUIRE_CBUB_TOGETHER") != nullptr) 
-        ? (std::string(std::getenv("STAR_REQUIRE_CBUB_TOGETHER")) == "no" ? false : true)
-        : requireCbUbTogetherDefault;
+    const bool requireCbUbTogether = P.pSolo.requireCbUbTogether;
     
     // ZI tag emission flag: controlled by STAR_EMIT_READID_TAG env var (default: off)
     static bool ziTagEmitChecked = false;
@@ -66,7 +61,7 @@ void SoloFeature::addBAMtags(char *&bam0, uint32 &size0, char *bam1, uint32_t re
     if (requireCbUbTogether && needUB && !needCB) {
         ostringstream errOut;
         errOut << "EXITING because of fatal ERROR: UB tag requested but CB tag not requested\n";
-        errOut << "SOLUTION: Request both CB and UB tags, or set environment variable STAR_REQUIRE_CBUB_TOGETHER=no";
+        errOut << "SOLUTION: Request both CB and UB tags, or set --soloCbUbRequireTogether no";
         exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
         return;
     }
@@ -142,7 +137,7 @@ void SoloFeature::addBAMtags(char *&bam0, uint32 &size0, char *bam1, uint32_t re
         if (requireCbUbTogether && needUB && !ziTagEmitEnabled) {
             ostringstream errOut;
             errOut << "EXITING because of fatal ERROR: UB tag requested but CB is missing (status==0)\n";
-            errOut << "SOLUTION: This is enforced by requireCbUbTogether policy. Set environment variable STAR_REQUIRE_CBUB_TOGETHER=no to allow UB-only injection.";
+            errOut << "SOLUTION: This is enforced by requireCbUbTogether policy. Set --soloCbUbRequireTogether no to allow UB-only injection.";
             exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_INPUT_FILES, P);
             return;
         }
@@ -291,4 +286,3 @@ void SoloFeature::addBAMtags(char *&bam0, uint32 &size0, char *bam1, uint32_t re
     bam0 = bam1;
     size0 = newSize;
 }
-

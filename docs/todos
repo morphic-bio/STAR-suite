@@ -2,3 +2,4 @@
 
 - Validate `--soloAddTagsToUnsorted` behavior (unsorted BAM CB/UB tag injection) for Flex runs; decide whether to fix or remove for core STARsolo.
 - Relax CB/UB strict coupling by default for non-Flex runs (keep strict policy for Flex); verify whether Flex drops CB when UB is missing.
+- Fix and run remaining smoke tests with missing fixtures for memory leak repair validation.

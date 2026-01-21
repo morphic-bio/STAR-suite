@@ -76,6 +76,8 @@ Standard STAR flags apply. See `core/legacy/README.md`.
 - `--readFilesIn`: Input read files
 - `--outSAMtype`: Output SAM/BAM format (e.g., `BAM SortedByCoordinate`)
 - `--soloType`: Single-cell mode (e.g., `CB_UMI_Simple`, `SmartSeq`)
+- `--soloCbUbRequireTogether`: Enforce CB/UB tag pairing for tag injection (`yes`/`no`, default `yes`)
+- `--soloCrGexFeature`: CR-compat merged GEX source (`auto`, `gene`, `genefull`)
 
 ### Flex
 See `flex/README_flex.md` for full reference.
