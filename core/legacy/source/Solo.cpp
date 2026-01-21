@@ -3,6 +3,7 @@
 #include "streamFuns.h"
 #include "InlineCBCorrection.h"
 #include "SoloReadBarcode.h"
+#include <cstdlib>
 
 Solo::Solo(ReadAlignChunk **RAchunkIn, Parameters &Pin, Transcriptome &inTrans)
                        :  RAchunk(RAchunkIn), P(Pin), Trans(inTrans), pSolo(P.pSolo)
@@ -26,6 +27,26 @@ Solo::Solo(ReadAlignChunk **RAchunkIn, Parameters &Pin, Transcriptome &inTrans)
     for (uint32 ii=0; ii<pSolo.nFeatures; ii++)
         soloFeat[ii] = new SoloFeature(P, RAchunk, Trans, pSolo.features[ii], readBarSum, soloFeat);
 };
+
+Solo::~Solo()
+{
+    if (readBarSum != nullptr) {
+        delete readBarSum;
+        readBarSum = nullptr;
+    }
+
+    if (soloFeat != nullptr) {
+        for (uint32 ii=0; ii<pSolo.nFeatures; ii++) {
+            delete soloFeat[ii];
+        }
+        delete[] soloFeat;
+        soloFeat = nullptr;
+    }
+
+    if (pSolo.inlineCBCorrection) {
+        InlineCBCorrection::clearWhitelist();
+    }
+}
 
 ///////////////////////////////////////////////////////////////////////////////////// post-mapping processing only
 //overloaded: only soloCellFiltering
@@ -65,6 +86,7 @@ void Solo::processAndOutput()
                 readBarSum->addCounts(*RAchunk[ii]->RA->soloRead->readBar);
                 readBarSum->addStats(*RAchunk[ii]->RA->soloRead->readBar);
                 delete RAchunk[ii]->RA->soloRead->readBar; //not needed anymore
+                RAchunk[ii]->RA->soloRead->readBar = nullptr;
             };
         };
 
@@ -144,9 +166,14 @@ void Solo::processAndOutput()
             if (kv.second.parents.size() > mergedMaxParents) mergedMaxParents = kv.second.parents.size();
         }
 
-        // Resolve merged ambiguous entries via Bayesian resolver (Phase 3)
+        static const bool disableAmbigResolve =
+            (std::getenv("STAR_DISABLE_AMBIG_CB_RESOLVE") != nullptr);
+        InlineCBCorrection::AmbigResolveStats ambigStats;
         std::vector<uint32_t> resolvedIdx;
-        auto ambigStats = InlineCBCorrection::resolveAmbiguousMerged(mergedAmbig, pSolo, resolvedIdx);
+        if (!disableAmbigResolve) {
+            // Resolve merged ambiguous entries via Bayesian resolver (Phase 3)
+            ambigStats = InlineCBCorrection::resolveAmbiguousMerged(mergedAmbig, pSolo, resolvedIdx);
+        }
 
         P.inOut->logMain << "[INLINE-CB] exact=" << getInlineCbExactCount()
                          << " corrected=" << getInlineCbCorrectedCount()

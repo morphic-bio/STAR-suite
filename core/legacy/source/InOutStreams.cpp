@@ -60,5 +60,41 @@ InOutStreams::~InOutStreams() {
             outNoYFastqStream[ii].close();
         }
     };
-};
 
+    // Delete heap-allocated streams created via streamFuns helpers.
+    // Callers typically close() them, but do not delete the heap object.
+    {
+        std::lock_guard<std::mutex> lock(ownedStreamsMutex);
+        for (auto *s : ownedIfstreams) {
+            if (s != nullptr) {
+                if (s->is_open()) {
+                    s->close();
+                }
+                delete s;
+            }
+        }
+        ownedIfstreams.clear();
+
+        for (auto *s : ownedOfstreams) {
+            if (s != nullptr) {
+                if (s->is_open()) {
+                    s->flush();
+                    s->close();
+                }
+                delete s;
+            }
+        }
+        ownedOfstreams.clear();
+
+        for (auto *s : ownedFstreams) {
+            if (s != nullptr) {
+                if (s->is_open()) {
+                    s->flush();
+                    s->close();
+                }
+                delete s;
+            }
+        }
+        ownedFstreams.clear();
+    }
+};

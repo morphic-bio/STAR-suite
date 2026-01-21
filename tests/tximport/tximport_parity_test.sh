@@ -11,8 +11,15 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STAR_FLEX="$(cd "$SCRIPT_DIR/../.." && pwd)"
-CLI="$STAR_FLEX/tools/tximport_compat/tximport_compat"
-RENV_DIR="$STAR_FLEX/tools/tximport_compat"
+TXIMPORT_DIR="${TXIMPORT_DIR:-$STAR_FLEX/core/features/vbem/tools/tximport_compat}"
+CLI="${CLI:-$TXIMPORT_DIR/tximport_compat}"
+
+# Skip cleanly if CLI doesn't exist
+if [ ! -f "$CLI" ]; then
+    log "SKIP: tximport_compat CLI not found at $CLI"
+    exit 0
+fi
+RENV_DIR="${TXIMPORT_DIR}"
 REPORT_DIR="${REPORT_DIR:-/storage/production/tximport_parity_$(date +%Y%m%d_%H%M%S)}"
 
 SKIP_SYNTHETIC=false
@@ -32,6 +39,16 @@ cd "$REPORT_DIR"
 
 log() { echo "[$(date '+%H:%M:%S')] $*"; }
 error_exit() { echo "[ERROR] $*" >&2; exit 1; }
+
+# Skip if R/tximport is not available.
+if ! command -v Rscript >/dev/null 2>&1; then
+    log "SKIP: Rscript not found; tximport parity test requires R + tximport."
+    exit 0
+fi
+if ! Rscript -e "if (!requireNamespace('tximport', quietly=TRUE)) quit(status=1)" >/dev/null 2>&1; then
+    log "SKIP: R package 'tximport' not available."
+    exit 0
+fi
 
 # Helper: Compare two quant files numerically (values + ordering)
 compare_quant_files() {
@@ -262,4 +279,3 @@ Output files preserved in subdirectories:
 EOF
 
 log "Summary written to $REPORT_DIR/SUMMARY.md"
-

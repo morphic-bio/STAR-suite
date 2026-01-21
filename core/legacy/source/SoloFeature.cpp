@@ -105,6 +105,31 @@ SoloFeature::SoloFeature(Parameters &Pin, ReadAlignChunk **RAchunk, Transcriptom
     }
 };
 
+SoloFeature::~SoloFeature()
+{
+    if (rGeneUMI != nullptr) {
+        delete[] rGeneUMI;
+        rGeneUMI = nullptr;
+    }
+    if (rCBp != nullptr) {
+        delete[] rCBp;
+        rCBp = nullptr;
+    }
+    if (rCBn != nullptr) {
+        delete[] rCBn;
+        rCBn = nullptr;
+    }
+
+    if (readFeatSum != nullptr) {
+        delete readFeatSum;
+        readFeatSum = nullptr;
+    }
+    if (readFeatAll != nullptr) {
+        delete[] readFeatAll;
+        readFeatAll = nullptr;
+    }
+}
+
 const ProbeListIndex* SoloFeature::getProbeListIndex() const {
     // Lazily load from --soloProbeList once per process
     static ProbeListIndex *fallbackProbeIndex = nullptr;

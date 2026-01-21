@@ -16,13 +16,15 @@ private:
 
 public:
     ParametersSolo &pSolo;
-    SoloFeature **soloFeat;
+    SoloFeature **soloFeat = nullptr;
     
-    SoloReadBarcode *readBarSum;
+    SoloReadBarcode *readBarSum = nullptr;
 
     Solo(ReadAlignChunk **RAchunk, Parameters &Pin, Transcriptome &inTrans);
     
     Solo(Parameters &Pin, Transcriptome &inTrans);//for soloCellFiltering
+
+    ~Solo();
 
     void processAndOutput();
 

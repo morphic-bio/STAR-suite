@@ -12,6 +12,7 @@
 #include "streamFuns.h"
 #include <fstream>
 #include <cctype>
+#include <unordered_set>
 
 // Define global atomic counter for processed read groups (matches Salmon's processedReads)
 // Used for pre-burn-in gating: aux params are enabled when this count >= numPreBurninFrags (5000)
@@ -94,6 +95,7 @@ string adjustCompressionExt(const string& name, const string& compression) {
 Parameters::Parameters() {//initalize parameters info
 
     inOut = new InOutStreams;
+    ownsParInfo_ = true;  // Primary instance owns the parameter registry
 
     //versions
     parArray.push_back(new ParameterInfoScalar <string> (-1, -1, "versionGenome", &versionGenome));
@@ -502,12 +504,14 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloCellReadStats",&pSolo.readStats.type));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloCBtype",&pSolo.CBtype.typeString));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloAddTagsToUnsorted",&pSolo.addTagsToUnsortedStr));
+    parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloCbUbRequireTogether",&pSolo.requireCbUbTogetherStr));
     // legacy sidecar flag removed; tag-table export is always enabled via unified writer
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloWriteKeysBin",&pSolo.writeKeysBinStr));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloSkipProcessing",&pSolo.skipProcessingStr));
 
     // CR-compatible keys mode (handoff)
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloKeysCompat", &pSolo.keysCompatStr));
+    parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloCrGexFeature", &pSolo.crGexFeatureStr));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloProbeList", &pSolo.probeListPath));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloRemoveDeprecated", &pSolo.removeDeprecatedStr));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloSampleWhitelist", &pSolo.sampleWhitelistPath));
@@ -580,13 +584,20 @@ Parameters::Parameters() {//initalize parameters info
     // Minimal memory mode
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "soloFlexMinimalMemory", &pSolo.soloFlexMinimalMemoryStr));
 
+    // Cell Ranger multi config support
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "crMultiConfig", &crMulti.crMultiConfig));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "crWhitelist", &crMulti.crWhitelist));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "crFeatureRef", &crMulti.crFeatureRef));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "crFastqRoot", &crMulti.crFastqRoot));
+    parArray.push_back(new ParameterInfoVector<string>(-1, -1, "crFastqMap", &crMulti.crFastqMap));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "crMexUseGexBarcodes", &crMulti.crMexUseGexBarcodes));
+
     parameterInputName.push_back("Default");
     parameterInputName.push_back("Command-Line-Initial");
     parameterInputName.push_back("Command-Line");
     parameterInputName.push_back("genomeParameters.txt");
 
 };
-
 
 void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters: default, from files, from command line
     
@@ -605,6 +616,26 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
         if (p->nameString == "soloUMICorrectionUseTags" && p->inputLevel < 0) {
             // Conservative default mirrors the legacy behavior (ignore tags)
             pSolo.umiCorrectionUseTagsStr = "no";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "crMultiConfig" && p->inputLevel < 0) {
+            crMulti.crMultiConfig = "-";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "crWhitelist" && p->inputLevel < 0) {
+            crMulti.crWhitelist = "-";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "crFeatureRef" && p->inputLevel < 0) {
+            crMulti.crFeatureRef = "-";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "crFastqRoot" && p->inputLevel < 0) {
+            crMulti.crFastqRoot = "-";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "crFastqMap" && p->inputLevel < 0) {
+            crMulti.crFastqMap.clear();
             p->inputLevel = 0;
         }
     }
@@ -2395,3 +2426,63 @@ int Parameters::scanOneLine (string &lineIn, int inputLevel, int inputLevelReque
     };
     return 0;
 };
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Copy constructor: compiler-generated (memberwise copy).
+// Copies are non-owning and must call disownParInfoRegistry() after construction.
+// This avoids brittleness of manual field-by-field copying and automatically handles
+// all members including arrays and complex types like pSolo (with reference members).
+//
+// WARNING: Copies have empty registries. Any code that attempts to use parameter parsing
+// (inputParameters, scanOneLine, scanAllLines) on a copy will fail silently or crash.
+// This is intentional: copies are value-only and must not use the registry.
+//
+// Note: Assignment operator is = delete in header to prevent accidental assignment.
+// (Copy constructor is compiler-generated, so no implementation needed here)
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Helper method to mark a copy as non-owning and clear its registry.
+// Must be called immediately after copy construction at the copy site.
+// This prevents accidental use of the registry in copies (registry pointers point
+// into the original instance's member fields).
+void Parameters::disownParInfoRegistry() {
+    ownsParInfo_ = false;
+    parArray.clear();
+    parArrayInitial.clear();
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Cleanup method for parameter registry (parArray/parArrayInitial).
+// Only the primary instance should call this; copies are non-owning and will return early.
+// This is idempotent (safe to call multiple times).
+void Parameters::cleanupParInfoForExit() {
+    if (!ownsParInfo_) {
+        return;  // Copy instance - do not free registry
+    }
+    
+    // De-duplicate pointers across parArray and parArrayInitial
+    // (defensive: in case the same pointer appears in both)
+    std::unordered_set<ParameterInfoBase*> seen;
+    seen.reserve(parArray.size() + parArrayInitial.size());
+    
+    for (auto* p : parArray) {
+        if (p != nullptr) {
+            seen.insert(p);
+        }
+    }
+    for (auto* p : parArrayInitial) {
+        if (p != nullptr) {
+            seen.insert(p);
+        }
+    }
+    
+    // Delete each unique ParameterInfo* allocation
+    for (auto* p : seen) {
+        delete p;
+    }
+    
+    // Clear vectors and mark as non-owning (idempotent)
+    parArray.clear();
+    parArrayInitial.clear();
+    ownsParInfo_ = false;
+}

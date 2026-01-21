@@ -4,7 +4,7 @@
 
 set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TOOL="$SCRIPT_DIR/../tools/remove_y_reads/remove_y_reads"
+TOOL="${REMOVE_Y_READS_BIN:-$SCRIPT_DIR/../core/features/yremove_fastq/tools/remove_y_reads/remove_y_reads}"
 TEST_DIR="/tmp/remove_y_reads_test_$$"
 
 mkdir -p "$TEST_DIR"
@@ -130,4 +130,3 @@ fi
 
 echo ""
 echo "=== All tests passed ==="
-

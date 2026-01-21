@@ -65,6 +65,21 @@ ReadAlignChunk::ReadAlignChunk(Parameters& Pin, Genome &genomeIn, Transcriptome 
                                 const libem::Transcriptome* libemTr) : P(Pin), mapGen(genomeIn) {//initialize chunk
 
     iThread=iChunk;
+    chunkTr = nullptr;
+    slamQuant = nullptr;
+    slamCompat = nullptr;
+    RA = nullptr;
+    chunkIn = nullptr;
+    readInStream = nullptr;
+    chunkOutBAM = nullptr;
+    chunkOutBAM1 = nullptr;
+    chunkOutSJ = nullptr;
+    chunkOutSJ1 = nullptr;
+    chunkOutBAMcoord = nullptr;
+    chunkOutBAMunsorted = nullptr;
+    chunkOutBAMquant = nullptr;
+    chunkQuants = nullptr;
+    chunkOutBAMstream = nullptr;
 
     if ( P.quant.yes ) {//allocate transcriptome structures
         chunkTr=new Transcriptome(*TrIn);
@@ -73,8 +88,6 @@ ReadAlignChunk::ReadAlignChunk(Parameters& Pin, Genome &genomeIn, Transcriptome 
         chunkTr=NULL;
     };
 
-    slamQuant = nullptr;
-    slamCompat = nullptr;
     if (P.quant.slam.yes && chunkTr != nullptr) {
         // For SNP mask build pre-pass, allow "alt" to mean any mismatch (GEDI-like) vs conversions only.
         bool snpObsAnyMismatch = false;
@@ -317,6 +330,7 @@ ReadAlignChunk::ReadAlignChunk(Parameters& Pin, Genome &genomeIn, Transcriptome 
         RA->peMergeRA= new ReadAlign(Pin,genomeIn,TrIn,iChunk);
         delete RA->peMergeRA->chunkOutChimJunction;
         RA->peMergeRA->chunkOutChimJunction=RA->chunkOutChimJunction;//point to the same out-stream
+        RA->peMergeRA->ownsChunkOutChimJunction_ = false;
         RA->peMergeRA->chimDet->ostreamChimJunction=RA->peMergeRA->chunkOutChimJunction;
         RA->peMergeRA->outBAMunsorted=RA->outBAMunsorted;
         RA->peMergeRA->outBAMcoord=RA->outBAMcoord;
@@ -325,10 +339,58 @@ ReadAlignChunk::ReadAlignChunk(Parameters& Pin, Genome &genomeIn, Transcriptome 
 
 ReadAlignChunk::~ReadAlignChunk() {
     // Clean up owned resources
+    delete RA;
+    RA = nullptr;
+
+    if (readInStream != nullptr) {
+        for (uint ii = 0; ii < P.readNends; ++ii) {
+            delete readInStream[ii];
+        }
+        delete[] readInStream;
+        readInStream = nullptr;
+    }
+
+    if (chunkIn != nullptr) {
+        for (uint ii = 0; ii < P.readNends; ++ii) {
+            delete[] chunkIn[ii];
+        }
+        delete[] chunkIn;
+        chunkIn = nullptr;
+    }
+
+    delete chunkOutBAMstream;
+    chunkOutBAMstream = nullptr;
+
+    delete[] chunkOutBAM;
+    chunkOutBAM = nullptr;
+
+    delete[] chunkOutBAM1;
+    chunkOutBAM1 = nullptr;
+
+    delete chunkOutBAMcoord;
+    chunkOutBAMcoord = nullptr;
+
+    delete chunkOutBAMunsorted;
+    chunkOutBAMunsorted = nullptr;
+
+    delete chunkOutBAMquant;
+    chunkOutBAMquant = nullptr;
+
+    delete chunkOutSJ;
+    chunkOutSJ = nullptr;
+
+    delete chunkOutSJ1;
+    chunkOutSJ1 = nullptr;
+
+    delete chunkTr;
+    chunkTr = nullptr;
+
     delete slamCompat;
+    slamCompat = nullptr;
     // Note: slamQuant is merged into global stats before destruction in STAR.cpp,
     // but we should still clean up the per-chunk instance
     delete slamQuant;
+    slamQuant = nullptr;
 };
 
 void ReadAlignChunk::reinitSlamCompat(int trim5p, int trim3p) {

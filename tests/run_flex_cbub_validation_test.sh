@@ -5,9 +5,22 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-STAR_BIN="${SCRIPT_DIR}/../core/legacy/source/STAR"
-OUT_DIR="${SCRIPT_DIR}/flex_cbub_validation_output"
-TMP_DIR="/tmp/flex_cbub_validation_$$"
+STAR_BIN="${STAR_BIN:-${SCRIPT_DIR}/../core/legacy/source/STAR}"
+OUT_DIR="${OUT_DIR:-${SCRIPT_DIR}/flex_cbub_validation_output}"
+TMP_DIR="${TMP_DIR:-/tmp/flex_cbub_validation_$$}"
+FLEX_INDEX="${FLEX_INDEX:-/storage/flex_filtered_reference/star_index}"
+FLEX_WHITELIST="${FLEX_WHITELIST:-/storage/scRNAseq_output/whitelists/737K-fixed-rna-profiling.txt}"
+FLEX_SAMPLE_WHITELIST="${FLEX_SAMPLE_WHITELIST:-/storage/SC2300771_filtered_2M/sample_whitelist.tsv}"
+FLEX_PROBE_LIST="${FLEX_PROBE_LIST:-/storage/flex_filtered_reference/filtered_reference/probe_list.txt}"
+FLEX_SAMPLE_PROBES="${FLEX_SAMPLE_PROBES:-/mnt/pikachu/JAX_scRNAseq01_processed/probe-barcodes-fixed-rna-profiling-rna.txt}"
+FLEX_ALLOWED_TAGS="${FLEX_ALLOWED_TAGS:-/storage/SC2300771_filtered_2M/sample_whitelist.tsv}"
+FLEX_FASTQ_R2="${FLEX_FASTQ_R2:-/storage/downsampled_100K/SC2300771/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L001_R2_001.fastq.gz}"
+FLEX_FASTQ_R1="${FLEX_FASTQ_R1:-/storage/downsampled_100K/SC2300771/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L001_R1_001.fastq.gz}"
+
+skip() {
+    echo "SKIP: $*"
+    exit 0
+}
 
 # Clean up previous run
 rm -rf "$OUT_DIR"
@@ -17,18 +30,36 @@ mkdir -p "$OUT_DIR"
 
 # Check prerequisites
 if [ ! -f "$STAR_BIN" ]; then
-    echo "ERROR: STAR binary not found: $STAR_BIN" >&2
-    exit 1
+    skip "STAR binary not found: $STAR_BIN"
 fi
 
 if ! command -v samtools &> /dev/null; then
-    echo "ERROR: samtools not found in PATH" >&2
-    exit 1
+    skip "samtools not found in PATH"
 fi
 
-if [ ! -d "/storage/flex_filtered_reference/star_index" ]; then
-    echo "ERROR: STAR index not found: /storage/flex_filtered_reference/star_index" >&2
-    exit 1
+if [ ! -d "$FLEX_INDEX" ]; then
+    skip "STAR index not found: $FLEX_INDEX"
+fi
+if [ ! -f "$FLEX_WHITELIST" ]; then
+    skip "Whitelist not found: $FLEX_WHITELIST"
+fi
+if [ ! -f "$FLEX_SAMPLE_WHITELIST" ]; then
+    skip "Sample whitelist not found: $FLEX_SAMPLE_WHITELIST"
+fi
+if [ ! -f "$FLEX_PROBE_LIST" ]; then
+    skip "Probe list not found: $FLEX_PROBE_LIST"
+fi
+if [ ! -f "$FLEX_SAMPLE_PROBES" ]; then
+    skip "Sample probes not found: $FLEX_SAMPLE_PROBES"
+fi
+if [ ! -f "$FLEX_ALLOWED_TAGS" ]; then
+    skip "Allowed tags file not found: $FLEX_ALLOWED_TAGS"
+fi
+if [ ! -f "$FLEX_FASTQ_R1" ]; then
+    skip "FASTQ not found: $FLEX_FASTQ_R1"
+fi
+if [ ! -f "$FLEX_FASTQ_R2" ]; then
+    skip "FASTQ not found: $FLEX_FASTQ_R2"
 fi
 
 echo "=== Testing CB/UB tag validation with sorted BAM ==="
@@ -53,17 +84,17 @@ echo ""
 STAR_EMIT_READID_TAG=1 STAR_EMIT_CBUB_TABLE=1 "$STAR_BIN" \
   --runThreadN 4 \
   --outTmpDir "$TMP_DIR" \
-  --genomeDir /storage/flex_filtered_reference/star_index \
+  --genomeDir "$FLEX_INDEX" \
   --soloType CB_UMI_Simple \
   --soloCBlen 16 --soloUMIlen 12 --soloUMIstart 17 --soloCBstart 1 --soloBarcodeReadLength 0 \
-  --soloCBwhitelist /storage/scRNAseq_output/whitelists/737K-fixed-rna-profiling.txt \
+  --soloCBwhitelist "$FLEX_WHITELIST" \
   --flex yes \
   --soloFlexExpectedCellsPerTag 3000 \
-  --soloSampleWhitelist /storage/SC2300771_filtered_2M/sample_whitelist.tsv \
-  --soloProbeList /storage/flex_filtered_reference/filtered_reference/probe_list.txt \
-  --soloSampleProbes /mnt/pikachu/JAX_scRNAseq01_processed/probe-barcodes-fixed-rna-profiling-rna.txt \
+  --soloSampleWhitelist "$FLEX_SAMPLE_WHITELIST" \
+  --soloProbeList "$FLEX_PROBE_LIST" \
+  --soloSampleProbes "$FLEX_SAMPLE_PROBES" \
   --soloSampleProbeOffset 68 \
-  --soloFlexAllowedTags /storage/SC2300771_filtered_2M/sample_whitelist.tsv \
+  --soloFlexAllowedTags "$FLEX_ALLOWED_TAGS" \
   --soloFlexMinimalMemory no \
   --soloInlineCBCorrection no \
   --limitIObufferSize 50000000 50000000 \
@@ -100,8 +131,8 @@ STAR_EMIT_READID_TAG=1 STAR_EMIT_CBUB_TABLE=1 "$STAR_BIN" \
   --soloSampleSearchNearby no \
   --readFilesCommand zcat \
   --readFilesIn \
-    /storage/downsampled_100K/SC2300771/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L001_R2_001.fastq.gz \
-    /storage/downsampled_100K/SC2300771/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L001_R1_001.fastq.gz \
+    "$FLEX_FASTQ_R2" \
+    "$FLEX_FASTQ_R1" \
   --outFileNamePrefix "$OUT_DIR/"
 
 # Verify output files exist
@@ -132,4 +163,3 @@ echo "=== Test PASSED ==="
 
 # Cleanup
 rm -rf "$TMP_DIR"
-

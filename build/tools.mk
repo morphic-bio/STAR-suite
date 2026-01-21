@@ -1,8 +1,8 @@
-.PHONY: tools tools-clean vbem-tools yremove-tools
+.PHONY: tools tools-clean vbem-tools yremove-tools feature-barcodes-tools
 .PHONY: vbem-compute-expected-gc vbem-sample-fld vbem-compute-gc-bias vbem-em-quant
 .PHONY: vbem-ec-filter-test vbem-tximport-compat vbem-trimvalidate
 
-tools: flex-tools slam-tools vbem-tools yremove-tools
+tools: flex-tools slam-tools vbem-tools yremove-tools feature-barcodes-tools
 
 vbem-tools: vbem-compute-expected-gc vbem-sample-fld vbem-compute-gc-bias vbem-em-quant vbem-ec-filter-test vbem-tximport-compat vbem-trimvalidate
 
@@ -30,6 +30,9 @@ vbem-trimvalidate:
 yremove-tools:
 	$(MAKE) -C $(YREMOVE_FASTQ_DIR)/tools/remove_y_reads
 
+feature-barcodes-tools:
+	$(MAKE) -C $(FEATURE_BARCODES_DIR)
+
 tools-clean:
 	$(MAKE) -C $(VBEM_DIR)/tools/compute_expected_gc clean
 	$(MAKE) -C $(VBEM_DIR)/tools/sample_fld clean
@@ -42,3 +45,4 @@ tools-clean:
 	$(MAKE) -C $(SLAM_DIR)/tools/pileup_snp clean
 	$(MAKE) -C $(FLEX_DIR)/tools/flexfilter clean
 	$(MAKE) -C $(YREMOVE_FASTQ_DIR)/tools/remove_y_reads clean
+	$(MAKE) -C $(FEATURE_BARCODES_DIR) clean

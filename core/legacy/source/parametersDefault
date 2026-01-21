@@ -1457,6 +1457,11 @@ soloAddTagsToUnsorted       no
                             yes         ... enable two-pass mode: generate temporary file during first pass, then add CB/UB tags during second pass
                             no          ... disable two-pass mode (default): CB/UB tags only available in sorted BAM
 
+soloCbUbRequireTogether     yes
+    string:                 require CB and UB together during tag injection
+                            yes         ... UB requires CB (default)
+                            no          ... allow UB-only or CB-only injection
+
 
 soloWriteKeysBin            no
     string:                 emit CR v1 keys.bin during pass-2 replay
@@ -1473,6 +1478,12 @@ soloKeysCompat              raw
     string:                 keys emission compatibility mode
                             raw         ... one key per alignment (current behavior)
                             cr          ... CR v1-compatible aggregation and dedup in pass-2
+
+soloCrGexFeature            auto
+    string:                 GEX feature selection for CR-compat MEX merge
+                            auto        ... use Gene if present, else GeneFull
+                            gene        ... use Gene only (error if missing)
+                            genefull    ... use GeneFull only (error if missing)
 
 soloProbeList               -
     string:                 path to probe_list.txt used to derive 1-based gene indices (15-bit cap)
@@ -1680,6 +1691,25 @@ soloFlexKeepCBTag             no
 soloFlexMinimalMemory         no
     string:                 yes|no (default no)
                             yes         ... skip legacy Solo structures and eagerly free hashes in inline hash path (reduces memory usage)
+
+crMultiConfig               -
+    string:                 Cell Ranger multi config CSV (enables CR multi processing)
+
+crWhitelist                 -
+    string:                 override cell barcode whitelist for CR multi feature processing
+
+crFeatureRef                -
+    string:                 override feature reference CSV for CR multi feature processing
+
+crFastqRoot                 -
+    string:                 fallback root for FASTQ directories in multi config
+
+crFastqMap                  -
+    string(s):              map FASTQ paths from multi config to actual paths (key=value)
+
+crMexUseGexBarcodes        -
+    string:                 DEPRECATED: CR-compat MEX now always writes both raw_feature_bc_matrix and filtered_feature_bc_matrix using GEX barcodes
+                            This parameter is ignored and kept for backward compatibility only
 
 #####UnderDevelopment_begin : not supported - do not use
 soloClusterCBfile           -

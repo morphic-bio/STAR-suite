@@ -4,6 +4,7 @@
 SoloRead::SoloRead(Parameters &Pin, int32 iChunkIn) :  iChunk(iChunkIn), P(Pin), pSolo(P.pSolo)
 {
     readBar = new SoloReadBarcode(P);
+    readFeat = nullptr;
     
     if (pSolo.type==0)
         return;
@@ -15,6 +16,18 @@ SoloRead::SoloRead(Parameters &Pin, int32 iChunkIn) :  iChunk(iChunkIn), P(Pin),
     for (uint32 ii=0; ii<pSolo.nFeatures; ii++)
         readFeat[ii] = new SoloReadFeature(pSolo.features[ii], P, iChunk);
 };
+
+SoloRead::~SoloRead() {
+    if (readFeat != nullptr) {
+        for (uint32 ii = 0; ii < pSolo.nFeatures; ++ii) {
+            delete readFeat[ii];
+        }
+        delete[] readFeat;
+        readFeat = nullptr;
+    }
+    delete readBar;
+    readBar = nullptr;
+}
 
 void SoloRead::readFlagReset()
 {

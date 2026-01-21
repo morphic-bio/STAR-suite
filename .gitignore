@@ -98,6 +98,7 @@ Depend.list
 /tests/regress_100K_current/
 /tests/flex_inline_test_output/
 /tests/*_output/
+/tests/*_output_*/
 /tests/*.slam_qc.*
 /tests/tmp_*
 /tests/*/output
@@ -106,3 +107,11 @@ Depend.list
 /tests/ychrom_test
 /tests/-/
 /tmp/samtools_sorter_test_*
+/comparison_results
+/comparison_results_filtered
+/tests/__pycache__/
+/tmp/
+
+## Local smoke-test run artifacts
+/tests/flex_smoke/baseline_*/
+/tests/flex_smoke/current_*/

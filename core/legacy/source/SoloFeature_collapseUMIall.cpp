@@ -14,6 +14,7 @@
 #include <algorithm>
 
 static const bool g_debugCollapse = (std::getenv("STAR_DEBUG_COLLAPSE") != nullptr);
+static const bool g_debugCollapseForced = (std::getenv("STAR_DEBUG_COLLAPSE_FORCED") != nullptr);
 
 #ifdef DEBUG_CB_UB_PARITY
 // Optional tracing of specific readIds via STAR_DEBUG_TRACE_READS=1,2,3
@@ -67,51 +68,59 @@ void SoloFeature::collapseUMIall(bool minimalMode)
         // countMatStride may be unused in minimal/skip paths; enforce a sane non-zero stride
         countMatStride = 1;
     }
-    // FORCED DEBUG: Always print to stderr to catch crashes early
-    fprintf(stderr, "[COLLAPSE-FORCED] Entering collapseUMIall: nCB=%u nReadPerCBmax=%u featuresNumber=%u minimalMode=%d\n",
-            nCB, nReadPerCBmax, featuresNumber, minimalMode ? 1 : 0);
-    fflush(stderr);
-    
-    // Dump all member values before allocation to check for uninitialized values
-    fprintf(stderr, "[COLLAPSE-FORCED] Member values before allocation:\n");
-    fprintf(stderr, "  nCB=%u\n", nCB);
-    fprintf(stderr, "  nReadPerCBmax=%u\n", nReadPerCBmax);
-    fprintf(stderr, "  featuresNumber=%u\n", featuresNumber);
-    fprintf(stderr, "  rguStride=%u\n", rguStride);
-    fprintf(stderr, "  umiArrayStride=%u\n", umiArrayStride);
-    fprintf(stderr, "  minimalMode=%d\n", minimalMode ? 1 : 0);
-    fprintf(stderr, "  pSolo.multiMap.yes.multi=%d\n", pSolo.multiMap.yes.multi ? 1 : 0);
-    fprintf(stderr, "  pSolo.umiFiltering.MultiGeneUMI=%d\n", pSolo.umiFiltering.MultiGeneUMI ? 1 : 0);
-    fflush(stderr);
+    if (g_debugCollapseForced) {
+        // FORCED DEBUG: Always print to stderr to catch crashes early
+        fprintf(stderr, "[COLLAPSE-FORCED] Entering collapseUMIall: nCB=%u nReadPerCBmax=%u featuresNumber=%u minimalMode=%d\n",
+                nCB, nReadPerCBmax, featuresNumber, minimalMode ? 1 : 0);
+        fflush(stderr);
+        
+        // Dump all member values before allocation to check for uninitialized values
+        fprintf(stderr, "[COLLAPSE-FORCED] Member values before allocation:\n");
+        fprintf(stderr, "  nCB=%u\n", nCB);
+        fprintf(stderr, "  nReadPerCBmax=%u\n", nReadPerCBmax);
+        fprintf(stderr, "  featuresNumber=%u\n", featuresNumber);
+        fprintf(stderr, "  rguStride=%u\n", rguStride);
+        fprintf(stderr, "  umiArrayStride=%u\n", umiArrayStride);
+        fprintf(stderr, "  minimalMode=%d\n", minimalMode ? 1 : 0);
+        fprintf(stderr, "  pSolo.multiMap.yes.multi=%d\n", pSolo.multiMap.yes.multi ? 1 : 0);
+        fprintf(stderr, "  pSolo.umiFiltering.MultiGeneUMI=%d\n", pSolo.umiFiltering.MultiGeneUMI ? 1 : 0);
+        fflush(stderr);
+    }
     
     // Calculate vector sizes and check for overflow
     uint32 umiArraySize = nReadPerCBmax * umiArrayStride;
     uint32 gIDSize = min(2*featuresNumber, nReadPerCBmax) + 1;
     uint32 gReadSSize = min(2*featuresNumber, nReadPerCBmax) + 1;
     
-    fprintf(stderr, "[COLLAPSE-FORCED] Calculated vector sizes:\n");
-    fprintf(stderr, "  umiArraySize=%u (bytes=%zu)\n", umiArraySize, (size_t)umiArraySize * sizeof(uint32));
-    fprintf(stderr, "  gIDSize=%u (bytes=%zu)\n", gIDSize, (size_t)gIDSize * sizeof(uint32));
-    fprintf(stderr, "  gReadSSize=%u (bytes=%zu)\n", gReadSSize, (size_t)gReadSSize * sizeof(uint32));
-    fprintf(stderr, "  Total stack allocation: %zu bytes\n", 
-            (size_t)(umiArraySize + gIDSize + gReadSSize) * sizeof(uint32));
-    fflush(stderr);
+    if (g_debugCollapseForced) {
+        fprintf(stderr, "[COLLAPSE-FORCED] Calculated vector sizes:\n");
+        fprintf(stderr, "  umiArraySize=%u (bytes=%zu)\n", umiArraySize, (size_t)umiArraySize * sizeof(uint32));
+        fprintf(stderr, "  gIDSize=%u (bytes=%zu)\n", gIDSize, (size_t)gIDSize * sizeof(uint32));
+        fprintf(stderr, "  gReadSSize=%u (bytes=%zu)\n", gReadSSize, (size_t)gReadSSize * sizeof(uint32));
+        fprintf(stderr, "  Total stack allocation: %zu bytes\n", 
+                (size_t)(umiArraySize + gIDSize + gReadSSize) * sizeof(uint32));
+        fflush(stderr);
+    }
     
     if (g_debugCollapse) {
         fprintf(stderr, "[COLLAPSE] Entering collapseUMIall: nCB=%u nReadPerCBmax=%u featuresNumber=%u minimalMode=%d\n",
                 nCB, nReadPerCBmax, featuresNumber, minimalMode ? 1 : 0);
     }
     
-    fprintf(stderr, "[COLLAPSE-FORCED] Allocating vectors: umiArray=%u gID=%u gReadS=%u\n",
-            nReadPerCBmax*umiArrayStride, min(2*featuresNumber,nReadPerCBmax)+1, min(2*featuresNumber,nReadPerCBmax)+1);
-    fflush(stderr);
+    if (g_debugCollapseForced) {
+        fprintf(stderr, "[COLLAPSE-FORCED] Allocating vectors: umiArray=%u gID=%u gReadS=%u\n",
+                nReadPerCBmax*umiArrayStride, min(2*featuresNumber,nReadPerCBmax)+1, min(2*featuresNumber,nReadPerCBmax)+1);
+        fflush(stderr);
+    }
     
     vector<uint32> umiArray(nReadPerCBmax*umiArrayStride);//temp array for collapsing UMI
     vector<uint32> gID(min(2*featuresNumber,nReadPerCBmax)+1); //gene IDs, 2* is needed because each gene can have unique and multi-mappers
     vector<uint32> gReadS(min(2*featuresNumber,nReadPerCBmax)+1); //start of gene reads TODO: allocate this array in the 2nd half of rGU
 
-    fprintf(stderr, "[COLLAPSE-FORCED] Vectors allocated successfully\n");
-    fflush(stderr);
+    if (g_debugCollapseForced) {
+        fprintf(stderr, "[COLLAPSE-FORCED] Vectors allocated successfully\n");
+        fflush(stderr);
+    }
 
     if (!minimalMode) {
         // Ensure per-CB bookkeeping vectors are sized for all cells before we start the main loop.
@@ -130,8 +139,10 @@ void SoloFeature::collapseUMIall(bool minimalMode)
             uint32_t stride = (countMatStride > 0) ? countMatStride : 1;
             size_t seed = std::max<size_t>(nCB * stride, (size_t)(nCB + 1) * stride);
             countCellGeneUMI.assign(seed, 0);
-            fprintf(stderr, "[COLLAPSE-DUMP] initialized countCellGeneUMI to %zu entries (stride=%u)\n", seed, stride);
-            fflush(stderr);
+            if (g_debugCollapseForced) {
+                fprintf(stderr, "[COLLAPSE-DUMP] initialized countCellGeneUMI to %zu entries (stride=%u)\n", seed, stride);
+                fflush(stderr);
+            }
         }
     }
 
@@ -144,13 +155,15 @@ void SoloFeature::collapseUMIall(bool minimalMode)
         // FORCED DEBUG: Print before each collapseUMIperCB call
         uint32 rN = nReadPerCB[icb];
         uint32 expectedStride = (icb < nCB-1) ? ((rCBp[icb+1] - rCBp[icb]) / rguStride) : rN;
-        fprintf(stderr, "[COLLAPSE-FORCED] CB %u/%u: rCBp[%u]=%p rN=%u expectedStride=%u\n",
-                icb, nCB, icb, (void*)rCBp[icb], rN, expectedStride);
-        if (icb < 3 && rCBp[icb] != nullptr) {
-            fprintf(stderr, "[COLLAPSE-FORCED]   First 3 words: %u %u %u\n",
-                    rCBp[icb][0], rCBp[icb][1], rCBp[icb][2]);
+        if (g_debugCollapseForced) {
+            fprintf(stderr, "[COLLAPSE-FORCED] CB %u/%u: rCBp[%u]=%p rN=%u expectedStride=%u\n",
+                    icb, nCB, icb, (void*)rCBp[icb], rN, expectedStride);
+            if (icb < 3 && rCBp[icb] != nullptr) {
+                fprintf(stderr, "[COLLAPSE-FORCED]   First 3 words: %u %u %u\n",
+                        rCBp[icb][0], rCBp[icb][1], rCBp[icb][2]);
+            }
+            fflush(stderr);
         }
-        fflush(stderr);
         
         if (g_debugCollapse && icb < 3) {
             fprintf(stderr, "[COLLAPSE] Processing CB %u/%u: rCBp[%u]=%p rN=%u\n",
@@ -193,8 +206,10 @@ void SoloFeature::collapseUMIall(bool minimalMode)
 void SoloFeature::collapseUMIperCB(uint32 iCB, vector<uint32> &umiArray, vector<uint32> &gID,  vector<uint32> &gReadS, bool minimalMode)
 {
     // FORCED DEBUG: Always print at entry
-    fprintf(stderr, "[COLLAPSE-FORCED] collapseUMIperCB entry: iCB=%u\n", iCB);
-    fflush(stderr);
+    if (g_debugCollapseForced) {
+        fprintf(stderr, "[COLLAPSE-FORCED] collapseUMIperCB entry: iCB=%u\n", iCB);
+        fflush(stderr);
+    }
 
     if (g_debugCollapse && iCB < 3) {
         fprintf(stderr, "[COLLAPSE] collapseUMIperCB: iCB=%u rCBp[%u]=%p nReadPerCB[%u]=%u rguStride=%u\n",
@@ -204,22 +219,26 @@ void SoloFeature::collapseUMIperCB(uint32 iCB, vector<uint32> &umiArray, vector<
     uint32 *rGU=rCBp[iCB];
     uint32 rN=nReadPerCB[iCB]; //with multimappers, this is the number of all aligns, not reads
     
-    fprintf(stderr, "[COLLAPSE-FORCED] Before qsort: rGU=%p rN=%u rguStride=%u\n", (void*)rGU, rN, rguStride);
-    fflush(stderr);
-    
-    // Capture data before qsort for comparison
-    const uint32 maxDumpTriplets = (rN < 10) ? rN : 10;
-    uint32 beforeTriplets[30]; // 10 triplets max
-    for (uint32 i = 0; i < maxDumpTriplets * rguStride && i < 30; i++) {
-        beforeTriplets[i] = rGU[i];
+    std::vector<uint32> beforeTriplets;
+    uint32 maxDumpTriplets = 0;
+    if (g_debugCollapseForced) {
+        fprintf(stderr, "[COLLAPSE-FORCED] Before qsort: rGU=%p rN=%u rguStride=%u\n", (void*)rGU, rN, rguStride);
+        fflush(stderr);
+        
+        // Capture data before qsort for comparison
+        maxDumpTriplets = (rN < 10) ? rN : 10;
+        beforeTriplets.resize(maxDumpTriplets * rguStride);
+        for (uint32 i = 0; i < maxDumpTriplets * rguStride; i++) {
+            beforeTriplets[i] = rGU[i];
+        }
+        fprintf(stderr, "[COLLAPSE-FORCED] Before qsort - first %u triplets:\n", maxDumpTriplets);
+        for (uint32 i = 0; i < maxDumpTriplets; i++) {
+            fprintf(stderr, "  [%u] g=%u u=%u r=%u\n", i, 
+                    rGU[i*rguStride + 0], rGU[i*rguStride + 1], 
+                    (rguStride == 3) ? rGU[i*rguStride + 2] : 0);
+        }
+        fflush(stderr);
     }
-    fprintf(stderr, "[COLLAPSE-FORCED] Before qsort - first %u triplets:\n", maxDumpTriplets);
-    for (uint32 i = 0; i < maxDumpTriplets; i++) {
-        fprintf(stderr, "  [%u] g=%u u=%u r=%u\n", i, 
-                rGU[i*rguStride + 0], rGU[i*rguStride + 1], 
-                (rguStride == 3) ? rGU[i*rguStride + 2] : 0);
-    }
-    fflush(stderr);
     
     // Comment out qsort temporarily to test std::sort
     // qsort(rGU,rN,rguStride*sizeof(uint32),funCompareNumbers<uint32>); //sort by gene index
@@ -235,8 +254,10 @@ void SoloFeature::collapseUMIperCB(uint32 iCB, vector<uint32> &umiArray, vector<
         }
     };
     
-    fprintf(stderr, "[COLLAPSE-FORCED] Converting to Triplet vector for std::sort\n");
-    fflush(stderr);
+    if (g_debugCollapseForced) {
+        fprintf(stderr, "[COLLAPSE-FORCED] Converting to Triplet vector for std::sort\n");
+        fflush(stderr);
+    }
     
     std::vector<Triplet> triplets;
     triplets.reserve(rN);
@@ -244,67 +265,79 @@ void SoloFeature::collapseUMIperCB(uint32 iCB, vector<uint32> &umiArray, vector<
         triplets.push_back(Triplet(rGU + i*rguStride, rguStride));
     }
     
-    fprintf(stderr, "[COLLAPSE-FORCED] Sorting %zu triplets with std::sort\n", triplets.size());
-    fflush(stderr);
+    if (g_debugCollapseForced) {
+        fprintf(stderr, "[COLLAPSE-FORCED] Sorting %zu triplets with std::sort\n", triplets.size());
+        fflush(stderr);
+    }
     
     std::sort(triplets.begin(), triplets.end(), 
               [](const Triplet& a, const Triplet& b) { return a.g < b.g; });
     
-    fprintf(stderr, "[COLLAPSE-FORCED] std::sort completed, writing back\n");
-    fflush(stderr);
+    if (g_debugCollapseForced) {
+        fprintf(stderr, "[COLLAPSE-FORCED] std::sort completed, writing back\n");
+        fflush(stderr);
+    }
     
     for (uint32 i = 0; i < rN; i++) {
         triplets[i].writeBack(rGU + i*rguStride, rguStride);
     }
     
-    fprintf(stderr, "[COLLAPSE-FORCED] std::sort writeback completed\n");
-    fflush(stderr);
-    
-    fprintf(stderr, "[COLLAPSE-FORCED] After qsort, dumping same slice:\n");
-    for (uint32 i = 0; i < maxDumpTriplets; i++) {
-        fprintf(stderr, "  [%u] g=%u u=%u r=%u", i, 
-                rGU[i*rguStride + 0], rGU[i*rguStride + 1], 
-                (rguStride == 3) ? rGU[i*rguStride + 2] : 0);
-        // Check if values changed unexpectedly
-        bool changed = false;
-        for (uint32 j = 0; j < rguStride; j++) {
-            if (rGU[i*rguStride + j] != beforeTriplets[i*rguStride + j]) {
-                changed = true;
-                break;
-            }
-        }
-        if (changed) {
-            fprintf(stderr, " *** CHANGED ***");
+    if (g_debugCollapseForced) {
+        fprintf(stderr, "[COLLAPSE-FORCED] std::sort writeback completed\n");
+        fflush(stderr);
+        
+        fprintf(stderr, "[COLLAPSE-FORCED] After qsort, dumping same slice:\n");
+        for (uint32 i = 0; i < maxDumpTriplets; i++) {
+            fprintf(stderr, "  [%u] g=%u u=%u r=%u", i, 
+                    rGU[i*rguStride + 0], rGU[i*rguStride + 1], 
+                    (rguStride == 3) ? rGU[i*rguStride + 2] : 0);
+            // Check if values changed unexpectedly
+            bool changed = false;
             for (uint32 j = 0; j < rguStride; j++) {
                 if (rGU[i*rguStride + j] != beforeTriplets[i*rguStride + j]) {
-                    fprintf(stderr, " [%u: %u->%u]", j, beforeTriplets[i*rguStride + j], rGU[i*rguStride + j]);
+                    changed = true;
+                    break;
                 }
             }
+            if (changed) {
+                fprintf(stderr, " *** CHANGED ***");
+                for (uint32 j = 0; j < rguStride; j++) {
+                    if (rGU[i*rguStride + j] != beforeTriplets[i*rguStride + j]) {
+                        fprintf(stderr, " [%u: %u->%u]", j, beforeTriplets[i*rguStride + j], rGU[i*rguStride + j]);
+                    }
+                }
+            }
+            fprintf(stderr, "\n");
         }
-        fprintf(stderr, "\n");
+        fflush(stderr);
+        
+        fprintf(stderr, "[COLLAPSE-FORCED] After qsort, about to start loop\n");
+        fflush(stderr);
     }
-    fflush(stderr);
-    
-    fprintf(stderr, "[COLLAPSE-FORCED] After qsort, about to start loop\n");
-    fflush(stderr);
 
     uint32 gid1 = -1;//current gID
     uint32 nGenes = 0, nGenesMult = 0; //number of genes
     
-    fprintf(stderr, "[COLLAPSE-FORCED] Loop vars initialized\n");
-    fflush(stderr);
+    if (g_debugCollapseForced) {
+        fprintf(stderr, "[COLLAPSE-FORCED] Loop vars initialized\n");
+        fflush(stderr);
+    }
     
     uint32 totalWords = rN * rguStride;
-    fprintf(stderr, "[COLLAPSE-FORCED] totalWords=%u\n", totalWords);
-    fflush(stderr);
+    if (g_debugCollapseForced) {
+        fprintf(stderr, "[COLLAPSE-FORCED] totalWords=%u\n", totalWords);
+        fflush(stderr);
+    }
     
     // Check pSolo.multiMap before using it
     bool multiMapEnabled = pSolo.multiMap.yes.multi;
-    fprintf(stderr, "[COLLAPSE-FORCED] multiMapEnabled=%d\n", multiMapEnabled ? 1 : 0);
-    fflush(stderr);
+    if (g_debugCollapseForced) {
+        fprintf(stderr, "[COLLAPSE-FORCED] multiMapEnabled=%d\n", multiMapEnabled ? 1 : 0);
+        fflush(stderr);
+    }
     
     for (uint32 iR=0; iR<totalWords; iR+=rguStride) {
-        if (iR == 0) {
+        if (iR == 0 && g_debugCollapseForced) {
             fprintf(stderr, "[COLLAPSE-FORCED] First iteration: iR=0 rGU[0]=%u rGU[1]=%u rGU[2]=%u\n",
                     rGU[0], rGU[1], rGU[2]);
             fflush(stderr);
@@ -312,9 +345,11 @@ void SoloFeature::collapseUMIperCB(uint32 iCB, vector<uint32> &umiArray, vector<
         if (rGU[iR+rguG]!=gid1) {//record gene boundary
             // Bounds check before writing
             if (nGenes >= gReadS.size()) {
-                fprintf(stderr, "[COLLAPSE-FORCED] ERROR in loop: nGenes=%u >= gReadS.size()=%zu at iR=%u\n",
-                        nGenes, gReadS.size(), iR);
-                fflush(stderr);
+                if (g_debugCollapseForced) {
+                    fprintf(stderr, "[COLLAPSE-FORCED] ERROR in loop: nGenes=%u >= gReadS.size()=%zu at iR=%u\n",
+                            nGenes, gReadS.size(), iR);
+                    fflush(stderr);
+                }
                 return; // Early return
             }
             gReadS[nGenes]=iR;
@@ -327,31 +362,43 @@ void SoloFeature::collapseUMIperCB(uint32 iCB, vector<uint32> &umiArray, vector<
         };
     };
     
-    fprintf(stderr, "[COLLAPSE-FORCED] Gene boundary loop complete: nGenes=%u nGenesMult=%u\n", nGenes, nGenesMult);
-    fflush(stderr);
+    if (g_debugCollapseForced) {
+        fprintf(stderr, "[COLLAPSE-FORCED] Gene boundary loop complete: nGenes=%u nGenesMult=%u\n", nGenes, nGenesMult);
+        fflush(stderr);
+    }
     
     // Try to access gReadS more carefully - check if it's valid first
-    fprintf(stderr, "[COLLAPSE-FORCED] About to access gReadS vector\n");
-    fflush(stderr);
+    if (g_debugCollapseForced) {
+        fprintf(stderr, "[COLLAPSE-FORCED] About to access gReadS vector\n");
+        fflush(stderr);
+    }
     
     // Store size in a local variable before any other operations
     const size_t gReadSSize = gReadS.size();
-    fprintf(stderr, "[COLLAPSE-FORCED] gReadS.size()=%zu nGenes=%u\n", gReadSSize, nGenes);
-    fflush(stderr);
+    if (g_debugCollapseForced) {
+        fprintf(stderr, "[COLLAPSE-FORCED] gReadS.size()=%zu nGenes=%u\n", gReadSSize, nGenes);
+        fflush(stderr);
+    }
     
     if (nGenes >= gReadSSize) {
-        fprintf(stderr, "[COLLAPSE-FORCED] ERROR: nGenes=%u >= gReadS.size()=%zu\n", nGenes, gReadSSize);
-        fflush(stderr);
+        if (g_debugCollapseForced) {
+            fprintf(stderr, "[COLLAPSE-FORCED] ERROR: nGenes=%u >= gReadS.size()=%zu\n", nGenes, gReadSSize);
+            fflush(stderr);
+        }
         return; // Early return to avoid crash
     }
     
-    fprintf(stderr, "[COLLAPSE-FORCED] About to set gReadS[%u]=%u\n", nGenes, rguStride*rN);
-    fflush(stderr);
+    if (g_debugCollapseForced) {
+        fprintf(stderr, "[COLLAPSE-FORCED] About to set gReadS[%u]=%u\n", nGenes, rguStride*rN);
+        fflush(stderr);
+    }
     
     gReadS[nGenes]=rguStride*rN;//so that gReadS[nGenes]-gReadS[nGenes-1] is the number of reads for nGenes, see below in qsort
     
-    fprintf(stderr, "[COLLAPSE-FORCED] gReadS[%u] set successfully\n", nGenes);
-    fflush(stderr);
+    if (g_debugCollapseForced) {
+        fprintf(stderr, "[COLLAPSE-FORCED] gReadS[%u] set successfully\n", nGenes);
+        fflush(stderr);
+    }
     
     nGenes -= nGenesMult;//unique only gene
     
@@ -368,17 +415,23 @@ void SoloFeature::collapseUMIperCB(uint32 iCB, vector<uint32> &umiArray, vector<
                    //UMI                 //Gene //Count
 
     if (multiGeneUMI) {
-        fprintf(stderr, "[COLLAPSE-FORCED] Entering MultiGeneUMI block, nGenes=%u\n", nGenes);
-        fflush(stderr);
+        if (g_debugCollapseForced) {
+            fprintf(stderr, "[COLLAPSE-FORCED] Entering MultiGeneUMI block, nGenes=%u\n", nGenes);
+            fflush(stderr);
+        }
         
         if (nGenes >= gReadS.size()) {
-            fprintf(stderr, "[COLLAPSE-FORCED] ERROR: nGenes=%u >= gReadS.size()=%zu\n", nGenes, gReadS.size());
-            fflush(stderr);
+            if (g_debugCollapseForced) {
+                fprintf(stderr, "[COLLAPSE-FORCED] ERROR: nGenes=%u >= gReadS.size()=%zu\n", nGenes, gReadS.size());
+                fflush(stderr);
+            }
             return;
         }
         
-        fprintf(stderr, "[COLLAPSE-FORCED] About to loop: iR from 0 to gReadS[%u]=%u\n", nGenes, gReadS[nGenes]);
-        fflush(stderr);
+        if (g_debugCollapseForced) {
+            fprintf(stderr, "[COLLAPSE-FORCED] About to loop: iR from 0 to gReadS[%u]=%u\n", nGenes, gReadS[nGenes]);
+            fflush(stderr);
+        }
         
         for (uint32 iR=0; iR<gReadS[nGenes]; iR+=rguStride) {
             umiGeneMapCount[rGU[iR+1]][rGU[iR]]++; 

@@ -6,14 +6,14 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-STAR_BIN="${SCRIPT_DIR}/../core/legacy/source/STAR"
+STAR_BIN="${STAR_BIN:-${SCRIPT_DIR}/../core/legacy/source/STAR}"
 BASE_DIR="${BASE_DIR:-/tmp/ychrom_bulk_pe_test}"
 REPORT_FILE="${SCRIPT_DIR}/TEST_REPORT_Y_SPLIT_BULK_PE.md"
 
 # Bulk RNA-seq parameters (no Flex, no Solo)
-GENOME_DIR="/storage/flex_filtered_reference/star_index"  # Use same reference (has chrY)
-R1_FILE="/storage/PE/downsampled/21033-09-01-13-01_S1_L007_R1_001.fastq.gz"
-R2_FILE="/storage/PE/downsampled/21033-09-01-13-01_S1_L007_R2_001.fastq.gz"
+GENOME_DIR="${YCHROM_BULK_GENOME_DIR:-/storage/flex_filtered_reference/star_index}"  # Use same reference (has chrY)
+R1_FILE="${YCHROM_BULK_R1:-/storage/PE/downsampled/21033-09-01-13-01_S1_L007_R1_001.fastq.gz}"
+R2_FILE="${YCHROM_BULK_R2:-/storage/PE/downsampled/21033-09-01-13-01_S1_L007_R2_001.fastq.gz}"
 
 if [ ! -f "$R1_FILE" ] || [ ! -f "$R2_FILE" ]; then
     echo "ERROR: FASTQ files not found"
@@ -356,4 +356,3 @@ else
     echo "See report: $REPORT_FILE"
     exit 1
 fi
-

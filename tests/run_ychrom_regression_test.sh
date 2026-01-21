@@ -6,9 +6,15 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-STAR_FLEX_BIN="${SCRIPT_DIR}/../core/legacy/source/STAR"
+STAR_FLEX_BIN="${STAR_BIN:-${SCRIPT_DIR}/../core/legacy/source/STAR}"
 STAR_SOLO_BIN="/usr/local/bin/STAR"
 REPORT_FILE="${SCRIPT_DIR}/TEST_REPORT_Y_SPLIT_REGRESSION.md"
+YCHROM_BULK_R1="${YCHROM_BULK_R1:-/storage/PE/downsampled/21033-09-01-13-01_S1_L007_R1_001.fastq.gz}"
+YCHROM_BULK_R2="${YCHROM_BULK_R2:-/storage/PE/downsampled/21033-09-01-13-01_S1_L007_R2_001.fastq.gz}"
+YCHROM_BULK_GENOME_DIR="${YCHROM_BULK_GENOME_DIR:-/storage/flex_filtered_reference/star_index}"
+YCHROM_FLEX_FASTQ_BASE="${YCHROM_FLEX_FASTQ_BASE:-/storage/downsampled/SC2300771}"
+
+export YCHROM_FLEX_FASTQ_BASE
 
 # Check if STAR Solo is available
 if [ ! -f "$STAR_SOLO_BIN" ]; then
@@ -47,8 +53,8 @@ This report validates that STAR-Flex baseline behavior matches upstream STAR Sol
 
 - STAR-Flex Binary: \`$STAR_FLEX_BIN\`
 - STAR Solo Binary: \`$STAR_SOLO_BIN\`
-- Dataset: \`/storage/PE/downsampled/21033-09-01-13-01_S1_L007_R1_001.fastq.gz\`
-- Reference: \`/storage/flex_filtered_reference/star_index\`
+- Dataset: \`$YCHROM_BULK_R1\`
+- Reference: \`$YCHROM_BULK_GENOME_DIR\`
 
 ### Test Procedure
 
@@ -68,9 +74,9 @@ if [ "$STAR_SOLO_AVAILABLE" = true ]; then
     rm -rf "$BULK_BASE_DIR"
     mkdir -p "$BULK_BASE_DIR"
     
-    R1_FILE="/storage/PE/downsampled/21033-09-01-13-01_S1_L007_R1_001.fastq.gz"
-    R2_FILE="/storage/PE/downsampled/21033-09-01-13-01_S1_L007_R2_001.fastq.gz"
-    GENOME_DIR="/storage/flex_filtered_reference/star_index"
+    R1_FILE="$YCHROM_BULK_R1"
+    R2_FILE="$YCHROM_BULK_R2"
+    GENOME_DIR="$YCHROM_BULK_GENOME_DIR"
     
     # Common parameters for bulk RNA-seq
     COMMON_PARAMS=(
@@ -167,6 +173,16 @@ if [ "$STAR_SOLO_AVAILABLE" = true ]; then
         
         FLEX_SORTED_Y=$(samtools idxstats "$FLEX_SORTED_DIR/Aligned.sortedByCoord.out.bam" 2>/dev/null | awk '$1=="chrY" {print $3+0}' || echo "0")
         SOLO_SORTED_Y=$(samtools idxstats "$SOLO_SORTED_DIR/Aligned.sortedByCoord.out.bam" 2>/dev/null | awk '$1=="chrY" {print $3+0}' || echo "0")
+        
+        # Ensure variables are numeric (default to 0 if empty)
+        FLEX_UNSORTED_TOTAL=${FLEX_UNSORTED_TOTAL:-0}
+        SOLO_UNSORTED_TOTAL=${SOLO_UNSORTED_TOTAL:-0}
+        FLEX_UNSORTED_Y=${FLEX_UNSORTED_Y:-0}
+        SOLO_UNSORTED_Y=${SOLO_UNSORTED_Y:-0}
+        FLEX_SORTED_TOTAL=${FLEX_SORTED_TOTAL:-0}
+        SOLO_SORTED_TOTAL=${SOLO_SORTED_TOTAL:-0}
+        FLEX_SORTED_Y=${FLEX_SORTED_Y:-0}
+        SOLO_SORTED_Y=${SOLO_SORTED_Y:-0}
         
         echo ""
         echo "  Unsorted Comparison:"
@@ -297,6 +313,12 @@ if [ -d "$PREV_FLEX_DIR/sorted_split" ] && [ -f "$PREV_FLEX_DIR/sorted_split/Ali
             PREV_NOY_COUNT=$(samtools view -c "$PREV_FLEX_DIR/sorted_split/Aligned.sortedByCoord.out_noY.bam" 2>/dev/null || echo "0")
             CURRENT_NOY_COUNT=$(samtools view -c "$CURRENT_FLEX_DIR/sorted_split/Aligned.sortedByCoord.out_noY.bam" 2>/dev/null || echo "0")
             
+            # Ensure variables are numeric
+            PREV_Y_COUNT=${PREV_Y_COUNT:-0}
+            CURRENT_Y_COUNT=${CURRENT_Y_COUNT:-0}
+            PREV_NOY_COUNT=${PREV_NOY_COUNT:-0}
+            CURRENT_NOY_COUNT=${CURRENT_NOY_COUNT:-0}
+            
             echo "    Previous Y reads: $PREV_Y_COUNT"
             echo "    Current Y reads: $CURRENT_Y_COUNT"
             echo "    Previous noY reads: $PREV_NOY_COUNT"
@@ -370,7 +392,7 @@ if [ -d "$PREV_FLEX_DIR/sorted_split" ] && [ -f "$PREV_FLEX_DIR/sorted_split/Ali
 
 - Previous artifacts: \`$PREV_FLEX_DIR\`
 - Current run: \`$CURRENT_FLEX_DIR\`
-- Dataset: \`/storage/downsampled/SC2300771\`
+- Dataset: \`$YCHROM_FLEX_FASTQ_BASE\`
 
 ### Results
 
@@ -492,4 +514,3 @@ else
     echo "✗ Some regression checks failed"
     exit 1
 fi
-

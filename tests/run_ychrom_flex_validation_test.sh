@@ -6,14 +6,19 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-STAR_BIN="${SCRIPT_DIR}/../core/legacy/source/STAR"
+STAR_BIN="${STAR_BIN:-${SCRIPT_DIR}/../core/legacy/source/STAR}"
 BASE_DIR="${BASE_DIR:-/tmp/ychrom_flex_test}"
 REPORT_FILE="${SCRIPT_DIR}/TEST_REPORT_Y_SPLIT_FLEX.md"
 
 # Flex parameters (from run_flex_multisample_test.sh)
-GENOME_DIR="/storage/flex_filtered_reference/star_index"
-FASTQ_BASE="/storage/downsampled/SC2300771"
+GENOME_DIR="${FLEX_INDEX:-/storage/flex_filtered_reference/star_index}"
+FASTQ_BASE="${YCHROM_FLEX_FASTQ_BASE:-/storage/downsampled/SC2300771}"
 SAMPLE_NAME="SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5"
+WHITELIST="${FLEX_WHITELIST:-/storage/scRNAseq_output/whitelists/737K-fixed-rna-profiling.txt}"
+SAMPLE_WHITELIST="${FLEX_SAMPLE_WHITELIST:-/storage/SC2300771_filtered_2M/sample_whitelist.tsv}"
+PROBE_LIST="${FLEX_PROBE_LIST:-/storage/flex_filtered_reference/filtered_reference/probe_list.txt}"
+SAMPLE_PROBES="${FLEX_SAMPLE_PROBES:-/mnt/pikachu/JAX_scRNAseq01_processed/probe-barcodes-fixed-rna-profiling-rna.txt}"
+ALLOWED_TAGS="${FLEX_ALLOWED_TAGS:-/storage/SC2300771_filtered_2M/sample_whitelist.tsv}"
 
 # Collect FASTQ files
 R2_FILES=$(ls ${FASTQ_BASE}/${SAMPLE_NAME}_L00[1-8]_R2_001.fastq.gz 2>/dev/null | tr '\n' ',' | sed 's/,$//')
@@ -42,14 +47,14 @@ COMMON_PARAMS=(
     --genomeDir "$GENOME_DIR"
     --soloType CB_UMI_Simple
     --soloCBlen 16 --soloUMIlen 12 --soloUMIstart 17 --soloCBstart 1 --soloBarcodeReadLength 0
-    --soloCBwhitelist /storage/scRNAseq_output/whitelists/737K-fixed-rna-profiling.txt
+    --soloCBwhitelist "$WHITELIST"
     --flex yes
     --soloFlexExpectedCellsPerTag 3000
-    --soloSampleWhitelist /storage/SC2300771_filtered_2M/sample_whitelist.tsv
-    --soloProbeList /storage/flex_filtered_reference/filtered_reference/probe_list.txt
-    --soloSampleProbes /mnt/pikachu/JAX_scRNAseq01_processed/probe-barcodes-fixed-rna-profiling-rna.txt
+    --soloSampleWhitelist "$SAMPLE_WHITELIST"
+    --soloProbeList "$PROBE_LIST"
+    --soloSampleProbes "$SAMPLE_PROBES"
     --soloSampleProbeOffset 68
-    --soloFlexAllowedTags /storage/SC2300771_filtered_2M/sample_whitelist.tsv
+    --soloFlexAllowedTags "$ALLOWED_TAGS"
     --limitIObufferSize 50000000 50000000
     --outSJtype None
     --outBAMcompression 6
@@ -409,4 +414,3 @@ else
     echo "See report: $REPORT_FILE"
     exit 1
 fi
-

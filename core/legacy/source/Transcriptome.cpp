@@ -6,7 +6,72 @@
 
 #include <unordered_map>
 
-Transcriptome::Transcriptome (Parameters &Pin) : P(Pin){
+Transcriptome::Transcriptome(const Transcriptome &other)
+    : trInfoDir(other.trInfoDir),
+      trID(other.trID),
+      geID(other.geID),
+      geName(other.geName),
+      geBiotype(other.geBiotype),
+      geIDCanonical(other.geIDCanonical),
+      nTr(other.nTr),
+      nGe(other.nGe),
+      geStr(other.geStr),
+      trS(other.trS),
+      trE(other.trE),
+      trEmax(other.trEmax),
+      nEx(other.nEx),
+      trExN(other.trExN),
+      trExI(other.trExI),
+      trStr(other.trStr),
+      exSE(other.exSE),
+      exLenCum(other.exLenCum),
+      trGene(other.trGene),
+      trLen(other.trLen),
+      exG(other.exG),
+      geneFull(other.geneFull),
+      quants(nullptr),
+      P(other.P),
+      ownsData_(false)
+{}
+
+Transcriptome::Transcriptome (Parameters &Pin)
+    : trInfoDir(),
+      trID(),
+      geID(),
+      geName(),
+      geBiotype(),
+      geIDCanonical(),
+      nTr(0),
+      nGe(0),
+      geStr(),
+      trS(nullptr),
+      trE(nullptr),
+      trEmax(nullptr),
+      nEx(0),
+      trExN(nullptr),
+      trExI(nullptr),
+      trStr(nullptr),
+      exSE(nullptr),
+      exLenCum(nullptr),
+      trGene(nullptr),
+      trLen(nullptr),
+      quants(nullptr),
+      P(Pin),
+      ownsData_(true)
+{
+    exG.nEx=0;
+    exG.s=nullptr;
+    exG.e=nullptr;
+    exG.eMax=nullptr;
+    exG.str=nullptr;
+    exG.g=nullptr;
+    exG.t=nullptr;
+
+    geneFull.s=nullptr;
+    geneFull.e=nullptr;
+    geneFull.eMax=nullptr;
+    geneFull.str=nullptr;
+    geneFull.g=nullptr;
 
     if (!P.quant.yes)
         return;
@@ -178,6 +243,7 @@ Transcriptome::Transcriptome (Parameters &Pin) : P(Pin){
             geneFull.str[ii] = gF[4*ii+2];
             geneFull.g[ii]   = gF[4*ii+3];
         };
+        delete[] gF;
 
         //calculate eMax
         geneFull.eMax[0]=geneFull.e[0];
@@ -193,6 +259,64 @@ void Transcriptome::quantsAllocate() {
         quants = new Quantifications (nGe);
     };
 };
+
+Transcriptome::~Transcriptome()
+{
+    delete quants;
+    quants=nullptr;
+
+    if (!ownsData_) {
+        return;
+    }
+
+    delete[] trS;
+    delete[] trE;
+    delete[] trEmax;
+    delete[] trExN;
+    delete[] trExI;
+    delete[] trStr;
+    delete[] exSE;
+    delete[] exLenCum;
+    delete[] trGene;
+    delete[] trLen;
+
+    delete[] exG.s;
+    delete[] exG.e;
+    delete[] exG.eMax;
+    delete[] exG.str;
+    delete[] exG.g;
+    delete[] exG.t;
+
+    delete[] geneFull.s;
+    delete[] geneFull.e;
+    delete[] geneFull.eMax;
+    delete[] geneFull.str;
+    delete[] geneFull.g;
+
+    trS=nullptr;
+    trE=nullptr;
+    trEmax=nullptr;
+    trExN=nullptr;
+    trExI=nullptr;
+    trStr=nullptr;
+    exSE=nullptr;
+    exLenCum=nullptr;
+    trGene=nullptr;
+    trLen=nullptr;
+
+    exG.s=nullptr;
+    exG.e=nullptr;
+    exG.eMax=nullptr;
+    exG.str=nullptr;
+    exG.g=nullptr;
+    exG.t=nullptr;
+
+    geneFull.s=nullptr;
+    geneFull.e=nullptr;
+    geneFull.eMax=nullptr;
+    geneFull.str=nullptr;
+    geneFull.g=nullptr;
+}
 
 void Transcriptome::quantsOutput() {
     ofstream qOut(P.quant.geCount.outFile);

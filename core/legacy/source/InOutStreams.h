@@ -3,6 +3,8 @@
 
 #include "IncludeDefine.h"
 #include SAMTOOLS_BGZF_H
+#include <mutex>
+#include <vector>
 
 class InOutStreams {
     public:
@@ -20,6 +22,13 @@ class InOutStreams {
 
     //compilation-optional streams
     ofstream outLocalChains;
+
+    // Track heap-allocated streams created via streamFuns (ifstrOpen/ofstrOpen/fstrOpen)
+    // so they can be deleted at shutdown and not show up as LSAN leaks.
+    std::mutex ownedStreamsMutex;
+    std::vector<std::ifstream*> ownedIfstreams;
+    std::vector<std::ofstream*> ownedOfstreams;
+    std::vector<std::fstream*> ownedFstreams;
 
     InOutStreams();
     ~InOutStreams();

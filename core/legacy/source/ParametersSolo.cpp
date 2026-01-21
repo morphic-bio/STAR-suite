@@ -41,6 +41,23 @@ void ParametersSolo::initialize(Parameters *pPin)
         errOut << "SOLUTION: use allowed option: yes OR no\n";
         exitWithError(errOut.str(),std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
     };
+
+    //////////////////////////////////////////////////////////////////////////////////////////////////////
+    ///////////////////////////////--soloCbUbRequireTogether
+    {
+        string mode = requireCbUbTogetherStr;
+        transform(mode.begin(), mode.end(), mode.begin(), ::tolower);
+        if (mode == "yes") {
+            requireCbUbTogether = true;
+        } else if (mode == "no" || mode.empty()) {
+            requireCbUbTogether = false;
+        } else {
+            ostringstream errOut;
+            errOut << "EXITING because of fatal PARAMETERS error: unrecognized option in --soloCbUbRequireTogether=" << requireCbUbTogetherStr << "\n";
+            errOut << "SOLUTION: use allowed option: yes OR no\n";
+            exitWithError(errOut.str(), std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
+        }
+    }
     
     //////////////////////////////////////////////////////////////////////////////////////////////////////
     /////////////////////////////// Tag-table export (always enabled; legacy flag removed)
@@ -128,6 +145,25 @@ void ParametersSolo::initialize(Parameters *pPin)
         if (nmMax < -1) nmMax = -1;
         if (mmRateMax < 0.0) mmRateMax = 0.0;
 
+    }
+
+    //////////////////////////////////////////////////////////////////////////////////////////////////////
+    ///////////////////////////////--soloCrGexFeature
+    {
+        string mode = crGexFeatureStr;
+        transform(mode.begin(), mode.end(), mode.begin(), ::tolower);
+        if (mode == "auto" || mode.empty()) {
+            crGexFeature = CrGexAuto;
+        } else if (mode == "gene") {
+            crGexFeature = CrGexGene;
+        } else if (mode == "genefull") {
+            crGexFeature = CrGexGeneFull;
+        } else {
+            ostringstream errOut;
+            errOut << "EXITING because of fatal PARAMETERS error: unrecognized option in --soloCrGexFeature=" << crGexFeatureStr << "\n";
+            errOut << "SOLUTION: use allowed option: auto OR gene OR genefull\n";
+            exitWithError(errOut.str(), std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
+        }
     }
     
     //////////////////////////////////////////////////////////////////////////////////////////////////////

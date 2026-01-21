@@ -49,6 +49,8 @@ public:
 
     //methods:
     Transcriptome (Parameters &Pin); //create transcriptome structure, load and initialize parameters
+    Transcriptome(const Transcriptome &other);
+    ~Transcriptome();
     uint32 quantAlign (Transcript &aG, Transcript *aTall);//transform coordinates for all aligns from genomic in RA to transcriptomic in RAtr
     void geneCountsAddAlign(uint nA, Transcript **aAll, vector<int32> &gene1); //add one alignment to gene counts
     void quantsAllocate(); //allocate quants structure
@@ -61,6 +63,7 @@ public:
 
 private:
     Parameters &P; //normal "genomic" parameters
+    bool ownsData_; //true if this instance owns raw pointer arrays
 
 };
 

@@ -24,6 +24,8 @@ tools/                   # Suite-level scripts/utilities
   Build tools: `make flex` or `make flex-tools`.
 - **STAR-SLAM** (`slam/`): SLAM-seq quantification, SNP masking, trimming/QC.
   Build tools: `make slam` or `make slam-tools`.
+- **Feature Barcodes** (`core/features/feature_barcodes/`): Vendored `process_features` tools for perturb-seq testing (`assignBarcodes`, `demux_bam`, `demux_fastq`).
+  Build tools: `make feature-barcodes-tools`.
 
 ## Technical Updates
 
@@ -74,6 +76,8 @@ Standard STAR flags apply. See `core/legacy/README.md`.
 - `--readFilesIn`: Input read files
 - `--outSAMtype`: Output SAM/BAM format (e.g., `BAM SortedByCoordinate`)
 - `--soloType`: Single-cell mode (e.g., `CB_UMI_Simple`, `SmartSeq`)
+- `--soloCbUbRequireTogether`: Enforce CB/UB tag pairing for tag injection (`yes`/`no`, default `yes`)
+- `--soloCrGexFeature`: CR-compat merged GEX source (`auto`, `gene`, `genefull`)
 
 ### Flex
 See `flex/README_flex.md` for full reference.
@@ -166,3 +170,4 @@ core/legacy/source/STAR \
 - Flex pipeline: [flex/README_flex.md](flex/README_flex.md)
 - SLAM compatibility: [slam/docs/SLAM_COMPATIBILITY_MODE.md](slam/docs/SLAM_COMPATIBILITY_MODE.md)
 - SLAM methodology: [slam/docs/SLAM_seq.md](slam/docs/SLAM_seq.md)
+- Cell Ranger multi smoke tool: [docs/cr_multi.md](docs/cr_multi.md)

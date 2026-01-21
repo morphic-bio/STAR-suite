@@ -105,6 +105,7 @@ public:
     vector <fstream*> redistrFilesStreams;
 
     SoloFeature(Parameters &Pin, ReadAlignChunk **RAchunk, Transcriptome &inTrans, int32 feTy, SoloReadBarcode *readBarSumIn, SoloFeature **soloFeatAll);
+    ~SoloFeature();
     void clearLarge(); //clear large vectors
     void processRecords();
     void sumThreads();

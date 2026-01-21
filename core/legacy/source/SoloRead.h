@@ -13,6 +13,7 @@ public:
     SoloReadFeature **readFeat;
     
     SoloRead(Parameters &Pin, int32 iChunkIn);
+    ~SoloRead();
     void readFlagReset();
     void record(uint64 nTr, Transcript **alignOut, uint64 iRead, ReadAnnotations &readAnnot);
     
