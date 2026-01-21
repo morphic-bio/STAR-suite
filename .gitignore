@@ -107,6 +107,10 @@ Depend.list
 /tests/ychrom_test
 /tests/-/
 /tmp/samtools_sorter_test_*
+/comparison_results
+/comparison_results_filtered
+/tests/__pycache__/
+/tmp/
 
 ## Local smoke-test run artifacts
 /tests/flex_smoke/baseline_*/

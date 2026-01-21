@@ -115,6 +115,24 @@ def load_mex(mex_dir):
     return features_df, barcodes_list, matrix_dict
 
 
+def filter_mex_features(features_df, matrix_dict, keep_types):
+    """Filter features/matrix to selected feature types. Returns (features_df, matrix_dict)."""
+    if not keep_types:
+        return features_df, matrix_dict
+    keep_mask = features_df['type'].isin(keep_types)
+    if keep_mask.all():
+        return features_df, matrix_dict
+    keep_indices = [idx for idx, keep in enumerate(keep_mask.values) if keep]
+    old_to_new = {old_idx: new_idx for new_idx, old_idx in enumerate(keep_indices)}
+    filtered_features = features_df.loc[keep_mask].reset_index(drop=True)
+    filtered_matrix = {}
+    for (gene_idx, barcode_idx), val in matrix_dict.items():
+        new_idx = old_to_new.get(gene_idx)
+        if new_idx is not None:
+            filtered_matrix[(new_idx, barcode_idx)] = val
+    return filtered_features, filtered_matrix
+
+
 def build_gene_barcode_matrix(features_df, barcodes_list, matrix_dict, harmonized_bc_map):
     """
     Build a dense matrix: genes (rows) x harmonized barcodes (cols).
@@ -158,7 +176,7 @@ def build_gene_barcode_matrix(features_df, barcodes_list, matrix_dict, harmonize
     return gene_counts_df, harmonized_bc_list
 
 
-def compare_mex(a375_dir, star_dir):
+def compare_mex(a375_dir, star_dir, min_cells_pct, min_counts, feature_types):
     """Compare A375 Cell Ranger MEX with STAR MEX."""
     print("=" * 70)
     print("A375 Cell Ranger vs STAR MEX Comparison")
@@ -171,12 +189,26 @@ def compare_mex(a375_dir, star_dir):
     print(f"  Features: {len(a375_features)}")
     print(f"  Barcodes: {len(a375_barcodes)}")
     print(f"  Matrix entries: {len(a375_matrix)}")
+
+    if feature_types:
+        a375_features, a375_matrix = filter_mex_features(
+            a375_features, a375_matrix, feature_types
+        )
+        print(f"  Features after filter: {len(a375_features)}")
+        print(f"  Matrix entries after filter: {len(a375_matrix)}")
     
     print("\nLoading STAR MEX...")
     star_features, star_barcodes, star_matrix = load_mex(star_dir)
     print(f"  Features: {len(star_features)}")
     print(f"  Barcodes: {len(star_barcodes)}")
     print(f"  Matrix entries: {len(star_matrix)}")
+
+    if feature_types:
+        star_features, star_matrix = filter_mex_features(
+            star_features, star_matrix, feature_types
+        )
+        print(f"  Features after filter: {len(star_features)}")
+        print(f"  Matrix entries after filter: {len(star_matrix)}")
     print()
     
     # Harmonize barcodes
@@ -202,10 +234,13 @@ def compare_mex(a375_dir, star_dir):
         star_features, star_barcodes, star_matrix, star_harmonized
     )
     
-    # Filter to common barcodes only
+    # Filter to common barcodes only (and drop barcodes absent from either matrix)
     common_bc_list = sorted(common_barcodes)
-    a375_gene_df = a375_gene_df[[bc for bc in common_bc_list if bc in a375_gene_df.columns]]
-    star_gene_df = star_gene_df[[bc for bc in common_bc_list if bc in star_gene_df.columns]]
+    a375_cols = [bc for bc in common_bc_list if bc in a375_gene_df.columns]
+    star_cols = [bc for bc in common_bc_list if bc in star_gene_df.columns]
+    common_bc_list = sorted(set(a375_cols) & set(star_cols))
+    a375_gene_df = a375_gene_df[common_bc_list]
+    star_gene_df = star_gene_df[common_bc_list]
     
     print(f"  A375 matrix shape: {a375_gene_df.shape}")
     print(f"  STAR matrix shape: {star_gene_df.shape}")
@@ -233,42 +268,52 @@ def compare_mex(a375_dir, star_dir):
     # Calculate per-gene sums across all barcodes
     a375_gene_sums = a375_aligned.sum(axis=1)
     star_gene_sums = star_aligned.sum(axis=1)
-    
-    # Filter for Spearman: genes with >= 10 counts in both datasets
-    spearman_mask = (a375_gene_sums >= 10) & (star_gene_sums >= 10)
-    spearman_genes = [gene for gene in common_genes if spearman_mask.loc[gene]]
-    
-    print("Filtering for Spearman correlation (>= 10 counts in both):")
-    print(f"  Genes passing filter: {len(spearman_genes)}")
+
+    # Filter genes by minimum cells and counts in both datasets
+    min_cells = max(1, int(np.ceil(len(common_bc_list) * min_cells_pct)))
+    a375_gene_cells = (a375_aligned > 0).sum(axis=1)
+    star_gene_cells = (star_aligned > 0).sum(axis=1)
+    filter_mask = (
+        (a375_gene_sums >= min_counts)
+        & (star_gene_sums >= min_counts)
+        & (a375_gene_cells >= min_cells)
+        & (star_gene_cells >= min_cells)
+    )
+    filtered_genes = [gene for gene in common_genes if filter_mask.loc[gene]]
+
+    print("Filtering for correlations:")
+    print(f"  min_cells_per_gene: {min_cells} ({min_cells_pct:.2%} of {len(common_bc_list)} cells)")
+    print(f"  min_counts_per_gene: {min_counts}")
+    print(f"  Genes passing filter: {len(filtered_genes)}")
     print()
     
     # Calculate correlations
     print("Correlation Analysis:")
     print()
     
-    # Pearson: all common genes
-    if len(common_genes) > 1:
-        pearson_r, pearson_p = pearsonr(a375_gene_sums[common_genes], star_gene_sums[common_genes])
-        print(f"Pearson (all {len(common_genes)} common genes):")
+    # Pearson: filtered genes
+    if len(filtered_genes) > 1:
+        pearson_r, pearson_p = pearsonr(a375_gene_sums[filtered_genes], star_gene_sums[filtered_genes])
+        print(f"Pearson (filtered {len(filtered_genes)} genes):")
         print(f"  r = {pearson_r:.6f}")
         print(f"  p = {pearson_p:.2e}")
     else:
-        print("Pearson: Insufficient data (need >1 gene)")
+        print("Pearson: Insufficient data (need >1 filtered gene)")
         pearson_r = np.nan
     
     print()
     
-    # Spearman: genes with >= 10 counts in both
-    if len(spearman_genes) > 1:
+    # Spearman: filtered genes
+    if len(filtered_genes) > 1:
         spearman_r, spearman_p = spearmanr(
-            a375_gene_sums[spearman_genes],
-            star_gene_sums[spearman_genes]
+            a375_gene_sums[filtered_genes],
+            star_gene_sums[filtered_genes]
         )
-        print(f"Spearman ({len(spearman_genes)} genes with >=10 counts in both):")
+        print(f"Spearman (filtered {len(filtered_genes)} genes):")
         print(f"  ρ = {spearman_r:.6f}")
         print(f"  p = {spearman_p:.2e}")
     else:
-        print("Spearman: Insufficient data (need >1 gene with >=10 counts)")
+        print("Spearman: Insufficient data (need >1 filtered gene)")
         spearman_r = np.nan
     
     print()
@@ -279,7 +324,7 @@ def compare_mex(a375_dir, star_dir):
     print("=" * 70)
     print(f"Common harmonized barcodes: {len(common_barcodes)}")
     print(f"Common genes: {len(common_genes)}")
-    print(f"Genes with >=10 counts in both: {len(spearman_genes)}")
+    print(f"Filtered genes: {len(filtered_genes)}")
     if not np.isnan(pearson_r):
         print(f"Pearson correlation: {pearson_r:.6f}")
     if not np.isnan(spearman_r):
@@ -289,7 +334,7 @@ def compare_mex(a375_dir, star_dir):
     return {
         'common_barcodes': len(common_barcodes),
         'common_genes': len(common_genes),
-        'spearman_genes': len(spearman_genes),
+        'filtered_genes': len(filtered_genes),
         'pearson_r': pearson_r,
         'spearman_r': spearman_r
     }
@@ -301,6 +346,25 @@ def main():
     )
     parser.add_argument('a375_dir', help='A375 Cell Ranger MEX directory')
     parser.add_argument('star_dir', help='STAR MEX directory')
+    parser.add_argument(
+        '--min-cells-pct',
+        type=float,
+        default=0.01,
+        help='Minimum fraction of common cells expressing a gene (default: 0.01)',
+    )
+    parser.add_argument(
+        '--min-counts',
+        type=int,
+        default=20,
+        help='Minimum total counts per gene in both datasets (default: 20)',
+    )
+    parser.add_argument(
+        '--feature-types',
+        type=str,
+        default='Gene Expression',
+        help='Comma-separated feature types to include (default: Gene Expression). '
+             'Use "all" to disable filtering.',
+    )
     args = parser.parse_args()
     
     if not os.path.isdir(args.a375_dir):
@@ -311,8 +375,18 @@ def main():
         print(f"Error: STAR directory not found: {args.star_dir}", file=sys.stderr)
         sys.exit(1)
     
+    feature_types = None
+    if args.feature_types and args.feature_types.lower() not in ('all', '*', 'any', 'none'):
+        feature_types = [ft.strip() for ft in args.feature_types.split(',') if ft.strip()]
+
     try:
-        results = compare_mex(args.a375_dir, args.star_dir)
+        results = compare_mex(
+            args.a375_dir,
+            args.star_dir,
+            args.min_cells_pct,
+            args.min_counts,
+            feature_types,
+        )
         sys.exit(0)
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
