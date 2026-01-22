@@ -11,3 +11,4 @@ VBEM_DIR := $(CORE_DIR)/features/vbem
 YREMOVE_FASTQ_DIR := $(CORE_DIR)/features/yremove_fastq
 BAMSORT_DIR := $(CORE_DIR)/features/bamsort
 FEATURE_BARCODES_DIR := $(CORE_DIR)/features/feature_barcodes
+PROCESS_FEATURES_DIR := $(CORE_DIR)/features/process_features

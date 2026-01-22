@@ -18,6 +18,7 @@ SLAM_DIR := $(ROOT_DIR)/slam
 VBEM_DIR := $(ROOT_DIR)/core/features/vbem
 YREMOVE_FASTQ_DIR := $(ROOT_DIR)/core/features/yremove_fastq
 BAMSORT_DIR := $(ROOT_DIR)/core/features/bamsort
+PROCESS_FEATURES_DIR := $(ROOT_DIR)/core/features/process_features
 
 FLEX_SRC_DIR := $(FLEX_DIR)/source
 SLAM_SRC_DIR := $(SLAM_DIR)/source
@@ -174,6 +175,20 @@ flexfilter: STAR$(SFX)
 .PHONY: remove_y_reads
 remove_y_reads: htslib/libhts.a
 	$(MAKE) -C $(REMOVE_Y_READS_DIR)
+
+# Standalone star_feature_call tool for perturb-seq processing
+# Requires libprocess_features.a to be built first
+PROCESS_FEATURES_LIB := $(PROCESS_FEATURES_DIR)/libprocess_features.a
+PROCESS_FEATURES_INC := $(PROCESS_FEATURES_DIR)/include
+
+.PHONY: star_feature_call libprocess_features
+libprocess_features:
+	$(MAKE) -C $(PROCESS_FEATURES_DIR) lib
+
+star_feature_call: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS) -I$(PROCESS_FEATURES_INC)
+star_feature_call: LDFLAGS_PF := -L$(PROCESS_FEATURES_DIR) -lprocess_features -lm -lpthread -lz -fopenmp -lcairo -Lhtslib -lhts
+star_feature_call: libprocess_features htslib/libhts.a
+	$(CXX) $(CXXFLAGS) -o star_feature_call star_feature_call.cpp $(LDFLAGS_PF)
 
 # Convenience target to rebuild only the MEX writer components
 .PHONY: MexWriterObjs
@@ -360,7 +375,7 @@ solo/CbBayesianResolver.o : $(FLEX_SRC_DIR)/solo/CbBayesianResolver.cpp $(FLEX_S
 
 .PHONY: clean
 clean:
-	'rm' -f *.o opal/opal.o solo/*.o STAR STARstatic STARlong Depend.list parametersDefault.xxd
+	'rm' -f *.o opal/opal.o solo/*.o STAR STARstatic STARlong star_feature_call Depend.list parametersDefault.xxd
 	$(MAKE) -C $(LIBFLEX_DIR) clean
 	$(MAKE) -C $(LIBTRIM_DIR) clean
 	$(MAKE) -C $(LIBEM_DIR) clean
