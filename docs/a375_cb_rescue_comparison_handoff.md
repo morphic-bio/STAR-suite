@@ -84,3 +84,46 @@ Use:
 - `FASTQ_DIR=/storage/A375/fastqs/1k_CRISPR_5p_gemx_fastqs/crispr/downsampled_1000_L001_pair`
 
 This isolates CB rescue effects without UMI/min-count noise.
+
+## What we tried and results (post-rebuild)
+### CB rescue and feature matching
+- Rebuilt `assignBarcodes` (maxHamming fix) and reran CB rescue on the 1k L001 pair with `MAX_HAMMING_LIST=1`, `MIN_COUNTS=0`, `LIMIT_SEARCH=-1`, CR nonzero barcodes as the filtered set.
+- The missing barcode `AACTTCTGTCGGGGTT` was due to the CB rescue candidate cap; using `max_barcode_mismatches>=5` recovers it. (`max_barcode_mismatches=3` can return no match when there are too many candidates.) Default was set to 10 for safety.
+
+Best parity run:
+- Output: `/tmp/a375_cb_rescue_scan_1000_L001_pair_m1_mbm5/m1_fn1_bn2_mbm5_off0_lsn1/downsampled_1000_L001_pair`
+- CR nonzero: 475 barcodes / 772 counts
+- STAR: 475 barcodes / 787 counts (delta +15)
+- Feature deltas: `RAB1A-2_MS +14`, `Non_Target-1_MS +1`
+
+Extra STAR barcodes (each +1):
+```
+ACTGTCGCAGGCGTAG
+AGAATGGGTCCTTAAT
+AGTATCCCAACGAGGT
+AGTTGGCTCCACTTAC
+ATAAGGTCACAAATCC
+CACTTAGAGATATGAG
+CGGTATTCACGGTATT
+CGTAACTCACCACCAA
+CTATACACAGTCATAC
+CTATCCCCAGCATCAT
+CTCCGGAAGAAGGTGT
+GCATCGTAGCCAAGCT
+GCCAAATGTGTCGTCT
+GCGTTAGGTGGGAGAT
+GGCCTGGGTGTGAGTT
+```
+
+### FASTQ vs CR molecule check (why STAR > CR)
+- The 15 extra UMIs are present in FASTQ and are not within Hamming 1 of any CR UMI for the same barcode+feature. So this is **not** UMI correction/clique collapse.
+- 14/16 reads are exact guide matches (Hamming=0), 2/16 are Hamming=1; no Ns in the guide window.
+- Guide-window meanQ ~34 on average; minimum base Q in the window is 11.
+- There are 53 FASTQ UMIs (H<=1, unambiguous) that do not appear in CR `raw_molecule_info`.
+
+Detailed outputs:
+- Per-read guide match/quality table for the 15 UMIs: `/tmp/a375_missing_umi_per_read.tsv`
+- FASTQ vs CR UMI comparison table: `/tmp/a375_fastq_vs_cr_umis.tsv`
+
+### CR BAM note
+- Reran Cell Ranger with BAM output enabled (`/tmp/a375_crispr_1000_pair_bam2`), but CR does not emit a feature/guide BAM. Only GEX alignments are in `sample_alignments.bam`, so MAPQ/CIGAR are not available for CRISPR guide reads.
