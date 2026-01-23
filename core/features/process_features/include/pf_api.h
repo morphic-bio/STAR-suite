@@ -98,6 +98,11 @@ void pf_config_set_limit_search(pf_config *config, int limit);
 void pf_config_set_max_reads(pf_config *config, long long max_reads);
 void pf_config_set_translate_nxt(pf_config *config, int enable);
 
+/* EmptyDrops control */
+void pf_config_set_skip_emptydrops(pf_config *config, int enable);
+void pf_config_set_emptydrops_failure_fatal(pf_config *config, int enable);
+void pf_config_set_expected_cells(pf_config *config, int n_cells);
+
 /* ============================================================================
  * Context Lifecycle API
  * ============================================================================ */
@@ -213,6 +218,60 @@ const char* pf_get_feature_name(pf_context *ctx, int index);
  * @return Feature sequence, or NULL if invalid index.
  */
 const char* pf_get_feature_sequence(pf_context *ctx, int index);
+
+/* ============================================================================
+ * EmptyDrops Filtering API (via libscrna)
+ * ============================================================================ */
+
+/**
+ * Run EmptyDrops filtering on pre-MEX data (in-memory structures).
+ * This is the PIPELINE integration point - called from finalize_processing.
+ * 
+ * Writes:
+ *   - filtered_barcodes.txt (at output_dir)
+ *   - EmptyDrops/emptydrops_results.tsv (audit file)
+ * 
+ * @param umi_counts UMI counts per barcode (length: n_barcodes)
+ * @param barcodes Barcode strings (length: n_barcodes)
+ * @param n_barcodes Number of barcodes
+ * @param features Feature names (length: n_features, or NULL for simple mode)
+ * @param n_features Number of features
+ * @param sparse_gene_ids Gene IDs for sparse entries (or NULL for simple mode)
+ * @param sparse_counts Counts for sparse entries (or NULL for simple mode)
+ * @param sparse_cell_index Start index for each cell (or NULL for simple mode)
+ * @param n_genes_per_cell Genes per cell (or NULL for simple mode)
+ * @param output_dir Directory to write outputs
+ * @param n_expected_cells Expected number of cells (0 = auto)
+ * @param filtered_barcodes_out Output: array of filtered barcode strings (caller frees)
+ * @param n_filtered_out Output: number of filtered barcodes
+ * @return PF_OK on success, error code otherwise.
+ */
+pf_error pf_run_emptydrops_premex(
+    const uint32_t *umi_counts,
+    const char **barcodes,
+    uint32_t n_barcodes,
+    const char **features,
+    uint32_t n_features,
+    const uint32_t *sparse_gene_ids,
+    const uint32_t *sparse_counts,
+    const uint32_t *sparse_cell_index,
+    const uint32_t *n_genes_per_cell,
+    const char *output_dir,
+    int n_expected_cells,
+    char ***filtered_barcodes_out,
+    uint32_t *n_filtered_out
+);
+
+/**
+ * Run EmptyDrops filtering on a MEX directory (standalone tool only).
+ * NOT for pipeline use - use pf_run_emptydrops_premex() instead.
+ * 
+ * @param mex_dir Path to MEX directory (containing matrix.mtx, barcodes.tsv, features.tsv)
+ * @param output_dir Directory to write outputs
+ * @param n_expected_cells Expected number of cells (0 = auto)
+ * @return PF_OK on success, error code otherwise.
+ */
+pf_error pf_run_emptydrops_mex(const char *mex_dir, const char *output_dir, int n_expected_cells);
 
 /* ============================================================================
  * Utility Functions

@@ -12,7 +12,7 @@ flex/                    # Flex-specific code + tools
 slam/                    # SLAM-seq code + tools
 build/                   # Modular make fragments
 docs/                    # Suite-level docs
-tests/                   # Suite-level tests
+  tests/                   # Suite-level tests (see tests/ARTIFACTS.md for artifact locations)
 tools/                   # Suite-level scripts/utilities
 ```
 

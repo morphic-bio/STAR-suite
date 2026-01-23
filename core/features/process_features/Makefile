@@ -23,7 +23,7 @@ DEFINES :=
 # Core library sources (shared by all tools)
 # Note: plot_histogram.c is needed by assignBarcodes.c for histogram generation
 # pf_counts.c and mex_writer.c provide modular counts/output stages
-CORE_SRCS = assignBarcodes.c queue.c globals.c utils.c memory.c io.c barcode_match.c pf_api.c call_features.c gmm.c mex_10x.c plot_histogram.c pf_counts.c mex_writer.c
+CORE_SRCS = assignBarcodes.c queue.c globals.c utils.c memory.c io.c barcode_match.c pf_api.c call_features.c gmm.c mex_10x.c plot_histogram.c pf_counts.c mex_writer.c emptydrops_bridge.c barcode_filter.c
 
 # CLI-specific sources
 MAIN_SRCS = main.c
@@ -77,12 +77,13 @@ TEST_API_TARGET=tests/test_pf_api
 TEST_PF_COUNTS_TARGET=tests/test_pf_counts
 TEST_MEX_WRITER_TARGET=tests/test_mex_writer
 TEST_MEX_PARITY_TARGET=tests/test_mex_writer_parity
+TEST_BARCODE_FILTER_TARGET=tests/test_barcode_filter
 
 .PHONY: all clean lib tools test
 
 all: lib tools
 
-test: $(TEST_API_TARGET) $(TEST_PF_COUNTS_TARGET) $(TEST_MEX_WRITER_TARGET) $(TEST_MEX_PARITY_TARGET) test-regression
+test: $(TEST_API_TARGET) $(TEST_PF_COUNTS_TARGET) $(TEST_MEX_WRITER_TARGET) $(TEST_MEX_PARITY_TARGET) $(TEST_BARCODE_FILTER_TARGET) test-regression
 
 lib: $(LIB_TARGET)
 
@@ -133,6 +134,11 @@ $(TEST_MEX_PARITY_TARGET): tests/test_mex_writer_parity.c $(LIB_TARGET) $(LIBSCR
 	$(CC) $(CFLAGS) -c tests/test_mex_writer_parity.c -o tests/test_mex_writer_parity.o
 	$(CXX) -o $@ tests/test_mex_writer_parity.o $(LIB_TARGET) $(LIBSCRNA) $(LDFLAGS)
 
+# Barcode filter test: tests emptydrops_bridge and barcode_filter modules
+$(TEST_BARCODE_FILTER_TARGET): tests/test_barcode_filter.c $(LIB_TARGET) $(LIBSCRNA)
+	$(CC) $(CFLAGS) -c tests/test_barcode_filter.c -o tests/test_barcode_filter.o
+	$(CXX) -o $@ tests/test_barcode_filter.o $(LIB_TARGET) $(LIBSCRNA) $(LDFLAGS)
+
 # Regression test: compares assignBarcodes output against saved baseline
 .PHONY: test-regression
 test-regression: $(TARGET)
@@ -140,4 +146,4 @@ test-regression: $(TARGET)
 	@./tests/test_assignbarcodes_regression.sh
 
 clean:
-	rm -f *.o $(TARGET) $(DEMUX_TARGET) $(DEMUX_BAM_TARGET) $(CALL_FEATURES_TARGET) $(LIB_TARGET) $(TEST_API_TARGET) $(TEST_PF_COUNTS_TARGET) $(TEST_MEX_WRITER_TARGET) $(TEST_MEX_PARITY_TARGET) tests/*.o
+	rm -f *.o $(TARGET) $(DEMUX_TARGET) $(DEMUX_BAM_TARGET) $(CALL_FEATURES_TARGET) $(LIB_TARGET) $(TEST_API_TARGET) $(TEST_PF_COUNTS_TARGET) $(TEST_MEX_WRITER_TARGET) $(TEST_MEX_PARITY_TARGET) $(TEST_BARCODE_FILTER_TARGET) tests/*.o

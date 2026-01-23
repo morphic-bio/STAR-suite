@@ -185,9 +185,10 @@ PROCESS_FEATURES_INC := $(PROCESS_FEATURES_DIR)/include
 libprocess_features:
 	$(MAKE) -C $(PROCESS_FEATURES_DIR) lib
 
+LIBSCRNA_DIR := $(ROOT_DIR)/core/features/libscrna
 star_feature_call: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS) -I$(PROCESS_FEATURES_INC)
-star_feature_call: LDFLAGS_PF := -L$(PROCESS_FEATURES_DIR) -lprocess_features -lm -lpthread -lz -fopenmp -lcairo -Lhtslib -lhts
-star_feature_call: libprocess_features htslib/libhts.a
+star_feature_call: LDFLAGS_PF := -L$(PROCESS_FEATURES_DIR) -lprocess_features -L$(LIBSCRNA_DIR) -lscrna -lm -lpthread -lz -fopenmp -lcairo -Lhtslib -lhts
+star_feature_call: libprocess_features htslib/libhts.a $(LIBSCRNA_DIR)/libscrna.a
 	$(CXX) $(CXXFLAGS) -o star_feature_call star_feature_call.cpp $(LDFLAGS_PF)
 
 # Convenience target to rebuild only the MEX writer components

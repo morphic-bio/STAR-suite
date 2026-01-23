@@ -10,6 +10,7 @@
 #include "../include/heatmap.h"
 #include "../include/pf_counts.h"
 #include "../include/mex_writer.h"
+#include "../include/barcode_filter.h"
 
 //will  print if DEBUG is set or debug=1
 //code for feature sequences stats
@@ -2595,7 +2596,7 @@ int checkAndCorrectBarcode(char **lines, int maxN, uint32_t feature_index, uint1
 }
 
 
-void finalize_processing(feature_arrays *features, data_structures *hashes,  char *directory, memory_pool_collection *pools, statistics *stats, uint16_t stringency, uint16_t min_counts, double min_posterior, khash_t(strptr)* filtered_barcodes_hash){
+void finalize_processing(feature_arrays *features, data_structures *hashes, char *directory, memory_pool_collection *pools, statistics *stats, uint16_t stringency, uint16_t min_counts, double min_posterior, khash_t(strptr)* filtered_barcodes_hash, int skip_emptydrops, int emptydrops_failure_fatal, int expected_cells, int *error_out){
     process_pending_barcodes(hashes, pools, stats,min_posterior);
     double elapsed_time = get_time_in_seconds() - stats->start_time;
     fprintf(stderr, "Finished processing %ld reads in %.2f seconds (%.1f thousand reads/second)\n", stats->number_of_reads, elapsed_time, stats->number_of_reads / (double)elapsed_time / 1000.0);
@@ -2614,6 +2615,45 @@ void finalize_processing(feature_arrays *features, data_structures *hashes,  cha
     // Validate keys for tracing/debugging
     pf_trace_validate_keys(hashes, counts_result->barcode_to_deduped_hash);
 
+    // Stage 3: Filter stage
+    // If no external filter is provided, run EmptyDrops to determine filtered barcodes.
+    // If external filter is provided, use it directly.
+    // If skip_emptydrops is set, skip the filter stage entirely.
+    barcode_filter_config filter_config = {
+        .output_dir = directory,
+        .feature_names = features->feature_names,
+        .n_features = features->number_of_features,
+        .n_expected_cells = expected_cells,
+        .translate_nxt = translate_NXT,
+        .skip_emptydrops = skip_emptydrops,
+        .emptydrops_failure_fatal = emptydrops_failure_fatal
+    };
+    
+    khash_t(strptr) *active_filter = NULL;
+    pf_filter_status filter_status = pf_filter_barcodes(
+        counts_result,
+        &filter_config,
+        filtered_barcodes_hash,  // May be NULL
+        &active_filter
+    );
+    
+    // Handle filter status
+    if (filter_status == PF_FILTER_FAILED) {
+        if (emptydrops_failure_fatal) {
+            fprintf(stderr, "ERROR: EmptyDrops failed (fatal mode)\n");
+            if (error_out) *error_out = 1;
+            pf_counts_result_free(counts_result);
+            return;  // Bail out of this sample
+        } else {
+            fprintf(stderr, "WARNING: EmptyDrops failed; skipping filtered output\n");
+        }
+    } else if (filter_status == PF_FILTER_SKIPPED) {
+        fprintf(stderr, "INFO: EmptyDrops skipped; no filtered output will be produced\n");
+    }
+    
+    // Track if we created a new filter (need to free it later)
+    int filter_is_owned = pf_filter_is_owned(active_filter, filtered_barcodes_hash);
+
     // Stage 2: Use mex_write_all() for all MEX output (barcodes.txt, features.txt,
     // matrix.mtx, stats.txt, feature_per_cell.csv, heatmaps, histograms).
     // This replaces the previous printFeatureCounts() calls.
@@ -2629,30 +2669,23 @@ void finalize_processing(feature_arrays *features, data_structures *hashes,  cha
     // Write unfiltered results
     if (mex_write_all(&config, counts_result) != 0) {
         fprintf(stderr, "Error: mex_write_all failed for unfiltered output\n");
+        if (filter_is_owned) pf_filter_free(active_filter);
         pf_counts_result_free(counts_result);
         return;
-    }
-    
-    // If a filter is provided, write filtered results as well.
-    // mex_write_all() clears and re-populates counts arrays internally.
-    if (filtered_barcodes_hash) {
-        config.filtered_barcodes_hash = filtered_barcodes_hash;
-        if (mex_write_all(&config, counts_result) != 0) {
-            fprintf(stderr, "Error: mex_write_all failed for filtered output\n");
-            pf_counts_result_free(counts_result);
-            return;
-        }
     }
     
     // Write feature_sequences.txt (populates total_feature_counts)
     print_feature_sequences(features, total_feature_counts, directory, hashes);
     
-    // Write deduped_counts_histograms.txt using feature_hist from counts_result
+    // Write deduped_counts_histograms.txt using feature_hist from counts_result.
+    // IMPORTANT: This must be done BEFORE the filtered mex_write_all() call,
+    // because mex_write_all() clears and re-populates feature_hist.
     char deduped_hist_filename[FILENAME_LENGTH];
     sprintf(deduped_hist_filename, "%s/deduped_counts_histograms.txt", directory);
     FILE *deduped_hist_fp = fopen(deduped_hist_filename, "w");
     if (deduped_hist_fp == NULL) {
         perror("Failed to open deduped counts histograms file");
+        if (filter_is_owned) pf_filter_free(active_filter);
         pf_counts_result_free(counts_result);
         exit(EXIT_FAILURE);
     }
@@ -2671,6 +2704,7 @@ void finalize_processing(feature_arrays *features, data_structures *hashes,  cha
     fclose(deduped_hist_fp);
 
     // Process cumulative histogram (simplified - no EM fitting)
+    // IMPORTANT: This must also be done BEFORE the filtered mex_write_all() call.
     {
         long cumulative_deduped_counts = 0;
         long cumulative_barcoded_counts = 0;
@@ -2689,7 +2723,24 @@ void finalize_processing(feature_arrays *features, data_structures *hashes,  cha
         plot_simple_histogram(directory, "umi_counts_histogram", "UMI Counts Distribution", 
                              "UMI Count", "Frequency", counts_result->feature_hist[0]);
     }
+    
+    // Write filtered results if we have a filter (either external or from EmptyDrops)
+    // mex_write_all() clears and re-populates counts arrays internally.
+    if (active_filter) {
+        config.filtered_barcodes_hash = active_filter;
+        if (mex_write_all(&config, counts_result) != 0) {
+            fprintf(stderr, "Error: mex_write_all failed for filtered output\n");
+            if (filter_is_owned) pf_filter_free(active_filter);
+            pf_counts_result_free(counts_result);
+            return;
+        }
+    }
 
+    // Clean up the filter if we created it (EmptyDrops case)
+    if (filter_is_owned) {
+        pf_filter_free(active_filter);
+    }
+    
     // Clean up the counts result (frees all nested hash tables and arrays)
     pf_counts_result_free(counts_result);
 }
@@ -3580,7 +3631,7 @@ void process_files_in_sample(sample_args *args) {
         //[i] = NULL; // Avoid double-free in later cleanup
     }
     // Since merging is not required, finalize using the first thread's data.
-    finalize_processing(args->features, &args->hashes[0], args->directory, args->pools[0], &args->stats[0], args->stringency, args->min_counts, min_posterior, args->filtered_barcodes_hash);
+    finalize_processing(args->features, &args->hashes[0], args->directory, args->pools[0], &args->stats[0], args->stringency, args->min_counts, min_posterior, args->filtered_barcodes_hash, args->skip_emptydrops, args->emptydrops_failure_fatal, args->expected_cells, args->error_out);
    
     // Free the reader sets
     for (int i = 0; i < sample_size; ++i)

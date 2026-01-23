@@ -233,6 +233,14 @@ typedef struct sample_args {
     int sample_constant_offset;      /* >=0 absolute offset; -1 unused */
     int sample_offset_relative;      /* negative/positive offset from feature end; 0 unused */
     feature_arrays *sample_barcodes; /* loaded sample barcode list */
+    
+    /* EmptyDrops control (copied from pf_config) */
+    int skip_emptydrops;             /* 1 = skip EmptyDrops entirely */
+    int emptydrops_failure_fatal;    /* 1 = treat ED failure as error */
+    int expected_cells;              /* 0 = auto-detect */
+    
+    /* Error propagation */
+    int *error_out;                  /* Set to non-zero if fatal error occurred */
 } sample_args;
 
 typedef struct fastq_reader {

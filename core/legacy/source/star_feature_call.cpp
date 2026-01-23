@@ -59,6 +59,10 @@ struct Config {
     int min_counts = 2;
     double dominance_fraction = 0.8;
     int dominance_margin = 1;
+    
+    // EmptyDrops control
+    bool skip_emptydrops = false;
+    int emptydrops_expected_cells = 0;
 };
 
 // ============================================================================
@@ -115,6 +119,10 @@ static void print_usage(const char *prog) {
     fprintf(stderr, "    --max-hamming N         Max Hamming distance for matching (default: 2)\n");
     fprintf(stderr, "    --threads N             Number of threads (default: 8)\n");
     fprintf(stderr, "\n");
+    fprintf(stderr, "  EmptyDrops options:\n");
+    fprintf(stderr, "    --skip-empty-drops      Skip EmptyDrops cell calling\n");
+    fprintf(stderr, "    --emptydrops-expected-cells N  Expected number of cells (default: auto)\n");
+    fprintf(stderr, "\n");
     fprintf(stderr, "  GMM calling parameters:\n");
     fprintf(stderr, "    --min-umi N             Minimum UMI threshold (default: 3)\n");
     fprintf(stderr, "\n");
@@ -146,6 +154,15 @@ static int run_extraction(const Config &cfg) {
     pf_config_set_umi_length(pf_cfg, cfg.umi_length);
     pf_config_set_max_hamming_distance(pf_cfg, cfg.max_hamming);
     pf_config_set_threads(pf_cfg, cfg.threads);
+    
+    // EmptyDrops control
+    pf_config_set_skip_emptydrops(pf_cfg, cfg.skip_emptydrops ? 1 : 0);
+    pf_config_set_expected_cells(pf_cfg, cfg.emptydrops_expected_cells);
+    
+    // In compat mode, EmptyDrops failure is fatal by default (unless skipped)
+    if (cfg.compat_perturb && !cfg.skip_emptydrops) {
+        pf_config_set_emptydrops_failure_fatal(pf_cfg, 1);
+    }
     
     // Initialize context
     pf_context *ctx = pf_init(pf_cfg);
@@ -426,6 +443,8 @@ int main(int argc, char *argv[]) {
         {"min-counts",          required_argument, 0, 1005},
         {"dominance-fraction",  required_argument, 0, 1006},
         {"dominance-margin",    required_argument, 0, 1007},
+        {"skip-empty-drops",    no_argument,       0, 1008},
+        {"emptydrops-expected-cells", required_argument, 0, 1009},
         {"help",                no_argument,       0, 'h'},
         {"version",             no_argument,       0, 'v'},
         {0, 0, 0, 0}
@@ -453,6 +472,8 @@ int main(int argc, char *argv[]) {
             case 1005: cfg.min_counts = atoi(optarg); break;
             case 1006: cfg.dominance_fraction = atof(optarg); break;
             case 1007: cfg.dominance_margin = atoi(optarg); break;
+            case 1008: cfg.skip_emptydrops = true; break;
+            case 1009: cfg.emptydrops_expected_cells = atoi(optarg); break;
             case 'v':
                 printf("star_feature_call version 1.0.0\n");
                 printf("Part of STAR-suite\n");

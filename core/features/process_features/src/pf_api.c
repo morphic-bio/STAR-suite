@@ -44,6 +44,11 @@ struct pf_config {
     int limit_search;
     long long max_reads;
     int translate_nxt;
+    
+    /* EmptyDrops control */
+    int skip_emptydrops;            /* 1 = skip EmptyDrops entirely */
+    int emptydrops_failure_fatal;   /* 1 = treat ED failure as error */
+    int expected_cells;             /* 0 = auto-detect */
 };
 
 struct pf_context {
@@ -87,6 +92,11 @@ pf_config* pf_config_create(void) {
     config->limit_search = -1;
     config->max_reads = 0;
     config->translate_nxt = 0;
+    
+    /* EmptyDrops control defaults */
+    config->skip_emptydrops = 0;
+    config->emptydrops_failure_fatal = 0;
+    config->expected_cells = 0;
     
     return config;
 }
@@ -179,6 +189,18 @@ void pf_config_set_max_reads(pf_config *config, long long max_reads) {
 
 void pf_config_set_translate_nxt(pf_config *config, int enable) {
     if (config) config->translate_nxt = enable;
+}
+
+void pf_config_set_skip_emptydrops(pf_config *config, int enable) {
+    if (config) config->skip_emptydrops = enable;
+}
+
+void pf_config_set_emptydrops_failure_fatal(pf_config *config, int enable) {
+    if (config) config->emptydrops_failure_fatal = enable;
+}
+
+void pf_config_set_expected_cells(pf_config *config, int n_cells) {
+    if (config) config->expected_cells = n_cells;
 }
 
 /* ============================================================================
@@ -419,7 +441,7 @@ pf_error pf_process_fastq_dir(pf_context *ctx,
     
     /* Process each sample */
     double start_time = get_time_in_seconds();
-    size_t total_reads = 0;
+    int any_failed = 0;
     
     for (int i = 0; i < fastq_files.nsamples; i++) {
         char sample_directory[FILENAME_LENGTH];
@@ -430,6 +452,9 @@ pf_error pf_process_fastq_dir(pf_context *ctx,
         if (stat(sample_directory, &st) == -1) {
             mkdir(sample_directory, 0755);
         }
+        
+        /* Per-sample error tracking */
+        int sample_error = 0;
         
         /* Set up sample args */
         sample_args args;
@@ -459,8 +484,20 @@ pf_error pf_process_fastq_dir(pf_context *ctx,
         args.sample_constant_offset = -1;
         args.sample_offset_relative = 0;
         
+        /* EmptyDrops control from config */
+        args.skip_emptydrops = ctx->config->skip_emptydrops;
+        args.emptydrops_failure_fatal = ctx->config->emptydrops_failure_fatal;
+        args.expected_cells = ctx->config->expected_cells;
+        args.error_out = &sample_error;
+        
         /* Process the sample */
         process_files_in_sample(&args);
+        
+        /* Check for errors */
+        if (sample_error) {
+            fprintf(stderr, "[pf_api] Sample %s reported an error\n", fastq_files.sample_names[i]);
+            any_failed = 1;
+        }
     }
     
     double end_time = get_time_in_seconds();
@@ -473,6 +510,12 @@ pf_error pf_process_fastq_dir(pf_context *ctx,
     }
     
     free_fastq_files_collection(&fastq_files);
+    
+    if (any_failed) {
+        snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                 "One or more samples failed during processing");
+        return PF_ERR_IO_ERROR;
+    }
     
     return PF_OK;
 }
@@ -563,6 +606,7 @@ pf_error pf_process_fastqs(pf_context *ctx,
     
     /* Process */
     double start_time = get_time_in_seconds();
+    int sample_error = 0;
     
     sample_args args;
     memset(&args, 0, sizeof(args));
@@ -591,6 +635,12 @@ pf_error pf_process_fastqs(pf_context *ctx,
     args.sample_constant_offset = -1;
     args.sample_offset_relative = 0;
     
+    /* EmptyDrops control from config */
+    args.skip_emptydrops = ctx->config->skip_emptydrops;
+    args.emptydrops_failure_fatal = ctx->config->emptydrops_failure_fatal;
+    args.expected_cells = ctx->config->expected_cells;
+    args.error_out = &sample_error;
+    
     process_files_in_sample(&args);
     
     double end_time = get_time_in_seconds();
@@ -615,6 +665,12 @@ pf_error pf_process_fastqs(pf_context *ctx,
     free(fastq_files.sample_offsets);
     free(fastq_files.sorted_index);
     
+    if (sample_error) {
+        snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                 "Sample processing failed");
+        return PF_ERR_IO_ERROR;
+    }
+    
     return PF_OK;
 }
 
@@ -637,6 +693,395 @@ const char* pf_get_feature_sequence(pf_context *ctx, int index) {
     if (!ctx || !ctx->features) return NULL;
     if (index < 0 || index >= ctx->features->number_of_features) return NULL;
     return ctx->features->feature_sequences[index];
+}
+
+/* ============================================================================
+ * EmptyDrops Filtering API Implementation (via libscrna)
+ * ============================================================================ */
+
+#include "scrna_api.h"
+#include <dirent.h>
+#include <ctype.h>
+
+/* Helper: read barcodes.tsv into array */
+static int read_barcodes_tsv(const char *path, char ***barcodes_out, uint32_t *n_barcodes_out) {
+    FILE *f = fopen(path, "r");
+    if (!f) {
+        /* Try .gz */
+        char gz_path[1024];
+        snprintf(gz_path, sizeof(gz_path), "%s.gz", path);
+        f = fopen(gz_path, "r");
+        if (!f) return -1;
+    }
+    
+    char **barcodes = NULL;
+    uint32_t n = 0, capacity = 1000;
+    barcodes = malloc(capacity * sizeof(char*));
+    if (!barcodes) { fclose(f); return -1; }
+    
+    char line[256];
+    while (fgets(line, sizeof(line), f)) {
+        /* Strip newline */
+        size_t len = strlen(line);
+        while (len > 0 && (line[len-1] == '\n' || line[len-1] == '\r')) line[--len] = '\0';
+        if (len == 0) continue;
+        
+        if (n >= capacity) {
+            capacity *= 2;
+            barcodes = realloc(barcodes, capacity * sizeof(char*));
+        }
+        barcodes[n++] = strdup(line);
+    }
+    fclose(f);
+    
+    *barcodes_out = barcodes;
+    *n_barcodes_out = n;
+    return 0;
+}
+
+/* Helper: read features.tsv into array */
+static int read_features_tsv(const char *path, char ***features_out, uint32_t *n_features_out) {
+    FILE *f = fopen(path, "r");
+    if (!f) {
+        /* Try .gz */
+        char gz_path[1024];
+        snprintf(gz_path, sizeof(gz_path), "%s.gz", path);
+        f = fopen(gz_path, "r");
+        if (!f) return -1;
+    }
+    
+    char **features = NULL;
+    uint32_t n = 0, capacity = 100;
+    features = malloc(capacity * sizeof(char*));
+    if (!features) { fclose(f); return -1; }
+    
+    char line[1024];
+    while (fgets(line, sizeof(line), f)) {
+        /* Extract first column (tab-separated) */
+        char *tab = strchr(line, '\t');
+        if (tab) *tab = '\0';
+        size_t len = strlen(line);
+        while (len > 0 && (line[len-1] == '\n' || line[len-1] == '\r')) line[--len] = '\0';
+        if (len == 0) continue;
+        
+        if (n >= capacity) {
+            capacity *= 2;
+            features = realloc(features, capacity * sizeof(char*));
+        }
+        features[n++] = strdup(line);
+    }
+    fclose(f);
+    
+    *features_out = features;
+    *n_features_out = n;
+    return 0;
+}
+
+/* Helper: read matrix.mtx and build sparse arrays */
+static int read_matrix_mtx(const char *path,
+                           uint32_t n_features, uint32_t n_barcodes,
+                           uint32_t **umi_counts_out,
+                           uint32_t **sparse_gene_ids_out,
+                           uint32_t **sparse_counts_out,
+                           uint32_t **sparse_cell_index_out,
+                           uint32_t **n_genes_per_cell_out,
+                           size_t *nnz_out) {
+    FILE *f = fopen(path, "r");
+    if (!f) {
+        /* Try .gz - would need zlib, skip for now */
+        return -1;
+    }
+    
+    char line[1024];
+    
+    /* Skip header comments */
+    while (fgets(line, sizeof(line), f)) {
+        if (line[0] != '%') break;
+    }
+    
+    /* Parse dimensions: nrows ncols nnz */
+    uint32_t nrows, ncols, nnz;
+    if (sscanf(line, "%u %u %u", &nrows, &ncols, &nnz) != 3) {
+        fclose(f);
+        return -1;
+    }
+    
+    if (nrows != n_features || ncols != n_barcodes) {
+        fprintf(stderr, "[pf_api] Matrix dimensions (%u x %u) don't match features (%u) and barcodes (%u)\n",
+                nrows, ncols, n_features, n_barcodes);
+        fclose(f);
+        return -1;
+    }
+    
+    /* Allocate sparse arrays */
+    uint32_t *sparse_gene_ids = malloc(nnz * sizeof(uint32_t));
+    uint32_t *sparse_counts = malloc(nnz * sizeof(uint32_t));
+    uint32_t *cell_starts = calloc(n_barcodes + 1, sizeof(uint32_t));  /* Temp: count per cell */
+    
+    if (!sparse_gene_ids || !sparse_counts || !cell_starts) {
+        free(sparse_gene_ids);
+        free(sparse_counts);
+        free(cell_starts);
+        fclose(f);
+        return -1;
+    }
+    
+    /* First pass: count entries per cell */
+    long pos = ftell(f);
+    while (fgets(line, sizeof(line), f)) {
+        uint32_t row, col, val;
+        if (sscanf(line, "%u %u %u", &row, &col, &val) == 3) {
+            if (col >= 1 && col <= n_barcodes) {
+                cell_starts[col]++;  /* 1-indexed to 0-indexed mapping */
+            }
+        }
+    }
+    
+    /* Compute cumulative starts */
+    uint32_t *sparse_cell_index = malloc((n_barcodes + 1) * sizeof(uint32_t));
+    uint32_t *n_genes_per_cell = calloc(n_barcodes, sizeof(uint32_t));
+    sparse_cell_index[0] = 0;
+    for (uint32_t i = 0; i < n_barcodes; i++) {
+        n_genes_per_cell[i] = cell_starts[i + 1];  /* cell_starts is 1-indexed counts */
+        sparse_cell_index[i + 1] = sparse_cell_index[i] + cell_starts[i + 1];
+    }
+    
+    /* Reset cell_starts for use as current write position */
+    memset(cell_starts, 0, (n_barcodes + 1) * sizeof(uint32_t));
+    
+    /* Second pass: fill sparse arrays */
+    fseek(f, pos, SEEK_SET);
+    uint32_t *umi_counts = calloc(n_barcodes, sizeof(uint32_t));
+    
+    while (fgets(line, sizeof(line), f)) {
+        uint32_t row, col, val;
+        if (sscanf(line, "%u %u %u", &row, &col, &val) == 3) {
+            if (col >= 1 && col <= n_barcodes && row >= 1 && row <= n_features) {
+                uint32_t cell_idx = col - 1;
+                uint32_t gene_idx = row - 1;
+                uint32_t write_pos = sparse_cell_index[cell_idx] + cell_starts[col];
+                
+                sparse_gene_ids[write_pos] = gene_idx;
+                sparse_counts[write_pos] = val;
+                cell_starts[col]++;
+                
+                umi_counts[cell_idx] += val;
+            }
+        }
+    }
+    
+    fclose(f);
+    free(cell_starts);
+    
+    *umi_counts_out = umi_counts;
+    *sparse_gene_ids_out = sparse_gene_ids;
+    *sparse_counts_out = sparse_counts;
+    *sparse_cell_index_out = sparse_cell_index;
+    *n_genes_per_cell_out = n_genes_per_cell;
+    *nnz_out = nnz;
+    
+    return 0;
+}
+
+/* ============================================================================
+ * Pre-MEX EmptyDrops (pipeline integration point)
+ * ============================================================================ */
+
+pf_error pf_run_emptydrops_premex(
+    const uint32_t *umi_counts,
+    const char **barcodes,
+    uint32_t n_barcodes,
+    const char **features,
+    uint32_t n_features,
+    const uint32_t *sparse_gene_ids,
+    const uint32_t *sparse_counts,
+    const uint32_t *sparse_cell_index,
+    const uint32_t *n_genes_per_cell,
+    const char *output_dir,
+    int n_expected_cells,
+    char ***filtered_barcodes_out,
+    uint32_t *n_filtered_out
+) {
+    if (!umi_counts || !barcodes || n_barcodes == 0 || !output_dir) {
+        return PF_ERR_INVALID_ARG;
+    }
+    
+    fprintf(stderr, "[pf_api] Running EmptyDrops on pre-MEX data (%u barcodes)...\n", n_barcodes);
+    
+    /* Set up EmptyDrops input */
+    scrna_matrix_input input;
+    memset(&input, 0, sizeof(input));
+    input.umi_counts = (uint32_t*)umi_counts;  /* Cast away const for API compatibility */
+    input.barcodes = (char**)barcodes;
+    input.features = (char**)features;
+    input.n_cells = n_barcodes;
+    input.n_features = n_features;
+    input.sparse_gene_ids = (uint32_t*)sparse_gene_ids;
+    input.sparse_counts = (uint32_t*)sparse_counts;
+    input.sparse_cell_index = (uint32_t*)sparse_cell_index;
+    input.n_genes_per_cell = (uint32_t*)n_genes_per_cell;
+    
+    /* Create config */
+    scrna_ed_config *config = scrna_ed_config_create();
+    if (n_expected_cells > 0) {
+        config->n_expected_cells = n_expected_cells;
+    }
+    config->disable_occupancy_filter = 1;  /* Disabled for compat mode */
+    
+    /* Run EmptyDrops */
+    scrna_ed_result result;
+    int rc = scrna_emptydrops_run(&input, config, &result);
+    
+    if (rc != 0) {
+        fprintf(stderr, "[pf_api] EmptyDrops failed: %s\n", 
+                result.error_message ? result.error_message : "unknown error");
+        scrna_ed_result_free(&result);
+        scrna_ed_config_destroy(config);
+        return PF_ERR_IO_ERROR;
+    }
+    
+    fprintf(stderr, "[pf_api] EmptyDrops: %zu cells pass\n", result.n_barcodes);
+    
+    /* Write outputs */
+    rc = scrna_emptydrops_write_outputs(&result, output_dir);
+    if (rc != 0) {
+        fprintf(stderr, "[pf_api] Failed to write EmptyDrops outputs\n");
+        scrna_ed_result_free(&result);
+        scrna_ed_config_destroy(config);
+        return PF_ERR_IO_ERROR;
+    }
+    
+    /* Return filtered barcodes to caller */
+    if (filtered_barcodes_out && n_filtered_out) {
+        *n_filtered_out = result.n_barcodes;
+        *filtered_barcodes_out = (char**)malloc(result.n_barcodes * sizeof(char*));
+        if (*filtered_barcodes_out) {
+            for (size_t i = 0; i < result.n_barcodes; i++) {
+                (*filtered_barcodes_out)[i] = strdup(result.barcodes[i]);
+            }
+        }
+    }
+    
+    scrna_ed_result_free(&result);
+    scrna_ed_config_destroy(config);
+    
+    return PF_OK;
+}
+
+/* ============================================================================
+ * MEX-based EmptyDrops (standalone tool only - NOT for pipeline use)
+ * ============================================================================ */
+
+pf_error pf_run_emptydrops_mex(const char *mex_dir, const char *output_dir, int n_expected_cells) {
+    if (!mex_dir || !output_dir) {
+        return PF_ERR_INVALID_ARG;
+    }
+    
+    fprintf(stderr, "[pf_api] Running EmptyDrops on MEX directory %s (standalone mode)...\n", mex_dir);
+    
+    /* Build file paths */
+    char barcodes_path[1024], features_path[1024], matrix_path[1024];
+    snprintf(barcodes_path, sizeof(barcodes_path), "%s/barcodes.tsv", mex_dir);
+    snprintf(features_path, sizeof(features_path), "%s/features.tsv", mex_dir);
+    snprintf(matrix_path, sizeof(matrix_path), "%s/matrix.mtx", mex_dir);
+    
+    /* Read barcodes */
+    char **barcodes = NULL;
+    uint32_t n_barcodes = 0;
+    if (read_barcodes_tsv(barcodes_path, &barcodes, &n_barcodes) != 0) {
+        fprintf(stderr, "[pf_api] Failed to read barcodes from %s\n", barcodes_path);
+        return PF_ERR_FILE_NOT_FOUND;
+    }
+    fprintf(stderr, "[pf_api] Loaded %u barcodes\n", n_barcodes);
+    
+    /* Read features */
+    char **features = NULL;
+    uint32_t n_features = 0;
+    if (read_features_tsv(features_path, &features, &n_features) != 0) {
+        fprintf(stderr, "[pf_api] Failed to read features from %s\n", features_path);
+        for (uint32_t i = 0; i < n_barcodes; i++) free(barcodes[i]);
+        free(barcodes);
+        return PF_ERR_FILE_NOT_FOUND;
+    }
+    fprintf(stderr, "[pf_api] Loaded %u features\n", n_features);
+    
+    /* Read matrix */
+    uint32_t *umi_counts = NULL;
+    uint32_t *sparse_gene_ids = NULL;
+    uint32_t *sparse_counts = NULL;
+    uint32_t *sparse_cell_index = NULL;
+    uint32_t *n_genes_per_cell = NULL;
+    size_t nnz = 0;
+    
+    if (read_matrix_mtx(matrix_path, n_features, n_barcodes,
+                        &umi_counts, &sparse_gene_ids, &sparse_counts,
+                        &sparse_cell_index, &n_genes_per_cell, &nnz) != 0) {
+        fprintf(stderr, "[pf_api] Failed to read matrix from %s\n", matrix_path);
+        for (uint32_t i = 0; i < n_barcodes; i++) free(barcodes[i]);
+        free(barcodes);
+        for (uint32_t i = 0; i < n_features; i++) free(features[i]);
+        free(features);
+        return PF_ERR_FILE_NOT_FOUND;
+    }
+    fprintf(stderr, "[pf_api] Loaded matrix: %zu non-zero entries\n", nnz);
+    
+    /* Set up EmptyDrops input */
+    scrna_matrix_input input;
+    memset(&input, 0, sizeof(input));
+    input.umi_counts = umi_counts;
+    input.barcodes = barcodes;
+    input.features = features;
+    input.n_cells = n_barcodes;
+    input.n_features = n_features;
+    input.sparse_gene_ids = sparse_gene_ids;
+    input.sparse_counts = sparse_counts;
+    input.sparse_cell_index = sparse_cell_index;
+    input.n_genes_per_cell = n_genes_per_cell;
+    input.sparse_nnz = nnz;
+    
+    /* Create config */
+    scrna_ed_config *config = scrna_ed_config_create();
+    if (n_expected_cells > 0) {
+        config->n_expected_cells = n_expected_cells;
+    }
+    config->disable_occupancy_filter = 1;  /* Disabled for compat mode */
+    
+    /* Run EmptyDrops */
+    scrna_ed_result result;
+    int rc = scrna_emptydrops_run(&input, config, &result);
+    
+    if (rc != 0) {
+        fprintf(stderr, "[pf_api] EmptyDrops failed: %s\n", 
+                result.error_message ? result.error_message : "unknown error");
+        scrna_ed_result_free(&result);
+        scrna_ed_config_destroy(config);
+        goto cleanup;
+    }
+    
+    fprintf(stderr, "[pf_api] EmptyDrops: %zu cells pass\n", result.n_barcodes);
+    
+    /* Write outputs */
+    rc = scrna_emptydrops_write_outputs(&result, output_dir);
+    if (rc != 0) {
+        fprintf(stderr, "[pf_api] Failed to write EmptyDrops outputs\n");
+    }
+    
+    scrna_ed_result_free(&result);
+    scrna_ed_config_destroy(config);
+    
+cleanup:
+    /* Free memory */
+    for (uint32_t i = 0; i < n_barcodes; i++) free(barcodes[i]);
+    free(barcodes);
+    for (uint32_t i = 0; i < n_features; i++) free(features[i]);
+    free(features);
+    free(umi_counts);
+    free(sparse_gene_ids);
+    free(sparse_counts);
+    free(sparse_cell_index);
+    free(n_genes_per_cell);
+    
+    return (rc == 0) ? PF_OK : PF_ERR_IO_ERROR;
 }
 
 /* ============================================================================

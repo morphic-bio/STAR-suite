@@ -50,6 +50,11 @@ static void print_usage(const char *prog){
     fprintf(stderr, "  -R, --read_buffer_lines <int>     Lines for read buffer (default 1024)\n");
     fprintf(stderr, "  -L, --average_read_length <int>   Estimated avg read length for buffer allocation (default 300)\n\n");
 
+    fprintf(stderr, "EmptyDrops Options:\n");
+    fprintf(stderr, "      --skip_empty_drops            Skip EmptyDrops cell calling\n");
+    fprintf(stderr, "      --emptydrops_expected_cells <int> Expected number of cells (default: auto)\n");
+    fprintf(stderr, "      --emptydrops_failure_fatal    Treat EmptyDrops failure as error\n\n");
+
     fprintf(stderr, "Miscellaneous:\n");
     fprintf(stderr, "      --translate_NXT               Complement positions 8 and 9 of cell barcodes at output/filter stages\n");
     fprintf(stderr, "  -v, --debug                       Enable verbose debug output\n");
@@ -102,6 +107,11 @@ int main(int argc, char *argv[])
     int sample_offset_relative_cli = 0;
     feature_arrays *sample_barcodes = NULL;
 
+    /* EmptyDrops control */
+    int skip_emptydrops = 0;
+    int emptydrops_expected_cells = 0;
+    int emptydrops_failure_fatal = 0;
+
     static struct option long_options[] = {
         {"whitelist", required_argument, 0, 'w'},
         {"featurelist", required_argument, 0, 'f'},
@@ -138,6 +148,10 @@ int main(int argc, char *argv[])
         {"min_prediction", required_argument, 0, 15},
         {"min_heatmap", required_argument, 0, 16},
         {"translate_NXT", no_argument, 0, 17},
+        {"skip_empty_drops", no_argument, 0, 18},
+        {"skip_emptydrops", no_argument, 0, 18},  /* alias */
+        {"emptydrops_expected_cells", required_argument, 0, 19},
+        {"emptydrops_failure_fatal", no_argument, 0, 20},
         {"help", no_argument, 0, 'h'},
         {0, 0, 0, 0}
     };
@@ -183,6 +197,9 @@ int main(int argc, char *argv[])
             case 15: min_prediction = atoi(optarg); break;
             case 16: min_heatmap = atoi(optarg); break;
             case 17: translate_NXT = 1; fprintf(stderr, "translate_NXT enabled: complementing positions 8 and 9 at output/filter time.\n"); break;
+            case 18: skip_emptydrops = 1; break;
+            case 19: emptydrops_expected_cells = atoi(optarg); break;
+            case 20: emptydrops_failure_fatal = 1; break;
             case 'h': print_usage(argv[0]); return 0;
             default: print_usage(argv[0]); return 1;
         }
@@ -299,6 +316,7 @@ int main(int argc, char *argv[])
             fprintf(stderr, "Processing sample directory %s\n", sample_directory);
             if (existing_output_skip(keep_existing, sample_directory)) exit(0);
             sample_args args;
+            memset(&args, 0, sizeof(args));  // Zero-initialize all fields
             // The following are now initialized in process_files_in_sample
             // memory_pool_collection *pools=initialize_memory_pool_collection();
             // statistics stats;
@@ -338,18 +356,43 @@ int main(int argc, char *argv[])
             args.sample_hashes = NULL;
             args.sample_stats = NULL;
             args.sample_pools = NULL;
+            
+            /* EmptyDrops control from CLI flags */
+            int child_error = 0;
+            args.skip_emptydrops = skip_emptydrops;
+            args.emptydrops_failure_fatal = emptydrops_failure_fatal;
+            args.expected_cells = emptydrops_expected_cells;
+            args.error_out = &child_error;
+            
             process_files_in_sample(&args);
             // cleanup_sample is handled within process_files_in_sample
             atomic_fetch_add(thread_counter, -threads_per_set);
-            exit(0);
+            exit(child_error ? 1 : 0);
         }
         concurrent_processes++;
 
     }
+    
+    /* Wait for all children and check exit status */
+    int any_failed = 0;
     while (concurrent_processes > 0) {
-        wait(NULL);
+        int status;
+        pid_t child_pid = waitpid(-1, &status, 0);
+        if (child_pid > 0) {
+            if (WIFEXITED(status)) {
+                int exit_code = WEXITSTATUS(status);
+                if (exit_code != 0) {
+                    fprintf(stderr, "Child process %d exited with error code %d\n", child_pid, exit_code);
+                    any_failed = 1;
+                }
+            } else if (WIFSIGNALED(status)) {
+                fprintf(stderr, "Child process %d killed by signal %d\n", child_pid, WTERMSIG(status));
+                any_failed = 1;
+            }
+        }
         concurrent_processes--;
     }
+    
     kh_destroy(u32ptr, whitelist_hash);
     free(whitelist);
     if (barcodeFastqFilesString) free(barcodeFastqFilesString);
@@ -359,5 +402,10 @@ int main(int argc, char *argv[])
     if (filtered_barcodes_hash) free_strptr_hash(filtered_barcodes_hash);
     free_feature_arrays(features);
     free_fastq_files_collection(&fastq_files);
+    
+    if (any_failed) {
+        fprintf(stderr, "One or more samples failed\n");
+        return 1;
+    }
     return 0;
 }
