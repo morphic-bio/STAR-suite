@@ -1,0 +1,16 @@
+# Build artifacts
+*.o
+*.a
+src/*.o
+
+# Test binaries
+tests/test_*
+
+# Editor files
+*.swp
+*~
+.*.swp
+
+# IDE/Editor directories
+.vscode/
+.idea/
