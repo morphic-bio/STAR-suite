@@ -1,0 +1,3 @@
+FeatureName	DedupedCount	Frequency
+FeatureA	1	1
+FeatureC	1	1

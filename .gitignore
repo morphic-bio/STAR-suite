@@ -115,3 +115,4 @@ Depend.list
 ## Local smoke-test run artifacts
 /tests/flex_smoke/baseline_*/
 /tests/flex_smoke/current_*/
+core/features/process_features/tests/fixtures/assignbarcodes_baseline/actual/

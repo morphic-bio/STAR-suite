@@ -1,0 +1,15 @@
+<!DOCTYPE html><html><head><title>Feature Multiplicity</title><script src="https://cdn.plot.ly/plotly-latest.min.js"></script></head><body><div id="plot" style="width:100%;height:600px;"></div><script>
+var hist_y = [0,2];
+var x_axis = [0,1];
+var hist_trace = { x: x_axis, y: hist_y, type: 'bar', name: 'Frequency' };
+var data = [hist_trace];
+var layout = {
+    title: { text: 'Feature Multiplicity', x: 0.5 },
+    xaxis: { title: 'Deduplicated UMI Count', range: [0, 5] },
+    yaxis: { title: 'Frequency', type: 'linear' },
+    showlegend: true,
+    plot_bgcolor: 'rgba(240,240,240,0.95)',
+    paper_bgcolor: 'rgba(240,240,240,0.95)'
+};
+Plotly.newPlot('plot', data, layout);
+</script></body></html>

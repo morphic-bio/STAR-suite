@@ -8,6 +8,8 @@
 #include "../include/plot_histogram.h"
 // EMfit.h removed - EM functionality no longer needed
 #include "../include/heatmap.h"
+#include "../include/pf_counts.h"
+#include "../include/mex_writer.h"
 
 //will  print if DEBUG is set or debug=1
 //code for feature sequences stats
@@ -2598,57 +2600,65 @@ void finalize_processing(feature_arrays *features, data_structures *hashes,  cha
     double elapsed_time = get_time_in_seconds() - stats->start_time;
     fprintf(stderr, "Finished processing %ld reads in %.2f seconds (%.1f thousand reads/second)\n", stats->number_of_reads, elapsed_time, stats->number_of_reads / (double)elapsed_time / 1000.0);
 
-    //find size of whitelist_hash and non_whitelist_hash
+    // total_feature_counts is populated separately by print_feature_sequences()
     int total_feature_counts[features->number_of_features + 1];
-    int total_deduped_counts[features->number_of_features + 1];
-    int total_barcoded_counts[features->number_of_features + 1];
 
-    vec_u32_t **feature_hist = calloc(features->number_of_features + 1, sizeof(vec_u32_t*));
-
+    // Create and populate the deduped counts using modular pf_counts API.
+    // pf_build_deduped_counts() internally calls find_deduped_counts().
+    pf_counts_result *counts_result = pf_build_deduped_counts(hashes, features->number_of_features, stringency, min_counts);
+    if (!counts_result) {
+        fprintf(stderr, "Error: failed to build deduped counts\n");
+        return;
+    }
     
-    // Create and populate the deduped counts hash table once.
-    khash_t(u32ptr)* barcode_to_deduped_hash = kh_init(u32ptr);
-    find_deduped_counts(hashes, barcode_to_deduped_hash, stringency, min_counts);
-    pf_trace_validate_keys(hashes, barcode_to_deduped_hash);
+    // Validate keys for tracing/debugging
+    pf_trace_validate_keys(hashes, counts_result->barcode_to_deduped_hash);
 
-    // Print the unfiltered results
-    printFeatureCounts(features, total_deduped_counts, total_barcoded_counts, feature_hist, directory, hashes, stats, barcode_to_deduped_hash, NULL);
+    // Stage 2: Use mex_write_all() for all MEX output (barcodes.txt, features.txt,
+    // matrix.mtx, stats.txt, feature_per_cell.csv, heatmaps, histograms).
+    // This replaces the previous printFeatureCounts() calls.
+    mex_writer_config config = {
+        .output_dir = directory,
+        .features = features,
+        .hashes = hashes,
+        .stats = stats,
+        .filtered_barcodes_hash = NULL,  // First pass: unfiltered
+        .min_heatmap_counts = min_heatmap
+    };
     
-    // If a filter is provided, print the filtered results as well.
+    // Write unfiltered results
+    if (mex_write_all(&config, counts_result) != 0) {
+        fprintf(stderr, "Error: mex_write_all failed for unfiltered output\n");
+        pf_counts_result_free(counts_result);
+        return;
+    }
+    
+    // If a filter is provided, write filtered results as well.
+    // mex_write_all() clears and re-populates counts arrays internally.
     if (filtered_barcodes_hash) {
-        // Reset co-expression and histogram data before the second ru
-        for (int i = 0; i < features->number_of_features + 1; i++) {
-            if (feature_hist[i]) {
-                vec_u32_destroy(feature_hist[i]);
-                feature_hist[i] = NULL;
-            }
-        }
-        
-        printFeatureCounts(features, total_deduped_counts, total_barcoded_counts, feature_hist, directory, hashes, stats, barcode_to_deduped_hash, filtered_barcodes_hash);
-    }
-    
-    // Clean up the hash table now that all printing is done.
-    // Destroy nested hash tables first
-    khint_t k;
-    for (k = kh_begin(barcode_to_deduped_hash); k != kh_end(barcode_to_deduped_hash); ++k) {
-        if (kh_exist(barcode_to_deduped_hash, k)) {
-            kh_destroy(u32u32, (khash_t(u32u32)*)kh_val(barcode_to_deduped_hash, k));
+        config.filtered_barcodes_hash = filtered_barcodes_hash;
+        if (mex_write_all(&config, counts_result) != 0) {
+            fprintf(stderr, "Error: mex_write_all failed for filtered output\n");
+            pf_counts_result_free(counts_result);
+            return;
         }
     }
-    kh_destroy(u32ptr, barcode_to_deduped_hash);
     
-    //DEBUG_PRINT( "Number of reads matched to a feature %ld\n", valid);
+    // Write feature_sequences.txt (populates total_feature_counts)
     print_feature_sequences(features, total_feature_counts, directory, hashes);
+    
+    // Write deduped_counts_histograms.txt using feature_hist from counts_result
     char deduped_hist_filename[FILENAME_LENGTH];
     sprintf(deduped_hist_filename, "%s/deduped_counts_histograms.txt", directory);
     FILE *deduped_hist_fp = fopen(deduped_hist_filename, "w");
     if (deduped_hist_fp == NULL) {
         perror("Failed to open deduped counts histograms file");
+        pf_counts_result_free(counts_result);
         exit(EXIT_FAILURE);
     }
     fprintf(deduped_hist_fp, "FeatureName\tDedupedCount\tFrequency\n");
     for (int i = 0; i < features->number_of_features; i++) {
-        vec_u32_t *h = feature_hist[i + 1]; // Histograms are 1-indexed
+        vec_u32_t *h = counts_result->feature_hist[i + 1]; // Histograms are 1-indexed
         if (h && vec_u32_size(h) > 0) {
             for (size_t j = 0; j < vec_u32_size(h); j++) {
                 uint32_t frequency = vec_u32_get(h, j);
@@ -2660,21 +2670,14 @@ void finalize_processing(feature_arrays *features, data_structures *hashes,  cha
     }
     fclose(deduped_hist_fp);
 
-    // EM-related output files removed - no longer needed without EM functionality
-
-    int feature_printed[features->number_of_features];
-    memset(feature_printed, 0, features->number_of_features * sizeof(int));
-
-    // EM fitting removed - using simple counts only
-
     // Process cumulative histogram (simplified - no EM fitting)
     {
         long cumulative_deduped_counts = 0;
         long cumulative_barcoded_counts = 0;
         long cumulative_feature_counts = 0;
         for (int i = 0; i < features->number_of_features; i++) {
-            cumulative_deduped_counts += total_deduped_counts[i];
-            cumulative_barcoded_counts += total_barcoded_counts[i];
+            cumulative_deduped_counts += counts_result->total_deduped_counts[i];
+            cumulative_barcoded_counts += counts_result->total_barcoded_counts[i];
             cumulative_feature_counts += total_feature_counts[i];
         }
 
@@ -2684,13 +2687,11 @@ void finalize_processing(feature_arrays *features, data_structures *hashes,  cha
         
         // Generate simple histogram plot without EM fit
         plot_simple_histogram(directory, "umi_counts_histogram", "UMI Counts Distribution", 
-                             "UMI Count", "Frequency", feature_hist[0]);
+                             "UMI Count", "Frequency", counts_result->feature_hist[0]);
     }
 
-    // Free the feature histogram arrays
-    for(int i=0; i < features->number_of_features + 1; ++i)
-        if(feature_hist[i]) vec_u32_destroy(feature_hist[i]);
-    free(feature_hist);
+    // Clean up the counts result (frees all nested hash tables and arrays)
+    pf_counts_result_free(counts_result);
 }
 
 void open_fastq_files(const char *barcode_fastq, const char *forward_fastq, const char *reverse_fastq, gzFile *barcode_fastqgz, gzFile *forward_fastqgz, gzFile *reverse_fastqgz) {
