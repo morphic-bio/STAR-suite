@@ -7,11 +7,14 @@
 #include "ErrorWarning.h"
 #include "serviceFuns.cpp"
 #include "TimeFunctions.h"
+#include "call_features.h"
+#include "MexWriter.h"
 #include <sys/stat.h>
 #include <dirent.h>
 #include <stdexcept>
 #include <iostream>
 #include <algorithm>
+#include <cstdio>
 using std::cerr;
 using std::endl;
 
@@ -208,6 +211,110 @@ static bool getFilteredBarcodesFromSolo(const Solo* solo, const Parameters& P, v
         }
     }
     return !out.empty();
+}
+
+/**
+ * Run CRISPR feature calling on filtered MEX with CRISPR Guide Capture features.
+ * 
+ * @param filteredMexDir Directory containing filtered_feature_bc_matrix
+ * @param outputDir Output directory for crispr_analysis/
+ * @param minUmi Minimum UMI threshold for GMM calling
+ * @param logStream Log output stream
+ * @return 0 on success, -1 on failure
+ */
+static int runCrisprFeatureCalling(const string& filteredMexDir, const string& outputDir,
+                                    int minUmi, ostream& logStream) {
+    logStream << timeMonthDayTime() << " ..... starting CRISPR feature calling\n";
+    
+    // Step 1: Read the filtered MEX
+    CrMultiMerge::MexData mexData;
+    try {
+        mexData = CrMultiMerge::readMex(filteredMexDir);
+    } catch (const exception& e) {
+        logStream << "ERROR: Failed to read filtered MEX for CRISPR calling: " << e.what() << "\n";
+        return -1;
+    }
+    
+    // Step 2: Filter to CRISPR Guide Capture features only
+    CrMultiMerge::MexData crisprData = CrMultiMerge::filterByFeatureType(mexData, "CRISPR Guide Capture");
+    
+    if (crisprData.features.empty()) {
+        logStream << "NOTICE: No CRISPR Guide Capture features found, skipping feature calling\n";
+        return 0;
+    }
+    
+    logStream << "  CRISPR features found: " << crisprData.features.size() << "\n";
+    logStream << "  Barcodes: " << crisprData.barcodes.size() << "\n";
+    logStream << "  Non-zero entries: " << crisprData.triplets.size() << "\n";
+    
+    // Step 3: Write CRISPR-only MEX to temporary directory
+    string tempMexDir = outputDir + "/.crispr_mex_tmp";
+    string mkdirCmd = "mkdir -p \"" + tempMexDir + "\"";
+    if (system(mkdirCmd.c_str()) != 0) {
+        logStream << "ERROR: Failed to create temp directory: " << tempMexDir << "\n";
+        return -1;
+    }
+    
+    // Convert MexData to MexWriter format
+    vector<MexWriter::Feature> features;
+    for (size_t i = 0; i < crisprData.features.size(); ++i) {
+        string name = (i < crisprData.featureNames.size()) ? crisprData.featureNames[i] : crisprData.features[i];
+        string type = (i < crisprData.featureTypes.size()) ? crisprData.featureTypes[i] : "CRISPR Guide Capture";
+        features.emplace_back(crisprData.features[i], name, type);
+    }
+    
+    // Write MEX (uncompressed for call_features compatibility)
+    string mexPrefix = tempMexDir + "/";
+    int ret = MexWriter::writeMex(mexPrefix, crisprData.barcodes, features, crisprData.triplets, -1);
+    if (ret != 0) {
+        logStream << "ERROR: Failed to write temporary CRISPR MEX\n";
+        return -1;
+    }
+    
+    // Step 4: Run GMM feature calling with min_umi=10 (CR-compatible default)
+    string crisprAnalysisDir = outputDir + "/crispr_analysis";
+    mkdirCmd = "mkdir -p \"" + crisprAnalysisDir + "\"";
+    if (system(mkdirCmd.c_str()) != 0) {
+        logStream << "ERROR: Failed to create crispr_analysis directory\n";
+        string rmCmd = "rm -rf \"" + tempMexDir + "\"";
+        system(rmCmd.c_str());
+        return -1;
+    }
+    
+    cf_gmm_config *gmm_cfg = cf_gmm_config_create();
+    if (!gmm_cfg) {
+        logStream << "ERROR: Failed to create GMM config\n";
+        return -1;
+    }
+    gmm_cfg->min_umi_threshold = minUmi;
+    
+    logStream << "  Calling mode: GMM (CR9-compatible)\n";
+    logStream << "  min_umi: " << gmm_cfg->min_umi_threshold << "\n";
+    logStream << "  Output: " << crisprAnalysisDir << "\n";
+    
+    ret = cf_process_mex_dir_gmm(tempMexDir.c_str(), crisprAnalysisDir.c_str(), gmm_cfg);
+    cf_gmm_config_destroy(gmm_cfg);
+    
+    if (ret != 0) {
+        logStream << "ERROR: CRISPR feature calling failed\n";
+        // Cleanup temp dir
+        string rmCmd = "rm -rf \"" + tempMexDir + "\"";
+        system(rmCmd.c_str());
+        return -1;
+    }
+    
+    // Step 5: Cleanup temporary MEX directory
+    string rmCmd = "rm -rf \"" + tempMexDir + "\"";
+    system(rmCmd.c_str());
+    
+    logStream << timeMonthDayTime() << " ..... finished CRISPR feature calling\n";
+    logStream << "  Output files:\n";
+    logStream << "    " << crisprAnalysisDir << "/protospacer_calls_per_cell.csv\n";
+    logStream << "    " << crisprAnalysisDir << "/protospacer_calls_summary.csv\n";
+    logStream << "    " << crisprAnalysisDir << "/protospacer_umi_thresholds.csv\n";
+    logStream << "    " << crisprAnalysisDir << "/protospacer_umi_thresholds.json\n";
+    
+    return 0;
 }
 
 } // namespace
@@ -529,6 +636,23 @@ int processCrMultiConfig(Parameters& P, const Solo* solo) {
             throw runtime_error("Failed to write filtered combined MEX");
         }
         P.inOut->logMain << "Filtered MEX written to: " << filteredOutDir << "\n";
+        
+        // Run CRISPR feature calling if CRISPR Guide Capture features were processed
+        bool hasCrisprFeatures = false;
+        for (const auto& run : featureRuns) {
+            if (run.featureType == "CRISPR Guide Capture") {
+                hasCrisprFeatures = true;
+                break;
+            }
+        }
+        
+        if (hasCrisprFeatures) {
+            string outsDir = outPrefix + "/outs";
+            ret = runCrisprFeatureCalling(filteredOutDir, outsDir, P.crMulti.crMinUmi, P.inOut->logMain);
+            if (ret != 0) {
+                P.inOut->logMain << "WARNING: CRISPR feature calling failed, continuing without crispr_analysis/\n";
+            }
+        }
         
         P.inOut->logMain << timeMonthDayTime() << " ..... finished CR multi config processing\n";
         

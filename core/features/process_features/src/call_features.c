@@ -10,8 +10,75 @@
 #include <sys/stat.h>
 #include <errno.h>
 #include <inttypes.h>
+#include <zlib.h>
 
 #define MAX_LINE_LENGTH 4096
+
+typedef struct {
+    int is_gz;
+    FILE *fp;
+    gzFile gz;
+} cf_file;
+
+static int file_exists(const char *path) {
+    struct stat st;
+    return (stat(path, &st) == 0);
+}
+
+static int file_exists_with_gz(const char *path) {
+    if (file_exists(path)) return 1;
+    char gz_path[MAX_LINE_LENGTH];
+    snprintf(gz_path, sizeof(gz_path), "%s.gz", path);
+    return file_exists(gz_path);
+}
+
+static int open_text_file(const char *path, cf_file *out) {
+    if (!out) return -1;
+    memset(out, 0, sizeof(*out));
+
+    FILE *fp = fopen(path, "r");
+    if (fp) {
+        out->fp = fp;
+        out->is_gz = 0;
+        return 0;
+    }
+
+    gzFile gz = gzopen(path, "rb");
+    if (gz) {
+        out->gz = gz;
+        out->is_gz = 1;
+        return 0;
+    }
+
+    if (!strstr(path, ".gz")) {
+        char gz_path[MAX_LINE_LENGTH];
+        snprintf(gz_path, sizeof(gz_path), "%s.gz", path);
+        gz = gzopen(gz_path, "rb");
+        if (gz) {
+            out->gz = gz;
+            out->is_gz = 1;
+            return 0;
+        }
+    }
+
+    return -1;
+}
+
+static char *cf_gets(cf_file *fh, char *buf, int size) {
+    if (fh->is_gz) {
+        return gzgets(fh->gz, buf, size);
+    }
+    return fgets(buf, size, fh->fp);
+}
+
+static void close_text_file(cf_file *fh) {
+    if (!fh) return;
+    if (fh->is_gz) {
+        if (fh->gz) gzclose(fh->gz);
+    } else {
+        if (fh->fp) fclose(fh->fp);
+    }
+}
 
 /* ============================================================================
  * Configuration Implementation
@@ -40,28 +107,28 @@ void cf_config_destroy(cf_config *config) {
 
 /* Helper: count lines in a file */
 static int count_lines(const char *path) {
-    FILE *fp = fopen(path, "r");
-    if (!fp) return -1;
+    cf_file fh;
+    if (open_text_file(path, &fh) != 0) return -1;
     
     int count = 0;
     char line[MAX_LINE_LENGTH];
-    while (fgets(line, sizeof(line), fp)) {
+    while (cf_gets(&fh, line, sizeof(line))) {
         count++;
     }
-    fclose(fp);
+    close_text_file(&fh);
     return count;
 }
 
 /* Helper: load names from a file (one per line) */
 static int load_names(const char *path, char ***names_out, char **storage_out, int *count_out) {
-    FILE *fp = fopen(path, "r");
-    if (!fp) return -1;
+    cf_file fh;
+    if (open_text_file(path, &fh) != 0) return -1;
     
     /* Count lines first */
     int count = 0;
     char line[MAX_LINE_LENGTH];
     size_t total_len = 0;
-    while (fgets(line, sizeof(line), fp)) {
+    while (cf_gets(&fh, line, sizeof(line))) {
         size_t len = strlen(line);
         if (len > 0 && line[len-1] == '\n') line[--len] = '\0';
         if (len > 0 && line[len-1] == '\r') line[--len] = '\0';
@@ -70,7 +137,7 @@ static int load_names(const char *path, char ***names_out, char **storage_out, i
     }
     
     if (count == 0) {
-        fclose(fp);
+        close_text_file(&fh);
         *names_out = NULL;
         *storage_out = NULL;
         *count_out = 0;
@@ -83,15 +150,20 @@ static int load_names(const char *path, char ***names_out, char **storage_out, i
     if (!storage || !names) {
         free(storage);
         free(names);
-        fclose(fp);
+        close_text_file(&fh);
         return -1;
     }
     
     /* Read names */
-    rewind(fp);
+    close_text_file(&fh);
+    if (open_text_file(path, &fh) != 0) {
+        free(storage);
+        free(names);
+        return -1;
+    }
     int i = 0;
     char *ptr = storage;
-    while (fgets(line, sizeof(line), fp) && i < count) {
+    while (cf_gets(&fh, line, sizeof(line)) && i < count) {
         size_t len = strlen(line);
         if (len > 0 && line[len-1] == '\n') line[--len] = '\0';
         if (len > 0 && line[len-1] == '\r') line[--len] = '\0';
@@ -109,7 +181,7 @@ static int load_names(const char *path, char ***names_out, char **storage_out, i
         i++;
     }
     
-    fclose(fp);
+    close_text_file(&fh);
     *names_out = names;
     *storage_out = storage;
     *count_out = i;
@@ -129,11 +201,10 @@ cf_sparse_matrix* cf_load_mex(const char *mex_dir) {
     snprintf(features_path, sizeof(features_path), "%s/features.txt", mex_dir);
     
     /* Check if files exist (try .tsv variants) */
-    struct stat st;
-    if (stat(barcodes_path, &st) != 0) {
+    if (!file_exists_with_gz(barcodes_path)) {
         snprintf(barcodes_path, sizeof(barcodes_path), "%s/barcodes.tsv", mex_dir);
     }
-    if (stat(features_path, &st) != 0) {
+    if (!file_exists_with_gz(features_path)) {
         snprintf(features_path, sizeof(features_path), "%s/features.tsv", mex_dir);
     }
     
@@ -156,16 +227,16 @@ cf_sparse_matrix* cf_load_mex(const char *mex_dir) {
     }
     
     /* Open matrix file */
-    FILE *fp = fopen(matrix_path, "r");
-    if (!fp) {
-        fprintf(stderr, "Failed to open matrix file %s\n", matrix_path);
+    cf_file fh;
+    if (open_text_file(matrix_path, &fh) != 0) {
+        fprintf(stderr, "Failed to open matrix file %s (or .gz)\n", matrix_path);
         cf_free_matrix(matrix);
         return NULL;
     }
     
     /* Skip header comments */
     char line[MAX_LINE_LENGTH];
-    while (fgets(line, sizeof(line), fp)) {
+    while (cf_gets(&fh, line, sizeof(line))) {
         if (line[0] != '%') break;
     }
     
@@ -173,7 +244,7 @@ cf_sparse_matrix* cf_load_mex(const char *mex_dir) {
     int rows, cols, nnz;
     if (sscanf(line, "%d %d %d", &rows, &cols, &nnz) != 3) {
         fprintf(stderr, "Invalid matrix header: %s\n", line);
-        fclose(fp);
+        close_text_file(&fh);
         cf_free_matrix(matrix);
         return NULL;
     }
@@ -189,7 +260,7 @@ cf_sparse_matrix* cf_load_mex(const char *mex_dir) {
     /* Allocate entries */
     matrix->entries = malloc(nnz * sizeof(cf_matrix_entry));
     if (!matrix->entries) {
-        fclose(fp);
+        close_text_file(&fh);
         cf_free_matrix(matrix);
         return NULL;
     }
@@ -197,7 +268,7 @@ cf_sparse_matrix* cf_load_mex(const char *mex_dir) {
     
     /* Read entries (1-based indices in file, convert to 0-based) */
     int row, col, val;
-    while (fgets(line, sizeof(line), fp)) {
+    while (cf_gets(&fh, line, sizeof(line))) {
         if (sscanf(line, "%d %d %d", &row, &col, &val) == 3) {
             if (matrix->num_entries < nnz) {
                 matrix->entries[matrix->num_entries].row = row - 1;  /* Convert to 0-based */
@@ -208,7 +279,7 @@ cf_sparse_matrix* cf_load_mex(const char *mex_dir) {
         }
     }
     
-    fclose(fp);
+    close_text_file(&fh);
     return matrix;
 }
 

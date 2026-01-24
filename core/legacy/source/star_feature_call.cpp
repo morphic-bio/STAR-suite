@@ -55,7 +55,7 @@ struct Config {
     int search_threads = 4;
     
     // GMM calling params
-    int min_umi = 3;
+    int min_umi = 10;
     
     // Ratio test params (for non-GMM mode)
     int min_counts = 2;
@@ -131,7 +131,7 @@ static void print_usage(const char *prog) {
     fprintf(stderr, "\n");
     fprintf(stderr, "\n");
     fprintf(stderr, "  GMM calling parameters:\n");
-    fprintf(stderr, "    --min-umi N             Minimum UMI threshold (default: 3)\n");
+    fprintf(stderr, "    --min-umi N             Minimum UMI threshold (default: 10)\n");
     fprintf(stderr, "\n");
     fprintf(stderr, "  Ratio test parameters:\n");
     fprintf(stderr, "    --min-counts N          Minimum counts threshold (default: 2)\n");
@@ -253,6 +253,23 @@ static bool has_mex_files(const std::string &dir) {
     std::string mtx_gz_path = dir + "/matrix.mtx.gz";
     struct stat st;
     return (stat(mtx_path.c_str(), &st) == 0) || (stat(mtx_gz_path.c_str(), &st) == 0);
+}
+
+// Check if a directory contains 10x-style MEX files (barcodes/features + matrix)
+static bool has_tenx_mex_files(const std::string &dir) {
+    struct stat st;
+    std::string bc = dir + "/barcodes.tsv";
+    std::string bc_gz = dir + "/barcodes.tsv.gz";
+    std::string feat = dir + "/features.tsv";
+    std::string feat_gz = dir + "/features.tsv.gz";
+    std::string mtx = dir + "/matrix.mtx";
+    std::string mtx_gz = dir + "/matrix.mtx.gz";
+
+    bool has_bc = (stat(bc.c_str(), &st) == 0) || (stat(bc_gz.c_str(), &st) == 0);
+    bool has_feat = (stat(feat.c_str(), &st) == 0) || (stat(feat_gz.c_str(), &st) == 0);
+    bool has_mtx = (stat(mtx.c_str(), &st) == 0) || (stat(mtx_gz.c_str(), &st) == 0);
+
+    return has_bc && has_feat && has_mtx;
 }
 
 // Find sample subdirectories that contain MEX files
@@ -407,14 +424,18 @@ static int run_calling(const Config &cfg) {
 
         std::string mex_dir_for_call = mex_dir;
         if (cfg.compat_perturb) {
-            std::string tenx_dir = sample_dir + "/sample_filtered_feature_bc_matrix";
-            if (pf_write_mex_10x(mex_dir.c_str(),
-                                 tenx_dir.c_str(),
-                                 "CRISPR Guide Capture",
-                                 1) != 0) {
-                fprintf(stderr, "Warning: Failed to write 10x MEX in %s; using raw MEX\n", tenx_dir.c_str());
+            if (has_tenx_mex_files(mex_dir)) {
+                mex_dir_for_call = mex_dir;
             } else {
-                mex_dir_for_call = tenx_dir;
+                std::string tenx_dir = sample_dir + "/sample_filtered_feature_bc_matrix";
+                if (pf_write_mex_10x(mex_dir.c_str(),
+                                     tenx_dir.c_str(),
+                                     "CRISPR Guide Capture",
+                                     1) != 0) {
+                    fprintf(stderr, "Warning: Failed to write 10x MEX in %s; using raw MEX\n", tenx_dir.c_str());
+                } else {
+                    mex_dir_for_call = tenx_dir;
+                }
             }
         }
 

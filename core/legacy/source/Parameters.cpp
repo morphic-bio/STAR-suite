@@ -591,6 +591,7 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "crFastqRoot", &crMulti.crFastqRoot));
     parArray.push_back(new ParameterInfoVector<string>(-1, -1, "crFastqMap", &crMulti.crFastqMap));
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "crMexUseGexBarcodes", &crMulti.crMexUseGexBarcodes));
+    parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "crMinUmi", &crMulti.crMinUmi));
 
     parameterInputName.push_back("Default");
     parameterInputName.push_back("Command-Line-Initial");
@@ -636,6 +637,10 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
         }
         if (p->nameString == "crFastqMap" && p->inputLevel < 0) {
             crMulti.crFastqMap.clear();
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "crMinUmi" && p->inputLevel < 0) {
+            crMulti.crMinUmi = 10;  // CR-compatible default
             p->inputLevel = 0;
         }
     }

@@ -36,6 +36,10 @@ TRIMVALIDATE_DIR := $(VBEM_DIR)/tools/trimvalidate
 LIBFLEX_LIB := $(LIBFLEX_DIR)/libflex.a
 LIBTRIM_LIB := $(LIBTRIM_DIR)/libtrim.a
 LIBEM_LIB := $(LIBEM_DIR)/libem.a
+PROCESS_FEATURES_DIR := $(ROOT_DIR)/core/features/process_features
+PROCESS_FEATURES_LIB := $(PROCESS_FEATURES_DIR)/libprocess_features.a
+LIBSCRNA_DIR := $(ROOT_DIR)/core/features/libscrna
+LIBSCRNA_LIB := $(LIBSCRNA_DIR)/libscrna.a
 
 VPATH := $(FLEX_SRC_DIR) $(SLAM_SRC_DIR) $(VBEM_SRC_DIR) $(BAMSORT_SRC_DIR)
 
@@ -74,9 +78,10 @@ CXXFLAGS_SIMD ?= -mavx2
 
 # Unconditionally set essential flags and optimization options
 # Packed ReadInfo is the only supported path (legacy removed)
-# Include flex (klib/libflex), vbem (libtrim/libem), and slam headers
+# Include flex (klib/libflex), vbem (libtrim/libem), slam, and process_features headers
 # Include current directory for IncludeDefine.h and other source headers
-CXXFLAGS_common := -std=c++11 -fopenmp -I. -I$(FLEX_SRC_DIR) -I$(LIBFLEX_DIR) -I$(VBEM_SRC_DIR) -I$(LIBEM_DIR) -I$(SLAM_SRC_DIR) -I$(BAMSORT_SRC_DIR) $(COMPTIMEPLACE) $(GIT_BRANCH_COMMIT_DIFF)
+PROCESS_FEATURES_INC := $(ROOT_DIR)/core/features/process_features/include
+CXXFLAGS_common := -std=c++11 -fopenmp -I. -I$(FLEX_SRC_DIR) -I$(LIBFLEX_DIR) -I$(VBEM_SRC_DIR) -I$(LIBEM_DIR) -I$(SLAM_SRC_DIR) -I$(BAMSORT_SRC_DIR) -I$(PROCESS_FEATURES_INC) $(COMPTIMEPLACE) $(GIT_BRANCH_COMMIT_DIFF)
 CXXFLAGS_main := -O3 $(CXXFLAGS_common)
 CXXFLAGS_gdb := -O0 -g3 $(CXXFLAGS_common)
 
@@ -178,17 +183,13 @@ remove_y_reads: htslib/libhts.a
 
 # Standalone star_feature_call tool for perturb-seq processing
 # Requires libprocess_features.a to be built first
-PROCESS_FEATURES_LIB := $(PROCESS_FEATURES_DIR)/libprocess_features.a
-PROCESS_FEATURES_INC := $(PROCESS_FEATURES_DIR)/include
-
 .PHONY: star_feature_call libprocess_features
 libprocess_features:
 	$(MAKE) -C $(PROCESS_FEATURES_DIR) lib
 
-LIBSCRNA_DIR := $(ROOT_DIR)/core/features/libscrna
-star_feature_call: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS) -I$(PROCESS_FEATURES_INC)
+star_feature_call: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
 star_feature_call: LDFLAGS_PF := -L$(PROCESS_FEATURES_DIR) -lprocess_features -L$(LIBSCRNA_DIR) -lscrna -lm -lpthread -lz -fopenmp -lcairo -Lhtslib -lhts
-star_feature_call: libprocess_features htslib/libhts.a $(LIBSCRNA_DIR)/libscrna.a
+star_feature_call: libprocess_features htslib/libhts.a $(LIBSCRNA_LIB)
 	$(CXX) $(CXXFLAGS) -o star_feature_call star_feature_call.cpp $(LDFLAGS_PF)
 
 # Convenience target to rebuild only the MEX writer components
@@ -436,9 +437,9 @@ libem:
 	$(MAKE) -C $(LIBEM_DIR) libem.a
 
 STAR$(SFX) : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
-STAR$(SFX) : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS) $(shell pkg-config --libs glib-2.0 2>/dev/null || echo "")
-STAR$(SFX) : Depend.list parametersDefault.xxd $(OBJECTS) libflex libtrim libem
-	$(CXX) -o STAR$(SFX) $(CXXFLAGS) $(OBJECTS) $(LIBFLEX_LIB) $(LIBTRIM_LIB) $(LIBEM_LIB) $(LDFLAGS)
+STAR$(SFX) : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS) $(shell pkg-config --libs glib-2.0 2>/dev/null || echo "") -lcairo
+STAR$(SFX) : Depend.list parametersDefault.xxd $(OBJECTS) libflex libtrim libem libprocess_features $(LIBSCRNA_LIB)
+	$(CXX) -o STAR$(SFX) $(CXXFLAGS) $(OBJECTS) $(LIBFLEX_LIB) $(LIBTRIM_LIB) $(LIBEM_LIB) $(PROCESS_FEATURES_LIB) $(LIBSCRNA_LIB) $(LDFLAGS)
 
 STARstatic$(SFX) : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
 STARstatic$(SFX) : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_static) $(LDFLAGS)
@@ -463,9 +464,9 @@ POSIXSHARED : Depend.list parametersDefault.xxd $(OBJECTS)
 	$(CXX) -o STAR$(SFX) $(CXXFLAGS) $(OBJECTS) $(LDFLAGS)
 
 gdb : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_gdb) $(CXXFLAGS)
-gdb : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_gdb) $(LDFLAGS) $(shell pkg-config --libs glib-2.0 2>/dev/null || echo "")
-gdb : Depend.list parametersDefault.xxd $(OBJECTS) libflex libtrim libem
-	$(CXX) -o STAR $(CXXFLAGS) $(OBJECTS) $(LIBFLEX_LIB) $(LIBTRIM_LIB) $(LIBEM_LIB) $(LDFLAGS)
+gdb : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_gdb) $(LDFLAGS) $(shell pkg-config --libs glib-2.0 2>/dev/null || echo "") -lcairo
+gdb : Depend.list parametersDefault.xxd $(OBJECTS) libflex libtrim libem libprocess_features $(LIBSCRNA_LIB)
+	$(CXX) -o STAR $(CXXFLAGS) $(OBJECTS) $(LIBFLEX_LIB) $(LIBTRIM_LIB) $(LIBEM_LIB) $(PROCESS_FEATURES_LIB) $(LIBSCRNA_LIB) $(LDFLAGS)
 
 gdb-long : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_gdb) -D'COMPILE_FOR_LONG_READS' $(CXXFLAGS)
 gdb-long : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_gdb) $(LDFLAGS) $(shell pkg-config --libs glib-2.0 2>/dev/null || echo "")

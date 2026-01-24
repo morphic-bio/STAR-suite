@@ -39,3 +39,40 @@ This writes `features.tsv` and `barcodes.tsv` alongside the existing `matrix.mtx
 ## Notes
 - This is a tool-level vendor intended for early parity testing.
 - STAR output integration will follow once the MEX path is validated.
+
+---
+
+## CRISPR Feature Calling (CR-Compat Mode)
+
+When running STAR with `--crMultiConfig` and CRISPR Guide Capture features, STAR automatically runs GMM-based feature calling after EmptyDrops filtering.
+
+### Parameter: `--crMinUmi N`
+
+**Default:** 10 (CR-compatible for CRISPR guides)
+
+Controls the minimum UMI threshold for feature calling. Adjust based on assay type:
+
+| Assay Type | Recommended Value | Rationale |
+|------------|-------------------|-----------|
+| **CRISPR Guide Capture** | 10 (default) | Guides have variable capture efficiency and noise |
+| **Lineage Barcodes** | 2-3 | Stable features with minimal noise - lower threshold captures more signal |
+| **FLEX Probes** | 10 | Similar characteristics to CRISPR guides |
+
+### Example
+
+```bash
+# CRISPR Guide Capture (default)
+STAR ... --crMultiConfig config.csv
+
+# Lineage Barcodes (lower threshold)
+STAR ... --crMultiConfig config.csv --crMinUmi 3
+```
+
+### Output
+
+CR-compat mode produces `outs/crispr_analysis/`:
+- `protospacer_calls_per_cell.csv` - Per-cell feature assignments
+- `protospacer_calls_summary.csv` - Calling statistics
+- `protospacer_umi_thresholds.csv` - GMM-derived UMI thresholds
+
+See `tests/crispr_feature_calling_comparison_report.md` for validation details.

@@ -565,6 +565,7 @@ class Parameters {
             string crFastqRoot;            // Fallback root for FASTQ directories
             vector<string> crFastqMap;     // Map config FASTQ paths to actual paths (key=value pairs)
             string crMexUseGexBarcodes;    // DEPRECATED: CR-compat MEX now always uses GEX barcodes (ignored, kept for backward compatibility)
+            int crMinUmi;                   // Minimum UMI threshold for CRISPR feature calling (default: 10)
         } crMulti;
 
         //chimeric

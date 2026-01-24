@@ -3,3 +3,12 @@
 - Validate `--soloAddTagsToUnsorted` behavior (unsorted BAM CB/UB tag injection) for Flex runs; decide whether to fix or remove for core STARsolo.
 - Relax CB/UB strict coupling by default for non-Flex runs (keep strict policy for Flex); verify whether Flex drops CB when UB is missing.
 - Fix and run remaining smoke tests with missing fixtures for memory leak repair validation.
+- Change libflex to use the modular libscrna (EmptyDrops, etc.) instead of vendored copies.
+  - When doing this, regression test the new `--crMinUmi` default (10) to ensure it doesn't cause regressions for:
+    - FLEX probe sets (likely OK at 10)
+    - Lineage barcodes / stable features (may need lower threshold like 2-3)
+  - See `docs/TODO_crispr_feature_calling.md` for detailed regression test plan.
+  - After regression testing, update the assay-specific recommendations table in:
+    - `tests/crispr_feature_calling_comparison_report.md`
+    - `docs/feature_barcodes.md`
+- Remove libcairo dependency from core STAR build by replacing process_features heatmap output with a libcairo-independent alternative (keep behavior behind the include-heatmap flag).
