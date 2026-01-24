@@ -56,6 +56,10 @@ Depend.list
 /core/features/vbem/tools/tximport_compat/libtximport/test_tximport
 /core/features/vbem/tools/trimvalidate/trimvalidate
 /core/features/yremove_fastq/tools/remove_y_reads/remove_y_reads
+/core/features/feature_barcodes/assignBarcodes
+/core/features/feature_barcodes/demux_bam
+/core/features/feature_barcodes/demux_fastq
+/core/legacy/source/star_feature_call
 /tools/flexfilter/run_flexfilter_mex
 /tools/flexfilter/test_output/
 /bin/*
@@ -110,9 +114,14 @@ Depend.list
 /comparison_results
 /comparison_results_filtered
 /tests/__pycache__/
+/tests/emptydrops/test_ambient_profile
+/tests/emptydrops/test_no_tag_mode
+/tests/emptydrops/test_sampler_deterministic
+/tests/emptydrops/test_simple_ed_threshold
 /tmp/
 
 ## Local smoke-test run artifacts
 /tests/flex_smoke/baseline_*/
 /tests/flex_smoke/current_*/
 core/features/process_features/tests/fixtures/assignbarcodes_baseline/actual/
+/tools/cr_multi/__pycache__/
