@@ -11,4 +11,10 @@
   - After regression testing, update the assay-specific recommendations table in:
     - `tests/crispr_feature_calling_comparison_report.md`
     - `docs/feature_barcodes.md`
-- Remove libcairo dependency from core STAR build by replacing process_features heatmap output with a libcairo-independent alternative (keep behavior behind the include-heatmap flag).
+- [DONE] Remove libcairo dependency from core STAR build by replacing process_features heatmap output with Plotly HTML+JSON.
+  - Heatmaps now emit `Feature_counts_heatmap.html` + `.json` and `Feature_types_heatmap.html` + `.json`
+  - No external graphics dependencies required; Plotly loaded from CDN at render time
+  - Removed `NO_HEATMAP` build flag (no longer needed since there's no external dependency)
+- Keep Plotly+JSON QC outputs in process_features and migrate QC graphics into a shared core so other STAR components can reuse them (eventually replace STAR's existing QC graphics with this core).
+- Draft a design note for a shared QC graphics core (inputs/outputs, Plotly+JSON artifacts, TSV fallbacks, and how STAR/other components will call it).
+- Verify no downstream scripts/tools expect `Feature_types_heatmap.png` or `Feature_counts_heatmap.png`; document the HTML/JSON switch in any user-facing docs if needed.

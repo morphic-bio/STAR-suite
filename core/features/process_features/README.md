@@ -30,15 +30,13 @@ Key features include:
 On Ubuntu/Debian:
 ```bash
 sudo apt-get update
-sudo apt-get -y install build-essential zlib1g-dev libcairo2-dev
+sudo apt-get -y install build-essential zlib1g-dev
 cd process_features
 make
 sudo cp assignBarcodes /usr/local/bin
 ```
-If heatmap generation is not required, you can omit the `libcairo2-dev` dependency and compile using:
-```bash
-make NO_HEATMAP=1
-```
+
+**Note:** Heatmap generation now uses Plotly (HTML+JSON) and has no external dependencies. The previous Cairo/PNG dependency has been removed.
 
 #### Docker
 Alternatively, you can use the Docker container `biodepot/process_features:latest` or build it from the provided Dockerfile.
@@ -249,7 +247,7 @@ The repository is organized into the following main directories:
     -   `queue.c`: Queue data structure for parallel processing.
     -   `utils.c`: Helper functions used across the application.
     -   `globals.c`: Definitions of global variables.
-    -   `heatmap.c`: Functions for generating QC heatmap images.
+    -   `heatmap.c`: Functions for generating QC heatmap HTML/JSON outputs.
     -   `barcode_match.c`: Barcode matching and k-mer lookup functions.
 -   **`include/`**: Contains all the header files.
     -   `pf_api.h`: **Public library API** for programmatic integration.
@@ -286,7 +284,6 @@ make clean        # Remove all build artifacts
 
 ```bash
 make DEBUG=1       # Debug symbols, no optimizations
-make NO_HEATMAP=1  # Disable Cairo/heatmap support
 ```
 
 ### From STAR-suite Root
@@ -312,36 +309,56 @@ An interactive HTML plot (`umi_counts_histogram.html`) is generated in each samp
 
 ### Feature Counts Heatmap
 
-A heatmap image (`Feature_counts_heatmap.png`) is generated for each sample. In this heatmap:
+An interactive heatmap (`Feature_counts_heatmap.html`) and data file (`Feature_counts_heatmap.json`) are generated for each sample. The heatmap shows:
 - **Rows:** Features.
 - **Columns:** UMI counts (starting from 1).
 - **Color Intensity:** Number of barcodes with that UMI count for the feature.
 - **Bar Graph:** Above the heatmap, a bar graph shows the total number of barcodes for each UMI count across all features.
-- **Color Bar:** Indicates the scale of counts.
+- **Color Bar:** Indicates the scale of counts (Plasma colorscale).
 - **Filtering:** Only features with deduped counts above the threshold set by `--min_heatmap` are shown.
 
 This heatmap provides a visual summary of the count distribution for each feature, helping to identify features with abnormal count profiles or multiplet artifacts.
+
+**Output files:**
+- `Feature_counts_heatmap.html` - Interactive Plotly visualization
+- `Feature_counts_heatmap.json` - Raw matrix data for programmatic access
 
 ---
 
 ### Feature Richness Heatmap
 
-A second heatmap (`Feature_types_heatmap.png`) is generated for each sample to visualize feature richness. In this heatmap:
+A second heatmap (`Feature_types_heatmap.html` + `Feature_types_heatmap.json`) is generated for each sample to visualize feature richness:
 - **Rows:** Features.
 - **Columns:** The total number of unique feature types present in a barcode (richness level).
 - **Color Intensity:** The number of barcodes where the given feature (row) was observed that contained a specific total number of feature types (column).
 - **Bar Graph:** Above the heatmap, a bar graph shows the total number of barcodes for each richness level across all features.
-- **Color Bar:** Indicates the scale of counts.
+- **Color Bar:** Indicates the scale of counts (Plasma colorscale).
 - **Filtering:** Only features with at least one observed count are shown.
 
 This heatmap helps visualize the complexity of features within single barcodes, which is useful for identifying potential multiplets and assessing the overall quality of the feature capture.
 
+**Output files:**
+- `Feature_types_heatmap.html` - Interactive Plotly visualization
+- `Feature_types_heatmap.json` - Raw matrix data for programmatic access
+
 ---
 
-#### Example
+### JSON Data Format
 
-![Feature Counts Heatmap Example](./graphics/Feature_counts_heatmap.png)
-![Feature Types Heatmap Example](./graphics/Feature_types_heatmap.png)
+The JSON heatmap data files contain:
+```json
+{
+  "title": "Feature Counts (Deduplicated) Heatmap",
+  "feature_labels": ["Feature1", "Feature2", ...],
+  "column_labels": [1, 2, 3, ...],
+  "column_sums": [100, 50, 25, ...],
+  "matrix": [[1, 2, 0], [0, 5, 3], ...],
+  "type": "deduped_counts",
+  "num_features": 10,
+  "num_filtered_features": 8,
+  "num_columns": 50
+}
+```
 
 ---
 
@@ -466,7 +483,7 @@ cf_free_matrix(matrix);
 ```bash
 # Link against libprocess_features.a
 gcc -o my_tool my_tool.c -L/path/to/process_features -lprocess_features \
-    -lm -lpthread -lz -fopenmp -lcairo -lhts
+    -lm -lpthread -lz -fopenmp -lhts
 ```
 
 ---

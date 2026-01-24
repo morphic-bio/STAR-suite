@@ -121,10 +121,6 @@ static void extract_qname(const char *header, char *out, size_t out_len) {
     out[i] = '\0';
 }
 
-//code for heatmap generation
-#ifndef NO_HEATMAP
-// Heatmap functionality is now in src/heatmap.c
-#endif
 
 void destroy_feature_counts(gpointer data) {
     feature_counts *fc = (feature_counts*)data;

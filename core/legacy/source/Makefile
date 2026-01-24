@@ -188,7 +188,7 @@ libprocess_features:
 	$(MAKE) -C $(PROCESS_FEATURES_DIR) lib
 
 star_feature_call: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
-star_feature_call: LDFLAGS_PF := -L$(PROCESS_FEATURES_DIR) -lprocess_features -L$(LIBSCRNA_DIR) -lscrna -lm -lpthread -lz -fopenmp -lcairo -Lhtslib -lhts
+star_feature_call: LDFLAGS_PF := -L$(PROCESS_FEATURES_DIR) -lprocess_features -L$(LIBSCRNA_DIR) -lscrna -lm -lpthread -lz -fopenmp -Lhtslib -lhts
 star_feature_call: libprocess_features htslib/libhts.a $(LIBSCRNA_LIB)
 	$(CXX) $(CXXFLAGS) -o star_feature_call star_feature_call.cpp $(LDFLAGS_PF)
 
@@ -437,7 +437,7 @@ libem:
 	$(MAKE) -C $(LIBEM_DIR) libem.a
 
 STAR$(SFX) : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
-STAR$(SFX) : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS) $(shell pkg-config --libs glib-2.0 2>/dev/null || echo "") -lcairo
+STAR$(SFX) : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS) $(shell pkg-config --libs glib-2.0 2>/dev/null || echo "")
 STAR$(SFX) : Depend.list parametersDefault.xxd $(OBJECTS) libflex libtrim libem libprocess_features $(LIBSCRNA_LIB)
 	$(CXX) -o STAR$(SFX) $(CXXFLAGS) $(OBJECTS) $(LIBFLEX_LIB) $(LIBTRIM_LIB) $(LIBEM_LIB) $(PROCESS_FEATURES_LIB) $(LIBSCRNA_LIB) $(LDFLAGS)
 
@@ -464,7 +464,7 @@ POSIXSHARED : Depend.list parametersDefault.xxd $(OBJECTS)
 	$(CXX) -o STAR$(SFX) $(CXXFLAGS) $(OBJECTS) $(LDFLAGS)
 
 gdb : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_gdb) $(CXXFLAGS)
-gdb : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_gdb) $(LDFLAGS) $(shell pkg-config --libs glib-2.0 2>/dev/null || echo "") -lcairo
+gdb : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_gdb) $(LDFLAGS) $(shell pkg-config --libs glib-2.0 2>/dev/null || echo "")
 gdb : Depend.list parametersDefault.xxd $(OBJECTS) libflex libtrim libem libprocess_features $(LIBSCRNA_LIB)
 	$(CXX) -o STAR $(CXXFLAGS) $(OBJECTS) $(LIBFLEX_LIB) $(LIBTRIM_LIB) $(LIBEM_LIB) $(PROCESS_FEATURES_LIB) $(LIBSCRNA_LIB) $(LDFLAGS)
 

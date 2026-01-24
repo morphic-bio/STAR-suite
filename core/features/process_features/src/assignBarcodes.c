@@ -366,11 +366,6 @@ static void pf_trace_trim_newline(char *s) {
     }
 }
 
-//code for heatmap generation
-#ifndef NO_HEATMAP
-// Heatmap functionality is now in src/heatmap.c
-#endif
-
 void destroy_feature_counts(void *data) {
     feature_counts *fc = (feature_counts*)data;
     if (fc && fc->counts) {

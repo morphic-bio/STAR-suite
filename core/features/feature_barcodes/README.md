@@ -20,10 +20,8 @@ cd process_features
 make
 sudo cp assignBarcodes /usr/local/bin
 ```
-If heatmap generation is not required, you can omit the `libcairo2-dev` dependency and compile using:
-```bash
-make NO_HEATMAP=1
-```
+
+**Note:** Heatmap generation now uses Plotly (HTML+JSON) and has no external dependencies. The previous Cairo/PNG dependency has been removed.
 
 #### Docker
 Alternatively, you can use the Docker container `biodepot/process_features:latest` or build it from the provided Dockerfile.
@@ -229,8 +227,7 @@ The repository is organized into the following main directories:
     -   `queue.c`: Implementation of a queue data structure used for parallel processing.
     -   `utils.c`: Helper functions used across the application.
     -   `globals.c`: Definitions of global variables.
-    -   `heatmap.c`: Functions for generating QC heatmap images.
-    -   `plasma_colormap_16.h`, `plasma_colormap_64.h`, `plasma_colormap_256.h`, `plasma_colormap_1024.h`: Color map definitions for heatmaps.
+    -   `heatmap.c`: Functions for generating QC heatmap HTML/JSON outputs.
 -   **`include/`**: Contains all the header files.
     -   `common.h`: Common headers, structs, and macros used throughout the project.
     -   `prototypes.h`: Function prototypes for functions defined in the `src` directory.
@@ -263,7 +260,7 @@ An interactive HTML plot (`umi_counts_histogram.html`) is generated in each samp
 
 ### Feature Counts Heatmap
 
-A heatmap image (`Feature_counts_heatmap.png`) is generated for each sample. In this heatmap:
+An interactive heatmap (`Feature_counts_heatmap.html`) and data file (`Feature_counts_heatmap.json`) are generated for each sample. In this heatmap:
 - **Rows:** Features.
 - **Columns:** UMI counts (starting from 1).
 - **Color Intensity:** Number of barcodes with that UMI count for the feature.
@@ -277,7 +274,7 @@ This heatmap provides a visual summary of the count distribution for each featur
 
 ### Feature Richness Heatmap
 
-A second heatmap (`Feature_types_heatmap.png`) is generated for each sample to visualize feature richness. In this heatmap:
+A second heatmap (`Feature_types_heatmap.html` + `Feature_types_heatmap.json`) is generated for each sample to visualize feature richness. In this heatmap:
 - **Rows:** Features.
 - **Columns:** The total number of unique feature types present in a barcode (richness level).
 - **Color Intensity:** The number of barcodes where the given feature (row) was observed that contained a specific total number of feature types (column).
@@ -289,14 +286,15 @@ This heatmap helps visualize the complexity of features within single barcodes, 
 
 ---
 
-#### Example
-
-![Feature Counts Heatmap Example](./graphics/Feature_counts_heatmap.png)
-![Feature Types Heatmap Example](./graphics/Feature_types_heatmap.png)
+**Output files:**
+- `Feature_counts_heatmap.html` - Interactive Plotly visualization
+- `Feature_counts_heatmap.json` - Raw matrix data for programmatic access
+- `Feature_types_heatmap.html` - Interactive Plotly visualization
+- `Feature_types_heatmap.json` - Raw matrix data for programmatic access
 
 ---
 
-*For more details on the plotting implementation, see `src/plot_histogram.c` and `src/heatmap.c`.* 
+*For more details on the plotting implementation, see `src/plot_histogram.c` and `src/heatmap.c`.*
 
 ## demux_fastq – sample-level demultiplexing helper
 

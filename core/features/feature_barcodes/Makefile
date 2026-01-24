@@ -5,35 +5,26 @@ SRCDIR = src
 INCDIR = include
 VPATH = $(SRCDIR)
 
-# Use pkg-config to get the correct flags for glib-2.0 and cairo
+# Use pkg-config to get the correct flags for glib-2.0
+# Note: cairo dependency removed - heatmaps now use Plotly HTML+JSON
 GLIB_CFLAGS := $(shell pkg-config --cflags glib-2.0)
 GLIB_LIBS := $(shell pkg-config --libs glib-2.0)
 HTS_LIBS := -lhts
 
-CAIRO_CFLAGS :=
-CAIRO_LIBS :=
 DEFINES :=
 
 # Source files (basenames only)
-SRCS_BASE=main.c assignBarcodes.c queue.c globals.c utils.c memory.c io.c plot_histogram.c barcode_match.c
+# Note: heatmap.c now uses Plotly (HTML+JSON), no external dependencies
+SRCS_BASE=main.c assignBarcodes.c queue.c globals.c utils.c memory.c io.c plot_histogram.c barcode_match.c heatmap.c
 SRCS = $(SRCS_BASE)
-
-# Add cairo flags and define if NO_HEATMAP is not set to 1
-ifeq ($(NO_HEATMAP), 1)
-	DEFINES += -DNO_HEATMAP
-else
-	CAIRO_CFLAGS := $(shell pkg-config --cflags cairo)
-	CAIRO_LIBS := $(shell pkg-config --libs cairo)
-	SRCS += heatmap.c
-endif
 
 # Compiler flags: optimise by default, but if DEBUG=1 build with symbols and no optimisations
 ifeq ($(DEBUG),1)
-    CFLAGS=-g -ggdb -Wall -O0 -I$(INCDIR) -fopenmp $(GLIB_CFLAGS) $(CAIRO_CFLAGS) $(DEFINES)
+    CFLAGS=-g -ggdb -Wall -O0 -I$(INCDIR) -fopenmp $(GLIB_CFLAGS) $(DEFINES)
 else
-    CFLAGS=-g -Wall -O3 -I$(INCDIR) -fopenmp $(GLIB_CFLAGS) $(CAIRO_CFLAGS) $(DEFINES)
+    CFLAGS=-g -Wall -O3 -I$(INCDIR) -fopenmp $(GLIB_CFLAGS) $(DEFINES)
 endif
-LDFLAGS=-lm -lpthread -lz -fopenmp $(GLIB_LIBS) $(CAIRO_LIBS) $(HTS_LIBS)
+LDFLAGS=-lm -lpthread -lz -fopenmp $(GLIB_LIBS) $(HTS_LIBS)
 
 # Object files
 OBJS=$(SRCS:.c=.o)

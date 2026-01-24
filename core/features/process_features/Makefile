@@ -12,18 +12,17 @@ LIBSCRNA_DIR = ../libscrna
 LIBSCRNA_INC = $(LIBSCRNA_DIR)/include
 LIBSCRNA = $(LIBSCRNA_DIR)/libscrna.a
 
-# Use pkg-config to get the correct flags for cairo
+# Library flags (no cairo - heatmaps now use Plotly HTML+JSON)
 HTS_LIBS := -lhts
 
-CAIRO_CFLAGS :=
-CAIRO_LIBS :=
 DEFINES :=
 
 # Source files (basenames only)
 # Core library sources (shared by all tools)
 # Note: plot_histogram.c is needed by assignBarcodes.c for histogram generation
+# Note: heatmap.c now uses Plotly (HTML+JSON), no external dependencies
 # pf_counts.c and mex_writer.c provide modular counts/output stages
-CORE_SRCS = assignBarcodes.c queue.c globals.c utils.c memory.c io.c barcode_match.c pf_api.c call_features.c gmm.c mex_10x.c plot_histogram.c pf_counts.c mex_writer.c emptydrops_bridge.c barcode_filter.c
+CORE_SRCS = assignBarcodes.c queue.c globals.c utils.c memory.c io.c barcode_match.c pf_api.c call_features.c gmm.c mex_10x.c plot_histogram.c pf_counts.c mex_writer.c emptydrops_bridge.c barcode_filter.c heatmap.c
 
 # CLI-specific sources
 MAIN_SRCS = main.c
@@ -34,23 +33,13 @@ DEMUX_BAM_SRCS = demux_bam.c
 SRCS_BASE = $(MAIN_SRCS) $(CORE_SRCS)
 SRCS = $(SRCS_BASE)
 
-# Add cairo flags and define if NO_HEATMAP is not set to 1
-ifeq ($(NO_HEATMAP), 1)
-	DEFINES += -DNO_HEATMAP
-else
-	CAIRO_CFLAGS := $(shell pkg-config --cflags cairo)
-	CAIRO_LIBS := $(shell pkg-config --libs cairo)
-	SRCS += heatmap.c
-	CORE_SRCS += heatmap.c
-endif
-
 # Compiler flags: optimise by default, but if DEBUG=1 build with symbols and no optimisations
 ifeq ($(DEBUG),1)
-    CFLAGS=-g -ggdb -Wall -O0 -I$(INCDIR) -I$(LIBSCRNA_INC) -fopenmp $(CAIRO_CFLAGS) $(DEFINES)
+    CFLAGS=-g -ggdb -Wall -O0 -I$(INCDIR) -I$(LIBSCRNA_INC) -fopenmp $(DEFINES)
 else
-    CFLAGS=-g -Wall -O3 -I$(INCDIR) -I$(LIBSCRNA_INC) -fopenmp $(CAIRO_CFLAGS) $(DEFINES)
+    CFLAGS=-g -Wall -O3 -I$(INCDIR) -I$(LIBSCRNA_INC) -fopenmp $(DEFINES)
 endif
-LDFLAGS=-lm -lpthread -lz -fopenmp -lstdc++ $(CAIRO_LIBS) $(HTS_LIBS)
+LDFLAGS=-lm -lpthread -lz -fopenmp -lstdc++ $(HTS_LIBS)
 
 # Object files
 OBJS=$(SRCS:.c=.o)
