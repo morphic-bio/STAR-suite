@@ -90,10 +90,10 @@ The tool can accept input FASTQ files in two ways:
 | :--- | :--- | :--- | :--- |
 | `-m`, `--maxHammingDistance` | `[int]` | Maximum Hamming distance for a feature sequence to be considered a match (inclusive). | `1` |
 | `-s`, `--stringency` | `[int]` | Stringency for UMI deduplication. See [UMI de-duplication](#umi-de-duplication) section for details. | `1` |
-| `-i`, `--min_counts` | `[int]` | Minimum read count for a UMI clique to be considered for counting. | `1` |
+| `-i`, `--min_counts` | `[int]` | Minimum read count for a UMI clique to be considered for counting. | `0` |
 | `-M`, `--min_posterior` | `[float]` | Minimum posterior probability to rescue a barcode with sequencing errors. | `0.975` |
 | `--max_barcode_mismatches` | `[int]` | Maximum number of mismatches allowed to rescue a sequence barcode. | `3` |
-| `--feature_n` | `[int]` | Maximum number of 'N' bases allowed in a feature sequence. | `3` |
+| `--feature_n` | `[int]` | Maximum number of 'N' bases allowed in a feature sequence. | `1` |
 | `--barcode_n` | `[int]` | Maximum number of 'N' bases allowed in a sequence barcode. | `1` |
 | `--max_reads` | `[long]` | Maximum number of reads to process from each FASTQ file. | `0` (all) |
 | `--min_prediction` | `[int]` | Minimum prediction threshold for feature assignment (advanced, rarely needed). | `1` |

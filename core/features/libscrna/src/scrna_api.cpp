@@ -4,8 +4,7 @@
  * 
  * EmptyDrops filtering for no-tag/single-sample mode:
  * - Default seed=1 (per emptydrops_refactor_plan.md)
- * - Simple ED is FALLBACK only (runs when no sparse data or explicit --use-simple-empty-drops)
- * - Full Monte Carlo EmptyDrops is the primary filtering method
+ * - Simple ED runs first to define simple cells, then Monte Carlo EmptyDrops rescues tail cells
  * - Occupancy filter disabled (Flex-only feature)
  * - Outputs: filtered_barcodes.txt + EmptyDrops/emptydrops_results.tsv
  */
@@ -88,9 +87,8 @@ extern "C" scrna_ed_config* scrna_ed_config_create(void) {
     config->mc_threads = 0;              // Single-threaded by default
     
     config->disable_occupancy_filter = 1; // Disabled for compat mode (occupancy is Flex-only)
-    config->ed_retain_count = 120000;     // Default retain window
+    config->ed_retain_count = 0;          // No retain cap by default (use all cells)
     config->use_fdr_gate = 0;             // Use raw p-value by default (Flex behavior)
-    config->use_simple_emptydrops = 0;    // Simple ED is fallback only by default
     
     return config;
 }
@@ -199,43 +197,32 @@ extern "C" int scrna_emptydrops_run(
     }
     
     // ========================================================================
-    // Step 3: Check if we should use Simple ED (fallback or explicit request)
-    // Simple ED runs ONLY as fallback (no sparse data) or if explicitly requested
+    // Step 3: Run Simple EmptyDrops to define simple cells and candidate tail
     // ========================================================================
-    bool useSimpleED = config->use_simple_emptydrops || 
-                       !input->sparse_gene_ids || 
-                       !input->sparse_counts || 
-                       !input->sparse_cell_index;
-    
-    if (useSimpleED) {
-        cerr << "[scrna_api] Using Simple EmptyDrops (";
-        if (config->use_simple_emptydrops) {
-            cerr << "explicit --use-simple-empty-drops";
-        } else {
-            cerr << "fallback: no sparse matrix data";
-        }
-        cerr << ")" << endl;
-        
-        SimpleEmptyDropsParams simpleParams;
-        simpleParams.nExpectedCells = config->n_expected_cells;
-        simpleParams.maxPercentile = config->max_percentile;
-        simpleParams.maxMinRatio = config->max_min_ratio;
-        simpleParams.umiMin = config->umi_min;
-        simpleParams.umiMinFracMedian = config->umi_min_frac_median;
-        simpleParams.candMaxN = config->cand_max_n;
-        simpleParams.indMin = config->ind_min;
-        simpleParams.indMax = config->ind_max;
-        simpleParams.useBootstrap = false;
-        
-        SimpleEmptyDropsResult simpleResult = SimpleEmptyDropsStage::runCRSimpleFilter(
-            retainUMI, retainIndices.size(), simpleParams);
-        
-        result->n_simple_cells = simpleResult.nCellsSimple;
-        result->retain_threshold = simpleResult.retainThreshold;
-        result->min_umi = simpleResult.minUMI;
-        
-        cerr << "[scrna_api] Simple filter: " << simpleResult.nCellsSimple << " cells, threshold=" << simpleResult.retainThreshold << endl;
-        
+    SimpleEmptyDropsParams simpleParams;
+    simpleParams.nExpectedCells = config->n_expected_cells;
+    simpleParams.maxPercentile = config->max_percentile;
+    simpleParams.maxMinRatio = config->max_min_ratio;
+    simpleParams.umiMin = config->umi_min;
+    simpleParams.umiMinFracMedian = config->umi_min_frac_median;
+    simpleParams.candMaxN = config->cand_max_n;
+    simpleParams.indMin = config->ind_min;
+    simpleParams.indMax = config->ind_max;
+
+    SimpleEmptyDropsResult simpleResult = SimpleEmptyDropsStage::runCRSimpleFilter(
+        retainUMI, retainIndices.size(), simpleParams);
+
+    result->retain_threshold = simpleResult.retainThreshold;
+    result->min_umi = simpleResult.minUMI;
+    result->n_simple_cells = simpleResult.nCellsSimple;
+
+    cerr << "[scrna_api] Simple filter: " << simpleResult.nCellsSimple
+         << " cells, threshold=" << simpleResult.retainThreshold << endl;
+
+    // If we don't have sparse data, Simple ED is the only option
+    if (!input->sparse_gene_ids || !input->sparse_counts || !input->sparse_cell_index) {
+        cerr << "[scrna_api] Using Simple EmptyDrops only (no sparse matrix data)" << endl;
+
         // Map simple filter passing indices back to original indices
         result->n_barcodes = simpleResult.passingIndices.size();
         result->barcodes = (char**)malloc(result->n_barcodes * sizeof(char*));
@@ -243,47 +230,31 @@ extern "C" int scrna_emptydrops_run(
             result->error_message = strdup_safe("Memory allocation failed");
             return -1;
         }
-        
+
         for (size_t i = 0; i < result->n_barcodes; i++) {
             uint32_t retainIdx = simpleResult.passingIndices[i];
             uint32_t origIdx = retainIndices[retainIdx];
             result->barcodes[i] = strdup_safe(barcodes[origIdx].c_str());
         }
-        
+
         return 0;
     }
-    
+
     // ========================================================================
-    // Step 4 onwards: Full Monte Carlo EmptyDrops (primary method)
+    // Step 4 onwards: Full Monte Carlo EmptyDrops (tail rescue)
     // ========================================================================
     cerr << "[scrna_api] Running full Monte Carlo EmptyDrops (seed=" << config->seed << ")" << endl;
-    
-    // Compute retain threshold for Monte Carlo mode (used for "simple cells" auto-pass)
-    // Sort retainUMI to find percentile-based threshold
-    vector<uint32_t> sortedUMI = retainUMI;
-    sort(sortedUMI.begin(), sortedUMI.end(), greater<uint32_t>());
-    
-    uint32_t nExpected = config->n_expected_cells;
-    uint32_t baselineIdx = min(nExpected, (uint32_t)sortedUMI.size()) - 1;
-    uint32_t retainThreshold = baselineIdx < sortedUMI.size() ? 
-        sortedUMI[baselineIdx] / 10 : config->umi_min;  // OrdMag style: baseline / 10
-    retainThreshold = max(retainThreshold, config->umi_min);
-    
-    result->retain_threshold = retainThreshold;
-    result->min_umi = config->umi_min;
-    
+
     // ========================================================================
     // Build ambient profile from cells with UMI <= ambientUmiMax WITHIN retain window
     // ========================================================================
     vector<uint32_t> ambCount(input->n_features, 0);
     size_t ambientCellsUsed = 0;
-    uint32_t ambientUmiMax = config->ambient_umi_max;
-    
-    for (size_t ri = 0; ri < retainIndices.size(); ri++) {
-        uint32_t origIdx = retainIndices[ri];
-        uint32_t umi = nUMIperCB[origIdx];
-        if (umi > ambientUmiMax) continue;  // Only cells with UMI <= ambientUmiMax
-        
+
+    for (uint32_t retainIdx : simpleResult.ambientIndices) {
+        if (retainIdx >= retainIndices.size()) continue;
+        uint32_t origIdx = retainIndices[retainIdx];
+
         uint32_t start = input->sparse_cell_index[origIdx];
         uint32_t nGenes = input->n_genes_per_cell[origIdx];
         for (uint32_t g = 0; g < nGenes; g++) {
@@ -295,8 +266,9 @@ extern "C" int scrna_emptydrops_run(
         }
         ambientCellsUsed++;
     }
-    
-    cerr << "[scrna_api] Ambient profile: " << ambientCellsUsed << " cells (UMI <= " << ambientUmiMax << " within retain)" << endl;
+
+    cerr << "[scrna_api] Ambient profile: " << ambientCellsUsed
+         << " cells (SimpleED ambient window)" << endl;
     
     // Find detected features
     vector<uint32_t> featDetVec;
@@ -310,43 +282,19 @@ extern "C" int scrna_emptydrops_run(
     cerr << "[scrna_api] Ambient profile: " << ambProfile.featuresDetected << " features detected" << endl;
     
     // ========================================================================
-    // Build candidate list (UMI > lowerTestingBound within retain window)
+    // Build candidate list (SimpleED candidates = simple cells + tail)
     // ========================================================================
-    uint32_t lowerTestingBound = config->lower_testing_bound;
-    
-    // Build sorted index within retain window (by UMI descending)
-    vector<pair<uint32_t, uint32_t>> retainUmiIdx;  // (umi, retain_index)
-    for (size_t ri = 0; ri < retainIndices.size(); ri++) {
-        retainUmiIdx.push_back({retainUMI[ri], ri});
-    }
-    stable_sort(retainUmiIdx.begin(), retainUmiIdx.end(), [](const pair<uint32_t,uint32_t>& a, const pair<uint32_t,uint32_t>& b) {
-        return a.first > b.first;
-    });
-    
-    // Candidates: cells with UMI > lowerTestingBound, capped by candMaxN
-    vector<uint32_t> candidateRetainIndices;  // indices into retain window
+    vector<uint32_t> candidateRetainIndices = simpleResult.candidateIndices;
     vector<uint32_t> candidateCounts;
-    uint32_t nSimpleCells = 0;
-    
-    for (size_t i = 0; i < retainUmiIdx.size(); i++) {
-        uint32_t umi = retainUmiIdx[i].first;
-        uint32_t retainIdx = retainUmiIdx[i].second;
-        
-        if (umi <= lowerTestingBound) break;  // No more candidates (sorted descending)
-        
-        candidateRetainIndices.push_back(retainIdx);
-        candidateCounts.push_back(umi);
-        
-        // Count simple cells (above retain threshold)
-        if (umi >= result->retain_threshold) {
-            nSimpleCells++;
-        }
-        
-        if (candidateRetainIndices.size() >= config->cand_max_n) break;
+    candidateCounts.reserve(candidateRetainIndices.size());
+    for (uint32_t retainIdx : candidateRetainIndices) {
+        candidateCounts.push_back(retainUMI[retainIdx]);
     }
-    
-    cerr << "[scrna_api] Candidates: " << candidateRetainIndices.size() 
-         << " (UMI > " << lowerTestingBound << ", cap=" << config->cand_max_n << ")" << endl;
+
+    uint32_t nSimpleCells = simpleResult.nCellsSimple;
+
+    cerr << "[scrna_api] Candidates: " << candidateRetainIndices.size()
+         << " (SimpleED candidates, cap=" << config->cand_max_n << ")" << endl;
     cerr << "[scrna_api] Simple cells (UMI >= " << result->retain_threshold << "): " << nSimpleCells << endl;
     
     // ========================================================================
@@ -412,28 +360,40 @@ extern "C" int scrna_emptydrops_run(
     );
     
     // ========================================================================
-    // Collect passing barcodes (use passesRawP unless use_fdr_gate is set)
+    // Collect passing barcodes:
+    // - Always include SimpleED passers (even if no p-values are computed)
+    // - Include tail rescues only if they pass the chosen gate
     // ========================================================================
     vector<string> passingBarcodes;
     uint32_t nEdPassers = 0;
+    vector<uint8_t> simpleFlags(input->n_cells, 0);
     
+    // Add SimpleED passers explicitly
+    for (size_t i = 0; i < simpleResult.passingIndices.size(); i++) {
+        uint32_t retainIdx = simpleResult.passingIndices[i];
+        if (retainIdx >= retainIndices.size()) continue;
+        uint32_t cellIdx = retainIndices[retainIdx];
+        if (cellIdx < barcodes.size()) {
+            simpleFlags[cellIdx] = 1;
+            passingBarcodes.push_back(barcodes[cellIdx]);
+        }
+    }
+    
+    // Add tail rescues based on gate
     for (size_t i = 0; i < edResults.size(); i++) {
         bool passes = config->use_fdr_gate ? edResults[i].passesFDR : edResults[i].passesRawP;
-        if (passes) {
-            uint32_t cellIdx = edResults[i].cellIndex;
-            if (cellIdx < barcodes.size()) {
-                passingBarcodes.push_back(barcodes[cellIdx]);
-            }
-            if (i >= nSimpleCells) {
-                nEdPassers++;
-            }
-        }
+        if (!passes) continue;
+        uint32_t cellIdx = edResults[i].cellIndex;
+        if (cellIdx >= barcodes.size()) continue;
+        if (simpleFlags[cellIdx]) continue;
+        passingBarcodes.push_back(barcodes[cellIdx]);
+        nEdPassers++;
     }
     
     cerr << "[scrna_api] EmptyDrops complete: " << passingBarcodes.size() << " cells pass" << endl;
     cerr << "[scrna_api]   Simple passers: " << nSimpleCells << endl;
     cerr << "[scrna_api]   ED rescues: " << nEdPassers << endl;
-    
+
     // ========================================================================
     // Store results
     // ========================================================================

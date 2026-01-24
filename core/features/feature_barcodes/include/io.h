@@ -8,10 +8,10 @@
 #include "globals.h"
 // Function prototypes for file I/O operations
 feature_arrays* read_features_file(const char* filename);
-int get_feature_line_sizes(char *line, int nameIndex, int seqIndex, int *name_size, int *seq_size, int *code_size, int *maxFeatureLength);
-void process_feature_line(char *line, int nameIndex, int seqIndex, feature_arrays *myfeatures, int count);
-feature_arrays* allocate_feature_arrays(int name_size, int seq_size, int code_size, int count, int maxFeatureLength);
-void find_name_and_sequence_fields(char *line, int *nameIndex, int *seqIndex);
+int get_feature_line_sizes(char *line, int nameIndex, int seqIndex, int patternIndex, int *name_size, int *seq_size, int *code_size, int *anchor_size, int *maxFeatureLength);
+void process_feature_line(char *line, int nameIndex, int seqIndex, int patternIndex, feature_arrays *myfeatures, int count);
+feature_arrays* allocate_feature_arrays(int name_size, int seq_size, int code_size, int anchor_size, int count, int maxFeatureLength);
+void find_name_and_sequence_fields(char *line, int *nameIndex, int *seqIndex, int *patternIndex);
 int put_fastq_files_string_into_collection(char *fastqFilesString, char **fastq_files, int *nFiles, char *concatenated_fastq);
 void check_filecounts(fastq_files_collection *fastq_files);
 int count_character(char *string, char character);

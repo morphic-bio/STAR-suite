@@ -233,7 +233,7 @@ static feature_arrays* load_probe_variants_to_features(const char *path) {
         if (canonical != variant) variant_cnt++;    
     }
 
-    feature_arrays *fa = allocate_feature_arrays(name_size, seq_size, code_size, uniq_cnt, PROBE_LEN);
+    feature_arrays *fa = allocate_feature_arrays(name_size, seq_size, code_size, 0, uniq_cnt, PROBE_LEN);
     fa->common_length = PROBE_LEN;
     //allocate a array of blocks of size (PROBE_LEN+3)/4
     uint8_t *variant_codes = malloc(variant_cnt * (PROBE_LEN+3)/4);

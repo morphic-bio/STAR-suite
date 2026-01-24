@@ -29,11 +29,11 @@
 #define BARCODE_CODE_LENGTH ((BARCODE_LENGTH + 3) / 4)
 #define UMI_CODE_LENGTH ((UMI_LENGTH + 3) / 4)
 #define MAX_FEATURES 128
-#define MAX_BARCODE_MISMATCHES 3
+#define MAX_BARCODE_MISMATCHES 10
 
 // other defines
 #define MIN_POSTERIOR 0.975
-#define MAX_FEATURE_N 3
+#define MAX_FEATURE_N 1
 #define MAX_BARCODE_N 1
 #define MAX_MALLOCS 1000
 #define MAX_FEATURE_SEQUENCE_LENGTH 64
@@ -93,6 +93,10 @@ typedef struct feature_arrays {
     char *feature_sequences_storage;
     unsigned char **feature_codes;
     unsigned char *feature_codes_storage;
+    char **feature_anchors;
+    char *feature_anchors_storage;
+    unsigned int *feature_anchor_lengths;
+    int *feature_offsets; /* 0-based array; entry i corresponds to feature index (i+1). -1 = unknown */
     int number_of_mismatched_features;
     int *mismatched_feature_indices;
 } feature_arrays;

@@ -51,6 +51,8 @@ struct Config {
     int umi_length = 12;
     int max_hamming = 2;
     int threads = 8;
+    int consumer_threads = 1;
+    int search_threads = 4;
     
     // GMM calling params
     int min_umi = 3;
@@ -63,6 +65,7 @@ struct Config {
     // EmptyDrops control
     bool skip_emptydrops = false;
     int emptydrops_expected_cells = 0;
+    bool emptydrops_use_fdr = false;
 };
 
 // ============================================================================
@@ -118,10 +121,14 @@ static void print_usage(const char *prog) {
     fprintf(stderr, "    --umi-length N          UMI length (default: 12)\n");
     fprintf(stderr, "    --max-hamming N         Max Hamming distance for matching (default: 2)\n");
     fprintf(stderr, "    --threads N             Number of threads (default: 8)\n");
+    fprintf(stderr, "    --consumer-threads N    Consumer threads per sample (default: 1)\n");
+    fprintf(stderr, "    --search-threads N      Search threads per consumer (default: 4)\n");
     fprintf(stderr, "\n");
     fprintf(stderr, "  EmptyDrops options:\n");
     fprintf(stderr, "    --skip-empty-drops      Skip EmptyDrops cell calling\n");
     fprintf(stderr, "    --emptydrops-expected-cells N  Expected number of cells (default: auto)\n");
+    fprintf(stderr, "    --emptydrops-use-fdr    Use FDR gate for tail rescue (default: raw p-value)\n");
+    fprintf(stderr, "\n");
     fprintf(stderr, "\n");
     fprintf(stderr, "  GMM calling parameters:\n");
     fprintf(stderr, "    --min-umi N             Minimum UMI threshold (default: 3)\n");
@@ -154,14 +161,24 @@ static int run_extraction(const Config &cfg) {
     pf_config_set_umi_length(pf_cfg, cfg.umi_length);
     pf_config_set_max_hamming_distance(pf_cfg, cfg.max_hamming);
     pf_config_set_threads(pf_cfg, cfg.threads);
+    pf_config_set_consumer_threads(pf_cfg, cfg.consumer_threads);
+    pf_config_set_search_threads(pf_cfg, cfg.search_threads);
     
     // EmptyDrops control
     pf_config_set_skip_emptydrops(pf_cfg, cfg.skip_emptydrops ? 1 : 0);
     pf_config_set_expected_cells(pf_cfg, cfg.emptydrops_expected_cells);
+    pf_config_set_emptydrops_use_fdr(pf_cfg, cfg.emptydrops_use_fdr ? 1 : 0);
     
     // In compat mode, EmptyDrops failure is fatal by default (unless skipped)
     if (cfg.compat_perturb && !cfg.skip_emptydrops) {
         pf_config_set_emptydrops_failure_fatal(pf_cfg, 1);
+    }
+    if (cfg.compat_perturb) {
+        pf_config_set_use_feature_anchor_search(pf_cfg, 1);
+        pf_config_set_require_feature_anchor_match(pf_cfg, 1);
+        pf_config_set_feature_mode_bootstrap_reads(pf_cfg, 100000);
+        /* Inclusive counting in compat mode: allow single-read UMIs. */
+        pf_config_set_min_counts(pf_cfg, 0);
     }
     
     // Initialize context
@@ -439,12 +456,15 @@ int main(int argc, char *argv[]) {
         {"umi-length",          required_argument, 0, 1002},
         {"max-hamming",         required_argument, 0, 1003},
         {"threads",             required_argument, 0, 't'},
+        {"consumer-threads",    required_argument, 0, 1011},
+        {"search-threads",      required_argument, 0, 1012},
         {"min-umi",             required_argument, 0, 1004},
         {"min-counts",          required_argument, 0, 1005},
         {"dominance-fraction",  required_argument, 0, 1006},
         {"dominance-margin",    required_argument, 0, 1007},
         {"skip-empty-drops",    no_argument,       0, 1008},
         {"emptydrops-expected-cells", required_argument, 0, 1009},
+        {"emptydrops-use-fdr",  no_argument,       0, 1010},
         {"help",                no_argument,       0, 'h'},
         {"version",             no_argument,       0, 'v'},
         {0, 0, 0, 0}
@@ -465,6 +485,8 @@ int main(int argc, char *argv[]) {
             case 'P': cfg.compat_perturb = true; break;
             case 'R': cfg.gmm_mode = false; break;
             case 't': cfg.threads = atoi(optarg); break;
+            case 1011: cfg.consumer_threads = atoi(optarg); break;
+            case 1012: cfg.search_threads = atoi(optarg); break;
             case 1001: cfg.barcode_length = atoi(optarg); break;
             case 1002: cfg.umi_length = atoi(optarg); break;
             case 1003: cfg.max_hamming = atoi(optarg); break;
@@ -474,6 +496,7 @@ int main(int argc, char *argv[]) {
             case 1007: cfg.dominance_margin = atoi(optarg); break;
             case 1008: cfg.skip_emptydrops = true; break;
             case 1009: cfg.emptydrops_expected_cells = atoi(optarg); break;
+            case 1010: cfg.emptydrops_use_fdr = true; break;
             case 'v':
                 printf("star_feature_call version 1.0.0\n");
                 printf("Part of STAR-suite\n");
@@ -524,11 +547,18 @@ int main(int argc, char *argv[]) {
             fprintf(stderr, "  CR9-compatible output normally uses GMM calling; results may diverge.\n");
         }
 
-        // Warn if filtered barcodes not provided (parity not guaranteed)
+        // Require filtered barcodes for compat extraction unless explicitly skipping EmptyDrops
         if (cfg.extract_mode && cfg.filtered_barcodes.empty()) {
-            fprintf(stderr, "Warning: --compat-perturb without --filtered-barcodes\n");
-            fprintf(stderr, "  CR9 parity requires filtered barcodes to match CR9's cell selection.\n");
-            fprintf(stderr, "  Output will use all whitelisted barcodes, not just filtered cells.\n");
+            if (cfg.skip_emptydrops) {
+                fprintf(stderr, "Warning: --compat-perturb without --filtered-barcodes\n");
+                fprintf(stderr, "  EmptyDrops is skipped; filtered outputs will be missing.\n");
+                fprintf(stderr, "  Provide GEX-filtered barcodes to generate CR9-compatible filtered MEX.\n");
+            } else {
+                fprintf(stderr, "Error: --compat-perturb requires --filtered-barcodes for feature-only runs\n");
+                fprintf(stderr, "  EmptyDrops should not be run on feature counts.\n");
+                fprintf(stderr, "  Provide GEX-filtered barcodes (or use --skip-empty-drops to proceed without filtered output).\n");
+                return 1;
+            }
         }
     }
     

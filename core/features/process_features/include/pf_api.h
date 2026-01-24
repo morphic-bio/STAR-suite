@@ -97,11 +97,16 @@ void pf_config_set_reverse_complement_whitelist(pf_config *config, int enable);
 void pf_config_set_limit_search(pf_config *config, int limit);
 void pf_config_set_max_reads(pf_config *config, long long max_reads);
 void pf_config_set_translate_nxt(pf_config *config, int enable);
+void pf_config_set_use_feature_offset_array(pf_config *config, int enable);
+void pf_config_set_use_feature_anchor_search(pf_config *config, int enable);
+void pf_config_set_require_feature_anchor_match(pf_config *config, int enable);
+void pf_config_set_feature_mode_bootstrap_reads(pf_config *config, int n_reads);
 
 /* EmptyDrops control */
 void pf_config_set_skip_emptydrops(pf_config *config, int enable);
 void pf_config_set_emptydrops_failure_fatal(pf_config *config, int enable);
 void pf_config_set_expected_cells(pf_config *config, int n_cells);
+void pf_config_set_emptydrops_use_fdr(pf_config *config, int enable);
 
 /* ============================================================================
  * Context Lifecycle API
@@ -242,6 +247,7 @@ const char* pf_get_feature_sequence(pf_context *ctx, int index);
  * @param n_genes_per_cell Genes per cell (or NULL for simple mode)
  * @param output_dir Directory to write outputs
  * @param n_expected_cells Expected number of cells (0 = auto)
+ * @param use_fdr_gate If true, gate tail rescues by FDR instead of raw p-value
  * @param filtered_barcodes_out Output: array of filtered barcode strings (caller frees)
  * @param n_filtered_out Output: number of filtered barcodes
  * @return PF_OK on success, error code otherwise.
@@ -258,6 +264,7 @@ pf_error pf_run_emptydrops_premex(
     const uint32_t *n_genes_per_cell,
     const char *output_dir,
     int n_expected_cells,
+    int use_fdr_gate,
     char ***filtered_barcodes_out,
     uint32_t *n_filtered_out
 );
@@ -269,9 +276,10 @@ pf_error pf_run_emptydrops_premex(
  * @param mex_dir Path to MEX directory (containing matrix.mtx, barcodes.tsv, features.tsv)
  * @param output_dir Directory to write outputs
  * @param n_expected_cells Expected number of cells (0 = auto)
+ * @param use_fdr_gate If true, gate tail rescues by FDR instead of raw p-value
  * @return PF_OK on success, error code otherwise.
  */
-pf_error pf_run_emptydrops_mex(const char *mex_dir, const char *output_dir, int n_expected_cells);
+pf_error pf_run_emptydrops_mex(const char *mex_dir, const char *output_dir, int n_expected_cells, int use_fdr_gate);
 
 /* ============================================================================
  * Utility Functions

@@ -29,15 +29,19 @@ static void print_usage(const char *prog){
     fprintf(stderr, "  -o, --feature_constant_offset <int> Expected start position of feature in read (default 0)\n");
     fprintf(stderr, "  -B, --barcode_constant_offset <int> Start position of barcode and UMI (default 0)\n");
     fprintf(stderr, "      --limit_search      <int>     Limit feature search to N bases around offset (-1 = entire read)\n");
+    fprintf(stderr, "      --use_feature_offset_array    Use per-feature offsets from pattern column when available\n");
+    fprintf(stderr, "      --use_feature_anchor_search   Find pattern anchor via strstr before matching features\n");
+    fprintf(stderr, "      --require_feature_anchor_match Require anchor match (no fallback search)\n");
+    fprintf(stderr, "      --feature_mode_bootstrap_reads <int> Bootstrap N reads to learn per-feature offsets\n");
     fprintf(stderr, "  -r, --reverse_complement_whitelist Reverse complement whitelist barcodes\n\n");
 
     fprintf(stderr, "Error Correction & Thresholds:\n");
     fprintf(stderr, "  -m, --maxHammingDistance <int>    Max Hamming distance for feature match (default 1)\n");
     fprintf(stderr, "  -s, --stringency        <int>     UMI dedup stringency (see README, default 1)\n");
-    fprintf(stderr, "  -i, --min_counts        <int>     Min reads in UMI clique for counting (default 1)\n");
+    fprintf(stderr, "  -i, --min_counts        <int>     Min reads in UMI clique for counting (default 0)\n");
     fprintf(stderr, "  -M, --min_posterior     <float>   Min posterior probability for barcode rescue (default 0.975)\n");
-    fprintf(stderr, "      --max_barcode_mismatches <int> Max mismatches to rescue sequence barcode (default 3)\n");
-    fprintf(stderr, "      --feature_n         <int>     Max 'N' bases allowed in feature sequence (default 3)\n");
+    fprintf(stderr, "      --max_barcode_mismatches <int> Max mismatches to rescue sequence barcode (default 10)\n");
+    fprintf(stderr, "      --feature_n         <int>     Max 'N' bases allowed in feature sequence (default 1)\n");
     fprintf(stderr, "      --barcode_n         <int>     Max 'N' bases allowed in sequence barcode (default 1)\n");
     fprintf(stderr, "      --max_reads         <long>    Max reads to process per FASTQ (0 = all)\n");
     fprintf(stderr, "      --min_prediction    <int>     Min prediction threshold for feature assignment (default 1)\n");
@@ -81,12 +85,16 @@ int main(int argc, char *argv[])
     char sample_flag=1;
     char keep_existing=0;
     uint16_t stringency=1;
-    uint16_t min_counts=1;
+    uint16_t min_counts=0;
     int read_buffer_lines=READ_BUFFER_LINES;
     int average_read_length=AVERAGE_READ_LENGTH;
     int feature_constant_offset=0;
     int barcode_constant_offset=0;
     double min_posterior=MIN_POSTERIOR;
+    int use_feature_offset_array_cli=0;
+    int use_feature_anchor_search_cli=0;
+    int require_feature_anchor_match_cli=0;
+    int feature_mode_bootstrap_reads_cli=0;
 
     int max_concurrent_processes=8;
     int consumer_threads_per_set=1;
@@ -134,6 +142,10 @@ int main(int argc, char *argv[])
         {"reverse_fastq_pattern", required_argument, 0, 8},
         {"max_reads", required_argument, 0, 9},
         {"limit_search", required_argument, 0, 10},
+        {"use_feature_offset_array", no_argument, 0, 22},
+        {"use_feature_anchor_search", no_argument, 0, 23},
+        {"require_feature_anchor_match", no_argument, 0, 24},
+        {"feature_mode_bootstrap_reads", required_argument, 0, 25},
         {"filtered_barcodes", required_argument, 0, 12},
         {"min_prediction", required_argument, 0, 15},
         {"min_heatmap", required_argument, 0, 16},
@@ -150,7 +162,28 @@ int main(int argc, char *argv[])
         switch (c) {
             case 'w': strcpy(whitelist_filename, optarg); break;
             case 'b': barcode_length=atoi(optarg); barcode_code_length=(barcode_length+3)/4; break;
-            case 'f': features=read_features_file(optarg); number_of_features=features->number_of_features; maximum_feature_length=features->max_length; feature_code_length=(maximum_feature_length+3)/4; break;
+            case 'f':
+                features=read_features_file(optarg);
+                number_of_features=features->number_of_features;
+                maximum_feature_length=features->max_length;
+                feature_code_length=(maximum_feature_length+3)/4;
+                feature_offsets = features->feature_offsets;
+                feature_offsets_count = features->number_of_features;
+                feature_anchors = features->feature_anchors;
+                feature_anchor_lengths = features->feature_anchor_lengths;
+                feature_anchor_count = features->number_of_features;
+                if (feature_mode_bootstrap_reads > 0) {
+                    feature_mode_offsets = malloc(sizeof(int) * features->number_of_features);
+                    feature_mode_hist = calloc((size_t)features->number_of_features * (size_t)feature_mode_max_offset, sizeof(unsigned int));
+                    if (!feature_mode_offsets || !feature_mode_hist) {
+                        fprintf(stderr, "Failed to allocate feature mode arrays\n");
+                        exit(EXIT_FAILURE);
+                    }
+                    for (int i = 0; i < features->number_of_features; i++) {
+                        feature_mode_offsets[i] = -1;
+                    }
+                }
+                break;
             case 'm': maxHammingDistance=atoi(optarg); break;
             case 's': stringency=(uint16_t)atoi(optarg); break;
             case 'S': set_search_threads_per_consumer=atoi(optarg); break;
@@ -179,12 +212,42 @@ int main(int argc, char *argv[])
             case 8: strcpy(reverse_pattern, optarg); break;
             case 9: max_reads=atoll(optarg); break;
             case 10: limit_search = atoi(optarg); break;
+            case 22: use_feature_offset_array_cli = 1; break;
+            case 23: use_feature_anchor_search_cli = 1; break;
+            case 24: require_feature_anchor_match_cli = 1; break;
+            case 25: feature_mode_bootstrap_reads_cli = atoi(optarg); break;
             case 12: filtered_barcodes_filename = strdup(optarg); break;
             case 15: min_prediction = atoi(optarg); break;
             case 16: min_heatmap = atoi(optarg); break;
             case 17: translate_NXT = 1; fprintf(stderr, "translate_NXT enabled: complementing positions 8 and 9 at output/filter time.\n"); break;
             case 'h': print_usage(argv[0]); return 0;
             default: print_usage(argv[0]); return 1;
+        }
+    }
+    if (use_feature_offset_array_cli) {
+        use_feature_offset_array = 1;
+    }
+    if (use_feature_anchor_search_cli) {
+        use_feature_anchor_search = 1;
+    }
+    if (require_feature_anchor_match_cli) {
+        require_feature_anchor_match = 1;
+        use_feature_anchor_search = 1;
+    }
+    if (feature_mode_bootstrap_reads_cli > 0) {
+        feature_mode_bootstrap_reads = feature_mode_bootstrap_reads_cli;
+        feature_mode_reads_seen = 0;
+        feature_mode_bootstrap_done = 0;
+    }
+    if (feature_mode_bootstrap_reads > 0 && features && !feature_mode_offsets) {
+        feature_mode_offsets = malloc(sizeof(int) * features->number_of_features);
+        feature_mode_hist = calloc((size_t)features->number_of_features * (size_t)feature_mode_max_offset, sizeof(unsigned int));
+        if (!feature_mode_offsets || !feature_mode_hist) {
+            fprintf(stderr, "Failed to allocate feature mode arrays\n");
+            exit(EXIT_FAILURE);
+        }
+        for (int i = 0; i < features->number_of_features; i++) {
+            feature_mode_offsets[i] = -1;
         }
     }
     GHashTable *filtered_barcodes_hash = NULL;

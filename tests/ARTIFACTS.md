@@ -37,4 +37,10 @@ update this file with its output location.
 - `plans/artifacts/parms_tests_YYYYMMDD/` (logs + report)
 - `tests/*_output*/` (smoke/regression outputs)
 - `/tmp/*` (temporary scratch outputs)
-
+- `/storage/A375/` (external A375 datasets + smoke outputs; e.g. `star_gex_smoke/`, `star_multi_smoke_cpp/`, `fastqs/`, `outputs/`)
+  - Downsampled MEX output: `/storage/A375/star_multi_smoke/assign/downsampled/`
+  - CRISPR compat runs:
+    - `/storage/A375/assign_anchor_mode_h3_min0_20260123_233445/`
+    - `/storage/A375/assign_anchor_mode_h1_min0_20260123_235424/`
+    - `/storage/A375/assign_anchor_mode_h1_min0_n0_20260124_000205/`
+    - `/storage/A375/assign_anchor_mode_h3_min0_trace_GTGTGATGTGTGGTCA_20260123_234434/`

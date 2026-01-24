@@ -48,6 +48,7 @@ pf_filter_status pf_filter_barcodes(
         config->n_features,
         config->output_dir,
         config->n_expected_cells,
+        config->emptydrops_use_fdr,
         config->translate_nxt
     );
     

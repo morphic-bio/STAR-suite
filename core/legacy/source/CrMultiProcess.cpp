@@ -1,4 +1,5 @@
 #include "CrMultiProcess.h"
+#include "Solo.h"
 #include "CrMultiConfig.h"
 #include "CrMultiAssign.h"
 #include "CrMultiMexStub.h"
@@ -171,9 +172,47 @@ static bool filterFeatureRefCsv(const string& inputPath, const string& featureTy
     return wroteAny;
 }
 
+static bool getFilteredBarcodesFromSolo(const Solo* solo, const Parameters& P, vector<string>& out) {
+    if (!solo || !solo->soloFeat) {
+        return false;
+    }
+    int32 featIdx = -1;
+    if (P.pSolo.crGexFeature == ParametersSolo::CrGexGene) {
+        featIdx = P.pSolo.featureInd[SoloFeatureTypes::Gene];
+    } else if (P.pSolo.crGexFeature == ParametersSolo::CrGexGeneFull) {
+        featIdx = P.pSolo.featureInd[SoloFeatureTypes::GeneFull];
+    } else {
+        // Auto: prefer Gene, fallback to GeneFull
+        featIdx = P.pSolo.featureInd[SoloFeatureTypes::Gene];
+        if (featIdx < 0) {
+            featIdx = P.pSolo.featureInd[SoloFeatureTypes::GeneFull];
+        }
+    }
+    if (featIdx < 0 || solo->soloFeat[featIdx] == nullptr) {
+        return false;
+    }
+
+    const SoloFeature* gex = solo->soloFeat[featIdx];
+    if (gex->filteredCells.filtVecBool.empty()) {
+        return false;
+    }
+
+    out.clear();
+    out.reserve(gex->filteredCells.nCells);
+    for (uint32 icb = 0; icb < gex->nCB; icb++) {
+        if (gex->filteredCells.filtVecBool[icb]) {
+            uint32 wlIdx = gex->indCB[icb];
+            if (wlIdx < gex->pSolo.cbWLstr.size()) {
+                out.push_back(gex->pSolo.cbWLstr[wlIdx]);
+            }
+        }
+    }
+    return !out.empty();
+}
+
 } // namespace
 
-int processCrMultiConfig(Parameters& P) {
+int processCrMultiConfig(Parameters& P, const Solo* solo) {
     if (P.crMulti.crMultiConfig.empty()) {
         return 0; // Not enabled
     }
@@ -340,6 +379,14 @@ int processCrMultiConfig(Parameters& P) {
             }
         }
         
+        // Prefer in-memory filtered barcodes from Solo if available (avoids reading filtered MEX for barcode list)
+        vector<string> filteredGexBarcodes;
+        bool useFilteredGex = false;
+        if (getFilteredBarcodesFromSolo(solo, P, filteredGexBarcodes)) {
+            useFilteredGex = true;
+            P.inOut->logMain << "NOTICE: Using GEX filtered barcodes from Solo (in-memory)\n";
+        }
+
         // Read raw GEX MEX (required for raw_feature_bc_matrix)
         CrMultiMerge::MexData gexRawData;
         try {
@@ -365,10 +412,12 @@ int processCrMultiConfig(Parameters& P) {
             }
         }
         
-        // Read filtered GEX MEX (for filtered_feature_bc_matrix)
+        // Read filtered GEX MEX if needed (for counts fallback or barcode list)
         CrMultiMerge::MexData gexFilteredData;
-        bool useFilteredGex = false;
-        if (hasFiltered) {
+        bool loadedFilteredMex = false;
+        bool needFilteredMexForCounts = (!hasRaw || gexRawData.features.empty());
+        bool needFilteredMexForBarcodes = (!useFilteredGex && hasFiltered);
+        if (hasFiltered && (needFilteredMexForCounts || needFilteredMexForBarcodes)) {
             try {
                 gexFilteredData = CrMultiMerge::readMex(filteredOut);
                 // Filter to Gene Expression only if needed
@@ -382,9 +431,9 @@ int processCrMultiConfig(Parameters& P) {
                 if (hasMultipleTypes) {
                     gexFilteredData = CrMultiMerge::filterByFeatureType(gexFilteredData, "Gene Expression");
                 }
-                useFilteredGex = true;
+                loadedFilteredMex = true;
             } catch (const exception& e) {
-                P.inOut->logMain << "WARNING: Failed to read filtered GEX MEX: " << e.what() 
+                P.inOut->logMain << "WARNING: Failed to read filtered GEX MEX: " << e.what()
                                  << ", will use observed raw GEX barcodes for filtered output\n";
             }
         }
@@ -393,7 +442,7 @@ int processCrMultiConfig(Parameters& P) {
         CrMultiMerge::MexData gexData;
         if (hasRaw && !gexRawData.features.empty()) {
             gexData = gexRawData;
-        } else if (hasFiltered && !gexFilteredData.features.empty()) {
+        } else if (hasFiltered && loadedFilteredMex && !gexFilteredData.features.empty()) {
             gexData = gexFilteredData;
             P.inOut->logMain << "WARNING: Raw GEX MEX not available, using filtered GEX MEX as merge base\n";
         } else {
@@ -454,16 +503,15 @@ int processCrMultiConfig(Parameters& P) {
         }
         
         // Compute GEX barcodes for filtered output
-        vector<string> filteredGexBarcodes;
-        if (useFilteredGex && !gexFilteredData.features.empty()) {
+        if (!useFilteredGex && hasFiltered && loadedFilteredMex && !gexFilteredData.features.empty()) {
             // Use filtered GEX barcodes (from filtered MEX)
             filteredGexBarcodes = CrMultiMerge::computeObservedGexBarcodes(gexFilteredData);
-        } else {
+            useFilteredGex = true;
+        }
+        if (!useFilteredGex) {
             // Fallback to observed raw GEX barcodes (or filtered if raw missing)
             filteredGexBarcodes = observedRawGexBarcodes;
-            if (!useFilteredGex) {
-                P.inOut->logMain << "WARNING: Filtered GEX MEX not found, using observed raw GEX barcodes for filtered output\n";
-            }
+            P.inOut->logMain << "WARNING: Filtered GEX barcodes not available, using observed raw GEX barcodes for filtered output\n";
         }
         
         // Write raw_feature_bc_matrix (using observed raw GEX barcodes)

@@ -44,11 +44,16 @@ struct pf_config {
     int limit_search;
     long long max_reads;
     int translate_nxt;
+    int use_feature_offset_array;
+    int use_feature_anchor_search;
+    int require_feature_anchor_match;
+    int feature_mode_bootstrap_reads;
     
     /* EmptyDrops control */
     int skip_emptydrops;            /* 1 = skip EmptyDrops entirely */
     int emptydrops_failure_fatal;   /* 1 = treat ED failure as error */
     int expected_cells;             /* 0 = auto-detect */
+    int emptydrops_use_fdr;         /* 1 = use FDR gate for tail rescue */
 };
 
 struct pf_context {
@@ -82,7 +87,7 @@ pf_config* pf_config_create(void) {
     config->feature_offset = 0;
     config->barcode_offset = 0;
     config->max_barcode_mismatches = 3;
-    config->max_feature_n = 3;
+    config->max_feature_n = 1;
     config->max_barcode_n = 1;
     config->max_threads = 8;
     config->search_threads = 4;
@@ -92,11 +97,16 @@ pf_config* pf_config_create(void) {
     config->limit_search = -1;
     config->max_reads = 0;
     config->translate_nxt = 0;
+    config->use_feature_offset_array = 0;
+    config->use_feature_anchor_search = 0;
+    config->require_feature_anchor_match = 0;
+    config->feature_mode_bootstrap_reads = 0;
     
     /* EmptyDrops control defaults */
     config->skip_emptydrops = 0;
     config->emptydrops_failure_fatal = 0;
     config->expected_cells = 0;
+    config->emptydrops_use_fdr = 0;
     
     return config;
 }
@@ -190,6 +200,20 @@ void pf_config_set_max_reads(pf_config *config, long long max_reads) {
 void pf_config_set_translate_nxt(pf_config *config, int enable) {
     if (config) config->translate_nxt = enable;
 }
+void pf_config_set_use_feature_offset_array(pf_config *config, int enable) {
+    if (config) config->use_feature_offset_array = enable;
+}
+void pf_config_set_use_feature_anchor_search(pf_config *config, int enable) {
+    if (config) config->use_feature_anchor_search = enable;
+}
+
+void pf_config_set_require_feature_anchor_match(pf_config *config, int enable) {
+    if (config) config->require_feature_anchor_match = enable;
+}
+
+void pf_config_set_feature_mode_bootstrap_reads(pf_config *config, int n_reads) {
+    if (config) config->feature_mode_bootstrap_reads = n_reads;
+}
 
 void pf_config_set_skip_emptydrops(pf_config *config, int enable) {
     if (config) config->skip_emptydrops = enable;
@@ -202,6 +226,11 @@ void pf_config_set_emptydrops_failure_fatal(pf_config *config, int enable) {
 void pf_config_set_expected_cells(pf_config *config, int n_cells) {
     if (config) config->expected_cells = n_cells;
 }
+
+void pf_config_set_emptydrops_use_fdr(pf_config *config, int enable) {
+    if (config) config->emptydrops_use_fdr = enable;
+}
+
 
 /* ============================================================================
  * Global Initialization
@@ -251,6 +280,15 @@ pf_context* pf_init(const pf_config *config) {
     limit_search = ctx->config->limit_search;
     debug = ctx->config->debug_enabled;
     translate_NXT = ctx->config->translate_nxt;
+    use_feature_offset_array = ctx->config->use_feature_offset_array;
+    use_feature_anchor_search = ctx->config->use_feature_anchor_search;
+    require_feature_anchor_match = ctx->config->require_feature_anchor_match;
+    if (require_feature_anchor_match) {
+        use_feature_anchor_search = 1;
+    }
+    feature_mode_bootstrap_reads = ctx->config->feature_mode_bootstrap_reads;
+    feature_mode_reads_seen = 0;
+    feature_mode_bootstrap_done = 0;
     
     /* Global initialization */
     pf_global_init();
@@ -270,7 +308,24 @@ void pf_destroy(pf_context *ctx) {
     }
     
     if (ctx->features) {
+        if (feature_offsets == ctx->features->feature_offsets) {
+            feature_offsets = NULL;
+            feature_offsets_count = 0;
+        }
+        if (feature_anchors == ctx->features->feature_anchors) {
+            feature_anchors = NULL;
+            feature_anchor_lengths = NULL;
+            feature_anchor_count = 0;
+        }
         free_feature_arrays(ctx->features);
+    }
+    if (feature_mode_hist) {
+        free(feature_mode_hist);
+        feature_mode_hist = NULL;
+    }
+    if (feature_mode_offsets) {
+        free(feature_mode_offsets);
+        feature_mode_offsets = NULL;
     }
     
     if (ctx->whitelist_hash) {
@@ -309,8 +364,25 @@ pf_error pf_load_feature_ref(pf_context *ctx, const char *feature_csv) {
     
     /* Free existing features if any */
     if (ctx->features) {
+        if (feature_offsets == ctx->features->feature_offsets) {
+            feature_offsets = NULL;
+            feature_offsets_count = 0;
+        }
+        if (feature_anchors == ctx->features->feature_anchors) {
+            feature_anchors = NULL;
+            feature_anchor_lengths = NULL;
+            feature_anchor_count = 0;
+        }
         free_feature_arrays(ctx->features);
         ctx->features = NULL;
+    }
+    if (feature_mode_hist) {
+        free(feature_mode_hist);
+        feature_mode_hist = NULL;
+    }
+    if (feature_mode_offsets) {
+        free(feature_mode_offsets);
+        feature_mode_offsets = NULL;
     }
     
     ctx->features = read_features_file(feature_csv);
@@ -318,6 +390,26 @@ pf_error pf_load_feature_ref(pf_context *ctx, const char *feature_csv) {
         snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
                  "Failed to parse feature reference: %s", feature_csv);
         return PF_ERR_PARSE_ERROR;
+    }
+
+    feature_offsets = ctx->features->feature_offsets;
+    feature_offsets_count = ctx->features->number_of_features;
+    feature_anchors = ctx->features->feature_anchors;
+    feature_anchor_lengths = ctx->features->feature_anchor_lengths;
+    feature_anchor_count = ctx->features->number_of_features;
+
+    if (feature_mode_bootstrap_reads > 0) {
+        const int count = ctx->features->number_of_features;
+        feature_mode_offsets = malloc(sizeof(int) * count);
+        feature_mode_hist = calloc((size_t)count * (size_t)feature_mode_max_offset, sizeof(unsigned int));
+        if (!feature_mode_offsets || !feature_mode_hist) {
+            snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                     "Failed to allocate feature mode arrays");
+            return PF_ERR_OUT_OF_MEMORY;
+        }
+        for (int i = 0; i < count; i++) {
+            feature_mode_offsets[i] = -1;
+        }
     }
     
     /* Update globals */
@@ -488,6 +580,7 @@ pf_error pf_process_fastq_dir(pf_context *ctx,
         args.skip_emptydrops = ctx->config->skip_emptydrops;
         args.emptydrops_failure_fatal = ctx->config->emptydrops_failure_fatal;
         args.expected_cells = ctx->config->expected_cells;
+        args.emptydrops_use_fdr = ctx->config->emptydrops_use_fdr;
         args.error_out = &sample_error;
         
         /* Process the sample */
@@ -639,6 +732,7 @@ pf_error pf_process_fastqs(pf_context *ctx,
     args.skip_emptydrops = ctx->config->skip_emptydrops;
     args.emptydrops_failure_fatal = ctx->config->emptydrops_failure_fatal;
     args.expected_cells = ctx->config->expected_cells;
+    args.emptydrops_use_fdr = ctx->config->emptydrops_use_fdr;
     args.error_out = &sample_error;
     
     process_files_in_sample(&args);
@@ -899,6 +993,7 @@ pf_error pf_run_emptydrops_premex(
     const uint32_t *n_genes_per_cell,
     const char *output_dir,
     int n_expected_cells,
+    int use_fdr_gate,
     char ***filtered_barcodes_out,
     uint32_t *n_filtered_out
 ) {
@@ -927,6 +1022,7 @@ pf_error pf_run_emptydrops_premex(
         config->n_expected_cells = n_expected_cells;
     }
     config->disable_occupancy_filter = 1;  /* Disabled for compat mode */
+    config->use_fdr_gate = use_fdr_gate ? 1 : 0;
     
     /* Run EmptyDrops */
     scrna_ed_result result;
@@ -972,7 +1068,7 @@ pf_error pf_run_emptydrops_premex(
  * MEX-based EmptyDrops (standalone tool only - NOT for pipeline use)
  * ============================================================================ */
 
-pf_error pf_run_emptydrops_mex(const char *mex_dir, const char *output_dir, int n_expected_cells) {
+pf_error pf_run_emptydrops_mex(const char *mex_dir, const char *output_dir, int n_expected_cells, int use_fdr_gate) {
     if (!mex_dir || !output_dir) {
         return PF_ERR_INVALID_ARG;
     }
@@ -1045,6 +1141,7 @@ pf_error pf_run_emptydrops_mex(const char *mex_dir, const char *output_dir, int 
         config->n_expected_cells = n_expected_cells;
     }
     config->disable_occupancy_filter = 1;  /* Disabled for compat mode */
+    config->use_fdr_gate = use_fdr_gate ? 1 : 0;
     
     /* Run EmptyDrops */
     scrna_ed_result result;

@@ -38,5 +38,21 @@ extern int min_heatmap;
 // Translation flag for final-stage barcode output/filters
 extern int translate_NXT;
 
+// Feature offset control
+extern int use_feature_offset_array;
+extern int use_feature_anchor_search;
+extern int require_feature_anchor_match;
+extern int *feature_offsets;
+extern int feature_offsets_count;
+extern char **feature_anchors;
+extern unsigned int *feature_anchor_lengths;
+extern int feature_anchor_count;
+extern int feature_mode_bootstrap_reads;
+extern unsigned long long feature_mode_reads_seen;
+extern int feature_mode_bootstrap_done;
+extern int feature_mode_max_offset;
+extern int *feature_mode_offsets;
+extern unsigned int *feature_mode_hist;
+
 
 #endif // GLOBALS_H

@@ -60,7 +60,7 @@ int simpleCorrectFeature(char *line, feature_arrays *features, int maxN, int max
 int checkAndCorrectFeature(char *line, feature_arrays *features,int maxHammingDistance, int nThreads, int *hamming_distance, char *matching_sequence, int maxN,char *ambiguous, uint16_t *match_position);
 size_t barcode_code2number(unsigned char *code);
 int checkAndCorrectBarcode(char **lines, int maxN, uint32_t feature_index, uint16_t match_position, data_structures *hashes, memory_pool_collection *pools, statistics *stats, int barcode_constant_offset);
-void finalize_processing(feature_arrays *features, data_structures *hashes, char *directory, memory_pool_collection *pools, statistics *stats, uint16_t stringency, uint16_t min_counts, double min_posterior, khash_t(strptr)* filtered_barcodes_hash, int skip_emptydrops, int emptydrops_failure_fatal, int expected_cells, int *error_out);
+void finalize_processing(feature_arrays *features, data_structures *hashes, char *directory, memory_pool_collection *pools, statistics *stats, uint16_t stringency, uint16_t min_counts, double min_posterior, khash_t(strptr)* filtered_barcodes_hash, int skip_emptydrops, int emptydrops_failure_fatal, int expected_cells, int emptydrops_use_fdr, int *error_out);
 void open_fastq_files(const char *barcode_fastq, const char *forward_fastq, const char *reverse_fastq, gzFile *barcode_fastqgz, gzFile *forward_fastqgz, gzFile *reverse_fastqgz);
 fastq_reader* allocate_fastq_reader( char **filenames, int nfiles, int filetype, size_t read_size, size_t read_buffer_lines);
 fastq_reader_set *  allocate_fastq_reader_set( char **barcode_filenames, char **forward_filenames, char **reverse_filenames, int nfiles, size_t read_size, size_t read_buffer_lines);

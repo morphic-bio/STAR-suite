@@ -1356,7 +1356,7 @@ int main(int argInN, char *argIn[])
 
     // Process Cell Ranger multi config if enabled
     if (!P.crMulti.crMultiConfig.empty()) {
-        processCrMultiConfig(P);
+        processCrMultiConfig(P, &soloMain);
     }
 
     // Note: Two-pass unsorted CB/UB tag injection removed - not used in inline flex path

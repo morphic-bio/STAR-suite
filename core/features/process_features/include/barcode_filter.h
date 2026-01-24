@@ -39,6 +39,7 @@ typedef struct barcode_filter_config {
     /* EmptyDrops control */
     int skip_emptydrops;            /* 1 = skip EmptyDrops entirely */
     int emptydrops_failure_fatal;   /* 1 = treat ED failure as error (for logging) */
+    int emptydrops_use_fdr;         /* 1 = use FDR gate for tail rescue */
 } barcode_filter_config;
 
 /**

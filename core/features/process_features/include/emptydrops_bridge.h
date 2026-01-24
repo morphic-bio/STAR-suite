@@ -77,6 +77,7 @@ void emptydrops_input_free(emptydrops_input *input);
  * @param n_features Number of features
  * @param output_dir Directory to write EmptyDrops outputs
  * @param n_expected_cells Expected cells (0 = auto)
+ * @param use_fdr_gate If true, gate tail rescues by FDR instead of raw p-value
  * @param translate_nxt If true, apply NXT translation to barcodes
  * @return New hash of filtered barcodes (caller owns), or NULL on error
  */
@@ -86,6 +87,7 @@ khash_t(strptr)* run_emptydrops_on_counts(
     int n_features,
     const char *output_dir,
     int n_expected_cells,
+    int use_fdr_gate,
     int translate_nxt
 );
 

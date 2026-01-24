@@ -92,7 +92,7 @@ static feature_arrays* load_probe_variants_to_features(const char *path) {
     code_size += (PROBE_LEN + 3) / 4;
   }
 
-  feature_arrays *fa = allocate_feature_arrays(name_size, seq_size, code_size, count, maxFeatureLength);
+  feature_arrays *fa = allocate_feature_arrays(name_size, seq_size, code_size, 0, count, maxFeatureLength);
   fa->common_length = PROBE_LEN;
 
   // Second pass: fill arrays and populate feature_code_hash

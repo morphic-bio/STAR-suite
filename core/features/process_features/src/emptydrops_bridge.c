@@ -168,6 +168,7 @@ khash_t(strptr)* run_emptydrops_on_counts(
     int n_features,
     const char *output_dir,
     int n_expected_cells,
+    int use_fdr_gate,
     int do_translate_nxt
 ) {
     if (!counts || !output_dir) {
@@ -210,6 +211,7 @@ khash_t(strptr)* run_emptydrops_on_counts(
         ed_input->n_genes_per_cell,
         output_dir,
         n_expected_cells,
+        use_fdr_gate,
         &filtered_barcodes,
         &n_filtered
     );

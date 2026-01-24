@@ -44,13 +44,11 @@ typedef struct {
     int disable_occupancy_filter;    // If true, skip occupancy filter (default: 1 for compat mode)
     
     // ED retain window
-    uint32_t ed_retain_count;        // Optional cap on ED candidates (default: 120000)
+    uint32_t ed_retain_count;        // Optional cap on retained cells (0 = no cap)
     
     // Gating mode
     int use_fdr_gate;                // If true, use FDR threshold; if false (default), use raw p-value
     
-    // Simple EmptyDrops mode (fallback only by default)
-    int use_simple_emptydrops;       // If true, use Simple ED as primary (default: 0, i.e., fallback only)
 } scrna_ed_config;
 
 // ============================================================================

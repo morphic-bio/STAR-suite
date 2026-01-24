@@ -33,7 +33,7 @@
 
 // other defines
 #define MIN_POSTERIOR 0.975
-#define MAX_FEATURE_N 3
+#define MAX_FEATURE_N 1
 #define MAX_BARCODE_N 1
 #define MAX_MALLOCS 1000
 #define MAX_FEATURE_SEQUENCE_LENGTH 64
@@ -93,6 +93,10 @@ typedef struct feature_arrays {
     char *feature_sequences_storage;
     unsigned char **feature_codes;
     unsigned char *feature_codes_storage;
+    char **feature_anchors;
+    char *feature_anchors_storage;
+    unsigned int *feature_anchor_lengths;
+    int *feature_offsets; /* 0-based array; entry i corresponds to feature index (i+1). -1 = unknown */
     int number_of_mismatched_features;
     int *mismatched_feature_indices;
 } feature_arrays;
@@ -238,6 +242,7 @@ typedef struct sample_args {
     int skip_emptydrops;             /* 1 = skip EmptyDrops entirely */
     int emptydrops_failure_fatal;    /* 1 = treat ED failure as error */
     int expected_cells;              /* 0 = auto-detect */
+    int emptydrops_use_fdr;          /* 1 = use FDR gate for tail rescue */
     
     /* Error propagation */
     int *error_out;                  /* Set to non-zero if fatal error occurred */

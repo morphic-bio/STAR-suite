@@ -225,7 +225,8 @@ static int test_filter_with_external(void) {
         .n_expected_cells = 0,
         .translate_nxt = 0,
         .skip_emptydrops = 0,
-        .emptydrops_failure_fatal = 0
+        .emptydrops_failure_fatal = 0,
+        .emptydrops_use_fdr = 0
     };
     
     /* Call filter with external filter - should return OK with the external filter */
@@ -296,7 +297,8 @@ static int test_emptydrops_integration(void) {
         .n_expected_cells = 0,  /* Auto-detect */
         .translate_nxt = 0,
         .skip_emptydrops = 0,
-        .emptydrops_failure_fatal = 0
+        .emptydrops_failure_fatal = 0,
+        .emptydrops_use_fdr = 0
     };
     
     /* Call filter WITHOUT external filter - should run EmptyDrops */
@@ -364,7 +366,8 @@ static int test_filter_skip_emptydrops(void) {
         .n_expected_cells = 0,
         .translate_nxt = 0,
         .skip_emptydrops = 1,  /* Skip EmptyDrops */
-        .emptydrops_failure_fatal = 0
+        .emptydrops_failure_fatal = 0,
+        .emptydrops_use_fdr = 0
     };
     
     /* Call filter with skip_emptydrops - should return SKIPPED with NULL filter */
@@ -413,7 +416,8 @@ static int test_filter_failure_nonfatal(void) {
         .n_expected_cells = 0,
         .translate_nxt = 0,
         .skip_emptydrops = 0,
-        .emptydrops_failure_fatal = 0  /* Non-fatal mode */
+        .emptydrops_failure_fatal = 0,  /* Non-fatal mode */
+        .emptydrops_use_fdr = 0
     };
     
     /* Call filter with empty counts - EmptyDrops should fail */
@@ -462,7 +466,8 @@ static int test_filter_failure_fatal(void) {
         .n_expected_cells = 0,
         .translate_nxt = 0,
         .skip_emptydrops = 0,
-        .emptydrops_failure_fatal = 1  /* Fatal mode */
+        .emptydrops_failure_fatal = 1,  /* Fatal mode */
+        .emptydrops_use_fdr = 0
     };
     
     /* Call filter with empty counts - EmptyDrops should fail */
@@ -515,6 +520,7 @@ static int test_nfeatures_mismatch_warning(void) {
         feature_names,
         wrong_n_features,  /* Mismatched! */
         test_dir,
+        0,
         0,
         0
     );
