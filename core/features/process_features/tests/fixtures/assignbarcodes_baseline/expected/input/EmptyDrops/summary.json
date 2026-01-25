@@ -1,0 +1,9 @@
+{
+  "n_cells_passing": 2,
+  "n_candidates_tested": 0,
+  "n_simple_cells": 2,
+  "n_tail_cells": 0,
+  "n_ed_passers": 0,
+  "retain_threshold": 1,
+  "min_umi": 500
+}

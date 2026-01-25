@@ -142,6 +142,37 @@ The generated HTML files include:
 
 ## Verification
 
+### Functional Test
+```bash
+cd /mnt/pikachu/STAR-suite/core/features/process_features
+./tests/test_assignbarcodes_regression.sh
+```
+
+**Result:** `Feature_types_heatmap.html` and `Feature_types_heatmap.json` generated correctly.
+
+Sample JSON output:
+```json
+{
+  "title": "Feature Types (Richness) Heatmap",
+  "feature_labels": ["FeatureA", "FeatureC"],
+  "column_labels": [1],
+  "column_sums": [2],
+  "matrix": [[1], [1]],
+  "type": "coexpression",
+  "num_features": 5,
+  "num_filtered_features": 2,
+  "num_columns": 1
+}
+```
+
+HTML output includes:
+- Plotly script from CDN
+- Bar graph trace for column totals
+- Heatmap trace with Plasma colorscale
+- Interactive hover templates
+
+Test baseline updated to include new HTML+JSON outputs.
+
 ### Build Verification
 ```bash
 # STAR-suite

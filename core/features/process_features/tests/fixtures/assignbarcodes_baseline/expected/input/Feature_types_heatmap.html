@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Feature Types (Richness) Heatmap</title>
+  <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    .container { display: flex; flex-direction: column; }
+    #bargraph { width: 100%; height: 200px; }
+    #heatmap { width: 100%; height: 600px; }
+  </style>
+</head>
+<body>
+  <h2>Feature Types (Richness) Heatmap</h2>
+  <p>Data file: <a href="Feature_types_heatmap.json">Feature_types_heatmap.json</a></p>
+  <div class="container">
+    <div id="bargraph"></div>
+    <div id="heatmap"></div>
+  </div>
+  <script>
+var x_labels = [1];
+var y_labels = ['FeatureA', 'FeatureC'];
+var col_sums = [2];
+var z_data = [
+  [1],
+  [1]
+];
+
+// Bar graph of column sums
+var bar_trace = {
+  x: x_labels,
+  y: col_sums,
+  type: 'bar',
+  marker: { color: 'rgb(51, 102, 204)' },
+  name: 'Column Totals'
+};
+var bar_layout = {
+  title: 'Column Totals',
+  xaxis: { title: 'Column' },
+  yaxis: { title: 'Total Count', range: [0, 2] },
+  margin: { t: 40, b: 40, l: 60, r: 20 },
+  showlegend: false
+};
+Plotly.newPlot('bargraph', [bar_trace], bar_layout);
+
+// Heatmap
+var heatmap_trace = {
+  x: x_labels,
+  y: y_labels,
+  z: z_data,
+  type: 'heatmap',
+  colorscale: [[0.0, 'rgb(13, 8, 135)'], [0.1, 'rgb(70, 3, 159)'], [0.2, 'rgb(114, 1, 168)'], [0.3, 'rgb(156, 23, 158)'], [0.4, 'rgb(189, 55, 134)'], [0.5, 'rgb(216, 87, 107)'], [0.6, 'rgb(237, 121, 83)'], [0.7, 'rgb(251, 159, 58)'], [0.8, 'rgb(253, 202, 38)'], [0.9, 'rgb(240, 248, 33)'], [1.0, 'rgb(240, 249, 33)']],
+  zmin: 0,
+  zmax: 1,
+  colorbar: {
+    title: 'Count',
+    thickness: 20
+  },
+  hovertemplate: 'Feature: %{y}<br>Column: %{x}<br>Count: %{z}<extra></extra>'
+};
+var heatmap_layout = {
+  title: 'Feature Types (Richness) Heatmap',
+  xaxis: { title: 'Feature Count / Richness', side: 'bottom' },
+  yaxis: { title: 'Feature', autorange: 'reversed' },
+  margin: { t: 50, b: 80, l: 150, r: 80 }
+};
+Plotly.newPlot('heatmap', [heatmap_trace], heatmap_layout);
+  </script>
+</body>
+</html>

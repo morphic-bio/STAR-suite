@@ -1,0 +1,14 @@
+{
+  "title": "Feature Types (Richness) Heatmap",
+  "feature_labels": ["FeatureA", "FeatureC"],
+  "column_labels": [1],
+  "column_sums": [2],
+  "matrix": [
+    [1],
+    [1]
+  ],
+  "type": "coexpression",
+  "num_features": 5,
+  "num_filtered_features": 2,
+  "num_columns": 1
+}
