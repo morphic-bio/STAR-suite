@@ -81,6 +81,7 @@ Depend.list
 ## Plans
 /plans/*
 !/plans/transfer_test_plan.md
+!/plans/refactor_flex_plan.md
 
 ## Data
 *.bam
