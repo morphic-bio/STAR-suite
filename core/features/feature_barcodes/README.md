@@ -61,9 +61,10 @@ The tool can accept input FASTQ files in two ways:
 | :--- | :--- | :--- | :--- |
 | `-b`, `--barcode_length`| `[int]` | Length of the sequence barcode. | `16` |
 | `-u`, `--umi_length` | `[int]` | Length of the Unique Molecular Identifier (UMI). | `12` |
-| `-o`, `--feature_constant_offset`| `[int]` | Expected starting position of the feature sequence in the read. Used for an initial directed search. | `0` |
+| `-o`, `--feature_constant_offset`| `[int]` | Global feature offset. If not provided, auto-detected from pattern column. | auto |
 | `-B`, `--barcode_constant_offset`| `[int]` | Starting position of the barcode and UMI in the read. | `0` |
 | `--limit_search` | `[int]` | Limit the search for the feature sequence to `N` bases around `feature_constant_offset`. Set to `-1` to search the entire read. | `-1` |
+| `--force_individual_offsets` | | Use per-feature offsets from pattern column (slower for large feature sets). | `false` |
 | `-r`, `--reverse_complement_whitelist` | | Reverse complement the whitelist barcodes before use. | `false` |
 | `-a`, `--as_named` | | Treat all input files as part of a single sample. | `false` |
 

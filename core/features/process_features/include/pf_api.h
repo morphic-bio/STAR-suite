@@ -38,6 +38,8 @@ typedef enum {
     PF_ERR_IO_ERROR = -5,
     PF_ERR_NOT_INITIALIZED = -6,
     PF_ERR_ALREADY_INITIALIZED = -7,
+    PF_ERR_OFFSET_CONFLICT = -8,       /* Both global offset and per-feature offsets specified */
+    PF_ERR_MULTI_OFFSET_DETECTED = -9, /* Multiple offsets detected, need explicit choice */
 } pf_error;
 
 /* Statistics structure returned after processing */

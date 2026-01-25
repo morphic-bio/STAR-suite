@@ -26,10 +26,12 @@ static void print_usage(const char *prog){
     fprintf(stderr, "Barcode & Feature Processing:\n");
     fprintf(stderr, "  -b, --barcode_length    <int>     Length of cell barcode (default 16)\n");
     fprintf(stderr, "  -u, --umi_length        <int>     Length of UMI (default 12)\n");
-    fprintf(stderr, "  -o, --feature_constant_offset <int> Expected start position of feature in read (default 0)\n");
+    fprintf(stderr, "  -o, --feature_constant_offset <int> Global feature offset (default: auto-detect from pattern column)\n");
     fprintf(stderr, "  -B, --barcode_constant_offset <int> Start position of barcode and UMI (default 0)\n");
     fprintf(stderr, "      --limit_search      <int>     Limit feature search to N bases around offset (-1 = entire read)\n");
-    fprintf(stderr, "      --use_feature_offset_array    Use per-feature offsets from pattern column when available\n");
+    fprintf(stderr, "      --force-individual-offsets    Use per-feature offsets from pattern column (slower for large sets)\n");
+    fprintf(stderr, "      --force_individual_offsets    (alias for --force-individual-offsets)\n");
+    fprintf(stderr, "      --use_feature_offset_array    (alias for --force-individual-offsets)\n");
     fprintf(stderr, "      --use_feature_anchor_search   Find pattern anchor via strstr before matching features\n");
     fprintf(stderr, "      --require_feature_anchor_match Require anchor match (no fallback search)\n");
     fprintf(stderr, "      --feature_mode_bootstrap_reads <int> Bootstrap N reads to learn per-feature offsets\n");
@@ -94,7 +96,8 @@ int main(int argc, char *argv[])
     uint16_t min_counts=0;
     int read_buffer_lines=READ_BUFFER_LINES;
     int average_read_length=AVERAGE_READ_LENGTH;
-    int feature_constant_offset=0;
+    int feature_constant_offset=-1;  /* sentinel: -1 means auto-detect */
+    int feature_constant_offset_explicit=0;  /* track if user provided --feature_constant_offset */
     int barcode_constant_offset=0;
     double min_posterior=MIN_POSTERIOR;
     int use_feature_offset_array_cli=0;
@@ -155,6 +158,8 @@ int main(int argc, char *argv[])
         {"max_reads", required_argument, 0, 9},
         {"limit_search", required_argument, 0, 10},
         {"use_feature_offset_array", no_argument, 0, 22},
+        {"force_individual_offsets", no_argument, 0, 22},  /* alias */
+        {"force-individual-offsets", no_argument, 0, 22},  /* hyphenated alias */
         {"use_feature_anchor_search", no_argument, 0, 23},
         {"require_feature_anchor_match", no_argument, 0, 24},
         {"feature_mode_bootstrap_reads", required_argument, 0, 25},
@@ -207,7 +212,7 @@ int main(int argc, char *argv[])
             case 'S': set_search_threads_per_consumer=atoi(optarg); break;
             case 'i': min_counts=(uint16_t)atoi(optarg); break;
             case 'd': strcpy(directory, optarg); if (directory[strlen(directory)-1] != '/'){ strcat(directory, "/"); } break;
-            case 'o': feature_constant_offset=atoi(optarg); break;
+            case 'o': feature_constant_offset=atoi(optarg); feature_constant_offset_explicit=1; break;
             case 't': max_concurrent_processes=atoi(optarg); break;
             case 'u': umi_length=atoi(optarg); umi_code_length=(umi_length+3)/4; break;
             case 'c': set_consumer_threads_per_set=atoi(optarg); break;
@@ -272,6 +277,81 @@ int main(int argc, char *argv[])
             feature_mode_offsets[i] = -1;
         }
     }
+    
+    /* Feature offset preflight detection */
+    if (use_feature_offset_array_cli && feature_constant_offset_explicit) {
+        fprintf(stderr, "Error: Cannot specify both --force_individual_offsets and --feature_constant_offset.\n");
+        fprintf(stderr, "       Use --force_individual_offsets for per-feature offsets from pattern column,\n");
+        fprintf(stderr, "       or --feature_constant_offset N for a single global offset.\n");
+        return 1;
+    }
+    
+    if (!use_feature_offset_array_cli && !feature_constant_offset_explicit && features && feature_offsets) {
+        /* Auto-detect: scan feature_offsets for heterogeneity */
+        int offset_counts[256] = {0};  /* count occurrences of each offset 0-255 */
+        int max_offset_seen = -1;
+        int valid_offsets = 0;
+        
+        for (int i = 0; i < feature_offsets_count; i++) {
+            int off = feature_offsets[i];
+            if (off >= 0 && off < 256) {
+                offset_counts[off]++;
+                valid_offsets++;
+                if (off > max_offset_seen) max_offset_seen = off;
+            }
+        }
+        
+        if (valid_offsets > 0) {
+            /* Find dominant offset */
+            int dominant_offset = 0;
+            int dominant_count = 0;
+            int second_count = 0;
+            
+            for (int i = 0; i <= max_offset_seen; i++) {
+                if (offset_counts[i] > dominant_count) {
+                    second_count = dominant_count;
+                    dominant_count = offset_counts[i];
+                    dominant_offset = i;
+                } else if (offset_counts[i] > second_count) {
+                    second_count = offset_counts[i];
+                }
+            }
+            
+            /* Check for heterogeneity: second offset > 5% of dominant */
+            double heterogeneity_threshold = 0.05;
+            if (second_count > 0 && (double)second_count / (double)dominant_count > heterogeneity_threshold) {
+                fprintf(stderr, "\n");
+                fprintf(stderr, "ERROR: Multiple feature offsets detected in pattern column.\n");
+                fprintf(stderr, "       Dominant offset: %d (used by %d features)\n", dominant_offset, dominant_count);
+                fprintf(stderr, "       Other offsets detected (threshold: %.0f%% of dominant):\n", heterogeneity_threshold * 100);
+                for (int i = 0; i <= max_offset_seen; i++) {
+                    if (i != dominant_offset && offset_counts[i] > 0) {
+                        double pct = 100.0 * offset_counts[i] / dominant_count;
+                        fprintf(stderr, "         offset %d: %d features (%.1f%%)\n", i, offset_counts[i], pct);
+                    }
+                }
+                fprintf(stderr, "\n");
+                fprintf(stderr, "To proceed, choose one of:\n");
+                fprintf(stderr, "  1. --force_individual_offsets   Use per-feature offsets (slower for large feature sets)\n");
+                fprintf(stderr, "  2. --feature_constant_offset %d  Use dominant offset globally (faster)\n", dominant_offset);
+                fprintf(stderr, "\n");
+                return 1;
+            }
+            
+            /* Single dominant offset - use it as global */
+            feature_constant_offset = dominant_offset;
+            fprintf(stderr, "[offset-detect] Auto-detected global offset: %d (from %d features with pattern)\n", 
+                    dominant_offset, valid_offsets);
+        } else {
+            /* No valid offsets from pattern column - default to 0 */
+            feature_constant_offset = 0;
+            fprintf(stderr, "[offset-detect] No pattern offsets found, using default offset: 0\n");
+        }
+    } else if (feature_constant_offset == -1) {
+        /* No features loaded yet or no offsets, default to 0 */
+        feature_constant_offset = 0;
+    }
+    
     khash_t(strptr) *filtered_barcodes_hash = NULL;
     if (filtered_barcodes_filename) {
         int filtered_barcodes_found = 0;

@@ -18,3 +18,4 @@
 - Keep Plotly+JSON QC outputs in process_features and migrate QC graphics into a shared core so other STAR components can reuse them (eventually replace STAR's existing QC graphics with this core).
 - Draft a design note for a shared QC graphics core (inputs/outputs, Plotly+JSON artifacts, TSV fallbacks, and how STAR/other components will call it).
 - Verify no downstream scripts/tools expect `Feature_types_heatmap.png` or `Feature_counts_heatmap.png`; document the HTML/JSON switch in any user-facing docs if needed.
+- Consider adding a read-level consistency preflight for global feature offset detection (warn/error if a large fraction of matches are off the global offset).

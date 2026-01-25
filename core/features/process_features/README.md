@@ -76,9 +76,10 @@ The tool can accept input FASTQ files in two ways:
 | :--- | :--- | :--- | :--- |
 | `-b`, `--barcode_length`| `[int]` | Length of the sequence barcode. | `16` |
 | `-u`, `--umi_length` | `[int]` | Length of the Unique Molecular Identifier (UMI). | `12` |
-| `-o`, `--feature_constant_offset`| `[int]` | Expected starting position of the feature sequence in the read. Used for an initial directed search. | `0` |
+| `-o`, `--feature_constant_offset`| `[int]` | Global feature offset. If not provided, auto-detected from pattern column. | auto |
 | `-B`, `--barcode_constant_offset`| `[int]` | Starting position of the barcode and UMI in the read. | `0` |
 | `--limit_search` | `[int]` | Limit the search for the feature sequence to `N` bases around `feature_constant_offset`. Set to `-1` to search the entire read. | `-1` |
+| `--force_individual_offsets` | | Use per-feature offsets from pattern column (slower for large feature sets). | `false` |
 | `-r`, `--reverse_complement_whitelist` | | Reverse complement the whitelist barcodes before use. | `false` |
 | `-a`, `--as_named` | | Treat all input files as part of a single sample. | `false` |
 
@@ -137,6 +138,46 @@ The tool can accept input FASTQ files in two ways:
     /path/to/sample2_fastqs/
 ```
 This command processes two samples located in separate directories. It uses 32 available threads, forking up to 8 sample-processing jobs at a time.
+
+## Feature Offset Detection
+
+By default, `assignBarcodes` automatically detects the optimal feature offset from the pattern column in your feature reference CSV. This provides the best balance of speed and accuracy for most datasets.
+
+### How It Works
+
+1. **Pattern Column**: If your feature CSV contains a `pattern` column with `(BC)` markers (e.g., `ACGTACGT(BC)TGCA`), the offset is extracted as the position of `(BC)`.
+
+2. **Auto-Detection**: At startup, `assignBarcodes` scans all feature offsets:
+   - If all features share the same offset → uses it as global offset (fast path)
+   - If multiple offsets detected (>5% heterogeneity) → stops with a clear message
+
+3. **User Override**: You can explicitly control offset behavior:
+   ```bash
+   # Use specific global offset (skip auto-detection)
+   --feature_constant_offset 26
+   
+   # Force per-feature offsets (slower for large feature sets)
+   --force_individual_offsets
+   ```
+
+### When to Use `--force_individual_offsets`
+
+Use this flag when your feature reference contains features with genuinely different offsets (e.g., mixed assay types). This enables per-feature offset matching but is slower for large feature sets (10k+ features).
+
+### Example Error Message
+
+```
+ERROR: Multiple feature offsets detected in pattern column.
+       Dominant offset: 26 (used by 9500 features)
+       Other offsets detected (threshold: 5% of dominant):
+         offset 30: 500 features (5.3%)
+
+To proceed, choose one of:
+  1. --force_individual_offsets   Use per-feature offsets (slower for large feature sets)
+  2. --feature_constant_offset 26  Use dominant offset globally (faster)
+```
+
+---
 
 ## Search methodology
 #### Initial fixed position search
@@ -452,6 +493,48 @@ pf_process_fastq_dir(ctx, "/path/to/fastqs", "/path/to/output", &stats);
 
 // Cleanup
 pf_destroy(ctx);
+```
+
+### Feature Offset Auto-Detection (pf_api)
+
+The `pf_api` now automatically detects the optimal feature offset from the pattern column when processing begins. This behavior matches the CLI.
+
+**Default Behavior:**
+- If `pf_config_set_feature_offset()` is NOT called, auto-detection is enabled
+- At processing time, `pf_api` scans feature offsets from the pattern column
+- If all features share the same offset → used as global offset
+- If no pattern offsets found → defaults to 0 with a warning
+
+**Multi-Offset Detection:**
+- If multiple offsets are detected (>5% heterogeneity), processing returns `PF_ERR_MULTI_OFFSET_DETECTED`
+- Use `pf_get_error(ctx)` to retrieve the detailed error message with guidance
+
+**Conflict Detection:**
+- If both `pf_config_set_feature_offset()` AND `pf_config_set_use_feature_offset_array(1)` are called, processing returns `PF_ERR_OFFSET_CONFLICT`
+
+**Example:**
+```c
+pf_config *config = pf_config_create();
+
+// Option 1: Use auto-detect (default)
+// pf_api scans pattern column at processing time
+
+// Option 2: Explicit global offset (skips auto-detect)
+pf_config_set_feature_offset(config, 26);
+
+// Option 3: Per-feature offsets from pattern column
+pf_config_set_use_feature_offset_array(config, 1);
+
+// ERROR: Cannot combine options 2 and 3
+// pf_process_fastq_dir() returns PF_ERR_OFFSET_CONFLICT
+
+pf_context *ctx = pf_init(config);
+// ...
+pf_error err = pf_process_fastq_dir(ctx, fastq_dir, output_dir, &stats);
+if (err == PF_ERR_MULTI_OFFSET_DETECTED) {
+    fprintf(stderr, "%s\n", pf_get_error(ctx));
+    // Handle: either set explicit offset or enable per-feature array
+}
 ```
 
 ### Feature Calling API (`call_features.h`)

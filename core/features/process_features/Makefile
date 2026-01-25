@@ -67,12 +67,13 @@ TEST_PF_COUNTS_TARGET=tests/test_pf_counts
 TEST_MEX_WRITER_TARGET=tests/test_mex_writer
 TEST_MEX_PARITY_TARGET=tests/test_mex_writer_parity
 TEST_BARCODE_FILTER_TARGET=tests/test_barcode_filter
+TEST_OFFSET_DETECTION_TARGET=tests/test_offset_detection
 
 .PHONY: all clean lib tools test
 
 all: lib tools
 
-test: $(TEST_API_TARGET) $(TEST_PF_COUNTS_TARGET) $(TEST_MEX_WRITER_TARGET) $(TEST_MEX_PARITY_TARGET) $(TEST_BARCODE_FILTER_TARGET) test-regression
+test: $(TEST_API_TARGET) $(TEST_PF_COUNTS_TARGET) $(TEST_MEX_WRITER_TARGET) $(TEST_MEX_PARITY_TARGET) $(TEST_BARCODE_FILTER_TARGET) $(TEST_OFFSET_DETECTION_TARGET) test-regression
 
 lib: $(LIB_TARGET)
 
@@ -128,6 +129,11 @@ $(TEST_BARCODE_FILTER_TARGET): tests/test_barcode_filter.c $(LIB_TARGET) $(LIBSC
 	$(CC) $(CFLAGS) -c tests/test_barcode_filter.c -o tests/test_barcode_filter.o
 	$(CXX) -o $@ tests/test_barcode_filter.o $(LIB_TARGET) $(LIBSCRNA) $(LDFLAGS)
 
+# Offset detection test: tests pf_api offset auto-detection and conflict handling
+$(TEST_OFFSET_DETECTION_TARGET): tests/test_offset_detection.c $(LIB_TARGET) $(LIBSCRNA)
+	$(CC) $(CFLAGS) -c tests/test_offset_detection.c -o tests/test_offset_detection.o
+	$(CXX) -o $@ tests/test_offset_detection.o $(LIB_TARGET) $(LIBSCRNA) $(LDFLAGS)
+
 # Regression test: compares assignBarcodes output against saved baseline
 .PHONY: test-regression
 test-regression: $(TARGET)
@@ -135,4 +141,4 @@ test-regression: $(TARGET)
 	@./tests/test_assignbarcodes_regression.sh
 
 clean:
-	rm -f *.o $(TARGET) $(DEMUX_TARGET) $(DEMUX_BAM_TARGET) $(CALL_FEATURES_TARGET) $(LIB_TARGET) $(TEST_API_TARGET) $(TEST_PF_COUNTS_TARGET) $(TEST_MEX_WRITER_TARGET) $(TEST_MEX_PARITY_TARGET) $(TEST_BARCODE_FILTER_TARGET) tests/*.o
+	rm -f *.o $(TARGET) $(DEMUX_TARGET) $(DEMUX_BAM_TARGET) $(CALL_FEATURES_TARGET) $(LIB_TARGET) $(TEST_API_TARGET) $(TEST_PF_COUNTS_TARGET) $(TEST_MEX_WRITER_TARGET) $(TEST_MEX_PARITY_TARGET) $(TEST_BARCODE_FILTER_TARGET) $(TEST_OFFSET_DETECTION_TARGET) tests/*.o
