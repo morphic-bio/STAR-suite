@@ -1,0 +1,6 @@
+#ifndef LIBSCRNA_EMPTYDROPSMULTINOMIAL_WRAPPER_H
+#define LIBSCRNA_EMPTYDROPSMULTINOMIAL_WRAPPER_H
+
+#include "../EmptyDropsMultinomial.h"
+
+#endif

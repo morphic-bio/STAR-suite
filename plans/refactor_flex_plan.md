@@ -1,5 +1,39 @@
 # Runbook: Flex Integration with Modular Components
 
+## Status: COMPLETED (2026-01-25)
+
+This runbook has been executed. libflex now uses libscrna for EmptyDrops, OrdMag, and Occupancy stages.
+
+### Summary of Changes
+- **Stage 0**: Baseline created at `tests/baselines/flex_pre_modular_20260125_060551/`
+- **Stage 1**: Added libscrna include paths to STAR and libflex Makefiles
+- **Stage 2**: Verified API compatibility (headers match except for unused STAR-specific declarations)
+- **Stage 3**: Removed OrdMagStage.o, EmptyDropsMultinomial.o, EmptyDropsCRSampler.o, OccupancyGuard.o from libflex.a (now provided by libscrna.a)
+- **Stage 4**: All regression tests pass (flex_inline_test, nonflex_mex_smoke, flex_smoke)
+
+### Current libflex.a Contents
+```
+FlexFilter.o
+FlexFilterAdapters.o
+FlexFilterIO.o
+```
+
+### Current libscrna.a Contents
+```
+EmptyDropsCRSampler.o
+EmptyDropsMultinomial.o
+OrdMagStage.o
+OccupancyGuard.o
+scrna_api.o
+```
+
+### Header Separation
+
+Flex now includes libscrna headers explicitly via a `libscrna/` prefix (wrapper headers live in
+`core/features/libscrna/include/libscrna/`). This avoids ambiguous includes from `flex/source/libflex`.
+
+---
+
 ## Goal
 Move Flex to the modular single-cell components (libscrna + process_features) while preserving Flex outputs and defaults.
 

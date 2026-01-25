@@ -10,12 +10,16 @@ CPPFLAGS ?=
 CFLAGS ?= -pipe -Wall -Wextra -O3
 AR ?= ar
 
-# Object files for libflex (active flexfilter pipeline only)
+# libscrna include path (for adapter headers in Stage 2+)
+# From flex/source/libflex/ go up to STAR-suite root (../../..)
+ROOT_DIR := $(abspath ../../..)
+LIBSCRNA_INC := $(ROOT_DIR)/core/features/libscrna/include
+
+# Object files for libflex (Flex-specific orchestration only)
+# NOTE: OrdMagStage, EmptyDropsMultinomial, EmptyDropsCRSampler, OccupancyGuard
+#       are now provided by libscrna (linked via core/legacy/source/Makefile).
+#       Only Flex-specific orchestration code remains here.
 LIBFLEX_OBJECTS = \
-	OrdMagStage.o \
-	EmptyDropsMultinomial.o \
-	EmptyDropsCRSampler.o \
-	OccupancyGuard.o \
 	FlexFilter.o \
 	FlexFilterAdapters.o \
 	FlexFilterIO.o
@@ -23,13 +27,17 @@ LIBFLEX_OBJECTS = \
 # Build static library (default target)
 all: libflex.a
 
+# NOTE: Delete archive first to avoid stale objects from previous builds.
+# ar rcs does not remove old members, so without rm -f, migrated-away objects
+# (OrdMagStage.o, EmptyDropsMultinomial.o, etc.) could persist and win the link.
 libflex.a: $(LIBFLEX_OBJECTS)
+	rm -f $@
 	$(AR) rcs $@ $^
 	ranlib $@
 
 # Compile rules for libflex objects
 %.o: %.cpp
-	$(CXX) -c $(CPPFLAGS) $(CXXFLAGS) $(CXXFLAGS_common) -I.. -I../htslib -I. $< -o $@
+	$(CXX) -c $(CPPFLAGS) $(CXXFLAGS) $(CXXFLAGS_common) -I.. -I../htslib -I. -I$(LIBSCRNA_INC) $< -o $@
 
 %.o: %.c
 	$(CXX) -c $(CPPFLAGS) $(CFLAGS) -I.. -I../htslib -I. $< -o $@

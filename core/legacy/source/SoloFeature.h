@@ -19,7 +19,7 @@
 #include "PackedReadInfo.h"
 #include "UMICorrector.h"
 
-#include "SampleMatrixData.h"
+#include "libscrna/SampleMatrixData.h"
 #include "MexWriter.h"
 
 // Forward declaration

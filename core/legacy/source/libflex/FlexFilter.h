@@ -2,10 +2,10 @@
 #define H_FlexFilter
 
 #include "IncludeDefine.h"
-#include "SampleMatrixData.h"
-#include "OrdMagStage.h"
-#include "EmptyDropsMultinomial.h"
-#include "OccupancyGuard.h"  // Includes OccupancyMode enum
+#include "libscrna/SampleMatrixData.h"
+#include "libscrna/OrdMagStage.h"
+#include "libscrna/EmptyDropsMultinomial.h"
+#include "libscrna/OccupancyGuard.h"  // Includes OccupancyMode enum
 #include <string>
 #include <vector>
 #include <map>

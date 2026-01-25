@@ -39,6 +39,7 @@ LIBEM_LIB := $(LIBEM_DIR)/libem.a
 PROCESS_FEATURES_DIR := $(ROOT_DIR)/core/features/process_features
 PROCESS_FEATURES_LIB := $(PROCESS_FEATURES_DIR)/libprocess_features.a
 LIBSCRNA_DIR := $(ROOT_DIR)/core/features/libscrna
+LIBSCRNA_INC := $(LIBSCRNA_DIR)/include
 LIBSCRNA_LIB := $(LIBSCRNA_DIR)/libscrna.a
 
 VPATH := $(FLEX_SRC_DIR) $(SLAM_SRC_DIR) $(VBEM_SRC_DIR) $(BAMSORT_SRC_DIR)
@@ -81,7 +82,7 @@ CXXFLAGS_SIMD ?= -mavx2
 # Include flex (klib/libflex), vbem (libtrim/libem), slam, and process_features headers
 # Include current directory for IncludeDefine.h and other source headers
 PROCESS_FEATURES_INC := $(ROOT_DIR)/core/features/process_features/include
-CXXFLAGS_common := -std=c++11 -fopenmp -I. -I$(FLEX_SRC_DIR) -I$(LIBFLEX_DIR) -I$(VBEM_SRC_DIR) -I$(LIBEM_DIR) -I$(SLAM_SRC_DIR) -I$(BAMSORT_SRC_DIR) -I$(PROCESS_FEATURES_INC) $(COMPTIMEPLACE) $(GIT_BRANCH_COMMIT_DIFF)
+CXXFLAGS_common := -std=c++11 -fopenmp -I. -I$(FLEX_SRC_DIR) -I$(LIBFLEX_DIR) -I$(LIBSCRNA_INC) -I$(VBEM_SRC_DIR) -I$(LIBEM_DIR) -I$(SLAM_SRC_DIR) -I$(BAMSORT_SRC_DIR) -I$(PROCESS_FEATURES_INC) $(COMPTIMEPLACE) $(GIT_BRANCH_COMMIT_DIFF)
 CXXFLAGS_main := -O3 $(CXXFLAGS_common)
 CXXFLAGS_gdb := -O0 -g3 $(CXXFLAGS_common)
 
@@ -421,9 +422,12 @@ htslib/libhts.a :
 parametersDefault.xxd: parametersDefault
 	xxd -i parametersDefault > parametersDefault.xxd
 
-# Ensure libflex is always rebuilt (sources may have changed)
+# Ensure libflex is always rebuilt from scratch (clean first to remove stale objects)
+# NOTE: After migration to libscrna, libflex.a no longer contains EmptyDrops/OrdMag/Occupancy.
+#       Cleaning ensures old objects don't persist in the archive (ar rcs doesn't remove old members).
 .PHONY: libflex
 libflex:
+	$(MAKE) -C $(LIBFLEX_DIR) clean
 	$(MAKE) -C $(LIBFLEX_DIR) libflex.a
 
 # Ensure libtrim is always rebuilt (sources may have changed)

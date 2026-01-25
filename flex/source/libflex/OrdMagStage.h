@@ -121,8 +121,9 @@ public:
         bool writeFilteredMatrix = false
     );
     
-    // Load simple emptydrops parameters from ParametersSolo (for EmptyDrops_CR compatibility)
-    static SimpleEmptyDropsParams loadParamsFromSolo(const ParametersSolo& pSolo);
+    // NOTE: loadParamsFromSolo was removed - implementation now in libscrna which
+    // does not have STAR-specific dependencies. Use EmptyDropsParams/SimpleEmptyDropsParams
+    // directly with default values or explicit configuration.
 };
 
 // Type alias for backwards compatibility
