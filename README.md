@@ -2,6 +2,8 @@
 
 STAR-suite reorganizes STAR into module-focused directories while keeping a single source of truth for shared code. Build outputs remain compatible with existing STAR workflows, and the new top-level `Makefile` exposes module targets.
 
+Agent quickstart: see `AGENTS.md` for repo-specific guardrails, tests, and recent changes.
+
 ## Folder Structure
 
 ```
