@@ -1,0 +1,50 @@
+# MCP Server Docker Compose Configuration
+# Usage: docker-compose up -d
+#
+# Required environment variables:
+#   MCP_AUTH_TOKEN - Authentication token (required for sensitive operations)
+#
+# Optional environment variables:
+#   MCP_PORT - Server port (default: 8765)
+#   STAR_SUITE_PATH - Path to STAR-suite repo (default: parent directory)
+#   STORAGE_PATH - Path to data storage (default: /storage)
+
+version: '3.8'
+
+services:
+  mcp-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: star-mcp-server
+    ports:
+      - "${MCP_PORT:-8765}:8765"
+    environment:
+      - MCP_AUTH_TOKEN=${MCP_AUTH_TOKEN:-}
+      - MCP_HOST=0.0.0.0
+      - MCP_PORT=8765
+      - MCP_TRANSPORT=http
+    volumes:
+      # Mount the STAR-suite repository (read-only for safety)
+      - ${STAR_SUITE_PATH:-..}:/repo:ro
+      # Mount data storage (read-only)
+      - ${STORAGE_PATH:-/storage}:/storage:ro
+      # Mount temp directory for outputs (read-write)
+      - mcp_temp:/tmp/mcp_runs
+      # Mount artifacts directory for logs (read-write)
+      - mcp_artifacts:/app/artifacts
+      # Mount config file if you want to override
+      # - ./config.yaml:/app/config.yaml:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8765/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  mcp_temp:
+    driver: local
+  mcp_artifacts:
+    driver: local

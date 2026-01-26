@@ -1,0 +1,169 @@
+# STAR-suite MCP Server Configuration
+
+server:
+  host: "0.0.0.0"
+  port: 8765
+  auth_token: "${MCP_AUTH_TOKEN}"  # Set via environment variable
+  transport: "http"  # "http" or "stdio"
+  public_discovery: true  # Discovery tools don't require auth
+
+paths:
+  repo_root: "/mnt/pikachu/STAR-suite"
+  artifact_log_root: "/mnt/pikachu/STAR-suite/plans/artifacts"
+  temp_root: "/tmp"
+
+trusted_roots:
+  - "/mnt/pikachu/STAR-suite"
+  - "/storage"
+  - "/tmp"
+  - "/usr/bin"        # read-only for tool discovery
+  - "/usr/local/bin"  # read-only for tool discovery
+
+datasets:
+  - id: "a375"
+    path: "/storage/A375"
+    description: "A375 cell line data (GEX + features)"
+    metadata_file: "dataset.yaml"  # optional
+  # Add more datasets as discovered from /storage scan
+
+execution:
+  default_timeout_seconds: 7200  # 2 hours
+  max_concurrent_jobs: 1
+  queue_max_size: 10
+
+# Disk space thresholds (per-suite configurable)
+disk_space:
+  default_min_gb: 20           # smoke tests
+  full_depth_min_gb: 100       # full A375/GeneFull runs
+
+# Allowlisted scripts with metadata
+scripts:
+  # Core / Solo
+  - name: "cbub_regression"
+    path: "tests/run_cbub_regression_test.sh"
+    module: "core"
+    timeout_seconds: 3600
+    description: "CB/UB tag regression test"
+
+  - name: "sorted_bam_cbub_nonflex"
+    path: "tests/run_sorted_bam_cbub_nonflex_test.sh"
+    module: "core"
+    description: "Sorted BAM CB/UB injection (non-Flex)"
+
+  - name: "unsorted_cbub_smoke"
+    path: "tests/run_unsorted_cbub_smoke_test.sh"
+    module: "core"
+    description: "Unsorted BAM CB/UB smoke test"
+
+  # Flex
+  - name: "flex_smoke"
+    path: "tests/flex_smoke/run_flex_smoke.sh"
+    module: "flex"
+    description: "Flex basic smoke test"
+    fixtures:
+      - "/storage/flex_fixtures"
+
+  - name: "flex_cbub_validation"
+    path: "tests/run_flex_cbub_validation_test.sh"
+    module: "flex"
+    description: "Flex CB/UB validation"
+
+  - name: "flex_multisample"
+    path: "tests/run_flex_multisample_test.sh"
+    module: "flex"
+    description: "Flex multi-sample test"
+
+  # CR-compat / CRISPR
+  - name: "crispr_calling"
+    path: "tests/test_cr_compat_crispr_calling.sh"
+    module: "cr-compat"
+    description: "CR-compat CRISPR feature calling"
+
+  - name: "a375_gex_features_cr_parity"
+    path: "tests/run_a375_gex_features_cr_parity_genefull.sh"
+    module: "cr-compat"
+    description: "A375 GEX+features CR parity test (GeneFull)"
+    fixtures:
+      - "/storage/A375"
+
+  # Feature tools
+  - name: "assignbarcodes_regression"
+    path: "core/features/process_features/tests/test_assignbarcodes_regression.sh"
+    module: "feature-tools"
+    description: "assignBarcodes regression test"
+
+  # SLAM (optional - fixtures not yet confirmed; paths are placeholders)
+  - name: "slam_smoke"
+    path: "slam/tests/run_slam_smoke.sh"
+    module: "slam"
+    description: "SLAM-seq basic smoke test"
+    runnable: false
+    fixtures:
+      - "/storage/slam_fixtures"
+
+  - name: "slam_qc"
+    path: "slam/tests/run_slam_qc_test.sh"
+    module: "slam"
+    description: "SLAM-seq QC validation"
+    runnable: false
+    fixtures:
+      - "/storage/slam_fixtures"
+
+  # Build commands (special category)
+  - name: "build_core"
+    path: "make"
+    args: ["core"]
+    module: "build"
+    working_dir: "."
+    description: "Build STAR core binary"
+
+  - name: "build_flex"
+    path: "make"
+    args: ["flex"]
+    module: "build"
+    description: "Build Flex tools"
+
+  - name: "build_slam"
+    path: "make"
+    args: ["slam"]
+    module: "build"
+    description: "Build SLAM tools"
+
+# Test suites (grouped by module, with disk space requirements)
+test_suites:
+  - module: "core"
+    description: "Core STAR / Solo tests (non-Flex)"
+    scripts: ["cbub_regression", "sorted_bam_cbub_nonflex", "unsorted_cbub_smoke"]
+    disk_space_min_gb: 20
+
+  - module: "flex"
+    description: "STAR-Flex tests"
+    scripts: ["flex_smoke", "flex_cbub_validation", "flex_multisample"]
+    disk_space_min_gb: 20
+
+  - module: "cr-compat"
+    description: "CellRanger compatibility tests"
+    scripts: ["crispr_calling", "a375_gex_features_cr_parity"]
+    disk_space_min_gb: 100
+
+  - module: "feature-tools"
+    description: "Feature barcode tools tests"
+    scripts: ["assignbarcodes_regression"]
+    disk_space_min_gb: 20
+
+  - module: "slam"
+    description: "SLAM-seq tests (fixtures not yet confirmed)"
+    scripts: ["slam_smoke", "slam_qc"]
+    disk_space_min_gb: 20
+    runnable: false
+
+# Required binaries for preflight checks
+required_binaries:
+  - name: "STAR"
+    paths:
+      - "core/legacy/source/STAR"
+      - "/usr/local/bin/STAR"
+  - name: "samtools"
+    paths:
+      - "/usr/bin/samtools"
+      - "/usr/local/bin/samtools"
