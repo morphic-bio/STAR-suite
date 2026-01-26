@@ -151,7 +151,8 @@ OBJECTS = systemFunctions.o funPrimaryAlignMark.o \
 	ZGZXTags.o \
 	FlexProbeIndex.o \
 	CellRangerFormatter.o \
-	CrMultiConfig.o CrMultiMexStub.o CrMultiAssign.o CrMultiMerge.o CrMultiProcess.o
+	CrMultiConfig.o CrMultiMexStub.o CrMultiAssign.o CrMultiMerge.o CrMultiProcess.o \
+	CbUbTagInjector.o
 
 # Unit tests for CR-compat regression components (built as a single binary)
 OBJECTS_NO_MAIN := $(filter-out STAR.o,$(OBJECTS))

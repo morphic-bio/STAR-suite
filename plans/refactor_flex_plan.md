@@ -116,8 +116,7 @@ Move Flex to the modular single-cell components (libscrna + process_features) wh
 3. Confirm Flex links cleanly against `libscrna.a` only (no duplicate symbols).
 
 ## Stage 4: Flex-specific regression checks
-1. Validate `--soloAddTagsToUnsorted` behavior on Flex runs.
-2. Verify CB/UB strict coupling:
+1. Verify CB/UB strict coupling:
    - Keep strict policy for Flex.
    - Relax for non-Flex (if required by `docs/todos`).
 3. Run CRISPR feature calling regression matrix for `--crMinUmi`:

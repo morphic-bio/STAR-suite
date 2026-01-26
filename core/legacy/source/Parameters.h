@@ -170,7 +170,6 @@ class Parameters {
 
         //SAM output
         string outBAMfileCoordName, outBAMfileUnsortedName, outQuantBAMfileName;
-        string outBAMfileUnsortedSoloTmpName;
         string samHeader, samHeaderHD, samHeaderSortedCoord, samHeaderExtra;
         string outSAMmode,  outSAMorder, outSAMprimaryFlag;
         vector<string> outSAMattributes, outSAMheaderHD, outSAMheaderPG;
@@ -192,7 +191,6 @@ class Parameters {
         int outBAMcompression;
         vector <string> outSAMtype;
         bool outBAMunsorted, outBAMcoord, outSAMbool;
-        bool outBAMunsortedUseSoloTmp; // whether to use solo tmp file for unsorted BAM output
         uint32 outBAMcoordNbins;
         uint32 outBAMsortingBinsN;//user-defined number of bins for sorting
         string outBAMsortTmpDir;

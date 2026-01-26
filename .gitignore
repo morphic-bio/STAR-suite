@@ -38,6 +38,7 @@ Depend.list
 /source/libtrim/libtrim.a
 /core/legacy/source/STAR
 /core/legacy/source/STARlong
+/core/legacy/source/compat_unit_tests
 /core/legacy/source/Aligned.out.sam
 /core/legacy/source/Log.progress.out
 /core/features/vbem/source/libem/libem.a

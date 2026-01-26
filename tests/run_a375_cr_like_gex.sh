@@ -99,7 +99,6 @@ echo "Running A375 CR-like STARsolo (EM + EmptyDrops_CR)..."
   --soloCbUbRequireTogether "${A375_REQUIRE_CBUB_TOGETHER}" \
   --soloCellFilter EmptyDrops_CR \
   --soloStrand Unstranded \
-  --soloAddTagsToUnsorted no \
   --soloFeatures GeneFull
 
 echo "Outputs:"

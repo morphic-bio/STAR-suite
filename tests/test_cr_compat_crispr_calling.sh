@@ -109,7 +109,6 @@ echo "Running STAR with CR-compat mode..."
   --soloCellFilter EmptyDrops_CR \
   --soloCbUbRequireTogether no \
   --soloStrand Unstranded \
-  --soloAddTagsToUnsorted no \
   --soloFeatures GeneFull \
   --soloCrGexFeature genefull \
   --crMultiConfig "${MULTI_CONFIG}" \

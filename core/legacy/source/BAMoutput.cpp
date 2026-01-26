@@ -11,6 +11,7 @@
 #include "SoloBamParsing.h"
 #include "ProbeListIndex.h"
 #include "PackedReadInfo.h"
+#include "CbUbTagInjector.h"
 #include <cstring>
 #include <fstream>
 #include <functional>
@@ -125,6 +126,10 @@ BAMoutput::BAMoutput (BGZF *bgzfBAMin, Parameters &Pin) : P(Pin){//allocate BAM 
     sampleDet_ = nullptr;
     sampleDetReady_ = false;
     
+    // Default: don't skip global buffer (main unsorted BAM uses it)
+    // This will be set to true for transcriptome output via setSkipGlobalBuffer()
+    skipGlobalBuffer_ = false;
+    
     // Initialize Y-chromosome split handles
     if (P.emitNoYBAMyes) {
         bgzfBAM_Y = P.inOut->outBAMfileY;
@@ -185,11 +190,62 @@ BAMoutput::~BAMoutput() {
 }
 
 void BAMoutput::unsortedOneAlign (char *bamIn, uint bamSize, uint bamSize2, uint64_t iReadAll, uint8_t sampleByte,
-                                  uint32_t cbIdxPlus1, uint32_t umi24, const std::string &cbSeq, bool hasY) {
+                                  uint32_t cbIdxPlus1, uint32_t umi24, bool umiValid,
+                                  const std::string &cbSeq, bool hasY) {
     if (bamSize==0) return; //no output, could happen if one of the mates is not mapped
     
     // Skip output during auto-trim detection pass
     if (P.quant.slam.autoTrimDetectionPass) return;
+
+    // When buffered mode is active, route records through g_unsortedTagBuffer
+    // Tags will be injected later after Solo counting completes
+    // Skip this for transcriptome output (skipGlobalBuffer_=true) which goes to a separate file
+    if (g_unsortedTagBuffer != nullptr && !skipGlobalBuffer_) {
+        uint32_t readId = static_cast<uint32_t>(iReadAll);
+        g_unsortedTagBuffer->addRecord(bamIn, static_cast<uint32_t>(bamSize), readId, hasY);
+        return;  // Don't write directly; will be output after Solo counting with tags
+    }
+
+    // CB/UB tag injection for unsorted BAM output
+    // Check if tags are requested and we have valid CB/UMI data
+    bool needCB = P.outSAMattrPresent.CB;
+    bool needUB = P.outSAMattrPresent.UB;
+    bool tagsRequested = needCB || needUB;
+    
+    // Pointer to actual BAM data to write (original or with injected tags)
+    const char* bamToWrite = bamIn;
+    uint bamSizeToWrite = bamSize;
+    
+    // Estimate max tag overhead for buffer size calculation (CB:Z:16chars + UB:Z:12chars + null terminators)
+    // This is done before injection to ensure buffer has enough space for all records
+    uint32_t maxTagOverhead = 0;
+    if (tagsRequested) {
+        maxTagOverhead = CbUbTagInjector::maxTagOverhead(16, 12);  // Typical CB=16, UMI=12
+    }
+    
+    if (tagsRequested && !P.pSolo.cbWLstr.empty()) {
+        // Inject CB/UB tags using shared helper
+        // umiValid parameter explicitly passed by caller - indicates whether UMI extraction succeeded
+        // (don't try to guess from umi24 value, as 0 could be valid all-A UMI)
+        
+        uint32_t sizeOut = 0;
+        bool injected = CbUbTagInjector::injectTags(
+            bamIn, static_cast<uint32_t>(bamSize),
+            bamTagScratch_.data(), sizeOut,
+            cbIdxPlus1, umi24, umiValid,
+            P.pSolo.cbWLstr, P.pSolo.umiL,
+            needCB, needUB
+        );
+        
+        if (injected) {
+            bamToWrite = bamTagScratch_.data();
+            bamSizeToWrite = sizeOut;
+        }
+    }
+    
+    // Add max tag overhead to size estimate for buffer calculation
+    // This ensures we have space even if all records in the batch get tags
+    bamSize2 = bamSize2 + maxTagOverhead;
 
     if (binBytes1+bamSize2 > bamArraySize) {//write out this buffer
         flushPendingToLedgerAndDisk();
@@ -374,8 +430,9 @@ void BAMoutput::unsortedOneAlign (char *bamIn, uint bamSize, uint bamSize2, uint
     
     pendingSoloMeta_.push_back(meta);
     
-    memcpy(bamArray+binBytes1, bamIn, bamSize);
-    binBytes1 += bamSize;
+    // Copy BAM record (with or without injected tags) to buffer
+    memcpy(bamArray+binBytes1, bamToWrite, bamSizeToWrite);
+    binBytes1 += bamSizeToWrite;
 };
 
 void BAMoutput::flushPendingToLedgerAndDisk() {
@@ -426,7 +483,9 @@ void BAMoutput::flushPendingToLedgerAndDisk() {
         }
     } else {
         // Normal mode: write entire buffer to primary BAM
-        bgzf_write(bgzfBAM, bamArray, binBytes1);
+        if (bgzfBAM != nullptr) {
+            bgzf_write(bgzfBAM, bamArray, binBytes1);
+        }
     }
     
     if (g_threadChunks.threadBool) pthread_mutex_unlock(&g_threadChunks.mutexOutSAM);
@@ -565,7 +624,9 @@ void BAMoutput::coordBins() {//define genomic starts for bins
         uint ib1=ib+bamIn32[0]+sizeof(uint32);//note that size of the BAM record does not include the size record itself
         uint64 iReadWithY = *((uint64*) (binStartOld+ib1));  // Read as uint64 (includes Y-bit)
         bool hasY = (iReadWithY >> 63) & 1;  // Extract Y-bit
-        uint iRead = static_cast<uint>(iReadWithY & 0x7FFFFFFF);  // Mask out Y-bit for original iRead
+        // Preserve the full 64-bit iRead value (readId is in upper 32 bits)
+        // Only mask out the Y-bit (bit 63), keeping all other bits intact
+        uint iRead = static_cast<uint>(iReadWithY & ~(1ULL << 63));
         coordOneAlign (binStartOld+ib, (uint) (bamIn32[0]+sizeof(uint32)), iRead, hasY);
         ib=ib1+sizeof(uint64);//iReadWithY at the end of the BAM record (now 8 bytes)
     };

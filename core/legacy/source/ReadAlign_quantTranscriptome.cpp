@@ -71,15 +71,17 @@ uint ReadAlign::quantTranscriptome (Transcriptome *Tr, uint nAlignG, Transcript 
         for (uint iatr=0;iatr<nAlignT;iatr++) {//write all transcripts
             alignBAM(alignT[iatr], nAlignT, iatr, 0, (uint) -1, (uint) -1, 0, -1, NULL, P.outSAMattrOrderQuant, outBAMoneAlign, outBAMoneAlignNbytes);
             for (uint imate=0; imate<P.readNmates; imate++) {//output each mate //not readNends: this is alignment
+                // Pass CB/UB for both mates (consistent tagging)
                 outBAMquant->unsortedOneAlign(
                     outBAMoneAlign[imate],
                     outBAMoneAlignNbytes[imate],
                     (imate>0 || iatr>0) ? 0 : (outBAMoneAlignNbytes[0]+outBAMoneAlignNbytes[1])*2*nAlignT,
                     iReadAll,
                     (imate==0 ? detectedSampleByte_ : 0xFFu),
-                    (imate==0 ? extractedCbIdxPlus1_ : 0u),
-                    (imate==0 ? extractedUmi24_ : 0u),
-                    (imate==0 && extractedCbIdxPlus1_ == 0 ? extractedCbSeq_ : std::string()));
+                    extractedCbIdxPlus1_,  // Same CB for both mates
+                    extractedUmi24_,       // Same UMI for both mates
+                    extractedUmiValid_,    // UMI validity flag
+                    (extractedCbIdxPlus1_ == 0 ? extractedCbSeq_ : std::string()));
             };
         };
     };

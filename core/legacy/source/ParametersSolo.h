@@ -210,10 +210,6 @@ public:
 
     bool samAttrYes;//post-processed SAM attributes: error-corrected CB and UMI
     int32 samAttrFeature;//which feature to use for error correction
-    
-    //two-pass unsorted CB/UB injection
-    string addTagsToUnsortedStr;//string parameter input
-    bool addTagsToUnsorted;//whether to add CB/UB tags to unsorted BAM via two-pass mode
 
     // CB/UB injection policy
     string requireCbUbTogetherStr = "yes"; // yes|no (default yes)
@@ -291,6 +287,12 @@ public:
     // This ensures non-Flex runs use legacy STARsolo output (MEX format)
     string inlineHashModeStr = "";            // raw CLI value: yes|no|auto (default: auto - enabled for Flex, disabled otherwise)
     bool inlineHashMode = false;              // resolved value: true if enabled (gated behind Flex flag by default)
+
+    // ReadId tracking for sorted BAM CB/UB tag injection (Option C)
+    // When enabled, a parallel hash (readid_cbumi) tracks readId -> (cbIdx, umi24, status)
+    // This allows packedReadInfo to be populated after inline-hash collapse
+    // Automatically enabled when inlineHashMode=true AND sorted BAM + CB/UB tags requested
+    bool trackReadIdsForTags = false;
 
     //skip processing
     string skipProcessingStr = "no";//raw CLI value

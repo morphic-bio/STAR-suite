@@ -27,15 +27,17 @@ static const std::unordered_set<uint32_t> g_traceReads = buildTraceReadSetSink()
 #endif
 
 void MinimalSink::onRecord(SoloFeature &feature, const ReadInfoRecord &rec) {
-    // Match CountingSink filter: only persist records with valid status and valid feature
-    // This keeps both modes in sync and preserves legacy behavior for no-feature reads
-    if (rec.status != 1 || rec.featureId == (uint32_t)-1) {
-        // Explicitly write sentinel for rejected/no-feature reads to ensure binary writer sees status=0
+    // CB and UB are independent: preserve CB data even when UMI is invalid (status==2)
+    // status==0: no CB match - write sentinel
+    // status==1: both CB and UMI valid - write both
+    // status==2: CB valid, UMI invalid - write CB with status==2
+    if (rec.status == 0 || rec.featureId == (uint32_t)-1) {
+        // No CB match or no feature - write sentinel
         feature.recordReadInfo((uint32_t)rec.readId, 0, 0, 0);
         return;
     }
     
-    // Pass original values; recordReadInfo will translate per-backend
+    // Pass original values (status==1 or status==2); recordReadInfo will translate per-backend
     feature.recordReadInfo((uint32_t)rec.readId, rec.cbIdx, rec.umi, rec.status);
 }
 

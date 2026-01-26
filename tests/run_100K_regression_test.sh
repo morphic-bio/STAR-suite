@@ -86,7 +86,6 @@ run_star_test() {
       --clipAdapterType CellRanger4 \
       --soloFeatures Gene \
       --alignEndsType Local \
-      --soloAddTagsToUnsorted no \
       --soloStrand Unstranded \
       --chimSegmentMin 1000000 \
       --soloKeysCompat cr \

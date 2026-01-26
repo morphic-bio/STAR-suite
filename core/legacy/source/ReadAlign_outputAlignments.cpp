@@ -556,14 +556,25 @@ void ReadAlign::outputAlignments() {
         }
         
         // Extract UMI (24-bit packed) from SoloReadBarcode (if not already extracted above)
-        if (extractedUmi24_ == 0) {
-            if (readBar->urValid && readBar->urPacked != UINT32_MAX) {
-                extractedUmi24_ = readBar->urPacked & 0xFFFFFFu;
-            } else if (!readBar->umiSeq.empty() && readBar->umiSeq.length() == 12) {
-                uint32_t encoded = encodeUMI12(readBar->umiSeq);
-                if (encoded != UINT32_MAX) {
-                    extractedUmi24_ = encoded & 0xFFFFFFu;
+        // Also determine UMI validity based on extraction success and umiCheck status
+        extractedUmiValid_ = false;  // Default: invalid
+        if (readBar) {  // Guard against null readBar
+            if (extractedUmi24_ == 0) {
+                if (readBar->urValid && readBar->urPacked != UINT32_MAX) {
+                    extractedUmi24_ = readBar->urPacked & 0xFFFFFFu;
+                    extractedUmiValid_ = true;  // urValid indicates successful extraction
+                } else if (!readBar->umiSeq.empty() && readBar->umiSeq.length() == 12) {
+                    uint32_t encoded = encodeUMI12(readBar->umiSeq);
+                    if (encoded != UINT32_MAX) {
+                        extractedUmi24_ = encoded & 0xFFFFFFu;
+                        // UMI is valid if umiCheck >= 0 (umiCheck < 0 means N in UMI or other failure)
+                        extractedUmiValid_ = (readBar->umiCheck >= 0);
+                    }
                 }
+            } else {
+                // UMI was already extracted (e.g., from previous code path)
+                // Consider it valid if umiCheck >= 0
+                extractedUmiValid_ = (readBar->umiCheck >= 0);
             }
         }
         
@@ -916,27 +927,33 @@ void ReadAlign::writeSAM(uint64 nTrOutSAM, Transcript **trOutSAM, Transcript *tr
 
                 if (P.outBAMunsorted && outBAMunsorted != NULL) {//unsorted mode
                     for (uint imate=0; imate<P.readNmates; imate++) {//output each mate //not readNends: this is alignment
+                        // Pass CB/UB for both mates so both get tags injected (consistent with sorted BAM behavior)
                         outBAMunsorted->unsortedOneAlign(
                             outBAMoneAlign[imate],
                             outBAMoneAlignNbytes[imate],
                             (imate>0 || iTr>0) ? 0 : (outBAMoneAlignNbytes[0]+outBAMoneAlignNbytes[1])*2*nTrOutWrite,
                             iReadAll,
                             (imate==0 ? detectedSampleByte_ : 0xFFu),
-                            (imate==0 ? extractedCbIdxPlus1_ : 0u),
-                            (imate==0 ? extractedUmi24_ : 0u),
-                            (imate==0 && extractedCbIdxPlus1_ == 0 ? extractedCbSeq_ : std::string()),
+                            extractedCbIdxPlus1_,  // Same CB for both mates
+                            extractedUmi24_,       // Same UMI for both mates
+                            extractedUmiValid_,    // UMI validity flag
+                            (extractedCbIdxPlus1_ == 0 ? extractedCbSeq_ : std::string()),
                             hasYAlignment_);
                     };
                     if (P.outSAMunmapped.keepPairs && P.readNmates>1 && ( !mateMapped1[0] || !mateMapped1[1] ) ) {//keep pairs && paired reads && one of the mates not mapped in this transcript //not readNends: this is alignment
                         alignBAM(*trOutSAM[iTr], 0, 0, mapGen.chrStart[trOutSAM[iTr]->Chr], (uint) -1, (uint) -1, 0, 4, mateMapped1, P.outSAMattrOrder, outBAMoneAlign, outBAMoneAlignNbytes);
                         for (uint imate=0; imate<P.readNmates; imate++) {//output each mate //not readNends: this is alignment
+                            // Pass CB/UB for unmapped pairs too (consistent tagging)
                             outBAMunsorted->unsortedOneAlign(
                                 outBAMoneAlign[imate],
                                 outBAMoneAlignNbytes[imate],
                                 (imate>0 || iTr>0) ? 0 : (outBAMoneAlignNbytes[0]+outBAMoneAlignNbytes[1])*2*nTrOutWrite,
                                 iReadAll,
                                 (imate==0 ? detectedSampleByte_ : 0xFFu),
-                                0u, 0u, std::string(), // CB/UMI not available for unmapped pairs
+                                extractedCbIdxPlus1_,  // Same CB for both mates
+                                extractedUmi24_,       // Same UMI for both mates
+                                extractedUmiValid_,    // UMI validity flag
+                                (extractedCbIdxPlus1_ == 0 ? extractedCbSeq_ : std::string()),
                                 hasYAlignment_);
                         };
                     };
@@ -969,12 +986,16 @@ void ReadAlign::writeSAM(uint64 nTrOutSAM, Transcript **trOutSAM, Transcript *tr
                 alignBAM(*trBestSAM, 0, 0, mapGen.chrStart[trBestSAM->Chr], (uint) -1, (uint) -1, 0, unmapType, mateMapped, P.outSAMattrOrder, outBAMoneAlign, outBAMoneAlignNbytes);
                 for (uint imate=0; imate<P.readNmates; imate++) {//alignBAM output is empty for mapped mate, but still need to scan through it //not readNends: this is alignment
                     if (P.outBAMunsorted && outBAMunsorted != NULL && !P.outSAMunmapped.keepPairs) {
+                        // Pass CB/UB for both mates (consistent tagging)
                         outBAMunsorted->unsortedOneAlign(outBAMoneAlign[imate],
                                                           outBAMoneAlignNbytes[imate],
                                                           imate>0 ? 0 : outBAMoneAlignNbytes[0]+outBAMoneAlignNbytes[1],
                                                           iReadAll,
                                                           (imate==0 ? detectedSampleByte_ : 0xFFu),
-                                                          0u, 0u, std::string(), // CB/UMI not available for unmapped pairs
+                                                          extractedCbIdxPlus1_,  // Same CB for both mates
+                                                          extractedUmi24_,       // Same UMI for both mates
+                                                          extractedUmiValid_,    // UMI validity flag
+                                                          (extractedCbIdxPlus1_ == 0 ? extractedCbSeq_ : std::string()),
                                                           hasYAlignment_);
                     };
                     if (P.outBAMcoord) {//KeepPairs option does not affect for sorted BAM since we do not want multiple entries for the same unmapped read
@@ -991,25 +1012,29 @@ void ReadAlign::writeSAM(uint64 nTrOutSAM, Transcript **trOutSAM, Transcript *tr
             alignBAM(*trBestSAM, 0, 0, mapGen.chrStart[trBestSAM->Chr], (uint) -1, (uint) -1, 0, unmapType, mateMapped, P.outSAMattrOrder, outBAMoneAlign, outBAMoneAlignNbytes);
             for (uint imate=0; imate<P.readNmates; imate++) {//output each mate //not readNends: this is alignment
                 if (P.outBAMunsorted && outBAMunsorted != NULL) {
+                    // Pass CB/UB for both mates (consistent tagging)
                     outBAMunsorted->unsortedOneAlign(outBAMoneAlign[imate],
                                                       outBAMoneAlignNbytes[imate],
                                                       imate>0 ? 0 : outBAMoneAlignNbytes[0]+outBAMoneAlignNbytes[1],
                                                       iReadAll,
                                                       (imate==0 ? detectedSampleByte_ : 0xFFu),
-                                                      (imate==0 ? extractedCbIdxPlus1_ : 0u),
-                                                      (imate==0 ? extractedUmi24_ : 0u),
-                                                      (imate==0 && extractedCbIdxPlus1_ == 0 ? extractedCbSeq_ : std::string()),
+                                                      extractedCbIdxPlus1_,  // Same CB for both mates
+                                                      extractedUmi24_,       // Same UMI for both mates
+                                                      extractedUmiValid_,    // UMI validity flag
+                                                      (extractedCbIdxPlus1_ == 0 ? extractedCbSeq_ : std::string()),
                                                       hasYAlignment_);
                 };
                 if (P.quant.trSAM.bamYes) {
+                    // Pass CB/UB for both mates (consistent tagging)
                     outBAMquant->unsortedOneAlign(outBAMoneAlign[imate],
                                                   outBAMoneAlignNbytes[imate],
                                                   imate>0 ? 0 : outBAMoneAlignNbytes[0]+outBAMoneAlignNbytes[1],
                                                   iReadAll,
                                                   (imate==0 ? detectedSampleByte_ : 0xFFu),
-                                                  (imate==0 ? extractedCbIdxPlus1_ : 0u),
-                                                  (imate==0 ? extractedUmi24_ : 0u),
-                                                  (imate==0 && extractedCbIdxPlus1_ == 0 ? extractedCbSeq_ : std::string()));
+                                                  extractedCbIdxPlus1_,  // Same CB for both mates
+                                                  extractedUmi24_,       // Same UMI for both mates
+                                                  extractedUmiValid_,    // UMI validity flag
+                                                  (extractedCbIdxPlus1_ == 0 ? extractedCbSeq_ : std::string()));
                 };
                 if (P.outBAMcoord) {
                     outBAMcoord->coordOneAlign(outBAMoneAlign[imate], outBAMoneAlignNbytes[imate], iReadAll<<32, hasYAlignment_);

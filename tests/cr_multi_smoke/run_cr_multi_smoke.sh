@@ -232,7 +232,6 @@ EOF
     --soloUMIfiltering MultiGeneUMI_CR \
     --soloMultiMappers "${SOLO_MULTIMAPPERS}" \
     --soloStrand Unstranded \
-    --soloAddTagsToUnsorted no \
     --soloFeatures GeneFull \
     --soloCellFilter "${SOLO_CELL_FILTER}" \
     --soloCrGexFeature "${CR_MULTI_GEX_FEATURE}" \

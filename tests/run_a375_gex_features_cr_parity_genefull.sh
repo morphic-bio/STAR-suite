@@ -131,7 +131,6 @@ echo ""
   --soloCbUbRequireTogether no \
   --soloCellFilter EmptyDrops_CR \
   --soloStrand Unstranded \
-  --soloAddTagsToUnsorted no \
   --soloFeatures GeneFull \
   --soloCrGexFeature genefull \
   --crMultiConfig "${MULTI_CONFIG}" \

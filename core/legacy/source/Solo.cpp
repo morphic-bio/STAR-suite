@@ -107,8 +107,8 @@ void Solo::processAndOutput()
 
     // Early exit for skipProcessing mode with minimal readInfo preparation
     if (pSolo.skipProcessing) {
-        // If tag table or CB/UB injection is enabled, we need minimal readInfo population
-        if (pSolo.writeTagTableEnabled || pSolo.addTagsToUnsorted) {
+        // If tag table export is enabled, we need minimal readInfo population
+        if (pSolo.writeTagTableEnabled) {
             // Process only the samAttrFeature to populate readInfo without full counting
             uint32 attrFeatureIdx = pSolo.featureInd[pSolo.samAttrFeature];
             if (attrFeatureIdx < pSolo.nFeatures) {

@@ -102,10 +102,12 @@ void ChimericAlign::chimericBAMoutput(Transcript *al1, Transcript *al2, ReadAlig
         if (P.outBAMunsorted) {
             uint32_t mateIdx = (P.readNmates>0) ? (ii % P.readNmates) : 0;
             uint8_t sampleByte = (mateIdx==0 ? RA->detectedSampleByte_ : 0xFFu);
+            // Pass CB/UB for both mates (consistent tagging)
             RA->outBAMunsorted->unsortedOneAlign(RA->outBAMoneAlign[ii], RA->outBAMoneAlignNbytes[ii], ii>0 ? 0 : bamBytesTotal, RA->iReadAll, sampleByte,
-                                                  (mateIdx==0 ? RA->extractedCbIdxPlus1_ : 0u),
-                                                  (mateIdx==0 ? RA->extractedUmi24_ : 0u),
-                                                  (mateIdx==0 && RA->extractedCbIdxPlus1_ == 0 ? RA->extractedCbSeq_ : std::string()),
+                                                  RA->extractedCbIdxPlus1_,  // Same CB for all records
+                                                  RA->extractedUmi24_,       // Same UMI for all records
+                                                  RA->extractedUmiValid_,    // UMI validity flag
+                                                  (RA->extractedCbIdxPlus1_ == 0 ? RA->extractedCbSeq_ : std::string()),
                                                   RA->hasYAlignment_);
         };
         if (P.outBAMcoord)    RA->outBAMcoord->coordOneAlign(RA->outBAMoneAlign[ii], RA->outBAMoneAlignNbytes[ii], (RA->iReadAll<<32), RA->hasYAlignment_);

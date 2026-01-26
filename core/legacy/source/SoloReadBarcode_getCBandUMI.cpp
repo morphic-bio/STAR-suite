@@ -455,11 +455,19 @@ void SoloReadBarcode::getCBandUMI(char **readSeq, char **readQual, uint64 *readL
             if (cbMatch==0)
                 cbReadCountExact[cbMatchInd[0]]++; //still need to count it as exact before return, even if UMI is not good
             #endif
-            cbMatch=umiCheck;
-            cbMatchString="";
-            cbMatchInd.clear();
-            addStats(cbMatch);
-            return;
+            // CB and UB are independent: don't reject read when UMI is invalid
+            // Keep CB data intact, just mark UMI as invalid via umiCheck
+            // For non-Flex (legacy Solo), preserve original behavior
+            if (!pSolo.inlineCBCorrection && !pSolo.inlineHashMode) {
+                // Legacy path: reject entire read (original behavior)
+                cbMatch=umiCheck;
+                cbMatchString="";
+                cbMatchInd.clear();
+                addStats(cbMatch);
+                return;
+            }
+            // Flex path: keep CB, UMI is marked invalid via umiB/umiCheck
+            // Continue to addStats below
         };
 
     ///////////////////////////CB_samTagOut

@@ -61,7 +61,6 @@ R2_FILES=$(ls "${GEX_DIR}/downsampled/"*R2*.fastq.gz | paste -sd, -)
   --soloStrand Unstranded \
   --alignEndsType Local \
   --chimSegmentMin 1000000 \
-  --soloAddTagsToUnsorted no \
   --outSAMtype BAM Unsorted
 
 OUT_GEX="${OUTPREFIX}/Solo.out/Gene/raw"
