@@ -6,6 +6,8 @@
 #include "systemFunctions.h"
 #include "SoloReadInfoLoader.h"
 #include "SoloReadInfoSink.h"
+#include "hash_shims_cpp_compat.h"  // For unpackReadIdCbUmi
+#include "ErrorWarning.h"
 
 void SoloFeature::countCBgeneUMI()
 {    
@@ -37,7 +39,13 @@ void SoloFeature::countCBgeneUMI()
     }
 #endif
 
-    if (pSolo.readInfoYes[featureType] && !(pSolo.soloFlexMinimalMemory && pSolo.inlineHashMode)) {
+    // Allocate packedReadInfo if:
+    // 1. readInfoYes is set for this feature type, OR
+    // 2. trackReadIdsForTags is enabled (for sorted BAM CB/UB tag injection)
+    // Skip only if soloFlexMinimalMemory is on AND inlineHashMode is on AND trackReadIdsForTags is off
+    bool needPackedReadInfo = pSolo.readInfoYes[featureType] || pSolo.trackReadIdsForTags;
+    bool skipForMinimalMemory = pSolo.soloFlexMinimalMemory && pSolo.inlineHashMode && !pSolo.trackReadIdsForTags;
+    if (needPackedReadInfo && !skipForMinimalMemory) {
         resetPackedStorage(nReadsInput);
         time(&rawTime);
 #ifdef SOLO_USE_PACKED_READINFO
@@ -59,6 +67,34 @@ void SoloFeature::countCBgeneUMI()
         
         // Direct hash consumption: no materialization/legacy collapse
         collapseUMIall_fromHash();
+        
+        // Populate packedReadInfo from readIdTracker_ for sorted BAM CB/UB tag injection
+        if (pSolo.trackReadIdsForTags && readFeatSum && readFeatSum->readIdTracker_) {
+            time(&rawTime);
+            P.inOut->logMain << timeMonthDayTime(rawTime) << " ... Populating packedReadInfo from readIdTracker for sorted BAM CB/UB tags" << endl;
+            
+            size_t trackerSize = kh_size(readFeatSum->readIdTracker_);
+            size_t populated = 0;
+            
+            for (khiter_t iter = kh_begin(readFeatSum->readIdTracker_); iter != kh_end(readFeatSum->readIdTracker_); ++iter) {
+                if (!kh_exist(readFeatSum->readIdTracker_, iter)) continue;
+                
+                uint32_t readId = kh_key(readFeatSum->readIdTracker_, iter);
+                uint64_t val = kh_val(readFeatSum->readIdTracker_, iter);
+                
+                uint32_t cbIdx, umi24;
+                uint8_t status;
+                unpackReadIdCbUmi(val, &cbIdx, &umi24, &status);
+                
+                // Record into packedReadInfo
+                if (readId < nReadsInput) {
+                    recordReadInfo(readId, cbIdx, umi24, status);
+                    populated++;
+                }
+            }
+            
+            P.inOut->logMain << "  Populated " << populated << " readIds from tracker (tracker size: " << trackerSize << ")" << endl;
+        }
         
         // Export readId/CB/UB/status TSV table (env var gated, after CB/UB finalized)
         writeReadIdTagTable();
@@ -82,6 +118,21 @@ void SoloFeature::countCBgeneUMI()
         SoloReadInfoLoader loader;
         CountingSink sink;
         for (int ii=0; ii<P.runThreadN; ii++) {
+            // Defensive check: verify readFeatAll[ii] and its streamReads are valid
+            // This guards against wiring issues in SoloFeature_sumThreads or featureInd mismatch
+            if (readFeatAll[ii] == nullptr) {
+                ostringstream errOut;
+                errOut << "EXITING because of fatal ERROR: readFeatAll[" << ii << "] is null in countCBgeneUMI\n"
+                       << "This indicates a wiring issue in SoloFeature_sumThreads.cpp\n";
+                exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_INPUT_FILES, P);
+            }
+            if (!pSolo.inlineHashMode && readFeatAll[ii]->streamReads == nullptr) {
+                ostringstream errOut;
+                errOut << "EXITING because of fatal ERROR: readFeatAll[" << ii << "]->streamReads is null in non-inline-hash mode\n"
+                       << "featureType=" << featureType << " thread=" << ii << "\n"
+                       << "This indicates streamReads was not opened during mapping phase\n";
+                exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_INPUT_FILES, P);
+            }
             loader.load(*readFeatAll[ii], SoloReadInfoMode::Counting,
                         [&](const ReadInfoRecord &rec){ sink.onRecord(*this, rec); },
                         readBarSum->cbReadCountExact,

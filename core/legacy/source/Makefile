@@ -18,6 +18,7 @@ SLAM_DIR := $(ROOT_DIR)/slam
 VBEM_DIR := $(ROOT_DIR)/core/features/vbem
 YREMOVE_FASTQ_DIR := $(ROOT_DIR)/core/features/yremove_fastq
 BAMSORT_DIR := $(ROOT_DIR)/core/features/bamsort
+PROCESS_FEATURES_DIR := $(ROOT_DIR)/core/features/process_features
 
 FLEX_SRC_DIR := $(FLEX_DIR)/source
 SLAM_SRC_DIR := $(SLAM_DIR)/source
@@ -35,6 +36,11 @@ TRIMVALIDATE_DIR := $(VBEM_DIR)/tools/trimvalidate
 LIBFLEX_LIB := $(LIBFLEX_DIR)/libflex.a
 LIBTRIM_LIB := $(LIBTRIM_DIR)/libtrim.a
 LIBEM_LIB := $(LIBEM_DIR)/libem.a
+PROCESS_FEATURES_DIR := $(ROOT_DIR)/core/features/process_features
+PROCESS_FEATURES_LIB := $(PROCESS_FEATURES_DIR)/libprocess_features.a
+LIBSCRNA_DIR := $(ROOT_DIR)/core/features/libscrna
+LIBSCRNA_INC := $(LIBSCRNA_DIR)/include
+LIBSCRNA_LIB := $(LIBSCRNA_DIR)/libscrna.a
 
 VPATH := $(FLEX_SRC_DIR) $(SLAM_SRC_DIR) $(VBEM_SRC_DIR) $(BAMSORT_SRC_DIR)
 
@@ -73,9 +79,10 @@ CXXFLAGS_SIMD ?= -mavx2
 
 # Unconditionally set essential flags and optimization options
 # Packed ReadInfo is the only supported path (legacy removed)
-# Include flex (klib/libflex), vbem (libtrim/libem), and slam headers
+# Include flex (klib/libflex), vbem (libtrim/libem), slam, and process_features headers
 # Include current directory for IncludeDefine.h and other source headers
-CXXFLAGS_common := -std=c++11 -fopenmp -I. -I$(FLEX_SRC_DIR) -I$(LIBFLEX_DIR) -I$(VBEM_SRC_DIR) -I$(LIBEM_DIR) -I$(SLAM_SRC_DIR) -I$(BAMSORT_SRC_DIR) $(COMPTIMEPLACE) $(GIT_BRANCH_COMMIT_DIFF)
+PROCESS_FEATURES_INC := $(ROOT_DIR)/core/features/process_features/include
+CXXFLAGS_common := -std=c++11 -fopenmp -I. -I$(FLEX_SRC_DIR) -I$(LIBFLEX_DIR) -I$(LIBSCRNA_INC) -I$(VBEM_SRC_DIR) -I$(LIBEM_DIR) -I$(SLAM_SRC_DIR) -I$(BAMSORT_SRC_DIR) -I$(PROCESS_FEATURES_INC) $(COMPTIMEPLACE) $(GIT_BRANCH_COMMIT_DIFF)
 CXXFLAGS_main := -O3 $(CXXFLAGS_common)
 CXXFLAGS_gdb := -O0 -g3 $(CXXFLAGS_common)
 
@@ -144,7 +151,8 @@ OBJECTS = systemFunctions.o funPrimaryAlignMark.o \
 	ZGZXTags.o \
 	FlexProbeIndex.o \
 	CellRangerFormatter.o \
-	CrMultiConfig.o CrMultiMexStub.o CrMultiAssign.o CrMultiMerge.o CrMultiProcess.o
+	CrMultiConfig.o CrMultiMexStub.o CrMultiAssign.o CrMultiMerge.o CrMultiProcess.o \
+	CbUbTagInjector.o
 
 # Unit tests for CR-compat regression components (built as a single binary)
 OBJECTS_NO_MAIN := $(filter-out STAR.o,$(OBJECTS))
@@ -174,6 +182,17 @@ flexfilter: STAR$(SFX)
 .PHONY: remove_y_reads
 remove_y_reads: htslib/libhts.a
 	$(MAKE) -C $(REMOVE_Y_READS_DIR)
+
+# Standalone star_feature_call tool for perturb-seq processing
+# Requires libprocess_features.a to be built first
+.PHONY: star_feature_call libprocess_features
+libprocess_features:
+	$(MAKE) -C $(PROCESS_FEATURES_DIR) lib
+
+star_feature_call: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
+star_feature_call: LDFLAGS_PF := -L$(PROCESS_FEATURES_DIR) -lprocess_features -L$(LIBSCRNA_DIR) -lscrna -lm -lpthread -lz -fopenmp -Lhtslib -lhts
+star_feature_call: libprocess_features htslib/libhts.a $(LIBSCRNA_LIB)
+	$(CXX) $(CXXFLAGS) -o star_feature_call star_feature_call.cpp $(LDFLAGS_PF)
 
 # Convenience target to rebuild only the MEX writer components
 .PHONY: MexWriterObjs
@@ -360,7 +379,7 @@ solo/CbBayesianResolver.o : $(FLEX_SRC_DIR)/solo/CbBayesianResolver.cpp $(FLEX_S
 
 .PHONY: clean
 clean:
-	'rm' -f *.o opal/opal.o solo/*.o STAR STARstatic STARlong Depend.list parametersDefault.xxd
+	'rm' -f *.o opal/opal.o solo/*.o STAR STARstatic STARlong star_feature_call Depend.list parametersDefault.xxd
 	$(MAKE) -C $(LIBFLEX_DIR) clean
 	$(MAKE) -C $(LIBTRIM_DIR) clean
 	$(MAKE) -C $(LIBEM_DIR) clean
@@ -404,9 +423,12 @@ htslib/libhts.a :
 parametersDefault.xxd: parametersDefault
 	xxd -i parametersDefault > parametersDefault.xxd
 
-# Ensure libflex is always rebuilt (sources may have changed)
+# Ensure libflex is always rebuilt from scratch (clean first to remove stale objects)
+# NOTE: After migration to libscrna, libflex.a no longer contains EmptyDrops/OrdMag/Occupancy.
+#       Cleaning ensures old objects don't persist in the archive (ar rcs doesn't remove old members).
 .PHONY: libflex
 libflex:
+	$(MAKE) -C $(LIBFLEX_DIR) clean
 	$(MAKE) -C $(LIBFLEX_DIR) libflex.a
 
 # Ensure libtrim is always rebuilt (sources may have changed)
@@ -421,8 +443,8 @@ libem:
 
 STAR$(SFX) : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
 STAR$(SFX) : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS) $(shell pkg-config --libs glib-2.0 2>/dev/null || echo "")
-STAR$(SFX) : Depend.list parametersDefault.xxd $(OBJECTS) libflex libtrim libem
-	$(CXX) -o STAR$(SFX) $(CXXFLAGS) $(OBJECTS) $(LIBFLEX_LIB) $(LIBTRIM_LIB) $(LIBEM_LIB) $(LDFLAGS)
+STAR$(SFX) : Depend.list parametersDefault.xxd $(OBJECTS) libflex libtrim libem libprocess_features $(LIBSCRNA_LIB)
+	$(CXX) -o STAR$(SFX) $(CXXFLAGS) $(OBJECTS) $(LIBFLEX_LIB) $(LIBTRIM_LIB) $(LIBEM_LIB) $(PROCESS_FEATURES_LIB) $(LIBSCRNA_LIB) $(LDFLAGS)
 
 STARstatic$(SFX) : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
 STARstatic$(SFX) : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_static) $(LDFLAGS)
@@ -448,8 +470,8 @@ POSIXSHARED : Depend.list parametersDefault.xxd $(OBJECTS)
 
 gdb : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_gdb) $(CXXFLAGS)
 gdb : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_gdb) $(LDFLAGS) $(shell pkg-config --libs glib-2.0 2>/dev/null || echo "")
-gdb : Depend.list parametersDefault.xxd $(OBJECTS) libflex libtrim libem
-	$(CXX) -o STAR $(CXXFLAGS) $(OBJECTS) $(LIBFLEX_LIB) $(LIBTRIM_LIB) $(LIBEM_LIB) $(LDFLAGS)
+gdb : Depend.list parametersDefault.xxd $(OBJECTS) libflex libtrim libem libprocess_features $(LIBSCRNA_LIB)
+	$(CXX) -o STAR $(CXXFLAGS) $(OBJECTS) $(LIBFLEX_LIB) $(LIBTRIM_LIB) $(LIBEM_LIB) $(PROCESS_FEATURES_LIB) $(LIBSCRNA_LIB) $(LDFLAGS)
 
 gdb-long : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_gdb) -D'COMPILE_FOR_LONG_READS' $(CXXFLAGS)
 gdb-long : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_gdb) $(LDFLAGS) $(shell pkg-config --libs glib-2.0 2>/dev/null || echo "")

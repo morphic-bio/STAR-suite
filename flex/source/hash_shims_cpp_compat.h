@@ -31,6 +31,12 @@ KHASH_MAP_INIT_INT64(cr, uint16_t)
 // 2. cg_agg: Map uint64_t -> uint32_t (cell|gene key -> count)
 KHASH_MAP_INIT_INT64(cg_agg, uint32_t)
 
+// 3. readid_cbumi: Map uint32_t readId -> uint64_t packed(cbIdx, umi24, status)
+// Used for parallel readId tracking when sorted BAM CB/UB tags are requested
+// Value format: [cbIdx:32][umi24:24][status:8] = 64 bits
+// Only allocated when pSolo.trackReadIdsForTags is true
+KHASH_MAP_INIT_INT(readid_cbumi, uint64_t)
+
 // Type aliases
 typedef khash_t(cr) cr_hash_t;
 
@@ -110,6 +116,18 @@ static inline void unpackCgAggKey(uint64_t key, uint32_t *cbIdx, uint32_t *umi24
     if (umi24) *umi24 = (uint32_t)((key >> 20) & 0xFFFFFF);
     if (geneIdx) *geneIdx = (uint16_t)((key >> 5) & 0x7FFF);
     if (tagIdx) *tagIdx = (uint8_t)(key & 0x1F);
+}
+
+// Pack/unpack functions for readid_cbumi hash value
+// Value format: [cbIdx:32][umi24:24][status:8] MSB→LSB
+static inline uint64_t packReadIdCbUmi(uint32_t cbIdx, uint32_t umi24, uint8_t status) {
+    return ((uint64_t)cbIdx << 32) | ((uint64_t)(umi24 & 0xFFFFFF) << 8) | (uint64_t)status;
+}
+
+static inline void unpackReadIdCbUmi(uint64_t val, uint32_t *cbIdx, uint32_t *umi24, uint8_t *status) {
+    if (cbIdx) *cbIdx = (uint32_t)(val >> 32);
+    if (umi24) *umi24 = (uint32_t)((val >> 8) & 0xFFFFFF);
+    if (status) *status = (uint8_t)(val & 0xFF);
 }
 
 #endif // HASH_SHIMS_CPP_COMPAT_H

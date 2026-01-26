@@ -193,6 +193,7 @@ ReadAlign::ReadAlign (Parameters& Pin, Genome &genomeIn, Transcriptome *TrIn, in
     detectedSampleByte_ = 0xFFu; // Default: no sample detected
     extractedCbIdxPlus1_ = 0;    // Default: no CB extracted
     extractedUmi24_ = 0;          // Default: no UMI extracted
+    extractedUmiValid_ = false;   // Default: UMI not valid
     if (!P.pSolo.sampleWhitelistPath.empty() && P.pSolo.sampleWhitelistPath != "-" &&
         !P.pSolo.sampleProbesPath.empty() && P.pSolo.sampleProbesPath != "-") {
         sampleDet_ = new SampleDetector(P.pSolo);
@@ -402,6 +403,7 @@ void ReadAlign::resetN () {//reset resets the counters to 0 for a new read
     detectedSampleByte_ = 0xFFu; // Reset detected sample for new read
     extractedCbIdxPlus1_ = 0;    // Reset extracted CB for new read
     extractedUmi24_ = 0;          // Reset extracted UMI for new read
+    extractedUmiValid_ = false;   // Reset UMI validity for new read
     extractedCbSeq_.clear();      // Reset CB sequence for new read
     hasYAlignment_ = false;       // Reset Y-alignment flag for new read
 

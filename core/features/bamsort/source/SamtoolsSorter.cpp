@@ -71,9 +71,10 @@ struct SamtoolsSorter::SpillFileReader {
     }
 };
 
-SamtoolsSorter::SamtoolsSorter(uint64_t maxRAM, int nThreads, const string& tmpDir, Parameters& P)
-    : maxRAM_(maxRAM), nThreads_(nThreads), tmpDir_(tmpDir), P_(P),
-      currentRAM_(0), spillFileCounter_(0), finalized_(false)
+SamtoolsSorter::SamtoolsSorter(uint64_t maxRAM, int nThreads, const string& tmpDir, Parameters& P, bool noSort)
+    : maxRAM_(maxRAM), nThreads_(nThreads), tmpDir_(tmpDir), P_(P), noSort_(noSort),
+      currentRAM_(0), spillFileCounter_(0), finalized_(false),
+      fifoRecordIdx_(0), fifoSpillFileIdx_(0)
 {
     records_.reserve(100000); // Pre-allocate space
     pthread_mutex_init(&bufferMutex_, nullptr);
@@ -134,8 +135,10 @@ void SamtoolsSorter::sortAndSpill() {
         pthread_mutex_unlock(&bufferMutex_);
     }
     
-    // Sort records by SortKey + QNAME (outside lock)
-    std::sort(recordsToSpill.begin(), recordsToSpill.end(), BAMRecordComparator());
+    // Sort records by SortKey + QNAME (outside lock) - skip if noSort_ mode
+    if (!noSort_) {
+        std::sort(recordsToSpill.begin(), recordsToSpill.end(), BAMRecordComparator());
+    }
     
     // Write sorted chunk to temp file with SortKey fields serialized explicitly
     // Protect spillFileCounter_ from concurrent access
@@ -182,13 +185,27 @@ void SamtoolsSorter::finalize() {
     
     pthread_mutex_lock(&bufferMutex_);
     
-    // Sort remaining in-memory records
-    if (!records_.empty()) {
+    // Sort remaining in-memory records (skip if noSort_ mode)
+    if (!records_.empty() && !noSort_) {
         std::sort(records_.begin(), records_.end(), BAMRecordComparator());
     }
     
-    // Initialize k-way merge with spill files
-    initializeKWayMerge();
+    if (noSort_) {
+        // Deterministic order mode: emit spill files first (in creation order), then in-memory records
+        // Initialize iteration state
+        fifoRecordIdx_ = 0;
+        fifoSpillFileIdx_ = 0;
+        
+        // Open spill file readers
+        for (size_t i = 0; i < spillFiles_.size(); i++) {
+            SpillFileReader* reader = new SpillFileReader(spillFiles_[i], static_cast<int>(i));
+            reader->readNext();  // Prime the reader with the first record
+            spillReaders_.push_back(reader);
+        }
+    } else {
+        // Initialize k-way merge with spill files
+        initializeKWayMerge();
+    }
     
     finalized_ = true;
     pthread_mutex_unlock(&bufferMutex_);
@@ -257,6 +274,48 @@ bool SamtoolsSorter::nextRecord(const char** bamData, uint32_t* bamSize, uint32_
     
     // Free previous spill-return buffer (contract: valid until next call)
     clearReturnedRecord();
+    
+    // Deterministic order mode: emit records in a fixed order (no sorting)
+    // Order: spill files first (in spill creation order), then in-memory records
+    if (noSort_) {
+        // First, iterate through spill files in creation order
+        while (fifoSpillFileIdx_ < spillReaders_.size()) {
+            SpillFileReader* reader = spillReaders_[fifoSpillFileIdx_];
+            if (reader->hasRecord) {
+                // Copy the record to returnedRecord_ for persistence
+                returnedRecord_.size = reader->currentRecord.size;
+                returnedRecord_.hasY = reader->currentRecord.hasY;
+                returnedRecord_.readId = reader->currentRecord.readId;
+                returnedRecord_.data = new char[returnedRecord_.size];
+                memcpy(returnedRecord_.data, reader->currentRecord.data, returnedRecord_.size);
+                
+                *bamData = returnedRecord_.data;
+                *bamSize = returnedRecord_.size;
+                *readId = returnedRecord_.readId;
+                *hasY = returnedRecord_.hasY;
+                
+                // Advance reader
+                reader->readNext();
+                return true;
+            }
+            // Current spill file exhausted, move to next
+            fifoSpillFileIdx_++;
+        }
+        
+        // Then, return in-memory records (these are the most recent)
+        if (fifoRecordIdx_ < records_.size()) {
+            BAMRecord& rec = records_[fifoRecordIdx_];
+            *bamData = rec.data;
+            *bamSize = rec.size;
+            *readId = rec.readId;
+            *hasY = rec.hasY;
+            fifoRecordIdx_++;
+            return true;
+        }
+        
+        // No more records
+        return false;
+    }
     
     // K-way merge using min-heap: coord (tid<<32|pos) then readId
     while (!mergeHeap_.empty()) {

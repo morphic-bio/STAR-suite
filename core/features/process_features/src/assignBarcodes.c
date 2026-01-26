@@ -1,0 +1,4286 @@
+#include "../include/common.h"
+#include "../include/barcode_match.h"
+#include "../include/globals.h"
+#include "../include/prototypes.h"
+#include "../include/utils.h"
+#include "../include/memory.h"
+#include "../include/io.h"
+#include "../include/plot_histogram.h"
+// EMfit.h removed - EM functionality no longer needed
+#include "../include/heatmap.h"
+#include "../include/pf_counts.h"
+#include "../include/mex_writer.h"
+#include "../include/barcode_filter.h"
+
+//will  print if DEBUG is set or debug=1
+//code for feature sequences stats
+
+static int pf_trace_rescue_inited = 0;
+static int pf_trace_rescue_enabled = 0;
+static const char *pf_trace_rescue_list = NULL;
+static FILE *pf_trace_rescue_fp = NULL;
+static int pf_trace_counts_inited = 0;
+static int pf_trace_counts_enabled = 0;
+static const char *pf_trace_counts_list = NULL;
+static FILE *pf_trace_counts_fp = NULL;
+static int pf_trace_dedup_inited = 0;
+static int pf_trace_dedup_enabled = 0;
+static const char *pf_trace_dedup_list = NULL;
+static FILE *pf_trace_dedup_fp = NULL;
+static int pf_trace_dedup_active = 0;
+static const char *pf_trace_dedup_barcode = NULL;
+static const char *pf_trace_dedup_umi = NULL;
+static uint32_t pf_current_dedup_barcode_key = 0;
+static int pf_trace_dedup_count_inited = 0;
+static int pf_trace_dedup_count_enabled = 0;
+static char pf_trace_dedup_count_bc1[64];
+static char pf_trace_dedup_count_bc2[64];
+static unsigned long long pf_trace_dedup_count1 = 0;
+static unsigned long long pf_trace_dedup_count2 = 0;
+static int pf_trace_reads_inited = 0;
+static int pf_trace_reads_enabled = 0;
+static const char *pf_trace_reads_list = NULL;
+static FILE *pf_trace_reads_fp = NULL;
+static int pf_trace_anchor_inited = 0;
+static int pf_trace_anchor_enabled = 0;
+static const char *pf_trace_anchor_list = NULL;
+static FILE *pf_trace_anchor_fp = NULL;
+static int pf_trace_anchor_all = 0;
+static unsigned long long pf_trace_anchor_max = 0;
+static unsigned long long pf_trace_anchor_emitted = 0;
+
+static void feature_mode_record(int feature_index, int offset) {
+    if (!feature_mode_hist || !feature_mode_offsets) {
+        return;
+    }
+    if (offset < 0 || offset >= feature_mode_max_offset) {
+        return;
+    }
+    const int idx = (feature_index - 1) * feature_mode_max_offset + offset;
+    __sync_fetch_and_add(&feature_mode_hist[idx], 1);
+}
+
+static void feature_mode_finalize(const feature_arrays *features) {
+    if (!features || !feature_mode_hist || !feature_mode_offsets) {
+        return;
+    }
+    for (int j = 0; j < features->number_of_features; j++) {
+        unsigned int best_count = 0;
+        int best_offset = -1;
+        const int base = j * feature_mode_max_offset;
+        for (int off = 0; off < feature_mode_max_offset; off++) {
+            unsigned int c = feature_mode_hist[base + off];
+            if (c > best_count) {
+                best_count = c;
+                best_offset = off;
+            }
+        }
+        feature_mode_offsets[j] = (best_count > 0) ? best_offset : -1;
+    }
+}
+static int pf_trace_keys_inited = 0;
+static int pf_trace_keys_enabled = 0;
+static const char *pf_trace_keys_list = NULL;
+static FILE *pf_trace_keys_fp = NULL;
+static int pf_trace_keys_feature = 0;
+static int pf_trace_feature_offsets_inited = 0;
+static int pf_trace_feature_offsets_enabled = 0;
+static FILE *pf_trace_feature_offsets_fp = NULL;
+static int pf_trace_feature_offsets_done = 0;
+
+static void pf_trace_rescue_init_once(void) {
+    if (pf_trace_rescue_inited) {
+        return;
+    }
+    pf_trace_rescue_inited = 1;
+    const char *trace_env = getenv("PF_TRACE_RESCUE");
+    const char *list_env = getenv("PF_TRACE_RESCUE_BARCODES");
+    if ((trace_env && trace_env[0] && strcmp(trace_env, "0") != 0) ||
+        (list_env && list_env[0])) {
+        pf_trace_rescue_enabled = 1;
+        pf_trace_rescue_list = list_env;
+    }
+    if (pf_trace_rescue_enabled) {
+        const char *log_path = getenv("PF_TRACE_RESCUE_LOG");
+        if (log_path && log_path[0]) {
+            pf_trace_rescue_fp = fopen(log_path, "a");
+        }
+        if (!pf_trace_rescue_fp) {
+            pf_trace_rescue_fp = stderr;
+        }
+    }
+}
+
+static int pf_trace_list_contains(const char *list, const char *barcode) {
+    if (!list || !barcode || !barcode[0]) {
+        return 0;
+    }
+    size_t blen = strlen(barcode);
+    const char *p = list;
+    while (*p) {
+        while (*p == ',' || *p == ' ' || *p == '\t') {
+            ++p;
+        }
+        if (!*p) {
+            break;
+        }
+        const char *start = p;
+        while (*p && *p != ',' && *p != ' ' && *p != '\t') {
+            ++p;
+        }
+        size_t n = (size_t)(p - start);
+        if (n == blen && strncmp(start, barcode, blen) == 0) {
+            return 1;
+        }
+        if (*p) {
+            ++p;
+        }
+    }
+    return 0;
+}
+
+static void pf_trace_counts_init_once(void) {
+    if (pf_trace_counts_inited) {
+        return;
+    }
+    pf_trace_counts_inited = 1;
+    const char *trace_env = getenv("PF_TRACE_COUNTS");
+    const char *list_env = getenv("PF_TRACE_COUNTS_BARCODES");
+    if ((trace_env && trace_env[0] && strcmp(trace_env, "0") != 0) ||
+        (list_env && list_env[0])) {
+        pf_trace_counts_enabled = 1;
+        pf_trace_counts_list = list_env;
+    }
+    if (pf_trace_counts_enabled) {
+        const char *log_path = getenv("PF_TRACE_COUNTS_LOG");
+        if (log_path && log_path[0]) {
+            pf_trace_counts_fp = fopen(log_path, "a");
+        }
+        if (!pf_trace_counts_fp) {
+            pf_trace_counts_fp = stderr;
+        }
+    }
+}
+
+static void pf_trace_copy_token(const char **pp, char *dst, size_t dst_len) {
+    const char *p = *pp;
+    while (*p == ',' || *p == ' ' || *p == '\t') {
+        ++p;
+    }
+    size_t n = 0;
+    while (*p && *p != ',' && *p != ' ' && *p != '\t') {
+        if (n + 1 < dst_len) {
+            dst[n++] = *p;
+        }
+        ++p;
+    }
+    dst[n] = '\0';
+    *pp = p;
+}
+
+static void pf_trace_dedup_init_once(void) {
+    if (pf_trace_dedup_inited) {
+        return;
+    }
+    pf_trace_dedup_inited = 1;
+    const char *trace_env = getenv("PF_TRACE_DEDUP");
+    const char *list_env = getenv("PF_TRACE_DEDUP_BARCODES");
+    if ((trace_env && trace_env[0] && strcmp(trace_env, "0") != 0) ||
+        (list_env && list_env[0])) {
+        pf_trace_dedup_enabled = 1;
+        pf_trace_dedup_list = list_env;
+    }
+    if (pf_trace_dedup_enabled) {
+        const char *log_path = getenv("PF_TRACE_DEDUP_LOG");
+        if (log_path && log_path[0]) {
+            pf_trace_dedup_fp = fopen(log_path, "a");
+        }
+        if (!pf_trace_dedup_fp) {
+            pf_trace_dedup_fp = stderr;
+        }
+    }
+}
+
+static void pf_trace_dedup_count_init_once(void) {
+    if (pf_trace_dedup_count_inited) {
+        return;
+    }
+    pf_trace_dedup_count_inited = 1;
+    pf_trace_dedup_init_once();
+    if (!pf_trace_dedup_enabled || !pf_trace_dedup_list) {
+        return;
+    }
+    const char *p = pf_trace_dedup_list;
+    pf_trace_copy_token(&p, pf_trace_dedup_count_bc1, sizeof(pf_trace_dedup_count_bc1));
+    pf_trace_copy_token(&p, pf_trace_dedup_count_bc2, sizeof(pf_trace_dedup_count_bc2));
+    if (pf_trace_dedup_count_bc1[0]) {
+        pf_trace_dedup_count_enabled = 1;
+    }
+}
+
+static void pf_trace_reads_init_once(void) {
+    if (pf_trace_reads_inited) {
+        return;
+    }
+    pf_trace_reads_inited = 1;
+    const char *trace_env = getenv("PF_TRACE_READS");
+    const char *list_env = getenv("PF_TRACE_READS_BARCODES");
+    if ((trace_env && trace_env[0] && strcmp(trace_env, "0") != 0) ||
+        (list_env && list_env[0])) {
+        pf_trace_reads_enabled = 1;
+        pf_trace_reads_list = list_env;
+    }
+    if (pf_trace_reads_enabled) {
+        const char *log_path = getenv("PF_TRACE_READS_LOG");
+        if (log_path && log_path[0]) {
+            pf_trace_reads_fp = fopen(log_path, "a");
+        }
+        if (!pf_trace_reads_fp) {
+            pf_trace_reads_fp = stderr;
+        }
+    }
+}
+
+static void pf_trace_anchor_init_once(void) {
+    if (pf_trace_anchor_inited) {
+        return;
+    }
+    pf_trace_anchor_inited = 1;
+    const char *trace_env = getenv("PF_TRACE_ANCHOR");
+    const char *list_env = getenv("PF_TRACE_ANCHOR_BARCODES");
+    const char *all_env = getenv("PF_TRACE_ANCHOR_ALL");
+    const char *max_env = getenv("PF_TRACE_ANCHOR_MAX");
+    if ((trace_env && trace_env[0] && strcmp(trace_env, "0") != 0) ||
+        (list_env && list_env[0])) {
+        pf_trace_anchor_enabled = 1;
+        pf_trace_anchor_list = list_env;
+        if (all_env && all_env[0] && strcmp(all_env, "0") != 0) {
+            pf_trace_anchor_all = 1;
+        }
+        if (max_env && max_env[0]) {
+            pf_trace_anchor_max = strtoull(max_env, NULL, 10);
+        }
+    }
+    if (pf_trace_anchor_enabled) {
+        const char *log_path = getenv("PF_TRACE_ANCHOR_LOG");
+        if (log_path && log_path[0]) {
+            pf_trace_anchor_fp = fopen(log_path, "a");
+        }
+        if (!pf_trace_anchor_fp) {
+            pf_trace_anchor_fp = stderr;
+        }
+    }
+}
+
+static void pf_trace_keys_init_once(void) {
+    if (pf_trace_keys_inited) {
+        return;
+    }
+    pf_trace_keys_inited = 1;
+    const char *trace_env = getenv("PF_TRACE_KEYS");
+    const char *list_env = getenv("PF_TRACE_KEYS_BARCODES");
+    const char *feature_env = getenv("PF_TRACE_KEYS_FEATURE");
+    if ((trace_env && trace_env[0] && strcmp(trace_env, "0") != 0) ||
+        (list_env && list_env[0]) || (feature_env && feature_env[0])) {
+        pf_trace_keys_enabled = 1;
+        pf_trace_keys_list = list_env;
+        if (feature_env && feature_env[0]) {
+            pf_trace_keys_feature = atoi(feature_env);
+        }
+    }
+    if (pf_trace_keys_enabled) {
+        const char *log_path = getenv("PF_TRACE_KEYS_LOG");
+        if (log_path && log_path[0]) {
+            pf_trace_keys_fp = fopen(log_path, "a");
+        }
+        if (!pf_trace_keys_fp) {
+            pf_trace_keys_fp = stderr;
+        }
+    }
+}
+
+static void pf_trace_feature_offsets_init_once(void) {
+    if (pf_trace_feature_offsets_inited) {
+        return;
+    }
+    pf_trace_feature_offsets_inited = 1;
+    const char *env = getenv("PF_TRACE_FEATURE_OFFSETS");
+    if (!env || !env[0]) {
+        return;
+    }
+    pf_trace_feature_offsets_enabled = 1;
+    if (strcmp(env, "1") == 0 || strcmp(env, "stderr") == 0) {
+        pf_trace_feature_offsets_fp = stderr;
+    } else {
+        pf_trace_feature_offsets_fp = fopen(env, "w");
+        if (!pf_trace_feature_offsets_fp) {
+            pf_trace_feature_offsets_fp = stderr;
+        }
+    }
+}
+
+static void pf_trace_feature_offsets_emit(const feature_arrays *features) {
+    pf_trace_feature_offsets_init_once();
+    if (!pf_trace_feature_offsets_enabled || pf_trace_feature_offsets_done) {
+        return;
+    }
+    pf_trace_feature_offsets_done = 1;
+    FILE *fp = pf_trace_feature_offsets_fp ? pf_trace_feature_offsets_fp : stderr;
+    fprintf(fp, "feature_index\tfeature_name\texpected_offset\tvalid_frames(code_offset)\n");
+    if (!features || !features->feature_offsets) {
+        fprintf(fp, "feature_offsets: (none)\n");
+        return;
+    }
+    for (int j = 0; j < features->number_of_features; j++) {
+        int expected_offset = features->feature_offsets[j];
+        fprintf(fp, "%d\t%s\t%d\t", j + 1, features->feature_names[j], expected_offset);
+        if (expected_offset < 0) {
+            fprintf(fp, "none\n");
+            continue;
+        }
+        int first = 1;
+        for (int i = 0; i < 4; i++) {
+            int delta = expected_offset - i;
+            if (delta < 0 || (delta % 4) != 0) {
+                continue;
+            }
+            int code_offset = delta / 4;
+            if (!first) fprintf(fp, ",");
+            fprintf(fp, "%d:%d", i, code_offset);
+            first = 0;
+        }
+        if (first) {
+            fprintf(fp, "none");
+        }
+        fprintf(fp, "\n");
+    }
+}
+
+static void pf_trace_trim_newline(char *s) {
+    if (!s) {
+        return;
+    }
+    char *p = strchr(s, '\n');
+    if (p) {
+        *p = '\0';
+    }
+}
+
+void destroy_feature_counts(void *data) {
+    feature_counts *fc = (feature_counts*)data;
+    if (fc && fc->counts) {
+        kh_destroy(u32u32, fc->counts);
+    }
+    // fc itself is pool-allocated, so we don't free it here.
+}
+
+void destroy_feature_umi_counts(void *data) {
+    feature_umi_counts *umi_counts = (feature_umi_counts*)data;
+    if (umi_counts && umi_counts->counts) {
+        kh_destroy(u32u32, umi_counts->counts);
+    }
+    // We do NOT free(umi_counts) itself, because it was allocated
+    // from our custom memory pool, which is freed all at once later.
+}
+
+/* moved to prototypes/common; provide non-static definition here for linkage */
+/* moved to barcode_match.c */
+void initialize_statistics(statistics *stats) {
+    stats->start_time = get_time_in_seconds();
+    stats->nMismatches = 0;
+    stats->recovered = 0;
+    stats->pending = 0;
+    stats->valid = 0;
+    stats->pending_recovered = 0;
+    stats->total_unmatched_features = 0;
+    stats->number_of_reads = 0;
+    stats->unmatched_list.first_entry = NULL;
+    stats->unmatched_list.last_entry = NULL;
+}
+
+void free_unmatched_barcodes_features_list(unmatched_barcodes_features_block_list *list) {
+    // The blocks are allocated from a memory pool, which is freed all at once.
+    // We don't need to free each block individually. Just reset the list pointers.
+    list->first_entry = NULL;
+    list->last_entry = NULL;
+}
+double get_time_in_seconds() {
+    struct timeval time;
+    gettimeofday(&time, NULL);
+    return time.tv_sec + (time.tv_usec / 1000000.0);
+}
+
+
+void lowerCaseDifferences(char *ref, char *query, int length){
+    for (int i=0; i<length; i++){
+        if (ref[i] != query[i]){
+            if (query[i] == '\n'){
+               //put x until the length of the query and then add a \0
+               for (int j=i; j<length; j++){
+                   query[j]='x';
+               }
+               query[length]='\0';
+               return;
+            }
+            query[i]=tolower(query[i]);
+        }
+    } 
+}   
+int compare_feature_sequences(const void *a, const void *b) {
+    const feature_sequences *fa = *(const feature_sequences **)a;
+    const feature_sequences *fb = *(const feature_sequences **)b;
+
+    // First sort by feature_index
+    if (fa->feature_index != fb->feature_index)
+        return (fa->feature_index > fb->feature_index) - (fa->feature_index < fb->feature_index);
+
+    // Then sort by hamming_distance
+    if (fa->hamming_distance != fb->hamming_distance)
+        return fa->hamming_distance - fb->hamming_distance;
+
+    // Lastly sort by counts
+    return fb->counts - fa->counts;
+}
+
+/* moved to barcode_match.c */
+
+
+/* moved to barcode_match.c */
+
+void initialize_unit_sizes(){
+    // Size of feature_counts (rounded up to alignment of uint16_t)
+    size_t feature_counts_size = sizeof(feature_counts);
+    size_t feature_counts_alignment = __alignof__(feature_counts);
+    dynamic_struct_sizes.feature_counts = (feature_counts_size + feature_counts_alignment - 1) & ~(feature_counts_alignment - 1);
+
+
+    // Size of feature_umi_counts (rounded up to alignment of uint16_t)
+    size_t feature_umi_counts_size = sizeof(feature_umi_counts);
+    size_t feature_umi_counts_alignment = __alignof__(feature_umi_counts);
+    dynamic_struct_sizes.feature_umi_counts = (feature_umi_counts_size + feature_umi_counts_alignment - 1) & ~(feature_umi_counts_alignment - 1);
+
+
+    // Size of feature_sequences (rounded up to alignment of char)
+    size_t feature_sequences_size = sizeof(feature_sequences) + maximum_feature_length + 1;
+    DEBUG_PRINT( "Feature sequences size %ld\n", feature_sequences_size);
+    size_t feature_sequences_alignment = __alignof__(char);  // Use __alignof__ instead of alignof
+    dynamic_struct_sizes.feature_sequences = (feature_sequences_size + feature_sequences_alignment - 1) & ~(feature_sequences_alignment - 1);
+    DEBUG_PRINT( "Adjusted feature sequences size %ld\n", dynamic_struct_sizes.feature_sequences);
+
+    // Size of unmatched_barcodes_features_block (rounded up to alignment of unsigned char)
+    size_t unmatched_barcodes_features_block_size = sizeof(unmatched_barcodes_features_block)
+            + sizeof(uint32_t) // For feature_index
+            + sizeof(uint16_t) // For match_position
+            + barcode_code_length 
+            + umi_code_length
+            + 1 // For number_of_closest_barcodes
+            + (max_barcode_mismatches + 1) * barcode_code_length
+            + (max_barcode_mismatches + 1);
+    size_t unmatched_barcodes_features_block_alignment = __alignof__(uint32_t);  // Use __alignof__ instead of alignof
+    dynamic_struct_sizes.unmatched_barcodes_features_block = (unmatched_barcodes_features_block_size + unmatched_barcodes_features_block_alignment - 1) & ~(unmatched_barcodes_features_block_alignment - 1);
+}
+int is_directory(const char *path) {
+    struct stat path_stat;
+    
+    // Check if stat call is successful
+    if (stat(path, &path_stat) != 0) {
+        // Error: path not found or other issue
+        perror("Error accessing path");
+        return -1;
+    }
+    
+    // Check if it is a directory
+    if (S_ISDIR(path_stat.st_mode)) {
+        return 1;
+    }
+
+    // Check if it is a file
+    if (S_ISREG(path_stat.st_mode)) {
+        return 0;
+    }
+
+    // In case it's neither a file nor a directory
+    return -1;
+}
+void read_unmatched_barcodes_features_block(unmatched_barcodes_features_block *entry_block, unmatched_barcodes_features *entry){
+    entry->next=entry_block->next;
+    unsigned char *storage = entry_block->storage;
+    memcpy(&entry->feature_index, storage, sizeof(uint32_t));
+    storage += sizeof(uint32_t);
+    memcpy(&entry->match_position, storage, sizeof(uint16_t));
+    storage += sizeof(uint16_t);
+    entry->barcode=storage;
+    entry->umi=entry->barcode+barcode_code_length;
+    entry->number_of_closest_barcodes=entry->umi[umi_code_length];
+    entry->closest_barcodes=entry->umi+umi_code_length+1;
+    entry->Qscores=entry->closest_barcodes+(barcode_code_length)*(max_barcode_mismatches+1);
+}
+int insert_feature_sequence(char *sequence, uint32_t feature_index, unsigned char hamming_distance, uint16_t match_position, data_structures *hashes, memory_pool_collection *pools){
+    khint_t k = kh_get(strptr, hashes->unique_features_match, sequence);
+    if (k != kh_end(hashes->unique_features_match)){
+        feature_sequences *entry = (feature_sequences*)kh_val(hashes->unique_features_match, k);
+        entry->counts++;
+        return 0;
+    }
+    else{
+        feature_sequences *new_entry = (feature_sequences*) allocate_memory_from_pool(pools->feature_sequences_pool);
+        strcpy(new_entry->sequence, sequence);
+        new_entry->feature_index=feature_index;
+        new_entry->hamming_distance=hamming_distance;
+        new_entry->match_position=match_position;
+        new_entry->counts=1;
+        int ret;
+        khint_t kh = kh_put(strptr, hashes->unique_features_match, new_entry->sequence, &ret);
+        kh_val(hashes->unique_features_match, kh) = new_entry;
+        return 1;
+    }   
+}
+int print_feature_sequences(feature_arrays *features, int *total_counts, char *directory, data_structures *hashes){
+    //remember that 1 is the first feature
+    memset(total_counts, 0, features->number_of_features * sizeof(int));
+    char feature_sequences_filename[FILENAME_LENGTH];
+    sprintf(feature_sequences_filename, "%s/feature_sequences.txt", directory);
+    FILE *feature_sequencesfp = fopen(feature_sequences_filename, "w");
+    if (feature_sequencesfp == NULL) {
+        fprintf(stderr, "Failed to open feature sequences file\n");
+        exit(EXIT_FAILURE);
+    }   
+    int i=0;
+    int count = kh_size(hashes->unique_features_match);
+    void **array = malloc(count * sizeof(void*));
+    if(!array){
+        fprintf(stderr, "Failed to allocate memory for array\n");
+        exit(EXIT_FAILURE);
+    }   
+    khint_t k;
+    for (k = kh_begin(hashes->unique_features_match); k != kh_end(hashes->unique_features_match); ++k) {
+        if (kh_exist(hashes->unique_features_match, k)) {
+            array[i++] = kh_val(hashes->unique_features_match, k);
+        }
+    }
+    qsort(array, count, sizeof(void*), compare_feature_sequences);
+    fprintf(feature_sequencesfp, "Feature Index Sequence Hamming Distance Counts Match Position Feature Name\n");   
+    for (i = 0; i < count; i++) {
+        char annotated_sequence[LINE_LENGTH];
+        const int mapped_index=((feature_sequences*)array[i])->feature_index-1;
+        feature_sequences *entry = (feature_sequences*)array[i];
+        total_counts[mapped_index]+=entry->counts;
+        strcpy(annotated_sequence, entry->sequence);
+        int feature_length=features->feature_lengths[entry->feature_index-1];
+        lowerCaseDifferences(features->feature_sequences[entry->feature_index-1],annotated_sequence,feature_length);
+        fprintf(feature_sequencesfp, "%7u %s %2d %7d %5u %s\n", entry->feature_index,annotated_sequence, entry->hamming_distance,entry->counts, entry->match_position, features->feature_names[entry->feature_index-1]);
+    }
+    free(array);
+    return 0;
+}
+
+
+
+unmatched_barcodes_features_block* add_unmatched_barcode_store_feature(unsigned char *barcodes, unsigned char* corrected_barcodes, char *umi, unsigned char *qscores, uint32_t feature_index, int number_of_variants, uint16_t match_position, memory_pool_collection *pools, statistics *stats){
+    unmatched_barcodes_features_block *new_entry = (unmatched_barcodes_features_block*)allocate_memory_from_pool(pools->unmatched_barcodes_features_block_pool); 
+
+    if (stats->unmatched_list.first_entry== NULL){
+        stats->unmatched_list.first_entry=new_entry;
+        stats->unmatched_list.last_entry=new_entry;
+    }
+    else{
+        stats->unmatched_list.last_entry->next=new_entry;
+        stats->unmatched_list.last_entry=new_entry;
+    }
+    unsigned char *storage = new_entry->storage; 
+    memcpy(storage, &feature_index, sizeof(uint32_t));
+    storage += sizeof(uint32_t);
+    memcpy(storage, &match_position, sizeof(uint16_t));
+    storage += sizeof(uint16_t);
+    memcpy(storage, barcodes, barcode_code_length);
+    storage+=barcode_code_length;
+    string2code(umi, umi_length, storage);
+    storage+=umi_code_length;    
+    storage[0]=number_of_variants;
+    storage++;
+    //leave empty space for the closest barcodes    
+    unsigned char* qscores_storage = storage + (barcode_code_length)*(max_barcode_mismatches+1);
+    memcpy(storage, corrected_barcodes, number_of_variants * barcode_code_length);
+    memcpy(qscores_storage, qscores, number_of_variants);
+    new_entry->next=NULL;
+    return new_entry;
+}
+
+
+unsigned char* read_whiteList(char *whitelist_filename, khash_t(u32ptr) *hash, int reverse_complement_flag){
+    FILE *whitelist_file = fopen(whitelist_filename, "r");
+    if (whitelist_file == NULL) {
+        fprintf(stderr, "Failed to open whitelist file %s\n", whitelist_filename);
+        exit(EXIT_FAILURE);
+    }
+    char line[LINE_LENGTH];
+    //just in case the file is corrupted - calculate the sizes by counting lines
+    //find the number of lines in the file by counting the number of newlines
+    char ch=0,lastChar=0;
+    size_t line_count=0;
+    //from the first line calculate the barcode length and check if the sequence is valid
+    int sequence_count=0;
+    while((ch = fgetc(whitelist_file)) != EOF) {
+        if(ch == 'A' || ch == 'C' || ch == 'G' || ch == 'T' || ch == 'N'){
+            sequence_count++;
+        }
+        else if (ch == '\n') {
+            if(sequence_count){
+                if (barcode_length==0){
+                    barcode_length=sequence_count;
+                    barcode_code_length=(barcode_length+3)/4;
+                }
+                else if (sequence_count != barcode_length){
+                    fprintf(stderr, "Error: Invalid barcode length %d\n", sequence_count);
+                    exit(EXIT_FAILURE);
+                }
+                sequence_count=0;
+                line_count++;
+            }
+        }
+        else{
+            fprintf(stderr, "Error: Invalid character %c in whitelist file\n", ch);
+            exit(EXIT_FAILURE);
+        }
+    }
+    // If the last character isn't a newline, increment the count
+    if (lastChar != '\n') {
+        line_count++;
+    }
+    
+    whitelist = malloc(line_count * barcode_code_length);
+    if (whitelist == NULL) {
+        fprintf(stderr, "Failed to allocate memory for whitelist storage\n");
+        exit(EXIT_FAILURE);
+    }
+    memset(whitelist, 0, line_count * barcode_code_length);
+    //reset the file pointer to the beginning of the file
+    fseek(whitelist_file, 0, SEEK_SET);
+    size_t nBarcodes=0;
+    //set line to zero
+    memset(line, 0, LINE_LENGTH);
+    char barcode_sequence[LINE_LENGTH];
+    while ( fgets(line, LINE_LENGTH, whitelist_file) != NULL) {
+        if (!check_sequence(line, barcode_length)){
+            fprintf(stderr, "Error: Invalid barcode sequence of expected length %d %s\n",barcode_length,line);
+            exit(EXIT_FAILURE);
+        }
+        //up to 16 characters will be stored in uint32_t
+        memset(line+barcode_length, 0, LINE_LENGTH-barcode_length);
+        if (reverse_complement_flag){
+            reverse_complement_sequence(line, barcode_sequence, barcode_length);
+        }
+        else{
+            memcpy(barcode_sequence, line, barcode_length+1);
+        }
+        int j=0;
+        int i=0;
+        const size_t offset=nBarcodes*barcode_code_length;
+        memset(whitelist+offset, 0, barcode_code_length);
+        while(j<barcode_length){
+            unsigned char char_value=seq2code[(unsigned char)barcode_sequence[j]]<<6 | seq2code[(unsigned char)barcode_sequence[j+1]]<<4 | seq2code[(unsigned char)barcode_sequence[j+2]]<<2 | seq2code[(unsigned char)barcode_sequence[j+3]];
+            whitelist[offset+i]=char_value;
+            i++;
+            j+=4;
+        }
+        uint32_t key = *(uint32_t*)(whitelist+offset);
+        int ret;
+        khint_t kh = kh_put(u32ptr, hash, key, &ret);
+        if (ret < 0) {
+            fprintf(stderr, "Error: Failed to insert barcode %s into the hash table %ld\n", line, nBarcodes);
+            exit(EXIT_FAILURE);
+        }
+        kh_val(hash, kh) = whitelist+offset;
+        nBarcodes++;
+    }
+    fprintf(stderr, "Read %ld barcodes\n", nBarcodes);
+    fclose(whitelist_file);
+    return whitelist;
+}
+/* moved to barcode_match.c */
+
+
+/* moved to barcode_match.c */
+/* moved to barcode_match.c */
+void string2all_codes(char *string, unsigned char codes[][LINE_LENGTH/2+1], int *lengths){
+    //4 codes are returned for the string to capture all the possible frames
+    char offset[3][LINE_LENGTH];
+    const int seqlength = strlen(string);
+
+    strcpy(offset[0], string+1);
+    strcpy(offset[1], string+2);
+    strcpy(offset[2], string+3);
+    lengths[0]=string2code(string, seqlength, codes[0]);
+
+    for (int i=0; i<3; i++){
+        lengths[i+1]=string2code(offset[i], seqlength-1-i, codes[i+1]);
+    }   
+}
+
+int check_barcode(char *barcode, unsigned char *code){
+    for (int i=0; i<barcode_code_length; i++){
+        string2code(barcode, barcode_length, code);
+    }
+    uint32_t key = *(uint32_t*)code;
+    khint_t k = kh_get(u32ptr, whitelist_hash, key);
+    if (k == kh_end(whitelist_hash)){
+        return 1;
+    }
+    return 0;
+}
+int find_matching_codes(unsigned char *sequence_code, unsigned char *feature_code, size_t feature_code_length, size_t feature_length){
+    unsigned char a1[feature_code_length];
+    unsigned char *b=feature_code;
+    memcpy(a1, sequence_code, feature_code_length);
+    unsigned char right_overhang=feature_length % 4;
+
+    if (right_overhang){
+        a1[feature_code_length-1] = a1[feature_code_length-1] & (0xff << (8-2*right_overhang));        
+    }
+    int length=feature_code_length;
+    unsigned char *a=a1;
+    if(length >= 8){
+        uint64_t *a64=(uint64_t*) a;
+        uint64_t *b64=(uint64_t*) b;
+        for (int i=0; i<length/8; i++){
+            if (a64[i] != b64[i]){
+                return feature_code_length+1;
+            }
+        }
+        if (length % 8 == 0){
+            return 0;
+        }
+        a+=8*(length/8);
+        b+=8*(length/8);
+        length=length%8;
+    }
+    if(length >= 4){
+        const uint32_t *a32=(uint32_t*) a;
+        const uint32_t *b32=(uint32_t*) b;
+        for (int i=0; i<length/4; i++){
+            if (a32[i] != b32[i]){
+                return feature_code_length+1;
+            }
+        }
+        if (length % 4 == 0){
+            return 0;
+        }
+        a+=4*(length/4);
+        b+=4*(length/4);
+        length=length%4;
+    }
+    if (length >= 2){
+        const uint16_t *a16=(uint16_t*) a;
+        const uint16_t *b16=(uint16_t*) b;
+        for (int i=0;i<length/2; i++){
+            if (a16[i] != b16[i]){
+                return feature_code_length+1;
+            }
+        }
+        if (length % 2 == 0){
+            return 0;
+        }
+        a+=2*(length/2);
+        b+=2*(length/2);
+        length=length%2;
+    }
+    for (int i=0;i<length; i++){
+        if (a[i] != b[i]){
+            return length+1;
+        }
+    }
+    return 0;
+}
+int fuzzy_matching_codes(unsigned char *sequence_code, unsigned char *feature_code, size_t feature_code_length, size_t feature_length, int maxHammingDistance){
+    int mismatches=0;
+    unsigned char a1[feature_code_length];
+    unsigned char *b=feature_code;
+    memcpy(a1, sequence_code, feature_code_length);
+    unsigned char right_overhang=feature_length % 4;
+    if (right_overhang){
+        a1[feature_code_length-1] = a1[feature_code_length-1] & (0xff << (8-2*right_overhang));        
+    }
+    unsigned char *a=a1;
+    int length=feature_code_length;
+    if(length >= 8){
+        const uint64_t *a64=(uint64_t*) a;
+        const uint64_t *b64=(uint64_t*) b;
+        for (int i=0; i<length/8; i++){
+            if (a64[i] != b64[i]){
+                if(mismatches==maxHammingDistance){
+                    return feature_code_length+1;
+                }
+                uint64_t diff=a64[i]^b64[i];
+                unsigned char *diff8=(unsigned char*)&diff;
+                mismatches+=diff2Hamming[diff8[0]]+diff2Hamming[diff8[1]]+diff2Hamming[diff8[2]]+diff2Hamming[diff8[3]] + diff2Hamming[diff8[4]]+diff2Hamming[diff8[5]]+diff2Hamming[diff8[6]]+diff2Hamming[diff8[7]];
+                if (mismatches > maxHammingDistance){
+                    return feature_code_length+1;
+                }
+            }
+        }
+        if (length % 8 == 0){
+            return mismatches;
+        }
+        a+=8*(length/8);
+        b+=8*(length/8);
+        length=length%8;
+    }
+    if (length >= 4 ){
+        const int last=8*(length/8);
+        const uint32_t *a32=(uint32_t*) a;
+        const uint32_t *b32=(uint32_t*) b;
+        for (int i=last/4; i<length/4; i++){
+            if (a32[i] != b32[i]){
+                if(mismatches==maxHammingDistance){
+                    return feature_code_length+1;
+                }
+                uint32_t diff=a32[i]^b32[i];
+                unsigned char *diff8=(unsigned char*)&diff;
+                mismatches+=diff2Hamming[diff8[0]]+diff2Hamming[diff8[1]]+diff2Hamming[diff8[2]]+diff2Hamming[diff8[3]];
+                if (mismatches > maxHammingDistance){
+                    return feature_code_length+1;
+                }
+            }
+        }
+        if (length % 4 == 0){
+            return mismatches;
+        }
+        a+=4*(length/4);
+        b+=4*(length/4);
+        length=length%4;
+        
+    }
+    if (length >= 2){
+        const uint16_t *a16=(uint16_t*) a;
+        const uint16_t *b16=(uint16_t*) b;
+        const int last=4*(length/4);
+        for (int i=last/2;i<length/2; i++){
+            if (a16[i] != b16[i]){
+                if(mismatches==maxHammingDistance){
+                    return feature_code_length+1;
+                }
+                uint16_t diff=a16[i]^b16[i];
+                unsigned char *diff8=(unsigned char*)&diff;
+                mismatches+=diff2Hamming[diff8[0]]+diff2Hamming[diff8[1]];  
+                if (mismatches > maxHammingDistance){
+                    return feature_code_length+1;
+                }   
+            }
+        }
+        if (length % 2 == 0){
+            return mismatches;
+        }
+        a+=2*(length/2);
+        b+=2*(length/2);
+        length=length%2;
+    }
+    const int last=2*(length/2);
+    for (int i=last;i<length; i++){
+        if (a[i] != b[i]){
+            if(mismatches==maxHammingDistance){
+                return feature_code_length+1;
+            }
+            mismatches+=diff2Hamming[a[i]^b[i]];
+            if (mismatches > maxHammingDistance){
+                return feature_code_length+1;
+            }
+        }
+    }   
+    return mismatches;
+}
+
+int find_matches_in_sub_arrays(unsigned char *sequence_code, unsigned char *feature_code, size_t sequence_code_length, size_t feature_code_length, size_t feature_length, int maxHammingDistance, int *best_offset){
+    int offset=0;
+    int length= (sequence_code_length > feature_code_length) ? sequence_code_length : feature_code_length;
+    int minHammingDistance=length+1;
+    *best_offset=0;
+    while (sequence_code_length - offset >= feature_code_length){
+        if (!maxHammingDistance){
+            if (!find_matching_codes(sequence_code+offset, feature_code, feature_code_length, feature_length)){
+                *best_offset=offset;
+                return 0;
+            }
+        }
+        else{
+            int hammingDistance=fuzzy_matching_codes(sequence_code+offset, feature_code, feature_code_length, feature_length, maxHammingDistance);
+            if (hammingDistance < minHammingDistance){
+                minHammingDistance=hammingDistance;
+                *best_offset=offset;
+            }
+            //if we have found a perfect match return immediately
+            if  (!minHammingDistance){
+                *best_offset=offset;
+                return 0;
+            }   
+        }
+        offset++;
+    }
+    return minHammingDistance;
+}
+
+static int find_matches_at_code_offset(unsigned char *sequence_code,
+                                       unsigned char *feature_code,
+                                       size_t sequence_code_length,
+                                       size_t feature_code_length,
+                                       size_t feature_length,
+                                       int maxHammingDistance,
+                                       int code_offset){
+    if (code_offset < 0) return maxHammingDistance + 1;
+    if ((size_t)code_offset + feature_code_length > sequence_code_length){
+        return maxHammingDistance + 1;
+    }
+    if (!find_matching_codes(sequence_code + code_offset, feature_code, feature_code_length, feature_length)){
+        return 0;
+    }
+    return fuzzy_matching_codes(sequence_code + code_offset, feature_code, feature_code_length, feature_length, maxHammingDistance);
+}
+
+int checkSequenceAndCorrectForN(char *line, char *corrected_lines[], char *buffer,int sequence_length, int maxN){
+    int nCount=0;
+    int indices[maxN];
+    corrected_lines[0]=line;
+    for (int i=0; i<sequence_length; i++){
+        if (line[i] == 'N'){
+            indices[nCount++]=i;
+            if (nCount >=  maxN) return 0;
+            
+        }
+        else if (line[i] != 'A' && line[i] != 'C' && line[i] != 'G' && line[i] != 'T'){
+            return 0;
+        }
+    }
+    if (!nCount){
+        return 1;
+    }
+    char line_copy[LINE_LENGTH];
+    strcpy(line_copy, line);
+    return generate_sequences(line_copy, sequence_length, indices, &buffer, 0, nCount, corrected_lines, 0);
+}
+
+char* printToBuffer(char *string, int sequence_length, char *buffer){
+    for (int i=0; i<sequence_length; i++){
+        buffer[i]=string[i];
+    }
+    buffer[sequence_length]='\0';
+    return buffer + sequence_length+1;
+}
+
+int generate_sequences(char* string, int string_length, int *indices, char **output, int index, int number_of_indices, char *output_indices[], 
+int number_of_outputs) {
+    static char bases[] = "ACGT";
+    //base case when index is equal to number of indices
+    if (index == number_of_indices) {
+        printToBuffer(string, string_length, *output);
+        output_indices[number_of_outputs++]=*output;
+        *output += string_length + 1;
+        return number_of_outputs;
+    }
+    //when the index is less than the number of indices
+    for (int i = 0; i < 4; i++) {
+        string[indices[index]] = bases[i];  
+        number_of_outputs=generate_sequences(string, string_length, indices, output, index+1, number_of_indices, output_indices, number_of_outputs);
+    }
+    return number_of_outputs;
+}
+int simple_code_search(feature_arrays *features, char *sequence){
+    const int string_length=strlen(sequence);
+    unsigned char code[string_length/2+1];
+    memset(code, 0, string_length/2+1);
+    const int sequence_code_length=string2code(sequence,string_length, code);
+    for (int i=0; i<features->number_of_features; i++){
+        const int feature_code_length=features->feature_code_lengths[i];
+        if (sequence_code_length != feature_code_length){
+            continue;
+        }
+        if (find_matching_codes(code, features->feature_codes[i], sequence_code_length, features->feature_lengths[i])== 0){
+            return i+1;
+        }
+    }
+    return 0;
+}
+int simple_hash_search(feature_arrays *features, char *sequence){
+    const int string_length=strlen(sequence);
+    const int feature_sequence_length=features->feature_lengths[0];
+    const int sequence_code_length=features->feature_code_lengths[0];
+    if (string_length < feature_sequence_length) return 0;
+    char local_line[LINE_LENGTH];
+    memcpy(local_line, sequence, feature_sequence_length);
+    local_line[feature_sequence_length]='\0';
+    unsigned char code[sequence_code_length];
+    string2code(local_line, feature_sequence_length, code);
+    
+    // Create a var_key_t key for lookup.
+    var_key_t key = {.ptr = code, .len = sequence_code_length};
+    khint_t k = kh_get(codeu32, feature_code_hash, key);
+    if (k != kh_end(feature_code_hash)){
+        return kh_val(feature_code_hash, k);
+    }
+    //check against the mismatched features
+    for (int i=0; i<features->number_of_mismatched_features; i++){
+        char *query=sequence;
+        char *feature=features->feature_sequences[features->mismatched_feature_indices[i]];
+        while (*query == *feature){
+            query++;
+            feature++;
+        }
+        if (!*feature){
+            return features->mismatched_feature_indices[i]+1;
+        }
+    }
+    return 0;
+}
+
+int simple_search(feature_arrays *features, char *line){
+    if (features->number_of_features < 150){
+        for (int i=0; i<features->number_of_features; i++){
+            char *query=line;
+            char *feature=features->feature_sequences[i];
+            //DEBUG_PRINT( "Comparing %s %s\n", query, feature);
+            while (*query == *feature){
+                query++;
+                feature++;
+            }
+            if (!*feature){
+                return i+1;
+            }
+        }
+        return 0;
+    }
+    return simple_hash_search(features, line);    
+}
+
+int simple_hamming_search(feature_arrays *features, char *line, int maxHammingDistance, int *hamming_distance){  
+    int ambiguous=0;
+    int bestFeature=0;
+    int bestHammingDistance=maxHammingDistance;
+    for (int i=0; i<features->number_of_features; i++){
+        char *query=line;
+        char *feature=features->feature_sequences[i];
+        int hammingDistance=0;
+        
+        //DEBUG_PRINT( "Comparing %s %s\n", query, feature);
+        while (*query && *feature){
+            if (*query != *feature){
+                hammingDistance++;
+                if (hammingDistance > maxHammingDistance){
+                    break;
+                }
+            }
+            query++;
+            feature++;
+        }
+        if (!*feature){
+            if (hammingDistance == bestHammingDistance){
+                if(bestFeature){
+                    ambiguous=1;
+                }
+                else{
+                    bestFeature=i+1;
+                    bestHammingDistance=hammingDistance;
+                    ambiguous=0;
+                }
+            }
+            else if (hammingDistance < bestHammingDistance){
+               bestFeature=i+1;
+               bestHammingDistance=hammingDistance;
+               ambiguous=0;
+            }
+        }
+
+    }
+    *hamming_distance=bestHammingDistance;
+    if (bestHammingDistance <= maxHammingDistance && !ambiguous){
+        return bestFeature;
+    }
+    return 0;
+}
+int find_feature_match_single(feature_arrays *features, char *lineR2, int maxHammingDistance,int *bestScore, char **matching_sequence, uint16_t *match_position){
+    // convert lineR2 to 4 codes
+    // do a quick check to see if there is a perfect match the constant feature
+    //int best_feature=simple_search_code(features, lineR2, constant_offset);
+    unsigned char codes[4][LINE_LENGTH/2+1];
+    int code_lengths[4];
+    string2all_codes(lineR2, codes, code_lengths);
+    int best_feature=0;
+    int bestHammingDistance=maxHammingDistance; 
+    int best_sequence_offset=0;
+    int ambiguous=0;
+    const int use_offsets = (use_feature_offset_array && feature_offsets && feature_offsets_count >= features->number_of_features);
+    if (use_offsets) {
+        pf_trace_feature_offsets_emit(features);
+    }
+    for (int i=0; i<4; i++){
+        for (int j=0; j<features->number_of_features; j++){
+            int code_offset=0;
+            int hammingDistance;
+            if (use_offsets) {
+                /* feature_offsets is 0-based; index j corresponds to feature index (j+1) */
+                int expected_offset = feature_offsets[j];
+                if (expected_offset < 0 || expected_offset < i) {
+                    continue;
+                }
+                int delta = expected_offset - i;
+                if (delta % 4 != 0) {
+                    continue;
+                }
+                code_offset = delta / 4;
+                hammingDistance = find_matches_at_code_offset(codes[i], features->feature_codes[j], code_lengths[i], features->feature_code_lengths[j], features->feature_lengths[j], maxHammingDistance, code_offset);
+            } else {
+                hammingDistance = find_matches_in_sub_arrays(codes[i], features->feature_codes[j], code_lengths[i], features->feature_code_lengths[j],features->feature_lengths[j], maxHammingDistance, &code_offset);
+            }
+            if (!hammingDistance){
+                *bestScore=0;
+                best_feature=j+1;
+                *matching_sequence=lineR2+i+code_offset*4;
+                *match_position = i+code_offset*4;
+                return best_feature;
+            }
+            if (hammingDistance < bestHammingDistance){
+                best_feature=j+1;
+                bestHammingDistance=hammingDistance;
+                best_sequence_offset=i+4*code_offset;
+                ambiguous=0;
+            }
+            else if (hammingDistance == bestHammingDistance){
+                if (best_feature){
+                    ambiguous=1;
+                }
+                else{
+                    best_feature=j+1;
+                    best_sequence_offset=i+4*code_offset;
+                    ambiguous=0;
+                }
+            }
+        }
+    }
+    if (bestHammingDistance <= maxHammingDistance){
+        *bestScore=bestHammingDistance;
+        *matching_sequence=lineR2+best_sequence_offset;
+        if (!ambiguous){
+            return best_feature;
+        }
+        return 0;
+    }
+    return 0;
+}
+int find_feature_match_parallel(feature_arrays *features, char *lineR2, int maxHammingDistance, int nThreads, int *bestScore, char **matching_sequence, uint16_t *match_position){
+    // convert lineR2 to 4 codes
+    // do a quick check to see if there is a perfect match the constant feature
+    //int best_feature=simple_search_code(features, lineR2, constant_offset);
+    nThreads=(nThreads > 4) ? 4 : nThreads;
+    nThreads=(nThreads < 1) ? 1 : nThreads;
+    if (nThreads==1){
+        return find_feature_match_single(features, lineR2, maxHammingDistance, bestScore, matching_sequence, match_position);
+    }
+    unsigned char codes[4][LINE_LENGTH/2+1];
+    int code_lengths[4];
+    string2all_codes(lineR2, codes, code_lengths);
+
+    int best_feature=0;
+    int bestFeatureDistance=maxHammingDistance;   
+    int bestHammingDistances[4]={maxHammingDistance,maxHammingDistance,maxHammingDistance,maxHammingDistance};
+    int best_code_offsets[4]={0,0,0,0};
+    int ambiguous[4]={0,0,0,0};
+    int best_match[4]={0,0,0,0};
+    int best_matching_indices[4]={0,0,0,0};
+
+    int exact_match_found=0;
+    const int use_offsets = (use_feature_offset_array && feature_offsets && feature_offsets_count >= features->number_of_features);
+    if (use_offsets) {
+        pf_trace_feature_offsets_emit(features);
+    }
+    #pragma omp parallel for num_threads(nThreads)
+    for (int i=0; i<4; i++){
+        //get the thread number
+        const int thread_num=omp_get_thread_num();
+        for (int j=0; j<features->number_of_features && !exact_match_found; j++){
+            int code_offset=0;
+            int hammingDistance;
+            if (use_offsets) {
+                /* feature_offsets is 0-based; index j corresponds to feature index (j+1) */
+                int expected_offset = feature_offsets[j];
+                if (expected_offset < 0 || expected_offset < i) {
+                    continue;
+                }
+                int delta = expected_offset - i;
+                if (delta % 4 != 0) {
+                    continue;
+                }
+                code_offset = delta / 4;
+                hammingDistance = find_matches_at_code_offset(codes[i], features->feature_codes[j], code_lengths[i], features->feature_code_lengths[j], features->feature_lengths[j], maxHammingDistance, code_offset);
+            } else {
+                hammingDistance = find_matches_in_sub_arrays(codes[i], features->feature_codes[j], code_lengths[i], features->feature_code_lengths[j],features->feature_lengths[j], maxHammingDistance, &code_offset);
+            }
+            if (!hammingDistance){
+                *bestScore=0;
+                exact_match_found=1;
+                best_feature=j+1;
+                *matching_sequence=lineR2+i+code_offset*4;
+                *match_position = i+code_offset*4;
+                best_matching_indices[thread_num]=i;
+                break;
+            }
+            if (hammingDistance < bestHammingDistances[thread_num]){
+                best_match[thread_num]=j+1;
+                bestHammingDistances[thread_num]=hammingDistance;
+                best_code_offsets[thread_num]=code_offset;
+                ambiguous[thread_num]=0;
+                best_matching_indices[thread_num]=i;
+            }
+            else if (hammingDistance == bestHammingDistances[thread_num]){
+                if (best_match[thread_num]){
+                    ambiguous[thread_num]=1;
+                }
+                else{
+                    ambiguous[thread_num]=0;
+                    best_match[thread_num]=j+1;
+                    best_code_offsets[thread_num]=code_offset;
+                    bestHammingDistances[thread_num]=hammingDistance;
+                    best_matching_indices[thread_num]=i;
+                }
+            }
+        }
+    }
+    if (exact_match_found){//matching_sequence is already set
+        return best_feature;
+    }
+    //find the best hamming distance - if there is a perfect match return immediately
+    char multiAmbiguous=0;
+    int best_code_offset=0;
+    int best_i=0;
+    for (int i=0; i<nThreads; i++){
+        if (!best_match[i]){
+            continue;
+        }
+        if (bestHammingDistances[i] < bestFeatureDistance){
+            bestFeatureDistance=bestHammingDistances[i];
+            best_feature=best_match[i];
+            best_code_offset=best_code_offsets[i];
+            multiAmbiguous=ambiguous[i]; //reset ambiguous flag
+            best_i=best_matching_indices[i];
+        }
+        else if (bestHammingDistances[i] == bestFeatureDistance){
+            if (best_feature ){
+                multiAmbiguous=1;
+            }
+            else{
+                best_feature=best_match[i];
+                bestFeatureDistance=bestHammingDistances[i];
+                best_code_offset=best_code_offsets[i];
+                best_i=best_matching_indices[i];
+                multiAmbiguous=ambiguous[i];
+            }
+        }
+    }
+    if (bestFeatureDistance <= maxHammingDistance){
+        *bestScore=bestFeatureDistance;
+        *matching_sequence=lineR2+best_i+best_code_offset*4;
+        *match_position=best_i+best_code_offset*4;
+        if (!multiAmbiguous){
+            return best_feature;
+        }
+        return 0;
+    }
+    return 0;
+}
+void update_feature_counts(char *barcodeString, char *umi, uint32_t feature_index, data_structures *hashes,  memory_pool_collection *pools){ 
+    unsigned char code[barcode_code_length];
+    string2code(barcodeString, barcode_length, code);
+    update_feature_counts_from_code(code, umi, feature_index, hashes, pools);
+}
+// In src/assignBarcodes.c
+
+void update_feature_counts_from_code(unsigned char *code, char *umi, uint32_t feature_index, data_structures *hashes, memory_pool_collection *pools){
+    pf_trace_counts_init_once();
+    if (pf_trace_counts_enabled) {
+        char bcode_str[4 * barcode_code_length + 1];
+        char umi_str[umi_length + 1];
+        int trace = 0;
+        code2string(code, bcode_str, barcode_code_length);
+        if (!pf_trace_counts_list) {
+            trace = 1;
+        } else if (pf_trace_list_contains(pf_trace_counts_list, bcode_str)) {
+            trace = 1;
+        }
+        if (trace) {
+            strncpy(umi_str, umi, (size_t)umi_length);
+            umi_str[umi_length] = '\0';
+            fprintf(pf_trace_counts_fp,
+                    "COUNT bc=%s umi=%s feat=%u\n",
+                    bcode_str, umi_str, feature_index);
+        }
+    }
+    update_umi_counts(code, umi, feature_index, hashes, pools);
+    uint32_t key = *(uint32_t*)code;
+    khint_t k = kh_get(u32ptr, hashes->filtered_hash, key);
+    feature_counts *s;
+
+    if (k == kh_end(hashes->filtered_hash)) {
+        // Logic for a NEW barcode
+        s = (feature_counts*) allocate_memory_from_pool(pools->feature_counts_pool);
+        if (s == NULL) return; // Error check
+
+        memcpy(s->sequence_code, code, barcode_code_length);
+
+        // NEW: Initialize the inner hash table for this barcode's counts.
+        s->counts = kh_init(u32u32);
+        if (s->counts == NULL) {
+            fprintf(stderr, "Fatal: khash creation for counts failed.\n");
+            exit(EXIT_FAILURE);
+        }
+
+        int ret;
+        khint_t kh = kh_put(u32ptr, hashes->filtered_hash, key, &ret);
+        kh_val(hashes->filtered_hash, kh) = s;
+
+        // For a new entry, the count for this feature is 1.
+        int ret2;
+        khint_t kh2 = kh_put(u32u32, s->counts, feature_index, &ret2);
+        kh_val(s->counts, kh2) = 1;
+        // The total count (at index 0) is also 1.
+        khint_t kh3 = kh_put(u32u32, s->counts, 0, &ret2);
+        kh_val(s->counts, kh3) = 1;
+
+    } else {
+        s = (feature_counts*)kh_val(hashes->filtered_hash, k);
+        // Logic for an EXISTING barcode
+        // 1. Increment the specific feature's count
+        khint_t k2 = kh_get(u32u32, s->counts, feature_index);
+        uint32_t current_count = 1;
+        if (k2 != kh_end(s->counts)) {
+            current_count = kh_val(s->counts, k2) + 1;
+            kh_val(s->counts, k2) = current_count;
+        } else {
+            int ret;
+            khint_t kh2 = kh_put(u32u32, s->counts, feature_index, &ret);
+            kh_val(s->counts, kh2) = current_count;
+        }
+
+        // 2. Increment the total count stored at key '0'
+        khint_t k3 = kh_get(u32u32, s->counts, 0);
+        uint32_t total = 1;
+        if (k3 != kh_end(s->counts)) {
+            total = kh_val(s->counts, k3) + 1;
+            kh_val(s->counts, k3) = total;
+        } else {
+            int ret;
+            khint_t kh3 = kh_put(u32u32, s->counts, 0, &ret);
+            kh_val(s->counts, kh3) = total;
+        }
+    }
+}
+void update_umi_counts(unsigned char *code, char *umi,  uint32_t feature_index,data_structures *hashes, memory_pool_collection *pools){
+    unsigned char code8[8];
+    memset(code8,0,8);
+    memcpy(code8,code,barcode_code_length);
+    string2code(umi, umi_length, code8+barcode_code_length);
+
+    uint64_t key = *(uint64_t*)code8;
+    khint_t k = kh_get(u64ptr, hashes->sequence_umi_hash, key);
+    feature_umi_counts *s;
+    
+    if (k == kh_end(hashes->sequence_umi_hash)) {
+        // Logic for a NEW barcode-UMI combination
+        s = (feature_umi_counts*) allocate_memory_from_pool(pools->feature_umi_counts_pool);
+        if (s == NULL) return; // Error check
+
+        memcpy(s->sequence_umi_code, code8, 8);
+        
+        // Create the new inner hash table for this UMI's feature counts
+        s->counts = kh_init(u32u32);
+        
+        // Set initial count for this feature to 1
+        int ret;
+        khint_t kh2 = kh_put(u32u32, s->counts, feature_index, &ret);
+        kh_val(s->counts, kh2) = 1;
+        // Mark as unvisited for the connected components algorithm by setting key '0' to 0.
+        khint_t kh3 = kh_put(u32u32, s->counts, 0, &ret);
+        kh_val(s->counts, kh3) = 0;
+
+        khint_t kh = kh_put(u64ptr, hashes->sequence_umi_hash, key, &ret);
+        kh_val(hashes->sequence_umi_hash, kh) = s;
+    } else {
+        s = (feature_umi_counts*)kh_val(hashes->sequence_umi_hash, k);
+        // Logic for an EXISTING barcode-UMI combination
+        khint_t k2 = kh_get(u32u32, s->counts, feature_index);
+        uint32_t current_count = 1;
+        if (k2 != kh_end(s->counts)) {
+            current_count = kh_val(s->counts, k2) + 1;
+            kh_val(s->counts, k2) = current_count;
+        } else {
+            int ret;
+            khint_t kh2 = kh_put(u32u32, s->counts, feature_index, &ret);
+            kh_val(s->counts, kh2) = current_count;
+        }
+    }
+}
+char check_neighbor(uint64_t code64,uint32_t *counts, data_structures *hashes){
+    khint_t k = kh_get(u64ptr, hashes->sequence_umi_hash, code64);
+    feature_umi_counts *result = (k != kh_end(hashes->sequence_umi_hash)) ? kh_val(hashes->sequence_umi_hash, k) : NULL;
+
+    if (result && result->counts) {
+        // Check if this node has been visited using key '0'
+        khint_t k2 = kh_get(u32u32, result->counts, 0);
+        uint32_t visited_flag = (k2 != kh_end(result->counts)) ? kh_val(result->counts, k2) : 0;
+        
+        if (visited_flag == 0) { // If not visited
+            // --- NEW: Iterate through the hash table to sum counts ---
+            khint_t iter;
+            for (iter = kh_begin(result->counts); iter != kh_end(result->counts); ++iter) {
+                if (kh_exist(result->counts, iter)) {
+                    uint32_t feature_index = kh_key(result->counts, iter);
+                    if (feature_index > 0) { // Don't add the visited flag to the temp counts array
+                        counts[feature_index] += kh_val(result->counts, iter);
+                    }
+                }
+            }
+
+            // Mark as visited by replacing the value at key '0' with 1
+            khint_t k3 = kh_get(u32u32, result->counts, 0);
+            if (k3 != kh_end(result->counts)) {
+                kh_val(result->counts, k3) = 1;
+            } else {
+                int ret;
+                khint_t kh3 = kh_put(u32u32, result->counts, 0, &ret);
+                kh_val(result->counts, kh3) = 1;
+            }
+            return 1; // Indicate success
+        }
+    }
+    return 0; // Not found or already visited
+}
+int find_neighbors(uint64_t key64, uint64_t *neighbors, uint32_t *counts, data_structures *hashes){
+    int neighbor_count=0;
+    uint64_t code64=key64;
+    unsigned char *code8= (unsigned char*) &code64;
+    unsigned char *code=code8+barcode_code_length;
+    for (int i=0; i<umi_code_length; i++){       
+        const unsigned char mask=code[i];
+        for (unsigned char j=1; j<4; j++){
+            code[i]=mask ^ j;
+            if (check_neighbor(code64,counts,hashes)) neighbors[neighbor_count++]=code64;
+            code[i]=mask ^ (j << 2);
+            if (check_neighbor(code64,counts,hashes)) neighbors[neighbor_count++]=code64;
+            code[i]=mask ^ (j << 4);
+            if (check_neighbor(code64,counts,hashes)) neighbors[neighbor_count++]=code64;
+            code[i]=mask;
+        }
+    }
+    return neighbor_count;
+}
+void find_deduped_counts(data_structures *hashes, khash_t(u32ptr)* barcode_to_deduped_counts, uint16_t stringency, uint16_t min_counts){
+    uint32_t clique_counts[number_of_features+1];
+    
+    // Create tracking set for barcodes that might need cleanup (empty after deduping)
+    khash_t(u32ptr) *empty_candidates = kh_init(u32ptr);
+    pf_trace_dedup_init_once();
+    pf_trace_dedup_count_init_once();
+    if (pf_trace_dedup_count_enabled) {
+        pf_trace_dedup_count1 = 0;
+        pf_trace_dedup_count2 = 0;
+    }
+    const uint32_t trace_key1 = 0xbc43274bU; /* CAGTAGCTCAATGTTA */
+    const uint32_t trace_key2 = 0xcb4b2fb9U; /* GTGCAGTTCAGTTAGT */
+
+    khint_t k;
+    for (k = kh_begin(hashes->sequence_umi_hash); k != kh_end(hashes->sequence_umi_hash); ++k) {
+        if (!kh_exist(hashes->sequence_umi_hash, k)) continue;
+        uint64_t lookup_key = kh_key(hashes->sequence_umi_hash, k);
+        feature_umi_counts *umi_counts = (feature_umi_counts*)kh_val(hashes->sequence_umi_hash, k);
+        
+        khint_t k2 = kh_get(u32u32, umi_counts->counts, 0);
+        uint32_t visited = (k2 != kh_end(umi_counts->counts)) ? kh_val(umi_counts->counts, k2) : 0;
+        if (visited) {
+            continue; // Already processed if the flag is 1
+        }
+        memset(clique_counts, 0, sizeof(clique_counts));
+        
+        find_connected_component(lookup_key, clique_counts, hashes);
+
+        uint32_t bcode_key = *(uint32_t*)umi_counts->sequence_umi_code;
+        khint_t k3 = kh_get(u32ptr, hashes->filtered_hash, bcode_key);
+        if (k3 != kh_end(hashes->filtered_hash)) {
+            feature_counts *s = (feature_counts*)kh_val(hashes->filtered_hash, k3);
+            // Get or create the inner hash table for this barcode's deduped counts
+            uint32_t s_key = *(uint32_t*)s->sequence_code;
+            khint_t k4 = kh_get(u32ptr, barcode_to_deduped_counts, s_key);
+            khash_t(u32u32)* temp_deduped_hash;
+            if (k4 == kh_end(barcode_to_deduped_counts)) {
+                temp_deduped_hash = kh_init(u32u32);
+                int ret;
+                khint_t kh = kh_put(u32ptr, barcode_to_deduped_counts, s_key, &ret);
+                kh_val(barcode_to_deduped_counts, kh) = temp_deduped_hash;
+                if (pf_trace_dedup_count_enabled) {
+                    if (s_key == trace_key1) {
+                        pf_trace_dedup_count1++;
+                    } else if (s_key == trace_key2) {
+                        pf_trace_dedup_count2++;
+                    }
+                }
+            } else {
+                temp_deduped_hash = (khash_t(u32u32)*)kh_val(barcode_to_deduped_counts, k4);
+            }
+            int trace = 0;
+            char bcode_str[4 * barcode_code_length + 1];
+            char umi_str[4 * umi_code_length + 1];
+            if (pf_trace_dedup_enabled) {
+                unsigned char *code8 = (unsigned char *)&lookup_key;
+                code2string(code8, bcode_str, barcode_code_length);
+                code2string(code8 + barcode_code_length, umi_str, umi_code_length);
+                if (pf_trace_dedup_count_enabled) {
+                    if (pf_trace_dedup_count_bc1[0] &&
+                        strcmp(bcode_str, pf_trace_dedup_count_bc1) == 0) {
+                        pf_trace_dedup_count1++;
+                    } else if (pf_trace_dedup_count_bc2[0] &&
+                               strcmp(bcode_str, pf_trace_dedup_count_bc2) == 0) {
+                        pf_trace_dedup_count2++;
+                    }
+                }
+                if (!pf_trace_dedup_list ||
+                    pf_trace_list_contains(pf_trace_dedup_list, bcode_str)) {
+                    trace = 1;
+                    fprintf(pf_trace_dedup_fp,
+                            "DEDUP clique bc=%s umi=%s\n",
+                            bcode_str, umi_str);
+                    fprintf(pf_trace_dedup_fp, "  counts:");
+                    for (int i = 1; i < number_of_features + 1; i++) {
+                        if (clique_counts[i]) {
+                            fprintf(pf_trace_dedup_fp, " %d:%u", i, clique_counts[i]);
+                        }
+                    }
+                    fprintf(pf_trace_dedup_fp, "\n");
+                }
+            }
+            if (trace) {
+                pf_trace_dedup_active = 1;
+                pf_trace_dedup_barcode = bcode_str;
+                pf_trace_dedup_umi = umi_str;
+            } else {
+                pf_trace_dedup_active = 0;
+                pf_trace_dedup_barcode = NULL;
+                pf_trace_dedup_umi = NULL;
+            }
+            pf_current_dedup_barcode_key = s_key;
+            add_deduped_count(temp_deduped_hash, clique_counts, stringency, min_counts);
+            pf_current_dedup_barcode_key = 0;
+            if (trace) {
+                pf_trace_dedup_active = 0;
+                pf_trace_dedup_barcode = NULL;
+                pf_trace_dedup_umi = NULL;
+            }
+            
+            // If still empty after deduping, remember this barcode for cleanup
+            if (kh_size(temp_deduped_hash) == 0) {
+                int ret;
+                khint_t kh2 = kh_put(u32ptr, empty_candidates, s_key, &ret);
+                kh_val(empty_candidates, kh2) = NULL;
+            }
+        }
+    }
+    
+    // --- FINAL CLEAN-UP SWEEP ---
+    // Remove barcodes that are truly empty after all deduping is complete
+    if (pf_trace_dedup_count_enabled) {
+        fprintf(pf_trace_dedup_fp,
+                "DEDUP_KEY_COUNTS bc1=%s count=%llu bc2=%s count=%llu\n",
+                pf_trace_dedup_count_bc1[0] ? pf_trace_dedup_count_bc1 : "-",
+                pf_trace_dedup_count1,
+                pf_trace_dedup_count_bc2[0] ? pf_trace_dedup_count_bc2 : "-",
+                pf_trace_dedup_count2);
+    }
+    for (k = kh_begin(empty_candidates); k != kh_end(empty_candidates); ++k) {
+        if (!kh_exist(empty_candidates, k)) continue;
+        uint32_t bcode_key = kh_key(empty_candidates, k);
+        khint_t k5 = kh_get(u32ptr, barcode_to_deduped_counts, bcode_key);
+        if (k5 != kh_end(barcode_to_deduped_counts)) {
+            khash_t(u32u32)* dedup_hash = (khash_t(u32u32)*)kh_val(barcode_to_deduped_counts, k5);
+            if (dedup_hash && kh_size(dedup_hash) == 0) {
+                /* Remove from main table and free inner hash */
+                kh_del(u32ptr, barcode_to_deduped_counts, k5);
+                kh_destroy(u32u32, dedup_hash);
+            }
+        }
+    }
+    kh_destroy(u32ptr, empty_candidates);
+}
+
+void find_connected_component(uint64_t start_key, uint32_t *counts, data_structures *hashes){
+    uint64_t neighbors[umi_length*3];
+    clear_queue(hashes->neighbors_queue);
+    enqueue(hashes->neighbors_queue, start_key);
+    while (!is_empty(hashes->neighbors_queue)) {
+        uint64_t code = dequeue(hashes->neighbors_queue);
+        check_neighbor(code,counts,hashes);
+        int neighbor_count=find_neighbors(code,neighbors, counts, hashes);
+        //if (neighbor_count) DEBUG_PRINT( "Found %d neighbors\n",neighbor_count);
+        for (int i = 0; i < neighbor_count; i++) {
+            enqueue(hashes->neighbors_queue,neighbors[i]);
+        }
+    }
+}
+/**
+ * @brief Calculates the winning feature based on UMI clique counts and stringency,
+ * and updates a temporary hash table with the deduplicated count.
+ *
+ * @param temp_deduped_hash A temporary hash table mapping a feature_index to its deduped count.
+ * @param clique_counts An array of raw UMI counts for the connected component.
+ * @param stringency The user-defined stringency for deduplication.
+ * @param min_counts The minimum count threshold.
+ */
+ void add_deduped_count(khash_t(u32u32)* temp_deduped_hash, uint32_t *clique_counts, uint16_t stringency, uint16_t min_counts) {
+    uint32_t winning_feature_index = 0;
+    uint32_t trace_total_counts = 0;
+    uint32_t trace_max_counts = 0;
+    unsigned char trace_unique = 0;
+
+    // --- STRINGENCY LOGIC (Restored from original code) ---
+    if (!stringency) {
+        // RNA-seq strategy: any feature with enough counts gets a single deduped count.
+        // This is a special case as it can increment multiple features.
+        for (int i = 1; i < number_of_features + 1; i++) {
+            if (clique_counts[i] > min_counts) {
+                khint_t k = kh_get(u32u32, temp_deduped_hash, i);
+                uint32_t count = 1;
+                if (k != kh_end(temp_deduped_hash)) {
+                    count = kh_val(temp_deduped_hash, k) + 1;
+                    kh_val(temp_deduped_hash, k) = count;
+                } else {
+                    int ret;
+                    khint_t kh = kh_put(u32u32, temp_deduped_hash, i, &ret);
+                    kh_val(temp_deduped_hash, kh) = count;
+                }
+            }
+        }
+        if (pf_trace_dedup_active) {
+            uint32_t total_counts = 0;
+            for (int i = 1; i < number_of_features + 1; i++) {
+                total_counts += clique_counts[i];
+            }
+            fprintf(pf_trace_dedup_fp,
+                    "DEDUP winner bc=%s umi=%s winner=multi total=%u stringency=%u min_counts=%u\n",
+                    pf_trace_dedup_barcode ? pf_trace_dedup_barcode : "-",
+                    pf_trace_dedup_umi ? pf_trace_dedup_umi : "-",
+                    total_counts, stringency, min_counts);
+        }
+        return; // Return early as the logic is different
+    }
+
+    if (stringency >= 1000) {
+        // Highest stringency: only one feature can have counts.
+        uint32_t feature_index = 0;
+        uint32_t total_counts = 0;
+        for (int i = 1; i < number_of_features + 1; i++) {
+            if (clique_counts[i]) {
+                if (feature_index) { // If a feature has already been found, there's more than one.
+                    winning_feature_index = 0; // Invalidate winner
+                    break;
+                }
+                feature_index = i;
+                total_counts = clique_counts[i];
+            }
+        }
+        if (feature_index && total_counts > min_counts) {
+            winning_feature_index = feature_index;
+        }
+        trace_total_counts = total_counts;
+        trace_max_counts = total_counts;
+        trace_unique = (winning_feature_index != 0);
+    } else {
+        // Mid-stringency: find the feature with the highest, unique count.
+        uint32_t feature_index = 0;
+        uint32_t max_counts = 0;
+        uint32_t total_counts = 0;
+        unsigned char unique = 0;
+        for (int i = 1; i < number_of_features + 1; i++) {
+            if (clique_counts[i]) {
+                total_counts += clique_counts[i];
+                if (clique_counts[i] > max_counts) {
+                    max_counts = clique_counts[i];
+                    feature_index = i;
+                    unique = 1;
+                } else if (clique_counts[i] == max_counts) {
+                    unique = 0;
+                }
+            }
+        }
+        if (unique && (double)max_counts > total_counts * stringency / 1000.0 && total_counts > min_counts) {
+            winning_feature_index = feature_index;
+        }
+        trace_total_counts = total_counts;
+        trace_max_counts = max_counts;
+        trace_unique = unique;
+    }
+
+    // --- If a single winner was found, increment its count in the temporary hash table ---
+    if (pf_trace_dedup_active) {
+        fprintf(pf_trace_dedup_fp,
+                "DEDUP winner bc=%s umi=%s winner=%u total=%u max=%u unique=%u stringency=%u min_counts=%u\n",
+                pf_trace_dedup_barcode ? pf_trace_dedup_barcode : "-",
+                pf_trace_dedup_umi ? pf_trace_dedup_umi : "-",
+                winning_feature_index,
+                trace_total_counts, trace_max_counts, trace_unique,
+                stringency, min_counts);
+    }
+    if (winning_feature_index > 0) {
+        khint_t k = kh_get(u32u32, temp_deduped_hash, winning_feature_index);
+        uint32_t current_deduped_count = 1;
+        if (k != kh_end(temp_deduped_hash)) {
+            current_deduped_count = kh_val(temp_deduped_hash, k) + 1;
+            kh_val(temp_deduped_hash, k) = current_deduped_count;
+        } else {
+            int ret;
+            khint_t kh = kh_put(u32u32, temp_deduped_hash, winning_feature_index, &ret);
+            kh_val(temp_deduped_hash, kh) = current_deduped_count;
+        }
+    }
+}
+
+static void pf_trace_validate_keys(data_structures *hashes, khash_t(u32ptr)* barcode_to_deduped_hash) {
+    pf_trace_keys_init_once();
+    if (!pf_trace_keys_enabled || !hashes || !hashes->filtered_hash || !barcode_to_deduped_hash) {
+        return;
+    }
+
+    if (barcode_code_length != (int)sizeof(uint32_t)) {
+        fprintf(pf_trace_keys_fp,
+                "KEY_WARN barcode_code_length=%d (expected %zu); key checks may be incomplete\n",
+                barcode_code_length, sizeof(uint32_t));
+    }
+
+    size_t filtered_total = 0;
+    size_t filtered_mismatch = 0;
+    khint_t k;
+    for (k = kh_begin(hashes->filtered_hash); k != kh_end(hashes->filtered_hash); ++k) {
+        if (!kh_exist(hashes->filtered_hash, k)) continue;
+        filtered_total++;
+        uint32_t key = kh_key(hashes->filtered_hash, k);
+        feature_counts *entry = (feature_counts*)kh_val(hashes->filtered_hash, k);
+        uint32_t derived = *(uint32_t*)entry->sequence_code;
+        if (key != derived) {
+            filtered_mismatch++;
+            if (barcode_code_length == (int)sizeof(uint32_t)) {
+                unsigned char key_code[sizeof(uint32_t)];
+                char key_barcode[barcode_length + 1];
+                memcpy(key_code, &key, sizeof(uint32_t));
+                code2string(key_code, key_barcode, barcode_code_length);
+                fprintf(pf_trace_keys_fp,
+                        "KEY_MISMATCH filtered key=0x%08x derived=0x%08x bc=%s\n",
+                        key, derived, key_barcode);
+            } else {
+                fprintf(pf_trace_keys_fp,
+                        "KEY_MISMATCH filtered key=0x%08x derived=0x%08x\n",
+                        key, derived);
+            }
+        }
+        if (pf_trace_keys_list) {
+            char barcode[barcode_length + 1];
+            code2string(entry->sequence_code, barcode, barcode_code_length);
+            if (translate_NXT) translate_nxt_inplace(barcode, barcode_length);
+            if (pf_trace_list_contains(pf_trace_keys_list, barcode)) {
+                fprintf(pf_trace_keys_fp,
+                        "KEY_OK filtered bc=%s key=0x%08x derived=0x%08x\n",
+                        barcode, key, derived);
+            }
+        }
+    }
+
+    size_t dedup_total = 0;
+    size_t dedup_missing = 0;
+    size_t dedup_mismatch = 0;
+    for (k = kh_begin(barcode_to_deduped_hash); k != kh_end(barcode_to_deduped_hash); ++k) {
+        if (!kh_exist(barcode_to_deduped_hash, k)) continue;
+        dedup_total++;
+        uint32_t key = kh_key(barcode_to_deduped_hash, k);
+        khint_t kf = kh_get(u32ptr, hashes->filtered_hash, key);
+        if (kf == kh_end(hashes->filtered_hash)) {
+            dedup_missing++;
+            fprintf(pf_trace_keys_fp, "KEY_MISSING dedup key=0x%08x\n", key);
+            continue;
+        }
+        feature_counts *entry = (feature_counts*)kh_val(hashes->filtered_hash, kf);
+        uint32_t derived = *(uint32_t*)entry->sequence_code;
+        if (derived != key) {
+            dedup_mismatch++;
+            fprintf(pf_trace_keys_fp,
+                    "KEY_MISMATCH dedup key=0x%08x derived=0x%08x\n",
+                    key, derived);
+        }
+        if (pf_trace_keys_list || pf_trace_keys_feature > 0) {
+            char barcode[barcode_length + 1];
+            code2string(entry->sequence_code, barcode, barcode_code_length);
+            if (translate_NXT) translate_nxt_inplace(barcode, barcode_length);
+            if (pf_trace_keys_list &&
+                pf_trace_list_contains(pf_trace_keys_list, barcode)) {
+                fprintf(pf_trace_keys_fp,
+                        "KEY_DEDUP bc=%s key=0x%08x derived=0x%08x\n",
+                        barcode, key, derived);
+            }
+            if (pf_trace_keys_feature > 0) {
+                khash_t(u32u32) *deduped_hash =
+                    (khash_t(u32u32)*)kh_val(barcode_to_deduped_hash, k);
+                khint_t kfeat = kh_get(u32u32, deduped_hash,
+                                       (uint32_t)pf_trace_keys_feature);
+                if (kfeat != kh_end(deduped_hash)) {
+                    fprintf(pf_trace_keys_fp,
+                            "KEY_FEATURE bc=%s key=0x%08x feature=%d count=%u\n",
+                            barcode, key, pf_trace_keys_feature,
+                            kh_val(deduped_hash, kfeat));
+                }
+            }
+        }
+    }
+
+    fprintf(pf_trace_keys_fp,
+            "KEY_SUMMARY filtered_total=%zu filtered_mismatch=%zu dedup_total=%zu dedup_missing=%zu dedup_mismatch=%zu\n",
+            filtered_total, filtered_mismatch, dedup_total, dedup_missing, dedup_mismatch);
+}
+
+/* moved to barcode_match.c */
+
+/* Increment (and lazily allocate/resize) the histogram for one feature. */
+static void update_feature_hist(vec_u32_t **feature_hist,
+                                int feature_idx, int count)
+{
+    vec_u32_t *h = feature_hist[feature_idx];
+    if (!h)
+        h = feature_hist[feature_idx] = vec_u32_init();
+
+    if (vec_u32_size(h) <= (size_t)count)
+        vec_u32_set_size(h, count + 1);
+
+    vec_u32_inc(h, count);
+}
+
+/* Build the cumulative histogram in slot 0 once all features are done. */
+static void build_cumulative_feature_hist(feature_arrays *features,
+                                          vec_u32_t **feature_hist)
+{
+    feature_hist[0] = vec_u32_init();
+    if (!feature_hist[0])
+        return;
+
+    /* find maximum length */
+    size_t max_len = 0;
+    for (int i = 1; i <= features->number_of_features; ++i)
+        if (feature_hist[i] && vec_u32_size(feature_hist[i]) > max_len)
+            max_len = vec_u32_size(feature_hist[i]);
+
+    vec_u32_set_size(feature_hist[0], max_len);
+    for (size_t j = 0; j < max_len; ++j)
+        vec_u32_set(feature_hist[0], j, 0);
+
+    /* accumulate */
+    for (int i = 1; i <= features->number_of_features; ++i) {
+        vec_u32_t *h = feature_hist[i];
+        if (!h) continue;
+        for (size_t j = 0; j < vec_u32_size(h); ++j)
+            vec_u32_set(feature_hist[0], j, vec_u32_get(feature_hist[0], j) + vec_u32_get(h, j));
+    }
+}
+
+void printFeatureCounts(feature_arrays *features, int *deduped_counts, int *barcoded_counts, vec_u32_t **feature_hist, char *directory, data_structures *hashes, statistics *stats, khash_t(u32ptr)* barcode_to_deduped_hash, khash_t(strptr)* filtered_barcodes_hash){
+    int total_deduped_counts = 0;
+    int total_raw_counts = 0;
+    char barcodes_file[FILENAME_LENGTH];
+    char stats_file[FILENAME_LENGTH];
+
+    memset(deduped_counts, 0, (features->number_of_features + 1) * sizeof(int));
+    memset(barcoded_counts, 0, (features->number_of_features + 1) * sizeof(int));
+
+
+    char output_directory[FILENAME_LENGTH];
+    strcpy(output_directory, directory);
+    if (filtered_barcodes_hash) {
+        sprintf(output_directory, "%s/filtered", directory);
+    }
+
+    mkdir_p(output_directory);
+    sprintf(barcodes_file, "%s/barcodes.txt", output_directory);
+    sprintf(stats_file, "%s/stats.txt", output_directory);
+    FILE *barcodesfp = fopen(barcodes_file, "w");
+    if (barcodesfp == NULL) {
+        fprintf(stderr, "Error opening barcodes file %s\n", barcodes_file);
+        exit(1);
+    }
+
+    char matrix_file[LINE_LENGTH];
+    sprintf(matrix_file, "%s/matrix.mtx", output_directory);
+    FILE *matrixfp = fopen(matrix_file, "w");
+    if (matrixfp == NULL) {
+        fprintf(stderr, "Error opening matrix file %s\n", matrix_file);
+        exit(1);
+    }
+    
+    // --- Step 2: Calculate stats and write the Matrix Market header ---
+    size_t number_of_features_seen = 0;
+    size_t number_of_barcode_entries = 0;
+
+    vec_u32_t *feature_richness_hist = vec_u32_init();
+
+    khint_t k;
+    for (k = kh_begin(barcode_to_deduped_hash); k != kh_end(barcode_to_deduped_hash); ++k) {
+        if (!kh_exist(barcode_to_deduped_hash, k)) continue;
+        uint32_t bcode_key = kh_key(barcode_to_deduped_hash, k);
+        void *value = kh_val(barcode_to_deduped_hash, k);
+        
+        if (filtered_barcodes_hash) {
+            char barcode[barcode_length + 1];
+            code2string((unsigned char *)&bcode_key, barcode, barcode_code_length);
+            if (translate_NXT) translate_nxt_inplace(barcode, barcode_length);
+            khint_t kf = kh_get(strptr, filtered_barcodes_hash, barcode);
+            if (kf == kh_end(filtered_barcodes_hash)) {
+                continue;
+            }
+        }
+        number_of_barcode_entries++;
+        khash_t(u32u32) *deduped_hash = (khash_t(u32u32)*)value;
+        size_t n_features_in_barcode = kh_size(deduped_hash);
+        number_of_features_seen += n_features_in_barcode;
+
+        if (feature_richness_hist && n_features_in_barcode > 0) {
+            if (vec_u32_size(feature_richness_hist) <= n_features_in_barcode) {
+                vec_u32_set_size(feature_richness_hist, n_features_in_barcode + 1);
+            }
+            vec_u32_inc(feature_richness_hist, n_features_in_barcode);
+        }
+    }
+    
+    fprintf(matrixfp, "%%%%MatrixMarket matrix coordinate real general\n");
+    fprintf(matrixfp, "%%metadata_json: {\"software_version\": \"assignBarcodes-0.1\", \"format_version\": 1}\n");
+    fprintf(matrixfp, "%d %ld %ld\n", features->number_of_features, number_of_barcode_entries, number_of_features_seen);
+    
+    
+    // --- Step 2.5: Calculate co-expression histograms for richness heat-map ---
+    // A more direct approach to building the histograms.
+
+    // Step 1: Find max co-occurrence and build an inverted index (feature -> barcodes).
+    khash_t(u32ptr) *feature_to_barcodes_hash = kh_init(u32ptr);
+    int global_max_cooccur = 0;
+
+    int skipped_barcodes = 0;
+    int processed_barcodes = 0;
+    for (k = kh_begin(barcode_to_deduped_hash); k != kh_end(barcode_to_deduped_hash); ++k) {
+        if (!kh_exist(barcode_to_deduped_hash, k)) continue;
+        uint32_t barcode_key = kh_key(barcode_to_deduped_hash, k);
+        void *deduped_hash_value = kh_val(barcode_to_deduped_hash, k);
+        
+        char barcode[barcode_length + 1];
+        code2string((unsigned char *)&barcode_key, barcode, barcode_code_length);
+        if (translate_NXT) translate_nxt_inplace(barcode, barcode_length);
+        if (filtered_barcodes_hash) {
+            khint_t kf = kh_get(strptr, filtered_barcodes_hash, barcode);
+            if (kf == kh_end(filtered_barcodes_hash)) {
+                skipped_barcodes++;
+                continue;
+            }
+        }
+        processed_barcodes++;
+        khash_t(u32u32) *features_in_barcode = (khash_t(u32u32)*)deduped_hash_value;
+        size_t n_feats_in_bc = kh_size(features_in_barcode);
+        if (n_feats_in_bc == 0) continue;
+        if (n_feats_in_bc > global_max_cooccur) {
+            global_max_cooccur = n_feats_in_bc;
+        }
+
+        khint_t kf;
+        for (kf = kh_begin(features_in_barcode); kf != kh_end(features_in_barcode); ++kf) {
+            if (!kh_exist(features_in_barcode, kf)) continue;
+            uint32_t f_idx = kh_key(features_in_barcode, kf);
+            if (f_idx <= 0) continue;
+
+            khint_t kfb = kh_get(u32ptr, feature_to_barcodes_hash, f_idx);
+            barcode_list_t *barcodes_for_feature;
+            if (kfb == kh_end(feature_to_barcodes_hash)) {
+                barcodes_for_feature = barcode_list_init();
+                int ret;
+                khint_t kh = kh_put(u32ptr, feature_to_barcodes_hash, f_idx, &ret);
+                kh_val(feature_to_barcodes_hash, kh) = barcodes_for_feature;
+            } else {
+                barcodes_for_feature = (barcode_list_t*)kh_val(feature_to_barcodes_hash, kfb);
+            }
+            barcode_list_add(barcodes_for_feature, barcode_key);
+        }
+    }
+    fprintf(stderr, "Skipped barcodes: %d\n", skipped_barcodes);
+    fprintf(stderr, "Processed barcodes: %d\n", processed_barcodes);
+    // Step 2: Allocate and zero the dense histogram matrix.
+    int **coexpression_histograms =
+        malloc((features->number_of_features + 1) * sizeof(int *));
+    for (int i = 0; i <= features->number_of_features; ++i) {
+        coexpression_histograms[i] =
+                calloc(global_max_cooccur + 1, sizeof(int));
+    }
+
+    // Step 3: Populate the histogram matrix using the inverted index.
+    for (k = kh_begin(feature_to_barcodes_hash); k != kh_end(feature_to_barcodes_hash); ++k) {
+        if (!kh_exist(feature_to_barcodes_hash, k)) continue;
+        uint32_t f_idx = kh_key(feature_to_barcodes_hash, k);
+        barcode_list_t *barcodes = (barcode_list_t*)kh_val(feature_to_barcodes_hash, k);
+
+        for (size_t i = 0; i < barcodes->n; ++i) {
+            uint32_t bcode_key = barcodes->keys[i];
+            khint_t kb = kh_get(u32ptr, barcode_to_deduped_hash, bcode_key);
+            if (kb == kh_end(barcode_to_deduped_hash)) continue;
+            khash_t(u32u32) *deduped_hash = (khash_t(u32u32)*)kh_val(barcode_to_deduped_hash, kb);
+            int num_feats = kh_size(deduped_hash);
+
+            if (num_feats > 0) {
+                coexpression_histograms[f_idx][num_feats]++;
+            }
+        }
+    }
+
+    // Step 4: Set column 0 to the max co-occurrence for each feature.
+    for (int i = 1; i <= features->number_of_features; ++i) {
+        int row_max = 0;
+        for (int j = global_max_cooccur; j >= 1; --j) {
+            if (coexpression_histograms[i][j] > 0) {
+                row_max = j;
+                break;
+            }
+        }
+        coexpression_histograms[i][0] = row_max;
+    }
+
+    // --- Clean up ---
+    for (k = kh_begin(feature_to_barcodes_hash); k != kh_end(feature_to_barcodes_hash); ++k) {
+        if (kh_exist(feature_to_barcodes_hash, k)) {
+            barcode_list_destroy((barcode_list_t*)kh_val(feature_to_barcodes_hash, k));
+        }
+    }
+    kh_destroy(u32ptr, feature_to_barcodes_hash);
+
+    generate_heatmap(output_directory, features, coexpression_histograms);
+
+    for (int i = 0; i <= features->number_of_features; ++i)
+        free(coexpression_histograms[i]);
+    free(coexpression_histograms);
+    
+    // --- Step 3: Iterate through all barcodes to write files and calculate final stats ---
+    int total_barcodes=0;
+    int total_excluded_barcodes=0;
+    for (k = kh_begin(hashes->filtered_hash); k != kh_end(hashes->filtered_hash); ++k) {
+        if (!kh_exist(hashes->filtered_hash, k)) continue;
+        feature_counts *entry = (feature_counts*)kh_val(hashes->filtered_hash, k);
+        
+        khint_t k0 = kh_get(u32u32, entry->counts, 0);
+        uint32_t total = (k0 != kh_end(entry->counts)) ? kh_val(entry->counts, k0) : 0;
+        total_raw_counts += total;
+        
+        // --- Populate total_barcoded_counts (raw counts) ---
+        khint_t kraw;
+        for (kraw = kh_begin(entry->counts); kraw != kh_end(entry->counts); ++kraw) {
+            if (!kh_exist(entry->counts, kraw)) continue;
+            uint32_t feature_index = kh_key(entry->counts, kraw);
+            if (feature_index > 0) { // Skip the total stored at index 0
+                barcoded_counts[feature_index - 1] += kh_val(entry->counts, kraw);
+            }
+        }
+
+        // Check if this barcode has any deduplicated counts
+        uint32_t bcode_key = *(uint32_t*)entry->sequence_code;
+        khint_t kdedup = kh_get(u32ptr, barcode_to_deduped_hash, bcode_key);
+        if (kdedup != kh_end(barcode_to_deduped_hash)) {
+            khash_t(u32u32)* deduped_hash = (khash_t(u32u32)*)kh_val(barcode_to_deduped_hash, kdedup);
+            if (deduped_hash && kh_size(deduped_hash) > 0) {
+                char barcode[barcode_length + 1];
+                code2string(entry->sequence_code, barcode, barcode_code_length);
+                if (translate_NXT) translate_nxt_inplace(barcode, barcode_length);
+                if (filtered_barcodes_hash) {
+                    khint_t kf = kh_get(strptr, filtered_barcodes_hash, barcode);
+                    if (kf == kh_end(filtered_barcodes_hash)) {
+                        total_excluded_barcodes++;
+                        continue;
+                    }
+                }
+                
+                fprintf(barcodesfp, "%s\n", barcode);
+                // Write its matrix entries
+                khint_t kdedup_iter;
+                for (kdedup_iter = kh_begin(deduped_hash); kdedup_iter != kh_end(deduped_hash); ++kdedup_iter) {
+                    if (!kh_exist(deduped_hash, kdedup_iter)) continue;
+                    uint32_t f_idx = kh_key(deduped_hash, kdedup_iter);
+                    uint32_t deduped_count = kh_val(deduped_hash, kdedup_iter);
+
+                    deduped_counts[f_idx - 1] += deduped_count;
+                    int c = deduped_count;
+
+                    update_feature_hist(feature_hist, f_idx, c);
+                    fprintf(matrixfp, "%d %d %d\n", f_idx, total_barcodes + 1, deduped_count);
+                    total_deduped_counts += deduped_count;
+                }
+                total_barcodes++;
+            }
+        }
+    }
+    
+    // --- Step 3.5: Create cumulative histogram at index 0 ---
+    build_cumulative_feature_hist(features, feature_hist);
+    
+    
+    
+    // --- Step 4: Final Cleanup ---
+    // The barcode_to_deduped_hash is managed by the caller (finalize_processing)
+    
+    fclose(barcodesfp);
+    fclose(matrixfp);
+    fprintf(stderr,"closing matrix file\n");
+    fprintf(stderr,"writing stats file\n");
+    FILE *statsfp = fopen(stats_file, "w");
+    fprintf (stderr, "Total feature counts %d\n", total_raw_counts);
+    fprintf (stderr, "Total deduped feature counts %d\n", total_deduped_counts);
+    fprintf (stderr, "Total barcodes %d\n", total_barcodes);
+    fprintf (stderr, "Total excluded barcodes %d\n", total_excluded_barcodes);
+    fprintf (stderr, "Total unique barcode UMIs %d\n", kh_size(hashes->sequence_umi_hash));
+    fprintf (stderr, "Total whitelisted barcodes %d\n", kh_size(hashes->filtered_hash));
+    fprintf (stderr,"Total feature counts %d total_unmatched_reads %ld\n", total_raw_counts, stats->total_unmatched_features);
+    fprintf (stderr, "Percentage reads assigned to barcode %.4f\n", 100.0*(total_raw_counts/(double) (total_raw_counts+stats->total_unmatched_features)));
+    fprintf (statsfp, "Total feature counts %d\n", total_raw_counts);
+    fprintf (statsfp, "Total deduped feature counts %d\n", total_deduped_counts);
+    fprintf (statsfp, "Total barcodes %d\n", total_barcodes);
+    fprintf (statsfp, "Total excluded barcodes %d\n", total_excluded_barcodes);
+    fprintf (statsfp, "Total unique barcode UMIs %d\n", kh_size(hashes->sequence_umi_hash));
+    fprintf (statsfp, "Total whitelisted barcodes %d\n", kh_size(hashes->filtered_hash));
+    fprintf (statsfp,"Total_unmatched_reads %ld\n", stats->total_unmatched_features);
+    fprintf (statsfp, "Percentage reads assigned to barcode %.4f\n", 100.0*(total_raw_counts/(double) (total_raw_counts+stats->total_unmatched_features)));
+    fclose(statsfp);
+
+    if (feature_richness_hist) {
+        plot_simple_histogram(output_directory, "feature_richness_histogram.html", "Feature Richness per Barcode", "Number of Distinct Features", "Frequency (Barcodes)", feature_richness_hist);
+        vec_u32_destroy(feature_richness_hist);
+    }
+    if (feature_hist[0]) {
+        plot_simple_histogram(output_directory, "feature_multiplicity_histogram.html", "Feature Multiplicity", "Deduplicated UMI Count", "Frequency", feature_hist[0]);
+    }
+        // After writing the text files, generate the heatmaps
+    
+    // --- Convert feature_hist (vec_u32_t**) to a dense matrix for the heatmap ---
+    int max_len = 0;
+    for (int i = 1; i <= features->number_of_features; i++) {
+        if (feature_hist[i] && vec_u32_size(feature_hist[i]) > max_len) {
+            max_len = vec_u32_size(feature_hist[i]);
+        }
+    }
+    
+    int max_deduped_count = (max_len > 0) ? max_len - 1 : 0;
+    
+    int **deduped_histograms =
+        malloc((features->number_of_features + 1) * sizeof(int *));
+    for (int i = 0; i <= features->number_of_features; ++i) {
+        deduped_histograms[i] =
+            calloc(max_deduped_count + 1, sizeof(int));
+    }
+
+    for (int i = 1; i <= features->number_of_features; ++i) {
+        if (feature_hist[i]) {
+            for (size_t j = 0; j < vec_u32_size(feature_hist[i]); j++) {
+                deduped_histograms[i][j] = vec_u32_get(feature_hist[i], j);
+            }
+        }
+    }
+
+    // Now, use the populated deduped_histograms to get total counts and check the condition.
+    int num_features_for_deduped_heatmap = 0;
+    int temp_total_deduped_counts[features->number_of_features];
+    for (int i = 0; i < features->number_of_features; ++i) {
+        long feature_total = 0;
+        // The histogram at index j stores the frequency of count j.
+        // Sum j * frequency(j) to get the total counts for the feature.
+        for (int j = 1; j <= max_deduped_count; j++) {
+            feature_total += (long)j * deduped_histograms[i+1][j];
+        }
+        temp_total_deduped_counts[i] = feature_total;
+
+        if (feature_total > min_heatmap) {
+            num_features_for_deduped_heatmap++;
+        }
+    }
+
+    if (num_features_for_deduped_heatmap < 2) {
+        fprintf(stdout, "Skipping heatmap generation as there are fewer than 2 features with sufficient counts.\n");
+    } else {
+        generate_deduped_heatmap(output_directory, features, deduped_histograms, max_deduped_count, temp_total_deduped_counts, min_heatmap);
+
+        // --- Step 2.5: Calculate feature richness histograms for heatmap ---
+        // A more direct approach to building the histograms.
+
+        // Step 1: Find max richness and build an inverted index (feature -> barcodes).
+        khash_t(u32ptr) *feature_to_barcodes_hash = kh_init(u32ptr);
+        int global_max_richness = 0;
+
+        for (k = kh_begin(barcode_to_deduped_hash); k != kh_end(barcode_to_deduped_hash); ++k) {
+            if (!kh_exist(barcode_to_deduped_hash, k)) continue;
+            uint32_t barcode_key = kh_key(barcode_to_deduped_hash, k);
+            void *deduped_hash_value = kh_val(barcode_to_deduped_hash, k);
+            
+            char barcode[barcode_length + 1];
+            code2string((unsigned char *)&barcode_key, barcode, barcode_code_length);    
+            if (translate_NXT) translate_nxt_inplace(barcode, barcode_length);
+            if (filtered_barcodes_hash) {
+                khint_t kf = kh_get(strptr, filtered_barcodes_hash, barcode);
+                if (kf == kh_end(filtered_barcodes_hash))
+                    continue;
+            }
+
+            khash_t(u32u32) *features_in_barcode = (khash_t(u32u32)*)deduped_hash_value;
+            size_t n_feats_in_bc = kh_size(features_in_barcode);
+
+            if (n_feats_in_bc == 0) continue;
+
+            if (n_feats_in_bc > global_max_richness) {
+                global_max_richness = n_feats_in_bc;
+            }
+
+            khint_t kf;
+            for (kf = kh_begin(features_in_barcode); kf != kh_end(features_in_barcode); ++kf) {
+                if (!kh_exist(features_in_barcode, kf)) continue;
+                uint32_t f_idx = kh_key(features_in_barcode, kf);
+                if (f_idx <= 0) continue;
+
+                khint_t kfb = kh_get(u32ptr, feature_to_barcodes_hash, f_idx);
+                barcode_list_t *barcodes_for_feature;
+                if (kfb == kh_end(feature_to_barcodes_hash)) {
+                    barcodes_for_feature = barcode_list_init();
+                    int ret;
+                    khint_t kh = kh_put(u32ptr, feature_to_barcodes_hash, f_idx, &ret);
+                    kh_val(feature_to_barcodes_hash, kh) = barcodes_for_feature;
+                } else {
+                    barcodes_for_feature = (barcode_list_t*)kh_val(feature_to_barcodes_hash, kfb);
+                }
+                barcode_list_add(barcodes_for_feature, barcode_key);
+            }
+        }
+
+        // Step 2: Allocate and zero the dense histogram matrix.
+        int **richness_histograms =
+            malloc((features->number_of_features + 1) * sizeof(int *));
+        for (int i = 0; i <= features->number_of_features; ++i) {
+            richness_histograms[i] =
+                calloc(global_max_richness + 1, sizeof(int));
+        }
+
+        // Step 3: Populate the histogram matrix using the inverted index.
+        for (k = kh_begin(feature_to_barcodes_hash); k != kh_end(feature_to_barcodes_hash); ++k) {
+            if (!kh_exist(feature_to_barcodes_hash, k)) continue;
+            uint32_t f_idx = kh_key(feature_to_barcodes_hash, k);
+            barcode_list_t *barcodes = (barcode_list_t*)kh_val(feature_to_barcodes_hash, k);
+
+            for (size_t i = 0; i < barcodes->n; ++i) {
+                uint32_t bcode_key = barcodes->keys[i];
+                khint_t kb = kh_get(u32ptr, barcode_to_deduped_hash, bcode_key);
+                if (kb == kh_end(barcode_to_deduped_hash)) continue;
+                khash_t(u32u32) *deduped_hash = (khash_t(u32u32)*)kh_val(barcode_to_deduped_hash, kb);
+                int num_feats = kh_size(deduped_hash);
+
+                if (num_feats > 0) {
+                    richness_histograms[f_idx][num_feats]++;
+                }
+            }
+        }
+
+        // Step 4: Set column 0 to the max richness for each feature.
+        for (int i = 1; i <= features->number_of_features; ++i) {
+            int row_max = 0;
+            for (int j = global_max_richness; j >= 1; --j) {
+                if (richness_histograms[i][j] > 0) {
+                    row_max = j;
+                    break;
+                }
+            }
+            richness_histograms[i][0] = row_max;
+        }
+
+        // --- Clean up ---
+        for (k = kh_begin(feature_to_barcodes_hash); k != kh_end(feature_to_barcodes_hash); ++k) {
+            if (kh_exist(feature_to_barcodes_hash, k)) {
+                barcode_list_destroy((barcode_list_t*)kh_val(feature_to_barcodes_hash, k));
+            }
+        }
+        kh_destroy(u32ptr, feature_to_barcodes_hash);
+
+        generate_heatmap(output_directory, features, richness_histograms);
+
+        for (int i = 0; i <= features->number_of_features; ++i)
+            free(richness_histograms[i]);
+        free(richness_histograms);
+    }
+
+    for (int i = 0; i <= features->number_of_features; ++i) {
+        free(deduped_histograms[i]);
+    }
+    free(deduped_histograms);
+
+    char features_file[LINE_LENGTH];
+    sprintf(features_file,"%s/features.txt",output_directory);
+    FILE *featuresfp=fopen(features_file,"w");
+    if(!featuresfp){fprintf(stderr,"Error opening features file %s\n",features_file);exit(1);}
+    for(int idx=0;idx<features->number_of_features;idx++)
+        fprintf(featuresfp,"%s\n",features->feature_names[idx]);
+    fclose(featuresfp);
+
+    /* --- NEW: open the feature-per-cell CSV --- */
+    char fpc_file[LINE_LENGTH];
+    sprintf(fpc_file, "%s/feature_per_cell.csv", output_directory);
+    FILE *fpcfp = fopen(fpc_file, "w");
+    if (fpcfp == NULL) {
+        fprintf(stderr, "Error opening feature_per_cell.csv\n");
+        exit(1);
+    }
+    /* header */
+    fprintf(fpcfp,
+            "barcode,num_features,top_feature_index,total_deduped_umi\n");
+
+    for (k = kh_begin(barcode_to_deduped_hash); k != kh_end(barcode_to_deduped_hash); ++k) {
+        if (!kh_exist(barcode_to_deduped_hash, k)) continue;
+        uint32_t barcode_key = kh_key(barcode_to_deduped_hash, k);
+        void *deduped_hash_value = kh_val(barcode_to_deduped_hash, k);
+        
+        char barcode[barcode_length + 1];
+        code2string((unsigned char *)&barcode_key, barcode, barcode_code_length);
+        if (translate_NXT) translate_nxt_inplace(barcode, barcode_length);
+
+        if (filtered_barcodes_hash) {
+            khint_t kf = kh_get(strptr, filtered_barcodes_hash, barcode);
+            if (kf == kh_end(filtered_barcodes_hash)) {
+                skipped_barcodes++;
+                continue;
+            }
+        }
+        processed_barcodes++;
+
+        /* ------------------------------------
+         *  Data for feature_per_cell.csv
+         * ------------------------------------*/
+        khash_t(u32u32) *features_in_barcode = (khash_t(u32u32)*)deduped_hash_value;
+        size_t n_feats_in_bc = kh_size(features_in_barcode);
+
+        uint32_t total_umi  = 0;
+        uint32_t top_count  = 0;
+        uint32_t top_feat   = 0;
+        int tie = 0;
+
+        khint_t kfeat;
+        for (kfeat = kh_begin(features_in_barcode); kfeat != kh_end(features_in_barcode); ++kfeat) {
+            if (!kh_exist(features_in_barcode, kfeat)) continue;
+            uint32_t feat_idx = kh_key(features_in_barcode, kfeat);
+            uint32_t feat_cnt = kh_val(features_in_barcode, kfeat);
+            total_umi += feat_cnt;
+
+            if (feat_cnt > top_count) {
+                top_count = feat_cnt;
+                top_feat  = feat_idx;
+                tie = 0;
+            } else if (feat_cnt == top_count) {
+                tie = 1;
+            }
+        }
+        if (tie) top_feat = 0;
+
+        /* write the CSV line */
+        fprintf(fpcfp, "%s,%zu,%u,%u\n",
+                barcode, n_feats_in_bc, top_feat, total_umi);
+
+        /* ------------------------------------ */
+    }
+
+    /* --- NEW: close CSV --- */
+    fclose(fpcfp);
+}
+
+int find_closest_barcodes(unsigned char* code,unsigned char *corrected_codes, unsigned char *indices){
+    int number_of_variants=0;
+    for (int i=0; i<barcode_length; i++){
+        unsigned char corrected_bases[3];
+        //check whitelist for variant match
+        int nmatches=find_variant_match(code, i, corrected_bases);
+        if(nmatches){
+            if (nmatches+number_of_variants > max_barcode_mismatches){
+                return 0;
+            }
+            for (int j=0; j<nmatches && number_of_variants+j < max_barcode_mismatches; j++){
+                memcpy(corrected_codes+(number_of_variants+j)*barcode_code_length, code, barcode_code_length);
+                const int code_index = i / 4;
+                corrected_codes[(number_of_variants+j)*barcode_code_length + code_index] = corrected_bases[j];
+                indices[number_of_variants+j]=i;
+            }
+            number_of_variants+=nmatches;
+        }
+        if (number_of_variants > max_barcode_mismatches){
+            return 0;
+        }
+    }
+    return number_of_variants;
+}
+int find_variant_match(unsigned char *code, int sequence_index, unsigned char *corrected_bases ){
+    const unsigned char index= sequence_index / 4;
+    const unsigned char shift= 6-2*(sequence_index % 4);
+    unsigned char mod_code[barcode_code_length];
+    memcpy(mod_code, code, barcode_code_length);
+    int number_of_variants=0; 
+    for (unsigned char i=1; i<4; i++){
+        unsigned char mod = code[index] ^ (i << shift );
+        mod_code[index]=mod;
+        uint32_t mod_key = *(uint32_t*)mod_code;
+        khint_t k = kh_get(u32ptr, whitelist_hash, mod_key);
+        if (k != kh_end(whitelist_hash)){
+            corrected_bases[number_of_variants++]=mod;
+        }
+    }
+    return number_of_variants;
+}
+void process_pending_barcodes( data_structures *hashes, memory_pool_collection *pools, statistics *stats, double min_posterior){
+    unmatched_barcodes_features_block *current_entry_block=stats->unmatched_list.first_entry;
+    while (current_entry_block != NULL){
+        unsigned char *retcode=find_best_posterior_match(current_entry_block, number_of_features, min_posterior,stats, hashes);
+        if (retcode != 0){
+            unmatched_barcodes_features current_entry;
+            read_unmatched_barcodes_features_block(current_entry_block, &current_entry);
+            char umi[umi_length+1];
+            code2string(current_entry.umi,umi, umi_code_length);
+            update_feature_counts_from_code(retcode, umi, current_entry.feature_index, hashes,pools);
+        }
+        current_entry_block=current_entry_block->next;
+    }
+}
+unsigned char* find_best_posterior_match (unmatched_barcodes_features_block *entry_block, int number_of_features, double min_posterior, statistics *stats, data_structures *hashes){
+    unmatched_barcodes_features entry_struct;
+    unmatched_barcodes_features *entry=&entry_struct;
+    read_unmatched_barcodes_features_block(entry_block, entry);
+    if (!entry->feature_index){
+        return 0;
+    }
+    double priors[max_barcode_mismatches+1];
+    double evidence[max_barcode_mismatches+1];
+    int total_counts_arr[max_barcode_mismatches+1];
+    double total_evidence = 0.0;
+    int trace = 0;
+    char obs_barcode[4 * barcode_code_length + 1];
+    char umi_str[4 * umi_code_length + 1];
+    pf_trace_rescue_init_once();
+    if (pf_trace_rescue_enabled) {
+        code2string(entry->barcode, obs_barcode, barcode_code_length);
+        code2string(entry->umi, umi_str, umi_code_length);
+        if (!pf_trace_rescue_list) {
+            trace = 1;
+        } else if (pf_trace_list_contains(pf_trace_rescue_list, obs_barcode)) {
+            trace = 1;
+        } else {
+            for (int i = 0; i < entry->number_of_closest_barcodes; i++) {
+                char cand_barcode[4 * barcode_code_length + 1];
+                unsigned char *cand = (entry->closest_barcodes) + i * barcode_code_length;
+                code2string(cand, cand_barcode, barcode_code_length);
+                if (pf_trace_list_contains(pf_trace_rescue_list, cand_barcode)) {
+                    trace = 1;
+                    break;
+                }
+            }
+        }
+    }
+    for (int i=0; i<entry->number_of_closest_barcodes; i++){
+        //find counts for the barcode
+        int total_counts=1;
+        unsigned char* barcode =(entry->closest_barcodes) + i*barcode_code_length;
+        uint32_t bcode_key = *(uint32_t*)barcode;
+        khint_t k = kh_get(u32ptr, hashes->filtered_hash, bcode_key);
+        if (k != kh_end(hashes->filtered_hash)){
+            feature_counts *s = (feature_counts*)kh_val(hashes->filtered_hash, k);
+            khint_t k0 = kh_get(u32u32, s->counts, 0);
+            if (k0 != kh_end(s->counts)) {
+                total_counts += kh_val(s->counts, k0);
+            }
+        }
+        total_counts_arr[i] = total_counts;
+        priors[i]= pow(10,-0.1*(entry->Qscores[i]-33));
+        evidence[i]=(double) total_counts * priors[i];
+        total_evidence+=evidence[i];
+    }
+    if (trace) {
+        fprintf(pf_trace_rescue_fp,
+                "RESCUE obs=%s umi=%s feat=%u match_pos=%u nclose=%u min_post=%.6f\n",
+                obs_barcode, umi_str, entry->feature_index, entry->match_position,
+                entry->number_of_closest_barcodes, min_posterior);
+        for (int i = 0; i < entry->number_of_closest_barcodes; i++) {
+            char cand_barcode[4 * barcode_code_length + 1];
+            unsigned char *cand = (entry->closest_barcodes) + i * barcode_code_length;
+            code2string(cand, cand_barcode, barcode_code_length);
+            fprintf(pf_trace_rescue_fp,
+                    "  cand[%d]=%s q=%u phred=%d total=%d prior=%.6e evidence=%.6e posterior=%.6e\n",
+                    i, cand_barcode, (unsigned int)entry->Qscores[i],
+                    (int)entry->Qscores[i] - 33, total_counts_arr[i],
+                    priors[i], evidence[i],
+                    (total_evidence > 0.0) ? (evidence[i] / total_evidence) : 0.0);
+        }
+    }
+    for (int i = 0; i < entry->number_of_closest_barcodes; i++) {
+        double posteriors = evidence[i] / total_evidence;
+        if(posteriors > min_posterior){
+            stats->pending_recovered++;
+            if (trace) {
+                char chosen_barcode[4 * barcode_code_length + 1];
+                unsigned char *chosen = (entry->closest_barcodes) + i * barcode_code_length;
+                code2string(chosen, chosen_barcode, barcode_code_length);
+                fprintf(pf_trace_rescue_fp,
+                        "  chosen=%s posterior=%.6e\n",
+                        chosen_barcode, posteriors);
+            }
+            return (entry->closest_barcodes) + i*barcode_code_length;
+        }   
+    }
+    if (trace) {
+        fprintf(pf_trace_rescue_fp, "  chosen=none\n");
+    }
+    return 0;
+}
+int simpleCorrectFeature(char *line, feature_arrays *features, int maxN, int maxHammingDistance, int *hamming_distance){
+    int best_feature=simple_search(features, line);
+    *hamming_distance=0;
+    if (!best_feature){
+        const size_t length=strlen(line)-1;
+        char buffer[(length+1) * (4 << ((maxN-1)*2))];
+        char *corrected_seqs[ 4 << ((maxN-1)*2)];
+        int nAlts=checkSequenceAndCorrectForN(line, corrected_seqs, buffer, length, maxN);
+        if (nAlts == 1){
+            return simple_hamming_search(features, corrected_seqs[0], maxHammingDistance,hamming_distance);
+        }
+        if (nAlts > 1){
+            int bestHammingDistance=maxHammingDistance;
+            int ambiguous=0;
+            for (int i=0; i<nAlts; i++){
+                int feature_index=simple_search(features, corrected_seqs[i]);
+                if (feature_index){
+                    *hamming_distance=0;
+                    return feature_index;
+                }
+            }
+            for (int i=0; i<nAlts; i++){
+                int myHammingDistance;
+                int feature_index=simple_hamming_search(features, corrected_seqs[i], maxHammingDistance,&myHammingDistance);
+                if (feature_index && myHammingDistance < bestHammingDistance){
+                    bestHammingDistance=myHammingDistance;
+                    best_feature=feature_index;
+                    ambiguous=0;
+                }
+                else if (feature_index && myHammingDistance == bestHammingDistance){
+                    if(best_feature){
+                        ambiguous=1;
+                    }
+                    else{
+                        best_feature=feature_index;
+                        bestHammingDistance=myHammingDistance;
+                        ambiguous=0;
+                    }
+                }
+            }
+            if(best_feature && !ambiguous){
+                *hamming_distance=bestHammingDistance;
+                return best_feature;
+            }
+        }
+
+    }
+    return best_feature;
+}
+int checkAndCorrectFeature(char *line, feature_arrays *features,int maxHammingDistance, int nThreads, int *hamming_distance, char *matching_sequence, int maxN,char *ambiguous, uint16_t *match_position){
+    const size_t length=strlen(line)-1;
+    char buffer[(length+1) * (4 << ((maxN-1)*2))];
+    char *corrected_seqs[ 4 << ((maxN-1)*2)];
+    int hamming=0;
+    //return ambiguous if the hamming distance is non-zero but the feature is zero
+    //return ambiguous if there are too many Ns ie. nAlts is zero - distinguish this by setting hamming distance to maxHammingDistance+1
+    int nAlts=checkSequenceAndCorrectForN(line, corrected_seqs, buffer, length, maxN);
+    if (!nAlts){
+        *hamming_distance=maxHammingDistance+1;
+        *ambiguous=1;
+        return 0;
+    }
+    if (nAlts == 1){
+        char *myMatchingSequence;
+        uint16_t myMatchPosition;
+        //no Ns and the barcode is good in terms of ACGT 
+        int feature_index=find_feature_match_parallel(features, line, maxHammingDistance,nThreads,&hamming,&myMatchingSequence, &myMatchPosition);
+        *hamming_distance=hamming;
+        if (feature_index){
+            memcpy(matching_sequence, myMatchingSequence, features->feature_lengths[feature_index-1]);
+            matching_sequence[features->feature_lengths[feature_index-1]]='\0';
+            *match_position = myMatchPosition;
+        }
+        else if (hamming <= maxHammingDistance){
+            *ambiguous=1;
+        }    
+        return feature_index;
+    }
+    else{
+        //if there are Ns in the barcode then we need to check all the possible sequences
+        //and return if there is a unique match in the whitelist
+        int myAmbiguous=0;
+        int bestfeature_index=0;
+        int bestHammingDistance=maxHammingDistance;
+        char *bestMatchingSequence=0; 
+        uint16_t bestMatchPosition=0;
+        //int bestAlt=0;
+
+        for (int i=0; i<nAlts; i++){
+            //DEBUG_PRINT( "Checking %s\n", corrected_seqs[i]);
+            char *myMatchingSequence;
+            uint16_t myMatchPosition;
+            int feature_index=find_feature_match_parallel(features, corrected_seqs[i], maxHammingDistance,nThreads,&hamming,&myMatchingSequence, &myMatchPosition);
+            //DEBUG_PRINT( "Feature index %d %d\n", feature_index,hamming);
+            
+            if (feature_index && !hamming){
+                memcpy(matching_sequence, myMatchingSequence, features->feature_lengths[feature_index-1]);
+                matching_sequence[features->feature_lengths[feature_index-1]]='\0';
+                *hamming_distance=hamming;
+                *match_position = myMatchPosition;
+                return feature_index;
+            }
+            else if (hamming < bestHammingDistance){
+                    bestHammingDistance=hamming;
+                    bestfeature_index=feature_index;
+                    bestMatchingSequence=myMatchingSequence;
+                    myAmbiguous=0;
+                    bestMatchPosition=myMatchPosition;
+            }
+            else if (hamming == bestHammingDistance){
+                if( bestfeature_index){
+                    myAmbiguous=1;
+                }
+            }
+        }
+        if (bestHammingDistance <= maxHammingDistance){
+            *hamming_distance=bestHammingDistance;
+            *ambiguous=myAmbiguous;
+            if (!myAmbiguous && bestfeature_index){
+                memcpy(matching_sequence, bestMatchingSequence, features->feature_lengths[bestfeature_index-1]);
+                matching_sequence[features->feature_lengths[bestfeature_index-1]]='\0';
+                *match_position = bestMatchPosition;
+                return bestfeature_index;
+            }
+            return 0;
+        }
+        return 0;
+    }
+}
+size_t barcode_code2number(unsigned char *code){
+    uint32_t key_val = *(uint32_t*)code;
+    khint_t k = kh_get(u32ptr, whitelist_hash, key_val);
+    if (k == kh_end(whitelist_hash)){
+        return 0;
+    }
+    unsigned char *key = (unsigned char*)kh_val(whitelist_hash, k);
+    return (key-whitelist)/barcode_code_length+1;
+}
+int checkAndCorrectBarcode(char **lines, int maxN, uint32_t feature_index, uint16_t match_position, data_structures *hashes, memory_pool_collection *pools, statistics *stats, int barcode_constant_offset){
+    char *sequence=lines[0]+barcode_constant_offset;
+    //DEBUG_PRINT( "Checking barcode %s\n", lines[1]);
+    if (strlen(sequence) < barcode_length + umi_length){
+        fprintf(stderr, "Error: Incomplete barcode %s\n", lines[0]);
+        return 0;
+    }
+    if (!check_sequence(sequence + barcode_length, umi_length)){
+        stats->nMismatches++;
+        return 0;
+    }
+    //The return code should indicate whether we should calculate the barcode or not
+    char buffer[(barcode_length + 1) * (4 << ((max_barcode_n-1)*2))];
+    char *corrected_seqs[ 4 << ((max_barcode_n-1)*2)];
+    char *candidateBarcode = sequence;
+    memset (buffer, 0, (barcode_length + 1) * (4 << ((max_barcode_n-1)*2)));
+ 
+    //DEBUG_PRINT( "Checking barcode %s\n", candidateBarcode);    
+    int nAlts=checkSequenceAndCorrectForN(candidateBarcode, corrected_seqs, buffer, barcode_length, maxN);
+    if (!nAlts){
+        stats->nMismatches++;
+        return 0;
+    }
+    unsigned char code[barcode_code_length];
+    if (nAlts == 1){
+        //no Ns and the barcode is good in terms of ACGT 
+        //check if the barcode is in the filtered whitelist 
+        string2code(candidateBarcode, barcode_length, code); 
+        uint32_t key = *(uint32_t*)code;
+        khint_t kw = kh_get(u32ptr, whitelist_hash, key);
+        if (kw != kh_end(whitelist_hash)){
+            update_feature_counts_from_code(code, sequence+barcode_length, feature_index, hashes, pools);
+            stats->valid++;            
+            return 1;
+        }
+        //if the barcode is not in the whitelist then try to correct it 
+        unsigned char indices[max_barcode_mismatches+1];
+        unsigned char corrected_codes[(max_barcode_mismatches+1)*barcode_code_length];
+        stats->nMismatches++;
+        //try to correct it by finding closest barcodes
+        int nMatches=find_closest_barcodes(code,corrected_codes, indices);
+        if (!nMatches){
+            return 0;
+        }
+
+        //if unique closest barcode found then correct
+        if (nMatches==1){
+            char corrected_barcode[barcode_length+1];   
+            code2string(corrected_codes, corrected_barcode, barcode_code_length);
+            memcpy(sequence, corrected_barcode, barcode_length);
+            stats->recovered++;
+            update_feature_counts_from_code(corrected_codes, sequence+barcode_length, feature_index, hashes, pools);
+            stats->valid++;
+            return 1;
+        }
+        else{
+            //otherwise store it for later processing when we have counts to calculate the posterior probabilities
+            if (nMatches > 1){
+                unsigned char qscores[max_barcode_mismatches+1];
+                for (int i=0; i<nMatches; i++){
+                    qscores[i]=lines[1][indices[i]];
+                }
+                add_unmatched_barcode_store_feature(code, corrected_codes, sequence+barcode_length, qscores,feature_index,nMatches, match_position, pools,stats);
+                stats->pending++;
+            }
+            return 0;
+        }
+        return 0;
+    }
+    else{
+        stats->nMismatches++;
+        //if there are Ns in the barcode then we need to check all the possible sequences
+        //and return if there is a unique match in the whitelist
+        int number_of_matches=0;
+        unsigned char corrected_code[barcode_code_length];
+        for (int i=0; i<nAlts; i++){
+            unsigned char code[barcode_code_length];
+            string2code(corrected_seqs[i], barcode_length, code);
+            char corrected_barcode[barcode_length+1];   
+            code2string(code, corrected_barcode, barcode_code_length);
+            uint32_t key = *(uint32_t*)code;
+            khint_t k = kh_get(u32ptr, whitelist_hash, key);
+            if (k != kh_end(whitelist_hash)){
+                if (number_of_matches){
+                    return 0;
+                }
+                else{
+                    number_of_matches++;
+                    memcpy(corrected_code, code, barcode_code_length);  
+                }
+            }
+        }
+        if (number_of_matches == 1){
+            stats->recovered++;
+            char corrected_barcode[barcode_length+1];   
+            code2string(corrected_code, corrected_barcode, barcode_code_length);
+            memcpy(sequence, corrected_barcode, barcode_length);
+            update_feature_counts_from_code(corrected_code, sequence + barcode_length,feature_index, hashes,pools);
+            stats->valid++;
+            return 1;
+        }
+        return 0;
+    }
+}
+
+
+void finalize_processing(feature_arrays *features, data_structures *hashes, char *directory, memory_pool_collection *pools, statistics *stats, uint16_t stringency, uint16_t min_counts, double min_posterior, khash_t(strptr)* filtered_barcodes_hash, int skip_emptydrops, int emptydrops_failure_fatal, int expected_cells, int emptydrops_use_fdr, int *error_out){
+    process_pending_barcodes(hashes, pools, stats,min_posterior);
+    double elapsed_time = get_time_in_seconds() - stats->start_time;
+    fprintf(stderr, "Finished processing %ld reads in %.2f seconds (%.1f thousand reads/second)\n", stats->number_of_reads, elapsed_time, stats->number_of_reads / (double)elapsed_time / 1000.0);
+
+    // total_feature_counts is populated separately by print_feature_sequences()
+    int total_feature_counts[features->number_of_features + 1];
+
+    // Create and populate the deduped counts using modular pf_counts API.
+    // pf_build_deduped_counts() internally calls find_deduped_counts().
+    pf_counts_result *counts_result = pf_build_deduped_counts(hashes, features->number_of_features, stringency, min_counts);
+    if (!counts_result) {
+        fprintf(stderr, "Error: failed to build deduped counts\n");
+        return;
+    }
+    
+    // Validate keys for tracing/debugging
+    pf_trace_validate_keys(hashes, counts_result->barcode_to_deduped_hash);
+
+    // Stage 3: Filter stage
+    // If no external filter is provided, run EmptyDrops to determine filtered barcodes.
+    // If external filter is provided, use it directly.
+    // If skip_emptydrops is set, skip the filter stage entirely.
+    barcode_filter_config filter_config = {
+        .output_dir = directory,
+        .feature_names = features->feature_names,
+        .n_features = features->number_of_features,
+        .n_expected_cells = expected_cells,
+        .translate_nxt = translate_NXT,
+        .skip_emptydrops = skip_emptydrops,
+        .emptydrops_failure_fatal = emptydrops_failure_fatal,
+        .emptydrops_use_fdr = emptydrops_use_fdr
+    };
+    
+    khash_t(strptr) *active_filter = NULL;
+    pf_filter_status filter_status = pf_filter_barcodes(
+        counts_result,
+        &filter_config,
+        filtered_barcodes_hash,  // May be NULL
+        &active_filter
+    );
+    
+    // Handle filter status
+    if (filter_status == PF_FILTER_FAILED) {
+        if (emptydrops_failure_fatal) {
+            fprintf(stderr, "ERROR: EmptyDrops failed (fatal mode)\n");
+            if (error_out) *error_out = 1;
+            pf_counts_result_free(counts_result);
+            return;  // Bail out of this sample
+        } else {
+            fprintf(stderr, "WARNING: EmptyDrops failed; skipping filtered output\n");
+        }
+    } else if (filter_status == PF_FILTER_SKIPPED) {
+        fprintf(stderr, "INFO: EmptyDrops skipped; no filtered output will be produced\n");
+    }
+    
+    // Track if we created a new filter (need to free it later)
+    int filter_is_owned = pf_filter_is_owned(active_filter, filtered_barcodes_hash);
+
+    // Stage 2: Use mex_write_all() for all MEX output (barcodes.txt, features.txt,
+    // matrix.mtx, stats.txt, feature_per_cell.csv, heatmaps, histograms).
+    // This replaces the previous printFeatureCounts() calls.
+    mex_writer_config config = {
+        .output_dir = directory,
+        .features = features,
+        .hashes = hashes,
+        .stats = stats,
+        .filtered_barcodes_hash = NULL,  // First pass: unfiltered
+        .min_heatmap_counts = min_heatmap
+    };
+    
+    // Write unfiltered results
+    if (mex_write_all(&config, counts_result) != 0) {
+        fprintf(stderr, "Error: mex_write_all failed for unfiltered output\n");
+        if (filter_is_owned) pf_filter_free(active_filter);
+        pf_counts_result_free(counts_result);
+        return;
+    }
+    
+    // Write feature_sequences.txt (populates total_feature_counts)
+    print_feature_sequences(features, total_feature_counts, directory, hashes);
+    
+    // Write deduped_counts_histograms.txt using feature_hist from counts_result.
+    // IMPORTANT: This must be done BEFORE the filtered mex_write_all() call,
+    // because mex_write_all() clears and re-populates feature_hist.
+    char deduped_hist_filename[FILENAME_LENGTH];
+    sprintf(deduped_hist_filename, "%s/deduped_counts_histograms.txt", directory);
+    FILE *deduped_hist_fp = fopen(deduped_hist_filename, "w");
+    if (deduped_hist_fp == NULL) {
+        perror("Failed to open deduped counts histograms file");
+        if (filter_is_owned) pf_filter_free(active_filter);
+        pf_counts_result_free(counts_result);
+        exit(EXIT_FAILURE);
+    }
+    fprintf(deduped_hist_fp, "FeatureName\tDedupedCount\tFrequency\n");
+    for (int i = 0; i < features->number_of_features; i++) {
+        vec_u32_t *h = counts_result->feature_hist[i + 1]; // Histograms are 1-indexed
+        if (h && vec_u32_size(h) > 0) {
+            for (size_t j = 0; j < vec_u32_size(h); j++) {
+                uint32_t frequency = vec_u32_get(h, j);
+                if (frequency > 0) {
+                    fprintf(deduped_hist_fp, "%s\t%zu\t%u\n", features->feature_names[i], j, frequency);
+                }
+            }
+        }
+    }
+    fclose(deduped_hist_fp);
+
+    // Process cumulative histogram (simplified - no EM fitting)
+    // IMPORTANT: This must also be done BEFORE the filtered mex_write_all() call.
+    {
+        long cumulative_deduped_counts = 0;
+        long cumulative_barcoded_counts = 0;
+        long cumulative_feature_counts = 0;
+        for (int i = 0; i < features->number_of_features; i++) {
+            cumulative_deduped_counts += counts_result->total_deduped_counts[i];
+            cumulative_barcoded_counts += counts_result->total_barcoded_counts[i];
+            cumulative_feature_counts += total_feature_counts[i];
+        }
+
+        // Output summary to stderr for logging
+        fprintf(stderr, "Cumulative counts: deduped=%ld, barcoded=%ld, features=%ld\n",
+                cumulative_deduped_counts, cumulative_barcoded_counts, cumulative_feature_counts);
+        
+        // Generate simple histogram plot without EM fit
+        plot_simple_histogram(directory, "umi_counts_histogram", "UMI Counts Distribution", 
+                             "UMI Count", "Frequency", counts_result->feature_hist[0]);
+    }
+    
+    // Write filtered results if we have a filter (either external or from EmptyDrops)
+    // mex_write_all() clears and re-populates counts arrays internally.
+    if (active_filter) {
+        config.filtered_barcodes_hash = active_filter;
+        if (mex_write_all(&config, counts_result) != 0) {
+            fprintf(stderr, "Error: mex_write_all failed for filtered output\n");
+            if (filter_is_owned) pf_filter_free(active_filter);
+            pf_counts_result_free(counts_result);
+            return;
+        }
+    }
+
+    // Clean up the filter if we created it (EmptyDrops case)
+    if (filter_is_owned) {
+        pf_filter_free(active_filter);
+    }
+    
+    // Clean up the counts result (frees all nested hash tables and arrays)
+    pf_counts_result_free(counts_result);
+}
+
+void open_fastq_files(const char *barcode_fastq, const char *forward_fastq, const char *reverse_fastq, gzFile *barcode_fastqgz, gzFile *forward_fastqgz, gzFile *reverse_fastqgz) {
+    *barcode_fastqgz = gzopen(barcode_fastq, "r");
+    if (*barcode_fastqgz == NULL) {
+        fprintf(stderr, "Error: Unable to open R1 FASTQ file %s\n", barcode_fastq);
+        exit(EXIT_FAILURE);
+    }
+    if (forward_fastq != NULL) {
+        *forward_fastqgz = gzopen(forward_fastq, "r");
+        if (*forward_fastqgz == NULL) {
+            fprintf(stderr, "Error: Unable to open R2 FASTQ file %s\n", forward_fastq);
+            exit(EXIT_FAILURE);
+        }
+    }
+    if (reverse_fastq != NULL) {
+        *reverse_fastqgz = gzopen(reverse_fastq, "r");
+        if (*reverse_fastqgz == NULL) {
+            fprintf(stderr, "Error: Unable to open R3 FASTQ file %s\n", reverse_fastq);
+            exit(EXIT_FAILURE);
+        }
+    }
+}
+fastq_reader* allocate_fastq_reader( char **filenames, int nfiles, int filetype, size_t read_size, size_t read_buffer_lines) {
+    fastq_reader *reader = malloc(sizeof(fastq_reader));
+    int total_filename_length = 0;
+    for (int i = 0; i < nfiles; i++) {
+        total_filename_length += strlen(filenames[i])+1; 
+    }
+    reader->filenames = malloc(nfiles * sizeof(char *));
+    reader->concatenated_filenames=malloc(total_filename_length);
+
+    char *this_filename = reader->concatenated_filenames;
+    for (int i = 0; i < nfiles; i++) {
+        fprintf (stderr, "Filename %s\n", filenames[i]);
+        //do no increment the last time to avoid overun of the buffe
+    }
+
+    for (int i = 0; i < nfiles; i++) {
+        strcpy(this_filename, filenames[i]);
+        reader->filenames[i] = this_filename;
+        this_filename += strlen(filenames[i]) + 1;
+    }
+    reader->nfiles = nfiles;
+    reader->gz_pointer = NULL;            // Initialize gz_pointer as needed
+    reader->filetype = filetype;          // Set the filetype
+    return reader;
+}
+fastq_reader_set *  allocate_fastq_reader_set( char **barcode_filenames, char **forward_filenames, char **reverse_filenames, int nfiles, size_t read_size, size_t read_buffer_lines) {
+    fastq_reader_set *reader_set=malloc(sizeof(fastq_reader_set));
+    fprintf(stderr, "allocating barcode reader\n");
+    reader_set->barcode_reader=allocate_fastq_reader(barcode_filenames, nfiles, 1, read_size, read_buffer_lines);
+    reader_set->forward_reader=NULL;
+    reader_set->reverse_reader=NULL;
+    if (forward_filenames != NULL ) {
+        fprintf(stderr, "allocating forward reader\n");
+        reader_set->forward_reader=allocate_fastq_reader(forward_filenames, nfiles, 2, read_size, read_buffer_lines);
+    }
+    if (reverse_filenames != NULL) {
+        fprintf(stderr, "allocating reverse reader\n");
+        reader_set->reverse_reader=allocate_fastq_reader(reverse_filenames, nfiles, 3, read_size, read_buffer_lines);
+    }
+    reader_set->read_buffer_lines = read_buffer_lines;
+    reader_set->buffer_storage    = malloc(read_buffer_lines * (read_size + 1));
+    reader_set->buffer            = malloc(read_buffer_lines * sizeof(char*));
+    for (size_t i = 0; i < read_buffer_lines; ++i)
+        reader_set->buffer[i] = reader_set->buffer_storage + i * (read_size + 1);
+
+    reader_set->produce_index = reader_set->consume_index = reader_set->filled = 0;
+    reader_set->done = 0;
+
+    pthread_mutex_init(&reader_set->mutex, NULL);
+    pthread_cond_init (&reader_set->can_produce, NULL);
+    pthread_cond_init (&reader_set->can_consume, NULL);
+    return reader_set;
+}
+
+// Producer thread function
+void *read_fastqs_by_set(void *arg) {
+    fastq_reader_set *set = (fastq_reader_set *)arg;
+    const int thread_id = set->thread_id;
+    long long number_of_reads=0;
+    const int number_of_readers = (set->forward_reader != NULL) + (set->reverse_reader != NULL) + 1;
+    fastq_reader *readers[number_of_readers];
+    readers[0]  = set->barcode_reader;
+    const int lines_per_block   = 2 * number_of_readers;
+    const int read_buffer_lines = set->read_buffer_lines;
+    if (set->forward_reader != NULL) {
+        readers[1] = set->forward_reader;
+    }
+    if (set->reverse_reader != NULL) {
+        readers[number_of_readers - 1] = set->reverse_reader;
+    }
+
+    char line1[number_of_readers][LINE_LENGTH];
+    char line2[number_of_readers][LINE_LENGTH];
+    char dummy_line[LINE_LENGTH];
+    int done = 0;
+    // Open the files
+    int file_index=0;
+    for (int j=0; j<number_of_readers; j++){
+        fprintf(stderr, "Opening file %s\n", readers[j]->filenames[file_index]);
+        readers[j]->gz_pointer = gzopen(readers[j]->filenames[file_index], "rb");
+        if (readers[j]->gz_pointer == NULL) {
+            fprintf(stderr, "Error: Unable to open file %s\n", readers[j]->filenames[file_index]);
+            exit(EXIT_FAILURE);
+        }
+    }
+    while(!done){
+        int eof_detected = 0;
+        for (int j = 0; j < number_of_readers; j++) {
+            if (gzgets(readers[j]->gz_pointer, dummy_line, LINE_LENGTH) == Z_NULL ||
+                gzgets(readers[j]->gz_pointer, line1[j], LINE_LENGTH) == Z_NULL ||
+                gzgets(readers[j]->gz_pointer, dummy_line, LINE_LENGTH) == Z_NULL ||
+                gzgets(readers[j]->gz_pointer, line2[j], LINE_LENGTH) == Z_NULL)
+            {
+                if (!gzeof(readers[j]->gz_pointer)) {
+                    fprintf(stderr, "Thread %d: Error or incomplete record in FASTQ file %s\n",
+                            thread_id, readers[j]->filenames[file_index]);
+                    exit(EXIT_FAILURE);
+                }
+                eof_detected = 1;
+                break; // Exit inner loop immediately
+            }
+        }
+
+        if (eof_detected || (max_reads && number_of_reads >= max_reads)) {
+            for (int j = 0; j < number_of_readers; j++) {
+                if (readers[j]->gz_pointer) {
+                    gzclose(readers[j]->gz_pointer);
+                    readers[j]->gz_pointer = NULL;
+                }
+            }
+            if (++file_index >= readers[0]->nfiles) {
+                done = 1; // All files for this producer are processed
+            } else {
+                // Open the next set of files
+                for (int j = 0; j < number_of_readers; j++) {
+                    fprintf(stderr, "Thread %d opening next file: %s\n", thread_id, readers[j]->filenames[file_index]);
+                    readers[j]->gz_pointer = gzopen(readers[j]->filenames[file_index], "rb");
+                    if (readers[j]->gz_pointer == NULL) {
+                        fprintf(stderr, "Error: Unable to open file %s\n", readers[j]->filenames[file_index]);
+                        exit(EXIT_FAILURE);
+                    }
+                }
+            }
+            continue; // Restart the while loop
+        }
+
+        if (number_of_reads > 0 && number_of_reads % 1000000 == 0) {
+            fprintf(stderr, "Thread %d has read %lld million records.\n", thread_id, number_of_reads / 1000000);
+        }
+        number_of_reads++;
+
+        /* ---------- NEW: write a whole block into set->buffer ---------- */
+        pthread_mutex_lock(&set->mutex);
+
+        while (set->filled >= read_buffer_lines - lines_per_block)
+            pthread_cond_wait(&set->can_produce, &set->mutex);
+
+        size_t p = set->produce_index;
+        /* barcode (always) */
+        strcpy(set->buffer[p],                             line1[0]);
+        strcpy(set->buffer[(p+1)%read_buffer_lines],       line2[0]);
+
+        int offset = 2;   /* start of next reader's lines */
+        int r_idx  = 1;   /* reader index we are copying from */
+
+        if (set->forward_reader) {            /* forward read present */
+            strcpy(set->buffer[(p+offset)%read_buffer_lines],     line1[r_idx]);
+            strcpy(set->buffer[(p+offset+1)%read_buffer_lines],   line2[r_idx]);
+            offset += 2;
+            r_idx  += 1;
+        }
+        if (set->reverse_reader) {            /* reverse read present */
+            strcpy(set->buffer[(p+offset)%read_buffer_lines],     line1[r_idx]);
+            strcpy(set->buffer[(p+offset+1)%read_buffer_lines],   line2[r_idx]);
+        }
+
+        set->produce_index = (p + lines_per_block) % read_buffer_lines;
+        set->filled       += lines_per_block;
+        pthread_cond_signal(&set->can_consume);
+        pthread_mutex_unlock(&set->mutex);
+    }
+    
+    // Signal that this producer is completely finished
+    pthread_mutex_lock(&set->mutex);
+    set->done = 1;
+    pthread_cond_broadcast(&set->can_consume);
+    pthread_mutex_unlock(&set->mutex);
+    
+    fprintf(stderr, "Thread %d done reading\n", thread_id);
+    pthread_exit(NULL);
+}
+void process_multiple_feature_sequences(int nsequences, char **sequences, int *orientations, feature_arrays *features, int maxHammingDistance, int nThreads, int feature_constant_offset, int max_feature_n, uint32_t *feature_index, int *hamming_distance, char *matching_sequence, uint16_t *match_position) {
+    //check if the sequences are the same
+
+    int best_hamming_distance = maxHammingDistance;
+    uint32_t best_feature_index = 0;
+    char best_matching_sequence[LINE_LENGTH];
+    uint16_t best_match_position=0;
+    char ambiguous = 0;
+    int myHammingDistance=maxHammingDistance;
+    for (int i=0; i<nsequences; i++){
+        DEBUG_PRINT( "Sequence %s\n", sequences[i]);
+        if(sequences[i]){
+            uint32_t myFeatureIndex=0;
+            char my_matching_sequence[LINE_LENGTH];
+            uint16_t my_match_position=0;
+            if (orientations[i] != 1){
+                process_feature_sequence(sequences[i], features, maxHammingDistance, nThreads, feature_constant_offset, max_feature_n, &myFeatureIndex, &myHammingDistance, my_matching_sequence, &my_match_position);
+                if (myFeatureIndex && myHammingDistance == best_hamming_distance) {
+                    if (best_feature_index) {
+                        ambiguous = 1;
+                    }
+                    else {
+                        //first time we have a match
+                        ambiguous = 0;
+                        best_hamming_distance = myHammingDistance;
+                        best_feature_index = myFeatureIndex;
+                        best_match_position=my_match_position;
+                        strcpy(best_matching_sequence, my_matching_sequence);
+                    }
+                }
+                else if (myFeatureIndex && myHammingDistance < best_hamming_distance) {
+                    ambiguous = 0;
+                    best_hamming_distance = myHammingDistance;
+                    best_feature_index = myFeatureIndex;
+                    best_match_position=my_match_position;
+                    strcpy(best_matching_sequence, my_matching_sequence);
+                }
+            }
+            if (orientations[i] != 0){
+                char reverse_sequence[LINE_LENGTH];
+                strcpy(reverse_sequence, sequences[i]);
+                reverse_complement_in_place(reverse_sequence);
+                process_feature_sequence(reverse_sequence, features, maxHammingDistance, nThreads, feature_constant_offset, max_feature_n, &myFeatureIndex, &myHammingDistance, my_matching_sequence, &my_match_position);
+            }
+        }
+    }
+    if (ambiguous || myHammingDistance > maxHammingDistance) {
+        *feature_index = 0;
+        *hamming_distance = best_hamming_distance;
+    } else {
+        *feature_index = best_feature_index;
+        *hamming_distance = best_hamming_distance;
+        *match_position = best_match_position;
+        if (best_feature_index) {
+            strcpy(matching_sequence, best_matching_sequence);
+        }
+    }
+}
+void process_feature_sequence(char *sequence, feature_arrays *features, int maxHammingDistance, int nThreads, int feature_constant_offset, int max_feature_n, uint32_t *feature_index, int *hamming_distance, char *matching_sequence, uint16_t *match_position) {
+    if (feature_mode_bootstrap_reads > 0 && features && features->feature_anchors && features->feature_anchor_lengths && features->feature_offsets) {
+        const size_t read_len = strlen(sequence);
+        unsigned long long seen = __sync_add_and_fetch(&feature_mode_reads_seen, 1);
+        if (feature_mode_bootstrap_done == 0 && seen >= (unsigned long long)feature_mode_bootstrap_reads) {
+            if (__sync_bool_compare_and_swap(&feature_mode_bootstrap_done, 0, 2)) {
+                feature_mode_finalize(features);
+                __sync_synchronize();
+                feature_mode_bootstrap_done = 1;
+            }
+        }
+
+        if (feature_mode_bootstrap_done == 1) {
+            int bestHamming = maxHammingDistance + 1;
+            uint32_t bestFeature = 0;
+            uint16_t bestPos = 0;
+            char ambiguous = 0;
+
+            for (int j = 0; j < features->number_of_features; j++) {
+                int mode_offset = feature_mode_offsets ? feature_mode_offsets[j] : -1;
+                if (mode_offset < 0) {
+                    continue;
+                }
+                int offsets[3] = {0, -1, 1};
+                for (int k = 0; k < 3; k++) {
+                    int current_offset = mode_offset + offsets[k];
+                    if (current_offset < 0 || (size_t)current_offset + features->feature_lengths[j] > read_len) {
+                        continue;
+                    }
+                    int tmp_hamming = 0;
+                    uint32_t idx = simpleCorrectFeature(sequence + current_offset, features, max_feature_n, maxHammingDistance, &tmp_hamming);
+                    if (idx == (uint32_t)(j + 1)) {
+                        if (tmp_hamming < bestHamming) {
+                            bestHamming = tmp_hamming;
+                            bestFeature = idx;
+                            bestPos = (uint16_t)current_offset;
+                            ambiguous = 0;
+                        } else if (tmp_hamming == bestHamming && bestFeature != idx) {
+                            ambiguous = 1;
+                        }
+                    }
+                }
+            }
+            if (!ambiguous && bestFeature && bestHamming <= maxHammingDistance) {
+                *feature_index = bestFeature;
+                *hamming_distance = bestHamming;
+                *match_position = bestPos;
+                memcpy(matching_sequence, sequence + bestPos, features->feature_lengths[bestFeature - 1]);
+                matching_sequence[features->feature_lengths[bestFeature - 1]] = '\0';
+            } else {
+                *feature_index = 0;
+                *hamming_distance = bestHamming;
+            }
+            return;
+        }
+
+        // Bootstrap phase: require anchor; try mode if available, else scan anchor
+        int bestHamming = maxHammingDistance + 1;
+        uint32_t bestFeature = 0;
+        uint16_t bestPos = 0;
+        char ambiguous = 0;
+
+        for (int j = 0; j < features->number_of_features; j++) {
+            int anchor_len = (int)features->feature_anchor_lengths[j];
+            int offset = features->feature_offsets[j];
+            if (anchor_len <= 0 || offset < 0) {
+                continue;
+            }
+            const char *anchor = features->feature_anchors[j];
+            int mode_offset = feature_mode_offsets ? feature_mode_offsets[j] : -1;
+            int matched = 0;
+
+            if (mode_offset >= 0) {
+                int anchor_pos = mode_offset - offset;
+                if (anchor_pos >= 0 && (size_t)anchor_pos + anchor_len <= read_len &&
+                    memcmp(sequence + anchor_pos, anchor, (size_t)anchor_len) == 0) {
+                    int offsets[3] = {0, -1, 1};
+                    for (int k = 0; k < 3; k++) {
+                        int current_offset = mode_offset + offsets[k];
+                        if (current_offset < 0 || (size_t)current_offset + features->feature_lengths[j] > read_len) {
+                            continue;
+                        }
+                        int tmp_hamming = 0;
+                        uint32_t idx = simpleCorrectFeature(sequence + current_offset, features, max_feature_n, maxHammingDistance, &tmp_hamming);
+                        if (idx == (uint32_t)(j + 1)) {
+                            matched = 1;
+                            feature_mode_record(idx, current_offset);
+                            if (tmp_hamming < bestHamming) {
+                                bestHamming = tmp_hamming;
+                                bestFeature = idx;
+                                bestPos = (uint16_t)current_offset;
+                                ambiguous = 0;
+                            } else if (tmp_hamming == bestHamming && bestFeature != idx) {
+                                ambiguous = 1;
+                            }
+                            break;
+                        }
+                    }
+                    if (matched) {
+                        continue;
+                    }
+                    // anchor present at mode but feature not found: skip anchor scan
+                    continue;
+                }
+            }
+
+            // anchor scan fallback
+            const char *pos = strstr(sequence, anchor);
+            while (pos) {
+                int anchor_pos = (int)(pos - sequence);
+                int bc_pos = anchor_pos + offset;
+                int offsets[3] = {0, -1, 1};
+                for (int k = 0; k < 3; k++) {
+                    int current_offset = bc_pos + offsets[k];
+                    if (current_offset < 0 || (size_t)current_offset + features->feature_lengths[j] > read_len) {
+                        continue;
+                    }
+                    int tmp_hamming = 0;
+                    uint32_t idx = simpleCorrectFeature(sequence + current_offset, features, max_feature_n, maxHammingDistance, &tmp_hamming);
+                    if (idx == (uint32_t)(j + 1)) {
+                        matched = 1;
+                        feature_mode_record(idx, current_offset);
+                        if (tmp_hamming < bestHamming) {
+                            bestHamming = tmp_hamming;
+                            bestFeature = idx;
+                            bestPos = (uint16_t)current_offset;
+                            ambiguous = 0;
+                        } else if (tmp_hamming == bestHamming && bestFeature != idx) {
+                            ambiguous = 1;
+                        }
+                        break;
+                    }
+                }
+                if (matched) {
+                    break;
+                }
+                pos = strstr(pos + 1, anchor);
+            }
+        }
+
+        if (!ambiguous && bestFeature && bestHamming <= maxHammingDistance) {
+            *feature_index = bestFeature;
+            *hamming_distance = bestHamming;
+            *match_position = bestPos;
+            memcpy(matching_sequence, sequence + bestPos, features->feature_lengths[bestFeature - 1]);
+            matching_sequence[features->feature_lengths[bestFeature - 1]] = '\0';
+        } else {
+            *feature_index = 0;
+            *hamming_distance = bestHamming;
+        }
+        return;
+    }
+    if (require_feature_anchor_match) {
+        if (features && features->feature_anchors && features->feature_anchor_lengths && features->feature_offsets) {
+            const size_t read_len = strlen(sequence);
+            for (int j = 0; j < features->number_of_features; j++) {
+                int anchor_len = (int)features->feature_anchor_lengths[j];
+                int offset = features->feature_offsets[j];
+                if (anchor_len <= 0 || offset < 0) {
+                    continue;
+                }
+                const char *anchor = features->feature_anchors[j];
+                const char *pos = strstr(sequence, anchor);
+                while (pos) {
+                    int anchor_pos = (int)(pos - sequence);
+                    int bc_pos = anchor_pos + offset;
+                    if (bc_pos >= 0 && (size_t)bc_pos + features->feature_lengths[j] <= read_len) {
+                        int tmp_hamming = 0;
+                        uint32_t idx = simpleCorrectFeature(sequence + bc_pos, features, max_feature_n, maxHammingDistance, &tmp_hamming);
+                        if (idx == (uint32_t)(j + 1)) {
+                            *feature_index = idx;
+                            *hamming_distance = tmp_hamming;
+                            *match_position = (uint16_t)bc_pos;
+                            memcpy(matching_sequence, sequence + bc_pos, features->feature_lengths[j]);
+                            matching_sequence[features->feature_lengths[j]] = '\0';
+                            return;
+                        }
+                    }
+                    pos = strstr(pos + 1, anchor);
+                }
+            }
+        }
+        *feature_index = 0;
+        *hamming_distance = maxHammingDistance + 1;
+        return;
+    }
+    if (use_feature_anchor_search && features && features->feature_anchors && features->feature_anchor_lengths && features->feature_offsets) {
+        const size_t read_len = strlen(sequence);
+        for (int j = 0; j < features->number_of_features; j++) {
+            int anchor_len = (int)features->feature_anchor_lengths[j];
+            int offset = features->feature_offsets[j];
+            if (anchor_len <= 0 || offset < 0) {
+                continue;
+            }
+            const char *anchor = features->feature_anchors[j];
+            const char *pos = strstr(sequence, anchor);
+            while (pos) {
+                int anchor_pos = (int)(pos - sequence);
+                int bc_pos = anchor_pos + offset;
+                if (bc_pos >= 0 && (size_t)bc_pos + features->feature_lengths[j] <= read_len) {
+                    int tmp_hamming = 0;
+                    uint32_t idx = simpleCorrectFeature(sequence + bc_pos, features, max_feature_n, maxHammingDistance, &tmp_hamming);
+                    if (idx == (uint32_t)(j + 1)) {
+                        *feature_index = idx;
+                        *hamming_distance = tmp_hamming;
+                        *match_position = (uint16_t)bc_pos;
+                        memcpy(matching_sequence, sequence + bc_pos, features->feature_lengths[j]);
+                        matching_sequence[features->feature_lengths[j]] = '\0';
+                        return;
+                    }
+                }
+                pos = strstr(pos + 1, anchor);
+            }
+        }
+    }
+    if (!use_feature_offset_array && limit_search != -1 && feature_constant_offset > 0) {
+        int bestHammingDistance = maxHammingDistance + 1;
+        uint32_t bestFeatureIndex = 0;
+        uint16_t bestMatchPosition = 0;
+        char ambiguous = 0;
+
+        for (int i = 0; i <= limit_search; i++) {
+            // For i=0, this checks offset 0. For i>0, it checks +i and -i.
+            for (int sign = 1; sign >= -1; sign -= 2) {
+                if (i == 0 && sign == -1) continue; // Only check offset 0 once
+
+                int offset_delta = i * sign;
+                int current_offset = feature_constant_offset + offset_delta;
+                if (current_offset < 0) continue;
+
+                int currentHammingDistance = 0;
+                uint32_t currentFeatureIndex = simpleCorrectFeature(sequence + current_offset, features, max_feature_n, maxHammingDistance, &currentHammingDistance);
+
+                if (currentFeatureIndex) {
+                    // If a perfect match is found, we can exit immediately.
+                    if (currentHammingDistance == 0) {
+                        *feature_index = currentFeatureIndex;
+                        *hamming_distance = 0;
+                        *match_position = current_offset;
+                        memcpy(matching_sequence, sequence + current_offset, features->feature_lengths[currentFeatureIndex - 1]);
+                        matching_sequence[features->feature_lengths[currentFeatureIndex - 1]] = '\0';
+                        return;
+                    }
+
+                    if (currentHammingDistance < bestHammingDistance) {
+                        bestHammingDistance = currentHammingDistance;
+                        bestFeatureIndex = currentFeatureIndex;
+                        bestMatchPosition = current_offset;
+                        ambiguous = 0;
+                    } else if (currentHammingDistance == bestHammingDistance) {
+                        if (bestFeatureIndex != currentFeatureIndex) {
+                            ambiguous = 1;
+                        }
+                    }
+                }
+            }
+        }
+
+        if (!ambiguous && bestFeatureIndex) {
+            *feature_index = bestFeatureIndex;
+            *hamming_distance = bestHammingDistance;
+            *match_position = bestMatchPosition;
+            memcpy(matching_sequence, sequence + bestMatchPosition, features->feature_lengths[bestFeatureIndex - 1]);
+            matching_sequence[features->feature_lengths[bestFeatureIndex - 1]] = '\0';
+        } else {
+            *feature_index = 0;
+            *hamming_distance = bestHammingDistance;
+        }
+        return;
+    }
+    int bestHammingDistance=0;
+    int variableMaxHammingDistance=maxHammingDistance;
+    uint32_t myFeatureIndex=0;
+    if (!use_feature_offset_array && feature_constant_offset > 0) {
+        int constantHammingDistance=0;
+        myFeatureIndex = simpleCorrectFeature(sequence + feature_constant_offset, features, max_feature_n, maxHammingDistance, &constantHammingDistance);
+        if (myFeatureIndex ) {
+            // need to have feature_index -1 because the feature index is 1 based but array in struct is 0 based
+            memcpy(matching_sequence, sequence + feature_constant_offset, features->feature_lengths[myFeatureIndex - 1]);
+            matching_sequence[features->feature_lengths[myFeatureIndex - 1]] = '\0';
+            *match_position = feature_constant_offset;
+            bestHammingDistance=constantHammingDistance;
+            variableMaxHammingDistance=constantHammingDistance;
+            //return immediately if we have a match with distance 0 (no need to check the variable hamming distance because it is the best if it also matches the offset)
+            if (constantHammingDistance == 0) {
+                *feature_index = myFeatureIndex;
+                *hamming_distance = bestHammingDistance;
+                return;
+            }
+        }
+        //repeat with feature_constant_offset - 1 and +1 tried higher changes but seem worse
+        int minusOne_feature_constant_offset = feature_constant_offset - 1;
+        int minusOneFeatureIndex = simpleCorrectFeature(sequence + minusOne_feature_constant_offset, features, max_feature_n, maxHammingDistance, &constantHammingDistance);
+        if (minusOneFeatureIndex && constantHammingDistance == 0) {
+            *feature_index = minusOneFeatureIndex;
+            *hamming_distance = bestHammingDistance;
+            *match_position = minusOne_feature_constant_offset;
+            return;
+        }
+        if (minusOneFeatureIndex && constantHammingDistance < bestHammingDistance) {
+            bestHammingDistance=constantHammingDistance;
+            myFeatureIndex=minusOneFeatureIndex;
+            *match_position = minusOne_feature_constant_offset;
+        }
+        int plusOne_feature_constant_offset = feature_constant_offset + 1;
+        int plusOneFeatureIndex = simpleCorrectFeature(sequence + plusOne_feature_constant_offset, features, max_feature_n, maxHammingDistance, &constantHammingDistance);
+        if (plusOneFeatureIndex && constantHammingDistance == 0) {
+            *feature_index = plusOneFeatureIndex;
+            *hamming_distance = bestHammingDistance;
+            *match_position = plusOne_feature_constant_offset;
+            return;
+        }
+        if (plusOneFeatureIndex && constantHammingDistance < bestHammingDistance) {
+            bestHammingDistance=constantHammingDistance;
+            myFeatureIndex=plusOneFeatureIndex;
+            *match_position = plusOne_feature_constant_offset;
+        }
+
+    }
+    if (myFeatureIndex && bestHammingDistance) {
+        char ambiguous = 0;
+        char new_matching_sequence[LINE_LENGTH];
+        uint16_t new_match_position;
+        int variableHammingDistance=variableMaxHammingDistance;
+        int new_feature_index = checkAndCorrectFeature(sequence, features, variableMaxHammingDistance, nThreads, &variableHammingDistance, new_matching_sequence, max_feature_n, &ambiguous, &new_match_position);
+        if (variableHammingDistance < variableMaxHammingDistance) {
+            myFeatureIndex = new_feature_index; // even if zero keep the new feature index because that would mean ambiguity
+            strcpy(matching_sequence, new_matching_sequence);
+            bestHammingDistance=variableHammingDistance;
+            *match_position=new_match_position;
+        }
+    } else if (!myFeatureIndex) {
+        char ambiguous = 0;
+        char new_matching_sequence[LINE_LENGTH];
+        uint16_t new_match_position;
+        int variableHammingDistance=maxHammingDistance;
+        int newFeatureIndex = checkAndCorrectFeature(sequence, features, variableMaxHammingDistance, nThreads, &variableHammingDistance, new_matching_sequence, max_feature_n, &ambiguous, &new_match_position);
+        if (!ambiguous && newFeatureIndex && variableHammingDistance <= maxHammingDistance) {
+            bestHammingDistance=variableHammingDistance;
+            strcpy(matching_sequence, new_matching_sequence);
+            myFeatureIndex = newFeatureIndex;
+            *match_position=new_match_position;
+        }
+    }
+    if (bestHammingDistance > maxHammingDistance) {
+        myFeatureIndex = 0;
+    }
+    *feature_index = myFeatureIndex;
+    *hamming_distance = bestHammingDistance;
+}
+void *consume_reads(void *arg) {
+    fastq_processor *processor_args = (fastq_processor *)arg;
+    const int nsets = processor_args->nsets;
+    fastq_reader_set **reader_sets = processor_args->reader_sets;
+    const sample_args *sample_args = processor_args->sample_args;
+
+    // Use thread-local statistics and hashes
+    statistics *stats;  
+    data_structures *hashes;  
+    memory_pool_collection *pools;  
+    const int thread_id = processor_args->thread_id;  
+    // default to global (legacy) structures  
+    stats  = &sample_args->stats[thread_id];  
+    hashes = &sample_args->hashes[thread_id];  
+    pools  = sample_args->pools[thread_id];
+
+    int done=0;
+    //first one is always barcode
+    char *lines_buffer=malloc(6*LINE_LENGTH);
+    char *lines[6];
+    char done_flags[nsets];
+    memset(done_flags, 0, nsets*sizeof(char));
+    const int feature_constant_offset = sample_args->feature_constant_offset;
+    const int barcode_constant_offset = sample_args->barcode_constant_offset;
+    feature_arrays *features = sample_args->features;
+    const int maxHammingDistance = sample_args->maxHammingDistance;
+    const int nThreads = sample_args->nThreads;
+    int nreaders=(reader_sets[0]->forward_reader && reader_sets[0]->reverse_reader)?3:2;
+    const int lines_per_block=2*nreaders;           /* NEW – 4 or 6 lines */
+    pf_trace_reads_init_once();
+    pf_trace_anchor_init_once();
+    for (int i=0; i<6; i++){
+        lines[i]=lines_buffer+i*LINE_LENGTH;
+    }
+    char **barcode_lines = lines;
+    char **forward_lines = 0;
+    char **reverse_lines = 0;
+    if (nreaders == 3) {
+        forward_lines= lines + 2;
+        reverse_lines = lines + 4;
+    }
+    if (nreaders == 2) {
+        if (reader_sets[0]->forward_reader) {
+            forward_lines = lines + 2;
+        }
+        else {
+            reverse_lines = lines + 2;
+        }
+    }
+    while (!done) {
+        // will store 0 type (barcode)
+        int data_available = 0;
+        for (int i = 0; i < nsets; i++) {
+            if (done_flags[i]){
+                continue;
+            }
+            fastq_reader_set *set = reader_sets[i];
+            //check the mutexes
+            pthread_mutex_lock(&set->mutex);
+
+            while (set->filled < lines_per_block && !set->done)
+                pthread_cond_wait(&set->can_consume, &set->mutex);
+
+            if (set->done && set->filled == 0) {
+                pthread_mutex_unlock(&set->mutex);
+                done_flags[i] = 1;
+                continue;
+            }
+
+            /* If we fall through, there's either data or it's the end */
+            if (set->filled == 0) { // This means set->done must be true
+                pthread_mutex_unlock(&set->mutex);
+                done_flags[i] = 1;
+                continue;
+            }
+            
+            /* we have a data block – copy it out */
+            data_available = 1; // We found work
+            size_t c = set->consume_index;
+            strcpy(barcode_lines[0], set->buffer[c]);
+            strcpy(barcode_lines[1], set->buffer[(c+1) % set->read_buffer_lines]);
+
+            if (forward_lines) {
+                strcpy(forward_lines[0], set->buffer[(c+2) % set->read_buffer_lines]);
+                strcpy(forward_lines[1], set->buffer[(c+3) % set->read_buffer_lines]);
+            }
+            if (reverse_lines) {
+                int off = (nreaders == 3) ? 4 : 2;
+                strcpy(reverse_lines[0], set->buffer[(c+off) % set->read_buffer_lines]);
+                strcpy(reverse_lines[1], set->buffer[(c+off+1) % set->read_buffer_lines]);
+            }
+            //signal that the data has been consumed
+            set->consume_index = (set->consume_index + lines_per_block) % set->read_buffer_lines;
+            set->filled      -= lines_per_block;
+            pthread_cond_signal(&set->can_produce);
+            pthread_mutex_unlock(&set->mutex);
+            //process the data
+            char matching_sequence[LINE_LENGTH];
+            int hamming_distance = 0;
+            uint32_t feature_index = 0;
+            uint16_t match_position = 0;
+            int missing_flag=0;
+            int barcode_ok = 0;
+            if (forward_lines && reverse_lines) {
+                char *sequences[2]={0,0};
+                int orientations[2]={0,0};
+                sequences[0] = forward_lines[0];
+                sequences[1] = reverse_lines[0];
+                orientations[0] = 1;
+                orientations[1] = 0;
+                process_multiple_feature_sequences(2, sequences, orientations, features, maxHammingDistance, nThreads, feature_constant_offset, max_feature_n, &feature_index, &hamming_distance, matching_sequence, &match_position);
+            }
+            else {
+                char *sequence=(forward_lines)?forward_lines[0]:reverse_lines[0];
+                process_feature_sequence(sequence, features, maxHammingDistance, nThreads, feature_constant_offset, max_feature_n, &feature_index, &hamming_distance, matching_sequence, &match_position);
+            }
+
+            // The mutex is removed from here
+            if (feature_index){
+                // need to have feature_index -1 because the feature index is 1 based but array in struct is 0 based
+                matching_sequence[features->feature_lengths[feature_index - 1]] = '\0';
+                insert_feature_sequence(matching_sequence, feature_index, hamming_distance, match_position, hashes, pools);
+                barcode_ok = checkAndCorrectBarcode(barcode_lines, max_barcode_n, feature_index, match_position, hashes, pools, stats, barcode_constant_offset);
+            }
+            else{
+                missing_flag=1;
+            }
+            if (pf_trace_anchor_enabled && features && features->feature_anchors && features->feature_anchor_lengths && features->feature_offsets) {
+                char *barcode_seq = barcode_lines[0] + barcode_constant_offset;
+                char barcode_str[barcode_length + 1];
+                memcpy(barcode_str, barcode_seq, barcode_length);
+                barcode_str[barcode_length] = '\0';
+                if (!pf_trace_anchor_list ||
+                    pf_trace_list_contains(pf_trace_anchor_list, barcode_str)) {
+                    if (pf_trace_anchor_all || feature_index == 0) {
+                        if (pf_trace_anchor_max == 0 || pf_trace_anchor_emitted < pf_trace_anchor_max) {
+                            char umi_str[umi_length + 1];
+                            char feat_read[LINE_LENGTH];
+                            const char *sequence = (forward_lines) ? forward_lines[0] : reverse_lines[0];
+                            strncpy(feat_read, sequence, LINE_LENGTH - 1);
+                            feat_read[LINE_LENGTH - 1] = '\0';
+                            pf_trace_trim_newline(feat_read);
+                            memcpy(umi_str, barcode_seq + barcode_length, umi_length);
+                            umi_str[umi_length] = '\0';
+                            fprintf(pf_trace_anchor_fp,
+                                    "ANCHOR_TRACE bc=%s umi=%s feature_index=%u match_pos=%u seq=%s\n",
+                                    barcode_str, umi_str, feature_index, match_position, feat_read);
+                            const size_t read_len = strlen(feat_read);
+                            for (int j = 0; j < features->number_of_features; j++) {
+                                int anchor_len = (int)features->feature_anchor_lengths[j];
+                                int offset = features->feature_offsets[j];
+                                if (anchor_len <= 0 || offset < 0) {
+                                    continue;
+                                }
+                                const char *anchor = features->feature_anchors[j];
+                                const char *pos = strstr(feat_read, anchor);
+                                if (pos) {
+                                    int anchor_pos = (int)(pos - feat_read);
+                                    int bc_pos = anchor_pos + offset;
+                                    int tmp_hamming = 0;
+                                    uint32_t idx = 0;
+                                    if (bc_pos >= 0 && (size_t)bc_pos + features->feature_lengths[j] <= read_len) {
+                                        idx = simpleCorrectFeature(feat_read + bc_pos, features, max_feature_n, maxHammingDistance, &tmp_hamming);
+                                    }
+                                    fprintf(pf_trace_anchor_fp,
+                                            "  hit feat=%u name=%s anchor_pos=%d bc_pos=%d idx=%u hamming=%d\n",
+                                            j + 1, features->feature_names[j], anchor_pos, bc_pos, idx, tmp_hamming);
+                                }
+                            }
+                            pf_trace_anchor_emitted++;
+                        }
+                    }
+                }
+            }
+            if (barcode_ok && pf_trace_reads_enabled) {
+                char *barcode_seq = barcode_lines[0] + barcode_constant_offset;
+                char barcode_str[barcode_length + 1];
+                memcpy(barcode_str, barcode_seq, barcode_length);
+                barcode_str[barcode_length] = '\0';
+                if (!pf_trace_reads_list ||
+                    pf_trace_list_contains(pf_trace_reads_list, barcode_str)) {
+                    char umi_str[umi_length + 1];
+                    char bc_read[LINE_LENGTH];
+                    char feat_read[LINE_LENGTH];
+                    memcpy(umi_str, barcode_seq + barcode_length, umi_length);
+                    umi_str[umi_length] = '\0';
+                    strncpy(bc_read, barcode_lines[0], LINE_LENGTH - 1);
+                    bc_read[LINE_LENGTH - 1] = '\0';
+                    pf_trace_trim_newline(bc_read);
+                    feat_read[0] = '\0';
+                    if (forward_lines) {
+                        strncpy(feat_read, forward_lines[0], LINE_LENGTH - 1);
+                        feat_read[LINE_LENGTH - 1] = '\0';
+                        pf_trace_trim_newline(feat_read);
+                    } else if (reverse_lines) {
+                        strncpy(feat_read, reverse_lines[0], LINE_LENGTH - 1);
+                        feat_read[LINE_LENGTH - 1] = '\0';
+                        pf_trace_trim_newline(feat_read);
+                    }
+                    fprintf(pf_trace_reads_fp,
+                            "READ bc=%s umi=%s feat=%u match_pos=%u bc_seq=%s feat_seq=%s\n",
+                            barcode_str, umi_str, feature_index, match_position, bc_read, feat_read);
+                }
+            }
+            stats->number_of_reads++;
+            if (stats->number_of_reads % 1000000 == 0)
+            {
+                double elapsed_time = get_time_in_seconds() - stats->start_time;
+                fprintf(stderr, "Processed %ld million reads in %.1f seconds\n", stats->number_of_reads / 1000000, elapsed_time);
+            }
+            if (missing_flag){
+                stats->nMismatches++;
+                stats->total_unmatched_features++;
+            }
+            break; // Exit the for loop to process the data
+        }
+        for (int i=0; i<nsets; i++){
+            if (!done_flags[i]){
+                done=0;
+                break;
+            }
+            done=1;
+        }
+        if(!done && !data_available){
+            sched_yield();
+        }
+    }
+    //free the lines buffer
+    free(lines_buffer);
+    pthread_exit(NULL);
+}
+void free_fastq_reader(fastq_reader *reader) {
+    if (reader == NULL) return;
+    // The gz_pointer is closed by the reader thread itself.
+    free(reader->concatenated_filenames);
+    free(reader->filenames);
+    free(reader); // Free the reader struct itself here.
+}
+void free_fastq_reader_set(fastq_reader_set *reader_set) {
+    free_fastq_reader(reader_set->barcode_reader);
+    if (reader_set->forward_reader) {
+        free_fastq_reader(reader_set->forward_reader);
+    }
+    if (reader_set->reverse_reader) {
+        free_fastq_reader(reader_set->reverse_reader);
+    }
+    free(reader_set->buffer);
+    free(reader_set->buffer_storage);
+    pthread_mutex_destroy(&reader_set->mutex);
+    pthread_cond_destroy(&reader_set->can_produce);
+    pthread_cond_destroy(&reader_set->can_consume);
+    free(reader_set);
+}
+void free_fastq_processor(fastq_processor *processor_args) {
+    for (int i = 0; i < processor_args->nsets; i++) {
+        if (processor_args->reader_sets[i]) {
+            free_fastq_reader_set(processor_args->reader_sets[i]);
+        }
+    }
+    pthread_mutex_destroy(&processor_args->process_mutex);
+}
+void merge_stats(statistics *merged_stats, statistics *thread_stats) {
+    merged_stats->nMismatches += thread_stats->nMismatches;
+    merged_stats->recovered += thread_stats->recovered;
+    merged_stats->pending += thread_stats->pending;
+    merged_stats->valid += thread_stats->valid;
+    merged_stats->pending_recovered += thread_stats->pending_recovered;
+    merged_stats->total_unmatched_features += thread_stats->total_unmatched_features;
+    merged_stats->number_of_reads += thread_stats->number_of_reads;
+}
+
+typedef struct {
+    void *dst_hash;
+    memory_pool_collection *dst_pool;
+} merge_context;
+
+void merge_feature_counts(uint32_t key, void *value, void *user_data)
+{
+    merge_context *ctx = (merge_context *)user_data;
+    khash_t(u32ptr) *dst = (khash_t(u32ptr)*)ctx->dst_hash;
+    feature_counts *src_entry = (feature_counts *)value;
+    khint_t k = kh_get(u32ptr, dst, key);
+    feature_counts *dst_entry = (k != kh_end(dst)) ? (feature_counts*)kh_val(dst, k) : NULL;
+
+    if (dst_entry) {
+        /* merge the per-barcode feature counters */
+        khint_t ksrc;
+        for (ksrc = kh_begin(src_entry->counts); ksrc != kh_end(src_entry->counts); ++ksrc) {
+            if (!kh_exist(src_entry->counts, ksrc)) continue;
+            uint32_t feat_key = kh_key(src_entry->counts, ksrc);
+            uint32_t add_val = kh_val(src_entry->counts, ksrc);
+            khint_t kdst = kh_get(u32u32, dst_entry->counts, feat_key);
+            if (kdst != kh_end(dst_entry->counts)) {
+                kh_val(dst_entry->counts, kdst) += add_val;
+            } else {
+                int ret;
+                khint_t kh = kh_put(u32u32, dst_entry->counts, feat_key, &ret);
+                kh_val(dst_entry->counts, kh) = add_val;
+            }
+        }
+    } else {
+        dst_entry = (feature_counts*) allocate_memory_from_pool(ctx->dst_pool->feature_counts_pool);
+        memcpy(dst_entry->sequence_code, src_entry->sequence_code, barcode_code_length);
+        dst_entry->counts = kh_init(u32u32);
+        khint_t ksrc;
+        for (ksrc = kh_begin(src_entry->counts); ksrc != kh_end(src_entry->counts); ++ksrc) {
+            if (!kh_exist(src_entry->counts, ksrc)) continue;
+            uint32_t feat_key = kh_key(src_entry->counts, ksrc);
+            uint32_t feat_val = kh_val(src_entry->counts, ksrc);
+            int ret;
+            khint_t kh = kh_put(u32u32, dst_entry->counts, feat_key, &ret);
+            kh_val(dst_entry->counts, kh) = feat_val;
+        }
+        int ret;
+        khint_t kh = kh_put(u32ptr, dst, key, &ret);
+        kh_val(dst, kh) = dst_entry;
+    }
+}
+
+void merge_feature_umi_counts(uint64_t key, void *value, void *user_data)
+{
+    merge_context *ctx = (merge_context *)user_data;
+    khash_t(u64ptr) *dst = (khash_t(u64ptr)*)ctx->dst_hash;
+    feature_umi_counts *src_ent = (feature_umi_counts *)value;
+    khint_t k = kh_get(u64ptr, dst, key);
+    feature_umi_counts *dst_ent = (k != kh_end(dst)) ? (feature_umi_counts*)kh_val(dst, k) : NULL;
+
+    if (dst_ent) {
+        /* Same barcode-UMI already present – add the counters */
+        khint_t ksrc;
+        for (ksrc = kh_begin(src_ent->counts); ksrc != kh_end(src_ent->counts); ++ksrc) {
+            if (!kh_exist(src_ent->counts, ksrc)) continue;
+            uint32_t feat_key = kh_key(src_ent->counts, ksrc);
+            uint32_t add_val = kh_val(src_ent->counts, ksrc);
+            khint_t kdst = kh_get(u32u32, dst_ent->counts, feat_key);
+            if (kdst != kh_end(dst_ent->counts)) {
+                kh_val(dst_ent->counts, kdst) += add_val;
+            } else {
+                int ret;
+                khint_t kh = kh_put(u32u32, dst_ent->counts, feat_key, &ret);
+                kh_val(dst_ent->counts, kh) = add_val;
+            }
+        }
+    } else {
+        /* Key not present – copy the whole struct into the dst pool and table  */
+        dst_ent = (feature_umi_counts*) allocate_memory_from_pool(ctx->dst_pool->feature_umi_counts_pool);
+        memcpy(dst_ent->sequence_umi_code, src_ent->sequence_umi_code, 8);
+        dst_ent->counts = kh_init(u32u32);
+        khint_t ksrc;
+        for (ksrc = kh_begin(src_ent->counts); ksrc != kh_end(src_ent->counts); ++ksrc) {
+            if (!kh_exist(src_ent->counts, ksrc)) continue;
+            uint32_t feat_key = kh_key(src_ent->counts, ksrc);
+            uint32_t feat_val = kh_val(src_ent->counts, ksrc);
+            int ret;
+            khint_t kh = kh_put(u32u32, dst_ent->counts, feat_key, &ret);
+            kh_val(dst_ent->counts, kh) = feat_val;
+        }
+        int ret;
+        khint_t kh = kh_put(u64ptr, dst, key, &ret);
+        kh_val(dst, kh) = dst_ent;
+    }
+}
+
+void merge_feature_sequences(const char *key, void *value, void *user_data) {
+    merge_context *ctx = (merge_context *)user_data;
+    khash_t(strptr) *merged_hash = (khash_t(strptr)*)ctx->dst_hash;
+    feature_sequences *thread_entry = (feature_sequences *)value;
+    khint_t k = kh_get(strptr, merged_hash, key);
+    feature_sequences *merged_entry = (k != kh_end(merged_hash)) ? (feature_sequences*)kh_val(merged_hash, k) : NULL;
+    if (merged_entry) {
+        merged_entry->counts += thread_entry->counts;
+    } else {
+        merged_entry = (feature_sequences*) allocate_memory_from_pool(ctx->dst_pool->feature_sequences_pool);
+        memcpy(merged_entry, thread_entry, dynamic_struct_sizes.feature_sequences);
+        int ret;
+        khint_t kh = kh_put(strptr, merged_hash, merged_entry->sequence, &ret);
+        kh_val(merged_hash, kh) = merged_entry;
+    }
+}
+
+void merge_queues(Queue *dest_q, Queue *src_q) {
+    if (!src_q || !src_q->data) return;
+    
+    while(!is_empty(src_q)){
+        enqueue(dest_q, dequeue(src_q));
+    }
+}
+
+void merge_unmatched_barcodes(unmatched_barcodes_features_block_list *merged_list, unmatched_barcodes_features_block_list *thread_list, memory_pool_collection *merged_pool) {
+    unmatched_barcodes_features_block *current_block = thread_list->first_entry;
+    while (current_block) {
+        unmatched_barcodes_features_block *new_block = (unmatched_barcodes_features_block*)allocate_memory_from_pool(merged_pool->unmatched_barcodes_features_block_pool);
+        
+        // Copy the data, excluding the 'next' pointer which will be set manually.
+        memcpy(new_block, current_block, dynamic_struct_sizes.unmatched_barcodes_features_block);
+        new_block->next = NULL;
+
+        // Append to merged list
+        if (merged_list->last_entry) {
+            merged_list->last_entry->next = new_block;
+            merged_list->last_entry = new_block;
+        } else {
+            merged_list->first_entry = new_block;
+            merged_list->last_entry = new_block;
+        }
+        current_block = current_block->next;
+    }
+
+    // Detach the thread list
+    thread_list->first_entry = NULL;
+    thread_list->last_entry = NULL;
+}
+void process_files_in_sample(sample_args *args) {
+    //allocate buffers here
+    //number of lines to read into the buffer
+    double  min_posterior=args->min_posterior;
+    // gposterior removed - EM functionality no longer needed
+    const int sample_index = args->sample_index;
+    const int nconsumers = args->consumer_threads_per_set;
+    fastq_processor processor_args[nconsumers]; // Array of processor args
+
+    fastq_files_collection *fastq_files=args->fastq_files;
+    const int sample_offset=fastq_files->sample_offsets[sample_index];
+    const int sample_size=fastq_files->sample_sizes[sample_index];
+    
+
+    if (args->filtered_barcodes_name && !args->filtered_barcodes_hash) {
+        fprintf(stderr, "Looking for filtered barcodes file at %s\n", args->filtered_barcodes_name);
+        char filtered_path[FILENAME_LENGTH];
+        snprintf(filtered_path, FILENAME_LENGTH, "%s/%s", args->directory, args->filtered_barcodes_name);
+        if (file_exists(filtered_path)) {
+            args->filtered_barcodes_hash = kh_init(strptr);
+            read_barcodes_into_hash(filtered_path, args->filtered_barcodes_hash);
+        }
+        else {
+            fprintf(stderr, "Error: Filtered barcodes file not found at %s\n", filtered_path);
+        }
+    }
+
+
+    // Allocate and initialize arrays of statistics and data_structures
+    args->stats = malloc(nconsumers * sizeof(statistics));
+    args->hashes = malloc(nconsumers * sizeof(data_structures));
+    args->pools = malloc(nconsumers * sizeof(memory_pool_collection*));
+    if (!args->stats || !args->hashes || !args->pools) {
+        perror("Failed to allocate memory for thread-local data");
+        exit(EXIT_FAILURE);
+    }
+    for (int i = 0; i < nconsumers; i++) {
+        initialize_statistics(&args->stats[i]);
+        initialize_data_structures(&args->hashes[i]);
+        // NEW: Initialize a memory pool for each consumer thread
+        args->pools[i] = initialize_memory_pool_collection();
+    }
+
+    // Initialize the data structures
+    fastq_reader_set *reader_sets[sample_size];
+    for (int i = 0; i < sample_size; ++i) {
+        char **barcode_files = fastq_files->barcode_fastq + sample_offset + i;
+        char **forward_files = (fastq_files->forward_fastq)
+                               ? fastq_files->forward_fastq + sample_offset + i
+                               : NULL;
+        char **reverse_files = (fastq_files->reverse_fastq)
+                               ? fastq_files->reverse_fastq + sample_offset + i
+                               : NULL;
+
+        reader_sets[i] = allocate_fastq_reader_set(barcode_files ,
+                                                   forward_files ,
+                                                   reverse_files ,
+                                                   /* nfiles = */ 1,
+                                                   args->average_read_length,
+                                                   args->read_buffer_lines);
+        reader_sets[i]->thread_id = i;
+    }
+
+    for (int i = 0; i < nconsumers; ++i) {
+        processor_args[i].sample_args  = args;
+        processor_args[i].reader_sets  = reader_sets;   /* array you built */
+        processor_args[i].nsets        = sample_size;   /* one entry per lane */
+        processor_args[i].thread_id    = i;
+        processor_args[i].nreaders     = (fastq_files->forward_fastq &&
+                                           fastq_files->reverse_fastq) ? 3 : 2;
+
+        pthread_mutex_init(&processor_args[i].process_mutex, NULL);
+    }
+
+    pthread_t *producer_threads = malloc(sample_size * sizeof(pthread_t));
+    for (int i = 0; i < sample_size; ++i) {
+        if (pthread_create(&producer_threads[i],
+                           NULL,
+                           read_fastqs_by_set,
+                           reader_sets[i]) != 0)
+        {
+            perror("Failed to create producer thread");
+            exit(EXIT_FAILURE);
+        }
+    }
+    pthread_t consumer_threads[nconsumers];
+    fprintf(stderr, "Will use %d threads to process the reads\n", nconsumers);
+    for (int j=0; j<nconsumers; j++){
+        if (pthread_create(&consumer_threads[j], NULL, consume_reads, (void *)&processor_args[j]) != 0) {
+            perror("Failed to create consumer thread");
+            exit(EXIT_FAILURE);
+        }
+    }
+    //join the threads
+    for (int i = 0; i < sample_size; ++i)
+        pthread_join(producer_threads[i], NULL);
+    free(producer_threads);
+    for (int j=0; j<nconsumers; j++){
+        pthread_join(consumer_threads[j], NULL);
+    }
+    // Merge data from all threads into the first thread's data structures
+    for (int i = 1; i < nconsumers; i++) {
+        merge_stats(&args->stats[0], &args->stats[i]);
+        
+        merge_context ctx;
+        ctx.dst_pool = args->pools[0];
+
+        ctx.dst_hash = args->hashes[0].filtered_hash;
+        khint_t k;
+        for (k = kh_begin(args->hashes[i].filtered_hash); k != kh_end(args->hashes[i].filtered_hash); ++k) {
+            if (!kh_exist(args->hashes[i].filtered_hash, k)) continue;
+            merge_feature_counts(kh_key(args->hashes[i].filtered_hash, k), kh_val(args->hashes[i].filtered_hash, k), &ctx);
+        }
+
+        ctx.dst_hash = args->hashes[0].sequence_umi_hash;
+        for (k = kh_begin(args->hashes[i].sequence_umi_hash); k != kh_end(args->hashes[i].sequence_umi_hash); ++k) {
+            if (!kh_exist(args->hashes[i].sequence_umi_hash, k)) continue;
+            merge_feature_umi_counts(kh_key(args->hashes[i].sequence_umi_hash, k), kh_val(args->hashes[i].sequence_umi_hash, k), &ctx);
+        }
+        
+        ctx.dst_hash = args->hashes[0].unique_features_match;
+        for (k = kh_begin(args->hashes[i].unique_features_match); k != kh_end(args->hashes[i].unique_features_match); ++k) {
+            if (!kh_exist(args->hashes[i].unique_features_match, k)) continue;
+            merge_feature_sequences(kh_key(args->hashes[i].unique_features_match, k), kh_val(args->hashes[i].unique_features_match, k), &ctx);
+        }
+
+        merge_unmatched_barcodes(&args->stats[0].unmatched_list, &args->stats[i].unmatched_list, args->pools[0]);
+        merge_queues(args->hashes[0].neighbors_queue, args->hashes[i].neighbors_queue);
+
+        // After deep copying all data from thread i, we can free its data structures
+        // and its memory pool, as they are no longer needed.
+        destroy_data_structures(&args->hashes[i]);
+        free_memory_pool_collection(args->pools[i]);
+        //[i] = NULL; // Avoid double-free in later cleanup
+    }
+    // Since merging is not required, finalize using the first thread's data.
+    finalize_processing(args->features, &args->hashes[0], args->directory, args->pools[0], &args->stats[0], args->stringency, args->min_counts, min_posterior, args->filtered_barcodes_hash, args->skip_emptydrops, args->emptydrops_failure_fatal, args->expected_cells, args->emptydrops_use_fdr, args->error_out);
+   
+    // Free the reader sets
+    for (int i = 0; i < sample_size; ++i)
+        free_fastq_reader_set(reader_sets[i]);
+    // need to write a free function for reader_sets
+    for (int i = 0; i < nconsumers; i++) {
+        pthread_mutex_destroy(&processor_args[i].process_mutex);
+    }
+    
+    // Now that all processing is complete, clean up the resources from thread 0.
+    destroy_data_structures(&args->hashes[0]);
+    free_memory_pool_collection(args->pools[0]);
+    
+    // Now free the arrays themselves
+    free(args->stats);
+    free(args->hashes);
+    free(args->pools);
+    args->stats = NULL;
+    args->hashes = NULL;
+    args->pools = NULL;
+}
+
+void initialize_data_structures(data_structures *hashes){
+    hashes->filtered_hash = kh_init(u32ptr);
+    hashes->unique_features_match = kh_init(strptr); // Keys/Values are memory-pooled
+    hashes->sequence_umi_hash = kh_init(u64ptr);
+    
+    hashes->neighbors_queue=malloc(sizeof(Queue));
+    //check if the memory allocation was successful
+    if (hashes->neighbors_queue == NULL) {
+        perror("Failed to allocate memory for neighbors queue");
+        exit(EXIT_FAILURE);
+    }
+    init_queue(hashes->neighbors_queue);
+}
+void destroy_data_structures(data_structures *hashes){
+    if (hashes->neighbors_queue){
+        if (hashes->neighbors_queue->data)free_queue(hashes->neighbors_queue);
+        free(hashes->neighbors_queue);
+    }
+    if (hashes->filtered_hash) {
+        // Destroy all feature_counts values
+        khint_t k;
+        for (k = kh_begin(hashes->filtered_hash); k != kh_end(hashes->filtered_hash); ++k) {
+            if (kh_exist(hashes->filtered_hash, k)) {
+                destroy_feature_counts(kh_val(hashes->filtered_hash, k));
+            }
+        }
+        kh_destroy(u32ptr, hashes->filtered_hash);
+    }
+    if (hashes->unique_features_match) kh_destroy(strptr, hashes->unique_features_match);
+    if (hashes->sequence_umi_hash) {
+        // Destroy all feature_umi_counts values
+        khint_t k;
+        for (k = kh_begin(hashes->sequence_umi_hash); k != kh_end(hashes->sequence_umi_hash); ++k) {
+            if (kh_exist(hashes->sequence_umi_hash, k)) {
+                destroy_feature_umi_counts(kh_val(hashes->sequence_umi_hash, k));
+            }
+        }
+        kh_destroy(u64ptr, hashes->sequence_umi_hash);
+    }
+}
+
+
+int existing_output_skip(char keep_existing, char *directory){
+    if (keep_existing && file_exists(directory)){
+        char matrix_filename[4096];
+        strcpy(matrix_filename, directory);
+        strcat(matrix_filename, "matrix.mtx");
+        if (file_exists(matrix_filename)){
+            fprintf(stderr, "Matrix file %s found and skipping %s\n", matrix_filename, get_basename(directory));
+            return 1;
+        }
+    }
+    return 0;
+}
+
+int compare_file_sizes(const void *a, const void *b, void *context) {
+    size_t *sizes = (size_t *)context;
+    int index_a = *(int *)a;
+    int index_b = *(int *)b;
+
+    // Compare sizes in descending order (so larger sizes come first)
+    if (sizes[index_a] < sizes[index_b]) {
+        return 1;
+    } else if (sizes[index_a] > sizes[index_b]) {
+        return -1;
+    } else {
+        return 0;
+    }
+}
+
+// Custom qsort that allows passing a context (like the sizes array)
+void qsort_with_context(void *base, size_t num, size_t size, 
+                        int (*compar)(const void *, const void *, void *), 
+                        void *context) {
+    char *ptr = (char *)base;
+    for (size_t i = 0; i < num - 1; i++) {
+        for (size_t j = i + 1; j < num; j++) {
+            if (compar(ptr + i * size, ptr + j * size, context) > 0) {
+                // Swap the elements
+                char temp[size];
+                memcpy(temp, ptr + i * size, size);
+                memcpy(ptr + i * size, ptr + j * size, size);
+                memcpy(ptr + j * size, temp, size);
+            }
+        }
+    }
+}
+
+// Main function to sort the indices of samples by their size and store the order in sample_order
+void cleanup_sample(memory_pool_collection *pools, data_structures *hashes){
+    destroy_data_structures(hashes);
+    free_memory_pool_collection(pools);
+}
+
+void reverse_in_place(char *str) {
+    if (str) {
+        char *end = str + strlen(str) - 1;
+        while (str < end) {
+            char temp = *str;
+            *str = *end;
+            *end = temp;
+            str++;
+            end--;
+        }
+    }
+}
+char complement(char base) {
+    switch (base) {
+        case 'A': return 'T';
+        case 'T': return 'A';
+        case 'C': return 'G';
+        case 'G': return 'C';
+        default: return base;  // For unexpected characters, return the base itself
+    }
+}
+
+// Function to calculate the reverse complement of a sequence in place
+void reverse_complement_in_place(char *seq) {
+    int left = 0;
+    int right = strlen(seq) - 1;
+
+    // Loop through the sequence from both ends, swapping and complementing
+    while (left <= right) {
+        // Get the complement of both ends
+        char left_complement = complement(seq[left]);
+        char right_complement = complement(seq[right]);
+
+        // Swap the left and right complements
+        seq[left] = right_complement;
+        seq[right] = left_complement;
+
+        left++;
+        right--;
+    }
+}
+
+void reverse_complement_sequence(char *sequence,  char *reverse, int length){
+    for (int i = 0; i < length; i++) {
+        const char comp_base =match[(unsigned char)sequence[length - i - 1]];
+        if (comp_base == 0){
+            fprintf(stderr, "Error: Invalid base %c in sequence %s\n", sequence[length - i - 1], sequence);
+            exit(EXIT_FAILURE);
+        }
+        reverse[i] = comp_base;
+    }
+    reverse[length] = '\0';
+}
+
+static char sample_barcode_buffer[LINE_LENGTH];
+
+char* grab_sample_barcode(char *read, uint16_t feature_end, const sample_args *args){
+    if (!args->sample_barcodes) return NULL;
+    int offset;
+    if (args->sample_constant_offset >= 0) offset = args->sample_constant_offset;
+    else if (args->sample_offset_relative != 0) offset = (int)feature_end + args->sample_offset_relative;
+    else return NULL;
+    const int len = args->sample_barcodes->common_length;
+    if (offset < 0) return NULL;
+    int read_len = strlen(read);
+    if (offset + len > read_len) return NULL;
+    memcpy(sample_barcode_buffer, read + offset, len);
+    sample_barcode_buffer[len] = '\0';
+    return sample_barcode_buffer;
+}
+
+int find_sample_index(char *seq, const sample_args *args, int *hamming){
+    if (!args->sample_barcodes) return 0;
+    if (!seq) return 0;
+    int hd=0;
+    char dummy_match[LINE_LENGTH];
+    uint16_t dummy_pos=0;
+    int idx = checkAndCorrectFeature(seq, args->sample_barcodes, args->sample_max_hamming, /*threads*/1, &hd, dummy_match, args->sample_max_N, NULL, &dummy_pos);
+    if (hamming) *hamming = hd;
+    if (idx==0) return 0; // undetermined
+    return idx; // 1-based index into sample_barcodes
+}
+
+
+
+
+
+void translate_nxt_inplace(char *barcode, int len) {
+    if (!barcode) return;
+    if (len >= 9) {
+        barcode[7] = complement(barcode[7]);
+        barcode[8] = complement(barcode[8]);
+    }
+}

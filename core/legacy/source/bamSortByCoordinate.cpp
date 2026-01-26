@@ -311,3 +311,97 @@ void bamSortByCoordinate (Parameters &P, ReadAlignChunk **RAchunk, Genome &genom
         };
     };    
 };
+
+// Finalize unsorted BAM with CB/UB tag injection
+// Uses g_unsortedTagBuffer which buffers records in noSort mode during mapping
+void bamUnsortedWithTags(Parameters &P, Genome &genome, Solo &solo) {
+    if (g_unsortedTagBuffer == nullptr) {
+        return;  // Not in buffered mode
+    }
+    
+    *P.inOut->logStdOut << timeMonthDayTime() << " ..... writing unsorted BAM with CB/UB tags\n" << flush;
+    P.inOut->logMain << timeMonthDayTime() << " ..... writing unsorted BAM with CB/UB tags\n" << flush;
+    
+    // Finalize the buffer (no sorting due to noSort mode)
+    g_unsortedTagBuffer->finalize();
+    
+    // Open output BAM file
+    BGZF* bgzfOut = bgzf_open(P.outBAMfileUnsortedName.c_str(),
+                              ("w" + to_string((long long)P.outBAMcompression)).c_str());
+    if (bgzfOut == nullptr) {
+        ostringstream errOut;
+        errOut << "EXITING because of fatal ERROR: could not open output unsorted bam file: " << P.outBAMfileUnsortedName << "\n";
+        errOut << "SOLUTION: check that the disk is not full";
+        exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
+    }
+    
+    // Write BAM header
+    outBAMwriteHeader(bgzfOut, P.samHeader, genome.chrNameAll, genome.chrLengthAll);
+    
+    // Optional Y/noY split files
+    BGZF* bgzfY = nullptr;
+    BGZF* bgzfNoY = nullptr;
+    if (P.emitNoYBAMyes) {
+        bgzfY = bgzf_open(P.outBAMfileYName.c_str(),
+                          ("w" + to_string((long long)P.outBAMcompression)).c_str());
+        if (bgzfY == nullptr) {
+            ostringstream errOut;
+            errOut << "EXITING because of fatal ERROR: could not open Y bam file\n";
+            exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
+        }
+        outBAMwriteHeader(bgzfY, P.samHeader, genome.chrNameAll, genome.chrLengthAll);
+        
+        bgzfNoY = bgzf_open(P.outBAMfileNoYName.c_str(),
+                            ("w" + to_string((long long)P.outBAMcompression)).c_str());
+        if (bgzfNoY == nullptr) {
+            ostringstream errOut;
+            errOut << "EXITING because of fatal ERROR: could not open noY bam file\n";
+            exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
+        }
+        outBAMwriteHeader(bgzfNoY, P.samHeader, genome.chrNameAll, genome.chrLengthAll);
+    }
+    
+    // Temp buffer for tag injection
+    char bam1[BAM_ATTR_MaxSize];
+    
+    // Stream records with tag injection
+    const char* bamData;
+    uint32_t bamSize;
+    uint32_t readId;
+    bool hasY;
+    uint64_t recordCount = 0;
+    
+    while (g_unsortedTagBuffer->nextRecord(&bamData, &bamSize, &readId, &hasY)) {
+        char* bam0 = const_cast<char*>(bamData);
+        uint32 size0 = bamSize;
+        
+        // Inject CB/UB tags using the same path as sorted BAM
+        if (solo.pSolo.samAttrYes) {
+            solo.soloFeat[solo.pSolo.featureInd[solo.pSolo.samAttrFeature]]
+                ->addBAMtags(bam0, size0, bam1, readId);
+        }
+        
+        // Write to output (bam0/size0 may point to bam1 after tag injection)
+        bgzf_write(bgzfOut, bam0, size0);
+        
+        // Y/noY split
+        if (P.emitNoYBAMyes) {
+            // Check if this alignment is Y-chromosome
+            bool isYChrom = hasY || isYChromosome(bam0, genome);
+            bgzf_write(isYChrom ? bgzfY : bgzfNoY, bam0, size0);
+        }
+        
+        recordCount++;
+    }
+    
+    // Close output files
+    bgzf_close(bgzfOut);
+    if (bgzfY) bgzf_close(bgzfY);
+    if (bgzfNoY) bgzf_close(bgzfNoY);
+    
+    P.inOut->logMain << "Unsorted BAM with CB/UB tags completed: " << recordCount << " records\n";
+    
+    // Cleanup
+    delete g_unsortedTagBuffer;
+    g_unsortedTagBuffer = nullptr;
+};

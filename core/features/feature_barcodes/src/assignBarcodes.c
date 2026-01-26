@@ -12,10 +12,115 @@
 //will  print if DEBUG is set or debug=1
 //code for feature sequences stats
 
-//code for heatmap generation
-#ifndef NO_HEATMAP
-// Heatmap functionality is now in src/heatmap.c
-#endif
+static int trace_key_counts_inited = 0;
+static int trace_key_counts_enabled = 0;
+static unsigned long long trace_key1_counts = 0;
+static unsigned long long trace_key2_counts = 0;
+static uint32_t trace_current_bcode_key = 0;
+
+// Optional per-read debug logging for a target barcode (env-driven).
+static int qname_debug_enabled = -1; // -1 = uninitialized, 0 = off, 1 = on
+static char qname_target_barcode[64];
+static FILE *qname_fp = NULL;
+static pthread_mutex_t qname_mutex = PTHREAD_MUTEX_INITIALIZER;
+static char qname_out_path[FILENAME_LENGTH];
+
+static void feature_mode_record(int feature_index, int offset) {
+    if (!feature_mode_hist || !feature_mode_offsets) {
+        return;
+    }
+    if (offset < 0 || offset >= feature_mode_max_offset) {
+        return;
+    }
+    const int idx = (feature_index - 1) * feature_mode_max_offset + offset;
+    __sync_fetch_and_add(&feature_mode_hist[idx], 1);
+}
+
+static void feature_mode_finalize(const feature_arrays *features) {
+    if (!features || !feature_mode_hist || !feature_mode_offsets) {
+        return;
+    }
+    for (int j = 0; j < features->number_of_features; j++) {
+        unsigned int best_count = 0;
+        int best_offset = -1;
+        const int base = j * feature_mode_max_offset;
+        for (int off = 0; off < feature_mode_max_offset; off++) {
+            unsigned int c = feature_mode_hist[base + off];
+            if (c > best_count) {
+                best_count = c;
+                best_offset = off;
+            }
+        }
+        feature_mode_offsets[j] = (best_count > 0) ? best_offset : -1;
+    }
+}
+
+static void init_qname_debug_env(void) {
+    if (qname_debug_enabled != -1) {
+        return;
+    }
+    const char *env = getenv("ASSIGNBARCODES_QNAME_BARCODE");
+    if (!env || !*env) {
+        qname_debug_enabled = 0;
+        return;
+    }
+    qname_debug_enabled = 1;
+    strncpy(qname_target_barcode, env, sizeof(qname_target_barcode) - 1);
+    qname_target_barcode[sizeof(qname_target_barcode) - 1] = '\0';
+    // Strip suffix like -1 if present.
+    char *dash = strrchr(qname_target_barcode, '-');
+    if (dash && dash[1] && strspn(dash + 1, "0123456789") == strlen(dash + 1)) {
+        *dash = '\0';
+    }
+}
+
+static void ensure_qname_debug_file(const char *directory) {
+    if (qname_debug_enabled != 1) {
+        return;
+    }
+    if (qname_fp) {
+        return;
+    }
+    pthread_mutex_lock(&qname_mutex);
+    if (!qname_fp) {
+        const char *out = getenv("ASSIGNBARCODES_QNAME_OUT");
+        if (out && *out) {
+            snprintf(qname_out_path, sizeof(qname_out_path), "%s", out);
+        } else if (directory && *directory) {
+            snprintf(qname_out_path, sizeof(qname_out_path),
+                     "%s/assignBarcodes_qnames_%s.tsv",
+                     directory, qname_target_barcode);
+        } else {
+            snprintf(qname_out_path, sizeof(qname_out_path),
+                     "assignBarcodes_qnames_%s.tsv",
+                     qname_target_barcode);
+        }
+        qname_fp = fopen(qname_out_path, "w");
+        if (qname_fp) {
+            fprintf(qname_fp,
+                    "qname\tbarcode\tumi\tfeature_index\tfeature_name\thamming_distance\tmatch_position\tmatching_sequence\n");
+        } else {
+            fprintf(stderr, "Warning: failed to open qname debug output %s\n", qname_out_path);
+        }
+    }
+    pthread_mutex_unlock(&qname_mutex);
+}
+
+static void extract_qname(const char *header, char *out, size_t out_len) {
+    if (!header || !out || out_len == 0) {
+        return;
+    }
+    const char *p = header;
+    if (*p == '@') {
+        p++;
+    }
+    size_t i = 0;
+    while (*p && *p != ' ' && *p != '\t' && *p != '\n' && i + 1 < out_len) {
+        out[i++] = *p++;
+    }
+    out[i] = '\0';
+}
+
 
 void destroy_feature_counts(gpointer data) {
     feature_counts *fc = (feature_counts*)data;
@@ -561,6 +666,23 @@ int find_matches_in_sub_arrays(unsigned char *sequence_code, unsigned char *feat
     return minHammingDistance;
 }
 
+static int find_matches_at_code_offset(unsigned char *sequence_code,
+                                       unsigned char *feature_code,
+                                       size_t sequence_code_length,
+                                       size_t feature_code_length,
+                                       size_t feature_length,
+                                       int maxHammingDistance,
+                                       int code_offset){
+    if (code_offset < 0) return maxHammingDistance + 1;
+    if ((size_t)code_offset + feature_code_length > sequence_code_length){
+        return maxHammingDistance + 1;
+    }
+    if (!find_matching_codes(sequence_code + code_offset, feature_code, feature_code_length, feature_length)){
+        return 0;
+    }
+    return fuzzy_matching_codes(sequence_code + code_offset, feature_code, feature_code_length, feature_length, maxHammingDistance);
+}
+
 int checkSequenceAndCorrectForN(char *line, char *corrected_lines[], char *buffer,int sequence_length, int maxN){
     int nCount=0;
     int indices[maxN];
@@ -734,10 +856,26 @@ int find_feature_match_single(feature_arrays *features, char *lineR2, int maxHam
     int bestHammingDistance=maxHammingDistance; 
     int best_sequence_offset=0;
     int ambiguous=0;
+    const int use_offsets = (use_feature_offset_array && feature_offsets && feature_offsets_count >= features->number_of_features);
     for (int i=0; i<4; i++){
         for (int j=0; j<features->number_of_features; j++){
             int code_offset=0;
-            int hammingDistance=find_matches_in_sub_arrays(codes[i], features->feature_codes[j], code_lengths[i], features->feature_code_lengths[j],features->feature_lengths[j], maxHammingDistance, &code_offset);
+            int hammingDistance;
+            if (use_offsets) {
+                /* feature_offsets is 0-based; index j corresponds to feature index (j+1) */
+                int expected_offset = feature_offsets[j];
+                if (expected_offset < 0 || expected_offset < i) {
+                    continue;
+                }
+                int delta = expected_offset - i;
+                if (delta % 4 != 0) {
+                    continue;
+                }
+                code_offset = delta / 4;
+                hammingDistance = find_matches_at_code_offset(codes[i], features->feature_codes[j], code_lengths[i], features->feature_code_lengths[j], features->feature_lengths[j], maxHammingDistance, code_offset);
+            } else {
+                hammingDistance = find_matches_in_sub_arrays(codes[i], features->feature_codes[j], code_lengths[i], features->feature_code_lengths[j],features->feature_lengths[j], maxHammingDistance, &code_offset);
+            }
             if (!hammingDistance){
                 *bestScore=0;
                 best_feature=j+1;
@@ -752,7 +890,14 @@ int find_feature_match_single(feature_arrays *features, char *lineR2, int maxHam
                 ambiguous=0;
             }
             else if (hammingDistance == bestHammingDistance){
-                ambiguous=1;
+                if (best_feature){
+                    ambiguous=1;
+                }
+                else{
+                    best_feature=j+1;
+                    best_sequence_offset=i+4*code_offset;
+                    ambiguous=0;
+                }
             }
         }
     }
@@ -788,13 +933,29 @@ int find_feature_match_parallel(feature_arrays *features, char *lineR2, int maxH
     int best_matching_indices[4]={0,0,0,0};
 
     int exact_match_found=0;
+    const int use_offsets = (use_feature_offset_array && feature_offsets && feature_offsets_count >= features->number_of_features);
     #pragma omp parallel for num_threads(nThreads)
     for (int i=0; i<4; i++){
         //get the thread number
         const int thread_num=omp_get_thread_num();
         for (int j=0; j<features->number_of_features && !exact_match_found; j++){
             int code_offset=0;
-            int hammingDistance=find_matches_in_sub_arrays(codes[i], features->feature_codes[j], code_lengths[i], features->feature_code_lengths[j],features->feature_lengths[j], maxHammingDistance, &code_offset);
+            int hammingDistance;
+            if (use_offsets) {
+                /* feature_offsets is 0-based; index j corresponds to feature index (j+1) */
+                int expected_offset = feature_offsets[j];
+                if (expected_offset < 0 || expected_offset < i) {
+                    continue;
+                }
+                int delta = expected_offset - i;
+                if (delta % 4 != 0) {
+                    continue;
+                }
+                code_offset = delta / 4;
+                hammingDistance = find_matches_at_code_offset(codes[i], features->feature_codes[j], code_lengths[i], features->feature_code_lengths[j], features->feature_lengths[j], maxHammingDistance, code_offset);
+            } else {
+                hammingDistance = find_matches_in_sub_arrays(codes[i], features->feature_codes[j], code_lengths[i], features->feature_code_lengths[j],features->feature_lengths[j], maxHammingDistance, &code_offset);
+            }
             if (!hammingDistance){
                 *bestScore=0;
                 exact_match_found=1;
@@ -833,6 +994,9 @@ int find_feature_match_parallel(feature_arrays *features, char *lineR2, int maxH
     int best_code_offset=0;
     int best_i=0;
     for (int i=0; i<nThreads; i++){
+        if (!best_match[i]){
+            continue;
+        }
         if (bestHammingDistances[i] < bestFeatureDistance){
             bestFeatureDistance=bestHammingDistances[i];
             best_feature=best_match[i];
@@ -991,6 +1155,19 @@ void find_deduped_counts(data_structures *hashes, GHashTable* barcode_to_deduped
     gpointer lookup_key, result;
     g_hash_table_iter_init(&iter, hashes->sequence_umi_hash);
     uint32_t clique_counts[number_of_features+1];
+    const uint32_t trace_key1 = 0xbc43274bU; /* CAGTAGCTCAATGTTA */
+    const uint32_t trace_key2 = 0xcb4b2fb9U; /* GTGCAGTTCAGTTAGT */
+    if (!trace_key_counts_inited) {
+        trace_key_counts_inited = 1;
+        const char *env = getenv("PF_TRACE_DEDUP_KEYCOUNTS");
+        if (env && env[0] && strcmp(env, "0") != 0) {
+            trace_key_counts_enabled = 1;
+        }
+    }
+    if (trace_key_counts_enabled) {
+        trace_key1_counts = 0;
+        trace_key2_counts = 0;
+    }
     
     // Create tracking set for barcodes that might need cleanup (empty after deduping)
     GHashTable *empty_candidates = g_hash_table_new(g_direct_hash, g_direct_equal);
@@ -1007,6 +1184,7 @@ void find_deduped_counts(data_structures *hashes, GHashTable* barcode_to_deduped
         feature_counts *s = g_hash_table_lookup(hashes->filtered_hash, umi_counts->sequence_umi_code);
         if (s) {
             // Get or create the inner hash table for this barcode's deduped counts
+            trace_current_bcode_key = *(uint32_t*)s->sequence_code;
             GHashTable* temp_deduped_hash = g_hash_table_lookup(barcode_to_deduped_counts, s->sequence_code);
             if (temp_deduped_hash == NULL) {
                 temp_deduped_hash = g_hash_table_new(g_direct_hash, g_direct_equal);
@@ -1041,6 +1219,11 @@ void find_deduped_counts(data_structures *hashes, GHashTable* barcode_to_deduped
         }
     }
     g_hash_table_destroy(empty_candidates);
+    if (trace_key_counts_enabled) {
+        fprintf(stderr,
+                "DEDUP_WINNER_KEYCOUNTS key1=0x%08x count=%llu key2=0x%08x count=%llu\n",
+                trace_key1, trace_key1_counts, trace_key2, trace_key2_counts);
+    }
 }
 
 void find_connected_component(gpointer start_key, uint32_t *counts, data_structures *hashes){
@@ -1068,6 +1251,8 @@ void find_connected_component(gpointer start_key, uint32_t *counts, data_structu
  */
  void add_deduped_count(GHashTable* temp_deduped_hash, uint32_t *clique_counts, uint16_t stringency, uint16_t min_counts) {
     uint32_t winning_feature_index = 0;
+    const uint32_t trace_key1 = 0xbc43274bU; /* CAGTAGCTCAATGTTA */
+    const uint32_t trace_key2 = 0xcb4b2fb9U; /* GTGCAGTTCAGTTAGT */
 
     // --- STRINGENCY LOGIC (Restored from original code) ---
     if (!stringency) {
@@ -1097,7 +1282,7 @@ void find_connected_component(gpointer start_key, uint32_t *counts, data_structu
                 total_counts = clique_counts[i];
             }
         }
-        if (feature_index && total_counts > min_counts) {
+        if (feature_index && total_counts >= min_counts) {
             winning_feature_index = feature_index;
         }
     } else {
@@ -1118,13 +1303,20 @@ void find_connected_component(gpointer start_key, uint32_t *counts, data_structu
                 }
             }
         }
-        if (unique && (double)max_counts > total_counts * stringency / 1000.0 && total_counts > min_counts) {
+        if (unique && (double)max_counts > total_counts * stringency / 1000.0 && total_counts >= min_counts) {
             winning_feature_index = feature_index;
         }
     }
 
     // --- If a single winner was found, increment its count in the temporary hash table ---
     if (winning_feature_index > 0) {
+        if (trace_key_counts_enabled && winning_feature_index == 11) {
+            if (trace_current_bcode_key == trace_key1) {
+                trace_key1_counts++;
+            } else if (trace_current_bcode_key == trace_key2) {
+                trace_key2_counts++;
+            }
+        }
         uintptr_t current_deduped_count = GPOINTER_TO_UINT(
             g_hash_table_lookup(temp_deduped_hash, GUINT_TO_POINTER(winning_feature_index))
         );
@@ -1132,6 +1324,18 @@ void find_connected_component(gpointer start_key, uint32_t *counts, data_structu
         g_hash_table_replace(temp_deduped_hash, 
                              GUINT_TO_POINTER(winning_feature_index), 
                              GUINT_TO_POINTER(current_deduped_count));
+        // DEDUP_TRACE: log when feature 11 wins for specific barcodes
+        if (winning_feature_index == 11) {
+            const uint32_t trace_key1 = 0x4b2743bcU; /* CAGTAGCTCAATGTTA */
+            const uint32_t trace_key2 = 0xb92f4bcbU; /* GTGCAGTTCAGTTAGT */
+            if (trace_current_bcode_key == trace_key1 || trace_current_bcode_key == trace_key2) {
+                char bcode_str[barcode_length + 1];
+                unsigned char key_code[barcode_code_length];
+                memcpy(key_code, &trace_current_bcode_key, barcode_code_length);
+                code2string(key_code, bcode_str, barcode_code_length);
+                fprintf(stderr, "DEDUP_TRACE key=%s feature=11 count+=1\n", bcode_str);
+            }
+        }
     }
 }
 
@@ -1183,6 +1387,9 @@ static void build_cumulative_feature_hist(feature_arrays *features,
 void printFeatureCounts(feature_arrays *features, int *deduped_counts, int *barcoded_counts, GArray **feature_hist, char *directory, data_structures *hashes, statistics *stats, GHashTable *barcode_to_deduped_hash, GHashTable *filtered_barcodes_hash){
     int total_deduped_counts = 0;
     int total_raw_counts = 0;
+    static int trace_matrix_inited = 0;
+    static int trace_matrix_enabled = 0;
+    static int trace_matrix_feature = 0;
     char barcodes_file[FILENAME_LENGTH];
     char stats_file[FILENAME_LENGTH];
 
@@ -1211,6 +1418,16 @@ void printFeatureCounts(feature_arrays *features, int *deduped_counts, int *barc
     if (matrixfp == NULL) {
         fprintf(stderr, "Error opening matrix file %s\n", matrix_file);
         exit(1);
+    }
+    if (!trace_matrix_inited) {
+        trace_matrix_inited = 1;
+        const char *env = getenv("PF_TRACE_MATRIX_FEATURE");
+        if (env && env[0]) {
+            trace_matrix_feature = atoi(env);
+            if (trace_matrix_feature > 0) {
+                trace_matrix_enabled = 1;
+            }
+        }
     }
     
     // --- Step 2: Calculate stats and write the Matrix Market header ---
@@ -1393,6 +1610,11 @@ void printFeatureCounts(feature_arrays *features, int *deduped_counts, int *barc
 
                 update_feature_hist(feature_hist, f_idx, c);
                 fprintf(matrixfp, "%d %d %d\n", GPOINTER_TO_INT(dedup_key), total_barcodes + 1, deduped_count);
+                if (trace_matrix_enabled && f_idx == trace_matrix_feature) {
+                    fprintf(stderr,
+                            "MATRIX_TRACE barcode=%s feature=%d count=%d\n",
+                            barcode, f_idx, deduped_count);
+                }
                 total_deduped_counts += deduped_count;
                 
             }
@@ -1994,9 +2216,9 @@ void finalize_processing(feature_arrays *features, data_structures *hashes,  cha
     fprintf(stderr, "Finished processing %ld reads in %.2f seconds (%.1f thousand reads/second)\n", stats->number_of_reads, elapsed_time, stats->number_of_reads / (double)elapsed_time / 1000.0);
 
     //find size of whitelist_hash and non_whitelist_hash
-    int total_feature_counts[features->number_of_features];
-    int total_deduped_counts[features->number_of_features];
-    int total_barcoded_counts[features->number_of_features];
+    int total_feature_counts[features->number_of_features + 1];
+    int total_deduped_counts[features->number_of_features + 1];
+    int total_barcoded_counts[features->number_of_features + 1];
 
     GArray **feature_hist = g_new0(GArray*, features->number_of_features + 1);
 
@@ -2160,10 +2382,12 @@ void *read_fastqs_by_set(void *arg) {
     fastq_reader_set *set = (fastq_reader_set *)arg;
     const int thread_id = set->thread_id;
     long long number_of_reads=0;
+    init_qname_debug_env();
+    const int has_barcode_header = (qname_debug_enabled == 1);
     const int number_of_readers = (set->forward_reader != NULL) + (set->reverse_reader != NULL) + 1;
     fastq_reader *readers[number_of_readers];
     readers[0]  = set->barcode_reader;
-    const int lines_per_block   = 2 * number_of_readers;
+    const int lines_per_block   = 2 * number_of_readers + (has_barcode_header ? 1 : 0);
     const int read_buffer_lines = set->read_buffer_lines;
     if (set->forward_reader != NULL) {
         readers[1] = set->forward_reader;
@@ -2172,6 +2396,7 @@ void *read_fastqs_by_set(void *arg) {
         readers[number_of_readers - 1] = set->reverse_reader;
     }
 
+    char line0[number_of_readers][LINE_LENGTH];
     char line1[number_of_readers][LINE_LENGTH];
     char line2[number_of_readers][LINE_LENGTH];
     char dummy_line[LINE_LENGTH];
@@ -2189,7 +2414,9 @@ void *read_fastqs_by_set(void *arg) {
     while(!done){
         int eof_detected = 0;
         for (int j = 0; j < number_of_readers; j++) {
-            if (gzgets(readers[j]->gz_pointer, dummy_line, LINE_LENGTH) == Z_NULL ||
+            if (((has_barcode_header && j == 0)
+                 ? gzgets(readers[j]->gz_pointer, line0[j], LINE_LENGTH)
+                 : gzgets(readers[j]->gz_pointer, dummy_line, LINE_LENGTH)) == Z_NULL ||
                 gzgets(readers[j]->gz_pointer, line1[j], LINE_LENGTH) == Z_NULL ||
                 gzgets(readers[j]->gz_pointer, dummy_line, LINE_LENGTH) == Z_NULL ||
                 gzgets(readers[j]->gz_pointer, line2[j], LINE_LENGTH) == Z_NULL)
@@ -2240,10 +2467,17 @@ void *read_fastqs_by_set(void *arg) {
 
         size_t p = set->produce_index;
         /* barcode (always) */
-        strcpy(set->buffer[p],                             line1[0]);
-        strcpy(set->buffer[(p+1)%read_buffer_lines],       line2[0]);
-
-        int offset = 2;   /* start of next reader's lines */
+        int offset = 0;
+        if (has_barcode_header) {
+            strcpy(set->buffer[p],                             line0[0]);
+            strcpy(set->buffer[(p+1)%read_buffer_lines],       line1[0]);
+            strcpy(set->buffer[(p+2)%read_buffer_lines],       line2[0]);
+            offset = 3;   /* start of next reader's lines */
+        } else {
+            strcpy(set->buffer[p],                             line1[0]);
+            strcpy(set->buffer[(p+1)%read_buffer_lines],       line2[0]);
+            offset = 2;   /* start of next reader's lines */
+        }
         int r_idx  = 1;   /* reader index we are copying from */
 
         if (set->forward_reader) {            /* forward read present */
@@ -2331,7 +2565,221 @@ void process_multiple_feature_sequences(int nsequences, char **sequences, int *o
     }
 }
 void process_feature_sequence(char *sequence, feature_arrays *features, int maxHammingDistance, int nThreads, int feature_constant_offset, int max_feature_n, uint32_t *feature_index, int *hamming_distance, char *matching_sequence, uint16_t *match_position) {
-    if (limit_search != -1 && feature_constant_offset > 0) {
+    if (feature_mode_bootstrap_reads > 0 && features && features->feature_anchors && features->feature_anchor_lengths && features->feature_offsets) {
+        const size_t read_len = strlen(sequence);
+        unsigned long long seen = __sync_add_and_fetch(&feature_mode_reads_seen, 1);
+        if (feature_mode_bootstrap_done == 0 && seen >= (unsigned long long)feature_mode_bootstrap_reads) {
+            if (__sync_bool_compare_and_swap(&feature_mode_bootstrap_done, 0, 2)) {
+                feature_mode_finalize(features);
+                __sync_synchronize();
+                feature_mode_bootstrap_done = 1;
+            }
+        }
+
+        if (feature_mode_bootstrap_done == 1) {
+            int bestHamming = maxHammingDistance + 1;
+            uint32_t bestFeature = 0;
+            uint16_t bestPos = 0;
+            char ambiguous = 0;
+
+            for (int j = 0; j < features->number_of_features; j++) {
+                int mode_offset = feature_mode_offsets ? feature_mode_offsets[j] : -1;
+                if (mode_offset < 0) {
+                    continue;
+                }
+                int offsets[3] = {0, -1, 1};
+                for (int k = 0; k < 3; k++) {
+                    int current_offset = mode_offset + offsets[k];
+                    if (current_offset < 0 || (size_t)current_offset + features->feature_lengths[j] > read_len) {
+                        continue;
+                    }
+                    int tmp_hamming = 0;
+                    uint32_t idx = simpleCorrectFeature(sequence + current_offset, features, max_feature_n, maxHammingDistance, &tmp_hamming);
+                    if (idx == (uint32_t)(j + 1)) {
+                        if (tmp_hamming < bestHamming) {
+                            bestHamming = tmp_hamming;
+                            bestFeature = idx;
+                            bestPos = (uint16_t)current_offset;
+                            ambiguous = 0;
+                        } else if (tmp_hamming == bestHamming && bestFeature != idx) {
+                            ambiguous = 1;
+                        }
+                    }
+                }
+            }
+            if (!ambiguous && bestFeature && bestHamming <= maxHammingDistance) {
+                *feature_index = bestFeature;
+                *hamming_distance = bestHamming;
+                *match_position = bestPos;
+                memcpy(matching_sequence, sequence + bestPos, features->feature_lengths[bestFeature - 1]);
+                matching_sequence[features->feature_lengths[bestFeature - 1]] = '\0';
+            } else {
+                *feature_index = 0;
+                *hamming_distance = bestHamming;
+            }
+            return;
+        }
+
+        // Bootstrap phase: require anchor; try mode if available, else scan anchor
+        int bestHamming = maxHammingDistance + 1;
+        uint32_t bestFeature = 0;
+        uint16_t bestPos = 0;
+        char ambiguous = 0;
+
+        for (int j = 0; j < features->number_of_features; j++) {
+            int anchor_len = (int)features->feature_anchor_lengths[j];
+            int offset = features->feature_offsets[j];
+            if (anchor_len <= 0 || offset < 0) {
+                continue;
+            }
+            const char *anchor = features->feature_anchors[j];
+            int mode_offset = feature_mode_offsets ? feature_mode_offsets[j] : -1;
+            int matched = 0;
+
+            if (mode_offset >= 0) {
+                int anchor_pos = mode_offset - offset;
+                if (anchor_pos >= 0 && (size_t)anchor_pos + anchor_len <= read_len &&
+                    memcmp(sequence + anchor_pos, anchor, (size_t)anchor_len) == 0) {
+                    int offsets[3] = {0, -1, 1};
+                    for (int k = 0; k < 3; k++) {
+                        int current_offset = mode_offset + offsets[k];
+                        if (current_offset < 0 || (size_t)current_offset + features->feature_lengths[j] > read_len) {
+                            continue;
+                        }
+                        int tmp_hamming = 0;
+                        uint32_t idx = simpleCorrectFeature(sequence + current_offset, features, max_feature_n, maxHammingDistance, &tmp_hamming);
+                        if (idx == (uint32_t)(j + 1)) {
+                            matched = 1;
+                            feature_mode_record(idx, current_offset);
+                            if (tmp_hamming < bestHamming) {
+                                bestHamming = tmp_hamming;
+                                bestFeature = idx;
+                                bestPos = (uint16_t)current_offset;
+                                ambiguous = 0;
+                            } else if (tmp_hamming == bestHamming && bestFeature != idx) {
+                                ambiguous = 1;
+                            }
+                            break;
+                        }
+                    }
+                    if (matched) {
+                        continue;
+                    }
+                    // anchor present at mode but feature not found: skip anchor scan
+                    continue;
+                }
+            }
+
+            // anchor scan fallback
+            const char *pos = strstr(sequence, anchor);
+            while (pos) {
+                int anchor_pos = (int)(pos - sequence);
+                int bc_pos = anchor_pos + offset;
+                int offsets[3] = {0, -1, 1};
+                for (int k = 0; k < 3; k++) {
+                    int current_offset = bc_pos + offsets[k];
+                    if (current_offset < 0 || (size_t)current_offset + features->feature_lengths[j] > read_len) {
+                        continue;
+                    }
+                    int tmp_hamming = 0;
+                    uint32_t idx = simpleCorrectFeature(sequence + current_offset, features, max_feature_n, maxHammingDistance, &tmp_hamming);
+                    if (idx == (uint32_t)(j + 1)) {
+                        matched = 1;
+                        feature_mode_record(idx, current_offset);
+                        if (tmp_hamming < bestHamming) {
+                            bestHamming = tmp_hamming;
+                            bestFeature = idx;
+                            bestPos = (uint16_t)current_offset;
+                            ambiguous = 0;
+                        } else if (tmp_hamming == bestHamming && bestFeature != idx) {
+                            ambiguous = 1;
+                        }
+                        break;
+                    }
+                }
+                if (matched) {
+                    break;
+                }
+                pos = strstr(pos + 1, anchor);
+            }
+        }
+
+        if (!ambiguous && bestFeature && bestHamming <= maxHammingDistance) {
+            *feature_index = bestFeature;
+            *hamming_distance = bestHamming;
+            *match_position = bestPos;
+            memcpy(matching_sequence, sequence + bestPos, features->feature_lengths[bestFeature - 1]);
+            matching_sequence[features->feature_lengths[bestFeature - 1]] = '\0';
+        } else {
+            *feature_index = 0;
+            *hamming_distance = bestHamming;
+        }
+        return;
+    }
+    if (require_feature_anchor_match) {
+        if (features && features->feature_anchors && features->feature_anchor_lengths && features->feature_offsets) {
+            const size_t read_len = strlen(sequence);
+            for (int j = 0; j < features->number_of_features; j++) {
+                int anchor_len = (int)features->feature_anchor_lengths[j];
+                int offset = features->feature_offsets[j];
+                if (anchor_len <= 0 || offset < 0) {
+                    continue;
+                }
+                const char *anchor = features->feature_anchors[j];
+                const char *pos = strstr(sequence, anchor);
+                while (pos) {
+                    int anchor_pos = (int)(pos - sequence);
+                    int bc_pos = anchor_pos + offset;
+                    if (bc_pos >= 0 && (size_t)bc_pos + features->feature_lengths[j] <= read_len) {
+                        int tmp_hamming = 0;
+                        uint32_t idx = simpleCorrectFeature(sequence + bc_pos, features, max_feature_n, maxHammingDistance, &tmp_hamming);
+                        if (idx == (uint32_t)(j + 1)) {
+                            *feature_index = idx;
+                            *hamming_distance = tmp_hamming;
+                            *match_position = (uint16_t)bc_pos;
+                            memcpy(matching_sequence, sequence + bc_pos, features->feature_lengths[j]);
+                            matching_sequence[features->feature_lengths[j]] = '\0';
+                            return;
+                        }
+                    }
+                    pos = strstr(pos + 1, anchor);
+                }
+            }
+        }
+        *feature_index = 0;
+        *hamming_distance = maxHammingDistance + 1;
+        return;
+    }
+    if (use_feature_anchor_search && features && features->feature_anchors && features->feature_anchor_lengths && features->feature_offsets) {
+        const size_t read_len = strlen(sequence);
+        for (int j = 0; j < features->number_of_features; j++) {
+            int anchor_len = (int)features->feature_anchor_lengths[j];
+            int offset = features->feature_offsets[j];
+            if (anchor_len <= 0 || offset < 0) {
+                continue;
+            }
+            const char *anchor = features->feature_anchors[j];
+            const char *pos = strstr(sequence, anchor);
+            while (pos) {
+                int anchor_pos = (int)(pos - sequence);
+                int bc_pos = anchor_pos + offset;
+                if (bc_pos >= 0 && (size_t)bc_pos + features->feature_lengths[j] <= read_len) {
+                    int tmp_hamming = 0;
+                    uint32_t idx = simpleCorrectFeature(sequence + bc_pos, features, max_feature_n, maxHammingDistance, &tmp_hamming);
+                    if (idx == (uint32_t)(j + 1)) {
+                        *feature_index = idx;
+                        *hamming_distance = tmp_hamming;
+                        *match_position = (uint16_t)bc_pos;
+                        memcpy(matching_sequence, sequence + bc_pos, features->feature_lengths[j]);
+                        matching_sequence[features->feature_lengths[j]] = '\0';
+                        return;
+                    }
+                }
+                pos = strstr(pos + 1, anchor);
+            }
+        }
+    }
+    if (!use_feature_offset_array && limit_search != -1 && feature_constant_offset > 0) {
         int bestHammingDistance = maxHammingDistance + 1;
         uint32_t bestFeatureIndex = 0;
         uint16_t bestMatchPosition = 0;
@@ -2389,7 +2837,7 @@ void process_feature_sequence(char *sequence, feature_arrays *features, int maxH
     int bestHammingDistance=0;
     int variableMaxHammingDistance=maxHammingDistance;
     uint32_t myFeatureIndex=0;
-    if (feature_constant_offset > 0) {
+    if (!use_feature_offset_array && feature_constant_offset > 0) {
         int constantHammingDistance=0;
         myFeatureIndex = simpleCorrectFeature(sequence + feature_constant_offset, features, max_feature_n, maxHammingDistance, &constantHammingDistance);
         if (myFeatureIndex ) {
@@ -2453,7 +2901,7 @@ void process_feature_sequence(char *sequence, feature_arrays *features, int maxH
         uint16_t new_match_position;
         int variableHammingDistance=maxHammingDistance;
         int newFeatureIndex = checkAndCorrectFeature(sequence, features, variableMaxHammingDistance, nThreads, &variableHammingDistance, new_matching_sequence, max_feature_n, &ambiguous, &new_match_position);
-        if (!ambiguous && newFeatureIndex && variableHammingDistance < maxHammingDistance) {
+        if (!ambiguous && newFeatureIndex && variableHammingDistance <= maxHammingDistance) {
             bestHammingDistance=variableHammingDistance;
             strcpy(matching_sequence, new_matching_sequence);
             myFeatureIndex = newFeatureIndex;
@@ -2471,6 +2919,8 @@ void *consume_reads(void *arg) {
     const int nsets = processor_args->nsets;
     fastq_reader_set **reader_sets = processor_args->reader_sets;
     const sample_args *sample_args = processor_args->sample_args;
+    init_qname_debug_env();
+    const int has_barcode_header = (qname_debug_enabled == 1);
 
     // Use thread-local statistics and hashes
     statistics *stats;  
@@ -2494,7 +2944,7 @@ void *consume_reads(void *arg) {
     const int maxHammingDistance = sample_args->maxHammingDistance;
     const int nThreads = sample_args->nThreads;
     int nreaders=(reader_sets[0]->forward_reader && reader_sets[0]->reverse_reader)?3:2;
-    const int lines_per_block=2*nreaders;           /* NEW – 4 or 6 lines */
+    const int lines_per_block=2*nreaders + (has_barcode_header ? 1 : 0);           /* NEW – 4 or 6 lines */
     for (int i=0; i<6; i++){
         lines[i]=lines_buffer+i*LINE_LENGTH;
     }
@@ -2543,17 +2993,27 @@ void *consume_reads(void *arg) {
             /* we have a data block – copy it out */
             data_available = 1; // We found work
             size_t c = set->consume_index;
-            strcpy(barcode_lines[0], set->buffer[c]);
-            strcpy(barcode_lines[1], set->buffer[(c+1) % set->read_buffer_lines]);
+            char barcode_header[LINE_LENGTH];
+            size_t base = c;
+            if (has_barcode_header) {
+                strcpy(barcode_header, set->buffer[c]);
+                strcpy(barcode_lines[0], set->buffer[(c+1) % set->read_buffer_lines]);
+                strcpy(barcode_lines[1], set->buffer[(c+2) % set->read_buffer_lines]);
+                base = (c + 3) % set->read_buffer_lines;
+            } else {
+                strcpy(barcode_lines[0], set->buffer[c]);
+                strcpy(barcode_lines[1], set->buffer[(c+1) % set->read_buffer_lines]);
+                base = (c + 2) % set->read_buffer_lines;
+            }
 
             if (forward_lines) {
-                strcpy(forward_lines[0], set->buffer[(c+2) % set->read_buffer_lines]);
-                strcpy(forward_lines[1], set->buffer[(c+3) % set->read_buffer_lines]);
+                strcpy(forward_lines[0], set->buffer[base % set->read_buffer_lines]);
+                strcpy(forward_lines[1], set->buffer[(base+1) % set->read_buffer_lines]);
+                base = (base + 2) % set->read_buffer_lines;
             }
             if (reverse_lines) {
-                int off = (nreaders == 3) ? 4 : 2;
-                strcpy(reverse_lines[0], set->buffer[(c+off) % set->read_buffer_lines]);
-                strcpy(reverse_lines[1], set->buffer[(c+off+1) % set->read_buffer_lines]);
+                strcpy(reverse_lines[0], set->buffer[base % set->read_buffer_lines]);
+                strcpy(reverse_lines[1], set->buffer[(base+1) % set->read_buffer_lines]);
             }
             //signal that the data has been consumed
             set->consume_index = (set->consume_index + lines_per_block) % set->read_buffer_lines;
@@ -2581,14 +3041,49 @@ void *consume_reads(void *arg) {
             }
 
             // The mutex is removed from here
+            int did_update = 0;
             if (feature_index){
                 // need to have feature_index -1 because the feature index is 1 based but array in struct is 0 based
                 matching_sequence[features->feature_lengths[feature_index - 1]] = '\0';
                 insert_feature_sequence(matching_sequence, feature_index, hamming_distance, match_position, hashes, pools);
-                checkAndCorrectBarcode(barcode_lines, max_barcode_n, feature_index, match_position, hashes, pools, stats, barcode_constant_offset);
+                did_update = checkAndCorrectBarcode(barcode_lines, max_barcode_n, feature_index, match_position, hashes, pools, stats, barcode_constant_offset);
             }
             else{
                 missing_flag=1;
+            }
+            if (did_update && qname_debug_enabled == 1) {
+                // Compare corrected barcode to target and log if it matches.
+                char corrected_barcode[barcode_length + 1];
+                memcpy(corrected_barcode, barcode_lines[0] + barcode_constant_offset, barcode_length);
+                corrected_barcode[barcode_length] = '\0';
+                if (translate_NXT) {
+                    translate_nxt_inplace(corrected_barcode, barcode_length);
+                }
+                if (strcmp(corrected_barcode, qname_target_barcode) == 0) {
+                    ensure_qname_debug_file(sample_args->directory);
+                    if (qname_fp) {
+                        char qname[LINE_LENGTH];
+                        if (has_barcode_header) {
+                            extract_qname(barcode_header, qname, sizeof(qname));
+                        } else {
+                            snprintf(qname, sizeof(qname), "NA");
+                        }
+                        char umi_buf[umi_length + 1];
+                        memcpy(umi_buf,
+                               barcode_lines[0] + barcode_constant_offset + barcode_length,
+                               umi_length);
+                        umi_buf[umi_length] = '\0';
+                        const char *feat_name = (feature_index > 0 && feature_index <= (uint32_t)features->number_of_features)
+                            ? features->feature_names[feature_index - 1]
+                            : "None";
+                        pthread_mutex_lock(&qname_mutex);
+                        fprintf(qname_fp, "%s\t%s\t%s\t%u\t%s\t%d\t%u\t%s\n",
+                                qname, corrected_barcode, umi_buf, feature_index,
+                                feat_name, hamming_distance, match_position, matching_sequence);
+                        fflush(qname_fp);
+                        pthread_mutex_unlock(&qname_mutex);
+                    }
+                }
             }
             stats->number_of_reads++;
             if (stats->number_of_reads % 1000000 == 0)

@@ -122,7 +122,6 @@ STAR_EMIT_READID_TAG=1 STAR_EMIT_CBUB_TABLE=1 "$STAR_BIN" \
   --clipAdapterType CellRanger4 \
   --soloFeatures Gene \
   --alignEndsType Local \
-  --soloAddTagsToUnsorted no \
   --soloStrand Unstranded \
   --chimSegmentMin 1000000 \
   --soloKeysCompat cr \

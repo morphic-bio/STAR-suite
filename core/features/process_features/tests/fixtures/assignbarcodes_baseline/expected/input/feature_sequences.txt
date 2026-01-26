@@ -1,0 +1,6 @@
+Feature Index Sequence Hamming Distance Counts Match Position Feature Name
+      1 ATCGATCGATCGATCG  0       4     0 FeatureA
+      2 GCTAGCTAGCTAGCTA  0       3     0 FeatureB
+      3 TTAATTAATTAATTAA  0       5     0 FeatureC
+      4 CCGGCCGGCCGGCCGG  0       3     0 FeatureD
+      5 AACCGGTTAACCGGTT  0       2     0 FeatureE

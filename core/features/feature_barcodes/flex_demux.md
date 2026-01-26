@@ -41,10 +41,7 @@ Processes STAR Solo-aligned BAM files to produce probe × cell-barcode matrices 
 ```bash
 # Ubuntu/Debian
 sudo apt-get update
-sudo apt-get -y install build-essential zlib1g-dev libglib2.0-dev libcairo2-dev
-
-# Optional: Disable heatmap generation to skip cairo dependency
-make NO_HEATMAP=1
+sudo apt-get -y install build-essential zlib1g-dev libglib2.0-dev
 ```
 
 ### Build

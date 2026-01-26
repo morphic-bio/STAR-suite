@@ -13,12 +13,14 @@ void SoloFeature::resolveCbUb(uint32_t iread, CbUbResult& result) const
     result.cb = "-";
     result.ub = "-";
 
-    // Resolve CB string if status is valid and index is in range
-    if (result.status == 1 && result.cbIdx < pSolo.cbWLstr.size()) {
+    // Resolve CB string if status indicates valid CB (status != 0) and index is in range
+    // status==1: both CB and UMI valid
+    // status==2: CB valid, UMI invalid
+    if (result.status != 0 && result.cbIdx < pSolo.cbWLstr.size()) {
         result.cb = pSolo.cbWLstr[result.cbIdx];
     }
 
-    // Resolve UMI string if status is valid
+    // Resolve UMI string only if status==1 (both CB and UMI valid)
     if (result.status == 1) {
         result.ub.clear();
         result.ub.reserve(pSolo.umiL);

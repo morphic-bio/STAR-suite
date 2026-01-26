@@ -1,0 +1,116 @@
+# CR9 GMM Parity Test Results
+# Date: 2026-01-22
+# Test Data: A375 1k CRISPR 5p GEX (Cell Ranger 9.0.1)
+
+## Test Configuration
+
+CR9 Reference Directory:
+  /storage/A375-CR-9.01/1k_CRISPR_5p_gemx_cr9_01/outs/per_sample_outs/1k_CRISPR_5p_gemx_cr9_01/count/crispr_analysis/
+
+MEX Source (CRISPR features filtered from raw matrix):
+  /storage/A375-CR-9.01/1k_CRISPR_5p_gemx_cr9_01/outs/multi/count/raw_feature_bc_matrix/
+
+Filtered Barcodes:
+  /storage/A375-CR-9.01/1k_CRISPR_5p_gemx_cr9_01/outs/per_sample_outs/1k_CRISPR_5p_gemx_cr9_01/count/sample_filtered_feature_bc_matrix/barcodes.tsv.gz
+  Count: 1352 cells
+
+## UMI Threshold Comparison
+
+Feature              | CR9 | Ours | Match
+---------------------|-----|------|------
+RAB1A-2              |   4 |    4 | YES
+Non_Target-1_MS      |   3 |    3 | YES
+
+## Call Count Comparison
+
+Metric                      | CR9  | Ours | Match
+----------------------------|------|------|------
+RAB1A-2 positive calls      |  516 |  516 | YES
+Non_Target-1_MS positive    |  274 |  274 | YES
+Multiplet calls             |   17 |   17 | YES
+Single-feature calls total  |  790 |  790 | YES
+
+## Per-Cell Call Verification
+
+Single-feature calls (790 total):
+  - Extracted from both outputs, sorted, and compared with diff
+  - Result: IDENTICAL (0 differences)
+
+Command used:
+  tail -n+2 ours.csv | awk -F',' '$2==1' | sort > ours_single.txt
+  tail -n+2 cr9.csv | awk -F',' '$2==1' | sort > cr9_single.txt
+  diff ours_single.txt cr9_single.txt
+  # Exit code 0 (no differences)
+
+## Known Differences
+
+1. Multiplet UMI format (cosmetic):
+   - CR9:  feature1|feature2,umi1|umi2
+   - Ours: feature1|feature2,total_umis
+
+2. Summary CSV format:
+   - Different column names but equivalent data
+
+## Reproduction Steps
+
+### Methodology Note
+Parity testing was performed on **CR9's filtered CRISPR MEX output**, not end-to-end
+from FASTQs. This isolates the GMM calling algorithm for verification. Full pipeline
+parity depends on the extraction step producing equivalent MEX to CR9.
+
+### Input Data Preparation
+The test MEX was extracted from CR9's filtered output:
+
+```bash
+CR9_BASE="/storage/A375-CR-9.01/1k_CRISPR_5p_gemx_cr9_01/outs/per_sample_outs/1k_CRISPR_5p_gemx_cr9_01/count"
+CR9_MEX="$CR9_BASE/sample_filtered_feature_bc_matrix"
+CR9_CRISPR="$CR9_BASE/crispr_analysis"
+
+# 1. Get CRISPR feature indices from CR9's multi-modal MEX
+zcat $CR9_MEX/features.tsv.gz | awk -F'\t' '$3=="CRISPR Guide Capture" {print NR}' > crispr_rows.txt
+
+# 2. Extract CRISPR-only matrix
+mkdir -p filtered_mex
+# features.tsv: CRISPR features only
+zcat $CR9_MEX/features.tsv.gz | awk -F'\t' '$3=="CRISPR Guide Capture"' > filtered_mex/features.tsv
+# barcodes.tsv: same as CR9 filtered
+zcat $CR9_MEX/barcodes.tsv.gz > filtered_mex/barcodes.tsv
+# matrix.mtx: filter to CRISPR rows, renumber
+# (actual script used python to handle MTX format correctly)
+```
+
+### Running the Test
+```bash
+# Using star_feature_call:
+./star_feature_call --call-only --compat-perturb \
+    --mex-dir filtered_mex --output-dir test_output
+
+# Compare single-feature calls (primary parity metric):
+tail -n+2 test_output/crispr_analysis/protospacer_calls_per_cell.csv | awk -F',' '$2==1' | sort > ours.txt
+tail -n+2 $CR9_CRISPR/protospacer_calls_per_cell.csv | awk -F',' '$2==1' | sort > cr9.txt
+diff ours.txt cr9.txt  # Exit code 0 = exact match
+```
+
+### Test Environment
+- Date: 2026-01-22
+- CR9 version: cellranger-9.0.1
+- STAR-suite: perturb branch
+- Test dataset: 1k_CRISPR_5p_gemx (A375)
+
+## Conclusion
+
+GMM feature calling achieves exact parity with CR9.0.1 for:
+- UMI thresholds (determines positive/negative cutoff)
+- Per-cell feature assignments (all 790 single-feature calls identical)
+- Overall call counts by feature
+
+### Requirements for Parity
+- Must use filtered barcodes (cells), not raw barcodes
+- CRISPR features must be extracted from multi-modal MEX
+- Requires --compat-perturb flag (enforces GMM mode + filtered MEX preference)
+
+### Limitations
+- Parity tested on GMM calling only, not full FASTQ→MEX extraction
+- Full pipeline parity requires extraction step to match CR9's output
+- When using star_feature_call with --filtered-barcodes, the tool will
+  prefer <sample>/filtered/ subdirectory for calling to ensure CR9 compat

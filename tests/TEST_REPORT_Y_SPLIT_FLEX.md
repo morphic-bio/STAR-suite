@@ -2,6 +2,9 @@
 
 Generated: Tue Jan 20 10:13:17 PM UTC 2026
 
+**Note**: This report contains historical command lines that include `--soloAddTagsToUnsorted no`. 
+This flag has since been removed (2026-01-26); unsorted CB/UB tags are now automatic.
+
 ## Test Configuration
 
 - STAR Binary: `/mnt/pikachu/STAR-suite/core/legacy/source/STAR.release`

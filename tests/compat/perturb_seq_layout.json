@@ -1,0 +1,27 @@
+{
+  "description": "CR9-style perturb-seq output layout",
+  "mex": {
+    "dir_names": [
+      "filtered_feature_bc_matrix",
+      "sample_filtered_feature_bc_matrix"
+    ],
+    "legacy_dir_names": [
+      "filtered"
+    ],
+    "require_gzip": true,
+    "files": [
+      {"name": "matrix.mtx", "type": "matrix_market"},
+      {"name": "barcodes.tsv", "type": "barcodes"},
+      {"name": "features.tsv", "type": "features"}
+    ]
+  },
+  "crispr_analysis": {
+    "dir_name": "crispr_analysis",
+    "files": [
+      {"name": "protospacer_calls_per_cell.csv", "type": "csv"},
+      {"name": "protospacer_calls_summary.csv", "type": "csv"},
+      {"name": "protospacer_umi_thresholds.csv", "type": "csv"},
+      {"name": "protospacer_umi_thresholds.json", "type": "json"}
+    ]
+  }
+}

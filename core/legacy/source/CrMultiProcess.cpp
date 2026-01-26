@@ -1,4 +1,5 @@
 #include "CrMultiProcess.h"
+#include "Solo.h"
 #include "CrMultiConfig.h"
 #include "CrMultiAssign.h"
 #include "CrMultiMexStub.h"
@@ -6,11 +7,14 @@
 #include "ErrorWarning.h"
 #include "serviceFuns.cpp"
 #include "TimeFunctions.h"
+#include "call_features.h"
+#include "MexWriter.h"
 #include <sys/stat.h>
 #include <dirent.h>
 #include <stdexcept>
 #include <iostream>
 #include <algorithm>
+#include <cstdio>
 using std::cerr;
 using std::endl;
 
@@ -171,9 +175,151 @@ static bool filterFeatureRefCsv(const string& inputPath, const string& featureTy
     return wroteAny;
 }
 
+static bool getFilteredBarcodesFromSolo(const Solo* solo, const Parameters& P, vector<string>& out) {
+    if (!solo || !solo->soloFeat) {
+        return false;
+    }
+    int32 featIdx = -1;
+    if (P.pSolo.crGexFeature == ParametersSolo::CrGexGene) {
+        featIdx = P.pSolo.featureInd[SoloFeatureTypes::Gene];
+    } else if (P.pSolo.crGexFeature == ParametersSolo::CrGexGeneFull) {
+        featIdx = P.pSolo.featureInd[SoloFeatureTypes::GeneFull];
+    } else {
+        // Auto: prefer Gene, fallback to GeneFull
+        featIdx = P.pSolo.featureInd[SoloFeatureTypes::Gene];
+        if (featIdx < 0) {
+            featIdx = P.pSolo.featureInd[SoloFeatureTypes::GeneFull];
+        }
+    }
+    if (featIdx < 0 || solo->soloFeat[featIdx] == nullptr) {
+        return false;
+    }
+
+    const SoloFeature* gex = solo->soloFeat[featIdx];
+    if (gex->filteredCells.filtVecBool.empty()) {
+        return false;
+    }
+
+    out.clear();
+    out.reserve(gex->filteredCells.nCells);
+    for (uint32 icb = 0; icb < gex->nCB; icb++) {
+        if (gex->filteredCells.filtVecBool[icb]) {
+            uint32 wlIdx = gex->indCB[icb];
+            if (wlIdx < gex->pSolo.cbWLstr.size()) {
+                out.push_back(gex->pSolo.cbWLstr[wlIdx]);
+            }
+        }
+    }
+    return !out.empty();
+}
+
+/**
+ * Run CRISPR feature calling on filtered MEX with CRISPR Guide Capture features.
+ * 
+ * @param filteredMexDir Directory containing filtered_feature_bc_matrix
+ * @param outputDir Output directory for crispr_analysis/
+ * @param minUmi Minimum UMI threshold for GMM calling
+ * @param logStream Log output stream
+ * @return 0 on success, -1 on failure
+ */
+static int runCrisprFeatureCalling(const string& filteredMexDir, const string& outputDir,
+                                    int minUmi, ostream& logStream) {
+    logStream << timeMonthDayTime() << " ..... starting CRISPR feature calling\n";
+    
+    // Step 1: Read the filtered MEX
+    CrMultiMerge::MexData mexData;
+    try {
+        mexData = CrMultiMerge::readMex(filteredMexDir);
+    } catch (const exception& e) {
+        logStream << "ERROR: Failed to read filtered MEX for CRISPR calling: " << e.what() << "\n";
+        return -1;
+    }
+    
+    // Step 2: Filter to CRISPR Guide Capture features only
+    CrMultiMerge::MexData crisprData = CrMultiMerge::filterByFeatureType(mexData, "CRISPR Guide Capture");
+    
+    if (crisprData.features.empty()) {
+        logStream << "NOTICE: No CRISPR Guide Capture features found, skipping feature calling\n";
+        return 0;
+    }
+    
+    logStream << "  CRISPR features found: " << crisprData.features.size() << "\n";
+    logStream << "  Barcodes: " << crisprData.barcodes.size() << "\n";
+    logStream << "  Non-zero entries: " << crisprData.triplets.size() << "\n";
+    
+    // Step 3: Write CRISPR-only MEX to temporary directory
+    string tempMexDir = outputDir + "/.crispr_mex_tmp";
+    string mkdirCmd = "mkdir -p \"" + tempMexDir + "\"";
+    if (system(mkdirCmd.c_str()) != 0) {
+        logStream << "ERROR: Failed to create temp directory: " << tempMexDir << "\n";
+        return -1;
+    }
+    
+    // Convert MexData to MexWriter format
+    vector<MexWriter::Feature> features;
+    for (size_t i = 0; i < crisprData.features.size(); ++i) {
+        string name = (i < crisprData.featureNames.size()) ? crisprData.featureNames[i] : crisprData.features[i];
+        string type = (i < crisprData.featureTypes.size()) ? crisprData.featureTypes[i] : "CRISPR Guide Capture";
+        features.emplace_back(crisprData.features[i], name, type);
+    }
+    
+    // Write MEX (uncompressed for call_features compatibility)
+    string mexPrefix = tempMexDir + "/";
+    int ret = MexWriter::writeMex(mexPrefix, crisprData.barcodes, features, crisprData.triplets, -1);
+    if (ret != 0) {
+        logStream << "ERROR: Failed to write temporary CRISPR MEX\n";
+        return -1;
+    }
+    
+    // Step 4: Run GMM feature calling with min_umi=10 (CR-compatible default)
+    string crisprAnalysisDir = outputDir + "/crispr_analysis";
+    mkdirCmd = "mkdir -p \"" + crisprAnalysisDir + "\"";
+    if (system(mkdirCmd.c_str()) != 0) {
+        logStream << "ERROR: Failed to create crispr_analysis directory\n";
+        string rmCmd = "rm -rf \"" + tempMexDir + "\"";
+        system(rmCmd.c_str());
+        return -1;
+    }
+    
+    cf_gmm_config *gmm_cfg = cf_gmm_config_create();
+    if (!gmm_cfg) {
+        logStream << "ERROR: Failed to create GMM config\n";
+        return -1;
+    }
+    gmm_cfg->min_umi_threshold = minUmi;
+    
+    logStream << "  Calling mode: GMM (CR9-compatible)\n";
+    logStream << "  min_umi: " << gmm_cfg->min_umi_threshold << "\n";
+    logStream << "  Output: " << crisprAnalysisDir << "\n";
+    
+    ret = cf_process_mex_dir_gmm(tempMexDir.c_str(), crisprAnalysisDir.c_str(), gmm_cfg);
+    cf_gmm_config_destroy(gmm_cfg);
+    
+    if (ret != 0) {
+        logStream << "ERROR: CRISPR feature calling failed\n";
+        // Cleanup temp dir
+        string rmCmd = "rm -rf \"" + tempMexDir + "\"";
+        system(rmCmd.c_str());
+        return -1;
+    }
+    
+    // Step 5: Cleanup temporary MEX directory
+    string rmCmd = "rm -rf \"" + tempMexDir + "\"";
+    system(rmCmd.c_str());
+    
+    logStream << timeMonthDayTime() << " ..... finished CRISPR feature calling\n";
+    logStream << "  Output files:\n";
+    logStream << "    " << crisprAnalysisDir << "/protospacer_calls_per_cell.csv\n";
+    logStream << "    " << crisprAnalysisDir << "/protospacer_calls_summary.csv\n";
+    logStream << "    " << crisprAnalysisDir << "/protospacer_umi_thresholds.csv\n";
+    logStream << "    " << crisprAnalysisDir << "/protospacer_umi_thresholds.json\n";
+    
+    return 0;
+}
+
 } // namespace
 
-int processCrMultiConfig(Parameters& P) {
+int processCrMultiConfig(Parameters& P, const Solo* solo) {
     if (P.crMulti.crMultiConfig.empty()) {
         return 0; // Not enabled
     }
@@ -340,6 +486,14 @@ int processCrMultiConfig(Parameters& P) {
             }
         }
         
+        // Prefer in-memory filtered barcodes from Solo if available (avoids reading filtered MEX for barcode list)
+        vector<string> filteredGexBarcodes;
+        bool useFilteredGex = false;
+        if (getFilteredBarcodesFromSolo(solo, P, filteredGexBarcodes)) {
+            useFilteredGex = true;
+            P.inOut->logMain << "NOTICE: Using GEX filtered barcodes from Solo (in-memory)\n";
+        }
+
         // Read raw GEX MEX (required for raw_feature_bc_matrix)
         CrMultiMerge::MexData gexRawData;
         try {
@@ -365,10 +519,12 @@ int processCrMultiConfig(Parameters& P) {
             }
         }
         
-        // Read filtered GEX MEX (for filtered_feature_bc_matrix)
+        // Read filtered GEX MEX if needed (for counts fallback or barcode list)
         CrMultiMerge::MexData gexFilteredData;
-        bool useFilteredGex = false;
-        if (hasFiltered) {
+        bool loadedFilteredMex = false;
+        bool needFilteredMexForCounts = (!hasRaw || gexRawData.features.empty());
+        bool needFilteredMexForBarcodes = (!useFilteredGex && hasFiltered);
+        if (hasFiltered && (needFilteredMexForCounts || needFilteredMexForBarcodes)) {
             try {
                 gexFilteredData = CrMultiMerge::readMex(filteredOut);
                 // Filter to Gene Expression only if needed
@@ -382,9 +538,9 @@ int processCrMultiConfig(Parameters& P) {
                 if (hasMultipleTypes) {
                     gexFilteredData = CrMultiMerge::filterByFeatureType(gexFilteredData, "Gene Expression");
                 }
-                useFilteredGex = true;
+                loadedFilteredMex = true;
             } catch (const exception& e) {
-                P.inOut->logMain << "WARNING: Failed to read filtered GEX MEX: " << e.what() 
+                P.inOut->logMain << "WARNING: Failed to read filtered GEX MEX: " << e.what()
                                  << ", will use observed raw GEX barcodes for filtered output\n";
             }
         }
@@ -393,7 +549,7 @@ int processCrMultiConfig(Parameters& P) {
         CrMultiMerge::MexData gexData;
         if (hasRaw && !gexRawData.features.empty()) {
             gexData = gexRawData;
-        } else if (hasFiltered && !gexFilteredData.features.empty()) {
+        } else if (hasFiltered && loadedFilteredMex && !gexFilteredData.features.empty()) {
             gexData = gexFilteredData;
             P.inOut->logMain << "WARNING: Raw GEX MEX not available, using filtered GEX MEX as merge base\n";
         } else {
@@ -454,16 +610,15 @@ int processCrMultiConfig(Parameters& P) {
         }
         
         // Compute GEX barcodes for filtered output
-        vector<string> filteredGexBarcodes;
-        if (useFilteredGex && !gexFilteredData.features.empty()) {
+        if (!useFilteredGex && hasFiltered && loadedFilteredMex && !gexFilteredData.features.empty()) {
             // Use filtered GEX barcodes (from filtered MEX)
             filteredGexBarcodes = CrMultiMerge::computeObservedGexBarcodes(gexFilteredData);
-        } else {
+            useFilteredGex = true;
+        }
+        if (!useFilteredGex) {
             // Fallback to observed raw GEX barcodes (or filtered if raw missing)
             filteredGexBarcodes = observedRawGexBarcodes;
-            if (!useFilteredGex) {
-                P.inOut->logMain << "WARNING: Filtered GEX MEX not found, using observed raw GEX barcodes for filtered output\n";
-            }
+            P.inOut->logMain << "WARNING: Filtered GEX barcodes not available, using observed raw GEX barcodes for filtered output\n";
         }
         
         // Write raw_feature_bc_matrix (using observed raw GEX barcodes)
@@ -481,6 +636,23 @@ int processCrMultiConfig(Parameters& P) {
             throw runtime_error("Failed to write filtered combined MEX");
         }
         P.inOut->logMain << "Filtered MEX written to: " << filteredOutDir << "\n";
+        
+        // Run CRISPR feature calling if CRISPR Guide Capture features were processed
+        bool hasCrisprFeatures = false;
+        for (const auto& run : featureRuns) {
+            if (run.featureType == "CRISPR Guide Capture") {
+                hasCrisprFeatures = true;
+                break;
+            }
+        }
+        
+        if (hasCrisprFeatures) {
+            string outsDir = outPrefix + "/outs";
+            ret = runCrisprFeatureCalling(filteredOutDir, outsDir, P.crMulti.crMinUmi, P.inOut->logMain);
+            if (ret != 0) {
+                P.inOut->logMain << "WARNING: CRISPR feature calling failed, continuing without crispr_analysis/\n";
+            }
+        }
         
         P.inOut->logMain << timeMonthDayTime() << " ..... finished CR multi config processing\n";
         

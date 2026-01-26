@@ -691,6 +691,17 @@ int main(int argInN, char *argIn[])
                                                P.outBAMsortTmpDir,
                                                P);
     }
+    
+    // Initialize unsorted tag buffer for unsorted BAM CB/UB tag injection
+    // Uses SamtoolsSorter in noSort mode - buffers records to disk, then streams with tag injection
+    if (P.outBAMunsorted && P.pSolo.samAttrYes && !P.pSolo.skipProcessing) {
+        g_unsortedTagBuffer = new SamtoolsSorter(P.limitBAMsortRAM,
+                                                  P.outBAMsortingThreadNactual,
+                                                  P.outBAMsortTmpDir,
+                                                  P,
+                                                  true);  // noSort = true
+        P.inOut->logMain << "NOTE: Using buffered mode for unsorted BAM CB/UB tag injection.\n";
+    }
 
     // this does not seem to work at the moment
     // P.inOut->logMain << "mlock value="<<mlockall(MCL_CURRENT|MCL_FUTURE) <<"\n"<<flush;
@@ -1317,11 +1328,6 @@ int main(int argInN, char *argIn[])
             if (P.inOut->outBAMfileNoY != NULL) bgzf_close(P.inOut->outBAMfileNoY);
         }
     };
-    if (P.inOut->outBAMfileUnsortedSoloTmp.is_open())
-    {
-        P.inOut->outBAMfileUnsortedSoloTmp.flush();
-        P.inOut->outBAMfileUnsortedSoloTmp.close();
-    };
     if (P.inOut->outQuantBAMfile != NULL)
     {
         bgzf_flush(P.inOut->outQuantBAMfile);
@@ -1356,7 +1362,7 @@ int main(int argInN, char *argIn[])
 
     // Process Cell Ranger multi config if enabled
     if (!P.crMulti.crMultiConfig.empty()) {
-        processCrMultiConfig(P);
+        processCrMultiConfig(P, &soloMain);
     }
 
     // Note: Two-pass unsorted CB/UB tag injection removed - not used in inline flex path
@@ -1442,6 +1448,9 @@ int main(int argInN, char *argIn[])
     }
 
     bamSortByCoordinate(P, RAchunk, *genomeMain.genomeOut.g, soloMain);
+    
+    // Finalize unsorted BAM with CB/UB tag injection (if buffered mode was used)
+    bamUnsortedWithTags(P, *genomeMain.genomeOut.g, soloMain);
     
     // Transcript quantification (TranscriptVB mode)
     // TODO: Debug - check if transcriptomeMain is valid

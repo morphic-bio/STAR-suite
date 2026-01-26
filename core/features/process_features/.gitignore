@@ -1,0 +1,14 @@
+# Build artifacts
+*.o
+*.a
+assignBarcodes
+demux_fastq
+demux_bam
+call_features
+
+# Test binaries
+tests/test_pf_api
+
+# Editor files
+*.swp
+*~

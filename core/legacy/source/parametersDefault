@@ -1452,10 +1452,10 @@ soloCellReadStats           None
     string:                 Output reads statistics for each CB
                             Standard    ... standard output
 
-soloAddTagsToUnsorted       no
-    string:                 add CB and UB tags to unsorted BAM output via two-pass processing
-                            yes         ... enable two-pass mode: generate temporary file during first pass, then add CB/UB tags during second pass
-                            no          ... disable two-pass mode (default): CB/UB tags only available in sorted BAM
+soloCbUbRequireTogether     yes
+    string:                 require CB and UB together during tag injection
+                            yes         ... UB requires CB (default)
+                            no          ... allow UB-only or CB-only injection
 
 soloCbUbRequireTogether     yes
     string:                 require CB and UB together during tag injection

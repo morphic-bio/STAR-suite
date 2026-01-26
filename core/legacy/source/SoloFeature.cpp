@@ -245,12 +245,13 @@ size_t SoloFeature::geneProbeCacheSize() {
 // Shared helper implementations for readInfo management
 void SoloFeature::resetPackedStorage(uint32_t nReads)
 {
-    // Skip allocation when minimal memory flag is on
-    if (pSolo.soloFlexMinimalMemory && pSolo.inlineHashMode) {
+    // Skip allocation when minimal memory flag is on, UNLESS trackReadIdsForTags is enabled
+    if (pSolo.soloFlexMinimalMemory && pSolo.inlineHashMode && !pSolo.trackReadIdsForTags) {
         return;
     }
     // Skip allocation when inline CB correction is active (Solo structures not used)
-    if (pSolo.inlineCBCorrection) {
+    // UNLESS trackReadIdsForTags is enabled
+    if (pSolo.inlineCBCorrection && !pSolo.trackReadIdsForTags) {
         // Assert that packedReadInfo stays empty
         assert(packedReadInfo.data.empty());
         return;
@@ -260,8 +261,8 @@ void SoloFeature::resetPackedStorage(uint32_t nReads)
 
 void SoloFeature::recordReadInfo(uint32_t readId, uint32_t cbIdx, uint32_t umiPacked, uint8_t status)
 {
-    // Skip entirely when minimal memory flag is on
-    if (pSolo.soloFlexMinimalMemory && pSolo.inlineHashMode) {
+    // Skip entirely when minimal memory flag is on, UNLESS trackReadIdsForTags is enabled
+    if (pSolo.soloFlexMinimalMemory && pSolo.inlineHashMode && !pSolo.trackReadIdsForTags) {
         return;
     }
     if (packedReadInfo.data.empty()) {

@@ -1,0 +1,8 @@
+Total feature counts 4
+Total deduped feature counts 2
+Total barcodes 2
+Total excluded barcodes 0
+Total unique barcode UMIs 2
+Total whitelisted barcodes 2
+Total_unmatched_reads 0
+Percentage reads assigned to barcode 100.0000

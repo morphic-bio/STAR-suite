@@ -20,10 +20,8 @@ cd process_features
 make
 sudo cp assignBarcodes /usr/local/bin
 ```
-If heatmap generation is not required, you can omit the `libcairo2-dev` dependency and compile using:
-```bash
-make NO_HEATMAP=1
-```
+
+**Note:** Heatmap generation now uses Plotly (HTML+JSON) and has no external dependencies. The previous Cairo/PNG dependency has been removed.
 
 #### Docker
 Alternatively, you can use the Docker container `biodepot/process_features:latest` or build it from the provided Dockerfile.
@@ -63,9 +61,10 @@ The tool can accept input FASTQ files in two ways:
 | :--- | :--- | :--- | :--- |
 | `-b`, `--barcode_length`| `[int]` | Length of the sequence barcode. | `16` |
 | `-u`, `--umi_length` | `[int]` | Length of the Unique Molecular Identifier (UMI). | `12` |
-| `-o`, `--feature_constant_offset`| `[int]` | Expected starting position of the feature sequence in the read. Used for an initial directed search. | `0` |
+| `-o`, `--feature_constant_offset`| `[int]` | Global feature offset. If not provided, auto-detected from pattern column. | auto |
 | `-B`, `--barcode_constant_offset`| `[int]` | Starting position of the barcode and UMI in the read. | `0` |
 | `--limit_search` | `[int]` | Limit the search for the feature sequence to `N` bases around `feature_constant_offset`. Set to `-1` to search the entire read. | `-1` |
+| `--force_individual_offsets` | | Use per-feature offsets from pattern column (slower for large feature sets). | `false` |
 | `-r`, `--reverse_complement_whitelist` | | Reverse complement the whitelist barcodes before use. | `false` |
 | `-a`, `--as_named` | | Treat all input files as part of a single sample. | `false` |
 
@@ -73,12 +72,12 @@ The tool can accept input FASTQ files in two ways:
 
 | Flag | Argument | Description | Default |
 | :--- | :--- | :--- | :--- |
-| `-m`, `--maxHammingDistance` | `[int]` | Maximum Hamming distance for a feature sequence to be considered a match. | `1` |
+| `-m`, `--maxHammingDistance` | `[int]` | Maximum Hamming distance for a feature sequence to be considered a match (inclusive). | `1` |
 | `-s`, `--stringency` | `[int]` | Stringency for UMI deduplication. See [UMI de-duplication](#umi-de-duplication) section for details. | `1` |
-| `-i`, `--min_counts` | `[int]` | Minimum read count for a UMI clique to be considered for counting. | `1` |
+| `-i`, `--min_counts` | `[int]` | Minimum read count for a UMI clique to be considered for counting. | `0` |
 | `-M`, `--min_posterior` | `[float]` | Minimum posterior probability to rescue a barcode with sequencing errors. | `0.975` |
-| `--max_barcode_mismatches` | `[int]` | Maximum number of mismatches allowed to rescue a sequence barcode. | `3` |
-| `--feature_n` | `[int]` | Maximum number of 'N' bases allowed in a feature sequence. | `3` |
+| `--max_barcode_mismatches` | `[int]` | Maximum number of mismatches allowed to rescue a sequence barcode. | `10` |
+| `--feature_n` | `[int]` | Maximum number of 'N' bases allowed in a feature sequence. | `1` |
 | `--barcode_n` | `[int]` | Maximum number of 'N' bases allowed in a sequence barcode. | `1` |
 | `--max_reads` | `[long]` | Maximum number of reads to process from each FASTQ file. | `0` (all) |
 | `--min_prediction` | `[int]` | Minimum prediction threshold for feature assignment (advanced, rarely needed). | `1` |
@@ -137,7 +136,7 @@ The exhaustive search checks the entire read against all the feature barcodes at
 The error correction handles Ns (unknown base pairs) and sequencing errors. To take into account sequencing errors, a barcode can be at most 1 base pair different from a single valid barcode and then it will be assigned to that barcode. If there are multiple barcodes, then we look at the quality scores and the number of barcodes variants observed and find the most likely match for the barcode based on the posterior probability. This is described in the Cell Ranger documentation.
 To handle N's the user specifies a maximum number of Ns (`--barcode_n`) that are tolerated. All the possible base pairs are substituted for an N and then compared to see if a unique barcode is found.
 ### Feature barcodes
-To handle sequencing errors, the user specifies a maximum Hamming distance (`-m`). If a sequence matches a feature barcode within the Hamming distance and uniquely to a sequence with a minimum distance then it is assigned to that feature barcode. For N's up to a maximum specified by the user (`--feature_n`), all possible variations are generated for the N's and checked against the possible sequences. If there is a unique best match (minimum Hamming distance) that is less or equal to the maximum Hamming distance then it is assigned to that feature barcode. Assignments are tentative, pending the completion of the comprehensive search (unless there is an exact match). If there is no exact match, the comprehensive search attempts to find a better match.
+To handle sequencing errors, the user specifies a maximum Hamming distance (`-m`). If a sequence matches a feature barcode within the Hamming distance and uniquely to a sequence with a minimum distance then it is assigned to that feature barcode. For N's up to a maximum specified by the user (`--feature_n`), all possible variations are generated for the N's and checked against the possible sequences. If there is a unique best match (minimum Hamming distance) that is less than or equal to the maximum Hamming distance (inclusive) then it is assigned to that feature barcode. Assignments are tentative, pending the completion of the comprehensive search (unless there is an exact match). If there is no exact match, the comprehensive search attempts to find a better match.
 
 ## Feature Assignment (Simplified)
 
@@ -229,8 +228,7 @@ The repository is organized into the following main directories:
     -   `queue.c`: Implementation of a queue data structure used for parallel processing.
     -   `utils.c`: Helper functions used across the application.
     -   `globals.c`: Definitions of global variables.
-    -   `heatmap.c`: Functions for generating QC heatmap images.
-    -   `plasma_colormap_16.h`, `plasma_colormap_64.h`, `plasma_colormap_256.h`, `plasma_colormap_1024.h`: Color map definitions for heatmaps.
+    -   `heatmap.c`: Functions for generating QC heatmap HTML/JSON outputs.
 -   **`include/`**: Contains all the header files.
     -   `common.h`: Common headers, structs, and macros used throughout the project.
     -   `prototypes.h`: Function prototypes for functions defined in the `src` directory.
@@ -263,7 +261,7 @@ An interactive HTML plot (`umi_counts_histogram.html`) is generated in each samp
 
 ### Feature Counts Heatmap
 
-A heatmap image (`Feature_counts_heatmap.png`) is generated for each sample. In this heatmap:
+An interactive heatmap (`Feature_counts_heatmap.html`) and data file (`Feature_counts_heatmap.json`) are generated for each sample. In this heatmap:
 - **Rows:** Features.
 - **Columns:** UMI counts (starting from 1).
 - **Color Intensity:** Number of barcodes with that UMI count for the feature.
@@ -277,7 +275,7 @@ This heatmap provides a visual summary of the count distribution for each featur
 
 ### Feature Richness Heatmap
 
-A second heatmap (`Feature_types_heatmap.png`) is generated for each sample to visualize feature richness. In this heatmap:
+A second heatmap (`Feature_types_heatmap.html` + `Feature_types_heatmap.json`) is generated for each sample to visualize feature richness. In this heatmap:
 - **Rows:** Features.
 - **Columns:** The total number of unique feature types present in a barcode (richness level).
 - **Color Intensity:** The number of barcodes where the given feature (row) was observed that contained a specific total number of feature types (column).
@@ -289,14 +287,15 @@ This heatmap helps visualize the complexity of features within single barcodes, 
 
 ---
 
-#### Example
-
-![Feature Counts Heatmap Example](./graphics/Feature_counts_heatmap.png)
-![Feature Types Heatmap Example](./graphics/Feature_types_heatmap.png)
+**Output files:**
+- `Feature_counts_heatmap.html` - Interactive Plotly visualization
+- `Feature_counts_heatmap.json` - Raw matrix data for programmatic access
+- `Feature_types_heatmap.html` - Interactive Plotly visualization
+- `Feature_types_heatmap.json` - Raw matrix data for programmatic access
 
 ---
 
-*For more details on the plotting implementation, see `src/plot_histogram.c` and `src/heatmap.c`.* 
+*For more details on the plotting implementation, see `src/plot_histogram.c` and `src/heatmap.c`.*
 
 ## demux_fastq – sample-level demultiplexing helper
 

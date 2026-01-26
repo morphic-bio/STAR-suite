@@ -271,7 +271,6 @@ run_star "Flex autoIndex" "$OUT_DIR/flex_autoindex/run.log" \
     --clipAdapterType CellRanger4 \
     --soloFeatures Gene \
     --alignEndsType Local \
-    --soloAddTagsToUnsorted no \
     --soloStrand Unstranded \
     --chimSegmentMin 1000000 \
     --soloKeysCompat cr \

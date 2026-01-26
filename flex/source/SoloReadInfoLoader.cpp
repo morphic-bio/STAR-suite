@@ -3,6 +3,7 @@
 #include "SoloFeature.h"
 #include "soloInputFeatureUMI.h"
 #include "SoloCommon.h"
+#include "ErrorWarning.h"
 #include "serviceFuns.cpp"
 #include <unordered_set>
 #include <sstream>
@@ -37,6 +38,18 @@ void SoloReadInfoLoader::load(SoloReadFeature &rf,
                               SoloReadFlagClass &readFlagCounts,
                               std::vector<uint32_t> &nReadPerCBunique1,
                               std::vector<uint32_t> &nReadPerCBmulti1) {
+
+    // Guard against null streamReads (e.g., inline hash mode or improperly initialized SoloReadFeature)
+    if (rf.streamReads == nullptr) {
+        std::ostringstream errOut;
+        errOut << "EXITING because of fatal ERROR: SoloReadInfoLoader::load called with null streamReads\n"
+               << "This typically happens when:\n"
+               << "  1. Inline hash mode is active but loader was called (should use hash path instead)\n"
+               << "  2. SoloReadFeature was constructed with iChunk < 0 (e.g., readFeatSum passed by mistake)\n"
+               << "  3. readFeatAll[ii] assignment mismatch in SoloFeature_sumThreads\n"
+               << "featureType=" << rf.featureType << " inlineHashMode=" << rf.pSolo.inlineHashMode << "\n";
+        exitWithError(errOut.str(), std::cerr, rf.P.inOut->logMain, EXIT_CODE_INPUT_FILES, rf.P);
+    }
 
     rf.streamReads->flush();
     rf.streamReads->seekg(0,std::ios::beg);

@@ -1,0 +1,6 @@
+name,sequence,type
+FeatureA,ATCGATCGATCGATCG,CRISPR Guide Capture
+FeatureB,GCTAGCTAGCTAGCTA,CRISPR Guide Capture
+FeatureC,TTAATTAATTAATTAA,CRISPR Guide Capture
+FeatureD,CCGGCCGGCCGGCCGG,CRISPR Guide Capture
+FeatureE,AACCGGTTAACCGGTT,CRISPR Guide Capture

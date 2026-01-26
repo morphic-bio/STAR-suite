@@ -6,6 +6,9 @@
 #include "Genome.h"
 #include "Solo.h"
 
-void bamSortByCoordinate(Parameters &P, ReadAlignChunk **RAchunk, Genome &genome, Solo &solo) ;
+void bamSortByCoordinate(Parameters &P, ReadAlignChunk **RAchunk, Genome &genome, Solo &solo);
+
+// Finalize unsorted BAM with CB/UB tag injection (uses g_unsortedTagBuffer)
+void bamUnsortedWithTags(Parameters &P, Genome &genome, Solo &solo);
 
 #endif

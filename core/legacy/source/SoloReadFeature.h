@@ -37,6 +37,12 @@ public:
 
     // Inline hash mode: per-thread hash table (replaces temp stream files)
     khash_t(cg_agg) *inlineHash_; // nullptr if not using inline hash mode
+    
+    // Parallel readId tracker for sorted BAM CB/UB tag injection (Option C)
+    // Maps readId -> packed(cbIdx, umi24, status) for populating packedReadInfo after collapse
+    // Only allocated when pSolo.trackReadIdsForTags is true
+    khash_t(readid_cbumi) *readIdTracker_; // nullptr if not tracking readIds
+    
     // Extended ambiguous entry to store gene/tag info for hash re-keying after resolution
     struct ExtendedAmbiguousEntry : public ReadAlign::AmbiguousEntry {
         // Store (gene, tag, umi24) combinations for each ambiguous CB observation

@@ -1,0 +1,6 @@
+#ifndef LIBSCRNA_EMPTYDROPSCRSAMPLER_WRAPPER_H
+#define LIBSCRNA_EMPTYDROPSCRSAMPLER_WRAPPER_H
+
+#include "../EmptyDropsCRSampler.h"
+
+#endif

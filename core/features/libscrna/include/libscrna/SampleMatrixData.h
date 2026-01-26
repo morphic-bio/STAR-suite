@@ -1,0 +1,6 @@
+#ifndef LIBSCRNA_SAMPLEMATRIXDATA_WRAPPER_H
+#define LIBSCRNA_SAMPLEMATRIXDATA_WRAPPER_H
+
+#include "../SampleMatrixData.h"
+
+#endif

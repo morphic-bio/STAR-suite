@@ -3,7 +3,7 @@
 #include "SoloFeatureTypes.h"
 
 SoloReadFeature::SoloReadFeature(int32 feTy, Parameters &Pin, int iChunk)
-             : featureType(feTy), P(Pin), pSolo(P.pSolo), inlineHash_(nullptr)
+             : featureType(feTy), P(Pin), pSolo(P.pSolo), streamReads(nullptr), inlineHash_(nullptr), readIdTracker_(nullptr)
 {
     if (pSolo.type==0)
         return;
@@ -21,6 +21,11 @@ SoloReadFeature::SoloReadFeature(int32 feTy, Parameters &Pin, int iChunk)
         // Initialize inline hash instead of opening temp stream file
         inlineHash_ = kh_init(cg_agg);
         streamReads = nullptr; // Do NOT open stream file in inline hash mode
+        
+        // Initialize parallel readId tracker for sorted BAM CB/UB tag injection
+        if (pSolo.trackReadIdsForTags) {
+            readIdTracker_ = kh_init(readid_cbumi);
+        }
     } else if (iChunk>=0) {
         //open with flagDelete=false, i.e. try to keep file if it exists
         streamReads = &fstrOpen(P.outFileTmp+"/solo"+SoloFeatureTypes::Names[featureType]+'_'+std::to_string(iChunk), ERROR_OUT, P, false);
@@ -34,6 +39,10 @@ SoloReadFeature::~SoloReadFeature() {
     if (inlineHash_) {
         kh_destroy(cg_agg, inlineHash_);
         inlineHash_ = nullptr;
+    }
+    if (readIdTracker_) {
+        kh_destroy(readid_cbumi, readIdTracker_);
+        readIdTracker_ = nullptr;
     }
 }
 
@@ -92,6 +101,23 @@ void SoloReadFeature::mergeInlineHash(SoloReadFeature &other)
             kh_val(inlineHash_, dest_iter) = count;
         } else {
             kh_val(inlineHash_, dest_iter) += count;
+        }
+    }
+    
+    // Merge readIdTracker_ if both have it
+    // Note: For readId tracking, we keep ALL entries (no collision resolution needed)
+    // Each readId should only appear in one thread's tracker
+    if (readIdTracker_ && other.readIdTracker_) {
+        for (khiter_t iter = kh_begin(other.readIdTracker_); iter != kh_end(other.readIdTracker_); ++iter) {
+            if (!kh_exist(other.readIdTracker_, iter)) continue;
+            
+            uint32_t readId = kh_key(other.readIdTracker_, iter);
+            uint64_t val = kh_val(other.readIdTracker_, iter);
+            
+            int absent;
+            khiter_t dest_iter = kh_put(readid_cbumi, readIdTracker_, readId, &absent);
+            // Should always be absent (each readId processed by one thread)
+            kh_val(readIdTracker_, dest_iter) = val;
         }
     }
     

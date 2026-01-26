@@ -30,25 +30,15 @@ void ParametersSolo::initialize(Parameters *pPin)
     redistrReadsNfiles = 3*pP->runThreadN;
     
     //////////////////////////////////////////////////////////////////////////////////////////////////////
-    ///////////////////////////////--soloAddTagsToUnsorted
-    if (addTagsToUnsortedStr=="yes") {
-        addTagsToUnsorted = true;
-    } else if (addTagsToUnsortedStr=="no") {
-        addTagsToUnsorted = false;
-    } else {
-        ostringstream errOut;
-        errOut << "EXITING because of fatal PARAMETERS error: unrecognized option in --soloAddTagsToUnsorted="<<addTagsToUnsortedStr<<"\n";
-        errOut << "SOLUTION: use allowed option: yes OR no\n";
-        exitWithError(errOut.str(),std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
-    };
-
-    //////////////////////////////////////////////////////////////////////////////////////////////////////
-    ///////////////////////////////--soloCbUbRequireTogether
+    ///////////////////////////////--soloCbUbRequireTogether (DEPRECATED - now always independent)
     {
         string mode = requireCbUbTogetherStr;
         transform(mode.begin(), mode.end(), mode.begin(), ::tolower);
         if (mode == "yes") {
             requireCbUbTogether = true;
+            // DEPRECATED: CB and UB are now always independent; this flag is ignored
+            pP->inOut->logMain << "WARNING: --soloCbUbRequireTogether is DEPRECATED and will be ignored. "
+                               << "CB and UB tags are now always handled independently.\n";
         } else if (mode == "no" || mode.empty()) {
             requireCbUbTogether = false;
         } else {
@@ -997,16 +987,24 @@ void ParametersSolo::initialize(Parameters *pPin)
     samAttrYes=false;
     if ( (pP->outSAMattrPresent.CB || pP->outSAMattrPresent.UB) && type!=SoloTypes::CB_samTagOut) {
         samAttrYes=true;
-        if (!pP->outBAMcoord && !(pP->outBAMunsorted && addTagsToUnsorted) && !writeTagTableEnabled) {
+        // CB/UB tags require either:
+        // - Sorted BAM output (tags injected after Solo counting)
+        // - Unsorted BAM output (tags injected via buffered mode after Solo counting)
+        // - Tag table output (sidecar file)
+        if (!pP->outBAMcoord && !pP->outBAMunsorted && !writeTagTableEnabled) {
             ostringstream errOut;
-            errOut << "EXITING because of fatal PARAMETERS error: CB and/or UB attributes in --outSAMattributes can only be output in the sorted BAM file, unsorted BAM with --soloAddTagsToUnsorted yes, or with --soloWriteTagTable enabled.\n";
-            errOut << "SOLUTION: re-run STAR with --outSAMtype BAM SortedByCoordinate ... OR --outSAMtype BAM Unsorted --soloAddTagsToUnsorted yes OR --soloWriteTagTable Default\n";
+            errOut << "EXITING because of fatal PARAMETERS error: CB and/or UB attributes in --outSAMattributes require BAM output or --soloWriteTagTable.\n";
+            errOut << "SOLUTION: re-run STAR with --outSAMtype BAM SortedByCoordinate or --outSAMtype BAM Unsorted or --soloWriteTagTable Default\n";
             exitWithError(errOut.str(),std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
         };
         
-        // Add a warning when both flags are off but CB/UB attributes are requested
-        if (!addTagsToUnsorted && !writeTagTableEnabled && pP->outBAMunsorted) {
-            pP->inOut->logMain << "WARNING: CB/UB attributes are requested but neither --soloAddTagsToUnsorted nor --soloWriteTagTable is enabled. Tags will be absent from BAM and no sidecar table will be produced.\n";
+        // Enable readId tracking when BAM CB/UB tags are requested with inline hash mode
+        // This creates a parallel hash (readid_cbumi) to track readId -> (cbIdx, umi24, status)
+        // After inline-hash collapse, this allows packedReadInfo to be populated for tag injection
+        // Works for both sorted and unsorted BAM output
+        if ((pP->outBAMcoord || pP->outBAMunsorted) && inlineHashMode) {
+            trackReadIdsForTags = true;
+            pP->inOut->logMain << "NOTE: Enabling parallel readId tracking for BAM CB/UB tag injection with Flex inline-hash mode.\n";
         };
     } else if ( pP->outSAMattrPresent.UB && type==SoloTypes::CB_samTagOut) {
         exitWithError("EXITING because of fatal PARAMETERS error: UB attribute (corrected UMI) in --outSAMattributes cannot be used with --soloType CB_samTagOut \n" \
@@ -1048,8 +1046,8 @@ void ParametersSolo::initialize(Parameters *pPin)
     ////////////////////////////////////////////////////////////////skipProcessing validation warnings
     if (skipProcessing) {
         // Warn if no per-read products are enabled
-        if (!writeTagTableEnabled && !addTagsToUnsorted && !pP->outSAMattrPresent.ZG && !pP->outSAMattrPresent.ZX) {
-            pP->inOut->logMain << "WARNING: --soloSkipProcessing=yes but neither CB/UB tag injection (--soloAddTagsToUnsorted) nor tag table export (--soloWriteTagTable) nor ZG/ZX tags are enabled.\n";
+        if (!writeTagTableEnabled && !pP->outSAMattrPresent.ZG && !pP->outSAMattrPresent.ZX) {
+            pP->inOut->logMain << "WARNING: --soloSkipProcessing=yes but neither tag table export (--soloWriteTagTable) nor ZG/ZX tags are enabled.\n";
             pP->inOut->logMain << "         Skipping Solo processing will not produce count matrices or per-read tag artifacts.\n";
         };
         

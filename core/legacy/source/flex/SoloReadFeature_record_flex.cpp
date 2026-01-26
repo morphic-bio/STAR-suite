@@ -624,6 +624,22 @@ uint32 outputReadCB_flex(fstream *streamOut, const uint64 iRead, const int32 fea
         entry.observations.push_back(obs);
     };
     
+    // Helper lambda to track readId -> (cbIdx, umi24, status) for sorted BAM CB/UB tag injection
+    // Only used when pSolo.trackReadIdsForTags is true
+    auto trackReadIdForTags = [&](uint32_t cbIdx, uint32_t umi24) {
+        if (!soloReadFeat || !soloReadFeat->readIdTracker_ || iRead == (uint64)-1) {
+            return;
+        }
+        // Determine status: 1 = both CB and UMI valid, 2 = CB valid but UMI invalid
+        uint8_t status = (soloBar.umiCheck >= 0) ? 1 : 2;
+        uint64_t val = packReadIdCbUmi(cbIdx, umi24, status);
+        
+        // Insert into tracker (readId should be unique per read)
+        int absent;
+        khiter_t iter = kh_put(readid_cbumi, soloReadFeat->readIdTracker_, (uint32_t)iRead, &absent);
+        kh_val(soloReadFeat->readIdTracker_, iter) = val;
+    };
+    
     uint64 nout=1;
     
     switch (featureType) {
@@ -644,6 +660,8 @@ uint32 outputReadCB_flex(fstream *streamOut, const uint64 iRead, const int32 fea
                 } else {
                     kh_val(soloReadFeat->inlineHash_, iter)++;
                 }
+                // Track readId for sorted BAM CB/UB tag injection
+                trackReadIdForTags(cbIdx, umi24);
             }
             if (!soloBar.pSolo.inlineHashMode && streamOut) {
                 *streamOut << soloBar.umiB <<' '<< iRead <<' '<< readFlag.flag <<' '<< -1 <<' '<< soloBar.cbMatch <<' '<< soloBar.cbMatchString <<'\n';
@@ -1006,6 +1024,8 @@ uint32 outputReadCB_flex(fstream *streamOut, const uint64 iRead, const int32 fea
                     } else {
                         kh_val(soloReadFeat->inlineHash_, iter)++;
                     }
+                    // Track readId for sorted BAM CB/UB tag injection
+                    trackReadIdForTags(cbIdx, umi24);
                 }
             }
             
@@ -1041,6 +1061,8 @@ uint32 outputReadCB_flex(fstream *streamOut, const uint64 iRead, const int32 fea
                     } else {
                         kh_val(soloReadFeat->inlineHash_, iter)++;
                     }
+                    // Track readId for sorted BAM CB/UB tag injection
+                    trackReadIdForTags(cbIdx, umi24);
                 }
                 if (!soloBar.pSolo.inlineHashMode && streamOut) {
                     *streamOut << soloBar.umiB <<' ';//UMI
@@ -1073,6 +1095,8 @@ uint32 outputReadCB_flex(fstream *streamOut, const uint64 iRead, const int32 fea
                     } else {
                         kh_val(soloReadFeat->inlineHash_, iter)++;
                     }
+                    // Track readId for sorted BAM CB/UB tag injection
+                    trackReadIdForTags(cbIdx, umi24);
                 }
             }
             if (!soloBar.pSolo.inlineHashMode && streamOut) {

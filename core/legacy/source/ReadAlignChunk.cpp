@@ -250,6 +250,8 @@ ReadAlignChunk::ReadAlignChunk(Parameters& Pin, Genome &genomeIn, Transcriptome 
 
     if ( P.quant.trSAM.bamYes ) {
         chunkOutBAMquant = new BAMoutput (P.inOut->outQuantBAMfile,P);
+        // Transcriptome BAM goes to separate file, skip g_unsortedTagBuffer routing
+        chunkOutBAMquant->setSkipGlobalBuffer(true);
         RA->outBAMquant = chunkOutBAMquant;
     } else {
         chunkOutBAMquant=NULL;

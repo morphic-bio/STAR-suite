@@ -1,5 +1,5 @@
 #include "FlexFilterAdapters.h"
-#include "OrdMagStage.h"
+#include "libscrna/OrdMagStage.h"
 #include "ErrorWarning.h"
 #include "streamFuns.h"
 #include <fstream>
@@ -334,4 +334,3 @@ void StandaloneFlexFilterAdapter::writeOutputs(
     writePerTagExpected(outputs, outputPrefix);
     writeAggregateFilterSummary(outputs, outputPrefix);
 }
-

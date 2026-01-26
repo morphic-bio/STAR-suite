@@ -7,6 +7,7 @@
 #include <vector>
 #include <cstdint>
 #include <fstream>
+#include <array>
 
 // Forward declarations
 class SampleDetector;
@@ -44,10 +45,13 @@ public:
     ~BAMoutput();
     
     void unsortedOneAlign (char *bamIn, uint bamSize, uint bamSize2, uint64_t iReadAll, uint8_t sampleByte, 
-                           uint32_t cbIdxPlus1 = 0, uint32_t umi24 = 0, const std::string &cbSeq = std::string(),
-                           bool hasY = false);
+                           uint32_t cbIdxPlus1 = 0, uint32_t umi24 = 0, bool umiValid = false,
+                           const std::string &cbSeq = std::string(), bool hasY = false);
     void unsortedFlush ();
     void coordUnmappedPrepareBySJout();
+    
+    // Set flag to skip g_unsortedTagBuffer routing (used for transcriptome BAM output)
+    void setSkipGlobalBuffer(bool skip) { skipGlobalBuffer_ = skip; }
 
     uint32 nBins; //number of bins to split genome into
     uint* binTotalN; //total number of aligns in each bin
@@ -78,12 +82,20 @@ private:
     SampleDetector *sampleDet_;
     bool sampleDetReady_;
     
+    // Flag to skip g_unsortedTagBuffer routing (for transcriptome output)
+    // When true, records are written directly even if g_unsortedTagBuffer is active
+    bool skipGlobalBuffer_;
+    
     // Ambiguous CB spillover file (optional)
     std::ofstream ambiguousCbSpilloverFile_;
     bool ambiguousCbSpilloverEnabled_;
     
     // Helper to flush buffer and append to ledger atomically
     void flushPendingToLedgerAndDisk();
+    
+    // Scratch buffer for CB/UB tag injection (unsorted path)
+    // Sized to BAM_ATTR_MaxSize to accommodate max record + tags
+    std::array<char, BAM_ATTR_MaxSize> bamTagScratch_;
 };
 
 #endif

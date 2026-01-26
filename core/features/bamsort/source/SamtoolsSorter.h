@@ -90,7 +90,8 @@ struct BAMRecordComparator {
 class SamtoolsSorter {
 public:
     // Initialize with memory limit and thread count
-    SamtoolsSorter(uint64_t maxRAM, int nThreads, const string& tmpDir, Parameters& P);
+    // noSort: if true, skip coordinate sorting (used for unsorted BAM with CB/UB tag injection)
+    SamtoolsSorter(uint64_t maxRAM, int nThreads, const string& tmpDir, Parameters& P, bool noSort = false);
     
     // Thread-safe: called from coordOneAlign replacement path
     // Takes raw BAM record bytes (same format as coordOneAlign input)
@@ -115,6 +116,7 @@ private:
     int nThreads_;
     string tmpDir_;
     Parameters& P_;
+    bool noSort_;  // If true, skip coordinate sorting (deterministic order: spills first, then in-memory)
     
     // Thread-safe buffer
     pthread_mutex_t bufferMutex_;
@@ -218,6 +220,10 @@ private:
     
     std::vector<HeapEntry> mergeHeap_;
     HeapLess heapLess_;  // Comparator instance
+    
+    // Deterministic iteration state (used when noSort_ is true)
+    size_t fifoRecordIdx_;     // Current index in records_ vector
+    size_t fifoSpillFileIdx_;  // Current spill file index
     
     // Helper functions
     void sortAndSpill();

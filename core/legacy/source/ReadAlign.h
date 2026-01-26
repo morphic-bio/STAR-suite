@@ -118,6 +118,7 @@ class ReadAlign {
         uint8_t detectedSampleByte_; // Detected sample index (token) for current read, 0xFF if not detected
         uint32_t extractedCbIdxPlus1_; // Extracted CB whitelist index (1-based) from Solo structures, 0 if not available
         uint32_t extractedUmi24_;     // Extracted UMI (24-bit packed) from Solo structures, 0 if not available
+        bool extractedUmiValid_;      // True if UMI extraction succeeded (umiCheck >= 0), false if invalid
         std::string extractedCbSeq_;   // CB sequence (for Phase 2: lookup resolved CB if cbIdxPlus1==0)
         
         // Phase 2: Ambiguous CB accumulation and resolution
