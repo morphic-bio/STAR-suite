@@ -87,7 +87,33 @@ actionable; link to deeper docs rather than copying them.
 
 - Use `GeneFull` for GEX parity (CR includes introns since v7).
 - `--soloCrGexFeature` controls which GEX MEX is merged in CR-compat mode.
-- `--soloCbUbRequireTogether` controls CB/UB pairing for tag injection.
+- CB/UB tags are independent (CB can be present without UB and vice versa).
+
+## MCP Server (Agent Tooling)
+
+An MCP server is available for automated agent workflows:
+
+```bash
+cd mcp_server && pip install -r requirements.txt
+export MCP_AUTH_TOKEN="your-token"
+python -m mcp_server.app
+```
+
+**Available tools**:
+- `list_datasets`, `list_test_suites`, `find_docs`, `find_tests` (discovery)
+- `preflight(script, ...)` - validate before running
+- `run_script(script, ...)` - execute allowlisted scripts
+- `collect_outputs(run_id)` - retrieve results
+- `reload_config()` - hot-reload config
+
+**Key features**:
+- All paths validated against trusted roots
+- Job queue (1 concurrent, 10 queued)
+- Timeout handling with process group cleanup
+- Logs stored in `plans/artifacts/mcp_runs_YYYYMMDD/`
+
+Documentation: `mcp_server/README.md`  
+Configuration: `mcp_server/config.yaml`
 
 ## Docs to Check First
 
@@ -97,6 +123,7 @@ actionable; link to deeper docs rather than copying them.
 - `docs/feature_barcodes.md`
 - `docs/todos`
 - `tests/ARTIFACTS.md`
+- `mcp_server/README.md`
 
 ## Branching and Merges
 

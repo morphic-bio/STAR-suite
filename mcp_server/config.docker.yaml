@@ -1,0 +1,98 @@
+# STAR-suite MCP Server Configuration (Docker)
+# This config is designed for containerized deployment.
+# Paths are mapped via Docker volumes:
+#   /repo     -> STAR-suite repository (read-only)
+#   /storage  -> Data storage (read-only)
+#   /tmp      -> Temporary files
+
+server:
+  host: "${MCP_HOST}"           # Default: 0.0.0.0
+  port: ${MCP_PORT}             # Default: 8765
+  auth_token: "${MCP_AUTH_TOKEN}"
+  transport: "${MCP_TRANSPORT}" # Default: http
+  public_discovery: true
+
+paths:
+  repo_root: "/repo"
+  artifact_log_root: "/app/artifacts"
+  temp_root: "/tmp"
+
+trusted_roots:
+  - "/repo"
+  - "/storage"
+  - "/tmp"
+  - "/app"
+  - "/usr/bin"
+  - "/usr/local/bin"
+
+datasets:
+  - id: "a375"
+    path: "/storage/A375"
+    description: "A375 cell line data (GEX + features)"
+
+execution:
+  default_timeout_seconds: 7200
+  max_concurrent_jobs: 1
+  queue_max_size: 10
+
+disk_space:
+  default_min_gb: 20
+  full_depth_min_gb: 100
+
+# Scripts with container-aware paths
+scripts:
+  - name: "cbub_regression"
+    path: "tests/run_cbub_regression_test.sh"
+    module: "core"
+    timeout_seconds: 3600
+    description: "CB/UB tag regression test"
+
+  - name: "sorted_bam_cbub_nonflex"
+    path: "tests/run_sorted_bam_cbub_nonflex_test.sh"
+    module: "core"
+    description: "Sorted BAM CB/UB injection (non-Flex)"
+
+  - name: "flex_smoke"
+    path: "tests/flex_smoke/run_flex_smoke.sh"
+    module: "flex"
+    description: "Flex basic smoke test"
+    fixtures:
+      - "/storage/flex_fixtures"
+
+  - name: "crispr_calling"
+    path: "tests/test_cr_compat_crispr_calling.sh"
+    module: "cr-compat"
+    description: "CR-compat CRISPR feature calling"
+
+  - name: "build_core"
+    path: "make"
+    args: ["core"]
+    module: "build"
+    working_dir: "."
+    description: "Build STAR core binary"
+
+test_suites:
+  - module: "core"
+    description: "Core STAR / Solo tests (non-Flex)"
+    scripts: ["cbub_regression", "sorted_bam_cbub_nonflex"]
+    disk_space_min_gb: 20
+
+  - module: "flex"
+    description: "STAR-Flex tests"
+    scripts: ["flex_smoke"]
+    disk_space_min_gb: 20
+
+  - module: "cr-compat"
+    description: "CellRanger compatibility tests"
+    scripts: ["crispr_calling"]
+    disk_space_min_gb: 100
+
+required_binaries:
+  - name: "STAR"
+    paths:
+      - "core/legacy/source/STAR"
+      - "/usr/local/bin/STAR"
+  - name: "samtools"
+    paths:
+      - "/usr/bin/samtools"
+      - "/usr/local/bin/samtools"
