@@ -1457,12 +1457,6 @@ soloCbUbRequireTogether     yes
                             yes         ... UB requires CB (default)
                             no          ... allow UB-only or CB-only injection
 
-soloCbUbRequireTogether     yes
-    string:                 require CB and UB together during tag injection
-                            yes         ... UB requires CB (default)
-                            no          ... allow UB-only or CB-only injection
-
-
 soloWriteKeysBin            no
     string:                 emit CR v1 keys.bin during pass-2 replay
                             yes         ... write <prefix>Aligned.out.keys.bin (+ .barcodes)
