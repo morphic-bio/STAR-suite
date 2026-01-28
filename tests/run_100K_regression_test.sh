@@ -78,7 +78,7 @@ run_star_test() {
       --outSAMprimaryFlag AllBestScore \
       --outFilterScoreMin 0 \
       --outFilterScoreMinOverLread 0 \
-      --outSAMattributes NH HI AS nM NM GX GN ZG \
+      --outSAMattributes NH HI AS nM NM GX GN \
       --soloCBmatchWLtype 1MM_multi_Nbase_pseudocounts \
       --soloUMIfiltering MultiGeneUMI_CR \
       --soloUMIdedup 1MM_CR \
@@ -191,4 +191,3 @@ echo "Current outputs: $CURRENT_DIR"
 echo ""
 echo "To compare outputs manually:"
 echo "  ${SCRIPT_DIR}/compare_mex_outputs.sh $BASELINE_DIR $CURRENT_DIR"
-

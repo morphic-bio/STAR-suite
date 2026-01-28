@@ -26,6 +26,7 @@ STAR_BIN="${STAR_BIN:-${REPO_ROOT}/core/legacy/source/STAR}"
 OUTPREFIX="${CR_COMPAT_TEST_OUTPREFIX:-/storage/A375/test_cr_compat_crispr_$(date +%Y%m%d_%H%M%S)/}"
 THREADS="${A375_THREADS:-16}"
 MIN_UMI="${CR_MIN_UMI:-10}"  # CR-compatible default
+DISK_POLL_SEC="${CR_COMPAT_DISK_POLL_SEC:-30}"
 
 if [[ "${OUTPREFIX}" != */ ]]; then
   OUTPREFIX="${OUTPREFIX}/"
@@ -64,11 +65,69 @@ fi
 
 mkdir -p "${OUTPREFIX}"
 
-# Get FASTQ files
-GEX_R1_FILES=$(ls "${GEX_DIR}/"*R1*.fastq.gz | paste -sd, -)
-GEX_R2_FILES=$(ls "${GEX_DIR}/"*R2*.fastq.gz | paste -sd, -)
-CRISPR_R1_FILES=$(ls "${CRISPR_DIR}/"*R1*.fastq.gz | paste -sd, -)
-CRISPR_R2_FILES=$(ls "${CRISPR_DIR}/"*R2*.fastq.gz | paste -sd, -)
+# Disk usage monitor (tracks peak usage during the run)
+DISK_LOG="${OUTPREFIX}disk_usage.log"
+(
+  while true; do
+    du -sb "${OUTPREFIX}" 2>/dev/null | awk '{print strftime("%F %T"), $1}' >> "${DISK_LOG}"
+    sleep "${DISK_POLL_SEC}"
+  done
+) &
+DISK_MON_PID=$!
+cleanup_disk_mon() {
+  if [[ -n "${DISK_MON_PID:-}" ]]; then
+    kill "${DISK_MON_PID}" >/dev/null 2>&1 || true
+  fi
+}
+trap cleanup_disk_mon EXIT
+
+# Get FASTQ files (robust to empty globs)
+mapfile -t GEX_R1_ARR < <(ls "${GEX_DIR}/"*R1*.fastq.gz 2>/dev/null || true)
+mapfile -t GEX_R2_ARR < <(ls "${GEX_DIR}/"*R2*.fastq.gz 2>/dev/null || true)
+mapfile -t CRISPR_R1_ARR < <(ls "${CRISPR_DIR}/"*R1*.fastq.gz 2>/dev/null || true)
+mapfile -t CRISPR_R2_ARR < <(ls "${CRISPR_DIR}/"*R2*.fastq.gz 2>/dev/null || true)
+
+join_by_comma() {
+  local IFS=,
+  echo "$*"
+}
+
+GEX_R1_FILES=$(join_by_comma "${GEX_R1_ARR[@]}")
+GEX_R2_FILES=$(join_by_comma "${GEX_R2_ARR[@]}")
+CRISPR_R1_FILES=$(join_by_comma "${CRISPR_R1_ARR[@]}")
+CRISPR_R2_FILES=$(join_by_comma "${CRISPR_R2_ARR[@]}")
+
+# Report FASTQ lists
+echo "GEX R1 files:    ${#GEX_R1_ARR[@]}"
+echo "GEX R2 files:    ${#GEX_R2_ARR[@]}"
+echo "CRISPR R1 files: ${#CRISPR_R1_ARR[@]}"
+echo "CRISPR R2 files: ${#CRISPR_R2_ARR[@]}"
+echo "GEX R1 list:     ${GEX_R1_FILES:-<empty>}"
+echo "GEX R2 list:     ${GEX_R2_FILES:-<empty>}"
+echo "CRISPR R1 list:  ${CRISPR_R1_FILES:-<empty>}"
+echo "CRISPR R2 list:  ${CRISPR_R2_FILES:-<empty>}"
+echo ""
+
+# Fail early if any FASTQ list is empty
+if [[ -z "${GEX_R1_FILES}" || -z "${GEX_R2_FILES}" || -z "${CRISPR_R1_FILES}" || -z "${CRISPR_R2_FILES}" ]]; then
+  echo "ERROR: FASTQ list is empty. Check FASTQ paths:" >&2
+  echo "  GEX dir:    ${GEX_DIR}" >&2
+  echo "  CRISPR dir: ${CRISPR_DIR}" >&2
+  echo "  GEX R1:     ${GEX_R1_FILES:-<empty>}" >&2
+  echo "  GEX R2:     ${GEX_R2_FILES:-<empty>}" >&2
+  echo "  CRISPR R1:  ${CRISPR_R1_FILES:-<empty>}" >&2
+  echo "  CRISPR R2:  ${CRISPR_R2_FILES:-<empty>}" >&2
+  exit 1
+fi
+
+# Detect malformed lists (leading/trailing/double commas)
+for lbl in GEX_R1_FILES GEX_R2_FILES CRISPR_R1_FILES CRISPR_R2_FILES; do
+  val="${!lbl}"
+  if [[ "${val}" == *,*","* || "${val}" == ,* || "${val}" == *, ]]; then
+    echo "ERROR: malformed FASTQ list for ${lbl}: ${val}" >&2
+    exit 1
+  fi
+done
 
 # Create multi-config
 MULTI_CONFIG="${OUTPREFIX}multi_config.csv"
@@ -95,7 +154,7 @@ echo "Running STAR with CR-compat mode..."
   --readFilesCommand zcat \
   --outFileNamePrefix "${OUTPREFIX}" \
   --outSAMtype BAM SortedByCoordinate \
-  --outSAMattributes NH HI nM AS CR UR CB UB GX GN gx gn sF ZG ZX sS sQ sM \
+  --outSAMattributes NH HI nM AS CR UR CB UB GX GN gx gn sF sS sQ sM \
   --clipAdapterType CellRanger4 \
   --alignEndsType Local \
   --chimSegmentMin 1000000 \
@@ -115,6 +174,15 @@ echo "Running STAR with CR-compat mode..."
   --crFeatureRef "${FEATURE_REF}" \
   --crWhitelist "${WHITELIST}" \
   --crMinUmi "${MIN_UMI}"
+
+cleanup_disk_mon
+
+if [[ -f "${DISK_LOG}" ]]; then
+  PEAK_BYTES=$(awk 'max<$2{max=$2} END{print max+0}' "${DISK_LOG}")
+  if [[ "${PEAK_BYTES}" -gt 0 ]]; then
+    echo "Peak disk usage (bytes): ${PEAK_BYTES}"
+  fi
+fi
 
 echo ""
 echo "=========================================="

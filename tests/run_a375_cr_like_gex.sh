@@ -85,7 +85,7 @@ echo "Running A375 CR-like STARsolo (EM + EmptyDrops_CR)..."
   --readFilesCommand zcat \
   --outFileNamePrefix "${OUTPREFIX}" \
   "${SAM_OUT_ARGS[@]}" \
-  --outSAMattributes NH HI nM AS CR UR CB UB GX GN gx gn sF ZG ZX sS sQ sM \
+  --outSAMattributes NH HI nM AS CR UR CB UB GX GN gx gn sF sS sQ sM \
   --clipAdapterType CellRanger4 \
   --alignEndsType Local \
   --chimSegmentMin 1000000 \

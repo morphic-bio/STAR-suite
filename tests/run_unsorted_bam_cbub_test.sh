@@ -62,7 +62,7 @@ echo "Running STAR with unsorted BAM + CB/UB tags..."
   --outSAMprimaryFlag AllBestScore \
   --outFilterScoreMin 0 \
   --outFilterScoreMinOverLread 0 \
-  --outSAMattributes NH HI AS nM NM GX GN ZG CB UB \
+  --outSAMattributes NH HI AS nM NM GX GN CB UB \
   --soloCBmatchWLtype 1MM_multi_Nbase_pseudocounts \
   --soloUMIfiltering MultiGeneUMI_CR \
   --soloUMIdedup 1MM_CR \

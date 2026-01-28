@@ -72,7 +72,7 @@ COMMON_PARAMS=(
     --outSAMprimaryFlag AllBestScore
     --outFilterScoreMin 0
     --outFilterScoreMinOverLread 0
-    --outSAMattributes NH HI AS nM NM GX GN ZG
+    --outSAMattributes NH HI AS nM NM GX GN
     --soloCBmatchWLtype 1MM_multi_Nbase_pseudocounts
     --soloUMIfiltering MultiGeneUMI_CR
     --soloUMIdedup 1MM_CR

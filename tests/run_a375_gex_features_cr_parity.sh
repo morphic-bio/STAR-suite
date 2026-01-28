@@ -117,7 +117,7 @@ echo ""
   --readFilesCommand zcat \
   --outFileNamePrefix "${OUTPREFIX}" \
   --outSAMtype BAM SortedByCoordinate \
-  --outSAMattributes NH HI nM AS CR UR CB UB GX GN gx gn sF ZG ZX sS sQ sM \
+  --outSAMattributes NH HI nM AS CR UR CB UB GX GN gx gn sF sS sQ sM \
   --clipAdapterType CellRanger4 \
   --alignEndsType Local \
   --chimSegmentMin 1000000 \

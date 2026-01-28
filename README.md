@@ -29,6 +29,20 @@ tools/                   # Suite-level scripts/utilities
 - **Feature Barcodes** (`core/features/feature_barcodes/`): Vendored `process_features` tools for perturb-seq testing (`assignBarcodes`, `demux_bam`, `demux_fastq`).
   Build tools: `make feature-barcodes-tools`.
 
+## Build Targets
+
+The top-level `Makefile` supports a default build, full build, and conditional include/exclude filters.
+
+- **Default build**: `make` (same as `make default`)
+  - Builds the “usual culprits” (core + common tools).
+  - Optional filters:
+    - `make default INCLUDE="core flex-tools"`
+    - `make default EXCLUDE="slam-tools yremove-tools"`
+- **Build everything**: `make all`
+  - Includes everything in the suite (core + all tools).
+
+Run `make help` to see the full target list and descriptions.
+
 ## Technical Updates
 
 ### Core Updates

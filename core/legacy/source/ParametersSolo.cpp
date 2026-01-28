@@ -1062,6 +1062,12 @@ void ParametersSolo::initialize(Parameters *pPin)
             pP->inOut->logMain << "         ZG/ZX tags may be empty or incomplete. Add GeneFull to --soloFeatures for proper annotation.\n";
         };
     };
+
+    // Flex note: ZG/ZX tags are legacy and not currently validated in Flex mode
+    if (flexMode && (pP->outSAMattrPresent.ZG || pP->outSAMattrPresent.ZX)) {
+        pP->inOut->logMain << "WARNING: ZG/ZX tags requested with --flex yes. ZG/ZX output is legacy and not currently validated for Flex.\n";
+        pP->inOut->logMain << "         Tags will be emitted for compatibility, but may be removed from Flex test defaults until validated.\n";
+    };
     
     readIndexYes = readInfoYes;
 
