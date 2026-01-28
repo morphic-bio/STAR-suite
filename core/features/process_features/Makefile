@@ -22,7 +22,8 @@ DEFINES :=
 # Note: plot_histogram.c is needed by assignBarcodes.c for histogram generation
 # Note: heatmap.c now uses Plotly (HTML+JSON), no external dependencies
 # pf_counts.c and mex_writer.c provide modular counts/output stages
-CORE_SRCS = assignBarcodes.c queue.c globals.c utils.c memory.c io.c barcode_match.c pf_api.c call_features.c gmm.c mex_10x.c plot_histogram.c pf_counts.c mex_writer.c emptydrops_bridge.c barcode_filter.c heatmap.c
+# nbem.c provides NB-EM feature calling (SCEPTRE-style)
+CORE_SRCS = assignBarcodes.c queue.c globals.c utils.c memory.c io.c barcode_match.c pf_api.c call_features.c gmm.c nbem.c mex_10x.c plot_histogram.c pf_counts.c mex_writer.c emptydrops_bridge.c barcode_filter.c heatmap.c
 
 # CLI-specific sources
 MAIN_SRCS = main.c

@@ -150,3 +150,7 @@ tests/
 - [x] TODO items for regression testing added
 - [ ] Regression testing for lineage barcodes (pending)
 - [ ] Regression testing for FLEX (pending)
+
+## Related NB-EM / SCEPTRE-Parity Results
+
+See `tests/nbem_sceptre_parity_results.md` for NB‑EM / Poisson‑EM / SCEPTRE‑parity results on A375 and vignette datasets, including test set locations and outputs.

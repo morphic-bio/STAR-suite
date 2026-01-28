@@ -36,15 +36,44 @@ update this file with its output location.
 
 - `plans/artifacts/parms_tests_YYYYMMDD/` (logs + report)
 - `tests/*_output*/` (smoke/regression outputs)
+- `tests/sceptre_example_output_*` (SCEPTRE vignette runs)
+- `tests/sceptre_example_*_mex` (SCEPTRE vignette MEX exports)
+- `tests/nbem_sceptre_example_*` (NB-EM outputs on SCEPTRE vignette MEX)
+- `tests/nbem_sceptre_parity_example_low_*` (SCEPTRE-parity Poisson EM on SCEPTRE example low)
+- `tests/crispat_vignette/` (crispat vignette outputs)
+- `tests/crispat_vignette_mex/` (crispat vignette MEX export)
+- `tests/crispat_vignette_mex_0_4/` (crispat vignette subset MEX for gRNA 0-4)
+- `tests/crispat_vignette_mex_0_9/` (crispat vignette subset MEX for gRNA 0-9)
+- `tests/nbem_crispat_vignette_output/` (NB-EM outputs on crispat vignette MEX)
+- `tests/nbem_crispat_vignette_output_0_4/` (NB-EM outputs on crispat vignette subset)
+- `tests/nbem_crispat_vignette_output_0_4_revert/` (NB-EM outputs on crispat vignette subset 0-4, reverted behavior)
+- `tests/nbem_crispat_vignette_output_0_4_revert2/` (NB-EM outputs on crispat vignette subset 0-4, reverted behavior rerun)
+- `tests/nbem_crispat_vignette_output_0_4_current/` (NB-EM outputs on crispat vignette subset 0-4, current code rerun)
+- `tests/nbem_crispat_vignette_output_0_4_noguard/` (NB-EM outputs on crispat vignette subset 0-4, no LL-decrease guard)
+- `tests/nbem_crispat_vignette_output_0_4_guard_prob05/` (NB-EM outputs on crispat vignette subset 0-4, guard + prob-threshold 0.5)
+- `tests/nbem_crispat_vignette_output_0_4_gap005/` (NB-EM outputs on crispat vignette subset 0-4, multiplet gap 0.05)
+- `tests/nbem_crispat_vignette_output_0_4_noseed/` (NB-EM outputs on crispat vignette subset 0-4, no seed)
+- `tests/nbem_crispat_vignette_output_0_9/` (NB-EM outputs on crispat vignette subset 0-9)
+- `tests/nbem_crispat_vignette_output_0_9_noseed/` (NB-EM outputs on crispat vignette subset 0-9, no seed)
+- `tests/nbem_crispat_vignette_output_0_9_current/` (NB-EM outputs on crispat vignette subset 0-9, current code rerun)
+- `tests/nbem_crispat_vignette_output_0_9_bk3/` (NB-EM outputs on crispat vignette subset 0-9, backup-threshold 3)
+- `tests/nbem_crispat_vignette_output_0_9_bk2/` (NB-EM outputs on crispat vignette subset 0-9, backup-threshold 2)
+- `tests/nbem_crispat_vignette_output_0_9_prob07/` (NB-EM outputs on crispat vignette subset 0-9, prob-threshold 0.7)
+- `tests/nbem_crispat_vignette_output_0_4_poisson_seed/` (NB-EM outputs with Poisson seed on crispat vignette subset)
+- `tests/nbem_crispat_vignette_output_0_4_fallback_dom/` (NB-EM outputs with fallback dominance on crispat vignette subset)
 - `tests/baselines/flex_pre_modular_*/` (Flex modular integration baselines)
 - `/tmp/*` (temporary scratch outputs)
 - `/storage/A375/` (external A375 datasets + smoke outputs; e.g. `star_gex_smoke/`, `star_multi_smoke_cpp/`, `fastqs/`, `outputs/`)
   - Downsampled MEX output: `/storage/A375/star_multi_smoke/assign/downsampled/`
+  - NB-EM calls (A375 CRISPR-only MEX): `/storage/A375/nbem_a375_20260128_075248/`
+  - Poisson-EM calls (A375 CRISPR-only MEX): `/storage/A375/poisson_em_a375_20260128_075938/`
+  - SCEPTRE-parity calls (A375 CRISPR-only MEX): `/storage/A375/sceptre_parity_a375_20260128_081139/`
   - CRISPR compat runs:
     - `/storage/A375/assign_anchor_mode_h3_min0_20260123_233445/`
     - `/storage/A375/assign_anchor_mode_h1_min0_20260123_235424/`
     - `/storage/A375/assign_anchor_mode_h1_min0_n0_20260124_000205/`
     - `/storage/A375/assign_anchor_mode_h3_min0_trace_GTGTGATGTGTGGTCA_20260123_234434/`
+  - SCEPTRE outputs: `/storage/A375/sceptre_runs/`
 
 ## Flex Modular Integration Baselines
 

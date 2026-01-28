@@ -1029,3 +1029,799 @@ int cf_process_mex_dir_gmm(const char *mex_dir, const char *output_dir, const cf
     cf_free_matrix(matrix);
     return 0;
 }
+
+/* ============================================================================
+ * NB-EM Feature Calling Implementation (SCEPTRE-style)
+ * ============================================================================ */
+
+#include "../include/nbem.h"
+
+/* Forward declaration for internal function */
+static cf_nbem_results* cf_call_features_nbem_with_output(const cf_sparse_matrix *matrix, 
+                                                           const cf_nbem_config *config,
+                                                           const char *posteriors_temp_path,
+                                                           double posteriors_threshold);
+
+cf_nbem_config* cf_nbem_config_create(void) {
+    cf_nbem_config *config = calloc(1, sizeof(cf_nbem_config));
+    if (!config) return NULL;
+    
+    config->moi_mode = CF_MOI_AUTO;
+    config->moi_min_umi = 1;
+    config->moi_pmulti_threshold = 0.05;
+    config->prob_threshold = 0.8;
+    config->backup_threshold = 5;
+    config->max_iter = 100;
+    config->tol = 1e-4;
+    config->use_poisson = 0;
+    config->sceptre_parity = 0;
+    config->global_phi = 0.0;  /* Auto */
+    config->phi_min = 0.01;
+    config->phi_max = 1000.0;
+    config->covariate_tsv = NULL;
+    config->debug = 0;
+    config->debug_max_features = 0;
+    config->debug_csv = NULL;
+    config->debug_feature = NULL;
+    config->debug_iter_csv = NULL;
+    
+    return config;
+}
+
+void cf_nbem_config_destroy(cf_nbem_config *config) {
+    if (config) free(config);
+}
+
+cf_nbem_results* cf_call_features_nbem(const cf_sparse_matrix *matrix, const cf_nbem_config *config) {
+    return cf_call_features_nbem_with_output(matrix, config, NULL, 0.01);
+}
+
+/* Internal implementation that supports streaming posteriors to file */
+static cf_nbem_results* cf_call_features_nbem_with_output(const cf_sparse_matrix *matrix, 
+                                                    const cf_nbem_config *config,
+                                                    const char *posteriors_temp_path,
+                                                    double posteriors_threshold) {
+    if (!matrix) return NULL;
+    
+    /* Use default config if none provided */
+    cf_nbem_config default_config;
+    if (!config) {
+        memset(&default_config, 0, sizeof(default_config));
+        default_config.moi_mode = CF_MOI_AUTO;
+        default_config.moi_min_umi = 1;
+        default_config.moi_pmulti_threshold = 0.05;
+        default_config.prob_threshold = 0.8;
+        default_config.backup_threshold = 5;
+        default_config.max_iter = 100;
+        default_config.tol = 1e-4;
+        default_config.use_poisson = 0;
+        default_config.sceptre_parity = 0;
+        default_config.global_phi = 0.0;
+        default_config.phi_min = 0.01;
+        default_config.phi_max = 1000.0;
+        config = &default_config;
+    }
+    
+    if (posteriors_threshold <= 0) posteriors_threshold = 0.01;
+    
+    int num_features, num_cells;
+    int **feature_counts = build_per_feature_counts(matrix, &num_features, &num_cells);
+    if (!feature_counts) return NULL;
+    
+    /* Allocate results */
+    cf_nbem_results *results = calloc(1, sizeof(cf_nbem_results));
+    if (!results) {
+        free_per_feature_counts(feature_counts, num_features);
+        return NULL;
+    }
+    
+    results->num_cells = num_cells;
+    results->num_features_total = num_features;
+    results->feature_names = matrix->row_names;
+    results->cell_barcodes = matrix->col_names;
+    
+    /* Allocate per-cell arrays */
+    results->feature_calls = calloc(num_cells, sizeof(char*));
+    results->num_features = calloc(num_cells, sizeof(int));
+    results->num_umis = calloc(num_cells, sizeof(int));
+    
+    /* Allocate per-cell best/second posterior tracking for LOW-MOI disambiguation */
+    results->best_post = calloc(num_cells, sizeof(double));
+    results->second_post = calloc(num_cells, sizeof(double));
+    results->best_feature = malloc(num_cells * sizeof(int));
+    results->second_feature = malloc(num_cells * sizeof(int));
+    
+    if (!results->feature_calls || !results->num_features || !results->num_umis ||
+        !results->best_post || !results->second_post || !results->best_feature || !results->second_feature) {
+        cf_free_nbem_results(results);
+        free_per_feature_counts(feature_counts, num_features);
+        return NULL;
+    }
+    
+    /* Initialize best/second tracking */
+    for (int c = 0; c < num_cells; c++) {
+        results->best_feature[c] = -1;
+        results->second_feature[c] = -1;
+        results->best_post[c] = -1.0;
+        results->second_post[c] = -1.0;
+    }
+    
+    /* Allocate per-feature results */
+    results->feature_results = calloc(num_features, sizeof(cf_feature_nbem_result));
+    if (!results->feature_results) {
+        cf_free_nbem_results(results);
+        free_per_feature_counts(feature_counts, num_features);
+        return NULL;
+    }
+
+    /* Step 1: Estimate MOI */
+    nbem_moi_result moi_raw = nbem_estimate_moi(feature_counts, num_features, num_cells,
+                                                  config->moi_min_umi, config->moi_pmulti_threshold);
+    results->moi.p0 = moi_raw.p0;
+    results->moi.lambda = moi_raw.lambda;
+    results->moi.p_multi_exp = moi_raw.p_multi_exp;
+    results->moi.p_multi_obs = moi_raw.p_multi_obs;
+    results->moi.n_cells_0 = moi_raw.n_cells_0;
+    results->moi.n_cells_1 = moi_raw.n_cells_1;
+    results->moi.n_cells_multi = moi_raw.n_cells_multi;
+    
+    cf_moi_mode effective_moi = config->moi_mode;
+    if (effective_moi == CF_MOI_AUTO) {
+        effective_moi = (moi_raw.classification == NBEM_MOI_HIGH) ? CF_MOI_HIGH : CF_MOI_LOW;
+    }
+    if (config->sceptre_parity) {
+        effective_moi = CF_MOI_HIGH;
+    }
+    results->moi.classification = effective_moi;
+    
+    printf("MOI estimation: p0=%.3f, lambda=%.3f, p_multi_obs=%.3f, p_multi_exp=%.3f\n",
+           moi_raw.p0, moi_raw.lambda, moi_raw.p_multi_obs, moi_raw.p_multi_exp);
+    printf("MOI classification: %s\n", (effective_moi == CF_MOI_HIGH) ? "HIGH" : "LOW");
+    
+    /* Step 2: Compute covariates */
+    nbem_covariates *covariates = nbem_compute_grna_covariates(feature_counts, num_features, num_cells);
+    if (!covariates) {
+        cf_free_nbem_results(results);
+        free_per_feature_counts(feature_counts, num_features);
+        return NULL;
+    }
+    
+    /* Load GEX covariates if provided */
+    if (config->covariate_tsv) {
+        nbem_load_gex_covariates(covariates, config->covariate_tsv, matrix->col_names);
+    }
+    
+    /* Step 3: Build design matrix (shared across all features) */
+    int n_covars = covariates->has_gex ? 5 : 3;
+    double *X = malloc(num_cells * n_covars * sizeof(double));
+    double *beta = malloc(n_covars * sizeof(double));
+    double *mu0 = malloc(num_cells * sizeof(double));  /* Per-feature background, reused */
+    
+    if (!X || !beta || !mu0) {
+        free(X); free(beta); free(mu0);
+        nbem_free_covariates(covariates);
+        cf_free_nbem_results(results);
+        free_per_feature_counts(feature_counts, num_features);
+        return NULL;
+    }
+    
+    nbem_build_design_matrix(covariates, X);
+    
+    /* Step 4: Estimate global phi using streaming accumulator (no O(features*cells) alloc) */
+    double global_phi = config->global_phi;
+    if (global_phi <= 0) {
+        nbem_phi_accum phi_acc;
+        nbem_phi_accum_init(&phi_acc);
+        for (int f = 0; f < num_features; f++) {
+            nbem_phi_accum_add(&phi_acc, feature_counts[f], num_cells);
+        }
+        global_phi = nbem_phi_accum_finish(&phi_acc, config->phi_min, config->phi_max);
+    }
+    results->global_phi = global_phi;
+    printf("Global dispersion (phi): %.4f\n", global_phi);
+    
+    /* Step 5: Run NB-EM for each feature with PER-FEATURE background model */
+    printf("Running NB-EM for %d features (per-feature background)...\n", num_features);
+    
+    /* Scratch arrays (reused per feature) */
+    double *posteriors_scratch = malloc(num_cells * sizeof(double));
+    int *positive_calls = malloc(num_cells * sizeof(int));
+    
+    if (!posteriors_scratch || !positive_calls) {
+        free(posteriors_scratch);
+        free(positive_calls);
+        free(X); free(beta); free(mu0);
+        nbem_free_covariates(covariates);
+        cf_free_nbem_results(results);
+        free_per_feature_counts(feature_counts, num_features);
+        return NULL;
+    }
+    
+    /* Track per-cell positive features for final call assembly */
+    int **cell_positive_features = calloc(num_cells, sizeof(int*));
+    int *cell_num_positive = calloc(num_cells, sizeof(int));
+    int *cell_positive_cap = calloc(num_cells, sizeof(int));
+    
+    if (!cell_positive_features || !cell_num_positive || !cell_positive_cap) {
+        free(posteriors_scratch);
+        free(positive_calls);
+        free(X); free(beta); free(mu0);
+        free(cell_positive_features);
+        free(cell_num_positive);
+        free(cell_positive_cap);
+        nbem_free_covariates(covariates);
+        cf_free_nbem_results(results);
+        free_per_feature_counts(feature_counts, num_features);
+        return NULL;
+    }
+    
+    /* Open temp file for streaming posteriors */
+    FILE *posteriors_fp = NULL;
+    int posteriors_nnz = 0;
+    if (posteriors_temp_path) {
+        posteriors_fp = fopen(posteriors_temp_path, "w");
+        if (!posteriors_fp) {
+            fprintf(stderr, "Warning: failed to open posteriors temp file: %s\n", posteriors_temp_path);
+        }
+        /* Note: we write raw entries first, header added later */
+    }
+    
+    int num_em_failures = 0;
+    FILE *debug_fp = NULL;
+    int debug_written = 0;
+    if (config->debug) {
+        if (config->debug_csv) {
+            debug_fp = fopen(config->debug_csv, "w");
+            if (!debug_fp) {
+                fprintf(stderr, "Warning: failed to open NB-EM debug CSV: %s\n", config->debug_csv);
+            }
+        }
+        if (debug_fp) {
+            fprintf(debug_fp, "feature,pi,delta,phi,log_likelihood,converged,n_iter,used_fallback,failure_reason,num_positive,total_umis\n");
+        }
+    }
+    
+    for (int f = 0; f < num_features; f++) {
+        /* === Per-feature background model === */
+        /* Fit Poisson GLM for THIS feature's counts (not total counts) */
+        int irls_ok = poisson_irls(X, feature_counts[f], num_cells, n_covars, beta, 25, 1e-6);
+        
+        if (irls_ok != 0) {
+            /* Fallback: use feature mean as constant background */
+            double feat_mean = 0.0;
+            for (int c = 0; c < num_cells; c++) feat_mean += feature_counts[f][c];
+            feat_mean /= num_cells;
+            if (feat_mean < 1e-10) feat_mean = 1e-10;
+            for (int c = 0; c < num_cells; c++) mu0[c] = feat_mean;
+        } else {
+            /* Predict per-feature background: mu0_f[i] = exp(X_i * beta_f) */
+            poisson_predict(X, beta, num_cells, n_covars, mu0);
+        }
+        
+        /* Fit NB-EM for this feature (with optional per-iteration debug) */
+        nbem_fit_result fit;
+        const char *feat_name = matrix->row_names ? matrix->row_names[f] : NULL;
+        double pi_seed = 0.1;
+        double delta_seed = 1.0;
+        if (config->debug && config->debug_feature && feat_name &&
+            strcmp(config->debug_feature, feat_name) == 0) {
+            FILE *iter_fp = NULL;
+            if (config->debug_iter_csv) {
+                iter_fp = fopen(config->debug_iter_csv, "w");
+                if (!iter_fp) {
+                    fprintf(stderr, "Warning: failed to open NB-EM iter debug CSV: %s\n", config->debug_iter_csv);
+                }
+            }
+            fit = nbem_fit_feature_debug(feature_counts[f], mu0, num_cells,
+                                         global_phi, config->max_iter, config->tol,
+                                         pi_seed, delta_seed, config->use_poisson, feat_name, iter_fp);
+            if (iter_fp) {
+                fclose(iter_fp);
+            }
+        } else {
+            fit = nbem_fit_feature(feature_counts[f], mu0, num_cells,
+                                   global_phi, config->use_poisson, config->max_iter, config->tol,
+                                   pi_seed, delta_seed);
+        }
+        
+        /* Track EM failures */
+        if (fit.used_fallback) {
+            num_em_failures++;
+        }
+        
+        /* Compute posteriors into scratch buffer */
+        nbem_posteriors(feature_counts[f], mu0, num_cells,
+                        fit.pi, fit.delta, global_phi, config->use_poisson, posteriors_scratch);
+        
+        /* Make calls (uses fallback threshold if EM failed) */
+        int use_fallback = fit.used_fallback;
+        if (config->sceptre_parity) {
+            use_fallback = 0;
+        }
+        int n_positive = nbem_make_calls(posteriors_scratch, feature_counts[f], num_cells,
+                                          config->prob_threshold, config->backup_threshold,
+                                          use_fallback, positive_calls);
+        
+        /* Update per-cell best/second posterior tracking (only for positive calls) */
+        for (int c = 0; c < num_cells; c++) {
+            if (!positive_calls[c]) continue;
+            double post = posteriors_scratch[c];
+            if (post > results->best_post[c]) {
+                /* New best: demote current best to second */
+                results->second_post[c] = results->best_post[c];
+                results->second_feature[c] = results->best_feature[c];
+                results->best_post[c] = post;
+                results->best_feature[c] = f;
+            } else if (post > results->second_post[c]) {
+                /* New second best */
+                results->second_post[c] = post;
+                results->second_feature[c] = f;
+            }
+        }
+        
+        /* Stream posteriors to temp file */
+        if (posteriors_fp) {
+            for (int c = 0; c < num_cells; c++) {
+                if (posteriors_scratch[c] >= posteriors_threshold) {
+                    fprintf(posteriors_fp, "%d %d %.6f\n", f + 1, c + 1, posteriors_scratch[c]);
+                    posteriors_nnz++;
+                }
+            }
+        }
+        
+        /* Store feature result */
+        results->feature_results[f].feature_index = f;
+        results->feature_results[f].feature_name = matrix->row_names ? matrix->row_names[f] : NULL;
+        results->feature_results[f].pi = fit.pi;
+        results->feature_results[f].delta = fit.delta;
+        results->feature_results[f].phi = global_phi;
+        results->feature_results[f].log_likelihood = fit.log_likelihood;
+        results->feature_results[f].converged = fit.converged;
+        results->feature_results[f].n_iter = fit.n_iter;
+        results->feature_results[f].used_fallback = fit.used_fallback;
+        results->feature_results[f].num_positive = n_positive;
+        
+        /* Calculate total UMIs */
+        int total_umis = 0;
+        for (int c = 0; c < num_cells; c++) {
+            total_umis += feature_counts[f][c];
+        }
+        results->feature_results[f].total_umis = total_umis;
+
+        if (debug_fp && (config->debug_max_features <= 0 || debug_written < config->debug_max_features)) {
+            const char *name = matrix->row_names ? matrix->row_names[f] : "Unknown";
+            fprintf(debug_fp, "%s,%.6f,%.6f,%.6f,%.6f,%d,%d,%d,%d,%d,%d\n",
+                    name,
+                    fit.pi,
+                    fit.delta,
+                    global_phi,
+                    fit.log_likelihood,
+                    fit.converged,
+                    fit.n_iter,
+                    fit.used_fallback,
+                    fit.failure_reason,
+                    n_positive,
+                    total_umis);
+            debug_written++;
+        }
+        
+        /* Track positive cells for this feature */
+        for (int c = 0; c < num_cells; c++) {
+            if (positive_calls[c]) {
+                if (cell_num_positive[c] >= cell_positive_cap[c]) {
+                    int new_cap = cell_positive_cap[c] ? cell_positive_cap[c] * 2 : 4;
+                    int *new_arr = realloc(cell_positive_features[c], new_cap * sizeof(int));
+                    if (new_arr) {
+                        cell_positive_features[c] = new_arr;
+                        cell_positive_cap[c] = new_cap;
+                    }
+                }
+                if (cell_num_positive[c] < cell_positive_cap[c]) {
+                    cell_positive_features[c][cell_num_positive[c]++] = f;
+                }
+            }
+        }
+    }
+    
+    if (posteriors_fp) {
+        fclose(posteriors_fp);
+    }
+    if (debug_fp) {
+        fclose(debug_fp);
+    }
+    
+    results->num_em_failures = num_em_failures;
+    results->posteriors_nnz = posteriors_nnz;
+    
+    free(posteriors_scratch);
+    free(positive_calls);
+    free(X);
+    free(beta);
+    free(mu0);
+    nbem_free_covariates(covariates);
+    
+    /* Step 6: Build per-cell call strings (handle MOI mode) */
+    /* Now uses best_post/second_post arrays instead of dense posteriors matrix */
+    for (int c = 0; c < num_cells; c++) {
+        int n_pos = cell_num_positive[c];
+        
+        /* Check if cell has any UMIs */
+        int has_any_umi = 0;
+        for (int f = 0; f < num_features && !has_any_umi; f++) {
+            if (feature_counts[f][c] > 0) has_any_umi = 1;
+        }
+        
+        if (n_pos == 0) {
+            if (!has_any_umi) {
+                results->cells_no_molecules++;
+            } else {
+                results->cells_no_call++;
+            }
+            results->feature_calls[c] = strdup("None");
+            results->num_features[c] = 0;
+            results->num_umis[c] = 0;
+        } else if (n_pos == 1 || effective_moi == CF_MOI_LOW) {
+            /* Single assignment (or LOW MOI forces single) */
+            int best_f = results->best_feature[c];
+            
+            if (effective_moi == CF_MOI_LOW && n_pos > 1) {
+                /* Use pre-tracked best/second posteriors for disambiguation */
+                double best_post_val = results->best_post[c];
+                double second_post_val = results->second_post[c];
+                
+                /* If second best is close, mark ambiguous */
+                if (second_post_val >= 0 && (best_post_val - second_post_val) < 0.05) {
+                    results->feature_calls[c] = strdup("Multiplet");
+                    results->num_features[c] = n_pos;
+                    results->num_umis[c] = 0;
+                    for (int i = 0; i < n_pos; i++) {
+                        results->num_umis[c] += feature_counts[cell_positive_features[c][i]][c];
+                    }
+                    results->cells_multi_feature++;
+                    continue;
+                }
+            } else if (n_pos == 1) {
+                best_f = cell_positive_features[c][0];
+            }
+            
+            if (best_f < 0) best_f = cell_positive_features[c][0];  /* Safety fallback */
+            
+            results->cells_1_feature++;
+            results->feature_calls[c] = strdup(matrix->row_names ? matrix->row_names[best_f] : "Unknown");
+            results->num_features[c] = 1;
+            results->num_umis[c] = feature_counts[best_f][c];
+        } else {
+            /* Multiple assignments (HIGH MOI) */
+            results->cells_multi_feature++;
+            
+            /* Build pipe-joined string */
+            size_t total_len = 0;
+            for (int i = 0; i < n_pos; i++) {
+                int f = cell_positive_features[c][i];
+                if (matrix->row_names && matrix->row_names[f]) {
+                    total_len += strlen(matrix->row_names[f]) + 1;
+                }
+            }
+            
+            char *call_str = malloc(total_len + 1);
+            if (call_str) {
+                call_str[0] = '\0';
+                for (int i = 0; i < n_pos; i++) {
+                    int f = cell_positive_features[c][i];
+                    if (i > 0) strcat(call_str, "|");
+                    if (matrix->row_names && matrix->row_names[f]) {
+                        strcat(call_str, matrix->row_names[f]);
+                    }
+                }
+                results->feature_calls[c] = call_str;
+            } else {
+                results->feature_calls[c] = strdup("Multiple");
+            }
+            
+            results->num_features[c] = n_pos;
+            results->num_umis[c] = 0;
+            for (int i = 0; i < n_pos; i++) {
+                results->num_umis[c] += feature_counts[cell_positive_features[c][i]][c];
+            }
+        }
+    }
+    
+    /* Cleanup */
+    for (int c = 0; c < num_cells; c++) {
+        free(cell_positive_features[c]);
+    }
+    free(cell_positive_features);
+    free(cell_num_positive);
+    free(cell_positive_cap);
+    free_per_feature_counts(feature_counts, num_features);
+    
+    return results;
+}
+
+void cf_free_nbem_results(cf_nbem_results *results) {
+    if (!results) return;
+    
+    if (results->feature_calls) {
+        for (int i = 0; i < results->num_cells; i++) {
+            free(results->feature_calls[i]);
+        }
+        free(results->feature_calls);
+    }
+    free(results->num_features);
+    free(results->num_umis);
+    
+    /* Free per-cell tracking arrays */
+    free(results->best_post);
+    free(results->second_post);
+    free(results->best_feature);
+    free(results->second_feature);
+    
+    free(results->feature_results);
+    free(results);
+}
+
+int cf_write_nbem_calls_per_cell(const cf_nbem_results *results, const char *output_path) {
+    if (!results || !output_path) return -1;
+    
+    FILE *fp = fopen(output_path, "w");
+    if (!fp) return -1;
+    
+    /* Same format as GMM: cell_barcode,num_features,feature_call,num_umis */
+    fprintf(fp, "cell_barcode,num_features,feature_call,num_umis\n");
+    
+    for (int i = 0; i < results->num_cells; i++) {
+        fprintf(fp, "%s,%d,%s,%d\n",
+                results->cell_barcodes[i],
+                results->num_features[i],
+                results->feature_calls[i],
+                results->num_umis[i]);
+    }
+    
+    fclose(fp);
+    return 0;
+}
+
+int cf_write_nbem_calls_summary(const cf_nbem_results *results, const char *output_path) {
+    if (!results || !output_path) return -1;
+    
+    FILE *fp = fopen(output_path, "w");
+    if (!fp) return -1;
+    
+    /* Same format as GMM */
+    fprintf(fp, "Category,Metric,Value\n");
+    
+    fprintf(fp, "All,Cells with 0 molecules,%" PRId64 "\n", (int64_t)results->cells_no_molecules);
+    fprintf(fp, "All,Cells with no confident call,%" PRId64 "\n", (int64_t)results->cells_no_call);
+    fprintf(fp, "All,Cells with 1 feature,%" PRId64 "\n", (int64_t)results->cells_1_feature);
+    fprintf(fp, "All,Cells with >1 features,%" PRId64 "\n", (int64_t)results->cells_multi_feature);
+    
+    /* Per-feature breakdown */
+    for (int f = 0; f < results->num_features_total; f++) {
+        const char *name = results->feature_names ? results->feature_names[f] : "Unknown";
+        fprintf(fp, "%s,Cells,%" PRId64 "\n", name, (int64_t)results->feature_results[f].num_positive);
+    }
+    
+    fclose(fp);
+    return 0;
+}
+
+int cf_write_nbem_feature_params(const cf_nbem_results *results, const char *output_path) {
+    if (!results || !output_path) return -1;
+    
+    FILE *fp = fopen(output_path, "w");
+    if (!fp) return -1;
+    
+    fprintf(fp, "feature,pi,delta,phi,log_likelihood,converged,n_iter,used_fallback,num_positive,total_umis\n");
+    
+    for (int f = 0; f < results->num_features_total; f++) {
+        const cf_feature_nbem_result *fr = &results->feature_results[f];
+        const char *name = results->feature_names ? results->feature_names[f] : "Unknown";
+        
+        fprintf(fp, "%s,%.6f,%.6f,%.6f,%.6f,%d,%d,%d,%d,%d\n",
+                name,
+                fr->pi,
+                fr->delta,
+                fr->phi,
+                fr->log_likelihood,
+                fr->converged,
+                fr->n_iter,
+                fr->used_fallback,
+                fr->num_positive,
+                fr->total_umis);
+    }
+    
+    fclose(fp);
+    return 0;
+}
+
+int cf_finalize_nbem_posteriors_mtx(const char *temp_path, const char *output_path,
+                                     int num_features, int num_cells, int nnz) {
+    if (!temp_path || !output_path) return -1;
+    
+    /* Read temp file contents */
+    FILE *temp_fp = fopen(temp_path, "r");
+    if (!temp_fp) return -1;
+    
+    FILE *out_fp = fopen(output_path, "w");
+    if (!out_fp) {
+        fclose(temp_fp);
+        return -1;
+    }
+    
+    /* Write MatrixMarket header */
+    fprintf(out_fp, "%%%%MatrixMarket matrix coordinate real general\n");
+    fprintf(out_fp, "%%\n");
+    fprintf(out_fp, "%d %d %d\n", num_features, num_cells, nnz);
+    
+    /* Copy temp file contents */
+    char line[256];
+    while (fgets(line, sizeof(line), temp_fp)) {
+        fputs(line, out_fp);
+    }
+    
+    fclose(temp_fp);
+    fclose(out_fp);
+    
+    /* Remove temp file */
+    remove(temp_path);
+    
+    return 0;
+}
+
+int cf_write_nbem_summary_json(const cf_nbem_results *results, const cf_nbem_config *config,
+                                const char *output_path) {
+    if (!results || !output_path) return -1;
+    
+    FILE *fp = fopen(output_path, "w");
+    if (!fp) return -1;
+    
+    fprintf(fp, "{\n");
+    
+    /* MOI section */
+    fprintf(fp, "  \"moi\": {\n");
+    fprintf(fp, "    \"classification\": \"%s\",\n", 
+            (results->moi.classification == CF_MOI_HIGH) ? "high" : "low");
+    fprintf(fp, "    \"p0\": %.6f,\n", results->moi.p0);
+    fprintf(fp, "    \"lambda\": %.6f,\n", results->moi.lambda);
+    fprintf(fp, "    \"p_multi_obs\": %.6f,\n", results->moi.p_multi_obs);
+    fprintf(fp, "    \"p_multi_exp\": %.6f,\n", results->moi.p_multi_exp);
+    fprintf(fp, "    \"n_cells_0\": %d,\n", results->moi.n_cells_0);
+    fprintf(fp, "    \"n_cells_1\": %d,\n", results->moi.n_cells_1);
+    fprintf(fp, "    \"n_cells_multi\": %d\n", results->moi.n_cells_multi);
+    fprintf(fp, "  },\n");
+    
+    /* Parameters section */
+    fprintf(fp, "  \"parameters\": {\n");
+    fprintf(fp, "    \"global_phi\": %.6f,\n", results->global_phi);
+    if (config) {
+        fprintf(fp, "    \"prob_threshold\": %.6f,\n", config->prob_threshold);
+        fprintf(fp, "    \"backup_threshold\": %d,\n", config->backup_threshold);
+        fprintf(fp, "    \"max_iter\": %d,\n", config->max_iter);
+        fprintf(fp, "    \"tol\": %.6e,\n", config->tol);
+        fprintf(fp, "    \"use_poisson\": %d,\n", config->use_poisson);
+        fprintf(fp, "    \"sceptre_parity\": %d\n", config->sceptre_parity);
+    } else {
+        fprintf(fp, "    \"prob_threshold\": 0.8,\n");
+        fprintf(fp, "    \"backup_threshold\": 5,\n");
+        fprintf(fp, "    \"max_iter\": 100,\n");
+        fprintf(fp, "    \"tol\": 1e-4,\n");
+        fprintf(fp, "    \"use_poisson\": 0,\n");
+        fprintf(fp, "    \"sceptre_parity\": 0\n");
+    }
+    fprintf(fp, "  },\n");
+    
+    /* Summary section */
+    fprintf(fp, "  \"summary\": {\n");
+    fprintf(fp, "    \"num_cells\": %d,\n", results->num_cells);
+    fprintf(fp, "    \"num_features\": %d,\n", results->num_features_total);
+    fprintf(fp, "    \"cells_no_molecules\": %d,\n", results->cells_no_molecules);
+    fprintf(fp, "    \"cells_no_call\": %d,\n", results->cells_no_call);
+    fprintf(fp, "    \"cells_1_feature\": %d,\n", results->cells_1_feature);
+    fprintf(fp, "    \"cells_multi_feature\": %d,\n", results->cells_multi_feature);
+    fprintf(fp, "    \"num_em_failures\": %d\n", results->num_em_failures);
+    fprintf(fp, "  }\n");
+    
+    fprintf(fp, "}\n");
+    
+    fclose(fp);
+    return 0;
+}
+
+int cf_process_mex_dir_nbem(const char *mex_dir, const char *output_dir, const cf_nbem_config *config) {
+    if (!mex_dir || !output_dir) return -1;
+    
+    /* Create output directory if needed */
+    struct stat st = {0};
+    if (stat(output_dir, &st) == -1) {
+        if (mkdir(output_dir, 0755) != 0) {
+            fprintf(stderr, "Failed to create output directory: %s\n", output_dir);
+            return -1;
+        }
+    }
+    
+    /* Load matrix */
+    printf("Loading MEX from: %s\n", mex_dir);
+    cf_sparse_matrix *matrix = cf_load_mex(mex_dir);
+    if (!matrix) {
+        fprintf(stderr, "Failed to load MEX directory\n");
+        return -1;
+    }
+    printf("  Features: %d, Barcodes: %d, Non-zero entries: %d\n",
+           matrix->num_rows, matrix->num_cols, matrix->num_entries);
+    
+    /* Set up temp file for streaming posteriors */
+    char temp_path[MAX_LINE_LENGTH];
+    char output_path[MAX_LINE_LENGTH];
+    snprintf(temp_path, sizeof(temp_path), "%s/.nbem_posteriors_temp.txt", output_dir);
+    snprintf(output_path, sizeof(output_path), "%s/nbem_cell_posteriors.mtx", output_dir);
+    
+    double posteriors_threshold = 0.01;
+    
+    /* Call features with NB-EM (with streaming posteriors) */
+    printf("Calling features with NB-EM (SCEPTRE-style)...\n");
+    cf_nbem_config local_cfg;
+    const cf_nbem_config *cfg_ptr = config;
+    if (config && config->debug && !config->debug_csv) {
+        local_cfg = *config;
+        static char debug_path[MAX_LINE_LENGTH];
+        snprintf(debug_path, sizeof(debug_path), "%s/nbem_debug.csv", output_dir);
+        local_cfg.debug_csv = debug_path;
+        cfg_ptr = &local_cfg;
+    }
+    cf_nbem_results *results = cf_call_features_nbem_with_output(matrix, cfg_ptr,
+                                                                  temp_path, posteriors_threshold);
+    if (!results) {
+        fprintf(stderr, "Failed to call features\n");
+        cf_free_matrix(matrix);
+        return -1;
+    }
+    
+    /* Write outputs */
+    char path[MAX_LINE_LENGTH];
+    
+    /* Standard outputs (same as GMM) */
+    snprintf(path, sizeof(path), "%s/protospacer_calls_per_cell.csv", output_dir);
+    printf("Writing: %s\n", path);
+    cf_write_nbem_calls_per_cell(results, path);
+    
+    snprintf(path, sizeof(path), "%s/protospacer_calls_summary.csv", output_dir);
+    printf("Writing: %s\n", path);
+    cf_write_nbem_calls_summary(results, path);
+    
+    /* NB-EM specific outputs */
+    snprintf(path, sizeof(path), "%s/nbem_feature_params.csv", output_dir);
+    printf("Writing: %s\n", path);
+    cf_write_nbem_feature_params(results, path);
+    
+    /* Finalize posteriors MTX (add header to temp file) */
+    if (file_exists(temp_path)) {
+        printf("Writing: %s\n", output_path);
+        if (cf_finalize_nbem_posteriors_mtx(temp_path, output_path,
+                                             results->num_features_total, results->num_cells,
+                                             results->posteriors_nnz) != 0) {
+            fprintf(stderr, "Warning: failed to finalize posteriors MTX: %s\n", output_path);
+        }
+    } else {
+        fprintf(stderr, "Warning: missing posteriors temp file; skipping MTX output\n");
+    }
+    
+    snprintf(path, sizeof(path), "%s/nbem_summary.json", output_dir);
+    printf("Writing: %s\n", path);
+    cf_write_nbem_summary_json(results, config, path);
+    
+    printf("\n=== NB-EM Calling Summary ===\n");
+    printf("Total cells:              %d\n", results->num_cells);
+    printf("Cells with 0 molecules:   %d\n", results->cells_no_molecules);
+    printf("Cells with no call:       %d\n", results->cells_no_call);
+    printf("Cells with 1 feature:     %d\n", results->cells_1_feature);
+    printf("Cells with >1 features:   %d\n", results->cells_multi_feature);
+    printf("Global phi:               %.4f\n", results->global_phi);
+    printf("MOI classification:       %s\n", 
+           (results->moi.classification == CF_MOI_HIGH) ? "HIGH" : "LOW");
+    printf("EM failures (fallback):   %d/%d features\n", 
+           results->num_em_failures, results->num_features_total);
+    
+    cf_free_nbem_results(results);
+    cf_free_matrix(matrix);
+    return 0;
+}
