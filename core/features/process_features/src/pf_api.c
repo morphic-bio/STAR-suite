@@ -32,7 +32,7 @@ struct pf_config {
     int min_counts;
     double min_posterior;
     int feature_offset;
-    int feature_offset_explicit;    /* 1 = user explicitly set feature_offset */
+    int feature_offset_explicit;  /* 1 if user called pf_config_set_feature_offset() */
     int barcode_offset;
     int max_barcode_mismatches;
     int max_feature_n;
@@ -46,6 +46,7 @@ struct pf_config {
     long long max_reads;
     int translate_nxt;
     int use_feature_offset_array;
+    int strict_offset_check;
     int use_feature_anchor_search;
     int require_feature_anchor_match;
     int feature_mode_bootstrap_reads;
@@ -85,7 +86,7 @@ pf_config* pf_config_create(void) {
     config->stringency = 1;
     config->min_counts = 1;
     config->min_posterior = 0.975;
-    config->feature_offset = -1;  /* sentinel: -1 means auto-detect */
+    config->feature_offset = 0;
     config->feature_offset_explicit = 0;
     config->barcode_offset = 0;
     config->max_barcode_mismatches = 3;
@@ -100,6 +101,7 @@ pf_config* pf_config_create(void) {
     config->max_reads = 0;
     config->translate_nxt = 0;
     config->use_feature_offset_array = 0;
+    config->strict_offset_check = 0;
     config->use_feature_anchor_search = 0;
     config->require_feature_anchor_match = 0;
     config->feature_mode_bootstrap_reads = 0;
@@ -208,6 +210,9 @@ void pf_config_set_translate_nxt(pf_config *config, int enable) {
 void pf_config_set_use_feature_offset_array(pf_config *config, int enable) {
     if (config) config->use_feature_offset_array = enable;
 }
+void pf_config_set_strict_offset_check(pf_config *config, int enable) {
+    if (config) config->strict_offset_check = enable;
+}
 void pf_config_set_use_feature_anchor_search(pf_config *config, int enable) {
     if (config) config->use_feature_anchor_search = enable;
 }
@@ -234,124 +239,6 @@ void pf_config_set_expected_cells(pf_config *config, int n_cells) {
 
 void pf_config_set_emptydrops_use_fdr(pf_config *config, int enable) {
     if (config) config->emptydrops_use_fdr = enable;
-}
-
-/* ============================================================================
- * Offset Auto-Detection
- * ============================================================================ */
-
-/**
- * @brief Run preflight offset detection on loaded features
- * 
- * @param ctx Context with loaded features
- * @param config Configuration (may be modified to set auto-detected offset)
- * @param detected_offset_out If non-NULL, receives the detected offset
- * @return PF_OK on success, PF_ERR_OFFSET_CONFLICT if both global and array set,
- *         PF_ERR_MULTI_OFFSET_DETECTED if heterogeneous offsets found
- */
-static pf_error pf_preflight_offset_detection(pf_context *ctx, pf_config *config, int *detected_offset_out) {
-    if (!ctx || !config || !ctx->features) {
-        return PF_ERR_INVALID_ARG;
-    }
-    
-    /* Check for conflict: both explicit offset and per-feature offsets enabled */
-    if (config->feature_offset_explicit && config->use_feature_offset_array) {
-        snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
-                 "Error: Cannot specify both global offset and per-feature offsets.\n"
-                 "       Use pf_config_set_use_feature_offset_array for per-feature offsets,\n"
-                 "       or pf_config_set_feature_offset for a single global offset.");
-        return PF_ERR_OFFSET_CONFLICT;
-    }
-    
-    /* If user explicitly set offset or enabled per-feature offsets, skip auto-detect */
-    if (config->feature_offset_explicit || config->use_feature_offset_array) {
-        if (detected_offset_out) {
-            *detected_offset_out = config->feature_offset_explicit ? config->feature_offset : -1;
-        }
-        return PF_OK;
-    }
-    
-    /* Auto-detect: scan feature_offsets for heterogeneity */
-    feature_arrays *features = ctx->features;
-    if (!features->feature_offsets) {
-        /* No pattern offsets available - default to 0 */
-        config->feature_offset = 0;
-        fprintf(stderr, "[offset-detect] No pattern offsets found, using default offset: 0\n");
-        if (detected_offset_out) *detected_offset_out = 0;
-        return PF_OK;
-    }
-    
-    int offset_counts[256] = {0};
-    int max_offset_seen = -1;
-    int valid_offsets = 0;
-    
-    for (int i = 0; i < features->number_of_features; i++) {
-        int off = features->feature_offsets[i];
-        if (off >= 0 && off < 256) {
-            offset_counts[off]++;
-            valid_offsets++;
-            if (off > max_offset_seen) max_offset_seen = off;
-        }
-    }
-    
-    if (valid_offsets == 0) {
-        /* No valid offsets from pattern column - default to 0 */
-        config->feature_offset = 0;
-        fprintf(stderr, "[offset-detect] No pattern offsets found, using default offset: 0\n");
-        if (detected_offset_out) *detected_offset_out = 0;
-        return PF_OK;
-    }
-    
-    /* Find dominant offset */
-    int dominant_offset = 0;
-    int dominant_count = 0;
-    int second_count = 0;
-    
-    for (int i = 0; i <= max_offset_seen; i++) {
-        if (offset_counts[i] > dominant_count) {
-            second_count = dominant_count;
-            dominant_count = offset_counts[i];
-            dominant_offset = i;
-        } else if (offset_counts[i] > second_count) {
-            second_count = offset_counts[i];
-        }
-    }
-    
-    /* Check for heterogeneity: second offset > 5% of dominant */
-    double heterogeneity_threshold = 0.05;
-    if (second_count > 0 && (double)second_count / (double)dominant_count > heterogeneity_threshold) {
-        /* Build error message matching CLI format */
-        int msg_len = 0;
-        msg_len += snprintf(ctx->error_buf + msg_len, PF_ERROR_BUF_SIZE - msg_len,
-                           "\nERROR: Multiple feature offsets detected in pattern column.\n"
-                           "       Dominant offset: %d (used by %d features)\n"
-                           "       Other offsets detected (threshold: %.0f%% of dominant):\n",
-                           dominant_offset, dominant_count, heterogeneity_threshold * 100);
-        
-        for (int i = 0; i <= max_offset_seen && msg_len < PF_ERROR_BUF_SIZE - 100; i++) {
-            if (i != dominant_offset && offset_counts[i] > 0) {
-                double pct = 100.0 * offset_counts[i] / dominant_count;
-                msg_len += snprintf(ctx->error_buf + msg_len, PF_ERROR_BUF_SIZE - msg_len,
-                                   "         offset %d: %d features (%.1f%%)\n", i, offset_counts[i], pct);
-            }
-        }
-        
-        msg_len += snprintf(ctx->error_buf + msg_len, PF_ERROR_BUF_SIZE - msg_len,
-                           "\nTo proceed, use one of:\n"
-                           "  1. pf_config_set_use_feature_offset_array(config, 1)  - per-feature offsets\n"
-                           "  2. pf_config_set_feature_offset(config, %d)           - dominant offset globally\n\n",
-                           dominant_offset);
-        
-        return PF_ERR_MULTI_OFFSET_DETECTED;
-    }
-    
-    /* Single dominant offset - use it as global */
-    config->feature_offset = dominant_offset;
-    fprintf(stderr, "[offset-detect] Auto-detected global offset: %d (from %d features with pattern)\n",
-            dominant_offset, valid_offsets);
-    
-    if (detected_offset_out) *detected_offset_out = dominant_offset;
-    return PF_OK;
 }
 
 
@@ -621,10 +508,77 @@ pf_error pf_process_fastq_dir(pf_context *ctx,
         return PF_ERR_NOT_INITIALIZED;
     }
     
-    /* Preflight offset detection - run before processing */
-    pf_error preflight_err = pf_preflight_offset_detection(ctx, ctx->config, NULL);
-    if (preflight_err != PF_OK) {
-        return preflight_err;
+    /* Feature offset preflight detection */
+    if (ctx->config->use_feature_offset_array && ctx->config->feature_offset_explicit) {
+        snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                 "Cannot specify both use_feature_offset_array and explicit feature_offset");
+        return PF_ERR_OFFSET_CONFLICT;
+    }
+    
+    if (!ctx->config->use_feature_offset_array && !ctx->config->feature_offset_explicit &&
+        ctx->features && feature_offsets && feature_offsets_count > 0) {
+        /* Auto-detect: scan feature_offsets for heterogeneity */
+        int offset_counts[256] = {0};
+        int max_offset_seen = -1;
+        int valid_offsets = 0;
+        
+        for (int i = 0; i < feature_offsets_count; i++) {
+            int off = feature_offsets[i];
+            if (off >= 0 && off < 256) {
+                offset_counts[off]++;
+                valid_offsets++;
+                if (off > max_offset_seen) max_offset_seen = off;
+            }
+        }
+        
+        if (valid_offsets > 0) {
+            /* Find dominant offset */
+            int dominant_offset = 0;
+            int dominant_count = 0;
+            int second_count = 0;
+            
+            for (int i = 0; i <= max_offset_seen; i++) {
+                if (offset_counts[i] > dominant_count) {
+                    second_count = dominant_count;
+                    dominant_count = offset_counts[i];
+                    dominant_offset = i;
+                } else if (offset_counts[i] > second_count) {
+                    second_count = offset_counts[i];
+                }
+            }
+            
+            /* Check for heterogeneity: second offset > 5% of dominant */
+            double heterogeneity_threshold = 0.05;
+            if (second_count > 0 && (double)second_count / (double)dominant_count > heterogeneity_threshold) {
+                if (ctx->config->strict_offset_check) {
+                    snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                             "Multiple feature offsets detected (strict mode). "
+                             "Dominant: %d (%d features), second: %d features. "
+                             "Use pf_config_set_feature_offset() or pf_config_set_use_feature_offset_array(1).",
+                             dominant_offset, dominant_count, second_count);
+                    return PF_ERR_MULTI_OFFSET_DETECTED;
+                }
+                /* Non-strict: warn and proceed with dominant */
+                fprintf(stderr, "\nWARNING: Multiple feature offsets detected in pattern column.\n");
+                fprintf(stderr, "         Dominant offset: %d (used by %d features)\n", dominant_offset, dominant_count);
+                fprintf(stderr, "         Other offsets detected:\n");
+                for (int i = 0; i <= max_offset_seen; i++) {
+                    if (i != dominant_offset && offset_counts[i] > 0) {
+                        double pct = 100.0 * offset_counts[i] / dominant_count;
+                        fprintf(stderr, "           offset %d: %d features (%.1f%%)\n", i, offset_counts[i], pct);
+                    }
+                }
+                fprintf(stderr, "\n         Proceeding with dominant offset %d.\n\n", dominant_offset);
+            }
+            
+            /* Use dominant offset as global */
+            ctx->config->feature_offset = dominant_offset;
+            fprintf(stderr, "[offset-detect] Auto-detected global offset: %d (from %d features with pattern)\n",
+                    dominant_offset, valid_offsets);
+        } else {
+            /* No valid offsets - default to 0 */
+            fprintf(stderr, "[offset-detect] No pattern offsets found, using default offset: 0\n");
+        }
     }
     
     if (!is_directory(fastq_dir)) {
@@ -762,10 +716,77 @@ pf_error pf_process_fastqs(pf_context *ctx,
         return PF_ERR_NOT_INITIALIZED;
     }
     
-    /* Preflight offset detection - run before processing */
-    pf_error preflight_err = pf_preflight_offset_detection(ctx, ctx->config, NULL);
-    if (preflight_err != PF_OK) {
-        return preflight_err;
+    /* Feature offset preflight detection (same as pf_process_fastq_dir) */
+    if (ctx->config->use_feature_offset_array && ctx->config->feature_offset_explicit) {
+        snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                 "Cannot specify both use_feature_offset_array and explicit feature_offset");
+        return PF_ERR_OFFSET_CONFLICT;
+    }
+    
+    if (!ctx->config->use_feature_offset_array && !ctx->config->feature_offset_explicit &&
+        ctx->features && feature_offsets && feature_offsets_count > 0) {
+        /* Auto-detect: scan feature_offsets for heterogeneity */
+        int offset_counts[256] = {0};
+        int max_offset_seen = -1;
+        int valid_offsets = 0;
+        
+        for (int i = 0; i < feature_offsets_count; i++) {
+            int off = feature_offsets[i];
+            if (off >= 0 && off < 256) {
+                offset_counts[off]++;
+                valid_offsets++;
+                if (off > max_offset_seen) max_offset_seen = off;
+            }
+        }
+        
+        if (valid_offsets > 0) {
+            /* Find dominant offset */
+            int dominant_offset = 0;
+            int dominant_count = 0;
+            int second_count = 0;
+            
+            for (int i = 0; i <= max_offset_seen; i++) {
+                if (offset_counts[i] > dominant_count) {
+                    second_count = dominant_count;
+                    dominant_count = offset_counts[i];
+                    dominant_offset = i;
+                } else if (offset_counts[i] > second_count) {
+                    second_count = offset_counts[i];
+                }
+            }
+            
+            /* Check for heterogeneity: second offset > 5% of dominant */
+            double heterogeneity_threshold = 0.05;
+            if (second_count > 0 && (double)second_count / (double)dominant_count > heterogeneity_threshold) {
+                if (ctx->config->strict_offset_check) {
+                    snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                             "Multiple feature offsets detected (strict mode). "
+                             "Dominant: %d (%d features), second: %d features. "
+                             "Use pf_config_set_feature_offset() or pf_config_set_use_feature_offset_array(1).",
+                             dominant_offset, dominant_count, second_count);
+                    return PF_ERR_MULTI_OFFSET_DETECTED;
+                }
+                /* Non-strict: warn and proceed with dominant */
+                fprintf(stderr, "\nWARNING: Multiple feature offsets detected in pattern column.\n");
+                fprintf(stderr, "         Dominant offset: %d (used by %d features)\n", dominant_offset, dominant_count);
+                fprintf(stderr, "         Other offsets detected:\n");
+                for (int i = 0; i <= max_offset_seen; i++) {
+                    if (i != dominant_offset && offset_counts[i] > 0) {
+                        double pct = 100.0 * offset_counts[i] / dominant_count;
+                        fprintf(stderr, "           offset %d: %d features (%.1f%%)\n", i, offset_counts[i], pct);
+                    }
+                }
+                fprintf(stderr, "\n         Proceeding with dominant offset %d.\n\n", dominant_offset);
+            }
+            
+            /* Use dominant offset as global */
+            ctx->config->feature_offset = dominant_offset;
+            fprintf(stderr, "[offset-detect] Auto-detected global offset: %d (from %d features with pattern)\n",
+                    dominant_offset, valid_offsets);
+        } else {
+            /* No valid offsets - default to 0 */
+            fprintf(stderr, "[offset-detect] No pattern offsets found, using default offset: 0\n");
+        }
     }
     
     /* Create output directory */

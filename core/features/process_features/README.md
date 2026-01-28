@@ -147,35 +147,66 @@ By default, `assignBarcodes` automatically detects the optimal feature offset fr
 
 1. **Pattern Column**: If your feature CSV contains a `pattern` column with `(BC)` markers (e.g., `ACGTACGT(BC)TGCA`), the offset is extracted as the position of `(BC)`.
 
-2. **Auto-Detection**: At startup, `assignBarcodes` scans all feature offsets:
+2. **Auto-Detection**: At startup, `assignBarcodes` scans all feature offsets and finds the **dominant offset** (the offset used by the most features):
    - If all features share the same offset → uses it as global offset (fast path)
-   - If multiple offsets detected (>5% heterogeneity) → stops with a clear message
+   - If multiple offsets detected → **warns** and proceeds with dominant offset
 
-3. **User Override**: You can explicitly control offset behavior:
+3. **Heterogeneity Detection**: Multiple offsets are flagged if the second-most-common offset is used by more than 5% of features relative to the dominant offset. This threshold catches meaningful heterogeneity while ignoring one-off outliers.
+
+4. **User Override**: You can explicitly control offset behavior:
    ```bash
    # Use specific global offset (skip auto-detection)
    --feature_constant_offset 26
    
    # Force per-feature offsets (slower for large feature sets)
    --force_individual_offsets
+   
+   # Make heterogeneous offsets a fatal error (strict preflight)
+   --strict-offset-check
    ```
+
+### Offset Control Flags
+
+| Flag | Description |
+|------|-------------|
+| `--feature_constant_offset N` | Use explicit global offset N (skips auto-detection) |
+| `--force_individual_offsets` | Use per-feature offsets from pattern column (slower for 10k+ features) |
+| `--strict-offset-check` | Error instead of warn on heterogeneous offsets (for automated pipelines) |
+
+### Default Behavior (Warning)
+
+```
+WARNING: Multiple feature offsets detected in pattern column.
+         Dominant offset: 26 (used by 9500 features)
+         Other offsets detected:
+           offset 30: 500 features (5.3%)
+
+         Proceeding with dominant offset 26.
+         Use --force_individual_offsets for per-feature offsets, or
+         --strict-offset-check to make this an error.
+
+[offset-detect] Auto-detected global offset: 26 (from 10000 features with pattern)
+```
+
+### Strict Mode (Error)
+
+With `--strict-offset-check`, heterogeneous offsets produce an error:
+
+```
+WARNING: Multiple feature offsets detected in pattern column.
+         Dominant offset: 26 (used by 9500 features)
+         Other offsets detected:
+           offset 30: 500 features (5.3%)
+
+ERROR: --strict-offset-check is set. To proceed, choose one of:
+  1. --force_individual_offsets   Use per-feature offsets (slower for large feature sets)
+  2. --feature_constant_offset 26  Use dominant offset globally (faster)
+  3. Remove --strict-offset-check to use dominant offset with warning
+```
 
 ### When to Use `--force_individual_offsets`
 
-Use this flag when your feature reference contains features with genuinely different offsets (e.g., mixed assay types). This enables per-feature offset matching but is slower for large feature sets (10k+ features).
-
-### Example Error Message
-
-```
-ERROR: Multiple feature offsets detected in pattern column.
-       Dominant offset: 26 (used by 9500 features)
-       Other offsets detected (threshold: 5% of dominant):
-         offset 30: 500 features (5.3%)
-
-To proceed, choose one of:
-  1. --force_individual_offsets   Use per-feature offsets (slower for large feature sets)
-  2. --feature_constant_offset 26  Use dominant offset globally (faster)
-```
+Use this flag when your feature reference contains features with genuinely different offsets (e.g., mixed CRISPR guide lengths like 15bp, 16bp, 20bp). This enables per-feature offset matching but is **slower for large feature sets (10k+ features)** due to per-read offset array lookups.
 
 ---
 
@@ -497,17 +528,23 @@ pf_destroy(ctx);
 
 ### Feature Offset Auto-Detection (pf_api)
 
-The `pf_api` now automatically detects the optimal feature offset from the pattern column when processing begins. This behavior matches the CLI.
+The `pf_api` automatically detects the optimal feature offset from the pattern column when processing begins. This behavior matches the CLI.
 
-**Default Behavior:**
+**Default Behavior (Warn + Proceed):**
 - If `pf_config_set_feature_offset()` is NOT called, auto-detection is enabled
 - At processing time, `pf_api` scans feature offsets from the pattern column
 - If all features share the same offset → used as global offset
+- If multiple offsets detected → **warns** and uses dominant offset
 - If no pattern offsets found → defaults to 0 with a warning
 
-**Multi-Offset Detection:**
-- If multiple offsets are detected (>5% heterogeneity), processing returns `PF_ERR_MULTI_OFFSET_DETECTED`
+**Heterogeneity Rule (5% Second-Best Dominance):**
+- Offsets are flagged as heterogeneous if the second-most-common offset is used by >5% of features relative to the dominant offset
+- This catches meaningful heterogeneity while ignoring one-off outliers
+
+**Strict Mode (Error on Heterogeneity):**
+- If `pf_config_set_strict_offset_check(config, 1)` is called, heterogeneous offsets return `PF_ERR_MULTI_OFFSET_DETECTED`
 - Use `pf_get_error(ctx)` to retrieve the detailed error message with guidance
+- Default is non-strict (warn + proceed with dominant offset)
 
 **Conflict Detection:**
 - If both `pf_config_set_feature_offset()` AND `pf_config_set_use_feature_offset_array(1)` are called, processing returns `PF_ERR_OFFSET_CONFLICT`

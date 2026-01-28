@@ -100,6 +100,7 @@ void pf_config_set_limit_search(pf_config *config, int limit);
 void pf_config_set_max_reads(pf_config *config, long long max_reads);
 void pf_config_set_translate_nxt(pf_config *config, int enable);
 void pf_config_set_use_feature_offset_array(pf_config *config, int enable);
+void pf_config_set_strict_offset_check(pf_config *config, int enable);
 void pf_config_set_use_feature_anchor_search(pf_config *config, int enable);
 void pf_config_set_require_feature_anchor_match(pf_config *config, int enable);
 void pf_config_set_feature_mode_bootstrap_reads(pf_config *config, int n_reads);

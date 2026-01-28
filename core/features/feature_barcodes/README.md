@@ -65,6 +65,7 @@ The tool can accept input FASTQ files in two ways:
 | `-B`, `--barcode_constant_offset`| `[int]` | Starting position of the barcode and UMI in the read. | `0` |
 | `--limit_search` | `[int]` | Limit the search for the feature sequence to `N` bases around `feature_constant_offset`. Set to `-1` to search the entire read. | `-1` |
 | `--force_individual_offsets` | | Use per-feature offsets from pattern column (slower for large feature sets). | `false` |
+| `--strict-offset-check` | | Error (instead of warn) on heterogeneous feature offsets. | `false` |
 | `-r`, `--reverse_complement_whitelist` | | Reverse complement the whitelist barcodes before use. | `false` |
 | `-a`, `--as_named` | | Treat all input files as part of a single sample. | `false` |
 

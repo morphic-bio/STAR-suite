@@ -31,6 +31,7 @@ static void print_usage(const char *prog){
     fprintf(stderr, "      --limit_search      <int>     Limit feature search to N bases around offset (-1 = entire read)\n");
     fprintf(stderr, "      --force_individual_offsets    Use per-feature offsets from pattern column (slower for large sets)\n");
     fprintf(stderr, "      --use_feature_offset_array    (alias for --force_individual_offsets)\n");
+    fprintf(stderr, "      --strict-offset-check         Error (instead of warn) on heterogeneous feature offsets\n");
     fprintf(stderr, "      --use_feature_anchor_search   Find pattern anchor via strstr before matching features\n");
     fprintf(stderr, "      --require_feature_anchor_match Require anchor match (no fallback search)\n");
     fprintf(stderr, "      --feature_mode_bootstrap_reads <int> Bootstrap N reads to learn per-feature offsets\n");
@@ -97,6 +98,7 @@ int main(int argc, char *argv[])
     int use_feature_anchor_search_cli=0;
     int require_feature_anchor_match_cli=0;
     int feature_mode_bootstrap_reads_cli=0;
+    int strict_offset_check_cli=0;
 
     int max_concurrent_processes=8;
     int consumer_threads_per_set=1;
@@ -146,6 +148,7 @@ int main(int argc, char *argv[])
         {"limit_search", required_argument, 0, 10},
         {"use_feature_offset_array", no_argument, 0, 22},
         {"force_individual_offsets", no_argument, 0, 22},  /* alias */
+        {"strict-offset-check", no_argument, 0, 26},
         {"use_feature_anchor_search", no_argument, 0, 23},
         {"require_feature_anchor_match", no_argument, 0, 24},
         {"feature_mode_bootstrap_reads", required_argument, 0, 25},
@@ -216,6 +219,7 @@ int main(int argc, char *argv[])
             case 9: max_reads=atoll(optarg); break;
             case 10: limit_search = atoi(optarg); break;
             case 22: use_feature_offset_array_cli = 1; break;
+            case 26: strict_offset_check_cli = 1; break;
             case 23: use_feature_anchor_search_cli = 1; break;
             case 24: require_feature_anchor_match_cli = 1; break;
             case 25: feature_mode_bootstrap_reads_cli = atoi(optarg); break;
@@ -297,24 +301,30 @@ int main(int argc, char *argv[])
             double heterogeneity_threshold = 0.05;
             if (second_count > 0 && (double)second_count / (double)dominant_count > heterogeneity_threshold) {
                 fprintf(stderr, "\n");
-                fprintf(stderr, "ERROR: Multiple feature offsets detected in pattern column.\n");
-                fprintf(stderr, "       Dominant offset: %d (used by %d features)\n", dominant_offset, dominant_count);
-                fprintf(stderr, "       Other offsets detected (threshold: %.0f%% of dominant):\n", heterogeneity_threshold * 100);
+                fprintf(stderr, "WARNING: Multiple feature offsets detected in pattern column.\n");
+                fprintf(stderr, "         Dominant offset: %d (used by %d features)\n", dominant_offset, dominant_count);
+                fprintf(stderr, "         Other offsets detected:\n");
                 for (int i = 0; i <= max_offset_seen; i++) {
                     if (i != dominant_offset && offset_counts[i] > 0) {
                         double pct = 100.0 * offset_counts[i] / dominant_count;
-                        fprintf(stderr, "         offset %d: %d features (%.1f%%)\n", i, offset_counts[i], pct);
+                        fprintf(stderr, "           offset %d: %d features (%.1f%%)\n", i, offset_counts[i], pct);
                     }
                 }
                 fprintf(stderr, "\n");
-                fprintf(stderr, "To proceed, choose one of:\n");
-                fprintf(stderr, "  1. --force_individual_offsets   Use per-feature offsets (slower for large feature sets)\n");
-                fprintf(stderr, "  2. --feature_constant_offset %d  Use dominant offset globally (faster)\n", dominant_offset);
-                fprintf(stderr, "\n");
-                return 1;
+                if (strict_offset_check_cli) {
+                    fprintf(stderr, "ERROR: --strict-offset-check is set. To proceed, choose one of:\n");
+                    fprintf(stderr, "  1. --force_individual_offsets   Use per-feature offsets (slower for large feature sets)\n");
+                    fprintf(stderr, "  2. --feature_constant_offset %d  Use dominant offset globally (faster)\n", dominant_offset);
+                    fprintf(stderr, "  3. Remove --strict-offset-check to use dominant offset with warning\n");
+                    fprintf(stderr, "\n");
+                    return 1;
+                }
+                fprintf(stderr, "         Proceeding with dominant offset %d.\n", dominant_offset);
+                fprintf(stderr, "         Use --force_individual_offsets for per-feature offsets, or\n");
+                fprintf(stderr, "         --strict-offset-check to make this an error.\n\n");
             }
             
-            /* Single dominant offset - use it as global */
+            /* Use dominant offset as global */
             feature_constant_offset = dominant_offset;
             fprintf(stderr, "[offset-detect] Auto-detected global offset: %d (from %d features with pattern)\n", 
                     dominant_offset, valid_offsets);

@@ -4,10 +4,12 @@
  * 
  * Tests:
  *   1. Single offset auto-detect (all features same offset)
- *   2. Multi-offset error (heterogeneous offsets)
- *   3. Conflict error (global offset + per-feature array)
- *   4. Explicit offset bypasses auto-detect
- *   5. No pattern fallback to 0
+ *   2. Multi-offset WARNING (default: warn + proceed with dominant offset)
+ *   3. Multi-offset ERROR (strict mode: error on heterogeneous offsets)
+ *   4. Conflict error (global offset + per-feature array)
+ *   5. Explicit offset bypasses auto-detect
+ *   6. No pattern fallback to 0
+ *   7. Heterogeneity rule: second-best > 5% of dominant triggers detection
  * 
  * Note: Tests that pass preflight but fail at FASTQ scan will exit() due to
  * organize_fastq_files_by_directory calling exit(). We create minimal dummy
@@ -101,21 +103,43 @@ static int create_no_pattern_features(const char *path) {
     return 0;
 }
 
-/* Test 1: Multi-offset error detection - fails in preflight before FASTQ check */
-static int test_multi_offset_error(void) {
-    printf("Test: Multi-offset error... ");
+/* Create features where second-best offset is BELOW 5% threshold (no heterogeneity) */
+static int create_below_threshold_features(const char *path) {
+    FILE *f = fopen(path, "w");
+    if (!f) return -1;
+    fprintf(f, "name,sequence,pattern\n");
+    /* 100 features at offset 4 */
+    for (int i = 0; i < 100; i++) {
+        fprintf(f, "Feature%d,ACGTACGT,NNNN(BC)NNNN\n", i);
+    }
+    /* 4 features at offset 2 (4% of dominant = below 5% threshold) */
+    for (int i = 100; i < 104; i++) {
+        fprintf(f, "Feature%d,TGCATGCA,NN(BC)NNNNNN\n", i);
+    }
+    fclose(f);
+    return 0;
+}
+
+/* Test 1: Multi-offset WARNING (default behavior: warn + proceed with dominant) */
+static int test_multi_offset_warning(void) {
+    printf("Test: Multi-offset warning (default)... ");
     fflush(stdout);
     
     char feature_path[512];
+    char fastq_dir[512];
     char output_path[512];
-    snprintf(feature_path, sizeof(feature_path), "%s/hetero_features.csv", g_temp_dir);
-    snprintf(output_path, sizeof(output_path), "%s/out_hetero", g_temp_dir);
+    snprintf(feature_path, sizeof(feature_path), "%s/hetero_features_warn.csv", g_temp_dir);
+    snprintf(fastq_dir, sizeof(fastq_dir), "%s/fastqs_warn", g_temp_dir);
+    snprintf(output_path, sizeof(output_path), "%s/out_warn", g_temp_dir);
     
     TEST_ASSERT(create_hetero_features(feature_path) == 0, "create feature file");
+    mkdir(fastq_dir, 0755);
     mkdir(output_path, 0755);
+    TEST_ASSERT(create_dummy_fastqs(fastq_dir) == 0, "create dummy FASTQs");
     
     pf_config *config = pf_config_create();
     TEST_ASSERT(config != NULL, "config creation");
+    /* Default: strict_offset_check = 0, so warning + proceed */
     
     pf_context *ctx = pf_init(config);
     pf_config_destroy(config);
@@ -127,9 +151,48 @@ static int test_multi_offset_error(void) {
     err = pf_load_whitelist(ctx, g_whitelist_path);
     TEST_ASSERT(err == PF_OK, "load whitelist");
     
-    /* Try to process - should fail with MULTI_OFFSET_DETECTED in preflight */
+    /* Default: warn + proceed with dominant offset - should NOT error */
+    err = pf_process_fastq_dir(ctx, fastq_dir, output_path, NULL);
+    TEST_ASSERT(err != PF_ERR_MULTI_OFFSET_DETECTED, "should NOT get MULTI_OFFSET (warn + proceed)");
+    TEST_ASSERT(err != PF_ERR_OFFSET_CONFLICT, "should NOT get OFFSET_CONFLICT");
+    
+    pf_destroy(ctx);
+    printf("PASS\n");
+    return 0;
+}
+
+/* Test 2: Multi-offset ERROR (strict mode: error on heterogeneous offsets) */
+static int test_multi_offset_strict_error(void) {
+    printf("Test: Multi-offset error (strict mode)... ");
+    fflush(stdout);
+    
+    char feature_path[512];
+    char output_path[512];
+    snprintf(feature_path, sizeof(feature_path), "%s/hetero_features_strict.csv", g_temp_dir);
+    snprintf(output_path, sizeof(output_path), "%s/out_hetero_strict", g_temp_dir);
+    
+    TEST_ASSERT(create_hetero_features(feature_path) == 0, "create feature file");
+    mkdir(output_path, 0755);
+    
+    pf_config *config = pf_config_create();
+    TEST_ASSERT(config != NULL, "config creation");
+    
+    /* Enable strict mode - should error on heterogeneous offsets */
+    pf_config_set_strict_offset_check(config, 1);
+    
+    pf_context *ctx = pf_init(config);
+    pf_config_destroy(config);
+    TEST_ASSERT(ctx != NULL, "context init");
+    
+    pf_error err = pf_load_feature_ref(ctx, feature_path);
+    TEST_ASSERT(err == PF_OK, "load features");
+    
+    err = pf_load_whitelist(ctx, g_whitelist_path);
+    TEST_ASSERT(err == PF_OK, "load whitelist");
+    
+    /* Strict mode: should fail with MULTI_OFFSET_DETECTED in preflight */
     err = pf_process_fastq_dir(ctx, g_temp_dir, output_path, NULL);
-    TEST_ASSERT(err == PF_ERR_MULTI_OFFSET_DETECTED, "expected MULTI_OFFSET_DETECTED");
+    TEST_ASSERT(err == PF_ERR_MULTI_OFFSET_DETECTED, "expected MULTI_OFFSET_DETECTED (strict mode)");
     
     /* Verify error message contains guidance */
     const char *errmsg = pf_get_error(ctx);
@@ -365,6 +428,93 @@ static int test_no_pattern_fallback(void) {
     return 0;
 }
 
+/* Test 8: Heterogeneity rule - second-best < 5% should NOT trigger warning */
+static int test_heterogeneity_below_threshold(void) {
+    printf("Test: Heterogeneity rule (below 5%% threshold)... ");
+    fflush(stdout);
+    
+    char feature_path[512];
+    char fastq_dir[512];
+    char output_path[512];
+    snprintf(feature_path, sizeof(feature_path), "%s/below_threshold_features.csv", g_temp_dir);
+    snprintf(fastq_dir, sizeof(fastq_dir), "%s/fastqs_below", g_temp_dir);
+    snprintf(output_path, sizeof(output_path), "%s/out_below", g_temp_dir);
+    
+    TEST_ASSERT(create_below_threshold_features(feature_path) == 0, "create feature file");
+    mkdir(fastq_dir, 0755);
+    mkdir(output_path, 0755);
+    TEST_ASSERT(create_dummy_fastqs(fastq_dir) == 0, "create dummy FASTQs");
+    
+    pf_config *config = pf_config_create();
+    TEST_ASSERT(config != NULL, "config creation");
+    
+    /* Even with strict mode, below-threshold shouldn't error */
+    pf_config_set_strict_offset_check(config, 1);
+    
+    pf_context *ctx = pf_init(config);
+    pf_config_destroy(config);
+    TEST_ASSERT(ctx != NULL, "context init");
+    
+    pf_error err = pf_load_feature_ref(ctx, feature_path);
+    TEST_ASSERT(err == PF_OK, "load features");
+    
+    err = pf_load_whitelist(ctx, g_whitelist_path);
+    TEST_ASSERT(err == PF_OK, "load whitelist");
+    
+    /* 4% heterogeneity is below 5% threshold - should NOT error even with strict */
+    err = pf_process_fastq_dir(ctx, fastq_dir, output_path, NULL);
+    TEST_ASSERT(err != PF_ERR_MULTI_OFFSET_DETECTED, "4%% heterogeneity should NOT trigger error");
+    TEST_ASSERT(err != PF_ERR_OFFSET_CONFLICT, "should NOT get OFFSET_CONFLICT");
+    
+    pf_destroy(ctx);
+    printf("PASS\n");
+    return 0;
+}
+
+/* Test 9: Explicit offset 0 bypasses auto-detect (tests feature_offset_explicit flag) */
+static int test_explicit_offset_zero(void) {
+    printf("Test: Explicit offset 0 bypasses auto-detect... ");
+    fflush(stdout);
+    
+    char feature_path[512];
+    char fastq_dir[512];
+    char output_path[512];
+    snprintf(feature_path, sizeof(feature_path), "%s/hetero_features.csv", g_temp_dir);
+    snprintf(fastq_dir, sizeof(fastq_dir), "%s/fastqs_zero", g_temp_dir);
+    snprintf(output_path, sizeof(output_path), "%s/out_zero", g_temp_dir);
+    
+    mkdir(fastq_dir, 0755);
+    mkdir(output_path, 0755);
+    TEST_ASSERT(create_dummy_fastqs(fastq_dir) == 0, "create dummy FASTQs");
+    
+    pf_config *config = pf_config_create();
+    TEST_ASSERT(config != NULL, "config creation");
+    
+    /* Explicitly set offset to 0 - should bypass auto-detect even with hetero features */
+    pf_config_set_feature_offset(config, 0);
+    /* Enable strict mode to ensure it would error if auto-detect ran */
+    pf_config_set_strict_offset_check(config, 1);
+    
+    pf_context *ctx = pf_init(config);
+    pf_config_destroy(config);
+    TEST_ASSERT(ctx != NULL, "context init");
+    
+    pf_error err = pf_load_feature_ref(ctx, feature_path);
+    TEST_ASSERT(err == PF_OK, "load features");
+    
+    err = pf_load_whitelist(ctx, g_whitelist_path);
+    TEST_ASSERT(err == PF_OK, "load whitelist");
+    
+    /* Explicit offset 0 should bypass auto-detect - no multi-offset error */
+    err = pf_process_fastq_dir(ctx, fastq_dir, output_path, NULL);
+    TEST_ASSERT(err != PF_ERR_MULTI_OFFSET_DETECTED, "explicit offset 0 should bypass auto-detect");
+    TEST_ASSERT(err != PF_ERR_OFFSET_CONFLICT, "should NOT get OFFSET_CONFLICT");
+    
+    pf_destroy(ctx);
+    printf("PASS\n");
+    return 0;
+}
+
 /* Cleanup temp directory */
 static void cleanup_temp_dir(void) {
     char cmd[1024];
@@ -391,16 +541,25 @@ int main(int argc, char *argv[]) {
     
     printf("\n=== pf_api Offset Detection Tests ===\n\n");
     
-    /* These tests fail in preflight (before FASTQ scan) */
+    /* Test error code values */
     failures += test_error_codes();
-    failures += test_multi_offset_error();
+    
+    /* Test strict mode errors (fail in preflight before FASTQ scan) */
+    failures += test_multi_offset_strict_error();
     failures += test_conflict_error();
+    
+    /* Test default warn + proceed behavior (needs dummy FASTQs) */
+    failures += test_multi_offset_warning();
     
     /* These tests pass preflight and need dummy FASTQs */
     failures += test_single_offset_auto_detect();
     failures += test_explicit_offset_bypass();
     failures += test_array_flag_bypass();
     failures += test_no_pattern_fallback();
+    
+    /* Test heterogeneity rule (5% threshold) and explicit offset 0 */
+    failures += test_heterogeneity_below_threshold();
+    failures += test_explicit_offset_zero();
     
     printf("\n=== Results: %d failures ===\n\n", failures);
     
