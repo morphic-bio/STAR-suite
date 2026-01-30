@@ -167,3 +167,30 @@ required_binaries:
     paths:
       - "/usr/bin/samtools"
       - "/usr/local/bin/samtools"
+
+# Build settings
+build:
+  # Auto-rebuild if sources changed (checked during preflight)
+  auto_check_stale: true
+  
+  # Recommend clean build before test suites
+  recommend_clean_for_tests: true
+  
+  # Build state tracking file (relative to repo root)
+  state_file: ".star_build_state.json"
+  
+  # Source directories to hash for change detection (per target)
+  source_dirs:
+    core:
+      - "core/legacy/source"
+      - "flex/source"
+      - "slam/source"
+      - "core/features"
+    flex:
+      - "flex/source"
+      - "core/features/libscrna"
+    slam:
+      - "slam/source"
+    feature-tools:
+      - "core/features/feature_barcodes"
+      - "core/features/process_features"

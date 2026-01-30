@@ -64,10 +64,12 @@ fi
 echo "=== Testing CB/UB tag injection in UNSORTED BAM ==="
 echo "Binary: $STAR_BIN"
 echo "Output: $OUT_DIR"
+[[ -n "${STAR_EXTRA_ARGS:-}" ]] && echo "Extra args: $STAR_EXTRA_ARGS"
 echo ""
 
 # Run STAR with unsorted BAM output and CB/UB tags requested
-"$STAR_BIN" \
+# shellcheck disable=SC2086
+"$STAR_BIN" ${STAR_EXTRA_ARGS:-} \
   --runThreadN 4 \
   --outTmpDir "$TMP_DIR" \
   --genomeDir "$FLEX_INDEX" \

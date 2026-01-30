@@ -20,10 +20,11 @@ run_one() {
   mkdir -p "${out_dir}"
   chmod 755 "${out_dir}" || true
 
+  # shellcheck disable=SC2086
   STAR_DISABLE_AMBIG_CB_RESOLVE="${stub}" \
   ASAN_OPTIONS="detect_leaks=1:exitcode=0" \
   LSAN_OPTIONS="detect_leaks=1:suppressions=${SUPPRESSIONS}" \
-    "${STAR_BIN}" --runThreadN 2 \
+    "${STAR_BIN}" ${STAR_EXTRA_ARGS:-} --runThreadN 2 \
       --genomeDir "${IDX_DIR}" \
       --readFilesIn "${R2}" "${R1}" \
       --outFileNamePrefix "${out_dir}" \

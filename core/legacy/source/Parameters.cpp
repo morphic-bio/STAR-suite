@@ -592,9 +592,19 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "crMexUseGexBarcodes", &crMulti.crMexUseGexBarcodes));
     parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "crMinUmi", &crMulti.crMinUmi));
 
+    // Default module flag groups
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "defaultBulk", &defaultGroups.bulk));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "defaultCoreScrna", &defaultGroups.coreScrna));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "defaultCrCompat", &defaultGroups.crCompat));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "defaultFlex", &defaultGroups.flex));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "defaultSlam", &defaultGroups.slam));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "defaultVbem", &defaultGroups.vbem));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "defaultA375Parity", &defaultGroups.a375Parity));
+
     parameterInputName.push_back("Default");
     parameterInputName.push_back("Command-Line-Initial");
     parameterInputName.push_back("Command-Line");
+    parameterInputName.push_back("Default-Group");
     parameterInputName.push_back("genomeParameters.txt");
 
 };
@@ -762,6 +772,9 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
         istringstream parStreamCommandLine(commandLineFile);
         scanAllLines(parStreamCommandLine, 2, -1);
     };
+
+    // Apply default module groups (only affects params not explicitly set by user)
+    applyDefaultGroups();
 
     inOut->logMain << "##### Finished reading parameters from all sources\n\n" << flush;
 
@@ -2320,6 +2333,218 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
     
     ////////////////////////////////////////////////
     inOut->logMain << "Finished loading and checking parameters\n" <<flush;
+};
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+void Parameters::applyDefaultGroups() {
+    // Helper to check Yes/yes (case-insensitive, consistent with typical STAR usage)
+    auto isYes = [](const string& val) -> bool {
+        return val == "Yes" || val == "yes";
+    };
+    
+    // Check if any default group is enabled
+    bool anyGroupEnabled = (isYes(defaultGroups.bulk) || isYes(defaultGroups.coreScrna) ||
+                           isYes(defaultGroups.crCompat) || isYes(defaultGroups.flex) ||
+                           isYes(defaultGroups.slam) || isYes(defaultGroups.vbem) ||
+                           isYes(defaultGroups.a375Parity));
+    
+    if (!anyGroupEnabled) return;
+    
+    // Helper lambda to find a parameter by name
+    auto findParam = [this](const string& name) -> ParameterInfoBase* {
+        for (auto *p : parArray) {
+            if (p->nameString == name) return p;
+        }
+        return nullptr;
+    };
+    
+    // Helper to set a string parameter if not user-specified (inputLevel == 0)
+    auto setStringIfDefault = [&](const string& name, const string& value) {
+        ParameterInfoBase* p = findParam(name);
+        if (p && p->inputLevel == 0) {
+            istringstream iss(value);
+            p->inputValues(iss);
+            p->inputLevel = 3; // Mark as set by default group
+            inOut->logMain << "  [default-group] " << name << " = " << value << "\n";
+        }
+    };
+    
+    // Helper to set a vector<string> parameter if not user-specified
+    auto setVectorStringIfDefault = [&](const string& name, const string& values) {
+        ParameterInfoBase* p = findParam(name);
+        if (p && p->inputLevel == 0) {
+            istringstream iss(values);
+            p->inputValues(iss);
+            p->inputLevel = 3;
+            inOut->logMain << "  [default-group] " << name << " = " << values << "\n";
+        }
+    };
+    
+    // Helper to set an int parameter if not user-specified
+    auto setIntIfDefault = [&](const string& name, int value) {
+        ParameterInfoBase* p = findParam(name);
+        if (p && p->inputLevel == 0) {
+            istringstream iss(to_string(value));
+            p->inputValues(iss);
+            p->inputLevel = 3;
+            inOut->logMain << "  [default-group] " << name << " = " << value << "\n";
+        }
+    };
+    
+    // Helper to set a uint parameter if not user-specified
+    auto setUintIfDefault = [&](const string& name, uint value) {
+        ParameterInfoBase* p = findParam(name);
+        if (p && p->inputLevel == 0) {
+            istringstream iss(to_string(value));
+            p->inputValues(iss);
+            p->inputLevel = 3;
+            inOut->logMain << "  [default-group] " << name << " = " << value << "\n";
+        }
+    };
+    
+    // Helper to set a double parameter if not user-specified
+    auto setDoubleIfDefault = [&](const string& name, double value) {
+        ParameterInfoBase* p = findParam(name);
+        if (p && p->inputLevel == 0) {
+            istringstream iss(to_string(value));
+            p->inputValues(iss);
+            p->inputLevel = 3;
+            inOut->logMain << "  [default-group] " << name << " = " << value << "\n";
+        }
+    };
+    
+    // Apply bulk defaults (also used as base for SLAM)
+    auto applyBulkDefaults = [&]() {
+        inOut->logMain << "##### Applying --defaultBulk parameter bundle:\n";
+        setVectorStringIfDefault("outSAMtype", "BAM SortedByCoordinate");
+        setVectorStringIfDefault("outSAMattributes", "NH");
+        setStringIfDefault("outSAMprimaryFlag", "AllBestScore");
+        setIntIfDefault("outSAMmultNmax", 10000);
+        setUintIfDefault("outFilterMultimapNmax", 10000);
+        setIntIfDefault("outFilterMultimapScoreRange", 4);
+        setUintIfDefault("outFilterMismatchNmax", 6);
+        setUintIfDefault("outFilterMatchNmin", 25);
+        setDoubleIfDefault("outFilterMatchNminOverLread", 0.0);
+        setDoubleIfDefault("outFilterScoreMinOverLread", 0.0);
+        setUintIfDefault("alignIntronMax", 500000);
+        setUintIfDefault("alignMatesGapMax", 1000);
+        setUintIfDefault("winAnchorMultimapNmax", 200);
+        setIntIfDefault("outBAMcompression", 6);
+    };
+    
+    // --defaultBulk
+    if (isYes(defaultGroups.bulk)) {
+        applyBulkDefaults();
+    }
+    
+    // --defaultCoreScrna
+    if (isYes(defaultGroups.coreScrna)) {
+        inOut->logMain << "##### Applying --defaultCoreScrna parameter bundle:\n";
+        setStringIfDefault("soloType", "Droplet");
+        setVectorStringIfDefault("soloFeatures", "Gene");
+        setStringIfDefault("soloCellFilter", "EmptyDrops_CR");
+        setStringIfDefault("soloCBmatchWLtype", "1MM_multi_Nbase_pseudocounts");
+        setStringIfDefault("soloUMIdedup", "1MM_CR");
+        setStringIfDefault("soloUMIfiltering", "MultiGeneUMI_CR");
+        setStringIfDefault("soloMultiMappers", "Rescue");
+        setStringIfDefault("soloCbUbRequireTogether", "no");
+    }
+    
+    // --defaultCrCompat
+    if (isYes(defaultGroups.crCompat)) {
+        inOut->logMain << "##### Applying --defaultCrCompat parameter bundle:\n";
+        setStringIfDefault("soloType", "Droplet");
+        setVectorStringIfDefault("soloFeatures", "Gene GeneFull");
+        setStringIfDefault("soloCellFilter", "EmptyDrops_CR");
+        setStringIfDefault("soloCrMode", "CR");
+        setStringIfDefault("soloCrGexFeature", "GeneFull");
+        setIntIfDefault("crMinUmi", 10);
+        // Note: soloKeysCompat cr requires soloProbeList, so we don't set it by default
+        setStringIfDefault("soloCBmatchWLtype", "1MM_multi_Nbase_pseudocounts");
+        setStringIfDefault("soloUMIdedup", "1MM_CR");
+        setStringIfDefault("soloUMIfiltering", "MultiGeneUMI_CR");
+        setStringIfDefault("soloMultiMappers", "Rescue");
+        setStringIfDefault("soloCbUbRequireTogether", "no");
+    }
+    
+    // --defaultFlex
+    if (isYes(defaultGroups.flex)) {
+        inOut->logMain << "##### Applying --defaultFlex parameter bundle:\n";
+        // Apply bulk alignment defaults first
+        setVectorStringIfDefault("outSAMtype", "BAM Unsorted");
+        setVectorStringIfDefault("outSAMattributes", "NH");
+        setStringIfDefault("outSAMprimaryFlag", "AllBestScore");
+        setIntIfDefault("outSAMmultNmax", 10000);
+        setUintIfDefault("outFilterMultimapNmax", 10000);
+        setIntIfDefault("outFilterMultimapScoreRange", 4);
+        setUintIfDefault("outFilterMismatchNmax", 6);
+        setUintIfDefault("outFilterMatchNmin", 25);
+        setDoubleIfDefault("outFilterMatchNminOverLread", 0.0);
+        setDoubleIfDefault("outFilterScoreMinOverLread", 0.0);
+        setUintIfDefault("alignIntronMax", 500000);
+        setUintIfDefault("winAnchorMultimapNmax", 200);
+        setIntIfDefault("outBAMcompression", 6);
+        // Flex-specific
+        setStringIfDefault("flex", "yes");
+        setVectorStringIfDefault("soloFeatures", "Gene");
+        setStringIfDefault("soloCellFilter", "EmptyDrops_CR");
+        setStringIfDefault("soloRunFlexFilter", "yes");
+        setStringIfDefault("soloRemoveDeprecated", "Yes");
+        setStringIfDefault("removeDeprecated", "Yes");
+        setStringIfDefault("soloSampleSearchNearby", "no");
+        setStringIfDefault("soloCBmatchWLtype", "1MM_multi_Nbase_pseudocounts");
+        setStringIfDefault("soloUMIdedup", "1MM_CR");
+        setStringIfDefault("soloUMIfiltering", "MultiGeneUMI_CR");
+        setStringIfDefault("soloMultiMappers", "Rescue");
+        // Note: outBAMsortMethod samtools is only needed if sorting is requested
+        // Check if outSAMtype includes SortedByCoordinate
+        for (auto *p : parArray) {
+            if (p->nameString == "outSAMtype") {
+                auto *pv = dynamic_cast<ParameterInfoVector<string>*>(p);
+                if (pv && pv->value) {
+                    for (const auto& v : *(pv->value)) {
+                        if (v == "SortedByCoordinate") {
+                            setStringIfDefault("outBAMsortMethod", "samtools");
+                            break;
+                        }
+                    }
+                }
+                break;
+            }
+        }
+    }
+    
+    // --defaultSlam (superset of bulk)
+    if (isYes(defaultGroups.slam)) {
+        inOut->logMain << "##### Applying --defaultSlam parameter bundle (includes bulk):\n";
+        applyBulkDefaults();
+        // SLAM-specific add-ons
+        setIntIfDefault("slamQuantMode", 1);
+        setStringIfDefault("slamSnpMaskModel", "em");
+        setIntIfDefault("slamSnpMaskOnly", 1);
+        setStringIfDefault("slamWeightMode", "dump");
+    }
+    
+    // --defaultVbem
+    if (isYes(defaultGroups.vbem)) {
+        inOut->logMain << "##### Applying --defaultVbem parameter bundle:\n";
+        setVectorStringIfDefault("quantMode", "TranscriptVB");
+        setIntIfDefault("quantVBem", 1);
+        setIntIfDefault("quantVBgcBias", 1);
+        setIntIfDefault("quantVBgenes", 1);
+        setStringIfDefault("quantVBgenesMode", "Tximport");
+        setDoubleIfDefault("quantVBprior", 0.01);
+    }
+    
+    // --defaultA375Parity
+    if (isYes(defaultGroups.a375Parity)) {
+        inOut->logMain << "##### Applying --defaultA375Parity parameter bundle:\n";
+        setStringIfDefault("soloCrMode", "CR");
+        setStringIfDefault("soloCrGexFeature", "GeneFull");
+        setIntIfDefault("crMinUmi", 10);
+    }
+    
+    inOut->logMain << "\n";
 };
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////

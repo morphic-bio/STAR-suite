@@ -115,6 +115,16 @@ python -m mcp_server.app
 Documentation: `mcp_server/README.md`  
 Configuration: `mcp_server/config.yaml`
 
+### MCP Usage for New Agents
+
+- Prefer MCP tools for discovery/preflight/run rather than ad‑hoc shell scripts.
+- Endpoints differ by client:
+  - **Codex** (streamable-HTTP): `POST /`
+  - **Cursor** (SSE): `GET /sse` + `POST /messages`
+- If running on a remote host, local SSH tunnels are not visible to agents.
+  Use a public tunnel (e.g., `cloudflared tunnel --url http://localhost:8765`)
+  so agents can reach the MCP server.
+
 ## Docs to Check First
 
 - `docs/UNSORTED_BAM_CBUB_IMPLEMENTATION_SUMMARY.md`

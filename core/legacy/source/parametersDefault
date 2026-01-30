@@ -1705,6 +1705,63 @@ crMexUseGexBarcodes        -
     string:                 DEPRECATED: CR-compat MEX now always writes both raw_feature_bc_matrix and filtered_feature_bc_matrix using GEX barcodes
                             This parameter is ignored and kept for backward compatibility only
 
+### Default Module Flag Groups
+### These flags apply predefined parameter bundles for common workflows.
+### Explicit command-line options always override defaults from these groups.
+
+defaultBulk                 No
+    string:                 yes/no - apply permissive bulk RNA-seq defaults (VB-quant friendly)
+                            Enables: outSAMtype BAM SortedByCoordinate, outSAMattributes NH,
+                            outSAMprimaryFlag AllBestScore, outSAMmultNmax 10000,
+                            outFilterMultimapNmax 10000, outFilterMultimapScoreRange 4,
+                            outFilterMismatchNmax 6, outFilterMatchNmin 25,
+                            outFilterMatchNminOverLread 0, outFilterScoreMinOverLread 0,
+                            alignIntronMax 500000, alignMatesGapMax 1000,
+                            winAnchorMultimapNmax 200, outBAMcompression 6
+
+defaultCoreScrna            No
+    string:                 yes/no - apply standard scRNA-seq (GEX) defaults (non-Flex)
+                            Enables: soloType Droplet, soloFeatures Gene,
+                            soloCellFilter EmptyDrops_CR, soloCBmatchWLtype 1MM_multi_Nbase_pseudocounts,
+                            soloUMIdedup 1MM_CR, soloUMIfiltering MultiGeneUMI_CR,
+                            soloMultiMappers Rescue, soloCbUbRequireTogether no
+
+defaultCrCompat             No
+    string:                 yes/no - apply CR-compat mode with CRISPR calling defaults
+                            Enables: soloType Droplet, soloFeatures Gene GeneFull,
+                            soloCellFilter EmptyDrops_CR, soloCrMode CR,
+                            soloCrGexFeature GeneFull, crMinUmi 10,
+                            soloCBmatchWLtype 1MM_multi_Nbase_pseudocounts,
+                            soloUMIdedup 1MM_CR, soloUMIfiltering MultiGeneUMI_CR,
+                            soloMultiMappers Rescue, soloCbUbRequireTogether no
+                            Note: soloKeysCompat is NOT set (requires soloProbeList)
+
+defaultFlex                 No
+    string:                 yes/no - apply STAR-Flex standard defaults
+                            Enables: flex mode, soloFeatures Gene,
+                            soloCellFilter EmptyDrops_CR, soloRunFlexFilter yes,
+                            soloRemoveDeprecated Yes, removeDeprecated Yes,
+                            soloSampleSearchNearby no, plus Flex alignment defaults,
+                            outSAMtype BAM Unsorted, outBAMsortMethod samtools (if sorting requested)
+                            NOTE: soloRunFlexFilter requires --soloFlexExpectedCellsTotal or
+                            --soloFlexExpectedCellsPerTag to be set (dataset-specific)
+
+defaultSlam                 No
+    string:                 yes/no - apply SLAM-seq defaults (superset of bulk)
+                            Enables: all defaultBulk parameters, plus
+                            slamQuantMode 1, slamSnpMaskModel em,
+                            slamSnpMaskOnly 1, slamWeightMode dump
+
+defaultVbem                 No
+    string:                 yes/no - apply VBEM/TranscriptVB quant defaults
+                            Enables: quantMode TranscriptVB, quantVBem 1,
+                            quantVBgcBias 1, quantVBgenes 1,
+                            quantVBgenesMode Tximport, quantVBprior 0.01
+
+defaultA375Parity           No
+    string:                 yes/no - apply A375 GEX+feature parity defaults
+                            Enables: soloCrMode CR, soloCrGexFeature GeneFull, crMinUmi 10
+
 #####UnderDevelopment_begin : not supported - do not use
 soloClusterCBfile           -
     string:                 file containing the cluster information for cell barcodes, two columns: CB cluster_index. Only used with --soloFeatures Transcript3p

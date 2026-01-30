@@ -3,7 +3,10 @@
 
 set -e
 
-STAR_BIN="/mnt/pikachu/STAR-suite/core/legacy/source/STAR"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+STAR_BIN="${STAR_BIN:-$REPO_ROOT/core/legacy/source/STAR}"
 OUT_DIR="/mnt/pikachu/STAR-suite/tests/baseline_test_output"
 TMP_DIR="/storage/100K/tmp/baseline_test"
 
@@ -15,10 +18,12 @@ mkdir -p "$OUT_DIR"
 echo "=== Testing STAR without --flexEnable (baseline) ==="
 echo "Binary: $STAR_BIN"
 echo "Output: $OUT_DIR"
+[[ -n "${STAR_EXTRA_ARGS:-}" ]] && echo "Extra args: $STAR_EXTRA_ARGS"
 echo ""
 
 # Run without --flexEnable (default behavior)
-"$STAR_BIN" \
+# shellcheck disable=SC2086
+"$STAR_BIN" ${STAR_EXTRA_ARGS:-} \
   --runThreadN 4 \
   --outTmpDir "$TMP_DIR" \
   --genomeDir /storage/flex_filtered_reference/star_index \

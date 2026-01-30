@@ -147,7 +147,9 @@ echo ""
 
 # Run STAR with crMultiConfig
 echo "Running STAR with CR-compat mode..."
-"${STAR_BIN}" \
+[[ -n "${STAR_EXTRA_ARGS:-}" ]] && echo "Extra args: $STAR_EXTRA_ARGS"
+# shellcheck disable=SC2086
+"${STAR_BIN}" ${STAR_EXTRA_ARGS:-} \
   --runThreadN "${THREADS}" \
   --genomeDir "${GENOME_DIR}" \
   --readFilesIn "${GEX_R2_FILES},${CRISPR_R2_FILES}" "${GEX_R1_FILES},${CRISPR_R1_FILES}" \

@@ -2,10 +2,14 @@
 
 import argparse
 import sys
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
 
 from fastmcp import FastMCP
+from starlette.applications import Starlette
+from starlette.middleware import Middleware
+import uvicorn
 
 from .config import get_config, load_config
 from .schemas.responses import (
@@ -33,10 +37,56 @@ from .tools.executor import (
 )
 from .tools.preflight import run_preflight as _run_preflight
 from .tools.reload import reload_config as _reload_config
+from .tools.build import (
+    build_target as _build_target,
+    needs_rebuild as _needs_rebuild,
+    load_build_state as _load_build_state,
+)
 
 
 # Create the MCP server
 mcp = FastMCP("star-suite")
+
+
+class AcceptHeaderMiddleware:
+    """Ensure clients accept both JSON and event-stream responses."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") == "http":
+            headers = dict(scope.get("headers") or [])
+            accept = headers.get(b"accept", b"")
+            if b"application/json" not in accept or b"text/event-stream" not in accept:
+                parts = [p.strip() for p in accept.split(b",") if p.strip()]
+                if b"application/json" not in accept:
+                    parts.append(b"application/json")
+                if b"text/event-stream" not in accept:
+                    parts.append(b"text/event-stream")
+                headers[b"accept"] = b", ".join(parts)
+                scope = {**scope, "headers": list(headers.items())}
+        await self.app(scope, receive, send)
+
+
+def build_http_app() -> Starlette:
+    """Build an HTTP app that supports both SSE and streamable-http clients."""
+    sse_app = mcp.http_app(transport="sse")
+    stream_app = mcp.http_app(transport="streamable-http", path="/")
+
+    @asynccontextmanager
+    async def lifespan(app: Starlette):
+        async with sse_app.lifespan(sse_app), stream_app.lifespan(stream_app):
+            yield
+
+    middleware = [Middleware(AcceptHeaderMiddleware)]
+    middleware += stream_app.user_middleware + sse_app.user_middleware
+
+    return Starlette(
+        routes=stream_app.routes + sse_app.routes,
+        middleware=middleware,
+        lifespan=lifespan,
+    )
 
 
 def check_auth(token: Optional[str], is_discovery: bool = False) -> Optional[ErrorResponse]:
@@ -363,6 +413,135 @@ def get_run_status(run_id: str, auth_token: Optional[str] = None) -> dict:
         ).model_dump()
 
 
+# --- Build Tools ---
+
+
+@mcp.tool()
+def build_star(
+    target: str = "core",
+    clean: bool = False,
+    force: bool = False,
+    auth_token: Optional[str] = None,
+) -> dict:
+    """Build STAR-suite binaries with proper state tracking.
+
+    IMPORTANT: Always use clean=True before running test suites to prevent
+    stale binary issues that can cause segfaults.
+
+    Args:
+        target: Build target - 'core' (STAR binary), 'flex', 'slam', or 'feature-tools'.
+        clean: If True, run 'make clean' before building (recommended for tests).
+        force: If True, rebuild even if sources haven't changed.
+        auth_token: Authentication token (required if server has auth configured).
+
+    Returns:
+        Build result with success status, duration, and any error messages.
+
+    Example:
+        # Clean build before running tests (recommended)
+        build_star(target="core", clean=True)
+
+        # Quick incremental build during development
+        build_star(target="core")
+    """
+    auth_error = check_auth(auth_token)
+    if auth_error:
+        return auth_error.model_dump()
+
+    try:
+        config = get_config()
+        repo_root = Path(config.paths.repo_root)
+        result = _build_target(repo_root, target, clean=clean, force=force)
+        return result
+    except Exception as e:
+        return ErrorResponse(
+            code="BUILD_FAILED",
+            message=str(e),
+        ).model_dump()
+
+
+@mcp.tool()
+def check_build_status(
+    target: str = "core",
+    auth_token: Optional[str] = None,
+) -> dict:
+    """Check if a build target needs rebuilding.
+
+    Uses source file hashing to detect changes since last build.
+    This helps avoid stale binary issues.
+
+    Args:
+        target: Build target to check ('core', 'flex', 'slam', 'feature-tools').
+        auth_token: Authentication token (required if server has auth configured).
+
+    Returns:
+        Status including:
+        - needs_rebuild: Whether sources have changed
+        - reason: Explanation of why rebuild is/isn't needed
+        - last_build: Timestamp of last successful build
+        - was_clean_build: Whether last build was a clean build
+    """
+    auth_error = check_auth(auth_token)
+    if auth_error:
+        return auth_error.model_dump()
+
+    try:
+        config = get_config()
+        repo_root = Path(config.paths.repo_root)
+
+        needs_build, reason = _needs_rebuild(repo_root, target)
+        state = _load_build_state(repo_root)
+        target_state = state.get(target, {})
+
+        return {
+            "target": target,
+            "needs_rebuild": needs_build,
+            "reason": reason,
+            "last_build": target_state.get("build_time"),
+            "was_clean_build": target_state.get("clean_build"),
+        }
+    except Exception as e:
+        return ErrorResponse(
+            code="STATUS_CHECK_FAILED",
+            message=str(e),
+        ).model_dump()
+
+
+@mcp.tool()
+def ensure_fresh_build(
+    target: str = "core",
+    auth_token: Optional[str] = None,
+) -> dict:
+    """Ensure a fresh, clean build exists (recommended before test suites).
+
+    This ALWAYS runs 'make clean' first to prevent stale binary issues
+    that can cause hard-to-debug segfaults.
+
+    Use this tool before running any test suite to ensure consistent results.
+
+    Args:
+        target: Build target - 'core' (STAR), 'flex', 'slam', or 'feature-tools'.
+        auth_token: Authentication token (required if server has auth configured).
+
+    Returns:
+        Build result with success status and timing.
+    """
+    auth_error = check_auth(auth_token)
+    if auth_error:
+        return auth_error.model_dump()
+
+    try:
+        config = get_config()
+        repo_root = Path(config.paths.repo_root)
+        result = _build_target(repo_root, target, clean=True, force=True)
+        return result
+    except Exception as e:
+        return ErrorResponse(
+            code="BUILD_FAILED",
+            message=str(e),
+        ).model_dump()
+
+
 def main():
     """Main entry point for the MCP server."""
     parser = argparse.ArgumentParser(description="STAR-suite MCP Server")
@@ -411,8 +590,9 @@ def main():
     if transport == "stdio":
         mcp.run(transport="stdio")
     else:
-        # HTTP/SSE mode
-        mcp.run(transport="sse", host=host, port=port)
+        # HTTP mode (serve both streamable-http at "/" and SSE at "/sse"/"/messages")
+        app = build_http_app()
+        uvicorn.run(app, host=host, port=port, log_level="info")
 
 
 if __name__ == "__main__":

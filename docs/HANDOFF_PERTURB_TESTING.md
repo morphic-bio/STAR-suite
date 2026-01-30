@@ -26,6 +26,20 @@ Key locations:
 - `mcp_server/tools/executor.py`
 - `mcp_server/README.md` (usage)
 
+Remote access notes:
+- Codex agents use **streamable-HTTP** and connect to `POST /`.
+- Cursor uses **SSE** and connects to `GET /sse` + `POST /messages`.
+- Local SSH tunnels are only visible on your machine. For remote servers, expose
+  the MCP server with a public URL (e.g., `cloudflared tunnel --url http://localhost:8765`)
+  so agents can reach it.
+
+Recent server changes:
+- `mcp_server/app.py` now serves **both** transports on one port (streamable-HTTP `/`
+  and SSE `/sse` + `/messages`) via a combined Starlette app.
+- Accept-header middleware injects `application/json` and `text/event-stream` so
+  streamable-HTTP clients don’t fail with HTTP 406.
+- `mcp_server/requirements.txt` includes `uvicorn`.
+
 Known issues / follow-ups:
 - Build commands run via bare `"make"/"cmake"/"ninja"` (PATH) even though preflight
   validated a trusted binary path. Consider using resolved binary path.

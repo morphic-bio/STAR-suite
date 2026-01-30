@@ -566,6 +566,17 @@ class Parameters {
             int crMinUmi;                   // Minimum UMI threshold for CRISPR feature calling (default: 10)
         } crMulti;
 
+        // Default module flag groups - apply predefined parameter bundles
+        struct {
+            string bulk;             // Yes/No - permissive bulk RNA-seq defaults
+            string coreScrna;        // Yes/No - standard scRNA-seq (non-Flex)
+            string crCompat;         // Yes/No - CR-compat with CRISPR calling
+            string flex;             // Yes/No - STAR-Flex defaults
+            string slam;             // Yes/No - SLAM-seq defaults (superset of bulk)
+            string vbem;             // Yes/No - VBEM/TranscriptVB defaults
+            string a375Parity;       // Yes/No - A375 GEX+feature parity defaults
+        } defaultGroups;
+
         //chimeric
         ParametersChimeric pCh;
 
@@ -596,6 +607,7 @@ class Parameters {
     int scanOneLine (string &lineIn, int inputLevel, int inputLevelRequested);
     void scanAllLines (istream &streamIn, int inputLevel, int inputLevelRequested);
     void inputParameters (int argInN, char* argIn[]); //input parameters: default, from files, from command line
+    void applyDefaultGroups(); //apply --default-* parameter bundles (only for params not explicitly set)
     void openReadsFiles();
     void readFilesInit();
     void closeReadsFiles();

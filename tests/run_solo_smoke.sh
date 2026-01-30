@@ -2,7 +2,9 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-STAR_BIN="${SCRIPT_DIR}/../core/legacy/source/STAR"
+STAR_BIN="${STAR_BIN:-${SCRIPT_DIR}/../core/legacy/source/STAR}"
+# Support injecting extra args (e.g., --defaultCoreScrna Yes) via STAR_EXTRA_ARGS
+STAR_EXTRA_ARGS="${STAR_EXTRA_ARGS:-}"
 TEST_DIR="${SCRIPT_DIR}/solo_smoke"
 
 # Ensure samtools exists
@@ -70,7 +72,8 @@ EOF
   --genomeSAindexNbases 4 >/dev/null
 
 # Run STARsolo with samtools sorter
-"$STAR_BIN" \
+# shellcheck disable=SC2086
+"$STAR_BIN" ${STAR_EXTRA_ARGS:-} \
   --runThreadN 2 \
   --genomeDir "$IDX_DIR" \
   --readFilesIn "$FASTQ_DIR/R2.fastq" "$FASTQ_DIR/R1.fastq" \

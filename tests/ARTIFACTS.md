@@ -81,3 +81,24 @@ update this file with its output location.
   - `flex_inline_test/` - Inline hash mode output (BAM + Solo.out)
   - `flex_inline_baseline.log` - Test execution log
   - `source_inventory.md` - Files to be migrated from libflex to libscrna
+
+## Default Groups Smoke Tests
+
+- Harness: `tests/run_default_groups_smoke.sh`
+- Outputs: `/tmp/default_group_test_*.log` (temporary per-test logs)
+- Tests each `--default-*` parameter bundle by running existing smoke tests
+- Uses `STAR_EXTRA_ARGS` environment variable to inject default group flags
+- Supported groups: `bulk`, `scrna`, `crcompat`, `flex`, `slam`, `vbem`, `a375`, `cbub`
+
+### Minimal Default Bundle Fixtures
+
+These scripts validate that default bundles work with minimal explicit parameters:
+
+- `tests/run_default_bundle_scrna_fixture.sh`
+  - Outputs: `/tmp/default_bundle_scrna_*/` (cleaned up after test)
+  - Validates `--defaultCoreScrna` sets `soloType Droplet`, etc.
+  - Does NOT override `--soloType` (lets default bundle set it)
+  
+- `tests/run_default_bundle_bulk_fixture.sh`
+  - Outputs: `/tmp/default_bundle_bulk_*/` (cleaned up after test)
+  - Validates `--defaultBulk` sets `outSAMtype BAM SortedByCoordinate`, etc.

@@ -9,6 +9,8 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 SOURCE_DIR="$PROJECT_ROOT/core/legacy/source"
 OUT_DIR="$SCRIPT_DIR/output"
 FIXTURE_DIR="${FLEX_FIXTURE_ROOT:-$PROJECT_ROOT/reference/tests/100K}"
+# Support injecting extra args (e.g., --defaultFlex Yes) via STAR_EXTRA_ARGS
+STAR_EXTRA_ARGS="${STAR_EXTRA_ARGS:-}"
 
 # Colors for output
 RED='\033[0;31m'
@@ -78,36 +80,43 @@ if [[ -d "$FIXTURE_DIR/genome" ]] && [[ -d "$FIXTURE_DIR/SC2300771" ]]; then
     rm -rf "$OUT_DIR"
     mkdir -p "$OUT_DIR/flex_off" "$OUT_DIR/flex_on"
     
-    # Test 4a: Run with flex disabled (default)
-    echo "Running STAR with flex disabled (default)..."
-    if "$STAR_BIN" \
-        --genomeDir "$FIXTURE_DIR/genome" \
-        --readFilesIn "$FIXTURE_DIR/SC2300771/reads_R2.fastq" "$FIXTURE_DIR/SC2300771/reads_R1.fastq" \
-        --outFileNamePrefix "$OUT_DIR/flex_off/" \
-        --soloType CB_UMI_Simple \
-        --soloCBwhitelist "$FIXTURE_DIR/737K-august-2016.txt" \
-        --soloCBlen 16 \
-        --soloUMIlen 12 \
-        --soloFeatures Gene \
-        --runThreadN 1 \
-        --outSAMtype BAM Unsorted \
-        2>&1; then
-        pass "STAR ran successfully with flex off"
-        
-        # Check that standard Solo output exists
-        if [[ -d "$OUT_DIR/flex_off/Solo.out" ]]; then
-            pass "Solo.out directory created"
-        else
-            fail "Solo.out directory missing"
-        fi
+    # Check if --defaultFlex is being injected (skip flex-off test in that case)
+    if [[ "$STAR_EXTRA_ARGS" == *"defaultFlex"* ]]; then
+        info "Skipping flex-off test (--defaultFlex is set via STAR_EXTRA_ARGS)"
     else
-        fail "STAR failed with flex off"
+        # Test 4a: Run with flex disabled (default)
+        echo "Running STAR with flex disabled (default)..."
+        # shellcheck disable=SC2086
+        if "$STAR_BIN" ${STAR_EXTRA_ARGS} \
+            --genomeDir "$FIXTURE_DIR/genome" \
+            --readFilesIn "$FIXTURE_DIR/SC2300771/reads_R2.fastq" "$FIXTURE_DIR/SC2300771/reads_R1.fastq" \
+            --outFileNamePrefix "$OUT_DIR/flex_off/" \
+            --soloType CB_UMI_Simple \
+            --soloCBwhitelist "$FIXTURE_DIR/737K-august-2016.txt" \
+            --soloCBlen 16 \
+            --soloUMIlen 12 \
+            --soloFeatures Gene \
+            --runThreadN 1 \
+            --outSAMtype BAM Unsorted \
+            2>&1; then
+            pass "STAR ran successfully with flex off"
+            
+            # Check that standard Solo output exists
+            if [[ -d "$OUT_DIR/flex_off/Solo.out" ]]; then
+                pass "Solo.out directory created"
+            else
+                fail "Solo.out directory missing"
+            fi
+        else
+            fail "STAR failed with flex off"
+        fi
     fi
     
     # Test 4b: Run with flex enabled
     echo ""
     echo "Running STAR with flex enabled..."
-    if "$STAR_BIN" \
+    # shellcheck disable=SC2086
+    if "$STAR_BIN" ${STAR_EXTRA_ARGS} \
         --genomeDir "$FIXTURE_DIR/genome" \
         --readFilesIn "$FIXTURE_DIR/SC2300771/reads_R2.fastq" "$FIXTURE_DIR/SC2300771/reads_R1.fastq" \
         --outFileNamePrefix "$OUT_DIR/flex_on/" \
@@ -135,10 +144,19 @@ if [[ -d "$FIXTURE_DIR/genome" ]] && [[ -d "$FIXTURE_DIR/SC2300771" ]]; then
     fi
     
     # Test 4c: Verify no regression (both runs should complete without crash)
-    if [[ -f "$OUT_DIR/flex_off/Aligned.out.bam" ]] && [[ -f "$OUT_DIR/flex_on/Aligned.out.bam" ]]; then
-        pass "Both runs produced BAM output"
+    # When --defaultFlex is injected, only flex_on output will exist
+    if [[ "$STAR_EXTRA_ARGS" == *"defaultFlex"* ]]; then
+        if [[ -f "$OUT_DIR/flex_on/Aligned.out.bam" ]]; then
+            pass "Flex run produced BAM output"
+        else
+            fail "Flex run did not produce BAM output"
+        fi
     else
-        fail "One or both runs did not produce BAM output"
+        if [[ -f "$OUT_DIR/flex_off/Aligned.out.bam" ]] && [[ -f "$OUT_DIR/flex_on/Aligned.out.bam" ]]; then
+            pass "Both runs produced BAM output"
+        else
+            fail "One or both runs did not produce BAM output"
+        fi
     fi
     
 else

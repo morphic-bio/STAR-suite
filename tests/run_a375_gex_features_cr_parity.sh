@@ -23,6 +23,8 @@ STAR_BIN="${STAR_BIN:-/mnt/pikachu/STAR-suite/core/legacy/source/STAR}"
 OUTPREFIX="${A375_CR_PARITY_OUTPREFIX:-/storage/A375/star_gex_features_cr_parity_$(date +%Y%m%d_%H%M%S)/}"
 THREADS="${A375_THREADS:-24}"
 A375_SKIP_DOWNSAMPLE="${A375_SKIP_DOWNSAMPLE:-1}"
+# Support injecting extra args (e.g., --defaultA375Parity Yes) via STAR_EXTRA_ARGS
+STAR_EXTRA_ARGS="${STAR_EXTRA_ARGS:-}"
 
 if [[ "${OUTPREFIX}" != */ ]]; then
   OUTPREFIX="${OUTPREFIX}/"
@@ -110,7 +112,8 @@ echo "  GEX: CR-parity mode with EmptyDrops_CR filtering"
 echo "  Features: Will use GEX filtered barcodes (no EmptyDrops on features)"
 echo ""
 
-"${STAR_BIN}" \
+# shellcheck disable=SC2086
+"${STAR_BIN}" ${STAR_EXTRA_ARGS} \
   --runThreadN "${THREADS}" \
   --genomeDir "${GENOME_DIR}" \
   --readFilesIn "${GEX_R2_FILES},${CRISPR_R2_FILES}" "${GEX_R1_FILES},${CRISPR_R1_FILES}" \

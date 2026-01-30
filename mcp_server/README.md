@@ -71,6 +71,18 @@ Environment variables in config use `${VAR_NAME}` syntax.
 - Sufficient disk space (per-suite thresholds)
 - Required fixtures present and within trusted roots
 
+### Build Tools
+
+| Tool | Description |
+|------|-------------|
+| `build_star(target?, clean?, force?, auth_token?)` | Build STAR-suite binaries |
+| `check_build_status(target?, auth_token?)` | Check if rebuild is needed |
+| `ensure_fresh_build(target?, auth_token?)` | Clean build (recommended before tests) |
+
+**Targets**: `core` (STAR binary), `flex`, `slam`, `feature-tools`
+
+**IMPORTANT**: Always use `ensure_fresh_build()` or `build_star(clean=True)` before running test suites to prevent stale binary issues that can cause segfaults.
+
 ### Execution (Phase 3)
 
 | Tool | Description |
@@ -132,6 +144,93 @@ response = client.call_tool("find_docs", {
 })
 for doc in response["matches"]:
     print(f"{doc['path']}: {doc['title']}")
+```
+
+## Build Workflow (Important!)
+
+**ALWAYS ensure a clean build before running tests** to prevent stale binary issues:
+
+```python
+# Recommended workflow for test execution
+# Step 1: Ensure fresh build
+response = client.call_tool("ensure_fresh_build", {
+    "target": "core",
+    "auth_token": "your-token"
+})
+if not response.get("success"):
+    print(f"Build failed: {response.get('error')}")
+    sys.exit(1)
+
+# Step 2: Run preflight
+response = client.call_tool("preflight", {
+    "script": "cbub_regression",
+    "auth_token": "your-token"
+})
+
+# Step 3: Run test
+response = client.call_tool("run_script", {
+    "script": "cbub_regression",
+    "auth_token": "your-token"
+})
+```
+
+**Why this matters**: Stale object files from incremental builds can cause hard-to-debug segfaults that only appear with `-O3` optimization. The `ensure_fresh_build` tool tracks source file changes and always runs `make clean` before building.
+
+**For incremental development** (not tests):
+```python
+# Quick incremental build (only rebuilds if sources changed)
+response = client.call_tool("build_star", {
+    "target": "core",
+    "auth_token": "your-token"
+})
+```
+
+## Endpoints and Remote Access
+
+The server now exposes **both** MCP HTTP transports on the same port:
+
+- **Streamable-HTTP** (Codex CLI / agent runtime): `POST /`
+- **SSE** (Cursor MCP client): `GET /sse` + `POST /messages`
+
+This is required because Codex and Cursor use different MCP transports and
+endpoints.
+
+### Remote Servers (SSH)
+
+If the MCP server runs on a remote host, Codex agents cannot see your local SSH
+tunnel (e.g., `localhost:8765`). Use a **public tunnel** so agents can reach the
+server directly.
+
+Recommended (no firewall changes):
+
+```bash
+cloudflared tunnel --url http://localhost:8765
+```
+
+This prints a `https://*.trycloudflare.com` URL that can be used by agents.
+
+### Codex MCP config (streamable-http)
+
+```toml
+[mcp_servers.star-suite]
+type = "streamable-http"
+url = "https://your-public-url"
+```
+
+### Cursor MCP config (SSE)
+
+```toml
+[mcp_servers.star-suite]
+type = "sse"
+url = "https://your-public-url/sse"
+```
+
+### Sanity check (streamable-http)
+
+```bash
+curl -i -X POST https://your-public-url/ \
+  -H 'content-type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"probe","version":"0.0"},"protocolVersion":"2024-11-05","capabilities":{}}}'
 ```
 
 ## Testing
