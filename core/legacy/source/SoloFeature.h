@@ -163,6 +163,7 @@ public:
     
     void cellFiltering();
     void emptyDrops_CR();
+    void emptyDrops_libscrna();
     void loadRawMatrix();
     
     void writeTagTableIfRequested(bool) {} // stub - tag table not used in flex path

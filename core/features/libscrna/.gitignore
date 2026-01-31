@@ -2,6 +2,7 @@
 *.o
 *.a
 src/*.o
+bin/
 
 # Test binaries
 tests/test_*

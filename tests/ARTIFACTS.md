@@ -62,6 +62,8 @@ update this file with its output location.
 - `tests/nbem_crispat_vignette_output_0_4_poisson_seed/` (NB-EM outputs with Poisson seed on crispat vignette subset)
 - `tests/nbem_crispat_vignette_output_0_4_fallback_dom/` (NB-EM outputs with fallback dominance on crispat vignette subset)
 - `tests/baselines/flex_pre_modular_*/` (Flex modular integration baselines)
+- `tests/emptydrops_parity_output_*/` (EmptyDrops legacy vs libscrna parity outputs)
+- `tests/flexfilter_parity_output_*/` (FlexFilter parity outputs vs production baseline)
 - `/tmp/*` (temporary scratch outputs)
 - `/storage/A375/` (external A375 datasets + smoke outputs; e.g. `star_gex_smoke/`, `star_multi_smoke_cpp/`, `fastqs/`, `outputs/`)
   - Downsampled MEX output: `/storage/A375/star_multi_smoke/assign/downsampled/`

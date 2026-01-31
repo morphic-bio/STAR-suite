@@ -29,11 +29,23 @@ PUBLIC_HEADERS := include/scrna_types.h \
                   include/CRLogProb.h \
                   include/scrna_api.h
 
-.PHONY: all clean lib test
+.PHONY: all clean lib test tools
 
 all: lib
 
 lib: $(TARGET)
+
+# Simple EmptyDrops CLI (wrapper around libscrna C API)
+TOOLS_DIR := tools
+BIN_DIR := bin
+SIMPLEED_TOOL := $(BIN_DIR)/scrna_simpleed
+
+tools: lib $(SIMPLEED_TOOL)
+
+$(SIMPLEED_TOOL): $(TOOLS_DIR)/scrna_simpleed.cpp $(TARGET)
+	@mkdir -p $(BIN_DIR)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -o $@ $< $(TARGET)
+	@echo "Built $(SIMPLEED_TOOL)"
 
 $(TARGET): $(OBJS)
 	$(AR) rcs $@ $^
@@ -45,6 +57,7 @@ src/%.o: src/%.cpp
 clean:
 	rm -f $(OBJS) $(TARGET)
 	rm -f tests/*.o tests/test_*
+	rm -f $(SIMPLEED_TOOL)
 
 # Dependency on headers
 src/EmptyDropsCRSampler.o: include/EmptyDropsCRSampler.h include/scrna_types.h include/pcg_random.hpp

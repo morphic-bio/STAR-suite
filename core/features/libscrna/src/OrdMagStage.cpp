@@ -365,11 +365,12 @@ OrdMagResult SimpleEmptyDropsStage::runCRSimpleFilterBootstrap(
     
     // Extract ambient indices (same logic as non-bootstrap version)
     uint32 scaledIndMin = min(params.indMin, nCB);
+    // STAR EmptyDrops_CR treats indMax as exclusive
     uint32 scaledIndMax = min(params.indMax, nCB);
     uint32 minAmbientCells = (nCB >= 1000) ? (nCB / 10) : min((uint32)100, nCB);
-    uint32 ambientWindowSize = (scaledIndMax >= scaledIndMin) ? (scaledIndMax - scaledIndMin + 1) : 0;
+    uint32 ambientWindowSize = (scaledIndMax > scaledIndMin) ? (scaledIndMax - scaledIndMin) : 0;
     
-    if (scaledIndMax < scaledIndMin || ambientWindowSize < minAmbientCells || scaledIndMin == scaledIndMax) {
+    if (scaledIndMax <= scaledIndMin || ambientWindowSize < minAmbientCells) {
         uint32 fallbackSize = min(minAmbientCells, nCB);
         uint32 fallbackStart = (nCB >= fallbackSize) ? (nCB - fallbackSize) : 0;
         result.ambientIndices.clear();
@@ -378,16 +379,15 @@ OrdMagResult SimpleEmptyDropsStage::runCRSimpleFilterBootstrap(
         }
         result.ambientRange = make_pair(fallbackStart + 1, nCB);
     } else {
-        uint32 ambientStart = (scaledIndMin > 0) ? scaledIndMin - 1 : 0;
+        uint32 ambientStart = scaledIndMin;
         uint32 ambientEnd = scaledIndMax;
-        if (ambientEnd > nCB) ambientEnd = nCB;
         result.ambientIndices.clear();
         for (uint32 ii = ambientStart; ii < ambientEnd; ii++) {
             if (ii < nCB) {
                 result.ambientIndices.push_back(indCount[ii].index);
             }
         }
-        result.ambientRange = make_pair(scaledIndMin, ambientEnd);
+        result.ambientRange = make_pair(ambientStart, ambientEnd);
     }
     
     // Store results
@@ -440,12 +440,12 @@ OrdMagResult SimpleEmptyDropsStage::runCRSimpleFilter(
     
     // Compute robust max index
     uint32 nExpectedCells = max(params.nExpectedCells, (uint32)1);
-    uint32 maxInd = (uint32)round(nExpectedCells * (1.0 - params.maxPercentile));
-    if (maxInd < 1) maxInd = 1;
-    if (maxInd > nCB) maxInd = nCB;
+    int maxInd = (int)llround(nExpectedCells * (1.0 - params.maxPercentile));
+    if (maxInd < 0) maxInd = 0;
+    if ((uint32)maxInd >= nCB) maxInd = (int)nCB - 1;
     
-    // Compute retain threshold
-    uint32 nUMImax = totalsSorted[maxInd - 1];
+    // Compute retain threshold (match STAR EmptyDrops_CR indexing)
+    uint32 nUMImax = totalsSorted[(uint32)maxInd];
     uint32 retain = max((uint32)round((double)nUMImax / params.maxMinRatio), (uint32)1);
     
     // Count cells passing simple filter
@@ -509,9 +509,9 @@ OrdMagResult SimpleEmptyDropsStage::runCRSimpleFilter(
     uint32 scaledIndMin = min(params.indMin, nCB);
     uint32 scaledIndMax = min(params.indMax, nCB);
     uint32 minAmbientCells = (nCB >= 1000) ? (nCB / 10) : min((uint32)100, nCB);
-    uint32 ambientWindowSize = (scaledIndMax >= scaledIndMin) ? (scaledIndMax - scaledIndMin + 1) : 0;
+    uint32 ambientWindowSize = (scaledIndMax >= scaledIndMin) ? (scaledIndMax - scaledIndMin) : 0;
     
-    if (scaledIndMax < scaledIndMin || ambientWindowSize < minAmbientCells || scaledIndMin == scaledIndMax) {
+    if (scaledIndMax <= scaledIndMin || ambientWindowSize < minAmbientCells) {
         uint32 fallbackSize = min(minAmbientCells, nCB);
         uint32 fallbackStart = (nCB >= fallbackSize) ? (nCB - fallbackSize) : 0;
         result.ambientIndices.clear();
@@ -520,7 +520,7 @@ OrdMagResult SimpleEmptyDropsStage::runCRSimpleFilter(
         }
         result.ambientRange = make_pair(fallbackStart + 1, nCB);
     } else {
-        uint32 ambientStart = (scaledIndMin > 0) ? scaledIndMin - 1 : 0;
+        uint32 ambientStart = scaledIndMin;
         uint32 ambientEnd = scaledIndMax;
         if (ambientEnd > nCB) ambientEnd = nCB;
         result.ambientIndices.clear();

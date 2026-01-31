@@ -23,6 +23,22 @@ STAR_BIN="${STAR_BIN:-/mnt/pikachu/STAR-suite/core/legacy/source/STAR}"
 OUTPREFIX="${A375_CR_PARITY_OUTPREFIX:-/storage/A375/star_gex_features_cr_parity_$(date +%Y%m%d_%H%M%S)/}"
 THREADS="${A375_THREADS:-24}"
 A375_SKIP_DOWNSAMPLE="${A375_SKIP_DOWNSAMPLE:-1}"
+# EmptyDrops backend selection: star | libscrna | libscrna-full
+A375_ED_BACKEND="${A375_ED_BACKEND:-libscrna-full}"
+# libscrna mode and tuning
+A375_LIBSCRNA_MODE="${A375_LIBSCRNA_MODE:-}"
+A375_LIBSCRNA_SIM_N="${A375_LIBSCRNA_SIM_N:-}"
+A375_LIBSCRNA_ED_RETAIN="${A375_LIBSCRNA_ED_RETAIN:-}"
+A375_LIBSCRNA_USE_FDR="${A375_LIBSCRNA_USE_FDR:-1}"
+A375_LIBSCRNA_FDR="${A375_LIBSCRNA_FDR:-}"
+A375_LIBSCRNA_RAW_PVALUE="${A375_LIBSCRNA_RAW_PVALUE:-}"
+# Allow skipping STAR run when reusing an existing OUTPREFIX (for backend testing)
+A375_SKIP_STAR="${A375_SKIP_STAR:-0}"
+# SimpleED fallback control (Stage 0)
+A375_SIMPLEED_FALLBACK="${A375_SIMPLEED_FALLBACK:-0}"
+A375_SIMPLEED_FORCE="${A375_SIMPLEED_FORCE:-0}"
+A375_SIMPLEED_MIN_CELLS="${A375_SIMPLEED_MIN_CELLS:-10}"
+SIMPLEED_BIN="${SIMPLEED_BIN:-${REPO_ROOT}/core/features/libscrna/bin/scrna_simpleed}"
 # Support injecting extra args (e.g., --defaultA375Parity Yes) via STAR_EXTRA_ARGS
 STAR_EXTRA_ARGS="${STAR_EXTRA_ARGS:-}"
 
@@ -107,38 +123,98 @@ echo ""
 # Run STAR with both GEX and features
 # GEX will use EmptyDrops_CR filtering
 # Features will automatically use GEX filtered barcodes via --soloCrGexFeature gene
+SOLO_CELL_FILTER="EmptyDrops_CR"
+if [[ "${A375_ED_BACKEND}" == "libscrna" || "${A375_ED_BACKEND}" == "libscrna-full" || "${A375_ED_BACKEND}" == "libscrna_full" ]]; then
+  SOLO_CELL_FILTER="None"
+  A375_SIMPLEED_FORCE=1
+  A375_SIMPLEED_FALLBACK=1
+  if [[ -z "${A375_LIBSCRNA_MODE}" ]]; then
+    if [[ "${A375_ED_BACKEND}" == "libscrna" ]]; then
+      A375_LIBSCRNA_MODE="simple"
+    else
+      A375_LIBSCRNA_MODE="full"
+    fi
+  fi
+fi
+
 echo "Running STAR with GEX + Features..."
-echo "  GEX: CR-parity mode with EmptyDrops_CR filtering"
+echo "  GEX: CR-parity mode with soloCellFilter=${SOLO_CELL_FILTER} (backend=${A375_ED_BACKEND})"
 echo "  Features: Will use GEX filtered barcodes (no EmptyDrops on features)"
 echo ""
 
 # shellcheck disable=SC2086
-"${STAR_BIN}" ${STAR_EXTRA_ARGS} \
-  --runThreadN "${THREADS}" \
-  --genomeDir "${GENOME_DIR}" \
-  --readFilesIn "${GEX_R2_FILES},${CRISPR_R2_FILES}" "${GEX_R1_FILES},${CRISPR_R1_FILES}" \
-  --readFilesCommand zcat \
-  --outFileNamePrefix "${OUTPREFIX}" \
-  --outSAMtype BAM SortedByCoordinate \
-  --outSAMattributes NH HI nM AS CR UR CB UB GX GN gx gn sF sS sQ sM \
-  --clipAdapterType CellRanger4 \
-  --alignEndsType Local \
-  --chimSegmentMin 1000000 \
-  --soloType CB_UMI_Simple \
-  --soloCBstart 1 --soloCBlen 16 --soloUMIstart 17 --soloUMIlen 12 --soloBarcodeReadLength 0 \
-  --soloCBwhitelist "${WHITELIST}" \
-  --soloCBmatchWLtype 1MM_multi_Nbase_pseudocounts \
-  --soloUMIfiltering MultiGeneUMI_CR \
-  --soloUMIdedup 1MM_CR \
-  --soloMultiMappers Unique \
-  --soloCbUbRequireTogether no \
-  --soloCellFilter EmptyDrops_CR \
-  --soloStrand Unstranded \
-  --soloFeatures Gene \
-  --soloCrGexFeature gene \
-  --crMultiConfig "${MULTI_CONFIG}" \
-  --crFeatureRef "${FEATURE_REF}" \
-  --crWhitelist "${WHITELIST}"
+if [[ "${A375_SKIP_STAR}" -eq 0 ]]; then
+  "${STAR_BIN}" ${STAR_EXTRA_ARGS} \
+    --runThreadN "${THREADS}" \
+    --genomeDir "${GENOME_DIR}" \
+    --readFilesIn "${GEX_R2_FILES},${CRISPR_R2_FILES}" "${GEX_R1_FILES},${CRISPR_R1_FILES}" \
+    --readFilesCommand zcat \
+    --outFileNamePrefix "${OUTPREFIX}" \
+    --outSAMtype BAM SortedByCoordinate \
+    --outSAMattributes NH HI nM AS CR UR CB UB GX GN gx gn sF sS sQ sM \
+    --clipAdapterType CellRanger4 \
+    --alignEndsType Local \
+    --chimSegmentMin 1000000 \
+    --soloType CB_UMI_Simple \
+    --soloCBstart 1 --soloCBlen 16 --soloUMIstart 17 --soloUMIlen 12 --soloBarcodeReadLength 0 \
+    --soloCBwhitelist "${WHITELIST}" \
+    --soloCBmatchWLtype 1MM_multi_Nbase_pseudocounts \
+    --soloUMIfiltering MultiGeneUMI_CR \
+    --soloUMIdedup 1MM_CR \
+    --soloMultiMappers Unique \
+    --soloCbUbRequireTogether no \
+    --soloCellFilter "${SOLO_CELL_FILTER}" \
+    --soloStrand Unstranded \
+    --soloFeatures Gene \
+    --soloCrGexFeature gene \
+    --crMultiConfig "${MULTI_CONFIG}" \
+    --crFeatureRef "${FEATURE_REF}" \
+    --crWhitelist "${WHITELIST}"
+else
+  echo "Skipping STAR run (A375_SKIP_STAR=1). Using existing OUTPREFIX: ${OUTPREFIX}"
+  if [[ ! -f "${OUTPREFIX}Solo.out/Gene/raw/matrix.mtx" && ! -f "${OUTPREFIX}Solo.out/Gene/raw/matrix.mtx.gz" ]]; then
+    echo "Missing raw MEX in ${OUTPREFIX}Solo.out/Gene/raw; cannot skip STAR." >&2
+    exit 1
+  fi
+fi
+
+if [[ "${A375_SIMPLEED_FALLBACK}" -eq 1 || "${A375_SIMPLEED_FORCE}" -eq 1 ]]; then
+  echo ""
+  echo "=========================================="
+  echo "SimpleED Fallback (Stage 0)"
+  echo "=========================================="
+  echo "Fallback enabled: ${A375_SIMPLEED_FALLBACK} (force=${A375_SIMPLEED_FORCE})"
+  echo "libscrna mode: ${A375_LIBSCRNA_MODE:-simple}"
+  echo "Min cells: ${A375_SIMPLEED_MIN_CELLS}"
+  echo ""
+  FALLBACK_SCRIPT="${REPO_ROOT}/scripts/run_simpleed_fallback.sh"
+  FALLBACK_OUTDIR="${OUTPREFIX}Solo.out/Gene/filtered/libscrna_simpleed"
+  FALLBACK_ARGS=(--raw-mex "${OUTPREFIX}Solo.out/Gene/raw" \
+    --filtered-barcodes "${OUTPREFIX}Solo.out/Gene/filtered/barcodes.tsv" \
+    --min-cells "${A375_SIMPLEED_MIN_CELLS}" \
+    --simpleed-bin "${SIMPLEED_BIN}" \
+    --mode "${A375_LIBSCRNA_MODE:-simple}" \
+    --out-dir "${FALLBACK_OUTDIR}")
+  if [[ -n "${A375_LIBSCRNA_SIM_N}" ]]; then
+    FALLBACK_ARGS+=(--sim-n "${A375_LIBSCRNA_SIM_N}")
+  fi
+  if [[ -n "${A375_LIBSCRNA_ED_RETAIN}" ]]; then
+    FALLBACK_ARGS+=(--ed-retain-count "${A375_LIBSCRNA_ED_RETAIN}")
+  fi
+  if [[ "${A375_LIBSCRNA_USE_FDR}" -eq 1 ]]; then
+    FALLBACK_ARGS+=(--use-fdr-gate)
+  fi
+  if [[ -n "${A375_LIBSCRNA_FDR}" ]]; then
+    FALLBACK_ARGS+=(--fdr "${A375_LIBSCRNA_FDR}")
+  fi
+  if [[ -n "${A375_LIBSCRNA_RAW_PVALUE}" ]]; then
+    FALLBACK_ARGS+=(--raw-pvalue "${A375_LIBSCRNA_RAW_PVALUE}")
+  fi
+  if [[ "${A375_SIMPLEED_FORCE}" -eq 1 ]]; then
+    FALLBACK_ARGS+=(--force)
+  fi
+  "${FALLBACK_SCRIPT}" "${FALLBACK_ARGS[@]}"
+fi
 
 echo ""
 echo "=========================================="
@@ -181,6 +257,10 @@ echo ""
 echo "=========================================="
 echo "Running Comparison"
 echo "=========================================="
+if [[ "${A375_SKIP_COMPARISON:-0}" -eq 1 ]]; then
+  echo "Skipping comparison (A375_SKIP_COMPARISON=1)"
+  exit 0
+fi
 CR_MEX_DIR="${CR_MEX_DIR:-/storage/A375/outputs/unpacked/sample_filtered_feature_bc_matrix}"
 
 if [[ ! -d "${CR_MEX_DIR}" ]]; then

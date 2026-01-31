@@ -14,6 +14,7 @@ paths:
 
 trusted_roots:
   - "/mnt/pikachu/STAR-suite"
+  - "/mnt/pikachu/prod-12-28"
   - "/storage"
   - "/tmp"
   - "/usr/bin"        # read-only for tool discovery
@@ -24,6 +25,9 @@ datasets:
     path: "/storage/A375"
     description: "A375 cell line data (GEX + features)"
     metadata_file: "dataset.yaml"  # optional
+  - id: "sc2300771"
+    path: "/mnt/pikachu/prod-12-28/SC2300771"
+    description: "SC2300771 production run (Flex MEX + per-sample summaries)"
   # Add more datasets as discovered from /storage scan
 
 execution:
@@ -86,6 +90,20 @@ scripts:
     fixtures:
       - "/storage/A375"
 
+  - name: "emptydrops_parity"
+    path: "tests/run_emptydrops_parity.sh"
+    module: "core"
+    description: "EmptyDrops_CR legacy vs libscrna parity (A375 raw MEX)"
+    fixtures:
+      - "/storage/A375"
+
+  - name: "flexfilter_parity"
+    path: "tests/run_flexfilter_parity.sh"
+    module: "flex"
+    description: "Flex EmptyDrops parity vs SC2300771 production summary"
+    fixtures:
+      - "/mnt/pikachu/prod-12-28/SC2300771"
+
   # Feature tools
   - name: "assignbarcodes_regression"
     path: "core/features/process_features/tests/test_assignbarcodes_regression.sh"
@@ -144,6 +162,11 @@ test_suites:
   - module: "cr-compat"
     description: "CellRanger compatibility tests"
     scripts: ["crispr_calling", "a375_gex_features_cr_parity"]
+    disk_space_min_gb: 100
+
+  - module: "parity"
+    description: "EmptyDrops parity checks (core + flex)"
+    scripts: ["emptydrops_parity", "flexfilter_parity"]
     disk_space_min_gb: 100
 
   - module: "feature-tools"

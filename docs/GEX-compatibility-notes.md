@@ -14,6 +14,8 @@ Use these settings when the goal is to match Cell Ranger GEX counts as closely a
   CR does not use EM/Uniform multimapper redistribution for the standard GEX matrix.
 - `--soloCellFilter EmptyDrops_CR`  
   Run EmptyDrops on GEX only; apply the filtered barcodes to features later.
+  - **Backend note**: EmptyDrops_CR now uses libscrna by default.
+  - Use `--soloEmptyDropsLegacy yes` to force the legacy STAR EmptyDrops_CR path.
 - `--soloUMIdedup 1MM_CR` and `--soloUMIfiltering MultiGeneUMI_CR`  
   Keep CR-like UMI handling.
 - `--soloCbUbRequireTogether no`  

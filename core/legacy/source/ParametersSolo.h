@@ -167,6 +167,10 @@ public:
         } eDcr;//EmptyDrops-CellRanger
         
     } cellFilter;
+
+    // EmptyDrops backend selection (default: libscrna)
+    string emptyDropsLegacyStr;
+    bool emptyDropsLegacy = false;
       
     //CBtype
     struct {

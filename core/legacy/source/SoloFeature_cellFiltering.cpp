@@ -65,7 +65,13 @@ void SoloFeature::cellFiltering()
             P.inOut->logMain << "cellFiltering: simple: nUMImax="<< nUMImax <<"; nUMImin="<< nUMImin <<"; nCellsSimple="<< filteredCells.nCellsSimple <<endl;
 
             if (pSolo.cellFilter.type[0]=="EmptyDrops_CR") {
-                emptyDrops_CR();
+                if (pSolo.emptyDropsLegacy) {
+                    P.inOut->logMain << "cellFiltering: EmptyDrops_CR legacy backend enabled (--soloEmptyDropsLegacy yes)\n";
+                    emptyDrops_CR();
+                } else {
+                    P.inOut->logMain << "cellFiltering: EmptyDrops_CR using libscrna backend (default)\n";
+                    emptyDrops_libscrna();
+                }
             };
         };
     };

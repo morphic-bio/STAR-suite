@@ -84,6 +84,23 @@ void ParametersSolo::initialize(Parameters *pPin)
         exitWithError(errOut.str(),std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
     };
     
+    //////////////////////////////////////////////////////////////////////////////////////////////////////
+    ///////////////////////////////--soloEmptyDropsLegacy
+    {
+        string mode = emptyDropsLegacyStr;
+        transform(mode.begin(), mode.end(), mode.begin(), ::tolower);
+        if (mode == "yes") {
+            emptyDropsLegacy = true;
+        } else if (mode == "no" || mode.empty()) {
+            emptyDropsLegacy = false;
+        } else {
+            ostringstream errOut;
+            errOut << "EXITING because of fatal PARAMETERS error: unrecognized option in --soloEmptyDropsLegacy=" << emptyDropsLegacyStr << "\n";
+            errOut << "SOLUTION: use allowed option: yes OR no\n";
+            exitWithError(errOut.str(), std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
+        }
+    }
+
     // Keep skipProcessing disabled when running in soloCellFiltering mode to avoid side effects
     if (pP->runMode == "soloCellFiltering") {
         skipProcessing = false;
