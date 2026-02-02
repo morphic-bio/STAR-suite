@@ -2,6 +2,7 @@
 # Unified SLAM unit test runner
 # Compiles and runs:
 # - test_slam_snp_em
+# - test_slam_vb_overdisp
 # - test_qc_transition_orientation
 # - test_slam_qc_output
 
@@ -37,7 +38,7 @@ TESTS_FAILED=0
 FAILED_TESTS=""
 
 # Test 1: SLAM SNP EM
-echo "[1/3] Building test_slam_snp_em..."
+echo "[1/4] Building test_slam_snp_em..."
 OUT_BIN_SNP_EM="$TMP_DIR/test_slam_snp_em"
 if [[ ! -f "$TEST_DIR/test_slam_snp_em.cpp" ]]; then
     echo "FAIL: test_slam_snp_em.cpp not found at $TEST_DIR/test_slam_snp_em.cpp"
@@ -64,8 +65,36 @@ else
 fi
 echo
 
-# Test 2: QC Transition Orientation
-echo "[2/3] Building test_qc_transition_orientation..."
+# Test 2: SLAM VB Overdisp Solver
+echo "[2/4] Building test_slam_vb_overdisp..."
+OUT_BIN_VB="$TMP_DIR/test_slam_vb_overdisp"
+if [[ ! -f "$TEST_DIR/test_slam_vb_overdisp.cpp" ]]; then
+    echo "FAIL: test_slam_vb_overdisp.cpp not found at $TEST_DIR/test_slam_vb_overdisp.cpp"
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+    FAILED_TESTS="$FAILED_TESTS test_slam_vb_overdisp(missing)"
+else
+    if "$CXX" $CXXFLAGS -I"$SOURCE_DIR" -I"$SOURCE_DIR/libem" -I"$CORE_DIR/source" \
+        "$TEST_DIR/test_slam_vb_overdisp.cpp" "$SOURCE_DIR/libem/slam_vb_overdisp.cpp" \
+        -o "$OUT_BIN_VB" -lm 2>&1; then
+        echo "Running test_slam_vb_overdisp..."
+        if "$OUT_BIN_VB" 2>&1; then
+            echo "✓ test_slam_vb_overdisp PASSED"
+            TESTS_PASSED=$((TESTS_PASSED + 1))
+        else
+            echo "✗ test_slam_vb_overdisp FAILED"
+            TESTS_FAILED=$((TESTS_FAILED + 1))
+            FAILED_TESTS="$FAILED_TESTS test_slam_vb_overdisp(run)"
+        fi
+    else
+        echo "FAIL: Compilation failed for test_slam_vb_overdisp"
+        TESTS_FAILED=$((TESTS_FAILED + 1))
+        FAILED_TESTS="$FAILED_TESTS test_slam_vb_overdisp(compile)"
+    fi
+fi
+echo
+
+# Test 3: QC Transition Orientation
+echo "[3/4] Building test_qc_transition_orientation..."
 OUT_BIN_QC_ORIENT="$TMP_DIR/test_qc_transition_orientation"
 if [[ ! -f "$TEST_DIR/test_qc_transition_orientation.cpp" ]]; then
     echo "FAIL: test_qc_transition_orientation.cpp not found at $TEST_DIR/test_qc_transition_orientation.cpp"
@@ -74,7 +103,8 @@ if [[ ! -f "$TEST_DIR/test_qc_transition_orientation.cpp" ]]; then
 else
     if "$CXX" $CXXFLAGS -I"$SOURCE_DIR" -I"$CORE_DIR/source" \
         "$TEST_DIR/test_qc_transition_orientation.cpp" "$SOURCE_DIR/SlamQuant.cpp" \
-        "$SOURCE_DIR/SlamSolver.cpp" "$SOURCE_DIR/SlamVarianceAnalysis.cpp" "$SOURCE_DIR/SlamReadBuffer.cpp" "$SOURCE_DIR/SlamCompat.cpp" \
+        "$SOURCE_DIR/SlamSolver.cpp" "$SOURCE_DIR/libem/slam_vb_overdisp.cpp" \
+        "$SOURCE_DIR/SlamVarianceAnalysis.cpp" "$SOURCE_DIR/SlamReadBuffer.cpp" "$SOURCE_DIR/SlamCompat.cpp" \
         -L"$HTSLIB_DIR" -lhts -lz -lssl -lcrypto -lpthread \
         -o "$OUT_BIN_QC_ORIENT" 2>&1; then
         echo "Running test_qc_transition_orientation..."
@@ -94,8 +124,8 @@ else
 fi
 echo
 
-# Test 3: SLAM QC Output
-echo "[3/3] Building test_slam_qc_output..."
+# Test 4: SLAM QC Output
+echo "[4/4] Building test_slam_qc_output..."
 OUT_BIN_QC_OUT="$TMP_DIR/test_slam_qc_output"
 if [[ ! -f "$TEST_DIR/test_slam_qc_output.cpp" ]]; then
     echo "FAIL: test_slam_qc_output.cpp not found at $TEST_DIR/test_slam_qc_output.cpp"
@@ -104,7 +134,8 @@ if [[ ! -f "$TEST_DIR/test_slam_qc_output.cpp" ]]; then
 else
     if "$CXX" $CXXFLAGS -I"$SOURCE_DIR" -I"$CORE_DIR/source" \
         "$TEST_DIR/test_slam_qc_output.cpp" "$SOURCE_DIR/SlamQuant.cpp" "$SOURCE_DIR/SlamQcOutput.cpp" \
-        "$SOURCE_DIR/SlamSolver.cpp" "$SOURCE_DIR/SlamVarianceAnalysis.cpp" "$SOURCE_DIR/SlamReadBuffer.cpp" "$SOURCE_DIR/SlamCompat.cpp" \
+        "$SOURCE_DIR/SlamSolver.cpp" "$SOURCE_DIR/libem/slam_vb_overdisp.cpp" \
+        "$SOURCE_DIR/SlamVarianceAnalysis.cpp" "$SOURCE_DIR/SlamReadBuffer.cpp" "$SOURCE_DIR/SlamCompat.cpp" \
         -L"$HTSLIB_DIR" -lhts -lz -lssl -lcrypto -lpthread \
         -o "$OUT_BIN_QC_OUT" 2>&1; then
         echo "Running test_slam_qc_output..."

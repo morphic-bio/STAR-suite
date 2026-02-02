@@ -22,6 +22,7 @@ PROCESS_FEATURES_DIR := $(ROOT_DIR)/core/features/process_features
 
 FLEX_SRC_DIR := $(FLEX_DIR)/source
 SLAM_SRC_DIR := $(SLAM_DIR)/source
+SLAM_LIBEM_DIR := $(SLAM_SRC_DIR)/libem
 VBEM_SRC_DIR := $(VBEM_DIR)/source
 BAMSORT_SRC_DIR := $(BAMSORT_DIR)/source
 
@@ -42,7 +43,7 @@ LIBSCRNA_DIR := $(ROOT_DIR)/core/features/libscrna
 LIBSCRNA_INC := $(LIBSCRNA_DIR)/include
 LIBSCRNA_LIB := $(LIBSCRNA_DIR)/libscrna.a
 
-VPATH := $(FLEX_SRC_DIR) $(SLAM_SRC_DIR) $(VBEM_SRC_DIR) $(BAMSORT_SRC_DIR)
+VPATH := $(FLEX_SRC_DIR) $(SLAM_SRC_DIR) $(SLAM_LIBEM_DIR) $(VBEM_SRC_DIR) $(BAMSORT_SRC_DIR)
 
 # pre-defined flags
 LDFLAGS_shared := -pthread -Lhtslib -Bstatic -lhts -Bdynamic -lz -lssl -lcrypto
@@ -120,7 +121,7 @@ OBJECTS = systemFunctions.o funPrimaryAlignMark.o \
 	SpliceGraph_findSuperTr.o sjAlignSplit.o \
 	GTF.o GTF_transcriptGeneSJ.o GTF_superTranscript.o SuperTranscriptome.o TranscriptomeFasta.o \
 	ReadAlign_outputAlignments.o ReadAlign_resolveAmbiguousCBs.o ReadAlign_slamQuant.o \
-		ReadAlign.o STAR.o TranscriptQuantEC.o LibFormatDetection.o TranscriptQuantOutput.o SlamQuant.o SlamSolver.o SlamCompat.o SlamVarianceAnalysis.o SlamReadBuffer.o SlamDump.o SlamQcOutput.o TrimQc.o TrimQcOutput.o SnpMaskBuild.o \
+		ReadAlign.o STAR.o TranscriptQuantEC.o LibFormatDetection.o TranscriptQuantOutput.o SlamQuant.o SlamSolver.o slam_vb_overdisp.o SlamCompat.o SlamVarianceAnalysis.o SlamReadBuffer.o SlamDump.o SlamQcOutput.o TrimQc.o TrimQcOutput.o SnpMaskBuild.o \
 	SharedMemory.o PackedArray.o SuffixArrayFuns.o Parameters.o Parameters_samAttributes.o InOutStreams.o SequenceFuns.o Genome.o ParametersGenome.o Stats.o \
 	Transcript.o Transcript_alignScore.o Transcript_generateCigarP.o Chain.o \
 	Transcript_variationAdjust.o Variation.o ReadAlign_waspMap.o \

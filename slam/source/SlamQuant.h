@@ -225,10 +225,14 @@ public:
     const SlamReadBuffer* dumpBuffer() const { return dumpBuffer_.get(); }
     void merge(const SlamQuant& other);
     void write(const Transcriptome& tr, const std::string& outFile,
-               double errorRate, double convRate) const;
+               double errorRate, double convRate,
+               bool vbOverdisp, double vbPhi,
+               double vbPriorAlpha, double vbPriorBeta) const;
     void writeGrandSlam(const Transcriptome& tr, const std::string& outFile,
                         const std::string& outFileNamePrefix,
-                        double errorRate, double convRate) const;
+                        double errorRate, double convRate,
+                        bool vbOverdisp, double vbPhi,
+                        double vbPriorAlpha, double vbPriorBeta) const;
     void writeDiagnostics(const std::string& diagFile) const;
     void writeTransitions(const std::string& outFile) const;
     void writeMismatches(const std::string& outFile, const std::string& condition) const;
@@ -252,7 +256,9 @@ public:
     void debugAddAssignment(uint32_t geneId, double weight, bool intronic,
                             bool oppositeStrand, uint16_t nT, uint8_t k);
     void debugLogRead(const SlamDebugReadRecord& record);
-    void writeDebug(const Transcriptome& tr, double errorRate, double convRate) const;
+    void writeDebug(const Transcriptome& tr, double errorRate, double convRate,
+                    bool vbOverdisp, double vbPhi,
+                    double vbPriorAlpha, double vbPriorBeta) const;
     // Enable/collect SNP-site debug for investigating counting parity.
     // absPos is STAR's 0-based genome-wide coordinate (same coordinate space as snpMask_ keys).
     void enableSnpSiteDebug(uint64_t absPos, int window, const std::string& locString);

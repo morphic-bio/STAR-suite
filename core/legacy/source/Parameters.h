@@ -422,6 +422,13 @@ class Parameters {
                 bool compatIgnoreOverlap = false; // Skip PE overlap positions
                 int compatTrim5p = 0;             // 5' trim guard
                 int compatTrim3p = 0;             // 3' trim guard
+
+                // VB over-dispersed solver (beta-binomial mixture)
+                int vbOverdispInt = 0;            // --slamVbOverdisp (0/1)
+                bool vbOverdisp = false;          // Derived from vbOverdispInt
+                double vbOverdispPhi = 50.0;      // --slamVbOverdispPhi (dispersion, larger=binomial-like)
+                double vbOverdispPriorAlpha = 1.0; // --slamVbOverdispPriorAlpha
+                double vbOverdispPriorBeta = 1.0;  // --slamVbOverdispPriorBeta
                 
                 // Auto-trim variance analysis (segmented regression on T→C stdev curve)
                 string autoTrimMode = "";         // ""=disabled, "variance"=variance-based trimming

@@ -458,7 +458,9 @@ int main(int argInN, char *argIn[])
 
             // If SNP-site debug was enabled, write debug outputs now (mask-only runs exit before SLAM quant writes).
             if (P.quant.slam.debugEnabled && RAchunkMask->slamQuant != nullptr) {
-                RAchunkMask->slamQuant->writeDebug(*transcriptomeMain, P.quant.slam.errorRate, P.quant.slam.convRate);
+                RAchunkMask->slamQuant->writeDebug(*transcriptomeMain, P.quant.slam.errorRate, P.quant.slam.convRate,
+                                                  P.quant.slam.vbOverdisp, P.quant.slam.vbOverdispPhi,
+                                                  P.quant.slam.vbOverdispPriorAlpha, P.quant.slam.vbOverdispPriorBeta);
             }
             
             // Restore original settings
@@ -1681,11 +1683,15 @@ int main(int argInN, char *argIn[])
             P.inOut->logMain << "\n";
         }
         mergedSlam.write(*transcriptomeMain, P.quant.slam.outFile,
-                         P.quant.slam.errorRate, P.quant.slam.convRate);
+                         P.quant.slam.errorRate, P.quant.slam.convRate,
+                         P.quant.slam.vbOverdisp, P.quant.slam.vbOverdispPhi,
+                         P.quant.slam.vbOverdispPriorAlpha, P.quant.slam.vbOverdispPriorBeta);
         if (P.quant.slam.grandSlamOut != 0) {
             std::string gsOut = P.outFileNamePrefix + "SlamQuant.grandslam.tsv";
             mergedSlam.writeGrandSlam(*transcriptomeMain, gsOut, P.outFileNamePrefix,
-                                      P.quant.slam.errorRate, P.quant.slam.convRate);
+                                      P.quant.slam.errorRate, P.quant.slam.convRate,
+                                      P.quant.slam.vbOverdisp, P.quant.slam.vbOverdispPhi,
+                                      P.quant.slam.vbOverdispPriorAlpha, P.quant.slam.vbOverdispPriorBeta);
         }
 
         // Optional: write dump for external re-quant
@@ -1770,7 +1776,9 @@ int main(int argInN, char *argIn[])
         std::string mismatchDetailsFile = P.quant.slam.outFile + ".mismatchdetails.tsv";
         mergedSlam.writeMismatchDetails(mismatchDetailsFile);
         if (P.quant.slam.debugEnabled) {
-            mergedSlam.writeDebug(*transcriptomeMain, P.quant.slam.errorRate, P.quant.slam.convRate);
+            mergedSlam.writeDebug(*transcriptomeMain, P.quant.slam.errorRate, P.quant.slam.convRate,
+                                  P.quant.slam.vbOverdisp, P.quant.slam.vbOverdispPhi,
+                                  P.quant.slam.vbOverdispPriorAlpha, P.quant.slam.vbOverdispPriorBeta);
         }
         
         // Write top mismatches if reference file exists

@@ -1032,6 +1032,18 @@ slamErrorRate                         0.001
 slamConvRate                          0.05
     double: Conversion rate for labeled reads in SLAM EM solver
 
+slamVbOverdisp                       0
+    int: 0/1 - Use VB over-dispersed (beta-binomial) solver instead of binomial EM
+
+slamVbOverdispPhi                    50
+    double: Over-dispersion parameter (larger -> binomial-like)
+
+slamVbOverdispPriorAlpha              1.0
+    double: Prior alpha for VB solver (Beta prior on NTR)
+
+slamVbOverdispPriorBeta               1.0
+    double: Prior beta for VB solver (Beta prior on NTR)
+
 slamOutFile                           -
     string: Output file for SlamQuant (default: <prefix>SlamQuant.out)
 

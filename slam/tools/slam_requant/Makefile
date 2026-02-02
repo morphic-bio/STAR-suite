@@ -10,6 +10,7 @@ SRC_DIR := $(SLAM_SRC_DIR)
 OBJS := \
 	$(SRC_DIR)/SlamQuant.cpp \
 	$(SRC_DIR)/SlamSolver.cpp \
+	$(SRC_DIR)/libem/slam_vb_overdisp.cpp \
 	$(SRC_DIR)/SlamCompat.cpp \
 	$(SRC_DIR)/SlamVarianceAnalysis.cpp \
 	$(SRC_DIR)/SlamReadBuffer.cpp \

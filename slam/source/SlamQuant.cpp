@@ -1,5 +1,6 @@
 #include "SlamQuant.h"
 #include "SlamCompat.h"
+#include "libem/slam_vb_overdisp.h"
 
 #include "Genome.h"
 #include "Transcriptome.h"
@@ -743,7 +744,9 @@ void SlamQuant::merge(const SlamQuant& other) {
 }
 
 void SlamQuant::write(const Transcriptome& tr, const std::string& outFile,
-                      double errorRate, double convRate) const {
+                      double errorRate, double convRate,
+                      bool vbOverdisp, double vbPhi,
+                      double vbPriorAlpha, double vbPriorBeta) const {
     std::ofstream out(outFile.c_str());
     if (!out.good()) {
         return;
@@ -751,12 +754,30 @@ void SlamQuant::write(const Transcriptome& tr, const std::string& outFile,
     out << "Gene\tSymbol\tReadCount\tConversions\tCoverage\tNTR\tMAP\tSigma\tLogLikelihood\n";
 
     SlamSolver solver(errorRate, convRate);
+    SlamVbOverdispSolver vbSolver(errorRate, convRate, vbPhi, vbPriorAlpha, vbPriorBeta);
     for (size_t i = 0; i < geneStats_.size(); ++i) {
         const SlamGeneStats& stats = geneStats_[i];
         if (stats.readCount <= 0.0) {
             continue;
         }
-        SlamResult res = solver.solve(stats.histogram);
+        double ntr = 0.0;
+        double map = 0.0;
+        double sigma = 0.0;
+        double ll = 0.0;
+        if (vbOverdisp) {
+            VbOverdispResult res = vbSolver.solve(stats.histogram);
+            // Use MAP for NTR to preserve parity with legacy comparisons.
+            ntr = res.ntr_map;
+            map = res.ntr_map;
+            sigma = 0.0;
+            ll = res.log_likelihood;
+        } else {
+            SlamResult res = solver.solve(stats.histogram);
+            ntr = res.ntr;
+            map = res.ntr;
+            sigma = res.sigma;
+            ll = res.log_likelihood;
+        }
         const std::string& geneId = tr.geID[i];
         const std::string& geneName = tr.geName[i].empty() ? tr.geID[i] : tr.geName[i];
         out << geneId << "\t"
@@ -764,10 +785,10 @@ void SlamQuant::write(const Transcriptome& tr, const std::string& outFile,
             << stats.readCount << "\t"
             << stats.conversions << "\t"
             << stats.coverage << "\t"
-            << res.ntr << "\t"
-            << res.ntr << "\t"
-            << res.sigma << "\t"
-            << res.log_likelihood << "\n";
+            << ntr << "\t"
+            << map << "\t"
+            << sigma << "\t"
+            << ll << "\n";
     }
 }
 
@@ -788,7 +809,9 @@ static std::string cleanGrandSlamPrefix(const std::string& outFileNamePrefix) {
 
 void SlamQuant::writeGrandSlam(const Transcriptome& tr, const std::string& outFile,
                                const std::string& outFileNamePrefix,
-                               double errorRate, double convRate) const {
+                               double errorRate, double convRate,
+                               bool vbOverdisp, double vbPhi,
+                               double vbPriorAlpha, double vbPriorBeta) const {
     std::ofstream out(outFile.c_str());
     if (!out.good()) {
         return;
@@ -810,24 +833,34 @@ void SlamQuant::writeGrandSlam(const Transcriptome& tr, const std::string& outFi
         << "Length\n";
 
     SlamSolver solver(errorRate, convRate);
+    SlamVbOverdispSolver vbSolver(errorRate, convRate, vbPhi, vbPriorAlpha, vbPriorBeta);
     for (size_t i = 0; i < geneStats_.size(); ++i) {
         const SlamGeneStats& stats = geneStats_[i];
         if (stats.readCount <= 0.0) {
             continue;
         }
-        SlamResult res = solver.solve(stats.histogram);
+        double ntr_mean = 0.0;
+        double ntr_map = 0.0;
+        if (vbOverdisp) {
+            VbOverdispResult res = vbSolver.solve(stats.histogram);
+            ntr_mean = res.ntr_mean;
+            ntr_map = res.ntr_map;
+        } else {
+            SlamResult res = solver.solve(stats.histogram);
+            ntr_mean = res.ntr;
+            ntr_map = res.ntr;
+        }
         const std::string& geneId = tr.geID[i];
         const std::string& geneName = tr.geName[i].empty() ? tr.geID[i] : tr.geName[i];
-        double ntr = res.ntr;
         // Placeholder: GEDI posterior not implemented; use NTR for MAP/mean/quantiles.
         // alpha/beta and double-hit metrics are emitted as 0 until tracked.
         out << geneId << "\t"
             << geneName << "\t"
             << stats.readCount << "\t"
-            << ntr << "\t"
-            << ntr << "\t"
-            << ntr << "\t"
-            << ntr << "\t"
+            << ntr_mean << "\t"
+            << ntr_mean << "\t"
+            << ntr_map << "\t"
+            << ntr_mean << "\t"
             << 0 << "\t"
             << 0 << "\t"
             << stats.conversions << "\t"
@@ -883,7 +916,9 @@ void SlamQuant::writeDiagnostics(const std::string& diagFile) const {
     }
 }
 
-void SlamQuant::writeDebug(const Transcriptome& tr, double errorRate, double convRate) const {
+void SlamQuant::writeDebug(const Transcriptome& tr, double errorRate, double convRate,
+                           bool vbOverdisp, double vbPhi,
+                           double vbPriorAlpha, double vbPriorBeta) const {
     if (!debugEnabled_) {
         return;
     }
@@ -895,12 +930,20 @@ void SlamQuant::writeDebug(const Transcriptome& tr, double errorRate, double con
                 << "DebugExonicWeight\tDebugIntronicWeight\tDebugSenseWeight\tDebugAntisenseWeight\t"
                 << "DebugReadsAssigned\tDebugReadsIntronic\tDropsSnpMask\tDropsStrandness\n";
             SlamSolver solver(errorRate, convRate);
+            SlamVbOverdispSolver vbSolver(errorRate, convRate, vbPhi, vbPriorAlpha, vbPriorBeta);
             for (size_t i = 0; i < debugGeneStats_.size(); ++i) {
                 if (debugGeneMask_.empty() || debugGeneMask_[i] == 0) {
                     continue;
                 }
                 const SlamGeneStats& stats = geneStats_[i];
-                SlamResult res = solver.solve(stats.histogram);
+                double ntr = 0.0;
+                if (vbOverdisp) {
+                    VbOverdispResult res = vbSolver.solve(stats.histogram);
+                    ntr = res.ntr_map;
+                } else {
+                    SlamResult res = solver.solve(stats.histogram);
+                    ntr = res.ntr;
+                }
                 const std::string& geneId = tr.geID[i];
                 const std::string& geneName = tr.geName[i].empty() ? tr.geID[i] : tr.geName[i];
                 const SlamDebugGeneStats& dbg = debugGeneStats_[i];
@@ -910,7 +953,7 @@ void SlamQuant::writeDebug(const Transcriptome& tr, double errorRate, double con
                     << stats.readCount << "\t"
                     << stats.conversions << "\t"
                     << stats.coverage << "\t"
-                    << res.ntr << "\t"
+                    << ntr << "\t"
                     << kOverNT << "\t"
                     << dbg.exonicWeight << "\t"
                     << dbg.intronicWeight << "\t"

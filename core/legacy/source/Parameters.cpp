@@ -412,6 +412,10 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "slamDebugSnpWindow", &quant.slam.debugSnpWindow));
     parArray.push_back(new ParameterInfoScalar <double>   (-1, -1, "slamErrorRate", &quant.slam.errorRate));
     parArray.push_back(new ParameterInfoScalar <double>   (-1, -1, "slamConvRate", &quant.slam.convRate));
+    parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "slamVbOverdisp", &quant.slam.vbOverdispInt));
+    parArray.push_back(new ParameterInfoScalar <double>   (-1, -1, "slamVbOverdispPhi", &quant.slam.vbOverdispPhi));
+    parArray.push_back(new ParameterInfoScalar <double>   (-1, -1, "slamVbOverdispPriorAlpha", &quant.slam.vbOverdispPriorAlpha));
+    parArray.push_back(new ParameterInfoScalar <double>   (-1, -1, "slamVbOverdispPriorBeta", &quant.slam.vbOverdispPriorBeta));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "slamOutFile", &quant.slam.outFile));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "slamCompatMode", &quant.slam.compatModeStr));
     parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "slamCompatIntronic", &quant.slam.compatIntronicInt));
@@ -1447,6 +1451,21 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
             errOut << "EXITING because of FATAL PARAMETER ERROR: "
                    << "--slamConvRate must be in (0,1)\n";
             exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+        }
+        quant.slam.vbOverdisp = (quant.slam.vbOverdispInt != 0);
+        if (quant.slam.vbOverdisp) {
+            if (quant.slam.vbOverdispPhi <= 0.0) {
+                ostringstream errOut;
+                errOut << "EXITING because of FATAL PARAMETER ERROR: "
+                       << "--slamVbOverdispPhi must be > 0\n";
+                exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+            }
+            if (quant.slam.vbOverdispPriorAlpha <= 0.0 || quant.slam.vbOverdispPriorBeta <= 0.0) {
+                ostringstream errOut;
+                errOut << "EXITING because of FATAL PARAMETER ERROR: "
+                       << "--slamVbOverdispPriorAlpha and --slamVbOverdispPriorBeta must be > 0\n";
+                exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+            }
         }
         if (quant.slam.snpBed == "-" || quant.slam.snpBed == "None") {
             quant.slam.snpBed.clear();
