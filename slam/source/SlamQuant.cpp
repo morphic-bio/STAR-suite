@@ -792,9 +792,12 @@ void SlamQuant::write(const Transcriptome& tr, const std::string& outFile,
     }
 }
 
-static std::string cleanGrandSlamPrefix(const std::string& outFileNamePrefix) {
-    std::string base = outFileNamePrefix;
-    size_t slash = base.find_last_of('/');
+static std::string cleanSlamLabel(const std::string& rawLabel) {
+    std::string base = rawLabel;
+    while (!base.empty() && (base.back() == '/' || base.back() == '\\')) {
+        base.pop_back();
+    }
+    size_t slash = base.find_last_of("/\\");
     if (slash != std::string::npos) {
         base = base.substr(slash + 1);
     }
@@ -816,7 +819,7 @@ void SlamQuant::writeGrandSlam(const Transcriptome& tr, const std::string& outFi
     if (!out.good()) {
         return;
     }
-    const std::string prefix = cleanGrandSlamPrefix(outFileNamePrefix);
+    const std::string prefix = cleanSlamLabel(outFileNamePrefix);
     out << "Gene\tSymbol\t"
         << prefix << " Readcount\t"
         << prefix << " 0.05 quantile\t"
@@ -1069,6 +1072,7 @@ void SlamQuant::writeMismatches(const std::string& outFile, const std::string& c
         }
     }
     static const char bases[4] = {'A', 'C', 'G', 'T'};
+    const std::string label = cleanSlamLabel(condition);
     out << "Category\tCondition\tOrientation\tGenomic\tRead\tCoverage\tMismatches\n";
     const char* labels[2] = {"First", "Second"};
     for (size_t c = 0; c < kSlamMismatchCategoryCount; ++c) {
@@ -1081,7 +1085,7 @@ void SlamQuant::writeMismatches(const std::string& outFile, const std::string& c
                     if (g == r) {
                         continue;
                     }
-                    out << category << "\t" << condition << "\t" << labels[o] << "\t"
+                    out << category << "\t" << label << "\t" << labels[o] << "\t"
                         << bases[g] << "\t" << bases[r] << "\t"
                         << stats.coverage[g] << "\t" << stats.mismatches[g][r] << "\n";
                 }

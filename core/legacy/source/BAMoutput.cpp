@@ -187,6 +187,32 @@ BAMoutput::~BAMoutput() {
 #endif
         ambiguousCbSpilloverFile_.close();
     }
+
+    // Release output buffers allocated in constructors to avoid per-sample leaks in batch mode
+    if (bamArray != nullptr) {
+        delete[] bamArray;
+        bamArray = nullptr;
+    }
+    if (binStart != nullptr) {
+        delete[] binStart;
+        binStart = nullptr;
+    }
+    if (binBytes != nullptr) {
+        delete[] binBytes;
+        binBytes = nullptr;
+    }
+    if (binStream != nullptr) {
+        delete[] binStream;
+        binStream = nullptr;
+    }
+    if (binTotalBytes != nullptr) {
+        delete[] binTotalBytes;
+        binTotalBytes = nullptr;
+    }
+    if (binTotalN != nullptr) {
+        delete[] binTotalN;
+        binTotalN = nullptr;
+    }
 }
 
 void BAMoutput::unsortedOneAlign (char *bamIn, uint bamSize, uint bamSize2, uint64_t iReadAll, uint8_t sampleByte,

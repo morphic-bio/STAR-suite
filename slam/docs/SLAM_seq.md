@@ -68,6 +68,41 @@ STAR \
   - SlamQuant tables → `counts/`
   - `_Y.bam` / `_noY.bam` → `y_removed/`
 
+### SLAM Batch Mode (--slamBatchMode)
+
+For processing multiple SLAM-seq FASTQs in a single STAR invocation with shared genome loading:
+
+```bash
+STAR \
+  --runThreadN 24 \
+  --genomeDir /path/to/index \
+  --readFilesIn /path/to/blank.fastq.gz,/path/to/0h.fastq.gz,/path/to/6h.fastq.gz,/path/to/24h.fastq.gz \
+  --readFilesCommand zcat \
+  --outFileNamePrefix /path/to/output/ \
+  --outFileNamePrefixAuto 1 \
+  --slamQuantMode 1 \
+  --slamGrandSlamOut 1 \
+  --slamSnpMaskIn /path/to/snps.bed.gz \
+  --trimScope first \
+  --slamErrorRateFromBlank 1 \
+  --slamBatchMode 1
+```
+
+**What `--slamBatchMode 1` does**:
+
+- Enables batch processing of multiple FASTQs with a single genome load
+- When combined with `--slamErrorRateFromBlank 1`, the **first FASTQ** (blank) is used to compute the background T→C error rate, which is then applied to all subsequent samples
+- Requires `--slamQuantMode 1`
+- Incompatible with Solo/single-cell processing (use single-sample mode for scRNA-seq)
+- Recommended with `--outFileNamePrefixAuto 1` for per-sample output routing
+
+**V1 Limitations**:
+- Per-sample outputs are separated by prefix/dirs; Log.out remains a combined run log
+- For paired-end input, provide **two comma‑separated lists** (R1 and R2):
+  ```
+  --readFilesIn R1_1.fastq.gz,R1_2.fastq.gz R2_1.fastq.gz,R2_2.fastq.gz
+  ```
+
 ### Key Parameters
 
 #### Quantification Control

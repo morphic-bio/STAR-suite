@@ -39,7 +39,10 @@ void Parameters::openReadsFiles()
     } else {//create fifo files, execute pre-processing command
 
          vector<string> readsCommandFileName;
-
+         const bool batchModeRequested = (batchMode || batchModeInt != 0 || quant.slam.batchModeInt != 0);
+         const bool filterBrokenPipe = (batchModeRequested &&
+                                        (readFilesCommandString.find("zcat") != std::string::npos ||
+                                         readFilesCommandString.find("gzcat") != std::string::npos));
          uint imate;
          for (imate=0;imate<readFilesNames.size();imate++) {//open readIn files
             ostringstream sysCom;
@@ -61,11 +64,17 @@ void Parameters::openReadsFiles()
             readsCommandFile.close();
             readsCommandFile.open( readsCommandFileName.at(imate).c_str(), ios::in | ios::out);
             //first line in the commands file
-            if (sysShell!="-") {//executed via specified shell
+            if (filterBrokenPipe) {
+                if (sysShell == "-" || sysShell.find("bash") != std::string::npos) {
+                    readsCommandFile << "#!/bin/bash\n";
+                } else {
+                    inOut->logMain << "WARNING: batch mode zcat filter requested, but sysShell is not bash ("
+                                   << sysShell << "); skipping Broken pipe filtering.\n";
+                }
+            } else if (sysShell!="-") {//executed via specified shell
                 readsCommandFile << "#!" <<sysShell <<"\n";
             };
             readsCommandFile << "exec > \""<<readFilesInTmp.at(imate)<<"\"\n" ; // redirect stdout to temp fifo files
-
             for (uint32 ifile=0; ifile<readFilesN; ifile++) {
                 
                 if ( system(("ls -lL " + readFilesNames[imate][ifile] + " > "+ outFileTmp+"/readFilesIn.info 2>&1").c_str()) !=0 )
@@ -86,13 +95,22 @@ void Parameters::openReadsFiles()
                 };
 
                 readsCommandFile <<"echo FILE "<< ifile << "\n";
-                readsCommandFile << readFilesCommandString <<"   "<< ("\""+readFilesNames[imate][ifile]+"\"") <<"\n";
+                if (filterBrokenPipe && (sysShell == "-" || sysShell.find("bash") != std::string::npos)) {
+                    readsCommandFile << readFilesCommandString <<"   "<< ("\""+readFilesNames[imate][ifile]+"\"")
+                                     << " 2> >(grep -v \"Broken pipe\" >&2)\n";
+                } else {
+                    readsCommandFile << readFilesCommandString <<"   "<< ("\""+readFilesNames[imate][ifile]+"\"") <<"\n";
+                }
             };
 
             readsCommandFile.flush();
             readsCommandFile.seekg(0,ios::beg);
             inOut->logMain <<"\n   readsCommandsFile:\n"<<readsCommandFile.rdbuf()<<endl;
             readsCommandFile.close();
+            if (filterBrokenPipe) {
+                inOut->logMain << "NOTE: batch mode detected zcat; wrapping readFilesCommand with bash to filter benign "
+                               << "\"Broken pipe\" warnings.\n";
+            }
 
             chmod(readsCommandFileName.at(imate).c_str(),S_IXUSR | S_IRUSR | S_IWUSR);
 

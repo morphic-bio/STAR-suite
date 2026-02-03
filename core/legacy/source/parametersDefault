@@ -1048,6 +1048,17 @@ slamErrorRateFromBlank                0
          Uses the same T->C error estimate computed during trim detection.
          Recommended with --trimScope first and (optionally) --trimSource <blank.fastq>
 
+batchMode                             0
+    int: 0/1 - enable core batch mode (process multiple FASTQs with single genome load)
+         Disallows Solo, 2-pass, and outFilterType BySJout. Requires --runMode alignReads.
+         Forces --outFileNamePrefixAuto for per-sample output routing.
+
+slamBatchMode                         0
+    int: 0/1 - enable SLAM batch mode (process multiple FASTQs with single genome load)
+         When enabled with --slamErrorRateFromBlank 1, the first FASTQ is treated as blank.
+         Requires --slamQuantMode 1. Solo processing is disabled in batch mode.
+         Recommended with --outFileNamePrefixAuto 1 for per-sample output routing.
+
 slamVbOverdisp                       0
     int: 0/1 - Use VB over-dispersed (beta-binomial) solver instead of binomial EM
 

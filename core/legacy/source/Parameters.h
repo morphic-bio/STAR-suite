@@ -42,6 +42,8 @@ class Parameters {
         mode_t runDirPerm;
         string runDirPermIn; //permission for directores created at run-time
         int runRNGseed; //random number generator seed
+        int batchModeInt = 0; // --batchMode (0/1)
+        bool batchMode = false; // Derived from batchModeInt or --slamBatchMode
 
         struct {
             int32 type;//0 no restart, 1 no mapping - restart from _STARtmp files
@@ -477,6 +479,15 @@ class Parameters {
                 string dumpWeights;                      // --slamDumpWeights (path to weight sidecar)
                 string dumpWeightsModeStr = "dump";      // --slamDumpWeightsMode (dump|vbGene)
                 uint8_t dumpWeightsMode = 0;             // 0=dump, 1=vbGene
+                
+                // Batch mode: process multiple FASTQs in one genome load
+                int batchModeInt = 0;                    // --slamBatchMode (0/1)
+                bool batchMode = false;                  // Derived from batchModeInt
+                int batchCurrentIndex = 0;               // Current FASTQ index in batch
+                int batchTotalCount = 0;                 // Total FASTQs in batch
+                double batchBlankErrorRate = 0.0;        // Error rate from blank (first file)
+                bool batchBlankProcessed = false;        // Whether blank has been processed
+                std::string batchOriginalPrefix;         // Original outFileNamePrefix before batch
             } slam;
 
             struct {
@@ -628,5 +639,12 @@ class Parameters {
     void readSAMheader(const string readFilesCommandString, const vector<string> readFilesNames);
     void samAttributes();
     void samAttrRequiresBAM(bool attrYes, string attrTag);
+    
+    // Batch mode: reset per-sample state for the next sample in batch
+    void resetForBatchSample(int sampleIndex, const std::string& sampleName);
+    void reconfigureOutputPathsForSample(const std::string& sampleName);
 };
+
+// Extract sample name from FASTQ path (utility for batch mode)
+std::string extractSampleNameFromFastq(const std::string& path);
 #endif  // Parameters.h

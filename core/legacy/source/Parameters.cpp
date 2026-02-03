@@ -88,6 +88,7 @@ bool hasReadToken(const string& name) {
            name.rfind("_r2") != string::npos;
 }
 
+
 string insertTagBeforeReadToken(const string& name, const string& tag) {
     size_t pos = string::npos;
     auto updatePos = [&](size_t candidate) {
@@ -145,6 +146,7 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "runThreadN", &runThreadN));
     parArray.push_back(new ParameterInfoScalar <string> (-1, -1, "runDirPerm", &runDirPermIn));
     parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "runRNGseed", &runRNGseed));
+    parArray.push_back(new ParameterInfoScalar <int> (-1, 2, "batchMode", &batchModeInt));
 
     //genome
     parArray.push_back(new ParameterInfoScalar <string> (-1, -1, "genomeType", &pGe.gTypeString));    
@@ -479,6 +481,7 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar <uint64_t> (-1, -1, "slamDumpMaxReads", &quant.slam.dumpMaxReads));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "slamDumpWeights", &quant.slam.dumpWeights));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "slamDumpWeightsMode", &quant.slam.dumpWeightsModeStr));
+    parArray.push_back(new ParameterInfoScalar <int>      (-1, 2, "slamBatchMode", &quant.slam.batchModeInt));
     
     // SLAM SNP mask build parameters
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "slamSnpMaskIn", &quant.slamSnpMask.maskIn));
@@ -832,8 +835,29 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
     // Apply default module groups (only affects params not explicitly set by user)
     applyDefaultGroups();
 
+    const bool batchModeRequested = (batchModeInt != 0 || quant.slam.batchModeInt != 0);
+    if (batchModeRequested && !outFileNamePrefixAuto) {
+        outFileNamePrefixAuto = true;
+        outFileNamePrefixAutoRoot = normalizeRootDir(outFileNamePrefix);
+        outFileNamePrefixAutoSample.clear();
+        inOut->logMain << "NOTE: batch mode enabled; forcing --outFileNamePrefixAuto"
+                       << " root=" << outFileNamePrefixAutoRoot << "\n";
+    }
+
     // Finalize auto-prefix after all command-line overrides
     if (outFileNamePrefixAuto) {
+        // In batch mode, defer per-sample auto-prefixing to the batch loop.
+        if (batchModeRequested) {
+            if (readFilesIn.empty() || readFilesIn.at(0) == "-") {
+                ostringstream errOut;
+                errOut << "EXITING because of FATAL INPUT ERROR: --outFileNamePrefixAuto requires --readFilesIn\n";
+                errOut << "SOLUTION: specify --readFilesIn or disable --outFileNamePrefixAuto\n";
+                exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+            }
+            outFileNamePrefixAutoRoot = normalizeRootDir(outFileNamePrefix);
+            inOut->logMain << "outFileNamePrefixAuto deferred to batch mode"
+                           << " root=" << outFileNamePrefixAutoRoot << "\n";
+        } else {
         if (readFilesIn.empty() || readFilesIn.at(0) == "-") {
             ostringstream errOut;
             errOut << "EXITING because of FATAL INPUT ERROR: --outFileNamePrefixAuto requires --readFilesIn\n";
@@ -893,6 +917,7 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
         inOut->logMain << "outFileNamePrefixAuto enabled: sample=" << outFileNamePrefixAutoSample
                        << " root=" << outFileNamePrefixAutoRoot
                        << " prefix=" << outFileNamePrefix << "\n";
+        }
     }
 
     inOut->logMain << "##### Finished reading parameters from all sources\n\n" << flush;
@@ -1149,6 +1174,14 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
 
             // Derive Y/noY BAM output paths
             if (emitNoYBAMyes) {
+                const bool deferBatchAutoPrefix = (batchModeRequested &&
+                                                  outFileNamePrefixAuto &&
+                                                  outFileNamePrefixAutoSample.empty());
+                if (deferBatchAutoPrefix) {
+                    // Defer Y/noY output path derivation to batch reset (per-sample).
+                    outBAMfileNoYName.clear();
+                    outBAMfileYName.clear();
+                } else {
                 // Handle user-specified override paths
                 if (!noYOutput.empty() && noYOutput != "-") {
                     outBAMfileNoYName = noYOutput;
@@ -1212,6 +1245,7 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
                         outBAMfileYName = outFileNamePrefixAutoRoot + "y_removed/" +
                                           outFileNamePrefixAutoSample + "_Y.bam";
                     }
+                }
                 }
             }
         } else if (outSAMtype.at(0)=="SAM") {
@@ -1997,6 +2031,101 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
         if (quant.slam.compatIgnoreOverlapInt >= 0) {
             quant.slam.compatIgnoreOverlap = (quant.slam.compatIgnoreOverlapInt != 0);
         }
+        
+        // Batch mode validation handled outside SLAM-specific block.
+    }
+    
+    // Batch mode validation (core + SLAM)
+    const bool slamBatchRequested = (quant.slam.batchModeInt != 0);
+
+    batchMode = batchModeRequested;
+    quant.slam.batchMode = batchModeRequested;
+
+    if (batchModeRequested) {
+        // Use readFilesN which is computed by readFilesInit() from readFilesNames[0].size()
+        // For batch mode, files should be comma-separated in --readFilesIn
+        quant.slam.batchTotalCount = static_cast<int>(readFilesN);
+
+        if (quant.slam.batchTotalCount < 1) {
+            ostringstream errOut;
+            errOut << "EXITING because of FATAL PARAMETER ERROR: "
+                   << "--batchMode requires at least one FASTQ in --readFilesIn\n"
+                   << "SOLUTION: use comma-separated files: --readFilesIn file1.fq,file2.fq,file3.fq\n";
+            exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+        }
+
+        if (quant.slam.batchTotalCount == 1) {
+            inOut->logMain << "WARNING: --batchMode with only 1 file has no benefit over normal mode.\n";
+        }
+
+        // Log all files in batch
+        inOut->logMain << "batchMode: enabled with " << quant.slam.batchTotalCount << " files:\n";
+        for (int i = 0; i < quant.slam.batchTotalCount; ++i) {
+            inOut->logMain << "  [" << i << "] " << readFilesNames[0][i] << "\n";
+        }
+
+        if (quant.slam.yes && quant.slam.errorRateFromBlank) {
+            inOut->logMain << "batchMode: first file will be used as blank for error rate estimation\n";
+        }
+
+        if (readNends < 1 || readNends > MAX_N_MATES) {
+            ostringstream errOut;
+            errOut << "EXITING because of FATAL PARAMETER ERROR: "
+                   << "--batchMode received unsupported mate count: " << readNends << "\n"
+                   << "SOLUTION: use 1 or 2 mates in --readFilesIn.\n";
+            exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+        }
+        if (readNends > 1) {
+            if (readFilesNames.size() < 2) {
+                ostringstream errOut;
+                errOut << "EXITING because of FATAL PARAMETER ERROR: "
+                       << "--batchMode expects paired-end inputs in two mate lists\n"
+                       << "SOLUTION: use '--readFilesIn R1_1.fastq.gz,R1_2.fastq.gz R2_1.fastq.gz,R2_2.fastq.gz'\n";
+                exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+            }
+            if (readFilesNames[1].size() != readFilesNames[0].size()) {
+                ostringstream errOut;
+                errOut << "EXITING because of FATAL INPUT ERROR: paired-end lists have different sizes "
+                       << "(" << readFilesNames[0].size() << " vs " << readFilesNames[1].size() << ")\n"
+                       << "SOLUTION: ensure the same number of files for both mates.\n";
+                exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+            }
+        }
+    }
+
+    // slamBatchMode requires slamQuantMode (legacy behavior)
+    if (slamBatchRequested && !quant.slam.yes) {
+        ostringstream errOut;
+        errOut << "EXITING because of FATAL PARAMETER ERROR: "
+               << "--slamBatchMode requires --slamQuantMode 1\n";
+        exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+    }
+    
+    // Batch mode disallows Solo for V1 (avoid cross-sample state bleed)
+    if (batchModeRequested && pSolo.typeStr != "None" && !pSolo.typeStr.empty()) {
+        ostringstream errOut;
+        errOut << "EXITING because of FATAL PARAMETER ERROR: "
+               << "--batchMode does not support --soloType (Solo processing is disabled in batch mode)\n"
+               << "SOLUTION: run without --soloType or use single-sample mode\n";
+        exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+    }
+
+    // Batch mode disallows two-pass (handled as single-pass only)
+    if (batchModeRequested && twoPass.mode != "None") {
+        ostringstream errOut;
+        errOut << "EXITING because of FATAL PARAMETER ERROR: "
+               << "--batchMode does not support --twopassMode (single-pass only)\n"
+               << "SOLUTION: run without --twopassMode\n";
+        exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+    }
+
+    // Batch mode requires alignReads
+    if (batchModeRequested && runMode != "alignReads") {
+        ostringstream errOut;
+        errOut << "EXITING because of FATAL PARAMETER ERROR: "
+               << "--batchMode can only be used with --runMode alignReads\n"
+               << "SOLUTION: run with --runMode alignReads or disable --batchMode\n";
+        exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
     }
     
     // Initialize transcriptVB defaults
@@ -2209,6 +2338,15 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
     
     // Open BAM files after Solo initialization
     if (outBAMunsorted) {
+        const bool deferBatchAutoPrefix = (batchModeRequested &&
+                                          outFileNamePrefixAuto &&
+                                          outFileNamePrefixAutoSample.empty());
+        if (deferBatchAutoPrefix) {
+            inOut->logMain << "NOTE: batch mode defers BAM output opening until per-sample reset.\n";
+            inOut->outBAMfileUnsorted = nullptr;
+            inOut->outBAMfileY = nullptr;
+            inOut->outBAMfileNoY = nullptr;
+        } else {
         // Buffered path (g_unsortedTagBuffer) handles CB/UB tag injection for unsorted BAM
         if (pSolo.samAttrYes && !pSolo.skipProcessing) {
             inOut->logMain << "NOTE: Unsorted BAM will use buffered path for CB/UB tag injection.\n";
@@ -2247,6 +2385,7 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
                 inOut->outBAMfileY = nullptr;
                 inOut->outBAMfileNoY = nullptr;
             }
+        }
         }
     }
     
@@ -2495,6 +2634,15 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
         errOut <<"SOLUTION: specify one of the allowed values: Normal | BySJout\n";
         exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
     };    
+
+    // Batch mode disallows outFilterBySJout stage (requires SJout across multiple passes)
+    if (batchModeRequested && outFilterBySJoutStage != 0) {
+        ostringstream errOut;
+        errOut << "EXITING because of FATAL PARAMETER ERROR: "
+               << "--batchMode does not support --outFilterType BySJout\n"
+               << "SOLUTION: use --outFilterType Normal or disable --batchMode\n";
+        exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+    }
     
     ////////////////////////////////////////////////
     inOut->logMain << "Finished loading and checking parameters\n" <<flush;

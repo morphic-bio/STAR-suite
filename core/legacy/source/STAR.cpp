@@ -643,6 +643,50 @@ int main(int argInN, char *argIn[])
         }
     }
 
+    // =========================================================================
+    // SLAM Batch Mode: Process multiple FASTQs with shared genome
+    // =========================================================================
+    // Save original file list and output prefix for batch processing
+    std::vector<std::string> batchFastqsR1;
+    std::vector<std::string> batchFastqsR2;
+    bool batchPaired = (P.readNends > 1);
+    bool batchModeActive = P.batchMode;
+    bool batchErrorRateFromBlank = (batchModeActive && P.quant.slam.yes && P.quant.slam.errorRateFromBlank);
+    
+    if (batchModeActive) {
+        if (P.readFilesNames.size() > 0) {
+            batchFastqsR1 = P.readFilesNames[0];
+        }
+        if (batchPaired && P.readFilesNames.size() > 1) {
+            batchFastqsR2 = P.readFilesNames[1];
+        }
+        
+        // Save original output prefix for creating per-sample directories
+        P.quant.slam.batchOriginalPrefix = P.outFileNamePrefix;
+        
+        P.inOut->logMain << "\n========================================\n";
+        P.inOut->logMain << "BATCH MODE V1 - PER-SAMPLE PROCESSING";
+        if (P.quant.slam.yes) {
+            P.inOut->logMain << " (SLAM enabled)";
+        }
+        P.inOut->logMain << "\n";
+        P.inOut->logMain << "  Total files: " << P.quant.slam.batchTotalCount << "\n";
+        if (P.quant.slam.yes) {
+            P.inOut->logMain << "  Error rate from blank: " << (batchErrorRateFromBlank ? "yes (first file)" : "no") << "\n";
+        } else {
+            P.inOut->logMain << "  Error rate from blank: n/a (SLAM disabled)\n";
+        }
+        for (size_t i = 0; i < batchFastqsR1.size(); ++i) {
+            P.inOut->logMain << "  [" << i << "] " << extractSampleNameFromFastq(batchFastqsR1[i]) 
+                             << " (R1=" << batchFastqsR1[i];
+            if (batchPaired && i < batchFastqsR2.size()) {
+                P.inOut->logMain << ", R2=" << batchFastqsR2[i];
+            }
+            P.inOut->logMain << ")\n";
+        }
+        P.inOut->logMain << "========================================\n\n";
+    }
+    
     // Pre-initialize inline CB correction whitelist (needed before mapping)
     if (P.pSolo.inlineCBCorrection && P.pSolo.cbWLyes && !P.pSolo.cbWLstr.empty()) {
         InlineCBCorrection::initializeWhitelist(P.pSolo);
@@ -673,6 +717,55 @@ int main(int argInN, char *argIn[])
         }
     }
 
+    // Apply limitBAMsortRAM fallback before sample loop
+    if (P.outBAMcoord && P.limitBAMsortRAM == 0) {
+        P.limitBAMsortRAM = genomeMain.nGenome + genomeMain.SA.lengthByte + genomeMain.SAi.lengthByte;
+    }
+
+    // =========================================================================
+    // BATCH LOOP START - iterate over each FASTQ in batch mode
+    // =========================================================================
+    int batchSampleCount = batchModeActive ? P.quant.slam.batchTotalCount : 1;
+    
+    int batchSampleIdx = 0;  // Loop variable declared outside for explicit control
+    while (batchSampleIdx < batchSampleCount) {
+
+        // --- Batch mode: configure for this sample ---
+        std::string currentSampleName;
+        if (batchModeActive) {
+            std::string samplePath = batchFastqsR1[batchSampleIdx];
+            currentSampleName = extractSampleNameFromFastq(samplePath);
+            
+            // Set readFilesNames to single file for this sample (per mate)
+            P.readFilesNames[0].clear();
+            P.readFilesNames[0].push_back(samplePath);
+            if (batchPaired) {
+                P.readFilesNames[1].clear();
+                P.readFilesNames[1].push_back(batchFastqsR2[batchSampleIdx]);
+            }
+            P.readFilesN = 1;
+            
+            // Close any open read files from previous sample
+            P.closeReadsFiles();
+            
+            // Reset per-sample state
+            P.resetForBatchSample(batchSampleIdx, currentSampleName);
+            P.reconfigureOutputPathsForSample(currentSampleName);
+            P.openReadsFiles();
+            
+            // For samples after blank, propagate the blank's error rate
+            if (batchSampleIdx > 0 && batchErrorRateFromBlank && P.quant.slam.batchBlankProcessed) {
+                P.quant.slam.errorRate = P.quant.slam.batchBlankErrorRate;
+                P.quant.slam.snpErrUsed = P.quant.slam.batchBlankErrorRate;
+                // Disable error rate computation for subsequent samples
+                P.quant.slam.errorRateFromBlank = false;
+                P.inOut->logMain << "  Using blank error rate: " << P.quant.slam.batchBlankErrorRate << "\n";
+            } else if (batchSampleIdx == 0 && batchErrorRateFromBlank) {
+                // First sample (blank) - enable error rate computation
+                P.quant.slam.errorRateFromBlank = true;
+            }
+        }
+
     // initialize Stats
     g_statsAll.resetN();
     time(&g_statsAll.timeStartMap);
@@ -686,13 +779,7 @@ int main(int argInN, char *argIn[])
     // initialize chimeric parameters here - note that chimeric parameters require samHeader
     P.pCh.initialize(&P);
 
-    // Apply limitBAMsortRAM fallback before creating SamtoolsSorter
-    if (P.outBAMcoord && P.limitBAMsortRAM == 0) {
-        // make it equal to the genome size
-        P.limitBAMsortRAM = genomeMain.nGenome + genomeMain.SA.lengthByte + genomeMain.SAi.lengthByte;
-    }
-
-    // Initialize samtools sorter if needed
+    // Initialize samtools sorter if needed (per-sample for proper cleanup)
     if (P.outBAMsortMethod == "samtools" && P.outBAMcoord) {
         g_samtoolsSorter = new SamtoolsSorter(P.limitBAMsortRAM, 
                                                P.outBAMsortingThreadNactual,
@@ -889,6 +976,14 @@ int main(int argInN, char *argIn[])
                                      << "    slamErrorRate=" << std::fixed << std::setprecision(6) << errUsed
                                      << " (source=" << trimSourcePath
                                      << (usingTrimSource ? ", --trimSource" : ", first input") << ")\n";
+                    
+                    // For batch mode: capture blank error rate for subsequent samples
+                    if (P.batchMode && !P.quant.slam.batchBlankProcessed) {
+                        P.quant.slam.batchBlankErrorRate = errUsed;
+                        P.quant.slam.batchBlankProcessed = true;
+                        P.inOut->logMain << "SLAM Batch Mode: blank error rate captured = " 
+                                         << std::fixed << std::setprecision(6) << errUsed << "\n";
+                    }
                 }
                 
                 // Cache variance curve for comprehensive QC (detection pass)
@@ -974,15 +1069,26 @@ int main(int argInN, char *argIn[])
         time(&g_statsAll.timeStartMap);
         g_statsAll.timeLastReport = g_statsAll.timeStartMap;
         
+        const bool usingBlankForQuant = (P.batchMode && P.quant.slam.batchBlankProcessed && !P.quant.slam.errorRateFromBlank);
         if (P.quant.slam.autoTrimComputed) {
             P.inOut->logMain << timeMonthDayTime() << " ..... finished SLAM stats collection (trims computed)\n" << flush;
-            *P.inOut->logStdOut << timeMonthDayTime() << " ..... finished SLAM stats collection, "
+            *P.inOut->logStdOut << timeMonthDayTime() << " ..... finished SLAM stats collection (QC), "
                                << "trim5p=" << P.quant.slam.autoTrim5p << " trim3p=" << P.quant.slam.autoTrim3p
-                               << " snp_err_used=" << std::fixed << std::setprecision(6) << P.quant.slam.snpErrUsed << "\n" << flush;
+                               << " snp_err_used(QC-only)=" << std::fixed << std::setprecision(6) << P.quant.slam.snpErrUsed;
+            if (usingBlankForQuant) {
+                *P.inOut->logStdOut << " ; slamErrorRate(used)=" << std::fixed << std::setprecision(6)
+                                   << P.quant.slam.batchBlankErrorRate;
+            }
+            *P.inOut->logStdOut << "\n" << flush;
         } else {
             P.inOut->logMain << timeMonthDayTime() << " ..... finished SLAM stats collection\n" << flush;
-            *P.inOut->logStdOut << timeMonthDayTime() << " ..... finished SLAM stats collection, "
-                               << "snp_err_used=" << std::fixed << std::setprecision(6) << P.quant.slam.snpErrUsed << "\n" << flush;
+            *P.inOut->logStdOut << timeMonthDayTime() << " ..... finished SLAM stats collection (QC), "
+                               << "snp_err_used(QC-only)=" << std::fixed << std::setprecision(6) << P.quant.slam.snpErrUsed;
+            if (usingBlankForQuant) {
+                *P.inOut->logStdOut << " ; slamErrorRate(used)=" << std::fixed << std::setprecision(6)
+                                   << P.quant.slam.batchBlankErrorRate;
+            }
+            *P.inOut->logStdOut << "\n" << flush;
         }
         }
     }
@@ -990,11 +1096,8 @@ int main(int argInN, char *argIn[])
     // Flag to track if per-file processing already ran mapping
     bool perFileMappingDone = false;
     
-    // Declare RAchunk array early so it can be used by both per-file and normal paths
-    ReadAlignChunk **RAchunk = new ReadAlignChunk*[P.runThreadN];
-    for (int ii = 0; ii < P.runThreadN; ii++) {
-        RAchunk[ii] = nullptr;
-    }
+    // Declare RAchunk pointer; allocate per-sample to avoid cross-sample state bleed
+    ReadAlignChunk **RAchunk = nullptr;
     
     // === SLAM STATS COLLECTION: trimScope=per-file (detection + mapping per file) ===
     // Always run detection pass when SLAM is enabled to collect variance stats and compute error rate
@@ -1011,10 +1114,16 @@ int main(int argInN, char *argIn[])
         uint64_t originalReadMapNumber = P.readMapNumber;
         int originalRunThreadN = P.runThreadN;
         
-        // Create RAchunks for mapping (will be reused for each file)
+        // Create RAchunks for mapping (per-sample)
+        if (RAchunk == nullptr) {
+            RAchunk = new ReadAlignChunk*[P.runThreadN];
+            for (int ii = 0; ii < P.runThreadN; ii++) {
+                RAchunk[ii] = nullptr;
+            }
+        }
         for (int ii = 0; ii < P.runThreadN; ii++) {
             RAchunk[ii] = new ReadAlignChunk(P, genomeMain, transcriptomeMain, ii, 
-                                              libem_transcriptome.get());
+                                             libem_transcriptome.get());
         }
         
         // Stats accumulator for tracking across files (detection reads excluded)
@@ -1255,11 +1364,16 @@ int main(int argInN, char *argIn[])
 
     // prepare chunks and spawn mapping threads (skip if per-file already handled mapping)
     if (!perFileMappingDone) {
-        for (int ii = 0; ii < P.runThreadN; ii++)
-        {
+        if (RAchunk == nullptr) {
+            RAchunk = new ReadAlignChunk*[P.runThreadN];
+            for (int ii = 0; ii < P.runThreadN; ii++) {
+                RAchunk[ii] = nullptr;
+            }
+        }
+        for (int ii = 0; ii < P.runThreadN; ii++) {
             RAchunk[ii] = new ReadAlignChunk(P, genomeMain, transcriptomeMain, ii, 
-                                              libem_transcriptome.get());  // Pass shared transcriptome
-        };
+                                             libem_transcriptome.get());  // Pass shared transcriptome
+        }
     }
 
     // === LIBRARY FORMAT DETECTION (single-threaded) ===
@@ -1342,15 +1456,23 @@ int main(int argInN, char *argIn[])
     {
         bgzf_flush(P.inOut->outBAMfileUnsorted);
         bgzf_close(P.inOut->outBAMfileUnsorted);
+        P.inOut->outBAMfileUnsorted = nullptr;
         if (P.emitNoYBAMyes) {
-            if (P.inOut->outBAMfileY != NULL) bgzf_close(P.inOut->outBAMfileY);
-            if (P.inOut->outBAMfileNoY != NULL) bgzf_close(P.inOut->outBAMfileNoY);
+            if (P.inOut->outBAMfileY != NULL) {
+                bgzf_close(P.inOut->outBAMfileY);
+                P.inOut->outBAMfileY = nullptr;
+            }
+            if (P.inOut->outBAMfileNoY != NULL) {
+                bgzf_close(P.inOut->outBAMfileNoY);
+                P.inOut->outBAMfileNoY = nullptr;
+            }
         }
     };
     if (P.inOut->outQuantBAMfile != NULL)
     {
         bgzf_flush(P.inOut->outQuantBAMfile);
         bgzf_close(P.inOut->outQuantBAMfile);
+        P.inOut->outQuantBAMfile = nullptr;
     };
 
 
@@ -1361,8 +1483,10 @@ int main(int argInN, char *argIn[])
                      << "RAM after mapping:\n"
                      << linuxProcMemory() << flush;
 
-    // no need for genome anymore, free the memory
-    genomeMain.freeMemory();
+    // Free genome memory only if not in batch mode (batch mode needs it for subsequent samples)
+    if (!batchModeActive) {
+        genomeMain.freeMemory();
+    }
 
     // aggregate output junctions
     // collapse splice junctions from different threads/chunks, and output them
@@ -1954,6 +2078,84 @@ int main(int argInN, char *argIn[])
         RAchunk = nullptr;
     }
 
+    if (batchModeActive) {
+        g_statsAll.writeLines(P.inOut->outChimJunction, P.pCh.outJunctionFormat, "#", STAR_VERSION + string("   ") + P.commandLine);
+        g_statsAll.progressReport(P.inOut->logProgress);
+        P.inOut->logProgress << "ALL DONE!\n" << flush;
+        if (P.inOut->logFinal.is_open()) {
+            P.inOut->logFinal.flush();
+            P.inOut->logFinal.close();
+        }
+        P.inOut->logFinal.open((P.outFileNamePrefix + "Log.final.out").c_str());
+        g_statsAll.reportFinal(P.inOut->logFinal);
+        P.inOut->logFinal.flush();
+        P.inOut->logFinal.close();
+        *P.inOut->logStdOut << timeMonthDayTime(g_statsAll.timeFinish) << " ..... finished successfully\n" << flush;
+        P.inOut->logMain << "ALL DONE!\n" << flush;
+    }
+
+    // --- Batch mode: cleanup per-sample resources ---
+    if (batchModeActive) {
+        // Cleanup samtools sorter for this sample
+        if (g_samtoolsSorter != nullptr) {
+            delete g_samtoolsSorter;
+            g_samtoolsSorter = nullptr;
+        }
+        // Cleanup unsorted tag buffer for this sample
+        if (g_unsortedTagBuffer != nullptr) {
+            delete g_unsortedTagBuffer;
+            g_unsortedTagBuffer = nullptr;
+        }
+        
+        // Reset global thread state for next sample
+        g_threadChunks.chunkInN = 0;
+        g_threadChunks.chunkOutN = 0;
+        g_bamRecordIndex.store(0);
+        
+        // Close read files for this sample
+        P.closeReadsFiles();
+        
+        // Clean up temp directory for this sample (unless keeping)
+        if (P.outTmpKeep == "None" && !P.outFileTmp.empty()) {
+            sysRemoveDir(P.outFileTmp);
+        }
+        
+        // For blank sample (first), capture error rate
+        if (batchSampleIdx == 0 && batchErrorRateFromBlank && P.quant.slam.snpErrUsed > 0) {
+            P.quant.slam.batchBlankErrorRate = P.quant.slam.snpErrUsed;
+            P.quant.slam.batchBlankProcessed = true;
+            P.inOut->logMain << "SLAM Batch: Captured blank error rate = " 
+                             << P.quant.slam.batchBlankErrorRate << "\n";
+        }
+        
+        P.inOut->logMain << "\n===== Completed sample " << (batchSampleIdx + 1) 
+                         << "/" << batchSampleCount << " (" << currentSampleName << ") =====\n\n";
+    }
+
+    ++batchSampleIdx;  // Explicit increment
+
+    }  // closes if(runSlamDetectionPass)
+
+    } // =========================================================================
+      // END OF WHILE LOOP - closes the batch loop 
+      // =========================================================================
+
+    // Restore original file list if batch mode was active
+    if (batchModeActive && !batchFastqsR1.empty()) {
+        P.readFilesNames[0] = batchFastqsR1;
+        if (batchPaired && !batchFastqsR2.empty()) {
+            P.readFilesNames[1] = batchFastqsR2;
+        }
+        P.readFilesN = batchFastqsR1.size();
+    }
+
+    // Free genome memory after batch loop completes (was deferred during batch processing)
+    if (batchModeActive) {
+        genomeMain.freeMemory();
+        P.inOut->logMain << "RAM after freeing genome memory (post-batch):\n" 
+                         << linuxProcMemory() << std::flush;
+    }
+
     if (transcriptomeMain != nullptr) {
         delete transcriptomeMain;
         transcriptomeMain = nullptr;
@@ -1990,22 +2192,24 @@ int main(int argInN, char *argIn[])
         signalFromBAM(P.outBAMfileCoordName, wigOutFileNamePrefix, P);
     }
 
-    g_statsAll.writeLines(P.inOut->outChimJunction, P.pCh.outJunctionFormat, "#", STAR_VERSION + string("   ") + P.commandLine);
+    if (!batchModeActive) {
+        g_statsAll.writeLines(P.inOut->outChimJunction, P.pCh.outJunctionFormat, "#", STAR_VERSION + string("   ") + P.commandLine);
 
-    g_statsAll.progressReport(P.inOut->logProgress);
-    P.inOut->logProgress << "ALL DONE!\n"
+        g_statsAll.progressReport(P.inOut->logProgress);
+        P.inOut->logProgress << "ALL DONE!\n"
+                             << flush;
+        P.inOut->logFinal.open((P.outFileNamePrefix + "Log.final.out").c_str());
+        g_statsAll.reportFinal(P.inOut->logFinal);
+        *P.inOut->logStdOut << timeMonthDayTime(g_statsAll.timeFinish) << " ..... finished successfully\n"
+                            << flush;
+
+        P.inOut->logMain << "ALL DONE!\n"
                          << flush;
-    P.inOut->logFinal.open((P.outFileNamePrefix + "Log.final.out").c_str());
-    g_statsAll.reportFinal(P.inOut->logFinal);
-    *P.inOut->logStdOut << timeMonthDayTime(g_statsAll.timeFinish) << " ..... finished successfully\n"
-                        << flush;
-
-    P.inOut->logMain << "ALL DONE!\n"
-                     << flush;
-    if (P.outTmpKeep == "None")
-    {
-        sysRemoveDir(P.outFileTmp);
-    };
+        if (P.outTmpKeep == "None")
+        {
+            sysRemoveDir(P.outFileTmp);
+        };
+    }
 
     P.closeReadsFiles(); // this will kill the readFilesCommand processes if necessary
     // genomeMain.~Genome(); //need explicit call because of the 'delete P.inOut' below, which will destroy P.inOut->logStdOut
@@ -2015,10 +2219,15 @@ int main(int argInN, char *argIn[])
         genomeMain.sharedMemory = NULL;
     };
 
-    // Cleanup samtools sorter if it exists
-    if (g_samtoolsSorter != nullptr) {
+    // Cleanup samtools sorter if it exists (for non-batch mode)
+    if (!batchModeActive && g_samtoolsSorter != nullptr) {
         delete g_samtoolsSorter;
         g_samtoolsSorter = nullptr;
+    }
+    // Cleanup unsorted tag buffer if it exists (for non-batch mode)
+    if (!batchModeActive && g_unsortedTagBuffer != nullptr) {
+        delete g_unsortedTagBuffer;
+        g_unsortedTagBuffer = nullptr;
     }
 
     // Cleanup parameter registry (only primary instance owns it)
@@ -2027,5 +2236,4 @@ int main(int argInN, char *argIn[])
     delete P.inOut; // to close files
 
     return 0;
-}
-}
+}  // closes main()

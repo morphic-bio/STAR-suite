@@ -72,6 +72,7 @@ Integrated SLAM-seq quantification with GRAND-SLAM parity:
 - **Auto-Trimming**: Variance-based detection of artifact-prone read ends (`--autoTrim variance`).
 - **QC**: Comprehensive reports for T->C rates and error modeling.
 - **Batch Layout + Blank-First**: `--outFileNamePrefixAuto 1` organizes SLAM outputs into `alignments/`, `counts/`, `qc/`, `y_removed/` under a single root, and `--slamErrorRateFromBlank 1` can seed the background error rate from a blank (e.g. no4sU).
+- **Batch Mode (Core)**: The multi-FASTQ “batch mode” originated in SLAM-seq workflows with a blank sample, and has been generalized to bulk single-pass runs. Use `--batchMode 1` to process multiple FASTQs in one invocation while reusing the loaded genome. **Exclusions**: not supported with Solo (`--soloType`) or 2-pass (`--twopassMode`). Output is routed into per-sample subdirectories via `--outFileNamePrefixAuto 1` (forced in batch mode).
 
 ### QC Outputs
 STAR-Flex and STAR-SLAM now generate detailed QC reports:
@@ -92,6 +93,7 @@ Standard STAR flags apply. See `core/legacy/README.md`.
 - `--genomeDir`: Path to genome index
 - `--readFilesIn`: Input read files
 - `--outSAMtype`: Output SAM/BAM format (e.g., `BAM SortedByCoordinate`)
+- `--batchMode`: Batch multiple FASTQs in one run (bulk, single-pass only; no Solo or 2-pass)
 - `--soloType`: Single-cell mode (e.g., `CB_UMI_Simple`, `SmartSeq`)
 - `--soloCbUbRequireTogether`: Enforce CB/UB tag pairing for tag injection (`yes`/`no`, default `yes`)
 - `--soloCrGexFeature`: CR-compat merged GEX source (`auto`, `gene`, `genefull`)
@@ -144,6 +146,21 @@ core/legacy/source/STAR \
   --outSAMtype BAM SortedByCoordinate \
   --outSAMattributes NH HI AS nM MD
 ```
+
+**Batch mode (bulk, single-pass):**
+```bash
+core/legacy/source/STAR \
+  --runMode alignReads \
+  --genomeDir /path/to/genome_index \
+  --readFilesIn A_R1.fq.gz,B_R1.fq.gz \
+  --readFilesCommand zcat \
+  --outFileNamePrefix /path/to/out_root/ \
+  --outFileNamePrefixAuto 1 \
+  --batchMode 1 \
+  --outSAMtype BAM SortedByCoordinate
+```
+For paired-end, pass **two comma-separated mate lists**:
+`--readFilesIn A_R1.fq.gz,B_R1.fq.gz A_R2.fq.gz,B_R2.fq.gz`
 
 **Flex Mode (10x Fixed RNA Profiling):**
 ```bash
