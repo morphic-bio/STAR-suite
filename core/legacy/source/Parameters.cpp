@@ -12,7 +12,9 @@
 #include "streamFuns.h"
 #include <fstream>
 #include <cctype>
+#include <cstring>
 #include <unordered_set>
+#include <cstdio>
 
 // Define global atomic counter for processed read groups (matches Salmon's processedReads)
 // Used for pre-burn-in gating: aux params are enabled when this count >= numPreBurninFrags (5000)
@@ -45,6 +47,38 @@ bool endsWith(const string& value, const string& suffix) {
         return false;
     }
     return value.compare(value.size() - suffix.size(), suffix.size(), suffix) == 0;
+}
+
+string stripFastqExt(string name) {
+    static const char* exts[] = {".fastq.gz", ".fq.gz", ".fastq", ".fq", ".gz"};
+    for (const auto* ext : exts) {
+        if (endsWith(name, ext)) {
+            name.erase(name.size() - strlen(ext));
+            break;
+        }
+    }
+    return name;
+}
+
+string stripReadToken(string name) {
+    static const char* tokens[] = {"_R1_001", "_R2_001", "_R1", "_R2", ".R1", ".R2"};
+    for (const auto* token : tokens) {
+        if (endsWith(name, token)) {
+            name.erase(name.size() - strlen(token));
+            break;
+        }
+    }
+    return name;
+}
+
+string normalizeRootDir(string root) {
+    if (root.empty() || root == "-") {
+        root = "./";
+    }
+    if (!root.empty() && root.back() != '/') {
+        root.push_back('/');
+    }
+    return root;
 }
 
 bool hasReadToken(const string& name) {
@@ -190,6 +224,7 @@ Parameters::Parameters() {//initalize parameters info
 
     //output
     parArray.push_back(new ParameterInfoScalar <string>     (-1, 2, "outFileNamePrefix", &outFileNamePrefix));
+    parArray.push_back(new ParameterInfoScalar <int>        (-1, 2, "outFileNamePrefixAuto", &outFileNamePrefixAutoInt));
     parArray.push_back(new ParameterInfoScalar <string>     (-1, 2, "outTmpDir", &outTmpDir));
     parArray.push_back(new ParameterInfoScalar <string>     (-1, 2, "outTmpKeep", &outTmpKeep));
     parArray.push_back(new ParameterInfoScalar <string>     (-1, 2, "outStd", &outStd));
@@ -412,6 +447,7 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "slamDebugSnpWindow", &quant.slam.debugSnpWindow));
     parArray.push_back(new ParameterInfoScalar <double>   (-1, -1, "slamErrorRate", &quant.slam.errorRate));
     parArray.push_back(new ParameterInfoScalar <double>   (-1, -1, "slamConvRate", &quant.slam.convRate));
+    parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "slamErrorRateFromBlank", &quant.slam.errorRateFromBlankInt));
     parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "slamVbOverdisp", &quant.slam.vbOverdispInt));
     parArray.push_back(new ParameterInfoScalar <double>   (-1, -1, "slamVbOverdispPhi", &quant.slam.vbOverdispPhi));
     parArray.push_back(new ParameterInfoScalar <double>   (-1, -1, "slamVbOverdispPriorAlpha", &quant.slam.vbOverdispPriorAlpha));
@@ -703,6 +739,21 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
         scanAllLines(parStreamCommandLine, 1, 2); //read only initial Command Line parameters
     };
 
+    // Auto-derive output prefix metadata (final sample name is resolved after all command-line overrides)
+    outFileNamePrefixAuto = (outFileNamePrefixAutoInt != 0);
+
+    // directory permissions
+    if (runDirPermIn=="User_RWX") {
+        runDirPerm=S_IRWXU;
+    } else if (runDirPermIn=="All_RWX") {
+        runDirPerm= S_IRWXU | S_IRWXG | S_IRWXO;
+    } else {
+        ostringstream errOut;
+        errOut << "EXITING because of FATAL INPUT ERROR: unrecognized option in --runDirPerm=" << runDirPerm << "\n";
+        errOut << "SOLUTION: use one of the allowed values of --runDirPerm : 'User_RWX' or 'All_RWX' \n";
+        exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+    };
+
 	createDirectory(outFileNamePrefix, runDirPerm, "--outFileNamePrefix", *this);
 
     outLogFileName=outFileNamePrefix + "Log.out";
@@ -781,6 +832,69 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
     // Apply default module groups (only affects params not explicitly set by user)
     applyDefaultGroups();
 
+    // Finalize auto-prefix after all command-line overrides
+    if (outFileNamePrefixAuto) {
+        if (readFilesIn.empty() || readFilesIn.at(0) == "-") {
+            ostringstream errOut;
+            errOut << "EXITING because of FATAL INPUT ERROR: --outFileNamePrefixAuto requires --readFilesIn\n";
+            errOut << "SOLUTION: specify --readFilesIn or disable --outFileNamePrefixAuto\n";
+            exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+        }
+
+        string firstToken = readFilesIn.at(0);
+        size_t comma = firstToken.find(',');
+        if (comma != string::npos) {
+            firstToken = firstToken.substr(0, comma);
+        }
+
+        string prefixFinal = (readFilesPrefix == "-" ? "" : readFilesPrefix);
+        string fullPath = prefixFinal + firstToken;
+        string sampleName = stripReadToken(stripFastqExt(pathBasename(fullPath)));
+        if (sampleName.empty()) {
+            ostringstream errOut;
+            errOut << "EXITING because of FATAL INPUT ERROR: could not derive sample name from read file: "
+                   << fullPath << "\n";
+            errOut << "SOLUTION: set --outFileNamePrefix explicitly or disable --outFileNamePrefixAuto\n";
+            exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+        }
+
+        outFileNamePrefixAutoSample = sampleName;
+        outFileNamePrefixAutoRoot = normalizeRootDir(outFileNamePrefix);
+        const string alignDir = outFileNamePrefixAutoRoot + "alignments/" + outFileNamePrefixAutoSample + "/";
+        const string newPrefix = alignDir + outFileNamePrefixAutoSample + "_";
+
+        if (outFileNamePrefix != newPrefix) {
+            string oldLogFile = outLogFileName;
+            inOut->logMain.flush();
+            inOut->logMain.close();
+
+            outFileNamePrefix = newPrefix;
+            createDirectory(outFileNamePrefix, runDirPerm, "--outFileNamePrefixAuto", *this);
+            outLogFileName = outFileNamePrefix + "Log.out";
+
+            if (!oldLogFile.empty()) {
+                std::rename(oldLogFile.c_str(), outLogFileName.c_str());
+            }
+
+            inOut->logMain.open(outLogFileName.c_str(), std::fstream::out | std::fstream::app);
+            if (inOut->logMain.fail()) {
+                ostringstream errOut;
+                errOut <<"EXITING because of FATAL ERROR: could not create output file: "<<outLogFileName<<"\n";
+                exitWithError(errOut.str(),std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+            }
+        }
+
+        const string qcDir = outFileNamePrefixAutoRoot + "qc/";
+        const string countsDir = outFileNamePrefixAutoRoot + "counts/";
+        const string yDir = outFileNamePrefixAutoRoot + "y_removed/";
+        createDirectory(qcDir, runDirPerm, "--outFileNamePrefixAuto qc", *this);
+        createDirectory(countsDir, runDirPerm, "--outFileNamePrefixAuto counts", *this);
+        createDirectory(yDir, runDirPerm, "--outFileNamePrefixAuto y_removed", *this);
+        inOut->logMain << "outFileNamePrefixAuto enabled: sample=" << outFileNamePrefixAutoSample
+                       << " root=" << outFileNamePrefixAutoRoot
+                       << " prefix=" << outFileNamePrefix << "\n";
+    }
+
     inOut->logMain << "##### Finished reading parameters from all sources\n\n" << flush;
 
     inOut->logMain << "##### Final user re-defined parameters-----------------:\n" << flush;
@@ -820,18 +934,6 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
     g_bamRecordIndex = 0;
     
     pGe.initialize(this);
-
-    //directory permissions TODO: this needs to be done before outPrefixFileName is created
-    if (runDirPermIn=="User_RWX") {
-        runDirPerm=S_IRWXU;
-    } else if (runDirPermIn=="All_RWX") {
-        runDirPerm= S_IRWXU | S_IRWXG | S_IRWXO;
-    } else {
-        ostringstream errOut;
-        errOut << "EXITING because of FATAL INPUT ERROR: unrecognized option in --runDirPerm=" << runDirPerm << "\n";
-        errOut << "SOLUTION: use one of the allowed values of --runDirPerm : 'User_RWX' or 'All_RWX' \n";
-        exitWithError(errOut.str(),std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
-    };
 
     if (outTmpDir=="-") {
         outFileTmp=outFileNamePrefix +"_STARtmp/";
@@ -1098,6 +1200,18 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
                 // Handle YOutput override
                 if (!YOutput.empty() && YOutput != "-") {
                     outBAMfileYName = YOutput;
+                }
+
+                // Auto-layout: place Y/noY BAMs into y_removed/ when enabled and no explicit override set
+                if (outFileNamePrefixAuto && !outFileNamePrefixAutoSample.empty()) {
+                    if (noYOutput.empty() || noYOutput == "-") {
+                        outBAMfileNoYName = outFileNamePrefixAutoRoot + "y_removed/" +
+                                            outFileNamePrefixAutoSample + "_noY.bam";
+                    }
+                    if (YOutput.empty() || YOutput == "-") {
+                        outBAMfileYName = outFileNamePrefixAutoRoot + "y_removed/" +
+                                          outFileNamePrefixAutoSample + "_Y.bam";
+                    }
                 }
             }
         } else if (outSAMtype.at(0)=="SAM") {
@@ -1437,6 +1551,7 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
     quant.slam.yes = (quant.slam.modeInt != 0);
     if (quant.slam.yes) {
         quant.yes = true;
+        quant.slam.errorRateFromBlank = (quant.slam.errorRateFromBlankInt != 0);
         if (quant.slam.outFile.empty() || quant.slam.outFile == "-") {
             quant.slam.outFile = outFileNamePrefix + "SlamQuant.out";
         }
@@ -1968,7 +2083,37 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
             }
         }
     }
-    
+
+    if (outFileNamePrefixAuto && !outFileNamePrefixAutoSample.empty()) {
+        const string countsDir = outFileNamePrefixAutoRoot + "counts/";
+        const string qcDir = outFileNamePrefixAutoRoot + "qc/";
+
+        if (quant.geCount.yes && quant.geCount.outFile == outFileNamePrefix + "ReadsPerGene.out.tab") {
+            quant.geCount.outFile = countsDir + outFileNamePrefixAutoSample + ".ReadsPerGene.out.tab";
+        }
+        if (quant.transcriptVB.yes) {
+            if (quant.transcriptVB.outFile == outFileNamePrefix + "quant.sf") {
+                quant.transcriptVB.outFile = countsDir + outFileNamePrefixAutoSample + ".quant.sf";
+            }
+            quant.transcriptVB.outFileGene = countsDir + outFileNamePrefixAutoSample + ".quant.genes.sf";
+            quant.transcriptVB.outFileGeneTximport = countsDir + outFileNamePrefixAutoSample + ".quant.genes.tximport.sf";
+        }
+        if (quant.slam.yes) {
+            if (quant.slam.outFile.empty() || quant.slam.outFile == outFileNamePrefix + "SlamQuant.out") {
+                quant.slam.outFile = countsDir + outFileNamePrefixAutoSample + ".SlamQuant.out";
+            }
+            if (quant.slam.grandSlamOut != 0 && quant.slam.grandSlamOutFile.empty()) {
+                quant.slam.grandSlamOutFile = countsDir + outFileNamePrefixAutoSample + ".SlamQuant.grandslam.tsv";
+            }
+            if (quant.slam.slamQcJson.empty() || quant.slam.slamQcJson == "-") {
+                quant.slam.slamQcJson = qcDir + outFileNamePrefixAutoSample + ".slam_qc.json";
+            }
+            if (quant.slam.slamQcHtml.empty() || quant.slam.slamQcHtml == "-") {
+                quant.slam.slamQcHtml = qcDir + outFileNamePrefixAutoSample + ".slam_qc.html";
+            }
+        }
+    }
+
 
     outSAMstrandField.type=0; //none
     if (outSAMstrandField.in=="None") {

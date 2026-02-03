@@ -603,6 +603,12 @@ int main(int argInN, char *argIn[])
                                  << P.quant.slam.trimSource << "\n";
             }
         }
+
+        if (P.quant.slam.yes && P.quant.slam.errorRateFromBlank && P.quant.slam.trimScope == "per-file") {
+            P.inOut->logMain << "WARNING: --slamErrorRateFromBlank is ignored when --trimScope per-file is set. "
+                             << "Use --trimScope first (and optionally --trimSource) to derive a shared error rate.\n";
+            P.quant.slam.errorRateFromBlank = false;
+        }
         
         // Load transcript sequences for error model if enabled
         if (P.quant.transcriptVB.yes && P.quant.transcriptVB.errorModelMode != "off") {
@@ -873,6 +879,17 @@ int main(int argInN, char *argIn[])
                     P.inOut->logMain << " (fallback: " << P.quant.slam.snpErrFallbackReason << ")";
                 }
                 P.inOut->logMain << "\n";
+
+                if (P.quant.slam.errorRateFromBlank) {
+                    double errUsed = (p_est >= P.quant.slam.snpErrMinThreshold)
+                                         ? p_est
+                                         : P.quant.slam.snpErrMinThreshold;
+                    P.quant.slam.errorRate = errUsed;
+                    P.inOut->logMain << "SLAM errorRate set from blank detection pass:\n"
+                                     << "    slamErrorRate=" << std::fixed << std::setprecision(6) << errUsed
+                                     << " (source=" << trimSourcePath
+                                     << (usingTrimSource ? ", --trimSource" : ", first input") << ")\n";
+                }
                 
                 // Cache variance curve for comprehensive QC (detection pass)
                 if (analyzer != nullptr) {
@@ -1687,7 +1704,9 @@ int main(int argInN, char *argIn[])
                          P.quant.slam.vbOverdisp, P.quant.slam.vbOverdispPhi,
                          P.quant.slam.vbOverdispPriorAlpha, P.quant.slam.vbOverdispPriorBeta);
         if (P.quant.slam.grandSlamOut != 0) {
-            std::string gsOut = P.outFileNamePrefix + "SlamQuant.grandslam.tsv";
+            std::string gsOut = P.quant.slam.grandSlamOutFile.empty()
+                                ? (P.outFileNamePrefix + "SlamQuant.grandslam.tsv")
+                                : P.quant.slam.grandSlamOutFile;
             mergedSlam.writeGrandSlam(*transcriptomeMain, gsOut, P.outFileNamePrefix,
                                       P.quant.slam.errorRate, P.quant.slam.convRate,
                                       P.quant.slam.vbOverdisp, P.quant.slam.vbOverdispPhi,

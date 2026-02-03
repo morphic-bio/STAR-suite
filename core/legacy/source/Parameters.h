@@ -165,6 +165,10 @@ class Parameters {
 
         //output
         string outFileNamePrefix, outStd;
+        int outFileNamePrefixAutoInt=0; // 0/1 - derive prefix from first read file
+        bool outFileNamePrefixAuto=false;
+        string outFileNamePrefixAutoRoot;
+        string outFileNamePrefixAutoSample;
         string outTmpDir, outTmpKeep;
         string outLogFileName;
 
@@ -390,6 +394,8 @@ class Parameters {
                 int modeInt=0;              // CLI flag (0/1)
                 double errorRate=0.001;     // Background error rate
                 double convRate=0.05;       // Conversion rate for labeled reads
+                int errorRateFromBlankInt=0; // --slamErrorRateFromBlank (0/1)
+                bool errorRateFromBlank=false; // Derived from errorRateFromBlankInt
                 string snpBed;              // Optional SNP BED for prefilter
                 int snpDetectInt=0;         // CLI flag (0/1) for internal SNP detection
                 bool snpDetect=false;       // Enable internal SNP detection + masking
@@ -443,6 +449,7 @@ class Parameters {
                 string slamQcHtml = "";            // Path for QC HTML output (empty=auto-generate)
                 string slamQcReport = "";          // Prefix for comprehensive QC report (JSON + HTML, empty=disabled)
                 int grandSlamOut = 1;              // --slamGrandSlamOut (0/1, default: 1)
+                string grandSlamOutFile = "";      // Optional override for GRAND-SLAM TSV output
                 int autoTrim5p = 0;               // Auto-computed 5' trim (0=not computed)
                 int autoTrim3p = 0;                // Auto-computed 3' trim (0=not computed)
                 bool autoTrimComputed = false;    // Whether auto-trim has been computed

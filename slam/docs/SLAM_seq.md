@@ -35,12 +35,47 @@ STAR \
   --outFileNamePrefix output/
 ```
 
+### Batch Layout + Blank-First Error Rate
+
+For multi-fastq SLAM runs where a **blank** (e.g., no4sU) should set the background error
+rate, STAR can derive a per-sample output layout automatically while keeping a common root.
+This is useful for large series (0h/6h/24h) where you want a consistent directory structure.
+
+```bash
+STAR \
+  --runMode alignReads \
+  --genomeDir /path/to/index \
+  --readFilesIn /path/to/blank_no4su_R1.fastq.gz \
+  --readFilesCommand zcat \
+  --slamQuantMode 1 \
+  --slamGrandSlamOut 1 \
+  --slamSnpBed /path/to/snps.bed \
+  --trimScope first \
+  --trimSource /path/to/blank_no4su_R1.fastq.gz \
+  --slamErrorRateFromBlank 1 \
+  --outFileNamePrefix /path/to/output_root/ \
+  --outFileNamePrefixAuto 1
+```
+
+**What `--outFileNamePrefixAuto` does**
+
+- Derives the sample name from the first read file:
+  - Strips `.fastq(.gz)`/`.fq(.gz)` and trailing `_R1/_R2` tokens.
+- Uses `--outFileNamePrefix` as a **root** and creates subdirectories:
+  - `alignments/`, `qc/`, `counts/`, `y_removed/`
+- Auto‑routes outputs:
+  - SLAM QC (`slamQcJson/Html`) → `qc/`
+  - SlamQuant tables → `counts/`
+  - `_Y.bam` / `_noY.bam` → `y_removed/`
+
 ### Key Parameters
 
 #### Quantification Control
 *   `--slamQuantMode 1`: Enables SLAM-seq quantification.
 *   `--slamGrandSlamOut 1`: (Default: 1) Enables generation of the GRAND-SLAM compatible output file `<prefix>SlamQuant.grandslam.tsv`.
 *   `--slamOutFile`: (Optional) Custom name for the standard STAR-style output (default: `<prefix>SlamQuant.out`).
+*   `--slamErrorRateFromBlank 1`: Derive `slamErrorRate` from the detection pass (useful when the first file is a blank).
+*   `--trimScope first` + `--trimSource <blank>`: Use the blank to define trimming parameters that apply to all files.
 
 #### Auto-Trimming (`--autoTrim variance`)
 Reads often exhibit higher error rates or chemical artifacts at the 5' and 3' ends, which can confound T->C conversion detection. STAR-Flex introduces a robust **variance-based** auto-trimming method.

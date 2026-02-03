@@ -71,6 +71,7 @@ Integrated SLAM-seq quantification with GRAND-SLAM parity:
 - **Compatibility Mode**: `--slamCompatMode gedi` enables GEDI-compatible behaviors (intronic classification, lenient overlap, overlap weighting) for parity testing.
 - **Auto-Trimming**: Variance-based detection of artifact-prone read ends (`--autoTrim variance`).
 - **QC**: Comprehensive reports for T->C rates and error modeling.
+- **Batch Layout + Blank-First**: `--outFileNamePrefixAuto 1` organizes SLAM outputs into `alignments/`, `counts/`, `qc/`, `y_removed/` under a single root, and `--slamErrorRateFromBlank 1` can seed the background error rate from a blank (e.g. no4sU).
 
 ### QC Outputs
 STAR-Flex and STAR-SLAM now generate detailed QC reports:
@@ -120,12 +121,15 @@ See `slam/docs/SLAM_COMPATIBILITY_MODE.md` and `slam/docs/SLAM_seq.md`.
 - **Quantification**:
   - `--slamQuantMode 1`: Enable SLAM quantification.
   - `--slamGrandSlamOut 1`: Generate GRAND-SLAM compatible output.
+  - `--slamErrorRateFromBlank 1`: Seed error rate from the detection pass (useful when a blank is first).
 - **Compatibility**:
   - `--slamCompatMode gedi`: Enable GEDI compatibility.
   - `--slamCompatIntronic`, `--slamCompatLenientOverlap`: Fine-grained control.
 - **Trimming**:
   - `--autoTrim variance`: Enable variance-based auto-trimming.
   - `--slamTrim5p`, `--slamTrim3p`: Manual trim guards.
+ - **Batch Layout**:
+   - `--outFileNamePrefixAuto 1`: Derive sample name from first FASTQ and route outputs into subdirs under `--outFileNamePrefix`.
 
 ## Sample Commands
 

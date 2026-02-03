@@ -401,6 +401,17 @@ limitNreadsSoft                        -1
 outFileNamePrefix               ./
     string: output files name prefix (including full or relative path). Can only be defined on the command line.
 
+outFileNamePrefixAuto           0
+    int: 0/1 - derive output prefix from the first input read file
+         Uses outFileNamePrefix as the root directory and creates subdirectories:
+           alignments/, qc/, counts/, y_removed/
+         Sample name is derived from the first read file by stripping .fastq(.gz)/.fq(.gz)
+         and trailing _R1/_R2 tokens.
+         When enabled, STAR also auto-sets:
+           - SLAM QC outputs (slamQcJson/Html) to qc/
+           - SlamQuant outputs to counts/
+           - Y/noY BAM outputs to y_removed/
+
 outTmpDir                       -
     string: path to a directory that will be used as temporary by STAR. All contents of this directory will be removed!
                                 - ... the temp directory will default to outFileNamePrefix_STARtmp
@@ -1031,6 +1042,11 @@ slamErrorRate                         0.001
 
 slamConvRate                          0.05
     double: Conversion rate for labeled reads in SLAM EM solver
+
+slamErrorRateFromBlank                0
+    int: 0/1 - derive slamErrorRate from SLAM detection pass (blank/first file)
+         Uses the same T->C error estimate computed during trim detection.
+         Recommended with --trimScope first and (optionally) --trimSource <blank.fastq>
 
 slamVbOverdisp                       0
     int: 0/1 - Use VB over-dispersed (beta-binomial) solver instead of binomial EM
