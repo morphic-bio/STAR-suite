@@ -74,6 +74,7 @@ Integrated SLAM-seq quantification with GRAND-SLAM parity:
 - **Batch Layout + Blank-First**: `--outFileNamePrefixAuto 1` organizes SLAM outputs into `alignments/`, `counts/`, `qc/`, `y_separated/` under a single root, and `--slamErrorRateFromBlank 1` can seed the background error rate from a blank (e.g. no4sU).
 - **Batch Mode (Core)**: The multi-FASTQ “batch mode” originated in SLAM-seq workflows with a blank sample, and has been generalized to bulk single-pass runs. Use `--batchMode 1` to process multiple FASTQs in one invocation while reusing the loaded genome. **Exclusions**: not supported with Solo (`--soloType`) or 2-pass (`--twopassMode`). Output is routed into per-sample subdirectories via `--outFileNamePrefixAuto 1` (forced in batch mode).
 - **Binary Dump + Requant**: `--slamDumpBinary 1 --slamDumpWeights 1` emits `<sample>_slam_dump.bin` and `<sample>_slam_weights.bin` in `counts/`. The `slam_requant` tool can re‑quantify these dumps with **exact parity** to `SlamQuant.out` (Pearson/Spearman 1.0 in the 1M parity check).
+- **Binary Dump Format**: bitwise header + record layout is documented in `slam/docs/SLAM_DUMP_FORMAT.md`.
 
 ### QC Outputs
 STAR-Flex and STAR-SLAM now generate detailed QC reports:
@@ -148,7 +149,7 @@ core/legacy/source/STAR \
   --outSAMattributes NH HI AS nM MD
 ```
 
-**Batch mode (bulk, single-pass):**
+**Batch mode (bulk, single-pass, SE):**
 ```bash
 core/legacy/source/STAR \
   --runMode alignReads \
@@ -160,8 +161,21 @@ core/legacy/source/STAR \
   --batchMode 1 \
   --outSAMtype BAM SortedByCoordinate
 ```
-For paired-end, pass **two comma-separated mate lists**:
-`--readFilesIn A_R1.fq.gz,B_R1.fq.gz A_R2.fq.gz,B_R2.fq.gz`
+**Batch mode (bulk, single-pass, PE):**
+```bash
+core/legacy/source/STAR \
+  --runMode alignReads \
+  --genomeDir /path/to/genome_index \
+  --readFilesIn A_R1.fq.gz,B_R1.fq.gz A_R2.fq.gz,B_R2.fq.gz \
+  --readFilesCommand zcat \
+  --outFileNamePrefix /path/to/out_root/ \
+  --outFileNamePrefixAuto 1 \
+  --batchMode 1 \
+  --outSAMtype BAM SortedByCoordinate
+```
+Notes:
+- Batch mode is **single-pass only** (not compatible with `--twopassMode`).
+- Batch mode is **not supported with Solo** (`--soloType`).
 
 **Flex Mode (10x Fixed RNA Profiling):**
 ```bash
@@ -201,6 +215,23 @@ core/legacy/source/STAR \
   --autoTrim variance \
   --outFileNamePrefix output/
 ```
+
+**SLAM Batch Mode (blank-first, SE/PE):**
+```bash
+core/legacy/source/STAR \
+  --runMode alignReads \
+  --genomeDir /path/to/genome_index \
+  --readFilesIn blank_R1.fq.gz,0h_R1.fq.gz,6h_R1.fq.gz,24h_R1.fq.gz \
+  --readFilesCommand zcat \
+  --outFileNamePrefix /path/to/out_root/ \
+  --outFileNamePrefixAuto 1 \
+  --slamQuantMode 1 \
+  --slamBatchMode 1 \
+  --slamErrorRateFromBlank 1 \
+  --slamSnpBed /path/to/snps.bed
+```
+For paired-end, pass **two comma-separated mate lists**:
+`--readFilesIn blank_R1.fq.gz,0h_R1.fq.gz,... blank_R2.fq.gz,0h_R2.fq.gz,...`
 
 ## More Detail
 

@@ -147,6 +147,16 @@ To avoid counting native SNPs as metabolic conversions, you must mask them.
 2.  **`<prefix>SlamQuant.out`**: The standard STAR-Slam output format.
 3.  **`<prefix>.slam_qc.html`**: The interactive QC report (if `--slamQcReport` is used).
 
+## Binary Dump Format
+
+When `--slamDumpBinary 1` / `--slamDumpWeights 1` are enabled, STAR-SLAM writes
+binary dumps (`*_slam_dump.bin`) and weight sidecars (`*_slam_weights.bin`).
+The **bitwise** file format (header + records) is documented in:
+
+```
+slam/docs/SLAM_DUMP_FORMAT.md
+```
+
 ## Theory: Variance-Based Trimming
 
 Standard trimming methods often rely on base quality (Phred) or simple adapter matching. However, in SLAM-seq, chemical modifications can cause specific conversion artifacts at read ends that don't always correspond to low quality scores.
