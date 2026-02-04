@@ -2273,6 +2273,10 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
 
     // Derive Y/noY FASTQ output paths (after Solo init so readNmates is final)
     if (emitYNoYFastqyes) {
+        const bool deferBatchFastq = (batchModeRequested && readFilesN > 1);
+        if (deferBatchFastq) {
+            inOut->logMain << "NOTE: batch mode defers Y/noY FASTQ path derivation until per-sample reset.\n";
+        } else {
         const bool hasYPrefix = !YFastqOutputPrefix.empty() && YFastqOutputPrefix != "-";
         const bool hasNoYPrefix = !noYFastqOutputPrefix.empty() && noYFastqOutputPrefix != "-";
         const string ext = (emitYNoYFastqCompression == "gz") ? ".fastq.gz" : ".fastq";
@@ -2330,9 +2334,12 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
             }
         }
     }
+    }
 
     // Open Y/noY FASTQ output files (uncompressed only)
     if (runMode == "alignReads" && emitYNoYFastqyes && emitYNoYFastqCompression == "none") {
+        const bool deferBatchFastq = (batchModeRequested && readFilesN > 1);
+        if (!deferBatchFastq) {
         for (uint imate = 0; imate < readNmates; imate++) {
             inOut->outYFastqStream[imate].open(outYFastqFile[imate].c_str());
             inOut->outNoYFastqStream[imate].open(outNoYFastqFile[imate].c_str());
@@ -2342,6 +2349,7 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
                 errOut << "Solution: check that you have permission to write and disk space\n";
                 exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_INPUT_FILES, *this);
             }
+        }
         }
     }
     

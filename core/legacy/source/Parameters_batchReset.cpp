@@ -31,6 +31,67 @@ static bool ensureDirExists(const std::string& path, mode_t mode) {
     return false;
 }
 
+// Helper: basename/path/FASTQ tagging (mirrors Parameters.cpp)
+static std::string pathBasenameLocal(const std::string& path) {
+    size_t pos = path.find_last_of("/\\");
+    if (pos == std::string::npos) {
+        return path;
+    }
+    return path.substr(pos + 1);
+}
+
+static std::string outputDirFromPrefixLocal(const std::string& prefix) {
+    size_t pos = prefix.find_last_of("/\\");
+    if (pos == std::string::npos) {
+        return "";
+    }
+    return prefix.substr(0, pos + 1);
+}
+
+static bool hasReadTokenLocal(const std::string& name) {
+    return name.rfind("_R1") != std::string::npos ||
+           name.rfind("_R2") != std::string::npos ||
+           name.rfind("_r1") != std::string::npos ||
+           name.rfind("_r2") != std::string::npos;
+}
+
+static std::string insertTagBeforeReadTokenLocal(const std::string& name, const std::string& tag) {
+    size_t pos = std::string::npos;
+    auto updatePos = [&](size_t candidate) {
+        if (candidate != std::string::npos) {
+            pos = (pos == std::string::npos) ? candidate : std::max(pos, candidate);
+        }
+    };
+    updatePos(name.rfind("_R1"));
+    updatePos(name.rfind("_R2"));
+    updatePos(name.rfind("_r1"));
+    updatePos(name.rfind("_r2"));
+    if (pos == std::string::npos) {
+        return std::string();
+    }
+    return name.substr(0, pos) + tag + name.substr(pos);
+}
+
+static bool endsWithLocal(const std::string& value, const std::string& suffix) {
+    if (suffix.size() > value.size()) {
+        return false;
+    }
+    return value.compare(value.size() - suffix.size(), suffix.size(), suffix) == 0;
+}
+
+static std::string adjustCompressionExtLocal(const std::string& name, const std::string& compression) {
+    if (compression == "gz") {
+        if (!endsWithLocal(name, ".gz")) {
+            return name + ".gz";
+        }
+        return name;
+    }
+    if (endsWithLocal(name, ".gz")) {
+        return name.substr(0, name.size() - 3);
+    }
+    return name;
+}
+
 // Extract sample name from a FASTQ path (exported for use in STAR.cpp)
 std::string extractSampleNameFromFastq(const std::string& path) {
     // Find the filename
@@ -231,6 +292,79 @@ void Parameters::reconfigureOutputPathsForSample(const std::string& sampleName) 
     if (emitNoYBAMyes) {
         outBAMfileNoYName = yDir + sampleName + "_noY.bam";
         outBAMfileYName = yDir + sampleName + "_Y.bam";
+    }
+
+    // Update Y/noY FASTQ paths (per-sample in batch mode)
+    if (emitYNoYFastqyes) {
+        const bool hasYPrefix = !YFastqOutputPrefix.empty() && YFastqOutputPrefix != "-";
+        const bool hasNoYPrefix = !noYFastqOutputPrefix.empty() && noYFastqOutputPrefix != "-";
+        const std::string ext = (emitYNoYFastqCompression == "gz") ? ".fastq.gz" : ".fastq";
+        const std::string outputDir = outputDirFromPrefixLocal(outFileNamePrefix);
+        bool useMateFallback = false;
+
+        if (!hasYPrefix || !hasNoYPrefix) {
+            for (uint imate = 0; imate < readNmates; imate++) {
+                if (readFilesNames.size() <= imate || readFilesNames[imate].empty()) {
+                    useMateFallback = true;
+                    break;
+                }
+                std::string base = pathBasenameLocal(readFilesNames[imate][0]);
+                if (!hasReadTokenLocal(base)) {
+                    useMateFallback = true;
+                    break;
+                }
+            }
+        }
+
+        for (uint imate = 0; imate < readNmates; imate++) {
+            if (hasYPrefix) {
+                outYFastqFile[imate] = YFastqOutputPrefix + "mate" + std::to_string(imate + 1) + ext;
+            } else if (!useMateFallback && readFilesNames.size() > imate && !readFilesNames[imate].empty()) {
+                std::string base = pathBasenameLocal(readFilesNames[imate][0]);
+                std::string tagged = insertTagBeforeReadTokenLocal(base, "_Y");
+                if (!tagged.empty()) {
+                    outYFastqFile[imate] = outputDir + adjustCompressionExtLocal(tagged, emitYNoYFastqCompression);
+                } else {
+                    outYFastqFile[imate] = outFileNamePrefix + "Y_reads.mate" + std::to_string(imate + 1) + ext;
+                }
+            } else {
+                outYFastqFile[imate] = outFileNamePrefix + "Y_reads.mate" + std::to_string(imate + 1) + ext;
+            }
+
+            if (hasNoYPrefix) {
+                outNoYFastqFile[imate] = noYFastqOutputPrefix + "mate" + std::to_string(imate + 1) + ext;
+            } else if (!useMateFallback && readFilesNames.size() > imate && !readFilesNames[imate].empty()) {
+                std::string base = pathBasenameLocal(readFilesNames[imate][0]);
+                std::string tagged = insertTagBeforeReadTokenLocal(base, "_noY");
+                if (!tagged.empty()) {
+                    outNoYFastqFile[imate] = outputDir + adjustCompressionExtLocal(tagged, emitYNoYFastqCompression);
+                } else {
+                    outNoYFastqFile[imate] = outFileNamePrefix + "noY_reads.mate" + std::to_string(imate + 1) + ext;
+                }
+            } else {
+                outNoYFastqFile[imate] = outFileNamePrefix + "noY_reads.mate" + std::to_string(imate + 1) + ext;
+            }
+        }
+
+        // Reopen uncompressed Y/noY FASTQ streams per sample
+        if (emitYNoYFastqCompression == "none") {
+            for (uint imate = 0; imate < readNmates; imate++) {
+                if (inOut->outYFastqStream[imate].is_open()) {
+                    inOut->outYFastqStream[imate].close();
+                }
+                if (inOut->outNoYFastqStream[imate].is_open()) {
+                    inOut->outNoYFastqStream[imate].close();
+                }
+                inOut->outYFastqStream[imate].open(outYFastqFile[imate].c_str());
+                inOut->outNoYFastqStream[imate].open(outNoYFastqFile[imate].c_str());
+                if (!inOut->outYFastqStream[imate].is_open() || !inOut->outNoYFastqStream[imate].is_open()) {
+                    std::ostringstream errOut;
+                    errOut << "EXITING because of FATAL ERROR: could not create Y/noY FASTQ output files\n";
+                    errOut << "Solution: check that you have permission to write and disk space\n";
+                    exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_INPUT_FILES, *this);
+                }
+            }
+        }
     }
     
     // Update log output path
