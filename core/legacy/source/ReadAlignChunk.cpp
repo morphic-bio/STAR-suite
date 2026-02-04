@@ -106,7 +106,16 @@ ReadAlignChunk::ReadAlignChunk(Parameters& Pin, Genome &genomeIn, Transcriptome 
         bool wantWeights = !P.quant.slam.dumpWeights.empty() && P.quant.slam.dumpWeights != "-" &&
                            P.quant.slam.dumpWeights != "None";
         if ((wantDump || wantWeights) && !P.quant.slam.autoTrimDetectionPass) {
-            slamQuant->enableDumpBuffer(P.quant.slam.dumpMaxReads);
+            if (P.quant.slam.dumpStream) {
+                std::string dumpPath = wantDump ? P.quant.slam.dumpBinary : (P.quant.slam.dumpWeights + ".dump.bin");
+                std::string partPath = dumpPath + ".part." + std::to_string(iThread);
+                std::string err;
+                if (!slamQuant->enableDumpWriter(partPath, P.quant.slam.dumpMaxReads, P.slamDumpGlobalCount.get(), &err)) {
+                    P.inOut->logMain << "WARNING: failed to enable SLAM dump stream: " << err << "\n";
+                }
+            } else {
+                slamQuant->enableDumpBuffer(P.quant.slam.dumpMaxReads);
+            }
         }
         if (P.quant.slam.debugEnabled) {
             slamQuant->initDebug(*chunkTr, P.quant.slam.debugGenes, P.quant.slam.debugReads,

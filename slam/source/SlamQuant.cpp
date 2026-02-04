@@ -1,5 +1,6 @@
 #include "SlamQuant.h"
 #include "SlamCompat.h"
+#include "SlamDump.h"
 #include "libem/slam_vb_overdisp.h"
 
 #include "Genome.h"
@@ -1745,11 +1746,42 @@ void SlamQuant::enableDumpBuffer(uint64_t maxReads) {
     dumpBuffer_.reset(new SlamReadBuffer(maxReads));
 }
 
+bool SlamQuant::enableDumpWriter(const std::string& path,
+                                 uint64_t maxReads,
+                                 std::atomic<uint64_t>* globalCounter,
+                                 std::string* err) {
+    dumpWriter_.reset(new SlamDumpPartWriter(path, maxReads, globalCounter, err));
+    if (!dumpWriter_ || !dumpWriter_->ok()) {
+        dumpWriter_.reset();
+        return false;
+    }
+    return true;
+}
+
+bool SlamQuant::dumpBufferFull() const {
+    if (dumpBuffer_) {
+        return dumpBuffer_->isFull();
+    }
+    if (dumpWriter_) {
+        return dumpWriter_->limitReached();
+    }
+    return false;
+}
+
 bool SlamQuant::bufferDumpRead(SlamBufferedRead&& read) {
+    if (dumpWriter_) {
+        return dumpWriter_->writeRead(read, nullptr);
+    }
     if (!dumpBuffer_) {
         return false;
     }
     return dumpBuffer_->addRead(std::move(read));
+}
+
+void SlamQuant::closeDumpWriter() {
+    if (dumpWriter_) {
+        dumpWriter_->close();
+    }
 }
 
 // Replay buffered reads with trim applied

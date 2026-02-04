@@ -1053,6 +1053,20 @@ batchMode                             0
          Disallows Solo, 2-pass, and outFilterType BySJout. Requires --runMode alignReads.
          Forces --outFileNamePrefixAuto for per-sample output routing.
 
+batchOnError                          stop
+    string: stop|respawn - behavior when a batch sample errors out
+            stop: exit immediately (default)
+            respawn: launch a new STAR process with remaining files and exit
+
+batchMaxRetries                       1
+    int: maximum respawn attempts when batchOnError=respawn (default 1)
+
+batchRetryCount                       0
+    int: current retry count (internal; used to prevent infinite respawn loops)
+
+batchRespawnScript                    -
+    string: optional path to write the respawn shell script (default auto)
+
 slamBatchMode                         0
     int: 0/1 - enable SLAM batch mode (process multiple FASTQs with single genome load)
          When enabled with --slamErrorRateFromBlank 1, the first FASTQ is treated as blank.
@@ -1173,6 +1187,10 @@ slamQcReport                         -
 slamDumpBinary                        -
     string: Write a binary dump of per-read SLAM data for external re-quantification.
             If set, STAR will collect per-read SLAM inputs and write a dump file.
+
+slamDumpStream                        1
+    int: Stream dump records to disk instead of buffering in memory.
+         1=stream (default), 0=buffer in memory (legacy).
 
 slamDumpMaxReads                   1000000
     uint64: Maximum number of reads to dump (to limit memory usage).

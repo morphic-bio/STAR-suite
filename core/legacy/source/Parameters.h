@@ -16,6 +16,7 @@
 #include <array>
 #include <unordered_set>
 #include <atomic>
+#include <memory>
 
 // Forward declaration for library format detector
 class LibFormatDetector;
@@ -44,6 +45,16 @@ class Parameters {
         int runRNGseed; //random number generator seed
         int batchModeInt = 0; // --batchMode (0/1)
         bool batchMode = false; // Derived from batchModeInt or --slamBatchMode
+        std::string batchOnError = "stop"; // stop|respawn (batch mode only)
+        int batchMaxRetries = 1; // max respawn attempts
+        int batchRetryCount = 0; // current retry count (internal)
+        std::string batchRespawnScript; // optional path to respawn script
+        std::string batchResumeFastqListR1;
+        std::string batchResumeFastqListR2;
+        bool batchResumeHasList = false;
+        bool batchPaired = false;
+        int batchCurrentIndex = 0;
+        std::shared_ptr<std::atomic<uint64_t>> slamDumpGlobalCount = std::make_shared<std::atomic<uint64_t>>(0);
 
         struct {
             int32 type;//0 no restart, 1 no mapping - restart from _STARtmp files
@@ -479,6 +490,8 @@ class Parameters {
                 string dumpWeights;                      // --slamDumpWeights (path to weight sidecar)
                 string dumpWeightsModeStr = "dump";      // --slamDumpWeightsMode (dump|vbGene)
                 uint8_t dumpWeightsMode = 0;             // 0=dump, 1=vbGene
+                int dumpStreamInt = 1;                   // --slamDumpStream (0/1)
+                bool dumpStream = true;                  // Derived from dumpStreamInt
                 
                 // Batch mode: process multiple FASTQs in one genome load
                 int batchModeInt = 0;                    // --slamBatchMode (0/1)

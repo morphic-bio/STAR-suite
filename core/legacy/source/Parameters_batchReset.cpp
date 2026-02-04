@@ -133,6 +133,9 @@ std::string extractSampleNameFromFastq(const std::string& path) {
 void Parameters::resetForBatchSample(int sampleIndex, const std::string& sampleName) {
     // Update batch tracking state
     quant.slam.batchCurrentIndex = sampleIndex;
+    if (slamDumpGlobalCount) {
+        slamDumpGlobalCount->store(0);
+    }
 
     const std::string batchLabel = quant.slam.yes ? "SLAM Batch Mode" : "Batch Mode";
     

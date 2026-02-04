@@ -147,6 +147,10 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar <string> (-1, -1, "runDirPerm", &runDirPermIn));
     parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "runRNGseed", &runRNGseed));
     parArray.push_back(new ParameterInfoScalar <int> (-1, 2, "batchMode", &batchModeInt));
+    parArray.push_back(new ParameterInfoScalar <string> (-1, -1, "batchOnError", &batchOnError));
+    parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "batchMaxRetries", &batchMaxRetries));
+    parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "batchRetryCount", &batchRetryCount));
+    parArray.push_back(new ParameterInfoScalar <string> (-1, -1, "batchRespawnScript", &batchRespawnScript));
 
     //genome
     parArray.push_back(new ParameterInfoScalar <string> (-1, -1, "genomeType", &pGe.gTypeString));    
@@ -478,6 +482,7 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "slamQcReport", &quant.slam.slamQcReport));
     parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "slamGrandSlamOut", &quant.slam.grandSlamOut));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "slamDumpBinary", &quant.slam.dumpBinary));
+    parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "slamDumpStream", &quant.slam.dumpStreamInt));
     parArray.push_back(new ParameterInfoScalar <uint64_t> (-1, -1, "slamDumpMaxReads", &quant.slam.dumpMaxReads));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "slamDumpWeights", &quant.slam.dumpWeights));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "slamDumpWeightsMode", &quant.slam.dumpWeightsModeStr));
@@ -1692,6 +1697,7 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
                    << "Got: " << quant.slam.dumpWeightsModeStr << "\n";
             exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
         }
+        quant.slam.dumpStream = (quant.slam.dumpStreamInt != 0);
         auto trimLine = [](const std::string& input) -> std::string {
             size_t start = input.find_first_not_of(" \t\r\n");
             if (start == std::string::npos) {
@@ -2046,6 +2052,34 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
     quant.slam.batchMode = batchModeRequested;
 
     if (batchModeRequested) {
+        // Normalize batchOnError
+        if (batchOnError.empty()) batchOnError = "stop";
+        std::string batchOnErrorLower = batchOnError;
+        std::transform(batchOnErrorLower.begin(), batchOnErrorLower.end(), batchOnErrorLower.begin(), ::tolower);
+        if (batchOnErrorLower != "stop" && batchOnErrorLower != "respawn") {
+            ostringstream errOut;
+            errOut << "EXITING because of FATAL PARAMETER ERROR: "
+                   << "--batchOnError must be one of: stop, respawn\n"
+                   << "Got: " << batchOnError << "\n";
+            exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+        }
+        batchOnError = batchOnErrorLower;
+
+        if (batchMaxRetries < 0) {
+            ostringstream errOut;
+            errOut << "EXITING because of FATAL PARAMETER ERROR: "
+                   << "--batchMaxRetries must be >= 0\n"
+                   << "Got: " << batchMaxRetries << "\n";
+            exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+        }
+        if (batchRetryCount < 0) {
+            ostringstream errOut;
+            errOut << "EXITING because of FATAL PARAMETER ERROR: "
+                   << "--batchRetryCount must be >= 0\n"
+                   << "Got: " << batchRetryCount << "\n";
+            exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+        }
+
         // Use readFilesN which is computed by readFilesInit() from readFilesNames[0].size()
         // For batch mode, files should be comma-separated in --readFilesIn
         quant.slam.batchTotalCount = static_cast<int>(readFilesN);
@@ -2071,6 +2105,9 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
         if (quant.slam.yes && quant.slam.errorRateFromBlank) {
             inOut->logMain << "batchMode: first file will be used as blank for error rate estimation\n";
         }
+        inOut->logMain << "batchMode: onError=" << batchOnError
+                       << " maxRetries=" << batchMaxRetries
+                       << " retryCount=" << batchRetryCount << "\n";
 
         if (readNends < 1 || readNends > MAX_N_MATES) {
             ostringstream errOut;

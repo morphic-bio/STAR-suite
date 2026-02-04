@@ -4,6 +4,8 @@
 #include "SlamSolver.h"
 #include "SlamVarianceAnalysis.h"
 #include "SlamReadBuffer.h"
+#include "SlamDump.h"
+#include <atomic>
 
 #include <cstdint>
 #include <string>
@@ -216,13 +218,20 @@ public:
     // Returns number of reads replayed
     uint64_t replayBufferedReads(SlamCompat* compat, const SlamSnpMask* snpMask, int strandness);
 
-    // Dump buffer for external re-quantification
+    // Dump buffer/stream for external re-quantification
     void enableDumpBuffer(uint64_t maxReads);
-    bool dumpEnabled() const { return dumpBuffer_ != nullptr; }
-    bool dumpBufferFull() const { return dumpBuffer_ && dumpBuffer_->isFull(); }
+    bool enableDumpWriter(const std::string& path,
+                          uint64_t maxReads,
+                          std::atomic<uint64_t>* globalCounter,
+                          std::string* err);
+    bool dumpEnabled() const { return dumpBuffer_ != nullptr || dumpWriter_ != nullptr; }
+    bool dumpBufferFull() const;
     uint64_t dumpBufferSize() const { return dumpBuffer_ ? dumpBuffer_->size() : 0; }
     bool bufferDumpRead(SlamBufferedRead&& read);
     const SlamReadBuffer* dumpBuffer() const { return dumpBuffer_.get(); }
+    const SlamDumpPartWriter* dumpWriter() const { return dumpWriter_.get(); }
+    SlamDumpPartWriter* dumpWriter() { return dumpWriter_.get(); }
+    void closeDumpWriter();
     void merge(const SlamQuant& other);
     void write(const Transcriptome& tr, const std::string& outFile,
                double errorRate, double convRate,
@@ -323,6 +332,7 @@ private:
     // Read buffer for auto-trim replay
     std::unique_ptr<SlamReadBuffer> readBuffer_;
     std::unique_ptr<SlamReadBuffer> dumpBuffer_;
+    std::unique_ptr<SlamDumpPartWriter> dumpWriter_;
 };
 
 #endif

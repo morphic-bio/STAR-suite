@@ -3,6 +3,8 @@
 #include <fstream>
 #include <iomanip>
 #include <limits>
+#include <sstream>
+#include <cstdio>
 
 #include "IncludeDefine.h"
 #include "Parameters.h"
@@ -64,6 +66,16 @@
 #include "htslib/htslib/sam.h"
 
 namespace {
+
+std::string joinStrings(const std::vector<std::string> &items, const std::string &delim) {
+    if (items.empty()) return "";
+    std::ostringstream out;
+    for (size_t i = 0; i < items.size(); ++i) {
+        if (i > 0) out << delim;
+        out << items[i];
+    }
+    return out.str();
+}
 
 bool ensureDirectoryTree(const std::string &path, mode_t mode, std::string &failedPath, int &failedErrno) {
     if (path.empty()) {
@@ -654,6 +666,8 @@ int main(int argInN, char *argIn[])
     bool batchErrorRateFromBlank = (batchModeActive && P.quant.slam.yes && P.quant.slam.errorRateFromBlank);
     
     if (batchModeActive) {
+        P.batchPaired = batchPaired;
+        P.batchResumeHasList = false;
         if (P.readFilesNames.size() > 0) {
             batchFastqsR1 = P.readFilesNames[0];
         }
@@ -733,6 +747,7 @@ int main(int argInN, char *argIn[])
         // --- Batch mode: configure for this sample ---
         std::string currentSampleName;
         if (batchModeActive) {
+            P.batchCurrentIndex = batchSampleIdx;
             std::string samplePath = batchFastqsR1[batchSampleIdx];
             currentSampleName = extractSampleNameFromFastq(samplePath);
             
@@ -752,6 +767,29 @@ int main(int argInN, char *argIn[])
             P.resetForBatchSample(batchSampleIdx, currentSampleName);
             P.reconfigureOutputPathsForSample(currentSampleName);
             P.openReadsFiles();
+            
+            // Build resume list (blank + current/remaining)
+            if (!batchFastqsR1.empty()) {
+                std::vector<std::string> resumeR1;
+                resumeR1.push_back(batchFastqsR1[0]);
+                int startIdx = (batchSampleIdx == 0 ? 1 : batchSampleIdx);
+                for (int i = startIdx; i < (int)batchFastqsR1.size(); ++i) {
+                    resumeR1.push_back(batchFastqsR1[i]);
+                }
+                P.batchResumeFastqListR1 = joinStrings(resumeR1, ",");
+                P.batchResumeHasList = true;
+            }
+            if (batchPaired && !batchFastqsR2.empty()) {
+                std::vector<std::string> resumeR2;
+                resumeR2.push_back(batchFastqsR2[0]);
+                int startIdx = (batchSampleIdx == 0 ? 1 : batchSampleIdx);
+                for (int i = startIdx; i < (int)batchFastqsR2.size(); ++i) {
+                    resumeR2.push_back(batchFastqsR2[i]);
+                }
+                P.batchResumeFastqListR2 = joinStrings(resumeR2, ",");
+            } else {
+                P.batchResumeFastqListR2.clear();
+            }
             
             // For samples after blank, propagate the blank's error rate
             if (batchSampleIdx > 0 && batchErrorRateFromBlank && P.quant.slam.batchBlankProcessed) {
@@ -1834,9 +1872,11 @@ int main(int argInN, char *argIn[])
                                       P.quant.slam.vbOverdispPriorAlpha, P.quant.slam.vbOverdispPriorBeta);
         }
 
-        // Optional: write dump for external re-quant
-        if (!P.quant.slam.dumpBinary.empty() && P.quant.slam.dumpBinary != "-" &&
-            P.quant.slam.dumpBinary != "None") {
+        const bool wantDump = !P.quant.slam.dumpBinary.empty() && P.quant.slam.dumpBinary != "-" &&
+                              P.quant.slam.dumpBinary != "None";
+        const bool wantWeights = !P.quant.slam.dumpWeights.empty() && P.quant.slam.dumpWeights != "-" &&
+                                 P.quant.slam.dumpWeights != "None";
+        if (wantDump || wantWeights) {
             SlamDumpMetadata meta;
             meta.errorRate = P.quant.slam.errorRate;
             meta.convRate = P.quant.slam.convRate;
@@ -1851,56 +1891,121 @@ int main(int argInN, char *argIn[])
                     meta.chrStart.push_back(static_cast<uint64_t>(v));
                 }
             }
-            std::vector<const SlamReadBuffer*> buffers;
-            buffers.reserve(P.runThreadN);
-            for (int ichunk = 0; ichunk < P.runThreadN; ++ichunk) {
-                if (RAchunk[ichunk] != nullptr && RAchunk[ichunk]->slamQuant != nullptr) {
-                    buffers.push_back(RAchunk[ichunk]->slamQuant->dumpBuffer());
-                }
-            }
-            std::string dumpErr;
-            if (writeSlamDump(P.quant.slam.dumpBinary, meta, buffers, P.quant.slam.dumpMaxReads, &dumpErr)) {
-                P.inOut->logMain << "SLAM dump written to: " << P.quant.slam.dumpBinary << "\n";
-            } else {
-                P.inOut->logMain << "WARNING: failed to write SLAM dump: " << dumpErr << "\n";
-            }
-        }
-        // Optional: write weight sidecar for external re-quant (uses same buffers/order).
-        if (!P.quant.slam.dumpWeights.empty() && P.quant.slam.dumpWeights != "-" &&
-            P.quant.slam.dumpWeights != "None") {
-            SlamDumpMetadata meta;
-            meta.errorRate = P.quant.slam.errorRate;
-            meta.convRate = P.quant.slam.convRate;
-            meta.weightMode = P.quant.slam.weightMode;
-            std::vector<const SlamReadBuffer*> buffers;
-            buffers.reserve(P.runThreadN);
-            for (int ichunk = 0; ichunk < P.runThreadN; ++ichunk) {
-                if (RAchunk[ichunk] != nullptr && RAchunk[ichunk]->slamQuant != nullptr) {
-                    buffers.push_back(RAchunk[ichunk]->slamQuant->dumpBuffer());
-                }
-            }
-            std::string wErr;
-            std::vector<double> overrideWeights;
-            const std::vector<double>* overridePtr = nullptr;
-            if (P.quant.slam.dumpWeightsMode == 1) {
-                if (!vbGenePosteriorReady) {
-                    P.inOut->logMain << "WARNING: vbGene weights requested but TranscriptVB not available; "
-                                     << "falling back to dump weights\n";
-                } else {
-                    if (!buildVbGeneWeights(buffers, vbGenePosterior, P.quant.slam.dumpMaxReads,
-                                            &overrideWeights, &wErr)) {
-                        P.inOut->logMain << "WARNING: failed to build vbGene weights: " << wErr
-                                         << "; falling back to dump weights\n";
-                    } else {
-                        overridePtr = &overrideWeights;
+
+            if (P.quant.slam.dumpStream) {
+                std::string dumpPath = wantDump ? P.quant.slam.dumpBinary : (P.quant.slam.dumpWeights + ".dump.bin");
+                bool dumpTemp = (!wantDump && wantWeights);
+                std::vector<SlamDumpPartInfo> parts;
+                parts.reserve(P.runThreadN);
+                std::vector<std::string> partPaths;
+                partPaths.reserve(P.runThreadN);
+                for (int ichunk = 0; ichunk < P.runThreadN; ++ichunk) {
+                    if (RAchunk[ichunk] != nullptr && RAchunk[ichunk]->slamQuant != nullptr) {
+                        RAchunk[ichunk]->slamQuant->closeDumpWriter();
+                        const SlamDumpPartWriter* writer = RAchunk[ichunk]->slamQuant->dumpWriter();
+                        if (writer != nullptr) {
+                            if (!writer->path().empty()) {
+                                partPaths.push_back(writer->path());
+                            }
+                            if (writer->written() > 0) {
+                                SlamDumpPartInfo info;
+                                info.path = writer->path();
+                                info.nReads = writer->written();
+                                parts.push_back(info);
+                            }
+                        }
                     }
                 }
-            }
-            if (writeSlamWeights(P.quant.slam.dumpWeights, meta, buffers, P.quant.slam.dumpMaxReads,
-                                 overridePtr, &wErr)) {
-                P.inOut->logMain << "SLAM weights written to: " << P.quant.slam.dumpWeights << "\n";
+                std::string dumpErr;
+                bool mergedOk = false;
+                if (!dumpPath.empty()) {
+                    if (mergeSlamDumpParts(dumpPath, meta, parts, &dumpErr)) {
+                        mergedOk = true;
+                        if (wantDump) {
+                            P.inOut->logMain << "SLAM dump written to: " << dumpPath << "\n";
+                        }
+                    } else {
+                        P.inOut->logMain << "WARNING: failed to write SLAM dump: " << dumpErr << "\n";
+                    }
+                }
+
+                if (wantWeights) {
+                    std::string wErr;
+                    const std::vector<double>* vbPtr = nullptr;
+                    if (P.quant.slam.dumpWeightsMode == 1) {
+                        if (!vbGenePosteriorReady) {
+                            P.inOut->logMain << "WARNING: vbGene weights requested but TranscriptVB not available; "
+                                             << "falling back to dump weights\n";
+                        } else {
+                            vbPtr = &vbGenePosterior;
+                        }
+                    }
+                    if (writeSlamWeightsFromDump(dumpPath, P.quant.slam.dumpWeights, vbPtr, &wErr)) {
+                        P.inOut->logMain << "SLAM weights written to: " << P.quant.slam.dumpWeights << "\n";
+                    } else {
+                        P.inOut->logMain << "WARNING: failed to write SLAM weights: " << wErr << "\n";
+                    }
+                }
+
+                if (dumpTemp && mergedOk && !dumpPath.empty()) {
+                    std::remove(dumpPath.c_str());
+                }
+                if (mergedOk) {
+                    for (const auto& path : partPaths) {
+                        if (!path.empty()) {
+                            std::remove(path.c_str());
+                        }
+                    }
+                }
             } else {
-                P.inOut->logMain << "WARNING: failed to write SLAM weights: " << wErr << "\n";
+                // Legacy in-memory dump path
+                if (wantDump) {
+                    std::vector<const SlamReadBuffer*> buffers;
+                    buffers.reserve(P.runThreadN);
+                    for (int ichunk = 0; ichunk < P.runThreadN; ++ichunk) {
+                        if (RAchunk[ichunk] != nullptr && RAchunk[ichunk]->slamQuant != nullptr) {
+                            buffers.push_back(RAchunk[ichunk]->slamQuant->dumpBuffer());
+                        }
+                    }
+                    std::string dumpErr;
+                    if (writeSlamDump(P.quant.slam.dumpBinary, meta, buffers, P.quant.slam.dumpMaxReads, &dumpErr)) {
+                        P.inOut->logMain << "SLAM dump written to: " << P.quant.slam.dumpBinary << "\n";
+                    } else {
+                        P.inOut->logMain << "WARNING: failed to write SLAM dump: " << dumpErr << "\n";
+                    }
+                }
+                if (wantWeights) {
+                    std::vector<const SlamReadBuffer*> buffers;
+                    buffers.reserve(P.runThreadN);
+                    for (int ichunk = 0; ichunk < P.runThreadN; ++ichunk) {
+                        if (RAchunk[ichunk] != nullptr && RAchunk[ichunk]->slamQuant != nullptr) {
+                            buffers.push_back(RAchunk[ichunk]->slamQuant->dumpBuffer());
+                        }
+                    }
+                    std::string wErr;
+                    std::vector<double> overrideWeights;
+                    const std::vector<double>* overridePtr = nullptr;
+                    if (P.quant.slam.dumpWeightsMode == 1) {
+                        if (!vbGenePosteriorReady) {
+                            P.inOut->logMain << "WARNING: vbGene weights requested but TranscriptVB not available; "
+                                             << "falling back to dump weights\n";
+                        } else {
+                            if (!buildVbGeneWeights(buffers, vbGenePosterior, P.quant.slam.dumpMaxReads,
+                                                    &overrideWeights, &wErr)) {
+                                P.inOut->logMain << "WARNING: failed to build vbGene weights: " << wErr
+                                                 << "; falling back to dump weights\n";
+                            } else {
+                                overridePtr = &overrideWeights;
+                            }
+                        }
+                    }
+                    if (writeSlamWeights(P.quant.slam.dumpWeights, meta, buffers, P.quant.slam.dumpMaxReads,
+                                         overridePtr, &wErr)) {
+                        P.inOut->logMain << "SLAM weights written to: " << P.quant.slam.dumpWeights << "\n";
+                    } else {
+                        P.inOut->logMain << "WARNING: failed to write SLAM weights: " << wErr << "\n";
+                    }
+                }
             }
         }
 

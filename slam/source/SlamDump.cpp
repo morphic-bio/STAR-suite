@@ -1,6 +1,7 @@
 #include "SlamDump.h"
 #include <fstream>
 #include <cstring>
+#include <unordered_map>
 
 namespace {
 constexpr char kMagic[8] = {'S','L','A','M','D','U','M','P'};
@@ -47,7 +48,229 @@ bool readString(std::ifstream& in, std::string* s, std::string* err) {
     }
     return true;
 }
+
+bool writeDumpReadRecord(std::ofstream& out, const SlamBufferedRead& r) {
+    writeString(out, r.readName);
+    out.write(reinterpret_cast<const char*>(&r.readLength0), sizeof(r.readLength0));
+    out.write(reinterpret_cast<const char*>(&r.readLength1), sizeof(r.readLength1));
+    out.write(reinterpret_cast<const char*>(&r.isMinus), sizeof(r.isMinus));
+    out.write(reinterpret_cast<const char*>(&r.oppositeStrand), sizeof(r.oppositeStrand));
+    out.write(reinterpret_cast<const char*>(&r.isIntronic), sizeof(r.isIntronic));
+    out.write(reinterpret_cast<const char*>(&r.fileIndex), sizeof(r.fileIndex));
+    out.write(reinterpret_cast<const char*>(&r.weight), sizeof(r.weight));
+
+    uint32_t geneCount = static_cast<uint32_t>(r.geneIds.size());
+    out.write(reinterpret_cast<const char*>(&geneCount), sizeof(geneCount));
+    if (geneCount > 0) {
+        out.write(reinterpret_cast<const char*>(r.geneIds.data()), geneCount * sizeof(uint32_t));
+    }
+
+    uint32_t posCount = static_cast<uint32_t>(r.positions.size());
+    out.write(reinterpret_cast<const char*>(&posCount), sizeof(posCount));
+    for (const SlamBufferedPosition& p : r.positions) {
+        out.write(reinterpret_cast<const char*>(&p.readPos), sizeof(p.readPos));
+        out.write(reinterpret_cast<const char*>(&p.genomicPos), sizeof(p.genomicPos));
+        out.write(reinterpret_cast<const char*>(&p.refBase), sizeof(p.refBase));
+        out.write(reinterpret_cast<const char*>(&p.readBase), sizeof(p.readBase));
+        out.write(reinterpret_cast<const char*>(&p.qual), sizeof(p.qual));
+        out.write(reinterpret_cast<const char*>(&p.secondMate), sizeof(p.secondMate));
+        out.write(reinterpret_cast<const char*>(&p.overlap), sizeof(p.overlap));
+    }
+    return out.good();
+}
+
+bool readDumpHeader(std::ifstream& in, SlamDumpMetadata* meta, std::streampos* readsPos, std::string* err) {
+    if (meta == nullptr) {
+        if (err) *err = "Null output pointer for dump header";
+        return false;
+    }
+    char magic[8] = {0};
+    if (!in.read(magic, sizeof(magic)) || std::memcmp(magic, kMagic, sizeof(kMagic)) != 0) {
+        if (err) *err = "Invalid dump magic";
+        return false;
+    }
+    uint32_t version = 0, flags = 0, nGenes = 0, nChrom = 0;
+    uint64_t nReads = 0;
+    if (!in.read(reinterpret_cast<char*>(&version), sizeof(version)) ||
+        !in.read(reinterpret_cast<char*>(&flags), sizeof(flags)) ||
+        !in.read(reinterpret_cast<char*>(&nGenes), sizeof(nGenes)) ||
+        !in.read(reinterpret_cast<char*>(&nChrom), sizeof(nChrom)) ||
+        !in.read(reinterpret_cast<char*>(&nReads), sizeof(nReads)) ||
+        !in.read(reinterpret_cast<char*>(&meta->errorRate), sizeof(meta->errorRate)) ||
+        !in.read(reinterpret_cast<char*>(&meta->convRate), sizeof(meta->convRate))) {
+        if (err) *err = "Failed to read dump header";
+        return false;
+    }
+    meta->version = version;
+    meta->weightMode = flags & kWeightModeMask;
+    meta->nReads = nReads;
+
+    meta->geneIds.clear();
+    meta->geneNames.clear();
+    meta->chrNames.clear();
+    meta->chrStart.clear();
+    meta->geneIds.reserve(nGenes);
+    meta->geneNames.reserve(nGenes);
+    for (uint32_t i = 0; i < nGenes; ++i) {
+        std::string gid, gname;
+        if (!readString(in, &gid, err) || !readString(in, &gname, err)) {
+            return false;
+        }
+        meta->geneIds.push_back(std::move(gid));
+        meta->geneNames.push_back(std::move(gname));
+    }
+
+    meta->chrNames.reserve(nChrom);
+    meta->chrStart.reserve(nChrom);
+    for (uint32_t i = 0; i < nChrom; ++i) {
+        std::string cname;
+        if (!readString(in, &cname, err)) {
+            return false;
+        }
+        uint64_t start = 0;
+        if (!in.read(reinterpret_cast<char*>(&start), sizeof(start))) {
+            if (err) *err = "Failed to read chrStart";
+            return false;
+        }
+        meta->chrNames.push_back(std::move(cname));
+        meta->chrStart.push_back(start);
+    }
+    if (readsPos) {
+        *readsPos = in.tellg();
+    }
+    return true;
+}
+
+bool readDumpRead(std::ifstream& in, SlamBufferedRead* r, bool includePositions, std::string* err) {
+    if (r == nullptr) {
+        if (err) *err = "Null read pointer";
+        return false;
+    }
+    r->positions.clear();
+    if (!readString(in, &r->readName, err)) return false;
+    if (!in.read(reinterpret_cast<char*>(&r->readLength0), sizeof(r->readLength0)) ||
+        !in.read(reinterpret_cast<char*>(&r->readLength1), sizeof(r->readLength1)) ||
+        !in.read(reinterpret_cast<char*>(&r->isMinus), sizeof(r->isMinus)) ||
+        !in.read(reinterpret_cast<char*>(&r->oppositeStrand), sizeof(r->oppositeStrand)) ||
+        !in.read(reinterpret_cast<char*>(&r->isIntronic), sizeof(r->isIntronic)) ||
+        !in.read(reinterpret_cast<char*>(&r->fileIndex), sizeof(r->fileIndex)) ||
+        !in.read(reinterpret_cast<char*>(&r->weight), sizeof(r->weight))) {
+        if (err) *err = "Failed to read read header";
+        return false;
+    }
+    uint32_t geneCount = 0;
+    if (!in.read(reinterpret_cast<char*>(&geneCount), sizeof(geneCount))) {
+        if (err) *err = "Failed to read geneCount";
+        return false;
+    }
+    r->geneIds.resize(geneCount);
+    if (geneCount > 0 &&
+        !in.read(reinterpret_cast<char*>(r->geneIds.data()), geneCount * sizeof(uint32_t))) {
+        if (err) *err = "Failed to read geneIds";
+        return false;
+    }
+    uint32_t posCount = 0;
+    if (!in.read(reinterpret_cast<char*>(&posCount), sizeof(posCount))) {
+        if (err) *err = "Failed to read posCount";
+        return false;
+    }
+    if (includePositions) {
+        r->positions.resize(posCount);
+        for (uint32_t p = 0; p < posCount; ++p) {
+            SlamBufferedPosition bp;
+            if (!in.read(reinterpret_cast<char*>(&bp.readPos), sizeof(bp.readPos)) ||
+                !in.read(reinterpret_cast<char*>(&bp.genomicPos), sizeof(bp.genomicPos)) ||
+                !in.read(reinterpret_cast<char*>(&bp.refBase), sizeof(bp.refBase)) ||
+                !in.read(reinterpret_cast<char*>(&bp.readBase), sizeof(bp.readBase)) ||
+                !in.read(reinterpret_cast<char*>(&bp.qual), sizeof(bp.qual)) ||
+                !in.read(reinterpret_cast<char*>(&bp.secondMate), sizeof(bp.secondMate)) ||
+                !in.read(reinterpret_cast<char*>(&bp.overlap), sizeof(bp.overlap))) {
+                if (err) *err = "Failed to read position record";
+                return false;
+            }
+            r->positions[p] = bp;
+        }
+    } else {
+        for (uint32_t p = 0; p < posCount; ++p) {
+            uint32_t readPos = 0;
+            uint64_t genomicPos = 0;
+            uint8_t refBase = 0;
+            uint8_t readBase = 0;
+            uint8_t qual = 0;
+            bool secondMate = false;
+            bool overlap = false;
+            if (!in.read(reinterpret_cast<char*>(&readPos), sizeof(readPos)) ||
+                !in.read(reinterpret_cast<char*>(&genomicPos), sizeof(genomicPos)) ||
+                !in.read(reinterpret_cast<char*>(&refBase), sizeof(refBase)) ||
+                !in.read(reinterpret_cast<char*>(&readBase), sizeof(readBase)) ||
+                !in.read(reinterpret_cast<char*>(&qual), sizeof(qual)) ||
+                !in.read(reinterpret_cast<char*>(&secondMate), sizeof(secondMate)) ||
+                !in.read(reinterpret_cast<char*>(&overlap), sizeof(overlap))) {
+                if (err) *err = "Failed to skip position record";
+                return false;
+            }
+        }
+    }
+    return true;
+}
 } // namespace
+
+SlamDumpPartWriter::SlamDumpPartWriter(const std::string& path,
+                                       uint64_t maxReads,
+                                       std::atomic<uint64_t>* globalCounter,
+                                       std::string* err)
+    : path_(path),
+      maxReads_(maxReads),
+      globalCounter_(globalCounter) {
+    out_.open(path.c_str(), std::ios::binary);
+    ok_ = out_.good();
+    if (!ok_ && err) {
+        *err = "Failed to open dump part for writing: " + path;
+    }
+}
+
+bool SlamDumpPartWriter::limitReached() const {
+    if (maxReads_ == 0) return false;
+    if (globalCounter_ != nullptr) {
+        return globalCounter_->load() >= maxReads_;
+    }
+    return written_ >= maxReads_;
+}
+
+bool SlamDumpPartWriter::writeRead(const SlamBufferedRead& read, std::string* err) {
+    if (!ok_) {
+        if (err) *err = "Dump part not open: " + path_;
+        return false;
+    }
+    if (maxReads_ > 0) {
+        if (globalCounter_ != nullptr) {
+            uint64_t cur = globalCounter_->load();
+            while (true) {
+                if (cur >= maxReads_) {
+                    return false;
+                }
+                if (globalCounter_->compare_exchange_weak(cur, cur + 1)) {
+                    break;
+                }
+            }
+        } else if (written_ >= maxReads_) {
+            return false;
+        }
+    }
+    if (!writeDumpReadRecord(out_, read)) {
+        if (err) *err = "Failed to write dump record";
+        return false;
+    }
+    ++written_;
+    return true;
+}
+
+void SlamDumpPartWriter::close() {
+    if (out_.is_open()) {
+        out_.flush();
+        out_.close();
+    }
+}
 
 SlamWeightKey computeSlamWeightKey(const SlamBufferedRead& read) {
     Fnv64 h1(1469598103934665603ull, 1099511628211ull);
@@ -155,32 +378,7 @@ bool writeSlamDump(const std::string& path,
         for (const SlamBufferedRead& r : buffer->reads()) {
             if (maxReads > 0 && written >= maxReads) break;
 
-            writeString(out, r.readName);
-            out.write(reinterpret_cast<const char*>(&r.readLength0), sizeof(r.readLength0));
-            out.write(reinterpret_cast<const char*>(&r.readLength1), sizeof(r.readLength1));
-            out.write(reinterpret_cast<const char*>(&r.isMinus), sizeof(r.isMinus));
-            out.write(reinterpret_cast<const char*>(&r.oppositeStrand), sizeof(r.oppositeStrand));
-            out.write(reinterpret_cast<const char*>(&r.isIntronic), sizeof(r.isIntronic));
-            out.write(reinterpret_cast<const char*>(&r.fileIndex), sizeof(r.fileIndex));
-            out.write(reinterpret_cast<const char*>(&r.weight), sizeof(r.weight));
-
-            uint32_t geneCount = static_cast<uint32_t>(r.geneIds.size());
-            out.write(reinterpret_cast<const char*>(&geneCount), sizeof(geneCount));
-            if (geneCount > 0) {
-                out.write(reinterpret_cast<const char*>(r.geneIds.data()), geneCount * sizeof(uint32_t));
-            }
-
-            uint32_t posCount = static_cast<uint32_t>(r.positions.size());
-            out.write(reinterpret_cast<const char*>(&posCount), sizeof(posCount));
-            for (const SlamBufferedPosition& p : r.positions) {
-                out.write(reinterpret_cast<const char*>(&p.readPos), sizeof(p.readPos));
-                out.write(reinterpret_cast<const char*>(&p.genomicPos), sizeof(p.genomicPos));
-                out.write(reinterpret_cast<const char*>(&p.refBase), sizeof(p.refBase));
-                out.write(reinterpret_cast<const char*>(&p.readBase), sizeof(p.readBase));
-                out.write(reinterpret_cast<const char*>(&p.qual), sizeof(p.qual));
-                out.write(reinterpret_cast<const char*>(&p.secondMate), sizeof(p.secondMate));
-                out.write(reinterpret_cast<const char*>(&p.overlap), sizeof(p.overlap));
-            }
+            writeDumpReadRecord(out, r);
 
             ++written;
         }
@@ -402,5 +600,152 @@ bool readSlamWeights(const std::string& path,
         }
         records->push_back(rec);
     }
+    return true;
+}
+
+bool mergeSlamDumpParts(const std::string& path,
+                        const SlamDumpMetadata& meta,
+                        const std::vector<SlamDumpPartInfo>& parts,
+                        std::string* err) {
+    std::ofstream out(path.c_str(), std::ios::binary);
+    if (!out.good()) {
+        if (err) *err = "Failed to open dump file for writing: " + path;
+        return false;
+    }
+
+    uint32_t version = meta.version;
+    uint32_t flags = meta.weightMode & kWeightModeMask;
+    uint32_t nGenes = static_cast<uint32_t>(meta.geneIds.size());
+    uint32_t nChrom = static_cast<uint32_t>(meta.chrNames.size());
+    uint64_t nReads = 0;
+    for (const auto& part : parts) {
+        nReads += part.nReads;
+    }
+
+    out.write(kMagic, sizeof(kMagic));
+    out.write(reinterpret_cast<const char*>(&version), sizeof(version));
+    out.write(reinterpret_cast<const char*>(&flags), sizeof(flags));
+    out.write(reinterpret_cast<const char*>(&nGenes), sizeof(nGenes));
+    out.write(reinterpret_cast<const char*>(&nChrom), sizeof(nChrom));
+    out.write(reinterpret_cast<const char*>(&nReads), sizeof(nReads));
+    out.write(reinterpret_cast<const char*>(&meta.errorRate), sizeof(meta.errorRate));
+    out.write(reinterpret_cast<const char*>(&meta.convRate), sizeof(meta.convRate));
+
+    for (size_t i = 0; i < meta.geneIds.size(); ++i) {
+        writeString(out, meta.geneIds[i]);
+        if (i < meta.geneNames.size()) {
+            writeString(out, meta.geneNames[i]);
+        } else {
+            writeString(out, meta.geneIds[i]);
+        }
+    }
+
+    for (size_t i = 0; i < meta.chrNames.size(); ++i) {
+        writeString(out, meta.chrNames[i]);
+        uint64_t start = (i < meta.chrStart.size()) ? meta.chrStart[i] : 0;
+        out.write(reinterpret_cast<const char*>(&start), sizeof(start));
+    }
+
+    for (const auto& part : parts) {
+        if (part.nReads == 0) continue;
+        std::ifstream in(part.path.c_str(), std::ios::binary);
+        if (!in.good()) {
+            if (err) *err = "Failed to open dump part: " + part.path;
+            return false;
+        }
+        out << in.rdbuf();
+        if (!out.good()) {
+            if (err) *err = "Failed to append dump part: " + part.path;
+            return false;
+        }
+    }
+    out.close();
+    return true;
+}
+
+bool writeSlamWeightsFromDump(const std::string& dumpPath,
+                              const std::string& weightPath,
+                              const std::vector<double>* vbGenePosterior,
+                              std::string* err) {
+    std::ifstream in(dumpPath.c_str(), std::ios::binary);
+    if (!in.good()) {
+        if (err) *err = "Failed to open dump for weights: " + dumpPath;
+        return false;
+    }
+    SlamDumpMetadata meta;
+    std::streampos readsPos;
+    if (!readDumpHeader(in, &meta, &readsPos, err)) {
+        return false;
+    }
+    uint64_t nReads = meta.nReads;
+
+    std::unordered_map<std::string, double> sumByRead;
+    std::unordered_map<std::string, size_t> countByRead;
+    if (vbGenePosterior != nullptr) {
+        sumByRead.reserve(static_cast<size_t>(nReads));
+        countByRead.reserve(static_cast<size_t>(nReads));
+        in.clear();
+        in.seekg(readsPos);
+        for (uint64_t i = 0; i < nReads; ++i) {
+            SlamBufferedRead r;
+            if (!readDumpRead(in, &r, false, err)) {
+                return false;
+            }
+            double score = 0.0;
+            for (uint32_t gid : r.geneIds) {
+                if (gid < vbGenePosterior->size()) {
+                    score += (*vbGenePosterior)[gid];
+                }
+            }
+            std::string key = std::to_string(r.fileIndex) + "\t" + r.readName;
+            sumByRead[key] += score;
+            countByRead[key] += 1;
+        }
+    }
+
+    in.clear();
+    in.seekg(readsPos);
+    std::ofstream out(weightPath.c_str(), std::ios::binary);
+    if (!out.good()) {
+        if (err) *err = "Failed to open weight file for writing: " + weightPath;
+        return false;
+    }
+    uint32_t version = 1;
+    uint32_t flags = kWeightFlagKeyed | kWeightFlagOrdered | ((meta.weightMode & kWeightModeMask) << 2);
+    out.write(kWeightMagic, sizeof(kWeightMagic));
+    out.write(reinterpret_cast<const char*>(&version), sizeof(version));
+    out.write(reinterpret_cast<const char*>(&flags), sizeof(flags));
+    out.write(reinterpret_cast<const char*>(&nReads), sizeof(nReads));
+    uint32_t weightMode = meta.weightMode;
+    out.write(reinterpret_cast<const char*>(&weightMode), sizeof(weightMode));
+
+    for (uint64_t i = 0; i < nReads; ++i) {
+        SlamBufferedRead r;
+        if (!readDumpRead(in, &r, true, err)) {
+            return false;
+        }
+        SlamWeightKey key = computeSlamWeightKey(r);
+        double weightOut = r.weight;
+        if (vbGenePosterior != nullptr) {
+            double score = 0.0;
+            for (uint32_t gid : r.geneIds) {
+                if (gid < vbGenePosterior->size()) {
+                    score += (*vbGenePosterior)[gid];
+                }
+            }
+            std::string sKey = std::to_string(r.fileIndex) + "\t" + r.readName;
+            double denom = sumByRead[sKey];
+            size_t count = countByRead[sKey];
+            if (denom > 0.0) {
+                weightOut = score / denom;
+            } else if (count > 0) {
+                weightOut = 1.0 / static_cast<double>(count);
+            }
+        }
+        out.write(reinterpret_cast<const char*>(&key.h1), sizeof(key.h1));
+        out.write(reinterpret_cast<const char*>(&key.h2), sizeof(key.h2));
+        out.write(reinterpret_cast<const char*>(&weightOut), sizeof(weightOut));
+    }
+    out.close();
     return true;
 }

@@ -5,6 +5,8 @@
 #include <cstdint>
 #include <string>
 #include <vector>
+#include <atomic>
+#include <fstream>
 
 struct SlamDumpMetadata {
     uint32_t version = 1;
@@ -36,6 +38,34 @@ struct SlamWeightMetadata {
     uint32_t weightMode = 0;
 };
 
+struct SlamDumpPartInfo {
+    std::string path;
+    uint64_t nReads = 0;
+};
+
+class SlamDumpPartWriter {
+public:
+    SlamDumpPartWriter(const std::string& path,
+                       uint64_t maxReads,
+                       std::atomic<uint64_t>* globalCounter,
+                       std::string* err);
+
+    bool writeRead(const SlamBufferedRead& read, std::string* err = nullptr);
+    uint64_t written() const { return written_; }
+    const std::string& path() const { return path_; }
+    bool ok() const { return ok_; }
+    bool limitReached() const;
+    void close();
+
+private:
+    std::ofstream out_;
+    std::string path_;
+    uint64_t written_ = 0;
+    uint64_t maxReads_ = 0;
+    std::atomic<uint64_t>* globalCounter_ = nullptr;
+    bool ok_ = false;
+};
+
 // Write dump file from one or more buffers.
 // maxReads=0 means no limit.
 bool writeSlamDump(const std::string& path,
@@ -65,5 +95,17 @@ bool readSlamWeights(const std::string& path,
                      SlamWeightMetadata* meta,
                      std::vector<SlamWeightRecord>* records,
                      std::string* err);
+
+// Merge per-thread dump parts into a final dump file.
+bool mergeSlamDumpParts(const std::string& path,
+                        const SlamDumpMetadata& meta,
+                        const std::vector<SlamDumpPartInfo>& parts,
+                        std::string* err);
+
+// Write weight sidecar by streaming a dump file (optionally vbGene-reweighted).
+bool writeSlamWeightsFromDump(const std::string& dumpPath,
+                              const std::string& weightPath,
+                              const std::vector<double>* vbGenePosterior,
+                              std::string* err);
 
 #endif // SLAM_DUMP_H
