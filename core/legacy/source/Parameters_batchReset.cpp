@@ -217,7 +217,7 @@ void Parameters::reconfigureOutputPathsForSample(const std::string& sampleName) 
         alignDir = baseDir + sampleName + "/";
         countsDir = alignDir;
         qcDir = alignDir;
-        yDir = alignDir;
+        yDir = baseDir + "y_removed/";
         newPrefix = alignDir + sampleName + "_";
     }
     
@@ -233,7 +233,7 @@ void Parameters::reconfigureOutputPathsForSample(const std::string& sampleName) 
     if (quant.slam.yes) {
         ensureDirExists(qcDir, runDirPerm);
     }
-    if (emitNoYBAMyes) {
+    if (emitNoYBAMyes || emitYNoYFastqyes) {
         ensureDirExists(yDir, runDirPerm);
     }
     
@@ -299,7 +299,7 @@ void Parameters::reconfigureOutputPathsForSample(const std::string& sampleName) 
         const bool hasYPrefix = !YFastqOutputPrefix.empty() && YFastqOutputPrefix != "-";
         const bool hasNoYPrefix = !noYFastqOutputPrefix.empty() && noYFastqOutputPrefix != "-";
         const std::string ext = (emitYNoYFastqCompression == "gz") ? ".fastq.gz" : ".fastq";
-        const std::string outputDir = outputDirFromPrefixLocal(outFileNamePrefix);
+        const std::string outputDir = yDir.empty() ? outputDirFromPrefixLocal(outFileNamePrefix) : yDir;
         bool useMateFallback = false;
 
         if (!hasYPrefix || !hasNoYPrefix) {

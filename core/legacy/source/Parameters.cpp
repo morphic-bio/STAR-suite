@@ -2280,7 +2280,19 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
         const bool hasYPrefix = !YFastqOutputPrefix.empty() && YFastqOutputPrefix != "-";
         const bool hasNoYPrefix = !noYFastqOutputPrefix.empty() && noYFastqOutputPrefix != "-";
         const string ext = (emitYNoYFastqCompression == "gz") ? ".fastq.gz" : ".fastq";
-        const string outputDir = outputDirFromPrefix(outFileNamePrefix);
+        string outputDir = outputDirFromPrefix(outFileNamePrefix);
+        // Route Y/noY FASTQs into y_removed/ when available
+        if (outFileNamePrefixAuto) {
+            outputDir = outFileNamePrefixAutoRoot + "y_removed/";
+            createDirectory(outputDir, runDirPerm, "--emitYNoYFastq y_removed", *this);
+        } else {
+            if (outputDir.empty()) {
+                outputDir = "y_removed/";
+            } else {
+                outputDir += "y_removed/";
+            }
+            createDirectory(outputDir, runDirPerm, "--emitYNoYFastq y_removed", *this);
+        }
         bool useMateFallback = false;
 
         if (!hasYPrefix || !hasNoYPrefix) {
