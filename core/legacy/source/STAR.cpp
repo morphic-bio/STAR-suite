@@ -1022,15 +1022,12 @@ int main(int argInN, char *argIn[])
                     if (writeResult) {
                         P.inOut->logMain << "SLAM QC JSON written to: " << qcJsonPath << "\n";
                         
-                        // Only write HTML if trim was computed (not for stats-only or failed trim)
-                        if (trimComputed) {
-                            std::string qcHtmlPath = P.quant.slam.slamQcHtml;
-                            if (qcHtmlPath.empty() || qcHtmlPath == "-") {
-                                qcHtmlPath = P.outFileNamePrefix + "slam_qc.html";
-                            }
-                            if (writeSlamQcHtml(qcJsonPath, qcHtmlPath, P.quant.slam.autoTrimFileIndex)) {
-                                P.inOut->logMain << "SLAM QC HTML written to: " << qcHtmlPath << "\n";
-                            }
+                        std::string qcHtmlPath = P.quant.slam.slamQcHtml;
+                        if (qcHtmlPath.empty() || qcHtmlPath == "-") {
+                            qcHtmlPath = P.outFileNamePrefix + "slam_qc.html";
+                        }
+                        if (writeSlamQcHtml(qcJsonPath, qcHtmlPath, P.quant.slam.autoTrimFileIndex)) {
+                            P.inOut->logMain << "SLAM QC HTML written to: " << qcHtmlPath << "\n";
                         }
                     }
                 }

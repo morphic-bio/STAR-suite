@@ -910,12 +910,12 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
             }
         }
 
-        const string qcDir = outFileNamePrefixAutoRoot + "qc/";
-        const string countsDir = outFileNamePrefixAutoRoot + "counts/";
-        const string yDir = outFileNamePrefixAutoRoot + "y_removed/";
+        const string qcDir = outFileNamePrefixAutoRoot + "qc/" + outFileNamePrefixAutoSample + "/";
+        const string countsDir = outFileNamePrefixAutoRoot + "counts/" + outFileNamePrefixAutoSample + "/";
+        const string yDir = outFileNamePrefixAutoRoot + "y_separated/" + outFileNamePrefixAutoSample + "/";
         createDirectory(qcDir, runDirPerm, "--outFileNamePrefixAuto qc", *this);
         createDirectory(countsDir, runDirPerm, "--outFileNamePrefixAuto counts", *this);
-        createDirectory(yDir, runDirPerm, "--outFileNamePrefixAuto y_removed", *this);
+        createDirectory(yDir, runDirPerm, "--outFileNamePrefixAuto y_separated", *this);
         inOut->logMain << "outFileNamePrefixAuto enabled: sample=" << outFileNamePrefixAutoSample
                        << " root=" << outFileNamePrefixAutoRoot
                        << " prefix=" << outFileNamePrefix << "\n";
@@ -1237,14 +1237,16 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
                     outBAMfileYName = YOutput;
                 }
 
-                // Auto-layout: place Y/noY BAMs into y_removed/ when enabled and no explicit override set
+                // Auto-layout: place Y/noY BAMs into y_separated/<sample>/ when enabled and no explicit override set
                 if (outFileNamePrefixAuto && !outFileNamePrefixAutoSample.empty()) {
                     if (noYOutput.empty() || noYOutput == "-") {
-                        outBAMfileNoYName = outFileNamePrefixAutoRoot + "y_removed/" +
+                        outBAMfileNoYName = outFileNamePrefixAutoRoot + "y_separated/" +
+                                            outFileNamePrefixAutoSample + "/" +
                                             outFileNamePrefixAutoSample + "_noY.bam";
                     }
                     if (YOutput.empty() || YOutput == "-") {
-                        outBAMfileYName = outFileNamePrefixAutoRoot + "y_removed/" +
+                        outBAMfileYName = outFileNamePrefixAutoRoot + "y_separated/" +
+                                          outFileNamePrefixAutoSample + "/" +
                                           outFileNamePrefixAutoSample + "_Y.bam";
                     }
                 }
@@ -2223,8 +2225,11 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
     }
 
     if (outFileNamePrefixAuto && !outFileNamePrefixAutoSample.empty()) {
-        const string countsDir = outFileNamePrefixAutoRoot + "counts/";
-        const string qcDir = outFileNamePrefixAutoRoot + "qc/";
+        const string countsDir = outFileNamePrefixAutoRoot + "counts/" + outFileNamePrefixAutoSample + "/";
+        const string qcDir = outFileNamePrefixAutoRoot + "qc/" + outFileNamePrefixAutoSample + "/";
+
+        createDirectory(countsDir, runDirPerm, "--outFileNamePrefixAuto counts", *this);
+        createDirectory(qcDir, runDirPerm, "--outFileNamePrefixAuto qc", *this);
 
         if (quant.geCount.yes && quant.geCount.outFile == outFileNamePrefix + "ReadsPerGene.out.tab") {
             quant.geCount.outFile = countsDir + outFileNamePrefixAutoSample + ".ReadsPerGene.out.tab";
@@ -2281,17 +2286,17 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
         const bool hasNoYPrefix = !noYFastqOutputPrefix.empty() && noYFastqOutputPrefix != "-";
         const string ext = (emitYNoYFastqCompression == "gz") ? ".fastq.gz" : ".fastq";
         string outputDir = outputDirFromPrefix(outFileNamePrefix);
-        // Route Y/noY FASTQs into y_removed/ when available
+        // Route Y/noY FASTQs into y_separated/<sample>/ when available
         if (outFileNamePrefixAuto) {
-            outputDir = outFileNamePrefixAutoRoot + "y_removed/";
-            createDirectory(outputDir, runDirPerm, "--emitYNoYFastq y_removed", *this);
+            outputDir = outFileNamePrefixAutoRoot + "y_separated/" + outFileNamePrefixAutoSample + "/";
+            createDirectory(outputDir, runDirPerm, "--emitYNoYFastq y_separated", *this);
         } else {
             if (outputDir.empty()) {
-                outputDir = "y_removed/";
+                outputDir = "y_separated/";
             } else {
-                outputDir += "y_removed/";
+                outputDir += "y_separated/";
             }
-            createDirectory(outputDir, runDirPerm, "--emitYNoYFastq y_removed", *this);
+            createDirectory(outputDir, runDirPerm, "--emitYNoYFastq y_separated", *this);
         }
         bool useMateFallback = false;
 

@@ -404,13 +404,13 @@ outFileNamePrefix               ./
 outFileNamePrefixAuto           0
     int: 0/1 - derive output prefix from the first input read file
          Uses outFileNamePrefix as the root directory and creates subdirectories:
-           alignments/, qc/, counts/, y_removed/
+           alignments/, qc/, counts/, y_separated/<sample>/
          Sample name is derived from the first read file by stripping .fastq(.gz)/.fq(.gz)
          and trailing _R1/_R2 tokens.
          When enabled, STAR also auto-sets:
            - SLAM QC outputs (slamQcJson/Html) to qc/
            - SlamQuant outputs to counts/
-           - Y/noY BAM outputs to y_removed/
+           - Y/noY BAM outputs to y_separated/<sample>/
 
 outTmpDir                       -
     string: path to a directory that will be used as temporary by STAR. All contents of this directory will be removed!

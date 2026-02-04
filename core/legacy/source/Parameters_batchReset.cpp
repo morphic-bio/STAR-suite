@@ -198,9 +198,9 @@ void Parameters::reconfigureOutputPathsForSample(const std::string& sampleName) 
         // Auto mode: use structured directory layout
         outFileNamePrefixAutoSample = sampleName;
         alignDir = outFileNamePrefixAutoRoot + "alignments/" + sampleName + "/";
-        countsDir = outFileNamePrefixAutoRoot + "counts/";
-        qcDir = outFileNamePrefixAutoRoot + "qc/";
-        yDir = outFileNamePrefixAutoRoot + "y_removed/";
+        countsDir = outFileNamePrefixAutoRoot + "counts/" + sampleName + "/";
+        qcDir = outFileNamePrefixAutoRoot + "qc/" + sampleName + "/";
+        yDir = outFileNamePrefixAutoRoot + "y_separated/" + sampleName + "/";
         newPrefix = alignDir + sampleName + "_";
     } else {
         // Manual mode: use sample name in prefix
@@ -215,9 +215,9 @@ void Parameters::reconfigureOutputPathsForSample(const std::string& sampleName) 
                 outFileNamePrefix.substr(0, lastSlash + 1) : "./";
         }
         alignDir = baseDir + sampleName + "/";
-        countsDir = alignDir;
-        qcDir = alignDir;
-        yDir = baseDir + "y_removed/";
+        countsDir = baseDir + "counts/" + sampleName + "/";
+        qcDir = baseDir + "qc/" + sampleName + "/";
+        yDir = baseDir + "y_separated/" + sampleName + "/";
         newPrefix = alignDir + sampleName + "_";
     }
     
