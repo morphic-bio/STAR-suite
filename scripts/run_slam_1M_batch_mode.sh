@@ -14,7 +14,9 @@ FASTQ_DIR=${FASTQ_DIR:-/mnt/pikachu/NW-5-21/SLAM-Seq-1M}
 SNP_MASK=${SNP_MASK:-/mnt/pikachu/slam_blank_artifacts_20260201/mask/snps_from_vcf.bed.gz}
 
 # Default: run all 1M R1 FASTQs, blank first
+# If FASTQ_LIST_OVERRIDE is set, it must be a comma-separated list with blank first.
 USE_ALL_FASTQS=${USE_ALL_FASTQS:-1}
+FASTQ_LIST_OVERRIDE=${FASTQ_LIST_OVERRIDE:-}
 
 # Optional explicit subset (used if USE_ALL_FASTQS=0)
 FASTQ_BLANK=${FASTQ_BLANK:-$FASTQ_DIR/ARID1A-no4su_S50_R1_001.fastq.gz}
@@ -23,7 +25,9 @@ FASTQ_6H=${FASTQ_6H:-$FASTQ_DIR/ARID1A-6h-1_S43_R1_001.fastq.gz}
 FASTQ_24H=${FASTQ_24H:-$FASTQ_DIR/ARID1A-24h-1_S46_R1_001.fastq.gz}
 
 FASTQS=()
-if [[ "$USE_ALL_FASTQS" == "1" ]]; then
+if [[ -n "$FASTQ_LIST_OVERRIDE" ]]; then
+  IFS=, read -r -a FASTQS <<< "$FASTQ_LIST_OVERRIDE"
+elif [[ "$USE_ALL_FASTQS" == "1" ]]; then
   # Find blank first (prefer FASTQ_BLANK if it exists)
   if [[ -f "$FASTQ_BLANK" ]]; then
     BLANK_PATH="$FASTQ_BLANK"
