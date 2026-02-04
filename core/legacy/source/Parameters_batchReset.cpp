@@ -219,6 +219,12 @@ void Parameters::reconfigureOutputPathsForSample(const std::string& sampleName) 
         }
         quant.slam.slamQcJson = qcDir + sampleName + ".slam_qc.json";
         quant.slam.slamQcHtml = qcDir + sampleName + ".slam_qc.html";
+        if (quant.slam.dumpBinary != "-" && quant.slam.dumpBinary != "None" && !quant.slam.dumpBinary.empty()) {
+            quant.slam.dumpBinary = countsDir + sampleName + "_slam_dump.bin";
+        }
+        if (quant.slam.dumpWeights != "-" && quant.slam.dumpWeights != "None" && !quant.slam.dumpWeights.empty()) {
+            quant.slam.dumpWeights = countsDir + sampleName + "_slam_weights.bin";
+        }
     }
     
     // Update Y/noY BAM paths

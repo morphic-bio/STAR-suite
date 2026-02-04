@@ -315,10 +315,18 @@ ECBuilderParams TranscriptQuantEC::getParams() const {
         params.ignore_incompat = true;
     } else {
         // Explicit format specified (not auto-detect)
-        params.lib_format = parseLibFormat(P_.quant.transcriptVB.libType);
-        params.incompat_prior = 0.0;
-        // Match Salmon: drop incompatible when ignoreIncompat is enabled
-        params.ignore_incompat = true;
+        // If libType == "A" but detection has not started yet (constructor path),
+        // fall back to permissive IU to avoid parseLibFormat("A") errors.
+        if (P_.quant.transcriptVB.libType == "A") {
+            params.lib_format = LibraryFormat::IU();
+            params.ignore_incompat = false;  // Don't drop any alignments pre-detection
+            params.incompat_prior = 1.0;
+        } else {
+            params.lib_format = parseLibFormat(P_.quant.transcriptVB.libType);
+            params.incompat_prior = 0.0;
+            // Match Salmon: drop incompatible when ignoreIncompat is enabled
+            params.ignore_incompat = true;
+        }
     }
     
     return params;

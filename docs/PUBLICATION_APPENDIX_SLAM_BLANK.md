@@ -101,6 +101,35 @@ Computed from STAR `SlamQuant.out`:
 | ARID1A_24h_1 | 0.9570 |
 | ARID1A_no4su | 0.8110 |
 
+## Dump/Requant Parity (Binary Dump → `slam_requant`)
+
+This validates that **binary dumps** produced by STAR‑SLAM can be re‑quantified
+by the external `slam_requant` tool with **exact parity** to STAR outputs.
+
+**Run (2026‑02‑04):**
+- **Output base:** `/mnt/pikachu/slam_batch_dump_20260204_054426`
+- **STAR flags:** `--slamDumpBinary 1 --slamDumpWeights 1` (with batch mode + auto prefix)
+- **Requant tool:** `slam/tools/slam_requant/slam_requant`
+
+**Requant invocation (template):**
+```bash
+slam/tools/slam_requant/slam_requant \
+  --dumpIn counts/<sample>_slam_dump.bin \
+  --dumpWeightsIn counts/<sample>_slam_weights.bin \
+  --dumpOut requant/<sample>_SlamQuant.out \
+  --dumpWeightsOut requant/<sample>_SlamQuant.out.weights \
+  --threads 24
+```
+
+**Parity vs STAR `SlamQuant.out` (Gene‑level overlap):**
+
+| Sample | Genes (overlap) | Pearson (ReadCount/Conversions/Coverage/NTR/Sigma) | Spearman (same) |
+|--------|-----------------|-----------------------------------------------------|-----------------|
+| ARID1A_0h_1 | 12,678 | 1.0000 | 1.0000 |
+| ARID1A_6h_1 | 12,573 | 1.0000 | 1.0000 |
+| ARID1A_24h_1 | 12,813 | 1.0000 | 1.0000 |
+| ARID1A_no4su | 12,965 | 1.0000 | 1.0000 |
+
 ## Artifact Locations
 
 - **STAR‑SLAM outputs (1M):**

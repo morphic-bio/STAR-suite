@@ -20,6 +20,8 @@ struct Args {
     std::string weightFile;
     std::string weightMatch = "auto";
     std::string qcReportPrefix;
+    std::string dumpOut;
+    std::string dumpWeightsOut;
     int trim5p = 0;
     int trim3p = 0;
     double errorRate = -1.0;
@@ -53,6 +55,8 @@ static bool parseArgs(int argc, char** argv, Args* args) {
         else if (a == "--slamWeightFile") args->weightFile = next("--slamWeightFile");
         else if (a == "--slamWeightMatch") args->weightMatch = next("--slamWeightMatch");
         else if (a == "--slamQcReport") args->qcReportPrefix = next("--slamQcReport");
+        else if (a == "--dumpOut") args->dumpOut = next("--dumpOut");
+        else if (a == "--dumpWeightsOut") args->dumpWeightsOut = next("--dumpWeightsOut");
         else if (a == "--errorRate") args->errorRate = std::stod(next("--errorRate"));
         else if (a == "--convRate") args->convRate = std::stod(next("--convRate"));
         else if (a == "--autoTrimDetectionReads") args->autoTrimMaxReads = static_cast<uint32_t>(std::stoul(next("--autoTrimDetectionReads")));
@@ -67,7 +71,8 @@ static bool parseArgs(int argc, char** argv, Args* args) {
     }
     if (args->dumpPath.empty() || args->outPrefix.empty()) {
         std::cerr << "Usage: --dump <path> --out <prefix> [--slamSnpMaskIn <bed.gz>] [--trim5p N --trim3p N] "
-                     "[--slamWeightMode dump|alignments|uniform] [--slamWeightFile <path>] [--slamWeightMatch auto|order|key]\n";
+                     "[--slamWeightMode dump|alignments|uniform] [--slamWeightFile <path>] [--slamWeightMatch auto|order|key] "
+                     "[--dumpOut <path>] [--dumpWeightsOut <path>]\n";
         return false;
     }
     return true;
@@ -370,6 +375,37 @@ int main(int argc, char** argv) {
     merged.writeTransitions(outBase + "SlamQuant.out.transitions.tsv");
     merged.writeMismatches(outBase + "SlamQuant.out.mismatches.tsv", outBase);
     merged.writeMismatchDetails(outBase + "SlamQuant.out.mismatchdetails.tsv");
+
+    if (!args.dumpOut.empty()) {
+        SlamDumpMetadata outMeta = meta;
+        outMeta.errorRate = errorRate;
+        outMeta.convRate = convRate;
+        if (!args.weightFile.empty()) {
+            outMeta.weightMode = 0;  // alignments (weights provided separately if requested)
+        } else if (weightMode == 2) {
+            outMeta.weightMode = 1;  // uniform
+        } else if (weightMode == 1) {
+            outMeta.weightMode = 0;  // alignments
+        }
+        SlamReadBuffer outBuf(static_cast<uint64_t>(reads.size()));
+        for (const auto& r : reads) {
+            SlamBufferedRead tmp(r);
+            outBuf.addRead(std::move(tmp));
+        }
+        std::vector<const SlamReadBuffer*> bufs{&outBuf};
+        std::string dumpErr;
+        if (!writeSlamDump(args.dumpOut, outMeta, bufs, 0, &dumpErr)) {
+            std::cerr << "Failed to write dumpOut: " << dumpErr << "\n";
+            return 1;
+        }
+        if (!args.dumpWeightsOut.empty()) {
+            std::string wErr;
+            if (!writeSlamWeights(args.dumpWeightsOut, outMeta, bufs, 0, nullptr, &wErr)) {
+                std::cerr << "Failed to write dumpWeightsOut: " << wErr << "\n";
+                return 1;
+            }
+        }
+    }
 
     if (!args.qcReportPrefix.empty()) {
         std::string jsonPath = args.qcReportPrefix + ".slam_qc.json";

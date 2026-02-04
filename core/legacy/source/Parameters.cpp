@@ -848,14 +848,16 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
     if (outFileNamePrefixAuto) {
         // In batch mode, defer per-sample auto-prefixing to the batch loop.
         if (batchModeRequested) {
-            if (readFilesIn.empty() || readFilesIn.at(0) == "-") {
+            const bool hasManifest = (!readFilesManifest.empty() && readFilesManifest.at(0) != "-");
+            if ((readFilesIn.empty() || readFilesIn.at(0) == "-") && !hasManifest) {
                 ostringstream errOut;
-                errOut << "EXITING because of FATAL INPUT ERROR: --outFileNamePrefixAuto requires --readFilesIn\n";
-                errOut << "SOLUTION: specify --readFilesIn or disable --outFileNamePrefixAuto\n";
+                errOut << "EXITING because of FATAL INPUT ERROR: --outFileNamePrefixAuto requires --readFilesIn or --readFilesManifest\n";
+                errOut << "SOLUTION: specify --readFilesIn/--readFilesManifest or disable --outFileNamePrefixAuto\n";
                 exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
             }
             outFileNamePrefixAutoRoot = normalizeRootDir(outFileNamePrefix);
             inOut->logMain << "outFileNamePrefixAuto deferred to batch mode"
+                           << (hasManifest ? " (manifest)" : "")
                            << " root=" << outFileNamePrefixAutoRoot << "\n";
         } else {
         if (readFilesIn.empty() || readFilesIn.at(0) == "-") {
@@ -2176,6 +2178,13 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
         }
         // Normalize libType to uppercase so libType == "A" works in STAR.cpp
         quant.transcriptVB.libType = upper;
+
+        // Auto-detect (A) requires paired-end; for single-end default to unstranded (U)
+        if (quant.transcriptVB.libType == "A" && readNends == 1) {
+            quant.transcriptVB.libType = "U";
+            inOut->logMain << "NOTE: --quantVBLibType=A not supported for single-end reads; "
+                           << "using --quantVBLibType=U (unstranded SE).\n";
+        }
         
         // Normalize errorModelMode to lowercase
         string errorModelModeLower = quant.transcriptVB.errorModelMode;

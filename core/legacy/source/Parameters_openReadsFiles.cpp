@@ -4,6 +4,8 @@
 #include <sys/stat.h>
 void Parameters::openReadsFiles() 
 {
+    // Reset FIFO list to avoid stale entries when reopening (e.g. SLAM auto-trim detection pass)
+    readFilesInTmp.clear();
     // Check number of mates BEFORE opening files
     // Use readNends if available (set during readFilesInit), otherwise count readFilesIn
     uint readFilesNmates = readNends;

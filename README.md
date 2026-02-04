@@ -73,6 +73,7 @@ Integrated SLAM-seq quantification with GRAND-SLAM parity:
 - **QC**: Comprehensive reports for T->C rates and error modeling.
 - **Batch Layout + Blank-First**: `--outFileNamePrefixAuto 1` organizes SLAM outputs into `alignments/`, `counts/`, `qc/`, `y_removed/` under a single root, and `--slamErrorRateFromBlank 1` can seed the background error rate from a blank (e.g. no4sU).
 - **Batch Mode (Core)**: The multi-FASTQ “batch mode” originated in SLAM-seq workflows with a blank sample, and has been generalized to bulk single-pass runs. Use `--batchMode 1` to process multiple FASTQs in one invocation while reusing the loaded genome. **Exclusions**: not supported with Solo (`--soloType`) or 2-pass (`--twopassMode`). Output is routed into per-sample subdirectories via `--outFileNamePrefixAuto 1` (forced in batch mode).
+- **Binary Dump + Requant**: `--slamDumpBinary 1 --slamDumpWeights 1` emits `<sample>_slam_dump.bin` and `<sample>_slam_weights.bin` in `counts/`. The `slam_requant` tool can re‑quantify these dumps with **exact parity** to `SlamQuant.out` (Pearson/Spearman 1.0 in the 1M parity check).
 
 ### QC Outputs
 STAR-Flex and STAR-SLAM now generate detailed QC reports:
