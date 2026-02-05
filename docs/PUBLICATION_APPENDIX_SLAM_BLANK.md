@@ -114,8 +114,8 @@ by the external `slam_requant` tool with **exact parity** to STAR outputs.
 **Requant invocation (template):**
 ```bash
 slam/tools/slam_requant/slam_requant \
-  --dumpIn counts/<sample>_slam_dump.bin \
-  --dumpWeightsIn counts/<sample>_slam_weights.bin \
+  --dumpIn alignments/<sample>_slam_dump.bin \
+  --dumpWeightsIn alignments/<sample>_slam_weights.bin \
   --dumpOut requant/<sample>_SlamQuant.out \
   --dumpWeightsOut requant/<sample>_SlamQuant.out.weights \
   --threads 24

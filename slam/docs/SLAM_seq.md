@@ -151,6 +151,8 @@ To avoid counting native SNPs as metabolic conversions, you must mask them.
 
 When `--slamDumpBinary 1` / `--slamDumpWeights 1` are enabled, STAR-SLAM writes
 binary dumps (`*_slam_dump.bin`) and weight sidecars (`*_slam_weights.bin`).
+In batch mode with `--outFileNamePrefixAuto 1`, these live under
+`alignments/<sample>/` alongside the BAMs.
 The **bitwise** file format (header + records) is documented in:
 
 ```

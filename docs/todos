@@ -12,6 +12,7 @@
 - Draft a design note for a shared QC graphics core (inputs/outputs, Plotly+JSON artifacts, TSV fallbacks, and how STAR/other components will call it).
 - Verify no downstream scripts/tools expect `Feature_types_heatmap.png` or `Feature_counts_heatmap.png`; document the HTML/JSON switch in any user-facing docs if needed.
 - Consider adding a read-level consistency preflight for global feature offset detection (warn/error if a large fraction of matches are off the global offset).
+- Re-test SLAM VB over‑dispersion vs binomial using technical replicate consistency and count‑stratified slices; sweep `slamVbOverdispPhi` to check for alternate minima.
 ## MCP Client Setup (Codex + Cursor)
 
 - **Endpoints**: Codex uses streamable-HTTP `POST /`, Cursor uses SSE `GET /sse` + `POST /messages`.
