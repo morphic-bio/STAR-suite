@@ -22,6 +22,15 @@ https://github.com/alexdobin/STAR/blob/master/doc/STARmanual.pdf
 [RELEASEnotes](https://github.com/alexdobin/STAR/blob/master/RELEASEnotes.md) contains detailed information about the latest major release
 [CHANGES](https://github.com/alexdobin/STAR/blob/master/CHANGES.md) contains detailed information about all the changes in all releases
 
+STAR-SUITE NOTES (THIS REPO)
+============================
+This `core/legacy` directory tracks upstream STAR layout, but STAR-suite adds
+module-level capabilities and wrappers around it.
+
+- Suite overview and module docs: `../../README.md`
+- STAR-perturb / CR-compat feature docs: `../../docs/feature_barcodes.md`
+- A375 small-set parity report (STAR vs Cell Ranger): `../../tests/crispr_feature_calling_comparison_report.md`
+
 DIRECTORY CONTENTS
 ==================
   * source: all source files required for compilation

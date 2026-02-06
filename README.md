@@ -76,6 +76,26 @@ Integrated SLAM-seq quantification with GRAND-SLAM parity:
 - **Binary Dump + Requant**: `--slamDumpBinary 1 --slamDumpWeights 1` emits `<sample>_slam_dump.bin` and `<sample>_slam_weights.bin` in `alignments/` (batch + auto prefix layout). The `slam_requant` tool can re‑quantify these dumps with **exact parity** to `SlamQuant.out` (Pearson/Spearman 1.0 in the 1M parity check).
 - **Binary Dump Format**: bitwise header + record layout is documented in `slam/docs/SLAM_DUMP_FORMAT.md`.
 
+### STAR-perturb (CR-Compat + process_features/call_features)
+STAR-suite includes a perturb-seq path that combines CR-compatible Solo behavior
+with integrated CRISPR feature calling. This is the path used for STAR-perturb
+work and CR compatibility comparisons.
+
+- **Integrated CR-compat in STAR** (GEX + feature merge + CRISPR calling):
+  - Use `--crMultiConfig <multi_config.csv>`
+  - Recommended bundle: `--defaultCrCompat yes`
+  - Key controls:
+    - `--crMinUmi 10` (default; lower to `2-3` for lineage-barcode style assays)
+    - `--soloCrGexFeature GeneFull` (or `Gene` when explicitly required)
+- **Standalone feature pipeline tool** (`core/legacy/source/star_feature_call`):
+  - Full pipeline: FASTQ -> MEX -> calls
+  - Call-only mode: MEX -> calls
+  - `--compat-perturb` writes CR9-style `crispr_analysis/` outputs.
+- **A375 small-set parity result**:
+  - On the A375 1k CRISPR 5' small set, STAR CRISPR calling matched Cell Ranger at
+    `1083/1083` common barcodes (**100.0% exact-match**) when using min-UMI `10`.
+  - Reference report: `tests/crispr_feature_calling_comparison_report.md`.
+
 ### QC Outputs
 STAR-Flex and STAR-SLAM now generate detailed QC reports:
 - **SLAM QC** (`--slamQcReport <prefix>`): Generates an interactive HTML report (`.html`) and JSON metrics (`.json`) visualizing:
@@ -134,6 +154,20 @@ See `slam/docs/SLAM_COMPATIBILITY_MODE.md` and `slam/docs/SLAM_seq.md`.
   - `--slamTrim5p`, `--slamTrim3p`: Manual trim guards.
  - **Batch Layout**:
    - `--outFileNamePrefixAuto 1`: Derive sample name from first FASTQ and route outputs into subdirs under `--outFileNamePrefix`.
+
+### STAR-perturb / CR-Compat
+See `docs/feature_barcodes.md` and `docs/CRISPR_FEATURE_CALLING_IMPLEMENTATION_SUMMARY.md`.
+- `--crMultiConfig`: Enable Cell Ranger-style multi processing with feature libraries.
+- `--defaultCrCompat yes`: Apply the CR-compat perturb defaults bundle.
+- `--crMinUmi`: Minimum UMI threshold for CRISPR feature calling (default `10`).
+- `--soloCrGexFeature`: Control merged GEX source (`auto`, `gene`, `genefull`).
+- `--soloCrMode CR`: Enable CR-compatible single-cell behavior.
+
+Standalone tool (`star_feature_call`) key flags:
+- `--compat-perturb`: CR9-compatible output layout (`crispr_analysis/`).
+- `--feature-ref`, `--whitelist`, `--fastq-dir`, `--output-dir`: FASTQ -> MEX -> calls.
+- `--call-only --mex-dir`: call_features-only pass on existing MEX.
+- `--emptydrops-use-fdr`, `--min-umi`, `--ratio-test`: calling controls.
 
 ## Sample Commands
 
@@ -233,10 +267,35 @@ core/legacy/source/STAR \
 For paired-end, pass **two comma-separated mate lists**:
 `--readFilesIn blank_R1.fq.gz,0h_R1.fq.gz,... blank_R2.fq.gz,0h_R2.fq.gz,...`
 
+**STAR-perturb (integrated CR-compat mode):**
+```bash
+core/legacy/source/STAR \
+  --runMode alignReads \
+  --genomeDir /path/to/index \
+  --crMultiConfig /path/to/multi_config.csv \
+  --defaultCrCompat yes \
+  --outFileNamePrefix /path/to/outs/
+```
+
+**STAR-perturb (standalone feature pipeline):**
+```bash
+core/legacy/source/star_feature_call \
+  --compat-perturb \
+  --feature-ref /path/to/feature_reference.csv \
+  --whitelist /path/to/whitelist.txt \
+  --fastq-dir /path/to/feature_fastqs \
+  --filtered-barcodes /path/to/filtered_barcodes.tsv \
+  --output-dir /path/to/feature_out \
+  --emptydrops-use-fdr \
+  --min-umi 10
+```
+
 ## More Detail
 
 - Core usage: [core/legacy/README.md](core/legacy/README.md)
 - Flex pipeline: [flex/README_flex.md](flex/README_flex.md)
 - SLAM compatibility: [slam/docs/SLAM_COMPATIBILITY_MODE.md](slam/docs/SLAM_COMPATIBILITY_MODE.md)
 - SLAM methodology: [slam/docs/SLAM_seq.md](slam/docs/SLAM_seq.md)
+- STAR-perturb feature docs: [docs/feature_barcodes.md](docs/feature_barcodes.md)
+- STAR-perturb A375 parity report: [tests/crispr_feature_calling_comparison_report.md](tests/crispr_feature_calling_comparison_report.md)
 - Cell Ranger multi smoke tool: [docs/cr_multi.md](docs/cr_multi.md)
