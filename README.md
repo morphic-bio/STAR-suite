@@ -91,22 +91,20 @@ Recent updates to the Core module (STAR 2.7.11b and prior) include:
   - **Limits**: batch mode is single-pass only (no `--twopassMode`) and not supported with Solo (`--soloType`).
   - **Output routing**: use `--outFileNamePrefixAuto 1` for per-sample subdirectories under one output root.
 - **Transcriptome Output**: Replaced `--quantTranscriptomeBan` with `--quantTranscriptomeSAMoutput` for more explicit control (e.g., `BanSingleEnd_ExtendSoftclip`).
+- **TranscriptVB Quantification**: Variational Bayes and EM quantification for transcript-level abundance (`--quantMode TranscriptVB`), with parity-oriented behavior against Salmon alignment-mode.
+- **Reference Automation**: Automated reference download/build (`--autoIndex`, `--autoCksumUpdate`) plus automatic `transcriptome.fa` generation during indexing for transcript-level quant workflows.
+- **Cutadapt-Compatible Trimming**: Native cutadapt-style trimming path (`--trimCutadapt Yes`) for bulk/PE workflows.
+- **Samtools-style BAM Sorting**: Spill-to-disk sort (`--outBAMsortMethod samtools`) to reduce peak RAM pressure versus in-memory bin sorting.
+- **Y/NoY Separation**: Split BAM and FASTQ outputs by chrY alignment (`--emitNoYBAM`, `--emitYNoYFastq`).
+- **EmptyDrops_CR Integration**: CR-compatible EmptyDrops path (including libscrna-backed behavior in scRNA/perturb flows).
 - **Solo Features**:
   - `sF` BAM tag for feature type and gene counts.
   - `--soloCBtype String` for arbitrary barcode strings.
   - Improved cell filtering and statistics with `--soloCellReadStats Standard`.
 
 ### Flex Updates
-STAR-Flex extends upstream STAR with features for 10x Flex, bulk RNA-seq, and reference management:
+STAR-Flex extends STAR-core with Flex-specific behavior:
 - **Flex Pipeline**: Inline hash-based processing for 10x Genomics Flex (Fixed RNA Profiling). Includes sample tag detection, 1MM pseudocount correction for CBs, clique-based UMI deduplication, and occupancy filtering.
-- **Cutadapt Parity**: Native implementation of cutadapt v5.1 trimming algorithm (`--trimCutadapt Yes`) for bulk RNA-seq.
-- **TranscriptVB**: Variational Bayes and EM quantification for transcript-level abundance, offering parity with Salmon alignment-mode.
-- **Reference Building**:
-  - **AutoIndex**: Automated reference download (`--autoIndex`), checksum verification (`--autoCksumUpdate`), and CellRanger-style formatting (`--cellrangerStyleIndex`).
-  - **Transcriptome FASTA**: Automatic generation of `transcriptome.fa` during indexing for Salmon/TranscriptVB compatibility.
-- **BAM Sorting**:
-  - **Samtools-style Sort**: Spill-to-disk sorting (`--outBAMsortMethod samtools`) reduces memory usage compared to the default bin-based sorter. Configurable with `--limitBAMsortRAM`.
-- **Y-Chromosome Splitting**: Split BAMs and FASTQs by Y-chromosome alignment (`--emitNoYBAM`, `--emitYNoYFastq`) for sex-specific analysis.
 
 ### SLAM Updates
 Integrated SLAM-seq quantification with GRAND-SLAM parity:
