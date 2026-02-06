@@ -87,6 +87,9 @@ Run `make help` to see the full target list and descriptions.
 
 ### Core Updates
 Recent updates to the Core module (STAR 2.7.11b and prior) include:
+- **Batch Mode (single-pass, non-Solo)**: `--batchMode 1` processes multiple FASTQs in one STAR invocation while reusing the loaded genome. This removes the need for `--genomeLoad` keep-in-memory workflows that are often brittle in containerized and HPC job environments. It is also important when analyses require shared static inputs across many samples (for example SLAM SNP masks and blank-derived background/error settings), so each sample is processed under the same fixed context.
+  - **Limits**: batch mode is single-pass only (no `--twopassMode`) and not supported with Solo (`--soloType`).
+  - **Output routing**: use `--outFileNamePrefixAuto 1` for per-sample subdirectories under one output root.
 - **Transcriptome Output**: Replaced `--quantTranscriptomeBan` with `--quantTranscriptomeSAMoutput` for more explicit control (e.g., `BanSingleEnd_ExtendSoftclip`).
 - **Solo Features**:
   - `sF` BAM tag for feature type and gene counts.
@@ -112,7 +115,6 @@ Integrated SLAM-seq quantification with GRAND-SLAM parity:
 - **Auto-Trimming**: Variance-based detection of artifact-prone read ends (`--autoTrim variance`).
 - **QC**: Comprehensive reports for T->C rates and error modeling.
 - **Batch Layout + Blank-First**: `--outFileNamePrefixAuto 1` organizes SLAM outputs into `alignments/`, `counts/`, `qc/`, `y_separated/` under a single root, and `--slamErrorRateFromBlank 1` can seed the background error rate from a blank (e.g. no4sU).
-- **Batch Mode (Core)**: The multi-FASTQ “batch mode” originated in SLAM-seq workflows with a blank sample, and has been generalized to bulk single-pass runs. Use `--batchMode 1` to process multiple FASTQs in one invocation while reusing the loaded genome. **Exclusions**: not supported with Solo (`--soloType`) or 2-pass (`--twopassMode`). Output is routed into per-sample subdirectories via `--outFileNamePrefixAuto 1` (forced in batch mode).
 - **Binary Dump + Requant**: `--slamDumpBinary 1 --slamDumpWeights 1` emits `<sample>_slam_dump.bin` and `<sample>_slam_weights.bin` in `alignments/` (batch + auto prefix layout). The `slam_requant` tool can re‑quantify these dumps with **exact parity** to `SlamQuant.out` (Pearson/Spearman 1.0 in the 1M parity check).
 - **Binary Dump Format**: bitwise header + record layout is documented in `slam/docs/SLAM_DUMP_FORMAT.md`.
 
