@@ -2,32 +2,72 @@
 
 STAR-suite reorganizes STAR into module-focused directories while keeping a single source of truth for shared code. Build outputs remain compatible with existing STAR workflows, and the new top-level `Makefile` exposes module targets.
 
+**No new external dependencies are required for the suite modules in this repo.**
+The current integrations (including STAR-perturb, STAR-SLAM, and QC updates) are
+built with the existing toolchain and vendored components.
+
+STAR-suite supports partial compilation: build only the module/tool targets you need
+instead of building the full suite every time.
+
 Agent quickstart: see `AGENTS.md` for repo-specific guardrails, tests, and recent changes.
 
 ## Folder Structure
 
 ```
 core/
-  legacy/                # Upstream STAR layout (single source of truth)
-  features/              # Shared feature overlays (vbem, yremove, bamsort)
+  legacy/                        # Upstream STAR layout (single source of truth)
+  features/                      # Shared overlays and feature tooling
+    process_features/            # Perturb feature extraction/calling implementation
+    feature_barcodes/            # assignBarcodes/demux tooling
+    libscrna/                    # EmptyDrops/OrdMag/Occupancy shared library
 flex/                    # Flex-specific code + tools
 slam/                    # SLAM-seq code + tools
 build/                   # Modular make fragments
 docs/                    # Suite-level docs
-  tests/                   # Suite-level tests (see tests/ARTIFACTS.md for artifact locations)
+tests/                   # Suite-level tests (see tests/ARTIFACTS.md for artifact locations)
 tools/                   # Suite-level scripts/utilities
+mcp_server/              # MCP server for scripted discovery/preflight/run workflows
 ```
 
 ## Modules
 
 - **STAR-core** (`core/`): Legacy STAR (indexing, bulk, Solo) plus shared utilities.
   Build: `make core` (binary at `core/legacy/source/STAR`).
+- **STAR-perturb** (`core/legacy/` + `core/features/process_features/`): CR-compatible perturb-seq path with integrated feature extraction/calling (`process_features` + `call_features`) and `crispr_analysis/` outputs in CR-compat mode.
+  Primary run path: `STAR --crMultiConfig ... --defaultCrCompat yes` (see STAR-perturb section below).
 - **STAR-Flex** (`flex/`): FlexFilter pipeline and Flex-specific integrations.
   Build tools: `make flex` or `make flex-tools`.
 - **STAR-SLAM** (`slam/`): SLAM-seq quantification, SNP masking, trimming/QC.
   Build tools: `make slam` or `make slam-tools`.
 - **Feature Barcodes** (`core/features/feature_barcodes/`): Vendored `process_features` tools for perturb-seq testing (`assignBarcodes`, `demux_bam`, `demux_fastq`).
   Build tools: `make feature-barcodes-tools`.
+- **Shared Feature Toolchains** (`core/features/`): Reusable tool layers used across modules, including `vbem` (TranscriptVB helpers), `yremove_*` (Y/noY splitting), `bamsort`, and `libscrna`.
+  Build tools: `make vbem-tools`, `make yremove-tools`, plus in-core integrations.
+- **MCP Server (tooling)** (`mcp_server/`): Agent automation service for dataset/test discovery and controlled execution (`list_datasets`, `list_test_suites`, `preflight`, `run_script`, `collect_outputs`). This is repo tooling, not an analysis module.
+
+## Installation
+
+Build from repo root:
+
+```bash
+# Core STAR binary
+make core
+
+# Module-focused builds
+make flex
+make slam
+make feature-barcodes-tools
+
+# Build everything
+make all
+```
+
+Selective default build:
+
+```bash
+make default INCLUDE="core slam-tools"
+make default EXCLUDE="flex-tools"
+```
 
 ## Build Targets
 

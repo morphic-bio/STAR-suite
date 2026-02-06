@@ -2,8 +2,8 @@
 .PHONY: vbem-compute-expected-gc vbem-sample-fld vbem-compute-gc-bias vbem-em-quant
 .PHONY: vbem-ec-filter-test vbem-tximport-compat vbem-trimvalidate
 
-# Note: feature-barcodes-tools removed from default (replaced by process-features-tools)
-# Keep feature-barcodes-tools target available for manual builds if needed
+# Default tool composition is selected in top-level Makefile.
+# Keep both feature-barcodes-tools and process-features-tools available.
 tools: flex-tools slam-tools vbem-tools yremove-tools process-features-tools star-feature-call
 
 vbem-tools: vbem-compute-expected-gc vbem-sample-fld vbem-compute-gc-bias vbem-em-quant vbem-ec-filter-test vbem-tximport-compat vbem-trimvalidate
