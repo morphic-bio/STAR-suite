@@ -69,6 +69,28 @@ make default INCLUDE="core slam-tools"
 make default EXCLUDE="flex-tools"
 ```
 
+Install alternatives (release artifacts):
+
+```bash
+# Ubuntu package from a local artifact
+sudo apt install ./star-suite_<version>_<arch>.deb
+
+# Optional PPA path (once published)
+sudo add-apt-repository ppa:<org>/star-suite
+sudo apt update
+sudo apt install star-suite
+```
+
+```bash
+# Static tarball install
+tar -xzf STAR-static-<version>-linux-<arch>.tar.gz
+sudo install -m 0755 STAR-static-<version>-linux-<arch>/bin/STAR /usr/local/bin/STAR
+```
+
+Packaging/release details and artifact policy:
+- `docs/Star-binary-distribution.md`
+- `docs/Github-actions.md`
+
 ## Build Targets
 
 The top-level `Makefile` supports a default build, full build, and conditional include/exclude filters.
