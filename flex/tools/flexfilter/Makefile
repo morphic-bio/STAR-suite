@@ -28,6 +28,8 @@ TARGET = run_flexfilter_mex
 SRC = run_flexfilter_mex.cpp
 OBJ = $(SRC:.cpp=.o)
 
+.DEFAULT_GOAL := all
+
 # Always rebuild libflex to avoid stale linkage when headers change
 .PHONY: libflex_rebuild libscrna_rebuild
 libflex_rebuild:

@@ -62,6 +62,7 @@ struct EMParams {
     std::string debug_file;           // output file for debug traces
     bool per_transcript_prior = true; // default: per-transcript
                                       // If false: prior_i = vb_prior * eff_length_i (per-nucleotide)
+    bool use_uniform_init = false;    // legacy CLI compatibility flag (currently no-op in engines)
     
     // VB-specific parameters (Salmon-style initialization)
     uint32_t min_iters = 100;         // Minimum iterations before checking convergence (VB only)

@@ -9,9 +9,11 @@ LIB = $(LIB_DIR)/libtximport.a
 
 .PHONY: all clean test lib
 
-all: lib $(CLI_BIN)
+all: $(CLI_BIN)
 
-lib:
+lib: $(LIB)
+
+$(LIB):
 	$(MAKE) -C $(LIB_DIR)
 
 $(CLI_BIN): $(CLI_SRC) $(LIB)
@@ -25,5 +27,4 @@ test: all
 clean:
 	$(MAKE) -C $(LIB_DIR) clean
 	rm -f $(CLI_BIN)
-
 

@@ -25,6 +25,7 @@
 #include <vector>
 #include <set>
 #include <unordered_set>
+#include <cstdint>
 
 namespace FlexProbeIndex {
 
@@ -95,4 +96,3 @@ std::string computeSHA256(const std::string& filePath);
 } // namespace FlexProbeIndex
 
 #endif // FLEX_PROBE_INDEX_H
-

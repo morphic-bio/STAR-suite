@@ -16,6 +16,7 @@
 #include <string>
 #include <set>
 #include <unordered_set>
+#include <cstdint>
 
 namespace CellRangerFormatter {
 
@@ -98,4 +99,3 @@ bool saveDecompressedCksumToCache(const std::string& cacheDir, const std::string
 } // namespace CellRangerFormatter
 
 #endif // CELLRANGER_FORMATTER_H
-

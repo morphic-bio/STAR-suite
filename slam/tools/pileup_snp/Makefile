@@ -1,4 +1,4 @@
-ROOT_DIR := $(abspath ../../../..)
+ROOT_DIR := $(abspath ../../..)
 SLAM_SRC_DIR := $(ROOT_DIR)/slam/source
 LEGACY_SRC_DIR := $(ROOT_DIR)/core/legacy/source
 

@@ -10,8 +10,9 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="${SCRIPT_DIR}/.."
-STAR_BIN="${REPO_DIR}/core/legacy/source/STAR"
+STAR_BIN="${STAR_BIN:-${REPO_DIR}/core/legacy/source/STAR}"
 GOLD_DIR="${SCRIPT_DIR}/gold_standard"
+CBUB_TMP_BASE="${CBUB_TMP_BASE:-/tmp/cbub_regress_tmp}"
 
 # Colors for output
 RED='\033[0;31m'
@@ -31,21 +32,33 @@ echo "STAR binary: $STAR_BIN"
 echo "Mode: $([ "$QUICK_MODE" = true ] && echo "Quick (2 lanes)" || echo "Full (8 lanes)")"
 echo ""
 
+skip() {
+    echo -e "${YELLOW}SKIP${NC}: $*"
+    exit 0
+}
+
 # Verify STAR binary exists
 if [ ! -f "$STAR_BIN" ]; then
-    echo -e "${RED}ERROR: STAR binary not found at $STAR_BIN${NC}"
-    exit 1
+    skip "STAR binary not found at $STAR_BIN"
+fi
+
+if ! command -v samtools >/dev/null 2>&1; then
+    skip "samtools not found in PATH"
+fi
+
+if ! command -v bc >/dev/null 2>&1; then
+    skip "bc not found in PATH"
 fi
 
 PASS_COUNT=0
 FAIL_COUNT=0
 
 # Common parameters
-GENOME_DIR="/storage/flex_filtered_reference/star_index"
-CB_WHITELIST="/storage/scRNAseq_output/whitelists/737K-fixed-rna-profiling.txt"
-SAMPLE_WHITELIST="/storage/SC2300771_filtered_2M/sample_whitelist.tsv"
-PROBE_LIST="/storage/flex_filtered_reference/filtered_reference/probe_list.txt"
-SAMPLE_PROBES="/mnt/pikachu/JAX_scRNAseq01_processed/probe-barcodes-fixed-rna-profiling-rna.txt"
+GENOME_DIR="${CBUB_GENOME_DIR:-/storage/flex_filtered_reference/star_index}"
+CB_WHITELIST="${CBUB_WHITELIST:-/storage/scRNAseq_output/whitelists/737K-fixed-rna-profiling.txt}"
+SAMPLE_WHITELIST="${CBUB_SAMPLE_WHITELIST:-/storage/SC2300771_filtered_2M/sample_whitelist.tsv}"
+PROBE_LIST="${CBUB_PROBE_LIST:-/storage/flex_filtered_reference/filtered_reference/probe_list.txt}"
+SAMPLE_PROBES="${CBUB_SAMPLE_PROBES:-/mnt/pikachu/JAX_scRNAseq01_processed/probe-barcodes-fixed-rna-profiling-rna.txt}"
 
 if [ "$QUICK_MODE" = true ]; then
     READS_R2="/storage/downsampled_100K/SC2300771/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L001_R2_001.fastq.gz,/storage/downsampled_100K/SC2300771/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L002_R2_001.fastq.gz"
@@ -55,10 +68,27 @@ else
     READS_R1="/storage/downsampled_100K/SC2300771/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L001_R1_001.fastq.gz,/storage/downsampled_100K/SC2300771/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L002_R1_001.fastq.gz,/storage/downsampled_100K/SC2300771/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L003_R1_001.fastq.gz,/storage/downsampled_100K/SC2300771/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L004_R1_001.fastq.gz,/storage/downsampled_100K/SC2300771/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L005_R1_001.fastq.gz,/storage/downsampled_100K/SC2300771/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L006_R1_001.fastq.gz,/storage/downsampled_100K/SC2300771/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L007_R1_001.fastq.gz,/storage/downsampled_100K/SC2300771/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L008_R1_001.fastq.gz"
 fi
 
+[ -d "$GENOME_DIR" ] || skip "Missing genome dir: $GENOME_DIR"
+[ -f "$CB_WHITELIST" ] || skip "Missing CB whitelist: $CB_WHITELIST"
+[ -f "$SAMPLE_WHITELIST" ] || skip "Missing sample whitelist: $SAMPLE_WHITELIST"
+[ -f "$PROBE_LIST" ] || skip "Missing probe list: $PROBE_LIST"
+[ -f "$SAMPLE_PROBES" ] || skip "Missing sample probes: $SAMPLE_PROBES"
+
+check_csv_files_exist() {
+    local csv="$1"
+    IFS=',' read -r -a arr <<< "$csv"
+    for f in "${arr[@]}"; do
+        [ -f "$f" ] || skip "Missing FASTQ: $f"
+    done
+}
+
+check_csv_files_exist "$READS_R1"
+check_csv_files_exist "$READS_R2"
+
 run_star() {
     local OUT_DIR="$1"
     local BAM_TYPE="$2"  # "Unsorted" or "SortedByCoordinate"
-    local TMP_DIR="/storage/100K/tmp/cbub_regress_$(echo $BAM_TYPE | tr '[:upper:]' '[:lower:]')"
+    local TMP_DIR="${CBUB_TMP_BASE}/cbub_regress_$(echo "$BAM_TYPE" | tr '[:upper:]' '[:lower:]')"
     
     rm -rf "$OUT_DIR" "$TMP_DIR"
     mkdir -p "$OUT_DIR"

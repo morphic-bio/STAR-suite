@@ -83,7 +83,7 @@ CXXFLAGS_SIMD ?= -mavx2
 # Include flex (klib/libflex), vbem (libtrim/libem), slam, and process_features headers
 # Include current directory for IncludeDefine.h and other source headers
 PROCESS_FEATURES_INC := $(ROOT_DIR)/core/features/process_features/include
-CXXFLAGS_common := -std=c++11 -fopenmp -I. -I$(FLEX_SRC_DIR) -I$(LIBFLEX_DIR) -I$(LIBSCRNA_INC) -I$(VBEM_SRC_DIR) -I$(LIBEM_DIR) -I$(SLAM_SRC_DIR) -I$(BAMSORT_SRC_DIR) -I$(PROCESS_FEATURES_INC) $(COMPTIMEPLACE) $(GIT_BRANCH_COMMIT_DIFF)
+CXXFLAGS_common := -std=c++11 -fopenmp -I. -Ihtslib -I$(FLEX_SRC_DIR) -I$(LIBFLEX_DIR) -I$(LIBSCRNA_INC) -I$(VBEM_SRC_DIR) -I$(LIBEM_DIR) -I$(SLAM_SRC_DIR) -I$(BAMSORT_SRC_DIR) -I$(PROCESS_FEATURES_INC) $(COMPTIMEPLACE) $(GIT_BRANCH_COMMIT_DIFF)
 CXXFLAGS_main := -O3 $(CXXFLAGS_common)
 CXXFLAGS_gdb := -O0 -g3 $(CXXFLAGS_common)
 

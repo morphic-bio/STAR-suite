@@ -3,6 +3,7 @@
 
 #include <string>
 #include <unordered_map>
+#include <cstdint>
 
 class ProbeListIndex {
 public:
@@ -30,5 +31,4 @@ private:
 };
 
 #endif
-
 

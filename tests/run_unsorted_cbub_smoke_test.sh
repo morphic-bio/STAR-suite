@@ -12,10 +12,16 @@ FLEX_INDEX="${FLEX_INDEX:-/storage/flex_filtered_reference/star_index}"
 FLEX_WHITELIST="${FLEX_WHITELIST:-/storage/scRNAseq_output/whitelists/737K-fixed-rna-profiling.txt}"
 FLEX_SAMPLE_WHITELIST="${FLEX_SAMPLE_WHITELIST:-/storage/SC2300771_filtered_2M/sample_whitelist.tsv}"
 FLEX_PROBE_LIST="${FLEX_PROBE_LIST:-/storage/flex_filtered_reference/filtered_reference/probe_list.txt}"
-FLEX_SAMPLE_PROBES="${FLEX_SAMPLE_PROBES:-/mnt/pikachu/JAX_scRNAseq01_processed/probe-barcodes-fixed-rna-profiling-rna.txt}"
 FLEX_ALLOWED_TAGS="${FLEX_ALLOWED_TAGS:-/storage/SC2300771_filtered_2M/sample_whitelist.tsv}"
 FLEX_FASTQ_R2="${FLEX_FASTQ_R2:-/storage/downsampled_100K/SC2300771/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L001_R2_001.fastq.gz}"
 FLEX_FASTQ_R1="${FLEX_FASTQ_R1:-/storage/downsampled_100K/SC2300771/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L001_R1_001.fastq.gz}"
+if [ -n "${FLEX_SAMPLE_PROBES:-}" ]; then
+    FLEX_SAMPLE_PROBES="${FLEX_SAMPLE_PROBES}"
+elif [ -f "/storage/JAX_scRNAseq01_processed/probe-barcodes-fixed-rna-profiling-rna.txt" ]; then
+    FLEX_SAMPLE_PROBES="/storage/JAX_scRNAseq01_processed/probe-barcodes-fixed-rna-profiling-rna.txt"
+else
+    FLEX_SAMPLE_PROBES="/mnt/pikachu/JAX_scRNAseq01_processed/probe-barcodes-fixed-rna-profiling-rna.txt"
+fi
 
 skip() {
     echo "SKIP: $*"

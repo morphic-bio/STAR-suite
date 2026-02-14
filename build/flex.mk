@@ -1,8 +1,8 @@
 .PHONY: flex flex-tools flexfilter
 
-flex: core flex-tools
+flex: flex-tools
 
-flex-tools: core flexfilter
+flex-tools: flexfilter
 
-flexfilter:
+flexfilter: core
 	$(MAKE) -C $(FLEX_DIR)/tools/flexfilter

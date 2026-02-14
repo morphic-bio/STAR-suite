@@ -2,7 +2,7 @@ CXX ?= g++
 CXXFLAGS := -std=c++11 -O3 -fopenmp -Wall -Wextra
 LDFLAGS := -fopenmp -lz
 
-ROOT_DIR := $(abspath ../../../..)
+ROOT_DIR := $(abspath ../../..)
 SLAM_SRC_DIR := $(ROOT_DIR)/slam/source
 LEGACY_SRC_DIR := $(ROOT_DIR)/core/legacy/source
 SRC_DIR := $(SLAM_SRC_DIR)

@@ -9,6 +9,7 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 SOURCE_DIR="$PROJECT_ROOT/core/legacy/source"
 OUT_DIR="$SCRIPT_DIR/output"
 FIXTURE_DIR="${FLEX_FIXTURE_ROOT:-$PROJECT_ROOT/reference/tests/100K}"
+FLEX_PROBE_SET="${FLEX_PROBE_SET:-/storage/flex-genome-filtered-110-44/filtered_reference/filtered_probe_set.csv}"
 # Support injecting extra args (e.g., --defaultFlex Yes) via STAR_EXTRA_ARGS
 STAR_EXTRA_ARGS="${STAR_EXTRA_ARGS:-}"
 
@@ -115,6 +116,12 @@ if [[ -d "$FIXTURE_DIR/genome" ]] && [[ -d "$FIXTURE_DIR/SC2300771" ]]; then
     # Test 4b: Run with flex enabled
     echo ""
     echo "Running STAR with flex enabled..."
+    if [[ ! -f "$FLEX_PROBE_SET" ]]; then
+        info "Skipping flex-enabled alignment test - probe set not found: $FLEX_PROBE_SET"
+        echo ""
+        echo "=== All smoke tests passed (with fixture-dependent skips) ==="
+        exit 0
+    fi
     # shellcheck disable=SC2086
     if "$STAR_BIN" ${STAR_EXTRA_ARGS} \
         --genomeDir "$FIXTURE_DIR/genome" \
@@ -126,7 +133,7 @@ if [[ -d "$FIXTURE_DIR/genome" ]] && [[ -d "$FIXTURE_DIR/SC2300771" ]]; then
         --soloCBlen 16 \
         --soloUMIlen 12 \
         --soloFeatures Gene \
-        --soloProbeList /storage/flex-genome-filtered-110-44/filtered_reference/filtered_probe_set.csv \
+        --soloProbeList "$FLEX_PROBE_SET" \
         --soloFlexExpectedCellsTotal 1000 \
         --runThreadN 1 \
         --outSAMtype BAM Unsorted \

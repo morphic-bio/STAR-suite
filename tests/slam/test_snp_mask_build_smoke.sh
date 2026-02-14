@@ -10,7 +10,8 @@
 # Usage: ./test_snp_mask_build_smoke.sh
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-STAR="${SCRIPT_DIR}/../../core/legacy/source/STAR"
+# Support STAR_BIN override for Docker/runtime images (default: source-relative path)
+STAR="${STAR_BIN:-${SCRIPT_DIR}/../../core/legacy/source/STAR}"
 SLAM_SOURCE="${SCRIPT_DIR}/../../slam/source"
 TMPDIR="${SCRIPT_DIR}/tmp_snp_mask_test_$$"
 
@@ -59,6 +60,8 @@ cd "$SCRIPT_DIR"
 if [ -f "test_slam_snp_em" ]; then
     EM_OUTPUT=$(./test_slam_snp_em 2>&1)
     echo "$EM_OUTPUT" | grep -q "ALL TESTS PASSED" && pass "EM unit tests" || fail "EM unit tests"
+elif ! command -v g++ >/dev/null 2>&1; then
+    echo "SKIP: EM unit tests (g++ unavailable and prebuilt test_slam_snp_em missing)"
 else
     echo "Compiling EM unit tests..."
     if g++ -std=c++11 -O2 -I"$SLAM_SOURCE" -I"$SLAM_SOURCE/libem" \

@@ -8,7 +8,7 @@
 #include "libem/forgetting_mass.h"
 #include "libem/em_types.h"
 #include "libem/gc_bias.h"
-#include "htslib/htslib/sam.h"
+#include <htslib/sam.h>
 #include <cmath>
 #include <iostream>
 #include <fstream>
@@ -786,7 +786,7 @@ int main(int argc, char* argv[]) {
                 delete alignment_model;
                 return 1;
             }
-            ErrorModelTraceLevel level = static_cast<ErrorModelTraceLevel>(trace_level);
+            libem::ErrorModelTraceLevel level = static_cast<libem::ErrorModelTraceLevel>(trace_level);
             alignment_model->setTraceOutput(trace_stream, level);
             std::cerr << "Error model tracing enabled (level " << trace_level << ") -> " << error_model_trace_file << "\n";
         }

@@ -1,0 +1,48 @@
+# Docker build context exclusions (repo root)
+# Reduces image size and build time
+
+# Git
+.git
+.gitignore
+
+# Build artifacts (builder compiles from source)
+*.o
+*.a
+Depend.list
+**/STAR
+**/STARlong
+**/htslib/*.a
+
+# Test outputs and artifacts
+tests/*_output*/
+tests/*_output_*
+**/tmp_*
+**/tmp
+*.log
+Log.out
+
+# Large external data
+storage
+reference
+*.fastq
+*.fastq.gz
+*.bam
+*.mtx
+
+# IDE and OS
+.DS_Store
+.idea
+.vscode
+*.swp
+*~
+
+# Plans artifacts (logs, reports)
+plans/artifacts
+
+# Python cache
+__pycache__
+*.pyc
+.pytest_cache
+
+# MCP server cache (not needed for build)
+mcp_server/__pycache__

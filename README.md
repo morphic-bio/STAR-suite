@@ -83,6 +83,72 @@ The top-level `Makefile` supports a default build, full build, and conditional i
 
 Run `make help` to see the full target list and descriptions.
 
+## Docker
+
+A multi-stage Docker setup (Ubuntu 24.04) provides a clean build environment and separate runtime/test images.
+
+**Builder stage**: Compiles STAR-suite from source with no host leakage. Validates `make core`, `flex`, `slam`, `feature-barcodes-tools`, `default`, and `all`.
+
+**Suite base runtime (`suite-base`)**: Minimal executable image with suite binaries (e.g. `STAR`) and no Python/test-only helpers.
+
+**Test images** (built from `suite-base`):
+- `test-tier-a`: self-contained smoke helpers.
+- `test-tier-b`: fixture-backed helper stack (e.g. `python3`, `bc`, `samtools`).
+
+### Quickstart
+
+```bash
+# Build suite base image (default tag: biodepot/star-suite:latest)
+./scripts/docker/build_image.sh
+
+# Override tag or parallel jobs
+IMAGE_TAG=myorg/star-suite:v1 MAKE_JOBS=8 ./scripts/docker/build_image.sh
+
+# Reproducibility check: force a clean rebuild (no cache)
+docker build --no-cache --target suite-base -f docker/Dockerfile -t biodepot/star-suite:latest --build-arg MAKE_JOBS=8 .
+
+# Run STAR from suite base image
+docker run --rm biodepot/star-suite:latest
+
+# Run Tier A smoke tests (builds/uses test-tier-a image)
+./scripts/docker/run_smokes_tier_a.sh
+
+# Run Tier B smoke tests (builds/uses test-tier-b image; requires fixtures)
+./scripts/docker/run_smokes_tier_b.sh
+```
+
+### Fixture mount for Tier B
+
+Tier B tests require data under `/storage`. Mount your fixture root:
+
+```bash
+docker run --rm -v /path/to/your/data:/storage biodepot/star-suite:test-tier-b bash -c "tests/run_cbub_regression_test.sh"
+```
+
+By default, `./scripts/docker/run_smokes_tier_b.sh` uses `STORAGE=/storage`.
+Set `STORAGE=/path` to override (script uses it for the `-v` mount).
+
+Expected layout: `/storage/A375`, `/storage/flex_filtered_reference`, etc. See `plans/docker_plan.md` for full fixture roots.
+
+### STAR_BIN override
+
+Smoke tests honor `STAR_BIN` to decouple from source-relative paths. Docker smoke wrappers set `STAR_BIN=/usr/local/bin/STAR` automatically.
+
+### Validation Status
+
+Recent portability checks on this branch (Ubuntu 24.04 Docker):
+
+- `docker build --no-cache --target suite-base -f docker/Dockerfile --build-arg MAKE_JOBS=8 .` passed.
+- `scripts/docker/run_smokes_tier_a.sh` passed.
+- `scripts/docker/run_smokes_tier_b.sh` with `STORAGE=/storage` produced:
+  - pass: `run_flex_smoke`, `run_cbub_regression_test`
+  - skip: `run_cr_compat_integration_smoke` (ASAN-only path), `run_cr_multi_smoke` (external script dependency), `run_unsorted_cbub_smoke_test` (missing probes fixture)
+  - fail: `test_cr_compat_crispr_calling` (missing expected `outs/*` files in this containerized fixture run)
+- Runtime split verified:
+  - `suite-base` and `test-tier-a` have no Python runtime
+  - `test-tier-b` includes Python runtime for fixture-backed tests
+- `suite-base` contains: `STAR`, `star_feature_call`, `slam_requant`, `pileup_snp`, `flexfilter` (`run_flexfilter_mex` alias), and `remove_y_reads`.
+
 ## Technical Updates
 
 ### Core Updates
