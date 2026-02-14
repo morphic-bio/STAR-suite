@@ -7,6 +7,7 @@
 #include <limits>
 #include <atomic>
 #include <mutex>
+#include <string>
 
 // Log-space constants
 constexpr double LOG_0_FLD = -std::numeric_limits<double>::infinity();

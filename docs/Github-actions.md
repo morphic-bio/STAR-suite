@@ -20,6 +20,29 @@ and when artifacts are published.
 | Tag Push | `v*` | release multi-arch build | release gates | Yes (version tags + release assets + PPA source upload) |
 | Scheduled (optional) | nightly | drift detection build | extended checks | Optional `nightly` tag |
 
+## Path Filters (Implemented)
+
+`ci-pr.yml`, `ci-dev.yml`, and `ci-master.yml` are path-scoped and trigger only when at least one of these changes:
+
+- `.github/workflows/ci-pr.yml`
+- `.github/workflows/ci-dev.yml`
+- `.github/workflows/ci-master.yml`
+- `.github/workflows/release.yml`
+- `docker/**`
+- `scripts/docker/**`
+- `scripts/release/**`
+- `core/**`
+- `flex/**`
+- `slam/**`
+- `tests/**`
+- `debian/**`
+- `Makefile`
+- `README.md`
+- `docs/Github-actions.md`
+- `docs/Star-binary-distribution.md`
+
+`release.yml` is tag-driven (`v*`) and intentionally does not use path filters.
+
 ## Test Tiers
 
 - Tier A:

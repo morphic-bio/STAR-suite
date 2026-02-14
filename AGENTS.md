@@ -151,6 +151,10 @@ Configuration: `mcp_server/config.yaml`
   `arm64`) to stable tags (`latest`, `master-<sha>`).
 - Tags `v*`: run release pipeline (multi-arch publish + GitHub Release artifacts
   + source package upload for PPA build).
+- CI path filters are enabled for `ci-pr.yml`, `ci-dev.yml`, and
+  `ci-master.yml`; these workflows run only when build/test/release infra paths
+  change (see exact globs in `docs/Github-actions.md`).
+- `release.yml` remains tag-triggered on `v*` and is intentionally not path-scoped.
 - Fixture-heavy tests (Tier B) should be run only when fixtures are available
   (self-hosted/scheduled/manual), not on all PRs.
 - Details: `docs/Github-actions.md`.

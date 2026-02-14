@@ -91,6 +91,9 @@ Packaging/release details and artifact policy:
 - `docs/Star-binary-distribution.md`
 - `docs/Github-actions.md`
 
+Compilation details (module-by-module, clean rebuilds, and clean Ubuntu 24.04 validation):
+- `docs/compile_instructions.md`
+
 ## Build Targets
 
 The top-level `Makefile` supports a default build, full build, and conditional include/exclude filters.

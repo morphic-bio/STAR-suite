@@ -5,6 +5,7 @@ Maintainer: STAR-suite Maintainers <maintainers@biodepot.example>
 Build-Depends:
  debhelper-compat (= 13),
  build-essential,
+ xxd | vim-common,
  pkg-config,
  zlib1g-dev,
  libbz2-dev,

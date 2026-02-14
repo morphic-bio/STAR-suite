@@ -2,6 +2,23 @@ name: CI PR
 
 on:
   pull_request:
+    paths:
+      - ".github/workflows/ci-pr.yml"
+      - ".github/workflows/ci-dev.yml"
+      - ".github/workflows/ci-master.yml"
+      - ".github/workflows/release.yml"
+      - "docker/**"
+      - "scripts/docker/**"
+      - "scripts/release/**"
+      - "core/**"
+      - "flex/**"
+      - "slam/**"
+      - "tests/**"
+      - "debian/**"
+      - "Makefile"
+      - "README.md"
+      - "docs/Github-actions.md"
+      - "docs/Star-binary-distribution.md"
 
 permissions:
   contents: read

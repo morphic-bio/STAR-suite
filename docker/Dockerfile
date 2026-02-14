@@ -21,6 +21,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     g++ \
     make \
+    xxd \
     cmake \
     pkg-config \
     zlib1g-dev \

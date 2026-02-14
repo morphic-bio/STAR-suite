@@ -47,7 +47,7 @@ fi
 if ! command -v dh >/dev/null 2>&1; then
   cat >&2 <<EOF
 ERROR: debhelper (dh) is required but not installed.
-Install with: sudo apt-get install -y debhelper devscripts dpkg-dev fakeroot
+Install with: sudo apt-get install -y xxd debhelper devscripts dpkg-dev fakeroot
 EOF
   exit 1
 fi
