@@ -47,10 +47,14 @@ VPATH := $(FLEX_SRC_DIR) $(SLAM_SRC_DIR) $(SLAM_LIBEM_DIR) $(VBEM_SRC_DIR) $(BAM
 
 # pre-defined flags
 LDFLAGS_shared := -pthread -Lhtslib -Bstatic -lhts -Bdynamic -lz -lssl -lcrypto
-LDFLAGS_static := -static -static-libgcc -pthread -Lhtslib -lhts -lz
+# "Static" build follows upstream STAR behavior: link STAR objects and vendored
+# htslib statically while keeping system libs dynamic for broad compatibility.
+LDFLAGS_static := -static-libgcc -static-libstdc++ -pthread -Lhtslib -Bstatic -lhts -Bdynamic -lz -lbz2 -llzma -lcurl -lssl -lcrypto
 LDFLAGS_Mac :=-pthread -lz htslib/libhts.a
 LDFLAGS_Mac_static :=-pthread -lz -static-libgcc htslib/libhts.a
 LDFLAGS_gdb := $(LDFLAGS_shared)
+GLIB_LIBS_SHARED := $(shell pkg-config --libs glib-2.0 2>/dev/null || echo "")
+GLIB_LIBS_STATIC := $(shell pkg-config --static --libs glib-2.0 2>/dev/null || pkg-config --libs glib-2.0 2>/dev/null || echo "")
 
 DATE_FMT = --iso-8601=seconds
 ifdef SOURCE_DATE_EPOCH
@@ -384,6 +388,7 @@ clean:
 	$(MAKE) -C $(LIBFLEX_DIR) clean
 	$(MAKE) -C $(LIBTRIM_DIR) clean
 	$(MAKE) -C $(LIBEM_DIR) clean
+	$(MAKE) -C $(LIBSCRNA_DIR) clean
 
 .PHONY: CLEAN
 CLEAN: clean
@@ -407,7 +412,10 @@ ifneq ($(MAKECMDGOALS),STARforMacGDB)
 Depend.list: $(SOURCES) parametersDefault.xxd htslib
 	echo $(SOURCES)
 	'rm' -f ./Depend.list
-	$(CXX) $(CXXFLAGS_common) -MM $(SOURCES) parametersDefault.xxd htslib >> Depend.list
+	# parametersDefault.xxd is generated input, not a compilation unit.
+	# Ensure it exists before dep-scan and only scan real source files.
+	test -f parametersDefault.xxd || xxd -i parametersDefault > parametersDefault.xxd
+	$(CXX) $(CXXFLAGS_common) -MM $(SOURCES) >> Depend.list
 include Depend.list
 endif
 endif
@@ -442,15 +450,22 @@ libtrim:
 libem:
 	$(MAKE) -C $(LIBEM_DIR) libem.a
 
+# Ensure libscrna is available from clean source exports (e.g. Debian packaging)
+.PHONY: libscrna
+libscrna:
+	$(MAKE) -C $(LIBSCRNA_DIR) libscrna.a
+
+$(LIBSCRNA_LIB): libscrna
+
 STAR$(SFX) : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
-STAR$(SFX) : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS) $(shell pkg-config --libs glib-2.0 2>/dev/null || echo "")
+STAR$(SFX) : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS) $(GLIB_LIBS_SHARED)
 STAR$(SFX) : Depend.list parametersDefault.xxd $(OBJECTS) libflex libtrim libem libprocess_features $(LIBSCRNA_LIB)
 	$(CXX) -o STAR$(SFX) $(CXXFLAGS) $(OBJECTS) $(LIBFLEX_LIB) $(LIBTRIM_LIB) $(LIBEM_LIB) $(PROCESS_FEATURES_LIB) $(LIBSCRNA_LIB) $(LDFLAGS)
 
 STARstatic$(SFX) : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
-STARstatic$(SFX) : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_static) $(LDFLAGS)
-STARstatic$(SFX) : Depend.list parametersDefault.xxd $(OBJECTS)
-	$(CXX) -o STAR$(SFX) $(CXXFLAGS) $(OBJECTS) $(LDFLAGS)
+STARstatic$(SFX) : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_static) $(LDFLAGS) $(GLIB_LIBS_STATIC)
+STARstatic$(SFX) : Depend.list parametersDefault.xxd $(OBJECTS) libflex libtrim libem libprocess_features $(LIBSCRNA_LIB)
+	$(CXX) -o STAR$(SFX) $(CXXFLAGS) $(OBJECTS) $(LIBFLEX_LIB) $(LIBTRIM_LIB) $(LIBEM_LIB) $(PROCESS_FEATURES_LIB) $(LIBSCRNA_LIB) $(LDFLAGS)
 
 STARlong$(SFX) : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) -D'COMPILE_FOR_LONG_READS' $(CXXFLAGS)
 STARlong$(SFX) : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS)

@@ -1,0 +1,27 @@
+#!/usr/bin/make -f
+
+export DH_VERBOSE = 1
+export DEB_BUILD_MAINT_OPTIONS = hardening=+all optimize=-lto
+NUM_JOBS ?= $(shell nproc)
+
+%:
+	dh $@
+
+override_dh_auto_build:
+	$(MAKE) -j$(NUM_JOBS) core
+	$(MAKE) -j$(NUM_JOBS) star-feature-call
+	$(MAKE) -j$(NUM_JOBS) flex-tools
+	$(MAKE) -j$(NUM_JOBS) slam-tools
+	$(MAKE) -j$(NUM_JOBS) yremove-tools
+
+override_dh_auto_install:
+	install -D -m 0755 core/legacy/source/STAR debian/star-suite/usr/bin/STAR
+	install -D -m 0755 core/legacy/source/star_feature_call debian/star-suite/usr/bin/star_feature_call
+	install -D -m 0755 slam/tools/slam_requant/slam_requant debian/star-suite/usr/bin/slam_requant
+	install -D -m 0755 slam/tools/pileup_snp/pileup_snp debian/star-suite/usr/bin/pileup_snp
+	install -D -m 0755 flex/tools/flexfilter/run_flexfilter_mex debian/star-suite/usr/bin/run_flexfilter_mex
+	install -D -m 0755 core/features/yremove_fastq/tools/remove_y_reads/remove_y_reads debian/star-suite/usr/bin/remove_y_reads
+	ln -sf run_flexfilter_mex debian/star-suite/usr/bin/flexfilter
+
+override_dh_auto_test:
+	# Full fixture-backed tests are handled in dedicated CI workflows.

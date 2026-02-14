@@ -1,0 +1,30 @@
+name: CI PR
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-tier-a:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build suite base image
+        run: |
+          chmod +x scripts/docker/*.sh
+          MAKE_JOBS=8 IMAGE_TAG=biodepot/star-suite:ci-pr-${{ github.sha }} \
+            scripts/docker/build_image.sh
+
+      - name: Run Tier A smoke tests
+        run: |
+          MAKE_JOBS=8 \
+          TEST_IMAGE_TAG=biodepot/star-suite:ci-pr-tier-a-${{ github.sha }} \
+            scripts/docker/run_smokes_tier_a.sh

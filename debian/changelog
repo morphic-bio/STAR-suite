@@ -1,0 +1,5 @@
+star-suite (2.7.11b+starsuite1-1) unstable; urgency=medium
+
+  * Initial Debian packaging skeleton for STAR-suite binary distribution.
+
+ -- STAR-suite Maintainers <maintainers@biodepot.example>  Sat, 14 Feb 2026 06:00:00 +0000

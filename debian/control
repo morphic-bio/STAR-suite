@@ -1,0 +1,28 @@
+Source: star-suite
+Section: science
+Priority: optional
+Maintainer: STAR-suite Maintainers <maintainers@biodepot.example>
+Build-Depends:
+ debhelper-compat (= 13),
+ build-essential,
+ pkg-config,
+ zlib1g-dev,
+ libbz2-dev,
+ liblzma-dev,
+ libcurl4-openssl-dev | libcurl4-gnutls-dev,
+ libssl-dev,
+ libglib2.0-dev,
+ libhts-dev
+Standards-Version: 4.6.2
+Rules-Requires-Root: no
+Homepage: https://github.com/morphic-bio/STAR-suite
+
+Package: star-suite
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Description: STAR-suite binary package for STAR, SLAM, Flex, and perturb tooling
+ STAR-suite extends upstream STAR with integrated modules for SLAM-seq,
+ Flex processing, perturb-seq compatibility, and helper tools.
+ .
+ This package installs core executable binaries used in STAR-suite runtime and
+ release workflows.

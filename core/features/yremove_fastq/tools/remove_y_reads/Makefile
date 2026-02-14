@@ -3,15 +3,17 @@
 ROOT_DIR := $(abspath ../../../../..)
 HTSLIB_DIR = $(ROOT_DIR)/core/legacy/source/htslib
 HTSLIB = $(HTSLIB_DIR)/libhts.a
-CC = gcc
-CFLAGS = -O3 -Wall -Wextra -pthread -I$(HTSLIB_DIR) -I$(HTSLIB_DIR)/htslib
-LDFLAGS = -L$(HTSLIB_DIR) -Bstatic -lhts -Bdynamic -lz -lpthread
+CC ?= cc
+CFLAGS ?= -O3 -Wall -Wextra -pthread
+CPPFLAGS ?=
+LOCAL_CPPFLAGS = -I$(HTSLIB_DIR) -I$(HTSLIB_DIR)/htslib
+LOCAL_LDLIBS = $(HTSLIB) -lz -lpthread
 
 TARGET = remove_y_reads
 SRC = remove_y_reads.c
 
 $(TARGET): $(SRC) $(HTSLIB)
-	$(CC) $(CFLAGS) -o $(TARGET) $(SRC) $(LDFLAGS)
+	$(CC) $(CPPFLAGS) $(LOCAL_CPPFLAGS) $(CFLAGS) -o $(TARGET) $(SRC) $(LDFLAGS) $(LOCAL_LDLIBS)
 
 clean:
 	rm -f $(TARGET) $(TARGET).o

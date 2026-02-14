@@ -130,6 +130,8 @@ Configuration: `mcp_server/config.yaml`
 - `docs/UNSORTED_BAM_CBUB_IMPLEMENTATION_SUMMARY.md`
 - `docs/CRISPR_FEATURE_CALLING_IMPLEMENTATION_SUMMARY.md`
 - `docs/HEATMAP_REFACTOR_SUMMARY.md`
+- `docs/Github-actions.md`
+- `docs/Star-binary-distribution.md`
 - `docs/feature_barcodes.md`
 - `docs/todos`
 - `tests/ARTIFACTS.md`
@@ -139,6 +141,19 @@ Configuration: `mcp_server/config.yaml`
 
 - Feature branches merge into `perturb`, then squash-merge into `master`.
 - Keep large binaries and datasets untracked; update `.gitignore` if needed.
+
+## GitHub Actions CI/CD Policy
+
+- Do not publish images or release artifacts on every push.
+- Pull requests: run fast checks only (build sanity + Tier A smoke); no publish.
+- Push to `dev`: run integration checks and optionally publish `dev-<sha>` images.
+- Push to `master`: run required checks and publish multi-arch images (`amd64`,
+  `arm64`) to stable tags (`latest`, `master-<sha>`).
+- Tags `v*`: run release pipeline (multi-arch publish + GitHub Release artifacts
+  + source package upload for PPA build).
+- Fixture-heavy tests (Tier B) should be run only when fixtures are available
+  (self-hosted/scheduled/manual), not on all PRs.
+- Details: `docs/Github-actions.md`.
 
 ## Output Hygiene
 

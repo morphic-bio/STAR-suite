@@ -1,0 +1,66 @@
+name: CI Dev
+
+on:
+  push:
+    branches:
+      - dev
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-tier-a:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build suite base image
+        run: |
+          chmod +x scripts/docker/*.sh
+          MAKE_JOBS=8 IMAGE_TAG=biodepot/star-suite:ci-dev-${{ github.sha }} \
+            scripts/docker/build_image.sh
+
+      - name: Run Tier A smoke tests
+        run: |
+          MAKE_JOBS=8 \
+          TEST_IMAGE_TAG=biodepot/star-suite:ci-dev-tier-a-${{ github.sha }} \
+            scripts/docker/run_smokes_tier_a.sh
+
+  publish-dev-image:
+    needs: build-and-tier-a
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    if: ${{ secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != '' }}
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push dev image (amd64)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: suite-base
+          platforms: linux/amd64
+          push: true
+          build-args: |
+            MAKE_JOBS=8
+          tags: |
+            biodepot/star-suite:dev-${{ github.sha }}
+            biodepot/star-suite:dev-latest

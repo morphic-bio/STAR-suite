@@ -1,0 +1,151 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-release-artifacts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install packaging dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            debhelper \
+            devscripts \
+            dpkg-dev \
+            fakeroot \
+            gnupg \
+            pkg-config \
+            zlib1g-dev \
+            libbz2-dev \
+            liblzma-dev \
+            libcurl4-gnutls-dev \
+            libssl-dev \
+            libglib2.0-dev \
+            libhts-dev
+
+      - name: Build static release tarball
+        run: |
+          chmod +x scripts/release/*.sh
+          scripts/release/build_static_tarball.sh \
+            --version "${GITHUB_REF_NAME}" \
+            --out-dir "dist/release"
+
+      - name: Build Debian binary package
+        run: |
+          scripts/release/build_deb_binary_package.sh \
+            --out-dir "dist/release/deb"
+
+      - name: Validate .deb install/uninstall (Ubuntu 24.04)
+        run: |
+          scripts/release/validate_deb_install_uninstall.sh
+
+      - name: Build source package for PPA
+        run: |
+          scripts/release/build_source_package.sh \
+            --out-dir "dist/release/source"
+
+      - name: Import Debian signing key
+        if: ${{ secrets.DEB_SIGNING_KEY != '' && secrets.DEB_SIGNING_KEY_ID != '' }}
+        env:
+          DEB_SIGNING_KEY: ${{ secrets.DEB_SIGNING_KEY }}
+        run: |
+          export GNUPGHOME="${RUNNER_TEMP}/gnupg"
+          mkdir -p "${GNUPGHOME}"
+          chmod 700 "${GNUPGHOME}"
+          printf '%s' "${DEB_SIGNING_KEY}" | gpg --batch --import
+          echo "GNUPGHOME=${GNUPGHOME}" >> "${GITHUB_ENV}"
+
+      - name: Sign source package artifacts
+        if: ${{ secrets.DEB_SIGNING_KEY != '' && secrets.DEB_SIGNING_KEY_ID != '' }}
+        env:
+          DEB_SIGNING_KEY_ID: ${{ secrets.DEB_SIGNING_KEY_ID }}
+          DEB_SIGNING_KEY_PASSPHRASE: ${{ secrets.DEB_SIGNING_KEY_PASSPHRASE }}
+        run: |
+          scripts/release/sign_source_package.sh \
+            --in-dir "dist/release/source" \
+            --key-id "${DEB_SIGNING_KEY_ID}"
+
+      - name: Source signing skipped (no signing secrets configured)
+        if: ${{ !(secrets.DEB_SIGNING_KEY != '' && secrets.DEB_SIGNING_KEY_ID != '') }}
+        run: |
+          echo "Skipping source package signing; configure DEB_SIGNING_KEY and DEB_SIGNING_KEY_ID to enable."
+
+      - name: Generate checksums
+        run: |
+          scripts/release/create_checksums.sh "dist/release"
+
+      - name: Upload release artifacts (workflow artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-artifacts-${{ github.ref_name }}
+          path: dist/release/**
+          if-no-files-found: error
+
+  publish-release-images:
+    needs: build-release-artifacts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    if: ${{ secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != '' }}
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push versioned multi-arch image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: suite-base
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            MAKE_JOBS=8
+          tags: |
+            biodepot/star-suite:${{ github.ref_name }}
+            biodepot/star-suite:latest
+
+  publish-github-release:
+    needs:
+      - build-release-artifacts
+      - publish-release-images
+    if: ${{ always() && needs.build-release-artifacts.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-artifacts-${{ github.ref_name }}
+          path: dist/release
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/release/**/*
+          generate_release_notes: true
+          draft: false
+          prerelease: false
