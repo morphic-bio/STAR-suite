@@ -126,7 +126,7 @@ This fork adds several features beyond upstream STAR:
 
 ### Index-Time Features
 
-- **[AutoIndex + CellRanger-style references](docs/autoindex_cellranger.md)**: Optional reference download + integrity verification, CellRanger-style FASTA/GTF formatting, and automatic index creation in `--genomeDir` (`--autoIndex`, `--forceIndex`, `--forceAllIndex`).
+- **[AutoIndex + CellRanger-style references](docs/autoindex_cellranger.md)**: Optional reference download + integrity verification, CellRanger-style FASTA/GTF formatting, and automatic index creation in `--genomeDir` (`--autoIndex`, `--forceIndex`, `--forceAllIndex`, `--cellrangerLegacyGtfFilter`). Parity is guaranteed for formatted input files (`genome.fa`/`genes.gtf`) only.
 
 - **[Transcriptome FASTA Generation](#transcriptome-fasta-generation)**: Generate `transcriptome.fa` during index creation for Salmon quantification parity and TranscriptVB error modeling. Eliminates the need to run gffread/rsem-prepare-reference separately.
 
@@ -424,6 +424,7 @@ STAR --runMode genomeGenerate \
   --genomeDir /path/to/index \
   --autoIndex Yes \
   --cellrangerStyleIndex Yes \
+  --cellrangerLegacyGtfFilter Auto \
   --autoCksumUpdate Yes \
   --sjdbOverhang 100 \
   --runThreadN 16
@@ -433,6 +434,12 @@ Key outputs and paths:
 - Formatted inputs: `${genomeDir}/cellranger_ref/genome.fa`, `${genomeDir}/cellranger_ref/genes.gtf`
 - Download cache (default): `${genomeDir}/cellranger_ref_cache` (override with `--cellrangerStyleCacheDir`)
 - Rebuild controls: `--forceIndex Yes` (re-index), `--forceAllIndex Yes` (re-download + re-index)
+
+Compatibility notes:
+- Downloaded `refdata-gex-GRCh38-2024-A/star/genomeParameters.txt` reports `versionGenome 2.7.1a` and indicates it was built with Cell Ranger 8.0.0's STAR binary.
+- Some benchmark bundles also include `star_2.7.11b/` as a locally regenerated compatibility index; it is distinct from the downloaded Cell Ranger `star/` index.
+- Updated `2024-A` filtering adds 47 `protein_coding_LoF` genes and excludes 33 chrY PAR genes relative to legacy filtering.
+- STAR-suite guarantees parity for formatted input files only (`cellranger_ref/genome.fa`, `cellranger_ref/genes.gtf`); generated STAR index binaries can differ by STAR index engine/version and build knobs.
 
 See [docs/autoindex_cellranger.md](docs/autoindex_cellranger.md) for URL selection (`--cellrangerRefRelease` / `--faUrl` / `--gtfUrl`), checksum flags, and parity test scripts.
 

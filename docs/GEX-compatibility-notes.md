@@ -4,6 +4,17 @@
 
 These notes capture the GEX parity settings and the main reasons Pearson/Spearman can drop when comparing STARsolo outputs to Cell Ranger filtered MEX outputs.
 
+## Reference/Input Parity Scope
+
+For CellRanger-style reference preparation (`--autoIndex Yes --cellrangerStyleIndex Yes`), parity guarantees apply to formatted input files:
+
+- `${genomeDir}/cellranger_ref/genome.fa`
+- `${genomeDir}/cellranger_ref/genes.gtf`
+
+For `2024-A`, updated filtering mode (`--cellrangerLegacyGtfFilter No`, or `Auto` with `2024-A`) includes 47 `protein_coding_LoF` genes and excludes 33 chrY PAR genes versus legacy mode.
+
+Index binaries (`Genome`, `SA`, `SAindex`) are not guaranteed byte-identical across STAR builds/versions, even with identical FASTA/GTF inputs.
+
 ## CR-Parity Parameter Set (Recommended)
 
 Use these settings when the goal is to match Cell Ranger GEX counts as closely as possible:

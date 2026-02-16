@@ -374,6 +374,14 @@ void Genome::genomeGenerate() {
         formatConfig.outputFastaPath = formattedFasta;
         formatConfig.inputGtfPath = inputGtf;
         formatConfig.outputGtfPath = formattedGtf;
+        bool useLegacyGtfFilter = pGe.cellrangerStyle.legacyGtfFilterIsAuto
+            ? (pGe.cellrangerStyle.refReleaseCanonical == "2020-A")
+            : pGe.cellrangerStyle.legacyGtfFilterBool;
+        formatConfig.useLegacyGtfFilter = useLegacyGtfFilter;
+        P.inOut->logMain << "  GTF filter mode: "
+                         << (useLegacyGtfFilter ? "legacy" : "updated")
+                         << " (setting: --cellrangerLegacyGtfFilter " << pGe.cellrangerStyle.legacyGtfFilter
+                         << ", release: " << pGe.cellrangerStyle.refReleaseCanonical << ")\n";
         
         P.inOut->logMain << "  Formatting FASTA and GTF files...\n";
         CellRangerFormatter::Result formatResult = CellRangerFormatter::format(formatConfig);

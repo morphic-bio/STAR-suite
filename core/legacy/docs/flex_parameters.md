@@ -69,6 +69,7 @@ See [docs/Y_CHROMOSOME_BAM_SPLIT.md](Y_CHROMOSOME_BAM_SPLIT.md) for details.
 | `--forceAllIndex` | `No` | Re-download/re-format/rebuild (wipes cache + formatted files) |
 | `--cellrangerStyleIndex` | `No` | Format FASTA/GTF using CellRanger-style rules before indexing |
 | `--cellrangerRefRelease` | `2024-A` | Default URL set used by AutoIndex when no inputs provided (`2024-A`/`2020-A`) |
+| `--cellrangerLegacyGtfFilter` | `Auto` | `Auto`/`Yes`/`No`: release-aware legacy vs updated CR filtering (`Auto`: `2020-A` legacy, `2024-A` updated) |
 | `--cellrangerStyleCacheDir` | `-` | Cache directory for downloads and checksum cache (default `${genomeDir}/cellranger_ref_cache`) |
 | `--cellrangerStyleDownloadOnly` | `No` | Download-only mode (exit after download; skip formatting and indexing) |
 | `--faUrl` | `-` | FASTA URL (must be provided together with `--gtfUrl`) |
@@ -77,7 +78,11 @@ See [docs/Y_CHROMOSOME_BAM_SPLIT.md](Y_CHROMOSOME_BAM_SPLIT.md) for details.
 | `--replaceUnverifiableFiles` | `No` | Replace existing final files that cannot be verified (checksum mismatches still error) |
 | `--allUntrustedUrl` | `No` | Allow untrusted URLs without checksums (disables integrity checking for those URLs) |
 
-See [docs/autoindex_cellranger.md](autoindex_cellranger.md) for usage examples and output layout.
+Notes:
+- `2024-A` updated mode adds 47 `protein_coding_LoF` genes and excludes 33 chrY PAR genes relative to legacy mode.
+- Input-file parity is guaranteed for formatted `genome.fa`/`genes.gtf`; STAR index binaries may still differ by STAR version/index engine settings.
+
+See [docs/autoindex_cellranger.md](autoindex_cellranger.md) for release provenance and parity details.
 
 ### Transcriptome FASTA Generation
 

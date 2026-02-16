@@ -73,12 +73,15 @@ public:
         string autoCksumUpdate;// --autoCksumUpdate Yes/No (auto-fill missing cksum from CHECKSUMS files)
         string replaceUnverifiableFiles;// --replaceUnverifiableFiles Yes/No (replace unverifiable existing files)
         string refRelease;     // --cellrangerRefRelease (default: 2024-A)
+        string legacyGtfFilter; // --cellrangerLegacyGtfFilter Auto/Yes/No
         string refReleaseCanonical; // Normalized canonical release string (2024-A or 2020-A)
         bool indexEnabledBool; // Converted from indexEnabled string
         bool downloadOnlyBool; // Converted from downloadOnly string
         bool allUntrustedUrlBool;// Converted from allUntrustedUrl string
         bool autoCksumUpdateBool;// Converted from autoCksumUpdate string
         bool replaceUnverifiableFilesBool;// Converted from replaceUnverifiableFiles string
+        bool legacyGtfFilterBool; // Converted from legacyGtfFilter when explicitly Yes/No
+        bool legacyGtfFilterIsAuto; // True when legacyGtfFilter is Auto
     } cellrangerStyle;
     
     // Auto-index workflow parameters

@@ -183,7 +183,7 @@ Recent updates to the Core module (STAR 2.7.11b and prior) include:
   - **Output routing**: use `--outFileNamePrefixAuto 1` for per-sample subdirectories under one output root.
 - **Transcriptome Output**: Replaced `--quantTranscriptomeBan` with `--quantTranscriptomeSAMoutput` for more explicit control (e.g., `BanSingleEnd_ExtendSoftclip`).
 - **TranscriptVB Quantification**: Variational Bayes and EM quantification for transcript-level abundance (`--quantMode TranscriptVB`), with parity-oriented behavior against Salmon alignment-mode.
-- **Reference Automation**: Automated reference download/build (`--autoIndex`, `--autoCksumUpdate`) plus automatic `transcriptome.fa` generation during indexing for transcript-level quant workflows.
+- **Reference Automation**: Automated reference download/build (`--autoIndex`, `--autoCksumUpdate`, `--cellrangerLegacyGtfFilter`) plus automatic `transcriptome.fa` generation during indexing for transcript-level quant workflows. CellRanger parity is guaranteed for formatted reference inputs (`cellranger_ref/genome.fa`, `cellranger_ref/genes.gtf`) only.
 - **Cutadapt-Compatible Trimming**: Native cutadapt-style trimming path (`--trimCutadapt Yes`) for bulk/PE workflows.
 - **Samtools-style BAM Sorting**: Spill-to-disk sort (`--outBAMsortMethod samtools`) to reduce peak RAM pressure versus in-memory bin sorting.
 - **Y/NoY Separation**: Split BAM and FASTQ outputs by chrY alignment (`--emitNoYBAM`, `--emitYNoYFastq`).
@@ -268,6 +268,7 @@ See `flex/README_flex.md` for full reference.
 - **Reference**:
   - `--autoIndex Yes`: Enable automated reference download/build.
   - `--cellrangerStyleIndex Yes`: Use CellRanger-style reference formatting.
+  - `--cellrangerLegacyGtfFilter Auto|Yes|No`: Select legacy vs updated CellRanger-style filtering mode.
 - **Sorting**:
   - `--outBAMsortMethod samtools`: Enable spill-to-disk sorting.
 

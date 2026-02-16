@@ -25,8 +25,8 @@ extern "C" {
 
 namespace CellRangerFormatter {
 
-// Allowed biotypes (exact match from Perl)
-static const std::set<std::string> ALLOWED_BIOTYPES = {
+// Allowed biotypes (legacy Perl parity)
+static const std::set<std::string> LEGACY_ALLOWED_BIOTYPES = {
     "protein_coding", "lncRNA",
     "IG_C_gene", "IG_D_gene", "IG_J_gene", "IG_LV_gene", "IG_V_gene",
     "IG_V_pseudogene", "IG_J_pseudogene", "IG_C_pseudogene",
@@ -34,12 +34,52 @@ static const std::set<std::string> ALLOWED_BIOTYPES = {
     "TR_V_pseudogene", "TR_J_pseudogene"
 };
 
+// Updated 10x 2024-A behavior: legacy set + protein_coding_LoF
+static const std::set<std::string> UPDATED_ALLOWED_BIOTYPES = {
+    "protein_coding", "protein_coding_LoF", "lncRNA",
+    "IG_C_gene", "IG_D_gene", "IG_J_gene", "IG_LV_gene", "IG_V_gene",
+    "IG_V_pseudogene", "IG_J_pseudogene", "IG_C_pseudogene",
+    "TR_C_gene", "TR_D_gene", "TR_J_gene", "TR_V_gene",
+    "TR_V_pseudogene", "TR_J_pseudogene"
+};
+
+// Updated filtering masks chrY PAR termini by coordinate.
+static const int64_t CHRY_KEEP_START = 2781479;
+static const int64_t CHRY_KEEP_END = 56887903;
+static const int64_t CHRY_MASK_LEFT_START = 10001;
+static const int64_t CHRY_MASK_RIGHT_END = 57217415;
+
 static const std::string GENE_ID_KEY = "gene_id \"";
 static const std::string TRANSCRIPT_ID_KEY = "transcript_id \"";
 static const std::string EXON_ID_KEY = "exon_id \"";
 static const std::string GENE_PREFIX = "ENSG";
 static const std::string TRANSCRIPT_PREFIX = "ENST";
 static const std::string EXON_PREFIX = "ENSE";
+
+static const std::set<std::string>& getAllowedBiotypes(bool useLegacyGtfFilter) {
+    return useLegacyGtfFilter ? LEGACY_ALLOWED_BIOTYPES : UPDATED_ALLOWED_BIOTYPES;
+}
+
+static bool isParYMaskedRecord(const std::vector<std::string>& parts, const std::string& geneID) {
+    (void)geneID;
+    if (parts.size() < 4 || parts[0] != "chrY") {
+        return false;
+    }
+    int64_t start = 0;
+    try {
+        start = std::stoll(parts[3]);
+    } catch (...) {
+        return false;
+    }
+    return (start < CHRY_KEEP_START || start > CHRY_KEEP_END);
+}
+
+static bool isParYMaskedFastaPos(const uint64_t pos1Based) {
+    return (pos1Based >= static_cast<uint64_t>(CHRY_MASK_LEFT_START) &&
+            pos1Based <= static_cast<uint64_t>(CHRY_KEEP_START)) ||
+           (pos1Based >= static_cast<uint64_t>(CHRY_KEEP_END) &&
+            pos1Based <= static_cast<uint64_t>(CHRY_MASK_RIGHT_END));
+}
 
 static bool parseGeneIdPass1(const std::string& attrs, std::string& geneId) {
     size_t pos = attrs.find(GENE_ID_KEY);
@@ -249,7 +289,7 @@ static vector<string> split(const string& s, char delim) {
 }
 
 // FASTA transformation: modifyChrNames
-Result formatFasta(const string& inputPath, const string& outputPath) {
+Result formatFasta(const string& inputPath, const string& outputPath, bool useLegacyGtfFilter) {
     Result result;
     
     if (!createDirectoryRecursive(outputPath)) {
@@ -272,6 +312,8 @@ Result formatFasta(const string& inputPath, const string& outputPath) {
     }
     
     string line;
+    bool applyUpdatedChrYMask = false;
+    uint64_t chrPos = 1; // 1-based position within current sequence
     while (getline(inFile, line)) {
         if (line.empty()) {
             outFile << "\n";
@@ -294,18 +336,36 @@ Result formatFasta(const string& inputPath, const string& outputPath) {
             if (regex_search(chrName, match, numChrRegex) && match.size() > 1) {
                 string matchedPart = match[1].str();
                 outFile << ">chr" << matchedPart << " " << matchedPart << "\n";
+                applyUpdatedChrYMask = (!useLegacyGtfFilter && matchedPart == "Y");
             }
             // Match >MT → >chrM MT (matches Perl: substr($chr,1,2) eq "MT")
             else if (chrName.length() >= 2 && chrName.substr(0, 2) == "MT") {
                 outFile << ">chrM MT\n";
+                applyUpdatedChrYMask = false;
             }
             // All others → >orig orig (matches Perl: printf "$chr %s\n",substr($chr,1))
             else {
                 outFile << chr << " " << chrName << "\n";
+                applyUpdatedChrYMask = false;
             }
+            chrPos = 1;
         } else {
-            // Sequence line - output as-is
-            outFile << line << "\n";
+            if (!applyUpdatedChrYMask) {
+                // Sequence line - output as-is
+                outFile << line << "\n";
+                continue;
+            }
+
+            // Updated mode: hard-mask chrY PAR termini to N.
+            string maskedLine = line;
+            for (size_t i = 0; i < maskedLine.size(); ++i) {
+                uint64_t pos1Based = chrPos + i;
+                if (isParYMaskedFastaPos(pos1Based)) {
+                    maskedLine[i] = 'N';
+                }
+            }
+            outFile << maskedLine << "\n";
+            chrPos += static_cast<uint64_t>(line.size());
         }
     }
     
@@ -330,7 +390,7 @@ Result formatFasta(const string& inputPath, const string& outputPath) {
 }
 
 // GTF Pass 1: Generate filter for GTF (build allowed gene_id set)
-static bool generateFilterForGTF(const string& gtfPath, unordered_set<string>& goodGenes, string& errorMsg) {
+static bool generateFilterForGTF(const string& gtfPath, bool useLegacyGtfFilter, unordered_set<string>& goodGenes, string& errorMsg) {
     bool isGzip = (gtfPath.length() > 3 && gtfPath.substr(gtfPath.length() - 3) == ".gz");
 
     goodGenes.reserve(200000);
@@ -395,11 +455,16 @@ static bool generateFilterForGTF(const string& gtfPath, unordered_set<string>& g
                 continue; // Already processed
             }
             
-            // Check conditions: gene_type, transcript_type, no PAR, no readthrough
+            if (!useLegacyGtfFilter && isParYMaskedRecord(parts, geneID)) {
+                continue;
+            }
+
+            // Check conditions: gene_type, transcript_type, no PAR tag, no readthrough tag
             bool hasGeneType = false, hasTranscriptType = false;
             bool hasPAR = false, hasReadthrough = false;
             
-            for (const auto& biotype : ALLOWED_BIOTYPES) {
+            const std::set<std::string>& allowedBiotypes = getAllowedBiotypes(useLegacyGtfFilter);
+            for (const auto& biotype : allowedBiotypes) {
                 if (attrs.find("gene_type \"" + biotype + "\"") != string::npos) {
                     hasGeneType = true;
                 }
@@ -416,8 +481,8 @@ static bool generateFilterForGTF(const string& gtfPath, unordered_set<string>& g
             }
             
             if (hasGeneType && hasTranscriptType && !hasPAR && !hasReadthrough) {
-            goodGenes.insert(geneID);
-        }
+                goodGenes.insert(geneID);
+            }
     }
     
     if (isGzip) {
@@ -434,13 +499,13 @@ static bool generateFilterForGTF(const string& gtfPath, unordered_set<string>& g
 }
 
 // GTF Pass 2: Modify GTF
-Result formatGtf(const string& inputPath, const string& outputPath) {
+Result formatGtf(const string& inputPath, const string& outputPath, bool useLegacyGtfFilter) {
     Result result;
     
     // Pass 1: Build allowed gene_id set
     unordered_set<string> goodGenes;
     string errorMsg;
-    if (!generateFilterForGTF(inputPath, goodGenes, errorMsg)) {
+    if (!generateFilterForGTF(inputPath, useLegacyGtfFilter, goodGenes, errorMsg)) {
         result.errorMessage = errorMsg;
         return result;
     }
@@ -520,7 +585,7 @@ Result formatGtf(const string& inputPath, const string& outputPath) {
         vector<string> parts = split(line, '\t');
         if (parts.size() < 9) continue;
         
-        // Skip if chrY and has PAR tag
+        // Keep Perl-compatible chrY PAR-tag exclusion in both modes.
         if (parts[0] == "chrY" && parts[8].find("tag \"PAR\"") != string::npos) {
             continue;
         }
@@ -533,6 +598,10 @@ Result formatGtf(const string& inputPath, const string& outputPath) {
         string geneID;
         string geneVersion;
         if (!parseIdWithVersion(infoParts[0], GENE_ID_KEY, GENE_PREFIX, geneID, geneVersion)) {
+            continue;
+        }
+
+        if (!useLegacyGtfFilter && isParYMaskedRecord(parts, geneID)) {
             continue;
         }
         
@@ -616,14 +685,14 @@ Result format(const Config& config) {
     Result result;
     
     // Format FASTA
-    Result fastaResult = formatFasta(config.inputFastaPath, config.outputFastaPath);
+    Result fastaResult = formatFasta(config.inputFastaPath, config.outputFastaPath, config.useLegacyGtfFilter);
     if (!fastaResult.success) {
         result.errorMessage = "FASTA formatting failed: " + fastaResult.errorMessage;
         return result;
     }
     
     // Format GTF
-    Result gtfResult = formatGtf(config.inputGtfPath, config.outputGtfPath);
+    Result gtfResult = formatGtf(config.inputGtfPath, config.outputGtfPath, config.useLegacyGtfFilter);
     if (!gtfResult.success) {
         result.errorMessage = "GTF formatting failed: " + gtfResult.errorMessage;
         return result;

@@ -1,7 +1,7 @@
 /**
  * Test driver for CellRangerFormatter
  * 
- * Usage: ./test_cellranger_format <input_fasta> <input_gtf> <output_fasta> <output_gtf>
+ * Usage: ./test_cellranger_format <input_fasta> <input_gtf> <output_fasta> <output_gtf> [legacy|updated]
  * 
  * Example:
  *   ./test_cellranger_format \
@@ -16,9 +16,10 @@
 #include "../source/CellRangerFormatter.h"
 
 void printUsage(const char* progName) {
-    std::cerr << "Usage: " << progName << " <input_fasta> <input_gtf> <output_fasta> <output_gtf>\n";
+    std::cerr << "Usage: " << progName << " <input_fasta> <input_gtf> <output_fasta> <output_gtf> [legacy|updated]\n";
     std::cerr << "\nExample:\n";
     std::cerr << "  " << progName << " test_genome.fa test_genes.gtf output_genome.fa output_genes.gtf\n";
+    std::cerr << "  " << progName << " test_genome.fa test_genes.gtf output_genome.fa output_genes.gtf updated\n";
 }
 
 int main(int argc, char** argv) {
@@ -32,6 +33,20 @@ int main(int argc, char** argv) {
     config.inputGtfPath = argv[2];
     config.outputFastaPath = argv[3];
     config.outputGtfPath = argv[4];
+    config.useLegacyGtfFilter = true;
+
+    if (argc >= 6) {
+        std::string mode = argv[5];
+        if (mode == "legacy") {
+            config.useLegacyGtfFilter = true;
+        } else if (mode == "updated") {
+            config.useLegacyGtfFilter = false;
+        } else {
+            std::cerr << "ERROR: invalid mode '" << mode << "'. Use legacy or updated.\n";
+            printUsage(argv[0]);
+            return 1;
+        }
+    }
     
     std::cout << "CellRangerFormatter Test Driver\n";
     std::cout << "===============================\n";
@@ -39,6 +54,7 @@ int main(int argc, char** argv) {
     std::cout << "Input GTF: " << config.inputGtfPath << "\n";
     std::cout << "Output FASTA: " << config.outputFastaPath << "\n";
     std::cout << "Output GTF: " << config.outputGtfPath << "\n";
+    std::cout << "GTF Filter Mode: " << (config.useLegacyGtfFilter ? "legacy" : "updated") << "\n";
     std::cout << "\n";
     
     CellRangerFormatter::Result result = CellRangerFormatter::format(config);
@@ -51,4 +67,3 @@ int main(int argc, char** argv) {
     std::cout << "SUCCESS: Files formatted successfully\n";
     return 0;
 }
-

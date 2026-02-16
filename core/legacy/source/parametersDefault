@@ -129,6 +129,15 @@ cellrangerRefRelease            2024-A
                                 Aliases (case-insensitive): 2024-A, 2024A, 2024 and 2020-A, 2020A, 2020
                                 Explicit inputs (--faUrl/--gtfUrl or --genomeFastaFiles/--sjdbGTFfile) always override this setting
 
+cellrangerLegacyGtfFilter       Auto
+    string:                     Auto|Yes|No - control legacy CellRanger-style GTF filtering behavior
+                                Auto        ... release-aware default: 2020-A uses legacy filtering, 2024-A uses updated filtering
+                                Yes         ... force legacy filtering (Perl parity: no protein_coding_LoF, PAR/readthrough tag logic)
+                                No          ... force updated filtering (includes protein_coding_LoF + PAR-Y coordinate masking)
+                                2024-A delta vs legacy: +47 protein_coding_LoF genes, -33 chrY PAR genes
+                                Parity guarantee applies to formatted input files only
+                                (${genomeDir}/cellranger_ref/genome.fa and genes.gtf); STAR index binaries may differ by STAR version/engine.
+
 ### Auto-Index Workflow Parameters - only used with --runMode genomeGenerate
 
 autoIndex                       No

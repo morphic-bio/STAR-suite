@@ -115,6 +115,37 @@ void ParametersGenome::initialize(Parameters *pPin)
         // Store normalized input for logging
         cellrangerStyle.refRelease = cellrangerStyle.refReleaseCanonical;
     }
+
+    // Parse and normalize cellrangerLegacyGtfFilter
+    {
+        string mode = cellrangerStyle.legacyGtfFilter;
+        if (mode.empty() || mode == "-") {
+            mode = "Auto";
+        }
+
+        string normalized = mode;
+        std::transform(normalized.begin(), normalized.end(), normalized.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+
+        if (normalized == "auto") {
+            cellrangerStyle.legacyGtfFilterIsAuto = true;
+            cellrangerStyle.legacyGtfFilterBool = false;
+            cellrangerStyle.legacyGtfFilter = "Auto";
+        } else if (normalized == "yes") {
+            cellrangerStyle.legacyGtfFilterIsAuto = false;
+            cellrangerStyle.legacyGtfFilterBool = true;
+            cellrangerStyle.legacyGtfFilter = "Yes";
+        } else if (normalized == "no") {
+            cellrangerStyle.legacyGtfFilterIsAuto = false;
+            cellrangerStyle.legacyGtfFilterBool = false;
+            cellrangerStyle.legacyGtfFilter = "No";
+        } else {
+            ostringstream errOut;
+            errOut << "EXITING because of FATAL PARAMETER ERROR: unrecognized option in --cellrangerLegacyGtfFilter=" << mode << "\n";
+            errOut << "SOLUTION: use one of the allowed values: Auto, Yes, or No\n";
+            exitWithError(errOut.str(), std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
+        }
+    }
     
     // Initialize auto-index workflow settings (case-insensitive Yes/No)
     autoIndexWorkflow.autoIndexBool = isYes(autoIndexWorkflow.autoIndex);

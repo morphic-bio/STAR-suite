@@ -26,8 +26,9 @@ struct Config {
     std::string outputFastaPath;   // Output FASTA file
     std::string inputGtfPath;      // Input GTF file
     std::string outputGtfPath;      // Output GTF file
+    bool useLegacyGtfFilter;       // Legacy Perl parity filter mode
     
-    Config() {}
+    Config() : useLegacyGtfFilter(true) {}
 };
 
 // Result struct
@@ -42,8 +43,8 @@ struct Result {
 Result format(const Config& config);
 
 // Individual formatters (exposed for testing)
-Result formatFasta(const std::string& inputPath, const std::string& outputPath);
-Result formatGtf(const std::string& inputPath, const std::string& outputPath);
+Result formatFasta(const std::string& inputPath, const std::string& outputPath, bool useLegacyGtfFilter = true);
+Result formatGtf(const std::string& inputPath, const std::string& outputPath, bool useLegacyGtfFilter = true);
 
 // Download reference files
 // Uses FTP/HTTP with optional cksum verification for integrity

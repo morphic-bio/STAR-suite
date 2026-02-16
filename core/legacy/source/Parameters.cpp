@@ -184,6 +184,7 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar <string> (-1, -1, "autoCksumUpdate", &pGe.cellrangerStyle.autoCksumUpdate));
     parArray.push_back(new ParameterInfoScalar <string> (-1, -1, "replaceUnverifiableFiles", &pGe.cellrangerStyle.replaceUnverifiableFiles));
     parArray.push_back(new ParameterInfoScalar <string> (-1, -1, "cellrangerRefRelease", &pGe.cellrangerStyle.refRelease));
+    parArray.push_back(new ParameterInfoScalar <string> (-1, -1, "cellrangerLegacyGtfFilter", &pGe.cellrangerStyle.legacyGtfFilter));
     
     // Auto-index workflow parameters
     parArray.push_back(new ParameterInfoScalar <string> (-1, -1, "autoIndex", &pGe.autoIndexWorkflow.autoIndex));
