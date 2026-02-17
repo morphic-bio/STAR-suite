@@ -11,6 +11,7 @@
 #include <cstdlib>
 #include <cstdio>
 #include <cctype>
+#include <zlib.h>
 using std::cerr;
 using std::endl;
 
@@ -70,6 +71,88 @@ static bool needsNamespaceTranslation(const string& inputChemistry, const string
     return inNorm != outNorm;
 }
 
+static bool gzGetLine(gzFile file, string& lineOut) {
+    lineOut.clear();
+    if (file == nullptr) {
+        return false;
+    }
+
+    char buffer[8192];
+    while (true) {
+        char* ret = gzgets(file, buffer, static_cast<int>(sizeof(buffer)));
+        if (ret == nullptr) {
+            if (lineOut.empty()) {
+                return false;
+            }
+            return true;
+        }
+
+        lineOut.append(buffer);
+        size_t n = lineOut.size();
+        if (n > 0 && lineOut[n - 1] == '\n') {
+            while (!lineOut.empty() &&
+                   (lineOut.back() == '\n' || lineOut.back() == '\r')) {
+                lineOut.pop_back();
+            }
+            return true;
+        }
+    }
+}
+
+static bool compressFileToGz(const string& plainPath, ofstream& logStream) {
+    FILE* in = std::fopen(plainPath.c_str(), "rb");
+    if (in == nullptr) {
+        logStream << "WARNING: Failed to open file for gzip: " << plainPath << "\n";
+        return false;
+    }
+
+    const string gzPath = plainPath + ".gz";
+    gzFile out = gzopen(gzPath.c_str(), "wb");
+    if (out == nullptr) {
+        std::fclose(in);
+        logStream << "WARNING: Failed to open gzip output: " << gzPath << "\n";
+        return false;
+    }
+
+    unsigned char buffer[1 << 20];
+    bool ok = true;
+    while (ok) {
+        size_t nRead = std::fread(buffer, 1, sizeof(buffer), in);
+        if (nRead > 0) {
+            int nWritten = gzwrite(out, buffer, static_cast<unsigned int>(nRead));
+            if (nWritten != static_cast<int>(nRead)) {
+                ok = false;
+                break;
+            }
+        }
+        if (nRead < sizeof(buffer)) {
+            if (std::ferror(in) != 0) {
+                ok = false;
+            }
+            break;
+        }
+    }
+
+    std::fclose(in);
+    int gzCloseRet = gzclose(out);
+    if (gzCloseRet != Z_OK) {
+        ok = false;
+    }
+
+    if (!ok) {
+        std::remove(gzPath.c_str());
+        logStream << "WARNING: Failed to gzip " << plainPath << ", leaving uncompressed\n";
+        return false;
+    }
+
+    if (std::remove(plainPath.c_str()) != 0) {
+        logStream << "WARNING: Failed to remove uncompressed file after gzip: "
+                  << plainPath << "\n";
+    }
+
+    return true;
+}
+
 } // namespace
 
 string resolveMexFile(const string& mexDir, const string& basename) {
@@ -94,28 +177,25 @@ vector<string> readLines(const string& path) {
     bool isGz = (path.length() > 3 && path.substr(path.length() - 3) == ".gz");
     
     if (isGz) {
-        // Use zcat/gunzip via pipe for simplicity
-        string cmd = "zcat \"" + path + "\" 2>/dev/null || gunzip -c \"" + path + "\" 2>/dev/null";
-        FILE* pipe = popen(cmd.c_str(), "r");
-        if (!pipe) {
+        gzFile file = gzopen(path.c_str(), "rb");
+        if (file == nullptr) {
             ostringstream err;
             err << "Failed to open gzipped file: " << path;
             throw runtime_error(err.str());
         }
-        
-        char buffer[8192];
+
         string line;
-        while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-            line = buffer;
-            // Remove trailing newline
-            while (!line.empty() && (line.back() == '\n' || line.back() == '\r')) {
-                line.pop_back();
-            }
+        while (gzGetLine(file, line)) {
             if (!line.empty()) {
                 result.push_back(line);
             }
         }
-        pclose(pipe);
+        int rc = gzclose(file);
+        if (rc != Z_OK) {
+            ostringstream err;
+            err << "Failed while reading gzipped file: " << path;
+            throw runtime_error(err.str());
+        }
     } else {
         ifstream file(path);
         if (!file.is_open()) {
@@ -173,27 +253,19 @@ MexData readMex(const string& mexDir) {
     bool isGz = (matrixPath.length() > 3 && matrixPath.substr(matrixPath.length() - 3) == ".gz");
     
     if (isGz) {
-        // Use zcat/gunzip via pipe
-        string cmd = "zcat \"" + matrixPath + "\" 2>/dev/null || gunzip -c \"" + matrixPath + "\" 2>/dev/null";
-        FILE* pipe = popen(cmd.c_str(), "r");
-        if (!pipe) {
+        gzFile file = gzopen(matrixPath.c_str(), "rb");
+        if (file == nullptr) {
             ostringstream err;
             err << "Failed to open matrix.mtx.gz: " << matrixPath;
             throw runtime_error(err.str());
         }
-        
-        char buffer[8192];
+
         string line;
         bool headerDone = false;
         uint32_t nrows = 0, ncols = 0;
         uint64_t nnz = 0;
         
-        while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-            line = buffer;
-            while (!line.empty() && (line.back() == '\n' || line.back() == '\r')) {
-                line.pop_back();
-            }
-            
+        while (gzGetLine(file, line)) {
             if (line.empty()) continue;
             
             if (line[0] == '%') {
@@ -221,7 +293,12 @@ MexData readMex(const string& mexDir) {
                 }
             }
         }
-        pclose(pipe);
+        int rc = gzclose(file);
+        if (rc != Z_OK) {
+            ostringstream err;
+            err << "Failed while reading matrix.mtx.gz: " << matrixPath;
+            throw runtime_error(err.str());
+        }
     } else {
         ifstream file(matrixPath);
         if (!file.is_open()) {
@@ -630,21 +707,11 @@ int writeCombinedMex(const string& outputDir,
         return -1;
     }
     
-    // Step 7: Gzip output files
+    // Step 7: Gzip output files (in-process zlib; no shell helpers)
     vector<string> filesToGzip = {"matrix.mtx", "barcodes.tsv", "features.tsv"};
     for (const auto& filename : filesToGzip) {
         string filePath = outputDir + "/" + filename;
-        string gzipCmd = "gzip -f \"" + filePath + "\" 2>&1";
-        FILE* gzipPipe = popen(gzipCmd.c_str(), "r");
-        if (gzipPipe) {
-            int gzipRet = pclose(gzipPipe);
-            if (gzipRet != 0) {
-                logStream << "WARNING: Failed to gzip " << filename 
-                          << " (exit code " << gzipRet << "), leaving uncompressed\n";
-            }
-        } else {
-            logStream << "WARNING: Failed to execute gzip for " << filename << ", leaving uncompressed\n";
-        }
+        compressFileToGz(filePath, logStream);
     }
     
     // Step 8: Log metrics
