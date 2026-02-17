@@ -7,11 +7,17 @@
 
 void SoloFeature::emptyDrops_libscrna()
 {
-    if (nCB <= pSolo.cellFilter.eDcr.indMin) {
+    const bool forceUnionMode = (pSolo.emptyDropsMode == ParametersSolo::EmptyDropsUnion);
+    if (nCB <= pSolo.cellFilter.eDcr.indMin && !forceUnionMode) {
         P.inOut->logMain << "emptyDrops_CR (libscrna) filtering: total number of cells: nCB=" << nCB
                          << " is smaller than emptyCellMinIndex=" << pSolo.cellFilter.eDcr.indMin
                          << ", which is the starting index for the *true empty* cells. The additional non-empty cells will not be detected.\n";
         return;
+    }
+    if (nCB <= pSolo.cellFilter.eDcr.indMin && forceUnionMode) {
+        P.inOut->logMain << "emptyDrops_CR (libscrna): forcing union mode despite nCB=" << nCB
+                         << " <= emptyCellMinIndex=" << pSolo.cellFilter.eDcr.indMin
+                         << "; attempting EmptyDrops rescue anyway.\n";
     }
 
     time_t rawTime;
@@ -99,7 +105,8 @@ void SoloFeature::emptyDrops_libscrna()
                      << " umiMinFracMedian=" << config->umi_min_frac_median
                      << " candMaxN=" << config->cand_max_n
                      << " FDR=" << config->fdr
-                     << " simN=" << config->sim_n << "\n";
+                     << " simN=" << config->sim_n
+                     << " mode=" << (forceUnionMode ? "union" : "auto") << "\n";
 
     scrna_ed_result result;
     memset(&result, 0, sizeof(result));

@@ -171,6 +171,8 @@ public:
     // EmptyDrops backend selection (default: libscrna)
     string emptyDropsLegacyStr;
     bool emptyDropsLegacy = false;
+    string emptyDropsModeStr = "auto"; // auto|simple|union
+    enum EmptyDropsMode : int32 { EmptyDropsAuto = 0, EmptyDropsSimpleOnly = 1, EmptyDropsUnion = 2 } emptyDropsMode = EmptyDropsAuto;
       
     //CBtype
     struct {

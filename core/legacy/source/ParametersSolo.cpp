@@ -100,6 +100,25 @@ void ParametersSolo::initialize(Parameters *pPin)
             exitWithError(errOut.str(), std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
         }
     }
+    
+    //////////////////////////////////////////////////////////////////////////////////////////////////////
+    ///////////////////////////////--soloEmptyDropsMode
+    {
+        string mode = emptyDropsModeStr;
+        transform(mode.begin(), mode.end(), mode.begin(), ::tolower);
+        if (mode == "auto" || mode.empty()) {
+            emptyDropsMode = EmptyDropsAuto;
+        } else if (mode == "simple" || mode == "simpleed" || mode == "ordmag" || mode == "simple_only") {
+            emptyDropsMode = EmptyDropsSimpleOnly;
+        } else if (mode == "union" || mode == "ed_union") {
+            emptyDropsMode = EmptyDropsUnion;
+        } else {
+            ostringstream errOut;
+            errOut << "EXITING because of fatal PARAMETERS error: unrecognized option in --soloEmptyDropsMode=" << emptyDropsModeStr << "\n";
+            errOut << "SOLUTION: use allowed option: auto OR simple OR union\n";
+            exitWithError(errOut.str(), std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
+        }
+    }
 
     // Keep skipProcessing disabled when running in soloCellFiltering mode to avoid side effects
     if (pP->runMode == "soloCellFiltering") {

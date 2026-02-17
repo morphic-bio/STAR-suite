@@ -65,7 +65,9 @@ void SoloFeature::cellFiltering()
             P.inOut->logMain << "cellFiltering: simple: nUMImax="<< nUMImax <<"; nUMImin="<< nUMImin <<"; nCellsSimple="<< filteredCells.nCellsSimple <<endl;
 
             if (pSolo.cellFilter.type[0]=="EmptyDrops_CR") {
-                if (pSolo.emptyDropsLegacy) {
+                if (pSolo.emptyDropsMode == ParametersSolo::EmptyDropsSimpleOnly) {
+                    P.inOut->logMain << "cellFiltering: EmptyDrops_CR mode=simple -> keeping SimpleED/ORDMAG passers only\n";
+                } else if (pSolo.emptyDropsLegacy) {
                     P.inOut->logMain << "cellFiltering: EmptyDrops_CR legacy backend enabled (--soloEmptyDropsLegacy yes)\n";
                     emptyDrops_CR();
                 } else {

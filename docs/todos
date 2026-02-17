@@ -23,6 +23,10 @@
   - Small-set cell calling parity: add explicit ORDMAG/simple EmptyDrops compatibility mode and regression tests.
   - Prevent feature-to-GEX leakage: ensure GEX quant only consumes GEX library reads in multi perturb runs unless explicitly overridden.
   - Add regression gate: A375 + UCSF 2M checks for feature UMI correlation, call-level parity, barcode overlap, and runtime.
+- Input decompression path:
+  - Add native `gzFile` FASTQ fast-path when `--readFilesCommand -` and inputs are `.gz`.
+  - Preserve `--readFilesCommand` behavior for generic preprocessors (`zcat`, `pigz`, `samtools view`, etc.).
+  - Ensure auto-detection/chemistry logic and file-boundary semantics remain identical across native-gz and command-stream paths.
 ## MCP Client Setup (Codex + Cursor)
 
 - **Endpoints**: Codex uses streamable-HTTP `POST /`, Cursor uses SSE `GET /sse` + `POST /messages`.

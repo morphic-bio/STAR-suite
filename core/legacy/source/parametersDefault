@@ -1516,6 +1516,12 @@ soloEmptyDropsLegacy        no
                             yes         ... use legacy in-core EmptyDrops_CR
                             no          ... use libscrna EmptyDrops (default)
 
+soloEmptyDropsMode          auto
+    string:                 EmptyDrops_CR execution mode
+                            auto        ... default behavior: run union mode when possible; use SimpleED/ORDMAG-only fallback on small sets
+                            simple      ... force SimpleED/ORDMAG-only (skip EmptyDrops rescue stage)
+                            union       ... force SimpleED + EmptyDrops rescue union attempt, even for small sets
+
 soloOutFormatFeaturesGeneField3    "Gene Expression"
     string(s):                field 3 in the Gene features.tsv file. If "-", then no 3rd field is output.
 
