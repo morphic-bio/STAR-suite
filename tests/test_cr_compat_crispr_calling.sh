@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Test script to validate CR-compat mode CRISPR feature calling integration
-# This runs STAR with crMultiConfig and verifies crispr_analysis/ is generated
+# This runs STAR with pfMultiConfig and verifies crispr_analysis/ is generated
 
 set -euo pipefail
 
@@ -145,7 +145,7 @@ echo "Multi-config:"
 cat "${MULTI_CONFIG}"
 echo ""
 
-# Run STAR with crMultiConfig
+# Run STAR with pfMultiConfig
 echo "Running STAR with CR-compat mode..."
 [[ -n "${STAR_EXTRA_ARGS:-}" ]] && echo "Extra args: $STAR_EXTRA_ARGS"
 # shellcheck disable=SC2086
@@ -172,7 +172,7 @@ echo "Running STAR with CR-compat mode..."
   --soloStrand Unstranded \
   --soloFeatures GeneFull \
   --soloCrGexFeature genefull \
-  --crMultiConfig "${MULTI_CONFIG}" \
+  --pfMultiConfig "${MULTI_CONFIG}" \
   --crFeatureRef "${FEATURE_REF}" \
   --crWhitelist "${WHITELIST}" \
   --crMinUmi "${MIN_UMI}"

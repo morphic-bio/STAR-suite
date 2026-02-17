@@ -195,6 +195,8 @@ int main(int argc, char *argv[])
                 feature_offsets_count = features->number_of_features;
                 feature_anchors = features->feature_anchors;
                 feature_anchor_lengths = features->feature_anchor_lengths;
+                feature_suffix_anchors = features->feature_suffix_anchors;
+                feature_suffix_anchor_lengths = features->feature_suffix_anchor_lengths;
                 feature_anchor_count = features->number_of_features;
                 if (feature_mode_bootstrap_reads > 0) {
                     feature_mode_offsets = malloc(sizeof(int) * features->number_of_features);
@@ -363,13 +365,13 @@ int main(int argc, char *argv[])
     khash_t(strptr) *filtered_barcodes_hash = NULL;
     if (filtered_barcodes_filename) {
         int filtered_barcodes_found = 0;
-        if (!file_exists(filtered_barcodes_filename)) {
+        if (!pf_file_exists(filtered_barcodes_filename)) {
             printf("filtered_barcodes_filename: %s does not exist  \n", filtered_barcodes_filename);
             char full_path[2048];
             if (strlen(directory) > 0) {
                 snprintf(full_path, sizeof(full_path), "%s%s", directory, filtered_barcodes_filename);
                 printf("Will check for filtered barcodes file at %s\n", full_path);
-                if (file_exists(full_path)) {
+                if (pf_file_exists(full_path)) {
                     free(filtered_barcodes_filename);
                     filtered_barcodes_filename = strdup(full_path);
                     filtered_barcodes_found = 1;
@@ -404,7 +406,7 @@ int main(int argc, char *argv[])
 
     fastq_files_collection fastq_files;
     memset(&fastq_files, 0, sizeof(fastq_files));
-    if (positional_arg_count && is_directory(argv[optind])){
+    if (positional_arg_count && pf_is_directory(argv[optind])){
         organize_fastq_files_by_directory(positional_arg_count, argc, argv, optind, barcodeFastqFilesString, forwardFastqFilesString, reverseFastqFilesString, &fastq_files, barcode_pattern, forward_pattern, reverse_pattern);
     }
     else{

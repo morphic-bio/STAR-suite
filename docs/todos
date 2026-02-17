@@ -13,6 +13,16 @@
 - Verify no downstream scripts/tools expect `Feature_types_heatmap.png` or `Feature_counts_heatmap.png`; document the HTML/JSON switch in any user-facing docs if needed.
 - Consider adding a read-level consistency preflight for global feature offset detection (warn/error if a large fraction of matches are off the global offset).
 - Re-test SLAM VB over‑dispersion vs binomial using technical replicate consistency and count‑stratified slices; sweep `slamVbOverdispPhi` to check for alternate minima.
+- Add dynamic thread-permit scheduling for STAR + feature assignment in perturb mode:
+  - Phase 1: STAR-only dynamic active-thread limits behind a feature flag (default off), preserving deterministic outputs and existing chunk/order semantics.
+  - Phase 2: queue-aware permit rebalancing between STAR mapping and feature consumers, with min/max guards to avoid starvation.
+  - Validation: A375 regression parity first, then UCSF full-dataset throughput and concordance checks.
+- Core compatibility fixes for perturb mode (post-`noBCfix`):
+  - Whitelist namespace support: handle 2-column NXT/TRU translation lists and keep both correction/output namespaces consistent.
+  - Barcode/chemistry auto-detection: harden perturb auto-detect path and deterministic fallback behavior for small/noisy runs.
+  - Small-set cell calling parity: add explicit ORDMAG/simple EmptyDrops compatibility mode and regression tests.
+  - Prevent feature-to-GEX leakage: ensure GEX quant only consumes GEX library reads in multi perturb runs unless explicitly overridden.
+  - Add regression gate: A375 + UCSF 2M checks for feature UMI correlation, call-level parity, barcode overlap, and runtime.
 ## MCP Client Setup (Codex + Cursor)
 
 - **Endpoints**: Codex uses streamable-HTTP `POST /`, Cursor uses SSE `GET /sse` + `POST /messages`.

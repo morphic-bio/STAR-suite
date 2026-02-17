@@ -1,19 +1,19 @@
-#ifndef CR_MULTI_CONFIG_H
-#define CR_MULTI_CONFIG_H
+#ifndef PF_MULTI_CONFIG_H
+#define PF_MULTI_CONFIG_H
 
 #include "IncludeDefine.h"
 #include <map>
 #include <vector>
 
 /**
- * @file CrMultiConfig.h
- * @brief Parser for Cell Ranger multi config CSV files
+ * @file PfMultiConfig.h
+ * @brief Parser for pf-multi config CSV files (Cell Ranger-style CSV input)
  * 
  * Parses multi config files with [libraries] section and other sections
  * like [feature] and [reference].
  */
 
-namespace CrMultiConfig {
+namespace PfMultiConfig {
 
 /**
  * @struct LibraryEntry
@@ -69,6 +69,6 @@ string resolveFastqDir(const string& configPath, const string& fastqRoot,
  */
 map<string, string> parseFastqMap(const vector<string>& fastqMapVec);
 
-} // namespace CrMultiConfig
+} // namespace PfMultiConfig
 
-#endif // CR_MULTI_CONFIG_H
+#endif // PF_MULTI_CONFIG_H

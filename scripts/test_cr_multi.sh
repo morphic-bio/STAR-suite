@@ -61,7 +61,7 @@ EOF
 
 # Build STAR if needed
 cd "$CORE_DIR"
-if [[ ! -f STAR ]] || [[ STAR -ot CrMultiProcess.cpp ]]; then
+if [[ ! -f STAR ]] || [[ STAR -ot PfMultiProcess.cpp ]]; then
     echo "Building STAR..."
     make -j$(nproc) STAR || {
         echo "ERROR: Build failed"
@@ -84,7 +84,7 @@ mkdir -p "$GENOME_DIR"
 
 # Run STAR with CR multi config
 OUTPUT_PREFIX="$TEST_DIR/star_output"
-echo "Running STAR with --crMultiConfig..."
+echo "Running STAR with --pfMultiConfig..."
 cd "$CORE_DIR"
 
 # Note: This is a minimal test - in practice you'd need:

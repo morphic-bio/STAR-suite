@@ -366,6 +366,286 @@ static void pf_trace_trim_newline(char *s) {
     }
 }
 
+#define PF_ANCHOR_PREFIX 0
+#define PF_ANCHOR_SUFFIX 1
+#define PF_ANCHOR_KINDS 2
+
+static int pf_has_anchor_arrays(const feature_arrays *features) {
+    if (!features) {
+        return 0;
+    }
+    if (features->feature_anchors && features->feature_anchor_lengths) {
+        return 1;
+    }
+    if (features->feature_suffix_anchors && features->feature_suffix_anchor_lengths) {
+        return 1;
+    }
+    return 0;
+}
+
+static int pf_get_feature_anchor(const feature_arrays *features, int feature_idx, int expected_offset, int anchor_kind, const char **anchor, int *anchor_len) {
+    if (anchor) {
+        *anchor = NULL;
+    }
+    if (anchor_len) {
+        *anchor_len = 0;
+    }
+    if (!features || feature_idx < 0 || feature_idx >= features->number_of_features) {
+        return 0;
+    }
+    if (anchor_kind == PF_ANCHOR_PREFIX) {
+        if (!features->feature_anchors || !features->feature_anchor_lengths || expected_offset < 0) {
+            return 0;
+        }
+        if ((int)features->feature_anchor_lengths[feature_idx] <= 0) {
+            return 0;
+        }
+        if (anchor) {
+            *anchor = features->feature_anchors[feature_idx];
+        }
+        if (anchor_len) {
+            *anchor_len = (int)features->feature_anchor_lengths[feature_idx];
+        }
+        return 1;
+    }
+    if (anchor_kind == PF_ANCHOR_SUFFIX) {
+        if (!features->feature_suffix_anchors || !features->feature_suffix_anchor_lengths) {
+            return 0;
+        }
+        if ((int)features->feature_suffix_anchor_lengths[feature_idx] <= 0) {
+            return 0;
+        }
+        if (anchor) {
+            *anchor = features->feature_suffix_anchors[feature_idx];
+        }
+        if (anchor_len) {
+            *anchor_len = (int)features->feature_suffix_anchor_lengths[feature_idx];
+        }
+        return 1;
+    }
+    return 0;
+}
+
+static int pf_anchor_mode_position(int anchor_kind, int mode_offset, int expected_offset, int feature_length) {
+    if (anchor_kind == PF_ANCHOR_PREFIX) {
+        if (expected_offset < 0) {
+            return -1;
+        }
+        return mode_offset - expected_offset;
+    }
+    if (anchor_kind == PF_ANCHOR_SUFFIX) {
+        return mode_offset + feature_length;
+    }
+    return -1;
+}
+
+static int pf_anchor_bc_position(int anchor_kind, int anchor_pos, int expected_offset, int feature_length) {
+    if (anchor_kind == PF_ANCHOR_PREFIX) {
+        if (expected_offset < 0) {
+            return -1;
+        }
+        return anchor_pos + expected_offset;
+    }
+    if (anchor_kind == PF_ANCHOR_SUFFIX) {
+        return anchor_pos - feature_length;
+    }
+    return -1;
+}
+
+static int pf_anchor_base_matches(char read_base, char anchor_base) {
+    const char read_nt = (char)toupper((unsigned char)read_base);
+    const char anchor_nt = (char)toupper((unsigned char)anchor_base);
+    if (anchor_nt == 'N') {
+        return read_nt == 'A' || read_nt == 'C' || read_nt == 'G' || read_nt == 'T' || read_nt == 'N';
+    }
+    return read_nt == anchor_nt;
+}
+
+static int pf_anchor_matches_at(const char *sequence, size_t read_len, int anchor_pos, const char *anchor, int anchor_len) {
+    if (!sequence || !anchor || anchor_len <= 0 || anchor_pos < 0) {
+        return 0;
+    }
+    if ((size_t)anchor_pos + (size_t)anchor_len > read_len) {
+        return 0;
+    }
+    for (int i = 0; i < anchor_len; i++) {
+        if (!pf_anchor_base_matches(sequence[anchor_pos + i], anchor[i])) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int pf_find_anchor_position(const char *sequence, size_t read_len, const char *anchor, int anchor_len, int start_pos) {
+    if (!sequence || !anchor || anchor_len <= 0) {
+        return -1;
+    }
+    if (start_pos < 0) {
+        start_pos = 0;
+    }
+    if ((size_t)anchor_len > read_len) {
+        return -1;
+    }
+    const int max_pos = (int)read_len - anchor_len;
+    for (int pos = start_pos; pos <= max_pos; pos++) {
+        if (pf_anchor_matches_at(sequence, read_len, pos, anchor, anchor_len)) {
+            return pos;
+        }
+    }
+    return -1;
+}
+
+typedef struct {
+    int kind;
+    char *anchor;
+    int anchor_len;
+    int *feature_indices;
+    int feature_count;
+    int feature_capacity;
+} pf_anchor_group_entry;
+
+static pthread_mutex_t pf_anchor_group_cache_mutex = PTHREAD_MUTEX_INITIALIZER;
+static const feature_arrays *pf_anchor_group_features = NULL;
+static pf_anchor_group_entry *pf_anchor_groups = NULL;
+static int pf_anchor_group_count = 0;
+static int pf_anchor_group_capacity = 0;
+static int *pf_feature_prefix_group_ids = NULL;
+static int *pf_feature_suffix_group_ids = NULL;
+
+static void pf_anchor_group_cache_reset_locked(void) {
+    if (pf_anchor_groups) {
+        for (int i = 0; i < pf_anchor_group_count; i++) {
+            free(pf_anchor_groups[i].anchor);
+            free(pf_anchor_groups[i].feature_indices);
+        }
+        free(pf_anchor_groups);
+    }
+    free(pf_feature_prefix_group_ids);
+    free(pf_feature_suffix_group_ids);
+    pf_anchor_groups = NULL;
+    pf_anchor_group_count = 0;
+    pf_anchor_group_capacity = 0;
+    pf_feature_prefix_group_ids = NULL;
+    pf_feature_suffix_group_ids = NULL;
+    pf_anchor_group_features = NULL;
+}
+
+static int pf_anchor_group_find_locked(int kind, const char *anchor, int anchor_len) {
+    for (int i = 0; i < pf_anchor_group_count; i++) {
+        if (pf_anchor_groups[i].kind != kind || pf_anchor_groups[i].anchor_len != anchor_len) {
+            continue;
+        }
+        if (memcmp(pf_anchor_groups[i].anchor, anchor, (size_t)anchor_len) == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+static int pf_anchor_group_add_locked(int kind, const char *anchor, int anchor_len) {
+    if (pf_anchor_group_count == pf_anchor_group_capacity) {
+        int new_cap = pf_anchor_group_capacity > 0 ? pf_anchor_group_capacity * 2 : 8;
+        pf_anchor_group_entry *new_groups = realloc(pf_anchor_groups, (size_t)new_cap * sizeof(pf_anchor_group_entry));
+        if (!new_groups) {
+            return -1;
+        }
+        pf_anchor_groups = new_groups;
+        pf_anchor_group_capacity = new_cap;
+    }
+    const int gid = pf_anchor_group_count++;
+    pf_anchor_groups[gid].kind = kind;
+    pf_anchor_groups[gid].anchor_len = anchor_len;
+    pf_anchor_groups[gid].feature_indices = NULL;
+    pf_anchor_groups[gid].feature_count = 0;
+    pf_anchor_groups[gid].feature_capacity = 0;
+    pf_anchor_groups[gid].anchor = malloc((size_t)anchor_len + 1);
+    if (!pf_anchor_groups[gid].anchor) {
+        pf_anchor_group_count--;
+        return -1;
+    }
+    memcpy(pf_anchor_groups[gid].anchor, anchor, (size_t)anchor_len);
+    pf_anchor_groups[gid].anchor[anchor_len] = '\0';
+    return gid;
+}
+
+static int pf_anchor_group_append_feature_locked(int gid, int feature_idx) {
+    if (gid < 0 || gid >= pf_anchor_group_count) {
+        return 0;
+    }
+    pf_anchor_group_entry *group = &pf_anchor_groups[gid];
+    if (group->feature_count == group->feature_capacity) {
+        int new_cap = group->feature_capacity > 0 ? group->feature_capacity * 2 : 8;
+        int *new_indices = realloc(group->feature_indices, (size_t)new_cap * sizeof(int));
+        if (!new_indices) {
+            return 0;
+        }
+        group->feature_indices = new_indices;
+        group->feature_capacity = new_cap;
+    }
+    group->feature_indices[group->feature_count++] = feature_idx;
+    return 1;
+}
+
+static int pf_anchor_group_get_or_create_locked(int kind, const char *anchor, int anchor_len) {
+    int gid = pf_anchor_group_find_locked(kind, anchor, anchor_len);
+    if (gid >= 0) {
+        return gid;
+    }
+    return pf_anchor_group_add_locked(kind, anchor, anchor_len);
+}
+
+static int pf_ensure_anchor_group_cache(const feature_arrays *features) {
+    if (!features || !features->feature_offsets || !pf_has_anchor_arrays(features) || features->number_of_features <= 0) {
+        return 0;
+    }
+    pthread_mutex_lock(&pf_anchor_group_cache_mutex);
+    if (pf_anchor_group_features == features && pf_anchor_groups && pf_anchor_group_count > 0) {
+        pthread_mutex_unlock(&pf_anchor_group_cache_mutex);
+        return 1;
+    }
+
+    pf_anchor_group_cache_reset_locked();
+    const int n_features = features->number_of_features;
+    pf_feature_prefix_group_ids = malloc((size_t)n_features * sizeof(int));
+    pf_feature_suffix_group_ids = malloc((size_t)n_features * sizeof(int));
+    if (!pf_feature_prefix_group_ids || !pf_feature_suffix_group_ids) {
+        pf_anchor_group_cache_reset_locked();
+        pthread_mutex_unlock(&pf_anchor_group_cache_mutex);
+        return 0;
+    }
+    for (int i = 0; i < n_features; i++) {
+        pf_feature_prefix_group_ids[i] = -1;
+        pf_feature_suffix_group_ids[i] = -1;
+    }
+
+    for (int j = 0; j < n_features; j++) {
+        int expected_offset = features->feature_offsets[j];
+        for (int anchor_kind = 0; anchor_kind < PF_ANCHOR_KINDS; anchor_kind++) {
+            const char *anchor = NULL;
+            int anchor_len = 0;
+            if (!pf_get_feature_anchor(features, j, expected_offset, anchor_kind, &anchor, &anchor_len)) {
+                continue;
+            }
+            int gid = pf_anchor_group_get_or_create_locked(anchor_kind, anchor, anchor_len);
+            if (gid < 0 || !pf_anchor_group_append_feature_locked(gid, j)) {
+                pf_anchor_group_cache_reset_locked();
+                pthread_mutex_unlock(&pf_anchor_group_cache_mutex);
+                return 0;
+            }
+            if (anchor_kind == PF_ANCHOR_PREFIX) {
+                pf_feature_prefix_group_ids[j] = gid;
+            } else {
+                pf_feature_suffix_group_ids[j] = gid;
+            }
+        }
+    }
+
+    pf_anchor_group_features = features;
+    const int ok = pf_anchor_group_count > 0;
+    pthread_mutex_unlock(&pf_anchor_group_cache_mutex);
+    return ok;
+}
+
 void destroy_feature_counts(void *data) {
     feature_counts *fc = (feature_counts*)data;
     if (fc && fc->counts) {
@@ -479,7 +759,7 @@ void initialize_unit_sizes(){
     size_t unmatched_barcodes_features_block_alignment = __alignof__(uint32_t);  // Use __alignof__ instead of alignof
     dynamic_struct_sizes.unmatched_barcodes_features_block = (unmatched_barcodes_features_block_size + unmatched_barcodes_features_block_alignment - 1) & ~(unmatched_barcodes_features_block_alignment - 1);
 }
-int is_directory(const char *path) {
+int pf_is_directory(const char *path) {
     struct stat path_stat;
     
     // Check if stat call is successful
@@ -524,7 +804,15 @@ int insert_feature_sequence(char *sequence, uint32_t feature_index, unsigned cha
     }
     else{
         feature_sequences *new_entry = (feature_sequences*) allocate_memory_from_pool(pools->feature_sequences_pool);
-        strcpy(new_entry->sequence, sequence);
+        size_t seq_len = strlen(sequence);
+        if (seq_len > (size_t)maximum_feature_length) {
+            fprintf(stderr,
+                    "Warning: feature sequence length %zu exceeds max %d, truncating\n",
+                    seq_len, maximum_feature_length);
+            seq_len = (size_t)maximum_feature_length;
+        }
+        memcpy(new_entry->sequence, sequence, seq_len);
+        new_entry->sequence[seq_len] = '\0';
         new_entry->feature_index=feature_index;
         new_entry->hamming_distance=hamming_distance;
         new_entry->match_position=match_position;
@@ -1070,23 +1358,22 @@ int simple_hamming_search(feature_arrays *features, char *line, int maxHammingDi
             feature++;
         }
         if (!*feature){
-            if (hammingDistance == bestHammingDistance){
-                if(bestFeature){
-                    ambiguous=1;
-                }
-                else{
-                    bestFeature=i+1;
-                    bestHammingDistance=hammingDistance;
-                    ambiguous=0;
-                }
+        if (hammingDistance == bestHammingDistance){
+            if(bestFeature){
+                ambiguous=1;
             }
-            else if (hammingDistance < bestHammingDistance){
-               bestFeature=i+1;
-               bestHammingDistance=hammingDistance;
-               ambiguous=0;
+            else{
+                bestFeature=i+1;
+                bestHammingDistance=hammingDistance;
+                ambiguous=0;
             }
         }
-
+        else if (hammingDistance < bestHammingDistance){
+           bestFeature=i+1;
+           bestHammingDistance=hammingDistance;
+           ambiguous=0;
+        }
+        }
     }
     *hamming_distance=bestHammingDistance;
     if (bestHammingDistance <= maxHammingDistance && !ambiguous){
@@ -3176,8 +3463,13 @@ void process_multiple_feature_sequences(int nsequences, char **sequences, int *o
     }
 }
 void process_feature_sequence(char *sequence, feature_arrays *features, int maxHammingDistance, int nThreads, int feature_constant_offset, int max_feature_n, uint32_t *feature_index, int *hamming_distance, char *matching_sequence, uint16_t *match_position) {
-    if (feature_mode_bootstrap_reads > 0 && features && features->feature_anchors && features->feature_anchor_lengths && features->feature_offsets) {
+    if (feature_mode_bootstrap_reads > 0 && features && features->feature_offsets && pf_has_anchor_arrays(features)) {
         const size_t read_len = strlen(sequence);
+        const int offset_cache_len = (int)read_len;
+        uint32_t offset_cached_idx[offset_cache_len > 0 ? offset_cache_len : 1];
+        int offset_cached_hamming[offset_cache_len > 0 ? offset_cache_len : 1];
+        unsigned char offset_cache_valid[offset_cache_len > 0 ? offset_cache_len : 1];
+        memset(offset_cache_valid, 0, sizeof(offset_cache_valid));
         unsigned long long seen = __sync_add_and_fetch(&feature_mode_reads_seen, 1);
         if (feature_mode_bootstrap_done == 0 && seen >= (unsigned long long)feature_mode_bootstrap_reads) {
             if (__sync_bool_compare_and_swap(&feature_mode_bootstrap_done, 0, 2)) {
@@ -3204,8 +3496,20 @@ void process_feature_sequence(char *sequence, feature_arrays *features, int maxH
                     if (current_offset < 0 || (size_t)current_offset + features->feature_lengths[j] > read_len) {
                         continue;
                     }
-                    int tmp_hamming = 0;
-                    uint32_t idx = simpleCorrectFeature(sequence + current_offset, features, max_feature_n, maxHammingDistance, &tmp_hamming);
+                    if (current_offset >= offset_cache_len) {
+                        continue;
+                    }
+                    uint32_t idx = 0;
+                    int tmp_hamming = maxHammingDistance + 1;
+                    if (offset_cache_valid[current_offset]) {
+                        idx = offset_cached_idx[current_offset];
+                        tmp_hamming = offset_cached_hamming[current_offset];
+                    } else {
+                        idx = simpleCorrectFeature(sequence + current_offset, features, max_feature_n, maxHammingDistance, &tmp_hamming);
+                        offset_cache_valid[current_offset] = 1;
+                        offset_cached_idx[current_offset] = idx;
+                        offset_cached_hamming[current_offset] = tmp_hamming;
+                    }
                     if (idx == (uint32_t)(j + 1)) {
                         if (tmp_hamming < bestHamming) {
                             bestHamming = tmp_hamming;
@@ -3237,81 +3541,200 @@ void process_feature_sequence(char *sequence, feature_arrays *features, int maxH
         uint16_t bestPos = 0;
         char ambiguous = 0;
 
-        for (int j = 0; j < features->number_of_features; j++) {
-            int anchor_len = (int)features->feature_anchor_lengths[j];
-            int offset = features->feature_offsets[j];
-            if (anchor_len <= 0 || offset < 0) {
-                continue;
-            }
-            const char *anchor = features->feature_anchors[j];
+        const int n_features = features->number_of_features;
+        unsigned char mode_anchor_seen_flags[n_features > 0 ? n_features : 1];
+        unsigned char fallback_done_flags[n_features > 0 ? n_features : 1];
+        memset(mode_anchor_seen_flags, 0, sizeof(mode_anchor_seen_flags));
+        memset(fallback_done_flags, 0, sizeof(fallback_done_flags));
+
+        const int have_anchor_groups = pf_ensure_anchor_group_cache(features);
+
+        // First pass: fast mode-centered checks around learned per-feature offsets.
+        for (int j = 0; j < n_features; j++) {
+            int expected_offset = features->feature_offsets[j];
+            int feature_len = features->feature_lengths[j];
             int mode_offset = feature_mode_offsets ? feature_mode_offsets[j] : -1;
             int matched = 0;
+            int mode_anchor_seen = 0;
 
-            if (mode_offset >= 0) {
-                int anchor_pos = mode_offset - offset;
-                if (anchor_pos >= 0 && (size_t)anchor_pos + anchor_len <= read_len &&
-                    memcmp(sequence + anchor_pos, anchor, (size_t)anchor_len) == 0) {
-                    int offsets[3] = {0, -1, 1};
-                    for (int k = 0; k < 3; k++) {
-                        int current_offset = mode_offset + offsets[k];
-                        if (current_offset < 0 || (size_t)current_offset + features->feature_lengths[j] > read_len) {
-                            continue;
-                        }
-                        int tmp_hamming = 0;
-                        uint32_t idx = simpleCorrectFeature(sequence + current_offset, features, max_feature_n, maxHammingDistance, &tmp_hamming);
-                        if (idx == (uint32_t)(j + 1)) {
-                            matched = 1;
-                            feature_mode_record(idx, current_offset);
-                            if (tmp_hamming < bestHamming) {
-                                bestHamming = tmp_hamming;
-                                bestFeature = idx;
-                                bestPos = (uint16_t)current_offset;
-                                ambiguous = 0;
-                            } else if (tmp_hamming == bestHamming && bestFeature != idx) {
-                                ambiguous = 1;
-                            }
-                            break;
-                        }
-                    }
-                    if (matched) {
-                        continue;
-                    }
-                    // anchor present at mode but feature not found: skip anchor scan
+            for (int anchor_kind = 0; anchor_kind < PF_ANCHOR_KINDS; anchor_kind++) {
+                const char *anchor = NULL;
+                int anchor_len = 0;
+                if (!pf_get_feature_anchor(features, j, expected_offset, anchor_kind, &anchor, &anchor_len)) {
                     continue;
                 }
-            }
-
-            // anchor scan fallback
-            const char *pos = strstr(sequence, anchor);
-            while (pos) {
-                int anchor_pos = (int)(pos - sequence);
-                int bc_pos = anchor_pos + offset;
-                int offsets[3] = {0, -1, 1};
-                for (int k = 0; k < 3; k++) {
-                    int current_offset = bc_pos + offsets[k];
-                    if (current_offset < 0 || (size_t)current_offset + features->feature_lengths[j] > read_len) {
-                        continue;
-                    }
-                    int tmp_hamming = 0;
-                    uint32_t idx = simpleCorrectFeature(sequence + current_offset, features, max_feature_n, maxHammingDistance, &tmp_hamming);
-                    if (idx == (uint32_t)(j + 1)) {
-                        matched = 1;
-                        feature_mode_record(idx, current_offset);
-                        if (tmp_hamming < bestHamming) {
-                            bestHamming = tmp_hamming;
-                            bestFeature = idx;
-                            bestPos = (uint16_t)current_offset;
-                            ambiguous = 0;
-                        } else if (tmp_hamming == bestHamming && bestFeature != idx) {
-                            ambiguous = 1;
+                if (mode_offset >= 0) {
+                    int anchor_pos = pf_anchor_mode_position(anchor_kind, mode_offset, expected_offset, feature_len);
+                    if (pf_anchor_matches_at(sequence, read_len, anchor_pos, anchor, anchor_len)) {
+                        mode_anchor_seen = 1;
+                        int offsets[3] = {0, -1, 1};
+                        for (int k = 0; k < 3; k++) {
+                            int current_offset = mode_offset + offsets[k];
+                            if (current_offset < 0 || (size_t)current_offset + feature_len > read_len) {
+                                continue;
+                            }
+                            if (current_offset >= offset_cache_len) {
+                                continue;
+                            }
+                            uint32_t idx = 0;
+                            int tmp_hamming = maxHammingDistance + 1;
+                            if (offset_cache_valid[current_offset]) {
+                                idx = offset_cached_idx[current_offset];
+                                tmp_hamming = offset_cached_hamming[current_offset];
+                            } else {
+                                idx = simpleCorrectFeature(sequence + current_offset, features, max_feature_n, maxHammingDistance, &tmp_hamming);
+                                offset_cache_valid[current_offset] = 1;
+                                offset_cached_idx[current_offset] = idx;
+                                offset_cached_hamming[current_offset] = tmp_hamming;
+                            }
+                            if (idx == (uint32_t)(j + 1)) {
+                                matched = 1;
+                                feature_mode_record(idx, current_offset);
+                                if (tmp_hamming < bestHamming) {
+                                    bestHamming = tmp_hamming;
+                                    bestFeature = idx;
+                                    bestPos = (uint16_t)current_offset;
+                                    ambiguous = 0;
+                                } else if (tmp_hamming == bestHamming && bestFeature != idx) {
+                                    ambiguous = 1;
+                                }
+                                break;
+                            }
                         }
-                        break;
                     }
                 }
                 if (matched) {
                     break;
                 }
-                pos = strstr(pos + 1, anchor);
+            }
+            if (mode_anchor_seen) {
+                mode_anchor_seen_flags[j] = 1;
+            }
+            if (matched) {
+                fallback_done_flags[j] = 1;
+            }
+        }
+
+        // Second pass: grouped anchor scan fallback.
+        if (have_anchor_groups &&
+            pf_anchor_group_features == features &&
+            pf_anchor_groups &&
+            pf_anchor_group_count > 0 &&
+            pf_feature_prefix_group_ids &&
+            pf_feature_suffix_group_ids) {
+            for (int gid = 0; gid < pf_anchor_group_count; gid++) {
+                const pf_anchor_group_entry *group = &pf_anchor_groups[gid];
+                int scan_from = 0;
+                int anchor_pos = pf_find_anchor_position(sequence, read_len, group->anchor, group->anchor_len, scan_from);
+                while (anchor_pos >= 0) {
+                    for (int fi = 0; fi < group->feature_count; fi++) {
+                        int j = group->feature_indices[fi];
+                        if (j < 0 || j >= n_features || fallback_done_flags[j] || mode_anchor_seen_flags[j]) {
+                            continue;
+                        }
+                        int expected_offset = features->feature_offsets[j];
+                        int feature_len = features->feature_lengths[j];
+                        int bc_pos = pf_anchor_bc_position(group->kind, anchor_pos, expected_offset, feature_len);
+                        int offsets[3] = {0, -1, 1};
+                        for (int k = 0; k < 3; k++) {
+                            int current_offset = bc_pos + offsets[k];
+                            if (current_offset < 0 || (size_t)current_offset + feature_len > read_len) {
+                                continue;
+                            }
+                            if (current_offset >= offset_cache_len) {
+                                continue;
+                            }
+                            uint32_t idx = 0;
+                            int tmp_hamming = maxHammingDistance + 1;
+                            if (offset_cache_valid[current_offset]) {
+                                idx = offset_cached_idx[current_offset];
+                                tmp_hamming = offset_cached_hamming[current_offset];
+                            } else {
+                                idx = simpleCorrectFeature(sequence + current_offset, features, max_feature_n, maxHammingDistance, &tmp_hamming);
+                                offset_cache_valid[current_offset] = 1;
+                                offset_cached_idx[current_offset] = idx;
+                                offset_cached_hamming[current_offset] = tmp_hamming;
+                            }
+                            if (idx == (uint32_t)(j + 1)) {
+                                fallback_done_flags[j] = 1;
+                                feature_mode_record(idx, current_offset);
+                                if (tmp_hamming < bestHamming) {
+                                    bestHamming = tmp_hamming;
+                                    bestFeature = idx;
+                                    bestPos = (uint16_t)current_offset;
+                                    ambiguous = 0;
+                                } else if (tmp_hamming == bestHamming && bestFeature != idx) {
+                                    ambiguous = 1;
+                                }
+                                break;
+                            }
+                        }
+                    }
+                    scan_from = anchor_pos + 1;
+                    anchor_pos = pf_find_anchor_position(sequence, read_len, group->anchor, group->anchor_len, scan_from);
+                }
+            }
+        } else {
+            // Fallback path if grouped cache is unavailable.
+            for (int j = 0; j < n_features; j++) {
+                if (fallback_done_flags[j] || mode_anchor_seen_flags[j]) {
+                    continue;
+                }
+                int expected_offset = features->feature_offsets[j];
+                int feature_len = features->feature_lengths[j];
+                int matched = 0;
+                for (int anchor_kind = 0; anchor_kind < PF_ANCHOR_KINDS && !matched; anchor_kind++) {
+                    const char *anchor = NULL;
+                    int anchor_len = 0;
+                    if (!pf_get_feature_anchor(features, j, expected_offset, anchor_kind, &anchor, &anchor_len)) {
+                        continue;
+                    }
+                    int scan_from = 0;
+                    int anchor_pos = pf_find_anchor_position(sequence, read_len, anchor, anchor_len, scan_from);
+                    while (anchor_pos >= 0) {
+                        int bc_pos = pf_anchor_bc_position(anchor_kind, anchor_pos, expected_offset, feature_len);
+                        int offsets[3] = {0, -1, 1};
+                        for (int k = 0; k < 3; k++) {
+                            int current_offset = bc_pos + offsets[k];
+                            if (current_offset < 0 || (size_t)current_offset + feature_len > read_len) {
+                                continue;
+                            }
+                            if (current_offset >= offset_cache_len) {
+                                continue;
+                            }
+                            uint32_t idx = 0;
+                            int tmp_hamming = maxHammingDistance + 1;
+                            if (offset_cache_valid[current_offset]) {
+                                idx = offset_cached_idx[current_offset];
+                                tmp_hamming = offset_cached_hamming[current_offset];
+                            } else {
+                                idx = simpleCorrectFeature(sequence + current_offset, features, max_feature_n, maxHammingDistance, &tmp_hamming);
+                                offset_cache_valid[current_offset] = 1;
+                                offset_cached_idx[current_offset] = idx;
+                                offset_cached_hamming[current_offset] = tmp_hamming;
+                            }
+                            if (idx == (uint32_t)(j + 1)) {
+                                matched = 1;
+                                fallback_done_flags[j] = 1;
+                                feature_mode_record(idx, current_offset);
+                                if (tmp_hamming < bestHamming) {
+                                    bestHamming = tmp_hamming;
+                                    bestFeature = idx;
+                                    bestPos = (uint16_t)current_offset;
+                                    ambiguous = 0;
+                                } else if (tmp_hamming == bestHamming && bestFeature != idx) {
+                                    ambiguous = 1;
+                                }
+                                break;
+                            }
+                        }
+                        if (matched) {
+                            break;
+                        }
+                        scan_from = anchor_pos + 1;
+                        anchor_pos = pf_find_anchor_position(sequence, read_len, anchor, anchor_len, scan_from);
+                    }
+                }
             }
         }
 
@@ -3328,32 +3751,36 @@ void process_feature_sequence(char *sequence, feature_arrays *features, int maxH
         return;
     }
     if (require_feature_anchor_match) {
-        if (features && features->feature_anchors && features->feature_anchor_lengths && features->feature_offsets) {
+        if (features && features->feature_offsets && pf_has_anchor_arrays(features)) {
             const size_t read_len = strlen(sequence);
             for (int j = 0; j < features->number_of_features; j++) {
-                int anchor_len = (int)features->feature_anchor_lengths[j];
-                int offset = features->feature_offsets[j];
-                if (anchor_len <= 0 || offset < 0) {
-                    continue;
-                }
-                const char *anchor = features->feature_anchors[j];
-                const char *pos = strstr(sequence, anchor);
-                while (pos) {
-                    int anchor_pos = (int)(pos - sequence);
-                    int bc_pos = anchor_pos + offset;
-                    if (bc_pos >= 0 && (size_t)bc_pos + features->feature_lengths[j] <= read_len) {
-                        int tmp_hamming = 0;
-                        uint32_t idx = simpleCorrectFeature(sequence + bc_pos, features, max_feature_n, maxHammingDistance, &tmp_hamming);
-                        if (idx == (uint32_t)(j + 1)) {
-                            *feature_index = idx;
-                            *hamming_distance = tmp_hamming;
-                            *match_position = (uint16_t)bc_pos;
-                            memcpy(matching_sequence, sequence + bc_pos, features->feature_lengths[j]);
-                            matching_sequence[features->feature_lengths[j]] = '\0';
-                            return;
-                        }
+                int expected_offset = features->feature_offsets[j];
+                int feature_len = features->feature_lengths[j];
+                for (int anchor_kind = 0; anchor_kind < PF_ANCHOR_KINDS; anchor_kind++) {
+                    const char *anchor = NULL;
+                    int anchor_len = 0;
+                    if (!pf_get_feature_anchor(features, j, expected_offset, anchor_kind, &anchor, &anchor_len)) {
+                        continue;
                     }
-                    pos = strstr(pos + 1, anchor);
+                    int scan_from = 0;
+                    int anchor_pos = pf_find_anchor_position(sequence, read_len, anchor, anchor_len, scan_from);
+                    while (anchor_pos >= 0) {
+                        int bc_pos = pf_anchor_bc_position(anchor_kind, anchor_pos, expected_offset, feature_len);
+                        if (bc_pos >= 0 && (size_t)bc_pos + feature_len <= read_len) {
+                            int tmp_hamming = 0;
+                            uint32_t idx = simpleCorrectFeature(sequence + bc_pos, features, max_feature_n, maxHammingDistance, &tmp_hamming);
+                            if (idx == (uint32_t)(j + 1)) {
+                                *feature_index = idx;
+                                *hamming_distance = tmp_hamming;
+                                *match_position = (uint16_t)bc_pos;
+                                memcpy(matching_sequence, sequence + bc_pos, feature_len);
+                                matching_sequence[feature_len] = '\0';
+                                return;
+                            }
+                        }
+                        scan_from = anchor_pos + 1;
+                        anchor_pos = pf_find_anchor_position(sequence, read_len, anchor, anchor_len, scan_from);
+                    }
                 }
             }
         }
@@ -3361,32 +3788,36 @@ void process_feature_sequence(char *sequence, feature_arrays *features, int maxH
         *hamming_distance = maxHammingDistance + 1;
         return;
     }
-    if (use_feature_anchor_search && features && features->feature_anchors && features->feature_anchor_lengths && features->feature_offsets) {
+    if (use_feature_anchor_search && features && features->feature_offsets && pf_has_anchor_arrays(features)) {
         const size_t read_len = strlen(sequence);
         for (int j = 0; j < features->number_of_features; j++) {
-            int anchor_len = (int)features->feature_anchor_lengths[j];
-            int offset = features->feature_offsets[j];
-            if (anchor_len <= 0 || offset < 0) {
-                continue;
-            }
-            const char *anchor = features->feature_anchors[j];
-            const char *pos = strstr(sequence, anchor);
-            while (pos) {
-                int anchor_pos = (int)(pos - sequence);
-                int bc_pos = anchor_pos + offset;
-                if (bc_pos >= 0 && (size_t)bc_pos + features->feature_lengths[j] <= read_len) {
-                    int tmp_hamming = 0;
-                    uint32_t idx = simpleCorrectFeature(sequence + bc_pos, features, max_feature_n, maxHammingDistance, &tmp_hamming);
-                    if (idx == (uint32_t)(j + 1)) {
-                        *feature_index = idx;
-                        *hamming_distance = tmp_hamming;
-                        *match_position = (uint16_t)bc_pos;
-                        memcpy(matching_sequence, sequence + bc_pos, features->feature_lengths[j]);
-                        matching_sequence[features->feature_lengths[j]] = '\0';
-                        return;
-                    }
+            int expected_offset = features->feature_offsets[j];
+            int feature_len = features->feature_lengths[j];
+            for (int anchor_kind = 0; anchor_kind < PF_ANCHOR_KINDS; anchor_kind++) {
+                const char *anchor = NULL;
+                int anchor_len = 0;
+                if (!pf_get_feature_anchor(features, j, expected_offset, anchor_kind, &anchor, &anchor_len)) {
+                    continue;
                 }
-                pos = strstr(pos + 1, anchor);
+                int scan_from = 0;
+                int anchor_pos = pf_find_anchor_position(sequence, read_len, anchor, anchor_len, scan_from);
+                while (anchor_pos >= 0) {
+                    int bc_pos = pf_anchor_bc_position(anchor_kind, anchor_pos, expected_offset, feature_len);
+                    if (bc_pos >= 0 && (size_t)bc_pos + feature_len <= read_len) {
+                        int tmp_hamming = 0;
+                        uint32_t idx = simpleCorrectFeature(sequence + bc_pos, features, max_feature_n, maxHammingDistance, &tmp_hamming);
+                        if (idx == (uint32_t)(j + 1)) {
+                            *feature_index = idx;
+                            *hamming_distance = tmp_hamming;
+                            *match_position = (uint16_t)bc_pos;
+                            memcpy(matching_sequence, sequence + bc_pos, feature_len);
+                            matching_sequence[feature_len] = '\0';
+                            return;
+                        }
+                    }
+                    scan_from = anchor_pos + 1;
+                    anchor_pos = pf_find_anchor_position(sequence, read_len, anchor, anchor_len, scan_from);
+                }
             }
         }
     }
@@ -3652,7 +4083,7 @@ void *consume_reads(void *arg) {
             else{
                 missing_flag=1;
             }
-            if (pf_trace_anchor_enabled && features && features->feature_anchors && features->feature_anchor_lengths && features->feature_offsets) {
+            if (pf_trace_anchor_enabled && features && features->feature_offsets && pf_has_anchor_arrays(features)) {
                 char *barcode_seq = barcode_lines[0] + barcode_constant_offset;
                 char barcode_str[barcode_length + 1];
                 memcpy(barcode_str, barcode_seq, barcode_length);
@@ -3674,24 +4105,31 @@ void *consume_reads(void *arg) {
                                     barcode_str, umi_str, feature_index, match_position, feat_read);
                             const size_t read_len = strlen(feat_read);
                             for (int j = 0; j < features->number_of_features; j++) {
-                                int anchor_len = (int)features->feature_anchor_lengths[j];
-                                int offset = features->feature_offsets[j];
-                                if (anchor_len <= 0 || offset < 0) {
-                                    continue;
-                                }
-                                const char *anchor = features->feature_anchors[j];
-                                const char *pos = strstr(feat_read, anchor);
-                                if (pos) {
-                                    int anchor_pos = (int)(pos - feat_read);
-                                    int bc_pos = anchor_pos + offset;
-                                    int tmp_hamming = 0;
-                                    uint32_t idx = 0;
-                                    if (bc_pos >= 0 && (size_t)bc_pos + features->feature_lengths[j] <= read_len) {
-                                        idx = simpleCorrectFeature(feat_read + bc_pos, features, max_feature_n, maxHammingDistance, &tmp_hamming);
+                                int expected_offset = features->feature_offsets[j];
+                                int feature_len = features->feature_lengths[j];
+                                for (int anchor_kind = 0; anchor_kind < PF_ANCHOR_KINDS; anchor_kind++) {
+                                    const char *anchor = NULL;
+                                    int anchor_len = 0;
+                                    if (!pf_get_feature_anchor(features, j, expected_offset, anchor_kind, &anchor, &anchor_len)) {
+                                        continue;
                                     }
-                                    fprintf(pf_trace_anchor_fp,
-                                            "  hit feat=%u name=%s anchor_pos=%d bc_pos=%d idx=%u hamming=%d\n",
-                                            j + 1, features->feature_names[j], anchor_pos, bc_pos, idx, tmp_hamming);
+                                    int scan_from = 0;
+                                    int anchor_pos = pf_find_anchor_position(feat_read, read_len, anchor, anchor_len, scan_from);
+                                    while (anchor_pos >= 0) {
+                                        int bc_pos = pf_anchor_bc_position(anchor_kind, anchor_pos, expected_offset, feature_len);
+                                        int tmp_hamming = 0;
+                                        uint32_t idx = 0;
+                                        if (bc_pos >= 0 && (size_t)bc_pos + feature_len <= read_len) {
+                                            idx = simpleCorrectFeature(feat_read + bc_pos, features, max_feature_n, maxHammingDistance, &tmp_hamming);
+                                        }
+                                        fprintf(pf_trace_anchor_fp,
+                                                "  hit feat=%u name=%s anchor=%s anchor_pos=%d bc_pos=%d idx=%u hamming=%d\n",
+                                                j + 1, features->feature_names[j],
+                                                anchor_kind == PF_ANCHOR_PREFIX ? "prefix" : "suffix",
+                                                anchor_pos, bc_pos, idx, tmp_hamming);
+                                        scan_from = anchor_pos + 1;
+                                        anchor_pos = pf_find_anchor_position(feat_read, read_len, anchor, anchor_len, scan_from);
+                                    }
                                 }
                             }
                             pf_trace_anchor_emitted++;
@@ -3955,7 +4393,7 @@ void process_files_in_sample(sample_args *args) {
         fprintf(stderr, "Looking for filtered barcodes file at %s\n", args->filtered_barcodes_name);
         char filtered_path[FILENAME_LENGTH];
         snprintf(filtered_path, FILENAME_LENGTH, "%s/%s", args->directory, args->filtered_barcodes_name);
-        if (file_exists(filtered_path)) {
+        if (pf_file_exists(filtered_path)) {
             args->filtered_barcodes_hash = kh_init(strptr);
             read_barcodes_into_hash(filtered_path, args->filtered_barcodes_hash);
         }
@@ -4139,11 +4577,11 @@ void destroy_data_structures(data_structures *hashes){
 
 
 int existing_output_skip(char keep_existing, char *directory){
-    if (keep_existing && file_exists(directory)){
+    if (keep_existing && pf_file_exists(directory)){
         char matrix_filename[4096];
         strcpy(matrix_filename, directory);
         strcat(matrix_filename, "matrix.mtx");
-        if (file_exists(matrix_filename)){
+        if (pf_file_exists(matrix_filename)){
             fprintf(stderr, "Matrix file %s found and skipping %s\n", matrix_filename, get_basename(directory));
             return 1;
         }

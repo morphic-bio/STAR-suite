@@ -96,6 +96,9 @@ typedef struct feature_arrays {
     char **feature_anchors;
     char *feature_anchors_storage;
     unsigned int *feature_anchor_lengths;
+    char **feature_suffix_anchors;
+    char *feature_suffix_anchors_storage;
+    unsigned int *feature_suffix_anchor_lengths;
     int *feature_offsets; /* 0-based array; entry i corresponds to feature index (i+1). -1 = unknown */
     int number_of_mismatched_features;
     int *mismatched_feature_indices;

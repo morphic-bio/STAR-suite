@@ -156,7 +156,7 @@ OBJECTS = systemFunctions.o funPrimaryAlignMark.o \
 	ZGZXTags.o \
 	FlexProbeIndex.o \
 	CellRangerFormatter.o \
-	CrMultiConfig.o CrMultiMexStub.o CrMultiAssign.o CrMultiMerge.o CrMultiProcess.o \
+	PfMultiConfig.o PfMultiMexStub.o PfMultiAssign.o PfMultiMerge.o PfMultiProcess.o \
 	CbUbTagInjector.o
 
 # Unit tests for CR-compat regression components (built as a single binary)

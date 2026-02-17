@@ -1757,14 +1757,14 @@ soloFlexMinimalMemory         no
     string:                 yes|no (default no)
                             yes         ... skip legacy Solo structures and eagerly free hashes in inline hash path (reduces memory usage)
 
-crMultiConfig               -
-    string:                 Cell Ranger multi config CSV (enables CR multi processing)
+pfMultiConfig               -
+    string:                 pf-multi config CSV (Cell Ranger-style input; enables pf-multi processing)
 
 crWhitelist                 -
-    string:                 override cell barcode whitelist for CR multi feature processing
+    string:                 override cell barcode whitelist for pf-multi feature processing
 
 crFeatureRef                -
-    string:                 override feature reference CSV for CR multi feature processing
+    string:                 override feature reference CSV for pf-multi feature processing
 
 crFastqRoot                 -
     string:                 fallback root for FASTQ directories in multi config

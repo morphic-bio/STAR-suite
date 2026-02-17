@@ -593,16 +593,27 @@ class Parameters {
         //solo
         ParametersSolo pSolo;
 
-        //Cell Ranger multi config support
+        // pf-multi config support (Cell Ranger-style CSV input)
         struct {
-            string crMultiConfig;           // Path to Cell Ranger multi config CSV
+            string pfMultiConfig;           // Path to pf-multi config CSV (Cell Ranger-style input)
             string crWhitelist;            // Override whitelist (if config missing)
             string crFeatureRef;            // Override feature reference (if config missing)
             string crFastqRoot;            // Fallback root for FASTQ directories
             vector<string> crFastqMap;     // Map config FASTQ paths to actual paths (key=value pairs)
             string crMexUseGexBarcodes;    // DEPRECATED: CR-compat MEX now always uses GEX barcodes (ignored, kept for backward compatibility)
             int crMinUmi;                   // Minimum UMI threshold for CRISPR feature calling (default: 10)
-        } crMulti;
+            int crAssignMaxHamming;         // Optional: pass --maxHammingDistance to assignBarcodes (default: unset)
+            int crAssignFeatureOffset;      // Optional: pass --feature_constant_offset to assignBarcodes (default: unset)
+            int crAssignLimitSearch;        // Optional: pass --limit_search to assignBarcodes; -2 means unset
+            int crAssignMinCounts;          // Optional: pass --min_counts to assignBarcodes (default: unset)
+            int crAssignMaxBarcodeMismatches; // Optional: pass --max_barcode_mismatches (default: unset)
+            int crAssignFeatureN;           // Optional: pass --feature_n to assignBarcodes (default: unset)
+            int crAssignBarcodeN;           // Optional: pass --barcode_n to assignBarcodes (default: unset)
+            int crAssignConsumerThreads;    // Optional: pass --consumer_threads_per_set (default: unset)
+            int crAssignSearchThreads;      // Optional: pass --search_threads (default: unset)
+            double crAssignMinPosterior;    // Optional: pass --min_posterior (default: unset)
+            string crAssignFilteredBarcodes;// Optional filtered barcode file for assignBarcodes
+        } pfMulti;
 
         // Default module flag groups - apply predefined parameter bundles
         struct {

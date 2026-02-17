@@ -1,5 +1,5 @@
-#ifndef CR_MULTI_MERGE_H
-#define CR_MULTI_MERGE_H
+#ifndef PF_MULTI_MERGE_H
+#define PF_MULTI_MERGE_H
 
 #include "IncludeDefine.h"
 #include "MexWriter.h"
@@ -7,14 +7,14 @@
 #include <fstream>
 
 /**
- * @file CrMultiMerge.h
+ * @file PfMultiMerge.h
  * @brief Merge multiple MEX files into a combined MEX
  * 
  * Reads GEX MEX and feature MEX files, merges by barcode,
  * and writes combined output.
  */
 
-namespace CrMultiMerge {
+namespace PfMultiMerge {
 
 /**
  * @struct MexData
@@ -71,6 +71,6 @@ vector<string> computeObservedGexBarcodes(const MexData& gexData);
  */
 int writeCombinedMex(const string& outputDir, const MexData& data, const string& gemWell, ofstream& logStream, const vector<string>& gexBarcodes = vector<string>());
 
-} // namespace CrMultiMerge
+} // namespace PfMultiMerge
 
-#endif // CR_MULTI_MERGE_H
+#endif // PF_MULTI_MERGE_H

@@ -1,4 +1,4 @@
-#include "CrMultiMexStub.h"
+#include "PfMultiMexStub.h"
 #include "ErrorWarning.h"
 #include "serviceFuns.cpp"
 #include <fstream>
@@ -12,7 +12,7 @@
 using std::cerr;
 using std::endl;
 
-namespace CrMultiMexStub {
+namespace PfMultiMexStub {
 
 static void trimInPlace(string& s) {
     size_t first = s.find_first_not_of(" \t\r\n");
@@ -282,4 +282,4 @@ int processAssignOutput(const string& assignOutDir, const string& featureCsvPath
     return 0;
 }
 
-} // namespace CrMultiMexStub
+} // namespace PfMultiMexStub

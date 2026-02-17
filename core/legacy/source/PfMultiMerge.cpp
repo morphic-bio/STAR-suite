@@ -1,4 +1,4 @@
-#include "CrMultiMerge.h"
+#include "PfMultiMerge.h"
 #include "ErrorWarning.h"
 #include "serviceFuns.cpp"
 #include <fstream>
@@ -14,7 +14,7 @@
 using std::cerr;
 using std::endl;
 
-namespace CrMultiMerge {
+namespace PfMultiMerge {
 
 string resolveMexFile(const string& mexDir, const string& basename) {
     string plain = mexDir + "/" + basename;
@@ -582,4 +582,4 @@ int writeCombinedMex(const string& outputDir, const MexData& data, const string&
     return 0;
 }
 
-} // namespace CrMultiMerge
+} // namespace PfMultiMerge

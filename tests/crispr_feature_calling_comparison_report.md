@@ -168,7 +168,7 @@ int min_umi = 10;
 
 ### Implementation
 
-CRISPR feature calling is now automatically integrated into CR-compat mode (`--crMultiConfig`). When STAR processes a multi-config with CRISPR Guide Capture libraries, it will:
+CRISPR feature calling is now automatically integrated into CR-compat mode (`--pfMultiConfig`). When STAR processes a multi-config with CRISPR Guide Capture libraries, it will:
 
 1. After GEX EmptyDrops filtering completes, filter the merged MEX to CRISPR features only
 2. Run GMM feature calling with the configured min UMI threshold (default: 10)
@@ -184,7 +184,7 @@ CRISPR feature calling is now automatically integrated into CR-compat mode (`--c
 
 Example:
 ```bash
-STAR ... --crMultiConfig config.csv --crMinUmi 5
+STAR ... --pfMultiConfig config.csv --crMinUmi 5
 ```
 
 This controls the GMM calling threshold - features with fewer UMIs than this value will not be considered for calling.
@@ -204,7 +204,7 @@ See `docs/TODO_crispr_feature_calling.md` for regression testing status.
 
 ### Code Changes
 
-**File:** `core/legacy/source/CrMultiProcess.cpp`
+**File:** `core/legacy/source/PfMultiProcess.cpp`
 
 Added `runCrisprFeatureCalling()` function that:
 - Filters merged MEX to CRISPR Guide Capture features

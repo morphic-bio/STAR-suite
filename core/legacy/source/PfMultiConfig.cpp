@@ -1,4 +1,4 @@
-#include "CrMultiConfig.h"
+#include "PfMultiConfig.h"
 #include "ErrorWarning.h"
 #include "serviceFuns.cpp"
 #include <fstream>
@@ -8,7 +8,7 @@
 #include <sys/stat.h>
 #include <stdexcept>
 
-namespace CrMultiConfig {
+namespace PfMultiConfig {
 
 static void trimInPlace(string& s) {
     size_t first = s.find_first_not_of(" \t\r\n");
@@ -368,4 +368,4 @@ map<string, string> parseFastqMap(const vector<string>& fastqMapVec) {
     return result;
 }
 
-} // namespace CrMultiConfig
+} // namespace PfMultiConfig

@@ -49,7 +49,7 @@
 #include "SlamVarianceAnalysis.h"
 #include "SlamQcOutput.h"
 #include "SnpMaskBuild.h"
-#include "CrMultiProcess.h"
+#include "PfMultiProcess.h"
 // Note: effective_length.h not included due to Transcriptome class name conflict
 // Use wrapper function instead
 #include "effective_length_wrapper.h"
@@ -1538,9 +1538,9 @@ int main(int argInN, char *argIn[])
         P.inOut->logMain << timeMonthDayTime() << " ..... skipping Solo processing (inline replayer already produced MEX)" << endl;
     }
 
-    // Process Cell Ranger multi config if enabled
-    if (!P.crMulti.crMultiConfig.empty()) {
-        processCrMultiConfig(P, &soloMain);
+    // Process pf-multi config if enabled
+    if (!P.pfMulti.pfMultiConfig.empty()) {
+        processPfMultiConfig(P, &soloMain);
     }
 
     // Note: Two-pass unsorted CB/UB tag injection removed - not used in inline flex path

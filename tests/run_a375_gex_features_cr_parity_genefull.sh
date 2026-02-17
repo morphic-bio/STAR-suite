@@ -133,7 +133,7 @@ echo ""
   --soloStrand Unstranded \
   --soloFeatures GeneFull \
   --soloCrGexFeature genefull \
-  --crMultiConfig "${MULTI_CONFIG}" \
+  --pfMultiConfig "${MULTI_CONFIG}" \
   --crFeatureRef "${FEATURE_REF}" \
   --crWhitelist "${WHITELIST}"
 
@@ -150,7 +150,7 @@ echo "GEX outputs:"
 echo "  Raw MEX:     ${GEX_RAW_MEX}"
 echo "  Filtered MEX: ${GEX_FILTERED_MEX}"
 
-# Features outputs (from crMultiConfig)
+# Features outputs (from pfMultiConfig)
 FEATURES_RAW_MEX="${OUTPREFIX}outs/raw_feature_bc_matrix"
 FEATURES_FILTERED_MEX="${OUTPREFIX}outs/filtered_feature_bc_matrix"
 

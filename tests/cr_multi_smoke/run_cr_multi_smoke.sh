@@ -235,7 +235,7 @@ EOF
     --soloFeatures GeneFull \
     --soloCellFilter "${SOLO_CELL_FILTER}" \
     --soloCrGexFeature "${CR_MULTI_GEX_FEATURE}" \
-    --crMultiConfig "${multi_config}" \
+    --pfMultiConfig "${multi_config}" \
     --crFeatureRef "${FEATURE_REF}" \
     --crWhitelist "${WHITELIST}"
   local exit_code=$?

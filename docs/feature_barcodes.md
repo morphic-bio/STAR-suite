@@ -118,7 +118,7 @@ This writes `features.tsv` and `barcodes.tsv` alongside the existing `matrix.mtx
 
 ## CRISPR Feature Calling (CR-Compat Mode)
 
-When running STAR with `--crMultiConfig` and CRISPR Guide Capture features, STAR automatically runs GMM-based feature calling after EmptyDrops filtering.
+When running STAR with `--pfMultiConfig` and CRISPR Guide Capture features, STAR automatically runs GMM-based feature calling after EmptyDrops filtering.
 
 ### Parameter: `--crMinUmi N`
 
@@ -136,10 +136,10 @@ Controls the minimum UMI threshold for feature calling. Adjust based on assay ty
 
 ```bash
 # CRISPR Guide Capture (default)
-STAR ... --crMultiConfig config.csv
+STAR ... --pfMultiConfig config.csv
 
 # Lineage Barcodes (lower threshold)
-STAR ... --crMultiConfig config.csv --crMinUmi 3
+STAR ... --pfMultiConfig config.csv --crMinUmi 3
 ```
 
 ### Output

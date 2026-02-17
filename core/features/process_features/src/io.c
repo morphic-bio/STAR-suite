@@ -1,11 +1,27 @@
 #include "../include/io.h"
 #include <sys/stat.h>
 
-static int extract_feature_offset(const char *pattern) {
-    if (!pattern) return -1;
+static void parse_feature_pattern(const char *pattern, int *offset, const char **prefix_start, int *prefix_len, const char **suffix_start, int *suffix_len) {
+    if (offset) *offset = -1;
+    if (prefix_start) *prefix_start = NULL;
+    if (prefix_len) *prefix_len = 0;
+    if (suffix_start) *suffix_start = NULL;
+    if (suffix_len) *suffix_len = 0;
+    if (!pattern) {
+        return;
+    }
     const char *marker = strstr(pattern, "(BC)");
-    if (!marker) return -1;
-    return (int)(marker - pattern);
+    if (!marker) {
+        return;
+    }
+    const char *suffix = marker + 4;
+    const int prefix_length = (int)(marker - pattern);
+    const int suffix_length = (int)strlen(suffix);
+    if (offset) *offset = prefix_length;
+    if (prefix_start) *prefix_start = pattern;
+    if (prefix_len) *prefix_len = prefix_length;
+    if (suffix_start) *suffix_start = suffix;
+    if (suffix_len) *suffix_len = suffix_length;
 }
 
 feature_arrays* read_features_file(const char* filename) {
@@ -14,6 +30,7 @@ feature_arrays* read_features_file(const char* filename) {
     int name_size=0;
     int code_size=0;
     int anchor_size=0;
+    int suffix_anchor_size=0;
     FILE *file = fopen(filename, "r");
     if (!file) {
         perror("Failed to open tags file");
@@ -37,7 +54,7 @@ feature_arrays* read_features_file(const char* filename) {
 
     while (fgets(line, LINE_LENGTH, file) != NULL) {
         int length = get_feature_line_sizes(line, nameIndex, seqIndex, patternIndex,
-                                            &name_size, &seq_size, &code_size, &anchor_size, &maxFeatureLength);
+                                            &name_size, &seq_size, &code_size, &anchor_size, &suffix_anchor_size, &maxFeatureLength);
         if (length > 0) {
             khint_t k = kh_get(u32u32, length_counts, length);
             uint32_t current_count = 1;
@@ -68,7 +85,7 @@ feature_arrays* read_features_file(const char* filename) {
     kh_destroy(u32u32, length_counts);
 
     fprintf(stderr, "Read %d tags with max length %d and most common length %d\n", count, maxFeatureLength, most_common_length);
-    feature_arrays *myfeatures = allocate_feature_arrays(name_size, seq_size, code_size, anchor_size, count, maxFeatureLength);
+    feature_arrays *myfeatures = allocate_feature_arrays(name_size, seq_size, code_size, anchor_size, suffix_anchor_size, count, maxFeatureLength);
     myfeatures->common_length = most_common_length;
     //rewind the file and read the sequences
     fseek(file, 0, SEEK_SET);
@@ -95,7 +112,7 @@ feature_arrays* read_features_file(const char* filename) {
 
     return myfeatures;
 }
-int get_feature_line_sizes(char *line, int nameIndex, int seqIndex, int patternIndex, int *name_size, int *seq_size, int *code_size, int *anchor_size, int *maxFeatureLength) {
+int get_feature_line_sizes(char *line, int nameIndex, int seqIndex, int patternIndex, int *name_size, int *seq_size, int *code_size, int *anchor_size, int *suffix_anchor_size, int *maxFeatureLength) {
     line[strcspn(line, "\r\n")] = '\0';
     char *fields[LINE_LENGTH];
     int nFields = split_line(line, fields, ",");
@@ -119,16 +136,18 @@ int get_feature_line_sizes(char *line, int nameIndex, int seqIndex, int patternI
         *maxFeatureLength = string_length;
     }
     *name_size += strlen(fields[nameIndex]) + 1;
-    if (anchor_size) {
-        int anchor_len = 0;
+    if (anchor_size || suffix_anchor_size) {
+        int prefix_anchor_len = 0;
+        int suffix_anchor_len = 0;
         if (patternIndex >= 0 && patternIndex < nFields) {
-            char *pattern = fields[patternIndex];
-            char *marker = strstr(pattern, "(BC)");
-            if (marker) {
-                anchor_len = (int)(marker - pattern);
-            }
+            parse_feature_pattern(fields[patternIndex], NULL, NULL, &prefix_anchor_len, NULL, &suffix_anchor_len);
         }
-        *anchor_size += anchor_len + 1;
+        if (anchor_size) {
+            *anchor_size += prefix_anchor_len + 1;
+        }
+        if (suffix_anchor_size) {
+            *suffix_anchor_size += suffix_anchor_len + 1;
+        }
     }
     return string_length;
 }
@@ -151,28 +170,36 @@ void process_feature_line(char *line, int nameIndex, int seqIndex, int patternIn
     strcpy(myfeatures->feature_sequences[count], tmpSeq);
     myfeatures->feature_lengths[count] = strlen(tmpSeq);
     myfeatures->feature_code_lengths[count] = string2code(tmpSeq, strlen(tmpSeq), myfeatures->feature_codes[count]);
+    int offset = -1;
+    const char *prefix_anchor = NULL;
+    const char *suffix_anchor = NULL;
+    int prefix_anchor_len = 0;
+    int suffix_anchor_len = 0;
+    if (patternIndex >= 0 && patternIndex < nFields) {
+        parse_feature_pattern(fields[patternIndex], &offset, &prefix_anchor, &prefix_anchor_len, &suffix_anchor, &suffix_anchor_len);
+    }
     if (myfeatures->feature_offsets) {
-        int offset = -1;
-        if (patternIndex >= 0 && patternIndex < nFields) {
-            offset = extract_feature_offset(fields[patternIndex]);
-        }
         // feature_offsets is 0-based; index i corresponds to feature index (i+1)
         myfeatures->feature_offsets[count] = offset;
     }
     if (myfeatures->feature_anchors) {
-        int anchor_len = 0;
-        if (patternIndex >= 0 && patternIndex < nFields) {
-            char *pattern = fields[patternIndex];
-            char *marker = strstr(pattern, "(BC)");
-            if (marker) {
-                anchor_len = (int)(marker - pattern);
-                memcpy(myfeatures->feature_anchors[count], pattern, (size_t)anchor_len);
-            }
+        if (prefix_anchor_len > 0 && prefix_anchor) {
+            memcpy(myfeatures->feature_anchors[count], prefix_anchor, (size_t)prefix_anchor_len);
         }
-        myfeatures->feature_anchors[count][anchor_len] = '\0';
-        myfeatures->feature_anchor_lengths[count] = (unsigned int)anchor_len;
+        myfeatures->feature_anchors[count][prefix_anchor_len] = '\0';
+        myfeatures->feature_anchor_lengths[count] = (unsigned int)prefix_anchor_len;
         if (count + 1 < myfeatures->number_of_features) {
-            myfeatures->feature_anchors[count + 1] = myfeatures->feature_anchors[count] + anchor_len + 1;
+            myfeatures->feature_anchors[count + 1] = myfeatures->feature_anchors[count] + prefix_anchor_len + 1;
+        }
+    }
+    if (myfeatures->feature_suffix_anchors) {
+        if (suffix_anchor_len > 0 && suffix_anchor) {
+            memcpy(myfeatures->feature_suffix_anchors[count], suffix_anchor, (size_t)suffix_anchor_len);
+        }
+        myfeatures->feature_suffix_anchors[count][suffix_anchor_len] = '\0';
+        myfeatures->feature_suffix_anchor_lengths[count] = (unsigned int)suffix_anchor_len;
+        if (count + 1 < myfeatures->number_of_features) {
+            myfeatures->feature_suffix_anchors[count + 1] = myfeatures->feature_suffix_anchors[count] + suffix_anchor_len + 1;
         }
     }
     if (myfeatures->feature_lengths[count] == myfeatures->common_length) {
@@ -186,7 +213,7 @@ void process_feature_line(char *line, int nameIndex, int seqIndex, int patternIn
         myfeatures->feature_codes[count + 1] = myfeatures->feature_codes[count] + myfeatures->feature_code_lengths[count];
     }
 }
-feature_arrays* allocate_feature_arrays(int name_size, int seq_size, int code_size, int anchor_size, int count, int maxFeatureLength) {
+feature_arrays* allocate_feature_arrays(int name_size, int seq_size, int code_size, int anchor_size, int suffix_anchor_size, int count, int maxFeatureLength) {
         feature_arrays *myfeatures = malloc(sizeof(feature_arrays));
         if (myfeatures == NULL) {
             fprintf(stderr, "Failed to allocate memory for feature arrays\n");
@@ -205,17 +232,25 @@ feature_arrays* allocate_feature_arrays(int name_size, int seq_size, int code_si
         myfeatures->feature_anchors_storage = NULL;
         myfeatures->feature_anchors = NULL;
         myfeatures->feature_anchor_lengths = NULL;
+        myfeatures->feature_suffix_anchors_storage = NULL;
+        myfeatures->feature_suffix_anchors = NULL;
+        myfeatures->feature_suffix_anchor_lengths = NULL;
         if (anchor_size > 0) {
             myfeatures->feature_anchors_storage = malloc(anchor_size);
             myfeatures->feature_anchors = malloc(count * sizeof(char*));
             myfeatures->feature_anchor_lengths = malloc(count * sizeof(unsigned int));
+        }
+        if (suffix_anchor_size > 0) {
+            myfeatures->feature_suffix_anchors_storage = malloc(suffix_anchor_size);
+            myfeatures->feature_suffix_anchors = malloc(count * sizeof(char*));
+            myfeatures->feature_suffix_anchor_lengths = malloc(count * sizeof(unsigned int));
         }
         myfeatures->feature_offsets = malloc(count * sizeof(int));
         myfeatures->number_of_features = count;
         myfeatures->mismatched_feature_indices = malloc(count * sizeof(int));
 
         // Check if any of the mallocs failed by checking for NULL pointers
-        if (myfeatures->feature_names_storage == NULL || myfeatures->feature_sequences_storage == NULL || myfeatures->feature_codes_storage == NULL || myfeatures->feature_names == NULL || myfeatures->feature_lengths == NULL || myfeatures->feature_code_lengths == NULL || myfeatures->feature_codes == NULL || myfeatures->mismatched_feature_indices == NULL || myfeatures->feature_offsets == NULL) {
+        if (myfeatures->feature_names_storage == NULL || myfeatures->feature_sequences_storage == NULL || myfeatures->feature_codes_storage == NULL || myfeatures->feature_names == NULL || myfeatures->feature_lengths == NULL || myfeatures->feature_code_lengths == NULL || myfeatures->feature_codes == NULL || myfeatures->mismatched_feature_indices == NULL || myfeatures->feature_offsets == NULL || (anchor_size > 0 && (!myfeatures->feature_anchors_storage || !myfeatures->feature_anchors || !myfeatures->feature_anchor_lengths)) || (suffix_anchor_size > 0 && (!myfeatures->feature_suffix_anchors_storage || !myfeatures->feature_suffix_anchors || !myfeatures->feature_suffix_anchor_lengths))) {
             fprintf(stderr, "Failed to allocate memory for feature arrays\n");
             exit(EXIT_FAILURE);
         }
@@ -225,15 +260,24 @@ feature_arrays* allocate_feature_arrays(int name_size, int seq_size, int code_si
         for (int i = 0; i < count; i++) {
             myfeatures->feature_offsets[i] = -1;
         }
-        myfeatures->feature_names[0] = myfeatures->feature_names_storage;
-        myfeatures->feature_sequences[0] = myfeatures->feature_sequences_storage;
-        myfeatures->feature_codes[0] = myfeatures->feature_codes_storage;
-        if (myfeatures->feature_anchors_storage) {
-            memset(myfeatures->feature_anchors_storage, 0, anchor_size);
-            for (int i = 0; i < count; i++) {
-                myfeatures->feature_anchor_lengths[i] = 0;
+        if (count > 0) {
+            myfeatures->feature_names[0] = myfeatures->feature_names_storage;
+            myfeatures->feature_sequences[0] = myfeatures->feature_sequences_storage;
+            myfeatures->feature_codes[0] = myfeatures->feature_codes_storage;
+            if (myfeatures->feature_anchors_storage) {
+                memset(myfeatures->feature_anchors_storage, 0, anchor_size);
+                for (int i = 0; i < count; i++) {
+                    myfeatures->feature_anchor_lengths[i] = 0;
+                }
+                myfeatures->feature_anchors[0] = myfeatures->feature_anchors_storage;
             }
-            myfeatures->feature_anchors[0] = myfeatures->feature_anchors_storage;
+            if (myfeatures->feature_suffix_anchors_storage) {
+                memset(myfeatures->feature_suffix_anchors_storage, 0, suffix_anchor_size);
+                for (int i = 0; i < count; i++) {
+                    myfeatures->feature_suffix_anchor_lengths[i] = 0;
+                }
+                myfeatures->feature_suffix_anchors[0] = myfeatures->feature_suffix_anchors_storage;
+            }
         }
 
         return myfeatures;
@@ -726,7 +770,7 @@ void organize_fastq_files_by_type(int positional_arg_count, int argc, char *argv
     //check that memory allocations are non null and free them
 }
 
-void read_barcodes_into_hash(char *filename, khash_t(strptr)* hash) {
+void read_barcodes_into_hash(const char *filename, khash_t(strptr)* hash) {
     FILE *file = fopen(filename, "r");
     if (file == NULL) {
         fprintf(stderr, "Failed to open barcode file %s\n", filename);
@@ -754,7 +798,7 @@ void free_strptr_hash(khash_t(strptr)* hash) {
     kh_destroy(strptr, hash);
 }
 
-int file_exists(const char *filename){
+int pf_file_exists(const char *filename){
     struct stat buffer;
     return (stat(filename, &buffer) == 0);
 }

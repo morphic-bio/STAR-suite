@@ -46,6 +46,8 @@ extern int *feature_offsets;
 extern int feature_offsets_count;
 extern char **feature_anchors;
 extern unsigned int *feature_anchor_lengths;
+extern char **feature_suffix_anchors;
+extern unsigned int *feature_suffix_anchor_lengths;
 extern int feature_anchor_count;
 extern int feature_mode_bootstrap_reads;
 extern unsigned long long feature_mode_reads_seen;

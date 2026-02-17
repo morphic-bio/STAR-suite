@@ -302,7 +302,6 @@ pf_context* pf_init(const pf_config *config) {
     
     /* Global initialization */
     pf_global_init();
-    initialize_unit_sizes();
     
     ctx->initialized = 1;
     ctx->error_buf[0] = '\0';
@@ -325,6 +324,8 @@ void pf_destroy(pf_context *ctx) {
         if (feature_anchors == ctx->features->feature_anchors) {
             feature_anchors = NULL;
             feature_anchor_lengths = NULL;
+            feature_suffix_anchors = NULL;
+            feature_suffix_anchor_lengths = NULL;
             feature_anchor_count = 0;
         }
         free_feature_arrays(ctx->features);
@@ -366,7 +367,7 @@ pf_error pf_load_feature_ref(pf_context *ctx, const char *feature_csv) {
     if (!ctx || !feature_csv) return PF_ERR_INVALID_ARG;
     if (!ctx->initialized) return PF_ERR_NOT_INITIALIZED;
     
-    if (!file_exists(feature_csv)) {
+    if (!pf_file_exists(feature_csv)) {
         snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE, 
                  "Feature reference file not found: %s", feature_csv);
         return PF_ERR_FILE_NOT_FOUND;
@@ -381,6 +382,8 @@ pf_error pf_load_feature_ref(pf_context *ctx, const char *feature_csv) {
         if (feature_anchors == ctx->features->feature_anchors) {
             feature_anchors = NULL;
             feature_anchor_lengths = NULL;
+            feature_suffix_anchors = NULL;
+            feature_suffix_anchor_lengths = NULL;
             feature_anchor_count = 0;
         }
         free_feature_arrays(ctx->features);
@@ -406,6 +409,8 @@ pf_error pf_load_feature_ref(pf_context *ctx, const char *feature_csv) {
     feature_offsets_count = ctx->features->number_of_features;
     feature_anchors = ctx->features->feature_anchors;
     feature_anchor_lengths = ctx->features->feature_anchor_lengths;
+    feature_suffix_anchors = ctx->features->feature_suffix_anchors;
+    feature_suffix_anchor_lengths = ctx->features->feature_suffix_anchor_lengths;
     feature_anchor_count = ctx->features->number_of_features;
 
     if (feature_mode_bootstrap_reads > 0) {
@@ -426,6 +431,7 @@ pf_error pf_load_feature_ref(pf_context *ctx, const char *feature_csv) {
     number_of_features = ctx->features->number_of_features;
     maximum_feature_length = ctx->features->max_length;
     feature_code_length = (maximum_feature_length + 3) / 4;
+    initialize_unit_sizes();
     
     return PF_OK;
 }
@@ -434,7 +440,7 @@ pf_error pf_load_whitelist(pf_context *ctx, const char *whitelist_path) {
     if (!ctx || !whitelist_path) return PF_ERR_INVALID_ARG;
     if (!ctx->initialized) return PF_ERR_NOT_INITIALIZED;
     
-    if (!file_exists(whitelist_path)) {
+    if (!pf_file_exists(whitelist_path)) {
         snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
                  "Whitelist file not found: %s", whitelist_path);
         return PF_ERR_FILE_NOT_FOUND;
@@ -472,7 +478,7 @@ pf_error pf_load_filtered_barcodes(pf_context *ctx, const char *filtered_path) {
     if (!ctx || !filtered_path) return PF_ERR_INVALID_ARG;
     if (!ctx->initialized) return PF_ERR_NOT_INITIALIZED;
     
-    if (!file_exists(filtered_path)) {
+    if (!pf_file_exists(filtered_path)) {
         snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
                  "Filtered barcodes file not found: %s", filtered_path);
         return PF_ERR_FILE_NOT_FOUND;
@@ -581,7 +587,7 @@ pf_error pf_process_fastq_dir(pf_context *ctx,
         }
     }
     
-    if (!is_directory(fastq_dir)) {
+    if (!pf_is_directory(fastq_dir)) {
         snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
                  "FASTQ directory not found: %s", fastq_dir);
         return PF_ERR_FILE_NOT_FOUND;

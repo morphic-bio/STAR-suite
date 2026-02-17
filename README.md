@@ -34,7 +34,7 @@ mcp_server/              # MCP server for scripted discovery/preflight/run workf
 - **STAR-core** (`core/`): Legacy STAR (indexing, bulk, Solo) plus shared utilities.
   Build: `make core` (binary at `core/legacy/source/STAR`).
 - **STAR-perturb** (`core/legacy/` + `core/features/process_features/`): CR-compatible perturb-seq path with integrated feature extraction/calling (`process_features` + `call_features`) and `crispr_analysis/` outputs in CR-compat mode.
-  Primary run path: `STAR --crMultiConfig ... --defaultCrCompat yes` (see STAR-perturb section below).
+  Primary run path: `STAR --pfMultiConfig ... --defaultCrCompat yes` (see STAR-perturb section below).
 - **STAR-Flex** (`flex/`): FlexFilter pipeline and Flex-specific integrations.
   Build tools: `make flex` or `make flex-tools`.
 - **STAR-SLAM** (`slam/`): SLAM-seq quantification, SNP masking, trimming/QC.
@@ -213,7 +213,7 @@ with integrated CRISPR feature calling. This is the path used for STAR-perturb
 work and CR compatibility comparisons.
 
 - **Integrated CR-compat in STAR** (GEX + feature merge + CRISPR calling):
-  - Use `--crMultiConfig <multi_config.csv>`
+  - Use `--pfMultiConfig <multi_config.csv>`
   - Recommended bundle: `--defaultCrCompat yes`
   - Key controls:
     - `--crMinUmi 10` (default; lower to `2-3` for lineage-barcode style assays)
@@ -289,7 +289,7 @@ See `slam/docs/SLAM_COMPATIBILITY_MODE.md` and `slam/docs/SLAM_seq.md`.
 
 ### STAR-perturb / CR-Compat
 See `docs/feature_barcodes.md` and `docs/CRISPR_FEATURE_CALLING_IMPLEMENTATION_SUMMARY.md`.
-- `--crMultiConfig`: Enable Cell Ranger-style multi processing with feature libraries.
+- `--pfMultiConfig`: Enable Cell Ranger-style multi processing with feature libraries.
 - `--defaultCrCompat yes`: Apply the CR-compat perturb defaults bundle.
 - `--crMinUmi`: Minimum UMI threshold for CRISPR feature calling (default `10`).
 - `--soloCrGexFeature`: Control merged GEX source (`auto`, `gene`, `genefull`).
@@ -404,7 +404,7 @@ For paired-end, pass **two comma-separated mate lists**:
 core/legacy/source/STAR \
   --runMode alignReads \
   --genomeDir /path/to/index \
-  --crMultiConfig /path/to/multi_config.csv \
+  --pfMultiConfig /path/to/multi_config.csv \
   --defaultCrCompat yes \
   --outFileNamePrefix /path/to/outs/
 ```

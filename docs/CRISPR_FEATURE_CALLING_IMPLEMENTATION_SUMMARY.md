@@ -5,7 +5,7 @@
 
 ## Overview
 
-Implemented automatic CRISPR feature calling in STAR's CR-compat mode (`--crMultiConfig`). When processing multi-configs with CRISPR Guide Capture libraries, STAR now automatically generates `crispr_analysis/*` outputs matching Cell Ranger's format.
+Implemented automatic CRISPR feature calling in STAR's CR-compat mode (`--pfMultiConfig`). When processing multi-configs with CRISPR Guide Capture libraries, STAR now automatically generates `crispr_analysis/*` outputs matching Cell Ranger's format.
 
 ## Key Results
 
@@ -29,14 +29,14 @@ Implemented automatic CRISPR feature calling in STAR's CR-compat mode (`--crMult
 #### `core/legacy/source/star_feature_call.cpp`
 - Changed default `--min-umi` from 3 to 10 for CR compatibility
 
-#### `core/legacy/source/CrMultiProcess.cpp`
+#### `core/legacy/source/PfMultiProcess.cpp`
 - Added `runCrisprFeatureCalling()` function
 - Filters merged MEX to CRISPR Guide Capture features only
 - Runs GMM calling with configurable min_umi threshold
 - Writes to `outs/crispr_analysis/`
 
 #### `core/legacy/source/Parameters.h`
-- Added `crMinUmi` field to crMulti struct
+- Added `crMinUmi` field to `pfMulti` struct
 
 #### `core/legacy/source/Parameters.cpp`
 - Added `--crMinUmi` parameter (default: 10)
@@ -114,14 +114,14 @@ See `docs/todos` for the full list:
 bash tests/test_cr_compat_crispr_calling.sh
 
 # Or manually with custom threshold
-STAR ... --crMultiConfig config.csv --crMinUmi 3
+STAR ... --pfMultiConfig config.csv --crMinUmi 3
 ```
 
 ## Files Modified (Summary)
 
 ```
 core/legacy/source/
-├── CrMultiProcess.cpp      # CRISPR calling integration
+├── PfMultiProcess.cpp      # CRISPR calling integration
 ├── Parameters.cpp          # --crMinUmi parameter
 ├── Parameters.h            # crMinUmi field
 ├── Makefile               # libprocess_features linkage

@@ -109,6 +109,9 @@ void free_feature_arrays(feature_arrays *features) {
     free(features->feature_anchors_storage);
     free(features->feature_anchors);
     free(features->feature_anchor_lengths);
+    free(features->feature_suffix_anchors_storage);
+    free(features->feature_suffix_anchors);
+    free(features->feature_suffix_anchor_lengths);
     free(features->feature_offsets);
     free(features->mismatched_feature_indices);
     free(features);

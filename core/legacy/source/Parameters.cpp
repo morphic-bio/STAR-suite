@@ -633,14 +633,25 @@ Parameters::Parameters() {//initalize parameters info
     // Minimal memory mode
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "soloFlexMinimalMemory", &pSolo.soloFlexMinimalMemoryStr));
 
-    // Cell Ranger multi config support
-    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "crMultiConfig", &crMulti.crMultiConfig));
-    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "crWhitelist", &crMulti.crWhitelist));
-    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "crFeatureRef", &crMulti.crFeatureRef));
-    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "crFastqRoot", &crMulti.crFastqRoot));
-    parArray.push_back(new ParameterInfoVector<string>(-1, -1, "crFastqMap", &crMulti.crFastqMap));
-    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "crMexUseGexBarcodes", &crMulti.crMexUseGexBarcodes));
-    parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "crMinUmi", &crMulti.crMinUmi));
+    // pf-multi config support (Cell Ranger-style CSV input)
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "pfMultiConfig", &pfMulti.pfMultiConfig));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "crWhitelist", &pfMulti.crWhitelist));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "crFeatureRef", &pfMulti.crFeatureRef));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "crFastqRoot", &pfMulti.crFastqRoot));
+    parArray.push_back(new ParameterInfoVector<string>(-1, -1, "crFastqMap", &pfMulti.crFastqMap));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "crMexUseGexBarcodes", &pfMulti.crMexUseGexBarcodes));
+    parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "crMinUmi", &pfMulti.crMinUmi));
+    parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "crAssignMaxHamming", &pfMulti.crAssignMaxHamming));
+    parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "crAssignFeatureOffset", &pfMulti.crAssignFeatureOffset));
+    parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "crAssignLimitSearch", &pfMulti.crAssignLimitSearch));
+    parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "crAssignMinCounts", &pfMulti.crAssignMinCounts));
+    parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "crAssignMaxBarcodeMismatches", &pfMulti.crAssignMaxBarcodeMismatches));
+    parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "crAssignFeatureN", &pfMulti.crAssignFeatureN));
+    parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "crAssignBarcodeN", &pfMulti.crAssignBarcodeN));
+    parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "crAssignConsumerThreads", &pfMulti.crAssignConsumerThreads));
+    parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "crAssignSearchThreads", &pfMulti.crAssignSearchThreads));
+    parArray.push_back(new ParameterInfoScalar<double>(-1, -1, "crAssignMinPosterior", &pfMulti.crAssignMinPosterior));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "crAssignFilteredBarcodes", &pfMulti.crAssignFilteredBarcodes));
 
     // Default module flag groups
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "defaultBulk", &defaultGroups.bulk));
@@ -678,28 +689,72 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
             pSolo.umiCorrectionUseTagsStr = "no";
             p->inputLevel = 0;
         }
-        if (p->nameString == "crMultiConfig" && p->inputLevel < 0) {
-            crMulti.crMultiConfig = "-";
+        if (p->nameString == "pfMultiConfig" && p->inputLevel < 0) {
+            pfMulti.pfMultiConfig = "-";
             p->inputLevel = 0;
         }
         if (p->nameString == "crWhitelist" && p->inputLevel < 0) {
-            crMulti.crWhitelist = "-";
+            pfMulti.crWhitelist = "-";
             p->inputLevel = 0;
         }
         if (p->nameString == "crFeatureRef" && p->inputLevel < 0) {
-            crMulti.crFeatureRef = "-";
+            pfMulti.crFeatureRef = "-";
             p->inputLevel = 0;
         }
         if (p->nameString == "crFastqRoot" && p->inputLevel < 0) {
-            crMulti.crFastqRoot = "-";
+            pfMulti.crFastqRoot = "-";
             p->inputLevel = 0;
         }
         if (p->nameString == "crFastqMap" && p->inputLevel < 0) {
-            crMulti.crFastqMap.clear();
+            pfMulti.crFastqMap.clear();
             p->inputLevel = 0;
         }
         if (p->nameString == "crMinUmi" && p->inputLevel < 0) {
-            crMulti.crMinUmi = 10;  // CR-compatible default
+            pfMulti.crMinUmi = 10;  // CR-compatible default
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "crAssignMaxHamming" && p->inputLevel < 0) {
+            pfMulti.crAssignMaxHamming = -1;
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "crAssignFeatureOffset" && p->inputLevel < 0) {
+            pfMulti.crAssignFeatureOffset = -1;
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "crAssignLimitSearch" && p->inputLevel < 0) {
+            pfMulti.crAssignLimitSearch = -2;
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "crAssignMinCounts" && p->inputLevel < 0) {
+            pfMulti.crAssignMinCounts = -1;
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "crAssignMaxBarcodeMismatches" && p->inputLevel < 0) {
+            pfMulti.crAssignMaxBarcodeMismatches = -1;
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "crAssignFeatureN" && p->inputLevel < 0) {
+            pfMulti.crAssignFeatureN = -1;
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "crAssignBarcodeN" && p->inputLevel < 0) {
+            pfMulti.crAssignBarcodeN = -1;
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "crAssignConsumerThreads" && p->inputLevel < 0) {
+            pfMulti.crAssignConsumerThreads = -1;
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "crAssignSearchThreads" && p->inputLevel < 0) {
+            pfMulti.crAssignSearchThreads = -1;
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "crAssignMinPosterior" && p->inputLevel < 0) {
+            pfMulti.crAssignMinPosterior = -1.0;
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "crAssignFilteredBarcodes" && p->inputLevel < 0) {
+            pfMulti.crAssignFilteredBarcodes = "-";
             p->inputLevel = 0;
         }
     }

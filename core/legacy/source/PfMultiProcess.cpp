@@ -1,9 +1,9 @@
-#include "CrMultiProcess.h"
+#include "PfMultiProcess.h"
 #include "Solo.h"
-#include "CrMultiConfig.h"
-#include "CrMultiAssign.h"
-#include "CrMultiMexStub.h"
-#include "CrMultiMerge.h"
+#include "PfMultiConfig.h"
+#include "PfMultiAssign.h"
+#include "PfMultiMexStub.h"
+#include "PfMultiMerge.h"
 #include "ErrorWarning.h"
 #include "serviceFuns.cpp"
 #include "TimeFunctions.h"
@@ -13,6 +13,7 @@
 #include <dirent.h>
 #include <stdexcept>
 #include <iostream>
+#include <fstream>
 #include <algorithm>
 #include <cstdio>
 using std::cerr;
@@ -227,16 +228,16 @@ static int runCrisprFeatureCalling(const string& filteredMexDir, const string& o
     logStream << timeMonthDayTime() << " ..... starting CRISPR feature calling\n";
     
     // Step 1: Read the filtered MEX
-    CrMultiMerge::MexData mexData;
+    PfMultiMerge::MexData mexData;
     try {
-        mexData = CrMultiMerge::readMex(filteredMexDir);
+        mexData = PfMultiMerge::readMex(filteredMexDir);
     } catch (const exception& e) {
         logStream << "ERROR: Failed to read filtered MEX for CRISPR calling: " << e.what() << "\n";
         return -1;
     }
     
     // Step 2: Filter to CRISPR Guide Capture features only
-    CrMultiMerge::MexData crisprData = CrMultiMerge::filterByFeatureType(mexData, "CRISPR Guide Capture");
+    PfMultiMerge::MexData crisprData = PfMultiMerge::filterByFeatureType(mexData, "CRISPR Guide Capture");
     
     if (crisprData.features.empty()) {
         logStream << "NOTICE: No CRISPR Guide Capture features found, skipping feature calling\n";
@@ -319,16 +320,16 @@ static int runCrisprFeatureCalling(const string& filteredMexDir, const string& o
 
 } // namespace
 
-int processCrMultiConfig(Parameters& P, const Solo* solo) {
-    if (P.crMulti.crMultiConfig.empty()) {
+int processPfMultiConfig(Parameters& P, const Solo* solo) {
+    if (P.pfMulti.pfMultiConfig.empty()) {
         return 0; // Not enabled
     }
     
-    P.inOut->logMain << timeMonthDayTime() << " ..... started CR multi config processing\n";
+    P.inOut->logMain << timeMonthDayTime() << " ..... started pf-multi config processing\n";
     
     try {
         // Parse multi config
-        CrMultiConfig::Config config = CrMultiConfig::parseConfig(P.crMulti.crMultiConfig);
+        PfMultiConfig::Config config = PfMultiConfig::parseConfig(P.pfMulti.pfMultiConfig);
         
         if (config.libraries.empty()) {
             ostringstream err;
@@ -337,7 +338,7 @@ int processCrMultiConfig(Parameters& P, const Solo* solo) {
         }
         
         // Get feature reference
-        string featureRef = P.crMulti.crFeatureRef;
+        string featureRef = P.pfMulti.crFeatureRef;
         if (featureRef.empty()) {
             featureRef = config.featureRef;
         }
@@ -346,7 +347,7 @@ int processCrMultiConfig(Parameters& P, const Solo* solo) {
         }
         
         // Get whitelist
-        string whitelist = P.crMulti.crWhitelist;
+        string whitelist = P.pfMulti.crWhitelist;
         if (whitelist.empty()) {
             // Try to get from solo whitelist
             if (!P.pSolo.soloCBwhitelist.empty()) {
@@ -358,22 +359,57 @@ int processCrMultiConfig(Parameters& P, const Solo* solo) {
         }
         
         // Parse FASTQ map
-        map<string, string> fastqMap = CrMultiConfig::parseFastqMap(P.crMulti.crFastqMap);
-        
-        // Find assignBarcodes binary
-        string assignBin = "core/features/feature_barcodes/assignBarcodes";
-        struct stat st;
-        if (stat(assignBin.c_str(), &st) != 0) {
-            // Try absolute path from STAR binary location
-            // For now, assume it's in the same directory structure
-            assignBin = "assignBarcodes"; // Fallback to PATH
-        }
+        map<string, string> fastqMap = PfMultiConfig::parseFastqMap(P.pfMulti.crFastqMap);
         
         // Get output prefix
         string outPrefix = P.outFileNamePrefix;
         // Remove trailing slash if present
         while (!outPrefix.empty() && outPrefix.back() == '/') {
             outPrefix.pop_back();
+        }
+
+        string crAssignRoot = outPrefix + "/cr_assign";
+        string mkCrAssignRootCmd = "mkdir -p \"" + crAssignRoot + "\"";
+        if (system(mkCrAssignRootCmd.c_str()) != 0) {
+            throw runtime_error("Failed to create CR assign root directory: " + crAssignRoot);
+        }
+
+        PfMultiAssign::AssignOptions assignOpts;
+        assignOpts.maxHammingDistance = P.pfMulti.crAssignMaxHamming;
+        assignOpts.featureConstantOffset = P.pfMulti.crAssignFeatureOffset;
+        assignOpts.limitSearch = P.pfMulti.crAssignLimitSearch;
+        assignOpts.minCounts = P.pfMulti.crAssignMinCounts;
+        assignOpts.maxBarcodeMismatches = P.pfMulti.crAssignMaxBarcodeMismatches;
+        assignOpts.featureN = P.pfMulti.crAssignFeatureN;
+        assignOpts.barcodeN = P.pfMulti.crAssignBarcodeN;
+        assignOpts.consumerThreadsPerSet = P.pfMulti.crAssignConsumerThreads;
+        assignOpts.searchThreads = P.pfMulti.crAssignSearchThreads;
+        assignOpts.minPosterior = P.pfMulti.crAssignMinPosterior;
+
+        if (!P.pfMulti.crAssignFilteredBarcodes.empty() && P.pfMulti.crAssignFilteredBarcodes != "-") {
+            struct stat stFiltered;
+            if (stat(P.pfMulti.crAssignFilteredBarcodes.c_str(), &stFiltered) != 0) {
+                throw runtime_error("crAssignFilteredBarcodes file not found: " + P.pfMulti.crAssignFilteredBarcodes);
+            }
+            assignOpts.filteredBarcodesPath = P.pfMulti.crAssignFilteredBarcodes;
+            P.inOut->logMain << "NOTICE: Using explicit filtered barcodes for assignBarcodes: "
+                             << assignOpts.filteredBarcodesPath << "\n";
+        } else {
+            vector<string> filteredAssignBarcodes;
+            if (getFilteredBarcodesFromSolo(solo, P, filteredAssignBarcodes)) {
+                string filteredPath = crAssignRoot + "/filtered_gex_barcodes.txt";
+                std::ofstream fbc(filteredPath.c_str());
+                if (!fbc.is_open()) {
+                    throw runtime_error("Failed to write filtered barcode list for assignBarcodes: " + filteredPath);
+                }
+                for (const auto& bc : filteredAssignBarcodes) {
+                    fbc << bc << "\n";
+                }
+                fbc.close();
+                assignOpts.filteredBarcodesPath = filteredPath;
+                P.inOut->logMain << "NOTICE: Using Solo filtered barcodes for assignBarcodes (" 
+                                 << filteredAssignBarcodes.size() << " barcodes)\n";
+            }
         }
         
         vector<FeatureSpec> featureSpecs = {
@@ -391,7 +427,7 @@ int processCrMultiConfig(Parameters& P, const Solo* solo) {
         vector<FeatureRun> featureRuns;
 
         for (const auto& spec : featureSpecs) {
-            vector<CrMultiConfig::LibraryEntry> libs = config.getFeatureLibraries(spec.libraryType);
+            vector<PfMultiConfig::LibraryEntry> libs = config.getFeatureLibraries(spec.libraryType);
             if (libs.empty()) {
                 continue;
             }
@@ -399,9 +435,14 @@ int processCrMultiConfig(Parameters& P, const Solo* solo) {
             string assignBase = outPrefix + "/cr_assign/" + featureDir;
 
             for (const auto& lib : libs) {
-                string resolvedFastq = CrMultiConfig::resolveFastqDir(lib.fastqs, P.crMulti.crFastqRoot, fastqMap);
+                string resolvedFastq = PfMultiConfig::resolveFastqDir(lib.fastqs, P.pfMulti.crFastqRoot, fastqMap);
                 string sampleName = lib.sample.empty() ? basenameOf(resolvedFastq) : lib.sample;
                 string assignOut = assignBase + "/" + sanitizeDirName(sampleName);
+
+                string mkAssignOutCmd = "mkdir -p \"" + assignOut + "\"";
+                if (system(mkAssignOutCmd.c_str()) != 0) {
+                    throw runtime_error("Failed to create assign output directory: " + assignOut);
+                }
 
                 string filteredRef = assignOut + "/feature_reference.filtered.csv";
                 bool filtered = filterFeatureRefCsv(featureRef, spec.featureRefType, filteredRef);
@@ -411,7 +452,7 @@ int processCrMultiConfig(Parameters& P, const Solo* solo) {
                                      << "; using full reference\n";
                 }
 
-                int ret = CrMultiAssign::runAssignBarcodes(assignBin, whitelist, refPath, resolvedFastq, assignOut);
+                int ret = PfMultiAssign::runAssignBarcodes(whitelist, refPath, resolvedFastq, assignOut, assignOpts);
                 if (ret != 0) {
                     throw runtime_error("Failed to process feature library: " + spec.libraryType);
                 }
@@ -431,7 +472,7 @@ int processCrMultiConfig(Parameters& P, const Solo* solo) {
         for (auto& run : featureRuns) {
             string realOut = findAssignOutputDir(run.assignOut);
             run.assignOut = realOut;
-            int ret = CrMultiMexStub::processAssignOutput(run.assignOut, run.featureRefPath, run.featureType, false);
+            int ret = PfMultiMexStub::processAssignOutput(run.assignOut, run.featureRefPath, run.featureType, false);
             if (ret != 0) {
                 P.inOut->logMain << "WARNING: Failed to generate MEX stub for " << run.featureType << "\n";
             }
@@ -495,10 +536,10 @@ int processCrMultiConfig(Parameters& P, const Solo* solo) {
         }
 
         // Read raw GEX MEX (required for raw_feature_bc_matrix)
-        CrMultiMerge::MexData gexRawData;
+        PfMultiMerge::MexData gexRawData;
         try {
             if (hasRaw) {
-                gexRawData = CrMultiMerge::readMex(rawOut);
+                gexRawData = PfMultiMerge::readMex(rawOut);
                 // Filter to Gene Expression only if needed
                 bool hasMultipleTypes = false;
                 for (const auto& type : gexRawData.featureTypes) {
@@ -508,7 +549,7 @@ int processCrMultiConfig(Parameters& P, const Solo* solo) {
                     }
                 }
                 if (hasMultipleTypes) {
-                    gexRawData = CrMultiMerge::filterByFeatureType(gexRawData, "Gene Expression");
+                    gexRawData = PfMultiMerge::filterByFeatureType(gexRawData, "Gene Expression");
                 }
             }
         } catch (const exception& e) {
@@ -520,13 +561,13 @@ int processCrMultiConfig(Parameters& P, const Solo* solo) {
         }
         
         // Read filtered GEX MEX if needed (for counts fallback or barcode list)
-        CrMultiMerge::MexData gexFilteredData;
+        PfMultiMerge::MexData gexFilteredData;
         bool loadedFilteredMex = false;
         bool needFilteredMexForCounts = (!hasRaw || gexRawData.features.empty());
         bool needFilteredMexForBarcodes = (!useFilteredGex && hasFiltered);
         if (hasFiltered && (needFilteredMexForCounts || needFilteredMexForBarcodes)) {
             try {
-                gexFilteredData = CrMultiMerge::readMex(filteredOut);
+                gexFilteredData = PfMultiMerge::readMex(filteredOut);
                 // Filter to Gene Expression only if needed
                 bool hasMultipleTypes = false;
                 for (const auto& type : gexFilteredData.featureTypes) {
@@ -536,7 +577,7 @@ int processCrMultiConfig(Parameters& P, const Solo* solo) {
                     }
                 }
                 if (hasMultipleTypes) {
-                    gexFilteredData = CrMultiMerge::filterByFeatureType(gexFilteredData, "Gene Expression");
+                    gexFilteredData = PfMultiMerge::filterByFeatureType(gexFilteredData, "Gene Expression");
                 }
                 loadedFilteredMex = true;
             } catch (const exception& e) {
@@ -546,7 +587,7 @@ int processCrMultiConfig(Parameters& P, const Solo* solo) {
         }
         
         // Determine primary GEX data for merging (use raw if available, otherwise filtered)
-        CrMultiMerge::MexData gexData;
+        PfMultiMerge::MexData gexData;
         if (hasRaw && !gexRawData.features.empty()) {
             gexData = gexRawData;
         } else if (hasFiltered && loadedFilteredMex && !gexFilteredData.features.empty()) {
@@ -558,10 +599,10 @@ int processCrMultiConfig(Parameters& P, const Solo* solo) {
         }
         
         // Read feature MEX files
-        vector<CrMultiMerge::MexData> featureDataVec;
+        vector<PfMultiMerge::MexData> featureDataVec;
         for (const auto& run : featureRuns) {
             try {
-                CrMultiMerge::MexData featData = CrMultiMerge::readMex(run.assignOut);
+                PfMultiMerge::MexData featData = PfMultiMerge::readMex(run.assignOut);
                 featureDataVec.push_back(featData);
             } catch (const exception& e) {
                 P.inOut->logMain << "WARNING: Failed to read feature MEX for " << run.featureType
@@ -575,11 +616,11 @@ int processCrMultiConfig(Parameters& P, const Solo* solo) {
         }
         
         // Merge MEX files
-        CrMultiMerge::MexData mergedData = CrMultiMerge::mergeMex(gexData, featureDataVec);
+        PfMultiMerge::MexData mergedData = PfMultiMerge::mergeMex(gexData, featureDataVec);
         
         // Extract GEM well from GEX library (with fallback logic)
         string gemWell = "1"; // Default
-        vector<CrMultiConfig::LibraryEntry> gexLibs = config.getGexLibraries();
+        vector<PfMultiConfig::LibraryEntry> gexLibs = config.getGexLibraries();
         if (!gexLibs.empty()) {
             gemWell = gexLibs[0].gem_well;
             // Check if multiple GEX entries disagree
@@ -599,10 +640,10 @@ int processCrMultiConfig(Parameters& P, const Solo* solo) {
         // Compute observed GEX barcodes from raw GEX triplets (for raw_feature_bc_matrix)
         vector<string> observedRawGexBarcodes;
         if (hasRaw && !gexRawData.features.empty()) {
-            observedRawGexBarcodes = CrMultiMerge::computeObservedGexBarcodes(gexRawData);
+            observedRawGexBarcodes = PfMultiMerge::computeObservedGexBarcodes(gexRawData);
         } else if (hasFiltered && !gexFilteredData.features.empty()) {
             // Fallback: use filtered GEX barcodes for raw output if raw is missing
-            observedRawGexBarcodes = CrMultiMerge::computeObservedGexBarcodes(gexFilteredData);
+            observedRawGexBarcodes = PfMultiMerge::computeObservedGexBarcodes(gexFilteredData);
             P.inOut->logMain << "WARNING: Raw GEX MEX not available, using filtered GEX barcodes for raw output\n";
         } else {
             P.inOut->logMain << "ERROR: Cannot compute observed GEX barcodes - no valid GEX data\n";
@@ -612,7 +653,7 @@ int processCrMultiConfig(Parameters& P, const Solo* solo) {
         // Compute GEX barcodes for filtered output
         if (!useFilteredGex && hasFiltered && loadedFilteredMex && !gexFilteredData.features.empty()) {
             // Use filtered GEX barcodes (from filtered MEX)
-            filteredGexBarcodes = CrMultiMerge::computeObservedGexBarcodes(gexFilteredData);
+            filteredGexBarcodes = PfMultiMerge::computeObservedGexBarcodes(gexFilteredData);
             useFilteredGex = true;
         }
         if (!useFilteredGex) {
@@ -623,7 +664,7 @@ int processCrMultiConfig(Parameters& P, const Solo* solo) {
         
         // Write raw_feature_bc_matrix (using observed raw GEX barcodes)
         string rawOutDir = outPrefix + "/outs/raw_feature_bc_matrix";
-        int ret = CrMultiMerge::writeCombinedMex(rawOutDir, mergedData, gemWell, P.inOut->logMain, observedRawGexBarcodes);
+        int ret = PfMultiMerge::writeCombinedMex(rawOutDir, mergedData, gemWell, P.inOut->logMain, observedRawGexBarcodes);
         if (ret != 0) {
             throw runtime_error("Failed to write raw combined MEX");
         }
@@ -631,7 +672,7 @@ int processCrMultiConfig(Parameters& P, const Solo* solo) {
         
         // Write filtered_feature_bc_matrix (using filtered GEX barcodes or fallback)
         string filteredOutDir = outPrefix + "/outs/filtered_feature_bc_matrix";
-        ret = CrMultiMerge::writeCombinedMex(filteredOutDir, mergedData, gemWell, P.inOut->logMain, filteredGexBarcodes);
+        ret = PfMultiMerge::writeCombinedMex(filteredOutDir, mergedData, gemWell, P.inOut->logMain, filteredGexBarcodes);
         if (ret != 0) {
             throw runtime_error("Failed to write filtered combined MEX");
         }
@@ -648,16 +689,16 @@ int processCrMultiConfig(Parameters& P, const Solo* solo) {
         
         if (hasCrisprFeatures) {
             string outsDir = outPrefix + "/outs";
-            ret = runCrisprFeatureCalling(filteredOutDir, outsDir, P.crMulti.crMinUmi, P.inOut->logMain);
+            ret = runCrisprFeatureCalling(filteredOutDir, outsDir, P.pfMulti.crMinUmi, P.inOut->logMain);
             if (ret != 0) {
                 P.inOut->logMain << "WARNING: CRISPR feature calling failed, continuing without crispr_analysis/\n";
             }
         }
         
-        P.inOut->logMain << timeMonthDayTime() << " ..... finished CR multi config processing\n";
+        P.inOut->logMain << timeMonthDayTime() << " ..... finished pf-multi config processing\n";
         
     } catch (const exception& e) {
-        P.inOut->logMain << "ERROR in CR multi config processing: " << e.what() << "\n";
+        P.inOut->logMain << "ERROR in pf-multi config processing: " << e.what() << "\n";
         return 1;
     }
     

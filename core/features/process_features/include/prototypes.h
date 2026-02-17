@@ -19,7 +19,7 @@ void initcode2seq();
 void initdiff2hamming(unsigned char *difference);
 void free_feature_arrays(feature_arrays *features);
 void initialize_unit_sizes();
-int is_directory(const char *path);
+int pf_is_directory(const char *path);
 void read_unmatched_barcodes_features_block(unmatched_barcodes_features_block *entry_block, unmatched_barcodes_features *entry);
 int insert_feature_sequence(char *sequence, uint32_t feature_index, unsigned char hamming_distance, uint16_t match_position, data_structures *hashes, memory_pool_collection *pools);
 int print_feature_sequences(feature_arrays *features, int *total_counts, char *directory, data_structures *hashes);

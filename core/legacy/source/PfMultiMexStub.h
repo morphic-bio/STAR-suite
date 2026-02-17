@@ -1,10 +1,10 @@
-#ifndef CR_MULTI_MEX_STUB_H
-#define CR_MULTI_MEX_STUB_H
+#ifndef PF_MULTI_MEX_STUB_H
+#define PF_MULTI_MEX_STUB_H
 
 #include "IncludeDefine.h"
 
 /**
- * @file CrMultiMexStub.h
+ * @file PfMultiMexStub.h
  * @brief Generate features.tsv and barcodes.tsv from assignBarcodes outputs
  * 
  * Ports logic from assignbarcodes_mex_stub.py to C++.
@@ -12,7 +12,7 @@
  * validating against features.txt when present.
  */
 
-namespace CrMultiMexStub {
+namespace PfMultiMexStub {
 
 /**
  * @struct FeatureRow
@@ -79,6 +79,6 @@ bool copyBarcodesTsv(const string& barcodesTxt, const string& barcodesTsv, bool 
 int processAssignOutput(const string& assignOutDir, const string& featureCsvPath,
                        const string& defaultFeatureType = "Custom", bool force = false);
 
-} // namespace CrMultiMexStub
+} // namespace PfMultiMexStub
 
-#endif // CR_MULTI_MEX_STUB_H
+#endif // PF_MULTI_MEX_STUB_H
