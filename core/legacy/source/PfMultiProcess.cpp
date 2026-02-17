@@ -16,6 +16,7 @@
 #include <fstream>
 #include <algorithm>
 #include <cstdio>
+#include <cctype>
 using std::cerr;
 using std::endl;
 
@@ -35,6 +36,48 @@ static string normalizeType(const string& input) {
         }
     }
     return out;
+}
+
+static string trimCopy(const string& input) {
+    size_t first = input.find_first_not_of(" \t\r\n");
+    if (first == string::npos) {
+        return "";
+    }
+    size_t last = input.find_last_not_of(" \t\r\n");
+    return input.substr(first, last - first + 1);
+}
+
+static string lowerCopy(string input) {
+    std::transform(input.begin(), input.end(), input.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return input;
+}
+
+static bool isUnsetToken(const string& input) {
+    string token = lowerCopy(trimCopy(input));
+    return token.empty() || token == "-" || token == "none";
+}
+
+static string basenameOf(const string& path);
+
+static string detectChemistryFromWhitelistPath(const string& whitelistPath, string& reason) {
+    if (isUnsetToken(whitelistPath)) {
+        reason = "whitelist path is unset";
+        return "unknown";
+    }
+
+    string base = lowerCopy(basenameOf(whitelistPath));
+    if (base.find("nxt") != string::npos) {
+        reason = "whitelist filename contains 'nxt'";
+        return "NXT";
+    }
+    if (base.find("tru") != string::npos) {
+        reason = "whitelist filename contains 'tru'";
+        return "TRU";
+    }
+
+    reason = "whitelist filename has no chemistry marker";
+    return "unknown";
 }
 
 static string sanitizeDirName(const string& input) {
@@ -321,7 +364,7 @@ static int runCrisprFeatureCalling(const string& filteredMexDir, const string& o
 } // namespace
 
 int processPfMultiConfig(Parameters& P, const Solo* solo) {
-    if (P.pfMulti.pfMultiConfig.empty()) {
+    if (isUnsetToken(P.pfMulti.pfMultiConfig)) {
         return 0; // Not enabled
     }
     
@@ -339,24 +382,48 @@ int processPfMultiConfig(Parameters& P, const Solo* solo) {
         
         // Get feature reference
         string featureRef = P.pfMulti.crFeatureRef;
-        if (featureRef.empty()) {
+        if (isUnsetToken(featureRef)) {
             featureRef = config.featureRef;
         }
-        if (featureRef.empty()) {
+        if (isUnsetToken(featureRef)) {
             throw runtime_error("Feature reference not provided (use --crFeatureRef or set in config)");
         }
         
         // Get whitelist
         string whitelist = P.pfMulti.crWhitelist;
-        if (whitelist.empty()) {
+        if (isUnsetToken(whitelist)) {
             // Try to get from solo whitelist
-            if (!P.pSolo.soloCBwhitelist.empty()) {
+            if (!P.pSolo.soloCBwhitelist.empty() && !isUnsetToken(P.pSolo.soloCBwhitelist[0])) {
                 whitelist = P.pSolo.soloCBwhitelist[0];
             }
         }
-        if (whitelist.empty()) {
+        if (isUnsetToken(whitelist)) {
             throw runtime_error("Whitelist not provided (use --crWhitelist or --soloCBwhitelist)");
         }
+
+        // Resolve chemistry precedence: default auto-detect, explicit chemistry override.
+        string requestedChem = lowerCopy(trimCopy(P.pfMulti.crChemistry));
+        if (requestedChem.empty() || requestedChem == "-" || requestedChem == "none") {
+            requestedChem = "auto";
+        }
+        if (requestedChem != "auto" && requestedChem != "nxt" && requestedChem != "tru") {
+            throw runtime_error("Invalid --crChemistry value '" + P.pfMulti.crChemistry +
+                                "' (allowed: auto|NXT|TRU)");
+        }
+
+        string inferredReason;
+        string inferredChem = detectChemistryFromWhitelistPath(whitelist, inferredReason);
+        string effectiveChem = inferredChem;
+        if (requestedChem == "nxt") {
+            effectiveChem = "NXT";
+        } else if (requestedChem == "tru") {
+            effectiveChem = "TRU";
+        }
+
+        P.inOut->logMain << "pf-multi chemistry: requested=" << requestedChem
+                         << " inferred=" << inferredChem
+                         << " (" << inferredReason << ")"
+                         << " effective=" << effectiveChem << "\n";
         
         // Parse FASTQ map
         map<string, string> fastqMap = PfMultiConfig::parseFastqMap(P.pfMulti.crFastqMap);

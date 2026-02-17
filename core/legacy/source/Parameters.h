@@ -596,6 +596,7 @@ class Parameters {
         // pf-multi config support (Cell Ranger-style CSV input)
         struct {
             string pfMultiConfig;           // Path to pf-multi config CSV (Cell Ranger-style input)
+            string crChemistry;            // Chemistry mode: auto|NXT|TRU (explicit mode overrides auto-detect)
             string crWhitelist;            // Override whitelist (if config missing)
             string crFeatureRef;            // Override feature reference (if config missing)
             string crFastqRoot;            // Fallback root for FASTQ directories

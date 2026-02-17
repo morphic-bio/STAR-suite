@@ -50,6 +50,7 @@
 #include "SlamQcOutput.h"
 #include "SnpMaskBuild.h"
 #include "PfMultiProcess.h"
+#include "PfMultiConfig.h"
 // Note: effective_length.h not included due to Transcriptome class name conflict
 // Use wrapper function instead
 #include "effective_length_wrapper.h"
@@ -57,9 +58,11 @@
 #include "alignment_model.h"  // For Transcriptome and AlignmentModel
 #include <memory>
 #include <unordered_map>
+#include <set>
 #include <cstdlib>
 #include <cerrno>
 #include <cstring>
+#include <cctype>
 
 #include "twoPassRunPass1.h"
 
@@ -75,6 +78,173 @@ std::string joinStrings(const std::vector<std::string> &items, const std::string
         out << items[i];
     }
     return out.str();
+}
+
+std::string trimCopy(const std::string& input) {
+    size_t first = input.find_first_not_of(" \t\r\n");
+    if (first == std::string::npos) {
+        return "";
+    }
+    size_t last = input.find_last_not_of(" \t\r\n");
+    return input.substr(first, last - first + 1);
+}
+
+std::string lowerCopy(std::string input) {
+    for (size_t i = 0; i < input.size(); ++i) {
+        input[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(input[i])));
+    }
+    return input;
+}
+
+bool isUnsetToken(const std::string& input) {
+    std::string t = lowerCopy(trimCopy(input));
+    return t.empty() || t == "-" || t == "none";
+}
+
+std::string normalizePathNoTrailingSlash(const std::string& input) {
+    std::string out = trimCopy(input);
+    while (!out.empty() && out.back() == '/') {
+        out.pop_back();
+    }
+    return out;
+}
+
+bool pathIsSameOrUnderDir(const std::string& path, const std::string& dir) {
+    if (dir.empty()) {
+        return false;
+    }
+    if (path == dir) {
+        return true;
+    }
+    if (path.size() <= dir.size()) {
+        return false;
+    }
+    if (path.compare(0, dir.size(), dir) != 0) {
+        return false;
+    }
+    return path[dir.size()] == '/';
+}
+
+bool applyPfMultiGexInputFiltering(Parameters& P) {
+    if (P.runMode != "alignReads") {
+        return false;
+    }
+    if (isUnsetToken(P.pfMulti.pfMultiConfig)) {
+        return false;
+    }
+    if (P.readFilesNames.empty() || P.readFilesNames[0].empty()) {
+        return false;
+    }
+
+    PfMultiConfig::Config cfg;
+    try {
+        cfg = PfMultiConfig::parseConfig(P.pfMulti.pfMultiConfig);
+    } catch (const std::exception& e) {
+        P.inOut->logMain << "WARNING: pf-multi GEX input filtering skipped (config parse failed): "
+                         << e.what() << "\n";
+        return false;
+    }
+
+    std::vector<PfMultiConfig::LibraryEntry> gexLibs = cfg.getGexLibraries();
+    if (gexLibs.empty()) {
+        P.inOut->logMain << "NOTICE: pf-multi GEX input filtering skipped (no Gene Expression libraries in config)\n";
+        return false;
+    }
+
+    std::map<std::string, std::string> fastqMap = PfMultiConfig::parseFastqMap(P.pfMulti.crFastqMap);
+    std::set<std::string> gexDirs;
+    for (size_t i = 0; i < gexLibs.size(); ++i) {
+        std::string resolved = PfMultiConfig::resolveFastqDir(gexLibs[i].fastqs, P.pfMulti.crFastqRoot, fastqMap);
+        resolved = normalizePathNoTrailingSlash(resolved);
+        if (!resolved.empty()) {
+            gexDirs.insert(resolved);
+        }
+    }
+    if (gexDirs.empty()) {
+        P.inOut->logMain << "WARNING: pf-multi GEX input filtering skipped (could not resolve any GEX FASTQ directories)\n";
+        return false;
+    }
+
+    const size_t originalN = P.readFilesN;
+    std::vector<size_t> keepIdx;
+    keepIdx.reserve(originalN);
+
+    for (size_t ifile = 0; ifile < originalN; ++ifile) {
+        std::string probePath;
+        for (size_t imate = 0; imate < P.readFilesNames.size(); ++imate) {
+            if (ifile < P.readFilesNames[imate].size()) {
+                probePath = normalizePathNoTrailingSlash(P.readFilesNames[imate][ifile]);
+                if (!probePath.empty()) {
+                    break;
+                }
+            }
+        }
+        if (probePath.empty()) {
+            continue;
+        }
+
+        bool matched = false;
+        for (std::set<std::string>::const_iterator it = gexDirs.begin(); it != gexDirs.end(); ++it) {
+            if (pathIsSameOrUnderDir(probePath, *it)) {
+                matched = true;
+                break;
+            }
+        }
+        if (matched) {
+            keepIdx.push_back(ifile);
+        }
+    }
+
+    if (keepIdx.empty()) {
+        P.inOut->logMain << "WARNING: pf-multi GEX input filtering matched 0/" << originalN
+                         << " FASTQ files; leaving input unchanged\n";
+        return false;
+    }
+    if (keepIdx.size() == originalN) {
+        P.inOut->logMain << "NOTICE: pf-multi GEX input filtering retained all " << originalN
+                         << " FASTQ files\n";
+        return false;
+    }
+
+    std::vector<std::vector<std::string> > filtered = P.readFilesNames;
+    for (size_t imate = 0; imate < filtered.size(); ++imate) {
+        std::vector<std::string> kept;
+        kept.reserve(keepIdx.size());
+        for (size_t k = 0; k < keepIdx.size(); ++k) {
+            size_t idx = keepIdx[k];
+            if (idx < P.readFilesNames[imate].size()) {
+                kept.push_back(P.readFilesNames[imate][idx]);
+            }
+        }
+        filtered[imate].swap(kept);
+    }
+
+    if (P.outSAMattrRG.size() > 1 && P.outSAMattrRG.size() == originalN) {
+        std::vector<std::string> keptRG;
+        keptRG.reserve(keepIdx.size());
+        for (size_t k = 0; k < keepIdx.size(); ++k) {
+            keptRG.push_back(P.outSAMattrRG[keepIdx[k]]);
+        }
+        P.outSAMattrRG.swap(keptRG);
+    }
+    if (P.outSAMattrRGlineSplit.size() > 1 && P.outSAMattrRGlineSplit.size() == originalN) {
+        std::vector<std::string> keptRGLines;
+        keptRGLines.reserve(keepIdx.size());
+        for (size_t k = 0; k < keepIdx.size(); ++k) {
+            keptRGLines.push_back(P.outSAMattrRGlineSplit[keepIdx[k]]);
+        }
+        P.outSAMattrRGlineSplit.swap(keptRGLines);
+    }
+
+    P.readFilesNames.swap(filtered);
+    P.readFilesN = static_cast<uint32>(keepIdx.size());
+    P.closeReadsFiles();
+    P.openReadsFiles();
+
+    P.inOut->logMain << "NOTICE: pf-multi GEX input filtering retained "
+                     << P.readFilesN << "/" << originalN
+                     << " FASTQ files for GEX mapping\n";
+    return true;
 }
 
 bool ensureDirectoryTree(const std::string &path, mode_t mode, std::string &failedPath, int &failedErrno) {
@@ -221,6 +391,7 @@ int main(int argInN, char *argIn[])
     ///////////////////////////////////////////// Parameters
     Parameters P; // all parameters
     P.inputParameters(argInN, argIn);
+    applyPfMultiGexInputFiltering(P);
 
     *(P.inOut->logStdOut) << "\t" << P.commandLine << '\n';
     *(P.inOut->logStdOut) << "\tSTAR version: " << STAR_VERSION << "   compiled: " << COMPILATION_TIME_PLACE << '\n';
@@ -1539,7 +1710,7 @@ int main(int argInN, char *argIn[])
     }
 
     // Process pf-multi config if enabled
-    if (!P.pfMulti.pfMultiConfig.empty()) {
+    if (!isUnsetToken(P.pfMulti.pfMultiConfig)) {
         processPfMultiConfig(P, &soloMain);
     }
 
