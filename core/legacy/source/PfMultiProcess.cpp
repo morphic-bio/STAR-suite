@@ -14,6 +14,7 @@
 #include <stdexcept>
 #include <iostream>
 #include <fstream>
+#include <sstream>
 #include <algorithm>
 #include <cstdio>
 #include <cctype>
@@ -60,12 +61,117 @@ static bool isUnsetToken(const string& input) {
 
 static string basenameOf(const string& path);
 
+static string upperCopy(string input) {
+    std::transform(input.begin(), input.end(), input.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+    return input;
+}
+
+static bool isValidBarcodeSeq(const string& seq) {
+    if (seq.empty()) {
+        return false;
+    }
+    for (unsigned char c : seq) {
+        unsigned char u = static_cast<unsigned char>(std::toupper(c));
+        if (!(u == 'A' || u == 'C' || u == 'G' || u == 'T' || u == 'N')) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static char complementBase(char base) {
+    switch (std::toupper(static_cast<unsigned char>(base))) {
+        case 'A': return 'T';
+        case 'T': return 'A';
+        case 'C': return 'G';
+        case 'G': return 'C';
+        default: return static_cast<char>(std::toupper(static_cast<unsigned char>(base)));
+    }
+}
+
+static string translateNxtMiddleTwoBases(string barcode) {
+    barcode = upperCopy(barcode);
+    if (barcode.size() >= 9) {
+        barcode[7] = complementBase(barcode[7]);
+        barcode[8] = complementBase(barcode[8]);
+    }
+    return barcode;
+}
+
+static vector<string> splitWhitelistColumns(const string& line) {
+    vector<string> fields;
+    string current;
+    for (size_t i = 0; i < line.size(); ++i) {
+        char c = line[i];
+        if (c == '\t' || c == ',' || std::isspace(static_cast<unsigned char>(c))) {
+            if (!current.empty()) {
+                fields.push_back(current);
+                current.clear();
+                if (fields.size() >= 2) {
+                    break;
+                }
+            }
+        } else {
+            current.push_back(c);
+        }
+    }
+    if (!current.empty() && fields.size() < 2) {
+        fields.push_back(current);
+    }
+    return fields;
+}
+
 static string detectChemistryFromWhitelistPath(const string& whitelistPath, string& reason) {
     if (isUnsetToken(whitelistPath)) {
         reason = "whitelist path is unset";
         return "unknown";
     }
 
+    // Prefer content-based detection first for 2-column NXT/TRU translation lists.
+    std::ifstream in(whitelistPath.c_str());
+    if (in.is_open()) {
+        const size_t kMaxScanRows = 10000;
+        size_t scanned = 0;
+        size_t twoColumnRows = 0;
+        size_t nxtRuleRows = 0;
+        string line;
+
+        while (scanned < kMaxScanRows && std::getline(in, line)) {
+            string trimmed = trimCopy(line);
+            if (trimmed.empty() || trimmed[0] == '#') {
+                continue;
+            }
+
+            vector<string> fields = splitWhitelistColumns(trimmed);
+            if (fields.empty()) {
+                continue;
+            }
+            scanned++;
+
+            if (fields.size() >= 2 && isValidBarcodeSeq(fields[0]) && isValidBarcodeSeq(fields[1])) {
+                twoColumnRows++;
+                const string col1 = upperCopy(fields[0]);
+                const string col2 = upperCopy(fields[1]);
+                if (translateNxtMiddleTwoBases(col1) == col2) {
+                    nxtRuleRows++;
+                }
+            }
+        }
+
+        if (twoColumnRows > 0) {
+            std::ostringstream msg;
+            msg << "whitelist has two barcode columns (" << twoColumnRows
+                << " sampled rows)";
+            if (nxtRuleRows > 0) {
+                msg << "; center-2bp complement rule matched " << nxtRuleRows << "/" << twoColumnRows;
+            }
+            reason = msg.str();
+            return "NXT";
+        }
+    }
+
+    // Fallback to filename hints.
     string base = lowerCopy(basenameOf(whitelistPath));
     if (base.find("nxt") != string::npos) {
         reason = "whitelist filename contains 'nxt'";
@@ -76,8 +182,20 @@ static string detectChemistryFromWhitelistPath(const string& whitelistPath, stri
         return "TRU";
     }
 
-    reason = "whitelist filename has no chemistry marker";
-    return "unknown";
+    reason = "no chemistry marker found in whitelist content or filename; defaulting to TRU";
+    return "TRU";
+}
+
+static string parseChemistryToken(const string& rawValue, const string& flagName) {
+    string value = lowerCopy(trimCopy(rawValue));
+    if (value.empty() || value == "-" || value == "none") {
+        value = "auto";
+    }
+    if (value != "auto" && value != "nxt" && value != "tru") {
+        throw runtime_error("Invalid " + flagName + " value '" + rawValue +
+                            "' (allowed: auto|NXT|TRU)");
+    }
+    return value;
 }
 
 static string sanitizeDirName(const string& input) {
@@ -402,14 +520,8 @@ int processPfMultiConfig(Parameters& P, const Solo* solo) {
         }
 
         // Resolve chemistry precedence: default auto-detect, explicit chemistry override.
-        string requestedChem = lowerCopy(trimCopy(P.pfMulti.crChemistry));
-        if (requestedChem.empty() || requestedChem == "-" || requestedChem == "none") {
-            requestedChem = "auto";
-        }
-        if (requestedChem != "auto" && requestedChem != "nxt" && requestedChem != "tru") {
-            throw runtime_error("Invalid --crChemistry value '" + P.pfMulti.crChemistry +
-                                "' (allowed: auto|NXT|TRU)");
-        }
+        const string requestedChem = parseChemistryToken(P.pfMulti.crChemistry, "--crChemistry");
+        const string requestedOutputChem = parseChemistryToken(P.pfMulti.crOutputChemistry, "--crOutputChemistry");
 
         string inferredReason;
         string inferredChem = detectChemistryFromWhitelistPath(whitelist, inferredReason);
@@ -420,10 +532,19 @@ int processPfMultiConfig(Parameters& P, const Solo* solo) {
             effectiveChem = "TRU";
         }
 
+        string outputChem = effectiveChem;
+        if (requestedOutputChem == "nxt") {
+            outputChem = "NXT";
+        } else if (requestedOutputChem == "tru") {
+            outputChem = "TRU";
+        }
+
         P.inOut->logMain << "pf-multi chemistry: requested=" << requestedChem
                          << " inferred=" << inferredChem
                          << " (" << inferredReason << ")"
-                         << " effective=" << effectiveChem << "\n";
+                         << " effective=" << effectiveChem
+                         << " output_requested=" << requestedOutputChem
+                         << " output_effective=" << outputChem << "\n";
         
         // Parse FASTQ map
         map<string, string> fastqMap = PfMultiConfig::parseFastqMap(P.pfMulti.crFastqMap);
@@ -731,7 +852,13 @@ int processPfMultiConfig(Parameters& P, const Solo* solo) {
         
         // Write raw_feature_bc_matrix (using observed raw GEX barcodes)
         string rawOutDir = outPrefix + "/outs/raw_feature_bc_matrix";
-        int ret = PfMultiMerge::writeCombinedMex(rawOutDir, mergedData, gemWell, P.inOut->logMain, observedRawGexBarcodes);
+        int ret = PfMultiMerge::writeCombinedMex(rawOutDir,
+                                                 mergedData,
+                                                 gemWell,
+                                                 P.inOut->logMain,
+                                                 observedRawGexBarcodes,
+                                                 effectiveChem,
+                                                 outputChem);
         if (ret != 0) {
             throw runtime_error("Failed to write raw combined MEX");
         }
@@ -739,7 +866,13 @@ int processPfMultiConfig(Parameters& P, const Solo* solo) {
         
         // Write filtered_feature_bc_matrix (using filtered GEX barcodes or fallback)
         string filteredOutDir = outPrefix + "/outs/filtered_feature_bc_matrix";
-        ret = PfMultiMerge::writeCombinedMex(filteredOutDir, mergedData, gemWell, P.inOut->logMain, filteredGexBarcodes);
+        ret = PfMultiMerge::writeCombinedMex(filteredOutDir,
+                                             mergedData,
+                                             gemWell,
+                                             P.inOut->logMain,
+                                             filteredGexBarcodes,
+                                             effectiveChem,
+                                             outputChem);
         if (ret != 0) {
             throw runtime_error("Failed to write filtered combined MEX");
         }

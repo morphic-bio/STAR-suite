@@ -640,6 +640,7 @@ Parameters::Parameters() {//initalize parameters info
     // pf-multi config support (Cell Ranger-style CSV input)
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "pfMultiConfig", &pfMulti.pfMultiConfig));
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "crChemistry", &pfMulti.crChemistry));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "crOutputChemistry", &pfMulti.crOutputChemistry));
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "crWhitelist", &pfMulti.crWhitelist));
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "crFeatureRef", &pfMulti.crFeatureRef));
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "crFastqRoot", &pfMulti.crFastqRoot));
@@ -700,6 +701,10 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
         }
         if (p->nameString == "crChemistry" && p->inputLevel < 0) {
             pfMulti.crChemistry = "auto";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "crOutputChemistry" && p->inputLevel < 0) {
+            pfMulti.crOutputChemistry = "auto";
             p->inputLevel = 0;
         }
         if (p->nameString == "crWhitelist" && p->inputLevel < 0) {

@@ -16,6 +16,62 @@ using std::endl;
 
 namespace PfMultiMerge {
 
+namespace {
+
+static string normalizeChemistry(const string& input) {
+    string out = input;
+    std::transform(out.begin(), out.end(), out.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+    return out;
+}
+
+static char complementBase(char base) {
+    switch (std::toupper(static_cast<unsigned char>(base))) {
+        case 'A': return 'T';
+        case 'T': return 'A';
+        case 'C': return 'G';
+        case 'G': return 'C';
+        default: return static_cast<char>(std::toupper(static_cast<unsigned char>(base)));
+    }
+}
+
+static void translateNxtMiddleTwoBasesInplace(string& barcode) {
+    if (barcode.empty()) {
+        return;
+    }
+    // Preserve optional GEM suffix ("-<digits>"), only translate the 16bp core.
+    size_t coreEnd = barcode.size();
+    size_t dashPos = barcode.find_last_of('-');
+    if (dashPos != string::npos && dashPos < barcode.size() - 1) {
+        bool digits = true;
+        for (size_t i = dashPos + 1; i < barcode.size(); ++i) {
+            if (!std::isdigit(static_cast<unsigned char>(barcode[i]))) {
+                digits = false;
+                break;
+            }
+        }
+        if (digits) {
+            coreEnd = dashPos;
+        }
+    }
+
+    if (coreEnd >= 9) {
+        barcode[7] = complementBase(barcode[7]);
+        barcode[8] = complementBase(barcode[8]);
+    }
+}
+
+static bool needsNamespaceTranslation(const string& inputChemistry, const string& outputChemistry) {
+    string inNorm = normalizeChemistry(inputChemistry);
+    string outNorm = normalizeChemistry(outputChemistry);
+    if ((inNorm != "NXT" && inNorm != "TRU") || (outNorm != "NXT" && outNorm != "TRU")) {
+        return false;
+    }
+    return inNorm != outNorm;
+}
+
+} // namespace
+
 string resolveMexFile(const string& mexDir, const string& basename) {
     string plain = mexDir + "/" + basename;
     string gz = plain + ".gz";
@@ -320,7 +376,13 @@ vector<string> computeObservedGexBarcodes(const MexData& gexData) {
     return observedBarcodes;
 }
 
-int writeCombinedMex(const string& outputDir, const MexData& data, const string& gemWell, ofstream& logStream, const vector<string>& gexBarcodes) {
+int writeCombinedMex(const string& outputDir,
+                     const MexData& data,
+                     const string& gemWell,
+                     ofstream& logStream,
+                     const vector<string>& gexBarcodes,
+                     const string& inputChemistry,
+                     const string& outputChemistry) {
     // Create directory
     string cmd = "mkdir -p \"" + outputDir + "\"";
     int ret = system(cmd.c_str());
@@ -414,7 +476,21 @@ int writeCombinedMex(const string& outputDir, const MexData& data, const string&
         return -1;
     }
     
-    // Step 2: Append GEM suffix with detection of existing -[0-9]+ pattern
+    // Step 2: Apply optional barcode namespace translation.
+    vector<string> namespaceAdjustedBarcodes = filteredBarcodes;
+    uint64_t namespaceTranslatedCount = 0;
+    if (needsNamespaceTranslation(inputChemistry, outputChemistry)) {
+        for (size_t i = 0; i < namespaceAdjustedBarcodes.size(); ++i) {
+            string translated = namespaceAdjustedBarcodes[i];
+            translateNxtMiddleTwoBasesInplace(translated);
+            if (translated != namespaceAdjustedBarcodes[i]) {
+                namespaceTranslatedCount++;
+            }
+            namespaceAdjustedBarcodes[i] = translated;
+        }
+    }
+
+    // Step 3: Append GEM suffix with detection of existing -[0-9]+ pattern
     // Helper function to detect and extract existing suffix
     auto hasSuffix = [](const string& bc) -> bool {
         if (bc.size() < 2) return false;
@@ -438,10 +514,10 @@ int writeCombinedMex(const string& outputDir, const MexData& data, const string&
     };
     
     vector<string> suffixedBarcodes;
-    suffixedBarcodes.reserve(filteredBarcodes.size());
+    suffixedBarcodes.reserve(namespaceAdjustedBarcodes.size());
     size_t suffixWarnings = 0;
     
-    for (const auto& bc : filteredBarcodes) {
+    for (const auto& bc : namespaceAdjustedBarcodes) {
         string newBc = bc;
         if (hasSuffix(bc)) {
             string existingSuffix = extractSuffix(bc);
@@ -486,7 +562,7 @@ int writeCombinedMex(const string& outputDir, const MexData& data, const string&
         return -1;
     }
     
-    // Step 3: Sort barcodes lexicographically after suffix
+    // Step 4: Sort barcodes lexicographically after suffix
     vector<size_t> sortIndices(suffixedBarcodes.size());
     for (size_t i = 0; i < sortIndices.size(); ++i) {
         sortIndices[i] = i;
@@ -508,7 +584,7 @@ int writeCombinedMex(const string& outputDir, const MexData& data, const string&
         sortedBarcodes.push_back(suffixedBarcodes[oldCompactIdx]);
     }
     
-    // Step 4: Remap triplet cell_idx to sorted indices
+    // Step 5: Remap triplet cell_idx to sorted indices
     vector<MexWriter::Triplet> remappedTriplets;
     remappedTriplets.reserve(data.triplets.size());
     uint64_t tripletsRetained = 0;
@@ -538,7 +614,7 @@ int writeCombinedMex(const string& outputDir, const MexData& data, const string&
                   return a.gene_idx < b.gene_idx;
               });
     
-    // Step 5: Write MEX files
+    // Step 6: Write MEX files
     vector<MexWriter::Feature> features;
     for (size_t i = 0; i < data.features.size(); ++i) {
         string name = (i < data.featureNames.size()) ? data.featureNames[i] : data.features[i];
@@ -554,7 +630,7 @@ int writeCombinedMex(const string& outputDir, const MexData& data, const string&
         return -1;
     }
     
-    // Step 6: Gzip output files
+    // Step 7: Gzip output files
     vector<string> filesToGzip = {"matrix.mtx", "barcodes.tsv", "features.tsv"};
     for (const auto& filename : filesToGzip) {
         string filePath = outputDir + "/" + filename;
@@ -571,11 +647,14 @@ int writeCombinedMex(const string& outputDir, const MexData& data, const string&
         }
     }
     
-    // Step 7: Log metrics
+    // Step 8: Log metrics
     logStream << "CR-compat MEX formatting:\n";
     logStream << "  Filter mode: " << (useGexFilter ? "GEX barcodes only" : "Observed barcodes (count > 0)") << "\n";
     logStream << "  Original barcode count: " << originalBarcodeCount << "\n";
     logStream << "  Filtered barcode count: " << observedBarcodeCount << "\n";
+    logStream << "  Barcode namespace input->output: " << normalizeChemistry(inputChemistry)
+              << " -> " << normalizeChemistry(outputChemistry) << "\n";
+    logStream << "  Barcode namespace translated: " << namespaceTranslatedCount << "\n";
     logStream << "  Triplets retained: " << tripletsRetained << "\n";
     logStream << "  GEM well used: " << gemWell << "\n";
     

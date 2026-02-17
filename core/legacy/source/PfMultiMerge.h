@@ -67,9 +67,17 @@ vector<string> computeObservedGexBarcodes(const MexData& gexData);
  * @param gemWell GEM well suffix (e.g., "1", "2") to append to barcodes
  * @param logStream Log stream for output messages
  * @param gexBarcodes Optional GEX barcode whitelist (if non-empty, filter to GEX-only barcodes)
+ * @param inputChemistry Effective correction chemistry (NXT/TRU)
+ * @param outputChemistry Output barcode namespace (NXT/TRU)
  * @return 0 on success, -1 on error
  */
-int writeCombinedMex(const string& outputDir, const MexData& data, const string& gemWell, ofstream& logStream, const vector<string>& gexBarcodes = vector<string>());
+int writeCombinedMex(const string& outputDir,
+                     const MexData& data,
+                     const string& gemWell,
+                     ofstream& logStream,
+                     const vector<string>& gexBarcodes = vector<string>(),
+                     const string& inputChemistry = "TRU",
+                     const string& outputChemistry = "TRU");
 
 } // namespace PfMultiMerge
 

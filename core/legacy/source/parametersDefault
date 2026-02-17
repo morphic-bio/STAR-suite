@@ -1773,6 +1773,12 @@ crChemistry                auto
                             TRU         ... force TRU chemistry behavior
                             Explicit mode overrides auto-detection.
 
+crOutputChemistry          auto
+    string:                 output barcode namespace for pf-multi MEX writing
+                            auto        ... follow effective chemistry after crChemistry resolution (default)
+                            NXT         ... force NXT barcode namespace in outputs
+                            TRU         ... force TRU barcode namespace in outputs (CR7-style)
+
 crWhitelist                 -
     string:                 override cell barcode whitelist for pf-multi feature processing
 
