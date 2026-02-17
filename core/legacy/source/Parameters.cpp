@@ -131,6 +131,9 @@ Parameters::Parameters() {//initalize parameters info
 
     inOut = new InOutStreams;
     ownsParInfo_ = true;  // Primary instance owns the parameter registry
+    for (uint imate = 0; imate < MAX_N_MATES; ++imate) {
+        readFilesCommandPID[imate] = 0;
+    }
 
     //versions
     parArray.push_back(new ParameterInfoScalar <string> (-1, -1, "versionGenome", &versionGenome));

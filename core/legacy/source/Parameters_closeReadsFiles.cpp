@@ -2,11 +2,44 @@
 #include "ErrorWarning.h"
 #include <fstream>
 #include <sys/stat.h>
+#include <cerrno>
+#include <csignal>
+#include <sys/wait.h>
+
 void Parameters::closeReadsFiles() {
-    for (uint imate=0; imate<readFilesIn.size(); imate++) {//open readIn files
-        if ( inOut->readIn[imate].is_open() )
+    // Close all potential read streams (not just readFilesIn.size()).
+    for (uint imate=0; imate<MAX_N_MATES; imate++) {
+        if (inOut->readIn[imate].is_open()) {
             inOut->readIn[imate].close();
-        if (readFilesCommandPID[imate]>0)
-            kill(readFilesCommandPID[imate],SIGKILL);
-    };
+        }
+    }
+
+    // Terminate and reap readFilesCommand helper children to avoid lingering
+    // processes at shutdown.
+    for (uint imate=0; imate<MAX_N_MATES; imate++) {
+        pid_t pid = readFilesCommandPID[imate];
+        if (pid <= 0) {
+            continue;
+        }
+
+        int status = 0;
+        pid_t wpid = waitpid(pid, &status, WNOHANG);
+        if (wpid == pid) {
+            readFilesCommandPID[imate] = 0;
+            continue; // already exited and reaped
+        }
+        if (wpid == -1 && errno == ECHILD) {
+            readFilesCommandPID[imate] = 0;
+            continue; // not our child anymore
+        }
+
+        if (kill(pid, SIGKILL) == -1 && errno != ESRCH) {
+            readFilesCommandPID[imate] = 0;
+            continue;
+        }
+
+        while (waitpid(pid, &status, 0) == -1 && errno == EINTR) {
+        }
+        readFilesCommandPID[imate] = 0;
+    }
 };
