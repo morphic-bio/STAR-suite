@@ -85,6 +85,9 @@ class Parameters {
         vector <vector <string> > readFilesNames;
         vector <string> readFilesCommand;
         vector <string> readFilesManifest;
+        string readFilesLegacyZcatStr = "No"; // Yes/No: force legacy external zcat path for .gz FASTQ
+        bool readFilesLegacyZcat = false;     // parsed bool from readFilesLegacyZcatStr
+        bool readFilesUseInternalGzip = false; // derived at readFilesInit(): auto internal gzip stream path
                
         string readFilesCommandString; //actual command string
         int readFilesIndex;

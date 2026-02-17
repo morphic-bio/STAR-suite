@@ -2,6 +2,90 @@
 #include "ErrorWarning.h"
 #include <fstream>
 #include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <cerrno>
+#include <zlib.h>
+
+namespace {
+bool writeAll(int fd, const char* data, size_t size) {
+    while (size > 0) {
+        const ssize_t written = ::write(fd, data, size);
+        if (written < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            return false;
+        }
+        data += written;
+        size -= static_cast<size_t>(written);
+    }
+    return true;
+}
+
+bool streamGzipFileToFd(const string& gzipPath, int outFd, string& errorOut) {
+    gzFile gz = gzopen(gzipPath.c_str(), "rb");
+    if (gz == nullptr) {
+        errorOut = "could not open gzip file: " + gzipPath;
+        return false;
+    }
+
+    char buffer[1 << 20];
+    int nRead = 0;
+    while ((nRead = gzread(gz, buffer, sizeof(buffer))) > 0) {
+        if (!writeAll(outFd, buffer, static_cast<size_t>(nRead))) {
+            errorOut = "write() failed while streaming gzip input: " + gzipPath + ": " + strerror(errno);
+            gzclose(gz);
+            return false;
+        }
+    }
+
+    if (nRead < 0) {
+        int zerr = Z_OK;
+        const char* zmsg = gzerror(gz, &zerr);
+        errorOut = "gzread failed for " + gzipPath + ": " + (zmsg != nullptr ? string(zmsg) : string("unknown zlib error"));
+        gzclose(gz);
+        return false;
+    }
+
+    if (gzclose(gz) != Z_OK) {
+        errorOut = "gzclose failed for " + gzipPath;
+        return false;
+    }
+
+    return true;
+}
+
+[[noreturn]] void streamGzipMateToFifo(const vector<string>& mateFiles, const string& fifoPath) {
+    const int outFd = open(fifoPath.c_str(), O_WRONLY);
+    if (outFd < 0) {
+        cerr << "EXITING: internal gzip helper could not open FIFO for write: " << fifoPath
+             << " (" << strerror(errno) << ")\n";
+        _exit(1);
+    }
+
+    for (uint32 ifile = 0; ifile < mateFiles.size(); ++ifile) {
+        const string marker = "FILE " + to_string(ifile) + "\n";
+        if (!writeAll(outFd, marker.c_str(), marker.size())) {
+            cerr << "EXITING: internal gzip helper failed writing FILE marker for " << mateFiles[ifile]
+                 << " (" << strerror(errno) << ")\n";
+            close(outFd);
+            _exit(1);
+        }
+
+        string errMsg;
+        if (!streamGzipFileToFd(mateFiles[ifile], outFd, errMsg)) {
+            cerr << "EXITING: internal gzip helper failed: " << errMsg << "\n";
+            close(outFd);
+            _exit(1);
+        }
+    }
+
+    close(outFd);
+    _exit(0);
+}
+}
+
 void Parameters::openReadsFiles() 
 {
     // Reset FIFO list to avoid stale entries when reopening (e.g. SLAM auto-trim detection pass)
@@ -42,7 +126,7 @@ void Parameters::openReadsFiles()
 
          vector<string> readsCommandFileName;
          const bool batchModeRequested = (batchMode || batchModeInt != 0 || quant.slam.batchModeInt != 0);
-         const bool filterBrokenPipe = (batchModeRequested &&
+             const bool filterBrokenPipe = (batchModeRequested &&
                                         (readFilesCommandString.find("zcat") != std::string::npos ||
                                          readFilesCommandString.find("gzcat") != std::string::npos));
          uint imate;
@@ -61,6 +145,57 @@ void Parameters::openReadsFiles()
 
             inOut->logMain << "\n   Input read files for mate "<< imate+1 <<" :\n";
 
+            // Log and validate input files before spawning helper path.
+            for (uint32 ifile = 0; ifile < readFilesN; ifile++) {
+                if (system(("ls -lL " + readFilesNames[imate][ifile] + " > " + outFileTmp + "/readFilesIn.info 2>&1").c_str()) != 0) {
+                    warningMessage(" Could not ls " + readFilesNames[imate][ifile], std::cerr, inOut->logMain, *this);
+                }
+
+                ifstream readFilesIn_info((outFileTmp + "/readFilesIn.info").c_str());
+                inOut->logMain << readFilesIn_info.rdbuf();
+
+                // Try to open files early and fail with actionable message.
+                ifstream rftry(readFilesNames[imate][ifile].c_str());
+                if (!rftry.good()) {
+                    exitWithError("EXITING: because of fatal INPUT file error: could not open read file: " +
+                                   readFilesNames[imate][ifile] +
+                                   "\nSOLUTION: check that this file exists and has read permision.\n",
+                                   std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+                }
+                rftry.close();
+            }
+
+            if (readFilesUseInternalGzip) {
+                inOut->logMain << "NOTE: mate " << (imate + 1)
+                               << " using internal gzip FIFO helper: " << readFilesInTmp.at(imate) << "\n";
+                readFilesCommandPID[imate] = 0;
+                ostringstream errOut;
+                const pid_t pid = fork();
+                switch (pid) {
+                    case -1:
+                        errOut << "EXITING: because of fatal EXECUTION error: Failed forking internal gzip helper\n";
+                        errOut << errno << ": " << strerror(errno) << "\n";
+                        exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+                        break;
+
+                    case 0:
+                        // Child: stream .gz FASTQ to FIFO using in-process zlib (no external zcat).
+                        streamGzipMateToFifo(readFilesNames.at(imate), readFilesInTmp.at(imate));
+                        break;
+
+                    default:
+                        readFilesCommandPID[imate] = pid;
+                }
+
+                inOut->readIn[imate].open(readFilesInTmp.at(imate).c_str());
+                if (inOut->readIn[imate].fail()) {
+                    ostringstream errOpen;
+                    errOpen << "EXITING because of fatal input ERROR: could not open FIFO stream " << readFilesInTmp.at(imate) << "\n";
+                    exitWithError(errOpen.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+                }
+                continue;
+            }
+
             readsCommandFileName.push_back(outFileTmp+"/readsCommand_read" + to_string(imate+1));
             fstream readsCommandFile( readsCommandFileName.at(imate).c_str(), ios::out);
             readsCommandFile.close();
@@ -78,24 +213,6 @@ void Parameters::openReadsFiles()
             };
             readsCommandFile << "exec > \""<<readFilesInTmp.at(imate)<<"\"\n" ; // redirect stdout to temp fifo files
             for (uint32 ifile=0; ifile<readFilesN; ifile++) {
-                
-                if ( system(("ls -lL " + readFilesNames[imate][ifile] + " > "+ outFileTmp+"/readFilesIn.info 2>&1").c_str()) !=0 )
-                    warningMessage(" Could not ls " + readFilesNames[imate][ifile], std::cerr, inOut->logMain, *this);
-
-                ifstream readFilesIn_info((outFileTmp+"/readFilesIn.info").c_str());
-                inOut->logMain <<readFilesIn_info.rdbuf();
-
-                {//try to open the files - throw an error if a file cannot be opened
-					ifstream rftry(readFilesNames[imate][ifile].c_str());
-					if (!rftry.good()){
-						exitWithError("EXITING: because of fatal INPUT file error: could not open read file: " + \
-									   readFilesNames[imate][ifile] + \
-									   "\nSOLUTION: check that this file exists and has read permision.\n", \
-									   std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
-					};
-					rftry.close();
-                };
-
                 readsCommandFile <<"echo FILE "<< ifile << "\n";
                 if (filterBrokenPipe && (sysShell == "-" || sysShell.find("bash") != std::string::npos)) {
                     readsCommandFile << readFilesCommandString <<"   "<< ("\""+readFilesNames[imate][ifile]+"\"")

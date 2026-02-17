@@ -3,7 +3,26 @@
 #include "streamFuns.h"
 #include <fstream>
 #include <sys/stat.h>
+#include <algorithm>
+#include <cctype>
 #include "serviceFuns.cpp"
+
+namespace {
+bool endsWithCaseInsensitive(const string& value, const string& suffix) {
+    if (suffix.size() > value.size()) {
+        return false;
+    }
+    const size_t offset = value.size() - suffix.size();
+    for (size_t ii = 0; ii < suffix.size(); ++ii) {
+        const unsigned char c1 = static_cast<unsigned char>(value[offset + ii]);
+        const unsigned char c2 = static_cast<unsigned char>(suffix[ii]);
+        if (std::tolower(c1) != std::tolower(c2)) {
+            return false;
+        }
+    }
+    return true;
+}
+}
 
 void Parameters::readFilesInit() 
 {//initialize read files - but do not open yet
@@ -139,14 +158,87 @@ void Parameters::readFilesInit()
 
     inOut->logMain << "Number of fastq files for each mate = " << readFilesN << endl;
     
-    readFilesCommandString="";
-    if (readFilesCommand.at(0)=="-") {
-        if (readFilesN>1)
-            readFilesCommandString="cat   ";//concatenate multiple files
-    } else {
-        for (uint ii=0; ii<readFilesCommand.size(); ii++) 
-            readFilesCommandString+=readFilesCommand.at(ii)+"   "; //concatenate into one string
-    };    
+    // Parse legacy gzip override
+    {
+        string legacy = readFilesLegacyZcatStr;
+        std::transform(legacy.begin(), legacy.end(), legacy.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        if (legacy == "yes") {
+            readFilesLegacyZcat = true;
+        } else if (legacy == "no" || legacy == "-" || legacy.empty()) {
+            readFilesLegacyZcat = false;
+        } else {
+            ostringstream errOut;
+            errOut << "EXITING because of FATAL INPUT ERROR: unrecognized option in --readFilesLegacyZcat=" << readFilesLegacyZcatStr << "\n";
+            errOut << "SOLUTION: use one of the allowed values: Yes or No\n";
+            exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+        }
+    }
+
+    const bool hasReadFilesCommand = (readFilesCommand.at(0) != "-");
+    string explicitReadFilesCommandLower;
+    if (hasReadFilesCommand) {
+        for (const auto& token : readFilesCommand) {
+            explicitReadFilesCommandLower += token;
+            explicitReadFilesCommandLower.push_back(' ');
+        }
+        std::transform(explicitReadFilesCommandLower.begin(), explicitReadFilesCommandLower.end(),
+                       explicitReadFilesCommandLower.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    }
+    const bool explicitLegacyZcatCmd =
+        hasReadFilesCommand &&
+        (explicitReadFilesCommandLower.find("zcat") != string::npos ||
+         explicitReadFilesCommandLower.find("gzcat") != string::npos ||
+         explicitReadFilesCommandLower.find("gunzip") != string::npos);
+    bool allFastqGz = (readFilesTypeN == 1);
+    if (allFastqGz) {
+        for (const auto& mateFiles : readFilesNames) {
+            for (const auto& fn : mateFiles) {
+                if (!endsWithCaseInsensitive(fn, ".gz")) {
+                    allFastqGz = false;
+                    break;
+                }
+            }
+            if (!allFastqGz) {
+                break;
+            }
+        }
+    }
+
+    // Default behavior: when readFilesCommand is '-' and all Fastx inputs are .gz,
+    // use internal zlib streaming path unless user forces legacy zcat helper mode.
+    readFilesUseInternalGzip = (!hasReadFilesCommand && readFilesTypeN == 1 && allFastqGz && !readFilesLegacyZcat);
+
+    readFilesCommandString = "";
+    if (hasReadFilesCommand) {
+        for (uint ii = 0; ii < readFilesCommand.size(); ii++) {
+            readFilesCommandString += readFilesCommand.at(ii) + "   "; // concatenate into one string
+        }
+    } else if (readFilesUseInternalGzip) {
+        // Non-empty sentinel to route openReadsFiles() through FIFO helper branch,
+        // where internal zlib streaming is handled.
+        readFilesCommandString = "INTERNAL_GZIP";
+    } else if (readFilesTypeN == 1 && allFastqGz && readFilesLegacyZcat) {
+        // Compatibility override: keep legacy FIFO + external zcat behavior.
+        readFilesCommandString = "zcat   ";
+    } else if (readFilesN > 1) {
+        readFilesCommandString = "cat   "; // concatenate multiple plain-text files
+    }
+
+    if (readFilesUseInternalGzip) {
+        inOut->logMain << "NOTE: .gz Fastx input detected with --readFilesCommand - ; using internal zlib streaming path.\n"
+                       << "      Set --readFilesLegacyZcat Yes to force legacy external zcat helper mode.\n";
+    } else if (hasReadFilesCommand && readFilesLegacyZcat) {
+        if (explicitLegacyZcatCmd) {
+            inOut->logMain << "NOTE: --readFilesLegacyZcat Yes is redundant because --readFilesCommand already uses zcat/gunzip.\n"
+                           << "      Continuing with the explicit --readFilesCommand path.\n";
+        } else {
+            inOut->logMain << "WARNING: --readFilesLegacyZcat Yes is ignored because an explicit --readFilesCommand is set.\n"
+                           << "         Continuing with explicit --readFilesCommand: " << readFilesCommandString << "\n";
+        }
+    } else if (!hasReadFilesCommand && readFilesTypeN == 1 && allFastqGz && readFilesLegacyZcat) {
+        inOut->logMain << "NOTE: --readFilesLegacyZcat Yes: forcing legacy external zcat helper for .gz Fastx input.\n";
+    }
     
     if (readFilesTypeN==1) {
         readNends=readFilesNames.size(); //for now the number of mates is defined by the number of input files

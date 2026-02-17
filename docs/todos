@@ -24,7 +24,8 @@
   - Prevent feature-to-GEX leakage: ensure GEX quant only consumes GEX library reads in multi perturb runs unless explicitly overridden.
   - Add regression gate: A375 + UCSF 2M checks for feature UMI correlation, call-level parity, barcode overlap, and runtime.
 - Input decompression path:
-  - Add native `gzFile` FASTQ fast-path when `--readFilesCommand -` and inputs are `.gz`.
+  - [DONE] Add native internal zlib FASTQ fast-path when `--readFilesCommand -` and inputs are `.gz`.
+    - Added `--readFilesLegacyZcat Yes|No` (default `No`) to force legacy external `zcat` helper mode.
   - Preserve `--readFilesCommand` behavior for generic preprocessors (`zcat`, `pigz`, `samtools view`, etc.).
   - Ensure auto-detection/chemistry logic and file-boundary semantics remain identical across native-gz and command-stream paths.
 ## MCP Client Setup (Codex + Cursor)
