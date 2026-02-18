@@ -32,6 +32,13 @@ actionable; link to deeper docs rather than copying them.
 - CRISPR calling test: `tests/test_cr_compat_crispr_calling.sh`.
 - Flex smoke: `tests/run_flex_smoke.sh` (if fixtures available).
 
+## Build Hygiene
+
+- After switching branches/commits, rebuild STAR from clean state before
+  judging regressions: `make -C core/legacy/source clean && make -C core/legacy/source -j8 STAR`.
+- This is especially important for Flex/Solo debugging; stale objects can
+  produce false segfault/regression signals.
+
 ## Data and Artifacts (Do Not Commit)
 
 - External datasets live under `/storage/` (e.g., `/storage/A375/...`).

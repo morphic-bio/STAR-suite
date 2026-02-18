@@ -123,3 +123,36 @@ The script writes outputs under `OUT_BASE` and emits:
 - `parity_minumi*.tsv`
 - `call_only_minumi*/crispr_analysis/*`
 - `star_feature_call_minumi*.log`
+
+## Run 3: Compatibility Gate Rerun on `core-compatibility-fixes` HEAD
+
+Date: 2026-02-18  
+Commit: `c30a106`  
+Build hygiene: clean rebuild before run (`make clean` + rebuild STAR/star_feature_call)
+
+Inputs:
+- CR filtered MEX:
+  `/storage/ucsf-2M/cellranger_runs/cr_baseline_iPSC2_1_AALG2_1M_crstar_sameidx_20260217_200813/outs/filtered_feature_bc_matrix`
+- CR CRISPR calls:
+  `/storage/ucsf-2M/cellranger_runs/cr_baseline_iPSC2_1_AALG2_1M_crstar_sameidx_20260217_200813/outs/crispr_analysis`
+
+Artifacts:
+- Output base: `/storage/ucsf-2M/compat_gate_ucsf_callonly_20260218_014137/`
+- Correlation summary:
+  `/storage/ucsf-2M/compat_gate_ucsf_callonly_20260218_014137/umi_correlation_summary.tsv`
+
+Results:
+- `--min-umi 3`:
+  - Set-equivalent calls: `5766 / 5767` (`99.9827%`)
+  - CR total UMIs (common rows): `1,447,384`
+  - STAR total UMIs (common rows): `1,447,391` (delta `+7`, `+0.000484%`)
+  - Pearson: `0.9999998779`
+  - Spearman: `0.9999999409`
+  - Runtime: `real 5.74s`
+- `--min-umi 10`:
+  - Set-equivalent calls: `5457 / 5767` (`94.6246%`)
+  - CR total UMIs (common rows): `1,447,384`
+  - STAR total UMIs (common rows): `1,445,234` (delta `-2,150`, `-0.148544%`)
+  - Pearson: `0.9999627946`
+  - Spearman: `0.9999400299`
+  - Runtime: `real 11.17s`

@@ -76,6 +76,11 @@ update this file with its output location.
     - `/storage/A375/assign_anchor_mode_h1_min0_n0_20260124_000205/`
     - `/storage/A375/assign_anchor_mode_h3_min0_trace_GTGTGATGTGTGGTCA_20260123_234434/`
   - SCEPTRE outputs: `/storage/A375/sceptre_runs/`
+- `/storage/ucsf-2M/` (UCSF downsampled perturb fixtures + parity outputs)
+  - CR baselines: `/storage/ucsf-2M/cellranger_runs/`
+  - Call-only parity outputs:
+    - `/storage/ucsf-2M/callonly_parity_masterclean_20260217_073728/`
+    - `/storage/ucsf-2M/compat_gate_ucsf_callonly_20260218_014137/`
 
 ## Flex Modular Integration Baselines
 

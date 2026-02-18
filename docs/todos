@@ -18,11 +18,12 @@
   - Phase 2: queue-aware permit rebalancing between STAR mapping and feature consumers, with min/max guards to avoid starvation.
   - Validation: A375 regression parity first, then UCSF full-dataset throughput and concordance checks.
 - Core compatibility fixes for perturb mode (post-`noBCfix`):
-  - Whitelist namespace support: handle 2-column NXT/TRU translation lists and keep both correction/output namespaces consistent.
-  - Barcode/chemistry auto-detection: harden perturb auto-detect path and deterministic fallback behavior for small/noisy runs.
-  - Small-set cell calling parity: add explicit ORDMAG/simple EmptyDrops compatibility mode and regression tests.
-  - Prevent feature-to-GEX leakage: ensure GEX quant only consumes GEX library reads in multi perturb runs unless explicitly overridden.
-  - Add regression gate: A375 + UCSF 2M checks for feature UMI correlation, call-level parity, barcode overlap, and runtime.
+  - [DONE] Whitelist namespace support: handle 2-column NXT/TRU translation lists and keep correction/output namespaces consistent (`crChemistry`, `crOutputChemistry`).
+  - [DONE] Barcode/chemistry auto-detection hardening with deterministic explicit-override precedence.
+  - [DONE] Small-set cell calling parity wiring: explicit ORDMAG/simple EmptyDrops mode (`--soloEmptyDropsMode auto|simple|union`).
+  - [DONE] Prevent feature-to-GEX leakage: route GEX quant to GEX libraries only in pf-multi mode.
+  - [DONE] Add regression gate runs: A375 + UCSF 2M checks (artifacts under `/storage/A375/...` and `/storage/ucsf-2M/...`).
+  - [TODO] Add dedicated automated tests that explicitly validate 2-column mapping edge-cases and chemistry precedence matrix.
 - Input decompression path:
   - [DONE] Add native internal zlib FASTQ fast-path when `--readFilesCommand -` and inputs are `.gz`.
     - Added `--readFilesLegacyZcat Yes|No` (default `No`) to force legacy external `zcat` helper mode.
