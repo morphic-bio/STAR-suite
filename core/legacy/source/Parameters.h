@@ -40,6 +40,16 @@ class Parameters {
         string runMode;
         vector<string> runModeIn;
         int runThreadN;
+        int dynamicThreadInterface = 0; // 0: off, 1: constant map permits + telemetry hooks
+        int dynamicThreadConstMapPermits = 0; // <=0 means use runThreadN
+        int dynamicThreadTelemetry = 0; // 0: off, 1: on
+        int variableThreads = 0; // 0: fixed map permits, 1: allow runtime map permit retuning
+        int variableThreadsRetuneEveryAcquires = 0; // <=0 disables auto-retune sequence
+        vector<int> variableThreadsPermitSequence; // sequence of permit targets applied at retune cadence
+        string dynamicThreadPfControllerMode = "off"; // off|shadow|active external pf controller mode
+        int dynamicThreadPfControllerIntervalMs = 0; // <=0 disables external pf controller ticks
+        vector<int> dynamicThreadPfControllerSequence; // controller permit target sequence
+        int dynamicThreadPfControllerMaxUpdates = 0; // <=0 means unlimited updates until pf stage ends
         mode_t runDirPerm;
         string runDirPermIn; //permission for directores created at run-time
         int runRNGseed; //random number generator seed

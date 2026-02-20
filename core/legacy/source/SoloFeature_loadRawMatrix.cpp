@@ -127,6 +127,7 @@ void SoloFeature::loadRawMatrix()
         pSolo.cbWLstr.resize(nCB1);
         for (auto &cb: pSolo.cbWLstr)
             std::getline(wlstream, cb);
+        pSolo.cbWLstrOut = pSolo.cbWLstr;
     };
     
     {//copy features

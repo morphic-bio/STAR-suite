@@ -22,6 +22,8 @@ struct AssignOptions {
     int consumerThreadsPerSet = -1;
     int searchThreads = -1;
     double minPosterior = -1.0;
+    long long maxReads = -1; // <=0 means unlimited
+    bool enableStarDynamicPermitHooks = false;
     string filteredBarcodesPath;
 };
 

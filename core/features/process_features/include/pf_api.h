@@ -28,6 +28,16 @@ extern "C" {
 typedef struct pf_config pf_config;
 typedef struct pf_context pf_context;
 
+/* Optional permit hook API for external schedulers */
+typedef uint64_t (*pf_permit_acquire_fn)(void *hook_ctx);
+typedef void (*pf_permit_release_fn)(
+    void *hook_ctx,
+    uint64_t wait_ns,
+    uint64_t work_units,
+    uint64_t work_bytes,
+    uint64_t work_ns
+);
+
 /* Error codes */
 typedef enum {
     PF_OK = 0,
@@ -94,6 +104,12 @@ void pf_config_set_max_barcode_n(pf_config *config, int max_n);
 void pf_config_set_threads(pf_config *config, int threads);
 void pf_config_set_search_threads(pf_config *config, int threads);
 void pf_config_set_consumer_threads(pf_config *config, int threads);
+void pf_config_set_permit_hooks(
+    pf_config *config,
+    pf_permit_acquire_fn acquire_cb,
+    pf_permit_release_fn release_cb,
+    void *hook_ctx
+);
 void pf_config_set_debug(pf_config *config, int enable);
 void pf_config_set_reverse_complement_whitelist(pf_config *config, int enable);
 void pf_config_set_limit_search(pf_config *config, int limit);

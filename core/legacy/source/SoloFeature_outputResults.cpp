@@ -64,17 +64,19 @@ void SoloFeature::outputResults(bool cellFilterYes, string outputPrefixMat)
     ////////////////////////////////////////////////////////////////////////////
     //write barcodes.tsv
     ofstream &cbStr=ofstrOpen(outputPrefixMat+pSolo.outFileNames[2],ERROR_OUT, P);
+    const vector<string>& cbWLout =
+        (pSolo.cbWLstrOut.size() == pSolo.cbWLstr.size()) ? pSolo.cbWLstrOut : pSolo.cbWLstr;
     uint64 nCellGeneEntries=0;//total number of non-zero cell/gene combinations (entries in the output matrix)
     if (cellFilterYes) {//filtered cells
         for (uint32 icb=0; icb<nCB; icb++) {
             if (filteredCells.filtVecBool[icb]) {
-                cbStr << pSolo.cbWLstr[indCB[icb]] <<'\n';
+                cbStr << cbWLout[indCB[icb]] <<'\n';
                 nCellGeneEntries += nGenePerCB[icb];
             };
         };
     } else {//unfiltered cells
         for (uint64 ii=0; ii<pSolo.cbWLsize; ii++) {
-             cbStr << pSolo.cbWLstr[ii] <<'\n';
+             cbStr << cbWLout[ii] <<'\n';
         };
         for (uint32 icb=0; icb<nCB; icb++) {
             nCellGeneEntries += nGenePerCB[icb];

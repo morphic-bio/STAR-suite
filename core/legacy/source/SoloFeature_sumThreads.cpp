@@ -66,6 +66,7 @@ void SoloFeature::sumThreads()
                 icb++;
             };
         };
+        pSolo.cbWLstrOut = pSolo.cbWLstr;
 
         //pseudocounts
         if (pSolo.CBmatchWL.mm1_multi_pc) {

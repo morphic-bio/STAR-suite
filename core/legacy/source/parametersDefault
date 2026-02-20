@@ -23,6 +23,54 @@ runMode                         alignReads
 runThreadN                      1
     int: number of threads to run STAR
 
+dynamicThreadInterface          0
+    int: dynamic thread interface mode.
+                                0 ... off (default behavior).
+                                1 ... enable constant map-permit interface + telemetry hooks.
+
+dynamicThreadConstMapPermits    0
+    int: constant number of concurrent mapping permits when dynamicThreadInterface=1.
+                                0 ... use --runThreadN.
+                                >0 ... cap concurrent mapChunk() executions to this value.
+
+dynamicThreadTelemetry          0
+    int: telemetry output for dynamic thread interface.
+                                0 ... disabled.
+                                1 ... emit map permit wait/work timing summary to Log.out.
+
+variableThreads                 0
+    int: allow runtime updates to active mapping permits when dynamicThreadInterface=1.
+                                0 ... fixed map permits.
+                                1 ... map permit count may be retuned during mapping.
+
+variableThreadsRetuneEveryAcquires 0
+    int: when >0 and variableThreads=1, apply permit retune sequence every N map permit acquires.
+                                0 ... disabled.
+
+variableThreadsPermitSequence   0
+    int(s): sequence of permit targets for runtime retuning when variableThreads=1.
+                                0 ... disabled (default sentinel).
+                                Example: 3 2 4
+
+dynamicThreadPfControllerMode   off
+    string: pf-stage external permit controller mode (dynamic thread interface v1).
+                                off    ... disabled (default).
+                                shadow ... tick sequence and report proposals without applying permit updates.
+                                active ... apply permit updates at each tick (requires --variableThreads 1).
+
+dynamicThreadPfControllerIntervalMs 0
+    int: controller update period in milliseconds when --dynamicThreadPfControllerMode is not off.
+                                0 ... disabled sentinel.
+
+dynamicThreadPfControllerSequence 0
+    int(s): controller permit-target sequence used by pf-stage controller mode.
+                                0 ... disabled (default sentinel).
+                                Example: 3 2 4
+
+dynamicThreadPfControllerMaxUpdates 0
+    int: optional max controller updates per feature-library run.
+                                0 ... unlimited updates until feature assignment finishes.
+
 runDirPerm                      User_RWX
     string: permissions for the directories created at the run-time.
                                 User_RWX ... user-read/write/execute

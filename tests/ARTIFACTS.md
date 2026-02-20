@@ -188,6 +188,51 @@ These scripts validate that default bundles work with minimal explicit parameter
   - Outputs: `/tmp/default_bundle_bulk_*/` (cleaned up after test)
   - Validates `--defaultBulk` sets `outSAMtype BAM SortedByCoordinate`, etc.
 
+## Dynamic Thread Interface Tiny Fixture Smoke
+
+- Harness: `tests/run_dynamic_threads_tiny_fixture.sh`
+- Mock consumer parser: `tests/dynamic_threads/mock_consumer_report.py`
+- Outputs: `/tmp/dynamic_threads_tiny_*/`
+  - `off/` baseline run logs
+  - `on/` dynamic run logs
+  - `dynamic_thread_report.json` (machine-readable telemetry summary)
+  - `dynamic_thread_report.txt` (human-readable telemetry summary)
+  - `log_final.diff` (canonical `Log.final.out` metric diff; expected empty)
+  - `bam_parity_summary.txt` (optional BAM parity metrics when enabled)
+- Status: untracked
+
+## Dynamic Thread Variable Sequence Smoke
+
+- Harness: `tests/run_dynamic_threads_variable_sequences_smoke.sh`
+- Uses: `tests/run_dynamic_threads_tiny_fixture.sh`
+- Outputs: `/tmp/dynamic_threads_variable_sequences_*/`
+  - `sequence_3_2_4/` (runThreadN=4, initial permits=3, sequence 2->4)
+  - `sequence_1_2_1/` (runThreadN=2, initial permits=1, sequence 2->1)
+- Status: untracked
+
+## PF Dynamic Permit 100K Smoke
+
+- Harness: `tests/run_pf_dynamic_permit_100k_smoke.sh`
+- Fixture defaults:
+  - GEX tier: `/storage/A375/fastqs/1k_CRISPR_5p_gemx_fastqs/gex/downsampled_100000_v2`
+  - CRISPR tier: `/storage/A375/fastqs/1k_CRISPR_5p_gemx_fastqs/crispr/downsampled_100000_v2`
+- Outputs: `/tmp/pf_dynamic_permit_100k_*/`
+  - `baseline_off/` (optional hook-disabled reference run)
+  - `dynamic_on/` (hook-enabled run)
+  - `variable_3_2_4/` (runtime retune sequence `3->2->4`)
+  - `variable_1_2_1/` (runtime retune sequence `1->2->1`)
+  - `forced_exit_probe/` + `forced_exit_recovery/` (timeout-kill and recovery guard)
+  - `*/cr_assign/.../assignBarcodes.api_run.txt` (permit delta assertions)
+- Validates:
+  - `enableStarDynamicPermitHooks` toggles correctly with `--dynamicThreadInterface`
+  - `dynamicPermitDelta.feature.*` counters are non-zero in dynamic mode
+  - `dynamicPermitDelta.{acquires,feature.acquires} == dynamicPermitDelta.{workUnits,feature.workUnits}`
+  - map-domain deltas remain zero in pf-only stage
+  - variable retune sequences (`3->2->4`, `1->2->1`) apply without deadlock
+  - forced early-exit timeout is followed by a successful recovery run
+  - optional raw/filtered MEX parity between baseline and dynamic runs
+- Status: untracked
+
 ## BAM SLAM Quantification Tool
 
 - Tool: `slam/tools/bam_slam_quant/bam_slam_quant.py`

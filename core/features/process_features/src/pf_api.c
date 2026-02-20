@@ -40,6 +40,9 @@ struct pf_config {
     int max_threads;
     int search_threads;
     int consumer_threads;
+    pf_permit_acquire_fn permit_acquire_cb;
+    pf_permit_release_fn permit_release_cb;
+    void *permit_hook_ctx;
     int debug_enabled;
     int reverse_complement_whitelist;
     int limit_search;
@@ -95,6 +98,9 @@ pf_config* pf_config_create(void) {
     config->max_threads = 8;
     config->search_threads = 4;
     config->consumer_threads = 1;
+    config->permit_acquire_cb = NULL;
+    config->permit_release_cb = NULL;
+    config->permit_hook_ctx = NULL;
     config->debug_enabled = 0;
     config->reverse_complement_whitelist = 0;
     config->limit_search = -1;
@@ -186,6 +192,20 @@ void pf_config_set_search_threads(pf_config *config, int threads) {
 
 void pf_config_set_consumer_threads(pf_config *config, int threads) {
     if (config) config->consumer_threads = threads;
+}
+
+void pf_config_set_permit_hooks(
+    pf_config *config,
+    pf_permit_acquire_fn acquire_cb,
+    pf_permit_release_fn release_cb,
+    void *hook_ctx
+) {
+    if (!config) {
+        return;
+    }
+    config->permit_acquire_cb = acquire_cb;
+    config->permit_release_cb = release_cb;
+    config->permit_hook_ctx = hook_ctx;
 }
 
 void pf_config_set_debug(pf_config *config, int enable) {
@@ -655,6 +675,11 @@ pf_error pf_process_fastq_dir(pf_context *ctx,
         args.average_read_length = AVERAGE_READ_LENGTH;
         args.min_posterior = ctx->config->min_posterior;
         args.consumer_threads_per_set = ctx->config->consumer_threads;
+        args.permit_acquire_hook = ctx->config->permit_acquire_cb;
+        args.permit_release_hook = ctx->config->permit_release_cb;
+        args.permit_hook_ctx = ctx->config->permit_hook_ctx;
+        args.permit_hooks_enabled = (ctx->config->permit_acquire_cb != NULL &&
+                                     ctx->config->permit_release_cb != NULL);
         args.filtered_barcodes_hash = ctx->filtered_barcodes_hash;
         args.min_prediction = 1;
         args.min_heatmap = 0;
@@ -880,6 +905,11 @@ pf_error pf_process_fastqs(pf_context *ctx,
     args.average_read_length = AVERAGE_READ_LENGTH;
     args.min_posterior = ctx->config->min_posterior;
     args.consumer_threads_per_set = ctx->config->consumer_threads;
+    args.permit_acquire_hook = ctx->config->permit_acquire_cb;
+    args.permit_release_hook = ctx->config->permit_release_cb;
+    args.permit_hook_ctx = ctx->config->permit_hook_ctx;
+    args.permit_hooks_enabled = (ctx->config->permit_acquire_cb != NULL &&
+                                 ctx->config->permit_release_cb != NULL);
     args.filtered_barcodes_hash = ctx->filtered_barcodes_hash;
     args.min_prediction = 1;
     args.min_heatmap = 0;

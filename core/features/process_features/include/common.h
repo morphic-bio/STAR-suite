@@ -226,6 +226,10 @@ typedef struct sample_args {
     int parallel_by_file;
     double min_posterior;
     int consumer_threads_per_set;
+    uint64_t (*permit_acquire_hook)(void *hook_ctx);
+    void (*permit_release_hook)(void *hook_ctx, uint64_t wait_ns, uint64_t work_units, uint64_t work_bytes, uint64_t work_ns);
+    void *permit_hook_ctx;
+    int permit_hooks_enabled;
     khash_t(strptr) *filtered_barcodes_hash;
     int heatmap_minimum_counts;
     int min_prediction;

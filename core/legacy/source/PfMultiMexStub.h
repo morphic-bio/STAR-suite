@@ -60,13 +60,16 @@ bool writeFeaturesTsv(const string& outPath, const vector<FeatureRow>& featureRo
                      const string& defaultType, bool force);
 
 /**
- * @brief Copy barcodes.txt to barcodes.tsv
+ * @brief Copy barcodes.txt to barcodes.tsv, optionally applying barcode output mapping
  * @param barcodesTxt Path to barcodes.txt
  * @param barcodesTsv Output path for barcodes.tsv
  * @param force Overwrite existing file
+ * @param whitelistPath Optional whitelist path. If it is 2-column, column1->column2
+ *        mapping is applied to output barcodes.tsv.
  * @return true if file was copied, false if skipped
  */
-bool copyBarcodesTsv(const string& barcodesTxt, const string& barcodesTsv, bool force);
+bool copyBarcodesTsv(const string& barcodesTxt, const string& barcodesTsv, bool force,
+                     const string& whitelistPath = "");
 
 /**
  * @brief Process assignBarcodes output directory
@@ -77,7 +80,8 @@ bool copyBarcodesTsv(const string& barcodesTxt, const string& barcodesTsv, bool 
  * @return 0 on success, 1 on error
  */
 int processAssignOutput(const string& assignOutDir, const string& featureCsvPath,
-                       const string& defaultFeatureType = "Custom", bool force = false);
+                       const string& defaultFeatureType = "Custom", bool force = false,
+                       const string& whitelistPath = "");
 
 } // namespace PfMultiMexStub
 

@@ -1,4 +1,5 @@
 #include "PfMultiAssign.h"
+#include "GlobalVariables.h"
 #include "pf_api.h"
 #include <cstdlib>
 #include <fstream>
@@ -10,6 +11,32 @@
 #include <stdexcept>
 using std::cerr;
 using std::endl;
+
+namespace {
+ThreadControl::PermitHookContext kFeaturePermitHookContext{ThreadControl::PermitDomain::FEATURE};
+}
+
+extern "C" uint64_t pfStarDynamicPermitAcquire(void *hookCtx) {
+    const ThreadControl::PermitHookContext *permitCtx =
+        static_cast<const ThreadControl::PermitHookContext *>(hookCtx);
+    const ThreadControl::PermitDomain domain =
+        (permitCtx == nullptr) ? ThreadControl::PermitDomain::MAP : permitCtx->domain;
+    return g_threadChunks.mapPermitAcquireForDomain(domain);
+}
+
+extern "C" void pfStarDynamicPermitRelease(
+    void *hookCtx,
+    uint64_t waitNs,
+    uint64_t workUnits,
+    uint64_t workBytes,
+    uint64_t workNs
+) {
+    const ThreadControl::PermitHookContext *permitCtx =
+        static_cast<const ThreadControl::PermitHookContext *>(hookCtx);
+    const ThreadControl::PermitDomain domain =
+        (permitCtx == nullptr) ? ThreadControl::PermitDomain::MAP : permitCtx->domain;
+    g_threadChunks.mapPermitReleaseForDomain(domain, waitNs, workUnits, workBytes, workNs);
+}
 
 namespace PfMultiAssign {
 
@@ -142,6 +169,17 @@ static void applyAssignOptions(pf_config* cfg, const AssignOptions& options) {
     if (options.minPosterior >= 0.0) {
         pf_config_set_min_posterior(cfg, options.minPosterior);
     }
+    if (options.maxReads > 0) {
+        pf_config_set_max_reads(cfg, options.maxReads);
+    }
+    if (options.enableStarDynamicPermitHooks) {
+        pf_config_set_permit_hooks(
+            cfg,
+            pfStarDynamicPermitAcquire,
+            pfStarDynamicPermitRelease,
+            &kFeaturePermitHookContext
+        );
+    }
 }
 
 static string pfErrorMessage(pf_context* ctx, pf_error err, const string& stage) {
@@ -159,7 +197,9 @@ static void writeApiRunSummary(const string& assignOut,
                                const string& featureRef,
                                const string& fastqDir,
                                const AssignOptions& options,
-                               const pf_stats& stats) {
+                               const pf_stats& stats,
+                               const ThreadControl::MapPermitSnapshot* permitBefore,
+                               const ThreadControl::MapPermitSnapshot* permitAfter) {
     std::ofstream out((assignOut + "/assignBarcodes.api_run.txt").c_str());
     if (!out.is_open()) {
         return;
@@ -179,12 +219,68 @@ static void writeApiRunSummary(const string& assignOut,
     out << "consumerThreadsPerSet=" << options.consumerThreadsPerSet << "\n";
     out << "searchThreads=" << options.searchThreads << "\n";
     out << "minPosterior=" << options.minPosterior << "\n";
+    out << "maxReads=" << options.maxReads << "\n";
+    out << "enableStarDynamicPermitHooks=" << (options.enableStarDynamicPermitHooks ? 1 : 0) << "\n";
     out << "filteredBarcodesPath=" << options.filteredBarcodesPath << "\n";
     out << "stats.total_reads=" << stats.total_reads << "\n";
     out << "stats.matched_reads=" << stats.matched_reads << "\n";
     out << "stats.unmatched_reads=" << stats.unmatched_reads << "\n";
     out << "stats.total_deduped_counts=" << stats.total_deduped_counts << "\n";
     out << "stats.processing_time_sec=" << stats.processing_time_sec << "\n";
+
+    if (permitBefore != nullptr && permitAfter != nullptr) {
+        auto delta = [](uint64_t after, uint64_t before) -> uint64_t {
+            return after >= before ? (after - before) : 0;
+        };
+        out << "dynamicPermitDelta.acquires="
+            << delta(permitAfter->acquireCalls, permitBefore->acquireCalls) << "\n";
+        out << "dynamicPermitDelta.retunes="
+            << delta(permitAfter->retuneCalls, permitBefore->retuneCalls) << "\n";
+        out << "dynamicPermitDelta.blockedAcquires="
+            << delta(permitAfter->blockedAcquireCalls, permitBefore->blockedAcquireCalls) << "\n";
+        out << "dynamicPermitDelta.waitTimeoutEvents="
+            << delta(permitAfter->waitTimeoutEvents, permitBefore->waitTimeoutEvents) << "\n";
+        out << "dynamicPermitDelta.stallWarnEvents="
+            << delta(permitAfter->stallWarnEvents, permitBefore->stallWarnEvents) << "\n";
+        out << "dynamicPermitDelta.waitNs="
+            << delta(permitAfter->waitNsTotal, permitBefore->waitNsTotal) << "\n";
+        out << "dynamicPermitDelta.workUnits="
+            << delta(permitAfter->workUnitsTotal, permitBefore->workUnitsTotal) << "\n";
+        out << "dynamicPermitDelta.workBytes="
+            << delta(permitAfter->workBytesTotal, permitBefore->workBytesTotal) << "\n";
+        out << "dynamicPermitDelta.workNs="
+            << delta(permitAfter->workNsTotal, permitBefore->workNsTotal) << "\n";
+        out << "dynamicPermitDelta.map.acquires="
+            << delta(permitAfter->mapDomain.acquireCalls, permitBefore->mapDomain.acquireCalls) << "\n";
+        out << "dynamicPermitDelta.map.waitNs="
+            << delta(permitAfter->mapDomain.waitNsTotal, permitBefore->mapDomain.waitNsTotal) << "\n";
+        out << "dynamicPermitDelta.map.workUnits="
+            << delta(permitAfter->mapDomain.workUnitsTotal, permitBefore->mapDomain.workUnitsTotal) << "\n";
+        out << "dynamicPermitDelta.map.workBytes="
+            << delta(permitAfter->mapDomain.workBytesTotal, permitBefore->mapDomain.workBytesTotal) << "\n";
+        out << "dynamicPermitDelta.map.workNs="
+            << delta(permitAfter->mapDomain.workNsTotal, permitBefore->mapDomain.workNsTotal) << "\n";
+        out << "dynamicPermitDelta.feature.acquires="
+            << delta(permitAfter->featureDomain.acquireCalls, permitBefore->featureDomain.acquireCalls) << "\n";
+        out << "dynamicPermitDelta.feature.waitNs="
+            << delta(permitAfter->featureDomain.waitNsTotal, permitBefore->featureDomain.waitNsTotal) << "\n";
+        out << "dynamicPermitDelta.feature.workUnits="
+            << delta(permitAfter->featureDomain.workUnitsTotal, permitBefore->featureDomain.workUnitsTotal) << "\n";
+        out << "dynamicPermitDelta.feature.workBytes="
+            << delta(permitAfter->featureDomain.workBytesTotal, permitBefore->featureDomain.workBytesTotal) << "\n";
+        out << "dynamicPermitDelta.feature.workNs="
+            << delta(permitAfter->featureDomain.workNsTotal, permitBefore->featureDomain.workNsTotal) << "\n";
+        out << "dynamicPermitAfter.configuredPermits=" << permitAfter->configuredPermits << "\n";
+        out << "dynamicPermitAfter.targetPermits=" << permitAfter->targetPermits << "\n";
+        out << "dynamicPermitAfter.availablePermits=" << permitAfter->availablePermits << "\n";
+        out << "dynamicPermitAfter.inUsePermits=" << permitAfter->inUsePermits << "\n";
+        out << "dynamicPermitAfter.waiters.current=" << permitAfter->currentWaiters << "\n";
+        out << "dynamicPermitAfter.waiters.max=" << permitAfter->maxWaiters << "\n";
+        out << "dynamicPermitAfter.blockedAcquires=" << permitAfter->blockedAcquireCalls << "\n";
+        out << "dynamicPermitAfter.waitTimeoutEvents=" << permitAfter->waitTimeoutEvents << "\n";
+        out << "dynamicPermitAfter.stallWarnEvents=" << permitAfter->stallWarnEvents << "\n";
+        out << "dynamicPermitAfter.lastReleaseAgoNs=" << permitAfter->lastReleaseAgoNs << "\n";
+    }
 }
 
 } // namespace
@@ -260,6 +356,13 @@ int runAssignBarcodes(const string& whitelist,
         }
     }
 
+    ThreadControl::MapPermitSnapshot permitBefore{};
+    ThreadControl::MapPermitSnapshot permitAfter{};
+    const bool capturePermitDelta = options.enableStarDynamicPermitHooks && g_threadChunks.mapPermitEnabled();
+    if (capturePermitDelta) {
+        permitBefore = g_threadChunks.mapPermitSnapshot();
+    }
+
     pf_stats stats = {};
     err = pf_process_fastq_dir(ctx, fastqDir.c_str(), assignOut.c_str(), &stats);
     if (err != PF_OK) {
@@ -268,7 +371,20 @@ int runAssignBarcodes(const string& whitelist,
         throw runtime_error(msg);
     }
 
-    writeApiRunSummary(assignOut, whitelistForAssign, featureRef, fastqDir, options, stats);
+    if (capturePermitDelta) {
+        permitAfter = g_threadChunks.mapPermitSnapshot();
+    }
+
+    writeApiRunSummary(
+        assignOut,
+        whitelistForAssign,
+        featureRef,
+        fastqDir,
+        options,
+        stats,
+        capturePermitDelta ? &permitBefore : nullptr,
+        capturePermitDelta ? &permitAfter : nullptr
+    );
     pf_destroy(ctx);
 
     return 0;

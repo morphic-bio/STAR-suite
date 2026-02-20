@@ -4,6 +4,8 @@
 #include "SequenceFuns.h"
 #include "GlobalVariables.h"
 #include "FlexDebugCounters.h"
+#include <algorithm>
+#include <chrono>
 
 inline uint64 fastqReadOneLine(ifstream &streamIn, char *arrIn);
 inline void removeStringEndControl(string &str);
@@ -103,12 +105,15 @@ void ReadAlignChunk::processChunks() {//read-map-write chunks
     }
     
     while (!noReadsLeft) {//continue until the input EOF
+            uint64_t chunkReadN = 0;
+            uint64_t chunkWorkBytes = 0;
             //////////////read a chunk from input files and store in memory
         if (P.outFilterBySJoutStage<2) {//read chunks from input file
 
             if (P.runThreadN>1) pthread_mutex_lock(&g_threadChunks.mutexInRead);
 
             chunkInSizeBytesTotal={0,0};
+            const uint64_t chunkReadStart = P.iReadAll;
             
             while (chunkInSizeBytesTotal[0] < P.chunkInSizeBytes && chunkInSizeBytesTotal[1] < P.chunkInSizeBytes && P.inOut->readIn[0].good() && P.inOut->readIn[1].good()) {
                 char nextChar=P.inOut->readIn[0].peek();
@@ -355,6 +360,10 @@ void ReadAlignChunk::processChunks() {//read-map-write chunks
 
             for (uint imate=0; imate<P.readNends; imate++) 
                 chunkIn[imate][chunkInSizeBytesTotal[imate]]='\n';//extra empty line at the end of the chunks
+            chunkReadN = P.iReadAll - chunkReadStart;
+            for (uint imate=0; imate<P.readNends; imate++) {
+                chunkWorkBytes += chunkInSizeBytesTotal[imate];
+            }
 
             if (P.runThreadN>1) pthread_mutex_unlock(&g_threadChunks.mutexInRead);
 
@@ -367,7 +376,27 @@ void ReadAlignChunk::processChunks() {//read-map-write chunks
             };
         };
 
+        const bool permitEnabled = g_threadChunks.mapPermitEnabled();
+        uint64_t waitNs = 0;
+        if (permitEnabled) {
+            if (P.variableThreads == 1 && P.variableThreadsRetuneEveryAcquires <= 0) {
+                const int requestedPermits = (P.dynamicThreadConstMapPermits > 0)
+                    ? std::min(P.dynamicThreadConstMapPermits, P.runThreadN)
+                    : P.runThreadN;
+                g_threadChunks.mapPermitSetTargetPermits(requestedPermits);
+            }
+            waitNs = g_threadChunks.mapPermitAcquire();
+        }
+        const auto workStart = std::chrono::steady_clock::now();
+        const uint64_t readCountBefore = RA->iRead;
         mapChunk();
+        const auto workEnd = std::chrono::steady_clock::now();
+        if (permitEnabled) {
+            const uint64_t workNs = static_cast<uint64_t>(
+                std::chrono::duration_cast<std::chrono::nanoseconds>(workEnd - workStart).count());
+            const uint64_t readsProcessed = RA->iRead >= readCountBefore ? (RA->iRead - readCountBefore) : chunkReadN;
+            g_threadChunks.mapPermitRelease(waitNs, readsProcessed, chunkWorkBytes, workNs);
+        }
 
         if (iThread==0 && P.runThreadN>1 && P.outSAMorder=="PairedKeepInputOrder") {//concatenate Aligned.* files
             chunkFilesCat(P.inOut->outSAM, P.outFileTmp + "/Aligned.out.sam.chunk", g_threadChunks.chunkOutN);

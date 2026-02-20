@@ -392,6 +392,10 @@ int main(int argInN, char *argIn[])
     Parameters P; // all parameters
     P.inputParameters(argInN, argIn);
     applyPfMultiGexInputFiltering(P);
+    std::shared_ptr<PfMultiPreloadHandle> pfMultiPreload = startPfMultiConfigPreload(P);
+    if (pfMultiPreload) {
+        P.inOut->logMain << "NOTICE: pf-preload async preparation started during STAR initialization\n";
+    }
 
     *(P.inOut->logStdOut) << "\t" << P.commandLine << '\n';
     *(P.inOut->logStdOut) << "\tSTAR version: " << STAR_VERSION << "   compiled: " << COMPILATION_TIME_PLACE << '\n';
@@ -1711,7 +1715,7 @@ int main(int argInN, char *argIn[])
 
     // Process pf-multi config if enabled
     if (!isUnsetToken(P.pfMulti.pfMultiConfig)) {
-        processPfMultiConfig(P, &soloMain);
+        processPfMultiConfig(P, &soloMain, pfMultiPreload);
     }
 
     // Note: Two-pass unsorted CB/UB tag injection removed - not used in inline flex path

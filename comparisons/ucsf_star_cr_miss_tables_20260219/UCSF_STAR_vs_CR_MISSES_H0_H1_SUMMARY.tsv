@@ -1,0 +1,11 @@
+hamming_mode	metric	value
+0	miss_pairs	352
+0	miss_star_sum	2043
+1	miss_pairs	109
+1	miss_star_sum	999
+1	barcode_absent_from_cr_matrix_pairs	12
+1	barcode_absent_from_cr_matrix_star_sum	12
+1	no_partner_signal_in_cr_pairs	82
+1	no_partner_signal_in_cr_star_sum	507
+1	shift_to_partner_feature_pairs	15
+1	shift_to_partner_feature_star_sum	480

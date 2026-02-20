@@ -147,6 +147,16 @@ Parameters::Parameters() {//initalize parameters info
     //run
     parArray.push_back(new ParameterInfoVector <string> (-1, -1, "runMode", &runModeIn));
     parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "runThreadN", &runThreadN));
+    parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "dynamicThreadInterface", &dynamicThreadInterface));
+    parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "dynamicThreadConstMapPermits", &dynamicThreadConstMapPermits));
+    parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "dynamicThreadTelemetry", &dynamicThreadTelemetry));
+    parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "variableThreads", &variableThreads));
+    parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "variableThreadsRetuneEveryAcquires", &variableThreadsRetuneEveryAcquires));
+    parArray.push_back(new ParameterInfoVector <int> (-1, -1, "variableThreadsPermitSequence", &variableThreadsPermitSequence));
+    parArray.push_back(new ParameterInfoScalar <string> (-1, -1, "dynamicThreadPfControllerMode", &dynamicThreadPfControllerMode));
+    parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "dynamicThreadPfControllerIntervalMs", &dynamicThreadPfControllerIntervalMs));
+    parArray.push_back(new ParameterInfoVector <int> (-1, -1, "dynamicThreadPfControllerSequence", &dynamicThreadPfControllerSequence));
+    parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "dynamicThreadPfControllerMaxUpdates", &dynamicThreadPfControllerMaxUpdates));
     parArray.push_back(new ParameterInfoScalar <string> (-1, -1, "runDirPerm", &runDirPermIn));
     parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "runRNGseed", &runRNGseed));
     parArray.push_back(new ParameterInfoScalar <int> (-1, 2, "batchMode", &batchModeInt));
@@ -1423,6 +1433,142 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
         errOut <<"EXITING: fatal input ERROR: runThreadN must be >0, user-defined runThreadN="<<runThreadN<<"\n";
         exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
     };
+
+    if (dynamicThreadInterface != 0 && dynamicThreadInterface != 1) {
+        ostringstream errOut;
+        errOut <<"EXITING: fatal input ERROR: --dynamicThreadInterface must be 0 or 1, user-defined value="
+               <<dynamicThreadInterface<<"\n";
+        exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+    }
+    if (dynamicThreadTelemetry != 0 && dynamicThreadTelemetry != 1) {
+        ostringstream errOut;
+        errOut <<"EXITING: fatal input ERROR: --dynamicThreadTelemetry must be 0 or 1, user-defined value="
+               <<dynamicThreadTelemetry<<"\n";
+        exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+    }
+    if (dynamicThreadConstMapPermits < 0) {
+        ostringstream errOut;
+        errOut <<"EXITING: fatal input ERROR: --dynamicThreadConstMapPermits must be >=0, user-defined value="
+               <<dynamicThreadConstMapPermits<<"\n";
+        exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+    }
+    if (variableThreads != 0 && variableThreads != 1) {
+        ostringstream errOut;
+        errOut <<"EXITING: fatal input ERROR: --variableThreads must be 0 or 1, user-defined value="
+               <<variableThreads<<"\n";
+        exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+    }
+    if (variableThreads == 1 && dynamicThreadInterface != 1) {
+        ostringstream errOut;
+        errOut <<"EXITING: fatal input ERROR: --variableThreads=1 requires --dynamicThreadInterface=1\n";
+        exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+    }
+    if (variableThreadsRetuneEveryAcquires < 0) {
+        ostringstream errOut;
+        errOut <<"EXITING: fatal input ERROR: --variableThreadsRetuneEveryAcquires must be >=0, user-defined value="
+               <<variableThreadsRetuneEveryAcquires<<"\n";
+        exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+    }
+
+    // default sentinel in parametersDefault is "0" -> treat as "no sequence"
+    const bool sequenceSentinelZero = (variableThreadsPermitSequence.size() == 1 && variableThreadsPermitSequence[0] == 0);
+    if (sequenceSentinelZero) {
+        variableThreadsPermitSequence.clear();
+    }
+
+    for (size_t iSeq = 0; iSeq < variableThreadsPermitSequence.size(); ++iSeq) {
+        if (variableThreadsPermitSequence[iSeq] <= 0) {
+            ostringstream errOut;
+            errOut <<"EXITING: fatal input ERROR: --variableThreadsPermitSequence values must be >0, offending value="
+                   <<variableThreadsPermitSequence[iSeq]<<"\n";
+            exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+        }
+    }
+
+    const bool hasVariableThreadsSequence = !variableThreadsPermitSequence.empty();
+    if ((variableThreadsRetuneEveryAcquires > 0 || hasVariableThreadsSequence) && variableThreads != 1) {
+        ostringstream errOut;
+        errOut <<"EXITING: fatal input ERROR: --variableThreadsRetuneEveryAcquires / --variableThreadsPermitSequence require --variableThreads=1\n";
+        exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+    }
+    if (variableThreads == 1 && hasVariableThreadsSequence && variableThreadsRetuneEveryAcquires <= 0) {
+        ostringstream errOut;
+        errOut <<"EXITING: fatal input ERROR: --variableThreadsPermitSequence requires --variableThreadsRetuneEveryAcquires > 0\n";
+        exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+    }
+    if (variableThreads == 1 && variableThreadsRetuneEveryAcquires > 0 && !hasVariableThreadsSequence) {
+        ostringstream errOut;
+        errOut <<"EXITING: fatal input ERROR: --variableThreadsRetuneEveryAcquires > 0 requires non-empty --variableThreadsPermitSequence\n";
+        exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+    }
+
+    {
+        string mode = dynamicThreadPfControllerMode;
+        std::transform(mode.begin(), mode.end(), mode.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        if (mode == "0" || mode == "none" || mode == "off") {
+            dynamicThreadPfControllerMode = "off";
+        } else if (mode == "1" || mode == "shadow") {
+            dynamicThreadPfControllerMode = "shadow";
+        } else if (mode == "2" || mode == "active") {
+            dynamicThreadPfControllerMode = "active";
+        } else {
+            ostringstream errOut;
+            errOut <<"EXITING: fatal input ERROR: --dynamicThreadPfControllerMode must be one of "
+                   <<"off|shadow|active (or 0|1|2), user-defined value="
+                   <<dynamicThreadPfControllerMode<<"\n";
+            exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+        }
+    }
+
+    if (dynamicThreadPfControllerIntervalMs < 0) {
+        ostringstream errOut;
+        errOut <<"EXITING: fatal input ERROR: --dynamicThreadPfControllerIntervalMs must be >=0, user-defined value="
+               <<dynamicThreadPfControllerIntervalMs<<"\n";
+        exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+    }
+    if (dynamicThreadPfControllerMaxUpdates < 0) {
+        ostringstream errOut;
+        errOut <<"EXITING: fatal input ERROR: --dynamicThreadPfControllerMaxUpdates must be >=0, user-defined value="
+               <<dynamicThreadPfControllerMaxUpdates<<"\n";
+        exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+    }
+
+    const bool pfControllerSequenceSentinelZero =
+        (dynamicThreadPfControllerSequence.size() == 1 && dynamicThreadPfControllerSequence[0] == 0);
+    if (pfControllerSequenceSentinelZero) {
+        dynamicThreadPfControllerSequence.clear();
+    }
+    for (size_t iSeq = 0; iSeq < dynamicThreadPfControllerSequence.size(); ++iSeq) {
+        if (dynamicThreadPfControllerSequence[iSeq] <= 0) {
+            ostringstream errOut;
+            errOut <<"EXITING: fatal input ERROR: --dynamicThreadPfControllerSequence values must be >0, offending value="
+                   <<dynamicThreadPfControllerSequence[iSeq]<<"\n";
+            exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+        }
+    }
+
+    const bool pfControllerEnabled = (dynamicThreadPfControllerMode != "off");
+    if (pfControllerEnabled && dynamicThreadInterface != 1) {
+        ostringstream errOut;
+        errOut <<"EXITING: fatal input ERROR: --dynamicThreadPfControllerMode requires --dynamicThreadInterface=1\n";
+        exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+    }
+    if (dynamicThreadPfControllerMode == "active" && variableThreads != 1) {
+        ostringstream errOut;
+        errOut <<"EXITING: fatal input ERROR: --dynamicThreadPfControllerMode=active requires --variableThreads=1\n";
+        exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+    }
+    if (pfControllerEnabled && dynamicThreadPfControllerIntervalMs <= 0) {
+        ostringstream errOut;
+        errOut <<"EXITING: fatal input ERROR: --dynamicThreadPfControllerMode requires --dynamicThreadPfControllerIntervalMs > 0\n";
+        exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+    }
+    if (pfControllerEnabled && dynamicThreadPfControllerSequence.empty()) {
+        ostringstream errOut;
+        errOut <<"EXITING: fatal input ERROR: --dynamicThreadPfControllerMode requires non-empty --dynamicThreadPfControllerSequence\n";
+        exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+    }
 
     //
     if (outFilterType=="BySJout" && outSAMorder=="PairedKeepInputOrder") {

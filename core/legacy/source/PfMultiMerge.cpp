@@ -153,6 +153,34 @@ static bool compressFileToGz(const string& plainPath, ofstream& logStream) {
     return true;
 }
 
+static bool writeLinesPlain(const string& path, const vector<string>& lines) {
+    std::ofstream out(path.c_str());
+    if (!out.is_open()) {
+        return false;
+    }
+    for (const auto& line : lines) {
+        out << line << "\n";
+    }
+    return true;
+}
+
+static bool writeNamespaceMapPlain(const string& path,
+                                   const vector<string>& nativeBarcodes,
+                                   const vector<string>& outputBarcodes) {
+    if (nativeBarcodes.size() != outputBarcodes.size()) {
+        return false;
+    }
+    std::ofstream out(path.c_str());
+    if (!out.is_open()) {
+        return false;
+    }
+    out << "native_barcode\toutput_barcode\n";
+    for (size_t i = 0; i < nativeBarcodes.size(); ++i) {
+        out << nativeBarcodes[i] << "\t" << outputBarcodes[i] << "\n";
+    }
+    return true;
+}
+
 } // namespace
 
 string resolveMexFile(const string& mexDir, const string& basename) {
@@ -639,6 +667,17 @@ int writeCombinedMex(const string& outputDir,
         return -1;
     }
     
+    // Derive native/read-space barcode representation from output-space barcodes.
+    // When input/output namespaces differ, translation is reversible, so applying
+    // the same middle-2bp transform converts output->native.
+    const bool emitNamespaceArtifacts = needsNamespaceTranslation(inputChemistry, outputChemistry);
+    vector<string> nativeSuffixedBarcodes = suffixedBarcodes;
+    if (emitNamespaceArtifacts) {
+        for (auto& bc : nativeSuffixedBarcodes) {
+            translateNxtMiddleTwoBasesInplace(bc);
+        }
+    }
+
     // Step 4: Sort barcodes lexicographically after suffix
     vector<size_t> sortIndices(suffixedBarcodes.size());
     for (size_t i = 0; i < sortIndices.size(); ++i) {
@@ -652,13 +691,16 @@ int writeCombinedMex(const string& outputDir,
     
     // Build sorted barcode list and remap: compact_idx -> sorted_idx
     vector<string> sortedBarcodes;
+    vector<string> sortedNativeBarcodes;
     sortedBarcodes.reserve(suffixedBarcodes.size());
+    sortedNativeBarcodes.reserve(nativeSuffixedBarcodes.size());
     map<uint32_t, uint32_t> compactToSorted;
     
     for (size_t i = 0; i < sortIndices.size(); ++i) {
         size_t oldCompactIdx = sortIndices[i];
         compactToSorted[oldCompactIdx] = i;
         sortedBarcodes.push_back(suffixedBarcodes[oldCompactIdx]);
+        sortedNativeBarcodes.push_back(nativeSuffixedBarcodes[oldCompactIdx]);
     }
     
     // Step 5: Remap triplet cell_idx to sorted indices
@@ -707,14 +749,34 @@ int writeCombinedMex(const string& outputDir,
         return -1;
     }
     
-    // Step 7: Gzip output files (in-process zlib; no shell helpers)
+    // Step 7: Write additive barcode namespace artifacts.
+    // barcodes.tsv(.gz) remains canonical output namespace (CR-style); the files
+    // below expose native/read-space barcodes for reproducibility/debugging.
+    if (emitNamespaceArtifacts) {
+        const string nativePath = outputDir + "/barcodes.native.tsv";
+        if (writeLinesPlain(nativePath, sortedNativeBarcodes)) {
+            compressFileToGz(nativePath, logStream);
+        } else {
+            logStream << "WARNING: Failed to write native barcode file: " << nativePath << "\n";
+        }
+
+        const string namespaceMapPath = outputDir + "/barcodes.namespace_map.tsv";
+        if (writeNamespaceMapPlain(namespaceMapPath, sortedNativeBarcodes, sortedBarcodes)) {
+            compressFileToGz(namespaceMapPath, logStream);
+        } else {
+            logStream << "WARNING: Failed to write barcode namespace map file: "
+                      << namespaceMapPath << "\n";
+        }
+    }
+
+    // Step 8: Gzip output files (in-process zlib; no shell helpers)
     vector<string> filesToGzip = {"matrix.mtx", "barcodes.tsv", "features.tsv"};
     for (const auto& filename : filesToGzip) {
         string filePath = outputDir + "/" + filename;
         compressFileToGz(filePath, logStream);
     }
     
-    // Step 8: Log metrics
+    // Step 9: Log metrics
     logStream << "CR-compat MEX formatting:\n";
     logStream << "  Filter mode: " << (useGexFilter ? "GEX barcodes only" : "Observed barcodes (count > 0)") << "\n";
     logStream << "  Original barcode count: " << originalBarcodeCount << "\n";
@@ -722,6 +784,12 @@ int writeCombinedMex(const string& outputDir,
     logStream << "  Barcode namespace input->output: " << normalizeChemistry(inputChemistry)
               << " -> " << normalizeChemistry(outputChemistry) << "\n";
     logStream << "  Barcode namespace translated: " << namespaceTranslatedCount << "\n";
+    if (emitNamespaceArtifacts) {
+        logStream << "  Added barcode file: barcodes.native.tsv.gz\n";
+        logStream << "  Added barcode file: barcodes.namespace_map.tsv.gz\n";
+    } else {
+        logStream << "  Namespace conversion artifacts: skipped (input/output namespaces identical)\n";
+    }
     logStream << "  Triplets retained: " << tripletsRetained << "\n";
     logStream << "  GEM well used: " << gemWell << "\n";
     

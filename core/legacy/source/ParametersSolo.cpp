@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <memory>
 #include <fstream>
+#include <cctype>
 
 ParametersSolo::~ParametersSolo() {
 }
@@ -867,6 +868,7 @@ void ParametersSolo::initialize(Parameters *pPin)
     umiMaskHigh=~umiMaskLow;
 
     //////////////////////////////////////////////////////CB whitelist
+    cbWLstrOut.clear();
     if (type==SoloTypes::CB_UMI_Simple || type==SoloTypes::CB_samTagOut) {//simple whitelist
         if (soloCBwhitelist.size()>1) {
             ostringstream errOut;
@@ -882,38 +884,115 @@ void ParametersSolo::initialize(Parameters *pPin)
             cbWLyes=false;
         } else {
             cbWLyes=true;
+            cbWL.clear();
+            cbWLstr.clear();
+            cbWLstrOut.clear();
+
             ifstream & cbWlStream = ifstrOpen(soloCBwhitelist[0], ERROR_OUT, "SOLUTION: check the path and permissions of the CB whitelist file: " + soloCBwhitelist[0], *pP);
-            string seq1;
-            while (cbWlStream >> seq1) {
+            vector<std::pair<uint64, string>> cbPairs;
+            string line;
+            uint64_t badOutputMapRows = 0;
+            uint64_t conflictingMapRows = 0;
+            bool sawTwoColumn = false;
+            bool sawOneColumn = false;
+            bool warnedExtraColumns = false;
+
+            while (std::getline(cbWlStream, line)) {
+                std::istringstream lineStream(line);
+                string seq1;
+                if (!(lineStream >> seq1)) {
+                    continue;
+                }
+
                 if (seq1.size() != cbL) {
                     ostringstream errOut;
-                    errOut << "EXITING because of FATAL ERROR in input CB whitelist file: "<< soloCBwhitelist[0] <<" the total length of barcode sequence is "  << seq1.size() << " not equal to expected " <<bL <<"\n"  ;
+                    errOut << "EXITING because of FATAL ERROR in input CB whitelist file: "<< soloCBwhitelist[0]
+                           << " the total length of barcode sequence is "  << seq1.size()
+                           << " not equal to expected " << bL << "\n";
                     errOut << "SOLUTION: make sure that the barcode read is the second in --readFilesIn and check that is has the correct formatting\n";
                     exitWithError(errOut.str(),std::cerr, pP->inOut->logMain, EXIT_CODE_INPUT_FILES, *pP);
-                };
+                }
+
                 uint64 cb1;
-                if (convertNuclStrToInt64(seq1,cb1)) {//convert to 2-bit format
-                    cbWL.push_back(cb1);
+                if (!convertNuclStrToInt64(seq1, cb1)) {
+                    pP->inOut->logMain << "WARNING: CB whitelist sequence contains non-ACGT base and is ignored: " << seq1 << endl;
+                    continue;
+                }
+                string wlSeq = convertNuclInt64toString(cb1, cbL);
+                string outSeq = wlSeq;
+
+                string seq2;
+                if (lineStream >> seq2) {
+                    sawTwoColumn = true;
+                    uint64 outCb;
+                    if (seq2.size() == cbL && convertNuclStrToInt64(seq2, outCb)) {
+                        outSeq = convertNuclInt64toString(outCb, cbL);
+                    } else {
+                        ++badOutputMapRows;
+                    }
+                    string extra;
+                    if (!warnedExtraColumns && (lineStream >> extra)) {
+                        warnedExtraColumns = true;
+                        pP->inOut->logMain << "WARNING: CB whitelist has more than 2 columns; only columns 1-2 are used.\n";
+                    }
                 } else {
-                    pP->inOut->logMain << "WARNING: CB whitelist sequence contains non-ACGT base and is ignored: " << seq1 <<endl;
-                };
-            };
-            if (cbWL.size()==0) {//empty whitelist
+                    sawOneColumn = true;
+                }
+
+                cbPairs.emplace_back(cb1, outSeq);
+            }
+
+            if (cbPairs.empty()) {
                 exitWithError("EXITING because of FATAL ERROR: CB whitelist file " + soloCBwhitelist[0] + \
                                " is empty. \nSOLUTION: provide non-empty whitelist.\n" , \
                                std::cerr, pP->inOut->logMain, EXIT_CODE_INPUT_FILES, *pP);
-            };
+            }
+
+            std::sort(cbPairs.begin(), cbPairs.end(),
+                      [](const std::pair<uint64, string>& a, const std::pair<uint64, string>& b) {
+                          if (a.first != b.first) {
+                              return a.first < b.first;
+                          }
+                          return a.second < b.second;
+                      });
+
+            cbWL.reserve(cbPairs.size());
+            cbWLstr.reserve(cbPairs.size());
+            cbWLstrOut.reserve(cbPairs.size());
+            for (const auto& entry : cbPairs) {
+                if (!cbWL.empty() && entry.first == cbWL.back()) {
+                    if (entry.second != cbWLstrOut.back()) {
+                        ++conflictingMapRows;
+                    }
+                    continue;
+                }
+                cbWL.push_back(entry.first);
+                cbWLstr.push_back(convertNuclInt64toString(entry.first, cbL));
+                cbWLstrOut.push_back(entry.second);
+            }
+
+            if (sawTwoColumn) {
+                pP->inOut->logMain
+                    << "NOTICE: Detected 2-column CB whitelist; column 1 is used for matching, column 2 is used for MEX barcode output mapping.\n";
+                if (sawOneColumn) {
+                    pP->inOut->logMain
+                        << "WARNING: Mixed 1-column/2-column rows detected in CB whitelist; 1-column rows default to identity mapping.\n";
+                }
+            }
+            if (badOutputMapRows > 0) {
+                pP->inOut->logMain
+                    << "WARNING: " << badOutputMapRows
+                    << " whitelist rows had invalid column-2 barcodes; falling back to column-1 output mapping for those rows.\n";
+            }
+            if (conflictingMapRows > 0) {
+                pP->inOut->logMain
+                    << "WARNING: " << conflictingMapRows
+                    << " duplicate whitelist barcodes had conflicting output mappings; first mapping was kept.\n";
+            }
         };
 
-        std::sort(cbWL.begin(),cbWL.end());//sort
-        auto un1=std::unique(cbWL.begin(),cbWL.end());//collapse identical
-        cbWL.resize(std::distance(cbWL.begin(),un1));        
         cbWLsize=cbWL.size();
         pP->inOut->logMain << "Number of CBs in the whitelist = " << cbWLsize <<endl;
-        
-        cbWLstr.resize(cbWLsize);
-        for (uint64 ii=0; ii<cbWLsize; ii++)
-             cbWLstr[ii] = convertNuclInt64toString(cbWL[ii],cbL);
         
         // Initialize CbCorrector instance for inline CB correction
         if (cbWLyes && !cbWLstr.empty()) {
@@ -929,39 +1008,45 @@ void ParametersSolo::initialize(Parameters *pPin)
             pP->inOut->logMain << "CbCorrector NOT initialized: cbWLyes=" << cbWLyes << ", cbWLstr.empty()=" << cbWLstr.empty() << endl;
         }
         
-        // Build ambiguousCbByKey hash map from CbCorrector ambiguous variants
+        // Legacy precompute path (currently unused by the in-flight resolver):
+        // keep behind env opt-in for debugging/backward validation.
         if (cbCorrector && cbWLyes && !cbWLstr.empty()) {
             ambiguousCbByKey.clear();
-            const auto& ambigVariants = cbCorrector->getAmbiguousVariants();
-            size_t cbLen = cbCorrector->getCbLength();
-            std::hash<std::string> hasher;
-            
-            for (const auto& kv : ambigVariants) {
-                uint32_t packedKey = kv.first;
-                const auto& indices = kv.second; // 0-based indices
+            if (std::getenv("STAR_BUILD_LEGACY_AMBIG_HASH") != nullptr) {
+                const auto& ambigVariants = cbCorrector->getAmbiguousVariants();
+                size_t cbLen = cbCorrector->getCbLength();
+                std::hash<std::string> hasher;
                 
-                // Decode packed key to CB string
-                std::string cbStr = cbCorrector->decodePackedKey(packedKey, cbLen);
-                
-                // Hash CB string
-                uint64_t cbHash = static_cast<uint64_t>(hasher(cbStr));
-                
-                // Convert 0-based indices to 1-based and store
-                std::vector<uint32_t> neighbors1Based;
-                neighbors1Based.reserve(indices.size());
-                for (uint32_t idx : indices) {
-                    neighbors1Based.push_back(idx + 1); // Convert to 1-based
+                for (const auto& kv : ambigVariants) {
+                    uint32_t packedKey = kv.first;
+                    const auto& indices = kv.second; // 0-based indices
+                    
+                    // Decode packed key to CB string
+                    std::string cbStr = cbCorrector->decodePackedKey(packedKey, cbLen);
+                    
+                    // Hash CB string
+                    uint64_t cbHash = static_cast<uint64_t>(hasher(cbStr));
+                    
+                    // Convert 0-based indices to 1-based and store
+                    std::vector<uint32_t> neighbors1Based;
+                    neighbors1Based.reserve(indices.size());
+                    for (uint32_t idx : indices) {
+                        neighbors1Based.push_back(idx + 1); // Convert to 1-based
+                    }
+                    
+                    ambiguousCbByKey[cbHash] = std::move(neighbors1Based);
                 }
                 
-                ambiguousCbByKey[cbHash] = std::move(neighbors1Based);
+                pP->inOut->logMain << "Built ambiguousCbByKey with " << ambiguousCbByKey.size() << " ambiguous CB variants" << endl;
+            } else {
+                pP->inOut->logMain << "Skipping legacy ambiguousCbByKey precompute (set STAR_BUILD_LEGACY_AMBIG_HASH=1 to enable)." << endl;
             }
-            
-            pP->inOut->logMain << "Built ambiguousCbByKey with " << ambiguousCbByKey.size() << " ambiguous CB variants" << endl;
         }
         
     //////////////////////////////////////////////////////////////////////////////////
     } else if (type==SoloTypes::SmartSeq) {
         cbWLstr=pP->outSAMattrRG;
+        cbWLstrOut=cbWLstr;
         cbWLsize=cbWLstr.size();
         cbWLyes=true; 
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////    
@@ -1014,6 +1099,10 @@ void ParametersSolo::initialize(Parameters *pPin)
         
         complexWLstrings();
     };
+
+    if (cbWLstrOut.size() != cbWLstr.size()) {
+        cbWLstrOut = cbWLstr;
+    }
 
     time_t rawTime;
     time(&rawTime);
@@ -1200,6 +1289,7 @@ void ParametersSolo::complexWLstrings() {
         
         cbV[0].iCB++;//shift by one for the next CB
     };
+    cbWLstrOut = cbWLstr;
 };
 
 void ParametersSolo::cellFiltering()

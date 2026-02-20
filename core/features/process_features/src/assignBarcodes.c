@@ -1464,23 +1464,29 @@ int find_feature_match_parallel(feature_arrays *features, char *lineR2, int maxH
     string2all_codes(lineR2, codes, code_lengths);
 
     int best_feature=0;
-    int bestFeatureDistance=maxHammingDistance;   
+    int bestFeatureDistance=maxHammingDistance;
     int bestHammingDistances[4]={maxHammingDistance,maxHammingDistance,maxHammingDistance,maxHammingDistance};
     int best_code_offsets[4]={0,0,0,0};
     int ambiguous[4]={0,0,0,0};
     int best_match[4]={0,0,0,0};
-    int best_matching_indices[4]={0,0,0,0};
-
-    int exact_match_found=0;
+    int exact_match[4]={0,0,0,0};
+    int exact_feature[4]={0,0,0,0};
+    int exact_code_offset[4]={0,0,0,0};
     const int use_offsets = (use_feature_offset_array && feature_offsets && feature_offsets_count >= features->number_of_features);
     if (use_offsets) {
         pf_trace_feature_offsets_emit(features);
     }
-    #pragma omp parallel for num_threads(nThreads)
+    #pragma omp parallel for num_threads(nThreads) schedule(static)
     for (int i=0; i<4; i++){
-        //get the thread number
-        const int thread_num=omp_get_thread_num();
-        for (int j=0; j<features->number_of_features && !exact_match_found; j++){
+        int local_best_match=0;
+        int local_best_hamming=maxHammingDistance;
+        int local_best_code_offset=0;
+        int local_ambiguous=0;
+        int local_exact_match=0;
+        int local_exact_feature=0;
+        int local_exact_code_offset=0;
+
+        for (int j=0; j<features->number_of_features; j++){
             int code_offset=0;
             int hammingDistance;
             if (use_offsets) {
@@ -1499,43 +1505,51 @@ int find_feature_match_parallel(feature_arrays *features, char *lineR2, int maxH
                 hammingDistance = find_matches_in_sub_arrays(codes[i], features->feature_codes[j], code_lengths[i], features->feature_code_lengths[j],features->feature_lengths[j], maxHammingDistance, &code_offset);
             }
             if (!hammingDistance){
-                *bestScore=0;
-                exact_match_found=1;
-                best_feature=j+1;
-                *matching_sequence=lineR2+i+code_offset*4;
-                *match_position = i+code_offset*4;
-                best_matching_indices[thread_num]=i;
+                local_exact_match=1;
+                local_exact_feature=j+1;
+                local_exact_code_offset=code_offset;
                 break;
             }
-            if (hammingDistance < bestHammingDistances[thread_num]){
-                best_match[thread_num]=j+1;
-                bestHammingDistances[thread_num]=hammingDistance;
-                best_code_offsets[thread_num]=code_offset;
-                ambiguous[thread_num]=0;
-                best_matching_indices[thread_num]=i;
+            if (hammingDistance < local_best_hamming){
+                local_best_match=j+1;
+                local_best_hamming=hammingDistance;
+                local_best_code_offset=code_offset;
+                local_ambiguous=0;
             }
-            else if (hammingDistance == bestHammingDistances[thread_num]){
-                if (best_match[thread_num]){
-                    ambiguous[thread_num]=1;
+            else if (hammingDistance == local_best_hamming){
+                if (local_best_match){
+                    local_ambiguous=1;
                 }
                 else{
-                    ambiguous[thread_num]=0;
-                    best_match[thread_num]=j+1;
-                    best_code_offsets[thread_num]=code_offset;
-                    bestHammingDistances[thread_num]=hammingDistance;
-                    best_matching_indices[thread_num]=i;
+                    local_ambiguous=0;
+                    local_best_match=j+1;
+                    local_best_code_offset=code_offset;
+                    local_best_hamming=hammingDistance;
                 }
             }
         }
+        exact_match[i]=local_exact_match;
+        exact_feature[i]=local_exact_feature;
+        exact_code_offset[i]=local_exact_code_offset;
+        best_match[i]=local_best_match;
+        bestHammingDistances[i]=local_best_hamming;
+        best_code_offsets[i]=local_best_code_offset;
+        ambiguous[i]=local_ambiguous;
     }
-    if (exact_match_found){//matching_sequence is already set
-        return best_feature;
+    for (int i=0; i<4; i++){
+        if (exact_match[i]){
+            *bestScore=0;
+            best_feature=exact_feature[i];
+            *matching_sequence=lineR2+i+exact_code_offset[i]*4;
+            *match_position=i+exact_code_offset[i]*4;
+            return best_feature;
+        }
     }
     //find the best hamming distance - if there is a perfect match return immediately
     char multiAmbiguous=0;
     int best_code_offset=0;
     int best_i=0;
-    for (int i=0; i<nThreads; i++){
+    for (int i=0; i<4; i++){
         if (!best_match[i]){
             continue;
         }
@@ -1544,7 +1558,7 @@ int find_feature_match_parallel(feature_arrays *features, char *lineR2, int maxH
             best_feature=best_match[i];
             best_code_offset=best_code_offsets[i];
             multiAmbiguous=ambiguous[i]; //reset ambiguous flag
-            best_i=best_matching_indices[i];
+            best_i=i;
         }
         else if (bestHammingDistances[i] == bestFeatureDistance){
             if (best_feature ){
@@ -1554,7 +1568,7 @@ int find_feature_match_parallel(feature_arrays *features, char *lineR2, int maxH
                 best_feature=best_match[i];
                 bestFeatureDistance=bestHammingDistances[i];
                 best_code_offset=best_code_offsets[i];
-                best_i=best_matching_indices[i];
+                best_i=i;
                 multiAmbiguous=ambiguous[i];
             }
         }
@@ -3961,6 +3975,12 @@ void *consume_reads(void *arg) {
     const int nsets = processor_args->nsets;
     fastq_reader_set **reader_sets = processor_args->reader_sets;
     const sample_args *sample_args = processor_args->sample_args;
+    const int permit_hooks_enabled = sample_args->permit_hooks_enabled &&
+                                     sample_args->permit_acquire_hook != NULL &&
+                                     sample_args->permit_release_hook != NULL;
+    uint64_t (*permit_acquire_hook)(void *hook_ctx) = sample_args->permit_acquire_hook;
+    void (*permit_release_hook)(void *hook_ctx, uint64_t wait_ns, uint64_t work_units, uint64_t work_bytes, uint64_t work_ns) = sample_args->permit_release_hook;
+    void *permit_hook_ctx = sample_args->permit_hook_ctx;
 
     // Use thread-local statistics and hashes
     statistics *stats;  
@@ -4052,6 +4072,23 @@ void *consume_reads(void *arg) {
             set->filled      -= lines_per_block;
             pthread_cond_signal(&set->can_produce);
             pthread_mutex_unlock(&set->mutex);
+
+            uint64_t work_bytes = 0;
+            work_bytes += (uint64_t)strlen(barcode_lines[0]) + (uint64_t)strlen(barcode_lines[1]);
+            if (forward_lines) {
+                work_bytes += (uint64_t)strlen(forward_lines[0]) + (uint64_t)strlen(forward_lines[1]);
+            }
+            if (reverse_lines) {
+                work_bytes += (uint64_t)strlen(reverse_lines[0]) + (uint64_t)strlen(reverse_lines[1]);
+            }
+
+            uint64_t wait_ns = 0;
+            double work_start_sec = 0.0;
+            if (permit_hooks_enabled) {
+                wait_ns = permit_acquire_hook(permit_hook_ctx);
+                work_start_sec = get_time_in_seconds();
+            }
+
             //process the data
             char matching_sequence[LINE_LENGTH];
             int hamming_distance = 0;
@@ -4176,6 +4213,15 @@ void *consume_reads(void *arg) {
             if (missing_flag){
                 stats->nMismatches++;
                 stats->total_unmatched_features++;
+            }
+
+            if (permit_hooks_enabled) {
+                const double work_end_sec = get_time_in_seconds();
+                uint64_t work_ns = 0;
+                if (work_end_sec > work_start_sec) {
+                    work_ns = (uint64_t)((work_end_sec - work_start_sec) * 1000000000.0);
+                }
+                permit_release_hook(permit_hook_ctx, wait_ns, 1, work_bytes, work_ns);
             }
             break; // Exit the for loop to process the data
         }

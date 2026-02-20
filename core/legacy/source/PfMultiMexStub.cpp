@@ -9,6 +9,7 @@
 #include <sys/stat.h>
 #include <stdexcept>
 #include <dirent.h>
+#include <unordered_map>
 using std::cerr;
 using std::endl;
 
@@ -22,6 +23,61 @@ static void trimInPlace(string& s) {
     }
     size_t last = s.find_last_not_of(" \t\r\n");
     s = s.substr(first, last - first + 1);
+}
+
+static bool isValidBarcodeSeq(const string& seq) {
+    if (seq.empty()) {
+        return false;
+    }
+    for (unsigned char c : seq) {
+        unsigned char u = static_cast<unsigned char>(std::toupper(c));
+        if (!(u == 'A' || u == 'C' || u == 'G' || u == 'T' || u == 'N')) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool parseWhitelistOutputMap(const string& whitelistPath, std::unordered_map<string, string>& outMap) {
+    outMap.clear();
+    if (whitelistPath.empty()) {
+        return false;
+    }
+
+    ifstream in(whitelistPath.c_str());
+    if (!in.is_open()) {
+        return false;
+    }
+
+    string line;
+    bool sawSecondColumn = false;
+    while (getline(in, line)) {
+        size_t first = line.find_first_not_of(" \t\r\n");
+        if (first == string::npos) {
+            continue;
+        }
+        size_t end1 = line.find_first_of(" \t,\r\n", first);
+        string col1 = (end1 == string::npos) ? line.substr(first) : line.substr(first, end1 - first);
+        size_t second = (end1 == string::npos) ? string::npos : line.find_first_not_of(" \t,\r\n", end1);
+        if (second == string::npos) {
+            continue;
+        }
+        size_t end2 = line.find_first_of(" \t,\r\n", second);
+        string col2 = (end2 == string::npos) ? line.substr(second) : line.substr(second, end2 - second);
+        sawSecondColumn = true;
+
+        std::transform(col1.begin(), col1.end(), col1.begin(), ::toupper);
+        std::transform(col2.begin(), col2.end(), col2.begin(), ::toupper);
+        if (!isValidBarcodeSeq(col1) || !isValidBarcodeSeq(col2)) {
+            continue;
+        }
+        if (col1.size() != col2.size()) {
+            continue;
+        }
+        outMap[col1] = col2;
+    }
+
+    return sawSecondColumn && !outMap.empty();
 }
 
 vector<FeatureRow> loadFeatureCsv(const string& csvPath) {
@@ -195,7 +251,8 @@ bool writeFeaturesTsv(const string& outPath, const vector<FeatureRow>& featureRo
     return true;
 }
 
-bool copyBarcodesTsv(const string& barcodesTxt, const string& barcodesTsv, bool force) {
+bool copyBarcodesTsv(const string& barcodesTxt, const string& barcodesTsv, bool force,
+                     const string& whitelistPath) {
     struct stat st;
     if (stat(barcodesTxt.c_str(), &st) != 0) {
         return false; // Source file doesn't exist
@@ -214,13 +271,34 @@ bool copyBarcodesTsv(const string& barcodesTxt, const string& barcodesTsv, bool 
     if (!dst.is_open()) {
         return false;
     }
-    
-    dst << src.rdbuf();
+
+    std::unordered_map<string, string> outputMap;
+    bool useOutputMap = parseWhitelistOutputMap(whitelistPath, outputMap);
+
+    if (!useOutputMap) {
+        dst << src.rdbuf();
+        return true;
+    }
+
+    string line;
+    while (getline(src, line)) {
+        trimInPlace(line);
+        if (line.empty()) {
+            continue;
+        }
+        auto it = outputMap.find(line);
+        if (it != outputMap.end()) {
+            dst << it->second << "\n";
+        } else {
+            dst << line << "\n";
+        }
+    }
     return true;
 }
 
 int processAssignOutput(const string& assignOutDir, const string& featureCsvPath,
-                       const string& defaultFeatureType, bool force) {
+                       const string& defaultFeatureType, bool force,
+                       const string& whitelistPath) {
     vector<string> outDirs;
     outDirs.push_back(assignOutDir);
     
@@ -261,7 +339,7 @@ int processAssignOutput(const string& assignOutDir, const string& featureCsvPath
             if (writeFeaturesTsv(featuresTsv, featureRows, defaultFeatureType, force)) {
                 wroteAny = true;
             }
-            if (copyBarcodesTsv(barcodesTxt, barcodesTsv, force)) {
+            if (copyBarcodesTsv(barcodesTxt, barcodesTsv, force, whitelistPath)) {
                 wroteAny = true;
             }
         } catch (const exception& e) {

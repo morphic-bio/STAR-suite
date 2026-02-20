@@ -5,6 +5,7 @@
 #include "PfMultiMexStub.h"
 #include "PfMultiMerge.h"
 #include "ErrorWarning.h"
+#include "GlobalVariables.h"
 #include "serviceFuns.cpp"
 #include "TimeFunctions.h"
 #include "call_features.h"
@@ -18,8 +19,75 @@
 #include <algorithm>
 #include <cstdio>
 #include <cctype>
+#include <cmath>
+#include <chrono>
+#include <thread>
+#include <atomic>
+#include <limits>
+#include <zlib.h>
 using std::cerr;
 using std::endl;
+
+struct AnchoredReadEstimate {
+    bool valid = false;
+    uint64_t estimatedReads = 0;
+    uint64_t anchorReads = 0;
+    uint64_t anchorBytes = 0;
+    uint64_t totalBytes = 0;
+    string anchorFile;
+    size_t fileCount = 0;
+};
+
+struct PfPreparedFeatureLibrary {
+    string libraryType;
+    string featureRefType;
+    string resolvedFastq;
+    string sampleName;
+    string assignOut;
+    string featureRefPath;
+    bool usedFilteredRef = false;
+    AnchoredReadEstimate featureEstimate;
+};
+
+struct PfMultiPreparedContext {
+    PfMultiConfig::Config config;
+    string featureRef;
+    string whitelist;
+    string requestedChem;
+    string requestedOutputChem;
+    string inferredChem;
+    string inferredReason;
+    string effectiveChem;
+    string outputChem;
+    string outPrefix;
+    string crAssignRoot;
+    AnchoredReadEstimate mapEstimate;
+    vector<PfPreparedFeatureLibrary> featureLibraries;
+    string prepLog;
+};
+
+class PfMultiPreloadHandle {
+public:
+    ~PfMultiPreloadHandle() {
+        if (worker.joinable()) {
+            worker.join();
+        }
+    }
+
+private:
+    friend std::shared_ptr<PfMultiPreloadHandle> startPfMultiConfigPreload(const Parameters& P);
+    friend int processPfMultiConfig(Parameters& P,
+                                    const Solo* solo,
+                                    const std::shared_ptr<PfMultiPreloadHandle>& preload);
+
+    std::thread worker;
+    bool started = false;
+    bool finished = false;
+    bool success = false;
+    double preloadSec = 0.0;
+    string error;
+    PfMultiPreparedContext context;
+};
 
 namespace {
 
@@ -213,6 +281,334 @@ static string basenameOf(const string& path) {
     return (pos == string::npos) ? path : path.substr(pos + 1);
 }
 
+enum class PfPermitControllerMode {
+    Off = 0,
+    Shadow = 1,
+    Active = 2,
+    Eta = 3
+};
+
+static PfPermitControllerMode parsePfPermitControllerMode(const string& rawMode) {
+    const string mode = lowerCopy(trimCopy(rawMode));
+    if (mode == "eta" || mode == "3") {
+        return PfPermitControllerMode::Eta;
+    }
+    if (mode == "active" || mode == "2") {
+        return PfPermitControllerMode::Active;
+    }
+    if (mode == "shadow" || mode == "1") {
+        return PfPermitControllerMode::Shadow;
+    }
+    return PfPermitControllerMode::Off;
+}
+
+static string pfPermitControllerModeName(PfPermitControllerMode mode) {
+    switch (mode) {
+        case PfPermitControllerMode::Shadow:
+            return "shadow";
+        case PfPermitControllerMode::Active:
+            return "active";
+        case PfPermitControllerMode::Eta:
+            return "eta";
+        case PfPermitControllerMode::Off:
+        default:
+            return "off";
+    }
+}
+
+static string joinIntVector(const vector<int>& values) {
+    if (values.empty()) {
+        return "";
+    }
+    std::ostringstream oss;
+    for (size_t i = 0; i < values.size(); ++i) {
+        if (i > 0) {
+            oss << ",";
+        }
+        oss << values[i];
+    }
+    return oss.str();
+}
+
+static bool hasSuffixCaseInsensitive(const string& value, const string& suffix) {
+    if (suffix.size() > value.size()) {
+        return false;
+    }
+    const size_t offset = value.size() - suffix.size();
+    for (size_t i = 0; i < suffix.size(); ++i) {
+        if (std::tolower(static_cast<unsigned char>(value[offset + i])) !=
+            std::tolower(static_cast<unsigned char>(suffix[i]))) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool isFastqPath(const string& path) {
+    return hasSuffixCaseInsensitive(path, ".fastq") ||
+           hasSuffixCaseInsensitive(path, ".fq") ||
+           hasSuffixCaseInsensitive(path, ".fastq.gz") ||
+           hasSuffixCaseInsensitive(path, ".fq.gz");
+}
+
+static bool isGzipPath(const string& path) {
+    return hasSuffixCaseInsensitive(path, ".gz");
+}
+
+static uint64_t fileSizeBytes(const string& path) {
+    struct stat st;
+    if (stat(path.c_str(), &st) != 0 || st.st_size <= 0) {
+        return 0;
+    }
+    return static_cast<uint64_t>(st.st_size);
+}
+
+static uint64_t countNewlinesInPlainFile(const string& path, bool* okOut) {
+    ifstream in(path.c_str(), std::ios::binary);
+    if (!in.is_open()) {
+        if (okOut != nullptr) {
+            *okOut = false;
+        }
+        return 0;
+    }
+    uint64_t lines = 0;
+    char buffer[1 << 20];
+    while (in.good()) {
+        in.read(buffer, sizeof(buffer));
+        const std::streamsize n = in.gcount();
+        for (std::streamsize i = 0; i < n; ++i) {
+            if (buffer[i] == '\n') {
+                ++lines;
+            }
+        }
+    }
+    if (okOut != nullptr) {
+        *okOut = true;
+    }
+    return lines;
+}
+
+static uint64_t countNewlinesInGzipFile(const string& path, bool* okOut) {
+    gzFile gz = gzopen(path.c_str(), "rb");
+    if (gz == nullptr) {
+        if (okOut != nullptr) {
+            *okOut = false;
+        }
+        return 0;
+    }
+
+    uint64_t lines = 0;
+    char buffer[1 << 20];
+    int nRead = 0;
+    while ((nRead = gzread(gz, buffer, sizeof(buffer))) > 0) {
+        for (int i = 0; i < nRead; ++i) {
+            if (buffer[i] == '\n') {
+                ++lines;
+            }
+        }
+    }
+
+    bool ok = (nRead >= 0);
+    if (gzclose(gz) != Z_OK) {
+        ok = false;
+    }
+    if (okOut != nullptr) {
+        *okOut = ok;
+    }
+    return ok ? lines : 0;
+}
+
+static bool countFastqReadsExact(const string& path, uint64_t* readsOut) {
+    if (readsOut == nullptr) {
+        return false;
+    }
+    bool ok = false;
+    const uint64_t lines = isGzipPath(path)
+        ? countNewlinesInGzipFile(path, &ok)
+        : countNewlinesInPlainFile(path, &ok);
+    if (!ok || lines == 0) {
+        return false;
+    }
+    *readsOut = lines / 4;
+    return true;
+}
+
+static vector<string> listFastqFilesInDirectory(const string& dirPath) {
+    vector<string> files;
+    DIR* dir = opendir(dirPath.c_str());
+    if (dir == nullptr) {
+        return files;
+    }
+    struct dirent* entry = nullptr;
+    while ((entry = readdir(dir)) != nullptr) {
+        if (entry->d_name[0] == '.') {
+            continue;
+        }
+        const string full = dirPath + "/" + entry->d_name;
+        struct stat st;
+        if (stat(full.c_str(), &st) != 0 || !S_ISREG(st.st_mode)) {
+            continue;
+        }
+        if (isFastqPath(full)) {
+            files.push_back(full);
+        }
+    }
+    closedir(dir);
+    std::sort(files.begin(), files.end());
+    return files;
+}
+
+static vector<string> filterFastqFilesByMarker(const vector<string>& files, const string& marker) {
+    if (marker.empty()) {
+        return files;
+    }
+    const string markerLower = lowerCopy(marker);
+    vector<string> out;
+    for (const auto& path : files) {
+        const string base = lowerCopy(basenameOf(path));
+        if (base.find(markerLower) != string::npos) {
+            out.push_back(path);
+        }
+    }
+    return out;
+}
+
+struct PfMultiPreloadInput {
+    string pfMultiConfig;
+    string crFeatureRef;
+    string crWhitelist;
+    string crChemistry;
+    string crOutputChemistry;
+    string crFastqRoot;
+    vector<string> crFastqMap;
+    vector<vector<string>> readFilesNames;
+    int soloType = 0;
+    uint32 soloBarcodeRead = 0;
+    vector<string> soloCbWhitelist;
+    string outFileNamePrefix;
+};
+
+static PfMultiPreloadInput makePfMultiPreloadInput(const Parameters& P) {
+    PfMultiPreloadInput input;
+    input.pfMultiConfig = P.pfMulti.pfMultiConfig;
+    input.crFeatureRef = P.pfMulti.crFeatureRef;
+    input.crWhitelist = P.pfMulti.crWhitelist;
+    input.crChemistry = P.pfMulti.crChemistry;
+    input.crOutputChemistry = P.pfMulti.crOutputChemistry;
+    input.crFastqRoot = P.pfMulti.crFastqRoot;
+    input.crFastqMap = P.pfMulti.crFastqMap;
+    input.readFilesNames = P.readFilesNames;
+    input.soloType = P.pSolo.type;
+    input.soloBarcodeRead = P.pSolo.barcodeRead;
+    input.soloCbWhitelist = P.pSolo.soloCBwhitelist;
+    input.outFileNamePrefix = P.outFileNamePrefix;
+    return input;
+}
+
+static vector<string> selectMapPrimaryFastqs(const PfMultiPreloadInput& input) {
+    vector<string> explicitR1;
+    for (const auto& mateFiles : input.readFilesNames) {
+        for (const auto& path : mateFiles) {
+            const string base = lowerCopy(basenameOf(path));
+            if (base.find("_r1_") != string::npos || base.find(".r1.") != string::npos) {
+                explicitR1.push_back(path);
+            }
+        }
+    }
+    if (!explicitR1.empty()) {
+        return explicitR1;
+    }
+
+    if (input.soloType != 0 && input.soloBarcodeRead < input.readFilesNames.size()) {
+        return input.readFilesNames.at(input.soloBarcodeRead);
+    }
+    if (!input.readFilesNames.empty()) {
+        return input.readFilesNames.at(0);
+    }
+    return {};
+}
+
+static AnchoredReadEstimate estimateReadsAnchored(const vector<string>& inputFiles,
+                                                 const string& label,
+                                                 ostream& logMain) {
+    AnchoredReadEstimate estimate;
+    vector<string> files;
+    files.reserve(inputFiles.size());
+    for (const auto& path : inputFiles) {
+        const uint64_t sizeBytes = fileSizeBytes(path);
+        if (sizeBytes > 0) {
+            files.push_back(path);
+            estimate.totalBytes += sizeBytes;
+        }
+    }
+    estimate.fileCount = files.size();
+    if (files.empty() || estimate.totalBytes == 0) {
+        logMain << "pf-dynamic-controller: estimator[" << label
+                << "] unavailable (no FASTQ files)\n";
+        return estimate;
+    }
+
+    std::sort(files.begin(), files.end(),
+              [](const string& a, const string& b) { return fileSizeBytes(a) < fileSizeBytes(b); });
+    estimate.anchorFile = files.front();
+    estimate.anchorBytes = fileSizeBytes(estimate.anchorFile);
+    if (estimate.anchorBytes == 0) {
+        logMain << "pf-dynamic-controller: estimator[" << label
+                << "] anchor has zero size: " << estimate.anchorFile << "\n";
+        return estimate;
+    }
+
+    const auto t0 = std::chrono::steady_clock::now();
+    uint64_t anchorReads = 0;
+    if (!countFastqReadsExact(estimate.anchorFile, &anchorReads)) {
+        logMain << "pf-dynamic-controller: estimator[" << label
+                << "] failed to count anchor reads: " << estimate.anchorFile << "\n";
+        return estimate;
+    }
+    const auto t1 = std::chrono::steady_clock::now();
+    const double anchorCountSec =
+        std::chrono::duration_cast<std::chrono::duration<double>>(t1 - t0).count();
+
+    estimate.anchorReads = anchorReads;
+    const long double scaled = static_cast<long double>(estimate.anchorReads) *
+                               static_cast<long double>(estimate.totalBytes) /
+                               static_cast<long double>(estimate.anchorBytes);
+    uint64_t estimatedReads = static_cast<uint64_t>(std::llround(scaled));
+    if (estimatedReads == 0 && estimate.anchorReads > 0) {
+        estimatedReads = estimate.anchorReads;
+    }
+    estimate.estimatedReads = estimatedReads;
+    estimate.valid = (estimate.estimatedReads > 0);
+
+    logMain << "pf-dynamic-controller: estimator[" << label
+            << "] files=" << estimate.fileCount
+            << ", anchor=" << estimate.anchorFile
+            << ", anchorBytes=" << estimate.anchorBytes
+            << ", anchorReads=" << estimate.anchorReads
+            << ", totalBytes=" << estimate.totalBytes
+            << ", estimatedReads=" << estimate.estimatedReads
+            << ", anchorCountSec=" << anchorCountSec
+            << "\n";
+
+    return estimate;
+}
+
+static uint64_t inflateEstimateUntilNonNegativeRemaining(uint64_t estimateTotal, uint64_t done) {
+    if (estimateTotal == 0) {
+        estimateTotal = done;
+    }
+    while (estimateTotal < done) {
+        const uint64_t bump = std::max<uint64_t>(1, estimateTotal / 10);
+        const uint64_t next = estimateTotal + bump;
+        if (next <= estimateTotal) {
+            estimateTotal = done;
+            break;
+        }
+        estimateTotal = next;
+    }
+    return estimateTotal;
+}
+
 static string findAssignOutputDir(const string& baseDir) {
     struct stat st;
     string matrixPath = baseDir + "/matrix.mtx";
@@ -337,7 +733,10 @@ static bool filterFeatureRefCsv(const string& inputPath, const string& featureTy
     return wroteAny;
 }
 
-static bool getFilteredBarcodesFromSolo(const Solo* solo, const Parameters& P, vector<string>& out) {
+static bool getFilteredBarcodesFromSolo(const Solo* solo,
+                                        const Parameters& P,
+                                        vector<string>& out,
+                                        bool useOutputNamespace) {
     if (!solo || !solo->soloFeat) {
         return false;
     }
@@ -367,12 +766,149 @@ static bool getFilteredBarcodesFromSolo(const Solo* solo, const Parameters& P, v
     for (uint32 icb = 0; icb < gex->nCB; icb++) {
         if (gex->filteredCells.filtVecBool[icb]) {
             uint32 wlIdx = gex->indCB[icb];
-            if (wlIdx < gex->pSolo.cbWLstr.size()) {
+            if (useOutputNamespace && wlIdx < gex->pSolo.cbWLstrOut.size()) {
+                out.push_back(gex->pSolo.cbWLstrOut[wlIdx]);
+            } else if (wlIdx < gex->pSolo.cbWLstr.size()) {
                 out.push_back(gex->pSolo.cbWLstr[wlIdx]);
             }
         }
     }
     return !out.empty();
+}
+
+static vector<FeatureSpec> defaultPfFeatureSpecs() {
+    return {
+        {"CRISPR Guide Capture", "CRISPR Guide Capture"},
+        {"Antibody Capture", "Antibody Capture"},
+        {"CellPlex (CMO)", "Multiplexing Capture"},
+        {"Multiplexing Capture", "Multiplexing Capture"}
+    };
+}
+
+static PfMultiPreparedContext buildPfMultiPreparedContext(const PfMultiPreloadInput& input) {
+    PfMultiPreparedContext context;
+    std::ostringstream prepLog;
+
+    context.config = PfMultiConfig::parseConfig(input.pfMultiConfig);
+    if (context.config.libraries.empty()) {
+        throw runtime_error("No libraries found in multi config");
+    }
+
+    context.featureRef = input.crFeatureRef;
+    if (isUnsetToken(context.featureRef)) {
+        context.featureRef = context.config.featureRef;
+    }
+    if (isUnsetToken(context.featureRef)) {
+        throw runtime_error("Feature reference not provided (use --crFeatureRef or set in config)");
+    }
+
+    context.whitelist = input.crWhitelist;
+    if (isUnsetToken(context.whitelist)) {
+        if (!input.soloCbWhitelist.empty() && !isUnsetToken(input.soloCbWhitelist[0])) {
+            context.whitelist = input.soloCbWhitelist[0];
+        }
+    }
+    if (isUnsetToken(context.whitelist)) {
+        throw runtime_error("Whitelist not provided (use --crWhitelist or --soloCBwhitelist)");
+    }
+
+    context.requestedChem = parseChemistryToken(input.crChemistry, "--crChemistry");
+    context.requestedOutputChem = parseChemistryToken(input.crOutputChemistry, "--crOutputChemistry");
+    context.inferredChem = detectChemistryFromWhitelistPath(context.whitelist, context.inferredReason);
+    context.effectiveChem = context.inferredChem;
+    if (context.requestedChem == "nxt") {
+        context.effectiveChem = "NXT";
+    } else if (context.requestedChem == "tru") {
+        context.effectiveChem = "TRU";
+    }
+
+    // CR-compat default output namespace is TRU.
+    context.outputChem = "TRU";
+    if (context.requestedOutputChem == "nxt") {
+        context.outputChem = "NXT";
+    } else if (context.requestedOutputChem == "tru") {
+        context.outputChem = "TRU";
+    }
+
+    prepLog << "pf-multi chemistry: requested=" << context.requestedChem
+            << " inferred=" << context.inferredChem
+            << " (" << context.inferredReason << ")"
+            << " effective=" << context.effectiveChem
+            << " output_requested=" << context.requestedOutputChem
+            << " output_effective=" << context.outputChem
+            << "\n";
+
+    const map<string, string> fastqMap = PfMultiConfig::parseFastqMap(input.crFastqMap);
+
+    context.outPrefix = input.outFileNamePrefix;
+    while (!context.outPrefix.empty() && context.outPrefix.back() == '/') {
+        context.outPrefix.pop_back();
+    }
+    context.crAssignRoot = context.outPrefix + "/cr_assign";
+
+    const string mkCrAssignRootCmd = "mkdir -p \"" + context.crAssignRoot + "\"";
+    if (system(mkCrAssignRootCmd.c_str()) != 0) {
+        throw runtime_error("Failed to create CR assign root directory: " + context.crAssignRoot);
+    }
+
+    context.mapEstimate =
+        estimateReadsAnchored(selectMapPrimaryFastqs(input), "map", prepLog);
+
+    const vector<FeatureSpec> featureSpecs = defaultPfFeatureSpecs();
+    for (const auto& spec : featureSpecs) {
+        const vector<PfMultiConfig::LibraryEntry> libs =
+            context.config.getFeatureLibraries(spec.libraryType);
+        if (libs.empty()) {
+            continue;
+        }
+
+        const string featureDir = sanitizeDirName(spec.libraryType);
+        const string assignBase = context.outPrefix + "/cr_assign/" + featureDir;
+
+        for (const auto& lib : libs) {
+            PfPreparedFeatureLibrary prepared;
+            prepared.libraryType = spec.libraryType;
+            prepared.featureRefType = spec.featureRefType;
+            prepared.resolvedFastq =
+                PfMultiConfig::resolveFastqDir(lib.fastqs, input.crFastqRoot, fastqMap);
+            prepared.sampleName = lib.sample.empty()
+                ? basenameOf(prepared.resolvedFastq)
+                : lib.sample;
+            prepared.assignOut =
+                assignBase + "/" + sanitizeDirName(prepared.sampleName);
+
+            const string mkAssignOutCmd = "mkdir -p \"" + prepared.assignOut + "\"";
+            if (system(mkAssignOutCmd.c_str()) != 0) {
+                throw runtime_error("Failed to create assign output directory: " + prepared.assignOut);
+            }
+
+            const string filteredRef = prepared.assignOut + "/feature_reference.filtered.csv";
+            prepared.usedFilteredRef =
+                filterFeatureRefCsv(context.featureRef, spec.featureRefType, filteredRef);
+            prepared.featureRefPath = prepared.usedFilteredRef ? filteredRef : context.featureRef;
+            if (!prepared.usedFilteredRef) {
+                prepLog << "WARNING: feature reference not filtered for "
+                        << spec.libraryType << "; using full reference\n";
+            }
+
+            vector<string> allFastqs = listFastqFilesInDirectory(prepared.resolvedFastq);
+            vector<string> featurePrimaryFastqs = filterFastqFilesByMarker(allFastqs, "_R1_");
+            if (featurePrimaryFastqs.empty()) {
+                featurePrimaryFastqs.swap(allFastqs);
+            }
+            prepared.featureEstimate =
+                estimateReadsAnchored(featurePrimaryFastqs, "feature", prepLog);
+
+            context.featureLibraries.push_back(std::move(prepared));
+        }
+    }
+
+    if (context.featureLibraries.empty()) {
+        throw runtime_error("No feature libraries found in multi config");
+    }
+
+    context.prepLog = prepLog.str();
+    return context;
 }
 
 /**
@@ -481,7 +1017,43 @@ static int runCrisprFeatureCalling(const string& filteredMexDir, const string& o
 
 } // namespace
 
-int processPfMultiConfig(Parameters& P, const Solo* solo) {
+std::shared_ptr<PfMultiPreloadHandle> startPfMultiConfigPreload(const Parameters& P) {
+    if (P.runMode != "alignReads") {
+        return nullptr;
+    }
+    if (isUnsetToken(P.pfMulti.pfMultiConfig)) {
+        return nullptr;
+    }
+    if (P.dynamicThreadInterface != 1) {
+        return nullptr;
+    }
+
+    auto preload = std::make_shared<PfMultiPreloadHandle>();
+    preload->started = true;
+    const PfMultiPreloadInput input = makePfMultiPreloadInput(P);
+    preload->worker = std::thread([preload, input]() {
+        const auto t0 = std::chrono::steady_clock::now();
+        try {
+            preload->context = buildPfMultiPreparedContext(input);
+            preload->success = true;
+        } catch (const std::exception& e) {
+            preload->error = e.what();
+            preload->success = false;
+        } catch (...) {
+            preload->error = "unknown exception";
+            preload->success = false;
+        }
+        const auto t1 = std::chrono::steady_clock::now();
+        preload->preloadSec =
+            std::chrono::duration_cast<std::chrono::duration<double>>(t1 - t0).count();
+        preload->finished = true;
+    });
+    return preload;
+}
+
+int processPfMultiConfig(Parameters& P,
+                         const Solo* solo,
+                         const std::shared_ptr<PfMultiPreloadHandle>& preload) {
     if (isUnsetToken(P.pfMulti.pfMultiConfig)) {
         return 0; // Not enabled
     }
@@ -489,78 +1061,47 @@ int processPfMultiConfig(Parameters& P, const Solo* solo) {
     P.inOut->logMain << timeMonthDayTime() << " ..... started pf-multi config processing\n";
     
     try {
-        // Parse multi config
-        PfMultiConfig::Config config = PfMultiConfig::parseConfig(P.pfMulti.pfMultiConfig);
-        
-        if (config.libraries.empty()) {
-            ostringstream err;
-            err << "No libraries found in multi config";
-            throw runtime_error(err.str());
-        }
-        
-        // Get feature reference
-        string featureRef = P.pfMulti.crFeatureRef;
-        if (isUnsetToken(featureRef)) {
-            featureRef = config.featureRef;
-        }
-        if (isUnsetToken(featureRef)) {
-            throw runtime_error("Feature reference not provided (use --crFeatureRef or set in config)");
-        }
-        
-        // Get whitelist
-        string whitelist = P.pfMulti.crWhitelist;
-        if (isUnsetToken(whitelist)) {
-            // Try to get from solo whitelist
-            if (!P.pSolo.soloCBwhitelist.empty() && !isUnsetToken(P.pSolo.soloCBwhitelist[0])) {
-                whitelist = P.pSolo.soloCBwhitelist[0];
+        PfMultiPreparedContext prepared;
+        bool usedPreload = false;
+        if (preload && preload->started) {
+            if (preload->worker.joinable()) {
+                preload->worker.join();
+            }
+            if (preload->success) {
+                prepared = preload->context;
+                usedPreload = true;
+                P.inOut->logMain << "pf-preload: consumed async preparation (sec="
+                                 << preload->preloadSec
+                                 << ", featureLibraries=" << prepared.featureLibraries.size()
+                                 << ")\n";
+            } else {
+                P.inOut->logMain << "WARNING: pf-preload failed; using synchronous preparation. cause="
+                                 << (preload->error.empty() ? string("unknown") : preload->error)
+                                 << "\n";
             }
         }
-        if (isUnsetToken(whitelist)) {
-            throw runtime_error("Whitelist not provided (use --crWhitelist or --soloCBwhitelist)");
+        if (!usedPreload) {
+            const auto prepStart = std::chrono::steady_clock::now();
+            prepared = buildPfMultiPreparedContext(makePfMultiPreloadInput(P));
+            const auto prepEnd = std::chrono::steady_clock::now();
+            const double prepSec =
+                std::chrono::duration_cast<std::chrono::duration<double>>(prepEnd - prepStart).count();
+            P.inOut->logMain << "pf-preload: synchronous preparation complete (sec="
+                             << prepSec
+                             << ", featureLibraries=" << prepared.featureLibraries.size()
+                             << ")\n";
+        }
+        if (!prepared.prepLog.empty()) {
+            P.inOut->logMain << prepared.prepLog;
         }
 
-        // Resolve chemistry precedence: default auto-detect, explicit chemistry override.
-        const string requestedChem = parseChemistryToken(P.pfMulti.crChemistry, "--crChemistry");
-        const string requestedOutputChem = parseChemistryToken(P.pfMulti.crOutputChemistry, "--crOutputChemistry");
-
-        string inferredReason;
-        string inferredChem = detectChemistryFromWhitelistPath(whitelist, inferredReason);
-        string effectiveChem = inferredChem;
-        if (requestedChem == "nxt") {
-            effectiveChem = "NXT";
-        } else if (requestedChem == "tru") {
-            effectiveChem = "TRU";
-        }
-
-        string outputChem = effectiveChem;
-        if (requestedOutputChem == "nxt") {
-            outputChem = "NXT";
-        } else if (requestedOutputChem == "tru") {
-            outputChem = "TRU";
-        }
-
-        P.inOut->logMain << "pf-multi chemistry: requested=" << requestedChem
-                         << " inferred=" << inferredChem
-                         << " (" << inferredReason << ")"
-                         << " effective=" << effectiveChem
-                         << " output_requested=" << requestedOutputChem
-                         << " output_effective=" << outputChem << "\n";
-        
-        // Parse FASTQ map
-        map<string, string> fastqMap = PfMultiConfig::parseFastqMap(P.pfMulti.crFastqMap);
-        
-        // Get output prefix
-        string outPrefix = P.outFileNamePrefix;
-        // Remove trailing slash if present
-        while (!outPrefix.empty() && outPrefix.back() == '/') {
-            outPrefix.pop_back();
-        }
-
-        string crAssignRoot = outPrefix + "/cr_assign";
-        string mkCrAssignRootCmd = "mkdir -p \"" + crAssignRoot + "\"";
-        if (system(mkCrAssignRootCmd.c_str()) != 0) {
-            throw runtime_error("Failed to create CR assign root directory: " + crAssignRoot);
-        }
+        const PfMultiConfig::Config& config = prepared.config;
+        const string& whitelist = prepared.whitelist;
+        const string& effectiveChem = prepared.effectiveChem;
+        const string& outputChem = prepared.outputChem;
+        const string& outPrefix = prepared.outPrefix;
+        const string& crAssignRoot = prepared.crAssignRoot;
+        const AnchoredReadEstimate mapEstimate = prepared.mapEstimate;
 
         PfMultiAssign::AssignOptions assignOpts;
         assignOpts.maxHammingDistance = P.pfMulti.crAssignMaxHamming;
@@ -573,6 +1114,22 @@ int processPfMultiConfig(Parameters& P, const Solo* solo) {
         assignOpts.consumerThreadsPerSet = P.pfMulti.crAssignConsumerThreads;
         assignOpts.searchThreads = P.pfMulti.crAssignSearchThreads;
         assignOpts.minPosterior = P.pfMulti.crAssignMinPosterior;
+        assignOpts.maxReads = (P.readMapNumber > 0) ? static_cast<long long>(P.readMapNumber) : -1;
+        assignOpts.legacyCbRescue = (P.pfMulti.crAssignLegacyCbRescue != 0);
+        assignOpts.enableStarDynamicPermitHooks = (P.dynamicThreadInterface == 1);
+        const PfPermitControllerMode pfControllerMode = parsePfPermitControllerMode(P.dynamicThreadPfControllerMode);
+        const bool pfControllerEnabled = (pfControllerMode != PfPermitControllerMode::Off);
+        const bool pfControllerSequenceMode =
+            (pfControllerMode == PfPermitControllerMode::Shadow ||
+             pfControllerMode == PfPermitControllerMode::Active);
+        const bool pfControllerEtaMode = (pfControllerMode == PfPermitControllerMode::Eta);
+        const bool pfControllerAppliesUpdates =
+            (pfControllerMode == PfPermitControllerMode::Active ||
+             pfControllerMode == PfPermitControllerMode::Eta);
+        const int pfControllerIntervalMs = P.dynamicThreadPfControllerIntervalMs;
+        const vector<int> pfControllerSequence = P.dynamicThreadPfControllerSequence;
+        const int pfControllerMaxUpdates = P.dynamicThreadPfControllerMaxUpdates;
+        const string pfControllerSequenceLabel = joinIntVector(pfControllerSequence);
 
         if (!P.pfMulti.crAssignFilteredBarcodes.empty() && P.pfMulti.crAssignFilteredBarcodes != "-") {
             struct stat stFiltered;
@@ -584,7 +1141,7 @@ int processPfMultiConfig(Parameters& P, const Solo* solo) {
                              << assignOpts.filteredBarcodesPath << "\n";
         } else {
             vector<string> filteredAssignBarcodes;
-            if (getFilteredBarcodesFromSolo(solo, P, filteredAssignBarcodes)) {
+            if (getFilteredBarcodesFromSolo(solo, P, filteredAssignBarcodes, false)) {
                 string filteredPath = crAssignRoot + "/filtered_gex_barcodes.txt";
                 std::ofstream fbc(filteredPath.c_str());
                 if (!fbc.is_open()) {
@@ -595,18 +1152,12 @@ int processPfMultiConfig(Parameters& P, const Solo* solo) {
                 }
                 fbc.close();
                 assignOpts.filteredBarcodesPath = filteredPath;
-                P.inOut->logMain << "NOTICE: Using Solo filtered barcodes for assignBarcodes (" 
+                P.inOut->logMain << "NOTICE: Using Solo filtered barcodes for assignBarcodes "
+                                 << "(matching namespace, " 
                                  << filteredAssignBarcodes.size() << " barcodes)\n";
             }
         }
         
-        vector<FeatureSpec> featureSpecs = {
-            {"CRISPR Guide Capture", "CRISPR Guide Capture"},
-            {"Antibody Capture", "Antibody Capture"},
-            {"CellPlex (CMO)", "Multiplexing Capture"},
-            {"Multiplexing Capture", "Multiplexing Capture"}
-        };
-
         struct FeatureRun {
             string featureType;
             string assignOut;
@@ -614,43 +1165,226 @@ int processPfMultiConfig(Parameters& P, const Solo* solo) {
         };
         vector<FeatureRun> featureRuns;
 
-        for (const auto& spec : featureSpecs) {
-            vector<PfMultiConfig::LibraryEntry> libs = config.getFeatureLibraries(spec.libraryType);
-            if (libs.empty()) {
-                continue;
+        for (const auto& preparedLib : prepared.featureLibraries) {
+            const string& resolvedFastq = preparedLib.resolvedFastq;
+            const string& sampleName = preparedLib.sampleName;
+            const string& assignOut = preparedLib.assignOut;
+            const string& refPath = preparedLib.featureRefPath;
+            const string& libraryType = preparedLib.libraryType;
+            const string& featureRefType = preparedLib.featureRefType;
+            const AnchoredReadEstimate featureEstimate = preparedLib.featureEstimate;
+
+            std::atomic<bool> stopPfController(false);
+            std::atomic<uint64_t> pfControllerTicks(0);
+            std::atomic<uint64_t> pfControllerApplied(0);
+            std::atomic<int> pfControllerLastTarget(0);
+            std::atomic<uint64_t> pfControllerMapEstimateInitial(0);
+            std::atomic<uint64_t> pfControllerFeatureEstimateInitial(0);
+            std::atomic<uint64_t> pfControllerMapEstimateFinal(0);
+            std::atomic<uint64_t> pfControllerFeatureEstimateFinal(0);
+            std::thread pfControllerThread;
+
+            if (pfControllerEnabled) {
+                const ThreadControl::MapPermitSnapshot controllerBaseline = g_threadChunks.mapPermitSnapshot();
+                uint64_t mapEstimateTotal = std::max<uint64_t>(
+                    controllerBaseline.mapDomain.workUnitsTotal, mapEstimate.estimatedReads);
+                uint64_t featureEstimateTotal = controllerBaseline.featureDomain.workUnitsTotal;
+                if (featureEstimate.valid) {
+                    featureEstimateTotal += featureEstimate.estimatedReads;
+                }
+                mapEstimateTotal = inflateEstimateUntilNonNegativeRemaining(
+                    mapEstimateTotal, controllerBaseline.mapDomain.workUnitsTotal);
+                featureEstimateTotal = inflateEstimateUntilNonNegativeRemaining(
+                    featureEstimateTotal, controllerBaseline.featureDomain.workUnitsTotal);
+                pfControllerMapEstimateInitial.store(mapEstimateTotal, std::memory_order_relaxed);
+                pfControllerFeatureEstimateInitial.store(featureEstimateTotal, std::memory_order_relaxed);
+                pfControllerMapEstimateFinal.store(mapEstimateTotal, std::memory_order_relaxed);
+                pfControllerFeatureEstimateFinal.store(featureEstimateTotal, std::memory_order_relaxed);
+
+                P.inOut->logMain << "pf-dynamic-controller: start mode="
+                                 << pfPermitControllerModeName(pfControllerMode)
+                                 << ", intervalMs=" << pfControllerIntervalMs
+                                 << ", sequence=" << pfControllerSequenceLabel
+                                 << ", maxUpdates=" << pfControllerMaxUpdates
+                                 << ", mapEstimate=" << mapEstimateTotal
+                                 << ", featureEstimate=" << featureEstimateTotal
+                                 << ", libraryType=" << libraryType
+                                 << ", sample=" << sampleName
+                                 << "\n";
+
+                pfControllerThread = std::thread([&]() {
+                    size_t seqIndex = 0;
+                    uint64_t mapEstimateLoop = mapEstimateTotal;
+                    uint64_t featureEstimateLoop = featureEstimateTotal;
+                    uint64_t prevMapDone = controllerBaseline.mapDomain.workUnitsTotal;
+                    uint64_t prevFeatureDone = controllerBaseline.featureDomain.workUnitsTotal;
+                    auto prevTick = std::chrono::steady_clock::now();
+                    double mapRateEwma = 0.0;
+                    double featureRateEwma = 0.0;
+                    constexpr double kEtaAlpha = 0.30;
+                    constexpr double kEtaGapThreshold = 0.10;
+                    constexpr double kEtaRateEps = 1.0e-9;
+
+                    while (!stopPfController.load(std::memory_order_relaxed)) {
+                        int nextTarget = g_threadChunks.mapPermitSnapshot().targetPermits;
+                        if (pfControllerSequenceMode) {
+                            nextTarget = pfControllerSequence[seqIndex % pfControllerSequence.size()];
+                            ++seqIndex;
+                        } else if (pfControllerEtaMode) {
+                            const ThreadControl::MapPermitSnapshot snapshot = g_threadChunks.mapPermitSnapshot();
+                            const uint64_t mapDone = snapshot.mapDomain.workUnitsTotal;
+                            const uint64_t featureDone = snapshot.featureDomain.workUnitsTotal;
+                            mapEstimateLoop = inflateEstimateUntilNonNegativeRemaining(mapEstimateLoop, mapDone);
+                            featureEstimateLoop = inflateEstimateUntilNonNegativeRemaining(featureEstimateLoop, featureDone);
+                            pfControllerMapEstimateFinal.store(mapEstimateLoop, std::memory_order_relaxed);
+                            pfControllerFeatureEstimateFinal.store(featureEstimateLoop, std::memory_order_relaxed);
+
+                            uint64_t mapRemaining = (mapEstimateLoop > mapDone) ? (mapEstimateLoop - mapDone) : 0;
+                            uint64_t featureRemaining =
+                                (featureEstimateLoop > featureDone) ? (featureEstimateLoop - featureDone) : 0;
+
+                            const auto nowTick = std::chrono::steady_clock::now();
+                            const double dt = std::chrono::duration_cast<std::chrono::duration<double>>(nowTick - prevTick).count();
+                            if (dt > 0.0) {
+                                const double mapInstRate = (mapDone >= prevMapDone)
+                                    ? static_cast<double>(mapDone - prevMapDone) / dt
+                                    : 0.0;
+                                const double featureInstRate = (featureDone >= prevFeatureDone)
+                                    ? static_cast<double>(featureDone - prevFeatureDone) / dt
+                                    : 0.0;
+                                mapRateEwma = (mapRateEwma <= 0.0)
+                                    ? mapInstRate
+                                    : (kEtaAlpha * mapInstRate + (1.0 - kEtaAlpha) * mapRateEwma);
+                                featureRateEwma = (featureRateEwma <= 0.0)
+                                    ? featureInstRate
+                                    : (kEtaAlpha * featureInstRate + (1.0 - kEtaAlpha) * featureRateEwma);
+                            }
+                            prevTick = nowTick;
+                            prevMapDone = mapDone;
+                            prevFeatureDone = featureDone;
+
+                            double mapEta = std::numeric_limits<double>::infinity();
+                            double featureEta = std::numeric_limits<double>::infinity();
+                            if (mapRemaining == 0) {
+                                mapEta = 0.0;
+                            } else if (mapRateEwma > kEtaRateEps) {
+                                mapEta = static_cast<double>(mapRemaining) / mapRateEwma;
+                            }
+                            if (featureRemaining == 0) {
+                                featureEta = 0.0;
+                            } else if (featureRateEwma > kEtaRateEps) {
+                                featureEta = static_cast<double>(featureRemaining) / featureRateEwma;
+                            }
+
+                            nextTarget = snapshot.targetPermits;
+                            if (mapRemaining == 0 && featureRemaining > 0) {
+                                nextTarget = P.runThreadN;
+                            } else if (featureRemaining == 0 && mapRemaining > 0) {
+                                nextTarget = 1;
+                            } else if (mapRemaining > 0 && featureRemaining > 0 &&
+                                       std::isfinite(mapEta) && std::isfinite(featureEta)) {
+                                const double maxEta = std::max(mapEta, featureEta);
+                                if (maxEta > 0.0) {
+                                    const double etaGap = std::fabs(mapEta - featureEta) / maxEta;
+                                    if (etaGap > kEtaGapThreshold) {
+                                        if (featureEta > mapEta) {
+                                            nextTarget = std::min(P.runThreadN, snapshot.targetPermits + 1);
+                                        } else {
+                                            nextTarget = std::max(1, snapshot.targetPermits - 1);
+                                        }
+                                    }
+                                }
+                            } else if (featureRemaining > 0 && !std::isfinite(featureEta)) {
+                                nextTarget = std::min(P.runThreadN, snapshot.targetPermits + 1);
+                            }
+                        }
+
+                        pfControllerLastTarget.store(nextTarget, std::memory_order_relaxed);
+                        const uint64_t tick =
+                            pfControllerTicks.fetch_add(1, std::memory_order_relaxed) + 1;
+                        if (pfControllerAppliesUpdates) {
+                            g_threadChunks.mapPermitSetTargetPermits(nextTarget);
+                            pfControllerApplied.fetch_add(1, std::memory_order_relaxed);
+                        }
+                        if (pfControllerMaxUpdates > 0 &&
+                            tick >= static_cast<uint64_t>(pfControllerMaxUpdates)) {
+                            break;
+                        }
+                        std::this_thread::sleep_for(std::chrono::milliseconds(pfControllerIntervalMs));
+                    }
+                });
             }
-            string featureDir = sanitizeDirName(spec.libraryType);
-            string assignBase = outPrefix + "/cr_assign/" + featureDir;
 
-            for (const auto& lib : libs) {
-                string resolvedFastq = PfMultiConfig::resolveFastqDir(lib.fastqs, P.pfMulti.crFastqRoot, fastqMap);
-                string sampleName = lib.sample.empty() ? basenameOf(resolvedFastq) : lib.sample;
-                string assignOut = assignBase + "/" + sanitizeDirName(sampleName);
-
-                string mkAssignOutCmd = "mkdir -p \"" + assignOut + "\"";
-                if (system(mkAssignOutCmd.c_str()) != 0) {
-                    throw runtime_error("Failed to create assign output directory: " + assignOut);
+            int ret = 0;
+            try {
+                ret = PfMultiAssign::runAssignBarcodes(whitelist, refPath, resolvedFastq, assignOut, assignOpts);
+            } catch (...) {
+                stopPfController.store(true, std::memory_order_relaxed);
+                if (pfControllerThread.joinable()) {
+                    pfControllerThread.join();
                 }
-
-                string filteredRef = assignOut + "/feature_reference.filtered.csv";
-                bool filtered = filterFeatureRefCsv(featureRef, spec.featureRefType, filteredRef);
-                string refPath = filtered ? filteredRef : featureRef;
-                if (!filtered) {
-                    P.inOut->logMain << "WARNING: feature reference not filtered for " << spec.libraryType
-                                     << "; using full reference\n";
-                }
-
-                int ret = PfMultiAssign::runAssignBarcodes(whitelist, refPath, resolvedFastq, assignOut, assignOpts);
-                if (ret != 0) {
-                    throw runtime_error("Failed to process feature library: " + spec.libraryType);
-                }
-
-                FeatureRun run;
-                run.featureType = spec.featureRefType;
-                run.assignOut = assignOut;
-                run.featureRefPath = refPath;
-                featureRuns.push_back(run);
+                throw;
             }
+
+            stopPfController.store(true, std::memory_order_relaxed);
+            if (pfControllerThread.joinable()) {
+                pfControllerThread.join();
+            }
+
+            if (pfControllerEnabled) {
+                const string apiRunPath = assignOut + "/assignBarcodes.api_run.txt";
+                std::ofstream apiRunOut(apiRunPath.c_str(), std::ios::app);
+                if (apiRunOut.is_open()) {
+                    apiRunOut << "pfController.mode=" << pfPermitControllerModeName(pfControllerMode) << "\n";
+                    apiRunOut << "pfController.intervalMs=" << pfControllerIntervalMs << "\n";
+                    apiRunOut << "pfController.sequence=" << pfControllerSequenceLabel << "\n";
+                    apiRunOut << "pfController.maxUpdates=" << pfControllerMaxUpdates << "\n";
+                    apiRunOut << "pfController.ticks=" << pfControllerTicks.load(std::memory_order_relaxed) << "\n";
+                    apiRunOut << "pfController.applied=" << pfControllerApplied.load(std::memory_order_relaxed) << "\n";
+                    apiRunOut << "pfController.lastTarget=" << pfControllerLastTarget.load(std::memory_order_relaxed) << "\n";
+                    apiRunOut << "pfController.mapEstimateInitial=" << pfControllerMapEstimateInitial.load(std::memory_order_relaxed) << "\n";
+                    apiRunOut << "pfController.featureEstimateInitial=" << pfControllerFeatureEstimateInitial.load(std::memory_order_relaxed) << "\n";
+                    apiRunOut << "pfController.mapEstimateFinal=" << pfControllerMapEstimateFinal.load(std::memory_order_relaxed) << "\n";
+                    apiRunOut << "pfController.featureEstimateFinal=" << pfControllerFeatureEstimateFinal.load(std::memory_order_relaxed) << "\n";
+                    apiRunOut << "pfController.estimatePolicy=smallest_anchor_bytescale\n";
+                    apiRunOut << "pfController.estimateNegativeRemainingInflationPct=10\n";
+                    apiRunOut << "pfController.etaGapThresholdPct=10\n";
+                    apiRunOut << "pfController.mapAnchorFile=" << mapEstimate.anchorFile << "\n";
+                    apiRunOut << "pfController.mapAnchorReads=" << mapEstimate.anchorReads << "\n";
+                    apiRunOut << "pfController.mapAnchorBytes=" << mapEstimate.anchorBytes << "\n";
+                    apiRunOut << "pfController.mapTotalBytes=" << mapEstimate.totalBytes << "\n";
+                    apiRunOut << "pfController.featureAnchorFile=" << featureEstimate.anchorFile << "\n";
+                    apiRunOut << "pfController.featureAnchorReads=" << featureEstimate.anchorReads << "\n";
+                    apiRunOut << "pfController.featureAnchorBytes=" << featureEstimate.anchorBytes << "\n";
+                    apiRunOut << "pfController.featureTotalBytes=" << featureEstimate.totalBytes << "\n";
+                } else {
+                    P.inOut->logMain << "WARNING: failed to append pf controller summary to "
+                                     << apiRunPath << "\n";
+                }
+            }
+
+            if (pfControllerEnabled) {
+                P.inOut->logMain << "pf-dynamic-controller: stop mode="
+                                 << pfPermitControllerModeName(pfControllerMode)
+                                 << ", ticks=" << pfControllerTicks.load(std::memory_order_relaxed)
+                                 << ", applied=" << pfControllerApplied.load(std::memory_order_relaxed)
+                                 << ", lastTarget=" << pfControllerLastTarget.load(std::memory_order_relaxed)
+                                 << ", mapEstimateFinal=" << pfControllerMapEstimateFinal.load(std::memory_order_relaxed)
+                                 << ", featureEstimateFinal=" << pfControllerFeatureEstimateFinal.load(std::memory_order_relaxed)
+                                 << ", libraryType=" << libraryType
+                                 << ", sample=" << sampleName
+                                 << "\n";
+            }
+
+            if (ret != 0) {
+                throw runtime_error("Failed to process feature library: " + libraryType);
+            }
+
+            FeatureRun run;
+            run.featureType = featureRefType;
+            run.assignOut = assignOut;
+            run.featureRefPath = refPath;
+            featureRuns.push_back(run);
         }
 
         if (featureRuns.empty()) {
@@ -660,7 +1394,7 @@ int processPfMultiConfig(Parameters& P, const Solo* solo) {
         for (auto& run : featureRuns) {
             string realOut = findAssignOutputDir(run.assignOut);
             run.assignOut = realOut;
-            int ret = PfMultiMexStub::processAssignOutput(run.assignOut, run.featureRefPath, run.featureType, false);
+            int ret = PfMultiMexStub::processAssignOutput(run.assignOut, run.featureRefPath, run.featureType, false, whitelist);
             if (ret != 0) {
                 P.inOut->logMain << "WARNING: Failed to generate MEX stub for " << run.featureType << "\n";
             }
@@ -718,9 +1452,10 @@ int processPfMultiConfig(Parameters& P, const Solo* solo) {
         // Prefer in-memory filtered barcodes from Solo if available (avoids reading filtered MEX for barcode list)
         vector<string> filteredGexBarcodes;
         bool useFilteredGex = false;
-        if (getFilteredBarcodesFromSolo(solo, P, filteredGexBarcodes)) {
+        if (getFilteredBarcodesFromSolo(solo, P, filteredGexBarcodes, true)) {
             useFilteredGex = true;
-            P.inOut->logMain << "NOTICE: Using GEX filtered barcodes from Solo (in-memory)\n";
+            P.inOut->logMain << "NOTICE: Using GEX filtered barcodes from Solo "
+                             << "(output namespace, in-memory)\n";
         }
 
         // Read raw GEX MEX (required for raw_feature_bc_matrix)

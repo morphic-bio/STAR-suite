@@ -112,6 +112,10 @@ public:
     vector<string> soloCBwhitelist;
     vector <uint64> cbWL;    
     vector<string> cbWLstr;
+    // Output barcode strings for MEX/barcodes.tsv.
+    // For 2-column whitelist files: cbWLstr = column 1 (matching), cbWLstrOut = column 2 (output mapping).
+    // For 1-column whitelist files: cbWLstrOut == cbWLstr.
+    vector<string> cbWLstrOut;
     
     // CB Corrector instance (shared across threads)
     std::shared_ptr<class CbCorrector> cbCorrector;
