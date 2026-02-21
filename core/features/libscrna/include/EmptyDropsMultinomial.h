@@ -43,6 +43,7 @@ struct EmptyDropsParams {
     double FDR = 0.0;                // FDR threshold (for FDR-based filtering)
     double rawPvalueThreshold = 0.0; // Raw p-value threshold (default: 0.999, permissive)
     bool useFDRGate = true;          // If true, use FDR threshold; if false, use raw p-value threshold
+    bool applyBHCorrection = false;  // If true, apply Benjamini-Hochberg correction to compute pAdjusted
     uint32 simN = 0;             // Number of Monte Carlo simulations
     uint64 seed = 0;             // Random seed (default: 19760110LLU)
     uint32 lowerTestingBound = 0;  // Lower UMI bound for testing: cells with UMI <= this are excluded from testing (default: 500, R's umi.min)

@@ -281,19 +281,44 @@ void gmm_free_assignments(gmm_assignments *assignments) {
 int gmm_call_feature(const int *counts, int n_cells, int min_umi_threshold,
                      int *positive_calls, int *umi_threshold) {
     if (!counts || n_cells <= 0 || !positive_calls) return -1;
+    if (min_umi_threshold <= 0) min_umi_threshold = 1;
     
     /* Initialize outputs */
     memset(positive_calls, 0, n_cells * sizeof(int));
     if (umi_threshold) *umi_threshold = 0;
     
-    /* Check if all counts are zero */
+    /* Quick scan for trivial cases where EM adds no value. */
     int max_count = 0;
+    int nonzero_cells = 0;
+    int above_min_cells = 0;
+    int singlet_cell = -1;
+    int singlet_count = 0;
     for (int i = 0; i < n_cells; i++) {
         if (counts[i] > max_count) max_count = counts[i];
+        if (counts[i] > 0) {
+            nonzero_cells++;
+            singlet_cell = i;
+            singlet_count = counts[i];
+        }
+        if (counts[i] >= min_umi_threshold) {
+            above_min_cells++;
+        }
     }
     
     if (max_count == 0 || n_cells < 2) {
         /* No positive calls possible */
+        return 0;
+    }
+    if (above_min_cells == 0) {
+        /* All observations are below the hard UMI floor. */
+        return 0;
+    }
+    if (nonzero_cells == 1) {
+        /* Single non-zero cell: skip EM and apply hard floor directly. */
+        if (singlet_count >= min_umi_threshold && singlet_cell >= 0) {
+            positive_calls[singlet_cell] = 1;
+            if (umi_threshold) *umi_threshold = singlet_count;
+        }
         return 0;
     }
     

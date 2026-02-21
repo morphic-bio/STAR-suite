@@ -23,6 +23,34 @@
 #include <cassert>
 #include <stdexcept>
 
+namespace {
+void applyFDR(vector<EmptyDropsResult>& results, const EmptyDropsParams& params) {
+    if (params.applyBHCorrection) {
+        // Benjamini-Hochberg: sort by p-value, compute padj = p * n / rank, enforce monotonicity
+        vector<size_t> order(results.size());
+        iota(order.begin(), order.end(), 0);
+        sort(order.begin(), order.end(), [&](size_t a, size_t b) {
+            return results[a].pValue < results[b].pValue;
+        });
+        double n = (double)results.size();
+        for (size_t rank = 0; rank < order.size(); rank++) {
+            results[order[rank]].pAdjusted = min(1.0, results[order[rank]].pValue * n / (double)(rank + 1));
+        }
+        // Enforce monotonicity from the tail (padj must be non-decreasing in rank order)
+        for (size_t i = order.size() - 1; i > 0; i--) {
+            results[order[i - 1]].pAdjusted = min(results[order[i - 1]].pAdjusted, results[order[i]].pAdjusted);
+        }
+    } else {
+        for (auto& res : results) {
+            res.pAdjusted = res.pValue;
+        }
+    }
+    for (auto& res : results) {
+        res.passesFDR = (res.pAdjusted <= params.FDR);
+    }
+}
+} // anon namespace
+
 using namespace std;
 
 AmbientProfile EmptyDropsMultinomial::computeAmbientProfile(
@@ -422,12 +450,7 @@ vector<EmptyDropsResult> EmptyDropsMultinomial::computePValues(
             results[origIdx].passesRawP = (results[origIdx].pValue <= params.rawPvalueThreshold);
         }
         
-        // FDR and final processing
-        for (auto& res : results) {
-            res.pAdjusted = res.pValue;
-            res.passesFDR = (res.pAdjusted <= params.FDR);
-        }
-        
+        applyFDR(results, params);
         return results;
     }
     
@@ -440,11 +463,6 @@ vector<EmptyDropsResult> EmptyDropsMultinomial::computePValues(
         results[icand].passesFDR = false;
     }
     
-    // FDR and final processing
-    for (auto& res : results) {
-        res.pAdjusted = res.pValue;
-        res.passesFDR = (res.pAdjusted <= params.FDR);
-    }
-    
+    applyFDR(results, params);
     return results;
 }

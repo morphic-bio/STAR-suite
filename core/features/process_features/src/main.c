@@ -43,6 +43,7 @@ static void print_usage(const char *prog){
     fprintf(stderr, "  -i, --min_counts        <int>     Min reads in UMI clique for counting (default 0)\n");
     fprintf(stderr, "  -M, --min_posterior     <float>   Min posterior probability for barcode rescue (default 0.975)\n");
     fprintf(stderr, "      --max_barcode_mismatches <int> Max mismatches to rescue sequence barcode (default 3)\n");
+    fprintf(stderr, "      --legacy-cb-rescue       Use legacy order-dependent pending barcode rescue\n");
     fprintf(stderr, "      --feature_n         <int>     Max 'N' bases allowed in feature sequence (default 1)\n");
     fprintf(stderr, "      --barcode_n         <int>     Max 'N' bases allowed in sequence barcode (default 1)\n");
     fprintf(stderr, "      --max_reads         <long>    Max reads to process per FASTQ (0 = all)\n");
@@ -125,6 +126,7 @@ int main(int argc, char *argv[])
     int emptydrops_expected_cells = 0;
     int emptydrops_failure_fatal = 0;
     int emptydrops_use_fdr = 0;
+    int legacy_cb_rescue = 0;
 
     static struct option long_options[] = {
         {"whitelist", required_argument, 0, 'w'},
@@ -151,6 +153,8 @@ int main(int argc, char *argv[])
         {"forward_fastqs", required_argument, 0, 1},
         {"reverse_fastqs", required_argument, 0, 2},
         {"max_barcode_mismatches", required_argument, 0, 3},
+        {"legacy-cb-rescue", no_argument, 0, 27},
+        {"legacy_cb_rescue", no_argument, 0, 27}, /* alias */
         {"feature_n", required_argument, 0, 4},
         {"barcode_n", required_argument, 0, 5},
         {"barcode_fastq_pattern", required_argument, 0, 6},
@@ -231,6 +235,7 @@ int main(int argc, char *argv[])
             case 1: forwardFastqFilesString = strdup(optarg); break;
             case 2: reverseFastqFilesString = strdup(optarg); break;
             case 3: max_barcode_mismatches=atoi(optarg); break;    
+            case 27: legacy_cb_rescue = 1; break;
             case 4: max_feature_n=atoi(optarg); break;
             case 5: max_barcode_n=atoi(optarg); break;
             case 6: strcpy(barcode_pattern, optarg); break;
@@ -501,6 +506,7 @@ int main(int argc, char *argv[])
             args.read_buffer_lines = read_buffer_lines;
             args.average_read_length = average_read_length;
             args.min_posterior = min_posterior;
+            args.legacy_cb_rescue = legacy_cb_rescue;
             args.consumer_threads_per_set = consumer_threads_per_set;
             args.filtered_barcodes_hash = filtered_barcodes_hash;
             args.min_prediction = min_prediction;

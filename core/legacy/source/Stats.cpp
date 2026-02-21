@@ -10,6 +10,13 @@ void Stats::resetN() {//zero all counters
     trimReadsProcessed = 0; trimReadsTrimmed = 0; trimReadsTooShort = 0;
     trimBasesQualityTrimmed = 0; trimBasesAdapterTrimmed = 0;
     trimPairsProcessed = 0; trimPairsDropped = 0; trimPairsKept = 0;
+    crRescueTotal = 0; crRescueGeneVsNonGene = 0; crRescueFastPathRejected50pct = 0;
+    crRescueFastPathIntronicFallbackOff = 0;
+    crRescueExonicWinner = 0; crRescueIntronicFallback = 0;
+    crRescueMultiExonicNoRescue = 0; crRescueMultiIntronicNoRescue = 0;
+    crRescueIntronicFallbackOffNoRescue = 0; crRescueAllIntergenicNoRescue = 0;
+    crGeneFullExonicOverIntronicFiltered = 0; crGeneFullResolvedToUniqueAfterFilter = 0;
+    crGeneFullStillMultiExonic = 0; crGeneFullCrossAlignMultiGene = 0;
     splicesNsjdb=0;
     for (uint ii=0; ii<SJ_MOTIF_SIZE; ii++) {
         splicesN[ii]=0;
@@ -31,6 +38,18 @@ void Stats::addStats(Stats &S) {//add S to Stats
     trimReadsProcessed += S.trimReadsProcessed; trimReadsTrimmed += S.trimReadsTrimmed; trimReadsTooShort += S.trimReadsTooShort;
     trimBasesQualityTrimmed += S.trimBasesQualityTrimmed; trimBasesAdapterTrimmed += S.trimBasesAdapterTrimmed;
     trimPairsProcessed += S.trimPairsProcessed; trimPairsDropped += S.trimPairsDropped; trimPairsKept += S.trimPairsKept;
+    crRescueTotal += S.crRescueTotal; crRescueGeneVsNonGene += S.crRescueGeneVsNonGene;
+    crRescueFastPathRejected50pct += S.crRescueFastPathRejected50pct;
+    crRescueFastPathIntronicFallbackOff += S.crRescueFastPathIntronicFallbackOff;
+    crRescueExonicWinner += S.crRescueExonicWinner; crRescueIntronicFallback += S.crRescueIntronicFallback;
+    crRescueMultiExonicNoRescue += S.crRescueMultiExonicNoRescue;
+    crRescueMultiIntronicNoRescue += S.crRescueMultiIntronicNoRescue;
+    crRescueIntronicFallbackOffNoRescue += S.crRescueIntronicFallbackOffNoRescue;
+    crRescueAllIntergenicNoRescue += S.crRescueAllIntergenicNoRescue;
+    crGeneFullExonicOverIntronicFiltered += S.crGeneFullExonicOverIntronicFiltered;
+    crGeneFullResolvedToUniqueAfterFilter += S.crGeneFullResolvedToUniqueAfterFilter;
+    crGeneFullStillMultiExonic += S.crGeneFullStillMultiExonic;
+    crGeneFullCrossAlignMultiGene += S.crGeneFullCrossAlignMultiGene;
 
     splicesNsjdb += S.splicesNsjdb;
     for (uint ii=0; ii<SJ_MOTIF_SIZE; ii++) {
@@ -165,7 +184,32 @@ void Stats::reportFinal(ofstream &streamOut) {
                <<setw(w1)<< "% of reads unmapped: other |\t"                   << (readN>0 ? double(unmappedOther)/double(readN)*100 :0) <<'%'<<"\n" \
                <<setw(w1)<< "CHIMERIC READS:\n" \
                <<setw(w1)<< "Number of chimeric reads |\t"                     << chimericAll <<"\n" \
-               <<setw(w1)<< "% of chimeric reads |\t"                          << (readN>0 ? double(chimericAll)/double(readN)*100 :0) <<'%'<<"\n" <<flush;
+               <<setw(w1)<< "% of chimeric reads |\t"                          << (readN>0 ? double(chimericAll)/double(readN)*100 :0) <<'%'<<"\n";
+
+    if (crRescueTotal > 0) {
+        streamOut << "\n" \
+                  <<setw(w1)<< "CR-COMPAT RESCUE:\n" \
+                  <<setw(w1)<< "Multimap reads entering rescue block |\t" << crRescueTotal << "\n" \
+                  <<setw(w1)<< "Rescued by gene-vs-non-gene fast path |\t" << crRescueGeneVsNonGene << "\n" \
+                  <<setw(w1)<< "Fast-path rejected (failed 50% rule) |\t" << crRescueFastPathRejected50pct << "\n" \
+                  <<setw(w1)<< "Fast-path intronic, fallback off |\t" << crRescueFastPathIntronicFallbackOff << "\n" \
+                  <<setw(w1)<< "Rescued by exonic winner (Phase 3) |\t" << crRescueExonicWinner << "\n" \
+                  <<setw(w1)<< "Rescued by intronic fallback (Phase 3) |\t" << crRescueIntronicFallback << "\n" \
+                  <<setw(w1)<< "No rescue: multiple exonic loci |\t" << crRescueMultiExonicNoRescue << "\n" \
+                  <<setw(w1)<< "No rescue: multiple intronic loci |\t" << crRescueMultiIntronicNoRescue << "\n" \
+                  <<setw(w1)<< "No rescue: 1 intronic, fallback off |\t" << crRescueIntronicFallbackOffNoRescue << "\n" \
+                  <<setw(w1)<< "No rescue: all intergenic |\t" << crRescueAllIntergenicNoRescue << "\n";
+    }
+
+    if (crGeneFullExonicOverIntronicFiltered > 0 || crGeneFullCrossAlignMultiGene > 0) {
+        streamOut << "\n" \
+                  <<setw(w1)<< "CR-COMPAT GENEFULL EXONIC-OVER-INTRONIC:\n" \
+                  <<setw(w1)<< "Alignments with intronic-only genes dropped |\t" << crGeneFullExonicOverIntronicFiltered << "\n" \
+                  <<setw(w1)<< "Reads resolved to unique after filter |\t" << crGeneFullResolvedToUniqueAfterFilter << "\n" \
+                  <<setw(w1)<< "Reads still multi-gene (all exonic) |\t" << crGeneFullStillMultiExonic << "\n" \
+                  <<setw(w1)<< "Reads multi-gene across alignments |\t" << crGeneFullCrossAlignMultiGene << "\n";
+    }
+    streamOut << flush;
 
 };
 

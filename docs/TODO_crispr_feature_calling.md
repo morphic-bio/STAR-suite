@@ -4,10 +4,10 @@
 
 ### `--crMinUmi` Parameter Validation
 
-The new `--crMinUmi` parameter (default: 10) needs regression testing across different assay types:
+The `--crMinUmi` parameter (default: 3) needs regression testing across different assay types:
 
-- [ ] **CRISPR Guide Capture** (current default target)
-  - A375 dataset: ✓ Validated at min_umi=10 (100% CR concordance)
+- [ ] **CRISPR Guide Capture** (general default target)
+  - A375 dataset: ✓ Validated at min_umi=10 (fixture-specific override, 100% CR concordance)
   - Additional CRISPR datasets needed
 
 - [ ] **Lineage Barcodes / Stable Features**
@@ -17,7 +17,7 @@ The new `--crMinUmi` parameter (default: 10) needs regression testing across dif
   - Compare calling rates at different thresholds
 
 - [ ] **FLEX Probe Sets**
-  - Current default (10) may be appropriate
+  - Current recommendation (10) may be appropriate
   - Needs validation with FLEX datasets
   - Document recommended settings
 
@@ -25,7 +25,8 @@ The new `--crMinUmi` parameter (default: 10) needs regression testing across dif
 
 | Assay Type | Recommended `--crMinUmi` | Status |
 |------------|--------------------------|--------|
-| CRISPR Guide Capture | 10 | ✓ Validated |
+| CRISPR Guide Capture (general) | 3 | Baseline default |
+| A375 CR-parity fixture | 10 | ✓ Validated |
 | Lineage Barcodes | 2-3 | **Needs Testing** |
 | FLEX Probes | 10 (TBD) | **Needs Testing** |
 | Antibody Capture | TBD | **Needs Testing** |
@@ -40,6 +41,7 @@ The new `--crMinUmi` parameter (default: 10) needs regression testing across dif
 
 ## Notes
 
-- The `--min-umi` default in `star_feature_call` was changed from 3 to 10 for CR compatibility
-- For CR-compat mode, `--crMinUmi` defaults to 10
-- Users can override with lower values for stable features like lineage barcodes
+- The `--min-umi` default in `star_feature_call` is 3
+- In CR-compat mode, `--crMinUmi` defaults to 3
+- A375 parity workflows intentionally override to 10
+- Users can tune lower/higher values by assay characteristics

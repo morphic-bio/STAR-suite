@@ -96,6 +96,7 @@ void pf_config_set_max_hamming_distance(pf_config *config, int distance);
 void pf_config_set_stringency(pf_config *config, int stringency);
 void pf_config_set_min_counts(pf_config *config, int min_counts);
 void pf_config_set_min_posterior(pf_config *config, double min_posterior);
+void pf_config_set_legacy_cb_rescue(pf_config *config, int enable);
 void pf_config_set_feature_offset(pf_config *config, int offset);
 void pf_config_set_barcode_offset(pf_config *config, int offset);
 void pf_config_set_max_barcode_mismatches(pf_config *config, int mismatches);

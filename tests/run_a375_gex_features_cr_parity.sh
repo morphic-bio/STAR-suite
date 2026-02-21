@@ -22,6 +22,7 @@ GENOME_DIR="${CR_GENOME_DIR:-/storage/autoindex_110_44/bulk_index}"
 STAR_BIN="${STAR_BIN:-/mnt/pikachu/STAR-suite/core/legacy/source/STAR}"
 OUTPREFIX="${A375_CR_PARITY_OUTPREFIX:-/storage/A375/star_gex_features_cr_parity_$(date +%Y%m%d_%H%M%S)/}"
 THREADS="${A375_THREADS:-24}"
+A375_CR_MIN_UMI="${A375_CR_MIN_UMI:-10}"
 A375_SKIP_DOWNSAMPLE="${A375_SKIP_DOWNSAMPLE:-1}"
 # EmptyDrops backend selection: star | libscrna | libscrna-full
 A375_ED_BACKEND="${A375_ED_BACKEND:-libscrna-full}"
@@ -102,6 +103,7 @@ echo "CRISPR FASTQ dir: ${CRISPR_DIR}"
 echo "Feature ref: ${FEATURE_REF}"
 echo "Genome dir: ${GENOME_DIR}"
 echo "Whitelist: ${WHITELIST}"
+echo "CR min UMI: ${A375_CR_MIN_UMI}"
 echo ""
 
 # Create multi-config for GEX + Features
@@ -169,7 +171,8 @@ if [[ "${A375_SKIP_STAR}" -eq 0 ]]; then
     --soloCrGexFeature gene \
     --pfMultiConfig "${MULTI_CONFIG}" \
     --crFeatureRef "${FEATURE_REF}" \
-    --crWhitelist "${WHITELIST}"
+    --crWhitelist "${WHITELIST}" \
+    --crMinUmi "${A375_CR_MIN_UMI}"
 else
   echo "Skipping STAR run (A375_SKIP_STAR=1). Using existing OUTPREFIX: ${OUTPREFIX}"
   if [[ ! -f "${OUTPREFIX}Solo.out/Gene/raw/matrix.mtx" && ! -f "${OUTPREFIX}Solo.out/Gene/raw/matrix.mtx.gz" ]]; then

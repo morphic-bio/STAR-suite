@@ -71,6 +71,9 @@ void gmm_free_assignments(gmm_assignments *assignments);
  * CR9-style feature calling using GMM.
  * 
  * For a single feature:
+ * 0. Pre-EM short-circuit:
+ *    - no counts >= min_umi_threshold -> no calls
+ *    - exactly one non-zero cell -> direct call if >= min_umi_threshold
  * 1. Transform counts: x = log10(1 + counts)
  * 2. Fit 2-component GMM with tied covariance
  * 3. Positive component = component with higher mean

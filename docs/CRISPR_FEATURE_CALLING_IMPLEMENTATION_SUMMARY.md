@@ -27,7 +27,8 @@ Implemented automatic CRISPR feature calling in STAR's CR-compat mode (`--pfMult
 ### 1. Code Changes
 
 #### `core/legacy/source/star_feature_call.cpp`
-- Changed default `--min-umi` from 3 to 10 for CR compatibility
+- Kept default `--min-umi` at 3 for general use
+- A375 parity workflows explicitly pin `--min-umi 10`
 
 #### `core/legacy/source/PfMultiProcess.cpp`
 - Added `runCrisprFeatureCalling()` function
@@ -39,7 +40,7 @@ Implemented automatic CRISPR feature calling in STAR's CR-compat mode (`--pfMult
 - Added `crMinUmi` field to `pfMulti` struct
 
 #### `core/legacy/source/Parameters.cpp`
-- Added `--crMinUmi` parameter (default: 10)
+- Added `--crMinUmi` parameter (default: 3)
 
 #### `core/legacy/source/Makefile`
 - Added `libprocess_features.a` and `libscrna.a` as STAR dependencies
@@ -49,9 +50,10 @@ Implemented automatic CRISPR feature calling in STAR's CR-compat mode (`--pfMult
 
 **`--crMinUmi N`** - Minimum UMI threshold for CRISPR feature calling
 
-- Default: 10 (CR-compatible for CRISPR guides)
+- Default: 3 (general default for perturb/lineage contexts)
+- A375 CR-parity workflows: pin to 10
 - For lineage barcodes/stable features: use 2-3
-- For FLEX probes: likely 10 (needs testing)
+- For FLEX probes: assay-specific validation still required
 
 ### 3. Documentation
 
@@ -87,12 +89,13 @@ When CRISPR Guide Capture features are present:
 
 | Assay Type | Recommended `--crMinUmi` | Status |
 |------------|--------------------------|--------|
-| CRISPR Guide Capture | 10 (default) | ✓ Validated |
+| CRISPR Guide Capture | 3 (default) | ✓ Validated baseline |
+| A375 CR-parity fixture | 10 (override) | ✓ Validated |
 | Lineage Barcodes | 2-3 | **Needs Testing** |
 | FLEX Probes | 10 (TBD) | **Needs Testing** |
 | Antibody Capture | TBD | **Needs Testing** |
 
-**Important:** The default of 10 is optimized for CRISPR-style assays with variable capture efficiency and noise. For stable features like lineage barcodes, a lower threshold (2-3) captures more true signal.
+**Important:** Default `3` is the general STAR-suite setting. Use higher values only for assay-specific parity targets (for example, A375 CR guide parity at `10`).
 
 ## Pending Work
 

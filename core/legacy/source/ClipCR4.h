@@ -16,6 +16,8 @@ public:
     
     OpalSearchResult** opalResP;
    
+    bool clipPolyG = false; // when true, trim polyG tails in addition to polyA
+
     //constructor
     ClipCR4();
     void opalFillOneSeq(uint32 idb, char *seq, uint32 seqL);

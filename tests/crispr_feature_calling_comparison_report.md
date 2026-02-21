@@ -5,7 +5,7 @@
 
 ## Executive Summary
 
-STAR's CRISPR feature calling achieves **100% concordance** with Cell Ranger when using appropriate UMI thresholds. The default `--min-umi` threshold was updated from 3 to 10 to match Cell Ranger's behavior.
+STAR's CRISPR feature calling achieves **100% concordance** with Cell Ranger when using appropriate UMI thresholds. Current default remains `--min-umi 3`; this A375 parity report uses an explicit `--min-umi 10` override.
 
 ## Background
 
@@ -40,7 +40,7 @@ star_feature_call --call-only --compat-perturb \
 
 ## Results
 
-### Initial Run (--min-umi 3, old default)
+### Initial Run (--min-umi 3, current default)
 
 | Metric | Value |
 |--------|-------|
@@ -99,16 +99,12 @@ star_feature_call --call-only --compat-perturb --min-umi 10 \
 
 ## Code Change
 
-Updated default `--min-umi` from 3 to 10 in `star_feature_call`:
+This report's parity command used an explicit `--min-umi 10` override:
 
 **File:** `core/legacy/source/star_feature_call.cpp`
 
 ```cpp
-// Before
 int min_umi = 3;
-
-// After  
-int min_umi = 10;
 ```
 
 ## Feature-Level Summary
@@ -148,7 +144,7 @@ int min_umi = 10;
 
 2. **GMM thresholds match closely:** RAB1A-2 (STAR: 225, CR: 217) and Non_Target-1_MS (STAR: 33, CR: 32).
 
-3. **Default updated:** The `--min-umi` default changed from 3 to 10 to prevent spurious calls on low-abundance features that Cell Ranger would not call.
+3. **A375-specific override:** Setting `--min-umi 10` on this fixture suppresses low-abundance guide calls and matches Cell Ranger.
 
 4. **Multi-feature assignments work correctly:** Both STAR and CR identify 35 cells with 2 features (typically Non_Target-1_MS|RAB1A-2 doublets).
 
@@ -158,7 +154,7 @@ int min_umi = 10;
 
 1. Always filter MEX to the appropriate feature type before calling (CRISPR Guide Capture for CRISPR, Antibody Capture for antibodies, etc.)
 
-2. Use `--min-umi 10` (now the default) for CR-compatible calling behavior.
+2. Use `--min-umi 10` for this A375 parity fixture (explicit override).
 
 3. For datasets with expected low-UMI features, `--min-umi` can be lowered, but expect additional calls that CR would not make.
 
@@ -171,7 +167,7 @@ int min_umi = 10;
 CRISPR feature calling is now automatically integrated into CR-compat mode (`--pfMultiConfig`). When STAR processes a multi-config with CRISPR Guide Capture libraries, it will:
 
 1. After GEX EmptyDrops filtering completes, filter the merged MEX to CRISPR features only
-2. Run GMM feature calling with the configured min UMI threshold (default: 10)
+2. Run GMM feature calling with the configured min UMI threshold (default: 3 unless explicitly overridden)
 3. Write outputs to `outs/crispr_analysis/`:
    - `protospacer_calls_per_cell.csv`
    - `protospacer_calls_summary.csv`
@@ -180,7 +176,7 @@ CRISPR feature calling is now automatically integrated into CR-compat mode (`--p
 
 ### New Parameter
 
-**`--crMinUmi N`** - Minimum UMI threshold for CRISPR feature calling (default: 10)
+**`--crMinUmi N`** - Minimum UMI threshold for CRISPR feature calling (default: 3)
 
 Example:
 ```bash
@@ -193,12 +189,13 @@ This controls the GMM calling threshold - features with fewer UMIs than this val
 
 | Assay Type | Recommended `--crMinUmi` | Notes |
 |------------|--------------------------|-------|
-| **CRISPR Guide Capture** | 10 (default) | Validated for CR9 parity; guides have variable capture efficiency and noise |
+| **CRISPR Guide Capture (general)** | 3 (default) | Baseline setting |
+| **A375 CR-parity fixture** | 10 (override) | Validated for CR9 parity |
 | **Lineage Barcodes** | 2-3 | Stable features with low noise; lower threshold captures more signal |
 | **FLEX Probes** | 10 (TBD) | Needs validation; similar to CRISPR guides |
 | **Antibody Capture** | TBD | Needs validation |
 
-**Important:** The default of 10 is optimized for CRISPR-style assays where capture efficiency varies and background noise is higher. For stable features like lineage barcodes, where the barcode sequence is consistent and noise is minimal, a lower threshold (2-3) will capture more true signal without introducing false positives.
+**Important:** Default is 3 in current STAR-suite. Use assay/fixture-specific overrides (for example, A375 at 10) when parity targets require stricter filtering.
 
 See `docs/TODO_crispr_feature_calling.md` for regression testing status.
 
@@ -209,7 +206,7 @@ See `docs/TODO_crispr_feature_calling.md` for regression testing status.
 Added `runCrisprFeatureCalling()` function that:
 - Filters merged MEX to CRISPR Guide Capture features
 - Writes temporary CRISPR-only MEX
-- Calls `cf_process_mex_dir_gmm()` with min_umi=10
+- Calls `cf_process_mex_dir_gmm()` with configured `min_umi`
 - Cleans up temporary files
 
 **File:** `core/legacy/source/Makefile`

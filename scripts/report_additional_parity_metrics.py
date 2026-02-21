@@ -23,6 +23,28 @@ def open_maybe_gz(path: Path):
     return open(path, "r", encoding="utf-8")
 
 
+def load_translation_domains(translation_path: Path) -> Tuple[set, set]:
+    """
+    Load barcode translation pairs as (left_domain, right_domain).
+    Supports whitespace- or comma-separated two-column files.
+    """
+    left = set()
+    right = set()
+    with open_maybe_gz(translation_path) as handle:
+        for raw in handle:
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            parts = line.split()
+            if len(parts) < 2 and "," in line:
+                parts = [p.strip() for p in line.split(",")]
+            if len(parts) < 2:
+                continue
+            left.add(parts[0])
+            right.add(parts[1])
+    return left, right
+
+
 def detect_mixed_pf_libraries(star_run: Path) -> Tuple[bool, List[str]]:
     """
     Best-effort parse of pf_multi_config.csv [libraries] section.
@@ -362,11 +384,15 @@ def summarize_gene_corr(
         right_meta, common_barcode_set, cfm
     )
 
+    xs_all: List[float] = []
+    ys_all: List[float] = []
     xs: List[float] = []
     ys: List[float] = []
     for gene_id in common_genes:
         left_sum = left_totals.get(gene_id, 0)
         right_sum = right_totals.get(gene_id, 0)
+        xs_all.append(left_sum)
+        ys_all.append(right_sum)
         left_cell_n = left_cells.get(gene_id, 0)
         right_cell_n = right_cells.get(gene_id, 0)
         if (
@@ -385,11 +411,16 @@ def summarize_gene_corr(
         f"  min_counts_per_gene: {min_counts}",
         f"  min_cells_per_gene_pct: {min_cells_pct}",
         f"  min_cells_per_gene_abs: {min_cells_abs}",
+        f"  pearson_all_genes: {fmt_float(pearson(xs_all, ys_all)) if len(xs_all) > 1 else 'NA'}",
+        f"  spearman_all_genes: {fmt_float(spearman(xs_all, ys_all)) if len(xs_all) > 1 else 'NA'}",
         f"  filtered_genes: {len(xs)}",
     ]
     if len(xs) > 1:
         lines.extend(
             [
+                f"  pearson_filtered_genes: {fmt_float(pearson(xs, ys))}",
+                f"  spearman_filtered_genes: {fmt_float(spearman(xs, ys))}",
+                # Backward-compatible aliases used by existing parsing scripts.
                 f"  pearson: {fmt_float(pearson(xs, ys))}",
                 f"  spearman: {fmt_float(spearman(xs, ys))}",
                 f"  left_sum_on_filtered_genes: {fmt_num(sum(xs))}",
@@ -399,6 +430,8 @@ def summarize_gene_corr(
     else:
         lines.extend(
             [
+                "  pearson_filtered_genes: NA",
+                "  spearman_filtered_genes: NA",
                 "  pearson: NA",
                 "  spearman: NA",
                 f"  left_sum_on_filtered_genes: {fmt_num(sum(xs))}",
@@ -585,6 +618,18 @@ def main():
     if translation_path is not None and not translation_path.exists():
         raise SystemExit(f"Missing translation file: {translation_path}")
 
+    translate_enabled = translation_path is not None and args.translate != "none"
+    source_domain = set()
+    target_domain = set()
+    cr_raw_keys_pre = set(cr_raw_counts.keys())
+    star_raw_keys_pre = set(star_raw_counts.keys())
+    if translate_enabled:
+        left_domain, right_domain = load_translation_domains(translation_path)
+        if args.translation_direction == "left-to-right":
+            source_domain, target_domain = left_domain, right_domain
+        else:
+            source_domain, target_domain = right_domain, left_domain
+
     if translation_path is not None and args.translate != "none":
         if args.translate in ("cr", "both"):
             cr_raw_counts = maybe_translate_counts(
@@ -609,6 +654,43 @@ def main():
 
     cr_raw_on_filter = {bc: c for bc, c in cr_raw_counts.items() if bc in filter_set}
     star_raw_on_filter = {bc: c for bc, c in star_raw_counts.items() if bc in filter_set}
+
+    print("=" * 70)
+    print("Parity Metrics Configuration")
+    print("=" * 70)
+    print(f"cr_run: {cr_run}")
+    print(f"star_run: {star_run}")
+    print(f"cr_filtered_barcodes: {cr_filtered_barcodes}")
+    print(f"keep_suffix: {args.keep_suffix}")
+    print(f"translate_enabled: {translate_enabled}")
+    if translation_path is not None:
+        print(f"translation_file: {translation_path}")
+        print(f"translation_direction: {args.translation_direction}")
+        print(f"translate_side: {args.translate}")
+    else:
+        print("translation_file: none")
+        print("translation_direction: none")
+        print("translate_side: none")
+    if translate_enabled:
+        cr_in_source = len(cr_raw_keys_pre & source_domain)
+        cr_in_target = len(cr_raw_keys_pre & target_domain)
+        star_in_source = len(star_raw_keys_pre & source_domain)
+        star_in_target = len(star_raw_keys_pre & target_domain)
+        cr_in_both = len(cr_raw_keys_pre & source_domain & target_domain)
+        star_in_both = len(star_raw_keys_pre & source_domain & target_domain)
+        print(f"translation_observed_raw_cr_in_source_domain: {cr_in_source}")
+        print(f"translation_observed_raw_cr_in_target_domain: {cr_in_target}")
+        print(f"translation_observed_raw_star_in_source_domain: {star_in_source}")
+        print(f"translation_observed_raw_star_in_target_domain: {star_in_target}")
+        print(f"translation_observed_raw_cr_in_both_domains: {cr_in_both}")
+        print(f"translation_observed_raw_star_in_both_domains: {star_in_both}")
+        if args.translate in ("cr", "star") and (cr_in_both > 0 or star_in_both > 0):
+            print(
+                "translation_warning: source/target domains overlap observed barcodes; "
+                "single-side translation can shift overlap/correlation metrics. "
+                "Prefer --translate both (or none) for stable comparisons."
+            )
+    print()
 
     print("=" * 70)
     print("GEX Correlations (Per-Barcode UMI Totals)")
@@ -776,6 +858,16 @@ def main():
     print("=" * 70)
     print("Feature-Call Parity (protospacer_calls_per_cell.csv)")
     print("=" * 70)
+    if len(star_calls) == 0:
+        print(
+            "warning: STAR protospacer_calls_per_cell.csv has no data rows; "
+            "call-parity statistics are not informative."
+        )
+    if len(cr_calls) == 0:
+        print(
+            "warning: CR protospacer_calls_per_cell.csv has no data rows; "
+            "call-parity statistics are not informative."
+        )
     print(f"rows_cr: {len(cr_calls)}")
     print(f"rows_star: {len(star_calls)}")
     print(f"rows_star_non_none: {star_non_none_rows}")

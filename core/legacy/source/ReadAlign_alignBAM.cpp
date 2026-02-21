@@ -282,6 +282,9 @@ int ReadAlign::alignBAM(Transcript const &trOut, uint nTrOut, uint iTrOut, uint 
             } else if (nTrOut==2) {
                 MAPQ=3;
             };
+            if (crMultiMapRescued_ && nTrOut == 1) {
+                MAPQ = 255;
+            }
 
             //attribute string
             uint tagNM=(uint) -1;
@@ -499,6 +502,9 @@ int ReadAlign::alignBAM(Transcript const &trOut, uint nTrOut, uint iTrOut, uint 
                         exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
                 };
             };
+            if (crMultiMapRescued_ && nTrOut == 1) {
+                attrN += bamAttrArrayWrite((int32) 1, "mm", attrOutArray+attrN);
+            }
         };
 
         if (P.readFilesTypeN==10 && !P.readFiles.samAttrKeepNone) {

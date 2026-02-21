@@ -225,6 +225,7 @@ typedef struct sample_args {
     int feature_constant_offset;
     int parallel_by_file;
     double min_posterior;
+    int legacy_cb_rescue;            /* 1 = use legacy order-dependent pending rescue */
     int consumer_threads_per_set;
     uint64_t (*permit_acquire_hook)(void *hook_ctx);
     void (*permit_release_hook)(void *hook_ctx, uint64_t wait_ns, uint64_t work_units, uint64_t work_bytes, uint64_t work_ns);

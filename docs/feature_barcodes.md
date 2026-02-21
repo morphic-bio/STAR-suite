@@ -122,21 +122,25 @@ When running STAR with `--pfMultiConfig` and CRISPR Guide Capture features, STAR
 
 ### Parameter: `--crMinUmi N`
 
-**Default:** 10 (CR-compatible for CRISPR guides)
+**Default:** 3 (general STAR-suite default)
 
 Controls the minimum UMI threshold for feature calling. Adjust based on assay type:
 
 | Assay Type | Recommended Value | Rationale |
 |------------|-------------------|-----------|
-| **CRISPR Guide Capture** | 10 (default) | Guides have variable capture efficiency and noise |
+| **CRISPR Guide Capture (general)** | 3 (default) | Baseline setting across perturb/lineage contexts |
+| **A375 CR-parity fixture** | 10 (override) | Fixture-specific parity target |
 | **Lineage Barcodes** | 2-3 | Stable features with minimal noise - lower threshold captures more signal |
 | **FLEX Probes** | 10 | Similar characteristics to CRISPR guides |
 
 ### Example
 
 ```bash
-# CRISPR Guide Capture (default)
+# CRISPR Guide Capture (general default)
 STAR ... --pfMultiConfig config.csv
+
+# A375 CR-parity fixture (explicit override)
+STAR ... --pfMultiConfig config.csv --crMinUmi 10
 
 # Lineage Barcodes (lower threshold)
 STAR ... --pfMultiConfig config.csv --crMinUmi 3

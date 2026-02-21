@@ -23,6 +23,7 @@ struct AssignOptions {
     int searchThreads = -1;
     double minPosterior = -1.0;
     long long maxReads = -1; // <=0 means unlimited
+    bool legacyCbRescue = false;
     bool enableStarDynamicPermitHooks = false;
     string filteredBarcodesPath;
 };

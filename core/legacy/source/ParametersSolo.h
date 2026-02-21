@@ -243,6 +243,17 @@ public:
     string crGexFeatureStr = "auto"; // auto|gene|genefull
     enum CrGexFeature : int32 { CrGexAuto=0, CrGexGene=1, CrGexGeneFull=2 } crGexFeature = CrGexAuto;
 
+    // CR-compatible transcriptomic multimap rescue
+    string crMultimapRescueStr = "no"; // yes|no
+    bool crMultimapRescue = false;
+    string crMultimapRescueIntronicStr = "auto"; // auto|yes|no
+    enum CrMultimapRescueIntronicMode : int32 {
+        CrMultimapRescueIntronicAuto=0,
+        CrMultimapRescueIntronicNo=1,
+        CrMultimapRescueIntronicYes=2
+    } crMultimapRescueIntronicMode = CrMultimapRescueIntronicAuto;
+    bool crMultimapRescueIntronic = false;
+
     // Probe list and sample detection resources
     string probeListPath;             // path to probe_list.txt
     string removeDeprecatedStr;      // --removeDeprecated Yes/No (remove deprecated entries from probe lists)

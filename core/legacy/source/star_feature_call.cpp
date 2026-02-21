@@ -55,7 +55,7 @@ struct Config {
     int search_threads = 4;
     
     // GMM calling params
-    int min_umi = 10;
+    int min_umi = 3;
     
     // Ratio test params (for non-GMM mode)
     int min_counts = 2;
@@ -131,7 +131,7 @@ static void print_usage(const char *prog) {
     fprintf(stderr, "\n");
     fprintf(stderr, "\n");
     fprintf(stderr, "  GMM calling parameters:\n");
-    fprintf(stderr, "    --min-umi N             Minimum UMI threshold (default: 10)\n");
+    fprintf(stderr, "    --min-umi N             Minimum UMI threshold (default: 3)\n");
     fprintf(stderr, "\n");
     fprintf(stderr, "  Ratio test parameters:\n");
     fprintf(stderr, "    --min-counts N          Minimum counts threshold (default: 2)\n");

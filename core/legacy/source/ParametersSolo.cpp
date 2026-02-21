@@ -192,6 +192,49 @@ void ParametersSolo::initialize(Parameters *pPin)
             exitWithError(errOut.str(), std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
         }
     }
+
+    //////////////////////////////////////////////////////////////////////////////////////////////////////
+    ///////////////////////////////--soloCrMultimapRescue
+    {
+        string mode = crMultimapRescueStr;
+        transform(mode.begin(), mode.end(), mode.begin(), ::tolower);
+        if (mode == "yes") {
+            crMultimapRescue = true;
+        } else if (mode == "no" || mode.empty()) {
+            crMultimapRescue = false;
+        } else {
+            ostringstream errOut;
+            errOut << "EXITING because of fatal PARAMETERS error: unrecognized option in --soloCrMultimapRescue=" << crMultimapRescueStr << "\n";
+            errOut << "SOLUTION: use allowed option: yes OR no\n";
+            exitWithError(errOut.str(), std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
+        }
+    }
+
+    //////////////////////////////////////////////////////////////////////////////////////////////////////
+    ///////////////////////////////--soloCrMultimapRescueIntronic
+    {
+        string mode = crMultimapRescueIntronicStr;
+        transform(mode.begin(), mode.end(), mode.begin(), ::tolower);
+        if (mode == "auto" || mode.empty()) {
+            crMultimapRescueIntronicMode = CrMultimapRescueIntronicAuto;
+            // Auto mode mirrors CR-compat defaults: intronic fallback is on for GeneFull GEX.
+            crMultimapRescueIntronic = (crGexFeature == CrGexGeneFull);
+        } else if (mode == "yes") {
+            crMultimapRescueIntronicMode = CrMultimapRescueIntronicYes;
+            crMultimapRescueIntronic = true;
+        } else if (mode == "no") {
+            crMultimapRescueIntronicMode = CrMultimapRescueIntronicNo;
+            crMultimapRescueIntronic = false;
+        } else {
+            ostringstream errOut;
+            errOut << "EXITING because of fatal PARAMETERS error: unrecognized option in --soloCrMultimapRescueIntronic=" << crMultimapRescueIntronicStr << "\n";
+            errOut << "SOLUTION: use allowed option: auto OR yes OR no\n";
+            exitWithError(errOut.str(), std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
+        }
+        if (!crMultimapRescue) {
+            crMultimapRescueIntronic = false;
+        }
+    }
     
     //////////////////////////////////////////////////////////////////////////////////////////////////////
     /////////////////////////////// Parse removeDeprecated flag (for probe list filtering)

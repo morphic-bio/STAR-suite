@@ -31,6 +31,7 @@ struct pf_config {
     int stringency;
     int min_counts;
     double min_posterior;
+    int legacy_cb_rescue;
     int feature_offset;
     int feature_offset_explicit;  /* 1 if user called pf_config_set_feature_offset() */
     int barcode_offset;
@@ -89,6 +90,7 @@ pf_config* pf_config_create(void) {
     config->stringency = 1;
     config->min_counts = 1;
     config->min_posterior = 0.975;
+    config->legacy_cb_rescue = 0;
     config->feature_offset = 0;
     config->feature_offset_explicit = 0;
     config->barcode_offset = 0;
@@ -157,6 +159,10 @@ void pf_config_set_min_counts(pf_config *config, int min_counts) {
 
 void pf_config_set_min_posterior(pf_config *config, double min_posterior) {
     if (config) config->min_posterior = min_posterior;
+}
+
+void pf_config_set_legacy_cb_rescue(pf_config *config, int enable) {
+    if (config) config->legacy_cb_rescue = enable;
 }
 
 void pf_config_set_feature_offset(pf_config *config, int offset) {
@@ -674,6 +680,7 @@ pf_error pf_process_fastq_dir(pf_context *ctx,
         args.read_buffer_lines = READ_BUFFER_LINES;
         args.average_read_length = AVERAGE_READ_LENGTH;
         args.min_posterior = ctx->config->min_posterior;
+        args.legacy_cb_rescue = ctx->config->legacy_cb_rescue;
         args.consumer_threads_per_set = ctx->config->consumer_threads;
         args.permit_acquire_hook = ctx->config->permit_acquire_cb;
         args.permit_release_hook = ctx->config->permit_release_cb;
@@ -904,6 +911,7 @@ pf_error pf_process_fastqs(pf_context *ctx,
     args.read_buffer_lines = READ_BUFFER_LINES;
     args.average_read_length = AVERAGE_READ_LENGTH;
     args.min_posterior = ctx->config->min_posterior;
+    args.legacy_cb_rescue = ctx->config->legacy_cb_rescue;
     args.consumer_threads_per_set = ctx->config->consumer_threads;
     args.permit_acquire_hook = ctx->config->permit_acquire_cb;
     args.permit_release_hook = ctx->config->permit_release_cb;

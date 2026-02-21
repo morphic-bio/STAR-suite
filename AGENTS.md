@@ -96,6 +96,22 @@ actionable; link to deeper docs rather than copying them.
 - `--soloCrGexFeature` controls which GEX MEX is merged in CR-compat mode.
 - CB/UB tags are independent (CB can be present without UB and vice versa).
 
+### Poly-G Trimming
+
+- `--clip3pPolyG yes|no|auto` (default `auto`) trims NovaSeq/NextSeq poly-G
+  artifacts in CellRanger4 mode. Without this, poly-G reads inflate LINC00486
+  and destroy gene-level Pearson correlation.
+- Summary: `docs/HANDOFF_UCSF_FULL_GENE_PEARSON_ANOMALY_20260220.md`.
+
+### OrdMag Cell Calling (Bootstrap)
+
+- Non-Flex libscrna path uses CR9-style bootstrapped `recovered_cells`
+  estimation (100 samples) instead of hardcoded `nExpectedCells=3000`.
+- Flex path keeps fixed `nExpectedCells=3000` (CR 7.1 defaults).
+- EmptyDrops MC simulations: 100K for non-Flex, 10K for Flex.
+- BH FDR correction enabled for non-Flex; raw p-value for Flex.
+- Validated: UCSF iPSC2 full sample Jaccard 0.99, gene Pearson 0.997.
+
 ## MCP Server (Agent Tooling)
 
 An MCP server is available for automated agent workflows:

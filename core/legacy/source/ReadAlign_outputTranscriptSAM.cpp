@@ -218,6 +218,9 @@ uint ReadAlign::outputTranscriptSAM(Transcript const &trOut, uint nTrOut, uint i
         } else if (nTrOut==2) {
             MAPQ=3;
         };
+        if (crMultiMapRescued_ && nTrOut == 1) {
+            MAPQ = 255;
+        }
 
         *outStream << readName+1 <<"\t"<< ((samFLAG & P.outSAMflagAND) | P.outSAMflagOR) <<"\t"<< genOut.chrName[trOut.Chr] <<"\t"<< trOut.exons[iEx1][EX_G] + 1 - genOut.chrStart[trOut.Chr]
                 <<"\t"<< MAPQ <<"\t"<< CIGAR;
@@ -352,6 +355,10 @@ uint ReadAlign::outputTranscriptSAM(Transcript const &trOut, uint nTrOut, uint i
                     exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
             };
         };
+
+        if (crMultiMapRescued_ && nTrOut == 1) {
+            *outStream << "\tmm:i:1";
+        }
 
         if (P.readFilesTypeN==10 && !readNameExtra[imate].empty()) {//SAM files as input - output extra attributes
              *outStream << "\t" << readNameExtra.at(imate);

@@ -48,6 +48,10 @@ typedef struct {
     
     // Gating mode
     int use_fdr_gate;                // If true, use FDR threshold; if false (default), use raw p-value
+    int apply_bh_correction;         // If true, apply Benjamini-Hochberg correction to p-values for passesFDR
+    
+    // OrdMag bootstrap (Cell Ranger 9 style)
+    int use_bootstrap;               // If true, bootstrap-estimate recovered_cells instead of fixed n_expected_cells
     
 } scrna_ed_config;
 

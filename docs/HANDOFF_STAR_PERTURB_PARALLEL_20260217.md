@@ -206,3 +206,55 @@ This is useful downstream context, but not blocking for permit scheduler impleme
 4. Provide validation note showing no output diffs with feature flag off.
 
 Then follow with feature-side gating and the rebalancer.
+
+## UCSF Parity Debug Status (2026-02-18, unresolved)
+Context:
+- Requested target: reproduce prior UCSF call parity where calls are identical
+  except one outlier (`--min-umi 3`: `5766/5767` set-equivalent).
+- This target is documented in:
+  `comparisons/ucsf_ipsc2_callonly_gmm_parity_20260217/RESULTS.md`.
+- Additional GEX parity goal for recovery automation:
+  Pearson `>= 0.93`, Spearman `>= 0.94` on normalized/common barcodes.
+
+What was run (ad hoc path, not accepted as gate):
+1. `scripts/run_gex_feature_parity_checks.sh` against:
+   - STAR:
+     `/storage/ucsf-2M/star_runs/star_baseline_iPSC2_1_AALG2_1M_nxt_20260217_160217`
+   - CR:
+     `/storage/ucsf-2M/cellranger_runs/cr_baseline_iPSC2_1_AALG2_1M_crstar_sameidx_20260217_200813`
+2. Translation mode tested with CR-side mapping
+   (`--translate-side cr --translation-direction left-to-right`).
+3. Artifacts:
+   - `/tmp/ucsf2m_oldscripts_try_20260218_222834/PARITY_GEX_FEATURES_RAW_AND_CR_FILTERED.txt`
+   - `/tmp/ucsf2m_oldscripts_try_20260218_222834/FILTERED_BARCODE_SET_OVERLAP.txt`
+4. Same run repeated against CR run `...064209`:
+   - `/tmp/ucsf2m_oldscripts_try_064209_20260218_222907/PARITY_GEX_FEATURES_RAW_AND_CR_FILTERED.txt`
+
+Observed outcome from ad hoc path:
+- Feature-call parity on common rows remained `831/937` (`88.6873%`), not the
+  expected one-outlier behavior.
+- This confirms the current mixed GEX+feature parity harness is not the right
+  gate for the requested call-only parity target.
+
+Action taken:
+1. Added dedicated recovery runbook:
+   `docs/UCSF_PARITY_RECOVERY_RUNBOOK_20260218.md`
+2. Runbook defines:
+   - locked inputs
+   - clean-build requirement
+   - script plan for a canonical parity wrapper
+   - explicit pass/fail thresholds aligned to prior known-good results
+   - explicit GEX parity goals (`>=0.93` Pearson, `>=0.94` Spearman)
+3. Next agent should implement:
+   `scripts/run_ucsf_call_parity_recovery.sh`
+   by wrapping (not replacing):
+   `comparisons/ucsf_ipsc2_callonly_gmm_parity_20260217/run_callonly_gmm_parity.sh`
+
+## Related Follow-Up (2026-02-19)
+For UCSF/A375 parity continuation specifically focused on Cell Ranger multimap
+compatibility policy, use:
+
+- `docs/HANDOFF_CR_COMPAT_MULTIMAP_POLICY_20260219.md`
+
+That handoff tracks the updated analysis scripts, matrix-selection controls,
+and the proposed compatibility-mode implementation plan (default OFF).

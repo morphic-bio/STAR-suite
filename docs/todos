@@ -20,10 +20,25 @@
 - Core compatibility fixes for perturb mode (post-`noBCfix`):
   - [DONE] Whitelist namespace support: handle 2-column NXT/TRU translation lists and keep correction/output namespaces consistent (`crChemistry`, `crOutputChemistry`).
   - [DONE] Barcode/chemistry auto-detection hardening with deterministic explicit-override precedence.
+  - [TODO] Add end-to-end NXT/TRU namespace conversion guardrails in CR-compat mode:
+    - Auto-detect when FASTQ/read-space barcodes are NXT but output/call-space is TRU (or vice versa), and apply conversion consistently across filtering/calling/output.
+    - Add temporary user override flag `--convertNXT-TRU` with file/library scoping (e.g., apply only to selected inputs/outputs), not a single run-global switch.
+    - Keep existing `crChemistry` / `crOutputChemistry` as global defaults; scoped overrides should take precedence for targeted files/libraries.
+    - Ensure behavior is explicit in logs so users can confirm when conversion is applied.
   - [DONE] Small-set cell calling parity wiring: explicit ORDMAG/simple EmptyDrops mode (`--soloEmptyDropsMode auto|simple|union`).
   - [DONE] Prevent feature-to-GEX leakage: route GEX quant to GEX libraries only in pf-multi mode.
   - [DONE] Add regression gate runs: A375 + UCSF 2M checks (artifacts under `/storage/A375/...` and `/storage/ucsf-2M/...`).
   - [TODO] Add dedicated automated tests that explicitly validate 2-column mapping edge-cases and chemistry precedence matrix.
+- EmptyDrops / OrdMag cell calling parity:
+  - [DONE] libscrna non-Flex path: lowered `umiMin` from 500 to 100 so EmptyDrops can rescue cells below the OrdMag knee.
+  - [DONE] libscrna non-Flex path: enabled Benjamini-Hochberg FDR correction (`applyBHCorrection=true`) matching the legacy EmptyDrops_CR implementation.
+  - [DONE] libscrna non-Flex path: bootstrap OrdMag knee estimation (CR9 style) instead of fixed `nExpectedCells=3000`. Estimates `recovered_cells` via 100 bootstrap samples, matching `filter_cellular_barcodes_ordmag()`. MC simulations bumped to 100K (CR9 `NUM_SIMS`).
+  - [DONE] Validated on UCSF iPSC2 full sample: cell gap 716→39, Jaccard 0.99, gene Pearson 0.997, cell Pearson 0.999.
+  - Flex path unchanged: `nExpectedCells=3000`, `umiMin=500`, raw p-value gating, no BH, no bootstrap — these are the Flex/CR7.1-derived defaults; keep until CR Flex cell-calling parity is investigated.
+  - [TODO] Investigate whether `indMin=45000` / `indMax=90000` ambient window sizing is appropriate for all dataset sizes (currently no rescue possible if nCB < 45000).
+- Poly-G trimming auto-detection:
+  - [DONE] `--clip3pPolyG yes|no|auto` parameter and poly-G trimming gated in `ClipCR4::polyTail3p`.
+  - [TODO] Implement data-driven `auto` mode: count poly-G fraction in first N reads (during existing chunk processing) and set the flag if prevalence exceeds threshold. Currently `auto` = `yes` when `--clipAdapterType CellRanger4`.
 - Input decompression path:
   - [DONE] Add native internal zlib FASTQ fast-path when `--readFilesCommand -` and inputs are `.gz`.
     - Added `--readFilesLegacyZcat Yes|No` (default `No`) to force legacy external `zcat` helper mode.

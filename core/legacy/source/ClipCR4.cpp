@@ -80,30 +80,38 @@ void ClipCR4::opalAlign(uint8_t *query, uint32 queryLen, int dbN1)
 };
 
 uint32 ClipCR4::polyTail3p(char *seq, uint32 seqLen)
-{//clip polyA tail
-    //hardcoded for CR4 trimming
+{//clip polyA tail, and optionally polyG tail (gated by clipPolyG flag)
     if (seqLen<20)
         return 0; //do not trim reads that are too short
 
-    uint32_t ib1=seqLen-1;
-    int32_t score=0, score1=0;
-    for (uint32_t ib=1; ib<=seqLen; ib++) {
-        if ( seq[seqLen-ib] == 0 ) {//A-tail
-            score += 1; //+1 for matches
-            if (score*10 >= (int)ib*7) {//score>=0.7*clipL
-                ib1 = ib;
-                score1 = score;
+    uint32 maxClip = 0;
+    const int nBases = clipPolyG ? 2 : 1;
+    const char bases[2] = {0, 2}; // A=0, G=2
+
+    for (int bi = 0; bi < nBases; bi++) {
+        const char base = bases[bi];
+        uint32_t ib1=seqLen-1;
+        int32_t score=0, score1=0;
+        for (uint32_t ib=1; ib<=seqLen; ib++) {
+            if ( seq[seqLen-ib] == base ) {
+                score += 1; //+1 for matches
+                if (score*10 >= (int)ib*7) {//score>=0.7*clipL
+                    ib1 = ib;
+                    score1 = score;
+                };
+            } else {
+                score -= 2; //-2 for mismatches
+                if ( ib-score > 27 )
+                    break; //score drop is too big
             };
-        } else {
-            score -= 2; //-2 for mismatches
-            if ( ib-score > 27 ) 
-                break; //score drop is too big
         };
+        if ( score1<20 )
+            ib1=0; //score is too small
+        if (ib1 > maxClip)
+            maxClip = ib1;
     };
-    if ( score1<20 )
-        ib1=0; //score is too small
-        
-    return ib1;
+
+    return maxClip;
 };
 
 

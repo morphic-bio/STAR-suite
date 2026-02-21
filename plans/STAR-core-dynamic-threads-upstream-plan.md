@@ -32,6 +32,50 @@ Iteration runbook: `plans/dynamic_scheduler_runbook.md`
    Artifact: `/tmp/pf_preload_smoke_20260218_190530_696476/Log.out`
    (`pf-preload: consumed async preparation (sec=6.92337, featureLibraries=1)`).
 
+## UCSF Timing Update (2026-02-18, CR9 32-core rerun)
+Dataset/scope:
+1. UCSF iPSC2_1_AALG2 comparison slice used in the existing STAR dynamic
+   benchmark (`/storage/ucsf-2M/...` inputs).
+2. CR9 reference rerun kept the same sample/feature/transcriptome inputs and
+   changed scheduler resources to `--localcores 32`.
+3. Consolidated report:
+   `comparisons/ucsf_dynamic_threads_vs_cr9_20260218/RESULTS.md`
+
+Timing summary:
+
+| Tool/Mode | Threads | Wall time | Peak RSS | Artifact |
+|---|---:|---:|---:|---|
+| STAR `dynamic_on` | 32 | `1:56.30` | `42,077,388 KB` | `/storage/ucsf-2M/star_runs/compare_pfopt_dynamic_vs_baseline_20260218_192106/PARITY_REPORT.txt` |
+| STAR `dynamic_off` | 32 | `1:56.30` | `42,076,712 KB` | `/storage/ucsf-2M/star_runs/compare_pfopt_dynamic_vs_baseline_20260218_192106/PARITY_REPORT.txt` |
+| Cell Ranger 9 (`crstar_sameidx`, prior) | 16 | `real 118.07s` | `13.616 GB` | `/storage/ucsf-2M/cellranger_runs/cr_baseline_iPSC2_1_AALG2_1M_crstar_sameidx_20260217_200813.log` |
+| Cell Ranger 9 (`crstar_sameidx`, rerun) | 32 | `1:57.83` (`117.83s`) | `13.618 GB` | `/storage/ucsf-2M/cellranger_runs/cr_baseline_iPSC2_1_AALG2_1M_crstar_sameidx_20260218_32c.log` |
+
+CR9 16-core vs 32-core reproducibility check:
+1. CRISPR call outputs are byte-identical:
+   `protospacer_calls_per_cell.csv`, `protospacer_calls_summary.csv`,
+   `protospacer_umi_thresholds.csv`, `protospacer_umi_thresholds.json`.
+2. Filtered MEX gzip files have different compressed MD5 values but identical
+   decompressed contents (gzip header/metadata variance only).
+
+32-core CR9 run provenance:
+1. Run id:
+   `cr_baseline_iPSC2_1_AALG2_1M_crstar_sameidx_20260218_32c`
+2. Resources:
+   `--localcores 32 --localmem 128`
+3. Martian fork walltime:
+   `116.712882166s` from
+   `/storage/ucsf-2M/cellranger_runs/cr_baseline_iPSC2_1_AALG2_1M_crstar_sameidx_20260218_32c/_perf`
+4. Repro command:
+   ```bash
+   /usr/bin/time -v cellranger count \
+     --id cr_baseline_iPSC2_1_AALG2_1M_crstar_sameidx_20260218_32c \
+     --transcriptome /storage/autoindex_110_44/refdata-gex-GRCh38-autoindex11044-crstar \
+     --libraries /storage/ucsf-2M/cellranger_runs/cr_baseline_iPSC2_1_AALG2_1M_crstar_sameidx_20260218_32c_libraries.csv \
+     --feature-ref /mnt/pikachu/ucsf-perturb-seq/cellranger_feature_ref_hCRISPRa_v2_like_AALG2_pattern.csv \
+     --include-introns true --min-crispr-umi 3 --create-bam false \
+     --localcores 32 --localmem 128 --disable-ui
+   ```
+
 ## Objective
 Build a dynamic threading controller in STAR core that can be reused by other
 modules now, then evolve into a producer/consumer execution model later.
@@ -157,6 +201,52 @@ modules now, then evolve into a producer/consumer execution model later.
 6. Exit criteria:
    no oscillatory behavior and no sustained starvation in stress tests.
 
+## Stage 4a: Phase-Aware Permit Handoff + Expandable PF Pools
+Goal:
+1. Increase available worker capacity, then throttle with permits so map and PF
+   can overlap and finish at similar times.
+2. After alignment completes, shift almost all permits to PF for tail collapse.
+
+Implementation slices:
+1. PF worker model update:
+   split PF from fixed-size workers to max-size workers + permit-gated active
+   work. Keep one global permit budget across map and PF.
+2. Programmatic phase machine:
+   `INIT_PRELOAD`, `ALIGN_ACTIVE`, `SOLO_POST_ALIGN`, `PF_ONLY`.
+3. Deterministic transition hooks:
+   transition on explicit STAR markers (`started mapping`, `finished mapping`,
+   Solo finalize boundaries), not only periodic heuristics.
+4. Target allocation policy:
+   - `INIT_PRELOAD`: map low floor, PF gets remainder for preload/read-side prep.
+   - `ALIGN_ACTIVE`: ETA-based balancing with bounded retune step.
+   - `SOLO_POST_ALIGN`: keep small map reserve (2-4), hand remainder to PF.
+   - `PF_ONLY`: map 0 (or reserve 1 if required), PF gets all remaining permits.
+5. Stability controls:
+   hysteresis threshold (10-15%), cooldown window, min floors, and starvation
+   guards.
+
+Required guards:
+1. `runThreadN == 1`:
+   disable dynamic mode and execute legacy sequential path.
+2. Zero-work domains:
+   if PF inputs absent, route all permits to map; if map done, route all permits
+   to PF.
+3. Error paths:
+   guarantee permit release on all exits (success, early return, exception).
+
+Telemetry requirements:
+1. Emit phase transitions with timestamp and permit split.
+2. Emit per-domain ETA snapshots used for retune decisions.
+3. Emit final summary:
+   time spent per phase, permit occupancy, retune count, and blocked-acquire
+   metrics.
+
+Acceptance criteria:
+1. No deadlock/livelock under 100-read and 500-read smoke cases.
+2. Deterministic outputs vs dynamic-off baseline (GEX + feature outputs).
+3. `dynamic_on` wall time improves vs `dynamic_off` on UCSF perturb runs.
+4. Post-alignment tail is materially reduced by PF permit expansion.
+
 ## Stage 5: Producer/Consumer Readiness Refactor
 1. Introduce internal work-item abstractions while preserving current semantics.
 2. Move chunk lifecycle metadata behind explicit interfaces.
@@ -258,6 +348,7 @@ Library scope (v1):
 1. Exact whitelist lookup.
 2. On-demand 1MM candidate generation and resolution (no global 1MM prebuild).
 3. N-base expansion with configurable cap.
+
 4. Optional bounded variant cache (LRU or shard-local cache).
 5. Deterministic ambiguity handling hooks (including frozen-count mode).
 
@@ -281,6 +372,49 @@ Acceptance gates:
 2. Deterministic rescue behavior under multithreaded schedules.
 3. Startup and memory improvements on 3M whitelist runs.
 4. No steady-state throughput regression in Solo or PF.
+
+## Planned Full-Sample Benchmark (Not Executed Yet)
+Goal:
+1. Repeat the timing/parity comparison on full UCSF sample inputs to validate
+   scaling behavior beyond the current comparison slice.
+
+Execution plan:
+1. Freeze binaries and provenance:
+   `STAR` commit/build tag, `cellranger-9.0.1`, reference paths, feature ref.
+2. Stage full-sample GEX/guide FASTQs to SSD-backed `/storage` before running
+   (copy from source roots under `/mnt/pikachu/ucsf-perturb-seq/...`).
+3. Build one shared input manifest after staging (absolute path, file size,
+   checksum) and use this same manifest to generate both:
+   STAR `--readFilesIn` lists and CR `--libraries` CSV roots.
+4. Lock parameters to the downsampled comparison values and do not tune per run:
+   STAR: `--runThreadN 32`, `--dynamicThreadConstMapPermits 24`,
+   `--dynamicThreadInterface {0|1}`, PF assign flags
+   (`crAssignMaxHamming=1`, `crAssignFeatureOffset=0`,
+   `crAssignLimitSearch=-1`, `crAssignMinCounts=0`,
+   `crAssignMaxBarcodeMismatches=5`, `crAssignFeatureN=1`,
+   `crAssignBarcodeN=2`, `crAssignConsumerThreads=4`,
+   `crAssignSearchThreads=4`), and same Solo/GEX flags as downsampled run.
+   CR: `--include-introns true --min-crispr-umi 3 --create-bam false` with
+   `--localcores 32`.
+5. Run three jobs on the same host under minimal background load:
+   STAR `dynamic_off` (32), STAR `dynamic_on` (32, map permits 24 start),
+   Cell Ranger 9 (32 cores, same reference family).
+6. Collect timing/memory:
+   STAR `/usr/bin/time -v` and `Log.out` phase markers;
+   CR9 wrapper `time -v`, `_log`, and `_perf`.
+7. Run parity checks on shared outputs:
+   GEX shared matrices, CRISPR calls, threshold files, and feature matrices.
+8. Record semantic differences with explicit `L1`/`max_abs` summaries if byte
+   parity fails.
+
+Acceptance criteria:
+1. No crashes/deadlocks.
+2. `dynamic_on` remains at least neutral to `dynamic_off` on wall time.
+3. CRISPR outputs remain deterministic across repeated CR9 runs at fixed inputs.
+4. STAR and CR are confirmed to use the same staged FASTQ set via shared
+   manifest checks.
+5. Any STAR dynamic-vs-baseline differences are bounded and documented with
+   per-feature/per-barcode localization.
 
 ## Success Criteria
 1. Default mode remains unchanged.

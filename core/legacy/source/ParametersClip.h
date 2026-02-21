@@ -24,7 +24,10 @@ public:
     //bool yes; //trimming is performed
 
     vector<string> adapterType;
-    
+    vector<string> polyG; // yes/no/auto
+
+    bool clipPolyG; // resolved flag: true = trim polyG tails
+
     array<ReadClipInput,2> in;
 
     void initialize(Parameters *pPin);

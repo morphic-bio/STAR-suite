@@ -12,7 +12,20 @@ void ParametersClip::initialize(Parameters *pPin)
         exitWithError("EXITING because of fatal PARAMETER error: --clipAdapterType = " + adapterType[0] + " is not a valid option\n" +
                       "SOLUTION: use valid --clipAdapterType options: Hamming OR CellRanger4\n", std::cerr, pPin->inOut->logMain, EXIT_CODE_PARAMETER, *pPin);
     };
-    
+
+    // resolve --clip3pPolyG
+    if (polyG[0]=="yes") {
+        clipPolyG = true;
+    } else if (polyG[0]=="no") {
+        clipPolyG = false;
+    } else if (polyG[0]=="auto") {
+        clipPolyG = (adapterType[0]=="CellRanger4");
+    } else {
+        exitWithError("EXITING because of fatal PARAMETER error: --clip3pPolyG = " + polyG[0] + " is not a valid option\n" +
+                      "SOLUTION: use valid --clip3pPolyG options: yes, no, or auto\n", std::cerr, pPin->inOut->logMain, EXIT_CODE_PARAMETER, *pPin);
+    };
+    pPin->inOut->logMain << "clip3pPolyG: " << polyG[0] << " => " << (clipPolyG ? "enabled" : "disabled") << "\n";
+
     if (adapterType[0]=="CellRanger4") {
         
         if (in[1].adSeq.size()>1 || in[1].adSeq[0]!="-") {
@@ -102,6 +115,9 @@ void ParametersClip::initializeClipMates(vector<vector<ClipMate>> &clipMates)
                 //back() effectively duplicates the values for 2nd mate - if only one value was given in paramerter input
                 clipMates[im][ip].initialize(0, "-", 0, 0); 
             };
+
+            if (clipMates[im][ip].cr4 != nullptr)
+                clipMates[im][ip].cr4->clipPolyG = clipPolyG;
         };
     };
 };

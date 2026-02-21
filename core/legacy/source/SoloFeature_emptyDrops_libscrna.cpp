@@ -84,18 +84,20 @@ void SoloFeature::emptyDrops_libscrna()
         return;
     }
 
-    // Map STAR Solo EmptyDrops_CR parameters
-    config->n_expected_cells = static_cast<uint32_t>(pSolo.cellFilter.knee.nExpectedCells);
+    // Map STAR Solo EmptyDrops_CR parameters (scRNA-seq defaults, not Flex)
+    config->n_expected_cells = 0;  // bootstrap will estimate this (CR9 style)
     config->max_percentile = pSolo.cellFilter.knee.maxPercentile;
     config->max_min_ratio = pSolo.cellFilter.knee.maxMinRatio;
     config->ind_min = pSolo.cellFilter.eDcr.indMin;
     config->ind_max = pSolo.cellFilter.eDcr.indMax;
-    config->umi_min = pSolo.cellFilter.eDcr.umiMin;
+    config->umi_min = 100; // scRNA-seq: low floor to allow EmptyDrops rescue below the OrdMag knee
     config->umi_min_frac_median = pSolo.cellFilter.eDcr.umiMinFracMedian;
     config->cand_max_n = pSolo.cellFilter.eDcr.candMaxN;
     config->fdr = pSolo.cellFilter.eDcr.FDR;
-    config->sim_n = pSolo.cellFilter.eDcr.simN;
+    config->sim_n = 100000; // match CR9: 100K MC simulations for better p-value resolution
     config->use_fdr_gate = 1;
+    config->apply_bh_correction = 1; // scRNA-seq: proper BH-corrected FDR (matches CR9)
+    config->use_bootstrap = 1; // scRNA-seq: bootstrap OrdMag knee estimation (matches CR9)
     config->mc_threads = 0;
     config->disable_occupancy_filter = 1;
 
@@ -106,6 +108,7 @@ void SoloFeature::emptyDrops_libscrna()
                      << " candMaxN=" << config->cand_max_n
                      << " FDR=" << config->fdr
                      << " simN=" << config->sim_n
+                     << " bootstrap=" << (config->use_bootstrap ? "yes" : "no")
                      << " mode=" << (forceUnionMode ? "union" : "auto") << "\n";
 
     scrna_ed_result result;

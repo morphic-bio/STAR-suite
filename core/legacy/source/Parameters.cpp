@@ -325,6 +325,7 @@ Parameters::Parameters() {//initalize parameters info
 
     //clipping
     parArray.push_back(new ParameterInfoVector <string> (-1, -1, "clipAdapterType", &pClip.adapterType));
+    parArray.push_back(new ParameterInfoVector <string> (-1, -1, "clip3pPolyG", &pClip.polyG));
     parArray.push_back(new ParameterInfoVector <uint32>   (-1, -1, "clip5pNbases", &pClip.in[0].N));
     parArray.push_back(new ParameterInfoVector <uint32>   (-1, -1, "clip3pNbases", &pClip.in[1].N));
     parArray.push_back(new ParameterInfoVector <uint32>   (-1, -1, "clip5pAfterAdapterNbases", &pClip.in[0].NafterAd));
@@ -576,6 +577,8 @@ Parameters::Parameters() {//initalize parameters info
     // CR-compatible keys mode (handoff)
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloKeysCompat", &pSolo.keysCompatStr));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloCrGexFeature", &pSolo.crGexFeatureStr));
+    parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloCrMultimapRescue", &pSolo.crMultimapRescueStr));
+    parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloCrMultimapRescueIntronic", &pSolo.crMultimapRescueIntronicStr));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloProbeList", &pSolo.probeListPath));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloRemoveDeprecated", &pSolo.removeDeprecatedStr));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloSampleWhitelist", &pSolo.sampleWhitelistPath));
@@ -668,6 +671,7 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "crAssignConsumerThreads", &pfMulti.crAssignConsumerThreads));
     parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "crAssignSearchThreads", &pfMulti.crAssignSearchThreads));
     parArray.push_back(new ParameterInfoScalar<double>(-1, -1, "crAssignMinPosterior", &pfMulti.crAssignMinPosterior));
+    parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "crAssignLegacyCbRescue", &pfMulti.crAssignLegacyCbRescue));
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "crAssignFilteredBarcodes", &pfMulti.crAssignFilteredBarcodes));
 
     // Default module flag groups
@@ -735,7 +739,7 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
             p->inputLevel = 0;
         }
         if (p->nameString == "crMinUmi" && p->inputLevel < 0) {
-            pfMulti.crMinUmi = 10;  // CR-compatible default
+            pfMulti.crMinUmi = 3;  // General default; parity scripts can override
             p->inputLevel = 0;
         }
         if (p->nameString == "crAssignMaxHamming" && p->inputLevel < 0) {
@@ -776,6 +780,10 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
         }
         if (p->nameString == "crAssignMinPosterior" && p->inputLevel < 0) {
             pfMulti.crAssignMinPosterior = -1.0;
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "crAssignLegacyCbRescue" && p->inputLevel < 0) {
+            pfMulti.crAssignLegacyCbRescue = 0;
             p->inputLevel = 0;
         }
         if (p->nameString == "crAssignFilteredBarcodes" && p->inputLevel < 0) {
@@ -1512,10 +1520,12 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
             dynamicThreadPfControllerMode = "shadow";
         } else if (mode == "2" || mode == "active") {
             dynamicThreadPfControllerMode = "active";
+        } else if (mode == "3" || mode == "eta") {
+            dynamicThreadPfControllerMode = "eta";
         } else {
             ostringstream errOut;
             errOut <<"EXITING: fatal input ERROR: --dynamicThreadPfControllerMode must be one of "
-                   <<"off|shadow|active (or 0|1|2), user-defined value="
+                   <<"off|shadow|active|eta (or 0|1|2|3), user-defined value="
                    <<dynamicThreadPfControllerMode<<"\n";
             exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
         }
@@ -1554,9 +1564,10 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
         errOut <<"EXITING: fatal input ERROR: --dynamicThreadPfControllerMode requires --dynamicThreadInterface=1\n";
         exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
     }
-    if (dynamicThreadPfControllerMode == "active" && variableThreads != 1) {
+    if ((dynamicThreadPfControllerMode == "active" || dynamicThreadPfControllerMode == "eta") &&
+        variableThreads != 1) {
         ostringstream errOut;
-        errOut <<"EXITING: fatal input ERROR: --dynamicThreadPfControllerMode=active requires --variableThreads=1\n";
+        errOut <<"EXITING: fatal input ERROR: --dynamicThreadPfControllerMode=active/eta requires --variableThreads=1\n";
         exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
     }
     if (pfControllerEnabled && dynamicThreadPfControllerIntervalMs <= 0) {
@@ -1564,9 +1575,13 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
         errOut <<"EXITING: fatal input ERROR: --dynamicThreadPfControllerMode requires --dynamicThreadPfControllerIntervalMs > 0\n";
         exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
     }
-    if (pfControllerEnabled && dynamicThreadPfControllerSequence.empty()) {
+    const bool pfControllerNeedsSequence =
+        (dynamicThreadPfControllerMode == "active" || dynamicThreadPfControllerMode == "shadow");
+    if (pfControllerNeedsSequence && dynamicThreadPfControllerSequence.empty()) {
         ostringstream errOut;
-        errOut <<"EXITING: fatal input ERROR: --dynamicThreadPfControllerMode requires non-empty --dynamicThreadPfControllerSequence\n";
+        errOut <<"EXITING: fatal input ERROR: --dynamicThreadPfControllerMode="
+               <<dynamicThreadPfControllerMode
+               <<" requires non-empty --dynamicThreadPfControllerSequence\n";
         exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
     }
 
@@ -3059,6 +3074,7 @@ void Parameters::applyDefaultGroups() {
         setStringIfDefault("soloCellFilter", "EmptyDrops_CR");
         setStringIfDefault("soloCrMode", "CR");
         setStringIfDefault("soloCrGexFeature", "GeneFull");
+        setStringIfDefault("soloCrMultimapRescue", "yes");
         setIntIfDefault("crMinUmi", 10);
         // Note: soloKeysCompat cr requires soloProbeList, so we don't set it by default
         setStringIfDefault("soloCBmatchWLtype", "1MM_multi_Nbase_pseudocounts");
@@ -3142,6 +3158,7 @@ void Parameters::applyDefaultGroups() {
         inOut->logMain << "##### Applying --defaultA375Parity parameter bundle:\n";
         setStringIfDefault("soloCrMode", "CR");
         setStringIfDefault("soloCrGexFeature", "GeneFull");
+        setStringIfDefault("soloCrMultimapRescue", "yes");
         setIntIfDefault("crMinUmi", 10);
     }
     

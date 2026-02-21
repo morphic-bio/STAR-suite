@@ -12,11 +12,9 @@
 #include <mutex>
 #include <cstring>
 #include <cstdlib>
-// #region agent log
+#include <unordered_map>
+#include <limits>
 #include <fstream>
-#include <chrono>
-#include <thread>
-// #endregion agent log
 
 // Forward declaration for Flex-only reject logging hook (defined in flex/SoloReadFeature_record_flex.cpp)
 extern "C" void storeQnameMapping(uint64_t iRead, const char* qname);
@@ -58,24 +56,6 @@ inline void writeNormalizedQname(std::ostream& out, const char* raw) {
     out.put('\n');
 }
 
-// #region agent log
-static inline uint64_t agentNowMs() {
-    using namespace std::chrono;
-    return (uint64_t)duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
-}
-static inline void agentDbgLog(const char* hypothesisId,
-                               const char* location,
-                               const char* message,
-                               const std::string& dataJson)
-{
-    std::ofstream ofs("/mnt/pikachu/STAR-suite/.cursor/debug.log", std::ios::app);
-    if (!ofs.good()) return;
-    ofs << "{\"sessionId\":\"debug-session\",\"runId\":\"pre-fix\",\"hypothesisId\":\""
-        << hypothesisId << "\",\"location\":\"" << location << "\",\"message\":\"" << message
-        << "\",\"data\":" << dataJson << ",\"timestamp\":" << agentNowMs() << "}\n";
-}
-// #endregion agent log
-
 static const bool g_debugAmbigResolve =
     (std::getenv("STAR_DEBUG_AMBIG_CB_RESOLVE") != nullptr);
 static std::atomic<uint64_t> g_debugAmbigCreateCount{0};
@@ -110,27 +90,265 @@ static void logAmbigReadName(const Parameters &P, const char* rawName) {
     std::lock_guard<std::mutex> lock(g_ambigReadNamesMutex);
     writeNormalizedQname(g_ambigReadNamesStream, rawName);
 }
+
+enum class CrRescueRegion : uint8_t { Intergenic = 0, Intronic = 1, Exonic = 2 };
+
+struct CrRescueDecision {
+    bool rescued = false;
+    bool intronicFallback = false;
+    uint64_t winnerAlignIndex = 0;
+    uint64_t exonicCount = 0;
+    uint64_t intronicCount = 0;
+};
+
+static int64_t findLastStartLE(const uint* starts, uint64_t n, uint64_t key) {
+    if (starts == nullptr || n == 0) {
+        return -1;
+    }
+    uint64_t lo = 0;
+    uint64_t hi = n;
+    while (lo < hi) {
+        const uint64_t mid = lo + (hi - lo) / 2;
+        if (starts[mid] <= key) {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+    if (lo == 0) {
+        return -1;
+    }
+    return static_cast<int64_t>(lo - 1);
+}
+
+static bool isSenseForTranscript(const Transcript& aln, uint8_t trStr, int32 strandType) {
+    if (strandType == -1) {
+        return true;
+    }
+    if (trStr == 0) {
+        return false;
+    }
+    const uint32_t readStr = (strandType == 0) ? static_cast<uint32_t>(aln.Str) : (1U - static_cast<uint32_t>(aln.Str));
+    return readStr == static_cast<uint32_t>(trStr - 1);
+}
+
+static bool isSenseForGene(const Transcript& aln, uint8_t geneStr, int32 strandType) {
+    if (strandType == -1) {
+        return true;
+    }
+    if (geneStr == 0) {
+        return false;
+    }
+    const uint32_t readStr = (strandType == 0) ? static_cast<uint32_t>(aln.Str) : (1U - static_cast<uint32_t>(aln.Str));
+    return readStr == static_cast<uint32_t>(geneStr - 1);
+}
+
+static bool alignmentHasSenseGeneOverlap(const Transcriptome& tr,
+                                         const Transcript& aln,
+                                         int32 strandType) {
+    for (uint32_t ib = 0; ib < aln.nExons; ++ib) {
+        if (aln.exons[ib][EX_L] == 0) {
+            continue;
+        }
+        const uint64_t bStart = aln.exons[ib][EX_G];
+        const uint64_t bEnd = bStart + aln.exons[ib][EX_L];
+        const int64_t gi0 = findLastStartLE(tr.geneFull.s, tr.nGe, bEnd - 1);
+        for (int64_t gi = gi0; gi >= 0; --gi) {
+            if (tr.geneFull.eMax[gi] < bStart) {
+                break;
+            }
+            if (tr.geneFull.e[gi] < bStart) {
+                continue;
+            }
+            const uint64_t gStart = tr.geneFull.s[gi];
+            const uint64_t gEnd = tr.geneFull.e[gi] + 1;
+            const uint64_t ov = (std::min(bEnd, gEnd) > std::max(bStart, gStart))
+                                    ? (std::min(bEnd, gEnd) - std::max(bStart, gStart))
+                                    : 0;
+            if (ov == 0) {
+                continue;
+            }
+            if (!isSenseForGene(aln, tr.geneFull.str[gi], strandType)) {
+                continue;
+            }
+            return true;
+        }
+    }
+    return false;
+}
+
+static uint64_t alignmentMappedLength(const Transcript& aln) {
+    if (aln.mappedLength > 0) {
+        return static_cast<uint64_t>(aln.mappedLength);
+    }
+    uint64_t len = 0;
+    for (uint32_t ib = 0; ib < aln.nExons; ++ib) {
+        len += aln.exons[ib][EX_L];
+    }
+    return len;
+}
+
+static void alignmentBounds(const Transcript& aln, uint64_t& startOut, uint64_t& endOut) {
+    startOut = std::numeric_limits<uint64_t>::max();
+    endOut = 0;
+    for (uint32_t ib = 0; ib < aln.nExons; ++ib) {
+        if (aln.exons[ib][EX_L] == 0) {
+            continue;
+        }
+        const uint64_t bStart = aln.exons[ib][EX_G];
+        const uint64_t bEnd = bStart + aln.exons[ib][EX_L] - 1;
+        startOut = std::min(startOut, bStart);
+        endOut = std::max(endOut, bEnd);
+    }
+}
+
+static uint64_t overlapBlocksWithTranscriptExons(const Transcript& aln,
+                                                 uint64_t trStart,
+                                                 uint16_t exN,
+                                                 const uint32_t* exSE) {
+    if (exSE == nullptr || exN == 0) {
+        return 0;
+    }
+    uint64_t overlap = 0;
+    uint32_t ib = 0;
+    uint16_t ie = 0;
+    while (ib < aln.nExons && ie < exN) {
+        const uint64_t bStart = aln.exons[ib][EX_G];
+        const uint64_t bEnd = bStart + aln.exons[ib][EX_L];
+        const uint64_t eStart = trStart + exSE[2 * ie];
+        const uint64_t eEnd = trStart + exSE[2 * ie + 1] + 1;
+
+        if (bEnd <= eStart) {
+            ++ib;
+            continue;
+        }
+        if (eEnd <= bStart) {
+            ++ie;
+            continue;
+        }
+
+        overlap += std::min(bEnd, eEnd) - std::max(bStart, eStart);
+        if (bEnd <= eEnd) {
+            ++ib;
+        }
+        if (eEnd <= bEnd) {
+            ++ie;
+        }
+    }
+    return overlap;
+}
+
+static CrRescueRegion classifyAlignmentCrRescue(const Transcriptome& tr,
+                                                const Transcript& aln,
+                                                int32 strandType) {
+    const uint64_t mappedLen = alignmentMappedLength(aln);
+    if (mappedLen == 0) {
+        return CrRescueRegion::Intergenic;
+    }
+
+    uint64_t aStart = 0, aEnd = 0;
+    alignmentBounds(aln, aStart, aEnd);
+    if (aStart == std::numeric_limits<uint64_t>::max()) {
+        return CrRescueRegion::Intergenic;
+    }
+
+    bool hasSenseExonic = false;
+    const int64_t trIdx0 = findLastStartLE(tr.trS, tr.nTr, aStart);
+    for (int64_t trIdx = trIdx0; trIdx >= 0; --trIdx) {
+        if (tr.trEmax[trIdx] < aEnd) {
+            break;
+        }
+        if (tr.trE[trIdx] < aEnd) {
+            continue;
+        }
+        if (!isSenseForTranscript(aln, tr.trStr[trIdx], strandType)) {
+            continue;
+        }
+        const uint16_t exN = tr.trExN[trIdx];
+        const uint32_t* exSE = tr.exSE + 2 * tr.trExI[trIdx];
+        const uint64_t exonOverlap = overlapBlocksWithTranscriptExons(aln, tr.trS[trIdx], exN, exSE);
+        if (2 * exonOverlap >= mappedLen) {
+            hasSenseExonic = true;
+            break;
+        }
+    }
+    if (hasSenseExonic) {
+        return CrRescueRegion::Exonic;
+    }
+
+    std::unordered_map<uint32_t, uint64_t> senseGeneOverlap;
+    senseGeneOverlap.reserve(8);
+    for (uint32_t ib = 0; ib < aln.nExons; ++ib) {
+        if (aln.exons[ib][EX_L] == 0) {
+            continue;
+        }
+        const uint64_t bStart = aln.exons[ib][EX_G];
+        const uint64_t bEnd = bStart + aln.exons[ib][EX_L];
+        const int64_t gi0 = findLastStartLE(tr.geneFull.s, tr.nGe, bEnd - 1);
+        for (int64_t gi = gi0; gi >= 0; --gi) {
+            if (tr.geneFull.eMax[gi] < bStart) {
+                break;
+            }
+            if (tr.geneFull.e[gi] < bStart) {
+                continue;
+            }
+            const uint64_t gStart = tr.geneFull.s[gi];
+            const uint64_t gEnd = tr.geneFull.e[gi] + 1;
+            const uint64_t ov = (std::min(bEnd, gEnd) > std::max(bStart, gStart))
+                                    ? (std::min(bEnd, gEnd) - std::max(bStart, gStart))
+                                    : 0;
+            if (ov == 0) {
+                continue;
+            }
+            if (!isSenseForGene(aln, tr.geneFull.str[gi], strandType)) {
+                continue;
+            }
+            senseGeneOverlap[tr.geneFull.g[gi]] += ov;
+        }
+    }
+
+    uint64_t maxSenseGeneOverlap = 0;
+    for (const auto& kv : senseGeneOverlap) {
+        maxSenseGeneOverlap = std::max(maxSenseGeneOverlap, kv.second);
+    }
+    if (2 * maxSenseGeneOverlap > mappedLen) {
+        return CrRescueRegion::Intronic;
+    }
+    return CrRescueRegion::Intergenic;
+}
+
+static CrRescueDecision evaluateCrRescueDecision(const std::vector<CrRescueRegion>& states,
+                                                 bool allowIntronicFallback) {
+    CrRescueDecision d;
+    for (uint64_t ia = 0; ia < states.size(); ++ia) {
+        if (states[ia] == CrRescueRegion::Exonic) {
+            ++d.exonicCount;
+            d.winnerAlignIndex = ia;
+        } else if (states[ia] == CrRescueRegion::Intronic) {
+            ++d.intronicCount;
+            d.winnerAlignIndex = ia;
+        }
+    }
+    if (d.exonicCount == 1) {
+        d.rescued = true;
+        d.intronicFallback = false;
+        return d;
+    }
+    if (allowIntronicFallback && d.exonicCount == 0 && d.intronicCount == 1) {
+        d.rescued = true;
+        d.intronicFallback = true;
+        return d;
+    }
+    d.rescued = false;
+    d.intronicFallback = false;
+    d.winnerAlignIndex = 0;
+    return d;
+}
 }
 
 void ReadAlign::outputAlignments() {
   
     outBAMbytes=0;
-    // #region agent log
-    if (iReadAll < 200) {
-        agentDbgLog(
-            "H0",
-            "ReadAlign_outputAlignments.cpp:outputAlignments:entry",
-            "enter outputAlignments",
-            std::string("{\"iReadAll\":") + std::to_string((uint64_t)iReadAll) +
-                ",\"readNmates\":" + std::to_string((uint64_t)readNmates) +
-                ",\"unmapType\":" + std::to_string((int64_t)unmapType) +
-                ",\"nTr\":" + std::to_string((int64_t)nTr) +
-                ",\"sampleDetReady\":" + std::to_string((int64_t)sampleDetReady_) +
-                "}"
-        );
-    }
-    // #endregion agent log
-        
     readAnnot.reset();
     
     if (mapGen.pGe.gType==101) {//temporary
@@ -143,6 +361,105 @@ void ReadAlign::outputAlignments() {
     if (outFilterBySJoutPass) {//otherwise align is held for the 2nd stage of outFilterBySJout
         ////////////////////////////////////
         if (unmapType<0) {//passed mappedFilter. Unmapped reads can have nTr>0
+
+            crMultiMapRescued_ = false;
+            crMultiMapRescuedIntronic_ = false;
+            if (P.pSolo.crMultimapRescue && nTr > 1) {
+                statsRA.crRescueTotal++;
+                const uint64_t nTrBefore = nTr;
+
+                uint64_t geneSenseCount = 0;
+                uint64_t geneSenseWinner = 0;
+                for (uint64_t ia = 0; ia < nTr; ++ia) {
+                    if (trMult[ia] == nullptr) {
+                        continue;
+                    }
+                    if (alignmentHasSenseGeneOverlap(*chunkTr, *trMult[ia], P.pSolo.strand)) {
+                        ++geneSenseCount;
+                        geneSenseWinner = ia;
+                    }
+                }
+
+                CrRescueDecision decision;
+                if (geneSenseCount == 1) {
+                    CrRescueRegion winnerRegion = classifyAlignmentCrRescue(
+                        *chunkTr, *trMult[geneSenseWinner], P.pSolo.strand);
+                    if (winnerRegion == CrRescueRegion::Exonic) {
+                        decision.rescued = true;
+                        decision.intronicFallback = false;
+                        decision.winnerAlignIndex = geneSenseWinner;
+                        statsRA.crRescueGeneVsNonGene++;
+                    } else if (winnerRegion == CrRescueRegion::Intronic
+                               && P.pSolo.crMultimapRescueIntronic) {
+                        decision.rescued = true;
+                        decision.intronicFallback = true;
+                        decision.winnerAlignIndex = geneSenseWinner;
+                        statsRA.crRescueGeneVsNonGene++;
+                    } else if (winnerRegion == CrRescueRegion::Intergenic) {
+                        statsRA.crRescueFastPathRejected50pct++;
+                    } else {
+                        statsRA.crRescueFastPathIntronicFallbackOff++;
+                    }
+                } else {
+                    std::vector<CrRescueRegion> states;
+                    states.reserve(static_cast<size_t>(nTr));
+                    for (uint64_t ia = 0; ia < nTr; ++ia) {
+                        if (trMult[ia] == nullptr) {
+                            states.push_back(CrRescueRegion::Intergenic);
+                            continue;
+                        }
+                        states.push_back(classifyAlignmentCrRescue(*chunkTr, *trMult[ia], P.pSolo.strand));
+                    }
+                    decision = evaluateCrRescueDecision(states, P.pSolo.crMultimapRescueIntronic);
+                    if (decision.rescued) {
+                        if (decision.intronicFallback) {
+                            statsRA.crRescueIntronicFallback++;
+                        } else {
+                            statsRA.crRescueExonicWinner++;
+                        }
+                    } else {
+                        if (decision.exonicCount > 1) {
+                            statsRA.crRescueMultiExonicNoRescue++;
+                        } else if (decision.intronicCount > 1) {
+                            statsRA.crRescueMultiIntronicNoRescue++;
+                        } else if (decision.exonicCount == 0 && decision.intronicCount == 1
+                                   && !P.pSolo.crMultimapRescueIntronic) {
+                            statsRA.crRescueIntronicFallbackOffNoRescue++;
+                        } else {
+                            statsRA.crRescueAllIntergenicNoRescue++;
+                        }
+                    }
+                }
+
+                if (decision.rescued && decision.winnerAlignIndex < nTrBefore
+                    && trMult[decision.winnerAlignIndex] != nullptr) {
+                    Transcript* winner = trMult[decision.winnerAlignIndex];
+                    for (uint64_t ia = 0; ia < nTrBefore; ++ia) {
+                        if (trMult[ia] != nullptr) {
+                            trMult[ia]->primaryFlag = (ia == decision.winnerAlignIndex);
+                        }
+                    }
+                    trMult[0] = winner;
+                    nTr = 1;
+                    trBest = winner;
+                    crMultiMapRescued_ = true;
+                    crMultiMapRescuedIntronic_ = decision.intronicFallback;
+
+                    if (alignsGenOut.yes && alignsGenOut.alN == nTrBefore
+                        && decision.winnerAlignIndex < alignsGenOut.alN
+                        && alignsGenOut.alMult[decision.winnerAlignIndex] != nullptr) {
+                        Transcript* winnerOut = alignsGenOut.alMult[decision.winnerAlignIndex];
+                        for (uint64_t ia = 0; ia < alignsGenOut.alN; ++ia) {
+                            if (alignsGenOut.alMult[ia] != nullptr) {
+                                alignsGenOut.alMult[ia]->primaryFlag = (ia == decision.winnerAlignIndex);
+                            }
+                        }
+                        alignsGenOut.alMult[0] = winnerOut;
+                        alignsGenOut.alN = 1;
+                        alignsGenOut.alBest = winnerOut;
+                    }
+                }
+            }
 
             auto nTr1 = nTr;
             auto trOut1 = trMult[0];
@@ -381,36 +698,7 @@ void ReadAlign::outputAlignments() {
         const int MAX_DEBUG_LOGS = 10;
         
         if (P.pSolo.cbCorrector && !readBar->cbSeq.empty()) {
-            // #region agent log
-            if (iReadAll < 200) {
-                agentDbgLog(
-                    "H1",
-                    "ReadAlign_outputAlignments.cpp:outputAlignments:before_cbCorrector",
-                    "before cbCorrector->correct",
-                    std::string("{\"iReadAll\":") + std::to_string((uint64_t)iReadAll) +
-                        ",\"cbSeqLen\":" + std::to_string((uint64_t)readBar->cbSeq.size()) +
-                        ",\"cbQualLen\":" + std::to_string((uint64_t)readBar->cbQual.size()) +
-                        "}"
-                );
-            }
-            // #endregion agent log
             CbMatch match = P.pSolo.cbCorrector->correct(readBar->cbSeq);
-            // #region agent log
-            if (iReadAll < 200) {
-                agentDbgLog(
-                    "H1",
-                    "ReadAlign_outputAlignments.cpp:outputAlignments:after_cbCorrector",
-                    "after cbCorrector->correct",
-                    std::string("{\"iReadAll\":") + std::to_string((uint64_t)iReadAll) +
-                        ",\"whitelistIdx\":" + std::to_string((uint64_t)match.whitelistIdx) +
-                        ",\"ambiguous\":" + std::to_string((int64_t)match.ambiguous) +
-                        ",\"ambiguousIdxSize\":" + std::to_string((uint64_t)match.ambiguousIdx.size()) +
-                        ",\"hammingDist\":" + std::to_string((int64_t)match.hammingDist) +
-                        "}"
-                );
-            }
-            // #endregion agent log
-            
             // Extract UMI first (needed for ambiguous accumulation)
             uint32_t umi24 = 0;
             if (readBar->urValid && readBar->urPacked != UINT32_MAX) {
@@ -510,20 +798,6 @@ void ReadAlign::outputAlignments() {
                                  << ", ambiguous=" << match.ambiguous
                                  << ", extractedCbIdxPlus1_=" << extractedCbIdxPlus1_ << endl;
             }
-            // #region agent log
-            if (iReadAll < 200) {
-                agentDbgLog(
-                    "H2",
-                    "ReadAlign_outputAlignments.cpp:outputAlignments:after_cb_resolution",
-                    "after CB resolution bookkeeping",
-                    std::string("{\"iReadAll\":") + std::to_string((uint64_t)iReadAll) +
-                        ",\"extractedCbIdxPlus1\":" + std::to_string((uint64_t)extractedCbIdxPlus1_) +
-                        ",\"extractedCbSeqLen\":" + std::to_string((uint64_t)extractedCbSeq_.size()) +
-                        ",\"pendingAmbiguousSize\":" + std::to_string((uint64_t)pendingAmbiguous_.size()) +
-                        "}"
-                );
-            }
-            // #endregion agent log
         } else {
             // Debug logging for why CbCorrector wasn't used
             if (debugCount++ < MAX_DEBUG_LOGS) {
@@ -531,22 +805,6 @@ void ReadAlign::outputAlignments() {
                                  << ", cbSeq.empty()=" << readBar->cbSeq.empty()
                                  << ", cbSeq=" << (readBar->cbSeq.empty() ? "(empty)" : readBar->cbSeq) << endl;
             }
-            // #region agent log
-            if (iReadAll < 200) {
-                agentDbgLog(
-                    "H3",
-                    "ReadAlign_outputAlignments.cpp:outputAlignments:cbCorrector_not_used",
-                    "cbCorrector not used",
-                    std::string("{\"iReadAll\":") + std::to_string((uint64_t)iReadAll) +
-                        ",\"cbCorrectorNonNull\":" + std::to_string((int64_t)(P.pSolo.cbCorrector != nullptr)) +
-                        ",\"cbSeqEmpty\":" + std::to_string((int64_t)readBar->cbSeq.empty()) +
-                        ",\"cbMatch\":" + std::to_string((int64_t)readBar->cbMatch) +
-                        ",\"cbMatchIndSize\":" + std::to_string((uint64_t)readBar->cbMatchInd.size()) +
-                        "}"
-                );
-            }
-            // #endregion agent log
-            
             // Fallback to original SoloReadBarcode matching logic
             // cbMatch: 0=exact match, 1=one match with 1MM, -1=no match, -3=multiple matches (not allowed)
             if ((readBar->cbMatch == 0 || readBar->cbMatch == 1) && !readBar->cbMatchInd.empty()) {
@@ -1152,14 +1410,63 @@ void ReadAlign::alignedAnnotation()
     if ( P.quant.geneFull.yes ) {
         chunkTr->geneFullAlignOverlap(nTr, trMult, P.pSolo.strand, readAnnot.annotFeatures[SoloFeatureTypes::GeneFull]);
     };   
-    //solo-Gene
-    if ( P.quant.gene.yes ) {
+    //solo-Gene (also needed for CR-compat exonic-over-intronic filter)
+    bool geneClassified = false;
+    if ( P.quant.gene.yes || (P.pSolo.crMultimapRescue && P.quant.geneFull.yes) ) {
         chunkTr->classifyAlign(trMult, nTr, readAnnot, slamCompat);
+        geneClassified = true;
     };
     // SLAM quantification needs gene annotations for alignments (if not already done above)
-    if ( P.quant.slam.yes && !P.quant.gene.yes ) {
+    if ( P.quant.slam.yes && !geneClassified ) {
         chunkTr->classifyAlign(trMult, nTr, readAnnot, slamCompat);
+        geneClassified = true;
     }
+    // CR-compat: exonic-over-intronic filter for GeneFull
+    // When a GeneFull alignment overlaps multiple gene bodies but only some have
+    // exonic (transcript-concordant) evidence, keep only the exonic genes.
+    // This resolves nested small-gene-inside-large-gene-intron cases (sentinel pattern).
+    if ( P.pSolo.crMultimapRescue && P.quant.geneFull.yes && geneClassified ) {
+        ReadAnnotFeature &gfAnn = readAnnot.annotFeatures[SoloFeatureTypes::GeneFull];
+        const ReadAnnotFeature &gAnn = readAnnot.annotFeatures[SoloFeatureTypes::Gene];
+
+        if ( gfAnn.fSet.size() > 1 && gfAnn.fAlign.size() == gAnn.fAlign.size() ) {
+            bool anyFiltered = false;
+            bool anyMultiGeneAlign = false;
+            for (uint32 iA = 0; iA < (uint32)gfAnn.fAlign.size(); iA++) {
+                if (gfAnn.fAlign[iA].size() <= 1)
+                    continue;
+                anyMultiGeneAlign = true;
+
+                set<uint32> exonicInAlign;
+                for (uint32 g : gfAnn.fAlign[iA]) {
+                    if (gAnn.fAlign[iA].count(g))
+                        exonicInAlign.insert(g);
+                }
+
+                if (!exonicInAlign.empty() && exonicInAlign.size() < gfAnn.fAlign[iA].size()) {
+                    gfAnn.fAlign[iA] = exonicInAlign;
+                    anyFiltered = true;
+                    statsRA.crGeneFullExonicOverIntronicFiltered++;
+                }
+            }
+
+            if (!anyMultiGeneAlign)
+                statsRA.crGeneFullCrossAlignMultiGene++;
+
+            if (anyFiltered) {
+                gfAnn.fSet.clear();
+                for (uint32 iA = 0; iA < (uint32)gfAnn.fAlign.size(); iA++)
+                    for (uint32 g : gfAnn.fAlign[iA])
+                        gfAnn.fSet.insert(g);
+
+                if (gfAnn.fSet.size() == 1)
+                    statsRA.crGeneFullResolvedToUniqueAfterFilter++;
+                else if (gfAnn.fSet.size() > 1)
+                    statsRA.crGeneFullStillMultiExonic++;
+            }
+        }
+    }
+
     //solo-GeneFull_ExonOverIntron
     if ( P.quant.geneFull_ExonOverIntron.yes ) {
         chunkTr->geneFullAlignOverlap_ExonOverIntron(nTr, trMult, P.pSolo.strand, readAnnot.annotFeatures[SoloFeatureTypes::GeneFull_ExonOverIntron], readAnnot.annotFeatures[SoloFeatureTypes::Gene]);

@@ -406,6 +406,8 @@ void ReadAlign::resetN () {//reset resets the counters to 0 for a new read
     extractedUmiValid_ = false;   // Reset UMI validity for new read
     extractedCbSeq_.clear();      // Reset CB sequence for new read
     hasYAlignment_ = false;       // Reset Y-alignment flag for new read
+    crMultiMapRescued_ = false;   // Reset CR multimapper rescue flag for new read
+    crMultiMapRescuedIntronic_ = false; // Reset intronic fallback marker
 
     for (uint ii=0; ii<P.readNmates; ii++) {//not readNends: this is alignment
         maxScoreMate[ii]=0;

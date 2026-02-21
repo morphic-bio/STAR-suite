@@ -2729,19 +2729,92 @@ int find_variant_match(unsigned char *code, int sequence_index, unsigned char *c
     }
     return number_of_variants;
 }
-void process_pending_barcodes( data_structures *hashes, memory_pool_collection *pools, statistics *stats, double min_posterior){
-    unmatched_barcodes_features_block *current_entry_block=stats->unmatched_list.first_entry;
-    while (current_entry_block != NULL){
-        unsigned char *retcode=find_best_posterior_match(current_entry_block, number_of_features, min_posterior,stats, hashes);
-        if (retcode != 0){
-            unmatched_barcodes_features current_entry;
-            read_unmatched_barcodes_features_block(current_entry_block, &current_entry);
-            char umi[umi_length+1];
-            code2string(current_entry.umi,umi, umi_code_length);
-            update_feature_counts_from_code(retcode, umi, current_entry.feature_index, hashes,pools);
+void process_pending_barcodes( data_structures *hashes, memory_pool_collection *pools, statistics *stats, double min_posterior, int legacy_cb_rescue){
+    unmatched_barcodes_features_block *current_entry_block = stats->unmatched_list.first_entry;
+
+    if (legacy_cb_rescue) {
+        while (current_entry_block != NULL) {
+            unsigned char *retcode = find_best_posterior_match(current_entry_block, number_of_features, min_posterior, stats, hashes);
+            if (retcode != 0) {
+                unmatched_barcodes_features current_entry;
+                read_unmatched_barcodes_features_block(current_entry_block, &current_entry);
+                char umi[umi_length + 1];
+                code2string(current_entry.umi, umi, umi_code_length);
+                update_feature_counts_from_code(retcode, umi, current_entry.feature_index, hashes, pools);
+            }
+            current_entry_block = current_entry_block->next;
         }
-        current_entry_block=current_entry_block->next;
+        return;
     }
+
+    /* Default deterministic mode: evaluate all pending entries against frozen totals,
+     * then apply accepted rescues in a separate pass. */
+    typedef struct pending_rescue_selection {
+        unmatched_barcodes_features_block *entry_block;
+        unsigned char *barcode_code;
+    } pending_rescue_selection;
+
+    pending_rescue_selection *selections = NULL;
+    size_t selections_n = 0;
+    size_t selections_cap = 0;
+
+    while (current_entry_block != NULL) {
+        unsigned char *retcode = find_best_posterior_match(current_entry_block, number_of_features, min_posterior, stats, hashes);
+        if (retcode != 0) {
+            if (selections_n == selections_cap) {
+                size_t new_cap = (selections_cap == 0) ? 1024 : (selections_cap * 2);
+                pending_rescue_selection *new_buf =
+                    (pending_rescue_selection *)realloc(selections, new_cap * sizeof(*new_buf));
+                if (!new_buf) {
+                    fprintf(stderr, "WARNING: pending rescue selection buffer allocation failed; falling back to immediate legacy updates\n");
+                    for (size_t i = 0; i < selections_n; i++) {
+                        unmatched_barcodes_features selected_entry;
+                        read_unmatched_barcodes_features_block(selections[i].entry_block, &selected_entry);
+                        char selected_umi[umi_length + 1];
+                        code2string(selected_entry.umi, selected_umi, umi_code_length);
+                        update_feature_counts_from_code(selections[i].barcode_code, selected_umi, selected_entry.feature_index, hashes, pools);
+                    }
+                    free(selections);
+
+                    unmatched_barcodes_features current_entry;
+                    read_unmatched_barcodes_features_block(current_entry_block, &current_entry);
+                    char umi[umi_length + 1];
+                    code2string(current_entry.umi, umi, umi_code_length);
+                    update_feature_counts_from_code(retcode, umi, current_entry.feature_index, hashes, pools);
+
+                    current_entry_block = current_entry_block->next;
+                    while (current_entry_block != NULL) {
+                        unsigned char *legacy_retcode =
+                            find_best_posterior_match(current_entry_block, number_of_features, min_posterior, stats, hashes);
+                        if (legacy_retcode != 0) {
+                            unmatched_barcodes_features legacy_entry;
+                            read_unmatched_barcodes_features_block(current_entry_block, &legacy_entry);
+                            char legacy_umi[umi_length + 1];
+                            code2string(legacy_entry.umi, legacy_umi, umi_code_length);
+                            update_feature_counts_from_code(legacy_retcode, legacy_umi, legacy_entry.feature_index, hashes, pools);
+                        }
+                        current_entry_block = current_entry_block->next;
+                    }
+                    return;
+                }
+                selections = new_buf;
+                selections_cap = new_cap;
+            }
+            selections[selections_n].entry_block = current_entry_block;
+            selections[selections_n].barcode_code = retcode;
+            selections_n++;
+        }
+        current_entry_block = current_entry_block->next;
+    }
+
+    for (size_t i = 0; i < selections_n; i++) {
+        unmatched_barcodes_features current_entry;
+        read_unmatched_barcodes_features_block(selections[i].entry_block, &current_entry);
+        char umi[umi_length + 1];
+        code2string(current_entry.umi, umi, umi_code_length);
+        update_feature_counts_from_code(selections[i].barcode_code, umi, current_entry.feature_index, hashes, pools);
+    }
+    free(selections);
 }
 unsigned char* find_best_posterior_match (unmatched_barcodes_features_block *entry_block, int number_of_features, double min_posterior, statistics *stats, data_structures *hashes){
     unmatched_barcodes_features entry_struct;
@@ -3076,8 +3149,8 @@ int checkAndCorrectBarcode(char **lines, int maxN, uint32_t feature_index, uint1
 }
 
 
-void finalize_processing(feature_arrays *features, data_structures *hashes, char *directory, memory_pool_collection *pools, statistics *stats, uint16_t stringency, uint16_t min_counts, double min_posterior, khash_t(strptr)* filtered_barcodes_hash, int skip_emptydrops, int emptydrops_failure_fatal, int expected_cells, int emptydrops_use_fdr, int *error_out){
-    process_pending_barcodes(hashes, pools, stats,min_posterior);
+void finalize_processing(feature_arrays *features, data_structures *hashes, char *directory, memory_pool_collection *pools, statistics *stats, uint16_t stringency, uint16_t min_counts, double min_posterior, int legacy_cb_rescue, khash_t(strptr)* filtered_barcodes_hash, int skip_emptydrops, int emptydrops_failure_fatal, int expected_cells, int emptydrops_use_fdr, int *error_out){
+    process_pending_barcodes(hashes, pools, stats, min_posterior, legacy_cb_rescue);
     double elapsed_time = get_time_in_seconds() - stats->start_time;
     fprintf(stderr, "Finished processing %ld reads in %.2f seconds (%.1f thousand reads/second)\n", stats->number_of_reads, elapsed_time, stats->number_of_reads / (double)elapsed_time / 1000.0);
 
@@ -4557,7 +4630,7 @@ void process_files_in_sample(sample_args *args) {
         //[i] = NULL; // Avoid double-free in later cleanup
     }
     // Since merging is not required, finalize using the first thread's data.
-    finalize_processing(args->features, &args->hashes[0], args->directory, args->pools[0], &args->stats[0], args->stringency, args->min_counts, min_posterior, args->filtered_barcodes_hash, args->skip_emptydrops, args->emptydrops_failure_fatal, args->expected_cells, args->emptydrops_use_fdr, args->error_out);
+    finalize_processing(args->features, &args->hashes[0], args->directory, args->pools[0], &args->stats[0], args->stringency, args->min_counts, min_posterior, args->legacy_cb_rescue, args->filtered_barcodes_hash, args->skip_emptydrops, args->emptydrops_failure_fatal, args->expected_cells, args->emptydrops_use_fdr, args->error_out);
    
     // Free the reader sets
     for (int i = 0; i < sample_size; ++i)

@@ -89,6 +89,8 @@ extern "C" scrna_ed_config* scrna_ed_config_create(void) {
     config->disable_occupancy_filter = 1; // Disabled for compat mode (occupancy is Flex-only)
     config->ed_retain_count = 0;          // No retain cap by default (use all cells)
     config->use_fdr_gate = 0;             // Use raw p-value by default (Flex behavior)
+    config->apply_bh_correction = 0;      // No BH correction by default (Flex behavior)
+    config->use_bootstrap = 0;            // Fixed nExpectedCells by default (Flex behavior)
     
     return config;
 }
@@ -209,8 +211,20 @@ extern "C" int scrna_emptydrops_run(
     simpleParams.indMin = config->ind_min;
     simpleParams.indMax = config->ind_max;
 
-    SimpleEmptyDropsResult simpleResult = SimpleEmptyDropsStage::runCRSimpleFilter(
-        retainUMI, retainIndices.size(), simpleParams);
+    SimpleEmptyDropsResult simpleResult;
+    if (config->use_bootstrap) {
+        simpleParams.useBootstrap = true;
+        simpleParams.nExpectedCells = 0;  // triggers bootstrap estimation
+        simpleParams.maxExpectedCells = min(config->ind_min / 2, (uint32_t)262144);
+        if (simpleParams.maxExpectedCells < 1000) simpleParams.maxExpectedCells = 90000;
+        cerr << "[scrna_api] Using bootstrap OrdMag (CR9 style), maxExpectedCells="
+             << simpleParams.maxExpectedCells << endl;
+        simpleResult = SimpleEmptyDropsStage::runCRSimpleFilterBootstrap(
+            retainUMI, retainIndices.size(), simpleParams);
+    } else {
+        simpleResult = SimpleEmptyDropsStage::runCRSimpleFilter(
+            retainUMI, retainIndices.size(), simpleParams);
+    }
 
     result->retain_threshold = simpleResult.retainThreshold;
     result->min_umi = simpleResult.minUMI;
@@ -335,6 +349,7 @@ extern "C" int scrna_emptydrops_run(
     edParams.lowerTestingBound = config->lower_testing_bound;
     edParams.ambientUmiMax = config->ambient_umi_max;
     edParams.mcThreads = config->mc_threads;
+    edParams.applyBHCorrection = (config->apply_bh_correction != 0);
     
     // ========================================================================
     // Run EmptyDrops Monte Carlo

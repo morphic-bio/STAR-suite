@@ -23,7 +23,7 @@ public:
     uint32 clippedAdMM; //adapter mismatches
     uint32 clippedN; //total number of bases clipped
     
-    ClipCR4 *cr4; //CR4 clipping structure
+    ClipCR4 *cr4 = nullptr; //CR4 clipping structure
 
     void initialize(uint32 Nin, const string &adSeqIn, uint32 afterAdNin, double adMMpIn);
     uint32 clip(uint &Lread, char *SeqNum);

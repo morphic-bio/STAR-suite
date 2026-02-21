@@ -57,6 +57,8 @@ dynamicThreadPfControllerMode   off
                                 off    ... disabled (default).
                                 shadow ... tick sequence and report proposals without applying permit updates.
                                 active ... apply permit updates at each tick (requires --variableThreads 1).
+                                eta    ... estimate remaining work from smallest-file anchors and
+                                           retune permits when ETA gap exceeds 10% (requires --variableThreads 1).
 
 dynamicThreadPfControllerIntervalMs 0
     int: controller update period in milliseconds when --dynamicThreadPfControllerMode is not off.
@@ -66,6 +68,7 @@ dynamicThreadPfControllerSequence 0
     int(s): controller permit-target sequence used by pf-stage controller mode.
                                 0 ... disabled (default sentinel).
                                 Example: 3 2 4
+                                Required for shadow/active modes; ignored by eta mode.
 
 dynamicThreadPfControllerMaxUpdates 0
     int: optional max controller updates per feature-library run.
@@ -367,6 +370,12 @@ clipAdapterType             Hamming
                             Hamming ... adapter clipping based on Hamming distance, with the number of mismatches controlled by --clip5pAdapterMMp
                             CellRanger4 ... 5p and 3p adapter clipping similar to CellRanger4. Utilizes Opal package by Martin Šošić: https://github.com/Martinsos/opal
                             None ... no adapter clipping, all other clip* parameters are disregarded
+
+clip3pPolyG                 auto
+    string:                 trim 3' polyG tails (two-color sequencer artifact filtering for NovaSeq/NextSeq)
+                            yes  ... always trim polyG tails
+                            no   ... never trim polyG tails
+                            auto ... trim polyG tails when --clipAdapterType CellRanger4 is used
                             
 clip3pNbases                 0
     int(s): number(s) of bases to clip from 3p of each mate. If one value is given, it will be assumed the same for both mates.
@@ -1609,6 +1618,17 @@ soloCrGexFeature            auto
                             gene        ... use Gene only (error if missing)
                             genefull    ... use GeneFull only (error if missing)
 
+soloCrMultimapRescue        no
+    string:                 CR-compatible transcriptomic multimap rescue policy (yes|no)
+                            no          ... keep legacy STAR multimapper handling (default)
+                            yes         ... apply exonic/intronic rescue to NH>1 genomic alignments
+
+soloCrMultimapRescueIntronic auto
+    string:                 intronic fallback for CR multimap rescue (auto|yes|no)
+                            auto        ... enable for soloCrGexFeature=genefull, disable otherwise
+                            yes         ... allow 0-exonic + single-intronic rescue
+                            no          ... exonic-only rescue
+
 soloProbeList               -
     string:                 path to probe_list.txt used to derive 1-based gene indices (15-bit cap)
                             If not provided, will auto-detect probe_gene_list.txt from genome index directory
@@ -1828,7 +1848,7 @@ crChemistry                auto
 
 crOutputChemistry          auto
     string:                 output barcode namespace for pf-multi MEX writing
-                            auto        ... follow effective chemistry after crChemistry resolution (default)
+                            auto        ... use TRU barcode namespace in outputs by default (CR-compatible)
                             NXT         ... force NXT barcode namespace in outputs
                             TRU         ... force TRU barcode namespace in outputs (CR7-style)
 
@@ -1847,6 +1867,11 @@ crFastqMap                  -
 crMexUseGexBarcodes        -
     string:                 DEPRECATED: CR-compat MEX now always writes both raw_feature_bc_matrix and filtered_feature_bc_matrix using GEX barcodes
                             This parameter is ignored and kept for backward compatibility only
+
+crAssignLegacyCbRescue     0
+    int:                    pending CB rescue mode for assignBarcodes.
+                            0 ... default deterministic frozen-pass rescue (order-independent).
+                            1 ... legacy order-dependent immediate-update rescue.
 
 ### Default Module Flag Groups
 ### These flags apply predefined parameter bundles for common workflows.
@@ -1873,7 +1898,7 @@ defaultCrCompat             No
     string:                 yes/no - apply CR-compat mode with CRISPR calling defaults
                             Enables: soloType Droplet, soloFeatures Gene GeneFull,
                             soloCellFilter EmptyDrops_CR, soloCrMode CR,
-                            soloCrGexFeature GeneFull, crMinUmi 10,
+                            soloCrGexFeature GeneFull, soloCrMultimapRescue yes, crMinUmi 3,
                             soloCBmatchWLtype 1MM_multi_Nbase_pseudocounts,
                             soloUMIdedup 1MM_CR, soloUMIfiltering MultiGeneUMI_CR,
                             soloMultiMappers Rescue, soloCbUbRequireTogether no
@@ -1903,7 +1928,8 @@ defaultVbem                 No
 
 defaultA375Parity           No
     string:                 yes/no - apply A375 GEX+feature parity defaults
-                            Enables: soloCrMode CR, soloCrGexFeature GeneFull, crMinUmi 10
+                            Enables: soloCrMode CR, soloCrGexFeature GeneFull,
+                            soloCrMultimapRescue yes, crMinUmi 10
 
 #####UnderDevelopment_begin : not supported - do not use
 soloClusterCBfile           -

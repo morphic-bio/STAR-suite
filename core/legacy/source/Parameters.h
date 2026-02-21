@@ -610,13 +610,13 @@ class Parameters {
         struct {
             string pfMultiConfig;           // Path to pf-multi config CSV (Cell Ranger-style input)
             string crChemistry;            // Chemistry mode: auto|NXT|TRU (explicit mode overrides auto-detect)
-            string crOutputChemistry;      // Output barcode namespace: auto|NXT|TRU (auto follows effective chemistry)
+            string crOutputChemistry;      // Output barcode namespace: auto|NXT|TRU (auto defaults to TRU for CR-compat)
             string crWhitelist;            // Override whitelist (if config missing)
             string crFeatureRef;            // Override feature reference (if config missing)
             string crFastqRoot;            // Fallback root for FASTQ directories
             vector<string> crFastqMap;     // Map config FASTQ paths to actual paths (key=value pairs)
             string crMexUseGexBarcodes;    // DEPRECATED: CR-compat MEX now always uses GEX barcodes (ignored, kept for backward compatibility)
-            int crMinUmi;                   // Minimum UMI threshold for CRISPR feature calling (default: 10)
+            int crMinUmi;                   // Minimum UMI threshold for CRISPR feature calling (default: 3)
             int crAssignMaxHamming;         // Optional: pass --maxHammingDistance to assignBarcodes (default: unset)
             int crAssignFeatureOffset;      // Optional: pass --feature_constant_offset to assignBarcodes (default: unset)
             int crAssignLimitSearch;        // Optional: pass --limit_search to assignBarcodes; -2 means unset
@@ -627,6 +627,7 @@ class Parameters {
             int crAssignConsumerThreads;    // Optional: pass --consumer_threads_per_set (default: unset)
             int crAssignSearchThreads;      // Optional: pass --search_threads (default: unset)
             double crAssignMinPosterior;    // Optional: pass --min_posterior (default: unset)
+            int crAssignLegacyCbRescue;     // Optional: pass legacy order-dependent pending CB rescue mode
             string crAssignFilteredBarcodes;// Optional filtered barcode file for assignBarcodes
         } pfMulti;
 

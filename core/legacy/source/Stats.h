@@ -35,6 +35,24 @@ class Stats {
         uint64 trimPairsDropped;
         uint64 trimPairsKept;
 
+        // CR-compat multimap rescue (gated on crRescueTotal > 0 in reportFinal)
+        uint64 crRescueTotal;
+        uint64 crRescueGeneVsNonGene;
+        uint64 crRescueFastPathRejected50pct;      // winner failed 50% rule (INTERGENIC)
+        uint64 crRescueFastPathIntronicFallbackOff;  // winner INTRONIC but fallback disabled
+        uint64 crRescueExonicWinner;
+        uint64 crRescueIntronicFallback;
+        uint64 crRescueMultiExonicNoRescue;
+        uint64 crRescueMultiIntronicNoRescue;
+        uint64 crRescueIntronicFallbackOffNoRescue;  // 1 intronic, 0 exonic, fallback disabled
+        uint64 crRescueAllIntergenicNoRescue;
+
+        // CR-compat GeneFull exonic-over-intronic filter (gated on counter > 0 in reportFinal)
+        uint64 crGeneFullExonicOverIntronicFiltered;  // alignments where intronic-only genes were dropped
+        uint64 crGeneFullResolvedToUniqueAfterFilter;  // reads resolved from multi-gene to single gene
+        uint64 crGeneFullStillMultiExonic;             // reads still multi-gene after filter
+        uint64 crGeneFullCrossAlignMultiGene;          // reads multi-gene from different alignments (not filterable)
+
         time_t timeStart, timeStartMap, timeFinishMap, timeLastReport, timeFinish;
         
         Stats ();

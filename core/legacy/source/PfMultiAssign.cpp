@@ -172,6 +172,9 @@ static void applyAssignOptions(pf_config* cfg, const AssignOptions& options) {
     if (options.maxReads > 0) {
         pf_config_set_max_reads(cfg, options.maxReads);
     }
+    if (options.legacyCbRescue) {
+        pf_config_set_legacy_cb_rescue(cfg, 1);
+    }
     if (options.enableStarDynamicPermitHooks) {
         pf_config_set_permit_hooks(
             cfg,
@@ -220,6 +223,7 @@ static void writeApiRunSummary(const string& assignOut,
     out << "searchThreads=" << options.searchThreads << "\n";
     out << "minPosterior=" << options.minPosterior << "\n";
     out << "maxReads=" << options.maxReads << "\n";
+    out << "legacyCbRescue=" << (options.legacyCbRescue ? 1 : 0) << "\n";
     out << "enableStarDynamicPermitHooks=" << (options.enableStarDynamicPermitHooks ? 1 : 0) << "\n";
     out << "filteredBarcodesPath=" << options.filteredBarcodesPath << "\n";
     out << "stats.total_reads=" << stats.total_reads << "\n";
