@@ -26,6 +26,19 @@ permissions:
   contents: read
 
 jobs:
+  check-secrets:
+    runs-on: ubuntu-24.04
+    outputs:
+      has-docker-creds: ${{ steps.check.outputs.has-creds }}
+    steps:
+      - id: check
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+        run: |
+          if [ -n "$DOCKERHUB_USERNAME" ]; then
+            echo "has-creds=true" >> "$GITHUB_OUTPUT"
+          fi
+
   build-and-tier-a:
     runs-on: ubuntu-24.04
     timeout-minutes: 120
@@ -49,10 +62,10 @@ jobs:
             scripts/docker/run_smokes_tier_a.sh
 
   publish-master-images:
-    needs: build-and-tier-a
+    needs: [build-and-tier-a, check-secrets]
     runs-on: ubuntu-24.04
     timeout-minutes: 120
-    if: ${{ secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != '' }}
+    if: needs.check-secrets.outputs.has-docker-creds == 'true'
     permissions:
       contents: read
     steps:

@@ -9,6 +9,19 @@ permissions:
   contents: write
 
 jobs:
+  check-secrets:
+    runs-on: ubuntu-24.04
+    outputs:
+      has-docker-creds: ${{ steps.check-docker.outputs.has-creds }}
+    steps:
+      - id: check-docker
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+        run: |
+          if [ -n "$DOCKERHUB_USERNAME" ]; then
+            echo "has-creds=true" >> "$GITHUB_OUTPUT"
+          fi
+
   build-release-artifacts:
     runs-on: ubuntu-24.04
     timeout-minutes: 180
@@ -95,10 +108,10 @@ jobs:
           if-no-files-found: error
 
   publish-release-images:
-    needs: build-release-artifacts
+    needs: [build-release-artifacts, check-secrets]
     runs-on: ubuntu-24.04
     timeout-minutes: 120
-    if: ${{ secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != '' }}
+    if: needs.check-secrets.outputs.has-docker-creds == 'true'
     permissions:
       contents: read
     steps:
