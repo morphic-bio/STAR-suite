@@ -36,6 +36,8 @@
   - [DONE] Validated on UCSF iPSC2 full sample: cell gap 716→39, Jaccard 0.99, gene Pearson 0.997, cell Pearson 0.999.
   - Flex path unchanged: `nExpectedCells=3000`, `umiMin=500`, raw p-value gating, no BH, no bootstrap — these are the Flex/CR7.1-derived defaults; keep until CR Flex cell-calling parity is investigated.
   - [TODO] Investigate whether `indMin=45000` / `indMax=90000` ambient window sizing is appropriate for all dataset sizes (currently no rescue possible if nCB < 45000).
+- GeneFull intronic read counting harmonization with CR:
+  - [TODO] Investigate differences in how STAR GeneFull counts intronic reads vs CR's intron inclusion mode. On UCSF iPSC2, several large genes (ENSG00000287001 310x, AKAP6 123x, ARMC9 29x, DHFR 20x) show extreme STAR-over-CR ratios despite identical GTFs. Pattern is diffuse (1-2 UMIs across thousands of barcodes), consistent with ambient intronic fragments that CR's stricter admission criteria suppress. CR may require reads to be confidently intronic (no exon overlap from any gene), apply antisense intron filtering, or use splice-awareness heuristics that STAR GeneFull does not. Gene Pearson remains 0.997 so impact is minor, but worth understanding for further parity improvement.
 - Poly-G trimming auto-detection:
   - [DONE] `--clip3pPolyG yes|no|auto` parameter and poly-G trimming gated in `ClipCR4::polyTail3p`.
   - [TODO] Implement data-driven `auto` mode: count poly-G fraction in first N reads (during existing chunk processing) and set the flag if prevalence exceeds threshold. Currently `auto` = `yes` when `--clipAdapterType CellRanger4`.
