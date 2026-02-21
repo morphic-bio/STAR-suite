@@ -70,31 +70,24 @@ jobs:
           scripts/release/build_source_package.sh \
             --out-dir "dist/release/source"
 
-      - name: Import Debian signing key
-        if: ${{ secrets.DEB_SIGNING_KEY != '' && secrets.DEB_SIGNING_KEY_ID != '' }}
+      - name: Import and sign Debian source package
         env:
           DEB_SIGNING_KEY: ${{ secrets.DEB_SIGNING_KEY }}
-        run: |
-          export GNUPGHOME="${RUNNER_TEMP}/gnupg"
-          mkdir -p "${GNUPGHOME}"
-          chmod 700 "${GNUPGHOME}"
-          printf '%s' "${DEB_SIGNING_KEY}" | gpg --batch --import
-          echo "GNUPGHOME=${GNUPGHOME}" >> "${GITHUB_ENV}"
-
-      - name: Sign source package artifacts
-        if: ${{ secrets.DEB_SIGNING_KEY != '' && secrets.DEB_SIGNING_KEY_ID != '' }}
-        env:
           DEB_SIGNING_KEY_ID: ${{ secrets.DEB_SIGNING_KEY_ID }}
           DEB_SIGNING_KEY_PASSPHRASE: ${{ secrets.DEB_SIGNING_KEY_PASSPHRASE }}
         run: |
-          scripts/release/sign_source_package.sh \
-            --in-dir "dist/release/source" \
-            --key-id "${DEB_SIGNING_KEY_ID}"
-
-      - name: Source signing skipped (no signing secrets configured)
-        if: ${{ !(secrets.DEB_SIGNING_KEY != '' && secrets.DEB_SIGNING_KEY_ID != '') }}
-        run: |
-          echo "Skipping source package signing; configure DEB_SIGNING_KEY and DEB_SIGNING_KEY_ID to enable."
+          if [ -n "$DEB_SIGNING_KEY" ] && [ -n "$DEB_SIGNING_KEY_ID" ]; then
+            export GNUPGHOME="${RUNNER_TEMP}/gnupg"
+            mkdir -p "${GNUPGHOME}"
+            chmod 700 "${GNUPGHOME}"
+            printf '%s' "${DEB_SIGNING_KEY}" | gpg --batch --import
+            echo "GNUPGHOME=${GNUPGHOME}" >> "${GITHUB_ENV}"
+            scripts/release/sign_source_package.sh \
+              --in-dir "dist/release/source" \
+              --key-id "${DEB_SIGNING_KEY_ID}"
+          else
+            echo "Skipping source package signing; configure DEB_SIGNING_KEY and DEB_SIGNING_KEY_ID to enable."
+          fi
 
       - name: Generate checksums
         run: |
