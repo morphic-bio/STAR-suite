@@ -155,6 +155,15 @@ jobs:
           name: release-artifacts-${{ github.ref_name }}
           path: dist/release
 
+      - name: Detect prerelease from tag
+        id: prerelease
+        run: |
+          if echo "${{ github.ref_name }}" | grep -qiE '[-](alpha|beta|rc|dev)'; then
+            echo "is_prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
@@ -162,4 +171,4 @@ jobs:
             dist/release/**/*
           generate_release_notes: true
           draft: false
-          prerelease: false
+          prerelease: ${{ steps.prerelease.outputs.is_prerelease == 'true' }}
