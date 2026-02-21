@@ -37,6 +37,8 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+OUT_DIR="$(cd "${REPO_ROOT}" && mkdir -p "${OUT_DIR}" && cd "${OUT_DIR}" && pwd)"
+
 cd "${REPO_ROOT}"
 
 if [[ ! -f debian/control ]]; then

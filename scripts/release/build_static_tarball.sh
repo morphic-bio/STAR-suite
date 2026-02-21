@@ -60,8 +60,9 @@ case "${arch_raw}" in
     ;;
 esac
 
-mkdir -p "${OUT_DIR}"
 cd "${REPO_ROOT}"
+mkdir -p "${OUT_DIR}"
+OUT_DIR="$(cd "${OUT_DIR}" && pwd)"
 
 echo "Building static STAR (jobs=${MAKE_JOBS})..."
 make -j"${MAKE_JOBS}" core-static
