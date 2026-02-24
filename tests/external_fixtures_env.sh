@@ -17,6 +17,20 @@ export CR_GENOME_DIR="${CR_GENOME_DIR:-/storage/autoindex_110_44/bulk_index}"
 export CR_MULTI_GEX_OUTPREFIX="${CR_MULTI_GEX_OUTPREFIX:-/tmp/star_gex_smoke/}"
 export CR_MULTI_OUTPREFIX="${CR_MULTI_OUTPREFIX:-/tmp/star_multi_smoke_cpp/}"
 
+# UCSF 2M perturb fixtures (current canonical runs)
+export UCSF_2M_ROOT="${UCSF_2M_ROOT:-/storage/ucsf-2M}"
+export UCSF_2M_STAR_RUNS_ROOT="${UCSF_2M_STAR_RUNS_ROOT:-$UCSF_2M_ROOT/star_runs}"
+export UCSF_2M_FIXTURE_SEQUENTIAL="${UCSF_2M_FIXTURE_SEQUENTIAL:-$UCSF_2M_STAR_RUNS_ROOT/fixture_ucsf2m_current_sequential}"
+export UCSF_2M_FIXTURE_DYNAMIC="${UCSF_2M_FIXTURE_DYNAMIC:-$UCSF_2M_STAR_RUNS_ROOT/fixture_ucsf2m_current_dynamic}"
+export UCSF_2M_FIXTURE_COMPARE_REPORT="${UCSF_2M_FIXTURE_COMPARE_REPORT:-/tmp/ucsf2m_seq_vs_fixture_20260224_090754/COMPARE_REPORT.txt}"
+
+# UCSF full-sample perturb references
+export UCSF_FULL_ROOT="${UCSF_FULL_ROOT:-/storage/ucsf-full/bench_20260218_dynamic_first}"
+export UCSF_FULL_STAR_RUNS_ROOT="${UCSF_FULL_STAR_RUNS_ROOT:-$UCSF_FULL_ROOT/runs}"
+export UCSF_FULL_FIXTURE_STAR="${UCSF_FULL_FIXTURE_STAR:-$UCSF_FULL_STAR_RUNS_ROOT/star_full_iPSC2_1_AALG2_forward_rescue_guides_bootstrap_20260221_010635}"
+export UCSF_FULL_DYNAMIC_32X32="${UCSF_FULL_DYNAMIC_32X32:-$UCSF_FULL_STAR_RUNS_ROOT/star_full_dynamic_32x32_20260224_092512}"
+export UCSF_FULL_CR_REF="${UCSF_FULL_CR_REF:-$UCSF_FULL_ROOT/cellranger_runs/cr_full_iPSC2_1_AALG2_crstar32_20260218_205804}"
+
 # Flex fixtures
 export FLEX_INDEX="${FLEX_INDEX:-/storage/flex_filtered_reference/star_index}"
 export FLEX_WHITELIST="${FLEX_WHITELIST:-/storage/scRNAseq_output/whitelists/737K-fixed-rna-profiling.txt}"

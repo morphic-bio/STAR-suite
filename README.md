@@ -212,6 +212,21 @@ STAR-suite includes a perturb-seq path that combines CR-compatible Solo behavior
 with integrated CRISPR feature calling. This is the path used for STAR-perturb
 work and CR compatibility comparisons.
 
+- **Default STAR-perturb execution profile (recommended):**
+  - `--runThreadN 32`
+  - `--dynamicThreadInterface 1`
+  - `--dynamicThreadConstMapPermits 32`
+  - `--dynamicThreadTelemetry 1`
+  - `--crAssignConsumerThreads 32`
+  - `--crAssignSearchThreads 1`
+  - This profile keeps both map and feature sides provisioned to use full CPU
+    when unconstrained, with permit gating preventing oversubscription.
+- **UCSF full-sample benchmark (2026-02-24, 32-thread host):**
+  - STAR dynamic (`32x32`): `20:26.93`
+  - STAR full fixture baseline: `30:20`
+  - Cell Ranger 9 full run (`32 cores`): `33:57.18`
+  - Speedup: ~`1.66x` throughput vs CR full run (~`39.8%` wall-time reduction).
+
 - **Integrated CR-compat in STAR** (GEX + feature merge + CRISPR calling):
   - Use `--pfMultiConfig <multi_config.csv>`
   - Recommended bundle: `--defaultCrCompat yes`
@@ -291,6 +306,10 @@ See `slam/docs/SLAM_COMPATIBILITY_MODE.md` and `slam/docs/SLAM_seq.md`.
 See `docs/feature_barcodes.md` and `docs/CRISPR_FEATURE_CALLING_IMPLEMENTATION_SUMMARY.md`.
 - `--pfMultiConfig`: Enable Cell Ranger-style multi processing with feature libraries.
 - `--defaultCrCompat yes`: Apply the CR-compat perturb defaults bundle.
+- `--dynamicThreadInterface 1`: Enable STAR/PF permit coordination.
+- `--dynamicThreadConstMapPermits 32`: Start with full map-side permit budget.
+- `--crAssignConsumerThreads 32`: Provision PF worker pool to full host budget.
+- `--crAssignSearchThreads 1`: Per-consumer search-thread mode used in UCSF full benchmark.
 - `--crMinUmi`: Minimum UMI threshold for CRISPR feature calling (default `10`).
 - `--soloCrGexFeature`: Control merged GEX source (`auto`, `gene`, `genefull`).
 - `--soloCrMode CR`: Enable CR-compatible single-cell behavior.
@@ -403,8 +422,14 @@ For paired-end, pass **two comma-separated mate lists**:
 ```bash
 core/legacy/source/STAR \
   --runMode alignReads \
+  --runThreadN 32 \
   --genomeDir /path/to/index \
   --pfMultiConfig /path/to/multi_config.csv \
+  --dynamicThreadInterface 1 \
+  --dynamicThreadConstMapPermits 32 \
+  --dynamicThreadTelemetry 1 \
+  --crAssignConsumerThreads 32 \
+  --crAssignSearchThreads 1 \
   --defaultCrCompat yes \
   --outFileNamePrefix /path/to/outs/
 ```

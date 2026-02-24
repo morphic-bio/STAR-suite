@@ -59,6 +59,8 @@ dynamicThreadPfControllerMode   off
                                 active ... apply permit updates at each tick (requires --variableThreads 1).
                                 eta    ... estimate remaining work from smallest-file anchors and
                                            retune permits when ETA gap exceeds 10% (requires --variableThreads 1).
+                                chunked ... simple coarse retune policy using PF search-thread quanta
+                                           (1/2/4 permits per update; requires --variableThreads 1).
 
 dynamicThreadPfControllerIntervalMs 0
     int: controller update period in milliseconds when --dynamicThreadPfControllerMode is not off.
@@ -68,7 +70,7 @@ dynamicThreadPfControllerSequence 0
     int(s): controller permit-target sequence used by pf-stage controller mode.
                                 0 ... disabled (default sentinel).
                                 Example: 3 2 4
-                                Required for shadow/active modes; ignored by eta mode.
+                                Required for shadow/active modes; ignored by eta/chunked modes.
 
 dynamicThreadPfControllerMaxUpdates 0
     int: optional max controller updates per feature-library run.

@@ -6,6 +6,16 @@ Status: staged design for upstream-friendly implementation
 
 Iteration runbook: `plans/dynamic_scheduler_runbook.md`
 
+## C/C++ LOC Delta Snapshot (2026-02-23)
+1. Counter script: `core/legacy/scripts/count_cpp_lines.sh`.
+2. Current STAR core scope (`core/legacy/source` + `core/features`,
+   excluding only `htslib/` and `opal/`): `444` files, `108,813` lines.
+3. Included integrated library example:
+   `core/features/libscrna` = `24` files, `7,236` lines.
+4. Upstream STAR `2.7.11b` (`source/` with the same exclusions):
+   `250` files, `28,228` lines.
+5. Net delta vs upstream: `+194` files, `+80,585` lines.
+
 ## CRISPR Calling Threshold Policy (2026-02-18)
 1. Default `crMinUmi` is reset to `3` for general CRISPR feature calling.
 2. A375 parity runs are pinned to `--crMinUmi 10` via:
@@ -75,6 +85,40 @@ CR9 16-core vs 32-core reproducibility check:
      --include-introns true --min-crispr-umi 3 --create-bam false \
      --localcores 32 --localmem 128 --disable-ui
    ```
+
+## UCSF 2M Fixture Refresh (2026-02-24)
+1. Active UCSF 2M fixture baseline is now the 2026-02-24 rerun set:
+   - sequential: `/storage/ucsf-2M/star_runs/fixture_ucsf2m_current_sequential`
+   - dynamic: `/storage/ucsf-2M/star_runs/fixture_ucsf2m_current_dynamic`
+2. New-run consistency checks show no regressions across current code paths:
+   - sequential vs dynamic: `17/17` key outputs identical
+   - sequential (`search=1`) vs sequential (`consumer=4/search=4`): `17/17` identical
+3. Old 2026-02-18 fixture remains a historical benchmark reference but is no
+   longer the canonical fixture for current validation.
+4. Evidence artifacts:
+   - `/tmp/ucsf2m_seq_vs_fixture_20260224_090754/COMPARE_REPORT.txt`
+   - `/tmp/ucsf2m_seq_fixture_check_20260224_091148/SUMMARY.txt`
+
+## UCSF Full Benchmark Refresh (2026-02-24)
+1. Dynamic full-sample run (provision both map and PF to 32):
+   - `/storage/ucsf-full/bench_20260218_dynamic_first/runs/star_full_dynamic_32x32_20260224_092512`
+2. Effective dynamic profile used:
+   - `--runThreadN 32`
+   - `--dynamicThreadInterface 1`
+   - `--dynamicThreadConstMapPermits 32`
+   - `--dynamicThreadTelemetry 1`
+   - `--crAssignConsumerThreads 32`
+   - `--crAssignSearchThreads 1`
+3. Wall-time comparison:
+   - STAR dynamic `32x32`: `20:26.93`
+   - STAR full fixture baseline: `30:20`
+   - Cell Ranger 9 full (`32 cores`): `33:57.18`
+4. Performance summary:
+   - vs CR full: `~1.66x` throughput, `~39.8%` less wall time
+   - vs STAR full fixture baseline: `~1.48x` throughput, `~32.6%` less wall time
+5. Parity summary:
+   - New full dynamic run matches STAR full fixture on checked core GEX/feature
+     matrices and `crispr_analysis` outputs.
 
 ## Objective
 Build a dynamic threading controller in STAR core that can be reused by other

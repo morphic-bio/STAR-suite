@@ -1522,10 +1522,12 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
             dynamicThreadPfControllerMode = "active";
         } else if (mode == "3" || mode == "eta") {
             dynamicThreadPfControllerMode = "eta";
+        } else if (mode == "4" || mode == "chunked" || mode == "chunks") {
+            dynamicThreadPfControllerMode = "chunked";
         } else {
             ostringstream errOut;
             errOut <<"EXITING: fatal input ERROR: --dynamicThreadPfControllerMode must be one of "
-                   <<"off|shadow|active|eta (or 0|1|2|3), user-defined value="
+                   <<"off|shadow|active|eta|chunked (or 0|1|2|3|4), user-defined value="
                    <<dynamicThreadPfControllerMode<<"\n";
             exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
         }
@@ -1564,10 +1566,12 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
         errOut <<"EXITING: fatal input ERROR: --dynamicThreadPfControllerMode requires --dynamicThreadInterface=1\n";
         exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
     }
-    if ((dynamicThreadPfControllerMode == "active" || dynamicThreadPfControllerMode == "eta") &&
+    if ((dynamicThreadPfControllerMode == "active" ||
+         dynamicThreadPfControllerMode == "eta" ||
+         dynamicThreadPfControllerMode == "chunked") &&
         variableThreads != 1) {
         ostringstream errOut;
-        errOut <<"EXITING: fatal input ERROR: --dynamicThreadPfControllerMode=active/eta requires --variableThreads=1\n";
+        errOut <<"EXITING: fatal input ERROR: --dynamicThreadPfControllerMode=active/eta/chunked requires --variableThreads=1\n";
         exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
     }
     if (pfControllerEnabled && dynamicThreadPfControllerIntervalMs <= 0) {

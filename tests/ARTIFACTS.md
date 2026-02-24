@@ -78,9 +78,29 @@ update this file with its output location.
   - SCEPTRE outputs: `/storage/A375/sceptre_runs/`
 - `/storage/ucsf-2M/` (UCSF downsampled perturb fixtures + parity outputs)
   - CR baselines: `/storage/ucsf-2M/cellranger_runs/`
+  - Canonical STAR 2M fixture (2026-02-24 refresh):
+    - Sequential fixture symlink:
+      `/storage/ucsf-2M/star_runs/fixture_ucsf2m_current_sequential`
+      -> `star_2m_sequential_search1_20260224_090102`
+    - Dynamic fixture symlink:
+      `/storage/ucsf-2M/star_runs/fixture_ucsf2m_current_dynamic`
+      -> `star_2m_dynamic_active_seq816_search1_20260224_081839`
+    - Fixture consistency report:
+      `/tmp/ucsf2m_seq_vs_fixture_20260224_090754/COMPARE_REPORT.txt`
+    - Promotion summary:
+      `/tmp/ucsf2m_seq_fixture_check_20260224_091148/SUMMARY.txt`
   - Call-only parity outputs:
     - `/storage/ucsf-2M/callonly_parity_masterclean_20260217_073728/`
     - `/storage/ucsf-2M/compat_gate_ucsf_callonly_20260218_014137/`
+- `/storage/ucsf-full/` (UCSF full-sample perturb runs)
+  - Dynamic 32x32 benchmark run:
+    - `/storage/ucsf-full/bench_20260218_dynamic_first/runs/star_full_dynamic_32x32_20260224_092512/`
+  - STAR full fixture baseline:
+    - `/storage/ucsf-full/bench_20260218_dynamic_first/runs/star_full_iPSC2_1_AALG2_forward_rescue_guides_bootstrap_20260221_010635/`
+  - Cell Ranger full reference (32 cores):
+    - `/storage/ucsf-full/bench_20260218_dynamic_first/cellranger_runs/cr_full_iPSC2_1_AALG2_crstar32_20260218_205804/`
+  - STAR vs CR parity report (dynamic 32x32 run):
+    - `/tmp/ucsf_full_dynamic_32x32_vs_cr_20260224_101314/`
 
 ## Flex Modular Integration Baselines
 

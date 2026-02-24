@@ -28,6 +28,42 @@ Non-goals for first implementation:
 - Todo anchor: `docs/todos` (dynamic permit item)
 - UCSF call-only parity context: `comparisons/ucsf_ipsc2_callonly_gmm_parity_20260217/RESULTS.md`
 
+## UCSF 2M Fixture Promotion (2026-02-24)
+1. The new canonical UCSF 2M STAR fixture is the 2026-02-24 rerun set:
+   - sequential: `/storage/ucsf-2M/star_runs/fixture_ucsf2m_current_sequential`
+   - dynamic: `/storage/ucsf-2M/star_runs/fixture_ucsf2m_current_dynamic`
+2. Hash parity over key outputs confirms internal consistency:
+   - new sequential vs new dynamic: `17/17` identical
+   - sequential `search=1` vs sequential `consumer=4/search=4`: `17/17` identical
+3. Old 2026-02-18 comparison fixture remains historically valid but is now
+   superseded as the active baseline for current code validation.
+4. Promotion evidence:
+   - `/tmp/ucsf2m_seq_vs_fixture_20260224_090754/COMPARE_REPORT.txt`
+   - `/tmp/ucsf2m_seq_fixture_check_20260224_091148/SUMMARY.txt`
+
+## UCSF Full Dynamic Default Benchmark (2026-02-24)
+1. Full-sample dynamic run with both sides provisioned to full host budget:
+   - run: `/storage/ucsf-full/bench_20260218_dynamic_first/runs/star_full_dynamic_32x32_20260224_092512`
+   - key flags:
+     - `--runThreadN 32`
+     - `--dynamicThreadInterface 1`
+     - `--dynamicThreadConstMapPermits 32`
+     - `--dynamicThreadTelemetry 1`
+     - `--crAssignConsumerThreads 32`
+     - `--crAssignSearchThreads 1`
+2. Wall-time comparison:
+   - STAR dynamic (`32x32`): `20:26.93`
+   - STAR full fixture baseline: `30:20`
+   - Cell Ranger 9 full run (`32 cores`): `33:57.18`
+3. Throughput improvement:
+   - vs CR full run: `~1.66x` (~`39.8%` wall-time reduction)
+   - vs STAR full fixture baseline: `~1.48x` (~`32.6%` wall-time reduction)
+4. Output checks:
+   - STAR full dynamic vs STAR full fixture: checked core GEX/feature MEX and
+     `crispr_analysis/*` outputs are identical.
+   - STAR vs CR parity report:
+     `/tmp/ucsf_full_dynamic_32x32_vs_cr_20260224_101314/PARITY_GEX_FEATURES_RAW_AND_CR_FILTERED.txt`
+
 ## Key Decisions Already Made
 1. Use a hybrid model with fixed worker pools and dynamic active permits.
 2. Keep STAR thread creation unchanged; dynamic behavior means gating active work, not spawning/killing threads mid-run.

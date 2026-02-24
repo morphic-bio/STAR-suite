@@ -46,7 +46,7 @@ class Parameters {
         int variableThreads = 0; // 0: fixed map permits, 1: allow runtime map permit retuning
         int variableThreadsRetuneEveryAcquires = 0; // <=0 disables auto-retune sequence
         vector<int> variableThreadsPermitSequence; // sequence of permit targets applied at retune cadence
-        string dynamicThreadPfControllerMode = "off"; // off|shadow|active external pf controller mode
+        string dynamicThreadPfControllerMode = "off"; // off|shadow|active|eta|chunked external pf controller mode
         int dynamicThreadPfControllerIntervalMs = 0; // <=0 disables external pf controller ticks
         vector<int> dynamicThreadPfControllerSequence; // controller permit target sequence
         int dynamicThreadPfControllerMaxUpdates = 0; // <=0 means unlimited updates until pf stage ends

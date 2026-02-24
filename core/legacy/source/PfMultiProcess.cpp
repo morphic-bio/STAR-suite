@@ -285,11 +285,15 @@ enum class PfPermitControllerMode {
     Off = 0,
     Shadow = 1,
     Active = 2,
-    Eta = 3
+    Eta = 3,
+    Chunked = 4
 };
 
 static PfPermitControllerMode parsePfPermitControllerMode(const string& rawMode) {
     const string mode = lowerCopy(trimCopy(rawMode));
+    if (mode == "chunked" || mode == "chunks" || mode == "4") {
+        return PfPermitControllerMode::Chunked;
+    }
     if (mode == "eta" || mode == "3") {
         return PfPermitControllerMode::Eta;
     }
@@ -310,10 +314,22 @@ static string pfPermitControllerModeName(PfPermitControllerMode mode) {
             return "active";
         case PfPermitControllerMode::Eta:
             return "eta";
+        case PfPermitControllerMode::Chunked:
+            return "chunked";
         case PfPermitControllerMode::Off:
         default:
             return "off";
     }
+}
+
+static int normalizePfSearchThreadQuantum(int rawSearchThreads) {
+    if (rawSearchThreads <= 1) {
+        return 1;
+    }
+    if (rawSearchThreads <= 2) {
+        return 2;
+    }
+    return 4;
 }
 
 static string joinIntVector(const vector<int>& values) {
@@ -1123,13 +1139,21 @@ int processPfMultiConfig(Parameters& P,
             (pfControllerMode == PfPermitControllerMode::Shadow ||
              pfControllerMode == PfPermitControllerMode::Active);
         const bool pfControllerEtaMode = (pfControllerMode == PfPermitControllerMode::Eta);
+        const bool pfControllerChunkedMode = (pfControllerMode == PfPermitControllerMode::Chunked);
         const bool pfControllerAppliesUpdates =
             (pfControllerMode == PfPermitControllerMode::Active ||
-             pfControllerMode == PfPermitControllerMode::Eta);
+             pfControllerMode == PfPermitControllerMode::Eta ||
+             pfControllerMode == PfPermitControllerMode::Chunked);
         const int pfControllerIntervalMs = P.dynamicThreadPfControllerIntervalMs;
         const vector<int> pfControllerSequence = P.dynamicThreadPfControllerSequence;
         const int pfControllerMaxUpdates = P.dynamicThreadPfControllerMaxUpdates;
         const string pfControllerSequenceLabel = joinIntVector(pfControllerSequence);
+        const int pfSearchThreadsForController =
+            (assignOpts.searchThreads > 0) ? assignOpts.searchThreads : 4;
+        const int pfSearchThreadQuantum = normalizePfSearchThreadQuantum(pfSearchThreadsForController);
+        const int pfChunkPermitStep = pfSearchThreadQuantum + 1;
+        const bool pfConsumerThreadsExplicit = (assignOpts.consumerThreadsPerSet > 0);
+        const int pfConsumerCapPerProducer = 8;
 
         if (!P.pfMulti.crAssignFilteredBarcodes.empty() && P.pfMulti.crAssignFilteredBarcodes != "-") {
             struct stat stFiltered;
@@ -1173,6 +1197,55 @@ int processPfMultiConfig(Parameters& P,
             const string& libraryType = preparedLib.libraryType;
             const string& featureRefType = preparedLib.featureRefType;
             const AnchoredReadEstimate featureEstimate = preparedLib.featureEstimate;
+            const int pfProducerSlotsAvailable =
+                std::max(1, std::min(std::max(1, P.runThreadN - 1),
+                                     std::max(1, static_cast<int>(featureEstimate.fileCount))));
+            int pfReaderThreadsReserved = 1;
+            int pfConsumerBudgetThreads = std::max(1, P.runThreadN - pfReaderThreadsReserved);
+            int pfConsumerThreadsForRun = std::max(1, assignOpts.consumerThreadsPerSet);
+            int pfConsumerSoftMax = pfConsumerCapPerProducer;
+            bool pfConsumerThreadsAuto = false;
+            if (!pfConsumerThreadsExplicit && assignOpts.enableStarDynamicPermitHooks) {
+                // Choose producer reservation and consumer pool jointly:
+                // maximize consumers, cap consumers per producer, then increase producers as needed.
+                int bestProducerReserve = 1;
+                int bestConsumerThreads = 1;
+                for (int producerReserve = 1; producerReserve <= pfProducerSlotsAvailable; ++producerReserve) {
+                    const int consumerBudget =
+                        std::max(1, P.runThreadN - producerReserve);
+                    const int consumerByBudget =
+                        std::max(1, consumerBudget / std::max(1, pfSearchThreadQuantum));
+                    const int consumerByProducerCap =
+                        std::max(1, producerReserve * pfConsumerCapPerProducer);
+                    const int candidateConsumers =
+                        std::max(1, std::min(consumerByBudget, consumerByProducerCap));
+                    if (candidateConsumers > bestConsumerThreads ||
+                        (candidateConsumers == bestConsumerThreads &&
+                         producerReserve < bestProducerReserve)) {
+                        bestConsumerThreads = candidateConsumers;
+                        bestProducerReserve = producerReserve;
+                    }
+                }
+                pfReaderThreadsReserved = bestProducerReserve;
+                pfConsumerThreadsForRun = bestConsumerThreads;
+                pfConsumerBudgetThreads = std::max(1, P.runThreadN - pfReaderThreadsReserved);
+                pfConsumerSoftMax =
+                    std::max(1, pfReaderThreadsReserved * pfConsumerCapPerProducer);
+                pfConsumerThreadsAuto = true;
+            } else if (pfConsumerThreadsExplicit) {
+                // Respect explicit consumer count, but scale producer reserve to maintain per-producer cap.
+                const int neededProducerReserve = std::max(
+                    1, (pfConsumerThreadsForRun + pfConsumerCapPerProducer - 1) / pfConsumerCapPerProducer);
+                pfReaderThreadsReserved = std::min(pfProducerSlotsAvailable, neededProducerReserve);
+                pfConsumerBudgetThreads = std::max(1, P.runThreadN - pfReaderThreadsReserved);
+                pfConsumerSoftMax =
+                    std::max(1, pfReaderThreadsReserved * pfConsumerCapPerProducer);
+            }
+            PfMultiAssign::AssignOptions runAssignOpts = assignOpts;
+            runAssignOpts.consumerThreadsPerSet = pfConsumerThreadsForRun;
+            const bool pfSingleConsumer = (pfConsumerThreadsForRun <= 1);
+            const int pfPermitCeilingDuringPf =
+                std::max(1, P.runThreadN - pfReaderThreadsReserved);
 
             std::atomic<bool> stopPfController(false);
             std::atomic<uint64_t> pfControllerTicks(0);
@@ -1206,11 +1279,29 @@ int processPfMultiConfig(Parameters& P,
                                  << ", intervalMs=" << pfControllerIntervalMs
                                  << ", sequence=" << pfControllerSequenceLabel
                                  << ", maxUpdates=" << pfControllerMaxUpdates
+                                 << ", chunkPermitStep=" << pfChunkPermitStep
+                                 << ", searchThreadQuantum=" << pfSearchThreadQuantum
+                                 << ", searchThreadsForController=" << pfSearchThreadsForController
+                                 << ", consumerThreadsForRun=" << pfConsumerThreadsForRun
+                                 << ", consumerSoftMax=" << pfConsumerSoftMax
+                                 << ", consumerCapPerProducer=" << pfConsumerCapPerProducer
+                                 << ", producerSlotsAvailable=" << pfProducerSlotsAvailable
+                                 << ", singleConsumerMode=" << (pfSingleConsumer ? "yes" : "no")
+                                 << ", readerThreadsReserved=" << pfReaderThreadsReserved
+                                 << ", permitCeilingDuringPf=" << pfPermitCeilingDuringPf
                                  << ", mapEstimate=" << mapEstimateTotal
                                  << ", featureEstimate=" << featureEstimateTotal
                                  << ", libraryType=" << libraryType
                                  << ", sample=" << sampleName
                                  << "\n";
+                if (pfReaderThreadsReserved >= P.runThreadN) {
+                    P.inOut->logMain << "pf-dynamic-controller: WARNING readerThreadsReserved="
+                                     << pfReaderThreadsReserved
+                                     << " >= runThreadN=" << P.runThreadN
+                                     << "; permit ceiling clamped to "
+                                     << pfPermitCeilingDuringPf
+                                     << " (oversubscription risk remains)\n";
+                }
 
                 pfControllerThread = std::thread([&]() {
                     size_t seqIndex = 0;
@@ -1224,6 +1315,7 @@ int processPfMultiConfig(Parameters& P,
                     constexpr double kEtaAlpha = 0.30;
                     constexpr double kEtaGapThreshold = 0.10;
                     constexpr double kEtaRateEps = 1.0e-9;
+                    constexpr long double kChunkGapThreshold = 0.10L;
 
                     while (!stopPfController.load(std::memory_order_relaxed)) {
                         int nextTarget = g_threadChunks.mapPermitSnapshot().targetPermits;
@@ -1278,9 +1370,9 @@ int processPfMultiConfig(Parameters& P,
 
                             nextTarget = snapshot.targetPermits;
                             if (mapRemaining == 0 && featureRemaining > 0) {
-                                nextTarget = P.runThreadN;
+                                nextTarget = pfPermitCeilingDuringPf;
                             } else if (featureRemaining == 0 && mapRemaining > 0) {
-                                nextTarget = 1;
+                                nextTarget = P.runThreadN;
                             } else if (mapRemaining > 0 && featureRemaining > 0 &&
                                        std::isfinite(mapEta) && std::isfinite(featureEta)) {
                                 const double maxEta = std::max(mapEta, featureEta);
@@ -1297,8 +1389,63 @@ int processPfMultiConfig(Parameters& P,
                             } else if (featureRemaining > 0 && !std::isfinite(featureEta)) {
                                 nextTarget = std::min(P.runThreadN, snapshot.targetPermits + 1);
                             }
+                            const int etaPermitCeiling =
+                                (featureRemaining > 0) ? pfPermitCeilingDuringPf : P.runThreadN;
+                            nextTarget = std::min(nextTarget, etaPermitCeiling);
+                        } else if (pfControllerChunkedMode) {
+                            const ThreadControl::MapPermitSnapshot snapshot = g_threadChunks.mapPermitSnapshot();
+                            const uint64_t mapDone = snapshot.mapDomain.workUnitsTotal;
+                            const uint64_t featureDone = snapshot.featureDomain.workUnitsTotal;
+                            mapEstimateLoop = inflateEstimateUntilNonNegativeRemaining(mapEstimateLoop, mapDone);
+                            featureEstimateLoop = inflateEstimateUntilNonNegativeRemaining(featureEstimateLoop, featureDone);
+                            pfControllerMapEstimateFinal.store(mapEstimateLoop, std::memory_order_relaxed);
+                            pfControllerFeatureEstimateFinal.store(featureEstimateLoop, std::memory_order_relaxed);
+
+                            const uint64_t mapRemaining =
+                                (mapEstimateLoop > mapDone) ? (mapEstimateLoop - mapDone) : 0;
+                            const uint64_t featureRemaining =
+                                (featureEstimateLoop > featureDone) ? (featureEstimateLoop - featureDone) : 0;
+
+                            nextTarget = snapshot.targetPermits;
+                            if (mapRemaining == 0 && featureRemaining == 0) {
+                                // nothing to retune
+                            } else if (mapRemaining == 0 || featureRemaining == 0) {
+                                if (featureRemaining > 0) {
+                                    nextTarget = pfPermitCeilingDuringPf;
+                                } else {
+                                    // PF side drained: release back to map side
+                                    nextTarget = P.runThreadN;
+                                }
+                            } else {
+                                const uint64_t dominantRemaining = std::max(mapRemaining, featureRemaining);
+                                const uint64_t remainingGap =
+                                    (mapRemaining > featureRemaining)
+                                    ? (mapRemaining - featureRemaining)
+                                    : (featureRemaining - mapRemaining);
+                                const long double gapFrac = (dominantRemaining == 0)
+                                    ? 0.0L
+                                    : (static_cast<long double>(remainingGap) /
+                                       static_cast<long double>(dominantRemaining));
+                                if (gapFrac > kChunkGapThreshold) {
+                                    if (featureRemaining > mapRemaining) {
+                                        nextTarget = std::max(1, snapshot.targetPermits - pfChunkPermitStep);
+                                    } else {
+                                        nextTarget = std::min(P.runThreadN, snapshot.targetPermits + pfChunkPermitStep);
+                                    }
+                                }
+                            }
+                            const int chunkPermitCeiling =
+                                (featureRemaining > 0) ? pfPermitCeilingDuringPf : P.runThreadN;
+                            nextTarget = std::min(nextTarget, chunkPermitCeiling);
                         }
 
+                        if (pfControllerSequenceMode) {
+                            // Sequence mode has no remaining-work signal; always reserve producer/read threads.
+                            nextTarget = std::min(nextTarget, pfPermitCeilingDuringPf);
+                        }
+                        if (nextTarget < 1) {
+                            nextTarget = 1;
+                        }
                         pfControllerLastTarget.store(nextTarget, std::memory_order_relaxed);
                         const uint64_t tick =
                             pfControllerTicks.fetch_add(1, std::memory_order_relaxed) + 1;
@@ -1317,7 +1464,7 @@ int processPfMultiConfig(Parameters& P,
 
             int ret = 0;
             try {
-                ret = PfMultiAssign::runAssignBarcodes(whitelist, refPath, resolvedFastq, assignOut, assignOpts);
+                ret = PfMultiAssign::runAssignBarcodes(whitelist, refPath, resolvedFastq, assignOut, runAssignOpts);
             } catch (...) {
                 stopPfController.store(true, std::memory_order_relaxed);
                 if (pfControllerThread.joinable()) {
@@ -1329,6 +1476,10 @@ int processPfMultiConfig(Parameters& P,
             stopPfController.store(true, std::memory_order_relaxed);
             if (pfControllerThread.joinable()) {
                 pfControllerThread.join();
+            }
+            if (pfControllerAppliesUpdates) {
+                // PF stage finished: release full permit budget back to map side.
+                g_threadChunks.mapPermitSetTargetPermits(P.runThreadN);
             }
 
             if (pfControllerEnabled) {
@@ -1348,7 +1499,29 @@ int processPfMultiConfig(Parameters& P,
                     apiRunOut << "pfController.featureEstimateFinal=" << pfControllerFeatureEstimateFinal.load(std::memory_order_relaxed) << "\n";
                     apiRunOut << "pfController.estimatePolicy=smallest_anchor_bytescale\n";
                     apiRunOut << "pfController.estimateNegativeRemainingInflationPct=10\n";
-                    apiRunOut << "pfController.etaGapThresholdPct=10\n";
+                    apiRunOut << "pfController.producerReservePolicy="
+                              << "expand_producers_by_consumer_cap"
+                              << "\n";
+                    apiRunOut << "pfController.searchThreadsForController=" << pfSearchThreadsForController << "\n";
+                    apiRunOut << "pfController.searchThreadQuantum=" << pfSearchThreadQuantum << "\n";
+                    apiRunOut << "pfController.chunkPermitStep=" << pfChunkPermitStep << "\n";
+                    apiRunOut << "pfController.consumerThreadsForRun=" << pfConsumerThreadsForRun << "\n";
+                    apiRunOut << "pfController.consumerSoftMax=" << pfConsumerSoftMax << "\n";
+                    apiRunOut << "pfController.consumerCapPerProducer=" << pfConsumerCapPerProducer << "\n";
+                    apiRunOut << "pfController.consumerThreadsExplicit=" << (pfConsumerThreadsExplicit ? 1 : 0) << "\n";
+                    apiRunOut << "pfController.consumerThreadsAuto=" << (pfConsumerThreadsAuto ? 1 : 0) << "\n";
+                    apiRunOut << "pfController.consumerBudgetThreads=" << pfConsumerBudgetThreads << "\n";
+                    apiRunOut << "pfController.producerSlotsAvailable=" << pfProducerSlotsAvailable << "\n";
+                    apiRunOut << "pfController.singleConsumerMode=" << (pfSingleConsumer ? 1 : 0) << "\n";
+                    apiRunOut << "pfController.readerThreadsReserved=" << pfReaderThreadsReserved << "\n";
+                    apiRunOut << "pfController.permitCeilingDuringPf=" << pfPermitCeilingDuringPf << "\n";
+                    if (pfControllerEtaMode) {
+                        apiRunOut << "pfController.etaGapThresholdPct=10\n";
+                    }
+                    if (pfControllerChunkedMode) {
+                        apiRunOut << "pfController.chunkGapThresholdPct=10\n";
+                        apiRunOut << "pfController.chunkPriorityPolicy=remaining_work_coarse_quantum\n";
+                    }
                     apiRunOut << "pfController.mapAnchorFile=" << mapEstimate.anchorFile << "\n";
                     apiRunOut << "pfController.mapAnchorReads=" << mapEstimate.anchorReads << "\n";
                     apiRunOut << "pfController.mapAnchorBytes=" << mapEstimate.anchorBytes << "\n";
