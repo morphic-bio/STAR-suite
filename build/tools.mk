@@ -3,7 +3,8 @@
 .PHONY: vbem-ec-filter-test vbem-tximport-compat vbem-trimvalidate
 
 # Default tool composition is selected in top-level Makefile.
-# Keep both feature-barcodes-tools and process-features-tools available.
+# process_features is the canonical feature stack; keep feature-barcodes-tools
+# as a compatibility alias that points to the same binaries.
 tools: flex-tools slam-tools vbem-tools yremove-tools process-features-tools star-feature-call
 
 vbem-tools: vbem-compute-expected-gc vbem-sample-fld vbem-compute-gc-bias vbem-em-quant vbem-ec-filter-test vbem-tximport-compat vbem-trimvalidate
@@ -33,7 +34,8 @@ yremove-tools:
 	$(MAKE) -C $(YREMOVE_FASTQ_DIR)/tools/remove_y_reads
 
 feature-barcodes-tools:
-	$(MAKE) -C $(FEATURE_BARCODES_DIR)
+	@echo "feature-barcodes-tools is a compatibility alias for process-features-tools"
+	$(MAKE) -C $(PROCESS_FEATURES_DIR) tools
 
 process-features-tools:
 	$(MAKE) -C $(PROCESS_FEATURES_DIR) tools

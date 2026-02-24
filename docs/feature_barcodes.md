@@ -1,27 +1,44 @@
 # Feature Barcode Tools (process_features vendor)
 
-This module vendors the `process_features` toolchain into STAR-suite for early perturb-seq testing.
-It builds standalone binaries and does not modify STAR alignment output.
+`process_features` is the canonical feature-processing implementation in this
+repo. Both FASTQ feature extraction and MEX feature calling are built from the
+same `libprocess_features` core.
 
 ## Build
 
 ```bash
-make feature-barcodes-tools
+make process-features-tools
 ```
 
-Binaries are produced in `core/features/feature_barcodes/`:
+Binaries are produced in `core/features/process_features/`:
 - `assignBarcodes`
 - `demux_fastq`
 - `demux_bam`
+- `call_features`
+
+Compatibility alias:
+```bash
+make feature-barcodes-tools
+```
+This target is a compatibility alias and builds the same
+`core/features/process_features` tools.
 
 ## Quick Usage (assignBarcodes)
 
 ```bash
-core/features/feature_barcodes/assignBarcodes \
+core/features/process_features/assignBarcodes \
   --whitelist /path/to/whitelist.txt \
   --featurelist /path/to/feature_ref.csv \
   --directory /path/to/output \
   /path/to/fastq_dir
+```
+
+## Quick Usage (call_features from MEX)
+
+```bash
+core/features/process_features/call_features --gmm \
+  /path/to/mex_dir \
+  /path/to/output_dir
 ```
 
 ## Feature Offset Detection
@@ -111,8 +128,8 @@ tools/feature_barcodes/assignbarcodes_mex_stub.py \
 This writes `features.tsv` and `barcodes.tsv` alongside the existing `matrix.mtx`.
 
 ## Notes
-- This is a tool-level vendor intended for early parity testing.
-- STAR output integration will follow once the MEX path is validated.
+- Canonical implementation path: `core/features/process_features`.
+- `core/features/feature_barcodes` is retained only as a compatibility path.
 
 ---
 
