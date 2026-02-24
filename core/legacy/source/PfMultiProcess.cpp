@@ -1470,6 +1470,9 @@ int processPfMultiConfig(Parameters& P,
                 if (pfControllerThread.joinable()) {
                     pfControllerThread.join();
                 }
+                if (pfControllerAppliesUpdates) {
+                    g_threadChunks.mapPermitSetTargetPermits(P.runThreadN);
+                }
                 throw;
             }
 

@@ -1870,6 +1870,17 @@ crMexUseGexBarcodes        -
     string:                 DEPRECATED: CR-compat MEX now always writes both raw_feature_bc_matrix and filtered_feature_bc_matrix using GEX barcodes
                             This parameter is ignored and kept for backward compatibility only
 
+crAssignConsumerThreads    -1
+    int:                    number of consumer (barcode-matching) threads per feature library in assignBarcodes.
+                            -1 ... auto (default). When dynamicThreadInterface=1, auto-sized from runThreadN
+                                   and producer cap; otherwise uses assignBarcodes internal default (4).
+                            >0 ... explicit consumer thread count passed to assignBarcodes.
+
+crAssignSearchThreads      -1
+    int:                    number of search threads per consumer in assignBarcodes feature matching.
+                            -1 ... auto (default). Uses assignBarcodes internal default (4).
+                            >0 ... explicit search thread count passed to assignBarcodes.
+
 crAssignLegacyCbRescue     0
     int:                    pending CB rescue mode for assignBarcodes.
                             0 ... default deterministic frozen-pass rescue (order-independent).
