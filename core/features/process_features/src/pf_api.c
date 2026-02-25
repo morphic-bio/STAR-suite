@@ -60,6 +60,11 @@ struct pf_config {
     int emptydrops_failure_fatal;   /* 1 = treat ED failure as error */
     int expected_cells;             /* 0 = auto-detect */
     int emptydrops_use_fdr;         /* 1 = use FDR gate for tail rescue */
+
+    /* NXT/TRU auto-detection */
+    int autodetect_chemistry;           /* 0=off, 1=on */
+    int autodetect_chemistry_reads;     /* N reads to sample (default 10000) */
+    int autodetect_chemistry_min_hits;  /* minimum total hits for decision (default 50) */
 };
 
 struct pf_context {
@@ -70,6 +75,13 @@ struct pf_context {
     khash_t(strptr) *filtered_barcodes_hash;
     int initialized;
     char error_buf[PF_ERROR_BUF_SIZE];
+
+    /* NXT/TRU auto-detection state */
+    unsigned long long chem_detect_raw_hits;
+    unsigned long long chem_detect_nxt_hits;
+    unsigned long long chem_detect_ticket;
+    int chem_detect_done;       /* 0=sampling, 1=decided */
+    int detected_match_mode;    /* 0=unknown, 1=RAW_MATCH, 2=TRANSLATED_MATCH, 3=AMBIGUOUS */
 };
 
 /* Global initialization flag */
@@ -119,6 +131,11 @@ pf_config* pf_config_create(void) {
     config->emptydrops_failure_fatal = 0;
     config->expected_cells = 0;
     config->emptydrops_use_fdr = 0;
+
+    /* NXT/TRU auto-detection defaults */
+    config->autodetect_chemistry = 0;
+    config->autodetect_chemistry_reads = 10000;
+    config->autodetect_chemistry_min_hits = 50;
     
     return config;
 }
@@ -267,6 +284,38 @@ void pf_config_set_emptydrops_use_fdr(pf_config *config, int enable) {
     if (config) config->emptydrops_use_fdr = enable;
 }
 
+void pf_config_set_autodetect_chemistry(pf_config *config, int enabled) {
+    if (config) config->autodetect_chemistry = enabled;
+}
+
+void pf_config_set_autodetect_chemistry_reads(pf_config *config, int n_reads) {
+    if (!config) return;
+    if (n_reads < 1) {
+        fprintf(stderr, "ERROR: autodetect_chemistry_reads must be >= 1 (got %d), clamping to 1\n", n_reads);
+        n_reads = 1;
+    }
+    config->autodetect_chemistry_reads = n_reads;
+}
+
+void pf_config_set_autodetect_chemistry_min_hits(pf_config *config, int min_hits) {
+    if (!config) return;
+    if (min_hits < 1) {
+        fprintf(stderr, "ERROR: autodetect_chemistry_min_hits must be >= 1 (got %d), clamping to 1\n", min_hits);
+        min_hits = 1;
+    }
+    config->autodetect_chemistry_min_hits = min_hits;
+}
+
+const char* pf_get_detected_match_mode(pf_context *ctx) {
+    if (!ctx) return "UNKNOWN";
+    switch (ctx->detected_match_mode) {
+        case 1: return "RAW_MATCH";
+        case 2: return "TRANSLATED_MATCH";
+        case 3: return "AMBIGUOUS";
+        default: return "UNKNOWN";
+    }
+}
+
 
 /* ============================================================================
  * Global Initialization
@@ -326,6 +375,13 @@ pf_context* pf_init(const pf_config *config) {
     feature_mode_reads_seen = 0;
     feature_mode_bootstrap_done = 0;
     
+    /* NXT/TRU auto-detection state */
+    ctx->chem_detect_raw_hits = 0;
+    ctx->chem_detect_nxt_hits = 0;
+    ctx->chem_detect_ticket = 0;
+    ctx->chem_detect_done = 0;
+    ctx->detected_match_mode = 0;
+
     /* Global initialization */
     pf_global_init();
     
@@ -531,6 +587,13 @@ pf_error pf_process_fastq_dir(pf_context *ctx,
                                pf_stats *stats_out) {
     if (!ctx || !fastq_dir || !output_dir) return PF_ERR_INVALID_ARG;
     if (!ctx->initialized) return PF_ERR_NOT_INITIALIZED;
+
+    /* Reset detection state unconditionally to prevent stale leakage */
+    ctx->chem_detect_raw_hits = 0;
+    ctx->chem_detect_nxt_hits = 0;
+    ctx->chem_detect_ticket = 0;
+    ctx->chem_detect_done = 0;
+    ctx->detected_match_mode = 0;
     if (!ctx->features) {
         snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE, "Features not loaded");
         return PF_ERR_NOT_INITIALIZED;
@@ -647,6 +710,19 @@ pf_error pf_process_fastq_dir(pf_context *ctx,
     }
     
     /* Process each sample */
+    /* NXT/TRU auto-detection shared state */
+    struct chem_detect_state chem_detect_buf;
+    struct chem_detect_state *chem_detect_ptr = NULL;
+    if (ctx->config->autodetect_chemistry) {
+        memset(&chem_detect_buf, 0, sizeof(chem_detect_buf));
+        chem_detect_buf.max_reads = ctx->config->autodetect_chemistry_reads;
+        chem_detect_buf.min_hits = ctx->config->autodetect_chemistry_min_hits;
+        chem_detect_ptr = &chem_detect_buf;
+        fprintf(stderr, "NOTICE: chemistry auto-detect enabled for directory "
+                "(aggregates across all samples; reads=%d, min_hits=%d)\n",
+                chem_detect_buf.max_reads, chem_detect_buf.min_hits);
+    }
+
     double start_time = get_time_in_seconds();
     int any_failed = 0;
     
@@ -702,6 +778,7 @@ pf_error pf_process_fastq_dir(pf_context *ctx,
         args.emptydrops_failure_fatal = ctx->config->emptydrops_failure_fatal;
         args.expected_cells = ctx->config->expected_cells;
         args.emptydrops_use_fdr = ctx->config->emptydrops_use_fdr;
+        args.chem_detect = chem_detect_ptr;
         args.error_out = &sample_error;
         
         /* Process the sample */
@@ -724,6 +801,15 @@ pf_error pf_process_fastq_dir(pf_context *ctx,
     }
     
     free_fastq_files_collection(&fastq_files);
+
+    /* Copy auto-detection results back to context */
+    if (chem_detect_ptr) {
+        ctx->chem_detect_raw_hits = chem_detect_ptr->raw_hits;
+        ctx->chem_detect_nxt_hits = chem_detect_ptr->nxt_hits;
+        ctx->chem_detect_ticket = chem_detect_ptr->ticket;
+        ctx->chem_detect_done = chem_detect_ptr->done;
+        ctx->detected_match_mode = chem_detect_ptr->match_mode;
+    }
     
     if (any_failed) {
         snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
@@ -745,6 +831,14 @@ pf_error pf_process_fastqs(pf_context *ctx,
         return PF_ERR_INVALID_ARG;
     }
     if (!ctx->initialized) return PF_ERR_NOT_INITIALIZED;
+
+    /* Reset detection state unconditionally to prevent stale leakage */
+    ctx->chem_detect_raw_hits = 0;
+    ctx->chem_detect_nxt_hits = 0;
+    ctx->chem_detect_ticket = 0;
+    ctx->chem_detect_done = 0;
+    ctx->detected_match_mode = 0;
+
     if (!ctx->features) {
         snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE, "Features not loaded");
         return PF_ERR_NOT_INITIALIZED;
@@ -933,9 +1027,26 @@ pf_error pf_process_fastqs(pf_context *ctx,
     args.emptydrops_failure_fatal = ctx->config->emptydrops_failure_fatal;
     args.expected_cells = ctx->config->expected_cells;
     args.emptydrops_use_fdr = ctx->config->emptydrops_use_fdr;
+    struct chem_detect_state chem_detect_buf2;
+    struct chem_detect_state *chem_detect_ptr2 = NULL;
+    if (ctx->config->autodetect_chemistry) {
+        memset(&chem_detect_buf2, 0, sizeof(chem_detect_buf2));
+        chem_detect_buf2.max_reads = ctx->config->autodetect_chemistry_reads;
+        chem_detect_buf2.min_hits = ctx->config->autodetect_chemistry_min_hits;
+        chem_detect_ptr2 = &chem_detect_buf2;
+    }
+    args.chem_detect = chem_detect_ptr2;
     args.error_out = &sample_error;
     
     process_files_in_sample(&args);
+
+    if (chem_detect_ptr2) {
+        ctx->chem_detect_raw_hits = chem_detect_ptr2->raw_hits;
+        ctx->chem_detect_nxt_hits = chem_detect_ptr2->nxt_hits;
+        ctx->chem_detect_ticket = chem_detect_ptr2->ticket;
+        ctx->chem_detect_done = chem_detect_ptr2->done;
+        ctx->detected_match_mode = chem_detect_ptr2->match_mode;
+    }
     
     double end_time = get_time_in_seconds();
     

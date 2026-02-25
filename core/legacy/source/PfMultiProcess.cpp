@@ -45,6 +45,9 @@ struct PfPreparedFeatureLibrary {
     string sampleName;
     string assignOut;
     string featureRefPath;
+    string effectiveChem;
+    string resolvedChemRequest;   // "auto", "nxt", or "tru" — after column > global resolution
+    bool explicitChem = false;    // true when star_chemistry column provided NXT/TRU
     bool usedFilteredRef = false;
     AnchoredReadEstimate featureEstimate;
 };
@@ -57,6 +60,7 @@ struct PfMultiPreparedContext {
     string requestedOutputChem;
     string inferredChem;
     string inferredReason;
+    bool inferredChemConfident = false;
     string effectiveChem;
     string outputChem;
     string outPrefix;
@@ -167,6 +171,32 @@ static string translateNxtMiddleTwoBases(string barcode) {
     return barcode;
 }
 
+static void normalizeMexBarcodesToTru(PfMultiMerge::MexData& data, const string& fromChem) {
+    string norm = upperCopy(fromChem);
+    if (norm != "NXT") {
+        return;
+    }
+    for (auto& bc : data.barcodes) {
+        if (bc.size() >= 9) {
+            bc[7] = complementBase(bc[7]);
+            bc[8] = complementBase(bc[8]);
+        }
+    }
+}
+
+static void normalizeBarcodeVecToTru(vector<string>& barcodes, const string& fromChem) {
+    string norm = upperCopy(fromChem);
+    if (norm != "NXT") {
+        return;
+    }
+    for (auto& bc : barcodes) {
+        if (bc.size() >= 9) {
+            bc[7] = complementBase(bc[7]);
+            bc[8] = complementBase(bc[8]);
+        }
+    }
+}
+
 static vector<string> splitWhitelistColumns(const string& line) {
     vector<string> fields;
     string current;
@@ -190,7 +220,9 @@ static vector<string> splitWhitelistColumns(const string& line) {
     return fields;
 }
 
-static string detectChemistryFromWhitelistPath(const string& whitelistPath, string& reason) {
+static string detectChemistryFromWhitelistPath(const string& whitelistPath, string& reason,
+                                                bool& confident) {
+    confident = false;
     if (isUnsetToken(whitelistPath)) {
         reason = "whitelist path is unset";
         return "unknown";
@@ -221,6 +253,8 @@ static string detectChemistryFromWhitelistPath(const string& whitelistPath, stri
                 twoColumnRows++;
                 const string col1 = upperCopy(fields[0]);
                 const string col2 = upperCopy(fields[1]);
+                // Symmetric: complement is an involution so translate(A)==B iff translate(B)==A,
+                // meaning column order does not matter.
                 if (translateNxtMiddleTwoBases(col1) == col2) {
                     nxtRuleRows++;
                 }
@@ -228,14 +262,19 @@ static string detectChemistryFromWhitelistPath(const string& whitelistPath, stri
         }
 
         if (twoColumnRows > 0) {
+            const double nxtFraction = static_cast<double>(nxtRuleRows) / static_cast<double>(twoColumnRows);
             std::ostringstream msg;
             msg << "whitelist has two barcode columns (" << twoColumnRows
-                << " sampled rows)";
-            if (nxtRuleRows > 0) {
-                msg << "; center-2bp complement rule matched " << nxtRuleRows << "/" << twoColumnRows;
+                << " sampled rows); center-2bp complement rule matched "
+                << nxtRuleRows << "/" << twoColumnRows
+                << " (" << static_cast<int>(nxtFraction * 100.0 + 0.5) << "%)";
+            if (nxtFraction >= 0.8) {
+                reason = msg.str();
+                confident = true;
+                return "NXT";
             }
+            msg << " — below 80% threshold, falling through to filename/default";
             reason = msg.str();
-            return "NXT";
         }
     }
 
@@ -243,15 +282,24 @@ static string detectChemistryFromWhitelistPath(const string& whitelistPath, stri
     string base = lowerCopy(basenameOf(whitelistPath));
     if (base.find("nxt") != string::npos) {
         reason = "whitelist filename contains 'nxt'";
+        confident = true;
         return "NXT";
     }
     if (base.find("tru") != string::npos) {
         reason = "whitelist filename contains 'tru'";
+        confident = true;
         return "TRU";
     }
 
     reason = "no chemistry marker found in whitelist content or filename; defaulting to TRU";
+    confident = false;
     return "TRU";
+}
+
+static string oppositeNamespace(const string& ns) {
+    if (ns == "NXT") return "TRU";
+    if (ns == "TRU") return "NXT";
+    return ns;
 }
 
 static string parseChemistryToken(const string& rawValue, const string& flagName) {
@@ -830,7 +878,8 @@ static PfMultiPreparedContext buildPfMultiPreparedContext(const PfMultiPreloadIn
 
     context.requestedChem = parseChemistryToken(input.crChemistry, "--crChemistry");
     context.requestedOutputChem = parseChemistryToken(input.crOutputChemistry, "--crOutputChemistry");
-    context.inferredChem = detectChemistryFromWhitelistPath(context.whitelist, context.inferredReason);
+    context.inferredChem = detectChemistryFromWhitelistPath(context.whitelist, context.inferredReason,
+                                                            context.inferredChemConfident);
     context.effectiveChem = context.inferredChem;
     if (context.requestedChem == "nxt") {
         context.effectiveChem = "NXT";
@@ -848,11 +897,40 @@ static PfMultiPreparedContext buildPfMultiPreparedContext(const PfMultiPreloadIn
 
     prepLog << "pf-multi chemistry: requested=" << context.requestedChem
             << " inferred=" << context.inferredChem
-            << " (" << context.inferredReason << ")"
+            << " (confident=" << (context.inferredChemConfident ? "yes" : "no")
+            << "; " << context.inferredReason << ")"
             << " effective=" << context.effectiveChem
             << " output_requested=" << context.requestedOutputChem
             << " output_effective=" << context.outputChem
             << "\n";
+
+    // Per-library GEX chemistry: star_chemistry column on GEX row overrides the global.
+    // Must update both effectiveChem AND inferredChem so that auto-detect composition
+    // for feature libraries uses the correct wlNamespace anchor.
+    {
+        vector<PfMultiConfig::LibraryEntry> gexLibs = context.config.getGexLibraries();
+        for (const auto& gex : gexLibs) {
+            if (!gex.starChemistry.empty() && gex.starChemistry != "auto") {
+                string prevEffective = context.effectiveChem;
+                string prevInferred = context.inferredChem;
+                if (gex.starChemistry == "nxt") {
+                    context.effectiveChem = "NXT";
+                    context.inferredChem = "NXT";
+                } else if (gex.starChemistry == "tru") {
+                    context.effectiveChem = "TRU";
+                    context.inferredChem = "TRU";
+                }
+                context.inferredChemConfident = true;
+                prepLog << "  GEX star_chemistry=" << gex.starChemistry
+                        << " overrides namespace: effectiveChem " << prevEffective
+                        << " → " << context.effectiveChem
+                        << ", inferredChem " << prevInferred
+                        << " → " << context.inferredChem
+                        << " (confident=yes, user-specified)\n";
+                break;
+            }
+        }
+    }
 
     const map<string, string> fastqMap = PfMultiConfig::parseFastqMap(input.crFastqMap);
 
@@ -902,6 +980,31 @@ static PfMultiPreparedContext buildPfMultiPreparedContext(const PfMultiPreloadIn
             prepared.usedFilteredRef =
                 filterFeatureRefCsv(context.featureRef, spec.featureRefType, filteredRef);
             prepared.featureRefPath = prepared.usedFilteredRef ? filteredRef : context.featureRef;
+
+            // Per-library chemistry: star_chemistry column > --crChemistry flag
+            string libChemRequest = lib.starChemistry;
+            if (libChemRequest.empty()) {
+                libChemRequest = context.requestedChem;
+            }
+            prepared.resolvedChemRequest = libChemRequest;
+            if (libChemRequest == "nxt") {
+                prepared.effectiveChem = "NXT";
+                prepared.explicitChem = true;
+            } else if (libChemRequest == "tru") {
+                prepared.effectiveChem = "TRU";
+                prepared.explicitChem = true;
+            } else {
+                prepared.effectiveChem = context.effectiveChem;
+                prepared.explicitChem = false;
+            }
+            prepLog << "  library " << prepared.sampleName << "/" << spec.libraryType
+                    << ": star_chemistry=" << (lib.starChemistry.empty() ? "(empty)" : lib.starChemistry)
+                    << ", global=" << context.requestedChem
+                    << ", resolved=" << libChemRequest
+                    << ", effectiveChem=" << prepared.effectiveChem
+                    << (prepared.explicitChem ? " (explicit)" : " (auto-detect eligible)")
+                    << "\n";
+
             if (!prepared.usedFilteredRef) {
                 prepLog << "WARNING: feature reference not filtered for "
                         << spec.libraryType << "; using full reference\n";
@@ -1186,6 +1289,8 @@ int processPfMultiConfig(Parameters& P,
             string featureType;
             string assignOut;
             string featureRefPath;
+            string effectiveChem;
+            string detectedMatchMode;
         };
         vector<FeatureRun> featureRuns;
 
@@ -1243,6 +1348,25 @@ int processPfMultiConfig(Parameters& P,
             }
             PfMultiAssign::AssignOptions runAssignOpts = assignOpts;
             runAssignOpts.consumerThreadsPerSet = pfConsumerThreadsForRun;
+
+            const bool useAutodetect = !preparedLib.explicitChem
+                                      && (preparedLib.resolvedChemRequest == "auto");
+            const string wlNamespace = prepared.inferredChem;
+            const bool wlNamespaceConfident = prepared.inferredChemConfident;
+            if (useAutodetect) {
+                runAssignOpts.autodetectChemistry = true;
+            }
+            if (preparedLib.explicitChem) {
+                P.inOut->logMain << "NOTICE: " << featureRefType
+                                 << " star_chemistry=" << preparedLib.resolvedChemRequest
+                                 << " → effectiveChem=" << preparedLib.effectiveChem
+                                 << " (auto-detect skipped)\n";
+            } else if (useAutodetect && !wlNamespaceConfident) {
+                P.inOut->logMain << "WARNING: Whitelist namespace uncertain ('"
+                                 << wlNamespace << "', inferred by default), "
+                                 << "auto-detect will determine effective chemistry for "
+                                 << featureRefType << "\n";
+            }
             const bool pfSingleConsumer = (pfConsumerThreadsForRun <= 1);
             const int pfPermitCeilingDuringPf =
                 std::max(1, P.runThreadN - pfReaderThreadsReserved);
@@ -1462,9 +1586,9 @@ int processPfMultiConfig(Parameters& P,
                 });
             }
 
-            int ret = 0;
+            PfMultiAssign::AssignResult assignResult;
             try {
-                ret = PfMultiAssign::runAssignBarcodes(whitelist, refPath, resolvedFastq, assignOut, runAssignOpts);
+                assignResult = PfMultiAssign::runAssignBarcodes(whitelist, refPath, resolvedFastq, assignOut, runAssignOpts);
             } catch (...) {
                 stopPfController.store(true, std::memory_order_relaxed);
                 if (pfControllerThread.joinable()) {
@@ -1552,7 +1676,7 @@ int processPfMultiConfig(Parameters& P,
                                  << "\n";
             }
 
-            if (ret != 0) {
+            if (assignResult.returnCode != 0) {
                 throw runtime_error("Failed to process feature library: " + libraryType);
             }
 
@@ -1560,6 +1684,36 @@ int processPfMultiConfig(Parameters& P,
             run.featureType = featureRefType;
             run.assignOut = assignOut;
             run.featureRefPath = refPath;
+            run.effectiveChem = preparedLib.effectiveChem;
+            run.detectedMatchMode = assignResult.detectedMatchMode;
+
+            if (useAutodetect && wlNamespaceConfident) {
+                if (assignResult.detectedMatchMode == "RAW_MATCH") {
+                    run.effectiveChem = wlNamespace;
+                    P.inOut->logMain << "NOTICE: auto-detect RAW_MATCH for "
+                                     << featureRefType
+                                     << " → effectiveChem=" << run.effectiveChem << "\n";
+                } else if (assignResult.detectedMatchMode == "TRANSLATED_MATCH") {
+                    run.effectiveChem = oppositeNamespace(wlNamespace);
+                    P.inOut->logMain << "NOTICE: auto-detect TRANSLATED_MATCH for "
+                                     << featureRefType
+                                     << " → effectiveChem=" << run.effectiveChem << "\n";
+                } else {
+                    P.inOut->logMain << "WARNING: auto-detect "
+                                     << assignResult.detectedMatchMode << " for "
+                                     << featureRefType << ", keeping inferred: "
+                                     << run.effectiveChem << "\n";
+                }
+            } else if (useAutodetect && !wlNamespaceConfident) {
+                P.inOut->logMain << "WARNING: auto-detect " << assignResult.detectedMatchMode
+                                 << " for " << featureRefType
+                                 << " but whitelist namespace is uncertain ('"
+                                 << wlNamespace << "' by default). "
+                                 << "effectiveChem kept as " << run.effectiveChem
+                                 << " to stay consistent with GEX. "
+                                 << "Use star_chemistry column, --crChemistry NXT/TRU, "
+                                 << "or rename whitelist to enable absolute namespace resolution.\n";
+            }
             featureRuns.push_back(run);
         }
 
@@ -1625,13 +1779,17 @@ int processPfMultiConfig(Parameters& P,
             }
         }
         
-        // Prefer in-memory filtered barcodes from Solo if available (avoids reading filtered MEX for barcode list)
+        // Prefer in-memory filtered barcodes from Solo if available.
+        // Fetch read-space barcodes (useOutputNamespace=false) so that the
+        // namespace is unambiguous regardless of 1-col vs 2-col whitelist,
+        // then normalize to TRU to match the merge-boundary convention.
         vector<string> filteredGexBarcodes;
         bool useFilteredGex = false;
-        if (getFilteredBarcodesFromSolo(solo, P, filteredGexBarcodes, true)) {
+        if (getFilteredBarcodesFromSolo(solo, P, filteredGexBarcodes, false)) {
+            normalizeBarcodeVecToTru(filteredGexBarcodes, effectiveChem);
             useFilteredGex = true;
             P.inOut->logMain << "NOTICE: Using GEX filtered barcodes from Solo "
-                             << "(output namespace, in-memory)\n";
+                             << "(read-space, normalized to TRU, in-memory)\n";
         }
 
         // Read raw GEX MEX (required for raw_feature_bc_matrix)
@@ -1697,24 +1855,54 @@ int processPfMultiConfig(Parameters& P,
             return 1;
         }
         
-        // Read feature MEX files
-        vector<PfMultiMerge::MexData> featureDataVec;
+        // Read feature MEX files, pairing each with its chemistry so that
+        // a failed read does not cause index misalignment.
+        struct FeatureMexEntry {
+            PfMultiMerge::MexData data;
+            string effectiveChem;
+            string featureType;
+        };
+        vector<FeatureMexEntry> featureMexEntries;
         for (const auto& run : featureRuns) {
             try {
-                PfMultiMerge::MexData featData = PfMultiMerge::readMex(run.assignOut);
-                featureDataVec.push_back(featData);
+                FeatureMexEntry entry;
+                entry.data = PfMultiMerge::readMex(run.assignOut);
+                entry.effectiveChem = run.effectiveChem;
+                entry.featureType = run.featureType;
+                featureMexEntries.push_back(std::move(entry));
             } catch (const exception& e) {
                 P.inOut->logMain << "WARNING: Failed to read feature MEX for " << run.featureType
                                 << ": " << e.what() << "\n";
             }
         }
         
-        if (featureDataVec.empty()) {
+        if (featureMexEntries.empty()) {
             P.inOut->logMain << "WARNING: No feature MEX files found, skipping merge\n";
             return 0;
         }
         
-        // Merge MEX files
+        // Normalize all barcode namespaces to TRU at the integration boundary.
+        // Each source may be NXT or TRU depending on its whitelist; normalizing
+        // here ensures cross-library barcode joins and output are in a single
+        // canonical namespace (TRU) regardless of per-library chemistry.
+        normalizeMexBarcodesToTru(gexData, effectiveChem);
+        normalizeMexBarcodesToTru(gexRawData, effectiveChem);
+        if (loadedFilteredMex) {
+            normalizeMexBarcodesToTru(gexFilteredData, effectiveChem);
+        }
+        for (auto& entry : featureMexEntries) {
+            normalizeMexBarcodesToTru(entry.data, entry.effectiveChem);
+        }
+        P.inOut->logMain << "Barcode namespace: all inputs normalized to TRU before merge"
+                         << " (GEX effectiveChem=" << effectiveChem
+                         << ", outputChem=" << outputChem << ")\n";
+
+        // Merge MEX files (all inputs now in TRU namespace)
+        vector<PfMultiMerge::MexData> featureDataVec;
+        featureDataVec.reserve(featureMexEntries.size());
+        for (auto& entry : featureMexEntries) {
+            featureDataVec.push_back(std::move(entry.data));
+        }
         PfMultiMerge::MexData mergedData = PfMultiMerge::mergeMex(gexData, featureDataVec);
         
         // Extract GEM well from GEX library (with fallback logic)
@@ -1722,7 +1910,6 @@ int processPfMultiConfig(Parameters& P,
         vector<PfMultiConfig::LibraryEntry> gexLibs = config.getGexLibraries();
         if (!gexLibs.empty()) {
             gemWell = gexLibs[0].gem_well;
-            // Check if multiple GEX entries disagree
             for (size_t i = 1; i < gexLibs.size(); ++i) {
                 if (gexLibs[i].gem_well != gemWell) {
                     P.inOut->logMain << "WARNING: Multiple GEX libraries have different gem_well values ("
@@ -1732,16 +1919,14 @@ int processPfMultiConfig(Parameters& P,
                 }
             }
         } else if (!config.libraries.empty()) {
-            // Fallback to first library's gem_well
             gemWell = config.libraries[0].gem_well;
         }
         
-        // Compute observed GEX barcodes from raw GEX triplets (for raw_feature_bc_matrix)
+        // Compute observed GEX barcodes from raw GEX triplets (already in TRU)
         vector<string> observedRawGexBarcodes;
         if (hasRaw && !gexRawData.features.empty()) {
             observedRawGexBarcodes = PfMultiMerge::computeObservedGexBarcodes(gexRawData);
         } else if (hasFiltered && !gexFilteredData.features.empty()) {
-            // Fallback: use filtered GEX barcodes for raw output if raw is missing
             observedRawGexBarcodes = PfMultiMerge::computeObservedGexBarcodes(gexFilteredData);
             P.inOut->logMain << "WARNING: Raw GEX MEX not available, using filtered GEX barcodes for raw output\n";
         } else {
@@ -1749,40 +1934,39 @@ int processPfMultiConfig(Parameters& P,
             return 1;
         }
         
-        // Compute GEX barcodes for filtered output
+        // Fallback filtered barcodes from MEX data (already TRU-normalized).
         if (!useFilteredGex && hasFiltered && loadedFilteredMex && !gexFilteredData.features.empty()) {
-            // Use filtered GEX barcodes (from filtered MEX)
             filteredGexBarcodes = PfMultiMerge::computeObservedGexBarcodes(gexFilteredData);
             useFilteredGex = true;
         }
         if (!useFilteredGex) {
-            // Fallback to observed raw GEX barcodes (or filtered if raw missing)
             filteredGexBarcodes = observedRawGexBarcodes;
             P.inOut->logMain << "WARNING: Filtered GEX barcodes not available, using observed raw GEX barcodes for filtered output\n";
         }
         
-        // Write raw_feature_bc_matrix (using observed raw GEX barcodes)
+        // Write raw_feature_bc_matrix — merged barcodes are in TRU;
+        // outputChem controls the final namespace (default TRU, --crOutputChemistry NXT reverses).
         string rawOutDir = outPrefix + "/outs/raw_feature_bc_matrix";
         int ret = PfMultiMerge::writeCombinedMex(rawOutDir,
                                                  mergedData,
                                                  gemWell,
                                                  P.inOut->logMain,
                                                  observedRawGexBarcodes,
-                                                 effectiveChem,
+                                                 "TRU",
                                                  outputChem);
         if (ret != 0) {
             throw runtime_error("Failed to write raw combined MEX");
         }
         P.inOut->logMain << "Raw MEX written to: " << rawOutDir << "\n";
         
-        // Write filtered_feature_bc_matrix (using filtered GEX barcodes or fallback)
+        // Write filtered_feature_bc_matrix
         string filteredOutDir = outPrefix + "/outs/filtered_feature_bc_matrix";
         ret = PfMultiMerge::writeCombinedMex(filteredOutDir,
                                              mergedData,
                                              gemWell,
                                              P.inOut->logMain,
                                              filteredGexBarcodes,
-                                             effectiveChem,
+                                             "TRU",
                                              outputChem);
         if (ret != 0) {
             throw runtime_error("Failed to write filtered combined MEX");

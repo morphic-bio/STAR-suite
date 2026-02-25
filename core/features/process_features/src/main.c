@@ -106,6 +106,9 @@ int main(int argc, char *argv[])
     int require_feature_anchor_match_cli=0;
     int feature_mode_bootstrap_reads_cli=0;
     int strict_offset_check_cli=0;
+    int autodetect_chemistry_cli=0;
+    int autodetect_chemistry_reads_cli=10000;
+    int autodetect_chemistry_min_hits_cli=50;
 
     int max_concurrent_processes=8;
     int consumer_threads_per_set=1;
@@ -168,6 +171,9 @@ int main(int argc, char *argv[])
         {"use_feature_anchor_search", no_argument, 0, 23},
         {"require_feature_anchor_match", no_argument, 0, 24},
         {"feature_mode_bootstrap_reads", required_argument, 0, 25},
+        {"autodetect_chemistry", required_argument, 0, 30},
+        {"autodetect_chemistry_reads", required_argument, 0, 31},
+        {"autodetect_chemistry_min_hits", required_argument, 0, 32},
         {"filtered_barcodes", required_argument, 0, 12},
         {"min_prediction", required_argument, 0, 15},
         {"min_heatmap", required_argument, 0, 16},
@@ -248,6 +254,9 @@ int main(int argc, char *argv[])
             case 23: use_feature_anchor_search_cli = 1; break;
             case 24: require_feature_anchor_match_cli = 1; break;
             case 25: feature_mode_bootstrap_reads_cli = atoi(optarg); break;
+            case 30: autodetect_chemistry_cli = atoi(optarg); break;
+            case 31: autodetect_chemistry_reads_cli = atoi(optarg); break;
+            case 32: autodetect_chemistry_min_hits_cli = atoi(optarg); break;
             case 12: filtered_barcodes_filename = strdup(optarg); break;
             case 15: min_prediction = atoi(optarg); break;
             case 16: min_heatmap = atoi(optarg); break;
@@ -528,6 +537,25 @@ int main(int argc, char *argv[])
             args.expected_cells = emptydrops_expected_cells;
             args.emptydrops_use_fdr = emptydrops_use_fdr;
             args.error_out = &child_error;
+            struct chem_detect_state chem_detect_buf;
+            if (autodetect_chemistry_cli) {
+                if (autodetect_chemistry_reads_cli < 1) {
+                    fprintf(stderr, "ERROR: --autodetect_chemistry_reads must be >= 1 (got %d)\n",
+                            autodetect_chemistry_reads_cli);
+                    exit(EXIT_FAILURE);
+                }
+                if (autodetect_chemistry_min_hits_cli < 1) {
+                    fprintf(stderr, "ERROR: --autodetect_chemistry_min_hits must be >= 1 (got %d)\n",
+                            autodetect_chemistry_min_hits_cli);
+                    exit(EXIT_FAILURE);
+                }
+                memset(&chem_detect_buf, 0, sizeof(chem_detect_buf));
+                chem_detect_buf.max_reads = autodetect_chemistry_reads_cli;
+                chem_detect_buf.min_hits = autodetect_chemistry_min_hits_cli;
+                args.chem_detect = &chem_detect_buf;
+            } else {
+                args.chem_detect = NULL;
+            }
             
             process_files_in_sample(&args);
             // cleanup_sample is handled within process_files_in_sample

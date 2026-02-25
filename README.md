@@ -313,6 +313,11 @@ See `docs/feature_barcodes.md` and `docs/CRISPR_FEATURE_CALLING_IMPLEMENTATION_S
 - `--crMinUmi`: Minimum UMI threshold for CRISPR feature calling (default `10`).
 - `--soloCrGexFeature`: Control merged GEX source (`auto`, `gene`, `genefull`).
 - `--soloCrMode CR`: Enable CR-compatible single-cell behavior.
+- `--crChemistry`: Barcode chemistry (`auto`, `NXT`, `TRU`). Default `auto` enables
+  per-library auto-detection from reads. Mixed NXT/TRU experiments (e.g., TRU GEX +
+  NXT gRNA) are handled automatically; feature barcodes are normalized to a common
+  namespace at merge. Per-library overrides via the `star_chemistry` column in
+  `--pfMultiConfig` (see `docs/feature_barcodes.md`).
 
 Standalone tool (`star_feature_call`) key flags:
 - `--compat-perturb`: CR9-compatible output layout (`crispr_analysis/`).
@@ -431,6 +436,7 @@ core/legacy/source/STAR \
   --crAssignConsumerThreads 32 \
   --crAssignSearchThreads 1 \
   --defaultCrCompat yes \
+  --crChemistry auto \
   --outFileNamePrefix /path/to/outs/
 ```
 

@@ -31,6 +31,17 @@
 #define MAX_FEATURES 128
 #define MAX_BARCODE_MISMATCHES 3
 
+/* NXT/TRU auto-detection shared state (carried via sample_args) */
+struct chem_detect_state {
+    unsigned long long raw_hits;
+    unsigned long long nxt_hits;
+    unsigned long long ticket;
+    int done;           /* 0=sampling, 1=decided */
+    int match_mode;     /* 0=unknown, 1=RAW_MATCH, 2=TRANSLATED_MATCH, 3=AMBIGUOUS */
+    int max_reads;      /* N reads to sample */
+    int min_hits;       /* minimum total hits for decision */
+};
+
 // other defines
 #define MIN_POSTERIOR 0.975
 #define MAX_FEATURE_N 1
@@ -252,6 +263,9 @@ typedef struct sample_args {
     int expected_cells;              /* 0 = auto-detect */
     int emptydrops_use_fdr;          /* 1 = use FDR gate for tail rescue */
     
+    /* NXT/TRU auto-detection state (shared with consumer threads) */
+    struct chem_detect_state *chem_detect;
+
     /* Error propagation */
     int *error_out;                  /* Set to non-zero if fatal error occurred */
 } sample_args;

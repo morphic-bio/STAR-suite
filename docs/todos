@@ -20,11 +20,20 @@
 - Core compatibility fixes for perturb mode (post-`noBCfix`):
   - [DONE] Whitelist namespace support: handle 2-column NXT/TRU translation lists and keep correction/output namespaces consistent (`crChemistry`, `crOutputChemistry`).
   - [DONE] Barcode/chemistry auto-detection hardening with deterministic explicit-override precedence.
-  - [TODO] Add end-to-end NXT/TRU namespace conversion guardrails in CR-compat mode:
-    - Auto-detect when FASTQ/read-space barcodes are NXT but output/call-space is TRU (or vice versa), and apply conversion consistently across filtering/calling/output.
-    - Add temporary user override flag `--convertNXT-TRU` with file/library scoping (e.g., apply only to selected inputs/outputs), not a single run-global switch.
-    - Keep existing `crChemistry` / `crOutputChemistry` as global defaults; scoped overrides should take precedence for targeted files/libraries.
-    - Ensure behavior is explicit in logs so users can confirm when conversion is applied.
+  - [DONE] NXT/TRU namespace normalization at merge boundary:
+    - All per-library MexData barcodes (GEX and feature) are normalized to TRU before cross-library merge using `normalizeMexBarcodesToTru()`. This makes the merge stage namespace-agnostic.
+    - Per-library `effectiveChem` tracked in `PfPreparedFeatureLibrary` and `FeatureRun`. Currently set from the global chemistry context (same-whitelist runs). True mixed-chemistry (per-library whitelists) requires future `PfMultiConfig` extensions.
+    - `PfMultiAssign::AssignOptions` supports `translateNxt` wired to `pf_config_set_translate_nxt()`. Not yet activated from the pf-multi caller path — normalization happens at the merge boundary instead.
+    - `writeCombinedMex` receives inputChemistry="TRU", outputChemistry from `--crOutputChemistry` (default TRU). When outputChem=NXT, TRU→NXT translation is applied at write time.
+    - Solo filtered barcodes are fetched in read-space (`getFilteredBarcodesFromSolo(..., false)`) and normalized to TRU via `normalizeBarcodeVecToTru()` immediately. MEX-derived fallback barcodes (from `computeObservedGexBarcodes`) are already TRU from merge-boundary normalization and skip a second pass, avoiding double-translation.
+    - Auto-detection hardened: `detectChemistryFromWhitelistPath` requires ≥80% complement-rule agreement for NXT classification (was: any 2-column → NXT).
+    - Feature MEX reads paired with chemistry in `FeatureMexEntry` struct (no index drift on partial read failure).
+    - Validated: A375 TRU path (full E2E), UCSF iPSC2 NXT path (7,286/7,286 barcode parity).
+  - [TODO] Auto-detect NXT/TRU chemistry per library during process_features bootstrap phase:
+    - During `feature_mode_bootstrap_reads` window, trial-match barcodes against whitelist both as-is and after NXT translation; tally hit rates.
+    - In `feature_mode_finalize()`, decide NXT vs TRU based on match ratio and export via `pf_get_detected_chemistry()`.
+    - Hook into `PfMultiProcess` per-library loop to set `translateNxt` from detected chemistry.
+  - [TODO] Add dedicated automated tests that explicitly validate mixed-chemistry merge (synthetic NXT+TRU feature libraries merged with TRU GEX).
   - [DONE] Small-set cell calling parity wiring: explicit ORDMAG/simple EmptyDrops mode (`--soloEmptyDropsMode auto|simple|union`).
   - [DONE] Prevent feature-to-GEX leakage: route GEX quant to GEX libraries only in pf-multi mode.
   - [DONE] Add regression gate runs: A375 + UCSF 2M checks (artifacts under `/storage/A375/...` and `/storage/ucsf-2M/...`).

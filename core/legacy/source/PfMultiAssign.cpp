@@ -175,6 +175,14 @@ static void applyAssignOptions(pf_config* cfg, const AssignOptions& options) {
     if (options.legacyCbRescue) {
         pf_config_set_legacy_cb_rescue(cfg, 1);
     }
+    if (options.translateNxt) {
+        pf_config_set_translate_nxt(cfg, 1);
+    }
+    if (options.autodetectChemistry) {
+        pf_config_set_autodetect_chemistry(cfg, 1);
+        pf_config_set_autodetect_chemistry_reads(cfg, options.autodetectChemistryReads);
+        pf_config_set_autodetect_chemistry_min_hits(cfg, options.autodetectChemistryMinHits);
+    }
     if (options.enableStarDynamicPermitHooks) {
         pf_config_set_permit_hooks(
             cfg,
@@ -224,6 +232,7 @@ static void writeApiRunSummary(const string& assignOut,
     out << "minPosterior=" << options.minPosterior << "\n";
     out << "maxReads=" << options.maxReads << "\n";
     out << "legacyCbRescue=" << (options.legacyCbRescue ? 1 : 0) << "\n";
+    out << "translateNxt=" << (options.translateNxt ? 1 : 0) << "\n";
     out << "enableStarDynamicPermitHooks=" << (options.enableStarDynamicPermitHooks ? 1 : 0) << "\n";
     out << "filteredBarcodesPath=" << options.filteredBarcodesPath << "\n";
     out << "stats.total_reads=" << stats.total_reads << "\n";
@@ -289,7 +298,7 @@ static void writeApiRunSummary(const string& assignOut,
 
 } // namespace
 
-int runAssignBarcodes(const string& whitelist,
+AssignResult runAssignBarcodes(const string& whitelist,
                      const string& featureRef, const string& fastqDir,
                      const string& assignOut,
                      const AssignOptions& options) {
@@ -389,9 +398,17 @@ int runAssignBarcodes(const string& whitelist,
         capturePermitDelta ? &permitBefore : nullptr,
         capturePermitDelta ? &permitAfter : nullptr
     );
+
+    AssignResult result;
+    result.returnCode = 0;
+    if (options.autodetectChemistry) {
+        const char* mode = pf_get_detected_match_mode(ctx);
+        result.detectedMatchMode = (mode != nullptr) ? mode : "UNKNOWN";
+    }
+
     pf_destroy(ctx);
 
-    return 0;
+    return result;
 }
 
 int processFeatureLibraries(const PfMultiConfig::Config& config,
@@ -421,7 +438,11 @@ int processFeatureLibraries(const PfMultiConfig::Config& config,
         string assignOut = outPrefix + "/cr_assign/" + featureTypeDir;
         
         try {
-            runAssignBarcodes(whitelist, featureRef, resolvedFastq, assignOut, options);
+            AssignResult result = runAssignBarcodes(whitelist, featureRef, resolvedFastq, assignOut, options);
+            if (result.returnCode != 0) {
+                cerr << "ERROR processing " << featureType << ": returnCode=" << result.returnCode << endl;
+                return 1;
+            }
         } catch (const exception& e) {
             cerr << "ERROR processing " << featureType << ": " << e.what() << endl;
             return 1;

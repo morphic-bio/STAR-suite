@@ -128,6 +128,18 @@ void pf_config_set_emptydrops_failure_fatal(pf_config *config, int enable);
 void pf_config_set_expected_cells(pf_config *config, int n_cells);
 void pf_config_set_emptydrops_use_fdr(pf_config *config, int enable);
 
+/* NXT/TRU auto-detection */
+void pf_config_set_autodetect_chemistry(pf_config *config, int enabled);
+void pf_config_set_autodetect_chemistry_reads(pf_config *config, int n_reads);
+void pf_config_set_autodetect_chemistry_min_hits(pf_config *config, int min_hits);
+
+/**
+ * Get detected barcode match mode after processing.
+ * Returns "RAW_MATCH", "TRANSLATED_MATCH", "AMBIGUOUS", or "UNKNOWN".
+ * Only meaningful after processing completes with autodetect_chemistry enabled.
+ */
+const char* pf_get_detected_match_mode(pf_context *ctx);
+
 /* ============================================================================
  * Context Lifecycle API
  * ============================================================================ */

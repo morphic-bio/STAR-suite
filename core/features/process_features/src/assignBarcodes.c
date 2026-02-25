@@ -78,6 +78,45 @@ static void feature_mode_finalize(const feature_arrays *features) {
         feature_mode_offsets[j] = (best_count > 0) ? best_offset : -1;
     }
 }
+
+static void chem_detect_decide(struct chem_detect_state *cd) {
+    if (!cd) return;
+    if (!__sync_bool_compare_and_swap(&cd->done, 0, 1)) {
+        return;
+    }
+
+    unsigned long long raw = cd->raw_hits;
+    unsigned long long nxt = cd->nxt_hits;
+    unsigned long long total = raw + nxt;
+    int n_reads = (int)cd->ticket;
+
+    fprintf(stderr, "NOTICE: chemistry auto-detect: raw_hits=%llu "
+            "nxt_hits=%llu total=%llu reads_sampled=%d\n",
+            raw, nxt, total, n_reads);
+
+    if (total < (unsigned long long)cd->min_hits) {
+        cd->match_mode = 3;
+        fprintf(stderr, "WARNING: chemistry auto-detect: total hits %llu "
+                "below minimum %d, result AMBIGUOUS\n", total, cd->min_hits);
+        __sync_synchronize();
+        return;
+    }
+
+    double raw_frac = (double)raw / (double)total;
+    fprintf(stderr, "NOTICE: chemistry auto-detect: raw_frac=%.3f\n", raw_frac);
+
+    if (raw_frac >= 0.8) {
+        cd->match_mode = 1;
+    } else if (raw_frac <= 0.2) {
+        cd->match_mode = 2;
+    } else {
+        cd->match_mode = 3;
+        fprintf(stderr, "WARNING: chemistry auto-detect: ambiguous "
+                "(raw_frac=%.3f), result AMBIGUOUS\n", raw_frac);
+    }
+    __sync_synchronize();
+}
+
 static int pf_trace_keys_inited = 0;
 static int pf_trace_keys_enabled = 0;
 static const char *pf_trace_keys_list = NULL;
@@ -4048,6 +4087,7 @@ void *consume_reads(void *arg) {
     const int nsets = processor_args->nsets;
     fastq_reader_set **reader_sets = processor_args->reader_sets;
     const sample_args *sample_args = processor_args->sample_args;
+    struct chem_detect_state *chem_detect = sample_args->chem_detect;
     const int permit_hooks_enabled = sample_args->permit_hooks_enabled &&
                                      sample_args->permit_acquire_hook != NULL &&
                                      sample_args->permit_release_hook != NULL;
@@ -4153,6 +4193,38 @@ void *consume_reads(void *arg) {
             }
             if (reverse_lines) {
                 work_bytes += (uint64_t)strlen(reverse_lines[0]) + (uint64_t)strlen(reverse_lines[1]);
+            }
+
+            /* NXT/TRU auto-detection: sample first N reads */
+            if (chem_detect && !chem_detect->done) {
+                unsigned long long ticket = __sync_add_and_fetch(&chem_detect->ticket, 1);
+                if (ticket <= (unsigned long long)chem_detect->max_reads) {
+                    char *barcode_seq = barcode_lines[0] + barcode_constant_offset;
+                    if (strlen(barcode_seq) >= (size_t)barcode_length) {
+                        char bc_buf[barcode_length + 1];
+                        memcpy(bc_buf, barcode_seq, barcode_length);
+                        bc_buf[barcode_length] = '\0';
+
+                        unsigned char raw_code[barcode_code_length];
+                        string2code(bc_buf, barcode_length, raw_code);
+                        uint32_t raw_key = *(uint32_t*)raw_code;
+                        if (kh_get(u32ptr, whitelist_hash, raw_key) != kh_end(whitelist_hash)) {
+                            __sync_add_and_fetch(&chem_detect->raw_hits, 1);
+                        }
+
+                        translate_nxt_inplace(bc_buf, barcode_length);
+                        unsigned char nxt_code[barcode_code_length];
+                        string2code(bc_buf, barcode_length, nxt_code);
+                        uint32_t nxt_key = *(uint32_t*)nxt_code;
+                        if (kh_get(u32ptr, whitelist_hash, nxt_key) != kh_end(whitelist_hash)) {
+                            __sync_add_and_fetch(&chem_detect->nxt_hits, 1);
+                        }
+                    }
+
+                    if (ticket == (unsigned long long)chem_detect->max_reads) {
+                        chem_detect_decide(chem_detect);
+                    }
+                }
             }
 
             uint64_t wait_ns = 0;
@@ -4309,6 +4381,12 @@ void *consume_reads(void *arg) {
             sched_yield();
         }
     }
+
+    /* Drain finalization: if total reads < max_reads, decide now */
+    if (chem_detect && !chem_detect->done) {
+        chem_detect_decide(chem_detect);
+    }
+
     //free the lines buffer
     free(lines_buffer);
     pthread_exit(NULL);

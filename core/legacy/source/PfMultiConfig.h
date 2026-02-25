@@ -25,6 +25,7 @@ struct LibraryEntry {
     string sample;              // Sample name (optional)
     string library_type;        // Library type (optional)
     string gem_well;            // GEM well suffix (e.g., "1", "2"), defaults to "1" if absent
+    string starChemistry;       // Per-library chemistry override: "TRU", "NXT", "auto", or empty (use global)
     
     // Normalized feature type for matching
     string normalizedFeatureType() const;

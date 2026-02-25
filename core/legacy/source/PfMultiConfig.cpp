@@ -125,8 +125,9 @@ Config parseConfig(const string& configPath) {
                         fields.push_back(field);
                     }
                     
-                    if (fields.size() < librariesHeader.size()) {
-                        continue; // Skip incomplete rows
+                    // Pad missing trailing fields with empty strings
+                    while (fields.size() < librariesHeader.size()) {
+                        fields.push_back(string());
                     }
                     
                     LibraryEntry entry;
@@ -139,6 +140,7 @@ Config parseConfig(const string& configPath) {
                         if (!value.empty() && value.front() == '"' && value.back() == '"') {
                             value = value.substr(1, value.length() - 2);
                         }
+                        trimInPlace(value);
                         
                         if (header == "fastqs") {
                             entry.fastqs = value;
@@ -150,6 +152,16 @@ Config parseConfig(const string& configPath) {
                             entry.library_type = value;
                         } else if (header == "gem_well") {
                             entry.gem_well = value.empty() ? "1" : value;
+                        } else if (header == "star_chemistry" || header == "starchemistry") {
+                            if (!value.empty()) {
+                                string lower = value;
+                                std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+                                if (lower != "tru" && lower != "nxt" && lower != "auto") {
+                                    throw runtime_error("Invalid star_chemistry value '" + value
+                                        + "'; must be TRU, NXT, auto, or empty");
+                                }
+                                entry.starChemistry = lower;
+                            }
                         }
                     }
                     if (!entry.fastqs.empty()) {
@@ -249,8 +261,9 @@ Config parseConfig(const string& configPath) {
                     fields.push_back(field);
                 }
                 
-                if (fields.size() < librariesHeader.size()) {
-                    continue;
+                // Pad missing trailing fields with empty strings
+                while (fields.size() < librariesHeader.size()) {
+                    fields.push_back(string());
                 }
                 
                 LibraryEntry entry;
@@ -262,6 +275,7 @@ Config parseConfig(const string& configPath) {
                     if (!value.empty() && value.front() == '"' && value.back() == '"') {
                         value = value.substr(1, value.length() - 2);
                     }
+                    trimInPlace(value);
                     
                     if (header == "fastqs") {
                         entry.fastqs = value;
@@ -273,6 +287,16 @@ Config parseConfig(const string& configPath) {
                         entry.library_type = value;
                     } else if (header == "gem_well") {
                         entry.gem_well = value.empty() ? "1" : value;
+                    } else if (header == "star_chemistry" || header == "starchemistry") {
+                        if (!value.empty()) {
+                            string lower = value;
+                            std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+                            if (lower != "tru" && lower != "nxt" && lower != "auto") {
+                                throw runtime_error("Invalid star_chemistry value '" + value
+                                    + "'; must be TRU, NXT, auto, or empty");
+                            }
+                            entry.starChemistry = lower;
+                        }
                     }
                 }
                 if (!entry.fastqs.empty()) {

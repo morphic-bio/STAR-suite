@@ -171,3 +171,47 @@ CR-compat mode produces `outs/crispr_analysis/`:
 - `protospacer_umi_thresholds.csv` - GMM-derived UMI thresholds
 
 See `tests/crispr_feature_calling_comparison_report.md` for validation details.
+
+---
+
+## Per-Library NXT/TRU Chemistry Override
+
+10x 3' HT experiments may use mixed NXT/TRU chemistries across libraries
+(e.g., mRNA GEX with TRU barcodes, gRNA CRISPR Guide Capture with NXT
+barcodes). STAR supports per-library chemistry specification via the
+`star_chemistry` column in the pfMultiConfig `[libraries]` section.
+
+### pfMultiConfig `star_chemistry` Column
+
+| Value | Behavior |
+|-------|----------|
+| `TRU` | Explicit TRU chemistry; auto-detection skipped for this library |
+| `NXT` | Explicit NXT chemistry; auto-detection skipped for this library |
+| `auto` | Auto-detect chemistry from reads for this library |
+| *(empty or absent)* | Inherit from `--crChemistry` flag (default: `auto`) |
+
+**Precedence**: `star_chemistry` column > `--crChemistry` flag > auto-detect.
+
+### Example
+
+```csv
+[libraries]
+fastqs,sample,library_type,feature_types,star_chemistry
+/path/to/mRNA,DE_30KO,Gene Expression,Gene Expression,TRU
+/path/to/PolyIII,DE_30KO,CRISPR Guide Capture,CRISPR Guide Capture,NXT
+/path/to/LARRY,DE_30KO,Custom,Custom,TRU
+
+[feature]
+ref,/path/to/feature_ref.csv
+```
+
+The `star_` prefix avoids collision with any future 10x-native column.
+Cell Ranger silently ignores unknown columns, so the same config file
+works with both STAR and Cell Ranger.
+
+### Merge Normalization
+
+At merge time, all feature library barcodes are normalized to the output
+namespace (TRU by default, controlled by `--crOutputChemistry`). This
+ensures the merged MEX has a consistent barcode namespace regardless of
+per-library chemistry differences.

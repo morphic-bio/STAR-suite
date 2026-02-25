@@ -25,7 +25,16 @@ struct AssignOptions {
     long long maxReads = -1; // <=0 means unlimited
     bool legacyCbRescue = false;
     bool enableStarDynamicPermitHooks = false;
+    bool translateNxt = false;
     string filteredBarcodesPath;
+    bool autodetectChemistry = false;
+    int autodetectChemistryReads = 10000;
+    int autodetectChemistryMinHits = 50;
+};
+
+struct AssignResult {
+    int returnCode = 0;
+    string detectedMatchMode = "UNKNOWN";
 };
 
 /**
@@ -35,9 +44,9 @@ struct AssignOptions {
  * @param fastqDir FASTQ directory for the feature library
  * @param assignOut Output directory for assignBarcodes
  * @param options Optional assignBarcodes CLI overrides
- * @return 0 on success, non-zero on error
+ * @return AssignResult with returnCode and detectedMatchMode
  */
-int runAssignBarcodes(const string& whitelist,
+AssignResult runAssignBarcodes(const string& whitelist,
                      const string& featureRef, const string& fastqDir,
                      const string& assignOut,
                      const AssignOptions& options = AssignOptions());
