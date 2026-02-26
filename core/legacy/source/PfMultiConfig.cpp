@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cctype>
 #include <sys/stat.h>
+#include <set>
 #include <stdexcept>
 
 namespace PfMultiConfig {
@@ -35,7 +36,7 @@ vector<LibraryEntry> Config::getGexLibraries() const {
     vector<LibraryEntry> result;
     for (const auto& lib : libraries) {
         string norm = lib.normalizedFeatureType();
-        if (norm.find("geneexpression") != string::npos || norm.find("gex") != string::npos) {
+        if (norm == "geneexpression" || norm == "gex") {
             result.push_back(lib);
         }
     }
@@ -44,14 +45,18 @@ vector<LibraryEntry> Config::getGexLibraries() const {
 
 vector<LibraryEntry> Config::getFeatureLibraries(const string& featureType) const {
     vector<LibraryEntry> result;
-    string targetNorm = featureType;
-    std::transform(targetNorm.begin(), targetNorm.end(), targetNorm.begin(), 
-                  [](unsigned char c) { return std::tolower(c); });
-    targetNorm.erase(std::remove_if(targetNorm.begin(), targetNorm.end(), ::isspace), targetNorm.end());
-    
+    // Normalize the target the same way as normalizedFeatureType():
+    // strip all non-alphanumeric, lowercase.
+    string targetNorm;
+    targetNorm.reserve(featureType.size());
+    for (unsigned char c : featureType) {
+        if (std::isalnum(c)) {
+            targetNorm.push_back(static_cast<char>(std::tolower(c)));
+        }
+    }
+
     for (const auto& lib : libraries) {
-        string norm = lib.normalizedFeatureType();
-        if (norm.find(targetNorm) != string::npos) {
+        if (lib.normalizedFeatureType() == targetNorm) {
             result.push_back(lib);
         }
     }
@@ -162,6 +167,10 @@ Config parseConfig(const string& configPath) {
                                 }
                                 entry.starChemistry = lower;
                             }
+                        } else if (header == "star_feature_ref" || header == "starfeatureref") {
+                            entry.starFeatureRef = value;
+                        } else if (header == "star_library_id" || header == "starlibraryid") {
+                            entry.starLibraryId = value;
                         }
                     }
                     if (!entry.fastqs.empty()) {
@@ -297,6 +306,10 @@ Config parseConfig(const string& configPath) {
                             }
                             entry.starChemistry = lower;
                         }
+                    } else if (header == "star_feature_ref" || header == "starfeatureref") {
+                        entry.starFeatureRef = value;
+                    } else if (header == "star_library_id" || header == "starlibraryid") {
+                        entry.starLibraryId = value;
                     }
                 }
                 if (!entry.fastqs.empty()) {
@@ -336,6 +349,59 @@ Config parseConfig(const string& configPath) {
         }
     }
     
+    // Auto-generate star_library_id when absent; check for duplicates
+    // on both raw IDs and filesystem-sanitized IDs (non-alnum chars → '_').
+    {
+        set<string> seenIds;
+        set<string> seenSanitized;
+        for (size_t i = 0; i < config.libraries.size(); ++i) {
+            auto& lib = config.libraries[i];
+            if (lib.starLibraryId.empty()) {
+                string samplePart = lib.sample.empty() ? "lib" : lib.sample;
+                string ftNorm = lib.feature_types;
+                std::replace(ftNorm.begin(), ftNorm.end(), ' ', '_');
+                lib.starLibraryId = samplePart + "_" + ftNorm + "_" + std::to_string(i);
+            }
+            if (!seenIds.insert(lib.starLibraryId).second) {
+                throw runtime_error("Duplicate star_library_id '" + lib.starLibraryId
+                    + "'; each library must have a unique identifier");
+            }
+            // Sanitize the same way as PfMultiProcess::sanitizeDirName
+            string sanitized;
+            sanitized.reserve(lib.starLibraryId.size());
+            for (unsigned char c : lib.starLibraryId) {
+                sanitized.push_back(
+                    (std::isalnum(c) || c == '-' || c == '_') ? static_cast<char>(c) : '_');
+            }
+            if (!seenSanitized.insert(sanitized).second) {
+                throw runtime_error("star_library_id '" + lib.starLibraryId
+                    + "' collides with another ID after path sanitization (both become '"
+                    + sanitized + "'); use IDs that differ in alphanumeric/dash/underscore characters");
+            }
+        }
+    }
+
+    // Resolve and validate star_feature_ref paths.
+    // Relative paths are resolved against the config file's directory.
+    string configDir;
+    {
+        size_t lastSlash = configPath.find_last_of("/\\");
+        configDir = (lastSlash == string::npos) ? "." : configPath.substr(0, lastSlash);
+    }
+    for (auto& lib : config.libraries) {
+        if (!lib.starFeatureRef.empty()) {
+            // Resolve relative paths against config directory
+            if (lib.starFeatureRef[0] != '/') {
+                lib.starFeatureRef = configDir + "/" + lib.starFeatureRef;
+            }
+            struct stat st;
+            if (stat(lib.starFeatureRef.c_str(), &st) != 0 || !S_ISREG(st.st_mode)) {
+                throw runtime_error("star_feature_ref path does not exist or is not a file: "
+                    + lib.starFeatureRef);
+            }
+        }
+    }
+
     return config;
 }
 

@@ -228,10 +228,11 @@ string compareFeatureNames(const vector<FeatureRow>& featureRows,
 }
 
 bool writeFeaturesTsv(const string& outPath, const vector<FeatureRow>& featureRows,
-                     const string& defaultType, bool force) {
+                     const string& defaultType, bool force,
+                     const string& featureTypeOverride) {
     struct stat st;
     if (stat(outPath.c_str(), &st) == 0 && !force) {
-        return false; // File exists and not forcing
+        return false;
     }
     
     ofstream out(outPath);
@@ -244,7 +245,14 @@ bool writeFeaturesTsv(const string& outPath, const vector<FeatureRow>& featureRo
     for (const auto& row : featureRows) {
         string id = row.id.empty() ? row.name : row.id;
         string name = row.name.empty() ? row.id : row.name;
-        string ftype = row.featureType.empty() ? defaultType : row.featureType;
+        string ftype;
+        if (!featureTypeOverride.empty()) {
+            ftype = featureTypeOverride;
+        } else if (!row.featureType.empty()) {
+            ftype = row.featureType;
+        } else {
+            ftype = defaultType;
+        }
         out << id << "\t" << name << "\t" << ftype << "\n";
     }
     
@@ -298,7 +306,8 @@ bool copyBarcodesTsv(const string& barcodesTxt, const string& barcodesTsv, bool 
 
 int processAssignOutput(const string& assignOutDir, const string& featureCsvPath,
                        const string& defaultFeatureType, bool force,
-                       const string& whitelistPath) {
+                       const string& whitelistPath,
+                       const string& featureTypeOverride) {
     vector<string> outDirs;
     outDirs.push_back(assignOutDir);
     
@@ -336,7 +345,8 @@ int processAssignOutput(const string& assignOutDir, const string& featureCsvPath
         }
         
         try {
-            if (writeFeaturesTsv(featuresTsv, featureRows, defaultFeatureType, force)) {
+            if (writeFeaturesTsv(featuresTsv, featureRows, defaultFeatureType, force,
+                                 featureTypeOverride)) {
                 wroteAny = true;
             }
             if (copyBarcodesTsv(barcodesTxt, barcodesTsv, force, whitelistPath)) {
@@ -353,7 +363,21 @@ int processAssignOutput(const string& assignOutDir, const string& featureCsvPath
     }
     
     if (!wroteAny) {
-        cerr << "No outputs written (files may already exist)." << endl;
+        if (!force) {
+            bool allExist = true;
+            for (const auto& outDir : outDirs) {
+                struct stat fst;
+                if (stat((outDir + "/features.tsv").c_str(), &fst) != 0 ||
+                    stat((outDir + "/barcodes.tsv").c_str(), &fst) != 0) {
+                    allExist = false;
+                    break;
+                }
+            }
+            if (allExist) {
+                return 0;
+            }
+        }
+        cerr << "No outputs written and expected files missing." << endl;
         return 1;
     }
     

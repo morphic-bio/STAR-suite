@@ -54,10 +54,13 @@ string compareFeatureNames(const vector<FeatureRow>& featureRows,
  * @param featureRows Features to write
  * @param defaultType Default feature type if missing
  * @param force Overwrite existing file
+ * @param featureTypeOverride If non-empty, force all features to this type
+ *        (overrides both CSV feature_type and defaultType)
  * @return true if file was written, false if skipped
  */
 bool writeFeaturesTsv(const string& outPath, const vector<FeatureRow>& featureRows,
-                     const string& defaultType, bool force);
+                     const string& defaultType, bool force,
+                     const string& featureTypeOverride = "");
 
 /**
  * @brief Copy barcodes.txt to barcodes.tsv, optionally applying barcode output mapping
@@ -77,11 +80,15 @@ bool copyBarcodesTsv(const string& barcodesTxt, const string& barcodesTsv, bool 
  * @param featureCsvPath Path to feature_reference.csv
  * @param defaultFeatureType Default feature type (default: "Custom")
  * @param force Overwrite existing files
+ * @param whitelistPath Optional whitelist for barcode mapping
+ * @param featureTypeOverride If non-empty, force all features to this type
+ *        (the config-declared featureRefType is the source of truth)
  * @return 0 on success, 1 on error
  */
 int processAssignOutput(const string& assignOutDir, const string& featureCsvPath,
                        const string& defaultFeatureType = "Custom", bool force = false,
-                       const string& whitelistPath = "");
+                       const string& whitelistPath = "",
+                       const string& featureTypeOverride = "");
 
 } // namespace PfMultiMexStub
 

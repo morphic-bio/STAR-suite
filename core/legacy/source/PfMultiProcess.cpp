@@ -10,6 +10,7 @@
 #include "TimeFunctions.h"
 #include "call_features.h"
 #include "MexWriter.h"
+#include "PfMultiFeatureSpecs.h"
 #include <sys/stat.h>
 #include <dirent.h>
 #include <stdexcept>
@@ -18,12 +19,15 @@
 #include <sstream>
 #include <algorithm>
 #include <cstdio>
+#include <cerrno>
+#include <cstring>
 #include <cctype>
 #include <cmath>
 #include <chrono>
 #include <thread>
 #include <atomic>
 #include <limits>
+#include <set>
 #include <zlib.h>
 using std::cerr;
 using std::endl;
@@ -43,6 +47,7 @@ struct PfPreparedFeatureLibrary {
     string featureRefType;
     string resolvedFastq;
     string sampleName;
+    string libraryId;             // from star_library_id (auto-generated if absent)
     string assignOut;
     string featureRefPath;
     string effectiveChem;
@@ -93,12 +98,10 @@ private:
     PfMultiPreparedContext context;
 };
 
-namespace {
+using PfMultiFeatureSpecs::FeatureSpec;
+using PfMultiFeatureSpecs::buildFeatureSpecsFromConfig;
 
-struct FeatureSpec {
-    string libraryType;
-    string featureRefType;
-};
+namespace {
 
 static string normalizeType(const string& input) {
     string out;
@@ -840,14 +843,7 @@ static bool getFilteredBarcodesFromSolo(const Solo* solo,
     return !out.empty();
 }
 
-static vector<FeatureSpec> defaultPfFeatureSpecs() {
-    return {
-        {"CRISPR Guide Capture", "CRISPR Guide Capture"},
-        {"Antibody Capture", "Antibody Capture"},
-        {"CellPlex (CMO)", "Multiplexing Capture"},
-        {"Multiplexing Capture", "Multiplexing Capture"}
-    };
-}
+// knownFeatureRefTypeMap() and buildFeatureSpecsFromConfig() are in PfMultiFeatureSpecs.h
 
 static PfMultiPreparedContext buildPfMultiPreparedContext(const PfMultiPreloadInput& input) {
     PfMultiPreparedContext context;
@@ -862,8 +858,22 @@ static PfMultiPreparedContext buildPfMultiPreparedContext(const PfMultiPreloadIn
     if (isUnsetToken(context.featureRef)) {
         context.featureRef = context.config.featureRef;
     }
+    // Global featureRef is only required if at least one non-GEX library
+    // lacks a per-library star_feature_ref.
     if (isUnsetToken(context.featureRef)) {
-        throw runtime_error("Feature reference not provided (use --crFeatureRef or set in config)");
+        bool anyNeedsGlobal = false;
+        for (const auto& lib : context.config.libraries) {
+            string norm = lib.normalizedFeatureType();
+            bool isGex = (norm == "geneexpression" || norm == "gex");
+            if (!isGex && lib.starFeatureRef.empty()) {
+                anyNeedsGlobal = true;
+                break;
+            }
+        }
+        if (anyNeedsGlobal) {
+            throw runtime_error("Feature reference not provided: use --crFeatureRef, "
+                "set [feature] ref in config, or provide star_feature_ref for every feature library");
+        }
     }
 
     context.whitelist = input.crWhitelist;
@@ -948,7 +958,7 @@ static PfMultiPreparedContext buildPfMultiPreparedContext(const PfMultiPreloadIn
     context.mapEstimate =
         estimateReadsAnchored(selectMapPrimaryFastqs(input), "map", prepLog);
 
-    const vector<FeatureSpec> featureSpecs = defaultPfFeatureSpecs();
+    const vector<FeatureSpec> featureSpecs = buildFeatureSpecsFromConfig(context.config, prepLog);
     for (const auto& spec : featureSpecs) {
         const vector<PfMultiConfig::LibraryEntry> libs =
             context.config.getFeatureLibraries(spec.libraryType);
@@ -968,18 +978,27 @@ static PfMultiPreparedContext buildPfMultiPreparedContext(const PfMultiPreloadIn
             prepared.sampleName = lib.sample.empty()
                 ? basenameOf(prepared.resolvedFastq)
                 : lib.sample;
+            prepared.libraryId = lib.starLibraryId;
             prepared.assignOut =
-                assignBase + "/" + sanitizeDirName(prepared.sampleName);
+                assignBase + "/" + sanitizeDirName(prepared.libraryId);
 
             const string mkAssignOutCmd = "mkdir -p \"" + prepared.assignOut + "\"";
             if (system(mkAssignOutCmd.c_str()) != 0) {
                 throw runtime_error("Failed to create assign output directory: " + prepared.assignOut);
             }
 
-            const string filteredRef = prepared.assignOut + "/feature_reference.filtered.csv";
-            prepared.usedFilteredRef =
-                filterFeatureRefCsv(context.featureRef, spec.featureRefType, filteredRef);
-            prepared.featureRefPath = prepared.usedFilteredRef ? filteredRef : context.featureRef;
+            // Feature ref precedence: star_feature_ref > global [feature] ref
+            if (!lib.starFeatureRef.empty()) {
+                prepared.featureRefPath = lib.starFeatureRef;
+                prepared.usedFilteredRef = false;
+                prepLog << "  using per-library star_feature_ref=" << lib.starFeatureRef
+                        << " (filter skipped)\n";
+            } else {
+                const string filteredRef = prepared.assignOut + "/feature_reference.filtered.csv";
+                prepared.usedFilteredRef =
+                    filterFeatureRefCsv(context.featureRef, spec.featureRefType, filteredRef);
+                prepared.featureRefPath = prepared.usedFilteredRef ? filteredRef : context.featureRef;
+            }
 
             // Per-library chemistry: star_chemistry column > --crChemistry flag
             string libChemRequest = lib.starChemistry;
@@ -997,17 +1016,23 @@ static PfMultiPreparedContext buildPfMultiPreparedContext(const PfMultiPreloadIn
                 prepared.effectiveChem = context.effectiveChem;
                 prepared.explicitChem = false;
             }
-            prepLog << "  library " << prepared.sampleName << "/" << spec.libraryType
+            prepLog << "  library " << prepared.libraryId
+                    << " (" << prepared.sampleName << "/" << spec.libraryType << ")"
                     << ": star_chemistry=" << (lib.starChemistry.empty() ? "(empty)" : lib.starChemistry)
                     << ", global=" << context.requestedChem
                     << ", resolved=" << libChemRequest
                     << ", effectiveChem=" << prepared.effectiveChem
                     << (prepared.explicitChem ? " (explicit)" : " (auto-detect eligible)")
+                    << ", featureRef=" << prepared.featureRefPath
                     << "\n";
 
-            if (!prepared.usedFilteredRef) {
+            if (!prepared.usedFilteredRef && lib.starFeatureRef.empty()) {
                 prepLog << "WARNING: feature reference not filtered for "
                         << spec.libraryType << "; using full reference\n";
+            } else if (!prepared.usedFilteredRef && !lib.starFeatureRef.empty()) {
+                prepLog << "NOTICE: per-library star_feature_ref provided for "
+                        << spec.libraryType << " (library_id="
+                        << prepared.libraryId << "); type-based filtering skipped as expected\n";
             }
 
             vector<string> allFastqs = listFastqFilesInDirectory(prepared.resolvedFastq);
@@ -1291,10 +1316,105 @@ int processPfMultiConfig(Parameters& P,
             string featureRefPath;
             string effectiveChem;
             string detectedMatchMode;
+            string libraryId;
+            string sampleName;
+            string resolvedFastq;
+            string resolvedChemRequest;
+            bool explicitChem = false;
+            int returnCode = 0;
         };
         vector<FeatureRun> featureRuns;
 
-        for (const auto& preparedLib : prepared.featureLibraries) {
+        // Phase 4: Library-aware PF scheduler.
+        // Compute per-library thread budgets proportional to remaining work,
+        // guaranteeing at least 1 producer per library. Libraries still run
+        // sequentially (pf_api is not concurrent-safe), but each library's
+        // allocation reflects its share of the total work.
+        const size_t numFeatureLibs = prepared.featureLibraries.size();
+        struct LibrarySchedule {
+            uint64_t estimatedWork = 0;
+            int fileCount = 0;
+            int threadBudget = 0;
+        };
+        vector<LibrarySchedule> librarySchedules(numFeatureLibs);
+        uint64_t totalEstimatedWork = 0;
+        int totalFileCount = 0;
+        for (size_t li = 0; li < numFeatureLibs; ++li) {
+            const auto& est = prepared.featureLibraries[li].featureEstimate;
+            uint64_t work = est.valid ? est.estimatedReads : 0;
+            if (work == 0) work = 1;
+            librarySchedules[li].estimatedWork = work;
+            librarySchedules[li].fileCount = std::max(1, static_cast<int>(est.fileCount));
+            totalEstimatedWork += work;
+            totalFileCount += librarySchedules[li].fileCount;
+        }
+
+        if (numFeatureLibs > 1 && assignOpts.enableStarDynamicPermitHooks) {
+            // Library-aware budget: distribute runThreadN proportionally.
+            // Each library gets at least 2 threads (1 producer + 1 consumer).
+            // When runThreadN >= numLibs*2, strict conservation holds:
+            //   sum(threadBudget) == runThreadN.
+            // When runThreadN < numLibs*2, min guarantee takes priority.
+            const int minPerLib = 2;
+            const int guaranteedTotal = static_cast<int>(numFeatureLibs) * minPerLib;
+
+            if (P.runThreadN < guaranteedTotal) {
+                // Not enough threads for everyone's minimum; give each the min.
+                // Total exceeds runThreadN but libraries run sequentially.
+                for (size_t li = 0; li < numFeatureLibs; ++li) {
+                    librarySchedules[li].threadBudget = minPerLib;
+                }
+            } else {
+                // Distribute surplus using largest-remainder method for strict conservation.
+                const int surplus = P.runThreadN - guaranteedTotal;
+                int floorSum = 0;
+                vector<double> fractionalParts(numFeatureLibs);
+                for (size_t li = 0; li < numFeatureLibs; ++li) {
+                    double exactExtra = static_cast<double>(librarySchedules[li].estimatedWork)
+                                      / static_cast<double>(std::max<uint64_t>(1, totalEstimatedWork))
+                                      * surplus;
+                    int floorExtra = static_cast<int>(exactExtra);
+                    librarySchedules[li].threadBudget = minPerLib + floorExtra;
+                    fractionalParts[li] = exactExtra - floorExtra;
+                    floorSum += floorExtra;
+                }
+                int leftover = surplus - floorSum;
+                // Give leftover threads one at a time to libraries with largest fractional parts
+                while (leftover > 0) {
+                    size_t bestIdx = 0;
+                    for (size_t li = 1; li < numFeatureLibs; ++li) {
+                        if (fractionalParts[li] > fractionalParts[bestIdx]) {
+                            bestIdx = li;
+                        }
+                    }
+                    librarySchedules[bestIdx].threadBudget += 1;
+                    fractionalParts[bestIdx] = -1.0;
+                    --leftover;
+                }
+            }
+
+            P.inOut->logMain << "\npf-multi library scheduler (Phase 4):\n";
+            P.inOut->logMain << "  total_threads=" << P.runThreadN
+                             << ", libraries=" << numFeatureLibs
+                             << ", total_est_reads=" << totalEstimatedWork << "\n";
+            for (size_t li = 0; li < numFeatureLibs; ++li) {
+                P.inOut->logMain << "  [" << li << "] library_id="
+                                 << prepared.featureLibraries[li].libraryId
+                                 << ", est_reads=" << librarySchedules[li].estimatedWork
+                                 << ", files=" << librarySchedules[li].fileCount
+                                 << ", thread_budget=" << librarySchedules[li].threadBudget
+                                 << "\n";
+            }
+            P.inOut->logMain << "\n";
+        } else {
+            for (size_t li = 0; li < numFeatureLibs; ++li) {
+                librarySchedules[li].threadBudget = P.runThreadN;
+            }
+        }
+
+        for (size_t libIdx = 0; libIdx < numFeatureLibs; ++libIdx) {
+            const auto& preparedLib = prepared.featureLibraries[libIdx];
+            const LibrarySchedule& sched = librarySchedules[libIdx];
             const string& resolvedFastq = preparedLib.resolvedFastq;
             const string& sampleName = preparedLib.sampleName;
             const string& assignOut = preparedLib.assignOut;
@@ -1302,22 +1422,22 @@ int processPfMultiConfig(Parameters& P,
             const string& libraryType = preparedLib.libraryType;
             const string& featureRefType = preparedLib.featureRefType;
             const AnchoredReadEstimate featureEstimate = preparedLib.featureEstimate;
+
+            const int libThreadBudget = std::max(1, sched.threadBudget);
             const int pfProducerSlotsAvailable =
-                std::max(1, std::min(std::max(1, P.runThreadN - 1),
-                                     std::max(1, static_cast<int>(featureEstimate.fileCount))));
+                std::max(1, std::min(std::max(1, libThreadBudget - 1),
+                                     std::max(1, sched.fileCount)));
             int pfReaderThreadsReserved = 1;
-            int pfConsumerBudgetThreads = std::max(1, P.runThreadN - pfReaderThreadsReserved);
+            int pfConsumerBudgetThreads = std::max(1, libThreadBudget - pfReaderThreadsReserved);
             int pfConsumerThreadsForRun = std::max(1, assignOpts.consumerThreadsPerSet);
             int pfConsumerSoftMax = pfConsumerCapPerProducer;
             bool pfConsumerThreadsAuto = false;
             if (!pfConsumerThreadsExplicit && assignOpts.enableStarDynamicPermitHooks) {
-                // Choose producer reservation and consumer pool jointly:
-                // maximize consumers, cap consumers per producer, then increase producers as needed.
                 int bestProducerReserve = 1;
                 int bestConsumerThreads = 1;
                 for (int producerReserve = 1; producerReserve <= pfProducerSlotsAvailable; ++producerReserve) {
                     const int consumerBudget =
-                        std::max(1, P.runThreadN - producerReserve);
+                        std::max(1, libThreadBudget - producerReserve);
                     const int consumerByBudget =
                         std::max(1, consumerBudget / std::max(1, pfSearchThreadQuantum));
                     const int consumerByProducerCap =
@@ -1333,16 +1453,15 @@ int processPfMultiConfig(Parameters& P,
                 }
                 pfReaderThreadsReserved = bestProducerReserve;
                 pfConsumerThreadsForRun = bestConsumerThreads;
-                pfConsumerBudgetThreads = std::max(1, P.runThreadN - pfReaderThreadsReserved);
+                pfConsumerBudgetThreads = std::max(1, libThreadBudget - pfReaderThreadsReserved);
                 pfConsumerSoftMax =
                     std::max(1, pfReaderThreadsReserved * pfConsumerCapPerProducer);
                 pfConsumerThreadsAuto = true;
             } else if (pfConsumerThreadsExplicit) {
-                // Respect explicit consumer count, but scale producer reserve to maintain per-producer cap.
                 const int neededProducerReserve = std::max(
                     1, (pfConsumerThreadsForRun + pfConsumerCapPerProducer - 1) / pfConsumerCapPerProducer);
                 pfReaderThreadsReserved = std::min(pfProducerSlotsAvailable, neededProducerReserve);
-                pfConsumerBudgetThreads = std::max(1, P.runThreadN - pfReaderThreadsReserved);
+                pfConsumerBudgetThreads = std::max(1, libThreadBudget - pfReaderThreadsReserved);
                 pfConsumerSoftMax =
                     std::max(1, pfReaderThreadsReserved * pfConsumerCapPerProducer);
             }
@@ -1369,7 +1488,7 @@ int processPfMultiConfig(Parameters& P,
             }
             const bool pfSingleConsumer = (pfConsumerThreadsForRun <= 1);
             const int pfPermitCeilingDuringPf =
-                std::max(1, P.runThreadN - pfReaderThreadsReserved);
+                std::max(1, libThreadBudget - pfReaderThreadsReserved);
 
             std::atomic<bool> stopPfController(false);
             std::atomic<uint64_t> pfControllerTicks(0);
@@ -1677,7 +1796,11 @@ int processPfMultiConfig(Parameters& P,
             }
 
             if (assignResult.returnCode != 0) {
-                throw runtime_error("Failed to process feature library: " + libraryType);
+                throw runtime_error("Failed to process feature library: type=" + libraryType
+                    + ", libraryId=" + preparedLib.libraryId
+                    + ", sample=" + sampleName
+                    + ", featureRef=" + refPath
+                    + ", fastq=" + resolvedFastq);
             }
 
             FeatureRun run;
@@ -1686,6 +1809,12 @@ int processPfMultiConfig(Parameters& P,
             run.featureRefPath = refPath;
             run.effectiveChem = preparedLib.effectiveChem;
             run.detectedMatchMode = assignResult.detectedMatchMode;
+            run.libraryId = preparedLib.libraryId;
+            run.sampleName = sampleName;
+            run.resolvedFastq = resolvedFastq;
+            run.resolvedChemRequest = preparedLib.resolvedChemRequest;
+            run.explicitChem = preparedLib.explicitChem;
+            run.returnCode = assignResult.returnCode;
 
             if (useAutodetect && wlNamespaceConfident) {
                 if (assignResult.detectedMatchMode == "RAW_MATCH") {
@@ -1721,14 +1850,120 @@ int processPfMultiConfig(Parameters& P,
             throw runtime_error("No feature libraries found in multi config");
         }
 
+        // Clear stale provenance artifacts before new validation/write cycle.
+        // A previous successful run may have left status=OK manifests that would
+        // be misleading if this run fails partway through.
         for (auto& run : featureRuns) {
             string realOut = findAssignOutputDir(run.assignOut);
             run.assignOut = realOut;
-            int ret = PfMultiMexStub::processAssignOutput(run.assignOut, run.featureRefPath, run.featureType, false, whitelist);
-            if (ret != 0) {
-                P.inOut->logMain << "WARNING: Failed to generate MEX stub for " << run.featureType << "\n";
+            for (const char* suffix : {"pf_library_provenance.tsv", "pf_library_provenance.tsv.tmp"}) {
+                string path = run.assignOut + "/" + suffix;
+                if (remove(path.c_str()) != 0 && errno != ENOENT) {
+                    throw runtime_error("Failed to remove stale provenance artifact: " + path
+                        + " (" + strerror(errno) + ")");
+                }
             }
         }
+
+        for (auto& run : featureRuns) {
+            int stubRet = PfMultiMexStub::processAssignOutput(
+                run.assignOut, run.featureRefPath, run.featureType,
+                true, whitelist, run.featureType);
+            if (stubRet != 0) {
+                throw runtime_error("Failed to generate MEX stub for library: type="
+                    + run.featureType + ", library_id=" + run.libraryId
+                    + ", assign_out=" + run.assignOut);
+            }
+        }
+
+        // Read feature MEX to validate before writing provenance (fail-fast on read errors)
+        struct FeatureMexEntry {
+            PfMultiMerge::MexData data;
+            string effectiveChem;
+            string featureType;
+            string libraryId;
+        };
+        vector<FeatureMexEntry> featureMexEntries;
+        for (const auto& run : featureRuns) {
+            try {
+                FeatureMexEntry entry;
+                entry.data = PfMultiMerge::readMex(run.assignOut);
+                entry.effectiveChem = run.effectiveChem;
+                entry.featureType = run.featureType;
+                entry.libraryId = run.libraryId;
+                featureMexEntries.push_back(std::move(entry));
+            } catch (const exception& e) {
+                throw runtime_error("Failed to read feature MEX for library: type="
+                    + run.featureType + ", library_id=" + run.libraryId
+                    + ", assign_out=" + run.assignOut + ": " + e.what());
+            }
+        }
+
+        // All libraries passed assign + stub + MEX read.
+        // Write provenance manifests atomically: tmp file + rename.
+        // On failure, clean up any .tmp files already written.
+        vector<string> manifestTmpPaths;
+        vector<string> manifestFinalPaths;
+        try {
+            for (const auto& run : featureRuns) {
+                string finalPath = run.assignOut + "/pf_library_provenance.tsv";
+                string tmpPath = finalPath + ".tmp";
+                manifestTmpPaths.push_back(tmpPath);
+                manifestFinalPaths.push_back(finalPath);
+
+                std::ofstream manifest(tmpPath.c_str());
+                if (!manifest.is_open()) {
+                    throw runtime_error("Failed to create provenance manifest: " + tmpPath);
+                }
+                manifest << "key\tvalue\n";
+                manifest << "library_id\t" << run.libraryId << "\n";
+                manifest << "sample\t" << run.sampleName << "\n";
+                manifest << "feature_type\t" << run.featureType << "\n";
+                manifest << "fastq_dir\t" << run.resolvedFastq << "\n";
+                manifest << "feature_ref\t" << run.featureRefPath << "\n";
+                manifest << "whitelist\t" << whitelist << "\n";
+                manifest << "chemistry_request\t" << run.resolvedChemRequest << "\n";
+                manifest << "chemistry_explicit\t" << (run.explicitChem ? "yes" : "no") << "\n";
+                manifest << "effective_chemistry\t" << run.effectiveChem << "\n";
+                manifest << "detected_match_mode\t" << run.detectedMatchMode << "\n";
+                manifest << "return_code\t" << run.returnCode << "\n";
+                manifest << "status\tOK\n";
+                manifest << "assign_output_dir\t" << run.assignOut << "\n";
+                manifest.close();
+                if (manifest.fail()) {
+                    throw runtime_error("Failed to flush provenance manifest: " + tmpPath);
+                }
+            }
+            // All tmp files written successfully; atomically promote them
+            for (size_t i = 0; i < manifestTmpPaths.size(); ++i) {
+                if (rename(manifestTmpPaths[i].c_str(), manifestFinalPaths[i].c_str()) != 0) {
+                    throw runtime_error("Failed to rename provenance manifest: "
+                        + manifestTmpPaths[i] + " -> " + manifestFinalPaths[i]);
+                }
+            }
+        } catch (...) {
+            for (const auto& tmp : manifestTmpPaths) {
+                remove(tmp.c_str());
+            }
+            throw;
+        }
+
+        // Log top-level multi-library summary table.
+        // All libraries are OK here (fail-fast throws before reaching this point).
+        P.inOut->logMain << "\npf-multi library summary:\n";
+        P.inOut->logMain << "  library_id\tfeature_type\tsample\teffective_chem\t"
+                         << "match_mode\tstatus\tassign_out\n";
+        for (const auto& run : featureRuns) {
+            P.inOut->logMain << "  " << run.libraryId
+                             << "\t" << run.featureType
+                             << "\t" << run.sampleName
+                             << "\t" << run.effectiveChem
+                             << "\t" << run.detectedMatchMode
+                             << "\tOK"
+                             << "\t" << run.assignOut
+                             << "\n";
+        }
+        P.inOut->logMain << "\n";
         
         // Read GEX MEX from STARsolo output (both raw and filtered if available)
         string soloOut = outPrefix + "/Solo.out";
@@ -1855,32 +2090,6 @@ int processPfMultiConfig(Parameters& P,
             return 1;
         }
         
-        // Read feature MEX files, pairing each with its chemistry so that
-        // a failed read does not cause index misalignment.
-        struct FeatureMexEntry {
-            PfMultiMerge::MexData data;
-            string effectiveChem;
-            string featureType;
-        };
-        vector<FeatureMexEntry> featureMexEntries;
-        for (const auto& run : featureRuns) {
-            try {
-                FeatureMexEntry entry;
-                entry.data = PfMultiMerge::readMex(run.assignOut);
-                entry.effectiveChem = run.effectiveChem;
-                entry.featureType = run.featureType;
-                featureMexEntries.push_back(std::move(entry));
-            } catch (const exception& e) {
-                P.inOut->logMain << "WARNING: Failed to read feature MEX for " << run.featureType
-                                << ": " << e.what() << "\n";
-            }
-        }
-        
-        if (featureMexEntries.empty()) {
-            P.inOut->logMain << "WARNING: No feature MEX files found, skipping merge\n";
-            return 0;
-        }
-        
         // Normalize all barcode namespaces to TRU at the integration boundary.
         // Each source may be NXT or TRU depending on its whitelist; normalizing
         // here ensures cross-library barcode joins and output are in a single
@@ -1904,6 +2113,20 @@ int processPfMultiConfig(Parameters& P,
             featureDataVec.push_back(std::move(entry.data));
         }
         PfMultiMerge::MexData mergedData = PfMultiMerge::mergeMex(gexData, featureDataVec);
+
+        // Log merged feature type breakdown
+        {
+            map<string, size_t> typeCountMap;
+            for (const auto& ft : mergedData.featureTypes) {
+                typeCountMap[ft]++;
+            }
+            P.inOut->logMain << "pf-multi merged feature breakdown:\n";
+            for (const auto& pair : typeCountMap) {
+                P.inOut->logMain << "  " << pair.first << ": " << pair.second << " features\n";
+            }
+            P.inOut->logMain << "  total barcodes: " << mergedData.barcodes.size()
+                             << ", total triplets: " << mergedData.triplets.size() << "\n";
+        }
         
         // Extract GEM well from GEX library (with fallback logic)
         string gemWell = "1"; // Default

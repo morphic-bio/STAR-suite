@@ -1,0 +1,8 @@
+[libraries]
+fastqs,sample,library_type,feature_types,star_chemistry,star_feature_ref,star_library_id
+__FIXTURE__/mRNA,DE_30KO,Gene Expression,Gene Expression,TRU,,gex_de
+__FIXTURE__/PolyIII,DE_30KO,CRISPR Guide Capture,CRISPR Guide Capture,NXT,/mnt/pikachu/MSK-whitelists/ref_feature_geneBC.csv,grna_de
+__FIXTURE__/LARRY,DE_30KO,Custom,Custom,TRU,/mnt/pikachu/MSK-whitelists/ref_feature_larryBC.csv,larry_de
+
+[feature]
+ref,/mnt/pikachu/MSK-whitelists/ref_feature_geneBC.csv

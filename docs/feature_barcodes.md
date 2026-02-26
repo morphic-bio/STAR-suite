@@ -215,3 +215,53 @@ At merge time, all feature library barcodes are normalized to the output
 namespace (TRU by default, controlled by `--crOutputChemistry`). This
 ensures the merged MEX has a consistent barcode namespace regardless of
 per-library chemistry differences.
+
+---
+
+## Per-Library Feature Reference and Library ID
+
+When multiple feature libraries of different types are present (e.g., gRNA +
+lineage barcodes), each library can specify its own feature reference CSV and
+a stable output identifier.
+
+### pfMultiConfig Columns
+
+| Column | Description |
+|--------|-------------|
+| `star_feature_ref` | Per-library feature reference CSV path. When set, the global `[feature] ref` is not used for this library, and type-based filtering is skipped. |
+| `star_library_id` | Stable provenance/output key for the library. Auto-generated as `{sample}_{feature_types}_{index}` when absent. Must be unique across libraries. |
+
+**Feature ref precedence**: `star_feature_ref` (per-library) > `--crFeatureRef` (CLI flag) > `[feature] ref` (config global).
+
+### Data-Driven Feature Routing
+
+Any non-GEX `feature_types` value in the config is automatically routed to
+`assignBarcodes`. This means custom types like "Lineage", "Custom", or
+"CRISPRa Activation" work without requiring hardcoded support. Known 10x
+types (CRISPR Guide Capture, Antibody Capture, Multiplexing Capture) map to
+their canonical `featureRefType`; unknown types use their `feature_types`
+verbatim.
+
+### Example
+
+```csv
+[libraries]
+fastqs,sample,library_type,feature_types,star_chemistry,star_feature_ref,star_library_id
+/path/to/mRNA,DE_30KO,Gene Expression,Gene Expression,TRU,,gex_de
+/path/to/PolyIII,DE_30KO,CRISPR Guide Capture,CRISPR Guide Capture,NXT,/path/to/ref_grna.csv,grna_de
+/path/to/LARRY,DE_30KO,Custom,Custom,TRU,/path/to/ref_larry.csv,larry_de
+
+[feature]
+ref,/path/to/ref_grna.csv
+```
+
+In this example:
+- The gRNA library uses its own `star_feature_ref` (no filtering needed).
+- The LARRY lineage library uses a separate reference CSV with LARRY barcodes.
+- The global `[feature] ref` is a fallback for libraries without `star_feature_ref`.
+
+### Validation
+
+- `star_feature_ref` must point to an existing file (hard error at parse time).
+- `star_library_id` must be unique across all libraries (hard error on duplicates).
+- Missing trailing fields are padded with empty strings (backward compatible).
