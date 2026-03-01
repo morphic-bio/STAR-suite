@@ -69,8 +69,8 @@ CMD=(
   --crAssignLimitSearch -1
   --crAssignMinCounts 0
   --crAssignMaxBarcodeMismatches 5
-  --crAssignFeatureN 1
-  --crAssignBarcodeN 2
+  --crAssignFeatureN 0
+  --crAssignBarcodeN 1
   --crAssignConsumerThreads 4
   --crAssignSearchThreads 4
 )

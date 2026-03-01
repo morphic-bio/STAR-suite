@@ -1269,7 +1269,7 @@ int checkSequenceAndCorrectForN(char *line, char *corrected_lines[], char *buffe
     for (int i=0; i<sequence_length; i++){
         if (line[i] == 'N'){
             indices[nCount++]=i;
-            if (nCount >=  maxN) return 0;
+            if (nCount > maxN) return 0;
             
         }
         else if (line[i] != 'A' && line[i] != 'C' && line[i] != 'G' && line[i] != 'T'){
