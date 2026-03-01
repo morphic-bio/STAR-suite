@@ -1472,9 +1472,9 @@ int processPfMultiConfig(Parameters& P,
                                       && (preparedLib.resolvedChemRequest == "auto");
             const string wlNamespace = prepared.inferredChem;
             const bool wlNamespaceConfident = prepared.inferredChemConfident;
-            if (useAutodetect) {
-                runAssignOpts.autodetectChemistry = true;
-            }
+            string assignmentChem = preparedLib.effectiveChem;
+            string detectedMatchMode = "UNKNOWN";
+            runAssignOpts.translateNxt = (assignmentChem == "NXT");
             if (preparedLib.explicitChem) {
                 P.inOut->logMain << "NOTICE: " << featureRefType
                                  << " star_chemistry=" << preparedLib.resolvedChemRequest
@@ -1486,6 +1486,57 @@ int processPfMultiConfig(Parameters& P,
                                  << "auto-detect will determine effective chemistry for "
                                  << featureRefType << "\n";
             }
+            if (useAutodetect) {
+                PfMultiAssign::AssignOptions detectOpts = runAssignOpts;
+                detectOpts.autodetectChemistry = true;
+                detectOpts.enableStarDynamicPermitHooks = false;
+                if (detectOpts.maxReads <= 0 ||
+                    detectOpts.maxReads > detectOpts.autodetectChemistryReads) {
+                    detectOpts.maxReads = detectOpts.autodetectChemistryReads;
+                }
+                const string detectOut = assignOut + "/.autodetect_probe";
+                PfMultiAssign::AssignResult detectResult =
+                    PfMultiAssign::runAssignBarcodes(
+                        whitelist, refPath, resolvedFastq, detectOut, detectOpts);
+                detectedMatchMode = detectResult.detectedMatchMode;
+
+                if (wlNamespaceConfident) {
+                    if (detectedMatchMode == "RAW_MATCH") {
+                        assignmentChem = wlNamespace;
+                        P.inOut->logMain << "NOTICE: auto-detect RAW_MATCH for "
+                                         << featureRefType
+                                         << " → assignmentChem=" << assignmentChem << "\n";
+                    } else if (detectedMatchMode == "TRANSLATED_MATCH") {
+                        assignmentChem = oppositeNamespace(wlNamespace);
+                        P.inOut->logMain << "NOTICE: auto-detect TRANSLATED_MATCH for "
+                                         << featureRefType
+                                         << " → assignmentChem=" << assignmentChem << "\n";
+                    } else {
+                        P.inOut->logMain << "WARNING: auto-detect "
+                                         << detectedMatchMode << " for "
+                                         << featureRefType << ", keeping inferred: "
+                                         << assignmentChem << "\n";
+                    }
+                } else {
+                    P.inOut->logMain << "WARNING: auto-detect " << detectedMatchMode
+                                     << " for " << featureRefType
+                                     << " but whitelist namespace is uncertain ('"
+                                     << wlNamespace << "' by default). "
+                                     << "assignmentChem kept as " << assignmentChem
+                                     << " to stay consistent with GEX. "
+                                     << "Use star_chemistry column, --crChemistry NXT/TRU, "
+                                     << "or rename whitelist to enable absolute namespace resolution.\n";
+                }
+
+                // Probe results are consumed above; remove transient artifacts.
+                const string cleanupCmd = "rm -rf \"" + detectOut + "\"";
+                if (system(cleanupCmd.c_str()) != 0) {
+                    P.inOut->logMain << "WARNING: failed to clean auto-detect probe dir: "
+                                     << detectOut << "\n";
+                }
+            }
+            runAssignOpts.autodetectChemistry = false;
+            runAssignOpts.translateNxt = (assignmentChem == "NXT");
             const bool pfSingleConsumer = (pfConsumerThreadsForRun <= 1);
             const int pfPermitCeilingDuringPf =
                 std::max(1, libThreadBudget - pfReaderThreadsReserved);
@@ -1807,42 +1858,14 @@ int processPfMultiConfig(Parameters& P,
             run.featureType = featureRefType;
             run.assignOut = assignOut;
             run.featureRefPath = refPath;
-            run.effectiveChem = preparedLib.effectiveChem;
-            run.detectedMatchMode = assignResult.detectedMatchMode;
+            run.effectiveChem = assignmentChem;
+            run.detectedMatchMode = detectedMatchMode;
             run.libraryId = preparedLib.libraryId;
             run.sampleName = sampleName;
             run.resolvedFastq = resolvedFastq;
             run.resolvedChemRequest = preparedLib.resolvedChemRequest;
             run.explicitChem = preparedLib.explicitChem;
             run.returnCode = assignResult.returnCode;
-
-            if (useAutodetect && wlNamespaceConfident) {
-                if (assignResult.detectedMatchMode == "RAW_MATCH") {
-                    run.effectiveChem = wlNamespace;
-                    P.inOut->logMain << "NOTICE: auto-detect RAW_MATCH for "
-                                     << featureRefType
-                                     << " → effectiveChem=" << run.effectiveChem << "\n";
-                } else if (assignResult.detectedMatchMode == "TRANSLATED_MATCH") {
-                    run.effectiveChem = oppositeNamespace(wlNamespace);
-                    P.inOut->logMain << "NOTICE: auto-detect TRANSLATED_MATCH for "
-                                     << featureRefType
-                                     << " → effectiveChem=" << run.effectiveChem << "\n";
-                } else {
-                    P.inOut->logMain << "WARNING: auto-detect "
-                                     << assignResult.detectedMatchMode << " for "
-                                     << featureRefType << ", keeping inferred: "
-                                     << run.effectiveChem << "\n";
-                }
-            } else if (useAutodetect && !wlNamespaceConfident) {
-                P.inOut->logMain << "WARNING: auto-detect " << assignResult.detectedMatchMode
-                                 << " for " << featureRefType
-                                 << " but whitelist namespace is uncertain ('"
-                                 << wlNamespace << "' by default). "
-                                 << "effectiveChem kept as " << run.effectiveChem
-                                 << " to stay consistent with GEX. "
-                                 << "Use star_chemistry column, --crChemistry NXT/TRU, "
-                                 << "or rename whitelist to enable absolute namespace resolution.\n";
-            }
             featureRuns.push_back(run);
         }
 
