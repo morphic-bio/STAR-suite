@@ -713,6 +713,12 @@ void initialize_statistics(statistics *stats) {
     stats->pending_recovered = 0;
     stats->total_unmatched_features = 0;
     stats->number_of_reads = 0;
+    stats->limited_exact_checks = 0;
+    stats->limited_exact_hits = 0;
+    stats->limited_simple_fallback_calls = 0;
+    stats->limited_simple_fallback_hits = 0;
+    stats->limited_full_fallback_calls = 0;
+    stats->limited_full_fallback_hits = 0;
     stats->unmatched_list.first_entry = NULL;
     stats->unmatched_list.last_entry = NULL;
 }
@@ -1374,6 +1380,37 @@ int simple_search(feature_arrays *features, char *line){
         return 0;
     }
     return simple_hash_search(features, line);    
+}
+
+static int exactCorrectFeature(char *line, feature_arrays *features, int maxN){
+    int exact_feature = simple_search(features, line);
+    if (exact_feature){
+        return exact_feature;
+    }
+
+    const size_t length=strlen(line)-1;
+    char buffer[(length+1) * (4 << ((maxN-1)*2))];
+    char *corrected_seqs[ 4 << ((maxN-1)*2)];
+    int nAlts=checkSequenceAndCorrectForN(line, corrected_seqs, buffer, length, maxN);
+    if (nAlts <= 0){
+        return 0;
+    }
+
+    int found_feature = 0;
+    for (int i = 0; i < nAlts; i++){
+        int feature_index = simple_search(features, corrected_seqs[i]);
+        if (!feature_index){
+            continue;
+        }
+        if (!found_feature){
+            found_feature = feature_index;
+        } else if (found_feature != feature_index){
+            // Multiple equally exact alternatives after N-expansion: ambiguous.
+            return 0;
+        }
+    }
+
+    return found_feature;
 }
 
 int simple_hamming_search(feature_arrays *features, char *line, int maxHammingDistance, int *hamming_distance){  
@@ -2475,6 +2512,13 @@ void printFeatureCounts(feature_arrays *features, int *deduped_counts, int *barc
     fprintf (stderr, "Total whitelisted barcodes %d\n", kh_size(hashes->filtered_hash));
     fprintf (stderr,"Total feature counts %d total_unmatched_reads %ld\n", total_raw_counts, stats->total_unmatched_features);
     fprintf (stderr, "Percentage reads assigned to barcode %.4f\n", 100.0*(total_raw_counts/(double) (total_raw_counts+stats->total_unmatched_features)));
+    fprintf (stderr, "Limited search fallback mode %s\n", feature_limited_fallback_mode ? "simple" : "full");
+    fprintf (stderr, "Limited exact checks %zu\n", stats->limited_exact_checks);
+    fprintf (stderr, "Limited exact hits %zu\n", stats->limited_exact_hits);
+    fprintf (stderr, "Limited simple fallback calls %zu\n", stats->limited_simple_fallback_calls);
+    fprintf (stderr, "Limited simple fallback hits %zu\n", stats->limited_simple_fallback_hits);
+    fprintf (stderr, "Limited full fallback calls %zu\n", stats->limited_full_fallback_calls);
+    fprintf (stderr, "Limited full fallback hits %zu\n", stats->limited_full_fallback_hits);
     fprintf (statsfp, "Total feature counts %d\n", total_raw_counts);
     fprintf (statsfp, "Total deduped feature counts %d\n", total_deduped_counts);
     fprintf (statsfp, "Total barcodes %d\n", total_barcodes);
@@ -2483,6 +2527,13 @@ void printFeatureCounts(feature_arrays *features, int *deduped_counts, int *barc
     fprintf (statsfp, "Total whitelisted barcodes %d\n", kh_size(hashes->filtered_hash));
     fprintf (statsfp,"Total_unmatched_reads %ld\n", stats->total_unmatched_features);
     fprintf (statsfp, "Percentage reads assigned to barcode %.4f\n", 100.0*(total_raw_counts/(double) (total_raw_counts+stats->total_unmatched_features)));
+    fprintf (statsfp, "Limited_search_fallback_mode %s\n", feature_limited_fallback_mode ? "simple" : "full");
+    fprintf (statsfp, "Limited_exact_checks %zu\n", stats->limited_exact_checks);
+    fprintf (statsfp, "Limited_exact_hits %zu\n", stats->limited_exact_hits);
+    fprintf (statsfp, "Limited_simple_fallback_calls %zu\n", stats->limited_simple_fallback_calls);
+    fprintf (statsfp, "Limited_simple_fallback_hits %zu\n", stats->limited_simple_fallback_hits);
+    fprintf (statsfp, "Limited_full_fallback_calls %zu\n", stats->limited_full_fallback_calls);
+    fprintf (statsfp, "Limited_full_fallback_hits %zu\n", stats->limited_full_fallback_hits);
     fclose(statsfp);
 
     if (feature_richness_hist) {
@@ -3530,7 +3581,7 @@ void *read_fastqs_by_set(void *arg) {
     fprintf(stderr, "Thread %d done reading\n", thread_id);
     pthread_exit(NULL);
 }
-void process_multiple_feature_sequences(int nsequences, char **sequences, int *orientations, feature_arrays *features, int maxHammingDistance, int nThreads, int feature_constant_offset, int max_feature_n, uint32_t *feature_index, int *hamming_distance, char *matching_sequence, uint16_t *match_position) {
+void process_multiple_feature_sequences(int nsequences, char **sequences, int *orientations, feature_arrays *features, int maxHammingDistance, int nThreads, int feature_constant_offset, int max_feature_n, uint32_t *feature_index, int *hamming_distance, char *matching_sequence, uint16_t *match_position, statistics *stats) {
     //check if the sequences are the same
 
     int best_hamming_distance = maxHammingDistance;
@@ -3546,7 +3597,7 @@ void process_multiple_feature_sequences(int nsequences, char **sequences, int *o
             char my_matching_sequence[LINE_LENGTH];
             uint16_t my_match_position=0;
             if (orientations[i] != 1){
-                process_feature_sequence(sequences[i], features, maxHammingDistance, nThreads, feature_constant_offset, max_feature_n, &myFeatureIndex, &myHammingDistance, my_matching_sequence, &my_match_position);
+                process_feature_sequence(sequences[i], features, maxHammingDistance, nThreads, feature_constant_offset, max_feature_n, &myFeatureIndex, &myHammingDistance, my_matching_sequence, &my_match_position, stats);
                 if (myFeatureIndex && myHammingDistance == best_hamming_distance) {
                     if (best_feature_index) {
                         ambiguous = 1;
@@ -3572,7 +3623,7 @@ void process_multiple_feature_sequences(int nsequences, char **sequences, int *o
                 char reverse_sequence[LINE_LENGTH];
                 strcpy(reverse_sequence, sequences[i]);
                 reverse_complement_in_place(reverse_sequence);
-                process_feature_sequence(reverse_sequence, features, maxHammingDistance, nThreads, feature_constant_offset, max_feature_n, &myFeatureIndex, &myHammingDistance, my_matching_sequence, &my_match_position);
+                process_feature_sequence(reverse_sequence, features, maxHammingDistance, nThreads, feature_constant_offset, max_feature_n, &myFeatureIndex, &myHammingDistance, my_matching_sequence, &my_match_position, stats);
             }
         }
     }
@@ -3588,9 +3639,9 @@ void process_multiple_feature_sequences(int nsequences, char **sequences, int *o
         }
     }
 }
-void process_feature_sequence(char *sequence, feature_arrays *features, int maxHammingDistance, int nThreads, int feature_constant_offset, int max_feature_n, uint32_t *feature_index, int *hamming_distance, char *matching_sequence, uint16_t *match_position) {
+void process_feature_sequence(char *sequence, feature_arrays *features, int maxHammingDistance, int nThreads, int feature_constant_offset, int max_feature_n, uint32_t *feature_index, int *hamming_distance, char *matching_sequence, uint16_t *match_position, statistics *stats) {
+    const size_t read_len = strlen(sequence);
     if (feature_mode_bootstrap_reads > 0 && features && features->feature_offsets && pf_has_anchor_arrays(features)) {
-        const size_t read_len = strlen(sequence);
         const int offset_cache_len = (int)read_len;
         uint32_t offset_cached_idx[offset_cache_len > 0 ? offset_cache_len : 1];
         int offset_cached_hamming[offset_cache_len > 0 ? offset_cache_len : 1];
@@ -3947,12 +3998,9 @@ void process_feature_sequence(char *sequence, feature_arrays *features, int maxH
             }
         }
     }
-    if (!use_feature_offset_array && limit_search != -1 && feature_constant_offset > 0) {
-        int bestHammingDistance = maxHammingDistance + 1;
-        uint32_t bestFeatureIndex = 0;
-        uint16_t bestMatchPosition = 0;
-        char ambiguous = 0;
-
+    if (!use_feature_offset_array && limit_search != -1 && feature_constant_offset >= 0) {
+        // Limited-offset precheck: exact-only at expected offset and nearby offsets.
+        // If no exact hit is found, fall back to configured matcher.
         for (int i = 0; i <= limit_search; i++) {
             // For i=0, this checks offset 0. For i>0, it checks +i and -i.
             for (int sign = 1; sign >= -1; sign -= 2) {
@@ -3961,44 +4009,109 @@ void process_feature_sequence(char *sequence, feature_arrays *features, int maxH
                 int offset_delta = i * sign;
                 int current_offset = feature_constant_offset + offset_delta;
                 if (current_offset < 0) continue;
+                if (stats) {
+                    stats->limited_exact_checks++;
+                }
 
-                int currentHammingDistance = 0;
-                uint32_t currentFeatureIndex = simpleCorrectFeature(sequence + current_offset, features, max_feature_n, maxHammingDistance, &currentHammingDistance);
-
+                uint32_t currentFeatureIndex = exactCorrectFeature(
+                    sequence + current_offset,
+                    features,
+                    max_feature_n
+                );
                 if (currentFeatureIndex) {
-                    // If a perfect match is found, we can exit immediately.
-                    if (currentHammingDistance == 0) {
-                        *feature_index = currentFeatureIndex;
-                        *hamming_distance = 0;
-                        *match_position = current_offset;
-                        memcpy(matching_sequence, sequence + current_offset, features->feature_lengths[currentFeatureIndex - 1]);
-                        matching_sequence[features->feature_lengths[currentFeatureIndex - 1]] = '\0';
-                        return;
+                    if (stats) {
+                        stats->limited_exact_hits++;
                     }
-
-                    if (currentHammingDistance < bestHammingDistance) {
-                        bestHammingDistance = currentHammingDistance;
-                        bestFeatureIndex = currentFeatureIndex;
-                        bestMatchPosition = current_offset;
-                        ambiguous = 0;
-                    } else if (currentHammingDistance == bestHammingDistance) {
-                        if (bestFeatureIndex != currentFeatureIndex) {
-                            ambiguous = 1;
-                        }
-                    }
+                    *feature_index = currentFeatureIndex;
+                    *hamming_distance = 0;
+                    *match_position = current_offset;
+                    memcpy(matching_sequence, sequence + current_offset, features->feature_lengths[currentFeatureIndex - 1]);
+                    matching_sequence[features->feature_lengths[currentFeatureIndex - 1]] = '\0';
+                    return;
                 }
             }
         }
 
-        if (!ambiguous && bestFeatureIndex) {
-            *feature_index = bestFeatureIndex;
-            *hamming_distance = bestHammingDistance;
-            *match_position = bestMatchPosition;
-            memcpy(matching_sequence, sequence + bestMatchPosition, features->feature_lengths[bestFeatureIndex - 1]);
-            matching_sequence[features->feature_lengths[bestFeatureIndex - 1]] = '\0';
+        if (feature_limited_fallback_mode == 1) {
+            if (stats) {
+                stats->limited_simple_fallback_calls++;
+            }
+            uint32_t bestFeature = 0;
+            int bestHamming = maxHammingDistance + 1;
+            int ambiguous = 0;
+            uint16_t bestMatchPosition = 0;
+            /* Global fallback (simple matcher): scan all candidate positions. */
+            for (int bc_pos = 0; bc_pos < (int)read_len; ++bc_pos) {
+                int tmp_hamming = maxHammingDistance + 1;
+                uint32_t idx = simpleCorrectFeature(
+                    sequence + bc_pos,
+                    features,
+                    max_feature_n,
+                    maxHammingDistance,
+                    &tmp_hamming
+                );
+                if (!idx || tmp_hamming > maxHammingDistance) {
+                    continue;
+                }
+                int flen = features->feature_lengths[idx - 1];
+                if (bc_pos + flen > (int)read_len) {
+                    continue;
+                }
+                if (!bestFeature || tmp_hamming < bestHamming) {
+                    bestFeature = idx;
+                    bestHamming = tmp_hamming;
+                    bestMatchPosition = (uint16_t)bc_pos;
+                    ambiguous = 0;
+                } else if (tmp_hamming == bestHamming) {
+                    ambiguous = 1;
+                }
+            }
+
+            if (bestFeature && !ambiguous) {
+                if (stats) {
+                    stats->limited_simple_fallback_hits++;
+                }
+                *feature_index = bestFeature;
+                *hamming_distance = bestHamming;
+                *match_position = bestMatchPosition;
+                memcpy(matching_sequence, sequence + bestMatchPosition, features->feature_lengths[bestFeature - 1]);
+                matching_sequence[features->feature_lengths[bestFeature - 1]] = '\0';
+            } else {
+                *feature_index = 0;
+                *hamming_distance = (bestHamming <= maxHammingDistance) ? bestHamming : (maxHammingDistance + 1);
+            }
+            return;
+        }
+
+        if (stats) {
+            stats->limited_full_fallback_calls++;
+        }
+        char ambiguous = 0;
+        char new_matching_sequence[LINE_LENGTH];
+        uint16_t new_match_position = 0;
+        int variableHammingDistance = maxHammingDistance;
+        int newFeatureIndex = checkAndCorrectFeature(
+            sequence,
+            features,
+            variableHammingDistance,
+            nThreads,
+            &variableHammingDistance,
+            new_matching_sequence,
+            max_feature_n,
+            &ambiguous,
+            &new_match_position
+        );
+        if (!ambiguous && newFeatureIndex && variableHammingDistance <= maxHammingDistance) {
+            if (stats) {
+                stats->limited_full_fallback_hits++;
+            }
+            *feature_index = newFeatureIndex;
+            *hamming_distance = variableHammingDistance;
+            *match_position = new_match_position;
+            strcpy(matching_sequence, new_matching_sequence);
         } else {
             *feature_index = 0;
-            *hamming_distance = bestHammingDistance;
+            *hamming_distance = variableHammingDistance;
         }
         return;
     }
@@ -4248,11 +4361,11 @@ void *consume_reads(void *arg) {
                 sequences[1] = reverse_lines[0];
                 orientations[0] = 1;
                 orientations[1] = 0;
-                process_multiple_feature_sequences(2, sequences, orientations, features, maxHammingDistance, nThreads, feature_constant_offset, max_feature_n, &feature_index, &hamming_distance, matching_sequence, &match_position);
+                process_multiple_feature_sequences(2, sequences, orientations, features, maxHammingDistance, nThreads, feature_constant_offset, max_feature_n, &feature_index, &hamming_distance, matching_sequence, &match_position, stats);
             }
             else {
                 char *sequence=(forward_lines)?forward_lines[0]:reverse_lines[0];
-                process_feature_sequence(sequence, features, maxHammingDistance, nThreads, feature_constant_offset, max_feature_n, &feature_index, &hamming_distance, matching_sequence, &match_position);
+                process_feature_sequence(sequence, features, maxHammingDistance, nThreads, feature_constant_offset, max_feature_n, &feature_index, &hamming_distance, matching_sequence, &match_position, stats);
             }
 
             // The mutex is removed from here
@@ -4429,6 +4542,12 @@ void merge_stats(statistics *merged_stats, statistics *thread_stats) {
     merged_stats->pending_recovered += thread_stats->pending_recovered;
     merged_stats->total_unmatched_features += thread_stats->total_unmatched_features;
     merged_stats->number_of_reads += thread_stats->number_of_reads;
+    merged_stats->limited_exact_checks += thread_stats->limited_exact_checks;
+    merged_stats->limited_exact_hits += thread_stats->limited_exact_hits;
+    merged_stats->limited_simple_fallback_calls += thread_stats->limited_simple_fallback_calls;
+    merged_stats->limited_simple_fallback_hits += thread_stats->limited_simple_fallback_hits;
+    merged_stats->limited_full_fallback_calls += thread_stats->limited_full_fallback_calls;
+    merged_stats->limited_full_fallback_hits += thread_stats->limited_full_fallback_hits;
 }
 
 typedef struct {

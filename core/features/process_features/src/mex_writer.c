@@ -244,6 +244,13 @@ int mex_write_stats(
             total_raw_counts, stats->total_unmatched_features);
     fprintf(stderr, "Percentage reads assigned to barcode %.4f\n", 
             100.0 * (total_raw_counts / (double)(total_raw_counts + stats->total_unmatched_features)));
+    fprintf(stderr, "Limited search fallback mode %s\n", feature_limited_fallback_mode ? "simple" : "full");
+    fprintf(stderr, "Limited exact checks %zu\n", stats->limited_exact_checks);
+    fprintf(stderr, "Limited exact hits %zu\n", stats->limited_exact_hits);
+    fprintf(stderr, "Limited simple fallback calls %zu\n", stats->limited_simple_fallback_calls);
+    fprintf(stderr, "Limited simple fallback hits %zu\n", stats->limited_simple_fallback_hits);
+    fprintf(stderr, "Limited full fallback calls %zu\n", stats->limited_full_fallback_calls);
+    fprintf(stderr, "Limited full fallback hits %zu\n", stats->limited_full_fallback_hits);
     
     fprintf(statsfp, "Total feature counts %d\n", total_raw_counts);
     fprintf(statsfp, "Total deduped feature counts %d\n", total_deduped_counts);
@@ -254,6 +261,13 @@ int mex_write_stats(
     fprintf(statsfp, "Total_unmatched_reads %ld\n", stats->total_unmatched_features);
     fprintf(statsfp, "Percentage reads assigned to barcode %.4f\n",
             100.0 * (total_raw_counts / (double)(total_raw_counts + stats->total_unmatched_features)));
+    fprintf(statsfp, "Limited_search_fallback_mode %s\n", feature_limited_fallback_mode ? "simple" : "full");
+    fprintf(statsfp, "Limited_exact_checks %zu\n", stats->limited_exact_checks);
+    fprintf(statsfp, "Limited_exact_hits %zu\n", stats->limited_exact_hits);
+    fprintf(statsfp, "Limited_simple_fallback_calls %zu\n", stats->limited_simple_fallback_calls);
+    fprintf(statsfp, "Limited_simple_fallback_hits %zu\n", stats->limited_simple_fallback_hits);
+    fprintf(statsfp, "Limited_full_fallback_calls %zu\n", stats->limited_full_fallback_calls);
+    fprintf(statsfp, "Limited_full_fallback_hits %zu\n", stats->limited_full_fallback_hits);
     
     fclose(statsfp);
     return 0;

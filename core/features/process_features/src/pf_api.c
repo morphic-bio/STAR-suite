@@ -47,6 +47,7 @@ struct pf_config {
     int debug_enabled;
     int reverse_complement_whitelist;
     int limit_search;
+    int feature_limited_fallback_mode;
     long long max_reads;
     int translate_nxt;
     int use_feature_offset_array;
@@ -118,6 +119,7 @@ pf_config* pf_config_create(void) {
     config->debug_enabled = 0;
     config->reverse_complement_whitelist = 0;
     config->limit_search = -1;
+    config->feature_limited_fallback_mode = 0;
     config->max_reads = 0;
     config->translate_nxt = 0;
     config->use_feature_offset_array = 0;
@@ -243,6 +245,15 @@ void pf_config_set_limit_search(pf_config *config, int limit) {
     if (config) config->limit_search = limit;
 }
 
+void pf_config_set_feature_limited_fallback(pf_config *config, int mode) {
+    if (!config) return;
+    if (mode < 0 || mode > 1) {
+        fprintf(stderr, "ERROR: feature_limited_fallback mode must be 0 or 1 (got %d), clamping to 0\n", mode);
+        mode = 0;
+    }
+    config->feature_limited_fallback_mode = mode;
+}
+
 void pf_config_set_max_reads(pf_config *config, long long max_reads) {
     if (config) config->max_reads = max_reads;
 }
@@ -363,6 +374,7 @@ pf_context* pf_init(const pf_config *config) {
     max_barcode_n = ctx->config->max_barcode_n;
     max_reads = ctx->config->max_reads;
     limit_search = ctx->config->limit_search;
+    feature_limited_fallback_mode = ctx->config->feature_limited_fallback_mode;
     debug = ctx->config->debug_enabled;
     translate_NXT = ctx->config->translate_nxt;
     use_feature_offset_array = ctx->config->use_feature_offset_array;

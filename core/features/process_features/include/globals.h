@@ -33,6 +33,8 @@ extern int umi_length;
 extern int umi_code_length;
 extern long long max_reads;
 extern int limit_search;
+/* 0=full fallback (checkAndCorrectFeature), 1=simple fallback (simpleCorrectFeature at limited offsets) */
+extern int feature_limited_fallback_mode;
 extern int min_heatmap;
 
 // Translation flag for final-stage barcode output/filters
