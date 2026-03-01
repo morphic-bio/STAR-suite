@@ -435,9 +435,11 @@ Execution plan:
    `--dynamicThreadInterface {0|1}`, PF assign flags
    (`crAssignMaxHamming=1`, `crAssignFeatureOffset=0`,
    `crAssignLimitSearch=-1`, `crAssignMinCounts=0`,
-   `crAssignMaxBarcodeMismatches=5`, `crAssignFeatureN=1`,
-   `crAssignBarcodeN=2`, `crAssignConsumerThreads=4`,
+   `crAssignMaxBarcodeMismatches=5`, `crAssignFeatureN=0`,
+   `crAssignBarcodeN=1`, `crAssignConsumerThreads=4`,
    `crAssignSearchThreads=4`), and same Solo/GEX flags as downsampled run.
+   Note: `FeatureN/BarcodeN` were reduced by 1 after fixing an off-by-one in
+   `checkSequenceAndCorrectForN` so effective behavior matches prior parity runs.
    CR: `--include-introns true --min-crispr-umi 3 --create-bam false` with
    `--localcores 32`.
 5. Run three jobs on the same host under minimal background load:
