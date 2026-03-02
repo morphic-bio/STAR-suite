@@ -114,6 +114,8 @@ void pf_config_set_permit_hooks(
 void pf_config_set_debug(pf_config *config, int enable);
 void pf_config_set_reverse_complement_whitelist(pf_config *config, int enable);
 void pf_config_set_limit_search(pf_config *config, int limit);
+/* 0=full fallback, 1=simple fallback (limited-search branch only) */
+void pf_config_set_feature_limited_fallback(pf_config *config, int mode);
 void pf_config_set_max_reads(pf_config *config, long long max_reads);
 void pf_config_set_translate_nxt(pf_config *config, int enable);
 void pf_config_set_use_feature_offset_array(pf_config *config, int enable);

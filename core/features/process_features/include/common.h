@@ -171,6 +171,12 @@ typedef struct statistics {
     size_t pending_recovered;
     size_t total_unmatched_features;
     size_t number_of_reads;
+    size_t limited_exact_checks;
+    size_t limited_exact_hits;
+    size_t limited_simple_fallback_calls;
+    size_t limited_simple_fallback_hits;
+    size_t limited_full_fallback_calls;
+    size_t limited_full_fallback_hits;
     unmatched_barcodes_features_block_list unmatched_list;
 } statistics;
 

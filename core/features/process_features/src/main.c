@@ -29,6 +29,7 @@ static void print_usage(const char *prog){
     fprintf(stderr, "  -o, --feature_constant_offset <int> Global feature offset (default: auto-detect from pattern column)\n");
     fprintf(stderr, "  -B, --barcode_constant_offset <int> Start position of barcode and UMI (default 0)\n");
     fprintf(stderr, "      --limit_search      <int>     Limit feature search to N bases around offset (-1 = entire read)\n");
+    fprintf(stderr, "      --feature_limited_fallback <full|simple> Fallback matcher for limited search (default: full)\n");
     fprintf(stderr, "      --force_individual_offsets    Use per-feature offsets from pattern column (slower for large sets)\n");
     fprintf(stderr, "      --use_feature_offset_array    (alias for --force_individual_offsets)\n");
     fprintf(stderr, "      --strict-offset-check         Error (instead of warn) on heterogeneous feature offsets\n");
@@ -69,6 +70,19 @@ static void print_usage(const char *prog){
     fprintf(stderr, "  -h, --help                        Show this help and exit\n\n");
 }
 
+static int parse_feature_limited_fallback_mode(const char *value, int *mode_out) {
+    if (!value || !mode_out) return 0;
+    if (strcmp(value, "full") == 0 || strcmp(value, "0") == 0) {
+        *mode_out = 0;
+        return 1;
+    }
+    if (strcmp(value, "simple") == 0 || strcmp(value, "1") == 0) {
+        *mode_out = 1;
+        return 1;
+    }
+    return 0;
+}
+
 int main(int argc, char *argv[])
 {   
     omp_set_nested(1);
@@ -105,6 +119,7 @@ int main(int argc, char *argv[])
     int use_feature_anchor_search_cli=0;
     int require_feature_anchor_match_cli=0;
     int feature_mode_bootstrap_reads_cli=0;
+    int feature_limited_fallback_mode_cli=0;
     int strict_offset_check_cli=0;
     int autodetect_chemistry_cli=0;
     int autodetect_chemistry_reads_cli=10000;
@@ -165,6 +180,7 @@ int main(int argc, char *argv[])
         {"reverse_fastq_pattern", required_argument, 0, 8},
         {"max_reads", required_argument, 0, 9},
         {"limit_search", required_argument, 0, 10},
+        {"feature_limited_fallback", required_argument, 0, 11},
         {"use_feature_offset_array", no_argument, 0, 22},
         {"force_individual_offsets", no_argument, 0, 22},  /* alias */
         {"strict-offset-check", no_argument, 0, 26},
@@ -249,6 +265,12 @@ int main(int argc, char *argv[])
             case 8: strcpy(reverse_pattern, optarg); break;
             case 9: max_reads=atoll(optarg); break;
             case 10: limit_search = atoi(optarg); break;
+            case 11:
+                if (!parse_feature_limited_fallback_mode(optarg, &feature_limited_fallback_mode_cli)) {
+                    fprintf(stderr, "Error: --feature_limited_fallback must be one of: full, simple, 0, 1\n");
+                    return 1;
+                }
+                break;
             case 22: use_feature_offset_array_cli = 1; break;
             case 26: strict_offset_check_cli = 1; break;
             case 23: use_feature_anchor_search_cli = 1; break;
@@ -295,6 +317,7 @@ int main(int argc, char *argv[])
             feature_mode_offsets[i] = -1;
         }
     }
+    feature_limited_fallback_mode = feature_limited_fallback_mode_cli;
     
     /* Feature offset preflight detection */
     if (use_feature_offset_array_cli && feature_constant_offset_explicit) {
