@@ -98,6 +98,24 @@ void initdiff2hamming(unsigned char *difference){
 }
 
 void free_feature_arrays(feature_arrays *features) {
+    if (features->feature_hamming_le1_hash) {
+        for (khint_t k = kh_begin(features->feature_hamming_le1_hash);
+             k != kh_end(features->feature_hamming_le1_hash); ++k) {
+            if (!kh_exist(features->feature_hamming_le1_hash, k)) continue;
+            free((void*)kh_key(features->feature_hamming_le1_hash, k));
+        }
+        kh_destroy(stru32, features->feature_hamming_le1_hash);
+    }
+    if (features->feature_hamming_le2_hash) {
+        for (khint_t k = kh_begin(features->feature_hamming_le2_hash);
+             k != kh_end(features->feature_hamming_le2_hash); ++k) {
+            if (!kh_exist(features->feature_hamming_le2_hash, k)) continue;
+            free((void*)kh_key(features->feature_hamming_le2_hash, k));
+        }
+        kh_destroy(stru32, features->feature_hamming_le2_hash);
+    }
+    free(features->feature_no_ambiguity_le1);
+    free(features->feature_no_ambiguity_le2);
     free(features->feature_names_storage);
     free(features->feature_lengths);
     free(features->feature_code_lengths);

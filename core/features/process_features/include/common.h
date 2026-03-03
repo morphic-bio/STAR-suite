@@ -113,6 +113,13 @@ typedef struct feature_arrays {
     int *feature_offsets; /* 0-based array; entry i corresponds to feature index (i+1). -1 = unknown */
     int number_of_mismatched_features;
     int *mismatched_feature_indices;
+    /* Per-library cumulative lookup hashes and ambiguity metadata. */
+    khash_t(stru32) *feature_hamming_le1_hash; /* <=1 */
+    khash_t(stru32) *feature_hamming_le2_hash; /* <=2 */
+    unsigned char *feature_no_ambiguity_le1;   /* per feature (1=true) */
+    unsigned char *feature_no_ambiguity_le2;   /* per feature (1=true) */
+    int feature_hamming_le1_enabled;
+    int feature_hamming_le2_enabled;
 } feature_arrays;
 
 typedef struct feature_counts {
