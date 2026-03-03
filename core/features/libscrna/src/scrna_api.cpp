@@ -233,9 +233,20 @@ extern "C" int scrna_emptydrops_run(
     cerr << "[scrna_api] Simple filter: " << simpleResult.nCellsSimple
          << " cells, threshold=" << simpleResult.retainThreshold << endl;
 
-    // If we don't have sparse data, Simple ED is the only option
-    if (!input->sparse_gene_ids || !input->sparse_counts || !input->sparse_cell_index) {
-        cerr << "[scrna_api] Using Simple EmptyDrops only (no sparse matrix data)" << endl;
+    // Return OrdMag-only results when sparse data is missing or when there are
+    // too few barcodes for ambient estimation (nCB < indMin).  The latter lets
+    // bootstrap OrdMag improve the knee on shallow data without requiring the
+    // 45K-barcode ambient window that MC tail rescue needs.
+    const bool skipMC = (!input->sparse_gene_ids || !input->sparse_counts || !input->sparse_cell_index)
+                     || (input->n_cells <= config->ind_min);
+    if (skipMC) {
+        if (input->n_cells <= config->ind_min) {
+            cerr << "[scrna_api] nCells=" << input->n_cells
+                 << " <= indMin=" << config->ind_min
+                 << "; returning bootstrap OrdMag result only (no MC tail rescue)" << endl;
+        } else {
+            cerr << "[scrna_api] Using Simple EmptyDrops only (no sparse matrix data)" << endl;
+        }
 
         // Map simple filter passing indices back to original indices
         result->n_barcodes = simpleResult.passingIndices.size();

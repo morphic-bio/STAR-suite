@@ -113,8 +113,9 @@ public:
     vector <uint64> cbWL;    
     vector<string> cbWLstr;
     // Output barcode strings for MEX/barcodes.tsv.
-    // For 2-column whitelist files: cbWLstr = column 1 (matching), cbWLstrOut = column 2 (output mapping).
-    // For 1-column whitelist files: cbWLstrOut == cbWLstr.
+    // For 2-column translation whitelists (e.g. NXT), cbWLstr[i] holds column 1
+    // (matching/read namespace) and cbWLstrOut[i] holds column 2 (output namespace).
+    // For 1-column whitelist files, cbWLstrOut == cbWLstr.
     vector<string> cbWLstrOut;
     
     // CB Corrector instance (shared across threads)
@@ -177,6 +178,8 @@ public:
     bool emptyDropsLegacy = false;
     string emptyDropsModeStr = "auto"; // auto|simple|union
     enum EmptyDropsMode : int32 { EmptyDropsAuto = 0, EmptyDropsSimpleOnly = 1, EmptyDropsUnion = 2 } emptyDropsMode = EmptyDropsAuto;
+    string emptyDropsLegacyKneeStr;
+    bool emptyDropsLegacyKnee = false; // if true, use hardcoded nExpectedCells=3000 knee instead of bootstrap OrdMag
       
     //CBtype
     struct {

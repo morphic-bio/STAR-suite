@@ -1580,6 +1580,11 @@ soloEmptyDropsLegacy        no
                             yes         ... use legacy in-core EmptyDrops_CR
                             no          ... use libscrna EmptyDrops (default)
 
+soloEmptyDropsLegacyKnee    no
+    string:                 use legacy hardcoded nExpectedCells=3000 knee instead of bootstrap OrdMag
+                            yes         ... use fixed nExpectedCells=3000 for the simple knee filter (pre-bootstrap behavior)
+                            no          ... use CR9-style bootstrap OrdMag knee estimation (default). When nCB < indMin, bootstrap OrdMag still runs for a better knee; only MC tail rescue is skipped.
+
 soloEmptyDropsMode          auto
     string:                 EmptyDrops_CR execution mode
                             auto        ... default behavior: run union mode when possible; use SimpleED/ORDMAG-only fallback on small sets

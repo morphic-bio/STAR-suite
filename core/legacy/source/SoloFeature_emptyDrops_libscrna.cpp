@@ -8,16 +8,24 @@
 void SoloFeature::emptyDrops_libscrna()
 {
     const bool forceUnionMode = (pSolo.emptyDropsMode == ParametersSolo::EmptyDropsUnion);
-    if (nCB <= pSolo.cellFilter.eDcr.indMin && !forceUnionMode) {
+    const bool bootstrapEnabled = !pSolo.emptyDropsLegacyKnee;
+    if (nCB <= pSolo.cellFilter.eDcr.indMin && !forceUnionMode && !bootstrapEnabled) {
         P.inOut->logMain << "emptyDrops_CR (libscrna) filtering: total number of cells: nCB=" << nCB
                          << " is smaller than emptyCellMinIndex=" << pSolo.cellFilter.eDcr.indMin
-                         << ", which is the starting index for the *true empty* cells. The additional non-empty cells will not be detected.\n";
+                         << ", which is the starting index for the *true empty* cells."
+                         << " The additional non-empty cells will not be detected."
+                         << " (Use --soloEmptyDropsLegacyKnee no to enable bootstrap OrdMag on shallow data.)\n";
         return;
     }
     if (nCB <= pSolo.cellFilter.eDcr.indMin && forceUnionMode) {
         P.inOut->logMain << "emptyDrops_CR (libscrna): forcing union mode despite nCB=" << nCB
                          << " <= emptyCellMinIndex=" << pSolo.cellFilter.eDcr.indMin
                          << "; attempting EmptyDrops rescue anyway.\n";
+    }
+    if (nCB <= pSolo.cellFilter.eDcr.indMin && bootstrapEnabled && !forceUnionMode) {
+        P.inOut->logMain << "emptyDrops_CR (libscrna): nCB=" << nCB
+                         << " < emptyCellMinIndex=" << pSolo.cellFilter.eDcr.indMin
+                         << "; running bootstrap OrdMag only (no MC tail rescue).\n";
     }
 
     time_t rawTime;
@@ -85,7 +93,6 @@ void SoloFeature::emptyDrops_libscrna()
     }
 
     // Map STAR Solo EmptyDrops_CR parameters (scRNA-seq defaults, not Flex)
-    config->n_expected_cells = 0;  // bootstrap will estimate this (CR9 style)
     config->max_percentile = pSolo.cellFilter.knee.maxPercentile;
     config->max_min_ratio = pSolo.cellFilter.knee.maxMinRatio;
     config->ind_min = pSolo.cellFilter.eDcr.indMin;
@@ -97,9 +104,16 @@ void SoloFeature::emptyDrops_libscrna()
     config->sim_n = 100000; // match CR9: 100K MC simulations for better p-value resolution
     config->use_fdr_gate = 1;
     config->apply_bh_correction = 1; // scRNA-seq: proper BH-corrected FDR (matches CR9)
-    config->use_bootstrap = 1; // scRNA-seq: bootstrap OrdMag knee estimation (matches CR9)
     config->mc_threads = 0;
     config->disable_occupancy_filter = 1;
+
+    if (bootstrapEnabled) {
+        config->n_expected_cells = 0;  // triggers bootstrap estimation (CR9 style)
+        config->use_bootstrap = 1;
+    } else {
+        config->n_expected_cells = pSolo.cellFilter.knee.nExpectedCells;
+        config->use_bootstrap = 0;
+    }
 
     P.inOut->logMain << "emptyDrops_CR (libscrna) params: indMin=" << config->ind_min
                      << " indMax=" << config->ind_max
@@ -109,6 +123,7 @@ void SoloFeature::emptyDrops_libscrna()
                      << " FDR=" << config->fdr
                      << " simN=" << config->sim_n
                      << " bootstrap=" << (config->use_bootstrap ? "yes" : "no")
+                     << " legacyKnee=" << (pSolo.emptyDropsLegacyKnee ? "yes" : "no")
                      << " mode=" << (forceUnionMode ? "union" : "auto") << "\n";
 
     scrna_ed_result result;

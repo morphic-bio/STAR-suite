@@ -28,6 +28,7 @@
 #include <atomic>
 #include <limits>
 #include <set>
+#include <unordered_set>
 #include <zlib.h>
 using std::cerr;
 using std::endl;
@@ -57,6 +58,26 @@ struct PfPreparedFeatureLibrary {
     AnchoredReadEstimate featureEstimate;
 };
 
+struct FilteredBarcodeNormalizationStats {
+    uint64_t inSet = 0;
+    uint64_t translatedToSet = 0;
+    uint64_t unmatched = 0;
+    uint64_t dedupDropped = 0;
+    uint64_t outputCount = 0;
+};
+
+struct PfLibraryNamespaceContext {
+    string libraryId;
+    string effectiveReadNamespace;       // NXT | TRU
+    string assignmentWhitelistNamespace; // NXT | TRU | UNKNOWN
+    bool translateNxtForAssign = false;
+    string outputNamespace;              // NXT | TRU (global output namespace)
+    string autoDetectMatchMode;          // RAW_MATCH | TRANSLATED_MATCH | AMBIGUOUS | UNKNOWN
+    bool isChemistryExplicit = false;
+    bool isNamespaceConfident = false;
+    FilteredBarcodeNormalizationStats normalizationStats;
+};
+
 struct PfMultiPreparedContext {
     PfMultiConfig::Config config;
     string featureRef;
@@ -67,6 +88,8 @@ struct PfMultiPreparedContext {
     string inferredReason;
     bool inferredChemConfident = false;
     string effectiveChem;
+    bool hasTwoColumnWhitelist = false;
+    string soloOutputNamespace;  // actual namespace of Solo's raw MEX barcodes
     string outputChem;
     string outPrefix;
     string crAssignRoot;
@@ -228,8 +251,11 @@ static string detectChemistryFromWhitelistPath(const string& whitelistPath, stri
     confident = false;
     if (isUnsetToken(whitelistPath)) {
         reason = "whitelist path is unset";
-        return "unknown";
+        return "UNKNOWN";
     }
+
+    bool complementRuleMatched = false;
+    string complementRuleReason;
 
     // Prefer content-based detection first for 2-column NXT/TRU translation lists.
     std::ifstream in(whitelistPath.c_str());
@@ -272,37 +298,144 @@ static string detectChemistryFromWhitelistPath(const string& whitelistPath, stri
                 << nxtRuleRows << "/" << twoColumnRows
                 << " (" << static_cast<int>(nxtFraction * 100.0 + 0.5) << "%)";
             if (nxtFraction >= 0.8) {
+                complementRuleMatched = true;
+                complementRuleReason = msg.str();
+            } else {
+                msg << " — below 80% threshold, falling through to filename/default";
                 reason = msg.str();
-                confident = true;
-                return "NXT";
             }
-            msg << " — below 80% threshold, falling through to filename/default";
-            reason = msg.str();
         }
     }
 
-    // Fallback to filename hints.
+    // Filename hints provide orientation confirmation for 2-column whitelists.
     string base = lowerCopy(basenameOf(whitelistPath));
     if (base.find("nxt") != string::npos) {
-        reason = "whitelist filename contains 'nxt'";
+        reason = complementRuleMatched
+            ? (complementRuleReason + "; confirmed by filename 'nxt'")
+            : "whitelist filename contains 'nxt'";
         confident = true;
         return "NXT";
     }
     if (base.find("tru") != string::npos) {
-        reason = "whitelist filename contains 'tru'";
+        reason = complementRuleMatched
+            ? (complementRuleReason + "; confirmed by filename 'tru'")
+            : "whitelist filename contains 'tru'";
         confident = true;
         return "TRU";
     }
 
-    reason = "no chemistry marker found in whitelist content or filename; defaulting to TRU";
+    // Complement rule matched but no filename confirmation. The rule is
+    // symmetric (translate(A)==B iff translate(B)==A), so content alone
+    // cannot distinguish COL1=NXT from COL1=TRU orientation.
+    if (complementRuleMatched) {
+        reason = complementRuleReason
+            + "; WARNING: no filename hint to confirm NXT orientation"
+              " — assuming standard COL1=NXT convention";
+        confident = false;
+        return "NXT";
+    }
+
+    reason = "no chemistry marker found in whitelist content or filename";
     confident = false;
-    return "TRU";
+    return "UNKNOWN";
 }
 
 static string oppositeNamespace(const string& ns) {
     if (ns == "NXT") return "TRU";
     if (ns == "TRU") return "NXT";
     return ns;
+}
+
+static bool isKnownNamespace(const string& ns) {
+    return ns == "NXT" || ns == "TRU";
+}
+
+static bool whitelistHasTwoColumns(const string& whitelistPath) {
+    std::ifstream in(whitelistPath.c_str());
+    if (!in.is_open()) return false;
+    string line;
+    while (std::getline(in, line)) {
+        string trimmed = trimCopy(line);
+        if (trimmed.empty() || trimmed[0] == '#') continue;
+        vector<string> fields = splitWhitelistColumns(trimmed);
+        if (fields.size() >= 2 && isValidBarcodeSeq(fields[0]) && isValidBarcodeSeq(fields[1])) {
+            return true;
+        }
+        return false;
+    }
+    return false;
+}
+
+static void enforceUniqueBarcodesOrThrow(const vector<string>& barcodes,
+                                         const string& contextLabel) {
+    std::unordered_set<string> seen;
+    seen.reserve(barcodes.size() * 2 + 1);
+    vector<string> dupPreview;
+    dupPreview.reserve(10);
+    uint64_t dupCount = 0;
+    for (const auto& bc : barcodes) {
+        const string token = upperCopy(trimCopy(bc));
+        if (token.empty()) {
+            continue;
+        }
+        if (!seen.insert(token).second) {
+            ++dupCount;
+            if (dupPreview.size() < 10) {
+                dupPreview.push_back(token);
+            }
+        }
+    }
+    if (dupCount == 0) {
+        return;
+    }
+    std::ostringstream oss;
+    oss << "Duplicate barcodes detected in " << contextLabel
+        << " (duplicates=" << dupCount << ").";
+    if (!dupPreview.empty()) {
+        oss << " Example duplicates:";
+        for (const auto& d : dupPreview) {
+            oss << " " << d;
+        }
+    }
+    throw runtime_error(oss.str());
+}
+
+static void enforceUniqueBarcodeFileOrThrow(const string& barcodePath,
+                                            const string& contextLabel) {
+    std::ifstream in(barcodePath.c_str());
+    if (!in.is_open()) {
+        throw runtime_error("Failed to read barcode file for uniqueness check: " + barcodePath);
+    }
+    std::unordered_set<string> seen;
+    vector<string> dupPreview;
+    dupPreview.reserve(10);
+    uint64_t dupCount = 0;
+    string line;
+    while (std::getline(in, line)) {
+        string token = upperCopy(trimCopy(line));
+        if (token.empty()) {
+            continue;
+        }
+        if (!seen.insert(token).second) {
+            ++dupCount;
+            if (dupPreview.size() < 10) {
+                dupPreview.push_back(token);
+            }
+        }
+    }
+    if (dupCount == 0) {
+        return;
+    }
+    std::ostringstream oss;
+    oss << "Duplicate filtered barcodes detected before pf_api load in "
+        << contextLabel << " (" << barcodePath << ", duplicates=" << dupCount << ").";
+    if (!dupPreview.empty()) {
+        oss << " Example duplicates:";
+        for (const auto& d : dupPreview) {
+            oss << " " << d;
+        }
+    }
+    throw runtime_error(oss.str());
 }
 
 static string parseChemistryToken(const string& rawValue, const string& flagName) {
@@ -843,6 +976,178 @@ static bool getFilteredBarcodesFromSolo(const Solo* solo,
     return !out.empty();
 }
 
+static bool loadWhitelistBarcodeSet(const string& whitelistPath,
+                                    std::unordered_set<string>& outSet,
+                                    uint64_t& rowsRead,
+                                    uint64_t& invalidRows) {
+    outSet.clear();
+    rowsRead = 0;
+    invalidRows = 0;
+
+    std::ifstream in(whitelistPath.c_str());
+    if (!in.is_open()) {
+        return false;
+    }
+
+    string line;
+    while (std::getline(in, line)) {
+        string trimmed = trimCopy(line);
+        if (trimmed.empty()) {
+            continue;
+        }
+        size_t first = trimmed.find_first_not_of(" \t\r\n");
+        if (first == string::npos) {
+            continue;
+        }
+        size_t end = trimmed.find_first_of("\t, \r\n", first);
+        string token = (end == string::npos) ? trimmed.substr(first)
+                                             : trimmed.substr(first, end - first);
+        token = upperCopy(token);
+        rowsRead++;
+        if (!isValidBarcodeSeq(token)) {
+            invalidRows++;
+            continue;
+        }
+        outSet.insert(token);
+    }
+
+    return !outSet.empty();
+}
+
+static bool loadBarcodeListFromFile(const string& path,
+                                    vector<string>& out,
+                                    uint64_t& rowsRead,
+                                    uint64_t& invalidRows) {
+    out.clear();
+    rowsRead = 0;
+    invalidRows = 0;
+
+    std::ifstream in(path.c_str());
+    if (!in.is_open()) {
+        return false;
+    }
+
+    string line;
+    while (std::getline(in, line)) {
+        string trimmed = trimCopy(line);
+        if (trimmed.empty()) {
+            continue;
+        }
+        size_t first = trimmed.find_first_not_of(" \t\r\n");
+        if (first == string::npos) {
+            continue;
+        }
+        size_t end = trimmed.find_first_of("\t, \r\n", first);
+        string token = (end == string::npos) ? trimmed.substr(first)
+                                             : trimmed.substr(first, end - first);
+        token = upperCopy(token);
+        rowsRead++;
+        if (!isValidBarcodeSeq(token)) {
+            invalidRows++;
+            continue;
+        }
+        out.push_back(token);
+    }
+
+    return !out.empty();
+}
+
+// Normalize filtered barcodes into the whitelist (assignment) namespace.
+//
+// sourceNamespace: if known ("NXT" or "TRU"), use deterministic mapping
+// instead of membership heuristics. This avoids misclassification when
+// COL1/COL2 sets overlap (barcodes self-complementary at positions 7-8).
+//
+// When sourceNamespace is empty or unknown, falls back to the heuristic
+// (check membership, then try translation).
+static vector<string> normalizeFilteredBarcodesForAssignNamespace(
+    const vector<string>& inputBarcodes,
+    const std::unordered_set<string>& whitelistSet,
+    FilteredBarcodeNormalizationStats& stats,
+    const string& sourceNamespace = "",
+    const string& whitelistNamespace = "") {
+    stats = FilteredBarcodeNormalizationStats{};
+    vector<string> output;
+    output.reserve(inputBarcodes.size());
+    std::unordered_set<string> seen;
+    seen.reserve(inputBarcodes.size());
+
+    // Deterministic mode: when both source and whitelist namespaces are known,
+    // we know exactly whether translation is needed — no membership guessing.
+    const bool deterministic =
+        isKnownNamespace(sourceNamespace) && isKnownNamespace(whitelistNamespace);
+    const bool needsTranslation = deterministic && (sourceNamespace != whitelistNamespace);
+
+    for (const auto& rawBc : inputBarcodes) {
+        const string bc = upperCopy(rawBc);
+        string selected;
+
+        if (deterministic) {
+            string candidate = needsTranslation ? translateNxtMiddleTwoBases(bc) : bc;
+            if (whitelistSet.find(candidate) != whitelistSet.end()) {
+                selected = candidate;
+                if (needsTranslation) {
+                    stats.translatedToSet++;
+                } else {
+                    stats.inSet++;
+                }
+            } else {
+                stats.unmatched++;
+            }
+        } else {
+            // Heuristic fallback: check membership then try translation.
+            if (whitelistSet.find(bc) != whitelistSet.end()) {
+                selected = bc;
+                stats.inSet++;
+            } else {
+                string translated = translateNxtMiddleTwoBases(bc);
+                if (whitelistSet.find(translated) != whitelistSet.end()) {
+                    selected = translated;
+                    stats.translatedToSet++;
+                } else {
+                    stats.unmatched++;
+                }
+            }
+        }
+
+        if (!selected.empty()) {
+            if (seen.insert(selected).second) {
+                output.push_back(selected);
+            } else {
+                stats.dedupDropped++;
+            }
+        }
+    }
+    stats.outputCount = output.size();
+    return output;
+}
+
+static void appendAssignNormalizationStats(const string& assignOut,
+                                           const PfLibraryNamespaceContext& nsCtx,
+                                           const PfMultiAssign::WhitelistNormalizationResult& wlInfo) {
+    string runSummaryPath = assignOut + "/assignBarcodes.api_run.txt";
+    std::ofstream out(runSummaryPath.c_str(), std::ios::app);
+    if (!out.is_open()) {
+        return;
+    }
+    out << "namespace_context.library_id=" << nsCtx.libraryId << "\n";
+    out << "namespace_context.effective_read_namespace=" << nsCtx.effectiveReadNamespace << "\n";
+    out << "namespace_context.assignment_whitelist_namespace=" << nsCtx.assignmentWhitelistNamespace << "\n";
+    out << "namespace_context.translate_nxt_for_assign=" << (nsCtx.translateNxtForAssign ? 1 : 0) << "\n";
+    out << "namespace_context.output_namespace=" << nsCtx.outputNamespace << "\n";
+    out << "namespace_context.detected_match_mode=" << nsCtx.autoDetectMatchMode << "\n";
+    out << "namespace_context.chemistry_explicit=" << (nsCtx.isChemistryExplicit ? 1 : 0) << "\n";
+    out << "namespace_context.namespace_confident=" << (nsCtx.isNamespaceConfident ? 1 : 0) << "\n";
+    out << "namespace_context.whitelist_source=" << wlInfo.sourcePath << "\n";
+    out << "namespace_context.whitelist_normalized=" << wlInfo.normalizedPath << "\n";
+    out << "namespace_context.whitelist_rows=" << wlInfo.normalizedRowCount << "\n";
+    out << "barcode_normalization.in_set=" << nsCtx.normalizationStats.inSet << "\n";
+    out << "barcode_normalization.translated_to_set=" << nsCtx.normalizationStats.translatedToSet << "\n";
+    out << "barcode_normalization.unmatched=" << nsCtx.normalizationStats.unmatched << "\n";
+    out << "barcode_normalization.dedup_dropped=" << nsCtx.normalizationStats.dedupDropped << "\n";
+    out << "barcode_normalization.output_count=" << nsCtx.normalizationStats.outputCount << "\n";
+}
+
 // knownFeatureRefTypeMap() and buildFeatureSpecsFromConfig() are in PfMultiFeatureSpecs.h
 
 static PfMultiPreparedContext buildPfMultiPreparedContext(const PfMultiPreloadInput& input) {
@@ -896,6 +1201,31 @@ static PfMultiPreparedContext buildPfMultiPreparedContext(const PfMultiPreloadIn
     } else if (context.requestedChem == "tru") {
         context.effectiveChem = "TRU";
     }
+    if (context.requestedChem == "auto" && !isKnownNamespace(context.effectiveChem)) {
+        throw runtime_error(
+            "Unable to infer whitelist chemistry namespace (NXT/TRU) from "
+            + context.whitelist +
+            ". Provide explicit --crChemistry NXT|TRU or set per-library star_chemistry.");
+    }
+    if (!context.inferredChemConfident && isKnownNamespace(context.effectiveChem)
+            && context.requestedChem == "auto") {
+        prepLog
+            << "WARNING: whitelist chemistry '" << context.effectiveChem
+            << "' inferred with LOW CONFIDENCE (" << context.inferredReason
+            << "). Column order may be ambiguous for 2-column whitelists"
+               " without NXT/TRU in the filename."
+               " Provide explicit --crChemistry NXT|TRU if results are unexpected.\n";
+    }
+
+    // Solo writes barcodes.tsv using cbWLstrOut:
+    //   2-column NXT whitelist → cbWLstrOut = COL2 (TRU)
+    //   1-column whitelist     → cbWLstrOut = cbWLstr (same as effectiveChem)
+    context.hasTwoColumnWhitelist = whitelistHasTwoColumns(context.whitelist);
+    if (context.hasTwoColumnWhitelist && context.effectiveChem == "NXT") {
+        context.soloOutputNamespace = "TRU";
+    } else {
+        context.soloOutputNamespace = context.effectiveChem;
+    }
 
     // CR-compat default output namespace is TRU.
     context.outputChem = "TRU";
@@ -910,6 +1240,8 @@ static PfMultiPreparedContext buildPfMultiPreparedContext(const PfMultiPreloadIn
             << " (confident=" << (context.inferredChemConfident ? "yes" : "no")
             << "; " << context.inferredReason << ")"
             << " effective=" << context.effectiveChem
+            << " hasTwoColumnWL=" << (context.hasTwoColumnWhitelist ? "yes" : "no")
+            << " soloOutputNamespace=" << context.soloOutputNamespace
             << " output_requested=" << context.requestedOutputChem
             << " output_effective=" << context.outputChem
             << "\n";
@@ -931,9 +1263,16 @@ static PfMultiPreparedContext buildPfMultiPreparedContext(const PfMultiPreloadIn
                     context.inferredChem = "TRU";
                 }
                 context.inferredChemConfident = true;
+                // Recompute soloOutputNamespace after override
+                if (context.hasTwoColumnWhitelist && context.effectiveChem == "NXT") {
+                    context.soloOutputNamespace = "TRU";
+                } else {
+                    context.soloOutputNamespace = context.effectiveChem;
+                }
                 prepLog << "  GEX star_chemistry=" << gex.starChemistry
                         << " overrides namespace: effectiveChem " << prevEffective
                         << " → " << context.effectiveChem
+                        << ", soloOutputNamespace=" << context.soloOutputNamespace
                         << ", inferredChem " << prevInferred
                         << " → " << context.inferredChem
                         << " (confident=yes, user-specified)\n";
@@ -1242,9 +1581,13 @@ int processPfMultiConfig(Parameters& P,
         const PfMultiConfig::Config& config = prepared.config;
         const string& whitelist = prepared.whitelist;
         const string& effectiveChem = prepared.effectiveChem;
+        const string gexWhitelistNamespace = upperCopy(prepared.inferredChem);
+        // Solo's raw MEX barcodes are in soloOutputNamespace, NOT the whitelist
+        // matching namespace. For 2-column NXT whitelists, Solo writes TRU barcodes
+        // (via cbWLstrOut = COL2), so gexNormalizationChem must be "TRU" (no-op).
+        const string gexNormalizationChem = upperCopy(prepared.soloOutputNamespace);
         const string& outputChem = prepared.outputChem;
         const string& outPrefix = prepared.outPrefix;
-        const string& crAssignRoot = prepared.crAssignRoot;
         const AnchoredReadEstimate mapEstimate = prepared.mapEstimate;
 
         PfMultiAssign::AssignOptions assignOpts;
@@ -1283,30 +1626,22 @@ int processPfMultiConfig(Parameters& P,
         const bool pfConsumerThreadsExplicit = (assignOpts.consumerThreadsPerSet > 0);
         const int pfConsumerCapPerProducer = 8;
 
-        if (!P.pfMulti.crAssignFilteredBarcodes.empty() && P.pfMulti.crAssignFilteredBarcodes != "-") {
+        const bool hasExplicitAssignFilteredBarcodes =
+            (!P.pfMulti.crAssignFilteredBarcodes.empty() && P.pfMulti.crAssignFilteredBarcodes != "-");
+        string explicitAssignFilteredBarcodesPath;
+        vector<string> soloFilteredAssignBarcodes;
+        if (hasExplicitAssignFilteredBarcodes) {
             struct stat stFiltered;
             if (stat(P.pfMulti.crAssignFilteredBarcodes.c_str(), &stFiltered) != 0) {
                 throw runtime_error("crAssignFilteredBarcodes file not found: " + P.pfMulti.crAssignFilteredBarcodes);
             }
-            assignOpts.filteredBarcodesPath = P.pfMulti.crAssignFilteredBarcodes;
+            explicitAssignFilteredBarcodesPath = P.pfMulti.crAssignFilteredBarcodes;
             P.inOut->logMain << "NOTICE: Using explicit filtered barcodes for assignBarcodes: "
-                             << assignOpts.filteredBarcodesPath << "\n";
+                             << explicitAssignFilteredBarcodesPath << "\n";
         } else {
-            vector<string> filteredAssignBarcodes;
-            if (getFilteredBarcodesFromSolo(solo, P, filteredAssignBarcodes, false)) {
-                string filteredPath = crAssignRoot + "/filtered_gex_barcodes.txt";
-                std::ofstream fbc(filteredPath.c_str());
-                if (!fbc.is_open()) {
-                    throw runtime_error("Failed to write filtered barcode list for assignBarcodes: " + filteredPath);
-                }
-                for (const auto& bc : filteredAssignBarcodes) {
-                    fbc << bc << "\n";
-                }
-                fbc.close();
-                assignOpts.filteredBarcodesPath = filteredPath;
-                P.inOut->logMain << "NOTICE: Using Solo filtered barcodes for assignBarcodes "
-                                 << "(matching namespace, " 
-                                 << filteredAssignBarcodes.size() << " barcodes)\n";
+            if (getFilteredBarcodesFromSolo(solo, P, soloFilteredAssignBarcodes, false)) {
+                P.inOut->logMain << "NOTICE: Loaded Solo filtered barcodes for assignBarcodes "
+                                 << "(pre-normalization count=" << soloFilteredAssignBarcodes.size() << ")\n";
             }
         }
         
@@ -1315,7 +1650,15 @@ int processPfMultiConfig(Parameters& P,
             string assignOut;
             string featureRefPath;
             string effectiveChem;
+            string effectiveReadNamespace;
+            string assignmentWhitelistNamespace;
+            bool translateNxtForAssign = false;
+            string featureMexOutputNamespace;  // actual namespace of barcodes in pf output MEX
+            string outputNamespace;
+            bool namespaceConfident = false;
             string detectedMatchMode;
+            PfMultiAssign::WhitelistNormalizationResult whitelistNormalization;
+            FilteredBarcodeNormalizationStats normalizationStats;
             string libraryId;
             string sampleName;
             string resolvedFastq;
@@ -1427,10 +1770,25 @@ int processPfMultiConfig(Parameters& P,
             const int pfProducerSlotsAvailable =
                 std::max(1, std::min(std::max(1, libThreadBudget - 1),
                                      std::max(1, sched.fileCount)));
+            const bool pfSingleProducerOnly = (pfProducerSlotsAvailable <= 1);
+            const bool pfProducerSlotsExhaustedByFiles =
+                (pfProducerSlotsAvailable >= std::max(1, sched.fileCount));
+            const bool pfHasExtraBudgetAfterAllProducers =
+                (libThreadBudget > (pfProducerSlotsAvailable + 1));
+            const bool pfLiftConsumerCap =
+                pfSingleProducerOnly ||
+                (pfProducerSlotsExhaustedByFiles && pfHasExtraBudgetAfterAllProducers);
+            // Keep the per-producer cap policy for multi-producer cases, but when
+            // only one producer slot is possible (e.g. one file set), lift the cap
+            // so consumers can use the full remaining budget. Also lift when all
+            // producer slots are already exhausted by file availability and extra
+            // thread budget remains.
+            const int pfConsumerCapPerProducerEffective =
+                pfLiftConsumerCap ? std::max(1, libThreadBudget) : pfConsumerCapPerProducer;
             int pfReaderThreadsReserved = 1;
             int pfConsumerBudgetThreads = std::max(1, libThreadBudget - pfReaderThreadsReserved);
             int pfConsumerThreadsForRun = std::max(1, assignOpts.consumerThreadsPerSet);
-            int pfConsumerSoftMax = pfConsumerCapPerProducer;
+            int pfConsumerSoftMax = pfConsumerCapPerProducerEffective;
             bool pfConsumerThreadsAuto = false;
             if (!pfConsumerThreadsExplicit && assignOpts.enableStarDynamicPermitHooks) {
                 int bestProducerReserve = 1;
@@ -1441,7 +1799,7 @@ int processPfMultiConfig(Parameters& P,
                     const int consumerByBudget =
                         std::max(1, consumerBudget / std::max(1, pfSearchThreadQuantum));
                     const int consumerByProducerCap =
-                        std::max(1, producerReserve * pfConsumerCapPerProducer);
+                        std::max(1, producerReserve * pfConsumerCapPerProducerEffective);
                     const int candidateConsumers =
                         std::max(1, std::min(consumerByBudget, consumerByProducerCap));
                     if (candidateConsumers > bestConsumerThreads ||
@@ -1455,36 +1813,133 @@ int processPfMultiConfig(Parameters& P,
                 pfConsumerThreadsForRun = bestConsumerThreads;
                 pfConsumerBudgetThreads = std::max(1, libThreadBudget - pfReaderThreadsReserved);
                 pfConsumerSoftMax =
-                    std::max(1, pfReaderThreadsReserved * pfConsumerCapPerProducer);
+                    std::max(1, pfReaderThreadsReserved * pfConsumerCapPerProducerEffective);
                 pfConsumerThreadsAuto = true;
             } else if (pfConsumerThreadsExplicit) {
                 const int neededProducerReserve = std::max(
-                    1, (pfConsumerThreadsForRun + pfConsumerCapPerProducer - 1) / pfConsumerCapPerProducer);
+                    1, (pfConsumerThreadsForRun + pfConsumerCapPerProducerEffective - 1) / pfConsumerCapPerProducerEffective);
                 pfReaderThreadsReserved = std::min(pfProducerSlotsAvailable, neededProducerReserve);
                 pfConsumerBudgetThreads = std::max(1, libThreadBudget - pfReaderThreadsReserved);
                 pfConsumerSoftMax =
-                    std::max(1, pfReaderThreadsReserved * pfConsumerCapPerProducer);
+                    std::max(1, pfReaderThreadsReserved * pfConsumerCapPerProducerEffective);
             }
             PfMultiAssign::AssignOptions runAssignOpts = assignOpts;
             runAssignOpts.consumerThreadsPerSet = pfConsumerThreadsForRun;
+            runAssignOpts.filteredBarcodesPath.clear();
+
+            PfMultiAssign::WhitelistNormalizationResult wlInfo =
+                PfMultiAssign::normalizeWhitelistForAssign(whitelist, assignOut);
+            string assignmentWhitelistNamespace = upperCopy(wlInfo.assignmentNamespace);
+            const bool assignmentNamespaceKnown = isKnownNamespace(assignmentWhitelistNamespace);
+
+            PfLibraryNamespaceContext nsCtx;
+            nsCtx.libraryId = preparedLib.libraryId;
+            nsCtx.assignmentWhitelistNamespace = assignmentWhitelistNamespace;
+            nsCtx.outputNamespace = outputChem;
+            nsCtx.autoDetectMatchMode = "UNKNOWN";
+            nsCtx.isChemistryExplicit = preparedLib.explicitChem;
+            nsCtx.isNamespaceConfident = assignmentNamespaceKnown && wlInfo.namespaceConfidence;
+
+            const bool needAssignFilteredNormalization =
+                hasExplicitAssignFilteredBarcodes || !soloFilteredAssignBarcodes.empty();
+            if (needAssignFilteredNormalization) {
+                std::unordered_set<string> whitelistSet;
+                uint64_t wlRowsRead = 0;
+                uint64_t wlInvalidRows = 0;
+                if (!loadWhitelistBarcodeSet(wlInfo.normalizedPath, whitelistSet, wlRowsRead, wlInvalidRows)) {
+                    throw runtime_error("Failed to load normalized assignment whitelist for filtered-barcode normalization: "
+                        + wlInfo.normalizedPath);
+                }
+
+                vector<string> sourceFiltered;
+                string sourceLabel;
+                if (hasExplicitAssignFilteredBarcodes) {
+                    uint64_t explicitRowsRead = 0;
+                    uint64_t explicitInvalidRows = 0;
+                    if (!loadBarcodeListFromFile(explicitAssignFilteredBarcodesPath,
+                                                 sourceFiltered,
+                                                 explicitRowsRead,
+                                                 explicitInvalidRows)) {
+                        throw runtime_error("Failed to load explicit assign filtered barcode list: "
+                            + explicitAssignFilteredBarcodesPath);
+                    }
+                    if (explicitInvalidRows > 0) {
+                        P.inOut->logMain
+                            << "WARNING: explicit assign filtered barcode file had "
+                            << explicitInvalidRows
+                            << " invalid rows ignored: "
+                            << explicitAssignFilteredBarcodesPath << "\n";
+                    }
+                    sourceLabel = "explicit";
+                } else {
+                    sourceFiltered = soloFilteredAssignBarcodes;
+                    sourceLabel = "solo";
+                }
+
+                FilteredBarcodeNormalizationStats normStats;
+                // For solo-sourced barcodes (read namespace = matching namespace),
+                // pass known namespaces for deterministic mapping.
+                // For explicit sources, namespace is unknown — use heuristic fallback.
+                const string assignSourceNS =
+                    (sourceLabel == "solo" && assignmentNamespaceKnown)
+                    ? assignmentWhitelistNamespace : "";
+                vector<string> normalizedFiltered =
+                    normalizeFilteredBarcodesForAssignNamespace(
+                        sourceFiltered, whitelistSet, normStats,
+                        assignSourceNS, assignmentWhitelistNamespace);
+                if (normalizedFiltered.empty() && !sourceFiltered.empty()) {
+                    std::ostringstream oss;
+                    oss << "Filtered barcodes became empty after assignment-namespace normalization for library_id="
+                        << preparedLib.libraryId
+                        << " (source=" << sourceLabel
+                        << ", source_count=" << sourceFiltered.size()
+                        << ", whitelist_rows=" << wlRowsRead
+                        << ", whitelist_invalid_rows=" << wlInvalidRows
+                        << ", unmatched=" << normStats.unmatched << ")";
+                    throw runtime_error(oss.str());
+                }
+
+                const string filteredPath = assignOut + "/filtered_gex_barcodes.assign_namespace.txt";
+                std::ofstream fbc(filteredPath.c_str());
+                if (!fbc.is_open()) {
+                    throw runtime_error("Failed to write normalized filtered barcode list for assignBarcodes: " + filteredPath);
+                }
+                for (const auto& bc : normalizedFiltered) {
+                    fbc << bc << "\n";
+                }
+                fbc.close();
+                runAssignOpts.filteredBarcodesPath = filteredPath;
+                nsCtx.normalizationStats = normStats;
+
+                P.inOut->logMain
+                    << "NOTICE: assign filtered-barcode normalization for library_id=" << preparedLib.libraryId
+                    << " source=" << sourceLabel
+                    << " in_set=" << normStats.inSet
+                    << " translated_to_set=" << normStats.translatedToSet
+                    << " unmatched=" << normStats.unmatched
+                    << " dedup_dropped=" << normStats.dedupDropped
+                    << " output=" << normStats.outputCount
+                    << " whitelist_rows=" << wlRowsRead
+                    << " whitelist_invalid_rows=" << wlInvalidRows
+                    << "\n";
+            }
+
+            if (!runAssignOpts.filteredBarcodesPath.empty()) {
+                enforceUniqueBarcodeFileOrThrow(
+                    runAssignOpts.filteredBarcodesPath,
+                    "filtered barcode input (library_id=" + preparedLib.libraryId + ")");
+            }
 
             const bool useAutodetect = !preparedLib.explicitChem
                                       && (preparedLib.resolvedChemRequest == "auto");
-            const string wlNamespace = prepared.inferredChem;
-            const bool wlNamespaceConfident = prepared.inferredChemConfident;
-            string assignmentChem = preparedLib.effectiveChem;
+            string effectiveReadNamespace = upperCopy(preparedLib.effectiveChem);
             string detectedMatchMode = "UNKNOWN";
-            runAssignOpts.translateNxt = (assignmentChem == "NXT");
+            runAssignOpts.translateNxt = false;
             if (preparedLib.explicitChem) {
                 P.inOut->logMain << "NOTICE: " << featureRefType
                                  << " star_chemistry=" << preparedLib.resolvedChemRequest
                                  << " → effectiveChem=" << preparedLib.effectiveChem
                                  << " (auto-detect skipped)\n";
-            } else if (useAutodetect && !wlNamespaceConfident) {
-                P.inOut->logMain << "WARNING: Whitelist namespace uncertain ('"
-                                 << wlNamespace << "', inferred by default), "
-                                 << "auto-detect will determine effective chemistry for "
-                                 << featureRefType << "\n";
             }
             if (useAutodetect) {
                 PfMultiAssign::AssignOptions detectOpts = runAssignOpts;
@@ -1499,33 +1954,30 @@ int processPfMultiConfig(Parameters& P,
                     PfMultiAssign::runAssignBarcodes(
                         whitelist, refPath, resolvedFastq, detectOut, detectOpts);
                 detectedMatchMode = detectResult.detectedMatchMode;
+                nsCtx.autoDetectMatchMode = detectedMatchMode;
 
-                if (wlNamespaceConfident) {
+                if (detectedMatchMode != "RAW_MATCH" && detectedMatchMode != "TRANSLATED_MATCH") {
+                    throw runtime_error(
+                        "Ambiguous or low-confidence chemistry auto-detect for library_id=" + preparedLib.libraryId +
+                        " (" + featureRefType + ", match_mode=" + detectedMatchMode +
+                        "). Provide explicit star_chemistry in multi config or set --crChemistry NXT/TRU.");
+                }
+                if (assignmentNamespaceKnown) {
                     if (detectedMatchMode == "RAW_MATCH") {
-                        assignmentChem = wlNamespace;
-                        P.inOut->logMain << "NOTICE: auto-detect RAW_MATCH for "
-                                         << featureRefType
-                                         << " → assignmentChem=" << assignmentChem << "\n";
-                    } else if (detectedMatchMode == "TRANSLATED_MATCH") {
-                        assignmentChem = oppositeNamespace(wlNamespace);
-                        P.inOut->logMain << "NOTICE: auto-detect TRANSLATED_MATCH for "
-                                         << featureRefType
-                                         << " → assignmentChem=" << assignmentChem << "\n";
+                        effectiveReadNamespace = assignmentWhitelistNamespace;
                     } else {
-                        P.inOut->logMain << "WARNING: auto-detect "
-                                         << detectedMatchMode << " for "
-                                         << featureRefType << ", keeping inferred: "
-                                         << assignmentChem << "\n";
+                        effectiveReadNamespace = oppositeNamespace(assignmentWhitelistNamespace);
                     }
-                } else {
-                    P.inOut->logMain << "WARNING: auto-detect " << detectedMatchMode
+                    P.inOut->logMain << "NOTICE: auto-detect " << detectedMatchMode
                                      << " for " << featureRefType
-                                     << " but whitelist namespace is uncertain ('"
-                                     << wlNamespace << "' by default). "
-                                     << "assignmentChem kept as " << assignmentChem
-                                     << " to stay consistent with GEX. "
-                                     << "Use star_chemistry column, --crChemistry NXT/TRU, "
-                                     << "or rename whitelist to enable absolute namespace resolution.\n";
+                                     << " → effectiveReadNamespace=" << effectiveReadNamespace
+                                     << ", assignmentWhitelistNamespace=" << assignmentWhitelistNamespace
+                                     << "\n";
+                } else {
+                    P.inOut->logMain << "WARNING: assignment whitelist namespace unresolved for "
+                                     << featureRefType
+                                     << " (whitelist=" << wlInfo.sourcePath
+                                     << "). Using detect-match mode relation directly for translateNxt.\n";
                 }
 
                 // Probe results are consumed above; remove transient artifacts.
@@ -1536,7 +1988,22 @@ int processPfMultiConfig(Parameters& P,
                 }
             }
             runAssignOpts.autodetectChemistry = false;
-            runAssignOpts.translateNxt = (assignmentChem == "NXT");
+            if (useAutodetect && (detectedMatchMode == "RAW_MATCH" || detectedMatchMode == "TRANSLATED_MATCH")) {
+                runAssignOpts.translateNxt = (detectedMatchMode == "TRANSLATED_MATCH");
+            } else if (assignmentNamespaceKnown && isKnownNamespace(effectiveReadNamespace)) {
+                runAssignOpts.translateNxt = (effectiveReadNamespace != assignmentWhitelistNamespace);
+            } else {
+                std::ostringstream oss;
+                oss << "Namespace relation unresolved for library_id=" << preparedLib.libraryId
+                    << " (effectiveReadNamespace=" << effectiveReadNamespace
+                    << ", assignmentWhitelistNamespace=" << assignmentWhitelistNamespace
+                    << "). Provide explicit star_chemistry and/or a whitelist with resolvable NXT/TRU namespace.";
+                throw runtime_error(oss.str());
+            }
+            nsCtx.effectiveReadNamespace = effectiveReadNamespace;
+            nsCtx.assignmentWhitelistNamespace = assignmentWhitelistNamespace;
+            nsCtx.translateNxtForAssign = runAssignOpts.translateNxt;
+
             const bool pfSingleConsumer = (pfConsumerThreadsForRun <= 1);
             const int pfPermitCeilingDuringPf =
                 std::max(1, libThreadBudget - pfReaderThreadsReserved);
@@ -1579,7 +2046,12 @@ int processPfMultiConfig(Parameters& P,
                                  << ", consumerThreadsForRun=" << pfConsumerThreadsForRun
                                  << ", consumerSoftMax=" << pfConsumerSoftMax
                                  << ", consumerCapPerProducer=" << pfConsumerCapPerProducer
+                                 << ", consumerCapPerProducerEffective=" << pfConsumerCapPerProducerEffective
                                  << ", producerSlotsAvailable=" << pfProducerSlotsAvailable
+                                 << ", producerSlotsExhaustedByFiles=" << (pfProducerSlotsExhaustedByFiles ? "yes" : "no")
+                                 << ", extraBudgetAfterProducers=" << (pfHasExtraBudgetAfterAllProducers ? "yes" : "no")
+                                 << ", liftConsumerCap=" << (pfLiftConsumerCap ? "yes" : "no")
+                                 << ", singleProducerOnly=" << (pfSingleProducerOnly ? "yes" : "no")
                                  << ", singleConsumerMode=" << (pfSingleConsumer ? "yes" : "no")
                                  << ", readerThreadsReserved=" << pfReaderThreadsReserved
                                  << ", permitCeilingDuringPf=" << pfPermitCeilingDuringPf
@@ -1805,10 +2277,15 @@ int processPfMultiConfig(Parameters& P,
                     apiRunOut << "pfController.consumerThreadsForRun=" << pfConsumerThreadsForRun << "\n";
                     apiRunOut << "pfController.consumerSoftMax=" << pfConsumerSoftMax << "\n";
                     apiRunOut << "pfController.consumerCapPerProducer=" << pfConsumerCapPerProducer << "\n";
+                    apiRunOut << "pfController.consumerCapPerProducerEffective=" << pfConsumerCapPerProducerEffective << "\n";
                     apiRunOut << "pfController.consumerThreadsExplicit=" << (pfConsumerThreadsExplicit ? 1 : 0) << "\n";
                     apiRunOut << "pfController.consumerThreadsAuto=" << (pfConsumerThreadsAuto ? 1 : 0) << "\n";
                     apiRunOut << "pfController.consumerBudgetThreads=" << pfConsumerBudgetThreads << "\n";
                     apiRunOut << "pfController.producerSlotsAvailable=" << pfProducerSlotsAvailable << "\n";
+                    apiRunOut << "pfController.producerSlotsExhaustedByFiles=" << (pfProducerSlotsExhaustedByFiles ? 1 : 0) << "\n";
+                    apiRunOut << "pfController.extraBudgetAfterProducers=" << (pfHasExtraBudgetAfterAllProducers ? 1 : 0) << "\n";
+                    apiRunOut << "pfController.liftConsumerCap=" << (pfLiftConsumerCap ? 1 : 0) << "\n";
+                    apiRunOut << "pfController.singleProducerOnly=" << (pfSingleProducerOnly ? 1 : 0) << "\n";
                     apiRunOut << "pfController.singleConsumerMode=" << (pfSingleConsumer ? 1 : 0) << "\n";
                     apiRunOut << "pfController.readerThreadsReserved=" << pfReaderThreadsReserved << "\n";
                     apiRunOut << "pfController.permitCeilingDuringPf=" << pfPermitCeilingDuringPf << "\n";
@@ -1854,12 +2331,28 @@ int processPfMultiConfig(Parameters& P,
                     + ", fastq=" + resolvedFastq);
             }
 
+            appendAssignNormalizationStats(assignOut, nsCtx, wlInfo);
+
             FeatureRun run;
             run.featureType = featureRefType;
             run.assignOut = assignOut;
             run.featureRefPath = refPath;
-            run.effectiveChem = assignmentChem;
+            run.effectiveChem = effectiveReadNamespace;
+            run.effectiveReadNamespace = nsCtx.effectiveReadNamespace;
+            run.assignmentWhitelistNamespace = nsCtx.assignmentWhitelistNamespace;
+            run.translateNxtForAssign = nsCtx.translateNxtForAssign;
+            // process_features outputs barcodes in the assignment whitelist namespace
+            // unless translateNxt is set, in which case it complements positions 7-8.
+            if (nsCtx.translateNxtForAssign && isKnownNamespace(nsCtx.assignmentWhitelistNamespace)) {
+                run.featureMexOutputNamespace = oppositeNamespace(nsCtx.assignmentWhitelistNamespace);
+            } else {
+                run.featureMexOutputNamespace = nsCtx.assignmentWhitelistNamespace;
+            }
+            run.outputNamespace = nsCtx.outputNamespace;
+            run.namespaceConfident = nsCtx.isNamespaceConfident;
             run.detectedMatchMode = detectedMatchMode;
+            run.whitelistNormalization = wlInfo;
+            run.normalizationStats = nsCtx.normalizationStats;
             run.libraryId = preparedLib.libraryId;
             run.sampleName = sampleName;
             run.resolvedFastq = resolvedFastq;
@@ -1897,12 +2390,20 @@ int processPfMultiConfig(Parameters& P,
                     + run.featureType + ", library_id=" + run.libraryId
                     + ", assign_out=" + run.assignOut);
             }
+            // PfMultiMexStub::copyBarcodesTsv translates barcodes.txt -> barcodes.tsv
+            // using the 2-column whitelist COL1->COL2 mapping. So barcodes.tsv is
+            // in the output namespace (TRU for 2-col NXT), regardless of translateNxt.
+            // readMex reads barcodes.tsv, so featureMexOutputNamespace must match.
+            if (prepared.hasTwoColumnWhitelist && isKnownNamespace(prepared.soloOutputNamespace)) {
+                run.featureMexOutputNamespace = prepared.soloOutputNamespace;
+            }
         }
 
         // Read feature MEX to validate before writing provenance (fail-fast on read errors)
         struct FeatureMexEntry {
             PfMultiMerge::MexData data;
             string effectiveChem;
+            string featureMexOutputNamespace;  // actual namespace of pf output barcodes
             string featureType;
             string libraryId;
         };
@@ -1912,6 +2413,7 @@ int processPfMultiConfig(Parameters& P,
                 FeatureMexEntry entry;
                 entry.data = PfMultiMerge::readMex(run.assignOut);
                 entry.effectiveChem = run.effectiveChem;
+                entry.featureMexOutputNamespace = run.featureMexOutputNamespace;
                 entry.featureType = run.featureType;
                 entry.libraryId = run.libraryId;
                 featureMexEntries.push_back(std::move(entry));
@@ -1949,6 +2451,21 @@ int processPfMultiConfig(Parameters& P,
                 manifest << "chemistry_explicit\t" << (run.explicitChem ? "yes" : "no") << "\n";
                 manifest << "effective_chemistry\t" << run.effectiveChem << "\n";
                 manifest << "detected_match_mode\t" << run.detectedMatchMode << "\n";
+                manifest << "effective_read_namespace\t" << run.effectiveReadNamespace << "\n";
+                manifest << "assignment_whitelist_namespace\t" << run.assignmentWhitelistNamespace << "\n";
+                manifest << "translate_nxt_for_assign\t" << (run.translateNxtForAssign ? "yes" : "no") << "\n";
+                manifest << "output_namespace\t" << run.outputNamespace << "\n";
+                manifest << "namespace_confidence\t" << (run.namespaceConfident ? "yes" : "no") << "\n";
+                manifest << "whitelist_source\t" << run.whitelistNormalization.sourcePath << "\n";
+                manifest << "whitelist_normalized\t" << run.whitelistNormalization.normalizedPath << "\n";
+                manifest << "whitelist_has_two_columns\t"
+                         << (run.whitelistNormalization.hasTwoColumnSource ? "yes" : "no") << "\n";
+                manifest << "whitelist_normalized_rows\t" << run.whitelistNormalization.normalizedRowCount << "\n";
+                manifest << "barcode_norm_in_set\t" << run.normalizationStats.inSet << "\n";
+                manifest << "barcode_norm_translated_to_set\t" << run.normalizationStats.translatedToSet << "\n";
+                manifest << "barcode_norm_unmatched\t" << run.normalizationStats.unmatched << "\n";
+                manifest << "barcode_norm_dedup_dropped\t" << run.normalizationStats.dedupDropped << "\n";
+                manifest << "barcode_norm_output_count\t" << run.normalizationStats.outputCount << "\n";
                 manifest << "return_code\t" << run.returnCode << "\n";
                 manifest << "status\tOK\n";
                 manifest << "assign_output_dir\t" << run.assignOut << "\n";
@@ -2038,16 +2555,47 @@ int processPfMultiConfig(Parameters& P,
         }
         
         // Prefer in-memory filtered barcodes from Solo if available.
-        // Fetch read-space barcodes (useOutputNamespace=false) so that the
-        // namespace is unambiguous regardless of 1-col vs 2-col whitelist,
-        // then normalize to TRU to match the merge-boundary convention.
+        // Fetch output-namespace barcodes (useOutputNamespace=true), then
+        // normalize to TRU to match the merge-boundary convention.
         vector<string> filteredGexBarcodes;
         bool useFilteredGex = false;
-        if (getFilteredBarcodesFromSolo(solo, P, filteredGexBarcodes, false)) {
-            normalizeBarcodeVecToTru(filteredGexBarcodes, effectiveChem);
+        std::unordered_set<string> gexWhitelistSet;
+        uint64_t gexWhitelistRows = 0;
+        uint64_t gexWhitelistInvalidRows = 0;
+        const bool haveGexWhitelistSet =
+            loadWhitelistBarcodeSet(whitelist, gexWhitelistSet, gexWhitelistRows, gexWhitelistInvalidRows);
+        if (!haveGexWhitelistSet) {
+            P.inOut->logMain << "WARNING: failed to load whitelist set for GEX barcode normalization: "
+                             << whitelist << "\n";
+        }
+        if (getFilteredBarcodesFromSolo(solo, P, filteredGexBarcodes, true)) {
+            if (haveGexWhitelistSet && isKnownNamespace(gexWhitelistNamespace)) {
+                FilteredBarcodeNormalizationStats gexNormStats;
+                // Pass known source namespace (soloOutputNamespace) to avoid
+                // overlap collisions when COL1/COL2 sets share barcodes.
+                filteredGexBarcodes =
+                    normalizeFilteredBarcodesForAssignNamespace(
+                        filteredGexBarcodes, gexWhitelistSet, gexNormStats,
+                        gexNormalizationChem, gexWhitelistNamespace);
+                P.inOut->logMain
+                    << "NOTICE: gex filtered-barcode normalization from Solo"
+                    << " sourceNS=" << gexNormalizationChem
+                    << " whitelistNS=" << gexWhitelistNamespace
+                    << " in_set=" << gexNormStats.inSet
+                    << " translated_to_set=" << gexNormStats.translatedToSet
+                    << " unmatched=" << gexNormStats.unmatched
+                    << " dedup_dropped=" << gexNormStats.dedupDropped
+                    << " output=" << gexNormStats.outputCount
+                    << "\n";
+                // After deterministic normalization, barcodes are in gexWhitelistNamespace
+                normalizeBarcodeVecToTru(filteredGexBarcodes, gexWhitelistNamespace);
+            } else {
+                // No whitelist or unknown namespace; normalize directly from soloOutputNamespace
+                normalizeBarcodeVecToTru(filteredGexBarcodes, gexNormalizationChem);
+            }
             useFilteredGex = true;
             P.inOut->logMain << "NOTICE: Using GEX filtered barcodes from Solo "
-                             << "(read-space, normalized to TRU, in-memory)\n";
+                             << "(normalized to TRU, in-memory)\n";
         }
 
         // Read raw GEX MEX (required for raw_feature_bc_matrix)
@@ -2117,16 +2665,17 @@ int processPfMultiConfig(Parameters& P,
         // Each source may be NXT or TRU depending on its whitelist; normalizing
         // here ensures cross-library barcode joins and output are in a single
         // canonical namespace (TRU) regardless of per-library chemistry.
-        normalizeMexBarcodesToTru(gexData, effectiveChem);
-        normalizeMexBarcodesToTru(gexRawData, effectiveChem);
+        normalizeMexBarcodesToTru(gexData, gexNormalizationChem);
+        normalizeMexBarcodesToTru(gexRawData, gexNormalizationChem);
         if (loadedFilteredMex) {
-            normalizeMexBarcodesToTru(gexFilteredData, effectiveChem);
+            normalizeMexBarcodesToTru(gexFilteredData, gexNormalizationChem);
         }
         for (auto& entry : featureMexEntries) {
-            normalizeMexBarcodesToTru(entry.data, entry.effectiveChem);
+            normalizeMexBarcodesToTru(entry.data, entry.featureMexOutputNamespace);
         }
         P.inOut->logMain << "Barcode namespace: all inputs normalized to TRU before merge"
-                         << " (GEX effectiveChem=" << effectiveChem
+                         << " (GEX soloOutputNS=" << gexNormalizationChem
+                         << ", whitelistNS=" << gexWhitelistNamespace
                          << ", outputChem=" << outputChem << ")\n";
 
         // Merge MEX files (all inputs now in TRU namespace)
@@ -2136,6 +2685,7 @@ int processPfMultiConfig(Parameters& P,
             featureDataVec.push_back(std::move(entry.data));
         }
         PfMultiMerge::MexData mergedData = PfMultiMerge::mergeMex(gexData, featureDataVec);
+        enforceUniqueBarcodesOrThrow(mergedData.barcodes, "merged MEX barcode list");
 
         // Log merged feature type breakdown
         {
@@ -2189,6 +2739,8 @@ int processPfMultiConfig(Parameters& P,
             filteredGexBarcodes = observedRawGexBarcodes;
             P.inOut->logMain << "WARNING: Filtered GEX barcodes not available, using observed raw GEX barcodes for filtered output\n";
         }
+        enforceUniqueBarcodesOrThrow(observedRawGexBarcodes, "observed raw GEX barcode list");
+        enforceUniqueBarcodesOrThrow(filteredGexBarcodes, "filtered GEX barcode list");
         
         // Write raw_feature_bc_matrix — merged barcodes are in TRU;
         // outputChem controls the final namespace (default TRU, --crOutputChemistry NXT reverses).

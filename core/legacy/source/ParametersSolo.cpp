@@ -103,6 +103,23 @@ void ParametersSolo::initialize(Parameters *pPin)
     }
     
     //////////////////////////////////////////////////////////////////////////////////////////////////////
+    ///////////////////////////////--soloEmptyDropsLegacyKnee
+    {
+        string mode = emptyDropsLegacyKneeStr;
+        transform(mode.begin(), mode.end(), mode.begin(), ::tolower);
+        if (mode == "yes") {
+            emptyDropsLegacyKnee = true;
+        } else if (mode == "no" || mode.empty()) {
+            emptyDropsLegacyKnee = false;
+        } else {
+            ostringstream errOut;
+            errOut << "EXITING because of fatal PARAMETERS error: unrecognized option in --soloEmptyDropsLegacyKnee=" << emptyDropsLegacyKneeStr << "\n";
+            errOut << "SOLUTION: use allowed option: yes OR no\n";
+            exitWithError(errOut.str(), std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
+        }
+    }
+
+    //////////////////////////////////////////////////////////////////////////////////////////////////////
     ///////////////////////////////--soloEmptyDropsMode
     {
         string mode = emptyDropsModeStr;

@@ -6,6 +6,7 @@
 #include <sstream>
 #include <iostream>
 #include <vector>
+#include <algorithm>
 #include <cctype>
 #include <sys/stat.h>
 #include <stdexcept>
@@ -68,6 +69,36 @@ static bool looksLikeMultiColumnWhitelist(const string& whitelistPath) {
     return false;
 }
 
+static string upperCopy(string value) {
+    std::transform(value.begin(), value.end(), value.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+    return value;
+}
+
+static bool pathContainsToken(const string& path, const string& token) {
+    const string up = upperCopy(path);
+    return up.find(token) != string::npos;
+}
+
+static char complementBase(char base) {
+    switch (std::toupper(static_cast<unsigned char>(base))) {
+        case 'A': return 'T';
+        case 'T': return 'A';
+        case 'C': return 'G';
+        case 'G': return 'C';
+        default: return static_cast<char>(std::toupper(static_cast<unsigned char>(base)));
+    }
+}
+
+static string translateNxtMiddleTwoBases(string barcode) {
+    barcode = upperCopy(barcode);
+    if (barcode.size() >= 9) {
+        barcode[7] = complementBase(barcode[7]);
+        barcode[8] = complementBase(barcode[8]);
+    }
+    return barcode;
+}
+
 static bool isValidBarcodeSeq(const string& seq) {
     if (seq.empty()) {
         return false;
@@ -81,24 +112,128 @@ static bool isValidBarcodeSeq(const string& seq) {
     return true;
 }
 
-static string normalizeWhitelistIfNeeded(const string& whitelistPath, const string& assignOut) {
-    if (!looksLikeMultiColumnWhitelist(whitelistPath)) {
-        return whitelistPath;
+static uint64 countValidWhitelistRows(const string& whitelistPath) {
+    std::ifstream in(whitelistPath.c_str());
+    if (!in.is_open()) {
+        return 0;
+    }
+    string line;
+    uint64 count = 0;
+    while (std::getline(in, line)) {
+        size_t first = line.find_first_not_of(" \t\r\n");
+        if (first == string::npos) {
+            continue;
+        }
+        size_t end = line.find_first_of("\t, \r\n", first);
+        string token = (end == string::npos) ? line.substr(first) : line.substr(first, end - first);
+        if (isValidBarcodeSeq(token)) {
+            ++count;
+        }
+    }
+    return count;
+}
+
+static string inferOneColumnNamespace(const string& whitelistPath, bool& confident) {
+    confident = true;
+    if (pathContainsToken(whitelistPath, "NXT")) {
+        return "NXT";
+    }
+    if (pathContainsToken(whitelistPath, "TRU")) {
+        return "TRU";
+    }
+    confident = false;
+    return "UNKNOWN";
+}
+
+static string inferTwoColumnNamespace(const string& whitelistPath, bool& confident) {
+    confident = false;
+    if (pathContainsToken(whitelistPath, "NXT")) {
+        confident = true;
+        return "NXT";
+    }
+    if (pathContainsToken(whitelistPath, "TRU")) {
+        confident = true;
+        return "TRU";
     }
 
     std::ifstream in(whitelistPath.c_str());
     if (!in.is_open()) {
-        return whitelistPath;
-    }
-
-    string normalizedPath = assignOut + "/whitelist.normalized.txt";
-    std::ofstream out(normalizedPath.c_str());
-    if (!out.is_open()) {
-        return whitelistPath;
+        return "UNKNOWN";
     }
 
     string line;
-    size_t emitted = 0;
+    uint64 sampled = 0;
+    uint64 twoCol = 0;
+    uint64 matchedRule = 0;
+    const uint64 kMaxSample = 10000;
+    while (sampled < kMaxSample && std::getline(in, line)) {
+        size_t first = line.find_first_not_of(" \t\r\n");
+        if (first == string::npos) {
+            continue;
+        }
+        sampled++;
+
+        size_t delim1 = line.find_first_of("\t, \r\n", first);
+        if (delim1 == string::npos) {
+            continue;
+        }
+        string col1 = line.substr(first, delim1 - first);
+        size_t second = line.find_first_not_of("\t, \r\n", delim1);
+        if (second == string::npos) {
+            continue;
+        }
+        size_t delim2 = line.find_first_of("\t, \r\n", second);
+        string col2 = (delim2 == string::npos) ? line.substr(second)
+                                               : line.substr(second, delim2 - second);
+        if (!isValidBarcodeSeq(col1) || !isValidBarcodeSeq(col2)) {
+            continue;
+        }
+        twoCol++;
+        if (translateNxtMiddleTwoBases(col1) == upperCopy(col2)) {
+            matchedRule++;
+        }
+    }
+
+    if (twoCol > 0) {
+        const double frac = static_cast<double>(matchedRule) / static_cast<double>(twoCol);
+        if (frac >= 0.80) {
+            // Complement rule is symmetric (translate(A)==B iff translate(B)==A),
+            // so content alone cannot distinguish COL1=NXT from COL1=TRU.
+            // Without filename confirmation, keep confident=false.
+            return "NXT";
+        }
+    }
+    return "UNKNOWN";
+}
+
+static WhitelistNormalizationResult normalizeWhitelistInternal(const string& whitelistPath,
+                                                               const string& assignOut) {
+    WhitelistNormalizationResult result;
+    result.sourcePath = whitelistPath;
+    result.normalizedPath = whitelistPath;
+
+    if (!looksLikeMultiColumnWhitelist(whitelistPath)) {
+        result.assignmentNamespace = inferOneColumnNamespace(whitelistPath, result.namespaceConfidence);
+        result.normalizedRowCount = countValidWhitelistRows(whitelistPath);
+        return result;
+    }
+
+    result.hasTwoColumnSource = true;
+    result.assignmentNamespace = inferTwoColumnNamespace(whitelistPath, result.namespaceConfidence);
+
+    std::ifstream in(whitelistPath.c_str());
+    if (!in.is_open()) {
+        return result;
+    }
+
+    const string normalizedPath = assignOut + "/whitelist.normalized.txt";
+    std::ofstream out(normalizedPath.c_str());
+    if (!out.is_open()) {
+        return result;
+    }
+
+    string line;
+    uint64 emitted = 0;
     while (std::getline(in, line)) {
         size_t first = line.find_first_not_of(" \t\r\n");
         if (first == string::npos) {
@@ -114,9 +249,11 @@ static string normalizeWhitelistIfNeeded(const string& whitelistPath, const stri
     }
 
     if (emitted == 0) {
-        return whitelistPath;
+        return result;
     }
-    return normalizedPath;
+    result.normalizedPath = normalizedPath;
+    result.normalizedRowCount = emitted;
+    return result;
 }
 
 static string pfErrorCodeString(pf_error err) {
@@ -204,7 +341,7 @@ static string pfErrorMessage(pf_context* ctx, pf_error err, const string& stage)
 }
 
 static void writeApiRunSummary(const string& assignOut,
-                               const string& whitelistPath,
+                               const WhitelistNormalizationResult& whitelistInfo,
                                const string& featureRef,
                                const string& fastqDir,
                                const AssignOptions& options,
@@ -217,7 +354,12 @@ static void writeApiRunSummary(const string& assignOut,
     }
 
     out << "mode=in_process_pf_api\n";
-    out << "whitelist=" << whitelistPath << "\n";
+    out << "whitelist=" << whitelistInfo.normalizedPath << "\n";
+    out << "whitelist_source=" << whitelistInfo.sourcePath << "\n";
+    out << "whitelist_has_two_columns=" << (whitelistInfo.hasTwoColumnSource ? 1 : 0) << "\n";
+    out << "whitelist_assignment_namespace=" << whitelistInfo.assignmentNamespace << "\n";
+    out << "whitelist_namespace_confidence=" << (whitelistInfo.namespaceConfidence ? 1 : 0) << "\n";
+    out << "whitelist_normalized_rows=" << whitelistInfo.normalizedRowCount << "\n";
     out << "feature_ref=" << featureRef << "\n";
     out << "fastq_dir=" << fastqDir << "\n";
     out << "maxHammingDistance=" << options.maxHammingDistance << "\n";
@@ -298,6 +440,11 @@ static void writeApiRunSummary(const string& assignOut,
 
 } // namespace
 
+WhitelistNormalizationResult normalizeWhitelistForAssign(const string& whitelistPath,
+                                                         const string& assignOut) {
+    return normalizeWhitelistInternal(whitelistPath, assignOut);
+}
+
 AssignResult runAssignBarcodes(const string& whitelist,
                      const string& featureRef, const string& fastqDir,
                      const string& assignOut,
@@ -328,7 +475,8 @@ AssignResult runAssignBarcodes(const string& whitelist,
         throw runtime_error(err.str());
     }
 
-    string whitelistForAssign = normalizeWhitelistIfNeeded(whitelist, assignOut);
+    WhitelistNormalizationResult whitelistInfo = normalizeWhitelistInternal(whitelist, assignOut);
+    const string whitelistForAssign = whitelistInfo.normalizedPath;
 
     pf_config* cfg = pf_config_create();
     if (cfg == nullptr) {
@@ -390,7 +538,7 @@ AssignResult runAssignBarcodes(const string& whitelist,
 
     writeApiRunSummary(
         assignOut,
-        whitelistForAssign,
+        whitelistInfo,
         featureRef,
         fastqDir,
         options,
@@ -401,6 +549,7 @@ AssignResult runAssignBarcodes(const string& whitelist,
 
     AssignResult result;
     result.returnCode = 0;
+    result.whitelistNormalization = whitelistInfo;
     if (options.autodetectChemistry) {
         const char* mode = pf_get_detected_match_mode(ctx);
         result.detectedMatchMode = (mode != nullptr) ? mode : "UNKNOWN";
