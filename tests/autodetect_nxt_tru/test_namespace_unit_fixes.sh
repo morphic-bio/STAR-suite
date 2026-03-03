@@ -47,6 +47,12 @@ AAAAAAAAAAAAAAAA	AAAAAAATTAAAAAAA
 CCCCCCCCCCCCCCCC	CCCCCCCGGCCCCCCC
 EOF
 
+# TRU-first 2-column: col1=TRU, col2=NXT (swapped from standard NXT-first)
+cat > "${WORK_DIR}/wl_tru_2col.txt" << 'EOF'
+AAAAAAATTAAAAAAA	AAAAAAAAAAAAAAAA
+CCCCCCCGGCCCCCCC	CCCCCCCCCCCCCCCC
+EOF
+
 cat > "${WORK_DIR}/assign_wl.txt" << 'EOF'
 AAAAAAAAAAAAAAAA
 CCCCCCCCCCCCCCCC
@@ -70,8 +76,8 @@ static int assert_true(bool cond, const std::string& msg) {
 }
 
 int main(int argc, char** argv) {
-    if (argc != 5) {
-        std::cerr << "usage: test_pf_multi_helpers <unknown_wl> <nxt_2col_wl> <assign_wl> <ambiguous_2col_wl>\n";
+    if (argc != 6) {
+        std::cerr << "usage: test_pf_multi_helpers <unknown_wl> <nxt_2col_wl> <assign_wl> <ambiguous_2col_wl> <tru_2col_wl>\n";
         return 2;
     }
 
@@ -89,14 +95,26 @@ int main(int argc, char** argv) {
     rc |= assert_true(chem == "NXT", "2-column whitelist with 'nxt' filename should resolve to NXT");
     rc |= assert_true(confident, "2-column whitelist with 'nxt' filename should be confident");
 
-    // Ambiguous 2-column: complement rule matches but no filename hint
+    // Ambiguous 2-column: complement rule matches but no filename hint → UNKNOWN (fail-fast)
     reason.clear();
     confident = true;
     chem = detectChemistryFromWhitelistPath(argv[4], reason, confident);
-    rc |= assert_true(chem == "NXT", "ambiguous 2-col should still resolve to NXT");
+    rc |= assert_true(chem == "UNKNOWN", "ambiguous 2-col must resolve to UNKNOWN (fail-fast)");
     rc |= assert_true(!confident, "ambiguous 2-col (no filename hint) should be non-confident");
-    rc |= assert_true(reason.find("WARNING") != std::string::npos,
-                      "ambiguous 2-col reason should contain WARNING");
+    rc |= assert_true(reason.find("ERROR") != std::string::npos,
+                      "ambiguous 2-col reason should contain ERROR");
+
+    // TRU-first 2-column: filename has 'tru' → should resolve to TRU
+    reason.clear();
+    confident = false;
+    chem = detectChemistryFromWhitelistPath(argv[5], reason, confident);
+    rc |= assert_true(chem == "TRU", "TRU-first whitelist with 'tru' filename should resolve to TRU");
+    rc |= assert_true(confident, "TRU-first whitelist with 'tru' filename should be confident");
+
+    // Verify oppositeNamespace works both ways
+    rc |= assert_true(oppositeNamespace("NXT") == "TRU", "oppositeNamespace(NXT) should be TRU");
+    rc |= assert_true(oppositeNamespace("TRU") == "NXT", "oppositeNamespace(TRU) should be NXT");
+    rc |= assert_true(oppositeNamespace("UNKNOWN") == "UNKNOWN", "oppositeNamespace(UNKNOWN) should be UNKNOWN");
 
     std::unordered_set<std::string> whitelistSet;
     uint64_t rowsRead = 0;
@@ -137,7 +155,7 @@ g++ -std=c++11 -O2 -fopenmp -ffunction-sections -fdata-sections \
     -lpthread -lz -lstdc++ -lhts -lglib-2.0 \
     -o "${WORK_DIR}/test_pf_multi_helpers"
 
-if "${WORK_DIR}/test_pf_multi_helpers" "${WORK_DIR}/wl_unknown.txt" "${WORK_DIR}/wl_nxt_2col.txt" "${WORK_DIR}/assign_wl.txt" "${WORK_DIR}/wl_custom_2col.txt"; then
+if "${WORK_DIR}/test_pf_multi_helpers" "${WORK_DIR}/wl_unknown.txt" "${WORK_DIR}/wl_nxt_2col.txt" "${WORK_DIR}/assign_wl.txt" "${WORK_DIR}/wl_custom_2col.txt" "${WORK_DIR}/wl_tru_2col.txt"; then
     pass "PfMultiProcess helper behavior"
 else
     fail "PfMultiProcess helper behavior"
@@ -195,10 +213,10 @@ int main(int argc, char** argv) {
     rc |= assert_true(one.normalizedRowCount == 2, "one-column normalizedRowCount should be 2");
     rc |= assert_true(one.normalizedPath == std::string(argv[2]), "one-column normalized path should stay source path");
 
-    // Ambiguous 2-column: complement rule matches but no filename hint
+    // Ambiguous 2-column: complement rule matches but no filename hint → UNKNOWN
     auto ambig = PfMultiAssign::normalizeWhitelistForAssign(argv[4], argv[3]);
     rc |= assert_true(ambig.hasTwoColumnSource, "ambiguous 2-col must set hasTwoColumnSource");
-    rc |= assert_true(ambig.assignmentNamespace == "NXT", "ambiguous 2-col must still infer NXT");
+    rc |= assert_true(ambig.assignmentNamespace == "UNKNOWN", "ambiguous 2-col must resolve to UNKNOWN (fail-fast)");
     rc |= assert_true(!ambig.namespaceConfidence,
                       "ambiguous 2-col (no filename hint) must be non-confident");
     rc |= assert_true(ambig.normalizedRowCount == 2, "ambiguous 2-col normalizedRowCount should be 2");

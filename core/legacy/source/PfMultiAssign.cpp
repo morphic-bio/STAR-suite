@@ -199,8 +199,8 @@ static string inferTwoColumnNamespace(const string& whitelistPath, bool& confide
         if (frac >= 0.80) {
             // Complement rule is symmetric (translate(A)==B iff translate(B)==A),
             // so content alone cannot distinguish COL1=NXT from COL1=TRU.
-            // Without filename confirmation, keep confident=false.
-            return "NXT";
+            // Return UNKNOWN to force explicit --crChemistry override.
+            return "UNKNOWN";
         }
     }
     return "UNKNOWN";

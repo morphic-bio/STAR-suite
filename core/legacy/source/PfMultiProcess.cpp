@@ -329,10 +329,10 @@ static string detectChemistryFromWhitelistPath(const string& whitelistPath, stri
     // cannot distinguish COL1=NXT from COL1=TRU orientation.
     if (complementRuleMatched) {
         reason = complementRuleReason
-            + "; WARNING: no filename hint to confirm NXT orientation"
-              " — assuming standard COL1=NXT convention";
+            + "; ERROR: no filename hint to confirm NXT/TRU orientation"
+              " — cannot determine column order from content alone";
         confident = false;
-        return "NXT";
+        return "UNKNOWN";
     }
 
     reason = "no chemistry marker found in whitelist content or filename";
@@ -354,14 +354,16 @@ static bool whitelistHasTwoColumns(const string& whitelistPath) {
     std::ifstream in(whitelistPath.c_str());
     if (!in.is_open()) return false;
     string line;
-    while (std::getline(in, line)) {
+    const int maxProbe = 20; // scan up to 20 non-comment lines before giving up
+    int probed = 0;
+    while (std::getline(in, line) && probed < maxProbe) {
         string trimmed = trimCopy(line);
         if (trimmed.empty() || trimmed[0] == '#') continue;
+        probed++;
         vector<string> fields = splitWhitelistColumns(trimmed);
         if (fields.size() >= 2 && isValidBarcodeSeq(fields[0]) && isValidBarcodeSeq(fields[1])) {
             return true;
         }
-        return false;
     }
     return false;
 }
@@ -1207,22 +1209,19 @@ static PfMultiPreparedContext buildPfMultiPreparedContext(const PfMultiPreloadIn
             + context.whitelist +
             ". Provide explicit --crChemistry NXT|TRU or set per-library star_chemistry.");
     }
-    if (!context.inferredChemConfident && isKnownNamespace(context.effectiveChem)
-            && context.requestedChem == "auto") {
+    if (!context.inferredChemConfident && isKnownNamespace(context.effectiveChem)) {
         prepLog
-            << "WARNING: whitelist chemistry '" << context.effectiveChem
-            << "' inferred with LOW CONFIDENCE (" << context.inferredReason
-            << "). Column order may be ambiguous for 2-column whitelists"
-               " without NXT/TRU in the filename."
-               " Provide explicit --crChemistry NXT|TRU if results are unexpected.\n";
+            << "NOTICE: whitelist chemistry '" << context.effectiveChem
+            << "' set via explicit --crChemistry (" << context.inferredReason
+            << "). Content-based auto-detection could not determine orientation.\n";
     }
 
-    // Solo writes barcodes.tsv using cbWLstrOut:
-    //   2-column NXT whitelist → cbWLstrOut = COL2 (TRU)
-    //   1-column whitelist     → cbWLstrOut = cbWLstr (same as effectiveChem)
+    // Solo writes barcodes.tsv using cbWLstrOut (COL2 for 2-column whitelists).
+    // effectiveChem represents COL1 (matching namespace), so the output namespace
+    // is the opposite for 2-column files, regardless of NXT-first vs TRU-first.
     context.hasTwoColumnWhitelist = whitelistHasTwoColumns(context.whitelist);
-    if (context.hasTwoColumnWhitelist && context.effectiveChem == "NXT") {
-        context.soloOutputNamespace = "TRU";
+    if (context.hasTwoColumnWhitelist && isKnownNamespace(context.effectiveChem)) {
+        context.soloOutputNamespace = oppositeNamespace(context.effectiveChem);
     } else {
         context.soloOutputNamespace = context.effectiveChem;
     }
@@ -1264,8 +1263,8 @@ static PfMultiPreparedContext buildPfMultiPreparedContext(const PfMultiPreloadIn
                 }
                 context.inferredChemConfident = true;
                 // Recompute soloOutputNamespace after override
-                if (context.hasTwoColumnWhitelist && context.effectiveChem == "NXT") {
-                    context.soloOutputNamespace = "TRU";
+                if (context.hasTwoColumnWhitelist && isKnownNamespace(context.effectiveChem)) {
+                    context.soloOutputNamespace = oppositeNamespace(context.effectiveChem);
                 } else {
                     context.soloOutputNamespace = context.effectiveChem;
                 }
