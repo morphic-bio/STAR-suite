@@ -11,6 +11,15 @@
 
 namespace PfMultiAssign {
 
+struct WhitelistNormalizationResult {
+    string normalizedPath;
+    bool hasTwoColumnSource = false;
+    string assignmentNamespace = "UNKNOWN"; // NXT | TRU | UNKNOWN
+    string sourcePath;
+    uint64 normalizedRowCount = 0;
+    bool namespaceConfidence = false;
+};
+
 struct AssignOptions {
     int maxHammingDistance = -1;
     int featureConstantOffset = -1;
@@ -35,7 +44,17 @@ struct AssignOptions {
 struct AssignResult {
     int returnCode = 0;
     string detectedMatchMode = "UNKNOWN";
+    WhitelistNormalizationResult whitelistNormalization;
 };
+
+/**
+ * @brief Normalize assignment whitelist and infer assignment namespace metadata.
+ *
+ * For 2-column translation lists, this writes column-1 barcodes to a normalized
+ * whitelist file in assignOut and reports assignment namespace metadata.
+ */
+WhitelistNormalizationResult normalizeWhitelistForAssign(const string& whitelistPath,
+                                                         const string& assignOut);
 
 /**
  * @brief Run assignBarcodes for a feature library
