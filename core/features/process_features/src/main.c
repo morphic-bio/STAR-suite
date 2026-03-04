@@ -3,6 +3,7 @@
 #include "../include/prototypes.h"
 #include "../include/utils.h"
 #include "../include/io.h"
+#include "../include/pf_api.h"
 #include <stdio.h>
 
 static void print_usage(const char *prog){
@@ -28,8 +29,15 @@ static void print_usage(const char *prog){
     fprintf(stderr, "  -u, --umi_length        <int>     Length of UMI (default 12)\n");
     fprintf(stderr, "  -o, --feature_constant_offset <int> Global feature offset (default: auto-detect from pattern column)\n");
     fprintf(stderr, "  -B, --barcode_constant_offset <int> Start position of barcode and UMI (default 0)\n");
-    fprintf(stderr, "      --limit_search      <int>     Limit feature search to N bases around offset (-1 = entire read)\n");
-    fprintf(stderr, "      --feature_limited_fallback <full|simple> Fallback matcher for limited search (default: full)\n");
+    fprintf(stderr, "      --limit_search      <int>     Hard bound: search only within N bases of offset (-1 = entire read).\n");
+    fprintf(stderr, "                                    No global fallback outside the window is performed.\n");
+    fprintf(stderr, "      --feature_limited_mode <in_window_full|in_window_simple>\n");
+    fprintf(stderr, "                                    In-window matcher when --limit_search >= 0 (default: in_window_full).\n");
+    fprintf(stderr, "                                    Matching is strictly confined to the search window.\n");
+    fprintf(stderr, "      --feature_limited_fallback    (deprecated alias for --feature_limited_mode; accepts full/simple)\n");
+    fprintf(stderr, "      --feature_prehash_max_hamming <int> Build feature prehash up to this distance (0-2, default 2)\n");
+    fprintf(stderr, "      --feature_prehash_max_entries <int> Entry budget for feature prehash build (default 50000000)\n");
+    fprintf(stderr, "      --feature_prehash_memory_budget <bytes> Memory budget for prehash (0 = auto-detect, default 0)\n");
     fprintf(stderr, "      --force_individual_offsets    Use per-feature offsets from pattern column (slower for large sets)\n");
     fprintf(stderr, "      --use_feature_offset_array    (alias for --force_individual_offsets)\n");
     fprintf(stderr, "      --strict-offset-check         Error (instead of warn) on heterogeneous feature offsets\n");
@@ -64,19 +72,28 @@ static void print_usage(const char *prog){
     fprintf(stderr, "      --emptydrops_failure_fatal    Treat EmptyDrops failure as error\n\n");
     fprintf(stderr, "      --emptydrops_use_fdr          Use FDR gate for tail rescue (default: raw p-value)\n\n");
 
-    fprintf(stderr, "Miscellaneous:\n");
+    fprintf(stderr, "Namespace & Compatibility:\n");
     fprintf(stderr, "      --translate_NXT               Complement positions 8 and 9 of cell barcodes at output/filter stages\n");
+    fprintf(stderr, "      --source_namespace <NXT|TRU>  Namespace of filtered barcode file (required with --filtered_barcodes)\n");
+    fprintf(stderr, "      --target_namespace <NXT|TRU>  Namespace of assignment output (required with --filtered_barcodes)\n");
+    fprintf(stderr, "      --allow_union_whitelist       Accept mixed NXT+TRU whitelist/filtered barcode files.\n");
+    fprintf(stderr, "                                    Expands filtered barcodes at ingress so both namespace forms\n");
+    fprintf(stderr, "                                    are present. Legacy compat for raw 3M-february-2018.txt.\n\n");
+
+    fprintf(stderr, "Miscellaneous:\n");
     fprintf(stderr, "  -v, --debug                       Enable verbose debug output\n");
     fprintf(stderr, "  -h, --help                        Show this help and exit\n\n");
 }
 
-static int parse_feature_limited_fallback_mode(const char *value, int *mode_out) {
+static int parse_feature_limited_mode(const char *value, int *mode_out) {
     if (!value || !mode_out) return 0;
-    if (strcmp(value, "full") == 0 || strcmp(value, "0") == 0) {
+    if (strcmp(value, "in_window_full") == 0 ||
+        strcmp(value, "full") == 0 || strcmp(value, "0") == 0) {
         *mode_out = 0;
         return 1;
     }
-    if (strcmp(value, "simple") == 0 || strcmp(value, "1") == 0) {
+    if (strcmp(value, "in_window_simple") == 0 ||
+        strcmp(value, "simple") == 0 || strcmp(value, "1") == 0) {
         *mode_out = 1;
         return 1;
     }
@@ -90,7 +107,6 @@ int main(int argc, char *argv[])
     initcode2seq();
     initdiff2hamming(diff2Hamming);
     initialize_complement();
-    feature_code_hash = kh_init(codeu32);
     feature_arrays *features=0;
     int reverse_complement_whitelist=0;
     char *barcodeFastqFilesString=0;
@@ -124,6 +140,9 @@ int main(int argc, char *argv[])
     int autodetect_chemistry_cli=0;
     int autodetect_chemistry_reads_cli=10000;
     int autodetect_chemistry_min_hits_cli=50;
+    int allow_union_whitelist_cli=0;
+    pf_namespace_t source_namespace_cli = PF_NS_UNKNOWN;
+    pf_namespace_t target_namespace_cli = PF_NS_UNKNOWN;
 
     int max_concurrent_processes=8;
     int consumer_threads_per_set=1;
@@ -180,7 +199,11 @@ int main(int argc, char *argv[])
         {"reverse_fastq_pattern", required_argument, 0, 8},
         {"max_reads", required_argument, 0, 9},
         {"limit_search", required_argument, 0, 10},
+        {"feature_limited_mode", required_argument, 0, 35},
         {"feature_limited_fallback", required_argument, 0, 11},
+        {"feature_prehash_max_hamming", required_argument, 0, 33},
+        {"feature_prehash_max_entries", required_argument, 0, 34},
+        {"feature_prehash_memory_budget", required_argument, 0, 39},
         {"use_feature_offset_array", no_argument, 0, 22},
         {"force_individual_offsets", no_argument, 0, 22},  /* alias */
         {"strict-offset-check", no_argument, 0, 26},
@@ -200,6 +223,12 @@ int main(int argc, char *argv[])
         {"emptydrops_failure_fatal", no_argument, 0, 20},
         {"emptydrops_use_fdr", no_argument, 0, 21},
         {"emptydrops-use-fdr", no_argument, 0, 21},  /* alias */
+        {"allow_union_whitelist", no_argument, 0, 36},
+        {"allow-union-whitelist", no_argument, 0, 36},  /* alias */
+        {"source_namespace", required_argument, 0, 37},
+        {"source-namespace", required_argument, 0, 37},
+        {"target_namespace", required_argument, 0, 38},
+        {"target-namespace", required_argument, 0, 38},
         {"help", no_argument, 0, 'h'},
         {0, 0, 0, 0}
     };
@@ -265,11 +294,32 @@ int main(int argc, char *argv[])
             case 8: strcpy(reverse_pattern, optarg); break;
             case 9: max_reads=atoll(optarg); break;
             case 10: limit_search = atoi(optarg); break;
+            case 35:
+                if (!parse_feature_limited_mode(optarg, &feature_limited_fallback_mode_cli)) {
+                    fprintf(stderr, "Error: --feature_limited_mode must be one of: in_window_full, in_window_simple, full, simple, 0, 1\n");
+                    return 1;
+                }
+                break;
             case 11:
-                if (!parse_feature_limited_fallback_mode(optarg, &feature_limited_fallback_mode_cli)) {
+                fprintf(stderr,
+                    "WARNING: --feature_limited_fallback is a deprecated alias for --feature_limited_mode.\n"
+                    "         Behavior is in-window only; --limit_search is a hard bound (no out-of-window rescue).\n"
+                    "         Please migrate to --feature_limited_mode <in_window_full|in_window_simple>.\n");
+                if (!parse_feature_limited_mode(optarg, &feature_limited_fallback_mode_cli)) {
                     fprintf(stderr, "Error: --feature_limited_fallback must be one of: full, simple, 0, 1\n");
                     return 1;
                 }
+                break;
+            case 33:
+                feature_prehash_max_hamming = atoi(optarg);
+                if (feature_prehash_max_hamming < 0) feature_prehash_max_hamming = 0;
+                if (feature_prehash_max_hamming > 2) feature_prehash_max_hamming = 2;
+                break;
+            case 34:
+                feature_prehash_max_entries = strtoull(optarg, NULL, 10);
+                break;
+            case 39:
+                feature_prehash_memory_budget = strtoull(optarg, NULL, 10);
                 break;
             case 22: use_feature_offset_array_cli = 1; break;
             case 26: strict_offset_check_cli = 1; break;
@@ -287,6 +337,21 @@ int main(int argc, char *argv[])
             case 19: emptydrops_expected_cells = atoi(optarg); break;
             case 20: emptydrops_failure_fatal = 1; break;
             case 21: emptydrops_use_fdr = 1; break;
+            case 36: allow_union_whitelist_cli = 1; break;
+            case 37:
+                source_namespace_cli = pf_namespace_from_string(optarg);
+                if (source_namespace_cli != PF_NS_NXT && source_namespace_cli != PF_NS_TRU) {
+                    fprintf(stderr, "ERROR: --source_namespace must be NXT or TRU (got '%s')\n", optarg);
+                    return EXIT_FAILURE;
+                }
+                break;
+            case 38:
+                target_namespace_cli = pf_namespace_from_string(optarg);
+                if (target_namespace_cli != PF_NS_NXT && target_namespace_cli != PF_NS_TRU) {
+                    fprintf(stderr, "ERROR: --target_namespace must be NXT or TRU (got '%s')\n", optarg);
+                    return EXIT_FAILURE;
+                }
+                break;
             case 'h': print_usage(argv[0]); return 0;
             default: print_usage(argv[0]); return 1;
         }
@@ -318,6 +383,13 @@ int main(int argc, char *argv[])
         }
     }
     feature_limited_fallback_mode = feature_limited_fallback_mode_cli;
+    if (feature_prehash_memory_budget == 0) {
+        feature_prehash_memory_budget = prehash_detect_memory_budget();
+    }
+    fprintf(stderr, "Feature prehash policy: max_hamming=%d max_entries=%llu memory_budget=%lluGB\n",
+            feature_prehash_max_hamming,
+            (unsigned long long)feature_prehash_max_entries,
+            feature_prehash_memory_budget ? (unsigned long long)(feature_prehash_memory_budget / (1024ULL*1024ULL*1024ULL)) : 0ULL);
     
     /* Feature offset preflight detection */
     if (use_feature_offset_array_cli && feature_constant_offset_explicit) {
@@ -427,6 +499,61 @@ int main(int argc, char *argv[])
         if (filtered_barcodes_found) {
             filtered_barcodes_hash = kh_init(strptr);
             read_barcodes_into_hash(filtered_barcodes_filename, filtered_barcodes_hash);
+
+            /* Ingress namespace normalization */
+            if ((source_namespace_cli == PF_NS_NXT || source_namespace_cli == PF_NS_TRU) &&
+                (target_namespace_cli == PF_NS_NXT || target_namespace_cli == PF_NS_TRU) &&
+                source_namespace_cli != target_namespace_cli &&
+                !allow_union_whitelist_cli) {
+                int rc = pf_normalize_hash_namespace(filtered_barcodes_hash);
+                if (rc < 0) {
+                    fprintf(stderr,
+                        "ERROR: Failed to normalize filtered barcodes from %s to %s "
+                        "(memory allocation error). Aborting.\n",
+                        pf_namespace_to_string(source_namespace_cli),
+                        pf_namespace_to_string(target_namespace_cli));
+                    return EXIT_FAILURE;
+                }
+                fprintf(stderr,
+                    "NOTICE: Normalized %d filtered barcodes from %s to %s namespace.\n",
+                    rc, pf_namespace_to_string(source_namespace_cli),
+                    pf_namespace_to_string(target_namespace_cli));
+            }
+
+            if (allow_union_whitelist_cli) {
+                int added = expand_hash_union_namespace(filtered_barcodes_hash);
+                if (added < 0) {
+                    fprintf(stderr,
+                        "ERROR: --allow_union_whitelist expansion failed "
+                        "(memory allocation error). Aborting.\n");
+                    return EXIT_FAILURE;
+                }
+                if (added > 0) {
+                    fprintf(stderr,
+                        "WARNING: --allow_union_whitelist active. Expanded filtered barcodes "
+                        "with %d NXT/TRU translations (total %u).\n"
+                        "         This is legacy compat for union whitelists. "
+                        "Migrate to namespace-split files for new workflows.\n",
+                        added, kh_size(filtered_barcodes_hash));
+                }
+            }
+
+            if (!allow_union_whitelist_cli) {
+                int src_known = (source_namespace_cli == PF_NS_NXT || source_namespace_cli == PF_NS_TRU);
+                int tgt_known = (target_namespace_cli == PF_NS_NXT || target_namespace_cli == PF_NS_TRU);
+                if (!src_known || !tgt_known) {
+                    fprintf(stderr,
+                        "ERROR: Filtered barcodes loaded with incomplete namespace "
+                        "metadata (source=%s, target=%s) and without "
+                        "--allow_union_whitelist.  With exact-only matching, "
+                        "a namespace mismatch will silently drop barcodes.\n"
+                        "  Set both --source_namespace and --target_namespace, "
+                        "or use --allow_union_whitelist.\n",
+                        pf_namespace_to_string(source_namespace_cli),
+                        pf_namespace_to_string(target_namespace_cli));
+                    return EXIT_FAILURE;
+                }
+            }
         }
     }
     int positional_arg_count = argc - optind;
@@ -617,6 +744,9 @@ int main(int argc, char *argv[])
     if (filtered_barcodes_filename) free(filtered_barcodes_filename);
     if (filtered_barcodes_hash) free_strptr_hash(filtered_barcodes_hash);
     free_feature_arrays(features);
+    /* Hash is now owned by feature_arrays; global alias is stale after free.
+     * Null out global to prevent accidental use-after-free. */
+    feature_code_hash.h64 = NULL;
     free_fastq_files_collection(&fastq_files);
     
     if (any_failed) {

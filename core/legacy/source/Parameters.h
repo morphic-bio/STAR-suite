@@ -629,6 +629,7 @@ class Parameters {
             double crAssignMinPosterior;    // Optional: pass --min_posterior (default: unset)
             int crAssignLegacyCbRescue;     // Optional: pass legacy order-dependent pending CB rescue mode
             string crAssignFilteredBarcodes;// Optional filtered barcode file for assignBarcodes
+            int crAssignAllowUnionWhitelist; // Accept mixed NXT+TRU filtered barcode sets
         } pfMulti;
 
         // Default module flag groups - apply predefined parameter bundles

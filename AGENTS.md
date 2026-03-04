@@ -34,8 +34,16 @@ actionable; link to deeper docs rather than copying them.
 
 ## Build Hygiene
 
-- After switching branches/commits, rebuild STAR from clean state before
-  judging regressions: `make -C core/legacy/source clean && make -C core/legacy/source -j8 STAR`.
+- **MANDATORY before debugging any crash or regression**: always do a clean
+  rebuild first. Stale `.o` files from a previous branch, commit, or partial
+  build are a proven source of false segfaults, conflict-guard trips, and
+  read-id corruption that disappear after a clean build. Do not spend time
+  investigating a failure until you have confirmed it reproduces on a clean
+  binary.
+- Clean rebuild command:
+  `make -C core/legacy/source clean && make -C core/legacy/source -j8 STAR`.
+- This applies after switching branches/commits, cherry-picking, reverting
+  files, or any operation that changes source without rebuilding all objects.
 - This is especially important for Flex/Solo debugging; stale objects can
   produce false segfault/regression signals.
 

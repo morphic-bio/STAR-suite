@@ -233,17 +233,17 @@ extern "C" int scrna_emptydrops_run(
     cerr << "[scrna_api] Simple filter: " << simpleResult.nCellsSimple
          << " cells, threshold=" << simpleResult.retainThreshold << endl;
 
-    // Return OrdMag-only results when sparse data is missing or when there are
-    // too few barcodes for ambient estimation (nCB < indMin).  The latter lets
-    // bootstrap OrdMag improve the knee on shallow data without requiring the
-    // 45K-barcode ambient window that MC tail rescue needs.
+    // Return OrdMag-only results when sparse data is missing.
+    // When bootstrap is enabled, MC tail rescue always proceeds regardless of
+    // barcode count — the OrdMag ambient-window fallback handles small datasets.
+    // The legacy ind_min gate is only active without bootstrap.
     const bool skipMC = (!input->sparse_gene_ids || !input->sparse_counts || !input->sparse_cell_index)
-                     || (input->n_cells <= config->ind_min);
+                     || (!config->use_bootstrap && input->n_cells <= config->ind_min);
     if (skipMC) {
-        if (input->n_cells <= config->ind_min) {
+        if (!config->use_bootstrap && input->n_cells <= config->ind_min) {
             cerr << "[scrna_api] nCells=" << input->n_cells
                  << " <= indMin=" << config->ind_min
-                 << "; returning bootstrap OrdMag result only (no MC tail rescue)" << endl;
+                 << "; returning OrdMag result only (no MC tail rescue; enable bootstrap to override)" << endl;
         } else {
             cerr << "[scrna_api] Using Simple EmptyDrops only (no sparse matrix data)" << endl;
         }

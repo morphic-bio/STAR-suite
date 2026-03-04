@@ -25,7 +25,7 @@ void SoloFeature::emptyDrops_libscrna()
     if (nCB <= pSolo.cellFilter.eDcr.indMin && bootstrapEnabled && !forceUnionMode) {
         P.inOut->logMain << "emptyDrops_CR (libscrna): nCB=" << nCB
                          << " < emptyCellMinIndex=" << pSolo.cellFilter.eDcr.indMin
-                         << "; running bootstrap OrdMag only (no MC tail rescue).\n";
+                         << "; bootstrap mode active — MC tail rescue will proceed with ambient fallback.\n";
     }
 
     time_t rawTime;

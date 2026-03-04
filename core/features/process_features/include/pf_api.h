@@ -38,6 +38,33 @@ typedef void (*pf_permit_release_fn)(
     uint64_t work_ns
 );
 
+/* ============================================================================
+ * Barcode Namespace Types
+ * ============================================================================ */
+
+/**
+ * Barcode namespace identifiers.
+ * NXT and TRU differ by complementation at 0-based positions 7 and 8.
+ * UNION indicates an explicitly opted-in mixed-namespace set (both forms
+ * present in the hash via expand_hash_union_namespace).
+ */
+typedef enum {
+    PF_NS_UNKNOWN = 0,
+    PF_NS_NXT     = 1,
+    PF_NS_TRU     = 2,
+    PF_NS_UNION   = 3,
+} pf_namespace_t;
+
+const char* pf_namespace_to_string(pf_namespace_t ns);
+pf_namespace_t pf_namespace_from_string(const char *s);
+
+/**
+ * Translate a barcode between NXT and TRU namespaces in place.
+ * Complements 0-based positions 7 and 8.  Idempotent: applying twice
+ * yields the original.  No-op if len < 9 or barcode is NULL.
+ */
+void pf_translate_barcode_inplace(char *barcode, size_t len);
+
 /* Error codes */
 typedef enum {
     PF_OK = 0,
@@ -50,6 +77,8 @@ typedef enum {
     PF_ERR_ALREADY_INITIALIZED = -7,
     PF_ERR_OFFSET_CONFLICT = -8,       /* Both global offset and per-feature offsets specified */
     PF_ERR_MULTI_OFFSET_DETECTED = -9, /* Multiple offsets detected, need explicit choice */
+    PF_ERR_ALLOC = -10,                /* Memory allocation failure */
+    PF_ERR_NAMESPACE = -11,            /* Namespace unresolved or ambiguous */
 } pf_error;
 
 /* Statistics structure returned after processing */
@@ -114,8 +143,9 @@ void pf_config_set_permit_hooks(
 void pf_config_set_debug(pf_config *config, int enable);
 void pf_config_set_reverse_complement_whitelist(pf_config *config, int enable);
 void pf_config_set_limit_search(pf_config *config, int limit);
-/* 0=full fallback, 1=simple fallback (limited-search branch only) */
-void pf_config_set_feature_limited_fallback(pf_config *config, int mode);
+/* 0=in_window_full, 1=in_window_simple (limited-search branch only; search is strictly in-window) */
+void pf_config_set_feature_limited_mode(pf_config *config, int mode);
+void pf_config_set_feature_limited_fallback(pf_config *config, int mode); /* deprecated alias */
 void pf_config_set_max_reads(pf_config *config, long long max_reads);
 void pf_config_set_translate_nxt(pf_config *config, int enable);
 void pf_config_set_use_feature_offset_array(pf_config *config, int enable);
@@ -123,6 +153,9 @@ void pf_config_set_strict_offset_check(pf_config *config, int enable);
 void pf_config_set_use_feature_anchor_search(pf_config *config, int enable);
 void pf_config_set_require_feature_anchor_match(pf_config *config, int enable);
 void pf_config_set_feature_mode_bootstrap_reads(pf_config *config, int n_reads);
+
+/* Prehash memory budget (0 = auto-detect from system memory) */
+void pf_config_set_prehash_memory_budget(pf_config *config, unsigned long long budget);
 
 /* EmptyDrops control */
 void pf_config_set_skip_emptydrops(pf_config *config, int enable);
@@ -134,6 +167,36 @@ void pf_config_set_emptydrops_use_fdr(pf_config *config, int enable);
 void pf_config_set_autodetect_chemistry(pf_config *config, int enabled);
 void pf_config_set_autodetect_chemistry_reads(pf_config *config, int n_reads);
 void pf_config_set_autodetect_chemistry_min_hits(pf_config *config, int min_hits);
+
+/**
+ * Allow union (mixed NXT+TRU) whitelists and filtered barcode sets.
+ * When enabled, filtered barcodes are expanded at ingress: each barcode's
+ * NXT/TRU translation is also inserted into the hash so both namespace
+ * forms are available for downstream lookup.  Emits a warning to stderr.
+ *
+ * filtered_barcode_hash_contains() uses exact-only matching (no runtime
+ * translated fallback).  This expansion ensures that union-whitelist
+ * workflows (e.g. raw 3M-february-2018.txt containing both NXT and TRU
+ * forms) continue to work with exact-only matching.  Without this flag,
+ * callers must ensure filtered barcodes are in the same namespace as the
+ * assignment output, either by pre-normalizing the file or by setting
+ * source_namespace and target_namespace so pf_load_filtered_barcodes()
+ * normalizes at ingress.  Using --allow_union_whitelist is the escape
+ * hatch for legacy workflows that do
+ * not regress union-whitelist workflows.
+ *
+ * Default: 0 (no expansion at ingress).
+ */
+void pf_config_set_allow_union_whitelist(pf_config *config, int enable);
+
+/**
+ * Set the source (filtered barcode file) and target (assignment output)
+ * namespaces.  When both are known single-namespace types (NXT or TRU)
+ * and differ, pf_load_filtered_barcodes() normalizes all barcodes to the
+ * target namespace at ingress.  Default: PF_NS_UNKNOWN (no normalization).
+ */
+void pf_config_set_source_namespace(pf_config *config, pf_namespace_t ns);
+void pf_config_set_target_namespace(pf_config *config, pf_namespace_t ns);
 
 /**
  * Get detected barcode match mode after processing.
@@ -257,6 +320,15 @@ const char* pf_get_feature_name(pf_context *ctx, int index);
  * @return Feature sequence, or NULL if invalid index.
  */
 const char* pf_get_feature_sequence(pf_context *ctx, int index);
+
+/**
+ * Query per-feature prehash uniqueness (no_ambiguity) flags.
+ * @param ctx Context handle.
+ * @param level 1 for le1, 2 for le2.
+ * @param index Feature index (0-based).
+ * @return 1 if unique at that level, 0 if ambiguous, -1 on error/not built.
+ */
+int pf_get_feature_no_ambiguity(pf_context *ctx, int level, int index);
 
 /* ============================================================================
  * EmptyDrops Filtering API (via libscrna)

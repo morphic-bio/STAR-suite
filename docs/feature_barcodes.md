@@ -265,3 +265,48 @@ In this example:
 - `star_feature_ref` must point to an existing file (hard error at parse time).
 - `star_library_id` must be unique across all libraries (hard error on duplicates).
 - Missing trailing fields are padded with empty strings (backward compatible).
+
+---
+
+## Per-Library Max Hamming Distance
+
+When running multiple feature libraries with very different sequence lengths
+(e.g., 8-nt gRNA guides vs 40-nt lineage barcodes), a single global Hamming
+distance is suboptimal. `star_max_hamming` lets each library specify its own
+max Hamming distance independently.
+
+### pfMultiConfig Column
+
+| Column | Description |
+|--------|-------------|
+| `star_max_hamming` | Per-library max Hamming distance override. When set, overrides the global `--crAssignMaxHamming` for this library only. Empty or absent = use global. |
+
+**Precedence**: `star_max_hamming` (per-library) > `--crAssignMaxHamming` (CLI flag).
+
+### Example
+
+```csv
+[libraries]
+fastqs,sample,library_type,feature_types,star_chemistry,star_feature_ref,star_library_id,star_max_hamming
+/path/to/mRNA,DE_30KO,Gene Expression,Gene Expression,TRU,,gex_de,
+/path/to/PolyIII,DE_30KO,CRISPR Guide Capture,CRISPR Guide Capture,NXT,/path/to/ref_grna.csv,grna_de,1
+/path/to/LARRY,DE_30KO,Custom,Custom,TRU,/path/to/ref_larry.csv,larry_de,5
+```
+
+In this example:
+- The gRNA library (29 guides, 8 nt) uses Hamming=1, appropriate for short sequences.
+- The LARRY library (245K barcodes, 40 nt) uses Hamming=5, enabling deeper fuzzy matching.
+- The GEX row has no `star_max_hamming`; GEX does not use feature assignment.
+
+### Guidance
+
+| Sequence length | Recommended max Hamming |
+|-----------------|-------------------------|
+| 8–10 nt | 1 |
+| 15–20 nt | 2 |
+| 30–40 nt | 3–5 |
+
+Higher Hamming distances on short sequences risk spurious matches (e.g.,
+Hamming=5 on 8-nt sequences allows 62.5% of positions to mismatch). The
+prehash memory budget also scales with Hamming distance and library size,
+so per-library control avoids wasting memory on unnecessary prehash tiers.

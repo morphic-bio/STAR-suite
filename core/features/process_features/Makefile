@@ -70,12 +70,17 @@ TEST_MEX_PARITY_TARGET=tests/test_mex_writer_parity
 TEST_BARCODE_FILTER_TARGET=tests/test_barcode_filter
 TEST_OFFSET_DETECTION_TARGET=tests/test_offset_detection
 TEST_ANCHOR_PATTERN_TARGET=tests/test_anchor_pattern_matching
+TEST_FILTERED_NAMESPACE_TARGET=tests/test_filtered_barcode_namespace
+TEST_PF_API_ISOLATION_TARGET=tests/test_pf_api_context_isolation
+TEST_PREHASH_AMBIGUITY_TARGET=tests/test_prehash_ambiguity
+TEST_UNION_WHITELIST_TARGET=tests/test_union_whitelist
+TEST_PREHASH_MEMORY_TARGET=tests/test_prehash_memory_safety
 
 .PHONY: all clean lib tools test
 
 all: lib tools
 
-test: $(TEST_API_TARGET) $(TEST_PF_COUNTS_TARGET) $(TEST_MEX_WRITER_TARGET) $(TEST_MEX_PARITY_TARGET) $(TEST_BARCODE_FILTER_TARGET) $(TEST_OFFSET_DETECTION_TARGET) $(TEST_ANCHOR_PATTERN_TARGET) test-regression
+test: $(TEST_API_TARGET) $(TEST_PF_COUNTS_TARGET) $(TEST_MEX_WRITER_TARGET) $(TEST_MEX_PARITY_TARGET) $(TEST_BARCODE_FILTER_TARGET) $(TEST_OFFSET_DETECTION_TARGET) $(TEST_ANCHOR_PATTERN_TARGET) $(TEST_FILTERED_NAMESPACE_TARGET) $(TEST_PF_API_ISOLATION_TARGET) $(TEST_PREHASH_AMBIGUITY_TARGET) $(TEST_UNION_WHITELIST_TARGET) $(TEST_PREHASH_MEMORY_TARGET) test-regression
 
 lib: $(LIB_TARGET)
 
@@ -141,6 +146,31 @@ $(TEST_ANCHOR_PATTERN_TARGET): tests/test_anchor_pattern_matching.c $(LIB_TARGET
 	$(CC) $(CFLAGS) -c tests/test_anchor_pattern_matching.c -o tests/test_anchor_pattern_matching.o
 	$(CXX) -o $@ tests/test_anchor_pattern_matching.o $(LIB_TARGET) $(LIBSCRNA) $(LDFLAGS)
 
+# Filtered-barcode namespace lookup test
+$(TEST_FILTERED_NAMESPACE_TARGET): tests/test_filtered_barcode_namespace.c $(LIB_TARGET) $(LIBSCRNA)
+	$(CC) $(CFLAGS) -c tests/test_filtered_barcode_namespace.c -o tests/test_filtered_barcode_namespace.o
+	$(CXX) -o $@ tests/test_filtered_barcode_namespace.o $(LIB_TARGET) $(LIBSCRNA) $(LDFLAGS)
+
+# pf_api context/global-state isolation smoke test
+$(TEST_PF_API_ISOLATION_TARGET): tests/test_pf_api_context_isolation.c $(LIB_TARGET) $(LIBSCRNA)
+	$(CC) $(CFLAGS) -c tests/test_pf_api_context_isolation.c -o tests/test_pf_api_context_isolation.o
+	$(CXX) -o $@ tests/test_pf_api_context_isolation.o $(LIB_TARGET) $(LIBSCRNA) $(LDFLAGS)
+
+# Prehash ambiguity bookkeeping regression test
+$(TEST_PREHASH_AMBIGUITY_TARGET): tests/test_prehash_ambiguity.c $(LIB_TARGET) $(LIBSCRNA)
+	$(CC) $(CFLAGS) -c tests/test_prehash_ambiguity.c -o tests/test_prehash_ambiguity.o
+	$(CXX) -o $@ tests/test_prehash_ambiguity.o $(LIB_TARGET) $(LIBSCRNA) $(LDFLAGS)
+
+# Union whitelist expansion test
+$(TEST_UNION_WHITELIST_TARGET): tests/test_union_whitelist.c $(LIB_TARGET) $(LIBSCRNA)
+	$(CC) $(CFLAGS) -c tests/test_union_whitelist.c -o tests/test_union_whitelist.o
+	$(CXX) -o $@ tests/test_union_whitelist.o $(LIB_TARGET) $(LIBSCRNA) $(LDFLAGS)
+
+# Prehash memory safety test
+$(TEST_PREHASH_MEMORY_TARGET): tests/test_prehash_memory_safety.c $(LIB_TARGET) $(LIBSCRNA)
+	$(CC) $(CFLAGS) -c tests/test_prehash_memory_safety.c -o tests/test_prehash_memory_safety.o
+	$(CXX) -o $@ tests/test_prehash_memory_safety.o $(LIB_TARGET) $(LIBSCRNA) $(LDFLAGS)
+
 # Regression test: compares assignBarcodes output against saved baseline
 .PHONY: test-regression
 test-regression: $(TARGET)
@@ -148,4 +178,4 @@ test-regression: $(TARGET)
 	@./tests/test_assignbarcodes_regression.sh
 
 clean:
-	rm -f *.o $(TARGET) $(DEMUX_TARGET) $(DEMUX_BAM_TARGET) $(CALL_FEATURES_TARGET) $(LIB_TARGET) $(TEST_API_TARGET) $(TEST_PF_COUNTS_TARGET) $(TEST_MEX_WRITER_TARGET) $(TEST_MEX_PARITY_TARGET) $(TEST_BARCODE_FILTER_TARGET) $(TEST_OFFSET_DETECTION_TARGET) $(TEST_ANCHOR_PATTERN_TARGET) tests/*.o
+	rm -f *.o $(TARGET) $(DEMUX_TARGET) $(DEMUX_BAM_TARGET) $(CALL_FEATURES_TARGET) $(LIB_TARGET) $(TEST_API_TARGET) $(TEST_PF_COUNTS_TARGET) $(TEST_MEX_WRITER_TARGET) $(TEST_MEX_PARITY_TARGET) $(TEST_BARCODE_FILTER_TARGET) $(TEST_OFFSET_DETECTION_TARGET) $(TEST_ANCHOR_PATTERN_TARGET) $(TEST_FILTERED_NAMESPACE_TARGET) $(TEST_PF_API_ISOLATION_TARGET) $(TEST_PREHASH_AMBIGUITY_TARGET) $(TEST_UNION_WHITELIST_TARGET) $(TEST_PREHASH_MEMORY_TARGET) tests/*.o

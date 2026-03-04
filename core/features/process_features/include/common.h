@@ -89,7 +89,8 @@ typedef struct feature_search_tables{
     struct feature_arrays *features;
     void *feature_code;
     unsigned char feature_code_length;
-    khash_t(codeu32) *feature_code_hash;
+    seq_hash_t feature_code_hash;
+    seq_key_mode_t code_hash_mode;
 } feature_search_tables;
 
 typedef struct feature_arrays {
@@ -113,13 +114,22 @@ typedef struct feature_arrays {
     int *feature_offsets; /* 0-based array; entry i corresponds to feature index (i+1). -1 = unknown */
     int number_of_mismatched_features;
     int *mismatched_feature_indices;
-    /* Per-library cumulative lookup hashes and ambiguity metadata. */
+    /* Per-library cumulative lookup hashes and ambiguity metadata.
+     * These use seq_hash_t (integer-keyed) for prehash, and
+     * khash_t(stru32) (string-keyed) as fallback only when seq_hash
+     * is not applicable. The le1/le2 hashes use string keys in the
+     * current prehash code because they store DNA variant strings.
+     * They will stay as stru32 until the integer-key prehash is wired. */
     khash_t(stru32) *feature_hamming_le1_hash; /* <=1 */
     khash_t(stru32) *feature_hamming_le2_hash; /* <=2 */
     unsigned char *feature_no_ambiguity_le1;   /* per feature (1=true) */
     unsigned char *feature_no_ambiguity_le2;   /* per feature (1=true) */
     int feature_hamming_le1_enabled;
     int feature_hamming_le2_enabled;
+    /* Per-instance exact code hash (owned by this feature_arrays) */
+    seq_hash_t feature_code_hash;
+    seq_key_mode_t code_hash_mode;
+    int code_hash_fixed_length;
 } feature_arrays;
 
 typedef struct feature_counts {
@@ -184,6 +194,18 @@ typedef struct statistics {
     size_t limited_simple_fallback_hits;
     size_t limited_full_fallback_calls;
     size_t limited_full_fallback_hits;
+    size_t resolve_calls_total;
+    size_t resolve_calls_multi_alt;
+    size_t resolve_too_many_n;
+    size_t resolve_no_hit;
+    size_t resolve_ambiguous_tie;
+    size_t resolve_ambiguous_no_feature;
+    size_t resolve_resolved;
+    size_t resolve_multi_alt_too_many_n;
+    size_t resolve_multi_alt_no_hit;
+    size_t resolve_multi_alt_ambiguous_tie;
+    size_t resolve_multi_alt_ambiguous_no_feature;
+    size_t resolve_multi_alt_resolved;
     unmatched_barcodes_features_block_list unmatched_list;
 } statistics;
 

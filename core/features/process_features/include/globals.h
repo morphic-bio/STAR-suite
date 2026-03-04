@@ -16,7 +16,14 @@ extern int debug;
 extern unsigned char *whitelist;
 extern khash_t(u32ptr) *whitelist_hash; 
 
-extern khash_t(codeu32) *feature_code_hash;
+extern seq_hash_t feature_code_hash;
+extern seq_key_mode_t feature_code_hash_mode;
+extern int feature_code_hash_fixed_length;
+extern int feature_prehash_max_hamming;
+extern unsigned long long feature_prehash_max_entries;
+extern unsigned long long feature_prehash_memory_budget;
+
+unsigned long long prehash_detect_memory_budget(void);
 
 // Size globals to replace constants
 extern int barcode_length;
@@ -57,6 +64,9 @@ extern int feature_mode_bootstrap_done;
 extern int feature_mode_max_offset;
 extern int *feature_mode_offsets;
 extern unsigned int *feature_mode_hist;
+
+/* Hash lifecycle helpers for feature matching tables */
+void clear_feature_lookup_hashes(void);
 
 
 #endif // GLOBALS_H

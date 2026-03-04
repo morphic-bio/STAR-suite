@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <vector>
+#include <unordered_map>
 #include "SoloReadInfoLoader.h" // for ReadInfoRecord
 
 class SoloFeature;
@@ -26,6 +27,7 @@ public:
 class CountingSink : public ISoloReadInfoSink {
 public:
     std::vector<std::vector<ReadInfoRecord>> perWL; // buffered per-WL CB records
+    std::unordered_map<uint32_t, uint32_t> readToCb; // per-run conflict guard
     void onRecord(SoloFeature &feature, const ReadInfoRecord &rec) override;
     void finalize(SoloFeature &feature) override;
 };

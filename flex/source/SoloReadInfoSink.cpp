@@ -65,7 +65,6 @@ void CountingSink::onRecord(SoloFeature &feature, const ReadInfoRecord &rec) {
 #endif
     // Hard guard: a readId must not appear under different CBs in the buffered stream
     {
-        static std::unordered_map<uint32_t,uint32_t> readToCb;
         uint32_t ridKey = (rec.readIndex != (uint32_t)-1) ? rec.readIndex : (uint32_t)rec.readId;
         auto it = readToCb.find(ridKey);
         if (it == readToCb.end()) {
@@ -163,4 +162,5 @@ void CountingSink::finalize(SoloFeature &feature) {
     for (auto &v : perWL) { std::vector<ReadInfoRecord>().swap(v); }
     perWL.clear();
     perWL.shrink_to_fit();
+    readToCb.clear();
 }

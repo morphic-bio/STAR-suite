@@ -674,6 +674,7 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar<double>(-1, -1, "crAssignMinPosterior", &pfMulti.crAssignMinPosterior));
     parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "crAssignLegacyCbRescue", &pfMulti.crAssignLegacyCbRescue));
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "crAssignFilteredBarcodes", &pfMulti.crAssignFilteredBarcodes));
+    parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "crAssignAllowUnionWhitelist", &pfMulti.crAssignAllowUnionWhitelist));
 
     // Default module flag groups
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "defaultBulk", &defaultGroups.bulk));
@@ -789,6 +790,10 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
         }
         if (p->nameString == "crAssignFilteredBarcodes" && p->inputLevel < 0) {
             pfMulti.crAssignFilteredBarcodes = "-";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "crAssignAllowUnionWhitelist" && p->inputLevel < 0) {
+            pfMulti.crAssignAllowUnionWhitelist = 0;
             p->inputLevel = 0;
         }
     }

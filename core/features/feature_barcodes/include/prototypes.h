@@ -76,6 +76,7 @@ void merge_feature_sequences(gpointer key, gpointer value, gpointer user_data);
 void merge_queues(Queue *dest_q, Queue *src_q);
 void merge_unmatched_barcodes(unmatched_barcodes_features_block_list *merged_list, unmatched_barcodes_features_block_list *thread_list, memory_pool_collection *merged_pool);
 void process_files_in_sample(sample_args *args);
+int expand_filtered_hash_union_namespace(GHashTable *hash);
 void initialize_data_structures(data_structures *hashes);
 void destroy_data_structures(data_structures *hashes);
 int existing_output_skip(char keep_existing, char *directory);

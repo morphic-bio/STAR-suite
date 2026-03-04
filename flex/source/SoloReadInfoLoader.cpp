@@ -55,12 +55,14 @@ void SoloReadInfoLoader::load(SoloReadFeature &rf,
     rf.streamReads->seekg(0,std::ios::beg);
 
     uint32 feature;
-    uint64 umi, iread, prevIread=(uint64)-1;
+    uint64 umi, iread=(uint64)-1, prevIread=(uint64)-1;
+    uint64 syntheticReadId=0;
     int32 cbmatch;
     int64 cb;
     std::vector<uint32> trIdDist;
 
     while (soloInputFeatureUMI(rf.streamReads, rf.featureType, rf.readIndexYes, rf.P.sjAll, iread, cbmatch, feature, umi, trIdDist, readFlagCounts)) {
+        const uint64 currentReadId = rf.readIndexYes ? iread : syntheticReadId++;
         if (feature == (uint32)(-1) && !rf.readIndexYes) {
             rf.streamReads->ignore((uint32)-1, '\n');
             continue;
@@ -85,12 +87,12 @@ void SoloReadInfoLoader::load(SoloReadFeature &rf,
                     uint32_t umi32 = (uint32_t)-1;
                     uint8_t status = 0;
 #ifdef DEBUG_CB_UB_PARITY
-                    if (!g_traceReadsLoader.empty() && g_traceReadsLoader.count((uint32_t)iread)) {
+                    if (!g_traceReadsLoader.empty() && g_traceReadsLoader.count((uint32_t)currentReadId)) {
                         fprintf(stderr, "[TRACE loader] read=%llu cb=%lld feature=%u umi=%u status=%u reason=%s\n",
-                                (unsigned long long)iread, (long long)cb, (uint32_t)feature, umi32, status, reason);
+                                (unsigned long long)currentReadId, (long long)cb, (uint32_t)feature, umi32, status, reason);
                     }
 #endif
-                    sink({(uint64_t)iread, (uint32_t)-1, umi32, status, (uint32_t)feature, rf.readIndexYes ? (uint32_t)iread : (uint32_t)-1});
+                    sink({(uint64_t)currentReadId, (uint32_t)-1, umi32, status, (uint32_t)feature, rf.readIndexYes ? (uint32_t)iread : (uint32_t)-1});
 #ifdef DEBUG_CB_UB_PARITY
                     if (rf.owner) rf.owner->noteDebugStatus(status, reason);
 #endif
@@ -106,12 +108,12 @@ void SoloReadInfoLoader::load(SoloReadFeature &rf,
                         uint32_t umi32 = (uint32_t)umi;
                         uint8_t status = (umi32==(uint32_t)-1) ? 2 : 1;
 #ifdef DEBUG_CB_UB_PARITY
-                        if (!g_traceReadsLoader.empty() && g_traceReadsLoader.count((uint32_t)iread)) {
+                        if (!g_traceReadsLoader.empty() && g_traceReadsLoader.count((uint32_t)currentReadId)) {
                             fprintf(stderr, "[TRACE loader] read=%llu cb=%lld feature=%u umi=%u status=%u reason=%s\n",
-                                    (unsigned long long)iread, (long long)cb, (uint32_t)feature, umi32, status, reason);
+                                    (unsigned long long)currentReadId, (long long)cb, (uint32_t)feature, umi32, status, reason);
                         }
 #endif
-                        sink({(uint64_t)iread, (uint32_t)cb, umi32, status, (uint32_t)feature, rf.readIndexYes ? (uint32_t)iread : (uint32_t)-1});
+                        sink({(uint64_t)currentReadId, (uint32_t)cb, umi32, status, (uint32_t)feature, rf.readIndexYes ? (uint32_t)iread : (uint32_t)-1});
 #ifdef DEBUG_CB_UB_PARITY
                         if (rf.owner) rf.owner->noteDebugStatus(status, reason);
 #endif
@@ -122,12 +124,12 @@ void SoloReadInfoLoader::load(SoloReadFeature &rf,
                         uint32_t umi32 = (uint32_t)umi;
                         uint8_t status = (umi32==(uint32_t)-1) ? 2 : 1;
 #ifdef DEBUG_CB_UB_PARITY
-                        if (!g_traceReadsLoader.empty() && g_traceReadsLoader.count((uint32_t)iread)) {
+                        if (!g_traceReadsLoader.empty() && g_traceReadsLoader.count((uint32_t)currentReadId)) {
                             fprintf(stderr, "[TRACE loader] read=%llu cb=%lld feature=%u umi=%u status=%u reason=%s\n",
-                                    (unsigned long long)iread, (long long)cb, (uint32_t)feature, umi32, status, reason);
+                                    (unsigned long long)currentReadId, (long long)cb, (uint32_t)feature, umi32, status, reason);
                         }
 #endif
-                        sink({(uint64_t)iread, (uint32_t)cb, umi32, status, (uint32_t)feature, rf.readIndexYes ? (uint32_t)iread : (uint32_t)-1});
+                        sink({(uint64_t)currentReadId, (uint32_t)cb, umi32, status, (uint32_t)feature, rf.readIndexYes ? (uint32_t)iread : (uint32_t)-1});
 #ifdef DEBUG_CB_UB_PARITY
                         if (rf.owner) rf.owner->noteDebugStatus(status, reason);
 #endif
@@ -155,12 +157,12 @@ void SoloReadInfoLoader::load(SoloReadFeature &rf,
                         uint32_t umi32 = (uint32_t)umi;
                         uint8_t status = (umi32==(uint32_t)-1) ? 2 : 1;
 #ifdef DEBUG_CB_UB_PARITY
-                        if (!g_traceReadsLoader.empty() && g_traceReadsLoader.count((uint32_t)iread)) {
+                        if (!g_traceReadsLoader.empty() && g_traceReadsLoader.count((uint32_t)currentReadId)) {
                             fprintf(stderr, "[TRACE loader] read=%llu cb=%lld feature=%u umi=%u status=%u reason=%s\n",
-                                    (unsigned long long)iread, (long long)cb, (uint32_t)feature, umi32, status, reason);
+                                    (unsigned long long)currentReadId, (long long)cb, (uint32_t)feature, umi32, status, reason);
                         }
 #endif
-                        sink({(uint64_t)iread, (uint32_t)cb, umi32, status, (uint32_t)feature, rf.readIndexYes ? (uint32_t)iread : (uint32_t)-1});
+                        sink({(uint64_t)currentReadId, (uint32_t)cb, umi32, status, (uint32_t)feature, rf.readIndexYes ? (uint32_t)iread : (uint32_t)-1});
 #ifdef DEBUG_CB_UB_PARITY
                         if (rf.owner) rf.owner->noteDebugStatus(status, reason);
 #endif
@@ -170,12 +172,12 @@ void SoloReadInfoLoader::load(SoloReadFeature &rf,
                         uint32_t umi32 = (uint32_t)umi;
                         uint8_t status = (umi32==(uint32_t)-1) ? 2 : 1;
 #ifdef DEBUG_CB_UB_PARITY
-                        if (!g_traceReadsLoader.empty() && g_traceReadsLoader.count((uint32_t)iread)) {
+                        if (!g_traceReadsLoader.empty() && g_traceReadsLoader.count((uint32_t)currentReadId)) {
                             fprintf(stderr, "[TRACE loader] read=%llu cb=%lld feature=%u umi=%u status=%u reason=%s\n",
-                                    (unsigned long long)iread, (long long)cb, (uint32_t)feature, umi32, status, reason);
+                                    (unsigned long long)currentReadId, (long long)cb, (uint32_t)feature, umi32, status, reason);
                         }
 #endif
-                        sink({(uint64_t)iread, (uint32_t)cb, umi32, status, (uint32_t)feature, rf.readIndexYes ? (uint32_t)iread : (uint32_t)-1});
+                        sink({(uint64_t)currentReadId, (uint32_t)cb, umi32, status, (uint32_t)feature, rf.readIndexYes ? (uint32_t)iread : (uint32_t)-1});
 #ifdef DEBUG_CB_UB_PARITY
                         if (rf.owner) rf.owner->noteDebugStatus(status, reason);
 #endif
@@ -188,7 +190,7 @@ void SoloReadInfoLoader::load(SoloReadFeature &rf,
                 if (sink) {
                     uint32_t umi32 = (uint32_t)-1;
                     uint8_t status = 0;
-                    sink({(uint64_t)iread, (uint32_t)-1, umi32, status, (uint32_t)feature, rf.readIndexYes ? (uint32_t)iread : (uint32_t)-1});
+                    sink({(uint64_t)currentReadId, (uint32_t)-1, umi32, status, (uint32_t)feature, rf.readIndexYes ? (uint32_t)iread : (uint32_t)-1});
 #ifdef DEBUG_CB_UB_PARITY
                     if (rf.owner) rf.owner->noteDebugStatus(status, reason);
 #endif
@@ -196,8 +198,8 @@ void SoloReadInfoLoader::load(SoloReadFeature &rf,
             };
         };
 
-        if ( !rf.readIndexYes || iread != prevIread ) {
-            prevIread = iread;
+        if ( !rf.readIndexYes || currentReadId != prevIread ) {
+            prevIread = currentReadId;
             if (mode==SoloReadInfoMode::Counting && featGood) {
                 if (cbmatch==0) { rf.stats.V[rf.stats.yessubWLmatchExact]++; }
                 else if (noMMtoWLwithoutExact) { rf.stats.V[rf.stats.noMMtoWLwithoutExact]++; }

@@ -98,6 +98,7 @@ void initdiff2hamming(unsigned char *difference){
 }
 
 void free_feature_arrays(feature_arrays *features) {
+    seq_hash_destroy(&features->feature_code_hash, features->code_hash_mode);
     if (features->feature_hamming_le1_hash) {
         for (khint_t k = kh_begin(features->feature_hamming_le1_hash);
              k != kh_end(features->feature_hamming_le1_hash); ++k) {
@@ -144,13 +145,23 @@ void initialize_complement(){
 }
 
 int feature_lookup_code(const unsigned char *code, int code_len) {
-    // Hash look-up path (current behavior)
-    var_key_t key = {.ptr = (uint8_t*)code, .len = (uint16_t)code_len};
-    khint_t k = kh_get(codeu32, feature_code_hash, key);
-    if (k != kh_end(feature_code_hash)) {
-        return kh_val(feature_code_hash, k);
-    }
+    (void)code; (void)code_len;
+    /* Legacy byte-code path is no longer used; callers should use
+     * feature_lookup_kmer() or direct integer-key lookup. Return 0
+     * (not found) to avoid silent misuse. */
     return 0;
+}
+
+int feature_lookup_seq(const char *seq, int len) {
+    if (feature_code_hash_mode == SEQ_KEY_64) {
+        if (!feature_code_hash.h64) return 0;
+        uint64_t key = seq_encode_64_fixed(seq, len);
+        return (int)seq_hash_get_64(&feature_code_hash, key);
+    } else {
+        if (!feature_code_hash.h128) return 0;
+        seq128_t key = seq_encode_128_fixed(seq, len);
+        return (int)seq_hash_get_128(&feature_code_hash, key);
+    }
 }
 
 // Precomputed 8-mer table for direct search
@@ -175,6 +186,28 @@ static void ensure_feature_u64(const struct feature_arrays *fa) {
     fa_cached_8 = fa;
 }
 
+static inline char translate_nxt_base(char b) {
+    switch ((unsigned char)b) {
+        case 'A': return 'T';
+        case 'T': return 'A';
+        case 'C': return 'G';
+        case 'G': return 'C';
+        case 'a': return 'T';
+        case 't': return 'A';
+        case 'c': return 'G';
+        case 'g': return 'C';
+        default: return b;
+    }
+}
+
+static inline void translate_nxt_middle_two_bases_inplace(char *barcode, size_t len) {
+    if (!barcode) return;
+    if (len >= 9) {
+        barcode[7] = translate_nxt_base(barcode[7]);
+        barcode[8] = translate_nxt_base(barcode[8]);
+    }
+}
+
 int feature_lookup_kmer(const char *seq, int len, const struct feature_arrays *fa, int direct_search) {
     int use_direct = (direct_search == 1) ||
                      (direct_search < 0 && fa && fa->number_of_features <= 128);
@@ -197,7 +230,107 @@ int feature_lookup_kmer(const char *seq, int len, const struct feature_arrays *f
         }
     }
 
-    unsigned char code[(MAX_FEATURE_CODE_LENGTH > 0 ? MAX_FEATURE_CODE_LENGTH : 40)];
-    int clen = string2code((char*)seq, len, code);
-    return feature_lookup_code(code, clen);
+    return feature_lookup_seq(seq, len);
+}
+
+int filtered_barcode_hash_contains(khash_t(strptr) *filtered_barcodes_hash, const char *barcode) {
+    if (!filtered_barcodes_hash || !barcode) {
+        return 0;
+    }
+
+    khint_t kf = kh_get(strptr, filtered_barcodes_hash, barcode);
+    return (kf != kh_end(filtered_barcodes_hash));
+}
+
+int pf_normalize_hash_namespace(khash_t(strptr) *hash) {
+    if (!hash) return 0;
+
+    size_t n = kh_size(hash);
+    if (n == 0) return 0;
+
+    /* Collect all existing keys, translate each, rebuild the hash. */
+    char **old_keys = malloc(n * sizeof(char *));
+    if (!old_keys) return -1;
+
+    size_t count = 0;
+    for (khint_t k = kh_begin(hash); k != kh_end(hash); ++k) {
+        if (!kh_exist(hash, k)) continue;
+        old_keys[count++] = (char *)kh_key(hash, k);
+    }
+
+    kh_clear(strptr, hash);
+    int translated = 0;
+    for (size_t i = 0; i < count; i++) {
+        char *key = old_keys[i];
+        size_t len = strlen(key);
+        if (len >= 9 && len < LINE_LENGTH) {
+            translate_nxt_middle_two_bases_inplace(key, len);
+            translated++;
+        }
+        int ret;
+        (void)kh_put(strptr, hash, key, &ret);
+        if (ret < 0) {
+            free(key);
+            for (size_t j = i + 1; j < count; j++) free(old_keys[j]);
+            free(old_keys);
+            return -1;
+        }
+        if (ret == 0) {
+            free(key);
+        }
+    }
+    free(old_keys);
+    return translated;
+}
+
+int expand_hash_union_namespace(khash_t(strptr) *hash) {
+    if (!hash) return 0;
+
+    size_t capacity = kh_size(hash);
+    if (capacity == 0) return 0;
+    char **pending_keys = malloc(capacity * sizeof(char *));
+    if (!pending_keys) return -1;
+    size_t npending = 0;
+
+    for (khint_t k = kh_begin(hash); k != kh_end(hash); ++k) {
+        if (!kh_exist(hash, k)) continue;
+        const char *barcode = kh_key(hash, k);
+        size_t len = strlen(barcode);
+        if (len < 9 || len >= LINE_LENGTH) continue;
+
+        char translated[LINE_LENGTH];
+        memcpy(translated, barcode, len + 1);
+        translate_nxt_middle_two_bases_inplace(translated, len);
+        if (strcmp(translated, barcode) == 0) continue;
+
+        khint_t kf = kh_get(strptr, hash, translated);
+        if (kf != kh_end(hash)) continue;
+
+        char *dup = strdup(translated);
+        if (!dup) {
+            for (size_t j = 0; j < npending; j++) free(pending_keys[j]);
+            free(pending_keys);
+            return -1;
+        }
+        pending_keys[npending++] = dup;
+    }
+
+    int added = 0;
+    for (size_t i = 0; i < npending; i++) {
+        int ret;
+        kh_put(strptr, hash, pending_keys[i], &ret);
+        if (ret < 0) {
+            free(pending_keys[i]);
+            for (size_t j = i + 1; j < npending; j++) free(pending_keys[j]);
+            free(pending_keys);
+            return -1;
+        }
+        if (ret > 0) {
+            added++;
+        } else {
+            free(pending_keys[i]);
+        }
+    }
+    free(pending_keys);
+    return added;
 }

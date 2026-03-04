@@ -64,7 +64,8 @@ echo "Running assignBarcodes on fixture data..."
     -f "${INPUT_DIR}/features.csv" \
     -d "${ACTUAL_DIR}" \
     "${INPUT_DIR}" \
-    -b 16 -u 12 2>&1 | grep -v "^$" | head -20
+    -b 16 -u 12 > "${ACTUAL_DIR}/_run.log" 2>&1
+grep -v "^$" "${ACTUAL_DIR}/_run.log" | head -20 || true
 
 echo ""
 
@@ -93,6 +94,30 @@ echo ""
 TOTAL_DIFFS=0
 TOTAL_FILES=0
 
+compare_stats_file() {
+    local expected_file="$1"
+    local actual_file="$2"
+    local missing=0
+
+    while IFS= read -r line || [ -n "$line" ]; do
+        if [ -z "${line}" ]; then
+            continue
+        fi
+        if ! grep -Fx -- "${line}" "${actual_file}" > /dev/null 2>&1; then
+            if [ "${missing}" -eq 0 ]; then
+                echo "       Missing expected stats lines:"
+            fi
+            echo "         ${line}"
+            missing=$((missing + 1))
+        fi
+    done < "${expected_file}"
+
+    if [ "${missing}" -eq 0 ]; then
+        return 0
+    fi
+    return 1
+}
+
 compare_file() {
     local rel_path="$1"
     local expected_file="${EXPECTED_DIR}/${rel_path}"
@@ -111,6 +136,16 @@ compare_file() {
         return 1
     fi
     
+    if [ "${rel_path}" = "stats.txt" ]; then
+        if compare_stats_file "${expected_file}" "${actual_file}"; then
+            echo -e "  ${GREEN}PASS${NC} ${rel_path}"
+            return 0
+        fi
+        echo -e "  ${RED}FAIL${NC} ${rel_path} (missing baseline stats lines)"
+        TOTAL_DIFFS=$((TOTAL_DIFFS + 1))
+        return 1
+    fi
+
     if diff -q "${expected_file}" "${actual_file}" > /dev/null 2>&1; then
         echo -e "  ${GREEN}PASS${NC} ${rel_path}"
         return 0
@@ -120,7 +155,7 @@ compare_file() {
         
         # Show first few differences
         echo "       First differences:"
-        diff "${expected_file}" "${actual_file}" 2>&1 | head -10 | sed 's/^/         /'
+        diff "${expected_file}" "${actual_file}" 2>&1 | head -10 | sed 's/^/         /' || true
         return 1
     fi
 }

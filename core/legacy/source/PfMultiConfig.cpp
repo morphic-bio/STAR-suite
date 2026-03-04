@@ -8,6 +8,7 @@
 #include <sys/stat.h>
 #include <set>
 #include <stdexcept>
+#include <cstdlib>
 
 namespace PfMultiConfig {
 
@@ -171,6 +172,10 @@ Config parseConfig(const string& configPath) {
                             entry.starFeatureRef = value;
                         } else if (header == "star_library_id" || header == "starlibraryid") {
                             entry.starLibraryId = value;
+                        } else if (header == "star_max_hamming" || header == "starmaxhamming") {
+                            if (!value.empty()) {
+                                entry.starMaxHamming = std::atoi(value.c_str());
+                            }
                         }
                     }
                     if (!entry.fastqs.empty()) {
@@ -310,6 +315,10 @@ Config parseConfig(const string& configPath) {
                         entry.starFeatureRef = value;
                     } else if (header == "star_library_id" || header == "starlibraryid") {
                         entry.starLibraryId = value;
+                    } else if (header == "star_max_hamming" || header == "starmaxhamming") {
+                        if (!value.empty()) {
+                            entry.starMaxHamming = std::atoi(value.c_str());
+                        }
                     }
                 }
                 if (!entry.fastqs.empty()) {

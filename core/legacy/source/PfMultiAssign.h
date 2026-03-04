@@ -39,6 +39,9 @@ struct AssignOptions {
     bool autodetectChemistry = false;
     int autodetectChemistryReads = 10000;
     int autodetectChemistryMinHits = 50;
+    bool allowUnionWhitelist = false;
+    string sourceNamespace = "UNKNOWN";
+    string targetNamespace = "UNKNOWN";
 };
 
 struct AssignResult {

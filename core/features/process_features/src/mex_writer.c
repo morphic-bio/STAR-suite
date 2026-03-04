@@ -137,8 +137,7 @@ int mex_write_all(
             char barcode[barcode_length + 1];
             code2string((unsigned char *)&bcode_key, barcode, barcode_code_length);
             if (translate_NXT) translate_nxt_inplace(barcode, barcode_length);
-            khint_t kf = kh_get(strptr, config->filtered_barcodes_hash, barcode);
-            if (kf == kh_end(config->filtered_barcodes_hash)) continue;
+            if (!filtered_barcode_hash_contains(config->filtered_barcodes_hash, barcode)) continue;
         }
         
         size_t n_features_in_bc = kh_size(deduped_hash);
@@ -251,6 +250,20 @@ int mex_write_stats(
     fprintf(stderr, "Limited simple fallback hits %zu\n", stats->limited_simple_fallback_hits);
     fprintf(stderr, "Limited full fallback calls %zu\n", stats->limited_full_fallback_calls);
     fprintf(stderr, "Limited full fallback hits %zu\n", stats->limited_full_fallback_hits);
+    fprintf(stderr, "Resolve calls total %zu\n", stats->resolve_calls_total);
+    fprintf(stderr, "Resolve calls multi_alt %zu\n", stats->resolve_calls_multi_alt);
+    fprintf(stderr, "Resolve outcomes total resolved=%zu no_hit=%zu too_many_n=%zu ambiguous_tie=%zu ambiguous_no_feature=%zu\n",
+            stats->resolve_resolved,
+            stats->resolve_no_hit,
+            stats->resolve_too_many_n,
+            stats->resolve_ambiguous_tie,
+            stats->resolve_ambiguous_no_feature);
+    fprintf(stderr, "Resolve outcomes multi_alt resolved=%zu no_hit=%zu too_many_n=%zu ambiguous_tie=%zu ambiguous_no_feature=%zu\n",
+            stats->resolve_multi_alt_resolved,
+            stats->resolve_multi_alt_no_hit,
+            stats->resolve_multi_alt_too_many_n,
+            stats->resolve_multi_alt_ambiguous_tie,
+            stats->resolve_multi_alt_ambiguous_no_feature);
     
     fprintf(statsfp, "Total feature counts %d\n", total_raw_counts);
     fprintf(statsfp, "Total deduped feature counts %d\n", total_deduped_counts);
@@ -268,6 +281,18 @@ int mex_write_stats(
     fprintf(statsfp, "Limited_simple_fallback_hits %zu\n", stats->limited_simple_fallback_hits);
     fprintf(statsfp, "Limited_full_fallback_calls %zu\n", stats->limited_full_fallback_calls);
     fprintf(statsfp, "Limited_full_fallback_hits %zu\n", stats->limited_full_fallback_hits);
+    fprintf(statsfp, "Resolve_calls_total %zu\n", stats->resolve_calls_total);
+    fprintf(statsfp, "Resolve_calls_multi_alt %zu\n", stats->resolve_calls_multi_alt);
+    fprintf(statsfp, "Resolve_total_resolved %zu\n", stats->resolve_resolved);
+    fprintf(statsfp, "Resolve_total_no_hit %zu\n", stats->resolve_no_hit);
+    fprintf(statsfp, "Resolve_total_too_many_n %zu\n", stats->resolve_too_many_n);
+    fprintf(statsfp, "Resolve_total_ambiguous_tie %zu\n", stats->resolve_ambiguous_tie);
+    fprintf(statsfp, "Resolve_total_ambiguous_no_feature %zu\n", stats->resolve_ambiguous_no_feature);
+    fprintf(statsfp, "Resolve_multi_alt_resolved %zu\n", stats->resolve_multi_alt_resolved);
+    fprintf(statsfp, "Resolve_multi_alt_no_hit %zu\n", stats->resolve_multi_alt_no_hit);
+    fprintf(statsfp, "Resolve_multi_alt_too_many_n %zu\n", stats->resolve_multi_alt_too_many_n);
+    fprintf(statsfp, "Resolve_multi_alt_ambiguous_tie %zu\n", stats->resolve_multi_alt_ambiguous_tie);
+    fprintf(statsfp, "Resolve_multi_alt_ambiguous_no_feature %zu\n", stats->resolve_multi_alt_ambiguous_no_feature);
     
     fclose(statsfp);
     return 0;
@@ -303,8 +328,7 @@ int mex_write_feature_per_cell(
         if (translate_NXT) translate_nxt_inplace(barcode, barcode_length);
         
         if (filtered_barcodes_hash) {
-            khint_t kf = kh_get(strptr, filtered_barcodes_hash, barcode);
-            if (kf == kh_end(filtered_barcodes_hash)) continue;
+            if (!filtered_barcode_hash_contains(filtered_barcodes_hash, barcode)) continue;
         }
         
         size_t n_feats_in_bc = kh_size(features_in_barcode);
@@ -399,8 +423,7 @@ static int mex_write_barcodes_matrix(
             char barcode[barcode_length + 1];
             code2string((unsigned char *)&bcode_key, barcode, barcode_code_length);
             if (translate_NXT) translate_nxt_inplace(barcode, barcode_length);
-            khint_t kf = kh_get(strptr, filtered_barcodes_hash, barcode);
-            if (kf == kh_end(filtered_barcodes_hash)) continue;
+            if (!filtered_barcode_hash_contains(filtered_barcodes_hash, barcode)) continue;
         }
         
         number_of_barcode_entries++;
@@ -464,8 +487,7 @@ static int mex_write_barcodes_matrix(
                 if (translate_NXT) translate_nxt_inplace(barcode, barcode_length);
                 
                 if (filtered_barcodes_hash) {
-                    khint_t kf = kh_get(strptr, filtered_barcodes_hash, barcode);
-                    if (kf == kh_end(filtered_barcodes_hash)) {
+                    if (!filtered_barcode_hash_contains(filtered_barcodes_hash, barcode)) {
                         total_excluded++;
                         skipped_barcodes++;
                         continue;
@@ -605,8 +627,7 @@ static int build_and_write_heatmaps(
         if (translate_NXT) translate_nxt_inplace(barcode, barcode_length);
         
         if (filtered_barcodes_hash) {
-            khint_t kf = kh_get(strptr, filtered_barcodes_hash, barcode);
-            if (kf == kh_end(filtered_barcodes_hash)) continue;
+            if (!filtered_barcode_hash_contains(filtered_barcodes_hash, barcode)) continue;
         }
         
         size_t n_feats_in_bc = kh_size(features_in_barcode);
@@ -746,8 +767,7 @@ static int build_and_write_heatmaps(
             if (translate_NXT) translate_nxt_inplace(barcode, barcode_length);
             
             if (filtered_barcodes_hash) {
-                khint_t kf = kh_get(strptr, filtered_barcodes_hash, barcode);
-                if (kf == kh_end(filtered_barcodes_hash)) continue;
+                if (!filtered_barcode_hash_contains(filtered_barcodes_hash, barcode)) continue;
             }
             
             size_t n_feats_in_bc = kh_size(features_in_barcode);

@@ -268,6 +268,8 @@ static string pfErrorCodeString(pf_error err) {
         case PF_ERR_ALREADY_INITIALIZED: return "PF_ERR_ALREADY_INITIALIZED";
         case PF_ERR_OFFSET_CONFLICT: return "PF_ERR_OFFSET_CONFLICT";
         case PF_ERR_MULTI_OFFSET_DETECTED: return "PF_ERR_MULTI_OFFSET_DETECTED";
+        case PF_ERR_ALLOC: return "PF_ERR_ALLOC";
+        case PF_ERR_NAMESPACE: return "PF_ERR_NAMESPACE";
         default: return "PF_ERR_UNKNOWN";
     }
 }
@@ -327,6 +329,15 @@ static void applyAssignOptions(pf_config* cfg, const AssignOptions& options) {
             pfStarDynamicPermitRelease,
             &kFeaturePermitHookContext
         );
+    }
+    if (options.allowUnionWhitelist) {
+        pf_config_set_allow_union_whitelist(cfg, 1);
+    }
+    if (options.sourceNamespace != "UNKNOWN") {
+        pf_config_set_source_namespace(cfg, pf_namespace_from_string(options.sourceNamespace.c_str()));
+    }
+    if (options.targetNamespace != "UNKNOWN") {
+        pf_config_set_target_namespace(cfg, pf_namespace_from_string(options.targetNamespace.c_str()));
     }
 }
 

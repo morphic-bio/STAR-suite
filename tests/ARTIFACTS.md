@@ -263,3 +263,26 @@ These scripts validate that default bundles work with minimal explicit parameter
   - Outputs STAR-SlamQuant-compatible tables
 - Parity: Matches PySAM methodology (2.21% vs 2.24% for 6h labeled)
 - Limitation: Gene-level quantification needs GTF optimization
+
+## Feature Hash Benchmark Suite
+
+- Harness runner: `tests/benchmarks/feature_hash/scripts/run_feature_hash_bench_suite.sh`
+- Harness sources:
+  - `tests/benchmarks/feature_hash/src/pf_exact_search_microbench.c`
+  - `tests/benchmarks/feature_hash/src/pf_exact_crossover_bench.c`
+  - `tests/benchmarks/feature_hash/src/hamming1_strategy_bench.cpp`
+  - `tests/benchmarks/feature_hash/src/hamming1_full_larry_bench.cpp`
+  - `tests/benchmarks/feature_hash/src/hash_read_scaling_larry.cpp`
+- Outputs: `/tmp/feature_hash_bench_suite_*/`
+  - `exact_vs_encoded.txt`
+  - `exact_crossover_ucsf.txt`
+  - `hamming_strategy.txt`
+  - `hamming_full_larry.txt` (when `RUN_FULL_LARRY=1`)
+  - `hash_read_scaling_larry.txt` (when `RUN_LARRY_SCALING=1`)
+- Session artifacts (2026-03-01):
+  - `/tmp/pf_exact_microbench_rand_20260301_212750/`
+  - `/tmp/pf_exact_crossover_20260301_213344/`
+  - `/tmp/pf_exact_crossover_20260301_213354/`
+  - `/tmp/hamming1_strategy_bench_20260301_214110/`
+  - `/tmp/hamming1_full_larry_20260301_215418/`
+  - `/tmp/hash_read_scaling_larry_20260301_215902/`

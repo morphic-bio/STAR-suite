@@ -119,13 +119,15 @@ static feature_arrays* load_probe_variants_to_features(const char *path) {
     strcpy(fa->feature_sequences[idx], v);
     fa->feature_lengths[idx] = PROBE_LEN;
 
-    // Code and insert into feature_code_hash
     fa->feature_code_lengths[idx] = string2code(v, PROBE_LEN, fa->feature_codes[idx]);
     if (fa->feature_lengths[idx] == fa->common_length) {
-      var_key_t key = {.ptr = fa->feature_codes[idx], .len = fa->feature_code_lengths[idx]};
-      int ret;
-      khint_t k = kh_put(codeu32, feature_code_hash, key, &ret);
-      kh_val(feature_code_hash, k) = idx + 1;
+      if (feature_code_hash_mode == SEQ_KEY_64) {
+        uint64_t ikey = seq_encode_64_fixed(v, PROBE_LEN);
+        seq_hash_put_64(&feature_code_hash, ikey, (uint32_t)(idx + 1));
+      } else {
+        seq128_t ikey = seq_encode_128_fixed(v, PROBE_LEN);
+        seq_hash_put_128(&feature_code_hash, ikey, (uint32_t)(idx + 1));
+      }
     }
 
     if (idx + 1 < fa->number_of_features) {
@@ -602,7 +604,9 @@ int main(int argc, char **argv) {
   // Initialise core matching tables
   barcode_match_init();
   initialize_complement();
-  feature_code_hash = kh_init(codeu32);
+  feature_code_hash_mode = SEQ_KEY_64;
+  feature_code_hash_fixed_length = 0;
+  seq_hash_init(&feature_code_hash, feature_code_hash_mode);
 
   cfg.features = load_probe_variants_to_features(probe_barcodes_path);
   cfg.libprobe_to_sample = load_sample_map(sample_map_path);
@@ -719,7 +723,7 @@ int main(int argc, char **argv) {
       }
   }
   kh_destroy(strptr, cfg.libprobe_to_sample);
-  kh_destroy(codeu32, feature_code_hash);
+  seq_hash_destroy(&feature_code_hash, feature_code_hash_mode);
   free_fastq_files_collection(&fastq_files);
   if (barcodeFastqFilesString) free(barcodeFastqFilesString);
   if (forwardFastqFilesString) free(forwardFastqFilesString);

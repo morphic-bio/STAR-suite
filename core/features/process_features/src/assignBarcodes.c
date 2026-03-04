@@ -534,6 +534,59 @@ static int pf_find_anchor_position(const char *sequence, size_t read_len, const 
     return -1;
 }
 
+typedef enum {
+    PF_RESOLVE_REASON_RESOLVED = 1,
+    PF_RESOLVE_REASON_NO_HIT = 2,
+    PF_RESOLVE_REASON_TOO_MANY_N = 3,
+    PF_RESOLVE_REASON_AMBIGUOUS_TIE = 4,
+    PF_RESOLVE_REASON_AMBIGUOUS_NO_FEATURE = 5
+} pf_resolve_reason_t;
+
+static inline void pf_stats_record_resolve(statistics *stats, int multi_alt, pf_resolve_reason_t reason) {
+    if (!stats) {
+        return;
+    }
+    stats->resolve_calls_total++;
+    if (multi_alt) {
+        stats->resolve_calls_multi_alt++;
+    }
+
+    switch (reason) {
+        case PF_RESOLVE_REASON_RESOLVED:
+            stats->resolve_resolved++;
+            if (multi_alt) {
+                stats->resolve_multi_alt_resolved++;
+            }
+            break;
+        case PF_RESOLVE_REASON_NO_HIT:
+            stats->resolve_no_hit++;
+            if (multi_alt) {
+                stats->resolve_multi_alt_no_hit++;
+            }
+            break;
+        case PF_RESOLVE_REASON_TOO_MANY_N:
+            stats->resolve_too_many_n++;
+            if (multi_alt) {
+                stats->resolve_multi_alt_too_many_n++;
+            }
+            break;
+        case PF_RESOLVE_REASON_AMBIGUOUS_TIE:
+            stats->resolve_ambiguous_tie++;
+            if (multi_alt) {
+                stats->resolve_multi_alt_ambiguous_tie++;
+            }
+            break;
+        case PF_RESOLVE_REASON_AMBIGUOUS_NO_FEATURE:
+            stats->resolve_ambiguous_no_feature++;
+            if (multi_alt) {
+                stats->resolve_multi_alt_ambiguous_no_feature++;
+            }
+            break;
+        default:
+            break;
+    }
+}
+
 typedef struct {
     int kind;
     char *anchor;
@@ -719,6 +772,18 @@ void initialize_statistics(statistics *stats) {
     stats->limited_simple_fallback_hits = 0;
     stats->limited_full_fallback_calls = 0;
     stats->limited_full_fallback_hits = 0;
+    stats->resolve_calls_total = 0;
+    stats->resolve_calls_multi_alt = 0;
+    stats->resolve_too_many_n = 0;
+    stats->resolve_no_hit = 0;
+    stats->resolve_ambiguous_tie = 0;
+    stats->resolve_ambiguous_no_feature = 0;
+    stats->resolve_resolved = 0;
+    stats->resolve_multi_alt_too_many_n = 0;
+    stats->resolve_multi_alt_no_hit = 0;
+    stats->resolve_multi_alt_ambiguous_tie = 0;
+    stats->resolve_multi_alt_ambiguous_no_feature = 0;
+    stats->resolve_multi_alt_resolved = 0;
     stats->unmatched_list.first_entry = NULL;
     stats->unmatched_list.last_entry = NULL;
 }
@@ -940,94 +1005,138 @@ unmatched_barcodes_features_block* add_unmatched_barcode_store_feature(unsigned 
 }
 
 
+static int parse_whitelist_first_token(const char *line, char *token_out, size_t token_cap) {
+    if (!line || !token_out || token_cap == 0) {
+        return 0;
+    }
+    size_t i = 0;
+    while (line[i] != '\0' && isspace((unsigned char)line[i])) {
+        i++;
+    }
+    if (line[i] == '\0' || line[i] == '#') {
+        return 0;
+    }
+
+    size_t j = 0;
+    while (line[i] != '\0' && !isspace((unsigned char)line[i]) && line[i] != ',') {
+        char c = (char)toupper((unsigned char)line[i]);
+        if (!(c == 'A' || c == 'C' || c == 'G' || c == 'T' || c == 'N')) {
+            return -1;
+        }
+        if (j + 1 >= token_cap) {
+            return -1;
+        }
+        token_out[j++] = c;
+        i++;
+    }
+    token_out[j] = '\0';
+    return j > 0 ? 1 : 0;
+}
+
 unsigned char* read_whiteList(char *whitelist_filename, khash_t(u32ptr) *hash, int reverse_complement_flag){
     FILE *whitelist_file = fopen(whitelist_filename, "r");
     if (whitelist_file == NULL) {
         fprintf(stderr, "Failed to open whitelist file %s\n", whitelist_filename);
         exit(EXIT_FAILURE);
     }
+
     char line[LINE_LENGTH];
-    //just in case the file is corrupted - calculate the sizes by counting lines
-    //find the number of lines in the file by counting the number of newlines
-    char ch=0,lastChar=0;
-    size_t line_count=0;
-    //from the first line calculate the barcode length and check if the sequence is valid
-    int sequence_count=0;
-    while((ch = fgetc(whitelist_file)) != EOF) {
-        if(ch == 'A' || ch == 'C' || ch == 'G' || ch == 'T' || ch == 'N'){
-            sequence_count++;
+    char token[LINE_LENGTH];
+    char **tokens = NULL;
+    size_t tokens_n = 0;
+    size_t tokens_cap = 0;
+
+    while (fgets(line, LINE_LENGTH, whitelist_file) != NULL) {
+        int parse_status = parse_whitelist_first_token(line, token, sizeof(token));
+        if (parse_status == 0) {
+            continue;
         }
-        else if (ch == '\n') {
-            if(sequence_count){
-                if (barcode_length==0){
-                    barcode_length=sequence_count;
-                    barcode_code_length=(barcode_length+3)/4;
-                }
-                else if (sequence_count != barcode_length){
-                    fprintf(stderr, "Error: Invalid barcode length %d\n", sequence_count);
-                    exit(EXIT_FAILURE);
-                }
-                sequence_count=0;
-                line_count++;
-            }
-        }
-        else{
-            fprintf(stderr, "Error: Invalid character %c in whitelist file\n", ch);
+        if (parse_status < 0) {
+            fprintf(stderr,
+                    "Error: Invalid whitelist row (expected barcode token in column 1): %s",
+                    line);
             exit(EXIT_FAILURE);
         }
+
+        int seq_len = (int)strlen(token);
+        if (barcode_length == 0) {
+            barcode_length = seq_len;
+            barcode_code_length = (barcode_length + 3) / 4;
+        } else if (seq_len != barcode_length) {
+            fprintf(stderr,
+                    "Error: Invalid barcode length %d in whitelist row (expected %d): %s",
+                    seq_len, barcode_length, line);
+            exit(EXIT_FAILURE);
+        }
+
+        if (tokens_n == tokens_cap) {
+            size_t new_cap = (tokens_cap == 0) ? 4096 : (tokens_cap * 2);
+            char **new_tokens = realloc(tokens, new_cap * sizeof(char *));
+            if (!new_tokens) {
+                fprintf(stderr, "Failed to allocate memory for whitelist rows\n");
+                exit(EXIT_FAILURE);
+            }
+            tokens = new_tokens;
+            tokens_cap = new_cap;
+        }
+        tokens[tokens_n] = strdup(token);
+        if (!tokens[tokens_n]) {
+            fprintf(stderr, "Failed to allocate memory for whitelist token\n");
+            exit(EXIT_FAILURE);
+        }
+        tokens_n++;
     }
-    // If the last character isn't a newline, increment the count
-    if (lastChar != '\n') {
-        line_count++;
+    fclose(whitelist_file);
+
+    if (tokens_n == 0) {
+        fprintf(stderr, "Error: No valid whitelist barcode rows found in %s\n", whitelist_filename);
+        exit(EXIT_FAILURE);
     }
-    
-    whitelist = malloc(line_count * barcode_code_length);
+
+    whitelist = malloc(tokens_n * barcode_code_length);
     if (whitelist == NULL) {
         fprintf(stderr, "Failed to allocate memory for whitelist storage\n");
         exit(EXIT_FAILURE);
     }
-    memset(whitelist, 0, line_count * barcode_code_length);
-    //reset the file pointer to the beginning of the file
-    fseek(whitelist_file, 0, SEEK_SET);
-    size_t nBarcodes=0;
-    //set line to zero
-    memset(line, 0, LINE_LENGTH);
+    memset(whitelist, 0, tokens_n * barcode_code_length);
+
+    size_t nBarcodes = 0;
     char barcode_sequence[LINE_LENGTH];
-    while ( fgets(line, LINE_LENGTH, whitelist_file) != NULL) {
-        if (!check_sequence(line, barcode_length)){
-            fprintf(stderr, "Error: Invalid barcode sequence of expected length %d %s\n",barcode_length,line);
-            exit(EXIT_FAILURE);
+    for (size_t row = 0; row < tokens_n; row++) {
+        if (reverse_complement_flag) {
+            reverse_complement_sequence(tokens[row], barcode_sequence, barcode_length);
+        } else {
+            memcpy(barcode_sequence, tokens[row], (size_t)barcode_length + 1);
         }
-        //up to 16 characters will be stored in uint32_t
-        memset(line+barcode_length, 0, LINE_LENGTH-barcode_length);
-        if (reverse_complement_flag){
-            reverse_complement_sequence(line, barcode_sequence, barcode_length);
-        }
-        else{
-            memcpy(barcode_sequence, line, barcode_length+1);
-        }
-        int j=0;
-        int i=0;
-        const size_t offset=nBarcodes*barcode_code_length;
-        memset(whitelist+offset, 0, barcode_code_length);
-        while(j<barcode_length){
-            unsigned char char_value=seq2code[(unsigned char)barcode_sequence[j]]<<6 | seq2code[(unsigned char)barcode_sequence[j+1]]<<4 | seq2code[(unsigned char)barcode_sequence[j+2]]<<2 | seq2code[(unsigned char)barcode_sequence[j+3]];
-            whitelist[offset+i]=char_value;
+
+        int j = 0;
+        int i = 0;
+        const size_t offset = nBarcodes * barcode_code_length;
+        memset(whitelist + offset, 0, barcode_code_length);
+        while (j < barcode_length) {
+            unsigned char char_value =
+                seq2code[(unsigned char)barcode_sequence[j]] << 6 |
+                seq2code[(unsigned char)barcode_sequence[j + 1]] << 4 |
+                seq2code[(unsigned char)barcode_sequence[j + 2]] << 2 |
+                seq2code[(unsigned char)barcode_sequence[j + 3]];
+            whitelist[offset + i] = char_value;
             i++;
-            j+=4;
+            j += 4;
         }
-        uint32_t key = *(uint32_t*)(whitelist+offset);
+        uint32_t key = *(uint32_t*)(whitelist + offset);
         int ret;
         khint_t kh = kh_put(u32ptr, hash, key, &ret);
         if (ret < 0) {
-            fprintf(stderr, "Error: Failed to insert barcode %s into the hash table %ld\n", line, nBarcodes);
+            fprintf(stderr, "Error: Failed to insert barcode into whitelist hash at row %zu\n", nBarcodes);
             exit(EXIT_FAILURE);
         }
-        kh_val(hash, kh) = whitelist+offset;
+        kh_val(hash, kh) = whitelist + offset;
         nBarcodes++;
+        free(tokens[row]);
     }
+    free(tokens);
+
     fprintf(stderr, "Read %ld barcodes\n", nBarcodes);
-    fclose(whitelist_file);
     return whitelist;
 }
 /* moved to barcode_match.c */
@@ -1334,21 +1443,11 @@ int simple_code_search(feature_arrays *features, char *sequence){
 int simple_hash_search(feature_arrays *features, char *sequence){
     const int string_length=strlen(sequence);
     const int feature_sequence_length=features->feature_lengths[0];
-    const int sequence_code_length=features->feature_code_lengths[0];
     if (string_length < feature_sequence_length) return 0;
-    char local_line[LINE_LENGTH];
-    memcpy(local_line, sequence, feature_sequence_length);
-    local_line[feature_sequence_length]='\0';
-    unsigned char code[sequence_code_length];
-    string2code(local_line, feature_sequence_length, code);
-    
-    // Create a var_key_t key for lookup.
-    var_key_t key = {.ptr = code, .len = sequence_code_length};
-    khint_t k = kh_get(codeu32, feature_code_hash, key);
-    if (k != kh_end(feature_code_hash)){
-        return kh_val(feature_code_hash, k);
-    }
-    //check against the mismatched features
+
+    int result = feature_lookup_seq(sequence, feature_sequence_length);
+    if (result) return result;
+
     for (int i=0; i<features->number_of_mismatched_features; i++){
         char *query=sequence;
         char *feature=features->feature_sequences[features->mismatched_feature_indices[i]];
@@ -1439,39 +1538,60 @@ int simple_hamming_search(feature_arrays *features, char *line, int maxHammingDi
     if (features->number_of_mismatched_features == 0 &&
         features->common_length > 0 &&
         (int)strlen(line) >= features->common_length) {
+        /* Policy: exact hash first, then <=1 cumulative hash, then <=2. */
+        int exact_feature = simple_hash_search(features, line);
+        if (exact_feature) {
+            *hamming_distance = 0;
+            return exact_feature;
+        }
+        if (maxHammingDistance <= 0) {
+            *hamming_distance = maxHammingDistance + 1;
+            return 0;
+        }
+
+        const int have_le1 = (features->feature_hamming_le1_enabled && features->feature_hamming_le1_hash);
+        const int have_le2 = (features->feature_hamming_le2_enabled && features->feature_hamming_le2_hash);
+
         char query[MAX_FEATURE_SEQUENCE_LENGTH + 1];
         memcpy(query, line, (size_t)features->common_length);
         query[features->common_length] = '\0';
 
-        uint32_t payload = 0;
-        int payload_found = 0;
-        /* Highest-hash-first policy: probe the maximum allowed cumulative table first. */
-        if (maxHammingDistance >= 2 && features->feature_hamming_le2_enabled && features->feature_hamming_le2_hash) {
-            khint_t k = kh_get(stru32, features->feature_hamming_le2_hash, query);
-            if (k != kh_end(features->feature_hamming_le2_hash)) {
-                payload = kh_val(features->feature_hamming_le2_hash, k);
-                payload_found = 1;
+        if (maxHammingDistance >= 1 && have_le1) {
+            khint_t k1 = kh_get(stru32, features->feature_hamming_le1_hash, query);
+            if (k1 != kh_end(features->feature_hamming_le1_hash)) {
+                const uint32_t payload = kh_val(features->feature_hamming_le1_hash, k1);
+                const int payload_hamming = (int)((payload >> 29u) & 0x3u);
+                const int payload_ambiguous = ((payload & 0x80000000u) != 0u);
+                const int payload_feature = (int)(payload & 0x1FFFFFFFu);
+                *hamming_distance = payload_hamming;
+                if (!payload_ambiguous && payload_feature > 0 && payload_hamming <= maxHammingDistance) {
+                    return payload_feature;
+                }
+                /* Ambiguous payload at best distance is terminal. */
+                return 0;
             }
-        } else if (maxHammingDistance >= 1 && features->feature_hamming_le1_enabled && features->feature_hamming_le1_hash) {
-            khint_t k = kh_get(stru32, features->feature_hamming_le1_hash, query);
-            if (k != kh_end(features->feature_hamming_le1_hash)) {
-                payload = kh_val(features->feature_hamming_le1_hash, k);
-                payload_found = 1;
+            if (maxHammingDistance == 1) {
+                /* <=1 table is complete for this ceiling. */
+                *hamming_distance = maxHammingDistance + 1;
+                return 0;
             }
         }
-        if (!payload_found) {
-            /* Fast return when the highest available hash has no match. */
+
+        if (maxHammingDistance >= 2 && have_le2) {
+            khint_t k2 = kh_get(stru32, features->feature_hamming_le2_hash, query);
+            if (k2 != kh_end(features->feature_hamming_le2_hash)) {
+                const uint32_t payload = kh_val(features->feature_hamming_le2_hash, k2);
+                const int payload_hamming = (int)((payload >> 29u) & 0x3u);
+                const int payload_ambiguous = ((payload & 0x80000000u) != 0u);
+                const int payload_feature = (int)(payload & 0x1FFFFFFFu);
+                *hamming_distance = payload_hamming;
+                if (!payload_ambiguous && payload_feature > 0 && payload_hamming <= maxHammingDistance) {
+                    return payload_feature;
+                }
+                return 0;
+            }
+            /* <=2 table is complete for this ceiling. */
             *hamming_distance = maxHammingDistance + 1;
-            return 0;
-        }
-        if (payload_found) {
-            const int payload_hamming = (int)((payload >> 29u) & 0x3u);
-            const int payload_ambiguous = ((payload & 0x80000000u) != 0u);
-            const int payload_feature = (int)(payload & 0x1FFFFFFFu);
-            *hamming_distance = payload_hamming;
-            if (!payload_ambiguous && payload_feature > 0 && payload_hamming <= maxHammingDistance) {
-                return payload_feature;
-            }
             return 0;
         }
     }
@@ -1484,7 +1604,9 @@ int simple_hamming_search(feature_arrays *features, char *line, int maxHammingDi
 
     int ambiguous=0;
     int bestFeature=0;
-    int bestHammingDistance=maxHammingDistance;
+    /* Keep >max as the no-match sentinel so callers can distinguish
+     * no hit from true ambiguity. */
+    int bestHammingDistance=maxHammingDistance+1;
     for (int i=0; i<features->number_of_features; i++){
         char *query=line;
         char *feature=features->feature_sequences[i];
@@ -1533,7 +1655,9 @@ int find_feature_match_single(feature_arrays *features, char *lineR2, int maxHam
     int code_lengths[4];
     string2all_codes(lineR2, codes, code_lengths);
     int best_feature=0;
-    int bestHammingDistance=maxHammingDistance; 
+    /* Keep >max as the no-match sentinel so callers can distinguish
+     * true ambiguity (<=max with feature_index=0) from no hit. */
+    int bestHammingDistance=maxHammingDistance+1; 
     int best_sequence_offset=0;
     int ambiguous=0;
     const int use_offsets = (use_feature_offset_array && feature_offsets && feature_offsets_count >= features->number_of_features);
@@ -1608,8 +1732,10 @@ int find_feature_match_parallel(feature_arrays *features, char *lineR2, int maxH
     string2all_codes(lineR2, codes, code_lengths);
 
     int best_feature=0;
-    int bestFeatureDistance=maxHammingDistance;
-    int bestHammingDistances[4]={maxHammingDistance,maxHammingDistance,maxHammingDistance,maxHammingDistance};
+    /* Keep >max as the no-match sentinel so callers can distinguish
+     * true ambiguity (<=max with feature_index=0) from no hit. */
+    int bestFeatureDistance=maxHammingDistance+1;
+    int bestHammingDistances[4]={maxHammingDistance+1,maxHammingDistance+1,maxHammingDistance+1,maxHammingDistance+1};
     int best_code_offsets[4]={0,0,0,0};
     int ambiguous[4]={0,0,0,0};
     int best_match[4]={0,0,0,0};
@@ -1623,7 +1749,7 @@ int find_feature_match_parallel(feature_arrays *features, char *lineR2, int maxH
     #pragma omp parallel for num_threads(nThreads) schedule(static)
     for (int i=0; i<4; i++){
         int local_best_match=0;
-        int local_best_hamming=maxHammingDistance;
+        int local_best_hamming=maxHammingDistance+1;
         int local_best_code_offset=0;
         int local_ambiguous=0;
         int local_exact_match=0;
@@ -2372,8 +2498,7 @@ void printFeatureCounts(feature_arrays *features, int *deduped_counts, int *barc
             char barcode[barcode_length + 1];
             code2string((unsigned char *)&bcode_key, barcode, barcode_code_length);
             if (translate_NXT) translate_nxt_inplace(barcode, barcode_length);
-            khint_t kf = kh_get(strptr, filtered_barcodes_hash, barcode);
-            if (kf == kh_end(filtered_barcodes_hash)) {
+            if (!filtered_barcode_hash_contains(filtered_barcodes_hash, barcode)) {
                 continue;
             }
         }
@@ -2413,8 +2538,7 @@ void printFeatureCounts(feature_arrays *features, int *deduped_counts, int *barc
         code2string((unsigned char *)&barcode_key, barcode, barcode_code_length);
         if (translate_NXT) translate_nxt_inplace(barcode, barcode_length);
         if (filtered_barcodes_hash) {
-            khint_t kf = kh_get(strptr, filtered_barcodes_hash, barcode);
-            if (kf == kh_end(filtered_barcodes_hash)) {
+            if (!filtered_barcode_hash_contains(filtered_barcodes_hash, barcode)) {
                 skipped_barcodes++;
                 continue;
             }
@@ -2532,8 +2656,7 @@ void printFeatureCounts(feature_arrays *features, int *deduped_counts, int *barc
                 code2string(entry->sequence_code, barcode, barcode_code_length);
                 if (translate_NXT) translate_nxt_inplace(barcode, barcode_length);
                 if (filtered_barcodes_hash) {
-                    khint_t kf = kh_get(strptr, filtered_barcodes_hash, barcode);
-                    if (kf == kh_end(filtered_barcodes_hash)) {
+                    if (!filtered_barcode_hash_contains(filtered_barcodes_hash, barcode)) {
                         total_excluded_barcodes++;
                         continue;
                     }
@@ -2587,6 +2710,20 @@ void printFeatureCounts(feature_arrays *features, int *deduped_counts, int *barc
     fprintf (stderr, "Limited simple fallback hits %zu\n", stats->limited_simple_fallback_hits);
     fprintf (stderr, "Limited full fallback calls %zu\n", stats->limited_full_fallback_calls);
     fprintf (stderr, "Limited full fallback hits %zu\n", stats->limited_full_fallback_hits);
+    fprintf (stderr, "Resolve calls total %zu\n", stats->resolve_calls_total);
+    fprintf (stderr, "Resolve calls multi_alt %zu\n", stats->resolve_calls_multi_alt);
+    fprintf (stderr, "Resolve outcomes total resolved=%zu no_hit=%zu too_many_n=%zu ambiguous_tie=%zu ambiguous_no_feature=%zu\n",
+             stats->resolve_resolved,
+             stats->resolve_no_hit,
+             stats->resolve_too_many_n,
+             stats->resolve_ambiguous_tie,
+             stats->resolve_ambiguous_no_feature);
+    fprintf (stderr, "Resolve outcomes multi_alt resolved=%zu no_hit=%zu too_many_n=%zu ambiguous_tie=%zu ambiguous_no_feature=%zu\n",
+             stats->resolve_multi_alt_resolved,
+             stats->resolve_multi_alt_no_hit,
+             stats->resolve_multi_alt_too_many_n,
+             stats->resolve_multi_alt_ambiguous_tie,
+             stats->resolve_multi_alt_ambiguous_no_feature);
     fprintf (statsfp, "Total feature counts %d\n", total_raw_counts);
     fprintf (statsfp, "Total deduped feature counts %d\n", total_deduped_counts);
     fprintf (statsfp, "Total barcodes %d\n", total_barcodes);
@@ -2602,6 +2739,18 @@ void printFeatureCounts(feature_arrays *features, int *deduped_counts, int *barc
     fprintf (statsfp, "Limited_simple_fallback_hits %zu\n", stats->limited_simple_fallback_hits);
     fprintf (statsfp, "Limited_full_fallback_calls %zu\n", stats->limited_full_fallback_calls);
     fprintf (statsfp, "Limited_full_fallback_hits %zu\n", stats->limited_full_fallback_hits);
+    fprintf (statsfp, "Resolve_calls_total %zu\n", stats->resolve_calls_total);
+    fprintf (statsfp, "Resolve_calls_multi_alt %zu\n", stats->resolve_calls_multi_alt);
+    fprintf (statsfp, "Resolve_total_resolved %zu\n", stats->resolve_resolved);
+    fprintf (statsfp, "Resolve_total_no_hit %zu\n", stats->resolve_no_hit);
+    fprintf (statsfp, "Resolve_total_too_many_n %zu\n", stats->resolve_too_many_n);
+    fprintf (statsfp, "Resolve_total_ambiguous_tie %zu\n", stats->resolve_ambiguous_tie);
+    fprintf (statsfp, "Resolve_total_ambiguous_no_feature %zu\n", stats->resolve_ambiguous_no_feature);
+    fprintf (statsfp, "Resolve_multi_alt_resolved %zu\n", stats->resolve_multi_alt_resolved);
+    fprintf (statsfp, "Resolve_multi_alt_no_hit %zu\n", stats->resolve_multi_alt_no_hit);
+    fprintf (statsfp, "Resolve_multi_alt_too_many_n %zu\n", stats->resolve_multi_alt_too_many_n);
+    fprintf (statsfp, "Resolve_multi_alt_ambiguous_tie %zu\n", stats->resolve_multi_alt_ambiguous_tie);
+    fprintf (statsfp, "Resolve_multi_alt_ambiguous_no_feature %zu\n", stats->resolve_multi_alt_ambiguous_no_feature);
     fclose(statsfp);
 
     if (feature_richness_hist) {
@@ -2676,8 +2825,7 @@ void printFeatureCounts(feature_arrays *features, int *deduped_counts, int *barc
             code2string((unsigned char *)&barcode_key, barcode, barcode_code_length);    
             if (translate_NXT) translate_nxt_inplace(barcode, barcode_length);
             if (filtered_barcodes_hash) {
-                khint_t kf = kh_get(strptr, filtered_barcodes_hash, barcode);
-                if (kf == kh_end(filtered_barcodes_hash))
+                if (!filtered_barcode_hash_contains(filtered_barcodes_hash, barcode))
                     continue;
             }
 
@@ -2799,8 +2947,7 @@ void printFeatureCounts(feature_arrays *features, int *deduped_counts, int *barc
         if (translate_NXT) translate_nxt_inplace(barcode, barcode_length);
 
         if (filtered_barcodes_hash) {
-            khint_t kf = kh_get(strptr, filtered_barcodes_hash, barcode);
-            if (kf == kh_end(filtered_barcodes_hash)) {
+            if (!filtered_barcode_hash_contains(filtered_barcodes_hash, barcode)) {
                 skipped_barcodes++;
                 continue;
             }
@@ -3197,7 +3344,7 @@ static int resolve_feature_over_n_alts(
     return 0;
 }
 
-int simpleCorrectFeature(char *line, feature_arrays *features, int maxN, int maxHammingDistance, int *hamming_distance){
+int simpleCorrectFeature(char *line, feature_arrays *features, int maxN, int maxHammingDistance, int *hamming_distance, statistics *stats){
     int best_feature = simple_search(features, line);
     *hamming_distance = 0;
     if (best_feature) {
@@ -3208,8 +3355,10 @@ int simpleCorrectFeature(char *line, feature_arrays *features, int maxN, int max
     char buffer[(length + 1) * (4 << ((maxN - 1) * 2))];
     char *corrected_seqs[4 << ((maxN - 1) * 2)];
     int nAlts = checkSequenceAndCorrectForN(line, corrected_seqs, buffer, length, maxN);
+    const int multi_alt = (nAlts > 1);
     if (nAlts <= 0) {
         *hamming_distance = maxHammingDistance + 1;
+        pf_stats_record_resolve(stats, strchr(line, 'N') != NULL, PF_RESOLVE_REASON_TOO_MANY_N);
         return 0;
     }
 
@@ -3233,11 +3382,19 @@ int simpleCorrectFeature(char *line, feature_arrays *features, int maxN, int max
     (void)myAmbiguous;
     *hamming_distance = best.hamming_distance;
     if (resolved) {
+        pf_stats_record_resolve(stats, multi_alt, PF_RESOLVE_REASON_RESOLVED);
         return resolved;
+    }
+    if (myAmbiguous) {
+        pf_stats_record_resolve(stats, multi_alt, PF_RESOLVE_REASON_AMBIGUOUS_TIE);
+    } else if (best.hamming_distance <= maxHammingDistance) {
+        pf_stats_record_resolve(stats, multi_alt, PF_RESOLVE_REASON_AMBIGUOUS_NO_FEATURE);
+    } else {
+        pf_stats_record_resolve(stats, multi_alt, PF_RESOLVE_REASON_NO_HIT);
     }
     return 0;
 }
-int checkAndCorrectFeature(char *line, feature_arrays *features,int maxHammingDistance, int nThreads, int *hamming_distance, char *matching_sequence, int maxN,char *ambiguous, uint16_t *match_position){
+int checkAndCorrectFeature(char *line, feature_arrays *features,int maxHammingDistance, int nThreads, int *hamming_distance, char *matching_sequence, int maxN,char *ambiguous, uint16_t *match_position, statistics *stats){
     const size_t length=strlen(line)-1;
     char buffer[(length+1) * (4 << ((maxN-1)*2))];
     char *corrected_seqs[ 4 << ((maxN-1)*2)];
@@ -3249,11 +3406,13 @@ int checkAndCorrectFeature(char *line, feature_arrays *features,int maxHammingDi
     //return ambiguous if the hamming distance is non-zero but the feature is zero
     //return ambiguous if there are too many Ns ie. nAlts is zero - distinguish this by setting hamming distance to maxHammingDistance+1
     int nAlts=checkSequenceAndCorrectForN(line, corrected_seqs, buffer, length, maxN);
+    const int multi_alt = (nAlts > 1);
     if (!nAlts){
         *hamming_distance=maxHammingDistance+1;
         if (ambiguous) {
             *ambiguous=1;
         }
+        pf_stats_record_resolve(stats, strchr(line, 'N') != NULL, PF_RESOLVE_REASON_TOO_MANY_N);
         return 0;
     }
 
@@ -3288,7 +3447,15 @@ int checkAndCorrectFeature(char *line, feature_arrays *features,int maxHammingDi
         if (match_position) {
             *match_position = best.match_position;
         }
+        pf_stats_record_resolve(stats, multi_alt, PF_RESOLVE_REASON_RESOLVED);
         return feature_index;
+    }
+    if (myAmbiguous) {
+        pf_stats_record_resolve(stats, multi_alt, PF_RESOLVE_REASON_AMBIGUOUS_TIE);
+    } else if (best.hamming_distance <= maxHammingDistance) {
+        pf_stats_record_resolve(stats, multi_alt, PF_RESOLVE_REASON_AMBIGUOUS_NO_FEATURE);
+    } else {
+        pf_stats_record_resolve(stats, multi_alt, PF_RESOLVE_REASON_NO_HIT);
     }
     return 0;
 }
@@ -3851,7 +4018,7 @@ void process_feature_sequence(char *sequence, feature_arrays *features, int maxH
                         tmp_hamming = offset_cached_hamming[current_offset];
                     } else {
                         const int query_max_hamming = adaptive_query_max_hamming(features, maxHammingDistance, bestHamming, bestFeature);
-                        idx = simpleCorrectFeature(sequence + current_offset, features, max_feature_n, query_max_hamming, &tmp_hamming);
+                        idx = simpleCorrectFeature(sequence + current_offset, features, max_feature_n, query_max_hamming, &tmp_hamming, stats);
                         offset_cache_valid[current_offset] = 1;
                         offset_cached_idx[current_offset] = idx;
                         offset_cached_hamming[current_offset] = tmp_hamming;
@@ -3929,7 +4096,7 @@ void process_feature_sequence(char *sequence, feature_arrays *features, int maxH
                                 tmp_hamming = offset_cached_hamming[current_offset];
                             } else {
                                 const int query_max_hamming = adaptive_query_max_hamming(features, maxHammingDistance, bestHamming, bestFeature);
-                                idx = simpleCorrectFeature(sequence + current_offset, features, max_feature_n, query_max_hamming, &tmp_hamming);
+                                idx = simpleCorrectFeature(sequence + current_offset, features, max_feature_n, query_max_hamming, &tmp_hamming, stats);
                                 offset_cache_valid[current_offset] = 1;
                                 offset_cached_idx[current_offset] = idx;
                                 offset_cached_hamming[current_offset] = tmp_hamming;
@@ -3998,7 +4165,7 @@ void process_feature_sequence(char *sequence, feature_arrays *features, int maxH
                                 tmp_hamming = offset_cached_hamming[current_offset];
                             } else {
                                 const int query_max_hamming = adaptive_query_max_hamming(features, maxHammingDistance, bestHamming, bestFeature);
-                                idx = simpleCorrectFeature(sequence + current_offset, features, max_feature_n, query_max_hamming, &tmp_hamming);
+                                idx = simpleCorrectFeature(sequence + current_offset, features, max_feature_n, query_max_hamming, &tmp_hamming, stats);
                                 offset_cache_valid[current_offset] = 1;
                                 offset_cached_idx[current_offset] = idx;
                                 offset_cached_hamming[current_offset] = tmp_hamming;
@@ -4057,7 +4224,7 @@ void process_feature_sequence(char *sequence, feature_arrays *features, int maxH
                                 tmp_hamming = offset_cached_hamming[current_offset];
                             } else {
                                 const int query_max_hamming = adaptive_query_max_hamming(features, maxHammingDistance, bestHamming, bestFeature);
-                                idx = simpleCorrectFeature(sequence + current_offset, features, max_feature_n, query_max_hamming, &tmp_hamming);
+                                idx = simpleCorrectFeature(sequence + current_offset, features, max_feature_n, query_max_hamming, &tmp_hamming, stats);
                                 offset_cache_valid[current_offset] = 1;
                                 offset_cached_idx[current_offset] = idx;
                                 offset_cached_hamming[current_offset] = tmp_hamming;
@@ -4117,7 +4284,7 @@ void process_feature_sequence(char *sequence, feature_arrays *features, int maxH
                         int bc_pos = pf_anchor_bc_position(anchor_kind, anchor_pos, expected_offset, feature_len);
                         if (bc_pos >= 0 && (size_t)bc_pos + feature_len <= read_len) {
                             int tmp_hamming = 0;
-                            uint32_t idx = simpleCorrectFeature(sequence + bc_pos, features, max_feature_n, maxHammingDistance, &tmp_hamming);
+                            uint32_t idx = simpleCorrectFeature(sequence + bc_pos, features, max_feature_n, maxHammingDistance, &tmp_hamming, stats);
                             if (idx == (uint32_t)(j + 1)) {
                                 *feature_index = idx;
                                 *hamming_distance = tmp_hamming;
@@ -4154,7 +4321,7 @@ void process_feature_sequence(char *sequence, feature_arrays *features, int maxH
                     int bc_pos = pf_anchor_bc_position(anchor_kind, anchor_pos, expected_offset, feature_len);
                     if (bc_pos >= 0 && (size_t)bc_pos + feature_len <= read_len) {
                         int tmp_hamming = 0;
-                        uint32_t idx = simpleCorrectFeature(sequence + bc_pos, features, max_feature_n, maxHammingDistance, &tmp_hamming);
+                        uint32_t idx = simpleCorrectFeature(sequence + bc_pos, features, max_feature_n, maxHammingDistance, &tmp_hamming, stats);
                         if (idx == (uint32_t)(j + 1)) {
                             *feature_index = idx;
                             *hamming_distance = tmp_hamming;
@@ -4171,178 +4338,242 @@ void process_feature_sequence(char *sequence, feature_arrays *features, int maxH
         }
     }
     if (!use_feature_offset_array && limit_search != -1 && feature_constant_offset >= 0) {
-        // Limited-offset precheck: exact-only at expected offset and nearby offsets.
-        // If no exact hit is found, fall back to configured matcher.
+        /* Build nearby candidate offsets in deterministic order: 0, +1, -1, +2, -2, ... */
+        const int max_candidates = 2 * limit_search + 1;
+        int candidate_offsets[max_candidates > 0 ? max_candidates : 1];
+        int ncandidates = 0;
         for (int i = 0; i <= limit_search; i++) {
-            // For i=0, this checks offset 0. For i>0, it checks +i and -i.
             for (int sign = 1; sign >= -1; sign -= 2) {
-                if (i == 0 && sign == -1) continue; // Only check offset 0 once
-
-                int offset_delta = i * sign;
-                int current_offset = feature_constant_offset + offset_delta;
-                if (current_offset < 0) continue;
-                if (stats) {
-                    stats->limited_exact_checks++;
+                if (i == 0 && sign == -1) {
+                    continue;
                 }
-
-                uint32_t currentFeatureIndex = exactCorrectFeature(
-                    sequence + current_offset,
-                    features,
-                    max_feature_n
-                );
-                if (currentFeatureIndex) {
-                    if (stats) {
-                        stats->limited_exact_hits++;
-                    }
-                    *feature_index = currentFeatureIndex;
-                    *hamming_distance = 0;
-                    *match_position = current_offset;
-                    memcpy(matching_sequence, sequence + current_offset, features->feature_lengths[currentFeatureIndex - 1]);
-                    matching_sequence[features->feature_lengths[currentFeatureIndex - 1]] = '\0';
-                    return;
+                int current_offset = feature_constant_offset + (i * sign);
+                if (current_offset < 0 || current_offset >= (int)read_len) {
+                    continue;
                 }
+                candidate_offsets[ncandidates++] = current_offset;
             }
         }
 
-        if (feature_limited_fallback_mode == 1) {
-            if (stats) {
-                stats->limited_simple_fallback_calls++;
-            }
-            uint32_t bestFeature = 0;
-            int bestHamming = maxHammingDistance + 1;
-            int ambiguous = 0;
-            uint16_t bestMatchPosition = 0;
-            /* Global fallback (simple matcher): scan all candidate positions. */
-            for (int bc_pos = 0; bc_pos < (int)read_len; ++bc_pos) {
-                int tmp_hamming = maxHammingDistance + 1;
-                int query_max_hamming = adaptive_query_max_hamming(features, maxHammingDistance, bestHamming, bestFeature);
-                uint32_t idx = simpleCorrectFeature(
-                    sequence + bc_pos,
-                    features,
-                    max_feature_n,
-                    query_max_hamming,
-                    &tmp_hamming
-                );
-                if (!idx || tmp_hamming > maxHammingDistance) {
-                    continue;
-                }
-                int flen = features->feature_lengths[idx - 1];
-                if (bc_pos + flen > (int)read_len) {
-                    continue;
-                }
-                if (!bestFeature || tmp_hamming < bestHamming) {
-                    bestFeature = idx;
-                    bestHamming = tmp_hamming;
-                    bestMatchPosition = (uint16_t)bc_pos;
-                    ambiguous = 0;
-                } else if (tmp_hamming == bestHamming) {
-                    ambiguous = 1;
-                }
-            }
-
-            if (bestFeature && !ambiguous) {
-                if (stats) {
-                    stats->limited_simple_fallback_hits++;
-                }
-                *feature_index = bestFeature;
-                *hamming_distance = bestHamming;
-                *match_position = bestMatchPosition;
-                memcpy(matching_sequence, sequence + bestMatchPosition, features->feature_lengths[bestFeature - 1]);
-                matching_sequence[features->feature_lengths[bestFeature - 1]] = '\0';
-            } else {
-                *feature_index = 0;
-                *hamming_distance = (bestHamming <= maxHammingDistance) ? bestHamming : (maxHammingDistance + 1);
-            }
-            return;
+        if (feature_limited_fallback_mode == 1 && stats) {
+            stats->limited_simple_fallback_calls++;
         }
-
-        if (stats) {
+        if (feature_limited_fallback_mode == 0 && stats) {
             stats->limited_full_fallback_calls++;
         }
-        char ambiguous = 0;
-        char new_matching_sequence[LINE_LENGTH];
-        uint16_t new_match_position = 0;
-        int variableHammingDistance = maxHammingDistance;
-        int newFeatureIndex = checkAndCorrectFeature(
-            sequence,
-            features,
-            variableHammingDistance,
-            nThreads,
-            &variableHammingDistance,
-            new_matching_sequence,
-            max_feature_n,
-            &ambiguous,
-            &new_match_position
-        );
-        if (!ambiguous && newFeatureIndex && variableHammingDistance <= maxHammingDistance) {
-            if (stats) {
-                stats->limited_full_fallback_hits++;
+
+        /*
+         * Distance-phased policy over nearby offsets:
+         * pass 0: exact hash at all candidate positions
+         * pass 1: <=1 hash at all candidate positions (accept only d=1)
+         * pass 2: <=2 hash at all candidate positions (accept only d=2)
+         * ...
+         */
+        for (int d = 0; d <= maxHammingDistance; d++) {
+            uint32_t pass_feature = 0;
+            uint16_t pass_match_position = 0;
+            int pass_ambiguous = 0;
+            int pass_found = 0;
+            for (int oi = 0; oi < ncandidates; oi++) {
+                int current_offset = candidate_offsets[oi];
+                int tmp_hamming = maxHammingDistance + 1;
+                uint32_t idx = simpleCorrectFeature(
+                    sequence + current_offset,
+                    features,
+                    max_feature_n,
+                    d,
+                    &tmp_hamming,
+                    stats
+                );
+                if (d == 0 && stats) {
+                    stats->limited_exact_checks++;
+                }
+                if (!idx || tmp_hamming != d) {
+                    continue;
+                }
+                if (d == 0 && stats) {
+                    stats->limited_exact_hits++;
+                }
+                pass_found = 1;
+                if (!pass_feature) {
+                    pass_feature = idx;
+                    pass_match_position = (uint16_t)current_offset;
+                } else if (pass_feature != idx) {
+                    pass_ambiguous = 1;
+                }
             }
-            *feature_index = newFeatureIndex;
-            *hamming_distance = variableHammingDistance;
-            *match_position = new_match_position;
-            strcpy(matching_sequence, new_matching_sequence);
-        } else {
-            *feature_index = 0;
-            *hamming_distance = variableHammingDistance;
+
+            if (pass_found) {
+                if (!pass_ambiguous) {
+                    if (feature_limited_fallback_mode == 1 && stats && d > 0) {
+                        stats->limited_simple_fallback_hits++;
+                    }
+                    if (feature_limited_fallback_mode == 0 && stats && d > 0) {
+                        stats->limited_full_fallback_hits++;
+                    }
+                    *feature_index = pass_feature;
+                    *hamming_distance = d;
+                    *match_position = pass_match_position;
+                    memcpy(matching_sequence, sequence + pass_match_position, features->feature_lengths[pass_feature - 1]);
+                    matching_sequence[features->feature_lengths[pass_feature - 1]] = '\0';
+                } else {
+                    *feature_index = 0;
+                    *hamming_distance = d;
+                }
+                return;
+            }
         }
+
+        *feature_index = 0;
+        *hamming_distance = maxHammingDistance + 1;
         return;
     }
     int bestHammingDistance=0;
     int variableMaxHammingDistance=maxHammingDistance;
     uint32_t myFeatureIndex=0;
-    if (!use_feature_offset_array && feature_constant_offset > 0) {
-        int constantHammingDistance=0;
-        myFeatureIndex = simpleCorrectFeature(sequence + feature_constant_offset, features, max_feature_n, maxHammingDistance, &constantHammingDistance);
-        if (myFeatureIndex ) {
-            // need to have feature_index -1 because the feature index is 1 based but array in struct is 0 based
-            memcpy(matching_sequence, sequence + feature_constant_offset, features->feature_lengths[myFeatureIndex - 1]);
-            matching_sequence[features->feature_lengths[myFeatureIndex - 1]] = '\0';
-            *match_position = feature_constant_offset;
-            bestHammingDistance=constantHammingDistance;
-            variableMaxHammingDistance=constantHammingDistance;
-            //return immediately if we have a match with distance 0 (no need to check the variable hamming distance because it is the best if it also matches the offset)
-            if (constantHammingDistance == 0) {
-                *feature_index = myFeatureIndex;
-                *hamming_distance = bestHammingDistance;
-                return;
+    if (!use_feature_offset_array && feature_constant_offset >= 0) {
+        const int feat_len = features->common_length;
+        const int can_use_tiered = (features->number_of_mismatched_features == 0 &&
+                                     feat_len > 0);
+
+        if (can_use_tiered) {
+            /*
+             * Tiered search: exhaust cheap hash lookups across ALL offsets
+             * before falling through to the expensive brute-force scan.
+             *   Phase 1: d=0 exact hash at offsets {0, -1, +1}
+             *   Phase 2: d<=1 prehash  at offsets {0, -1, +1}
+             *   Phase 3: d<=2 prehash  at offsets {0, -1, +1}
+             *   Phase 4: brute-force fast hamming (checkAndCorrectFeature)
+             */
+            const int have_le1 = (features->feature_hamming_le1_enabled && features->feature_hamming_le1_hash);
+            const int have_le2 = (features->feature_hamming_le2_enabled && features->feature_hamming_le2_hash);
+            const int offsets[3] = { feature_constant_offset,
+                                     feature_constant_offset - 1,
+                                     feature_constant_offset + 1 };
+
+            /* Phase 1: d=0 exact hash at all offsets */
+            for (int i = 0; i < 3; i++) {
+                const int off = offsets[i];
+                if (off < 0 || off + feat_len > (int)read_len) continue;
+                int idx = simple_hash_search(features, sequence + off);
+                if (idx) {
+                    *feature_index = (uint32_t)idx;
+                    *hamming_distance = 0;
+                    memcpy(matching_sequence, sequence + off, features->feature_lengths[idx - 1]);
+                    matching_sequence[features->feature_lengths[idx - 1]] = '\0';
+                    *match_position = (uint16_t)off;
+                    return;
+                }
+            }
+
+            /* Phase 2: d<=1 prehash at all offsets */
+            if (maxHammingDistance >= 1 && have_le1) {
+                for (int i = 0; i < 3; i++) {
+                    const int off = offsets[i];
+                    if (off < 0 || off + feat_len > (int)read_len) continue;
+                    char query[MAX_FEATURE_SEQUENCE_LENGTH + 1];
+                    memcpy(query, sequence + off, (size_t)feat_len);
+                    query[feat_len] = '\0';
+                    khint_t k = kh_get(stru32, features->feature_hamming_le1_hash, query);
+                    if (k != kh_end(features->feature_hamming_le1_hash)) {
+                        const uint32_t payload = kh_val(features->feature_hamming_le1_hash, k);
+                        const int d = (int)((payload >> 29u) & 0x3u);
+                        const int amb = ((payload & 0x80000000u) != 0u);
+                        const int feat = (int)(payload & 0x1FFFFFFFu);
+                        if (!amb && feat > 0 && d <= maxHammingDistance) {
+                            *feature_index = (uint32_t)feat;
+                            *hamming_distance = d;
+                            memcpy(matching_sequence, sequence + off, features->feature_lengths[feat - 1]);
+                            matching_sequence[features->feature_lengths[feat - 1]] = '\0';
+                            *match_position = (uint16_t)off;
+                            return;
+                        }
+                    }
+                }
+            }
+
+            /* Phase 3: d<=2 prehash at all offsets */
+            if (maxHammingDistance >= 2 && have_le2) {
+                for (int i = 0; i < 3; i++) {
+                    const int off = offsets[i];
+                    if (off < 0 || off + feat_len > (int)read_len) continue;
+                    char query[MAX_FEATURE_SEQUENCE_LENGTH + 1];
+                    memcpy(query, sequence + off, (size_t)feat_len);
+                    query[feat_len] = '\0';
+                    khint_t k = kh_get(stru32, features->feature_hamming_le2_hash, query);
+                    if (k != kh_end(features->feature_hamming_le2_hash)) {
+                        const uint32_t payload = kh_val(features->feature_hamming_le2_hash, k);
+                        const int d = (int)((payload >> 29u) & 0x3u);
+                        const int amb = ((payload & 0x80000000u) != 0u);
+                        const int feat = (int)(payload & 0x1FFFFFFFu);
+                        if (!amb && feat > 0 && d <= maxHammingDistance) {
+                            *feature_index = (uint32_t)feat;
+                            *hamming_distance = d;
+                            memcpy(matching_sequence, sequence + off, features->feature_lengths[feat - 1]);
+                            matching_sequence[features->feature_lengths[feat - 1]] = '\0';
+                            *match_position = (uint16_t)off;
+                            return;
+                        }
+                    }
+                }
+            }
+
+            /* Phases 1-3 exhausted — fall through to brute-force (Phase 4) below */
+
+        } else {
+            /* Legacy per-offset cascade for mismatched-length features */
+            int constantHammingDistance=0;
+            myFeatureIndex = simpleCorrectFeature(sequence + feature_constant_offset, features, max_feature_n, maxHammingDistance, &constantHammingDistance, stats);
+            if (myFeatureIndex) {
+                memcpy(matching_sequence, sequence + feature_constant_offset, features->feature_lengths[myFeatureIndex - 1]);
+                matching_sequence[features->feature_lengths[myFeatureIndex - 1]] = '\0';
+                *match_position = feature_constant_offset;
+                bestHammingDistance=constantHammingDistance;
+                variableMaxHammingDistance=constantHammingDistance;
+                if (constantHammingDistance == 0) {
+                    *feature_index = myFeatureIndex;
+                    *hamming_distance = bestHammingDistance;
+                    return;
+                }
+            }
+            int minusOne_feature_constant_offset = feature_constant_offset - 1;
+            if (minusOne_feature_constant_offset >= 0) {
+                int minusOneFeatureIndex = simpleCorrectFeature(sequence + minusOne_feature_constant_offset, features, max_feature_n, maxHammingDistance, &constantHammingDistance, stats);
+                if (minusOneFeatureIndex && constantHammingDistance == 0) {
+                    *feature_index = minusOneFeatureIndex;
+                    *hamming_distance = bestHammingDistance;
+                    *match_position = minusOne_feature_constant_offset;
+                    return;
+                }
+                if (minusOneFeatureIndex && constantHammingDistance < bestHammingDistance) {
+                    bestHammingDistance=constantHammingDistance;
+                    myFeatureIndex=minusOneFeatureIndex;
+                    *match_position = minusOne_feature_constant_offset;
+                }
+            }
+            int plusOne_feature_constant_offset = feature_constant_offset + 1;
+            if (plusOne_feature_constant_offset < (int)read_len) {
+                int plusOneFeatureIndex = simpleCorrectFeature(sequence + plusOne_feature_constant_offset, features, max_feature_n, maxHammingDistance, &constantHammingDistance, stats);
+                if (plusOneFeatureIndex && constantHammingDistance == 0) {
+                    *feature_index = plusOneFeatureIndex;
+                    *hamming_distance = bestHammingDistance;
+                    *match_position = plusOne_feature_constant_offset;
+                    return;
+                }
+                if (plusOneFeatureIndex && constantHammingDistance < bestHammingDistance) {
+                    bestHammingDistance=constantHammingDistance;
+                    myFeatureIndex=plusOneFeatureIndex;
+                    *match_position = plusOne_feature_constant_offset;
+                }
             }
         }
-        //repeat with feature_constant_offset - 1 and +1 tried higher changes but seem worse
-        int minusOne_feature_constant_offset = feature_constant_offset - 1;
-        int minusOneFeatureIndex = simpleCorrectFeature(sequence + minusOne_feature_constant_offset, features, max_feature_n, maxHammingDistance, &constantHammingDistance);
-        if (minusOneFeatureIndex && constantHammingDistance == 0) {
-            *feature_index = minusOneFeatureIndex;
-            *hamming_distance = bestHammingDistance;
-            *match_position = minusOne_feature_constant_offset;
-            return;
-        }
-        if (minusOneFeatureIndex && constantHammingDistance < bestHammingDistance) {
-            bestHammingDistance=constantHammingDistance;
-            myFeatureIndex=minusOneFeatureIndex;
-            *match_position = minusOne_feature_constant_offset;
-        }
-        int plusOne_feature_constant_offset = feature_constant_offset + 1;
-        int plusOneFeatureIndex = simpleCorrectFeature(sequence + plusOne_feature_constant_offset, features, max_feature_n, maxHammingDistance, &constantHammingDistance);
-        if (plusOneFeatureIndex && constantHammingDistance == 0) {
-            *feature_index = plusOneFeatureIndex;
-            *hamming_distance = bestHammingDistance;
-            *match_position = plusOne_feature_constant_offset;
-            return;
-        }
-        if (plusOneFeatureIndex && constantHammingDistance < bestHammingDistance) {
-            bestHammingDistance=constantHammingDistance;
-            myFeatureIndex=plusOneFeatureIndex;
-            *match_position = plusOne_feature_constant_offset;
-        }
-
     }
     if (myFeatureIndex && bestHammingDistance) {
         char ambiguous = 0;
         char new_matching_sequence[LINE_LENGTH];
         uint16_t new_match_position;
         int variableHammingDistance=variableMaxHammingDistance;
-        int new_feature_index = checkAndCorrectFeature(sequence, features, variableMaxHammingDistance, nThreads, &variableHammingDistance, new_matching_sequence, max_feature_n, &ambiguous, &new_match_position);
+        int new_feature_index = checkAndCorrectFeature(sequence, features, variableMaxHammingDistance, nThreads, &variableHammingDistance, new_matching_sequence, max_feature_n, &ambiguous, &new_match_position, stats);
         if (variableHammingDistance < variableMaxHammingDistance) {
             myFeatureIndex = new_feature_index; // even if zero keep the new feature index because that would mean ambiguity
             strcpy(matching_sequence, new_matching_sequence);
@@ -4354,7 +4585,7 @@ void process_feature_sequence(char *sequence, feature_arrays *features, int maxH
         char new_matching_sequence[LINE_LENGTH];
         uint16_t new_match_position;
         int variableHammingDistance=maxHammingDistance;
-        int newFeatureIndex = checkAndCorrectFeature(sequence, features, variableMaxHammingDistance, nThreads, &variableHammingDistance, new_matching_sequence, max_feature_n, &ambiguous, &new_match_position);
+        int newFeatureIndex = checkAndCorrectFeature(sequence, features, variableMaxHammingDistance, nThreads, &variableHammingDistance, new_matching_sequence, max_feature_n, &ambiguous, &new_match_position, stats);
         if (!ambiguous && newFeatureIndex && variableHammingDistance <= maxHammingDistance) {
             bestHammingDistance=variableHammingDistance;
             strcpy(matching_sequence, new_matching_sequence);
@@ -4588,7 +4819,7 @@ void *consume_reads(void *arg) {
                                         int tmp_hamming = 0;
                                         uint32_t idx = 0;
                                         if (bc_pos >= 0 && (size_t)bc_pos + feature_len <= read_len) {
-                                            idx = simpleCorrectFeature(feat_read + bc_pos, features, max_feature_n, maxHammingDistance, &tmp_hamming);
+                                            idx = simpleCorrectFeature(feat_read + bc_pos, features, max_feature_n, maxHammingDistance, &tmp_hamming, stats);
                                         }
                                         fprintf(pf_trace_anchor_fp,
                                                 "  hit feat=%u name=%s anchor=%s anchor_pos=%d bc_pos=%d idx=%u hamming=%d\n",
@@ -4721,6 +4952,18 @@ void merge_stats(statistics *merged_stats, statistics *thread_stats) {
     merged_stats->limited_simple_fallback_hits += thread_stats->limited_simple_fallback_hits;
     merged_stats->limited_full_fallback_calls += thread_stats->limited_full_fallback_calls;
     merged_stats->limited_full_fallback_hits += thread_stats->limited_full_fallback_hits;
+    merged_stats->resolve_calls_total += thread_stats->resolve_calls_total;
+    merged_stats->resolve_calls_multi_alt += thread_stats->resolve_calls_multi_alt;
+    merged_stats->resolve_too_many_n += thread_stats->resolve_too_many_n;
+    merged_stats->resolve_no_hit += thread_stats->resolve_no_hit;
+    merged_stats->resolve_ambiguous_tie += thread_stats->resolve_ambiguous_tie;
+    merged_stats->resolve_ambiguous_no_feature += thread_stats->resolve_ambiguous_no_feature;
+    merged_stats->resolve_resolved += thread_stats->resolve_resolved;
+    merged_stats->resolve_multi_alt_too_many_n += thread_stats->resolve_multi_alt_too_many_n;
+    merged_stats->resolve_multi_alt_no_hit += thread_stats->resolve_multi_alt_no_hit;
+    merged_stats->resolve_multi_alt_ambiguous_tie += thread_stats->resolve_multi_alt_ambiguous_tie;
+    merged_stats->resolve_multi_alt_ambiguous_no_feature += thread_stats->resolve_multi_alt_ambiguous_no_feature;
+    merged_stats->resolve_multi_alt_resolved += thread_stats->resolve_multi_alt_resolved;
 }
 
 typedef struct {
@@ -5194,7 +5437,7 @@ int find_sample_index(char *seq, const sample_args *args, int *hamming){
     int hd=0;
     char dummy_match[LINE_LENGTH];
     uint16_t dummy_pos=0;
-    int idx = checkAndCorrectFeature(seq, args->sample_barcodes, args->sample_max_hamming, /*threads*/1, &hd, dummy_match, args->sample_max_N, NULL, &dummy_pos);
+    int idx = checkAndCorrectFeature(seq, args->sample_barcodes, args->sample_max_hamming, /*threads*/1, &hd, dummy_match, args->sample_max_N, NULL, &dummy_pos, NULL);
     if (hamming) *hamming = hd;
     if (idx==0) return 0; // undetermined
     return idx; // 1-based index into sample_barcodes

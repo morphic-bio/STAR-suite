@@ -28,6 +28,7 @@ struct LibraryEntry {
     string starChemistry;       // Per-library chemistry override: "TRU", "NXT", "auto", or empty (use global)
     string starFeatureRef;      // Per-library feature reference CSV path (skip global filtering when set)
     string starLibraryId;       // Stable output/provenance key (auto-generated if absent)
+    int starMaxHamming = -1;    // Per-library max Hamming distance override (-1 = use global)
     
     // Normalized feature type for matching
     string normalizedFeatureType() const;

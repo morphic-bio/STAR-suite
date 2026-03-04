@@ -279,10 +279,13 @@ static feature_arrays* load_probe_variants_to_features(const char *path) {
         }
         /* insert canonical code into lookup */
         if (fa->feature_lengths[idx] == PROBE_LEN) {
-            var_key_t k = {.ptr = fa->feature_codes[idx], .len = fa->feature_code_lengths[idx]};
-            int ret;
-            khint_t kh = kh_put(codeu32, feature_code_hash, k, &ret);
-            kh_val(feature_code_hash, kh) = idx+1;
+            if (feature_code_hash_mode == SEQ_KEY_64) {
+                uint64_t ikey = seq_encode_64_fixed((char *)canon, PROBE_LEN);
+                seq_hash_put_64(&feature_code_hash, ikey, (uint32_t)(idx + 1));
+            } else {
+                seq128_t ikey = seq_encode_128_fixed((char *)canon, PROBE_LEN);
+                seq_hash_put_128(&feature_code_hash, ikey, (uint32_t)(idx + 1));
+            }
         }
         int ret;
         khint_t kh = kh_put(strptr, bc2idx, bc_id, &ret);
@@ -306,17 +309,17 @@ static feature_arrays* load_probe_variants_to_features(const char *path) {
         khint_t kbc = kh_get(strptr, bc2idx, bc_id);
         if (kbc == kh_end(bc2idx)) continue;              /* should not happen */
         uint32_t bc_index = (uint32_t)(uintptr_t)kh_val(bc2idx, kbc) - 1;   /* back to 0-based */
-        uint8_t *codebuf = variant_codes + variant_idx * (PROBE_LEN+3)/4;
-        int codelen = string2code(variant, PROBE_LEN, codebuf);
-        var_key_t k = {.ptr = codebuf, .len = (uint16_t)codelen};
-        int ret;
-        khint_t kh = kh_put(codeu32, feature_code_hash, k, &ret);
-        kh_val(feature_code_hash, kh) = bc_index+1;
+        if (feature_code_hash_mode == SEQ_KEY_64) {
+            uint64_t ikey = seq_encode_64_fixed(variant, PROBE_LEN);
+            seq_hash_put_64(&feature_code_hash, ikey, bc_index + 1);
+        } else {
+            seq128_t ikey = seq_encode_128_fixed(variant, PROBE_LEN);
+            seq_hash_put_128(&feature_code_hash, ikey, bc_index + 1);
+        }
         variant_idx++;
     }
-    //print the size of the feature_code_hash
     fprintf(stderr, "DEBUG: variant_idx=%d\n", variant_idx);
-    fprintf(stderr, "DEBUG: feature_code_hash size=%u\n", kh_size(feature_code_hash));   
+    fprintf(stderr, "DEBUG: feature_code_hash size=%u\n", seq_hash_size(&feature_code_hash, feature_code_hash_mode));   
     fclose(fp);
     // Free bc2canon keys and values (both are strings)
     khint_t k;
@@ -1126,7 +1129,9 @@ int main(int argc, char **argv) {
 
     /* init matching tables */
     barcode_match_init();
-    feature_code_hash = kh_init(codeu32);
+    feature_code_hash_mode = SEQ_KEY_64;
+    feature_code_hash_fixed_length = 0;
+    seq_hash_init(&feature_code_hash, feature_code_hash_mode);
 
     if (cfg.sample_probes) {
         probe_fa     = load_probe_variants_to_features(cfg.sample_probes);

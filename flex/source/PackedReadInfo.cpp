@@ -50,6 +50,9 @@ void PackedReadInfo::unpack(uint64_t w, uint32_t &cbIdx, uint32_t &umiPacked, ui
 }
 
 void PackedReadInfo::set(uint32_t readId, uint32_t cbIdx, uint32_t umiPacked, uint8_t status) {
+    if (readId >= data.size()) {
+        return;
+    }
     uint64_t umiMask = maskUMI();
     uint64_t cbMask = maskCB();
     if (umiMask != 0 && umiPacked > umiMask) {

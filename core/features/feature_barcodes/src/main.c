@@ -56,8 +56,13 @@ static void print_usage(const char *prog){
     fprintf(stderr, "  -R, --read_buffer_lines <int>     Lines for read buffer (default 1024)\n");
     fprintf(stderr, "  -L, --average_read_length <int>   Estimated avg read length for buffer allocation (default 300)\n\n");
 
-    fprintf(stderr, "Miscellaneous:\n");
+    fprintf(stderr, "Namespace & Compatibility:\n");
     fprintf(stderr, "      --translate_NXT               Complement positions 8 and 9 of cell barcodes at output/filter stages\n");
+    fprintf(stderr, "      --allow_union_whitelist       Accept mixed NXT+TRU filtered barcode files.\n");
+    fprintf(stderr, "                                    Expands filtered barcodes at load so both namespace forms\n");
+    fprintf(stderr, "                                    are present for exact-only matching.\n\n");
+
+    fprintf(stderr, "Miscellaneous:\n");
     fprintf(stderr, "  -v, --debug                       Enable verbose debug output\n");
     fprintf(stderr, "  -h, --help                        Show this help and exit\n\n");
 }
@@ -99,6 +104,7 @@ int main(int argc, char *argv[])
     int require_feature_anchor_match_cli=0;
     int feature_mode_bootstrap_reads_cli=0;
     int strict_offset_check_cli=0;
+    int allow_union_whitelist_cli=0;
 
     int max_concurrent_processes=8;
     int consumer_threads_per_set=1;
@@ -156,6 +162,7 @@ int main(int argc, char *argv[])
         {"min_prediction", required_argument, 0, 15},
         {"min_heatmap", required_argument, 0, 16},
         {"translate_NXT", no_argument, 0, 17},
+        {"allow_union_whitelist", no_argument, 0, 27},
         {"help", no_argument, 0, 'h'},
         {0, 0, 0, 0}
     };
@@ -227,6 +234,7 @@ int main(int argc, char *argv[])
             case 15: min_prediction = atoi(optarg); break;
             case 16: min_heatmap = atoi(optarg); break;
             case 17: translate_NXT = 1; fprintf(stderr, "translate_NXT enabled: complementing positions 8 and 9 at output/filter time.\n"); break;
+            case 27: allow_union_whitelist_cli = 1; break;
             case 'h': print_usage(argv[0]); return 0;
             default: print_usage(argv[0]); return 1;
         }
@@ -366,6 +374,21 @@ int main(int argc, char *argv[])
         if (filtered_barcodes_found) {
             filtered_barcodes_hash = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
             read_barcodes_into_hash(filtered_barcodes_filename, filtered_barcodes_hash);
+            if (allow_union_whitelist_cli) {
+                int union_added = expand_filtered_hash_union_namespace(filtered_barcodes_hash);
+                if (union_added < 0) {
+                    fprintf(stderr, "ERROR: --allow_union_whitelist expansion failed "
+                            "(memory allocation error). Aborting.\n");
+                    return EXIT_FAILURE;
+                }
+                if (union_added > 0) {
+                    fprintf(stderr, "WARNING: --allow_union_whitelist active. Expanded "
+                            "filtered barcodes with %d NXT/TRU translations (total %u).\n"
+                            "         This is legacy compat for union whitelists. "
+                            "Migrate to namespace-split files for new workflows.\n",
+                            union_added, g_hash_table_size(filtered_barcodes_hash));
+                }
+            }
         }
     }
     int positional_arg_count = argc - optind;
@@ -486,6 +509,7 @@ int main(int argc, char *argv[])
             args.sample_max_N = sample_max_N;
             args.sample_constant_offset = (sample_constant_offset_cli!=-2)? sample_constant_offset_cli : -1;
             args.sample_offset_relative = sample_offset_relative_cli;
+            args.allow_union_whitelist = allow_union_whitelist_cli;
             args.sample_hashes = NULL;
             args.sample_stats = NULL;
             args.sample_pools = NULL;

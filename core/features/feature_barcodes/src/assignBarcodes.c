@@ -361,6 +361,34 @@ unmatched_barcodes_features_block* add_unmatched_barcode_store_feature(unsigned 
 }
 
 
+static int parse_whitelist_first_token(const char *line, char *token_out, size_t token_cap) {
+    if (!line || !token_out || token_cap == 0) {
+        return 0;
+    }
+    size_t i = 0;
+    while (line[i] != '\0' && isspace((unsigned char)line[i])) {
+        i++;
+    }
+    if (line[i] == '\0' || line[i] == '#') {
+        return 0;
+    }
+
+    size_t j = 0;
+    while (line[i] != '\0' && !isspace((unsigned char)line[i]) && line[i] != ',') {
+        char c = (char)toupper((unsigned char)line[i]);
+        if (!(c == 'A' || c == 'C' || c == 'G' || c == 'T' || c == 'N')) {
+            return -1;
+        }
+        if (j + 1 >= token_cap) {
+            return -1;
+        }
+        token_out[j++] = c;
+        i++;
+    }
+    token_out[j] = '\0';
+    return j > 0 ? 1 : 0;
+}
+
 unsigned char* read_whiteList(char *whitelist_filename,GHashTable *hash, int reverse_complement_flag){
     FILE *whitelist_file = fopen(whitelist_filename, "r");
     if (whitelist_file == NULL) {
@@ -368,89 +396,152 @@ unsigned char* read_whiteList(char *whitelist_filename,GHashTable *hash, int rev
         exit(EXIT_FAILURE);
     }
     char line[LINE_LENGTH];
-    //just in case the file is corrupted - calculate the sizes by counting lines
-    //find the number of lines in the file by counting the number of newlines
-    char ch=0,lastChar=0;
-    size_t line_count=0;
-    //from the first line calculate the barcode length and check if the sequence is valid
-    int sequence_count=0;
-    while((ch = fgetc(whitelist_file)) != EOF) {
-        if(ch == 'A' || ch == 'C' || ch == 'G' || ch == 'T' || ch == 'N'){
-            sequence_count++;
+    char token[LINE_LENGTH];
+    char **tokens = NULL;
+    size_t tokens_n = 0;
+    size_t tokens_cap = 0;
+
+    while (fgets(line, LINE_LENGTH, whitelist_file) != NULL) {
+        int parse_status = parse_whitelist_first_token(line, token, sizeof(token));
+        if (parse_status == 0) {
+            continue;
         }
-        else if (ch == '\n') {
-            if(sequence_count){
-                if (barcode_length==0){
-                    barcode_length=sequence_count;
-                    barcode_code_length=(barcode_length+3)/4;
-                }
-                else if (sequence_count != barcode_length){
-                    fprintf(stderr, "Error: Invalid barcode length %d\n", sequence_count);
-                    exit(EXIT_FAILURE);
-                }
-                sequence_count=0;
-                line_count++;
-            }
-        }
-        else{
-            fprintf(stderr, "Error: Invalid character %c in whitelist file\n", ch);
+        if (parse_status < 0) {
+            fprintf(stderr,
+                    "Error: Invalid whitelist row (expected barcode token in column 1): %s",
+                    line);
             exit(EXIT_FAILURE);
         }
+
+        int seq_len = (int)strlen(token);
+        if (barcode_length == 0) {
+            barcode_length = seq_len;
+            barcode_code_length = (barcode_length + 3) / 4;
+        } else if (seq_len != barcode_length) {
+            fprintf(stderr,
+                    "Error: Invalid barcode length %d in whitelist row (expected %d): %s",
+                    seq_len, barcode_length, line);
+            exit(EXIT_FAILURE);
+        }
+
+        if (tokens_n == tokens_cap) {
+            size_t new_cap = (tokens_cap == 0) ? 4096 : (tokens_cap * 2);
+            char **new_tokens = realloc(tokens, new_cap * sizeof(char *));
+            if (!new_tokens) {
+                fprintf(stderr, "Failed to allocate memory for whitelist rows\n");
+                exit(EXIT_FAILURE);
+            }
+            tokens = new_tokens;
+            tokens_cap = new_cap;
+        }
+        tokens[tokens_n] = strdup(token);
+        if (!tokens[tokens_n]) {
+            fprintf(stderr, "Failed to allocate memory for whitelist token\n");
+            exit(EXIT_FAILURE);
+        }
+        tokens_n++;
     }
-    // If the last character isn't a newline, increment the count
-    if (lastChar != '\n') {
-        line_count++;
+    fclose(whitelist_file);
+
+    if (tokens_n == 0) {
+        fprintf(stderr, "Error: No valid whitelist barcode rows found in %s\n", whitelist_filename);
+        exit(EXIT_FAILURE);
     }
-    
-    whitelist = malloc(line_count * barcode_code_length);
+
+    whitelist = malloc(tokens_n * barcode_code_length);
     if (whitelist == NULL) {
         fprintf(stderr, "Failed to allocate memory for whitelist storage\n");
         exit(EXIT_FAILURE);
     }
-    memset(whitelist, 0, line_count * barcode_code_length);
-    //reset the file pointer to the beginning of the file
-    fseek(whitelist_file, 0, SEEK_SET);
-    size_t nBarcodes=0;
-    //set line to zero
-    memset(line, 0, LINE_LENGTH);
+    memset(whitelist, 0, tokens_n * barcode_code_length);
+
+    size_t nBarcodes = 0;
     char barcode_sequence[LINE_LENGTH];
-    while ( fgets(line, LINE_LENGTH, whitelist_file) != NULL) {
-        if (!check_sequence(line, barcode_length)){
-            fprintf(stderr, "Error: Invalid barcode sequence of expected length %d %s\n",barcode_length,line);
+    for (size_t row = 0; row < tokens_n; row++) {
+        if (reverse_complement_flag){
+            reverse_complement_sequence(tokens[row], barcode_sequence, barcode_length);
+        } else {
+            memcpy(barcode_sequence, tokens[row], (size_t)barcode_length + 1);
+        }
+        int j = 0;
+        int i = 0;
+        const size_t offset = nBarcodes * barcode_code_length;
+        memset(whitelist + offset, 0, barcode_code_length);
+        while (j < barcode_length) {
+            unsigned char char_value =
+                seq2code[(unsigned char)barcode_sequence[j]] << 6 |
+                seq2code[(unsigned char)barcode_sequence[j + 1]] << 4 |
+                seq2code[(unsigned char)barcode_sequence[j + 2]] << 2 |
+                seq2code[(unsigned char)barcode_sequence[j + 3]];
+            whitelist[offset + i] = char_value;
+            i++;
+            j += 4;
+        }
+        if (!g_hash_table_insert(hash, (uint32_t*)(whitelist + offset), whitelist + offset)) {
+            fprintf(stderr, "Error: Failed to insert barcode into whitelist hash at row %zu\n", nBarcodes);
             exit(EXIT_FAILURE);
         }
-        //up to 16 characters will be stored in uint32_t
-        memset(line+barcode_length, 0, LINE_LENGTH-barcode_length);
-        if (reverse_complement_flag){
-            reverse_complement_sequence(line, barcode_sequence, barcode_length);
-        }
-        else{
-            memcpy(barcode_sequence, line, barcode_length+1);
-        }
-        int j=0;
-        int i=0;
-        const size_t offset=nBarcodes*barcode_code_length;
-        memset(whitelist+offset, 0, barcode_code_length);
-        while(j<barcode_length){
-            unsigned char char_value=seq2code[(unsigned char)barcode_sequence[j]]<<6 | seq2code[(unsigned char)barcode_sequence[j+1]]<<4 | seq2code[(unsigned char)barcode_sequence[j+2]]<<2 | seq2code[(unsigned char)barcode_sequence[j+3]];
-            whitelist[offset+i]=char_value;
-            i++;
-            j+=4;
-        }
-        if(!g_hash_table_insert(hash,  (uint32_t*)(whitelist+offset) , whitelist+offset)){
-            fprintf(stderr, "Error: Failed to insert barcode %s into the hash table %ld\n", line, nBarcodes);
-            exit(EXIT_FAILURE); 
-        }
         nBarcodes++;
+        free(tokens[row]);
     }
+    free(tokens);
+
     fprintf(stderr, "Read %ld barcodes\n", nBarcodes);
-    fclose(whitelist_file);
     return whitelist;
 }
-/* moved to barcode_match.c */
 
+static int filtered_barcode_hash_contains(GHashTable *filtered_barcodes_hash, const char *barcode) {
+    if (!filtered_barcodes_hash || !barcode) {
+        return 0;
+    }
+    return g_hash_table_lookup(filtered_barcodes_hash, barcode) != NULL;
+}
 
-/* moved to barcode_match.c */
+int expand_filtered_hash_union_namespace(GHashTable *hash) {
+    if (!hash) return 0;
+
+    guint n = g_hash_table_size(hash);
+    if (n == 0) return 0;
+
+    GHashTableIter iter;
+    gpointer key;
+    char **pending = malloc(n * sizeof(char *));
+    if (!pending) return -1;
+    size_t npending = 0;
+
+    g_hash_table_iter_init(&iter, hash);
+    while (g_hash_table_iter_next(&iter, &key, NULL)) {
+        const char *bc = (const char *)key;
+        size_t len = strlen(bc);
+        if (len < 9 || len >= LINE_LENGTH) continue;
+
+        char translated[LINE_LENGTH];
+        memcpy(translated, bc, len + 1);
+        translate_nxt_inplace(translated, (int)len);
+        if (strcmp(translated, bc) == 0) continue;
+        if (g_hash_table_lookup(hash, translated) != NULL) continue;
+
+        char *dup = strdup(translated);
+        if (!dup) {
+            for (size_t j = 0; j < npending; j++) free(pending[j]);
+            free(pending);
+            return -1;
+        }
+        pending[npending++] = dup;
+    }
+
+    int added = 0;
+    for (size_t i = 0; i < npending; i++) {
+        if (g_hash_table_lookup(hash, pending[i]) == NULL) {
+            g_hash_table_insert(hash, pending[i], GINT_TO_POINTER(1));
+            added++;
+        } else {
+            free(pending[i]);
+        }
+    }
+    free(pending);
+    return added;
+}
 /* moved to barcode_match.c */
 void string2all_codes(char *string, unsigned char codes[][LINE_LENGTH/2+1], int *lengths){
     //4 codes are returned for the string to capture all the possible frames
@@ -1444,7 +1535,7 @@ void printFeatureCounts(feature_arrays *features, int *deduped_counts, int *barc
             char barcode[barcode_length + 1];
             code2string((unsigned char *)key, barcode, barcode_code_length);
             if (translate_NXT) translate_nxt_inplace(barcode, barcode_length);
-            if (g_hash_table_lookup(filtered_barcodes_hash, barcode) == NULL) {
+            if (!filtered_barcode_hash_contains(filtered_barcodes_hash, barcode)) {
                 continue;
             }
         }
@@ -1483,7 +1574,7 @@ void printFeatureCounts(feature_arrays *features, int *deduped_counts, int *barc
         code2string((unsigned char *)barcode_key, barcode, barcode_code_length);
         if (translate_NXT) translate_nxt_inplace(barcode, barcode_length);
         if (filtered_barcodes_hash &&
-            g_hash_table_lookup(filtered_barcodes_hash, barcode) == NULL){
+            !filtered_barcode_hash_contains(filtered_barcodes_hash, barcode)){
             skipped_barcodes++;
             continue;
         }
@@ -1591,7 +1682,7 @@ void printFeatureCounts(feature_arrays *features, int *deduped_counts, int *barc
             char barcode[barcode_length + 1];
             code2string(entry->sequence_code, barcode, barcode_code_length);
             if (translate_NXT) translate_nxt_inplace(barcode, barcode_length);
-            if (filtered_barcodes_hash && g_hash_table_lookup(filtered_barcodes_hash, barcode) == NULL) {
+            if (filtered_barcodes_hash && !filtered_barcode_hash_contains(filtered_barcodes_hash, barcode)) {
                 total_excluded_barcodes++;
                 continue;
             }
@@ -1727,7 +1818,7 @@ void printFeatureCounts(feature_arrays *features, int *deduped_counts, int *barc
             code2string((unsigned char *)barcode_key, barcode, barcode_code_length);    
             if (translate_NXT) translate_nxt_inplace(barcode, barcode_length);
             if (filtered_barcodes_hash &&
-                g_hash_table_lookup(filtered_barcodes_hash, barcode) == NULL)
+                !filtered_barcode_hash_contains(filtered_barcodes_hash, barcode))
                 continue;
 
             GHashTable *features_in_barcode = (GHashTable *)deduped_hash_value;
@@ -1842,7 +1933,7 @@ void printFeatureCounts(feature_arrays *features, int *deduped_counts, int *barc
         if (translate_NXT) translate_nxt_inplace(barcode, barcode_length);
 
         if (filtered_barcodes_hash &&
-            g_hash_table_lookup(filtered_barcodes_hash, barcode) == NULL){
+            !filtered_barcode_hash_contains(filtered_barcodes_hash, barcode)){
             skipped_barcodes++;
             continue;
         }
@@ -3278,6 +3369,21 @@ void process_files_in_sample(sample_args *args) {
         if (file_exists(filtered_path)) {
             args->filtered_barcodes_hash = g_hash_table_new(g_str_hash, g_str_equal);
             read_barcodes_into_hash(filtered_path, args->filtered_barcodes_hash);
+            if (args->allow_union_whitelist) {
+                int union_added = expand_filtered_hash_union_namespace(args->filtered_barcodes_hash);
+                if (union_added < 0) {
+                    fprintf(stderr, "ERROR: --allow_union_whitelist expansion failed "
+                            "(memory allocation error). Aborting.\n");
+                    exit(EXIT_FAILURE);
+                }
+                if (union_added > 0) {
+                    fprintf(stderr, "WARNING: --allow_union_whitelist active. Expanded "
+                            "filtered barcodes with %d NXT/TRU translations (total %u).\n"
+                            "         This is legacy compat for union whitelists. "
+                            "Migrate to namespace-split files for new workflows.\n",
+                            union_added, g_hash_table_size(args->filtered_barcodes_hash));
+                }
+            }
         }
         else {
             fprintf(stderr, "Error: Filtered barcodes file not found at %s\n", filtered_path);

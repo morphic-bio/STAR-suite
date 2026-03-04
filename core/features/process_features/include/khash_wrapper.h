@@ -27,8 +27,171 @@ KHASH_INIT(strptr, const char*, void*, 1, kh_str_hash_func, kh_str_hash_equal)
 /* Hash table: char* -> char* (string -> string) */
 KHASH_INIT(strstr, const char*, char*, 1, kh_str_hash_func, kh_str_hash_equal)
 
-/* Hash table: char* -> uint32_t (string -> uint32_t) */
+/* Hash table: char* -> uint32_t (string -> uint32_t, used by prehash) */
 KHASH_INIT(stru32, const char*, uint32_t, 1, kh_str_hash_func, kh_str_hash_equal)
+
+/* ============================================================================
+ * Integer-key hash tables for feature sequence encoding
+ *
+ * 2-bit encoding: A=00, C=01, G=10, T=11
+ * Fixed-length mode (prehash, exact hash when all features same length):
+ *   pure 2-bit encoding, no length bits.
+ * Variable-length mode (exact hash when features have mixed lengths):
+ *   top 6 bits encode (len - 1), remaining bits encode sequence.
+ * ============================================================================ */
+
+/* Hash table: uint64_t -> uint32_t (for <=32bp fixed or <=29bp variable) */
+KHASH_INIT(u64u32, uint64_t, uint32_t, 1, kh_int64_hash_func, kh_int64_hash_equal)
+
+/* 128-bit sequence key (for 33-64bp fixed or 30-61bp variable) */
+typedef struct { uint64_t w[2]; } seq128_t;
+
+static inline khint_t seq128_hash_func(seq128_t k) {
+    khint_t h = (khint_t)(k.w[0] ^ (k.w[0] >> 33));
+    h *= 0xff51afd7ed558ccdULL;
+    h ^= (khint_t)(k.w[1] ^ (k.w[1] >> 33));
+    h *= 0xc4ceb9fe1a85ec53ULL;
+    h ^= h >> 16;
+    return h;
+}
+
+static inline int seq128_hash_equal(seq128_t a, seq128_t b) {
+    return a.w[0] == b.w[0] && a.w[1] == b.w[1];
+}
+
+#define seq128_hash(k) seq128_hash_func(k)
+#define seq128_eq(a, b) seq128_hash_equal(a, b)
+KHASH_INIT(seq128u32, seq128_t, uint32_t, 1, seq128_hash, seq128_eq)
+
+/* Runtime mode selection and dispatch union */
+typedef enum { SEQ_KEY_64, SEQ_KEY_128 } seq_key_mode_t;
+
+typedef union {
+    khash_t(u64u32)    *h64;
+    khash_t(seq128u32) *h128;
+} seq_hash_t;
+
+#define MAX_VARIABLE_KEY_SEQ_LENGTH_64  29
+#define MAX_VARIABLE_KEY_SEQ_LENGTH_128 61
+#define MAX_FIXED_KEY_SEQ_LENGTH_64     32
+#define MAX_FIXED_KEY_SEQ_LENGTH_128    64
+
+/* ============================================================================
+ * Sequence encoding helpers
+ * ============================================================================ */
+
+/*
+ * These require seq2code[] to be initialized (via initseq2Code()).
+ * The seq2code table is declared extern in globals.h.
+ */
+
+static inline uint64_t seq_encode_64_fixed(const char *seq, int len) {
+    uint64_t key = 0;
+    for (int i = 0; i < len; i++) {
+        key = (key << 2) | (uint64_t)(((const unsigned char *)seq)[i] == 'C' ? 1 :
+                                       ((const unsigned char *)seq)[i] == 'G' ? 2 :
+                                       ((const unsigned char *)seq)[i] == 'T' ? 3 : 0);
+    }
+    return key;
+}
+
+static inline uint64_t seq_encode_64_var(const char *seq, int len) {
+    uint64_t key = (uint64_t)(len - 1) << 58;
+    for (int i = 0; i < len; i++) {
+        key |= ((uint64_t)(((const unsigned char *)seq)[i] == 'C' ? 1 :
+                            ((const unsigned char *)seq)[i] == 'G' ? 2 :
+                            ((const unsigned char *)seq)[i] == 'T' ? 3 : 0)) << (2 * (28 - i));
+    }
+    return key;
+}
+
+static inline seq128_t seq_encode_128_fixed(const char *seq, int len) {
+    seq128_t key = {{0, 0}};
+    for (int i = 0; i < len; i++) {
+        uint64_t bits = ((const unsigned char *)seq)[i] == 'C' ? 1 :
+                        ((const unsigned char *)seq)[i] == 'G' ? 2 :
+                        ((const unsigned char *)seq)[i] == 'T' ? 3 : 0;
+        int bit_pos = 2 * (63 - i);
+        if (bit_pos >= 64) {
+            key.w[0] |= bits << (bit_pos - 64);
+        } else {
+            key.w[1] |= bits << bit_pos;
+        }
+    }
+    return key;
+}
+
+static inline seq128_t seq_encode_128_var(const char *seq, int len) {
+    seq128_t key = {{0, 0}};
+    key.w[0] = (uint64_t)(len - 1) << 58;
+    for (int i = 0; i < len; i++) {
+        uint64_t bits = ((const unsigned char *)seq)[i] == 'C' ? 1 :
+                        ((const unsigned char *)seq)[i] == 'G' ? 2 :
+                        ((const unsigned char *)seq)[i] == 'T' ? 3 : 0;
+        /* Bits go into positions [57..0] of w[0] then [63..0] of w[1] */
+        int bit_pos = 2 * (60 - i);  /* 60 because 6 bits reserved in w[0] top */
+        if (bit_pos >= 64) {
+            key.w[0] |= bits << (bit_pos - 64);
+        } else if (bit_pos >= 0) {
+            key.w[1] |= bits << bit_pos;
+        }
+    }
+    return key;
+}
+
+/* ============================================================================
+ * Dispatch wrappers for seq_hash_t
+ * ============================================================================ */
+
+static inline void seq_hash_init(seq_hash_t *sh, seq_key_mode_t mode) {
+    if (mode == SEQ_KEY_64) {
+        sh->h64 = kh_init(u64u32);
+    } else {
+        sh->h128 = kh_init(seq128u32);
+    }
+}
+
+static inline void seq_hash_destroy(seq_hash_t *sh, seq_key_mode_t mode) {
+    if (mode == SEQ_KEY_64) {
+        if (sh->h64) { kh_destroy(u64u32, sh->h64); sh->h64 = NULL; }
+    } else {
+        if (sh->h128) { kh_destroy(seq128u32, sh->h128); sh->h128 = NULL; }
+    }
+}
+
+static inline int seq_hash_put_64(seq_hash_t *sh, uint64_t key, uint32_t val) {
+    int ret;
+    khint_t k = kh_put(u64u32, sh->h64, key, &ret);
+    if (ret < 0) return -1;
+    kh_val(sh->h64, k) = val;
+    return ret;
+}
+
+static inline int seq_hash_put_128(seq_hash_t *sh, seq128_t key, uint32_t val) {
+    int ret;
+    khint_t k = kh_put(seq128u32, sh->h128, key, &ret);
+    if (ret < 0) return -1;
+    kh_val(sh->h128, k) = val;
+    return ret;
+}
+
+static inline uint32_t seq_hash_get_64(const seq_hash_t *sh, uint64_t key) {
+    khint_t k = kh_get(u64u32, sh->h64, key);
+    return (k != kh_end(sh->h64)) ? kh_val(sh->h64, k) : 0;
+}
+
+static inline uint32_t seq_hash_get_128(const seq_hash_t *sh, seq128_t key) {
+    khint_t k = kh_get(seq128u32, sh->h128, key);
+    return (k != kh_end(sh->h128)) ? kh_val(sh->h128, k) : 0;
+}
+
+static inline khint_t seq_hash_size(const seq_hash_t *sh, seq_key_mode_t mode) {
+    if (mode == SEQ_KEY_64) {
+        return sh->h64 ? kh_size(sh->h64) : 0;
+    } else {
+        return sh->h128 ? kh_size(sh->h128) : 0;
+    }
+}
 
 /* ============================================================================
  * Variable-length key structure (replaces GBytes)

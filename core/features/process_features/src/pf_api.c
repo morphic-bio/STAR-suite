@@ -16,6 +16,7 @@
 #include <stdio.h>
 #include <sys/stat.h>
 #include <errno.h>
+#include <pthread.h>
 
 #define PF_VERSION "1.0.0"
 #define PF_ERROR_BUF_SIZE 1024
@@ -56,6 +57,9 @@ struct pf_config {
     int require_feature_anchor_match;
     int feature_mode_bootstrap_reads;
     
+    /* Prehash memory budget (0 = auto-detect) */
+    unsigned long long prehash_memory_budget;
+
     /* EmptyDrops control */
     int skip_emptydrops;            /* 1 = skip EmptyDrops entirely */
     int emptydrops_failure_fatal;   /* 1 = treat ED failure as error */
@@ -66,6 +70,13 @@ struct pf_config {
     int autodetect_chemistry;           /* 0=off, 1=on */
     int autodetect_chemistry_reads;     /* N reads to sample (default 10000) */
     int autodetect_chemistry_min_hits;  /* minimum total hits for decision (default 50) */
+
+    /* Union whitelist support (legacy compat) */
+    int allow_union_whitelist;          /* 0=strict, 1=accept mixed NXT+TRU */
+
+    /* Namespace normalization */
+    pf_namespace_t source_namespace;    /* namespace of filtered barcode file (PF_NS_UNKNOWN = not set) */
+    pf_namespace_t target_namespace;    /* namespace of assignment output (PF_NS_UNKNOWN = not set) */
 };
 
 struct pf_context {
@@ -87,6 +98,108 @@ struct pf_context {
 
 /* Global initialization flag */
 static int g_pf_global_initialized = 0;
+/* process_features legacy core still uses process-global mutable state.
+ * Serialize API entrypoints that mutate/read that state to avoid cross-context
+ * namespace/config bleed when multiple contexts are used in one process. */
+static pthread_mutex_t g_pf_runtime_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+static void pf_apply_context_globals(pf_context *ctx) {
+    if (!ctx || !ctx->config) {
+        return;
+    }
+
+    barcode_length = ctx->config->barcode_length;
+    barcode_code_length = (barcode_length + 3) / 4;
+    umi_length = ctx->config->umi_length;
+    umi_code_length = (umi_length + 3) / 4;
+    max_barcode_mismatches = ctx->config->max_barcode_mismatches;
+    max_feature_n = ctx->config->max_feature_n;
+    max_barcode_n = ctx->config->max_barcode_n;
+    max_reads = ctx->config->max_reads;
+    limit_search = ctx->config->limit_search;
+    feature_limited_fallback_mode = ctx->config->feature_limited_fallback_mode;
+    debug = ctx->config->debug_enabled;
+    translate_NXT = ctx->config->translate_nxt;
+    use_feature_offset_array = ctx->config->use_feature_offset_array;
+    use_feature_anchor_search = ctx->config->use_feature_anchor_search;
+    require_feature_anchor_match = ctx->config->require_feature_anchor_match;
+    if (require_feature_anchor_match) {
+        use_feature_anchor_search = 1;
+    }
+    feature_mode_bootstrap_reads = ctx->config->feature_mode_bootstrap_reads;
+    feature_mode_reads_seen = 0;
+    feature_mode_bootstrap_done = 0;
+
+    if (ctx->features) {
+        /* Set global hash alias from per-instance hash (non-owning) */
+        feature_code_hash = ctx->features->feature_code_hash;
+        feature_code_hash_mode = ctx->features->code_hash_mode;
+        feature_code_hash_fixed_length = ctx->features->code_hash_fixed_length;
+        feature_offsets = ctx->features->feature_offsets;
+        feature_offsets_count = ctx->features->number_of_features;
+        feature_anchors = ctx->features->feature_anchors;
+        feature_anchor_lengths = ctx->features->feature_anchor_lengths;
+        feature_suffix_anchors = ctx->features->feature_suffix_anchors;
+        feature_suffix_anchor_lengths = ctx->features->feature_suffix_anchor_lengths;
+        feature_anchor_count = ctx->features->number_of_features;
+        number_of_features = ctx->features->number_of_features;
+        maximum_feature_length = ctx->features->max_length;
+        feature_code_length = (maximum_feature_length + 3) / 4;
+        initialize_unit_sizes();
+    } else {
+        feature_offsets = NULL;
+        feature_offsets_count = 0;
+        feature_anchors = NULL;
+        feature_anchor_lengths = NULL;
+        feature_suffix_anchors = NULL;
+        feature_suffix_anchor_lengths = NULL;
+        feature_anchor_count = 0;
+        number_of_features = 0;
+        maximum_feature_length = 0;
+        feature_code_length = 0;
+    }
+
+    whitelist_hash = ctx->whitelist_hash;
+    whitelist = ctx->whitelist_data;
+}
+
+/* ============================================================================
+ * Namespace API Implementation
+ * ============================================================================ */
+
+static inline char pf_complement_base(char b) {
+    switch ((unsigned char)b) {
+        case 'A': return 'T'; case 'T': return 'A';
+        case 'C': return 'G'; case 'G': return 'C';
+        case 'a': return 'T'; case 't': return 'A';
+        case 'c': return 'G'; case 'g': return 'C';
+        default: return b;
+    }
+}
+
+void pf_translate_barcode_inplace(char *barcode, size_t len) {
+    if (!barcode || len < 9) return;
+    barcode[7] = pf_complement_base(barcode[7]);
+    barcode[8] = pf_complement_base(barcode[8]);
+}
+
+const char* pf_namespace_to_string(pf_namespace_t ns) {
+    switch (ns) {
+        case PF_NS_NXT:     return "NXT";
+        case PF_NS_TRU:     return "TRU";
+        case PF_NS_UNION:   return "UNION";
+        case PF_NS_UNKNOWN: return "UNKNOWN";
+        default:             return "UNKNOWN";
+    }
+}
+
+pf_namespace_t pf_namespace_from_string(const char *s) {
+    if (!s) return PF_NS_UNKNOWN;
+    if (strcmp(s, "NXT") == 0 || strcmp(s, "nxt") == 0) return PF_NS_NXT;
+    if (strcmp(s, "TRU") == 0 || strcmp(s, "tru") == 0) return PF_NS_TRU;
+    if (strcmp(s, "UNION") == 0 || strcmp(s, "union") == 0) return PF_NS_UNION;
+    return PF_NS_UNKNOWN;
+}
 
 /* ============================================================================
  * Configuration API Implementation
@@ -128,6 +241,9 @@ pf_config* pf_config_create(void) {
     config->require_feature_anchor_match = 0;
     config->feature_mode_bootstrap_reads = 0;
     
+    /* Prehash memory budget default (0 = auto-detect) */
+    config->prehash_memory_budget = 0;
+
     /* EmptyDrops control defaults */
     config->skip_emptydrops = 0;
     config->emptydrops_failure_fatal = 0;
@@ -138,6 +254,13 @@ pf_config* pf_config_create(void) {
     config->autodetect_chemistry = 0;
     config->autodetect_chemistry_reads = 10000;
     config->autodetect_chemistry_min_hits = 50;
+
+    /* Union whitelist: off by default (strict namespace) */
+    config->allow_union_whitelist = 0;
+
+    /* Namespace normalization: both unknown = no normalization */
+    config->source_namespace = PF_NS_UNKNOWN;
+    config->target_namespace = PF_NS_UNKNOWN;
     
     return config;
 }
@@ -245,13 +368,17 @@ void pf_config_set_limit_search(pf_config *config, int limit) {
     if (config) config->limit_search = limit;
 }
 
-void pf_config_set_feature_limited_fallback(pf_config *config, int mode) {
+void pf_config_set_feature_limited_mode(pf_config *config, int mode) {
     if (!config) return;
     if (mode < 0 || mode > 1) {
-        fprintf(stderr, "ERROR: feature_limited_fallback mode must be 0 or 1 (got %d), clamping to 0\n", mode);
+        fprintf(stderr, "ERROR: feature_limited_mode must be 0 or 1 (got %d), clamping to 0\n", mode);
         mode = 0;
     }
     config->feature_limited_fallback_mode = mode;
+}
+
+void pf_config_set_feature_limited_fallback(pf_config *config, int mode) {
+    pf_config_set_feature_limited_mode(config, mode);
 }
 
 void pf_config_set_max_reads(pf_config *config, long long max_reads) {
@@ -277,6 +404,10 @@ void pf_config_set_require_feature_anchor_match(pf_config *config, int enable) {
 
 void pf_config_set_feature_mode_bootstrap_reads(pf_config *config, int n_reads) {
     if (config) config->feature_mode_bootstrap_reads = n_reads;
+}
+
+void pf_config_set_prehash_memory_budget(pf_config *config, unsigned long long budget) {
+    if (config) config->prehash_memory_budget = budget;
 }
 
 void pf_config_set_skip_emptydrops(pf_config *config, int enable) {
@@ -317,6 +448,18 @@ void pf_config_set_autodetect_chemistry_min_hits(pf_config *config, int min_hits
     config->autodetect_chemistry_min_hits = min_hits;
 }
 
+void pf_config_set_allow_union_whitelist(pf_config *config, int enable) {
+    if (config) config->allow_union_whitelist = (enable != 0);
+}
+
+void pf_config_set_source_namespace(pf_config *config, pf_namespace_t ns) {
+    if (config) config->source_namespace = ns;
+}
+
+void pf_config_set_target_namespace(pf_config *config, pf_namespace_t ns) {
+    if (config) config->target_namespace = ns;
+}
+
 const char* pf_get_detected_match_mode(pf_context *ctx) {
     if (!ctx) return "UNKNOWN";
     switch (ctx->detected_match_mode) {
@@ -340,10 +483,8 @@ void pf_global_init(void) {
     initdiff2hamming(diff2Hamming);
     initialize_complement();
     
-    /* Initialize feature code hash if not already done */
-    if (!feature_code_hash) {
-        feature_code_hash = kh_init(codeu32);
-    }
+    /* Feature code hash is now per-instance (owned by feature_arrays).
+     * Global alias is set by pf_apply_context_globals() after feature load. */
     
     g_pf_global_initialized = 1;
 }
@@ -354,38 +495,24 @@ void pf_global_init(void) {
 
 pf_context* pf_init(const pf_config *config) {
     if (!config) return NULL;
-    
+
+    pthread_mutex_lock(&g_pf_runtime_mutex);
+
     pf_context *ctx = calloc(1, sizeof(pf_context));
-    if (!ctx) return NULL;
+    if (!ctx) {
+        pthread_mutex_unlock(&g_pf_runtime_mutex);
+        return NULL;
+    }
     
     ctx->config = pf_config_clone(config);
     if (!ctx->config) {
         free(ctx);
+        pthread_mutex_unlock(&g_pf_runtime_mutex);
         return NULL;
     }
     
-    /* Apply config to globals */
-    barcode_length = ctx->config->barcode_length;
-    barcode_code_length = (barcode_length + 3) / 4;
-    umi_length = ctx->config->umi_length;
-    umi_code_length = (umi_length + 3) / 4;
-    max_barcode_mismatches = ctx->config->max_barcode_mismatches;
-    max_feature_n = ctx->config->max_feature_n;
-    max_barcode_n = ctx->config->max_barcode_n;
-    max_reads = ctx->config->max_reads;
-    limit_search = ctx->config->limit_search;
-    feature_limited_fallback_mode = ctx->config->feature_limited_fallback_mode;
-    debug = ctx->config->debug_enabled;
-    translate_NXT = ctx->config->translate_nxt;
-    use_feature_offset_array = ctx->config->use_feature_offset_array;
-    use_feature_anchor_search = ctx->config->use_feature_anchor_search;
-    require_feature_anchor_match = ctx->config->require_feature_anchor_match;
-    if (require_feature_anchor_match) {
-        use_feature_anchor_search = 1;
-    }
-    feature_mode_bootstrap_reads = ctx->config->feature_mode_bootstrap_reads;
-    feature_mode_reads_seen = 0;
-    feature_mode_bootstrap_done = 0;
+    /* Apply config to globals for legacy internals. */
+    pf_apply_context_globals(ctx);
     
     /* NXT/TRU auto-detection state */
     ctx->chem_detect_raw_hits = 0;
@@ -400,17 +527,30 @@ pf_context* pf_init(const pf_config *config) {
     ctx->initialized = 1;
     ctx->error_buf[0] = '\0';
     
+    pthread_mutex_unlock(&g_pf_runtime_mutex);
     return ctx;
 }
 
 void pf_destroy(pf_context *ctx) {
     if (!ctx) return;
-    
+
+    pthread_mutex_lock(&g_pf_runtime_mutex);
+
     if (ctx->config) {
         pf_config_destroy(ctx->config);
     }
     
     if (ctx->features) {
+        /* Nullify global alias if it points into this instance */
+        if (feature_code_hash_mode == ctx->features->code_hash_mode) {
+            if (feature_code_hash_mode == SEQ_KEY_64 &&
+                feature_code_hash.h64 == ctx->features->feature_code_hash.h64) {
+                feature_code_hash.h64 = NULL;
+            } else if (feature_code_hash_mode == SEQ_KEY_128 &&
+                       feature_code_hash.h128 == ctx->features->feature_code_hash.h128) {
+                feature_code_hash.h128 = NULL;
+            }
+        }
         if (feature_offsets == ctx->features->feature_offsets) {
             feature_offsets = NULL;
             feature_offsets_count = 0;
@@ -444,8 +584,9 @@ void pf_destroy(pf_context *ctx) {
     if (ctx->filtered_barcodes_hash) {
         free_strptr_hash(ctx->filtered_barcodes_hash);
     }
-    
+
     free(ctx);
+    pthread_mutex_unlock(&g_pf_runtime_mutex);
 }
 
 const char* pf_get_error(pf_context *ctx) {
@@ -460,15 +601,29 @@ const char* pf_get_error(pf_context *ctx) {
 pf_error pf_load_feature_ref(pf_context *ctx, const char *feature_csv) {
     if (!ctx || !feature_csv) return PF_ERR_INVALID_ARG;
     if (!ctx->initialized) return PF_ERR_NOT_INITIALIZED;
-    
+
+    pthread_mutex_lock(&g_pf_runtime_mutex);
+    pf_apply_context_globals(ctx);
+
     if (!pf_file_exists(feature_csv)) {
         snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE, 
                  "Feature reference file not found: %s", feature_csv);
+        pthread_mutex_unlock(&g_pf_runtime_mutex);
         return PF_ERR_FILE_NOT_FOUND;
     }
     
     /* Free existing features if any */
     if (ctx->features) {
+        /* Nullify global hash alias before free */
+        if (feature_code_hash_mode == ctx->features->code_hash_mode) {
+            if (feature_code_hash_mode == SEQ_KEY_64 &&
+                feature_code_hash.h64 == ctx->features->feature_code_hash.h64) {
+                feature_code_hash.h64 = NULL;
+            } else if (feature_code_hash_mode == SEQ_KEY_128 &&
+                       feature_code_hash.h128 == ctx->features->feature_code_hash.h128) {
+                feature_code_hash.h128 = NULL;
+            }
+        }
         if (feature_offsets == ctx->features->feature_offsets) {
             feature_offsets = NULL;
             feature_offsets_count = 0;
@@ -492,10 +647,37 @@ pf_error pf_load_feature_ref(pf_context *ctx, const char *feature_csv) {
         feature_mode_offsets = NULL;
     }
     
+    /* Wire prehash memory budget from config */
+    if (ctx->config->prehash_memory_budget > 0) {
+        feature_prehash_memory_budget = ctx->config->prehash_memory_budget;
+    } else if (feature_prehash_memory_budget == 0) {
+        feature_prehash_memory_budget = prehash_detect_memory_budget();
+    }
+
+    int prehash_max_saved = feature_prehash_max_hamming;
+    int prehash_max_effective = feature_prehash_max_hamming;
+    if (ctx->config && ctx->config->max_hamming_distance >= 0 &&
+        prehash_max_effective > ctx->config->max_hamming_distance) {
+        prehash_max_effective = ctx->config->max_hamming_distance;
+    }
+    if (prehash_max_effective < 0) {
+        prehash_max_effective = 0;
+    }
+    if (prehash_max_effective != feature_prehash_max_hamming) {
+        fprintf(stderr,
+                "Feature prehash clamp: requested max_hamming=%d, assignment max_hamming=%d, effective=%d\n",
+                feature_prehash_max_hamming,
+                ctx->config ? ctx->config->max_hamming_distance : -1,
+                prehash_max_effective);
+        feature_prehash_max_hamming = prehash_max_effective;
+    }
+
     ctx->features = read_features_file(feature_csv);
+    feature_prehash_max_hamming = prehash_max_saved;
     if (!ctx->features) {
         snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
                  "Failed to parse feature reference: %s", feature_csv);
+        pthread_mutex_unlock(&g_pf_runtime_mutex);
         return PF_ERR_PARSE_ERROR;
     }
 
@@ -514,6 +696,7 @@ pf_error pf_load_feature_ref(pf_context *ctx, const char *feature_csv) {
         if (!feature_mode_offsets || !feature_mode_hist) {
             snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
                      "Failed to allocate feature mode arrays");
+            pthread_mutex_unlock(&g_pf_runtime_mutex);
             return PF_ERR_OUT_OF_MEMORY;
         }
         for (int i = 0; i < count; i++) {
@@ -526,17 +709,22 @@ pf_error pf_load_feature_ref(pf_context *ctx, const char *feature_csv) {
     maximum_feature_length = ctx->features->max_length;
     feature_code_length = (maximum_feature_length + 3) / 4;
     initialize_unit_sizes();
-    
+
+    pthread_mutex_unlock(&g_pf_runtime_mutex);
     return PF_OK;
 }
 
 pf_error pf_load_whitelist(pf_context *ctx, const char *whitelist_path) {
     if (!ctx || !whitelist_path) return PF_ERR_INVALID_ARG;
     if (!ctx->initialized) return PF_ERR_NOT_INITIALIZED;
-    
+
+    pthread_mutex_lock(&g_pf_runtime_mutex);
+    pf_apply_context_globals(ctx);
+
     if (!pf_file_exists(whitelist_path)) {
         snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
                  "Whitelist file not found: %s", whitelist_path);
+        pthread_mutex_unlock(&g_pf_runtime_mutex);
         return PF_ERR_FILE_NOT_FOUND;
     }
     
@@ -558,23 +746,29 @@ pf_error pf_load_whitelist(pf_context *ctx, const char *whitelist_path) {
                  "Failed to load whitelist: %s", whitelist_path);
         kh_destroy(u32ptr, ctx->whitelist_hash);
         ctx->whitelist_hash = NULL;
+        pthread_mutex_unlock(&g_pf_runtime_mutex);
         return PF_ERR_IO_ERROR;
     }
     
     /* Update global pointer for existing code */
     whitelist_hash = ctx->whitelist_hash;
     whitelist = ctx->whitelist_data;
-    
+
+    pthread_mutex_unlock(&g_pf_runtime_mutex);
     return PF_OK;
 }
 
 pf_error pf_load_filtered_barcodes(pf_context *ctx, const char *filtered_path) {
     if (!ctx || !filtered_path) return PF_ERR_INVALID_ARG;
     if (!ctx->initialized) return PF_ERR_NOT_INITIALIZED;
-    
+
+    pthread_mutex_lock(&g_pf_runtime_mutex);
+    pf_apply_context_globals(ctx);
+
     if (!pf_file_exists(filtered_path)) {
         snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
                  "Filtered barcodes file not found: %s", filtered_path);
+        pthread_mutex_unlock(&g_pf_runtime_mutex);
         return PF_ERR_FILE_NOT_FOUND;
     }
     
@@ -585,7 +779,75 @@ pf_error pf_load_filtered_barcodes(pf_context *ctx, const char *filtered_path) {
     
     ctx->filtered_barcodes_hash = kh_init(strptr);
     read_barcodes_into_hash(filtered_path, ctx->filtered_barcodes_hash);
-    
+
+    /* Ingress namespace normalization: if source and target are both known
+     * single-namespace (NXT vs TRU) and differ, translate every barcode. */
+    pf_namespace_t src_ns = ctx->config->source_namespace;
+    pf_namespace_t tgt_ns = ctx->config->target_namespace;
+    if ((src_ns == PF_NS_NXT || src_ns == PF_NS_TRU) &&
+        (tgt_ns == PF_NS_NXT || tgt_ns == PF_NS_TRU) &&
+        src_ns != tgt_ns &&
+        !ctx->config->allow_union_whitelist) {
+        int rc = pf_normalize_hash_namespace(ctx->filtered_barcodes_hash);
+        if (rc < 0) {
+            snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                     "Failed to normalize filtered barcodes from %s to %s "
+                     "(allocation failure)",
+                     pf_namespace_to_string(src_ns),
+                     pf_namespace_to_string(tgt_ns));
+            pthread_mutex_unlock(&g_pf_runtime_mutex);
+            return PF_ERR_ALLOC;
+        }
+        fprintf(stderr,
+            "NOTICE: Normalized %d filtered barcodes from %s to %s namespace.\n",
+            rc, pf_namespace_to_string(src_ns), pf_namespace_to_string(tgt_ns));
+    }
+
+    if (ctx->config->allow_union_whitelist) {
+        int added = expand_hash_union_namespace(ctx->filtered_barcodes_hash);
+        if (added < 0) {
+            snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                     "Failed to expand filtered barcodes for union whitelist "
+                     "(allocation failure)");
+            pthread_mutex_unlock(&g_pf_runtime_mutex);
+            return PF_ERR_ALLOC;
+        }
+        if (added > 0) {
+            fprintf(stderr,
+                "WARNING: --allow_union_whitelist is active. Added %d NXT/TRU "
+                "translated barcodes to filtered set (total now %u).\n"
+                "         This is a legacy compatibility mode for union whitelists\n"
+                "         (e.g. raw 3M-february-2018.txt). Migrate to namespace-split\n"
+                "         whitelist files for new workflows.\n",
+                added, kh_size(ctx->filtered_barcodes_hash));
+        } else {
+            fprintf(stderr,
+                "NOTICE: --allow_union_whitelist active but no additional translations "
+                "needed (filtered set already covers both namespaces or is single-namespace).\n");
+        }
+    }
+
+    /* Hard error when namespace metadata is incomplete or missing and union
+     * mode is off.  With exact-only matching, any gap means silent drops. */
+    if (!ctx->config->allow_union_whitelist &&
+        kh_size(ctx->filtered_barcodes_hash) > 0) {
+        int src_known = (src_ns == PF_NS_NXT || src_ns == PF_NS_TRU);
+        int tgt_known = (tgt_ns == PF_NS_NXT || tgt_ns == PF_NS_TRU);
+        if (!src_known || !tgt_known) {
+            snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                "Filtered barcodes loaded with incomplete namespace metadata "
+                "(source=%s, target=%s) and without --allow_union_whitelist.  "
+                "With exact-only matching, a namespace mismatch will silently "
+                "drop barcodes.  Set both --source_namespace and "
+                "--target_namespace, or use --allow_union_whitelist.",
+                pf_namespace_to_string(src_ns),
+                pf_namespace_to_string(tgt_ns));
+            pthread_mutex_unlock(&g_pf_runtime_mutex);
+            return PF_ERR_NAMESPACE;
+        }
+    }
+
+    pthread_mutex_unlock(&g_pf_runtime_mutex);
     return PF_OK;
 }
 
@@ -600,6 +862,9 @@ pf_error pf_process_fastq_dir(pf_context *ctx,
     if (!ctx || !fastq_dir || !output_dir) return PF_ERR_INVALID_ARG;
     if (!ctx->initialized) return PF_ERR_NOT_INITIALIZED;
 
+    pthread_mutex_lock(&g_pf_runtime_mutex);
+    pf_apply_context_globals(ctx);
+
     /* Reset detection state unconditionally to prevent stale leakage */
     ctx->chem_detect_raw_hits = 0;
     ctx->chem_detect_nxt_hits = 0;
@@ -608,10 +873,12 @@ pf_error pf_process_fastq_dir(pf_context *ctx,
     ctx->detected_match_mode = 0;
     if (!ctx->features) {
         snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE, "Features not loaded");
+        pthread_mutex_unlock(&g_pf_runtime_mutex);
         return PF_ERR_NOT_INITIALIZED;
     }
     if (!ctx->whitelist_hash) {
         snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE, "Whitelist not loaded");
+        pthread_mutex_unlock(&g_pf_runtime_mutex);
         return PF_ERR_NOT_INITIALIZED;
     }
     
@@ -619,6 +886,7 @@ pf_error pf_process_fastq_dir(pf_context *ctx,
     if (ctx->config->use_feature_offset_array && ctx->config->feature_offset_explicit) {
         snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
                  "Cannot specify both use_feature_offset_array and explicit feature_offset");
+        pthread_mutex_unlock(&g_pf_runtime_mutex);
         return PF_ERR_OFFSET_CONFLICT;
     }
     
@@ -663,6 +931,7 @@ pf_error pf_process_fastq_dir(pf_context *ctx,
                              "Dominant: %d (%d features), second: %d features. "
                              "Use pf_config_set_feature_offset() or pf_config_set_use_feature_offset_array(1).",
                              dominant_offset, dominant_count, second_count);
+                    pthread_mutex_unlock(&g_pf_runtime_mutex);
                     return PF_ERR_MULTI_OFFSET_DETECTED;
                 }
                 /* Non-strict: warn and proceed with dominant */
@@ -691,6 +960,7 @@ pf_error pf_process_fastq_dir(pf_context *ctx,
     if (!pf_is_directory(fastq_dir)) {
         snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
                  "FASTQ directory not found: %s", fastq_dir);
+        pthread_mutex_unlock(&g_pf_runtime_mutex);
         return PF_ERR_FILE_NOT_FOUND;
     }
     
@@ -700,6 +970,7 @@ pf_error pf_process_fastq_dir(pf_context *ctx,
         if (mkdir(output_dir, 0755) != 0) {
             snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
                      "Failed to create output directory: %s", output_dir);
+            pthread_mutex_unlock(&g_pf_runtime_mutex);
             return PF_ERR_IO_ERROR;
         }
     }
@@ -718,6 +989,7 @@ pf_error pf_process_fastq_dir(pf_context *ctx,
     if (fastq_files.nsamples == 0) {
         snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
                  "No FASTQ files found in directory: %s", fastq_dir);
+        pthread_mutex_unlock(&g_pf_runtime_mutex);
         return PF_ERR_FILE_NOT_FOUND;
     }
     
@@ -826,9 +1098,11 @@ pf_error pf_process_fastq_dir(pf_context *ctx,
     if (any_failed) {
         snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
                  "One or more samples failed during processing");
+        pthread_mutex_unlock(&g_pf_runtime_mutex);
         return PF_ERR_IO_ERROR;
     }
-    
+
+    pthread_mutex_unlock(&g_pf_runtime_mutex);
     return PF_OK;
 }
 
@@ -844,6 +1118,9 @@ pf_error pf_process_fastqs(pf_context *ctx,
     }
     if (!ctx->initialized) return PF_ERR_NOT_INITIALIZED;
 
+    pthread_mutex_lock(&g_pf_runtime_mutex);
+    pf_apply_context_globals(ctx);
+
     /* Reset detection state unconditionally to prevent stale leakage */
     ctx->chem_detect_raw_hits = 0;
     ctx->chem_detect_nxt_hits = 0;
@@ -853,10 +1130,12 @@ pf_error pf_process_fastqs(pf_context *ctx,
 
     if (!ctx->features) {
         snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE, "Features not loaded");
+        pthread_mutex_unlock(&g_pf_runtime_mutex);
         return PF_ERR_NOT_INITIALIZED;
     }
     if (!ctx->whitelist_hash) {
         snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE, "Whitelist not loaded");
+        pthread_mutex_unlock(&g_pf_runtime_mutex);
         return PF_ERR_NOT_INITIALIZED;
     }
     
@@ -864,6 +1143,7 @@ pf_error pf_process_fastqs(pf_context *ctx,
     if (ctx->config->use_feature_offset_array && ctx->config->feature_offset_explicit) {
         snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
                  "Cannot specify both use_feature_offset_array and explicit feature_offset");
+        pthread_mutex_unlock(&g_pf_runtime_mutex);
         return PF_ERR_OFFSET_CONFLICT;
     }
     
@@ -908,6 +1188,7 @@ pf_error pf_process_fastqs(pf_context *ctx,
                              "Dominant: %d (%d features), second: %d features. "
                              "Use pf_config_set_feature_offset() or pf_config_set_use_feature_offset_array(1).",
                              dominant_offset, dominant_count, second_count);
+                    pthread_mutex_unlock(&g_pf_runtime_mutex);
                     return PF_ERR_MULTI_OFFSET_DETECTED;
                 }
                 /* Non-strict: warn and proceed with dominant */
@@ -939,6 +1220,7 @@ pf_error pf_process_fastqs(pf_context *ctx,
         if (mkdir(output_dir, 0755) != 0) {
             snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
                      "Failed to create output directory: %s", output_dir);
+            pthread_mutex_unlock(&g_pf_runtime_mutex);
             return PF_ERR_IO_ERROR;
         }
     }
@@ -952,6 +1234,7 @@ pf_error pf_process_fastqs(pf_context *ctx,
         if (mkdir(sample_directory, 0755) != 0) {
             snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
                      "Failed to create sample directory: %s", sample_directory);
+            pthread_mutex_unlock(&g_pf_runtime_mutex);
             return PF_ERR_IO_ERROR;
         }
     }
@@ -983,6 +1266,7 @@ pf_error pf_process_fastqs(pf_context *ctx,
         free(fastq_files.sample_sizes);
         free(fastq_files.sample_offsets);
         free(fastq_files.sorted_index);
+        pthread_mutex_unlock(&g_pf_runtime_mutex);
         return PF_ERR_OUT_OF_MEMORY;
     }
     
@@ -1085,9 +1369,11 @@ pf_error pf_process_fastqs(pf_context *ctx,
     if (sample_error) {
         snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
                  "Sample processing failed");
+        pthread_mutex_unlock(&g_pf_runtime_mutex);
         return PF_ERR_IO_ERROR;
     }
-    
+
+    pthread_mutex_unlock(&g_pf_runtime_mutex);
     return PF_OK;
 }
 
@@ -1110,6 +1396,16 @@ const char* pf_get_feature_sequence(pf_context *ctx, int index) {
     if (!ctx || !ctx->features) return NULL;
     if (index < 0 || index >= ctx->features->number_of_features) return NULL;
     return ctx->features->feature_sequences[index];
+}
+
+int pf_get_feature_no_ambiguity(pf_context *ctx, int level, int index) {
+    if (!ctx || !ctx->features) return -1;
+    if (index < 0 || index >= ctx->features->number_of_features) return -1;
+    const unsigned char *arr = NULL;
+    if (level == 1) arr = ctx->features->feature_no_ambiguity_le1;
+    else if (level == 2) arr = ctx->features->feature_no_ambiguity_le2;
+    if (!arr) return -1;
+    return (int)arr[index];
 }
 
 /* ============================================================================

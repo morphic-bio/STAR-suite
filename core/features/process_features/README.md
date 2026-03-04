@@ -78,7 +78,9 @@ The tool can accept input FASTQ files in two ways:
 | `-u`, `--umi_length` | `[int]` | Length of the Unique Molecular Identifier (UMI). | `12` |
 | `-o`, `--feature_constant_offset`| `[int]` | Global feature offset. If not provided, auto-detected from pattern column. | auto |
 | `-B`, `--barcode_constant_offset`| `[int]` | Starting position of the barcode and UMI in the read. | `0` |
-| `--limit_search` | `[int]` | Limit the search for the feature sequence to `N` bases around `feature_constant_offset`. Set to `-1` to search the entire read. | `-1` |
+| `--limit_search` | `[int]` | **Hard bound**: restrict feature search to `N` bases around `feature_constant_offset`. No global fallback outside the window is performed. Set to `-1` to search the entire read. | `-1` |
+| `--feature_limited_mode` | `in_window_full` or `in_window_simple` | In-window matcher when `--limit_search >= 0`. Both modes are strictly confined to the search window; no out-of-window rescue occurs. | `in_window_full` |
+| `--feature_limited_fallback` | `full` or `simple` | **Deprecated** alias for `--feature_limited_mode`. Accepts `full`/`simple` (equivalent to `in_window_full`/`in_window_simple`). Emits a deprecation warning. | |
 | `--force_individual_offsets` | | Use per-feature offsets from pattern column (slower for large feature sets). | `false` |
 | `-r`, `--reverse_complement_whitelist` | | Reverse complement the whitelist barcodes before use. | `false` |
 | `-a`, `--as_named` | | Treat all input files as part of a single sample. | `false` |
@@ -111,12 +113,20 @@ The tool can accept input FASTQ files in two ways:
 | `-R`, `--read_buffer_lines` | `[int]` | Number of lines for the read buffer. | `1024` |
 | `-L`, `--average_read_length` | `[int]` | Estimated average read length for buffer allocation. | `300` |
 
+### Namespace & Compatibility
+
+| Flag | Argument | Description | Default |
+| :--- | :--- | :--- | :--- |
+| `--translate_NXT` | | Complement positions 8 and 9 of cell barcodes at output/filter stages. | `false` |
+| `--source_namespace` | `NXT` or `TRU` | Namespace of the filtered barcode file. Required when `--filtered_barcodes` is used (unless `--allow_union_whitelist` is set). When source != target, barcodes are normalized at ingress. | — |
+| `--target_namespace` | `NXT` or `TRU` | Namespace of assignment output. Required when `--filtered_barcodes` is used (unless `--allow_union_whitelist` is set). | — |
+| `--allow_union_whitelist` | | Accept mixed NXT+TRU whitelist and filtered barcode files. Expands filtered barcodes at ingress so both namespace forms are present. Legacy compat for raw 3M-february-2018.txt union whitelists. | `false` |
+
 ### Miscellaneous
 
 | Flag | Argument | Description | Default |
 | :--- | :--- | :--- | :--- |
 | `-v`, `--debug` | | Enable verbose debug output. | `false` |
-| `--translate_NXT` | | Complement positions 8 and 9 of cell barcodes at output/filter stages. | `false` |
 
 
 ## Example Usage
@@ -211,8 +221,40 @@ Use this flag when your feature reference contains features with genuinely diffe
 ---
 
 ## Search methodology
+
 #### Initial fixed position search
 For targeted sequencing, most of the of read sequences will have a constant start sequence of fixed length. `assignBarcodes` attempts to make a match here first. If no match is found, then it does a more expensive exhaustive search. The scope of this search can be controlled with the `--limit_search` flag.
+
+#### Windowed search (`--limit_search`)
+
+When `--limit_search N` is set (N >= 0), feature matching is **strictly confined** to a window of N bases on either side of `feature_constant_offset`. This is a **hard bound**: reads whose true feature falls outside the window will remain unmatched. No global fallback or out-of-window rescue is performed.
+
+Within the window, offsets are tried in deterministic order (0, +1, -1, +2, -2, …) using a distance-phased policy: exact matches are tried at all candidate positions first, then Hamming-1 matches, then Hamming-2, etc. up to `maxHammingDistance`.
+
+The `--feature_limited_mode` flag selects which in-window matcher is used:
+- **`in_window_full`** (default) — uses `simpleCorrectFeature` with distance-phased sweeps across all candidate offsets.
+- **`in_window_simple`** — same in-window matching; differs only in stats tracking labels.
+
+The old `--feature_limited_fallback` flag is a deprecated alias that accepts `full`/`simple` and maps them to the corresponding `in_window_*` mode.
+
+#### Union whitelist support (`--allow_union_whitelist`)
+
+Some legacy workflows (particularly those using the raw `3M-february-2018.txt` file or early STARsolo runs before namespace separation) produce filtered barcode sets containing a mix of NXT and TRU namespace barcodes. By default, `assignBarcodes` expects single-namespace inputs and may miss cells when the filtered barcode namespace doesn't match the assignment namespace.
+
+When `--allow_union_whitelist` is set:
+1. At filtered barcode ingress, each barcode's NXT/TRU translation (complement of positions 8 and 9) is computed and inserted into the hash if not already present.
+2. This doubles the coverage of the filtered barcode set so both namespace forms are available for downstream lookup regardless of which namespace a read's cell barcode is in.
+3. A `WARNING` is emitted to stderr reporting the number of translations added.
+4. The expansion is idempotent — running it twice produces the same result.
+5. On allocation failure the tool aborts with a clear error rather than silently proceeding with a partial expansion.
+
+This flag does **not** change feature matching, Hamming distance scoring, or assignment logic. It only affects the filtered barcode ingress path.
+
+> **Important:** `filtered_barcode_hash_contains()` uses strict exact-only matching (no runtime translated fallback).  If filtered barcodes are in a different namespace than the assignment output, barcodes will be silently dropped unless you either (a) set `--source_namespace` and `--target_namespace` for ingress normalization, or (b) use `--allow_union_whitelist` for mixed-namespace files.
+
+**When to use**: Only for legacy datasets where the filtered barcode file is known to contain mixed-namespace barcodes. New workflows should use namespace-split whitelist files and explicit chemistry settings.
+
+**STAR integration**: Use `--crAssignAllowUnionWhitelist 1` in the STAR parameter file to enable this mode through the STAR pipeline.
 
 #### Exhaustive search
 The exhaustive search checks the entire read against all the feature barcodes at all possible starting positions in the read. For ATAC-seq the search is done in both orientations. We use a novel method that converts the query and match sequences to bitcodes. We uses bitwise ops and a lookup table for hamming distance evaluation of 4 basepairs chunks with a bitops and lookup and can be vectorized by the compiler for even greater speedup. Additionally, the search is broken down into four independent subsearches which are performed in parallel for a 16x speedup over the simple Hamming search.
@@ -339,6 +381,8 @@ The repository is organized into the following main directories:
 -   **`tests/`**: Contains test programs.
     -   `test_pf_api.c`: Test program for library API validation.
     -   `test_max_hamming_inclusive.sh`: Hamming distance test script.
+    -   `test_limit_search_hard_bound.sh`: Verifies `--limit_search` hard-bound semantics and `--feature_limited_mode` / `--feature_limited_fallback` alias parity.
+    -   `test_union_whitelist.c`: Tests `expand_hash_union_namespace()` expansion logic and `filtered_barcode_hash_contains()` with mixed NXT+TRU barcode sets.
 -   **`scripts/`**: Contains utility scripts for testing and other purposes.
 -   **`Makefile`**: The main makefile for compiling the project.
 

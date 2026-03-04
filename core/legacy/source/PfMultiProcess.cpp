@@ -55,6 +55,7 @@ struct PfPreparedFeatureLibrary {
     string resolvedChemRequest;   // "auto", "nxt", or "tru" — after column > global resolution
     bool explicitChem = false;    // true when star_chemistry column provided NXT/TRU
     bool usedFilteredRef = false;
+    int starMaxHamming = -1;    // Per-library max Hamming override (-1 = use global)
     AnchoredReadEstimate featureEstimate;
 };
 
@@ -75,6 +76,7 @@ struct PfLibraryNamespaceContext {
     string autoDetectMatchMode;          // RAW_MATCH | TRANSLATED_MATCH | AMBIGUOUS | UNKNOWN
     bool isChemistryExplicit = false;
     bool isNamespaceConfident = false;
+    bool allowUnionWhitelist = false;
     FilteredBarcodeNormalizationStats normalizationStats;
 };
 
@@ -1056,12 +1058,8 @@ static bool loadBarcodeListFromFile(const string& path,
 
 // Normalize filtered barcodes into the whitelist (assignment) namespace.
 //
-// sourceNamespace: if known ("NXT" or "TRU"), use deterministic mapping
-// instead of membership heuristics. This avoids misclassification when
-// COL1/COL2 sets overlap (barcodes self-complementary at positions 7-8).
-//
-// When sourceNamespace is empty or unknown, falls back to the heuristic
-// (check membership, then try translation).
+// sourceNamespace and whitelistNamespace must both be resolved ("NXT" or
+// "TRU").  Uses deterministic mapping only.
 static vector<string> normalizeFilteredBarcodesForAssignNamespace(
     const vector<string>& inputBarcodes,
     const std::unordered_set<string>& whitelistSet,
@@ -1074,42 +1072,29 @@ static vector<string> normalizeFilteredBarcodesForAssignNamespace(
     std::unordered_set<string> seen;
     seen.reserve(inputBarcodes.size());
 
-    // Deterministic mode: when both source and whitelist namespaces are known,
-    // we know exactly whether translation is needed — no membership guessing.
-    const bool deterministic =
-        isKnownNamespace(sourceNamespace) && isKnownNamespace(whitelistNamespace);
-    const bool needsTranslation = deterministic && (sourceNamespace != whitelistNamespace);
+    if (!isKnownNamespace(sourceNamespace) || !isKnownNamespace(whitelistNamespace)) {
+        throw runtime_error(
+            "normalizeFilteredBarcodesForAssignNamespace: both sourceNamespace ('"
+            + sourceNamespace + "') and whitelistNamespace ('" + whitelistNamespace
+            + "') must be resolved to NXT or TRU.  Heuristic membership-based "
+            "fallback has been removed per strict namespace policy.");
+    }
+    const bool needsTranslation = (sourceNamespace != whitelistNamespace);
 
     for (const auto& rawBc : inputBarcodes) {
         const string bc = upperCopy(rawBc);
+        string candidate = needsTranslation ? translateNxtMiddleTwoBases(bc) : bc;
         string selected;
 
-        if (deterministic) {
-            string candidate = needsTranslation ? translateNxtMiddleTwoBases(bc) : bc;
-            if (whitelistSet.find(candidate) != whitelistSet.end()) {
-                selected = candidate;
-                if (needsTranslation) {
-                    stats.translatedToSet++;
-                } else {
-                    stats.inSet++;
-                }
+        if (whitelistSet.find(candidate) != whitelistSet.end()) {
+            selected = candidate;
+            if (needsTranslation) {
+                stats.translatedToSet++;
             } else {
-                stats.unmatched++;
+                stats.inSet++;
             }
         } else {
-            // Heuristic fallback: check membership then try translation.
-            if (whitelistSet.find(bc) != whitelistSet.end()) {
-                selected = bc;
-                stats.inSet++;
-            } else {
-                string translated = translateNxtMiddleTwoBases(bc);
-                if (whitelistSet.find(translated) != whitelistSet.end()) {
-                    selected = translated;
-                    stats.translatedToSet++;
-                } else {
-                    stats.unmatched++;
-                }
-            }
+            stats.unmatched++;
         }
 
         if (!selected.empty()) {
@@ -1148,6 +1133,9 @@ static void appendAssignNormalizationStats(const string& assignOut,
     out << "barcode_normalization.unmatched=" << nsCtx.normalizationStats.unmatched << "\n";
     out << "barcode_normalization.dedup_dropped=" << nsCtx.normalizationStats.dedupDropped << "\n";
     out << "barcode_normalization.output_count=" << nsCtx.normalizationStats.outputCount << "\n";
+    out << "namespace_policy.strict_exact_only=1\n";
+    out << "namespace_policy.allow_union_whitelist="
+        << (nsCtx.allowUnionWhitelist ? 1 : 0) << "\n";
 }
 
 // knownFeatureRefTypeMap() and buildFeatureSpecsFromConfig() are in PfMultiFeatureSpecs.h
@@ -1317,6 +1305,7 @@ static PfMultiPreparedContext buildPfMultiPreparedContext(const PfMultiPreloadIn
                 ? basenameOf(prepared.resolvedFastq)
                 : lib.sample;
             prepared.libraryId = lib.starLibraryId;
+            prepared.starMaxHamming = lib.starMaxHamming;
             prepared.assignOut =
                 assignBase + "/" + sanitizeDirName(prepared.libraryId);
 
@@ -1361,6 +1350,7 @@ static PfMultiPreparedContext buildPfMultiPreparedContext(const PfMultiPreloadIn
                     << ", resolved=" << libChemRequest
                     << ", effectiveChem=" << prepared.effectiveChem
                     << (prepared.explicitChem ? " (explicit)" : " (auto-detect eligible)")
+                    << ", star_max_hamming=" << (prepared.starMaxHamming >= 0 ? std::to_string(prepared.starMaxHamming) : "(global)")
                     << ", featureRef=" << prepared.featureRefPath
                     << "\n";
 
@@ -1602,6 +1592,7 @@ int processPfMultiConfig(Parameters& P,
         assignOpts.minPosterior = P.pfMulti.crAssignMinPosterior;
         assignOpts.maxReads = (P.readMapNumber > 0) ? static_cast<long long>(P.readMapNumber) : -1;
         assignOpts.legacyCbRescue = (P.pfMulti.crAssignLegacyCbRescue != 0);
+        assignOpts.allowUnionWhitelist = (P.pfMulti.crAssignAllowUnionWhitelist != 0);
         assignOpts.enableStarDynamicPermitHooks = (P.dynamicThreadInterface == 1);
         const PfPermitControllerMode pfControllerMode = parsePfPermitControllerMode(P.dynamicThreadPfControllerMode);
         const bool pfControllerEnabled = (pfControllerMode != PfPermitControllerMode::Off);
@@ -1623,7 +1614,6 @@ int processPfMultiConfig(Parameters& P,
         const int pfSearchThreadQuantum = normalizePfSearchThreadQuantum(pfSearchThreadsForController);
         const int pfChunkPermitStep = pfSearchThreadQuantum + 1;
         const bool pfConsumerThreadsExplicit = (assignOpts.consumerThreadsPerSet > 0);
-        const int pfConsumerCapPerProducer = 8;
 
         const bool hasExplicitAssignFilteredBarcodes =
             (!P.pfMulti.crAssignFilteredBarcodes.empty() && P.pfMulti.crAssignFilteredBarcodes != "-");
@@ -1691,54 +1681,18 @@ int processPfMultiConfig(Parameters& P,
             totalFileCount += librarySchedules[li].fileCount;
         }
 
-        if (numFeatureLibs > 1 && assignOpts.enableStarDynamicPermitHooks) {
-            // Library-aware budget: distribute runThreadN proportionally.
-            // Each library gets at least 2 threads (1 producer + 1 consumer).
-            // When runThreadN >= numLibs*2, strict conservation holds:
-            //   sum(threadBudget) == runThreadN.
-            // When runThreadN < numLibs*2, min guarantee takes priority.
-            const int minPerLib = 2;
-            const int guaranteedTotal = static_cast<int>(numFeatureLibs) * minPerLib;
-
-            if (P.runThreadN < guaranteedTotal) {
-                // Not enough threads for everyone's minimum; give each the min.
-                // Total exceeds runThreadN but libraries run sequentially.
-                for (size_t li = 0; li < numFeatureLibs; ++li) {
-                    librarySchedules[li].threadBudget = minPerLib;
-                }
-            } else {
-                // Distribute surplus using largest-remainder method for strict conservation.
-                const int surplus = P.runThreadN - guaranteedTotal;
-                int floorSum = 0;
-                vector<double> fractionalParts(numFeatureLibs);
-                for (size_t li = 0; li < numFeatureLibs; ++li) {
-                    double exactExtra = static_cast<double>(librarySchedules[li].estimatedWork)
-                                      / static_cast<double>(std::max<uint64_t>(1, totalEstimatedWork))
-                                      * surplus;
-                    int floorExtra = static_cast<int>(exactExtra);
-                    librarySchedules[li].threadBudget = minPerLib + floorExtra;
-                    fractionalParts[li] = exactExtra - floorExtra;
-                    floorSum += floorExtra;
-                }
-                int leftover = surplus - floorSum;
-                // Give leftover threads one at a time to libraries with largest fractional parts
-                while (leftover > 0) {
-                    size_t bestIdx = 0;
-                    for (size_t li = 1; li < numFeatureLibs; ++li) {
-                        if (fractionalParts[li] > fractionalParts[bestIdx]) {
-                            bestIdx = li;
-                        }
-                    }
-                    librarySchedules[bestIdx].threadBudget += 1;
-                    fractionalParts[bestIdx] = -1.0;
-                    --leftover;
-                }
-            }
-
+        // Libraries run sequentially (pf_api holds a mutex), so each gets
+        // the full thread budget.  The permit controller manages contention
+        // with concurrent MAP work dynamically.
+        for (size_t li = 0; li < numFeatureLibs; ++li) {
+            librarySchedules[li].threadBudget = P.runThreadN;
+        }
+        if (numFeatureLibs > 1) {
             P.inOut->logMain << "\npf-multi library scheduler (Phase 4):\n";
             P.inOut->logMain << "  total_threads=" << P.runThreadN
                              << ", libraries=" << numFeatureLibs
-                             << ", total_est_reads=" << totalEstimatedWork << "\n";
+                             << ", total_est_reads=" << totalEstimatedWork
+                             << ", policy=full_budget_sequential\n";
             for (size_t li = 0; li < numFeatureLibs; ++li) {
                 P.inOut->logMain << "  [" << li << "] library_id="
                                  << prepared.featureLibraries[li].libraryId
@@ -1748,10 +1702,6 @@ int processPfMultiConfig(Parameters& P,
                                  << "\n";
             }
             P.inOut->logMain << "\n";
-        } else {
-            for (size_t li = 0; li < numFeatureLibs; ++li) {
-                librarySchedules[li].threadBudget = P.runThreadN;
-            }
         }
 
         for (size_t libIdx = 0; libIdx < numFeatureLibs; ++libIdx) {
@@ -1770,59 +1720,21 @@ int processPfMultiConfig(Parameters& P,
                 std::max(1, std::min(std::max(1, libThreadBudget - 1),
                                      std::max(1, sched.fileCount)));
             const bool pfSingleProducerOnly = (pfProducerSlotsAvailable <= 1);
-            const bool pfProducerSlotsExhaustedByFiles =
-                (pfProducerSlotsAvailable >= std::max(1, sched.fileCount));
-            const bool pfHasExtraBudgetAfterAllProducers =
-                (libThreadBudget > (pfProducerSlotsAvailable + 1));
-            const bool pfLiftConsumerCap =
-                pfSingleProducerOnly ||
-                (pfProducerSlotsExhaustedByFiles && pfHasExtraBudgetAfterAllProducers);
-            // Keep the per-producer cap policy for multi-producer cases, but when
-            // only one producer slot is possible (e.g. one file set), lift the cap
-            // so consumers can use the full remaining budget. Also lift when all
-            // producer slots are already exhausted by file availability and extra
-            // thread budget remains.
-            const int pfConsumerCapPerProducerEffective =
-                pfLiftConsumerCap ? std::max(1, libThreadBudget) : pfConsumerCapPerProducer;
             int pfReaderThreadsReserved = 1;
             int pfConsumerBudgetThreads = std::max(1, libThreadBudget - pfReaderThreadsReserved);
             int pfConsumerThreadsForRun = std::max(1, assignOpts.consumerThreadsPerSet);
-            int pfConsumerSoftMax = pfConsumerCapPerProducerEffective;
+            int pfConsumerSoftMax = std::max(1, libThreadBudget);
             bool pfConsumerThreadsAuto = false;
             if (!pfConsumerThreadsExplicit && assignOpts.enableStarDynamicPermitHooks) {
-                int bestProducerReserve = 1;
-                int bestConsumerThreads = 1;
-                for (int producerReserve = 1; producerReserve <= pfProducerSlotsAvailable; ++producerReserve) {
-                    const int consumerBudget =
-                        std::max(1, libThreadBudget - producerReserve);
-                    const int consumerByBudget =
-                        std::max(1, consumerBudget / std::max(1, pfSearchThreadQuantum));
-                    const int consumerByProducerCap =
-                        std::max(1, producerReserve * pfConsumerCapPerProducerEffective);
-                    const int candidateConsumers =
-                        std::max(1, std::min(consumerByBudget, consumerByProducerCap));
-                    if (candidateConsumers > bestConsumerThreads ||
-                        (candidateConsumers == bestConsumerThreads &&
-                         producerReserve < bestProducerReserve)) {
-                        bestConsumerThreads = candidateConsumers;
-                        bestProducerReserve = producerReserve;
-                    }
-                }
-                pfReaderThreadsReserved = bestProducerReserve;
-                pfConsumerThreadsForRun = bestConsumerThreads;
-                pfConsumerBudgetThreads = std::max(1, libThreadBudget - pfReaderThreadsReserved);
-                pfConsumerSoftMax =
-                    std::max(1, pfReaderThreadsReserved * pfConsumerCapPerProducerEffective);
+                pfConsumerThreadsForRun = pfConsumerBudgetThreads;
                 pfConsumerThreadsAuto = true;
             } else if (pfConsumerThreadsExplicit) {
-                const int neededProducerReserve = std::max(
-                    1, (pfConsumerThreadsForRun + pfConsumerCapPerProducerEffective - 1) / pfConsumerCapPerProducerEffective);
-                pfReaderThreadsReserved = std::min(pfProducerSlotsAvailable, neededProducerReserve);
-                pfConsumerBudgetThreads = std::max(1, libThreadBudget - pfReaderThreadsReserved);
-                pfConsumerSoftMax =
-                    std::max(1, pfReaderThreadsReserved * pfConsumerCapPerProducerEffective);
+                pfConsumerBudgetThreads = std::max(pfConsumerThreadsForRun, pfConsumerBudgetThreads);
             }
             PfMultiAssign::AssignOptions runAssignOpts = assignOpts;
+            if (preparedLib.starMaxHamming >= 0) {
+                runAssignOpts.maxHammingDistance = preparedLib.starMaxHamming;
+            }
             runAssignOpts.consumerThreadsPerSet = pfConsumerThreadsForRun;
             runAssignOpts.filteredBarcodesPath.clear();
 
@@ -1876,16 +1788,36 @@ int processPfMultiConfig(Parameters& P,
                 }
 
                 FilteredBarcodeNormalizationStats normStats;
-                // For solo-sourced barcodes (read namespace = matching namespace),
-                // pass known namespaces for deterministic mapping.
-                // For explicit sources, namespace is unknown — use heuristic fallback.
-                const string assignSourceNS =
-                    (sourceLabel == "solo" && assignmentNamespaceKnown)
-                    ? assignmentWhitelistNamespace : "";
-                vector<string> normalizedFiltered =
-                    normalizeFilteredBarcodesForAssignNamespace(
-                        sourceFiltered, whitelistSet, normStats,
-                        assignSourceNS, assignmentWhitelistNamespace);
+                if (!assignmentNamespaceKnown) {
+                    throw runtime_error(
+                        "Cannot normalize filtered barcodes for library_id="
+                        + preparedLib.libraryId + " (source=" + sourceLabel
+                        + "): assignment whitelist namespace is unresolved.  "
+                        "Provide a whitelist with resolvable NXT/TRU namespace.");
+                }
+
+                vector<string> normalizedFiltered;
+                if (runAssignOpts.allowUnionWhitelist && sourceLabel == "explicit") {
+                    // Union mode with explicit filtered barcodes: pass through
+                    // as-is.  Downstream pf_load_filtered_barcodes will expand
+                    // both namespace forms via expand_hash_union_namespace.
+                    // Normalization would drop opposite-namespace barcodes.
+                    normStats = FilteredBarcodeNormalizationStats{};
+                    normStats.outputCount = sourceFiltered.size();
+                    normalizedFiltered.reserve(sourceFiltered.size());
+                    for (const auto& rawBc : sourceFiltered) {
+                        normalizedFiltered.push_back(upperCopy(rawBc));
+                    }
+                } else {
+                    // Solo-sourced barcodes are already in whitelist namespace.
+                    // Explicit sources without union mode: assume same namespace
+                    // as assignment whitelist.
+                    const string assignSourceNS = assignmentWhitelistNamespace;
+                    normalizedFiltered =
+                        normalizeFilteredBarcodesForAssignNamespace(
+                            sourceFiltered, whitelistSet, normStats,
+                            assignSourceNS, assignmentWhitelistNamespace);
+                }
                 if (normalizedFiltered.empty() && !sourceFiltered.empty()) {
                     std::ostringstream oss;
                     oss << "Filtered barcodes became empty after assignment-namespace normalization for library_id="
@@ -1944,6 +1876,7 @@ int processPfMultiConfig(Parameters& P,
                 PfMultiAssign::AssignOptions detectOpts = runAssignOpts;
                 detectOpts.autodetectChemistry = true;
                 detectOpts.enableStarDynamicPermitHooks = false;
+                detectOpts.filteredBarcodesPath.clear();
                 if (detectOpts.maxReads <= 0 ||
                     detectOpts.maxReads > detectOpts.autodetectChemistryReads) {
                     detectOpts.maxReads = detectOpts.autodetectChemistryReads;
@@ -2002,6 +1935,20 @@ int processPfMultiConfig(Parameters& P,
             nsCtx.effectiveReadNamespace = effectiveReadNamespace;
             nsCtx.assignmentWhitelistNamespace = assignmentWhitelistNamespace;
             nsCtx.translateNxtForAssign = runAssignOpts.translateNxt;
+            nsCtx.allowUnionWhitelist = runAssignOpts.allowUnionWhitelist;
+
+            runAssignOpts.sourceNamespace = assignmentWhitelistNamespace;
+            // Target namespace = output namespace after translate_NXT.
+            // When translateNxt is active, output barcodes are in the
+            // opposite namespace from the whitelist.  Filtered barcodes
+            // must be normalized to the output namespace for exact-only
+            // matching.
+            if (runAssignOpts.translateNxt) {
+                runAssignOpts.targetNamespace =
+                    (assignmentWhitelistNamespace == "TRU") ? "NXT" : "TRU";
+            } else {
+                runAssignOpts.targetNamespace = assignmentWhitelistNamespace;
+            }
 
             const bool pfSingleConsumer = (pfConsumerThreadsForRun <= 1);
             const int pfPermitCeilingDuringPf =
@@ -2044,12 +1991,7 @@ int processPfMultiConfig(Parameters& P,
                                  << ", searchThreadsForController=" << pfSearchThreadsForController
                                  << ", consumerThreadsForRun=" << pfConsumerThreadsForRun
                                  << ", consumerSoftMax=" << pfConsumerSoftMax
-                                 << ", consumerCapPerProducer=" << pfConsumerCapPerProducer
-                                 << ", consumerCapPerProducerEffective=" << pfConsumerCapPerProducerEffective
                                  << ", producerSlotsAvailable=" << pfProducerSlotsAvailable
-                                 << ", producerSlotsExhaustedByFiles=" << (pfProducerSlotsExhaustedByFiles ? "yes" : "no")
-                                 << ", extraBudgetAfterProducers=" << (pfHasExtraBudgetAfterAllProducers ? "yes" : "no")
-                                 << ", liftConsumerCap=" << (pfLiftConsumerCap ? "yes" : "no")
                                  << ", singleProducerOnly=" << (pfSingleProducerOnly ? "yes" : "no")
                                  << ", singleConsumerMode=" << (pfSingleConsumer ? "yes" : "no")
                                  << ", readerThreadsReserved=" << pfReaderThreadsReserved
@@ -2275,15 +2217,10 @@ int processPfMultiConfig(Parameters& P,
                     apiRunOut << "pfController.chunkPermitStep=" << pfChunkPermitStep << "\n";
                     apiRunOut << "pfController.consumerThreadsForRun=" << pfConsumerThreadsForRun << "\n";
                     apiRunOut << "pfController.consumerSoftMax=" << pfConsumerSoftMax << "\n";
-                    apiRunOut << "pfController.consumerCapPerProducer=" << pfConsumerCapPerProducer << "\n";
-                    apiRunOut << "pfController.consumerCapPerProducerEffective=" << pfConsumerCapPerProducerEffective << "\n";
                     apiRunOut << "pfController.consumerThreadsExplicit=" << (pfConsumerThreadsExplicit ? 1 : 0) << "\n";
                     apiRunOut << "pfController.consumerThreadsAuto=" << (pfConsumerThreadsAuto ? 1 : 0) << "\n";
                     apiRunOut << "pfController.consumerBudgetThreads=" << pfConsumerBudgetThreads << "\n";
                     apiRunOut << "pfController.producerSlotsAvailable=" << pfProducerSlotsAvailable << "\n";
-                    apiRunOut << "pfController.producerSlotsExhaustedByFiles=" << (pfProducerSlotsExhaustedByFiles ? 1 : 0) << "\n";
-                    apiRunOut << "pfController.extraBudgetAfterProducers=" << (pfHasExtraBudgetAfterAllProducers ? 1 : 0) << "\n";
-                    apiRunOut << "pfController.liftConsumerCap=" << (pfLiftConsumerCap ? 1 : 0) << "\n";
                     apiRunOut << "pfController.singleProducerOnly=" << (pfSingleProducerOnly ? 1 : 0) << "\n";
                     apiRunOut << "pfController.singleConsumerMode=" << (pfSingleConsumer ? 1 : 0) << "\n";
                     apiRunOut << "pfController.readerThreadsReserved=" << pfReaderThreadsReserved << "\n";

@@ -56,8 +56,8 @@ int find_closest_barcodes(unsigned char* code,unsigned char *corrected_codes, un
 int find_variant_match(unsigned char *code, int sequence_index, unsigned char *corrected_bases );
 void process_pending_barcodes( data_structures *hashes, memory_pool_collection *pools, statistics *stats, double min_posterior, int legacy_cb_rescue);
 unsigned char* find_best_posterior_match (unmatched_barcodes_features_block *entry_block, int number_of_features, double min_posterior, statistics *stats, data_structures *hashes);
-int simpleCorrectFeature(char *line, feature_arrays *features, int maxN, int maxHammingDistance, int *hamming_distance);
-int checkAndCorrectFeature(char *line, feature_arrays *features,int maxHammingDistance, int nThreads, int *hamming_distance, char *matching_sequence, int maxN,char *ambiguous, uint16_t *match_position);
+int simpleCorrectFeature(char *line, feature_arrays *features, int maxN, int maxHammingDistance, int *hamming_distance, statistics *stats);
+int checkAndCorrectFeature(char *line, feature_arrays *features,int maxHammingDistance, int nThreads, int *hamming_distance, char *matching_sequence, int maxN,char *ambiguous, uint16_t *match_position, statistics *stats);
 size_t barcode_code2number(unsigned char *code);
 int checkAndCorrectBarcode(char **lines, int maxN, uint32_t feature_index, uint16_t match_position, data_structures *hashes, memory_pool_collection *pools, statistics *stats, int barcode_constant_offset);
 void finalize_processing(feature_arrays *features, data_structures *hashes, char *directory, memory_pool_collection *pools, statistics *stats, uint16_t stringency, uint16_t min_counts, double min_posterior, int legacy_cb_rescue, khash_t(strptr)* filtered_barcodes_hash, int skip_emptydrops, int emptydrops_failure_fatal, int expected_cells, int emptydrops_use_fdr, int *error_out);
@@ -94,6 +94,9 @@ void generate_heatmap(const char *directory, feature_arrays *features, int **coe
 void generate_deduped_heatmap(const char *directory, feature_arrays *features, int **deduped_histograms, int max_deduped_count, int *total_deduped_counts, int histogram_minimum_counts);
 char* grab_sample_barcode(char *read, uint16_t feature_end, const sample_args *args);
 int find_sample_index(char *seq, const sample_args *args, int *hamming_distance);
+int filtered_barcode_hash_contains(khash_t(strptr) *filtered_barcodes_hash, const char *barcode);
+int pf_normalize_hash_namespace(khash_t(strptr) *hash);
+int expand_hash_union_namespace(khash_t(strptr) *hash);
 
 
 #endif // PROTOTYPES_H

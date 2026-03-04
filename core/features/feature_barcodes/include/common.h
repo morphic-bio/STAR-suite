@@ -237,6 +237,7 @@ typedef struct sample_args {
     int sample_constant_offset;      /* >=0 absolute offset; -1 unused */
     int sample_offset_relative;      /* negative/positive offset from feature end; 0 unused */
     feature_arrays *sample_barcodes; /* loaded sample barcode list */
+    int allow_union_whitelist;       /* expand filtered barcodes to both NXT/TRU forms */
 } sample_args;
 
 typedef struct fastq_reader {

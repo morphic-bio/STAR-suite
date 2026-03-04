@@ -164,6 +164,23 @@ Implementation:
 - `core/features/process_features/src/assignBarcodes.c`
   - shared resolver `resolve_feature_over_n_alts(...)`
 
+## Benchmark Summary (documented results)
+### End-to-end and regression timings
+| Benchmark | Input / Scale | Baseline | New policy/code path | Delta | Output parity |
+|---|---|---:|---:|---:|---|
+| UCSF 2M PF A/B (`max_reads=1,000,000`) | `/storage/ucsf-2M/guides/iPSC2_1_AALG2` | `0:35.76`, `329104 KB` (`prehash_off`) | `0:35.85`, `381236 KB` (`prehash_on`) | `+0.09s` | Canonical matrix identical; `stats.txt`/`features.txt` identical |
+| UCSF full dynamic STAR+PF (32x32) | `/storage/ucsf-full/bench_20260218_dynamic_first` | `20:53.24`, `44019664 KB` (ref dynamic prehash run) | `20:50.45`, `44021648 KB` (cumhash per-library run) | `-2.79s` | Mapping metrics identical; GEX summaries identical; CRISPR outputs identical; raw/filtered MEX identical |
+| UCSF guides smoke (`max_reads=100,000`) | UCSF guides quick check | `4.26s` (`off`) | `4.30s` (`on`) | `+0.04s` | Canonical matrix identical; `stats.txt`/`features.txt` identical |
+
+Interpretation:
+- No observed correctness regressions in same-input A/B checks.
+- Runtime impact is near-neutral on 2M and smoke, with slight improvement in the full dynamic run.
+- Memory increases are expected when cumulative hashes are enabled.
+
+### Microbenchmark reference
+Detailed hash-policy microbenchmarks (exact-search crossover, 1-Hamming strategy comparisons, full-LARRY scaling) are documented in:
+- `docs/FEATURE_HASH_POLICY_BENCHMARK_SUMMARY_20260301.md`
+
 ## Current Working Tree (relevant files)
 Modified and not committed:
 - `core/features/process_features/include/common.h`
