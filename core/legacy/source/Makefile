@@ -49,7 +49,13 @@ VPATH := $(FLEX_SRC_DIR) $(SLAM_SRC_DIR) $(SLAM_LIBEM_DIR) $(VBEM_SRC_DIR) $(BAM
 LDFLAGS_shared := -pthread -Lhtslib -Bstatic -lhts -Bdynamic -lz -lssl -lcrypto
 # "Static" build follows upstream STAR behavior: link STAR objects and vendored
 # htslib statically while keeping system libs dynamic for broad compatibility.
-LDFLAGS_static := -static-libgcc -static-libstdc++ -pthread -Lhtslib -Bstatic -lhts -Bdynamic -lz -lbz2 -llzma -lcurl -lssl -lcrypto
+LIBGOMP_STATIC := $(shell $(CXX) -print-file-name=libgomp.a 2>/dev/null)
+ifeq ($(notdir $(LIBGOMP_STATIC)),libgomp.a)
+LDFLAGS_static_gomp := $(LIBGOMP_STATIC)
+else
+LDFLAGS_static_gomp := -lgomp
+endif
+LDFLAGS_static := -static-libgcc -static-libstdc++ -pthread -Lhtslib -Bstatic -lhts $(LDFLAGS_static_gomp) -Bdynamic -lz -lbz2 -llzma -lcurl -lssl -lcrypto
 LDFLAGS_Mac :=-pthread -lz htslib/libhts.a
 LDFLAGS_Mac_static :=-pthread -lz -static-libgcc htslib/libhts.a
 LDFLAGS_gdb := $(LDFLAGS_shared)
@@ -465,7 +471,7 @@ STAR$(SFX) : Depend.list parametersDefault.xxd $(OBJECTS) libflex libtrim libem 
 STARstatic$(SFX) : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
 STARstatic$(SFX) : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_static) $(LDFLAGS) $(GLIB_LIBS_STATIC)
 STARstatic$(SFX) : Depend.list parametersDefault.xxd $(OBJECTS) libflex libtrim libem libprocess_features $(LIBSCRNA_LIB)
-	$(CXX) -o STAR$(SFX) $(CXXFLAGS) $(OBJECTS) $(LIBFLEX_LIB) $(LIBTRIM_LIB) $(LIBEM_LIB) $(PROCESS_FEATURES_LIB) $(LIBSCRNA_LIB) $(LDFLAGS)
+	$(CXX) -o STAR$(SFX) $(filter-out -fopenmp,$(CXXFLAGS)) $(OBJECTS) $(LIBFLEX_LIB) $(LIBTRIM_LIB) $(LIBEM_LIB) $(PROCESS_FEATURES_LIB) $(LIBSCRNA_LIB) $(LDFLAGS)
 
 STARlong$(SFX) : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) -D'COMPILE_FOR_LONG_READS' $(CXXFLAGS)
 STARlong$(SFX) : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS)
@@ -475,7 +481,7 @@ STARlong$(SFX) : Depend.list parametersDefault.xxd $(OBJECTS)
 STARlongStatic$(SFX) : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) -D'COMPILE_FOR_LONG_READS' $(CXXFLAGS)
 STARlongStatic$(SFX) : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_static) $(LDFLAGS)
 STARlongStatic$(SFX) : Depend.list parametersDefault.xxd $(OBJECTS)
-	$(CXX) -o STARlong$(SFX) $(CXXFLAGS) $(OBJECTS) $(LDFLAGS)
+	$(CXX) -o STARlong$(SFX) $(filter-out -fopenmp,$(CXXFLAGS)) $(OBJECTS) $(LDFLAGS)
 
 
 

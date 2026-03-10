@@ -23,6 +23,34 @@ cleanup() {
 }
 trap cleanup EXIT
 
+version_ge() {
+  local lhs="$1"
+  local rhs="$2"
+  printf '%s\n%s\n' "$rhs" "$lhs" | sort -V -C
+}
+
+detect_actual_glibc() {
+  if command -v getconf >/dev/null 2>&1; then
+    local out
+    out="$(getconf GNU_LIBC_VERSION 2>/dev/null || true)"
+    if [[ "${out}" =~ ([0-9]+\.[0-9]+) ]]; then
+      printf '%s\n' "${BASH_REMATCH[1]}"
+      return 0
+    fi
+  fi
+
+  if command -v ldd >/dev/null 2>&1; then
+    local first_line
+    first_line="$(ldd --version 2>&1 | head -n1)"
+    if [[ "${first_line}" =~ ([0-9]+\.[0-9]+) ]]; then
+      printf '%s\n' "${BASH_REMATCH[1]}"
+      return 0
+    fi
+  fi
+
+  printf 'unknown\n'
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --bundle)
@@ -88,7 +116,22 @@ if [[ ! -x "${installed_bin}" ]]; then
   exit 1
 fi
 
-version_output="$(${installed_bin} --version)"
+actual_host_glibc="$(detect_actual_glibc)"
 echo "Selected label: ${selected_label}"
 echo "Selected glibc baseline: ${selected_baseline}"
+
+if [[ "${actual_host_glibc}" == "unknown" ]]; then
+  echo "NOTE: unable to determine actual host glibc; skipping installed binary runtime check."
+  exit 0
+fi
+
+echo "Actual host glibc: ${actual_host_glibc}"
+
+if ! version_ge "${actual_host_glibc}" "${selected_baseline}"; then
+  echo "NOTE: skipping installed binary runtime check because actual host glibc ${actual_host_glibc} is below selected baseline ${selected_baseline}."
+  echo "NOTE: selection validation passed; runtime validation requires a host or container compatible with the selected variant."
+  exit 0
+fi
+
+version_output="$(${installed_bin} --version)"
 echo "Installed version: ${version_output}"
