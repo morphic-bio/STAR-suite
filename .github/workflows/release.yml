@@ -54,6 +54,7 @@ jobs:
           chmod +x scripts/release/*.sh
           scripts/release/build_static_tarball.sh \
             --version "${GITHUB_REF_NAME}" \
+            --docker-image "ubuntu:22.04" \
             --out-dir "dist/release"
 
       - name: Build Debian binary package

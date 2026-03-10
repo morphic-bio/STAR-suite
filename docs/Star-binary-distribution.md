@@ -67,6 +67,7 @@ Ship discoverable, installable Ubuntu binaries for STAR-suite with low-friction 
 - Static release artifact build:
   - `scripts/release/build_static_tarball.sh --version v0.0.0-test`
   - output verified: `STAR-static-v0.0.0-test-linux-amd64.tar.gz`
+  - release workflow now builds the tarball inside an `ubuntu:22.04` container to target a glibc 2.35 baseline for the published amd64 tarball
 - Dynamic Debian binary packaging:
   - script implemented and validated:
     - build: `scripts/release/build_deb_binary_package.sh --out-dir /tmp/star-release-test/deb`
@@ -126,6 +127,7 @@ Notes:
 - `.deb` remains the preferred Ubuntu installation path.
 - Static tarballs are for minimal-host-dependency deployments and HPC/container edge cases.
 - `v0.*` tags are prereleases for testing. They publish release artifacts and a versioned container tag, but do not move `latest`.
+- Native `build_static_tarball.sh` runs still inherit the host toolchain/glibc baseline; the CI/release path uses `--docker-image ubuntu:22.04` for portability.
 
 ## Phase 1: Packaging Foundation
 
