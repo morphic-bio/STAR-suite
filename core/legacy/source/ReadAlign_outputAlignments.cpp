@@ -585,63 +585,30 @@ void ReadAlign::outputAlignments() {
             }
         };
         
-        // Y-chromosome alignment decision: check if any alignment touches Y
-        // Mode-aware logic:
-        // - Single-cell/Flex: R1/R2 are NOT mates, only check current read's alignments
-        // - Bulk paired-end: Check both read's alignments AND mate's alignments (via mtid in BAM output)
-        // - Bulk single-end: Only check read's own alignments
+        // Y-chromosome routing decision: follow emitted-alignment semantics.
+        // For mapped reads/pairs, route to Y if any emitted alignment touches Y.
+        // For non-BAM failure classes (unmapType 0..3), keep reads in noY.
+        // This matches the external stepwise path, which derives Y read names from
+        // the emitted Y BAM rather than from filtered-out candidate alignments.
         hasYAlignment_ = false;
         if (P.emitNoYBAMyes || P.emitYReadNamesyes || P.emitYNoYFastqyes) {
-            // Determine if we're in single-cell/Flex mode (no mates) vs bulk paired-end (has mates)
-            bool isSingleCellOrFlex = (P.pSolo.type != 0) || P.pSolo.flexMode;
-            bool hasMates = (P.readNmates == 2) && !isSingleCellOrFlex;
-            
-            // Use transformed genome alignments if available, otherwise use original
-            uint64 nTrCheck = nTr;
-            Transcript **trCheck = trMult;
-            if (P.pGe.transform.outSAM && (!P.twoPass.yes || P.twoPass.pass2)) {
-                nTrCheck = alignsGenOut.alN;
-                trCheck = alignsGenOut.alMult;
-            }
-            
+            // Use transformed genome alignments if available, otherwise use original.
             if (unmapType < 0) {
-                // Mapped reads: check ALL transcripts (primary + secondary/supplementary)
-                // Each transcript's Chr represents where that alignment maps
-                // For single-cell/Flex: only current read's alignments (R1 or R2 processed separately)
-                // For bulk paired-end: alignments for both mates are in trMult, check all
+                uint64 nTrCheck = nTr;
+                Transcript **trCheck = trMult;
+                if (P.pGe.transform.outSAM && (!P.twoPass.yes || P.twoPass.pass2)) {
+                    nTrCheck = alignsGenOut.alN;
+                    trCheck = alignsGenOut.alMult;
+                }
+
+                // Check all mapped alignments that can contribute to emitted BAM output.
                 for (uint iTr = 0; iTr < nTrCheck && !hasYAlignment_; iTr++) {
                     if (trCheck[iTr] == nullptr) continue;
-                    // Check if this transcript aligns to Y chromosome
                     if (mapGen.yTids.count(trCheck[iTr]->Chr)) {
                         hasYAlignment_ = true;
                         break;
                     }
                 }
-                
-                // For bulk paired-end: also check mate's reference (mtid) if available
-                // Note: mtid is set during BAM writing, so we check it there if needed
-                // For now, checking all transcripts should cover both mates in paired-end mode
-            } else {
-                // Unmapped reads: check if mate is mapped to Y (only for bulk paired-end)
-                if (hasMates) {
-                    // Bulk paired-end: check all transcripts to see if mate maps to Y
-                    for (uint iTr = 0; iTr < nTrCheck && !hasYAlignment_; iTr++) {
-                        if (trCheck[iTr] == nullptr) continue;
-                        // Check if this transcript (for the mapped mate) is on Y
-                        if (mapGen.yTids.count(trCheck[iTr]->Chr)) {
-                            hasYAlignment_ = true;
-                            break;
-                        }
-                    }
-                    // Also check trBest as fallback (best alignment might be for the mate)
-                    if (!hasYAlignment_ && trBest != nullptr) {
-                        if (mapGen.yTids.count(trBest->Chr)) {
-                            hasYAlignment_ = true;
-                        }
-                    }
-                }
-                // For single-cell/Flex unmapped reads or single-end unmapped: 
-                // default hasYAlignment_ = false -> route to noY
             }
         }
 
