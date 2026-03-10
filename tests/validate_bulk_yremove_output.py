@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 import argparse
 import gzip
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -12,9 +11,26 @@ def fail(msg: str) -> None:
     sys.exit(2)
 
 
+def normalize_qname(raw: str) -> str:
+    name = raw.split()[0]
+    if name.startswith("@"):
+        name = name[1:]
+    if name.endswith("/1") or name.endswith("/2"):
+        name = name[:-2]
+    elif len(name) > 2 and name[-2:] in {".1", ".2"}:
+        name = name[:-2]
+    return name
+
+
+def open_maybe_gzip(path: Path):
+    with path.open("rb") as handle:
+        magic = handle.read(2)
+    return gzip.open if magic == b"\x1f\x8b" else open
+
+
 def read_fastq_names(path: Path) -> set[str]:
     names: set[str] = set()
-    opener = gzip.open if path.suffix == ".gz" else open
+    opener = open_maybe_gzip(path)
     with opener(path, "rt") as handle:
         for idx, line in enumerate(handle):
             if idx % 4 != 0:
@@ -22,10 +38,7 @@ def read_fastq_names(path: Path) -> set[str]:
             header = line.strip()
             if not header.startswith("@"):
                 fail(f"Unexpected FASTQ header in {path}: {header!r}")
-            name = header[1:].split()[0]
-            if name.endswith("/1") or name.endswith("/2"):
-                name = name[:-2]
-            names.add(name)
+            names.add(normalize_qname(header))
     return names
 
 
@@ -40,7 +53,7 @@ def read_bam_names(path: Path) -> set[str]:
     for line in proc.stdout.splitlines():
         if not line:
             continue
-        names.add(line.split("\t", 1)[0])
+        names.add(normalize_qname(line.split("\t", 1)[0]))
     return names
 
 
@@ -78,6 +91,10 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Validate BAM-to-FASTQ parity for Y/noY emission")
     parser.add_argument("--outdir", required=True, help="STAR output directory to validate")
     parser.add_argument("--require-y-reads", action="store_true", help="Fail if no Y BAM reads are present")
+    parser.add_argument("--reference-y-r1", help="Reference Y FASTQ R1 for exact set comparison")
+    parser.add_argument("--reference-y-r2", help="Reference Y FASTQ R2 for exact set comparison")
+    parser.add_argument("--reference-noy-r1", help="Reference noY FASTQ R1 for exact set comparison")
+    parser.add_argument("--reference-noy-r2", help="Reference noY FASTQ R2 for exact set comparison")
     args = parser.parse_args()
 
     outdir = Path(args.outdir)
@@ -88,11 +105,21 @@ def main() -> int:
     noy_bam = locate_bam(outdir, "noY")
     y_r1, y_r2 = locate_fastq_pair(outdir, "Y")
     noy_r1, noy_r2 = locate_fastq_pair(outdir, "noY")
+    have_y_reference = bool(args.reference_y_r1 or args.reference_y_r2)
+    have_noy_reference = bool(args.reference_noy_r1 or args.reference_noy_r2)
+    if have_y_reference and not (args.reference_y_r1 and args.reference_y_r2):
+        fail("Y reference comparison requires both --reference-y-r1 and --reference-y-r2")
+    if have_noy_reference and not (args.reference_noy_r1 and args.reference_noy_r2):
+        fail("noY reference comparison requires both --reference-noy-r1 and --reference-noy-r2")
 
     print(f"Y BAM: {y_bam}")
     print(f"noY BAM: {noy_bam}")
     print(f"Y FASTQ R1/R2: {y_r1} | {y_r2}")
     print(f"noY FASTQ R1/R2: {noy_r1} | {noy_r2}")
+    if have_y_reference:
+        print(f"Reference Y FASTQ R1/R2: {args.reference_y_r1} | {args.reference_y_r2}")
+    if have_noy_reference:
+        print(f"Reference noY FASTQ R1/R2: {args.reference_noy_r1} | {args.reference_noy_r2}")
 
     y_bam_names = read_bam_names(y_bam)
     noy_bam_names = read_bam_names(noy_bam)
@@ -144,6 +171,40 @@ def main() -> int:
     if y_bam_names & noy_bam_names:
         print(f"FAIL: Y and noY BAM outputs overlap: {len(y_bam_names & noy_bam_names)}", file=sys.stderr)
         ok = False
+
+    if have_y_reference:
+        ref_y_r1 = Path(args.reference_y_r1)
+        ref_y_r2 = Path(args.reference_y_r2)
+        for ref_path in (ref_y_r1, ref_y_r2):
+            if not ref_path.exists():
+                fail(f"Reference FASTQ not found: {ref_path}")
+        ref_y_r1_names = read_fastq_names(ref_y_r1)
+        ref_y_r2_names = read_fastq_names(ref_y_r2)
+        print(f"Reference Y FASTQ R1 unique names: {len(ref_y_r1_names)}")
+        print(f"Reference Y FASTQ R2 unique names: {len(ref_y_r2_names)}")
+        if ref_y_r1_names != ref_y_r2_names:
+            print(f"FAIL: Reference Y FASTQ mate name sets differ by {len(ref_y_r1_names ^ ref_y_r2_names)}", file=sys.stderr)
+            ok = False
+        if y_r1_names != ref_y_r1_names:
+            print(f"FAIL: Y FASTQ differs from reference split by {len(y_r1_names ^ ref_y_r1_names)} names", file=sys.stderr)
+            ok = False
+
+    if have_noy_reference:
+        ref_noy_r1 = Path(args.reference_noy_r1)
+        ref_noy_r2 = Path(args.reference_noy_r2)
+        for ref_path in (ref_noy_r1, ref_noy_r2):
+            if not ref_path.exists():
+                fail(f"Reference FASTQ not found: {ref_path}")
+        ref_noy_r1_names = read_fastq_names(ref_noy_r1)
+        ref_noy_r2_names = read_fastq_names(ref_noy_r2)
+        print(f"Reference noY FASTQ R1 unique names: {len(ref_noy_r1_names)}")
+        print(f"Reference noY FASTQ R2 unique names: {len(ref_noy_r2_names)}")
+        if ref_noy_r1_names != ref_noy_r2_names:
+            print(f"FAIL: Reference noY FASTQ mate name sets differ by {len(ref_noy_r1_names ^ ref_noy_r2_names)}", file=sys.stderr)
+            ok = False
+        if noy_r1_names != ref_noy_r1_names:
+            print(f"FAIL: noY FASTQ differs from reference split by {len(noy_r1_names ^ ref_noy_r1_names)} names", file=sys.stderr)
+            ok = False
 
     if ok:
         print("PASS: BAM-to-FASTQ Y/noY parity checks succeeded")
