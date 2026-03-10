@@ -52,6 +52,8 @@ RawAlignment TranscriptQuantEC::transcriptToRawAlignment(Transcript* tr, uint32_
     aln.err_like = 0.0;
     aln.has_err_like = false;
     aln.is_decoy = false;  // TODO: check if transcript is decoy
+    aln.five_prime_pos = -1;
+    aln.mate_five_prime_pos = -1;
 
     // Identify read1/read2 exon indices (if present) for proper orientation
     uint iExRead1 = UINT_MAX;
@@ -65,37 +67,29 @@ RawAlignment TranscriptQuantEC::transcriptToRawAlignment(Transcript* tr, uint32_
         }
     }
 
+    TranscriptPairGeometry geometry;
+    const bool have_pair_geometry =
+        (tr->readNmates == 2) && deriveTranscriptPairGeometry(tr, geometry);
+
     // Default to leftmost exon if read1/read2 not found
     uint iExPos = (iExRead1 != UINT_MAX) ? iExRead1 : 0;
-    aln.pos = tr->exons[iExPos][EX_G];  // TRANSCRIPTOME coordinate
+    aln.pos = have_pair_geometry
+        ? geometry.read1_left
+        : static_cast<int32_t>(tr->exons[iExPos][EX_G]);  // TRANSCRIPTOME coordinate
 
-    // Determine read1 forwardness based on which mate is leftmost
-    // Match detection logic: tr->Str is the strand of the leftmost mate
-    // (see LibFormatDetection.cpp observeFormatFromTranscript)
-    bool read1_fwd;
-    bool read2_fwd;
-    
-    if (tr->readNmates == 2 && iExRead1 != UINT_MAX && iExRead2 != UINT_MAX) {
-        // Determine which mate is leftmost based on positions
-        int32_t pos1 = tr->exons[iExRead1][EX_G];
-        int32_t pos2 = tr->exons[iExRead2][EX_G];
-        bool read1_leftmost = (pos1 <= pos2);
-        
-        if (read1_leftmost) {
-            // Read1 is leftmost: read1 strand = Str
-            read1_fwd = (tr->Str == 0);
-            // Assume opposite strands (as Str does for proper pairs)
-            read2_fwd = !read1_fwd;
-        } else {
-            // Read2 is leftmost: read2 strand = Str
-            read2_fwd = (tr->Str == 0);
-            // Assume opposite strands
-            read1_fwd = !read2_fwd;
-        }
+    // Determine read1/read2 forwardness.
+    bool read1_fwd = true;
+    bool read2_fwd = false;
+    if (have_pair_geometry) {
+        read1_fwd = geometry.read1_forward;
+        read2_fwd = geometry.read2_forward;
+        aln.five_prime_pos = geometry.read1_fiveprime;
+        aln.mate_five_prime_pos = geometry.read2_fiveprime;
     } else {
-        // Single-end or missing mate info: use Str directly
+        // Single-end or missing mate info: use Str directly.
         read1_fwd = (tr->Str == 0);
-        read2_fwd = !read1_fwd;  // Not used for single-end
+        read2_fwd = !read1_fwd;
+        aln.five_prime_pos = aln.pos;
     }
     
     aln.is_forward = read1_fwd;
@@ -117,10 +111,14 @@ RawAlignment TranscriptQuantEC::transcriptToRawAlignment(Transcript* tr, uint32_
         
         if (proper) {
             aln.mate_status = MateStatus::PAIRED_END_PAIRED;
-            if (iExRead2 != UINT_MAX) {
+            if (have_pair_geometry) {
+                aln.mate_pos = geometry.read2_left;
+            } else if (iExRead2 != UINT_MAX) {
                 aln.mate_pos = tr->exons[iExRead2][EX_G];  // TRANSCRIPTOME coord
+                aln.mate_five_prime_pos = aln.mate_pos;
             } else {
                 aln.mate_pos = tr->exons[iExMate + 1][EX_G];  // fallback
+                aln.mate_five_prime_pos = aln.mate_pos;
             }
             aln.mate_is_forward = read2_fwd;  // Use computed read2_fwd
             // Set mate fields for proper pairs (regardless of primaryFlag)
@@ -149,8 +147,8 @@ RawAlignment TranscriptQuantEC::transcriptToRawAlignment(Transcript* tr, uint32_
                 }
                 
                 // Get positions (transcriptomic coordinates)
-                int32_t pos1 = aln.pos;  // Read1 5' start (transcriptomic)
-                int32_t pos2 = aln.mate_pos;  // Read2 5' start (transcriptomic)
+                int32_t pos1 = aln.pos;  // Read1 leftmost aligned coordinate
+                int32_t pos2 = aln.mate_pos;  // Read2 leftmost aligned coordinate
                 
                 // Determine 5' start and 3' end for each mate
                 // Forward mate: 5' start = pos, 3' end = pos + len - 1
@@ -1391,22 +1389,10 @@ std::vector<uint32_t> TranscriptQuantEC::extractCIGAR(Transcript* tr, bool is_re
         return left_cigar;
     }
 
-    // Determine whether read1 is leftmost based on transcript exons
     bool read1_leftmost = true;
-    uint iExRead1 = UINT_MAX;
-    uint iExRead2 = UINT_MAX;
-    for (uint i = 0; i < tr->nExons; i++) {
-        if (tr->exons[i][EX_iFrag] == 0 && iExRead1 == UINT_MAX) {
-            iExRead1 = i;
-        }
-        if (tr->exons[i][EX_iFrag] == 1 && iExRead2 == UINT_MAX) {
-            iExRead2 = i;
-        }
-    }
-    if (iExRead1 != UINT_MAX && iExRead2 != UINT_MAX) {
-        int32_t pos1 = tr->exons[iExRead1][EX_G];
-        int32_t pos2 = tr->exons[iExRead2][EX_G];
-        read1_leftmost = (pos1 <= pos2);
+    TranscriptPairGeometry geometry;
+    if (deriveTranscriptPairGeometry(tr, geometry)) {
+        read1_leftmost = geometry.read1_leftmost;
     }
 
     if (is_read1) {

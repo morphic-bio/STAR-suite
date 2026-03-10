@@ -78,8 +78,8 @@ static LibraryFormat computeObservedFormat(const RawAlignment& aln) {
     
     bool end1Fwd = aln.is_forward;
     bool end2Fwd = aln.mate_is_forward;
-    int32_t end1Start = aln.pos;
-    int32_t end2Start = aln.mate_pos;
+    int32_t end1Start = (aln.five_prime_pos >= 0) ? aln.five_prime_pos : aln.pos;
+    int32_t end2Start = (aln.mate_five_prime_pos >= 0) ? aln.mate_five_prime_pos : aln.mate_pos;
     
     // If reads come from opposite strands
     if (end1Fwd != end2Fwd) {

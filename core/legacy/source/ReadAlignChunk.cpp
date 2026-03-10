@@ -65,6 +65,7 @@ ReadAlignChunk::ReadAlignChunk(Parameters& Pin, Genome &genomeIn, Transcriptome 
                                 const libem::Transcriptome* libemTr) : P(Pin), mapGen(genomeIn) {//initialize chunk
 
     iThread=iChunk;
+    processRuns=0;
     chunkTr = nullptr;
     slamQuant = nullptr;
     slamCompat = nullptr;
@@ -420,6 +421,46 @@ void ReadAlignChunk::reinitSlamCompat(int trim5p, int trim3p) {
         slamCompat = new SlamCompat(*chunkTr, cfg);
         RA->slamCompat = slamCompat;
     }
+}
+
+void ReadAlignChunk::reopenYNoYFastqOutputsForReuse() {
+    if (!P.emitYNoYFastqyes) {
+        return;
+    }
+
+    for (uint32 imate = 0; imate < P.readNmates; imate++) {
+        if (P.emitYNoYFastqCompression == "gz") {
+            ostringstream yName, noYName;
+            yName << P.outFileTmp << "/YFastq.mate" << imate << ".thread" << iThread << ".gz";
+            noYName << P.outFileTmp << "/noYFastq.mate" << imate << ".thread" << iThread << ".gz";
+
+            RA->chunkOutYFastqGz[imate] = gzopen(yName.str().c_str(), "ab");
+            RA->chunkOutNoYFastqGz[imate] = gzopen(noYName.str().c_str(), "ab");
+            if (RA->chunkOutYFastqGz[imate] == nullptr || RA->chunkOutNoYFastqGz[imate] == nullptr) {
+                ostringstream errOut;
+                errOut << "EXITING because of FATAL ERROR: could not reopen Y/noY FASTQ output files for append\n";
+                errOut << "Solution: check that you have permission to write and disk space\n";
+                exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_INPUT_FILES, P);
+            }
+        } else {
+            if (RA->chunkOutYFastqStream[imate].is_open()) {
+                RA->chunkOutYFastqStream[imate].close();
+            }
+            if (RA->chunkOutNoYFastqStream[imate].is_open()) {
+                RA->chunkOutNoYFastqStream[imate].close();
+            }
+            RA->chunkOutYFastqStream[imate].clear();
+            RA->chunkOutNoYFastqStream[imate].clear();
+
+            chunkFstreamOpen(P.outFileTmp + "/YFastq.mate" + to_string(imate) + ".thread", iThread, RA->chunkOutYFastqStream[imate]);
+            chunkFstreamOpen(P.outFileTmp + "/noYFastq.mate" + to_string(imate) + ".thread", iThread, RA->chunkOutNoYFastqStream[imate]);
+            RA->chunkOutYFastqGz[imate] = nullptr;
+            RA->chunkOutNoYFastqGz[imate] = nullptr;
+        }
+    }
+
+    P.inOut->logMain << "Reopened Y/noY FASTQ outputs for thread #" << iThread
+                     << " before repeated processChunks() invocation" << endl;
 }
 
 ///////////////

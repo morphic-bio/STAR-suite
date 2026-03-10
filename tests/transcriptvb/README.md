@@ -9,6 +9,7 @@ This test suite provides:
 - **Salmon parity tests** - Comparison with Salmon on same data
 - **Regression tests** - Compare against golden outputs
 - **Edge case tests** - Handle unusual inputs gracefully
+- **PE bulk auto-detect validation** - Real PE regression checks for `--quantVBLibType A`
 
 ## Quick Start
 
@@ -18,6 +19,12 @@ This test suite provides:
 
 # Run Salmon parity test
 ./salmon_parity_test.sh
+
+# Validate archived bad PE artifacts fail and fixed artifacts pass
+../run_pe_bulk_regression_replay.sh
+
+# Run public human male bulk PE smoke (after preparing fixture)
+../run_public_bulk_pe_smoke.sh
 
 # Generate golden references (one-time)
 ./regression_test.sh generate
@@ -137,6 +144,30 @@ python3 compare_salmon_star.py salmon_quant.sf star_quant.sf [--verbose]
 
 ---
 
+### `validate_pe_autodetect_output.py`
+
+Validates PE TranscriptVB auto-detect logs and optional Salmon parity metrics.
+
+**Checks**:
+- detected format is not `UNKNOWN`
+- `dropped_incompat` stays at zero
+- `dropped_missing_mate_fields` stays at zero
+- `dropped_unknown_obs_fmt` stays at zero
+- optional Salmon parity thresholds
+
+**Usage**:
+```bash
+python3 validate_pe_autodetect_output.py --outdir /path/to/star_out
+python3 validate_pe_autodetect_output.py \
+    --outdir /path/to/star_out \
+    --salmon-quant /path/to/salmon/quant.sf \
+    --min-spearman-all 0.95 \
+    --min-spearman-expressed 0.99 \
+    --min-pearson-expressed 0.99
+```
+
+---
+
 ## Test Data
 
 ### Default Test Data
@@ -148,6 +179,37 @@ Located at `/mnt/pikachu/test-datasets-rnaseq/`:
 | `testdata/GSE110004/SRR6357070_*.fastq.gz` | Yeast PE reads |
 | `reference/transcriptome.fasta.gz` | Yeast transcriptome |
 | `reference/genes.gtf.gz` | Yeast GTF |
+
+### Public PE Bulk Fixture
+
+Local fixture download script:
+
+```bash
+scripts/download_public_bulk_fixture.sh
+```
+
+Default pinned source:
+
+| Field | Value |
+|------|-------|
+| GEO series | `GSE88509` |
+| GEO sample | `GSM2344101` |
+| SRA run | `SRR4422207` |
+| Sample | human male esophagus muscularis mucosa |
+| Layout | paired-end |
+
+Default local location:
+
+```bash
+/tmp/public_bulk_fixture_SRR4422207/
+```
+
+For the public PE smoke, the default STAR `--readFilesIn` order is `R2,R1`
+via `PUBLIC_BULK_STAR_MATE_ORDER=R2R1`, matching the TranscriptVB PE
+documentation for mate-order-sensitive libraries.
+
+For the pinned `SRR4422207` public smoke fixture, the expected auto-detected
+format is `ISF`.
 
 ### Golden References
 

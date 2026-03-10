@@ -14,6 +14,11 @@ inline void removeStringEndControl(string &str);
 void ReadAlignChunk::processChunks() {//read-map-write chunks
     // Register this thread's counters for debug statistics collection
     flexCountersRegisterThread();
+
+    if (processRuns > 0 && P.emitYNoYFastqyes) {
+        reopenYNoYFastqOutputsForReuse();
+    }
+    processRuns++;
     
     noReadsLeft=false; //true if there no more reads left in the file
     bool newFile=false; //new file marker in the input stream

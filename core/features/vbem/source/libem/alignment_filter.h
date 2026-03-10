@@ -28,12 +28,14 @@ struct RawAlignment {
     MateStatus mate_status;
     bool is_decoy;
     bool is_forward;            // True if read aligns to forward strand (not reverse complemented)
+    int32_t five_prime_pos;     // 5' transcript position for observed-format inference
     
     // For paired-end
     int32_t mate_score;
     int32_t fragment_len;
     bool mate_is_forward;       // For paired-end pairs: orientation of mate (needed for observed format)
     int32_t mate_pos;           // For paired-end pairs: position of mate (needed for observed format)
+    int32_t mate_five_prime_pos; // 5' transcript position for mate
     bool mate_fields_set;       // true when mate_pos/mate_is_forward are populated
     bool is_primary;            // true if alignment is primary
     
@@ -42,8 +44,8 @@ struct RawAlignment {
           log_frag_prob(0.0), log_compat_prob(0.0),
           err_like(0.0), has_err_like(false),
           mate_status(MateStatus::SINGLE_END), is_decoy(false),
-          is_forward(true), mate_score(0), fragment_len(0),
-          mate_is_forward(false), mate_pos(-1), mate_fields_set(false),
+          is_forward(true), five_prime_pos(-1), mate_score(0), fragment_len(0),
+          mate_is_forward(false), mate_pos(-1), mate_five_prime_pos(-1), mate_fields_set(false),
           is_primary(true) {}
 };
 
