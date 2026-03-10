@@ -1,9 +1,10 @@
-# Flex And Perturb Y-Removal Smokes
+# Single-Cell Y-Removal Smokes
 
 Date: March 10, 2026
 
-This note records the new end-to-end Y-removal smokes for single-cell modes:
+This note records the end-to-end Y-removal smokes for single-cell modes:
 
+- [`tests/run_solo_yremove_smoke.sh`](/mnt/pikachu/STAR-suite/tests/run_solo_yremove_smoke.sh)
 - [`tests/run_flex_yremove_smoke.sh`](/mnt/pikachu/STAR-suite/tests/run_flex_yremove_smoke.sh)
 - [`tests/run_perturb_yremove_smoke.sh`](/mnt/pikachu/STAR-suite/tests/run_perturb_yremove_smoke.sh)
 
@@ -12,6 +13,7 @@ This note records the new end-to-end Y-removal smokes for single-cell modes:
 These smokes compare integrated STAR Y-removal against the standalone
 `remove_y_reads` splitter on small real fixtures:
 
+- Vanilla Solo: UCSF `100k` GEX fixture (`iPSC2_1_AALG2`)
 - Flex: downsampled `SC2300771`
 - Perturb: UCSF `100k` `pfMultiConfig` fixture (`iPSC2_1_AALG2`)
 
@@ -32,7 +34,7 @@ Because of that, the smoke comparisons are defined as:
 
 The standalone reference is produced by:
 
-- running `remove_y_reads` on the same emitted input FASTQs
+- running `remove_y_reads` on the same emitted input FASTQs for the relevant cDNA/barcode pair
 - aggregating per-input outputs in the original input order
 
 ## Additional Guardrails
@@ -52,13 +54,19 @@ Without an explicit override, Flex writes per-sample outputs under a top-level
 
 Passing artifacts:
 
+- Vanilla Solo:
+  [`tests/solo_yremove_smoke_output_20260310_091732/SUMMARY.txt`](/mnt/pikachu/STAR-suite/tests/solo_yremove_smoke_output_20260310_091732/SUMMARY.txt)
 - Flex:
-  [`tests/flex_yremove_smoke_output_20260310_085039`](/mnt/pikachu/STAR-suite/tests/flex_yremove_smoke_output_20260310_085039)
+  [`tests/flex_yremove_smoke_output_20260310_091921/SUMMARY.txt`](/mnt/pikachu/STAR-suite/tests/flex_yremove_smoke_output_20260310_091921/SUMMARY.txt)
 - Perturb:
-  [`tests/perturb_yremove_smoke_output_20260310_085137`](/mnt/pikachu/STAR-suite/tests/perturb_yremove_smoke_output_20260310_085137)
+  [`tests/perturb_yremove_smoke_output_20260310_091921/SUMMARY.txt`](/mnt/pikachu/STAR-suite/tests/perturb_yremove_smoke_output_20260310_091921/SUMMARY.txt)
 
 Observed counts:
 
+- Vanilla Solo:
+  - Y BAM reads: `57`
+  - emitted GEX cDNA/barcode FASTQ parity vs `remove_y_reads`: pass
+  - `Solo.out/GeneFull/{raw,filtered}` present: pass
 - Flex:
   - Y BAM reads: `499`
   - emitted cDNA/barcode FASTQ parity vs `remove_y_reads`: pass

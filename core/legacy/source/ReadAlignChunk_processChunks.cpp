@@ -411,7 +411,8 @@ void ReadAlignChunk::processChunks() {//read-map-write chunks
 
     // Close Y/noY FASTQ gzip streams even if no reads were processed in this thread
     if (P.emitYNoYFastqyes && P.emitYNoYFastqCompression == "gz") {
-        for (uint32 imate = 0; imate < P.readNmates; imate++) {
+        const uint32 yFastqEmitCount = P.yFastqEmitReadCount();
+        for (uint32 imate = 0; imate < yFastqEmitCount; imate++) {
             if (RA->chunkOutYFastqGz[imate] != nullptr) {
                 gzclose(RA->chunkOutYFastqGz[imate]);
                 RA->chunkOutYFastqGz[imate] = nullptr;

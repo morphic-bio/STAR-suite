@@ -38,6 +38,7 @@ update this file with its output location.
 - `tests/*_output*/` (smoke/regression outputs)
 - `tests/bulk_pe_multisample_equivalence_output_*/` (batch vs sequential bulk PE multisample equivalence smoke)
 - `tests/flex_yremove_smoke_output_*/` (Flex integrated Y-removal vs remove_y_reads smoke)
+- `tests/solo_yremove_smoke_output_*/` (vanilla Solo integrated Y-removal vs remove_y_reads smoke)
 - `tests/perturb_yremove_smoke_output_*/` (perturb integrated Y-removal vs remove_y_reads smoke)
 - `tests/sceptre_example_output_*` (SCEPTRE vignette runs)
 - `tests/sceptre_example_*_mex` (SCEPTRE vignette MEX exports)
