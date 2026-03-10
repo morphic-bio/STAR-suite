@@ -266,6 +266,15 @@ void Parameters::reconfigureOutputPathsForSample(const std::string& sampleName) 
             quant.transcriptVB.outFileGeneTximport = outFileNamePrefix + "quant.genes.tximport.sf";
         }
     }
+
+    // Update transcriptome BAM output for batch mode so each sample gets its own writer.
+    if (quant.trSAM.bamYes) {
+        if (outStd == "BAM_Quant") {
+            outQuantBAMfileName = "-";
+        } else {
+            outQuantBAMfileName = newPrefix + "Aligned.toTranscriptome.out.bam";
+        }
+    }
     
     // Update BAM output paths
     if (outBAMunsorted) {
@@ -391,6 +400,22 @@ void Parameters::reconfigureOutputPathsForSample(const std::string& sampleName) 
         inOut->logProgress.close();
     }
     inOut->logProgress.open((outFileNamePrefix + "Log.progress.out").c_str());
+
+    if (quant.trSAM.bamYes) {
+        if (inOut->outQuantBAMfile != nullptr) {
+            bgzf_close(inOut->outQuantBAMfile);
+            inOut->outQuantBAMfile = nullptr;
+        }
+        inOut->outQuantBAMfile = bgzf_open(outQuantBAMfileName.c_str(),
+                                           ("w" + to_string((long long) quant.trSAM.bamCompression)).c_str());
+        if (inOut->outQuantBAMfile == nullptr) {
+            std::ostringstream errOut;
+            errOut << "EXITING because of fatal OUTPUT ERROR: could not create transcriptome BAM file: "
+                   << outQuantBAMfileName << "\n"
+                   << "SOLUTION: check the path and permissions\n";
+            exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+        }
+    }
 
     // Reopen BAM outputs for this sample (batch mode uses per-sample output paths)
     if (outBAMunsorted) {

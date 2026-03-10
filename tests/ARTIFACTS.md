@@ -36,6 +36,7 @@ update this file with its output location.
 
 - `plans/artifacts/parms_tests_YYYYMMDD/` (logs + report)
 - `tests/*_output*/` (smoke/regression outputs)
+- `tests/bulk_pe_multisample_equivalence_output_*/` (batch vs sequential bulk PE multisample equivalence smoke)
 - `tests/sceptre_example_output_*` (SCEPTRE vignette runs)
 - `tests/sceptre_example_*_mex` (SCEPTRE vignette MEX exports)
 - `tests/nbem_sceptre_example_*` (NB-EM outputs on SCEPTRE vignette MEX)
