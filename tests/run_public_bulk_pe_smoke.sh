@@ -55,14 +55,7 @@ done
 [[ -f "${REFERENCE_SPLITTER}" ]] || { echo "ERROR: missing reference splitter ${REFERENCE_SPLITTER}" >&2; exit 2; }
 
 case "${STAR_MATE_ORDER}" in
-    R1R2)
-        STAR_READ_1="${R1}"
-        STAR_READ_2="${R2}"
-        ;;
-    R2R1)
-        STAR_READ_1="${R2}"
-        STAR_READ_2="${R1}"
-        ;;
+    R1R2|R2R1) ;;
     *)
         echo "ERROR: PUBLIC_BULK_STAR_MATE_ORDER must be R1R2 or R2R1" >&2
         exit 2
@@ -94,28 +87,6 @@ echo "STAR readFilesIn order: ${STAR_MATE_ORDER}"
 echo "Output: ${OUTDIR}"
 echo
 
-"${STAR_BIN}" \
-    --runMode alignReads \
-    --runThreadN "${THREADS}" \
-    --genomeDir "${GENOME_DIR}" \
-    --readFilesIn "${STAR_READ_1}" "${STAR_READ_2}" \
-    --readFilesCommand zcat \
-    --outSAMtype BAM SortedByCoordinate \
-    --outBAMsortMethod samtools \
-    --limitIObufferSize 50000000 50000000 \
-    --outFileNamePrefix "${OUTDIR}/" \
-    --outTmpDir "${OUTDIR}/tmp" \
-    --trimCutadapt Yes \
-    --trimCutadaptQuality "${TRIM_QUALITY}" \
-    --trimCutadaptMinLength "${TRIM_MIN_LENGTH}" \
-    --trimCutadaptAdapter "${ADAPTER_R1}" "${ADAPTER_R2}" \
-    --emitNoYBAM yes \
-    --emitYNoYFastq yes \
-    --emitYNoYFastqCompression gz \
-    --quantMode TranscriptomeSAM TranscriptVB \
-    --quantVBgcBias 1 \
-    --quantVBLibType A
-
 gzip -dc "${R1}" > "${RAW_R1}"
 gzip -dc "${R2}" > "${RAW_R2}"
 
@@ -128,6 +99,34 @@ gzip -dc "${R2}" > "${RAW_R2}"
     --length "${TRIM_MIN_LENGTH}" \
     --adapter-r1 "${ADAPTER_R1}" \
     --adapter-r2 "${ADAPTER_R2}"
+
+case "${STAR_MATE_ORDER}" in
+    R1R2)
+        STAR_READ_1="${TRIMMED_R1}"
+        STAR_READ_2="${TRIMMED_R2}"
+        ;;
+    R2R1)
+        STAR_READ_1="${TRIMMED_R2}"
+        STAR_READ_2="${TRIMMED_R1}"
+        ;;
+esac
+
+"${STAR_BIN}" \
+    --runMode alignReads \
+    --runThreadN "${THREADS}" \
+    --genomeDir "${GENOME_DIR}" \
+    --readFilesIn "${STAR_READ_1}" "${STAR_READ_2}" \
+    --outSAMtype BAM SortedByCoordinate \
+    --outBAMsortMethod samtools \
+    --limitIObufferSize 50000000 50000000 \
+    --outFileNamePrefix "${OUTDIR}/" \
+    --outTmpDir "${OUTDIR}/tmp" \
+    --emitNoYBAM yes \
+    --emitYNoYFastq yes \
+    --emitYNoYFastqCompression gz \
+    --quantMode TranscriptomeSAM TranscriptVB \
+    --quantVBgcBias 1 \
+    --quantVBLibType A
 
 python3 "${REFERENCE_SPLITTER}" \
     --ybam "${OUTDIR}/Aligned.sortedByCoord.out_Y.bam" \

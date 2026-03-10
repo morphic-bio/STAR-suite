@@ -64,6 +64,7 @@ def locate_fastq_pair(root: Path, token: str) -> tuple[Path, Path]:
             continue
         patterns = [
             (f"*_{token}_R1_001.fastq*", f"*_{token}_R2_001.fastq*"),
+            (f"*_{token}_R1.fastq*", f"*_{token}_R2.fastq*"),
             (f"{token}_reads.mate1.fastq*", f"{token}_reads.mate2.fastq*"),
         ]
         for p1, p2 in patterns:
