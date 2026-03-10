@@ -152,19 +152,21 @@ run_container_build() {
     bash -lc "
       set -euo pipefail
       export DEBIAN_FRONTEND=noninteractive
-      apt-get update
-      apt-get install -y --no-install-recommends \
-        build-essential \
-        xxd \
-        pkg-config \
-        zlib1g-dev \
-        libbz2-dev \
-        liblzma-dev \
-        libcurl4-gnutls-dev \
-        libssl-dev \
-        libglib2.0-dev \
-        ca-certificates \
-        git
+      if [[ \"\${STAR_SUITE_BUILD_CONTAINER_READY:-0}\" != \"1\" ]]; then
+        apt-get update
+        apt-get install -y --no-install-recommends \
+          build-essential \
+          xxd \
+          pkg-config \
+          zlib1g-dev \
+          libbz2-dev \
+          liblzma-dev \
+          libcurl4-gnutls-dev \
+          libssl-dev \
+          libglib2.0-dev \
+          ca-certificates \
+          git
+      fi
       mkdir -p /src
       cp -a /src-ro/. /src/
       cd /src

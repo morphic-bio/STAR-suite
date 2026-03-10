@@ -29,6 +29,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Make release scripts executable
+        run: |
+          chmod +x scripts/release/*.sh scripts/release/docker/*.sh
+
       - name: Install packaging dependencies
         run: |
           sudo apt-get update
@@ -49,12 +53,41 @@ jobs:
             libglib2.0-dev \
             libhts-dev
 
+      - name: Build release build image (Ubuntu 22.04)
+        run: |
+          docker build \
+            -f scripts/release/docker/Dockerfile.build-ubuntu22 \
+            -t star-suite-release-build:ubuntu22 \
+            .
+
+      - name: Build release build image (Ubuntu 24.04)
+        run: |
+          docker build \
+            -f scripts/release/docker/Dockerfile.build-ubuntu24 \
+            -t star-suite-release-build:ubuntu24 \
+            .
+
+      - name: Build runtime check image (Ubuntu 22.04)
+        run: |
+          docker build \
+            --build-arg BASE_IMAGE=ubuntu:22.04 \
+            -f scripts/release/docker/Dockerfile.runtime-check \
+            -t star-suite-runtime-check:ubuntu22 \
+            .
+
+      - name: Build runtime check image (Ubuntu 24.04)
+        run: |
+          docker build \
+            --build-arg BASE_IMAGE=ubuntu:24.04 \
+            -f scripts/release/docker/Dockerfile.runtime-check \
+            -t star-suite-runtime-check:ubuntu24 \
+            .
+
       - name: Build compatibility tarball (glibc 2.34 baseline)
         run: |
-          chmod +x scripts/release/*.sh
           scripts/release/build_static_tarball.sh \
             --version "${GITHUB_REF_NAME}" \
-            --docker-image "ubuntu:22.04" \
+            --docker-image "star-suite-release-build:ubuntu22" \
             --compat-label "glibc234" \
             --glibc-baseline "2.34" \
             --out-dir "dist/release"
@@ -63,7 +96,7 @@ jobs:
         run: |
           scripts/release/build_static_tarball.sh \
             --version "${GITHUB_REF_NAME}" \
-            --docker-image "ubuntu:24.04" \
+            --docker-image "star-suite-release-build:ubuntu24" \
             --compat-label "glibc239" \
             --glibc-baseline "2.39" \
             --out-dir "dist/release"
@@ -76,26 +109,52 @@ jobs:
             --tarball "dist/release/STAR-suite-${GITHUB_REF_NAME}-linux-amd64-glibc239.tar.gz" \
             --out-dir "dist/release"
 
-      - name: Validate direct tarball installer
+      - name: Validate glibc234 tarball runtime (Ubuntu 22.04)
         run: |
-          tmpdir="$(mktemp -d)"
-          tar -xzf "dist/release/STAR-suite-${GITHUB_REF_NAME}-linux-amd64-glibc234.tar.gz" -C "${tmpdir}"
-          "${tmpdir}/install.sh" --prefix "${tmpdir}/prefix"
-          "${tmpdir}/prefix/bin/STAR" --version
+          scripts/release/run_tarball_runtime_container_check.sh \
+            --docker-image "star-suite-runtime-check:ubuntu22" \
+            --skip-image-build \
+            --base-image "ubuntu:22.04" \
+            --tarball "dist/release/STAR-suite-${GITHUB_REF_NAME}-linux-amd64-glibc234.tar.gz" \
+            --manifest-out "dist/release/runtime-manifests/glibc234-ubuntu22.txt"
 
-      - name: Validate installer bundle selection (older baseline)
+      - name: Validate glibc234 tarball runtime (Ubuntu 24.04)
         run: |
-          scripts/release/validate_installer_bundle.sh \
-            --bundle "dist/release/STAR-suite-${GITHUB_REF_NAME}-linux-amd64-installer.tar.gz" \
-            --glibc-version "2.35" \
-            --expected-label "glibc234"
+          scripts/release/run_tarball_runtime_container_check.sh \
+            --docker-image "star-suite-runtime-check:ubuntu24" \
+            --skip-image-build \
+            --base-image "ubuntu:24.04" \
+            --tarball "dist/release/STAR-suite-${GITHUB_REF_NAME}-linux-amd64-glibc234.tar.gz" \
+            --manifest-out "dist/release/runtime-manifests/glibc234-ubuntu24.txt"
 
-      - name: Validate installer bundle selection (current baseline)
+      - name: Validate glibc239 tarball runtime (Ubuntu 24.04)
         run: |
-          scripts/release/validate_installer_bundle.sh \
+          scripts/release/run_tarball_runtime_container_check.sh \
+            --docker-image "star-suite-runtime-check:ubuntu24" \
+            --skip-image-build \
+            --base-image "ubuntu:24.04" \
+            --tarball "dist/release/STAR-suite-${GITHUB_REF_NAME}-linux-amd64-glibc239.tar.gz" \
+            --manifest-out "dist/release/runtime-manifests/glibc239-ubuntu24.txt"
+
+      - name: Validate installer bundle (Ubuntu 22.04)
+        run: |
+          scripts/release/run_installer_bundle_container_check.sh \
+            --docker-image "star-suite-runtime-check:ubuntu22" \
+            --skip-image-build \
+            --base-image "ubuntu:22.04" \
             --bundle "dist/release/STAR-suite-${GITHUB_REF_NAME}-linux-amd64-installer.tar.gz" \
-            --glibc-version "2.39" \
-            --expected-label "glibc239"
+            --expected-label "glibc234" \
+            --manifest-out "dist/release/runtime-manifests/installer-ubuntu22.txt"
+
+      - name: Validate installer bundle (Ubuntu 24.04)
+        run: |
+          scripts/release/run_installer_bundle_container_check.sh \
+            --docker-image "star-suite-runtime-check:ubuntu24" \
+            --skip-image-build \
+            --base-image "ubuntu:24.04" \
+            --bundle "dist/release/STAR-suite-${GITHUB_REF_NAME}-linux-amd64-installer.tar.gz" \
+            --expected-label "glibc239" \
+            --manifest-out "dist/release/runtime-manifests/installer-ubuntu24.txt"
 
       - name: Build Debian binary package
         run: |

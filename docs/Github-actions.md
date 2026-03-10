@@ -103,12 +103,15 @@ For Ubuntu discoverability and package updates:
     - `v0.*` and `-alpha|-beta|-rc|-dev` tags are published as prereleases
     - prereleases do not retag Docker `latest`
   - Linux tarball builds:
+    - build with Dockerfiles under `scripts/release/docker/`
     - publish an `ubuntu:22.04`-based `glibc234` tarball for broader compatibility
     - publish an `ubuntu:24.04`-based `glibc239` tarball for current systems
     - publish an installer bundle that auto-selects the correct tarball for the host
   - includes:
+    - Docker container runtime/version validation for release tarballs on Ubuntu 22.04 and 24.04
+    - Docker container installer-bundle selection/version validation on Ubuntu 22.04 and 24.04
+    - runtime dependency manifests captured from the validation containers and uploaded with release artifacts
     - Debian `.deb` install/uninstall validation in clean `ubuntu:24.04` container
-    - installer bundle selection validation against older and current glibc levels
     - optional Debian source package signing when signing secrets are configured
 
 ## Implemented Workflow Files

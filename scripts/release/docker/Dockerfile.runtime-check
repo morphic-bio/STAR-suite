@@ -1,0 +1,10 @@
+ARG BASE_IMAGE=ubuntu:24.04
+FROM ${BASE_IMAGE}
+
+COPY scripts/release/docker/container_check_tarball.sh /usr/local/bin/container_check_tarball.sh
+COPY scripts/release/docker/container_check_installer_bundle.sh /usr/local/bin/container_check_installer_bundle.sh
+
+RUN chmod 0755 /usr/local/bin/container_check_tarball.sh /usr/local/bin/container_check_installer_bundle.sh
+
+WORKDIR /work
+ENTRYPOINT ["/bin/bash"]

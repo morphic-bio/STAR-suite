@@ -93,6 +93,10 @@ cd STAR-suite-<version>-linux-<arch>-glibc234
 ./install.sh
 ```
 
+Compatibility note:
+- release tarballs are validated in clean Ubuntu 22.04 and 24.04 Docker containers before publication
+- the installer bundle auto-detects the host glibc level and chooses the right bundled binary
+
 Packaging/release details and artifact policy:
 - `docs/Star-binary-distribution.md`
 - `docs/Github-actions.md`

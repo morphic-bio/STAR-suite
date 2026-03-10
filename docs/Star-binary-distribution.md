@@ -68,11 +68,25 @@ Ship discoverable, installable Ubuntu binaries for STAR-suite with low-friction 
   - `scripts/release/build_static_tarball.sh --version v0.0.0-test --compat-label glibc234 --glibc-baseline 2.34`
   - output verified: `STAR-suite-v0.0.0-test-linux-amd64-glibc234.tar.gz`
   - release workflow now builds two amd64 tarballs:
-    - `glibc234` in an `ubuntu:22.04` container for broader Linux compatibility
-    - `glibc239` in an `ubuntu:24.04` container for current systems
+    - `glibc234` with `scripts/release/docker/Dockerfile.build-ubuntu22` for broader Linux compatibility
+    - `glibc239` with `scripts/release/docker/Dockerfile.build-ubuntu24` for current systems
 - Installer bundle build:
   - `scripts/release/build_installer_bundle.sh --version v0.0.0-test --tarball <glibc234> --tarball <glibc239>`
   - output verified: `STAR-suite-v0.0.0-test-linux-amd64-installer.tar.gz`
+- Container runtime validation:
+  - runtime checks are executed with `scripts/release/docker/Dockerfile.runtime-check`
+  - host wrappers:
+    - `scripts/release/run_tarball_runtime_container_check.sh`
+    - `scripts/release/run_installer_bundle_container_check.sh`
+  - release workflow writes per-container manifests under `dist/release/runtime-manifests/`
+  - validated on March 10, 2026 in clean Ubuntu 22.04 and 24.04 containers:
+    - `glibc234` tarball:
+      - max referenced glibc symbol: `GLIBC_2.34`
+      - Ubuntu 22.04 runtime packages: `libc6`, `zlib1g`, `libssl3`
+    - `glibc239` tarball:
+      - max referenced glibc symbol: `GLIBC_2.38`
+      - Ubuntu 24.04 runtime packages: `libc6`, `zlib1g`, `libssl3t64`
+    - installer bundle selected `glibc234` on Ubuntu 22.04 and `glibc239` on Ubuntu 24.04
 - Dynamic Debian binary packaging:
   - script implemented and validated:
     - build: `scripts/release/build_deb_binary_package.sh --out-dir /tmp/star-release-test/deb`
@@ -138,6 +152,8 @@ Notes:
 - Native `build_static_tarball.sh` runs still inherit the host toolchain/glibc baseline.
 - The CI/release path publishes multiple tarballs because Linux may reject a binary built for a newer runtime environment before STAR-suite starts.
 - The installer bundle checks the host environment and selects the highest compatible bundled binary automatically.
+- Release artifacts now include runtime-manifest text files captured from clean Ubuntu 22.04 and 24.04 containers.
+- Those manifests record the resolved runtime libraries and Ubuntu/Debian package names seen by the validator.
 
 ## OS Compatibility Note
 
@@ -146,6 +162,26 @@ For non-technical users:
 - If a downloaded Linux binary does not run, that is usually the operating system rejecting a binary built for a newer system environment.
 - STAR-suite itself is not crashing and is not asking the user to install extra libraries manually.
 - The release fix is to ship multiple Linux binaries built for different compatibility levels, plus an installer bundle that picks the right one.
+
+For technical users:
+
+- The tarballs are only partially static.
+- Current validated runtime SONAMEs are:
+  - `libc.so.6`
+  - `libm.so.6`
+  - `libz.so.1`
+  - `libcrypto.so.3`
+- On Ubuntu 22.04 the validated package set is:
+  - `libc6`
+  - `zlib1g`
+  - `libssl3`
+- On Ubuntu 24.04 the validated package set is:
+  - `libc6`
+  - `zlib1g`
+  - `libssl3t64`
+- The `glibc239` asset label tracks the Ubuntu 24.04 build environment.
+- The March 10, 2026 runtime manifest showed that this build currently references `GLIBC_2.38`, so the label is conservative.
+- The exact resolved package names are recorded in the release `runtime-manifests/` artifacts for each container baseline.
 
 ## Phase 1: Packaging Foundation
 

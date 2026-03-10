@@ -1,0 +1,21 @@
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    STAR_SUITE_BUILD_CONTAINER_READY=1
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      bash \
+      build-essential \
+      ca-certificates \
+      git \
+      libbz2-dev \
+      libcurl4-gnutls-dev \
+      libglib2.0-dev \
+      libhts-dev \
+      liblzma-dev \
+      libssl-dev \
+      pkg-config \
+      xxd \
+      zlib1g-dev \
+ && rm -rf /var/lib/apt/lists/*
