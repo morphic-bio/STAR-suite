@@ -49,13 +49,53 @@ jobs:
             libglib2.0-dev \
             libhts-dev
 
-      - name: Build static release tarball
+      - name: Build compatibility tarball (glibc 2.34 baseline)
         run: |
           chmod +x scripts/release/*.sh
           scripts/release/build_static_tarball.sh \
             --version "${GITHUB_REF_NAME}" \
             --docker-image "ubuntu:22.04" \
+            --compat-label "glibc234" \
+            --glibc-baseline "2.34" \
             --out-dir "dist/release"
+
+      - name: Build compatibility tarball (glibc 2.39 baseline)
+        run: |
+          scripts/release/build_static_tarball.sh \
+            --version "${GITHUB_REF_NAME}" \
+            --docker-image "ubuntu:24.04" \
+            --compat-label "glibc239" \
+            --glibc-baseline "2.39" \
+            --out-dir "dist/release"
+
+      - name: Build installer bundle
+        run: |
+          scripts/release/build_installer_bundle.sh \
+            --version "${GITHUB_REF_NAME}" \
+            --tarball "dist/release/STAR-suite-${GITHUB_REF_NAME}-linux-amd64-glibc234.tar.gz" \
+            --tarball "dist/release/STAR-suite-${GITHUB_REF_NAME}-linux-amd64-glibc239.tar.gz" \
+            --out-dir "dist/release"
+
+      - name: Validate direct tarball installer
+        run: |
+          tmpdir="$(mktemp -d)"
+          tar -xzf "dist/release/STAR-suite-${GITHUB_REF_NAME}-linux-amd64-glibc234.tar.gz" -C "${tmpdir}"
+          "${tmpdir}/install.sh" --prefix "${tmpdir}/prefix"
+          "${tmpdir}/prefix/bin/STAR" --version
+
+      - name: Validate installer bundle selection (older baseline)
+        run: |
+          scripts/release/validate_installer_bundle.sh \
+            --bundle "dist/release/STAR-suite-${GITHUB_REF_NAME}-linux-amd64-installer.tar.gz" \
+            --glibc-version "2.35" \
+            --expected-label "glibc234"
+
+      - name: Validate installer bundle selection (current baseline)
+        run: |
+          scripts/release/validate_installer_bundle.sh \
+            --bundle "dist/release/STAR-suite-${GITHUB_REF_NAME}-linux-amd64-installer.tar.gz" \
+            --glibc-version "2.39" \
+            --expected-label "glibc239"
 
       - name: Build Debian binary package
         run: |

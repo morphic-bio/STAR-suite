@@ -102,10 +102,13 @@ For Ubuntu discoverability and package updates:
   - prerelease logic:
     - `v0.*` and `-alpha|-beta|-rc|-dev` tags are published as prereleases
     - prereleases do not retag Docker `latest`
-  - static tarball build:
-    - uses an `ubuntu:22.04` container inside the release job to lower the glibc baseline of the tarball artifact
+  - Linux tarball builds:
+    - publish an `ubuntu:22.04`-based `glibc234` tarball for broader compatibility
+    - publish an `ubuntu:24.04`-based `glibc239` tarball for current systems
+    - publish an installer bundle that auto-selects the correct tarball for the host
   - includes:
     - Debian `.deb` install/uninstall validation in clean `ubuntu:24.04` container
+    - installer bundle selection validation against older and current glibc levels
     - optional Debian source package signing when signing secrets are configured
 
 ## Implemented Workflow Files

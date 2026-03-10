@@ -48,7 +48,7 @@ Ship discoverable, installable Ubuntu binaries for STAR-suite with low-friction 
 - Phase 4 (GitHub Releases): **in progress**
   - Completed:
     - release workflow scaffold for artifact publication
-    - release workflow builds static tarball + Debian binary package + Debian source package
+    - release workflow builds compatibility tarballs + installer bundle + Debian binary package + Debian source package
   - Pending:
     - production signing and release key setup
     - stable release note templates/badges
@@ -64,10 +64,15 @@ Ship discoverable, installable Ubuntu binaries for STAR-suite with low-friction 
 
 ## Checkpoint Validation (2026-02-14)
 
-- Static release artifact build:
-  - `scripts/release/build_static_tarball.sh --version v0.0.0-test`
-  - output verified: `STAR-static-v0.0.0-test-linux-amd64.tar.gz`
-  - release workflow now builds the tarball inside an `ubuntu:22.04` container to target a glibc 2.35 baseline for the published amd64 tarball
+- Compatibility tarball build:
+  - `scripts/release/build_static_tarball.sh --version v0.0.0-test --compat-label glibc234 --glibc-baseline 2.34`
+  - output verified: `STAR-suite-v0.0.0-test-linux-amd64-glibc234.tar.gz`
+  - release workflow now builds two amd64 tarballs:
+    - `glibc234` in an `ubuntu:22.04` container for broader Linux compatibility
+    - `glibc239` in an `ubuntu:24.04` container for current systems
+- Installer bundle build:
+  - `scripts/release/build_installer_bundle.sh --version v0.0.0-test --tarball <glibc234> --tarball <glibc239>`
+  - output verified: `STAR-suite-v0.0.0-test-linux-amd64-installer.tar.gz`
 - Dynamic Debian binary packaging:
   - script implemented and validated:
     - build: `scripts/release/build_deb_binary_package.sh --out-dir /tmp/star-release-test/deb`
@@ -84,9 +89,9 @@ Ship discoverable, installable Ubuntu binaries for STAR-suite with low-friction 
     `scripts/release/build_source_package.sh`
   - optional signing script:
     - `scripts/release/sign_source_package.sh --in-dir dist/release/source --key-id <KEY_ID>`
-- Static binary runtime check:
+- Compatibility tarball runtime check:
   - extracted binary reports expected version: `2.7.11b`
-- Tier A smoke tests against extracted static binary (`STAR_BIN=<extracted>/bin/STAR`):
+- Tier A smoke tests against extracted compatibility tarball binary (`STAR_BIN=<extracted>/bin/STAR`):
   - `tests/slam/test_snp_mask_build_smoke.sh`: passed
   - `tests/run_solo_smoke.sh`: passed
 
@@ -106,7 +111,7 @@ Use two channels in parallel:
   - Ubuntu 22.04 (optional follow-up)
 - Build type:
   - Dynamic binaries (default runtime path)
-  - Static binaries (portable fallback path, like upstream STAR distribution model)
+  - Compatibility tarballs plus installer bundle (portable fallback path)
 
 ## Artifact Matrix
 
@@ -115,9 +120,11 @@ Per release tag (`v*`), publish both binary styles:
 - Dynamic:
   - `star-suite_<version>_amd64.deb`
   - `star-suite_<version>_arm64.deb`
-- Static:
-  - `STAR-static-<version>-linux-amd64.tar.gz`
-  - `STAR-static-<version>-linux-arm64.tar.gz`
+- Compatibility tarballs:
+  - `STAR-suite-<version>-linux-amd64-glibc234.tar.gz`
+  - `STAR-suite-<version>-linux-amd64-glibc239.tar.gz`
+- Installer bundle:
+  - `STAR-suite-<version>-linux-amd64-installer.tar.gz`
 - Containers:
   - `biodepot/star-suite:<version>` (multi-arch manifest)
   - `biodepot/star-suite:latest` (stable pointer only)
@@ -125,9 +132,20 @@ Per release tag (`v*`), publish both binary styles:
 Notes:
 
 - `.deb` remains the preferred Ubuntu installation path.
-- Static tarballs are for minimal-host-dependency deployments and HPC/container edge cases.
+- The installer bundle is the preferred non-`.deb` installation path.
+- Direct compatibility tarballs are for manual installs and HPC/container edge cases.
 - `v0.*` tags are prereleases for testing. They publish release artifacts and a versioned container tag, but do not move `latest`.
-- Native `build_static_tarball.sh` runs still inherit the host toolchain/glibc baseline; the CI/release path uses `--docker-image ubuntu:22.04` for portability.
+- Native `build_static_tarball.sh` runs still inherit the host toolchain/glibc baseline.
+- The CI/release path publishes multiple tarballs because Linux may reject a binary built for a newer runtime environment before STAR-suite starts.
+- The installer bundle checks the host environment and selects the highest compatible bundled binary automatically.
+
+## OS Compatibility Note
+
+For non-technical users:
+
+- If a downloaded Linux binary does not run, that is usually the operating system rejecting a binary built for a newer system environment.
+- STAR-suite itself is not crashing and is not asking the user to install extra libraries manually.
+- The release fix is to ship multiple Linux binaries built for different compatibility levels, plus an installer bundle that picks the right one.
 
 ## Phase 1: Packaging Foundation
 
@@ -186,7 +204,7 @@ Notes:
    - Trigger: tags `v*`
    - Build and publish:
      - dynamic artifacts (`.deb` path, preferably via Launchpad source upload)
-     - static tarball artifacts
+     - compatibility tarball + installer bundle artifacts
      - multi-arch image tags
    - Publish checksums and release notes.
 5. Add PPA upload step in release workflow:
@@ -228,6 +246,6 @@ Notes:
 
 1. Add release signing and checksum verification policy (GPG key ownership + rotation).
 2. Configure Docker Hub and release secrets in GitHub repository settings.
-3. Add README install section (`apt` via PPA + manual `.deb` + static tarball).
+3. Add README install section (`apt` via PPA + manual `.deb` + installer bundle).
 4. Add optional PPA upload step (guarded by release environment approval).
 5. Validate install/uninstall behavior on Ubuntu 22.04 as secondary target.

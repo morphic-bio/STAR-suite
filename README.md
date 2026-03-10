@@ -82,9 +82,15 @@ sudo apt install star-suite
 ```
 
 ```bash
-# Static tarball install
-tar -xzf STAR-static-<version>-linux-<arch>.tar.gz
-sudo install -m 0755 STAR-static-<version>-linux-<arch>/bin/STAR /usr/local/bin/STAR
+# Preferred fallback when you are not using the .deb
+tar -xzf STAR-suite-<version>-linux-<arch>-installer.tar.gz
+cd STAR-suite-<version>-linux-<arch>-installer
+./install.sh
+
+# Manual compatibility tarball path
+tar -xzf STAR-suite-<version>-linux-<arch>-glibc234.tar.gz
+cd STAR-suite-<version>-linux-<arch>-glibc234
+./install.sh
 ```
 
 Packaging/release details and artifact policy:
