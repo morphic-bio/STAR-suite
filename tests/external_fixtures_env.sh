@@ -23,6 +23,13 @@ export UCSF_2M_STAR_RUNS_ROOT="${UCSF_2M_STAR_RUNS_ROOT:-$UCSF_2M_ROOT/star_runs
 export UCSF_2M_FIXTURE_SEQUENTIAL="${UCSF_2M_FIXTURE_SEQUENTIAL:-$UCSF_2M_STAR_RUNS_ROOT/fixture_ucsf2m_current_sequential}"
 export UCSF_2M_FIXTURE_DYNAMIC="${UCSF_2M_FIXTURE_DYNAMIC:-$UCSF_2M_STAR_RUNS_ROOT/fixture_ucsf2m_current_dynamic}"
 export UCSF_2M_FIXTURE_COMPARE_REPORT="${UCSF_2M_FIXTURE_COMPARE_REPORT:-/tmp/ucsf2m_seq_vs_fixture_20260224_090754/COMPARE_REPORT.txt}"
+export UCSF_100K_PFCONFIG_ROOT="${UCSF_100K_PFCONFIG_ROOT:-$UCSF_2M_ROOT/fixtures/ucsf2m_iPSC2_AALG2_100k_pfconfig}"
+export UCSF_100K_GEX_DIR="${UCSF_100K_GEX_DIR:-$UCSF_100K_PFCONFIG_ROOT/GEX/iPSC2_1_AALG2}"
+export UCSF_100K_GUIDE_DIR="${UCSF_100K_GUIDE_DIR:-$UCSF_100K_PFCONFIG_ROOT/guides/iPSC2_1_AALG2}"
+export UCSF_100K_PFCONFIG="${UCSF_100K_PFCONFIG:-$UCSF_100K_PFCONFIG_ROOT/multi_config_100k.csv}"
+export UCSF_100K_FEATURE_REF="${UCSF_100K_FEATURE_REF:-/mnt/pikachu/ucsf-perturb-seq/cellranger_feature_ref_hCRISPRa_v2_like_AALG2_pattern.csv}"
+export UCSF_100K_CB_WHITELIST="${UCSF_100K_CB_WHITELIST:-/home/lhhung/cellranger-9.0.1/lib/python/cellranger/barcodes/translation/3M-february-2018_NXT.txt}"
+export UCSF_100K_GENOME_DIR="${UCSF_100K_GENOME_DIR:-/storage/autoindex_110_44/bulk_index}"
 
 # UCSF full-sample perturb references
 export UCSF_FULL_ROOT="${UCSF_FULL_ROOT:-/storage/ucsf-full/bench_20260218_dynamic_first}"
@@ -68,6 +75,8 @@ export BULK_MULTISAMPLE_THREADS="${BULK_MULTISAMPLE_THREADS:-1}"
 
 # Y-chrom flex dataset
 export YCHROM_FLEX_FASTQ_BASE="${YCHROM_FLEX_FASTQ_BASE:-/storage/downsampled/SC2300771}"
+export FLEX_YREMOVE_THREADS="${FLEX_YREMOVE_THREADS:-1}"
+export PERTURB_YREMOVE_THREADS="${PERTURB_YREMOVE_THREADS:-1}"
 
 # Public bulk PE regression fixture
 # Note: Salmon alignment-mode autodetect (-l A) mis-detects this fixture as ISR.
