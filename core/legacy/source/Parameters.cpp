@@ -2557,6 +2557,7 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
 
     // Derive Y/noY FASTQ output paths (after Solo init so readNmates is final)
     if (emitYNoYFastqyes) {
+        const uint32 yFastqEmitCount = yFastqEmitReadCount();
         const bool deferBatchFastq = (batchModeRequested && readFilesN > 1);
         if (deferBatchFastq) {
             inOut->logMain << "NOTE: batch mode defers Y/noY FASTQ path derivation until per-sample reset.\n";
@@ -2587,7 +2588,7 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
         }
 
         if (!hasYPrefix || !hasNoYPrefix) {
-            for (uint imate = 0; imate < readNmates; imate++) {
+            for (uint imate = 0; imate < yFastqEmitCount; imate++) {
                 if (readFilesNames.size() <= imate || readFilesNames[imate].empty()) {
                     useMateFallback = true;
                     break;
@@ -2600,7 +2601,7 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
             }
         }
 
-        for (uint imate = 0; imate < readNmates; imate++) {
+        for (uint imate = 0; imate < yFastqEmitCount; imate++) {
             if (hasYPrefix) {
                 outYFastqFile[imate] = YFastqOutputPrefix + "mate" + to_string(imate + 1) + ext;
             } else if (!useMateFallback && readFilesNames.size() > imate && !readFilesNames[imate].empty()) {
@@ -2636,7 +2637,8 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
     if (runMode == "alignReads" && emitYNoYFastqyes && emitYNoYFastqCompression == "none") {
         const bool deferBatchFastq = (batchModeRequested && readFilesN > 1);
         if (!deferBatchFastq) {
-        for (uint imate = 0; imate < readNmates; imate++) {
+        const uint32 yFastqEmitCount = yFastqEmitReadCount();
+        for (uint imate = 0; imate < yFastqEmitCount; imate++) {
             inOut->outYFastqStream[imate].open(outYFastqFile[imate].c_str());
             inOut->outNoYFastqStream[imate].open(outNoYFastqFile[imate].c_str());
             if (!inOut->outYFastqStream[imate].is_open() || !inOut->outNoYFastqStream[imate].is_open()) {

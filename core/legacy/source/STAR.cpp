@@ -493,7 +493,8 @@ int main(int argInN, char *argIn[])
         pthread_mutex_init(&g_threadChunks.mutexBAMsortBins, NULL);
         pthread_mutex_init(&g_threadChunks.mutexError, NULL);
         if (P.emitYNoYFastqyes) {
-            for (uint32 imate = 0; imate < P.readNmates; imate++) {
+            const uint32 yFastqEmitCount = P.yFastqEmitReadCount();
+            for (uint32 imate = 0; imate < yFastqEmitCount; imate++) {
                 pthread_mutex_init(&g_threadChunks.mutexOutYFastq[imate], NULL);
                 pthread_mutex_init(&g_threadChunks.mutexOutNoYFastq[imate], NULL);
             }
@@ -1757,7 +1758,8 @@ int main(int argInN, char *argIn[])
     
     // Concatenate Y/noY FASTQ gzip files (if compression is enabled)
     if (P.emitYNoYFastqyes && P.emitYNoYFastqCompression == "gz") {
-        for (uint32 imate = 0; imate < P.readNmates; imate++) {
+        const uint32 yFastqEmitCount = P.yFastqEmitReadCount();
+        for (uint32 imate = 0; imate < yFastqEmitCount; imate++) {
             // Concatenate Y FASTQ gzip files
             ofstream yFastqOut(P.outYFastqFile[imate].c_str(), ios::binary);
             if (yFastqOut.fail()) {

@@ -618,6 +618,7 @@ void ReadAlign::outputAlignments() {
         
         // Write Y/noY FASTQ output
         if (P.emitYNoYFastqyes) {
+            const uint32 yFastqEmitCount = P.yFastqEmitReadCount();
             // Determine if we're in Flex/solo mode (route per read) vs bulk PE (route both mates together)
             bool isSingleCellOrFlex = (P.pSolo.type != 0) || P.pSolo.flexMode;
             bool routePerRead = isSingleCellOrFlex;  // Flex: route each read independently
@@ -625,9 +626,9 @@ void ReadAlign::outputAlignments() {
             if (routePerRead) {
                 // Flex/solo mode: route each read independently based on its own alignments
                 // Note: hasYAlignment_ reflects current read's alignments in Flex mode
-                // In Flex mode, R1 and R2 are processed separately, so we write all available mates
-                // but hasYAlignment_ applies to the current read being processed
-                for (uint im = 0; im < P.readNmates; im++) {
+                // When scRNA/Flex has a separate barcode read, emit it to the same side
+                // as the aligned cDNA read by iterating over all emitted input ends.
+                for (uint im = 0; im < yFastqEmitCount; im++) {
                     if (hasYAlignment_) {
                         writeFastxRecord(im, true);  // Write to Y FASTQ
                     } else {
@@ -637,7 +638,7 @@ void ReadAlign::outputAlignments() {
             } else {
                 // Bulk PE mode: route both mates together based on hasYAlignment_ (which reflects both mates)
                 // If either mate has Y alignment, both mates go to Y FASTQ
-                for (uint im = 0; im < P.readNmates; im++) {
+                for (uint im = 0; im < yFastqEmitCount; im++) {
                     if (hasYAlignment_) {
                         writeFastxRecord(im, true);  // Write both mates to Y FASTQ
                     } else {

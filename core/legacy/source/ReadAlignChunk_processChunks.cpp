@@ -448,7 +448,8 @@ void ReadAlignChunk::processChunks() {//read-map-write chunks
         
         // Concatenate Y/noY FASTQ thread outputs
         if (P.emitYNoYFastqyes && P.emitYNoYFastqCompression != "gz") {
-            for (uint32 imate = 0; imate < P.readNmates; imate++) {
+            const uint32 yFastqEmitCount = P.yFastqEmitReadCount();
+            for (uint32 imate = 0; imate < yFastqEmitCount; imate++) {
                 chunkFstreamCat(RA->chunkOutYFastqStream[imate], P.inOut->outYFastqStream[imate], P.runThreadN > 1, g_threadChunks.mutexOutYFastq[imate]);
                 chunkFstreamCat(RA->chunkOutNoYFastqStream[imate], P.inOut->outNoYFastqStream[imate], P.runThreadN > 1, g_threadChunks.mutexOutNoYFastq[imate]);
             }

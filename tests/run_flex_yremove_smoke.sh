@@ -131,25 +131,33 @@ NOY_CHRY="$(samtools view "${RUN_DIR}/Aligned.out_noY.bam" | awk '$3=="chrY"{c++
 "${REMOVE_Y_READS_BIN}" \
   -y "${RUN_DIR}/Aligned.out_Y.bam" \
   -o "${REF_DIR}" \
-  "${R2_FILES[@]}"
+  "${R2_FILES[@]}" "${R1_FILES[@]}"
 
-REF_Y="${REF_DIR}/reference_Y_R2_001.fastq.gz"
-REF_NOY="${REF_DIR}/reference_noY_R2_001.fastq.gz"
+REF_Y_R2="${REF_DIR}/reference_Y_R2_001.fastq.gz"
+REF_NOY_R2="${REF_DIR}/reference_noY_R2_001.fastq.gz"
 python3 "${AGGREGATE_HELPER}" \
   --split-dir "${REF_DIR}" \
-  --output-y "${REF_Y}" \
-  --output-noy "${REF_NOY}" \
+  --output-y "${REF_Y_R2}" \
+  --output-noy "${REF_NOY_R2}" \
   "${R2_FILES[@]}"
 
-ACTUAL_Y="$(find_one "${RUN_DIR}/y_separated" '*_Y_R2_001.fastq.gz')"
-ACTUAL_NOY="$(find_one "${RUN_DIR}/y_separated" '*_noY_R2_001.fastq.gz')"
+REF_Y_R1="${REF_DIR}/reference_Y_R1_001.fastq.gz"
+REF_NOY_R1="${REF_DIR}/reference_noY_R1_001.fastq.gz"
+python3 "${AGGREGATE_HELPER}" \
+  --split-dir "${REF_DIR}" \
+  --output-y "${REF_Y_R1}" \
+  --output-noy "${REF_NOY_R1}" \
+  "${R1_FILES[@]}"
 
-if find "${RUN_DIR}/y_separated" -maxdepth 1 -type f \( -name '*_Y_R1_001.fastq.gz' -o -name '*_noY_R1_001.fastq.gz' \) | grep -q .; then
-  die "Unexpected Flex Y/noY barcode-read outputs were emitted"
-fi
+ACTUAL_Y_R2="$(find_one "${RUN_DIR}/y_separated" '*_Y_R2_001.fastq.gz')"
+ACTUAL_NOY_R2="$(find_one "${RUN_DIR}/y_separated" '*_noY_R2_001.fastq.gz')"
+ACTUAL_Y_R1="$(find_one "${RUN_DIR}/y_separated" '*_Y_R1_001.fastq.gz')"
+ACTUAL_NOY_R1="$(find_one "${RUN_DIR}/y_separated" '*_noY_R1_001.fastq.gz')"
 
-python3 "${COMPARE_HELPER}" --actual "${ACTUAL_Y}" --reference "${REF_Y}" --ignore-header-comments --label "Flex Y R2"
-python3 "${COMPARE_HELPER}" --actual "${ACTUAL_NOY}" --reference "${REF_NOY}" --ignore-header-comments --label "Flex noY R2"
+python3 "${COMPARE_HELPER}" --actual "${ACTUAL_Y_R2}" --reference "${REF_Y_R2}" --ignore-header-comments --label "Flex Y R2"
+python3 "${COMPARE_HELPER}" --actual "${ACTUAL_NOY_R2}" --reference "${REF_NOY_R2}" --ignore-header-comments --label "Flex noY R2"
+python3 "${COMPARE_HELPER}" --actual "${ACTUAL_Y_R1}" --reference "${REF_Y_R1}" --ignore-header-comments --label "Flex Y R1"
+python3 "${COMPARE_HELPER}" --actual "${ACTUAL_NOY_R1}" --reference "${REF_NOY_R1}" --ignore-header-comments --label "Flex noY R1"
 
 [[ -f "${PER_SAMPLE_DIR}/flexfilter_summary.tsv" ]] || die "Missing Flex per-sample summary"
 
@@ -159,8 +167,10 @@ python3 "${COMPARE_HELPER}" --actual "${ACTUAL_NOY}" --reference "${REF_NOY}" --
   echo "Threads: ${THREADS}"
   echo "cDNA lanes: ${#R2_FILES[@]}"
   echo "Y BAM reads: ${Y_COUNT}"
-  echo "Actual Y FASTQ: ${ACTUAL_Y}"
-  echo "Actual noY FASTQ: ${ACTUAL_NOY}"
+  echo "Actual Y R2 FASTQ: ${ACTUAL_Y_R2}"
+  echo "Actual noY R2 FASTQ: ${ACTUAL_NOY_R2}"
+  echo "Actual Y R1 FASTQ: ${ACTUAL_Y_R1}"
+  echo "Actual noY R1 FASTQ: ${ACTUAL_NOY_R1}"
 } > "${SUMMARY_FILE}"
 
 echo "PASS: Flex Y-removal smoke"

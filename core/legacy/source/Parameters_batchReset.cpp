@@ -308,6 +308,7 @@ void Parameters::reconfigureOutputPathsForSample(const std::string& sampleName) 
 
     // Update Y/noY FASTQ paths (per-sample in batch mode)
     if (emitYNoYFastqyes) {
+        const uint32 yFastqEmitCount = yFastqEmitReadCount();
         const bool hasYPrefix = !YFastqOutputPrefix.empty() && YFastqOutputPrefix != "-";
         const bool hasNoYPrefix = !noYFastqOutputPrefix.empty() && noYFastqOutputPrefix != "-";
         const std::string ext = (emitYNoYFastqCompression == "gz") ? ".fastq.gz" : ".fastq";
@@ -315,7 +316,7 @@ void Parameters::reconfigureOutputPathsForSample(const std::string& sampleName) 
         bool useMateFallback = false;
 
         if (!hasYPrefix || !hasNoYPrefix) {
-            for (uint imate = 0; imate < readNmates; imate++) {
+            for (uint imate = 0; imate < yFastqEmitCount; imate++) {
                 if (readFilesNames.size() <= imate || readFilesNames[imate].empty()) {
                     useMateFallback = true;
                     break;
@@ -328,7 +329,7 @@ void Parameters::reconfigureOutputPathsForSample(const std::string& sampleName) 
             }
         }
 
-        for (uint imate = 0; imate < readNmates; imate++) {
+        for (uint imate = 0; imate < yFastqEmitCount; imate++) {
             if (hasYPrefix) {
                 outYFastqFile[imate] = YFastqOutputPrefix + "mate" + std::to_string(imate + 1) + ext;
             } else if (!useMateFallback && readFilesNames.size() > imate && !readFilesNames[imate].empty()) {
@@ -360,7 +361,7 @@ void Parameters::reconfigureOutputPathsForSample(const std::string& sampleName) 
 
         // Reopen uncompressed Y/noY FASTQ streams per sample
         if (emitYNoYFastqCompression == "none") {
-            for (uint imate = 0; imate < readNmates; imate++) {
+            for (uint imate = 0; imate < yFastqEmitCount; imate++) {
                 if (inOut->outYFastqStream[imate].is_open()) {
                     inOut->outYFastqStream[imate].close();
                 }

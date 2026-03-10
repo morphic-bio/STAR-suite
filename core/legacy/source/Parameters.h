@@ -244,6 +244,13 @@ class Parameters {
         string emitYNoYFastqCompression;  // raw CLI: gz|none - compression for FASTQ output
         string YFastqOutputPrefix, noYFastqOutputPrefix;  // user-specified output prefixes
         string outYFastqFile[MAX_N_MATES], outNoYFastqFile[MAX_N_MATES];  // derived output paths per mate
+        uint32 yFastqEmitReadCount() const {
+            const bool singleCellOrFlex = (pSolo.type != ParametersSolo::SoloTypes::None) || pSolo.flexMode;
+            if (singleCellOrFlex && readNends > readNmates) {
+                return readNends;
+            }
+            return readNmates;
+        }
 
 //         string bamRemoveDuplicatesType;
 //         uint bamRemoveDuplicatesMate2basesN;

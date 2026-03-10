@@ -309,7 +309,8 @@ ReadAlignChunk::ReadAlignChunk(Parameters& Pin, Genome &genomeIn, Transcriptome 
     }
     
     if (P.emitYNoYFastqyes) {
-        for (uint32 imate = 0; imate < P.readNmates; imate++) {
+        const uint32 yFastqEmitCount = P.yFastqEmitReadCount();
+        for (uint32 imate = 0; imate < yFastqEmitCount; imate++) {
             if (P.emitYNoYFastqCompression == "gz") {
                 // Open gzip-compressed streams
                 ostringstream yName, noYName;
@@ -428,7 +429,8 @@ void ReadAlignChunk::reopenYNoYFastqOutputsForReuse() {
         return;
     }
 
-    for (uint32 imate = 0; imate < P.readNmates; imate++) {
+    const uint32 yFastqEmitCount = P.yFastqEmitReadCount();
+    for (uint32 imate = 0; imate < yFastqEmitCount; imate++) {
         if (P.emitYNoYFastqCompression == "gz") {
             ostringstream yName, noYName;
             yName << P.outFileTmp << "/YFastq.mate" << imate << ".thread" << iThread << ".gz";
