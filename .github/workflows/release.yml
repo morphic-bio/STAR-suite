@@ -111,6 +111,24 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Resolve image tags
+        id: image-tags
+        run: |
+          if echo "${{ github.ref_name }}" | grep -qiE '^v0([.]|$)|[-](alpha|beta|rc|dev)'; then
+            {
+              echo "tags<<EOF"
+              echo "biodepot/star-suite:${{ github.ref_name }}"
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+          else
+            {
+              echo "tags<<EOF"
+              echo "biodepot/star-suite:${{ github.ref_name }}"
+              echo "biodepot/star-suite:latest"
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -130,9 +148,7 @@ jobs:
           push: true
           build-args: |
             MAKE_JOBS=8
-          tags: |
-            biodepot/star-suite:${{ github.ref_name }}
-            biodepot/star-suite:latest
+          tags: ${{ steps.image-tags.outputs.tags }}
 
   publish-github-release:
     needs:
@@ -151,7 +167,7 @@ jobs:
       - name: Detect prerelease from tag
         id: prerelease
         run: |
-          if echo "${{ github.ref_name }}" | grep -qiE '[-](alpha|beta|rc|dev)'; then
+          if echo "${{ github.ref_name }}" | grep -qiE '^v0([.]|$)|[-](alpha|beta|rc|dev)'; then
             echo "is_prerelease=true" >> "$GITHUB_OUTPUT"
           else
             echo "is_prerelease=false" >> "$GITHUB_OUTPUT"

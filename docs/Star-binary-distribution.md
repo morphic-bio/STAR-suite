@@ -109,7 +109,7 @@ Use two channels in parallel:
 
 ## Artifact Matrix
 
-Per stable release tag (`v*`), publish both binary styles:
+Per release tag (`v*`), publish both binary styles:
 
 - Dynamic:
   - `star-suite_<version>_amd64.deb`
@@ -119,12 +119,13 @@ Per stable release tag (`v*`), publish both binary styles:
   - `STAR-static-<version>-linux-arm64.tar.gz`
 - Containers:
   - `biodepot/star-suite:<version>` (multi-arch manifest)
-  - `biodepot/star-suite:latest` (stable pointer)
+  - `biodepot/star-suite:latest` (stable pointer only)
 
 Notes:
 
 - `.deb` remains the preferred Ubuntu installation path.
 - Static tarballs are for minimal-host-dependency deployments and HPC/container edge cases.
+- `v0.*` tags are prereleases for testing. They publish release artifacts and a versioned container tag, but do not move `latest`.
 
 ## Phase 1: Packaging Foundation
 

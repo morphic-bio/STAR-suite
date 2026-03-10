@@ -20,6 +20,13 @@ and when artifacts are published.
 | Tag Push | `v*` | release multi-arch build | release gates | Yes (version tags + release assets + PPA source upload) |
 | Scheduled (optional) | nightly | drift detection build | extended checks | Optional `nightly` tag |
 
+Tag policy:
+
+- Tags matching `v0.*` are treated as prereleases.
+- Tags containing `-alpha`, `-beta`, `-rc`, or `-dev` are treated as prereleases.
+- Prerelease tags publish versioned container images and GitHub prereleases, but do not move Docker `latest`.
+- Stable tags (`v1.0`, `v1.1.0`, etc.) publish versioned images and update Docker `latest`.
+
 ## Path Filters (Implemented)
 
 `ci-pr.yml`, `ci-dev.yml`, and `ci-master.yml` are path-scoped and trigger only when at least one of these changes:
@@ -63,7 +70,7 @@ and when artifacts are published.
   - `biodepot/star-suite:master-<sha>`
 - `v*` tags:
   - `biodepot/star-suite:vX.Y.Z`
-  - optionally update `latest` from tagged release only
+  - update `latest` only for stable tags
 
 ## Binary Distribution Policy
 
@@ -92,6 +99,9 @@ For Ubuntu discoverability and package updates:
   - checks: release gates
   - publish: versioned images, GitHub release artifacts/checksums, PPA source
     upload
+  - prerelease logic:
+    - `v0.*` and `-alpha|-beta|-rc|-dev` tags are published as prereleases
+    - prereleases do not retag Docker `latest`
   - includes:
     - Debian `.deb` install/uninstall validation in clean `ubuntu:24.04` container
     - optional Debian source package signing when signing secrets are configured

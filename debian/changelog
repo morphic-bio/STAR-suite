@@ -1,5 +1,9 @@
-star-suite (2.7.11b+starsuite1-1) unstable; urgency=medium
+star-suite (0.50-1) unstable; urgency=medium
 
-  * Initial Debian packaging skeleton for STAR-suite binary distribution.
+  * Pre-1.0 test release for expanded PE/scRNA regression coverage.
+  * Fix PE batch TranscriptomeSAM multisample reset.
+  * Fix PE Y/noY FASTQ routing and TranscriptVB PE autodetect regression.
+  * Add public bulk, Flex, perturb, and vanilla Solo Y-removal smokes.
+  * Emit barcode-side scRNA Y/noY FASTQs.
 
- -- STAR-suite Maintainers <maintainers@biodepot.example>  Sat, 14 Feb 2026 06:00:00 +0000
+ -- STAR-suite Maintainers <maintainers@biodepot.example>  Tue, 10 Mar 2026 09:30:00 +0000
