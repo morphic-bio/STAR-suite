@@ -65,6 +65,8 @@ export YCHROM_BULK_R2="${YCHROM_BULK_R2:-/storage/PE/downsampled/21033-09-01-13-
 export YCHROM_FLEX_FASTQ_BASE="${YCHROM_FLEX_FASTQ_BASE:-/storage/downsampled/SC2300771}"
 
 # Public bulk PE regression fixture
+# Note: Salmon alignment-mode autodetect (-l A) mis-detects this fixture as ISR.
+# Keep the public smoke pinned to IU unless specifically testing Salmon autodetect.
 export PUBLIC_BULK_FIXTURE_ROOT="${PUBLIC_BULK_FIXTURE_ROOT:-/tmp/public_bulk_fixture_SRR4422207}"
 export PUBLIC_BULK_ACCESSION="${PUBLIC_BULK_ACCESSION:-SRR4422207}"
 export PUBLIC_BULK_GEO_SERIES="${PUBLIC_BULK_GEO_SERIES:-GSE88509}"
@@ -74,5 +76,8 @@ export PUBLIC_BULK_R2="${PUBLIC_BULK_R2:-$PUBLIC_BULK_FIXTURE_ROOT/${PUBLIC_BULK
 export PUBLIC_BULK_GENOME_DIR="${PUBLIC_BULK_GENOME_DIR:-/storage/autoindex_110_44/bulk_index}"
 export PUBLIC_BULK_TRANSCRIPTOME="${PUBLIC_BULK_TRANSCRIPTOME:-/storage/autoindex_110_44/bulk_index/transcriptome.fa}"
 export PUBLIC_BULK_STAR_MATE_ORDER="${PUBLIC_BULK_STAR_MATE_ORDER:-R2R1}"
+export PUBLIC_BULK_SALMON_LIBTYPE="${PUBLIC_BULK_SALMON_LIBTYPE:-IU}"
+# With Salmon pinned to IU on this fixture, keep smoke thresholds slightly looser
+# than the old auto-detect-based defaults.
 export PUBLIC_BULK_EXPECTED_FORMAT="${PUBLIC_BULK_EXPECTED_FORMAT:-ISF}"
 export PUBLIC_BULK_MAX_DROPPED_INCOMPAT="${PUBLIC_BULK_MAX_DROPPED_INCOMPAT:--1}"
