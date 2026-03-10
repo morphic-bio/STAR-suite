@@ -32,7 +32,7 @@ Because of that, the smoke comparisons are defined as:
 
 The standalone reference is produced by:
 
-- running `remove_y_reads` on the same cDNA `R2` FASTQs
+- running `remove_y_reads` on the same emitted input FASTQs
 - aggregating per-input outputs in the original input order
 
 ## Additional Guardrails
@@ -53,9 +53,9 @@ Without an explicit override, Flex writes per-sample outputs under a top-level
 Passing artifacts:
 
 - Flex:
-  [`tests/flex_yremove_smoke_output_20260310_082732/SUMMARY.txt`](/mnt/pikachu/STAR-suite/tests/flex_yremove_smoke_output_20260310_082732/SUMMARY.txt)
+  [`tests/flex_yremove_smoke_output_20260310_085039`](/mnt/pikachu/STAR-suite/tests/flex_yremove_smoke_output_20260310_085039)
 - Perturb:
-  [`tests/perturb_yremove_smoke_output_20260310_082723/SUMMARY.txt`](/mnt/pikachu/STAR-suite/tests/perturb_yremove_smoke_output_20260310_082723/SUMMARY.txt)
+  [`tests/perturb_yremove_smoke_output_20260310_085137`](/mnt/pikachu/STAR-suite/tests/perturb_yremove_smoke_output_20260310_085137)
 
 Observed counts:
 
