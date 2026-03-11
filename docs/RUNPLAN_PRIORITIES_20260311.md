@@ -35,22 +35,13 @@ This run plan converts the active top-level TODOs into an execution order that i
 - Exit criterion:
   - `auto` is dataset-driven and tested.
 
-## Priority 2: Throughput and Architecture
-
-### 4. Harden feature-offset and decompression behavior
-
-- Add the read-level feature-offset preflight if the false-positive rate is acceptable.
-- Confirm native-gz and `--readFilesCommand` paths remain behaviorally identical on representative inputs.
-- Exit criterion:
-  - no hidden behavior split between decompression modes.
-
 ## Priority 3: Coverage Expansion
 
-### 5. Finish missing fixture-dependent smokes
+### 4. Finish missing fixture-dependent smokes
 
 - Run the outstanding memory-leak repair smokes once fixtures are available.
 
-### 6. Expand CRISPR feature-calling threshold validation
+### 5. Expand CRISPR feature-calling threshold validation
 
 - Validate `--crMinUmi` on lineage, FLEX, and antibody datasets.
 - Convert the resulting recommendations into tests and user guidance.
@@ -71,9 +62,11 @@ This run plan converts the active top-level TODOs into an execution order that i
 - Expanded real-dataset PE multisample benchmark beyond the current regression smoke
 - SLAM over-dispersion parameter sweep until another SLAM-seq dataset is available
 - Further CR-compatibility cleanup for ambient-window sizing and GeneFull intronic edge cases
+- Additional feature-offset preflight work until there is a broader formal preflight framework
+- `--readFilesCommand` compatibility work beyond the current legacy support path
 - QC graphics consolidation until we are actively working on new graphical output again
 - CB/UB semantics cleanup unless stats/reporting problems make it worth revisiting
 - Legacy FLEX `ZG/ZX` cleanup until there is time to remove or replace the old workaround path
 - Perturb dynamic permit scheduling unless a new workload exposes a fresh scheduling bottleneck
 
-Those are complete enough for current prerelease use and should not block the paper/debugging work. The PE bulk residual is currently treated as an acceptable small policy/model difference unless a materially larger dataset-specific gap appears. The PE multisample batch-vs-sequential path remains covered by the checked-in smoke test and can be revisited later if a broader formal benchmark is needed. The SLAM over-dispersion work is also deferred because the initial conservative implementation made the term effectively negligible and there is no urgency to complicate the analysis without an additional independent dataset to justify the extra effort. The remaining CR-compatibility cleanup is likewise deferred because compatibility is already much stronger than before and the expected return is low unless a concrete accuracy problem points back to those areas. QC graphics consolidation is deferred because only the `process_features` heatmap consolidation/optimization remains, and that work is better done the next time we add or revise graphical output. CB/UB and legacy `ZG/ZX` cleanup are also deferred unless they create real stats or maintenance pain. Perturb dynamic permit scheduling is likewise considered complete unless new workloads show another clear bottleneck.
+Those are complete enough for current prerelease use and should not block the paper/debugging work. The PE bulk residual is currently treated as an acceptable small policy/model difference unless a materially larger dataset-specific gap appears. The PE multisample batch-vs-sequential path remains covered by the checked-in smoke test and can be revisited later if a broader formal benchmark is needed. The SLAM over-dispersion work is also deferred because the initial conservative implementation made the term effectively negligible and there is no urgency to complicate the analysis without an additional independent dataset to justify the extra effort. The remaining CR-compatibility cleanup is likewise deferred because compatibility is already much stronger than before and the expected return is low unless a concrete accuracy problem points back to those areas. Additional feature-offset preflight work is deferred because there is already a working offset-detection phase, and any deeper consistency check belongs in a more formal preflight framework. `--readFilesCommand` remains for flexibility and legacy support, but active development should target the direct internal gzip path rather than chasing full compatibility for every command-stream combination. QC graphics consolidation is deferred because only the `process_features` heatmap consolidation/optimization remains, and that work is better done the next time we add or revise graphical output. CB/UB and legacy `ZG/ZX` cleanup are also deferred unless they create real stats or maintenance pain. Perturb dynamic permit scheduling is likewise considered complete unless new workloads show another clear bottleneck.
