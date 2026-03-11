@@ -8,6 +8,10 @@ This file tracks active top-level work only. Completed items and stale historica
 
 ## Priority 1: Correctness / Parity
 
+- Establish FLEX parity versus Cell Ranger 9.0 on a representative dataset.
+  - This is not an immediate blocker, but it is the highest-value follow-up because other major comparisons were made against CR 9.0.
+  - Include runtime comparison and inspect whether targeted acceleration in FLEX feature processing is worthwhile.
+  - FLEX is currently only modestly slower than CR, so the goal is to decide whether additional complexity is justified.
 - Relax CB/UB strict coupling by default for non-Flex runs while keeping the strict Flex policy.
   - Verify explicitly whether Flex still drops CB when UB is missing.
 - Validate FLEX `ZG` / `ZX` tags and re-enable them in FLEX test scripts once CB/UB tag injection is confirmed stable.
