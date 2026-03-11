@@ -1,73 +1,51 @@
 # STAR-suite TODOs
 
-- Relax CB/UB strict coupling by default for non-Flex runs (keep strict policy for Flex); verify whether Flex drops CB when UB is missing.
-- Validate FLEX ZG/ZX tags (raw GeneFull tags) and re-enable them in FLEX test scripts once CB/UB tag injection is confirmed stable.
-- Fix and run remaining smoke tests with missing fixtures for memory leak repair validation.
-- Change libflex to use the modular libscrna (EmptyDrops, etc.) instead of vendored copies.
-- [DONE] Remove libcairo dependency from core STAR build by replacing process_features heatmap output with Plotly HTML+JSON.
-  - Heatmaps now emit `Feature_counts_heatmap.html` + `.json` and `Feature_types_heatmap.html` + `.json`
-  - No external graphics dependencies required; Plotly loaded from CDN at render time
-  - Removed `NO_HEATMAP` build flag (no longer needed since there's no external dependency)
-- Keep Plotly+JSON QC outputs in process_features and migrate QC graphics into a shared core so other STAR components can reuse them (eventually replace STAR's existing QC graphics with this core).
-- Draft a design note for a shared QC graphics core (inputs/outputs, Plotly+JSON artifacts, TSV fallbacks, and how STAR/other components will call it).
-- Verify no downstream scripts/tools expect `Feature_types_heatmap.png` or `Feature_counts_heatmap.png`; document the HTML/JSON switch in any user-facing docs if needed.
-- Consider adding a read-level consistency preflight for global feature offset detection (warn/error if a large fraction of matches are off the global offset).
-- Re-test SLAM VB over‑dispersion vs binomial using technical replicate consistency and count‑stratified slices; sweep `slamVbOverdispPhi` to check for alternate minima.
-- Add dynamic thread-permit scheduling for STAR + feature assignment in perturb mode:
-  - Phase 1: STAR-only dynamic active-thread limits behind a feature flag (default off), preserving deterministic outputs and existing chunk/order semantics.
-  - Phase 2: queue-aware permit rebalancing between STAR mapping and feature consumers, with min/max guards to avoid starvation.
-  - Validation: A375 regression parity first, then UCSF full-dataset throughput and concordance checks.
-- Core compatibility fixes for perturb mode (post-`noBCfix`):
-  - [DONE] Whitelist namespace support: handle 2-column NXT/TRU translation lists and keep correction/output namespaces consistent (`crChemistry`, `crOutputChemistry`).
-  - [DONE] Barcode/chemistry auto-detection hardening with deterministic explicit-override precedence.
-  - [DONE] NXT/TRU namespace normalization at merge boundary:
-    - All per-library MexData barcodes (GEX and feature) are normalized to TRU before cross-library merge using `normalizeMexBarcodesToTru()`. This makes the merge stage namespace-agnostic.
-    - Per-library `effectiveChem` tracked in `PfPreparedFeatureLibrary` and `FeatureRun`. Currently set from the global chemistry context (same-whitelist runs). True mixed-chemistry (per-library whitelists) requires future `PfMultiConfig` extensions.
-    - `PfMultiAssign::AssignOptions` supports `translateNxt` wired to `pf_config_set_translate_nxt()`. Not yet activated from the pf-multi caller path — normalization happens at the merge boundary instead.
-    - `writeCombinedMex` receives inputChemistry="TRU", outputChemistry from `--crOutputChemistry` (default TRU). When outputChem=NXT, TRU→NXT translation is applied at write time.
-    - Solo filtered barcodes are fetched in read-space (`getFilteredBarcodesFromSolo(..., false)`) and normalized to TRU via `normalizeBarcodeVecToTru()` immediately. MEX-derived fallback barcodes (from `computeObservedGexBarcodes`) are already TRU from merge-boundary normalization and skip a second pass, avoiding double-translation.
-    - Auto-detection hardened: `detectChemistryFromWhitelistPath` requires ≥80% complement-rule agreement for NXT classification (was: any 2-column → NXT).
-    - Feature MEX reads paired with chemistry in `FeatureMexEntry` struct (no index drift on partial read failure).
-    - Validated: A375 TRU path (full E2E), UCSF iPSC2 NXT path (7,286/7,286 barcode parity).
-  - [TODO] Auto-detect NXT/TRU chemistry per library during process_features bootstrap phase:
-    - During `feature_mode_bootstrap_reads` window, trial-match barcodes against whitelist both as-is and after NXT translation; tally hit rates.
-    - In `feature_mode_finalize()`, decide NXT vs TRU based on match ratio and export via `pf_get_detected_chemistry()`.
-    - Hook into `PfMultiProcess` per-library loop to set `translateNxt` from detected chemistry.
-  - [TODO] Add dedicated automated tests that explicitly validate mixed-chemistry merge (synthetic NXT+TRU feature libraries merged with TRU GEX).
-  - [DONE] Small-set cell calling parity wiring: explicit ORDMAG/simple EmptyDrops mode (`--soloEmptyDropsMode auto|simple|union`).
-  - [DONE] Prevent feature-to-GEX leakage: route GEX quant to GEX libraries only in pf-multi mode.
-  - [DONE] Add regression gate runs: A375 + UCSF 2M checks (artifacts under `/storage/A375/...` and `/storage/ucsf-2M/...`).
-  - [TODO] Add dedicated automated tests that explicitly validate 2-column mapping edge-cases and chemistry precedence matrix.
-- EmptyDrops / OrdMag cell calling parity:
-  - [DONE] libscrna non-Flex path: lowered `umiMin` from 500 to 100 so EmptyDrops can rescue cells below the OrdMag knee.
-  - [DONE] libscrna non-Flex path: enabled Benjamini-Hochberg FDR correction (`applyBHCorrection=true`) matching the legacy EmptyDrops_CR implementation.
-  - [DONE] libscrna non-Flex path: bootstrap OrdMag knee estimation (CR9 style) instead of fixed `nExpectedCells=3000`. Estimates `recovered_cells` via 100 bootstrap samples, matching `filter_cellular_barcodes_ordmag()`. MC simulations bumped to 100K (CR9 `NUM_SIMS`).
-  - [DONE] Validated on UCSF iPSC2 full sample: cell gap 716→39, Jaccard 0.99, gene Pearson 0.997, cell Pearson 0.999.
-  - Flex path unchanged: `nExpectedCells=3000`, `umiMin=500`, raw p-value gating, no BH, no bootstrap — these are the Flex/CR7.1-derived defaults; keep until CR Flex cell-calling parity is investigated.
-  - [TODO] Investigate whether `indMin=45000` / `indMax=90000` ambient window sizing is appropriate for all dataset sizes (currently no rescue possible if nCB < 45000).
-- GeneFull intronic read counting harmonization with CR:
-  - [TODO] Investigate differences in how STAR GeneFull counts intronic reads vs CR's intron inclusion mode. On UCSF iPSC2, several large genes (ENSG00000287001 310x, AKAP6 123x, ARMC9 29x, DHFR 20x) show extreme STAR-over-CR ratios despite identical GTFs. Pattern is diffuse (1-2 UMIs across thousands of barcodes), consistent with ambient intronic fragments that CR's stricter admission criteria suppress. CR may require reads to be confidently intronic (no exon overlap from any gene), apply antisense intron filtering, or use splice-awareness heuristics that STAR GeneFull does not. Gene Pearson remains 0.997 so impact is minor, but worth understanding for further parity improvement.
-- Poly-G trimming auto-detection:
-  - [DONE] `--clip3pPolyG yes|no|auto` parameter and poly-G trimming gated in `ClipCR4::polyTail3p`.
-  - [TODO] Implement data-driven `auto` mode: count poly-G fraction in first N reads (during existing chunk processing) and set the flag if prevalence exceeds threshold. Currently `auto` = `yes` when `--clipAdapterType CellRanger4`.
-- Input decompression path:
-  - [DONE] Add native internal zlib FASTQ fast-path when `--readFilesCommand -` and inputs are `.gz`.
-    - Added `--readFilesLegacyZcat Yes|No` (default `No`) to force legacy external `zcat` helper mode.
-  - Preserve `--readFilesCommand` behavior for generic preprocessors (`zcat`, `pigz`, `samtools view`, etc.).
-  - Ensure auto-detection/chemistry logic and file-boundary semantics remain identical across native-gz and command-stream paths.
-## MCP Client Setup (Codex + Cursor)
+This file tracks active top-level work only. Completed items and stale historical notes should stay in the implementation summaries and handoff docs, not here.
 
-- **Endpoints**: Codex uses streamable-HTTP `POST /`, Cursor uses SSE `GET /sse` + `POST /messages`.
-- **Remote host**: Local SSH tunnels are not visible to agents. Use `cloudflared tunnel --url http://localhost:8765` to expose a public URL.
-- **Codex config**:
-  ```toml
-  [mcp_servers.star-suite]
-  type = "streamable-http"
-  url = "https://your-public-url"
-  ```
-- **Cursor config**:
-  ```toml
-  [mcp_servers.star-suite]
-  type = "sse"
-  url = "https://your-public-url/sse"
-  ```
+## Priority 0: Paper-Critical Validation
+
+- Investigate the remaining small TranscriptVB vs Salmon residual on the corrected PE bulk benchmark.
+  - Current magnitude: about `3350 / 5.49M` reads (`~0.06%`).
+  - Goal: determine whether the remainder is model allocation, effective-length handling, or an input/filtering discrepancy.
+- Run the real multi-sample bulk PE end-to-end benchmark beyond the current 2-sample smoke.
+  - Compare one multi-sample STAR batch run against sequential per-sample STAR runs.
+  - Require parity for trimming, Y/noY outputs, transcriptome BAMs, and quant outputs.
+- Re-test SLAM VB over-dispersion vs binomial using technical replicate consistency and count-stratified slices.
+  - Sweep `slamVbOverdispPhi` to check for alternate minima.
+
+## Priority 1: Correctness / Parity
+
+- Relax CB/UB strict coupling by default for non-Flex runs while keeping the strict Flex policy.
+  - Verify explicitly whether Flex still drops CB when UB is missing.
+- Validate FLEX `ZG` / `ZX` tags and re-enable them in FLEX test scripts once CB/UB tag injection is confirmed stable.
+- Auto-detect `NXT` vs `TRU` chemistry per library during `process_features` bootstrap.
+- Add dedicated automated tests for:
+  - mixed-chemistry merge (`NXT + TRU` feature libraries with TRU GEX)
+  - 2-column mapping edge cases and chemistry precedence
+- Investigate whether `indMin=45000` / `indMax=90000` ambient-window sizing is appropriate across dataset sizes.
+- Investigate remaining GeneFull intronic-count differences vs Cell Ranger intron-inclusion mode.
+- Implement data-driven `--clip3pPolyG auto`.
+- Consider a read-level consistency preflight for global feature-offset detection.
+- Preserve `--readFilesCommand` parity for generic preprocessors while ensuring native-gz and command-stream paths remain behaviorally identical.
+
+## Priority 2: Performance / Architecture
+
+- Add dynamic thread-permit scheduling for STAR + feature assignment in perturb mode.
+  - Phase 1: STAR-only dynamic active-thread limits behind a feature flag.
+  - Phase 2: queue-aware permit rebalancing between STAR mapping and feature consumers.
+- Keep Plotly+JSON QC outputs in `process_features` and migrate QC graphics into a shared reusable core.
+- Draft the design note for that shared QC graphics core.
+- Verify no downstream scripts still expect `Feature_types_heatmap.png` or `Feature_counts_heatmap.png`, and document the HTML/JSON switch where needed.
+
+## Priority 3: Dataset / Fixture Coverage
+
+- Fix and run the remaining smoke tests that still depend on missing fixtures for memory-leak repair validation.
+- Validate `--crMinUmi` across real assay types beyond the A375 fixture:
+  - lineage barcodes
+  - FLEX probes
+  - antibody capture
+
+## Notes
+
+- Flex already uses `libscrna`; the older migration item is complete and removed from this list.
+- Linux compatibility tarballs and installer-bundle release validation are complete; release follow-up work belongs in the release/distribution docs, not here.

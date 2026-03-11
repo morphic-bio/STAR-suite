@@ -134,8 +134,8 @@ Use two channels in parallel:
 
 - Primary package: `star-suite`
 - Initial target OS:
-  - Ubuntu 24.04 (required)
-  - Ubuntu 22.04 (optional follow-up)
+  - Ubuntu 24.04
+  - Ubuntu 22.04 compatibility target via release tarball validation
 - Build type:
   - Dynamic binaries (default runtime path)
   - Compatibility tarballs plus installer bundle (portable fallback path)
