@@ -4,8 +4,7 @@ This file tracks active top-level work only. Completed items and stale historica
 
 ## Priority 0: Paper-Critical Validation
 
-- Re-test SLAM VB over-dispersion vs binomial using technical replicate consistency and count-stratified slices.
-  - Sweep `slamVbOverdispPhi` to check for alternate minima.
+- No active paper-critical blockers at present.
 
 ## Priority 1: Correctness / Parity
 
@@ -43,5 +42,6 @@ This file tracks active top-level work only. Completed items and stale historica
 
 - The multisample PE bulk batch-vs-sequential equivalence work is closed for now. The current smoke/regression coverage is sufficient to catch regressions, and a broader benchmark can be revisited later if needed for formal test expansion.
 - The remaining PE bulk `TranscriptVB` vs Salmon gap (`~0.06%`) is currently treated as an acceptable small policy/model difference, not an active blocker. Revisit it only if a materially larger dataset-specific gap appears or a paper/reviewer question requires exact attribution.
+- The SLAM over-dispersion parameter sweep is demoted to a low-priority follow-up. The initial conservative implementation made the over-dispersion term effectively negligible; revisit it when another suitable SLAM-seq dataset is available and there is time for a formal parameter sweep.
 - Flex already uses `libscrna`; the older migration item is complete and removed from this list.
 - Linux compatibility tarballs and installer-bundle release validation are complete; release follow-up work belongs in the release/distribution docs, not here.
