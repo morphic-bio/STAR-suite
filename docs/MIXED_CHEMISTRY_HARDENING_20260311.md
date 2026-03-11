@@ -12,6 +12,8 @@ This pass tightened the lightweight regression surface in two places:
    strict namespace policy.
 2. Added a new prepared-context regression test for the actual chemistry
    precedence logic in `PfMultiProcess.cpp`.
+3. Added a small filtered-cell mixed-library smoke that exercises the full
+   CR-compat merged-filtered-MEX path against real Solo filtered barcodes.
 
 ## Tests Added / Updated
 
@@ -32,6 +34,17 @@ This pass tightened the lightweight regression surface in two places:
     - per-library override isolation in a multi-library config
     - distinction between empty `star_chemistry` and explicit `auto`
 
+- `tests/multi_feature/run_mixed_chemistry_filtered_smoke.sh`
+  - Builds or reuses the downsampled MSK mixed-library fixture.
+  - Runs the full pf-multi / CR-compat path with filtered cell calling enabled.
+  - Verifies that:
+    - `outs/filtered_feature_bc_matrix/barcodes.tsv.gz` matches
+      `Solo.out/GeneFull/filtered/barcodes.tsv` after suffix normalization
+    - feature-library filtered barcode outputs are subsets of the merged
+      filtered barcode universe after per-library chemistry normalization
+    - `Log.out` records the Solo-sourced filtered-barcode path and the
+      normalized GEX barcode count used for CR-compat merge filtering
+
 ## Validated Suite
 
 The following scripts were run after a clean rebuild:
@@ -44,18 +57,17 @@ The following scripts were run after a clean rebuild:
 - `tests/multi_feature/test_no_global_ref_guard.sh`
 - `tests/multi_feature/test_data_driven_specs.sh`
 - `tests/multi_feature/test_mixed_chemistry_prepared_context.sh`
+- `tests/multi_feature/run_mixed_chemistry_filtered_smoke.sh`
 
 ## Remaining Gap
 
-The original full filtered-cell merge path note is still only partially closed.
+The original filtered-cell merge-path gap is now closed at smoke-test level.
 
 What is now covered:
 - strict namespace normalization behavior
 - prepared-context chemistry precedence
+- full mixed-library filtered-cell merge behavior on a downsampled real MSK
+  fixture, including the `Solo -> filtered_feature_bc_matrix` handoff
 
-What is still not isolated by a small regression fixture:
-- a full filtered-cell E2E mixed-library run that exercises the complete
-  post-cell-calling merge path with real filtered GEX barcodes
-
-That remaining gap is small enough to defer until there is a good reason to
-add another heavier fixture-driven smoke.
+What is still intentionally deferred:
+- larger fixture or production-scale reruns beyond the smoke surface

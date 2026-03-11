@@ -37,6 +37,7 @@ update this file with its output location.
 - `plans/artifacts/parms_tests_YYYYMMDD/` (logs + report)
 - `tests/*_output*/` (smoke/regression outputs)
 - `tests/bulk_pe_multisample_equivalence_output_*/` (batch vs sequential bulk PE multisample equivalence smoke)
+- `tests/mixed_chemistry_filtered_smoke_output_*/` (downsampled MSK mixed-chemistry filtered-cell smoke)
 - `tests/flex_yremove_smoke_output_*/` (Flex integrated Y-removal vs remove_y_reads smoke)
 - `tests/solo_yremove_smoke_output_*/` (vanilla Solo integrated Y-removal vs remove_y_reads smoke)
 - `tests/perturb_yremove_smoke_output_*/` (perturb integrated Y-removal vs remove_y_reads smoke)

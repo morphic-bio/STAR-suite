@@ -24,7 +24,7 @@ This run plan converts the active top-level TODOs into an execution order that i
   - mixed `NXT + TRU` feature-library merge
   - 2-column mapping edge cases
   - chemistry precedence matrix
-  - remaining filtered-cell / multi-library validation gaps
+  - any remaining multi-library validation gaps beyond the filtered-cell smoke
 - Exit criterion:
   - mixed-chemistry support is covered by current unit/smoke tests strongly enough
     that future regressions are unlikely to slip through unnoticed.

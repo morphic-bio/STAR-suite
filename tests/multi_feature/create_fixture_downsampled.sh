@@ -56,7 +56,9 @@ cp "$GRNA_REF" "$OUT/ref_feature_geneBC.csv"
 
 # LARRY ref: keep header + first N features
 head -n 1 "$LARRY_REF" > "$OUT/ref_feature_larryBC.csv"
+set +o pipefail
 tail -n +2 "$LARRY_REF" | head -n "$LARRY_FEATURES" >> "$OUT/ref_feature_larryBC.csv"
+set -o pipefail
 
 echo ""
 echo "Fixture created at: $OUT"
