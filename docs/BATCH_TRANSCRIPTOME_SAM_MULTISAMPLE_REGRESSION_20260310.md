@@ -80,6 +80,15 @@ Reason:
 This smoke is therefore designed to be a strict correctness guard, not a
 throughput benchmark.
 
+## Current Status
+
+This issue is currently considered closed for active benchmark follow-up.
+
+- the regression is fixed
+- the strict batch-vs-sequential smoke remains checked in
+- future broader PE multisample benchmarking can be revisited later without
+  blocking current paper/debugging work
+
 ## Validation Artifact
 
 Clean passing run:
