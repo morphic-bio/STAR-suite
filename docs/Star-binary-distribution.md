@@ -109,6 +109,19 @@ Ship discoverable, installable Ubuntu binaries for STAR-suite with low-friction 
   - `tests/slam/test_snp_mask_build_smoke.sh`: passed
   - `tests/run_solo_smoke.sh`: passed
 
+## Published Release Smoke (2026-03-11)
+
+- Release tested:
+  - `v0.50.3`
+  - GitHub prerelease assets downloaded from the published release page, not from local build outputs
+- Download verification:
+  - `SHA256SUMS` checked against the published installer bundle and both published compatibility tarballs
+- External-user installer checks:
+  - host install on a `glibc 2.35` machine selected `glibc234` and `STAR --version` returned `2.7.11b`
+  - manual direct install from the published `glibc234` tarball also returned `2.7.11b`
+  - clean `ubuntu:24.04` container install from the published installer bundle selected `glibc239` and `STAR --version` returned `2.7.11b`
+- This confirms the published release assets, checksums, and installer selection behavior match the intended compatibility model outside the repo build environment
+
 ## Distribution Strategy
 
 Use two channels in parallel:
