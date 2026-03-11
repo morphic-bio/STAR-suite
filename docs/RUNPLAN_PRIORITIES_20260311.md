@@ -17,15 +17,17 @@ This run plan converts the active top-level TODOs into an execution order that i
 - Exit criterion:
   - clear parity status against CR9 and a yes/no recommendation on performance optimization scope.
 
-### 2. Finish perturb mixed-chemistry support
+### 2. Harden perturb mixed-chemistry support
 
-- Implement per-library `NXT/TRU` auto-detection in `process_features` bootstrap.
-- Add automated tests for:
+- Treat the core behavior as implemented and E2E-validated rather than missing.
+- Focus this work on updating regression coverage:
   - mixed `NXT + TRU` feature-library merge
   - 2-column mapping edge cases
   - chemistry precedence matrix
+  - remaining filtered-cell / multi-library validation gaps
 - Exit criterion:
-  - mixed-chemistry runs do not depend on a single global chemistry assumption.
+  - mixed-chemistry support is covered by current unit/smoke tests strongly enough
+    that future regressions are unlikely to slip through unnoticed.
 
 ### 3. Resolve remaining cell-calling and intronic-parity questions
 

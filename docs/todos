@@ -15,10 +15,12 @@ This file tracks active top-level work only. Completed items and stale historica
 - Relax CB/UB strict coupling by default for non-Flex runs while keeping the strict Flex policy.
   - Verify explicitly whether Flex still drops CB when UB is missing.
 - Validate FLEX `ZG` / `ZX` tags and re-enable them in FLEX test scripts once CB/UB tag injection is confirmed stable.
-- Auto-detect `NXT` vs `TRU` chemistry per library during `process_features` bootstrap.
-- Add dedicated automated tests for:
-  - mixed-chemistry merge (`NXT + TRU` feature libraries with TRU GEX)
-  - 2-column mapping edge cases and chemistry precedence
+- Harden mixed-chemistry (`NXT/TRU`) support now that the core behavior is implemented and E2E-validated.
+  - Keep this focused on unit/smoke coverage rather than new feature design.
+  - Add dedicated automated tests for:
+    - mixed-chemistry merge (`NXT + TRU` feature libraries with TRU GEX)
+    - 2-column mapping edge cases and chemistry precedence
+    - remaining filtered-cell / multi-library validation gaps
 - Investigate whether `indMin=45000` / `indMax=90000` ambient-window sizing is appropriate across dataset sizes.
 - Investigate remaining GeneFull intronic-count differences vs Cell Ranger intron-inclusion mode.
 - Implement data-driven `--clip3pPolyG auto`.
