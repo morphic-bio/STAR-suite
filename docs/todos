@@ -4,9 +4,6 @@ This file tracks active top-level work only. Completed items and stale historica
 
 ## Priority 0: Paper-Critical Validation
 
-- Investigate the remaining small TranscriptVB vs Salmon residual on the corrected PE bulk benchmark.
-  - Current magnitude: about `3350 / 5.49M` reads (`~0.06%`).
-  - Goal: determine whether the remainder is model allocation, effective-length handling, or an input/filtering discrepancy.
 - Run the real multi-sample bulk PE end-to-end benchmark beyond the current 2-sample smoke.
   - Compare one multi-sample STAR batch run against sequential per-sample STAR runs.
   - Require parity for trimming, Y/noY outputs, transcriptome BAMs, and quant outputs.
@@ -47,5 +44,6 @@ This file tracks active top-level work only. Completed items and stale historica
 
 ## Notes
 
+- The remaining PE bulk `TranscriptVB` vs Salmon gap (`~0.06%`) is currently treated as an acceptable small policy/model difference, not an active blocker. Revisit it only if a materially larger dataset-specific gap appears or a paper/reviewer question requires exact attribution.
 - Flex already uses `libscrna`; the older migration item is complete and removed from this list.
 - Linux compatibility tarballs and installer-bundle release validation are complete; release follow-up work belongs in the release/distribution docs, not here.
