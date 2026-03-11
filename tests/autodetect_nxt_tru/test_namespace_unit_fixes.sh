@@ -59,7 +59,7 @@ CCCCCCCCCCCCCCCC
 EOF
 
 echo ""
-echo "--- Test 1: PfMultiProcess static helpers (detect + explicit filtered normalization) ---"
+echo "--- Test 1: PfMultiProcess static helpers (detect + strict filtered normalization) ---"
 cat > "${WORK_DIR}/test_pf_multi_helpers.cpp" << 'EOF'
 #include <iostream>
 #include <string>
@@ -123,22 +123,51 @@ int main(int argc, char** argv) {
                       "loadWhitelistBarcodeSet failed");
     rc |= assert_true(whitelistSet.size() == 2, "expected two whitelist barcodes");
 
-    std::vector<std::string> src;
-    src.push_back("AAAAAAAAAAAAAAAA");                         // in_set
-    src.push_back(translateNxtMiddleTwoBases("CCCCCCCCCCCCCCCC")); // translated_to_set
-    src.push_back(translateNxtMiddleTwoBases("CCCCCCCCCCCCCCCC")); // translated_to_set duplicate
-    src.push_back("GGGGGGGGGGGGGGGG");                         // unmatched
+    bool threwMissingNs = false;
+    try {
+        FilteredBarcodeNormalizationStats missingNsStats;
+        (void)normalizeFilteredBarcodesForAssignNamespace(
+            std::vector<std::string>{"AAAAAAAAAAAAAAAA"},
+            whitelistSet,
+            missingNsStats);
+    } catch (const std::runtime_error& e) {
+        threwMissingNs =
+            std::string(e.what()).find("must be resolved to NXT or TRU") != std::string::npos;
+    }
+    rc |= assert_true(threwMissingNs, "missing namespace arguments must throw");
+
+    std::vector<std::string> srcTranslated;
+    srcTranslated.push_back(translateNxtMiddleTwoBases("AAAAAAAAAAAAAAAA")); // translated_to_set
+    srcTranslated.push_back(translateNxtMiddleTwoBases("CCCCCCCCCCCCCCCC")); // translated_to_set
+    srcTranslated.push_back(translateNxtMiddleTwoBases("CCCCCCCCCCCCCCCC")); // translated_to_set duplicate
+    srcTranslated.push_back("GGGGGGGGGGGGGGGG");                             // unmatched
 
     FilteredBarcodeNormalizationStats stats;
     std::vector<std::string> out =
-        normalizeFilteredBarcodesForAssignNamespace(src, whitelistSet, stats);
+        normalizeFilteredBarcodesForAssignNamespace(srcTranslated, whitelistSet, stats, "TRU", "NXT");
 
-    rc |= assert_true(stats.inSet == 1, "inSet should be 1");
-    rc |= assert_true(stats.translatedToSet == 2, "translatedToSet should be 2");
+    rc |= assert_true(stats.inSet == 0, "translated path should not count inSet");
+    rc |= assert_true(stats.translatedToSet == 3, "translatedToSet should count all matching translated inputs");
     rc |= assert_true(stats.unmatched == 1, "unmatched should be 1");
     rc |= assert_true(stats.dedupDropped == 1, "dedupDropped should be 1");
     rc |= assert_true(stats.outputCount == 2, "outputCount should be 2");
     rc |= assert_true(out.size() == 2, "normalized output size should be 2");
+
+    FilteredBarcodeNormalizationStats sameNsStats;
+    std::vector<std::string> sameNsIn;
+    sameNsIn.push_back("AAAAAAAAAAAAAAAA");
+    sameNsIn.push_back("CCCCCCCCCCCCCCCC");
+    sameNsIn.push_back("CCCCCCCCCCCCCCCC");
+    sameNsIn.push_back("GGGGGGGGGGGGGGGG");
+    std::vector<std::string> sameNsOut =
+        normalizeFilteredBarcodesForAssignNamespace(sameNsIn, whitelistSet, sameNsStats, "NXT", "NXT");
+
+    rc |= assert_true(sameNsStats.inSet == 3, "same-namespace path should count matching inputs as inSet");
+    rc |= assert_true(sameNsStats.translatedToSet == 0, "same-namespace path should not translate");
+    rc |= assert_true(sameNsStats.unmatched == 1, "same-namespace unmatched should be 1");
+    rc |= assert_true(sameNsStats.dedupDropped == 1, "same-namespace dedupDropped should be 1");
+    rc |= assert_true(sameNsStats.outputCount == 2, "same-namespace outputCount should be 2");
+    rc |= assert_true(sameNsOut.size() == 2, "same-namespace normalized output size should be 2");
 
     return rc;
 }
@@ -290,18 +319,16 @@ int main() {
     truBarcodes.push_back(col2_b);  // AAAAAAAACAAAAAAA — overlaps col1_a!
     truBarcodes.push_back(col2_c);  // CCCCCCCCGCCCCCCC — no overlap
 
-    // --- Heuristic path (BUG): no sourceNamespace, membership decides ---
-    FilteredBarcodeNormalizationStats heuristicStats;
-    std::vector<std::string> heuristicOut =
-        normalizeFilteredBarcodesForAssignNamespace(truBarcodes, nxtSet, heuristicStats);
-
-    // With heuristic, col2_a matches col1_b in set → inSet (WRONG: kept as TRU)
-    // col2_b matches col1_a in set → inSet (WRONG: kept as TRU)
-    // col2_c doesn't match → translated to NXT
-    rc |= assert_true(heuristicStats.inSet == 2,
-        "heuristic: expected inSet=2 (overlap collisions)");
-    rc |= assert_true(heuristicStats.translatedToSet == 1,
-        "heuristic: expected translatedToSet=1");
+    bool threwMissingNs = false;
+    try {
+        FilteredBarcodeNormalizationStats heuristicStats;
+        (void)normalizeFilteredBarcodesForAssignNamespace(truBarcodes, nxtSet, heuristicStats);
+    } catch (const std::runtime_error& e) {
+        threwMissingNs =
+            std::string(e.what()).find("must be resolved to NXT or TRU") != std::string::npos;
+    }
+    rc |= assert_true(threwMissingNs,
+        "missing namespace arguments must hard-fail; heuristic fallback is removed");
 
     // --- Deterministic path (FIX): sourceNS=TRU, whitelistNS=NXT ---
     FilteredBarcodeNormalizationStats deterministicStats;
@@ -387,4 +414,3 @@ echo "=========================================="
 if [[ ${FAIL_COUNT} -ne 0 ]]; then
     exit 1
 fi
-
