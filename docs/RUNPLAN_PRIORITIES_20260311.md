@@ -35,17 +35,9 @@ This run plan converts the active top-level TODOs into an execution order that i
 - Exit criterion:
   - `auto` is dataset-driven and tested.
 
-### 4. Clean up CB/UB and FLEX raw-tag behavior
-
-- Relax CB/UB coupling for non-Flex only.
-- Confirm Flex policy remains strict.
-- Re-enable and validate FLEX `ZG/ZX` tags once the tag path is stable.
-- Exit criterion:
-  - tag emission policy is documented and regression-tested.
-
 ## Priority 2: Throughput and Architecture
 
-### 5. Implement perturb dynamic permit scheduling
+### 4. Implement perturb dynamic permit scheduling
 
 - Phase 1: STAR-only dynamic active-thread limit behind a feature flag.
 - Phase 2: queue-aware producer/consumer permit rebalancing.
@@ -53,7 +45,7 @@ This run plan converts the active top-level TODOs into an execution order that i
 - Exit criterion:
   - measurable throughput gain with parity preserved.
 
-### 6. Finish the QC graphics consolidation
+### 5. Finish the QC graphics consolidation
 
 - Define the shared QC graphics core.
 - Keep Plotly HTML+JSON as the common format.
@@ -61,7 +53,7 @@ This run plan converts the active top-level TODOs into an execution order that i
 - Exit criterion:
   - one reusable QC graphics path instead of duplicated per-module outputs.
 
-### 7. Harden feature-offset and decompression behavior
+### 6. Harden feature-offset and decompression behavior
 
 - Add the read-level feature-offset preflight if the false-positive rate is acceptable.
 - Confirm native-gz and `--readFilesCommand` paths remain behaviorally identical on representative inputs.
@@ -70,11 +62,11 @@ This run plan converts the active top-level TODOs into an execution order that i
 
 ## Priority 3: Coverage Expansion
 
-### 8. Finish missing fixture-dependent smokes
+### 7. Finish missing fixture-dependent smokes
 
 - Run the outstanding memory-leak repair smokes once fixtures are available.
 
-### 9. Expand CRISPR feature-calling threshold validation
+### 8. Expand CRISPR feature-calling threshold validation
 
 - Validate `--crMinUmi` on lineage, FLEX, and antibody datasets.
 - Convert the resulting recommendations into tests and user guidance.
@@ -84,10 +76,9 @@ This run plan converts the active top-level TODOs into an execution order that i
 1. FLEX parity versus Cell Ranger 9.0
 2. Mixed-chemistry perturb support and tests
 3. Poly-G auto detection
-4. CB/UB and FLEX raw-tag cleanup
-5. Dynamic permit scheduling
-6. QC graphics consolidation
-7. Fixture and assay coverage expansion
+4. Dynamic permit scheduling
+5. QC graphics consolidation
+6. Fixture and assay coverage expansion
 
 ## Explicitly Out of This Plan
 
@@ -98,5 +89,7 @@ This run plan converts the active top-level TODOs into an execution order that i
 - Expanded real-dataset PE multisample benchmark beyond the current regression smoke
 - SLAM over-dispersion parameter sweep until another SLAM-seq dataset is available
 - Further CR-compatibility cleanup for ambient-window sizing and GeneFull intronic edge cases
+- CB/UB semantics cleanup unless stats/reporting problems make it worth revisiting
+- Legacy FLEX `ZG/ZX` cleanup until there is time to remove or replace the old workaround path
 
-Those are complete enough for current prerelease use and should not block the paper/debugging work. The PE bulk residual is currently treated as an acceptable small policy/model difference unless a materially larger dataset-specific gap appears. The PE multisample batch-vs-sequential path remains covered by the checked-in smoke test and can be revisited later if a broader formal benchmark is needed. The SLAM over-dispersion work is also deferred because the initial conservative implementation made the term effectively negligible and there is no urgency to complicate the analysis without an additional independent dataset to justify the extra effort. The remaining CR-compatibility cleanup is likewise deferred because compatibility is already much stronger than before and the expected return is low unless a concrete accuracy problem points back to those areas.
+Those are complete enough for current prerelease use and should not block the paper/debugging work. The PE bulk residual is currently treated as an acceptable small policy/model difference unless a materially larger dataset-specific gap appears. The PE multisample batch-vs-sequential path remains covered by the checked-in smoke test and can be revisited later if a broader formal benchmark is needed. The SLAM over-dispersion work is also deferred because the initial conservative implementation made the term effectively negligible and there is no urgency to complicate the analysis without an additional independent dataset to justify the extra effort. The remaining CR-compatibility cleanup is likewise deferred because compatibility is already much stronger than before and the expected return is low unless a concrete accuracy problem points back to those areas. CB/UB and legacy `ZG/ZX` cleanup are also deferred unless they create real stats or maintenance pain.

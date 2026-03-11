@@ -12,9 +12,6 @@ This file tracks active top-level work only. Completed items and stale historica
   - This is not an immediate blocker, but it is the highest-value follow-up because other major comparisons were made against CR 9.0.
   - Include runtime comparison and inspect whether targeted acceleration in FLEX feature processing is worthwhile.
   - FLEX is currently only modestly slower than CR, so the goal is to decide whether additional complexity is justified.
-- Relax CB/UB strict coupling by default for non-Flex runs while keeping the strict Flex policy.
-  - Verify explicitly whether Flex still drops CB when UB is missing.
-- Validate FLEX `ZG` / `ZX` tags and re-enable them in FLEX test scripts once CB/UB tag injection is confirmed stable.
 - Harden mixed-chemistry (`NXT/TRU`) support now that the core behavior is implemented and E2E-validated.
   - Keep this focused on unit/smoke coverage rather than new feature design.
   - Add dedicated automated tests for:
@@ -48,5 +45,7 @@ This file tracks active top-level work only. Completed items and stale historica
 - The remaining PE bulk `TranscriptVB` vs Salmon gap (`~0.06%`) is currently treated as an acceptable small policy/model difference, not an active blocker. Revisit it only if a materially larger dataset-specific gap appears or a paper/reviewer question requires exact attribution.
 - The SLAM over-dispersion parameter sweep is demoted to a low-priority follow-up. The initial conservative implementation made the over-dispersion term effectively negligible; revisit it when another SLAM-seq dataset is available and there is time for a formal parameter sweep.
 - Remaining CR-compatibility cleanup around ambient-window sizing and GeneFull intronic-count differences is also demoted to a low-priority reminder. Compatibility is much stronger than before; revisit only if a concrete accuracy issue or dataset-specific failure points back to these areas.
+- CB/UB coupling is no longer an active behavior-change task. For FLEX, treat CB/UB coupling as the intended semantics and only revisit the stats/reporting consequences if they become confusing in practice.
+- Legacy FLEX `ZG/ZX` handling is demoted to dead-code cleanup rather than an active feature item. It came from the older BAM/sidecar workaround path and should only be revisited when there is time to simplify or replace it directly.
 - Flex already uses `libscrna`; the older migration item is complete and removed from this list.
 - Linux compatibility tarballs and installer-bundle release validation are complete; release follow-up work belongs in the release/distribution docs, not here.
