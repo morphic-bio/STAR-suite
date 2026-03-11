@@ -254,6 +254,5 @@ ldd /mnt/pikachu/process_features/assignBarcodes | grep cairo
 
 ## Future Work
 
-Per `docs/todos`:
-- Keep Plotly+JSON QC outputs in process_features and migrate QC graphics into a shared core so other STAR components can reuse them
-- Draft a design note for a shared QC graphics core (inputs/outputs, Plotly+JSON artifacts, TSV fallbacks, and how STAR/other components will call it)
+- The remaining work is mainly `process_features` heatmap consolidation/optimization.
+- Defer broader QC graphics consolidation until the next time new graphical output work is active.

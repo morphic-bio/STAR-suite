@@ -19,14 +19,11 @@ This file tracks active top-level work only. Completed items and stale historica
     - 2-column mapping edge cases and chemistry precedence
     - remaining filtered-cell / multi-library validation gaps
 - Implement data-driven `--clip3pPolyG auto`.
-- Consider a read-level consistency preflight for global feature-offset detection.
-- Preserve `--readFilesCommand` parity for generic preprocessors while ensuring native-gz and command-stream paths remain behaviorally identical.
 
 ## Priority 2: Performance / Architecture
 
-- Keep Plotly+JSON QC outputs in `process_features` and migrate QC graphics into a shared reusable core.
-- Draft the design note for that shared QC graphics core.
-- Verify no downstream scripts still expect `Feature_types_heatmap.png` or `Feature_counts_heatmap.png`, and document the HTML/JSON switch where needed.
+- Consider a read-level consistency preflight for global feature-offset detection.
+- Preserve `--readFilesCommand` parity for generic preprocessors while ensuring native-gz and command-stream paths remain behaviorally identical.
 
 ## Priority 3: Dataset / Fixture Coverage
 
@@ -42,6 +39,7 @@ This file tracks active top-level work only. Completed items and stale historica
 - The remaining PE bulk `TranscriptVB` vs Salmon gap (`~0.06%`) is currently treated as an acceptable small policy/model difference, not an active blocker. Revisit it only if a materially larger dataset-specific gap appears or a paper/reviewer question requires exact attribution.
 - The SLAM over-dispersion parameter sweep is demoted to a low-priority follow-up. The initial conservative implementation made the over-dispersion term effectively negligible; revisit it when another SLAM-seq dataset is available and there is time for a formal parameter sweep.
 - Remaining CR-compatibility cleanup around ambient-window sizing and GeneFull intronic-count differences is also demoted to a low-priority reminder. Compatibility is much stronger than before; revisit only if a concrete accuracy issue or dataset-specific failure points back to these areas.
+- QC graphics consolidation is deferred rather than complete. The remaining work is mainly `process_features` heatmap consolidation/optimization, and it should be revisited the next time new graphical output work is active.
 - CB/UB coupling is no longer an active behavior-change task. For FLEX, treat CB/UB coupling as the intended semantics and only revisit the stats/reporting consequences if they become confusing in practice.
 - Legacy FLEX `ZG/ZX` handling is demoted to dead-code cleanup rather than an active feature item. It came from the older BAM/sidecar workaround path and should only be revisited when there is time to simplify or replace it directly.
 - Perturb dynamic permit scheduling is treated as complete for now. The scheduler landed, Phase 5 validation was completed, and the later PF consumer-cap removal produced the expected large throughput improvement. Keep the smoke/benchmark coverage, and only revisit if new workloads show another clear scheduling bottleneck.

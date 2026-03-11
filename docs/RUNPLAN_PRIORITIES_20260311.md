@@ -37,15 +37,7 @@ This run plan converts the active top-level TODOs into an execution order that i
 
 ## Priority 2: Throughput and Architecture
 
-### 4. Finish the QC graphics consolidation
-
-- Define the shared QC graphics core.
-- Keep Plotly HTML+JSON as the common format.
-- Audit downstream scripts for removed PNG expectations.
-- Exit criterion:
-  - one reusable QC graphics path instead of duplicated per-module outputs.
-
-### 5. Harden feature-offset and decompression behavior
+### 4. Harden feature-offset and decompression behavior
 
 - Add the read-level feature-offset preflight if the false-positive rate is acceptable.
 - Confirm native-gz and `--readFilesCommand` paths remain behaviorally identical on representative inputs.
@@ -54,11 +46,11 @@ This run plan converts the active top-level TODOs into an execution order that i
 
 ## Priority 3: Coverage Expansion
 
-### 6. Finish missing fixture-dependent smokes
+### 5. Finish missing fixture-dependent smokes
 
 - Run the outstanding memory-leak repair smokes once fixtures are available.
 
-### 7. Expand CRISPR feature-calling threshold validation
+### 6. Expand CRISPR feature-calling threshold validation
 
 - Validate `--crMinUmi` on lineage, FLEX, and antibody datasets.
 - Convert the resulting recommendations into tests and user guidance.
@@ -68,8 +60,7 @@ This run plan converts the active top-level TODOs into an execution order that i
 1. FLEX parity versus Cell Ranger 9.0
 2. Mixed-chemistry perturb support and tests
 3. Poly-G auto detection
-4. QC graphics consolidation
-5. Fixture and assay coverage expansion
+4. Fixture and assay coverage expansion
 
 ## Explicitly Out of This Plan
 
@@ -80,8 +71,9 @@ This run plan converts the active top-level TODOs into an execution order that i
 - Expanded real-dataset PE multisample benchmark beyond the current regression smoke
 - SLAM over-dispersion parameter sweep until another SLAM-seq dataset is available
 - Further CR-compatibility cleanup for ambient-window sizing and GeneFull intronic edge cases
+- QC graphics consolidation until we are actively working on new graphical output again
 - CB/UB semantics cleanup unless stats/reporting problems make it worth revisiting
 - Legacy FLEX `ZG/ZX` cleanup until there is time to remove or replace the old workaround path
 - Perturb dynamic permit scheduling unless a new workload exposes a fresh scheduling bottleneck
 
-Those are complete enough for current prerelease use and should not block the paper/debugging work. The PE bulk residual is currently treated as an acceptable small policy/model difference unless a materially larger dataset-specific gap appears. The PE multisample batch-vs-sequential path remains covered by the checked-in smoke test and can be revisited later if a broader formal benchmark is needed. The SLAM over-dispersion work is also deferred because the initial conservative implementation made the term effectively negligible and there is no urgency to complicate the analysis without an additional independent dataset to justify the extra effort. The remaining CR-compatibility cleanup is likewise deferred because compatibility is already much stronger than before and the expected return is low unless a concrete accuracy problem points back to those areas. CB/UB and legacy `ZG/ZX` cleanup are also deferred unless they create real stats or maintenance pain. Perturb dynamic permit scheduling is likewise considered complete unless new workloads show another clear bottleneck.
+Those are complete enough for current prerelease use and should not block the paper/debugging work. The PE bulk residual is currently treated as an acceptable small policy/model difference unless a materially larger dataset-specific gap appears. The PE multisample batch-vs-sequential path remains covered by the checked-in smoke test and can be revisited later if a broader formal benchmark is needed. The SLAM over-dispersion work is also deferred because the initial conservative implementation made the term effectively negligible and there is no urgency to complicate the analysis without an additional independent dataset to justify the extra effort. The remaining CR-compatibility cleanup is likewise deferred because compatibility is already much stronger than before and the expected return is low unless a concrete accuracy problem points back to those areas. QC graphics consolidation is deferred because only the `process_features` heatmap consolidation/optimization remains, and that work is better done the next time we add or revise graphical output. CB/UB and legacy `ZG/ZX` cleanup are also deferred unless they create real stats or maintenance pain. Perturb dynamic permit scheduling is likewise considered complete unless new workloads show another clear bottleneck.
