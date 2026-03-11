@@ -58,13 +58,33 @@ mkdir -p "${OUTDIR}"/{logs,manifests}
 MANIFEST="${OUTDIR}/manifests/samples.tsv"
 MISSING="${OUTDIR}/manifests/missing_fastqs.tsv"
 FAILED="${OUTDIR}/manifests/failed_samples.tsv"
-: > "${MANIFEST}"
-: > "${MISSING}"
-: > "${FAILED}"
 
-printf 'sample\tybam\tfastq\toutdir\ty_names\n' > "${MANIFEST}"
-printf 'sample\tybam\treason\n' > "${MISSING}"
-printf 'sample\tybam\tfastq\toutdir\tlog\n' > "${FAILED}"
+init_tsv() {
+    local path="$1"
+    local header="$2"
+    if [[ ! -f "${path}" ]]; then
+        printf '%s\n' "${header}" > "${path}"
+    fi
+}
+
+manifest_has_sample() {
+    local path="$1"
+    local sample="$2"
+    [[ -f "${path}" ]] && awk -F '\t' -v sample="${sample}" 'NR > 1 && $1 == sample {found=1; exit} END {exit !found}' "${path}"
+}
+
+append_unique_row() {
+    local path="$1"
+    local sample="$2"
+    local row="$3"
+    if ! manifest_has_sample "${path}" "${sample}"; then
+        printf '%b\n' "${row}" >> "${path}"
+    fi
+}
+
+init_tsv "${MANIFEST}" $'sample\tybam\tfastq\toutdir\ty_names'
+init_tsv "${MISSING}" $'sample\tybam\treason'
+init_tsv "${FAILED}" $'sample\tybam\tfastq\toutdir\tlog'
 
 map_fastq_for_sample() {
     local sample="$1"
@@ -78,13 +98,17 @@ process_sample() {
     local sample_out
     local names_out
     local log_out
+    local fastq_base
+    local fastq_stem
+    local y_fastq
+    local noy_fastq
 
     sample="$(basename "${ybam}")"
     sample="${sample%_Y.bam}"
     fastq="$(map_fastq_for_sample "${sample}")"
 
     if [[ -z "${fastq}" ]]; then
-        printf '%s\t%s\tno matching FASTQ in %s\n' "${sample}" "${ybam}" "${FASTQ_DIR}" >> "${MISSING}"
+        append_unique_row "${MISSING}" "${sample}" "${sample}\t${ybam}\tno matching FASTQ in ${FASTQ_DIR}"
         return 0
     fi
 
@@ -92,6 +116,18 @@ process_sample() {
     names_out="${sample_out}/${sample}_Y.names.txt"
     log_out="${OUTDIR}/logs/${sample}.log"
     mkdir -p "${sample_out}"
+    fastq_base="$(basename "${fastq}")"
+    fastq_stem="${fastq_base%.fastq.gz}"
+    fastq_stem="${fastq_stem%.fq.gz}"
+    fastq_stem="${fastq_stem%.fastq}"
+    fastq_stem="${fastq_stem%.fq}"
+    y_fastq="${sample_out}/${fastq_stem}_Y.fastq.gz"
+    noy_fastq="${sample_out}/${fastq_stem}_noY.fastq.gz"
+
+    if [[ -s "${names_out}" && -s "${y_fastq}" && -s "${noy_fastq}" ]] && rg -q 'total=[0-9]+ Y=[0-9]+ noY=[0-9]+' "${log_out}" 2>/dev/null; then
+        append_unique_row "${MANIFEST}" "${sample}" "${sample}\t${ybam}\t${fastq}\t${sample_out}\t${names_out}"
+        return 0
+    fi
 
     samtools view "${ybam}" \
         | cut -f1 \
@@ -111,16 +147,17 @@ process_sample() {
             --threads 1 \
             --gzip-level "${GZIP_LEVEL}" \
             "${fastq}"
+        echo "DONE"
     } > "${log_out}" 2>&1 || {
-        printf '%s\t%s\t%s\t%s\t%s\n' "${sample}" "${ybam}" "${fastq}" "${sample_out}" "${log_out}" >> "${FAILED}"
+        append_unique_row "${FAILED}" "${sample}" "${sample}\t${ybam}\t${fastq}\t${sample_out}\t${log_out}"
         return 1
     }
 
-    printf '%s\t%s\t%s\t%s\t%s\n' "${sample}" "${ybam}" "${fastq}" "${sample_out}" "${names_out}" >> "${MANIFEST}"
+    append_unique_row "${MANIFEST}" "${sample}" "${sample}\t${ybam}\t${fastq}\t${sample_out}\t${names_out}"
 }
 
 export ROOT_DIR REMOVE_Y_READS_BIN YBAM_ROOT FASTQ_DIR OUTDIR GZIP_LEVEL MANIFEST MISSING FAILED
-export -f map_fastq_for_sample process_sample
+export -f append_unique_row init_tsv manifest_has_sample map_fastq_for_sample process_sample
 
 log "Output root: ${OUTDIR}"
 log "Scanning Y BAMs under ${YBAM_ROOT}"
