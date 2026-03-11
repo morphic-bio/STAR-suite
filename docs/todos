@@ -24,9 +24,6 @@ This file tracks active top-level work only. Completed items and stale historica
 
 ## Priority 2: Performance / Architecture
 
-- Add dynamic thread-permit scheduling for STAR + feature assignment in perturb mode.
-  - Phase 1: STAR-only dynamic active-thread limits behind a feature flag.
-  - Phase 2: queue-aware permit rebalancing between STAR mapping and feature consumers.
 - Keep Plotly+JSON QC outputs in `process_features` and migrate QC graphics into a shared reusable core.
 - Draft the design note for that shared QC graphics core.
 - Verify no downstream scripts still expect `Feature_types_heatmap.png` or `Feature_counts_heatmap.png`, and document the HTML/JSON switch where needed.
@@ -47,5 +44,6 @@ This file tracks active top-level work only. Completed items and stale historica
 - Remaining CR-compatibility cleanup around ambient-window sizing and GeneFull intronic-count differences is also demoted to a low-priority reminder. Compatibility is much stronger than before; revisit only if a concrete accuracy issue or dataset-specific failure points back to these areas.
 - CB/UB coupling is no longer an active behavior-change task. For FLEX, treat CB/UB coupling as the intended semantics and only revisit the stats/reporting consequences if they become confusing in practice.
 - Legacy FLEX `ZG/ZX` handling is demoted to dead-code cleanup rather than an active feature item. It came from the older BAM/sidecar workaround path and should only be revisited when there is time to simplify or replace it directly.
+- Perturb dynamic permit scheduling is treated as complete for now. The scheduler landed, Phase 5 validation was completed, and the later PF consumer-cap removal produced the expected large throughput improvement. Keep the smoke/benchmark coverage, and only revisit if new workloads show another clear scheduling bottleneck.
 - Flex already uses `libscrna`; the older migration item is complete and removed from this list.
 - Linux compatibility tarballs and installer-bundle release validation are complete; release follow-up work belongs in the release/distribution docs, not here.
