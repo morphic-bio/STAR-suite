@@ -21,8 +21,6 @@ This file tracks active top-level work only. Completed items and stale historica
     - mixed-chemistry merge (`NXT + TRU` feature libraries with TRU GEX)
     - 2-column mapping edge cases and chemistry precedence
     - remaining filtered-cell / multi-library validation gaps
-- Investigate whether `indMin=45000` / `indMax=90000` ambient-window sizing is appropriate across dataset sizes.
-- Investigate remaining GeneFull intronic-count differences vs Cell Ranger intron-inclusion mode.
 - Implement data-driven `--clip3pPolyG auto`.
 - Consider a read-level consistency preflight for global feature-offset detection.
 - Preserve `--readFilesCommand` parity for generic preprocessors while ensuring native-gz and command-stream paths remain behaviorally identical.
@@ -49,5 +47,6 @@ This file tracks active top-level work only. Completed items and stale historica
 - The multisample PE bulk batch-vs-sequential equivalence work is closed for now. The current smoke/regression coverage is sufficient to catch regressions, and a broader benchmark can be revisited later if needed for formal test expansion.
 - The remaining PE bulk `TranscriptVB` vs Salmon gap (`~0.06%`) is currently treated as an acceptable small policy/model difference, not an active blocker. Revisit it only if a materially larger dataset-specific gap appears or a paper/reviewer question requires exact attribution.
 - The SLAM over-dispersion parameter sweep is demoted to a low-priority follow-up. The initial conservative implementation made the over-dispersion term effectively negligible; revisit it when another SLAM-seq dataset is available and there is time for a formal parameter sweep.
+- Remaining CR-compatibility cleanup around ambient-window sizing and GeneFull intronic-count differences is also demoted to a low-priority reminder. Compatibility is much stronger than before; revisit only if a concrete accuracy issue or dataset-specific failure points back to these areas.
 - Flex already uses `libscrna`; the older migration item is complete and removed from this list.
 - Linux compatibility tarballs and installer-bundle release validation are complete; release follow-up work belongs in the release/distribution docs, not here.
