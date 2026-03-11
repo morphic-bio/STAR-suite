@@ -92,6 +92,6 @@ This run plan converts the active top-level TODOs into an execution order that i
 - Published `v0.50.3` release smoke
 - PE bulk `TranscriptVB` vs Salmon residual deep dive (`~0.06%`)
 - Expanded real-dataset PE multisample benchmark beyond the current regression smoke
-- SLAM over-dispersion parameter sweep until another suitable SLAM-seq dataset is available
+- SLAM over-dispersion parameter sweep until another SLAM-seq dataset is available
 
-Those are complete enough for current prerelease use and should not block the paper/debugging work. The PE bulk residual is currently treated as an acceptable small policy/model difference unless a materially larger dataset-specific gap appears. The PE multisample batch-vs-sequential path remains covered by the checked-in smoke test and can be revisited later if a broader formal benchmark is needed. The SLAM over-dispersion work is also deferred because the initial conservative implementation made the term effectively negligible and there is no urgency to complicate the analysis without a stronger follow-up dataset.
+Those are complete enough for current prerelease use and should not block the paper/debugging work. The PE bulk residual is currently treated as an acceptable small policy/model difference unless a materially larger dataset-specific gap appears. The PE multisample batch-vs-sequential path remains covered by the checked-in smoke test and can be revisited later if a broader formal benchmark is needed. The SLAM over-dispersion work is also deferred because the initial conservative implementation made the term effectively negligible and there is no urgency to complicate the analysis without an additional independent dataset to justify the extra effort.
