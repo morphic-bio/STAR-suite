@@ -14,6 +14,8 @@ This pass tightened the lightweight regression surface in two places:
    precedence logic in `PfMultiProcess.cpp`.
 3. Added a small filtered-cell mixed-library smoke that exercises the full
    CR-compat merged-filtered-MEX path against real Solo filtered barcodes.
+4. Added a real-fixture auto-detect smoke that exercises the pf-multi
+   `TRANSLATED_MATCH -> NXT` composition path on the MSK PolyIII library.
 
 ## Tests Added / Updated
 
@@ -45,6 +47,16 @@ This pass tightened the lightweight regression surface in two places:
     - `Log.out` records the Solo-sourced filtered-barcode path and the
       normalized GEX barcode count used for CR-compat merge filtering
 
+- `tests/multi_feature/run_mixed_chemistry_autodetect_smoke.sh`
+  - Builds or reuses the downsampled MSK mixed-library fixture.
+  - Runs the same filtered-cell merge path, but with `grna_de` set to
+    `star_chemistry=auto`.
+  - Verifies that:
+    - real autodetect on the PolyIII library resolves to `TRANSLATED_MATCH`
+    - `effectiveReadNamespace=NXT` is composed in `Log.out`
+    - the transient `.autodetect_probe` directory is cleaned up
+    - filtered-barcode invariants still hold after the auto-detect path
+
 ## Validated Suite
 
 The following scripts were run after a clean rebuild:
@@ -58,6 +70,7 @@ The following scripts were run after a clean rebuild:
 - `tests/multi_feature/test_data_driven_specs.sh`
 - `tests/multi_feature/test_mixed_chemistry_prepared_context.sh`
 - `tests/multi_feature/run_mixed_chemistry_filtered_smoke.sh`
+- `tests/multi_feature/run_mixed_chemistry_autodetect_smoke.sh`
 
 ## Remaining Gap
 
@@ -68,6 +81,8 @@ What is now covered:
 - prepared-context chemistry precedence
 - full mixed-library filtered-cell merge behavior on a downsampled real MSK
   fixture, including the `Solo -> filtered_feature_bc_matrix` handoff
+- full real-fixture pf-multi autodetect on a mixed-chemistry feature library,
+  including `TRANSLATED_MATCH` composition into `NXT`
 
 What is still intentionally deferred:
 - larger fixture or production-scale reruns beyond the smoke surface
