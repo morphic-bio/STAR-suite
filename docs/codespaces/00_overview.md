@@ -28,3 +28,14 @@ Use this non-linearly:
 - skip the foundation chapter if you already have a suitable reference or index
 - go directly to Bulk or SLAM if that is all you need
 - use the single-cell fixture chapter only if you want the bounded public input used by perturb and Flex
+
+Starting points by experience:
+- Experienced users:
+  - skip directly to [Bulk](./02_bulk.md) or [SLAM](./03_slam.md) if you already have a suitable index
+  - skip to [Single-cell Fixture Derivation](./04_single_cell_fixture.md) only if you specifically want the bounded public input used by perturb or Flex
+  - use [Perturb Placeholder](./05_perturb.md) or [Flex Placeholder](./06_flex.md) as command-shape scaffolds if you already understand the assay-specific inputs
+- Novice users:
+  - start with [Setup + Mini Reference](./01_setup_reference.md) if you want to see how the demo reference is built
+  - then try [Bulk](./02_bulk.md) first, because it is the smallest stable end-to-end chapter
+  - then move to [SLAM](./03_slam.md)
+  - leave perturb and Flex for later unless you specifically want the prototype surfaces

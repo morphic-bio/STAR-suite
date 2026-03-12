@@ -148,6 +148,33 @@
             ]
           },
           {
+            "id": "experiencedStart",
+            "title": "Experienced users: skip directly to a chapter",
+            "description": "If you already know STAR and have a suitable index, jump straight to [Bulk](command:starSuiteWalkthrough.openBulkWalkthrough) or [SLAM](command:starSuiteWalkthrough.openSlamWalkthrough). Use [Single-cell Fixture](command:starSuiteWalkthrough.openFixtureWalkthrough) only for perturb or Flex.",
+            "media": {
+              "image": "media/terminal.svg",
+              "altText": "Experienced user path"
+            },
+            "completionEvents": [
+              "onCommand:starSuiteWalkthrough.openBulkWalkthrough",
+              "onCommand:starSuiteWalkthrough.openSlamWalkthrough",
+              "onCommand:starSuiteWalkthrough.openFixtureWalkthrough"
+            ]
+          },
+          {
+            "id": "noviceStart",
+            "title": "Novice users: start with the foundation or bulk",
+            "description": "If you want the gentlest path, open [Optional: Build Mini Reference](command:starSuiteWalkthrough.openFoundationWalkthrough) first and then move to [Bulk](command:starSuiteWalkthrough.openBulkWalkthrough).",
+            "media": {
+              "image": "media/setup.svg",
+              "altText": "Novice user path"
+            },
+            "completionEvents": [
+              "onCommand:starSuiteWalkthrough.openFoundationWalkthrough",
+              "onCommand:starSuiteWalkthrough.openBulkWalkthrough"
+            ]
+          },
+          {
             "id": "foundation",
             "title": "Optional foundation chapter",
             "description": "If you need the shared mini-reference, jump to [Optional: Build Mini Reference](command:starSuiteWalkthrough.openFoundationWalkthrough). Otherwise skip it.",

@@ -93,6 +93,17 @@ The intended user flow is non-linear:
 - go directly to Bulk or SLAM otherwise
 - use the single-cell fixture chapter only when you want the bounded public input for perturb or Flex
 
+Recommended chapter picks:
+
+- Experienced users:
+  - go directly to Bulk or SLAM if you already have an index and only want the command shape
+  - use the single-cell fixture chapter only if you need the bounded public input used by perturb or Flex
+  - treat perturb and Flex as prototype chapters for now
+- Novice users:
+  - start with the optional foundation chapter if you want to see the reference build once
+  - then use Bulk as the first stable end-to-end demo
+  - then try SLAM
+
 ## Demo Matrix
 
 | Module | Data source | Fully runnable in Codespaces | Main helper |
