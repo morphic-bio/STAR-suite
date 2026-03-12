@@ -17,6 +17,7 @@ THREADS="${THREADS:-32}"
 SAMPLES_CSV=""
 ALL_SAMPLES=0
 CR_CONFIG=""
+CR_SAMPLE_ID=""
 DOWNSAMPLE_READS=0
 DOWNSAMPLE_SEED="${DOWNSAMPLE_SEED:-1}"
 GLOBUS_SRC_ENDPOINT="${GLOBUS_SRC_ENDPOINT:-}"
@@ -33,6 +34,7 @@ Options:
   --samples CSV            Comma-separated sample IDs from sample_fastq_guide_map.csv
   --all-samples            Run every sample in the sample map
   --cr-config FILE         Use a Cell Ranger config.csv as the exact UCSF input source for one sample
+  --cr-sample-id ID        Override the logical STAR sample ID when using --cr-config
   --downsample-reads N     Downsample each library (GEX and guides) to N read pairs before STAR
   --threads N              STAR threads per sample run (default: ${THREADS})
   --out-root DIR           Output root (default: ${OUT_ROOT})
@@ -161,6 +163,10 @@ render_from_cr_config() {
 
 enumerate_samples() {
   if [[ -n "${CR_CONFIG}" ]]; then
+    if [[ -n "${CR_SAMPLE_ID}" ]]; then
+      printf '%s\n' "${CR_SAMPLE_ID}"
+      return
+    fi
     python3 "${CR_INPUT_HELPER}" --config "${CR_CONFIG}" --pf-multi-out /dev/null --emit-env \
       | awk -F= '/^SAMPLE_ID=/{sub(/^SAMPLE_ID='\''?/,""); gsub(/^'\''|'\''$/,""); print $0}'
     return
@@ -476,7 +482,7 @@ run_sample() {
     local cr_env_file="${OUT_ROOT}/samples/${sample}/cr_config_inputs.env"
     local pre_pf="${OUT_ROOT}/samples/${sample}/pf_multi_config.prestage.csv"
     mkdir -p "$(dirname "${cr_env_file}")"
-    render_from_cr_config "${CR_CONFIG}" "${sample}" "${pre_pf}" > "${cr_env_file}"
+    render_from_cr_config "${CR_CONFIG}" "${CR_SAMPLE_ID:-${sample}}" "${pre_pf}" > "${cr_env_file}"
     # shellcheck disable=SC1090
     source "${cr_env_file}"
     map_sample="${SAMPLE_ID}"
@@ -566,7 +572,7 @@ PY
       done
       python3 "${CR_INPUT_HELPER}" \
         --config "${CR_CONFIG}" \
-        --sample-id "${sample}" \
+        --sample-id "${CR_SAMPLE_ID:-${sample}}" \
         --pf-multi-out "${pf_config}" \
         "${rewrite_args[@]}" \
         --emit-env > "${cr_env_file}"
@@ -582,7 +588,7 @@ PY
     if [[ -n "${CR_CONFIG}" ]]; then
       python3 "${CR_INPUT_HELPER}" \
         --config "${CR_CONFIG}" \
-        --sample-id "${sample}" \
+        --sample-id "${CR_SAMPLE_ID:-${sample}}" \
         --pf-multi-out "${pf_config}" \
         --emit-env > "${cr_env_file}"
       # shellcheck disable=SC1090
@@ -697,6 +703,7 @@ EOF
     printf 'run_dir=%s\n' "${run_dir}"
     if [[ -n "${CR_CONFIG}" ]]; then
       printf 'cr_config=%s\n' "${CR_CONFIG}"
+      printf 'cr_sample_id=%s\n' "${CR_SAMPLE_ID:-${sample}}"
       printf 'cr_gene_expression_reference=%s\n' "${cr_gene_expression_reference}"
       printf 'cr_gene_expression_chemistry=%s\n' "${cr_gene_expression_chemistry}"
     fi
@@ -732,6 +739,7 @@ while [[ $# -gt 0 ]]; do
     --samples) SAMPLES_CSV="$2"; shift 2 ;;
     --all-samples) ALL_SAMPLES=1; shift ;;
     --cr-config) CR_CONFIG="$2"; shift 2 ;;
+    --cr-sample-id) CR_SAMPLE_ID="$2"; shift 2 ;;
     --downsample-reads) DOWNSAMPLE_READS="$2"; shift 2 ;;
     --threads) THREADS="$2"; shift 2 ;;
     --out-root) OUT_ROOT="$2"; shift 2 ;;

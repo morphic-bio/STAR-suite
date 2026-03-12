@@ -12,6 +12,7 @@ STAR_BIN="${STAR_BIN:-${REPO_ROOT}/core/legacy/source/STAR}"
 THREADS="${THREADS:-32}"
 GENOME_DIR="${GENOME_DIR:-/storage/autoindex_110_44/bulk_index}"
 CR_CONFIG="${CR_CONFIG:-}"
+CR_SAMPLE_ID="${CR_SAMPLE_ID:-}"
 
 GEX_R2="${GEX_R2:-/storage/ucsf-full/bench_20260218_dynamic_first/staged_iPSC2_1_AALG2/GEX/iPSC2_1_AALG2/iPSC2_1_AALG2_S30_L001_R2_001.fastq.gz,/storage/ucsf-full/bench_20260218_dynamic_first/staged_iPSC2_1_AALG2/GEX/iPSC2_1_AALG2/iPSC2_1_AALG2_S30_L002_R2_001.fastq.gz,/storage/ucsf-full/bench_20260218_dynamic_first/staged_iPSC2_1_AALG2/GEX/iPSC2_1_AALG2/iPSC2_1_AALG2_S30_L003_R2_001.fastq.gz,/storage/ucsf-full/bench_20260218_dynamic_first/staged_iPSC2_1_AALG2/GEX/iPSC2_1_AALG2/iPSC2_1_AALG2_S30_L004_R2_001.fastq.gz,/storage/ucsf-full/bench_20260218_dynamic_first/staged_iPSC2_1_AALG2/GEX/iPSC2_1_AALG2/iPSC2_1_AALG2_S30_L005_R2_001.fastq.gz,/storage/ucsf-full/bench_20260218_dynamic_first/staged_iPSC2_1_AALG2/GEX/iPSC2_1_AALG2/iPSC2_1_AALG2_S30_L006_R2_001.fastq.gz,/storage/ucsf-full/bench_20260218_dynamic_first/staged_iPSC2_1_AALG2/GEX/iPSC2_1_AALG2/iPSC2_1_AALG2_S30_L007_R2_001.fastq.gz,/storage/ucsf-full/bench_20260218_dynamic_first/staged_iPSC2_1_AALG2/GEX/iPSC2_1_AALG2/iPSC2_1_AALG2_S30_L008_R2_001.fastq.gz}"
 GEX_R1="${GEX_R1:-/storage/ucsf-full/bench_20260218_dynamic_first/staged_iPSC2_1_AALG2/GEX/iPSC2_1_AALG2/iPSC2_1_AALG2_S30_L001_R1_001.fastq.gz,/storage/ucsf-full/bench_20260218_dynamic_first/staged_iPSC2_1_AALG2/GEX/iPSC2_1_AALG2/iPSC2_1_AALG2_S30_L002_R1_001.fastq.gz,/storage/ucsf-full/bench_20260218_dynamic_first/staged_iPSC2_1_AALG2/GEX/iPSC2_1_AALG2/iPSC2_1_AALG2_S30_L003_R1_001.fastq.gz,/storage/ucsf-full/bench_20260218_dynamic_first/staged_iPSC2_1_AALG2/GEX/iPSC2_1_AALG2/iPSC2_1_AALG2_S30_L004_R1_001.fastq.gz,/storage/ucsf-full/bench_20260218_dynamic_first/staged_iPSC2_1_AALG2/GEX/iPSC2_1_AALG2/iPSC2_1_AALG2_S30_L005_R1_001.fastq.gz,/storage/ucsf-full/bench_20260218_dynamic_first/staged_iPSC2_1_AALG2/GEX/iPSC2_1_AALG2/iPSC2_1_AALG2_S30_L006_R1_001.fastq.gz,/storage/ucsf-full/bench_20260218_dynamic_first/staged_iPSC2_1_AALG2/GEX/iPSC2_1_AALG2/iPSC2_1_AALG2_S30_L007_R1_001.fastq.gz,/storage/ucsf-full/bench_20260218_dynamic_first/staged_iPSC2_1_AALG2/GEX/iPSC2_1_AALG2/iPSC2_1_AALG2_S30_L008_R1_001.fastq.gz}"
@@ -34,6 +35,7 @@ Usage: $(basename "$0") [options]
 
 Options:
   --cr-config FILE   Cell Ranger config.csv to use as the source of truth for UCSF inputs
+  --cr-sample-id ID  Override the logical STAR sample ID when using --cr-config
   --threads N        Override thread count
   --genome-dir DIR   Override STAR genomeDir
   --out-base DIR     Override output base directory
@@ -52,6 +54,10 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --cr-config)
       CR_CONFIG="$2"
+      shift 2
+      ;;
+    --cr-sample-id)
+      CR_SAMPLE_ID="$2"
       shift 2
       ;;
     --threads)
@@ -92,10 +98,16 @@ if [[ -n "${CR_CONFIG}" ]]; then
   [[ -x "${CR_INPUT_HELPER}" ]] || die "Missing helper: ${CR_INPUT_HELPER}"
   CR_ENV_FILE="${OUT_DIR}/cr_config_inputs.env"
   GENERATED_PF_MULTI="${OUT_DIR}/pf_multi_config.from_cr.csv"
-  python3 "${CR_INPUT_HELPER}" \
-    --config "${CR_CONFIG}" \
-    --pf-multi-out "${GENERATED_PF_MULTI}" \
-    --emit-env > "${CR_ENV_FILE}"
+  helper_args=(
+    python3 "${CR_INPUT_HELPER}"
+    --config "${CR_CONFIG}"
+    --pf-multi-out "${GENERATED_PF_MULTI}"
+  )
+  if [[ -n "${CR_SAMPLE_ID}" ]]; then
+    helper_args+=(--sample-id "${CR_SAMPLE_ID}")
+  fi
+  helper_args+=(--emit-env)
+  "${helper_args[@]}" > "${CR_ENV_FILE}"
   # shellcheck disable=SC1090
   source "${CR_ENV_FILE}"
   PF_MULTI_CONFIG="${GENERATED_PF_MULTI}"

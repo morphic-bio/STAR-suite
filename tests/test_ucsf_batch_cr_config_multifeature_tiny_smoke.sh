@@ -54,14 +54,17 @@ reference,/storage/A375-CR-9.01/refdata-gex-GRCh38-2024-A
 create-bam,false
 chemistry,auto
 
+[star]
+sample-id,DE_30KO
+
 [feature]
 reference,${tmpdir}/guide_ref.csv
 
 [libraries]
 fastq_id,fastqs,feature_types,star_chemistry,star_feature_ref,star_library_id
-sample1,${tmpdir}/gex/sample1,Gene Expression,,,gex_main
-sample1,${tmpdir}/guides/sample1,CRISPR Guide Capture,NXT,,guide_main
-sample1,${tmpdir}/custom/sample1,Custom,TRU,${tmpdir}/custom_ref.csv,custom_main
+mRNA_DE_30KO,${tmpdir}/gex/sample1,Gene Expression,,,gex_main
+PolyIII_DE_30KO,${tmpdir}/guides/sample1,CRISPR Guide Capture,NXT,,guide_main
+LARRY_DE_30KO,${tmpdir}/custom/sample1,Custom,TRU,${tmpdir}/custom_ref.csv,custom_main
 EOF
 
 out="${tmpdir}/out"
@@ -75,14 +78,15 @@ out="${tmpdir}/out"
   --cr-config "${tmpdir}/config.csv" \
   --out-root "${out}"
 
-sample_root="${out}/samples/sample1"
+sample_root="${out}/samples/DE_30KO"
 [[ -f "${sample_root}/RUN_COMPLETE.ok" ]]
 [[ -f "${sample_root}/run/Aligned.out_Y.bam" ]]
 [[ -f "${sample_root}/run/Aligned.out_noY.bam" ]]
 [[ -d "${sample_root}/run/y_separated" ]]
 [[ "$(find "${sample_root}/run/y_separated" -maxdepth 1 -type f -name '*.fastq.gz' | wc -l)" == "4" ]]
 grep -F "feature_dirs=${tmpdir}/guides/sample1,${tmpdir}/custom/sample1" "${sample_root}/RUN_MANIFEST.txt" >/dev/null
-grep -F "${tmpdir}/guides/sample1,sample1,CRISPR Guide Capture,CRISPR Guide Capture,NXT,,guide_main" "${sample_root}/pf_multi_config.csv" >/dev/null
-grep -F "${tmpdir}/custom/sample1,sample1,Custom,Custom,TRU,${tmpdir}/custom_ref.csv,custom_main" "${sample_root}/pf_multi_config.csv" >/dev/null
+grep -F "cr_sample_id=DE_30KO" "${sample_root}/RUN_MANIFEST.txt" >/dev/null
+grep -F "${tmpdir}/guides/sample1,DE_30KO,CRISPR Guide Capture,CRISPR Guide Capture,NXT,,guide_main" "${sample_root}/pf_multi_config.csv" >/dev/null
+grep -F "${tmpdir}/custom/sample1,DE_30KO,Custom,Custom,TRU,${tmpdir}/custom_ref.csv,custom_main" "${sample_root}/pf_multi_config.csv" >/dev/null
 
 echo "PASS"

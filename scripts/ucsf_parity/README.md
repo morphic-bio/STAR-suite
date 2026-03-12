@@ -76,11 +76,18 @@ and `cr_gene_expression_chemistry` in `RUN_MANIFEST.txt`.
 The same CR-config input mode is also available for the UCSF perturb Y-removal
 runner:
 - `scripts/run_ucsf_perturb_yremove_batch.sh --cr-config <config.csv>`
+- `scripts/run_ucsf_perturb_yremove_batch.sh --cr-config <config.csv> --cr-sample-id <sample>`
 
 For perturb configs with multiple non-GEX feature libraries, the generated
 `pf_multi_config.from_cr.csv` preserves each library row plus the optional
 `star_chemistry`, `star_feature_ref`, and `star_library_id` columns from the
 Cell Ranger config.
+
+For MSK-style configs where multiple library rows should collapse onto one STAR
+sample name, the optional `[star]` section may provide:
+- `sample-id`
+
+An explicit `--cr-sample-id` CLI override takes precedence over the config.
 
 Smoke coverage for this path:
 - `tests/test_ucsf_cr_config_input.sh`
@@ -102,9 +109,17 @@ making the CR config the source of truth for:
 - probe-set CSV
 - sample-to-probe-barcode mapping from `[samples]`
 
+The optional `[star]` section may also provide STAR-specific Flex extensions:
+- `sample-probe-catalog`
+- `sample-probe-offset`
+
+These let the config drive `--soloSampleProbes` support without requiring
+separate CLI probe-catalog arguments.
+
 Smoke coverage for this path:
 - `tests/test_flex_cr_config_input.sh`
 - `tests/run_flex_cr_config_smoke.sh`
+- `tests/run_flex_cr_config_star_section_smoke.sh`
 
 ## End-to-end wrapper
 

@@ -34,16 +34,18 @@ def parse_cr_config(path: Path) -> dict:
             sections[current].append(raw)
 
     config_dir = path.resolve().parent
-    parsed = {"gene-expression": {}, "libraries": [], "samples": []}
-    if "gene-expression" in sections:
-        reader = csv.reader(sections["gene-expression"])
+    parsed = {"gene-expression": {}, "star": {}, "libraries": [], "samples": []}
+    for section in ("gene-expression", "star"):
+        if section not in sections:
+            continue
+        reader = csv.reader(sections[section])
         for row in reader:
             if len(row) >= 2:
                 key = row[0].strip().lower()
                 value = row[1].strip()
-                if key in {"reference", "probe-set", "probeset"}:
+                if key in {"reference", "probe-set", "probeset", "sample-probe-catalog", "sample_probe_catalog"}:
                     value = resolve_path(value, config_dir)
-                parsed["gene-expression"][key] = value
+                parsed[section][key] = value
 
     if "libraries" not in sections:
         raise SystemExit(f"Missing [libraries] section in {path}")
@@ -152,7 +154,7 @@ def main() -> int:
     parser.add_argument("--sample-whitelist-out", required=True, help="Output sample_whitelist.tsv path")
     parser.add_argument("--sample-probes-out", required=True, help="Output sample probes TSV path")
     parser.add_argument("--probe-list-out", required=True, help="Output probe_list.txt path")
-    parser.add_argument("--probe-catalog", required=True, help="Catalog of sample probe barcodes (variant, canonical, sample_id)")
+    parser.add_argument("--probe-catalog", help="Catalog of sample probe barcodes (variant, canonical, sample_id)")
     parser.add_argument("--emit-env", action="store_true", help="Emit shell-compatible KEY=VALUE lines")
     args = parser.parse_args()
 
@@ -189,7 +191,26 @@ def main() -> int:
         gex_r1.extend(r1s)
         gex_r2.extend(r2s)
 
-    catalog = load_probe_catalog(Path(args.probe_catalog).resolve())
+    probe_catalog = (
+        parsed.get("star", {}).get("sample-probe-catalog")
+        or parsed.get("star", {}).get("sample_probe_catalog")
+        or args.probe_catalog
+        or ""
+    )
+    if not probe_catalog:
+        raise SystemExit(
+            f"No probe catalog provided. Pass --probe-catalog or set [star] sample-probe-catalog in {config_path}"
+        )
+    catalog_path = Path(probe_catalog).resolve()
+    if not catalog_path.is_file():
+        raise SystemExit(f"Probe catalog file does not exist: {catalog_path}")
+    sample_probe_offset = (
+        parsed.get("star", {}).get("sample-probe-offset")
+        or parsed.get("star", {}).get("sample_probe_offset")
+        or "68"
+    )
+
+    catalog = load_probe_catalog(catalog_path)
     whitelist_rows: list[tuple[str, str]] = []
     probe_rows: list[tuple[str, str, str]] = []
     for sample in parsed["samples"]:
@@ -200,10 +221,10 @@ def main() -> int:
         for probe_id in probe_ids:
             entries = catalog.get(probe_id)
             if not entries:
-                raise SystemExit(f"probe_barcode_id {probe_id} for sample {label} not found in {args.probe_catalog}")
+                raise SystemExit(f"probe_barcode_id {probe_id} for sample {label} not found in {catalog_path}")
             canonical_values = {canonical for _, canonical in entries}
             if len(canonical_values) != 1:
-                raise SystemExit(f"probe_barcode_id {probe_id} maps to multiple canonical tags in {args.probe_catalog}")
+                raise SystemExit(f"probe_barcode_id {probe_id} maps to multiple canonical tags in {catalog_path}")
             canonical = next(iter(canonical_values))
             whitelist_rows.append((label, canonical))
             for variant, canonical in entries:
@@ -231,6 +252,8 @@ def main() -> int:
                 "GEX_FASTQ_DIRS": ",".join(gex_dirs),
                 "GEX_R1": ",".join(gex_r1),
                 "GEX_R2": ",".join(gex_r2),
+                "FLEX_SAMPLE_PROBE_CATALOG": str(catalog_path),
+                "FLEX_SAMPLE_PROBE_OFFSET": str(sample_probe_offset),
                 "FLEX_SAMPLE_WHITELIST": str(sample_whitelist_out.resolve()),
                 "FLEX_ALLOWED_TAGS": str(sample_whitelist_out.resolve()),
                 "FLEX_SAMPLE_PROBES": str(sample_probes_out.resolve()),

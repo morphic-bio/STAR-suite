@@ -46,6 +46,10 @@ reference,/storage/A375-CR-9.01/refdata-gex-GRCh38-2024-A
 probe-set,${tmpdir}/probe_set.csv
 create-bam,false
 
+[star]
+sample-probe-catalog,${tmpdir}/sample_probe_catalog.tsv
+sample-probe-offset,71
+
 [libraries]
 fastq_id,fastqs,feature_types
 sample1,${tmpdir}/gex/sample1,Gene Expression
@@ -61,11 +65,12 @@ python3 "${HELPER}" \
   --sample-whitelist-out "${tmpdir}/sample_whitelist.tsv" \
   --sample-probes-out "${tmpdir}/sample_probes.tsv" \
   --probe-list-out "${tmpdir}/probe_list.txt" \
-  --probe-catalog "${tmpdir}/sample_probe_catalog.tsv" \
   --emit-env > "${tmpdir}/helper.env"
 
 grep -F "FLEX_SAMPLE_WHITELIST=${tmpdir}/sample_whitelist.tsv" "${tmpdir}/helper.env" >/dev/null
 grep -F "FLEX_PROBE_LIST=${tmpdir}/probe_list.txt" "${tmpdir}/helper.env" >/dev/null
+grep -F "FLEX_SAMPLE_PROBE_CATALOG=${tmpdir}/sample_probe_catalog.tsv" "${tmpdir}/helper.env" >/dev/null
+grep -F "FLEX_SAMPLE_PROBE_OFFSET=71" "${tmpdir}/helper.env" >/dev/null
 grep -F $'BC004	AAAACCCC' "${tmpdir}/sample_whitelist.tsv" >/dev/null
 grep -F $'BC006	TTTTGGGG' "${tmpdir}/sample_whitelist.tsv" >/dev/null
 grep -F $'AAAACCCG	AAAACCCC	BC004' "${tmpdir}/sample_probes.tsv" >/dev/null
@@ -73,7 +78,6 @@ grep -F 'ENSG000001' "${tmpdir}/probe_list.txt" >/dev/null
 grep -F 'ENSG000002' "${tmpdir}/probe_list.txt" >/dev/null
 
 STAR_BIN=/bin/true \
-  SAMPLE_PROBE_CATALOG="${tmpdir}/sample_probe_catalog.tsv" \
   "${RUN_SCRIPT}" \
   --cr-config "${config}" \
   --out-base "${tmpdir}/out" \
@@ -85,8 +89,11 @@ command="${tmpdir}/out/smoke_flex/RUN_COMMAND.sh"
 
 grep -F "cr_config=${config}" "${manifest}" >/dev/null
 grep -F "cr_gene_expression_probe_set=${tmpdir}/probe_set.csv" "${manifest}" >/dev/null
+grep -F "sample_probe_catalog=${tmpdir}/sample_probe_catalog.tsv" "${manifest}" >/dev/null
+grep -F "sample_probe_offset=71" "${manifest}" >/dev/null
 grep -F -- "--soloSampleWhitelist ${tmpdir}/out/smoke_flex/sample_whitelist.from_cr.tsv" "${command}" >/dev/null
 grep -F -- "--soloSampleProbes ${tmpdir}/out/smoke_flex/sample_probes.from_cr.tsv" "${command}" >/dev/null
 grep -F -- "--soloProbeList ${tmpdir}/out/smoke_flex/probe_list.from_cr.txt" "${command}" >/dev/null
+grep -F -- "--soloSampleProbeOffset 71" "${command}" >/dev/null
 
 echo "PASS"

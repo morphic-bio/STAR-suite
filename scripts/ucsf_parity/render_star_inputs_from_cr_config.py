@@ -48,10 +48,10 @@ def parse_cr_config(path: Path) -> dict:
                 continue
             sections[current].append(raw)
 
-    parsed = {"gene-expression": {}, "feature": {}, "libraries": []}
+    parsed = {"gene-expression": {}, "feature": {}, "star": {}, "libraries": []}
     config_dir = path.resolve().parent
 
-    for section in ("gene-expression", "feature", "reference"):
+    for section in ("gene-expression", "feature", "reference", "star"):
         if section in sections:
             reader = csv.reader(sections[section])
             for row in reader:
@@ -124,9 +124,14 @@ def classify_libraries(libraries: list[dict]) -> tuple[list[dict], list[dict], l
     return gex, features, guides
 
 
-def determine_sample_id(libraries: list[dict], explicit: str | None) -> str:
+def determine_sample_id(libraries: list[dict], explicit: str | None, parsed: dict) -> str:
     if explicit:
         return explicit
+    star_cfg = parsed.get("star", {})
+    if star_cfg.get("sample-id"):
+        return star_cfg["sample-id"]
+    if star_cfg.get("sample_id"):
+        return star_cfg["sample_id"]
     ids = {
         row.get("sample") or row.get("fastq_id") or row.get("library_id") or ""
         for row in libraries
@@ -250,7 +255,7 @@ def main() -> int:
     if not feature_libs:
         raise SystemExit(f"No non-GEX feature library rows found in {config_path}")
 
-    sample_id = determine_sample_id(parsed["libraries"], args.sample_id)
+    sample_id = determine_sample_id(parsed["libraries"], args.sample_id, parsed)
     global_feature_ref = parsed.get("feature", {}).get("reference") or parsed.get("feature", {}).get("ref", "")
     for row in feature_libs:
         if not row_value(row, "star_feature_ref", "starfeatureref") and not global_feature_ref:
@@ -274,6 +279,7 @@ def main() -> int:
             {
                 "CR_CONFIG": str(config_path),
                 "SAMPLE_ID": sample_id,
+                "CR_STAR_SAMPLE_ID": parsed.get("star", {}).get("sample-id", "") or parsed.get("star", {}).get("sample_id", ""),
                 "CR_FEATURE_REF": global_feature_ref,
                 "CR_HAS_GLOBAL_FEATURE_REF": "1" if global_feature_ref else "0",
                 "CR_GENE_EXPRESSION_REFERENCE": parsed.get("gene-expression", {}).get("reference", ""),
