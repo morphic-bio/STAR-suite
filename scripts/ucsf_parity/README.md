@@ -73,6 +73,10 @@ The script writes a generated `pf_multi_config.from_cr.csv` into the run output
 directory and records the original `cr_config`, `cr_gene_expression_reference`,
 and `cr_gene_expression_chemistry` in `RUN_MANIFEST.txt`.
 
+The same CR-config input mode is also available for the UCSF perturb Y-removal
+runner:
+- `scripts/run_ucsf_perturb_yremove_batch.sh --cr-config <config.csv>`
+
 ## End-to-end wrapper
 
 Use `scripts/run_ucsf_star1h_cr_analysis.sh` to run all three scripts with
