@@ -77,6 +77,12 @@ The same CR-config input mode is also available for the UCSF perturb Y-removal
 runner:
 - `scripts/run_ucsf_perturb_yremove_batch.sh --cr-config <config.csv>`
 
+Smoke coverage for this path:
+- `tests/test_ucsf_cr_config_input.sh`
+- `tests/test_ucsf_batch_cr_config_input.sh`
+- `tests/test_ucsf_batch_cr_config_tiny_smoke.sh`
+- `tests/run_ucsf_cr_config_1m_smoke.sh`
+
 ## End-to-end wrapper
 
 Use `scripts/run_ucsf_star1h_cr_analysis.sh` to run all three scripts with
