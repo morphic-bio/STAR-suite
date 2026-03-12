@@ -127,3 +127,6 @@ Depend.list
 /tests/flex_smoke/current_*/
 core/features/process_features/tests/fixtures/assignbarcodes_baseline/actual/
 /tools/cr_multi/__pycache__/
+
+## Codespaces demo cache
+/.codespaces-demo/

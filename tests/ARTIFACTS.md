@@ -34,6 +34,7 @@ update this file with its output location.
 
 ## Known untracked artifacts (current)
 
+- `.codespaces-demo/` (Codespaces demo cache, downloaded public fixtures, tiny indices, and walkthrough runs)
 - `plans/artifacts/parms_tests_YYYYMMDD/` (logs + report)
 - `tests/*_output*/` (smoke/regression outputs)
 - `tests/bulk_pe_multisample_equivalence_output_*/` (batch vs sequential bulk PE multisample equivalence smoke)

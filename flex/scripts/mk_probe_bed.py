@@ -42,4 +42,4 @@ if __name__ == "__main__":
         for chrom, start, end, gene_id, gene_name, strand in read_gtf(args.gtf):
             key = gene_id if any(k.startswith('ENSG') for k in genes) else gene_name
             if key in genes:
-                out.write(f\"{chrom}\\t{start}\\t{end}\\t{gene_id}\\t0\\t{strand}\\n\")
+                out.write(f"{chrom}\t{start}\t{end}\t{gene_id}\t0\t{strand}\n")

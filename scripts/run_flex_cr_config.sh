@@ -9,6 +9,10 @@ STAR_BIN="${STAR_BIN:-${REPO_ROOT}/core/legacy/source/STAR}"
 THREADS="${THREADS:-8}"
 GENOME_DIR="${GENOME_DIR:-/storage/flex_filtered_reference/star_index}"
 SOLO_CB_WHITELIST="${SOLO_CB_WHITELIST:-/storage/scRNAseq_output/whitelists/737K-fixed-rna-profiling.txt}"
+SOLO_CB_START="${SOLO_CB_START:-1}"
+SOLO_CB_LEN="${SOLO_CB_LEN:-16}"
+SOLO_UMI_START="${SOLO_UMI_START:-17}"
+SOLO_UMI_LEN="${SOLO_UMI_LEN:-12}"
 SAMPLE_PROBE_CATALOG="${SAMPLE_PROBE_CATALOG:-/mnt/pikachu/JAX_scRNAseq01_processed/probe-barcodes-fixed-rna-profiling-rna.txt}"
 SAMPLE_PROBE_OFFSET="${SAMPLE_PROBE_OFFSET:-68}"
 CR_CONFIG="${CR_CONFIG:-}"
@@ -27,6 +31,10 @@ Options:
   --threads N                STAR threads (default: ${THREADS})
   --genome-dir DIR           STAR genomeDir (default: ${GENOME_DIR})
   --cb-whitelist FILE        Fixed RNA CB whitelist (default: ${SOLO_CB_WHITELIST})
+  --solo-cb-start N          Barcode start on R1 (default: ${SOLO_CB_START})
+  --solo-cb-len N            Barcode length on R1 (default: ${SOLO_CB_LEN})
+  --solo-umi-start N         UMI start on R1 (default: ${SOLO_UMI_START})
+  --solo-umi-len N           UMI length on R1 (default: ${SOLO_UMI_LEN})
   --sample-probe-catalog P   Probe barcode catalog (default: ${SAMPLE_PROBE_CATALOG})
   --sample-probe-offset N    Probe offset relative to cDNA read (default: ${SAMPLE_PROBE_OFFSET})
   --out-base DIR             Output base directory (default: ${OUT_BASE})
@@ -47,6 +55,10 @@ while [[ $# -gt 0 ]]; do
     --threads) THREADS="$2"; shift 2 ;;
     --genome-dir) GENOME_DIR="$2"; shift 2 ;;
     --cb-whitelist) SOLO_CB_WHITELIST="$2"; shift 2 ;;
+    --solo-cb-start) SOLO_CB_START="$2"; shift 2 ;;
+    --solo-cb-len) SOLO_CB_LEN="$2"; shift 2 ;;
+    --solo-umi-start) SOLO_UMI_START="$2"; shift 2 ;;
+    --solo-umi-len) SOLO_UMI_LEN="$2"; shift 2 ;;
     --sample-probe-catalog) SAMPLE_PROBE_CATALOG="$2"; SAMPLE_PROBE_CATALOG_EXPLICIT=1; shift 2 ;;
     --sample-probe-offset) SAMPLE_PROBE_OFFSET="$2"; SAMPLE_PROBE_OFFSET_EXPLICIT=1; shift 2 ;;
     --out-base) OUT_BASE="$2"; shift 2 ;;
@@ -103,10 +115,10 @@ CMD=(
   --outFileNamePrefix "${OUT_DIR}/"
   --outSAMtype BAM Unsorted
   --soloType CB_UMI_Simple
-  --soloCBstart 1
-  --soloCBlen 16
-  --soloUMIstart 17
-  --soloUMIlen 12
+  --soloCBstart "${SOLO_CB_START}"
+  --soloCBlen "${SOLO_CB_LEN}"
+  --soloUMIstart "${SOLO_UMI_START}"
+  --soloUMIlen "${SOLO_UMI_LEN}"
   --soloBarcodeReadLength 0
   --soloCBwhitelist "${SOLO_CB_WHITELIST}"
   --flex yes
@@ -158,6 +170,10 @@ CMD=(
   printf 'cr_gene_expression_reference=%s\n' "${CR_GENE_EXPRESSION_REFERENCE:-}"
   printf 'cr_gene_expression_probe_set=%s\n' "${CR_GENE_EXPRESSION_PROBE_SET:-}"
   printf 'gex_fastq_dirs=%s\n' "${GEX_FASTQ_DIRS:-}"
+  printf 'solo_cb_start=%s\n' "${SOLO_CB_START}"
+  printf 'solo_cb_len=%s\n' "${SOLO_CB_LEN}"
+  printf 'solo_umi_start=%s\n' "${SOLO_UMI_START}"
+  printf 'solo_umi_len=%s\n' "${SOLO_UMI_LEN}"
   printf 'sample_whitelist=%s\n' "${FLEX_SAMPLE_WHITELIST}"
   printf 'sample_probes=%s\n' "${FLEX_SAMPLE_PROBES}"
   printf 'probe_list=%s\n' "${FLEX_PROBE_LIST}"

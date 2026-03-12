@@ -104,6 +104,9 @@ Packaging/release details and artifact policy:
 Compilation details (module-by-module, clean rebuilds, and clean Ubuntu 24.04 validation):
 - `docs/compile_instructions.md`
 
+Codespaces walkthroughs for the four major modules:
+- `docs/CODESPACES_DEMO_WALKTHROUGHS_20260312.md`
+
 ## Build Targets
 
 The top-level `Makefile` supports a default build, full build, and conditional include/exclude filters.
