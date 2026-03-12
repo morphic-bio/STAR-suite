@@ -1,29 +1,34 @@
-# Bulk Demo
+# Bulk
 
-Current status: stable.
+This is the easiest full demo.
 
-This walkthrough uses a small public bulk RNA-seq fixture and emits the STAR bulk command shape. The script supports `--run`, but the recommended first step in Codespaces is to preview it with `--dry-run` and then swap in the index you actually want to use.
+## What you need
 
-Preview:
+- a STAR index
+- if you do not have one, you can use your own or start with the small setup guide
+
+## Preview first
+
 ```bash
 bash scripts/codespaces/run_bulk_public_demo.sh \
   --dry-run \
   --genome-dir /path/to/star_bulk_index
 ```
 
-Run:
+## Run it
+
 ```bash
 bash scripts/codespaces/run_bulk_public_demo.sh \
   --run \
   --genome-dir /path/to/star_bulk_index
 ```
 
-Outputs:
+## What you get
+
 - `.codespaces-demo/runs/bulk_public_demo/RUN_COMMAND.sh`
 - `.codespaces-demo/runs/bulk_public_demo/Aligned.sortedByCoord.out.bam`
 - `.codespaces-demo/runs/bulk_public_demo/ReadsPerGene.out.tab`
 
-## If You Already Know STAR or Cell Ranger
+## If you already know STAR
 
-- STAR users: this is very close to a normal STAR bulk run. The wrapper mainly fetches the public fixture and writes `RUN_COMMAND.sh` so you can inspect or replace the defaults.
-- Cell Ranger users: there is no CR-style abstraction here. This chapter is intentionally just the bulk STAR command shape.
+This guide mostly saves time by downloading a small public dataset and writing the full command for you.

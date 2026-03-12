@@ -1,31 +1,28 @@
-# Perturb Demo
+# Perturb (work in progress)
 
-Current status: scaffold only.
+This guide is not finished yet.
 
-The repository already has a runnable prototype wrapper for a public `chr22 + chrY` perturb demo surface, but it is not yet strong enough to present as a faithful public assay walkthrough. The structure is still exposed in Codespaces so the module slot is stable and easy to swap later.
+You can still use it to see the current command shape and file layout.
 
-Current prototype preview:
+## Preview the current version
+
 ```bash
 bash scripts/codespaces/run_perturb_public_demo.sh --dry-run
 ```
 
-Current prototype run surface:
+## Run the current version
+
 ```bash
 bash scripts/codespaces/run_perturb_public_demo.sh
 ```
 
-What is stable here:
-- shared mini-reference creation
-- shared GEX fixture derivation
-- CR-config based perturb wrapper integration
+## What works now
 
-What is still placeholder quality:
-- the generated guide companion does not yet produce a strong public demo signal
+- small demo reference setup
+- small shared single-cell input
+- CR-style config input path
 
-Planned replacement:
-- swap in a bounded real public perturb assay fixture while keeping the same walkthrough slot and command shape
+## What is still missing
 
-## If You Already Know STAR or Cell Ranger
-
-- STAR users: the important surface here is the CR-config compatible wrapper and the pinned STAR-side defaults around it.
-- Cell Ranger users: the wrapper is designed so the CR-style input surface is familiar, but STAR-suite may still supersede some behavior with explicit STAR parameters.
+- a stronger public perturb demo dataset
+- a cleaner end-to-end demo result

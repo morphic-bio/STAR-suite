@@ -48,11 +48,11 @@
       },
       {
         "command": "starSuiteWalkthrough.openOverviewGuide",
-        "title": "STAR-suite: Open Codespaces Demo Overview"
+        "title": "STAR-suite: Open Overview Guide"
       },
       {
         "command": "starSuiteWalkthrough.openSetupGuide",
-        "title": "STAR-suite: Open Setup + Mini Reference Guide"
+        "title": "STAR-suite: Open Optional Setup Guide"
       },
       {
         "command": "starSuiteWalkthrough.openBulkGuide",
@@ -64,15 +64,15 @@
       },
       {
         "command": "starSuiteWalkthrough.openFixtureGuide",
-        "title": "STAR-suite: Open Single-cell Fixture Guide"
+        "title": "STAR-suite: Open Single-cell Input Guide"
       },
       {
         "command": "starSuiteWalkthrough.openPerturbGuide",
-        "title": "STAR-suite: Open Perturb Demo Guide"
+        "title": "STAR-suite: Open Perturb Guide"
       },
       {
         "command": "starSuiteWalkthrough.openFlexGuide",
-        "title": "STAR-suite: Open Flex Demo Guide"
+        "title": "STAR-suite: Open Flex Guide"
       },
       {
         "command": "starSuiteWalkthrough.runFetchReference",
@@ -104,7 +104,7 @@
       },
       {
         "command": "starSuiteWalkthrough.openFoundationWalkthrough",
-        "title": "STAR-suite: Open Foundation Walkthrough"
+        "title": "STAR-suite: Open Optional Setup"
       },
       {
         "command": "starSuiteWalkthrough.openBulkWalkthrough",
@@ -116,7 +116,7 @@
       },
       {
         "command": "starSuiteWalkthrough.openFixtureWalkthrough",
-        "title": "STAR-suite: Open Single-cell Fixture Walkthrough"
+        "title": "STAR-suite: Open Single-cell Input"
       },
       {
         "command": "starSuiteWalkthrough.openPerturbWalkthrough",
@@ -128,22 +128,22 @@
       },
       {
         "command": "starSuiteWalkthrough.openStarCrGuide",
-        "title": "STAR-suite: Open STAR / Cell Ranger Guidance"
+        "title": "STAR-suite: Open STAR / Cell Ranger Guide"
       }
     ],
     "walkthroughs": [
       {
         "id": "overview",
-        "title": "Overview",
-        "description": "Choose an independent STAR-suite demo chapter. The foundation chapter is optional.",
+        "title": "Choose a Guide",
+        "description": "Pick the guide you want. Setup is optional.",
         "featuredFor": [
           "workspace"
         ],
         "steps": [
           {
             "id": "overviewGuide",
-            "title": "Open the Codespaces overview",
-            "description": "Open [the overview guide](command:starSuiteWalkthrough.openOverviewGuide) to see the chapter model and current stable surfaces.",
+            "title": "Open the main guide",
+            "description": "Open [the overview guide](command:starSuiteWalkthrough.openOverviewGuide).",
             "media": {
               "image": "media/setup.svg",
               "altText": "Overview"
@@ -153,38 +153,12 @@
             ]
           },
           {
-            "id": "experiencedStart",
-            "title": "Experienced users: skip directly to a chapter",
-            "description": "If you already know STAR and have a suitable index, jump straight to [Bulk](command:starSuiteWalkthrough.openBulkWalkthrough) or [SLAM](command:starSuiteWalkthrough.openSlamWalkthrough). Use [Single-cell Fixture](command:starSuiteWalkthrough.openFixtureWalkthrough) only for perturb or Flex.",
-            "media": {
-              "image": "media/terminal.svg",
-              "altText": "Experienced user path"
-            },
-            "completionEvents": [
-              "onCommand:starSuiteWalkthrough.openBulkWalkthrough",
-              "onCommand:starSuiteWalkthrough.openSlamWalkthrough",
-              "onCommand:starSuiteWalkthrough.openFixtureWalkthrough"
-            ]
-          },
-          {
-            "id": "starCrStart",
-            "title": "STAR / Cell Ranger users: focus on deltas",
-            "description": "Open [STAR / Cell Ranger guidance](command:starSuiteWalkthrough.openStarCrGuide) if you want the walkthrough to highlight what changes relative to normal STAR or Cell Ranger usage.",
-            "media": {
-              "image": "media/reference.svg",
-              "altText": "STAR and Cell Ranger guidance"
-            },
-            "completionEvents": [
-              "onCommand:starSuiteWalkthrough.openStarCrGuide"
-            ]
-          },
-          {
-            "id": "noviceStart",
-            "title": "Novice users: start with the foundation or bulk",
-            "description": "If you want the gentlest path, open [Optional: Build Mini Reference](command:starSuiteWalkthrough.openFoundationWalkthrough) first and then move to [Bulk](command:starSuiteWalkthrough.openBulkWalkthrough).",
+            "id": "newUsers",
+            "title": "New users",
+            "description": "If you want the easiest path, open [Optional setup](command:starSuiteWalkthrough.openFoundationWalkthrough) first and then go to [Bulk](command:starSuiteWalkthrough.openBulkWalkthrough).",
             "media": {
               "image": "media/setup.svg",
-              "altText": "Novice user path"
+              "altText": "New users"
             },
             "completionEvents": [
               "onCommand:starSuiteWalkthrough.openFoundationWalkthrough",
@@ -192,21 +166,21 @@
             ]
           },
           {
-            "id": "foundation",
-            "title": "Optional foundation chapter",
-            "description": "If you need the shared mini-reference, jump to [Optional: Build Mini Reference](command:starSuiteWalkthrough.openFoundationWalkthrough). Otherwise skip it.",
+            "id": "starCrUsers",
+            "title": "STAR or Cell Ranger users",
+            "description": "Open [this short guide](command:starSuiteWalkthrough.openStarCrGuide) and then jump to the guide you want.",
             "media": {
               "image": "media/reference.svg",
-              "altText": "Foundation"
+              "altText": "STAR or Cell Ranger users"
             },
             "completionEvents": [
-              "onCommand:starSuiteWalkthrough.openFoundationWalkthrough"
+              "onCommand:starSuiteWalkthrough.openStarCrGuide"
             ]
           },
           {
             "id": "bulk",
-            "title": "Bulk chapter",
-            "description": "Open the independent [Bulk walkthrough](command:starSuiteWalkthrough.openBulkWalkthrough).",
+            "title": "Bulk",
+            "description": "Open the [Bulk guide](command:starSuiteWalkthrough.openBulkWalkthrough).",
             "media": {
               "image": "media/bulk.svg",
               "altText": "Bulk"
@@ -217,8 +191,8 @@
           },
           {
             "id": "slam",
-            "title": "SLAM chapter",
-            "description": "Open the independent [SLAM walkthrough](command:starSuiteWalkthrough.openSlamWalkthrough).",
+            "title": "SLAM",
+            "description": "Open the [SLAM guide](command:starSuiteWalkthrough.openSlamWalkthrough).",
             "media": {
               "image": "media/slam.svg",
               "altText": "SLAM"
@@ -229,11 +203,11 @@
           },
           {
             "id": "fixture",
-            "title": "Single-cell fixture utility",
-            "description": "Open the shared [Single-cell Fixture walkthrough](command:starSuiteWalkthrough.openFixtureWalkthrough) if you want the bounded public GEX input used by perturb and Flex.",
+            "title": "Single-cell input for perturb and Flex",
+            "description": "Open this guide only if you want the small shared input used by perturb and Flex.",
             "media": {
               "image": "media/reference.svg",
-              "altText": "Fixture"
+              "altText": "Single-cell input"
             },
             "completionEvents": [
               "onCommand:starSuiteWalkthrough.openFixtureWalkthrough"
@@ -241,8 +215,8 @@
           },
           {
             "id": "perturb",
-            "title": "Perturb prototype chapter",
-            "description": "Open the current [Perturb walkthrough](command:starSuiteWalkthrough.openPerturbWalkthrough).",
+            "title": "Perturb (work in progress)",
+            "description": "Open the current [Perturb guide](command:starSuiteWalkthrough.openPerturbWalkthrough).",
             "media": {
               "image": "media/prototype.svg",
               "altText": "Perturb"
@@ -253,8 +227,8 @@
           },
           {
             "id": "flex",
-            "title": "Flex prototype chapter",
-            "description": "Open the current [Flex walkthrough](command:starSuiteWalkthrough.openFlexWalkthrough).",
+            "title": "Flex (work in progress)",
+            "description": "Open the current [Flex guide](command:starSuiteWalkthrough.openFlexWalkthrough).",
             "media": {
               "image": "media/prototype.svg",
               "altText": "Flex"
@@ -267,16 +241,16 @@
       },
       {
         "id": "foundation",
-        "title": "Optional: Build Mini Reference",
-        "description": "Build the shared public chr22 + chrY mini-reference only if you need the demo source surface or do not already have a suitable index.",
+        "title": "Optional setup",
+        "description": "Build the small demo reference only if you need it.",
         "featuredFor": [
           "workspace"
         ],
         "steps": [
           {
             "id": "setupGuide",
-            "title": "Open the foundation guide",
-            "description": "Open [Setup + Mini Reference](command:starSuiteWalkthrough.openSetupGuide) for the exact reference contract and outputs.",
+            "title": "Open the setup guide",
+            "description": "Open [Optional setup: small demo reference](command:starSuiteWalkthrough.openSetupGuide).",
             "media": {
               "image": "media/reference.svg",
               "altText": "Reference guide"
@@ -287,8 +261,8 @@
           },
           {
             "id": "fetchReference",
-            "title": "Fetch chr22 + chrY reference sources",
-            "description": "Launch the real reference fetch in an integrated terminal with [Run chr22+chrY Reference Fetch](command:starSuiteWalkthrough.runFetchReference).",
+            "title": "Download the small reference files",
+            "description": "Run [Download the small reference files](command:starSuiteWalkthrough.runFetchReference).",
             "media": {
               "image": "media/reference.svg",
               "altText": "Fetch reference"
@@ -299,8 +273,8 @@
           },
           {
             "id": "buildIndex",
-            "title": "Build the demo STAR index",
-            "description": "Build the shared mini-reference index with [Build chr22+chrY Demo Index](command:starSuiteWalkthrough.runBuildIndex).",
+            "title": "Build the small STAR index",
+            "description": "Run [Build the small STAR index](command:starSuiteWalkthrough.runBuildIndex).",
             "media": {
               "image": "media/terminal.svg",
               "altText": "Build index"
@@ -314,7 +288,7 @@
       {
         "id": "bulkDemo",
         "title": "Bulk Demo",
-        "description": "Independent public bulk walkthrough.",
+        "description": "Run the small bulk demo.",
         "featuredFor": [
           "workspace"
         ],
@@ -322,7 +296,7 @@
           {
             "id": "bulkGuide",
             "title": "Open the bulk guide",
-            "description": "Open [Bulk Demo](command:starSuiteWalkthrough.openBulkGuide) for the command shape and outputs.",
+            "description": "Open [Bulk](command:starSuiteWalkthrough.openBulkGuide).",
             "media": {
               "image": "media/bulk.svg",
               "altText": "Bulk guide"
@@ -333,8 +307,8 @@
           },
           {
             "id": "bulkDryRun",
-            "title": "Preview the bulk command",
-            "description": "Launch the dry-run helper with [Preview Bulk Demo Command](command:starSuiteWalkthrough.runBulkDryRun).",
+            "title": "Preview the command",
+            "description": "Run [Preview Bulk Demo Command](command:starSuiteWalkthrough.runBulkDryRun).",
             "media": {
               "image": "media/terminal.svg",
               "altText": "Bulk terminal"
@@ -348,7 +322,7 @@
       {
         "id": "slamDemo",
         "title": "SLAM Demo",
-        "description": "Independent public SLAM walkthrough.",
+        "description": "Run the small SLAM demo.",
         "featuredFor": [
           "workspace"
         ],
@@ -356,7 +330,7 @@
           {
             "id": "slamGuide",
             "title": "Open the SLAM guide",
-            "description": "Open [SLAM Demo](command:starSuiteWalkthrough.openSlamGuide) for the command shape and outputs.",
+            "description": "Open [SLAM](command:starSuiteWalkthrough.openSlamGuide).",
             "media": {
               "image": "media/slam.svg",
               "altText": "SLAM guide"
@@ -367,8 +341,8 @@
           },
           {
             "id": "slamDryRun",
-            "title": "Preview the SLAM command",
-            "description": "Launch the dry-run helper with [Preview SLAM Demo Command](command:starSuiteWalkthrough.runSlamDryRun).",
+            "title": "Preview the command",
+            "description": "Run [Preview SLAM Demo Command](command:starSuiteWalkthrough.runSlamDryRun).",
             "media": {
               "image": "media/terminal.svg",
               "altText": "SLAM terminal"
@@ -381,16 +355,16 @@
       },
       {
         "id": "singleCellFixture",
-        "title": "Utility: Single-cell Fixture",
-        "description": "Shared bounded public GEX fixture derivation for perturb and Flex. This is not a required chapter for bulk or SLAM.",
+        "title": "Single-cell input",
+        "description": "Build the small shared input used by perturb and Flex.",
         "featuredFor": [
           "workspace"
         ],
         "steps": [
           {
             "id": "fixtureGuide",
-            "title": "Open the fixture guide",
-            "description": "Open [Single-cell Fixture Derivation](command:starSuiteWalkthrough.openFixtureGuide) for the bounded derivation flow.",
+            "title": "Open the single-cell input guide",
+            "description": "Open [Single-cell input for perturb and Flex](command:starSuiteWalkthrough.openFixtureGuide).",
             "media": {
               "image": "media/reference.svg",
               "altText": "Fixture guide"
@@ -401,8 +375,8 @@
           },
           {
             "id": "fixtureDryRun",
-            "title": "Preview the fixture derivation",
-            "description": "Launch the dry-run helper with [Preview Single-cell Fixture Derivation](command:starSuiteWalkthrough.runFixtureDryRun).",
+            "title": "Preview the command",
+            "description": "Run [Preview Single-cell Fixture Derivation](command:starSuiteWalkthrough.runFixtureDryRun).",
             "media": {
               "image": "media/terminal.svg",
               "altText": "Fixture terminal"
@@ -415,16 +389,16 @@
       },
       {
         "id": "perturbPlaceholder",
-        "title": "Perturb Demo (Prototype)",
-        "description": "Independent perturb chapter placeholder until the real public assay fixture replaces the current scaffold.",
+        "title": "Perturb (work in progress)",
+        "description": "See the current perturb guide.",
         "featuredFor": [
           "workspace"
         ],
         "steps": [
           {
             "id": "perturbGuide",
-            "title": "Open the perturb placeholder guide",
-            "description": "Open [Perturb Demo](command:starSuiteWalkthrough.openPerturbGuide) to see the current limits and swap plan.",
+            "title": "Open the perturb guide",
+            "description": "Open [Perturb](command:starSuiteWalkthrough.openPerturbGuide).",
             "media": {
               "image": "media/prototype.svg",
               "altText": "Perturb placeholder"
@@ -435,8 +409,8 @@
           },
           {
             "id": "perturbDryRun",
-            "title": "Preview the current perturb prototype",
-            "description": "Launch the current scaffold with [Preview Perturb Prototype Command](command:starSuiteWalkthrough.runPerturbDryRun).",
+            "title": "Preview the current command",
+            "description": "Run [Preview Perturb Prototype Command](command:starSuiteWalkthrough.runPerturbDryRun).",
             "media": {
               "image": "media/prototype.svg",
               "altText": "Perturb prototype"
@@ -449,16 +423,16 @@
       },
       {
         "id": "flexPlaceholder",
-        "title": "Flex Demo (Prototype)",
-        "description": "Independent Flex chapter placeholder until the real public assay fixture replaces the current scaffold.",
+        "title": "Flex (work in progress)",
+        "description": "See the current Flex guide.",
         "featuredFor": [
           "workspace"
         ],
         "steps": [
           {
             "id": "flexGuide",
-            "title": "Open the Flex placeholder guide",
-            "description": "Open [Flex Demo](command:starSuiteWalkthrough.openFlexGuide) to see the current limits and swap plan.",
+            "title": "Open the Flex guide",
+            "description": "Open [Flex](command:starSuiteWalkthrough.openFlexGuide).",
             "media": {
               "image": "media/prototype.svg",
               "altText": "Flex placeholder"
@@ -469,8 +443,8 @@
           },
           {
             "id": "flexDryRun",
-            "title": "Preview the current Flex prototype",
-            "description": "Launch the current scaffold with [Preview Flex Prototype Command](command:starSuiteWalkthrough.runFlexDryRun).",
+            "title": "Preview the current command",
+            "description": "Run [Preview Flex Prototype Command](command:starSuiteWalkthrough.runFlexDryRun).",
             "media": {
               "image": "media/prototype.svg",
               "altText": "Flex prototype"

@@ -1,10 +1,11 @@
-# Single-cell Fixture Derivation
+# Single-cell input for perturb and Flex
 
-Current status: stable.
+Use this guide only if you want the small shared single-cell input used by the perturb and Flex demos.
 
-This is a shared utility chapter for perturb and Flex. It derives a bounded public GEX fixture by aligning a limited number of read pairs from a public male 10x dataset to the shared `chr22 + chrY` mini-reference and retaining only read pairs whose cDNA mates map to `chr22` or `chrY`.
+You do not need this guide for bulk or SLAM.
 
-Preview:
+## Preview first
+
 ```bash
 bash scripts/codespaces/derive_public_chr22y_gex_fixture.sh \
   --threads 4 \
@@ -12,23 +13,20 @@ bash scripts/codespaces/derive_public_chr22y_gex_fixture.sh \
   --dry-run
 ```
 
-Run:
+## Run it
+
 ```bash
 bash scripts/codespaces/derive_public_chr22y_gex_fixture.sh \
   --threads 4 \
   --read-limit 200000
 ```
 
-Outputs:
+## What you get
+
 - `.codespaces-demo/data/public_10x_male_bcell/raw_fastqs/`
 - `.codespaces-demo/data/public_chr22y_gex_fixture/gex/public_chr22y_demo/`
 - `.codespaces-demo/data/public_chr22y_gex_fixture/MANIFEST.txt`
 
-Important note:
-- barcode geometry is pinned as source metadata for the chosen public assay
-- it is not treated as a global STAR-suite constant
+## In plain terms
 
-## If You Already Know STAR or Cell Ranger
-
-- STAR users: this chapter is just a bounded public-input derivation utility so the single-cell demos fit in Codespaces.
-- Cell Ranger users: this is where the walkthrough deliberately constrains the public input surface rather than trying to replicate a full CR-scale ingest.
+This takes a small amount of public single-cell data and makes an even smaller input set that fits more easily in Codespaces.

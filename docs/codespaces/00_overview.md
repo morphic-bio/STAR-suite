@@ -1,47 +1,42 @@
-# STAR-suite Codespaces Demos
+# STAR-suite Codespaces
 
-This Codespaces surface is a guided entry point for the stable STAR-suite demo flows.
+These guides help you try STAR-suite in GitHub Codespaces with small public datasets.
 
-Current status:
-- Stable now: setup + mini-reference, bulk, SLAM, shared single-cell fixture derivation
-- Scaffold only for now: perturb, Flex
+## What is ready now
 
-Design rules:
-- In Codespaces, `.devcontainer/postCreate.sh` packages and installs the repo-local walkthrough extension on a best-effort basis. The fallback entry point is Command Palette -> `STAR-suite: Open Codespaces Walkthrough`.
-- The walkthroughs use helper scripts under [`scripts/codespaces/`](../../scripts/codespaces/).
-- The mini-reference is a public human `chr22 + chrY` `FASTA + GTF` source surface built directly with STAR.
-- Advanced users can swap in their own indices, references, or FASTQs at any step.
-- Perturb and Flex are intentionally present as placeholders so the module structure is stable even while their public demo fixtures are still being tightened.
+- Bulk: ready
+- SLAM: ready
+- Single-cell input builder: ready
+- Perturb: still being worked on
+- Flex: still being worked on
 
-Fast delta guide:
-- [Guidance for STAR and Cell Ranger Users](./07_star_cellranger_users.md)
+## Pick a starting point
 
-Chapter model:
-- Optional shared foundation:
-  - [Setup + Mini Reference](./01_setup_reference.md)
-- Independent module chapters:
-  - [Bulk](./02_bulk.md)
-  - [SLAM](./03_slam.md)
-  - [Perturb Placeholder](./05_perturb.md)
-  - [Flex Placeholder](./06_flex.md)
-- Shared utility chapter for perturb and Flex only:
-  - [Single-cell Fixture Derivation](./04_single_cell_fixture.md)
+- If you are new to this:
+  - start with [Optional setup: small demo reference](./01_setup_reference.md)
+  - then run [Bulk](./02_bulk.md)
+  - then try [SLAM](./03_slam.md)
+- If you already use STAR or Cell Ranger:
+  - read [If you already use STAR or Cell Ranger](./07_star_cellranger_users.md)
+  - then jump straight to the guide you want
+- If you already have your own STAR index:
+  - skip setup
+  - go straight to [Bulk](./02_bulk.md) or [SLAM](./03_slam.md)
+- If you want to try perturb or Flex later:
+  - first build the small shared single-cell input with [Single-cell input for perturb and Flex](./04_single_cell_fixture.md)
 
-Use this non-linearly:
-- skip the foundation chapter if you already have a suitable reference or index
-- go directly to Bulk or SLAM if that is all you need
-- use the single-cell fixture chapter only if you want the bounded public input used by perturb and Flex
+## Guides
 
-Starting points by experience:
-- Experienced users:
-  - skip directly to [Bulk](./02_bulk.md) or [SLAM](./03_slam.md) if you already have a suitable index
-  - skip to [Single-cell Fixture Derivation](./04_single_cell_fixture.md) only if you specifically want the bounded public input used by perturb or Flex
-  - use [Perturb Placeholder](./05_perturb.md) or [Flex Placeholder](./06_flex.md) as command-shape scaffolds if you already understand the assay-specific inputs
-- STAR / Cell Ranger users:
-  - start with [Guidance for STAR and Cell Ranger Users](./07_star_cellranger_users.md) if you want the walkthrough to focus on deltas instead of basics
-  - then jump directly to the relevant module chapter
-- Novice users:
-  - start with [Setup + Mini Reference](./01_setup_reference.md) if you want to see how the demo reference is built
-  - then try [Bulk](./02_bulk.md) first, because it is the smallest stable end-to-end chapter
-  - then move to [SLAM](./03_slam.md)
-  - leave perturb and Flex for later unless you specifically want the prototype surfaces
+- [Optional setup: small demo reference](./01_setup_reference.md)
+- [Bulk](./02_bulk.md)
+- [SLAM](./03_slam.md)
+- [Single-cell input for perturb and Flex](./04_single_cell_fixture.md)
+- [Perturb (work in progress)](./05_perturb.md)
+- [Flex (work in progress)](./06_flex.md)
+- [If you already use STAR or Cell Ranger](./07_star_cellranger_users.md)
+
+## Notes
+
+- The Codespaces setup tries to install a small walkthrough extension automatically.
+- If that does not happen, open the Command Palette and run `STAR-suite: Open Codespaces Walkthrough`.
+- You can replace the demo reference, STAR index, and input files with your own at any time.

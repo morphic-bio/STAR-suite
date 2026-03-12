@@ -1,29 +1,34 @@
-# SLAM Demo
+# SLAM
 
-Current status: stable.
+This is the small public SLAM demo.
 
-This walkthrough uses a small public SLAM-seq fixture and emits the STAR-SLAM command shape. As with the bulk walkthrough, the first step in Codespaces should be a `--dry-run` preview.
+## What you need
 
-Preview:
+- a STAR index
+- if you do not have one, you can use your own or start with the small setup guide
+
+## Preview first
+
 ```bash
 bash scripts/codespaces/run_slam_public_demo.sh \
   --dry-run \
   --genome-dir /path/to/star_bulk_index
 ```
 
-Run:
+## Run it
+
 ```bash
 bash scripts/codespaces/run_slam_public_demo.sh \
   --run \
   --genome-dir /path/to/star_bulk_index
 ```
 
-Outputs:
+## What you get
+
 - `.codespaces-demo/runs/slam_public_demo/RUN_COMMAND.sh`
 - `.codespaces-demo/runs/slam_public_demo/Aligned.sortedByCoord.out.bam`
 - `.codespaces-demo/runs/slam_public_demo/slam_qc/`
 
-## If You Already Know STAR or Cell Ranger
+## If you already know STAR
 
-- STAR users: the material differences here are the SLAM-specific flags: `--slamQuantMode`, `--slamGrandSlamOut`, `--autoTrim variance`, and `--slamQcReport`.
-- Cell Ranger users: this is a STAR-SLAM surface, not a CR-like workflow.
+The main new pieces here are the SLAM-specific options. The guide still writes the full command so you can inspect or edit it.

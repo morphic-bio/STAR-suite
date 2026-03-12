@@ -1,28 +1,23 @@
-# Setup + Mini Reference
+# Optional setup: small demo reference
 
-Goal:
-- prepare the shared public `chr22 + chrY` source reference
-- build the STAR demo index inside Codespaces
+Use this guide only if you want to build the small demo reference inside Codespaces.
 
-This is an optional foundation chapter. Skip it if you already have a suitable reference source surface or a STAR index you want to use instead.
+If you already have a STAR index that you want to use, skip this guide.
 
-Commands:
+## Run
+
 ```bash
 bash scripts/codespaces/fetch_public_chr22y_reference.sh
 bash scripts/codespaces/build_public_chr22y_index.sh --threads 4
 ```
 
-Outputs:
+## What you get
+
 - `.codespaces-demo/data/public_human_chr22y_ref/fasta/genome.fa`
 - `.codespaces-demo/data/public_human_chr22y_ref/genes/genes.gtf`
 - `.codespaces-demo/indices/public_human_chr22y_star`
 
-Why this is the reference contract:
-- the important compatibility surface is the processed `FASTA + GTF`
-- we do not introduce `cellranger mkref` into the Codespaces path
-- users can replace this source surface with their own full reference later
+## In plain terms
 
-## If You Already Know STAR or Cell Ranger
-
-- STAR users: this is just a small public `FASTA + GTF` source surface plus `genomeGenerate`.
-- Cell Ranger users: the key point is that the demo does not use `mkref`; the relevant compatibility surface is the processed `genome.fa` and `genes.gtf`.
+This builds a very small human reference that only contains `chr22` and `chrY`.
+It is small enough to use in Codespaces and is shared by the single-cell demo guides.

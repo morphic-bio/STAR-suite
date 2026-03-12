@@ -1,31 +1,28 @@
-# Flex Demo
+# Flex (work in progress)
 
-Current status: scaffold only.
+This guide is not finished yet.
 
-The repository already has a runnable prototype wrapper for a public `chr22 + chrY` Flex demo surface, but it is not yet strong enough to present as a faithful public assay walkthrough. The structure is still exposed in Codespaces so the module slot is stable and easy to swap later.
+You can still use it to see the current command shape and file layout.
 
-Current prototype preview:
+## Preview the current version
+
 ```bash
 bash scripts/codespaces/run_flex_public_demo.sh --dry-run
 ```
 
-Current prototype run surface:
+## Run the current version
+
 ```bash
 bash scripts/codespaces/run_flex_public_demo.sh
 ```
 
-What is stable here:
-- shared mini-reference creation
-- shared GEX fixture derivation
-- FLEX wrapper/config integration
+## What works now
 
-What is still placeholder quality:
-- the synthetic probe/sample-tag overlay is too weak for a proper public demo
+- small demo reference setup
+- small shared single-cell input
+- Flex config and wrapper wiring
 
-Planned replacement:
-- swap in a bounded real public Flex assay fixture while keeping the same walkthrough slot and command shape
+## What is still missing
 
-## If You Already Know STAR or Cell Ranger
-
-- STAR users: this chapter is about the STAR-suite Flex wrapper surface rather than raw STAR alone.
-- Cell Ranger users: treat this as a prototype config-driven scaffold for now, not a finished public parity walkthrough.
+- a stronger public Flex demo dataset
+- a cleaner end-to-end demo result
