@@ -61,6 +61,18 @@ parity differences between STAR (`process_features`/`assignBarcodes`) and Cell R
   - `SUMMARY.txt`
   - `STAR_ZERO_FASTQ_PROBE.tsv` (when FASTQ probe is enabled)
 
+
+## Using Cell Ranger config.csv as the UCSF input source
+
+Use `scripts/run_ucsf_full_compat_forward_rescue_guides.sh --cr-config <config.csv>` to
+derive the exact GEX/guides FASTQ inputs and feature reference from an existing
+Cell Ranger `config.csv`. This preserves the local pinned STAR `genomeDir` policy
+while making the CR config the source of truth for library inputs.
+
+The script writes a generated `pf_multi_config.from_cr.csv` into the run output
+directory and records the original `cr_config`, `cr_gene_expression_reference`,
+and `cr_gene_expression_chemistry` in `RUN_MANIFEST.txt`.
+
 ## End-to-end wrapper
 
 Use `scripts/run_ucsf_star1h_cr_analysis.sh` to run all three scripts with
