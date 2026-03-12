@@ -468,6 +468,9 @@ run_sample() {
   local gex_dir guide_dir feature_ref map_sample
   local cr_gene_expression_reference=""
   local cr_gene_expression_chemistry=""
+  local -a gex_dirs=()
+  local -a feature_dirs=()
+  local -a all_input_dirs=()
 
   if [[ -n "${CR_CONFIG}" ]]; then
     local cr_env_file="${OUT_ROOT}/samples/${sample}/cr_config_inputs.env"
@@ -477,16 +480,16 @@ run_sample() {
     # shellcheck disable=SC1090
     source "${cr_env_file}"
     map_sample="${SAMPLE_ID}"
+    IFS=',' read -r -a gex_dirs <<< "${GEX_FASTQ_DIRS:-}"
+    IFS=',' read -r -a feature_dirs <<< "${FEATURE_FASTQ_DIRS:-}"
+    [[ "${#gex_dirs[@]}" -gt 0 ]] || die "CR config rendered no GEX fastq dirs for ${sample}"
+    [[ "${#feature_dirs[@]}" -gt 0 ]] || die "CR config rendered no feature fastq dirs for ${sample}"
     gex_dir="$(python3 - <<'PY' "${GEX_R1}"
 import sys
 print(sys.argv[1].split(',')[0].rsplit('/', 1)[0])
 PY
 )"
-    guide_dir="$(python3 - <<'PY' "${GUIDE_R1}"
-import sys
-print(sys.argv[1].split(',')[0].rsplit('/', 1)[0])
-PY
-)"
+    guide_dir="${feature_dirs[0]}"
     feature_ref="${CR_FEATURE_REF}"
     cr_gene_expression_reference="${CR_GENE_EXPRESSION_REFERENCE:-}"
     cr_gene_expression_chemistry="${CR_GENE_EXPRESSION_CHEMISTRY:-}"
@@ -495,15 +498,28 @@ PY
     row="$(lookup_sample_row "${sample}")" || die "Sample not found in map: ${sample}"
     IFS=$'\t' read -r map_sample gex_dir guide_dir feature_ref <<< "${row}"
     [[ -n "${feature_ref}" ]] || feature_ref="${FEATURE_REF}"
+    gex_dirs=("${gex_dir}")
+    feature_dirs=("${guide_dir}")
   fi
 
-  require_dir "${gex_dir}"
-  require_dir "${guide_dir}"
-  require_file "${feature_ref}"
-  validate_pairs "${gex_dir}" "${sample} GEX"
-  validate_pairs "${guide_dir}" "${sample} guide"
+  all_input_dirs=("${gex_dirs[@]}" "${feature_dirs[@]}")
+  local dir_index=0
+  for gex_dir in "${gex_dirs[@]}"; do
+    require_dir "${gex_dir}"
+    validate_pairs "${gex_dir}" "${sample} GEX library ${dir_index}"
+    dir_index=$((dir_index + 1))
+  done
+  dir_index=0
+  for guide_dir in "${feature_dirs[@]}"; do
+    require_dir "${guide_dir}"
+    validate_pairs "${guide_dir}" "${sample} feature library ${dir_index}"
+    dir_index=$((dir_index + 1))
+  done
+  if [[ -n "${feature_ref}" ]]; then
+    require_file "${feature_ref}"
+  fi
 
-  mapfile -t src_fastqs < <(find "${gex_dir}" "${guide_dir}" -maxdepth 1 -type f -name '*.fastq.gz' | sort)
+  mapfile -t src_fastqs < <(find "${all_input_dirs[@]}" -maxdepth 1 -type f -name '*.fastq.gz' | sort)
   [[ "${#src_fastqs[@]}" -gt 0 ]] || die "No FASTQs found for ${sample}"
 
   local source_bytes
@@ -532,19 +548,54 @@ PY
 
   if (( DOWNSAMPLE_READS > 0 )); then
     log "Downsampling ${sample} libraries to ${DOWNSAMPLE_READS} read pairs each"
-    downsample_library_dir "${gex_dir}" "${stage_gex}" "${DOWNSAMPLE_READS}" "${DOWNSAMPLE_SEED}" "${sample} GEX"
-    downsample_library_dir "${guide_dir}" "${stage_guides}" "${DOWNSAMPLE_READS}" "$((DOWNSAMPLE_SEED + 1000))" "${sample} guides"
+    if [[ -n "${CR_CONFIG}" ]]; then
+      local -a rewrite_args=()
+      local idx=0
+      for gex_dir in "${gex_dirs[@]}"; do
+        local stage_dir="${stage_root}/GEX/$(printf '%02d' "${idx}")_$(basename "${gex_dir}")"
+        downsample_library_dir "${gex_dir}" "${stage_dir}" "${DOWNSAMPLE_READS}" "$((DOWNSAMPLE_SEED + idx))" "${sample} GEX ${idx}"
+        rewrite_args+=(--rewrite-fastq-dir "${gex_dir}=${stage_dir}")
+        idx=$((idx + 1))
+      done
+      idx=0
+      for guide_dir in "${feature_dirs[@]}"; do
+        local stage_dir="${stage_root}/FEATURE/$(printf '%02d' "${idx}")_$(basename "${guide_dir}")"
+        downsample_library_dir "${guide_dir}" "${stage_dir}" "${DOWNSAMPLE_READS}" "$((DOWNSAMPLE_SEED + 1000 + idx))" "${sample} feature ${idx}"
+        rewrite_args+=(--rewrite-fastq-dir "${guide_dir}=${stage_dir}")
+        idx=$((idx + 1))
+      done
+      python3 "${CR_INPUT_HELPER}" \
+        --config "${CR_CONFIG}" \
+        --sample-id "${sample}" \
+        --pf-multi-out "${pf_config}" \
+        "${rewrite_args[@]}" \
+        --emit-env > "${cr_env_file}"
+      # shellcheck disable=SC1090
+      source "${cr_env_file}"
+      stage_gex="${stage_root}/GEX"
+      stage_guides="${stage_root}/FEATURE"
+    else
+      downsample_library_dir "${gex_dir}" "${stage_gex}" "${DOWNSAMPLE_READS}" "${DOWNSAMPLE_SEED}" "${sample} GEX"
+      downsample_library_dir "${guide_dir}" "${stage_guides}" "${DOWNSAMPLE_READS}" "$((DOWNSAMPLE_SEED + 1000))" "${sample} guides"
+    fi
   else
-    stage_gex="${gex_dir}"
-    stage_guides="${guide_dir}"
+    if [[ -n "${CR_CONFIG}" ]]; then
+      python3 "${CR_INPUT_HELPER}" \
+        --config "${CR_CONFIG}" \
+        --sample-id "${sample}" \
+        --pf-multi-out "${pf_config}" \
+        --emit-env > "${cr_env_file}"
+      # shellcheck disable=SC1090
+      source "${cr_env_file}"
+      stage_gex="$(IFS=,; echo "${GEX_FASTQ_DIRS}")"
+      stage_guides="$(IFS=,; echo "${FEATURE_FASTQ_DIRS}")"
+    else
+      stage_gex="${gex_dir}"
+      stage_guides="${guide_dir}"
+    fi
   fi
 
-  if [[ -n "${CR_CONFIG}" ]]; then
-    python3 "${CR_INPUT_HELPER}" \
-      --config "${CR_CONFIG}" \
-      --sample-id "${sample}" \
-      --pf-multi-out "${pf_config}" >/dev/null
-  else
+  if [[ -z "${CR_CONFIG}" ]]; then
     cat > "${pf_config}" <<EOF
 [libraries]
 fastqs,sample,library_type,feature_types
@@ -556,15 +607,24 @@ ref,${feature_ref}
 EOF
   fi
 
-  mapfile -t gex_r2 < <(find "${stage_gex}" -maxdepth 1 -type f -name '*_R2_001.fastq.gz' | sort)
-  mapfile -t gex_r1 < <(find "${stage_gex}" -maxdepth 1 -type f -name '*_R1_001.fastq.gz' | sort)
-  mapfile -t guide_r2 < <(find "${stage_guides}" -maxdepth 1 -type f -name '*_R2_001.fastq.gz' | sort)
-  mapfile -t guide_r1 < <(find "${stage_guides}" -maxdepth 1 -type f -name '*_R1_001.fastq.gz' | sort)
-  local all_r2=("${gex_r2[@]}" "${guide_r2[@]}")
-  local all_r1=("${gex_r1[@]}" "${guide_r1[@]}")
   local reads_r2 reads_r1
-  reads_r2="$(join_by_comma "${all_r2[@]}")"
-  reads_r1="$(join_by_comma "${all_r1[@]}")"
+  if [[ -n "${CR_CONFIG}" ]]; then
+    reads_r2="${GEX_R2}"
+    reads_r1="${GEX_R1}"
+    if [[ -n "${FEATURE_R2:-}" ]]; then
+      reads_r2="${reads_r2},${FEATURE_R2}"
+      reads_r1="${reads_r1},${FEATURE_R1}"
+    fi
+  else
+    mapfile -t gex_r2 < <(find "${stage_gex}" -maxdepth 1 -type f -name '*_R2_001.fastq.gz' | sort)
+    mapfile -t gex_r1 < <(find "${stage_gex}" -maxdepth 1 -type f -name '*_R1_001.fastq.gz' | sort)
+    mapfile -t guide_r2 < <(find "${stage_guides}" -maxdepth 1 -type f -name '*_R2_001.fastq.gz' | sort)
+    mapfile -t guide_r1 < <(find "${stage_guides}" -maxdepth 1 -type f -name '*_R1_001.fastq.gz' | sort)
+    local all_r2=("${gex_r2[@]}" "${guide_r2[@]}")
+    local all_r1=("${gex_r1[@]}" "${guide_r1[@]}")
+    reads_r2="$(join_by_comma "${all_r2[@]}")"
+    reads_r1="$(join_by_comma "${all_r1[@]}")"
+  fi
 
   local cmd=(
     "${STAR_BIN}"
@@ -599,7 +659,6 @@ EOF
     --soloCrGexFeature genefull
     --soloCrMultimapRescue yes
     --pfMultiConfig "${pf_config}"
-    --crFeatureRef "${feature_ref}"
     --crWhitelist "${CR_WHITELIST}"
     --crMinUmi 3
     --crAssignMaxHamming 1
@@ -612,6 +671,9 @@ EOF
     --crAssignConsumerThreads 4
     --crAssignSearchThreads 4
   )
+  if [[ -n "${feature_ref}" ]]; then
+    cmd+=(--crFeatureRef "${feature_ref}")
+  fi
 
   {
     printf 'sample=%s\n' "${sample}"
@@ -628,6 +690,8 @@ EOF
     printf 'free_bytes_at_start=%s\n' "${avail_bytes}"
     printf 'gex_dir=%s\n' "${gex_dir}"
     printf 'guide_dir=%s\n' "${guide_dir}"
+    printf 'gex_dirs=%s\n' "$(join_by_comma "${gex_dirs[@]}")"
+    printf 'feature_dirs=%s\n' "$(join_by_comma "${feature_dirs[@]}")"
     printf 'staged_gex_dir=%s\n' "${stage_gex}"
     printf 'staged_guide_dir=%s\n' "${stage_guides}"
     printf 'run_dir=%s\n' "${run_dir}"

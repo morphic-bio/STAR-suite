@@ -77,11 +77,34 @@ The same CR-config input mode is also available for the UCSF perturb Y-removal
 runner:
 - `scripts/run_ucsf_perturb_yremove_batch.sh --cr-config <config.csv>`
 
+For perturb configs with multiple non-GEX feature libraries, the generated
+`pf_multi_config.from_cr.csv` preserves each library row plus the optional
+`star_chemistry`, `star_feature_ref`, and `star_library_id` columns from the
+Cell Ranger config.
+
 Smoke coverage for this path:
 - `tests/test_ucsf_cr_config_input.sh`
 - `tests/test_ucsf_batch_cr_config_input.sh`
+- `tests/test_ucsf_cr_config_multifeature_input.sh`
 - `tests/test_ucsf_batch_cr_config_tiny_smoke.sh`
+- `tests/test_ucsf_batch_cr_config_multifeature_tiny_smoke.sh`
 - `tests/run_ucsf_cr_config_1m_smoke.sh`
+
+## Flex CR-config input compatibility
+
+Use `scripts/run_flex_cr_config.sh --cr-config <config.csv>` to derive the Flex
+GEX FASTQ inputs, sample whitelist, sample probe table, and probe list directly
+from a Cell Ranger Flex `config.csv`.
+
+This path keeps the local pinned STAR reference/index policy unchanged while
+making the CR config the source of truth for:
+- GEX FASTQ directories
+- probe-set CSV
+- sample-to-probe-barcode mapping from `[samples]`
+
+Smoke coverage for this path:
+- `tests/test_flex_cr_config_input.sh`
+- `tests/run_flex_cr_config_smoke.sh`
 
 ## End-to-end wrapper
 

@@ -101,8 +101,18 @@ if [[ -n "${CR_CONFIG}" ]]; then
   PF_MULTI_CONFIG="${GENERATED_PF_MULTI}"
 fi
 
-READS_R2="${GEX_R2},${GUIDE_R2}"
-READS_R1="${GEX_R1},${GUIDE_R1}"
+READS_R2="${GEX_R2}"
+READS_R1="${GEX_R1}"
+if [[ -n "${FEATURE_R2:-}" ]]; then
+  READS_R2="${READS_R2},${FEATURE_R2}"
+elif [[ -n "${GUIDE_R2:-}" ]]; then
+  READS_R2="${READS_R2},${GUIDE_R2}"
+fi
+if [[ -n "${FEATURE_R1:-}" ]]; then
+  READS_R1="${READS_R1},${FEATURE_R1}"
+elif [[ -n "${GUIDE_R1:-}" ]]; then
+  READS_R1="${READS_R1},${GUIDE_R1}"
+fi
 
 CMD=(
   "${STAR_BIN}"
@@ -133,7 +143,6 @@ CMD=(
   --soloCrGexFeature genefull
   --soloCrMultimapRescue yes
   --pfMultiConfig "${PF_MULTI_CONFIG}"
-  --crFeatureRef "${CR_FEATURE_REF}"
   --crWhitelist "${CR_WHITELIST}"
   --crMinUmi 3
   --crAssignMaxHamming 1
@@ -146,6 +155,10 @@ CMD=(
   --crAssignConsumerThreads 4
   --crAssignSearchThreads 4
 )
+
+if [[ -n "${CR_FEATURE_REF}" ]]; then
+  CMD+=(--crFeatureRef "${CR_FEATURE_REF}")
+fi
 
 printf "run_id=%s\n" "${RUN_ID}" > "${OUT_DIR}/RUN_MANIFEST.txt"
 printf "date_utc=%s\n" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "${OUT_DIR}/RUN_MANIFEST.txt"

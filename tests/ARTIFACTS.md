@@ -72,6 +72,8 @@ update this file with its output location.
 - `tests/flexfilter_parity_output_*/` (FlexFilter parity outputs vs production baseline)
 - `/tmp/*` (temporary scratch outputs)
 - `/tmp/ucsf_cr_config_1m_smoke_*` (real UCSF perturb CR-config fixture smoke outputs)
+- `/tmp/ucsf_batch_cr_multifeature_tiny_*` (synthetic UCSF perturb multifeature CR-config tiny smoke outputs)
+- `/tmp/flex_cr_config_smoke_*` (Flex CR-config smoke outputs)
 - `/tmp/public_bulk_fixture_*` (public GEO bulk PE smoke fixtures downloaded via `scripts/download_public_bulk_fixture.sh`)
 - `/storage/A375/` (external A375 datasets + smoke outputs; e.g. `star_gex_smoke/`, `star_multi_smoke_cpp/`, `fastqs/`, `outputs/`)
   - Downsampled MEX output: `/storage/A375/star_multi_smoke/assign/downsampled/`
