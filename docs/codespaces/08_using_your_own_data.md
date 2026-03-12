@@ -13,7 +13,34 @@ For most real datasets, you will usually need to change only these things:
 - the whitelist and barcode settings for single-cell data
 - the feature reference or probe set for perturb or Flex
 
-## 1. If you use your own reference
+## 1. Reusing a parameter set you already trust
+
+The easiest way to move from the demo data to your own data is:
+- keep a command or config that already works
+- change only the parts that are specific to the dataset
+
+In practice, that usually means:
+- keep the same trimming and alignment settings
+- keep the same counting settings
+- replace only:
+  - FASTQ paths
+  - `--genome-dir`
+  - whitelist
+  - barcode and UMI settings
+  - feature reference or probe set
+
+Good starting points:
+- the `RUN_COMMAND.sh` file written by each demo
+- your own working STAR command
+- your own Cell Ranger-style config file for perturb or Flex, if that is the input style you already use
+
+The safest way to do this is:
+1. run the demo guide first
+2. copy the written `RUN_COMMAND.sh`
+3. replace one group of inputs at a time
+4. rerun and check the output before changing more
+
+## 2. If you use your own reference
 
 If your data is not meant to run against the small demo reference, use your own full reference instead.
 
@@ -31,7 +58,7 @@ Important rule:
 - the FASTA and GTF should match each other
 - the STAR index should be built from that same FASTA and GTF pair
 
-## 2. Bulk and SLAM
+## 3. Bulk and SLAM
 
 For bulk or SLAM runs, the main changes are simple:
 - replace the public FASTQ files with your own FASTQ files
@@ -39,7 +66,7 @@ For bulk or SLAM runs, the main changes are simple:
 
 Use the demo guides mainly as examples of the command shape.
 
-## 3. Single-cell data
+## 4. Single-cell data
 
 For single-cell data, there are two extra things to think about:
 - whitelist
@@ -64,7 +91,7 @@ If your assay uses different positions or lengths, you need to change:
 The small demo uses values that match its public source data.
 Your real dataset may need different values.
 
-## 4. Perturb
+## 5. Perturb
 
 For real perturb data, you will usually need:
 - your own GEX FASTQs
@@ -75,7 +102,7 @@ For real perturb data, you will usually need:
 
 If you are using a Cell Ranger-style config, make sure it points to the real files you want to run.
 
-## 5. Flex
+## 6. Flex
 
 For real Flex data, you will usually need:
 - your own FASTQs
@@ -84,7 +111,7 @@ For real Flex data, you will usually need:
 - the right probe set
 - a filtered reference and STAR index built from the reference and probe set you actually want to use
 
-## 6. A safe way to switch from demo data to real data
+## 7. A safe way to switch from demo data to real data
 
 A simple order is:
 1. get the demo guide working first
@@ -94,7 +121,7 @@ A simple order is:
 5. for perturb or Flex, update the feature reference or probe set
 6. rerun and check the written `RUN_COMMAND.sh`
 
-## 7. When in doubt
+## 8. When in doubt
 
 If you are unsure what to change:
 - start from the guide that is closest to your assay
