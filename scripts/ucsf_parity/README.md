@@ -78,6 +78,9 @@ runner:
 - `scripts/run_ucsf_perturb_yremove_batch.sh --cr-config <config.csv>`
 - `scripts/run_ucsf_perturb_yremove_batch.sh --cr-config <config.csv> --cr-sample-id <sample>`
 
+Detailed consumed/ignored/superseded field mapping is documented in:
+- [CR_CONFIG_COMPATIBILITY_MATRIX_20260312.md](/mnt/pikachu/STAR-suite/docs/CR_CONFIG_COMPATIBILITY_MATRIX_20260312.md)
+
 For perturb configs with multiple non-GEX feature libraries, the generated
 `pf_multi_config.from_cr.csv` preserves each library row plus the optional
 `star_chemistry`, `star_feature_ref`, and `star_library_id` columns from the
