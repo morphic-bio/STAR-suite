@@ -34,9 +34,11 @@ These guides help you try STAR-suite in GitHub Codespaces with small public data
 - [Perturb (work in progress)](./05_perturb.md)
 - [Flex (work in progress)](./06_flex.md)
 - [If you already use STAR or Cell Ranger](./07_star_cellranger_users.md)
+- [Using your own data](./08_using_your_own_data.md)
 
 ## Notes
 
 - The Codespaces setup tries to install a small walkthrough extension automatically.
 - If that does not happen, open the Command Palette and run `STAR-suite: Open Codespaces Walkthrough`.
 - You can replace the demo reference, STAR index, and input files with your own at any time.
+- See [Using your own data](./08_using_your_own_data.md).

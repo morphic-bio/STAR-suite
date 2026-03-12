@@ -26,3 +26,9 @@ bash scripts/codespaces/run_flex_public_demo.sh
 
 - a stronger public Flex demo dataset
 - a cleaner end-to-end demo result
+
+## Using your own data
+
+For a real Flex run, you will usually need your own FASTQs, whitelist, barcode settings, probe set, and a new filtered reference and STAR index.
+
+See [Using your own data](./08_using_your_own_data.md).

@@ -32,3 +32,9 @@ bash scripts/codespaces/run_bulk_public_demo.sh \
 ## If you already know STAR
 
 This guide mostly saves time by downloading a small public dataset and writing the full command for you.
+
+## Using your own data
+
+For a real bulk dataset, replace the demo FASTQs with your own files and point `--genome-dir` to the STAR index built from the reference you want to use.
+
+See [Using your own data](./08_using_your_own_data.md).

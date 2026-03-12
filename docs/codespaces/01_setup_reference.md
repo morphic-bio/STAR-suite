@@ -21,3 +21,9 @@ bash scripts/codespaces/build_public_chr22y_index.sh --threads 4
 
 This builds a very small human reference that only contains `chr22` and `chrY`.
 It is small enough to use in Codespaces and is shared by the single-cell demo guides.
+
+## Using your own data
+
+If you want to run real data, this is the place where you would switch from the small demo `genome.fa` and `genes.gtf` to your own full reference files and build a new STAR index.
+
+See [Using your own data](./08_using_your_own_data.md).

@@ -22,3 +22,9 @@ This page is for users who already know the tools, but still want simple setup i
 
 These guides do not use `cellranger mkref`.
 They build the small demo reference directly with STAR.
+
+## Using your own data
+
+If you want to move from the demo files to a real dataset, use this short guide:
+
+- [Using your own data](./08_using_your_own_data.md)

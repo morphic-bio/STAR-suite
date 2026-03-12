@@ -26,3 +26,9 @@ bash scripts/codespaces/run_perturb_public_demo.sh
 
 - a stronger public perturb demo dataset
 - a cleaner end-to-end demo result
+
+## Using your own data
+
+For a real perturb run, you will usually need your own GEX FASTQs, guide FASTQs, whitelist, barcode settings, and feature reference.
+
+See [Using your own data](./08_using_your_own_data.md).

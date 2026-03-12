@@ -30,3 +30,9 @@ bash scripts/codespaces/derive_public_chr22y_gex_fixture.sh \
 ## In plain terms
 
 This takes a small amount of public single-cell data and makes an even smaller input set that fits more easily in Codespaces.
+
+## Using your own data
+
+For real single-cell data, you will usually skip this guide and use your own FASTQs instead. That is also where whitelist and barcode settings start to matter.
+
+See [Using your own data](./08_using_your_own_data.md).
