@@ -104,9 +104,27 @@ Packaging/release details and artifact policy:
 Compilation details (module-by-module, clean rebuilds, and clean Ubuntu 24.04 validation):
 - `docs/compile_instructions.md`
 
-Codespaces walkthroughs for the four major modules:
-- `docs/CODESPACES_DEMO_WALKTHROUGHS_20260312.md`
-- `docs/codespaces/00_overview.md`
+## Codespaces Walkthroughs
+
+STAR-suite includes GitHub Codespaces walkthroughs for the main module entry points.
+
+Start here:
+- [Codespaces walkthrough summary](docs/CODESPACES_DEMO_WALKTHROUGHS_20260312.md)
+- [Codespaces overview](docs/codespaces/00_overview.md)
+
+Ready now:
+- [Optional setup: build the small demo reference](docs/codespaces/01_setup_reference.md)
+- [Bulk demo](docs/codespaces/02_bulk.md)
+- [SLAM demo](docs/codespaces/03_slam.md)
+- [Single-cell fixture builder](docs/codespaces/04_single_cell_fixture.md)
+
+Work in progress:
+- [Perturb demo](docs/codespaces/05_perturb.md)
+- [Flex demo](docs/codespaces/06_flex.md)
+
+Helpful follow-up guides:
+- [If you already use STAR or Cell Ranger](docs/codespaces/07_star_cellranger_users.md)
+- [Using your own data](docs/codespaces/08_using_your_own_data.md)
 
 ## Build Targets
 
