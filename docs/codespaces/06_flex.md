@@ -24,3 +24,8 @@ What is still placeholder quality:
 
 Planned replacement:
 - swap in a bounded real public Flex assay fixture while keeping the same walkthrough slot and command shape
+
+## If You Already Know STAR or Cell Ranger
+
+- STAR users: this chapter is about the STAR-suite Flex wrapper surface rather than raw STAR alone.
+- Cell Ranger users: treat this as a prototype config-driven scaffold for now, not a finished public parity walkthrough.

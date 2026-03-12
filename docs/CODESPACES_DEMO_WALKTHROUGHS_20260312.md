@@ -95,6 +95,7 @@ The intended user flow is non-linear:
 
 Recommended chapter picks:
 
+- users who already know STAR or Cell Ranger can start with `docs/codespaces/07_star_cellranger_users.md` and then jump straight to the relevant chapter
 - Experienced users:
   - go directly to Bulk or SLAM if you already have an index and only want the command shape
   - use the single-cell fixture chapter only if you need the bounded public input used by perturb or Flex

@@ -30,6 +30,7 @@
     "onCommand:starSuiteWalkthrough.openSetupGuide",
     "onCommand:starSuiteWalkthrough.openSlamGuide",
     "onCommand:starSuiteWalkthrough.openSlamWalkthrough",
+    "onCommand:starSuiteWalkthrough.openStarCrGuide",
     "onCommand:starSuiteWalkthrough.runBuildIndex",
     "onCommand:starSuiteWalkthrough.runBulkDryRun",
     "onCommand:starSuiteWalkthrough.runFetchReference",
@@ -124,6 +125,10 @@
       {
         "command": "starSuiteWalkthrough.openFlexWalkthrough",
         "title": "STAR-suite: Open Flex Walkthrough"
+      },
+      {
+        "command": "starSuiteWalkthrough.openStarCrGuide",
+        "title": "STAR-suite: Open STAR / Cell Ranger Guidance"
       }
     ],
     "walkthroughs": [
@@ -159,6 +164,18 @@
               "onCommand:starSuiteWalkthrough.openBulkWalkthrough",
               "onCommand:starSuiteWalkthrough.openSlamWalkthrough",
               "onCommand:starSuiteWalkthrough.openFixtureWalkthrough"
+            ]
+          },
+          {
+            "id": "starCrStart",
+            "title": "STAR / Cell Ranger users: focus on deltas",
+            "description": "Open [STAR / Cell Ranger guidance](command:starSuiteWalkthrough.openStarCrGuide) if you want the walkthrough to highlight what changes relative to normal STAR or Cell Ranger usage.",
+            "media": {
+              "image": "media/reference.svg",
+              "altText": "STAR and Cell Ranger guidance"
+            },
+            "completionEvents": [
+              "onCommand:starSuiteWalkthrough.openStarCrGuide"
             ]
           },
           {

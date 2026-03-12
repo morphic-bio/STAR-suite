@@ -22,3 +22,8 @@ Outputs:
 - `.codespaces-demo/runs/slam_public_demo/RUN_COMMAND.sh`
 - `.codespaces-demo/runs/slam_public_demo/Aligned.sortedByCoord.out.bam`
 - `.codespaces-demo/runs/slam_public_demo/slam_qc/`
+
+## If You Already Know STAR or Cell Ranger
+
+- STAR users: the material differences here are the SLAM-specific flags: `--slamQuantMode`, `--slamGrandSlamOut`, `--autoTrim variance`, and `--slamQcReport`.
+- Cell Ranger users: this is a STAR-SLAM surface, not a CR-like workflow.

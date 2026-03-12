@@ -24,3 +24,8 @@ What is still placeholder quality:
 
 Planned replacement:
 - swap in a bounded real public perturb assay fixture while keeping the same walkthrough slot and command shape
+
+## If You Already Know STAR or Cell Ranger
+
+- STAR users: the important surface here is the CR-config compatible wrapper and the pinned STAR-side defaults around it.
+- Cell Ranger users: the wrapper is designed so the CR-style input surface is familiar, but STAR-suite may still supersede some behavior with explicit STAR parameters.

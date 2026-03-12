@@ -21,3 +21,8 @@ Why this is the reference contract:
 - the important compatibility surface is the processed `FASTA + GTF`
 - we do not introduce `cellranger mkref` into the Codespaces path
 - users can replace this source surface with their own full reference later
+
+## If You Already Know STAR or Cell Ranger
+
+- STAR users: this is just a small public `FASTA + GTF` source surface plus `genomeGenerate`.
+- Cell Ranger users: the key point is that the demo does not use `mkref`; the relevant compatibility surface is the processed `genome.fa` and `genes.gtf`.

@@ -67,6 +67,7 @@ function activate(context) {
 
   register(context, 'starSuiteWalkthrough.openOverviewGuide', () => openRelative('docs/codespaces/00_overview.md'));
   register(context, 'starSuiteWalkthrough.openSetupGuide', () => openRelative('docs/codespaces/01_setup_reference.md'));
+  register(context, 'starSuiteWalkthrough.openStarCrGuide', () => openRelative('docs/codespaces/07_star_cellranger_users.md'));
   register(context, 'starSuiteWalkthrough.openBulkGuide', () => openRelative('docs/codespaces/02_bulk.md'));
   register(context, 'starSuiteWalkthrough.openSlamGuide', () => openRelative('docs/codespaces/03_slam.md'));
   register(context, 'starSuiteWalkthrough.openFixtureGuide', () => openRelative('docs/codespaces/04_single_cell_fixture.md'));
