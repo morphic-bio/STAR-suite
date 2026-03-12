@@ -2,7 +2,7 @@
 
 Current status: stable.
 
-This is the shared single-cell preparation path. It derives a bounded public GEX fixture by aligning a limited number of read pairs from a public male 10x dataset to the shared `chr22 + chrY` mini-reference and retaining only read pairs whose cDNA mates map to `chr22` or `chrY`.
+This is a shared utility chapter for perturb and Flex. It derives a bounded public GEX fixture by aligning a limited number of read pairs from a public male 10x dataset to the shared `chr22 + chrY` mini-reference and retaining only read pairs whose cDNA mates map to `chr22` or `chrY`.
 
 Preview:
 ```bash

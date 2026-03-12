@@ -4,7 +4,7 @@ Goal:
 - prepare the shared public `chr22 + chrY` source reference
 - build the STAR demo index inside Codespaces
 
-This is the common setup surface for the single-cell walkthroughs.
+This is an optional foundation chapter. Skip it if you already have a suitable reference source surface or a STAR index you want to use instead.
 
 Commands:
 ```bash

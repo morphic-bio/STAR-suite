@@ -13,10 +13,18 @@ Design rules:
 - Advanced users can swap in their own indices, references, or FASTQs at any step.
 - Perturb and Flex are intentionally present as placeholders so the module structure is stable even while their public demo fixtures are still being tightened.
 
-Suggested order:
-1. [Setup + Mini Reference](./01_setup_reference.md)
-2. [Bulk](./02_bulk.md)
-3. [SLAM](./03_slam.md)
-4. [Single-cell Fixture Derivation](./04_single_cell_fixture.md)
-5. [Perturb Placeholder](./05_perturb.md)
-6. [Flex Placeholder](./06_flex.md)
+Chapter model:
+- Optional shared foundation:
+  - [Setup + Mini Reference](./01_setup_reference.md)
+- Independent module chapters:
+  - [Bulk](./02_bulk.md)
+  - [SLAM](./03_slam.md)
+  - [Perturb Placeholder](./05_perturb.md)
+  - [Flex Placeholder](./06_flex.md)
+- Shared utility chapter for perturb and Flex only:
+  - [Single-cell Fixture Derivation](./04_single_cell_fixture.md)
+
+Use this non-linearly:
+- skip the foundation chapter if you already have a suitable reference or index
+- go directly to Bulk or SLAM if that is all you need
+- use the single-cell fixture chapter only if you want the bounded public input used by perturb and Flex

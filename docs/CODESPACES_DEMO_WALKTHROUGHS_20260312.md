@@ -57,7 +57,12 @@ These download the official `config.csv` and feature/probe reference files and p
 
 - In Codespaces, `.devcontainer/postCreate.sh` packages and installs the repo-local walkthrough extension on a best-effort basis. The fallback entry point is Command Palette -> `STAR-suite: Open Codespaces Walkthrough`.
 
-Codespaces now includes a repo-local VS Code walkthrough extension under `tools/vscode-star-suite-walkthrough/`. The extension keeps the stable parts runnable today and exposes perturb/Flex as placeholder module slots so the guided structure does not need to change when the real public assay fixtures replace the current scaffolds.
+Codespaces now includes a repo-local VS Code walkthrough extension under `tools/vscode-star-suite-walkthrough/`. The extension presents the demo surface as independent chapters:
+
+- one optional shared foundation chapter for mini-reference creation
+- standalone module chapters for bulk and SLAM
+- a shared utility chapter for the single-cell fixture used by perturb and Flex
+- placeholder perturb and Flex chapters that keep the walkthrough shape stable while their real public assay fixtures are being tightened
 
 Structured module guides also live under `docs/codespaces/`:
 
@@ -81,6 +86,12 @@ Open the repo in Codespaces. The devcontainer installs:
 - Python + pandas
 
 If the STAR binary is missing, the walkthrough scripts build it automatically.
+
+The intended user flow is non-linear:
+
+- start with the foundation chapter only if you need the shared mini-reference
+- go directly to Bulk or SLAM otherwise
+- use the single-cell fixture chapter only when you want the bounded public input for perturb or Flex
 
 ## Demo Matrix
 

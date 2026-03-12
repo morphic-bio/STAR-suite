@@ -2,7 +2,7 @@ const vscode = require('vscode');
 const path = require('path');
 
 const EXTENSION_ID = 'morphic-bio.star-suite-walkthrough';
-const ROOT_WALKTHROUGH_ID = `${EXTENSION_ID}#setupReference`;
+const ROOT_WALKTHROUGH_ID = `${EXTENSION_ID}#overview`;
 
 function workspaceRoot() {
   const folder = vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders[0];
@@ -47,15 +47,23 @@ function register(context, command, fn) {
   context.subscriptions.push(vscode.commands.registerCommand(command, fn));
 }
 
+async function openWalkthrough(id) {
+  try {
+    await vscode.commands.executeCommand('workbench.action.openWalkthrough', `${EXTENSION_ID}#${id}`, true);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    vscode.window.showInformationMessage(`Open Getting Started and select STAR-suite Demo Walkthrough. ${detail}`);
+  }
+}
+
 function activate(context) {
-  register(context, 'starSuiteWalkthrough.openMainWalkthrough', async () => {
-    try {
-      await vscode.commands.executeCommand('workbench.action.openWalkthrough', ROOT_WALKTHROUGH_ID, true);
-    } catch (error) {
-      const detail = error instanceof Error ? error.message : String(error);
-      vscode.window.showInformationMessage(`Open Getting Started and select STAR-suite Demo Walkthrough. ${detail}`);
-    }
-  });
+  register(context, 'starSuiteWalkthrough.openMainWalkthrough', () => openWalkthrough('overview'));
+  register(context, 'starSuiteWalkthrough.openFoundationWalkthrough', () => openWalkthrough('foundation'));
+  register(context, 'starSuiteWalkthrough.openBulkWalkthrough', () => openWalkthrough('bulkDemo'));
+  register(context, 'starSuiteWalkthrough.openSlamWalkthrough', () => openWalkthrough('slamDemo'));
+  register(context, 'starSuiteWalkthrough.openFixtureWalkthrough', () => openWalkthrough('singleCellFixture'));
+  register(context, 'starSuiteWalkthrough.openPerturbWalkthrough', () => openWalkthrough('perturbPlaceholder'));
+  register(context, 'starSuiteWalkthrough.openFlexWalkthrough', () => openWalkthrough('flexPlaceholder'));
 
   register(context, 'starSuiteWalkthrough.openOverviewGuide', () => openRelative('docs/codespaces/00_overview.md'));
   register(context, 'starSuiteWalkthrough.openSetupGuide', () => openRelative('docs/codespaces/01_setup_reference.md'));

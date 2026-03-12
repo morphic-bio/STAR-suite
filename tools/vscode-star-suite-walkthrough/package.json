@@ -16,21 +16,27 @@
     "Other"
   ],
   "activationEvents": [
+    "onCommand:starSuiteWalkthrough.openBulkGuide",
+    "onCommand:starSuiteWalkthrough.openBulkWalkthrough",
+    "onCommand:starSuiteWalkthrough.openFixtureGuide",
+    "onCommand:starSuiteWalkthrough.openFixtureWalkthrough",
+    "onCommand:starSuiteWalkthrough.openFlexGuide",
+    "onCommand:starSuiteWalkthrough.openFlexWalkthrough",
+    "onCommand:starSuiteWalkthrough.openFoundationWalkthrough",
     "onCommand:starSuiteWalkthrough.openMainWalkthrough",
     "onCommand:starSuiteWalkthrough.openOverviewGuide",
-    "onCommand:starSuiteWalkthrough.openSetupGuide",
-    "onCommand:starSuiteWalkthrough.openBulkGuide",
-    "onCommand:starSuiteWalkthrough.openSlamGuide",
-    "onCommand:starSuiteWalkthrough.openFixtureGuide",
     "onCommand:starSuiteWalkthrough.openPerturbGuide",
-    "onCommand:starSuiteWalkthrough.openFlexGuide",
-    "onCommand:starSuiteWalkthrough.runFetchReference",
+    "onCommand:starSuiteWalkthrough.openPerturbWalkthrough",
+    "onCommand:starSuiteWalkthrough.openSetupGuide",
+    "onCommand:starSuiteWalkthrough.openSlamGuide",
+    "onCommand:starSuiteWalkthrough.openSlamWalkthrough",
     "onCommand:starSuiteWalkthrough.runBuildIndex",
-    "onCommand:starSuiteWalkthrough.runFixtureDryRun",
     "onCommand:starSuiteWalkthrough.runBulkDryRun",
-    "onCommand:starSuiteWalkthrough.runSlamDryRun",
+    "onCommand:starSuiteWalkthrough.runFetchReference",
+    "onCommand:starSuiteWalkthrough.runFixtureDryRun",
+    "onCommand:starSuiteWalkthrough.runFlexDryRun",
     "onCommand:starSuiteWalkthrough.runPerturbDryRun",
-    "onCommand:starSuiteWalkthrough.runFlexDryRun"
+    "onCommand:starSuiteWalkthrough.runSlamDryRun"
   ],
   "main": "./extension.js",
   "contributes": {
@@ -94,21 +100,45 @@
       {
         "command": "starSuiteWalkthrough.runFlexDryRun",
         "title": "STAR-suite: Preview Flex Prototype Command"
+      },
+      {
+        "command": "starSuiteWalkthrough.openFoundationWalkthrough",
+        "title": "STAR-suite: Open Foundation Walkthrough"
+      },
+      {
+        "command": "starSuiteWalkthrough.openBulkWalkthrough",
+        "title": "STAR-suite: Open Bulk Walkthrough"
+      },
+      {
+        "command": "starSuiteWalkthrough.openSlamWalkthrough",
+        "title": "STAR-suite: Open SLAM Walkthrough"
+      },
+      {
+        "command": "starSuiteWalkthrough.openFixtureWalkthrough",
+        "title": "STAR-suite: Open Single-cell Fixture Walkthrough"
+      },
+      {
+        "command": "starSuiteWalkthrough.openPerturbWalkthrough",
+        "title": "STAR-suite: Open Perturb Walkthrough"
+      },
+      {
+        "command": "starSuiteWalkthrough.openFlexWalkthrough",
+        "title": "STAR-suite: Open Flex Walkthrough"
       }
     ],
     "walkthroughs": [
       {
-        "id": "setupReference",
-        "title": "Setup + Mini Reference",
-        "description": "Prepare the shared public chr22 + chrY demo reference and STAR index.",
+        "id": "overview",
+        "title": "Overview",
+        "description": "Choose an independent STAR-suite demo chapter. The foundation chapter is optional.",
         "featuredFor": [
           "workspace"
         ],
         "steps": [
           {
-            "id": "overview",
-            "title": "Open the demo overview",
-            "description": "Review [the Codespaces demo overview](command:starSuiteWalkthrough.openOverviewGuide) before you start.",
+            "id": "overviewGuide",
+            "title": "Open the Codespaces overview",
+            "description": "Open [the overview guide](command:starSuiteWalkthrough.openOverviewGuide) to see the chapter model and current stable surfaces.",
             "media": {
               "image": "media/setup.svg",
               "altText": "Overview"
@@ -118,8 +148,90 @@
             ]
           },
           {
+            "id": "foundation",
+            "title": "Optional foundation chapter",
+            "description": "If you need the shared mini-reference, jump to [Optional: Build Mini Reference](command:starSuiteWalkthrough.openFoundationWalkthrough). Otherwise skip it.",
+            "media": {
+              "image": "media/reference.svg",
+              "altText": "Foundation"
+            },
+            "completionEvents": [
+              "onCommand:starSuiteWalkthrough.openFoundationWalkthrough"
+            ]
+          },
+          {
+            "id": "bulk",
+            "title": "Bulk chapter",
+            "description": "Open the independent [Bulk walkthrough](command:starSuiteWalkthrough.openBulkWalkthrough).",
+            "media": {
+              "image": "media/bulk.svg",
+              "altText": "Bulk"
+            },
+            "completionEvents": [
+              "onCommand:starSuiteWalkthrough.openBulkWalkthrough"
+            ]
+          },
+          {
+            "id": "slam",
+            "title": "SLAM chapter",
+            "description": "Open the independent [SLAM walkthrough](command:starSuiteWalkthrough.openSlamWalkthrough).",
+            "media": {
+              "image": "media/slam.svg",
+              "altText": "SLAM"
+            },
+            "completionEvents": [
+              "onCommand:starSuiteWalkthrough.openSlamWalkthrough"
+            ]
+          },
+          {
+            "id": "fixture",
+            "title": "Single-cell fixture utility",
+            "description": "Open the shared [Single-cell Fixture walkthrough](command:starSuiteWalkthrough.openFixtureWalkthrough) if you want the bounded public GEX input used by perturb and Flex.",
+            "media": {
+              "image": "media/reference.svg",
+              "altText": "Fixture"
+            },
+            "completionEvents": [
+              "onCommand:starSuiteWalkthrough.openFixtureWalkthrough"
+            ]
+          },
+          {
+            "id": "perturb",
+            "title": "Perturb prototype chapter",
+            "description": "Open the current [Perturb walkthrough](command:starSuiteWalkthrough.openPerturbWalkthrough).",
+            "media": {
+              "image": "media/prototype.svg",
+              "altText": "Perturb"
+            },
+            "completionEvents": [
+              "onCommand:starSuiteWalkthrough.openPerturbWalkthrough"
+            ]
+          },
+          {
+            "id": "flex",
+            "title": "Flex prototype chapter",
+            "description": "Open the current [Flex walkthrough](command:starSuiteWalkthrough.openFlexWalkthrough).",
+            "media": {
+              "image": "media/prototype.svg",
+              "altText": "Flex"
+            },
+            "completionEvents": [
+              "onCommand:starSuiteWalkthrough.openFlexWalkthrough"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "foundation",
+        "title": "Optional: Build Mini Reference",
+        "description": "Build the shared public chr22 + chrY mini-reference only if you need the demo source surface or do not already have a suitable index.",
+        "featuredFor": [
+          "workspace"
+        ],
+        "steps": [
+          {
             "id": "setupGuide",
-            "title": "Open the setup guide",
+            "title": "Open the foundation guide",
             "description": "Open [Setup + Mini Reference](command:starSuiteWalkthrough.openSetupGuide) for the exact reference contract and outputs.",
             "media": {
               "image": "media/reference.svg",
@@ -158,7 +270,7 @@
       {
         "id": "bulkDemo",
         "title": "Bulk Demo",
-        "description": "Preview the stable public bulk STAR walkthrough.",
+        "description": "Independent public bulk walkthrough.",
         "featuredFor": [
           "workspace"
         ],
@@ -192,7 +304,7 @@
       {
         "id": "slamDemo",
         "title": "SLAM Demo",
-        "description": "Preview the stable public SLAM walkthrough.",
+        "description": "Independent public SLAM walkthrough.",
         "featuredFor": [
           "workspace"
         ],
@@ -225,8 +337,8 @@
       },
       {
         "id": "singleCellFixture",
-        "title": "Single-cell Fixture",
-        "description": "Derive the shared bounded public GEX fixture used by the single-cell demos.",
+        "title": "Utility: Single-cell Fixture",
+        "description": "Shared bounded public GEX fixture derivation for perturb and Flex. This is not a required chapter for bulk or SLAM.",
         "featuredFor": [
           "workspace"
         ],
@@ -260,7 +372,7 @@
       {
         "id": "perturbPlaceholder",
         "title": "Perturb Demo (Prototype)",
-        "description": "Keep the perturb walkthrough slot visible, but mark it as a placeholder until the real public assay fixture replaces the current scaffold.",
+        "description": "Independent perturb chapter placeholder until the real public assay fixture replaces the current scaffold.",
         "featuredFor": [
           "workspace"
         ],
@@ -294,7 +406,7 @@
       {
         "id": "flexPlaceholder",
         "title": "Flex Demo (Prototype)",
-        "description": "Keep the Flex walkthrough slot visible, but mark it as a placeholder until the real public assay fixture replaces the current scaffold.",
+        "description": "Independent Flex chapter placeholder until the real public assay fixture replaces the current scaffold.",
         "featuredFor": [
           "workspace"
         ],
