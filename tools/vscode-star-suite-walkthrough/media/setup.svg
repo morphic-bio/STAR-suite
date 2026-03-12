@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 320" role="img" aria-label="STAR-suite setup walkthrough">
+  <rect width="640" height="320" fill="#0f172a"/>
+  <rect x="32" y="32" width="576" height="256" rx="20" fill="#111827" stroke="#38bdf8" stroke-width="4"/>
+  <text x="64" y="118" fill="#e2e8f0" font-family="monospace" font-size="30">STAR-suite</text>
+  <text x="64" y="160" fill="#7dd3fc" font-family="monospace" font-size="24">Codespaces walkthrough</text>
+  <text x="64" y="210" fill="#cbd5e1" font-family="monospace" font-size="20">setup + mini-reference</text>
+</svg>

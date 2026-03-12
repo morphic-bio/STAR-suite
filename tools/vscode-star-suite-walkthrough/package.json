@@ -1,0 +1,333 @@
+{
+  "name": "star-suite-walkthrough",
+  "displayName": "STAR-suite Demo Walkthrough",
+  "description": "Guided Codespaces walkthroughs for the stable STAR-suite demo surfaces.",
+  "version": "0.0.1",
+  "publisher": "morphic-bio",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/morphic-bio/STAR-suite.git"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onCommand:starSuiteWalkthrough.openMainWalkthrough",
+    "onCommand:starSuiteWalkthrough.openOverviewGuide",
+    "onCommand:starSuiteWalkthrough.openSetupGuide",
+    "onCommand:starSuiteWalkthrough.openBulkGuide",
+    "onCommand:starSuiteWalkthrough.openSlamGuide",
+    "onCommand:starSuiteWalkthrough.openFixtureGuide",
+    "onCommand:starSuiteWalkthrough.openPerturbGuide",
+    "onCommand:starSuiteWalkthrough.openFlexGuide",
+    "onCommand:starSuiteWalkthrough.runFetchReference",
+    "onCommand:starSuiteWalkthrough.runBuildIndex",
+    "onCommand:starSuiteWalkthrough.runFixtureDryRun",
+    "onCommand:starSuiteWalkthrough.runBulkDryRun",
+    "onCommand:starSuiteWalkthrough.runSlamDryRun",
+    "onCommand:starSuiteWalkthrough.runPerturbDryRun",
+    "onCommand:starSuiteWalkthrough.runFlexDryRun"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "starSuiteWalkthrough.openMainWalkthrough",
+        "title": "STAR-suite: Open Codespaces Walkthrough"
+      },
+      {
+        "command": "starSuiteWalkthrough.openOverviewGuide",
+        "title": "STAR-suite: Open Codespaces Demo Overview"
+      },
+      {
+        "command": "starSuiteWalkthrough.openSetupGuide",
+        "title": "STAR-suite: Open Setup + Mini Reference Guide"
+      },
+      {
+        "command": "starSuiteWalkthrough.openBulkGuide",
+        "title": "STAR-suite: Open Bulk Demo Guide"
+      },
+      {
+        "command": "starSuiteWalkthrough.openSlamGuide",
+        "title": "STAR-suite: Open SLAM Demo Guide"
+      },
+      {
+        "command": "starSuiteWalkthrough.openFixtureGuide",
+        "title": "STAR-suite: Open Single-cell Fixture Guide"
+      },
+      {
+        "command": "starSuiteWalkthrough.openPerturbGuide",
+        "title": "STAR-suite: Open Perturb Demo Guide"
+      },
+      {
+        "command": "starSuiteWalkthrough.openFlexGuide",
+        "title": "STAR-suite: Open Flex Demo Guide"
+      },
+      {
+        "command": "starSuiteWalkthrough.runFetchReference",
+        "title": "STAR-suite: Run chr22+chrY Reference Fetch"
+      },
+      {
+        "command": "starSuiteWalkthrough.runBuildIndex",
+        "title": "STAR-suite: Build chr22+chrY Demo Index"
+      },
+      {
+        "command": "starSuiteWalkthrough.runFixtureDryRun",
+        "title": "STAR-suite: Preview Single-cell Fixture Derivation"
+      },
+      {
+        "command": "starSuiteWalkthrough.runBulkDryRun",
+        "title": "STAR-suite: Preview Bulk Demo Command"
+      },
+      {
+        "command": "starSuiteWalkthrough.runSlamDryRun",
+        "title": "STAR-suite: Preview SLAM Demo Command"
+      },
+      {
+        "command": "starSuiteWalkthrough.runPerturbDryRun",
+        "title": "STAR-suite: Preview Perturb Prototype Command"
+      },
+      {
+        "command": "starSuiteWalkthrough.runFlexDryRun",
+        "title": "STAR-suite: Preview Flex Prototype Command"
+      }
+    ],
+    "walkthroughs": [
+      {
+        "id": "setupReference",
+        "title": "Setup + Mini Reference",
+        "description": "Prepare the shared public chr22 + chrY demo reference and STAR index.",
+        "featuredFor": [
+          "workspace"
+        ],
+        "steps": [
+          {
+            "id": "overview",
+            "title": "Open the demo overview",
+            "description": "Review [the Codespaces demo overview](command:starSuiteWalkthrough.openOverviewGuide) before you start.",
+            "media": {
+              "image": "media/setup.svg",
+              "altText": "Overview"
+            },
+            "completionEvents": [
+              "onCommand:starSuiteWalkthrough.openOverviewGuide"
+            ]
+          },
+          {
+            "id": "setupGuide",
+            "title": "Open the setup guide",
+            "description": "Open [Setup + Mini Reference](command:starSuiteWalkthrough.openSetupGuide) for the exact reference contract and outputs.",
+            "media": {
+              "image": "media/reference.svg",
+              "altText": "Reference guide"
+            },
+            "completionEvents": [
+              "onCommand:starSuiteWalkthrough.openSetupGuide"
+            ]
+          },
+          {
+            "id": "fetchReference",
+            "title": "Fetch chr22 + chrY reference sources",
+            "description": "Launch the real reference fetch in an integrated terminal with [Run chr22+chrY Reference Fetch](command:starSuiteWalkthrough.runFetchReference).",
+            "media": {
+              "image": "media/reference.svg",
+              "altText": "Fetch reference"
+            },
+            "completionEvents": [
+              "onCommand:starSuiteWalkthrough.runFetchReference"
+            ]
+          },
+          {
+            "id": "buildIndex",
+            "title": "Build the demo STAR index",
+            "description": "Build the shared mini-reference index with [Build chr22+chrY Demo Index](command:starSuiteWalkthrough.runBuildIndex).",
+            "media": {
+              "image": "media/terminal.svg",
+              "altText": "Build index"
+            },
+            "completionEvents": [
+              "onCommand:starSuiteWalkthrough.runBuildIndex"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "bulkDemo",
+        "title": "Bulk Demo",
+        "description": "Preview the stable public bulk STAR walkthrough.",
+        "featuredFor": [
+          "workspace"
+        ],
+        "steps": [
+          {
+            "id": "bulkGuide",
+            "title": "Open the bulk guide",
+            "description": "Open [Bulk Demo](command:starSuiteWalkthrough.openBulkGuide) for the command shape and outputs.",
+            "media": {
+              "image": "media/bulk.svg",
+              "altText": "Bulk guide"
+            },
+            "completionEvents": [
+              "onCommand:starSuiteWalkthrough.openBulkGuide"
+            ]
+          },
+          {
+            "id": "bulkDryRun",
+            "title": "Preview the bulk command",
+            "description": "Launch the dry-run helper with [Preview Bulk Demo Command](command:starSuiteWalkthrough.runBulkDryRun).",
+            "media": {
+              "image": "media/terminal.svg",
+              "altText": "Bulk terminal"
+            },
+            "completionEvents": [
+              "onCommand:starSuiteWalkthrough.runBulkDryRun"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "slamDemo",
+        "title": "SLAM Demo",
+        "description": "Preview the stable public SLAM walkthrough.",
+        "featuredFor": [
+          "workspace"
+        ],
+        "steps": [
+          {
+            "id": "slamGuide",
+            "title": "Open the SLAM guide",
+            "description": "Open [SLAM Demo](command:starSuiteWalkthrough.openSlamGuide) for the command shape and outputs.",
+            "media": {
+              "image": "media/slam.svg",
+              "altText": "SLAM guide"
+            },
+            "completionEvents": [
+              "onCommand:starSuiteWalkthrough.openSlamGuide"
+            ]
+          },
+          {
+            "id": "slamDryRun",
+            "title": "Preview the SLAM command",
+            "description": "Launch the dry-run helper with [Preview SLAM Demo Command](command:starSuiteWalkthrough.runSlamDryRun).",
+            "media": {
+              "image": "media/terminal.svg",
+              "altText": "SLAM terminal"
+            },
+            "completionEvents": [
+              "onCommand:starSuiteWalkthrough.runSlamDryRun"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "singleCellFixture",
+        "title": "Single-cell Fixture",
+        "description": "Derive the shared bounded public GEX fixture used by the single-cell demos.",
+        "featuredFor": [
+          "workspace"
+        ],
+        "steps": [
+          {
+            "id": "fixtureGuide",
+            "title": "Open the fixture guide",
+            "description": "Open [Single-cell Fixture Derivation](command:starSuiteWalkthrough.openFixtureGuide) for the bounded derivation flow.",
+            "media": {
+              "image": "media/reference.svg",
+              "altText": "Fixture guide"
+            },
+            "completionEvents": [
+              "onCommand:starSuiteWalkthrough.openFixtureGuide"
+            ]
+          },
+          {
+            "id": "fixtureDryRun",
+            "title": "Preview the fixture derivation",
+            "description": "Launch the dry-run helper with [Preview Single-cell Fixture Derivation](command:starSuiteWalkthrough.runFixtureDryRun).",
+            "media": {
+              "image": "media/terminal.svg",
+              "altText": "Fixture terminal"
+            },
+            "completionEvents": [
+              "onCommand:starSuiteWalkthrough.runFixtureDryRun"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "perturbPlaceholder",
+        "title": "Perturb Demo (Prototype)",
+        "description": "Keep the perturb walkthrough slot visible, but mark it as a placeholder until the real public assay fixture replaces the current scaffold.",
+        "featuredFor": [
+          "workspace"
+        ],
+        "steps": [
+          {
+            "id": "perturbGuide",
+            "title": "Open the perturb placeholder guide",
+            "description": "Open [Perturb Demo](command:starSuiteWalkthrough.openPerturbGuide) to see the current limits and swap plan.",
+            "media": {
+              "image": "media/prototype.svg",
+              "altText": "Perturb placeholder"
+            },
+            "completionEvents": [
+              "onCommand:starSuiteWalkthrough.openPerturbGuide"
+            ]
+          },
+          {
+            "id": "perturbDryRun",
+            "title": "Preview the current perturb prototype",
+            "description": "Launch the current scaffold with [Preview Perturb Prototype Command](command:starSuiteWalkthrough.runPerturbDryRun).",
+            "media": {
+              "image": "media/prototype.svg",
+              "altText": "Perturb prototype"
+            },
+            "completionEvents": [
+              "onCommand:starSuiteWalkthrough.runPerturbDryRun"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "flexPlaceholder",
+        "title": "Flex Demo (Prototype)",
+        "description": "Keep the Flex walkthrough slot visible, but mark it as a placeholder until the real public assay fixture replaces the current scaffold.",
+        "featuredFor": [
+          "workspace"
+        ],
+        "steps": [
+          {
+            "id": "flexGuide",
+            "title": "Open the Flex placeholder guide",
+            "description": "Open [Flex Demo](command:starSuiteWalkthrough.openFlexGuide) to see the current limits and swap plan.",
+            "media": {
+              "image": "media/prototype.svg",
+              "altText": "Flex placeholder"
+            },
+            "completionEvents": [
+              "onCommand:starSuiteWalkthrough.openFlexGuide"
+            ]
+          },
+          {
+            "id": "flexDryRun",
+            "title": "Preview the current Flex prototype",
+            "description": "Launch the current scaffold with [Preview Flex Prototype Command](command:starSuiteWalkthrough.runFlexDryRun).",
+            "media": {
+              "image": "media/prototype.svg",
+              "altText": "Flex prototype"
+            },
+            "completionEvents": [
+              "onCommand:starSuiteWalkthrough.runFlexDryRun"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "extensionKind": [
+    "workspace"
+  ]
+}

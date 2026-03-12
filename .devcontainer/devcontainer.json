@@ -14,7 +14,9 @@
       ],
       "settings": {
         "terminal.integrated.defaultProfile.linux": "bash",
-        "files.eol": "\n"
+        "files.eol": "\n",
+        "workbench.welcomePage.walkthroughs.openOnInstall": true,
+        "workbench.startupEditor": "welcomePage"
       }
     }
   }

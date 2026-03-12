@@ -11,6 +11,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git-lfs \
     jq \
     make \
+    nodejs \
+    npm \
     pigz \
     python3 \
     python3-pandas \

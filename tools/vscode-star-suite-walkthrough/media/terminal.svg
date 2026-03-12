@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 320" role="img" aria-label="Terminal walkthrough step">
+  <rect width="640" height="320" fill="#111827"/>
+  <rect x="40" y="40" width="560" height="240" rx="16" fill="#020617" stroke="#22c55e" stroke-width="4"/>
+  <circle cx="80" cy="78" r="8" fill="#ef4444"/>
+  <circle cx="108" cy="78" r="8" fill="#f59e0b"/>
+  <circle cx="136" cy="78" r="8" fill="#22c55e"/>
+  <text x="74" y="136" fill="#86efac" font-family="monospace" font-size="22">bash scripts/codespaces/...</text>
+  <text x="74" y="182" fill="#d1fae5" font-family="monospace" font-size="18">run the exact helper from the guide</text>
+</svg>

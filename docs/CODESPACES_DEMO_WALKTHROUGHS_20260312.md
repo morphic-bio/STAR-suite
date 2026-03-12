@@ -53,6 +53,22 @@ Small metadata fetchers for those sources are available:
 
 These download the official `config.csv` and feature/probe reference files and pin the raw FASTQ tar URLs. The remaining open problem is writing a bounded stream-extract path for those large public raw tar archives so Codespaces can derive small runnable fixtures without downloading the full tarballs.
 
+## VS Code Walkthrough Surface
+
+- In Codespaces, `.devcontainer/postCreate.sh` packages and installs the repo-local walkthrough extension on a best-effort basis. The fallback entry point is Command Palette -> `STAR-suite: Open Codespaces Walkthrough`.
+
+Codespaces now includes a repo-local VS Code walkthrough extension under `tools/vscode-star-suite-walkthrough/`. The extension keeps the stable parts runnable today and exposes perturb/Flex as placeholder module slots so the guided structure does not need to change when the real public assay fixtures replace the current scaffolds.
+
+Structured module guides also live under `docs/codespaces/`:
+
+- `00_overview.md`
+- `01_setup_reference.md`
+- `02_bulk.md`
+- `03_slam.md`
+- `04_single_cell_fixture.md`
+- `05_perturb.md`
+- `06_flex.md`
+
 ## One-Time Setup
 
 Open the repo in Codespaces. The devcontainer installs:

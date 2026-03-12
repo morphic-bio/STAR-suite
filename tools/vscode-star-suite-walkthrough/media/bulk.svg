@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 320" role="img" aria-label="Bulk walkthrough step">
+  <rect width="640" height="320" fill="#0f172a"/>
+  <text x="72" y="124" fill="#f8fafc" font-family="monospace" font-size="34">Bulk</text>
+  <text x="72" y="176" fill="#fcd34d" font-family="monospace" font-size="22">public PE fixture</text>
+  <text x="72" y="214" fill="#cbd5e1" font-family="monospace" font-size="18">preview first, then swap in your index</text>
+</svg>

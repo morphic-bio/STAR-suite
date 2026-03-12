@@ -106,6 +106,7 @@ Compilation details (module-by-module, clean rebuilds, and clean Ubuntu 24.04 va
 
 Codespaces walkthroughs for the four major modules:
 - `docs/CODESPACES_DEMO_WALKTHROUGHS_20260312.md`
+- `docs/codespaces/00_overview.md`
 
 ## Build Targets
 

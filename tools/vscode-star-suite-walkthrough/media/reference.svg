@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 320" role="img" aria-label="Reference walkthrough step">
+  <rect width="640" height="320" fill="#0b1220"/>
+  <rect x="48" y="48" width="544" height="224" rx="18" fill="#172033" stroke="#94a3b8" stroke-width="3"/>
+  <text x="80" y="120" fill="#f8fafc" font-family="monospace" font-size="26">public_human_chr22y_ref</text>
+  <text x="80" y="170" fill="#93c5fd" font-family="monospace" font-size="20">FASTA + GTF source surface</text>
+  <text x="80" y="214" fill="#cbd5e1" font-family="monospace" font-size="18">shared by the single-cell demos</text>
+</svg>
