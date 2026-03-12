@@ -10,6 +10,7 @@ source "${SCRIPT_DIR}/public_demo_sources.sh"
 GENOME_DIR="${GENOME_DIR:-}"
 OUTDIR="${OUTDIR:-${RUN_ROOT}/bulk_public_demo}"
 THREADS="${THREADS:-4}"
+MAX_SPOTS="${MAX_SPOTS:-${CODESPACES_PUBLIC_BULK_MAX_SPOTS}}"
 RUN=0
 DRY_RUN=0
 
@@ -24,6 +25,7 @@ Options:
   --genome-dir DIR  STAR genomeDir for execution
   --outdir DIR      Output directory. Default: ${RUN_ROOT}/bulk_public_demo
   --threads N       STAR threads. Default: ${THREADS}
+  --max-spots N     FASTQ spots to stage for the demo. Default: ${MAX_SPOTS}
   --run             Execute STAR after writing RUN_COMMAND.sh
   --dry-run         Download fixture and write command without executing
   -h, --help        Show help
@@ -35,6 +37,7 @@ while [[ $# -gt 0 ]]; do
     --genome-dir) GENOME_DIR="$2"; shift 2 ;;
     --outdir) OUTDIR="$2"; shift 2 ;;
     --threads) THREADS="$2"; shift 2 ;;
+    --max-spots) MAX_SPOTS="$2"; shift 2 ;;
     --run) RUN=1; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -46,11 +49,12 @@ need_cmd pigz
 need_cmd fastq-dump
 ensure_star_built
 
-FIXTURE_DIR="${DATA_ROOT}/bulk_${CODESPACES_PUBLIC_BULK_SRR}"
+FIXTURE_DIR="${DATA_ROOT}/bulk_${CODESPACES_PUBLIC_BULK_SRR}_${MAX_SPOTS}spots"
 "${REPO_ROOT}/scripts/download_public_bulk_fixture.sh" \
   --accession "${CODESPACES_PUBLIC_BULK_SRR}" \
   --geo-series "${CODESPACES_PUBLIC_BULK_GSE}" \
   --geo-sample "${CODESPACES_PUBLIC_BULK_GSM}" \
+  --max-spots "${MAX_SPOTS}" \
   --outdir "${FIXTURE_DIR}"
 
 R1="${FIXTURE_DIR}/${CODESPACES_PUBLIC_BULK_SRR}_1.fastq.gz"
@@ -78,6 +82,7 @@ write_command_script "${OUTDIR}/RUN_COMMAND.sh" "${CMD[@]}"
 cat > "${OUTDIR}/RUN_MANIFEST.txt" <<MANIFEST
 Module: STAR-core bulk
 Fixture: ${CODESPACES_PUBLIC_BULK_SRR}
+Max spots: ${MAX_SPOTS}
 Output: ${OUTDIR}
 GenomeDir: ${GENOME_DIR}
 R1: ${R1}

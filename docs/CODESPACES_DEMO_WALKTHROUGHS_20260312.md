@@ -4,7 +4,7 @@ This page is the short guide for the Codespaces demos.
 
 ## What is ready now
 
-- Bulk: ready
+- Bulk: ready (`25000` read-pair public subset)
 - SLAM: ready
 - Single-cell input builder: ready
 - Perturb: work in progress

@@ -2,6 +2,8 @@
 
 This is the easiest full demo.
 
+The demo uses a small public bulk RNA-seq subset with `25000` read pairs.
+
 ## What you need
 
 - a STAR index
