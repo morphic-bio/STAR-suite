@@ -63,15 +63,15 @@ void CountingSink::onRecord(SoloFeature &feature, const ReadInfoRecord &rec) {
         }
     }
 #endif
-    // Hard guard: a readId must not appear under different CBs in the buffered stream
-    {
-        uint32_t ridKey = (rec.readIndex != (uint32_t)-1) ? rec.readIndex : (uint32_t)rec.readId;
-        auto it = readToCb.find(ridKey);
+    // Only guard on real readIndex values. Synthetic readIds are generated per thread
+    // for features that do not carry readIndex, so they are not globally unique.
+    if (rec.readIndex != (uint32_t)-1) {
+        auto it = readToCb.find(rec.readIndex);
         if (it == readToCb.end()) {
-            readToCb.emplace(ridKey, rec.cbIdx);
+            readToCb.emplace(rec.readIndex, rec.cbIdx);
         } else if (it->second != rec.cbIdx) {
             fprintf(stderr, "[ERROR] Conflicting CB for readId=%u existing=%u new=%u\n",
-                    ridKey, it->second, rec.cbIdx);
+                    rec.readIndex, it->second, rec.cbIdx);
             std::exit(1);
         }
     }

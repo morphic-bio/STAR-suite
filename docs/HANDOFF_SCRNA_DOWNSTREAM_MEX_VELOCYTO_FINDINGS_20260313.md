@@ -170,3 +170,97 @@ The next feature branch should focus on one of these two paths:
 - add a documented post hoc velocyto workflow from full retained BAMs
 - add first-class STAR-suite support for keeping or emitting `Velocyto` outputs
   in the UCSF/CR-compat execution path
+
+## Update On `velocyto-posthoc` Branch
+
+The branch now includes a working path to package STARsolo `Velocyto` outputs
+into Cell Ranger-style raw/filtered MEX directories.
+
+Added:
+
+- `scripts/prepare_velocyto_mex.py`
+  - reads `Solo.out/Velocyto/raw/{spliced,unspliced,ambiguous}.mtx`
+  - reuses `Solo.out/Gene/{raw,filtered}` barcode axes
+  - writes:
+    - `outs/raw_velocyto_feature_bc_matrix/`
+    - `outs/filtered_velocyto_feature_bc_matrix/`
+    - `outs/velocyto_feature_bc_matrix_manifest.json`
+
+- `tests/run_perturb_velocyto_mex_smoke.sh`
+  - runs the UCSF 100K perturb fixture with:
+    - `--soloFeatures Gene GeneFull Velocyto`
+    - `--soloCrGexFeature genefull`
+  - validates that:
+    - raw/filtered velocyto MEX directories are created
+    - `matrix.mtx.gz == spliced + unspliced + ambiguous`
+    - filtered barcodes are a subset of raw barcodes
+
+## UCSF 100K Validation Result
+
+Validated successfully on:
+
+- `/storage/ucsf-2M/fixtures/ucsf2m_iPSC2_AALG2_100k_pfconfig`
+
+Smoke output:
+
+- `/mnt/pikachu/STAR-suite/tests/perturb_velocyto_mex_smoke_output_20260313_061919`
+
+Observed summary:
+
+- raw velocyto features: `38606`
+- raw velocyto barcodes: `3686400`
+- filtered velocyto barcodes: `3261`
+- raw total nnz: `3145`
+- filtered total nnz: `3145`
+
+## UCSF 2M Validation Result
+
+Validated successfully on the larger staged UCSF 2M set:
+
+- GEX:
+  - `/storage/ucsf-2M/GEX/iPSC2_1_AALG2`
+- guides:
+  - `/storage/ucsf-2M/guides/iPSC2_1_AALG2`
+- pfMulti config:
+  - `/storage/ucsf-2M/star_runs/star_baseline_iPSC2_1_AALG2_1M_20260217_065351/multi_config.csv`
+
+Smoke output:
+
+- `/mnt/pikachu/STAR-suite/tests/perturb_velocyto_mex_smoke_output_20260313_064248`
+
+Observed summary:
+
+- raw velocyto features: `38606`
+- raw velocyto barcodes: `3686400`
+- filtered velocyto barcodes: `6832`
+- raw total nnz: `30436`
+- filtered total nnz: `26987`
+
+This rerun also passed with multithreading enabled:
+
+- `PERTURB_VELOCYTO_MEX_THREADS=8`
+
+## Root Cause Of Initial Failure
+
+The first multithreaded UCSF 100K run failed with:
+
+- `[ERROR] Conflicting CB for readId=0 existing=229421 new=3402852`
+
+Root cause:
+
+- `GeneFull` does not carry `readIndex` in this configuration
+- the loader therefore generated synthetic read IDs starting at zero per thread
+- `CountingSink` incorrectly treated those per-thread synthetic IDs as global
+  keys and rejected legitimate records from another thread
+
+Fix applied:
+
+- `flex/source/SoloReadInfoSink.cpp`
+  - only enforce the per-read CB conflict guard when a real `readIndex` is
+    present
+  - skip that guard for synthetic thread-local IDs
+
+Result:
+
+- the UCSF 100K perturb velocyto smoke now completes successfully with
+  `PERTURB_VELOCYTO_MEX_THREADS=4`
