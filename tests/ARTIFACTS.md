@@ -44,6 +44,10 @@ update this file with its output location.
 - `tests/solo_yremove_smoke_output_*/` (vanilla Solo integrated Y-removal vs remove_y_reads smoke)
 - `tests/perturb_yremove_smoke_output_*/` (perturb integrated Y-removal vs remove_y_reads smoke)
 - `tests/perturb_velocyto_mex_smoke_output_*/` (UCSF 100K perturb smoke producing raw/filtered velocyto MEX surfaces)
+  - may also contain downstream STAR-cell QC outputs such as `downstream_genefull_velocyto_100k_starcells/`
+  - may also contain per-feature-library downstream outputs such as:
+    - `downstream_genefull_velocyto_100k_starcells_featurelibs_v2/feature_libraries/*/raw_feature_library.h5ad`
+    - `downstream_genefull_velocyto_100k_starcells_featurelibs_v2/feature_libraries/*/filtered_feature_library.h5ad`
 - `tests/sceptre_example_output_*` (SCEPTRE vignette runs)
 - `tests/sceptre_example_*_mex` (SCEPTRE vignette MEX exports)
 - `tests/nbem_sceptre_example_*` (NB-EM outputs on SCEPTRE vignette MEX)

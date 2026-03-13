@@ -264,3 +264,177 @@ Result:
 
 - the UCSF 100K perturb velocyto smoke now completes successfully with
   `PERTURB_VELOCYTO_MEX_THREADS=4`
+
+## STAR-Cell Downstream Path
+
+For downstream QC on the packaged GeneFull + velocyto output, do not run
+external EmptyDrops on the 100K downsampled smoke. It is too sparse for that
+path and STAR already provides the cell calls we want to honor.
+
+Implementation added in this branch:
+
+- `scripts/build_gene_full_velocyto_h5ad.py`
+  - builds `counts.h5ad` with GeneFull counts and raw velocyto layers
+- `scripts/run_star_cell_doublets.R`
+  - writes `non_empty_barcodes.txt` from STAR-called cells (`obs.is_cell`)
+  - runs `scDblFinder` on STAR-called cells only
+  - writes `doublet_barcodes.txt` and `filtered_barcodes_with_scores.txt`
+- `scripts/run_scrna_downstream_gene_full_velocyto.sh`
+  - uses `outs/filtered_feature_bc_matrix` as the STAR-called cell set
+  - runs the R/Python downstream steps inside `biodepot/scrna-matrices:latest`
+  - sets writable `NUMBA` and matplotlib cache dirs inside the output tree
+
+100K smoke rerun:
+
+- command:
+  - `scripts/run_scrna_downstream_gene_full_velocyto.sh --run-dir tests/perturb_velocyto_mex_smoke_output_20260313_061919/run --output-dir tests/perturb_velocyto_mex_smoke_output_20260313_061919/downstream_genefull_velocyto_100k_starcells --min-genes 1 --mt-pct-cutoff 100 --adaptive-filter`
+- output:
+  - `tests/perturb_velocyto_mex_smoke_output_20260313_061919/downstream_genefull_velocyto_100k_starcells`
+
+Observed result on the 100K STAR-cell smoke:
+
+- STAR-called cells: `4082`
+- `scDblFinder` doublets: `248`
+- singlets after doublet removal: `3834`
+- cells passing QC filter: `3118`
+- singlets passing QC filter: `3113`
+
+Artifacts written:
+
+- `counts.h5ad`
+- `unfiltered_counts.h5ad`
+- `filtered_counts.h5ad`
+- `non_empty_barcodes.txt`
+- `doublet_barcodes.txt`
+- `filtered_barcodes_with_scores.txt`
+- `gene_quantile_histogram.html`
+- `gene_quantile_histogram.png`
+
+Notes:
+
+- The 100K fixture is extremely sparse; the adaptive smoke above used
+  `--min-genes 1` and `--mt-pct-cutoff 100` only to exercise the path.
+- With these data, adaptive `max_genes` collapsed to `1` because the singlet
+  median and MAD were both `1` and `0`, respectively.
+
+## CellBender Integration Method
+
+The existing scRNA-seq CellBender path does not replace `X` directly. It does:
+
+- `remove_noise.sh`
+  - runs `cellbender remove-background`
+  - default pipeline input is `filtered_counts.h5ad`
+  - writes `cellbender/cellbender_counts.h5`
+- `addCounts.py`
+  - loads the original h5ad
+  - loads CellBender output with `cellbender.remove_background.downstream.anndata_from_h5`
+  - maps CellBender barcode rows back onto the original AnnData by barcode name
+  - adds the denoised counts as a new sparse layer, default layer name:
+    - `denoised`
+  - writes:
+    - `final_counts.h5ad`
+
+This is the methodology used by:
+
+- `/mnt/pikachu/scRNA-seq/scripts/run_flex_master.sh`
+- `/mnt/pikachu/scRNA-seq/scripts/rerun_cellbender_sequential.py`
+
+## UCSF 100K CellBender Check
+
+I ran the existing CellBender container script (`remove_noise.sh` inside
+`biodepot/cellbender:0.3.2`) against:
+
+- `tests/perturb_velocyto_mex_smoke_output_20260313_061919/downstream_genefull_velocyto_100k_starcells/filtered_counts.h5ad`
+
+Result:
+
+- CellBender failed before producing `final_counts.h5ad`
+- it warned that only `3117` barcodes were present and that the input appeared
+  prefiltered
+- failure terminated in CellBender prior estimation with:
+  - `IndexError: index -100 is out of bounds for axis 0 with size 0`
+
+Interpretation:
+
+- the scRNA-seq integration method is clear and reusable
+- but the 100K STAR-cell smoke is too sparse/prefiltered for CellBender itself
+- for a real CellBender run we should feed it a true raw unfiltered barcode
+  matrix/h5ad, then add the denoised layer back into the AnnData object
+
+## Feature-Library Integration
+
+The older scRNA-seq `gather_features.py` workflow is not directly compatible
+with current CR-compat `cr_assign` outputs:
+
+- the legacy script expects `features_matrix.mtx`
+- current `cr_assign` libraries expose `matrix.mtx`
+- the GEX-aligned CRISPR calls now come from:
+  - `outs/crispr_analysis/protospacer_calls_per_cell.csv`
+- that call file provides:
+  - `num_features`
+  - `feature_call`
+  - `num_umis`
+- it does **not** provide the top-two feature-count fields that the older
+  `best_feature` / `feature1_count` / `feature2_count` logic used
+
+Implementation added in this branch:
+
+- `scripts/integrate_feature_library.py`
+  - runs inside `biodepot/gather_features:latest`
+  - discovers one feature library at a time from `run/cr_assign/*/*/<sample>`
+  - writes per-library feature-matrix h5ads:
+    - `feature_libraries/<library_id>/raw_feature_library.h5ad`
+    - `feature_libraries/<library_id>/filtered_feature_library.h5ad`
+  - annotates `counts.h5ad`, `unfiltered_counts.h5ad`, `filtered_counts.h5ad`
+    (and `final_counts.h5ad` if present) with library-scoped obs columns
+- `scripts/run_scrna_downstream_gene_full_velocyto.sh`
+  - now auto-discovers feature libraries after QC / optional CellBender
+  - runs the feature-library helper in the gather container
+  - regenerates a single `summary.txt` after feature annotations are added
+
+Current counts obs columns added for the UCSF CRISPR Guide Capture library:
+
+- `CRISPR_Guide_Capture_iPSC2_1_AALG2_CRISPR_Guide_Capture_1__is_featured`
+- `CRISPR_Guide_Capture_iPSC2_1_AALG2_CRISPR_Guide_Capture_1__feature_call`
+- `CRISPR_Guide_Capture_iPSC2_1_AALG2_CRISPR_Guide_Capture_1__num_features`
+- `CRISPR_Guide_Capture_iPSC2_1_AALG2_CRISPR_Guide_Capture_1__num_umis`
+
+When exactly one compatible feature library is present, the wrapper also adds
+generic aliases:
+
+- `is_featured`
+- `feature_call`
+- `feature_call_num_features`
+- `feature_call_num_umis`
+
+Safety rule:
+
+- if more than one `CRISPR_Guide_Capture` library is present but STAR only
+  exposes the single global
+  `outs/crispr_analysis/protospacer_calls_per_cell.csv`, the wrapper exits
+  instead of guessing the library mapping
+
+100K validation:
+
+- command:
+  - `scripts/run_scrna_downstream_gene_full_velocyto.sh --run-dir tests/perturb_velocyto_mex_smoke_output_20260313_061919/run --output-dir tests/perturb_velocyto_mex_smoke_output_20260313_061919/downstream_genefull_velocyto_100k_starcells_featurelibs_v2 --min-genes 1 --mt-pct-cutoff 100 --adaptive-filter`
+- output:
+  - `tests/perturb_velocyto_mex_smoke_output_20260313_061919/downstream_genefull_velocyto_100k_starcells_featurelibs_v2`
+
+Observed result:
+
+- `counts.h5ad`: `4082 x 38606`
+- `unfiltered_counts.h5ad`: `4082 x 38606`
+- `filtered_counts.h5ad`: `3118 x 38606`
+- filtered cells with CRISPR calls:
+  - `1337`
+- feature-library raw h5ad:
+  - `8368 x 548`
+- feature-library filtered h5ad:
+  - `2725 x 548`
+
+Artifacts written:
+
+- `feature_libraries/iPSC2_1_AALG2_CRISPR_Guide_Capture_1/raw_feature_library.h5ad`
+- `feature_libraries/iPSC2_1_AALG2_CRISPR_Guide_Capture_1/filtered_feature_library.h5ad`
+- `feature_libraries/iPSC2_1_AALG2_CRISPR_Guide_Capture_1/manifest.json`
