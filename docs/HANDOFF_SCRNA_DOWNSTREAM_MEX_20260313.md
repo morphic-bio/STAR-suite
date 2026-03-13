@@ -209,3 +209,10 @@ Unless the new task explicitly asks for it, the next agent should not start by:
 - re-deriving Cell Ranger compatibility inputs
 
 The immediate work is downstream use of the finished MEX outputs.
+
+## Follow-Up Findings
+
+Additional downstream and velocyto-specific findings from the follow-up review
+are documented here:
+
+- `docs/HANDOFF_SCRNA_DOWNSTREAM_MEX_VELOCYTO_FINDINGS_20260313.md`
