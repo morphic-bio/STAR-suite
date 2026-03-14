@@ -73,7 +73,7 @@ actionable; link to deeper docs rather than copying them.
 
 - CR-compat mode runs GMM-based CRISPR calling automatically when Guide Capture
   features are present.
-- `--crMinUmi` default is 10 (CRISPR guides); use 2-3 for lineage barcodes.
+- `--crMinUmi` code default is 3; the CRISPR Guide bundle overrides it to 10. Use 2-3 for lineage barcodes.
 - Summary: `docs/CRISPR_FEATURE_CALLING_IMPLEMENTATION_SUMMARY.md`.
 
 ### Heatmaps (process_features)

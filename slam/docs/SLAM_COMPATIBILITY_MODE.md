@@ -1,12 +1,12 @@
 # SLAM Compatibility Mode
 
-This document describes the optional GEDI-compatibility mode for SLAM quantification in STAR-Flex. This mode mirrors specific GEDI behaviors for parity testing and optional alignment with GEDI results.
+This document describes the optional GEDI-compatibility mode for SLAM quantification in STAR-SLAM. This mode mirrors specific GEDI behaviors for parity testing and optional alignment with GEDI results.
 
 ## Overview
 
 The SLAM compatibility mode provides an optional set of behaviors that approximate how GEDI (Genome-wide Dynamics of Intronic and Exonic transcription) processes SLAM-seq data. This enables:
 
-1. **Parity testing**: Compare STAR-Flex SLAM results with GEDI outputs
+1. **Parity testing**: Compare STAR-SLAM SLAM results with GEDI outputs
 2. **Migration**: Users transitioning from GEDI can maintain consistent behavior
 3. **Research**: Study the effect of different algorithmic choices on NTR estimates
 
@@ -17,7 +17,7 @@ The SLAM compatibility mode provides an optional set of behaviors that approxima
 Enable GEDI-compatible mode with a single flag:
 
 ```bash
-STAR --quantMode Slam \
+STAR --slamQuantMode 1 \
      --slamCompatMode gedi \
      # ... other parameters
 ```
@@ -25,7 +25,7 @@ STAR --quantMode Slam \
 Or enable individual features granularly:
 
 ```bash
-STAR --quantMode Slam \
+STAR --slamQuantMode 1 \
      --slamCompatIntronic 1 \
      --slamCompatLenientOverlap 1 \
      --slamCompatOverlapWeight 1 \
@@ -225,12 +225,12 @@ Lenient overlap acceptance flows through `Transcriptome::classifyAlign` since `a
 
 ## Example Workflow
 
-### Comparing STAR-Flex vs GEDI
+### Comparing STAR-SLAM vs GEDI
 
 ```bash
 # Run STAR with GEDI compat mode
 STAR --runMode alignReads \
-     --quantMode Slam \
+     --slamQuantMode 1 \
      --slamCompatMode gedi \
      --genomeDir /path/to/genome \
      --readFilesIn reads_R1.fastq reads_R2.fastq \
@@ -245,7 +245,7 @@ python compare_ntr.py gedi_output.tsv slam_compat_SlamQuant.out
 Enable debug mode to trace individual reads:
 
 ```bash
-STAR --quantMode Slam \
+STAR --slamQuantMode 1 \
      --slamCompatMode gedi \
      --slamDebugGeneList genes_of_interest.txt \
      --slamDebugReadList reads_of_interest.txt \
@@ -258,7 +258,7 @@ This produces per-read logs with gene assignments, weights, and drop reasons. No
 
 ### Fixture Parity Tests
 
-Tests were run on the SLAM fixture dataset (100K reads) comparing STAR-Flex with GEDI-compat mode against GRAND-SLAM reference.
+Tests were run on the SLAM fixture dataset (100K reads) comparing STAR-SLAM with GEDI-compat mode against GRAND-SLAM reference.
 
 #### Run A: GEDI Compat Mode Defaults
 
@@ -306,10 +306,10 @@ Tests were run on the SLAM fixture dataset (100K reads) comparing STAR-Flex with
 
 ### Auto-Trim Mode
 
-STAR-Flex supports automatic detection of optimal 5' and 3' trim values based on variance analysis of the first N reads:
+STAR-SLAM supports automatic detection of optimal 5' and 3' trim values based on variance analysis of the first N reads:
 
 ```bash
-STAR --quantMode Slam \
+STAR --slamQuantMode 1 \
      --autoTrim variance \
      --autoTrimDetectionReads 100000 \
      --autoTrimMinReads 1000 \
@@ -330,7 +330,7 @@ When processing multiple input files in a single run, the `--trimScope` paramete
 **Example with per-file trim:**
 
 ```bash
-STAR --quantMode Slam \
+STAR --slamQuantMode 1 \
      --autoTrim variance \
      --trimScope per-file \
      --readFilesIn file1.fq,file2.fq,file3.fq \

@@ -1,6 +1,6 @@
-# SLAM-seq Quantification in STAR-Flex
+# SLAM-seq Quantification in STAR-SLAM
 
-STAR-Flex includes a fully integrated SLAM-seq quantification module ("STAR-Slam") that allows for gene-level quantification of metabolic labeling experiments (e.g., s4U labeling) directly within the aligner. This implementation provides parity with GRAND-SLAM while adding performance improvements and new features like variance-based auto-trimming and comprehensive QC reports.
+STAR-SLAM includes a fully integrated SLAM-seq quantification module ("STAR-Slam") that allows for gene-level quantification of metabolic labeling experiments (e.g., s4U labeling) directly within the aligner. This implementation provides parity with GRAND-SLAM while adding performance improvements and new features like variance-based auto-trimming and comprehensive QC reports.
 
 ## Overview
 
@@ -12,7 +12,7 @@ STAR-Slam performs the following steps:
 3.  **Trimming**: Identifies and excludes read ends with high error rates (auto-trimming).
 4.  **Quantification**: Counts T->C conversions and estimates the New-to-Total Ratio (NTR) for each gene using a binomial or EM model.
 
-## New Features in STAR-Flex
+## New Features in STAR-SLAM
 
 *   **GRAND-SLAM Compatible Output**: Generates `<prefix>SlamQuant.grandslam.tsv` with the exact column schema required by downstream tools expecting GRAND-SLAM output.
 *   **Variance-based Auto-trimming**: Automatically detects optimal 5' and 3' trim points by analyzing the variance of T->C rates across read positions.
@@ -113,7 +113,7 @@ STAR \
 *   `--trimScope first` + `--trimSource <blank>`: Use the blank to define trimming parameters that apply to all files.
 
 #### Auto-Trimming (`--autoTrim variance`)
-Reads often exhibit higher error rates or chemical artifacts at the 5' and 3' ends, which can confound T->C conversion detection. STAR-Flex introduces a robust **variance-based** auto-trimming method.
+Reads often exhibit higher error rates or chemical artifacts at the 5' and 3' ends, which can confound T->C conversion detection. STAR-SLAM introduces a robust **variance-based** auto-trimming method.
 
 *   **Theory**: We calculate the standard deviation of T->C transition rates at each read position across a sample of reads. Artifact-prone ends typically show high variance, while the "clean" middle section shows low, stable variance.
 *   **Method**: A segmented regression (2, 3, or 4 segments) is fitted to the smoothed standard deviation curve. The "knees" or breakpoints of this regression define the start and end of the reliable region.

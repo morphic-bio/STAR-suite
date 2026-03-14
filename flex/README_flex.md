@@ -4,7 +4,7 @@ This document describes STAR-Flex, the Flex-specific module in STAR-suite.
 
 ## Overview
 
-STAR-Flex adds an **inline hash-based pipeline for 10x Genomics Flex** (Fixed RNA Profiling) samples using probes for transcript detection and RTL tags for multiplexing. A hybrid reference is generated with the regular genome and synthetic chromosomes for each probe. STAR alignment routines quantify probe alignment and use genomic hits to confirm matches and detect off-probe noise. The rest of the workflow diverges from the standard STAR Solo workflow because RTL tags are on the same mate as the probe (not the cell barcode), so STAR's barcode/UMI correction and deduplication routines cannot be used. A fast inline path handles Flex-specific processing after alignment.
+STAR-Flex adds a **pseudo-chromosome alignment pipeline for 10x Genomics Flex** (Fixed RNA Profiling) samples using probes for transcript detection and RTL tags for multiplexing. A hybrid reference is generated with the regular genome and synthetic chromosomes for each probe. STAR's native alignment machinery quantifies probe alignment and uses genomic hits to confirm matches and detect off-probe noise. The rest of the workflow diverges from the standard STAR Solo workflow because RTL tags are on the same mate as the probe (not the cell barcode), so STAR's barcode/UMI correction and deduplication routines cannot be used. A fast inline path handles Flex-specific processing after alignment.
 
 The Flex pipeline includes:
 - **Sample tag detection** during alignment identifies multiplexed sample barcodes
@@ -23,17 +23,17 @@ The following features were originally developed in the STAR-Flex fork and are n
 part of STAR-core. They work with all STAR modes (bulk, single-cell, Flex). See the
 main suite `README.md` for full documentation and flags.
 
-- **Cutadapt-style trimming** (`--trimCutadapt Yes`): See [docs/trimming.md](docs/trimming.md).
+- **Cutadapt-style trimming** (`--trimCutadapt Yes`): See [trimming docs](../core/features/vbem/docs/trimming.md).
 - **TranscriptVB quantification** (`--quantMode TranscriptVB`): VB/EM transcript-level quantification with Salmon parity.
 - **SLAM-seq** (`--slamQuantMode 1`): See [slam/docs/SLAM_seq.md](../slam/docs/SLAM_seq.md).
 - **Spill-to-disk BAM sorting** (`--outBAMsortMethod samtools`): Bounded-RAM coordinate sorting. Works with Flex.
-- **Y-chromosome BAM/FASTQ splitting** (`--emitNoYBAM yes`, `--emitYNoYFastq yes`): Split reads by chrY alignment. Developed for MorPHiC KOLF cell lines. Tested and validated with Flex in both sorted and unsorted modes (see `tests/TEST_REPORT_Y_SPLIT_FLEX.md`). See [docs/Y_CHROMOSOME_BAM_SPLIT.md](docs/Y_CHROMOSOME_BAM_SPLIT.md).
+- **Y-chromosome BAM/FASTQ splitting** (`--emitNoYBAM yes`, `--emitYNoYFastq yes`): Split reads by chrY alignment. Developed for MorPHiC KOLF cell lines. Tested and validated with Flex in both sorted and unsorted modes (see `tests/TEST_REPORT_Y_SPLIT_FLEX.md`). See [Y-chromosome BAM split docs](../core/features/yremove_fastq/docs/Y_CHROMOSOME_BAM_SPLIT.md).
 
 ## STAR-Flex Extras
 
 ### Index-Time Features
 
-- **[AutoIndex + CellRanger-style references](docs/autoindex_cellranger.md)**: Optional reference download + integrity verification, CellRanger-style FASTA/GTF formatting, and automatic index creation in `--genomeDir` (`--autoIndex`, `--forceIndex`, `--forceAllIndex`).
+- **[AutoIndex + CellRanger-style references](../core/legacy/docs/autoindex_cellranger.md)**: Optional reference download + integrity verification, CellRanger-style FASTA/GTF formatting, and automatic index creation in `--genomeDir` (`--autoIndex`, `--forceIndex`, `--forceAllIndex`).
 
 - **[Transcriptome FASTA Generation](#transcriptome-fasta-generation)**: Generate `transcriptome.fa` during index creation for Salmon quantification parity and TranscriptVB error modeling. Eliminates the need to run gffread/rsem-prepare-reference separately.
 
@@ -41,7 +41,7 @@ main suite `README.md` for full documentation and flags.
 
 - **[Flex Pipeline](docs/flex_methodology.md)**: Inline hash pipeline for 10x Genomics Flex (Fixed RNA Profiling) samples.
 
-For complete parameter reference, see [docs/flex_parameters.md](docs/flex_parameters.md) (STAR-Flex-only flags) and upstream `README.md` (all other parameters).
+For complete parameter reference, see [flex parameter docs](../core/legacy/docs/flex_parameters.md) (STAR-Flex-only flags) and upstream `README.md` (all other parameters).
 
 For detailed technical documentation of the flex data flow and algorithms, see [docs/flex_methodology.md](docs/flex_methodology.md).
 
@@ -343,7 +343,7 @@ Key outputs and paths:
 - Download cache (default): `${genomeDir}/cellranger_ref_cache` (override with `--cellrangerStyleCacheDir`)
 - Rebuild controls: `--forceIndex Yes` (re-index), `--forceAllIndex Yes` (re-download + re-index)
 
-See [docs/autoindex_cellranger.md](docs/autoindex_cellranger.md) for URL selection (`--cellrangerRefRelease` / `--faUrl` / `--gtfUrl`), checksum flags, and parity test scripts.
+See [autoindex docs](../core/legacy/docs/autoindex_cellranger.md) for URL selection (`--cellrangerRefRelease` / `--faUrl` / `--gtfUrl`), checksum flags, and parity test scripts.
 
 ## Transcriptome FASTA Generation
 

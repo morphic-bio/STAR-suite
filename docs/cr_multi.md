@@ -10,7 +10,7 @@ python3 tools/cr_multi/cr_multi.py \
   --multi-config /path/to/multi_config.csv \
   --feature-ref /path/to/feature_reference.csv \
   --whitelist /path/to/whitelist.txt \
-  --assign-barcodes core/features/feature_barcodes/assignBarcodes \
+  --assign-barcodes core/features/process_features/assignBarcodes \
   --mex-stub tools/feature_barcodes/assignbarcodes_mex_stub.py \
   --gex-mex /path/to/gex_mex_dir \
   --gex-filter-type "Gene Expression" \
