@@ -237,7 +237,9 @@ When `--emitNoYBAM yes` is enabled:
 
 ## Building References
 
-The flex pipeline requires a hybrid reference genome that includes pseudo-chromosomes for probe sequences. Scripts are provided in `scripts/` to build these references:
+The flex pipeline requires a hybrid reference genome that includes pseudo-chromosomes for probe sequences. We benchmarked hash-based gene assignment techniques as an alternative, which were faster but resulted in 15–20% sensitivity loss and required blacklisting and downstream QC to achieve parity with Cell Ranger. The pseudo-chromosome approach avoids these trade-offs by leveraging STAR's native alignment machinery.
+
+Scripts are provided in `scripts/` to build these references:
 
 ### Integrated Index Generation (Recommended)
 

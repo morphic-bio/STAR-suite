@@ -58,11 +58,14 @@ mcp_server/              # MCP server for scripted discovery/preflight/run workf
 - A375: GeneFull parity (15,522 filtered genes); CRISPR exact-match at min-UMI 10.
 - MSK 30polyKO: planned, not yet run.
 
-### Flex (STAR vs Cell Ranger)
+### Flex (STAR vs Cell Ranger 7.2)
 
-| Dataset | Cells (STAR / CR) | Jaccard | Gene Pearson | Speedup |
-|---|---|---|---|---|
-| (benchmarks pending) | -- | -- | -- | -- |
+| Dataset | Cells (STAR / CR) | Jaccard | Gene Pearson | Cell Pearson | Speedup |
+|---|---|---|---|---|---|
+| JAX SC2300771 full (4 samples) | 20,291 / 20,444 | 0.98 | 0.998 | 1.000 | pending |
+
+- Gene Pearson on 18,021 common genes; Cell Pearson on 20,173 shared barcodes.
+- Speedup not yet measured (optimization pending).
 
 ### PE Bulk (Integrated STAR-suite vs External Stepwise Pipeline)
 
@@ -77,6 +80,8 @@ mcp_server/              # MCP server for scripted discovery/preflight/run workf
 
 ### SLAM-seq (STAR-SLAM vs GrandSLAM/GEDI)
 
+**NTR parity (compat mode, GEDI is reference):**
+
 | Dataset | Sample | NTR Pearson | NTR Spearman |
 |---|---|---|---|
 | NW-5-21 ARID1A 1M (compat, no trim) | 0h | 0.978 | 0.990 |
@@ -86,6 +91,8 @@ mcp_server/              # MCP server for scripted discovery/preflight/run workf
 
 - Comparison uses SNP-masked BAMs; GEDI is reference.
 - `slam_requant` replay: Pearson/Spearman 1.0 (exact parity with STAR output).
+- Compat mode (`--slamCompatMode gedi`) adds negligible overhead (<0.1% wall time, <1% memory).
+- Direct speedup comparison is not reported because GRAND-SLAM depends on alignment being completed first (it operates on pre-aligned BAMs), whereas STAR-SLAM performs alignment and quantification in a single pass. On the ARID1A time-course (167M reads, 4 samples), GEDI quantification alone adds ~14% to the alignment time (~5.5 min on top of ~40 min alignment).
 
 ## Installation
 
