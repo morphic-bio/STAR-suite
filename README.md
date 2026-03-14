@@ -18,7 +18,7 @@ core/
   legacy/                        # Upstream STAR layout (single source of truth)
   features/                      # Shared overlays and feature tooling
     process_features/            # Perturb feature extraction/calling implementation
-    feature_barcodes/            # assignBarcodes/demux tooling
+    feature_barcodes/            # Standalone barcode tools (assignBarcodes, demux)
     libscrna/                    # EmptyDrops/OrdMag/Occupancy shared library
 flex/                    # Flex-specific code + tools
 slam/                    # SLAM-seq code + tools
@@ -39,8 +39,10 @@ mcp_server/              # MCP server for scripted discovery/preflight/run workf
   Build tools: `make flex` or `make flex-tools`.
 - **STAR-SLAM** (`slam/`): SLAM-seq quantification, SNP masking, trimming/QC.
   Build tools: `make slam` or `make slam-tools`.
-- **Feature Barcodes** (`core/features/feature_barcodes/`): Vendored `process_features` tools for perturb-seq testing (`assignBarcodes`, `demux_bam`, `demux_fastq`).
+- **Feature Barcodes** (`core/features/feature_barcodes/`): Standalone barcode tools (`assignBarcodes`, `demux_bam`, `demux_fastq`) for perturb-seq testing.
   Build tools: `make feature-barcodes-tools`.
+- **Process Features** (`core/features/process_features/`): Full feature extraction/calling pipeline (`assignBarcodes`, `call_features`, `demux_bam`, `demux_fastq`) and standalone tool (`star_feature_call`).
+  Build tools: `make process-features-tools`, `make star-feature-call`.
 - **Shared Feature Toolchains** (`core/features/`): Reusable tool layers used across modules, including `vbem` (TranscriptVB helpers), `yremove_*` (Y/noY splitting), `bamsort`, and `libscrna`.
   Build tools: `make vbem-tools`, `make yremove-tools`, plus in-core integrations.
 - **MCP Server (tooling)** (`mcp_server/`): Agent automation service for dataset/test discovery and controlled execution (`list_datasets`, `list_test_suites`, `preflight`, `run_script`, `collect_outputs`). This is repo tooling, not an analysis module.
@@ -94,57 +96,59 @@ mcp_server/              # MCP server for scripted discovery/preflight/run workf
 - Compat mode (`--slamCompatMode gedi`) adds negligible overhead (<0.1% wall time, <1% memory).
 - Direct speedup comparison is not reported because GRAND-SLAM depends on alignment being completed first (it operates on pre-aligned BAMs), whereas STAR-SLAM performs alignment and quantification in a single pass. On the ARID1A time-course (167M reads, 4 samples), GEDI quantification alone adds ~14% to the alignment time (~5.5 min on top of ~40 min alignment).
 
-## Installation
+## Building & Installing
 
-Build from repo root:
+### From source
 
 ```bash
 # Core STAR binary
 make core
 
 # Module-focused builds
-make flex
-make slam
-make feature-barcodes-tools
+make flex           # core + Flex tools
+make slam           # core + SLAM tools
+
+# Individual tool targets
+make feature-barcodes-tools    # assignBarcodes/demux (standalone)
+make process-features-tools    # full process_features pipeline
+make star-feature-call         # standalone feature caller
+make vbem-tools                # TranscriptVB helpers
+make yremove-tools             # Y/noY splitting tools
+
+# Default build (core + common tools)
+make                           # or: make default
 
 # Build everything
 make all
 ```
 
-Selective default build:
+Selective filtering:
 
 ```bash
 make default INCLUDE="core slam-tools"
 make default EXCLUDE="flex-tools"
 ```
 
-Install alternatives (release artifacts):
+Run `make help` to see the full target list and descriptions.
+
+### From release artifacts
 
 ```bash
 # Ubuntu package from a local artifact
 sudo apt install ./star-suite_<version>_<arch>.deb
 
-# Optional PPA path (once published)
-sudo add-apt-repository ppa:<org>/star-suite
-sudo apt update
-sudo apt install star-suite
-```
-
-```bash
-# Preferred fallback when you are not using the .deb
+# Installer tarball (auto-detects host glibc level)
 tar -xzf STAR-suite-<version>-linux-<arch>-installer.tar.gz
 cd STAR-suite-<version>-linux-<arch>-installer
 ./install.sh
 
-# Manual compatibility tarball path
+# Manual compatibility tarball
 tar -xzf STAR-suite-<version>-linux-<arch>-glibc234.tar.gz
 cd STAR-suite-<version>-linux-<arch>-glibc234
 ./install.sh
 ```
 
-Compatibility note:
-- release tarballs are validated in clean Ubuntu 22.04 and 24.04 Docker containers before publication
-- the installer bundle auto-detects the host glibc level and chooses the right bundled binary
+Release tarballs are validated in clean Ubuntu 22.04 and 24.04 Docker containers before publication. The installer bundle auto-detects the host glibc level and chooses the right bundled binary.
 
 Packaging/release details and artifact policy:
 - `docs/Star-binary-distribution.md`
@@ -174,20 +178,6 @@ Work in progress:
 Helpful follow-up guides:
 - [If you already use STAR or Cell Ranger](docs/codespaces/07_star_cellranger_users.md)
 - [Using your own data](docs/codespaces/08_using_your_own_data.md)
-
-## Build Targets
-
-The top-level `Makefile` supports a default build, full build, and conditional include/exclude filters.
-
-- **Default build**: `make` (same as `make default`)
-  - Builds the “usual culprits” (core + common tools).
-  - Optional filters:
-    - `make default INCLUDE="core flex-tools"`
-    - `make default EXCLUDE="slam-tools yremove-tools"`
-- **Build everything**: `make all`
-  - Includes everything in the suite (core + all tools).
-
-Run `make help` to see the full target list and descriptions.
 
 ## Docker
 
@@ -240,173 +230,112 @@ Expected layout: `/storage/A375`, `/storage/flex_filtered_reference`, etc. See `
 
 Smoke tests honor `STAR_BIN` to decouple from source-relative paths. Docker smoke wrappers set `STAR_BIN=/usr/local/bin/STAR` automatically.
 
-### Validation Status
+### Validation
 
-Recent portability checks on this branch (Ubuntu 24.04 Docker):
+See [docs/docker_validation.md](docs/docker_validation.md) for the latest portability check results.
 
-- `docker build --no-cache --target suite-base -f docker/Dockerfile --build-arg MAKE_JOBS=8 .` passed.
-- `scripts/docker/run_smokes_tier_a.sh` passed.
-- `scripts/docker/run_smokes_tier_b.sh` with `STORAGE=/storage` produced:
-  - pass: `run_flex_smoke`, `run_cbub_regression_test`
-  - skip: `run_cr_compat_integration_smoke` (ASAN-only path), `run_cr_multi_smoke` (external script dependency), `run_unsorted_cbub_smoke_test` (missing probes fixture)
-  - fail: `test_cr_compat_crispr_calling` (missing expected `outs/*` files in this containerized fixture run)
-- Runtime split verified:
-  - `suite-base` and `test-tier-a` have no Python runtime
-  - `test-tier-b` includes Python runtime for fixture-backed tests
-- `suite-base` contains: `STAR`, `star_feature_call`, `slam_requant`, `pileup_snp`, `flexfilter` (`run_flexfilter_mex` alias), and `remove_y_reads`.
+## Module Reference
 
-## Technical Updates
+This section documents the key features and flags for each module. For standard STAR flags not listed here, see `core/legacy/README.md`.
 
-### Core Updates
-Recent updates to the Core module (STAR 2.7.11b and prior) include:
-- **Batch Mode (single-pass, non-Solo)**: `--batchMode 1` processes multiple FASTQs in one STAR invocation while reusing the loaded genome. This removes the need for `--genomeLoad` keep-in-memory workflows that are often brittle in containerized and HPC job environments. It is also important when analyses require shared static inputs across many samples (for example SLAM SNP masks and blank-derived background/error settings), so each sample is processed under the same fixed context.
-  - **Limits**: batch mode is single-pass only (no `--twopassMode`) and not supported with Solo (`--soloType`).
-  - **Output routing**: use `--outFileNamePrefixAuto 1` for per-sample subdirectories under one output root.
-- **Transcriptome Output**: Replaced `--quantTranscriptomeBan` with `--quantTranscriptomeSAMoutput` for more explicit control (e.g., `BanSingleEnd_ExtendSoftclip`).
-- **TranscriptVB Quantification**: Variational Bayes and EM quantification for transcript-level abundance (`--quantMode TranscriptVB`), with parity-oriented behavior against Salmon alignment-mode.
-- **Reference Automation**: Automated reference download/build (`--autoIndex`, `--autoCksumUpdate`, `--cellrangerLegacyGtfFilter`) plus automatic `transcriptome.fa` generation during indexing for transcript-level quant workflows. CellRanger parity is guaranteed for formatted reference inputs (`cellranger_ref/genome.fa`, `cellranger_ref/genes.gtf`) only.
-- **Cutadapt-Compatible Trimming**: Native cutadapt-style trimming path (`--trimCutadapt Yes`) for bulk/PE workflows.
-- **Samtools-style BAM Sorting**: Spill-to-disk sort (`--outBAMsortMethod samtools`) to reduce peak RAM pressure versus in-memory bin sorting.
-- **Y/NoY Separation**: Split BAM and FASTQ outputs by chrY alignment (`--emitNoYBAM`, `--emitYNoYFastq`).
+### Core
+
+STAR-suite is built on top of STAR 2.7.11b. The following features are STAR-suite additions to the core:
+
+- **Batch Mode** (`--batchMode 1`): Processes multiple FASTQs in one STAR invocation while reusing the loaded genome. Removes the need for `--genomeLoad` keep-in-memory workflows. Single-pass only (no `--twopassMode`); not supported with Solo (`--soloType`). Use `--outFileNamePrefixAuto 1` for per-sample subdirectories.
+- **TranscriptVB Quantification** (`--quantMode TranscriptVB`): Variational Bayes and EM quantification for transcript-level abundance, with parity-oriented behavior against Salmon alignment-mode. Gene-level summarization via `--quantVBgenesMode Tximport`.
+- **Transcriptome Output** (`--quantTranscriptomeSAMoutput`): Replaces the former `--quantTranscriptomeBan` with more explicit control (e.g., `BanSingleEnd_ExtendSoftclip`).
+- **Reference Automation** (`--autoIndex Yes`): Automated reference download/build with `--cellrangerStyleIndex Yes` formatting and `--genomeGenerateTranscriptome Yes` for transcript-level quant workflows.
+- **Cutadapt-Compatible Trimming** (`--trimCutadapt Yes`): Native cutadapt-style trimming for bulk/PE workflows. Compatibility mode: `--trimCutadaptCompat Cutadapt3`.
+- **Poly-G Trimming** (`--clip3pPolyG yes|no|auto`): Trims poly-G artifacts common on NovaSeq/NextSeq platforms. Default `auto` activates in CellRanger4 mode. Without this, poly-G reads can inflate specific genes (e.g., LINC00486) and degrade gene-level correlations.
+- **Samtools-style BAM Sorting** (`--outBAMsortMethod samtools`): Spill-to-disk sort to reduce peak RAM pressure. Works with all modes including Flex.
+- **Y/NoY Separation** (`--emitNoYBAM yes`, `--emitYNoYFastq yes`): Split BAM and FASTQ outputs by chrY alignment. Works with bulk, single-cell, and Flex.
 - **EmptyDrops_CR Integration**: CR-compatible EmptyDrops path (including libscrna-backed behavior in scRNA/perturb flows).
-- **Solo Features**:
-  - `sF` BAM tag for feature type and gene counts.
-  - `--soloCBtype String` for arbitrary barcode strings.
-  - Improved cell filtering and statistics with `--soloCellReadStats Standard`.
-
-### Flex Updates
-STAR-Flex extends STAR-core with Flex-specific behavior:
-- **Flex Pipeline**: Inline hash-based processing for 10x Genomics Flex (Fixed RNA Profiling). Includes sample tag detection, 1MM pseudocount correction for CBs, clique-based UMI deduplication, and occupancy filtering.
-- **Y-Chromosome Splitting**: Tested and validated with Flex (`tests/TEST_REPORT_Y_SPLIT_FLEX.md`). Works in both sorted and unsorted modes.
-- **Spill-to-Disk Sorting**: `--outBAMsortMethod samtools` works with Flex (shared core infrastructure).
-
-### SLAM Updates
-Integrated SLAM-seq quantification with GRAND-SLAM parity:
-- **Quantification**: Full gene-level NTR estimation (Binomial/EM models).
-- **Compatibility Mode**: `--slamCompatMode gedi` enables GEDI-compatible behaviors (intronic classification, lenient overlap, overlap weighting) for parity testing.
-- **Auto-Trimming**: Variance-based detection of artifact-prone read ends (`--autoTrim variance`).
-- **QC**: Comprehensive reports for T->C rates and error modeling.
-- **Batch Layout + Blank-First**: `--outFileNamePrefixAuto 1` organizes SLAM outputs into `alignments/`, `counts/`, `qc/`, `y_separated/` under a single root, and `--slamErrorRateFromBlank 1` can seed the background error rate from a blank (e.g. no4sU).
-- **Binary Dump + Requant**: `--slamDumpBinary 1 --slamDumpWeights 1` emits `<sample>_slam_dump.bin` and `<sample>_slam_weights.bin` in `alignments/` (batch + auto prefix layout). The `slam_requant` tool can re‑quantify these dumps with **exact parity** to `SlamQuant.out` (Pearson/Spearman 1.0 in the 1M parity check).
-- **Binary Dump Format**: bitwise header + record layout is documented in `slam/docs/SLAM_DUMP_FORMAT.md`.
-
-### STAR-perturb (CR-Compat + process_features/call_features)
-STAR-suite includes a perturb-seq path that combines CR-compatible Solo behavior
-with integrated CRISPR feature calling. This is the path used for STAR-perturb
-work and CR compatibility comparisons.
-
-- **Default STAR-perturb execution profile (recommended):**
-  - `--runThreadN 32`
-  - `--dynamicThreadInterface 1`
-  - `--dynamicThreadConstMapPermits 32`
-  - `--dynamicThreadTelemetry 1`
-  - `--crAssignConsumerThreads 32`
-  - `--crAssignSearchThreads 1`
-  - This profile keeps both map and feature sides provisioned to use full CPU
-    when unconstrained, with permit gating preventing oversubscription.
-
-- **Integrated CR-compat in STAR** (GEX + feature merge + CRISPR calling):
-  - Use `--pfMultiConfig <multi_config.csv>`
-  - Recommended bundle: `--defaultCrCompat yes`
-  - Key controls:
-    - `--crMinUmi 10` (default; lower to `2-3` for lineage-barcode style assays)
-    - `--soloCrGexFeature GeneFull` (or `Gene` when explicitly required)
-- **Standalone feature pipeline tool** (`core/legacy/source/star_feature_call`):
-  - Full pipeline: FASTQ -> MEX -> calls
-  - Call-only mode: MEX -> calls
-  - `--compat-perturb` writes CR9-style `crispr_analysis/` outputs.
-
-### QC Outputs
-STAR-Flex and STAR-SLAM now generate detailed QC reports:
-- **SLAM QC** (`--slamQcReport <prefix>`): Generates an interactive HTML report (`.html`) and JSON metrics (`.json`) visualizing:
-  - T->C conversion rates per read position.
-  - Variance analysis for auto-trimming (Stdev curves, segmented regression fits).
-  - Trimming overlays showing chosen 5'/3' cut sites.
-- **FlexFilter QC** (`flexfilter_summary.tsv`):
-  - Cell calling statistics (EmptyDrops/OrdMag results).
-  - Cell counts, UMI thresholds, and filtering rates per sample.
-
-
-## Summary of Flags
-
-### Core (Legacy)
-Standard STAR flags apply. See `core/legacy/README.md`.
-- `--runMode`: `alignReads`, `genomeGenerate`, `soloCellFiltering`
-- `--genomeDir`: Path to genome index
-- `--readFilesIn`: Input read files
-- `--outSAMtype`: Output SAM/BAM format (e.g., `BAM SortedByCoordinate`)
-- `--batchMode`: Batch multiple FASTQs in one run (bulk, single-pass only; no Solo or 2-pass)
-- `--soloType`: Single-cell mode (e.g., `CB_UMI_Simple`, `SmartSeq`)
-- `--soloCbUbRequireTogether`: Enforce CB/UB tag pairing for tag injection (`yes`/`no`, default `yes`)
-- `--soloCrGexFeature`: CR-compat merged GEX source (`auto`, `gene`, `genefull`)
-- **Trimming**:
-  - `--trimCutadapt Yes`: Enable native cutadapt-style trimming (v5.1 parity).
-  - `--trimCutadaptCompat Cutadapt3`: Compatibility mode for legacy cutadapt 3.2 datasets.
-- **Quantification**:
-  - `--quantMode TranscriptVB`: Enable VB/EM transcript quantification (Salmon parity).
-  - `--quantVBgenesMode Tximport`: Gene-level summarization in tximport style.
-- **BAM Sorting**:
-  - `--outBAMsortMethod samtools`: Spill-to-disk sorting (bounded RAM, works with all modes including Flex).
-- **Y-Chromosome Splitting** (works with bulk, single-cell, and Flex modes):
-  - `--emitNoYBAM yes`: Emit `_Y.bam` and `_noY.bam`.
-  - `--emitYNoYFastq yes`: Emit split FASTQ files directly during alignment.
-- **Reference Automation**:
-  - `--autoIndex Yes`: Automated reference download/build.
-  - `--cellrangerStyleIndex Yes`: CellRanger-style FASTA/GTF formatting.
-  - `--genomeGenerateTranscriptome Yes`: Generate `transcriptome.fa` at index time.
+- **Solo Features**: `sF` BAM tag for feature type, `--soloCBtype String` for arbitrary barcode strings, `--soloCellReadStats Standard` for improved cell filtering.
+- **CR-compat GEX** (`--soloCrGexFeature auto|gene|genefull`): Controls which GEX source is merged in CR-compat mode.
+- **CB/UB Tag Pairing** (`--soloCbUbRequireTogether yes|no`): Enforce CB/UB tag pairing for tag injection (default `yes`).
 
 ### Flex
-See `flex/README_flex.md` for full Flex pipeline reference.
-- **Pipeline**:
-  - `--flex yes`: Enable Flex pipeline.
-  - `--soloFlexExpectedCellsPerTag`: Expected cells per sample tag.
-  - `--soloSampleWhitelist`: TSV mapping sample tags to labels.
-  - `--soloProbeList`: Probe gene list (auto-detected from index if omitted).
-  - `--soloSampleProbes`: 10x probe barcode sequences file.
 
-Note: Core features such as trimming (`--trimCutadapt`), spill-to-disk BAM sorting (`--outBAMsortMethod samtools`), Y-chromosome splitting (`--emitNoYBAM`, `--emitYNoYFastq`), TranscriptVB quantification (`--quantMode TranscriptVB`), and automated reference building (`--autoIndex`) are documented in the Core section above and work with Flex.
+See [flex/README_flex.md](flex/README_flex.md) for the full pipeline reference.
+
+STAR-Flex uses a pseudo-chromosome alignment approach: probe sequences are embedded as pseudo-chromosomes in a hybrid reference genome, and STAR's native alignment machinery handles gene assignment. Core features (trimming, spill-to-disk sorting, Y-chromosome splitting, TranscriptVB) all work with Flex.
+
+Key flags:
+- `--flex yes`: Enable Flex pipeline.
+- `--soloFlexExpectedCellsPerTag`: Expected cells per sample tag.
+- `--soloSampleWhitelist`: TSV mapping sample tags to labels.
+- `--soloProbeList`: Probe gene list (auto-detected from index if omitted).
+- `--soloSampleProbes`: 10x probe barcode sequences file.
+
+Features:
+- Sample tag detection, 1MM pseudocount correction for CBs, clique-based UMI deduplication, and occupancy filtering.
+- Y-chromosome splitting tested and validated (`tests/TEST_REPORT_Y_SPLIT_FLEX.md`).
 
 ### SLAM
-See `slam/docs/SLAM_COMPATIBILITY_MODE.md` and `slam/docs/SLAM_seq.md`.
-- **Quantification**:
-  - `--slamQuantMode 1`: Enable SLAM quantification.
-  - `--slamGrandSlamOut 1`: Generate GRAND-SLAM compatible output.
-  - `--slamErrorRateFromBlank 1`: Seed error rate from the detection pass (useful when a blank is first).
-- **Compatibility**:
-  - `--slamCompatMode gedi`: Enable GEDI compatibility.
-  - `--slamCompatIntronic`, `--slamCompatLenientOverlap`: Fine-grained control.
-- **Trimming**:
-  - `--autoTrim variance`: Enable variance-based auto-trimming.
-  - `--slamTrim5p`, `--slamTrim3p`: Manual trim guards.
- - **Batch Layout**:
-   - `--outFileNamePrefixAuto 1`: Derive sample name from first FASTQ and route outputs into subdirs under `--outFileNamePrefix`.
+
+See [slam/docs/SLAM_COMPATIBILITY_MODE.md](slam/docs/SLAM_COMPATIBILITY_MODE.md) and [slam/docs/SLAM_seq.md](slam/docs/SLAM_seq.md).
+
+Integrated SLAM-seq quantification with GRAND-SLAM parity:
+
+Key flags:
+- `--slamQuantMode 1`: Enable SLAM quantification.
+- `--slamGrandSlamOut 1`: Generate GRAND-SLAM compatible output.
+- `--slamCompatMode gedi`: Enable GEDI compatibility (intronic classification, lenient overlap, overlap weighting).
+- `--slamCompatIntronic`, `--slamCompatLenientOverlap`: Fine-grained compat control.
+- `--autoTrim variance`: Variance-based detection of artifact-prone read ends.
+- `--slamTrim5p`, `--slamTrim3p`: Manual trim guards.
+- `--slamErrorRateFromBlank 1`: Seed error rate from a blank (e.g. no4sU) sample.
+- `--outFileNamePrefixAuto 1`: Derive sample name from first FASTQ and route outputs into subdirs.
+- `--slamDumpBinary 1 --slamDumpWeights 1`: Emit binary dumps for offline re-quantification with `slam_requant`.
+
+Features:
+- Full gene-level NTR estimation (Binomial/EM models).
+- Auto-trimming: variance-based detection of artifact-prone read ends.
+- QC: comprehensive interactive HTML reports for T->C rates and error modeling.
+- Batch layout organizes outputs into `alignments/`, `counts/`, `qc/`, `y_separated/`.
+- Binary dump format documented in `slam/docs/SLAM_DUMP_FORMAT.md`.
 
 ### STAR-perturb / CR-Compat
-See `docs/feature_barcodes.md` and `docs/CRISPR_FEATURE_CALLING_IMPLEMENTATION_SUMMARY.md`.
-- `--pfMultiConfig`: Enable Cell Ranger-style multi processing with feature libraries.
+
+See [docs/feature_barcodes.md](docs/feature_barcodes.md) and [docs/CRISPR_FEATURE_CALLING_IMPLEMENTATION_SUMMARY.md](docs/CRISPR_FEATURE_CALLING_IMPLEMENTATION_SUMMARY.md).
+
+CR-compatible Solo behavior with integrated CRISPR feature calling:
+
+Key flags:
+- `--pfMultiConfig`: Cell Ranger-style multi processing with feature libraries.
 - `--defaultCrCompat yes`: Apply the CR-compat perturb defaults bundle.
 - `--dynamicThreadInterface 1`: Enable STAR/PF permit coordination.
 - `--dynamicThreadConstMapPermits 32`: Start with full map-side permit budget.
 - `--crAssignConsumerThreads 32`: Provision PF worker pool to full host budget.
-- `--crAssignSearchThreads 1`: Per-consumer search-thread mode used in UCSF full benchmark.
-- `--crMinUmi`: Minimum UMI threshold for CRISPR feature calling (default `10`).
+- `--crAssignSearchThreads 1`: Per-consumer search-thread mode.
+- `--crMinUmi`: Minimum UMI threshold for CRISPR feature calling (default `10`; lower to `2-3` for lineage barcodes).
 - `--soloCrGexFeature`: Control merged GEX source (`auto`, `gene`, `genefull`).
 - `--soloCrMode CR`: Enable CR-compatible single-cell behavior.
-- `--crChemistry`: Barcode chemistry (`auto`, `NXT`, `TRU`). Default `auto` enables
-  per-library auto-detection from reads. Mixed NXT/TRU experiments (e.g., TRU GEX +
-  NXT gRNA) are handled automatically; feature barcodes are normalized to a common
-  namespace at merge. Per-library overrides via the `star_chemistry` column in
-  `--pfMultiConfig` (see `docs/feature_barcodes.md`).
+- `--crChemistry`: Barcode chemistry (`auto`, `NXT`, `TRU`). Default `auto` enables per-library auto-detection. Mixed NXT/TRU experiments are handled automatically; per-library overrides via the `star_chemistry` column in `--pfMultiConfig`.
 
-Standalone tool (`star_feature_call`) key flags:
+Recommended execution profile (32-thread host):
+
+```bash
+--runThreadN 32 --dynamicThreadInterface 1 --dynamicThreadConstMapPermits 32 \
+--dynamicThreadTelemetry 1 --crAssignConsumerThreads 32 --crAssignSearchThreads 1
+```
+
+Standalone tool (`star_feature_call`):
 - `--compat-perturb`: CR9-compatible output layout (`crispr_analysis/`).
 - `--feature-ref`, `--whitelist`, `--fastq-dir`, `--output-dir`: FASTQ -> MEX -> calls.
 - `--call-only --mex-dir`: call_features-only pass on existing MEX.
 - `--emptydrops-use-fdr`, `--min-umi`, `--ratio-test`: calling controls.
 
+### QC Outputs
+
+- **SLAM QC** (`--slamQcReport <prefix>`): Interactive HTML report (`.html`) and JSON metrics (`.json`) for T->C conversion rates, variance analysis, and trimming overlays.
+- **FlexFilter QC** (`flexfilter_summary.tsv`): Cell calling statistics (EmptyDrops/OrdMag), cell counts, UMI thresholds, and filtering rates per sample.
+
 ## Sample Commands
 
 **Core alignment:**
+
 ```bash
 core/legacy/source/STAR \
   --runMode alignReads \
@@ -419,6 +348,7 @@ core/legacy/source/STAR \
 ```
 
 **Batch mode (bulk, single-pass, SE):**
+
 ```bash
 core/legacy/source/STAR \
   --runMode alignReads \
@@ -430,7 +360,9 @@ core/legacy/source/STAR \
   --batchMode 1 \
   --outSAMtype BAM SortedByCoordinate
 ```
+
 **Batch mode (bulk, single-pass, PE):**
+
 ```bash
 core/legacy/source/STAR \
   --runMode alignReads \
@@ -442,11 +374,9 @@ core/legacy/source/STAR \
   --batchMode 1 \
   --outSAMtype BAM SortedByCoordinate
 ```
-Notes:
-- Batch mode is **single-pass only** (not compatible with `--twopassMode`).
-- Batch mode is **not supported with Solo** (`--soloType`).
 
 **Flex Mode (10x Fixed RNA Profiling):**
+
 ```bash
 core/legacy/source/STAR \
   --runMode alignReads \
@@ -460,6 +390,7 @@ core/legacy/source/STAR \
 ```
 
 **SLAM Mode (Standard):**
+
 ```bash
 core/legacy/source/STAR \
   --runMode alignReads \
@@ -474,6 +405,7 @@ core/legacy/source/STAR \
 ```
 
 **SLAM Mode (GEDI Compatibility):**
+
 ```bash
 core/legacy/source/STAR \
   --runMode alignReads \
@@ -486,6 +418,7 @@ core/legacy/source/STAR \
 ```
 
 **SLAM Batch Mode (blank-first, SE/PE):**
+
 ```bash
 core/legacy/source/STAR \
   --runMode alignReads \
@@ -499,10 +432,12 @@ core/legacy/source/STAR \
   --slamErrorRateFromBlank 1 \
   --slamSnpBed /path/to/snps.bed
 ```
+
 For paired-end, pass **two comma-separated mate lists**:
 `--readFilesIn blank_R1.fq.gz,0h_R1.fq.gz,... blank_R2.fq.gz,0h_R2.fq.gz,...`
 
 **STAR-perturb (integrated CR-compat mode):**
+
 ```bash
 core/legacy/source/STAR \
   --runMode alignReads \
@@ -520,6 +455,7 @@ core/legacy/source/STAR \
 ```
 
 **STAR-perturb (standalone feature pipeline):**
+
 ```bash
 core/legacy/source/star_feature_call \
   --compat-perturb \
@@ -541,3 +477,4 @@ core/legacy/source/star_feature_call \
 - STAR-perturb feature docs: [docs/feature_barcodes.md](docs/feature_barcodes.md)
 - STAR-perturb A375 parity report: [tests/crispr_feature_calling_comparison_report.md](tests/crispr_feature_calling_comparison_report.md)
 - Cell Ranger multi smoke tool: [docs/cr_multi.md](docs/cr_multi.md)
+- Docker validation: [docs/docker_validation.md](docs/docker_validation.md)
