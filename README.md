@@ -256,7 +256,7 @@ work and CR compatibility comparisons.
 - **UCSF full-sample benchmark (2026-03-06, 32-thread host):**
   - STAR canonical TRU seq run: `11:02.98`
   - Cell Ranger 9 full run (`32 cores`): `33:57.18`
-  - Speedup: ~`3.07x` throughput vs CR full run (~`67.5%` wall-time reduction).
+  - Speedup: `3.07x`
   - Artifact roots:
     - STAR: `/storage/ucsf-full/paper_benchmarks/canonical_tru_seq_20260306_052040`
     - Cell Ranger: `/storage/ucsf-full/bench_20260218_dynamic_first/cellranger_runs/cr_full_iPSC2_1_AALG2_crstar32_20260218_205804`
