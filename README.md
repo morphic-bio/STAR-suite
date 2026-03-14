@@ -45,6 +45,48 @@ mcp_server/              # MCP server for scripted discovery/preflight/run workf
   Build tools: `make vbem-tools`, `make yremove-tools`, plus in-core integrations.
 - **MCP Server (tooling)** (`mcp_server/`): Agent automation service for dataset/test discovery and controlled execution (`list_datasets`, `list_test_suites`, `preflight`, `run_script`, `collect_outputs`). This is repo tooling, not an analysis module.
 
+## Benchmarks
+
+### Perturb-seq (STAR vs Cell Ranger 9)
+
+| Dataset | Cells (STAR / CR) | Jaccard | Gene Pearson | Cell Pearson | CRISPR match | Speedup |
+|---|---|---|---|---|---|---|
+| UCSF iPSC2 (full, TRU) | 7,286 / 7,325 | 0.99 | 0.997 | 0.999 | -- | 3.1x |
+| A375 1k CRISPR 5' (GeneFull) | 1,167 / 1,163 | -- | 0.943 | -- | 100% (1,083/1,083) | -- |
+
+- UCSF: Gene Pearson on 21,521 filtered genes; Cell Pearson on 7,268 common barcodes; speedup = 11 min vs 34 min (32 threads).
+- A375: GeneFull parity (15,522 filtered genes); CRISPR exact-match at min-UMI 10.
+- MSK 30polyKO: planned, not yet run.
+
+### Flex (STAR vs Cell Ranger)
+
+| Dataset | Cells (STAR / CR) | Jaccard | Gene Pearson | Speedup |
+|---|---|---|---|---|
+| (benchmarks pending) | -- | -- | -- | -- |
+
+### PE Bulk (Integrated STAR-suite vs External Stepwise Pipeline)
+
+"External stepwise" = Trim Galore + STAR align + remove\_y\_reads + Salmon quant (sequential).
+
+| Dataset | Transcript Pearson | Gene Pearson | Speedup |
+|---|---|---|---|
+| JAX PE (full, 32 threads) | 0.995 | 0.997 | 2.1x |
+
+- TranscriptVB vs Salmon (alignment-mode VB) on expressed transcripts.
+- Integrated: 61 s vs external stepwise: 125 s (32 threads).
+
+### SLAM-seq (STAR-SLAM vs GrandSLAM/GEDI)
+
+| Dataset | Sample | NTR Pearson | NTR Spearman |
+|---|---|---|---|
+| NW-5-21 ARID1A 1M (compat, no trim) | 0h | 0.978 | 0.990 |
+| NW-5-21 ARID1A 1M (compat, no trim) | 6h | 0.972 | 0.986 |
+| NW-5-21 ARID1A 1M (compat, no trim) | 24h | 0.967 | 0.985 |
+| 100K fixture (SNP BED, ≥20 reads) | -- | 0.999 | 0.981 |
+
+- Comparison uses SNP-masked BAMs; GEDI is reference.
+- `slam_requant` replay: Pearson/Spearman 1.0 (exact parity with STAR output).
+
 ## Installation
 
 Build from repo root:
@@ -255,13 +297,6 @@ work and CR compatibility comparisons.
   - `--crAssignSearchThreads 1`
   - This profile keeps both map and feature sides provisioned to use full CPU
     when unconstrained, with permit gating preventing oversubscription.
-- **UCSF full-sample benchmark (2026-03-06, 32-thread host):**
-  - STAR canonical TRU seq run: `11:02.98`
-  - Cell Ranger 9 full run (`32 cores`): `33:57.18`
-  - Speedup: `3.07x`
-  - Artifact roots:
-    - STAR: `/storage/ucsf-full/paper_benchmarks/canonical_tru_seq_20260306_052040`
-    - Cell Ranger: `/storage/ucsf-full/bench_20260218_dynamic_first/cellranger_runs/cr_full_iPSC2_1_AALG2_crstar32_20260218_205804`
 
 - **Integrated CR-compat in STAR** (GEX + feature merge + CRISPR calling):
   - Use `--pfMultiConfig <multi_config.csv>`
@@ -273,10 +308,6 @@ work and CR compatibility comparisons.
   - Full pipeline: FASTQ -> MEX -> calls
   - Call-only mode: MEX -> calls
   - `--compat-perturb` writes CR9-style `crispr_analysis/` outputs.
-- **A375 small-set parity result**:
-  - On the A375 1k CRISPR 5' small set, STAR CRISPR calling matched Cell Ranger at
-    `1083/1083` common barcodes (**100.0% exact-match**) when using min-UMI `10`.
-  - Reference report: `tests/crispr_feature_calling_comparison_report.md`.
 
 ### QC Outputs
 STAR-Flex and STAR-SLAM now generate detailed QC reports:
