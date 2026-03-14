@@ -228,6 +228,8 @@ Recent updates to the Core module (STAR 2.7.11b and prior) include:
 ### Flex Updates
 STAR-Flex extends STAR-core with Flex-specific behavior:
 - **Flex Pipeline**: Inline hash-based processing for 10x Genomics Flex (Fixed RNA Profiling). Includes sample tag detection, 1MM pseudocount correction for CBs, clique-based UMI deduplication, and occupancy filtering.
+- **Y-Chromosome Splitting**: Tested and validated with Flex (`tests/TEST_REPORT_Y_SPLIT_FLEX.md`). Works in both sorted and unsorted modes.
+- **Spill-to-Disk Sorting**: `--outBAMsortMethod samtools` works with Flex (shared core infrastructure).
 
 ### SLAM Updates
 Integrated SLAM-seq quantification with GRAND-SLAM parity:
@@ -299,27 +301,32 @@ Standard STAR flags apply. See `core/legacy/README.md`.
 - `--soloType`: Single-cell mode (e.g., `CB_UMI_Simple`, `SmartSeq`)
 - `--soloCbUbRequireTogether`: Enforce CB/UB tag pairing for tag injection (`yes`/`no`, default `yes`)
 - `--soloCrGexFeature`: CR-compat merged GEX source (`auto`, `gene`, `genefull`)
+- **Trimming**:
+  - `--trimCutadapt Yes`: Enable native cutadapt-style trimming (v5.1 parity).
+  - `--trimCutadaptCompat Cutadapt3`: Compatibility mode for legacy cutadapt 3.2 datasets.
+- **Quantification**:
+  - `--quantMode TranscriptVB`: Enable VB/EM transcript quantification (Salmon parity).
+  - `--quantVBgenesMode Tximport`: Gene-level summarization in tximport style.
+- **BAM Sorting**:
+  - `--outBAMsortMethod samtools`: Spill-to-disk sorting (bounded RAM, works with all modes including Flex).
+- **Y-Chromosome Splitting** (works with bulk, single-cell, and Flex modes):
+  - `--emitNoYBAM yes`: Emit `_Y.bam` and `_noY.bam`.
+  - `--emitYNoYFastq yes`: Emit split FASTQ files directly during alignment.
+- **Reference Automation**:
+  - `--autoIndex Yes`: Automated reference download/build.
+  - `--cellrangerStyleIndex Yes`: CellRanger-style FASTA/GTF formatting.
+  - `--genomeGenerateTranscriptome Yes`: Generate `transcriptome.fa` at index time.
 
 ### Flex
-See `flex/README_flex.md` for full reference.
+See `flex/README_flex.md` for full Flex pipeline reference.
 - **Pipeline**:
   - `--flex yes`: Enable Flex pipeline.
   - `--soloFlexExpectedCellsPerTag`: Expected cells per sample tag.
   - `--soloSampleWhitelist`: TSV mapping sample tags to labels.
-- **Trimming**:
-  - `--trimCutadapt Yes`: Enable cutadapt-style trimming.
-  - `--trimCutadaptCompat`: Compatibility mode (e.g., `Cutadapt3`).
-- **Quantification**:
-  - `--quantMode TranscriptVB`: Enable VB/EM quantification.
-- **Y-Split**:
-  - `--emitNoYBAM yes`: Emit `_Y.bam` and `_noY.bam`.
-  - `--emitYNoYFastq yes`: Emit split FASTQ files.
-- **Reference**:
-  - `--autoIndex Yes`: Enable automated reference download/build.
-  - `--cellrangerStyleIndex Yes`: Use CellRanger-style reference formatting.
-  - `--cellrangerLegacyGtfFilter Auto|Yes|No`: Select legacy vs updated CellRanger-style filtering mode.
-- **Sorting**:
-  - `--outBAMsortMethod samtools`: Enable spill-to-disk sorting.
+  - `--soloProbeList`: Probe gene list (auto-detected from index if omitted).
+  - `--soloSampleProbes`: 10x probe barcode sequences file.
+
+Note: Core features such as trimming (`--trimCutadapt`), spill-to-disk BAM sorting (`--outBAMsortMethod samtools`), Y-chromosome splitting (`--emitNoYBAM`, `--emitYNoYFastq`), TranscriptVB quantification (`--quantMode TranscriptVB`), and automated reference building (`--autoIndex`) are documented in the Core section above and work with Flex.
 
 ### SLAM
 See `slam/docs/SLAM_COMPATIBILITY_MODE.md` and `slam/docs/SLAM_seq.md`.

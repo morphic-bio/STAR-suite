@@ -1,14 +1,10 @@
-# STAR-Flex: Extended Features for 10x Flex and Trimming
+# STAR-Flex: 10x Fixed RNA Profiling Pipeline
 
-This document describes the STAR-Flex fork, which extends upstream STAR with additional features.
+This document describes STAR-Flex, the Flex-specific module in STAR-suite.
 
 ## Overview
 
-STAR-Flex extends STAR with additional features:
-
-1. **Cutadapt-style trimming** (`--trimCutadapt Yes`) for **bulk RNA-seq** with perfect parity to Trim Galore/cutadapt v5.1. For legacy datasets processed with Trim Galore + cutadapt 3.2, enable `--trimCutadaptCompat Cutadapt3` (see [docs/cutadapt_3.2_parity_report.md](docs/cutadapt_3.2_parity_report.md)). This is a general-purpose trimming feature usable with any STAR workflow (bulk RNA-seq, single-cell, etc.). See [docs/trimming.md](docs/trimming.md) for details.
-
-2. **Inline hash-based pipeline for 10x Genomics Flex** (Fixed RNA Profiling) samples using probes for transcript detection and RTL tags for multiplexing. We generate a hybrid reference with the regular genome and with synthetic chromosomes for each of the probes. This allows to use the STAR alignment routines to quantify probe alignment and use the genomic hits to confirm the match and detect off-probe noise. However, the rest of the workflow diverges from the standard STAR solo workflow, largely due to the presence of RTL tags for multiplexing samples. Because these are on the same mate as the probe and not the cell barcode, STAR's barcode and UMI correction, and UMI deduping routines could not be used. Furthermore, the noise characteristics of Flex are different that the native STAR's multimapping ad emptyDrops functions could not be used. A fast inline path was created to handle Flex processing after STAR alignment.
+STAR-Flex adds an **inline hash-based pipeline for 10x Genomics Flex** (Fixed RNA Profiling) samples using probes for transcript detection and RTL tags for multiplexing. A hybrid reference is generated with the regular genome and synthetic chromosomes for each probe. STAR alignment routines quantify probe alignment and use genomic hits to confirm matches and detect off-probe noise. The rest of the workflow diverges from the standard STAR Solo workflow because RTL tags are on the same mate as the probe (not the cell barcode), so STAR's barcode/UMI correction and deduplication routines cannot be used. A fast inline path handles Flex-specific processing after alignment.
 
 The Flex pipeline includes:
 - **Sample tag detection** during alignment identifies multiplexed sample barcodes
@@ -21,108 +17,19 @@ The Flex pipeline includes:
 
 When `--flex no` (default), STAR behavior is identical to upstream.
 
+## Core Features Available in Flex Mode
+
+The following features were originally developed in the STAR-Flex fork and are now
+part of STAR-core. They work with all STAR modes (bulk, single-cell, Flex). See the
+main suite `README.md` for full documentation and flags.
+
+- **Cutadapt-style trimming** (`--trimCutadapt Yes`): See [docs/trimming.md](docs/trimming.md).
+- **TranscriptVB quantification** (`--quantMode TranscriptVB`): VB/EM transcript-level quantification with Salmon parity.
+- **SLAM-seq** (`--slamQuantMode 1`): See [slam/docs/SLAM_seq.md](../slam/docs/SLAM_seq.md).
+- **Spill-to-disk BAM sorting** (`--outBAMsortMethod samtools`): Bounded-RAM coordinate sorting. Works with Flex.
+- **Y-chromosome BAM/FASTQ splitting** (`--emitNoYBAM yes`, `--emitYNoYFastq yes`): Split reads by chrY alignment. Developed for MorPHiC KOLF cell lines. Tested and validated with Flex in both sorted and unsorted modes (see `tests/TEST_REPORT_Y_SPLIT_FLEX.md`). See [docs/Y_CHROMOSOME_BAM_SPLIT.md](docs/Y_CHROMOSOME_BAM_SPLIT.md).
+
 ## STAR-Flex Extras
-
-This fork adds several features beyond upstream STAR:
-
-### Bulk RNA-seq Features
-
-- **[Cutadapt-Style Trimming](docs/trimming.md)**: Perfect parity with Trim Galore/cutadapt v5.1 for quality and adapter trimming. For legacy datasets trimmed with Trim Galore + cutadapt 3.2, enable `--trimCutadaptCompat Cutadapt3` (see [docs/cutadapt_3.2_parity_report.md](docs/cutadapt_3.2_parity_report.md)).
-
-- **TranscriptVB (VB/EM) + Salmon parity workflow**: STAR-Flex can quantify transcripts with variational Bayes (VB, default) or EM, and can run Salmon in alignment mode for cross-tool parity checks.
-  - **STAR TranscriptVB** (VB by default; set `--quantVBem 1` for EM):
-    ```bash
-    STAR \
-      --runMode alignReads \
-      --genomeDir /path/to/star_index \
-      --readFilesIn R2.fastq.gz R1.fastq.gz \
-      --readFilesCommand zcat \
-      --quantMode TranscriptVB \
-      --quantVBLibType A \
-      --quantVBAutoDetectWindow 1000 \
-      --quantVBem 0 \
-      --outFileNamePrefix out/
-    ```
-  - **Generate transcriptome BAM for Salmon (alignment-mode quant)**:
-    ```bash
-    STAR \
-      --runMode alignReads \
-      --genomeDir /path/to/star_index \
-      --readFilesIn R2.fastq.gz R1.fastq.gz \
-      --readFilesCommand zcat \
-      --quantMode TranscriptomeSAM \
-      --outSAMtype BAM Unsorted \
-      --outFileNamePrefix out_trbam/
-    ```
-    This produces `out_trbam/Aligned.toTranscriptome.out.bam`.
-  - **Salmon VB in alignment mode** (requires `transcriptome.fa`):
-    ```bash
-    salmon quant \
-      -t /path/to/transcriptome.fa \
-      -l A \
-      -a out_trbam/Aligned.toTranscriptome.out.bam \
-      --useVBOpt \
-      -o salmon_out
-    ```
-    For gene-level Salmon output, also pass a gene map: `-g tx2gene.tsv` (format `transcript_id<TAB>gene_id`).
-  - **tximport-style gene counts in STAR** (DESeq2-friendly):
-    ```bash
-    STAR \
-      --runMode alignReads \
-      --genomeDir /path/to/star_index \
-      --readFilesIn R2.fastq.gz R1.fastq.gz \
-      --readFilesCommand zcat \
-      --quantMode TranscriptVB \
-      --quantVBgenesMode Tximport \
-      --outFileNamePrefix out/
-    ```
-    This writes `out/quant.genes.tximport.sf` in the standard `quant.sf`-like schema.
-  - **Testing and expected correlations**:
-    - TranscriptVB vs Salmon (alignment-mode VB) parity tests: `tests/transcriptvb/salmon_parity_test.sh`
-    - tximport parity tests (STAR vs R tximport, and CLI tool): `tests/tximport/star_tximport_e2e_test.sh`
-    - On the JAX PE validation runs, gene-level correlations between STAR and Salmon tximport-style summaries are typically very high (Spearman/Pearson ~0.99+), and base-vs-auto (trimming) parity is expected to be ~1.0.
-
-- **[SLAM-seq (STAR-SLAM)](docs/SLAM_seq.md)**: Integrated SLAM-seq quantification with GRAND-SLAM parity.
-  - **Features**:
-    - **Gene Quantification**: Full gene-level NTR estimation (Binomial/EM models).
-    - **GRAND-SLAM Output**: Generates `<prefix>SlamQuant.grandslam.tsv` for seamless tool compatibility (`--slamGrandSlamOut 1`).
-    - **Auto-Trimming**: Robust variance-based detection of artifact-prone read ends (`--autoTrim variance`).
-    - **QC Reports**: Comprehensive HTML reports for T->C rates, error modeling, and trimming (`--slamQcReport`).
-  - **Usage**:
-    ```bash
-    STAR \
-      --runMode alignReads \
-      --genomeDir /path/to/star_index \
-      --readFilesIn reads.fastq.gz \
-      --slamQuantMode 1 \
-      --slamGrandSlamOut 1 \
-      --autoTrim variance \
-      --slamQcReport output/qc_report \
-      --outFileNamePrefix output/
-    ```
-  - **Documentation**: See **[docs/SLAM_seq.md](docs/SLAM_seq.md)** for detailed theory, usage guide, and parameter reference.
-  - **Benchmarks**: See [docs/SLAM_METHOD_TECHNICAL_NOTE.md](docs/SLAM_METHOD_TECHNICAL_NOTE.md) for parity benchmarks.
-
-- **Samtools-style spill-to-disk BAM sorting** (`--outBAMsortMethod samtools`): Optional coordinate-sorting backend that uses a spill-to-disk strategy (bounded by `--limitBAMsortRAM`) to reduce temporary disk usage compared to STAR’s legacy bin-based sorter.
-  - Rationale: the legacy STAR sorter partitions alignments into many genomic bins and can create large temporary files; the spill-to-disk sorter keeps in-memory buffers up to the RAM cap and only writes spill files as needed.
-  - Usage:
-    ```bash
-    STAR \
-      --runMode alignReads \
-      --genomeDir /path/to/star_index \
-      --readFilesIn R2.fastq.gz R1.fastq.gz \
-      --readFilesCommand zcat \
-      --outSAMtype BAM SortedByCoordinate \
-      --outBAMsortMethod samtools \
-      --outBAMsortingThreadN 8 \
-      --limitBAMsortRAM 24000000000 \
-      --outFileNamePrefix out/
-    ```
-  - Notes:
-    - Default remains `--outBAMsortMethod star`.
-    - Works with `--emitNoYBAM yes` / `--keepBAM yes`.
-
-- **[Y-Chromosome BAM Split](docs/Y_CHROMOSOME_BAM_SPLIT.md)**: Split BAMs by Y-chromosome alignment. Developed for **Morphic requirements for KOLF cell lines** (not connected to Flex pipeline). Works with both bulk and single-cell workflows.
 
 ### Index-Time Features
 
@@ -242,7 +149,7 @@ STAR \
   --outFileNamePrefix output/
 ```
 
-**Note**: The Y/noY split is a general-purpose feature developed for **Morphic requirements for KOLF cell lines** (not Flex-specific). It works with both single-cell RNA-seq (Flex mode) and bulk RNA-seq modes. In single-cell mode, R1/R2 are not traditional paired-end mates, so routing is based on each read's own alignments. In bulk paired-end mode, if either mate has a Y-chromosome alignment, both mates route to `_Y.bam`.
+**Note**: The Y/noY split is a general-purpose core feature developed for **MorPHiC requirements for KOLF cell lines**. It works with all modes: Flex, single-cell, and bulk RNA-seq. Validated with Flex in both sorted and unsorted modes (see `tests/TEST_REPORT_Y_SPLIT_FLEX.md`). In single-cell mode, R1/R2 are not traditional paired-end mates, so routing is based on each read's own alignments. In bulk paired-end mode, if either mate has a Y-chromosome alignment, both mates route to `_Y.bam`.
 
 ## Required Inputs
 
@@ -777,44 +684,3 @@ tools/remove_y_reads/           # Standalone FASTQ Y-splitter CLI
 - When `--flex no` (default), behavior is identical to upstream STAR
 - Upstream `README.md` and `CHANGES.md` are not modified
 
-## Code Statistics
-
-STAR-Flex adds approximately **33,800 lines of C/C++ code** on top of upstream STAR 2.7.11b.
-
-### Summary (excluding third-party libraries)
-
-| Repository | Files | Lines |
-|------------|-------|-------|
-| Upstream STAR (2.7.11b) | 250 | 28,228 |
-| STAR-Flex | 356 | 62,016 |
-| **Difference** | **+106** | **+33,788** |
-
-### Bulk/PE vs Flex (heuristic file classification)
-
-| Category | Files | Lines |
-|----------|-------|-------|
-| Flex-specific | 25 | 9,670 |
-| Bulk/PE-specific | 44 | 10,993 |
-| Shared/core (includes overlap) | 287 | 41,353 |
-
-Bulk/PE-specific includes (among others) `source/libtrim/` (trimming) and `source/libem/` (TranscriptVB/EM + tximport-style gene summaries).
-
-### Key Bulk/PE Modules (selected)
-
-| Path | Files | Lines |
-|------|-------|-------|
-| `source/libtrim/` | 4 | 962 |
-| `source/libem/` | 26 | 4,873 |
-| `source/TranscriptomeFasta.*` | 2 | 231 |
-| `source/SamtoolsSorter.*` | 2 | 584 |
-| `source/CellRangerFormatter.*` | 2 | 1,863 |
-
-### Third-party Libraries (included in repo)
-
-| Library | Lines | Files | Notes |
-|---------|-------|-------|-------|
-| PCG random (pcg_*.hpp) | 3,623 | 3 | New in STAR-Flex |
-| klib/khash.h | 617 | 1 | New in STAR-Flex |
-| SimpleGoodTuring | 300 | 1 | Present in upstream |
-
-*Line counts include only compiled source files (`.c`, `.cpp`, `.h`, `.hpp`) under `source/`. Excludes `source/htslib/`, `source/opal/`, reference data, scripts, and test fixtures. Generated by `scripts/count_cpp_lines.sh --upstream-ref 2.7.11b`.*
