@@ -253,11 +253,13 @@ work and CR compatibility comparisons.
   - `--crAssignSearchThreads 1`
   - This profile keeps both map and feature sides provisioned to use full CPU
     when unconstrained, with permit gating preventing oversubscription.
-- **UCSF full-sample benchmark (2026-02-24, 32-thread host):**
-  - STAR dynamic (`32x32`): `20:26.93`
-  - STAR full fixture baseline: `30:20`
+- **UCSF full-sample benchmark (2026-03-06, 32-thread host):**
+  - STAR canonical TRU seq run: `11:02.98`
   - Cell Ranger 9 full run (`32 cores`): `33:57.18`
-  - Speedup: ~`1.66x` throughput vs CR full run (~`39.8%` wall-time reduction).
+  - Speedup: ~`3.07x` throughput vs CR full run (~`67.5%` wall-time reduction).
+  - Artifact roots:
+    - STAR: `/storage/ucsf-full/paper_benchmarks/canonical_tru_seq_20260306_052040`
+    - Cell Ranger: `/storage/ucsf-full/bench_20260218_dynamic_first/cellranger_runs/cr_full_iPSC2_1_AALG2_crstar32_20260218_205804`
 
 - **Integrated CR-compat in STAR** (GEX + feature merge + CRISPR calling):
   - Use `--pfMultiConfig <multi_config.csv>`
