@@ -1,0 +1,119 @@
+======================================================================
+Parity Metrics Configuration
+======================================================================
+cr_run: /tmp/a375_bench_32t_20260315_072752/cr_a375_32t_nobam
+star_run: /tmp/a375_bench_32t_20260315_072752/star_a375_32t_nobam_v4
+cr_filtered_barcodes: /tmp/a375_bench_32t_20260315_072752/cr_a375_32t_nobam/outs/filtered_feature_bc_matrix/barcodes.tsv.gz
+keep_suffix: False
+translate_enabled: False
+translation_file: none
+translation_direction: none
+translate_side: none
+
+======================================================================
+GEX Correlations (Per-Barcode UMI Totals)
+======================================================================
+matrix_raw_cr: matrix.mtx
+matrix_raw_star: matrix.mtx
+matrix_filtered_cr: matrix.mtx
+matrix_filtered_star: matrix.mtx
+
+raw_all:
+  common_barcodes: 252236
+  pearson: 0.999938
+  spearman: 0.984175
+  left_sum_on_common: 22685591
+  right_sum_on_common: 22708832
+raw_restricted_to_cr_filtered:
+  common_barcodes: 1162
+  pearson: 0.999539
+  spearman: 0.999427
+  left_sum_on_common: 21361149
+  right_sum_on_common: 21376229
+filtered_vs_filtered:
+  common_barcodes: 1162
+  pearson: 0.999539
+  spearman: 0.999427
+  left_sum_on_common: 21361149
+  right_sum_on_common: 21376229
+
+======================================================================
+GEX Correlations (Per-Gene Totals Across Common Barcodes)
+======================================================================
+method_feature_type: Gene Expression
+method_barcode_set: normalized/translated common barcodes per comparison
+method_min_counts_per_gene: 20
+method_min_cells_per_gene_pct: 0.01
+
+raw_all:
+  common_barcodes: 252236
+  common_genes: 38606
+  min_counts_per_gene: 20
+  min_cells_per_gene_pct: 0.01
+  min_cells_per_gene_abs: 2523
+  pearson_all_genes: 0.974922
+  spearman_all_genes: 0.950792
+  filtered_genes: 108
+  pearson_filtered_genes: 0.982158
+  spearman_filtered_genes: 0.981737
+  pearson: 0.982158
+  spearman: 0.981737
+  left_sum_on_filtered_genes: 6654855
+  right_sum_on_filtered_genes: 6369907
+raw_restricted_to_cr_filtered:
+  common_barcodes: 1162
+  common_genes: 38606
+  min_counts_per_gene: 20
+  min_cells_per_gene_pct: 0.01
+  min_cells_per_gene_abs: 12
+  pearson_all_genes: 0.975152
+  spearman_all_genes: 0.950093
+  filtered_genes: 15677
+  pearson_filtered_genes: 0.974661
+  spearman_filtered_genes: 0.974683
+  pearson: 0.974661
+  spearman: 0.974683
+  left_sum_on_filtered_genes: 21285159
+  right_sum_on_filtered_genes: 21171743
+filtered_vs_filtered:
+  common_barcodes: 1162
+  common_genes: 38606
+  min_counts_per_gene: 20
+  min_cells_per_gene_pct: 0.01
+  min_cells_per_gene_abs: 12
+  pearson_all_genes: 0.975152
+  spearman_all_genes: 0.950093
+  filtered_genes: 15677
+  pearson_filtered_genes: 0.974661
+  spearman_filtered_genes: 0.974683
+  pearson: 0.974661
+  spearman: 0.974683
+  left_sum_on_filtered_genes: 21285159
+  right_sum_on_filtered_genes: 21171743
+
+======================================================================
+Feature-Call Parity (protospacer_calls_per_cell.csv)
+======================================================================
+rows_cr: 1083
+rows_star: 1191
+rows_star_non_none: 1086
+rows_star_none: 105
+common_rows_all: 1083
+common_rows_eval: 1083
+excluded_common_rows_star_none: 0
+call_parity_mode: exclude_star_none_default
+only_cr_rows: 0
+only_star_rows: 108
+num_features_exact_match: 1083
+num_features_exact_match_pct: 100.0000
+set_equivalent_calls: 1083
+set_equivalent_calls_pct: 100.0000
+set_equivalent_calls_target: 1083
+set_equivalent_calls_target_pct: 100.0000
+set_equivalent_calls_gene: 1083
+set_equivalent_calls_gene_pct: 100.0000
+umi_sum_pearson_on_common: 0.999994
+umi_sum_spearman_on_common: 0.999987
+total_assigned_umis_cr: 3001352
+total_assigned_umis_star: 3049220
+total_assigned_umis_delta_star_minus_cr: 47868

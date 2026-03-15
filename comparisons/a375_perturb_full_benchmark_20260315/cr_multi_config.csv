@@ -1,0 +1,11 @@
+[gene-expression]
+reference,/storage/A375-CR-9.01/refdata-gex-GRCh38-2024-A
+create-bam,false
+
+[feature]
+ref,/storage/A375/1k_CRISPR_5p_gemx_Multiplex_count_feature_reference.csv
+
+[libraries]
+fastq_id,fastqs,lanes,feature_types
+1k_CRISPR_5p_gemx_crispr,/storage/A375-CR-9.01/full_fastqs/crispr,1|2,CRISPR Guide Capture
+1k_CRISPR_5p_gemx_gex,/storage/A375-CR-9.01/full_fastqs/gex,1|2,Gene Expression

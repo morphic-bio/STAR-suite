@@ -49,6 +49,7 @@ update this file with its output location.
     - `downstream_genefull_velocyto_100k_starcells_featurelibs_v2/feature_libraries/*/raw_feature_library.h5ad`
     - `downstream_genefull_velocyto_100k_starcells_featurelibs_v2/feature_libraries/*/filtered_feature_library.h5ad`
 - `tests/trim_qc_replay_smoke_output/` (standalone alignment replay smoke for FastQC-like trim-QC JSON/HTML)
+- `tests/trim_qc_fastq_smoke_output/` (standalone FASTQ replay smoke for FastQC-like trim-QC JSON/HTML)
 - `tests/sceptre_example_output_*` (SCEPTRE vignette runs)
 - `tests/sceptre_example_*_mex` (SCEPTRE vignette MEX exports)
 - `tests/nbem_sceptre_example_*` (NB-EM outputs on SCEPTRE vignette MEX)
@@ -84,6 +85,7 @@ update this file with its output location.
 - `/tmp/flex_cr_config_star_section_smoke_*` (Flex CR-config smoke outputs using `[star]` probe catalog/offset extensions)
 - `/tmp/public_bulk_fixture_*` (public GEO bulk PE smoke fixtures downloaded via `scripts/download_public_bulk_fixture.sh`)
 - `/mnt/pikachu/ucsf-perturb-yremove*/samples/*/run/read_qc.trim_qc.{json,html}` (STAR read-level FastQC-like QC reports when UCSF perturb runners are launched with `--trim-qc`)
+- `/mnt/pikachu/ucsf-perturb-yremove_all_velocyto*/samples/*/qc/read_qc_r2.{json,html}` (standalone FASTQ replay QC reports on UCSF GEX R2 inputs, written into processed sample roots)
 - `/storage/A375/` (external A375 datasets + smoke outputs; e.g. `star_gex_smoke/`, `star_multi_smoke_cpp/`, `fastqs/`, `outputs/`)
   - Downsampled MEX output: `/storage/A375/star_multi_smoke/assign/downsampled/`
   - NB-EM calls (A375 CRISPR-only MEX): `/storage/A375/nbem_a375_20260128_075248/`
@@ -305,3 +307,10 @@ These scripts validate that default bundles work with minimal explicit parameter
   - `/tmp/hamming1_strategy_bench_20260301_214110/`
   - `/tmp/hamming1_full_larry_20260301_215418/`
   - `/tmp/hash_read_scaling_larry_20260301_215902/`
+
+## A375 Perturb-seq Full Benchmark (2026-03-15)
+
+- Benchmark dir: `/tmp/a375_bench_32t_20260315_072752/`
+- Committed results: `comparisons/a375_perturb_full_benchmark_20260315/`
+- STAR output: `/tmp/a375_bench_32t_20260315_072752/star_a375_32t_nobam_v4/`
+- CR output: `/tmp/a375_bench_32t_20260315_072752/cr_a375_32t_nobam/`
