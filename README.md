@@ -53,11 +53,11 @@ mcp_server/              # MCP server for scripted discovery/preflight/run workf
 
 | Dataset | Cells (STAR / CR) | Jaccard | Gene Pearson | Cell Pearson | CRISPR match | Speedup |
 |---|---|---|---|---|---|---|
-| UCSF iPSC2 (full, TRU) | 7,286 / 7,325 | 0.99 | 0.997 | 0.999 | -- | 3.1x |
-| A375 1k CRISPR 5' (GeneFull) | 1,167 / 1,163 | -- | 0.943 | -- | 100% (1,083/1,083) | -- |
+| UCSF iPSC2 (full, TRU) | 7,286 / 7,325 | 0.99 | 0.997 | 0.999 | 99.6% (5,110/5,133) | 3.1x |
+| A375 1k CRISPR 5' (GeneFull) | 1,191 / 1,162 | 0.98 | 0.975 | 1.000 | 100% (1,083/1,083) | 2.1x |
 
-- UCSF: Gene Pearson on 21,521 filtered genes; Cell Pearson on 7,268 common barcodes; speedup = 11 min vs 34 min (32 threads).
-- A375: GeneFull parity (15,522 filtered genes); CRISPR exact-match at min-UMI 10.
+- UCSF: Gene Pearson on 21,521 filtered genes; Cell Pearson on 7,268 common barcodes; CRISPR exact-match on 5,133 common evaluated rows; speedup = 11 min vs 34 min (32 threads).
+- A375: Gene Pearson on 15,677 filtered genes; Cell Pearson on 1,162 common barcodes; CRISPR exact-match at min-UMI 10; speedup = 7 min vs 15 min (32 threads, no BAM, dynamic permits).
 - MSK 30polyKO: planned, not yet run.
 
 ### Flex (STAR vs Cell Ranger 7.2)

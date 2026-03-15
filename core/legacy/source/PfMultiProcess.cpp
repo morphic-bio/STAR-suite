@@ -1741,6 +1741,9 @@ int processPfMultiConfig(Parameters& P,
             PfMultiAssign::WhitelistNormalizationResult wlInfo =
                 PfMultiAssign::normalizeWhitelistForAssign(whitelist, assignOut);
             string assignmentWhitelistNamespace = upperCopy(wlInfo.assignmentNamespace);
+            if (!isKnownNamespace(assignmentWhitelistNamespace) && isKnownNamespace(effectiveChem)) {
+                assignmentWhitelistNamespace = effectiveChem;
+            }
             const bool assignmentNamespaceKnown = isKnownNamespace(assignmentWhitelistNamespace);
 
             PfLibraryNamespaceContext nsCtx;
