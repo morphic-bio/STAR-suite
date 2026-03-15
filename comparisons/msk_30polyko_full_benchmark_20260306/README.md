@@ -15,9 +15,11 @@
 | Cell Pearson (per-barcode UMI) | 1.000 |
 | CRISPR set-equivalent calls | 98.5% (22,200/22,531) |
 | CRISPR UMI Pearson | 0.999 |
-| STAR wall time | 42 min |
-| Cell Ranger wall time | 61 min |
-| Speedup | 1.5× |
+| STAR wall time | 42 min (single run, all 3 libraries) |
+| CR wall time (gRNA + GEX) | 58 min |
+| CR wall time (LARRY + GEX) | 110 min |
+| CR total wall time | 168 min |
+| Speedup | 4.0× |
 
 ## Configuration
 
