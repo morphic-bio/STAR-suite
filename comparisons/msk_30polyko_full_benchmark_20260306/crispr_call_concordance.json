@@ -1,0 +1,35 @@
+{
+  "agreement": {
+    "called_cell_total_umi_pearson": 0.9997172721104666,
+    "exact_call_set_match_rate": 0.9944301628106256,
+    "exact_multi_match_rate": 0.9505747126436782,
+    "exact_singleton_match_rate": 0.9999517607332369,
+    "mean_call_set_jaccard": 0.9972864895744072,
+    "mean_cellwise_cr_in_star": 0.9991073978863181,
+    "mean_cellwise_star_in_cr": 0.9981362467866324,
+    "same_num_features_rate": 0.9865864483676892,
+    "same_zero_one_multi_bucket_rate": 0.9870138409442089
+  },
+  "called_set_containment": {
+    "cr_called": 23426,
+    "cr_in_star": 0.9963288653632716,
+    "overlap_coefficient": 0.9963288653632716,
+    "star_called": 23533,
+    "star_in_cr": 0.9917987506905197
+  },
+  "excluded_features": [],
+  "filtered_barcode_counts": {
+    "cr": 32256,
+    "cr_only": 1839,
+    "jaccard": 0.940654379020287,
+    "shared": 30417,
+    "star": 30497,
+    "star_only": 80
+  },
+  "shared_filtered_breakdown": {
+    "both_called": 23340,
+    "both_zero": 6798,
+    "cr_only_called": 86,
+    "star_only_called": 193
+  }
+}

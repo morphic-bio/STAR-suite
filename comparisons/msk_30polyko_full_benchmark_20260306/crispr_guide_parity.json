@@ -1,0 +1,72 @@
+{
+  "excluded_features": [],
+  "feature_count": 30,
+  "feature_ids": [
+    "EOMES",
+    "PAX6",
+    "MEIS1",
+    "SIX3",
+    "HES1",
+    "HNF1A",
+    "NEUROG3",
+    "ONECUT1",
+    "INSM1",
+    "MAFB",
+    "ISL1",
+    "FEV",
+    "SIM1",
+    "PBX2",
+    "HNF4A",
+    "NOTCH2",
+    "MEN1",
+    "GCM1",
+    "CARM1",
+    "CBX4",
+    "DPY30",
+    "JMJD6",
+    "NCOA5",
+    "NKX6-1",
+    "NOTCH1",
+    "PDX1",
+    "RFX3",
+    "RFX7",
+    "RREB1",
+    "SIX2"
+  ],
+  "merged_filtered": {
+    "pearson_per_feature": 0.9999245838368628,
+    "star_over_cr_ratio": 1.0436522795008358
+  },
+  "stages": {
+    "cr_merged_filtered": {
+      "feature_count": 30,
+      "path": "/storage/MSK-perturb-comparison/cr_full_grna_30crispr_20260306_173247/cr9_gex_grna_30crispr/outs/per_sample_outs/cr9_gex_grna_30crispr/count/sample_filtered_feature_bc_matrix",
+      "positive_barcodes": 32017,
+      "total_umis": 3111361
+    },
+    "cr_merged_raw": {
+      "feature_count": 30,
+      "path": "/storage/MSK-perturb-comparison/cr_full_grna_30crispr_20260306_173247/cr9_gex_grna_30crispr/outs/multi/count/raw_feature_bc_matrix",
+      "positive_barcodes": 231128,
+      "total_umis": 4515296
+    },
+    "star_merged_filtered": {
+      "feature_count": 30,
+      "path": "/storage/MSK-perturb-comparison/canonical_tru_seq_20260306_052040/star_3lib/outs/filtered_feature_bc_matrix",
+      "positive_barcodes": 30263,
+      "total_umis": 3247179
+    },
+    "star_merged_raw": {
+      "feature_count": 30,
+      "path": "/storage/MSK-perturb-comparison/canonical_tru_seq_20260306_052040/star_3lib/outs/raw_feature_bc_matrix",
+      "positive_barcodes": 220109,
+      "total_umis": 4729451
+    },
+    "star_raw_assign": {
+      "feature_count": 30,
+      "path": "/storage/MSK-perturb-comparison/canonical_tru_seq_20260306_052040/star_3lib/cr_assign/CRISPR_Guide_Capture/grna_de/PolyIII",
+      "positive_barcodes": 238726,
+      "total_umis": 4751051
+    }
+  }
+}

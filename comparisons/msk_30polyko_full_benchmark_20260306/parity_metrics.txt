@@ -1,0 +1,125 @@
+======================================================================
+Parity Metrics Configuration
+======================================================================
+cr_run: /tmp/cr_full_grna_withcalls_wrapper_20260306
+star_run: /storage/MSK-perturb-comparison/canonical_tru_seq_20260306_052040/star_3lib
+cr_filtered_barcodes: /tmp/cr_full_grna_withcalls_wrapper_20260306/outs/filtered_feature_bc_matrix/barcodes.tsv.gz
+keep_suffix: False
+translate_enabled: True
+translation_file: /home/lhhung/cellranger-9.0.1/lib/python/cellranger/barcodes/translation/3M-february-2018_NXT.txt.gz
+translation_direction: left-to-right
+translate_side: both
+translation_observed_raw_cr_in_source_domain: 327263
+translation_observed_raw_cr_in_target_domain: 2060870
+translation_observed_raw_star_in_source_domain: 329886
+translation_observed_raw_star_in_target_domain: 2078394
+translation_observed_raw_cr_in_both_domains: 327263
+translation_observed_raw_star_in_both_domains: 329886
+
+======================================================================
+GEX Correlations (Per-Barcode UMI Totals)
+======================================================================
+matrix_raw_cr: matrix.mtx.gz
+matrix_raw_star: matrix.mtx
+matrix_filtered_cr: matrix.mtx.gz
+matrix_filtered_star: matrix.mtx
+
+raw_all:
+  common_barcodes: 2045950
+  pearson: 0.999992
+  spearman: 0.977550
+  left_sum_on_common: 296045472
+  right_sum_on_common: 298315073
+raw_restricted_to_cr_filtered:
+  common_barcodes: 32256
+  pearson: 0.999965
+  spearman: 0.999949
+  left_sum_on_common: 265642094
+  right_sum_on_common: 268042238
+filtered_vs_filtered:
+  common_barcodes: 30417
+  pearson: 0.999959
+  spearman: 0.999940
+  left_sum_on_common: 264048892
+  right_sum_on_common: 266445024
+
+======================================================================
+GEX Correlations (Per-Gene Totals Across Common Barcodes)
+======================================================================
+method_feature_type: Gene Expression
+method_barcode_set: normalized/translated common barcodes per comparison
+method_min_counts_per_gene: 20
+method_min_cells_per_gene_pct: 0.01
+
+raw_all:
+  common_barcodes: 2045950
+  common_genes: 38606
+  min_counts_per_gene: 20
+  min_cells_per_gene_pct: 0.01
+  min_cells_per_gene_abs: 20460
+  pearson_all_genes: 0.993168
+  spearman_all_genes: 0.991127
+  filtered_genes: 1777
+  pearson_filtered_genes: 0.993458
+  spearman_filtered_genes: 0.991975
+  pearson: 0.993458
+  spearman: 0.991975
+  left_sum_on_filtered_genes: 181670359
+  right_sum_on_filtered_genes: 179516930
+raw_restricted_to_cr_filtered:
+  common_barcodes: 32256
+  common_genes: 38606
+  min_counts_per_gene: 20
+  min_cells_per_gene_pct: 0.01
+  min_cells_per_gene_abs: 323
+  pearson_all_genes: 0.993790
+  spearman_all_genes: 0.991167
+  filtered_genes: 17253
+  pearson_filtered_genes: 0.993570
+  spearman_filtered_genes: 0.991795
+  pearson: 0.993570
+  spearman: 0.991795
+  left_sum_on_filtered_genes: 264508799
+  right_sum_on_filtered_genes: 266273520
+filtered_vs_filtered:
+  common_barcodes: 30417
+  common_genes: 38606
+  min_counts_per_gene: 20
+  min_cells_per_gene_pct: 0.01
+  min_cells_per_gene_abs: 305
+  pearson_all_genes: 0.993649
+  spearman_all_genes: 0.991168
+  filtered_genes: 17448
+  pearson_filtered_genes: 0.993422
+  spearman_filtered_genes: 0.991838
+  pearson: 0.993422
+  spearman: 0.991838
+  left_sum_on_filtered_genes: 262984779
+  right_sum_on_filtered_genes: 264763388
+
+======================================================================
+Feature-Call Parity (protospacer_calls_per_cell.csv)
+======================================================================
+rows_cr: 22715
+rows_star: 30497
+rows_star_non_none: 23541
+rows_star_none: 6956
+common_rows_all: 22617
+common_rows_eval: 22531
+excluded_common_rows_star_none: 86
+call_parity_mode: exclude_star_none_default
+only_cr_rows: 98
+only_star_rows: 7880
+num_features_exact_match: 22202
+num_features_exact_match_pct: 98.5398
+set_equivalent_calls: 22200
+set_equivalent_calls_pct: 98.5309
+set_equivalent_calls_target: 22200
+set_equivalent_calls_target_pct: 98.5309
+set_equivalent_calls_gene: 22200
+set_equivalent_calls_gene_pct: 98.5309
+umi_sum_pearson_on_common: 0.998871
+umi_sum_spearman_on_common: 0.996859
+total_assigned_umis_cr: 2801825
+total_assigned_umis_star: 3015106
+total_assigned_umis_delta_star_minus_cr: 213281

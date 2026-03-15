@@ -1,0 +1,11 @@
+[gene-expression]
+reference,/storage/A375-CR-9.01/refdata-gex-GRCh38-2024-A
+create-bam,false
+
+[feature]
+reference,/storage/MSK-perturb-comparison/cr_msk30ko_grna_gex_100k_20260304_051823/ref_feature_geneBC_crispr.csv
+
+[libraries]
+fastq_id,fastqs,feature_types
+mRNA,/storage/MSK-perturb-comparison/msk30ko_full_3lib_20260304_095911/fastqs/mRNA,Gene Expression
+PolyIII,/storage/MSK-perturb-comparison/msk30ko_full_3lib_20260304_095911/fastqs/PolyIII,CRISPR Guide Capture
