@@ -7,6 +7,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 CR_INPUT_HELPER="${CR_INPUT_HELPER:-${SCRIPT_DIR}/ucsf_parity/render_star_inputs_from_cr_config.py}"
+TRIM_QC_HELPER="${TRIM_QC_HELPER:-${SCRIPT_DIR}/lib/star_trim_qc.sh}"
+
+# shellcheck disable=SC1090
+source "${TRIM_QC_HELPER}"
 
 STAR_BIN="${STAR_BIN:-${REPO_ROOT}/core/legacy/source/STAR}"
 THREADS="${THREADS:-32}"
@@ -27,6 +31,8 @@ PF_MULTI_CONFIG="${PF_MULTI_CONFIG:-/storage/ucsf-full/bench_20260218_dynamic_fi
 
 OUT_BASE="${OUT_BASE:-/storage/ucsf-full/bench_20260218_dynamic_first/runs}"
 RUN_ID="${RUN_ID:-star_full_iPSC2_1_AALG2_forward_rescue_guides_$(date +%Y%m%d_%H%M%S)}"
+STAR_TRIM_QC_ENABLE="${STAR_TRIM_QC_ENABLE:-0}"
+STAR_TRIM_QC_MAX_READS="${STAR_TRIM_QC_MAX_READS:-250000}"
 DRY_RUN="${DRY_RUN:-0}"
 
 usage() {
@@ -40,6 +46,9 @@ Options:
   --genome-dir DIR   Override STAR genomeDir
   --out-base DIR     Override output base directory
   --run-id ID        Override run identifier
+  --trim-qc          Emit STAR read-level FastQC-like HTML/JSON reports
+  --trim-qc-max-reads N
+                     Limit reads sampled by trim-QC reporting
   --dry-run          Write manifest/command only
   -h, --help         Show help
 EOF
@@ -74,6 +83,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --run-id)
       RUN_ID="$2"
+      shift 2
+      ;;
+    --trim-qc)
+      STAR_TRIM_QC_ENABLE=1
+      shift
+      ;;
+    --trim-qc-max-reads)
+      STAR_TRIM_QC_MAX_READS="$2"
       shift 2
       ;;
     --dry-run)
@@ -167,6 +184,7 @@ CMD=(
   --crAssignConsumerThreads 4
   --crAssignSearchThreads 4
 )
+star_trim_qc_append_args CMD "${OUT_DIR}"
 
 if [[ -n "${CR_FEATURE_REF}" ]]; then
   CMD+=(--crFeatureRef "${CR_FEATURE_REF}")
@@ -182,6 +200,7 @@ if [[ -n "${CR_CONFIG}" ]]; then
   printf "cr_gene_expression_reference=%s\n" "${CR_GENE_EXPRESSION_REFERENCE:-}" >> "${OUT_DIR}/RUN_MANIFEST.txt"
   printf "cr_gene_expression_chemistry=%s\n" "${CR_GENE_EXPRESSION_CHEMISTRY:-}" >> "${OUT_DIR}/RUN_MANIFEST.txt"
 fi
+star_trim_qc_write_manifest "${OUT_DIR}/RUN_MANIFEST.txt" "${OUT_DIR}"
 {
   echo '#!/usr/bin/env bash'
   echo 'set -euo pipefail'

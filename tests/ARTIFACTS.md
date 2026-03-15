@@ -48,6 +48,7 @@ update this file with its output location.
   - may also contain per-feature-library downstream outputs such as:
     - `downstream_genefull_velocyto_100k_starcells_featurelibs_v2/feature_libraries/*/raw_feature_library.h5ad`
     - `downstream_genefull_velocyto_100k_starcells_featurelibs_v2/feature_libraries/*/filtered_feature_library.h5ad`
+- `tests/trim_qc_replay_smoke_output/` (standalone alignment replay smoke for FastQC-like trim-QC JSON/HTML)
 - `tests/sceptre_example_output_*` (SCEPTRE vignette runs)
 - `tests/sceptre_example_*_mex` (SCEPTRE vignette MEX exports)
 - `tests/nbem_sceptre_example_*` (NB-EM outputs on SCEPTRE vignette MEX)
@@ -82,6 +83,7 @@ update this file with its output location.
 - `/tmp/flex_cr_config_smoke_*` (Flex CR-config smoke outputs)
 - `/tmp/flex_cr_config_star_section_smoke_*` (Flex CR-config smoke outputs using `[star]` probe catalog/offset extensions)
 - `/tmp/public_bulk_fixture_*` (public GEO bulk PE smoke fixtures downloaded via `scripts/download_public_bulk_fixture.sh`)
+- `/mnt/pikachu/ucsf-perturb-yremove*/samples/*/run/read_qc.trim_qc.{json,html}` (STAR read-level FastQC-like QC reports when UCSF perturb runners are launched with `--trim-qc`)
 - `/storage/A375/` (external A375 datasets + smoke outputs; e.g. `star_gex_smoke/`, `star_multi_smoke_cpp/`, `fastqs/`, `outputs/`)
   - Downsampled MEX output: `/storage/A375/star_multi_smoke/assign/downsampled/`
   - NB-EM calls (A375 CRISPR-only MEX): `/storage/A375/nbem_a375_20260128_075248/`

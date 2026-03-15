@@ -4,6 +4,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 CR_INPUT_HELPER="${CR_INPUT_HELPER:-${SCRIPT_DIR}/ucsf_parity/render_star_inputs_from_cr_config.py}"
+TRIM_QC_HELPER="${TRIM_QC_HELPER:-${SCRIPT_DIR}/lib/star_trim_qc.sh}"
+
+# shellcheck disable=SC1090
+source "${TRIM_QC_HELPER}"
 
 STAR_BIN="${STAR_BIN:-${REPO_ROOT}/core/legacy/source/STAR}"
 DATASET_ROOT="${DATASET_ROOT:-/mnt/pikachu/ucsf-perturb-seq}"
@@ -24,6 +28,8 @@ GLOBUS_SRC_ENDPOINT="${GLOBUS_SRC_ENDPOINT:-}"
 GLOBUS_DST_ENDPOINT="${GLOBUS_DST_ENDPOINT:-}"
 GLOBUS_DST_ROOT="${GLOBUS_DST_ROOT:-}"
 GLOBUS_POLL_SECONDS="${GLOBUS_POLL_SECONDS:-30}"
+STAR_TRIM_QC_ENABLE="${STAR_TRIM_QC_ENABLE:-0}"
+STAR_TRIM_QC_MAX_READS="${STAR_TRIM_QC_MAX_READS:-250000}"
 DRY_RUN=0
 
 usage() {
@@ -49,6 +55,8 @@ Options:
   --globus-dst-endpoint ID Destination Globus collection ID
   --globus-dst-root PATH   Destination root path (e.g. /UCSF-perturb/run_name)
   --globus-poll-seconds N  Poll interval while waiting for transfer cleanup
+  --trim-qc                Emit STAR read-level FastQC-like HTML/JSON reports
+  --trim-qc-max-reads N    Limit reads sampled by trim-QC reporting
   --dry-run                Write manifests/commands but do not run STAR
   -h, --help               Show help
 EOF
@@ -395,6 +403,10 @@ finalize_sample_outputs() {
   while IFS= read -r fastq; do
     printf '%s\t%s\n' "${fastq}" "${sample}/y_separated/$(basename "${fastq}")" >> "${transfer_batch}"
   done < <(find "${run_dir}/y_separated" -maxdepth 1 -type f -name '*.fastq.gz' | sort)
+  while IFS= read -r qc_file; do
+    [[ -f "${qc_file}" ]] || continue
+    printf '%s\t%s\n' "${qc_file}" "${sample}/$(basename "${qc_file}")" >> "${transfer_batch}"
+  done < <(star_trim_qc_list_outputs "${run_dir}")
   write_globus_helper "${transfer_helper}" "${transfer_batch}"
 
   printf 'completed_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "${done_file}"
@@ -680,6 +692,7 @@ EOF
   if [[ -n "${feature_ref}" ]]; then
     cmd+=(--crFeatureRef "${feature_ref}")
   fi
+  star_trim_qc_append_args cmd "${run_dir}"
 
   {
     printf 'sample=%s\n' "${sample}"
@@ -708,6 +721,7 @@ EOF
       printf 'cr_gene_expression_chemistry=%s\n' "${cr_gene_expression_chemistry}"
     fi
   } > "${sample_manifest}"
+  star_trim_qc_write_manifest "${sample_manifest}" "${run_dir}"
 
   {
     echo '#!/usr/bin/env bash'
@@ -754,6 +768,8 @@ while [[ $# -gt 0 ]]; do
     --globus-dst-endpoint) GLOBUS_DST_ENDPOINT="$2"; shift 2 ;;
     --globus-dst-root) GLOBUS_DST_ROOT="$2"; shift 2 ;;
     --globus-poll-seconds) GLOBUS_POLL_SECONDS="$2"; shift 2 ;;
+    --trim-qc) STAR_TRIM_QC_ENABLE=1; shift ;;
+    --trim-qc-max-reads) STAR_TRIM_QC_MAX_READS="$2"; shift 2 ;;
     --dry-run) DRY_RUN=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) die "Unknown argument: $1" ;;

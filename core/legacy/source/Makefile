@@ -194,6 +194,13 @@ flexfilter: STAR$(SFX)
 remove_y_reads: htslib/libhts.a
 	$(MAKE) -C $(REMOVE_Y_READS_DIR)
 
+# Standalone alignment replay tool for FastQC-like trim-QC output.
+.PHONY: trim_qc_replay
+trim_qc_replay : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
+trim_qc_replay : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS)
+trim_qc_replay : htslib/libhts.a TrimQc.o TrimQcOutput.o Stats.o TimeFunctions.o trim_qc_replay.cpp
+	$(CXX) -o trim_qc_replay $(CXXFLAGS) trim_qc_replay.cpp TrimQc.o TrimQcOutput.o Stats.o TimeFunctions.o $(LDFLAGS)
+
 # Standalone star_feature_call tool for perturb-seq processing
 # Requires libprocess_features.a to be built first
 .PHONY: star_feature_call libprocess_features
