@@ -24,6 +24,7 @@ QUALITY_CUTOFF="20"
 MIN_LENGTH="20"
 ADAPTER_R1="AGATCGGAAGAGCACACGTCTGAACTCCAGTCA"
 ADAPTER_R2="AGATCGGAAGAGCGTCGTGTAGGGAAAGAGTGT"
+YREMOVE=1
 FORCE_COPY=0
 SKIP_COPY=0
 SKIP_INTEGRATED=0
@@ -53,6 +54,8 @@ Optional:
   --min-length N                 Adapter trim minimum length for trimvalidate (default: 20).
   --adapter-r1 SEQ               R1 adapter for trimvalidate.
   --adapter-r2 SEQ               R2 adapter for trimvalidate.
+  --yremove                      Enable Y-chromosome removal (default).
+  --no-yremove                   Disable Y-chromosome removal on both arms.
   --skip-copy                    Do not copy /storage PE inputs into --pikachu-fastq-dir.
   --force-copy                   Re-copy into --pikachu-fastq-dir even if files already exist.
   --skip-integrated              Skip integrated STAR-suite arm.
@@ -61,14 +64,25 @@ Optional:
   --dry-run                      Print resolved commands only.
   -h, --help                     Show this help.
 
-Integrated arm:
-  raw FASTQ -> STAR (trimCutadapt + emitNoYBAM + emitYNoYFastq + TranscriptomeSAM + TranscriptVB)
-            -> Salmon alignment-mode QC on integrated transcriptome BAM
+Modes:
+  --yremove (default):
+    Integrated arm:
+      raw FASTQ -> STAR (trimCutadapt + emitNoYBAM + emitYNoYFastq + TranscriptomeSAM + TranscriptVB)
+                -> Salmon alignment-mode QC on integrated transcriptome BAM
 
-External arm:
-  raw FASTQ -> trimvalidate -> STAR (TranscriptomeSAM + emitNoYBAM)
-            -> remove_y_reads on trimmed FASTQs
-            -> Salmon alignment-mode QC on transcriptome BAM
+    External arm:
+      raw FASTQ -> trimvalidate -> STAR (TranscriptomeSAM + emitNoYBAM)
+                -> remove_y_reads on trimmed FASTQs
+                -> Salmon alignment-mode QC on transcriptome BAM
+
+  --no-yremove:
+    Integrated arm:
+      raw FASTQ -> STAR (trimCutadapt + TranscriptomeSAM + TranscriptVB)
+                -> Salmon alignment-mode QC on integrated transcriptome BAM
+
+    External arm:
+      raw FASTQ -> trimvalidate -> STAR (TranscriptomeSAM)
+                -> Salmon alignment-mode QC on transcriptome BAM
 
 Note:
   Salmon auto libtype detection (-l A) mis-detects the current PE benchmark sample as ISR.
@@ -301,6 +315,8 @@ while [[ $# -gt 0 ]]; do
         --min-length) MIN_LENGTH="$2"; shift 2 ;;
         --adapter-r1) ADAPTER_R1="$2"; shift 2 ;;
         --adapter-r2) ADAPTER_R2="$2"; shift 2 ;;
+        --yremove) YREMOVE=1; shift ;;
+        --no-yremove) YREMOVE=0; shift ;;
         --skip-copy) SKIP_COPY=1; shift ;;
         --force-copy) FORCE_COPY=1; shift ;;
         --skip-integrated) SKIP_INTEGRATED=1; shift ;;
@@ -375,6 +391,7 @@ RUN_MANIFEST="${OUT_ROOT}/RUN_MANIFEST.txt"
     echo "threads=${THREADS}"
     echo "salmon_libtype=${SALMON_LIBTYPE}"
     echo "stages=${STAGES}"
+    echo "yremove=${YREMOVE}"
     echo "dry_run=${DRY_RUN}"
     echo "skip_copy=${SKIP_COPY}"
     echo "skip_integrated=${SKIP_INTEGRATED}"
@@ -453,6 +470,7 @@ run_stage() {
         echo "external_dir=${external_dir}"
         echo "comparison_dir=${comparison_dir}"
         echo "salmon_libtype=${SALMON_LIBTYPE}"
+        echo "yremove=${YREMOVE}"
     } > "${stage_manifest}"
 
     local integrated_quant="${integrated_dir}/quant.sf"
@@ -482,21 +500,27 @@ run_stage() {
             --trimCutadaptAdapter "${ADAPTER_R1}" "${ADAPTER_R2}"
             --outSAMtype BAM SortedByCoordinate
             --outBAMsortMethod samtools
-            --emitNoYBAM yes
             --keepBAM yes
-            --emitYNoYFastq yes
-            --emitYNoYFastqCompression gz
             --quantMode TranscriptomeSAM TranscriptVB
             --quantVBgcBias 1
             --outFileNamePrefix "${integrated_dir}/"
         )
+        if [[ "${YREMOVE}" -eq 1 ]]; then
+            integrated_cmd+=(
+                --emitNoYBAM yes
+                --emitYNoYFastq yes
+                --emitYNoYFastqCompression gz
+            )
+        fi
         write_cmd_script "${integrated_dir}/run_integrated_star.sh" "${integrated_cmd[@]}"
-        log "Stage ${stage_name}: integrated STAR-suite arm"
+        log "Stage ${stage_name}: integrated STAR-suite arm (yremove=${YREMOVE})"
         run_timed_cmd "${integrated_dir}/star.time_v.log" "${integrated_dir}/star.log" "${integrated_cmd[@]}"
         if [[ "${DRY_RUN}" -eq 0 ]]; then
             require_file "${integrated_quant}"
             require_file "${integrated_transcriptome_bam}"
-            require_file "${integrated_dir}/Aligned.sortedByCoord.out_Y.bam"
+            if [[ "${YREMOVE}" -eq 1 ]]; then
+                require_file "${integrated_dir}/Aligned.sortedByCoord.out_Y.bam"
+            fi
         fi
 
         local integrated_salmon_cmd=(
@@ -559,31 +583,39 @@ run_stage() {
             --readFilesIn "${external_trim_r1}" "${external_trim_r2}"
             --outSAMtype BAM SortedByCoordinate
             --outBAMsortMethod samtools
-            --emitNoYBAM yes
             --keepBAM yes
             --quantMode TranscriptomeSAM
             --outFileNamePrefix "${external_dir}/"
         )
+        if [[ "${YREMOVE}" -eq 1 ]]; then
+            external_star_cmd+=(--emitNoYBAM yes)
+        fi
         write_cmd_script "${external_dir}/run_external_star.sh" "${external_star_cmd[@]}"
-        log "Stage ${stage_name}: external STAR alignment/Y-BAM arm"
+        log "Stage ${stage_name}: external STAR alignment arm (yremove=${YREMOVE})"
         run_timed_cmd "${external_dir}/star.time_v.log" "${external_dir}/star.log" "${external_star_cmd[@]}"
         if [[ "${DRY_RUN}" -eq 0 ]]; then
             require_file "${external_transcriptome_bam}"
-            require_file "${external_y_bam}"
+            if [[ "${YREMOVE}" -eq 1 ]]; then
+                require_file "${external_y_bam}"
+            fi
         fi
 
-        mkdir -p "${external_dir}/y_fastq_split"
-        local remove_y_cmd=(
-            "${REMOVE_Y_READS_BIN}"
-            -y "${external_y_bam}"
-            --threads "${THREADS}"
-            -o "${external_dir}/y_fastq_split"
-            "${external_trim_r1}"
-            "${external_trim_r2}"
-        )
-        write_cmd_script "${external_dir}/run_remove_y_reads.sh" "${remove_y_cmd[@]}"
-        log "Stage ${stage_name}: external remove_y_reads FASTQ split"
-        run_timed_cmd "${external_dir}/remove_y_reads.time_v.log" "${external_dir}/remove_y_reads.log" "${remove_y_cmd[@]}"
+        if [[ "${YREMOVE}" -eq 1 ]]; then
+            mkdir -p "${external_dir}/y_fastq_split"
+            local remove_y_cmd=(
+                "${REMOVE_Y_READS_BIN}"
+                -y "${external_y_bam}"
+                --threads "${THREADS}"
+                -o "${external_dir}/y_fastq_split"
+                "${external_trim_r1}"
+                "${external_trim_r2}"
+            )
+            write_cmd_script "${external_dir}/run_remove_y_reads.sh" "${remove_y_cmd[@]}"
+            log "Stage ${stage_name}: external remove_y_reads FASTQ split"
+            run_timed_cmd "${external_dir}/remove_y_reads.time_v.log" "${external_dir}/remove_y_reads.log" "${remove_y_cmd[@]}"
+        else
+            log "Stage ${stage_name}: skipping external remove_y_reads (yremove disabled)"
+        fi
 
         local external_salmon_cmd=(
             "${SALMON_BIN}" quant
@@ -628,22 +660,24 @@ run_stage() {
         log "Stage ${stage_name}: skipping comparison stage"
     fi
 
-    local integrated_y_r1
-    local integrated_y_r2
-    local integrated_noy_r1
-    local integrated_noy_r2
-    local external_y_r1
-    local external_y_r2
-    local external_noy_r1
-    local external_noy_r2
-    integrated_y_r1="$(find "${integrated_dir}" -maxdepth 2 -type f -name '*_Y_R1*.fastq*' | head -n1 || true)"
-    integrated_y_r2="$(find "${integrated_dir}" -maxdepth 2 -type f -name '*_Y_R2*.fastq*' | head -n1 || true)"
-    integrated_noy_r1="$(find "${integrated_dir}" -maxdepth 2 -type f -name '*_noY_R1*.fastq*' | head -n1 || true)"
-    integrated_noy_r2="$(find "${integrated_dir}" -maxdepth 2 -type f -name '*_noY_R2*.fastq*' | head -n1 || true)"
-    external_y_r1="$(find "${external_dir}/y_fastq_split" -maxdepth 1 -type f -name '*R1*_Y.fastq*' | head -n1 || true)"
-    external_y_r2="$(find "${external_dir}/y_fastq_split" -maxdepth 1 -type f -name '*R2*_Y.fastq*' | head -n1 || true)"
-    external_noy_r1="$(find "${external_dir}/y_fastq_split" -maxdepth 1 -type f -name '*R1*_noY.fastq*' | head -n1 || true)"
-    external_noy_r2="$(find "${external_dir}/y_fastq_split" -maxdepth 1 -type f -name '*R2*_noY.fastq*' | head -n1 || true)"
+    local integrated_y_r1=""
+    local integrated_y_r2=""
+    local integrated_noy_r1=""
+    local integrated_noy_r2=""
+    local external_y_r1=""
+    local external_y_r2=""
+    local external_noy_r1=""
+    local external_noy_r2=""
+    if [[ "${YREMOVE}" -eq 1 ]]; then
+        integrated_y_r1="$(find "${integrated_dir}" -maxdepth 2 -type f -name '*_Y_R1*.fastq*' | head -n1 || true)"
+        integrated_y_r2="$(find "${integrated_dir}" -maxdepth 2 -type f -name '*_Y_R2*.fastq*' | head -n1 || true)"
+        integrated_noy_r1="$(find "${integrated_dir}" -maxdepth 2 -type f -name '*_noY_R1*.fastq*' | head -n1 || true)"
+        integrated_noy_r2="$(find "${integrated_dir}" -maxdepth 2 -type f -name '*_noY_R2*.fastq*' | head -n1 || true)"
+        external_y_r1="$(find "${external_dir}/y_fastq_split" -maxdepth 1 -type f -name '*R1*_Y.fastq*' | head -n1 || true)"
+        external_y_r2="$(find "${external_dir}/y_fastq_split" -maxdepth 1 -type f -name '*R2*_Y.fastq*' | head -n1 || true)"
+        external_noy_r1="$(find "${external_dir}/y_fastq_split" -maxdepth 1 -type f -name '*R1*_noY.fastq*' | head -n1 || true)"
+        external_noy_r2="$(find "${external_dir}/y_fastq_split" -maxdepth 1 -type f -name '*R2*_noY.fastq*' | head -n1 || true)"
+    fi
 
     local copy_wall="NA"
     local integrated_star_wall="NA"
@@ -659,7 +693,11 @@ run_stage() {
     external_decompress_wall="$(extract_time_metric "${external_dir}/decompress.time_v.log" "Elapsed (wall clock) time")"
     external_trim_wall="$(extract_time_metric "${external_dir}/trimvalidate.time_v.log" "Elapsed (wall clock) time")"
     external_star_wall="$(extract_time_metric "${external_dir}/star.time_v.log" "Elapsed (wall clock) time")"
-    external_ysplit_wall="$(extract_time_metric "${external_dir}/remove_y_reads.time_v.log" "Elapsed (wall clock) time")"
+    if [[ "${YREMOVE}" -eq 1 ]]; then
+        external_ysplit_wall="$(extract_time_metric "${external_dir}/remove_y_reads.time_v.log" "Elapsed (wall clock) time")"
+    else
+        external_ysplit_wall="(skipped)"
+    fi
     external_salmon_wall="$(extract_time_metric "${external_dir}/salmon.time_v.log" "Elapsed (wall clock) time")"
 
     {
@@ -667,6 +705,7 @@ run_stage() {
         echo "PE Bulk Feature Benchmark Summary"
         echo "=============================================================="
         echo "Stage:                  ${stage_name}"
+        echo "Y-removal:              ${YREMOVE}"
         echo "Sample:                 ${sample_name}"
         echo "FASTQ dir:              ${stage_fastq_dir}"
         echo "STAR index:             ${STAR_INDEX}"
@@ -707,8 +746,8 @@ run_stage() {
         echo "  External noY R1:      ${external_noy_r1:-NA}"
         echo "  External noY R2:      ${external_noy_r2:-NA}"
         echo
-        if [[ "${DRY_RUN}" -eq 0 ]]; then
-            echo "FASTQ counts:"
+        if [[ "${DRY_RUN}" -eq 0 && "${YREMOVE}" -eq 1 ]]; then
+            echo "FASTQ counts (Y-split):"
             echo "  Integrated Y R1 reads:    $(count_fastq_reads "${integrated_y_r1:-/dev/null}")"
             echo "  Integrated noY R1 reads:  $(count_fastq_reads "${integrated_noy_r1:-/dev/null}")"
             echo "  External Y R1 reads:      $(count_fastq_reads "${external_y_r1:-/dev/null}")"

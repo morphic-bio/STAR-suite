@@ -8,6 +8,10 @@ SC_RNA_SEQ_ROOT="${SC_RNA_SEQ_ROOT:-/mnt/pikachu/scRNA-seq}"
 BUILD_COUNTS="${REPO_ROOT}/scripts/build_gene_full_velocyto_h5ad.py"
 DOUBLET_SCRIPT="${REPO_ROOT}/scripts/run_star_cell_doublets.R"
 FEATURE_GATHER_SCRIPT="${REPO_ROOT}/scripts/integrate_feature_library.py"
+POSTPROCESS_FILTERS="${REPO_ROOT}/scripts/postprocess_downstream_filters.py"
+COMPUTE_ADAPTIVE_QC="${REPO_ROOT}/scripts/compute_adaptive_qc_threshold.py"
+GENERATE_QC_HISTOGRAM="${REPO_ROOT}/scripts/generate_qc_histogram.py"
+PROPAGATE_LAYER="${REPO_ROOT}/scripts/propagate_anndata_layer.py"
 INSPECT_ANNDATA="${INSPECT_ANNDATA:-${SC_RNA_SEQ_ROOT}/utilities/inspect_anndata.py}"
 DOCKER_IMAGE="${SCRNA_DOWNSTREAM_IMAGE:-biodepot/scrna-matrices:latest}"
 CELLBENDER_IMAGE="${CELLBENDER_IMAGE:-biodepot/cellbender:0.3.2}"
@@ -45,7 +49,7 @@ Options:
   --feature-gather-image IMAGE
                          Feature-library integration image
                          (default: biodepot/gather_features:latest)
-  --run-cellbender       Run CellBender on filtered_counts.h5ad and add denoised layer
+  --run-cellbender       Run CellBender on raw-backed counts.h5ad and add denoised layer
   --cellbender-image IMG CellBender image (default: biodepot/cellbender:0.3.2)
   --cellbender-gpu       Run CellBender with --gpus all instead of CPU mode
   --cellbender-cpu-cores INT
@@ -146,12 +150,17 @@ OUTPUT_DIR="$(realpath -m "${OUTPUT_DIR}")"
 COUNTS_H5AD="${OUTPUT_DIR}/counts.h5ad"
 FILTERED_H5AD="${OUTPUT_DIR}/filtered_counts.h5ad"
 UNFILTERED_H5AD="${OUTPUT_DIR}/unfiltered_counts.h5ad"
+DEFAULT_SINGLET_FILTERED_H5AD="${OUTPUT_DIR}/default_singlet_filtered_counts.h5ad"
 FINAL_H5AD="${OUTPUT_DIR}/final_counts.h5ad"
 PRIMARY_H5AD="${FILTERED_H5AD}"
 
 [[ -f "${BUILD_COUNTS}" ]] || { echo "ERROR: Missing helper ${BUILD_COUNTS}" >&2; exit 1; }
 [[ -f "${DOUBLET_SCRIPT}" ]] || { echo "ERROR: Missing helper ${DOUBLET_SCRIPT}" >&2; exit 1; }
 [[ -f "${FEATURE_GATHER_SCRIPT}" ]] || { echo "ERROR: Missing helper ${FEATURE_GATHER_SCRIPT}" >&2; exit 1; }
+[[ -f "${POSTPROCESS_FILTERS}" ]] || { echo "ERROR: Missing helper ${POSTPROCESS_FILTERS}" >&2; exit 1; }
+[[ -f "${COMPUTE_ADAPTIVE_QC}" ]] || { echo "ERROR: Missing helper ${COMPUTE_ADAPTIVE_QC}" >&2; exit 1; }
+[[ -f "${GENERATE_QC_HISTOGRAM}" ]] || { echo "ERROR: Missing helper ${GENERATE_QC_HISTOGRAM}" >&2; exit 1; }
+[[ -f "${PROPAGATE_LAYER}" ]] || { echo "ERROR: Missing helper ${PROPAGATE_LAYER}" >&2; exit 1; }
 [[ -f "${INSPECT_ANNDATA}" ]] || { echo "ERROR: Missing helper ${INSPECT_ANNDATA}" >&2; exit 1; }
 [[ -d "${RUN_DIR}/outs/filtered_feature_bc_matrix" ]] || { echo "ERROR: Missing ${RUN_DIR}/outs/filtered_feature_bc_matrix" >&2; exit 1; }
 [[ -d "${RUN_DIR}/outs/raw_velocyto_feature_bc_matrix" ]] || { echo "ERROR: Missing ${RUN_DIR}/outs/raw_velocyto_feature_bc_matrix" >&2; exit 1; }
@@ -172,8 +181,6 @@ fi
 
 python3 "${BUILD_COUNTS}" \
   --run-dir "${RUN_DIR}" \
-  --feature-raw-dir "${RUN_DIR}/outs/filtered_feature_bc_matrix" \
-  --feature-filtered-dir "${RUN_DIR}/outs/filtered_feature_bc_matrix" \
   --output-h5ad "${COUNTS_H5AD}"
 
 DOCKER_ARGS=(
@@ -203,27 +210,82 @@ COMBINE_ARGS=(--input_file "${COUNTS_H5AD}")
 if [[ -n "${MITO_GENES}" ]]; then
   COMBINE_ARGS+=(--mito_genes "${MITO_GENES}")
 fi
+
+EFFECTIVE_MAX_GENES="${MAX_GENES}"
+RAW_ADAPTIVE_MAX_GENES=""
 if [[ "${ADAPTIVE_FILTER}" == "1" ]]; then
-  COMBINE_ARGS+=(--adaptive_filter --n_mad "${N_MAD}")
+  ADAPTIVE_QC_JSON="${OUTPUT_DIR}/adaptive_qc_threshold.json"
+  python3 "${COMPUTE_ADAPTIVE_QC}" \
+    --counts-h5ad "${COUNTS_H5AD}" \
+    --non-empty-barcodes "${OUTPUT_DIR}/non_empty_barcodes.txt" \
+    --doublet-barcodes "${OUTPUT_DIR}/doublet_barcodes.txt" \
+    --min-genes "${MIN_GENES}" \
+    --n-mad "${N_MAD}" \
+    --output-json "${ADAPTIVE_QC_JSON}" >/dev/null
+
+  EFFECTIVE_MAX_GENES="$(python3 - <<'PY' "${ADAPTIVE_QC_JSON}"
+import json, sys
+with open(sys.argv[1], "r", encoding="utf-8") as handle:
+    data = json.load(handle)
+print(data["effective_max_genes"])
+PY
+)"
+  RAW_ADAPTIVE_MAX_GENES="$(python3 - <<'PY' "${ADAPTIVE_QC_JSON}"
+import json, sys
+with open(sys.argv[1], "r", encoding="utf-8") as handle:
+    data = json.load(handle)
+print(data["raw_adaptive_max_genes"])
+PY
+)"
+  if [[ "${EFFECTIVE_MAX_GENES}" != "${RAW_ADAPTIVE_MAX_GENES}" ]]; then
+    echo "WARNING: adaptive max_genes (${RAW_ADAPTIVE_MAX_GENES}) fell below min_genes (${MIN_GENES}); clamping applied max_genes to ${EFFECTIVE_MAX_GENES}"
+  else
+    echo "Adaptive max_genes: ${EFFECTIVE_MAX_GENES}"
+  fi
 fi
+
+DOCKER_ARGS+=(-e "max_genes=${EFFECTIVE_MAX_GENES}")
 
 docker "${DOCKER_ARGS[@]}" \
   "${DOCKER_IMAGE}" \
   python3 /usr/local/bin/combineFilters.py "${COMBINE_ARGS[@]}"
 
+if [[ "${ADAPTIVE_FILTER}" == "1" ]]; then
+  docker "${DOCKER_ARGS[@]}" \
+    "${DOCKER_IMAGE}" \
+    python3 "${GENERATE_QC_HISTOGRAM}" \
+      --input-h5ad "${UNFILTERED_H5AD}" \
+      --output-dir "${OUTPUT_DIR}" \
+      --min-genes "${MIN_GENES}" \
+      --max-genes "${EFFECTIVE_MAX_GENES}" \
+      --mt-pct-cutoff "${MT_PCT_CUTOFF}" \
+      --n-mad "${N_MAD}" \
+      --raw-adaptive-max "${RAW_ADAPTIVE_MAX_GENES}"
+fi
+
+python3 "${POSTPROCESS_FILTERS}" \
+  --unfiltered-h5ad "${UNFILTERED_H5AD}" \
+  --qc-output-h5ad "${FILTERED_H5AD}" \
+  --default-singlet-output-h5ad "${DEFAULT_SINGLET_FILTERED_H5AD}"
+
 if [[ "${RUN_CELLBENDER}" == "1" ]]; then
+  CELLBENDER_CB_FILE="${OUTPUT_DIR}/cellbender/cellbender_counts.h5"
   CELLBENDER_ARGS=(
     run --rm
     --user "$(id -u):$(id -g)"
     -v "${OUTPUT_DIR}:${OUTPUT_DIR}"
+    -w "${OUTPUT_DIR}"
     -e "alignsDir=${OUTPUT_DIR}"
-    -e "input_pattern=filtered_counts.h5ad"
-    -e "output_pattern=$(basename "${FINAL_H5AD}")"
+    -e "NUMBA_CACHE_DIR=${OUTPUT_DIR}/.numba"
+    -e "MPLCONFIGDIR=${OUTPUT_DIR}/.matplotlib"
+    -e "input_pattern=counts.h5ad"
+    -e "output_pattern=counts.h5ad"
     -e "cb_subdir=cellbender"
     -e "cb_file=cellbender_counts.h5"
     -e "layername=${CELLBENDER_LAYER}"
     -e "nThreads=1"
     -e "cpu_cores=${CELLBENDER_CPU_CORES}"
+    -e "overwrite_layer=1"
   )
   if [[ "${CELLBENDER_USE_GPU}" == "1" ]]; then
     CELLBENDER_ARGS+=(--gpus all)
@@ -238,14 +300,41 @@ if [[ "${RUN_CELLBENDER}" == "1" ]]; then
     "${CELLBENDER_IMAGE}" \
     remove_noise.sh
 
-  if [[ -f "${OUTPUT_DIR}/cellbender/$(basename "${FINAL_H5AD}")" ]]; then
-    cp -f "${OUTPUT_DIR}/cellbender/$(basename "${FINAL_H5AD}")" "${FINAL_H5AD}"
-    PRIMARY_H5AD="${FINAL_H5AD}"
-    python3 "${INSPECT_ANNDATA}" "${PRIMARY_H5AD}" > "${OUTPUT_DIR}/summary.txt"
+  if [[ -f "${CELLBENDER_CB_FILE}" ]]; then
+    CELLBENDER_ADD_ARGS=(
+      run --rm
+      --user "$(id -u):$(id -g)"
+      -v "${OUTPUT_DIR}:${OUTPUT_DIR}"
+      -w "${OUTPUT_DIR}"
+      -e "NUMBA_CACHE_DIR=${OUTPUT_DIR}/.numba"
+      -e "MPLCONFIGDIR=${OUTPUT_DIR}/.matplotlib"
+      -e "overwrite_layer=1"
+      "${CELLBENDER_IMAGE}"
+      addCounts.py
+      -c "${CELLBENDER_CB_FILE}"
+      -l "${CELLBENDER_LAYER}"
+    )
+
+    for target_h5ad in "${COUNTS_H5AD}" "${UNFILTERED_H5AD}"; do
+      docker "${CELLBENDER_ADD_ARGS[@]}" -i "${target_h5ad}" -o "${target_h5ad}"
+    done
+
+    python3 "${PROPAGATE_LAYER}" \
+      --source-h5ad "${UNFILTERED_H5AD}" \
+      --target-h5ad "${FILTERED_H5AD}" \
+      --output-h5ad "${FILTERED_H5AD}" \
+      --layer-name "${CELLBENDER_LAYER}"
+    python3 "${PROPAGATE_LAYER}" \
+      --source-h5ad "${UNFILTERED_H5AD}" \
+      --target-h5ad "${DEFAULT_SINGLET_FILTERED_H5AD}" \
+      --output-h5ad "${DEFAULT_SINGLET_FILTERED_H5AD}" \
+      --layer-name "${CELLBENDER_LAYER}"
+
+    cp -f "${UNFILTERED_H5AD}" "${FINAL_H5AD}"
+    PRIMARY_H5AD="${FILTERED_H5AD}"
   else
-    echo "ERROR: CellBender did not produce ${OUTPUT_DIR}/cellbender/$(basename "${FINAL_H5AD}")" >&2
-    echo "ERROR: For this 100K smoke, filtered_counts.h5ad is too prefiltered/sparse for CellBender." >&2
-    echo "ERROR: CellBender needs a raw unfiltered barcode matrix to infer priors." >&2
+    echo "ERROR: CellBender did not produce ${CELLBENDER_CB_FILE}" >&2
+    echo "ERROR: CellBender must finish successfully on raw-backed counts.h5ad before downstream layer propagation can occur." >&2
     exit 1
   fi
 fi
@@ -269,7 +358,7 @@ if (( ${#FEATURE_LIBRARY_DIRS[@]} > 0 )); then
     exit 1
   fi
 
-  COUNTS_TARGETS=("${COUNTS_H5AD}" "${UNFILTERED_H5AD}" "${FILTERED_H5AD}")
+  COUNTS_TARGETS=("${COUNTS_H5AD}" "${UNFILTERED_H5AD}" "${FILTERED_H5AD}" "${DEFAULT_SINGLET_FILTERED_H5AD}")
   if [[ -f "${FINAL_H5AD}" ]]; then
     COUNTS_TARGETS+=("${FINAL_H5AD}")
   fi
@@ -316,6 +405,7 @@ echo "PASS: downstream GeneFull + Velocyto"
 echo "counts.h5ad: ${COUNTS_H5AD}"
 echo "unfiltered_counts.h5ad: ${UNFILTERED_H5AD}"
 echo "filtered_counts.h5ad: ${FILTERED_H5AD}"
+echo "default_singlet_filtered_counts.h5ad: ${DEFAULT_SINGLET_FILTERED_H5AD}"
 if [[ "${RUN_CELLBENDER}" == "1" ]]; then
   echo "final_counts.h5ad: ${FINAL_H5AD}"
 fi

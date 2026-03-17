@@ -5,13 +5,39 @@ import re
 from pathlib import Path
 
 import anndata as ad
+import numpy as np
 import pandas as pd
 import scipy.io
+import scipy.sparse as sp
 
 
 def slugify(value: str) -> str:
     slug = re.sub(r"[^A-Za-z0-9]+", "_", value).strip("_")
     return slug or "feature_library"
+
+
+def canonical_barcode(value: str) -> str:
+    return re.sub(r"-[0-9]+$", "", str(value).strip())
+
+
+def complement_base(base: str) -> str:
+    return {
+        "A": "T",
+        "T": "A",
+        "C": "G",
+        "G": "C",
+        "N": "N",
+    }.get(base.upper(), base)
+
+
+def translate_nxt_middle_two_bases(barcode: str) -> str:
+    barcode = canonical_barcode(barcode).upper()
+    if len(barcode) >= 9:
+        chars = list(barcode)
+        chars[7] = complement_base(chars[7])
+        chars[8] = complement_base(chars[8])
+        return "".join(chars)
+    return barcode
 
 
 def first_existing(directory: Path, candidates):
@@ -50,7 +76,10 @@ def read_provenance(library_dir: Path) -> dict:
 
 def load_feature_matrix(matrix_dir: Path) -> ad.AnnData:
     matrix_path = first_existing(matrix_dir, ["matrix.mtx", "matrix.mtx.gz", "features_matrix.mtx", "features_matrix.mtx.gz"])
-    barcodes_path = first_existing(matrix_dir, ["barcodes.txt", "barcodes.tsv", "barcodes.tsv.gz", "barcodes.csv"])
+    # Prefer barcodes.tsv over barcodes.txt. In current pf outputs, barcodes.tsv
+    # is the output-namespace surface that should align with GEX barcodes,
+    # while barcodes.txt can remain in the assignment namespace.
+    barcodes_path = first_existing(matrix_dir, ["barcodes.tsv", "barcodes.tsv.gz", "barcodes.txt", "barcodes.csv"])
     features_path = first_existing(matrix_dir, ["features.txt", "features.tsv", "features.tsv.gz", "features.csv"])
     if matrix_path is None or barcodes_path is None or features_path is None:
         raise FileNotFoundError(f"Missing matrix/barcodes/features in {matrix_dir}")
@@ -87,7 +116,18 @@ def annotate_feature_barcodes(adata: ad.AnnData, matrix_dir: Path):
         return
 
     df["barcode"] = df["barcode"].astype(str)
-    df = df.set_index("barcode")
+    direct_index = pd.Index(df["barcode"].map(canonical_barcode), dtype=str, name="barcode")
+    translated_index = pd.Index(df["barcode"].map(translate_nxt_middle_two_bases), dtype=str, name="barcode")
+    target_index = pd.Index(adata.obs_names.map(canonical_barcode), dtype=str, name="barcode")
+
+    direct_overlap = int(direct_index.isin(target_index).sum())
+    translated_overlap = int(translated_index.isin(target_index).sum())
+    if translated_overlap > direct_overlap:
+        df.index = translated_index
+        df["barcode_namespace_transform"] = "translated"
+    else:
+        df.index = direct_index
+        df["barcode_namespace_transform"] = "direct"
 
     for source_col, target_col in [
         ("num_features", "num_features"),
@@ -95,7 +135,7 @@ def annotate_feature_barcodes(adata: ad.AnnData, matrix_dir: Path):
         ("total_deduped_umi", "total_deduped_umi"),
     ]:
         if source_col in df.columns:
-            series = df[source_col].reindex(adata.obs_names)
+            series = df[source_col].reindex(target_index)
             if pd.api.types.is_numeric_dtype(series):
                 fill_value = -1 if target_col == "top_feature_index" else 0
                 adata.obs[target_col] = series.fillna(fill_value).astype(int)
@@ -120,6 +160,84 @@ def annotate_feature_barcodes(adata: ad.AnnData, matrix_dir: Path):
         adata.obs["top_feature_name"] = top_names
 
 
+def derive_feature_calls(adata: ad.AnnData) -> pd.DataFrame:
+    if adata.n_obs == 0:
+        return pd.DataFrame(
+            columns=[
+                "best_feature",
+                "feature1_count",
+                "feature2_count",
+                "feature_call_category",
+            ]
+        )
+
+    X = adata.X
+    if sp.issparse(X):
+        X = X.tocsr()
+    else:
+        X = sp.csr_matrix(X)
+
+    best_feature = []
+    feature1_count = np.zeros(adata.n_obs, dtype=np.int64)
+    feature2_count = np.zeros(adata.n_obs, dtype=np.int64)
+
+    for i in range(adata.n_obs):
+        row = X.getrow(i)
+        if row.nnz == 0:
+            best_feature.append("")
+            continue
+
+        counts = row.data.astype(np.int64, copy=False)
+        cols = row.indices
+        order = np.argsort(counts)[::-1]
+        top_idx = order[0]
+        top_count = int(counts[top_idx])
+        second_count = int(counts[order[1]]) if len(order) > 1 else 0
+
+        feature1_count[i] = top_count
+        feature2_count[i] = second_count
+        if top_count > second_count:
+            best_feature.append(str(adata.var_names[cols[top_idx]]))
+        else:
+            best_feature.append("")
+
+    num_features = adata.obs.get("num_features", pd.Series(0, index=adata.obs_names)).astype(int)
+    category = np.where(
+        num_features.to_numpy() <= 0,
+        "none",
+        np.where(
+            np.array(best_feature, dtype=object) == "",
+            "ambiguous",
+            np.where(num_features.to_numpy() > 1, "multi", "single"),
+        ),
+    )
+
+    return pd.DataFrame(
+        {
+            "best_feature": pd.Series(best_feature, index=adata.obs_names, dtype="string"),
+            "feature1_count": pd.Series(feature1_count, index=adata.obs_names, dtype="int64"),
+            "feature2_count": pd.Series(feature2_count, index=adata.obs_names, dtype="int64"),
+            "feature_call_category": pd.Series(category, index=adata.obs_names, dtype="string"),
+        }
+    )
+
+
+def build_feature_obs_table(adata: ad.AnnData) -> pd.DataFrame:
+    metrics = derive_feature_calls(adata)
+    obs = adata.obs.copy()
+    for col in metrics.columns:
+        obs[col] = metrics[col]
+
+    obs["barcode_raw"] = obs.index.astype(str)
+    obs["barcode_canonical"] = obs.index.map(canonical_barcode)
+    if obs["barcode_canonical"].duplicated().any():
+        dupes = obs.loc[obs["barcode_canonical"].duplicated(), "barcode_canonical"].tolist()[:5]
+        raise ValueError(f"Feature library produced duplicate canonical barcodes: {dupes}")
+
+    obs = obs.set_index("barcode_canonical", drop=False)
+    return obs
+
+
 def build_feature_outputs(library_dir: Path, feature_output_dir: Path, provenance: dict) -> dict:
     outputs = {}
 
@@ -141,46 +259,62 @@ def build_feature_outputs(library_dir: Path, feature_output_dir: Path, provenanc
     return outputs
 
 
-def integrate_calls(counts_path: Path, calls_path: Path, prefix: str, provenance: dict, generic_aliases: bool):
+def integrate_calls(
+    counts_path: Path,
+    prefix: str,
+    provenance: dict,
+    generic_aliases: bool,
+    feature_obs: pd.DataFrame,
+    call_source: str,
+):
     counts_adata = ad.read_h5ad(counts_path)
-    calls = pd.read_csv(calls_path)
+    counts_canonical = counts_adata.obs_names.map(canonical_barcode)
+    if counts_canonical.duplicated().any():
+        dupes = counts_canonical[counts_canonical.duplicated()].tolist()[:5]
+        raise ValueError(f"{counts_path} produced duplicate canonical barcodes: {dupes}")
 
-    expected_columns = ["cell_barcode", "num_features", "feature_call", "num_umis"]
-    missing = [column for column in expected_columns if column not in calls.columns]
-    if missing:
-        raise ValueError(f"{calls_path} is missing columns: {', '.join(missing)}")
+    mapped = feature_obs.reindex(counts_canonical)
 
-    calls["cell_barcode"] = calls["cell_barcode"].astype(str)
-    calls = calls.set_index("cell_barcode")
+    num_features = mapped["num_features"].fillna(0).astype(int)
+    num_umis = mapped["total_deduped_umi"].fillna(0).astype(int)
+    feature_call = mapped["best_feature"].fillna("").astype(str)
+    feature1_count = mapped["feature1_count"].fillna(0).astype(int)
+    feature2_count = mapped["feature2_count"].fillna(0).astype(int)
+    feature_category = mapped["feature_call_category"].fillna("none").astype(str)
+    is_featured = mapped["is_featured"].fillna(False).astype(bool)
 
-    num_features = calls["num_features"].reindex(counts_adata.obs_names).fillna(0).astype(int)
-    num_umis = calls["num_umis"].reindex(counts_adata.obs_names).fillna(0).astype(int)
-    feature_call = calls["feature_call"].reindex(counts_adata.obs_names).fillna("").astype(str)
-    feature_call = feature_call.replace({"None": "", "nan": "", "<NA>": ""})
-    feature_call = feature_call.where(num_features > 0, "")
-
-    counts_adata.obs[f"{prefix}__num_features"] = num_features.astype(int)
-    counts_adata.obs[f"{prefix}__num_umis"] = num_umis.astype(int)
-    counts_adata.obs[f"{prefix}__feature_call"] = feature_call
-    counts_adata.obs[f"{prefix}__is_featured"] = (num_features > 0).astype(bool)
+    counts_adata.obs[f"{prefix}__num_features"] = num_features.to_numpy()
+    counts_adata.obs[f"{prefix}__num_umis"] = num_umis.to_numpy()
+    counts_adata.obs[f"{prefix}__feature_call"] = feature_call.to_numpy()
+    counts_adata.obs[f"{prefix}__is_featured"] = is_featured.to_numpy()
+    counts_adata.obs[f"{prefix}__feature1_count"] = feature1_count.to_numpy()
+    counts_adata.obs[f"{prefix}__feature2_count"] = feature2_count.to_numpy()
+    counts_adata.obs[f"{prefix}__feature_call_category"] = pd.Categorical(feature_category.to_numpy())
 
     if generic_aliases:
         counts_adata.obs["is_featured"] = counts_adata.obs[f"{prefix}__is_featured"]
         counts_adata.obs["feature_call"] = counts_adata.obs[f"{prefix}__feature_call"]
         counts_adata.obs["feature_call_num_features"] = counts_adata.obs[f"{prefix}__num_features"]
         counts_adata.obs["feature_call_num_umis"] = counts_adata.obs[f"{prefix}__num_umis"]
+        counts_adata.obs["best_feature"] = counts_adata.obs[f"{prefix}__feature_call"]
+        counts_adata.obs["feature1_count"] = counts_adata.obs[f"{prefix}__feature1_count"]
+        counts_adata.obs["feature2_count"] = counts_adata.obs[f"{prefix}__feature2_count"]
+        counts_adata.obs["feature_call_category"] = counts_adata.obs[f"{prefix}__feature_call_category"]
 
     feature_libraries = dict(counts_adata.uns.get("feature_libraries", {}))
     feature_libraries[prefix] = {
         "library_id": provenance.get("library_id", ""),
         "sample": provenance.get("sample", ""),
         "feature_type": provenance.get("feature_type", ""),
-        "call_source": str(calls_path),
+        "call_source": call_source,
         "obs_columns": [
             f"{prefix}__is_featured",
             f"{prefix}__feature_call",
             f"{prefix}__num_features",
             f"{prefix}__num_umis",
+            f"{prefix}__feature1_count",
+            f"{prefix}__feature2_count",
+            f"{prefix}__feature_call_category",
         ],
     }
     counts_adata.uns["feature_libraries"] = feature_libraries
@@ -210,12 +344,25 @@ def main():
     feature_output_dir.mkdir(parents=True, exist_ok=True)
 
     feature_outputs = build_feature_outputs(library_dir, feature_output_dir, provenance)
+    raw_feature_dir = feature_output_dir / "raw_feature_library.h5ad"
+    feature_obs = None
+    feature_obs_source = ""
+    if raw_feature_dir.exists():
+        raw_feature_adata = ad.read_h5ad(raw_feature_dir)
+        feature_obs = build_feature_obs_table(raw_feature_adata)
+        feature_obs_source = str(raw_feature_dir)
 
     prefix = slugify(f"{feature_type}_{library_id}")
-    if args.calls_csv:
-        calls_path = Path(args.calls_csv).resolve()
+    if feature_obs is not None:
         for counts_h5ad in args.counts_h5ad:
-            integrate_calls(Path(counts_h5ad).resolve(), calls_path, prefix, provenance, args.set_generic_aliases)
+            integrate_calls(
+                Path(counts_h5ad).resolve(),
+                prefix,
+                provenance,
+                args.set_generic_aliases,
+                feature_obs,
+                feature_obs_source,
+            )
 
     manifest = {
         "library_id": library_id,
@@ -224,6 +371,7 @@ def main():
         "source_dir": str(library_dir),
         "feature_outputs": feature_outputs,
         "calls_csv": str(Path(args.calls_csv).resolve()) if args.calls_csv else "",
+        "call_source": feature_obs_source,
         "counts_h5ads": [str(Path(path).resolve()) for path in args.counts_h5ad],
         "obs_prefix": prefix,
         "generic_aliases": bool(args.set_generic_aliases),

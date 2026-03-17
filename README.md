@@ -53,12 +53,12 @@ mcp_server/              # MCP server for scripted discovery/preflight/run workf
 
 | Dataset | Cells (STAR / CR) | Jaccard | Gene Pearson | Cell Pearson | CRISPR match | Speedup |
 |---|---|---|---|---|---|---|
-| UCSF iPSC2 (full, TRU) | 7,286 / 7,325 | 0.99 | 0.997 | 0.999 | 99.6% (5,110/5,133) | 3.1x |
-| A375 1k CRISPR 5' (GeneFull) | 1,191 / 1,162 | 0.98 | 0.975 | 1.000 | 100% (1,083/1,083) | 2.1x |
+| UCSF EBs2_2 (full, NXT) | 13,721 / 13,760 | 0.98 | 0.995 | 1.000 | 98.9% (11,032/11,157) | 2.5x |
+| A375 1k CRISPR 5' (GeneFull) | 1,186 / 1,163 | 0.98 | 0.933 | 0.999 | 96.8% (1,048/1,083) | 3.9x |
 | MSK 30polyKO (full, NXT) | 30,497 / 32,256 | 0.94 | 0.993 | 1.000 | 98.5% (22,200/22,531) | 4.0x |
 
-- UCSF: Gene Pearson on 21,521 filtered genes; Cell Pearson on 7,268 common barcodes; CRISPR exact-match on 5,133 common evaluated rows; speedup = 11 min vs 34 min (32 threads).
-- A375: Gene Pearson on 15,677 filtered genes; Cell Pearson on 1,162 common barcodes; CRISPR exact-match at min-UMI 10; speedup = 7 min vs 15 min (32 threads, no BAM, dynamic permits).
+- UCSF EBs2_2: Gene Pearson on 24,343 filtered genes; Cell Pearson on 13,571 common barcodes; CRISPR top-guide match on 11,157 common evaluated barcodes; speedup = 20 min vs 52 min (32 threads, no BAM, dynamic permits, bootstrap tiered hash).
+- A375: Gene Pearson on 17,253 filtered genes; Cell Pearson on 1,163 common barcodes; CRISPR exact-match at min-UMI 10; speedup = 4 min vs 15 min (32 threads, no BAM, dynamic permits, bootstrap tiered hash).
 - MSK: Gene Pearson on 17,448 filtered genes; Cell Pearson on 30,417 common barcodes; CRISPR set-equivalent calls on 22,531 evaluated rows (30 guides, min-UMI 2); speedup = 42 min vs 168 min (32 threads, with BAM, dynamic permits). CR requires two separate runs (GEX+gRNA 58 min + GEX+LARRY 110 min); STAR handles all three libraries in a single pass.
 
 ### Flex (STAR vs Cell Ranger 7.2)

@@ -32,6 +32,13 @@ actionable; link to deeper docs rather than copying them.
 - CRISPR calling test: `tests/test_cr_compat_crispr_calling.sh`.
 - Flex smoke: `tests/run_flex_smoke.sh` (if fixtures available).
 
+## Benchmark Hygiene
+
+- Do not run benchmark jobs in parallel with other benchmark jobs on the same
+  machine or from the same checkout.
+- Serialize benchmarking runs to avoid memory pressure, disk contention, and
+  misleading performance results.
+
 ## Build Hygiene
 
 - **MANDATORY before debugging any crash or regression**: always do a clean

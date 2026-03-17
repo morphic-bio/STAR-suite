@@ -53,77 +53,98 @@ static inline int feature_prehash_ambiguous(uint32_t payload) {
     return (payload & FEATURE_PREHASH_AMBIG_MASK) != 0u;
 }
 
-/* Returns 0 on success, -1 on allocation failure (OOM). */
-static int feature_hash_insert_best(khash_t(stru32) *hash,
-                                    const char *seq,
-                                    uint32_t feature_index_1based,
-                                    uint32_t distance,
-                                    unsigned char *no_ambiguity) {
-    khint_t k = kh_get(stru32, hash, seq);
-    if (k == kh_end(hash)) {
-        char *key_copy = strdup(seq);
-        if (!key_copy) {
-            return -1;
-        }
-        int ret;
-        khint_t kh = kh_put(stru32, hash, key_copy, &ret);
-        if (ret < 0) {
-            free(key_copy);
-            return -1;
-        }
-        kh_val(hash, kh) = feature_prehash_pack(feature_index_1based, distance, 0);
-        return 0;
+static int prehash_insert_64(khash_t(u64u32) *hash, uint64_t key,
+                             uint32_t feature_index_1based, uint32_t distance,
+                             unsigned char *no_ambiguity) {
+    int ret;
+    khint_t k = kh_put(u64u32, hash, key, &ret);
+    if (ret < 0) {
+        return -1;
     }
-
-    uint32_t existing_payload = kh_val(hash, k);
-    uint32_t existing_feature = feature_prehash_feature(existing_payload);
-    uint32_t existing_distance = feature_prehash_distance(existing_payload);
-    int existing_ambiguous = feature_prehash_ambiguous(existing_payload);
-
-    if (distance < existing_distance) {
+    if (ret > 0) {
         kh_val(hash, k) = feature_prehash_pack(feature_index_1based, distance, 0);
         return 0;
     }
-    if (distance > existing_distance) {
-        return 0;
-    }
-    if (existing_feature == feature_index_1based) {
-        return 0;
-    }
-    if (existing_ambiguous) {
-        if (no_ambiguity) {
-            no_ambiguity[feature_index_1based - 1] = 0;
-        }
-        return 0;
-    }
+    uint32_t existing = kh_val(hash, k);
+    uint32_t ex_feat = feature_prehash_feature(existing);
+    uint32_t ex_dist = feature_prehash_distance(existing);
+    int ex_amb = feature_prehash_ambiguous(existing);
 
-    kh_val(hash, k) = feature_prehash_pack(existing_feature, distance, 1);
+    if (distance < ex_dist) {
+        kh_val(hash, k) = feature_prehash_pack(feature_index_1based, distance, 0);
+        return 0;
+    }
+    if (distance > ex_dist || ex_feat == feature_index_1based) {
+        return 0;
+    }
+    if (ex_amb) {
+        if (no_ambiguity) no_ambiguity[feature_index_1based - 1] = 0;
+        return 0;
+    }
+    kh_val(hash, k) = feature_prehash_pack(ex_feat, distance, 1);
     if (no_ambiguity) {
-        if (existing_feature > 0) {
-            no_ambiguity[existing_feature - 1] = 0;
-        }
+        if (ex_feat > 0) no_ambiguity[ex_feat - 1] = 0;
         no_ambiguity[feature_index_1based - 1] = 0;
     }
     return 0;
 }
 
-static unsigned long long estimate_prehash_bytes(uint64_t entries, size_t key_size) {
-    /* bytes_per_entry = key_size + 4 (uint32 value) + 1 (khash flags) */
+static int prehash_insert_128(khash_t(seq128u32) *hash, seq128_t key,
+                              uint32_t feature_index_1based, uint32_t distance,
+                              unsigned char *no_ambiguity) {
+    int ret;
+    khint_t k = kh_put(seq128u32, hash, key, &ret);
+    if (ret < 0) {
+        return -1;
+    }
+    if (ret > 0) {
+        kh_val(hash, k) = feature_prehash_pack(feature_index_1based, distance, 0);
+        return 0;
+    }
+    uint32_t existing = kh_val(hash, k);
+    uint32_t ex_feat = feature_prehash_feature(existing);
+    uint32_t ex_dist = feature_prehash_distance(existing);
+    int ex_amb = feature_prehash_ambiguous(existing);
+
+    if (distance < ex_dist) {
+        kh_val(hash, k) = feature_prehash_pack(feature_index_1based, distance, 0);
+        return 0;
+    }
+    if (distance > ex_dist || ex_feat == feature_index_1based) {
+        return 0;
+    }
+    if (ex_amb) {
+        if (no_ambiguity) no_ambiguity[feature_index_1based - 1] = 0;
+        return 0;
+    }
+    kh_val(hash, k) = feature_prehash_pack(ex_feat, distance, 1);
+    if (no_ambiguity) {
+        if (ex_feat > 0) no_ambiguity[ex_feat - 1] = 0;
+        no_ambiguity[feature_index_1based - 1] = 0;
+    }
+    return 0;
+}
+
+static int prehash_insert(seq_hash_t *sh, seq_key_mode_t mode,
+                          const char *seq, int slen,
+                          uint32_t feature_index_1based, uint32_t distance,
+                          unsigned char *no_ambiguity) {
+    if (mode == SEQ_KEY_64) {
+        uint64_t key = seq_encode_64_fixed(seq, slen);
+        return prehash_insert_64(sh->h64, key, feature_index_1based, distance, no_ambiguity);
+    }
+    seq128_t key = seq_encode_128_fixed(seq, slen);
+    return prehash_insert_128(sh->h128, key, feature_index_1based, distance, no_ambiguity);
+}
+
+static unsigned long long estimate_prehash_bytes(uint64_t entries, seq_key_mode_t mode) {
+    const size_t key_size = (mode == SEQ_KEY_64) ? 8 : 16;
     const unsigned long long bytes_per_entry = (unsigned long long)key_size + 4ULL + 1ULL;
-    /* khash doubles on ~77% load; 1.5x headroom covers resize transients */
     return entries * bytes_per_entry * 3ULL / 2ULL;
 }
 
-static void prehash_tier_cleanup(khash_t(stru32) **hashp, unsigned char **ambiguity) {
-    if (hashp && *hashp) {
-        for (khint_t k = kh_begin(*hashp); k != kh_end(*hashp); ++k) {
-            if (kh_exist(*hashp, k)) {
-                free((void *)kh_key(*hashp, k));
-            }
-        }
-        kh_destroy(stru32, *hashp);
-        *hashp = NULL;
-    }
+static void prehash_tier_cleanup(seq_hash_t *hashp, seq_key_mode_t mode, unsigned char **ambiguity) {
+    seq_hash_destroy(hashp, mode);
     if (ambiguity && *ambiguity) {
         free(*ambiguity);
         *ambiguity = NULL;
@@ -136,8 +157,8 @@ static void build_feature_hamming_variant_hashes(feature_arrays *features) {
     }
     features->feature_hamming_le1_enabled = 0;
     features->feature_hamming_le2_enabled = 0;
-    features->feature_hamming_le1_hash = NULL;
-    features->feature_hamming_le2_hash = NULL;
+    memset(&features->feature_hamming_le1_hash, 0, sizeof(seq_hash_t));
+    memset(&features->feature_hamming_le2_hash, 0, sizeof(seq_hash_t));
     features->feature_no_ambiguity_le1 = NULL;
     features->feature_no_ambiguity_le2 = NULL;
 
@@ -169,11 +190,10 @@ static void build_feature_hamming_variant_hashes(feature_arrays *features) {
     const uint64_t est_le1 = n_common * (1ULL + 3ULL * L);
     const uint64_t est_le2 = n_common * (1ULL + 3ULL * L + 9ULL * (L * (L - 1ULL) / 2ULL));
     const uint64_t entry_budget = (feature_prehash_max_entries > 0ULL) ? feature_prehash_max_entries : ULLONG_MAX;
+    const seq_key_mode_t mode = features->code_hash_mode;
 
-    /* String key size: common_length + 1 (NUL) average. strdup'd DNA strings. */
-    const size_t key_size = (size_t)features->common_length + 1;
-    const unsigned long long est_le1_bytes = estimate_prehash_bytes(est_le1, key_size);
-    const unsigned long long est_le2_bytes = estimate_prehash_bytes(est_le2, key_size);
+    const unsigned long long est_le1_bytes = estimate_prehash_bytes(est_le1, mode);
+    const unsigned long long est_le2_bytes = estimate_prehash_bytes(est_le2, mode);
     const unsigned long long mem_budget = feature_prehash_memory_budget;
 
     /* Entry budget check (existing) */
@@ -202,22 +222,27 @@ static void build_feature_hamming_variant_hashes(feature_arrays *features) {
             (unsigned long long)(est_le1_bytes / (1024ULL*1024ULL*1024ULL)),
             mem_budget ? (unsigned long long)(mem_budget / (1024ULL*1024ULL*1024ULL)) : 0ULL);
 
-    features->feature_hamming_le1_hash = kh_init(stru32);
-    if (!features->feature_hamming_le1_hash) {
-        fprintf(stderr, "WARNING: failed to allocate feature_hamming_le1_hash, skipping prehash\n");
-        return;
-    }
-    if (kh_resize(stru32, features->feature_hamming_le1_hash, (khint_t)(est_le1 * 13ULL / 10ULL + 1024ULL)) < 0) {
-        fprintf(stderr, "WARNING: failed to pre-allocate d1 hash table (%llu entries), skipping prehash\n",
-                (unsigned long long)est_le1);
-        prehash_tier_cleanup(&features->feature_hamming_le1_hash, NULL);
-        return;
+    seq_hash_init(&features->feature_hamming_le1_hash, mode);
+    if (mode == SEQ_KEY_64) {
+        if (!features->feature_hamming_le1_hash.h64) {
+            fprintf(stderr, "WARNING: failed to allocate feature_hamming_le1_hash, skipping prehash\n");
+            return;
+        }
+        kh_resize(u64u32, features->feature_hamming_le1_hash.h64,
+                  (khint_t)(est_le1 * 13ULL / 10ULL + 1024ULL));
+    } else {
+        if (!features->feature_hamming_le1_hash.h128) {
+            fprintf(stderr, "WARNING: failed to allocate feature_hamming_le1_hash, skipping prehash\n");
+            return;
+        }
+        kh_resize(seq128u32, features->feature_hamming_le1_hash.h128,
+                  (khint_t)(est_le1 * 13ULL / 10ULL + 1024ULL));
     }
 
     features->feature_no_ambiguity_le1 = malloc((size_t)features->number_of_features);
     if (!features->feature_no_ambiguity_le1) {
         fprintf(stderr, "WARNING: failed to allocate feature_no_ambiguity_le1, skipping prehash\n");
-        prehash_tier_cleanup(&features->feature_hamming_le1_hash, NULL);
+        prehash_tier_cleanup(&features->feature_hamming_le1_hash, mode, NULL);
         return;
     }
     memset(features->feature_no_ambiguity_le1, 1, (size_t)features->number_of_features);
@@ -229,7 +254,8 @@ static void build_feature_hamming_variant_hashes(feature_arrays *features) {
     for (int i = 0; i < features->number_of_features && !oom; i++) {
         if ((int)features->feature_lengths[i] != features->common_length) continue;
         const char *seq = features->feature_sequences[i];
-        if (feature_hash_insert_best(features->feature_hamming_le1_hash, seq, (uint32_t)(i + 1), 0, features->feature_no_ambiguity_le1) < 0) { oom = 1; break; }
+        if (prehash_insert(&features->feature_hamming_le1_hash, mode, seq, features->common_length,
+                           (uint32_t)(i + 1), 0, features->feature_no_ambiguity_le1) < 0) { oom = 1; break; }
         memcpy(variant, seq, (size_t)features->common_length);
         variant[features->common_length] = '\0';
         for (int p = 0; p < features->common_length && !oom; p++) {
@@ -237,7 +263,8 @@ static void build_feature_hamming_variant_hashes(feature_arrays *features) {
             for (int b = 0; b < 4; b++) {
                 if (bases[b] == orig) continue;
                 variant[p] = bases[b];
-                if (feature_hash_insert_best(features->feature_hamming_le1_hash, variant, (uint32_t)(i + 1), 1, features->feature_no_ambiguity_le1) < 0) { oom = 1; break; }
+                if (prehash_insert(&features->feature_hamming_le1_hash, mode, variant, features->common_length,
+                                   (uint32_t)(i + 1), 1, features->feature_no_ambiguity_le1) < 0) { oom = 1; break; }
             }
             variant[p] = orig;
         }
@@ -245,7 +272,7 @@ static void build_feature_hamming_variant_hashes(feature_arrays *features) {
 
     if (oom) {
         fprintf(stderr, "WARNING: OOM during d1 prehash build, cleaning up and skipping prehash\n");
-        prehash_tier_cleanup(&features->feature_hamming_le1_hash, &features->feature_no_ambiguity_le1);
+        prehash_tier_cleanup(&features->feature_hamming_le1_hash, mode, &features->feature_no_ambiguity_le1);
         return;
     }
     features->feature_hamming_le1_enabled = 1;
@@ -285,22 +312,27 @@ static void build_feature_hamming_variant_hashes(feature_arrays *features) {
             (unsigned long long)(est_le2_bytes / (1024ULL*1024ULL*1024ULL)),
             mem_budget ? (unsigned long long)(mem_budget / (1024ULL*1024ULL*1024ULL)) : 0ULL);
 
-    features->feature_hamming_le2_hash = kh_init(stru32);
-    if (!features->feature_hamming_le2_hash) {
-        fprintf(stderr, "WARNING: failed to allocate feature_hamming_le2_hash, d2 skipped\n");
-        return;
-    }
-    if (kh_resize(stru32, features->feature_hamming_le2_hash, (khint_t)(est_le2 * 13ULL / 10ULL + 1024ULL)) < 0) {
-        fprintf(stderr, "WARNING: failed to pre-allocate d2 hash table (%llu entries), d2 skipped\n",
-                (unsigned long long)est_le2);
-        prehash_tier_cleanup(&features->feature_hamming_le2_hash, NULL);
-        return;
+    seq_hash_init(&features->feature_hamming_le2_hash, mode);
+    if (mode == SEQ_KEY_64) {
+        if (!features->feature_hamming_le2_hash.h64) {
+            fprintf(stderr, "WARNING: failed to allocate feature_hamming_le2_hash, d2 skipped\n");
+            return;
+        }
+        kh_resize(u64u32, features->feature_hamming_le2_hash.h64,
+                  (khint_t)(est_le2 * 13ULL / 10ULL + 1024ULL));
+    } else {
+        if (!features->feature_hamming_le2_hash.h128) {
+            fprintf(stderr, "WARNING: failed to allocate feature_hamming_le2_hash, d2 skipped\n");
+            return;
+        }
+        kh_resize(seq128u32, features->feature_hamming_le2_hash.h128,
+                  (khint_t)(est_le2 * 13ULL / 10ULL + 1024ULL));
     }
 
     features->feature_no_ambiguity_le2 = malloc((size_t)features->number_of_features);
     if (!features->feature_no_ambiguity_le2) {
         fprintf(stderr, "WARNING: failed to allocate feature_no_ambiguity_le2, d2 skipped\n");
-        prehash_tier_cleanup(&features->feature_hamming_le2_hash, NULL);
+        prehash_tier_cleanup(&features->feature_hamming_le2_hash, mode, NULL);
         return;
     }
     memset(features->feature_no_ambiguity_le2, 1, (size_t)features->number_of_features);
@@ -309,7 +341,8 @@ static void build_feature_hamming_variant_hashes(feature_arrays *features) {
     for (int i = 0; i < features->number_of_features && !oom; i++) {
         if ((int)features->feature_lengths[i] != features->common_length) continue;
         const char *seq = features->feature_sequences[i];
-        if (feature_hash_insert_best(features->feature_hamming_le2_hash, seq, (uint32_t)(i + 1), 0, features->feature_no_ambiguity_le2) < 0) { oom = 1; break; }
+        if (prehash_insert(&features->feature_hamming_le2_hash, mode, seq, features->common_length,
+                           (uint32_t)(i + 1), 0, features->feature_no_ambiguity_le2) < 0) { oom = 1; break; }
         memcpy(variant, seq, (size_t)features->common_length);
         variant[features->common_length] = '\0';
         for (int p1 = 0; p1 < features->common_length && !oom; p1++) {
@@ -317,7 +350,8 @@ static void build_feature_hamming_variant_hashes(feature_arrays *features) {
             for (int b1 = 0; b1 < 4 && !oom; b1++) {
                 if (bases[b1] == orig1) continue;
                 variant[p1] = bases[b1];
-                if (feature_hash_insert_best(features->feature_hamming_le2_hash, variant, (uint32_t)(i + 1), 1, features->feature_no_ambiguity_le2) < 0) { oom = 1; break; }
+                if (prehash_insert(&features->feature_hamming_le2_hash, mode, variant, features->common_length,
+                                   (uint32_t)(i + 1), 1, features->feature_no_ambiguity_le2) < 0) { oom = 1; break; }
             }
             variant[p1] = orig1;
             for (int p2 = p1 + 1; p2 < features->common_length && !oom; p2++) {
@@ -328,7 +362,8 @@ static void build_feature_hamming_variant_hashes(feature_arrays *features) {
                     for (int b2 = 0; b2 < 4 && !oom; b2++) {
                         if (bases[b2] == orig2) continue;
                         variant[p2] = bases[b2];
-                        if (feature_hash_insert_best(features->feature_hamming_le2_hash, variant, (uint32_t)(i + 1), 2, features->feature_no_ambiguity_le2) < 0) { oom = 1; break; }
+                        if (prehash_insert(&features->feature_hamming_le2_hash, mode, variant, features->common_length,
+                                           (uint32_t)(i + 1), 2, features->feature_no_ambiguity_le2) < 0) { oom = 1; break; }
                     }
                 }
                 variant[p2] = orig2;
@@ -339,7 +374,7 @@ static void build_feature_hamming_variant_hashes(feature_arrays *features) {
 
     if (oom) {
         fprintf(stderr, "WARNING: OOM during d2 prehash build, cleaning up d2 tier (d1 still active)\n");
-        prehash_tier_cleanup(&features->feature_hamming_le2_hash, &features->feature_no_ambiguity_le2);
+        prehash_tier_cleanup(&features->feature_hamming_le2_hash, mode, &features->feature_no_ambiguity_le2);
         return;
     }
 

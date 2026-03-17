@@ -1844,6 +1844,18 @@ std::shared_ptr<PfMultiAssignPhaseResult> runPfMultiAssignPhase(
         assignOpts.legacyCbRescue = (P.pfMulti.crAssignLegacyCbRescue != 0);
         assignOpts.skipQcOutputs = (P.pfMulti.crAssignSkipQcOutputs != 0);
         assignOpts.allowUnionWhitelist = (P.pfMulti.crAssignAllowUnionWhitelist != 0);
+        assignOpts.useFeatureAnchorSearch = true;
+        assignOpts.requireFeatureAnchorMatch = true;
+        assignOpts.featureModeBootstrapReads = 100000;
+        if (const char* env = std::getenv("STAR_PF_USE_FEATURE_ANCHOR_SEARCH")) {
+            assignOpts.useFeatureAnchorSearch = (std::atoi(env) != 0);
+        }
+        if (const char* env = std::getenv("STAR_PF_REQUIRE_FEATURE_ANCHOR_MATCH")) {
+            assignOpts.requireFeatureAnchorMatch = (std::atoi(env) != 0);
+        }
+        if (const char* env = std::getenv("STAR_PF_FEATURE_BOOTSTRAP_READS")) {
+            assignOpts.featureModeBootstrapReads = std::atoi(env);
+        }
         assignOpts.enableStarDynamicPermitHooks = (P.dynamicThreadInterface == 1);
         const PfPermitControllerMode pfControllerMode = parsePfPermitControllerMode(P.dynamicThreadPfControllerMode);
         const bool pfControllerEnabled = (pfControllerMode != PfPermitControllerMode::Off);

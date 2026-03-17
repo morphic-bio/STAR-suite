@@ -42,6 +42,13 @@ struct chem_detect_state {
     int min_hits;       /* minimum total hits for decision */
 };
 
+/* Lookup strategy for tiered feature search (set via PF_LOOKUP_STRATEGY env). */
+typedef enum {
+    PF_STRATEGY_DEFAULT = 0,      /* d0 exact -> d1/d2 integer prehash */
+    PF_STRATEGY_HOT_D0  = 1,      /* hot d0 -> d0 exact -> d1/d2 integer prehash */
+    PF_STRATEGY_HOT_D0_BLOOM = 2  /* reserved for future bloom-assisted variants */
+} pf_lookup_strategy_t;
+
 // other defines
 #define MIN_POSTERIOR 0.975
 #define MAX_FEATURE_N 1
@@ -114,14 +121,10 @@ typedef struct feature_arrays {
     int *feature_offsets; /* 0-based array; entry i corresponds to feature index (i+1). -1 = unknown */
     int number_of_mismatched_features;
     int *mismatched_feature_indices;
-    /* Per-library cumulative lookup hashes and ambiguity metadata.
-     * These use seq_hash_t (integer-keyed) for prehash, and
-     * khash_t(stru32) (string-keyed) as fallback only when seq_hash
-     * is not applicable. The le1/le2 hashes use string keys in the
-     * current prehash code because they store DNA variant strings.
-     * They will stay as stru32 until the integer-key prehash is wired. */
-    khash_t(stru32) *feature_hamming_le1_hash; /* <=1 */
-    khash_t(stru32) *feature_hamming_le2_hash; /* <=2 */
+    /* Per-library cumulative prehash tables (integer-keyed via seq_hash_t).
+     * Keys are 2-bit encoded DNA sequences; no strdup, no per-key free. */
+    seq_hash_t feature_hamming_le1_hash; /* <=1 */
+    seq_hash_t feature_hamming_le2_hash; /* <=2 */
     unsigned char *feature_no_ambiguity_le1;   /* per feature (1=true) */
     unsigned char *feature_no_ambiguity_le2;   /* per feature (1=true) */
     int feature_hamming_le1_enabled;

@@ -345,6 +345,15 @@ static void applyAssignOptions(pf_config* cfg, const AssignOptions& options) {
     if (options.targetNamespace != "UNKNOWN") {
         pf_config_set_target_namespace(cfg, pf_namespace_from_string(options.targetNamespace.c_str()));
     }
+    if (options.useFeatureAnchorSearch) {
+        pf_config_set_use_feature_anchor_search(cfg, 1);
+    }
+    if (options.requireFeatureAnchorMatch) {
+        pf_config_set_require_feature_anchor_match(cfg, 1);
+    }
+    if (options.featureModeBootstrapReads > 0) {
+        pf_config_set_feature_mode_bootstrap_reads(cfg, options.featureModeBootstrapReads);
+    }
 }
 
 static string pfErrorMessage(pf_context* ctx, pf_error err, const string& stage) {

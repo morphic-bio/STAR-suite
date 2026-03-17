@@ -314,3 +314,16 @@ These scripts validate that default bundles work with minimal explicit parameter
 - Committed results: `comparisons/a375_perturb_full_benchmark_20260315/`
 - STAR output: `/tmp/a375_bench_32t_20260315_072752/star_a375_32t_nobam_v4/`
 - CR output: `/tmp/a375_bench_32t_20260315_072752/cr_a375_32t_nobam/`
+
+## UCSF Bootstrap / Tiered Hash Debug (2026-03-17)
+
+- Current-surface verification:
+  - `/tmp/ucsf_bootstrap_regression_current_20260317_080129/`
+- Exploratory replay/bootstrap finalize experiment:
+  - `/tmp/ucsf_bootstrap_regression_patched_20260317_080624/`
+- Forced direct tiered-hash at offset `0`:
+  - `/tmp/ucsf_hash_offset0_20260317/`
+- Forced direct tiered-hash at offset `31`:
+  - `/tmp/ucsf_hash_offset31_20260317/`
+- Primary notes:
+  - `docs/HANDOFF_BOOTSTRAP_TIERED_HASH_ACTIVATION_20260317.md`

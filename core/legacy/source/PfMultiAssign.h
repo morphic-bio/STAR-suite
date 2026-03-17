@@ -44,6 +44,10 @@ struct AssignOptions {
     bool allowUnionWhitelist = false;
     string sourceNamespace = "UNKNOWN";
     string targetNamespace = "UNKNOWN";
+    bool useFeatureAnchorSearch = false;
+    bool requireFeatureAnchorMatch = false;
+    int featureModeBootstrapReads = 0;
+    bool useHotHash = false;
 };
 
 struct AssignResult {
