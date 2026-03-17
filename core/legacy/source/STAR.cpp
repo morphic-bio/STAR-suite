@@ -393,8 +393,21 @@ int main(int argInN, char *argIn[])
     P.inputParameters(argInN, argIn);
     applyPfMultiGexInputFiltering(P);
     std::shared_ptr<PfMultiPreloadHandle> pfMultiPreload = startPfMultiConfigPreload(P);
+    std::shared_ptr<PfFeatureAssignHandle> pfAssignHandle;
     if (pfMultiPreload) {
         P.inOut->logMain << "NOTICE: pf-preload async preparation started during STAR initialization\n";
+    }
+    {
+        const char* asyncEnv = getenv("STAR_PF_ASYNC_ASSIGN");
+        const bool asyncAssign = (asyncEnv == nullptr || strcmp(asyncEnv, "0") != 0);
+        if (asyncAssign) {
+            pfAssignHandle = startPfFeatureAssignment(P, pfMultiPreload);
+        }
+    }
+    if (pfAssignHandle) {
+        P.inOut->logMain << timeMonthDayTime()
+                         << " ..... pf-feature-assign Phase A launched (async)\n"
+                         << flush;
     }
 
     *(P.inOut->logStdOut) << "\t" << P.commandLine << '\n';
@@ -1706,7 +1719,6 @@ int main(int argInN, char *argIn[])
 
     // solo counts
     Solo soloMain(RAchunk, P, *RAchunk[0]->chunkTr);
-    
     // Skip Solo processing if inline replayer already ran (it produces MEX directly)
     if (!P.pSolo.useInlineReplayer) {
         soloMain.processAndOutput();
@@ -1714,9 +1726,11 @@ int main(int argInN, char *argIn[])
         P.inOut->logMain << timeMonthDayTime() << " ..... skipping Solo processing (inline replayer already produced MEX)" << endl;
     }
 
-    // Process pf-multi config if enabled
+    // Finish pf-multi merge/filtering once Solo outputs are available.
     if (!isUnsetToken(P.pfMulti.pfMultiConfig)) {
-        processPfMultiConfig(P, &soloMain, pfMultiPreload);
+        if (processPfMultiConfig(P, &soloMain, pfMultiPreload, pfAssignHandle) != 0) {
+            return 1;
+        }
     }
 
     // Note: Two-pass unsorted CB/UB tag injection removed - not used in inline flex path

@@ -100,6 +100,12 @@ struct PfMultiPreparedContext {
     string prepLog;
 };
 
+class PfMultiPreloadHandle;
+
+static PfMultiPreparedContext resolvePfMultiPreparedContext(
+    Parameters& P,
+    const std::shared_ptr<PfMultiPreloadHandle>& preload);
+
 class PfMultiPreloadHandle {
 public:
     ~PfMultiPreloadHandle() {
@@ -110,9 +116,12 @@ public:
 
 private:
     friend std::shared_ptr<PfMultiPreloadHandle> startPfMultiConfigPreload(const Parameters& P);
-    friend int processPfMultiConfig(Parameters& P,
-                                    const Solo* solo,
-                                    const std::shared_ptr<PfMultiPreloadHandle>& preload);
+    friend PfMultiPreparedContext resolvePfMultiPreparedContext(
+        Parameters& P,
+        const std::shared_ptr<PfMultiPreloadHandle>& preload);
+    friend std::shared_ptr<PfMultiAssignPhaseResult> runPfMultiAssignPhase(
+        Parameters& P,
+        const std::shared_ptr<PfMultiPreloadHandle>& preload);
 
     std::thread worker;
     bool started = false;
@@ -121,6 +130,79 @@ private:
     double preloadSec = 0.0;
     string error;
     PfMultiPreparedContext context;
+};
+
+struct PfMultiFeatureRun {
+    string featureType;
+    string assignOut;
+    string featureRefPath;
+    string effectiveChem;
+    string effectiveReadNamespace;
+    string assignmentWhitelistNamespace;
+    bool translateNxtForAssign = false;
+    string featureMexOutputNamespace;
+    string outputNamespace;
+    bool namespaceConfident = false;
+    string detectedMatchMode;
+    PfMultiAssign::WhitelistNormalizationResult whitelistNormalization;
+    FilteredBarcodeNormalizationStats normalizationStats;
+    string libraryId;
+    string sampleName;
+    string resolvedFastq;
+    string resolvedChemRequest;
+    bool explicitChem = false;
+    int returnCode = 0;
+};
+
+struct PfMultiFeatureMexEntry {
+    PfMultiMerge::MexData data;
+    string effectiveChem;
+    string featureMexOutputNamespace;
+    string featureType;
+    string libraryId;
+};
+
+struct PfMultiAssignPhaseResult {
+    PfMultiPreparedContext prepared;
+    vector<PfMultiFeatureRun> featureRuns;
+    vector<PfMultiFeatureMexEntry> featureMexEntries;
+    bool usedExplicitAssignFilteredBarcodes = false;
+};
+
+class PfFeatureAssignHandle {
+public:
+    ~PfFeatureAssignHandle() {
+        if (worker.joinable()) {
+            worker.join();
+        }
+    }
+
+    void join() {
+        if (worker.joinable()) {
+            worker.join();
+        }
+    }
+
+    bool isFinished() const { return finished; }
+    bool isSuccess() const { return success; }
+    const string& getError() const { return error; }
+    const std::shared_ptr<PfMultiAssignPhaseResult>& getResult() const { return result; }
+
+private:
+    friend std::shared_ptr<PfFeatureAssignHandle> startPfFeatureAssignment(
+        Parameters& P,
+        const std::shared_ptr<PfMultiPreloadHandle>& preload);
+    friend int processPfMultiConfig(Parameters& P,
+                                    const Solo* solo,
+                                    const std::shared_ptr<PfMultiPreloadHandle>& preload,
+                                    const std::shared_ptr<PfFeatureAssignHandle>& assignHandle);
+
+    std::thread worker;
+    bool started = false;
+    bool finished = false;
+    bool success = false;
+    string error;
+    std::shared_ptr<PfMultiAssignPhaseResult> result;
 };
 
 using PfMultiFeatureSpecs::FeatureSpec;
@@ -1489,6 +1571,210 @@ static int runCrisprFeatureCalling(const string& filteredMexDir, const string& o
 
 } // namespace
 
+static PfMultiPreparedContext resolvePfMultiPreparedContext(
+    Parameters& P,
+    const std::shared_ptr<PfMultiPreloadHandle>& preload) {
+    PfMultiPreparedContext prepared;
+    bool usedPreload = false;
+    if (preload && preload->started) {
+        if (preload->worker.joinable()) {
+            preload->worker.join();
+        }
+        if (preload->success) {
+            prepared = preload->context;
+            usedPreload = true;
+            P.inOut->logMain << "pf-preload: consumed async preparation (sec="
+                             << preload->preloadSec
+                             << ", featureLibraries=" << prepared.featureLibraries.size()
+                             << ")\n";
+        } else {
+            P.inOut->logMain << "WARNING: pf-preload failed; using synchronous preparation. cause="
+                             << (preload->error.empty() ? string("unknown") : preload->error)
+                             << "\n";
+        }
+    }
+    if (!usedPreload) {
+        const auto prepStart = std::chrono::steady_clock::now();
+        prepared = buildPfMultiPreparedContext(makePfMultiPreloadInput(P));
+        const auto prepEnd = std::chrono::steady_clock::now();
+        const double prepSec =
+            std::chrono::duration_cast<std::chrono::duration<double>>(prepEnd - prepStart).count();
+        P.inOut->logMain << "pf-preload: synchronous preparation complete (sec="
+                         << prepSec
+                         << ", featureLibraries=" << prepared.featureLibraries.size()
+                         << ")\n";
+    }
+    if (!prepared.prepLog.empty()) {
+        P.inOut->logMain << prepared.prepLog;
+    }
+    return prepared;
+}
+
+static string stripBarcodeSuffix(const string& barcode) {
+    size_t dashPos = barcode.find_last_of('-');
+    if (dashPos != string::npos && dashPos < barcode.size() - 1) {
+        bool digits = true;
+        for (size_t i = dashPos + 1; i < barcode.size(); ++i) {
+            if (!std::isdigit(static_cast<unsigned char>(barcode[i]))) {
+                digits = false;
+                break;
+            }
+        }
+        if (digits) {
+            return barcode.substr(0, dashPos);
+        }
+    }
+    return barcode;
+}
+
+static void writeDeferredFilteredAssignOutput(const string& assignOut,
+                                              const vector<string>& filteredGexBarcodes,
+                                              ofstream& logStream) {
+    if (filteredGexBarcodes.empty()) {
+        return;
+    }
+
+    PfMultiMerge::MexData rawData = PfMultiMerge::readMex(assignOut);
+    std::unordered_set<string> filteredSet;
+    filteredSet.reserve(filteredGexBarcodes.size());
+    for (const auto& bc : filteredGexBarcodes) {
+        filteredSet.insert(stripBarcodeSuffix(upperCopy(bc)));
+    }
+
+    std::vector<string> subsetBarcodes;
+    subsetBarcodes.reserve(filteredSet.size());
+    std::vector<uint32_t> oldToCompact(rawData.barcodes.size(), std::numeric_limits<uint32_t>::max());
+    for (size_t i = 0; i < rawData.barcodes.size(); ++i) {
+        const string normalized = stripBarcodeSuffix(upperCopy(rawData.barcodes[i]));
+        if (filteredSet.find(normalized) != filteredSet.end()) {
+            oldToCompact[i] = static_cast<uint32_t>(subsetBarcodes.size());
+            subsetBarcodes.push_back(rawData.barcodes[i]);
+        }
+    }
+
+    const string filteredDir = assignOut + "/filtered";
+    const string resetCmd = "rm -rf \"" + filteredDir + "\" && mkdir -p \"" + filteredDir + "\"";
+    if (system(resetCmd.c_str()) != 0) {
+        throw runtime_error("Failed to reset deferred filtered assign output dir: " + filteredDir);
+    }
+    if (subsetBarcodes.empty()) {
+        logStream << "WARNING: deferred filtered assign output for " << assignOut
+                  << " matched zero GEX barcodes\n";
+        return;
+    }
+
+    std::vector<MexWriter::Triplet> subsetTriplets;
+    subsetTriplets.reserve(rawData.triplets.size());
+    uint64_t dedupedCount = 0;
+    for (const auto& t : rawData.triplets) {
+        if (t.cell_idx < oldToCompact.size() && oldToCompact[t.cell_idx] != std::numeric_limits<uint32_t>::max()) {
+            MexWriter::Triplet newT;
+            newT.cell_idx = oldToCompact[t.cell_idx];
+            newT.gene_idx = t.gene_idx;
+            newT.count = t.count;
+            subsetTriplets.push_back(newT);
+            dedupedCount += t.count;
+        }
+    }
+    std::sort(subsetTriplets.begin(), subsetTriplets.end(),
+              [](const MexWriter::Triplet& a, const MexWriter::Triplet& b) {
+                  if (a.cell_idx != b.cell_idx) {
+                      return a.cell_idx < b.cell_idx;
+                  }
+                  return a.gene_idx < b.gene_idx;
+              });
+
+    std::vector<MexWriter::Feature> features;
+    features.reserve(rawData.features.size());
+    for (size_t i = 0; i < rawData.features.size(); ++i) {
+        const string name = (i < rawData.featureNames.size()) ? rawData.featureNames[i] : rawData.features[i];
+        const string type = (i < rawData.featureTypes.size()) ? rawData.featureTypes[i] : "Gene Expression";
+        features.emplace_back(rawData.features[i], name, type);
+    }
+    if (MexWriter::writeMex(filteredDir + "/", subsetBarcodes, features, subsetTriplets, -1) != 0) {
+        throw runtime_error("Failed to write deferred filtered MEX for assign output: " + assignOut);
+    }
+
+    {
+        std::ofstream out((filteredDir + "/barcodes.txt").c_str());
+        if (!out.is_open()) {
+            throw runtime_error("Failed to write filtered barcodes.txt: " + filteredDir);
+        }
+        for (const auto& bc : subsetBarcodes) {
+            out << bc << "\n";
+        }
+    }
+    {
+        std::ofstream out((filteredDir + "/features.txt").c_str());
+        if (!out.is_open()) {
+            throw runtime_error("Failed to write filtered features.txt: " + filteredDir);
+        }
+        for (const auto& featureName : rawData.featureNames) {
+            out << featureName << "\n";
+        }
+    }
+    {
+        const string rawFeaturePerCell = assignOut + "/feature_per_cell.csv";
+        std::ifstream in(rawFeaturePerCell.c_str());
+        if (in.is_open()) {
+            std::ofstream out((filteredDir + "/feature_per_cell.csv").c_str());
+            if (!out.is_open()) {
+                throw runtime_error("Failed to write filtered feature_per_cell.csv: " + filteredDir);
+            }
+            string line;
+            if (std::getline(in, line)) {
+                out << line << "\n";
+            }
+            while (std::getline(in, line)) {
+                const size_t commaPos = line.find(',');
+                const string barcode = upperCopy(stripBarcodeSuffix(
+                    commaPos == string::npos ? line : line.substr(0, commaPos)));
+                if (filteredSet.find(barcode) != filteredSet.end()) {
+                    out << line << "\n";
+                }
+            }
+        }
+    }
+    {
+        const string rawStatsPath = assignOut + "/stats.txt";
+        std::ifstream in(rawStatsPath.c_str());
+        std::ofstream out((filteredDir + "/stats.txt").c_str());
+        if (!out.is_open()) {
+            throw runtime_error("Failed to write filtered stats.txt: " + filteredDir);
+        }
+        if (in.is_open()) {
+            string line;
+            while (std::getline(in, line)) {
+                if (line.find("Total deduped feature counts ") == 0) {
+                    out << "Total deduped feature counts " << dedupedCount << "\n";
+                } else if (line.find("Total barcodes ") == 0) {
+                    out << "Total barcodes " << subsetBarcodes.size() << "\n";
+                } else if (line.find("Total excluded barcodes ") == 0) {
+                    const uint64_t excluded =
+                        rawData.barcodes.size() >= subsetBarcodes.size()
+                        ? static_cast<uint64_t>(rawData.barcodes.size() - subsetBarcodes.size())
+                        : 0;
+                    out << "Total excluded barcodes " << excluded << "\n";
+                } else {
+                    out << line << "\n";
+                }
+            }
+        } else {
+            out << "Total deduped feature counts " << dedupedCount << "\n";
+            out << "Total barcodes " << subsetBarcodes.size() << "\n";
+            out << "Total excluded barcodes "
+                << (rawData.barcodes.size() >= subsetBarcodes.size()
+                        ? static_cast<uint64_t>(rawData.barcodes.size() - subsetBarcodes.size())
+                        : 0)
+                << "\n";
+        }
+    }
+
+    logStream << "NOTICE: wrote deferred filtered assign output for " << assignOut
+              << " (barcodes=" << subsetBarcodes.size()
+              << ", deduped_counts=" << dedupedCount << ")\n";
+}
+
 std::shared_ptr<PfMultiPreloadHandle> startPfMultiConfigPreload(const Parameters& P) {
     if (P.runMode != "alignReads") {
         return nullptr;
@@ -1523,60 +1809,24 @@ std::shared_ptr<PfMultiPreloadHandle> startPfMultiConfigPreload(const Parameters
     return preload;
 }
 
-int processPfMultiConfig(Parameters& P,
-                         const Solo* solo,
-                         const std::shared_ptr<PfMultiPreloadHandle>& preload) {
+std::shared_ptr<PfMultiAssignPhaseResult> runPfMultiAssignPhase(
+    Parameters& P,
+    const std::shared_ptr<PfMultiPreloadHandle>& preload) {
     if (isUnsetToken(P.pfMulti.pfMultiConfig)) {
-        return 0; // Not enabled
+        return nullptr;
     }
     
-    P.inOut->logMain << timeMonthDayTime() << " ..... started pf-multi config processing\n";
+    P.inOut->logMain << timeMonthDayTime() << " ..... started pf-multi feature assignment\n";
     
+    auto phase = std::make_shared<PfMultiAssignPhaseResult>();
     try {
-        PfMultiPreparedContext prepared;
-        bool usedPreload = false;
-        if (preload && preload->started) {
-            if (preload->worker.joinable()) {
-                preload->worker.join();
-            }
-            if (preload->success) {
-                prepared = preload->context;
-                usedPreload = true;
-                P.inOut->logMain << "pf-preload: consumed async preparation (sec="
-                                 << preload->preloadSec
-                                 << ", featureLibraries=" << prepared.featureLibraries.size()
-                                 << ")\n";
-            } else {
-                P.inOut->logMain << "WARNING: pf-preload failed; using synchronous preparation. cause="
-                                 << (preload->error.empty() ? string("unknown") : preload->error)
-                                 << "\n";
-            }
-        }
-        if (!usedPreload) {
-            const auto prepStart = std::chrono::steady_clock::now();
-            prepared = buildPfMultiPreparedContext(makePfMultiPreloadInput(P));
-            const auto prepEnd = std::chrono::steady_clock::now();
-            const double prepSec =
-                std::chrono::duration_cast<std::chrono::duration<double>>(prepEnd - prepStart).count();
-            P.inOut->logMain << "pf-preload: synchronous preparation complete (sec="
-                             << prepSec
-                             << ", featureLibraries=" << prepared.featureLibraries.size()
-                             << ")\n";
-        }
-        if (!prepared.prepLog.empty()) {
-            P.inOut->logMain << prepared.prepLog;
-        }
+        phase->prepared = resolvePfMultiPreparedContext(P, preload);
+        const PfMultiPreparedContext& prepared = phase->prepared;
 
         const PfMultiConfig::Config& config = prepared.config;
         const string& whitelist = prepared.whitelist;
         const string& effectiveChem = prepared.effectiveChem;
-        const string gexWhitelistNamespace = upperCopy(prepared.inferredChem);
-        // Solo's raw MEX barcodes are in soloOutputNamespace, NOT the whitelist
-        // matching namespace. For 2-column NXT whitelists, Solo writes TRU barcodes
-        // (via cbWLstrOut = COL2), so gexNormalizationChem must be "TRU" (no-op).
-        const string gexNormalizationChem = upperCopy(prepared.soloOutputNamespace);
         const string& outputChem = prepared.outputChem;
-        const string& outPrefix = prepared.outPrefix;
         const AnchoredReadEstimate mapEstimate = prepared.mapEstimate;
 
         PfMultiAssign::AssignOptions assignOpts;
@@ -1592,6 +1842,7 @@ int processPfMultiConfig(Parameters& P,
         assignOpts.minPosterior = P.pfMulti.crAssignMinPosterior;
         assignOpts.maxReads = (P.readMapNumber > 0) ? static_cast<long long>(P.readMapNumber) : -1;
         assignOpts.legacyCbRescue = (P.pfMulti.crAssignLegacyCbRescue != 0);
+        assignOpts.skipQcOutputs = (P.pfMulti.crAssignSkipQcOutputs != 0);
         assignOpts.allowUnionWhitelist = (P.pfMulti.crAssignAllowUnionWhitelist != 0);
         assignOpts.enableStarDynamicPermitHooks = (P.dynamicThreadInterface == 1);
         const PfPermitControllerMode pfControllerMode = parsePfPermitControllerMode(P.dynamicThreadPfControllerMode);
@@ -1618,7 +1869,7 @@ int processPfMultiConfig(Parameters& P,
         const bool hasExplicitAssignFilteredBarcodes =
             (!P.pfMulti.crAssignFilteredBarcodes.empty() && P.pfMulti.crAssignFilteredBarcodes != "-");
         string explicitAssignFilteredBarcodesPath;
-        vector<string> soloFilteredAssignBarcodes;
+        phase->usedExplicitAssignFilteredBarcodes = hasExplicitAssignFilteredBarcodes;
         if (hasExplicitAssignFilteredBarcodes) {
             struct stat stFiltered;
             if (stat(P.pfMulti.crAssignFilteredBarcodes.c_str(), &stFiltered) != 0) {
@@ -1628,34 +1879,9 @@ int processPfMultiConfig(Parameters& P,
             P.inOut->logMain << "NOTICE: Using explicit filtered barcodes for assignBarcodes: "
                              << explicitAssignFilteredBarcodesPath << "\n";
         } else {
-            if (getFilteredBarcodesFromSolo(solo, P, soloFilteredAssignBarcodes, false)) {
-                P.inOut->logMain << "NOTICE: Loaded Solo filtered barcodes for assignBarcodes "
-                                 << "(pre-normalization count=" << soloFilteredAssignBarcodes.size() << ")\n";
-            }
+            P.inOut->logMain << "NOTICE: deferring assign filtered-barcode gating until post-Solo merge\n";
         }
-        
-        struct FeatureRun {
-            string featureType;
-            string assignOut;
-            string featureRefPath;
-            string effectiveChem;
-            string effectiveReadNamespace;
-            string assignmentWhitelistNamespace;
-            bool translateNxtForAssign = false;
-            string featureMexOutputNamespace;  // actual namespace of barcodes in pf output MEX
-            string outputNamespace;
-            bool namespaceConfident = false;
-            string detectedMatchMode;
-            PfMultiAssign::WhitelistNormalizationResult whitelistNormalization;
-            FilteredBarcodeNormalizationStats normalizationStats;
-            string libraryId;
-            string sampleName;
-            string resolvedFastq;
-            string resolvedChemRequest;
-            bool explicitChem = false;
-            int returnCode = 0;
-        };
-        vector<FeatureRun> featureRuns;
+        vector<PfMultiFeatureRun>& featureRuns = phase->featureRuns;
 
         // Phase 4: Library-aware PF scheduler.
         // Compute per-library thread budgets proportional to remaining work,
@@ -1754,8 +1980,7 @@ int processPfMultiConfig(Parameters& P,
             nsCtx.isChemistryExplicit = preparedLib.explicitChem;
             nsCtx.isNamespaceConfident = assignmentNamespaceKnown && wlInfo.namespaceConfidence;
 
-            const bool needAssignFilteredNormalization =
-                hasExplicitAssignFilteredBarcodes || !soloFilteredAssignBarcodes.empty();
+            const bool needAssignFilteredNormalization = hasExplicitAssignFilteredBarcodes;
             if (needAssignFilteredNormalization) {
                 std::unordered_set<string> whitelistSet;
                 uint64_t wlRowsRead = 0;
@@ -1766,28 +1991,22 @@ int processPfMultiConfig(Parameters& P,
                 }
 
                 vector<string> sourceFiltered;
-                string sourceLabel;
-                if (hasExplicitAssignFilteredBarcodes) {
-                    uint64_t explicitRowsRead = 0;
-                    uint64_t explicitInvalidRows = 0;
-                    if (!loadBarcodeListFromFile(explicitAssignFilteredBarcodesPath,
-                                                 sourceFiltered,
-                                                 explicitRowsRead,
-                                                 explicitInvalidRows)) {
-                        throw runtime_error("Failed to load explicit assign filtered barcode list: "
-                            + explicitAssignFilteredBarcodesPath);
-                    }
-                    if (explicitInvalidRows > 0) {
-                        P.inOut->logMain
-                            << "WARNING: explicit assign filtered barcode file had "
-                            << explicitInvalidRows
-                            << " invalid rows ignored: "
-                            << explicitAssignFilteredBarcodesPath << "\n";
-                    }
-                    sourceLabel = "explicit";
-                } else {
-                    sourceFiltered = soloFilteredAssignBarcodes;
-                    sourceLabel = "solo";
+                const string sourceLabel = "explicit";
+                uint64_t explicitRowsRead = 0;
+                uint64_t explicitInvalidRows = 0;
+                if (!loadBarcodeListFromFile(explicitAssignFilteredBarcodesPath,
+                                             sourceFiltered,
+                                             explicitRowsRead,
+                                             explicitInvalidRows)) {
+                    throw runtime_error("Failed to load explicit assign filtered barcode list: "
+                        + explicitAssignFilteredBarcodesPath);
+                }
+                if (explicitInvalidRows > 0) {
+                    P.inOut->logMain
+                        << "WARNING: explicit assign filtered barcode file had "
+                        << explicitInvalidRows
+                        << " invalid rows ignored: "
+                        << explicitAssignFilteredBarcodesPath << "\n";
                 }
 
                 FilteredBarcodeNormalizationStats normStats;
@@ -1812,14 +2031,10 @@ int processPfMultiConfig(Parameters& P,
                         normalizedFiltered.push_back(upperCopy(rawBc));
                     }
                 } else {
-                    // Solo-sourced barcodes are already in whitelist namespace.
-                    // Explicit sources without union mode: assume same namespace
-                    // as assignment whitelist.
-                    const string assignSourceNS = assignmentWhitelistNamespace;
                     normalizedFiltered =
                         normalizeFilteredBarcodesForAssignNamespace(
                             sourceFiltered, whitelistSet, normStats,
-                            assignSourceNS, assignmentWhitelistNamespace);
+                            assignmentWhitelistNamespace, assignmentWhitelistNamespace);
                 }
                 if (normalizedFiltered.empty() && !sourceFiltered.empty()) {
                     std::ostringstream oss;
@@ -1878,6 +2093,7 @@ int processPfMultiConfig(Parameters& P,
             if (useAutodetect) {
                 PfMultiAssign::AssignOptions detectOpts = runAssignOpts;
                 detectOpts.autodetectChemistry = true;
+                detectOpts.probeOnly = true;
                 detectOpts.enableStarDynamicPermitHooks = false;
                 detectOpts.filteredBarcodesPath.clear();
                 if (detectOpts.maxReads <= 0 ||
@@ -1924,7 +2140,17 @@ int processPfMultiConfig(Parameters& P,
             }
             runAssignOpts.autodetectChemistry = false;
             if (useAutodetect && (detectedMatchMode == "RAW_MATCH" || detectedMatchMode == "TRANSLATED_MATCH")) {
-                runAssignOpts.translateNxt = (detectedMatchMode == "TRANSLATED_MATCH");
+                // RAW_MATCH means raw barcodes hit the whitelist hash directly.
+                // With a TRU whitelist: RAW_MATCH ⇒ data is TRU ⇒ no translation.
+                // With an NXT whitelist (2-column): RAW_MATCH ⇒ data is NXT ⇒ need translation.
+                bool needTranslate = (detectedMatchMode == "TRANSLATED_MATCH");
+                if (assignmentWhitelistNamespace == "NXT") {
+                    needTranslate = !needTranslate;
+                    P.inOut->logMain << "NOTICE: inverting translate decision for NXT-namespace whitelist"
+                                     << " (detect=" << detectedMatchMode
+                                     << ", translateNxt=" << needTranslate << ")\n";
+                }
+                runAssignOpts.translateNxt = needTranslate;
             } else if (assignmentNamespaceKnown && isKnownNamespace(effectiveReadNamespace)) {
                 runAssignOpts.translateNxt = (effectiveReadNamespace != assignmentWhitelistNamespace);
             } else {
@@ -1956,6 +2182,11 @@ int processPfMultiConfig(Parameters& P,
             const bool pfSingleConsumer = (pfConsumerThreadsForRun <= 1);
             const int pfPermitCeilingDuringPf =
                 std::max(1, libThreadBudget - pfReaderThreadsReserved);
+            const bool pfControllerCpuAware = (P.dynamicThreadPfControllerCpuAware == 1);
+            const int pfControllerCpuSampleMs = P.dynamicThreadPfControllerCpuSampleMs;
+            const double pfControllerCpuEmaAlpha = P.dynamicThreadPfControllerCpuEmaAlpha;
+            const double pfControllerCpuIdleThreshold = P.dynamicThreadPfControllerCpuIdleThreshold;
+            const double pfControllerCpuBusyThreshold = P.dynamicThreadPfControllerCpuBusyThreshold;
 
             std::atomic<bool> stopPfController(false);
             std::atomic<uint64_t> pfControllerTicks(0);
@@ -1999,6 +2230,11 @@ int processPfMultiConfig(Parameters& P,
                                  << ", singleConsumerMode=" << (pfSingleConsumer ? "yes" : "no")
                                  << ", readerThreadsReserved=" << pfReaderThreadsReserved
                                  << ", permitCeilingDuringPf=" << pfPermitCeilingDuringPf
+                                 << ", cpuAware=" << (pfControllerCpuAware ? "yes" : "no")
+                                 << ", cpuSampleMs=" << pfControllerCpuSampleMs
+                                 << ", cpuEmaAlpha=" << pfControllerCpuEmaAlpha
+                                 << ", cpuIdleThreshold=" << pfControllerCpuIdleThreshold
+                                 << ", cpuBusyThreshold=" << pfControllerCpuBusyThreshold
                                  << ", mapEstimate=" << mapEstimateTotal
                                  << ", featureEstimate=" << featureEstimateTotal
                                  << ", libraryType=" << libraryType
@@ -2026,14 +2262,24 @@ int processPfMultiConfig(Parameters& P,
                     constexpr double kEtaGapThreshold = 0.10;
                     constexpr double kEtaRateEps = 1.0e-9;
                     constexpr long double kChunkGapThreshold = 0.10L;
+                    constexpr int kCpuStableTicksRequired = 2;
+                    int cpuIdleStableTicks = 0;
+                    int cpuBusyStableTicks = 0;
 
                     while (!stopPfController.load(std::memory_order_relaxed)) {
-                        int nextTarget = g_threadChunks.mapPermitSnapshot().targetPermits;
+                        if (pfControllerCpuAware) {
+                            g_threadChunks.mapPermitCpuMaybeSample();
+                        }
+                        const ThreadControl::MapPermitSnapshot snapshot = g_threadChunks.mapPermitSnapshot();
+                        int nextTarget = snapshot.targetPermits;
+                        uint64_t mapRemainingForCpu = 0;
+                        uint64_t featureRemainingForCpu = 0;
+                        int permitCeilingForCpu = P.runThreadN;
                         if (pfControllerSequenceMode) {
                             nextTarget = pfControllerSequence[seqIndex % pfControllerSequence.size()];
                             ++seqIndex;
+                            permitCeilingForCpu = pfPermitCeilingDuringPf;
                         } else if (pfControllerEtaMode) {
-                            const ThreadControl::MapPermitSnapshot snapshot = g_threadChunks.mapPermitSnapshot();
                             const uint64_t mapDone = snapshot.mapDomain.workUnitsTotal;
                             const uint64_t featureDone = snapshot.featureDomain.workUnitsTotal;
                             mapEstimateLoop = inflateEstimateUntilNonNegativeRemaining(mapEstimateLoop, mapDone);
@@ -2044,6 +2290,8 @@ int processPfMultiConfig(Parameters& P,
                             uint64_t mapRemaining = (mapEstimateLoop > mapDone) ? (mapEstimateLoop - mapDone) : 0;
                             uint64_t featureRemaining =
                                 (featureEstimateLoop > featureDone) ? (featureEstimateLoop - featureDone) : 0;
+                            mapRemainingForCpu = mapRemaining;
+                            featureRemainingForCpu = featureRemaining;
 
                             const auto nowTick = std::chrono::steady_clock::now();
                             const double dt = std::chrono::duration_cast<std::chrono::duration<double>>(nowTick - prevTick).count();
@@ -2102,8 +2350,8 @@ int processPfMultiConfig(Parameters& P,
                             const int etaPermitCeiling =
                                 (featureRemaining > 0) ? pfPermitCeilingDuringPf : P.runThreadN;
                             nextTarget = std::min(nextTarget, etaPermitCeiling);
+                            permitCeilingForCpu = etaPermitCeiling;
                         } else if (pfControllerChunkedMode) {
-                            const ThreadControl::MapPermitSnapshot snapshot = g_threadChunks.mapPermitSnapshot();
                             const uint64_t mapDone = snapshot.mapDomain.workUnitsTotal;
                             const uint64_t featureDone = snapshot.featureDomain.workUnitsTotal;
                             mapEstimateLoop = inflateEstimateUntilNonNegativeRemaining(mapEstimateLoop, mapDone);
@@ -2115,6 +2363,8 @@ int processPfMultiConfig(Parameters& P,
                                 (mapEstimateLoop > mapDone) ? (mapEstimateLoop - mapDone) : 0;
                             const uint64_t featureRemaining =
                                 (featureEstimateLoop > featureDone) ? (featureEstimateLoop - featureDone) : 0;
+                            mapRemainingForCpu = mapRemaining;
+                            featureRemainingForCpu = featureRemaining;
 
                             nextTarget = snapshot.targetPermits;
                             if (mapRemaining == 0 && featureRemaining == 0) {
@@ -2147,11 +2397,46 @@ int processPfMultiConfig(Parameters& P,
                             const int chunkPermitCeiling =
                                 (featureRemaining > 0) ? pfPermitCeilingDuringPf : P.runThreadN;
                             nextTarget = std::min(nextTarget, chunkPermitCeiling);
+                            permitCeilingForCpu = chunkPermitCeiling;
                         }
 
                         if (pfControllerSequenceMode) {
                             // Sequence mode has no remaining-work signal; always reserve producer/read threads.
                             nextTarget = std::min(nextTarget, pfPermitCeilingDuringPf);
+                            permitCeilingForCpu = pfPermitCeilingDuringPf;
+                        }
+
+                        if (pfControllerCpuAware && snapshot.cpuAwareEnabled && snapshot.cpuInitialized) {
+                            const bool canNudgeUp =
+                                featureRemainingForCpu > 0 &&
+                                nextTarget < permitCeilingForCpu &&
+                                snapshot.cpuIdleEma >= pfControllerCpuIdleThreshold;
+                            const bool canNudgeDown =
+                                (mapRemainingForCpu > 0 || featureRemainingForCpu > 0) &&
+                                nextTarget > 1 &&
+                                snapshot.cpuBusyEma >= pfControllerCpuBusyThreshold;
+
+                            if (canNudgeUp && !canNudgeDown) {
+                                ++cpuIdleStableTicks;
+                                cpuBusyStableTicks = 0;
+                                if (cpuIdleStableTicks >= kCpuStableTicksRequired) {
+                                    nextTarget = std::min(permitCeilingForCpu, nextTarget + 1);
+                                    cpuIdleStableTicks = 0;
+                                }
+                            } else if (canNudgeDown) {
+                                ++cpuBusyStableTicks;
+                                cpuIdleStableTicks = 0;
+                                if (cpuBusyStableTicks >= kCpuStableTicksRequired) {
+                                    nextTarget = std::max(1, nextTarget - 1);
+                                    cpuBusyStableTicks = 0;
+                                }
+                            } else {
+                                cpuIdleStableTicks = 0;
+                                cpuBusyStableTicks = 0;
+                            }
+                        } else {
+                            cpuIdleStableTicks = 0;
+                            cpuBusyStableTicks = 0;
                         }
                         if (nextTarget < 1) {
                             nextTarget = 1;
@@ -2228,6 +2513,11 @@ int processPfMultiConfig(Parameters& P,
                     apiRunOut << "pfController.singleConsumerMode=" << (pfSingleConsumer ? 1 : 0) << "\n";
                     apiRunOut << "pfController.readerThreadsReserved=" << pfReaderThreadsReserved << "\n";
                     apiRunOut << "pfController.permitCeilingDuringPf=" << pfPermitCeilingDuringPf << "\n";
+                    apiRunOut << "pfController.cpuAware=" << (pfControllerCpuAware ? 1 : 0) << "\n";
+                    apiRunOut << "pfController.cpuSampleMs=" << pfControllerCpuSampleMs << "\n";
+                    apiRunOut << "pfController.cpuEmaAlpha=" << pfControllerCpuEmaAlpha << "\n";
+                    apiRunOut << "pfController.cpuIdleThreshold=" << pfControllerCpuIdleThreshold << "\n";
+                    apiRunOut << "pfController.cpuBusyThreshold=" << pfControllerCpuBusyThreshold << "\n";
                     if (pfControllerEtaMode) {
                         apiRunOut << "pfController.etaGapThresholdPct=10\n";
                     }
@@ -2243,6 +2533,12 @@ int processPfMultiConfig(Parameters& P,
                     apiRunOut << "pfController.featureAnchorReads=" << featureEstimate.anchorReads << "\n";
                     apiRunOut << "pfController.featureAnchorBytes=" << featureEstimate.anchorBytes << "\n";
                     apiRunOut << "pfController.featureTotalBytes=" << featureEstimate.totalBytes << "\n";
+                    const ThreadControl::MapPermitSnapshot finalSnapshot = g_threadChunks.mapPermitSnapshot();
+                    apiRunOut << "pfController.cpuInitializedFinal=" << (finalSnapshot.cpuInitialized ? 1 : 0) << "\n";
+                    apiRunOut << "pfController.cpuSampleCountFinal=" << finalSnapshot.cpuSampleCount << "\n";
+                    apiRunOut << "pfController.cpuBusyInstantFinal=" << finalSnapshot.cpuBusyInstant << "\n";
+                    apiRunOut << "pfController.cpuBusyEmaFinal=" << finalSnapshot.cpuBusyEma << "\n";
+                    apiRunOut << "pfController.cpuIdleEmaFinal=" << finalSnapshot.cpuIdleEma << "\n";
                 } else {
                     P.inOut->logMain << "WARNING: failed to append pf controller summary to "
                                      << apiRunPath << "\n";
@@ -2250,6 +2546,7 @@ int processPfMultiConfig(Parameters& P,
             }
 
             if (pfControllerEnabled) {
+                const ThreadControl::MapPermitSnapshot controllerStopSnapshot = g_threadChunks.mapPermitSnapshot();
                 P.inOut->logMain << "pf-dynamic-controller: stop mode="
                                  << pfPermitControllerModeName(pfControllerMode)
                                  << ", ticks=" << pfControllerTicks.load(std::memory_order_relaxed)
@@ -2257,6 +2554,10 @@ int processPfMultiConfig(Parameters& P,
                                  << ", lastTarget=" << pfControllerLastTarget.load(std::memory_order_relaxed)
                                  << ", mapEstimateFinal=" << pfControllerMapEstimateFinal.load(std::memory_order_relaxed)
                                  << ", featureEstimateFinal=" << pfControllerFeatureEstimateFinal.load(std::memory_order_relaxed)
+                                 << ", cpuInitialized=" << (controllerStopSnapshot.cpuInitialized ? "yes" : "no")
+                                 << ", cpuSampleCount=" << controllerStopSnapshot.cpuSampleCount
+                                 << ", cpuBusyEma=" << controllerStopSnapshot.cpuBusyEma
+                                 << ", cpuIdleEma=" << controllerStopSnapshot.cpuIdleEma
                                  << ", libraryType=" << libraryType
                                  << ", sample=" << sampleName
                                  << "\n";
@@ -2272,7 +2573,7 @@ int processPfMultiConfig(Parameters& P,
 
             appendAssignNormalizationStats(assignOut, nsCtx, wlInfo);
 
-            FeatureRun run;
+            PfMultiFeatureRun run;
             run.featureType = featureRefType;
             run.assignOut = assignOut;
             run.featureRefPath = refPath;
@@ -2339,17 +2640,10 @@ int processPfMultiConfig(Parameters& P,
         }
 
         // Read feature MEX to validate before writing provenance (fail-fast on read errors)
-        struct FeatureMexEntry {
-            PfMultiMerge::MexData data;
-            string effectiveChem;
-            string featureMexOutputNamespace;  // actual namespace of pf output barcodes
-            string featureType;
-            string libraryId;
-        };
-        vector<FeatureMexEntry> featureMexEntries;
+        vector<PfMultiFeatureMexEntry> featureMexEntries;
         for (const auto& run : featureRuns) {
             try {
-                FeatureMexEntry entry;
+                PfMultiFeatureMexEntry entry;
                 entry.data = PfMultiMerge::readMex(run.assignOut);
                 entry.effectiveChem = run.effectiveChem;
                 entry.featureMexOutputNamespace = run.featureMexOutputNamespace;
@@ -2444,7 +2738,65 @@ int processPfMultiConfig(Parameters& P,
         }
         P.inOut->logMain << "\n";
         
-        // Read GEX MEX from STARsolo output (both raw and filtered if available)
+        phase->featureMexEntries = std::move(featureMexEntries);
+        P.inOut->logMain << timeMonthDayTime() << " ..... finished pf-multi feature assignment\n";
+        return phase;
+    } catch (const exception& e) {
+        P.inOut->logMain << "ERROR in pf-multi feature assignment: " << e.what() << "\n";
+        return nullptr;
+    }
+}
+
+std::shared_ptr<PfFeatureAssignHandle> startPfFeatureAssignment(
+    Parameters& P,
+    const std::shared_ptr<PfMultiPreloadHandle>& preload) {
+    if (P.runMode != "alignReads") {
+        return nullptr;
+    }
+    if (isUnsetToken(P.pfMulti.pfMultiConfig)) {
+        return nullptr;
+    }
+
+    auto handle = std::make_shared<PfFeatureAssignHandle>();
+    handle->started = true;
+    handle->worker = std::thread([handle, &P, preload]() {
+        try {
+            handle->result = runPfMultiAssignPhase(P, preload);
+            handle->success = (handle->result != nullptr);
+            if (!handle->success) {
+                handle->error = "raw pf-multi feature-assignment phase returned no result";
+            }
+        } catch (const std::exception& e) {
+            handle->success = false;
+            handle->error = e.what();
+        } catch (...) {
+            handle->success = false;
+            handle->error = "unknown exception";
+        }
+        handle->finished = true;
+    });
+    return handle;
+}
+
+int finalizePfMultiConfig(Parameters& P,
+                          const Solo* solo,
+                          const std::shared_ptr<PfMultiAssignPhaseResult>& assignPhase) {
+    if (!assignPhase) {
+        return 0;
+    }
+    try {
+        const PfMultiPreparedContext& prepared = assignPhase->prepared;
+        const PfMultiConfig::Config& config = prepared.config;
+        const string& whitelist = prepared.whitelist;
+        const string gexWhitelistNamespace = upperCopy(prepared.inferredChem);
+        const string gexNormalizationChem = upperCopy(prepared.soloOutputNamespace);
+        const string& outputChem = prepared.outputChem;
+        const string& outPrefix = prepared.outPrefix;
+        const vector<PfMultiFeatureRun>& featureRuns = assignPhase->featureRuns;
+        vector<PfMultiFeatureMexEntry> featureMexEntries = assignPhase->featureMexEntries;
+
+        P.inOut->logMain << timeMonthDayTime() << " ..... started pf-multi merge/finalize\n";
+
         string soloOut = outPrefix + "/Solo.out";
         string geneOut = soloOut + "/Gene";
         string geneFullOut = soloOut + "/GeneFull";
@@ -2465,7 +2817,6 @@ int processPfMultiConfig(Parameters& P,
 
         bool hasRaw = (P.pSolo.type != 0 && hasMexFiles(rawOut));
         bool hasFiltered = (P.pSolo.type != 0 && hasMexFiles(filteredOut));
-
         if (!hasRaw && !hasFiltered) {
             if (P.pSolo.crGexFeature == ParametersSolo::CrGexGeneFull) {
                 P.inOut->logMain << "ERROR: GeneFull MEX directory not found for CR-compat merge\n";
@@ -2475,7 +2826,6 @@ int processPfMultiConfig(Parameters& P,
                 P.inOut->logMain << "ERROR: Gene MEX directory not found for CR-compat merge\n";
                 return 1;
             }
-            // Fallback to GeneFull if Gene is absent (auto mode)
             bool hasGeneFullRaw = (P.pSolo.type != 0 && hasMexFiles(geneFullRaw));
             bool hasGeneFullFiltered = (P.pSolo.type != 0 && hasMexFiles(geneFullFiltered));
             if (hasGeneFullRaw || hasGeneFullFiltered) {
@@ -2492,10 +2842,7 @@ int processPfMultiConfig(Parameters& P,
                 return 0;
             }
         }
-        
-        // Prefer in-memory filtered barcodes from Solo if available.
-        // Fetch output-namespace barcodes (useOutputNamespace=true), then
-        // normalize to TRU to match the merge-boundary convention.
+
         vector<string> filteredGexBarcodes;
         bool useFilteredGex = false;
         std::unordered_set<string> gexWhitelistSet;
@@ -2507,11 +2854,9 @@ int processPfMultiConfig(Parameters& P,
             P.inOut->logMain << "WARNING: failed to load whitelist set for GEX barcode normalization: "
                              << whitelist << "\n";
         }
-        if (getFilteredBarcodesFromSolo(solo, P, filteredGexBarcodes, true)) {
+        if (solo && getFilteredBarcodesFromSolo(solo, P, filteredGexBarcodes, true)) {
             if (haveGexWhitelistSet && isKnownNamespace(gexWhitelistNamespace)) {
                 FilteredBarcodeNormalizationStats gexNormStats;
-                // Pass known source namespace (soloOutputNamespace) to avoid
-                // overlap collisions when COL1/COL2 sets share barcodes.
                 filteredGexBarcodes =
                     normalizeFilteredBarcodesForAssignNamespace(
                         filteredGexBarcodes, gexWhitelistSet, gexNormStats,
@@ -2526,10 +2871,8 @@ int processPfMultiConfig(Parameters& P,
                     << " dedup_dropped=" << gexNormStats.dedupDropped
                     << " output=" << gexNormStats.outputCount
                     << "\n";
-                // After deterministic normalization, barcodes are in gexWhitelistNamespace
                 normalizeBarcodeVecToTru(filteredGexBarcodes, gexWhitelistNamespace);
             } else {
-                // No whitelist or unknown namespace; normalize directly from soloOutputNamespace
                 normalizeBarcodeVecToTru(filteredGexBarcodes, gexNormalizationChem);
             }
             useFilteredGex = true;
@@ -2537,12 +2880,10 @@ int processPfMultiConfig(Parameters& P,
                              << "(normalized to TRU, in-memory)\n";
         }
 
-        // Read raw GEX MEX (required for raw_feature_bc_matrix)
         PfMultiMerge::MexData gexRawData;
         try {
             if (hasRaw) {
                 gexRawData = PfMultiMerge::readMex(rawOut);
-                // Filter to Gene Expression only if needed
                 bool hasMultipleTypes = false;
                 for (const auto& type : gexRawData.featureTypes) {
                     if (type != "Gene Expression" && !type.empty()) {
@@ -2556,13 +2897,11 @@ int processPfMultiConfig(Parameters& P,
             }
         } catch (const exception& e) {
             P.inOut->logMain << "WARNING: Failed to read raw GEX MEX: " << e.what() << "\n";
-            // If raw failed but filtered exists, we'll use filtered as fallback below
             if (!hasFiltered) {
                 return 0;
             }
         }
-        
-        // Read filtered GEX MEX if needed (for counts fallback or barcode list)
+
         PfMultiMerge::MexData gexFilteredData;
         bool loadedFilteredMex = false;
         bool needFilteredMexForCounts = (!hasRaw || gexRawData.features.empty());
@@ -2570,7 +2909,6 @@ int processPfMultiConfig(Parameters& P,
         if (hasFiltered && (needFilteredMexForCounts || needFilteredMexForBarcodes)) {
             try {
                 gexFilteredData = PfMultiMerge::readMex(filteredOut);
-                // Filter to Gene Expression only if needed
                 bool hasMultipleTypes = false;
                 for (const auto& type : gexFilteredData.featureTypes) {
                     if (type != "Gene Expression" && !type.empty()) {
@@ -2587,8 +2925,7 @@ int processPfMultiConfig(Parameters& P,
                                  << ", will use observed raw GEX barcodes for filtered output\n";
             }
         }
-        
-        // Determine primary GEX data for merging (use raw if available, otherwise filtered)
+
         PfMultiMerge::MexData gexData;
         if (hasRaw && !gexRawData.features.empty()) {
             gexData = gexRawData;
@@ -2599,11 +2936,7 @@ int processPfMultiConfig(Parameters& P,
             P.inOut->logMain << "ERROR: No valid GEX MEX data available for merging\n";
             return 1;
         }
-        
-        // Normalize all barcode namespaces to TRU at the integration boundary.
-        // Each source may be NXT or TRU depending on its whitelist; normalizing
-        // here ensures cross-library barcode joins and output are in a single
-        // canonical namespace (TRU) regardless of per-library chemistry.
+
         normalizeMexBarcodesToTru(gexData, gexNormalizationChem);
         normalizeMexBarcodesToTru(gexRawData, gexNormalizationChem);
         if (loadedFilteredMex) {
@@ -2617,7 +2950,6 @@ int processPfMultiConfig(Parameters& P,
                          << ", whitelistNS=" << gexWhitelistNamespace
                          << ", outputChem=" << outputChem << ")\n";
 
-        // Merge MEX files (all inputs now in TRU namespace)
         vector<PfMultiMerge::MexData> featureDataVec;
         featureDataVec.reserve(featureMexEntries.size());
         for (auto& entry : featureMexEntries) {
@@ -2626,7 +2958,6 @@ int processPfMultiConfig(Parameters& P,
         PfMultiMerge::MexData mergedData = PfMultiMerge::mergeMex(gexData, featureDataVec);
         enforceUniqueBarcodesOrThrow(mergedData.barcodes, "merged MEX barcode list");
 
-        // Log merged feature type breakdown
         {
             map<string, size_t> typeCountMap;
             for (const auto& ft : mergedData.featureTypes) {
@@ -2639,9 +2970,8 @@ int processPfMultiConfig(Parameters& P,
             P.inOut->logMain << "  total barcodes: " << mergedData.barcodes.size()
                              << ", total triplets: " << mergedData.triplets.size() << "\n";
         }
-        
-        // Extract GEM well from GEX library (with fallback logic)
-        string gemWell = "1"; // Default
+
+        string gemWell = "1";
         vector<PfMultiConfig::LibraryEntry> gexLibs = config.getGexLibraries();
         if (!gexLibs.empty()) {
             gemWell = gexLibs[0].gem_well;
@@ -2656,8 +2986,7 @@ int processPfMultiConfig(Parameters& P,
         } else if (!config.libraries.empty()) {
             gemWell = config.libraries[0].gem_well;
         }
-        
-        // Compute observed GEX barcodes from raw GEX triplets (already in TRU)
+
         vector<string> observedRawGexBarcodes;
         if (hasRaw && !gexRawData.features.empty()) {
             observedRawGexBarcodes = PfMultiMerge::computeObservedGexBarcodes(gexRawData);
@@ -2668,8 +2997,7 @@ int processPfMultiConfig(Parameters& P,
             P.inOut->logMain << "ERROR: Cannot compute observed GEX barcodes - no valid GEX data\n";
             return 1;
         }
-        
-        // Fallback filtered barcodes from MEX data (already TRU-normalized).
+
         if (!useFilteredGex && hasFiltered && loadedFilteredMex && !gexFilteredData.features.empty()) {
             filteredGexBarcodes = PfMultiMerge::computeObservedGexBarcodes(gexFilteredData);
             useFilteredGex = true;
@@ -2680,9 +3008,13 @@ int processPfMultiConfig(Parameters& P,
         }
         enforceUniqueBarcodesOrThrow(observedRawGexBarcodes, "observed raw GEX barcode list");
         enforceUniqueBarcodesOrThrow(filteredGexBarcodes, "filtered GEX barcode list");
-        
-        // Write raw_feature_bc_matrix — merged barcodes are in TRU;
-        // outputChem controls the final namespace (default TRU, --crOutputChemistry NXT reverses).
+
+        if (!assignPhase->usedExplicitAssignFilteredBarcodes) {
+            for (const auto& run : featureRuns) {
+                writeDeferredFilteredAssignOutput(run.assignOut, filteredGexBarcodes, P.inOut->logMain);
+            }
+        }
+
         string rawOutDir = outPrefix + "/outs/raw_feature_bc_matrix";
         int ret = PfMultiMerge::writeCombinedMex(rawOutDir,
                                                  mergedData,
@@ -2695,8 +3027,7 @@ int processPfMultiConfig(Parameters& P,
             throw runtime_error("Failed to write raw combined MEX");
         }
         P.inOut->logMain << "Raw MEX written to: " << rawOutDir << "\n";
-        
-        // Write filtered_feature_bc_matrix
+
         string filteredOutDir = outPrefix + "/outs/filtered_feature_bc_matrix";
         ret = PfMultiMerge::writeCombinedMex(filteredOutDir,
                                              mergedData,
@@ -2709,8 +3040,7 @@ int processPfMultiConfig(Parameters& P,
             throw runtime_error("Failed to write filtered combined MEX");
         }
         P.inOut->logMain << "Filtered MEX written to: " << filteredOutDir << "\n";
-        
-        // Run CRISPR feature calling if CRISPR Guide Capture features were processed
+
         bool hasCrisprFeatures = false;
         for (const auto& run : featureRuns) {
             if (run.featureType == "CRISPR Guide Capture") {
@@ -2718,7 +3048,6 @@ int processPfMultiConfig(Parameters& P,
                 break;
             }
         }
-        
         if (hasCrisprFeatures) {
             string outsDir = outPrefix + "/outs";
             ret = runCrisprFeatureCalling(filteredOutDir, outsDir, P.pfMulti.crMinUmi, P.inOut->logMain);
@@ -2726,13 +3055,40 @@ int processPfMultiConfig(Parameters& P,
                 P.inOut->logMain << "WARNING: CRISPR feature calling failed, continuing without crispr_analysis/\n";
             }
         }
-        
+
         P.inOut->logMain << timeMonthDayTime() << " ..... finished pf-multi config processing\n";
-        
     } catch (const exception& e) {
         P.inOut->logMain << "ERROR in pf-multi config processing: " << e.what() << "\n";
         return 1;
     }
-    
+
     return 0;
+}
+
+int processPfMultiConfig(Parameters& P,
+                         const Solo* solo,
+                         const std::shared_ptr<PfMultiPreloadHandle>& preload,
+                         const std::shared_ptr<PfFeatureAssignHandle>& assignHandle) {
+    std::shared_ptr<PfMultiAssignPhaseResult> phase;
+    if (isUnsetToken(P.pfMulti.pfMultiConfig)) {
+        return 0;
+    }
+
+    if (assignHandle && assignHandle->started) {
+        assignHandle->join();
+        if (!assignHandle->isSuccess()) {
+            P.inOut->logMain << "ERROR: pf-feature-assign Phase A failed: "
+                             << (assignHandle->getError().empty() ? string("unknown") : assignHandle->getError())
+                             << "\n";
+            return 1;
+        }
+        phase = assignHandle->getResult();
+    } else {
+        phase = runPfMultiAssignPhase(P, preload);
+    }
+
+    if (!phase) {
+        return 1;
+    }
+    return finalizePfMultiConfig(P, solo, phase);
 }

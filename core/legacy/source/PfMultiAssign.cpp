@@ -322,6 +322,12 @@ static void applyAssignOptions(pf_config* cfg, const AssignOptions& options) {
         pf_config_set_autodetect_chemistry_reads(cfg, options.autodetectChemistryReads);
         pf_config_set_autodetect_chemistry_min_hits(cfg, options.autodetectChemistryMinHits);
     }
+    if (options.probeOnly) {
+        pf_config_set_probe_only(cfg, 1);
+    }
+    if (options.skipQcOutputs) {
+        pf_config_set_skip_qc_outputs(cfg, 1);
+    }
     if (options.enableStarDynamicPermitHooks) {
         pf_config_set_permit_hooks(
             cfg,
@@ -386,6 +392,8 @@ static void writeApiRunSummary(const string& assignOut,
     out << "maxReads=" << options.maxReads << "\n";
     out << "legacyCbRescue=" << (options.legacyCbRescue ? 1 : 0) << "\n";
     out << "translateNxt=" << (options.translateNxt ? 1 : 0) << "\n";
+    out << "probeOnly=" << (options.probeOnly ? 1 : 0) << "\n";
+    out << "skipQcOutputs=" << (options.skipQcOutputs ? 1 : 0) << "\n";
     out << "enableStarDynamicPermitHooks=" << (options.enableStarDynamicPermitHooks ? 1 : 0) << "\n";
     out << "filteredBarcodesPath=" << options.filteredBarcodesPath << "\n";
     out << "stats.total_reads=" << stats.total_reads << "\n";

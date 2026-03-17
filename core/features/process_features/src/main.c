@@ -58,6 +58,7 @@ static void print_usage(const char *prog){
     fprintf(stderr, "      --max_reads         <long>    Max reads to process per FASTQ (0 = all)\n");
     fprintf(stderr, "      --min_prediction    <int>     Min prediction threshold for feature assignment (default 1)\n");
     fprintf(stderr, "      --min_heatmap       <int>     Min deduped count for feature in heatmap (default 0)\n\n");
+    fprintf(stderr, "      --skip_qc_outputs            Skip feature histograms and heatmaps\n\n");
 
     fprintf(stderr, "Performance & Parallelism:\n");
     fprintf(stderr, "  -t, --threads           <int>     Max concurrent sample processes (default 8)\n");
@@ -164,6 +165,7 @@ int main(int argc, char *argv[])
     int emptydrops_failure_fatal = 0;
     int emptydrops_use_fdr = 0;
     int legacy_cb_rescue = 0;
+    int skip_qc_outputs = 0;
 
     static struct option long_options[] = {
         {"whitelist", required_argument, 0, 'w'},
@@ -216,6 +218,7 @@ int main(int argc, char *argv[])
         {"filtered_barcodes", required_argument, 0, 12},
         {"min_prediction", required_argument, 0, 15},
         {"min_heatmap", required_argument, 0, 16},
+        {"skip_qc_outputs", no_argument, 0, 40},
         {"translate_NXT", no_argument, 0, 17},
         {"skip_empty_drops", no_argument, 0, 18},
         {"skip_emptydrops", no_argument, 0, 18},  /* alias */
@@ -332,6 +335,7 @@ int main(int argc, char *argv[])
             case 12: filtered_barcodes_filename = strdup(optarg); break;
             case 15: min_prediction = atoi(optarg); break;
             case 16: min_heatmap = atoi(optarg); break;
+            case 40: skip_qc_outputs = 1; break;
             case 17: translate_NXT = 1; fprintf(stderr, "translate_NXT enabled: complementing positions 8 and 9 at output/filter time.\n"); break;
             case 18: skip_emptydrops = 1; break;
             case 19: emptydrops_expected_cells = atoi(optarg); break;
@@ -686,6 +690,7 @@ int main(int argc, char *argv[])
             args.emptydrops_failure_fatal = emptydrops_failure_fatal;
             args.expected_cells = emptydrops_expected_cells;
             args.emptydrops_use_fdr = emptydrops_use_fdr;
+            args.skip_qc_outputs = skip_qc_outputs;
             args.error_out = &child_error;
             struct chem_detect_state chem_detect_buf;
             if (autodetect_chemistry_cli) {

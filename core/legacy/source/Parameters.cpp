@@ -157,6 +157,11 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "dynamicThreadPfControllerIntervalMs", &dynamicThreadPfControllerIntervalMs));
     parArray.push_back(new ParameterInfoVector <int> (-1, -1, "dynamicThreadPfControllerSequence", &dynamicThreadPfControllerSequence));
     parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "dynamicThreadPfControllerMaxUpdates", &dynamicThreadPfControllerMaxUpdates));
+    parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "dynamicThreadPfControllerCpuAware", &dynamicThreadPfControllerCpuAware));
+    parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "dynamicThreadPfControllerCpuSampleMs", &dynamicThreadPfControllerCpuSampleMs));
+    parArray.push_back(new ParameterInfoScalar <double> (-1, -1, "dynamicThreadPfControllerCpuEmaAlpha", &dynamicThreadPfControllerCpuEmaAlpha));
+    parArray.push_back(new ParameterInfoScalar <double> (-1, -1, "dynamicThreadPfControllerCpuIdleThreshold", &dynamicThreadPfControllerCpuIdleThreshold));
+    parArray.push_back(new ParameterInfoScalar <double> (-1, -1, "dynamicThreadPfControllerCpuBusyThreshold", &dynamicThreadPfControllerCpuBusyThreshold));
     parArray.push_back(new ParameterInfoScalar <string> (-1, -1, "runDirPerm", &runDirPermIn));
     parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "runRNGseed", &runRNGseed));
     parArray.push_back(new ParameterInfoScalar <int> (-1, 2, "batchMode", &batchModeInt));
@@ -673,6 +678,7 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "crAssignSearchThreads", &pfMulti.crAssignSearchThreads));
     parArray.push_back(new ParameterInfoScalar<double>(-1, -1, "crAssignMinPosterior", &pfMulti.crAssignMinPosterior));
     parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "crAssignLegacyCbRescue", &pfMulti.crAssignLegacyCbRescue));
+    parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "crAssignSkipQcOutputs", &pfMulti.crAssignSkipQcOutputs));
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "crAssignFilteredBarcodes", &pfMulti.crAssignFilteredBarcodes));
     parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "crAssignAllowUnionWhitelist", &pfMulti.crAssignAllowUnionWhitelist));
 
@@ -786,6 +792,10 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
         }
         if (p->nameString == "crAssignLegacyCbRescue" && p->inputLevel < 0) {
             pfMulti.crAssignLegacyCbRescue = 0;
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "crAssignSkipQcOutputs" && p->inputLevel < 0) {
+            pfMulti.crAssignSkipQcOutputs = 0;
             p->inputLevel = 0;
         }
         if (p->nameString == "crAssignFilteredBarcodes" && p->inputLevel < 0) {
@@ -1551,6 +1561,36 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
                <<dynamicThreadPfControllerMaxUpdates<<"\n";
         exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
     }
+    if (dynamicThreadPfControllerCpuAware != 0 && dynamicThreadPfControllerCpuAware != 1) {
+        ostringstream errOut;
+        errOut <<"EXITING: fatal input ERROR: --dynamicThreadPfControllerCpuAware must be 0 or 1, user-defined value="
+               <<dynamicThreadPfControllerCpuAware<<"\n";
+        exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+    }
+    if (dynamicThreadPfControllerCpuSampleMs <= 0) {
+        ostringstream errOut;
+        errOut <<"EXITING: fatal input ERROR: --dynamicThreadPfControllerCpuSampleMs must be >0, user-defined value="
+               <<dynamicThreadPfControllerCpuSampleMs<<"\n";
+        exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+    }
+    if (!(dynamicThreadPfControllerCpuEmaAlpha > 0.0 && dynamicThreadPfControllerCpuEmaAlpha <= 1.0)) {
+        ostringstream errOut;
+        errOut <<"EXITING: fatal input ERROR: --dynamicThreadPfControllerCpuEmaAlpha must be in (0,1], user-defined value="
+               <<dynamicThreadPfControllerCpuEmaAlpha<<"\n";
+        exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+    }
+    if (!(dynamicThreadPfControllerCpuIdleThreshold >= 0.0 && dynamicThreadPfControllerCpuIdleThreshold <= 1.0)) {
+        ostringstream errOut;
+        errOut <<"EXITING: fatal input ERROR: --dynamicThreadPfControllerCpuIdleThreshold must be in [0,1], user-defined value="
+               <<dynamicThreadPfControllerCpuIdleThreshold<<"\n";
+        exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+    }
+    if (!(dynamicThreadPfControllerCpuBusyThreshold >= 0.0 && dynamicThreadPfControllerCpuBusyThreshold <= 1.0)) {
+        ostringstream errOut;
+        errOut <<"EXITING: fatal input ERROR: --dynamicThreadPfControllerCpuBusyThreshold must be in [0,1], user-defined value="
+               <<dynamicThreadPfControllerCpuBusyThreshold<<"\n";
+        exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+    }
 
     const bool pfControllerSequenceSentinelZero =
         (dynamicThreadPfControllerSequence.size() == 1 && dynamicThreadPfControllerSequence[0] == 0);
@@ -1592,6 +1632,14 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
         errOut <<"EXITING: fatal input ERROR: --dynamicThreadPfControllerMode="
                <<dynamicThreadPfControllerMode
                <<" requires non-empty --dynamicThreadPfControllerSequence\n";
+        exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+    }
+    if (dynamicThreadPfControllerCpuAware == 1 &&
+        !(dynamicThreadPfControllerMode == "eta" || dynamicThreadPfControllerMode == "chunked")) {
+        ostringstream errOut;
+        errOut <<"EXITING: fatal input ERROR: --dynamicThreadPfControllerCpuAware=1 currently requires "
+               <<"--dynamicThreadPfControllerMode=eta|chunked, user-defined mode="
+               <<dynamicThreadPfControllerMode<<"\n";
         exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
     }
 

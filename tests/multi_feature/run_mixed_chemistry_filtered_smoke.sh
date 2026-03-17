@@ -114,14 +114,15 @@ if [[ -n "$LARRY_FILTERED" ]]; then pass_msg "larry filtered barcodes exist"; el
 check_grep "Log records GeneFull CR-compat merge" 'NOTICE: --soloCrGexFeature=genefull'
 check_grep "Log records Solo filtered GEX barcodes" 'NOTICE: Using GEX filtered barcodes from Solo'
 check_grep "Log records filtered MEX write" 'Filtered MEX written to:'
-check_grep "Log records grna filtered-barcode normalization" 'assign filtered-barcode normalization for library_id=grna_de'
-check_grep "Log records larry filtered-barcode normalization" 'assign filtered-barcode normalization for library_id=larry_de'
+check_grep "Log records deferred filtered-barcode gating" 'NOTICE: deferring assign filtered-barcode gating until post-Solo merge'
+check_grep "Log records grna deferred filtered output" 'NOTICE: wrote deferred filtered assign output for .*grna_de'
+check_grep "Log records larry deferred filtered output" 'NOTICE: wrote deferred filtered assign output for .*larry_de'
 
 if [[ -s "$SOLO_FILTERED" && -s "$MERGED_FILTERED" && -n "$GRNA_FILTERED" && -n "$LARRY_FILTERED" ]]; then
   if python3 "$VALIDATOR" \
       --solo-barcodes "$SOLO_FILTERED" \
       --merged-barcodes "$MERGED_FILTERED" \
-      --subset-barcodes "$GRNA_FILTERED::NXT" \
+      --subset-barcodes "$GRNA_FILTERED::TRU" \
       --subset-barcodes "$LARRY_FILTERED::TRU" \
       --log "$LOG" \
       --report "$REPORT"; then

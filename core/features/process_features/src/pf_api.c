@@ -70,6 +70,8 @@ struct pf_config {
     int autodetect_chemistry;           /* 0=off, 1=on */
     int autodetect_chemistry_reads;     /* N reads to sample (default 10000) */
     int autodetect_chemistry_min_hits;  /* minimum total hits for decision (default 50) */
+    int probe_only;                     /* 1=lightweight chemistry probe, no outputs */
+    int skip_qc_outputs;                /* 1=skip feature histograms/heatmaps */
 
     /* Union whitelist support (legacy compat) */
     int allow_union_whitelist;          /* 0=strict, 1=accept mixed NXT+TRU */
@@ -254,6 +256,8 @@ pf_config* pf_config_create(void) {
     config->autodetect_chemistry = 0;
     config->autodetect_chemistry_reads = 10000;
     config->autodetect_chemistry_min_hits = 50;
+    config->probe_only = 0;
+    config->skip_qc_outputs = 0;
 
     /* Union whitelist: off by default (strict namespace) */
     config->allow_union_whitelist = 0;
@@ -446,6 +450,14 @@ void pf_config_set_autodetect_chemistry_min_hits(pf_config *config, int min_hits
         min_hits = 1;
     }
     config->autodetect_chemistry_min_hits = min_hits;
+}
+
+void pf_config_set_probe_only(pf_config *config, int enabled) {
+    if (config) config->probe_only = enabled;
+}
+
+void pf_config_set_skip_qc_outputs(pf_config *config, int enabled) {
+    if (config) config->skip_qc_outputs = enabled;
 }
 
 void pf_config_set_allow_union_whitelist(pf_config *config, int enable) {
@@ -1063,6 +1075,8 @@ pf_error pf_process_fastq_dir(pf_context *ctx,
         args.expected_cells = ctx->config->expected_cells;
         args.emptydrops_use_fdr = ctx->config->emptydrops_use_fdr;
         args.chem_detect = chem_detect_ptr;
+        args.probe_only = ctx->config->probe_only;
+        args.skip_qc_outputs = ctx->config->skip_qc_outputs;
         args.error_out = &sample_error;
         
         /* Process the sample */
@@ -1332,6 +1346,8 @@ pf_error pf_process_fastqs(pf_context *ctx,
         chem_detect_ptr2 = &chem_detect_buf2;
     }
     args.chem_detect = chem_detect_ptr2;
+    args.probe_only = ctx->config->probe_only;
+    args.skip_qc_outputs = ctx->config->skip_qc_outputs;
     args.error_out = &sample_error;
     
     process_files_in_sample(&args);

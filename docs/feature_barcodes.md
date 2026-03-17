@@ -310,3 +310,87 @@ Higher Hamming distances on short sequences risk spurious matches (e.g.,
 Hamming=5 on 8-nt sequences allows 62.5% of positions to mismatch). The
 prehash memory budget also scales with Hamming distance and library size,
 so per-library control avoids wasting memory on unnecessary prehash tiers.
+
+---
+
+## Optimized Benchmark Parameters (CR-Compat)
+
+When running STAR benchmarks in CR-compat mode (GEX + features), use these
+parameters for optimal throughput and parity. **Do not hardcode thread
+counts**; use the dynamic interface so threads are auto-sized.
+
+### Required Threading Parameters
+
+```bash
+--runThreadN 32                    # (or nproc)
+--dynamicThreadInterface 1         # parallel phases: pf-preload overlaps Solo
+--crAssignConsumerThreads -1       # AUTO-SIZE from runThreadN (DO NOT hardcode 4)
+--crAssignSearchThreads 1          # 1 search thread per consumer (prevents oversubscription)
+```
+
+**Why these values matter:**
+
+| Parameter | Bad value | Effect | Correct |
+|-----------|-----------|--------|---------|
+| `crAssignConsumerThreads` | `4` (hardcoded) | Only 5 threads active during feature assignment (~15% CPU) | `-1` (auto) |
+| `crAssignSearchThreads` | `4` | Oversubscription: 31×4=124 threads, thrashing | `1` |
+| `dynamicThreadInterface` | `0` (off) | Solo and pf-preload run sequentially, not overlapped | `1` |
+
+### Full Reference Command
+
+```bash
+/usr/bin/time -v STAR \
+  --runThreadN 32 \
+  --dynamicThreadInterface 1 \
+  --genomeDir /path/to/genome \
+  --readFilesIn R2_files R1_files \
+  --readFilesCommand zcat \
+  --outSAMtype None \
+  --clipAdapterType CellRanger4 \
+  --clip3pPolyG yes \
+  --alignEndsType Local \
+  --chimSegmentMin 1000000 \
+  --soloType CB_UMI_Simple \
+  --soloCBstart 1 --soloCBlen 16 \
+  --soloUMIstart 17 --soloUMIlen 12 \
+  --soloBarcodeReadLength 0 \
+  --soloCBwhitelist /path/to/3M-february-2018_TRU.txt \
+  --soloCBmatchWLtype 1MM_multi_Nbase_pseudocounts \
+  --soloUMIfiltering MultiGeneUMI_CR \
+  --soloUMIdedup 1MM_CR \
+  --soloMultiMappers Unique \
+  --soloCellFilter EmptyDrops_CR \
+  --soloCbUbRequireTogether no \
+  --soloStrand Forward \
+  --soloFeatures GeneFull \
+  --soloCrGexFeature genefull \
+  --soloCrMultimapRescue yes \
+  --pfMultiConfig /path/to/config.csv \
+  --crChemistry TRU \
+  --crOutputChemistry TRU \
+  --crWhitelist /path/to/3M-february-2018_TRU.txt \
+  --crMinUmi 3 \
+  --crAssignMaxHamming 1 \
+  --crAssignFeatureOffset 0 \
+  --crAssignLimitSearch -1 \
+  --crAssignMinCounts 0 \
+  --crAssignMaxBarcodeMismatches 5 \
+  --crAssignFeatureN 0 \
+  --crAssignBarcodeN 1 \
+  --crAssignConsumerThreads -1 \
+  --crAssignSearchThreads 1 \
+  --crFeatureRef /path/to/feature_ref.csv
+```
+
+### Notes
+
+- **No BAM for benchmarks**: Use `--outSAMtype None` unless BAM output is
+  needed. Saves significant I/O and disk.
+- **GeneFull only**: Skip `Gene` and `Velocyto` unless specifically required.
+  Each adds a full pass over the read array.
+- **Poly-G trimming**: Always `--clip3pPolyG yes` for NovaSeq/NextSeq data
+  (auto-detected in CellRanger4 mode, but explicit is safer).
+- **Chemistry**: Set `--crChemistry TRU` or `NXT` explicitly when known.
+  Auto-detect can misclassify certain samples (see AALG1 autodetect bug).
+- **Per-library Hamming**: Use `star_max_hamming` column when mixing short
+  guides (h=1) with long barcodes (h=5). See section above.

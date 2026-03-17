@@ -50,6 +50,11 @@ class Parameters {
         int dynamicThreadPfControllerIntervalMs = 0; // <=0 disables external pf controller ticks
         vector<int> dynamicThreadPfControllerSequence; // controller permit target sequence
         int dynamicThreadPfControllerMaxUpdates = 0; // <=0 means unlimited updates until pf stage ends
+        int dynamicThreadPfControllerCpuAware = 0; // 0: off, 1: enable CPU-aware secondary retune signal
+        int dynamicThreadPfControllerCpuSampleMs = 500; // /proc/stat sample interval for CPU-aware controller
+        double dynamicThreadPfControllerCpuEmaAlpha = 0.2; // EMA alpha for CPU busy smoothing
+        double dynamicThreadPfControllerCpuIdleThreshold = 0.15; // minimum smoothed idle fraction to bias permits upward
+        double dynamicThreadPfControllerCpuBusyThreshold = 0.95; // minimum smoothed busy fraction to bias permits downward
         mode_t runDirPerm;
         string runDirPermIn; //permission for directores created at run-time
         int runRNGseed; //random number generator seed
@@ -635,6 +640,7 @@ class Parameters {
             int crAssignSearchThreads;      // Optional: pass --search_threads (default: unset)
             double crAssignMinPosterior;    // Optional: pass --min_posterior (default: unset)
             int crAssignLegacyCbRescue;     // Optional: pass legacy order-dependent pending CB rescue mode
+            int crAssignSkipQcOutputs;      // Skip feature histograms/heatmaps in assignBarcodes outputs
             string crAssignFilteredBarcodes;// Optional filtered barcode file for assignBarcodes
             int crAssignAllowUnionWhitelist; // Accept mixed NXT+TRU filtered barcode sets
         } pfMulti;

@@ -167,6 +167,8 @@ void pf_config_set_emptydrops_use_fdr(pf_config *config, int enable);
 void pf_config_set_autodetect_chemistry(pf_config *config, int enabled);
 void pf_config_set_autodetect_chemistry_reads(pf_config *config, int n_reads);
 void pf_config_set_autodetect_chemistry_min_hits(pf_config *config, int min_hits);
+void pf_config_set_probe_only(pf_config *config, int enabled);
+void pf_config_set_skip_qc_outputs(pf_config *config, int enabled);
 
 /**
  * Allow union (mixed NXT+TRU) whitelists and filtered barcode sets.

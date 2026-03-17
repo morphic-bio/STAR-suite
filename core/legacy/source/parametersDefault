@@ -76,6 +76,28 @@ dynamicThreadPfControllerMaxUpdates 0
     int: optional max controller updates per feature-library run.
                                 0 ... unlimited updates until feature assignment finishes.
 
+dynamicThreadPfControllerCpuAware 0
+    int: enable CPU-aware secondary retuning for the PF permit controller.
+                                0 ... disabled (default).
+                                1 ... sample /proc/stat and bias permits only when smoothed
+                                      CPU idle/busy crosses configured thresholds.
+                                Supported for eta/chunked modes.
+
+dynamicThreadPfControllerCpuSampleMs 500
+    int: /proc/stat sample interval in milliseconds for the CPU-aware PF controller.
+
+dynamicThreadPfControllerCpuEmaAlpha 0.2
+    double: EMA alpha for smoothed CPU busy fraction in the CPU-aware PF controller.
+                                Smaller values smooth more aggressively.
+
+dynamicThreadPfControllerCpuIdleThreshold 0.15
+    double: minimum smoothed idle fraction required before CPU-aware controller
+                                nudges PF permits upward.
+
+dynamicThreadPfControllerCpuBusyThreshold 0.95
+    double: minimum smoothed busy fraction required before CPU-aware controller
+                                nudges PF permits downward.
+
 runDirPerm                      User_RWX
     string: permissions for the directories created at the run-time.
                                 User_RWX ... user-read/write/execute
@@ -1890,6 +1912,11 @@ crAssignLegacyCbRescue     0
     int:                    pending CB rescue mode for assignBarcodes.
                             0 ... default deterministic frozen-pass rescue (order-independent).
                             1 ... legacy order-dependent immediate-update rescue.
+
+crAssignSkipQcOutputs      0
+    int:                    skip feature histogram and heatmap outputs from assignBarcodes.
+                            0 ... write full feature QC outputs (default).
+                            1 ... skip feature histograms and heatmaps, keep core matrices/stats.
 
 ### Default Module Flag Groups
 ### These flags apply predefined parameter bundles for common workflows.

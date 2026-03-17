@@ -3574,7 +3574,7 @@ int checkAndCorrectBarcode(char **lines, int maxN, uint32_t feature_index, uint1
 }
 
 
-void finalize_processing(feature_arrays *features, data_structures *hashes, char *directory, memory_pool_collection *pools, statistics *stats, uint16_t stringency, uint16_t min_counts, double min_posterior, int legacy_cb_rescue, khash_t(strptr)* filtered_barcodes_hash, int skip_emptydrops, int emptydrops_failure_fatal, int expected_cells, int emptydrops_use_fdr, int *error_out){
+void finalize_processing(feature_arrays *features, data_structures *hashes, char *directory, memory_pool_collection *pools, statistics *stats, uint16_t stringency, uint16_t min_counts, double min_posterior, int legacy_cb_rescue, khash_t(strptr)* filtered_barcodes_hash, int skip_emptydrops, int emptydrops_failure_fatal, int expected_cells, int emptydrops_use_fdr, int skip_qc_outputs, int *error_out){
     process_pending_barcodes(hashes, pools, stats, min_posterior, legacy_cb_rescue);
     double elapsed_time = get_time_in_seconds() - stats->start_time;
     fprintf(stderr, "Finished processing %ld reads in %.2f seconds (%.1f thousand reads/second)\n", stats->number_of_reads, elapsed_time, stats->number_of_reads / (double)elapsed_time / 1000.0);
@@ -3642,7 +3642,8 @@ void finalize_processing(feature_arrays *features, data_structures *hashes, char
         .hashes = hashes,
         .stats = stats,
         .filtered_barcodes_hash = NULL,  // First pass: unfiltered
-        .min_heatmap_counts = min_heatmap
+        .min_heatmap_counts = min_heatmap,
+        .skip_qc_outputs = skip_qc_outputs
     };
     
     // Write unfiltered results
@@ -3831,6 +3832,17 @@ void *read_fastqs_by_set(void *arg) {
         }
     }
     while(!done){
+        if (set->probe_only && set->chem_detect && set->chem_detect->done) {
+            for (int j = 0; j < number_of_readers; j++) {
+                if (readers[j]->gz_pointer) {
+                    gzclose(readers[j]->gz_pointer);
+                    readers[j]->gz_pointer = NULL;
+                }
+            }
+            done = 1;
+            continue;
+        }
+
         int eof_detected = 0;
         for (int j = 0; j < number_of_readers; j++) {
             if (gzgets(readers[j]->gz_pointer, dummy_line, LINE_LENGTH) == Z_NULL ||
@@ -4744,6 +4756,10 @@ void *consume_reads(void *arg) {
                 }
             }
 
+            if (sample_args->probe_only && chem_detect && chem_detect->done) {
+                break;
+            }
+
             uint64_t wait_ns = 0;
             double work_start_sec = 0.0;
             if (permit_hooks_enabled) {
@@ -5168,6 +5184,8 @@ void process_files_in_sample(sample_args *args) {
                                                    args->average_read_length,
                                                    args->read_buffer_lines);
         reader_sets[i]->thread_id = i;
+        reader_sets[i]->chem_detect = args->chem_detect;
+        reader_sets[i]->probe_only = args->probe_only;
     }
 
     for (int i = 0; i < nconsumers; ++i) {
@@ -5242,8 +5260,10 @@ void process_files_in_sample(sample_args *args) {
         free_memory_pool_collection(args->pools[i]);
         //[i] = NULL; // Avoid double-free in later cleanup
     }
-    // Since merging is not required, finalize using the first thread's data.
-    finalize_processing(args->features, &args->hashes[0], args->directory, args->pools[0], &args->stats[0], args->stringency, args->min_counts, min_posterior, args->legacy_cb_rescue, args->filtered_barcodes_hash, args->skip_emptydrops, args->emptydrops_failure_fatal, args->expected_cells, args->emptydrops_use_fdr, args->error_out);
+    if (!args->probe_only) {
+        // Since merging is not required, finalize using the first thread's data.
+        finalize_processing(args->features, &args->hashes[0], args->directory, args->pools[0], &args->stats[0], args->stringency, args->min_counts, min_posterior, args->legacy_cb_rescue, args->filtered_barcodes_hash, args->skip_emptydrops, args->emptydrops_failure_fatal, args->expected_cells, args->emptydrops_use_fdr, args->skip_qc_outputs, args->error_out);
+    }
    
     // Free the reader sets
     for (int i = 0; i < sample_size; ++i)

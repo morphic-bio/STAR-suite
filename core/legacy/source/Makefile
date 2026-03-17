@@ -201,6 +201,13 @@ trim_qc_replay : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS)
 trim_qc_replay : htslib/libhts.a TrimQc.o TrimQcOutput.o Stats.o TimeFunctions.o trim_qc_replay.cpp
 	$(CXX) -o trim_qc_replay $(CXXFLAGS) trim_qc_replay.cpp TrimQc.o TrimQcOutput.o Stats.o TimeFunctions.o $(LDFLAGS)
 
+# Standalone FASTQ replay tool for FastQC-like trim-QC output.
+.PHONY: trim_qc_fastq
+trim_qc_fastq : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
+trim_qc_fastq : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS)
+trim_qc_fastq : htslib/libhts.a TrimQc.o TrimQcOutput.o Stats.o TimeFunctions.o trim_qc_fastq.cpp
+	$(CXX) -o trim_qc_fastq $(CXXFLAGS) trim_qc_fastq.cpp TrimQc.o TrimQcOutput.o Stats.o TimeFunctions.o $(LDFLAGS)
+
 # Standalone star_feature_call tool for perturb-seq processing
 # Requires libprocess_features.a to be built first
 .PHONY: star_feature_call libprocess_features

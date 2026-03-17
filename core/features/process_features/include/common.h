@@ -300,6 +300,8 @@ typedef struct sample_args {
     
     /* NXT/TRU auto-detection state (shared with consumer threads) */
     struct chem_detect_state *chem_detect;
+    int probe_only;                  /* 1 = chemistry probe pass, suppress outputs */
+    int skip_qc_outputs;             /* 1 = skip feature histograms/heatmaps */
 
     /* Error propagation */
     int *error_out;                  /* Set to non-zero if fatal error occurred */
@@ -328,6 +330,8 @@ typedef struct fastq_reader_set {
     pthread_cond_t  can_produce;
     pthread_cond_t  can_consume;
     int done;
+    struct chem_detect_state *chem_detect;
+    int probe_only;
 } fastq_reader_set;
 
 typedef struct fastq_processor {

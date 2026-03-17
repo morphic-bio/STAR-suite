@@ -118,59 +118,63 @@ int mex_write_all(
         return -1;
     }
     
-    /* Build cumulative histogram and write histogram HTMLs */
-    build_cumulative_feature_hist_internal(config->features, counts->feature_hist);
-    
-    /* Write histograms if data exists */
-    vec_u32_t *richness_hist = NULL;
-    /* Build richness histogram from counts */
-    richness_hist = vec_u32_init();
-    khint_t k;
-    for (k = kh_begin(counts->barcode_to_deduped_hash); 
-         k != kh_end(counts->barcode_to_deduped_hash); ++k) {
-        if (!kh_exist(counts->barcode_to_deduped_hash, k)) continue;
-        
-        uint32_t bcode_key = kh_key(counts->barcode_to_deduped_hash, k);
-        khash_t(u32u32) *deduped_hash = (khash_t(u32u32)*)kh_val(counts->barcode_to_deduped_hash, k);
-        
-        if (config->filtered_barcodes_hash) {
-            char barcode[barcode_length + 1];
-            code2string((unsigned char *)&bcode_key, barcode, barcode_code_length);
-            if (translate_NXT) translate_nxt_inplace(barcode, barcode_length);
-            if (!filtered_barcode_hash_contains(config->filtered_barcodes_hash, barcode)) continue;
-        }
-        
-        size_t n_features_in_bc = kh_size(deduped_hash);
-        if (n_features_in_bc > 0) {
-            if (vec_u32_size(richness_hist) <= n_features_in_bc) {
-                vec_u32_set_size(richness_hist, n_features_in_bc + 1);
+    if (!config->skip_qc_outputs) {
+        /* Build cumulative histogram and write histogram HTMLs */
+        build_cumulative_feature_hist_internal(config->features, counts->feature_hist);
+
+        /* Write histograms if data exists */
+        vec_u32_t *richness_hist = NULL;
+        /* Build richness histogram from counts */
+        richness_hist = vec_u32_init();
+        khint_t k;
+        for (k = kh_begin(counts->barcode_to_deduped_hash);
+             k != kh_end(counts->barcode_to_deduped_hash); ++k) {
+            if (!kh_exist(counts->barcode_to_deduped_hash, k)) continue;
+
+            uint32_t bcode_key = kh_key(counts->barcode_to_deduped_hash, k);
+            khash_t(u32u32) *deduped_hash = (khash_t(u32u32)*)kh_val(counts->barcode_to_deduped_hash, k);
+
+            if (config->filtered_barcodes_hash) {
+                char barcode[barcode_length + 1];
+                code2string((unsigned char *)&bcode_key, barcode, barcode_code_length);
+                if (translate_NXT) translate_nxt_inplace(barcode, barcode_length);
+                if (!filtered_barcode_hash_contains(config->filtered_barcodes_hash, barcode)) continue;
             }
-            vec_u32_inc(richness_hist, n_features_in_bc);
+
+            size_t n_features_in_bc = kh_size(deduped_hash);
+            if (n_features_in_bc > 0) {
+                if (vec_u32_size(richness_hist) <= n_features_in_bc) {
+                    vec_u32_set_size(richness_hist, n_features_in_bc + 1);
+                }
+                vec_u32_inc(richness_hist, n_features_in_bc);
+            }
         }
-    }
-    
-    if (richness_hist && vec_u32_size(richness_hist) > 0) {
-        plot_simple_histogram(output_directory, "feature_richness_histogram.html", 
-                             "Feature Richness per Barcode", "Number of Distinct Features", 
-                             "Frequency (Barcodes)", richness_hist);
-    }
-    vec_u32_destroy(richness_hist);
-    
-    if (counts->feature_hist[0]) {
-        plot_simple_histogram(output_directory, "feature_multiplicity_histogram.html",
-                             "Feature Multiplicity", "Deduplicated UMI Count",
-                             "Frequency", counts->feature_hist[0]);
-    }
-    
-    /* Generate heatmaps */
-    if (mex_write_heatmaps(
-            output_directory,
-            config->features,
-            counts,
-            config->filtered_barcodes_hash,
-            config->min_heatmap_counts) != 0) {
-        /* Heatmap failures are non-fatal - log but continue */
-        fprintf(stderr, "Warning: heatmap generation failed\n");
+
+        if (richness_hist && vec_u32_size(richness_hist) > 0) {
+            plot_simple_histogram(output_directory, "feature_richness_histogram.html",
+                                 "Feature Richness per Barcode", "Number of Distinct Features",
+                                 "Frequency (Barcodes)", richness_hist);
+        }
+        vec_u32_destroy(richness_hist);
+
+        if (counts->feature_hist[0]) {
+            plot_simple_histogram(output_directory, "feature_multiplicity_histogram.html",
+                                 "Feature Multiplicity", "Deduplicated UMI Count",
+                                 "Frequency", counts->feature_hist[0]);
+        }
+
+        /* Generate heatmaps */
+        if (mex_write_heatmaps(
+                output_directory,
+                config->features,
+                counts,
+                config->filtered_barcodes_hash,
+                config->min_heatmap_counts) != 0) {
+            /* Heatmap failures are non-fatal - log but continue */
+            fprintf(stderr, "Warning: heatmap generation failed\n");
+        }
+    } else {
+        fprintf(stderr, "Skipping feature QC outputs for %s\n", output_directory);
     }
     
     return 0;

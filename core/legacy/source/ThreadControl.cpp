@@ -2,6 +2,8 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
+#include <fstream>
+#include <string>
 
 namespace {
 inline void atomicStoreMax(std::atomic<uint64_t> &target, uint64_t value) {
@@ -37,6 +39,33 @@ inline uint64_t steadyNowNs() {
 
 constexpr uint64_t kPermitWaitPollNs = 250000000ULL;      // 250ms
 constexpr uint64_t kPermitStallWarnEveryNs = 5000000000ULL; // 5s
+
+bool readProcStatCpuTotals(uint64_t &idleAll, uint64_t &totalAll) {
+    std::ifstream in("/proc/stat");
+    if (!in.is_open()) {
+        return false;
+    }
+
+    std::string label;
+    uint64_t user = 0;
+    uint64_t nice = 0;
+    uint64_t system = 0;
+    uint64_t idle = 0;
+    uint64_t iowait = 0;
+    uint64_t irq = 0;
+    uint64_t softirq = 0;
+    uint64_t steal = 0;
+    uint64_t guest = 0;
+    uint64_t guestNice = 0;
+    in >> label >> user >> nice >> system >> idle >> iowait >> irq >> softirq >> steal >> guest >> guestNice;
+    if (!in.good() || label != "cpu") {
+        return false;
+    }
+
+    idleAll = idle + iowait;
+    totalAll = user + nice + system + idle + iowait + irq + softirq + steal + guest + guestNice;
+    return totalAll >= idleAll;
+}
 }
 
 ThreadControl::ThreadControl() {
@@ -105,6 +134,87 @@ void ThreadControl::mapPermitConfigure(
         mapPermitWorkNsTotalByDomain[domain].store(0, std::memory_order_relaxed);
         mapPermitWorkNsMaxByDomain[domain].store(0, std::memory_order_relaxed);
     }
+}
+
+void ThreadControl::mapPermitConfigureCpuAware(bool enabled, int sampleIntervalMs, double emaAlpha) {
+    std::lock_guard<std::mutex> lock(mapPermitMutex);
+    mapPermitCpuAwareEnabledFlag = enabled;
+    mapPermitCpuInitializedFlag = false;
+    mapPermitCpuSampleIntervalMs = std::max(1, sampleIntervalMs);
+    mapPermitCpuEmaAlpha = std::max(0.0, std::min(1.0, emaAlpha));
+    mapPermitCpuLastIdleAll = 0;
+    mapPermitCpuLastTotalAll = 0;
+    mapPermitCpuLastSampleNs = 0;
+    mapPermitCpuSampleCount = 0;
+    mapPermitCpuBusyInstant = 0.0;
+    mapPermitCpuBusyEma = 0.0;
+}
+
+bool ThreadControl::mapPermitCpuMaybeSample() {
+    std::lock_guard<std::mutex> lock(mapPermitMutex);
+    if (!mapPermitEnabledFlag || !mapPermitCpuAwareEnabledFlag) {
+        return false;
+    }
+
+    const uint64_t nowNs = steadyNowNs();
+    const uint64_t sampleIntervalNs =
+        static_cast<uint64_t>(std::max(1, mapPermitCpuSampleIntervalMs)) * 1000000ULL;
+    if (mapPermitCpuInitializedFlag &&
+        nowNs >= mapPermitCpuLastSampleNs &&
+        (nowNs - mapPermitCpuLastSampleNs) < sampleIntervalNs) {
+        return false;
+    }
+
+    uint64_t idleAll = 0;
+    uint64_t totalAll = 0;
+    if (!readProcStatCpuTotals(idleAll, totalAll) || totalAll == 0) {
+        return false;
+    }
+
+    if (!mapPermitCpuInitializedFlag) {
+        mapPermitCpuLastIdleAll = idleAll;
+        mapPermitCpuLastTotalAll = totalAll;
+        mapPermitCpuLastSampleNs = nowNs;
+        mapPermitCpuSampleCount = 1;
+        mapPermitCpuBusyInstant = 0.0;
+        mapPermitCpuBusyEma = 0.0;
+        mapPermitCpuInitializedFlag = true;
+        return true;
+    }
+
+    if (totalAll <= mapPermitCpuLastTotalAll || idleAll < mapPermitCpuLastIdleAll) {
+        mapPermitCpuLastIdleAll = idleAll;
+        mapPermitCpuLastTotalAll = totalAll;
+        mapPermitCpuLastSampleNs = nowNs;
+        return false;
+    }
+
+    const uint64_t idleDelta = idleAll - mapPermitCpuLastIdleAll;
+    const uint64_t totalDelta = totalAll - mapPermitCpuLastTotalAll;
+    if (totalDelta == 0) {
+        mapPermitCpuLastSampleNs = nowNs;
+        return false;
+    }
+
+    double busyInstant = 1.0 - (static_cast<double>(idleDelta) / static_cast<double>(totalDelta));
+    if (busyInstant < 0.0) {
+        busyInstant = 0.0;
+    } else if (busyInstant > 1.0) {
+        busyInstant = 1.0;
+    }
+
+    mapPermitCpuBusyInstant = busyInstant;
+    if (mapPermitCpuSampleCount <= 1) {
+        mapPermitCpuBusyEma = busyInstant;
+    } else {
+        mapPermitCpuBusyEma =
+            mapPermitCpuEmaAlpha * busyInstant + (1.0 - mapPermitCpuEmaAlpha) * mapPermitCpuBusyEma;
+    }
+    mapPermitCpuLastIdleAll = idleAll;
+    mapPermitCpuLastTotalAll = totalAll;
+    mapPermitCpuLastSampleNs = nowNs;
+    ++mapPermitCpuSampleCount;
+    return true;
 }
 
 void ThreadControl::mapPermitConfigureRetunePlan(const std::vector<int> &permitSequence, int retuneEveryAcquires) {
@@ -312,6 +422,8 @@ ThreadControl::MapPermitSnapshot ThreadControl::mapPermitSnapshot() const {
     snapshot.enabled = mapPermitEnabledFlag;
     snapshot.telemetryEnabled = mapPermitTelemetryEnabledFlag;
     snapshot.variableThreadsEnabled = mapPermitVariableThreadsEnabledFlag;
+    snapshot.cpuAwareEnabled = mapPermitCpuAwareEnabledFlag;
+    uint64_t cpuLastSampleNs = 0;
 
     {
         std::lock_guard<std::mutex> lock(mapPermitMutex);
@@ -323,6 +435,12 @@ ThreadControl::MapPermitSnapshot ThreadControl::mapPermitSnapshot() const {
         snapshot.inUsePermits = mapPermitConfigured - mapPermitAvailable;
         snapshot.retuneTraceTargets = mapPermitRetuneTraceTargets;
         snapshot.retuneTraceDropped = mapPermitRetuneTraceDropped;
+        snapshot.cpuInitialized = mapPermitCpuInitializedFlag;
+        snapshot.cpuSampleIntervalMs = mapPermitCpuSampleIntervalMs;
+        snapshot.cpuSampleCount = mapPermitCpuSampleCount;
+        snapshot.cpuBusyInstant = mapPermitCpuBusyInstant;
+        snapshot.cpuBusyEma = mapPermitCpuBusyEma;
+        cpuLastSampleNs = mapPermitCpuLastSampleNs;
     }
 
     snapshot.acquireCalls = mapPermitAcquireCalls.load(std::memory_order_relaxed);
@@ -335,6 +453,10 @@ ThreadControl::MapPermitSnapshot ThreadControl::mapPermitSnapshot() const {
     const uint64_t lastReleaseNs = mapPermitLastReleaseNs.load(std::memory_order_relaxed);
     const uint64_t nowNs = steadyNowNs();
     snapshot.lastReleaseAgoNs = (nowNs >= lastReleaseNs) ? (nowNs - lastReleaseNs) : 0;
+    snapshot.cpuLastSampleAgoNs = (snapshot.cpuInitialized && nowNs >= cpuLastSampleNs)
+        ? (nowNs - cpuLastSampleNs)
+        : 0;
+    snapshot.cpuIdleEma = std::max(0.0, 1.0 - snapshot.cpuBusyEma);
     snapshot.waitNsTotal = mapPermitWaitNsTotal.load(std::memory_order_relaxed);
     snapshot.waitNsMax = mapPermitWaitNsMax.load(std::memory_order_relaxed);
     snapshot.workUnitsTotal = mapPermitWorkUnitsTotal.load(std::memory_order_relaxed);

@@ -50,6 +50,9 @@ typedef struct mex_writer_config {
     
     /** Minimum counts for heatmap display (feature threshold) */
     int min_heatmap_counts;
+
+    /** Skip histogram/heatmap QC outputs while keeping core matrices/stats */
+    int skip_qc_outputs;
     
 } mex_writer_config;
 

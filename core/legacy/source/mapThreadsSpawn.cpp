@@ -30,6 +30,11 @@ void mapThreadsSpawn (Parameters &P, ReadAlignChunk** RAchunk) {
         ? std::min(P.dynamicThreadConstMapPermits, P.runThreadN)
         : P.runThreadN;
     g_threadChunks.mapPermitConfigure(interfaceEnabled, P.runThreadN, configuredPermits, telemetryEnabled, variableThreadsEnabled);
+    g_threadChunks.mapPermitConfigureCpuAware(
+        interfaceEnabled && P.dynamicThreadPfControllerCpuAware == 1,
+        P.dynamicThreadPfControllerCpuSampleMs,
+        P.dynamicThreadPfControllerCpuEmaAlpha
+    );
     g_threadChunks.mapPermitConfigureRetunePlan(P.variableThreadsPermitSequence, P.variableThreadsRetuneEveryAcquires);
 
     if (interfaceEnabled) {
@@ -38,6 +43,9 @@ void mapThreadsSpawn (Parameters &P, ReadAlignChunk** RAchunk) {
                          << " (runThreadN=" << P.runThreadN
                          << ", telemetry=" << (telemetryEnabled ? "on" : "off")
                          << ", variableThreads=" << (variableThreadsEnabled ? "on" : "off")
+                         << ", cpuAware=" << ((P.dynamicThreadPfControllerCpuAware == 1) ? "on" : "off")
+                         << ", cpuSampleMs=" << P.dynamicThreadPfControllerCpuSampleMs
+                         << ", cpuEmaAlpha=" << P.dynamicThreadPfControllerCpuEmaAlpha
                          << ", retuneEveryAcquires=" << P.variableThreadsRetuneEveryAcquires
                          << ", retuneSequenceLength=" << P.variableThreadsPermitSequence.size() << ")\n" << flush;
         pthread_mutex_unlock(&g_threadChunks.mutexLogMain);
@@ -91,6 +99,12 @@ void mapThreadsSpawn (Parameters &P, ReadAlignChunk** RAchunk) {
                          << ", targetPermits=" << snapshot.targetPermits
                          << ", configuredPermits=" << snapshot.configuredPermits
                          << ", inUsePermits=" << snapshot.inUsePermits
+                         << ", cpuAware=" << (snapshot.cpuAwareEnabled ? "on" : "off")
+                         << ", cpuInitialized=" << (snapshot.cpuInitialized ? "yes" : "no")
+                         << ", cpuSampleCount=" << snapshot.cpuSampleCount
+                         << ", cpuBusyInstant=" << snapshot.cpuBusyInstant
+                         << ", cpuBusyEma=" << snapshot.cpuBusyEma
+                         << ", cpuIdleEma=" << snapshot.cpuIdleEma
                          << ", retuneTrace=" << serializeRetuneTrace(snapshot.retuneTraceTargets)
                          << ", retuneTraceDropped=" << snapshot.retuneTraceDropped
                          << ", lastReleaseAgoMs=" << lastReleaseAgoMs
