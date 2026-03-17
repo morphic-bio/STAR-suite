@@ -4635,11 +4635,14 @@ void *consume_reads(void *arg) {
     pools  = sample_args->pools[thread_id];
 
     int done=0;
-    //first one is always barcode
     char *lines_buffer=malloc(6*LINE_LENGTH);
     char *lines[6];
     char done_flags[nsets];
     memset(done_flags, 0, nsets*sizeof(char));
+    int permit_batch_count = 0;
+    uint64_t permit_batch_wait_ns = 0;
+    double permit_batch_start_sec = 0.0;
+    uint64_t permit_batch_work_bytes = 0;
     const int feature_constant_offset = sample_args->feature_constant_offset;
     const int barcode_constant_offset = sample_args->barcode_constant_offset;
     feature_arrays *features = sample_args->features;
@@ -4763,9 +4766,12 @@ void *consume_reads(void *arg) {
 
             uint64_t wait_ns = 0;
             double work_start_sec = 0.0;
-            if (permit_hooks_enabled) {
+            if (permit_hooks_enabled && permit_batch_count == 0) {
                 wait_ns = permit_acquire_hook(permit_hook_ctx);
                 work_start_sec = get_time_in_seconds();
+                permit_batch_wait_ns = wait_ns;
+                permit_batch_start_sec = work_start_sec;
+                permit_batch_work_bytes = 0;
             }
 
             //process the data
@@ -4895,12 +4901,19 @@ void *consume_reads(void *arg) {
             }
 
             if (permit_hooks_enabled) {
-                const double work_end_sec = get_time_in_seconds();
-                uint64_t work_ns = 0;
-                if (work_end_sec > work_start_sec) {
-                    work_ns = (uint64_t)((work_end_sec - work_start_sec) * 1000000000.0);
+                permit_batch_work_bytes += work_bytes;
+                permit_batch_count++;
+                if (permit_batch_count >= 64) {
+                    const double work_end_sec = get_time_in_seconds();
+                    uint64_t work_ns = 0;
+                    if (work_end_sec > permit_batch_start_sec) {
+                        work_ns = (uint64_t)((work_end_sec - permit_batch_start_sec) * 1000000000.0);
+                    }
+                    permit_release_hook(permit_hook_ctx, permit_batch_wait_ns,
+                                        (uint64_t)permit_batch_count,
+                                        permit_batch_work_bytes, work_ns);
+                    permit_batch_count = 0;
                 }
-                permit_release_hook(permit_hook_ctx, wait_ns, 1, work_bytes, work_ns);
             }
             break; // Exit the for loop to process the data
         }
@@ -4914,6 +4927,18 @@ void *consume_reads(void *arg) {
         if(!done && !data_available){
             sched_yield();
         }
+    }
+
+    if (permit_hooks_enabled && permit_batch_count > 0) {
+        const double work_end_sec = get_time_in_seconds();
+        uint64_t work_ns = 0;
+        if (work_end_sec > permit_batch_start_sec) {
+            work_ns = (uint64_t)((work_end_sec - permit_batch_start_sec) * 1000000000.0);
+        }
+        permit_release_hook(permit_hook_ctx, permit_batch_wait_ns,
+                            (uint64_t)permit_batch_count,
+                            permit_batch_work_bytes, work_ns);
+        permit_batch_count = 0;
     }
 
     /* Drain finalization: if total reads < max_reads, decide now */
