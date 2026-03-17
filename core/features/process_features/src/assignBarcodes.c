@@ -4710,8 +4710,8 @@ void *consume_reads(void *arg) {
             if (rc == EBUSY)
                 continue;
             if (rc != 0) {
-                fprintf(stderr, "FATAL: pthread_mutex_trylock returned %d\n", rc);
-                pthread_exit(NULL);
+                fprintf(stderr, "FATAL: pthread_mutex_trylock returned %d (set %d)\n", rc, i);
+                exit(EXIT_FAILURE);
             }
 
             if (set->filled < lines_per_block) {
