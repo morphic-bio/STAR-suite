@@ -1,3 +1,4 @@
+#include <errno.h>
 #include "../include/common.h"
 #include "../include/barcode_match.h"
 #include "../include/globals.h"
@@ -3891,8 +3892,13 @@ void *read_fastqs_by_set(void *arg) {
         /* ---------- NEW: write a whole block into set->buffer ---------- */
         pthread_mutex_lock(&set->mutex);
 
-        while (set->filled >= read_buffer_lines - lines_per_block)
+        while (set->filled >= read_buffer_lines - lines_per_block) {
+            if (set->probe_only && set->chem_detect && set->chem_detect->done) {
+                pthread_mutex_unlock(&set->mutex);
+                goto producer_probe_exit;
+            }
             pthread_cond_wait(&set->can_produce, &set->mutex);
+        }
 
         size_t p = set->produce_index;
         /* barcode (always) */
@@ -3919,7 +3925,14 @@ void *read_fastqs_by_set(void *arg) {
         pthread_mutex_unlock(&set->mutex);
     }
     
-    // Signal that this producer is completely finished
+producer_probe_exit:
+    for (int j = 0; j < number_of_readers; j++) {
+        if (readers[j]->gz_pointer) {
+            gzclose(readers[j]->gz_pointer);
+            readers[j]->gz_pointer = NULL;
+        }
+    }
+
     pthread_mutex_lock(&set->mutex);
     set->done = 1;
     pthread_cond_broadcast(&set->can_consume);
@@ -4671,7 +4684,20 @@ void *consume_reads(void *arg) {
             reverse_lines = lines + 2;
         }
     }
+    int empty_sweeps = 0;
     while (!done) {
+        if (sample_args->probe_only && chem_detect && chem_detect->done) {
+            for (int k = 0; k < nsets; k++) {
+                pthread_mutex_lock(&reader_sets[k]->mutex);
+                pthread_cond_signal(&reader_sets[k]->can_produce);
+                pthread_mutex_unlock(&reader_sets[k]->mutex);
+            }
+            break;
+        }
+
+        if (empty_sweeps >= 2)
+            usleep(100 * (empty_sweeps > 8 ? 8 : empty_sweeps));
+
         int data_available = 0;
         for (int sweep = 0; sweep < nsets; sweep++) {
             int i = (rr_start + sweep) % nsets;
@@ -4680,8 +4706,13 @@ void *consume_reads(void *arg) {
             }
             fastq_reader_set *set = reader_sets[i];
 
-            if (pthread_mutex_trylock(&set->mutex) != 0)
+            int rc = pthread_mutex_trylock(&set->mutex);
+            if (rc == EBUSY)
                 continue;
+            if (rc != 0) {
+                fprintf(stderr, "FATAL: pthread_mutex_trylock returned %d\n", rc);
+                pthread_exit(NULL);
+            }
 
             if (set->filled < lines_per_block) {
                 if (set->done && set->filled == 0) {
@@ -4692,6 +4723,7 @@ void *consume_reads(void *arg) {
             }
 
             data_available = 1;
+            empty_sweeps = 0;
             rr_start = (i + 1) % nsets;
             size_t c = set->consume_index;
             uint64_t work_bytes = 0;
@@ -4918,8 +4950,8 @@ void *consume_reads(void *arg) {
                 break;
             }
         }
-        if(!done && !data_available){
-            sched_yield();
+        if (!done && !data_available) {
+            empty_sweeps++;
         }
     }
 
