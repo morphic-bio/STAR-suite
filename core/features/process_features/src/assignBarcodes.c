@@ -4639,6 +4639,7 @@ void *consume_reads(void *arg) {
     char *lines[6];
     char done_flags[nsets];
     memset(done_flags, 0, nsets*sizeof(char));
+    int rr_start = 0;
     int permit_batch_count = 0;
     uint64_t permit_batch_wait_ns = 0;
     double permit_batch_start_sec = 0.0;
@@ -4671,34 +4672,27 @@ void *consume_reads(void *arg) {
         }
     }
     while (!done) {
-        // will store 0 type (barcode)
         int data_available = 0;
-        for (int i = 0; i < nsets; i++) {
+        for (int sweep = 0; sweep < nsets; sweep++) {
+            int i = (rr_start + sweep) % nsets;
             if (done_flags[i]){
                 continue;
             }
             fastq_reader_set *set = reader_sets[i];
-            //check the mutexes
-            pthread_mutex_lock(&set->mutex);
 
-            while (set->filled < lines_per_block && !set->done)
-                pthread_cond_wait(&set->can_consume, &set->mutex);
+            if (pthread_mutex_trylock(&set->mutex) != 0)
+                continue;
 
-            if (set->done && set->filled == 0) {
+            if (set->filled < lines_per_block) {
+                if (set->done && set->filled == 0) {
+                    done_flags[i] = 1;
+                }
                 pthread_mutex_unlock(&set->mutex);
-                done_flags[i] = 1;
                 continue;
             }
 
-            /* If we fall through, there's either data or it's the end */
-            if (set->filled == 0) { // This means set->done must be true
-                pthread_mutex_unlock(&set->mutex);
-                done_flags[i] = 1;
-                continue;
-            }
-            
-            /* we have a data block – copy it out, tracking lengths */
             data_available = 1;
+            rr_start = (i + 1) % nsets;
             size_t c = set->consume_index;
             uint64_t work_bytes = 0;
             {
@@ -4915,14 +4909,14 @@ void *consume_reads(void *arg) {
                     permit_batch_count = 0;
                 }
             }
-            break; // Exit the for loop to process the data
+            break; /* exit sweep loop */
         }
+        done = 1;
         for (int i=0; i<nsets; i++){
             if (!done_flags[i]){
                 done=0;
                 break;
             }
-            done=1;
         }
         if(!done && !data_available){
             sched_yield();
