@@ -4694,35 +4694,36 @@ void *consume_reads(void *arg) {
                 continue;
             }
             
-            /* we have a data block – copy it out */
-            data_available = 1; // We found work
+            /* we have a data block – copy it out, tracking lengths */
+            data_available = 1;
             size_t c = set->consume_index;
-            strcpy(barcode_lines[0], set->buffer[c]);
-            strcpy(barcode_lines[1], set->buffer[(c+1) % set->read_buffer_lines]);
-
+            uint64_t work_bytes = 0;
+            {
+                char *end;
+                end = stpcpy(barcode_lines[0], set->buffer[c]);
+                work_bytes += (uint64_t)(end - barcode_lines[0]);
+                end = stpcpy(barcode_lines[1], set->buffer[(c+1) % set->read_buffer_lines]);
+                work_bytes += (uint64_t)(end - barcode_lines[1]);
+            }
             if (forward_lines) {
-                strcpy(forward_lines[0], set->buffer[(c+2) % set->read_buffer_lines]);
-                strcpy(forward_lines[1], set->buffer[(c+3) % set->read_buffer_lines]);
+                char *end;
+                end = stpcpy(forward_lines[0], set->buffer[(c+2) % set->read_buffer_lines]);
+                work_bytes += (uint64_t)(end - forward_lines[0]);
+                end = stpcpy(forward_lines[1], set->buffer[(c+3) % set->read_buffer_lines]);
+                work_bytes += (uint64_t)(end - forward_lines[1]);
             }
             if (reverse_lines) {
                 int off = (nreaders == 3) ? 4 : 2;
-                strcpy(reverse_lines[0], set->buffer[(c+off) % set->read_buffer_lines]);
-                strcpy(reverse_lines[1], set->buffer[(c+off+1) % set->read_buffer_lines]);
+                char *end;
+                end = stpcpy(reverse_lines[0], set->buffer[(c+off) % set->read_buffer_lines]);
+                work_bytes += (uint64_t)(end - reverse_lines[0]);
+                end = stpcpy(reverse_lines[1], set->buffer[(c+off+1) % set->read_buffer_lines]);
+                work_bytes += (uint64_t)(end - reverse_lines[1]);
             }
-            //signal that the data has been consumed
             set->consume_index = (set->consume_index + lines_per_block) % set->read_buffer_lines;
             set->filled      -= lines_per_block;
             pthread_cond_signal(&set->can_produce);
             pthread_mutex_unlock(&set->mutex);
-
-            uint64_t work_bytes = 0;
-            work_bytes += (uint64_t)strlen(barcode_lines[0]) + (uint64_t)strlen(barcode_lines[1]);
-            if (forward_lines) {
-                work_bytes += (uint64_t)strlen(forward_lines[0]) + (uint64_t)strlen(forward_lines[1]);
-            }
-            if (reverse_lines) {
-                work_bytes += (uint64_t)strlen(reverse_lines[0]) + (uint64_t)strlen(reverse_lines[1]);
-            }
 
             /* NXT/TRU auto-detection: sample first N reads */
             if (chem_detect && !chem_detect->done) {
