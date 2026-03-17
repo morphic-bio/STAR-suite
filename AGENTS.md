@@ -91,6 +91,17 @@ actionable; link to deeper docs rather than copying them.
 - Use `--force-individual-offsets` for per-feature offsets.
 - Docs: `docs/feature_barcodes.md`.
 
+### CR-Compat Benchmark Threading (CRITICAL)
+
+- **Always** use `--dynamicThreadInterface 1` for parallel phases.
+- **Always** use `--crAssignConsumerThreads -1` (auto-size). **NEVER** hardcode
+  to a small number like 4; this starves the feature assignment phase.
+- **Always** use `--crAssignSearchThreads 1` to prevent oversubscription.
+- Use `--soloFeatures GeneFull` only (skip Gene/Velocyto) for benchmarks.
+- Use `--outSAMtype None` unless BAM output is specifically needed.
+- Full reference command: `docs/feature_barcodes.md` § "Optimized Benchmark
+  Parameters".
+
 ## Flex Integration Notes
 
 - Flex now uses `libscrna` for EmptyDrops/OrdMag/Occupancy (no duplicate
@@ -172,6 +183,36 @@ Configuration: `mcp_server/config.yaml`
 
 - Feature branches merge into `perturb`, then squash-merge into `master`.
 - Keep large binaries and datasets untracked; update `.gitignore` if needed.
+
+### Safe Merge Policy
+
+Squash merges have caused silent regressions by dropping critical code when
+two branches modify the same file. Follow these rules:
+
+- **Never squash-merge branches that touch `assignBarcodes.c` or other large
+  shared files.** Use `git merge --no-ff` instead; this preserves the DAG so
+  git can produce proper three-way conflict markers.
+- **Pre-merge diff audit**: before any squash merge, verify no expected
+  functions were dropped:
+  ```bash
+  # After staging the squash but BEFORE committing:
+  git diff HEAD -- core/features/process_features/src/assignBarcodes.c \
+    | grep '^-.*pf_search_hash_offsets\|^-.*pf_single_offset_hash_search' \
+    && echo "FATAL: tiered search removed" && exit 1
+  ```
+- **Post-merge symbol check**: after every merge that touches
+  `process_features`, confirm critical fast-path symbols are present:
+  ```bash
+  grep -c 'pf_search_hash_offsets\|pf_single_offset_hash_search' \
+    core/features/process_features/src/assignBarcodes.c
+  # Must be >= 4 (2 definitions + 2 call sites)
+  ```
+- **Prefer rebase-merge** (`git rebase <target> && git merge --no-ff`) for
+  branches touching core files. This gives clean linear history while
+  preserving merge-base information.
+- **Squash merges are safe only for** isolated leaf changes (docs, scripts,
+  configs, CI files) that do not touch files concurrently modified on other
+  branches.
 
 ## GitHub Actions CI/CD Policy
 

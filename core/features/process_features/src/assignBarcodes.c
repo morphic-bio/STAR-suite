@@ -61,11 +61,15 @@ static void feature_mode_record(int feature_index, int offset) {
     __sync_fetch_and_add(&feature_mode_hist[idx], 1);
 }
 
+static int *feature_mode_search_offsets = NULL;
+static int  feature_mode_n_search_offsets = 0;
+
 static void feature_mode_finalize(const feature_arrays *features) {
     if (!features || !feature_mode_hist || !feature_mode_offsets) {
         return;
     }
-    for (int j = 0; j < features->number_of_features; j++) {
+    const int n = features->number_of_features;
+    for (int j = 0; j < n; j++) {
         unsigned int best_count = 0;
         int best_offset = -1;
         const int base = j * feature_mode_max_offset;
@@ -78,6 +82,58 @@ static void feature_mode_finalize(const feature_arrays *features) {
         }
         feature_mode_offsets[j] = (best_count > 0) ? best_offset : -1;
     }
+
+    /* CRITICAL_PATH: build deduplicated search offsets for tiered hash lookup.
+     * For each unique bootstrap offset D, search {D, D-1, D+1}. */
+    int *unique = malloc(n * sizeof(int));
+    int n_unique = 0;
+    if (!unique) return;
+    for (int j = 0; j < n; j++) {
+        int off = feature_mode_offsets[j];
+        if (off < 0) continue;
+        int found = 0;
+        for (int u = 0; u < n_unique; u++) {
+            if (unique[u] == off) { found = 1; break; }
+        }
+        if (!found) unique[n_unique++] = off;
+    }
+
+    if (n_unique == 0) {
+        free(unique);
+        free(feature_mode_search_offsets);
+        feature_mode_search_offsets = NULL;
+        feature_mode_n_search_offsets = 0;
+        return;
+    }
+
+    int *search = malloc(n_unique * 3 * sizeof(int));
+    int ns = 0;
+    if (!search) { free(unique); return; }
+    for (int u = 0; u < n_unique; u++) {
+        search[ns++] = unique[u];
+        search[ns++] = unique[u] - 1;
+        search[ns++] = unique[u] + 1;
+    }
+    free(unique);
+
+    int *deduped = malloc(ns * sizeof(int));
+    int nd = 0;
+    if (!deduped) { free(search); return; }
+    for (int i = 0; i < ns; i++) {
+        int dup = 0;
+        for (int j = 0; j < nd; j++) {
+            if (deduped[j] == search[i]) { dup = 1; break; }
+        }
+        if (!dup) deduped[nd++] = search[i];
+    }
+    free(search);
+
+    free(feature_mode_search_offsets);
+    feature_mode_search_offsets = deduped;
+    feature_mode_n_search_offsets = nd;
+
+    fprintf(stderr, "[bootstrap] Finalized: %d unique base offsets -> %d search positions\n",
+            n_unique, nd);
 }
 
 static void chem_detect_decide(struct chem_detect_state *cd) {
@@ -3460,6 +3516,184 @@ int checkAndCorrectFeature(char *line, feature_arrays *features,int maxHammingDi
     }
     return 0;
 }
+
+static int pf_single_offset_hash_search(
+    const char *seq,
+    int feat_len,
+    feature_arrays *features,
+    int maxHammingDistance,
+    int *out_hamming,
+    int *out_ambiguous)
+{
+    const int have_le1 = (features->feature_hamming_le1_enabled &&
+                          features->feature_hamming_le1_hash != NULL);
+    const int have_le2 = (features->feature_hamming_le2_enabled &&
+                          features->feature_hamming_le2_hash != NULL);
+
+    *out_ambiguous = 0;
+
+    {
+        const int idx = feature_lookup_seq(seq, feat_len);
+        if (idx > 0) {
+            *out_hamming = 0;
+            return idx;
+        }
+    }
+
+    if (maxHammingDistance <= 0) {
+        *out_hamming = maxHammingDistance + 1;
+        return 0;
+    }
+
+    char query[MAX_FEATURE_SEQUENCE_LENGTH + 1];
+    memcpy(query, seq, (size_t)feat_len);
+    query[feat_len] = '\0';
+
+    if (maxHammingDistance >= 1 && have_le1) {
+        khint_t k = kh_get(stru32, features->feature_hamming_le1_hash, query);
+        if (k != kh_end(features->feature_hamming_le1_hash)) {
+            const uint32_t payload = kh_val(features->feature_hamming_le1_hash, k);
+            const int d = (int)((payload >> 29u) & 0x3u);
+            const int amb = ((payload & 0x80000000u) != 0u);
+            const int feat = (int)(payload & 0x1FFFFFFFu);
+            *out_hamming = d;
+            *out_ambiguous = amb;
+            if (!amb && feat > 0 && d <= maxHammingDistance) {
+                return feat;
+            }
+            return 0;
+        }
+        if (maxHammingDistance == 1) {
+            *out_hamming = maxHammingDistance + 1;
+            return 0;
+        }
+    }
+
+    if (maxHammingDistance >= 2 && have_le2) {
+        khint_t k = kh_get(stru32, features->feature_hamming_le2_hash, query);
+        if (k != kh_end(features->feature_hamming_le2_hash)) {
+            const uint32_t payload = kh_val(features->feature_hamming_le2_hash, k);
+            const int d = (int)((payload >> 29u) & 0x3u);
+            const int amb = ((payload & 0x80000000u) != 0u);
+            const int feat = (int)(payload & 0x1FFFFFFFu);
+            *out_hamming = d;
+            *out_ambiguous = amb;
+            if (!amb && feat > 0 && d <= maxHammingDistance) {
+                return feat;
+            }
+            return 0;
+        }
+        *out_hamming = maxHammingDistance + 1;
+        return 0;
+    }
+
+    *out_hamming = maxHammingDistance + 1;
+    return 0;
+}
+
+static int pf_search_hash_offsets(
+    const char *read,
+    int read_len,
+    feature_arrays *features,
+    int maxHammingDistance,
+    int maxN,
+    const int *offsets,
+    int n_offsets,
+    int *out_hamming,
+    uint16_t *out_match_position)
+{
+    const int feat_len = features->common_length;
+    int best_feat = 0;
+    int best_d = maxHammingDistance + 1;
+    uint16_t best_pos = 0;
+
+    for (int oi = 0; oi < n_offsets; oi++) {
+        const int off = offsets[oi];
+        if (off < 0 || off + feat_len > read_len) {
+            continue;
+        }
+
+        const char *subseq = read + off;
+        int n_count = 0;
+        int n_indices[maxN > 0 ? maxN : 1];
+        int has_bad_base = 0;
+        for (int p = 0; p < feat_len; p++) {
+            char c = subseq[p];
+            if (c == 'N' || c == 'n') {
+                if (n_count >= maxN) {
+                    has_bad_base = 1;
+                    break;
+                }
+                n_indices[n_count++] = p;
+            } else if (c != 'A' && c != 'C' && c != 'G' && c != 'T') {
+                has_bad_base = 1;
+                break;
+            }
+        }
+        if (has_bad_base) {
+            continue;
+        }
+
+        if (n_count == 0) {
+            int d = maxHammingDistance + 1;
+            int ambiguous = 0;
+            int feat = pf_single_offset_hash_search(
+                subseq, feat_len, features, maxHammingDistance, &d, &ambiguous);
+            if (feat > 0 && d < best_d) {
+                best_feat = feat;
+                best_d = d;
+                best_pos = (uint16_t)off;
+                if (d == 0) {
+                    break;
+                }
+            } else if ((feat > 0 && d == best_d && feat != best_feat) ||
+                       (feat == 0 && ambiguous && d == best_d && d <= maxHammingDistance)) {
+                best_feat = 0;
+            }
+            continue;
+        }
+
+        static const char bases[] = "ACGT";
+        int n_alts = 1;
+        for (int i = 0; i < n_count; i++) {
+            n_alts *= 4;
+        }
+
+        char alt[MAX_FEATURE_SEQUENCE_LENGTH + 1];
+        memcpy(alt, subseq, (size_t)feat_len);
+        alt[feat_len] = '\0';
+
+        for (int a = 0; a < n_alts; a++) {
+            int tmp = a;
+            for (int i = n_count - 1; i >= 0; i--) {
+                alt[n_indices[i]] = bases[tmp & 3];
+                tmp >>= 2;
+            }
+
+            int d = maxHammingDistance + 1;
+            int ambiguous = 0;
+            int feat = pf_single_offset_hash_search(
+                alt, feat_len, features, maxHammingDistance, &d, &ambiguous);
+            if (feat > 0 && d < best_d) {
+                best_feat = feat;
+                best_d = d;
+                best_pos = (uint16_t)off;
+                if (d == 0) {
+                    goto done;
+                }
+            } else if ((feat > 0 && d == best_d && feat != best_feat) ||
+                       (feat == 0 && ambiguous && d == best_d && d <= maxHammingDistance)) {
+                best_feat = 0;
+            }
+        }
+    }
+
+done:
+    *out_hamming = best_d;
+    *out_match_position = best_pos;
+    return best_feat;
+}
+
 size_t barcode_code2number(unsigned char *code){
     uint32_t key_val = *(uint32_t*)code;
     khint_t k = kh_get(u32ptr, whitelist_hash, key_val);
@@ -4017,6 +4251,41 @@ void process_feature_sequence(char *sequence, feature_arrays *features, int maxH
         }
 
         if (feature_mode_bootstrap_done == 1) {
+            /* CRITICAL_PATH: tiered hash search at bootstrap-learned offsets.
+             * Uses pf_search_hash_offsets for O(n_offsets) hash probes instead
+             * of O(N_features) iteration. */
+            const int feat_len = features->common_length;
+            const int can_use_tiered =
+                (features->number_of_mismatched_features == 0 &&
+                 feat_len > 0 &&
+                 feature_mode_search_offsets != NULL &&
+                 feature_mode_n_search_offsets > 0);
+
+            if (can_use_tiered) {
+                int search_hamming = maxHammingDistance + 1;
+                uint16_t search_pos = 0;
+                int search_feat = pf_search_hash_offsets(
+                    sequence, (int)read_len, features,
+                    maxHammingDistance, max_feature_n,
+                    feature_mode_search_offsets,
+                    feature_mode_n_search_offsets,
+                    &search_hamming, &search_pos);
+
+                if (search_feat > 0 && search_hamming <= maxHammingDistance) {
+                    *feature_index = (uint32_t)search_feat;
+                    *hamming_distance = search_hamming;
+                    *match_position = search_pos;
+                    memcpy(matching_sequence, sequence + search_pos,
+                           features->feature_lengths[search_feat - 1]);
+                    matching_sequence[features->feature_lengths[search_feat - 1]] = '\0';
+                } else {
+                    *feature_index = 0;
+                    *hamming_distance = search_hamming;
+                }
+                return;
+            }
+
+            /* Fallback for mixed-length features: per-feature offset iteration */
             int bestHamming = maxHammingDistance + 1;
             uint32_t bestFeature = 0;
             uint16_t bestPos = 0;
@@ -4462,88 +4731,38 @@ void process_feature_sequence(char *sequence, feature_arrays *features, int maxH
                                      feat_len > 0);
 
         if (can_use_tiered) {
-            /*
-             * Tiered search: exhaust cheap hash lookups across ALL offsets
-             * before falling through to the expensive brute-force scan.
-             *   Phase 1: d=0 exact hash at offsets {0, -1, +1}
-             *   Phase 2: d<=1 prehash  at offsets {0, -1, +1}
-             *   Phase 3: d<=2 prehash  at offsets {0, -1, +1}
-             *   Phase 4: brute-force fast hamming (checkAndCorrectFeature)
-             */
-            const int have_le1 = (features->feature_hamming_le1_enabled && features->feature_hamming_le1_hash);
-            const int have_le2 = (features->feature_hamming_le2_enabled && features->feature_hamming_le2_hash);
             const int offsets[3] = { feature_constant_offset,
-                                     feature_constant_offset - 1,
-                                     feature_constant_offset + 1 };
+                                     feature_constant_offset + 1,
+                                     feature_constant_offset - 1 };
+            int tiered_hamming = maxHammingDistance + 1;
+            uint16_t tiered_match_position = 0;
+            const int tiered_feature_index = pf_search_hash_offsets(
+                sequence,
+                (int)read_len,
+                features,
+                maxHammingDistance,
+                max_feature_n,
+                offsets,
+                3,
+                &tiered_hamming,
+                &tiered_match_position);
 
-            /* Phase 1: d=0 exact hash at all offsets */
-            for (int i = 0; i < 3; i++) {
-                const int off = offsets[i];
-                if (off < 0 || off + feat_len > (int)read_len) continue;
-                int idx = simple_hash_search(features, sequence + off);
-                if (idx) {
-                    *feature_index = (uint32_t)idx;
-                    *hamming_distance = 0;
-                    memcpy(matching_sequence, sequence + off, features->feature_lengths[idx - 1]);
-                    matching_sequence[features->feature_lengths[idx - 1]] = '\0';
-                    *match_position = (uint16_t)off;
-                    return;
-                }
+            if (tiered_feature_index > 0) {
+                *feature_index = (uint32_t)tiered_feature_index;
+                *hamming_distance = tiered_hamming;
+                *match_position = tiered_match_position;
+                memcpy(matching_sequence,
+                       sequence + tiered_match_position,
+                       features->feature_lengths[tiered_feature_index - 1]);
+                matching_sequence[features->feature_lengths[tiered_feature_index - 1]] = '\0';
+                return;
             }
-
-            /* Phase 2: d<=1 prehash at all offsets */
-            if (maxHammingDistance >= 1 && have_le1) {
-                for (int i = 0; i < 3; i++) {
-                    const int off = offsets[i];
-                    if (off < 0 || off + feat_len > (int)read_len) continue;
-                    char query[MAX_FEATURE_SEQUENCE_LENGTH + 1];
-                    memcpy(query, sequence + off, (size_t)feat_len);
-                    query[feat_len] = '\0';
-                    khint_t k = kh_get(stru32, features->feature_hamming_le1_hash, query);
-                    if (k != kh_end(features->feature_hamming_le1_hash)) {
-                        const uint32_t payload = kh_val(features->feature_hamming_le1_hash, k);
-                        const int d = (int)((payload >> 29u) & 0x3u);
-                        const int amb = ((payload & 0x80000000u) != 0u);
-                        const int feat = (int)(payload & 0x1FFFFFFFu);
-                        if (!amb && feat > 0 && d <= maxHammingDistance) {
-                            *feature_index = (uint32_t)feat;
-                            *hamming_distance = d;
-                            memcpy(matching_sequence, sequence + off, features->feature_lengths[feat - 1]);
-                            matching_sequence[features->feature_lengths[feat - 1]] = '\0';
-                            *match_position = (uint16_t)off;
-                            return;
-                        }
-                    }
-                }
+            if (tiered_hamming <= maxHammingDistance) {
+                *feature_index = 0;
+                *hamming_distance = tiered_hamming;
+                *match_position = tiered_match_position;
+                return;
             }
-
-            /* Phase 3: d<=2 prehash at all offsets */
-            if (maxHammingDistance >= 2 && have_le2) {
-                for (int i = 0; i < 3; i++) {
-                    const int off = offsets[i];
-                    if (off < 0 || off + feat_len > (int)read_len) continue;
-                    char query[MAX_FEATURE_SEQUENCE_LENGTH + 1];
-                    memcpy(query, sequence + off, (size_t)feat_len);
-                    query[feat_len] = '\0';
-                    khint_t k = kh_get(stru32, features->feature_hamming_le2_hash, query);
-                    if (k != kh_end(features->feature_hamming_le2_hash)) {
-                        const uint32_t payload = kh_val(features->feature_hamming_le2_hash, k);
-                        const int d = (int)((payload >> 29u) & 0x3u);
-                        const int amb = ((payload & 0x80000000u) != 0u);
-                        const int feat = (int)(payload & 0x1FFFFFFFu);
-                        if (!amb && feat > 0 && d <= maxHammingDistance) {
-                            *feature_index = (uint32_t)feat;
-                            *hamming_distance = d;
-                            memcpy(matching_sequence, sequence + off, features->feature_lengths[feat - 1]);
-                            matching_sequence[features->feature_lengths[feat - 1]] = '\0';
-                            *match_position = (uint16_t)off;
-                            return;
-                        }
-                    }
-                }
-            }
-
-            /* Phases 1-3 exhausted — fall through to brute-force (Phase 4) below */
 
         } else {
             /* Legacy per-offset cascade for mismatched-length features */
