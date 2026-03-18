@@ -1,0 +1,49 @@
+==============================================================
+PE Bulk Feature Benchmark Summary
+==============================================================
+Stage:                  storage
+Y-removal:              0
+Sample:                 21033-09-01-13-01_S1_L007
+FASTQ dir:              /storage/PE
+STAR index:             /storage/autoindex_110_44/bulk_index
+Transcriptome:          /storage/autoindex_110_44/bulk_index/transcriptome.fa
+GTF:                    /storage/autoindex_110_44/bulk_index/cellranger_ref/genes.gtf
+tx2gene:                /tmp/pe_bulk_feature_benchmark_no_yremove_20260318_144657/inputs/tx2gene.tsv
+Salmon libtype:         IU
+
+Timings:
+  Copy to pikachu:      NA
+  Integrated STAR:      05.69
+  Integrated Salmon:    31.00
+  External decompress:  12.79
+  External trimvalidate:14.36
+  External STAR:        29.65
+  External remove_y:    (skipped)
+  External Salmon:      30.49
+
+Integrated outputs:
+  quant.sf:             /tmp/pe_bulk_feature_benchmark_no_yremove_20260318_144657/storage/integrated/quant.sf
+  quant.genes.sf:       /tmp/pe_bulk_feature_benchmark_no_yremove_20260318_144657/storage/integrated/quant.genes.sf
+  transcriptome BAM:    /tmp/pe_bulk_feature_benchmark_no_yremove_20260318_144657/storage/integrated/Aligned.toTranscriptome.out.bam
+  Salmon QC dir:        /tmp/pe_bulk_feature_benchmark_no_yremove_20260318_144657/storage/integrated/salmon_qc
+  Integrated Y R1:      NA
+  Integrated Y R2:      NA
+  Integrated noY R1:    NA
+  Integrated noY R2:    NA
+
+External outputs:
+  raw R1 (plain):       /tmp/pe_bulk_feature_benchmark_no_yremove_20260318_144657/storage/external/21033-09-01-13-01_S1_L007.raw_R1.fastq
+  raw R2 (plain):       /tmp/pe_bulk_feature_benchmark_no_yremove_20260318_144657/storage/external/21033-09-01-13-01_S1_L007.raw_R2.fastq
+  trimmed R1:           /tmp/pe_bulk_feature_benchmark_no_yremove_20260318_144657/storage/external/21033-09-01-13-01_S1_L007.trimmed_R1.fastq
+  trimmed R2:           /tmp/pe_bulk_feature_benchmark_no_yremove_20260318_144657/storage/external/21033-09-01-13-01_S1_L007.trimmed_R2.fastq
+  transcriptome BAM:    /tmp/pe_bulk_feature_benchmark_no_yremove_20260318_144657/storage/external/Aligned.toTranscriptome.out.bam
+  Salmon QC dir:        /tmp/pe_bulk_feature_benchmark_no_yremove_20260318_144657/storage/external/salmon_qc
+  External Y R1:        NA
+  External Y R2:        NA
+  External noY R1:      NA
+  External noY R2:      NA
+
+Comparison TSV:         /tmp/pe_bulk_feature_benchmark_no_yremove_20260318_144657/storage/comparison/comparison_metrics.tsv
+Manifest:               /tmp/pe_bulk_feature_benchmark_no_yremove_20260318_144657/storage/BENCHMARK_MANIFEST.txt
+Summary:                /tmp/pe_bulk_feature_benchmark_no_yremove_20260318_144657/storage/BENCHMARK_SUMMARY.txt
+==============================================================

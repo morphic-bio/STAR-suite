@@ -98,14 +98,16 @@ Feature assignment and mapping run concurrently via `dynamicThreadInterface`.
 
 ### PE Bulk (Integrated STAR-suite vs External Stepwise Pipeline)
 
-"External stepwise" = Trim Galore + STAR align + remove\_y\_reads + Salmon quant (sequential).
+"External stepwise" = Trim Galore + STAR align + (optional remove\_y\_reads) + Salmon quant (sequential).
 
-| Dataset | Transcript Pearson | Gene Pearson | Speedup |
-|---|---|---|---|
-| JAX PE (full, 32 threads) | 0.995 | 0.997 | 2.1x |
+| Dataset | Y-removal | Transcript Pearson | Gene Pearson | Speedup |
+|---|---|---|---|---|
+| JAX PE (full, 32 threads) | yes | 0.995 | 0.997 | 2.1x |
+| JAX PE (full, 32 threads) | no | 0.995 | 0.997 | 2.4x |
 
 - TranscriptVB vs Salmon (alignment-mode VB) on expressed transcripts.
-- Integrated: 61 s vs external stepwise: 125 s (32 threads).
+- With Y-removal: integrated 61 s vs external stepwise 125 s (32 threads).
+- Without Y-removal: integrated 37 s vs external stepwise 87 s (32 threads).
 
 ### SLAM-seq (STAR-SLAM vs GrandSLAM/GEDI)
 

@@ -197,6 +197,51 @@ Establishes the baseline for 2-library NXT perturb-seq with CRISPRa v2 guides.
    brute-force fallback only activates for `maxHammingDistance > 2`, preventing
    performance regression on standard prehash tiers.
 
+## PE Bulk Benchmark (Integrated STAR-suite vs External Stepwise Pipeline)
+
+Benchmark script: `scripts/paper/run_pe_bulk_feature_benchmark.sh`
+Dataset: JAX PE (21033-09-01-13-01\_S1\_L007), full sample on `/storage`, 32 threads.
+STAR index: `/storage/autoindex_110_44/bulk_index`
+
+### With Y-removal (2026-03-10)
+
+| Step | Integrated | External |
+|---|---|---|
+| STAR (trim + align + Y-split + TranscriptVB) | 29.20s | — |
+| Salmon QC | 31.51s | 31.03s |
+| Decompress | — | 13.44s |
+| Trimvalidate | — | 16.89s |
+| STAR align | — | 49.94s |
+| remove\_y\_reads | — | 14.03s |
+| **Total** | **60.71s** | **125.33s** |
+| **Speedup** | **2.1x** | — |
+
+### Without Y-removal (2026-03-18)
+
+| Step | Integrated | External |
+|---|---|---|
+| STAR (trim + align + TranscriptVB) | 5.69s | — |
+| Salmon QC | 31.00s | 30.49s |
+| Decompress | — | 12.79s |
+| Trimvalidate | — | 14.36s |
+| STAR align | — | 29.65s |
+| **Total** | **36.69s** | **87.29s** |
+| **Speedup** | **2.4x** | — |
+
+Note: The low 5.69s integrated STAR time in the no-Y run reflects a warm page cache
+(genome loaded by the preceding downsampled stage). The Y-removal run's 29.20s
+is a cold-cache measurement and is more representative for single-invocation use.
+
+### Quantification Parity (no Y-removal, storage)
+
+| Comparison | Transcript Pearson | Gene Pearson |
+|---|---|---|
+| TranscriptVB vs integrated Salmon | 0.995 | 0.997 |
+| Integrated Salmon vs external Salmon | 1.000 | 0.997 |
+| TranscriptVB vs external Salmon | 0.995 | 0.997 |
+
+Artifacts: `/tmp/pe_bulk_feature_benchmark_no_yremove_20260318_144657/`
+
 ## File Inventory
 
 ```
@@ -233,18 +278,22 @@ paper_benchmarks_20260318/
 │   ├── parity_vs_cr9.txt             (canonical parity metrics)
 │   ├── phase_timings.txt
 │   └── dynamic_thread_telemetry.txt
-└── msk_30polyko/
-    ├── BENCHMARK_SUMMARY.txt
-    ├── Log.final.out
-    ├── pf_multi_config.csv
-    ├── RUN_COMMAND.sh
-    ├── run_msk_30polyko_benchmark.sh
-    ├── star_solo_summary.csv
-    ├── protospacer_calls_summary.csv
-    ├── protospacer_umi_thresholds.csv
-    ├── parity_vs_cr9.txt             (canonical parity metrics)
-    ├── phase_timings.txt
-    └── dynamic_thread_telemetry.txt
+├── msk_30polyko/
+│   ├── BENCHMARK_SUMMARY.txt
+│   ├── Log.final.out
+│   ├── pf_multi_config.csv
+│   ├── RUN_COMMAND.sh
+│   ├── run_msk_30polyko_benchmark.sh
+│   ├── star_solo_summary.csv
+│   ├── protospacer_calls_summary.csv
+│   ├── protospacer_umi_thresholds.csv
+│   ├── parity_vs_cr9.txt             (canonical parity metrics)
+│   ├── phase_timings.txt
+│   └── dynamic_thread_telemetry.txt
+└── pe_bulk/
+    ├── BENCHMARK_SUMMARY_yremove.txt  (with Y-removal, 2026-03-10)
+    ├── BENCHMARK_SUMMARY_no_yremove.txt (without Y-removal, 2026-03-18)
+    └── comparison_metrics_no_yremove.tsv
 ```
 
 ## Full Run Outputs

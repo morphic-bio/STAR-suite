@@ -1,0 +1,54 @@
+==============================================================
+PE Bulk Feature Benchmark Summary
+==============================================================
+Stage:                  storage
+Sample:                 21033-09-01-13-01_S1_L007
+FASTQ dir:              /storage/PE
+STAR index:             /storage/autoindex_110_44/bulk_index
+Transcriptome:          /storage/autoindex_110_44/bulk_index/transcriptome.fa
+GTF:                    /storage/autoindex_110_44/bulk_index/cellranger_ref/genes.gtf
+tx2gene:                /tmp/pe_bulk_feature_benchmark_full_iu32_20260310_033337/inputs/tx2gene.tsv
+Salmon libtype:         IU
+
+Timings:
+  Copy to pikachu:      NA
+  Integrated STAR:      29.20
+  Integrated Salmon:    31.51
+  External decompress:  13.44
+  External trimvalidate:16.89
+  External STAR:        49.94
+  External remove_y:    14.03
+  External Salmon:      31.03
+
+Integrated outputs:
+  quant.sf:             /tmp/pe_bulk_feature_benchmark_full_iu32_20260310_033337/storage/integrated/quant.sf
+  quant.genes.sf:       /tmp/pe_bulk_feature_benchmark_full_iu32_20260310_033337/storage/integrated/quant.genes.sf
+  transcriptome BAM:    /tmp/pe_bulk_feature_benchmark_full_iu32_20260310_033337/storage/integrated/Aligned.toTranscriptome.out.bam
+  Salmon QC dir:        /tmp/pe_bulk_feature_benchmark_full_iu32_20260310_033337/storage/integrated/salmon_qc
+  Integrated Y R1:      /tmp/pe_bulk_feature_benchmark_full_iu32_20260310_033337/storage/integrated/21033-09-01-13-01_S1_L007_Y_R1_001.fastq.gz
+  Integrated Y R2:      /tmp/pe_bulk_feature_benchmark_full_iu32_20260310_033337/storage/integrated/21033-09-01-13-01_S1_L007_Y_R2_001.fastq.gz
+  Integrated noY R1:    /tmp/pe_bulk_feature_benchmark_full_iu32_20260310_033337/storage/integrated/21033-09-01-13-01_S1_L007_noY_R1_001.fastq.gz
+  Integrated noY R2:    /tmp/pe_bulk_feature_benchmark_full_iu32_20260310_033337/storage/integrated/21033-09-01-13-01_S1_L007_noY_R2_001.fastq.gz
+
+External outputs:
+  raw R1 (plain):       /tmp/pe_bulk_feature_benchmark_full_iu32_20260310_033337/storage/external/21033-09-01-13-01_S1_L007.raw_R1.fastq
+  raw R2 (plain):       /tmp/pe_bulk_feature_benchmark_full_iu32_20260310_033337/storage/external/21033-09-01-13-01_S1_L007.raw_R2.fastq
+  trimmed R1:           /tmp/pe_bulk_feature_benchmark_full_iu32_20260310_033337/storage/external/21033-09-01-13-01_S1_L007.trimmed_R1.fastq
+  trimmed R2:           /tmp/pe_bulk_feature_benchmark_full_iu32_20260310_033337/storage/external/21033-09-01-13-01_S1_L007.trimmed_R2.fastq
+  transcriptome BAM:    /tmp/pe_bulk_feature_benchmark_full_iu32_20260310_033337/storage/external/Aligned.toTranscriptome.out.bam
+  Salmon QC dir:        /tmp/pe_bulk_feature_benchmark_full_iu32_20260310_033337/storage/external/salmon_qc
+  External Y R1:        /tmp/pe_bulk_feature_benchmark_full_iu32_20260310_033337/storage/external/y_fastq_split/21033-09-01-13-01_S1_L007.trimmed_R1_Y.fastq
+  External Y R2:        /tmp/pe_bulk_feature_benchmark_full_iu32_20260310_033337/storage/external/y_fastq_split/21033-09-01-13-01_S1_L007.trimmed_R2_Y.fastq
+  External noY R1:      /tmp/pe_bulk_feature_benchmark_full_iu32_20260310_033337/storage/external/y_fastq_split/21033-09-01-13-01_S1_L007.trimmed_R1_noY.fastq
+  External noY R2:      /tmp/pe_bulk_feature_benchmark_full_iu32_20260310_033337/storage/external/y_fastq_split/21033-09-01-13-01_S1_L007.trimmed_R2_noY.fastq
+
+FASTQ counts:
+  Integrated Y R1 reads:    8265
+  Integrated noY R1 reads:  6422076
+  External Y R1 reads:      8265
+  External noY R1 reads:    6422076
+
+Comparison TSV:         /tmp/pe_bulk_feature_benchmark_full_iu32_20260310_033337/storage/comparison/comparison_metrics.tsv
+Manifest:               /tmp/pe_bulk_feature_benchmark_full_iu32_20260310_033337/storage/BENCHMARK_MANIFEST.txt
+Summary:                /tmp/pe_bulk_feature_benchmark_full_iu32_20260310_033337/storage/BENCHMARK_SUMMARY.txt
+==============================================================
