@@ -199,9 +199,9 @@ static void build_feature_hamming_variant_hashes(feature_arrays *features) {
     /* Entry budget check (existing) */
     if (est_le1 > entry_budget) {
         fprintf(stderr,
-                "PREHASH_BUDGET: tier=d1 entries=%llu est_bytes=%lluGB budget=%lluGB decision=SKIP (entry budget)\n",
+                "PREHASH_BUDGET: tier=d1 entries=%llu est_bytes=%lluMB budget=%lluGB decision=SKIP (entry budget)\n",
                 (unsigned long long)est_le1,
-                (unsigned long long)(est_le1_bytes / (1024ULL*1024ULL*1024ULL)),
+                (unsigned long long)(est_le1_bytes / (1024ULL*1024ULL)),
                 mem_budget ? (unsigned long long)(mem_budget / (1024ULL*1024ULL*1024ULL)) : 0ULL);
         return;
     }
@@ -209,17 +209,17 @@ static void build_feature_hamming_variant_hashes(feature_arrays *features) {
     /* Memory budget check for d1 */
     if (mem_budget > 0 && est_le1_bytes > mem_budget) {
         fprintf(stderr,
-                "PREHASH_BUDGET: tier=d1 entries=%llu est_bytes=%lluGB budget=%lluGB decision=SKIP\n",
+                "PREHASH_BUDGET: tier=d1 entries=%llu est_bytes=%lluMB budget=%lluGB decision=SKIP\n",
                 (unsigned long long)est_le1,
-                (unsigned long long)(est_le1_bytes / (1024ULL*1024ULL*1024ULL)),
+                (unsigned long long)(est_le1_bytes / (1024ULL*1024ULL)),
                 (unsigned long long)(mem_budget / (1024ULL*1024ULL*1024ULL)));
         return;
     }
 
     fprintf(stderr,
-            "PREHASH_BUDGET: tier=d1 entries=%llu est_bytes=%lluGB budget=%lluGB decision=BUILD\n",
+            "PREHASH_BUDGET: tier=d1 entries=%llu est_bytes=%lluMB budget=%lluGB decision=BUILD\n",
             (unsigned long long)est_le1,
-            (unsigned long long)(est_le1_bytes / (1024ULL*1024ULL*1024ULL)),
+            (unsigned long long)(est_le1_bytes / (1024ULL*1024ULL)),
             mem_budget ? (unsigned long long)(mem_budget / (1024ULL*1024ULL*1024ULL)) : 0ULL);
 
     seq_hash_init(&features->feature_hamming_le1_hash, mode);
@@ -287,9 +287,9 @@ static void build_feature_hamming_variant_hashes(feature_arrays *features) {
     /* Memory budget check for d2 */
     if (mem_budget > 0 && est_le2_bytes > mem_budget) {
         fprintf(stderr,
-                "PREHASH_BUDGET: tier=d2 entries=%llu est_bytes=%lluGB budget=%lluGB decision=SKIP\n",
+                "PREHASH_BUDGET: tier=d2 entries=%llu est_bytes=%lluMB budget=%lluGB decision=SKIP\n",
                 (unsigned long long)est_le2,
-                (unsigned long long)(est_le2_bytes / (1024ULL*1024ULL*1024ULL)),
+                (unsigned long long)(est_le2_bytes / (1024ULL*1024ULL)),
                 (unsigned long long)(mem_budget / (1024ULL*1024ULL*1024ULL)));
         fprintf(stderr, "Feature prehash enabled: <=1 only (d2 skipped due to memory budget)\n");
         return;
@@ -298,18 +298,18 @@ static void build_feature_hamming_variant_hashes(feature_arrays *features) {
     /* Entry budget check for d2 */
     if (est_le2 > entry_budget) {
         fprintf(stderr,
-                "PREHASH_BUDGET: tier=d2 entries=%llu est_bytes=%lluGB budget=%lluGB decision=SKIP (entry budget)\n",
+                "PREHASH_BUDGET: tier=d2 entries=%llu est_bytes=%lluMB budget=%lluGB decision=SKIP (entry budget)\n",
                 (unsigned long long)est_le2,
-                (unsigned long long)(est_le2_bytes / (1024ULL*1024ULL*1024ULL)),
+                (unsigned long long)(est_le2_bytes / (1024ULL*1024ULL)),
                 mem_budget ? (unsigned long long)(mem_budget / (1024ULL*1024ULL*1024ULL)) : 0ULL);
         fprintf(stderr, "Feature prehash enabled: <=1 only (d2 skipped due to entry budget)\n");
         return;
     }
 
     fprintf(stderr,
-            "PREHASH_BUDGET: tier=d2 entries=%llu est_bytes=%lluGB budget=%lluGB decision=BUILD\n",
+            "PREHASH_BUDGET: tier=d2 entries=%llu est_bytes=%lluMB budget=%lluGB decision=BUILD\n",
             (unsigned long long)est_le2,
-            (unsigned long long)(est_le2_bytes / (1024ULL*1024ULL*1024ULL)),
+            (unsigned long long)(est_le2_bytes / (1024ULL*1024ULL)),
             mem_budget ? (unsigned long long)(mem_budget / (1024ULL*1024ULL*1024ULL)) : 0ULL);
 
     seq_hash_init(&features->feature_hamming_le2_hash, mode);

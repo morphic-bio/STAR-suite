@@ -3778,6 +3778,37 @@ int checkAndCorrectFeature(char *line, feature_arrays *features,int maxHammingDi
     return 0;
 }
 
+static int pf_hamming_search_fasthamming(
+    const char *seq, int feat_len,
+    feature_arrays *features, int maxHamming,
+    int *out_hamming, int *out_ambiguous)
+{
+    unsigned char query_code[feat_len / 2 + 1];
+    memset(query_code, 0, sizeof(query_code));
+    int query_code_len = string2code((char *)seq, feat_len, query_code);
+    int best_d = maxHamming + 1;
+    int best_feat = 0;
+    int n_best = 0;
+    for (int i = 0; i < features->number_of_features; i++) {
+        if (features->feature_code_lengths[i] != query_code_len) continue;
+        int d = fuzzy_matching_codes(query_code, features->feature_codes[i],
+                                     query_code_len, features->feature_lengths[i],
+                                     maxHamming);
+        if (d < best_d) {
+            best_d = d;
+            best_feat = i + 1;
+            n_best = 1;
+        } else if (d == best_d && (i + 1) != best_feat) {
+            n_best++;
+        }
+        if (best_d == 0) break;
+    }
+    *out_hamming = best_d;
+    if (n_best > 1) { *out_ambiguous = 1; return 0; }
+    *out_ambiguous = 0;
+    return (best_d <= maxHamming) ? best_feat : 0;
+}
+
 static int pf_single_offset_hash_search(
     const char *seq,
     int feat_len,
@@ -3861,8 +3892,16 @@ static int pf_single_offset_hash_search(
             }
             return 0;
         }
-        *out_hamming = maxHammingDistance + 1;
-        return 0;
+        if (maxHammingDistance <= 2) {
+            *out_hamming = maxHammingDistance + 1;
+            return 0;
+        }
+    }
+
+    if (maxHammingDistance > 2) {
+        return pf_hamming_search_fasthamming(seq, feat_len, features,
+                                             maxHammingDistance, out_hamming,
+                                             out_ambiguous);
     }
 
     *out_hamming = maxHammingDistance + 1;

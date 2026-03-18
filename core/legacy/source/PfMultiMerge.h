@@ -5,6 +5,8 @@
 #include "MexWriter.h"
 #include <vector>
 #include <fstream>
+#include <chrono>
+#include <iostream>
 
 /**
  * @file PfMultiMerge.h
@@ -16,6 +18,19 @@
 
 namespace PfMultiMerge {
 
+struct TimerScope {
+    const char* label;
+    std::ostream& log;
+    std::chrono::steady_clock::time_point t0;
+    TimerScope(const char* l, std::ostream& lg)
+        : label(l), log(lg), t0(std::chrono::steady_clock::now()) {}
+    ~TimerScope() {
+        auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - t0).count();
+        log << "pf-timing: " << label << " " << ms << " ms" << std::endl;
+    }
+};
+
 /**
  * @struct MexData
  * @brief In-memory representation of a MEX file
@@ -26,50 +41,29 @@ struct MexData {
     vector<string> featureTypes; // Feature types
     vector<string> barcodes;    // Barcode list (from barcodes.tsv)
     vector<MexWriter::Triplet> triplets; // Sparse matrix entries (row, col, count)
-    // Note: triplets use 0-based indices
 };
 
-/**
- * @brief Read MEX files from directory
- * @param mexDir Directory containing matrix.mtx, features.tsv, barcodes.tsv
- * @return MexData structure
- * @throws runtime_error on read errors
- */
+string resolveMexFile(const string& mexDir, const string& basename);
+vector<string> readLines(const string& path);
+
 MexData readMex(const string& mexDir);
 
-/**
- * @brief Filter MEX data to specific feature type
- * @param data Input MEX data
- * @param featureType Feature type to keep (e.g., "Gene Expression")
- * @return Filtered MexData
- */
 MexData filterByFeatureType(const MexData& data, const string& featureType);
 
-/**
- * @brief Merge multiple MEX files
- * @param gexData GEX MEX data (determines barcode order)
- * @param featureDataVec Vector of feature MEX data to merge
- * @return Combined MexData
- */
 MexData mergeMex(const MexData& gexData, const vector<MexData>& featureDataVec);
 
-/**
- * @brief Compute observed GEX barcodes (barcodes with counts > 0 in GEX triplets)
- * @param gexData GEX MEX data
- * @return Vector of observed barcode strings
- */
 vector<string> computeObservedGexBarcodes(const MexData& gexData);
 
+void pruneZeroCountFeatures(MexData& data, ofstream& logStream);
+
+/** @brief Silent overload for pre-merge pruning. Returns count of pruned features. */
+size_t pruneZeroCountFeatures(MexData& data);
+
 /**
- * @brief Write combined MEX to directory
- * @param outputDir Output directory (will be created)
- * @param data Combined MEX data
- * @param gemWell GEM well suffix (e.g., "1", "2") to append to barcodes
- * @param logStream Log stream for output messages
- * @param gexBarcodes Optional GEX barcode whitelist (if non-empty, filter to GEX-only barcodes)
- * @param inputChemistry Effective correction chemistry (NXT/TRU)
- * @param outputChemistry Output barcode namespace (NXT/TRU)
- * @return 0 on success, -1 on error
+ * @brief Write combined MEX to directory with streaming gzip.
+ *
+ * Uses vector-based O(1) barcode remap and writes directly to gzFile
+ * with batched snprintf, eliminating the write-plain-then-compress path.
  */
 int writeCombinedMex(const string& outputDir,
                      const MexData& data,

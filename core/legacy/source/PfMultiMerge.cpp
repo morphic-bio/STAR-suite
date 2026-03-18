@@ -6,11 +6,14 @@
 #include <iostream>
 #include <algorithm>
 #include <map>
+#include <unordered_map>
+#include <unordered_set>
 #include <sys/stat.h>
 #include <stdexcept>
 #include <cstdlib>
 #include <cstdio>
 #include <cctype>
+#include <climits>
 #include <zlib.h>
 using std::cerr;
 using std::endl;
@@ -18,6 +21,8 @@ using std::endl;
 namespace PfMultiMerge {
 
 namespace {
+
+static const int kGzLevel = 3;
 
 static string normalizeChemistry(const string& input) {
     string out = input;
@@ -40,7 +45,6 @@ static void translateNxtMiddleTwoBasesInplace(string& barcode) {
     if (barcode.empty()) {
         return;
     }
-    // Preserve optional GEM suffix ("-<digits>"), only translate the 16bp core.
     size_t coreEnd = barcode.size();
     size_t dashPos = barcode.find_last_of('-');
     if (dashPos != string::npos && dashPos < barcode.size() - 1) {
@@ -99,86 +103,16 @@ static bool gzGetLine(gzFile file, string& lineOut) {
     }
 }
 
-static bool compressFileToGz(const string& plainPath, ofstream& logStream) {
-    FILE* in = std::fopen(plainPath.c_str(), "rb");
-    if (in == nullptr) {
-        logStream << "WARNING: Failed to open file for gzip: " << plainPath << "\n";
-        return false;
-    }
-
-    const string gzPath = plainPath + ".gz";
-    gzFile out = gzopen(gzPath.c_str(), "wb");
-    if (out == nullptr) {
-        std::fclose(in);
-        logStream << "WARNING: Failed to open gzip output: " << gzPath << "\n";
-        return false;
-    }
-
-    unsigned char buffer[1 << 20];
-    bool ok = true;
-    while (ok) {
-        size_t nRead = std::fread(buffer, 1, sizeof(buffer), in);
-        if (nRead > 0) {
-            int nWritten = gzwrite(out, buffer, static_cast<unsigned int>(nRead));
-            if (nWritten != static_cast<int>(nRead)) {
-                ok = false;
-                break;
-            }
-        }
-        if (nRead < sizeof(buffer)) {
-            if (std::ferror(in) != 0) {
-                ok = false;
-            }
-            break;
-        }
-    }
-
-    std::fclose(in);
-    int gzCloseRet = gzclose(out);
-    if (gzCloseRet != Z_OK) {
-        ok = false;
-    }
-
-    if (!ok) {
-        std::remove(gzPath.c_str());
-        logStream << "WARNING: Failed to gzip " << plainPath << ", leaving uncompressed\n";
-        return false;
-    }
-
-    if (std::remove(plainPath.c_str()) != 0) {
-        logStream << "WARNING: Failed to remove uncompressed file after gzip: "
-                  << plainPath << "\n";
-    }
-
-    return true;
-}
-
-static bool writeLinesPlain(const string& path, const vector<string>& lines) {
-    std::ofstream out(path.c_str());
-    if (!out.is_open()) {
-        return false;
-    }
+static bool writeGzLines(const string& path, const vector<string>& lines) {
+    gzFile gz = gzopen(path.c_str(), "wb");
+    if (gz == nullptr) return false;
+    gzbuffer(gz, 1 << 20);
+    gzsetparams(gz, kGzLevel, Z_DEFAULT_STRATEGY);
     for (const auto& line : lines) {
-        out << line << "\n";
+        if (gzwrite(gz, line.data(), line.size()) <= 0) { gzclose(gz); return false; }
+        if (gzwrite(gz, "\n", 1) <= 0) { gzclose(gz); return false; }
     }
-    return true;
-}
-
-static bool writeNamespaceMapPlain(const string& path,
-                                   const vector<string>& nativeBarcodes,
-                                   const vector<string>& outputBarcodes) {
-    if (nativeBarcodes.size() != outputBarcodes.size()) {
-        return false;
-    }
-    std::ofstream out(path.c_str());
-    if (!out.is_open()) {
-        return false;
-    }
-    out << "native_barcode\toutput_barcode\n";
-    for (size_t i = 0; i < nativeBarcodes.size(); ++i) {
-        out << nativeBarcodes[i] << "\t" << outputBarcodes[i] << "\n";
-    }
-    return true;
+    return gzclose(gz) == Z_OK;
 }
 
 } // namespace
@@ -188,11 +122,11 @@ string resolveMexFile(const string& mexDir, const string& basename) {
     string gz = plain + ".gz";
     
     struct stat st;
-    if (stat(plain.c_str(), &st) == 0) {
-        return plain;
-    }
     if (stat(gz.c_str(), &st) == 0) {
         return gz;
+    }
+    if (stat(plain.c_str(), &st) == 0) {
+        return plain;
     }
     
     ostringstream err;
@@ -234,7 +168,6 @@ vector<string> readLines(const string& path) {
         
         string line;
         while (getline(file, line)) {
-            // Remove trailing newline
             while (!line.empty() && (line.back() == '\n' || line.back() == '\r')) {
                 line.pop_back();
             }
@@ -250,7 +183,6 @@ vector<string> readLines(const string& path) {
 MexData readMex(const string& mexDir) {
     MexData data;
     
-    // Read features.tsv
     string featuresPath = resolveMexFile(mexDir, "features.tsv");
     vector<string> featureLines = readLines(featuresPath);
     for (const auto& line : featureLines) {
@@ -272,11 +204,9 @@ MexData readMex(const string& mexDir) {
         }
     }
     
-    // Read barcodes.tsv
     string barcodesPath = resolveMexFile(mexDir, "barcodes.tsv");
     data.barcodes = readLines(barcodesPath);
     
-    // Read matrix.mtx
     string matrixPath = resolveMexFile(mexDir, "matrix.mtx");
     bool isGz = (matrixPath.length() > 3 && matrixPath.substr(matrixPath.length() - 3) == ".gz");
     
@@ -297,7 +227,7 @@ MexData readMex(const string& mexDir) {
             if (line.empty()) continue;
             
             if (line[0] == '%') {
-                continue; // Skip comments
+                continue;
             }
             
             if (!headerDone) {
@@ -311,7 +241,6 @@ MexData readMex(const string& mexDir) {
             uint32_t row, col;
             double val;
             if (ss >> row >> col >> val) {
-                // Convert from 1-based to 0-based
                 if (row > 0 && col > 0 && row <= data.features.size() && col <= data.barcodes.size()) {
                     MexWriter::Triplet t;
                     t.gene_idx = row - 1;
@@ -366,7 +295,6 @@ MexData readMex(const string& mexDir) {
         }
     }
     
-    // Validate dimensions
     if (data.features.size() != data.featureNames.size() || 
         data.features.size() != data.featureTypes.size()) {
         throw runtime_error("Features array size mismatch");
@@ -377,7 +305,7 @@ MexData readMex(const string& mexDir) {
 
 MexData filterByFeatureType(const MexData& data, const string& featureType) {
     MexData filtered;
-    map<uint32_t, uint32_t> rowMap; // old row -> new row
+    map<uint32_t, uint32_t> rowMap;
     
     for (size_t i = 0; i < data.features.size(); ++i) {
         if (data.featureTypes[i] == featureType) {
@@ -407,37 +335,33 @@ MexData filterByFeatureType(const MexData& data, const string& featureType) {
 MexData mergeMex(const MexData& gexData, const vector<MexData>& featureDataVec) {
     MexData merged;
     
-    // Start with GEX features and barcodes
     merged.features = gexData.features;
     merged.featureNames = gexData.featureNames;
     merged.featureTypes = gexData.featureTypes;
     merged.barcodes = gexData.barcodes;
     merged.triplets = gexData.triplets;
     
-    // Create barcode map (barcode -> column index in GEX)
-    map<string, uint32_t> barcodeMap;
+    std::unordered_map<string, uint32_t> barcodeMap;
+    barcodeMap.reserve(merged.barcodes.size() * 2);
     for (size_t i = 0; i < merged.barcodes.size(); ++i) {
         barcodeMap[merged.barcodes[i]] = i;
     }
     
-    // Merge each feature MEX
     uint32_t rowOffset = merged.features.size();
-    uint32_t missingCount = 0;
+    uint64_t missingCount = 0;
     
     for (const auto& featData : featureDataVec) {
-        // Add features
         for (size_t i = 0; i < featData.features.size(); ++i) {
             merged.features.push_back(featData.features[i]);
             merged.featureNames.push_back(featData.featureNames[i]);
             merged.featureTypes.push_back(featData.featureTypes[i]);
         }
         
-        // Merge triplets
         for (const auto& t : featData.triplets) {
             if (t.cell_idx >= featData.barcodes.size()) {
-                continue; // Skip invalid indices
+                continue;
             }
-            string bc = featData.barcodes[t.cell_idx];
+            const string& bc = featData.barcodes[t.cell_idx];
             auto it = barcodeMap.find(bc);
             if (it != barcodeMap.end()) {
                 MexWriter::Triplet newT;
@@ -461,24 +385,116 @@ MexData mergeMex(const MexData& gexData, const vector<MexData>& featureDataVec) 
 }
 
 vector<string> computeObservedGexBarcodes(const MexData& gexData) {
-    // Compute per-barcode counts from GEX triplets
-    map<uint32_t, uint64_t> barcodeCounts;
+    vector<uint64_t> barcodeCounts(gexData.barcodes.size(), 0);
     for (const auto& t : gexData.triplets) {
-        if (t.cell_idx < gexData.barcodes.size()) {
+        if (t.cell_idx < barcodeCounts.size()) {
             barcodeCounts[t.cell_idx] += t.count;
         }
     }
     
-    // Return barcodes with counts > 0
     vector<string> observedBarcodes;
-    observedBarcodes.reserve(barcodeCounts.size());
-    for (const auto& pair : barcodeCounts) {
-        if (pair.second > 0) {
-            observedBarcodes.push_back(gexData.barcodes[pair.first]);
+    for (size_t i = 0; i < barcodeCounts.size(); ++i) {
+        if (barcodeCounts[i] > 0) {
+            observedBarcodes.push_back(gexData.barcodes[i]);
         }
     }
     
     return observedBarcodes;
+}
+
+void pruneZeroCountFeatures(MexData& data, ofstream& logStream) {
+    vector<bool> hasCount(data.features.size(), false);
+    for (const auto& t : data.triplets) {
+        if (t.gene_idx < hasCount.size()) {
+            hasCount[t.gene_idx] = true;
+        }
+    }
+
+    vector<uint32_t> oldToNew(data.features.size(), UINT32_MAX);
+    vector<string> keptFeatures, keptNames, keptTypes;
+    size_t prunedNonGex = 0;
+
+    for (size_t i = 0; i < data.features.size(); ++i) {
+        bool isGex = (data.featureTypes[i] == "Gene Expression");
+        if (isGex || hasCount[i]) {
+            oldToNew[i] = keptFeatures.size();
+            keptFeatures.push_back(data.features[i]);
+            keptNames.push_back(data.featureNames[i]);
+            keptTypes.push_back(data.featureTypes[i]);
+        } else {
+            prunedNonGex++;
+        }
+    }
+
+    if (prunedNonGex == 0) {
+        logStream << "pruneZeroCountFeatures: nothing to prune (" << data.features.size() << " features all have counts)\n";
+        return;
+    }
+
+    vector<MexWriter::Triplet> keptTriplets;
+    keptTriplets.reserve(data.triplets.size());
+    for (const auto& t : data.triplets) {
+        if (t.gene_idx < oldToNew.size() && oldToNew[t.gene_idx] != UINT32_MAX) {
+            MexWriter::Triplet newT;
+            newT.gene_idx = oldToNew[t.gene_idx];
+            newT.cell_idx = t.cell_idx;
+            newT.count = t.count;
+            keptTriplets.push_back(newT);
+        }
+    }
+
+    logStream << "pruneZeroCountFeatures: " << data.features.size() << " -> " << keptFeatures.size()
+              << " features (pruned " << prunedNonGex << " zero-count non-GEX features)\n";
+
+    data.features = std::move(keptFeatures);
+    data.featureNames = std::move(keptNames);
+    data.featureTypes = std::move(keptTypes);
+    data.triplets = std::move(keptTriplets);
+}
+
+size_t pruneZeroCountFeatures(MexData& data) {
+    vector<bool> hasCount(data.features.size(), false);
+    for (const auto& t : data.triplets) {
+        if (t.gene_idx < hasCount.size()) {
+            hasCount[t.gene_idx] = true;
+        }
+    }
+
+    vector<uint32_t> oldToNew(data.features.size(), UINT32_MAX);
+    vector<string> keptFeatures, keptNames, keptTypes;
+    size_t pruned = 0;
+
+    for (size_t i = 0; i < data.features.size(); ++i) {
+        bool isGex = (data.featureTypes[i] == "Gene Expression");
+        if (isGex || hasCount[i]) {
+            oldToNew[i] = keptFeatures.size();
+            keptFeatures.push_back(data.features[i]);
+            keptNames.push_back(data.featureNames[i]);
+            keptTypes.push_back(data.featureTypes[i]);
+        } else {
+            pruned++;
+        }
+    }
+
+    if (pruned == 0) return 0;
+
+    vector<MexWriter::Triplet> keptTriplets;
+    keptTriplets.reserve(data.triplets.size());
+    for (const auto& t : data.triplets) {
+        if (t.gene_idx < oldToNew.size() && oldToNew[t.gene_idx] != UINT32_MAX) {
+            MexWriter::Triplet newT;
+            newT.gene_idx = oldToNew[t.gene_idx];
+            newT.cell_idx = t.cell_idx;
+            newT.count = t.count;
+            keptTriplets.push_back(newT);
+        }
+    }
+
+    data.features = std::move(keptFeatures);
+    data.featureNames = std::move(keptNames);
+    data.featureTypes = std::move(keptTypes);
+    data.triplets = std::move(keptTriplets);
+    return pruned;
 }
 
 int writeCombinedMex(const string& outputDir,
@@ -488,7 +504,8 @@ int writeCombinedMex(const string& outputDir,
                      const vector<string>& gexBarcodes,
                      const string& inputChemistry,
                      const string& outputChemistry) {
-    // Create directory
+    TimerScope timer("writeCombinedMex", logStream);
+
     string cmd = "mkdir -p \"" + outputDir + "\"";
     int ret = system(cmd.c_str());
     if (ret != 0) {
@@ -496,7 +513,6 @@ int writeCombinedMex(const string& outputDir,
         return -1;
     }
     
-    // Validate inputs
     if (data.features.empty()) {
         cerr << "ERROR: No features in MEX data" << endl;
         return -1;
@@ -505,11 +521,9 @@ int writeCombinedMex(const string& outputDir,
     size_t originalBarcodeCount = data.barcodes.size();
     bool useGexFilter = !gexBarcodes.empty();
     
-    // Helper function to strip potential suffix from barcode for comparison
     auto stripSuffix = [](const string& bc) -> string {
         size_t dashPos = bc.find_last_of('-');
         if (dashPos != string::npos && dashPos < bc.size() - 1) {
-            // Check if everything after '-' is digits
             bool allDigits = true;
             for (size_t i = dashPos + 1; i < bc.size(); ++i) {
                 if (!std::isdigit(static_cast<unsigned char>(bc[i]))) {
@@ -524,48 +538,51 @@ int writeCombinedMex(const string& outputDir,
         return bc;
     };
     
-    // Build GEX barcode set (strip suffixes for comparison)
-    map<string, bool> gexBarcodeSet;
+    std::unordered_set<string> gexBarcodeSet;
     if (useGexFilter) {
+        gexBarcodeSet.reserve(gexBarcodes.size() * 2);
         for (const auto& bc : gexBarcodes) {
-            string baseBc = stripSuffix(bc);
-            gexBarcodeSet[baseBc] = true;
+            gexBarcodeSet.insert(stripSuffix(bc));
         }
         logStream << "CR-compat MEX filtering: Using GEX barcodes only (" << gexBarcodeSet.size() << " barcodes)\n";
     } else {
         logStream << "CR-compat MEX filtering: Using observed barcodes (count > 0)\n";
     }
     
-    // Step 1: Filter barcodes (GEX-only or observed only)
-    map<uint32_t, uint64_t> barcodeCounts; // barcode index -> total count
-    for (const auto& t : data.triplets) {
-        if (t.cell_idx < data.barcodes.size()) {
-            barcodeCounts[t.cell_idx] += t.count;
+    // Barcode count accumulation (only needed for non-GEX-filter mode)
+    vector<uint64_t> barcodeCounts;
+    if (!useGexFilter) {
+        barcodeCounts.resize(data.barcodes.size(), 0);
+        for (const auto& t : data.triplets) {
+            if (t.cell_idx < barcodeCounts.size()) {
+                barcodeCounts[t.cell_idx] += t.count;
+            }
         }
     }
     
-    // Build mapping: old_idx -> compact_idx
-    map<uint32_t, uint32_t> oldToCompact;
+    // Vector-based O(1) remap: old_idx -> compact_idx
+    vector<uint32_t> oldToCompact(data.barcodes.size(), UINT32_MAX);
     vector<string> filteredBarcodes;
     
     if (useGexFilter) {
-        // Filter to GEX barcodes only
         filteredBarcodes.reserve(gexBarcodeSet.size());
         for (size_t i = 0; i < data.barcodes.size(); ++i) {
             string baseBc = stripSuffix(data.barcodes[i]);
-            if (gexBarcodeSet.find(baseBc) != gexBarcodeSet.end()) {
-                // Barcode is in GEX set, include it (even if count is 0)
+            if (gexBarcodeSet.count(baseBc)) {
                 oldToCompact[i] = filteredBarcodes.size();
                 filteredBarcodes.push_back(data.barcodes[i]);
             }
         }
     } else {
-        // Filter to observed barcodes only (count > 0)
-        filteredBarcodes.reserve(barcodeCounts.size());
-        for (const auto& pair : barcodeCounts) {
-            if (pair.second > 0) {
-                oldToCompact[pair.first] = filteredBarcodes.size();
-                filteredBarcodes.push_back(data.barcodes[pair.first]);
+        size_t nObserved = 0;
+        for (size_t i = 0; i < barcodeCounts.size(); ++i) {
+            if (barcodeCounts[i] > 0) nObserved++;
+        }
+        filteredBarcodes.reserve(nObserved);
+        for (size_t i = 0; i < barcodeCounts.size(); ++i) {
+            if (barcodeCounts[i] > 0) {
+                oldToCompact[i] = filteredBarcodes.size();
+                filteredBarcodes.push_back(data.barcodes[i]);
             }
         }
     }
@@ -581,7 +598,7 @@ int writeCombinedMex(const string& outputDir,
         return -1;
     }
     
-    // Step 2: Apply optional barcode namespace translation.
+    // Namespace translation
     vector<string> namespaceAdjustedBarcodes = filteredBarcodes;
     uint64_t namespaceTranslatedCount = 0;
     if (needsNamespaceTranslation(inputChemistry, outputChemistry)) {
@@ -595,13 +612,11 @@ int writeCombinedMex(const string& outputDir,
         }
     }
 
-    // Step 3: Append GEM suffix with detection of existing -[0-9]+ pattern
-    // Helper function to detect and extract existing suffix
+    // GEM suffix handling
     auto hasSuffix = [](const string& bc) -> bool {
         if (bc.size() < 2) return false;
         size_t dashPos = bc.find_last_of('-');
         if (dashPos == string::npos || dashPos == bc.size() - 1) return false;
-        // Check if everything after '-' is digits
         for (size_t i = dashPos + 1; i < bc.size(); ++i) {
             if (!std::isdigit(static_cast<unsigned char>(bc[i]))) {
                 return false;
@@ -628,11 +643,8 @@ int writeCombinedMex(const string& outputDir,
             string existingSuffix = extractSuffix(bc);
             if (existingSuffix != gemWell) {
                 suffixWarnings++;
-                // Keep existing suffix, don't append
             }
-            // Already has suffix, use as-is
         } else {
-            // Append GEM well suffix
             newBc += "-" + gemWell;
         }
         suffixedBarcodes.push_back(newBc);
@@ -643,33 +655,33 @@ int writeCombinedMex(const string& outputDir,
                   << gemWell << ", keeping existing suffix\n";
     }
     
-    // Detect duplicate barcodes after suffixing
-    map<string, size_t> barcodeDupCounts;
-    for (const auto& bc : suffixedBarcodes) {
-        barcodeDupCounts[bc]++;
-    }
-    vector<string> duplicates;
-    for (const auto& pair : barcodeDupCounts) {
-        if (pair.second > 1) {
-            duplicates.push_back(pair.first);
+    // Duplicate detection with unordered_map
+    {
+        std::unordered_map<string, size_t> barcodeDupCounts;
+        barcodeDupCounts.reserve(suffixedBarcodes.size() * 2);
+        for (const auto& bc : suffixedBarcodes) {
+            barcodeDupCounts[bc]++;
         }
-    }
-    if (!duplicates.empty()) {
-        ostringstream err;
-        err << "ERROR: Duplicate barcodes after suffixing (e.g., mixed suffixed/unsuffixed input):\n";
-        for (size_t i = 0; i < duplicates.size() && i < 10; ++i) {
-            err << "  " << duplicates[i] << " (appears " << barcodeDupCounts[duplicates[i]] << " times)\n";
+        vector<string> duplicates;
+        for (const auto& pair : barcodeDupCounts) {
+            if (pair.second > 1) {
+                duplicates.push_back(pair.first);
+            }
         }
-        if (duplicates.size() > 10) {
-            err << "  ... and " << (duplicates.size() - 10) << " more\n";
+        if (!duplicates.empty()) {
+            ostringstream err;
+            err << "ERROR: Duplicate barcodes after suffixing (e.g., mixed suffixed/unsuffixed input):\n";
+            for (size_t i = 0; i < duplicates.size() && i < 10; ++i) {
+                err << "  " << duplicates[i] << " (appears " << barcodeDupCounts[duplicates[i]] << " times)\n";
+            }
+            if (duplicates.size() > 10) {
+                err << "  ... and " << (duplicates.size() - 10) << " more\n";
+            }
+            cerr << err.str();
+            return -1;
         }
-        cerr << err.str();
-        return -1;
     }
     
-    // Derive native/read-space barcode representation from output-space barcodes.
-    // When input/output namespaces differ, translation is reversible, so applying
-    // the same middle-2bp transform converts output->native.
     const bool emitNamespaceArtifacts = needsNamespaceTranslation(inputChemistry, outputChemistry);
     vector<string> nativeSuffixedBarcodes = suffixedBarcodes;
     if (emitNamespaceArtifacts) {
@@ -678,7 +690,7 @@ int writeCombinedMex(const string& outputDir,
         }
     }
 
-    // Step 4: Sort barcodes lexicographically after suffix
+    // Sort barcodes lexicographically
     vector<size_t> sortIndices(suffixedBarcodes.size());
     for (size_t i = 0; i < sortIndices.size(); ++i) {
         sortIndices[i] = i;
@@ -689,12 +701,12 @@ int writeCombinedMex(const string& outputDir,
                   return suffixedBarcodes[a] < suffixedBarcodes[b];
               });
     
-    // Build sorted barcode list and remap: compact_idx -> sorted_idx
+    // Vector-based O(1) compact_idx -> sorted_idx
+    vector<uint32_t> compactToSorted(suffixedBarcodes.size(), UINT32_MAX);
     vector<string> sortedBarcodes;
     vector<string> sortedNativeBarcodes;
     sortedBarcodes.reserve(suffixedBarcodes.size());
     sortedNativeBarcodes.reserve(nativeSuffixedBarcodes.size());
-    map<uint32_t, uint32_t> compactToSorted;
     
     for (size_t i = 0; i < sortIndices.size(); ++i) {
         size_t oldCompactIdx = sortIndices[i];
@@ -703,80 +715,152 @@ int writeCombinedMex(const string& outputDir,
         sortedNativeBarcodes.push_back(nativeSuffixedBarcodes[oldCompactIdx]);
     }
     
-    // Step 5: Remap triplet cell_idx to sorted indices
+    // Fused single-pass remap: old_idx -> sorted_idx via two O(1) vector lookups
     vector<MexWriter::Triplet> remappedTriplets;
     remappedTriplets.reserve(data.triplets.size());
     uint64_t tripletsRetained = 0;
     
     for (const auto& t : data.triplets) {
-        // Map: old_idx -> compact_idx -> sorted_idx
-        auto it1 = oldToCompact.find(t.cell_idx);
-        if (it1 != oldToCompact.end()) {
-            auto it2 = compactToSorted.find(it1->second);
-            if (it2 != compactToSorted.end()) {
-                MexWriter::Triplet newT;
-                newT.gene_idx = t.gene_idx;
-                newT.cell_idx = it2->second;
-                newT.count = t.count;
-                remappedTriplets.push_back(newT);
-                tripletsRetained++;
-            }
-        }
+        if (t.cell_idx >= oldToCompact.size()) continue;
+        uint32_t compactIdx = oldToCompact[t.cell_idx];
+        if (compactIdx == UINT32_MAX) continue;
+        uint32_t sortedIdx = compactToSorted[compactIdx];
+        if (sortedIdx == UINT32_MAX) continue;
+        MexWriter::Triplet newT;
+        newT.gene_idx = t.gene_idx;
+        newT.cell_idx = sortedIdx;
+        newT.count = t.count;
+        remappedTriplets.push_back(newT);
+        tripletsRetained++;
     }
     
-    // Sort triplets by (cell_idx, gene_idx) for exact parity with Cell Ranger
     std::sort(remappedTriplets.begin(), remappedTriplets.end(),
               [](const MexWriter::Triplet& a, const MexWriter::Triplet& b) {
-                  if (a.cell_idx != b.cell_idx) {
-                      return a.cell_idx < b.cell_idx;
-                  }
+                  if (a.cell_idx != b.cell_idx) return a.cell_idx < b.cell_idx;
                   return a.gene_idx < b.gene_idx;
               });
     
-    // Step 6: Write MEX files
-    vector<MexWriter::Feature> features;
-    for (size_t i = 0; i < data.features.size(); ++i) {
-        string name = (i < data.featureNames.size()) ? data.featureNames[i] : data.features[i];
-        string type = (i < data.featureTypes.size()) ? data.featureTypes[i] : "Gene Expression";
-        features.emplace_back(data.features[i], name, type);
+    // Streaming gzip writes — write directly to .gz files
+
+    // features.tsv.gz
+    {
+        string featPath = outputDir + "/features.tsv.gz";
+        gzFile gz = gzopen(featPath.c_str(), "wb");
+        if (gz == nullptr) {
+            cerr << "ERROR: Failed to open " << featPath << endl;
+            return -1;
+        }
+        gzbuffer(gz, 1 << 20);
+        gzsetparams(gz, kGzLevel, Z_DEFAULT_STRATEGY);
+        for (size_t i = 0; i < data.features.size(); ++i) {
+            string name = (i < data.featureNames.size()) ? data.featureNames[i] : data.features[i];
+            string type = (i < data.featureTypes.size()) ? data.featureTypes[i] : "Gene Expression";
+            string line = data.features[i] + "\t" + name + "\t" + type + "\n";
+            if (gzwrite(gz, line.data(), line.size()) <= 0) {
+                gzclose(gz);
+                cerr << "ERROR: Failed writing features.tsv.gz" << endl;
+                return -1;
+            }
+        }
+        if (gzclose(gz) != Z_OK) {
+            cerr << "ERROR: Failed closing features.tsv.gz" << endl;
+            return -1;
+        }
     }
-    
-    string outputPrefix = outputDir + "/";
-    int result = MexWriter::writeMex(outputPrefix, sortedBarcodes, features, remappedTriplets, -1);
-    
-    if (result != 0) {
-        cerr << "ERROR: Failed to write combined MEX" << endl;
-        return -1;
+
+    // barcodes.tsv.gz
+    {
+        string bcPath = outputDir + "/barcodes.tsv.gz";
+        if (!writeGzLines(bcPath, sortedBarcodes)) {
+            cerr << "ERROR: Failed writing barcodes.tsv.gz" << endl;
+            return -1;
+        }
     }
-    
-    // Step 7: Write additive barcode namespace artifacts.
-    // barcodes.tsv(.gz) remains canonical output namespace (CR-style); the files
-    // below expose native/read-space barcodes for reproducibility/debugging.
+
+    // matrix.mtx.gz — batched triplet writes
+    {
+        string mtxPath = outputDir + "/matrix.mtx.gz";
+        gzFile gz = gzopen(mtxPath.c_str(), "wb");
+        if (gz == nullptr) {
+            cerr << "ERROR: Failed to open " << mtxPath << endl;
+            return -1;
+        }
+        gzbuffer(gz, 1 << 20);
+        gzsetparams(gz, kGzLevel, Z_DEFAULT_STRATEGY);
+
+        ostringstream hdr;
+        hdr << "%%MatrixMarket matrix coordinate integer general\n"
+            << "%\n"
+            << data.features.size() << " " << sortedBarcodes.size() << " " << remappedTriplets.size() << "\n";
+        string hdrStr = hdr.str();
+        if (gzwrite(gz, hdrStr.data(), hdrStr.size()) <= 0) {
+            gzclose(gz);
+            return -1;
+        }
+
+        const size_t kBatchSize = 4096;
+        const size_t kBufCapacity = kBatchSize * 40;
+        vector<char> buf(kBufCapacity);
+        size_t bufUsed = 0;
+
+        for (size_t i = 0; i < remappedTriplets.size(); ++i) {
+            const auto& t = remappedTriplets[i];
+            int n = snprintf(buf.data() + bufUsed, kBufCapacity - bufUsed,
+                             "%u %u %u\n",
+                             t.gene_idx + 1, t.cell_idx + 1, t.count);
+            if (n < 0 || static_cast<size_t>(n) >= kBufCapacity - bufUsed) {
+                if (bufUsed > 0) {
+                    if (gzwrite(gz, buf.data(), bufUsed) <= 0) { gzclose(gz); return -1; }
+                    bufUsed = 0;
+                }
+                n = snprintf(buf.data(), kBufCapacity, "%u %u %u\n",
+                             t.gene_idx + 1, t.cell_idx + 1, t.count);
+            }
+            bufUsed += n;
+
+            if (bufUsed >= kBufCapacity - 40 || ((i + 1) % kBatchSize == 0)) {
+                if (gzwrite(gz, buf.data(), bufUsed) <= 0) { gzclose(gz); return -1; }
+                bufUsed = 0;
+            }
+        }
+        if (bufUsed > 0) {
+            if (gzwrite(gz, buf.data(), bufUsed) <= 0) { gzclose(gz); return -1; }
+        }
+
+        if (gzclose(gz) != Z_OK) {
+            cerr << "ERROR: Failed closing matrix.mtx.gz" << endl;
+            return -1;
+        }
+    }
+
+    // Namespace artifacts (plain-then-compress since these are small)
     if (emitNamespaceArtifacts) {
-        const string nativePath = outputDir + "/barcodes.native.tsv";
-        if (writeLinesPlain(nativePath, sortedNativeBarcodes)) {
-            compressFileToGz(nativePath, logStream);
-        } else {
+        const string nativePath = outputDir + "/barcodes.native.tsv.gz";
+        if (!writeGzLines(nativePath, sortedNativeBarcodes)) {
             logStream << "WARNING: Failed to write native barcode file: " << nativePath << "\n";
         }
 
-        const string namespaceMapPath = outputDir + "/barcodes.namespace_map.tsv";
-        if (writeNamespaceMapPlain(namespaceMapPath, sortedNativeBarcodes, sortedBarcodes)) {
-            compressFileToGz(namespaceMapPath, logStream);
-        } else {
-            logStream << "WARNING: Failed to write barcode namespace map file: "
-                      << namespaceMapPath << "\n";
+        const string namespaceMapPath = outputDir + "/barcodes.namespace_map.tsv.gz";
+        {
+            gzFile gz = gzopen(namespaceMapPath.c_str(), "wb");
+            if (gz != nullptr) {
+                gzbuffer(gz, 1 << 20);
+                gzsetparams(gz, kGzLevel, Z_DEFAULT_STRATEGY);
+                string hdrLine = "native_barcode\toutput_barcode\n";
+                gzwrite(gz, hdrLine.data(), hdrLine.size());
+                for (size_t i = 0; i < sortedNativeBarcodes.size(); ++i) {
+                    string line = sortedNativeBarcodes[i] + "\t" + sortedBarcodes[i] + "\n";
+                    gzwrite(gz, line.data(), line.size());
+                }
+                gzclose(gz);
+            } else {
+                logStream << "WARNING: Failed to write barcode namespace map file: "
+                          << namespaceMapPath << "\n";
+            }
         }
     }
 
-    // Step 8: Gzip output files (in-process zlib; no shell helpers)
-    vector<string> filesToGzip = {"matrix.mtx", "barcodes.tsv", "features.tsv"};
-    for (const auto& filename : filesToGzip) {
-        string filePath = outputDir + "/" + filename;
-        compressFileToGz(filePath, logStream);
-    }
-    
-    // Step 9: Log metrics
+    // Log metrics
     logStream << "CR-compat MEX formatting:\n";
     logStream << "  Filter mode: " << (useGexFilter ? "GEX barcodes only" : "Observed barcodes (count > 0)") << "\n";
     logStream << "  Original barcode count: " << originalBarcodeCount << "\n";
