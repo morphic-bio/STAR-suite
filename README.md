@@ -35,6 +35,7 @@ core/
 flex/                    # Flex-specific code + tools
 slam/                    # SLAM-seq code + tools
 build/                   # Modular make fragments
+scripts/                 # Suite-level helper scripts (see scripts/README.md)
 docs/                    # Suite-level docs
 tests/                   # Suite-level tests (see tests/ARTIFACTS.md for artifact locations)
 tools/                   # Suite-level scripts/utilities
@@ -58,6 +59,7 @@ mcp_server/              # MCP server for scripted discovery/preflight/run workf
 - **Shared Feature Toolchains** (`core/features/`): Reusable tool layers used across modules, including `vbem` (TranscriptVB helpers), `yremove_*` (Y/noY splitting), `bamsort`, and `libscrna`.
   Build tools: `make vbem-tools`, `make yremove-tools`, plus in-core integrations.
 - **MCP Server (tooling)** (`mcp_server/`): Agent automation service for dataset/test discovery and controlled execution (`list_datasets`, `list_test_suites`, `preflight`, `run_script`, `collect_outputs`). This is repo tooling, not an analysis module.
+- **Helper Scripts** (`scripts/`): Standalone Python and Bash tools for FASTQ preflight, QC, parity benchmarking, downstream h5ad processing, and fixture management. These are not compiled into STAR; they run independently. Highlights include `preflight_library_pairing.py` (chemistry detection and library pairing for mislabeled Perturb-seq), `report_additional_parity_metrics.py` (STAR vs CR parity), and `build_gene_full_velocyto_h5ad.py` (Velocyto h5ad packaging). See [`scripts/README.md`](scripts/README.md) for the full catalogue.
 
 ## Benchmarks
 
