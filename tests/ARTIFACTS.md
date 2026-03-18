@@ -122,6 +122,8 @@ update this file with its output location.
     - `/storage/ucsf-full/bench_20260218_dynamic_first/cellranger_runs/cr_full_iPSC2_1_AALG2_crstar32_20260218_205804/`
   - STAR vs CR parity report (dynamic 32x32 run):
     - `/tmp/ucsf_full_dynamic_32x32_vs_cr_20260224_101314/`
+- `/storage/downsampled_100K/SC2300771/results/flex_h01_*` (Flex H0/H1 cache pilot artifacts, including synthetic cache builds, 100-probe parity runs, and full-probe cache/scan outputs)
+- `/storage/downsampled_100K/SC2300771/results/flex_hash_screen_internal_*` (internal Flex hash-screen 100K E2E runs, including the exact-parity full-16-whitelist run `flex_hash_screen_internal_full16_20260315_203745/`)
 
 ## Flex Modular Integration Baselines
 
@@ -327,3 +329,17 @@ These scripts validate that default bundles work with minimal explicit parameter
   - `/tmp/ucsf_hash_offset31_20260317/`
 - Primary notes:
   - `docs/HANDOFF_BOOTSTRAP_TIERED_HASH_ACTIVATION_20260317.md`
+
+## Flex Internal Hash-Screen 100K E2E (2026-03-15)
+
+- Harness: `tests/run_flex_hash_screen_internal_100k.sh`
+- Cache:
+  - `/storage/downsampled_100K/SC2300771/results/flex_h01_full_cache_20260315_153914/reclassified/sequence_cache.bin`
+- Completed runs:
+  - `/storage/downsampled_100K/SC2300771/results/flex_hash_screen_internal_20260315_193538/`
+    - `hash_on/` internal H0/H1 keep + internal deny
+    - `legacy/` same-binary `--no-hash-screen yes` control
+  - `/storage/downsampled_100K/SC2300771/results/flex_hash_screen_internal_exactonly_20260315_194025/`
+    - `hash_on/` exact-only keep (`0,+1,-1` offset scan) + internal deny
+    - `legacy/` aborted after startup because the prior legacy control was reused
+- Status: untracked

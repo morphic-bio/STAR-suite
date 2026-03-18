@@ -16,6 +16,7 @@
 #include "SpliceGraph.h"
 #include "ClipMate.h"
 #include "TrimQc.h"
+#include "FlexHashScreen.h"
 #include <zlib.h>
 
 // Forward declarations
@@ -120,6 +121,7 @@ class ReadAlign {
         uint32_t extractedUmi24_;     // Extracted UMI (24-bit packed) from Solo structures, 0 if not available
         bool extractedUmiValid_;      // True if UMI extraction succeeded (umiCheck >= 0), false if invalid
         std::string extractedCbSeq_;   // CB sequence (for Phase 2: lookup resolved CB if cbIdxPlus1==0)
+        FlexHashScreenDecision hashScreenDecision_;
         
         // Phase 2: Ambiguous CB accumulation and resolution
         struct AmbiguousEntry {
@@ -151,6 +153,7 @@ class ReadAlign {
         
         // Phase 2: Resolve accumulated ambiguous CBs using Bayesian inference
         void resolveAmbiguousCBs();
+        void detectSampleFromRawR2();
 
 	//input,output
         char** outBAMoneAlign;

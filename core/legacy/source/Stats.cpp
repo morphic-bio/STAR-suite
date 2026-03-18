@@ -17,6 +17,9 @@ void Stats::resetN() {//zero all counters
     crRescueIntronicFallbackOffNoRescue = 0; crRescueAllIntergenicNoRescue = 0;
     crGeneFullExonicOverIntronicFiltered = 0; crGeneFullResolvedToUniqueAfterFilter = 0;
     crGeneFullStillMultiExonic = 0; crGeneFullCrossAlignMultiGene = 0;
+    sampleDetectPreAlignCalls = 0; sampleDetectPreAlignNs = 0;
+    sampleDetectOutputCalls = 0; sampleDetectOutputNs = 0;
+    alignCoreCalls = 0; alignCoreNs = 0;
     splicesNsjdb=0;
     for (uint ii=0; ii<SJ_MOTIF_SIZE; ii++) {
         splicesN[ii]=0;
@@ -50,6 +53,12 @@ void Stats::addStats(Stats &S) {//add S to Stats
     crGeneFullResolvedToUniqueAfterFilter += S.crGeneFullResolvedToUniqueAfterFilter;
     crGeneFullStillMultiExonic += S.crGeneFullStillMultiExonic;
     crGeneFullCrossAlignMultiGene += S.crGeneFullCrossAlignMultiGene;
+    sampleDetectPreAlignCalls += S.sampleDetectPreAlignCalls;
+    sampleDetectPreAlignNs += S.sampleDetectPreAlignNs;
+    sampleDetectOutputCalls += S.sampleDetectOutputCalls;
+    sampleDetectOutputNs += S.sampleDetectOutputNs;
+    alignCoreCalls += S.alignCoreCalls;
+    alignCoreNs += S.alignCoreNs;
 
     splicesNsjdb += S.splicesNsjdb;
     for (uint ii=0; ii<SJ_MOTIF_SIZE; ii++) {
@@ -158,6 +167,33 @@ void Stats::reportFinal(ofstream &streamOut) {
         }
     }
 
+    if (sampleDetectPreAlignCalls > 0 || sampleDetectOutputCalls > 0 || alignCoreCalls > 0) {
+        auto nsToMs = [](uint64 ns) -> double {
+            return static_cast<double>(ns) / 1.0e6;
+        };
+        auto nsToUs = [](uint64 ns, uint64 calls) -> double {
+            return calls > 0 ? static_cast<double>(ns) / static_cast<double>(calls) / 1.0e3 : 0.0;
+        };
+
+        streamOut << "\n" \
+                  <<setw(w1)<< "                        FLEX STAGE TIMING |\n";
+        if (sampleDetectPreAlignCalls > 0) {
+            streamOut << setw(w1)<< "        Sample calling (pre-align) calls |\t" << sampleDetectPreAlignCalls << "\n" \
+                      << setw(w1)<< "     Sample calling (pre-align) total ms |\t" << nsToMs(sampleDetectPreAlignNs) << "\n" \
+                      << setw(w1)<< "   Sample calling (pre-align) mean us/call |\t" << nsToUs(sampleDetectPreAlignNs, sampleDetectPreAlignCalls) << "\n";
+        }
+        if (sampleDetectOutputCalls > 0) {
+            streamOut << setw(w1)<< "      Sample calling (output path) calls |\t" << sampleDetectOutputCalls << "\n" \
+                      << setw(w1)<< "   Sample calling (output path) total ms |\t" << nsToMs(sampleDetectOutputNs) << "\n" \
+                      << setw(w1)<< " Sample calling (output path) mean us/call |\t" << nsToUs(sampleDetectOutputNs, sampleDetectOutputCalls) << "\n";
+        }
+        if (alignCoreCalls > 0) {
+            streamOut << setw(w1)<< "                 Core alignment calls |\t" << alignCoreCalls << "\n" \
+                      << setw(w1)<< "              Core alignment total ms |\t" << nsToMs(alignCoreNs) << "\n" \
+                      << setw(w1)<< "            Core alignment mean us/call |\t" << nsToUs(alignCoreNs, alignCoreCalls) << "\n";
+        }
+    }
+
     streamOut  <<setw(w1)<< "Number of splices: Total |\t"                     << splicesN[0]+splicesN[1]+splicesN[2]+splicesN[3]+splicesN[4]+splicesN[5]+splicesN[6]<< "\n" \
                <<setw(w1)<< "Number of splices: Annotated (sjdb) |\t"          << splicesNsjdb << "\n" \
                <<setw(w1)<< "Number of splices: GT/AG |\t"                     << splicesN[1]+splicesN[2] << "\n" \
@@ -222,4 +258,3 @@ void Stats::writeLines(ofstream &streamOut, const vector<int> outType, const str
         };
     };
 };
-

@@ -544,6 +544,61 @@ void ParametersSolo::initialize(Parameters *pPin)
             exitWithError(errOut.str(), std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
         }
     }
+
+    //////////////////////////////////////////////////////////////////////////////////////////////////////
+    /////////////////////////////// H0/H1 hash screen
+    {
+        string disable = hashScreenDisableStr;
+        transform(disable.begin(), disable.end(), disable.begin(), ::tolower);
+        bool hashScreenDisabled = false;
+        if (hashScreenFile == "-") {
+            hashScreenFile.clear();
+        }
+        if (disable == "yes") {
+            hashScreenDisabled = true;
+        } else if (disable == "no" || disable.empty()) {
+            hashScreenDisabled = false;
+        } else {
+            ostringstream errOut;
+            errOut << "EXITING because of fatal PARAMETERS error: unrecognized option in --no-hash-screen=" << hashScreenDisableStr << "\n";
+            errOut << "SOLUTION: use allowed option: yes OR no\n";
+            exitWithError(errOut.str(), std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
+        }
+
+        hashScreenEnabled = flexMode && inlineHashMode && !hashScreenDisabled;
+
+        if (hashScreenEnabled) {
+            const char* envPath = std::getenv("STAR_FLEX_HASH_SCREEN_CACHE");
+            if (hashScreenFile.empty() && envPath != nullptr && envPath[0] != '\0') {
+                hashScreenFile = envPath;
+            }
+
+            if (hashScreenFile.empty() && !probeListPath.empty() && probeListPath != "-") {
+                size_t slashPos = probeListPath.find_last_of("/\\");
+                string probeDir = slashPos == string::npos ? string(".") : probeListPath.substr(0, slashPos);
+                string candidate = probeDir + "/flex_h01_sequence_cache.bin";
+                ifstream cacheTest(candidate.c_str(), ios::binary);
+                if (cacheTest.good()) {
+                    hashScreenFile = candidate;
+                }
+            }
+
+            if (hashScreenFile.empty()) {
+                hashScreenEnabled = false;
+                pP->inOut->logMain << "H0/H1 hash screen: disabled (no cache discovered)\n";
+            } else {
+                ifstream cacheTest(hashScreenFile.c_str(), ios::binary);
+                if (!cacheTest.good()) {
+                    hashScreenEnabled = false;
+                    pP->inOut->logMain << "H0/H1 hash screen: disabled (cache not readable): " << hashScreenFile << "\n";
+                } else {
+                    pP->inOut->logMain << "H0/H1 hash screen: enabled with cache " << hashScreenFile << "\n";
+                }
+            }
+        } else if (hashScreenDisabled) {
+            pP->inOut->logMain << "H0/H1 hash screen: disabled by --no-hash-screen yes\n";
+        }
+    }
     
     //////////////////////////////////////////////////////////////////////////////////////////////////////
     /////////////////////////////// FlexFilter inline integration

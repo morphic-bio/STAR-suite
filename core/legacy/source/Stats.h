@@ -53,6 +53,14 @@ class Stats {
         uint64 crGeneFullStillMultiExonic;             // reads still multi-gene after filter
         uint64 crGeneFullCrossAlignMultiGene;          // reads multi-gene from different alignments (not filterable)
 
+        // Flex stage timing instrumentation
+        uint64 sampleDetectPreAlignCalls;
+        uint64 sampleDetectPreAlignNs;
+        uint64 sampleDetectOutputCalls;
+        uint64 sampleDetectOutputNs;
+        uint64 alignCoreCalls;
+        uint64 alignCoreNs;
+
         time_t timeStart, timeStartMap, timeFinishMap, timeLastReport, timeFinish;
         
         Stats ();

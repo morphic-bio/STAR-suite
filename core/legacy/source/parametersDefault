@@ -1756,6 +1756,16 @@ soloInlineHashMode           auto
                             When disabled (default for non-Flex), STARsolo uses legacy path and produces standard MEX output
                             (matrix.mtx, barcodes.tsv, features.tsv). When enabled (default for Flex), uses inline-hash pipeline.
 
+no-hash-screen              no
+    string:                 yes|no (default no)
+                            yes          ... disable the Flex H0/H1 hash screen and force the legacy align-everything path
+                            no           ... allow the Flex H0/H1 hash screen when Flex mode and a cache are available (default)
+
+soloHashScreenFile          -
+    string:                 path to the Flex H0/H1 binary cache file (optional)
+                            If omitted, STAR will use STAR_FLEX_HASH_SCREEN_CACHE or auto-discover
+                            flex_h01_sequence_cache.bin next to the probe list.
+
 flex                         no
     string:                 yes|no (default no)
                             yes         ... enable full Flex pipeline with production defaults:

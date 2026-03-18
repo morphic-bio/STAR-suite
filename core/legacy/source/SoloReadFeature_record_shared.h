@@ -10,6 +10,7 @@
 class Transcript;
 class SoloReadFeature;
 class SoloReadFlagClass;
+struct FlexHashScreenDecision;
 
 // Shared data structure used by both base and Flex implementations
 class ReadSoloFeatures {
@@ -37,5 +38,9 @@ void record_base(SoloReadFeature *soloReadFeat, SoloReadBarcode &soloBar, uint n
 
 // Flex record implementation
 void record_flex(SoloReadFeature *soloReadFeat, SoloReadBarcode &soloBar, uint nTr, Transcript **alignOut, uint64 iRead, ReadAnnotations &readAnnot);
+
+// Internal Flex hash-screen fast path helpers.
+bool record_flex_hash_screen_keep(SoloReadFeature *soloReadFeat, SoloReadBarcode &soloBar, uint64 iRead, uint16_t geneIdx15, uint8_t cacheClass);
+void record_flex_hash_screen_deny(SoloReadFeature *soloReadFeat, SoloReadBarcode &soloBar, uint64 iRead, const char *reason);
 
 #endif

@@ -609,6 +609,8 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloUseInlineReplayer", &pSolo.useInlineReplayerStr));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloInlineCBCorrection", &pSolo.inlineCBCorrectionStr));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloInlineHashMode", &pSolo.inlineHashModeStr));
+    parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "no-hash-screen", &pSolo.hashScreenDisableStr));
+    parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloHashScreenFile", &pSolo.hashScreenFile));
 
     // Flex omnibus flag
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "flex", &pSolo.flexModeStr));
