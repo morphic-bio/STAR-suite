@@ -343,3 +343,22 @@ These scripts validate that default bundles work with minimal explicit parameter
     - `hash_on/` exact-only keep (`0,+1,-1` offset scan) + internal deny
     - `legacy/` aborted after startup because the prior legacy control was reused
 - Status: untracked
+
+## Flex Internal Hash-Screen 2M E2E (2026-03-18)
+
+- Harness: `tests/run_flex_hash_screen_internal_2M.sh`
+- Cache: `/storage/downsampled_100K/SC2300771/results/flex_h01_full_cache_20260315_153914/reclassified/sequence_cache.bin`
+- Completed runs:
+  - `/storage/downsampled_2M/SC2300771/results/flex_hash_screen_internal_20260318_212014/`
+    - `hash_on/` H0/H1 keep + deny (DENY restored)
+    - `legacy/` same-binary `--no-hash-screen yes` control
+- 2M results (16M reads, 8 lanes x 2M):
+  - Wall-clock: hash_on 1:46 vs legacy 3:42 = **52.1% speedup (2.09x)**
+  - Alignment calls: 2,470,053 / 16M = 15.4% = **84.6% reduction**
+  - Raw MEX pair discrepancy: 14,209 / 10.8M = **0.132%**
+    - 12,501 pairs only in hash_on
+    - 1,708 pairs only in legacy
+    - 4,069 shared pairs with count mismatch (0.038%)
+  - Barcodes: 61 only in hash_on, 7 only in legacy
+  - Features: identical
+- Status: untracked
