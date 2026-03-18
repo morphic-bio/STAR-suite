@@ -1,6 +1,6 @@
-# STAR-suite Codespaces
+# STAR Suite Codespaces
 
-These guides help you try STAR-suite in GitHub Codespaces with small public datasets.
+These guides help you try STAR Suite in GitHub Codespaces with small public datasets.
 
 ## What is ready now
 

@@ -1,7 +1,7 @@
 # Cell Ranger Multi Input (Smoke Pipeline)
 
 This tool parses Cell Ranger `multi` configs and runs the feature-barcode pipeline to produce
-10x-style MEX outputs suitable for early STAR-suite parity testing.
+10x-style MEX outputs suitable for early STAR Suite parity testing.
 
 ## Usage
 

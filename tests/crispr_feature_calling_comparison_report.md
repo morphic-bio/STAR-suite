@@ -195,7 +195,7 @@ This controls the GMM calling threshold - features with fewer UMIs than this val
 | **FLEX Probes** | 10 (TBD) | Needs validation; similar to CRISPR guides |
 | **Antibody Capture** | TBD | Needs validation |
 
-**Important:** Default is 3 in current STAR-suite. Use assay/fixture-specific overrides (for example, A375 at 10) when parity targets require stricter filtering.
+**Important:** Default is 3 in current STAR Suite. Use assay/fixture-specific overrides (for example, A375 at 10) when parity targets require stricter filtering.
 
 See `docs/TODO_crispr_feature_calling.md` for regression testing status.
 

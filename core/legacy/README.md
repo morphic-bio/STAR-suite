@@ -24,7 +24,7 @@ https://github.com/alexdobin/STAR/blob/master/doc/STARmanual.pdf
 
 STAR-SUITE NOTES (THIS REPO)
 ============================
-This `core/legacy` directory tracks upstream STAR layout, but STAR-suite adds
+This `core/legacy` directory tracks upstream STAR layout, but STAR Suite adds
 module-level capabilities and wrappers around it.
 
 - Suite overview and module docs: `../../README.md`

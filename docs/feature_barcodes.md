@@ -139,7 +139,7 @@ When running STAR with `--pfMultiConfig` and CRISPR Guide Capture features, STAR
 
 ### Parameter: `--crMinUmi N`
 
-**Default:** 3 (general STAR-suite default)
+**Default:** 3 (general STAR Suite default)
 
 Controls the minimum UMI threshold for feature calling. Adjust based on assay type:
 

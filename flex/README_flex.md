@@ -1,6 +1,6 @@
 # STAR-Flex: 10x Fixed RNA Profiling Pipeline
 
-This document describes STAR-Flex, the Flex-specific module in STAR-suite.
+This document describes STAR-Flex, the Flex-specific module in STAR Suite.
 
 ## Overview
 

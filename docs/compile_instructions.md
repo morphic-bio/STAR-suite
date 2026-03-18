@@ -1,4 +1,4 @@
-# STAR-suite Compile Instructions
+# STAR Suite Compile Instructions
 
 This document provides explicit source compile commands for each module, the
 full suite, and clean rebuild workflows.

@@ -1,12 +1,12 @@
-# STAR-suite
+# STAR Suite
 
-STAR-suite reorganizes STAR into module-focused directories while keeping a single source of truth for shared code. Build outputs remain compatible with existing STAR workflows, and the new top-level `Makefile` exposes module targets.
+STAR Suite reorganizes STAR into module-focused directories while keeping a single source of truth for shared code. Build outputs remain compatible with existing STAR workflows, and the new top-level `Makefile` exposes module targets.
 
 **No new external dependencies are required for the suite modules in this repo.**
 The current integrations (including STAR-perturb, STAR-SLAM, and QC updates) are
 built with the existing toolchain and vendored components.
 
-STAR-suite supports partial compilation: build only the module/tool targets you need
+STAR Suite supports partial compilation: build only the module/tool targets you need
 instead of building the full suite every time.
 
 Agent quickstart: see `AGENTS.md` for repo-specific guardrails, tests, and recent changes.
@@ -215,7 +215,7 @@ Compilation details (module-by-module, clean rebuilds, and clean Ubuntu 24.04 va
 
 A multi-stage Docker setup (Ubuntu 24.04) provides a clean build environment and separate runtime/test images.
 
-**Builder stage**: Compiles STAR-suite from source with no host leakage. Validates `make core`, `flex`, `slam`, `feature-barcodes-tools`, `default`, and `all`.
+**Builder stage**: Compiles STAR Suite from source with no host leakage. Validates `make core`, `flex`, `slam`, `feature-barcodes-tools`, `default`, and `all`.
 
 **Suite base runtime (`suite-base`)**: Minimal executable image with suite binaries (e.g. `STAR`) and no Python/test-only helpers.
 
@@ -477,7 +477,7 @@ core/legacy/source/star_feature_call \
 
 ## Codespaces Walkthroughs
 
-STAR-suite includes GitHub Codespaces walkthroughs for the main module entry points.
+STAR Suite includes GitHub Codespaces walkthroughs for the main module entry points.
 
 Start here:
 - [Codespaces walkthrough summary](docs/CODESPACES_DEMO_WALKTHROUGHS_20260312.md)

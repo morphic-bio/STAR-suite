@@ -1,8 +1,8 @@
-# STAR-suite Binary Distribution Plan
+# STAR Suite Binary Distribution Plan
 
 ## Goal
 
-Ship discoverable, installable Ubuntu binaries for STAR-suite with low-friction install and clear provenance.
+Ship discoverable, installable Ubuntu binaries for STAR Suite with low-friction install and clear provenance.
 
 ## Implementation Status (2026-02-14)
 
@@ -163,7 +163,7 @@ Notes:
 - Direct compatibility tarballs are for manual installs and HPC/container edge cases.
 - `v0.*` tags are prereleases for testing. They publish release artifacts and a versioned container tag, but do not move `latest`.
 - Native `build_static_tarball.sh` runs still inherit the host toolchain/glibc baseline.
-- The CI/release path publishes multiple tarballs because Linux may reject a binary built for a newer runtime environment before STAR-suite starts.
+- The CI/release path publishes multiple tarballs because Linux may reject a binary built for a newer runtime environment before STAR Suite starts.
 - The installer bundle checks the host environment and selects the highest compatible bundled binary automatically.
 - Release artifacts now include runtime-manifest text files captured from clean Ubuntu 22.04 and 24.04 containers.
 - Those manifests record the resolved runtime libraries and Ubuntu/Debian package names seen by the validator.
@@ -173,7 +173,7 @@ Notes:
 For non-technical users:
 
 - If a downloaded Linux binary does not run, that is usually the operating system rejecting a binary built for a newer system environment.
-- STAR-suite itself is not crashing and is not asking the user to install extra libraries manually.
+- STAR Suite itself is not crashing and is not asking the user to install extra libraries manually.
 - The release fix is to ship multiple Linux binaries built for different compatibility levels, plus an installer bundle that picks the right one.
 
 For technical users:
@@ -267,7 +267,7 @@ For technical users:
 - Static binary tarball runs on clean target host (documented dependency expectations).
 - `amd64` and `arm64` release artifacts are both generated and verifiable.
 - Release notes contain:
-  - STAR-suite version
+  - STAR Suite version
   - commit hash
   - dependency list
   - known limitations

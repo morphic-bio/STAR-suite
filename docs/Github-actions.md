@@ -1,6 +1,6 @@
 # GitHub Actions CI/CD Policy
 
-This document defines when STAR-suite CI should run, what it should execute,
+This document defines when STAR Suite CI should run, what it should execute,
 and when artifacts are published.
 
 ## Goals
