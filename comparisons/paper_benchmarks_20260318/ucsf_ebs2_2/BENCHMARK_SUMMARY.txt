@@ -1,0 +1,12 @@
+dataset=UCSF_EBs2_2
+mode=standard
+chemistry=NXT
+star_cells=13721
+wall_seconds=1141
+wall_minutes=19.0
+threads=32
+bam=none
+dynamic_permits=32
+bootstrap_tiered_hash=yes
+multimap_rescue=yes
+outdir=/storage/paper_bench_rerun_20260318_065211/ucsf_ebs2_2_standard

@@ -1,0 +1,9 @@
+Mar 18 07:30:27 ..... started pf-multi feature assignment
+Mar 18 07:45:09 ..... finished mapping
+Mar 18 07:45:10 ..... started Solo counting
+Mar 18 07:50:17 ..... finished pf-multi feature assignment
+Mar 18 07:54:39 ..... finished Solo counting
+Mar 18 07:54:39 ..... started pf-multi merge/finalize
+pf-timing: writeCombinedMex 35113 ms
+pf-timing: writeCombinedMex 24391 ms
+Mar 18 07:56:38 ..... finished pf-multi config processing

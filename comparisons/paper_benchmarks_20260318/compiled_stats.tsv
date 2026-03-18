@@ -1,0 +1,4 @@
+run_tag	dataset	mode	threads	wall_seconds	wall_minutes	star_cells	pf_writeCombinedMex_raw_ms	pf_writeCombinedMex_filtered_ms	bam	outdir
+20260318_065211	A375_1k_CRISPR_5p_gemx	standard	32	241	4.0	1187	2013	1536	none	/mnt/pikachu/paper_bench_rerun_20260318_065211/a375
+20260318_065211	UCSF_EBs2_2	standard	32	1141	19.0	13721	19485	14950	none	/mnt/pikachu/paper_bench_rerun_20260318_065211/ucsf_ebs2_2_standard
+20260318_065211	MSK_30polyKO	3lib_no_bam	32	1656	27.6	30567	35113	24391	none	/mnt/pikachu/paper_bench_rerun_20260318_065211/msk_30polyko

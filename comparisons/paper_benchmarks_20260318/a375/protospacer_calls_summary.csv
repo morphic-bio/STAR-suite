@@ -1,0 +1,16 @@
+Category,Metric,Value
+All,Cells with 0 molecules,16
+All,Cells with no confident call,85
+All,Cells with 1 feature,1051
+All,Cells with >1 features,35
+GFP,Cells,0
+RAB1A-2,Cells,540
+Non_Target-1_MS,Cells,581
+RAB1A-2_C,Cells,0
+Non_Target-1,Cells,0
+IL1B_sg2,Cells,0
+IL1B_sg2_HEK,Cells,0
+RAB1A-2_HD,Cells,0
+Non_Target-1_HD,Cells,0
+RAB1A-2_HD_v2,Cells,0
+Non_Target-1_HD_v2,Cells,0

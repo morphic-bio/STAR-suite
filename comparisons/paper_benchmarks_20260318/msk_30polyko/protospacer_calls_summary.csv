@@ -1,0 +1,35 @@
+Category,Metric,Value
+All,Cells with 0 molecules,233
+All,Cells with no confident call,6788
+All,Cells with 1 feature,20972
+All,Cells with >1 features,2574
+EOMES,Cells,10
+PAX6,Cells,1075
+MEIS1,Cells,991
+SIX3,Cells,886
+HES1,Cells,227
+HNF1A,Cells,1016
+NEUROG3,Cells,1002
+ONECUT1,Cells,998
+INSM1,Cells,558
+MAFB,Cells,944
+ISL1,Cells,1229
+FEV,Cells,1069
+SIM1,Cells,1072
+PBX2,Cells,885
+HNF4A,Cells,953
+NOTCH2,Cells,864
+MEN1,Cells,795
+GCM1,Cells,963
+CARM1,Cells,1095
+CBX4,Cells,1076
+DPY30,Cells,1082
+JMJD6,Cells,243
+NCOA5,Cells,1039
+NKX6-1,Cells,960
+NOTCH1,Cells,787
+PDX1,Cells,1552
+RFX3,Cells,737
+RFX7,Cells,522
+RREB1,Cells,733
+SIX2,Cells,1017

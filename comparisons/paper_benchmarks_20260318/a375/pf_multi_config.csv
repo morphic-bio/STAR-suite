@@ -1,0 +1,7 @@
+[libraries]
+fastqs,sample,library_type,feature_types
+/storage/A375/fastqs/1k_CRISPR_5p_gemx_fastqs/gex,A375,Gene Expression,Gene Expression
+/storage/A375/fastqs/1k_CRISPR_5p_gemx_fastqs/crispr,A375,CRISPR Guide Capture,CRISPR Guide Capture
+
+[feature]
+ref,/storage/A375/1k_CRISPR_5p_gemx_Multiplex_count_feature_reference.csv

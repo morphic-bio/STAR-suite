@@ -49,17 +49,43 @@ mcp_server/              # MCP server for scripted discovery/preflight/run workf
 
 ## Benchmarks
 
-### Perturb-seq (STAR vs Cell Ranger 9)
+All benchmarks run on pikachu (AMD, 32 threads, 128 GB RAM, NVMe SSD).
+Detailed artifacts: `comparisons/paper_benchmarks_20260318/`.
+
+### Perturb-seq Wall Time (STAR, 2026-03-18)
+
+| Dataset | Libraries | Chemistry | Reads | STAR cells | Wall time | BAM |
+|---|---|---|---|---|---|---|
+| A375 1k CRISPR 5' GemX | GEX + CRISPR (2) | TRU | 47M | 1,187 | **4.0 min** | none |
+| UCSF EBs2_2 Perturb-seq | GEX + CRISPRa (2) | NXT→TRU | 445M | 13,721 | **19.0 min** | none |
+| MSK 30polyKO | GEX + gRNA + LARRY (3) | Mixed TRU/NXT | 669M | 30,567 | **27.6 min** | none |
+
+### Perturb-seq Parity (STAR vs Cell Ranger 9)
 
 | Dataset | Cells (STAR / CR) | Jaccard | Gene Pearson | Cell Pearson | CRISPR match | Speedup |
 |---|---|---|---|---|---|---|
-| UCSF EBs2_2 (full, NXT) | 13,721 / 13,760 | 0.98 | 0.995 | 1.000 | 98.9% (11,032/11,157) | 2.5x |
-| A375 1k CRISPR 5' (GeneFull) | 1,186 / 1,163 | 0.98 | 0.933 | 0.999 | 96.8% (1,048/1,083) | 3.9x |
-| MSK 30polyKO (full, NXT) | 30,497 / 32,256 | 0.94 | 0.993 | 1.000 | 98.5% (22,200/22,531) | 4.0x |
+| A375 1k CRISPR 5' (GeneFull) | 1,187 / 1,162 | 0.976 | 0.975 | 1.000 | 100% (1,083/1,083) | 3.8x |
+| UCSF EBs2_2 (full, NXT) | 13,721 / 13,760 | 0.976 | 0.995 | 1.000 | 98.9% (11,902/12,038) | 3.2x |
+| MSK 30polyKO (3-lib, NXT+TRU) | 30,567 / 32,256 | 0.942 | 0.994 | 1.000 | 99.4% (23,210/23,341) | 6.1x |
 
-- UCSF EBs2_2: Gene Pearson on 24,343 filtered genes; Cell Pearson on 13,571 common barcodes; CRISPR top-guide match on 11,157 common evaluated barcodes; speedup = 20 min vs 52 min (32 threads, no BAM, dynamic permits, bootstrap tiered hash).
-- A375: Gene Pearson on 17,253 filtered genes; Cell Pearson on 1,163 common barcodes; CRISPR exact-match at min-UMI 10; speedup = 4 min vs 15 min (32 threads, no BAM, dynamic permits, bootstrap tiered hash).
-- MSK: Gene Pearson on 17,448 filtered genes; Cell Pearson on 30,417 common barcodes; CRISPR set-equivalent calls on 22,531 evaluated rows (30 guides, min-UMI 2); speedup = 42 min vs 168 min (32 threads, with BAM, dynamic permits). CR requires two separate runs (GEX+gRNA 58 min + GEX+LARRY 110 min); STAR handles all three libraries in a single pass.
+- A375: Gene Pearson on 15,673 filtered genes (min 20 counts, 1% cells); Cell Pearson 0.9995 on 1,160 common barcodes; CRISPR exact set-match on all 1,083 common cells (min-UMI 10), UMI Pearson 1.000; speedup = 4 min vs 15 min (32 threads, no BAM). CR9 reference: `refdata-gex-GRCh38-2024-A`, `1k_CRISPR_5p_gemx_count_refmatch_2024a_fullraw`.
+- UCSF EBs2_2: Gene Pearson on 18,061 filtered genes; Cell Pearson 1.000 on 13,571 common barcodes; CRISPR set-match 98.9% on 12,038 evaluated cells, target-level match 99.5%; UMI Pearson 0.999; speedup = 19 min vs 61 min CR9 (32 threads, no BAM). CR9 reference: `refdata-gex-GRCh38-2024-A`, run on same corrected FASTQs.
+- MSK: Gene Pearson on 17,460 filtered genes; Cell Pearson 1.000 on 30,481 common barcodes; CRISPR set-match 99.4% on 23,341 evaluated cells (30 guides, min-UMI 2), UMI Pearson 1.000; speedup = 28 min vs 168 min (32 threads, no BAM). CR requires two separate runs (GEX+gRNA 58 min + GEX+LARRY 110 min); STAR handles all three libraries in a single pass with per-library whitelist support.
+
+All parity metrics computed with `scripts/report_additional_parity_metrics.py --gene-corr-min-counts 20 --gene-corr-min-cells-pct 0.01` per `docs/PAPER_BENCHMARK_METHODOLOGY.md`. CR9 references use `refdata-gex-GRCh38-2024-A` (gencode v44, mkref 8.0.0).
+
+### Perturb-seq Phase Breakdown (32 threads, no BAM)
+
+| Phase | A375 (47M) | UCSF EBs2_2 (445M) | MSK 30polyKO (669M) |
+|---|---|---|---|
+| Genome load | 44s | 48s | 48s |
+| Feature assignment | 32s | 4m 17s | 19m 50s |
+| Mapping | 81s | 8m 31s | 14m 42s |
+| Solo counting | 69s | 7m 46s | 9m 29s |
+| PfMulti merge + calling | 10s | 1m 20s | 1m 59s |
+| writeCombinedMex (raw/filt) | 2.0s / 1.5s | 19.5s / 15.0s | 35.1s / 24.4s |
+
+Feature assignment and mapping run concurrently via `dynamicThreadInterface`.
 
 ### Flex (STAR vs Cell Ranger 7.2)
 

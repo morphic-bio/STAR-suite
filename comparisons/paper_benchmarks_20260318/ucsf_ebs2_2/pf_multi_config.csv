@@ -1,0 +1,7 @@
+[libraries]
+fastqs,sample,library_type,feature_types
+/mnt/pikachu/ucsf-perturb-seq-corrected/EBs2_2/GEX,EBs2_2_AALG1,Gene Expression,Gene Expression
+/mnt/pikachu/ucsf-perturb-seq-corrected/EBs2_2/guides,EBs2_2_AALG2,CRISPR Guide Capture,CRISPR Guide Capture
+
+[feature]
+ref,/mnt/pikachu/ucsf-perturb-seq/cellranger_feature_ref_hCRISPRa_v2_like_AALG2_pattern.csv

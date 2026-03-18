@@ -1,0 +1,12 @@
+dataset=MSK_30polyKO
+chemistry=mixed_TRU_NXT
+libraries=3 (GEX + gRNA + LARRY)
+star_cells=30567
+wall_seconds=1656
+wall_minutes=27.6
+threads=32
+bam=none
+dynamic_permits=32
+bootstrap_tiered_hash=yes
+multimap_rescue=yes
+outdir=/storage/paper_bench_rerun_20260318_065211/msk_30polyko

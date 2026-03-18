@@ -1,0 +1,11 @@
+dataset=A375_1k_CRISPR_5p_gemx
+chemistry=TRU
+star_cells=1187
+wall_seconds=241
+wall_minutes=4.0
+threads=32
+bam=none
+dynamic_permits=32
+bootstrap_tiered_hash=yes
+multimap_rescue=yes
+outdir=/storage/paper_bench_rerun_20260318_065211/a375
