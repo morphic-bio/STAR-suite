@@ -26,6 +26,7 @@ This file tracks active top-level work only. Completed items and stale historica
 
 ## Priority 3: Dataset / Fixture Coverage
 
+- Benchmark PE bulk on a larger dataset with multiple samples. The current benchmark uses a single MorPHiC JAX KOLF sample (6.5M read pairs); a larger public PE dataset (50M+ pairs, multiple samples) would make the speedup more representative, provide a citable accession, and showcase batch-mode multi-sample handling.
 - Fix and run the remaining smoke tests that still depend on missing fixtures for memory-leak repair validation.
 - Validate `--crMinUmi` across real assay types beyond the A375 fixture:
   - lineage barcodes

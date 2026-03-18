@@ -52,6 +52,27 @@ mcp_server/              # MCP server for scripted discovery/preflight/run workf
 All benchmarks run on pikachu (AMD, 32 threads, 128 GB RAM, NVMe SSD).
 Detailed artifacts: `comparisons/paper_benchmarks_20260318/`.
 
+Dataset: MorPHiC JAX KOLF PE RNA-seq (sample 21033-09-01-13-01, 6.5M read pairs, NovaSeq X Plus).
+
+### Bulk RNA-seq Wall Time (STAR, 2026-03-18)
+
+| Dataset | Y-removal | Wall time (integrated) | Wall time (stepwise) | Speedup |
+|---|---|---|---|---|
+| JAX PE (full, 32 threads) | no | **37 s** | 87 s | 2.4x |
+| JAX PE (full, 32 threads) | yes | **61 s** | 125 s | 2.1x |
+
+### Bulk RNA-seq Parity (STAR TranscriptVB vs Salmon)
+
+"External stepwise" = Trim Galore + STAR align + (optional remove\_y\_reads) + Salmon quant (sequential).
+
+| Dataset | Y-removal | Transcript Pearson | Gene Pearson | Speedup |
+|---|---|---|---|---|
+| JAX PE (full, 32 threads) | no | 0.995 | 0.997 | 2.4x |
+| JAX PE (full, 32 threads) | yes | 0.995 | 0.997 | 2.1x |
+
+- JAX PE noY: TranscriptVB vs Salmon alignment-mode VB on expressed transcripts; integrated 37 s vs external stepwise 87 s (32 threads). Speedup reflects elimination of Trim Galore and Salmon as separate steps; single-pass STAR handles trimming, alignment, and quantification.
+- JAX PE Y-removal: TranscriptVB vs Salmon alignment-mode VB on expressed transcripts; integrated 61 s vs external stepwise 125 s (32 threads). Y-removal adds chrY BAM splitting and noY FASTQ generation in both pipelines; integrated path handles this natively via `--emitNoYBAM yes`.
+
 ### Perturb-seq Wall Time (STAR, 2026-03-18)
 
 | Dataset | Libraries | Chemistry | Reads | STAR cells | Wall time | BAM |
@@ -95,19 +116,6 @@ Feature assignment and mapping run concurrently via `dynamicThreadInterface`.
 
 - Gene Pearson on 18,021 common genes; Cell Pearson on 20,173 shared barcodes.
 - Speedup not yet measured (optimization pending).
-
-### PE Bulk (Integrated STAR-suite vs External Stepwise Pipeline)
-
-"External stepwise" = Trim Galore + STAR align + (optional remove\_y\_reads) + Salmon quant (sequential).
-
-| Dataset | Y-removal | Transcript Pearson | Gene Pearson | Speedup |
-|---|---|---|---|---|
-| JAX PE (full, 32 threads) | yes | 0.995 | 0.997 | 2.1x |
-| JAX PE (full, 32 threads) | no | 0.995 | 0.997 | 2.4x |
-
-- TranscriptVB vs Salmon (alignment-mode VB) on expressed transcripts.
-- With Y-removal: integrated 61 s vs external stepwise 125 s (32 threads).
-- Without Y-removal: integrated 37 s vs external stepwise 87 s (32 threads).
 
 ### SLAM-seq (STAR-SLAM vs GrandSLAM/GEDI)
 
