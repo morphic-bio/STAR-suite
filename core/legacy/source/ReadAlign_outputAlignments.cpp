@@ -15,6 +15,7 @@
 #include <unordered_map>
 #include <limits>
 #include <fstream>
+#include <chrono>
 
 // Forward declaration for Flex-only reject logging hook (defined in flex/SoloReadFeature_record_flex.cpp)
 extern "C" void storeQnameMapping(uint64_t iRead, const char* qname);
@@ -344,6 +345,23 @@ static CrRescueDecision evaluateCrRescueDecision(const std::vector<CrRescueRegio
     d.winnerAlignIndex = 0;
     return d;
 }
+}
+
+void ReadAlign::detectSampleFromRawR2() {
+    detectedSampleByte_ = 0xFFu;
+    if (!(sampleDetReady_ && readNmates > 0 && readLengthOriginal[0] >= 8)) {
+        return;
+    }
+
+    const uint32_t seqLen = readLengthOriginal[0];
+    const uint32_t packedLen = (seqLen + 1) / 2;
+    std::vector<uint8_t> packedSeq(packedLen);
+    nuclPackBAM(Read0[0], reinterpret_cast<char*>(packedSeq.data()), seqLen);
+
+    const uint32_t detectedIdx = sampleDet_->detectSampleIndex(packedSeq.data(), seqLen, false);
+    if (detectedIdx > 0) {
+        detectedSampleByte_ = static_cast<uint8_t>(detectedIdx & 0x1Fu);
+    }
 }
 
 void ReadAlign::outputAlignments() {
@@ -813,59 +831,12 @@ void ReadAlign::outputAlignments() {
                              << ", umiSeq.length()=" << readBar->umiSeq.length() << std::endl;
         }
         
-        // Detect sample index from raw R2 sequence (mate 0) before alignment/BAM conversion
-        // This ensures we detect from the original FASTQ sequence, not modified BAM sequence
-        detectedSampleByte_ = 0xFFu; // Default: no sample (mate 1 or no detection)
-        if (sampleDetReady_ && readNmates > 0 && readLengthOriginal[0] >= 8) {
-            // Mate 0 = R2 = sample read (per convention: R2,R1 order)
-            // Pack raw sequence to BAM format for detection
-            uint32_t seqLen = readLengthOriginal[0];
-            uint32_t packedLen = (seqLen + 1) / 2;
-            uint8_t *packedSeq = new uint8_t[packedLen];
-            nuclPackBAM(Read0[0], reinterpret_cast<char*>(packedSeq), seqLen);
-            
-            // Detect sample index (returns 1-based sequential index)
-            // Note: reverseStrand=false for raw R2 sequences (they're sequenced forward)
-            uint32_t detectedIdx = sampleDet_->detectSampleIndex(packedSeq, seqLen, false);
-            
-            static int debugCount = 0;
-            if (debugCount++ < 5) {
-                // Log first few bytes of raw sequence for debugging
-                std::string seqPreview;
-                for (int i = 0; i < std::min(20, static_cast<int>(seqLen)); i++) {
-                    seqPreview += Read0[0][i];
-                }
-                // Log probe offset from ParametersSolo (we'll need to access it)
-                P.inOut->logMain << "ReadAlign::outputAlignments: seqLen=" << seqLen
-                                 << ", seqPreview=" << seqPreview
-                                 << ", detectedIdx=" << detectedIdx << std::endl;
-            }
-            
-            delete[] packedSeq;
-            
-            if (detectedIdx > 0) {
-                // Store token (5 bits) for passing to BAMoutput
-                // Token registration happens automatically inside detectSampleIndex()
-                detectedSampleByte_ = static_cast<uint8_t>(detectedIdx & 0x1Fu);
-                static int detectCount = 0;
-                if (detectCount++ < 10) {
-                    P.inOut->logMain << "ReadAlign::outputAlignments: detected sample idx=" << detectedIdx
-                                     << ", token=" << (unsigned int)detectedSampleByte_ << std::endl;
-                }
-            } else {
-                static int missCount = 0;
-                if (missCount++ < 10) {
-                    P.inOut->logMain << "ReadAlign::outputAlignments: detection returned 0 (no match)" << std::endl;
-                }
-            }
-        } else {
-            static int skipCount = 0;
-            if (skipCount++ < 5) {
-                P.inOut->logMain << "ReadAlign::outputAlignments: SKIP detection - sampleDetReady_="
-                                 << sampleDetReady_ << ", readNmates=" << readNmates
-                                 << ", readLengthOriginal[0]=" << (readNmates > 0 ? readLengthOriginal[0] : 0) << std::endl;
-            }
-        }
+        const auto sampleDetectStart = std::chrono::steady_clock::now();
+        detectSampleFromRawR2();
+        const auto sampleDetectEnd = std::chrono::steady_clock::now();
+        statsRA.sampleDetectOutputCalls++;
+        statsRA.sampleDetectOutputNs += static_cast<uint64>(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(sampleDetectEnd - sampleDetectStart).count());
 
         //transcripts: need to be run after CB/UMI are obtained to output CR/UR tags
         uint nAlignT = 0;

@@ -4,9 +4,12 @@
 #include "SequenceFuns.h"
 #include "ErrorWarning.h"
 #include "GlobalVariables.h"
+#include "SampleDetector.h"
+#include "SoloReadFeature_record_shared.h"
 #include "libtrim/trim.h"
 #include <cstdlib>
 #include <atomic>
+#include <chrono>
 
 // Static counter for debug logging (guarded by STAR_TRIM_DEBUG_N env var)
 // Use atomic for thread-safety when debug logging is enabled
@@ -291,6 +294,43 @@ int ReadAlign::oneRead() {//process one read: load, map, write
       
     readFileType=readStatus[0];
 
+    hashScreenDecision_ = FlexHashScreenDecision();
+    if (P.pSolo.hashScreenEnabled && soloRead != nullptr && soloRead->readBar != nullptr &&
+        soloRead->readFeat != nullptr && P.pSolo.featureYes[SoloFeatureTypes::Gene] &&
+        P.readNmates > 0) {
+        soloRead->readBar->getCBandUMI(Read0, Qual0, readLengthOriginal, readNameExtra[0], readFilesIndex, readName);
+        const auto sampleDetectStart = std::chrono::steady_clock::now();
+        detectSampleFromRawR2();
+        const auto sampleDetectEnd = std::chrono::steady_clock::now();
+        statsRA.sampleDetectPreAlignCalls++;
+        statsRA.sampleDetectPreAlignNs += static_cast<uint64>(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(sampleDetectEnd - sampleDetectStart).count());
+        soloRead->readBar->detectedSampleToken = detectedSampleByte_;
+        const uint16_t hashScreenSampleIdx = SampleDetector::sampleIndexForToken(detectedSampleByte_);
+        // Read0[0] is still ASCII-encoded at this point (numeric conversion
+        // happens later at complementSeqNumbers). The hash screen encodes
+        // A/C/G/T characters; moving this call after convertNucleotidesToNumbers
+        // would silently break classification.
+        hashScreenDecision_ = FlexHashScreenCache::instance().classifyRead(Read0[0], readLengthOriginal[0], hashScreenSampleIdx);
+        if (hashScreenDecision_.action == FlexHashScreenDecision::Keep ||
+            hashScreenDecision_.action == FlexHashScreenDecision::Deny) {
+            soloRead->readFlagReset();
+            SoloReadFeature *geneFeat = soloRead->readFeat[P.pSolo.featureInd[SoloFeatureTypes::Gene]];
+            bool handled = false;
+            if (hashScreenDecision_.action == FlexHashScreenDecision::Keep) {
+                handled = record_flex_hash_screen_keep(geneFeat, *soloRead->readBar, iReadAll,
+                                                      hashScreenDecision_.geneIdx15,
+                                                      hashScreenDecision_.cacheClass);
+            } else {
+                record_flex_hash_screen_deny(geneFeat, *soloRead->readBar, iReadAll, "NEG_PROBE_AMBIG");
+                handled = true;
+            }
+            if (handled) {
+                return 0;
+            }
+        }
+    }
+
     complementSeqNumbers(Read1[0],Read1[1],Lread); //returns complement of Reads[ii]
     for (uint ii=0;ii<Lread;ii++) {//reverse
         Read1[2][Lread-ii-1]=Read1[1][ii];
@@ -300,11 +340,16 @@ int ReadAlign::oneRead() {//process one read: load, map, write
     outFilterMismatchNmaxTotal=min(P.outFilterMismatchNmax, (uint) (P.outFilterMismatchNoverReadLmax*(readLength[0]+readLength[1])));
 
     //map the read
+    const auto alignCoreStart = std::chrono::steady_clock::now();
     if (P.pGe.gType==101) {//SpliceGraph
         mapOneReadSpliceGraph();
     } else {//all other cases - standard alignment algorithm
         mapOneRead();
     };
+    const auto alignCoreEnd = std::chrono::steady_clock::now();
+    statsRA.alignCoreCalls++;
+    statsRA.alignCoreNs += static_cast<uint64>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(alignCoreEnd - alignCoreStart).count());
 
     peOverlapMergeMap();
     
@@ -342,5 +387,3 @@ int ReadAlign::oneRead() {//process one read: load, map, write
     return 0;
 
 };
-
-

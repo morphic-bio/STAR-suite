@@ -145,6 +145,9 @@ static void initRejectLogging() {
 // Store iRead -> qname mapping (called from ReadAlign::outputAlignments)
 // Note: This function is called from ReadAlign_outputAlignments.cpp (gated behind Flex mode)
 extern "C" void storeQnameMapping(uint64_t iRead, const char* qname) {
+    if (!g_rejectLogInitialized) {
+        initRejectLogging();
+    }
     if (!g_rejectLogTraceQname || iRead == (uint64_t)-1 || !qname) {
         return;
     }
@@ -298,6 +301,130 @@ const ProbeListIndex* getGlobalProbeIndex(const SoloReadFeature* rf) {
     return gProbeIndex;
 }
 
+static uint8_t extractTagIdxForFlex(const SoloReadBarcode &soloBar) {
+    uint8_t tagIdx = 0;
+    if (soloBar.detectedSampleToken != 0xFF) {
+        uint16_t sampleIdx = SampleDetector::sampleIndexForToken(soloBar.detectedSampleToken);
+        if (sampleIdx > 0) {
+            tagIdx = static_cast<uint8_t>(sampleIdx & 0x1F);
+        }
+    }
+    return tagIdx;
+}
+
+static bool dropUnmatchedTagForFlex(const SoloReadBarcode &soloBar, uint8_t tagIdx) {
+    return ((!soloBar.pSolo.sampleWhitelistPath.empty()) || soloBar.pSolo.sampleRequireMatch) && (tagIdx == 0);
+}
+
+static void accumulateAmbiguousCBForFlex(SoloReadFeature *soloReadFeat, SoloReadBarcode &soloBar, uint16_t geneIdx, uint8_t tagIdx) {
+    bool isAmbiguous = (soloBar.cbMatchInd.size() > 1) || (soloBar.cbMatch > 1);
+    if (!soloReadFeat || !soloReadFeat->inlineHash_ || !isAmbiguous || soloBar.cbMatchString.empty() || soloBar.cbMatchInd.empty()) {
+        return;
+    }
+
+    uint32_t umi24 = soloBar.umiB & 0xFFFFFF;
+    ReadAlign::AmbigKey ambigKey = ReadAlign::hashCbSeq(soloBar.cbMatchString);
+    auto &entry = soloReadFeat->pendingAmbiguous_[ambigKey];
+
+    if (entry.candidateIdx.empty()) {
+        entry.candidateIdx.reserve(soloBar.cbMatchInd.size());
+        for (auto idx : soloBar.cbMatchInd) {
+            entry.candidateIdx.push_back(static_cast<uint32_t>(idx + 1));
+        }
+        entry.cbSeq = soloBar.cbMatchString;
+        entry.cbQual = soloBar.cbQual;
+        entry.umiCounts.reserve(32);
+    }
+
+    entry.umiCounts[umi24]++;
+
+    SoloReadFeature::ExtendedAmbiguousEntry::AmbiguousObservation obs;
+    obs.geneIdx = geneIdx;
+    obs.tagIdx = tagIdx;
+    obs.umi24 = umi24;
+    obs.count = 1;
+    entry.observations.push_back(obs);
+}
+
+static void trackReadIdForTagsFlex(SoloReadFeature *soloReadFeat, SoloReadBarcode &soloBar, uint64_t iRead, uint32_t cbIdx, uint32_t umi24) {
+    if (!soloReadFeat || !soloReadFeat->readIdTracker_ || iRead == (uint64_t)-1) {
+        return;
+    }
+
+    uint8_t status = (soloBar.umiCheck >= 0) ? 1 : 2;
+    uint64_t val = packReadIdCbUmi(cbIdx, umi24, status);
+
+    int absent;
+    khiter_t iter = kh_put(readid_cbumi, soloReadFeat->readIdTracker_, (uint32_t)iRead, &absent);
+    kh_val(soloReadFeat->readIdTracker_, iter) = val;
+}
+
+bool record_flex_hash_screen_keep(SoloReadFeature *soloReadFeat, SoloReadBarcode &soloBar, uint64 iRead, uint16_t geneIdx15, uint8_t cacheClass)
+{
+    if (soloReadFeat == nullptr || soloReadFeat->featureType != SoloFeatureTypes::Gene) {
+        return false;
+    }
+    if (soloBar.cbMatch < 0) {
+        return false;
+    }
+
+    const uint8_t tagIdx = extractTagIdxForFlex(soloBar);
+    if (dropUnmatchedTagForFlex(soloBar, tagIdx)) {
+        if (soloBar.pSolo.inlineHashMode) {
+            logRejectReason(soloBar, iRead, soloReadFeat->featureType, 0, 0, "UNMATCHED_TAG", "", soloBar.pSolo);
+        }
+        return true;
+    }
+
+    const bool isAmbiguous = (soloBar.cbMatchInd.size() > 1) || (soloBar.cbMatch > 1);
+    if (isAmbiguous) {
+        if (soloBar.pSolo.inlineHashMode) {
+            char extraBuf[64];
+            snprintf(extraBuf, sizeof(extraBuf), "cache_class=%u", static_cast<unsigned>(cacheClass));
+            logRejectReason(soloBar, iRead, soloReadFeat->featureType, 1, geneIdx15, "KEEP_SCREEN", extraBuf, soloBar.pSolo);
+        }
+        accumulateAmbiguousCBForFlex(soloReadFeat, soloBar, geneIdx15, tagIdx);
+    } else if (soloReadFeat->inlineHash_ != nullptr && !soloBar.cbMatchInd.empty()) {
+        uint32_t cbIdx = soloBar.cbMatchInd[0];
+        uint32_t umi24 = soloBar.umiB & 0xFFFFFF;
+        uint64_t key = packCgAggKey(cbIdx, umi24, geneIdx15, tagIdx);
+        int absent;
+        khiter_t iter = kh_put(cg_agg, soloReadFeat->inlineHash_, key, &absent);
+        if (absent) {
+            kh_val(soloReadFeat->inlineHash_, iter) = 1;
+        } else {
+            kh_val(soloReadFeat->inlineHash_, iter)++;
+        }
+        trackReadIdForTagsFlex(soloReadFeat, soloBar, iRead, cbIdx, umi24);
+        if (soloBar.pSolo.inlineHashMode) {
+            char extraBuf[64];
+            snprintf(extraBuf, sizeof(extraBuf), "cache_class=%u", static_cast<unsigned>(cacheClass));
+            logRejectReason(soloBar, iRead, soloReadFeat->featureType, 1, geneIdx15, "KEEP_SCREEN", extraBuf, soloBar.pSolo);
+        }
+    }
+
+    if (soloReadFeat->pSolo.cbWLyes) {
+        for (auto &cbi : soloBar.cbMatchInd) {
+            soloReadFeat->cbReadCount[cbi] += 1;
+        }
+    } else if (!soloBar.cbMatchInd.empty()) {
+        soloReadFeat->cbReadCountMap[soloBar.cbMatchInd[0]] += 1;
+    }
+    soloReadFeat->readFlag.setBit(soloReadFeat->readFlag.featureU);
+    return true;
+}
+
+void record_flex_hash_screen_deny(SoloReadFeature *soloReadFeat, SoloReadBarcode &soloBar, uint64 iRead, const char *reason)
+{
+    if (soloReadFeat == nullptr || soloReadFeat->featureType != SoloFeatureTypes::Gene) {
+        return;
+    }
+    soloReadFeat->stats.V[soloReadFeat->stats.noNoFeature]++;
+    if (soloBar.pSolo.inlineHashMode) {
+        logRejectReason(soloBar, iRead, soloReadFeat->featureType, 1, 0, "DENY_SCREEN", reason ? reason : "", soloBar.pSolo);
+    }
+}
+
 void record_flex(SoloReadFeature *soloReadFeat, SoloReadBarcode &soloBar, uint nTr, Transcript **alignOut, uint64 iRead, ReadAnnotations &readAnnot)
 {
     // Check for NO_GENE debug mode
@@ -364,6 +491,9 @@ void record_flex(SoloReadFeature *soloReadFeat, SoloReadBarcode &soloBar, uint n
     uint32 nFeat=0; //number of features in this read (could be >1 for SJs)
     if (nTr==0) {//unmapped
         soloReadFeat->stats.V[soloReadFeat->stats.noUnmapped]++;
+        if (soloReadFeat->pSolo.inlineHashMode) {
+            logRejectReason(soloBar, iRead, soloReadFeat->featureType, 0, 0, "UNMAPPED", "", soloReadFeat->pSolo);
+        }
         
     } else {
         switch (soloReadFeat->featureType) {
@@ -586,6 +716,9 @@ uint32 outputReadCB_flex(fstream *streamOut, const uint64 iRead, const int32 fea
     const uint8_t tagIdx = extractTagIdx();
     const bool dropUnmatchedTag = ( (!soloBar.pSolo.sampleWhitelistPath.empty()) || soloBar.pSolo.sampleRequireMatch ) && (tagIdx == 0);
     if (dropUnmatchedTag) {
+        if (soloBar.pSolo.inlineHashMode) {
+            logRejectReason(soloBar, iRead, featureType, 0, 0, "UNMATCHED_TAG", "", soloBar.pSolo);
+        }
         return 0;
     }
     

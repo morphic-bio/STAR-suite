@@ -5,6 +5,15 @@
 /*_SUMMARY.md
 /*_FIX*.md
 
+## Agent-local files
+AGENTS.local.md
+
+## PID files
+*.pid
+
+## Root-level dash directories (test artifacts)
+/-/
+
 ## OS / editor / IDE files
 .DS_Store
 .project
@@ -39,6 +48,7 @@ Depend.list
 /core/legacy/source/STAR
 /core/legacy/source/STARlong
 /core/legacy/source/compat_unit_tests
+/core/legacy/source/trim_qc_fastq
 /core/legacy/source/Aligned.out.sam
 /core/legacy/source/Log.progress.out
 /core/features/vbem/source/libem/libem.a
@@ -115,7 +125,7 @@ Depend.list
 /tmp/samtools_sorter_test_*
 /comparison_results
 /comparison_results_filtered
-/tests/__pycache__/
+__pycache__/
 /tests/emptydrops/test_ambient_profile
 /tests/emptydrops/test_no_tag_mode
 /tests/emptydrops/test_sampler_deterministic

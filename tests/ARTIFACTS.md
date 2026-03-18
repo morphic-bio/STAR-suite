@@ -122,6 +122,8 @@ update this file with its output location.
     - `/storage/ucsf-full/bench_20260218_dynamic_first/cellranger_runs/cr_full_iPSC2_1_AALG2_crstar32_20260218_205804/`
   - STAR vs CR parity report (dynamic 32x32 run):
     - `/tmp/ucsf_full_dynamic_32x32_vs_cr_20260224_101314/`
+- `/storage/downsampled_100K/SC2300771/results/flex_h01_*` (Flex H0/H1 cache pilot artifacts, including synthetic cache builds, 100-probe parity runs, and full-probe cache/scan outputs)
+- `/storage/downsampled_100K/SC2300771/results/flex_hash_screen_internal_*` (internal Flex hash-screen 100K E2E runs, including the exact-parity full-16-whitelist run `flex_hash_screen_internal_full16_20260315_203745/`)
 
 ## Flex Modular Integration Baselines
 
@@ -327,3 +329,36 @@ These scripts validate that default bundles work with minimal explicit parameter
   - `/tmp/ucsf_hash_offset31_20260317/`
 - Primary notes:
   - `docs/HANDOFF_BOOTSTRAP_TIERED_HASH_ACTIVATION_20260317.md`
+
+## Flex Internal Hash-Screen 100K E2E (2026-03-15)
+
+- Harness: `tests/run_flex_hash_screen_internal_100k.sh`
+- Cache:
+  - `/storage/downsampled_100K/SC2300771/results/flex_h01_full_cache_20260315_153914/reclassified/sequence_cache.bin`
+- Completed runs:
+  - `/storage/downsampled_100K/SC2300771/results/flex_hash_screen_internal_20260315_193538/`
+    - `hash_on/` internal H0/H1 keep + internal deny
+    - `legacy/` same-binary `--no-hash-screen yes` control
+  - `/storage/downsampled_100K/SC2300771/results/flex_hash_screen_internal_exactonly_20260315_194025/`
+    - `hash_on/` exact-only keep (`0,+1,-1` offset scan) + internal deny
+    - `legacy/` aborted after startup because the prior legacy control was reused
+- Status: untracked
+
+## Flex Internal Hash-Screen 2M E2E (2026-03-18)
+
+- Harness: `tests/run_flex_hash_screen_internal_2M.sh`
+- Cache: `/storage/downsampled_100K/SC2300771/results/flex_h01_full_cache_20260315_153914/reclassified/sequence_cache.bin`
+- Completed runs:
+  - `/storage/downsampled_2M/SC2300771/results/flex_hash_screen_internal_20260318_212014/`
+    - `hash_on/` H0/H1 keep + deny (DENY restored)
+    - `legacy/` same-binary `--no-hash-screen yes` control
+- 2M results (16M reads, 8 lanes x 2M):
+  - Wall-clock: hash_on 1:46 vs legacy 3:42 = **52.1% speedup (2.09x)**
+  - Alignment calls: 2,470,053 / 16M = 15.4% = **84.6% reduction**
+  - Raw MEX pair discrepancy: 14,209 / 10.8M = **0.132%**
+    - 12,501 pairs only in hash_on
+    - 1,708 pairs only in legacy
+    - 4,069 shared pairs with count mismatch (0.038%)
+  - Barcodes: 61 only in hash_on, 7 only in legacy
+  - Features: identical
+- Status: untracked

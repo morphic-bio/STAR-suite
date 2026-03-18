@@ -312,6 +312,13 @@ public:
     string inlineHashModeStr = "";            // raw CLI value: yes|no|auto (default: auto - enabled for Flex, disabled otherwise)
     bool inlineHashMode = false;              // resolved value: true if enabled (gated behind Flex flag by default)
 
+    // H0/H1 hash screen fast path for Flex.
+    // Default behavior: enabled when --flex yes and a cache file is discoverable.
+    // Use --no-hash-screen yes to force the legacy align-everything path.
+    string hashScreenDisableStr = "no";
+    bool hashScreenEnabled = false;
+    string hashScreenFile;
+
     // ReadId tracking for sorted BAM CB/UB tag injection (Option C)
     // When enabled, a parallel hash (readid_cbumi) tracks readId -> (cbIdx, umi24, status)
     // This allows packedReadInfo to be populated after inline-hash collapse
