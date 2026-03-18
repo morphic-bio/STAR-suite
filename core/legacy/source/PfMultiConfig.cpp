@@ -168,6 +168,8 @@ Config parseConfig(const string& configPath) {
                                 }
                                 entry.starChemistry = lower;
                             }
+                        } else if (header == "star_whitelist" || header == "starwhitelist") {
+                            entry.starWhitelist = value;
                         } else if (header == "star_feature_ref" || header == "starfeatureref") {
                             entry.starFeatureRef = value;
                         } else if (header == "star_library_id" || header == "starlibraryid") {
@@ -311,6 +313,8 @@ Config parseConfig(const string& configPath) {
                             }
                             entry.starChemistry = lower;
                         }
+                    } else if (header == "star_whitelist" || header == "starwhitelist") {
+                        entry.starWhitelist = value;
                     } else if (header == "star_feature_ref" || header == "starfeatureref") {
                         entry.starFeatureRef = value;
                     } else if (header == "star_library_id" || header == "starlibraryid") {
@@ -398,6 +402,16 @@ Config parseConfig(const string& configPath) {
         configDir = (lastSlash == string::npos) ? "." : configPath.substr(0, lastSlash);
     }
     for (auto& lib : config.libraries) {
+        if (!lib.starWhitelist.empty()) {
+            if (lib.starWhitelist[0] != '/') {
+                lib.starWhitelist = configDir + "/" + lib.starWhitelist;
+            }
+            struct stat st;
+            if (stat(lib.starWhitelist.c_str(), &st) != 0 || !S_ISREG(st.st_mode)) {
+                throw runtime_error("star_whitelist path does not exist or is not a file: "
+                    + lib.starWhitelist);
+            }
+        }
         if (!lib.starFeatureRef.empty()) {
             // Resolve relative paths against config directory
             if (lib.starFeatureRef[0] != '/') {

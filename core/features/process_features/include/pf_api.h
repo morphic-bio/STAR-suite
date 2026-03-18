@@ -153,6 +153,8 @@ void pf_config_set_strict_offset_check(pf_config *config, int enable);
 void pf_config_set_use_feature_anchor_search(pf_config *config, int enable);
 void pf_config_set_require_feature_anchor_match(pf_config *config, int enable);
 void pf_config_set_feature_mode_bootstrap_reads(pf_config *config, int n_reads);
+void pf_config_set_use_hot_hash(pf_config *config, int enable);
+void pf_config_set_skip_heatmaps(pf_config *config, int enable);
 
 /* Prehash memory budget (0 = auto-detect from system memory) */
 void pf_config_set_prehash_memory_budget(pf_config *config, unsigned long long budget);

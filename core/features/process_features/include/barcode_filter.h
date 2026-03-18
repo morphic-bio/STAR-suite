@@ -35,6 +35,7 @@ typedef struct barcode_filter_config {
     int n_features;                 /* Number of features */
     int n_expected_cells;           /* Expected cells for EmptyDrops (0 = auto) */
     int translate_nxt;              /* If true, apply NXT translation to barcodes */
+    const char *output_namespace;   /* Reserved (currently unused) */
     
     /* EmptyDrops control */
     int skip_emptydrops;            /* 1 = skip EmptyDrops entirely */

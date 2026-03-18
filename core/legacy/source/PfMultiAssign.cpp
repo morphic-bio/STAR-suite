@@ -354,6 +354,12 @@ static void applyAssignOptions(pf_config* cfg, const AssignOptions& options) {
     if (options.featureModeBootstrapReads > 0) {
         pf_config_set_feature_mode_bootstrap_reads(cfg, options.featureModeBootstrapReads);
     }
+    if (options.useHotHash) {
+        pf_config_set_use_hot_hash(cfg, 1);
+    }
+    if (options.skipHeatmaps) {
+        pf_config_set_skip_heatmaps(cfg, 1);
+    }
 }
 
 static string pfErrorMessage(pf_context* ctx, pf_error err, const string& stage) {
@@ -471,6 +477,63 @@ static void writeApiRunSummary(const string& assignOut,
 WhitelistNormalizationResult normalizeWhitelistForAssign(const string& whitelistPath,
                                                          const string& assignOut) {
     return normalizeWhitelistInternal(whitelistPath, assignOut);
+}
+
+WhitelistNormalizationResult normalizeWhitelistToNamespace(
+    const string& whitelistPath,
+    const string& assignOut,
+    const string& desiredNamespace)
+{
+    WhitelistNormalizationResult base = normalizeWhitelistInternal(whitelistPath, assignOut);
+
+    if (desiredNamespace != "NXT" && desiredNamespace != "TRU") {
+        return base;
+    }
+    if (base.assignmentNamespace == desiredNamespace) {
+        return base;
+    }
+    if (base.assignmentNamespace != "NXT" && base.assignmentNamespace != "TRU") {
+        return base;
+    }
+
+    const string srcPath = base.normalizedPath;
+    const string translatedPath = assignOut + "/whitelist.ns_" + desiredNamespace + ".txt";
+
+    std::ifstream in(srcPath.c_str());
+    if (!in.is_open()) {
+        return base;
+    }
+    std::ofstream out(translatedPath.c_str());
+    if (!out.is_open()) {
+        return base;
+    }
+
+    string line;
+    uint64 emitted = 0;
+    while (std::getline(in, line)) {
+        size_t first = line.find_first_not_of(" \t\r\n");
+        if (first == string::npos) {
+            continue;
+        }
+        size_t end = line.find_first_of("\t, \r\n", first);
+        string token = (end == string::npos) ? line.substr(first)
+                                             : line.substr(first, end - first);
+        if (!isValidBarcodeSeq(token)) {
+            continue;
+        }
+        out << translateNxtMiddleTwoBases(token) << "\n";
+        ++emitted;
+    }
+
+    if (emitted == 0) {
+        return base;
+    }
+
+    WhitelistNormalizationResult result = base;
+    result.normalizedPath = translatedPath;
+    result.assignmentNamespace = desiredNamespace;
+    result.normalizedRowCount = emitted;
+    return result;
 }
 
 AssignResult runAssignBarcodes(const string& whitelist,

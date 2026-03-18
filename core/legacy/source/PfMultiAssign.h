@@ -48,6 +48,7 @@ struct AssignOptions {
     bool requireFeatureAnchorMatch = false;
     int featureModeBootstrapReads = 0;
     bool useHotHash = false;
+    bool skipHeatmaps = false;
 };
 
 struct AssignResult {
@@ -64,6 +65,21 @@ struct AssignResult {
  */
 WhitelistNormalizationResult normalizeWhitelistForAssign(const string& whitelistPath,
                                                          const string& assignOut);
+
+/**
+ * @brief Normalize whitelist to a specific target namespace.
+ *
+ * If the whitelist is already in desiredNamespace, returns the existing
+ * normalized path unchanged.  Otherwise writes a translated copy where
+ * positions 7-8 of each barcode are complemented (NXT<->TRU).
+ *
+ * The autodetect probe must run BEFORE this call so that
+ * effectiveReadNamespace is already determined.
+ */
+WhitelistNormalizationResult normalizeWhitelistToNamespace(
+    const string& whitelistPath,
+    const string& assignOut,
+    const string& desiredNamespace);
 
 /**
  * @brief Run assignBarcodes for a feature library

@@ -107,10 +107,14 @@ emptydrops_input* emptydrops_input_from_counts(
         }
         code2string((unsigned char*)&barcode_key, barcode_str, barcode_code_length);
         
-        /* Apply NXT translation if requested */
+        /* Apply NXT translation if requested (legacy path) */
         if (do_translate_nxt && translate_NXT) {
             translate_nxt_inplace(barcode_str, barcode_length);
         }
+        /* NOTE: With the namespace refactor, translate_NXT is false when
+         * the whitelist has been pre-normalized to match read namespace.
+         * Barcodes are already in the correct assignment namespace and
+         * do not need translation here. */
         
         input->barcodes[bc_idx] = barcode_str;
         

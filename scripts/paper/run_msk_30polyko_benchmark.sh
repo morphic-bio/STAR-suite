@@ -24,6 +24,8 @@ LARRY_DIR="${MSK_LARRY_DIR:-${FASTQ_ROOT}/LARRY}"
 GRNA_FEATURE_REF="${MSK_GRNA_REF:-/mnt/pikachu/MSK-whitelists/ref_feature_geneBC.csv}"
 LARRY_FEATURE_REF="${MSK_LARRY_REF:-/mnt/pikachu/MSK-whitelists/ref_feature_larryBC.csv}"
 SOLO_CB_WHITELIST="${MSK_SOLO_WHITELIST:-/storage/scRNAseq_output/whitelists/3M-february-2018_TRU.txt}"
+GRNA_WHITELIST="${MSK_GRNA_WHITELIST:-/storage/scRNAseq_output/whitelists/3M-february-2018_NXT.txt}"
+LARRY_WHITELIST="${MSK_LARRY_WHITELIST:-/storage/scRNAseq_output/whitelists/3M-february-2018_TRU.txt}"
 GENOME_DIR="${MSK_GENOME_DIR:-/storage/autoindex_110_44/bulk_index}"
 OUTDIR="${MSK_OUTDIR:-/storage/MSK-perturb-comparison/paper_bench_$(date +%Y%m%d_%H%M%S)}"
 THREADS="${MSK_THREADS:-32}"
@@ -58,7 +60,7 @@ done
 
 # ── Validate inputs ─────────────────────────────────────────────────
 [[ -x "${STAR_BIN}" ]] || { echo "ERROR: STAR binary not found: ${STAR_BIN}" >&2; exit 1; }
-for f in "${SOLO_CB_WHITELIST}" "${GRNA_FEATURE_REF}" "${LARRY_FEATURE_REF}"; do
+for f in "${SOLO_CB_WHITELIST}" "${GRNA_WHITELIST}" "${LARRY_WHITELIST}" "${GRNA_FEATURE_REF}" "${LARRY_FEATURE_REF}"; do
   [[ -f "$f" ]] || { echo "ERROR: Missing file: $f" >&2; exit 1; }
 done
 for d in "${GENOME_DIR}" "${GEX_DIR}" "${GRNA_DIR}" "${LARRY_DIR}"; do
@@ -91,10 +93,10 @@ echo ""
 MULTI_CONFIG="${OUTDIR}/multi_config.csv"
 cat > "${MULTI_CONFIG}" <<EOF
 [libraries]
-fastqs,sample,library_type,feature_types,star_chemistry,star_feature_ref,star_library_id,star_max_hamming
-${GEX_DIR},DE_30KO,Gene Expression,Gene Expression,TRU,,gex_de,
-${GRNA_DIR},DE_30KO,CRISPR Guide Capture,CRISPR Guide Capture,NXT,${GRNA_FEATURE_REF},grna_de,1
-${LARRY_DIR},DE_30KO,Custom,Custom,TRU,${LARRY_FEATURE_REF},larry_de,1
+fastqs,sample,library_type,feature_types,star_chemistry,star_whitelist,star_feature_ref,star_library_id,star_max_hamming
+${GEX_DIR},DE_30KO,Gene Expression,Gene Expression,TRU,,,gex_de,
+${GRNA_DIR},DE_30KO,CRISPR Guide Capture,CRISPR Guide Capture,NXT,${GRNA_WHITELIST},${GRNA_FEATURE_REF},grna_de,1
+${LARRY_DIR},DE_30KO,Custom,Custom,TRU,${LARRY_WHITELIST},${LARRY_FEATURE_REF},larry_de,1
 EOF
 
 echo "Multi-config: ${MULTI_CONFIG}"

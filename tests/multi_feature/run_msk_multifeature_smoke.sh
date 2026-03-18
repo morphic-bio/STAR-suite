@@ -7,7 +7,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 STAR="$REPO_ROOT/core/legacy/source/STAR"
-GENOME=/storage/autoindex_110_44/refdata-gex-GRCh38-autoindex11044-crstar/star
+GENOME="${MSK_MULTI_GENOME:-/storage/autoindex_110_44/refdata-gex-GRCh38-autoindex11044-crstar/star}"
 FIXTURE=${1:-/tmp/msk_multi_fixture}
 OUT_DIR=${2:-/tmp/msk_multifeature_smoke_$(date +%Y%m%d_%H%M%S)}
 
@@ -36,10 +36,10 @@ mkdir -p "$OUT_DIR"
 #   - Explicit star_library_id for output provenance
 cat > "$OUT_DIR/multi_config.csv" << EOF
 [libraries]
-fastqs,sample,library_type,feature_types,star_chemistry,star_feature_ref,star_library_id
-$FIXTURE/mRNA,DE_30KO,Gene Expression,Gene Expression,TRU,,gex_de
-$FIXTURE/PolyIII,DE_30KO,CRISPR Guide Capture,CRISPR Guide Capture,NXT,/mnt/pikachu/MSK-whitelists/ref_feature_geneBC.csv,grna_de
-$FIXTURE/LARRY,DE_30KO,Custom,Custom,TRU,/mnt/pikachu/MSK-whitelists/ref_feature_larryBC.csv,larry_de
+fastqs,sample,library_type,feature_types,star_chemistry,star_whitelist,star_feature_ref,star_library_id
+$FIXTURE/mRNA,DE_30KO,Gene Expression,Gene Expression,TRU,,,gex_de
+$FIXTURE/PolyIII,DE_30KO,CRISPR Guide Capture,CRISPR Guide Capture,NXT,/storage/scRNAseq_output/whitelists/3M-february-2018_NXT.txt,/mnt/pikachu/MSK-whitelists/ref_feature_geneBC.csv,grna_de
+$FIXTURE/LARRY,DE_30KO,Custom,Custom,TRU,/storage/scRNAseq_output/whitelists/3M-february-2018_TRU.txt,/mnt/pikachu/MSK-whitelists/ref_feature_larryBC.csv,larry_de
 EOF
 
 echo "Config:"
@@ -119,6 +119,13 @@ check "grna_de per-library feature ref logged" \
 
 check "larry_de per-library feature ref logged" \
     "grep -q 'star_feature_ref=.*ref_feature_larryBC.csv' '$OUT_DIR/Log.out'"
+
+# Check per-library star_whitelist logged
+check "grna_de per-library whitelist logged" \
+    "grep -q 'grna_de.*whitelist=.*/3M-february-2018_NXT.txt' '$OUT_DIR/Log.out'"
+
+check "larry_de per-library whitelist logged" \
+    "grep -q 'larry_de.*whitelist=.*/3M-february-2018_TRU.txt' '$OUT_DIR/Log.out'"
 
 # Check that CRISPR is recognized as known type (no NOTICE for it)
 check "CRISPR is recognized as known type (no NOTICE)" \

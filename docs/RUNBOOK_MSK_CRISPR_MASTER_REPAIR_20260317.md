@@ -23,6 +23,51 @@ work already present in this tree.
   cherry-pick of the 15 missing commits.
 - GEX expression looks unaffected. The immediate problem is feature assignment
   and downstream CRISPR calling on the MSK mixed TRU/NXT/TRU run.
+- The MSK 100k guide fixture does **not** currently point to a wrapper-level
+  namespace flip:
+  - guide library uses explicit `star_chemistry=nxt`
+  - whitelist is 1-column `3M-february-2018_TRU.txt`
+  - known-good and bad runs both record
+    `effective_read_namespace=NXT`,
+    `assignment_whitelist_namespace=TRU`,
+    `translate_nxt_for_assign=yes`
+- The first hard divergence on that fixture is inside feature matching:
+  - reference PolyIII run: `Total feature counts 94394`, `Total barcodes 41418`,
+    `Resolve_calls_total 0`
+  - bad/current PolyIII run: `Total feature counts 31976`, `Total barcodes 14318`,
+    `Resolve_calls_total 200782`
+  This pushes the main P0 target into `assignBarcodes.c` guide matching rather
+  than `PfMultiProcess.cpp` namespace plumbing.
+- A simplified UCSF-style guide run on the same MSK 100k fixture recovered the
+  catastrophic top-line regression without touching the matcher:
+  - run shape: GEX + PolyIII only, no LARRY, explicit NXT `crWhitelist`,
+    explicit CR assign knobs
+  - PolyIII result: `Total feature counts 95733`, `Total barcodes 42084`,
+    `Resolve_calls_total 200782`
+  - final CRISPR calls rebounded from the bad run's near-zero signal
+    (`1 feature=39`, `>1 features=3`) to a plausible distribution
+    (`1 feature=6466`, `>1 features=223`), though still below the reference
+    (`1 feature=8898`, `>1 features=459`)
+- That means the current priority should shift from "matcher-only regression" to
+  "multi-feature whitelist/control-path regression that can trigger the bad
+  14k-barcode collapse on MSK".
+- Small mixed-fixture tracing confirmed one real downstream namespace bug in the
+  multi-feature path:
+  - raw PolyIII guide barcodes overlapped filtered GEX barcodes only after the
+    2-base NXT->TRU transform (`292` matches on the smoke fixture)
+  - deferred `cr_assign/.../filtered` generation was matching feature
+    `barcodes.tsv` against already-TRU-normalized GEX barcodes without first
+    normalizing the feature-side namespace
+  - this collapsed the final per-library PolyIII `filtered/` output from the
+    expected `292` guide barcodes to `1`
+  - patching `writeDeferredFilteredAssignOutput()` to normalize feature
+    barcodes to TRU before subsetting restored the correct `292`-barcode smoke
+    result
+- Important: that deferred-filter bug was real, but it is **not sufficient** to
+  explain the full MSK 100k regression by itself. On the same small fixture,
+  the merged filtered feature matrix already carried the correct `292` CRISPR
+  cells before this fix; the bug mainly affected the per-library `filtered/`
+  artifacts and anything that depended on them directly.
 
 ## Current Tree vs `CR-Larry-perturb`
 
@@ -60,6 +105,37 @@ Still clearly missing relative to `CR-Larry-perturb`:
 ## Proposed Changes
 
 ### P0: Must Restore for MSK Correctness
+
+- [ ] Reproduce and isolate the bad MSK path as a multi-feature whitelist/control
+  regression first.
+  Concrete diff surface:
+  - compare the bad mixed run against the simplified UCSF-style NXT run
+  - trace what changes when `crWhitelist` is explicit NXT versus inherited TRU
+    plus `translateNxt`
+  - inspect how the multiple-feature path chooses filtered barcode inputs,
+    namespace normalization, and whitelist mode when PolyIII is processed beside
+    other libraries
+  Validation surface:
+  - PolyIII `stats.txt`
+  - final `protospacer_calls_summary.csv`
+  - raw/filtered guide barcode counts
+  - `assignBarcodes.api_run.txt`
+
+- [ ] Treat the MSK guide regression as an `assignBarcodes.c` matcher regression
+  only after the simplified UCSF-style guide run path is accounted for.
+  Concrete audit target:
+  - compare the post-bootstrap fast path on current `master` against the
+    known-good branch
+  - current path uses `pf_search_hash_offsets()` /
+    `pf_single_offset_hash_search()`
+  - known-good branch used `pf_search_with_offsets()` /
+    `pf_hamming_search_single()`
+  - verify that the current helper still preserves the old fallback behavior
+    when exact/hash probes miss, especially for PolyIII guide reads
+  Validation surface:
+  - PolyIII `stats.txt`
+  - `Resolve_*` counters
+  - raw/filtered guide barcode counts and MEX totals
 
 - [ ] Backport the remaining bootstrap/tiered assignment logic from
   `CR-Larry-perturb` into
@@ -108,8 +184,14 @@ Still clearly missing relative to `CR-Larry-perturb`:
   - per-library `star_max_hamming`
   Rationale:
   - MSK is `GEX=TRU`, `gRNA=NXT`, `LARRY=TRU`
-  - even if the big count regression is primarily assignment-side, we should
-    re-verify this path before calling the repair complete
+  - this is now back in scope because the simplified UCSF-style NXT run largely
+    fixes the catastrophic MSK guide collapse
+  Status:
+  - per-library `star_whitelist` override is now implemented
+  - deferred filtered assign output namespace normalization is now fixed for the
+    smoke fixture
+  - remaining work is the deeper guide-assignment regression on the full MSK
+    dataset
 
 ### P1: Likely Useful but Not Required for First Correctness Pass
 
@@ -144,6 +226,105 @@ Still clearly missing relative to `CR-Larry-perturb`:
   - these are valuable, but they are not the first thing blocking MSK CRISPR
     correctness
 
+## Confirmed Fixes
+
+### Deferred Filtered Assign Output: Raw-vs-MEX Namespace Skew
+
+Confirmed root cause:
+
+- `assignBarcodes` raw outputs (`barcodes.txt`, `feature_per_cell.csv`) remain
+  in native/raw barcode space.
+- `PfMultiMexStub::copyBarcodesTsv()` rewrites `barcodes.tsv` into the
+  whitelist-driven output namespace.
+- `writeDeferredFilteredAssignOutput()` was subsetting through
+  `PfMultiMerge::readMex(assignOut)`, which reads `barcodes.tsv`, then copying
+  raw-side files separately.
+
+That meant the deferred filtered writer could silently drop valid
+`raw guide assignment ∩ Solo filtered GEX` cells whenever `barcodes.txt` and
+`barcodes.tsv` diverged.
+
+Applied fix in [PfMultiProcess.cpp](/mnt/pikachu/STAR-suite/core/legacy/source/PfMultiProcess.cpp):
+
+- deferred filtered assign output now subsets using raw `barcodes.txt`
+- filtered `feature_per_cell.csv` is subset from the same raw barcode set
+- filtered `barcodes.tsv` is regenerated from filtered `barcodes.txt` via
+  `PfMultiMexStub::copyBarcodesTsv()`
+
+Validation:
+
+- Small newer-parameter fixture:
+  `/tmp/msk_small_newpaperparams_fix_20260317`
+  - filtered guide barcodes improved from `249` to `294`
+  - filtered guide deduped counts improved from `299` to `355`
+  - previously dropped cells such as `ACGTTCCGTAGCTGCC`,
+    `AGACCCGGTCCCTGAG`, and `TACCTGCGTTCAGCTA` now survive the deferred
+    filtered writer
+  - all `raw guide assignment ∩ Solo filtered GEX` cells now survive
+    (`missing_from_filtered = 0`)
+
+- 100K newer-parameter fixture:
+  `/tmp/msk_100k_ucsf_newpaperparams_fix_20260317`
+  - no material change on this surface
+  - filtered guide stats remain `6149` barcodes / `46826` deduped counts
+
+Interpretation:
+
+- this was a real late-stage namespace bug and is now fixed
+- it explains the small-fixture filtered-guide dropouts
+- it does not by itself explain the larger 100K assignment-level recovery gap
+
+### 100K Guide Trace: NXT Barcode Mis-Rescued Against TRU Whitelist
+
+Confirmed trace on the bad-path 100K `GEX + PolyIII` reproduction:
+`/tmp/msk_bad_trace_ns_20260317`
+
+Target barcode:
+
+- raw guide read barcode in FASTQ: `AACGAAAAGAGCGTCG` (NXT)
+- true translated whitelist barcode: `AACGAAATCAGCGTCG` (TRU)
+
+Observed in the new targeted trace log:
+`/tmp/msk_bad_trace_ns_20260317/namespace_trace.log`
+
+- `NS_CHECK raw=AACGAAAAGAGCGTCG translated=AACGAAATCAGCGTCG translate_NXT=1 feat=18 match_pos=20 raw_hit=0 translated_hit=1`
+- `NS_RESCUE ... n_matches=1`
+- `cand[0]=AACGAAAAGAGCATCG mismatch_pos=12`
+- `NS_DECISION ... decision=unique_rescue chosen=AACGAAAAGAGCATCG`
+
+Interpretation:
+
+- the read enters `checkAndCorrectBarcode()` in NXT space
+- the code can see that the translated TRU form would hit the whitelist
+- but the bad path does **not** translate before exact whitelist lookup
+- instead it falls into the ordinary 1-mismatch rescue path and chooses the
+  wrong TRU neighbor `AACGAAAAGAGCATCG`
+
+Downstream consequence:
+
+- the good/recovered run contains the expected cell barcode
+  `AACGAAAAGAGCGTCG` with `(num_features=2, top_feature=18, total_deduped_umi=25)`
+- the bad run does **not** contain that barcode
+- instead the bad run contains the wrong translated output barcode
+  `AACGAAATCAGCATCG` with `(num_features=2, top_feature=18, total_deduped_umi=24)`
+
+Supporting outputs:
+
+- good run:
+  `/tmp/msk_100k_ucsf_guideflags_nolarry_20260317_1912/cr_assign/CRISPR_Guide_Capture/grna_de/PolyIII/feature_per_cell.csv`
+- bad traced run:
+  `/tmp/msk_bad_trace_ns_20260317/cr_assign/CRISPR_Guide_Capture/grna_de/PolyIII/feature_per_cell.csv`
+- per-read corrected barcode trace:
+  `/tmp/msk_bad_trace_ns_20260317/reads_trace.log`
+
+What this means for the repair:
+
+- the main 100K PolyIII failure is not just a late namespace leak
+- it is also an early assignment-space error: NXT guide reads are being
+  matched against a TRU whitelist via generic mismatch rescue instead of a
+  deterministic NXT->TRU normalization step
+- that gives silent misassignment, not just dropped barcodes
+
 ## Verification Gates
 
 ### Gate 0: Clean Rebuild First
@@ -167,6 +348,13 @@ make -C core/legacy/source clean && make -C core/legacy/source -j8 STAR
 - Do **not** use only `resolve_resolved` counters as the success criterion.
   The bootstrap handoff already showed those counters are not the right parity
   surface.
+- Do use `Resolve_calls_total` as a regression smoke metric for PolyIII.
+  Current evidence:
+  - known-good MSK 100k guide run: `0`
+  - bad/current MSK 100k guide run: `200782`
+  - simplified UCSF-style MSK guide run: `200782`
+  This means `Resolve_calls_total` is useful as a smoke metric, but it is not
+  sufficient by itself to explain the catastrophic MSK failure.
 
 ### Gate 2: Full MSK Benchmark
 
@@ -204,9 +392,12 @@ After MSK repair:
 
 ## Recommended Execution Order
 
-1. Finish the `process_features` assignment-path backport.
-2. Finish `PfMultiAssign`/`PfMultiProcess` option plumbing reconciliation.
-3. Clean rebuild.
-4. Run targeted mixed-chem validation.
-5. Run the full MSK paper benchmark.
-6. Only then decide whether to port the larger MEX optimization stack.
+1. Diff the bad MSK mixed run against the simplified UCSF-style NXT guide run.
+2. Trace the multi-feature whitelist/namespace/filtering control path.
+3. Patch the smallest control-path delta that reproduces the UCSF-style recovery
+   under the normal MSK mixed run.
+4. Only then revisit the PolyIII matcher path in `assignBarcodes.c` if the bad
+   collapse still persists.
+5. Clean rebuild.
+6. Run targeted mixed-chem validation.
+7. Run the full MSK paper benchmark.

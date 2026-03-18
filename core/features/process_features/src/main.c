@@ -44,6 +44,8 @@ static void print_usage(const char *prog){
     fprintf(stderr, "      --use_feature_anchor_search   Find pattern anchor via strstr before matching features\n");
     fprintf(stderr, "      --require_feature_anchor_match Require anchor match (no fallback search)\n");
     fprintf(stderr, "      --feature_mode_bootstrap_reads <int> Bootstrap N reads to learn per-feature offsets\n");
+    fprintf(stderr, "      --use_hot_hash                Enable thread-local hot d0 hash cache\n");
+    fprintf(stderr, "      --skip_heatmaps               Skip heatmap generation while keeping histograms\n");
     fprintf(stderr, "  -r, --reverse_complement_whitelist Reverse complement whitelist barcodes\n\n");
 
     fprintf(stderr, "Error Correction & Thresholds:\n");
@@ -136,6 +138,8 @@ int main(int argc, char *argv[])
     int use_feature_anchor_search_cli=0;
     int require_feature_anchor_match_cli=0;
     int feature_mode_bootstrap_reads_cli=0;
+    int use_hot_hash_cli=0;
+    int skip_heatmaps_cli=0;
     int feature_limited_fallback_mode_cli=0;
     int strict_offset_check_cli=0;
     int autodetect_chemistry_cli=0;
@@ -212,6 +216,8 @@ int main(int argc, char *argv[])
         {"use_feature_anchor_search", no_argument, 0, 23},
         {"require_feature_anchor_match", no_argument, 0, 24},
         {"feature_mode_bootstrap_reads", required_argument, 0, 25},
+        {"use_hot_hash", no_argument, 0, 41},
+        {"skip_heatmaps", no_argument, 0, 42},
         {"autodetect_chemistry", required_argument, 0, 30},
         {"autodetect_chemistry_reads", required_argument, 0, 31},
         {"autodetect_chemistry_min_hits", required_argument, 0, 32},
@@ -329,6 +335,8 @@ int main(int argc, char *argv[])
             case 23: use_feature_anchor_search_cli = 1; break;
             case 24: require_feature_anchor_match_cli = 1; break;
             case 25: feature_mode_bootstrap_reads_cli = atoi(optarg); break;
+            case 41: use_hot_hash_cli = 1; break;
+            case 42: skip_heatmaps_cli = 1; break;
             case 30: autodetect_chemistry_cli = atoi(optarg); break;
             case 31: autodetect_chemistry_reads_cli = atoi(optarg); break;
             case 32: autodetect_chemistry_min_hits_cli = atoi(optarg); break;
@@ -374,6 +382,13 @@ int main(int argc, char *argv[])
         feature_mode_bootstrap_reads = feature_mode_bootstrap_reads_cli;
         feature_mode_reads_seen = 0;
         feature_mode_bootstrap_done = 0;
+        feature_mode_search_offsets_reset();
+    }
+    if (use_hot_hash_cli) {
+        use_hot_hash = 1;
+    }
+    if (skip_heatmaps_cli) {
+        skip_heatmaps = 1;
     }
     if (feature_mode_bootstrap_reads > 0 && features && !feature_mode_offsets) {
         feature_mode_offsets = malloc(sizeof(int) * features->number_of_features);

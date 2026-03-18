@@ -81,6 +81,7 @@ void destroy_data_structures(data_structures *hashes);
 int existing_output_skip(char keep_existing, char *directory);
 void process_feature_sequence(char *sequence, feature_arrays *features, int maxHammingDistance, int nThreads, int feature_constant_offset, int max_feature_n, uint32_t *feature_index, int *hamming_distance, char *matching_sequence, uint16_t *match_position, statistics *stats);
 void process_multiple_feature_sequences(int nsequences, char **sequences, int *orientations, feature_arrays *features, int maxHammingDistance, int nThreads, int feature_constant_offset, int max_feature_n, uint32_t *feature_index, int *hamming_distance, char *matching_sequence, uint16_t *match_position, statistics *stats);
+void feature_mode_search_offsets_reset(void);
 void reverse_in_place(char *str);
 char complement(char base);
 void reverse_complement_in_place(char *seq);

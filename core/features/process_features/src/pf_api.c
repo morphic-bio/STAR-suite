@@ -56,6 +56,8 @@ struct pf_config {
     int use_feature_anchor_search;
     int require_feature_anchor_match;
     int feature_mode_bootstrap_reads;
+    int use_hot_hash;
+    int skip_heatmaps;
     
     /* Prehash memory budget (0 = auto-detect) */
     unsigned long long prehash_memory_budget;
@@ -131,6 +133,9 @@ static void pf_apply_context_globals(pf_context *ctx) {
     feature_mode_bootstrap_reads = ctx->config->feature_mode_bootstrap_reads;
     feature_mode_reads_seen = 0;
     feature_mode_bootstrap_done = 0;
+    feature_mode_search_offsets_reset();
+    use_hot_hash = ctx->config->use_hot_hash;
+    skip_heatmaps = ctx->config->skip_heatmaps;
 
     if (ctx->features) {
         /* Set global hash alias from per-instance hash (non-owning) */
@@ -242,6 +247,8 @@ pf_config* pf_config_create(void) {
     config->use_feature_anchor_search = 0;
     config->require_feature_anchor_match = 0;
     config->feature_mode_bootstrap_reads = 0;
+    config->use_hot_hash = 0;
+    config->skip_heatmaps = 0;
     
     /* Prehash memory budget default (0 = auto-detect) */
     config->prehash_memory_budget = 0;
@@ -408,6 +415,14 @@ void pf_config_set_require_feature_anchor_match(pf_config *config, int enable) {
 
 void pf_config_set_feature_mode_bootstrap_reads(pf_config *config, int n_reads) {
     if (config) config->feature_mode_bootstrap_reads = n_reads;
+}
+
+void pf_config_set_use_hot_hash(pf_config *config, int enable) {
+    if (config) config->use_hot_hash = enable;
+}
+
+void pf_config_set_skip_heatmaps(pf_config *config, int enable) {
+    if (config) config->skip_heatmaps = enable;
 }
 
 void pf_config_set_prehash_memory_budget(pf_config *config, unsigned long long budget) {
@@ -584,6 +599,7 @@ void pf_destroy(pf_context *ctx) {
         free(feature_mode_offsets);
         feature_mode_offsets = NULL;
     }
+    feature_mode_search_offsets_reset();
     
     if (ctx->whitelist_hash) {
         kh_destroy(u32ptr, ctx->whitelist_hash);
@@ -658,6 +674,7 @@ pf_error pf_load_feature_ref(pf_context *ctx, const char *feature_csv) {
         free(feature_mode_offsets);
         feature_mode_offsets = NULL;
     }
+    feature_mode_search_offsets_reset();
     
     /* Wire prehash memory budget from config */
     if (ctx->config->prehash_memory_budget > 0) {

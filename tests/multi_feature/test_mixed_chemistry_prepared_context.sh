@@ -34,7 +34,7 @@ echo "=== Test: mixed-chemistry prepared context ==="
 require_file "${REPO_ROOT}/core/legacy/source/STAR" "STAR binary"
 
 mkdir -p "${WORK_DIR}/gex" "${WORK_DIR}/grna_a" "${WORK_DIR}/grna_b"
-mkdir -p "${WORK_DIR}/out_case1" "${WORK_DIR}/out_case2" "${WORK_DIR}/out_case3"
+mkdir -p "${WORK_DIR}/out_case1" "${WORK_DIR}/out_case2" "${WORK_DIR}/out_case3" "${WORK_DIR}/out_case4"
 
 cat > "${WORK_DIR}/feature_ref_grna.csv" << 'EOF'
 id,name,read,pattern,sequence,feature_type,target_gene_id,target_gene_name
@@ -66,6 +66,7 @@ static void dumpContext(const PfMultiPreparedContext& ctx) {
               << " inferred=" << ctx.inferredChem
               << " confident=" << (ctx.inferredChemConfident ? "yes" : "no")
               << " effective=" << ctx.effectiveChem
+              << " soloEffective=" << ctx.soloEffectiveChem
               << " hasTwoColumnWL=" << (ctx.hasTwoColumnWhitelist ? "yes" : "no")
               << " soloOutputNamespace=" << ctx.soloOutputNamespace
               << " outputChem=" << ctx.outputChem
@@ -78,6 +79,7 @@ static void dumpContext(const PfMultiPreparedContext& ctx) {
                   << " resolved=" << lib.resolvedChemRequest
                   << " effective=" << lib.effectiveChem
                   << " explicit=" << (lib.explicitChem ? 1 : 0)
+                  << " whitelist=" << lib.whitelistPath
                   << "\n";
     }
 }
@@ -133,16 +135,16 @@ EOF
 OUTPUT=$("${HARNESS}" "${WORK_DIR}/config_case1.csv" "${WORK_DIR}/whitelist_nxt_2col.txt" auto "${WORK_DIR}/out_case1" 2>&1)
 echo "$OUTPUT"
 
-if echo "$OUTPUT" | grep -q 'CTX requested=auto inferred=TRU confident=yes effective=TRU .*soloOutputNamespace=NXT'; then
-    pass "GEX star_chemistry=TRU re-anchors inferred/effective chemistry and solo output namespace"
+if echo "$OUTPUT" | grep -q 'CTX requested=auto inferred=NXT confident=yes effective=NXT soloEffective=TRU .*soloOutputNamespace=NXT'; then
+    pass "GEX star_chemistry=TRU re-anchors Solo namespace without rewriting feature-whitelist context"
 else
-    fail "GEX override should re-anchor context from NXT whitelist to TRU effective chemistry"
+    fail "GEX override should only re-anchor Solo namespace from the GEX row"
 fi
 
-if echo "$OUTPUT" | grep -q 'LIB:0 id=grna_auto .* resolved=auto effective=TRU explicit=0'; then
-    pass "auto feature lib follows re-anchored TRU context without becoming explicit"
+if echo "$OUTPUT" | grep -q 'LIB:0 id=grna_auto .* resolved=auto effective=NXT explicit=0'; then
+    pass "auto feature lib stays tied to feature-whitelist context rather than GEX Solo override"
 else
-    fail "auto feature lib should inherit re-anchored TRU context"
+    fail "auto feature lib should remain on the feature-whitelist context"
 fi
 
 if echo "$OUTPUT" | grep -q 'LIB:1 id=grna_explicit .* resolved=nxt effective=NXT explicit=1'; then
@@ -191,6 +193,31 @@ if echo "$OUTPUT" | grep -q 'LIB:0 id=grna_inherit_flag .* resolved=tru effectiv
     pass "empty star_chemistry inherits global flag as explicit chemistry"
 else
     fail "empty star_chemistry should inherit global TRU explicitly"
+fi
+
+echo ""
+echo "--- Test 4: per-library star_whitelist overrides global feature whitelist ---"
+cat > "${WORK_DIR}/config_case4.csv" << EOF
+[libraries]
+fastqs,sample,library_type,feature_types,star_chemistry,star_whitelist,star_feature_ref,star_library_id
+${WORK_DIR}/gex,S1,Gene Expression,Gene Expression,,,
+${WORK_DIR}/grna_a,S1,CRISPR Guide Capture,CRISPR Guide Capture,NXT,whitelist_nxt_2col.txt,${WORK_DIR}/feature_ref_grna.csv,grna_nxt_wl
+${WORK_DIR}/grna_b,S1,Custom,Custom,TRU,whitelist_tru_2col.txt,${WORK_DIR}/feature_ref_grna.csv,custom_tru_wl
+EOF
+
+OUTPUT=$("${HARNESS}" "${WORK_DIR}/config_case4.csv" "${WORK_DIR}/whitelist_tru_2col.txt" auto "${WORK_DIR}/out_case4" 2>&1)
+echo "$OUTPUT"
+
+if echo "$OUTPUT" | grep -q "LIB:0 id=grna_nxt_wl .* whitelist=${WORK_DIR}/whitelist_nxt_2col.txt"; then
+    pass "CRISPR library picks per-library star_whitelist"
+else
+    fail "CRISPR library should use per-library NXT whitelist"
+fi
+
+if echo "$OUTPUT" | grep -q "LIB:1 id=custom_tru_wl .* whitelist=${WORK_DIR}/whitelist_tru_2col.txt"; then
+    pass "Custom library picks its own TRU star_whitelist"
+else
+    fail "Custom library should use per-library TRU whitelist"
 fi
 
 echo ""

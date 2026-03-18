@@ -163,15 +163,19 @@ int mex_write_all(
                                  "Frequency", counts->feature_hist[0]);
         }
 
-        /* Generate heatmaps */
-        if (mex_write_heatmaps(
-                output_directory,
-                config->features,
-                counts,
-                config->filtered_barcodes_hash,
-                config->min_heatmap_counts) != 0) {
-            /* Heatmap failures are non-fatal - log but continue */
-            fprintf(stderr, "Warning: heatmap generation failed\n");
+        if (!skip_heatmaps) {
+            /* Generate heatmaps */
+            if (mex_write_heatmaps(
+                    output_directory,
+                    config->features,
+                    counts,
+                    config->filtered_barcodes_hash,
+                    config->min_heatmap_counts) != 0) {
+                /* Heatmap failures are non-fatal - log but continue */
+                fprintf(stderr, "Warning: heatmap generation failed\n");
+            }
+        } else {
+            fprintf(stderr, "Skipping feature heatmaps for %s\n", output_directory);
         }
     } else {
         fprintf(stderr, "Skipping feature QC outputs for %s\n", output_directory);

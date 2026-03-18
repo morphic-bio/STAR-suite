@@ -64,6 +64,8 @@ extern int feature_mode_bootstrap_done;
 extern int feature_mode_max_offset;
 extern int *feature_mode_offsets;
 extern unsigned int *feature_mode_hist;
+extern int use_hot_hash;
+extern int skip_heatmaps;
 
 /* Hash lifecycle helpers for feature matching tables */
 void clear_feature_lookup_hashes(void);

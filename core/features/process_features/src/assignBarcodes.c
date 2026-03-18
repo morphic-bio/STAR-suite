@@ -4193,6 +4193,7 @@ void finalize_processing(feature_arrays *features, data_structures *hashes, char
         .n_features = features->number_of_features,
         .n_expected_cells = expected_cells,
         .translate_nxt = translate_NXT,
+        .output_namespace = NULL,
         .skip_emptydrops = skip_emptydrops,
         .emptydrops_failure_fatal = emptydrops_failure_fatal,
         .emptydrops_use_fdr = emptydrops_use_fdr

@@ -26,6 +26,7 @@ struct LibraryEntry {
     string library_type;        // Library type (optional)
     string gem_well;            // GEM well suffix (e.g., "1", "2"), defaults to "1" if absent
     string starChemistry;       // Per-library chemistry override: "TRU", "NXT", "auto", or empty (use global)
+    string starWhitelist;       // Per-library barcode whitelist override (defaults to global --crWhitelist)
     string starFeatureRef;      // Per-library feature reference CSV path (skip global filtering when set)
     string starLibraryId;       // Stable output/provenance key (auto-generated if absent)
     int starMaxHamming = -1;    // Per-library max Hamming distance override (-1 = use global)

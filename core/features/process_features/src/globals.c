@@ -109,6 +109,8 @@ int feature_mode_bootstrap_done = 0;
 int feature_mode_max_offset = LINE_LENGTH;
 int *feature_mode_offsets = NULL;
 unsigned int *feature_mode_hist = NULL;
+int use_hot_hash = 0;
+int skip_heatmaps = 0;
 
 void clear_feature_lookup_hashes(void) {
     /* Global hash is now a non-owning alias; just null the pointer.
