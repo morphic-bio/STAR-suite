@@ -1,6 +1,6 @@
 # STAR Suite
 
-STAR Suite updates the original STAR aligner by integrating four modules — STAR-perturb, STAR-Flex, STAR-SLAM, and TranscriptVB — to provide complete internal C/C++ pipelines for bulk RNA-seq, scRNA-seq, Perturb-seq, 10x Flex, and SLAM-seq. The integration results in substantial speedups (**2.1–2.4x for bulk RNA-seq**, **3.2–6.1x for Perturb-seq**) and a simplified toolchain that can be installed through pre-compiled binaries for researchers and agents. No new external dependencies are required; the suite is built entirely with the existing STAR toolchain and vendored components.
+STAR Suite updates the original STAR aligner by integrating four modules — STAR-perturb, STAR-Flex, STAR-SLAM, and TranscriptVB — to provide complete internal C/C++ pipelines for bulk RNA-seq, scRNA-seq, Perturb-seq, 10x Flex, and SLAM-seq. The integration results in **substantial speedups** (**2.1–2.4x for bulk RNA-seq**, **3.2–6.1x for Perturb-seq**) and a simplified toolchain that can be **installed through pre-compiled binaries** for researchers and agents. **No new external dependencies** are required; the suite is built entirely with the existing STAR toolchain and vendored components. This is a drop-in replacement for the STAR aligner.
 
 STAR Suite supports partial compilation: build only the module/tool targets you need instead of building the full suite every time.
 
