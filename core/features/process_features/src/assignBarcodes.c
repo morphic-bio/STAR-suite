@@ -42,6 +42,10 @@ static int pf_trace_reads_inited = 0;
 static int pf_trace_reads_enabled = 0;
 static const char *pf_trace_reads_list = NULL;
 static FILE *pf_trace_reads_fp = NULL;
+static int pf_trace_namespace_inited = 0;
+static int pf_trace_namespace_enabled = 0;
+static const char *pf_trace_namespace_list = NULL;
+static FILE *pf_trace_namespace_fp = NULL;
 static int pf_trace_anchor_inited = 0;
 static int pf_trace_anchor_enabled = 0;
 static const char *pf_trace_anchor_list = NULL;
@@ -67,6 +71,89 @@ static pf_lookup_strategy_t pf_get_lookup_strategy(void) {
     return pf_lookup_strategy;
 }
 
+static void process_feature_sequence_internal(char *sequence, feature_arrays *features,
+                                              int maxHammingDistance, int nThreads,
+                                              int feature_constant_offset,
+                                              int max_feature_n,
+                                              uint32_t *feature_index,
+                                              int *hamming_distance,
+                                              char *matching_sequence,
+                                              uint16_t *match_position,
+                                              statistics *stats,
+                                              seq_hash_t *hot_d0);
+
+#define BOOTSTRAP_REPLAY_INIT_CAP 4096
+
+typedef struct {
+    char *barcode_line;
+    char *barcode_qual;
+    char *feature_line;
+    char *feature_line2;
+} bootstrap_replay_entry_t;
+
+typedef struct {
+    bootstrap_replay_entry_t *entries;
+    int count;
+    int capacity;
+} bootstrap_replay_buf_t;
+
+static inline void bootstrap_replay_init(bootstrap_replay_buf_t *buf) {
+    buf->entries = NULL;
+    buf->count = 0;
+    buf->capacity = 0;
+}
+
+static inline int bootstrap_replay_push(bootstrap_replay_buf_t *buf,
+                                        const char *barcode_line,
+                                        const char *barcode_qual,
+                                        const char *feature_line,
+                                        const char *feature_line2) {
+    if (buf->count >= buf->capacity) {
+        int new_cap = buf->capacity == 0 ? BOOTSTRAP_REPLAY_INIT_CAP
+                                         : buf->capacity * 2;
+        bootstrap_replay_entry_t *tmp = realloc(
+            buf->entries, (size_t)new_cap * sizeof(bootstrap_replay_entry_t));
+        if (!tmp) {
+            return -1;
+        }
+        buf->entries = tmp;
+        buf->capacity = new_cap;
+    }
+    bootstrap_replay_entry_t *e = &buf->entries[buf->count++];
+    e->barcode_line = strdup(barcode_line);
+    e->barcode_qual = barcode_qual ? strdup(barcode_qual) : NULL;
+    e->feature_line = strdup(feature_line);
+    e->feature_line2 = feature_line2 ? strdup(feature_line2) : NULL;
+    if (!e->barcode_line || !e->feature_line ||
+        (barcode_qual && !e->barcode_qual) ||
+        (feature_line2 && !e->feature_line2)) {
+        free(e->barcode_line);
+        free(e->barcode_qual);
+        free(e->feature_line);
+        free(e->feature_line2);
+        e->barcode_line = NULL;
+        e->barcode_qual = NULL;
+        e->feature_line = NULL;
+        e->feature_line2 = NULL;
+        buf->count--;
+        return -1;
+    }
+    return 0;
+}
+
+static inline void bootstrap_replay_free(bootstrap_replay_buf_t *buf) {
+    for (int i = 0; i < buf->count; i++) {
+        free(buf->entries[i].barcode_line);
+        free(buf->entries[i].barcode_qual);
+        free(buf->entries[i].feature_line);
+        free(buf->entries[i].feature_line2);
+    }
+    free(buf->entries);
+    buf->entries = NULL;
+    buf->count = 0;
+    buf->capacity = 0;
+}
+
 static inline void hot_d0_insert(seq_hash_t *hot, seq_key_mode_t mode,
                                  const char *seq, int slen, uint32_t feat1) {
     if (mode == SEQ_KEY_64) {
@@ -88,6 +175,9 @@ static void feature_mode_record(int feature_index, int offset) {
     if (!feature_mode_hist || !feature_mode_offsets) {
         return;
     }
+    if (feature_mode_bootstrap_done != 0) {
+        return;
+    }
     if (offset < 0 || offset >= feature_mode_max_offset) {
         return;
     }
@@ -98,11 +188,18 @@ static void feature_mode_record(int feature_index, int offset) {
 static int *feature_mode_search_offsets = NULL;
 static int  feature_mode_n_search_offsets = 0;
 
+void feature_mode_search_offsets_reset(void) {
+    free(feature_mode_search_offsets);
+    feature_mode_search_offsets = NULL;
+    feature_mode_n_search_offsets = 0;
+}
+
 static void feature_mode_finalize(const feature_arrays *features) {
     if (!features || !feature_mode_hist || !feature_mode_offsets) {
         return;
     }
     const int n = features->number_of_features;
+    __sync_synchronize();
     for (int j = 0; j < n; j++) {
         unsigned int best_count = 0;
         int best_offset = -1;
@@ -134,9 +231,7 @@ static void feature_mode_finalize(const feature_arrays *features) {
 
     if (n_unique == 0) {
         free(unique);
-        free(feature_mode_search_offsets);
-        feature_mode_search_offsets = NULL;
-        feature_mode_n_search_offsets = 0;
+        feature_mode_search_offsets_reset();
         return;
     }
 
@@ -162,12 +257,84 @@ static void feature_mode_finalize(const feature_arrays *features) {
     }
     free(search);
 
-    free(feature_mode_search_offsets);
+    feature_mode_search_offsets_reset();
     feature_mode_search_offsets = deduped;
     feature_mode_n_search_offsets = nd;
 
     fprintf(stderr, "[bootstrap] Finalized: %d unique base offsets -> %d search positions\n",
             n_unique, nd);
+}
+
+static void bootstrap_replay_drain(bootstrap_replay_buf_t *replay_buf,
+                                   feature_arrays *features,
+                                   int maxHammingDistance,
+                                   int nThreads,
+                                   int feature_constant_offset,
+                                   statistics *stats,
+                                   data_structures *hashes,
+                                   memory_pool_collection *pools,
+                                   int barcode_constant_offset,
+                                   seq_hash_t *thread_hot_d0,
+                                   int *thread_hot_d0_active,
+                                   int thread_id,
+                                   const char *phase_label) {
+    if (!replay_buf || replay_buf->count == 0) {
+        return;
+    }
+
+    if (*thread_hot_d0_active && features) {
+        khint_t hot_sz = seq_hash_size(thread_hot_d0, features->code_hash_mode);
+        khint_t full_sz = seq_hash_size(&features->feature_code_hash,
+                                       features->code_hash_mode);
+        if (full_sz > 0 && hot_sz >= full_sz / 10) {
+            seq_hash_destroy(thread_hot_d0, features->code_hash_mode);
+            memset(thread_hot_d0, 0, sizeof(*thread_hot_d0));
+            *thread_hot_d0_active = 0;
+        }
+    }
+
+    fprintf(stderr, "[bootstrap-replay] thread %d %s: %d buffered reads\n",
+            thread_id, phase_label, replay_buf->count);
+    int replay_matched = 0;
+    for (int r = 0; r < replay_buf->count; r++) {
+        bootstrap_replay_entry_t *re = &replay_buf->entries[r];
+        char rp_match_seq[LINE_LENGTH];
+        int rp_hd = 0;
+        uint32_t rp_fi = 0;
+        uint16_t rp_mp = 0;
+        char *rp_barcode_lines[2];
+        rp_barcode_lines[0] = re->barcode_line;
+        rp_barcode_lines[1] = re->barcode_qual;
+
+        if (re->feature_line2) {
+            char *seqs[2] = { re->feature_line, re->feature_line2 };
+            int oris[2] = { 1, 0 };
+            process_multiple_feature_sequences(2, seqs, oris, features,
+                                               maxHammingDistance, nThreads,
+                                               feature_constant_offset,
+                                               max_feature_n, &rp_fi, &rp_hd,
+                                               rp_match_seq, &rp_mp, stats);
+        } else {
+            process_feature_sequence_internal(
+                re->feature_line, features, maxHammingDistance, nThreads,
+                feature_constant_offset, max_feature_n, &rp_fi, &rp_hd,
+                rp_match_seq, &rp_mp, stats,
+                *thread_hot_d0_active ? thread_hot_d0 : NULL);
+        }
+
+        if (rp_fi > 0) {
+            rp_match_seq[features->feature_lengths[rp_fi - 1]] = '\0';
+            insert_feature_sequence(rp_match_seq, rp_fi, rp_hd, rp_mp, hashes, pools);
+            checkAndCorrectBarcode(rp_barcode_lines, max_barcode_n, rp_fi, rp_mp,
+                                   hashes, pools, stats, barcode_constant_offset);
+            replay_matched++;
+        } else {
+            stats->nMismatches++;
+            stats->total_unmatched_features++;
+        }
+    }
+    fprintf(stderr, "[bootstrap-replay] thread %d %s: %d/%d replayed reads matched\n",
+            thread_id, phase_label, replay_matched, replay_buf->count);
 }
 
 static void chem_detect_decide(struct chem_detect_state *cd) {
@@ -267,6 +434,55 @@ static int pf_trace_list_contains(const char *list, const char *barcode) {
         }
     }
     return 0;
+}
+
+static void pf_trace_namespace_init_once(void) {
+    if (pf_trace_namespace_inited) {
+        return;
+    }
+    pf_trace_namespace_inited = 1;
+    const char *trace_env = getenv("PF_TRACE_NAMESPACE");
+    const char *list_env = getenv("PF_TRACE_NAMESPACE_BARCODES");
+    if ((trace_env && trace_env[0] && strcmp(trace_env, "0") != 0) ||
+        (list_env && list_env[0])) {
+        pf_trace_namespace_enabled = 1;
+        pf_trace_namespace_list = list_env;
+    }
+    if (pf_trace_namespace_enabled) {
+        const char *log_path = getenv("PF_TRACE_NAMESPACE_LOG");
+        if (log_path && log_path[0]) {
+            pf_trace_namespace_fp = fopen(log_path, "a");
+        }
+        if (!pf_trace_namespace_fp) {
+            pf_trace_namespace_fp = stderr;
+        }
+    }
+}
+
+static int pf_trace_namespace_list_matches_barcode(const char *barcode) {
+    if (!pf_trace_namespace_list || !barcode || !barcode[0]) {
+        return 0;
+    }
+    if (pf_trace_list_contains(pf_trace_namespace_list, barcode)) {
+        return 1;
+    }
+    size_t len = strlen(barcode);
+    if (len == 0 || len >= LINE_LENGTH) {
+        return 0;
+    }
+    char translated[LINE_LENGTH];
+    memcpy(translated, barcode, len + 1);
+    translate_nxt_inplace(translated, (int)len);
+    return pf_trace_list_contains(pf_trace_namespace_list, translated);
+}
+
+static int pf_trace_whitelist_contains_barcode(const char *barcode) {
+    if (!barcode || !barcode[0] || !whitelist_hash) {
+        return 0;
+    }
+    unsigned char code[barcode_code_length];
+    string2code((char *)barcode, barcode_length, code);
+    return kh_get(u32ptr, whitelist_hash, *(uint32_t *)code) != kh_end(whitelist_hash);
 }
 
 static void pf_trace_counts_init_once(void) {
@@ -3578,7 +3794,7 @@ static int pf_single_offset_hash_search(
 
     *out_ambiguous = 0;
 
-    if (strategy >= PF_STRATEGY_HOT_D0 && hot_d0) {
+    if ((strategy >= PF_STRATEGY_HOT_D0 || use_hot_hash) && hot_d0) {
         uint32_t val = 0;
         if (mode == SEQ_KEY_64) {
             if (hot_d0->h64) {
@@ -3596,7 +3812,7 @@ static int pf_single_offset_hash_search(
     {
         const int idx = feature_lookup_seq(seq, feat_len);
         if (idx > 0) {
-            if (strategy >= PF_STRATEGY_HOT_D0 && hot_d0) {
+            if ((strategy >= PF_STRATEGY_HOT_D0 || use_hot_hash) && hot_d0) {
                 hot_d0_insert(hot_d0, mode, seq, feat_len, (uint32_t)idx);
             }
             *out_hamming = 0;
@@ -3702,17 +3918,6 @@ static int pf_search_hash_offsets(
             int ambiguous = 0;
             int feat = pf_single_offset_hash_search(
                 subseq, feat_len, features, maxHammingDistance, hot_d0, &d, &ambiguous);
-            { static int _pf_dbg_hit = 0, _pf_dbg_miss = 0;
-              if (feat > 0 && _pf_dbg_hit < 3) {
-                _pf_dbg_hit++;
-                fprintf(stderr, "[DBG_HIT] off=%d feat=%d d=%d seq=%.30s sub=%.22s\n",
-                    off, feat, d, read, subseq);
-              } else if (feat == 0 && off == 0 && read[0] != 'N' && _pf_dbg_miss < 3) {
-                _pf_dbg_miss++;
-                fprintf(stderr, "[DBG_MISS] off=%d d=%d seq=%.30s sub=%.22s exact=%d\n",
-                    off, d, read, subseq, feature_lookup_seq(subseq, feat_len));
-              }
-            }
             if (feat > 0 && d < best_d) {
                 best_feat = feat;
                 best_d = d;
@@ -3793,32 +3998,84 @@ int checkAndCorrectBarcode(char **lines, int maxN, uint32_t feature_index, uint1
     char *corrected_seqs[ 4 << ((max_barcode_n-1)*2)];
     char *candidateBarcode = sequence;
     memset (buffer, 0, (barcode_length + 1) * (4 << ((max_barcode_n-1)*2)));
+
+    pf_trace_namespace_init_once();
+    char raw_barcode[barcode_length + 1];
+    char translated_barcode[barcode_length + 1];
+    memcpy(raw_barcode, candidateBarcode, barcode_length);
+    raw_barcode[barcode_length] = '\0';
+    memcpy(translated_barcode, raw_barcode, barcode_length + 1);
+    translate_nxt_inplace(translated_barcode, barcode_length);
+    const int trace_namespace =
+        pf_trace_namespace_enabled &&
+        (!pf_trace_namespace_list ||
+         pf_trace_namespace_list_matches_barcode(raw_barcode));
+    const int raw_whitelist_hit = pf_trace_whitelist_contains_barcode(raw_barcode);
+    const int translated_whitelist_hit = pf_trace_whitelist_contains_barcode(translated_barcode);
+    if (trace_namespace) {
+        fprintf(pf_trace_namespace_fp,
+                "NS_CHECK raw=%s translated=%s translate_NXT=%d feat=%u match_pos=%u raw_hit=%d translated_hit=%d\n",
+                raw_barcode, translated_barcode, translate_NXT, feature_index,
+                match_position, raw_whitelist_hit, translated_whitelist_hit);
+    }
  
     //DEBUG_PRINT( "Checking barcode %s\n", candidateBarcode);    
     int nAlts=checkSequenceAndCorrectForN(candidateBarcode, corrected_seqs, buffer, barcode_length, maxN);
     if (!nAlts){
+        if (trace_namespace) {
+            fprintf(pf_trace_namespace_fp,
+                    "NS_DECISION raw=%s decision=reject_invalid_barcode_characters\n",
+                    raw_barcode);
+        }
         stats->nMismatches++;
         return 0;
     }
     unsigned char code[barcode_code_length];
     if (nAlts == 1){
-        //no Ns and the barcode is good in terms of ACGT 
-        //check if the barcode is in the filtered whitelist 
-        string2code(candidateBarcode, barcode_length, code); 
+        char match_barcode[barcode_length + 1];
+        memcpy(match_barcode, candidateBarcode, barcode_length);
+        match_barcode[barcode_length] = '\0';
+        if (translate_NXT) {
+            translate_nxt_inplace(match_barcode, barcode_length);
+        }
+
+        string2code(match_barcode, barcode_length, code);
         uint32_t key = *(uint32_t*)code;
         khint_t kw = kh_get(u32ptr, whitelist_hash, key);
         if (kw != kh_end(whitelist_hash)){
+            if (trace_namespace) {
+                fprintf(pf_trace_namespace_fp,
+                        "NS_DECISION raw=%s decision=%s\n",
+                        raw_barcode,
+                        translate_NXT ? "exact_translated" : "exact_raw");
+            }
             update_feature_counts_from_code(code, sequence+barcode_length, feature_index, hashes, pools);
             stats->valid++;            
             return 1;
         }
-        //if the barcode is not in the whitelist then try to correct it 
         unsigned char indices[max_barcode_mismatches+1];
         unsigned char corrected_codes[(max_barcode_mismatches+1)*barcode_code_length];
         stats->nMismatches++;
-        //try to correct it by finding closest barcodes
         int nMatches=find_closest_barcodes(code,corrected_codes, indices);
+        if (trace_namespace) {
+            fprintf(pf_trace_namespace_fp,
+                    "NS_RESCUE raw=%s translated=%s n_matches=%d\n",
+                    raw_barcode, translated_barcode, nMatches);
+            for (int i = 0; i < nMatches; i++) {
+                char candidate_match[barcode_length + 1];
+                code2string(corrected_codes + i * barcode_code_length,
+                            candidate_match, barcode_code_length);
+                fprintf(pf_trace_namespace_fp,
+                        "  cand[%d]=%s mismatch_pos=%u\n",
+                        i, candidate_match, (unsigned int)indices[i]);
+            }
+        }
         if (!nMatches){
+            if (trace_namespace) {
+                fprintf(pf_trace_namespace_fp,
+                        "NS_DECISION raw=%s decision=reject_no_close_match\n",
+                        raw_barcode);
+            }
             return 0;
         }
 
@@ -3826,6 +4083,11 @@ int checkAndCorrectBarcode(char **lines, int maxN, uint32_t feature_index, uint1
         if (nMatches==1){
             char corrected_barcode[barcode_length+1];   
             code2string(corrected_codes, corrected_barcode, barcode_code_length);
+            if (trace_namespace) {
+                fprintf(pf_trace_namespace_fp,
+                        "NS_DECISION raw=%s decision=unique_rescue chosen=%s\n",
+                        raw_barcode, corrected_barcode);
+            }
             memcpy(sequence, corrected_barcode, barcode_length);
             stats->recovered++;
             update_feature_counts_from_code(corrected_codes, sequence+barcode_length, feature_index, hashes, pools);
@@ -3839,6 +4101,11 @@ int checkAndCorrectBarcode(char **lines, int maxN, uint32_t feature_index, uint1
                 for (int i=0; i<nMatches; i++){
                     qscores[i]=lines[1][indices[i]];
                 }
+                if (trace_namespace) {
+                    fprintf(pf_trace_namespace_fp,
+                            "NS_DECISION raw=%s decision=pending n_matches=%d\n",
+                            raw_barcode, nMatches);
+                }
                 add_unmatched_barcode_store_feature(code, corrected_codes, sequence+barcode_length, qscores,feature_index,nMatches, match_position, pools,stats);
                 stats->pending++;
             }
@@ -3848,13 +4115,17 @@ int checkAndCorrectBarcode(char **lines, int maxN, uint32_t feature_index, uint1
     }
     else{
         stats->nMismatches++;
-        //if there are Ns in the barcode then we need to check all the possible sequences
-        //and return if there is a unique match in the whitelist
         int number_of_matches=0;
         unsigned char corrected_code[barcode_code_length];
         for (int i=0; i<nAlts; i++){
+            char n_match_barcode[barcode_length + 1];
+            memcpy(n_match_barcode, corrected_seqs[i], barcode_length);
+            n_match_barcode[barcode_length] = '\0';
+            if (translate_NXT) {
+                translate_nxt_inplace(n_match_barcode, barcode_length);
+            }
             unsigned char code[barcode_code_length];
-            string2code(corrected_seqs[i], barcode_length, code);
+            string2code(n_match_barcode, barcode_length, code);
             char corrected_barcode[barcode_length+1];   
             code2string(code, corrected_barcode, barcode_code_length);
             uint32_t key = *(uint32_t*)code;
@@ -3873,10 +4144,20 @@ int checkAndCorrectBarcode(char **lines, int maxN, uint32_t feature_index, uint1
             stats->recovered++;
             char corrected_barcode[barcode_length+1];   
             code2string(corrected_code, corrected_barcode, barcode_code_length);
+            if (trace_namespace) {
+                fprintf(pf_trace_namespace_fp,
+                        "NS_DECISION raw=%s decision=unique_N_rescue chosen=%s\n",
+                        raw_barcode, corrected_barcode);
+            }
             memcpy(sequence, corrected_barcode, barcode_length);
             update_feature_counts_from_code(corrected_code, sequence + barcode_length,feature_index, hashes,pools);
             stats->valid++;
             return 1;
+        }
+        if (trace_namespace) {
+            fprintf(pf_trace_namespace_fp,
+                    "NS_DECISION raw=%s decision=reject_N_ambiguous matches=%d\n",
+                    raw_barcode, number_of_matches);
         }
         return 0;
     }
@@ -4309,7 +4590,8 @@ void process_multiple_feature_sequences(int nsequences, char **sequences, int *o
 }
 static void process_feature_sequence_internal(char *sequence, feature_arrays *features, int maxHammingDistance, int nThreads, int feature_constant_offset, int max_feature_n, uint32_t *feature_index, int *hamming_distance, char *matching_sequence, uint16_t *match_position, statistics *stats, seq_hash_t *hot_d0) {
     const size_t read_len = strlen(sequence);
-    if (feature_mode_bootstrap_reads > 0 && features && features->feature_offsets && pf_has_anchor_arrays(features)) {
+    if (feature_mode_bootstrap_reads > 0 && features && features->feature_offsets &&
+        feature_mode_hist && feature_mode_offsets && pf_has_anchor_arrays(features)) {
         const int offset_cache_len = (int)read_len;
         uint32_t offset_cached_idx[offset_cache_len > 0 ? offset_cache_len : 1];
         int offset_cached_hamming[offset_cache_len > 0 ? offset_cache_len : 1];
@@ -5012,7 +5294,7 @@ void *consume_reads(void *arg) {
     memset(&thread_hot_d0, 0, sizeof(thread_hot_d0));
     int thread_hot_d0_active = 0;
     unsigned int hot_check_counter = 0;
-    if (pf_get_lookup_strategy() >= PF_STRATEGY_HOT_D0 &&
+    if ((pf_get_lookup_strategy() >= PF_STRATEGY_HOT_D0 || use_hot_hash) &&
         features &&
         features->number_of_mismatched_features == 0 &&
         features->common_length > 0) {
@@ -5022,6 +5304,9 @@ void *consume_reads(void *arg) {
             thread_hot_d0_active = 1;
         }
     }
+    bootstrap_replay_buf_t replay_buf;
+    bootstrap_replay_init(&replay_buf);
+    int replay_buf_drained = 0;
     for (int i=0; i<6; i++){
         lines[i]=lines_buffer+i*LINE_LENGTH;
     }
@@ -5163,6 +5448,7 @@ void *consume_reads(void *arg) {
             uint16_t match_position = 0;
             int missing_flag=0;
             int barcode_ok = 0;
+            int deferred_bootstrap_replay = 0;
             if (forward_lines && reverse_lines) {
                 char *sequences[2]={0,0};
                 int orientations[2]={0,0};
@@ -5182,17 +5468,36 @@ void *consume_reads(void *arg) {
                                                   thread_hot_d0_active ? &thread_hot_d0 : NULL);
             }
 
+            if (feature_mode_bootstrap_reads > 0 &&
+                __atomic_load_n(&feature_mode_bootstrap_done, __ATOMIC_ACQUIRE) != 1 &&
+                feature_index == 0) {
+                const char *feat_seq = (forward_lines) ? forward_lines[0]
+                    : (reverse_lines ? reverse_lines[0] : NULL);
+                const char *feat_seq2 = (forward_lines && reverse_lines)
+                    ? reverse_lines[0] : NULL;
+                if (feat_seq && bootstrap_replay_push(&replay_buf, barcode_lines[0],
+                                                      barcode_lines[1], feat_seq,
+                                                      feat_seq2) == 0) {
+                    deferred_bootstrap_replay = 1;
+                } else if (feat_seq) {
+                    fprintf(stderr,
+                            "WARNING: bootstrap replay buffer push failed; counting read as unmatched\n");
+                }
+            }
+
             // The mutex is removed from here
-            if (feature_index){
+            if (!deferred_bootstrap_replay && feature_index){
                 // need to have feature_index -1 because the feature index is 1 based but array in struct is 0 based
                 matching_sequence[features->feature_lengths[feature_index - 1]] = '\0';
                 insert_feature_sequence(matching_sequence, feature_index, hamming_distance, match_position, hashes, pools);
                 barcode_ok = checkAndCorrectBarcode(barcode_lines, max_barcode_n, feature_index, match_position, hashes, pools, stats, barcode_constant_offset);
             }
-            else{
+            else if (!deferred_bootstrap_replay){
                 missing_flag=1;
             }
-            if (pf_trace_anchor_enabled && features && features->feature_offsets && pf_has_anchor_arrays(features)) {
+            if (!deferred_bootstrap_replay &&
+                pf_trace_anchor_enabled && features && features->feature_offsets &&
+                pf_has_anchor_arrays(features)) {
                 char *barcode_seq = barcode_lines[0] + barcode_constant_offset;
                 char barcode_str[barcode_length + 1];
                 memcpy(barcode_str, barcode_seq, barcode_length);
@@ -5246,7 +5551,7 @@ void *consume_reads(void *arg) {
                     }
                 }
             }
-            if (barcode_ok && pf_trace_reads_enabled) {
+            if (!deferred_bootstrap_replay && barcode_ok && pf_trace_reads_enabled) {
                 char *barcode_seq = barcode_lines[0] + barcode_constant_offset;
                 char barcode_str[barcode_length + 1];
                 memcpy(barcode_str, barcode_seq, barcode_length);
@@ -5291,7 +5596,7 @@ void *consume_reads(void *arg) {
                 double elapsed_time = get_time_in_seconds() - stats->start_time;
                 fprintf(stderr, "Processed %ld million reads in %.1f seconds\n", stats->number_of_reads / 1000000, elapsed_time);
             }
-            if (missing_flag){
+            if (!deferred_bootstrap_replay && missing_flag){
                 stats->nMismatches++;
                 stats->total_unmatched_features++;
             }
@@ -5336,6 +5641,40 @@ void *consume_reads(void *arg) {
                             permit_batch_work_bytes, work_ns);
         permit_batch_count = 0;
     }
+
+    if (!replay_buf_drained && replay_buf.count > 0 &&
+        feature_mode_bootstrap_reads > 0 &&
+        __atomic_load_n(&feature_mode_bootstrap_done, __ATOMIC_ACQUIRE) != 1 &&
+        __atomic_load_n(&feature_mode_reads_seen, __ATOMIC_ACQUIRE) >=
+            (unsigned long long)feature_mode_bootstrap_reads) {
+        fprintf(stderr,
+                "[bootstrap-replay] thread %d waiting for bootstrap finalization (done=%d, %d buffered reads)\n",
+                thread_id,
+                __atomic_load_n(&feature_mode_bootstrap_done, __ATOMIC_ACQUIRE),
+                replay_buf.count);
+        while (__atomic_load_n(&feature_mode_bootstrap_done, __ATOMIC_ACQUIRE) != 1) {
+            usleep(100);
+        }
+    }
+
+    if (!replay_buf_drained && replay_buf.count > 0 &&
+        __atomic_load_n(&feature_mode_bootstrap_done, __ATOMIC_ACQUIRE) == 1) {
+        bootstrap_replay_drain(&replay_buf, features, maxHammingDistance, nThreads,
+                               feature_constant_offset, stats, hashes, pools,
+                               barcode_constant_offset, &thread_hot_d0,
+                               &thread_hot_d0_active, thread_id, "end-of-stream");
+        replay_buf_drained = 1;
+    } else if (!replay_buf_drained && replay_buf.count > 0) {
+        fprintf(stderr,
+                "[bootstrap-replay] thread %d discarding %d buffered reads (bootstrap_done=%d)\n",
+                thread_id, replay_buf.count,
+                __atomic_load_n(&feature_mode_bootstrap_done, __ATOMIC_ACQUIRE));
+        for (int r = 0; r < replay_buf.count; r++) {
+            stats->nMismatches++;
+            stats->total_unmatched_features++;
+        }
+    }
+    bootstrap_replay_free(&replay_buf);
 
     /* Drain finalization: if total reads < max_reads, decide now */
     if (chem_detect && !chem_detect->done) {
