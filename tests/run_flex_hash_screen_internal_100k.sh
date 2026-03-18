@@ -50,7 +50,6 @@ run_star() {
       --soloFlexOutputPrefix "${out_dir}/per_sample" \
       --limitIObufferSize 50000000 50000000 \
       --outSJtype None \
-      --outBAMcompression 6 \
       --soloMultiMappers Rescue \
       --alignIntronMax 500000 \
       --outFilterMismatchNmax 6 \
@@ -65,7 +64,7 @@ run_star() {
       --outSAMprimaryFlag AllBestScore \
       --outFilterScoreMin 0 \
       --outFilterScoreMinOverLread 0 \
-      --outSAMattributes NH HI AS nM NM GX GN \
+      --outSAMattributes None \
       --soloCBmatchWLtype 1MM_multi_Nbase_pseudocounts \
       --soloUMIfiltering MultiGeneUMI_CR \
       --soloUMIdedup 1MM_CR \
@@ -76,7 +75,7 @@ run_star() {
       --soloStrand Unstranded \
       --chimSegmentMin 1000000 \
       --soloKeysCompat cr \
-      --outSAMtype BAM Unsorted \
+      --outSAMtype None \
       --soloSampleSearchNearby no \
       --readFilesCommand zcat \
       --readFilesIn "${READS_R2}" "${READS_R1}" \

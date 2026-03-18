@@ -191,11 +191,15 @@ FlexHashScreenDecision FlexHashScreenCache::classifyHits(const Record* const* hi
     FlexHashScreenDecision out;
     out.action = FlexHashScreenDecision::Pass;
     bool sawAmbig = false;
+    bool sawSampleMismatch = false;
+    int8_t sampleMismatchOffset = 0;
     bool sawNonExactKeep = false;
     uint16_t nonExactGene = 0;
     uint16_t nonExactSample = 0;
     uint8_t nonExactClass = 0;
     int8_t nonExactOffset = 0;
+    bool sawGeneConflict = false;
+    int8_t geneConflictOffset = 0;
 
     for (size_t idx = 0; idx < nHits; ++idx) {
         const Record* rec = hits[idx];
@@ -226,12 +230,11 @@ FlexHashScreenDecision FlexHashScreenCache::classifyHits(const Record* const* hi
         }
 
         if ((rec->cacheClass == 0 || rec->cacheClass == 1) && sampleSpecifiedMismatch) {
-            out.action = FlexHashScreenDecision::Deny;
-            out.geneIdx15 = 0;
-            out.cacheClass = 0;
-            out.negativeCode = FlexHashNegProbeAmbig;
-            out.offset = relativeOffsets[idx];
-            return out;
+            if (!sawSampleMismatch) {
+                sawSampleMismatch = true;
+                sampleMismatchOffset = relativeOffsets[idx];
+            }
+            continue;
         }
 
         if (rec->cacheClass == 0 || rec->cacheClass == 1) {
@@ -244,18 +247,23 @@ FlexHashScreenDecision FlexHashScreenCache::classifyHits(const Record* const* hi
                 nonExactClass = rec->cacheClass;
                 nonExactOffset = relativeOffsets[idx];
             } else if (nonExactGene != geneIdx15 || nonExactSample != sampleKey) {
-                out.action = FlexHashScreenDecision::Deny;
-                out.geneIdx15 = 0;
-                out.cacheClass = 0;
-                out.negativeCode = FlexHashNegProbeAmbig;
-                out.offset = relativeOffsets[idx];
-                return out;
+                sawGeneConflict = true;
+                geneConflictOffset = relativeOffsets[idx];
             }
         }
     }
 
     if (sawAmbig) {
         out.action = FlexHashScreenDecision::Deny;
+        return out;
+    }
+
+    if (sawGeneConflict) {
+        out.action = FlexHashScreenDecision::Deny;
+        out.geneIdx15 = 0;
+        out.cacheClass = 0;
+        out.negativeCode = FlexHashNegProbeAmbig;
+        out.offset = geneConflictOffset;
         return out;
     }
 
@@ -267,12 +275,20 @@ FlexHashScreenDecision FlexHashScreenCache::classifyHits(const Record* const* hi
         return out;
     }
 
+    if (sawSampleMismatch) {
+        out.action = FlexHashScreenDecision::Deny;
+        out.geneIdx15 = 0;
+        out.cacheClass = 0;
+        out.negativeCode = FlexHashNegProbeAmbig;
+        out.offset = sampleMismatchOffset;
+        return out;
+    }
+
     return out;
 }
 
-FlexHashScreenDecision FlexHashScreenCache::classifyRead(const ParametersSolo& pSolo, const char* readSeq, uint32_t readLen, uint16_t sampleIdx) {
-    std::string error;
-    if (!ensureLoaded(pSolo, &error)) {
+FlexHashScreenDecision FlexHashScreenCache::classifyRead(const char* readSeq, uint32_t readLen, uint16_t sampleIdx) const {
+    if (!initialized_ || !enabled_) {
         FlexHashScreenDecision out;
         out.action = FlexHashScreenDecision::Disabled;
         return out;

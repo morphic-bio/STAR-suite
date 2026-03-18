@@ -36,7 +36,8 @@ public:
     static FlexHashScreenCache& instance();
 
     bool ensureLoaded(const ParametersSolo& pSolo, std::string* errorOut = nullptr);
-    FlexHashScreenDecision classifyRead(const ParametersSolo& pSolo, const char* readSeq, uint32_t readLen, uint16_t sampleIdx);
+    FlexHashScreenDecision classifyRead(const char* readSeq, uint32_t readLen, uint16_t sampleIdx) const;
+    size_t recordCount() const { return records_.size(); }
 
 private:
     FlexHashScreenCache() = default;

@@ -53,7 +53,7 @@ compare_file() {
                 echo "      Current:  $CURRENT_HEADER"
             fi
             echo "    First data differences:"
-            diff "$BASELINE_FILE" "$CURRENT_FILE" | grep -E "^[<>]" | head -5 | sed 's/^/      /'
+            diff "$BASELINE_FILE" "$CURRENT_FILE" | grep -E "^[<>]" | head -5 | sed 's/^/      /' || true
         else
             # For TSV files, show line count and first few differences
             BASELINE_LINES=$(wc -l < "$BASELINE_FILE")
@@ -62,7 +62,7 @@ compare_file() {
                 echo "    Line count: baseline=$BASELINE_LINES current=$CURRENT_LINES"
             fi
             echo "    First differences:"
-            diff "$BASELINE_FILE" "$CURRENT_FILE" | grep -E "^[<>]" | head -5 | sed 's/^/      /'
+            diff "$BASELINE_FILE" "$CURRENT_FILE" | grep -E "^[<>]" | head -5 | sed 's/^/      /' || true
         fi
         return 1
     fi

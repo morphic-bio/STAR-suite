@@ -5,6 +5,7 @@
 #include "SequenceFuns.h"
 #include "serviceFuns.cpp"
 #include "solo/CbCorrector.h"  // Include after ParametersSolo.h (which has IncludeDefine.h)
+#include "FlexHashScreen.h"
 
 #include <stdlib.h>
 #include <algorithm>
@@ -587,12 +588,14 @@ void ParametersSolo::initialize(Parameters *pPin)
                 hashScreenEnabled = false;
                 pP->inOut->logMain << "H0/H1 hash screen: disabled (no cache discovered)\n";
             } else {
-                ifstream cacheTest(hashScreenFile.c_str(), ios::binary);
-                if (!cacheTest.good()) {
-                    hashScreenEnabled = false;
-                    pP->inOut->logMain << "H0/H1 hash screen: disabled (cache not readable): " << hashScreenFile << "\n";
+                std::string loadError;
+                bool loaded = FlexHashScreenCache::instance().ensureLoaded(*this, &loadError);
+                if (loaded) {
+                    pP->inOut->logMain << "H0/H1 hash screen: enabled with cache " << hashScreenFile
+                                       << " (" << FlexHashScreenCache::instance().recordCount() << " records)\n";
                 } else {
-                    pP->inOut->logMain << "H0/H1 hash screen: enabled with cache " << hashScreenFile << "\n";
+                    hashScreenEnabled = false;
+                    pP->inOut->logMain << "H0/H1 hash screen: disabled (" << loadError << "): " << hashScreenFile << "\n";
                 }
             }
         } else if (hashScreenDisabled) {

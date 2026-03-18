@@ -307,7 +307,11 @@ int ReadAlign::oneRead() {//process one read: load, map, write
             std::chrono::duration_cast<std::chrono::nanoseconds>(sampleDetectEnd - sampleDetectStart).count());
         soloRead->readBar->detectedSampleToken = detectedSampleByte_;
         const uint16_t hashScreenSampleIdx = SampleDetector::sampleIndexForToken(detectedSampleByte_);
-        hashScreenDecision_ = FlexHashScreenCache::instance().classifyRead(P.pSolo, Read0[0], readLengthOriginal[0], hashScreenSampleIdx);
+        // Read0[0] is still ASCII-encoded at this point (numeric conversion
+        // happens later at complementSeqNumbers). The hash screen encodes
+        // A/C/G/T characters; moving this call after convertNucleotidesToNumbers
+        // would silently break classification.
+        hashScreenDecision_ = FlexHashScreenCache::instance().classifyRead(Read0[0], readLengthOriginal[0], hashScreenSampleIdx);
         if (hashScreenDecision_.action == FlexHashScreenDecision::Keep ||
             hashScreenDecision_.action == FlexHashScreenDecision::Deny) {
             soloRead->readFlagReset();
