@@ -20,6 +20,8 @@ actionable; link to deeper docs rather than copying them.
 - `core/features/libscrna/` - shared EmptyDrops/OrdMag/Occupancy implementations.
 - `flex/` - STAR-Flex code and tools.
 - `slam/` - SLAM-seq code and tools.
+- `scripts/` - suite-level helper scripts (preflight, QC, parity, downstream).
+  See `scripts/README.md` for a full catalogue.
 - `tests/` - smoke/regression scripts; keep outputs untracked.
 - `docs/` - technical summaries and runbooks.
 

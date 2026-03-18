@@ -36,7 +36,7 @@ For each candidate library or FASTQ set:
 
 - `R1` FASTQ path(s)
 - `R2` FASTQ path(s)
-- expected sample count `k`
+- optional expected sample count `k`
 - whitelist resources:
   - TRU whitelist
   - NXT translation whitelist
@@ -44,10 +44,12 @@ For each candidate library or FASTQ set:
 
 Recommended sampling budget:
 
-- `100000` reads from `R1`
-- `100000` reads from `R2`
+- `200000` reads from `R1` (configurable via `--sample-reads`)
+- `200000` reads from `R2`
 
-This is large enough to stabilize top-barcode overlap while remaining cheap.
+This is large enough to stabilize top-barcode overlap while remaining cheap
+(~1 s/file for gzipped FASTQs). If pairing S/N is thin, increase to `500000`.
+See [Tuning](#tuning-parameters) below.
 
 ## Canonical outputs
 
@@ -146,15 +148,39 @@ For each file:
 1. correct sampled `R1` barcodes using the inferred chemistry
 2. normalize them to canonical `TRU`
 3. count barcode frequencies
-4. keep the top `N`
+4. keep the top `N` (configurable via `--top-barcodes`, default `500`)
 
-Recommended initial `N`:
+Validated signature widths (UCSF 16-sample Perturb-seq, 10x Chromium V3):
 
-- start with `50`
-- also record `100` and `500` for diagnostics
+| `top_n` | Pairing result | Notes |
+|---------|---------------|-------|
+| 50 | classification ✓, pairing ✗ | Too narrow; GEX/GUIDE rank distributions differ enough that top-50 sets barely overlap |
+| 200 | adequate for clean data | |
+| **500** | **robust (default)** | **Worst-case pairing S/N = 50x on UCSF dataset** |
+| 1000 | diminishing returns | Only needed if S/N is still thin with 500 |
 
-The main signature for pairing should be the top-50 canonical barcode set plus
-their counts.
+The signature also records diagnostic slices at top-50, top-100, and top-500
+for the output report.
+
+### 4b. Merge duplicate / multi-lane files
+
+Before cross-type pairing, the preflight automatically detects and merges files
+that represent the same logical library (e.g., duplicate copies from different
+delivery directories, or multi-lane FASTQs from the same library).
+
+Merge criteria (all must hold):
+
+- same inferred chemistry (TRU/NXT)
+- same inferred library type (GEX/GUIDE)
+- pairwise set-Jaccard on barcode signatures ≥ `MERGE_JACCARD_MIN` (0.20)
+
+Merged groups pool their barcode counters (union of counts, trimmed to `top_n`)
+to create a single stronger signature for pairing. This is critical when the
+same library appears in multiple directories — without merging, these duplicates
+absorb the "second-best" slot and destroy pairing S/N.
+
+Validated on UCSF dataset: 64 individual files → 32 merged logical libraries
+(each original directory pair merged). Worst-case merge S/N = 288x.
 
 ### 5. Pair files by barcode overlap
 
@@ -171,38 +197,69 @@ Secondary metrics:
 - chemistry compatibility
 - library-type compatibility (`GEX` vs `GUIDE`)
 
-### 6. Assign files to samples
+### 6. Infer groups and assign files to samples
 
-Two viable approaches:
+Do not require `k` up front.
 
-#### Iteration 1: deterministic matching
+The default behavior should infer sample groups from the barcode-overlap graph.
 
-Use simple, auditable rules first:
+#### Iteration 1: overlap graph first
+
+After chemistry normalization and library-type detection:
+
+1. build a pairwise similarity matrix across files
+2. keep only strong, chemistry-compatible edges
+3. require reciprocal-best-match or a clear best-vs-second-best margin
+4. form connected components on the retained graph
+
+Each connected component is the inferred file group for one biological sample
+or sample-family.
+
+This should be the default because it naturally handles:
+
+- unknown sample count
+- missing mates
+- extra lanes
+- orphan libraries
+- mislabeled files
+- partial runs where not every sample has every library type
+
+If the graph is clean, use it directly and do not invoke clustering.
+
+#### Iteration 2: deterministic matching within components
+
+Inside each clean graph component:
 
 1. split files into likely `GEX` and likely `GUIDE`
 2. compute all cross-group Jaccards
 3. greedily or bipartite-match the highest-confidence pairs
 4. reject weak or conflicting matches
 
-This is the simplest first version and should cover most cases.
+This remains the simplest first version and should cover most cases.
 
-#### Iteration 2: clustering
+#### Iteration 3: clustering only for ambiguous cases
 
-If the run has more files than simple pairs, or if labels are noisy:
+If the graph does not separate cleanly, escalate to one of:
 
-- use `k = number_of_samples`
+- manual review
+- optional clustering summary
+
+If clustering is needed:
+
+- if `k` is known, use `k = number_of_samples`
+- if `k` is unknown, estimate it from the graph or from a dendrogram cut, then
+  cluster
 - cluster on barcode-set similarity after canonical normalization
-- prefer a medoid-style clustering because the sample count is small and the
-  metric is not Euclidean
 
-`k`-medoids is a reasonable second-phase improvement because:
+`k`-medoids is still a reasonable second-phase option because:
 
 - the distance can be `1 - Jaccard`
 - it is robust to outliers
 - it works directly on pairwise distances
 
-But it should not block the first implementation. The deterministic matcher is
-easier to debug and explain.
+But if `k` is unknown, hierarchical clustering is usually a better first
+fallback than fixed-`k` medoids because it does not force an up-front sample
+count.
 
 ## Confidence and failure rules
 
@@ -213,6 +270,7 @@ Hard-stop cases:
 - chemistry `UNKNOWN`
 - guide/GEX type `UNKNOWN`
 - two candidate pairings with near-identical Jaccard
+- graph structure that does not admit a confident component split
 - no candidate pair above a minimum overlap threshold
 
 Soft-warning cases:
@@ -239,7 +297,7 @@ Inputs:
 - FASTQ paths
 - whitelist paths
 - optional feature reference
-- expected sample count `k`
+- optional expected sample count `k`
 
 Outputs:
 
@@ -271,6 +329,7 @@ Once validated, allow preflight to emit a suggested config file:
 
 - corrected library labels
 - inferred chemistry per library
+- inferred sample groups
 - proposed GEX/guide pairing
 
 The main run should still require either:
@@ -294,6 +353,8 @@ Acceptance criteria for Phase 1:
 - guide vs GEX classification is correct on known mixed fixtures
 - canonical barcode normalization reproduces known same-sample pairings
 - top-barcode Jaccard separates true pairs from false pairs with a clear gap
+- inferred overlap-graph components match known sample structure when `k` is
+  not provided
 
 Acceptance criteria for Phase 2:
 
@@ -301,22 +362,68 @@ Acceptance criteria for Phase 2:
 - preflight adds only a small fixed startup cost
 - failures are explicit and actionable
 
-## Initial recommendation
+## Tuning parameters
 
-Implement the deterministic preflight first.
+The two key knobs are `--sample-reads` and `--top-barcodes`. Both are printed
+in the `PREFLIGHT SUMMARY` header and recorded in the JSON report under
+`parameters`.
 
-Specifically:
+| Parameter | Default | When to increase | Cost |
+|-----------|---------|-----------------|------|
+| `--sample-reads` | 200,000 | Pairing S/N < 10x; very low barcode diversity | ~1 s/file per 200K reads (gzip) |
+| `--top-barcodes` | 500 | Pairing S/N < 10x after increasing reads | Negligible (in-memory counter trim) |
 
-1. sample `100K` reads from each `R1/R2`
-2. detect chemistry from `R1`
-3. normalize sampled barcodes to `TRU`
+**Decision rule**: if the `PAIRING CONFIDENCE` table shows S/N below 10x on any
+pair, double `--sample-reads` first (cheap), then widen `--top-barcodes` to
+1000. If S/N is still below 5x, the libraries likely lack sufficient shared
+barcode population and manual review is warranted.
+
+The `MERGE CONFIDENCE` table typically shows S/N > 100x because same-library
+duplicates share nearly identical barcode profiles. If merge S/N is low (< 20x),
+the files being merged may not actually be from the same library — inspect the
+`NAME_MISMATCH` warnings.
+
+## Validated results
+
+### UCSF 16-sample Perturb-seq (10x Chromium V3, AALG1=GEX/TRU, AALG2=GUIDE/NXT)
+
+- **Input**: 64 individual FASTQ sets (32 from `GEX/` dir, 32 from `guides/` dir)
+- **Parameters**: `--sample-reads 200000 --top-barcodes 500`
+- **Runtime**: ~65 s total (~1 s/file for gzip decompression + scoring)
+
+| Metric | Value |
+|--------|-------|
+| Chemistry detection | 32/32 TRU (AALG1), 32/32 NXT (AALG2) — 100% correct |
+| Library type detection | 32/32 GEX, 32/32 GUIDE — 100% correct |
+| Merge phase | 64 → 32 logical libraries (all duplicates detected) |
+| Merge S/N (worst) | 288x |
+| Pairing | 16/16 correct pairs (matches corrected symlink set) |
+| Pairing S/N (worst) | 50x |
+| Pairing S/N (median) | 107x |
+| Name warnings | 16× PAIR_NAME_MISMATCH (AALG1≠AALG2, expected for this dataset) |
+
+## Implementation status
+
+Phase 1 is implemented as `scripts/preflight_library_pairing.py`.
+
+Pipeline (all barcode-driven, no filename assumptions for pairing):
+
+1. sample `200K` reads from each `R1/R2` (`--sample-reads`)
+2. detect chemistry from `R1` (TRU/NXT/AMBIGUOUS/UNKNOWN)
+3. normalize sampled barcodes to canonical `TRU`
 4. detect guide evidence and offset band from `R2`
-5. compute top-50 barcode Jaccard between files
-6. emit a pairing report
+5. build top-N barcode signatures (`--top-barcodes`, default 500)
+6. merge same-type/chemistry duplicates (Jaccard ≥ 0.20) into logical libraries
+7. pairwise cross-type Jaccard scoring on merged libraries
+8. connected-component detection + greedy bipartite GEX↔GUIDE matching
+9. confidence tables (S/N for both merge and pairing decisions)
+10. post-hoc name-based sanity checks (anomalous filenames, missing R1/R2,
+    empty GEX/GUIDE sides)
 
-Do **not** start with clustering as the only algorithm. Add `k`-medoids after
-the deterministic surface is validated, as a refinement for noisy multi-file
-runs.
+The overlap graph is the primary algorithm; fixed-`k` clustering is not used.
+Hierarchical clustering / `k`-medoids remain available as a refinement for
+noisy multi-file runs if the graph does not separate cleanly.
 
-That gives us a cheap, explainable gate before the main pipeline and would have
-prevented the specific confusion that triggered this runbook.
+This gives a cheap (~1 min for 64 files), explainable gate before the main
+pipeline and would have prevented the specific confusion that triggered this
+runbook.
