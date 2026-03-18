@@ -11,6 +11,24 @@ instead of building the full suite every time.
 
 Agent quickstart: see `AGENTS.md` for repo-specific guardrails, tests, and recent changes.
 
+## Core Additions over STAR 2.7.11b
+
+Bulk RNA-seq 2.1–2.4x faster than external stepwise pipelines; Perturb-seq 3.2–6.1x faster than Cell Ranger 9 with near-identical parity.
+
+- **Batch Mode** (`--batchMode 1`): Processes multiple FASTQs in one STAR invocation while reusing the loaded genome. Removes the need for `--genomeLoad` keep-in-memory workflows. Single-pass only (no `--twopassMode`); not supported with Solo (`--soloType`). Use `--outFileNamePrefixAuto 1` for per-sample subdirectories.
+- **TranscriptVB Quantification** (`--quantMode TranscriptVB`): Variational Bayes and EM quantification for transcript-level abundance, with parity-oriented behavior against Salmon alignment-mode. Gene-level summarization via `--quantVBgenesMode Tximport`.
+- **Transcriptome Output** (`--quantTranscriptomeSAMoutput`): Replaces the former `--quantTranscriptomeBan` with more explicit control (e.g., `BanSingleEnd_ExtendSoftclip`).
+- **Reference Automation** (`--autoIndex Yes`): Automated reference download/build with `--cellrangerStyleIndex Yes` formatting and `--genomeGenerateTranscriptome Yes` for transcript-level quant workflows.
+- **Native Gzip FASTQ Handling**: Automatic detection of `.gz` FASTQ inputs with internal zlib streaming — no `--readFilesCommand zcat` needed. Legacy external helper available via `--readFilesLegacyZcat Yes`.
+- **Cutadapt-Compatible Trimming** (`--trimCutadapt Yes`): Native cutadapt-style trimming for bulk/PE workflows. Compatibility mode: `--trimCutadaptCompat Cutadapt3`.
+- **Poly-G Trimming** (`--clip3pPolyG yes|no|auto`): Trims poly-G artifacts common on NovaSeq/NextSeq platforms. Default `auto` activates in CellRanger4 mode. Without this, poly-G reads can inflate specific genes (e.g., LINC00486) and degrade gene-level correlations.
+- **Samtools-style BAM Sorting** (`--outBAMsortMethod samtools`): Spill-to-disk sort to reduce peak RAM pressure. Works with all modes including Flex.
+- **Y/NoY Separation** (`--emitNoYBAM yes`, `--emitYNoYFastq yes`): Split BAM and FASTQ outputs by chrY alignment. Works with bulk, single-cell, and Flex.
+- **EmptyDrops_CR Integration**: CR-compatible EmptyDrops path (including libscrna-backed behavior in scRNA/perturb flows).
+- **Solo Features**: `sF` BAM tag for feature type, `--soloCBtype String` for arbitrary barcode strings, `--soloCellReadStats Standard` for improved cell filtering.
+- **CR-compat GEX** (`--soloCrGexFeature auto|gene|genefull`): Controls which GEX source is merged in CR-compat mode.
+- **CB/UB Tag Pairing** (`--soloCbUbRequireTogether yes|no`): Enforce CB/UB tag pairing for tag injection (default `yes`).
+
 ## Folder Structure
 
 ```
@@ -54,7 +72,9 @@ Detailed artifacts: `comparisons/paper_benchmarks_20260318/`.
 
 Dataset: MorPHiC JAX KOLF PE RNA-seq (sample 21033-09-01-13-01, 6.5M read pairs, NovaSeq X Plus).
 
-### Bulk RNA-seq Wall Time (STAR, 2026-03-18)
+"External stepwise" = Trim Galore + STAR align + (optional remove\_y\_reads) + Salmon quant (sequential).
+
+### Bulk RNA-seq Wall Time
 
 | Dataset | Y-removal | Wall time (integrated) | Wall time (stepwise) | Speedup |
 |---|---|---|---|---|
@@ -63,31 +83,29 @@ Dataset: MorPHiC JAX KOLF PE RNA-seq (sample 21033-09-01-13-01, 6.5M read pairs,
 
 ### Bulk RNA-seq Parity (STAR TranscriptVB vs Salmon)
 
-"External stepwise" = Trim Galore + STAR align + (optional remove\_y\_reads) + Salmon quant (sequential).
-
-| Dataset | Y-removal | Transcript Pearson | Gene Pearson | Speedup |
-|---|---|---|---|---|
-| JAX PE (full, 32 threads) | no | 0.995 | 0.997 | 2.4x |
-| JAX PE (full, 32 threads) | yes | 0.995 | 0.997 | 2.1x |
+| Dataset | Y-removal | Transcript Pearson | Gene Pearson |
+|---|---|---|---|
+| JAX PE (full, 32 threads) | no | 0.995 | 0.997 |
+| JAX PE (full, 32 threads) | yes | 0.995 | 0.997 |
 
 - JAX PE noY: TranscriptVB vs Salmon alignment-mode VB on expressed transcripts; integrated 37 s vs external stepwise 87 s (32 threads). Speedup reflects elimination of Trim Galore and Salmon as separate steps; single-pass STAR handles trimming, alignment, and quantification.
 - JAX PE Y-removal: TranscriptVB vs Salmon alignment-mode VB on expressed transcripts; integrated 61 s vs external stepwise 125 s (32 threads). Y-removal adds chrY BAM splitting and noY FASTQ generation in both pipelines; integrated path handles this natively via `--emitNoYBAM yes`.
 
-### Perturb-seq Wall Time (STAR, 2026-03-18)
+### Perturb-seq Wall Time
 
-| Dataset | Libraries | Chemistry | Reads | STAR cells | Wall time | BAM |
+| Dataset | Libraries | Chemistry | Reads | STAR cells | Wall time | Speedup |
 |---|---|---|---|---|---|---|
-| A375 1k CRISPR 5' GemX | GEX + CRISPR (2) | TRU | 47M | 1,187 | **4.0 min** | none |
-| UCSF EBs2_2 Perturb-seq | GEX + CRISPRa (2) | NXT→TRU | 445M | 13,721 | **19.0 min** | none |
-| MSK 30polyKO | GEX + gRNA + LARRY (3) | Mixed TRU/NXT | 669M | 30,567 | **27.6 min** | none |
+| A375 1k CRISPR 5' GemX | GEX + CRISPR (2) | TRU | 47M | 1,187 | **4.0 min** | 3.8x |
+| UCSF EBs2_2 Perturb-seq | GEX + CRISPRa (2) | NXT→TRU | 445M | 13,721 | **19.0 min** | 3.2x |
+| MSK 30polyKO | GEX + gRNA + LARRY (3) | Mixed TRU/NXT | 669M | 30,567 | **27.6 min** | 6.1x |
 
 ### Perturb-seq Parity (STAR vs Cell Ranger 9)
 
-| Dataset | Cells (STAR / CR) | Jaccard | Gene Pearson | Cell Pearson | CRISPR match | Speedup |
-|---|---|---|---|---|---|---|
-| A375 1k CRISPR 5' (GeneFull) | 1,187 / 1,162 | 0.976 | 0.975 | 1.000 | 100% (1,083/1,083) | 3.8x |
-| UCSF EBs2_2 (full, NXT) | 13,721 / 13,760 | 0.976 | 0.995 | 1.000 | 98.9% (11,902/12,038) | 3.2x |
-| MSK 30polyKO (3-lib, NXT+TRU) | 30,567 / 32,256 | 0.942 | 0.994 | 1.000 | 99.4% (23,210/23,341) | 6.1x |
+| Dataset | Cells (STAR / CR) | Jaccard | Gene Pearson | Cell Pearson | CRISPR match |
+|---|---|---|---|---|---|
+| A375 1k CRISPR 5' (GeneFull) | 1,187 / 1,162 | 0.976 | 0.975 | 1.000 | 100% (1,083/1,083) |
+| UCSF EBs2_2 (full, NXT) | 13,721 / 13,760 | 0.976 | 0.995 | 1.000 | 98.9% (11,902/12,038) |
+| MSK 30polyKO (3-lib, NXT+TRU) | 30,567 / 32,256 | 0.942 | 0.994 | 1.000 | 99.4% (23,210/23,341) |
 
 - A375: Gene Pearson on 15,673 filtered genes (min 20 counts, 1% cells); Cell Pearson 0.9995 on 1,160 common barcodes; CRISPR exact set-match on all 1,083 common cells (min-UMI 10), UMI Pearson 1.000; speedup = 4 min vs 15 min (32 threads, no BAM). CR9 reference: `refdata-gex-GRCh38-2024-A`, `1k_CRISPR_5p_gemx_count_refmatch_2024a_fullraw`.
 - UCSF EBs2_2: Gene Pearson on 18,061 filtered genes; Cell Pearson 1.000 on 13,571 common barcodes; CRISPR set-match 98.9% on 12,038 evaluated cells, target-level match 99.5%; UMI Pearson 0.999; speedup = 19 min vs 61 min CR9 (32 threads, no BAM). CR9 reference: `refdata-gex-GRCh38-2024-A`, run on same corrected FASTQs.
@@ -194,28 +212,6 @@ Packaging/release details and artifact policy:
 Compilation details (module-by-module, clean rebuilds, and clean Ubuntu 24.04 validation):
 - `docs/compile_instructions.md`
 
-## Codespaces Walkthroughs
-
-STAR-suite includes GitHub Codespaces walkthroughs for the main module entry points.
-
-Start here:
-- [Codespaces walkthrough summary](docs/CODESPACES_DEMO_WALKTHROUGHS_20260312.md)
-- [Codespaces overview](docs/codespaces/00_overview.md)
-
-Ready now:
-- [Optional setup: build the small demo reference](docs/codespaces/01_setup_reference.md)
-- [Bulk demo](docs/codespaces/02_bulk.md)
-- [SLAM demo](docs/codespaces/03_slam.md)
-- [Single-cell fixture builder](docs/codespaces/04_single_cell_fixture.md)
-
-Work in progress:
-- [Perturb demo](docs/codespaces/05_perturb.md)
-- [Flex demo](docs/codespaces/06_flex.md)
-
-Helpful follow-up guides:
-- [If you already use STAR or Cell Ranger](docs/codespaces/07_star_cellranger_users.md)
-- [Using your own data](docs/codespaces/08_using_your_own_data.md)
-
 ## Docker
 
 A multi-stage Docker setup (Ubuntu 24.04) provides a clean build environment and separate runtime/test images.
@@ -273,24 +269,7 @@ See [docs/docker_validation.md](docs/docker_validation.md) for the latest portab
 
 ## Module Reference
 
-This section documents the key features and flags for each module. For standard STAR flags not listed here, see `core/legacy/README.md`.
-
-### Core
-
-STAR-suite is built on top of STAR 2.7.11b. The following features are STAR-suite additions to the core:
-
-- **Batch Mode** (`--batchMode 1`): Processes multiple FASTQs in one STAR invocation while reusing the loaded genome. Removes the need for `--genomeLoad` keep-in-memory workflows. Single-pass only (no `--twopassMode`); not supported with Solo (`--soloType`). Use `--outFileNamePrefixAuto 1` for per-sample subdirectories.
-- **TranscriptVB Quantification** (`--quantMode TranscriptVB`): Variational Bayes and EM quantification for transcript-level abundance, with parity-oriented behavior against Salmon alignment-mode. Gene-level summarization via `--quantVBgenesMode Tximport`.
-- **Transcriptome Output** (`--quantTranscriptomeSAMoutput`): Replaces the former `--quantTranscriptomeBan` with more explicit control (e.g., `BanSingleEnd_ExtendSoftclip`).
-- **Reference Automation** (`--autoIndex Yes`): Automated reference download/build with `--cellrangerStyleIndex Yes` formatting and `--genomeGenerateTranscriptome Yes` for transcript-level quant workflows.
-- **Cutadapt-Compatible Trimming** (`--trimCutadapt Yes`): Native cutadapt-style trimming for bulk/PE workflows. Compatibility mode: `--trimCutadaptCompat Cutadapt3`.
-- **Poly-G Trimming** (`--clip3pPolyG yes|no|auto`): Trims poly-G artifacts common on NovaSeq/NextSeq platforms. Default `auto` activates in CellRanger4 mode. Without this, poly-G reads can inflate specific genes (e.g., LINC00486) and degrade gene-level correlations.
-- **Samtools-style BAM Sorting** (`--outBAMsortMethod samtools`): Spill-to-disk sort to reduce peak RAM pressure. Works with all modes including Flex.
-- **Y/NoY Separation** (`--emitNoYBAM yes`, `--emitYNoYFastq yes`): Split BAM and FASTQ outputs by chrY alignment. Works with bulk, single-cell, and Flex.
-- **EmptyDrops_CR Integration**: CR-compatible EmptyDrops path (including libscrna-backed behavior in scRNA/perturb flows).
-- **Solo Features**: `sF` BAM tag for feature type, `--soloCBtype String` for arbitrary barcode strings, `--soloCellReadStats Standard` for improved cell filtering.
-- **CR-compat GEX** (`--soloCrGexFeature auto|gene|genefull`): Controls which GEX source is merged in CR-compat mode.
-- **CB/UB Tag Pairing** (`--soloCbUbRequireTogether yes|no`): Enforce CB/UB tag pairing for tag injection (default `yes`).
+This section documents the key features and flags for each module. For standard STAR flags not listed here, see `core/legacy/README.md`. Core additions are listed above in [Core Additions over STAR 2.7.11b](#core-additions-over-star-2711b).
 
 ### Flex
 
@@ -378,7 +357,6 @@ core/legacy/source/STAR \
   --runMode alignReads \
   --genomeDir /path/to/genome_index \
   --readFilesIn reads.fq.gz \
-  --readFilesCommand zcat \
   --outFileNamePrefix out/ \
   --outSAMtype BAM SortedByCoordinate \
   --outSAMattributes NH HI AS nM MD
@@ -391,7 +369,6 @@ core/legacy/source/STAR \
   --runMode alignReads \
   --genomeDir /path/to/genome_index \
   --readFilesIn A_R1.fq.gz,B_R1.fq.gz \
-  --readFilesCommand zcat \
   --outFileNamePrefix /path/to/out_root/ \
   --outFileNamePrefixAuto 1 \
   --batchMode 1 \
@@ -405,7 +382,6 @@ core/legacy/source/STAR \
   --runMode alignReads \
   --genomeDir /path/to/genome_index \
   --readFilesIn A_R1.fq.gz,B_R1.fq.gz A_R2.fq.gz,B_R2.fq.gz \
-  --readFilesCommand zcat \
   --outFileNamePrefix /path/to/out_root/ \
   --outFileNamePrefixAuto 1 \
   --batchMode 1 \
@@ -433,7 +409,6 @@ core/legacy/source/STAR \
   --runMode alignReads \
   --genomeDir /path/to/genome_index \
   --readFilesIn reads.fq.gz \
-  --readFilesCommand zcat \
   --outFileNamePrefix out/ \
   --outSAMtype BAM SortedByCoordinate \
   --outSAMattributes NH HI AS nM MD \
@@ -461,7 +436,6 @@ core/legacy/source/STAR \
   --runMode alignReads \
   --genomeDir /path/to/genome_index \
   --readFilesIn blank_R1.fq.gz,0h_R1.fq.gz,6h_R1.fq.gz,24h_R1.fq.gz \
-  --readFilesCommand zcat \
   --outFileNamePrefix /path/to/out_root/ \
   --outFileNamePrefixAuto 1 \
   --slamQuantMode 1 \
@@ -483,11 +457,8 @@ core/legacy/source/STAR \
   --pfMultiConfig /path/to/multi_config.csv \
   --dynamicThreadInterface 1 \
   --dynamicThreadConstMapPermits 32 \
-  --dynamicThreadTelemetry 1 \
-  --crAssignConsumerThreads 32 \
   --crAssignSearchThreads 1 \
   --defaultCrCompat yes \
-  --crChemistry auto \
   --outFileNamePrefix /path/to/outs/
 ```
 
@@ -504,6 +475,28 @@ core/legacy/source/star_feature_call \
   --emptydrops-use-fdr \
   --min-umi 10
 ```
+
+## Codespaces Walkthroughs
+
+STAR-suite includes GitHub Codespaces walkthroughs for the main module entry points.
+
+Start here:
+- [Codespaces walkthrough summary](docs/CODESPACES_DEMO_WALKTHROUGHS_20260312.md)
+- [Codespaces overview](docs/codespaces/00_overview.md)
+
+Ready now:
+- [Optional setup: build the small demo reference](docs/codespaces/01_setup_reference.md)
+- [Bulk demo](docs/codespaces/02_bulk.md)
+- [SLAM demo](docs/codespaces/03_slam.md)
+- [Single-cell fixture builder](docs/codespaces/04_single_cell_fixture.md)
+
+Work in progress:
+- [Perturb demo](docs/codespaces/05_perturb.md)
+- [Flex demo](docs/codespaces/06_flex.md)
+
+Helpful follow-up guides:
+- [If you already use STAR or Cell Ranger](docs/codespaces/07_star_cellranger_users.md)
+- [Using your own data](docs/codespaces/08_using_your_own_data.md)
 
 ## More Detail
 
