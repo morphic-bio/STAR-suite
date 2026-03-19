@@ -1,5 +1,4 @@
 #include "UMICorrector.h"
-#include "UmiCodec.h"
 #include <algorithm>
 #include <queue>
 
@@ -11,18 +10,17 @@ UMICorrectionResult UMICorrector::correctClique(const std::vector<UMICount>& cou
         return result;
     }
     
-    // Build UMI histogram (packed UMI -> count)
+    // Build UMI histogram — input UMIs are already packed uint32_t.
+    // Multiple entries with the same umi24 (different tagIdx) are aggregated.
     std::unordered_map<uint32_t, uint32_t> hist;
-    
-    // First pass: aggregate counts for each UMI
+    hist.reserve(counts.size());
     for (const auto& count : counts) {
-        uint32_t packed = encodeUMI12(count.ur);
-        if (packed == UINT32_MAX) continue; // Invalid UMI
-        
-        hist[packed] += count.readCount;
+        hist[count.ur] += count.readCount;
     }
     
-    // Second pass: filter by min_count (after aggregation)
+    result.uniqueUmisInput = static_cast<uint32_t>(hist.size());
+    
+    // Filter by min_count
     for (auto it = hist.begin(); it != hist.end();) {
         if (it->second < static_cast<uint32_t>(params.minCount)) {
             it = hist.erase(it);
@@ -30,6 +28,8 @@ UMICorrectionResult UMICorrector::correctClique(const std::vector<UMICount>& cou
             ++it;
         }
     }
+    
+    result.uniqueUmisPostFilter = static_cast<uint32_t>(hist.size());
     
     // Process each unvisited UMI to find its connected component
     std::unordered_set<uint32_t> visited;
@@ -91,18 +91,10 @@ UMICorrectionResult UMICorrector::correctClique(const std::vector<UMICount>& cou
             }
         }
         
-        // Decode winner to UB string
-        std::string winnerUb = decodeUMI12(winner);
-        
-        // Create corrections for all UMIs in component
+        // Map every non-winner UMI to the winner (all packed uint32_t)
         for (int i = 0; i < componentSize; i++) {
-            if (componentUmis[i] == winner) continue; // Winner maps to itself
-            
-            // Decode UR
-            std::string ur = decodeUMI12(componentUmis[i]);
-            
-            // Add correction mapping
-            result.urToUb[ur] = winnerUb;
+            if (componentUmis[i] == winner) continue;
+            result.urToUb[componentUmis[i]] = winner;
             result.merges++;
         }
     }

@@ -4,28 +4,30 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
-#include <string>
 #include <cstdint>
 #include <queue>
 
 // UMI correction result
 struct UMICorrectionResult {
-    std::unordered_map<std::string, std::string> urToUb;  // UR -> corrected UB mapping
+    std::unordered_map<uint32_t, uint32_t> urToUb;  // packed UR -> corrected packed UB
     uint32_t merges;
     uint32_t components;
     uint32_t componentsCapped;
     uint32_t componentsBelowThreshold;
-    std::vector<uint32_t> componentSizes;  // Size of each component processed
-    
-    UMICorrectionResult() : merges(0), components(0), componentsCapped(0), componentsBelowThreshold(0) {}
+    uint32_t uniqueUmisInput;        // unique UMIs in histogram before minCount filter
+    uint32_t uniqueUmisPostFilter;   // unique UMIs after minCount filter
+    std::vector<uint32_t> componentSizes;
+
+    UMICorrectionResult() : merges(0), components(0), componentsCapped(0),
+        componentsBelowThreshold(0), uniqueUmisInput(0), uniqueUmisPostFilter(0) {}
 };
 
-// UMI count input
+// UMI count input — ur is a packed 24-bit UMI (2 bits/base, 12 bases)
 struct UMICount {
-    std::string ur;  // UR tag (12bp)
+    uint32_t ur;
     uint32_t readCount;
-    
-    UMICount(const std::string& u, uint32_t c) : ur(u), readCount(c) {}
+
+    UMICount(uint32_t u, uint32_t c) : ur(u), readCount(c) {}
 };
 
 // UMI correction parameters

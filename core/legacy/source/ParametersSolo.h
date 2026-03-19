@@ -387,7 +387,7 @@ public:
     bool flexFilterKeepCBTag = false;            // resolved: if true, keep full CB+TAG barcodes in per-sample MEX
 
     // Minimal memory mode (inline hash path only)
-    string soloFlexMinimalMemoryStr = "no";      // raw CLI: yes|no (default: no)
+    string soloFlexMinimalMemoryStr = "auto";     // raw CLI: auto|yes|no; "auto" → "yes" when --flex yes, "no" otherwise
     bool soloFlexMinimalMemory = false;          // resolved: true if enabled
 
     //processing

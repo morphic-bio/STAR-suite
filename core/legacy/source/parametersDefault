@@ -1770,7 +1770,7 @@ flex                         no
     string:                 yes|no (default no)
                             yes         ... enable full Flex pipeline with production defaults:
                                             soloRunFlexFilter=yes, soloInlineCBCorrection=yes,
-                                            soloInlineHashMode=yes, soloFlexMinimalMemory=yes,
+                                            soloInlineHashMode=yes, soloFlexMinimalMemory=yes (unless explicitly overridden),
                                             soloMapqMode=genomic, soloMMrateMax=0.1,
                                             soloBarcodesObservedOnly=yes, soloUMICorrection=clique
                             no          ... use individual flag settings (default, inline hash mode disabled)
@@ -1871,9 +1871,11 @@ soloFlexKeepCBTag             no
                             yes         ... keep full CB+TAG (24bp) barcodes in per-sample MEX outputs
                             no          ... strip sample tag, output 16bp CB barcodes (default)
 
-soloFlexMinimalMemory         no
-    string:                 yes|no (default no)
+soloFlexMinimalMemory         auto
+    string:                 auto|yes|no (default auto)
+                            auto        ... enabled automatically when --flex yes; disabled otherwise
                             yes         ... skip legacy Solo structures and eagerly free hashes in inline hash path (reduces memory usage)
+                            no          ... keep legacy Solo structures (required for CB/UB table export and validation tests)
 
 pfMultiConfig               -
     string:                 pf-multi config CSV (Cell Ranger-style input; enables pf-multi processing)

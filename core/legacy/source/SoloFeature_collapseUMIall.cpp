@@ -638,44 +638,9 @@ void SoloFeature::collapseUMIperCB(uint32 iCB, vector<uint32> &umiArray, vector<
 #endif
         
         {
-            // Apply clique corrections if enabled
-            if (pSolo.umiCorrectionMode > 0 && !umiCorrections.empty()) {
-                // Get CB16 and sample assignment for this CB
-                if (iCB >= indCB.size()) {
-                    P.inOut->logMain << "ERROR: iCB=" << iCB << " >= indCB.size()=" << indCB.size() << " in collapseUMIperCB" << endl;
-                    ostringstream errOut;
-                    errOut << "FATAL: indCB index out of bounds: iCB=" << iCB << " >= " << indCB.size();
-                    exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_INPUT_FILES, P);
-                }
-                uint32_t wlIdx = indCB[iCB];
-                if (wlIdx >= pSolo.cbWLstr.size()) {
-                    P.inOut->logMain << "ERROR: wlIdx=" << wlIdx << " >= cbWLstr.size()=" << pSolo.cbWLstr.size() << " in collapseUMIperCB" << endl;
-                    ostringstream errOut;
-                    errOut << "FATAL: cbWLstr index out of bounds: wlIdx=" << wlIdx << " >= " << pSolo.cbWLstr.size();
-                    exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_INPUT_FILES, P);
-                }
-                std::string cb16 = pSolo.cbWLstr[wlIdx].substr(0, 16);
-                uint8_t sampleIdx = 0;
-                auto assignIt = assignmentsMap.find(cb16);
-                if (assignIt != assignmentsMap.end()) {
-                    AssignmentInfo& info = assignIt->second;
-                    if (info.status != "ambiguous" && info.status != "no_call") {
-                        sampleIdx = info.sampleIdx;
-                    }
-                }
-                
-                for (uint32 iG=0; iG<nGenes; iG++) {
-                    uint32 geneIdx = gID[iG];
-                    // Build group key
-                    uint64_t groupKey = (static_cast<uint64_t>(wlIdx) << 24) | 
-                                      (static_cast<uint64_t>(sampleIdx) << 16) | 
-                                      static_cast<uint64_t>(geneIdx);
-                    
-                    // Note: Ledger-based UMI correction path removed
-                    // The inline flex path uses hash-based correction in buildHistogramsFromHash/applyCliqueCorrectionsToHash
-                    (void)groupKey; // suppress unused warning
-                }
-            }
+            // Clique corrections are applied directly to the inline hash
+            // in runCliqueCorrection() -> applyCliqueCorrectionsToHash(),
+            // so no per-CB correction lookup is needed here.
         }
         
             for (uint32 iG=0; iG<nGenes; iG++) {//cycle over genes
@@ -1305,14 +1270,7 @@ void SoloFeature::compareCBUBParity(uint32_t iCB, uint32_t *rGU, vector<uint32> 
         uint32 nR0 = (gReadS[iG+1]-gReadS[iG])/rguStride;
         uint32 geneIdx = gID[iG];
 
-        uint64_t groupKey = (static_cast<uint64_t>(wlIdx) << 24) |
-                            (static_cast<uint64_t>(sampleIdx) << 16) |
-                            static_cast<uint64_t>(geneIdx);
-        uint32_t cliqueSize = 0;
-        auto groupIt = umiCorrections.find(groupKey);
-        if (groupIt != umiCorrections.end()) {
-            cliqueSize = groupIt->second.size();
-        }
+        uint32_t cliqueSize = 0; // corrections already applied to inline hash
 
         for (uint32 iR=0; iR<nR0; iR++) {
             uint64 iread1 = rGU1[iR+rguStride*rguR];

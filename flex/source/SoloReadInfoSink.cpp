@@ -76,11 +76,6 @@ void CountingSink::onRecord(SoloFeature &feature, const ReadInfoRecord &rec) {
         }
     }
     perWL[rec.cbIdx].push_back(rec);
-    
-    // Collect UR histogram for UMI correction
-    if (feature.pSolo.umiCorrectionMode > 0) {
-        feature.collectURHistogram(rec.readId, rec.cbIdx, rec.featureId);
-    }
 }
 
 void CountingSink::finalize(SoloFeature &feature) {

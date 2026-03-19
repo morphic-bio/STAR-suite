@@ -1159,121 +1159,153 @@ int FlexFilter::runInternal(
     // This matches CR's approach: run occupancy on ALL filtered cells from ALL tags
     if (!config.disableOccupancyFilter) {
         cerr << "[FlexFilter] Running combined occupancy filter..." << endl;
-        
-        // Collect ALL ED passers from ALL tags
-        vector<string> allEdPasserBarcodes;
-        vector<uint32_t> allEdPasserUMIs;
-        
-        // First pass: count total for pre-allocation
-        size_t totalEdPassers = 0;
-        for (const auto& tagResult : outputs->tagResults) {
-            totalEdPassers += tagResult.edPasserBarcodes.size();
-        }
-        allEdPasserBarcodes.reserve(totalEdPassers);
-        allEdPasserUMIs.reserve(totalEdPassers);
-        
-        // Build combined list
-        for (const auto& tagResult : outputs->tagResults) {
-            for (const auto& barcode : tagResult.edPasserBarcodes) {
-                allEdPasserBarcodes.push_back(barcode);
-                allEdPasserUMIs.push_back(1);  // UMI not used for unique tag counting
+
+        // Use only tags with actual tail-testing as the occupancy surface.
+        // Fallback-only tags can accumulate large numbers of low-confidence
+        // passers at UMI=1 and distort the combined unique-tag distribution.
+        vector<size_t> occupancyTagIndices;
+        occupancyTagIndices.reserve(outputs->tagResults.size());
+        for (size_t i = 0; i < outputs->tagResults.size(); ++i) {
+            if (outputs->tagResults[i].nTailTested > 0) {
+                occupancyTagIndices.push_back(i);
             }
         }
-        
-        cerr << "[FlexFilter] Combined ED passers: " << allEdPasserBarcodes.size() << endl;
-        
-        // Compute lambda estimate for Monte Carlo (from combined passers)
-        double lambdaEstimate = 0.0;
-        if (config.occupancyMode == OccupancyMode::MonteCarlo) {
-            // Count cells per GEM (CB16) from all ED passers
-            unordered_map<string, uint32_t> cellsPerGem;
+
+        if (occupancyTagIndices.empty()) {
+            cerr << "[FlexFilter] Combined occupancy skipped: no observed tags "
+                    "(no tail-tested tags)\n";
+        } else {
+            cerr << "[FlexFilter] Combined occupancy observed tags: "
+                 << occupancyTagIndices.size() << " / " << outputs->tagResults.size()
+                 << endl;
+
+            // Collect ED passers from the observed tags only.
+            vector<string> allEdPasserBarcodes;
+            vector<uint32_t> allEdPasserUMIs;
+
+            size_t totalEdPassers = 0;
+            for (size_t tagIdx : occupancyTagIndices) {
+                totalEdPassers += outputs->tagResults[tagIdx].edPasserBarcodes.size();
+            }
+            allEdPasserBarcodes.reserve(totalEdPassers);
+            allEdPasserUMIs.reserve(totalEdPassers);
+
+            for (size_t tagIdx : occupancyTagIndices) {
+                const auto& tagResult = outputs->tagResults[tagIdx];
+                for (const auto& barcode : tagResult.edPasserBarcodes) {
+                    allEdPasserBarcodes.push_back(barcode);
+                    allEdPasserUMIs.push_back(1);  // UMI not used for unique tag counting
+                }
+            }
+
+            cerr << "[FlexFilter] Combined ED passers (observed tags): "
+                 << allEdPasserBarcodes.size() << endl;
+
+            // Compute lambda estimate for Monte Carlo (from combined passers)
+            double lambdaEstimate = 0.0;
+            if (config.occupancyMode == OccupancyMode::MonteCarlo) {
+                // Count cells per GEM (CB16) from all ED passers
+                unordered_map<string, uint32_t> cellsPerGem;
+                size_t cb16Len = 16;
+                for (const auto& barcode : allEdPasserBarcodes) {
+                    if (barcode.size() >= cb16Len) {
+                        string gem = barcode.substr(0, cb16Len);
+                        cellsPerGem[gem]++;
+                    }
+                }
+
+                // Build distribution
+                unordered_map<uint32_t, uint32_t> countDistribution;
+                for (const auto& entry : cellsPerGem) {
+                    countDistribution[entry.second]++;
+                }
+
+                // Add empty GEMs
+                uint32_t gemsWithCells = static_cast<uint32_t>(cellsPerGem.size());
+                uint32_t totalExpectedGems = static_cast<uint32_t>(config.totalPartitions * config.recoveryFactor);
+                uint32_t emptyGems = (totalExpectedGems > gemsWithCells) ? (totalExpectedGems - gemsWithCells) : 0;
+                countDistribution[0] = emptyGems;
+
+                // Compute weighted average
+                double sumWeighted = 0.0;
+                uint64_t sumWeights = 0;
+                for (const auto& entry : countDistribution) {
+                    sumWeighted += static_cast<double>(entry.first) * entry.second;
+                    sumWeights += entry.second;
+                }
+                lambdaEstimate = (sumWeights > 0) ? (sumWeighted / sumWeights) : 0.0;
+
+                cerr << "[FlexFilter] Combined occupancy lambda: " << lambdaEstimate
+                     << " (GEMs: " << gemsWithCells << ", empty: " << emptyGems << ")" << endl;
+            }
+
+            // Run occupancy filter on combined set
+            OccupancyGuard::Config occConfig;
+            occConfig.totalPartitions = config.totalPartitions;
+            occConfig.recoveryFactor = config.recoveryFactor;
+            occConfig.percentile = config.occupancyPercentile;
+
+            vector<uint32_t> occupancyFlagged = OccupancyGuard::filterHighOccupancy(
+                allEdPasserUMIs,
+                allEdPasserBarcodes,
+                occConfig,
+                config.occupancyMode,
+                lambdaEstimate,
+                8,  // tagLength
+                config.occupancySimulatedGems,
+                config.emptydropsParams.seed
+            );
+
+            // Convert flagged cells into flagged GEMs (CB16) so the combined
+            // filter can still remove the same overloaded GEM across all tags.
             size_t cb16Len = 16;
-            for (const auto& barcode : allEdPasserBarcodes) {
-                if (barcode.size() >= cb16Len) {
-                    string gem = barcode.substr(0, cb16Len);
-                    cellsPerGem[gem]++;
+            unordered_set<string> occupancyFlaggedGems;
+            for (uint32_t idx : occupancyFlagged) {
+                if (idx < allEdPasserBarcodes.size()) {
+                    const string& barcode = allEdPasserBarcodes[idx];
+                    if (barcode.size() >= cb16Len) {
+                        occupancyFlaggedGems.insert(barcode.substr(0, cb16Len));
+                    }
                 }
             }
-            
-            // Build distribution
-            unordered_map<uint32_t, uint32_t> countDistribution;
-            for (const auto& entry : cellsPerGem) {
-                countDistribution[entry.second]++;
-            }
-            
-            // Add empty GEMs
-            uint32_t gemsWithCells = static_cast<uint32_t>(cellsPerGem.size());
-            uint32_t totalExpectedGems = static_cast<uint32_t>(config.totalPartitions * config.recoveryFactor);
-            uint32_t emptyGems = (totalExpectedGems > gemsWithCells) ? (totalExpectedGems - gemsWithCells) : 0;
-            countDistribution[0] = emptyGems;
-            
-            // Compute weighted average
-            double sumWeighted = 0.0;
-            uint64_t sumWeights = 0;
-            for (const auto& entry : countDistribution) {
-                sumWeighted += static_cast<double>(entry.first) * entry.second;
-                sumWeights += entry.second;
-            }
-            lambdaEstimate = (sumWeights > 0) ? (sumWeighted / sumWeights) : 0.0;
-            
-            cerr << "[FlexFilter] Combined occupancy lambda: " << lambdaEstimate 
-                 << " (GEMs: " << gemsWithCells << ", empty: " << emptyGems << ")" << endl;
-        }
-        
-        // Run occupancy filter on combined set
-        OccupancyGuard::Config occConfig;
-        occConfig.totalPartitions = config.totalPartitions;
-        occConfig.recoveryFactor = config.recoveryFactor;
-        occConfig.percentile = config.occupancyPercentile;
-        
-        vector<uint32_t> occupancyFlagged = OccupancyGuard::filterHighOccupancy(
-            allEdPasserUMIs,
-            allEdPasserBarcodes,
-            occConfig,
-            config.occupancyMode,
-            lambdaEstimate,
-            8,  // tagLength
-            config.occupancySimulatedGems,
-            config.emptydropsParams.seed
-        );
-        
-        // Build set of flagged barcodes
-        unordered_set<string> occupancyFlaggedBarcodes;
-        for (uint32_t idx : occupancyFlagged) {
-            if (idx < allEdPasserBarcodes.size()) {
-                occupancyFlaggedBarcodes.insert(allEdPasserBarcodes[idx]);
-            }
-        }
-        
-        cerr << "[FlexFilter] Combined occupancy flagged " << occupancyFlaggedBarcodes.size() << " barcodes" << endl;
-        
-        // Update each tag's results: remove flagged barcodes
-        uint32_t totalRemoved = 0;
-        for (auto& tagResult : outputs->tagResults) {
-            vector<string> filteredPassers;
-            filteredPassers.reserve(tagResult.edPasserBarcodes.size());
-            
-            uint32_t removedFromTag = 0;
-            for (const auto& barcode : tagResult.edPasserBarcodes) {
-                if (occupancyFlaggedBarcodes.find(barcode) == occupancyFlaggedBarcodes.end()) {
-                    filteredPassers.push_back(barcode);
-                } else {
-                    removedFromTag++;
+
+            cerr << "[FlexFilter] Combined occupancy flagged "
+                 << occupancyFlaggedGems.size() << " GEMs" << endl;
+
+            // Update each tag's results: remove cells from flagged GEMs.
+            uint32_t totalRemoved = 0;
+            for (auto& tagResult : outputs->tagResults) {
+                vector<string> filteredPassers;
+                filteredPassers.reserve(tagResult.edPasserBarcodes.size());
+
+                uint32_t removedFromTag = 0;
+                for (const auto& barcode : tagResult.edPasserBarcodes) {
+                    bool removeBarcode = false;
+                    if (barcode.size() >= cb16Len) {
+                        removeBarcode = occupancyFlaggedGems.find(barcode.substr(0, cb16Len))
+                                      != occupancyFlaggedGems.end();
+                    }
+                    if (!removeBarcode) {
+                        filteredPassers.push_back(barcode);
+                    } else {
+                        removedFromTag++;
+                    }
+                }
+
+                tagResult.occupancyRemoved = removedFromTag;
+                tagResult.passingBarcodes = filteredPassers;
+                tagResult.filteredBarcodes = filteredPassers;
+                totalRemoved += removedFromTag;
+
+                if (removedFromTag > 0) {
+                    cerr << "[FlexFilter] Tag " << tagResult.tag << ": removed " << removedFromTag
+                         << " by occupancy, final: " << filteredPassers.size() << endl;
                 }
             }
-            
-            tagResult.occupancyRemoved = removedFromTag;
-            tagResult.passingBarcodes = filteredPassers;
-            tagResult.filteredBarcodes = filteredPassers;
-            totalRemoved += removedFromTag;
-            
-            if (removedFromTag > 0) {
-                cerr << "[FlexFilter] Tag " << tagResult.tag << ": removed " << removedFromTag 
-                     << " by occupancy, final: " << filteredPassers.size() << endl;
-            }
+
+            cerr << "[FlexFilter] Combined occupancy removed " << totalRemoved
+                 << " cells total" << endl;
         }
-        
-        cerr << "[FlexFilter] Combined occupancy removed " << totalRemoved << " cells total" << endl;
     }
     
     // Debug: For BC006/BC008, compare against golden files if available

@@ -1735,6 +1735,20 @@ int main(int argInN, char *argIn[])
 
     // Note: Two-pass unsorted CB/UB tag injection removed - not used in inline flex path
 
+    // Free RAchunk early when no downstream operations need it (no BAM, no gene quant, no Y-reads).
+    // This releases per-thread IO buffers, ReadAlign structures, and residual SoloReadFeature data.
+    if (RAchunk != nullptr && !P.outSAMbool && !P.quant.geCount.yes
+        && !P.emitYReadNamesyes && !P.emitYNoYFastqyes && !batchModeActive) {
+        for (int ichunk = 0; ichunk < P.runThreadN; ++ichunk) {
+            delete RAchunk[ichunk];
+            RAchunk[ichunk] = nullptr;
+        }
+        delete[] RAchunk;
+        RAchunk = nullptr;
+        P.inOut->logMain << "RAM after freeing RAchunk (no downstream BAM/quant needed):\n"
+                         << linuxProcMemory() << flush;
+    }
+
     if (P.quant.geCount.yes)
     { // output gene quantifications
         for (int ichunk = 1; ichunk < P.runThreadN; ichunk++)
