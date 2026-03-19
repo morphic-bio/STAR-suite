@@ -14,8 +14,10 @@
 #include "ErrorWarning.h"
 #include "solo/CbBayesianResolver.h"
 #include "solo/CbCorrector.h"
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <iomanip>
 #include <vector>
 #include <algorithm>
 
@@ -180,60 +182,93 @@ void SoloFeature::collapseUMIall_fromHash()
                      << " genomic_dropped_mmrate=" << solo_genomic_dropped_mmrate()
                      << endl;
     
-    // Deduped UMI counts per (CB,TAG,gene) using khash: key = packCgAggKey(cb, 0, gene, tag)
-    khash_t(cg_agg)* cbTagGeneCounts = kh_init(cg_agg);
+    // --- Flat-sort collapse: extract, sort, count runs ---
+    // Each inline hash entry is a unique (CB, UMI, gene, tag) combination.
+    // UMI dedup = count entries sharing the same (CB, gene, tag) after zeroing UMI bits.
+    auto collapseStart = std::chrono::steady_clock::now();
 
-    // Track observed CBs and per-(CB,gene) read totals (for Exact)
+    static const uint64_t UMI_CLEAR_MASK = ~(0xFFFFFFULL << 20); // zero bits 43..20
+
+    P.inOut->logMain << "Grouping hash entries by CB/gene/tag (flat sort)..." << endl;
+
+    // Phase A: extract triplet keys (UMI-zeroed) and unique CBs in one pass
+    std::vector<uint64_t> tripletKeys;
+    tripletKeys.reserve(hashSize);
     std::unordered_set<uint32_t> uniqueCBs;
-    std::unordered_map<uint32_t, std::unordered_map<uint32_t, uint32_t>> cbGeneReadCounts;
-    
-    P.inOut->logMain << "Grouping hash entries by CB/gene/tag..." << endl;
-    
+
     for (khiter_t iter = kh_begin(hash); iter != kh_end(hash); ++iter) {
         if (!kh_exist(hash, iter)) continue;
-        
         uint64_t key = kh_key(hash, iter);
-        uint32_t count = kh_val(hash, iter);
 
-        // Fast-path: extract tag via mask, skip tagIdx==0, and zero UMI bits for dedup aggregation
-        uint8_t tagIdxFast = static_cast<uint8_t>(key & 0x1Fu);
-        if (tagIdxFast > 0) {
-            static const uint64_t UMI_CLEAR_MASK = ~(0xFFFFFFULL << 20); // zero bits 43..20
-            uint64_t tripletKey = key & UMI_CLEAR_MASK; // keeps CB/gene/tag, zeros UMI
-            int absent;
-            khiter_t titer = kh_put(cg_agg, cbTagGeneCounts, tripletKey, &absent);
-            if (absent) {
-                kh_val(cbTagGeneCounts, titer) = 1u;
-            } else {
-                kh_val(cbTagGeneCounts, titer) += 1u;
+        uint32_t cbIdx = static_cast<uint32_t>((key >> 44) & 0xFFFFF);
+        uniqueCBs.insert(cbIdx);
+
+        uint8_t tagIdx = static_cast<uint8_t>(key & 0x1F);
+        if (tagIdx > 0) {
+            tripletKeys.push_back(key & UMI_CLEAR_MASK);
+        }
+    }
+
+    auto extractEnd = std::chrono::steady_clock::now();
+
+    // Phase B: sort triplet keys
+    std::sort(tripletKeys.begin(), tripletKeys.end());
+
+    auto sortEnd = std::chrono::steady_clock::now();
+
+    // Phase C: count consecutive runs → build cbTagGeneCountsVec directly
+    std::unordered_map<uint64_t, std::vector<std::pair<uint32_t, uint32_t>>> cbTagGeneCountsVec;
+    size_t nTripletGroups = 0;
+
+    if (!tripletKeys.empty()) {
+        size_t runStart = 0;
+        for (size_t i = 1; i <= tripletKeys.size(); ++i) {
+            if (i == tripletKeys.size() || tripletKeys[i] != tripletKeys[i-1]) {
+                uint64_t tripletKey = tripletKeys[runStart];
+                uint32_t dedupCount = static_cast<uint32_t>(i - runStart);
+
+                uint32_t cbIdx;
+                uint16_t geneIdx;
+                uint8_t tagIdx;
+                unpackCgAggKey(tripletKey, &cbIdx, nullptr, &geneIdx, &tagIdx);
+
+                uint64_t cbTagKey = (static_cast<uint64_t>(cbIdx) << 8) | tagIdx;
+                cbTagGeneCountsVec[cbTagKey].emplace_back(geneIdx, dedupCount);
+                ++nTripletGroups;
+
+                runStart = i;
             }
         }
-
-        uint32_t cbIdx, umi24;
-        uint16_t geneIdx;
-        uint8_t tagIdx;
-        unpackCgAggKey(key, &cbIdx, &umi24, &geneIdx, &tagIdx);
-        
-        uniqueCBs.insert(cbIdx);
-        cbGeneReadCounts[cbIdx][geneIdx] += count;
     }
-    
+
+    { std::vector<uint64_t>().swap(tripletKeys); }
+
+    auto groupEnd = std::chrono::steady_clock::now();
+    double extractSec = std::chrono::duration<double>(extractEnd - collapseStart).count();
+    double sortSec = std::chrono::duration<double>(sortEnd - extractEnd).count();
+    double groupSec = std::chrono::duration<double>(groupEnd - sortEnd).count();
+    double totalCollapseSec = std::chrono::duration<double>(groupEnd - collapseStart).count();
+    P.inOut->logMain << "Collapse timing: extract=" << std::fixed << std::setprecision(1)
+                     << extractSec << "s sort=" << sortSec << "s group=" << groupSec
+                     << "s total=" << totalCollapseSec << "s" << endl;
+
     nCB = uniqueCBs.size();
-    P.inOut->logMain << "Found " << nCB << " unique CBs and " << kh_size(cbTagGeneCounts) << " (CB, gene, tag) groups" << endl;
-    
-    // Step 2: Build indCB (dense list of observed whitelist CB indices) and indCBwl (reverse map WL idx -> dense idx)
-    indCB.resize(nCB);                      // dense list of CB whitelist indices observed in this run
-    indCBwl.resize(pSolo.cbWLsize, (uint32)-1); // reverse map: whitelist idx -> dense column idx (or -1 if absent)
-    
+    P.inOut->logMain << "Found " << nCB << " unique CBs and " << nTripletGroups
+                     << " (CB, gene, tag) groups" << endl;
+
+    // Build indCB (dense list of observed whitelist CB indices) and indCBwl (reverse map)
+    indCB.resize(nCB);
+    indCBwl.resize(pSolo.cbWLsize, (uint32)-1);
+
     std::vector<uint32_t> sortedCBs(uniqueCBs.begin(), uniqueCBs.end());
     std::sort(sortedCBs.begin(), sortedCBs.end());
-    
+
     for (uint32_t iCB = 0; iCB < nCB; iCB++) {
         uint32_t cbIdx = sortedCBs[iCB];
         indCB[iCB] = cbIdx;
         indCBwl[cbIdx] = iCB;
     }
-    
+
     // For inline-MEX path we do not build Solo dense matrices; keep minimal bookkeeping only
     nReadPerCB.assign(nCB, 0);
     nReadPerCBunique.assign(nCB, 0);
@@ -248,25 +283,6 @@ void SoloFeature::collapseUMIall_fromHash()
         countMatMult.m.clear();
         countMatMult.i.assign(nCB + 1, 0);
     }
-
-    // Build per-(CB,gene) dedup counts and per-(CB,TAG) gene counts for MEX
-    std::unordered_map<uint32_t, std::unordered_map<uint32_t, uint32_t>> cbGeneCounts;
-    std::unordered_map<uint64_t, std::vector<std::pair<uint32_t, uint32_t>>> cbTagGeneCountsVec;
-    size_t totalCbGeneEntries = 0;
-    for (khiter_t iter = kh_begin(cbTagGeneCounts); iter != kh_end(cbTagGeneCounts); ++iter) {
-        if (!kh_exist(cbTagGeneCounts, iter)) continue;
-        uint64_t tripletKey = kh_key(cbTagGeneCounts, iter);
-        uint32_t cbIdx, umiDummy;
-        uint16_t geneIdx;
-        uint8_t tagIdx;
-        unpackCgAggKey(tripletKey, &cbIdx, &umiDummy, &geneIdx, &tagIdx);
-        if (tagIdx == 0) continue; // should already be filtered
-        uint32_t val = kh_val(cbTagGeneCounts, iter);
-        cbGeneCounts[cbIdx][geneIdx] += val;
-        uint64_t cbTagKey = (static_cast<uint64_t>(cbIdx) << 8) | tagIdx;
-        cbTagGeneCountsVec[cbTagKey].emplace_back(geneIdx, val);
-    }
-    kh_destroy(cg_agg, cbTagGeneCounts);
 
     // We skip building Solo dense matrices entirely in this path
     countCellGeneUMI.clear();
@@ -318,8 +334,8 @@ void SoloFeature::collapseUMIall_fromHash()
     // Hash usage timeline:
     // 1. Hash is populated during read capture (SoloReadFeature_record.cpp)
     // 2. Hash is merged from per-thread hashes in sumThreads() (SoloFeature_sumThreads.cpp)
-    // 3. Hash is used during collapse (lines 68-206): iterate, dedup UMIs, build cbTagGeneCountsVec
-    // 4. MEX is written to disk from cbTagGeneCountsVec (line 206: writeMexFromInlineHashDedup)
+    // 3. Hash is used during collapse: flat-sort dedup → build cbTagGeneCountsVec
+    // 4. MEX is written to disk from cbTagGeneCountsVec (writeMexFromInlineHashDedup)
     // 5. Flexfilter reads from on-disk MEX files via FlexFilter::runFromFiles() (SoloFeature_flexfilter.cpp:187),
     //    NOT from the hash. Flexfilter uses inputs.matrixDir pointing to the on-disk MEX directory.
     // 6. Hash is no longer needed after MEX write - safe to destroy immediately

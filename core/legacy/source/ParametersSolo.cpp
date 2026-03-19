@@ -476,10 +476,8 @@ void ParametersSolo::initialize(Parameters *pPin)
                 inlineHashMode = true;  // Override boolean directly
             }
             
-            // Enable minimal memory mode (if not explicitly set)
-            // Only override if empty (default), respect explicit "no" from user
-            // Set string now, boolean will be parsed later
-            if (soloFlexMinimalMemoryStr.empty()) {
+            // Enable minimal memory mode when --flex yes, unless user explicitly set yes/no
+            if (soloFlexMinimalMemoryStr.empty() || soloFlexMinimalMemoryStr == "auto") {
                 soloFlexMinimalMemoryStr = "yes";
             }
             
@@ -697,15 +695,17 @@ void ParametersSolo::initialize(Parameters *pPin)
     //////////////////////////////////////////////////////////////////////////////////////////////////////
     /////////////////////////////// Minimal memory mode
     {
-        // Resolve soloFlexMinimalMemory flag
+        // Resolve soloFlexMinimalMemory flag.
+        // "auto" without --flex yes resolves to false (the auto-enable in the
+        // flex block above converts it to "yes" when --flex yes is active).
         if (soloFlexMinimalMemoryStr == "yes") {
             soloFlexMinimalMemory = true;
-        } else if (soloFlexMinimalMemoryStr == "no" || soloFlexMinimalMemoryStr.empty()) {
+        } else if (soloFlexMinimalMemoryStr == "no" || soloFlexMinimalMemoryStr == "auto" || soloFlexMinimalMemoryStr.empty()) {
             soloFlexMinimalMemory = false;
         } else {
             ostringstream errOut;
             errOut << "EXITING because of fatal PARAMETERS error: unrecognized option in --soloFlexMinimalMemory=" << soloFlexMinimalMemoryStr << "\n";
-            errOut << "SOLUTION: use allowed option: yes OR no\n";
+            errOut << "SOLUTION: use allowed option: auto, yes, or no\n";
             exitWithError(errOut.str(), std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
         }
         

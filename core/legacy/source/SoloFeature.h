@@ -181,22 +181,14 @@ public:
     std::unordered_set<std::string> cellsAllowSet;  // CB16 (wildcard) or CB24 (exact match)
     std::unordered_map<std::string, AssignmentInfo> assignmentsMap;  // key: CB16, value: assignment info
     
-    // UMI histogram collection: key is packed uint64 (cbIdx << 24 | sampleIdx << 16 | geneIdx)
-    struct UMIHistogram {
-        std::unordered_map<std::string, uint32_t> urCounts;  // UR string -> count
-        uint32_t totalReads;
-    };
-    std::unordered_map<uint64_t, UMIHistogram> umiGroupHistograms;
-    
-    // UMI corrections: groupKey -> (UR -> corrected UB)
-    std::unordered_map<uint64_t, std::unordered_map<std::string, std::string>> umiCorrections;
+    // Flat correction hash: original cg_agg key → corrected umi24.
+    // Replaces the previous two-level unordered_map<groupKey, unordered_map<ur, ub>>
+    // to avoid 234M inner-map heap allocations (~22 GB overhead → ~2 GB flat khash).
+    khash_t(cg_agg) *umiCorrectionHash;
     
     // Load assignment files
     bool loadCellsAllowList(const std::string& path);
     bool loadSampleAssignments(const std::string& path);
-    
-    // UMI correction: collect UR histogram for a read
-    void collectURHistogram(uint32_t readId, uint32_t cbIdx, uint32_t geneIdx);
     
     // UMI correction: run clique correction for all groups and apply corrections
     void runCliqueCorrection();
@@ -204,10 +196,7 @@ public:
     // Ambiguous CB resolution: stub - not wired in flex path
     void resolveAmbiguousCBs() {}
     
-    // Build UMI histograms from inline hash (for clique correction)
-    void buildHistogramsFromHash();
-    
-    // Apply clique corrections back to inline hash (re-key entries with corrected UB)
+    // Apply flat correction hash back to inline hash (re-key entries with corrected UB)
     void applyCliqueCorrectionsToHash();
     
     // Metrics output

@@ -62,6 +62,7 @@ SoloFeature::SoloFeature(Parameters &Pin, ReadAlignChunk **RAchunk, Transcriptom
     for (int i = 0; i < 5; i++) {
         componentSizeHist[i] = 0;
     }
+    umiCorrectionHash = nullptr;
     
     if (featureType>=0) {//otherwise we do not need these arrays - e.g. with --runMode soloCellFiltering 
         readFeatSum = new SoloReadFeature(featureType,P,-1);
@@ -120,6 +121,10 @@ SoloFeature::~SoloFeature()
         rCBn = nullptr;
     }
 
+    if (umiCorrectionHash != nullptr) {
+        kh_destroy(cg_agg, umiCorrectionHash);
+        umiCorrectionHash = nullptr;
+    }
     if (readFeatSum != nullptr) {
         delete readFeatSum;
         readFeatSum = nullptr;
@@ -431,7 +436,10 @@ void SoloFeature::clearLarge()
     // Clear UMI correction data structures
     cellsAllowSet.clear();
     assignmentsMap.clear();
-    umiGroupHistograms.clear();
+    if (umiCorrectionHash) {
+        kh_destroy(cg_agg, umiCorrectionHash);
+        umiCorrectionHash = nullptr;
+    }
     
 #ifdef DEBUG_CB_UB_PARITY
     // Cleanup parity validation resources

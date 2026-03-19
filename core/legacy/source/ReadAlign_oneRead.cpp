@@ -312,22 +312,25 @@ int ReadAlign::oneRead() {//process one read: load, map, write
         // A/C/G/T characters; moving this call after convertNucleotidesToNumbers
         // would silently break classification.
         hashScreenDecision_ = FlexHashScreenCache::instance().classifyRead(Read0[0], readLengthOriginal[0], hashScreenSampleIdx);
-        if (hashScreenDecision_.action == FlexHashScreenDecision::Keep ||
-            hashScreenDecision_.action == FlexHashScreenDecision::Deny) {
+        if (hashScreenDecision_.action == FlexHashScreenDecision::Keep) {
             soloRead->readFlagReset();
             SoloReadFeature *geneFeat = soloRead->readFeat[P.pSolo.featureInd[SoloFeatureTypes::Gene]];
-            bool handled = false;
-            if (hashScreenDecision_.action == FlexHashScreenDecision::Keep) {
-                handled = record_flex_hash_screen_keep(geneFeat, *soloRead->readBar, iReadAll,
-                                                      hashScreenDecision_.geneIdx15,
-                                                      hashScreenDecision_.cacheClass);
-            } else {
-                record_flex_hash_screen_deny(geneFeat, *soloRead->readBar, iReadAll, "NEG_PROBE_AMBIG");
-                handled = true;
-            }
+            bool handled = record_flex_hash_screen_keep(geneFeat, *soloRead->readBar, iReadAll,
+                                                        hashScreenDecision_.geneIdx15,
+                                                        hashScreenDecision_.cacheClass);
             if (handled) {
+                statsRA.hashScreenKeep++;
                 return 0;
             }
+            statsRA.hashScreenPass++;
+        } else if (hashScreenDecision_.action == FlexHashScreenDecision::Deny) {
+            statsRA.hashScreenDeny++;
+            soloRead->readFlagReset();
+            SoloReadFeature *geneFeat = soloRead->readFeat[P.pSolo.featureInd[SoloFeatureTypes::Gene]];
+            record_flex_hash_screen_deny(geneFeat, *soloRead->readBar, iReadAll, "NEG_PROBE_AMBIG");
+            return 0;
+        } else {
+            statsRA.hashScreenPass++;
         }
     }
 

@@ -53,6 +53,11 @@ class Stats {
         uint64 crGeneFullStillMultiExonic;             // reads still multi-gene after filter
         uint64 crGeneFullCrossAlignMultiGene;          // reads multi-gene from different alignments (not filterable)
 
+        // Flex hash screen counters
+        uint64 hashScreenKeep;
+        uint64 hashScreenDeny;
+        uint64 hashScreenPass;
+
         // Flex stage timing instrumentation
         uint64 sampleDetectPreAlignCalls;
         uint64 sampleDetectPreAlignNs;

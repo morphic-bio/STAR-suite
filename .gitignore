@@ -138,5 +138,10 @@ __pycache__/
 core/features/process_features/tests/fixtures/assignbarcodes_baseline/actual/
 /tools/cr_multi/__pycache__/
 
+## Clique replay tool binaries
+flex/tools/clique_replay/clique_replay
+flex/tools/clique_replay/test_clique
+flex/tools/clique_replay/test_fanout
+
 ## Codespaces demo cache
 /.codespaces-demo/
