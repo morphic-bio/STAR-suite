@@ -1,6 +1,6 @@
 # Handoff: Flex Full-Scale Benchmark (2026-03-19)
 
-## Status: COMPLETE — instrumentation added, all three runs done
+## Status: COMPLETE — Solo phase optimized (5.1x), mapping phase is next target
 
 ## Summary
 
@@ -185,20 +185,120 @@ Combined across the four biological samples:
 This is good enough to treat the occupancy fix as validated against CR9 on the
 filtered-cell surface.
 
+## Solo Phase Optimization (P0–P4) — COMPLETE
+
+After the hash screen work, the post-map Solo phase was the next bottleneck at
+~16 minutes. Five optimization phases were implemented and validated, reducing
+it to 3 minutes (5.1x speedup).
+
+Full implementation details: `docs/RUNBOOK_FLEX_OPTIMIZATION_CHOKEPOINTS_20260319.md`
+
+### Summary of changes
+
+| Phase | What | Impact |
+|-------|------|--------|
+| **P0** | Clique replay harness + 14 unit/integration tests | Test infrastructure for safe iteration |
+| **P1** | Eliminate string↔uint32_t round-trips in UMI correction | −4m 35s (750M+ string allocs removed) |
+| **P2** | Parallelize clique group processing (OpenMP, 32 threads) | Phase 2: 6.4s (was serial) |
+| **P4** | Flatten hash collapse grouping (dead code removal + flat sort) | 18.0s (was 3m 24s with nested maps) |
+| **Mem** | soloFlexMinimalMemory auto, RAchunk cleanup, flat khash | −28 GB peak RSS |
+
+### Bug fixes included
+
+- **break bug**: correction fan-out now updates all tag variants (was stopping at first)
+- **soloFlexMinimalMemory override**: explicit `yes`/`no` now respected (`auto` default)
+- **umisBeforeTotal inflation**: uses unique UMI counts, not raw entry counts
+
+### Final benchmark numbers (P2+P4 run)
+
+| Metric | Original (hash_on) | Final (P1+P2+P4) | Delta |
+|--------|--------------------:|------------------:|------:|
+| **Total wall** | 52m 23s | **39m 01s** | **−26%** |
+| **Solo phase** | 15m 58s | **3m 06s** | **−81%** (5.1x) |
+| **Peak RSS** | 118 GB | **86 GB** | **−27%** |
+| Mapping phase | ~36m | ~36m | unchanged |
+
+### Phase timers (full scale, 254M entries)
+
+```
+Clique correction:
+  phase 1 (extract+sort):    18.9s   254M entries
+  phase 2 (group BFS):        6.4s   93.7M groups, 32 threads
+  phase 3 (apply):             4.8s
+  total:                      30.3s
+
+Hash collapse grouping:
+  extract:                     3.4s   235M entries
+  sort:                       13.1s   100M triplet keys
+  group:                       1.5s
+  total:                      18.0s
+
+FlexFilter (16 tags):         ~27s
+MEX build+write:              ~10s
+```
+
+### Correctness validation
+
+- Raw matrix: 18082 × 1882155, 99,963,085 entries — **zero structural diffs**
+- 1005 count-only diffs (0.001%) from non-deterministic parallel tie-breaking
+- Total UMI delta: −376 out of 228M (0.00016%)
+- reads_before/after: identical at 1,673,223,131
+
+### Key files changed
+
+| File | What |
+|------|------|
+| `flex/source/SoloFeature_umiCorrection.cpp` | Flat extraction, parallel clique BFS, dump mode |
+| `flex/source/SoloFeature_collapseUMI_fromHash.cpp` | Flat sort collapse, dead code removal |
+| `flex/source/UMICorrector.h` / `.cpp` | Packed uint32_t UMIs throughout |
+| `core/legacy/source/SoloFeature.h` | umiCorrectionHash, removed dead structs |
+| `core/legacy/source/ParametersSolo.h` / `.cpp` | soloFlexMinimalMemory auto default |
+| `core/legacy/source/STAR.cpp` | RAchunk conditional cleanup |
+| `flex/tools/clique_replay/` | Replay tool, 12 unit tests, 2 integration tests |
+
+### Benchmark run reference
+
+| Run | Path |
+|-----|------|
+| Legacy (hash-off) | `/mnt/pikachu/benchmark_flex_full_legacy_20260319_091414/` |
+| Hash_on (pre-P1 baseline) | `/mnt/pikachu/benchmark_flex_full_hashon_20260319_112421/` |
+| P1+memfix (serial packed) | `/mnt/pikachu/benchmark_flex_full_memfix_20260319_183507/` |
+| **P1+P2+P4 (current)** | **`/mnt/pikachu/benchmark_flex_full_p2p4_20260319_222701/`** |
+| CR9 | `/mnt/pikachu/benchmark_cr9_flex_full/` |
+
+## Current Pipeline Timing Breakdown (39m total)
+
+```
+Genome load:          ~12s   (44 GB index from disk)
+Mapping (32 threads): ~35m   ← 92% of total wall time ← NEXT TARGET
+  Hash screen:        ~6m 20s cumulative thread-time (380s pre-align + 71s output)
+  Core alignment:     ~28m    cumulative 28,120s across 32 threads → ~14.7m wall
+  I/O + serialize:    remainder (chunk reads, mutex waits)
+Solo phase:           ~3m    (clique 30s + collapse 18s + FlexFilter 27s + MEX 10s)
+Cleanup:              ~1m
+```
+
+The mapping phase at ~35 minutes is now **92% of total wall time** and is the
+clear next optimization target. See:
+`docs/HANDOFF_FLEX_MAPPING_PHASE_OPTIMIZATION_20260319.md`
+
 ## What Remains
 
-### 1. Integrated full rerun on patched `STAR`
-The CR9 comparison above was done on the patched `run_flexfilter_mex` replay of
-the benchmark raw MEX. The integrated full `STAR` benchmark should still be
-rerun once on the patched binary so the benchmark directory itself reflects the
-fixed occupancy behavior.
+### 1. Mapping phase optimization (next focus)
+The mapping phase is ~35 min and dominates the 39-minute total. A dedicated
+handoff has been created: `docs/HANDOFF_FLEX_MAPPING_PHASE_OPTIMIZATION_20260319.md`
 
-### 2. Merge instrumentation to master
-The Stats changes are on the `benchmark-flex` branch and should be squash-merged
-to `master`. These are leaf changes (Stats only, no shared files) so squash merge
-is safe per the safe merge policy.
+### 2. P3: Skip readInfo array allocation (low priority)
+The readInfo array is already skipped via `soloFlexMinimalMemory=auto`. A more
+targeted gate (skip when `--outSAMtype None` and inline-hash mode) could save
+the ~2m43s allocation for non-minimal-memory runs, but this is no longer on the
+critical path.
 
-### 3. Cache coverage improvement (optional)
+### 3. P5: MEX writer buffering (low priority)
+Combined `buildInlineMatrixFromHash` (7s) + `writeMexFromInlineHashDedup` (6s) =
+13s total. Only worth pursuing if sub-minute Solo is a goal.
+
+### 4. Cache coverage improvement (optional)
 The 14.8% pass-through could be reduced by building the cache from a larger
 pilot (e.g., 1M reads instead of 100K). This is an optimization, not a
 correctness issue.
