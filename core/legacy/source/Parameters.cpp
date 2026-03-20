@@ -2639,11 +2639,8 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
             exitWithError("EXITING: --runMode hashCacheGenerate requires a non-empty --soloCBwhitelist\n", std::cerr,
                           inOut->logMain, EXIT_CODE_PARAMETER, *this);
         }
-        if (readNmates != 2) {
-            exitWithError("EXITING: --runMode hashCacheGenerate requires paired-end read layout (two mates in --readFilesIn "
-                          "or use default /dev/null mates)\n",
-                          std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
-        }
+        // Synthetic reads are PE (R2=90bp, R1=CB+UMI); force readNmates=2 regardless of --readFilesIn.
+        readNmates = 2;
     }
 
     // Derive Y/noY FASTQ output paths (after Solo init so readNmates is final)

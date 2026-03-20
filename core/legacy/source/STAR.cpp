@@ -928,6 +928,8 @@ int main(int argInN, char *argIn[])
                    << "SOLUTION: use e.g. --soloFeatures Gene (and other required Flex/Solo parameters).\n";
             exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
         }
+        // Synthetic reads are PE (R2=90bp, R1=CB+UMI); force readNmates=2 so ReadAlign accepts them.
+        P.readNmates = 2;
         runFlexHashCacheGenerate(P, genomeMain, transcriptomeMain, libem_transcriptome.get());
         sysRemoveDir(P.outFileTmp);
         P.cleanupParInfoForExit();
