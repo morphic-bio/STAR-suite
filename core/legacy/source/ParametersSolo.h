@@ -319,6 +319,11 @@ public:
     bool hashScreenEnabled = false;
     string hashScreenFile;
 
+    // Internal hash cache generation (--runMode hashCacheGenerate)
+    string hashCacheOutput;       // --hashCacheOutput path (FH01SEQ1 binary)
+    string hashCacheTiers = "H0,H1,H2"; // comma-separated: H0,H1,H2
+    uint32_t hashCacheParentLimit = 0; // 0 = all probes; else cap probe count (testing)
+
     // ReadId tracking for sorted BAM CB/UB tag injection (Option C)
     // When enabled, a parallel hash (readid_cbumi) tracks readId -> (cbIdx, umi24, status)
     // This allows packedReadInfo to be populated after inline-hash collapse

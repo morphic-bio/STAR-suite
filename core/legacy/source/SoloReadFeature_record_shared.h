@@ -43,4 +43,20 @@ void record_flex(SoloReadFeature *soloReadFeat, SoloReadBarcode &soloBar, uint n
 bool record_flex_hash_screen_keep(SoloReadFeature *soloReadFeat, SoloReadBarcode &soloBar, uint64 iRead, uint16_t geneIdx15, uint8_t cacheClass);
 void record_flex_hash_screen_deny(SoloReadFeature *soloReadFeat, SoloReadBarcode &soloBar, uint64 iRead, const char *reason);
 
+// Same probe/genomic candidate build + resolveGeneFromCandidates as outputReadCB_flex (Gene*).
+// Used by hash-cache synthetic validation and by outputReadCB_flex to avoid drift.
+struct FlexGeneInlineResolveResult {
+    uint16_t geneIdx15 = 0;
+    /** Meaningful only when geneIdx15 != 0; matches winning candidate isGenomic. */
+    bool winningIsGenomic = false;
+    bool hasWinningCandidate = false;
+};
+FlexGeneInlineResolveResult flexResolveGeneIdx15_inlineResolver(
+    SoloReadFeature *soloReadFeat,
+    SoloReadBarcode &soloBar,
+    const ReadSoloFeatures &reFe,
+    const ReadAnnotations &readAnnot,
+    int32_t featureType,
+    uint64_t iRead);
+
 #endif

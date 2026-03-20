@@ -11,7 +11,7 @@ UMICorrectionResult UMICorrector::correctClique(const std::vector<UMICount>& cou
     }
     
     // Build UMI histogram — input UMIs are already packed uint32_t.
-    // Multiple entries with the same umi24 (different tagIdx) are aggregated.
+    // Duplicate packed UMIs in the input are aggregated before correction.
     std::unordered_map<uint32_t, uint32_t> hist;
     hist.reserve(counts.size());
     for (const auto& count : counts) {
@@ -61,11 +61,15 @@ UMICorrectionResult UMICorrector::correctClique(const std::vector<UMICount>& cou
         // Check component size cap
         if (componentSize > params.maxComponentSize) {
             result.componentsCapped++;
-            // Skip this component (don't merge)
+            // Reject oversized components as ambiguous: do not merge, but do
+            // mark the full component visited so it is not fragmented into
+            // multiple pseudo-components downstream.
             continue;
         }
-        
-        // Find winner (highest count UMI) and second-best
+
+        // Find winner (highest count UMI) and second-best. If the top count is
+        // tied, reject correction for this component instead of choosing an
+        // arbitrary representative.
         uint32_t winner = findWinnerUmi(componentUmis, componentCounts, componentSize);
         if (winner == UINT32_MAX) continue;
         
@@ -144,7 +148,7 @@ void UMICorrector::findConnectedComponent(uint32_t startUmi,
     
     std::vector<uint32_t> neighbors;
     
-    while (!queue.empty() && componentSize < maxSize) {
+    while (!queue.empty()) {
         uint32_t currentUmi = queue.front();
         queue.pop();
         
@@ -162,17 +166,18 @@ void UMICorrector::findConnectedComponent(uint32_t startUmi,
         // Mark as visited
         visited.insert(currentUmi);
         
-        // Add to component
-        componentUmis.push_back(currentUmi);
-        componentCounts.push_back(histIt->second);
         componentSize++;
+        if (componentSize <= maxSize) {
+            componentUmis.push_back(currentUmi);
+            componentCounts.push_back(histIt->second);
+        }
         
-        // Find neighbors and enqueue them
+        // Find neighbors and enqueue them. Continue traversing even after the
+        // component exceeds maxSize so the whole connected component is marked
+        // visited and later rejected as a unit.
         findNeighbors(currentUmi, neighbors, hist, visited);
         for (uint32_t neighbor : neighbors) {
-            if (componentSize < maxSize) {
-                queue.push(neighbor);
-            }
+            queue.push(neighbor);
         }
     }
 }
@@ -184,14 +189,18 @@ uint32_t UMICorrector::findWinnerUmi(const std::vector<uint32_t>& componentUmis,
     
     uint32_t winner = componentUmis[0];
     uint32_t maxCount = componentCounts[0];
+    bool topCountIsUnique = true;
     
     for (int i = 1; i < componentSize; i++) {
         if (componentCounts[i] > maxCount) {
             maxCount = componentCounts[i];
             winner = componentUmis[i];
+            topCountIsUnique = true;
+        } else if (componentCounts[i] == maxCount) {
+            topCountIsUnique = false;
         }
     }
     
+    if (!topCountIsUnique) return UINT32_MAX;
     return winner;
 }
-

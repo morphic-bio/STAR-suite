@@ -2,9 +2,20 @@
 import argparse
 import csv
 import gzip
+import hashlib
 import os
+import struct
 import sys
 from collections import defaultdict
+
+# Must match core/legacy/source/FlexHashScreen.cpp
+CACHE_MAGIC = b"FH01SEQ1"
+CACHE_VERSION_SAMPLE_AWARE = 2
+CACHE_KMER_LENGTH = 50
+CACHE_RECORD_SIZE = 24
+NEG_PROBE_AMBIG = 1
+# Hash-screen cache class: H2 KEEP (2-substitution) — FlexHashScreen treats like H1 for non-exact path
+CACHE_CLASS_H2_KEEP = 3
 
 
 def read_probe_list_index(path):
@@ -203,6 +214,109 @@ def variant_records(seq):
             var = seq_chars[:]
             var[pos] = alt
             yield (1, pos, alt, "".join(var))
+
+
+def encode_window_50(seq):
+    """Pack 50 bp into (seq_lo, seq_hi) matching FlexHashScreenCache::encodeWindow."""
+    if len(seq) != CACHE_KMER_LENGTH:
+        raise ValueError(f"expected {CACHE_KMER_LENGTH} bp, got {len(seq)}")
+    mp = {"A": 0, "C": 1, "G": 2, "T": 3}
+    lo = 0
+    hi = 0
+    for c in seq.upper():
+        if c not in mp:
+            raise ValueError(f"invalid base {c!r}")
+        code = mp[c]
+        hi = ((hi << 2) | (lo >> 62)) & 0xFFFFFFFFFFFFFFFF
+        lo = ((lo << 2) | code) & 0xFFFFFFFFFFFFFFFF
+    return lo, hi
+
+
+def decode_window_50(seq_lo, seq_hi):
+    """Unpack (seq_lo, seq_hi) to 50 bp string."""
+    inv = "ACGT"
+    combined = (seq_hi << 64) | seq_lo
+    out = []
+    for i in range(CACHE_KMER_LENGTH):
+        shift = 98 - 2 * i
+        code = (combined >> shift) & 3
+        out.append(inv[code])
+    return "".join(out)
+
+
+def load_binary_hash_cache(path):
+    """Read FH01SEQ1 cache; return list of dicts with seq_lo, seq_hi, sequence, gene_idx15, cache_class, negative_code, sample_idx."""
+    with open(path, "rb") as handle:
+        header = handle.read(24)
+        if len(header) != 24:
+            raise SystemExit(f"truncated cache header: {path}")
+        magic, version, kmer_len, rec_size, nrec = struct.unpack("<8sHHIQ", header)
+        if magic != CACHE_MAGIC:
+            raise SystemExit(f"bad magic in {path}")
+        if version not in (1, CACHE_VERSION_SAMPLE_AWARE) or kmer_len != CACHE_KMER_LENGTH or rec_size != CACHE_RECORD_SIZE:
+            raise SystemExit(f"unsupported cache format version={version} kmer={kmer_len} rec={rec_size}")
+        out = []
+        for _ in range(int(nrec)):
+            raw = handle.read(24)
+            if len(raw) != 24:
+                raise SystemExit(f"truncated cache body: {path}")
+            seq_lo, seq_hi, gene15, cclass, negcode, res = struct.unpack("<QQIBBH", raw)
+            sample_idx = res if version >= CACHE_VERSION_SAMPLE_AWARE else 0
+            seq = decode_window_50(seq_lo, seq_hi)
+            out.append(
+                {
+                    "seq_lo": seq_lo,
+                    "seq_hi": seq_hi,
+                    "sequence": seq,
+                    "resolved_gene_idx15": gene15,
+                    "cache_class": cclass,
+                    "negative_code": negcode,
+                    "sample_idx": sample_idx,
+                }
+            )
+        return out
+
+
+def write_binary_hash_cache(path, records):
+    """Write FH01SEQ1 v2. records: iterable of (seq_lo, seq_hi, gene_idx15, cache_class, negative_code, sample_idx)."""
+    recs = list(records)
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, "wb") as handle:
+        handle.write(
+            struct.pack(
+                "<8sHHIQ",
+                CACHE_MAGIC,
+                CACHE_VERSION_SAMPLE_AWARE,
+                CACHE_KMER_LENGTH,
+                CACHE_RECORD_SIZE,
+                len(recs),
+            )
+        )
+        for seq_lo, seq_hi, gene15, cclass, negcode, sample_idx in recs:
+            handle.write(struct.pack("<QQIBBH", seq_lo, seq_hi, gene15, cclass, negcode, sample_idx & 0xFFFF))
+
+
+def variant_records_h2(seq):
+    """All 2-substitution variants (Hamming distance 2). Yields (i, j, alt_i, alt_j, variant_seq)."""
+    bases = "ACGT"
+    chars = list(seq.upper())
+    n = len(chars)
+    if n != CACHE_KMER_LENGTH:
+        raise ValueError(f"H2 variants need length {CACHE_KMER_LENGTH}")
+    for i in range(n):
+        ref_i = chars[i]
+        for j in range(i + 1, n):
+            ref_j = chars[j]
+            for alt_i in bases:
+                if alt_i == ref_i:
+                    continue
+                for alt_j in bases:
+                    if alt_j == ref_j:
+                        continue
+                    var = chars[:]
+                    var[i] = alt_i
+                    var[j] = alt_j
+                    yield (i, j, alt_i, alt_j, "".join(var))
 
 
 def open_maybe_gzip(path):
@@ -536,6 +650,307 @@ def mex_barcode_keys(row):
     if cell_barcode:
         keys.append(cell_barcode)
     return keys
+
+
+def cmd_h2_make_synth_fastq(args):
+    """Generate R1/R2 FASTQ for all H2 variants of unique H0 sequences from a binary hash cache."""
+    _, idx_to_gene = read_probe_list_index(args.probe_list)
+    cache_rows = load_binary_hash_cache(args.binary_cache)
+    h0_by_seq = {}
+    for row in cache_rows:
+        if row["cache_class"] != 0:
+            continue
+        key = (row["seq_lo"], row["seq_hi"])
+        if key not in h0_by_seq:
+            gid = idx_to_gene.get(row["resolved_gene_idx15"], "")
+            h0_by_seq[key] = {
+                "sequence": row["sequence"],
+                "gene_idx15": row["resolved_gene_idx15"],
+                "gene_id": gid,
+                "probe_id": f"gene{row['resolved_gene_idx15']}",
+            }
+    parents = list(h0_by_seq.values())
+    if args.parent_limit is not None:
+        parents = parents[: args.parent_limit]
+    num_shards = max(1, args.num_shards)
+    shard_id = args.shard_id
+    if shard_id < 0 or shard_id >= num_shards:
+        raise SystemExit(f"shard_id must be in [0, {num_shards})")
+
+    selected = []
+    for p in parents:
+        h = int(hashlib.md5(p["sequence"].encode()).hexdigest(), 16) % num_shards
+        if h == shard_id:
+            selected.append(p)
+
+    variant_tasks = []
+    for probe in selected:
+        for i, j, alt_i, alt_j, var_seq in variant_records_h2(probe["sequence"]):
+            variant_tasks.append((probe, i, j, alt_i, alt_j, var_seq))
+
+    n_records = len(variant_tasks)
+    if n_records == 0:
+        raise SystemExit("no H2 variants for this shard/parent set")
+    max_cb = args.max_reads_per_shard
+    if n_records > max_cb:
+        raise SystemExit(
+            f"shard has {n_records} variants but max_reads_per_shard={max_cb} (whitelist size). "
+            f"Increase --num-shards (>= {((len(parents) * 11025 + max_cb - 1) // max_cb)}) or --parent-limit."
+        )
+
+    barcodes = read_whitelist_barcodes(args.cb_whitelist, n_records)
+    umi = args.synthetic_umi
+    if len(umi) != 12:
+        raise SystemExit(f"expected 12 bp synthetic UMI, got {len(umi)}")
+    sample_tag = args.sample_tag.upper() if args.sample_tag else ""
+    sample_label = ""
+    if args.sample_whitelist:
+        file_tag, file_label = first_sample_tag(args.sample_whitelist)
+        sample_label = file_label
+        if not sample_tag:
+            sample_tag = file_tag.upper()
+    use_real_flex_layout = bool(sample_tag)
+    if use_real_flex_layout and len(sample_tag) != 8:
+        raise SystemExit(f"expected 8 bp sample tag, got {len(sample_tag)}")
+    if use_real_flex_layout:
+        if args.probe_offset + CACHE_KMER_LENGTH > args.read_length:
+            raise SystemExit("probe placement exceeds read length")
+        if args.sample_offset + 8 > args.read_length:
+            raise SystemExit("sample tag placement exceeds read length")
+        fill_base = args.fill_base.upper()
+        if fill_base not in {"A", "C", "G", "T"}:
+            raise SystemExit(f"fill base must be A/C/G/T, got {fill_base}")
+
+    os.makedirs(os.path.dirname(args.r1_fastq), exist_ok=True)
+    os.makedirs(os.path.dirname(args.r2_fastq), exist_ok=True)
+    manifest_rows = []
+    record_id = 1
+    with open_maybe_gzip(args.r1_fastq) as r1_handle, open_maybe_gzip(args.r2_fastq) as r2_handle:
+        for probe, i, j, alt_i, alt_j, var_seq in variant_tasks:
+            qname = f"H02|{record_id:09d}"
+            note = f"p{i:02d}{alt_i}_p{j:02d}{alt_j}"
+            barcode = barcodes[record_id - 1]
+            r1_seq = barcode + umi
+            if use_real_flex_layout:
+                read_chars = [fill_base] * args.read_length
+                for idx, base in enumerate(var_seq):
+                    read_chars[args.probe_offset + idx] = base
+                for idx, base in enumerate(sample_tag):
+                    read_chars[args.sample_offset + idx] = base
+                read_seq = "".join(read_chars)
+            else:
+                read_seq = args.left_flank + var_seq + args.right_flank
+            r1_qual = "I" * len(r1_seq)
+            r2_qual = "I" * len(read_seq)
+            r1_handle.write(f"@{qname}\n{r1_seq}\n+\n{r1_qual}\n")
+            r2_handle.write(f"@{qname}\n{read_seq}\n+\n{r2_qual}\n")
+            manifest_rows.append(
+                {
+                    "qname": qname,
+                    "core_sequence": var_seq,
+                    "read_sequence": read_seq,
+                    "cell_barcode": barcode,
+                    "sample_tag": sample_tag,
+                    "sample_label": sample_label,
+                    "distance": 2,
+                    "mut_pos": i,
+                    "mut_alt": alt_i,
+                    "mut_pos2": j,
+                    "mut_alt2": alt_j,
+                    "variant_note": note,
+                    "gene_id": probe["gene_id"],
+                    "gene_name": probe["gene_id"],
+                    "gene_idx15": probe["gene_idx15"],
+                    "probe_id": probe["probe_id"],
+                }
+            )
+            record_id += 1
+
+    with open(args.manifest_tsv, "w", encoding="utf-8", newline="") as handle:
+        fieldnames = [
+            "qname",
+            "core_sequence",
+            "read_sequence",
+            "cell_barcode",
+            "sample_tag",
+            "sample_label",
+            "distance",
+            "mut_pos",
+            "mut_alt",
+            "mut_pos2",
+            "mut_alt2",
+            "variant_note",
+            "gene_id",
+            "gene_name",
+            "gene_idx15",
+            "probe_id",
+        ]
+        writer = csv.DictWriter(handle, delimiter="\t", fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(manifest_rows)
+
+    print(
+        f"h2-make-synth-fastq: shard {shard_id}/{num_shards} wrote {n_records} reads "
+        f"from {len(selected)} parent probes",
+        file=sys.stderr,
+    )
+
+
+def cmd_h2_build_cache_from_mex(args):
+    """Same as build-cache-from-mex, but KEEP rows use cache_class=3 (H2) instead of min(distance)."""
+    gene_to_idx, _ = read_probe_list_index(args.probe_list)
+    manifest_rows = []
+    by_qname = {}
+    with open(args.manifest_tsv, "r", encoding="utf-8") as handle:
+        reader = csv.DictReader(handle, delimiter="\t")
+        for row in reader:
+            row["distance"] = int(row["distance"])
+            row["gene_idx15"] = int(row["gene_idx15"])
+            row["mut_pos"] = int(row["mut_pos"])
+            manifest_rows.append(row)
+            by_qname[row["qname"]] = row
+
+    barcodes = load_barcode_order(args.barcodes_tsv)
+    features = load_features_order(args.features_tsv)
+    col_entries = load_mtx_entries(args.matrix_mtx)
+    barcode_to_col = {barcode: idx for idx, barcode in enumerate(barcodes, start=1)}
+
+    qname_rows = []
+    by_sequence = defaultdict(list)
+    for row in manifest_rows:
+        entries = []
+        for barcode_key in mex_barcode_keys(row):
+            col_idx = barcode_to_col.get(barcode_key)
+            if col_idx is not None:
+                entries = col_entries.get(col_idx, [])
+                break
+        nonzero = [(features[r - 1], value) for r, value in entries if value > 0]
+        if len(nonzero) == 1 and nonzero[0][1] == 1:
+            resolved_gene_id = nonzero[0][0]
+            resolved_gene_idx15 = gene_to_idx.get(resolved_gene_id, 0)
+            state = (
+                "KEEP"
+                if resolved_gene_idx15 > 0 and resolved_gene_id == row["gene_id"]
+                else "DENY"
+            )
+        else:
+            resolved_gene_id = ""
+            resolved_gene_idx15 = 0
+            state = "DENY"
+        qname_row = {
+            "qname": row["qname"],
+            "sequence": row["core_sequence"],
+            "input_distance": row["distance"],
+            "input_gene_id": row["gene_id"],
+            "input_gene_idx15": row["gene_idx15"],
+            "probe_id": row["probe_id"],
+            "state": state,
+            "resolved_gene_idx15": resolved_gene_idx15,
+            "resolved_gene_id": resolved_gene_id,
+            "reason": "SYNTH_MEX_H2",
+        }
+        qname_rows.append(qname_row)
+        by_sequence[row["core_sequence"]].append(qname_row)
+
+    with open(args.qname_cache_tsv, "w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(
+            handle,
+            delimiter="\t",
+            fieldnames=[
+                "qname",
+                "sequence",
+                "input_distance",
+                "input_gene_id",
+                "input_gene_idx15",
+                "probe_id",
+                "state",
+                "resolved_gene_idx15",
+                "resolved_gene_id",
+                "reason",
+            ],
+        )
+        writer.writeheader()
+        writer.writerows(qname_rows)
+
+    sequence_rows = []
+    for sequence, rows in by_sequence.items():
+        keep_genes = {row["resolved_gene_idx15"] for row in rows if row["state"] == "KEEP"}
+        has_deny = any(row["state"] != "KEEP" for row in rows)
+        if has_deny or len(keep_genes) != 1:
+            cache_class = 2
+            resolved_gene_idx15 = 0
+            neg_code = NEG_PROBE_AMBIG
+        else:
+            cache_class = CACHE_CLASS_H2_KEEP
+            resolved_gene_idx15 = next(iter(keep_genes))
+            neg_code = 0
+        source_gene_ids = sorted({row["input_gene_id"] for row in rows})
+        sequence_rows.append(
+            {
+                "sequence": sequence,
+                "cache_class": cache_class,
+                "negative_code": neg_code,
+                "resolved_gene_idx15": resolved_gene_idx15,
+                "source_gene_ids": ",".join(source_gene_ids),
+                "n_records": len(rows),
+                "n_keep": sum(1 for row in rows if row["state"] == "KEEP"),
+                "n_deny": sum(1 for row in rows if row["state"] != "KEEP"),
+            }
+        )
+
+    sequence_rows.sort(key=lambda row: (row["cache_class"], row["resolved_gene_idx15"], row["sequence"]))
+    with open(args.sequence_cache_tsv, "w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(
+            handle,
+            delimiter="\t",
+            fieldnames=[
+                "sequence",
+                "cache_class",
+                "negative_code",
+                "resolved_gene_idx15",
+                "source_gene_ids",
+                "n_records",
+                "n_keep",
+                "n_deny",
+            ],
+        )
+        writer.writeheader()
+        writer.writerows(sequence_rows)
+
+
+def cmd_h2_write_binary_cache(args):
+    """Write FH01SEQ1 from sequence_cache TSV (optionally filter to KEEP rows only)."""
+    rows = []
+    with open(args.sequence_cache_tsv, "r", encoding="utf-8") as handle:
+        reader = csv.DictReader(handle, delimiter="\t")
+        for row in reader:
+            cclass = int(row["cache_class"])
+            if args.min_class is not None and cclass < args.min_class:
+                continue
+            if args.max_class is not None and cclass > args.max_class:
+                continue
+            if args.keep_only and cclass != CACHE_CLASS_H2_KEEP:
+                continue
+            rows.append(row)
+
+    recs = []
+    sample_idx = args.sample_idx
+    neg_default = 0
+    for row in rows:
+        seq = row["sequence"]
+        if len(seq) != CACHE_KMER_LENGTH:
+            raise SystemExit(f"bad sequence length {len(seq)}")
+        lo, hi = encode_window_50(seq)
+        gene15 = int(row["resolved_gene_idx15"])
+        cclass = int(row["cache_class"])
+        negcode = int(row.get("negative_code", neg_default))
+        if cclass == 2 and gene15 == 0:
+            negcode = NEG_PROBE_AMBIG
+        recs.append((lo, hi, gene15, cclass, negcode, sample_idx))
+
+    recs.sort(key=lambda r: (r[1], r[0], r[5]))
+    write_binary_hash_cache(args.output_bin, recs)
+    print(f"wrote {len(recs)} records to {args.output_bin}", file=sys.stderr)
 
 
 def cmd_build_cache_from_mex(args):
@@ -1215,6 +1630,52 @@ def build_parser():
     mex_cache_p.add_argument("--qname-cache-tsv", required=True)
     mex_cache_p.add_argument("--sequence-cache-tsv", required=True)
     mex_cache_p.set_defaults(func=cmd_build_cache_from_mex)
+
+    h2_fastq_p = sub.add_parser("h2-make-synth-fastq")
+    h2_fastq_p.add_argument("--binary-cache", required=True, help="FH01SEQ1 cache; H0 rows (class 0) seed H2 variants")
+    h2_fastq_p.add_argument("--probe-list", required=True)
+    h2_fastq_p.add_argument("--cb-whitelist", required=True)
+    h2_fastq_p.add_argument("--sample-whitelist")
+    h2_fastq_p.add_argument("--sample-tag")
+    h2_fastq_p.add_argument("--synthetic-umi", default="AAAAAAAAAAAA")
+    h2_fastq_p.add_argument("--probe-offset", type=int, default=0)
+    h2_fastq_p.add_argument("--sample-offset", type=int, default=68)
+    h2_fastq_p.add_argument("--read-length", type=int, default=90)
+    h2_fastq_p.add_argument("--fill-base", default="A")
+    h2_fastq_p.add_argument("--left-flank", default="ACGT")
+    h2_fastq_p.add_argument("--right-flank", default="TGCA")
+    h2_fastq_p.add_argument("--num-shards", type=int, default=1)
+    h2_fastq_p.add_argument("--shard-id", type=int, default=0)
+    h2_fastq_p.add_argument(
+        "--max-reads-per-shard",
+        type=int,
+        default=600_000,
+        help="Must be <= CB whitelist size; raise num-shards if hit",
+    )
+    h2_fastq_p.add_argument("--parent-limit", type=int, default=None, help="Cap unique H0 sequences (testing)")
+    h2_fastq_p.add_argument("--r1-fastq", required=True)
+    h2_fastq_p.add_argument("--r2-fastq", required=True)
+    h2_fastq_p.add_argument("--manifest-tsv", required=True)
+    h2_fastq_p.set_defaults(func=cmd_h2_make_synth_fastq)
+
+    h2_mex_p = sub.add_parser("h2-build-cache-from-mex")
+    h2_mex_p.add_argument("--manifest-tsv", required=True)
+    h2_mex_p.add_argument("--probe-list", required=True)
+    h2_mex_p.add_argument("--barcodes-tsv", required=True)
+    h2_mex_p.add_argument("--features-tsv", required=True)
+    h2_mex_p.add_argument("--matrix-mtx", required=True)
+    h2_mex_p.add_argument("--qname-cache-tsv", required=True)
+    h2_mex_p.add_argument("--sequence-cache-tsv", required=True)
+    h2_mex_p.set_defaults(func=cmd_h2_build_cache_from_mex)
+
+    h2_bin_p = sub.add_parser("h2-write-binary-cache")
+    h2_bin_p.add_argument("--sequence-cache-tsv", required=True)
+    h2_bin_p.add_argument("--output-bin", required=True)
+    h2_bin_p.add_argument("--sample-idx", type=int, default=0)
+    h2_bin_p.add_argument("--keep-only", action="store_true", help="Only class-3 (H2 KEEP) rows")
+    h2_bin_p.add_argument("--min-class", type=int, default=None)
+    h2_bin_p.add_argument("--max-class", type=int, default=None)
+    h2_bin_p.set_defaults(func=cmd_h2_write_binary_cache)
 
     scan_p = sub.add_parser("scan-fastq")
     scan_p.add_argument("--sequence-cache-tsv", required=True)

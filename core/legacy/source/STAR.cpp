@@ -35,6 +35,7 @@
 #include "samHeaders.h"
 #include "systemFunctions.h"
 #include "ProbeListIndex.h"
+#include "FlexHashCacheGenerate.h"
 #include "TranscriptQuantEC.h"
 #include "LibFormatDetection.h"
 #include "TrimQcOutput.h"
@@ -416,7 +417,7 @@ int main(int argInN, char *argIn[])
                           << flush;
 
     // runMode
-    if (P.runMode == "alignReads" || P.runMode == "soloCellFiltering")
+    if (P.runMode == "alignReads" || P.runMode == "soloCellFiltering" || P.runMode == "hashCacheGenerate")
     {
         // continue
     }
@@ -918,6 +919,19 @@ int main(int argInN, char *argIn[])
         } else {
             P.inOut->logMain << "[GENE-PROBE-INIT] Skipped pre-mapping init (no probe list path)\n";
         }
+    }
+
+    if (P.runMode == "hashCacheGenerate") {
+        if (transcriptomeMain == nullptr) {
+            ostringstream errOut;
+            errOut << "EXITING: --runMode hashCacheGenerate requires Solo transcriptome quantification.\n"
+                   << "SOLUTION: use e.g. --soloFeatures Gene (and other required Flex/Solo parameters).\n";
+            exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
+        }
+        runFlexHashCacheGenerate(P, genomeMain, transcriptomeMain, libem_transcriptome.get());
+        sysRemoveDir(P.outFileTmp);
+        P.cleanupParInfoForExit();
+        exit(0);
     }
 
     // Apply limitBAMsortRAM fallback before sample loop

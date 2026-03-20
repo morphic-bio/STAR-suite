@@ -44,7 +44,8 @@ For module-specific scripts see `core/legacy/scripts/README.md` and
 
 | Script | Language | Purpose |
 |--------|----------|---------|
-| `flex_h01_pilot.py` | Python | External 100-probe H0/H1 pilot for Flex: generates probe lists, probe FASTAs, and handles feature-matrix post-processing for the Flex validation pipeline. |
+| `flex_h01_pilot.py` | Python | Flex H0/H1/H2 tooling: probe lists/FASTAs, MEX→sequence-cache post-processing, **H2** subcommands (`h2-make-synth-fastq`, `h2-build-cache-from-mex`, `h2-write-binary-cache`) for two-mismatch variants with `cache_class=3` KEEP rows. |
+| `run_flex_h02_pilot.sh` | Bash | End-to-end H2 pilot: synthetic FASTQ from H0 seeds in an FH01SEQ1 cache → STAR-Flex (BAM+GX) → MEX-derived TSV → optional `h2_keep_only.bin`. See script header for sharding env vars. |
 | `run_flex_cr_config.sh` | Bash | Runs STAR-Flex using a CellRanger-format config, with inputs rendered by `render_flex_inputs_from_cr_config.py`. |
 
 ## Fixtures and Utilities

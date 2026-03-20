@@ -455,6 +455,13 @@ void ParametersSolo::initialize(Parameters *pPin)
     {
         if (flexModeStr == "yes") {
             flexMode = true;
+
+            auto findParam = [&](const string& name) -> ParameterInfoBase* {
+                for (auto *p : pP->parArray) {
+                    if (p->nameString == name) return p;
+                }
+                return nullptr;
+            };
             
             // Enable FlexFilter pipeline (if not explicitly disabled)
             if (runFlexFilterStr.empty() || runFlexFilterStr == "no") {
@@ -502,8 +509,12 @@ void ParametersSolo::initialize(Parameters *pPin)
                 barcodesObservedOnlyStr = "yes";
             }
             
-            // Set UMI correction to clique (if not explicitly set)
-            if (umiCorrectionModeStr.empty() || umiCorrectionModeStr == "none") {
+            // Set UMI correction to clique only if the user/default-groups did
+            // not explicitly set soloUMICorrection. This preserves an explicit
+            // '--soloUMICorrection none' under --flex yes.
+            ParameterInfoBase* umiCorrectionParam = findParam("soloUMICorrection");
+            bool umiCorrectionUserSpecified = (umiCorrectionParam != nullptr && umiCorrectionParam->inputLevel > 0);
+            if (!umiCorrectionUserSpecified && (umiCorrectionModeStr.empty() || umiCorrectionModeStr == "none")) {
                 umiCorrectionModeStr = "clique";
             }
             

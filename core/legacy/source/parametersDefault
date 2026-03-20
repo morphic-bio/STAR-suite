@@ -1766,6 +1766,15 @@ soloHashScreenFile          -
                             If omitted, STAR will use STAR_FLEX_HASH_SCREEN_CACHE or auto-discover
                             flex_h01_sequence_cache.bin next to the probe list.
 
+hashCacheOutput             -
+    string:                 output path for FH01SEQ1 v2 binary (required for --runMode hashCacheGenerate)
+
+hashCacheTiers              H0,H1,H2
+    string:                 comma-separated subset: H0, H1, H2 (default: all)
+
+hashCacheParentLimit        0
+    uint32:                 if >0, cap number of parent probes processed (testing / pilot)
+
 flex                         no
     string:                 yes|no (default no)
                             yes         ... enable full Flex pipeline with production defaults:

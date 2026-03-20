@@ -995,7 +995,9 @@ void ReadAlign::outputAlignments() {
             }
         }
         
-        soloRead->record((unmapType<0 ? nTr : 0), trMult, iReadAll, readAnnot); //need to supply nTr=0 for unmapped reads
+        if (!hashCacheSynthProbe_) {
+            soloRead->record((unmapType<0 ? nTr : 0), trMult, iReadAll, readAnnot); //need to supply nTr=0 for unmapped reads
+        }
 
         if (P.pGe.transform.outSAM) {
             ReadAlign::writeSAM(alignsGenOut.alN, alignsGenOut.alMult, alignsGenOut.alBest);

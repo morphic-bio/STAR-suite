@@ -7,6 +7,7 @@
 #include "stringSubstituteAll.h"
 #include SAMTOOLS_BGZF_H
 #include "GlobalVariables.h"
+#include "SoloFeatureTypes.h"
 #include "signalFromBAM.h"
 #include "bamRemoveDuplicates.h"
 #include "streamFuns.h"
@@ -611,6 +612,9 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloInlineHashMode", &pSolo.inlineHashModeStr));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "no-hash-screen", &pSolo.hashScreenDisableStr));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloHashScreenFile", &pSolo.hashScreenFile));
+    parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "hashCacheOutput", &pSolo.hashCacheOutput));
+    parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "hashCacheTiers", &pSolo.hashCacheTiers));
+    parArray.push_back(new ParameterInfoScalar <uint32>   (-1, -1, "hashCacheParentLimit", &pSolo.hashCacheParentLimit));
 
     // Flex omnibus flag
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "flex", &pSolo.flexModeStr));
@@ -1164,7 +1168,7 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
     };
 
     runMode=runModeIn[0];
-    if (runMode=="alignReads") {
+    if (runMode=="alignReads" || runMode == "hashCacheGenerate") {
         inOut->logProgress.open((outFileNamePrefix + "Log.progress.out").c_str());
     } else if (runMode=="inputAlignmentsFromBAM") {
         //at the moment, only wiggle output is implemented
@@ -1712,6 +1716,13 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
     };
 
     //read parameters
+    if (runMode == "hashCacheGenerate") {
+        if (readFilesIn.empty() || (readFilesIn.size() == 1 && readFilesIn[0] == "-")) {
+            readFilesIn.clear();
+            readFilesIn.push_back("/dev/null");
+            readFilesIn.push_back("/dev/null");
+        }
+    }
     readFilesInit();
 
     //two-pass
@@ -2604,6 +2615,36 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
     
     //solo
     pSolo.initialize(this);
+
+    if (runMode == "hashCacheGenerate") {
+        if (pSolo.hashCacheOutput.empty() || pSolo.hashCacheOutput == "-") {
+            exitWithError("EXITING: --runMode hashCacheGenerate requires --hashCacheOutput <path>\n", std::cerr, inOut->logMain,
+                          EXIT_CODE_PARAMETER, *this);
+        }
+        if (pSolo.probeListPath.empty() || pSolo.probeListPath == "-") {
+            exitWithError("EXITING: --runMode hashCacheGenerate requires --soloProbeList\n", std::cerr, inOut->logMain,
+                          EXIT_CODE_PARAMETER, *this);
+        }
+        if (!pSolo.featureYes[SoloFeatureTypes::Gene]) {
+            exitWithError("EXITING: --runMode hashCacheGenerate requires --soloFeatures Gene\n", std::cerr, inOut->logMain,
+                          EXIT_CODE_PARAMETER, *this);
+        }
+        if (pSolo.sampleWhitelistPath.empty() || pSolo.sampleWhitelistPath == "-" || pSolo.sampleProbesPath.empty() ||
+            pSolo.sampleProbesPath == "-") {
+            exitWithError(
+                "EXITING: --runMode hashCacheGenerate requires --soloSampleWhitelist and --soloSampleProbes\n", std::cerr,
+                inOut->logMain, EXIT_CODE_PARAMETER, *this);
+        }
+        if (!pSolo.cbWLyes || pSolo.cbWLstr.empty()) {
+            exitWithError("EXITING: --runMode hashCacheGenerate requires a non-empty --soloCBwhitelist\n", std::cerr,
+                          inOut->logMain, EXIT_CODE_PARAMETER, *this);
+        }
+        if (readNmates != 2) {
+            exitWithError("EXITING: --runMode hashCacheGenerate requires paired-end read layout (two mates in --readFilesIn "
+                          "or use default /dev/null mates)\n",
+                          std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+        }
+    }
 
     // Derive Y/noY FASTQ output paths (after Solo init so readNmates is final)
     if (emitYNoYFastqyes) {

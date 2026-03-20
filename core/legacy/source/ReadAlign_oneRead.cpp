@@ -10,6 +10,59 @@
 #include <cstdlib>
 #include <atomic>
 #include <chrono>
+#include <mutex>
+
+// --- Hash screen dump (env-gated: STAR_DUMP_HASH_SCREEN=<path>) ---
+// Binary format: 8-byte magic "HSCRN001", 8-byte nReads placeholder,
+// then per-read: {uint32 readLen, uint16 sampleIdx, uint8 action,
+//   uint8 cacheClass, uint16 geneIdx15, int8 offset, uint8 pad,
+//   char readSeq[readLen]}.
+namespace {
+struct HashScreenDumpState {
+    FILE* fp = nullptr;
+    std::mutex mu;
+    uint64_t nReads = 0;
+};
+static HashScreenDumpState g_hsDump;
+static std::once_flag g_hsDumpOnce;
+
+void hashScreenDumpFinalize() {
+    if (!g_hsDump.fp) return;
+    std::fseek(g_hsDump.fp, 8, SEEK_SET);
+    std::fwrite(&g_hsDump.nReads, 8, 1, g_hsDump.fp);
+    std::fclose(g_hsDump.fp);
+    g_hsDump.fp = nullptr;
+}
+
+void hashScreenDumpInit() {
+    const char* path = std::getenv("STAR_DUMP_HASH_SCREEN");
+    if (!path || path[0] == '\0') return;
+    g_hsDump.fp = std::fopen(path, "wb");
+    if (!g_hsDump.fp) return;
+    const char magic[8] = {'H','S','C','R','N','0','0','1'};
+    std::fwrite(magic, 1, 8, g_hsDump.fp);
+    uint64_t placeholder = 0;
+    std::fwrite(&placeholder, 8, 1, g_hsDump.fp);
+    std::atexit(hashScreenDumpFinalize);
+}
+
+void hashScreenDumpWrite(const char* readSeq, uint32_t readLen,
+                         uint16_t sampleIdx, const FlexHashScreenDecision& d) {
+    std::call_once(g_hsDumpOnce, hashScreenDumpInit);
+    if (!g_hsDump.fp) return;
+    std::lock_guard<std::mutex> lock(g_hsDump.mu);
+    std::fwrite(&readLen, 4, 1, g_hsDump.fp);
+    std::fwrite(&sampleIdx, 2, 1, g_hsDump.fp);
+    uint8_t action = static_cast<uint8_t>(d.action);
+    std::fwrite(&action, 1, 1, g_hsDump.fp);
+    std::fwrite(&d.cacheClass, 1, 1, g_hsDump.fp);
+    std::fwrite(&d.geneIdx15, 2, 1, g_hsDump.fp);
+    std::fwrite(&d.offset, 1, 1, g_hsDump.fp);
+    std::fwrite(&d.negativeCode, 1, 1, g_hsDump.fp);
+    std::fwrite(readSeq, 1, readLen, g_hsDump.fp);
+    ++g_hsDump.nReads;
+}
+} // namespace
 
 // Static counter for debug logging (guarded by STAR_TRIM_DEBUG_N env var)
 // Use atomic for thread-safety when debug logging is enabled
@@ -312,6 +365,7 @@ int ReadAlign::oneRead() {//process one read: load, map, write
         // A/C/G/T characters; moving this call after convertNucleotidesToNumbers
         // would silently break classification.
         hashScreenDecision_ = FlexHashScreenCache::instance().classifyRead(Read0[0], readLengthOriginal[0], hashScreenSampleIdx);
+        hashScreenDumpWrite(Read0[0], readLengthOriginal[0], hashScreenSampleIdx, hashScreenDecision_);
         if (hashScreenDecision_.action == FlexHashScreenDecision::Keep) {
             soloRead->readFlagReset();
             SoloReadFeature *geneFeat = soloRead->readFeat[P.pSolo.featureInd[SoloFeatureTypes::Gene]];
@@ -332,6 +386,12 @@ int ReadAlign::oneRead() {//process one read: load, map, write
         } else {
             statsRA.hashScreenPass++;
         }
+    } else {
+        // Read skipped the hash screen entirely (disabled, missing soloRead,
+        // wrong feature config, etc.). Dump with action=Disabled so the replay
+        // tool can count and verify these reads are correctly routed.
+        // sampleIdx=0 because sample detection did not run.
+        hashScreenDumpWrite(Read0[0], readLengthOriginal[0], 0, hashScreenDecision_);
     }
 
     complementSeqNumbers(Read1[0],Read1[1],Lread); //returns complement of Reads[ii]

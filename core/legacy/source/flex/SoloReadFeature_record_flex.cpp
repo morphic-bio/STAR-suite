@@ -681,6 +681,307 @@ void record_flex(SoloReadFeature *soloReadFeat, SoloReadBarcode &soloBar, uint n
     return;
 };
 
+FlexGeneInlineResolveResult flexResolveGeneIdx15_inlineResolver(
+    SoloReadFeature *soloReadFeat,
+    SoloReadBarcode &soloBar,
+    const ReadSoloFeatures &reFe,
+    const ReadAnnotations &readAnnot,
+    int32_t featureType,
+    uint64_t iRead)
+{
+    FlexGeneInlineResolveResult out{};
+
+    // Build CandidateView per alignment (probe/genomic) for probe-aware resolution
+    std::vector<CandidateView> candidates;
+    const auto &featAnnot = readAnnot.annotFeatures[featureType];
+    const auto &fAlign = featAnnot.fAlign;
+    uint32_t nAlign = fAlign.size();
+
+    auto lookupProbeIdx = [&](uint32_t geneIdx) -> uint16_t {
+        return SoloFeature::getProbeIdxForGene(geneIdx);
+    };
+
+    bool hasProbeCandidates = false;
+    bool hasGenomicProbeGenes = false;
+
+    for (uint32_t ia = 0; ia < nAlign; ++ia) {
+        if (!reFe.alignOut || reFe.alignOut[ia] == nullptr) continue;
+        Transcript *tr = reFe.alignOut[ia];
+        const std::string &chrName = tr->chrName;
+        bool isProbeChr = !chrName.empty() && chrName.rfind("ENSG", 0) == 0;
+
+        auto isCanonicalProbeCigar = [](const std::string &cig) -> bool {
+            return cig == "40S50M" || cig == "50M40S" || cig == "50M";
+        };
+
+        CandidateView cv;
+        cv.mapq = tr->mapq;
+        cv.asScore = tr->asScore;
+        cv.nm = tr->nm;
+        cv.probeCigarOk = true;
+        cv.zgGeneIdx15.clear();
+
+        if (isProbeChr) {
+            cv.isGenomic = false;
+            cv.probeCigarOk = isCanonicalProbeCigar(tr->cigarString);
+            FLEX_COUNT_INC(probeAlignCount);
+
+            if (soloBar.pSolo.nmMax >= 0 && cv.nm >= 0) {
+                if (cv.nm > soloBar.pSolo.nmMax) {
+                    FLEX_COUNT_INC(probeDroppedNM);
+                    continue;
+                }
+            }
+
+            if (soloBar.pSolo.nmMax < 0 && cv.nm >= 0 && soloBar.pSolo.mmRateMax > 0) {
+                int alignedLen = static_cast<int>(tr->exons[tr->nExons-1][EX_G] - tr->exons[0][EX_G] + tr->exons[tr->nExons-1][EX_L]);
+                if (alignedLen > 0) {
+                    double mmRate = static_cast<double>(cv.nm) / alignedLen;
+                    if (mmRate > soloBar.pSolo.mmRateMax) {
+                        FLEX_COUNT_INC(probeDroppedMMrate);
+                        continue;
+                    }
+                }
+            }
+
+            uint16_t probeIdx = 0;
+            const ProbeListIndex* probeIdxTable = getGlobalProbeIndex(soloReadFeat);
+            if (probeIdxTable) {
+                std::string ensgId = chrName.substr(0, std::min<size_t>(15, chrName.size()));
+                probeIdx = probeIdxTable->geneIndex15(ensgId);
+            }
+            if (probeIdx != 0) {
+                cv.geneIdx15 = probeIdx;
+                cv.zgGeneIdx15.push_back(probeIdx);
+                hasProbeCandidates = true;
+            } else {
+                FLEX_COUNT_INC(probeMissingIdx);
+                if (soloBar.pSolo.inlineHashMode) {
+                    char extraBuf[256];
+                    snprintf(extraBuf, sizeof(extraBuf), "chr=%s", chrName.c_str());
+                    logRejectReason(soloBar, iRead, featureType, 1, 0, "NO_PROBE_IDX", extraBuf, soloBar.pSolo);
+                }
+                continue;
+            }
+        } else {
+            cv.isGenomic = true;
+            FLEX_COUNT_INC(genomicAlignCount);
+
+            if (soloBar.pSolo.mapqMode == ParametersSolo::MapqGenomicOnly ||
+                soloBar.pSolo.mapqMode == ParametersSolo::MapqAll) {
+                if (cv.mapq >= 0 && cv.mapq < soloBar.pSolo.mapqThreshold) {
+                    FLEX_COUNT_INC(genomicDroppedMapq);
+                    continue;
+                }
+            }
+
+            if (soloBar.pSolo.nmMax >= 0 && cv.nm >= 0) {
+                if (cv.nm > soloBar.pSolo.nmMax) {
+                    FLEX_COUNT_INC(genomicDroppedNM);
+                    continue;
+                }
+            }
+
+            if (soloBar.pSolo.nmMax < 0 && cv.nm >= 0 && soloBar.pSolo.mmRateMax > 0) {
+                int alignedLen = static_cast<int>(tr->exons[tr->nExons-1][EX_G] - tr->exons[0][EX_G] + tr->exons[tr->nExons-1][EX_L]);
+                if (alignedLen > 0) {
+                    double mmRate = static_cast<double>(cv.nm) / alignedLen;
+                    if (mmRate > soloBar.pSolo.mmRateMax) {
+                        FLEX_COUNT_INC(genomicDroppedMMrate);
+                        continue;
+                    }
+                }
+            }
+
+            if (ia < fAlign.size()) {
+                for (uint32_t g : fAlign[ia]) {
+                    uint16_t probeIdx = lookupProbeIdx(g);
+                    if (probeIdx != 0) {
+                        cv.zgGeneIdx15.push_back(probeIdx);
+                    }
+                }
+            }
+            if (cv.zgGeneIdx15.empty()) {
+                continue;
+            }
+            FLEX_COUNT_INC(genomicAlignWithProbeGenes);
+            hasGenomicProbeGenes = true;
+            if (cv.zgGeneIdx15.size() == 1) {
+                cv.geneIdx15 = cv.zgGeneIdx15[0];
+            } else {
+                cv.geneIdx15 = 0;
+            }
+        }
+
+        candidates.push_back(std::move(cv));
+    }
+
+    if (!hasProbeCandidates && hasGenomicProbeGenes) {
+        FLEX_COUNT_INC(genomicOnlyReadsWithProbeGenes);
+        std::unordered_set<uint16_t> geneSet;
+        for (const auto &cv : candidates) {
+            if (!cv.isGenomic) continue;
+            for (uint16_t g : cv.zgGeneIdx15) {
+                if (g != 0) geneSet.insert(g);
+            }
+        }
+        FLEX_COUNT_ADD(genomicOnlyProbeGeneCount, geneSet.size());
+    }
+
+    auto buildCandidateSummary = [](const std::vector<CandidateView>& candidates) {
+        std::vector<uint16_t> probeGenes;
+        std::vector<uint16_t> genomicGenes;
+        size_t probeCount = 0;
+        size_t genomicCount = 0;
+
+        for (const auto &cv : candidates) {
+            if (!cv.isGenomic) {
+                probeCount++;
+                if (cv.geneIdx15 != 0) {
+                    probeGenes.push_back(cv.geneIdx15);
+                }
+                for (uint16_t g : cv.zgGeneIdx15) {
+                    if (g != 0) probeGenes.push_back(g);
+                }
+            } else {
+                genomicCount++;
+                if (cv.geneIdx15 != 0) {
+                    genomicGenes.push_back(cv.geneIdx15);
+                }
+                for (uint16_t g : cv.zgGeneIdx15) {
+                    if (g != 0) genomicGenes.push_back(g);
+                }
+            }
+        }
+
+        std::sort(probeGenes.begin(), probeGenes.end());
+        probeGenes.erase(std::unique(probeGenes.begin(), probeGenes.end()), probeGenes.end());
+        std::sort(genomicGenes.begin(), genomicGenes.end());
+        genomicGenes.erase(std::unique(genomicGenes.begin(), genomicGenes.end()), genomicGenes.end());
+
+        return std::make_tuple(probeGenes, genomicGenes, probeCount, genomicCount);
+    };
+
+    if (candidates.empty()) {
+        FLEX_COUNT_INC(resolverDropped);
+        FLEX_COUNT_INC(resolverDropNoCandidates);
+        if (soloBar.pSolo.inlineHashMode) {
+            logRejectReason(soloBar, iRead, featureType, 0, 0, "RESOLVER_DROP", "reason=NO_CANDIDATES", soloBar.pSolo);
+        }
+        return out;
+    }
+
+    uint16_t resolvedGeneIdx = resolveGeneFromCandidates(candidates);
+
+    if (resolvedGeneIdx == 0) {
+        FLEX_COUNT_INC(resolverDropped);
+        if (soloBar.pSolo.inlineHashMode) {
+            auto [probeGenes, genomicGenes, probeCount, genomicCount] = buildCandidateSummary(candidates);
+
+            std::string reason;
+            if (probeGenes.size() > 1 && genomicGenes.empty()) {
+                reason = "PROBE_DISAGREE";
+                FLEX_COUNT_INC(resolverDropProbeDisagree);
+            } else if (genomicGenes.size() > 1 && probeGenes.empty()) {
+                reason = "GENOMIC_DISAGREE";
+                FLEX_COUNT_INC(resolverDropGenomicDisagree);
+            } else if (probeGenes.size() > 0 && genomicGenes.size() > 0) {
+                reason = "MIXED";
+                FLEX_COUNT_INC(resolverDropMixed);
+            } else {
+                reason = probeGenes.size() > 0 ? "PROBE_DISAGREE" : "GENOMIC_DISAGREE";
+                if (probeGenes.size() > 0) {
+                    FLEX_COUNT_INC(resolverDropProbeDisagree);
+                } else {
+                    FLEX_COUNT_INC(resolverDropGenomicDisagree);
+                }
+            }
+
+            std::string extraStr = "reason=" + reason + ";probe={";
+            for (size_t i = 0; i < probeGenes.size(); ++i) {
+                if (i > 0) extraStr += ",";
+                char buf[16];
+                snprintf(buf, sizeof(buf), "%u", (unsigned)probeGenes[i]);
+                extraStr += buf;
+            }
+            extraStr += "};genomic={";
+            for (size_t i = 0; i < genomicGenes.size(); ++i) {
+                if (i > 0) extraStr += ",";
+                char buf[16];
+                snprintf(buf, sizeof(buf), "%u", (unsigned)genomicGenes[i]);
+                extraStr += buf;
+            }
+            extraStr += "}";
+
+            uint8_t isProbeDrop = 0;
+            if (probeCount > 0 && genomicCount == 0) {
+                isProbeDrop = 1;
+            } else if (probeCount == 0 && genomicCount > 0) {
+                isProbeDrop = 0;
+            } else {
+                isProbeDrop = (probeCount >= genomicCount) ? 1 : 0;
+            }
+
+            logRejectReason(soloBar, iRead, featureType, isProbeDrop, 0, "RESOLVER_DROP", extraStr.c_str(), soloBar.pSolo);
+        }
+        return out;
+    }
+
+    bool resolvedGenomic = false;
+    const CandidateView* winningCandidate = nullptr;
+    for (const auto &cv : candidates) {
+        if (cv.geneIdx15 == resolvedGeneIdx ||
+            std::find(cv.zgGeneIdx15.begin(), cv.zgGeneIdx15.end(), resolvedGeneIdx) != cv.zgGeneIdx15.end()) {
+            resolvedGenomic = cv.isGenomic;
+            winningCandidate = &cv;
+            break;
+        }
+    }
+    if (resolvedGenomic) {
+        FLEX_COUNT_INC(genomicResolvedCount);
+        FLEX_COUNT_INC(resolverKeepGenomic);
+    } else {
+        FLEX_COUNT_INC(probeResolvedCount);
+        FLEX_COUNT_INC(resolverKeepProbe);
+    }
+
+    if (soloBar.pSolo.inlineHashMode) {
+        uint8_t isProbeKeep = winningCandidate ? (!winningCandidate->isGenomic ? 1 : 0) : 0;
+
+        auto [probeGenes, genomicGenes, probeCount, genomicCount] = buildCandidateSummary(candidates);
+
+        std::string win = winningCandidate && !winningCandidate->isGenomic ? "PROBE" : "GENOMIC";
+
+        std::string extraStr = "win=" + win + ";gid=";
+        char gidBuf[16];
+        snprintf(gidBuf, sizeof(gidBuf), "%u", (unsigned)resolvedGeneIdx);
+        extraStr += gidBuf;
+        extraStr += ";probe={";
+        for (size_t i = 0; i < probeGenes.size(); ++i) {
+            if (i > 0) extraStr += ",";
+            char buf[16];
+            snprintf(buf, sizeof(buf), "%u", (unsigned)probeGenes[i]);
+            extraStr += buf;
+        }
+        extraStr += "};genomic={";
+        for (size_t i = 0; i < genomicGenes.size(); ++i) {
+            if (i > 0) extraStr += ",";
+            char buf[16];
+            snprintf(buf, sizeof(buf), "%u", (unsigned)genomicGenes[i]);
+            extraStr += buf;
+        }
+        extraStr += "}";
+
+        logRejectReason(soloBar, iRead, featureType, isProbeKeep, resolvedGeneIdx, "KEEP_HASH", extraStr.c_str(), soloBar.pSolo);
+    }
+
+    out.geneIdx15 = resolvedGeneIdx;
+    out.hasWinningCandidate = (winningCandidate != nullptr);
+    out.winningIsGenomic = resolvedGenomic;
+    return out;
+}
+
+
 uint32 outputReadCB_flex(fstream *streamOut, const uint64 iRead, const int32 featureType, SoloReadBarcode &soloBar, 
                          const ReadSoloFeatures &reFe, const ReadAnnotations &readAnnot, const SoloReadFlagClass &readFlag,
                          SoloReadFeature *soloReadFeat)
@@ -808,332 +1109,14 @@ uint32 outputReadCB_flex(fstream *streamOut, const uint64 iRead, const int32 fea
         case SoloFeatureTypes::GeneFull_ExonOverIntron : {
             const bool isAmbiguous = (soloBar.cbMatchInd.size() > 1) || (soloBar.cbMatch > 1);
 
-            // Build CandidateView per alignment (probe/genomic) for probe-aware resolution
-            std::vector<CandidateView> candidates;
-            const auto &featAnnot = readAnnot.annotFeatures[featureType];
-            const auto &fAlign = featAnnot.fAlign;
-            uint32_t nAlign = fAlign.size();
-
-            auto lookupProbeIdx = [&](uint32_t geneIdx) -> uint16_t {
-                return SoloFeature::getProbeIdxForGene(geneIdx);
-            };
-
-            // One-time sanity check removed after validation (previously dumped gene→probe table)
-            // If future debugging is needed, reintroduce lightweight logging here.
-
-            bool hasProbeCandidates = false;
-            bool hasGenomicProbeGenes = false;
-
-            for (uint32_t ia = 0; ia < nAlign; ++ia) {
-                if (!reFe.alignOut || reFe.alignOut[ia] == nullptr) continue;
-                Transcript *tr = reFe.alignOut[ia];
-                const std::string &chrName = tr->chrName;
-                bool isProbeChr = !chrName.empty() && chrName.rfind("ENSG", 0) == 0;
-
-                auto isCanonicalProbeCigar = [](const std::string &cig) -> bool {
-                    // Mirror bam_to_counts probe CIGAR whitelist: 40S50M, 50M40S, 50M
-                    // This is a conservative filter; genomic alignments are not filtered here.
-                    return cig == "40S50M" || cig == "50M40S" || cig == "50M";
-                };
-
-                CandidateView cv;
-                cv.mapq = tr->mapq;
-                cv.asScore = tr->asScore;
-                cv.nm = tr->nm;
-                cv.probeCigarOk = true;
-                cv.zgGeneIdx15.clear();
-
-                if (isProbeChr) {
-                    cv.isGenomic = false;
-                    cv.probeCigarOk = isCanonicalProbeCigar(tr->cigarString);
-                    FLEX_COUNT_INC(probeAlignCount);
-                    
-                    // NM filter for probe alignments (match bam_to_counts behavior)
-                    // soloNMmax: max allowed mismatches; -1 disables
-                    if (soloBar.pSolo.nmMax >= 0 && cv.nm >= 0) {
-                        if (cv.nm > soloBar.pSolo.nmMax) {
-                            FLEX_COUNT_INC(probeDroppedNM);
-                            continue; // skip high-mismatch probe alignment
-                        }
-                    }
-                    
-                    // MM rate filter for probe alignments (match bam_to_counts behavior)
-                    // soloMMrateMax: max allowed mismatch rate (NM / aligned_len)
-                    // Only apply if nmMax is disabled (-1) and we have valid NM
-                    if (soloBar.pSolo.nmMax < 0 && cv.nm >= 0 && soloBar.pSolo.mmRateMax > 0) {
-                        // For probes, use mapped length from transcript
-                        int alignedLen = static_cast<int>(tr->exons[tr->nExons-1][EX_G] - tr->exons[0][EX_G] + tr->exons[tr->nExons-1][EX_L]);
-                        if (alignedLen > 0) {
-                            double mmRate = static_cast<double>(cv.nm) / alignedLen;
-                            if (mmRate > soloBar.pSolo.mmRateMax) {
-                                FLEX_COUNT_INC(probeDroppedMMrate);
-                                continue; // skip high-mismatch-rate probe alignment
-                            }
-                        }
-                    }
-                    
-                    uint16_t probeIdx = 0;
-                    const ProbeListIndex* probeIdxTable = getGlobalProbeIndex(soloReadFeat);
-                    if (probeIdxTable) {
-                        std::string ensgId = chrName.substr(0, std::min<size_t>(15, chrName.size()));
-                        probeIdx = probeIdxTable->geneIndex15(ensgId);
-                    }
-                    if (probeIdx != 0) {
-                        cv.geneIdx15 = probeIdx;
-                        cv.zgGeneIdx15.push_back(probeIdx);
-                        hasProbeCandidates = true;
-                    } else {
-                        FLEX_COUNT_INC(probeMissingIdx);
-                        // Log NO_PROBE_IDX
-                        if (soloBar.pSolo.inlineHashMode) {
-                            char extraBuf[256];
-                            snprintf(extraBuf, sizeof(extraBuf), "chr=%s", chrName.c_str());
-                            logRejectReason(soloBar, iRead, featureType, 1, 0, "NO_PROBE_IDX", extraBuf, soloBar.pSolo);
-                        }
-                        continue; // no usable gene for this alignment
-                    }
-                } else {
-                    cv.isGenomic = true;
-                    FLEX_COUNT_INC(genomicAlignCount);
-                    
-                    // MAPQ filter for genomic alignments (match bam_to_counts behavior)
-                    // Only applies when soloMapqMode is "genomic" or "all"
-                    if (soloBar.pSolo.mapqMode == ParametersSolo::MapqGenomicOnly ||
-                        soloBar.pSolo.mapqMode == ParametersSolo::MapqAll) {
-                        if (cv.mapq >= 0 && cv.mapq < soloBar.pSolo.mapqThreshold) {
-                            FLEX_COUNT_INC(genomicDroppedMapq);
-                            continue; // skip low-MAPQ genomic alignment
-                        }
-                    }
-                    
-                    // NM filter for genomic alignments (match bam_to_counts behavior)
-                    // soloNMmax: max allowed mismatches; -1 disables
-                    if (soloBar.pSolo.nmMax >= 0 && cv.nm >= 0) {
-                        if (cv.nm > soloBar.pSolo.nmMax) {
-                            FLEX_COUNT_INC(genomicDroppedNM);
-                            continue; // skip high-mismatch genomic alignment
-                        }
-                    }
-                    
-                    // MM rate filter for genomic alignments (match bam_to_counts behavior)
-                    // soloMMrateMax: max allowed mismatch rate (NM / read_len)
-                    // Only apply if nmMax is disabled (-1) and we have valid NM
-                    if (soloBar.pSolo.nmMax < 0 && cv.nm >= 0 && soloBar.pSolo.mmRateMax > 0) {
-                        // Use nM (mismatches) and aligned length from transcript
-                        int alignedLen = static_cast<int>(tr->exons[tr->nExons-1][EX_G] - tr->exons[0][EX_G] + tr->exons[tr->nExons-1][EX_L]);
-                        if (alignedLen > 0) {
-                            double mmRate = static_cast<double>(cv.nm) / alignedLen;
-                            if (mmRate > soloBar.pSolo.mmRateMax) {
-                                FLEX_COUNT_INC(genomicDroppedMMrate);
-                                continue; // skip high-mismatch-rate genomic alignment
-                            }
-                        }
-                    }
-                    
-                    // Map per-alignment genes to probe indices (if available)
-                    if (ia < fAlign.size()) {
-                        for (uint32_t g : fAlign[ia]) {
-                            uint16_t probeIdx = lookupProbeIdx(g);
-                            if (probeIdx != 0) {
-                                cv.zgGeneIdx15.push_back(probeIdx);
-                            }
-                        }
-                    }
-                    if (cv.zgGeneIdx15.empty()) {
-                        continue; // genomic align with no probe-mapped gene
-                    }
-                    // Genomic alignment that yielded >=1 probe gene
-                    FLEX_COUNT_INC(genomicAlignWithProbeGenes);
-                    hasGenomicProbeGenes = true;
-                    if (cv.zgGeneIdx15.size() == 1) {
-                        cv.geneIdx15 = cv.zgGeneIdx15[0];
-                    } else {
-                        cv.geneIdx15 = 0;
-                    }
-                }
-
-                candidates.push_back(std::move(cv));
-            }
-
-            // Track reads where we have NO probe-chromosome candidates but DO
-            // have genomic alignments that map to probe genes via ZG/lookup.
-            if (!hasProbeCandidates && hasGenomicProbeGenes) {
-                FLEX_COUNT_INC(genomicOnlyReadsWithProbeGenes);
-                std::unordered_set<uint16_t> geneSet;
-                for (const auto &cv : candidates) {
-                    if (!cv.isGenomic) continue;
-                    for (uint16_t g : cv.zgGeneIdx15) {
-                        if (g != 0) geneSet.insert(g);
-                    }
-                }
-                FLEX_COUNT_ADD(genomicOnlyProbeGeneCount, geneSet.size());
-            }
-
-            // Helper lambda to build candidate summary
-            auto buildCandidateSummary = [](const std::vector<CandidateView>& candidates) {
-                    std::vector<uint16_t> probeGenes;
-                    std::vector<uint16_t> genomicGenes;
-                size_t probeCount = 0;
-                size_t genomicCount = 0;
-                
-                    for (const auto &cv : candidates) {
-                        if (!cv.isGenomic) {
-                        probeCount++;
-                            if (cv.geneIdx15 != 0) {
-                                probeGenes.push_back(cv.geneIdx15);
-                            }
-                            for (uint16_t g : cv.zgGeneIdx15) {
-                                if (g != 0) probeGenes.push_back(g);
-                            }
-                        } else {
-                        genomicCount++;
-                            if (cv.geneIdx15 != 0) {
-                                genomicGenes.push_back(cv.geneIdx15);
-                            }
-                            for (uint16_t g : cv.zgGeneIdx15) {
-                                if (g != 0) genomicGenes.push_back(g);
-                            }
-                        }
-                    }
-                
-                    // Remove duplicates
-                    std::sort(probeGenes.begin(), probeGenes.end());
-                    probeGenes.erase(std::unique(probeGenes.begin(), probeGenes.end()), probeGenes.end());
-                    std::sort(genomicGenes.begin(), genomicGenes.end());
-                    genomicGenes.erase(std::unique(genomicGenes.begin(), genomicGenes.end()), genomicGenes.end());
-                    
-                return std::make_tuple(probeGenes, genomicGenes, probeCount, genomicCount);
-            };
-
-            if (candidates.empty()) {
-                FLEX_COUNT_INC(resolverDropped);
-                FLEX_COUNT_INC(resolverDropNoCandidates);
-                // Log RESOLVER_DROP with no candidates
-                if (soloBar.pSolo.inlineHashMode) {
-                    logRejectReason(soloBar, iRead, featureType, 0, 0, "RESOLVER_DROP", "reason=NO_CANDIDATES", soloBar.pSolo);
-                }
+            FlexGeneInlineResolveResult res = flexResolveGeneIdx15_inlineResolver(
+                soloReadFeat, soloBar, reFe, readAnnot, featureType, iRead);
+            if (res.geneIdx15 == 0) {
                 break;
             }
+            const uint16_t resolvedGeneIdx = res.geneIdx15;
+            const uint8_t ambigIsProbe = (!res.hasWinningCandidate || !res.winningIsGenomic) ? 1 : 0;
 
-            uint16_t resolvedGeneIdx = resolveGeneFromCandidates(candidates);
-            
-            // If resolver returns 0, drop the read (don't insert into hash)
-            // Note: This only happens for:
-            //   - Probe gene conflicts (disagreeing probe genes)
-            //   - Empty/no genes
-            if (resolvedGeneIdx == 0) {
-                FLEX_COUNT_INC(resolverDropped);
-                // Log RESOLVER_DROP with candidate summary
-                if (soloBar.pSolo.inlineHashMode) {
-                    // Build candidate summary using helper
-                    auto [probeGenes, genomicGenes, probeCount, genomicCount] = buildCandidateSummary(candidates);
-                    
-                    // Determine reason
-                    std::string reason;
-                    if (probeGenes.size() > 1 && genomicGenes.empty()) {
-                        reason = "PROBE_DISAGREE";
-                        FLEX_COUNT_INC(resolverDropProbeDisagree);
-                    } else if (genomicGenes.size() > 1 && probeGenes.empty()) {
-                        reason = "GENOMIC_DISAGREE";
-                        FLEX_COUNT_INC(resolverDropGenomicDisagree);
-                    } else if (probeGenes.size() > 0 && genomicGenes.size() > 0) {
-                        reason = "MIXED";
-                        FLEX_COUNT_INC(resolverDropMixed);
-                    } else {
-                        // Fallback: one gene in only one side (rare)
-                        reason = probeGenes.size() > 0 ? "PROBE_DISAGREE" : "GENOMIC_DISAGREE";
-                        if (probeGenes.size() > 0) {
-                            FLEX_COUNT_INC(resolverDropProbeDisagree);
-                        } else {
-                            FLEX_COUNT_INC(resolverDropGenomicDisagree);
-                        }
-                    }
-                    
-                    // Format extra field: reason=...;probe={p1,p2};genomic={g1}
-                    std::string extraStr = "reason=" + reason + ";probe={";
-                    for (size_t i = 0; i < probeGenes.size(); ++i) {
-                        if (i > 0) extraStr += ",";
-                        char buf[16];
-                        snprintf(buf, sizeof(buf), "%u", (unsigned)probeGenes[i]);
-                        extraStr += buf;
-                    }
-                    extraStr += "};genomic={";
-                    for (size_t i = 0; i < genomicGenes.size(); ++i) {
-                        if (i > 0) extraStr += ",";
-                        char buf[16];
-                        snprintf(buf, sizeof(buf), "%u", (unsigned)genomicGenes[i]);
-                        extraStr += buf;
-                    }
-                    extraStr += "}";
-                    
-                    // Determine isProbe: if all candidates are probe, set to 1; if all genomic, set to 0; if mixed, use majority
-                    uint8_t isProbeDrop = 0;
-                    if (probeCount > 0 && genomicCount == 0) {
-                        isProbeDrop = 1; // All probe
-                    } else if (probeCount == 0 && genomicCount > 0) {
-                        isProbeDrop = 0; // All genomic
-                    } else {
-                        // Mixed: use majority or last candidate type
-                        isProbeDrop = (probeCount >= genomicCount) ? 1 : 0;
-                    }
-                    
-                    logRejectReason(soloBar, iRead, featureType, isProbeDrop, 0, "RESOLVER_DROP", extraStr.c_str(), soloBar.pSolo);
-                }
-                break; // drop read
-            }
-            // Count resolution type based on winning candidate
-            bool resolvedGenomic = false;
-            const CandidateView* winningCandidate = nullptr;
-            for (const auto &cv : candidates) {
-                if (cv.geneIdx15 == resolvedGeneIdx || 
-                    std::find(cv.zgGeneIdx15.begin(), cv.zgGeneIdx15.end(), resolvedGeneIdx) != cv.zgGeneIdx15.end()) {
-                    resolvedGenomic = cv.isGenomic;
-                    winningCandidate = &cv;
-                    break;
-                }
-            }
-            if (resolvedGenomic) {
-                FLEX_COUNT_INC(genomicResolvedCount);
-                FLEX_COUNT_INC(resolverKeepGenomic);
-            } else {
-                FLEX_COUNT_INC(probeResolvedCount);
-                FLEX_COUNT_INC(resolverKeepProbe);
-            }
-            
-            // Log KEEP_HASH with winning candidate info
-            if (soloBar.pSolo.inlineHashMode) {
-                uint8_t isProbeKeep = winningCandidate ? (!winningCandidate->isGenomic ? 1 : 0) : 0;
-                
-                // Build candidate summary using helper
-                auto [probeGenes, genomicGenes, probeCount, genomicCount] = buildCandidateSummary(candidates);
-                
-                // Determine win
-                std::string win = winningCandidate && !winningCandidate->isGenomic ? "PROBE" : "GENOMIC";
-                
-                // Format extra field: win=...;gid=...;probe={...};genomic={...}
-                std::string extraStr = "win=" + win + ";gid=";
-                char gidBuf[16];
-                snprintf(gidBuf, sizeof(gidBuf), "%u", (unsigned)resolvedGeneIdx);
-                extraStr += gidBuf;
-                extraStr += ";probe={";
-                for (size_t i = 0; i < probeGenes.size(); ++i) {
-                    if (i > 0) extraStr += ",";
-                    char buf[16];
-                    snprintf(buf, sizeof(buf), "%u", (unsigned)probeGenes[i]);
-                    extraStr += buf;
-                }
-                extraStr += "};genomic={";
-                for (size_t i = 0; i < genomicGenes.size(); ++i) {
-                    if (i > 0) extraStr += ",";
-                    char buf[16];
-                    snprintf(buf, sizeof(buf), "%u", (unsigned)genomicGenes[i]);
-                    extraStr += buf;
-                }
-                extraStr += "}";
-                
-                logRejectReason(soloBar, iRead, featureType, isProbeKeep, resolvedGeneIdx, "KEEP_HASH", extraStr.c_str(), soloBar.pSolo);
-            }
-            
             // Insert exactly one quartet key with resolved gene (no per-gene fanout)
             if (soloReadFeat && soloReadFeat->inlineHash_ != nullptr && soloBar.cbMatch >= 0 && soloBar.cbMatch <= 1 && !soloBar.cbMatchInd.empty()) {
                 if (isAmbiguous) {
@@ -1142,7 +1125,7 @@ uint32 outputReadCB_flex(fstream *streamOut, const uint64 iRead, const int32 fea
                         char extraBuf[128];
                         snprintf(extraBuf, sizeof(extraBuf), "candidates=%zu", soloBar.cbMatchInd.size());
                         logRejectReason(soloBar, iRead, featureType, 
-                                       (!winningCandidate || !winningCandidate->isGenomic ? 1 : 0), 
+                                       ambigIsProbe, 
                                        resolvedGeneIdx, "AMBIG_CB", extraBuf, soloBar.pSolo);
                     }
                     accumulateAmbiguousCB(resolvedGeneIdx, tagIdx);

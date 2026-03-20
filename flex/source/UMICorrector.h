@@ -62,11 +62,11 @@ private:
                                       std::unordered_set<uint32_t>& visited,
                                       int maxSize);
     
-    // Find UMI with highest count in component
+    // Find UMI with highest count in component.
+    // Returns UINT32_MAX if the top count is tied.
     static uint32_t findWinnerUmi(const std::vector<uint32_t>& componentUmis,
                                   const std::vector<uint32_t>& componentCounts,
                                   int componentSize);
 };
 
 #endif
-

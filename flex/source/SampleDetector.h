@@ -38,6 +38,9 @@ public:
 
     bool ready() const { return !canonicalToIndex_.empty(); }
 
+    /** Number of sequential samples (1-based indices 1..N) from the whitelist; 0 if none. */
+    uint32_t sequentialSampleCount() const { return static_cast<uint32_t>(indexToCanonical_.size()); }
+
     // Map Solo's sequential sample index to the whitelist's canonical numeric index (BC###)
     uint32_t whitelistIndexForCanonical(uint32_t sampleIdx) const;
     uint32_t sequentialIndexForWhitelist(uint32_t sampleIdx) const;

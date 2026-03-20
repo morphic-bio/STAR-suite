@@ -114,8 +114,10 @@ void SoloFeature::runCliqueCorrection() {
         if (cbIdx >= pSolo.cbWLstr.size()) continue;
         if (hasAllowList && cbIdxAllowed.find(cbIdx) == cbIdxAllowed.end()) continue;
 
+        // Correct within the final composite-barcode surface: CB + tag/sample + gene.
+        // Do not merge UMIs across different sample tags.
         uint64_t groupKey = (static_cast<uint64_t>(cbIdx) << 24) |
-                            (static_cast<uint64_t>(0) << 16) |     // sampleIdx=0
+                            (static_cast<uint64_t>(tagIdx) << 16) |
                             static_cast<uint64_t>(geneIdx);
 
         entries.push_back({groupKey, key, umi24, count});

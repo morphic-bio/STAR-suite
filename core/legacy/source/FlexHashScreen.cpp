@@ -2,6 +2,7 @@
 #include "ParametersSolo.h"
 
 #include <algorithm>
+#include <cstring>
 #include <fstream>
 #include <sstream>
 
@@ -229,7 +230,8 @@ FlexHashScreenDecision FlexHashScreenCache::classifyHits(const Record* const* hi
             return out;
         }
 
-        if ((rec->cacheClass == 0 || rec->cacheClass == 1) && sampleSpecifiedMismatch) {
+        if ((rec->cacheClass == 0 || rec->cacheClass == 1 || rec->cacheClass == 3) &&
+            sampleSpecifiedMismatch) {
             if (!sawSampleMismatch) {
                 sawSampleMismatch = true;
                 sampleMismatchOffset = relativeOffsets[idx];
@@ -237,7 +239,7 @@ FlexHashScreenDecision FlexHashScreenCache::classifyHits(const Record* const* hi
             continue;
         }
 
-        if (rec->cacheClass == 0 || rec->cacheClass == 1) {
+        if (rec->cacheClass == 0 || rec->cacheClass == 1 || rec->cacheClass == 3) {
             const uint16_t geneIdx15 = static_cast<uint16_t>(rec->resolvedGeneIdx15);
             const uint16_t sampleKey = sampleMatched ? runtimeSampleIdx : 0;
             if (!sawNonExactKeep) {
@@ -285,6 +287,81 @@ FlexHashScreenDecision FlexHashScreenCache::classifyHits(const Record* const* hi
     }
 
     return out;
+}
+
+bool FlexHashScreenCache::encodeProbeWindow(const char* readSeq, uint32_t offset, uint64_t& seqLo, uint64_t& seqHi) {
+    uint64_t packedLo = 0;
+    uint64_t packedHi = 0;
+    for (uint32_t i = 0; i < kCacheKmerLength; ++i) {
+        char base = readSeq[offset + i];
+        uint64_t code = 0;
+        switch (base) {
+            case 'A':
+            case 'a':
+                code = 0;
+                break;
+            case 'C':
+            case 'c':
+                code = 1;
+                break;
+            case 'G':
+            case 'g':
+                code = 2;
+                break;
+            case 'T':
+            case 't':
+                code = 3;
+                break;
+            default:
+                return false;
+        }
+        packedHi = (packedHi << 2) | (packedLo >> 62);
+        packedLo = (packedLo << 2) | code;
+    }
+    seqLo = packedLo;
+    seqHi = packedHi;
+    return true;
+}
+
+bool FlexHashScreenCache::writeHashCacheFile(const std::string& path, std::vector<Record>& records, std::string* errorOut) {
+    std::sort(records.begin(), records.end(), recordLess);
+    std::ofstream out(path.c_str(), std::ios::binary);
+    if (!out.good()) {
+        if (errorOut != nullptr) {
+            *errorOut = "cannot open hash cache output for write";
+        }
+        return false;
+    }
+    CacheHeaderRaw header {};
+    std::memcpy(header.magic, kCacheMagic, 8);
+    header.version = kCacheVersionSampleAware;
+    header.kmerLength = kCacheKmerLength;
+    header.recordSize = kCacheRecordSize;
+    header.recordCount = static_cast<uint64_t>(records.size());
+    out.write(reinterpret_cast<const char*>(&header), sizeof(header));
+    if (!out.good()) {
+        if (errorOut != nullptr) {
+            *errorOut = "cannot write hash cache header";
+        }
+        return false;
+    }
+    for (const Record& rec : records) {
+        CacheRecordRaw raw {};
+        raw.seqLo = rec.seqLo;
+        raw.seqHi = rec.seqHi;
+        raw.resolvedGeneIdx15 = rec.resolvedGeneIdx15;
+        raw.cacheClass = rec.cacheClass;
+        raw.negativeCode = rec.negativeCode;
+        raw.reserved = rec.sampleIdx;
+        out.write(reinterpret_cast<const char*>(&raw), sizeof(raw));
+        if (!out.good()) {
+            if (errorOut != nullptr) {
+                *errorOut = "cannot write hash cache record";
+            }
+            return false;
+        }
+    }
+    return true;
 }
 
 FlexHashScreenDecision FlexHashScreenCache::classifyRead(const char* readSeq, uint32_t readLen, uint16_t sampleIdx) const {

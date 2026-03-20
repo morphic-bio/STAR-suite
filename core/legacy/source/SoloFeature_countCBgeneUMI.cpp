@@ -162,11 +162,6 @@ void SoloFeature::countCBgeneUMI()
         }
 #endif
 
-        // Run clique correction if enabled (before collapseUMIall)
-        if (pSolo.umiCorrectionMode > 0) {
-            runCliqueCorrection();
-        }
-
         // After finalize(), rGeneUMI/rCBp are filled for collapseUMIall().
         // Compute per-CB sizes and initialize matrices to mirror legacy path.
         nReadPerCB.resize(nCB);

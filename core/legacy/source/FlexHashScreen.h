@@ -39,6 +39,11 @@ public:
     FlexHashScreenDecision classifyRead(const char* readSeq, uint32_t readLen, uint16_t sampleIdx) const;
     size_t recordCount() const { return records_.size(); }
 
+    /** Pack 50bp ACGT window into (seqLo, seqHi); same encoding as classifyRead. */
+    static bool encodeProbeWindow(const char* readSeq, uint32_t offset, uint64_t& seqLo, uint64_t& seqHi);
+    /** Write FH01SEQ1 v2 cache (sorted by seqHi, seqLo, sampleIdx). */
+    static bool writeHashCacheFile(const std::string& path, std::vector<Record>& records, std::string* errorOut);
+
 private:
     FlexHashScreenCache() = default;
 
