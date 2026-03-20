@@ -90,7 +90,7 @@ fi
     # Write GTF entry (single exon spanning entire sequence)
     # Format: seqname source feature start end score strand frame attributes
     printf "%s\tFLEX\texon\t1\t%d\t.\t+\t.\tgene_id \"%s\"; gene_name \"%s\"; transcript_id \"%s\"; probe_id \"%s\"; region \"%s\";\n" \
-        "$probe_id" "$seq_length" "$gene_name" "$gene_name" "$probe_id" "$probe_id" "$region" >> "$GTF_OUTPUT"
+        "$probe_id" "$seq_length" "$gene_id" "$gene_name" "$probe_id" "$probe_id" "$region" >> "$GTF_OUTPUT"
 done
 
 echo "Generated FASTA file: $FASTA_OUTPUT"

@@ -185,8 +185,55 @@ if [ "$NEED_HYBRID_REBUILD" = true ]; then
     cat "$PROBE_ONLY_FASTA" >> "$FILTERED_FASTA"
     log "Created hybrid FASTA: $FILTERED_FASTA"
 
-    log "  Copying base genome GTF..."
-    cp "$BASE_GTF_ABS" "$FILTERED_GTF"
+    # Build set of deprecated-only gene_ids to strip from base GTF
+    log "  Collecting deprecated-only gene IDs..."
+    DEPRECATED_GENE_IDS=$(python3 - <<'PYEOF' "$FILTERED_PROBE_CSV"
+import sys, csv
+csv_path = sys.argv[1]
+included_genes, all_genes = set(), set()
+with open(csv_path) as f:
+    for line in f:
+        if line.startswith('#') or line.startswith('gene_id,'): continue
+        parts = line.strip().split(',')
+        if len(parts) < 4: continue
+        all_genes.add(parts[0])
+        if parts[3] == 'TRUE':
+            included_genes.add(parts[0])
+deprecated_only = all_genes - included_genes
+for g in sorted(deprecated_only):
+    print(g)
+PYEOF
+    )
+    DEPRECATED_COUNT=$(echo "$DEPRECATED_GENE_IDS" | grep -c . || echo "0")
+    log "  Found $DEPRECATED_COUNT deprecated-only gene IDs to strip from GTF"
+
+    log "  Filtering base genome GTF (removing deprecated-only gene annotations)..."
+    if [ "$DEPRECATED_COUNT" -gt 0 ]; then
+        DEPRECATED_PATTERN_FILE=$(mktemp)
+        echo "$DEPRECATED_GENE_IDS" > "$DEPRECATED_PATTERN_FILE"
+        python3 - <<'PYEOF' "$BASE_GTF_ABS" "$FILTERED_GTF" "$DEPRECATED_PATTERN_FILE"
+import sys, re
+base_gtf, out_gtf, pattern_file = sys.argv[1], sys.argv[2], sys.argv[3]
+with open(pattern_file) as f:
+    deprecated = set(line.strip() for line in f if line.strip())
+gene_id_re = re.compile(r'gene_id\s+"([^"]+)"')
+dropped = 0
+with open(base_gtf) as fin, open(out_gtf, 'w') as fout:
+    for line in fin:
+        if line.startswith('#') or not deprecated:
+            fout.write(line)
+            continue
+        m = gene_id_re.search(line)
+        if m and m.group(1) in deprecated:
+            dropped += 1
+            continue
+        fout.write(line)
+print(f"GTF lines dropped: {dropped}", file=sys.stderr)
+PYEOF
+        rm -f "$DEPRECATED_PATTERN_FILE"
+    else
+        cp "$BASE_GTF_ABS" "$FILTERED_GTF"
+    fi
     log "  Appending filtered probe annotations..."
     cat "$PROBE_ONLY_GTF" >> "$FILTERED_GTF"
     log "Created hybrid GTF: $FILTERED_GTF"
