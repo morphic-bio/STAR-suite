@@ -67,9 +67,12 @@ struct FilterStats {
     uint32_t droppedInvalidSeq;
     uint32_t totalOutput;
     uint32_t uniqueGenes;
+    uint32_t deprecatedOnlyGenes;   // genes removed from base GTF (only have excluded probes)
+    uint32_t gtfLinesDropped;       // base GTF lines dropped due to deprecated gene filtering
     
     FilterStats() : totalInput(0), droppedDeprecated(0), droppedIncludedFalse(0), droppedNoMatch(0),
-                    droppedInvalidSeq(0), totalOutput(0), uniqueGenes(0) {}
+                    droppedInvalidSeq(0), totalOutput(0), uniqueGenes(0),
+                    deprecatedOnlyGenes(0), gtfLinesDropped(0) {}
 };
 
 // Result struct
@@ -91,6 +94,10 @@ bool parseProbeCSV(const std::string& csvPath, const std::unordered_set<std::str
                    uint32_t enforceLength, std::vector<ProbeEntry>& probes,
                    std::vector<std::string>& headerLines, std::string& headerRow,
                    FilterStats& stats, std::string& errorMsg);
+bool collectDeprecatedOnlyGeneIds(const std::string& csvPath,
+                                  const std::unordered_set<std::string>& includedGeneIds,
+                                  std::unordered_set<std::string>& deprecatedOnlyIds,
+                                  std::string& errorMsg);
 std::string computeSHA256(const std::string& filePath);
 
 } // namespace FlexProbeIndex

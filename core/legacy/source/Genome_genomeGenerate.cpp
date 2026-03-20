@@ -397,6 +397,7 @@ void Genome::genomeGenerate() {
     }
     
     // Flex gene probe processing - generate hybrid reference if enabled
+    FlexProbeIndex::Result fpResult;
     if (pGe.flexGeneProbe.enabled) {
         P.inOut->logMain << "Flex gene probe processing enabled, generating hybrid reference...\n";
         
@@ -425,7 +426,7 @@ void Genome::genomeGenerate() {
         P.inOut->logMain << "  Base FASTA: " << fpConfig.baseFastaPath << "\n";
         P.inOut->logMain << "  Output dir: " << fpConfig.outputDir << "\n";
         
-        FlexProbeIndex::Result fpResult = FlexProbeIndex::run(fpConfig);
+        fpResult = FlexProbeIndex::run(fpConfig);
         
         if (!fpResult.success) {
             exitWithError("EXITING because of FATAL ERROR in FlexProbeIndex: " + fpResult.errorMessage + "\n",
@@ -439,6 +440,8 @@ void Genome::genomeGenerate() {
         P.inOut->logMain << "    Dropped (DEPRECATED): " << fpResult.stats.droppedDeprecated << "\n";
         P.inOut->logMain << "    Dropped (included=FALSE): " << fpResult.stats.droppedIncludedFalse << "\n";
         P.inOut->logMain << "    Dropped (no GTF match): " << fpResult.stats.droppedNoMatch << "\n";
+        P.inOut->logMain << "    Deprecated-only genes stripped from GTF: " << fpResult.stats.deprecatedOnlyGenes << "\n";
+        P.inOut->logMain << "    GTF lines dropped: " << fpResult.stats.gtfLinesDropped << "\n";
         if (pGe.flexGeneProbe.removeDeprecatedBool) {
             P.inOut->logMain << "    Note: Deprecated gene IDs were removed from probe_list.txt (--removeDeprecated enabled)\n";
         }
@@ -480,6 +483,30 @@ void Genome::genomeGenerate() {
     *P.inOut->logStdOut  << timeMonthDayTime(rawTime) <<" ... starting to generate Genome files\n" <<flush;
 
     //define some parameters from input parameters
+    //
+    // Auto-tune genomeChrBinNbits for Flex hybrid references.
+    // With default=18, each 50bp probe chromosome wastes 256KB of padding.
+    // For 53K probes this inflates the genome by ~14GB and the SA by ~20GB.
+    // Follow STAR's own recommendation: min(18, log2(GenomeLength/nContigs)).
+    if (pGe.flexGeneProbe.enabled && pGe.gChrBinNbits == 18) {
+        // Estimate contig count: base genome contigs (~200) + probe pseudo-chromosomes
+        uint64_t estimatedContigs = 200 + fpResult.stats.totalOutput;
+        // Use base genome length (not inflated); 3.1GB for human
+        uint64_t estimatedGenomeLen = 3100000000ULL;
+        uint newBits = 18;
+        if (estimatedContigs > 0) {
+            double ratio = (double)estimatedGenomeLen / (double)estimatedContigs;
+            if (ratio < 50.0) ratio = 50.0;
+            newBits = (uint)std::min(18.0, std::floor(std::log2(ratio)));
+            if (newBits < 10) newBits = 10;
+        }
+        if (newBits < pGe.gChrBinNbits) {
+            P.inOut->logMain << "Auto-tuning genomeChrBinNbits for Flex: " << pGe.gChrBinNbits
+                             << " -> " << newBits << " (probes=" << fpResult.stats.totalOutput
+                             << ", estimated contigs=" << estimatedContigs << ")\n";
+            pGe.gChrBinNbits = newBits;
+        }
+    }
     genomeChrBinNbases=1LLU << pGe.gChrBinNbits;
 
     nGenome = genomeScanFastaFiles(P,NULL,false,*this);//first scan the fasta file to find all the sizes
