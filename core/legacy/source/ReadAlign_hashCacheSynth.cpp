@@ -4,7 +4,6 @@
 #include "SoloReadFeature.h"
 #include "SoloReadFeature_record_shared.h"
 #include "SoloFeatureTypes.h"
-#include "SampleDetector.h"
 #include "serviceFuns.cpp"
 
 #include <cstring>
@@ -77,7 +76,26 @@ bool ReadAlign::flexHashCacheValidateSyntheticPair(const char* r2seq, uint32_t l
 
     peOverlapMergeMap();
     multMapSelect();
+
+    // Only 50bp of the 90bp R2 aligns (the probe region); the rest is padding
+    // + sample tag. Score/match thresholds scaled by Lread (R2+R1=119) or even
+    // readLength[0] (90) reject every H1/H2 variant. Temporarily zero the
+    // per-read-length scaling so mappedFilter() uses only absolute thresholds.
+    const double savedScoreOvL = P.outFilterScoreMinOverLread;
+    const double savedMatchOvL = P.outFilterMatchNminOverLread;
+    P.outFilterScoreMinOverLread = 0;
+    P.outFilterMatchNminOverLread = 0;
     mappedFilter();
+    P.outFilterScoreMinOverLread = savedScoreOvL;
+    P.outFilterMatchNminOverLread = savedMatchOvL;
+
+    // Check mapping result now, before outputAlignments() which will set
+    // unmapType=4 because the barcode mate (R1) never maps to the genome.
+    if (unmapType >= 0 || nTr == 0) {
+        hashCacheSynthProbe_ = savedSynth;
+        return false;
+    }
+
     transformGenome();
 
     if (!peOv.yes) {
@@ -94,36 +112,11 @@ bool ReadAlign::flexHashCacheValidateSyntheticPair(const char* r2seq, uint32_t l
 
     hashCacheSynthProbe_ = savedSynth;
 
-    if (unmapType >= 0) {
-        return false;
-    }
-    if (nTr == 0) {
-        return false;
-    }
-
     if (soloRead == nullptr || soloRead->readBar == nullptr || soloRead->readFeat == nullptr) {
         return false;
     }
     SoloReadBarcode &soloBar = *soloRead->readBar;
-    if (soloBar.cbMatch < 0) {
-        return false;
-    }
 
-    // Match outputReadCB_flex tag policy (sample whitelist / require-match drops tagIdx==0)
-    uint8_t tagIdx = 0;
-    if (soloBar.detectedSampleToken != 0xFF) {
-        uint16_t sampleIdx = SampleDetector::sampleIndexForToken(soloBar.detectedSampleToken);
-        if (sampleIdx > 0) {
-            tagIdx = static_cast<uint8_t>(sampleIdx & 0x1F);
-        }
-    }
-    const bool dropUnmatchedTag =
-        ((!P.pSolo.sampleWhitelistPath.empty()) || P.pSolo.sampleRequireMatch) && (tagIdx == 0);
-    if (dropUnmatchedTag) {
-        return false;
-    }
-
-    // Match hash-screen path: ReadAlign_oneRead uses SoloFeatureTypes::Gene only (not GeneFull / other gene-like features).
     if (!P.pSolo.featureYes[SoloFeatureTypes::Gene] || P.pSolo.featureInd[SoloFeatureTypes::Gene] < 0) {
         return false;
     }
