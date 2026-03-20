@@ -379,6 +379,58 @@ bool parseProbeCSV(const std::string& csvPath, const std::unordered_set<std::str
     return true;
 }
 
+// Collect gene_ids that ONLY appear in included=FALSE rows of the probe CSV.
+// These are "deprecated-only" genes whose annotations should be stripped from the base GTF
+// to prevent alignment ambiguity with included probe genes.
+bool collectDeprecatedOnlyGeneIds(const std::string& csvPath,
+                                  const std::unordered_set<std::string>& includedGeneIds,
+                                  std::unordered_set<std::string>& deprecatedOnlyIds,
+                                  std::string& errorMsg) {
+    std::ifstream file(csvPath);
+    if (!file.is_open()) {
+        errorMsg = "Could not open probe CSV for deprecated scan: " + csvPath;
+        return false;
+    }
+
+    int geneIdCol = -1, includedCol = -1;
+    bool foundHeader = false;
+    std::unordered_set<std::string> allCsvGeneIds;
+    std::string line;
+
+    while (std::getline(file, line)) {
+        std::string trimmedLine = trim(line);
+        if (trimmedLine.empty() || trimmedLine[0] == '#') continue;
+
+        if (!foundHeader) {
+            foundHeader = true;
+            std::vector<std::string> headers = splitCSV(line);
+            for (size_t i = 0; i < headers.size(); i++) {
+                std::string h = trim(headers[i]);
+                if (h == "gene_id") geneIdCol = i;
+                else if (h == "included") includedCol = i;
+            }
+            if (geneIdCol < 0) {
+                errorMsg = "Required column 'gene_id' not found in header";
+                return false;
+            }
+            continue;
+        }
+
+        std::vector<std::string> fields = splitCSV(line);
+        if ((size_t)geneIdCol >= fields.size()) continue;
+        std::string geneId = trim(fields[geneIdCol]);
+        if (!geneId.empty())
+            allCsvGeneIds.insert(geneId);
+    }
+    file.close();
+
+    for (const auto& g : allCsvGeneIds) {
+        if (includedGeneIds.find(g) == includedGeneIds.end())
+            deprecatedOnlyIds.insert(g);
+    }
+    return true;
+}
+
 // Main entry point
 Result run(const Config& config) {
     Result result;
@@ -432,6 +484,21 @@ Result run(const Config& config) {
     
     // Step 4: Stable sort by gene_id then probe_id
     std::stable_sort(probes.begin(), probes.end());
+    
+    // Step 4b: Collect deprecated-only gene_ids to strip from base GTF.
+    // Genes that only have included=FALSE probes still have genomic annotations
+    // in the base GTF; these compete with included probe genes during alignment
+    // when gene bodies overlap.
+    std::unordered_set<std::string> includedGeneIds;
+    for (const auto& probe : probes) {
+        includedGeneIds.insert(probe.gene_id);
+    }
+    std::unordered_set<std::string> deprecatedOnlyGeneIds;
+    if (!collectDeprecatedOnlyGeneIds(config.probeCSVPath, includedGeneIds,
+                                      deprecatedOnlyGeneIds, result.errorMessage)) {
+        return result;
+    }
+    result.stats.deprecatedOnlyGenes = deprecatedOnlyGeneIds.size();
     
     // Step 5: Check for contig collisions
     for (const auto& probe : probes) {
@@ -503,7 +570,7 @@ Result run(const Config& config) {
             
             uint32_t seqLen = probe.probe_seq.length();
             gtfOut << probe.probe_id << "\tFLEX\texon\t1\t" << seqLen << "\t.\t+\t.\t"
-                   << "gene_id \"" << geneName << "\"; gene_name \"" << geneName << "\"; "
+                   << "gene_id \"" << probe.gene_id << "\"; gene_name \"" << geneName << "\"; "
                    << "transcript_id \"" << probe.probe_id << "\"; "
                    << "probe_id \"" << probe.probe_id << "\"; "
                    << "region \"" << probe.region << "\";\n";
@@ -535,9 +602,8 @@ Result run(const Config& config) {
         hybridOut.close();
     }
     
-    // Write hybrid GTF (copy base + append probes)
+    // Write hybrid GTF (copy base, filtering deprecated-only genes, + append probes)
     {
-        // Handle gzipped base GTF
         bool isGzip = config.gtfPath.length() > 3 && 
                       config.gtfPath.substr(config.gtfPath.length() - 3) == ".gz";
         
@@ -546,6 +612,26 @@ Result run(const Config& config) {
             result.errorMessage = "Could not create hybrid GTF";
             return result;
         }
+        
+        std::regex geneIdRegex("gene_id\\s+\"([^\"]+)\"");
+        uint32_t gtfDropped = 0;
+        
+        auto filterLine = [&](const std::string& line) {
+            if (line.empty() || line[0] == '#') {
+                hybridOut << line << "\n";
+                return;
+            }
+            if (!deprecatedOnlyGeneIds.empty()) {
+                std::smatch match;
+                if (std::regex_search(line, match, geneIdRegex) && match.size() > 1) {
+                    if (deprecatedOnlyGeneIds.count(match[1].str())) {
+                        gtfDropped++;
+                        return;
+                    }
+                }
+            }
+            hybridOut << line << "\n";
+        };
         
         if (isGzip) {
             std::string cmd = "zcat \"" + config.gtfPath + "\"";
@@ -557,14 +643,21 @@ Result run(const Config& config) {
             
             char buffer[65536];
             while (fgets(buffer, sizeof(buffer), fp)) {
-                hybridOut << buffer;
+                std::string line(buffer);
+                if (!line.empty() && line.back() == '\n') line.pop_back();
+                filterLine(line);
             }
             pclose(fp);
         } else {
             std::ifstream baseIn(config.gtfPath);
-            hybridOut << baseIn.rdbuf();
+            std::string line;
+            while (std::getline(baseIn, line)) {
+                filterLine(line);
+            }
             baseIn.close();
         }
+        
+        result.stats.gtfLinesDropped = gtfDropped;
         
         // Append probe GTF
         std::ifstream probeIn(probesOnlyGTF);
@@ -688,6 +781,8 @@ Result run(const Config& config) {
         out << "    \"total_output_probes\": " << result.stats.totalOutput << ",\n";
         out << "    \"unique_genes\": " << result.stats.uniqueGenes << ",\n";
         out << "    \"enforce_probe_length\": " << config.enforceProbeLength << ",\n";
+        out << "    \"deprecated_only_genes_in_gtf\": " << result.stats.deprecatedOnlyGenes << ",\n";
+        out << "    \"gtf_lines_dropped\": " << result.stats.gtfLinesDropped << ",\n";
         out << "    \"ordering\": \"stable_sort_gene_id_probe_id\"\n";
         out << "  },\n";
         
