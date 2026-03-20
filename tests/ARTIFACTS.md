@@ -362,3 +362,16 @@ These scripts validate that default bundles work with minimal explicit parameter
   - Barcodes: 61 only in hash_on, 7 only in legacy
   - Features: identical
 - Status: untracked
+
+## TranscriptVB PPARG Segfault Debug / Fix Validation (2026-03-20)
+
+- GDB repro on clean debug build:
+  - `/tmp/pe_bulk_vb_gdb_20260320_0944/`
+    - `gdb_bt.log`
+    - `run/Log.out`
+- Patched smoke validation after guarding early `RAchunk` free:
+  - `/tmp/pe_bulk_vb_patch_smoke_20260320_1009/`
+    - `run/Log.out`
+    - `stdout.log`
+    - `stderr.log`
+- Status: untracked
