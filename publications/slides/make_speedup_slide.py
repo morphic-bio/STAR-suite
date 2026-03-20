@@ -29,7 +29,7 @@ labels = [
     "MSK 30polyKO\n(669M, 3 lib)",
     "Flex SC2300771\n(2M reads)",
 ]
-speedups = [2.4, 2.1, 3.8, 3.2, 6.1, 2.0]
+speedups = [1.7, 2.4, 3.8, 3.2, 6.1, 2.0]
 types    = ["bulk", "bulk", "perturb", "perturb", "perturb", "flex"]
 color_map = {"bulk": BULK_COLOR, "perturb": PERTURB_COLOR, "flex": FLEX_COLOR}
 colors   = [color_map[t] for t in types]

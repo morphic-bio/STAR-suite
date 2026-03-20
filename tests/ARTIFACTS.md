@@ -388,4 +388,6 @@ These scripts validate that default bundles work with minimal explicit parameter
   - `/tmp/h01_keep_rate_patched2_20260320/`
 - Synthetic R1 offset fix + reduced ASAN leak check:
   - `/tmp/h2_asan_20260320/`
+- Full patched 30-thread H0/H1/H2 rerun:
+  - `/tmp/h2_full_rerun_20260320/`
 - Status: untracked

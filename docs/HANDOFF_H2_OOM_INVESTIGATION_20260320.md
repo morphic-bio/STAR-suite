@@ -2,7 +2,30 @@
 
 **Date**: 2026-03-20
 **Branch**: `benchmark-flex`
-**Status**: Streaming workaround in place; dedup container rewritten to packed khash, but full H2 OOM root cause is still open
+**Status**: Fixed on `benchmark-flex`; full 30-thread `H0,H1,H2` rerun completed successfully after the khash dedup rewrite and synthetic R1 off-by-one fix
+
+## Final Outcome For Testing Agent
+
+The old full H2 failure mode no longer reproduces on the patched branch.
+
+Validated full rerun:
+- output dir: `/tmp/h2_full_rerun_20260320/`
+- output cache: `/tmp/h2_full_rerun_20260320/test_h012_full.bin`
+- wall clock: `30:09.92`
+- max RSS: `83,404,608 kB`
+- exit status: `0`
+- final cache size: `11,734,634,976` bytes
+- final cache record count: `488,943,123`
+
+Practical conclusion:
+- the previous OOM at about `67 GB` / `~15 min` is gone
+- the generator now completes at full `H0,H1,H2` scale on the 128 GB host
+- the next agent should treat this as a validation handoff, not an active OOM-debug handoff
+
+Recommended next checks:
+- load the generated cache in the runtime screen and confirm it initializes cleanly
+- compare the new full cache summary against the prior H0/H1-only surface
+- if needed, run a spot 100K or 2M Flex hash-screen test against the new cache
 
 ## Problem
 
@@ -118,14 +141,18 @@ persist.
 coordinates. Check whether this path appends to any genome-level shared
 structure (e.g., splice junction arrays via `recordSJ`).
 
-## Current Workaround
+## Current Fix
 
-The streaming fix (already committed) avoids in-memory H2 record
-accumulation by writing per-thread binary temp files
-(`h2_tmp_t<tid>.bin`). This eliminates the vector-doubling overhead
-and caps record memory at near-zero. However, **if the leak is in the
-alignment pipeline itself, the streaming fix does not prevent it** — the
-process will still grow over 589M alignment calls.
+The active fix is now larger than the original streaming workaround:
+
+- per-thread H2 temp files are still used to avoid retained in-memory H2 vectors
+- H0/H1 are merged directly into a packed `khash` dedup table
+- H2 temp records are streamed back into that same `khash` and discarded immediately
+- the final `vector<Record>` is materialized only once, immediately before write
+- the synthetic R1 builder now writes CB/UMI at the same 1-based offsets that
+  the Solo extractor reads (`cbS-1`, `umiS-1`)
+
+This combination was sufficient to complete the full rerun.
 
 ## Follow-up: Dedup Container Rewrite
 
@@ -157,6 +184,16 @@ Replayed the reduced `--hashCacheParentLimit 100` sample after a clean rebuild.
 - old reference sample: `16,591` final records, `34,618,664 kB` peak RSS
 - patched rerun A: `16,590` final records, `34,618,580 kB` peak RSS
 - patched rerun B: `16,591` final records, `34,619,104 kB` peak RSS
+
+Canonical sample-path note:
+- the original sample H0/H1 cache path
+  `/tmp/h01_keep_rate_20260320_1033/test_h01_100.bin`
+  has now been overwritten in place with the corrected rerun from
+  `/tmp/h01_keep_rate_patched2_20260320/test_h01_100.bin`
+- verification after copy:
+  - size `398,208` bytes on both paths
+  - identical MD5:
+    `183dea9674feae3707c8e000b32b81f8`
 
 Interpretation:
 - the khash rewrite preserves the full H0/H1/H2 100-probe count exactly
@@ -211,6 +248,35 @@ Interpretation:
   - or per-call retained capacity / ratcheting buffers that do not appear as
     classic unreachable leaks at process exit
 
+## Full Rerun After Fixes
+
+After the khash rewrite and synthetic R1 offset fix, the full historical
+repro command was rerun unchanged except for the output path:
+
+- run dir: `/tmp/h2_full_rerun_20260320/`
+- output cache: `/tmp/h2_full_rerun_20260320/test_h012_full.bin`
+
+Observed result:
+- completed successfully with `Exit status: 0`
+- wall clock `30:09.92`
+- max RSS `83,404,608 kB`
+- output file size `11,734,634,976` bytes
+- output record count `488,943,123`
+
+The synthetic CB surface was also confirmed correct in the run log. The early
+debug lines now show:
+
+- `whitelistIdx=1`
+- `hammingDist=0`
+- `extractedCbIdxPlus1_=1`
+
+Interpretation:
+- the prior OOM was primarily a memory-shape/container problem, not a classic
+  large unreachable leak
+- the patched generator is now viable for full-cache production on this host
+- remaining work is downstream validation of the generated cache, not further
+  emergency memory debugging
+
 ## Files to Investigate
 
 | File | Relevance |
@@ -230,7 +296,8 @@ Interpretation:
 # Build
 make -C core/legacy/source clean && make -C core/legacy/source -j8 STAR
 
-# Run (will OOM at ~67 GB with 30 threads on 128 GB machine)
+# Historical reproduction command (previously OOM-killed at ~67 GB / ~15 min;
+# now completes on the patched branch)
 core/legacy/source/STAR \
   --runMode hashCacheGenerate \
   --runThreadN 30 \
@@ -256,8 +323,8 @@ core/legacy/source/STAR \
   --soloKeysCompat cr \
   --outSAMtype None \
   --hashCacheTiers "H0,H1,H2" \
-  --hashCacheOutput /tmp/test_h012.bin \
-  --outFileNamePrefix /tmp/test_h012/
+  --hashCacheOutput /tmp/h2_full_rerun_20260320/test_h012_full.bin \
+  --outFileNamePrefix /tmp/h2_full_rerun_20260320/
 ```
 
 Monitor with: `while sleep 10; do ps -o rss= -p $PID | awk '{printf "%.1f GB\n", $1/1048576}'; done`
