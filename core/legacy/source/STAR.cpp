@@ -1751,9 +1751,13 @@ int main(int argInN, char *argIn[])
 
     // Note: Two-pass unsorted CB/UB tag injection removed - not used in inline flex path
 
-    // Free RAchunk early when no downstream operations need it (no BAM, no gene quant, no Y-reads).
-    // This releases per-thread IO buffers, ReadAlign structures, and residual SoloReadFeature data.
+    // Free RAchunk early only when no later stage still needs per-thread alignment state.
+    // Regression note: commit 54f1108 freed RAchunk too aggressively and caused a PE
+    // TranscriptVB segfault on PPARG because transcript quant merges chunk-local EC state
+    // after mapping. Audit all downstream RAchunk consumers before broadening this guard.
+    // TranscriptVB, SLAM, and trim QC all merge chunk-local state after mapping completes.
     if (RAchunk != nullptr && !P.outSAMbool && !P.quant.geCount.yes
+        && !P.quant.transcriptVB.yes && !P.quant.slam.yes && !P.trimQcEnabled
         && !P.emitYReadNamesyes && !P.emitYNoYFastqyes && !batchModeActive) {
         for (int ichunk = 0; ichunk < P.runThreadN; ++ichunk) {
             delete RAchunk[ichunk];
