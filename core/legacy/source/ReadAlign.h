@@ -43,8 +43,9 @@ class ReadAlign {
         ~ReadAlign();
         int oneRead();
 
-        /** Synthetic Flex PE read (mate0=R2, mate1=R1) for --runMode hashCacheGenerate. Uses full map+annotate path; skips Solo record when hashCacheSynthProbe_. */
-        bool flexHashCacheValidateSyntheticPair(const char* r2seq, uint32_t lenR2, const char* r1seq, uint32_t lenR1, uint16_t expectedGeneIdx15);
+        /** Synthetic Flex PE read (mate0=R2, mate1=R1) for --runMode hashCacheGenerate.
+         *  Returns: 1=KEEP (correct gene), 0=DENY (mapped but wrong/ambiguous gene), -1=DEAD (unmapped). */
+        int flexHashCacheValidateSyntheticPair(const char* r2seq, uint32_t lenR2, const char* r1seq, uint32_t lenR1, uint16_t expectedGeneIdx15);
 
         Genome &mapGen, &genOut; //mapped-to-genome structure
 

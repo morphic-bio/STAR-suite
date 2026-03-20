@@ -160,14 +160,17 @@ static void buildR1FromParams(char* buf, uint32_t len, const ParametersSolo& ps,
     }
 }
 
+// verdict: 1=KEEP, 0=DENY, -1=DEAD (skip, don't store)
 static void appendVariantRecord(std::vector<FlexHashScreenCache::Record>& out, const char* var50, uint16_t gene15,
-                                uint8_t cacheClass, bool keep) {
+                                uint8_t cacheClass, int verdict) {
+    if (verdict < 0)
+        return; // DEAD: unmapped variant, no value in caching
     FlexHashScreenCache::Record r;
     if (!FlexHashScreenCache::encodeProbeWindow(var50, 0, r.seqLo, r.seqHi)) {
         return;
     }
     r.sampleIdx = 0;
-    if (keep) {
+    if (verdict > 0) {
         r.resolvedGeneIdx15 = gene15;
         r.cacheClass = cacheClass;
         r.negativeCode = 0;
@@ -376,9 +379,9 @@ void runFlexHashCacheGenerate(Parameters& P, Genome& genome, Transcriptome* tran
                         }
                         var[pos] = alt;
                         fillR2Layout(r2, var, tag8.c_str(), tagOff);
-                        const bool ok =
+                        const int verdict =
                             RA->flexHashCacheValidateSyntheticPair(r2, 90, r1buf.data(), P.pSolo.cbumiL, pr.geneIdx15);
-                        appendVariantRecord(local, var, pr.geneIdx15, 1, ok);
+                        appendVariantRecord(local, var, pr.geneIdx15, 1, verdict);
                         var[pos] = refb;
                     }
                 }
@@ -400,9 +403,9 @@ void runFlexHashCacheGenerate(Parameters& P, Genome& genome, Transcriptome* tran
                                 }
                                 var[p1] = *a1;
                                 fillR2Layout(r2, var, tag8.c_str(), tagOff);
-                                const bool ok2 = RA->flexHashCacheValidateSyntheticPair(r2, 90, r1buf.data(),
-                                                                                       P.pSolo.cbumiL, pr.geneIdx15);
-                                appendVariantRecord(local, var, pr.geneIdx15, 3, ok2);
+                                const int verdict2 = RA->flexHashCacheValidateSyntheticPair(r2, 90, r1buf.data(),
+                                                                                           P.pSolo.cbumiL, pr.geneIdx15);
+                                appendVariantRecord(local, var, pr.geneIdx15, 3, verdict2);
                                 var[p1] = r1b;
                             }
                         }

@@ -8,18 +8,18 @@
 
 #include <cstring>
 
-bool ReadAlign::flexHashCacheValidateSyntheticPair(const char* r2seq, uint32_t lenR2, const char* r1seq, uint32_t lenR1,
-                                                   uint16_t expectedGeneIdx15) {
+int ReadAlign::flexHashCacheValidateSyntheticPair(const char* r2seq, uint32_t lenR2, const char* r1seq, uint32_t lenR1,
+                                                  uint16_t expectedGeneIdx15) {
     const bool savedSynth = hashCacheSynthProbe_;
     hashCacheSynthProbe_ = true;
 
     if (r2seq == nullptr || r1seq == nullptr || lenR2 == 0 || lenR1 == 0) {
         hashCacheSynthProbe_ = savedSynth;
-        return false;
+        return -1;
     }
     if (P.readNmates != 2) {
         hashCacheSynthProbe_ = savedSynth;
-        return false;
+        return -1;
     }
 
     std::strncpy(readName, "@hashCacheSynth", DEF_readNameLengthMax - 1);
@@ -49,7 +49,7 @@ bool ReadAlign::flexHashCacheValidateSyntheticPair(const char* r2seq, uint32_t l
     readLengthPairOriginal = readLengthOriginal[0] + readLengthOriginal[1] + 1;
     if (Lread > DEF_readSeqLengthMax) {
         hashCacheSynthProbe_ = savedSynth;
-        return false;
+        return -1;
     }
 
     Read1[0][readLength[0]] = MARK_FRAG_SPACER_BASE;
@@ -93,7 +93,7 @@ bool ReadAlign::flexHashCacheValidateSyntheticPair(const char* r2seq, uint32_t l
     // unmapType=4 because the barcode mate (R1) never maps to the genome.
     if (unmapType >= 0 || nTr == 0) {
         hashCacheSynthProbe_ = savedSynth;
-        return false;
+        return -1; // DEAD: variant doesn't map
     }
 
     transformGenome();
@@ -104,7 +104,7 @@ bool ReadAlign::flexHashCacheValidateSyntheticPair(const char* r2seq, uint32_t l
 
     if (P.pCh.out.bam && chimRecord) {
         hashCacheSynthProbe_ = savedSynth;
-        return false;
+        return -1;
     }
 
     waspMap();
@@ -113,22 +113,22 @@ bool ReadAlign::flexHashCacheValidateSyntheticPair(const char* r2seq, uint32_t l
     hashCacheSynthProbe_ = savedSynth;
 
     if (soloRead == nullptr || soloRead->readBar == nullptr || soloRead->readFeat == nullptr) {
-        return false;
+        return -1;
     }
     SoloReadBarcode &soloBar = *soloRead->readBar;
 
     if (!P.pSolo.featureYes[SoloFeatureTypes::Gene] || P.pSolo.featureInd[SoloFeatureTypes::Gene] < 0) {
-        return false;
+        return -1;
     }
     SoloReadFeature *geneSoloFeat = soloRead->readFeat[P.pSolo.featureInd[SoloFeatureTypes::Gene]];
     const int32_t geneFeatureType = SoloFeatureTypes::Gene;
 
     const auto &readGe = readAnnot.annotFeatures[geneFeatureType].fSet;
     if (readGe.size() == 0) {
-        return false;
+        return -1; // DEAD: mapped but no gene annotation
     }
     if (readGe.size() > 1 && !P.pSolo.multiMap.yes.multi) {
-        return false;
+        return 0; // DENY: multi-gene hit, ambiguous
     }
 
     ReadSoloFeatures reFe;
@@ -138,5 +138,9 @@ bool ReadAlign::flexHashCacheValidateSyntheticPair(const char* r2seq, uint32_t l
     FlexGeneInlineResolveResult res = flexResolveGeneIdx15_inlineResolver(
         geneSoloFeat, soloBar, reFe, readAnnot, geneFeatureType, (uint64_t)-1);
 
-    return res.geneIdx15 != 0 && res.geneIdx15 == expectedGeneIdx15;
+    if (res.geneIdx15 != 0 && res.geneIdx15 == expectedGeneIdx15)
+        return 1; // KEEP: correct gene
+    if (res.geneIdx15 != 0)
+        return 0; // DENY: resolved to wrong gene
+    return 0; // DENY: resolver failed but read did map to gene(s)
 }
