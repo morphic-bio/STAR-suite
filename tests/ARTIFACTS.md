@@ -375,3 +375,17 @@ These scripts validate that default bundles work with minimal explicit parameter
     - `stdout.log`
     - `stderr.log`
 - Status: untracked
+
+## Hash Cache H2 OOM Investigation Samples (2026-03-20)
+
+- H0+H1+H2, 100 probes, 8 threads:
+  - `/tmp/h2_keep_rate_20260320_1020/`
+- H0+H1 only, 100 probes, 8 threads:
+  - `/tmp/h01_keep_rate_20260320_1033/`
+- Patched khash dedup rewrite validation:
+  - `/tmp/h2_keep_rate_patched_20260320/`
+  - `/tmp/h01_keep_rate_patched_20260320/`
+  - `/tmp/h01_keep_rate_patched2_20260320/`
+- Synthetic R1 offset fix + reduced ASAN leak check:
+  - `/tmp/h2_asan_20260320/`
+- Status: untracked
