@@ -122,6 +122,7 @@ update this file with its output location.
     - `/storage/ucsf-full/bench_20260218_dynamic_first/cellranger_runs/cr_full_iPSC2_1_AALG2_crstar32_20260218_205804/`
   - STAR vs CR parity report (dynamic 32x32 run):
     - `/tmp/ucsf_full_dynamic_32x32_vs_cr_20260224_101314/`
+- `/storage/flex_multilane_20K/SC2300771/` (multi-lane Flex smoke fixture: 8 lane pairs x 20K reads each = 160K PE reads total, seqtk seed=42, created by `tests/create_flex_multilane_20k_fixture.sh`)
 - `/storage/downsampled_100K/SC2300771/results/flex_h01_*` (Flex H0/H1 cache pilot artifacts, including synthetic cache builds, 100-probe parity runs, and full-probe cache/scan outputs)
 - `/storage/downsampled_100K/SC2300771/results/flex_hash_screen_internal_*` (internal Flex hash-screen 100K E2E runs, including the exact-parity full-16-whitelist run `flex_hash_screen_internal_full16_20260315_203745/`)
 

@@ -58,13 +58,20 @@ class Stats {
         uint64 hashScreenDeny;
         uint64 hashScreenPass;
 
-        // Flex stage timing instrumentation
-        uint64 sampleDetectPreAlignCalls;
-        uint64 sampleDetectPreAlignNs;
-        uint64 sampleDetectOutputCalls;
-        uint64 sampleDetectOutputNs;
-        uint64 alignCoreCalls;
-        uint64 alignCoreNs;
+    // Flex stage timing instrumentation
+    uint64 sampleDetectPreAlignCalls;
+    uint64 sampleDetectPreAlignNs;
+    uint64 sampleDetectOutputCalls;
+    uint64 sampleDetectOutputNs;
+    uint64 alignCoreCalls;
+    uint64 alignCoreNs;
+
+    // Pipeline diagnostics (per-thread, summed in addStats)
+    uint64 pipelineMutexWaitNs;
+    uint64 pipelineChunkReadNs;
+    uint64 pipelineChunkReadBytes;
+    uint64 pipelineChunksProcessed;
+    uint64 pipelineMapChunkNs;
 
         time_t timeStart, timeStartMap, timeFinishMap, timeLastReport, timeFinish;
         

@@ -618,6 +618,10 @@ Parameters::Parameters() {//initalize parameters info
 
     // Flex omnibus flag
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "flex", &pSolo.flexModeStr));
+    // Flex pipeline-parallel I/O mode
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "flexPipeline", &pSolo.flexPipelineStr));
+    parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "flexPipelineNSolo", &pSolo.flexPipelineNSolo));
+    parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "flexPipelineNTriage", &pSolo.flexPipelineNTriage));
     
     // FlexFilter inline integration
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "soloRunFlexFilter", &pSolo.runFlexFilterStr));

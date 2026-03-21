@@ -1787,6 +1787,21 @@ flex                         no
                             rebuild index with --flexGeneProbeSet <probe CSV>. Probe sets are not
                             downloaded - must be user-supplied.
 
+flexPipeline                 auto
+    string:                 auto|yes|no (default auto)
+                            auto        ... activate pipeline mode when Flex + hash screen + outSAMtype None + enough threads
+                            yes         ... force pipeline mode (fail if preconditions unmet)
+                            no          ... use legacy serial I/O path
+
+flexPipelineNSolo            2
+    int>=1:                 number of sharded Solo consumer threads in pipeline mode (default 2)
+                            Each consumer owns its own SoloReadFeature and inlineHash; merged at end of run.
+
+flexPipelineNTriage          2
+    int>=1:                 number of triage threads in pipeline mode (default 2)
+                            Each triage thread performs CB/UMI extraction, sample detection, and H0 lookup.
+                            Routes KEEP/DENY to Solo consumers, MISS to alignment workers.
+
 soloRunFlexFilter            no
     string:                 yes|no (default no)
                             yes         ... run flexfilter inline after composite MEX is written

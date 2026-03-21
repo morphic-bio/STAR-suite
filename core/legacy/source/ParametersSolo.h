@@ -337,6 +337,11 @@ public:
     // Flex omnibus flag - enables full Flex pipeline with production defaults
     string flexModeStr = "no";       // raw CLI: yes|no (default: no)
     bool flexMode = false;           // resolved: true if enabled
+
+    // Flex pipeline-parallel I/O mode
+    string flexPipelineStr = "auto"; // raw CLI: yes|no|auto (default: auto)
+    int flexPipelineNSolo = 2;       // number of sharded Solo consumers (default: 2)
+    int flexPipelineNTriage = 2;     // number of triage threads (default: 2)
     
     // FlexFilter inline integration
     string runFlexFilterStr = "no";  // raw CLI: yes|no (default: no)

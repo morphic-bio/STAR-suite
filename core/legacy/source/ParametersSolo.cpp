@@ -555,6 +555,24 @@ void ParametersSolo::initialize(Parameters *pPin)
         }
     }
 
+    // Flex pipeline parameter validation
+    if (flexPipelineStr != "yes" && flexPipelineStr != "no" && flexPipelineStr != "auto") {
+        ostringstream errOut;
+        errOut << "EXITING because of fatal PARAMETERS error: unrecognized --flexPipeline=" << flexPipelineStr << "\n";
+        errOut << "SOLUTION: use yes, no, or auto\n";
+        exitWithError(errOut.str(), std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
+    }
+    if (flexPipelineNSolo < 1 || flexPipelineNSolo > 16) {
+        ostringstream errOut;
+        errOut << "EXITING because of fatal PARAMETERS error: --flexPipelineNSolo=" << flexPipelineNSolo << " out of range [1, 16]\n";
+        exitWithError(errOut.str(), std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
+    }
+    if (flexPipelineNTriage < 0 || flexPipelineNTriage > 8) {
+        ostringstream errOut;
+        errOut << "EXITING because of fatal PARAMETERS error: --flexPipelineNTriage=" << flexPipelineNTriage << " out of range [0, 8] (0=fused reader+router)\n";
+        exitWithError(errOut.str(), std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
+    }
+
     //////////////////////////////////////////////////////////////////////////////////////////////////////
     /////////////////////////////// H0/H1 hash screen
     {
