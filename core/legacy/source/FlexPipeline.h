@@ -176,6 +176,8 @@ struct FlexLaneReaderArgs {
     gzFile gzR2;
     gzFile gzR1;
     int laneId;
+    SoloReadFeature *readFeat;  // non-null in fully-fused mode
+    Stats *stats;               // non-null in fully-fused mode
 };
 
 struct FlexSoloConsumerArgs {
@@ -203,6 +205,7 @@ struct FlexStatsReporterArgs {
 
 void *flexLaneReaderThread(void *arg);
 void *flexLaneReaderRouterThread(void *arg);
+void *flexLaneReaderFullThread(void *arg);
 void *flexTriageThread(void *arg);
 void *flexSoloConsumerThread(void *arg);
 void *flexAlignWorkerThread(void *arg);

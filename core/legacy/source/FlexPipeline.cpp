@@ -220,6 +220,142 @@ void *flexLaneReaderRouterThread(void *arg) {
     return nullptr;
 }
 
+void *flexLaneReaderFullThread(void *arg) {
+    FlexLaneReaderArgs *ctx = static_cast<FlexLaneReaderArgs *>(arg);
+    FlexPipelineState *st = ctx->state;
+    Parameters &P = *ctx->P;
+    const int laneId = ctx->laneId;
+    gzFile gzR2 = ctx->gzR2;
+    gzFile gzR1 = ctx->gzR1;
+    SoloReadFeature *readFeat = ctx->readFeat;
+    Stats *stats = ctx->stats;
+
+    auto &cache = FlexHashScreenCache::instance();
+    const uint32_t sampleTagOffset = P.pSolo.sampleProbeOffset;
+
+    SoloReadBarcode localBar(P);
+
+    SampleDetector *sampleDet = nullptr;
+    bool sampleDetReady = false;
+    if (!P.pSolo.sampleWhitelistPath.empty() && P.pSolo.sampleWhitelistPath != "-" &&
+        !P.pSolo.sampleProbesPath.empty() && P.pSolo.sampleProbesPath != "-") {
+        sampleDet = new SampleDetector(P.pSolo);
+        if (sampleDet->loadWhitelist(P.pSolo.sampleWhitelistPath) &&
+            sampleDet->loadProbes(P.pSolo.sampleProbesPath)) {
+            sampleDetReady = true;
+        } else {
+            delete sampleDet;
+            sampleDet = nullptr;
+        }
+    }
+
+    uint8_t packedScratch[4];
+    char dummySeq[4] = {'\0'};
+    char dummyQual[4] = {'\0'};
+
+    char lineBuf[kFlexPipeSeqMax + 256];
+    char seq0[kFlexPipeSeqMax], seq1[kFlexPipeSeqMax];
+    char qual0[kFlexPipeSeqMax], qual1[kFlexPipeSeqMax];
+    char name[kFlexPipeNameMax];
+
+    while (true) {
+        if (!gzReadLine(gzR2, lineBuf, sizeof(lineBuf))) break;
+        {
+            const char *src = lineBuf;
+            if (*src == '@') ++src;
+            size_t nameLen = 0;
+            while (src[nameLen] && src[nameLen] != ' ' && src[nameLen] != '\t')
+                ++nameLen;
+            if (nameLen >= kFlexPipeNameMax) nameLen = kFlexPipeNameMax - 1;
+            std::memcpy(name, src, nameLen);
+            name[nameLen] = '\0';
+        }
+        if (!gzReadLine(gzR2, seq0, kFlexPipeSeqMax)) break;
+        uint32_t readLen0 = static_cast<uint32_t>(strlen(seq0));
+        if (!gzReadLine(gzR2, lineBuf, sizeof(lineBuf))) break;
+        if (!gzReadLine(gzR2, qual0, kFlexPipeSeqMax)) break;
+
+        if (!gzReadLine(gzR1, lineBuf, sizeof(lineBuf))) break;
+        if (!gzReadLine(gzR1, seq1, kFlexPipeSeqMax)) break;
+        uint32_t readLen1 = static_cast<uint32_t>(strlen(seq1));
+        if (!gzReadLine(gzR1, lineBuf, sizeof(lineBuf))) break;
+        if (!gzReadLine(gzR1, qual1, kFlexPipeSeqMax)) break;
+
+        uint64_t iReadAll = st->iReadAllGlobal.fetch_add(1);
+        st->counters.perLaneReads[laneId]++;
+
+        FlexHashScreenDecision decision = cache.classifyReadH0Offset0(seq0, readLen0);
+
+        if (decision.action == FlexHashScreenDecision::Keep ||
+            decision.action == FlexHashScreenDecision::Deny) {
+
+            char *readSeqPtrs[2]  = { dummySeq, seq1 };
+            char *readQualPtrs[2] = { dummyQual, qual1 };
+            uint64 readLens[2]    = { 0, readLen1 };
+            std::string readNameExtra;
+
+            localBar.getCBandUMI(readSeqPtrs, readQualPtrs, readLens, readNameExtra,
+                                  static_cast<uint32_t>(laneId), name);
+
+            uint8_t detectedSampleToken = 0xFF;
+            if (sampleDetReady && sampleTagOffset + 8 <= readLen0) {
+                nuclPackBAM(seq0 + sampleTagOffset, reinterpret_cast<char *>(packedScratch), 8);
+                uint32_t detIdx = sampleDet->detectSampleFromPackedTag(packedScratch);
+                if (detIdx > 0) {
+                    detectedSampleToken = static_cast<uint8_t>(detIdx & 0x1Fu);
+                }
+            }
+            localBar.detectedSampleToken = detectedSampleToken;
+
+            if (decision.action == FlexHashScreenDecision::Keep) {
+                record_flex_hash_screen_keep(readFeat, localBar, iReadAll,
+                                             decision.geneIdx15, decision.cacheClass);
+                stats->hashScreenKeep++;
+                st->counters.triageKeep.fetch_add(1);
+            } else {
+                record_flex_hash_screen_deny(readFeat, localBar, iReadAll, "NEG_PROBE_AMBIG");
+                stats->hashScreenDeny++;
+                st->counters.triageDeny.fetch_add(1);
+            }
+        } else {
+            EnrichedPacket ep;
+            std::memcpy(ep.name, name, kFlexPipeNameMax);
+            std::memcpy(ep.seq[0], seq0, readLen0 + 1);
+            std::memcpy(ep.seq[1], seq1, readLen1 + 1);
+            std::memcpy(ep.qual[0], qual0, readLen0 + 1);
+            std::memcpy(ep.qual[1], qual1, readLen1 + 1);
+            ep.readLen[0] = readLen0;
+            ep.readLen[1] = readLen1;
+            ep.iReadAll = iReadAll;
+            ep.laneId = static_cast<uint8_t>(laneId);
+            ep.readFilesIndex = static_cast<uint32_t>(laneId);
+            ep.readFilter = 'Y';
+            ep.eof = false;
+            ep.cbMatch = -1;
+            ep.cbMatchIndN = 0;
+            ep.umiB = 0;
+            ep.detectedSampleToken = 0xFF;
+            ep.hashScreenSampleIdx = 0;
+
+            st->counters.triageMiss.fetch_add(1);
+            st->alignQ.push(std::move(ep));
+        }
+
+        st->counters.readsTotal.fetch_add(1);
+    }
+
+    gzclose(gzR2);
+    gzclose(gzR1);
+    delete sampleDet;
+
+    int finishedCount = st->readersFinished.fetch_add(1) + 1;
+    if (finishedCount == st->nLanes) {
+        st->alignQ.close();
+    }
+
+    return nullptr;
+}
+
 void *flexTriageThread(void *arg) {
     FlexTriageArgs *ctx = static_cast<FlexTriageArgs *>(arg);
     FlexPipelineState *st = ctx->state;
@@ -421,9 +557,13 @@ void *flexStatsReporterThread(void *arg) {
         size_t aqSize = st->alignQ.size();
 
         std::ostringstream soloQStr;
-        for (int i = 0; i < st->nSolo; ++i) {
-            if (i > 0) soloQStr << ",";
-            soloQStr << st->soloQ[i]->size();
+        if (st->nSolo > 0) {
+            for (int i = 0; i < st->nSolo; ++i) {
+                if (i > 0) soloQStr << ",";
+                soloQStr << st->soloQ[i]->size();
+            }
+        } else {
+            soloQStr << "n/a";
         }
 
         uint64_t delta = total - prevTotal;

@@ -562,9 +562,9 @@ void ParametersSolo::initialize(Parameters *pPin)
         errOut << "SOLUTION: use yes, no, or auto\n";
         exitWithError(errOut.str(), std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
     }
-    if (flexPipelineNSolo < 1 || flexPipelineNSolo > 16) {
+    if (flexPipelineNSolo < 0 || flexPipelineNSolo > 16) {
         ostringstream errOut;
-        errOut << "EXITING because of fatal PARAMETERS error: --flexPipelineNSolo=" << flexPipelineNSolo << " out of range [1, 16]\n";
+        errOut << "EXITING because of fatal PARAMETERS error: --flexPipelineNSolo=" << flexPipelineNSolo << " out of range [0, 16] (0=fully fused)\n";
         exitWithError(errOut.str(), std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
     }
     if (flexPipelineNTriage < 0 || flexPipelineNTriage > 8) {
