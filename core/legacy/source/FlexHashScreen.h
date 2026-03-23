@@ -40,6 +40,7 @@ public:
     FlexHashScreenDecision classifyRead(const char* readSeq, uint32_t readLen, uint16_t sampleIdx) const;
     FlexHashScreenDecision classifyReadH0Only(const char* readSeq, uint32_t readLen, uint16_t sampleIdx) const;
     FlexHashScreenDecision classifyReadH0Offset0(const char* readSeq, uint32_t readLen) const;
+    FlexHashScreenDecision classifyReadH0H1Offset0(const char* readSeq, uint32_t readLen) const;
     size_t recordCount() const { return records_.size(); }
     size_t h0RecordCount() const { return h0Records_.size(); }
     size_t h1DenyRecordCount() const { return h1DenyRecords_.size(); }
@@ -73,6 +74,7 @@ private:
 
     bool encodeWindowLUT(const char* readSeq, uint32_t offset, uint64_t& seqLo, uint64_t& seqHi) const;
     void buildH0NoSampleMap();
+    void buildH1DenyNoSampleMap();
 
     bool initialized_ = false;
     bool enabled_ = false;
@@ -81,6 +83,7 @@ private:
     std::vector<Record> h0Records_;
     std::vector<Record> h1DenyRecords_;
     H0NoSampleMap h0NoSampleMap_;
+    H0NoSampleMap h1DenyNoSampleMap_;
     static uint8_t baseLUT_[256];
     static bool lutInitialized_;
 };

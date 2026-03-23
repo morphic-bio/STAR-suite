@@ -12,6 +12,9 @@
 
 #include <cstring>
 #include <cstdlib>
+#include <fstream>
+#include <sstream>
+#include <unordered_set>
 #include <unistd.h>
 #include <chrono>
 
@@ -249,6 +252,84 @@ void *flexLaneReaderFullThread(void *arg) {
         }
     }
 
+    // Build sample code set for fast pre-filter: all valid variant codes
+    // across user-selected samples (nSamples * up to 8 variants each).
+    std::unordered_set<uint32_t> validSampleCodes;
+    if (sampleDetReady && sampleDet != nullptr) {
+        // Re-load whitelist+probes to get sampleCodes — use detectSampleFromPackedTag
+        // approach: pre-enumerate all valid codes by encoding each sample's variants.
+        // The SampleDetector stores sampleCodes_ privately, so we build the set by
+        // encoding the canonical + variants from the probe file.
+        // Simpler approach: iterate all 16 possible nibble-encoded 8-mers for each
+        // sample. But that's intractable. Instead, load the probe file directly.
+    }
+
+    // ASCII-to-nibble LUT for fast 8-byte sample tag encoding
+    static uint8_t asciiToNib[256] = {};
+    static bool nibLutInit = false;
+    if (!nibLutInit) {
+        std::memset(asciiToNib, 0, sizeof(asciiToNib));
+        asciiToNib['A'] = asciiToNib['a'] = 1;
+        asciiToNib['C'] = asciiToNib['c'] = 2;
+        asciiToNib['G'] = asciiToNib['g'] = 4;
+        asciiToNib['T'] = asciiToNib['t'] = 8;
+        nibLutInit = true;
+    }
+
+    // Build fast sample pre-filter: hash set of all valid uint32 sample codes.
+    // Encode each variant from the probe file the same way detectSampleFromPackedTag does.
+    std::unordered_set<uint32_t> samplePreFilter;
+    if (sampleDetReady) {
+        // Re-parse the probe file to extract all variant sequences
+        std::ifstream probeFile(P.pSolo.sampleProbesPath.c_str());
+        if (probeFile.is_open()) {
+            // Also load the whitelist canonicals into a set
+            std::unordered_set<std::string> userCanonicals;
+            {
+                std::ifstream wl(P.pSolo.sampleWhitelistPath.c_str());
+                std::string line;
+                while (std::getline(wl, line)) {
+                    std::istringstream iss(line);
+                    std::string id, canonical;
+                    if (iss >> id >> canonical) {
+                        userCanonicals.insert(canonical);
+                    }
+                }
+            }
+            // Add canonical sequences
+            for (const std::string &canon : userCanonicals) {
+                if (canon.size() == 8) {
+                    uint32_t code = 0;
+                    bool ok = true;
+                    for (int i = 0; i < 8; ++i) {
+                        uint8_t nib = asciiToNib[static_cast<uint8_t>(canon[i])];
+                        if (nib == 0) { ok = false; break; }
+                        code = (code << 4) | nib;
+                    }
+                    if (ok) samplePreFilter.insert(code);
+                }
+            }
+            // Add variants from probe file
+            std::string line;
+            while (std::getline(probeFile, line)) {
+                std::istringstream iss(line);
+                std::string variant, canonical, barcodeId;
+                if (!(iss >> variant >> canonical >> barcodeId)) continue;
+                if (variant.size() != 8 || canonical.size() != 8) continue;
+                if (userCanonicals.find(canonical) == userCanonicals.end()) continue;
+                uint32_t code = 0;
+                bool ok = true;
+                for (int i = 0; i < 8; ++i) {
+                    uint8_t nib = asciiToNib[static_cast<uint8_t>(variant[i])];
+                    if (nib == 0) { ok = false; break; }
+                    code = (code << 4) | nib;
+                }
+                if (ok) samplePreFilter.insert(code);
+            }
+        }
+    }
+    const bool hasSamplePreFilter = !samplePreFilter.empty();
+
     uint8_t packedScratch[4];
     char dummySeq[4] = {'\0'};
     char dummyQual[4] = {'\0'};
@@ -284,7 +365,28 @@ void *flexLaneReaderFullThread(void *arg) {
         uint64_t iReadAll = st->iReadAllGlobal.fetch_add(1);
         st->counters.perLaneReads[laneId]++;
 
-        FlexHashScreenDecision decision = cache.classifyReadH0Offset0(seq0, readLen0);
+        // Sample pre-filter: encode 8bp at sampleTagOffset, skip hash screen
+        // if the sample tag doesn't match any user-selected sample variant.
+        bool sampleOK = true;
+        if (hasSamplePreFilter && sampleTagOffset + 8 <= readLen0) {
+            uint32_t tagCode = 0;
+            bool encodable = true;
+            for (int i = 0; i < 8; ++i) {
+                uint8_t nib = asciiToNib[static_cast<uint8_t>(seq0[sampleTagOffset + i])];
+                if (nib == 0) { encodable = false; break; }
+                tagCode = (tagCode << 4) | nib;
+            }
+            if (!encodable || samplePreFilter.find(tagCode) == samplePreFilter.end()) {
+                sampleOK = false;
+            }
+        }
+
+        FlexHashScreenDecision decision;
+        if (sampleOK) {
+            decision = cache.classifyReadH0H1Offset0(seq0, readLen0);
+        } else {
+            decision.action = FlexHashScreenDecision::Pass;
+        }
 
         if (decision.action == FlexHashScreenDecision::Keep ||
             decision.action == FlexHashScreenDecision::Deny) {

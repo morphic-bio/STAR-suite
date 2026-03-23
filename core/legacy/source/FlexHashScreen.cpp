@@ -304,6 +304,7 @@ void FlexHashScreenCache::buildTieredVectors() {
     std::sort(h0Records_.begin(), h0Records_.end(), recordLess);
     std::sort(h1DenyRecords_.begin(), h1DenyRecords_.end(), recordLess);
     buildH0NoSampleMap();
+    buildH1DenyNoSampleMap();
 }
 
 // ── LUT for branchless base-to-2bit conversion ──────────────────────────────
@@ -343,6 +344,15 @@ void FlexHashScreenCache::buildH0NoSampleMap() {
     for (const Record& r : h0Records_) {
         SeqKeyNoSample key{r.seqLo, r.seqHi};
         h0NoSampleMap_.emplace(key, r);
+    }
+}
+
+void FlexHashScreenCache::buildH1DenyNoSampleMap() {
+    h1DenyNoSampleMap_.clear();
+    h1DenyNoSampleMap_.reserve(h1DenyRecords_.size() * 2);
+    for (const Record& r : h1DenyRecords_) {
+        SeqKeyNoSample key{r.seqLo, r.seqHi};
+        h1DenyNoSampleMap_.emplace(key, r);
     }
 }
 
@@ -396,6 +406,79 @@ FlexHashScreenDecision FlexHashScreenCache::classifyReadH0Offset0(const char* re
         out.negativeCode = 0;
         out.offset = 0;
     }
+    return out;
+}
+
+FlexHashScreenDecision FlexHashScreenCache::classifyReadH0H1Offset0(const char* readSeq, uint32_t readLen) const {
+    if (!initialized_ || !enabled_) {
+        FlexHashScreenDecision out;
+        out.action = FlexHashScreenDecision::Disabled;
+        return out;
+    }
+
+    if (readSeq == nullptr || readLen < kCacheKmerLength) {
+        FlexHashScreenDecision out;
+        out.action = FlexHashScreenDecision::Pass;
+        return out;
+    }
+
+    const uint32_t offset = static_cast<uint32_t>(kProbeStartOffset);
+    if (offset + kCacheKmerLength > readLen) {
+        FlexHashScreenDecision out;
+        out.action = FlexHashScreenDecision::Pass;
+        return out;
+    }
+
+    uint64_t seqLo = 0, seqHi = 0;
+    if (!encodeWindowLUT(readSeq, offset, seqLo, seqHi)) {
+        FlexHashScreenDecision out;
+        out.action = FlexHashScreenDecision::Pass;
+        return out;
+    }
+
+    SeqKeyNoSample key{seqLo, seqHi};
+
+    // H0 check
+    auto it = h0NoSampleMap_.find(key);
+    if (it != h0NoSampleMap_.end()) {
+        const Record& rec = it->second;
+        FlexHashScreenDecision out;
+        if (rec.negativeCode == FlexHashNegProbeAmbig) {
+            out.action = FlexHashScreenDecision::Deny;
+            out.geneIdx15 = 0;
+            out.cacheClass = rec.cacheClass;
+            out.negativeCode = rec.negativeCode;
+        } else {
+            out.action = FlexHashScreenDecision::Keep;
+            out.geneIdx15 = static_cast<uint16_t>(rec.resolvedGeneIdx15);
+            out.cacheClass = rec.cacheClass;
+        }
+        out.offset = 0;
+        return out;
+    }
+
+    // H1+Deny check (same key, different tier)
+    it = h1DenyNoSampleMap_.find(key);
+    if (it != h1DenyNoSampleMap_.end()) {
+        const Record& rec = it->second;
+        FlexHashScreenDecision out;
+        if (rec.cacheClass == 2 && rec.negativeCode == FlexHashNegProbeAmbig) {
+            out.action = FlexHashScreenDecision::Deny;
+            out.geneIdx15 = 0;
+            out.negativeCode = rec.negativeCode;
+        } else if (rec.resolvedGeneIdx15 > 0) {
+            out.action = FlexHashScreenDecision::Keep;
+            out.geneIdx15 = static_cast<uint16_t>(rec.resolvedGeneIdx15);
+        } else {
+            out.action = FlexHashScreenDecision::Pass;
+        }
+        out.cacheClass = rec.cacheClass;
+        out.offset = 0;
+        return out;
+    }
+
+    FlexHashScreenDecision out;
+    out.action = FlexHashScreenDecision::Pass;
     return out;
 }
 

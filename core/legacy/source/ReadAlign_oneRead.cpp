@@ -505,33 +505,9 @@ int ReadAlign::oneReadFromPacket(EnrichedPacket &pkt) {
     clipMates[1][0].clip(readLength[1], Read1[1]);
     clipMates[1][1].clip(readLength[1], Read1[1]);
 
-    // H1+deny hash screen lookup (triage already checked H0 and got MISS)
-    hashScreenDecision_ = FlexHashScreenDecision();
-    if (P.pSolo.hashScreenEnabled && soloRead != nullptr && soloRead->readBar != nullptr &&
-        soloRead->readFeat != nullptr && P.pSolo.featureYes[SoloFeatureTypes::Gene]) {
-        hashScreenDecision_ = FlexHashScreenCache::instance().classifyRead(
-            Read0[0], readLengthOriginal[0], pkt.hashScreenSampleIdx);
-        if (hashScreenDecision_.action == FlexHashScreenDecision::Keep) {
-            soloRead->readFlagReset();
-            SoloReadFeature *geneFeat = soloRead->readFeat[P.pSolo.featureInd[SoloFeatureTypes::Gene]];
-            bool handled = record_flex_hash_screen_keep(geneFeat, *soloRead->readBar, iReadAll,
-                                                        hashScreenDecision_.geneIdx15,
-                                                        hashScreenDecision_.cacheClass);
-            if (handled) {
-                statsRA.hashScreenKeep++;
-                return 0;
-            }
-            statsRA.hashScreenPass++;
-        } else if (hashScreenDecision_.action == FlexHashScreenDecision::Deny) {
-            statsRA.hashScreenDeny++;
-            soloRead->readFlagReset();
-            SoloReadFeature *geneFeat = soloRead->readFeat[P.pSolo.featureInd[SoloFeatureTypes::Gene]];
-            record_flex_hash_screen_deny(geneFeat, *soloRead->readBar, iReadAll, "NEG_PROBE_AMBIG");
-            return 0;
-        } else {
-            statsRA.hashScreenPass++;
-        }
-    }
+    // H0+H1 hash screen is now fully handled pre-queue by the fused lane thread.
+    // Alignment workers receive only true MISS reads — proceed directly to alignment.
+    statsRA.hashScreenPass++;
 
     // Combine PE mates with spacer base (mirrors oneRead path)
     if (P.readNmates == 2) {
