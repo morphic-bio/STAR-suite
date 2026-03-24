@@ -5,6 +5,8 @@
 #include "Stats.h"
 #include "GlobalVariables.h"
 #include "SoloReadFeature.h"
+#include "ErrorWarning.h"
+#include <sstream>
 
 void SoloFeature::sumThreads()
 {   
@@ -78,6 +80,14 @@ void SoloFeature::sumThreads()
 
     // if restarting from _STARtmp/solo* file
     if (P.runRestart.type==1) {//this could happen if the run is restarted. Would be better to save/load cbReadCount, or recalculate it from
+        for (int ii=0; ii<P.runThreadN; ii++) {
+            if (readFeatAll[ii] != nullptr && readFeatAll[ii]->binarySpool) {
+                ostringstream errOut;
+                errOut << "EXITING because STAR_SOLO_BINARY_SPOOL does not support restart parsing from existing solo temp files.\n"
+                       << "SOLUTION: rerun without restart files or disable STAR_SOLO_BINARY_SPOOL.\n";
+                exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
+            }
+        }
         if (pSolo.soloFlexMinimalMemory) {
             // Warn and skip restart even if inlineHashMode is false (flag will be ignored but restart still skipped)
             P.inOut->logMain << "WARNING: --soloFlexMinimalMemory is enabled; skipping restart logic that depends on stream files/packed read info" << endl;
