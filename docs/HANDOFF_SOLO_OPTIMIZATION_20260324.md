@@ -939,6 +939,98 @@ Current conclusion:
 - remaining differences are small enough to investigate as residual edge-case
   parity issues rather than architectural gaps
 
+## 2M Unique Benchmark for Unified CR-Style Bridge
+
+After switching away from the full sample for runtime reasons, I ran a matched
+`2,000,000`-read UCSF `iPSC2_1/GEX` downsample benchmark in
+`--soloMultiMappers Unique` mode on the current branch.
+
+Artifacts:
+
+- legacy control:
+  `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_legacy/`
+- unified non-Flex bridge (`STAR_SOLO_NONFLEX_HASH_BRIDGE=1`,
+  `--soloInlineHashMode yes`):
+  `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_hashbridge/`
+
+Measured Solo timings from `run/Log.out`:
+
+- legacy:
+  - `collapseUMIall 0.540971 s`
+  - `countCBgeneUMI 1.00476 s`
+  - `outputResults(raw) 0.128359 s`
+  - `outputResults(filtered) 0.0657186 s`
+  - `cellFiltering 0.0675458 s`
+  - `processRecords 1.2246 s`
+- bridge:
+  - `collapseUMIall 0.43801 s`
+  - `countCBgeneUMI 0.624055 s`
+  - `outputResults(raw) 0.126878 s`
+  - `outputResults(filtered) 0.0737178 s`
+  - `cellFiltering 0.0755331 s`
+  - `processRecords 1.08528 s`
+
+Timing deltas:
+
+- `countCBgeneUMI`: about `1.61x` faster on the bridge
+  (`1.00476 s -> 0.624055 s`, saving `0.380705 s`)
+- `collapseUMIall`: about `1.24x` faster on the bridge
+  (`0.540971 s -> 0.43801 s`, saving `0.102961 s`)
+- `processRecords`: about `1.13x` faster on the bridge
+  (`1.2246 s -> 1.08528 s`, saving `0.13932 s`)
+- `outputResults(raw)` is effectively flat
+- `outputResults(filtered)` and `cellFiltering` are slightly slower on the
+  bridge, but by only a few milliseconds
+
+Top-line outputs:
+
+- legacy:
+  - `Number of Reads = 2000000`
+  - `Reads Mapped to GeneFull: Unique GeneFull = 0.746895`
+  - `Estimated Number of Cells = 7211`
+  - `Unique Reads in Cells Mapped to GeneFull = 1438379`
+  - `UMIs in Cells = 1313762`
+  - `Total GeneFull Detected = 17782`
+  - `Sequencing Saturation = 0.0865785`
+- bridge:
+  - `Number of Reads = 2000000`
+  - `Reads Mapped to GeneFull: Unique GeneFull = 0.746586`
+  - `Estimated Number of Cells = 7211`
+  - `Unique Reads in Cells Mapped to GeneFull = 1437767`
+  - `UMIs in Cells = 1306937`
+  - `Total GeneFull Detected = 17766`
+  - `Sequencing Saturation = 0.0901919`
+
+Feature-stat differences:
+
+- legacy:
+  - `yesWLmatch = 1493789`
+  - `yessubWLmatchExact = 1460058`
+  - `noTooManyWLmatches = 4499`
+  - `yesCellBarcodes = 40650`
+  - `yesUMIs = 1364459`
+- bridge:
+  - `yesWLmatch = 1493172`
+  - `yessubWLmatchExact = 1460058`
+  - `noTooManyWLmatches = 5115`
+  - `yesCellBarcodes = 41440`
+  - `yesUMIs = 1358500`
+
+Interpretation:
+
+- the unified non-Flex inline-hash route still produces a real Solo-phase win
+  at `2M`
+- the clearest gain remains `countCBgeneUMI`, which is now about `1.6x` faster
+  on this larger benchmark
+- `processRecords` also improves, but only modestly, because non-counting work
+  still dominates the post-map phase
+- the output drift at `2M` is consistent with the earlier policy decision to
+  keep the Cell Ranger/Flex-style Bayesian ambiguous-CB resolver instead of
+  forcing strict legacy `ptot/pmax` parity
+- so this benchmark should be interpreted as: the route is worthwhile from a
+  speed perspective, and the remaining output differences are an intentional
+  algorithmic choice rather than an unresolved bridge corruption bug
+
 ## Related Files Worth Reading
 
 - [SoloFeature_countCBgeneUMI.cpp](/mnt/pikachu/STAR-suite/core/legacy/source/SoloFeature_countCBgeneUMI.cpp)

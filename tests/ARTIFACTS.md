@@ -167,6 +167,10 @@ update this file with its output location.
     `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_100k_unique_hashbridge_v12/`
   - Targeted trace run for the `73` bridge-only raw barcodes:
     `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_100k_unique_hashbridge_trace73/`
+  - Matched 2M `soloMultiMappers=Unique` legacy control:
+    `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_legacy/`
+  - Matched 2M `soloMultiMappers=Unique` unified non-Flex bridge run:
+    `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_hashbridge/`
   - Failed debug iterations while bringing up the experimental bridge:
     - `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_100k_unique_hashbridge_v2/`
     - `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_100k_unique_hashbridge_v3/`
