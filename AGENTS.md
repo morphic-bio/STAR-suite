@@ -11,6 +11,14 @@ actionable; link to deeper docs rather than copying them.
 - Large data and test outputs stay untracked; document their locations in
   `tests/ARTIFACTS.md`.
 
+## Local Agent Override
+
+- If `AGENTS.local.md` exists at the repo root, read it before doing any work
+  that depends on local datasets, references, installation paths, or host
+  policy.
+- `AGENTS.local.md` is intentionally untracked and host-specific. Use
+  `AGENTS.local.md.example` as the template.
+
 ## Repository Map
 
 - `core/legacy/` - upstream STAR layout (single source of truth).
@@ -190,13 +198,15 @@ Configuration: `mcp_server/config.yaml`
 
 ## Branching and Merges
 
-- Feature branches merge into `perturb`, then squash-merge into `master`.
+- Feature branches merge into `perturb`, then merge into `master`.
+- Do not squash-merge branches that touch shared core files; preserve the DAG
+  with `git merge --no-ff` so later integrations keep a usable merge base.
 - Keep large binaries and datasets untracked; update `.gitignore` if needed.
 
 ### Safe Merge Policy
 
-Squash merges have caused silent regressions by dropping critical code when
-two branches modify the same file. Follow these rules:
+Large shared-file merges have caused silent regressions by dropping critical
+code when two branches modify the same file. Follow these rules:
 
 - **Never squash-merge branches that touch `assignBarcodes.c` or other large
   shared files.** Use `git merge --no-ff` instead; this preserves the DAG so
@@ -219,9 +229,6 @@ two branches modify the same file. Follow these rules:
 - **Prefer rebase-merge** (`git rebase <target> && git merge --no-ff`) for
   branches touching core files. This gives clean linear history while
   preserving merge-base information.
-- **Squash merges are safe only for** isolated leaf changes (docs, scripts,
-  configs, CI files) that do not touch files concurrently modified on other
-  branches.
 
 ## GitHub Actions CI/CD Policy
 

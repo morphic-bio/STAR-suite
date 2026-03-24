@@ -1,0 +1,35 @@
+# Local Agent Notes
+
+This file is intentionally a local, untracked override for host-specific paths
+and installation details.
+
+Usage:
+- Copy this file to `AGENTS.local.md`
+- Edit the copied file for the local machine
+- Do not commit `AGENTS.local.md`
+
+Suggested contents:
+
+## Canonical Local References
+
+- Local harmonized GRCh38 STAR index:
+  `/storage/autoindex_110_44/bulk_index`
+- Cell Ranger-style wrapper around the same local index:
+  `/storage/autoindex_110_44/refdata-gex-GRCh38-autoindex11044-cellranger`
+
+## Important Reference Provenance
+
+- `/storage/autoindex_110_44/refdata-gex-GRCh38-autoindex11044-crstar/star`
+  is not a local STAR build. Its `star/` files resolve into:
+  `/storage/A375-CR-9.01/refdata-gex-GRCh38-2024-A/star`
+- Use it only when you explicitly want the Cell Ranger frozen STAR index.
+
+## Local Policy
+
+- For STAR-only analysis, prefer:
+  `/storage/autoindex_110_44/bulk_index`
+- For Cell Ranger-style wrappers that should still use the local STAR index,
+  prefer:
+  `/storage/autoindex_110_44/refdata-gex-GRCh38-autoindex11044-cellranger`
+- Do not assume similarly named GRCh38 reference roots use distinct STAR
+  indices. Check symlink targets first.
