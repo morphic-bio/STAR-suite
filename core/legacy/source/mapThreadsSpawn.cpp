@@ -48,7 +48,8 @@ static bool flexPipelineActivationGuard(Parameters &P) {
     int nLanes = static_cast<int>(P.readFilesN);
     int nTriage = ps.flexPipelineNTriage;
     int nSolo = ps.flexPipelineNSolo;
-    int minThreads = nLanes + nTriage + nSolo + 1;
+    bool fullyFused = (nTriage == 0 && nSolo == 0);
+    int minThreads = fullyFused ? 1 : (nLanes + nTriage + nSolo + 1);
     if (P.runThreadN < minThreads) {
         P.inOut->logMain << "Flex pipeline: not active (runThreadN=" << P.runThreadN
                          << " < minimum " << minThreads << " for " << nLanes << " lanes + "
@@ -75,24 +76,109 @@ static void mapThreadsSpawnFlexPipeline(Parameters &P, ReadAlignChunk** RAchunk)
     const bool fusedReaderRouter = (nTriage == 0 && nSolo > 0);
     const int actualNTriage = (nTriage == 0) ? 0 : nTriage;
     const int actualNSolo = fullyFused ? 0 : nSolo;
-    const int nWorkers = P.runThreadN - nLanes - actualNTriage - actualNSolo;
+    const int nWorkers = fullyFused ? 0 : (P.runThreadN - nLanes - actualNTriage - actualNSolo);
+    const int nFusedThreads = fullyFused ? P.runThreadN : 0;
 
+    const bool noAlign = (P.pSolo.flexNoAlign != 0);
     P.inOut->logMain << "Flex pipeline: runThreadN=" << P.runThreadN
                      << ", nLanes=" << nLanes
                      << ", triage=" << actualNTriage
-                     << (fullyFused ? " (fully fused read+route+solo)" :
+                     << (fullyFused ? " (fully fused + lane steal + role switch)" :
                          fusedReaderRouter ? " (fused reader+router)" : "")
                      << ", soloConsumers=" << actualNSolo
-                     << ", workers=" << nWorkers << "\n" << std::flush;
+                     << ", fusedThreads=" << nFusedThreads
+                     << ", dedicatedWorkers=" << nWorkers
+                     << (noAlign ? ", noAlign=ON (alignment skipped)" : "")
+                     << "\n" << std::flush;
 
     FlexPipelineState state;
     state.init(nLanes, actualNSolo, actualNTriage);
 
-    // Per-lane SoloReadFeature + Stats for fully-fused mode
-    std::vector<SoloReadFeature *> laneFeats(fullyFused ? nLanes : 0);
-    std::vector<Stats> laneStats(fullyFused ? nLanes : 0);
+    // Store lane file paths for dynamic claiming (fully-fused mode)
+    if (fullyFused) {
+        state.laneFiles.resize(nLanes);
+        for (int lane = 0; lane < nLanes; ++lane) {
+            state.laneFiles[lane].r2path = P.readFilesNames[0][lane];
+            state.laneFiles[lane].r1path = P.readFilesNames[1][lane];
+        }
+        state.nFusedThreads = nFusedThreads;
+    }
 
-    // --- Stage 1: Lane threads ---
+    // Per-thread SoloReadFeature + Stats for fully-fused mode
+    std::vector<SoloReadFeature *> fusedFeats(nFusedThreads);
+    std::vector<Stats> fusedStats(nFusedThreads);
+
+    if (fullyFused) {
+        // All runThreadN threads are fused: they steal lanes, then switch to alignment
+        std::vector<pthread_t> fusedThreads(nFusedThreads);
+        std::vector<FlexLaneReaderArgs> fusedArgs(nFusedThreads);
+
+        for (int i = 0; i < nFusedThreads; ++i) {
+            fusedFeats[i] = new SoloReadFeature(SoloFeatureTypes::Gene, P, -(200 + i));
+            fusedStats[i] = Stats();
+            fusedArgs[i].state = &state;
+            fusedArgs[i].P = &P;
+            fusedArgs[i].gzR2 = nullptr;
+            fusedArgs[i].gzR1 = nullptr;
+            fusedArgs[i].laneId = -1;
+            fusedArgs[i].readFeat = fusedFeats[i];
+            fusedArgs[i].stats = &fusedStats[i];
+            fusedArgs[i].RA = RAchunk[i]->RA;
+            fusedArgs[i].threadId = i;
+            pthread_create(&fusedThreads[i], nullptr, flexLaneReaderFullThread, &fusedArgs[i]);
+        }
+        P.inOut->logMain << "  " << nFusedThreads << " fused threads started (lane-steal + role-switch)\n" << std::flush;
+
+        // Stats reporter
+        pthread_t reporterThread;
+        FlexStatsReporterArgs reporterArgs;
+        reporterArgs.state = &state;
+        reporterArgs.P = &P;
+        pthread_create(&reporterThread, nullptr, flexStatsReporterThread, &reporterArgs);
+
+        // Join all fused threads (they self-transition from reader to aligner)
+        for (int i = 0; i < nFusedThreads; ++i) pthread_join(fusedThreads[i], nullptr);
+        P.inOut->logMain << "  All fused threads joined\n" << std::flush;
+
+        state.pipelineDone.store(true, std::memory_order_relaxed);
+        pthread_join(reporterThread, nullptr);
+        P.inOut->logMain << "  Stats reporter joined\n" << std::flush;
+
+        // Merge stats from all fused threads
+        for (int i = 0; i < nFusedThreads; ++i) {
+            g_statsAll.addStats(fusedStats[i]);
+            if (!noAlign)
+                g_statsAll.addStats(RAchunk[i]->RA->statsRA);
+        }
+        g_statsAll.readN = state.counters.readsTotal.load();
+
+        // Merge Solo hashes
+        if (P.pSolo.inlineHashMode && P.pSolo.featureYes[SoloFeatureTypes::Gene]) {
+            SoloReadFeature *workerGeneFeat = RAchunk[0]->RA->soloRead->readFeat[P.pSolo.featureInd[SoloFeatureTypes::Gene]];
+            for (int i = 0; i < nFusedThreads; ++i) {
+                workerGeneFeat->mergeInlineHash(*fusedFeats[i]);
+            }
+        }
+
+        for (int i = 0; i < nFusedThreads; ++i) delete fusedFeats[i];
+
+        P.inOut->logMain << "Flex pipeline complete: total=" << state.counters.readsTotal.load()
+                         << ", triageKeep=" << state.counters.triageKeep.load()
+                         << ", triageDeny=" << state.counters.triageDeny.load()
+                         << ", triageMiss=" << state.counters.triageMiss.load() << "\n";
+        for (int i = 0; i < nLanes; ++i) {
+            P.inOut->logMain << "  Lane " << i << ": " << state.counters.perLaneReads[i] << " reads\n";
+        }
+        P.inOut->logMain << std::flush;
+        return;
+    }
+
+    // --- Non-fused paths (legacy pipeline modes) ---
+
+    // Per-lane SoloReadFeature + Stats (not used in non-fused)
+    std::vector<SoloReadFeature *> laneFeats;
+    std::vector<Stats> laneStats;
+
     std::vector<pthread_t> readerThreads(nLanes);
     std::vector<FlexLaneReaderArgs> readerArgs(nLanes);
     for (int lane = 0; lane < nLanes; ++lane) {
@@ -116,15 +202,10 @@ static void mapThreadsSpawnFlexPipeline(Parameters &P, ReadAlignChunk** RAchunk)
         readerArgs[lane].laneId = lane;
         readerArgs[lane].readFeat = nullptr;
         readerArgs[lane].stats = nullptr;
+        readerArgs[lane].RA = nullptr;
+        readerArgs[lane].threadId = lane;
 
-        if (fullyFused) {
-            laneFeats[lane] = new SoloReadFeature(SoloFeatureTypes::Gene, P, -(200 + lane));
-            laneStats[lane] = Stats();
-            readerArgs[lane].readFeat = laneFeats[lane];
-            readerArgs[lane].stats = &laneStats[lane];
-            pthread_create(&readerThreads[lane], nullptr, flexLaneReaderFullThread, &readerArgs[lane]);
-            P.inOut->logMain << "  Flex full-fused lane " << lane << " started\n" << std::flush;
-        } else if (fusedReaderRouter) {
+        if (fusedReaderRouter) {
             pthread_create(&readerThreads[lane], nullptr, flexLaneReaderRouterThread, &readerArgs[lane]);
             P.inOut->logMain << "  Flex reader+router lane " << lane << " started\n" << std::flush;
         } else {
@@ -143,7 +224,7 @@ static void mapThreadsSpawnFlexPipeline(Parameters &P, ReadAlignChunk** RAchunk)
         P.inOut->logMain << "  Flex triage " << i << " started\n" << std::flush;
     }
 
-    // --- Stage 3a: Solo consumers (skipped in fully-fused mode) ---
+    // --- Stage 3a: Solo consumers ---
     std::vector<pthread_t> soloThreads(actualNSolo);
     std::vector<FlexSoloConsumerArgs> soloArgs(actualNSolo);
     std::vector<SoloReadFeature *> soloFeats(actualNSolo);
@@ -202,11 +283,6 @@ static void mapThreadsSpawnFlexPipeline(Parameters &P, ReadAlignChunk** RAchunk)
     for (int i = 0; i < actualNSolo; ++i) {
         g_statsAll.addStats(soloStats[i]);
     }
-    if (fullyFused) {
-        for (int i = 0; i < nLanes; ++i) {
-            g_statsAll.addStats(laneStats[i]);
-        }
-    }
     for (int i = 0; i < nWorkers; ++i) {
         g_statsAll.addStats(RAchunk[i]->RA->statsRA);
     }
@@ -219,18 +295,10 @@ static void mapThreadsSpawnFlexPipeline(Parameters &P, ReadAlignChunk** RAchunk)
         for (int i = 0; i < actualNSolo; ++i) {
             workerGeneFeat->mergeInlineHash(*soloFeats[i]);
         }
-        if (fullyFused) {
-            for (int i = 0; i < nLanes; ++i) {
-                workerGeneFeat->mergeInlineHash(*laneFeats[i]);
-            }
-        }
     }
 
     // Cleanup
     for (int i = 0; i < actualNSolo; ++i) delete soloFeats[i];
-    if (fullyFused) {
-        for (int i = 0; i < nLanes; ++i) delete laneFeats[i];
-    }
 
     // Log pipeline counters
     P.inOut->logMain << "Flex pipeline complete: total=" << state.counters.readsTotal.load()

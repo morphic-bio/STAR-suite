@@ -248,25 +248,74 @@ gene compared to the full 3-offset H1 search.
 | Total UMI delta | −376 out of 228M (0.00016%) |
 | reads_before/after | Identical: 1,673,223,131 |
 
-### CR9 parity (filtered cells)
+### CR9 parity (filtered cells, full 2.011B reads, GRCh38-2024-A)
 
-| Sample | STAR cells | CR9 cells | Barcode Jaccard | Gene Pearson |
+CellRanger 9.0.1 reference: `/mnt/pikachu/benchmark_cr9_flex_full/` (March 19,
+32 cores, 59 min, `create-bam false`).
+
+Both STAR and CR9 use GRCh38-2024-A genome and probe set v1.1.0.
+
+| Sample | STAR cells | CR9 cells | Barcode Jaccard | Cell Pearson | Gene Pearson |
+|--------|----------:|----------:|----------------:|-------------:|-------------:|
+| BC004 (WT-Day-7) | 4,384 | 4,397 | 0.966 | 0.99997 | 0.99990 |
+| BC006 (PAX6-PTC-D9-Day7) | 5,283 | 5,343 | 0.979 | 0.99998 | 0.99992 |
+| BC007 (WT-Day-8) | 5,383 | 5,383 | 0.992 | 0.99997 | 0.99994 |
+| BC008 (PAX6-PTC-D9-Day8) | 5,266 | 5,296 | 0.988 | 0.99998 | 0.99995 |
+| **Mean** | | | **0.981** | **0.99998** | **0.99993** |
+
+Cell Pearson = per-barcode total-UMI Pearson on common barcodes (Spearman also
+≥0.9997). Gene Pearson = per-probe total-UMI Pearson on common features
+(Spearman ≥0.9999). CR barcodes truncated to 16bp GEM prefix for comparison.
+
+**Note on annotation version**: Using mismatched annotations (STAR v1.0.1 /
+GRCh38-2020-A vs CR9 v1.1.0 / GRCh38-2024-A) drops Gene Pearson to ~0.09
+while Cell Pearson remains >0.999. Always match annotation versions for
+gene-level parity.
+
+### CR7 parity (filtered cells, full 2.011B reads, GRCh38-2020-A)
+
+CellRanger 7.0.0 reference: `/home/lhhung/cellranger-multi/` (Dec 2023
+production run, 32 cores, ~5 hr, with BAM output).
+
+STAR used GRCh38-2020-A (probe set v1.0.1) to match CR7's annotation.
+
+| Sample | STAR cells | CR7 cells | Barcode Jaccard | Cell Pearson |
 |--------|----------:|----------:|----------------:|-------------:|
-| BC004 (WT-Day-7) | 4,393 | 4,397 | 0.965 | 0.996 |
-| BC006 (PAX6-PTC-D9-Day7) | 5,288 | 5,343 | 0.978 | 0.994 |
-| BC007 (WT-Day-8) | 5,366 | 5,383 | 0.991 | 0.996 |
-| BC008 (PAX6-PTC-D9-Day8) | 5,258 | 5,296 | 0.987 | 0.996 |
-| **Mean** | | | **0.980** | **0.996** |
+| BC004 (WT-Day-7) | 4,555 | 4,416 | 0.956 | 0.9997 |
+| BC006 (PAX6-PTC-D9-Day7) | 5,440 | 5,348 | 0.965 | 0.9998 |
+| BC007 (WT-Day-8) | 5,468 | 5,383 | 0.979 | 0.9997 |
+| BC008 (PAX6-PTC-D9-Day8) | 5,382 | 5,297 | 0.981 | 0.9997 |
+| **Mean** | | | **0.970** | **0.9997** |
+
+Gene Pearson not reported for CR7 comparison because the STAR run used the
+2020-A reference matching CR7; gene-level parity was validated via the CR9
+comparison above using matching 2024-A annotations.
+
+### No-Align mode (`--flexNoAlign 1`)
+
+No-align mode skips alignment for H0/H1 misses (~16% of reads). Cell counts
+are identical to full mode (within 1 cell). Parity vs CR9 is unchanged.
+
+| Mode | Mapping | Solo | Total | vs CR9 | vs CR7 (with BAM) |
+|------|---------|------|-------|--------|-------------------|
+| Full | 20m 16s | 2m 4s | **22 min** | **2.7x** | **~14x** |
+| No-align | 8m 16s | 1m 48s | **10 min** | **5.9x** | **~30x** |
+
+Parity script: `scripts/paper/run_flex_parity.sh`
+Output (2024-A): `comparisons/flex_fullalign_2024_parity_20260323_235045/`
+Output (2020-A, CR7): `comparisons/flex_parity_20260323_215847/`
 
 ## Pipeline Architecture (fully-fused mode)
 
-### Thread allocation (32 threads, 8 lanes)
+### Thread allocation (32 threads, 8 lanes, lane-stealing mode)
 
 | Role | Count | Function |
 |------|------:|----------|
-| Lane reader+Solo (fully-fused) | 8 | `flexLaneReaderFullThread` |
-| Alignment workers | 24 | Standard STAR alignment |
-| Stats reporter | 1 | (shares with worker) |
+| Fused threads (lane reader+Solo→aligner) | 32 | `flexLaneReaderFullThread` |
+
+All 32 threads start as lane readers, dynamically claiming lanes via
+`atomic<int> nextLaneIdx`. After all 8 lanes are claimed, idle threads
+switch to alignment-worker role, draining `alignQ`.
 
 ### Per-lane thread work (full decision tree)
 
@@ -336,13 +385,19 @@ gene compared to the full 3-offset H1 search.
 
 ### Short-term optimizations
 
-2. **H2 cache coverage** — build from 1M+ read pilot to push KEEP rate from
-   83% toward 93–97%, reducing alignment calls further. Each 1% KEEP gain
-   saves ~30s of alignment wall time.
+2. ~~**H2 cache coverage**~~ — **evaluated and dropped**. The H2 pipeline
+   (synthetic FASTQ generation → per-shard STAR alignment → MEX-based
+   reclassification → binary merge) was implemented and tested. The
+   incremental KEEP gain did not justify the complexity: the 980-shard
+   external pipeline took hours to run, the additional 2-mismatch variants
+   added marginal coverage over H1, and the combined H0+H1 offset-0 lookup
+   already resolves 84.7% of reads. Not worth pursuing further.
 
-3. **Alignment worker efficiency** — `alignQ=256` (full) means alignment is
-   now the bottleneck. Profile alignment hotspots with `perf` to find
-   micro-optimization opportunities for 50bp Flex reads.
+3. ~~**Alignment worker efficiency**~~ — **dropped**. STAR's core alignment
+   is already highly optimized. The remaining 15.3% MISS reads genuinely
+   need full alignment. Parameter tuning changes semantics; SIMD rewrites
+   are high-effort marginal-gain. The practical lever is recovering idle
+   threads via M5 lane work-stealing.
 
 ### Medium-term
 
@@ -355,10 +410,96 @@ gene compared to the full 3-offset H1 search.
    deterministic `iReadAll` assignment (lane-local counters) would fix this
    if strict bit-level reproducibility is required.
 
-6. **Dynamic thread balancing** — currently 8 lanes = 8 reader threads
-   (fixed). If lanes have unequal sizes, some readers finish early and their
-   threads are wasted. A work-stealing or dynamic lane assignment scheme
-   could improve tail latency.
+6. **Lane work-stealing + reader-to-aligner role switch** — see design below.
+
+7. **Probe list / hash cache consistency check** — the MEX writer now pads
+   and warns when `--soloProbeList` has fewer entries than the hash cache
+   references, but a startup validation that compares the two lists and
+   emits a clear diagnostic would prevent confusion. Root cause: the cache
+   at `h01_cache.bin` was built with the 18,129-entry 2024 probe list
+   (`probe_gene_list.txt`), while the runtime was using the 18,082-entry
+   filtered list (`probe_list.txt`). Always use the same probe list for
+   cache generation and mapping.
+
+### Dynamic thread balancing design (item 6)
+
+**Priority**: medium-term, after the fused pipeline is validated at full
+scale and throughput/parity are confirmed.
+
+**Problem**: the current fused pipeline permanently binds one thread per
+lane (8 lanes → 8 reader threads). If lanes are unequal in size, the
+shorter lanes finish early and their threads sit idle while the longest
+lane (and alignment workers) are still running. Dynamic permits alone do
+not help — permits throttle alignment concurrency but cannot reclaim a
+finished reader thread.
+
+**Design**: the smallest change that enables tail-latency recovery:
+
+```
+                    ┌──────────────────┐
+                    │  Lane Job Queue  │  (atomic pop; initially L0..L7)
+                    └────────┬─────────┘
+                             │
+         ┌───────────────────┼───────────────────┐
+         ▼                   ▼                   ▼
+   ┌──────────┐        ┌──────────┐        ┌──────────┐
+   │ Worker 0 │        │ Worker 1 │        │  ...  7  │
+   │ (reader) │        │ (reader) │        │ (reader) │
+   └────┬─────┘        └────┬─────┘        └────┬─────┘
+        │ lane done?         │                   │
+        ▼                    │                   │
+   pop next lane             │                   │
+   from queue ───► if empty: │                   │
+        │         switch to  │                   │
+        │         aligner ───┼──► drain alignQ   │
+        │                    │    as alignment   │
+        ▼                    ▼    worker          ▼
+```
+
+**Three components, each small and self-contained**:
+
+1. **Shared lane-job queue** (`std::atomic<int> nextLane`). Instead of
+   binding thread *i* to lane *i*, each fused thread atomically increments
+   `nextLane` to claim work. If there are more threads than lanes, extra
+   threads skip straight to step 3. If lanes > threads (unusual), threads
+   loop back for another lane after finishing one.
+
+2. **Lane work-stealing**. When a fused thread finishes its lane, it
+   attempts to pop the next unclaimed lane from the queue. If one exists,
+   it opens the new gzFile and resumes the fused read loop. The per-thread
+   `SoloReadFeature` / `SoloReadBarcode` state is already lane-independent
+   (the inline hash is global), so no state migration is needed.
+
+3. **Reader-to-aligner role transition**. When the lane queue is exhausted
+   and the thread has no more lanes to read, it enters the alignment worker
+   loop: pop `EnrichedPacket` from `alignQ`, call `oneReadFromPacket()`,
+   repeat until `alignQ` signals done. This requires each fused thread to
+   carry a `ReadAlignChunk*` (already allocated in `mapThreadsSpawn.cpp`).
+
+**Invariants preserved**:
+- The hot path (fused read loop) is unchanged — no new branches or locks
+  on the per-read path.
+- `alignQ` semantics are unchanged — it gains extra consumers, not
+  producers.
+- Solo inline hash recording is thread-safe (already uses per-thread
+  shards or atomics).
+- Total thread count stays at `runThreadN`; no new threads are created.
+
+**What NOT to do**:
+- Do not add a scheduler, work-stealing framework, or dynamic thread pool.
+- Do not change the fused read loop's per-read hot path.
+- Do not add permits/semaphores to gate reader threads — the problem is
+  thread *idleness*, not thread *oversubscription*.
+
+**Expected impact**: on the JAX 8-lane dataset, lanes are nearly equal
+(247–255M reads each, ~3% variation), so the tail-latency gain is small
+(~30–60s). The optimization matters more for datasets with heterogeneous
+lane sizes or fewer lanes than threads (e.g. 4-lane NovaSeq S4 on a
+32-thread machine, where 28 threads would be idle during reading).
+
+**Validation**: run the same 2.01B-read benchmark with the new code and
+confirm (a) identical `PIPELINE_STATS` total/keep/deny/miss counts,
+(b) identical or near-identical Solo MEX output, (c) wall time ≤ current.
 
 ## Benchmark Run Reference
 

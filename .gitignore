@@ -145,3 +145,6 @@ flex/tools/clique_replay/test_fanout
 
 ## Codespaces demo cache
 /.codespaces-demo/
+
+## Machine-local agent notes (not committed)
+AGENTS_local.md

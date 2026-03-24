@@ -223,111 +223,87 @@ void *flexLaneReaderRouterThread(void *arg) {
     return nullptr;
 }
 
-void *flexLaneReaderFullThread(void *arg) {
-    FlexLaneReaderArgs *ctx = static_cast<FlexLaneReaderArgs *>(arg);
-    FlexPipelineState *st = ctx->state;
-    Parameters &P = *ctx->P;
-    const int laneId = ctx->laneId;
-    gzFile gzR2 = ctx->gzR2;
-    gzFile gzR1 = ctx->gzR1;
-    SoloReadFeature *readFeat = ctx->readFeat;
-    Stats *stats = ctx->stats;
+// Shared one-time init for the sample pre-filter (thread-safe via call_once)
+static std::unordered_set<uint32_t> g_samplePreFilter;
+static std::once_flag g_samplePreFilterFlag;
 
+static void buildSamplePreFilter(Parameters &P) {
+
+    static uint8_t asciiToNib[256] = {};
+    std::memset(asciiToNib, 0, sizeof(asciiToNib));
+    asciiToNib['A'] = asciiToNib['a'] = 1;
+    asciiToNib['C'] = asciiToNib['c'] = 2;
+    asciiToNib['G'] = asciiToNib['g'] = 4;
+    asciiToNib['T'] = asciiToNib['t'] = 8;
+
+    if (P.pSolo.sampleWhitelistPath.empty() || P.pSolo.sampleWhitelistPath == "-" ||
+        P.pSolo.sampleProbesPath.empty() || P.pSolo.sampleProbesPath == "-")
+        return;
+
+    std::unordered_set<std::string> userCanonicals;
+    {
+        std::ifstream wl(P.pSolo.sampleWhitelistPath.c_str());
+        std::string line;
+        while (std::getline(wl, line)) {
+            std::istringstream iss(line);
+            std::string id, canonical;
+            if (iss >> id >> canonical) userCanonicals.insert(canonical);
+        }
+    }
+    auto encodeTag = [&](const std::string &tag) -> uint32_t {
+        if (tag.size() != 8) return 0;
+        uint32_t code = 0;
+        for (int i = 0; i < 8; ++i) {
+            uint8_t nib = asciiToNib[static_cast<uint8_t>(tag[i])];
+            if (nib == 0) return 0;
+            code = (code << 4) | nib;
+        }
+        return code;
+    };
+    for (const std::string &canon : userCanonicals) {
+        uint32_t c = encodeTag(canon);
+        if (c) g_samplePreFilter.insert(c);
+    }
+    std::ifstream probeFile(P.pSolo.sampleProbesPath.c_str());
+    std::string line;
+    while (std::getline(probeFile, line)) {
+        std::istringstream iss(line);
+        std::string variant, canonical, barcodeId;
+        if (!(iss >> variant >> canonical >> barcodeId)) continue;
+        if (userCanonicals.find(canonical) == userCanonicals.end()) continue;
+        uint32_t c = encodeTag(variant);
+        if (c) g_samplePreFilter.insert(c);
+    }
+}
+
+static uint8_t g_asciiToNib[256];
+static std::once_flag g_asciiToNibFlag;
+
+static void initAsciiToNib() {
+    std::memset(g_asciiToNib, 0, sizeof(g_asciiToNib));
+    g_asciiToNib['A'] = g_asciiToNib['a'] = 1;
+    g_asciiToNib['C'] = g_asciiToNib['c'] = 2;
+    g_asciiToNib['G'] = g_asciiToNib['g'] = 4;
+    g_asciiToNib['T'] = g_asciiToNib['t'] = 8;
+}
+
+static void ensureAsciiToNibInit() {
+    std::call_once(g_asciiToNibFlag, initAsciiToNib);
+}
+
+// Process one lane: read all FASTQ records, hash screen, inline Solo for hits, push misses to alignQ.
+// All per-thread state (localBar, sampleDet, scratch buffers) is owned by the caller
+// and reused across lane claims — no per-lane allocation.
+static uint64_t processOneLane(
+    FlexPipelineState *st, Parameters &P, int laneId,
+    gzFile gzR2, gzFile gzR1,
+    SoloReadFeature *readFeat, Stats *stats,
+    const std::unordered_set<uint32_t> &samplePreFilter,
+    SampleDetector *sampleDet, bool sampleDetReady,
+    SoloReadBarcode &localBar, bool noAlign = false)
+{
     auto &cache = FlexHashScreenCache::instance();
     const uint32_t sampleTagOffset = P.pSolo.sampleProbeOffset;
-
-    SoloReadBarcode localBar(P);
-
-    SampleDetector *sampleDet = nullptr;
-    bool sampleDetReady = false;
-    if (!P.pSolo.sampleWhitelistPath.empty() && P.pSolo.sampleWhitelistPath != "-" &&
-        !P.pSolo.sampleProbesPath.empty() && P.pSolo.sampleProbesPath != "-") {
-        sampleDet = new SampleDetector(P.pSolo);
-        if (sampleDet->loadWhitelist(P.pSolo.sampleWhitelistPath) &&
-            sampleDet->loadProbes(P.pSolo.sampleProbesPath)) {
-            sampleDetReady = true;
-        } else {
-            delete sampleDet;
-            sampleDet = nullptr;
-        }
-    }
-
-    // Build sample code set for fast pre-filter: all valid variant codes
-    // across user-selected samples (nSamples * up to 8 variants each).
-    std::unordered_set<uint32_t> validSampleCodes;
-    if (sampleDetReady && sampleDet != nullptr) {
-        // Re-load whitelist+probes to get sampleCodes — use detectSampleFromPackedTag
-        // approach: pre-enumerate all valid codes by encoding each sample's variants.
-        // The SampleDetector stores sampleCodes_ privately, so we build the set by
-        // encoding the canonical + variants from the probe file.
-        // Simpler approach: iterate all 16 possible nibble-encoded 8-mers for each
-        // sample. But that's intractable. Instead, load the probe file directly.
-    }
-
-    // ASCII-to-nibble LUT for fast 8-byte sample tag encoding
-    static uint8_t asciiToNib[256] = {};
-    static bool nibLutInit = false;
-    if (!nibLutInit) {
-        std::memset(asciiToNib, 0, sizeof(asciiToNib));
-        asciiToNib['A'] = asciiToNib['a'] = 1;
-        asciiToNib['C'] = asciiToNib['c'] = 2;
-        asciiToNib['G'] = asciiToNib['g'] = 4;
-        asciiToNib['T'] = asciiToNib['t'] = 8;
-        nibLutInit = true;
-    }
-
-    // Build fast sample pre-filter: hash set of all valid uint32 sample codes.
-    // Encode each variant from the probe file the same way detectSampleFromPackedTag does.
-    std::unordered_set<uint32_t> samplePreFilter;
-    if (sampleDetReady) {
-        // Re-parse the probe file to extract all variant sequences
-        std::ifstream probeFile(P.pSolo.sampleProbesPath.c_str());
-        if (probeFile.is_open()) {
-            // Also load the whitelist canonicals into a set
-            std::unordered_set<std::string> userCanonicals;
-            {
-                std::ifstream wl(P.pSolo.sampleWhitelistPath.c_str());
-                std::string line;
-                while (std::getline(wl, line)) {
-                    std::istringstream iss(line);
-                    std::string id, canonical;
-                    if (iss >> id >> canonical) {
-                        userCanonicals.insert(canonical);
-                    }
-                }
-            }
-            // Add canonical sequences
-            for (const std::string &canon : userCanonicals) {
-                if (canon.size() == 8) {
-                    uint32_t code = 0;
-                    bool ok = true;
-                    for (int i = 0; i < 8; ++i) {
-                        uint8_t nib = asciiToNib[static_cast<uint8_t>(canon[i])];
-                        if (nib == 0) { ok = false; break; }
-                        code = (code << 4) | nib;
-                    }
-                    if (ok) samplePreFilter.insert(code);
-                }
-            }
-            // Add variants from probe file
-            std::string line;
-            while (std::getline(probeFile, line)) {
-                std::istringstream iss(line);
-                std::string variant, canonical, barcodeId;
-                if (!(iss >> variant >> canonical >> barcodeId)) continue;
-                if (variant.size() != 8 || canonical.size() != 8) continue;
-                if (userCanonicals.find(canonical) == userCanonicals.end()) continue;
-                uint32_t code = 0;
-                bool ok = true;
-                for (int i = 0; i < 8; ++i) {
-                    uint8_t nib = asciiToNib[static_cast<uint8_t>(variant[i])];
-                    if (nib == 0) { ok = false; break; }
-                    code = (code << 4) | nib;
-                }
-                if (ok) samplePreFilter.insert(code);
-            }
-        }
-    }
     const bool hasSamplePreFilter = !samplePreFilter.empty();
 
     uint8_t packedScratch[4];
@@ -338,6 +314,8 @@ void *flexLaneReaderFullThread(void *arg) {
     char seq0[kFlexPipeSeqMax], seq1[kFlexPipeSeqMax];
     char qual0[kFlexPipeSeqMax], qual1[kFlexPipeSeqMax];
     char name[kFlexPipeNameMax];
+
+    uint64_t nReads = 0;
 
     while (true) {
         if (!gzReadLine(gzR2, lineBuf, sizeof(lineBuf))) break;
@@ -364,15 +342,14 @@ void *flexLaneReaderFullThread(void *arg) {
 
         uint64_t iReadAll = st->iReadAllGlobal.fetch_add(1);
         st->counters.perLaneReads[laneId]++;
+        nReads++;
 
-        // Sample pre-filter: encode 8bp at sampleTagOffset, skip hash screen
-        // if the sample tag doesn't match any user-selected sample variant.
         bool sampleOK = true;
         if (hasSamplePreFilter && sampleTagOffset + 8 <= readLen0) {
             uint32_t tagCode = 0;
             bool encodable = true;
             for (int i = 0; i < 8; ++i) {
-                uint8_t nib = asciiToNib[static_cast<uint8_t>(seq0[sampleTagOffset + i])];
+                uint8_t nib = g_asciiToNib[static_cast<uint8_t>(seq0[sampleTagOffset + i])];
                 if (nib == 0) { encodable = false; break; }
                 tagCode = (tagCode << 4) | nib;
             }
@@ -420,27 +397,28 @@ void *flexLaneReaderFullThread(void *arg) {
                 st->counters.triageDeny.fetch_add(1);
             }
         } else {
-            EnrichedPacket ep;
-            std::memcpy(ep.name, name, kFlexPipeNameMax);
-            std::memcpy(ep.seq[0], seq0, readLen0 + 1);
-            std::memcpy(ep.seq[1], seq1, readLen1 + 1);
-            std::memcpy(ep.qual[0], qual0, readLen0 + 1);
-            std::memcpy(ep.qual[1], qual1, readLen1 + 1);
-            ep.readLen[0] = readLen0;
-            ep.readLen[1] = readLen1;
-            ep.iReadAll = iReadAll;
-            ep.laneId = static_cast<uint8_t>(laneId);
-            ep.readFilesIndex = static_cast<uint32_t>(laneId);
-            ep.readFilter = 'Y';
-            ep.eof = false;
-            ep.cbMatch = -1;
-            ep.cbMatchIndN = 0;
-            ep.umiB = 0;
-            ep.detectedSampleToken = 0xFF;
-            ep.hashScreenSampleIdx = 0;
-
             st->counters.triageMiss.fetch_add(1);
-            st->alignQ.push(std::move(ep));
+            if (!noAlign) {
+                EnrichedPacket ep;
+                std::memcpy(ep.name, name, kFlexPipeNameMax);
+                std::memcpy(ep.seq[0], seq0, readLen0 + 1);
+                std::memcpy(ep.seq[1], seq1, readLen1 + 1);
+                std::memcpy(ep.qual[0], qual0, readLen0 + 1);
+                std::memcpy(ep.qual[1], qual1, readLen1 + 1);
+                ep.readLen[0] = readLen0;
+                ep.readLen[1] = readLen1;
+                ep.iReadAll = iReadAll;
+                ep.laneId = static_cast<uint8_t>(laneId);
+                ep.readFilesIndex = static_cast<uint32_t>(laneId);
+                ep.readFilter = 'Y';
+                ep.eof = false;
+                ep.cbMatch = -1;
+                ep.cbMatchIndN = 0;
+                ep.umiB = 0;
+                ep.detectedSampleToken = 0xFF;
+                ep.hashScreenSampleIdx = 0;
+                st->alignQ.push(std::move(ep));
+            }
         }
 
         st->counters.readsTotal.fetch_add(1);
@@ -448,13 +426,77 @@ void *flexLaneReaderFullThread(void *arg) {
 
     gzclose(gzR2);
     gzclose(gzR1);
-    delete sampleDet;
 
+    return nReads;
+}
+
+void *flexLaneReaderFullThread(void *arg) {
+    FlexLaneReaderArgs *ctx = static_cast<FlexLaneReaderArgs *>(arg);
+    FlexPipelineState *st = ctx->state;
+    Parameters &P = *ctx->P;
+    SoloReadFeature *readFeat = ctx->readFeat;
+    Stats *stats = ctx->stats;
+    ReadAlign *RA = ctx->RA;
+
+    ensureAsciiToNibInit();
+    std::call_once(g_samplePreFilterFlag, buildSamplePreFilter, std::ref(P));
+    const auto &samplePreFilter = g_samplePreFilter;
+    const bool noAlign = (P.pSolo.flexNoAlign != 0);
+
+    // Preallocate once per thread — reused across all lane claims
+    SoloReadBarcode localBar(P);
+    SampleDetector *sampleDet = nullptr;
+    bool sampleDetReady = false;
+
+    // Phase 1: Lane work-stealing loop — claim and process lanes until none remain
+    int lane;
+    while ((lane = st->claimNextLane()) >= 0) {
+        // Lazy-init SampleDetector on first lane claim (threads that never
+        // claim a lane skip the file I/O entirely)
+        if (sampleDet == nullptr &&
+            !P.pSolo.sampleWhitelistPath.empty() && P.pSolo.sampleWhitelistPath != "-" &&
+            !P.pSolo.sampleProbesPath.empty() && P.pSolo.sampleProbesPath != "-") {
+            sampleDet = new SampleDetector(P.pSolo);
+            if (sampleDet->loadWhitelist(P.pSolo.sampleWhitelistPath) &&
+                sampleDet->loadProbes(P.pSolo.sampleProbesPath)) {
+                sampleDetReady = true;
+            } else {
+                delete sampleDet;
+                sampleDet = nullptr;
+            }
+        }
+
+        const std::string &r2path = st->laneFiles[lane].r2path;
+        const std::string &r1path = st->laneFiles[lane].r1path;
+        gzFile gzR2 = gzopen(r2path.c_str(), "rb");
+        gzFile gzR1 = gzopen(r1path.c_str(), "rb");
+        if (!gzR2 || !gzR1) {
+            if (gzR2) gzclose(gzR2);
+            if (gzR1) gzclose(gzR1);
+            continue;
+        }
+        gzbuffer(gzR2, kGzBufSize);
+        gzbuffer(gzR1, kGzBufSize);
+
+        processOneLane(st, P, lane, gzR2, gzR1, readFeat, stats,
+                       samplePreFilter, sampleDet, sampleDetReady, localBar, noAlign);
+    }
+
+    // Signal that this reader is done; last one closes alignQ
     int finishedCount = st->readersFinished.fetch_add(1) + 1;
-    if (finishedCount == st->nLanes) {
+    if (finishedCount == st->nFusedThreads) {
         st->alignQ.close();
     }
 
+    // Phase 2: Role switch — drain alignQ as an alignment worker (skipped in noAlign mode)
+    if (!noAlign && RA != nullptr) {
+        EnrichedPacket ep;
+        while (st->alignQ.pop(ep)) {
+            RA->oneReadFromPacket(ep);
+        }
+    }
+
+    delete sampleDet;
     return nullptr;
 }
 

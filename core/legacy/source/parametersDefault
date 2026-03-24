@@ -1802,6 +1802,12 @@ flexPipelineNTriage          2
                             Each triage thread performs CB/UMI extraction, sample detection, and H0 lookup.
                             Routes KEEP/DENY to Solo consumers, MISS to alignment workers.
 
+flexNoAlign                  0
+    int:                    0|1 (default 0)
+                            1           ... skip alignment for H0/H1 misses (quick prototyping mode).
+                                        Reads that miss the hash screen are discarded instead of aligned.
+                                        Useful for benchmarking the hash screen + Solo path in isolation.
+
 soloRunFlexFilter            no
     string:                 yes|no (default no)
                             yes         ... run flexfilter inline after composite MEX is written

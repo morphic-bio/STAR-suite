@@ -138,6 +138,11 @@ struct FlexPipelineCounters {
     FlexPipelineCounters() { std::memset(perLaneReads, 0, sizeof(perLaneReads)); }
 };
 
+struct LaneFiles {
+    std::string r2path;
+    std::string r1path;
+};
+
 struct FlexPipelineState {
     BoundedQueue<ReadPacket> readerQ;
     std::vector<BoundedQueue<DecisionPacket>*> soloQ;
@@ -152,6 +157,12 @@ struct FlexPipelineState {
     int nSolo = 0;
     int nTriage = 1;
 
+    // Lane work-stealing: atomic counter for dynamic lane claim
+    std::atomic<int> nextLaneIdx{0};
+    std::vector<LaneFiles> laneFiles;
+    // Track how many fused threads are still active (reading or aligning)
+    int nFusedThreads = 0;
+
     ~FlexPipelineState() {
         for (auto* q : soloQ) delete q;
     }
@@ -162,6 +173,12 @@ struct FlexPipelineState {
         nTriage = triageThreads;
         for (int i = 0; i < nSolo; ++i)
             soloQ.push_back(new BoundedQueue<DecisionPacket>(queueCapacity));
+    }
+
+    // Atomically claim the next unprocessed lane. Returns -1 if all lanes claimed.
+    int claimNextLane() {
+        int lane = nextLaneIdx.fetch_add(1, std::memory_order_relaxed);
+        return (lane < nLanes) ? lane : -1;
     }
 };
 
@@ -178,6 +195,8 @@ struct FlexLaneReaderArgs {
     int laneId;
     SoloReadFeature *readFeat;  // non-null in fully-fused mode
     Stats *stats;               // non-null in fully-fused mode
+    ReadAlign *RA;              // non-null for role-switch to alignment worker
+    int threadId;               // logical thread index (0..nFusedThreads-1)
 };
 
 struct FlexSoloConsumerArgs {

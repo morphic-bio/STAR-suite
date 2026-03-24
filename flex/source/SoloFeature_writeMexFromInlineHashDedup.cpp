@@ -99,13 +99,19 @@ SoloFeature::InlineMatrixBundle SoloFeature::buildInlineMatrixFromHash(
                 geneIds.push_back(line.substr(beg, end - beg + 1));
             }
             probeFile.close();
-            if (maxProbeIdx <= geneIds.size()) {
-                usedProbeList = true;
-            } else {
-                P.inOut->logMain << "WARNING: probe list too small for max probe index " << maxProbeIdx
-                                 << " (size " << geneIds.size() << "), falling back to transcriptome features" << endl;
-                geneIds.clear();
+            if (maxProbeIdx > geneIds.size()) {
+                uint32_t nPad = maxProbeIdx - (uint32_t)geneIds.size();
+                P.inOut->logMain << "WARNING: probe list has " << geneIds.size()
+                                 << " entries but hash cache references probe index " << maxProbeIdx
+                                 << " — padding with " << nPad << " placeholder entries."
+                                 << " This usually means --soloProbeList does not match the probe list"
+                                 << " used to build --soloHashScreenFile."
+                                 << " (probe list: " << P.pSolo.probeListPath << ")" << endl;
+                for (uint32_t p = (uint32_t)geneIds.size(); p < maxProbeIdx; ++p) {
+                    geneIds.push_back("UNKNOWN_PROBE_" + std::to_string(p + 1));
+                }
             }
+            usedProbeList = true;
         } else {
             P.inOut->logMain << "WARNING: could not open probe list at " << P.pSolo.probeListPath
                              << ", falling back to transcriptome features" << endl;
@@ -113,7 +119,7 @@ SoloFeature::InlineMatrixBundle SoloFeature::buildInlineMatrixFromHash(
     }
     if (!usedProbeList) {
         std::ostringstream err;
-        err << "ERROR: Probe list unavailable or too small for max probe index " << maxProbeIdx
+        err << "ERROR: Probe list unavailable"
             << " (probe list path: " << P.pSolo.probeListPath << ")";
         P.inOut->logMain << err.str() << endl;
         throw std::runtime_error(err.str());

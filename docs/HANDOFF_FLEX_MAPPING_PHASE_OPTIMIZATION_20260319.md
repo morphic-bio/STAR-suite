@@ -1,12 +1,18 @@
 # Handoff: Flex Mapping Phase Optimization (2026-03-19)
 
-## Status: IN-PROGRESS — Phase 1-3 implemented (dump + replay harness + unit tests), Phase 4+ pending
+## Status: SUPERSEDED by fully-fused pipeline — see `docs/HANDOFF_FLEX_PIPELINE_BENCHMARK_SUMMARY_20260323.md`
+
+The tiered hash screen and I/O pipeline work described in M1–M2 below has
+been completed and merged into the fully-fused pipeline (1.44M reads/sec,
+5.5x vs legacy). The remaining optimization targets (M3, M5) are updated
+below to reflect current state.
 
 ## Active Work Item
 
-**Tiered hash screen lookup + cache pruning + H2 coverage expansion.**
+**Full-scale validation of the fused pipeline + lane work-stealing design.**
 
-Detailed runbook: `docs/RUNBOOK_HASH_CACHE_PRUNING_AND_H2_20260319.md`
+Detailed benchmark summary: `docs/HANDOFF_FLEX_PIPELINE_BENCHMARK_SUMMARY_20260323.md`
+Hash cache runbook (for H2 follow-on): `docs/RUNBOOK_HASH_CACHE_PRUNING_AND_H2_20260319.md`
 
 ### Decision summary from planning discussion
 
@@ -191,72 +197,37 @@ the I/O and serialization overhead (chunk reads, zcat) is now a larger fraction.
 
 ## All Optimization Targets (M1–M5)
 
-### M1: I/O pipeline optimization (HIGH — ~8m of wall time)
+### M1: I/O pipeline optimization — COMPLETED
 
-**Problem**: ~8 minutes of the 35-minute mapping wall time is I/O overhead:
-reading 141 GB of gzipped FASTQs through `zcat`, with `mutexInRead`
-serializing chunk reads.
+**Resolution**: the fully-fused pipeline eliminates `mutexInRead` entirely.
+Each lane thread does per-lane `gzgets()` decompression + hash screen +
+inline Solo, bypassing the chunk-serial model. The ~8 minutes of I/O
+overhead is gone. See pipeline architecture evolution §4–6 in the
+benchmark summary doc.
 
-**Investigation areas**:
+### M2: Hash screen tiering + coverage — COMPLETED (H0+H1); H2 dropped
 
-1. **Parallel decompression**: `zcat` spawns one decompression process per
-   input file, but STAR reads chunks serially under a mutex. Consider
-   `pigz` or `libdeflate` for faster decompression, or pre-decompress to
-   tmpfs/NVMe.
+**Resolution**: H0 and H1 are now served via sample-free hash maps
+(`h0NoSampleMap_`, `h1DenyNoSampleMap_`) with LUT-based 2-bit encoding at
+offset 0 only. The flat sorted-vector binary search is eliminated for the
+fused path. KEEP rate: 84.0%, DENY: 0.7%. A sample pre-filter rejects
+77.5% of reads before any hash probe.
 
-2. **Chunk size tuning**: `limitIObufferSize` is set to 50M. Larger chunks
-   reduce mutex contention but increase memory. Smaller chunks improve
-   load balancing. Profile the actual mutex wait time.
+**H2 evaluated and dropped**: the 2-mismatch variant pipeline was built
+and tested (980-shard synthetic FASTQ → STAR → MEX reclassification →
+binary merge). The incremental KEEP gain over H0+H1 did not justify the
+multi-hour build cost and added complexity. Not worth pursuing further.
 
-3. **Double buffering**: Pre-read the next chunk while the current one is
-   being mapped. This requires a producer-consumer pattern rather than the
-   current "acquire mutex → read → release → map" serial pattern.
+### M3: Alignment speedup for PASS reads — DROPPED
 
-4. **Pre-decompressed input**: For repeated benchmarks on the same data,
-   decompressing to NVMe once (`pigz -dk`) and using uncompressed input
-   eliminates decompression overhead entirely.
-
-**Status**: Not started. Lower priority than M2 (hash screen tiering) for
-now; revisit if hash screen gains are insufficient.
-
-### M2: Hash screen tiering + coverage (ACTIVE — see runbook)
-
-**Tiered lookup** (structural): split cache into H0/H1/deny tiers, search
-H0 first. Reduces per-read binary-search cost for the 85% of reads that
-are exact matches.
-
-**Cache pruning** (free): dead-weight records not loaded into any tier.
-
-**H2 coverage** (follow-on): build cache from 1M+ read pilot to push
-KEEP rate from 85% toward 93-97%, reducing alignment calls.
-
-**Runbook**: `docs/RUNBOOK_HASH_CACHE_PRUNING_AND_H2_20260319.md`
-
-### M3: Alignment speedup for PASS reads (MEDIUM-LOW)
-
-**Problem**: PASS reads are harder to align (94 µs/read vs 86 µs for legacy
-all-reads average). This is inherent — the easy cache-resolvable reads
-were removed. But 94 µs × 298M reads × (1/32 threads) = ~14.5 minutes of
-wall time.
-
-**Investigation areas**:
-
-1. **Profile alignment hotspots**: Use `perf record` during a short run to
-   identify hot functions within `mapOneRead()`. Seed generation vs
-   extension vs scoring vs splice detection.
-
-2. **Alignment parameter tuning**: Current settings allow generous
-   multi-mapping (`outFilterMultimapNmax 10000`). For Flex probes (50-mer
-   reads), this may generate excessive candidate loci.
-
-3. **Shorter read optimization**: Flex R2 reads are ~50 bp (average mapped
-   length 47.4). STAR's seed/extend is designed for 100–150 bp RNA-seq.
-
-4. **SIMD / vectorization**: Check compiler flags and whether hot inner
-   loops in the aligner are auto-vectorized. AVX-512 is available on
-   i9-13900KF.
-
-**Status**: Not started.
+STAR's core seed+extend alignment is already highly optimized (10+ years
+of development). The remaining 15.3% MISS reads are genuinely hard —
+they didn't match any probe at 0 or 1 mismatches and need full alignment.
+Parameter tuning (e.g., lowering `outFilterMultimapNmax`) changes
+alignment semantics. SIMD/AVX-512 vectorization of STAR's irregular
+memory access patterns would be a major rewrite for marginal gain. Not
+worth pursuing. The practical path to faster wall time is reducing idle
+threads (M5) and accepting that ~25 minutes for 2B reads is a good result.
 
 ### M4: Genome load optimization (LOW — 12s)
 
@@ -265,25 +236,61 @@ Not useful for single-run benchmarks.
 
 **Status**: Not started.
 
-### M5: Thread utilization and load balancing (LOW-MEDIUM)
+### M5: Thread utilization and load balancing (MEDIUM — tail latency)
 
-Profile per-thread alignment time vs mutex wait time; check
-`--dynamicThreadInterface 1` for Flex.
+**Status**: design documented, implementation pending.
 
-**Status**: Not started.
+The fused pipeline uses 8 permanent reader threads (one per lane) + 24
+alignment workers. With balanced lanes (JAX dataset: ±3%), tail latency
+from lane imbalance is ~30–60s. For datasets with fewer lanes or uneven
+lane sizes the waste is larger.
 
-## Estimated Impact Summary
+**Dynamic permits are not sufficient.** Permits throttle alignment
+concurrency but cannot reclaim a finished reader thread. The right
+optimization is lane work-stealing + reader-to-aligner role switching:
 
-| Target | Est. savings | Difficulty | Risk |
-|--------|-------------|-----------|------|
-| M1: I/O pipeline | 3–8m | Medium | Low (no alignment changes) |
-| **M2: Hash screen tiering + H2** | **3–10m** | **Low-Medium** | **Low** |
-| M3: Alignment speedup | 1–3m | High | Medium (parameter tuning risk) |
-| M4: Genome load | 12s | Trivial | None |
-| M5: Thread utilization | 1–3m | Medium | Low |
+1. **Shared lane-job queue** (`std::atomic<int> nextLane`). Fused threads
+   claim lanes by atomic increment instead of permanent binding.
 
-**Conservative target**: M2 + M1 could bring total wall time from 39m to
-~25–30m without touching alignment code.
+2. **Lane work-stealing**. When a fused thread finishes its lane, it pops
+   the next unclaimed lane. Per-thread Solo state is lane-independent.
+
+3. **Reader-to-aligner role switch**. When no lanes remain, the thread
+   enters the alignment worker loop (pop `alignQ`, call
+   `oneReadFromPacket()`). Each fused thread already has a
+   `ReadAlignChunk*`.
+
+**Constraints**:
+- No changes to the per-read hot path in the fused read loop.
+- No scheduler or thread-pool rewrite. Just an atomic counter + a role
+  switch after lane exhaustion.
+- `alignQ` gains extra consumers, not producers.
+- Total thread count stays at `runThreadN`.
+
+**Validation**: identical `PIPELINE_STATS` totals, identical Solo MEX,
+wall time ≤ current.
+
+Full design: `docs/HANDOFF_FLEX_PIPELINE_BENCHMARK_SUMMARY_20260323.md`
+§ "Dynamic thread balancing design".
+
+## Estimated Impact Summary (updated 2026-03-23)
+
+| Target | Est. savings | Difficulty | Status |
+|--------|-------------|-----------|--------|
+| M1: I/O pipeline | 3–8m | Medium | **DONE** (fused pipeline) |
+| M2: Hash screen tiering | 3–10m | Low-Medium | **DONE** (H0+H1 hash maps) |
+| ~~M2b: H2 coverage~~ | 1–3m | Medium | **Dropped** (not worth the effort) |
+| ~~M3: Alignment speedup~~ | 1–3m | High | **Dropped** (STAR core already highly optimized) |
+| M4: Genome load | 12s | Trivial | Not started |
+| **M5: Lane steal + role switch** | **0.5–2m+** | **Low-Medium** | **Design done, impl pending** |
+
+**Achieved**: M1 + M2 brought mapping from 35m to ~25m (confirmed at
+1.44M reads/sec sustained). Total wall time 39m → ~27m projected.
+
+**Next targets** (in priority order):
+1. Full-scale validation of current fused pipeline
+2. Lane work-stealing + role switch (M5) — ~30s tail savings on balanced
+   8-lane data; larger gains on datasets with fewer lanes or unequal sizes
 
 ## Architecture of the Mapping Phase
 
@@ -361,11 +368,14 @@ dominant serialization point is `mutexInRead` for chunk I/O.
 | CR9 reference run | `/mnt/pikachu/benchmark_cr9_flex_full/` |
 | CB whitelist | `/storage/scRNAseq_output/whitelists/737K-fixed-rna-profiling.txt` |
 | Sample whitelist | `/mnt/pikachu/flex/tables/sample_whitelist_full_16.tsv` |
-| Probe list | `/storage/flex_filtered_reference/filtered_reference/probe_list.txt` |
+| Probe list (cache-matched) | `/storage/flex_filtered_reference_2024/star_index/probe_gene_list.txt` (18,129 entries — matches `h01_cache.bin`) |
+| Probe list (filtered) | `/storage/flex_filtered_reference/filtered_reference/probe_list.txt` (18,082 entries — 47 fewer; triggers padding warning) |
 | Sample probes | `/mnt/pikachu/JAX_scRNAseq01_processed/probe-barcodes-fixed-rna-profiling-rna.txt` |
+| Hash cache (2024, H0+H1) | `/storage/downsampled_100K/SC2300771/results/flex_h01_2024_20260320_081246/h01_cache.bin` |
+| **Benchmark summary** | `docs/HANDOFF_FLEX_PIPELINE_BENCHMARK_SUMMARY_20260323.md` |
 | **Runbook** | `docs/RUNBOOK_HASH_CACHE_PRUNING_AND_H2_20260319.md` |
 | **Clique replay (template)** | `flex/tools/clique_replay/` |
-| **New replay tool (planned)** | `flex/tools/hash_screen_replay/` |
+| **Hash screen replay** | `flex/tools/hash_screen_replay/` |
 
 ## Full Benchmark Command (current best)
 

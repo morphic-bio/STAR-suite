@@ -342,6 +342,7 @@ public:
     string flexPipelineStr = "auto"; // raw CLI: yes|no|auto (default: auto)
     int flexPipelineNSolo = 2;       // number of sharded Solo consumers (default: 2)
     int flexPipelineNTriage = 2;     // number of triage threads (default: 2)
+    int flexNoAlign = 0;             // 1 = skip alignment for H0/H1 misses (prototyping mode)
     
     // FlexFilter inline integration
     string runFlexFilterStr = "no";  // raw CLI: yes|no (default: no)
