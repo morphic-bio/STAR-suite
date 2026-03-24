@@ -8,6 +8,8 @@
 #include <unordered_set>
 
 void SoloFeature::materializeRGUFromHash() {
+    // Note: non-Flex STAR_SOLO_NONFLEX_HASH_BRIDGE path no longer calls this from
+    // countCBgeneUMI (direct collapse: core/SoloFeature_collapseUMI_fromBridgeHash.cpp).
     if (!readFeatSum || !readFeatSum->inlineHash_) {
         return;
     }
@@ -40,8 +42,8 @@ void SoloFeature::materializeRGUFromHash() {
         
         HashEntry entry;
         uint16_t compactGeneIdx = 0;
-        unpackCgAggKey(key, &entry.cbIdx, &entry.umi24, &compactGeneIdx, nullptr);
         if (nonFlexHashBridge) {
+            unpackBridgeCgAggKey(key, &entry.cbIdx, &entry.umi24, &compactGeneIdx);
             entry.cbIdx = readFeatSum->bridgeCompactToWl(entry.cbIdx);
             if (entry.cbIdx == static_cast<uint32_t>(-1)) {
                 continue;
@@ -51,6 +53,7 @@ void SoloFeature::materializeRGUFromHash() {
                 continue;
             }
         } else {
+            unpackCgAggKey(key, &entry.cbIdx, &entry.umi24, &compactGeneIdx, nullptr);
             entry.geneIdx = compactGeneIdx;
         }
         entry.count = count;

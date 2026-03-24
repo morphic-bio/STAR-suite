@@ -113,7 +113,7 @@ endif
 OBJECTS = systemFunctions.o funPrimaryAlignMark.o \
 	SoloFeature_loadRawMatrix.o SoloFeature_emptyDrops_CR.o SoloFeature_emptyDrops_libscrna.o soloInputFeatureUMI.o SoloFeature_countSmartSeq.o SoloFeature_redistributeReadsByCB.o \
 	SoloFeature_quantTranscript.o SoloFeature_sumThreads.o SoloFeature_countVelocyto.o SoloFeature_countCBgeneUMI.o \
-	SoloFeature_collapseUMI_Graph.o SoloFeature_collapseUMIall.o SoloFeature_collapseUMI_fromHash.o SoloFeature_umiCorrection.o SoloFeature_materializeFromHash.o SoloFeature_metricsOutput.o SoloFeature_writeMexFromInlineHashDedup.o SoloFeature_flexfilter.o SoloFeature_addBAMtags.o SoloFeature_writeTagTable.o \
+	SoloFeature_collapseUMI_Graph.o SoloFeature_collapseUMIall.o SoloFeature_collapseUMI_fromHash.o SoloFeature_collapseUMI_fromBridgeHash.o SoloFeature_umiCorrection.o SoloFeature_materializeFromHash.o SoloFeature_metricsOutput.o SoloFeature_writeMexFromInlineHashDedup.o SoloFeature_flexfilter.o SoloFeature_addBAMtags.o SoloFeature_writeTagTable.o \
 	MexWriter.o MexWriterUtil.o \
 	UMICorrector.o \
 	ParametersClip_initialize.o ClipMate_clip.o ClipCR4.o opal/opal.o ClipMate_clipChunk.o ClipMate_initialize.o \

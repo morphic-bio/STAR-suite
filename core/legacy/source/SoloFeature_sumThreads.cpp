@@ -11,6 +11,38 @@ void SoloFeature::sumThreads()
     //stats
     nReadsInput=g_statsAll.readN+1; //reserve 1 extra
 
+    auto releaseMergedThreadState = [](SoloReadFeature *rf, bool keepInlineHashAndBridgeMaps) {
+        if (rf == nullptr) {
+            return;
+        }
+        if (!keepInlineHashAndBridgeMaps && rf->inlineHash_) {
+            kh_destroy(cg_agg, rf->inlineHash_);
+            rf->inlineHash_ = nullptr;
+        }
+        if (rf->readIdTracker_) {
+            kh_destroy(readid_cbumi, rf->readIdTracker_);
+            rf->readIdTracker_ = nullptr;
+        }
+        decltype(rf->pendingAmbiguous_)().swap(rf->pendingAmbiguous_);
+        decltype(rf->bridgeImmediateReadCounts_)().swap(rf->bridgeImmediateReadCounts_);
+        std::vector<SoloReadFeature::BridgeDeferredReadAccounting>().swap(rf->bridgeDeferredAccounting_);
+        std::vector<uint32_t>().swap(rf->bridgeDeferredCandidates_);
+        if (!keepInlineHashAndBridgeMaps) {
+            decltype(rf->bridgeCbCompactByWl_)().swap(rf->bridgeCbCompactByWl_);
+            std::vector<uint32_t>().swap(rf->bridgeCbWlByCompact_);
+            decltype(rf->bridgeGeneCompactByFull_)().swap(rf->bridgeGeneCompactByFull_);
+            std::vector<uint32_t>().swap(rf->bridgeGeneFullByCompact_);
+        }
+        decltype(rf->readFlag.flagCounts)().swap(rf->readFlag.flagCounts);
+        rf->readFlag.flagCountsNoCB = {};
+        std::vector<uint32_t>().swap(rf->cbReadCount);
+        decltype(rf->cbReadCountMap)().swap(rf->cbReadCountMap);
+    };
+
+    const bool nonFlexDirectBridge = pSolo.inlineHashMode
+        && !pSolo.flexMode
+        && std::getenv("STAR_SOLO_NONFLEX_HASH_BRIDGE") != nullptr;
+    
     ///////////////////////////// collect RAchunk->RA->soloRead->readFeat            
     for (int ii=0; ii<P.runThreadN; ii++) {//point to
         readFeatAll[ii]= RAchunk[ii]->RA->soloRead->readFeat[pSolo.featureInd[featureType]];
@@ -21,19 +53,22 @@ void SoloFeature::sumThreads()
         
         // Merge inline hash if enabled
         if (pSolo.inlineHashMode) {
-            readFeatSum->mergeInlineHash(*readFeatAll[ii]);
-            readFeatSum->addStats(*readFeatAll[ii]);
-            
-            // Destroy per-thread hash after merge when minimal memory flag is on
-            if (pSolo.soloFlexMinimalMemory && pSolo.inlineHashMode) {
-                if (readFeatAll[ii]->inlineHash_) {
-                    kh_destroy(cg_agg, readFeatAll[ii]->inlineHash_);
-                    readFeatAll[ii]->inlineHash_ = nullptr;
-                }
+            if (nonFlexDirectBridge) {
+                // Keep the bulky non-ambiguous thread-local hashes for direct draining later;
+                // merge only the smaller ambiguous/deferred sidecars into readFeatSum.
+                readFeatSum->mergePendingAmbiguous(*readFeatAll[ii]);
+                readFeatSum->mergeDeferredBridgeAccounting(*readFeatAll[ii]);
+            } else {
+                readFeatSum->mergeInlineHash(*readFeatAll[ii]);
             }
+            readFeatSum->addStats(*readFeatAll[ii]);
         }
         
-        readFeatSum->addCounts(*readFeatAll[ii]);        
+        readFeatSum->addCounts(*readFeatAll[ii]);
+
+        if (pSolo.inlineHashMode) {
+            releaseMergedThreadState(readFeatAll[ii], nonFlexDirectBridge);
+        }
     };       
     
     // if WL was not defined

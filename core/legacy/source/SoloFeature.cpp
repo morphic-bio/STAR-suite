@@ -365,7 +365,9 @@ void SoloFeature::resolvePendingAmbiguousToHash(bool useBridgeCompactMapping)
             if (useBridgeCompactMapping) {
                 storedGeneIdx = readFeatSum->getOrCreateBridgeCompactGene(obs.geneIdx);
             }
-            uint64_t newKey = packCgAggKey(storedCbIdx, obs.umi24, storedGeneIdx, obs.tagIdx);
+            uint64_t newKey = useBridgeCompactMapping
+                ? packBridgeCgAggKey(storedCbIdx, obs.umi24, storedGeneIdx)
+                : packCgAggKey(storedCbIdx, obs.umi24, storedGeneIdx, obs.tagIdx);
             int absent;
             khiter_t iter = kh_put(cg_agg, hash, newKey, &absent);
             if (absent) {
@@ -589,6 +591,19 @@ void SoloFeature::clearLarge()
         kh_destroy(cg_agg, umiCorrectionHash);
         umiCorrectionHash = nullptr;
     }
+
+    packedReadInfo.data.clear();
+    packedReadInfo.data.shrink_to_fit();
+
+    if (readFeatSum != nullptr) {
+        decltype(readFeatSum->bridgeImmediateReadCounts_)().swap(readFeatSum->bridgeImmediateReadCounts_);
+        std::vector<SoloReadFeature::BridgeDeferredReadAccounting>().swap(readFeatSum->bridgeDeferredAccounting_);
+        std::vector<uint32_t>().swap(readFeatSum->bridgeDeferredCandidates_);
+        decltype(readFeatSum->bridgeCbCompactByWl_)().swap(readFeatSum->bridgeCbCompactByWl_);
+        std::vector<uint32_t>().swap(readFeatSum->bridgeCbWlByCompact_);
+        decltype(readFeatSum->bridgeGeneCompactByFull_)().swap(readFeatSum->bridgeGeneCompactByFull_);
+        std::vector<uint32_t>().swap(readFeatSum->bridgeGeneFullByCompact_);
+    }
     
 #ifdef DEBUG_CB_UB_PARITY
     // Cleanup parity validation resources
@@ -600,10 +615,6 @@ void SoloFeature::clearLarge()
 
     // Defensive cleanup for minimal memory mode
     if (pSolo.soloFlexMinimalMemory && pSolo.inlineHashMode) {
-        // Clear packed read info if somehow allocated (defensive - should never be allocated)
-        packedReadInfo.data.clear();
-        packedReadInfo.data.shrink_to_fit();
-        
         // Ensure inline hash is destroyed (defensive - should already be destroyed)
         if (readFeatSum && readFeatSum->inlineHash_) {
             kh_destroy(cg_agg, readFeatSum->inlineHash_);

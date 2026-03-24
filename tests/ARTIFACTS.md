@@ -463,3 +463,54 @@ These scripts validate that default bundles work with minimal explicit parameter
 - Full patched 30-thread H0/H1/H2 rerun:
   - `/tmp/h2_full_rerun_20260320/`
 - Status: untracked
+
+## Solo Full UCSF EBs2_2 Benchmark A/B (2026-03-24)
+
+- Full baseline on corrected `EBs2_2` README harness:
+  - `/storage/paper_bench_solo_full_20260324/ucsf_ebs2_2_standard_baseline/`
+- First full optimized non-Flex bridge attempt:
+  - `/storage/paper_bench_solo_full_20260324/ucsf_ebs2_2_standard_solohash_optimized/`
+  - failed with bridge packed-gene overflow at `>32768` genes
+- Second full optimized non-Flex bridge attempt after 16-bit/tagless bridge-key patch:
+  - `/storage/paper_bench_solo_full_20260324/ucsf_ebs2_2_standard_solohash_optimized_v2/`
+  - passed the packed-gene overflow, then was killed with exit `137` during Solo finalize
+- Third attempt (direct hash collapse, no `materializeRGUFromHash`; code 2026-03-24):
+  - `/storage/paper_bench_solo_full_20260324/ucsf_ebs2_2_standard_solohash_optimized_v3/`
+  - entered direct bridge collapse, then was killed with exit `137`
+- Fourth attempt after fix 5 (drain thread-local bridge hashes directly):
+  - `/storage/paper_bench_solo_full_20260324/ucsf_ebs2_2_standard_solohash_optimized_v4/`
+  - completed successfully; no OOM
+- Current-branch full baseline rerun:
+  - `/storage/paper_bench_solo_full_20260324/ucsf_ebs2_2_standard_baseline_mastermerge_v2/`
+  - completed successfully; `Summary.csv` matches the archived baseline
+- Notes:
+  - baseline completed in `19:46.33`, peak RSS `72504156 kB`
+  - optimized v2 reached peak RSS `127126724 kB` before kill (materialize + legacy collapse OOM)
+  - optimized v3 reached peak RSS `127682252 kB` before kill (direct bridge collapse OOM)
+  - optimized v4 completed in `22:38.81`, peak RSS `70575848 kB`
+  - baseline mastermerge v2 completed in `19:48.45`, peak RSS `68149756 kB`
+  - see `docs/HANDOFF_SOLO_OPTIMIZATION_20260324.md`
+
+## Solo 2M Direct Bridge Memory Validation (2026-03-24)
+
+- Fresh 2M resample on direct bridge path:
+  - `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_hashbridge_direct_v3/`
+- Exact same-FASTQ rerun on direct bridge path:
+  - `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_hashbridge_direct_samefastq_v1/`
+- Same-FASTQ rerun after memory fixes 1-4:
+  - `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_hashbridge_direct_samefastq_v2/`
+- Same-FASTQ rerun after deferred-accounting bug fix:
+  - `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_hashbridge_direct_samefastq_v3/`
+- Same-FASTQ rerun after fix 5 (thread-local bridge-hash drain):
+  - `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_hashbridge_direct_samefastq_v4/`
+- Current-branch legacy control on the same FASTQs:
+  - `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_legacy_mastermerge_v1/`
+- Older pre-direct bridge 2M run for historical comparison:
+  - `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_hashbridge/`
+- Notes:
+  - same-FASTQ direct peak RSS: `40395468 kB`
+  - same-FASTQ direct after memory fixes 1-4 peak RSS: `40213304 kB`
+  - same-FASTQ direct after deferred-accounting bug fix peak RSS: `40213020 kB`
+  - same-FASTQ direct after fix 5 peak RSS: `40214224 kB`
+  - current-branch legacy peak RSS: `40193584 kB`
+  - older pre-direct bridge peak RSS: `44360304 kB`

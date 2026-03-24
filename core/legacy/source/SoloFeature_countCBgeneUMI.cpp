@@ -39,73 +39,76 @@ bool nonFlexHashBridgeApplies(const SoloFeature& feat)
     }
 }
 
+uint32_t unpackBridgeDeferredCandidateCb(uint32_t packed)
+{
+    return packed >> 8;
+}
+
+char unpackBridgeDeferredCandidateQual(uint32_t packed)
+{
+    return static_cast<char>(packed & 0xFFu);
+}
+
 void populateBridgeReadAccounting(SoloFeature &feat,
                                   std::vector<uint32_t> &nReadPerCBunique1,
                                   std::vector<uint32_t> &nReadPerCBmulti1)
 {
     feat.readFlagCounts.flagCounts.clear();
-    feat.readFlagCounts.flagCounts.reserve((feat.pSolo.cbWLsize ? feat.pSolo.cbWLsize : 1) * 3 / 2);
-    feat.readFlagCounts.flagCountsNoCB = {};
+    feat.readFlagCounts.flagCounts.swap(feat.readFeatSum->readFlag.flagCounts);
+    feat.readFlagCounts.flagCountsNoCB = feat.readFeatSum->readFlag.flagCountsNoCB;
+    feat.readFeatSum->readFlag.flagCountsNoCB = {};
 
-    for (const auto &rec : feat.readFeatSum->bridgeReadAccounting_) {
+    for (const auto &kv : feat.readFeatSum->bridgeImmediateReadCounts_) {
+        if (kv.first >= nReadPerCBunique1.size()) {
+            continue;
+        }
+        nReadPerCBunique1[kv.first] += static_cast<uint32_t>(kv.second & 0xFFFFFFFFu);
+        nReadPerCBmulti1[kv.first] += static_cast<uint32_t>(kv.second >> 32);
+    }
+
+    for (const auto &rec : feat.readFeatSum->bridgeDeferredAccounting_) {
+        const bool featGood = rec.featGood != 0;
+        const bool multiFeature = rec.multiFeature != 0;
         bool readIsCounted = false;
-        bool noMMtoWLwithoutExact = false;
         bool noTooManyWLmatches = false;
         uint32_t cb = 0;
 
-        if (rec.cbMatch <= 1) {
-            if (!rec.cbCandidates.empty()) {
-                cb = rec.cbCandidates[0];
+#ifdef MATCH_CellRanger
+        double ptot = 0.0, pmax = 0.0, pin;
+#else
+        float ptot = 0.0, pmax = 0.0, pin;
+#endif
+        const uint32_t begin = rec.candidateOffset;
+        const uint32_t end = begin + rec.candidateCount;
+        for (uint32_t ii = begin; ii < end && ii < feat.readFeatSum->bridgeDeferredCandidates_.size(); ++ii) {
+            const uint32_t packedCandidate = feat.readFeatSum->bridgeDeferredCandidates_[ii];
+            const uint32_t cbin = unpackBridgeDeferredCandidateCb(packedCandidate);
+            char qin = unpackBridgeDeferredCandidateQual(packedCandidate);
+            if (cbin < feat.readFeatSum->cbReadCount.size() && feat.readFeatSum->cbReadCount[cbin] > 0) {
+                qin -= feat.pSolo.QSbase;
+                qin = qin < feat.pSolo.QSmax ? qin : feat.pSolo.QSmax;
+                pin = feat.readFeatSum->cbReadCount[cbin] * std::pow(10.0, -qin / 10.0);
+                ptot += pin;
+                if (pin > pmax) {
+                    cb = cbin;
+                    pmax = pin;
+                }
             }
-            if (rec.cbMatch == 1
-                && feat.pSolo.CBmatchWL.oneExact
-                && cb < feat.readFeatSum->cbReadCount.size()
-                && feat.readFeatSum->cbReadCount[cb] == 0) {
-                noMMtoWLwithoutExact = true;
-            } else if (rec.featGood && !rec.cbCandidates.empty()) {
+        }
+        if (ptot > 0.0 && pmax >= feat.pSolo.cbMinP * ptot) {
+            if (featGood) {
                 readIsCounted = true;
             }
         } else {
-#ifdef MATCH_CellRanger
-            double ptot = 0.0, pmax = 0.0, pin;
-#else
-            float ptot = 0.0, pmax = 0.0, pin;
-#endif
-            for (size_t ii = 0; ii < rec.cbCandidates.size(); ++ii) {
-                uint32_t cbin = rec.cbCandidates[ii];
-                char qin = (ii < rec.candidateQuals.size()) ? static_cast<char>(rec.candidateQuals[ii]) : feat.pSolo.QSbase;
-                if (cbin < feat.readFeatSum->cbReadCount.size() && feat.readFeatSum->cbReadCount[cbin] > 0) {
-                    qin -= feat.pSolo.QSbase;
-                    qin = qin < feat.pSolo.QSmax ? qin : feat.pSolo.QSmax;
-                    pin = feat.readFeatSum->cbReadCount[cbin] * std::pow(10.0, -qin / 10.0);
-                    ptot += pin;
-                    if (pin > pmax) {
-                        cb = cbin;
-                        pmax = pin;
-                    }
-                }
-            }
-            if (ptot > 0.0 && pmax >= feat.pSolo.cbMinP * ptot) {
-                if (rec.featGood) {
-                    readIsCounted = true;
-                }
-            } else {
-                noTooManyWLmatches = true;
-            }
+            noTooManyWLmatches = true;
         }
 
-        if (rec.featGood) {
-            if (rec.cbMatch == 0) {
-                feat.readFeatSum->stats.V[feat.readFeatSum->stats.yessubWLmatchExact]++;
-            } else if (noMMtoWLwithoutExact) {
-                feat.readFeatSum->stats.V[feat.readFeatSum->stats.noMMtoWLwithoutExact]++;
-            } else if (noTooManyWLmatches) {
-                feat.readFeatSum->stats.V[feat.readFeatSum->stats.noTooManyWLmatches]++;
-            }
+        if (featGood && noTooManyWLmatches) {
+            feat.readFeatSum->stats.V[feat.readFeatSum->stats.noTooManyWLmatches]++;
         }
 
         if (readIsCounted && cb < nReadPerCBunique1.size()) {
-            if (rec.multiFeature) {
+            if (multiFeature) {
                 nReadPerCBmulti1[cb]++;
             } else {
                 nReadPerCBunique1[cb]++;
@@ -123,13 +126,7 @@ void populateBridgeReadAccounting(SoloFeature &feat,
                 }
             }
             feat.readFlagCounts.setBit(feat.readFlagCounts.cbMatch);
-            if (rec.cbMatch == 0 && !rec.cbCandidates.empty()) {
-                feat.readFlagCounts.setBit(feat.readFlagCounts.cbPerfect);
-                feat.readFlagCounts.countsAdd(cb);
-            } else if (rec.cbMatch == 1 && !noMMtoWLwithoutExact && !rec.cbCandidates.empty()) {
-                feat.readFlagCounts.setBit(feat.readFlagCounts.cbMMunique);
-                feat.readFlagCounts.countsAdd(cb);
-            } else if (rec.cbMatch > 1 && !noTooManyWLmatches) {
+            if (!noTooManyWLmatches) {
                 feat.readFlagCounts.setBit(feat.readFlagCounts.cbMMmultiple);
                 feat.readFlagCounts.countsAdd(cb);
             } else {
@@ -138,7 +135,9 @@ void populateBridgeReadAccounting(SoloFeature &feat,
         }
     }
 
-    feat.readFlagCounts.countsAddNoCBarray(feat.readFeatSum->readFlag.flagCountsNoCB);
+    decltype(feat.readFeatSum->bridgeImmediateReadCounts_)().swap(feat.readFeatSum->bridgeImmediateReadCounts_);
+    std::vector<SoloReadFeature::BridgeDeferredReadAccounting>().swap(feat.readFeatSum->bridgeDeferredAccounting_);
+    std::vector<uint32_t>().swap(feat.readFeatSum->bridgeDeferredCandidates_);
 }
 }
 
@@ -166,6 +165,9 @@ void SoloFeature::countCBgeneUMI()
         parityEnabled = false;
     } else {
         bool parityEnv = (std::getenv("STAR_DEBUG_CB_UB_PARITY") != nullptr);
+        if (nonFlexBridgePath) {
+            parityEnv = false;
+        }
         if (parityEnv && packedReadInfo.data.empty()) {
             resetPackedStorage(nReadsInput);
         }
@@ -174,11 +176,15 @@ void SoloFeature::countCBgeneUMI()
     }
 #endif
 
+    const bool nonFlexBridgePath = nonFlexHashBridgeApplies(*this);
+
     // Allocate packedReadInfo if:
     // 1. readInfoYes is set for this feature type, OR
     // 2. trackReadIdsForTags is enabled (for sorted BAM CB/UB tag injection)
+    // Non-Flex direct bridge mode does not use packed read info for this benchmark path.
     // Skip only if soloFlexMinimalMemory is on AND inlineHashMode is on AND trackReadIdsForTags is off
-    bool needPackedReadInfo = pSolo.readInfoYes[featureType] || pSolo.trackReadIdsForTags;
+    bool needPackedReadInfo = pSolo.trackReadIdsForTags
+        || (pSolo.readInfoYes[featureType] && !nonFlexBridgePath);
     bool skipForMinimalMemory = pSolo.soloFlexMinimalMemory && pSolo.inlineHashMode && !pSolo.trackReadIdsForTags;
     if (needPackedReadInfo && !skipForMinimalMemory) {
         resetPackedStorage(nReadsInput);
@@ -200,58 +206,27 @@ void SoloFeature::countCBgeneUMI()
             runCliqueCorrection();
         }
 
-        if (nonFlexHashBridgeApplies(*this)) {
+        if (nonFlexBridgePath) {
             time(&rawTime);
             P.inOut->logMain << timeMonthDayTime(rawTime)
-                             << " ... Experimental non-Flex inline-hash bridge enabled"
-                             << " (hash capture -> materializeRGUFromHash -> legacy collapse)"
+                             << " ... Experimental non-Flex inline-hash bridge: direct hash collapse"
+                             << " (no materializeRGUFromHash / no legacy collapseUMIall)"
                              << endl;
 
-            materializeRGUFromHash();
+            const auto bridgeCollapseStart = std::chrono::steady_clock::now();
+            collapseUMIall_fromBridgeHash();
+            P.inOut->logMain << "Solo timing: collapseUMIall_fromBridgeHash "
+                             << soloElapsedSeconds(bridgeCollapseStart) << " s" << endl;
 
-            if (nCB == 0 || rGeneUMI == nullptr || rCBp == nullptr || rCBn == nullptr) {
-                P.inOut->logMain << "WARNING: non-Flex inline-hash bridge produced no materialized records" << endl;
+            if (nCB == 0) {
+                P.inOut->logMain << "WARNING: non-Flex inline-hash bridge produced no cells after direct collapse"
+                                 << endl;
                 P.inOut->logMain << "Solo timing: countCBgeneUMI " << soloElapsedSeconds(countStart) << " s" << endl;
                 return;
             }
 
-            nReadPerCB.resize(nCB);
-            nReadPerCBmax = 0;
-            for (uint32 iCB = 0; iCB < nCB; iCB++) {
-                nReadPerCB[iCB] = rCBn[iCB];
-                if (nReadPerCB[iCB] > nReadPerCBmax) {
-                    nReadPerCBmax = nReadPerCB[iCB];
-                }
-            }
-
             std::vector<uint32> nReadPerCBunique1(pSolo.cbWLsize), nReadPerCBmulti1(pSolo.cbWLsize);
             populateBridgeReadAccounting(*this, nReadPerCBunique1, nReadPerCBmulti1);
-            {
-                uint64_t recTotal = readFeatSum->bridgeReadAccounting_.size();
-                uint64_t recFeatGood = 0, recMulti = 0, recExact = 0, recOneMm = 0, recAmbig = 0;
-                for (const auto &rec : readFeatSum->bridgeReadAccounting_) {
-                    recFeatGood += rec.featGood ? 1 : 0;
-                    recMulti += rec.multiFeature ? 1 : 0;
-                    recExact += rec.cbMatch == 0 ? 1 : 0;
-                    recOneMm += rec.cbMatch == 1 ? 1 : 0;
-                    recAmbig += rec.cbMatch > 1 ? 1 : 0;
-                }
-                uint64_t sumUnique = 0, sumMulti = 0;
-                for (uint32 ii = 0; ii < pSolo.cbWLsize; ++ii) {
-                    sumUnique += nReadPerCBunique1[ii];
-                    sumMulti += nReadPerCBmulti1[ii];
-                }
-                P.inOut->logMain << "Bridge accounting debug:"
-                                 << " records=" << recTotal
-                                 << " featGood=" << recFeatGood
-                                 << " multiFeature=" << recMulti
-                                 << " exact=" << recExact
-                                 << " oneMM=" << recOneMm
-                                 << " ambiguous=" << recAmbig
-                                 << " uniqueReads=" << sumUnique
-                                 << " multiReads=" << sumMulti
-                                 << endl;
-            }
 
             nReadPerCBunique.resize(nCB);
             nReadPerCBtotal.resize(nCB);
@@ -261,32 +236,17 @@ void SoloFeature::countCBgeneUMI()
                 nReadPerCBtotal[icb] = nReadPerCBunique1[wlIndex] + nReadPerCBmulti1[wlIndex];
             }
 
-            nUMIperCB.resize(nCB);
-            nGenePerCB.resize(nCB);
-            countMatStride = pSolo.umiDedup.yes.N + 1;
-            countCellGeneUMI.resize(nReadsMapped * countMatStride / 5 + 16);
-            countCellGeneUMIindex.resize(nCB + 1, 0);
-            if (pSolo.multiMap.yes.multi) {
-                countMatMult.s = 1 + pSolo.multiMap.yes.N * pSolo.umiDedup.yes.N;
-                countMatMult.m.resize(nReadsMapped * countMatMult.s / 5 + 16);
-                countMatMult.i.resize(nCB + 1, 0);
+            for (uint32 icb = 0; icb < nCB; icb++) {
+                readFeatSum->stats.V[readFeatSum->stats.yesUMIs] += nUMIperCB[icb];
+                if (nGenePerCB[icb] > 0)
+                    ++readFeatSum->stats.V[readFeatSum->stats.yesCellBarcodes];
+                readFeatSum->stats.V[readFeatSum->stats.yesWLmatch] += nReadPerCBtotal[icb];
+                readFeatSum->stats.V[readFeatSum->stats.yessubWLmatch_UniqueFeature] += nReadPerCBunique[icb];
             }
-
-            const auto collapseStart = std::chrono::steady_clock::now();
-            collapseUMIall();
-            P.inOut->logMain << "Solo timing: collapseUMIall (countCBgeneUMI wrapper) "
-                             << soloElapsedSeconds(collapseStart) << " s" << endl;
-
-            delete[] rGeneUMI;
-            rGeneUMI = nullptr;
-            delete[] rCBp;
-            rCBp = nullptr;
-            delete[] rCBn;
-            rCBn = nullptr;
 
             time(&rawTime);
             P.inOut->logMain << timeMonthDayTime(rawTime)
-                             << " ... Finished collapsing UMIs (non-Flex inline-hash bridge)" << endl;
+                             << " ... Finished collapsing UMIs (non-Flex inline-hash bridge, direct hash)" << endl;
             P.inOut->logMain << "Solo timing: countCBgeneUMI " << soloElapsedSeconds(countStart) << " s" << endl;
             return;
         }

@@ -1,8 +1,8 @@
 # Handoff: Solo Optimization
 
-Date: 2026-03-24
-Branch: `feature/solo-optimization-20260324`
-Base commit: `7a7fb08`
+Date: 2026-03-24 (updated)
+Branch: `feature/solo-optimization-20260324-mastermerge`
+Tip commit (when handoff last revised): `ff30af9`
 Audience: next coding agent working on Solo / STARsolo post-map optimization
 
 ## Scope
@@ -18,9 +18,10 @@ Do not start by redesigning the read-stage pipeline here. The main optimization 
 
 ## Current Branch State
 
-- Branch created from `perturb` as `feature/solo-optimization-20260324`
-- No tracked code changes yet on this branch from me
-- There are unrelated untracked local files in the checkout; leave them alone unless explicitly asked
+- Active integration branch: `feature/solo-optimization-20260324-mastermerge` (Solo optimization + related merges).
+- Tracked changes include non-Flex inline-hash bridge packed-key fixes, direct bridge collapse
+  (`SoloFeature_collapseUMI_fromBridgeHash.cpp`), and related docs/artifacts notes.
+- There may be unrelated untracked local files in the checkout; leave them alone unless explicitly asked.
 
 ## Build Hygiene
 
@@ -1040,3 +1041,458 @@ Interpretation:
 - [SoloFeature.h](/mnt/pikachu/STAR-suite/core/legacy/source/SoloFeature.h)
 - [tests/run_solo_smoke.sh](/mnt/pikachu/STAR-suite/tests/run_solo_smoke.sh)
 - [tests/run_cr_parity_100k.sh](/mnt/pikachu/STAR-suite/tests/run_cr_parity_100k.sh)
+
+## Full EBs2_2 Benchmark on Repaired Master-Based Branch
+
+Using the corrected full UCSF paper harness from
+`comparisons/paper_benchmarks_20260318/ucsf_ebs2_2/run_ucsf_ebs2_2_benchmark.sh`
+on the corrected dataset root
+`/mnt/pikachu/ucsf-perturb-seq-corrected/EBs2_2`, I ran the full 32-thread
+dynamic benchmark on the repaired master-based Solo branch.
+
+Baseline full run:
+
+- output:
+  `/storage/paper_bench_solo_full_20260324/ucsf_ebs2_2_standard_baseline/`
+- completed successfully
+- `Log.final.out`:
+  - `Number of input reads = 444896731`
+  - `Started job on = Mar 24 07:05:37`
+  - `Started mapping on = Mar 24 07:06:37`
+  - `Finished on = Mar 24 07:24:52`
+- `BENCHMARK_SUMMARY.txt`:
+  - `star_cells = 13721`
+  - `wall_minutes = 19.8`
+- `Summary.csv`:
+  - `Reads Mapped to GeneFull: Unique GeneFull = 0.855092`
+  - `Estimated Number of Cells = 13721`
+  - `UMIs in Cells = 256057933`
+- instrumented Solo timings from `Log.out`:
+  - `collapseUMIall 164.982 s`
+  - `countCBgeneUMI 271.754 s`
+  - `outputResults(raw) 4.31639 s`
+  - `outputResults(filtered) 3.76 s`
+  - `cellFiltering 211.73 s`
+  - `processRecords 488.128 s`
+- `/usr/bin/time -v`:
+  - `Elapsed (wall clock) = 19:46.33`
+  - `Maximum resident set size = 72504156 kB`
+
+Optimized full run, first attempt:
+
+- output:
+  `/storage/paper_bench_solo_full_20260324/ucsf_ebs2_2_standard_solohash_optimized/`
+- same harness plus:
+  - environment `STAR_SOLO_NONFLEX_HASH_BRIDGE=1`
+  - CLI flag `--soloInlineHashMode yes`
+- failed in Solo post-map with:
+  - `FATAL ERROR: non-Flex Solo hash bridge observed more than 32768 distinct genes; packed gene field overflow`
+
+Root cause:
+
+- the UCSF benchmark reference under `/storage/autoindex_110_44/bulk_index`
+  contains `38606` genes
+- this fits in a true 16-bit field but not in the bridge's effective 15-bit
+  gene field inherited from the Flex-style packed key
+
+Patch applied:
+
+- the non-Flex bridge now uses its own packed key layout instead of the shared
+  Flex key
+- new bridge key:
+  - `[bridgeCB24][UMI24][GENE16]`
+- changed files:
+  - `flex/source/hash_shims_cpp_compat.h`
+  - `core/legacy/source/SoloReadFeature.cpp`
+  - `core/legacy/source/SoloReadFeature_record_base.cpp`
+  - `core/legacy/source/SoloFeature.cpp`
+  - `flex/source/SoloFeature_materializeFromHash.cpp`
+
+Optimized full run, second attempt after 16-bit bridge patch:
+
+- output:
+  `/storage/paper_bench_solo_full_20260324/ucsf_ebs2_2_standard_solohash_optimized_v2/`
+- successfully passed the previous overflow point and entered Solo post-map on
+  the full sample
+- then was killed externally during Solo finalize with shell status `137`
+- no new STAR fatal error was emitted before termination
+- `/usr/bin/time -v`:
+  - `Elapsed (wall clock) = 10:54.91`
+  - `Maximum resident set size = 127126724 kB`
+  - `Exit status = 137`
+
+Interpretation of the new blocker:
+
+- the 16-bit bridge-key fix worked; the previous full-sample gene-field crash
+  is resolved
+- the next full-scale blocker is memory, not packed-key width
+- compared with the successful baseline:
+  - baseline RSS peak: `72.5 GB`
+  - optimized bridge RSS peak before kill: `127.1 GB`
+- this strongly suggests the current bridge implementation's
+  `materializeRGUFromHash()` path is still too memory-hungry at full scale
+- the likely next optimization target is eliminating the bridge
+  materialization/expansion step rather than further packed-key changes
+
+### Direct bridge-hash collapse (implemented 2026-03-24)
+
+The non-Flex bridge no longer uses `materializeRGUFromHash()` → `rGeneUMI` /
+`collapseUMIall()` in `countCBgeneUMI`. It calls
+`SoloFeature::collapseUMIall_fromBridgeHash()` instead:
+
+- **File:** `core/legacy/source/SoloFeature_collapseUMI_fromBridgeHash.cpp`
+- **Behavior:** scan `inlineHash_` with `unpackBridgeCgAggKey`, sort by
+  `(wlCb, gene, umi)`, per-CB gene segments build `umiArray` from aggregated
+  counts, then reuse `umiArrayCorrect_CR` and the same MultiGeneUMI_CR
+  resolution loop shape as `SoloFeature_collapseUMIall.cpp`.
+- **Fail-closed gating** (parameter error if not met): `--soloUMIfiltering
+  MultiGeneUMI_CR`, exactly `--soloUMIdedup 1MM_CR`, `--soloMultiMappers
+  Unique`, `--outSAMtype None`, no `trackReadIdsForTags`, no MultiGeneUMI /
+  MultiGeneUMI_All.
+- **`materializeRGUFromHash()`** remains in the tree for other experiments but
+  is not invoked from the bridge path in `SoloFeature_countCBgeneUMI.cpp`.
+- **Memory hygiene:** after copying the merged hash into `recs`, the code calls
+  `kh_destroy` on `readFeatSum->inlineHash_` and nulls the pointer so peak RSS
+  is not *hash + recs + matrix* at once (unlike waiting for `clearLarge` /
+  `soloFlexMinimalMemory`).
+- **`countCellGeneUMI` sizing:** preallocated using the count of unique
+  `(wlCb, gene)` runs in sorted `recs` (upper bound on matrix rows), not
+  `recs.size()` (unique CB/gene/UMI keys).
+- **`umiArray`:** grows per gene with `nU0` only; not pre-sized from
+  `nReadPerCBmax` (total reads per CB).
+
+**Full-sample validation (v3):** reran optimized EBs2_2 with
+`STAR_SOLO_NONFLEX_HASH_BRIDGE=1`, `--soloInlineHashMode yes`, output under
+`/storage/paper_bench_solo_full_20260324/ucsf_ebs2_2_standard_solohash_optimized_v3/`.
+
+Result:
+
+- still killed externally with exit `137`
+- `/usr/bin/time -v`:
+  - `Elapsed (wall clock) = 11:30.97`
+  - `Maximum resident set size = 127682252 kB`
+  - `Exit status = 137`
+- got substantially farther than `v2`:
+  - finished mapping at `Mar 24 09:36:21`
+  - entered Solo post-map at `09:36:22`
+  - logged `Allocated and initialized readInfo array, nReadsInput = 444896732`
+  - logged
+    `Experimental non-Flex inline-hash bridge: direct hash collapse (no materializeRGUFromHash / no legacy collapseUMIall)`
+  - logged
+    `Direct bridge-hash UMI collapse (no rGeneUMI materialization), hash_entries=269677733`
+
+Interpretation:
+
+- the direct bridge collapse removed the old `materializeRGUFromHash()` /
+  legacy-collapse path, but it did **not** solve the full-sample OOM
+- the new failure occurs after entering the direct bridge collapse on a merged
+  hash with `269,677,733` unique `(CB,gene,UMI)` entries
+- live memory right before Solo counting was already high:
+  - after freeing genome index memory:
+    - `VmRSS = 80806804 kB`
+    - `VmHWM = 109832420 kB`
+- compared with prior full attempts:
+  - baseline peak RSS: `72504156 kB`
+  - optimized `v2` peak RSS: `127126724 kB`
+  - optimized `v3` peak RSS: `127682252 kB`
+
+So the full-scale blocker remains memory, but it is now concentrated inside the
+direct bridge path itself rather than the old explicit
+`materializeRGUFromHash()` step.
+
+### 2M memory validation after direct bridge collapse (2026-03-24)
+
+After the direct `collapseUMIall_fromBridgeHash()` path landed, I reran the
+2M UCSF `GeneFull` `Unique` benchmark on the repaired
+`feature/solo-optimization-20260324-mastermerge` branch to check whether the
+bridge-specific memory blow-up was actually gone.
+
+First completion on a fresh 2M resample:
+
+- output:
+  `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_hashbridge_direct_v3/`
+- completed successfully
+- `/usr/bin/time -v`:
+  - `Elapsed (wall clock) = 1:33.95`
+  - `Maximum resident set size = 40396560 kB`
+- instrumented Solo timings from `Log.out`:
+  - `collapseUMIall_fromBridgeHash 0.386508 s`
+  - `countCBgeneUMI 0.447979 s`
+  - `outputResults(raw) 0.120784 s`
+  - `outputResults(filtered) 0.0752119 s`
+  - `cellFiltering 2.75206 s`
+  - `processRecords 3.5359 s`
+
+Exact same-FASTQ rerun for apples-to-apples timing/memory on the new branch:
+
+- output:
+  `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_hashbridge_direct_samefastq_v1/`
+- completed successfully
+- `/usr/bin/time -v`:
+  - `Elapsed (wall clock) = 1:33.65`
+  - `Maximum resident set size = 40395468 kB`
+- instrumented Solo timings from `Log.out`:
+  - `collapseUMIall_fromBridgeHash 0.382937 s`
+  - `countCBgeneUMI 0.44476 s`
+  - `outputResults(raw) 0.121363 s`
+  - `outputResults(filtered) 0.0664623 s`
+  - `cellFiltering 2.71248 s`
+  - `processRecords 3.52106 s`
+
+Current-branch legacy control on the exact same 2M FASTQs:
+
+- output:
+  `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_legacy_mastermerge_v1/`
+- completed successfully
+- `/usr/bin/time -v`:
+  - `Elapsed (wall clock) = 1:33.28`
+  - `Maximum resident set size = 40193584 kB`
+- instrumented Solo timings from `Log.out`:
+  - `collapseUMIall 0.474378 s`
+  - `countCBgeneUMI 0.940734 s`
+  - `outputResults(raw) 0.120835 s`
+  - `outputResults(filtered) 0.0646548 s`
+  - `cellFiltering 2.65979 s`
+  - `processRecords 3.74702 s`
+
+Interpretation:
+
+- The direct bridge collapse removed the old bridge-specific RSS penalty at 2M.
+- On the current master-based branch, the direct bridge is only `201884 kB`
+  (~`0.19 GB`, ~`0.5%`) above the same-binary legacy control.
+- Compared with the older pre-direct bridge path
+  `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_hashbridge/`,
+  peak RSS dropped from `44360304 kB` to `40395468 kB`:
+  - delta `-3964836 kB` (~`-3.8 GB`, ~`-8.9%`)
+- The main Solo counting step is still faster on the direct path:
+  - `countCBgeneUMI`: `0.940734 s` legacy vs `0.44476 s` direct (`2.1x`)
+  - `collapseUMIall`/`collapseUMIall_fromBridgeHash`: `0.474378 s` vs
+    `0.382937 s`
+  - `processRecords`: `3.74702 s` vs `3.52106 s`
+
+Current parity status on the current branch:
+
+- Mapping totals now match exactly between current-branch legacy and direct
+  runs:
+  - `Number of Reads = 2000000`
+  - `Reads Mapped to Genome: Unique = 0.902979`
+- Remaining direct-vs-legacy output drift at 2M is modest but real:
+  - `Reads Mapped to GeneFull: Unique GeneFull = 0.743445` legacy vs
+    `0.743137` direct
+  - `Estimated Number of Cells = 7221` legacy vs `7217` direct
+  - `UMIs in Cells = 1308644` legacy vs `1301714` direct
+  - `Total GeneFull Detected = 17786` legacy vs `17771` direct
+
+### 2M validation after memory fixes 1-4 (2026-03-24)
+
+Implemented before this rerun:
+
+1. free thread-local bridge state immediately after `sumThreads()` merge
+2. skip `PackedReadInfo` allocation on the non-Flex direct bridge path
+3. replace bridge per-read accounting with:
+   - immediate per-CB packed counters
+   - compact fixed-width deferred accounting for ambiguous CBs only
+4. clear bridge accounting state immediately after replay
+
+I intentionally did **not** do the next architecture change yet:
+
+5. avoid the giant merged/extracted bulk structure by draining thread-local
+   hashes directly into grouped sub-hashes
+
+Validation rerun:
+
+- output:
+  `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_hashbridge_direct_samefastq_v2/`
+- inputs:
+  reused `fastq_downsampled/` from
+  `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_hashbridge_direct_v3/`
+- completed successfully
+- `/usr/bin/time -v`:
+  - `Elapsed (wall clock) = 1:38.48`
+  - `Maximum resident set size = 40213304 kB`
+- Solo timings from `Log.out`:
+  - `collapseUMIall_fromBridgeHash 0.419443 s`
+  - `countCBgeneUMI 0.45533 s`
+  - `outputResults(raw) 0.132954 s`
+  - `outputResults(filtered) 0.0635182 s`
+  - `cellFiltering 2.72824 s`
+  - `processRecords 3.49318 s`
+
+Memory interpretation:
+
+- compared with the exact same FASTQs on the pre-fix direct path (`v3`):
+  - RSS dropped from `40396560 kB` to `40213304 kB`
+  - delta `-183256 kB` (~`-0.17 GB`)
+- this leaves the direct bridge only `19720 kB` (~`19 MB`) above the earlier
+  current-branch legacy control (`40193584 kB`), though that legacy control was
+  not run on this exact downsample
+- so items `1-4` improved 2M RSS modestly, but 2M was already close to legacy
+  after the earlier direct-collapse work
+
+Important regression on the exact same FASTQs:
+
+- outputs changed relative to direct `v3`, so these fixes are **not** parity-safe
+  yet
+- `Features.stats` changes:
+  - `noTooManyWLmatches: 5068 -> 6443`
+  - `yesWLmatch: 1486274 -> 1492990`
+  - `yessubWLmatch_UniqueFeature: 1486274 -> 1467273`
+- `Summary.csv` changes:
+  - `Reads With Valid Barcodes: 0.972353 -> 0.971665`
+  - `Reads Mapped to GeneFull: Unique GeneFull: 0.743137 -> 0.733637`
+  - `Estimated Number of Cells: 7242 -> 7224`
+  - `UMIs in Cells: 1302603 -> 1301990`
+  - `Unique Reads in Cells Mapped to GeneFull: 1432339 -> 1413168`
+
+Conclusion:
+
+- memory fixes `1-4` are directionally correct and do shave RSS
+- but they introduced a real 2M regression in read/accounting behavior on the
+  exact same input
+- before the full benchmark, the next debug target is the new immediate +
+  deferred bridge accounting logic, not item `5` yet
+
+Bottom line:
+
+- the large `v2` drift was a **real bug**, not acceptable algorithmic drift
+- root cause: the compact deferred accounting rewrite dropped explicit
+  `featGood` / `multiFeature` state and reconstructed `featGood` from
+  `readFlag.featureU || readFlag.featureM`
+- that is wrong for `--soloMultiMappers Unique` because some ambiguous
+  `feature=-1` records still carry `featureM` bits; `v2` therefore replayed
+  those as counted multi-feature reads
+- smoking gun from `Features.stats` on the exact same FASTQs:
+  - direct `v3`: `yesWLmatch = yessubWLmatch_UniqueFeature = 1486274`
+  - broken `samefastq_v2`: `yesWLmatch = 1492990`,
+    `yessubWLmatch_UniqueFeature = 1467273`
+  - implied counted multi-feature reads in `Unique` mode: `25717`
+
+### 2M same-FASTQ rerun after deferred-accounting bug fix (2026-03-24)
+
+Fix:
+
+- restored explicit `featGood` and `multiFeature` fields in the compact
+  deferred bridge accounting record
+- ambiguous `feature=-1` rows are now replayed with the same counted/not-counted
+  semantics as before the memory rewrite
+
+Validation rerun:
+
+- output:
+  `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_hashbridge_direct_samefastq_v3/`
+- inputs:
+  reused `fastq_downsampled/` from
+  `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_hashbridge_direct_v3/`
+- completed successfully
+- `/usr/bin/time -v`:
+  - `Elapsed (wall clock) = 1:34.39`
+  - `Maximum resident set size = 40213020 kB`
+
+Result:
+
+- the major read-accounting regression is gone
+- `Features.stats` returned to the expected `Unique`-mode shape:
+  - `yesWLmatch = 1486273`
+  - `yessubWLmatch_UniqueFeature = 1486273`
+  - implied counted multi-feature reads: `0`
+- `Reads Mapped to GeneFull: Unique GeneFull` recovered from `0.733637` to
+  `0.743136` (pre-regression `v3` was `0.743137`)
+- `noTooManyWLmatches` returned from `6443` to `5068`
+
+Residual difference vs pre-memory-fix direct `v3`:
+
+- small matrix / filtered-output drift remains
+- examples:
+  - `Estimated Number of Cells: 7242 -> 7224`
+  - `UMIs in Cells: 1302603 -> 1301927`
+  - `yesUMIs: 1352866 -> 1352811`
+- so item `3` contained one clear real bug that is now fixed, but there is
+  still a smaller parity difference left in the post-memory-fix path
+
+- the 2M memory problem is substantially addressed
+- the direct bridge path no longer shows the large intermediate-memory
+  expansion seen in the old hash-bridge implementation
+- full-sample validation is still required, but 2M no longer suggests an OOM
+  mechanism by itself
+
+### Full UCSF optimized rerun after fix 5 (2026-03-24)
+
+Fix 5 changed the full-scale bridge collapse shape:
+
+- instead of merging all non-ambiguous bridge data into one giant global hash,
+  the direct bridge path now drains the thread-local bridge hashes directly
+  during extraction
+- only the merged ambiguous/deferred contribution is still injected through
+  `readFeatSum->inlineHash_`
+- this removes the old "giant merged bulk hash + giant extracted traversal"
+  overlap that was driving the full-sample OOM
+
+Optimized full rerun:
+
+- output:
+  `/storage/paper_bench_solo_full_20260324/ucsf_ebs2_2_standard_solohash_optimized_v4/`
+- completed successfully; no exit `137`
+- `/usr/bin/time -v`:
+  - `Elapsed (wall clock) = 22:38.81`
+  - `Maximum resident set size = 70575848 kB`
+- `Log.out` key bridge lines:
+  - `hash_entries=325532880 thread_hashes=32 merged_ambiguous_hash_entries=2665474`
+  - `Drained thread-local + merged ambiguous bridge hashes after extraction (recs=325532880)`
+  - `Unique (CB,gene) segments (matrix row upper bound)=83073593`
+  - `Finished direct bridge-hash UMI collapse, nCB=1840536 wall=277.391 s`
+
+Current-branch full baseline rerun:
+
+- output:
+  `/storage/paper_bench_solo_full_20260324/ucsf_ebs2_2_standard_baseline_mastermerge_v2/`
+- completed successfully
+- `/usr/bin/time -v`:
+  - `Elapsed (wall clock) = 19:48.45`
+  - `Maximum resident set size = 68149756 kB`
+- this rerun reproduced the archived baseline `Summary.csv` exactly
+
+Full same-branch A/B result:
+
+- fix 5 **did** solve the full-sample OOM
+- however, on the current branch it is still slower than the current baseline:
+  - wall time: `22:38.81` optimized vs `19:48.45` baseline
+  - delta: `+170.36 s` (`+14.33%`)
+  - peak RSS: `70575848 kB` optimized vs `68149756 kB` baseline
+  - delta: `+2426092 kB` (`+2.31 GiB`)
+- this is still a huge improvement over the old failed full runs:
+  - old direct-collapse `v3` OOM peak: `127682252 kB`
+  - new full optimized `v4` peak: `70575848 kB`
+
+Solo timing comparison vs current-branch baseline:
+
+- optimized `countCBgeneUMI`: `280.117 s`
+- baseline `countCBgeneUMI`: `277.432 s`
+- optimized `cellFiltering`: `218.183 s`
+- baseline `cellFiltering`: `219.881 s`
+- optimized `processRecords`: `508.431 s`
+- baseline `processRecords`: `501.99 s`
+
+So the current state is:
+
+- fix 5 succeeded as a **memory fix**
+- fix 5 did **not** produce a speed win on the full UCSF workload
+- the remaining optimization target is now CPU / traversal cost, not OOM survival
+
+Full-output parity vs current-branch baseline:
+
+- `Number of Reads`: identical (`444896731`)
+- `Reads Mapped to GeneFull: Unique GeneFull`:
+  `0.855092 -> 0.854919` (`-0.000173`, `-0.0202%`)
+- `Estimated Number of Cells`: `13721 -> 13706` (`-15`, `-0.1093%`)
+- `Unique Reads in Cells Mapped to GeneFull`:
+  `365470404 -> 365284662` (`-185742`, `-0.0508%`)
+- `UMIs in Cells`: `256057933 -> 254997805`
+  (`-1060128`, `-0.4140%`)
+- `Total GeneFull Detected`: `33779 -> 33758` (`-21`, `-0.0622%`)
+
+Conclusion after fix 5:
+
+- full-scale viability is now restored
+- residual full-output drift is small but real
+- the direct bridge is now viable enough to iterate further, but it is not yet
+  ready to replace the baseline path on either speed or parity

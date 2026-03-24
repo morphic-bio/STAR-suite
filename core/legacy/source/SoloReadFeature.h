@@ -57,15 +57,16 @@ public:
     };
     std::unordered_map<ReadAlign::AmbigKey, ExtendedAmbiguousEntry> pendingAmbiguous_; // Ambiguous CB accumulation with gene/tag info
 
-    struct BridgeReadAccounting {
+    struct BridgeDeferredReadAccounting {
         SoloReadFlagClass::typeFlag readFlag = 0;
-        int32_t cbMatch = -1;
-        bool featGood = false;
-        bool multiFeature = false;
-        std::vector<uint32_t> cbCandidates;
-        std::vector<uint8_t> candidateQuals;
+        uint32_t candidateOffset = 0;
+        uint16_t candidateCount = 0;
+        uint8_t featGood = 0;
+        uint8_t multiFeature = 0;
     };
-    std::vector<BridgeReadAccounting> bridgeReadAccounting_;
+    std::unordered_map<uint32_t, uint64_t> bridgeImmediateReadCounts_; // key: wlCb, value: low32=unique, high32=multi
+    std::vector<BridgeDeferredReadAccounting> bridgeDeferredAccounting_;
+    std::vector<uint32_t> bridgeDeferredCandidates_; // packed candidate [cb24|qual8]
     std::unordered_map<uint32_t, uint32_t> bridgeCbCompactByWl_;
     std::vector<uint32_t> bridgeCbWlByCompact_;
     std::unordered_map<uint32_t, uint16_t> bridgeGeneCompactByFull_;
@@ -84,6 +85,8 @@ public:
     void addStats(const SoloReadFeature &soloCBin);
     void statsOut(ofstream &streamOut);
     void mergeInlineHash(SoloReadFeature &other); // Merge inlineHash_ and pendingAmbiguous_ from other
+    void mergePendingAmbiguous(const SoloReadFeature &other);
+    void mergeDeferredBridgeAccounting(const SoloReadFeature &other);
     uint32_t getOrCreateBridgeCompactCb(uint32_t wlIdx);
     uint32_t bridgeCompactToWl(uint32_t compactIdx) const;
     uint16_t getOrCreateBridgeCompactGene(uint32_t geneIdx);

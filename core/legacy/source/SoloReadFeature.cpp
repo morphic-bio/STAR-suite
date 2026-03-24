@@ -71,8 +71,18 @@ void SoloReadFeature::addStats(const SoloReadFeature &rfIn)
     for (uint32 ii=0; ii<stats.nStats; ii++)
         stats.V[ii] += rfIn.stats.V[ii];
 
+    for (const auto &kv : rfIn.readFlag.flagCounts) {
+        auto &dst = readFlag.flagCounts[kv.first];
+        for (uint32 ii = 0; ii < readFlag.nBits; ++ii) {
+            dst[ii] += kv.second[ii];
+        }
+    }
     for (uint32 ii=0; ii<readFlag.nBits; ii++)
         readFlag.flagCountsNoCB[ii] += rfIn.readFlag.flagCountsNoCB[ii];
+
+    for (const auto &kv : rfIn.bridgeImmediateReadCounts_) {
+        bridgeImmediateReadCounts_[kv.first] += kv.second;
+    }
 };
 
 void SoloReadFeature::statsOut(ofstream &streamOut)
@@ -113,9 +123,9 @@ uint16_t SoloReadFeature::getOrCreateBridgeCompactGene(uint32_t geneIdx)
     }
 
     size_t compactIdx = bridgeGeneFullByCompact_.size();
-    if (compactIdx > 0x7FFFu) {
+    if (compactIdx > 0xFFFFu) {
         std::fprintf(stderr,
-                     "FATAL ERROR: non-Flex Solo hash bridge observed more than 32768 distinct genes; packed gene field overflow\n");
+                     "FATAL ERROR: non-Flex Solo hash bridge observed more than 65536 distinct genes; packed gene field overflow\n");
         std::exit(1);
     }
 
@@ -136,46 +146,45 @@ uint32_t SoloReadFeature::bridgeCompactToGene(uint16_t compactIdx) const
 void SoloReadFeature::mergeInlineHash(SoloReadFeature &other)
 {
     if (!inlineHash_ || !other.inlineHash_) {
-        return;
-    }
+        // Still merge non-hash sidecars below.
+    } else {
+        bool nonFlexHashBridge = pSolo.inlineHashMode
+            && !pSolo.flexMode
+            && std::getenv("STAR_SOLO_NONFLEX_HASH_BRIDGE") != nullptr;
 
-    bool nonFlexHashBridge = pSolo.inlineHashMode
-        && !pSolo.flexMode
-        && std::getenv("STAR_SOLO_NONFLEX_HASH_BRIDGE") != nullptr;
+        // Merge hash tables: iterate over source hash, add counts
+        for (khiter_t iter = kh_begin(other.inlineHash_); iter != kh_end(other.inlineHash_); ++iter) {
+            if (!kh_exist(other.inlineHash_, iter)) continue;
 
-    // Merge hash tables: iterate over source hash, add counts
-    for (khiter_t iter = kh_begin(other.inlineHash_); iter != kh_end(other.inlineHash_); ++iter) {
-        if (!kh_exist(other.inlineHash_, iter)) continue;
+            uint64_t key = kh_key(other.inlineHash_, iter);
+            uint32_t count = kh_val(other.inlineHash_, iter);
 
-        uint64_t key = kh_key(other.inlineHash_, iter);
-        uint32_t count = kh_val(other.inlineHash_, iter);
+            if (nonFlexHashBridge) {
+                uint32_t otherCompactCb = 0, umi24 = 0;
+                uint16_t geneIdx = 0;
+                unpackBridgeCgAggKey(key, &otherCompactCb, &umi24, &geneIdx);
 
-        if (nonFlexHashBridge) {
-            uint32_t otherCompactCb = 0, umi24 = 0;
-            uint16_t geneIdx = 0;
-            uint8_t tagIdx = 0;
-            unpackCgAggKey(key, &otherCompactCb, &umi24, &geneIdx, &tagIdx);
+                uint32_t wlIdx = other.bridgeCompactToWl(otherCompactCb);
+                if (wlIdx == static_cast<uint32_t>(-1)) {
+                    continue;
+                }
 
-            uint32_t wlIdx = other.bridgeCompactToWl(otherCompactCb);
-            if (wlIdx == static_cast<uint32_t>(-1)) {
-                continue;
+                uint32_t compactCb = getOrCreateBridgeCompactCb(wlIdx);
+                uint32_t fullGeneIdx = other.bridgeCompactToGene(geneIdx);
+                if (fullGeneIdx == static_cast<uint32_t>(-1)) {
+                    continue;
+                }
+                uint16_t compactGene = getOrCreateBridgeCompactGene(fullGeneIdx);
+                key = packBridgeCgAggKey(compactCb, umi24, compactGene);
             }
 
-            uint32_t compactCb = getOrCreateBridgeCompactCb(wlIdx);
-            uint32_t fullGeneIdx = other.bridgeCompactToGene(geneIdx);
-            if (fullGeneIdx == static_cast<uint32_t>(-1)) {
-                continue;
+            int absent;
+            khiter_t dest_iter = kh_put(cg_agg, inlineHash_, key, &absent);
+            if (absent) {
+                kh_val(inlineHash_, dest_iter) = count;
+            } else {
+                kh_val(inlineHash_, dest_iter) += count;
             }
-            uint16_t compactGene = getOrCreateBridgeCompactGene(fullGeneIdx);
-            key = packCgAggKey(compactCb, umi24, compactGene, tagIdx);
-        }
-
-        int absent;
-        khiter_t dest_iter = kh_put(cg_agg, inlineHash_, key, &absent);
-        if (absent) {
-            kh_val(inlineHash_, dest_iter) = count;
-        } else {
-            kh_val(inlineHash_, dest_iter) += count;
         }
     }
     
@@ -196,6 +205,12 @@ void SoloReadFeature::mergeInlineHash(SoloReadFeature &other)
         }
     }
     
+    mergePendingAmbiguous(other);
+    mergeDeferredBridgeAccounting(other);
+}
+
+void SoloReadFeature::mergePendingAmbiguous(const SoloReadFeature &other)
+{
     // Merge ambiguous CB structs: combine UMI counts and observations on key collision
     for (const auto &kv : other.pendingAmbiguous_) {
         ReadAlign::AmbigKey key = kv.first;
@@ -220,10 +235,20 @@ void SoloReadFeature::mergeInlineHash(SoloReadFeature &other)
                                      otherEntry.observations.end());
         }
     }
+}
 
-    if (!other.bridgeReadAccounting_.empty()) {
-        bridgeReadAccounting_.insert(bridgeReadAccounting_.end(),
-                                     other.bridgeReadAccounting_.begin(),
-                                     other.bridgeReadAccounting_.end());
+void SoloReadFeature::mergeDeferredBridgeAccounting(const SoloReadFeature &other)
+{
+    if (!other.bridgeDeferredAccounting_.empty()) {
+        const uint32_t candidateOffsetBase = static_cast<uint32_t>(bridgeDeferredCandidates_.size());
+        bridgeDeferredCandidates_.insert(bridgeDeferredCandidates_.end(),
+                                         other.bridgeDeferredCandidates_.begin(),
+                                         other.bridgeDeferredCandidates_.end());
+        bridgeDeferredAccounting_.reserve(bridgeDeferredAccounting_.size() + other.bridgeDeferredAccounting_.size());
+        for (const auto &rec : other.bridgeDeferredAccounting_) {
+            BridgeDeferredReadAccounting mergedRec = rec;
+            mergedRec.candidateOffset += candidateOffsetBase;
+            bridgeDeferredAccounting_.push_back(mergedRec);
+        }
     }
 }
