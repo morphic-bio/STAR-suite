@@ -319,6 +319,11 @@ public:
     bool hashScreenEnabled = false;
     string hashScreenFile;
 
+    // Internal hash cache generation (--runMode hashCacheGenerate)
+    string hashCacheOutput;       // --hashCacheOutput path (FH01SEQ1 binary)
+    string hashCacheTiers = "H0,H1,H2"; // comma-separated: H0,H1,H2
+    uint32_t hashCacheParentLimit = 0; // 0 = all probes; else cap probe count (testing)
+
     // ReadId tracking for sorted BAM CB/UB tag injection (Option C)
     // When enabled, a parallel hash (readid_cbumi) tracks readId -> (cbIdx, umi24, status)
     // This allows packedReadInfo to be populated after inline-hash collapse
@@ -332,6 +337,12 @@ public:
     // Flex omnibus flag - enables full Flex pipeline with production defaults
     string flexModeStr = "no";       // raw CLI: yes|no (default: no)
     bool flexMode = false;           // resolved: true if enabled
+
+    // Flex pipeline-parallel I/O mode
+    string flexPipelineStr = "auto"; // raw CLI: yes|no|auto (default: auto)
+    int flexPipelineNSolo = 2;       // number of sharded Solo consumers (default: 2)
+    int flexPipelineNTriage = 2;     // number of triage threads (default: 2)
+    int flexNoAlign = 0;             // 1 = skip alignment for H0/H1 misses (prototyping mode)
     
     // FlexFilter inline integration
     string runFlexFilterStr = "no";  // raw CLI: yes|no (default: no)

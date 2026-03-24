@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 class ParametersSolo;
@@ -37,7 +38,17 @@ public:
 
     bool ensureLoaded(const ParametersSolo& pSolo, std::string* errorOut = nullptr);
     FlexHashScreenDecision classifyRead(const char* readSeq, uint32_t readLen, uint16_t sampleIdx) const;
+    FlexHashScreenDecision classifyReadH0Only(const char* readSeq, uint32_t readLen, uint16_t sampleIdx) const;
+    FlexHashScreenDecision classifyReadH0Offset0(const char* readSeq, uint32_t readLen) const;
+    FlexHashScreenDecision classifyReadH0H1Offset0(const char* readSeq, uint32_t readLen) const;
     size_t recordCount() const { return records_.size(); }
+    size_t h0RecordCount() const { return h0Records_.size(); }
+    size_t h1DenyRecordCount() const { return h1DenyRecords_.size(); }
+
+    /** Pack 50bp ACGT window into (seqLo, seqHi); same encoding as classifyRead. */
+    static bool encodeProbeWindow(const char* readSeq, uint32_t offset, uint64_t& seqLo, uint64_t& seqHi);
+    /** Write FH01SEQ1 v2 cache (sorted by seqHi, seqLo, sampleIdx). */
+    static bool writeHashCacheFile(const std::string& path, std::vector<Record>& records, std::string* errorOut);
 
 private:
     FlexHashScreenCache() = default;
@@ -47,10 +58,34 @@ private:
     bool findRecord(uint64_t seqLo, uint64_t seqHi, uint16_t sampleIdx, Record& out) const;
     FlexHashScreenDecision classifyHits(const Record* const* hits, const int8_t* relativeOffsets, size_t nHits, uint16_t runtimeSampleIdx) const;
 
+    bool findRecordInVec(const std::vector<Record>& vec, uint64_t seqLo, uint64_t seqHi, uint16_t sampleIdx, Record& out) const;
+    void buildTieredVectors();
+
+    struct SeqKeyNoSample {
+        uint64_t lo, hi;
+        bool operator==(const SeqKeyNoSample& o) const { return lo == o.lo && hi == o.hi; }
+    };
+    struct SeqKeyNoSampleHash {
+        size_t operator()(const SeqKeyNoSample& k) const {
+            return k.lo * 0x9E3779B97F4A7C15ULL ^ k.hi * 0xBF58476D1CE4E5B9ULL;
+        }
+    };
+    using H0NoSampleMap = std::unordered_map<SeqKeyNoSample, Record, SeqKeyNoSampleHash>;
+
+    bool encodeWindowLUT(const char* readSeq, uint32_t offset, uint64_t& seqLo, uint64_t& seqHi) const;
+    void buildH0NoSampleMap();
+    void buildH1DenyNoSampleMap();
+
     bool initialized_ = false;
     bool enabled_ = false;
     std::string loadedPath_;
     std::vector<Record> records_;
+    std::vector<Record> h0Records_;
+    std::vector<Record> h1DenyRecords_;
+    H0NoSampleMap h0NoSampleMap_;
+    H0NoSampleMap h1DenyNoSampleMap_;
+    static uint8_t baseLUT_[256];
+    static bool lutInitialized_;
 };
 
 // Binary negative class codes from scripts/flex_h01_pilot.py.

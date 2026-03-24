@@ -233,6 +233,29 @@ uint32_t SampleDetector::detectSampleIndex(const uint8_t *seqData, int32_t readL
     return 0u;
 }
 
+uint32_t SampleDetector::detectSampleFromPackedTag(const uint8_t *packedTag8) const {
+    if (packedTag8 == nullptr || !ready()) return 0u;
+
+    uint32_t code = 0;
+    for (int i = 0; i < 8; ++i) {
+        uint32_t nib = static_cast<uint32_t>(bam_seqi(packedTag8, i) & 0xFu);
+        if (!isACGTNib(nib)) return 0u;
+        code = (code << 4) | nib;
+    }
+    for (size_t sample = 0; sample < variantCountsPerSample_.size(); ++sample) {
+        size_t base = sample * 8;
+        uint8_t count = variantCountsPerSample_[sample];
+        for (uint8_t k = 0; k < count; ++k) {
+            if (sampleCodes_[base + k] == code) {
+                uint32_t idx = static_cast<uint32_t>(sample + 1);
+                registerSampleToken(static_cast<uint8_t>(idx & 0x1Fu), static_cast<uint16_t>(idx));
+                return idx;
+            }
+        }
+    }
+    return 0u;
+}
+
 uint32_t SampleDetector::detectSampleIndexFromBam(const char *bamRecord, uint32_t bamSize) const {
     if (bamRecord == nullptr || bamSize < 32u || !ready()) {
         return 0u;

@@ -6,10 +6,65 @@
 #include "GlobalVariables.h"
 #include "SampleDetector.h"
 #include "SoloReadFeature_record_shared.h"
+#include "FlexPipeline.h"
+#include "FlexHashScreen.h"
 #include "libtrim/trim.h"
 #include <cstdlib>
 #include <atomic>
 #include <chrono>
+#include <mutex>
+
+// --- Hash screen dump (env-gated: STAR_DUMP_HASH_SCREEN=<path>) ---
+// Binary format: 8-byte magic "HSCRN001", 8-byte nReads placeholder,
+// then per-read: {uint32 readLen, uint16 sampleIdx, uint8 action,
+//   uint8 cacheClass, uint16 geneIdx15, int8 offset, uint8 pad,
+//   char readSeq[readLen]}.
+namespace {
+struct HashScreenDumpState {
+    FILE* fp = nullptr;
+    std::mutex mu;
+    uint64_t nReads = 0;
+};
+static HashScreenDumpState g_hsDump;
+static std::once_flag g_hsDumpOnce;
+
+void hashScreenDumpFinalize() {
+    if (!g_hsDump.fp) return;
+    std::fseek(g_hsDump.fp, 8, SEEK_SET);
+    std::fwrite(&g_hsDump.nReads, 8, 1, g_hsDump.fp);
+    std::fclose(g_hsDump.fp);
+    g_hsDump.fp = nullptr;
+}
+
+void hashScreenDumpInit() {
+    const char* path = std::getenv("STAR_DUMP_HASH_SCREEN");
+    if (!path || path[0] == '\0') return;
+    g_hsDump.fp = std::fopen(path, "wb");
+    if (!g_hsDump.fp) return;
+    const char magic[8] = {'H','S','C','R','N','0','0','1'};
+    std::fwrite(magic, 1, 8, g_hsDump.fp);
+    uint64_t placeholder = 0;
+    std::fwrite(&placeholder, 8, 1, g_hsDump.fp);
+    std::atexit(hashScreenDumpFinalize);
+}
+
+void hashScreenDumpWrite(const char* readSeq, uint32_t readLen,
+                         uint16_t sampleIdx, const FlexHashScreenDecision& d) {
+    std::call_once(g_hsDumpOnce, hashScreenDumpInit);
+    if (!g_hsDump.fp) return;
+    std::lock_guard<std::mutex> lock(g_hsDump.mu);
+    std::fwrite(&readLen, 4, 1, g_hsDump.fp);
+    std::fwrite(&sampleIdx, 2, 1, g_hsDump.fp);
+    uint8_t action = static_cast<uint8_t>(d.action);
+    std::fwrite(&action, 1, 1, g_hsDump.fp);
+    std::fwrite(&d.cacheClass, 1, 1, g_hsDump.fp);
+    std::fwrite(&d.geneIdx15, 2, 1, g_hsDump.fp);
+    std::fwrite(&d.offset, 1, 1, g_hsDump.fp);
+    std::fwrite(&d.negativeCode, 1, 1, g_hsDump.fp);
+    std::fwrite(readSeq, 1, readLen, g_hsDump.fp);
+    ++g_hsDump.nReads;
+}
+} // namespace
 
 // Static counter for debug logging (guarded by STAR_TRIM_DEBUG_N env var)
 // Use atomic for thread-safety when debug logging is enabled
@@ -312,6 +367,7 @@ int ReadAlign::oneRead() {//process one read: load, map, write
         // A/C/G/T characters; moving this call after convertNucleotidesToNumbers
         // would silently break classification.
         hashScreenDecision_ = FlexHashScreenCache::instance().classifyRead(Read0[0], readLengthOriginal[0], hashScreenSampleIdx);
+        hashScreenDumpWrite(Read0[0], readLengthOriginal[0], hashScreenSampleIdx, hashScreenDecision_);
         if (hashScreenDecision_.action == FlexHashScreenDecision::Keep) {
             soloRead->readFlagReset();
             SoloReadFeature *geneFeat = soloRead->readFeat[P.pSolo.featureInd[SoloFeatureTypes::Gene]];
@@ -332,6 +388,12 @@ int ReadAlign::oneRead() {//process one read: load, map, write
         } else {
             statsRA.hashScreenPass++;
         }
+    } else {
+        // Read skipped the hash screen entirely (disabled, missing soloRead,
+        // wrong feature config, etc.). Dump with action=Disabled so the replay
+        // tool can count and verify these reads are correctly routed.
+        // sampleIdx=0 because sample detection did not run.
+        hashScreenDumpWrite(Read0[0], readLengthOriginal[0], 0, hashScreenDecision_);
     }
 
     complementSeqNumbers(Read1[0],Read1[1],Lread); //returns complement of Reads[ii]
@@ -390,3 +452,114 @@ int ReadAlign::oneRead() {//process one read: load, map, write
     return 0;
 
 };
+
+int ReadAlign::oneReadFromPacket(EnrichedPacket &pkt) {
+    // Copy read data from packet into ReadAlign buffers
+    std::strncpy(readName, pkt.name, DEF_readNameLengthMax - 1);
+    readName[DEF_readNameLengthMax - 1] = '\0';
+    readNameMates[0][0] = '\0';
+    readNameMates[1][0] = '\0';
+
+    iReadAll = pkt.iReadAll;
+    readFilesIndex = pkt.readFilesIndex;
+    readFilter = pkt.readFilter;
+
+    // Copy R2 (mate 0) and R1 (mate 1) sequences and qualities
+    std::memcpy(Read0[0], pkt.seq[0], pkt.readLen[0]);
+    Read0[0][pkt.readLen[0]] = '\0';
+    std::memcpy(Qual0[0], pkt.qual[0], pkt.readLen[0]);
+    Qual0[0][pkt.readLen[0]] = '\0';
+    readLength[0] = pkt.readLen[0];
+    readLengthOriginal[0] = pkt.readLen[0];
+
+    std::memcpy(Read0[1], pkt.seq[1], pkt.readLen[1]);
+    Read0[1][pkt.readLen[1]] = '\0';
+    std::memcpy(Qual0[1], pkt.qual[1], pkt.readLen[1]);
+    Qual0[1][pkt.readLen[1]] = '\0';
+    readLength[1] = pkt.readLen[1];
+    readLengthOriginal[1] = pkt.readLen[1];
+
+    statsRA.readN++;
+    statsRA.readBases += readLength[0] + readLength[1];
+
+    readFileType = 2; // FASTQ
+
+    // Restore CB/UMI state from triage's pre-extracted fields
+    if (soloRead != nullptr && soloRead->readBar != nullptr) {
+        soloRead->readBar->cbMatch = pkt.cbMatch;
+        soloRead->readBar->cbMatchInd.resize(pkt.cbMatchIndN);
+        for (uint32_t i = 0; i < pkt.cbMatchIndN; ++i)
+            soloRead->readBar->cbMatchInd[i] = pkt.cbMatchInd[i];
+        soloRead->readBar->umiB = pkt.umiB;
+        soloRead->readBar->detectedSampleToken = pkt.detectedSampleToken;
+    }
+
+    // Convert ASCII sequences to numeric encoding (must happen before hash screen
+    // since classifyRead operates on ASCII Read0, but alignment needs numeric Read1)
+    convertNucleotidesToNumbers(Read0[0], Read1[0], readLength[0]);
+    convertNucleotidesToNumbers(Read0[1], Read1[1], readLength[1]);
+
+    // Apply 5' and 3' clipping on numeric sequence
+    clipMates[0][0].clip(readLength[0], Read1[0]);
+    clipMates[0][1].clip(readLength[0], Read1[0]);
+    clipMates[1][0].clip(readLength[1], Read1[1]);
+    clipMates[1][1].clip(readLength[1], Read1[1]);
+
+    // H0+H1 hash screen is now fully handled pre-queue by the fused lane thread.
+    // Alignment workers receive only true MISS reads — proceed directly to alignment.
+    statsRA.hashScreenPass++;
+
+    // Combine PE mates with spacer base (mirrors oneRead path)
+    if (P.readNmates == 2) {
+        Lread = readLength[0] + readLength[1] + 1;
+        readLengthPairOriginal = readLengthOriginal[0] + readLengthOriginal[1] + 1;
+        Read1[0][readLength[0]] = MARK_FRAG_SPACER_BASE;
+        complementSeqNumbers(Read1[1], Read1[0] + readLength[0] + 1, readLength[1]);
+        for (uint ii = 0; ii < readLength[1] / 2; ii++) {
+            swap(Read1[0][Lread - ii - 1], Read1[0][ii + readLength[0] + 1]);
+        }
+    } else {
+        Lread = readLength[0];
+        readLengthPairOriginal = readLengthOriginal[0];
+        readLength[1] = 0;
+    }
+
+    // Full-read complement and reverse complement for alignment
+    complementSeqNumbers(Read1[0], Read1[1], Lread);
+    for (uint ii = 0; ii < Lread; ii++) {
+        Read1[2][Lread - ii - 1] = Read1[1][ii];
+    }
+
+    outFilterMismatchNmaxTotal = min(P.outFilterMismatchNmax,
+        (uint)(P.outFilterMismatchNoverReadLmax * (readLength[0] + readLength[1])));
+
+    const auto alignCoreStart = std::chrono::steady_clock::now();
+    if (P.pGe.gType == 101) {
+        mapOneReadSpliceGraph();
+    } else {
+        mapOneRead();
+    }
+    const auto alignCoreEnd = std::chrono::steady_clock::now();
+    statsRA.alignCoreCalls++;
+    statsRA.alignCoreNs += static_cast<uint64>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(alignCoreEnd - alignCoreStart).count());
+
+    peOverlapMergeMap();
+    multMapSelect();
+    mappedFilter();
+    transformGenome();
+
+    if (!peOv.yes) {
+        chimericDetection();
+    }
+
+    if (P.pCh.out.bam && chimRecord) {
+        return 0;
+    }
+
+    waspMap();
+
+    outputAlignments();
+
+    return 0;
+}

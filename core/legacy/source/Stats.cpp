@@ -21,6 +21,8 @@ void Stats::resetN() {//zero all counters
     sampleDetectPreAlignCalls = 0; sampleDetectPreAlignNs = 0;
     sampleDetectOutputCalls = 0; sampleDetectOutputNs = 0;
     alignCoreCalls = 0; alignCoreNs = 0;
+    pipelineMutexWaitNs = 0; pipelineChunkReadNs = 0;
+    pipelineChunkReadBytes = 0; pipelineChunksProcessed = 0; pipelineMapChunkNs = 0;
     splicesNsjdb=0;
     for (uint ii=0; ii<SJ_MOTIF_SIZE; ii++) {
         splicesN[ii]=0;
@@ -61,6 +63,11 @@ void Stats::addStats(Stats &S) {//add S to Stats
     sampleDetectOutputNs += S.sampleDetectOutputNs;
     alignCoreCalls += S.alignCoreCalls;
     alignCoreNs += S.alignCoreNs;
+    pipelineMutexWaitNs += S.pipelineMutexWaitNs;
+    pipelineChunkReadNs += S.pipelineChunkReadNs;
+    pipelineChunkReadBytes += S.pipelineChunkReadBytes;
+    pipelineChunksProcessed += S.pipelineChunksProcessed;
+    pipelineMapChunkNs += S.pipelineMapChunkNs;
 
     splicesNsjdb += S.splicesNsjdb;
     for (uint ii=0; ii<SJ_MOTIF_SIZE; ii++) {
@@ -250,6 +257,30 @@ void Stats::reportFinal(ofstream &streamOut) {
                   <<setw(w1)<< "No rescue: multiple intronic loci |\t" << crRescueMultiIntronicNoRescue << "\n" \
                   <<setw(w1)<< "No rescue: 1 intronic, fallback off |\t" << crRescueIntronicFallbackOffNoRescue << "\n" \
                   <<setw(w1)<< "No rescue: all intergenic |\t" << crRescueAllIntergenicNoRescue << "\n";
+    }
+
+    if (pipelineChunksProcessed > 0) {
+        auto nsToMs = [](uint64 ns) -> double { return static_cast<double>(ns) / 1.0e6; };
+        auto nsToSec = [](uint64 ns) -> double { return static_cast<double>(ns) / 1.0e9; };
+        double mutexWaitSec = nsToSec(pipelineMutexWaitNs);
+        double chunkReadSec = nsToSec(pipelineChunkReadNs);
+        double mapChunkSec = nsToSec(pipelineMapChunkNs);
+        double chunkReadMBps = pipelineChunkReadNs > 0
+            ? static_cast<double>(pipelineChunkReadBytes) / (1024.0*1024.0) / chunkReadSec : 0.0;
+
+        streamOut << "\n" \
+                  <<setw(w1)<< "                 PIPELINE DIAGNOSTICS |\n" \
+                  <<setw(w1)<< "              Chunks processed (all threads) |\t" << pipelineChunksProcessed << "\n" \
+                  <<setw(w1)<< "    Mutex wait time (thread-seconds) |\t" << std::setprecision(2) << mutexWaitSec << "\n" \
+                  <<setw(w1)<< " Chunk read time (thread-seconds) |\t" << std::setprecision(2) << chunkReadSec << "\n" \
+                  <<setw(w1)<< "     Chunk read throughput (MB/s) |\t" << std::setprecision(1) << chunkReadMBps << "\n" \
+                  <<setw(w1)<< " Map chunk time (thread-seconds) |\t" << std::setprecision(2) << mapChunkSec << "\n";
+        if (pipelineChunksProcessed > 0) {
+            streamOut \
+                  <<setw(w1)<< "Avg mutex wait per chunk (ms) |\t" << std::setprecision(2) << nsToMs(pipelineMutexWaitNs) / pipelineChunksProcessed << "\n" \
+                  <<setw(w1)<< "    Avg chunk read time (ms) |\t" << std::setprecision(2) << nsToMs(pipelineChunkReadNs) / pipelineChunksProcessed << "\n" \
+                  <<setw(w1)<< "      Avg map chunk time (ms) |\t" << std::setprecision(2) << nsToMs(pipelineMapChunkNs) / pipelineChunksProcessed << "\n";
+        }
     }
 
     if (crGeneFullExonicOverIntronicFiltered > 0 || crGeneFullCrossAlignMultiGene > 0) {

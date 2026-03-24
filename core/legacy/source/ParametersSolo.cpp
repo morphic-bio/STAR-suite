@@ -455,6 +455,13 @@ void ParametersSolo::initialize(Parameters *pPin)
     {
         if (flexModeStr == "yes") {
             flexMode = true;
+
+            auto findParam = [&](const string& name) -> ParameterInfoBase* {
+                for (auto *p : pP->parArray) {
+                    if (p->nameString == name) return p;
+                }
+                return nullptr;
+            };
             
             // Enable FlexFilter pipeline (if not explicitly disabled)
             if (runFlexFilterStr.empty() || runFlexFilterStr == "no") {
@@ -502,8 +509,12 @@ void ParametersSolo::initialize(Parameters *pPin)
                 barcodesObservedOnlyStr = "yes";
             }
             
-            // Set UMI correction to clique (if not explicitly set)
-            if (umiCorrectionModeStr.empty() || umiCorrectionModeStr == "none") {
+            // Set UMI correction to clique only if the user/default-groups did
+            // not explicitly set soloUMICorrection. This preserves an explicit
+            // '--soloUMICorrection none' under --flex yes.
+            ParameterInfoBase* umiCorrectionParam = findParam("soloUMICorrection");
+            bool umiCorrectionUserSpecified = (umiCorrectionParam != nullptr && umiCorrectionParam->inputLevel > 0);
+            if (!umiCorrectionUserSpecified && (umiCorrectionModeStr.empty() || umiCorrectionModeStr == "none")) {
                 umiCorrectionModeStr = "clique";
             }
             
@@ -542,6 +553,24 @@ void ParametersSolo::initialize(Parameters *pPin)
             errOut << "SOLUTION: use allowed option: yes OR no\n";
             exitWithError(errOut.str(), std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
         }
+    }
+
+    // Flex pipeline parameter validation
+    if (flexPipelineStr != "yes" && flexPipelineStr != "no" && flexPipelineStr != "auto") {
+        ostringstream errOut;
+        errOut << "EXITING because of fatal PARAMETERS error: unrecognized --flexPipeline=" << flexPipelineStr << "\n";
+        errOut << "SOLUTION: use yes, no, or auto\n";
+        exitWithError(errOut.str(), std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
+    }
+    if (flexPipelineNSolo < 0 || flexPipelineNSolo > 16) {
+        ostringstream errOut;
+        errOut << "EXITING because of fatal PARAMETERS error: --flexPipelineNSolo=" << flexPipelineNSolo << " out of range [0, 16] (0=fully fused)\n";
+        exitWithError(errOut.str(), std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
+    }
+    if (flexPipelineNTriage < 0 || flexPipelineNTriage > 8) {
+        ostringstream errOut;
+        errOut << "EXITING because of fatal PARAMETERS error: --flexPipelineNTriage=" << flexPipelineNTriage << " out of range [0, 8] (0=fused reader+router)\n";
+        exitWithError(errOut.str(), std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
     }
 
     //////////////////////////////////////////////////////////////////////////////////////////////////////

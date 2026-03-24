@@ -115,7 +115,9 @@ void ReadAlignChunk::processChunks() {//read-map-write chunks
             //////////////read a chunk from input files and store in memory
         if (P.outFilterBySJoutStage<2) {//read chunks from input file
 
-            if (P.runThreadN>1) pthread_mutex_lock(&g_threadChunks.mutexInRead);
+            const auto mutexWaitStart = std::chrono::steady_clock::now();
+        if (P.runThreadN>1) pthread_mutex_lock(&g_threadChunks.mutexInRead);
+            const auto mutexAcquired = std::chrono::steady_clock::now();
 
             chunkInSizeBytesTotal={0,0};
             const uint64_t chunkReadStart = P.iReadAll;
@@ -372,6 +374,16 @@ void ReadAlignChunk::processChunks() {//read-map-write chunks
 
             if (P.runThreadN>1) pthread_mutex_unlock(&g_threadChunks.mutexInRead);
 
+            {
+                const auto chunkReadEnd = std::chrono::steady_clock::now();
+                RA->statsRA.pipelineMutexWaitNs += static_cast<uint64>(
+                    std::chrono::duration_cast<std::chrono::nanoseconds>(mutexAcquired - mutexWaitStart).count());
+                RA->statsRA.pipelineChunkReadNs += static_cast<uint64>(
+                    std::chrono::duration_cast<std::chrono::nanoseconds>(chunkReadEnd - mutexAcquired).count());
+                RA->statsRA.pipelineChunkReadBytes += chunkWorkBytes;
+                RA->statsRA.pipelineChunksProcessed++;
+            }
+
         } else {//read from one file per thread
             noReadsLeft=true;
             for (uint imate=0; imate<P.readNends; imate++) {
@@ -396,6 +408,8 @@ void ReadAlignChunk::processChunks() {//read-map-write chunks
         const uint64_t readCountBefore = RA->iRead;
         mapChunk();
         const auto workEnd = std::chrono::steady_clock::now();
+        RA->statsRA.pipelineMapChunkNs += static_cast<uint64>(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(workEnd - workStart).count());
         if (permitEnabled) {
             const uint64_t workNs = static_cast<uint64_t>(
                 std::chrono::duration_cast<std::chrono::nanoseconds>(workEnd - workStart).count());

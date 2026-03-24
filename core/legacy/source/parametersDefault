@@ -1766,6 +1766,15 @@ soloHashScreenFile          -
                             If omitted, STAR will use STAR_FLEX_HASH_SCREEN_CACHE or auto-discover
                             flex_h01_sequence_cache.bin next to the probe list.
 
+hashCacheOutput             -
+    string:                 output path for FH01SEQ1 v2 binary (required for --runMode hashCacheGenerate)
+
+hashCacheTiers              H0,H1,H2
+    string:                 comma-separated subset: H0, H1, H2 (default: all)
+
+hashCacheParentLimit        0
+    uint32:                 if >0, cap number of parent probes processed (testing / pilot)
+
 flex                         no
     string:                 yes|no (default no)
                             yes         ... enable full Flex pipeline with production defaults:
@@ -1777,6 +1786,27 @@ flex                         no
                             NOTE: Flex mode requires a probe list. Provide --soloProbeList <path> OR
                             rebuild index with --flexGeneProbeSet <probe CSV>. Probe sets are not
                             downloaded - must be user-supplied.
+
+flexPipeline                 auto
+    string:                 auto|yes|no (default auto)
+                            auto        ... activate pipeline mode when Flex + hash screen + outSAMtype None + enough threads
+                            yes         ... force pipeline mode (fail if preconditions unmet)
+                            no          ... use legacy serial I/O path
+
+flexPipelineNSolo            2
+    int>=1:                 number of sharded Solo consumer threads in pipeline mode (default 2)
+                            Each consumer owns its own SoloReadFeature and inlineHash; merged at end of run.
+
+flexPipelineNTriage          2
+    int>=1:                 number of triage threads in pipeline mode (default 2)
+                            Each triage thread performs CB/UMI extraction, sample detection, and H0 lookup.
+                            Routes KEEP/DENY to Solo consumers, MISS to alignment workers.
+
+flexNoAlign                  0
+    int:                    0|1 (default 0)
+                            1           ... skip alignment for H0/H1 misses (quick prototyping mode).
+                                        Reads that miss the hash screen are discarded instead of aligned.
+                                        Useful for benchmarking the hash screen + Solo path in isolation.
 
 soloRunFlexFilter            no
     string:                 yes|no (default no)

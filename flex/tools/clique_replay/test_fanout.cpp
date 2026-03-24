@@ -1,11 +1,10 @@
-// Integration test for the correction fan-out path.
+// Integration tests for applying clique corrections back to the cg_agg hash.
 //
-// Verifies that when the same umi24 appears in multiple cg_agg keys (different
-// tagIdx values), ALL of them receive the correction — not just the first.
-// This is the exact regression surface that previously broke (the "break" bug).
-//
-// The test builds a real khash_t(cg_agg) inline hash, runs the processGroup
-// fan-out logic and applyCliqueCorrectionsToHash, and checks the result.
+// Current intended behavior:
+// - corrections are scoped to the final composite barcode surface
+//   (CB + tagIdx + gene)
+// - no cross-tag correction is allowed
+// - within a group, every matching original key is updated when corrected
 
 #include "UMICorrector.h"
 #include "hash_shims_cpp_compat.h"
@@ -47,15 +46,16 @@ static uint32_t packUMI(const char *seq) {
     return packed;
 }
 
-// Reproduces the exact logic from runCliqueCorrection's processGroup lambda
-// and applyCliqueCorrectionsToHash, operating on a real khash.
+// Reproduces the current logic from runCliqueCorrection and
+// applyCliqueCorrectionsToHash, operating on a real khash.
 static void test_fanout_multi_tag() {
     uint32_t cbIdx = 42;
     uint16_t geneIdx = 7;
     uint32_t winner_umi = packUMI("AAAAAAAAAAAA");
     uint32_t loser_umi  = packUMI("CAAAAAAAAAAA"); // Hamming-1 from winner
 
-    // Build an inline hash with the loser UMI appearing under 3 different tags
+    // Build an inline hash with the loser UMI appearing under 3 different tags.
+    // Only tag 1 has a local winner, so only tag 1 should be corrected.
     khash_t(cg_agg) *inlineHash = kh_init(cg_agg);
     int absent;
 
@@ -97,41 +97,52 @@ static void test_fanout_multi_tag() {
         uint16_t gene;
         uint8_t tag;
         unpackCgAggKey(key, &cb, &umi24, &gene, &tag);
-        uint64_t groupKey = (static_cast<uint64_t>(cb) << 24) | static_cast<uint64_t>(gene);
+        uint64_t groupKey = (static_cast<uint64_t>(cb) << 24) |
+                            (static_cast<uint64_t>(tag) << 16) |
+                            static_cast<uint64_t>(gene);
         entries.push_back({groupKey, key, umi24, count});
     }
     std::sort(entries.begin(), entries.end(),
               [](const FlatEntry &a, const FlatEntry &b) { return a.groupKey < b.groupKey; });
 
-    // --- Phase 2: Process group (same as processGroup lambda) ---
+    // --- Phase 2: Process groups (same as runCliqueCorrection) ---
     khash_t(cg_agg) *correctionHash = kh_init(cg_agg);
-    std::vector<UMICount> counts;
-    std::vector<uint64_t> cgAggKeys;
-
-    for (const auto &e : entries) {
-        counts.emplace_back(e.umi24, e.count);
-        cgAggKeys.push_back(e.cgAggKey);
-    }
-
     UMIParams params(1, 2.0, 1000);
-    UMICorrectionResult result = UMICorrector::correctClique(counts, params);
+    uint32_t totalMerges = 0;
 
-    ASSERT_EQ(result.merges, 1u, "should have 1 merge (loser -> winner)");
+    size_t groupStart = 0;
+    while (groupStart < entries.size()) {
+        size_t groupEnd = groupStart + 1;
+        while (groupEnd < entries.size() && entries[groupEnd].groupKey == entries[groupStart].groupKey) {
+            ++groupEnd;
+        }
 
-    // Fan-out: store corrections for ALL entries with matching umi24
-    for (const auto &corr : result.urToUb) {
-        if (corr.first == corr.second) continue;
-        for (size_t i = 0; i < counts.size(); ++i) {
-            if (counts[i].ur == corr.first) {
-                ki = kh_put(cg_agg, correctionHash, cgAggKeys[i], &absent);
-                kh_val(correctionHash, ki) = corr.second;
+        std::vector<UMICount> counts;
+        std::vector<uint64_t> cgAggKeys;
+        for (size_t i = groupStart; i < groupEnd; ++i) {
+            counts.emplace_back(entries[i].umi24, entries[i].count);
+            cgAggKeys.push_back(entries[i].cgAggKey);
+        }
+
+        UMICorrectionResult result = UMICorrector::correctClique(counts, params);
+        totalMerges += result.merges;
+
+        for (const auto &corr : result.urToUb) {
+            if (corr.first == corr.second) continue;
+            for (size_t i = 0; i < counts.size(); ++i) {
+                if (counts[i].ur == corr.first) {
+                    ki = kh_put(cg_agg, correctionHash, cgAggKeys[i], &absent);
+                    kh_val(correctionHash, ki) = corr.second;
+                }
             }
         }
+
+        groupStart = groupEnd;
     }
 
-    // The correction hash must have entries for ALL 3 loser keys (tags 1,2,3)
-    ASSERT_EQ(kh_size(correctionHash), 3u,
-              "correction hash must have 3 entries (one per loser tag variant)");
+    ASSERT_EQ(totalMerges, 1u, "should have 1 merge in total");
+    ASSERT_EQ(kh_size(correctionHash), 1u,
+              "correction hash must have 1 entry (only the same-tag loser)");
 
     khiter_t it;
     it = kh_get(cg_agg, correctionHash, key_loser_t1);
@@ -139,12 +150,10 @@ static void test_fanout_multi_tag() {
     ASSERT_EQ(kh_val(correctionHash, it), winner_umi, "loser tag1 corrected to winner");
 
     it = kh_get(cg_agg, correctionHash, key_loser_t2);
-    ASSERT_TRUE(it != kh_end(correctionHash), "loser tag2 must be in correction hash");
-    ASSERT_EQ(kh_val(correctionHash, it), winner_umi, "loser tag2 corrected to winner");
+    ASSERT_TRUE(it == kh_end(correctionHash), "loser tag2 must not be cross-tag corrected");
 
     it = kh_get(cg_agg, correctionHash, key_loser_t3);
-    ASSERT_TRUE(it != kh_end(correctionHash), "loser tag3 must be in correction hash");
-    ASSERT_EQ(kh_val(correctionHash, it), winner_umi, "loser tag3 corrected to winner");
+    ASSERT_TRUE(it == kh_end(correctionHash), "loser tag3 must not be cross-tag corrected");
 
     // --- Phase 3: Apply corrections to inline hash (same as applyCliqueCorrectionsToHash) ---
     struct HashUpdate {
@@ -180,34 +189,26 @@ static void test_fanout_multi_tag() {
             kh_val(inlineHash, ki) += update.count;
     }
 
-    // After correction: loser keys should be gone, winner keys should have merged counts.
+    // After correction: tag1 merges locally, other tags stay unchanged.
     // winner_umi tag1: original 100, plus loser tag1's 3 = 103
     uint64_t key_corrected_t1 = packCgAggKey(cbIdx, winner_umi, geneIdx, 1);
     it = kh_get(cg_agg, inlineHash, key_corrected_t1);
     ASSERT_TRUE(it != kh_end(inlineHash), "winner tag1 must exist after correction");
     ASSERT_EQ(kh_val(inlineHash, it), 103u, "winner tag1 count: 100 + 3 = 103");
 
-    // winner_umi tag2: loser tag2's 5 (winner didn't originally have tag2)
-    uint64_t key_corrected_t2 = packCgAggKey(cbIdx, winner_umi, geneIdx, 2);
-    it = kh_get(cg_agg, inlineHash, key_corrected_t2);
-    ASSERT_TRUE(it != kh_end(inlineHash), "winner tag2 must exist after correction");
-    ASSERT_EQ(kh_val(inlineHash, it), 5u, "winner tag2 count: 5 (from loser)");
-
-    // winner_umi tag3: loser tag3's 2
-    uint64_t key_corrected_t3 = packCgAggKey(cbIdx, winner_umi, geneIdx, 3);
-    it = kh_get(cg_agg, inlineHash, key_corrected_t3);
-    ASSERT_TRUE(it != kh_end(inlineHash), "winner tag3 must exist after correction");
-    ASSERT_EQ(kh_val(inlineHash, it), 2u, "winner tag3 count: 2 (from loser)");
-
-    // Loser keys should be gone
+    // loser tag1 should be gone after same-tag correction
     it = kh_get(cg_agg, inlineHash, key_loser_t1);
     ASSERT_TRUE(it == kh_end(inlineHash), "loser tag1 must be deleted");
-    it = kh_get(cg_agg, inlineHash, key_loser_t2);
-    ASSERT_TRUE(it == kh_end(inlineHash), "loser tag2 must be deleted");
-    it = kh_get(cg_agg, inlineHash, key_loser_t3);
-    ASSERT_TRUE(it == kh_end(inlineHash), "loser tag3 must be deleted");
 
-    // Final entry count: winner_t1 (merged), winner_t2 (new), winner_t3 (new) = 3
+    // Other tags remain unchanged: no cross-tag correction
+    it = kh_get(cg_agg, inlineHash, key_loser_t2);
+    ASSERT_TRUE(it != kh_end(inlineHash), "loser tag2 must remain");
+    ASSERT_EQ(kh_val(inlineHash, it), 5u, "loser tag2 count remains unchanged");
+    it = kh_get(cg_agg, inlineHash, key_loser_t3);
+    ASSERT_TRUE(it != kh_end(inlineHash), "loser tag3 must remain");
+    ASSERT_EQ(kh_val(inlineHash, it), 2u, "loser tag3 count remains unchanged");
+
+    // Final entry count: winner_t1, loser_t2, loser_t3 = 3
     ASSERT_EQ(kh_size(inlineHash), 3u, "inline hash should have 3 entries after correction");
 
     kh_destroy(cg_agg, correctionHash);
@@ -217,59 +218,79 @@ static void test_fanout_multi_tag() {
     printf("  PASS test_fanout_multi_tag\n");
 }
 
-// Regression test: the old code had `break` after the first match, which would
-// produce only 1 entry in the correction hash instead of 3.
-static void test_fanout_break_regression() {
+// Regression test: grouping must remain tag-scoped. A winner on tag 1 must not
+// pull in the same loser UMI from tag 2.
+static void test_tag_scoped_grouping() {
     uint32_t cbIdx = 1;
     uint16_t geneIdx = 1;
     uint32_t winner_umi = packUMI("TTTTTTTTTTTT");
     uint32_t loser_umi  = packUMI("GTTTTTTTTTTT"); // Hamming-1
 
-    // Loser under 2 tags, winner under 1 tag
-    std::vector<UMICount> counts = {
-        {winner_umi, 200},
-        {loser_umi, 4},    // from tag 1
-        {loser_umi, 6},    // from tag 2
+    struct FlatEntry {
+        uint64_t groupKey;
+        uint64_t cgAggKey;
+        uint32_t umi24;
+        uint32_t count;
     };
-    std::vector<uint64_t> cgAggKeys = {
-        packCgAggKey(cbIdx, winner_umi, geneIdx, 1),
-        packCgAggKey(cbIdx, loser_umi, geneIdx, 1),
-        packCgAggKey(cbIdx, loser_umi, geneIdx, 2),
+
+    std::vector<FlatEntry> entries = {
+        {(static_cast<uint64_t>(cbIdx) << 24) | (static_cast<uint64_t>(1) << 16) | geneIdx,
+         packCgAggKey(cbIdx, winner_umi, geneIdx, 1), winner_umi, 200},
+        {(static_cast<uint64_t>(cbIdx) << 24) | (static_cast<uint64_t>(1) << 16) | geneIdx,
+         packCgAggKey(cbIdx, loser_umi, geneIdx, 1), loser_umi, 4},
+        {(static_cast<uint64_t>(cbIdx) << 24) | (static_cast<uint64_t>(2) << 16) | geneIdx,
+         packCgAggKey(cbIdx, loser_umi, geneIdx, 2), loser_umi, 6},
     };
+    std::sort(entries.begin(), entries.end(),
+              [](const FlatEntry &a, const FlatEntry &b) { return a.groupKey < b.groupKey; });
 
     UMIParams params(1, 2.0, 1000);
-    UMICorrectionResult result = UMICorrector::correctClique(counts, params);
-
-    ASSERT_EQ(result.merges, 1u, "regression: 1 merge");
-
-    // Fan-out WITHOUT break (current correct code)
     khash_t(cg_agg) *corrHash = kh_init(cg_agg);
-    for (const auto &corr : result.urToUb) {
-        if (corr.first == corr.second) continue;
-        for (size_t i = 0; i < counts.size(); ++i) {
-            if (counts[i].ur == corr.first) {
-                int absent;
-                khiter_t ki = kh_put(cg_agg, corrHash, cgAggKeys[i], &absent);
-                kh_val(corrHash, ki) = corr.second;
-                // NO break — this is the fix
+    size_t groupStart = 0;
+    uint32_t totalMerges = 0;
+    while (groupStart < entries.size()) {
+        size_t groupEnd = groupStart + 1;
+        while (groupEnd < entries.size() && entries[groupEnd].groupKey == entries[groupStart].groupKey) {
+            ++groupEnd;
+        }
+
+        std::vector<UMICount> counts;
+        std::vector<uint64_t> cgAggKeys;
+        for (size_t i = groupStart; i < groupEnd; ++i) {
+            counts.emplace_back(entries[i].umi24, entries[i].count);
+            cgAggKeys.push_back(entries[i].cgAggKey);
+        }
+
+        UMICorrectionResult result = UMICorrector::correctClique(counts, params);
+        totalMerges += result.merges;
+        for (const auto &corr : result.urToUb) {
+            if (corr.first == corr.second) continue;
+            for (size_t i = 0; i < counts.size(); ++i) {
+                if (counts[i].ur == corr.first) {
+                    int absent;
+                    khiter_t ki = kh_put(cg_agg, corrHash, cgAggKeys[i], &absent);
+                    kh_val(corrHash, ki) = corr.second;
+                }
             }
         }
+
+        groupStart = groupEnd;
     }
 
-    // Must have 2 corrections (one per loser tag variant), not 1
-    ASSERT_EQ(kh_size(corrHash), 2u,
-              "regression: correction hash must have 2 entries (both tag variants)");
+    ASSERT_EQ(totalMerges, 1u, "tag-scoped grouping: one local merge only");
+    ASSERT_EQ(kh_size(corrHash), 1u,
+              "tag-scoped grouping: only the tag1 loser should be corrected");
 
     kh_destroy(cg_agg, corrHash);
     g_pass++;
-    printf("  PASS test_fanout_break_regression\n");
+    printf("  PASS test_tag_scoped_grouping\n");
 }
 
 int main() {
     printf("=== Fan-out Integration Tests ===\n\n");
 
     test_fanout_multi_tag();
-    test_fanout_break_regression();
+    test_tag_scoped_grouping();
 
     printf("\n=== Results: %d passed, %d failed ===\n", g_pass, g_fail);
     return g_fail > 0 ? 1 : 0;

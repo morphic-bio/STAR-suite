@@ -43,6 +43,13 @@ class ReadAlign {
         ~ReadAlign();
         int oneRead();
 
+        /** Pipeline mode: load from EnrichedPacket, restore CB/UMI, run H1+alignment. */
+        int oneReadFromPacket(struct EnrichedPacket &pkt);
+
+        /** Synthetic Flex PE read (mate0=R2, mate1=R1) for --runMode hashCacheGenerate.
+         *  Returns: 1=KEEP (correct gene), 0=DENY (mapped but wrong/ambiguous gene), -1=DEAD (unmapped). */
+        int flexHashCacheValidateSyntheticPair(const char* r2seq, uint32_t lenR2, const char* r1seq, uint32_t lenR1, uint16_t expectedGeneIdx15);
+
         Genome &mapGen, &genOut; //mapped-to-genome structure
 
         uint64 iRead, iReadAll;
@@ -122,7 +129,9 @@ class ReadAlign {
         bool extractedUmiValid_;      // True if UMI extraction succeeded (umiCheck >= 0), false if invalid
         std::string extractedCbSeq_;   // CB sequence (for Phase 2: lookup resolved CB if cbIdxPlus1==0)
         FlexHashScreenDecision hashScreenDecision_;
-        
+        /** Per-thread: when true, outputAlignments skips soloRead->record (hash cache synthetic validation). */
+        bool hashCacheSynthProbe_ = false;
+
         // Phase 2: Ambiguous CB accumulation and resolution
         struct AmbiguousEntry {
             std::vector<uint32_t> candidateIdx;          // 1-based whitelist indices
@@ -313,6 +322,7 @@ class ReadAlign {
         void writeSAM(uint64 nTrOutSAM, Transcript **trOutSAM, Transcript *trBestSAM);
         void recordSJ(uint64 nTrO, Transcript **trO, OutSJ *cSJ);
 
+        /** Hash-cache generator: true if Gene annotations map to a single probe index == expected. */
 };
 
 #endif

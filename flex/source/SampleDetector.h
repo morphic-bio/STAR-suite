@@ -25,6 +25,10 @@ public:
     // Respects offsets and flags from ParametersSolo
     uint32_t detectSampleIndex(const uint8_t *seqData, int32_t readLength, bool reverseStrand) const;
 
+    // Match a pre-packed 8-base BAM-encoded tag (packed at position 0, length 8) against sample codes.
+    // Used when the caller already extracted the 8 bases at sampleProbeOffset.
+    uint32_t detectSampleFromPackedTag(const uint8_t *packedTag8) const;
+
     // Convenience helper: parse a BAM record and detect the sample index from its sequence.
     // The record pointer must reference the beginning of a BAM alignment (block_size field first).
     uint32_t detectSampleIndexFromBam(const char *bamRecord, uint32_t bamSize) const;
@@ -37,6 +41,9 @@ public:
     std::string canonicalForWhitelistIndex(uint32_t sampleIdx) const;
 
     bool ready() const { return !canonicalToIndex_.empty(); }
+
+    /** Number of sequential samples (1-based indices 1..N) from the whitelist; 0 if none. */
+    uint32_t sequentialSampleCount() const { return static_cast<uint32_t>(indexToCanonical_.size()); }
 
     // Map Solo's sequential sample index to the whitelist's canonical numeric index (BC###)
     uint32_t whitelistIndexForCanonical(uint32_t sampleIdx) const;

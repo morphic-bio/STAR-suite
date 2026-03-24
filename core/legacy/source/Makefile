@@ -120,7 +120,7 @@ OBJECTS = systemFunctions.o funPrimaryAlignMark.o \
 	Transcriptome_classifyAlign.o Transcriptome_geneFullAlignOverlap_ExonOverIntron.o Transcriptome_alignExonOverlap.cpp \
 	SoloFeature_cellFiltering.o \
 	SoloFeature_statsOutput.o bamSortByCoordinate.o SamtoolsSorter.o SoloBarcode.o \
-	ParametersSolo.o FlexHashScreen.o SoloRead.o SoloRead_record.o \
+	ParametersSolo.o FlexHashScreen.o FlexHashCacheGenerate.o FlexPipeline.o SoloRead.o SoloRead_record.o \
 	SoloReadBarcode.o SoloReadBarcode_getCBandUMI.o SoloBarcode_extractBarcode.o \
 	SoloReadFeature.o SoloReadFeature_record.o SoloReadFeature_record_base.o flex/SoloReadFeature_record_flex.o SoloReadFeature_inputRecords.o \
 	Solo.o SoloFeature.o SoloFeature_outputResults.o SoloFeature_processRecords.o SoloFeature_prepareReadInfoOnly.o SoloReadInfoLoader.o SoloReadInfoSink.o \
@@ -140,7 +140,7 @@ OBJECTS = systemFunctions.o funPrimaryAlignMark.o \
 	OutSJ.o outputSJ.o blocksOverlap.o ThreadControl.o sysRemoveDir.o \
 	ReadAlign_maxMappableLength2strands.o binarySearch2.o\
 	ReadAlign_outputTranscriptSAM.o ReadAlign_outputTranscriptSJ.o ReadAlign_outputTranscriptCIGARp.o ReadAlign_calcCIGAR.cpp \
-	ReadAlign_createExtendWindowsWithAlign.o ReadAlign_assignAlignToWindow.o ReadAlign_oneRead.o \
+	ReadAlign_createExtendWindowsWithAlign.o ReadAlign_assignAlignToWindow.o ReadAlign_oneRead.o ReadAlign_hashCacheSynth.o \
 	ReadAlign_stitchWindowSeeds.o \
 	ReadAlign_peOverlapMergeMap.o ReadAlign_mappedFilter.o \
 	ParametersChimeric_initialize.o ReadAlign_chimericDetection.o ReadAlign_chimericDetectionOld.o ReadAlign_chimericDetectionOldOutput.o\

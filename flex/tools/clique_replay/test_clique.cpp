@@ -142,11 +142,8 @@ static void test_min_count_filter() {
 }
 
 // --- Test: component cap behavior ---
-// NOTE: findConnectedComponent uses `while (componentSize < maxSize)` in the
-// BFS loop, so componentSize never exceeds maxComponentSize.  The cap check
-// `if (componentSize > maxComponentSize)` is therefore unreachable with the
-// current BFS implementation.  A 3-node chain with maxComponentSize=2 results
-// in BFS truncation (finds 2 of 3), producing 2 components instead of 1.
+// Oversized connected components should be rejected as a unit and should not be
+// fragmented into multiple pseudo-components by the BFS traversal.
 static void test_component_cap() {
     uint32_t u1 = packUMI("AAAAAAAAAAAA");
     uint32_t u2 = packUMI("CAAAAAAAAAAA");
@@ -159,10 +156,10 @@ static void test_component_cap() {
 
     UMICorrectionResult r = UMICorrector::correctClique(counts, params);
 
-    // BFS truncates at 2 nodes; the 3rd node forms a separate singleton.
-    // The 2-node component merges (100 vs 50, ratio 2.0 meets threshold).
-    ASSERT_EQ(r.componentsCapped, 0u, "cap: BFS self-limits, no cap trigger");
-    ASSERT_TRUE(r.components >= 2, "cap: at least 2 components due to BFS truncation");
+    ASSERT_EQ(r.components, 1u, "cap: one connected component");
+    ASSERT_EQ(r.componentsCapped, 1u, "cap: oversized component rejected");
+    ASSERT_EQ(r.merges, 0u, "cap: no merges for capped component");
+    ASSERT_TRUE(r.urToUb.empty(), "cap: no corrections emitted for capped component");
     g_pass++;
     printf("  PASS test_component_cap\n");
 }
@@ -194,23 +191,21 @@ static void test_two_components() {
     printf("  PASS test_two_components\n");
 }
 
-// --- Test: winner tie-break (equal counts, first-seen wins) ---
-static void test_tie_break() {
+// --- Test: tied top count rejects correction ---
+static void test_tie_reject() {
     uint32_t u1 = packUMI("AAAAAAAAAAAA");
     uint32_t u2 = packUMI("CAAAAAAAAAAA");
 
     std::vector<UMICount> counts = { {u1, 50}, {u2, 50} };
-    UMIParams params(1, 1.0, 1000); // ratioThresh=1.0 so 50/50=1.0 is accepted
+    UMIParams params(1, 1.0, 1000); // even if ratioThresh would allow it, tie should reject
 
     UMICorrectionResult r = UMICorrector::correctClique(counts, params);
 
-    // With equal counts, findWinnerUmi returns the first one encountered in BFS
     ASSERT_EQ(r.components, 1u, "tie: 1 component");
-    ASSERT_EQ(r.merges, 1u, "tie: 1 merge");
-    // One should map to the other (exact winner depends on BFS order)
-    ASSERT_TRUE(r.urToUb.size() == 1, "tie: exactly 1 correction");
+    ASSERT_EQ(r.merges, 0u, "tie: no merge on tied top count");
+    ASSERT_TRUE(r.urToUb.empty(), "tie: no correction emitted");
     g_pass++;
-    printf("  PASS test_tie_break\n");
+    printf("  PASS test_tie_reject\n");
 }
 
 // --- Test: empty input ---
@@ -290,7 +285,7 @@ int main() {
     test_min_count_filter();
     test_component_cap();
     test_two_components();
-    test_tie_break();
+    test_tie_reject();
     test_empty();
     test_duplicate_umi_aggregation();
     test_hamming2_not_connected();
