@@ -3,6 +3,8 @@
 #include "ProbeListIndex.h"
 #include "ReadAlignChunk.h"
 #include "Genome.h"
+#include "solo/CbBayesianResolver.h"
+#include "solo/CbCorrector.h"
 #include "streamFuns.h"
 #include "ErrorWarning.h"
 #include <fstream>
@@ -11,6 +13,7 @@
 #include <cctype>
 #include <cstdlib>
 #include <cstdio>
+#include <unordered_set>
 
 // Static cache for gene→probe index (15-bit), 0 = not a probe gene
 static std::vector<uint16_t> gGeneToProbeIdx;
@@ -20,6 +23,44 @@ static size_t gChrProbeCount = 0, gChrGenomicCount = 0, gChrENSGCount = 0;
 static std::vector<std::string> gChrProbeExamples;
 static std::vector<std::string> gChrGenomicExamples;
 static bool gChrFlagsInitialized = false;
+
+namespace {
+const std::unordered_set<std::string>& bridgeDebugBarcodeSet()
+{
+    static std::unordered_set<std::string> barcodes;
+    static bool loaded = false;
+    if (loaded) {
+        return barcodes;
+    }
+    loaded = true;
+
+    const char *path = std::getenv("STAR_SOLO_DEBUG_BARCODE_FILE");
+    if (path == nullptr || path[0] == '\0') {
+        return barcodes;
+    }
+
+    std::ifstream in(path);
+    std::string line;
+    while (std::getline(in, line)) {
+        if (!line.empty()) {
+            barcodes.insert(line);
+        }
+    }
+    return barcodes;
+}
+
+bool shouldTraceBridgeBarcode(const ParametersSolo &pSolo, uint32_t wlIdx)
+{
+    if (wlIdx >= pSolo.cbWLstr.size()) {
+        return false;
+    }
+    const auto &debugSet = bridgeDebugBarcodeSet();
+    if (debugSet.empty()) {
+        return false;
+    }
+    return debugSet.count(pSolo.cbWLstr[wlIdx]) != 0;
+}
+}
 
 SoloFeature::SoloFeature(Parameters &Pin, ReadAlignChunk **RAchunk, Transcriptome &inTrans, int32 feTy, SoloReadBarcode *readBarSumIn, SoloFeature **soloFeatAll)
             : P(Pin), RAchunk(RAchunk), Trans(inTrans), featureType(feTy), soloFeatAll(soloFeatAll), pSolo(P.pSolo), readBarSum(readBarSumIn),
@@ -234,6 +275,114 @@ void SoloFeature::initChrGenomicFlags(ReadAlignChunk **RAchunkIn) {
     gChrGenomicCount = genomicCount;
     gChrENSGCount = ensgCount;
     gChrFlagsInitialized = true;
+}
+
+void SoloFeature::resolveAmbiguousCBs()
+{
+    if (!pSolo.inlineHashMode || pSolo.flexMode || std::getenv("STAR_SOLO_NONFLEX_HASH_BRIDGE") == nullptr) {
+        return;
+    }
+
+    resolvePendingAmbiguousToHash(true);
+}
+
+void SoloFeature::resolvePendingAmbiguousToHash(bool useBridgeCompactMapping)
+{
+    static const bool g_disableAmbigResolve =
+        (std::getenv("STAR_DISABLE_AMBIG_CB_RESOLVE") != nullptr);
+
+    if (!readFeatSum || !readFeatSum->inlineHash_ || readFeatSum->pendingAmbiguous_.empty()) {
+        return;
+    }
+
+    if (g_disableAmbigResolve) {
+        P.inOut->logMain << "[AMBIG-CB-RESOLVE] disabled by STAR_DISABLE_AMBIG_CB_RESOLVE, skipping "
+                         << readFeatSum->pendingAmbiguous_.size() << " pending ambiguous CBs" << endl;
+        return;
+    }
+
+    if (!pSolo.cbCorrector) {
+        P.inOut->logMain << "[AMBIG-CB-RESOLVE] " << readFeatSum->pendingAmbiguous_.size()
+                         << " pending ambiguous CBs but CbCorrector not available, skipping" << endl;
+        return;
+    }
+
+    khash_t(cg_agg) *hash = readFeatSum->inlineHash_;
+    const std::vector<std::string> &whitelistSeqs = pSolo.cbCorrector->whitelist();
+    CbBayesianResolver resolver(whitelistSeqs.size(), &whitelistSeqs);
+
+    uint64_t resolved = 0, stillAmbiguous = 0, addedToHash = 0;
+    for (auto &kv : readFeatSum->pendingAmbiguous_) {
+        SoloReadFeature::ExtendedAmbiguousEntry &entry = kv.second;
+
+        if (entry.candidateIdx.empty() || entry.umiCounts.empty()) {
+            stillAmbiguous++;
+            continue;
+        }
+
+        CBContext context(entry.cbSeq, entry.cbQual);
+
+        std::vector<Candidate> candidates;
+        candidates.reserve(entry.candidateIdx.size());
+        for (uint32_t idx : entry.candidateIdx) {
+            if (idx > 0 && idx <= whitelistSeqs.size()) {
+                candidates.emplace_back(idx, whitelistSeqs[idx - 1], 0.0);
+            }
+        }
+
+        if (candidates.empty()) {
+            stillAmbiguous++;
+            continue;
+        }
+
+        BayesianResult result = resolver.resolve(context, candidates, entry.umiCounts);
+        if (result.status != BayesianResult::Resolved || result.bestIdx == 0) {
+            stillAmbiguous++;
+            continue;
+        }
+
+        resolved++;
+        uint32_t resolvedCbIdx = result.bestIdx - 1;
+        uint32_t storedCbIdx = resolvedCbIdx;
+        if (useBridgeCompactMapping) {
+            storedCbIdx = readFeatSum->getOrCreateBridgeCompactCb(resolvedCbIdx);
+        }
+
+        if (shouldTraceBridgeBarcode(pSolo, resolvedCbIdx)) {
+            std::fprintf(stderr,
+                         "[BRIDGE-CB-TRACE] mode=ambig_resolve cb=%s wlIdx=%u candidates=%zu umiKeys=%zu obs=%zu status=%d bestIdx=%u\n",
+                         pSolo.cbWLstr[resolvedCbIdx].c_str(),
+                         resolvedCbIdx,
+                         entry.candidateIdx.size(),
+                         entry.umiCounts.size(),
+                         entry.observations.size(),
+                         static_cast<int>(result.status),
+                         result.bestIdx);
+        }
+
+        for (const auto &obs : entry.observations) {
+            uint16_t storedGeneIdx = static_cast<uint16_t>(obs.geneIdx);
+            if (useBridgeCompactMapping) {
+                storedGeneIdx = readFeatSum->getOrCreateBridgeCompactGene(obs.geneIdx);
+            }
+            uint64_t newKey = packCgAggKey(storedCbIdx, obs.umi24, storedGeneIdx, obs.tagIdx);
+            int absent;
+            khiter_t iter = kh_put(cg_agg, hash, newKey, &absent);
+            if (absent) {
+                kh_val(hash, iter) = obs.count;
+            } else {
+                kh_val(hash, iter) += obs.count;
+            }
+            addedToHash++;
+        }
+    }
+
+    P.inOut->logMain << "[AMBIG-CB-RESOLVE] pending=" << readFeatSum->pendingAmbiguous_.size()
+                     << " resolved=" << resolved
+                     << " still_ambiguous=" << stillAmbiguous
+                     << " added_to_hash=" << addedToHash << endl;
+
+    readFeatSum->pendingAmbiguous_.clear();
 }
 
 bool SoloFeature::isChrGenomic(uint32_t chrIdx) {

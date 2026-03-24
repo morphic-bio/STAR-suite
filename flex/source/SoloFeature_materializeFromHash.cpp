@@ -3,6 +3,7 @@
 #include "SoloCommon.h"
 #include "SoloReadFeature.h"
 #include <algorithm>
+#include <cstdlib>
 #include <vector>
 #include <unordered_set>
 
@@ -20,7 +21,7 @@ void SoloFeature::materializeRGUFromHash() {
     // Build temporary vector of entries for sorting
     struct HashEntry {
         uint32_t cbIdx;
-        uint16_t geneIdx;
+        uint32_t geneIdx;
         uint32_t umi24;
         uint32_t count;
     };
@@ -28,6 +29,9 @@ void SoloFeature::materializeRGUFromHash() {
     entries.reserve(hashSize);
     
     // Extract all entries from hash
+    bool nonFlexHashBridge = pSolo.inlineHashMode
+        && !pSolo.flexMode
+        && std::getenv("STAR_SOLO_NONFLEX_HASH_BRIDGE") != nullptr;
     for (khiter_t iter = kh_begin(readFeatSum->inlineHash_); iter != kh_end(readFeatSum->inlineHash_); ++iter) {
         if (!kh_exist(readFeatSum->inlineHash_, iter)) continue;
         
@@ -35,7 +39,20 @@ void SoloFeature::materializeRGUFromHash() {
         uint32_t count = kh_val(readFeatSum->inlineHash_, iter);
         
         HashEntry entry;
-        unpackCgAggKey(key, &entry.cbIdx, &entry.umi24, &entry.geneIdx, nullptr);
+        uint16_t compactGeneIdx = 0;
+        unpackCgAggKey(key, &entry.cbIdx, &entry.umi24, &compactGeneIdx, nullptr);
+        if (nonFlexHashBridge) {
+            entry.cbIdx = readFeatSum->bridgeCompactToWl(entry.cbIdx);
+            if (entry.cbIdx == static_cast<uint32_t>(-1)) {
+                continue;
+            }
+            entry.geneIdx = readFeatSum->bridgeCompactToGene(compactGeneIdx);
+            if (entry.geneIdx == static_cast<uint32_t>(-1)) {
+                continue;
+            }
+        } else {
+            entry.geneIdx = compactGeneIdx;
+        }
         entry.count = count;
         
         // CRITICAL: Expand by count (each count represents one read)

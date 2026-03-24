@@ -608,6 +608,336 @@ Updated conclusion:
   per-thread feature stats
 - the remaining mismatch now concentrates in the two harder items:
   `nReadPerCBunique` / `nReadPerCBtotal` bookkeeping and ambiguous-CB handling
+- important scope note for problem 3:
+  - the deferred `oneExact` gate for `cbMatch==1` is a strict-match
+    compatibility rule and is intentionally **not** part of the current bridge
+    implementation target
+  - the UCSF benchmark harness uses
+    `--soloCBmatchWLtype 1MM_multi_Nbase_pseudocounts`, where `oneExact` is
+    disabled
+  - therefore the current problem-3 work should focus on general read-level
+    accounting parity, not on reproducing the stricter `oneExact` acceptance
+    rule
+  - if strict-match compatibility is needed later, add `oneExact` support as a
+    separate follow-up item rather than blocking the current pseudocount-mode
+    optimization work
+
+## Problem 3 Update: Read-Accounting Sidecar + CB Key-Space Fix
+
+To address problem 3, the bridge now captures a compact per-read accounting
+sidecar during `record_base()` and uses that to populate
+`nReadPerCBunique` / `nReadPerCBtotal` in the experimental non-Flex bridge
+path instead of fabricating them from `cbReadCount`.
+
+The first sidecar-only validation run (`hashbridge_v8`) showed that the new
+read accounting itself was correct, but the bridge hash was still corrupting
+cell-barcode identity:
+
+- debug line from `Log.out`:
+  - `Bridge accounting debug: records=97211 featGood=74757 multiFeature=0 exact=92690 oneMM=2234 ambiguous=2287 uniqueReads=74072 multiReads=0`
+- but `Features.stats` still reported only:
+  - `yesWLmatch=21642`
+  - `yessubWLmatch_UniqueFeature=21642`
+
+Root cause:
+
+- the shared inline hash key format is `CB20/UMI24/GENE15/TAG5`
+- that 20-bit CB field silently truncates 3M Cell Ranger whitelist indices
+- the sidecar was using full whitelist indices, while the bridge hash was
+  materializing a truncated CB space
+
+Fix implemented:
+
+- the experimental non-Flex bridge now stores a compact bridge-local CB id in
+  the inline hash
+- thread merge remaps other threads' compact ids back to real whitelist
+  indices, then into the destination compact id space
+- materialization remaps compact ids back to the original whitelist indices
+
+Validation rerun after the key-space fix:
+
+- bridge:
+  `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_100k_unique_hashbridge_v9/`
+- legacy control:
+  `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_100k_unique_legacy_v4/`
+
+What is now fixed:
+
+- read-level mapping totals are essentially back to parity:
+  - legacy `yesWLmatch=74086`
+  - bridge `yesWLmatch=74035`
+  - legacy `yessubWLmatch_UniqueFeature=74086`
+  - bridge `74035`
+  - legacy `Reads Mapped to GeneFull: Unique GeneFull = 0.74086`
+  - bridge `0.74035`
+  - legacy `Unique Reads in Cells Mapped to GeneFull = 71640`
+  - bridge `71615`
+- sequencing saturation is now sane again:
+  - legacy `0.0801366`
+  - bridge `0.0915378`
+
+What is still mismatched:
+
+- `noTooManyWLmatches` is still slightly high:
+  - legacy `671`
+  - bridge `685`
+- molecule/cell outputs are still low:
+  - legacy `yesUMIs=68149`
+  - bridge `67258`
+  - legacy `UMIs in Cells=65887`
+  - bridge `65027`
+  - legacy `yesCellBarcodes=9571`
+  - bridge `9535`
+  - legacy `Estimated Number of Cells=7309`
+  - bridge `7304`
+  - legacy `Total GeneFull Detected=9887`
+  - bridge `9485`
+
+Current conclusion:
+
+- problem 3 is largely resolved for read-level accounting
+- the big `yesWLmatch` / `Summary.csv` mismatch was mostly a CB key-space bug,
+  not a sidecar logic bug
+- the remaining parity gap is now much smaller and is consistent with the
+  unresolved ambiguous-CB path in problem 4
+- timing remains favorable:
+  - bridge `countCBgeneUMI 0.0365256 s`
+  - bridge `processRecords 0.136989 s`
+
+## Problem 4 Update: Reuse the Flex Ambiguous-CB Strategy
+
+The non-Flex bridge now reuses the same high-level approach as Flex:
+
+- during mapping, ambiguous CB observations are stored in
+  `pendingAmbiguous_` instead of being dropped
+- after mapping, the bridge runs Bayesian CB resolution
+- resolved observations are reinserted into the inline hash
+- the bridge then materializes and collapses as before
+
+Implementation notes:
+
+- ambiguous gene observations are now accumulated in
+  [SoloReadFeature_record_base.cpp](/mnt/pikachu/STAR-suite/core/legacy/source/SoloReadFeature_record_base.cpp)
+- non-Flex bridge resolution/reinsertion is implemented in
+  [SoloFeature.cpp](/mnt/pikachu/STAR-suite/core/legacy/source/SoloFeature.cpp)
+- the first attempt (`hashbridge_v10`) wired the reuse pattern but still fed
+  the resolver the wrong barcode representation, so it resolved nothing:
+  - `[AMBIG-CB-RESOLVE] pending=1639 resolved=0 still_ambiguous=1639 added_to_hash=0`
+- the fix was to use the raw observed CB sequence `cbSeq` plus matching
+  `cbQual`, rather than `cbMatchString`, for Bayesian resolution context
+
+Validation rerun after the raw-CB fix:
+
+- bridge:
+  `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_100k_unique_hashbridge_v11/`
+- legacy control:
+  `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_100k_unique_legacy_v4/`
+
+Resolver activity:
+
+- `pending=1621`
+- `resolved=1048`
+- `still_ambiguous=573`
+- `added_to_hash=1081`
+
+Parity after ambiguous-CB reuse:
+
+- read-level metrics are now essentially matched:
+  - legacy `yesWLmatch=74086`
+  - bridge `74072`
+  - legacy `Reads Mapped to GeneFull: Unique GeneFull = 0.74086`
+  - bridge `0.74072`
+- molecule/cell metrics are now also essentially matched:
+  - legacy `yesUMIs=68149`
+  - bridge `68214`
+  - legacy `UMIs in Cells=65887`
+  - bridge `65881`
+  - legacy `Estimated Number of Cells=7309`
+  - bridge `7311`
+  - legacy `Sequencing Saturation=0.0801366`
+  - bridge `0.0790852`
+
+Residual differences still present:
+
+- `noTooManyWLmatches` remains slightly high:
+  - legacy `671`
+  - bridge `685`
+- `yesCellBarcodes` is slightly high:
+  - legacy `9571`
+  - bridge `9644`
+
+## GeneFull Detected Root Cause: 15-bit Gene Key Aliasing
+
+The large `Total GeneFull Detected` gap in `hashbridge_v11` was not a cell
+filtering problem. It was a bridge hash key-space bug.
+
+Observed symptom:
+
+- filtered cell sets were nearly identical, but the bridge had
+  `Total GeneFull Detected = 9524` versus legacy `9887`
+- direct filtered-matrix comparison showed many exact count swaps between gene
+  rows rather than random gene loss
+- representative swaps:
+  - `ENSG00000198938` row `38576` lost `618`, while `ENSG00000289422` row
+    `5808` gained `618`
+  - `ENSG00000198712` row `38573` lost `354`, while `ENSG00000163251` row
+    `5805` gained `354`
+
+Critical clue:
+
+- these swapped row pairs differ by exactly `32768`
+- the inline-hash packed key format is `[CB20][UMI24][GENE15][TAG5]`
+- so the non-Flex bridge was truncating gene indices above `32767` via the
+  15-bit `GENE15` field and aliasing them onto lower gene rows
+
+Fix:
+
+- the non-Flex bridge now uses a bridge-local compact gene id, analogous to
+  the already-required bridge-local compact CB id
+- hash insert, cross-thread hash merge, ambiguous-CB reinsertion, and
+  materialization now round-trip through this bridge-local gene map before
+  collapsing back onto the real `GeneFull` row ids
+
+Validation rerun after the gene-key fix:
+
+- bridge:
+  `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_100k_unique_hashbridge_v12/`
+- legacy control:
+  `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_100k_unique_legacy_v4/`
+
+Key result:
+
+- `Total GeneFull Detected` now matches exactly:
+  - legacy `9887`
+  - bridge `9887`
+- the prior `32768` row-swap pairs are gone; for example:
+  - row `38576` remains `618` in both legacy and bridge
+  - row `5808` remains `0` in both legacy and bridge
+
+Residual differences after the gene-key fix are now small and no longer
+structural:
+
+- `Reads Mapped to GeneFull: Unique GeneFull`
+  - legacy `0.74086`
+  - bridge `0.74072`
+- `UMIs in Cells`
+  - legacy `65887`
+  - bridge `65881`
+- `Unique Reads in Cells Mapped to GeneFull`
+  - legacy `71640`
+  - bridge `71626`
+- `noTooManyWLmatches`
+  - legacy `671`
+  - bridge `685`
+- `yesCellBarcodes`
+  - legacy `9571`
+  - bridge `9644`
+
+Residual pattern analysis:
+
+- the remaining drift is concentrated in the extreme low-count barcode tail,
+  not in established cells or gene rows
+- raw nonzero barcodes:
+  - legacy `9571`
+  - bridge `9644`
+  - delta is entirely `73` bridge-only barcodes; legacy has no raw-only
+    barcodes
+- size of those `73` bridge-only raw barcodes:
+  - `72` have exactly `(1 UMI, 1 gene)`
+  - `1` has exactly `(2 UMI, 2 genes)`
+- among barcodes that are nonzero in both runs, only `53` differ at all, and
+  every one of them differs by exactly one singleton molecule:
+  - either `(legacy UMI, legacy genes) -> (bridge UMI, bridge genes)` as
+    `(n, n) -> (n+1, n+1)`
+  - or `(n, n) -> (n-1, n-1)`
+  - no shared barcode shows a larger structural drift
+- filtered cells show the same pattern:
+  - only `52` shared filtered cells differ
+  - every shared filtered-cell delta is exactly `(±1 UMI, ±1 gene)`
+  - the two bridge-only filtered cells are tiny edge cases with `2 UMI` and
+    `2 genes` each
+
+Interpretation:
+
+- the remaining mismatch behaves like single-molecule reassignment between
+  low-support barcodes
+- it does **not** look like another gene-index or matrix materialization bug
+- because UMI and detected-gene deltas move together as `(±1, ±1)`, the
+  likely remaining source is CB-assignment / ambiguous-CB edge handling rather
+  than UMI collapse or gene mapping
+
+Targeted trace of the `73` bridge-only raw barcodes:
+
+- trace run:
+  `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_100k_unique_hashbridge_trace73/`
+- target list:
+  `/tmp/solo_bridge_73_barcodes.txt`
+- stderr trace file:
+  `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_100k_unique_hashbridge_trace73/driver.stderr`
+
+Trace result:
+
+- exactly `73` trace lines were emitted
+- all `73` were `mode=ambig_resolve`
+- `0` were `mode=direct`
+- therefore every one of the `73` extra raw barcodes is created by the
+  ambiguous-CB reinsertion path, not by exact or simple `cbMatch<=1` insertions
+
+Per-entry pattern:
+
+- every traced barcode came from a very small ambiguous group:
+  - candidate count `2-5`
+  - usually `umiKeys=1`
+  - usually `obs=1`
+  - one notable 2-observation case:
+    `CTCCTCCCACGTACTA` with `umiKeys=2`, `obs=2`
+- this is fully consistent with the observed singleton-tail behavior in the raw
+  matrix
+
+Operational conclusion:
+
+- the remaining parity gap is now isolated to non-Flex handling of
+  `cbMatch>1` ambiguous CBs
+- the current bridge uses the Flex Bayesian resolver for these reads
+- legacy standard Solo uses the older `ptot/pmax` heuristic in
+  [SoloReadFeature_inputRecords.cpp](/mnt/pikachu/STAR-suite/core/legacy/source/SoloReadFeature_inputRecords.cpp)
+- so the residual `73`-barcode tail is best interpreted as a resolver-policy
+  mismatch between Flex-style Bayesian resolution and legacy Solo ambiguous-CB
+  assignment, not as a downstream counting bug
+
+Policy decision:
+
+- keep the unified Cell Ranger-style ambiguous-CB resolver used by Flex
+- do **not** reintroduce legacy non-Flex `ptot/pmax` behavior just for bridge
+  parity
+- treat the remaining singleton-tail mismatch as an intentional algorithmic
+  difference between legacy STARsolo and the unified Flex/CR-style path
+
+Codebase unification to reduce drift:
+
+- the Cell Ranger-style ambiguous-CB reinsertion logic for inline-hash data is
+  now centralized in
+  [SoloFeature::resolvePendingAmbiguousToHash()](/mnt/pikachu/STAR-suite/core/legacy/source/SoloFeature.cpp)
+- the non-Flex bridge wrapper
+  [SoloFeature::resolveAmbiguousCBs()](/mnt/pikachu/STAR-suite/core/legacy/source/SoloFeature.cpp)
+  now just delegates to that shared helper with bridge compact CB/gene mapping
+- the Flex inline-hash collapse path in
+  [SoloFeature_collapseUMI_fromHash.cpp](/mnt/pikachu/STAR-suite/flex/source/SoloFeature_collapseUMI_fromHash.cpp)
+  now calls the same helper instead of maintaining a duplicate Bayesian
+  resolution/reinsertion block
+- this keeps Flex and non-Flex bridge on the same Cell Ranger-style ambiguous
+  CB code path and should reduce future drift
+
+Current conclusion:
+
+- the Flex-style ambiguous-CB reuse is the right solution and materially fixes
+  problem 4
+- the large `GeneFull Detected` mismatch was caused by 15-bit gene-id aliasing
+  in the bridge hash and is now fixed
+- the bridge is now very close to legacy on the benchmark that previously had
+  large parity failures
+- remaining differences are small enough to investigate as residual edge-case
+  parity issues rather than architectural gaps
 
 ## Related Files Worth Reading
 

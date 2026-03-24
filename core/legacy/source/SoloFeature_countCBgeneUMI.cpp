@@ -9,6 +9,7 @@
 #include "hash_shims_cpp_compat.h"  // For unpackReadIdCbUmi
 #include "ErrorWarning.h"
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
 
 namespace {
@@ -36,6 +37,108 @@ bool nonFlexHashBridgeApplies(const SoloFeature& feat)
         default:
             return false;
     }
+}
+
+void populateBridgeReadAccounting(SoloFeature &feat,
+                                  std::vector<uint32_t> &nReadPerCBunique1,
+                                  std::vector<uint32_t> &nReadPerCBmulti1)
+{
+    feat.readFlagCounts.flagCounts.clear();
+    feat.readFlagCounts.flagCounts.reserve((feat.pSolo.cbWLsize ? feat.pSolo.cbWLsize : 1) * 3 / 2);
+    feat.readFlagCounts.flagCountsNoCB = {};
+
+    for (const auto &rec : feat.readFeatSum->bridgeReadAccounting_) {
+        bool readIsCounted = false;
+        bool noMMtoWLwithoutExact = false;
+        bool noTooManyWLmatches = false;
+        uint32_t cb = 0;
+
+        if (rec.cbMatch <= 1) {
+            if (!rec.cbCandidates.empty()) {
+                cb = rec.cbCandidates[0];
+            }
+            if (rec.cbMatch == 1
+                && feat.pSolo.CBmatchWL.oneExact
+                && cb < feat.readFeatSum->cbReadCount.size()
+                && feat.readFeatSum->cbReadCount[cb] == 0) {
+                noMMtoWLwithoutExact = true;
+            } else if (rec.featGood && !rec.cbCandidates.empty()) {
+                readIsCounted = true;
+            }
+        } else {
+#ifdef MATCH_CellRanger
+            double ptot = 0.0, pmax = 0.0, pin;
+#else
+            float ptot = 0.0, pmax = 0.0, pin;
+#endif
+            for (size_t ii = 0; ii < rec.cbCandidates.size(); ++ii) {
+                uint32_t cbin = rec.cbCandidates[ii];
+                char qin = (ii < rec.candidateQuals.size()) ? static_cast<char>(rec.candidateQuals[ii]) : feat.pSolo.QSbase;
+                if (cbin < feat.readFeatSum->cbReadCount.size() && feat.readFeatSum->cbReadCount[cbin] > 0) {
+                    qin -= feat.pSolo.QSbase;
+                    qin = qin < feat.pSolo.QSmax ? qin : feat.pSolo.QSmax;
+                    pin = feat.readFeatSum->cbReadCount[cbin] * std::pow(10.0, -qin / 10.0);
+                    ptot += pin;
+                    if (pin > pmax) {
+                        cb = cbin;
+                        pmax = pin;
+                    }
+                }
+            }
+            if (ptot > 0.0 && pmax >= feat.pSolo.cbMinP * ptot) {
+                if (rec.featGood) {
+                    readIsCounted = true;
+                }
+            } else {
+                noTooManyWLmatches = true;
+            }
+        }
+
+        if (rec.featGood) {
+            if (rec.cbMatch == 0) {
+                feat.readFeatSum->stats.V[feat.readFeatSum->stats.yessubWLmatchExact]++;
+            } else if (noMMtoWLwithoutExact) {
+                feat.readFeatSum->stats.V[feat.readFeatSum->stats.noMMtoWLwithoutExact]++;
+            } else if (noTooManyWLmatches) {
+                feat.readFeatSum->stats.V[feat.readFeatSum->stats.noTooManyWLmatches]++;
+            }
+        }
+
+        if (readIsCounted && cb < nReadPerCBunique1.size()) {
+            if (rec.multiFeature) {
+                nReadPerCBmulti1[cb]++;
+            } else {
+                nReadPerCBunique1[cb]++;
+            }
+        }
+
+        if (feat.pSolo.readStatsYes[feat.featureType]) {
+            feat.readFlagCounts.flag = rec.readFlag;
+            if (readIsCounted) {
+                if (feat.readFlagCounts.checkBit(feat.readFlagCounts.featureU)) {
+                    feat.readFlagCounts.setBit(feat.readFlagCounts.countedU);
+                }
+                if (feat.readFlagCounts.checkBit(feat.readFlagCounts.featureM)) {
+                    feat.readFlagCounts.setBit(feat.readFlagCounts.countedM);
+                }
+            }
+            feat.readFlagCounts.setBit(feat.readFlagCounts.cbMatch);
+            if (rec.cbMatch == 0 && !rec.cbCandidates.empty()) {
+                feat.readFlagCounts.setBit(feat.readFlagCounts.cbPerfect);
+                feat.readFlagCounts.countsAdd(cb);
+            } else if (rec.cbMatch == 1 && !noMMtoWLwithoutExact && !rec.cbCandidates.empty()) {
+                feat.readFlagCounts.setBit(feat.readFlagCounts.cbMMunique);
+                feat.readFlagCounts.countsAdd(cb);
+            } else if (rec.cbMatch > 1 && !noTooManyWLmatches) {
+                feat.readFlagCounts.setBit(feat.readFlagCounts.cbMMmultiple);
+                feat.readFlagCounts.countsAdd(cb);
+            } else {
+                feat.readFlagCounts.countsAddNoCB();
+            }
+        }
+    }
+
+    feat.readFlagCounts.countsAddNoCBarray(feat.readFeatSum->readFlag.flagCountsNoCB);
 }
 }
 
@@ -121,13 +224,41 @@ void SoloFeature::countCBgeneUMI()
                 }
             }
 
+            std::vector<uint32> nReadPerCBunique1(pSolo.cbWLsize), nReadPerCBmulti1(pSolo.cbWLsize);
+            populateBridgeReadAccounting(*this, nReadPerCBunique1, nReadPerCBmulti1);
+            {
+                uint64_t recTotal = readFeatSum->bridgeReadAccounting_.size();
+                uint64_t recFeatGood = 0, recMulti = 0, recExact = 0, recOneMm = 0, recAmbig = 0;
+                for (const auto &rec : readFeatSum->bridgeReadAccounting_) {
+                    recFeatGood += rec.featGood ? 1 : 0;
+                    recMulti += rec.multiFeature ? 1 : 0;
+                    recExact += rec.cbMatch == 0 ? 1 : 0;
+                    recOneMm += rec.cbMatch == 1 ? 1 : 0;
+                    recAmbig += rec.cbMatch > 1 ? 1 : 0;
+                }
+                uint64_t sumUnique = 0, sumMulti = 0;
+                for (uint32 ii = 0; ii < pSolo.cbWLsize; ++ii) {
+                    sumUnique += nReadPerCBunique1[ii];
+                    sumMulti += nReadPerCBmulti1[ii];
+                }
+                P.inOut->logMain << "Bridge accounting debug:"
+                                 << " records=" << recTotal
+                                 << " featGood=" << recFeatGood
+                                 << " multiFeature=" << recMulti
+                                 << " exact=" << recExact
+                                 << " oneMM=" << recOneMm
+                                 << " ambiguous=" << recAmbig
+                                 << " uniqueReads=" << sumUnique
+                                 << " multiReads=" << sumMulti
+                                 << endl;
+            }
+
             nReadPerCBunique.resize(nCB);
             nReadPerCBtotal.resize(nCB);
             for (uint32 icb = 0; icb < nCB; icb++) {
                 uint32 wlIndex = indCB[icb];
-                uint32 cbReads = (wlIndex < readFeatSum->cbReadCount.size()) ? readFeatSum->cbReadCount[wlIndex] : 0;
-                nReadPerCBunique[icb] = cbReads;
-                nReadPerCBtotal[icb] = cbReads;
+                nReadPerCBunique[icb] = nReadPerCBunique1[wlIndex];
+                nReadPerCBtotal[icb] = nReadPerCBunique1[wlIndex] + nReadPerCBmulti1[wlIndex];
             }
 
             nUMIperCB.resize(nCB);

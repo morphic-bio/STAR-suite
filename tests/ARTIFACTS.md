@@ -152,6 +152,21 @@ update this file with its output location.
   - Refreshed same-binary 100k experimental non-Flex inline-hash bridge run
     after those two fixes:
     `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_100k_unique_hashbridge_v6/`
+  - Legacy control used for problem-3 sidecar validation:
+    `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_100k_unique_legacy_v4/`
+  - Problem-3 sidecar validation run before CB key-space fix:
+    `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_100k_unique_hashbridge_v8/`
+  - Problem-3 sidecar validation run after CB key-space fix:
+    `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_100k_unique_hashbridge_v9/`
+  - Problem-4 ambiguous-CB bridge validation before raw-CB fix:
+    `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_100k_unique_hashbridge_v10/`
+  - Problem-4 ambiguous-CB bridge validation after raw-CB fix:
+    `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_100k_unique_hashbridge_v11/`
+  - Problem-4 follow-up validation after fixing 15-bit gene key aliasing in the
+    non-Flex bridge:
+    `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_100k_unique_hashbridge_v12/`
+  - Targeted trace run for the `73` bridge-only raw barcodes:
+    `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_100k_unique_hashbridge_trace73/`
   - Failed debug iterations while bringing up the experimental bridge:
     - `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_100k_unique_hashbridge_v2/`
     - `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_100k_unique_hashbridge_v3/`

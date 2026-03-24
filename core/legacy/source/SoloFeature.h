@@ -193,8 +193,10 @@ public:
     // UMI correction: run clique correction for all groups and apply corrections
     void runCliqueCorrection();
     
-    // Ambiguous CB resolution: stub - not wired in flex path
-    void resolveAmbiguousCBs() {}
+    // Ambiguous CB resolution for the experimental non-Flex bridge.
+    void resolveAmbiguousCBs();
+    // Shared Cell Ranger-style ambiguous-CB reinsertion into inline hash.
+    void resolvePendingAmbiguousToHash(bool useBridgeCompactMapping);
     
     // Apply flat correction hash back to inline hash (re-key entries with corrected UB)
     void applyCliqueCorrectionsToHash();

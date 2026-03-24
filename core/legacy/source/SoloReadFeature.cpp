@@ -1,6 +1,8 @@
 #include "SoloReadFeature.h"
 #include "streamFuns.h"
 #include "SoloFeatureTypes.h"
+#include <cstdlib>
+#include <cstdio>
 
 SoloReadFeature::SoloReadFeature(int32 feTy, Parameters &Pin, int iChunk)
              : featureType(feTy), P(Pin), pSolo(P.pSolo), streamReads(nullptr), inlineHash_(nullptr), readIdTracker_(nullptr)
@@ -82,19 +84,92 @@ void SoloReadFeature::statsOut(ofstream &streamOut)
     streamOut.flush();
 };
 
+uint32_t SoloReadFeature::getOrCreateBridgeCompactCb(uint32_t wlIdx)
+{
+    auto it = bridgeCbCompactByWl_.find(wlIdx);
+    if (it != bridgeCbCompactByWl_.end()) {
+        return it->second;
+    }
+
+    uint32_t compactIdx = bridgeCbWlByCompact_.size();
+    bridgeCbCompactByWl_[wlIdx] = compactIdx;
+    bridgeCbWlByCompact_.push_back(wlIdx);
+    return compactIdx;
+}
+
+uint32_t SoloReadFeature::bridgeCompactToWl(uint32_t compactIdx) const
+{
+    if (compactIdx >= bridgeCbWlByCompact_.size()) {
+        return static_cast<uint32_t>(-1);
+    }
+    return bridgeCbWlByCompact_[compactIdx];
+}
+
+uint16_t SoloReadFeature::getOrCreateBridgeCompactGene(uint32_t geneIdx)
+{
+    auto it = bridgeGeneCompactByFull_.find(geneIdx);
+    if (it != bridgeGeneCompactByFull_.end()) {
+        return it->second;
+    }
+
+    size_t compactIdx = bridgeGeneFullByCompact_.size();
+    if (compactIdx > 0x7FFFu) {
+        std::fprintf(stderr,
+                     "FATAL ERROR: non-Flex Solo hash bridge observed more than 32768 distinct genes; packed gene field overflow\n");
+        std::exit(1);
+    }
+
+    uint16_t compactGene = static_cast<uint16_t>(compactIdx);
+    bridgeGeneCompactByFull_[geneIdx] = compactGene;
+    bridgeGeneFullByCompact_.push_back(geneIdx);
+    return compactGene;
+}
+
+uint32_t SoloReadFeature::bridgeCompactToGene(uint16_t compactIdx) const
+{
+    if (compactIdx >= bridgeGeneFullByCompact_.size()) {
+        return static_cast<uint32_t>(-1);
+    }
+    return bridgeGeneFullByCompact_[compactIdx];
+}
+
 void SoloReadFeature::mergeInlineHash(SoloReadFeature &other)
 {
     if (!inlineHash_ || !other.inlineHash_) {
         return;
     }
-    
+
+    bool nonFlexHashBridge = pSolo.inlineHashMode
+        && !pSolo.flexMode
+        && std::getenv("STAR_SOLO_NONFLEX_HASH_BRIDGE") != nullptr;
+
     // Merge hash tables: iterate over source hash, add counts
     for (khiter_t iter = kh_begin(other.inlineHash_); iter != kh_end(other.inlineHash_); ++iter) {
         if (!kh_exist(other.inlineHash_, iter)) continue;
-        
+
         uint64_t key = kh_key(other.inlineHash_, iter);
         uint32_t count = kh_val(other.inlineHash_, iter);
-        
+
+        if (nonFlexHashBridge) {
+            uint32_t otherCompactCb = 0, umi24 = 0;
+            uint16_t geneIdx = 0;
+            uint8_t tagIdx = 0;
+            unpackCgAggKey(key, &otherCompactCb, &umi24, &geneIdx, &tagIdx);
+
+            uint32_t wlIdx = other.bridgeCompactToWl(otherCompactCb);
+            if (wlIdx == static_cast<uint32_t>(-1)) {
+                continue;
+            }
+
+            uint32_t compactCb = getOrCreateBridgeCompactCb(wlIdx);
+            uint32_t fullGeneIdx = other.bridgeCompactToGene(geneIdx);
+            if (fullGeneIdx == static_cast<uint32_t>(-1)) {
+                continue;
+            }
+            uint16_t compactGene = getOrCreateBridgeCompactGene(fullGeneIdx);
+            key = packCgAggKey(compactCb, umi24, compactGene, tagIdx);
+        }
+
         int absent;
         khiter_t dest_iter = kh_put(cg_agg, inlineHash_, key, &absent);
         if (absent) {
@@ -144,5 +219,11 @@ void SoloReadFeature::mergeInlineHash(SoloReadFeature &other)
                                      otherEntry.observations.begin(), 
                                      otherEntry.observations.end());
         }
+    }
+
+    if (!other.bridgeReadAccounting_.empty()) {
+        bridgeReadAccounting_.insert(bridgeReadAccounting_.end(),
+                                     other.bridgeReadAccounting_.begin(),
+                                     other.bridgeReadAccounting_.end());
     }
 }
