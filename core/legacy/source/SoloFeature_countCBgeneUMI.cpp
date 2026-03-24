@@ -315,7 +315,7 @@ void SoloFeature::countCBgeneUMI()
                        << "This indicates a wiring issue in SoloFeature_sumThreads.cpp\n";
                 exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_INPUT_FILES, P);
             }
-            if (!pSolo.inlineHashMode && readFeatAll[ii]->streamReads == nullptr) {
+            if (!pSolo.inlineHashMode && !readFeatAll[ii]->binarySpoolInMemory && readFeatAll[ii]->streamReads == nullptr) {
                 ostringstream errOut;
                 errOut << "EXITING because of fatal ERROR: readFeatAll[" << ii << "]->streamReads is null in non-inline-hash mode\n"
                        << "featureType=" << featureType << " thread=" << ii << "\n"
@@ -328,6 +328,10 @@ void SoloFeature::countCBgeneUMI()
                         readFlagCounts,
                         nReadPerCBunique1, nReadPerCBmulti1);
             readFeatSum->addStats(*readFeatAll[ii]);
+            if (readFeatAll[ii]->binarySpoolInMemory) {
+                readFeatAll[ii]->binarySpoolBuffer.clear();
+                readFeatAll[ii]->binarySpoolReadPos = 0;
+            }
         }
         readFlagCounts.countsAddNoCBarray(readFeatSum->readFlag.flagCountsNoCB);
 

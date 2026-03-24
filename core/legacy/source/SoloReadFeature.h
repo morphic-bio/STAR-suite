@@ -12,6 +12,7 @@
 #include "ReadAnnotations.h"
 #include "ReadAlign.h"
 #include "hash_shims_cpp_compat.h"
+#include "SoloBinarySpool.h"
 #include <functional>
 
 class SoloFeature;
@@ -32,8 +33,14 @@ public:
     vector<uint32> transcriptDistCount;
     
     bool readInfoYes ,readIndexYes;
+    bool binarySpool;
+    bool binarySpoolInMemory;
+    uint64_t binarySpoolMemoryLimitBytes;
+    string binarySpoolFileName;
 
     fstream *streamReads;
+    SoloBinarySpool::MemoryBuffer binarySpoolBuffer;
+    size_t binarySpoolReadPos;
 
     // Inline hash mode: per-thread hash table (replaces temp stream files)
     khash_t(cg_agg) *inlineHash_; // nullptr if not using inline hash mode
@@ -91,6 +98,7 @@ public:
     uint32_t bridgeCompactToWl(uint32_t compactIdx) const;
     uint16_t getOrCreateBridgeCompactGene(uint32_t geneIdx);
     uint32_t bridgeCompactToGene(uint16_t compactIdx) const;
+    void maybeSpillBinarySpool(size_t extraBytes);
     // Legacy overload removed
     // Overload that emits read info via a sink (avoids requiring legacy vector storage)
     void inputRecords(uint32 **cbP, uint32 cbPstride, vector<uint32> &cbReadCountTotal, SoloReadFlagClass &readFlagCounts,

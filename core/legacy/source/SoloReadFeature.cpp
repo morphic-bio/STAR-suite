@@ -1,11 +1,13 @@
 #include "SoloReadFeature.h"
+#include "ErrorWarning.h"
+#include "SoloBinarySpool.h"
 #include "streamFuns.h"
 #include "SoloFeatureTypes.h"
 #include <cstdlib>
 #include <cstdio>
 
 SoloReadFeature::SoloReadFeature(int32 feTy, Parameters &Pin, int iChunk)
-             : featureType(feTy), P(Pin), pSolo(P.pSolo), streamReads(nullptr), inlineHash_(nullptr), readIdTracker_(nullptr)
+             : featureType(feTy), P(Pin), pSolo(P.pSolo), binarySpool(false), binarySpoolInMemory(false), binarySpoolMemoryLimitBytes(0), streamReads(nullptr), binarySpoolReadPos(0), inlineHash_(nullptr), readIdTracker_(nullptr)
 {
     if (pSolo.type==0)
         return;
@@ -19,6 +21,16 @@ SoloReadFeature::SoloReadFeature(int32 feTy, Parameters &Pin, int iChunk)
         cbReadCount.resize(pSolo.cbWLsize,0);
     };
 
+    const bool wantBinarySpool = SoloBinarySpool::envEnabled();
+    const bool wantBinarySpoolInMemory = SoloBinarySpool::envInMemoryEnabled();
+    const uint64_t binarySpoolMemoryLimitBytesEnv = SoloBinarySpool::envInMemoryLimitBytes();
+    if (wantBinarySpool && P.runRestart.type == 1) {
+        ostringstream errOut;
+        errOut << "EXITING because STAR_SOLO_BINARY_SPOOL is not compatible with restart mode in this experiment.\n"
+               << "SOLUTION: rerun without restart files or disable STAR_SOLO_BINARY_SPOOL.\n";
+        exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
+    }
+
     if (pSolo.inlineHashMode) {
         // Initialize inline hash instead of opening temp stream file
         inlineHash_ = kh_init(cg_agg);
@@ -29,8 +41,39 @@ SoloReadFeature::SoloReadFeature(int32 feTy, Parameters &Pin, int iChunk)
             readIdTracker_ = kh_init(readid_cbumi);
         }
     } else if (iChunk>=0) {
-        //open with flagDelete=false, i.e. try to keep file if it exists
-        streamReads = &fstrOpen(P.outFileTmp+"/solo"+SoloFeatureTypes::Names[featureType]+'_'+std::to_string(iChunk), ERROR_OUT, P, false);
+        binarySpool = wantBinarySpool && SoloBinarySpool::supportsFeature(featureType);
+        binarySpoolInMemory = binarySpool && wantBinarySpoolInMemory;
+        binarySpoolFileName = P.outFileTmp+"/solo"+SoloFeatureTypes::Names[featureType]+'_'+std::to_string(iChunk);
+        binarySpoolMemoryLimitBytes = binarySpoolInMemory ? binarySpoolMemoryLimitBytesEnv : 0;
+        if (binarySpoolInMemory) {
+            streamReads = nullptr;
+            SoloBinarySpool::writeFileHeader(binarySpoolBuffer, featureType, readIndexYes);
+            if (iChunk == 0) {
+                P.inOut->logMain << "Using experimental in-memory binary Solo temp spool for feature "
+                                 << SoloFeatureTypes::Names[featureType] << endl;
+                if (binarySpoolMemoryLimitBytes > 0) {
+                    P.inOut->logMain << "Experimental in-memory Solo spool limit: "
+                                     << (binarySpoolMemoryLimitBytes / (1024ull * 1024ull))
+                                     << " MiB per thread; spilling overflow to disk" << endl;
+                }
+            }
+        } else if (binarySpool) {
+            streamReads = &fstrOpenBinary(binarySpoolFileName, ERROR_OUT, P, true);
+            SoloBinarySpool::writeFileHeader(*streamReads, featureType, readIndexYes);
+            if (iChunk == 0) {
+                P.inOut->logMain << "Using experimental binary Solo temp spool for feature "
+                                 << SoloFeatureTypes::Names[featureType] << endl;
+            }
+        } else {
+            //open with flagDelete=false, i.e. try to keep file if it exists
+            streamReads = &fstrOpen(binarySpoolFileName, ERROR_OUT, P, false);
+            if (wantBinarySpool && iChunk == 0 && !SoloBinarySpool::supportsFeature(featureType)) {
+                P.inOut->logMain << "WARNING: STAR_SOLO_BINARY_SPOOL is enabled, but feature "
+                                 << SoloFeatureTypes::Names[featureType]
+                                 << " is not supported by the experimental binary spool; using legacy text temp stream"
+                                 << endl;
+            }
+        }
     };
     
     if (featureType==SoloFeatureTypes::Transcript3p)
@@ -251,4 +294,27 @@ void SoloReadFeature::mergeDeferredBridgeAccounting(const SoloReadFeature &other
             bridgeDeferredAccounting_.push_back(mergedRec);
         }
     }
+}
+
+void SoloReadFeature::maybeSpillBinarySpool(size_t extraBytes)
+{
+    if (!binarySpoolInMemory || binarySpoolMemoryLimitBytes == 0) {
+        return;
+    }
+    if (binarySpoolBuffer.totalBytes + extraBytes <= binarySpoolMemoryLimitBytes) {
+        return;
+    }
+
+    streamReads = &fstrOpenBinary(binarySpoolFileName, ERROR_OUT, P, true);
+    SoloBinarySpool::flushToStream(binarySpoolBuffer, *streamReads);
+    streamReads->flush();
+    binarySpoolBuffer.clear();
+    binarySpoolReadPos = 0;
+    binarySpoolInMemory = false;
+
+    P.inOut->logMain << "Spilling experimental in-memory binary Solo temp spool to disk for feature "
+                     << SoloFeatureTypes::Names[featureType]
+                     << " after reaching "
+                     << (binarySpoolMemoryLimitBytes / (1024ull * 1024ull))
+                     << " MiB per-thread limit" << endl;
 }

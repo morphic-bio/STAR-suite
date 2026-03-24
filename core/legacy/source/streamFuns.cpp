@@ -133,6 +133,31 @@ std::fstream &fstrOpen (std::string fileName, std::string errorID, Parameters &P
     return *fStreamP;
 };
 
+std::fstream &fstrOpenBinary (std::string fileName, std::string errorID, Parameters &P, bool flagDelete) {
+    std::fstream *fStreamP;
+    if (flagDelete) {
+        fStreamP = new std::fstream(fileName.c_str(), std::fstream::in | std::fstream::out | std::fstream::binary | std::fstream::trunc);
+    } else {
+        fStreamP = new std::fstream(fileName.c_str(), std::fstream::in | std::fstream::out | std::fstream::binary);
+        if (fStreamP->fail()) {
+            delete fStreamP;
+            fStreamP = new std::fstream(fileName.c_str(), std::fstream::in | std::fstream::out | std::fstream::binary | std::fstream::trunc);
+        }
+    }
+
+    if (fStreamP->fail()) {
+        ostringstream errOut;
+        errOut << errorID << ": exiting because of *OUTPUT FILE* error: could not create binary input/output file " << fileName << "\n";
+        errOut << "Solution: check that the path exists and you have write permission for this file\n";
+        exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_FILE_OPEN, P);
+    }
+    {
+        std::lock_guard<std::mutex> lock(P.inOut->ownedStreamsMutex);
+        P.inOut->ownedFstreams.push_back(fStreamP);
+    }
+    return *fStreamP;
+};
+
 std::ifstream & ifstrOpen (std::string fileName, std::string errorID, std::string solutionString, Parameters &P) {
     //open file 'fileName', generate error if cannot open
     std::ifstream *ifStreamP = new std::ifstream(fileName.c_str());

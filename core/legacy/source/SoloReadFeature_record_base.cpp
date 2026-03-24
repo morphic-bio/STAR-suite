@@ -7,7 +7,9 @@
 #include "SoloReadBarcode.h"
 #include "hash_shims_cpp_compat.h"
 #include "ReadAlign.h"
+#include "SoloBinarySpool.h"
 #include "SoloReadFeature_record_shared.h"
+#include "ErrorWarning.h"
 #include <unordered_set>
 #include <sstream>
 #include <string>
@@ -464,6 +466,76 @@ uint32 outputReadCB_base(fstream *streamOut, const uint64 iRead, const int32 fea
     if (soloBar.pSolo.type==soloBar.pSolo.SoloTypes::SmartSeq && featureType!=-1) {//need to calculate "UMI" from align start/end
         soloBar.umiB=reFe.alignOut[reFe.indAnnotTr]->chrStartLengthExtended();
     };
+
+    const bool binarySpool = soloReadFeat != nullptr && soloReadFeat->binarySpool;
+    std::vector<std::pair<uint32_t, uint8_t>> ambiguousCbCandidates;
+    if (binarySpool && soloBar.cbMatch > 1) {
+        ambiguousCbCandidates.reserve(static_cast<size_t>(soloBar.cbMatch));
+        std::istringstream cbMatchStream(soloBar.cbMatchString);
+        uint32_t cbIdx = 0;
+        char qualChar = 0;
+        while (cbMatchStream >> cbIdx >> qualChar) {
+            ambiguousCbCandidates.emplace_back(cbIdx, static_cast<uint8_t>(qualChar));
+        }
+        if (static_cast<int32>(ambiguousCbCandidates.size()) != soloBar.cbMatch) {
+            ostringstream errOut;
+            errOut << "EXITING because of fatal ERROR: could not encode ambiguous CB payload into experimental binary Solo spool\n"
+                   << "cbMatch=" << soloBar.cbMatch << " parsedCandidates=" << ambiguousCbCandidates.size() << "\n";
+            exitWithError(errOut.str(), std::cerr, soloReadFeat->P.inOut->logMain, EXIT_CODE_PARAMETER, soloReadFeat->P);
+        }
+    }
+
+    auto writeCbPayload = [&]() {
+        const bool binarySpoolInMemoryNow = binarySpool && soloReadFeat->binarySpoolInMemory;
+        fstream *activeStream = binarySpool ? soloReadFeat->streamReads : streamOut;
+        if (activeStream == nullptr && !binarySpoolInMemoryNow) {
+            return;
+        }
+        if (binarySpool) {
+            if (soloBar.cbMatch <= 1) {
+                uint64_t cbValue = 0;
+                if (!soloBar.cbMatchInd.empty()) {
+                    cbValue = soloBar.cbMatchInd[0];
+                } else if (!soloBar.cbMatchString.empty()) {
+                    cbValue = static_cast<uint64_t>(std::stoull(soloBar.cbMatchString));
+                } else {
+                    ostringstream errOut;
+                    errOut << "EXITING because of fatal ERROR: missing resolved CB payload for experimental binary Solo spool\n";
+                    exitWithError(errOut.str(), std::cerr, soloReadFeat->P.inOut->logMain, EXIT_CODE_PARAMETER, soloReadFeat->P);
+                }
+                if (binarySpoolInMemoryNow) {
+                    SoloBinarySpool::writeResolvedCb(soloReadFeat->binarySpoolBuffer, cbValue);
+                } else {
+                    SoloBinarySpool::writeResolvedCb(*activeStream, cbValue);
+                }
+            } else {
+                for (const auto &candidate : ambiguousCbCandidates) {
+                    if (binarySpoolInMemoryNow) {
+                        SoloBinarySpool::writeAmbiguousCandidate(soloReadFeat->binarySpoolBuffer, candidate.first, candidate.second);
+                    } else {
+                        SoloBinarySpool::writeAmbiguousCandidate(*activeStream, candidate.first, candidate.second);
+                    }
+                }
+            }
+        } else {
+            *activeStream << soloBar.cbMatchString;
+        }
+    };
+    auto binaryHeaderBytes = [&](bool writeReadIndex) -> size_t {
+        return sizeof(uint64_t) + sizeof(uint32_t) + sizeof(int32_t) +
+               (writeReadIndex ? (sizeof(uint64_t) + sizeof(uint32_t)) : 0);
+    };
+    auto binaryPayloadBytes = [&]() -> size_t {
+        if (soloBar.cbMatch <= 1) {
+            return sizeof(uint64_t);
+        }
+        return static_cast<size_t>(soloBar.cbMatch) * (sizeof(uint32_t) + sizeof(uint8_t));
+    };
+    auto maybeSpillBeforeBinaryWrite = [&](bool writeReadIndex) {
+        if (binarySpool && soloReadFeat->binarySpoolInMemory) {
+            soloReadFeat->maybeSpillBinarySpool(binaryHeaderBytes(writeReadIndex) + binaryPayloadBytes());
+        }
+    };
     
     uint64 nout=1;
     
@@ -491,8 +563,19 @@ uint32 outputReadCB_base(fstream *streamOut, const uint64 iRead, const int32 fea
                 }
                 break;
             }
-            if (streamOut) {
-                *streamOut << soloBar.umiB <<' '<< iRead <<' '<< readFlag.flag <<' '<< -1 <<' '<< soloBar.cbMatch <<' '<< soloBar.cbMatchString <<'\n';
+            if (streamOut || (binarySpool && soloReadFeat->binarySpoolInMemory)) {
+                if (binarySpool) {
+                    maybeSpillBeforeBinaryWrite(true);
+                    fstream *activeStream = soloReadFeat->binarySpoolInMemory ? nullptr : soloReadFeat->streamReads;
+                    if (soloReadFeat->binarySpoolInMemory) {
+                        SoloBinarySpool::writeRecordHeader(soloReadFeat->binarySpoolBuffer, true, soloBar.umiB, iRead, readFlag.flag, static_cast<uint32_t>(-1), soloBar.cbMatch);
+                    } else {
+                        SoloBinarySpool::writeRecordHeader(*activeStream, true, soloBar.umiB, iRead, readFlag.flag, static_cast<uint32_t>(-1), soloBar.cbMatch);
+                    }
+                    writeCbPayload();
+                } else {
+                    *streamOut << soloBar.umiB <<' '<< iRead <<' '<< readFlag.flag <<' '<< -1 <<' '<< soloBar.cbMatch <<' '<< soloBar.cbMatchString <<'\n';
+                }
             }
             break;
         }
@@ -546,22 +629,44 @@ uint32 outputReadCB_base(fstream *streamOut, const uint64 iRead, const int32 fea
                 break;
             }
 
-            if (streamOut) {
+            if (streamOut || (binarySpool && soloReadFeat->binarySpoolInMemory)) {
                 if (!reFe.geneMult.empty()) {
                     for (uint32_t geneIdx : reFe.geneMult) {
+                        if (binarySpool) {
+                            maybeSpillBeforeBinaryWrite(iRead != (uint64)-1);
+                            fstream *activeStream = soloReadFeat->binarySpoolInMemory ? nullptr : soloReadFeat->streamReads;
+                            if (soloReadFeat->binarySpoolInMemory) {
+                                SoloBinarySpool::writeRecordHeader(soloReadFeat->binarySpoolBuffer, iRead != (uint64)-1, soloBar.umiB, iRead, readFlag.flag, geneIdx, soloBar.cbMatch);
+                            } else {
+                                SoloBinarySpool::writeRecordHeader(*activeStream, iRead != (uint64)-1, soloBar.umiB, iRead, readFlag.flag, geneIdx, soloBar.cbMatch);
+                            }
+                            writeCbPayload();
+                        } else {
+                            *streamOut << soloBar.umiB <<' ';
+                            if (iRead != (uint64)-1) {
+                                *streamOut << iRead <<' '<< readFlag.flag <<' ';
+                            }
+                            *streamOut << geneIdx <<' '<< soloBar.cbMatch <<' '<< soloBar.cbMatchString <<'\n';
+                        }
+                    }
+                    nout = reFe.geneMult.size();
+                } else {
+                    if (binarySpool) {
+                        maybeSpillBeforeBinaryWrite(iRead != (uint64)-1);
+                        fstream *activeStream = soloReadFeat->binarySpoolInMemory ? nullptr : soloReadFeat->streamReads;
+                        if (soloReadFeat->binarySpoolInMemory) {
+                            SoloBinarySpool::writeRecordHeader(soloReadFeat->binarySpoolBuffer, iRead != (uint64)-1, soloBar.umiB, iRead, readFlag.flag, reFe.gene, soloBar.cbMatch);
+                        } else {
+                            SoloBinarySpool::writeRecordHeader(*activeStream, iRead != (uint64)-1, soloBar.umiB, iRead, readFlag.flag, reFe.gene, soloBar.cbMatch);
+                        }
+                        writeCbPayload();
+                    } else {
                         *streamOut << soloBar.umiB <<' ';
                         if (iRead != (uint64)-1) {
                             *streamOut << iRead <<' '<< readFlag.flag <<' ';
                         }
-                        *streamOut << geneIdx <<' '<< soloBar.cbMatch <<' '<< soloBar.cbMatchString <<'\n';
+                        *streamOut << reFe.gene <<' '<< soloBar.cbMatch <<' '<< soloBar.cbMatchString <<'\n';
                     }
-                    nout = reFe.geneMult.size();
-                } else {
-                    *streamOut << soloBar.umiB <<' ';
-                    if (iRead != (uint64)-1) {
-                        *streamOut << iRead <<' '<< readFlag.flag <<' ';
-                    }
-                    *streamOut << reFe.gene <<' '<< soloBar.cbMatch <<' '<< soloBar.cbMatchString <<'\n';
                     nout = 1;
                 }
             }

@@ -113,6 +113,26 @@ update this file with its output location.
   - Call-only parity outputs:
     - `/storage/ucsf-2M/callonly_parity_masterclean_20260217_073728/`
     - `/storage/ucsf-2M/compat_gate_ucsf_callonly_20260218_014137/`
+- `/storage/100K/ucsf_solo_binary_spool_20260324/` (non-Flex Solo binary temp-spool experiment on pre-bridge base)
+  - Warm-cache legacy baseline on corrected UCSF `iPSC2_1/GEX` 2M fixture:
+    - `/storage/100K/ucsf_solo_binary_spool_20260324/iPSC2_1_GEX_2M_baseline_warm/`
+  - First legacy baseline run on same fixture:
+    - `/storage/100K/ucsf_solo_binary_spool_20260324/iPSC2_1_GEX_2M_baseline/`
+  - Experimental binary-spool run on same fixture:
+    - `/storage/100K/ucsf_solo_binary_spool_20260324/iPSC2_1_GEX_2M_binaryspool/`
+  - Experimental chunked in-memory binary-spool run on same fixture:
+    - `/storage/100K/ucsf_solo_binary_spool_20260324/iPSC2_1_GEX_2M_binaryspool_memory_chunked/`
+  - Hybrid RAM-first spill-cap validation:
+    - `/storage/100K/ucsf_solo_binary_spool_20260324/iPSC2_1_GEX_2M_binaryspool_memory_spill_v1/`
+      - `STAR_SOLO_BINARY_SPOOL_IN_MEMORY=1`
+      - `STAR_SOLO_BINARY_SPOOL_IN_MEMORY_LIMIT_MB=32`
+    - `/storage/100K/ucsf_solo_binary_spool_20260324/iPSC2_1_GEX_2M_binaryspool_memory_spill_1mb_v1/`
+      - forced-spill bug discovery run; exposed spill-boundary write bug
+    - `/storage/100K/ucsf_solo_binary_spool_20260324/iPSC2_1_GEX_2M_binaryspool_memory_spill_1mb_v3/`
+      - fixed forced-spill validation run; exact `Summary.csv` + raw MEX parity
+- `/storage/paper_bench_solo_binary_spool_20260324/` (full corrected UCSF binary-spool experiments)
+  - Full corrected UCSF `EBs2_2` chunked in-memory spool:
+    - `/storage/paper_bench_solo_binary_spool_20260324/ucsf_ebs2_2_chunkedmem/`
 - `/storage/ucsf-full/` (UCSF full-sample perturb runs)
   - Dynamic 32x32 benchmark run:
     - `/storage/ucsf-full/bench_20260218_dynamic_first/runs/star_full_dynamic_32x32_20260224_092512/`
@@ -514,3 +534,28 @@ These scripts validate that default bundles work with minimal explicit parameter
   - same-FASTQ direct after fix 5 peak RSS: `40214224 kB`
   - current-branch legacy peak RSS: `40193584 kB`
   - older pre-direct bridge peak RSS: `44360304 kB`
+
+## Solo Binary Spool UCSF 2M Benchmarks (2026-03-24)
+
+- Corrected UCSF `iPSC2_1/GEX` 2M downsample, `--soloMultiMappers Rescue --soloCrMultimapRescue yes`
+- Binary spool worktree baseline runs:
+  - `/storage/100K/ucsf_solo_binary_spool_20260324/iPSC2_1_GEX_2M_baseline/`
+  - `/storage/100K/ucsf_solo_binary_spool_20260324/iPSC2_1_GEX_2M_baseline_warm/`
+- Binary spool on-disk run:
+  - `/storage/100K/ucsf_solo_binary_spool_20260324/iPSC2_1_GEX_2M_binaryspool/`
+- Experimental in-memory binary spool run:
+  - `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_100k_total/`
+  - Note: current wrapper script ignored the custom output root and reused the above STAR output path.
+- Experimental chunked in-memory binary spool run:
+  - `/storage/100K/ucsf_solo_binary_spool_20260324/iPSC2_1_GEX_2M_binaryspool_memory_chunked/`
+- Hybrid RAM-first spill-cap validation:
+  - `/storage/100K/ucsf_solo_binary_spool_20260324/iPSC2_1_GEX_2M_binaryspool_memory_spill_v1/`
+    - `STAR_SOLO_BINARY_SPOOL_IN_MEMORY=1`
+    - `STAR_SOLO_BINARY_SPOOL_IN_MEMORY_LIMIT_MB=32`
+  - `/storage/100K/ucsf_solo_binary_spool_20260324/iPSC2_1_GEX_2M_binaryspool_memory_spill_1mb_v1/`
+    - forced-spill bug discovery run; exposed spill-boundary write bug
+  - `/storage/100K/ucsf_solo_binary_spool_20260324/iPSC2_1_GEX_2M_binaryspool_memory_spill_1mb_v3/`
+    - fixed forced-spill validation run; exact `Summary.csv` + raw MEX parity
+- Full corrected UCSF `EBs2_2` chunked in-memory spool benchmark:
+  - `/storage/paper_bench_solo_binary_spool_20260324/ucsf_ebs2_2_chunkedmem/`
+- Status: untracked
