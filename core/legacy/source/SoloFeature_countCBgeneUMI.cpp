@@ -8,9 +8,41 @@
 #include "SoloReadInfoSink.h"
 #include "hash_shims_cpp_compat.h"  // For unpackReadIdCbUmi
 #include "ErrorWarning.h"
+#include <chrono>
+#include <cstdlib>
+
+namespace {
+double soloElapsedSeconds(const std::chrono::steady_clock::time_point &start)
+{
+    return std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+}
+
+bool nonFlexHashBridgeEnabled()
+{
+    return std::getenv("STAR_SOLO_NONFLEX_HASH_BRIDGE") != nullptr;
+}
+
+bool nonFlexHashBridgeApplies(const SoloFeature& feat)
+{
+    if (!feat.pSolo.inlineHashMode || feat.pSolo.flexMode || !nonFlexHashBridgeEnabled()) {
+        return false;
+    }
+    switch (feat.featureType) {
+        case SoloFeatureTypes::Gene:
+        case SoloFeatureTypes::GeneFull:
+        case SoloFeatureTypes::GeneFull_Ex50pAS:
+        case SoloFeatureTypes::GeneFull_ExonOverIntron:
+            return true;
+        default:
+            return false;
+    }
+}
+}
 
 void SoloFeature::countCBgeneUMI()
 {    
+    const auto countStart = std::chrono::steady_clock::now();
+
     // Skip legacy Solo counting when inline CB correction is active, but continue to inline-hash flow
     if (pSolo.inlineCBCorrection) {
         // Assert that Solo structures are unused
@@ -64,9 +96,74 @@ void SoloFeature::countCBgeneUMI()
         if (pSolo.umiCorrectionMode > 0) {
             runCliqueCorrection();
         }
+
+        if (nonFlexHashBridgeApplies(*this)) {
+            time(&rawTime);
+            P.inOut->logMain << timeMonthDayTime(rawTime)
+                             << " ... Experimental non-Flex inline-hash bridge enabled"
+                             << " (hash capture -> materializeRGUFromHash -> legacy collapse)"
+                             << endl;
+
+            materializeRGUFromHash();
+
+            if (nCB == 0 || rGeneUMI == nullptr || rCBp == nullptr || rCBn == nullptr) {
+                P.inOut->logMain << "WARNING: non-Flex inline-hash bridge produced no materialized records" << endl;
+                P.inOut->logMain << "Solo timing: countCBgeneUMI " << soloElapsedSeconds(countStart) << " s" << endl;
+                return;
+            }
+
+            nReadPerCB.resize(nCB);
+            nReadPerCBmax = 0;
+            for (uint32 iCB = 0; iCB < nCB; iCB++) {
+                nReadPerCB[iCB] = rCBn[iCB];
+                if (nReadPerCB[iCB] > nReadPerCBmax) {
+                    nReadPerCBmax = nReadPerCB[iCB];
+                }
+            }
+
+            nReadPerCBunique.resize(nCB);
+            nReadPerCBtotal.resize(nCB);
+            for (uint32 icb = 0; icb < nCB; icb++) {
+                uint32 wlIndex = indCB[icb];
+                uint32 cbReads = (wlIndex < readFeatSum->cbReadCount.size()) ? readFeatSum->cbReadCount[wlIndex] : 0;
+                nReadPerCBunique[icb] = cbReads;
+                nReadPerCBtotal[icb] = cbReads;
+            }
+
+            nUMIperCB.resize(nCB);
+            nGenePerCB.resize(nCB);
+            countMatStride = pSolo.umiDedup.yes.N + 1;
+            countCellGeneUMI.resize(nReadsMapped * countMatStride / 5 + 16);
+            countCellGeneUMIindex.resize(nCB + 1, 0);
+            if (pSolo.multiMap.yes.multi) {
+                countMatMult.s = 1 + pSolo.multiMap.yes.N * pSolo.umiDedup.yes.N;
+                countMatMult.m.resize(nReadsMapped * countMatMult.s / 5 + 16);
+                countMatMult.i.resize(nCB + 1, 0);
+            }
+
+            const auto collapseStart = std::chrono::steady_clock::now();
+            collapseUMIall();
+            P.inOut->logMain << "Solo timing: collapseUMIall (countCBgeneUMI wrapper) "
+                             << soloElapsedSeconds(collapseStart) << " s" << endl;
+
+            delete[] rGeneUMI;
+            rGeneUMI = nullptr;
+            delete[] rCBp;
+            rCBp = nullptr;
+            delete[] rCBn;
+            rCBn = nullptr;
+
+            time(&rawTime);
+            P.inOut->logMain << timeMonthDayTime(rawTime)
+                             << " ... Finished collapsing UMIs (non-Flex inline-hash bridge)" << endl;
+            P.inOut->logMain << "Solo timing: countCBgeneUMI " << soloElapsedSeconds(countStart) << " s" << endl;
+            return;
+        }
         
         // Direct hash consumption: no materialization/legacy collapse
+        const auto hashCollapseStart = std::chrono::steady_clock::now();
         collapseUMIall_fromHash();
+        P.inOut->logMain << "Solo timing: collapseUMIall_fromHash " << soloElapsedSeconds(hashCollapseStart) << " s" << endl;
         
         // Populate packedReadInfo from readIdTracker_ for sorted BAM CB/UB tag injection
         if (pSolo.trackReadIdsForTags && readFeatSum && readFeatSum->readIdTracker_) {
@@ -101,6 +198,7 @@ void SoloFeature::countCBgeneUMI()
         
         time(&rawTime);
         P.inOut->logMain << timeMonthDayTime(rawTime) << " ... Finished collapsing UMIs (direct hash mode)" << endl;
+        P.inOut->logMain << "Solo timing: countCBgeneUMI " << soloElapsedSeconds(countStart) << " s" << endl;
         return;
     }
     
@@ -193,7 +291,9 @@ void SoloFeature::countCBgeneUMI()
         }
 
         // Collapse UMIs once here; CountingSink no longer calls collapseUMIall.
+        const auto collapseStart = std::chrono::steady_clock::now();
         collapseUMIall();
+        P.inOut->logMain << "Solo timing: collapseUMIall (countCBgeneUMI wrapper) " << soloElapsedSeconds(collapseStart) << " s" << endl;
 
         // Free temporary arrays allocated via CountingSink::finalize
         if (rGeneUMI) { delete[] rGeneUMI; rGeneUMI=nullptr; }
@@ -210,6 +310,7 @@ void SoloFeature::countCBgeneUMI()
         logDebugStatusCounters();
         logDebugStageCounters();
 #endif
+        P.inOut->logMain << "Solo timing: countCBgeneUMI " << soloElapsedSeconds(countStart) << " s" << endl;
         return;
     }
 };

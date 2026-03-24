@@ -5,12 +5,49 @@
 #include "SequenceFuns.h"
 #include "ErrorWarning.h"
 #include "systemFunctions.h"
+#include <chrono>
+#include <cstdlib>
+
+namespace {
+double soloElapsedSeconds(const std::chrono::steady_clock::time_point &start)
+{
+    return std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+}
+
+bool nonFlexHashBridgeEnabled()
+{
+    return std::getenv("STAR_SOLO_NONFLEX_HASH_BRIDGE") != nullptr;
+}
+
+bool useDirectInlineHashOutput(const SoloFeature& feat)
+{
+    if (!feat.pSolo.inlineHashMode) {
+        return false;
+    }
+    if (feat.pSolo.flexMode) {
+        return true;
+    }
+    if (!nonFlexHashBridgeEnabled()) {
+        return true;
+    }
+    switch (feat.featureType) {
+        case SoloFeatureTypes::Gene:
+        case SoloFeatureTypes::GeneFull:
+        case SoloFeatureTypes::GeneFull_Ex50pAS:
+        case SoloFeatureTypes::GeneFull_ExonOverIntron:
+            return false;
+        default:
+            return true;
+    }
+}
+}
 
 void SoloFeature::processRecords()
 {
     if (pSolo.type==0)
         return;
 
+    const auto processStart = std::chrono::steady_clock::now();
     time_t rawTime;
     time(&rawTime);
     P.inOut->logMain << timeMonthDayTime(rawTime) << " ... Starting Solo post-map for " <<SoloFeatureTypes::Names[featureType] <<endl;
@@ -60,6 +97,7 @@ void SoloFeature::processRecords()
         time(&rawTime);
         P.inOut->logMain << timeMonthDayTime(rawTime) << " ... Solo: skipping counting and matrix output for " 
                          << SoloFeatureTypes::Names[featureType] << " (soloSkipProcessing=yes)" <<endl;
+        P.inOut->logMain << "Solo timing: processRecords " << soloElapsedSeconds(processStart) << " s" << endl;
         return;
     }
     
@@ -79,9 +117,10 @@ void SoloFeature::processRecords()
     
     // Inline hash path already wrote MEX directly; skip legacy matrix output to avoid
     // touching uninitialized Solo dense matrices.
-    if (pSolo.inlineHashMode) {
+    if (useDirectInlineHashOutput(*this)) {
         time(&rawTime);
         P.inOut->logMain << timeMonthDayTime(rawTime) << " ... Solo: inline-hash mode completed (skipping legacy output)" <<endl;
+        P.inOut->logMain << "Solo timing: processRecords " << soloElapsedSeconds(processStart) << " s" << endl;
         return;
     }
     
@@ -106,7 +145,9 @@ void SoloFeature::processRecords()
     
     time(&rawTime);
     P.inOut->logMain << timeMonthDayTime(rawTime) << " ... Solo: cell filtering" <<endl;    
+    const auto cellFilterStart = std::chrono::steady_clock::now();
     cellFiltering();
+    P.inOut->logMain << "Solo timing: cellFiltering " << soloElapsedSeconds(cellFilterStart) << " s" << endl;
     
     //summary stats output
     statsOutput();
@@ -123,4 +164,5 @@ void SoloFeature::processRecords()
 
     P.inOut->logMain << "RAM after completing solo:\n"
                      <<  linuxProcMemory() << flush;   
+    P.inOut->logMain << "Solo timing: processRecords " << soloElapsedSeconds(processStart) << " s" << endl;
 };

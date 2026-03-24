@@ -89,6 +89,7 @@ void SoloFeature::materializeRGUFromHash() {
     uint32_t currentICB = 0;
     uint32_t cbStartOffset = 0;
     
+    uint32_t syntheticReadId = 0;
     for (size_t i = 0; i < entries.size(); i++) {
         const auto &entry = entries[i];
         
@@ -108,10 +109,9 @@ void SoloFeature::materializeRGUFromHash() {
         rGeneUMI[rguOffset + rguG] = entry.geneIdx;
         rGeneUMI[rguOffset + rguU] = entry.umi24;
         if (rguStride == 3) {
-            // WARNING: readId set to 0 in hash mode (not available)
-            // Comparators that rely on readId (e.g., funCompare_uint32_1_2_0) may misbehave
-            // TODO: Either modify collapse to use stride=2 (no readId) or drive collapse directly from hash
-            rGeneUMI[rguOffset + rguR] = 0;
+            // The bridge does not preserve original read ids, but legacy collapse
+            // only requires stable unique ids within this materialized record set.
+            rGeneUMI[rguOffset + rguR] = syntheticReadId++;
         }
         rguOffset += rguStride;
     }

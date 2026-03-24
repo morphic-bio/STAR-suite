@@ -22,6 +22,7 @@ void SoloFeature::sumThreads()
         // Merge inline hash if enabled
         if (pSolo.inlineHashMode) {
             readFeatSum->mergeInlineHash(*readFeatAll[ii]);
+            readFeatSum->addStats(*readFeatAll[ii]);
             
             // Destroy per-thread hash after merge when minimal memory flag is on
             if (pSolo.soloFlexMinimalMemory && pSolo.inlineHashMode) {

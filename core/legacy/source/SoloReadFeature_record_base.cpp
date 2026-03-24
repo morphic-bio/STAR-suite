@@ -13,6 +13,30 @@
 #include <string>
 #include <cstdlib>
 
+namespace {
+void insertInlineHashEntry(SoloReadFeature *soloReadFeat, const SoloReadBarcode &soloBar, uint16_t geneIdx)
+{
+    if (soloReadFeat == nullptr
+        || soloReadFeat->inlineHash_ == nullptr
+        || soloBar.cbMatch < 0
+        || soloBar.cbMatch > 1
+        || soloBar.cbMatchInd.empty()) {
+        return;
+    }
+
+    uint32_t cbIdx = soloBar.cbMatchInd[0];
+    uint32_t umi24 = soloBar.umiB & 0xFFFFFF;
+    uint64_t key = packCgAggKey(cbIdx, umi24, geneIdx, 0);
+    int absent;
+    khiter_t iter = kh_put(cg_agg, soloReadFeat->inlineHash_, key, &absent);
+    if (absent) {
+        kh_val(soloReadFeat->inlineHash_, iter) = 1;
+    } else {
+        kh_val(soloReadFeat->inlineHash_, iter)++;
+    }
+}
+}
+
 #ifdef DEBUG_CB_UB_PARITY
 // Optional tracing of specific readIds via STAR_DEBUG_TRACE_READS=1,2,3
 static std::unordered_set<uint32_t> buildTraceReadSetWriter() {
@@ -251,6 +275,23 @@ uint32 outputReadCB_base(fstream *streamOut, const uint64 iRead, const int32 fea
         case SoloFeatureTypes::GeneFull :
         case SoloFeatureTypes::GeneFull_Ex50pAS :
         case SoloFeatureTypes::GeneFull_ExonOverIntron : {
+            bool nonFlexHashBridge = soloReadFeat != nullptr
+                && soloReadFeat->pSolo.inlineHashMode
+                && !soloReadFeat->pSolo.flexMode
+                && std::getenv("STAR_SOLO_NONFLEX_HASH_BRIDGE") != nullptr;
+            if (nonFlexHashBridge) {
+                if (!reFe.geneMult.empty()) {
+                    for (uint32_t geneIdx : reFe.geneMult) {
+                        insertInlineHashEntry(soloReadFeat, soloBar, static_cast<uint16_t>(geneIdx ^ geneMultMark));
+                    }
+                    nout = reFe.geneMult.size();
+                } else {
+                    insertInlineHashEntry(soloReadFeat, soloBar, static_cast<uint16_t>(reFe.gene));
+                    nout = 1;
+                }
+                break;
+            }
+
             if (streamOut) {
                 if (!reFe.geneMult.empty()) {
                     for (uint32_t geneIdx : reFe.geneMult) {

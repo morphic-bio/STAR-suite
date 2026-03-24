@@ -125,6 +125,51 @@ update this file with its output location.
 - `/storage/flex_multilane_20K/SC2300771/` (multi-lane Flex smoke fixture: 8 lane pairs x 20K reads each = 160K PE reads total, seqtk seed=42, created by `tests/create_flex_multilane_20k_fixture.sh`)
 - `/storage/downsampled_100K/SC2300771/results/flex_h01_*` (Flex H0/H1 cache pilot artifacts, including synthetic cache builds, 100-probe parity runs, and full-probe cache/scan outputs)
 - `/storage/downsampled_100K/SC2300771/results/flex_hash_screen_internal_*` (internal Flex hash-screen 100K E2E runs, including the exact-parity full-16-whitelist run `flex_hash_screen_internal_full16_20260315_203745/`)
+- `/storage/100K/ucsf_solo_optimization_20260324/`
+  - Solo-only non-Flex UCSF GEX benchmark artifacts from
+    `tests/run_ucsf_solo_gex_100k_benchmark.sh`
+  - Current optimized benchmark root:
+    `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_100k_total/`
+  - 2M optimized benchmark root:
+    `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_total/`
+  - Matching baseline benchmark root:
+    `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_100k_total_baseline/`
+  - Matching 2M baseline benchmark root:
+    `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_total_baseline/`
+  - Same-binary 2M optimized guard run:
+    `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_samebin_opt/`
+  - Same-binary 2M legacy-guard run:
+    `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_samebin_legacy/`
+  - Same-binary 100k `soloMultiMappers=Unique` legacy control for experimental
+    non-Flex inline-hash bridge:
+    `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_100k_unique_legacy_v2/`
+  - Same-binary 100k experimental non-Flex inline-hash bridge run
+    (`STAR_SOLO_NONFLEX_HASH_BRIDGE=1`, `--soloInlineHashMode yes`):
+    `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_100k_unique_hashbridge_v4/`
+  - Refreshed same-binary 100k `soloMultiMappers=Unique` legacy control after
+    fixing stats aggregation and invalid-UMI rejection:
+    `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_100k_unique_legacy_v3/`
+  - Refreshed same-binary 100k experimental non-Flex inline-hash bridge run
+    after those two fixes:
+    `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_100k_unique_hashbridge_v6/`
+  - Failed debug iterations while bringing up the experimental bridge:
+    - `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_100k_unique_hashbridge_v2/`
+    - `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_100k_unique_hashbridge_v3/`
+- `/storage/MSK-perturb-comparison/paper_artifacts/`
+  - MSK 30-KO 30-guide gRNA parity paper artifacts:
+    - `/storage/MSK-perturb-comparison/paper_artifacts/msk_grna_parity_30guide_20260306/`
+    - contents:
+      - `guide_counts/guide_stage_summary.tsv`
+      - `guide_counts/guide_per_feature_filtered.tsv`
+      - `guide_counts/guide_parity_summary.json`
+      - `call_concordance/call_concordance_summary.json`
+      - `call_concordance/call_pair_counts.tsv`
+      - `call_concordance/call_mismatch_rows.tsv`
+  - MSK residual GEX watchlist molecule provenance:
+    - `/storage/MSK-perturb-comparison/paper_artifacts/msk_cr_molecule_provenance_20260307/`
+    - contents:
+      - `cr_molecule_provenance_watchlist.json`
+      - `README.txt`
 
 ## Flex Full-Scale Benchmark Artifacts
 
