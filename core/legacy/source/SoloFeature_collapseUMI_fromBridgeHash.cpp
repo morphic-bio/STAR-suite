@@ -4,9 +4,10 @@
 // Data flow (no global sort over the full tuple set):
 // 1) Two passes over thread-local + merged hashes: count entries per whitelist CB, then CSR-fill
 //    a flat (gene, umi24, count) array with per-CB slices [cbOffsets[i], cbOffsets[i+1]).
-// 2) Per CB: in-place sort by (gene, umi24); per gene bucket run 1MM_CR via umiArrayCorrect_CR.
-// 3) MultiGeneUMI_CR: collect flat (corrUmi, origUmi, geneIdx, count) rows for the CB, sort by
-//    corrected UMI, resolve each corrected-UMI group with vector scans (no nested umi->gene maps).
+// 2) Per CB: count/scatter into a local buffer grouped by gene (no comparison sort of the slice);
+//    per gene bucket run 1MM_CR via umiArrayCorrect_CR (which sorts UMIs internally).
+// 3) MultiGeneUMI_CR: collect flat (corrUmi, origUmi, geneIdx, count) rows for the CB, radix-sort
+//    by corrected UMI, resolve each corrected-UMI group with vector scans (no nested umi->gene maps).
 
 #include "SoloFeature.h"
 #include "SoloReadFeature.h"
@@ -79,6 +80,37 @@ size_t nextGrowSize(size_t currentSize, size_t need)
     while (next < need)
         next *= 2;
     return next;
+}
+
+// Stable LSB radix on MgRow.corr (uint32). Replaces std::sort for large per-CB mgBuf.
+void radixSortMgRowsByCorr(std::vector<MgRow> &rows)
+{
+    const size_t n = rows.size();
+    if (n <= 1)
+        return;
+    std::vector<MgRow> tmp(n);
+    bool srcIsRows = true;
+    for (int pass = 0; pass < 4; ++pass) {
+        const int shift = pass * 8;
+        uint32_t cnt[256] = {};
+        const MgRow *src = srcIsRows ? rows.data() : tmp.data();
+        MgRow *dst = srcIsRows ? tmp.data() : rows.data();
+        for (size_t i = 0; i < n; ++i) {
+            const uint32_t b = (src[i].corr >> shift) & 0xFFu;
+            cnt[b]++;
+        }
+        uint32_t pos[256];
+        pos[0] = 0;
+        for (int i = 1; i < 256; ++i)
+            pos[i] = pos[i - 1] + cnt[i - 1];
+        for (size_t i = 0; i < n; ++i) {
+            const uint32_t b = (src[i].corr >> shift) & 0xFFu;
+            dst[pos[b]++] = src[i];
+        }
+        srcIsRows = !srcIsRows;
+    }
+    if (!srcIsRows)
+        rows.swap(tmp);
 }
 
 } // namespace
@@ -354,11 +386,23 @@ void SoloFeature::collapseUMIall_fromBridgeHash()
     uint32_t stampVer = 1;
     size_t nCbGeneSeg = 0;
 
+    // Per-CB gene bucketing (separate from geneStamp used for segment counting across CBs).
+    std::vector<uint32_t> geneSeenBkt(65536, 0);
+    std::vector<uint32_t> geneDupCount(65536, 0);
+    std::vector<uint32_t> geneWriteScratch(65536, 0);
+    std::vector<uint32_t> touchedGenes;
+    touchedGenes.reserve(8192);
+    std::vector<size_t> genePref;
+    genePref.reserve(8192);
+    std::vector<BridgeFlatSlot> geneBucketBuf;
+    std::vector<uint32_t> gID;
+    std::vector<size_t> gBeg, gEnd;
+
     for (uint32_t iCB = 0; iCB < nCB; ++iCB) {
         const size_t cbBeg = cbOffsets[iCB];
         const size_t cbEnd = cbOffsets[iCB + 1];
         const size_t sliceLen = cbEnd - cbBeg;
-        BridgeFlatSlot *slice = flat.data() + cbBeg;
+        BridgeFlatSlot *const rawSlice = flat.data() + cbBeg;
 
         nGenePerCB[iCB] = 0;
         nUMIperCB[iCB] = 0;
@@ -389,30 +433,61 @@ void SoloFeature::collapseUMIall_fromBridgeHash()
             stampVer = 1u;
         }
 
-        std::sort(slice, slice + sliceLen, [](const BridgeFlatSlot &a, const BridgeFlatSlot &b) {
-            if (a.gene != b.gene)
-                return a.gene < b.gene;
-            return a.umi24 < b.umi24;
-        });
-
-        std::vector<uint32_t> gID;
-        std::vector<size_t> gBeg, gEnd;
-        for (size_t j = 0; j < sliceLen;) {
-            const uint32_t gid = slice[j].gene;
-            if (gid & geneMultMark) {
+        const uint32_t bktMark = iCB + 1u;
+        touchedGenes.clear();
+        for (size_t j = 0; j < sliceLen; ++j) {
+            const uint32_t g = rawSlice[j].gene;
+            if (g & geneMultMark) {
                 ostringstream errOut;
                 errOut << "EXITING because of fatal ERROR: multimapper gene encountered in non-Flex bridge direct "
                           "collapse.\n"
                        << "This path requires unique-gene alignments only (--soloMultiMappers Unique).\n";
                 exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_INCONSISTENT_DATA, P);
             }
-            gID.push_back(gid);
-            gBeg.push_back(j);
-            size_t k = j;
-            while (k < sliceLen && slice[k].gene == gid)
-                ++k;
-            gEnd.push_back(k);
-            j = k;
+            if (geneSeenBkt[g] != bktMark) {
+                geneSeenBkt[g] = bktMark;
+                touchedGenes.push_back(g);
+                geneDupCount[g] = 1;
+            } else {
+                geneDupCount[g]++;
+            }
+        }
+
+        std::sort(touchedGenes.begin(), touchedGenes.end());
+
+        genePref.resize(touchedGenes.size() + 1);
+        genePref[0] = 0;
+        for (size_t i = 0; i < touchedGenes.size(); ++i)
+            genePref[i + 1] = genePref[i] + static_cast<size_t>(geneDupCount[touchedGenes[i]]);
+        if (genePref.back() != sliceLen) {
+            ostringstream errOut;
+            errOut << "EXITING because of fatal ERROR: bridge gene bucket size mismatch (expected " << sliceLen
+                   << ", got " << genePref.back() << ").\n";
+            exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_INCONSISTENT_DATA, P);
+        }
+
+        if (geneBucketBuf.size() < sliceLen)
+            geneBucketBuf.resize(sliceLen);
+        BridgeFlatSlot *slice = geneBucketBuf.data();
+        for (size_t i = 0; i < touchedGenes.size(); ++i) {
+            const uint32_t g = touchedGenes[i];
+            geneWriteScratch[g] = static_cast<uint32_t>(genePref[i]);
+        }
+        for (size_t j = 0; j < sliceLen; ++j) {
+            const uint32_t g = rawSlice[j].gene;
+            slice[geneWriteScratch[g]++] = rawSlice[j];
+        }
+
+        gID.clear();
+        gBeg.clear();
+        gEnd.clear();
+        gID.reserve(touchedGenes.size());
+        gBeg.reserve(touchedGenes.size());
+        gEnd.reserve(touchedGenes.size());
+        for (size_t i = 0; i < touchedGenes.size(); ++i) {
+            gID.push_back(touchedGenes[i]);
+            gBeg.push_back(genePref[i]);
+            gEnd.push_back(genePref[i + 1]);
         }
 
         const uint32_t nGenes = static_cast<uint32_t>(gID.size());
@@ -449,7 +524,7 @@ void SoloFeature::collapseUMIall_fromBridgeHash()
             }
         }
 
-        std::sort(mgBuf.begin(), mgBuf.end(), [](const MgRow &x, const MgRow &y) { return x.corr < y.corr; });
+        radixSortMgRowsByCorr(mgBuf);
 
         geneCounts.assign(static_cast<size_t>(nGenes), 0);
 
