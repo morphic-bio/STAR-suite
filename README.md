@@ -1,6 +1,6 @@
 # STAR Suite
 
-STAR Suite updates the original STAR aligner by integrating four modules — STAR-perturb, STAR-Flex, STAR-SLAM, and TranscriptVB — to provide complete internal C/C++ pipelines for bulk RNA-seq, scRNA-seq, Perturb-seq, 10x Flex, and SLAM-seq. The integration results in **substantial speedups** (**1.7–2.4x for bulk RNA-seq**, **3.2–6.1x for Perturb-seq**, **2.7–30x for Flex**) and a simplified toolchain that can be **installed through pre-compiled binaries** for researchers and agents. **No new external dependencies** are required; the suite is built entirely with the existing STAR toolchain and vendored components. **This is a drop-in replacement for the STAR aligner.**
+STAR Suite updates the original STAR aligner by integrating four modules — STAR-perturb, STAR-Flex, STAR-SLAM, and TranscriptVB — to provide complete internal C/C++ pipelines for bulk RNA-seq, scRNA-seq, Perturb-seq, 10x Flex, and SLAM-seq. The integration results in **substantial speedups** (**1.7–2.4x for bulk RNA-seq**, **3.2–6.1x for Perturb-seq**, **2.5–28x for Flex**) and a simplified toolchain that can be **installed through pre-compiled binaries** for researchers and agents. **No new external dependencies** are required; the suite is built entirely with the existing STAR toolchain and vendored components. **This is a drop-in replacement for the STAR aligner.**
 
 STAR Suite supports partial compilation: build only the module/tool targets you need instead of building the full suite every time.
 
@@ -8,7 +8,7 @@ Agent quickstart: see `AGENTS.md` for repo-specific guardrails, tests, and recen
 
 ## Core Additions over STAR 2.7.11b
 
-- **Speedup**: Bulk RNA-seq **1.7–2.4x faster** than external stepwise pipelines; Perturb-seq **3.2–6.1x faster** than Cell Ranger 9; Flex **2.7x faster** than Cell Ranger 9 (5.9x in no-align mode, ~14–30x vs Cell Ranger 7 with BAM) — all with near-identical parity.
+- **Speedup**: Bulk RNA-seq **1.7–2.4x faster** than external stepwise pipelines; Perturb-seq **3.2–6.1x faster** than Cell Ranger 9; Flex **2.5x faster** than Cell Ranger 9 (5.5x in no-align mode, ~13–28x vs Cell Ranger 7 with BAM) — all with near-identical parity.
 - **Batch Mode** (`--batchMode 1`): Processes multiple FASTQs in one STAR invocation while reusing the loaded genome. Removes the need for `--genomeLoad` keep-in-memory workflows. Single-pass only (no `--twopassMode`); not supported with Solo (`--soloType`). Use `--outFileNamePrefixAuto 1` for per-sample subdirectories.
 - **TranscriptVB Quantification** (`--quantMode TranscriptVB`): Variational Bayes and EM quantification for transcript-level abundance, with parity-oriented behavior against Salmon alignment-mode. Gene-level summarization via `--quantVBgenesMode Tximport`.
 - **Transcriptome Output** (`--quantTranscriptomeSAMoutput`): Replaces the former `--quantTranscriptomeBan` with more explicit control (e.g., `BanSingleEnd_ExtendSoftclip`).
@@ -130,8 +130,8 @@ Feature assignment and mapping run concurrently via `dynamicThreadInterface`.
 
 | Pipeline | Mode | BAM | Wall time | vs CR9 (no BAM) | vs CR7 (with BAM) |
 |---|---|---|---|---|---|
-| **STAR-Flex** | full | no | **22 min** | **2.7x** | **~14x** |
-| **STAR-Flex** | no-align | no | **10 min** | **5.9x** | **~30x** |
+| **STAR-Flex** | full | no | **23m 30s** | **2.5x** | **~12.8x** |
+| **STAR-Flex** | no-align | no | **10m 41s** | **5.5x** | **~28.1x** |
 | CellRanger 9.0.1 | multi | no | 59 min | 1.0x | ~5x |
 | CellRanger 7.0.0 | multi | yes | ~5 hr | 0.2x | 1.0x |
 
@@ -145,24 +145,25 @@ Dataset: JAX SC2300771 (4 Flex tags, 8 lanes, 2.011B paired-end reads). All runs
 | BC006 (PAX6-PTC-D9-Day7) | 5,283 | 5,343 | 0.979 | 0.99998 | 0.99992 |
 | BC007 (WT-Day-8) | 5,383 | 5,383 | 0.992 | 0.99997 | 0.99994 |
 | BC008 (PAX6-PTC-D9-Day8) | 5,266 | 5,296 | 0.988 | 0.99998 | 0.99995 |
-| **Mean** | | | **0.981** | **0.99998** | **0.99993** |
+| **Mean** | | | **0.981** | **0.99997** | **0.99993** |
 
 ### Flex No-Align Mode (`--flexNoAlign 1`)
 
-No-align mode skips alignment for H0/H1 misses (~16% of reads), reducing wall time from 22 min to 10 min. Intended for rapid prototyping and iteration.
+No-align mode skips alignment for H0/H1 misses (~16% of reads), reducing wall time from 23m 30s to 10m 41s. Intended for rapid prototyping and iteration.
 
-| Tag (sample) | No-Align cells | Full cells | CR9 cells | Cells lost |
-|---|---|---|---|---|
-| BC004 (WT-Day-7) | 4,383 | 4,384 | 4,397 | 1 (<0.1%) |
-| BC006 (PAX6-PTC-D9-Day7) | 5,284 | 5,283 | 5,343 | 0 |
-| BC007 (WT-Day-8) | 5,383 | 5,383 | 5,383 | 0 |
-| BC008 (PAX6-PTC-D9-Day8) | 5,266 | 5,266 | 5,296 | 0 |
+| Tag (sample) | No-Align cells | Full cells | CR9 cells | Cells lost | Jaccard | Cell Pearson | Gene Pearson |
+|---|---|---|---|---|---|---|---|
+| BC004 (WT-Day-7) | 4,383 | 4,384 | 4,397 | 1 (<0.1%) | 0.966 | 0.99997 | 0.99990 |
+| BC006 (PAX6-PTC-D9-Day7) | 5,284 | 5,283 | 5,343 | 0 | 0.979 | 0.99998 | 0.99992 |
+| BC007 (WT-Day-8) | 5,383 | 5,383 | 5,383 | 0 | 0.992 | 0.99997 | 0.99994 |
+| BC008 (PAX6-PTC-D9-Day8) | 5,266 | 5,266 | 5,296 | 0 | 0.988 | 0.99998 | 0.99995 |
+| **Mean** | | | | | **0.981** | **0.99997** | **0.99993** |
 
-Cell loss from no-align is negligible (<0.1%). The hash screen resolves 84% of reads at offset 0; the remaining 16% that would go to alignment contribute no additional cells or quantification signal for this dataset. No-align parity vs CR9 is identical to full mode (Cell Pearson 0.99998, Gene Pearson 0.99993, Jaccard 0.981).
+Cell loss from no-align is negligible (<0.1%): BC004 loses one filtered cell, BC006 gains one, and the other two benchmark tags are unchanged. The hash screen resolves ~84% of reads at offset 0; the remaining ~16% that would go to alignment change only one cell in this dataset while preserving the same mean CR9 parity to 3-5 decimal places.
 
 - Cell Pearson = per-barcode total-UMI Pearson on common barcodes. Gene Pearson = per-probe total-UMI Pearson on common features. Barcode Jaccard computed after truncating CR 24bp barcodes to 16bp GEM prefix.
 - Both STAR and CR9 use GRCh38-2024-A genome and probe set v1.1.0. Using mismatched annotations (e.g., v1.0.1 / GRCh38-2020-A) drops Gene Pearson to ~0.09 while Cell Pearson remains >0.999.
-- STAR full 22 min = 20m mapping + 2m Solo (`--outSAMtype None`). STAR no-align 10 min = 8m mapping + 2m Solo. CR9 59 min = CellRanger 9.0.1 multi (32 cores, `--localmem 120`, `create-bam false`). CR7 ~5 hr = CellRanger 7.0.0 multi (32 cores, 160 GB, with BAM output).
+- STAR full 23m30s = 20m55s to mapping complete + 2m07s Solo counting (`--outSAMtype None`). STAR no-align 10m41s = 8m34s to mapping complete + 1m45s Solo counting. CR9 58m59s = CellRanger 9.0.1 multi (32 cores, `--localmem 120`, `create-bam false`). CR7 ~5 hr = CellRanger 7.0.0 multi (32 cores, 160 GB, with BAM output).
 - STAR-Flex uses a fully-fused lane-reader pipeline with H0+H1 hash-screen cache, sample pre-filter, and lane work-stealing with reader-to-aligner role switching.
 - Parity script: `scripts/paper/run_flex_parity.sh`. Underlying metric tool: `scripts/paper/compute_parity_metrics.py`.
 
