@@ -8,9 +8,143 @@
 #include "SoloReadInfoSink.h"
 #include "hash_shims_cpp_compat.h"  // For unpackReadIdCbUmi
 #include "ErrorWarning.h"
+#include <chrono>
+#include <cmath>
+#include <cstdlib>
+
+namespace {
+double soloElapsedSeconds(const std::chrono::steady_clock::time_point &start)
+{
+    return std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+}
+
+bool nonFlexHashBridgeEnabled()
+{
+    return std::getenv("STAR_SOLO_NONFLEX_HASH_BRIDGE") != nullptr;
+}
+
+bool nonFlexHashBridgeApplies(const SoloFeature& feat)
+{
+    if (!feat.pSolo.inlineHashMode || feat.pSolo.flexMode || !nonFlexHashBridgeEnabled()) {
+        return false;
+    }
+    switch (feat.featureType) {
+        case SoloFeatureTypes::Gene:
+        case SoloFeatureTypes::GeneFull:
+        case SoloFeatureTypes::GeneFull_Ex50pAS:
+        case SoloFeatureTypes::GeneFull_ExonOverIntron:
+            return true;
+        default:
+            return false;
+    }
+}
+
+uint32_t unpackBridgeDeferredCandidateCb(uint32_t packed)
+{
+    return packed >> 8;
+}
+
+char unpackBridgeDeferredCandidateQual(uint32_t packed)
+{
+    return static_cast<char>(packed & 0xFFu);
+}
+
+void populateBridgeReadAccounting(SoloFeature &feat,
+                                  std::vector<uint32_t> &nReadPerCBunique1,
+                                  std::vector<uint32_t> &nReadPerCBmulti1)
+{
+    feat.readFlagCounts.flagCounts.clear();
+    feat.readFlagCounts.flagCounts.swap(feat.readFeatSum->readFlag.flagCounts);
+    feat.readFlagCounts.flagCountsNoCB = feat.readFeatSum->readFlag.flagCountsNoCB;
+    feat.readFeatSum->readFlag.flagCountsNoCB = {};
+
+    for (const auto &kv : feat.readFeatSum->bridgeImmediateReadCounts_) {
+        if (kv.first >= nReadPerCBunique1.size()) {
+            continue;
+        }
+        nReadPerCBunique1[kv.first] += static_cast<uint32_t>(kv.second & 0xFFFFFFFFu);
+        nReadPerCBmulti1[kv.first] += static_cast<uint32_t>(kv.second >> 32);
+    }
+
+    for (const auto &rec : feat.readFeatSum->bridgeDeferredAccounting_) {
+        const bool featGood = rec.featGood != 0;
+        const bool multiFeature = rec.multiFeature != 0;
+        bool readIsCounted = false;
+        bool noTooManyWLmatches = false;
+        uint32_t cb = 0;
+
+#ifdef MATCH_CellRanger
+        double ptot = 0.0, pmax = 0.0, pin;
+#else
+        float ptot = 0.0, pmax = 0.0, pin;
+#endif
+        const uint32_t begin = rec.candidateOffset;
+        const uint32_t end = begin + rec.candidateCount;
+        for (uint32_t ii = begin; ii < end && ii < feat.readFeatSum->bridgeDeferredCandidates_.size(); ++ii) {
+            const uint32_t packedCandidate = feat.readFeatSum->bridgeDeferredCandidates_[ii];
+            const uint32_t cbin = unpackBridgeDeferredCandidateCb(packedCandidate);
+            char qin = unpackBridgeDeferredCandidateQual(packedCandidate);
+            if (cbin < feat.readFeatSum->cbReadCount.size() && feat.readFeatSum->cbReadCount[cbin] > 0) {
+                qin -= feat.pSolo.QSbase;
+                qin = qin < feat.pSolo.QSmax ? qin : feat.pSolo.QSmax;
+                pin = feat.readFeatSum->cbReadCount[cbin] * std::pow(10.0, -qin / 10.0);
+                ptot += pin;
+                if (pin > pmax) {
+                    cb = cbin;
+                    pmax = pin;
+                }
+            }
+        }
+        if (ptot > 0.0 && pmax >= feat.pSolo.cbMinP * ptot) {
+            if (featGood) {
+                readIsCounted = true;
+            }
+        } else {
+            noTooManyWLmatches = true;
+        }
+
+        if (featGood && noTooManyWLmatches) {
+            feat.readFeatSum->stats.V[feat.readFeatSum->stats.noTooManyWLmatches]++;
+        }
+
+        if (readIsCounted && cb < nReadPerCBunique1.size()) {
+            if (multiFeature) {
+                nReadPerCBmulti1[cb]++;
+            } else {
+                nReadPerCBunique1[cb]++;
+            }
+        }
+
+        if (feat.pSolo.readStatsYes[feat.featureType]) {
+            feat.readFlagCounts.flag = rec.readFlag;
+            if (readIsCounted) {
+                if (feat.readFlagCounts.checkBit(feat.readFlagCounts.featureU)) {
+                    feat.readFlagCounts.setBit(feat.readFlagCounts.countedU);
+                }
+                if (feat.readFlagCounts.checkBit(feat.readFlagCounts.featureM)) {
+                    feat.readFlagCounts.setBit(feat.readFlagCounts.countedM);
+                }
+            }
+            feat.readFlagCounts.setBit(feat.readFlagCounts.cbMatch);
+            if (!noTooManyWLmatches) {
+                feat.readFlagCounts.setBit(feat.readFlagCounts.cbMMmultiple);
+                feat.readFlagCounts.countsAdd(cb);
+            } else {
+                feat.readFlagCounts.countsAddNoCB();
+            }
+        }
+    }
+
+    decltype(feat.readFeatSum->bridgeImmediateReadCounts_)().swap(feat.readFeatSum->bridgeImmediateReadCounts_);
+    std::vector<SoloReadFeature::BridgeDeferredReadAccounting>().swap(feat.readFeatSum->bridgeDeferredAccounting_);
+    std::vector<uint32_t>().swap(feat.readFeatSum->bridgeDeferredCandidates_);
+}
+}
 
 void SoloFeature::countCBgeneUMI()
 {    
+    const auto countStart = std::chrono::steady_clock::now();
+
     // Skip legacy Solo counting when inline CB correction is active, but continue to inline-hash flow
     if (pSolo.inlineCBCorrection) {
         // Assert that Solo structures are unused
@@ -31,6 +165,9 @@ void SoloFeature::countCBgeneUMI()
         parityEnabled = false;
     } else {
         bool parityEnv = (std::getenv("STAR_DEBUG_CB_UB_PARITY") != nullptr);
+        if (nonFlexBridgePath) {
+            parityEnv = false;
+        }
         if (parityEnv && packedReadInfo.data.empty()) {
             resetPackedStorage(nReadsInput);
         }
@@ -39,11 +176,15 @@ void SoloFeature::countCBgeneUMI()
     }
 #endif
 
+    const bool nonFlexBridgePath = nonFlexHashBridgeApplies(*this);
+
     // Allocate packedReadInfo if:
     // 1. readInfoYes is set for this feature type, OR
     // 2. trackReadIdsForTags is enabled (for sorted BAM CB/UB tag injection)
+    // Non-Flex direct bridge mode does not use packed read info for this benchmark path.
     // Skip only if soloFlexMinimalMemory is on AND inlineHashMode is on AND trackReadIdsForTags is off
-    bool needPackedReadInfo = pSolo.readInfoYes[featureType] || pSolo.trackReadIdsForTags;
+    bool needPackedReadInfo = pSolo.trackReadIdsForTags
+        || (pSolo.readInfoYes[featureType] && !nonFlexBridgePath);
     bool skipForMinimalMemory = pSolo.soloFlexMinimalMemory && pSolo.inlineHashMode && !pSolo.trackReadIdsForTags;
     if (needPackedReadInfo && !skipForMinimalMemory) {
         resetPackedStorage(nReadsInput);
@@ -57,16 +198,64 @@ void SoloFeature::countCBgeneUMI()
     
     // Inline hash path: resolve/correct, then walk the hash directly (no materialization)
     if (pSolo.inlineHashMode) {
-        // Resolve ambiguous CBs (before collapse)
+        // Resolve ambiguous CBs (before collapse). For non-Flex hash bridge this is usually a no-op
+        // because sumThreads already resolved merged pending state after global CB counts.
         resolveAmbiguousCBs();
-        
-        // Run clique correction if enabled (operates on hash)
-        if (pSolo.umiCorrectionMode > 0) {
+
+        // Clique correction walks readFeatSum->inlineHash_ with Flex-style key unpacking; skip on bridge.
+        if (pSolo.umiCorrectionMode > 0 && !nonFlexBridgePath) {
             runCliqueCorrection();
+        }
+
+        if (nonFlexBridgePath) {
+            time(&rawTime);
+            P.inOut->logMain << timeMonthDayTime(rawTime)
+                             << " ... Experimental non-Flex inline-hash bridge: direct hash collapse"
+                             << " (no materializeRGUFromHash / no legacy collapseUMIall)"
+                             << endl;
+
+            const auto bridgeCollapseStart = std::chrono::steady_clock::now();
+            collapseUMIall_fromBridgeHash();
+            P.inOut->logMain << "Solo timing: collapseUMIall_fromBridgeHash "
+                             << soloElapsedSeconds(bridgeCollapseStart) << " s" << endl;
+
+            if (nCB == 0) {
+                P.inOut->logMain << "WARNING: non-Flex inline-hash bridge produced no cells after direct collapse"
+                                 << endl;
+                P.inOut->logMain << "Solo timing: countCBgeneUMI " << soloElapsedSeconds(countStart) << " s" << endl;
+                return;
+            }
+
+            std::vector<uint32> nReadPerCBunique1(pSolo.cbWLsize), nReadPerCBmulti1(pSolo.cbWLsize);
+            populateBridgeReadAccounting(*this, nReadPerCBunique1, nReadPerCBmulti1);
+
+            nReadPerCBunique.resize(nCB);
+            nReadPerCBtotal.resize(nCB);
+            for (uint32 icb = 0; icb < nCB; icb++) {
+                uint32 wlIndex = indCB[icb];
+                nReadPerCBunique[icb] = nReadPerCBunique1[wlIndex];
+                nReadPerCBtotal[icb] = nReadPerCBunique1[wlIndex] + nReadPerCBmulti1[wlIndex];
+            }
+
+            for (uint32 icb = 0; icb < nCB; icb++) {
+                readFeatSum->stats.V[readFeatSum->stats.yesUMIs] += nUMIperCB[icb];
+                if (nGenePerCB[icb] > 0)
+                    ++readFeatSum->stats.V[readFeatSum->stats.yesCellBarcodes];
+                readFeatSum->stats.V[readFeatSum->stats.yesWLmatch] += nReadPerCBtotal[icb];
+                readFeatSum->stats.V[readFeatSum->stats.yessubWLmatch_UniqueFeature] += nReadPerCBunique[icb];
+            }
+
+            time(&rawTime);
+            P.inOut->logMain << timeMonthDayTime(rawTime)
+                             << " ... Finished collapsing UMIs (non-Flex inline-hash bridge, direct hash)" << endl;
+            P.inOut->logMain << "Solo timing: countCBgeneUMI " << soloElapsedSeconds(countStart) << " s" << endl;
+            return;
         }
         
         // Direct hash consumption: no materialization/legacy collapse
+        const auto hashCollapseStart = std::chrono::steady_clock::now();
         collapseUMIall_fromHash();
+        P.inOut->logMain << "Solo timing: collapseUMIall_fromHash " << soloElapsedSeconds(hashCollapseStart) << " s" << endl;
         
         // Populate packedReadInfo from readIdTracker_ for sorted BAM CB/UB tag injection
         if (pSolo.trackReadIdsForTags && readFeatSum && readFeatSum->readIdTracker_) {
@@ -101,6 +290,7 @@ void SoloFeature::countCBgeneUMI()
         
         time(&rawTime);
         P.inOut->logMain << timeMonthDayTime(rawTime) << " ... Finished collapsing UMIs (direct hash mode)" << endl;
+        P.inOut->logMain << "Solo timing: countCBgeneUMI " << soloElapsedSeconds(countStart) << " s" << endl;
         return;
     }
     
@@ -197,7 +387,9 @@ void SoloFeature::countCBgeneUMI()
         }
 
         // Collapse UMIs once here; CountingSink no longer calls collapseUMIall.
+        const auto collapseStart = std::chrono::steady_clock::now();
         collapseUMIall();
+        P.inOut->logMain << "Solo timing: collapseUMIall (countCBgeneUMI wrapper) " << soloElapsedSeconds(collapseStart) << " s" << endl;
 
         // Free temporary arrays allocated via CountingSink::finalize
         if (rGeneUMI) { delete[] rGeneUMI; rGeneUMI=nullptr; }
@@ -214,6 +406,7 @@ void SoloFeature::countCBgeneUMI()
         logDebugStatusCounters();
         logDebugStageCounters();
 #endif
+        P.inOut->logMain << "Solo timing: countCBgeneUMI " << soloElapsedSeconds(countStart) << " s" << endl;
         return;
     }
 };

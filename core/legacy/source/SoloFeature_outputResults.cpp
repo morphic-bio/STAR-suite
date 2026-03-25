@@ -7,10 +7,19 @@
 #include "SoloFeatureTypes.h"
 
 #include<unistd.h> // for get_current_dir
+#include <chrono>
 
+namespace {
+double soloElapsedSeconds(const std::chrono::steady_clock::time_point &start)
+{
+    return std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+}
+}
 
 void SoloFeature::outputResults(bool cellFilterYes, string outputPrefixMat)
 {    
+    const auto outputStart = std::chrono::steady_clock::now();
+
     //make directories   
     createDirectory(outputPrefixMat,P.runDirPerm, "Solo output directory", P);
     /* old way, does not work when parent directores are needed
@@ -240,4 +249,6 @@ void SoloFeature::outputResults(bool cellFilterYes, string outputPrefixMat)
             };
         };
     };
+    P.inOut->logMain << "Solo timing: outputResults(" << (cellFilterYes ? "filtered" : "raw") << ") "
+                     << soloElapsedSeconds(outputStart) << " s" << endl;
 };

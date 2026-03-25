@@ -12,8 +12,6 @@
 #include "SoloReadFeature.h"
 #include "UMICorrector.h"
 #include "ErrorWarning.h"
-#include "solo/CbBayesianResolver.h"
-#include "solo/CbCorrector.h"
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -82,76 +80,8 @@ void SoloFeature::collapseUMIall_fromHash()
     }
 
     // ========== Phase 2: Resolve accumulated ambiguous CBs ==========
-    static const bool g_disableAmbigResolve =
-        (std::getenv("STAR_DISABLE_AMBIG_CB_RESOLVE") != nullptr);
-    if (!g_disableAmbigResolve && !readFeatSum->pendingAmbiguous_.empty() && pSolo.cbCorrector) {
-        const std::vector<std::string> &whitelistSeqs = pSolo.cbCorrector->whitelist();
-        CbBayesianResolver resolver(whitelistSeqs.size(), &whitelistSeqs);
-        
-        uint64_t resolved = 0, stillAmbiguous = 0, addedToHash = 0;
-        
-        for (auto &kv : readFeatSum->pendingAmbiguous_) {
-            SoloReadFeature::ExtendedAmbiguousEntry &entry = kv.second;
-            
-            if (entry.candidateIdx.empty() || entry.umiCounts.empty()) {
-                stillAmbiguous++;
-                continue;
-            }
-            
-            // Build context and candidates for resolver
-            CBContext context(entry.cbSeq, entry.cbQual);
-            
-            std::vector<Candidate> candidates;
-            candidates.reserve(entry.candidateIdx.size());
-            for (uint32_t idx : entry.candidateIdx) {
-                if (idx > 0 && idx <= whitelistSeqs.size()) {
-                    candidates.emplace_back(idx, whitelistSeqs[idx - 1], 0.0);
-                }
-            }
-            
-            if (candidates.empty()) {
-                stillAmbiguous++;
-                continue;
-            }
-            
-            // Run Bayesian resolution
-            BayesianResult result = resolver.resolve(context, candidates, entry.umiCounts);
-            
-            if (result.status == BayesianResult::Resolved && result.bestIdx > 0) {
-                resolved++;
-                
-                // Add resolved observations to hash with resolved CB index
-                uint32_t resolvedCbIdx = result.bestIdx - 1; // Convert to 0-based
-                for (const auto &obs : entry.observations) {
-                    uint64_t newKey = packCgAggKey(resolvedCbIdx, obs.umi24, obs.geneIdx, obs.tagIdx);
-                    int absent;
-                    khiter_t iter = kh_put(cg_agg, hash, newKey, &absent);
-                    if (absent) {
-                        kh_val(hash, iter) = obs.count;
-                    } else {
-                        kh_val(hash, iter) += obs.count;
-                    }
-                    addedToHash++;
-                }
-            } else {
-                stillAmbiguous++;
-            }
-        }
-        
-        P.inOut->logMain << "[AMBIG-CB-RESOLVE] pending=" << readFeatSum->pendingAmbiguous_.size()
-                         << " resolved=" << resolved
-                         << " still_ambiguous=" << stillAmbiguous
-                         << " added_to_hash=" << addedToHash << endl;
-        
-        // Update hash size after resolution
-        hashSize = kh_size(hash);
-    } else if (!g_disableAmbigResolve && !readFeatSum->pendingAmbiguous_.empty()) {
-        P.inOut->logMain << "[AMBIG-CB-RESOLVE] " << readFeatSum->pendingAmbiguous_.size() 
-                         << " pending ambiguous CBs but CbCorrector not available, skipping" << endl;
-    } else if (g_disableAmbigResolve && !readFeatSum->pendingAmbiguous_.empty()) {
-        P.inOut->logMain << "[AMBIG-CB-RESOLVE] disabled by STAR_DISABLE_AMBIG_CB_RESOLVE, skipping "
-                         << readFeatSum->pendingAmbiguous_.size() << " pending ambiguous CBs" << endl;
-    }
+    resolvePendingAmbiguousToHash(false);
+    hashSize = kh_size(hash);
 
     // Instrumentation: total entries and counts pre-dedup
     uint64_t totalCountsPre = 0;

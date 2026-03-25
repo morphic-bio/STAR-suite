@@ -119,6 +119,7 @@ public:
     void collapseUMI_CR(uint32 iCB, uint32 *umiArray);
     void collapseUMIall(bool minimalMode=false);
     void collapseUMIall_fromHash(); // Direct hash consumption (no materialization)
+    void collapseUMIall_fromBridgeHash(); // Non-Flex bridge: collapse without rGeneUMI materialization
     void collapseUMIperCB(uint32 iCB, vector<uint32> &umiArray, vector<uint32> &gID,  vector<uint32> &gReadS, bool minimalMode);
     void materializeRGUFromHash(); // Materialize rGeneUMI/rCBp/rCBn from inlineHash_ (DEPRECATED)
     
@@ -193,8 +194,14 @@ public:
     // UMI correction: run clique correction for all groups and apply corrections
     void runCliqueCorrection();
     
-    // Ambiguous CB resolution: stub - not wired in flex path
-    void resolveAmbiguousCBs() {}
+    // Ambiguous CB resolution for the experimental non-Flex bridge.
+    void resolveAmbiguousCBs();
+    // Shared Cell Ranger-style ambiguous-CB reinsertion into inline hash.
+    void resolvePendingAmbiguousToHash(bool useBridgeCompactMapping);
+    // Non-Flex bridge: resolve a single thread-local ambiguous-CB sidecar into its own hash.
+    void resolvePendingAmbiguousForReadFeat(SoloReadFeature &targetFeat, bool useBridgeCompactMapping);
+    // Non-Flex bridge: finalize deferred per-read accounting for one thread using global CB evidence.
+    void finalizeDeferredBridgeAccountingForReadFeat(SoloReadFeature &targetFeat);
     
     // Apply flat correction hash back to inline hash (re-key entries with corrected UB)
     void applyCliqueCorrectionsToHash();

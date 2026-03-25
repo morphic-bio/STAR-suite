@@ -55,7 +55,7 @@ public:
         // Store (gene, tag, umi24) combinations for each ambiguous CB observation
         // After resolution, we'll create hash entries with resolved CB + stored gene/tag/umi
         struct AmbiguousObservation {
-            uint16_t geneIdx;
+            uint32_t geneIdx;
             uint8_t tagIdx;
             uint32_t umi24;
             uint32_t count;
@@ -63,6 +63,25 @@ public:
         std::vector<AmbiguousObservation> observations; // All (gene, tag, umi) observations for this ambiguous CB
     };
     std::unordered_map<ReadAlign::AmbigKey, ExtendedAmbiguousEntry> pendingAmbiguous_; // Ambiguous CB accumulation with gene/tag info
+
+    struct BridgeDeferredReadAccounting {
+        SoloReadFlagClass::typeFlag readFlag = 0;
+        uint32_t candidateOffset = 0;
+        uint16_t candidateCount = 0;
+        uint8_t featGood = 0;
+        uint8_t multiFeature = 0;
+    };
+    std::unordered_map<uint32_t, uint64_t> bridgeImmediateReadCounts_; // key: wlCb, value: low32=unique, high32=multi
+    std::vector<BridgeDeferredReadAccounting> bridgeDeferredAccounting_;
+    std::vector<uint32_t> bridgeDeferredCandidates_; // packed candidate [cb24|qual8]
+    std::unordered_map<uint32_t, uint32_t> bridgeCbCompactByWl_;
+    std::vector<uint32_t> bridgeCbWlByCompact_;
+    std::unordered_map<uint32_t, uint16_t> bridgeGeneCompactByFull_;
+    std::vector<uint32_t> bridgeGeneFullByCompact_;
+
+    // STAR_SOLO_NONFLEX_HASH_BRIDGE: kh_val(inlineHash_) = slot id; packed payload below.
+    std::vector<uint64_t> bridgePackedSlots_;
+    uint64_t bridgeSlotOverflowEvents_ = 0;
 
     string cbSeq, umiSeq, cbQual, umiQual;
 
@@ -77,6 +96,14 @@ public:
     void addStats(const SoloReadFeature &soloCBin);
     void statsOut(ofstream &streamOut);
     void mergeInlineHash(SoloReadFeature &other); // Merge inlineHash_ and pendingAmbiguous_ from other
+    void mergePendingAmbiguous(const SoloReadFeature &other);
+    void mergeDeferredBridgeAccounting(const SoloReadFeature &other);
+    uint32_t getOrCreateBridgeCompactCb(uint32_t wlIdx);
+    uint32_t bridgeCompactToWl(uint32_t compactIdx) const;
+    uint16_t getOrCreateBridgeCompactGene(uint32_t geneIdx);
+    uint32_t bridgeCompactToGene(uint16_t compactIdx) const;
+    /** Direct-bridge path: upsert (tupleKey -> slot); slot stores geneFull in 19-bit field. */
+    void bridgeDirectTupleAdd(uint64_t tupleKey, uint32_t geneFull, uint32_t umi24, uint32_t delta);
     void maybeSpillBinarySpool(size_t extraBytes);
     // Legacy overload removed
     // Overload that emits read info via a sink (avoids requiring legacy vector storage)

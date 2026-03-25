@@ -7,6 +7,7 @@
 #include "SequenceFuns.h"
 #include "UmiCodec.h"
 #include "solo/CbCorrector.h"
+#include "solo/CbBayesianResolver.h"
 #include "TranscriptQuantEC.h"
 #include <atomic>
 #include <mutex>
@@ -717,17 +718,14 @@ void ReadAlign::outputAlignments() {
                     entry.cbSeq = readBar->cbSeq; // Raw observed sequence (may contain Ns)
                     entry.cbQual = readBar->cbQual; // Phred quality scores (same length as cbSeq)
                     entry.umiCounts.reserve(32);
-                    
-                    // Validate quality scores match sequence length
-                    if (entry.cbQual.length() != entry.cbSeq.length()) {
-                        // Pad with default quality if needed (shouldn't happen, but be defensive)
-                        if (entry.cbQual.length() < entry.cbSeq.length()) {
-                            entry.cbQual.append(entry.cbSeq.length() - entry.cbQual.length(), 'H'); // Q39 default
-                        } else {
-                            entry.cbQual = entry.cbQual.substr(0, entry.cbSeq.length());
-                        }
-                    }
+                    cb_bayesian::normalizeCbQual(entry.cbQual, entry.cbSeq);
                 }
+
+                cb_bayesian::accumulateCbQualityEvidence(entry.cbSeq,
+                                                         readBar->cbQual,
+                                                         entry.cbLogLikMatch,
+                                                         entry.cbLogLikMismatch,
+                                                         entry.cbEvidenceReads);
                 
                 // Accumulate UMI count (24-bit packed UMI -> count)
                 entry.umiCounts[umi24]++;

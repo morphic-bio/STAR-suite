@@ -121,12 +121,24 @@ void InlineCBCorrection::recordAmbiguousCB(uint64_t packedVariant, const std::st
         rec.packedVariant = packedVariant;
         rec.cbSeq = cbSeq;
         rec.cbQual = cbQual;
+        cb_bayesian::normalizeCbQual(rec.cbQual, rec.cbSeq);
+        cb_bayesian::accumulateCbQualityEvidence(rec.cbSeq,
+                                                 cbQual,
+                                                 rec.cbLogLikMatch,
+                                                 rec.cbLogLikMismatch,
+                                                 rec.evidenceReads);
         rec.parents = parentIt->second;
         rec.count = 1;
         shard->records.push_back(std::move(rec));
         shard->index[packedVariant] = shard->records.size() - 1;
     } else {
-        shard->records[idxIt->second].count += 1;
+        AmbigRecord &rec = shard->records[idxIt->second];
+        rec.count += 1;
+        cb_bayesian::accumulateCbQualityEvidence(rec.cbSeq,
+                                                 cbQual,
+                                                 rec.cbLogLikMatch,
+                                                 rec.cbLogLikMismatch,
+                                                 rec.evidenceReads);
     }
     ++ambigTotal_;
 }
@@ -189,11 +201,20 @@ void InlineCBCorrection::mergeAmbiguousShards(std::unordered_map<uint64_t, Merge
                 MergedAmbigEntry e;
                 e.cbSeq = rec.cbSeq;
                 e.cbQual = rec.cbQual;
+                e.cbLogLikMatch = rec.cbLogLikMatch;
+                e.cbLogLikMismatch = rec.cbLogLikMismatch;
+                e.evidenceReads = rec.evidenceReads;
                 e.parents = rec.parents;
                 e.count = rec.count;
                 out[rec.packedVariant] = std::move(e);
             } else {
                 it->second.count += rec.count;
+                cb_bayesian::mergeCbQualityEvidence(rec.cbLogLikMatch,
+                                                    rec.cbLogLikMismatch,
+                                                    rec.evidenceReads,
+                                                    it->second.cbLogLikMatch,
+                                                    it->second.cbLogLikMismatch,
+                                                    it->second.evidenceReads);
             }
         }
     }
@@ -236,7 +257,11 @@ InlineCBCorrection::AmbigResolveStats InlineCBCorrection::resolveAmbiguousMerged
         std::unordered_map<uint32_t, uint32_t> umiCounts;
         umiCounts[0] = entry.count;
 
-        CBContext ctx(entry.cbSeq, entry.cbQual);
+        CBContext ctx(entry.cbSeq,
+                      entry.cbQual,
+                      entry.cbLogLikMatch,
+                      entry.cbLogLikMismatch,
+                      entry.evidenceReads);
         BayesianResult result = resolver.resolve(ctx, candidates, umiCounts);
         if (result.status == BayesianResult::Resolved && result.bestIdx != 0) {
             resolvedIdx.push_back(result.bestIdx);

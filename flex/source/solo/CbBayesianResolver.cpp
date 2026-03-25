@@ -10,32 +10,7 @@ CbBayesianResolver::CbBayesianResolver(size_t whitelistSize,
 }
 
 double CbBayesianResolver::phredToErrorProb(char phred) const {
-    // Convert Phred quality score to error probability
-    // Phred Q = -10 * log10(P_error)
-    // P_error = 10^(-Q/10)
-    // ASCII offset: '!' (33) = Q0, 'A' (65) = Q33, etc.
-    
-    if (phred < PHRED_BASE) {
-        // Invalid quality: use maximum error probability
-        return MAX_ERROR_PROB;
-    }
-    
-    int q = static_cast<int>(phred) - PHRED_BASE;
-    if (q < 0) {
-        q = 0;
-    }
-    
-    // Convert to error probability: 10^(-Q/10)
-    double errorProb = std::pow(10.0, -q / 10.0);
-    
-    // Clamp to reasonable range
-    if (errorProb < MIN_ERROR_PROB) {
-        errorProb = MIN_ERROR_PROB;
-    } else if (errorProb > MAX_ERROR_PROB) {
-        errorProb = MAX_ERROR_PROB;
-    }
-    
-    return errorProb;
+    return cb_bayesian::phredToErrorProb(phred);
 }
 
 double CbBayesianResolver::computeLogLikelihood(const CBContext &context, 
@@ -43,14 +18,29 @@ double CbBayesianResolver::computeLogLikelihood(const CBContext &context,
     // Compute log-likelihood: log P(observed_seq | candidate_seq)
     // This matches Cell Ranger's compute_log_likelihood() logic
     
-    if (context.cbSeq.length() != candidateSeq.length() || 
-        context.cbSeq.length() != context.cbQual.length()) {
+    if (context.cbSeq.length() != candidateSeq.length()) {
         // Length mismatch: return very low likelihood
         return -1e10;
     }
     
     double logLikelihood = 0.0;
     size_t len = context.cbSeq.length();
+
+    if (context.hasAggregatedEvidence()) {
+        for (size_t i = 0; i < len; ++i) {
+            const bool matches = (context.cbSeq[i] == 'N' || context.cbSeq[i] == 'n')
+                ? true
+                : (context.cbSeq[i] == candidateSeq[i]);
+            logLikelihood += matches
+                ? (*context.aggLogLikMatch)[i]
+                : (*context.aggLogLikMismatch)[i];
+        }
+        return logLikelihood;
+    }
+
+    if (context.cbSeq.length() != context.cbQual.length()) {
+        return -1e10;
+    }
     
     // Accumulate log-likelihood over each base position
     // This matches process_features: compare observed sequence (may contain Ns)

@@ -145,6 +145,70 @@ update this file with its output location.
 - `/storage/flex_multilane_20K/SC2300771/` (multi-lane Flex smoke fixture: 8 lane pairs x 20K reads each = 160K PE reads total, seqtk seed=42, created by `tests/create_flex_multilane_20k_fixture.sh`)
 - `/storage/downsampled_100K/SC2300771/results/flex_h01_*` (Flex H0/H1 cache pilot artifacts, including synthetic cache builds, 100-probe parity runs, and full-probe cache/scan outputs)
 - `/storage/downsampled_100K/SC2300771/results/flex_hash_screen_internal_*` (internal Flex hash-screen 100K E2E runs, including the exact-parity full-16-whitelist run `flex_hash_screen_internal_full16_20260315_203745/`)
+- `/storage/100K/ucsf_solo_optimization_20260324/`
+  - Solo-only non-Flex UCSF GEX benchmark artifacts from
+    `tests/run_ucsf_solo_gex_100k_benchmark.sh`
+  - Current optimized benchmark root:
+    `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_100k_total/`
+  - 2M optimized benchmark root:
+    `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_total/`
+  - Matching baseline benchmark root:
+    `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_100k_total_baseline/`
+  - Matching 2M baseline benchmark root:
+    `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_total_baseline/`
+  - Same-binary 2M optimized guard run:
+    `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_samebin_opt/`
+  - Same-binary 2M legacy-guard run:
+    `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_samebin_legacy/`
+  - Same-binary 100k `soloMultiMappers=Unique` legacy control for experimental
+    non-Flex inline-hash bridge:
+    `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_100k_unique_legacy_v2/`
+  - Same-binary 100k experimental non-Flex inline-hash bridge run
+    (`STAR_SOLO_NONFLEX_HASH_BRIDGE=1`, `--soloInlineHashMode yes`):
+    `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_100k_unique_hashbridge_v4/`
+  - Refreshed same-binary 100k `soloMultiMappers=Unique` legacy control after
+    fixing stats aggregation and invalid-UMI rejection:
+    `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_100k_unique_legacy_v3/`
+  - Refreshed same-binary 100k experimental non-Flex inline-hash bridge run
+    after those two fixes:
+    `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_100k_unique_hashbridge_v6/`
+  - Legacy control used for problem-3 sidecar validation:
+    `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_100k_unique_legacy_v4/`
+  - Problem-3 sidecar validation run before CB key-space fix:
+    `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_100k_unique_hashbridge_v8/`
+  - Problem-3 sidecar validation run after CB key-space fix:
+    `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_100k_unique_hashbridge_v9/`
+  - Problem-4 ambiguous-CB bridge validation before raw-CB fix:
+    `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_100k_unique_hashbridge_v10/`
+  - Problem-4 ambiguous-CB bridge validation after raw-CB fix:
+    `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_100k_unique_hashbridge_v11/`
+  - Problem-4 follow-up validation after fixing 15-bit gene key aliasing in the
+    non-Flex bridge:
+    `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_100k_unique_hashbridge_v12/`
+  - Targeted trace run for the `73` bridge-only raw barcodes:
+    `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_100k_unique_hashbridge_trace73/`
+  - Matched 2M `soloMultiMappers=Unique` legacy control:
+    `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_legacy/`
+  - Matched 2M `soloMultiMappers=Unique` unified non-Flex bridge run:
+    `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_hashbridge/`
+  - Failed debug iterations while bringing up the experimental bridge:
+    - `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_100k_unique_hashbridge_v2/`
+    - `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_100k_unique_hashbridge_v3/`
+- `/storage/MSK-perturb-comparison/paper_artifacts/`
+  - MSK 30-KO 30-guide gRNA parity paper artifacts:
+    - `/storage/MSK-perturb-comparison/paper_artifacts/msk_grna_parity_30guide_20260306/`
+    - contents:
+      - `guide_counts/guide_stage_summary.tsv`
+      - `guide_counts/guide_per_feature_filtered.tsv`
+      - `guide_counts/guide_parity_summary.json`
+      - `call_concordance/call_concordance_summary.json`
+      - `call_concordance/call_pair_counts.tsv`
+      - `call_concordance/call_mismatch_rows.tsv`
+  - MSK residual GEX watchlist molecule provenance:
+    - `/storage/MSK-perturb-comparison/paper_artifacts/msk_cr_molecule_provenance_20260307/`
+    - contents:
+      - `cr_molecule_provenance_watchlist.json`
+      - `README.txt`
 
 ## Flex Full-Scale Benchmark Artifacts
 
@@ -420,6 +484,91 @@ These scripts validate that default bundles work with minimal explicit parameter
   - `/tmp/h2_full_rerun_20260320/`
 - Status: untracked
 
+## Solo Full UCSF EBs2_2 Benchmark A/B (2026-03-24)
+
+- Full baseline on corrected `EBs2_2` README harness:
+  - `/storage/paper_bench_solo_full_20260324/ucsf_ebs2_2_standard_baseline/`
+- First full optimized non-Flex bridge attempt:
+  - `/storage/paper_bench_solo_full_20260324/ucsf_ebs2_2_standard_solohash_optimized/`
+  - failed with bridge packed-gene overflow at `>32768` genes
+- Second full optimized non-Flex bridge attempt after 16-bit/tagless bridge-key patch:
+  - `/storage/paper_bench_solo_full_20260324/ucsf_ebs2_2_standard_solohash_optimized_v2/`
+  - passed the packed-gene overflow, then was killed with exit `137` during Solo finalize
+- Third attempt (direct hash collapse, no `materializeRGUFromHash`; code 2026-03-24):
+  - `/storage/paper_bench_solo_full_20260324/ucsf_ebs2_2_standard_solohash_optimized_v3/`
+  - entered direct bridge collapse, then was killed with exit `137`
+- Fourth attempt after fix 5 (drain thread-local bridge hashes directly):
+  - `/storage/paper_bench_solo_full_20260324/ucsf_ebs2_2_standard_solohash_optimized_v4/`
+  - completed successfully; no OOM
+- Current-branch full baseline rerun:
+  - `/storage/paper_bench_solo_full_20260324/ucsf_ebs2_2_standard_baseline_mastermerge_v2/`
+  - completed successfully; `Summary.csv` matches the archived baseline
+- Notes:
+  - baseline completed in `19:46.33`, peak RSS `72504156 kB`
+  - optimized v2 reached peak RSS `127126724 kB` before kill (materialize + legacy collapse OOM)
+  - optimized v3 reached peak RSS `127682252 kB` before kill (direct bridge collapse OOM)
+  - optimized v4 completed in `22:38.81`, peak RSS `70575848 kB`
+  - baseline mastermerge v2 completed in `19:48.45`, peak RSS `68149756 kB`
+  - see `docs/HANDOFF_SOLO_OPTIMIZATION_20260324.md`
+
+## Solo 2M Direct Bridge Memory Validation (2026-03-24)
+
+- Fresh 2M resample on direct bridge path:
+  - `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_hashbridge_direct_v3/`
+- Exact same-FASTQ rerun on direct bridge path:
+  - `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_hashbridge_direct_samefastq_v1/`
+- Same-FASTQ rerun after memory fixes 1-4:
+  - `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_hashbridge_direct_samefastq_v2/`
+- Same-FASTQ rerun after deferred-accounting bug fix:
+  - `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_hashbridge_direct_samefastq_v3/`
+- Same-FASTQ rerun after fix 5 (thread-local bridge-hash drain):
+  - `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_hashbridge_direct_samefastq_v4/`
+- Post-spool-merge direct-hash `Unique` rerun on the bridge branch:
+  - `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_hashbridge_direct_postmerge_v1/`
+- Post-spool-merge direct-hash `Unique` after sumThreads ambiguous resolve + deferred finalize (v2 architecture):
+  - intended long-term path: `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_hashbridge_direct_postmerge_v2/`
+  - agent validation mirror (same FASTQs / command): `/tmp/iPSC2_1_GEX_2M_unique_hashbridge_direct_postmerge_v2/` (2026-03-24)
+- Post-spool-merge direct-hash `Unique` with **CB-sharded** bridge collapse (no global `recs`):
+  - intended path: `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_hashbridge_direct_postmerge_v3/`
+  - agent validation mirror: `/tmp/iPSC2_1_GEX_2M_unique_hashbridge_direct_postmerge_v3/` (2026-03-24)
+- Post-spool-merge direct-hash `Unique` with **CB-sharded grouped khashes** (no full `BridgeHashRec` staging layer):
+  - intended path: `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_hashbridge_direct_postmerge_v4/`
+  - agent validation mirror: `/tmp/iPSC2_1_GEX_2M_unique_hashbridge_direct_postmerge_v4/` (2026-03-24)
+- Post-spool-merge direct-hash `Unique` **v5** (grouped khash → flat per-shard `vector` + multi-pointer merge; no `unordered_map<wlCb, vector<...>>` rebuild):
+  - `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_hashbridge_direct_postmerge_v5/`
+  - agent mirror: `/tmp/iPSC2_1_GEX_2M_unique_hashbridge_direct_postmerge_v5/` (2026-03-24)
+- Post-spool-merge direct-hash `Unique` **v6** (scratch/parity investigation on MultiGene aggregation; collapse logic aligned with v5 — see `docs/HANDOFF_SOLO_OPTIMIZATION_20260324.md`, subsection "Direct bridge v6 scratch / parity notes"):
+  - `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_hashbridge_direct_postmerge_v6/`
+- Post-spool-merge direct-hash `Unique` **v7a** (khash retained + per-shard sorted `khiter_t` index; no full-shard `vector<ShardRow>` — see `docs/HANDOFF_SOLO_OPTIMIZATION_20260324.md`, subsection "Direct bridge v7a"):
+  - `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_hashbridge_direct_postmerge_v7a/`
+- Post-spool-merge direct-hash `Unique` **v8** (insert-time packed slots + `CB→slot ids`; global tuple merge; no shard khash / sorted `khiter_t` — see `docs/HANDOFF_SOLO_OPTIMIZATION_20260324.md`, subsection "Direct bridge v8"):
+  - `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_hashbridge_direct_postmerge_v8/`
+- Post-spool-merge direct-hash `Unique` **v9** (v8 minus unused insert-time CB slot list; `unordered_map` wl→slot ids for observed CBs only — see `docs/HANDOFF_SOLO_OPTIMIZATION_20260324.md`, subsection "Direct bridge v9"):
+  - `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_hashbridge_direct_postmerge_v9/`
+- Post-spool-merge direct-hash `Unique` **v10** (v9 + flat per-CB MultiGeneUMI_CR aggregates in `collapseOneBarcodeRows`; no nested umi→gene maps — see `docs/HANDOFF_SOLO_OPTIMIZATION_20260324.md`, subsection "Direct bridge v10"):
+  - `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_hashbridge_direct_postmerge_v10/`
+- Clean paired validation roots for the v9 vs v10 MultiGene hot-path question (same 2M FASTQs; clean rebuilds from the same commit; use these instead of the stored standalone v9/v10 roots for strict parity claims):
+  - v9 paired control:
+    `/storage/100K/ucsf_solo_optimization_20260324/validation_pair_20260324/iPSC2_1_GEX_2M_unique_hashbridge_direct_paired_v9/`
+  - v10 paired candidate:
+    `/storage/100K/ucsf_solo_optimization_20260324/validation_pair_20260324/iPSC2_1_GEX_2M_unique_hashbridge_direct_paired_v10/`
+- Same-binary ambiguity-fix determinism check after aggregated CB-quality evidence was introduced:
+  - `/tmp/iPSC2_1_GEX_2M_aggqual_check_run1/`
+  - `/tmp/iPSC2_1_GEX_2M_aggqual_check_run2/`
+- Post-spool-merge legacy `Unique` control on the same branch / same FASTQs:
+  - `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_legacy_postmerge_v1/`
+- Current-branch legacy control on the same FASTQs:
+  - `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_legacy_mastermerge_v1/`
+- Older pre-direct bridge 2M run for historical comparison:
+  - `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_hashbridge/`
+- Notes:
+  - same-FASTQ direct peak RSS: `40395468 kB`
+  - same-FASTQ direct after memory fixes 1-4 peak RSS: `40213304 kB`
+  - same-FASTQ direct after deferred-accounting bug fix peak RSS: `40213020 kB`
+  - same-FASTQ direct after fix 5 peak RSS: `40214224 kB`
+  - current-branch legacy peak RSS: `40193584 kB`
+  - older pre-direct bridge peak RSS: `44360304 kB`
+
 ## Solo Binary Spool UCSF 2M Benchmarks (2026-03-24)
 
 - Corrected UCSF `iPSC2_1/GEX` 2M downsample, `--soloMultiMappers Rescue --soloCrMultimapRescue yes`
@@ -433,6 +582,14 @@ These scripts validate that default bundles work with minimal explicit parameter
   - Note: current wrapper script ignored the custom output root and reused the above STAR output path.
 - Experimental chunked in-memory binary spool run:
   - `/storage/100K/ucsf_solo_binary_spool_20260324/iPSC2_1_GEX_2M_binaryspool_memory_chunked/`
+- Hybrid RAM-first spill-cap validation:
+  - `/storage/100K/ucsf_solo_binary_spool_20260324/iPSC2_1_GEX_2M_binaryspool_memory_spill_v1/`
+    - `STAR_SOLO_BINARY_SPOOL_IN_MEMORY=1`
+    - `STAR_SOLO_BINARY_SPOOL_IN_MEMORY_LIMIT_MB=32`
+  - `/storage/100K/ucsf_solo_binary_spool_20260324/iPSC2_1_GEX_2M_binaryspool_memory_spill_1mb_v1/`
+    - forced-spill bug discovery run; exposed spill-boundary write bug
+  - `/storage/100K/ucsf_solo_binary_spool_20260324/iPSC2_1_GEX_2M_binaryspool_memory_spill_1mb_v3/`
+    - fixed forced-spill validation run; exact `Summary.csv` + raw MEX parity
 - Full corrected UCSF `EBs2_2` chunked in-memory spool benchmark:
   - `/storage/paper_bench_solo_binary_spool_20260324/ucsf_ebs2_2_chunkedmem/`
 - Status: untracked
