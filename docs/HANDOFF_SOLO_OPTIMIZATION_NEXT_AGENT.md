@@ -5,6 +5,7 @@
 **Workspace tip (verify):** `git rev-parse HEAD` — was `735ed6e` when this file was written.
 
 **Deep dive / history / benchmark tables:** [HANDOFF_SOLO_OPTIMIZATION_20260324.md](./HANDOFF_SOLO_OPTIMIZATION_20260324.md) (long document; start with sections on direct bridge v5–v8, **v9**, **v10**).  
+**Bridge tuple + ambiguous aggregate redesign (2026-03-25):** [HANDOFF_SOLO_BRIDGE_TUPLE_AMBIG_REDESIGN_NEXT_AGENT_20260325.md](./HANDOFF_SOLO_BRIDGE_TUPLE_AMBIG_REDESIGN_NEXT_AGENT_20260325.md) — packed `(wlCb, umi24, gene16)` exact hash, per-key ambiguous accounting (no pin-replay rows), Bayes-resolved read attribution policy, worktree `/tmp/star-suite-v10-redesign-20260325`, full EBs2_2 benchmark root under `/storage/100K/ucsf_solo_bridge_redesign_20260325/`.  
 **Repo agent rules:** [AGENTS.md](../AGENTS.md) at repo root (clean rebuild before debugging; do not touch `README.md` if it is dirty unless asked).
 
 ---
@@ -15,9 +16,21 @@ Solo / STARsolo **post-map** optimization (counting, UMI collapse, MEX), especia
 
 ---
 
+## Binary spool downstream HASH_MEX (non-Flex, mapping unchanged)
+
+**Environment:** `STAR_SOLO_BINARY_SPOOL=1` and `STAR_SOLO_BINARY_SPOOL_HASH_MEX=1`. Legacy control for A/B: `env -u STAR_SOLO_BINARY_SPOOL_HASH_MEX`. Do **not** set `STAR_SOLO_NONFLEX_HASH_BRIDGE` or `--soloInlineHashMode` for this track.
+
+**Code:** `SoloFeature_collapseUMI_fromBinarySpoolHash.cpp` (spool scan + global hash) → `solo_bridge_collapse::runFromGlobalAggregates` in `SoloFeature_collapse_bridge_global.cpp` (shared with inline-hash bridge drain). `SoloFeature_countCBgeneUMI.cpp` selects the branch.
+
+**Validated 2M pair (CSR v4, 2026-03-25):** exact `Summary.csv` + raw/filtered MEX triple parity vs legacy binary spool. Roots: `…/iPSC2_1_GEX_2M_binaryspool_{legacy,hashmex}_v4_csrval/` under `/storage/100K/ucsf_solo_spool_hash_20260325/`. Details and timing: long handoff **“Binary spool HASH_MEX: CSR global sort in `runFromGlobalAggregates` (v4, 2026-03-25)”** and `tests/ARTIFACTS.md` (`ucsf_solo_spool_hash_20260325`).
+
+---
+
 ## What is already landed (direct-hash bridge, non-Flex)
 
 **Environment:** `STAR_SOLO_NONFLEX_HASH_BRIDGE=1` enables the direct bridge from packed inline hash into collapse without the legacy `rGeneUMI` / `rCBp` replay.
+
+**Bridge collapse snapshot / replay (dev harness, v2, 2026-03-25):** after `resolveAmbiguousCBs()` + `runCliqueCorrection()`, immediately before draining hashes, `collapseUMIall_fromBridgeHash()` can write a binary snapshot (`STAR_SOLO_BRIDGE_HASH_SNAPSHOT_OUT=/abs/path.bin`). Replay: `STAR_SOLO_BRIDGE_HASH_SNAPSHOT_IN` + **`STAR_SOLO_BRIDGE_HASH_SNAPSHOT_REPLAY_SKIP_READS=1`** — `STAR.cpp` skips the entire `mapThreadsSpawn()` call (no FASTQ decompression, no thread pool for mapping) and calls `P.closeReadsFiles()` to kill decompression processes immediately. Same `--runThreadN` and whitelist as seed required. v2 format: magic `STARBG2\0`, bulk block I/O (no per-entry decode), `kh_resize` pre-sizes hash on load. Code: `SoloFeature_bridgeHashSnapshot.cpp`, `STAR.cpp` (mapping-phase skip gate), `ReadAlignChunk_mapChunk.cpp` (defense-in-depth `mapChunk` skip). Full EBs2_2 v2 replay: **7:56 wall** (vs 13:37 v1, vs 16:27 seed); snapshot load **4.9 s** (vs 28 s v1); **raw/filtered matrix.mtx byte-identical** to seed.
 
 **Constraints the path respects (do not break casually):**
 
@@ -28,8 +41,11 @@ Solo / STARsolo **post-map** optimization (counting, UMI collapse, MEX), especia
 - `outSAMtype None` is common in benchmarks
 
 **v10 (current MultiGene hot path):** same outer architecture as v9; inside **`collapseOneBarcodeRows`**
-nested `umiGeneMapCount` / `umiGeneMapCount0` maps and **`umiCorrected`** are replaced by flat
-`corrUmiGeneCount` + `corrPackedKeys` + sparse **`origByOrigUmi`** (see long handoff “Direct bridge v10”).
+(`SoloFeature_collapse_bridge_global.cpp`) nested `umiGeneMapCount` / `umiGeneMapCount0` maps and
+**`umiCorrected`** are replaced by flat `corrUmiGeneCount` + `corrPackedKeys` + sparse
+**`origByOrigUmi`** (see long handoff “Direct bridge v10”). The **inline-hash bridge** path uses the
+same MultiGene **semantics** via per-CB **`MgRow`** sorting in
+`SoloFeature_collapseUMI_fromBridgeHash.cpp` (no nested maps there either after 2026-03-25).
 
 **v9:** same as v8 **except** no unused `bridgeSlotsByCompactCb_`; collapse uses
 `unordered_map<wl, vector<slotId>>` for **observed** barcodes only (not `resize(cbWLsize)`). Tuple
@@ -44,8 +60,10 @@ hash → stable slot id; global fold + per-CB sort + **`collapseOneBarcodeRows`*
 
 | File | Role |
 |------|------|
-| `core/legacy/source/SoloFeature_collapseUMI_fromBridgeHash.cpp` | Direct bridge collapse (v8/v9 shell, v10 flat MultiGene) |
-| `core/legacy/source/SoloFeature_countCBgeneUMI.cpp` | Chooses bridge vs legacy path |
+| `core/legacy/source/SoloFeature_collapseUMI_fromBridgeHash.cpp` | Direct bridge: CSR drain + per-CB sort + **flat `MgRow` MultiGeneUMI_CR** (no nested umi→gene maps; `umiArrayCorrect_CR` with `readInfoRec=false` when BAM tags unused) |
+| `core/legacy/source/SoloFeature_collapse_bridge_global.cpp` | Shared `runFromGlobalAggregates` (bridge + binary-spool HASH_MEX) |
+| `core/legacy/source/SoloFeature_collapseUMI_fromBinarySpoolHash.cpp` | `STAR_SOLO_BINARY_SPOOL_HASH_MEX` spool path |
+| `core/legacy/source/SoloFeature_countCBgeneUMI.cpp` | Chooses bridge vs legacy vs HASH_MEX path |
 | `core/legacy/source/SoloFeature_sumThreads.cpp` | Drains thread hashes + ambiguous merge |
 | `core/legacy/source/SoloFeature.cpp` / `SoloFeature.h` | Wiring, declarations |
 | `tests/ARTIFACTS.md` | Canonical benchmark output roots (v5, v6, v7a, legacy) |

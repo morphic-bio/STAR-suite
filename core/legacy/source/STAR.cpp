@@ -56,6 +56,7 @@
 // Use wrapper function instead
 #include "effective_length_wrapper.h"
 #include "InlineCBCorrection.h"
+#include "SoloFeature_bridgeHashSnapshot.h"
 #include "alignment_model.h"  // For Transcriptome and AlignmentModel
 #include <memory>
 #include <unordered_map>
@@ -1669,10 +1670,17 @@ int main(int argInN, char *argIn[])
         Parameters::global_fld_obs_count.store(0, std::memory_order_relaxed);
     }
 
-    if (P.runRestart.type != 1 && !perFileMappingDone)
-        mapThreadsSpawn(P, RAchunk);
+    const bool bridgeReplaySkipMapping = solo_bridge_hash_snapshot::replaySkipReadsEnabled(P);
 
-    if (P.outFilterBySJoutStage == 1 && !perFileMappingDone)
+    if (bridgeReplaySkipMapping) {
+        P.inOut->logMain << timeMonthDayTime() << " ..... bridge snapshot replay: skipping entire mapping phase\n" << flush;
+        *P.inOut->logStdOut << timeMonthDayTime() << " ..... bridge snapshot replay: skipping entire mapping phase\n" << flush;
+        P.closeReadsFiles();
+    } else if (P.runRestart.type != 1 && !perFileMappingDone) {
+        mapThreadsSpawn(P, RAchunk);
+    }
+
+    if (!bridgeReplaySkipMapping && P.outFilterBySJoutStage == 1 && !perFileMappingDone)
     { // completed stage 1, go to stage 2
         P.inOut->logMain << "Completed stage 1 mapping of outFilterBySJout mapping\n"
                          << flush;

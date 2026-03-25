@@ -28,15 +28,10 @@ void SoloFeature::sumThreads()
             rf->readIdTracker_ = nullptr;
         }
         decltype(rf->pendingAmbiguous_)().swap(rf->pendingAmbiguous_);
+        decltype(rf->bridgeAmbigReadInfoOrphan_)().swap(rf->bridgeAmbigReadInfoOrphan_);
         decltype(rf->bridgeImmediateReadCounts_)().swap(rf->bridgeImmediateReadCounts_);
-        std::vector<SoloReadFeature::BridgeDeferredReadAccounting>().swap(rf->bridgeDeferredAccounting_);
-        std::vector<uint32_t>().swap(rf->bridgeDeferredCandidates_);
-        if (!keepInlineHashAndBridgeMaps) {
-            decltype(rf->bridgeCbCompactByWl_)().swap(rf->bridgeCbCompactByWl_);
-            std::vector<uint32_t>().swap(rf->bridgeCbWlByCompact_);
-            decltype(rf->bridgeGeneCompactByFull_)().swap(rf->bridgeGeneCompactByFull_);
-            std::vector<uint32_t>().swap(rf->bridgeGeneFullByCompact_);
-        }
+        rf->bridgePinNreadUnique_.clear();
+        rf->bridgePinNreadMulti_.clear();
         decltype(rf->readFlag.flagCounts)().swap(rf->readFlag.flagCounts);
         rf->readFlag.flagCountsNoCB = {};
         std::vector<uint32_t>().swap(rf->cbReadCount);
@@ -61,7 +56,6 @@ void SoloFeature::sumThreads()
                 // Keep the bulky non-ambiguous thread-local hashes for direct draining later;
                 // merge only the smaller ambiguous/deferred sidecars into readFeatSum.
                 readFeatSum->mergePendingAmbiguous(*readFeatAll[ii]);
-                readFeatSum->mergeDeferredBridgeAccounting(*readFeatAll[ii]);
             } else {
                 readFeatSum->mergeInlineHash(*readFeatAll[ii]);
             }

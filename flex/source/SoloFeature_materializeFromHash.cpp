@@ -43,15 +43,9 @@ void SoloFeature::materializeRGUFromHash() {
         HashEntry entry;
         uint16_t compactGeneIdx = 0;
         if (nonFlexHashBridge) {
-            unpackBridgeCgAggKey(key, &entry.cbIdx, &entry.umi24, &compactGeneIdx);
-            entry.cbIdx = readFeatSum->bridgeCompactToWl(entry.cbIdx);
-            if (entry.cbIdx == static_cast<uint32_t>(-1)) {
-                continue;
-            }
-            entry.geneIdx = readFeatSum->bridgeCompactToGene(compactGeneIdx);
-            if (entry.geneIdx == static_cast<uint32_t>(-1)) {
-                continue;
-            }
+            uint16_t gene16 = 0;
+            unpackBridgeWlUmiGeneKey(key, &entry.cbIdx, &entry.umi24, &gene16);
+            entry.geneIdx = static_cast<uint32_t>(gene16);
         } else {
             unpackCgAggKey(key, &entry.cbIdx, &entry.umi24, &compactGeneIdx, nullptr);
             entry.geneIdx = compactGeneIdx;

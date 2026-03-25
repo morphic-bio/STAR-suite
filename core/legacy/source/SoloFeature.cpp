@@ -5,6 +5,7 @@
 #include "Genome.h"
 #include "solo/CbBayesianResolver.h"
 #include "solo/CbCorrector.h"
+#include "hash_shims_cpp_compat.h"
 #include "streamFuns.h"
 #include "ErrorWarning.h"
 #include <fstream>
@@ -13,7 +14,6 @@
 #include <cctype>
 #include <cstdlib>
 #include <cstdio>
-#include <cmath>
 #include <unordered_set>
 
 // Static cache for gene→probe index (15-bit), 0 = not a probe gene
@@ -284,65 +284,93 @@ void SoloFeature::resolveAmbiguousCBs()
         return;
     }
 
-    if (readFeatSum) {
-        resolvePendingAmbiguousForReadFeat(*readFeatSum, true);
-    }
+    resolvePendingAmbiguousToHash(true);
 }
 
 void SoloFeature::resolvePendingAmbiguousToHash(bool useBridgeCompactMapping)
 {
-    if (readFeatSum) {
-        resolvePendingAmbiguousForReadFeat(*readFeatSum, useBridgeCompactMapping);
-    }
-}
-
-void SoloFeature::resolvePendingAmbiguousForReadFeat(SoloReadFeature &targetFeat, bool useBridgeCompactMapping)
-{
     static const bool g_disableAmbigResolve =
         (std::getenv("STAR_DISABLE_AMBIG_CB_RESOLVE") != nullptr);
 
-    if (!pSolo.inlineHashMode || pSolo.flexMode || std::getenv("STAR_SOLO_NONFLEX_HASH_BRIDGE") == nullptr) {
+    if (!readFeatSum || !readFeatSum->inlineHash_) {
         return;
     }
 
-    if (targetFeat.pendingAmbiguous_.empty()) {
+    const bool havePending = !readFeatSum->pendingAmbiguous_.empty();
+    const bool haveBridgeReadInfoOrphans = useBridgeCompactMapping
+        && !readFeatSum->bridgeAmbigReadInfoOrphan_.empty();
+    if (!havePending && !haveBridgeReadInfoOrphans) {
         return;
-    }
-
-    if (!targetFeat.inlineHash_) {
-        targetFeat.inlineHash_ = kh_init(cg_agg);
     }
 
     if (g_disableAmbigResolve) {
         P.inOut->logMain << "[AMBIG-CB-RESOLVE] disabled by STAR_DISABLE_AMBIG_CB_RESOLVE, skipping "
-                         << targetFeat.pendingAmbiguous_.size() << " pending ambiguous CBs" << endl;
+                         << readFeatSum->pendingAmbiguous_.size() << " pending ambiguous CBs" << endl;
         return;
     }
 
     if (!pSolo.cbCorrector) {
-        P.inOut->logMain << "[AMBIG-CB-RESOLVE] " << targetFeat.pendingAmbiguous_.size()
-                         << " pending ambiguous CBs but CbCorrector not available, skipping" << endl;
+        if (havePending) {
+            P.inOut->logMain << "[AMBIG-CB-RESOLVE] " << readFeatSum->pendingAmbiguous_.size()
+                             << " pending ambiguous CBs but CbCorrector not available, skipping" << endl;
+        }
+        if (haveBridgeReadInfoOrphans) {
+            for (const auto &okv : readFeatSum->bridgeAmbigReadInfoOrphan_) {
+                const auto &orph = okv.second;
+                SoloReadFeature::ExtendedAmbiguousEntry synthetic;
+                synthetic.candidateIdx = orph.candidateIdx;
+                synthetic.cbSeq = orph.cbSeq;
+                synthetic.cbQual = orph.cbQual;
+                synthetic.bridgeAmbigPinCandQuals_ = orph.pinCandQuals_;
+                synthetic.bridgeAmbigReadInfoN_ = orph.readInfoN_;
+                synthetic.bridgeAmbigReadInfoHaveSample_ = orph.haveSample_;
+                synthetic.bridgeAmbigReadInfoSampleFlag_ = orph.sampleFlag_;
+                readFeatSum->applyBridgeAmbiguousAggregatedReadAccounting(P, featureType, synthetic, false, 0);
+            }
+            readFeatSum->bridgeAmbigReadInfoOrphan_.clear();
+        }
         return;
     }
 
-    khash_t(cg_agg) *hash = targetFeat.inlineHash_;
+    auto applyBridgeReadInfoOrphans = [&]() {
+        if (!useBridgeCompactMapping) {
+            return;
+        }
+        for (const auto &okv : readFeatSum->bridgeAmbigReadInfoOrphan_) {
+            const auto &orph = okv.second;
+            SoloReadFeature::ExtendedAmbiguousEntry synthetic;
+            synthetic.candidateIdx = orph.candidateIdx;
+            synthetic.cbSeq = orph.cbSeq;
+            synthetic.cbQual = orph.cbQual;
+            synthetic.bridgeAmbigPinCandQuals_ = orph.pinCandQuals_;
+            synthetic.bridgeAmbigReadInfoN_ = orph.readInfoN_;
+            synthetic.bridgeAmbigReadInfoHaveSample_ = orph.haveSample_;
+            synthetic.bridgeAmbigReadInfoSampleFlag_ = orph.sampleFlag_;
+            readFeatSum->applyBridgeAmbiguousAggregatedReadAccounting(P, featureType, synthetic, false, 0);
+        }
+        readFeatSum->bridgeAmbigReadInfoOrphan_.clear();
+    };
+
+    khash_t(cg_agg) *hash = readFeatSum->inlineHash_;
     const std::vector<std::string> &whitelistSeqs = pSolo.cbCorrector->whitelist();
     CbBayesianResolver resolver(whitelistSeqs.size(), &whitelistSeqs);
+    static const std::unordered_map<uint32_t, uint32_t> kEmptyUmiHistogram;
 
     uint64_t resolved = 0, stillAmbiguous = 0, addedToHash = 0;
-    for (auto &kv : targetFeat.pendingAmbiguous_) {
+    for (auto &kv : readFeatSum->pendingAmbiguous_) {
         SoloReadFeature::ExtendedAmbiguousEntry &entry = kv.second;
 
-        if (entry.candidateIdx.empty() || entry.umiCounts.empty()) {
+        if (entry.candidateIdx.empty()) {
             stillAmbiguous++;
             continue;
         }
 
-        CBContext context(entry.cbSeq,
-                          entry.cbQual,
-                          entry.cbLogLikMatch,
-                          entry.cbLogLikMismatch,
-                          entry.cbEvidenceReads);
+        if (!useBridgeCompactMapping && entry.umiCounts.empty()) {
+            stillAmbiguous++;
+            continue;
+        }
+
+        CBContext context(entry.cbSeq, entry.cbQual);
 
         std::vector<Candidate> candidates;
         candidates.reserve(entry.candidateIdx.size());
@@ -357,42 +385,61 @@ void SoloFeature::resolvePendingAmbiguousForReadFeat(SoloReadFeature &targetFeat
             continue;
         }
 
-        BayesianResult result = resolver.resolve(context, candidates, entry.umiCounts);
-        if (result.status != BayesianResult::Resolved || result.bestIdx == 0) {
+        const std::unordered_map<uint32_t, uint32_t> &umiForResolve =
+            useBridgeCompactMapping ? kEmptyUmiHistogram : entry.umiCounts;
+        BayesianResult result = resolver.resolve(context, candidates, umiForResolve);
+        const bool bayesResolved = (result.status == BayesianResult::Resolved && result.bestIdx != 0);
+        const uint32_t resolvedCbIdx = bayesResolved ? (result.bestIdx - 1u) : 0u;
+
+        if (useBridgeCompactMapping) {
+            readFeatSum->applyBridgeAmbiguousAggregatedReadAccounting(
+                P, featureType, entry, bayesResolved, resolvedCbIdx);
+        }
+
+        if (!bayesResolved) {
             stillAmbiguous++;
             continue;
         }
 
         resolved++;
-        uint32_t resolvedCbIdx = result.bestIdx - 1;
-        uint32_t storedCbIdx = resolvedCbIdx;
-        if (useBridgeCompactMapping) {
-            storedCbIdx = targetFeat.getOrCreateBridgeCompactCb(resolvedCbIdx);
-        }
 
         if (shouldTraceBridgeBarcode(pSolo, resolvedCbIdx)) {
             std::fprintf(stderr,
-                         "[BRIDGE-CB-TRACE] mode=ambig_resolve cb=%s wlIdx=%u candidates=%zu umiKeys=%zu obs=%zu status=%d bestIdx=%u\n",
+                         "[BRIDGE-CB-TRACE] mode=ambig_resolve cb=%s wlIdx=%u candidates=%zu "
+                         "bridgeAmbigUmiGene=%zu legacyObs=%zu status=%d bestIdx=%u\n",
                          pSolo.cbWLstr[resolvedCbIdx].c_str(),
                          resolvedCbIdx,
                          entry.candidateIdx.size(),
-                         entry.umiCounts.size(),
+                         entry.bridgeAmbigUmiGene_.size(),
                          entry.observations.size(),
                          static_cast<int>(result.status),
                          result.bestIdx);
         }
 
-        for (const auto &obs : entry.observations) {
-            uint16_t storedGeneIdx = static_cast<uint16_t>(obs.geneIdx);
-            if (useBridgeCompactMapping) {
-                storedGeneIdx = targetFeat.getOrCreateBridgeCompactGene(obs.geneIdx);
+        if (useBridgeCompactMapping) {
+            if (resolvedCbIdx >= 0x1000000u) {
+                ostringstream errOut;
+                errOut << "EXITING because of fatal ERROR: resolved whitelist CB index exceeds 24-bit bridge key\n";
+                exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_INCONSISTENT_DATA, P);
             }
-            uint64_t newKey = useBridgeCompactMapping
-                ? packBridgeCgAggKey(storedCbIdx, obs.umi24, storedGeneIdx)
-                : packCgAggKey(storedCbIdx, obs.umi24, storedGeneIdx, obs.tagIdx);
-            if (useBridgeCompactMapping) {
-                targetFeat.bridgeDirectTupleAdd(newKey, obs.geneIdx, obs.umi24, obs.count);
-            } else {
+            for (const auto &ug : entry.bridgeAmbigUmiGene_) {
+                const uint64_t ugKey = ug.first;
+                const uint32_t umi24 = static_cast<uint32_t>((ugKey >> 16) & 0xFFFFFFu);
+                const uint16_t gene16 = static_cast<uint16_t>(ugKey & 0xFFFFu);
+                const uint64_t newKey = packBridgeWlUmiGeneKey(resolvedCbIdx, umi24, gene16);
+                int absent;
+                khiter_t iter = kh_put(cg_agg, hash, newKey, &absent);
+                if (absent) {
+                    kh_val(hash, iter) = ug.second;
+                } else {
+                    kh_val(hash, iter) += ug.second;
+                }
+                addedToHash++;
+            }
+        } else {
+            for (const auto &obs : entry.observations) {
+                const uint64_t newKey = packCgAggKey(resolvedCbIdx, obs.umi24, static_cast<uint16_t>(obs.geneIdx),
+                                                     obs.tagIdx);
                 int absent;
                 khiter_t iter = kh_put(cg_agg, hash, newKey, &absent);
                 if (absent) {
@@ -400,115 +447,19 @@ void SoloFeature::resolvePendingAmbiguousForReadFeat(SoloReadFeature &targetFeat
                 } else {
                     kh_val(hash, iter) += obs.count;
                 }
+                addedToHash++;
             }
-            addedToHash++;
         }
     }
 
-    P.inOut->logMain << "[AMBIG-CB-RESOLVE] pending=" << targetFeat.pendingAmbiguous_.size()
+    applyBridgeReadInfoOrphans();
+
+    P.inOut->logMain << "[AMBIG-CB-RESOLVE] pending=" << readFeatSum->pendingAmbiguous_.size()
                      << " resolved=" << resolved
                      << " still_ambiguous=" << stillAmbiguous
                      << " added_to_hash=" << addedToHash << endl;
 
-    targetFeat.pendingAmbiguous_.clear();
-}
-
-namespace {
-
-uint32_t unpackBridgeDeferredCandidateCbLocal(uint32_t packed)
-{
-    return packed >> 8;
-}
-
-char unpackBridgeDeferredCandidateQualLocal(uint32_t packed)
-{
-    return static_cast<char>(packed & 0xFFu);
-}
-
-} // namespace
-
-void SoloFeature::finalizeDeferredBridgeAccountingForReadFeat(SoloReadFeature &targetFeat)
-{
-    if (!pSolo.inlineHashMode || pSolo.flexMode || std::getenv("STAR_SOLO_NONFLEX_HASH_BRIDGE") == nullptr) {
-        return;
-    }
-    if (targetFeat.bridgeDeferredAccounting_.empty()) {
-        return;
-    }
-
-    for (const auto &rec : targetFeat.bridgeDeferredAccounting_) {
-        const bool featGood = rec.featGood != 0;
-        const bool multiFeature = rec.multiFeature != 0;
-        bool readIsCounted = false;
-        bool noTooManyWLmatches = false;
-        uint32_t cb = 0;
-
-#ifdef MATCH_CellRanger
-        double ptot = 0.0, pmax = 0.0, pin;
-#else
-        float ptot = 0.0, pmax = 0.0, pin;
-#endif
-        const uint32_t begin = rec.candidateOffset;
-        const uint32_t end = begin + rec.candidateCount;
-        for (uint32_t ii = begin; ii < end && ii < targetFeat.bridgeDeferredCandidates_.size(); ++ii) {
-            const uint32_t packedCandidate = targetFeat.bridgeDeferredCandidates_[ii];
-            const uint32_t cbin = unpackBridgeDeferredCandidateCbLocal(packedCandidate);
-            char qin = unpackBridgeDeferredCandidateQualLocal(packedCandidate);
-            if (cbin < targetFeat.cbReadCount.size() && targetFeat.cbReadCount[cbin] > 0) {
-                qin -= pSolo.QSbase;
-                qin = qin < pSolo.QSmax ? qin : pSolo.QSmax;
-                pin = targetFeat.cbReadCount[cbin] * std::pow(10.0, -qin / 10.0);
-                ptot += pin;
-                if (pin > pmax) {
-                    cb = cbin;
-                    pmax = pin;
-                }
-            }
-        }
-        if (ptot > 0.0 && pmax >= pSolo.cbMinP * ptot) {
-            if (featGood) {
-                readIsCounted = true;
-            }
-        } else {
-            noTooManyWLmatches = true;
-        }
-
-        if (featGood && noTooManyWLmatches) {
-            targetFeat.stats.V[targetFeat.stats.noTooManyWLmatches]++;
-        }
-
-        if (readIsCounted && cb < targetFeat.cbReadCount.size()) {
-            uint64_t &packed = targetFeat.bridgeImmediateReadCounts_[cb];
-            if (multiFeature) {
-                packed += (uint64_t{1} << 32);
-            } else {
-                packed += 1;
-            }
-        }
-
-        if (pSolo.readStatsYes[featureType]) {
-            SoloReadFlagClass &rfc = targetFeat.readFlag;
-            rfc.flag = rec.readFlag;
-            if (readIsCounted) {
-                if (rfc.checkBit(rfc.featureU)) {
-                    rfc.setBit(rfc.countedU);
-                }
-                if (rfc.checkBit(rfc.featureM)) {
-                    rfc.setBit(rfc.countedM);
-                }
-            }
-            rfc.setBit(rfc.cbMatch);
-            if (!noTooManyWLmatches) {
-                rfc.setBit(rfc.cbMMmultiple);
-                rfc.countsAdd(cb);
-            } else {
-                rfc.countsAddNoCB();
-            }
-        }
-    }
-
-    std::vector<SoloReadFeature::BridgeDeferredReadAccounting>().swap(targetFeat.bridgeDeferredAccounting_);
-    std::vector<uint32_t>().swap(targetFeat.bridgeDeferredCandidates_);
+    readFeatSum->pendingAmbiguous_.clear();
 }
 
 bool SoloFeature::isChrGenomic(uint32_t chrIdx) {
@@ -721,12 +672,8 @@ void SoloFeature::clearLarge()
 
     if (readFeatSum != nullptr) {
         decltype(readFeatSum->bridgeImmediateReadCounts_)().swap(readFeatSum->bridgeImmediateReadCounts_);
-        std::vector<SoloReadFeature::BridgeDeferredReadAccounting>().swap(readFeatSum->bridgeDeferredAccounting_);
-        std::vector<uint32_t>().swap(readFeatSum->bridgeDeferredCandidates_);
-        decltype(readFeatSum->bridgeCbCompactByWl_)().swap(readFeatSum->bridgeCbCompactByWl_);
-        std::vector<uint32_t>().swap(readFeatSum->bridgeCbWlByCompact_);
-        decltype(readFeatSum->bridgeGeneCompactByFull_)().swap(readFeatSum->bridgeGeneCompactByFull_);
-        std::vector<uint32_t>().swap(readFeatSum->bridgeGeneFullByCompact_);
+        readFeatSum->bridgePinNreadUnique_.clear();
+        readFeatSum->bridgePinNreadMulti_.clear();
     }
     
 #ifdef DEBUG_CB_UB_PARITY
