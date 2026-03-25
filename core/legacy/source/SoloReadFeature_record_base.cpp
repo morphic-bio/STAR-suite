@@ -9,7 +9,6 @@
 #include "ReadAlign.h"
 #include "SoloBinarySpool.h"
 #include "SoloReadFeature_record_shared.h"
-#include "solo/CbBayesianResolver.h"
 #include "ErrorWarning.h"
 #include <unordered_set>
 #include <sstream>
@@ -20,12 +19,7 @@
 namespace {
 std::vector<uint8_t> bridgeCandidateQuals(const SoloReadBarcode &soloBar);
 
-uint32_t packBridgeDeferredCandidate(uint32_t cbIdx, uint8_t qual)
-{
-    return (cbIdx << 8) | static_cast<uint32_t>(qual);
-}
-
-bool bridgeUsesDeferredAccounting(const SoloReadFeature *soloReadFeat, const SoloReadBarcode &soloBar)
+bool bridgeNonFlexAmbigSidecar(const SoloReadFeature *soloReadFeat, const SoloReadBarcode &soloBar)
 {
     return soloReadFeat != nullptr
         && std::getenv("STAR_SOLO_NONFLEX_HASH_BRIDGE") != nullptr
@@ -33,6 +27,185 @@ bool bridgeUsesDeferredAccounting(const SoloReadFeature *soloReadFeat, const Sol
         && !soloBar.pSolo.flexMode
         && soloBar.cbMatch > 1
         && !soloBar.cbMatchInd.empty();
+}
+
+int64_t bridgeCbQualTotalScoreLocal(const std::string &qual, char qsBase, uint32_t qsMax)
+{
+    int64_t s = 0;
+    for (unsigned char uc : qual) {
+        int v = static_cast<int>(uc) - static_cast<int>(qsBase);
+        if (v < 0) {
+            v = 0;
+        }
+        if (static_cast<uint32_t>(v) > qsMax) {
+            v = static_cast<int>(qsMax);
+        }
+        s += v;
+    }
+    return s;
+}
+
+void ensureBridgeAmbigEntryBase(SoloReadFeature *soloReadFeat, const SoloReadBarcode &soloBar)
+{
+    ReadAlign::AmbigKey ambigKey = ReadAlign::hashCbSeq(soloBar.cbSeq);
+    auto &entry = soloReadFeat->pendingAmbiguous_[ambigKey];
+    if (!entry.candidateIdx.empty()) {
+        return;
+    }
+    entry.candidateIdx.reserve(soloBar.cbMatchInd.size());
+    for (auto idx : soloBar.cbMatchInd) {
+        entry.candidateIdx.push_back(static_cast<uint32_t>(idx + 1));
+    }
+    entry.cbSeq = soloBar.cbSeq;
+    entry.cbQual = soloBar.cbQual;
+    if (entry.cbQual.length() != entry.cbSeq.length()) {
+        if (entry.cbQual.length() < entry.cbSeq.length()) {
+            entry.cbQual.append(entry.cbSeq.length() - entry.cbQual.length(), 'H');
+        } else {
+            entry.cbQual = entry.cbQual.substr(0, entry.cbSeq.length());
+        }
+    }
+    const uint32_t kCand = static_cast<uint32_t>(entry.candidateIdx.size());
+    const char qsBase = soloBar.pSolo.QSbase;
+    const std::vector<uint8_t> quals = bridgeCandidateQuals(soloBar);
+    entry.bridgeAmbigPinCandQuals_.resize(kCand);
+    for (uint32_t ii = 0; ii < kCand; ++ii) {
+        entry.bridgeAmbigPinCandQuals_[ii] = ii < quals.size() ? quals[ii] : static_cast<uint8_t>(qsBase);
+    }
+}
+
+void maybeUpgradeBridgeAmbigRepresentativeQual(SoloReadFeature::ExtendedAmbiguousEntry &entry,
+                                               const SoloReadBarcode &soloBar,
+                                               char qsBase,
+                                               uint32_t qsMax)
+{
+    std::string newQual = soloBar.cbQual;
+    if (newQual.length() != soloBar.cbSeq.length()) {
+        if (newQual.length() < soloBar.cbSeq.length()) {
+            newQual.append(soloBar.cbSeq.length() - newQual.length(), 'H');
+        } else {
+            newQual = newQual.substr(0, soloBar.cbSeq.length());
+        }
+    }
+    const int64_t oldScore = bridgeCbQualTotalScoreLocal(entry.cbQual, qsBase, qsMax);
+    const int64_t newScore = bridgeCbQualTotalScoreLocal(newQual, qsBase, qsMax);
+    if (newScore > oldScore || (newScore == oldScore && newQual < entry.cbQual)) {
+        entry.cbQual = std::move(newQual);
+        entry.cbSeq = soloBar.cbSeq;
+        const uint32_t kCand = static_cast<uint32_t>(entry.candidateIdx.size());
+        const std::vector<uint8_t> quals = bridgeCandidateQuals(soloBar);
+        entry.bridgeAmbigPinCandQuals_.resize(kCand);
+        for (uint32_t ii = 0; ii < kCand; ++ii) {
+            entry.bridgeAmbigPinCandQuals_[ii] = ii < quals.size() ? quals[ii] : static_cast<uint8_t>(qsBase);
+        }
+    }
+}
+
+void maybeUpgradeBridgeAmbigOrphanQual(SoloReadFeature::BridgeAmbigReadInfoOrphanEntry &orph,
+                                       const SoloReadBarcode &soloBar,
+                                       char qsBase,
+                                       uint32_t qsMax)
+{
+    std::string newQual = soloBar.cbQual;
+    if (newQual.length() != soloBar.cbSeq.length()) {
+        if (newQual.length() < soloBar.cbSeq.length()) {
+            newQual.append(soloBar.cbSeq.length() - newQual.length(), 'H');
+        } else {
+            newQual = newQual.substr(0, soloBar.cbSeq.length());
+        }
+    }
+    const int64_t oldScore = bridgeCbQualTotalScoreLocal(orph.cbQual, qsBase, qsMax);
+    const int64_t newScore = bridgeCbQualTotalScoreLocal(newQual, qsBase, qsMax);
+    if (newScore > oldScore || (newScore == oldScore && newQual < orph.cbQual)) {
+        orph.cbQual = std::move(newQual);
+        orph.cbSeq = soloBar.cbSeq;
+        const uint32_t kCand = static_cast<uint32_t>(orph.candidateIdx.size());
+        const std::vector<uint8_t> quals = bridgeCandidateQuals(soloBar);
+        orph.pinCandQuals_.resize(kCand);
+        for (uint32_t ii = 0; ii < kCand; ++ii) {
+            orph.pinCandQuals_[ii] = ii < quals.size() ? quals[ii] : static_cast<uint8_t>(qsBase);
+        }
+    }
+}
+
+void accumulateBridgeAmbigGeneAggregates(SoloReadFeature *soloReadFeat,
+                                         const SoloReadBarcode &soloBar,
+                                         const SoloReadFlagClass &readFlag,
+                                         bool multiFeature)
+{
+    if (!bridgeNonFlexAmbigSidecar(soloReadFeat, soloBar)) {
+        return;
+    }
+    const ReadAlign::AmbigKey ambigKey = ReadAlign::hashCbSeq(soloBar.cbSeq);
+    auto it = soloReadFeat->pendingAmbiguous_.find(ambigKey);
+    if (it == soloReadFeat->pendingAmbiguous_.end() || it->second.candidateIdx.empty()) {
+        return;
+    }
+    auto &entry = it->second;
+    if (multiFeature) {
+        entry.bridgeAmbigGeneFeatM_++;
+        if (!entry.bridgeAmbigGeneHaveSampleM_) {
+            entry.bridgeAmbigGeneSampleFlagM_ = readFlag.flag;
+            entry.bridgeAmbigGeneHaveSampleM_ = true;
+        }
+    } else {
+        entry.bridgeAmbigGeneFeatU_++;
+        if (!entry.bridgeAmbigGeneHaveSampleU_) {
+            entry.bridgeAmbigGeneSampleFlagU_ = readFlag.flag;
+            entry.bridgeAmbigGeneHaveSampleU_ = true;
+        }
+    }
+}
+
+void accumulateBridgeAmbigReadInfoAggregates(SoloReadFeature *soloReadFeat,
+                                             const SoloReadBarcode &soloBar,
+                                             const SoloReadFlagClass &readFlag)
+{
+    if (!bridgeNonFlexAmbigSidecar(soloReadFeat, soloBar)) {
+        return;
+    }
+    ReadAlign::AmbigKey ambigKey = ReadAlign::hashCbSeq(soloBar.cbSeq);
+    auto pit = soloReadFeat->pendingAmbiguous_.find(ambigKey);
+    if (pit != soloReadFeat->pendingAmbiguous_.end() && !pit->second.candidateIdx.empty()) {
+        auto &entry = pit->second;
+        maybeUpgradeBridgeAmbigRepresentativeQual(entry, soloBar, soloBar.pSolo.QSbase, soloBar.pSolo.QSmax);
+        entry.bridgeAmbigReadInfoN_++;
+        if (!entry.bridgeAmbigReadInfoHaveSample_) {
+            entry.bridgeAmbigReadInfoSampleFlag_ = readFlag.flag;
+            entry.bridgeAmbigReadInfoHaveSample_ = true;
+        }
+        return;
+    }
+
+    auto &orph = soloReadFeat->bridgeAmbigReadInfoOrphan_[ambigKey];
+    if (orph.candidateIdx.empty()) {
+        orph.candidateIdx.reserve(soloBar.cbMatchInd.size());
+        for (auto idx : soloBar.cbMatchInd) {
+            orph.candidateIdx.push_back(static_cast<uint32_t>(idx + 1));
+        }
+        orph.cbSeq = soloBar.cbSeq;
+        orph.cbQual = soloBar.cbQual;
+        if (orph.cbQual.length() != orph.cbSeq.length()) {
+            if (orph.cbQual.length() < orph.cbSeq.length()) {
+                orph.cbQual.append(orph.cbSeq.length() - orph.cbQual.length(), 'H');
+            } else {
+                orph.cbQual = orph.cbQual.substr(0, orph.cbSeq.length());
+            }
+        }
+        const uint32_t kCand = static_cast<uint32_t>(orph.candidateIdx.size());
+        const std::vector<uint8_t> quals = bridgeCandidateQuals(soloBar);
+        orph.pinCandQuals_.resize(kCand);
+        for (uint32_t ii = 0; ii < kCand; ++ii) {
+            orph.pinCandQuals_[ii] = ii < quals.size() ? quals[ii] : static_cast<uint8_t>(soloBar.pSolo.QSbase);
+        }
+    } else {
+        maybeUpgradeBridgeAmbigOrphanQual(orph, soloBar, soloBar.pSolo.QSbase, soloBar.pSolo.QSmax);
+    }
+    orph.readInfoN_++;
+    if (!orph.haveSample_) {
+        orph.sampleFlag_ = readFlag.flag;
+        orph.haveSample_ = true;
+    }
 }
 
 void accumulateBridgeImmediateReadFlags(SoloReadFeature *soloReadFeat,
@@ -82,34 +255,6 @@ void accumulateBridgeImmediateReadFlags(SoloReadFeature *soloReadFeat,
     }
 }
 
-void captureBridgeDeferredAccounting(SoloReadFeature *soloReadFeat,
-                                     const SoloReadBarcode &soloBar,
-                                     SoloReadFlagClass::typeFlag readFlag,
-                                     bool featGood,
-                                     bool multiFeature,
-                                     uint8_t qsBase)
-{
-    if (!bridgeUsesDeferredAccounting(soloReadFeat, soloBar)) {
-        return;
-    }
-
-    SoloReadFeature::BridgeDeferredReadAccounting rec;
-    rec.readFlag = readFlag;
-    rec.candidateOffset = static_cast<uint32_t>(soloReadFeat->bridgeDeferredCandidates_.size());
-    rec.candidateCount = static_cast<uint16_t>(soloBar.cbMatchInd.size());
-    rec.featGood = featGood ? 1 : 0;
-    rec.multiFeature = multiFeature ? 1 : 0;
-
-    const std::vector<uint8_t> quals = bridgeCandidateQuals(soloBar);
-    soloReadFeat->bridgeDeferredCandidates_.reserve(soloReadFeat->bridgeDeferredCandidates_.size() + soloBar.cbMatchInd.size());
-    for (size_t ii = 0; ii < soloBar.cbMatchInd.size(); ++ii) {
-        const uint8_t qual = ii < quals.size() ? quals[ii] : qsBase;
-        soloReadFeat->bridgeDeferredCandidates_.push_back(
-            packBridgeDeferredCandidate(static_cast<uint32_t>(soloBar.cbMatchInd[ii]), qual));
-    }
-    soloReadFeat->bridgeDeferredAccounting_.push_back(rec);
-}
-
 const std::unordered_set<std::string>& bridgeDebugBarcodeSet()
 {
     static std::unordered_set<std::string> barcodes;
@@ -156,28 +301,32 @@ void insertInlineHashEntry(SoloReadFeature *soloReadFeat, const SoloReadBarcode 
         return;
     }
 
-    uint32_t cbIdx = soloBar.cbMatchInd[0];
-    uint32_t wlIdx = cbIdx;
-    uint16_t packedGeneIdx = static_cast<uint16_t>(geneIdx);
+    const uint32_t wlIdx = soloBar.cbMatchInd[0];
     uint32_t umi24 = soloBar.umiB & 0xFFFFFF;
     uint64_t key = 0;
     if (std::getenv("STAR_SOLO_NONFLEX_HASH_BRIDGE") != nullptr) {
-        cbIdx = soloReadFeat->getOrCreateBridgeCompactCb(cbIdx);
-        packedGeneIdx = soloReadFeat->getOrCreateBridgeCompactGene(geneIdx);
-        key = packBridgeCgAggKey(cbIdx, umi24, packedGeneIdx);
-    } else {
-        key = packCgAggKey(cbIdx, umi24, packedGeneIdx, 0);
-    }
-    if (std::getenv("STAR_SOLO_NONFLEX_HASH_BRIDGE") != nullptr) {
-        soloReadFeat->bridgeDirectTupleAdd(key, geneIdx, umi24, 1);
-    } else {
-        int absent;
-        khiter_t iter = kh_put(cg_agg, soloReadFeat->inlineHash_, key, &absent);
-        if (absent) {
-            kh_val(soloReadFeat->inlineHash_, iter) = 1;
-        } else {
-            kh_val(soloReadFeat->inlineHash_, iter)++;
+        if (geneIdx > 0xFFFFu) {
+            std::fprintf(stderr,
+                         "FATAL ERROR: non-Flex Solo direct bridge: gene index %u exceeds 16-bit tuple field\n",
+                         geneIdx);
+            std::exit(1);
         }
+        if (wlIdx >= 0x1000000u) {
+            std::fprintf(stderr,
+                         "FATAL ERROR: non-Flex Solo direct bridge: whitelist CB index %u exceeds 24-bit key field\n",
+                         wlIdx);
+            std::exit(1);
+        }
+        key = packBridgeWlUmiGeneKey(wlIdx, umi24, static_cast<uint16_t>(geneIdx));
+    } else {
+        key = packCgAggKey(wlIdx, umi24, static_cast<uint16_t>(geneIdx), 0);
+    }
+    int absent;
+    khiter_t iter = kh_put(cg_agg, soloReadFeat->inlineHash_, key, &absent);
+    if (absent) {
+        kh_val(soloReadFeat->inlineHash_, iter) = 1;
+    } else {
+        kh_val(soloReadFeat->inlineHash_, iter)++;
     }
 
     if (shouldTraceBridgeBarcode(soloBar.pSolo, wlIdx)) {
@@ -217,35 +366,32 @@ void accumulateBridgeAmbiguousCB(SoloReadFeature *soloReadFeat,
         return;
     }
 
-    uint32_t umi24 = soloBar.umiB & 0xFFFFFF;
-    ReadAlign::AmbigKey ambigKey = ReadAlign::hashCbSeq(soloBar.cbSeq);
-    auto &entry = soloReadFeat->pendingAmbiguous_[ambigKey];
-
-    if (entry.candidateIdx.empty()) {
-        entry.candidateIdx.reserve(soloBar.cbMatchInd.size());
-        for (auto idx : soloBar.cbMatchInd) {
-            entry.candidateIdx.push_back(static_cast<uint32_t>(idx + 1));
-        }
-        entry.cbSeq = soloBar.cbSeq;
-        entry.cbQual = soloBar.cbQual;
-        cb_bayesian::normalizeCbQual(entry.cbQual, entry.cbSeq);
-        entry.umiCounts.reserve(32);
+    if (geneIdx > 0xFFFFu) {
+        std::fprintf(stderr,
+                     "FATAL ERROR: non-Flex Solo direct bridge: gene index %u exceeds 16-bit ambiguous observation field\n",
+                     geneIdx);
+        std::exit(1);
     }
 
-    cb_bayesian::accumulateCbQualityEvidence(entry.cbSeq,
-                                             soloBar.cbQual,
-                                             entry.cbLogLikMatch,
-                                             entry.cbLogLikMismatch,
-                                             entry.cbEvidenceReads);
+    ensureBridgeAmbigEntryBase(soloReadFeat, soloBar);
+    ReadAlign::AmbigKey ambigKey = ReadAlign::hashCbSeq(soloBar.cbSeq);
+    auto &entry = soloReadFeat->pendingAmbiguous_[ambigKey];
+    maybeUpgradeBridgeAmbigRepresentativeQual(entry, soloBar, soloBar.pSolo.QSbase, soloBar.pSolo.QSmax);
 
-    entry.umiCounts[umi24]++;
+    auto oit = soloReadFeat->bridgeAmbigReadInfoOrphan_.find(ambigKey);
+    if (oit != soloReadFeat->bridgeAmbigReadInfoOrphan_.end()) {
+        entry.bridgeAmbigReadInfoN_ += oit->second.readInfoN_;
+        if (!entry.bridgeAmbigReadInfoHaveSample_ && oit->second.haveSample_) {
+            entry.bridgeAmbigReadInfoSampleFlag_ = oit->second.sampleFlag_;
+            entry.bridgeAmbigReadInfoHaveSample_ = true;
+        }
+        soloReadFeat->bridgeAmbigReadInfoOrphan_.erase(oit);
+    }
 
-    SoloReadFeature::ExtendedAmbiguousEntry::AmbiguousObservation obs;
-    obs.geneIdx = geneIdx;
-    obs.tagIdx = 0;
-    obs.umi24 = umi24;
-    obs.count = 1;
-    entry.observations.push_back(obs);
+    const uint32_t umi24 = soloBar.umiB & 0xFFFFFF;
+    const uint64_t ugKey = (static_cast<uint64_t>(umi24 & 0xFFFFFFu) << 16)
+        | static_cast<uint64_t>(static_cast<uint16_t>(geneIdx));
+    entry.bridgeAmbigUmiGene_[ugKey] += 1u;
 }
 }
 
@@ -552,11 +698,8 @@ uint32 outputReadCB_base(fstream *streamOut, const uint64 iRead, const int32 fea
                 && !soloReadFeat->pSolo.flexMode
                 && std::getenv("STAR_SOLO_NONFLEX_HASH_BRIDGE") != nullptr;
             if (nonFlexHashBridge) {
-                if (bridgeUsesDeferredAccounting(soloReadFeat, soloBar)) {
-                    captureBridgeDeferredAccounting(soloReadFeat, soloBar, readFlag.flag,
-                                                   false,
-                                                   false,
-                                                   static_cast<uint8_t>(soloBar.pSolo.QSbase));
+                if (bridgeNonFlexAmbigSidecar(soloReadFeat, soloBar)) {
+                    accumulateBridgeAmbigReadInfoAggregates(soloReadFeat, soloBar, readFlag);
                 } else if (soloBar.cbMatch >= 0 && soloBar.cbMatch <= 1 && !soloBar.cbMatchInd.empty()) {
                     accumulateBridgeImmediateReadFlags(soloReadFeat,
                                                        static_cast<uint32_t>(soloBar.cbMatchInd[0]),
@@ -595,12 +738,7 @@ uint32 outputReadCB_base(fstream *streamOut, const uint64 iRead, const int32 fea
                 && std::getenv("STAR_SOLO_NONFLEX_HASH_BRIDGE") != nullptr;
             if (nonFlexHashBridge) {
                 const bool multiFeature = !reFe.geneMult.empty();
-                if (bridgeUsesDeferredAccounting(soloReadFeat, soloBar)) {
-                    captureBridgeDeferredAccounting(soloReadFeat, soloBar, readFlag.flag,
-                                                   true,
-                                                   multiFeature,
-                                                   static_cast<uint8_t>(soloBar.pSolo.QSbase));
-                } else if (soloBar.cbMatch >= 0 && soloBar.cbMatch <= 1 && !soloBar.cbMatchInd.empty()) {
+                if (soloBar.cbMatch >= 0 && soloBar.cbMatch <= 1 && !soloBar.cbMatchInd.empty()) {
                     accumulateBridgeImmediateReadFlags(soloReadFeat,
                                                        static_cast<uint32_t>(soloBar.cbMatchInd[0]),
                                                        readFlag.flag,
@@ -630,6 +768,9 @@ uint32 outputReadCB_base(fstream *streamOut, const uint64 iRead, const int32 fea
                         insertInlineHashEntry(soloReadFeat, soloBar, reFe.gene);
                     }
                     nout = 1;
+                }
+                if (isAmbiguous && bridgeNonFlexAmbigSidecar(soloReadFeat, soloBar)) {
+                    accumulateBridgeAmbigGeneAggregates(soloReadFeat, soloBar, readFlag, multiFeature);
                 }
                 break;
             }

@@ -575,6 +575,47 @@ These scripts validate that default bundles work with minimal explicit parameter
   - current-branch legacy peak RSS: `40193584 kB`
   - older pre-direct bridge peak RSS: `44360304 kB`
 
+## Solo non-Flex bridge v10 tuple redesign (2026-03-25)
+
+- Implemented on clean base `735ed6e` in isolated worktree: exact hash uses global `(wlCb, umi24, gene16)` keys; ambiguous side uses `bridgeAmbigUmiGene_` aggregates; per-key aggregated ambiguous read accounting (gene U/M counts, readInfo counts, sample read-flag templates, `bridgeAmbigPinCandQuals_`); readInfo-only ambiguous CBs use `bridgeAmbigReadInfoOrphan_` (merged on first gene, pin-only epilogue at resolve — same lifecycle as legacy `bridgePinOrphans_`); no `bridgeAmbigPinFlat_` / per-read pin replay vectors; representative best `cbQual`; `CbBayesianResolver` skips the UMI term when the histogram is empty.
+- 2M UCSF GEX check (same FASTQs and STAR CLI as `validation_pair_20260324/iPSC2_1_GEX_2M_unique_hashbridge_direct_paired_v9`, `STAR_SOLO_NONFLEX_HASH_BRIDGE=1`, fresh `--outTmpDir`):
+  - `/tmp/v10_redesign_2m_parity3/` (local scratch; untracked)
+- Observed vs paired v9 control: `pending=20003` (match v9); `added_to_hash=12902` (match v9); `resolved=10398` vs v9 `10412` (−14); `Summary.csv` still differs slightly (e.g. 7225 vs 7226 cells, ~46 unique reads in cells) and raw/filtered matrices + filtered barcodes are not byte-identical — expect residual drift from key-level pin aggregation and from attributing ambiguous read counts to the Bayes-resolved CB when resolution succeeds (legacy per-read path used the pin winner only). `/usr/bin/time -v` max RSS ~38.3 GiB for this 2M run.
+
+## Full UCSF EBs2_2 GEX bridge tuple redesign (2026-03-25)
+
+- Corrected full-sample **EBs2_2** GEX lanes only in `readFilesIn`; same CLI family as `paper_bench_solo_full_20260324/ucsf_ebs2_2_standard_solohash_optimized_v4` (Solo + `pfMultiConfig` + CR-assign flags); `STAR_SOLO_NONFLEX_HASH_BRIDGE=1`, `--soloInlineHashMode yes`, 32 threads, worktree binary.
+- Artifact root: `/storage/100K/ucsf_solo_bridge_redesign_20260325/ucsf_ebs2_2_gexonly_bridge_redesign_v1/` (`RUN_COMMAND.sh`, `time.txt`, `BENCHMARK_SUMMARY.txt`).
+- `/usr/bin/time -v`: wall **20:07.92**, max RSS **70985716 kB**; mapping log **531 s** (10:19:27 → 10:28:18); `collapseUMIall_fromBridgeHash` **277.749 s**, `countCBgeneUMI` **279.954 s**, `processRecords` **505.697 s**.
+- Compare: direct bridge v4 wall **22:38.81** / RSS **70575848 kB** / mapping log **678 s**; baseline mastermerge v2 wall **19:48.45** / RSS **68149756 kB** (see `docs/HANDOFF_SOLO_OPTIMIZATION_20260324.md`).
+
+## Full UCSF EBs2_2 GEX bridge — CSR grouped collapse (2026-03-25)
+
+- Worktree binary; same CLI family as `ucsf_ebs2_2_gexonly_bridge_redesign_v1`; no global tuple sort; per-CB `(gene, umi)` sort; nested MultiGene maps still present before flat rewrite.
+- Artifact: `/storage/100K/ucsf_solo_bridge_redesign_20260325/ucsf_ebs2_2_gexonly_csr_groupedcollapse_20260325_v2/`
+- `collapseUMIall_fromBridgeHash` ~**208 s**, `processRecords` ~**439 s**, wall ~**19:07**, max RSS ~**70233136 kB**.
+
+## Full UCSF EBs2_2 GEX bridge — flat MultiGene collapse (2026-03-25)
+
+- Worktree `/tmp/star-suite-v10-redesign-20260325`; replaces nested `umiGeneMapCount` / `umiGeneMapCount0` / per-gene `umiCorrected` in `SoloFeature_collapseUMI_fromBridgeHash.cpp` with per-CB `MgRow` buffer + sort-by-corrected-UMI resolution; `countCellGeneUMI` sized with upper bound `totalHashSize * countMatStride`; fused `nReadPerCB` / `nCbGeneSeg` into main CB loop.
+- Artifact: `/storage/100K/ucsf_solo_bridge_redesign_20260325/ucsf_ebs2_2_gexonly_flat_multigene_20260325/`
+- `/usr/bin/time -v`: wall **16:22.00**, max RSS **70368812 kB**; `collapseUMIall_fromBridgeHash` **48.125 s**, `countCBgeneUMI` **50.112 s**, `processRecords` **277.645 s**; `Summary.csv` top lines align with CSR v2 within small threading/cell-call drift (e.g. **13721** vs **13724** estimated cells).
+
+## UCSF 2M — flat MultiGene bridge check (2026-03-25)
+
+- Fresh tmp root: `/tmp/v10_flat_mg_2m_20260325/` — wall **~93 s**, max RSS **~40197056 kB**; `collapseUMIall_fromBridgeHash` **~0.11 s**; `STAR_SOLO_NONFLEX_HASH_BRIDGE=1`, same FASTQ/CLI family as `iPSC2_1_GEX_2M_unique_hashbridge_direct_samefastq_v4`.
+
+## Non-Flex bridge hash snapshot harness (2026-03-25)
+
+- **Snapshot-out:** `STAR_SOLO_BRIDGE_HASH_SNAPSHOT_OUT=/abs/path.bin` on a normal direct-bridge run; written at entry to `collapseUMIall_fromBridgeHash()` (after resolve + clique correction). Log line: `STAR_SOLO_BRIDGE_HASH_SNAPSHOT_OUT wrote N bridge hash entries`.
+- **Replay:** `STAR_SOLO_BRIDGE_HASH_SNAPSHOT_IN` + **`STAR_SOLO_BRIDGE_HASH_SNAPSHOT_REPLAY_SKIP_READS=1`** (required); entire `mapThreadsSpawn()` is skipped (no FASTQ decompression, no read loading, no thread pool for mapping); `closeReadsFiles()` kills decompression processes immediately; loads hash + bridge read-accounting fields; runs the same collapse and downstream Solo output. Do not combine `_IN` and `_OUT` in one process.
+- **Format (v2):** magic `STARBG2\0`, `version=2`, `featureType`, `cbWLsize`, `runThreadN`, `statsReadN`, `totalHashEntries`, immediate/pin/flag metadata counts. Hash sections: `uint64 n` then `n` packed 16-byte `(uint64 key, uint32 val, uint32 pad)` rows written/read as bulk blocks; `kh_resize` pre-sizes hash on load. Remaining sections (immediate counts, pin vectors, flagCounts, stats, cbReadCount) also use bulk read/write. Little-endian; incompatible magic/version/dimension exits with error.
+- **Smoke (250k PE reads, 4 threads, worktree binary):** snapshot `/tmp/bg_snap_test.bin` (~42 MiB for 312 hash rows in this downsample); seed `/tmp/bg_snap_smoke_seed/`, replay `/tmp/bg_snap_smoke_replay/`. `collapseUMIall_fromBridgeHash` **~0.001 s** on replay vs **~0.095 s** seed; `processRecords` **~0.17 s** both; `Summary.csv` matches seed on GeneFull / saturation / cell lines; differs on mapping- and Q30-derived rows (expected when mapping is skipped).
+- **Full-sample EBs2_2 v1 seed/replay (done 2026-03-25):** same CLI family as `ucsf_ebs2_2_gexonly_flat_multigene_20260325`; snapshot **`…/ucsf_ebs2_2_flatmg_snapshot_v1.bin`** (~**4.9 GiB**, **323,956,844** hash rows, format `STARBG1`). Seed wall ~**17:05**, replay wall ~**13:37** (mapping overhead ~350 s, snapshot load ~28 s); **raw/filtered `matrix.mtx` byte-identical**.
+- **v2 format + mapping skip (done 2026-03-25):** format `STARBG2` — bulk I/O (block read/write per hash section), `kh_resize` pre-sizing, no sort-on-write. Replay short-circuit moved from `mapChunk()` to `STAR.cpp` (`mapThreadsSpawn()` skipped entirely; `closeReadsFiles()` called immediately). Snapshot **`/storage/100K/ucsf_solo_bridge_snapshot_20260325/ucsf_ebs2_2_flatmg_snapshot_v2.bin`** (~**4.9 GiB**, **323,954,266** hash rows). Seed: `…/ucsf_ebs2_2_flatmg_snapshot_seed_v1/` (wall **16:27**, RSS **70294 MB**). Replay: `…/ucsf_ebs2_2_flatmg_snapshot_replay_v1/` (wall **7:56**, RSS **48627 MB**; snapshot load **4.9 s**; collapse **71 s**). **raw/filtered `matrix.mtx` byte-identical**. Summary: GeneFull/cells/UMI/saturation all identical; Q30/genome mapping `-nan`/0 on replay (expected, mapping skipped entirely).
+- **v2 vs v1 replay improvement:** wall **7:56 vs 13:37** (−42%); snapshot load **4.9 s vs 28 s** (−83%); mapping overhead **0 s vs 350 s** (−100%); RSS **49 GB vs 68 GB** (−28%).
+- **Shell hygiene:** seed `RUN_COMMAND.sh` unsets `STAR_SOLO_BRIDGE_HASH_SNAPSHOT_IN` / `_REPLAY_SKIP_READS`; replay unsets `_OUT`.
+
 ## Solo Binary Spool UCSF 2M Benchmarks (2026-03-24)
 
 - Corrected UCSF `iPSC2_1/GEX` 2M downsample, `--soloMultiMappers Rescue --soloCrMultimapRescue yes`
