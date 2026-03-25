@@ -535,6 +535,20 @@ These scripts validate that default bundles work with minimal explicit parameter
   - current-branch legacy peak RSS: `40193584 kB`
   - older pre-direct bridge peak RSS: `44360304 kB`
 
+## Solo non-Flex bridge v10 tuple redesign (2026-03-25)
+
+- Implemented on clean base `735ed6e` in isolated worktree: exact hash uses global `(wlCb, umi24, gene16)` keys; ambiguous side uses `bridgeAmbigUmiGene_` aggregates; per-key aggregated ambiguous read accounting (gene U/M counts, readInfo counts, sample read-flag templates, `bridgeAmbigPinCandQuals_`); readInfo-only ambiguous CBs use `bridgeAmbigReadInfoOrphan_` (merged on first gene, pin-only epilogue at resolve — same lifecycle as legacy `bridgePinOrphans_`); no `bridgeAmbigPinFlat_` / per-read pin replay vectors; representative best `cbQual`; `CbBayesianResolver` skips the UMI term when the histogram is empty.
+- 2M UCSF GEX check (same FASTQs and STAR CLI as `validation_pair_20260324/iPSC2_1_GEX_2M_unique_hashbridge_direct_paired_v9`, `STAR_SOLO_NONFLEX_HASH_BRIDGE=1`, fresh `--outTmpDir`):
+  - `/tmp/v10_redesign_2m_parity3/` (local scratch; untracked)
+- Observed vs paired v9 control: `pending=20003` (match v9); `added_to_hash=12902` (match v9); `resolved=10398` vs v9 `10412` (−14); `Summary.csv` still differs slightly (e.g. 7225 vs 7226 cells, ~46 unique reads in cells) and raw/filtered matrices + filtered barcodes are not byte-identical — expect residual drift from key-level pin aggregation and from attributing ambiguous read counts to the Bayes-resolved CB when resolution succeeds (legacy per-read path used the pin winner only). `/usr/bin/time -v` max RSS ~38.3 GiB for this 2M run.
+
+## Full UCSF EBs2_2 GEX bridge tuple redesign (2026-03-25)
+
+- Corrected full-sample **EBs2_2** GEX lanes only in `readFilesIn`; same CLI family as `paper_bench_solo_full_20260324/ucsf_ebs2_2_standard_solohash_optimized_v4` (Solo + `pfMultiConfig` + CR-assign flags); `STAR_SOLO_NONFLEX_HASH_BRIDGE=1`, `--soloInlineHashMode yes`, 32 threads, worktree binary.
+- Artifact root: `/storage/100K/ucsf_solo_bridge_redesign_20260325/ucsf_ebs2_2_gexonly_bridge_redesign_v1/` (`RUN_COMMAND.sh`, `time.txt`, `BENCHMARK_SUMMARY.txt`).
+- `/usr/bin/time -v`: wall **20:07.92**, max RSS **70985716 kB**; mapping log **531 s** (10:19:27 → 10:28:18); `collapseUMIall_fromBridgeHash` **277.749 s**, `countCBgeneUMI` **279.954 s**, `processRecords` **505.697 s**.
+- Compare: direct bridge v4 wall **22:38.81** / RSS **70575848 kB** / mapping log **678 s**; baseline mastermerge v2 wall **19:48.45** / RSS **68149756 kB** (see `docs/HANDOFF_SOLO_OPTIMIZATION_20260324.md`).
+
 ## Solo Binary Spool UCSF 2M Benchmarks (2026-03-24)
 
 - Corrected UCSF `iPSC2_1/GEX` 2M downsample, `--soloMultiMappers Rescue --soloCrMultimapRescue yes`

@@ -142,13 +142,11 @@ BayesianResult CbBayesianResolver::resolve(const CBContext &context,
     for (const auto &umi : umiCounts) {
         totalUmiWeight += umiWeight(umi.first, umi.second);
     }
-    
-    if (totalUmiWeight == 0.0) {
-        // No UMI counts: cannot resolve
-        result.status = BayesianResult::Unresolved;
-        return result;
-    }
-    
+
+    // Empty UMI histogram: skip the UMI likelihood term. Under the current uniform UMI model the
+    // per-candidate UMI contribution is identical for all candidates, so it does not affect ranking.
+    const bool skipUmiTerm = (totalUmiWeight == 0.0);
+
     // For each candidate, compute log-posterior
     for (size_t i = 0; i < candidates.size(); ++i) {
         const Candidate &cand = candidates[i];
@@ -170,15 +168,13 @@ BayesianResult CbBayesianResolver::resolve(const CBContext &context,
         // Compute log-likelihood for CB sequence (using quality scores)
         double logLikelihoodCB = computeLogLikelihood(context, candidateSeq);
         
-        // Compute log-likelihood for UMIs
-        // For uniform UMI model: log P(UMIs | candidate) = sum over UMIs: weight * log(1/N)
-        // where N is the number of possible UMIs (we normalize by total weight)
-        // In practice, we use: sum over UMIs: weight * log(weight / total_weight)
         double logLikelihoodUMI = 0.0;
-        for (const auto &umi : umiCounts) {
-            double weight = umiWeight(umi.first, umi.second);
-            double prob = weight / totalUmiWeight;
-            logLikelihoodUMI += weight * std::log(prob + MIN_ERROR_PROB);
+        if (!skipUmiTerm) {
+            for (const auto &umi : umiCounts) {
+                double weight = umiWeight(umi.first, umi.second);
+                double prob = weight / totalUmiWeight;
+                logLikelihoodUMI += weight * std::log(prob + MIN_ERROR_PROB);
+            }
         }
         
         // Compute prior

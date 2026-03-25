@@ -1,5 +1,5 @@
 // Non-Flex Solo inline-hash bridge: collapse UMIs directly from aggregated bridge hash
-// (tagless key [bridgeCB24][UMI24][GENE16]) without materializeRGUFromHash() / rGeneUMI.
+// (tagless key [wlCb24][UMI24][geneFull16]) without materializeRGUFromHash() / rGeneUMI.
 
 #include "SoloFeature.h"
 #include "SoloReadFeature.h"
@@ -104,56 +104,40 @@ void SoloFeature::collapseUMIall_fromBridgeHash()
     std::vector<BridgeHashRec> recs;
     recs.reserve(totalHashSize);
 
-    auto appendHashRecords = [&](SoloReadFeature *srcFeat, khash_t(cg_agg) *&hash, bool clearCompactMaps) {
+    auto appendHashRecords = [&](SoloReadFeature *srcFeat, khash_t(cg_agg) *&hash) {
         if (srcFeat == nullptr || hash == nullptr) {
             return;
         }
+        (void)srcFeat;
         for (khiter_t it = kh_begin(hash); it != kh_end(hash); ++it) {
             if (!kh_exist(hash, it))
                 continue;
             const uint64_t key = kh_key(hash, it);
             const uint32_t val = kh_val(hash, it);
 
-            uint32_t compactCb = 0, umi24 = 0;
-            uint16_t compactGene = 0;
-            unpackBridgeCgAggKey(key, &compactCb, &umi24, &compactGene);
+            uint32_t wlCb = 0, umi24 = 0;
+            uint16_t gene16 = 0;
+            unpackBridgeWlUmiGeneKey(key, &wlCb, &umi24, &gene16);
 
-            const uint32_t wlCb = srcFeat->bridgeCompactToWl(compactCb);
-            if (wlCb == static_cast<uint32_t>(-1))
-                continue;
-            const uint32_t geneFull = srcFeat->bridgeCompactToGene(compactGene);
-            if (geneFull == static_cast<uint32_t>(-1))
-                continue;
-
-            recs.push_back({wlCb, geneFull, umi24, val});
+            recs.push_back({wlCb, static_cast<uint32_t>(gene16), umi24, val});
         }
 
         kh_destroy(cg_agg, hash);
         hash = nullptr;
-        if (clearCompactMaps) {
-            decltype(srcFeat->bridgeCbCompactByWl_)().swap(srcFeat->bridgeCbCompactByWl_);
-            std::vector<uint32_t>().swap(srcFeat->bridgeCbWlByCompact_);
-            decltype(srcFeat->bridgeGeneCompactByFull_)().swap(srcFeat->bridgeGeneCompactByFull_);
-            std::vector<uint32_t>().swap(srcFeat->bridgeGeneFullByCompact_);
-        }
     };
 
     for (int ii = 0; ii < P.runThreadN; ++ii) {
         if (readFeatAll[ii] && readFeatAll[ii]->inlineHash_ && kh_size(readFeatAll[ii]->inlineHash_) > 0) {
-            appendHashRecords(readFeatAll[ii], readFeatAll[ii]->inlineHash_, true);
+            appendHashRecords(readFeatAll[ii], readFeatAll[ii]->inlineHash_);
         }
     }
 
     if (readFeatSum->inlineHash_) {
         if (kh_size(readFeatSum->inlineHash_) > 0) {
-            appendHashRecords(readFeatSum, readFeatSum->inlineHash_, true);
+            appendHashRecords(readFeatSum, readFeatSum->inlineHash_);
         } else {
             kh_destroy(cg_agg, readFeatSum->inlineHash_);
             readFeatSum->inlineHash_ = nullptr;
-            decltype(readFeatSum->bridgeCbCompactByWl_)().swap(readFeatSum->bridgeCbCompactByWl_);
-            std::vector<uint32_t>().swap(readFeatSum->bridgeCbWlByCompact_);
-            decltype(readFeatSum->bridgeGeneCompactByFull_)().swap(readFeatSum->bridgeGeneCompactByFull_);
-            std::vector<uint32_t>().swap(readFeatSum->bridgeGeneFullByCompact_);
         }
     }
 

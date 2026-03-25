@@ -1496,3 +1496,54 @@ Conclusion after fix 5:
 - residual full-output drift is small but real
 - the direct bridge is now viable enough to iterate further, but it is not yet
   ready to replace the baseline path on either speed or parity
+
+### Full EBs2_2 direct bridge — tuple redesign + aggregated ambiguous CB (2026-03-25)
+
+Detached worktree `/tmp/star-suite-v10-redesign-20260325` (clean rebuild), policy:
+Bayes-resolved ambiguous read accounting when resolution succeeds (preferred
+semantics; not legacy pin-only).
+
+- **Artifact root:**
+  `/storage/100K/ucsf_solo_bridge_redesign_20260325/ucsf_ebs2_2_gexonly_bridge_redesign_v1/`
+- **Harness:** same STAR CLI family as archived
+  `ucsf_ebs2_2_standard_solohash_optimized_v4` (GEX-only `readFilesIn`, same
+  Solo + `pfMultiConfig` + CR-assign flags); `STAR_SOLO_NONFLEX_HASH_BRIDGE=1`,
+  `--soloInlineHashMode yes`, `--outTmpDir` under the artifact root.
+- **`/usr/bin/time -v`:** wall **20:07.92**; max RSS **70985716 kB** (~67.7 GiB).
+- **Mapping (`Log.out` / `Log.final.out`):** started **Mar 25 10:19:27**,
+  finished **Mar 25 10:28:18** → **531 s** (~8 m 51 s); mapping speed line
+  ~**1426** M reads/h on this run.
+- **Solo timings (`Log.out`):**
+  - `collapseUMIall_fromBridgeHash` **277.749 s**
+  - `countCBgeneUMI` **279.954 s**
+  - `processRecords` **505.697 s**
+  - `cellFiltering` **214.226 s**
+- **`[AMBIG-CB-RESOLVE]`:** `pending=704105` `resolved=163716`
+  `still_ambiguous=540389` `added_to_hash=1090231`
+- **`Summary.csv` (GeneFull):** Unique GeneFull **0.85468**; Estimated cells
+  **13715**; UMIs in cells **254181669**; Total GeneFull detected **33750**
+
+Comparison anchors (same UCSF corrected EBs2_2 GEX input family):
+
+| Run | Wall | Max RSS kB | Mapping elapsed (from logs) |
+|-----|------|------------|------------------------------|
+| Baseline mastermerge v2 | 19:48.45 | 68149756 | (see that `Log.out`) |
+| Direct bridge v4 | 22:38.81 | 70575848 | 13:53:03 → 14:04:21 = **678 s** |
+| **Redesign (this)** | **20:07.92** | **70985716** | 10:19:27 → 10:28:18 = **531 s** |
+
+Readout:
+
+- **Wall** improved by ~**151 s** (~**11%**) vs bridge **v4** on this execution;
+  still ~**19 s** slower (~**1.6%**) than baseline mastermerge v2.
+- **Mapping** log interval dropped by ~**147 s** (~**22%**) vs v4 on this pair of
+  runs (treat as indicative; different calendar days / load).
+- **RSS** essentially in the v4 tier (~**+410 MiB** vs v4); still several GiB
+  above baseline-only.
+- **`collapseUMIall_fromBridgeHash`** remains ~**278 s** — the dominant Solo
+  cost is unchanged; the redesign targets ambiguous **mapping** bookkeeping, not
+  post-map hash collapse CPU.
+
+Worth pursuing further if the **mapping** improvement reproduces under repeated
+serialized runs and if the Bayes-resolved accounting policy is accepted
+product-side; **collapse** time still dominates Solo vs baseline until further
+HASH phase work.

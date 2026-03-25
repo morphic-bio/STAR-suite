@@ -5,6 +5,7 @@
 #include "Genome.h"
 #include "solo/CbBayesianResolver.h"
 #include "solo/CbCorrector.h"
+#include "hash_shims_cpp_compat.h"
 #include "streamFuns.h"
 #include "ErrorWarning.h"
 #include <fstream>
@@ -291,7 +292,14 @@ void SoloFeature::resolvePendingAmbiguousToHash(bool useBridgeCompactMapping)
     static const bool g_disableAmbigResolve =
         (std::getenv("STAR_DISABLE_AMBIG_CB_RESOLVE") != nullptr);
 
-    if (!readFeatSum || !readFeatSum->inlineHash_ || readFeatSum->pendingAmbiguous_.empty()) {
+    if (!readFeatSum || !readFeatSum->inlineHash_) {
+        return;
+    }
+
+    const bool havePending = !readFeatSum->pendingAmbiguous_.empty();
+    const bool haveBridgeReadInfoOrphans = useBridgeCompactMapping
+        && !readFeatSum->bridgeAmbigReadInfoOrphan_.empty();
+    if (!havePending && !haveBridgeReadInfoOrphans) {
         return;
     }
 
@@ -302,20 +310,62 @@ void SoloFeature::resolvePendingAmbiguousToHash(bool useBridgeCompactMapping)
     }
 
     if (!pSolo.cbCorrector) {
-        P.inOut->logMain << "[AMBIG-CB-RESOLVE] " << readFeatSum->pendingAmbiguous_.size()
-                         << " pending ambiguous CBs but CbCorrector not available, skipping" << endl;
+        if (havePending) {
+            P.inOut->logMain << "[AMBIG-CB-RESOLVE] " << readFeatSum->pendingAmbiguous_.size()
+                             << " pending ambiguous CBs but CbCorrector not available, skipping" << endl;
+        }
+        if (haveBridgeReadInfoOrphans) {
+            for (const auto &okv : readFeatSum->bridgeAmbigReadInfoOrphan_) {
+                const auto &orph = okv.second;
+                SoloReadFeature::ExtendedAmbiguousEntry synthetic;
+                synthetic.candidateIdx = orph.candidateIdx;
+                synthetic.cbSeq = orph.cbSeq;
+                synthetic.cbQual = orph.cbQual;
+                synthetic.bridgeAmbigPinCandQuals_ = orph.pinCandQuals_;
+                synthetic.bridgeAmbigReadInfoN_ = orph.readInfoN_;
+                synthetic.bridgeAmbigReadInfoHaveSample_ = orph.haveSample_;
+                synthetic.bridgeAmbigReadInfoSampleFlag_ = orph.sampleFlag_;
+                readFeatSum->applyBridgeAmbiguousAggregatedReadAccounting(P, featureType, synthetic, false, 0);
+            }
+            readFeatSum->bridgeAmbigReadInfoOrphan_.clear();
+        }
         return;
     }
+
+    auto applyBridgeReadInfoOrphans = [&]() {
+        if (!useBridgeCompactMapping) {
+            return;
+        }
+        for (const auto &okv : readFeatSum->bridgeAmbigReadInfoOrphan_) {
+            const auto &orph = okv.second;
+            SoloReadFeature::ExtendedAmbiguousEntry synthetic;
+            synthetic.candidateIdx = orph.candidateIdx;
+            synthetic.cbSeq = orph.cbSeq;
+            synthetic.cbQual = orph.cbQual;
+            synthetic.bridgeAmbigPinCandQuals_ = orph.pinCandQuals_;
+            synthetic.bridgeAmbigReadInfoN_ = orph.readInfoN_;
+            synthetic.bridgeAmbigReadInfoHaveSample_ = orph.haveSample_;
+            synthetic.bridgeAmbigReadInfoSampleFlag_ = orph.sampleFlag_;
+            readFeatSum->applyBridgeAmbiguousAggregatedReadAccounting(P, featureType, synthetic, false, 0);
+        }
+        readFeatSum->bridgeAmbigReadInfoOrphan_.clear();
+    };
 
     khash_t(cg_agg) *hash = readFeatSum->inlineHash_;
     const std::vector<std::string> &whitelistSeqs = pSolo.cbCorrector->whitelist();
     CbBayesianResolver resolver(whitelistSeqs.size(), &whitelistSeqs);
+    static const std::unordered_map<uint32_t, uint32_t> kEmptyUmiHistogram;
 
     uint64_t resolved = 0, stillAmbiguous = 0, addedToHash = 0;
     for (auto &kv : readFeatSum->pendingAmbiguous_) {
         SoloReadFeature::ExtendedAmbiguousEntry &entry = kv.second;
 
-        if (entry.candidateIdx.empty() || entry.umiCounts.empty()) {
+        if (entry.candidateIdx.empty()) {
+            stillAmbiguous++;
+            continue;
+        }
+
+        if (!useBridgeCompactMapping && entry.umiCounts.empty()) {
             stillAmbiguous++;
             continue;
         }
@@ -335,49 +385,74 @@ void SoloFeature::resolvePendingAmbiguousToHash(bool useBridgeCompactMapping)
             continue;
         }
 
-        BayesianResult result = resolver.resolve(context, candidates, entry.umiCounts);
-        if (result.status != BayesianResult::Resolved || result.bestIdx == 0) {
+        const std::unordered_map<uint32_t, uint32_t> &umiForResolve =
+            useBridgeCompactMapping ? kEmptyUmiHistogram : entry.umiCounts;
+        BayesianResult result = resolver.resolve(context, candidates, umiForResolve);
+        const bool bayesResolved = (result.status == BayesianResult::Resolved && result.bestIdx != 0);
+        const uint32_t resolvedCbIdx = bayesResolved ? (result.bestIdx - 1u) : 0u;
+
+        if (useBridgeCompactMapping) {
+            readFeatSum->applyBridgeAmbiguousAggregatedReadAccounting(
+                P, featureType, entry, bayesResolved, resolvedCbIdx);
+        }
+
+        if (!bayesResolved) {
             stillAmbiguous++;
             continue;
         }
 
         resolved++;
-        uint32_t resolvedCbIdx = result.bestIdx - 1;
-        uint32_t storedCbIdx = resolvedCbIdx;
-        if (useBridgeCompactMapping) {
-            storedCbIdx = readFeatSum->getOrCreateBridgeCompactCb(resolvedCbIdx);
-        }
 
         if (shouldTraceBridgeBarcode(pSolo, resolvedCbIdx)) {
             std::fprintf(stderr,
-                         "[BRIDGE-CB-TRACE] mode=ambig_resolve cb=%s wlIdx=%u candidates=%zu umiKeys=%zu obs=%zu status=%d bestIdx=%u\n",
+                         "[BRIDGE-CB-TRACE] mode=ambig_resolve cb=%s wlIdx=%u candidates=%zu "
+                         "bridgeAmbigUmiGene=%zu legacyObs=%zu status=%d bestIdx=%u\n",
                          pSolo.cbWLstr[resolvedCbIdx].c_str(),
                          resolvedCbIdx,
                          entry.candidateIdx.size(),
-                         entry.umiCounts.size(),
+                         entry.bridgeAmbigUmiGene_.size(),
                          entry.observations.size(),
                          static_cast<int>(result.status),
                          result.bestIdx);
         }
 
-        for (const auto &obs : entry.observations) {
-            uint16_t storedGeneIdx = static_cast<uint16_t>(obs.geneIdx);
-            if (useBridgeCompactMapping) {
-                storedGeneIdx = readFeatSum->getOrCreateBridgeCompactGene(obs.geneIdx);
+        if (useBridgeCompactMapping) {
+            if (resolvedCbIdx >= 0x1000000u) {
+                ostringstream errOut;
+                errOut << "EXITING because of fatal ERROR: resolved whitelist CB index exceeds 24-bit bridge key\n";
+                exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_INCONSISTENT_DATA, P);
             }
-            uint64_t newKey = useBridgeCompactMapping
-                ? packBridgeCgAggKey(storedCbIdx, obs.umi24, storedGeneIdx)
-                : packCgAggKey(storedCbIdx, obs.umi24, storedGeneIdx, obs.tagIdx);
-            int absent;
-            khiter_t iter = kh_put(cg_agg, hash, newKey, &absent);
-            if (absent) {
-                kh_val(hash, iter) = obs.count;
-            } else {
-                kh_val(hash, iter) += obs.count;
+            for (const auto &ug : entry.bridgeAmbigUmiGene_) {
+                const uint64_t ugKey = ug.first;
+                const uint32_t umi24 = static_cast<uint32_t>((ugKey >> 16) & 0xFFFFFFu);
+                const uint16_t gene16 = static_cast<uint16_t>(ugKey & 0xFFFFu);
+                const uint64_t newKey = packBridgeWlUmiGeneKey(resolvedCbIdx, umi24, gene16);
+                int absent;
+                khiter_t iter = kh_put(cg_agg, hash, newKey, &absent);
+                if (absent) {
+                    kh_val(hash, iter) = ug.second;
+                } else {
+                    kh_val(hash, iter) += ug.second;
+                }
+                addedToHash++;
             }
-            addedToHash++;
+        } else {
+            for (const auto &obs : entry.observations) {
+                const uint64_t newKey = packCgAggKey(resolvedCbIdx, obs.umi24, static_cast<uint16_t>(obs.geneIdx),
+                                                     obs.tagIdx);
+                int absent;
+                khiter_t iter = kh_put(cg_agg, hash, newKey, &absent);
+                if (absent) {
+                    kh_val(hash, iter) = obs.count;
+                } else {
+                    kh_val(hash, iter) += obs.count;
+                }
+                addedToHash++;
+            }
         }
     }
+
+    applyBridgeReadInfoOrphans();
 
     P.inOut->logMain << "[AMBIG-CB-RESOLVE] pending=" << readFeatSum->pendingAmbiguous_.size()
                      << " resolved=" << resolved
@@ -597,12 +672,8 @@ void SoloFeature::clearLarge()
 
     if (readFeatSum != nullptr) {
         decltype(readFeatSum->bridgeImmediateReadCounts_)().swap(readFeatSum->bridgeImmediateReadCounts_);
-        std::vector<SoloReadFeature::BridgeDeferredReadAccounting>().swap(readFeatSum->bridgeDeferredAccounting_);
-        std::vector<uint32_t>().swap(readFeatSum->bridgeDeferredCandidates_);
-        decltype(readFeatSum->bridgeCbCompactByWl_)().swap(readFeatSum->bridgeCbCompactByWl_);
-        std::vector<uint32_t>().swap(readFeatSum->bridgeCbWlByCompact_);
-        decltype(readFeatSum->bridgeGeneCompactByFull_)().swap(readFeatSum->bridgeGeneCompactByFull_);
-        std::vector<uint32_t>().swap(readFeatSum->bridgeGeneFullByCompact_);
+        readFeatSum->bridgePinNreadUnique_.clear();
+        readFeatSum->bridgePinNreadMulti_.clear();
     }
     
 #ifdef DEBUG_CB_UB_PARITY

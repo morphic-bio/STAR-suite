@@ -8,6 +8,7 @@
 #include "SoloReadInfoSink.h"
 #include "hash_shims_cpp_compat.h"  // For unpackReadIdCbUmi
 #include "ErrorWarning.h"
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
@@ -39,16 +40,6 @@ bool nonFlexHashBridgeApplies(const SoloFeature& feat)
     }
 }
 
-uint32_t unpackBridgeDeferredCandidateCb(uint32_t packed)
-{
-    return packed >> 8;
-}
-
-char unpackBridgeDeferredCandidateQual(uint32_t packed)
-{
-    return static_cast<char>(packed & 0xFFu);
-}
-
 void populateBridgeReadAccounting(SoloFeature &feat,
                                   std::vector<uint32_t> &nReadPerCBunique1,
                                   std::vector<uint32_t> &nReadPerCBmulti1)
@@ -66,78 +57,18 @@ void populateBridgeReadAccounting(SoloFeature &feat,
         nReadPerCBmulti1[kv.first] += static_cast<uint32_t>(kv.second >> 32);
     }
 
-    for (const auto &rec : feat.readFeatSum->bridgeDeferredAccounting_) {
-        const bool featGood = rec.featGood != 0;
-        const bool multiFeature = rec.multiFeature != 0;
-        bool readIsCounted = false;
-        bool noTooManyWLmatches = false;
-        uint32_t cb = 0;
-
-#ifdef MATCH_CellRanger
-        double ptot = 0.0, pmax = 0.0, pin;
-#else
-        float ptot = 0.0, pmax = 0.0, pin;
-#endif
-        const uint32_t begin = rec.candidateOffset;
-        const uint32_t end = begin + rec.candidateCount;
-        for (uint32_t ii = begin; ii < end && ii < feat.readFeatSum->bridgeDeferredCandidates_.size(); ++ii) {
-            const uint32_t packedCandidate = feat.readFeatSum->bridgeDeferredCandidates_[ii];
-            const uint32_t cbin = unpackBridgeDeferredCandidateCb(packedCandidate);
-            char qin = unpackBridgeDeferredCandidateQual(packedCandidate);
-            if (cbin < feat.readFeatSum->cbReadCount.size() && feat.readFeatSum->cbReadCount[cbin] > 0) {
-                qin -= feat.pSolo.QSbase;
-                qin = qin < feat.pSolo.QSmax ? qin : feat.pSolo.QSmax;
-                pin = feat.readFeatSum->cbReadCount[cbin] * std::pow(10.0, -qin / 10.0);
-                ptot += pin;
-                if (pin > pmax) {
-                    cb = cbin;
-                    pmax = pin;
-                }
-            }
+    const size_t pinN = feat.readFeatSum->bridgePinNreadUnique_.size();
+    if (pinN > 0) {
+        const size_t lim = std::min(nReadPerCBunique1.size(), pinN);
+        for (size_t i = 0; i < lim; ++i) {
+            nReadPerCBunique1[i] += feat.readFeatSum->bridgePinNreadUnique_[i];
+            nReadPerCBmulti1[i] += feat.readFeatSum->bridgePinNreadMulti_[i];
         }
-        if (ptot > 0.0 && pmax >= feat.pSolo.cbMinP * ptot) {
-            if (featGood) {
-                readIsCounted = true;
-            }
-        } else {
-            noTooManyWLmatches = true;
-        }
-
-        if (featGood && noTooManyWLmatches) {
-            feat.readFeatSum->stats.V[feat.readFeatSum->stats.noTooManyWLmatches]++;
-        }
-
-        if (readIsCounted && cb < nReadPerCBunique1.size()) {
-            if (multiFeature) {
-                nReadPerCBmulti1[cb]++;
-            } else {
-                nReadPerCBunique1[cb]++;
-            }
-        }
-
-        if (feat.pSolo.readStatsYes[feat.featureType]) {
-            feat.readFlagCounts.flag = rec.readFlag;
-            if (readIsCounted) {
-                if (feat.readFlagCounts.checkBit(feat.readFlagCounts.featureU)) {
-                    feat.readFlagCounts.setBit(feat.readFlagCounts.countedU);
-                }
-                if (feat.readFlagCounts.checkBit(feat.readFlagCounts.featureM)) {
-                    feat.readFlagCounts.setBit(feat.readFlagCounts.countedM);
-                }
-            }
-            feat.readFlagCounts.setBit(feat.readFlagCounts.cbMatch);
-            if (!noTooManyWLmatches) {
-                feat.readFlagCounts.setBit(feat.readFlagCounts.cbMMmultiple);
-                feat.readFlagCounts.countsAdd(cb);
-            } else {
-                feat.readFlagCounts.countsAddNoCB();
-            }
-        }
+        feat.readFeatSum->bridgePinNreadUnique_.clear();
+        feat.readFeatSum->bridgePinNreadMulti_.clear();
     }
 
     decltype(feat.readFeatSum->bridgeImmediateReadCounts_)().swap(feat.readFeatSum->bridgeImmediateReadCounts_);
-    std::vector<SoloReadFeature::BridgeDeferredReadAccounting>().swap(feat.readFeatSum->bridgeDeferredAccounting_);
-    std::vector<uint32_t>().swap(feat.readFeatSum->bridgeDeferredCandidates_);
 }
 }
 
