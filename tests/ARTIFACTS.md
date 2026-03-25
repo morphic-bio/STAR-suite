@@ -549,6 +549,22 @@ These scripts validate that default bundles work with minimal explicit parameter
 - `/usr/bin/time -v`: wall **20:07.92**, max RSS **70985716 kB**; mapping log **531 s** (10:19:27 → 10:28:18); `collapseUMIall_fromBridgeHash` **277.749 s**, `countCBgeneUMI` **279.954 s**, `processRecords` **505.697 s**.
 - Compare: direct bridge v4 wall **22:38.81** / RSS **70575848 kB** / mapping log **678 s**; baseline mastermerge v2 wall **19:48.45** / RSS **68149756 kB** (see `docs/HANDOFF_SOLO_OPTIMIZATION_20260324.md`).
 
+## Full UCSF EBs2_2 GEX bridge — CSR grouped collapse (2026-03-25)
+
+- Worktree binary; same CLI family as `ucsf_ebs2_2_gexonly_bridge_redesign_v1`; no global tuple sort; per-CB `(gene, umi)` sort; nested MultiGene maps still present before flat rewrite.
+- Artifact: `/storage/100K/ucsf_solo_bridge_redesign_20260325/ucsf_ebs2_2_gexonly_csr_groupedcollapse_20260325_v2/`
+- `collapseUMIall_fromBridgeHash` ~**208 s**, `processRecords` ~**439 s**, wall ~**19:07**, max RSS ~**70233136 kB**.
+
+## Full UCSF EBs2_2 GEX bridge — flat MultiGene collapse (2026-03-25)
+
+- Worktree `/tmp/star-suite-v10-redesign-20260325`; replaces nested `umiGeneMapCount` / `umiGeneMapCount0` / per-gene `umiCorrected` in `SoloFeature_collapseUMI_fromBridgeHash.cpp` with per-CB `MgRow` buffer + sort-by-corrected-UMI resolution; `countCellGeneUMI` sized with upper bound `totalHashSize * countMatStride`; fused `nReadPerCB` / `nCbGeneSeg` into main CB loop.
+- Artifact: `/storage/100K/ucsf_solo_bridge_redesign_20260325/ucsf_ebs2_2_gexonly_flat_multigene_20260325/`
+- `/usr/bin/time -v`: wall **16:22.00**, max RSS **70368812 kB**; `collapseUMIall_fromBridgeHash` **48.125 s**, `countCBgeneUMI` **50.112 s**, `processRecords` **277.645 s**; `Summary.csv` top lines align with CSR v2 within small threading/cell-call drift (e.g. **13721** vs **13724** estimated cells).
+
+## UCSF 2M — flat MultiGene bridge check (2026-03-25)
+
+- Fresh tmp root: `/tmp/v10_flat_mg_2m_20260325/` — wall **~93 s**, max RSS **~40197056 kB**; `collapseUMIall_fromBridgeHash` **~0.11 s**; `STAR_SOLO_NONFLEX_HASH_BRIDGE=1`, same FASTQ/CLI family as `iPSC2_1_GEX_2M_unique_hashbridge_direct_samefastq_v4`.
+
 ## Solo Binary Spool UCSF 2M Benchmarks (2026-03-24)
 
 - Corrected UCSF `iPSC2_1/GEX` 2M downsample, `--soloMultiMappers Rescue --soloCrMultimapRescue yes`

@@ -1539,11 +1539,25 @@ Readout:
   runs (treat as indicative; different calendar days / load).
 - **RSS** essentially in the v4 tier (~**+410 MiB** vs v4); still several GiB
   above baseline-only.
-- **`collapseUMIall_fromBridgeHash`** remains ~**278 s** — the dominant Solo
-  cost is unchanged; the redesign targets ambiguous **mapping** bookkeeping, not
-  post-map hash collapse CPU.
+- **`collapseUMIall_fromBridgeHash`** was ~**278 s** on this artifact — the tuple
+  redesign did not change post-map collapse; follow-up work in the same worktree
+  addressed that (see below).
+
+#### Follow-up: CSR drain + flat MultiGene collapse (same worktree, 2026-03-25)
+
+- **CSR grouped collapse (nested maps removed from global sort only):**
+  `/storage/100K/ucsf_solo_bridge_redesign_20260325/ucsf_ebs2_2_gexonly_csr_groupedcollapse_20260325_v2/`
+  — `collapseUMIall_fromBridgeHash` ~**208 s**, `processRecords` ~**439 s**, wall
+  ~**19:07**, max RSS ~**70233136 kB**.
+- **Flat `MgRow` MultiGeneUMI_CR (no nested umi→gene maps in collapse):**
+  `/storage/100K/ucsf_solo_bridge_redesign_20260325/ucsf_ebs2_2_gexonly_flat_multigene_20260325/`
+  — `collapseUMIall_fromBridgeHash` ~**48 s**, `countCBgeneUMI` ~**50 s**,
+  `processRecords` ~**278 s**, wall ~**16:22**, max RSS ~**70368812 kB**;
+  `Summary.csv` close to CSR v2 (e.g. estimated cells **13721** vs **13724**);
+  raw `matrix.mtx` nnz may differ slightly from CSR v2 (`cmp` non-zero — treat as
+  small drift / ordering unless byte parity is required).
 
 Worth pursuing further if the **mapping** improvement reproduces under repeated
 serialized runs and if the Bayes-resolved accounting policy is accepted
-product-side; **collapse** time still dominates Solo vs baseline until further
-HASH phase work.
+product-side; **post-map collapse** is no longer stuck at ~278 s on this sample
+after the flat MultiGene rewrite.
