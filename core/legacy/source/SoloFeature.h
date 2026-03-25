@@ -120,6 +120,10 @@ public:
     void collapseUMIall(bool minimalMode=false);
     void collapseUMIall_fromHash(); // Direct hash consumption (no materialization)
     void collapseUMIall_fromBridgeHash(); // Non-Flex bridge: collapse without rGeneUMI materialization
+
+    // Experimental bridge replay harness (env-gated callers): snapshot at pre-collapse boundary.
+    void bridgeHashSnapshotWrite(const char *path);
+    void bridgeHashSnapshotLoad(const char *path);
     void collapseUMIperCB(uint32 iCB, vector<uint32> &umiArray, vector<uint32> &gID,  vector<uint32> &gReadS, bool minimalMode);
     void materializeRGUFromHash(); // Materialize rGeneUMI/rCBp/rCBn from inlineHash_ (DEPRECATED)
     

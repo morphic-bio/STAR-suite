@@ -4,6 +4,7 @@
 #include "TimeFunctions.h"
 #include "SequenceFuns.h"
 #include "ErrorWarning.h"
+#include "SoloFeature_bridgeHashSnapshot.h"
 #include "systemFunctions.h"
 #include <chrono>
 #include <cstdlib>
@@ -114,6 +115,15 @@ void SoloFeature::processRecords()
             countCBgeneUMI();
         };
     };
+
+    if (solo_bridge_hash_snapshot::stopAfterCountEnabled(P)) {
+        time(&rawTime);
+        P.inOut->logMain << timeMonthDayTime(rawTime)
+                         << " ... bridge snapshot replay: stopping after countCBgeneUMI (skipping raw output/cell filtering)"
+                         << endl;
+        P.inOut->logMain << "Solo timing: processRecords " << soloElapsedSeconds(processStart) << " s" << endl;
+        return;
+    }
     
     // Inline hash path already wrote MEX directly; skip legacy matrix output to avoid
     // touching uninitialized Solo dense matrices.

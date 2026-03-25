@@ -12,6 +12,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
+#include <sstream>
 
 namespace {
 double soloElapsedSeconds(const std::chrono::steady_clock::time_point &start)
@@ -90,6 +91,8 @@ void SoloFeature::countCBgeneUMI()
     if (pSolo.readIndexYes[featureType])
         rguStride=3; //to keep readI column
 
+    const bool nonFlexBridgePath = nonFlexHashBridgeApplies(*this);
+
 #ifdef DEBUG_CB_UB_PARITY
     // Skip parity validation when minimal memory flag is on (parity requires packed storage)
     if (pSolo.soloFlexMinimalMemory && pSolo.inlineHashMode) {
@@ -106,8 +109,6 @@ void SoloFeature::countCBgeneUMI()
         parityEnabled = parityEnv;
     }
 #endif
-
-    const bool nonFlexBridgePath = nonFlexHashBridgeApplies(*this);
 
     // Allocate packedReadInfo if:
     // 1. readInfoYes is set for this feature type, OR
@@ -129,12 +130,40 @@ void SoloFeature::countCBgeneUMI()
     
     // Inline hash path: resolve/correct, then walk the hash directly (no materialization)
     if (pSolo.inlineHashMode) {
-        // Resolve ambiguous CBs (before collapse)
-        resolveAmbiguousCBs();
-        
-        // Run clique correction if enabled (operates on hash)
-        if (pSolo.umiCorrectionMode > 0) {
-            runCliqueCorrection();
+        const char *snapIn = std::getenv("STAR_SOLO_BRIDGE_HASH_SNAPSHOT_IN");
+        if (snapIn != nullptr && snapIn[0] != '\0' && !nonFlexBridgePath) {
+            exitWithError(
+                "EXITING because of fatal PARAMETERS error: STAR_SOLO_BRIDGE_HASH_SNAPSHOT_IN is only supported on the "
+                "non-Flex direct-hash bridge Gene* path (STAR_SOLO_NONFLEX_HASH_BRIDGE + --soloInlineHashMode).\n",
+                std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
+        }
+        const bool bridgeSnapReplay =
+            nonFlexBridgePath && snapIn != nullptr && snapIn[0] != '\0';
+
+        if (bridgeSnapReplay) {
+            if (std::getenv("STAR_SOLO_BRIDGE_HASH_SNAPSHOT_REPLAY_SKIP_READS") == nullptr) {
+                ostringstream errOut;
+                errOut << "EXITING because of fatal PARAMETERS error: STAR_SOLO_BRIDGE_HASH_SNAPSHOT_IN is set but "
+                          "STAR_SOLO_BRIDGE_HASH_SNAPSHOT_REPLAY_SKIP_READS is not set.\n"
+                       << "SOLUTION: export STAR_SOLO_BRIDGE_HASH_SNAPSHOT_REPLAY_SKIP_READS=1 for replay (mapping "
+                          "skip), or unset STAR_SOLO_BRIDGE_HASH_SNAPSHOT_IN for a normal seed run.\n";
+                exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
+            }
+            if (std::getenv("STAR_SOLO_BRIDGE_HASH_SNAPSHOT_OUT") != nullptr) {
+                exitWithError(
+                    "EXITING because of fatal PARAMETERS error: STAR_SOLO_BRIDGE_HASH_SNAPSHOT_IN and "
+                    "STAR_SOLO_BRIDGE_HASH_SNAPSHOT_OUT cannot be used together.\n",
+                    std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
+            }
+            bridgeHashSnapshotLoad(snapIn);
+        } else {
+            // Resolve ambiguous CBs (before collapse)
+            resolveAmbiguousCBs();
+
+            // Run clique correction if enabled (operates on hash)
+            if (pSolo.umiCorrectionMode > 0) {
+                runCliqueCorrection();
+            }
         }
 
         if (nonFlexBridgePath) {

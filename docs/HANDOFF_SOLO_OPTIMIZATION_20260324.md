@@ -1557,6 +1557,12 @@ Readout:
   raw `matrix.mtx` nnz may differ slightly from CSR v2 (`cmp` non-zero — treat as
   small drift / ordering unless byte parity is required).
 
+#### Bridge hash snapshot for fast collapse iteration (2026-03-25)
+
+- **Purpose:** capture the exact pre-collapse bridge state (thread + sum `inlineHash_` plus `populateBridgeReadAccounting` inputs on `readFeatSum`) and replay through `collapseUMIall_fromBridgeHash` without mapping reads.
+- **Env:** `STAR_SOLO_BRIDGE_HASH_SNAPSHOT_OUT` (seed), `STAR_SOLO_BRIDGE_HASH_SNAPSHOT_IN` + `STAR_SOLO_BRIDGE_HASH_SNAPSHOT_REPLAY_SKIP_READS=1` (replay). Same `STAR_SOLO_NONFLEX_HASH_BRIDGE=1`, `--soloInlineHashMode yes`, and **`--runThreadN` as seed** (enforced in file header).
+- **Code:** `SoloFeature_bridgeHashSnapshot.cpp`, hooks in `SoloFeature_collapseUMI_fromBridgeHash.cpp`, `SoloFeature_countCBgeneUMI.cpp`, `ReadAlignChunk_mapChunk.cpp`.
+
 Worth pursuing further if the **mapping** improvement reproduces under repeated
 serialized runs and if the Bayes-resolved accounting policy is accepted
 product-side; **post-map collapse** is no longer stuck at ~278 s on this sample

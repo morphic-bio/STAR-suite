@@ -30,6 +30,8 @@ Solo / STARsolo **post-map** optimization (counting, UMI collapse, MEX), especia
 
 **Environment:** `STAR_SOLO_NONFLEX_HASH_BRIDGE=1` enables the direct bridge from packed inline hash into collapse without the legacy `rGeneUMI` / `rCBp` replay.
 
+**Bridge collapse snapshot / replay (dev harness, v2, 2026-03-25):** after `resolveAmbiguousCBs()` + `runCliqueCorrection()`, immediately before draining hashes, `collapseUMIall_fromBridgeHash()` can write a binary snapshot (`STAR_SOLO_BRIDGE_HASH_SNAPSHOT_OUT=/abs/path.bin`). Replay: `STAR_SOLO_BRIDGE_HASH_SNAPSHOT_IN` + **`STAR_SOLO_BRIDGE_HASH_SNAPSHOT_REPLAY_SKIP_READS=1`** — `STAR.cpp` skips the entire `mapThreadsSpawn()` call (no FASTQ decompression, no thread pool for mapping) and calls `P.closeReadsFiles()` to kill decompression processes immediately. Same `--runThreadN` and whitelist as seed required. v2 format: magic `STARBG2\0`, bulk block I/O (no per-entry decode), `kh_resize` pre-sizes hash on load. Code: `SoloFeature_bridgeHashSnapshot.cpp`, `STAR.cpp` (mapping-phase skip gate), `ReadAlignChunk_mapChunk.cpp` (defense-in-depth `mapChunk` skip). Full EBs2_2 v2 replay: **7:56 wall** (vs 13:37 v1, vs 16:27 seed); snapshot load **4.9 s** (vs 28 s v1); **raw/filtered matrix.mtx byte-identical** to seed.
+
 **Constraints the path respects (do not break casually):**
 
 - `Unique` + `1MM_CR` + `MultiGeneUMI_CR`, optional CR multimap rescue at alignment

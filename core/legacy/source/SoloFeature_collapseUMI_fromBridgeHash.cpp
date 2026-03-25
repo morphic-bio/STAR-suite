@@ -17,10 +17,10 @@
 #include "TimeFunctions.h"
 #include "ErrorWarning.h"
 #include "IncludeDefine.h"
-
 #include <algorithm>
 #include <chrono>
 #include <cstdlib>
+#include <cstring>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -39,6 +39,47 @@ struct MgRow {
     uint32_t geneIdx;
     uint32_t count;
 };
+
+enum class CountMatAllocMode {
+    HashUpper,
+    SegUpper,
+    SegGuarded,
+    Grow
+};
+
+CountMatAllocMode countMatAllocMode()
+{
+    const char *mode = std::getenv("STAR_SOLO_BRIDGE_COUNTMAT_ALLOC_MODE");
+    if (mode == nullptr || mode[0] == '\0' || std::strcmp(mode, "hash_upper") == 0)
+        return CountMatAllocMode::HashUpper;
+    if (std::strcmp(mode, "seg_upper") == 0)
+        return CountMatAllocMode::SegUpper;
+    if (std::strcmp(mode, "seg_guarded") == 0)
+        return CountMatAllocMode::SegGuarded;
+    if (std::strcmp(mode, "grow") == 0)
+        return CountMatAllocMode::Grow;
+    return CountMatAllocMode::HashUpper;
+}
+
+size_t guardedAllocThresholdBytes()
+{
+    const char *env = std::getenv("STAR_SOLO_BRIDGE_COUNTMAT_ALLOC_THRESHOLD_MB");
+    if (env == nullptr || env[0] == '\0')
+        return static_cast<size_t>(4096) * 1024u * 1024u; // 4 GiB default guard
+    char *end = nullptr;
+    unsigned long long mb = std::strtoull(env, &end, 10);
+    if (end == env || (end != nullptr && *end != '\0'))
+        return static_cast<size_t>(4096) * 1024u * 1024u;
+    return static_cast<size_t>(mb) * 1024u * 1024u;
+}
+
+size_t nextGrowSize(size_t currentSize, size_t need)
+{
+    size_t next = currentSize == 0 ? 1024 : currentSize;
+    while (next < need)
+        next *= 2;
+    return next;
+}
 
 } // namespace
 
@@ -98,6 +139,10 @@ void SoloFeature::collapseUMIall_fromBridgeHash()
     if (totalHashSize == 0) {
         P.inOut->logMain << "WARNING: collapseUMIall_fromBridgeHash: no thread-local or merged bridge hash entries"
                          << endl;
+        if (const char *snapPath = std::getenv("STAR_SOLO_BRIDGE_HASH_SNAPSHOT_OUT")) {
+            if (snapPath[0] != '\0')
+                bridgeHashSnapshotWrite(snapPath);
+        }
         if (readFeatSum->inlineHash_) {
             kh_destroy(cg_agg, readFeatSum->inlineHash_);
             readFeatSum->inlineHash_ = nullptr;
@@ -114,6 +159,11 @@ void SoloFeature::collapseUMIall_fromBridgeHash()
                      << " thread_hashes=" << threadHashCount
                      << " merged_ambiguous_hash_entries=" << mergedAmbigHashSize
                      << endl;
+
+    if (const char *snapPath = std::getenv("STAR_SOLO_BRIDGE_HASH_SNAPSHOT_OUT")) {
+        if (snapPath[0] != '\0')
+            bridgeHashSnapshotWrite(snapPath);
+    }
 
     std::unordered_map<uint32_t, size_t> cbEntryCount;
     cbEntryCount.reserve(std::min<size_t>(totalHashSize / 8 + 64, size_t{1} << 20));
@@ -234,12 +284,57 @@ void SoloFeature::collapseUMIall_fromBridgeHash()
     nReadPerCB.assign(nCB, 0);
     nReadPerCBmax = 0;
 
-    // Upper bound: at most one count-matrix slot per hash entry (distinct (CB,gene) <= totalHashSize).
-    const size_t matSlotsUpper = totalHashSize * static_cast<size_t>(countMatStride);
     const size_t minSeed = static_cast<size_t>(nCB + 1u) * static_cast<size_t>(countMatStride);
+    const CountMatAllocMode allocMode = countMatAllocMode();
+    size_t nCbGeneSegUpper = 0;
+    if (allocMode == CountMatAllocMode::SegUpper || allocMode == CountMatAllocMode::SegGuarded) {
+        std::vector<uint32_t> geneStampUpper(65536, 0);
+        uint32_t stampUpper = 1;
+        for (uint32_t iCB = 0; iCB < nCB; ++iCB) {
+            const size_t cbBeg = cbOffsets[iCB];
+            const size_t cbEnd = cbOffsets[iCB + 1];
+            for (size_t j = cbBeg; j < cbEnd; ++j) {
+                const uint32_t g = flat[j].gene;
+                if (geneStampUpper[g] != stampUpper) {
+                    geneStampUpper[g] = stampUpper;
+                    ++nCbGeneSegUpper;
+                }
+            }
+            if (++stampUpper == 0u) {
+                std::fill(geneStampUpper.begin(), geneStampUpper.end(), 0u);
+                stampUpper = 1u;
+            }
+        }
+    }
+
+    size_t initialMatSlots = 0;
+    const size_t hashUpperSlots = totalHashSize * static_cast<size_t>(countMatStride);
+    if (allocMode == CountMatAllocMode::HashUpper) {
+        initialMatSlots = std::max(hashUpperSlots, minSeed);
+    } else if (allocMode == CountMatAllocMode::SegUpper) {
+        initialMatSlots = std::max(nCbGeneSegUpper * static_cast<size_t>(countMatStride), minSeed);
+    } else if (allocMode == CountMatAllocMode::SegGuarded) {
+        const size_t segSlots = std::max(nCbGeneSegUpper * static_cast<size_t>(countMatStride), minSeed);
+        const size_t segBytes = segSlots * sizeof(uint32_t);
+        initialMatSlots = (segBytes <= guardedAllocThresholdBytes()) ? segSlots : minSeed;
+    } else {
+        initialMatSlots = minSeed;
+    }
     countCellGeneUMI.clear();
-    countCellGeneUMI.resize(std::max(matSlotsUpper, minSeed), 0);
+    countCellGeneUMI.resize(initialMatSlots, 0);
     countCellGeneUMIindex.assign(nCB + 1, 0);
+
+    time(&rawTime);
+    P.inOut->logMain << timeMonthDayTime(rawTime)
+                     << " ... countCellGeneUMI alloc mode="
+                     << (allocMode == CountMatAllocMode::HashUpper ? "hash_upper"
+                         : allocMode == CountMatAllocMode::SegUpper ? "seg_upper"
+                         : allocMode == CountMatAllocMode::SegGuarded ? "seg_guarded"
+                         : "grow")
+                     << " initial_slots=" << initialMatSlots
+                     << " seg_upper=" << nCbGeneSegUpper
+                     << " hash_upper=" << totalHashSize
+                     << endl;
 
     countMatMult.s = 1 + pSolo.multiMap.yes.N * pSolo.umiDedup.yes.N;
     countMatMult.m.clear();
@@ -436,6 +531,16 @@ void SoloFeature::collapseUMIall_fromBridgeHash()
                 geneCounts[maxg]++;
 
             p = q;
+        }
+
+        size_t cbNonzeroGenes = 0;
+        for (uint32_t ig = 0; ig < nGenes; ++ig)
+            if (geneCounts[ig] != 0)
+                ++cbNonzeroGenes;
+        const size_t needEnd = static_cast<size_t>(countCellGeneUMIindex[iCB]) + cbNonzeroGenes * countMatStride;
+        if (countCellGeneUMI.size() < needEnd) {
+            const size_t newSize = nextGrowSize(countCellGeneUMI.size(), needEnd);
+            countCellGeneUMI.resize(newSize, 0);
         }
 
         for (uint32_t ig = 0; ig < nGenes; ++ig) {
