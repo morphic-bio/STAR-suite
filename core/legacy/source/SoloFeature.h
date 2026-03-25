@@ -198,6 +198,10 @@ public:
     void resolveAmbiguousCBs();
     // Shared Cell Ranger-style ambiguous-CB reinsertion into inline hash.
     void resolvePendingAmbiguousToHash(bool useBridgeCompactMapping);
+    // Non-Flex bridge: resolve a single thread-local ambiguous-CB sidecar into its own hash.
+    void resolvePendingAmbiguousForReadFeat(SoloReadFeature &targetFeat, bool useBridgeCompactMapping);
+    // Non-Flex bridge: finalize deferred per-read accounting for one thread using global CB evidence.
+    void finalizeDeferredBridgeAccountingForReadFeat(SoloReadFeature &targetFeat);
     
     // Apply flat correction hash back to inline hash (re-key entries with corrected UB)
     void applyCliqueCorrectionsToHash();

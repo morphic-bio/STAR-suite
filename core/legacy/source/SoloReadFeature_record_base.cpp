@@ -9,6 +9,7 @@
 #include "ReadAlign.h"
 #include "SoloBinarySpool.h"
 #include "SoloReadFeature_record_shared.h"
+#include "solo/CbBayesianResolver.h"
 #include "ErrorWarning.h"
 #include <unordered_set>
 #include <sstream>
@@ -167,12 +168,16 @@ void insertInlineHashEntry(SoloReadFeature *soloReadFeat, const SoloReadBarcode 
     } else {
         key = packCgAggKey(cbIdx, umi24, packedGeneIdx, 0);
     }
-    int absent;
-    khiter_t iter = kh_put(cg_agg, soloReadFeat->inlineHash_, key, &absent);
-    if (absent) {
-        kh_val(soloReadFeat->inlineHash_, iter) = 1;
+    if (std::getenv("STAR_SOLO_NONFLEX_HASH_BRIDGE") != nullptr) {
+        soloReadFeat->bridgeDirectTupleAdd(key, geneIdx, umi24, 1);
     } else {
-        kh_val(soloReadFeat->inlineHash_, iter)++;
+        int absent;
+        khiter_t iter = kh_put(cg_agg, soloReadFeat->inlineHash_, key, &absent);
+        if (absent) {
+            kh_val(soloReadFeat->inlineHash_, iter) = 1;
+        } else {
+            kh_val(soloReadFeat->inlineHash_, iter)++;
+        }
     }
 
     if (shouldTraceBridgeBarcode(soloBar.pSolo, wlIdx)) {
@@ -223,15 +228,15 @@ void accumulateBridgeAmbiguousCB(SoloReadFeature *soloReadFeat,
         }
         entry.cbSeq = soloBar.cbSeq;
         entry.cbQual = soloBar.cbQual;
-        if (entry.cbQual.length() != entry.cbSeq.length()) {
-            if (entry.cbQual.length() < entry.cbSeq.length()) {
-                entry.cbQual.append(entry.cbSeq.length() - entry.cbQual.length(), 'H');
-            } else {
-                entry.cbQual = entry.cbQual.substr(0, entry.cbSeq.length());
-            }
-        }
+        cb_bayesian::normalizeCbQual(entry.cbQual, entry.cbSeq);
         entry.umiCounts.reserve(32);
     }
+
+    cb_bayesian::accumulateCbQualityEvidence(entry.cbSeq,
+                                             soloBar.cbQual,
+                                             entry.cbLogLikMatch,
+                                             entry.cbLogLikMismatch,
+                                             entry.cbEvidenceReads);
 
     entry.umiCounts[umi24]++;
 

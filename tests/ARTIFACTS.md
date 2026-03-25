@@ -523,6 +523,40 @@ These scripts validate that default bundles work with minimal explicit parameter
   - `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_hashbridge_direct_samefastq_v3/`
 - Same-FASTQ rerun after fix 5 (thread-local bridge-hash drain):
   - `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_hashbridge_direct_samefastq_v4/`
+- Post-spool-merge direct-hash `Unique` rerun on the bridge branch:
+  - `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_hashbridge_direct_postmerge_v1/`
+- Post-spool-merge direct-hash `Unique` after sumThreads ambiguous resolve + deferred finalize (v2 architecture):
+  - intended long-term path: `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_hashbridge_direct_postmerge_v2/`
+  - agent validation mirror (same FASTQs / command): `/tmp/iPSC2_1_GEX_2M_unique_hashbridge_direct_postmerge_v2/` (2026-03-24)
+- Post-spool-merge direct-hash `Unique` with **CB-sharded** bridge collapse (no global `recs`):
+  - intended path: `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_hashbridge_direct_postmerge_v3/`
+  - agent validation mirror: `/tmp/iPSC2_1_GEX_2M_unique_hashbridge_direct_postmerge_v3/` (2026-03-24)
+- Post-spool-merge direct-hash `Unique` with **CB-sharded grouped khashes** (no full `BridgeHashRec` staging layer):
+  - intended path: `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_hashbridge_direct_postmerge_v4/`
+  - agent validation mirror: `/tmp/iPSC2_1_GEX_2M_unique_hashbridge_direct_postmerge_v4/` (2026-03-24)
+- Post-spool-merge direct-hash `Unique` **v5** (grouped khash → flat per-shard `vector` + multi-pointer merge; no `unordered_map<wlCb, vector<...>>` rebuild):
+  - `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_hashbridge_direct_postmerge_v5/`
+  - agent mirror: `/tmp/iPSC2_1_GEX_2M_unique_hashbridge_direct_postmerge_v5/` (2026-03-24)
+- Post-spool-merge direct-hash `Unique` **v6** (scratch/parity investigation on MultiGene aggregation; collapse logic aligned with v5 — see `docs/HANDOFF_SOLO_OPTIMIZATION_20260324.md`, subsection "Direct bridge v6 scratch / parity notes"):
+  - `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_hashbridge_direct_postmerge_v6/`
+- Post-spool-merge direct-hash `Unique` **v7a** (khash retained + per-shard sorted `khiter_t` index; no full-shard `vector<ShardRow>` — see `docs/HANDOFF_SOLO_OPTIMIZATION_20260324.md`, subsection "Direct bridge v7a"):
+  - `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_hashbridge_direct_postmerge_v7a/`
+- Post-spool-merge direct-hash `Unique` **v8** (insert-time packed slots + `CB→slot ids`; global tuple merge; no shard khash / sorted `khiter_t` — see `docs/HANDOFF_SOLO_OPTIMIZATION_20260324.md`, subsection "Direct bridge v8"):
+  - `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_hashbridge_direct_postmerge_v8/`
+- Post-spool-merge direct-hash `Unique` **v9** (v8 minus unused insert-time CB slot list; `unordered_map` wl→slot ids for observed CBs only — see `docs/HANDOFF_SOLO_OPTIMIZATION_20260324.md`, subsection "Direct bridge v9"):
+  - `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_hashbridge_direct_postmerge_v9/`
+- Post-spool-merge direct-hash `Unique` **v10** (v9 + flat per-CB MultiGeneUMI_CR aggregates in `collapseOneBarcodeRows`; no nested umi→gene maps — see `docs/HANDOFF_SOLO_OPTIMIZATION_20260324.md`, subsection "Direct bridge v10"):
+  - `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_hashbridge_direct_postmerge_v10/`
+- Clean paired validation roots for the v9 vs v10 MultiGene hot-path question (same 2M FASTQs; clean rebuilds from the same commit; use these instead of the stored standalone v9/v10 roots for strict parity claims):
+  - v9 paired control:
+    `/storage/100K/ucsf_solo_optimization_20260324/validation_pair_20260324/iPSC2_1_GEX_2M_unique_hashbridge_direct_paired_v9/`
+  - v10 paired candidate:
+    `/storage/100K/ucsf_solo_optimization_20260324/validation_pair_20260324/iPSC2_1_GEX_2M_unique_hashbridge_direct_paired_v10/`
+- Same-binary ambiguity-fix determinism check after aggregated CB-quality evidence was introduced:
+  - `/tmp/iPSC2_1_GEX_2M_aggqual_check_run1/`
+  - `/tmp/iPSC2_1_GEX_2M_aggqual_check_run2/`
+- Post-spool-merge legacy `Unique` control on the same branch / same FASTQs:
+  - `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_legacy_postmerge_v1/`
 - Current-branch legacy control on the same FASTQs:
   - `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_legacy_mastermerge_v1/`
 - Older pre-direct bridge 2M run for historical comparison:

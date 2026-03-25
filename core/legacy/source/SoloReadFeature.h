@@ -79,6 +79,10 @@ public:
     std::unordered_map<uint32_t, uint16_t> bridgeGeneCompactByFull_;
     std::vector<uint32_t> bridgeGeneFullByCompact_;
 
+    // STAR_SOLO_NONFLEX_HASH_BRIDGE: kh_val(inlineHash_) = slot id; packed payload below.
+    std::vector<uint64_t> bridgePackedSlots_;
+    uint64_t bridgeSlotOverflowEvents_ = 0;
+
     string cbSeq, umiSeq, cbQual, umiQual;
 
     SoloReadFlagClass readFlag;
@@ -98,6 +102,8 @@ public:
     uint32_t bridgeCompactToWl(uint32_t compactIdx) const;
     uint16_t getOrCreateBridgeCompactGene(uint32_t geneIdx);
     uint32_t bridgeCompactToGene(uint16_t compactIdx) const;
+    /** Direct-bridge path: upsert (tupleKey -> slot); slot stores geneFull in 19-bit field. */
+    void bridgeDirectTupleAdd(uint64_t tupleKey, uint32_t geneFull, uint32_t umi24, uint32_t delta);
     void maybeSpillBinarySpool(size_t extraBytes);
     // Legacy overload removed
     // Overload that emits read info via a sink (avoids requiring legacy vector storage)

@@ -13,6 +13,7 @@
 #include <cctype>
 #include <cstdlib>
 #include <cstdio>
+#include <cmath>
 #include <unordered_set>
 
 // Static cache for gene→probe index (15-bit), 0 = not a probe gene
@@ -283,36 +284,53 @@ void SoloFeature::resolveAmbiguousCBs()
         return;
     }
 
-    resolvePendingAmbiguousToHash(true);
+    if (readFeatSum) {
+        resolvePendingAmbiguousForReadFeat(*readFeatSum, true);
+    }
 }
 
 void SoloFeature::resolvePendingAmbiguousToHash(bool useBridgeCompactMapping)
 {
+    if (readFeatSum) {
+        resolvePendingAmbiguousForReadFeat(*readFeatSum, useBridgeCompactMapping);
+    }
+}
+
+void SoloFeature::resolvePendingAmbiguousForReadFeat(SoloReadFeature &targetFeat, bool useBridgeCompactMapping)
+{
     static const bool g_disableAmbigResolve =
         (std::getenv("STAR_DISABLE_AMBIG_CB_RESOLVE") != nullptr);
 
-    if (!readFeatSum || !readFeatSum->inlineHash_ || readFeatSum->pendingAmbiguous_.empty()) {
+    if (!pSolo.inlineHashMode || pSolo.flexMode || std::getenv("STAR_SOLO_NONFLEX_HASH_BRIDGE") == nullptr) {
         return;
+    }
+
+    if (targetFeat.pendingAmbiguous_.empty()) {
+        return;
+    }
+
+    if (!targetFeat.inlineHash_) {
+        targetFeat.inlineHash_ = kh_init(cg_agg);
     }
 
     if (g_disableAmbigResolve) {
         P.inOut->logMain << "[AMBIG-CB-RESOLVE] disabled by STAR_DISABLE_AMBIG_CB_RESOLVE, skipping "
-                         << readFeatSum->pendingAmbiguous_.size() << " pending ambiguous CBs" << endl;
+                         << targetFeat.pendingAmbiguous_.size() << " pending ambiguous CBs" << endl;
         return;
     }
 
     if (!pSolo.cbCorrector) {
-        P.inOut->logMain << "[AMBIG-CB-RESOLVE] " << readFeatSum->pendingAmbiguous_.size()
+        P.inOut->logMain << "[AMBIG-CB-RESOLVE] " << targetFeat.pendingAmbiguous_.size()
                          << " pending ambiguous CBs but CbCorrector not available, skipping" << endl;
         return;
     }
 
-    khash_t(cg_agg) *hash = readFeatSum->inlineHash_;
+    khash_t(cg_agg) *hash = targetFeat.inlineHash_;
     const std::vector<std::string> &whitelistSeqs = pSolo.cbCorrector->whitelist();
     CbBayesianResolver resolver(whitelistSeqs.size(), &whitelistSeqs);
 
     uint64_t resolved = 0, stillAmbiguous = 0, addedToHash = 0;
-    for (auto &kv : readFeatSum->pendingAmbiguous_) {
+    for (auto &kv : targetFeat.pendingAmbiguous_) {
         SoloReadFeature::ExtendedAmbiguousEntry &entry = kv.second;
 
         if (entry.candidateIdx.empty() || entry.umiCounts.empty()) {
@@ -320,7 +338,11 @@ void SoloFeature::resolvePendingAmbiguousToHash(bool useBridgeCompactMapping)
             continue;
         }
 
-        CBContext context(entry.cbSeq, entry.cbQual);
+        CBContext context(entry.cbSeq,
+                          entry.cbQual,
+                          entry.cbLogLikMatch,
+                          entry.cbLogLikMismatch,
+                          entry.cbEvidenceReads);
 
         std::vector<Candidate> candidates;
         candidates.reserve(entry.candidateIdx.size());
@@ -345,7 +367,7 @@ void SoloFeature::resolvePendingAmbiguousToHash(bool useBridgeCompactMapping)
         uint32_t resolvedCbIdx = result.bestIdx - 1;
         uint32_t storedCbIdx = resolvedCbIdx;
         if (useBridgeCompactMapping) {
-            storedCbIdx = readFeatSum->getOrCreateBridgeCompactCb(resolvedCbIdx);
+            storedCbIdx = targetFeat.getOrCreateBridgeCompactCb(resolvedCbIdx);
         }
 
         if (shouldTraceBridgeBarcode(pSolo, resolvedCbIdx)) {
@@ -363,28 +385,130 @@ void SoloFeature::resolvePendingAmbiguousToHash(bool useBridgeCompactMapping)
         for (const auto &obs : entry.observations) {
             uint16_t storedGeneIdx = static_cast<uint16_t>(obs.geneIdx);
             if (useBridgeCompactMapping) {
-                storedGeneIdx = readFeatSum->getOrCreateBridgeCompactGene(obs.geneIdx);
+                storedGeneIdx = targetFeat.getOrCreateBridgeCompactGene(obs.geneIdx);
             }
             uint64_t newKey = useBridgeCompactMapping
                 ? packBridgeCgAggKey(storedCbIdx, obs.umi24, storedGeneIdx)
                 : packCgAggKey(storedCbIdx, obs.umi24, storedGeneIdx, obs.tagIdx);
-            int absent;
-            khiter_t iter = kh_put(cg_agg, hash, newKey, &absent);
-            if (absent) {
-                kh_val(hash, iter) = obs.count;
+            if (useBridgeCompactMapping) {
+                targetFeat.bridgeDirectTupleAdd(newKey, obs.geneIdx, obs.umi24, obs.count);
             } else {
-                kh_val(hash, iter) += obs.count;
+                int absent;
+                khiter_t iter = kh_put(cg_agg, hash, newKey, &absent);
+                if (absent) {
+                    kh_val(hash, iter) = obs.count;
+                } else {
+                    kh_val(hash, iter) += obs.count;
+                }
             }
             addedToHash++;
         }
     }
 
-    P.inOut->logMain << "[AMBIG-CB-RESOLVE] pending=" << readFeatSum->pendingAmbiguous_.size()
+    P.inOut->logMain << "[AMBIG-CB-RESOLVE] pending=" << targetFeat.pendingAmbiguous_.size()
                      << " resolved=" << resolved
                      << " still_ambiguous=" << stillAmbiguous
                      << " added_to_hash=" << addedToHash << endl;
 
-    readFeatSum->pendingAmbiguous_.clear();
+    targetFeat.pendingAmbiguous_.clear();
+}
+
+namespace {
+
+uint32_t unpackBridgeDeferredCandidateCbLocal(uint32_t packed)
+{
+    return packed >> 8;
+}
+
+char unpackBridgeDeferredCandidateQualLocal(uint32_t packed)
+{
+    return static_cast<char>(packed & 0xFFu);
+}
+
+} // namespace
+
+void SoloFeature::finalizeDeferredBridgeAccountingForReadFeat(SoloReadFeature &targetFeat)
+{
+    if (!pSolo.inlineHashMode || pSolo.flexMode || std::getenv("STAR_SOLO_NONFLEX_HASH_BRIDGE") == nullptr) {
+        return;
+    }
+    if (targetFeat.bridgeDeferredAccounting_.empty()) {
+        return;
+    }
+
+    for (const auto &rec : targetFeat.bridgeDeferredAccounting_) {
+        const bool featGood = rec.featGood != 0;
+        const bool multiFeature = rec.multiFeature != 0;
+        bool readIsCounted = false;
+        bool noTooManyWLmatches = false;
+        uint32_t cb = 0;
+
+#ifdef MATCH_CellRanger
+        double ptot = 0.0, pmax = 0.0, pin;
+#else
+        float ptot = 0.0, pmax = 0.0, pin;
+#endif
+        const uint32_t begin = rec.candidateOffset;
+        const uint32_t end = begin + rec.candidateCount;
+        for (uint32_t ii = begin; ii < end && ii < targetFeat.bridgeDeferredCandidates_.size(); ++ii) {
+            const uint32_t packedCandidate = targetFeat.bridgeDeferredCandidates_[ii];
+            const uint32_t cbin = unpackBridgeDeferredCandidateCbLocal(packedCandidate);
+            char qin = unpackBridgeDeferredCandidateQualLocal(packedCandidate);
+            if (cbin < targetFeat.cbReadCount.size() && targetFeat.cbReadCount[cbin] > 0) {
+                qin -= pSolo.QSbase;
+                qin = qin < pSolo.QSmax ? qin : pSolo.QSmax;
+                pin = targetFeat.cbReadCount[cbin] * std::pow(10.0, -qin / 10.0);
+                ptot += pin;
+                if (pin > pmax) {
+                    cb = cbin;
+                    pmax = pin;
+                }
+            }
+        }
+        if (ptot > 0.0 && pmax >= pSolo.cbMinP * ptot) {
+            if (featGood) {
+                readIsCounted = true;
+            }
+        } else {
+            noTooManyWLmatches = true;
+        }
+
+        if (featGood && noTooManyWLmatches) {
+            targetFeat.stats.V[targetFeat.stats.noTooManyWLmatches]++;
+        }
+
+        if (readIsCounted && cb < targetFeat.cbReadCount.size()) {
+            uint64_t &packed = targetFeat.bridgeImmediateReadCounts_[cb];
+            if (multiFeature) {
+                packed += (uint64_t{1} << 32);
+            } else {
+                packed += 1;
+            }
+        }
+
+        if (pSolo.readStatsYes[featureType]) {
+            SoloReadFlagClass &rfc = targetFeat.readFlag;
+            rfc.flag = rec.readFlag;
+            if (readIsCounted) {
+                if (rfc.checkBit(rfc.featureU)) {
+                    rfc.setBit(rfc.countedU);
+                }
+                if (rfc.checkBit(rfc.featureM)) {
+                    rfc.setBit(rfc.countedM);
+                }
+            }
+            rfc.setBit(rfc.cbMatch);
+            if (!noTooManyWLmatches) {
+                rfc.setBit(rfc.cbMMmultiple);
+                rfc.countsAdd(cb);
+            } else {
+                rfc.countsAddNoCB();
+            }
+        }
+    }
+
+    std::vector<SoloReadFeature::BridgeDeferredReadAccounting>().swap(targetFeat.bridgeDeferredAccounting_);
+    std::vector<uint32_t>().swap(targetFeat.bridgeDeferredCandidates_);
 }
 
 bool SoloFeature::isChrGenomic(uint32_t chrIdx) {

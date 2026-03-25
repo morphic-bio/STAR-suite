@@ -3,6 +3,7 @@
 #include "SoloBinarySpool.h"
 #include "streamFuns.h"
 #include "SoloFeatureTypes.h"
+#include "solo/CbBayesianResolver.h"
 #include <cstdlib>
 #include <cstdio>
 
@@ -186,6 +187,37 @@ uint32_t SoloReadFeature::bridgeCompactToGene(uint16_t compactIdx) const
     return bridgeGeneFullByCompact_[compactIdx];
 }
 
+void SoloReadFeature::bridgeDirectTupleAdd(uint64_t tupleKey, uint32_t geneFull, uint32_t umi24, uint32_t delta)
+{
+    if (inlineHash_ == nullptr || delta == 0) {
+        return;
+    }
+    if (geneFull >= (1u << 18)) {
+        std::fprintf(stderr,
+                     "FATAL ERROR: non-Flex bridge direct path: gene index %u exceeds 18-bit collapse key field\n",
+                     geneFull);
+        std::exit(1);
+    }
+    int absent = 0;
+    khiter_t it = kh_put(cg_agg, inlineHash_, tupleKey, &absent);
+    if (absent) {
+        const bool over = delta > kBridgePackedSlotCountMax;
+        const uint32_t cnt = over ? kBridgePackedSlotCountMax : delta;
+        if (over) {
+            bridgeSlotOverflowEvents_++;
+        }
+        const uint32_t sid = static_cast<uint32_t>(bridgePackedSlots_.size());
+        bridgePackedSlots_.push_back(packBridgePackedSlot(umi24, geneFull, cnt, over));
+        kh_val(inlineHash_, it) = sid;
+        return;
+    }
+    const uint32_t sid = kh_val(inlineHash_, it);
+    if (sid >= bridgePackedSlots_.size()) {
+        return;
+    }
+    bridgePackedSlotAddCount(&bridgePackedSlots_[sid], delta, &bridgeSlotOverflowEvents_);
+}
+
 void SoloReadFeature::mergeInlineHash(SoloReadFeature &other)
 {
     if (!inlineHash_ || !other.inlineHash_) {
@@ -203,6 +235,12 @@ void SoloReadFeature::mergeInlineHash(SoloReadFeature &other)
             uint32_t count = kh_val(other.inlineHash_, iter);
 
             if (nonFlexHashBridge) {
+                uint32_t otherSid = count;
+                if (otherSid >= other.bridgePackedSlots_.size()) {
+                    continue;
+                }
+                const uint64_t srcPack = other.bridgePackedSlots_[otherSid];
+
                 uint32_t otherCompactCb = 0, umi24 = 0;
                 uint16_t geneIdx = 0;
                 unpackBridgeCgAggKey(key, &otherCompactCb, &umi24, &geneIdx);
@@ -218,7 +256,22 @@ void SoloReadFeature::mergeInlineHash(SoloReadFeature &other)
                     continue;
                 }
                 uint16_t compactGene = getOrCreateBridgeCompactGene(fullGeneIdx);
-                key = packBridgeCgAggKey(compactCb, umi24, compactGene);
+                const uint64_t newKey = packBridgeCgAggKey(compactCb, umi24, compactGene);
+
+                int absent = 0;
+                khiter_t dest_iter = kh_put(cg_agg, inlineHash_, newKey, &absent);
+                if (absent) {
+                    const uint32_t sid = static_cast<uint32_t>(bridgePackedSlots_.size());
+                    bridgePackedSlots_.push_back(srcPack);
+                    kh_val(inlineHash_, dest_iter) = sid;
+                } else {
+                    const uint32_t sid = kh_val(inlineHash_, dest_iter);
+                    if (sid < bridgePackedSlots_.size()) {
+                        bridgePackedSlots_[sid] =
+                            bridgePackedSlotMerge(bridgePackedSlots_[sid], srcPack, &bridgeSlotOverflowEvents_);
+                    }
+                }
+                continue;
             }
 
             int absent;
@@ -265,9 +318,18 @@ void SoloReadFeature::mergePendingAmbiguous(const SoloReadFeature &other)
             entry.candidateIdx = otherEntry.candidateIdx;
             entry.cbSeq = otherEntry.cbSeq;
             entry.cbQual = otherEntry.cbQual;
+            entry.cbLogLikMatch = otherEntry.cbLogLikMatch;
+            entry.cbLogLikMismatch = otherEntry.cbLogLikMismatch;
+            entry.cbEvidenceReads = otherEntry.cbEvidenceReads;
             entry.umiCounts = otherEntry.umiCounts;
             entry.observations = otherEntry.observations;
         } else {
+            cb_bayesian::mergeCbQualityEvidence(otherEntry.cbLogLikMatch,
+                                                otherEntry.cbLogLikMismatch,
+                                                otherEntry.cbEvidenceReads,
+                                                entry.cbLogLikMatch,
+                                                entry.cbLogLikMismatch,
+                                                entry.cbEvidenceReads);
             // Merge UMI counts
             for (const auto &umiCount : otherEntry.umiCounts) {
                 entry.umiCounts[umiCount.first] += umiCount.second;

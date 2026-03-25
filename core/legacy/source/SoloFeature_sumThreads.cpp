@@ -20,6 +20,8 @@ void SoloFeature::sumThreads()
         if (!keepInlineHashAndBridgeMaps && rf->inlineHash_) {
             kh_destroy(cg_agg, rf->inlineHash_);
             rf->inlineHash_ = nullptr;
+            std::vector<uint64_t>().swap(rf->bridgePackedSlots_);
+            rf->bridgeSlotOverflowEvents_ = 0;
         }
         if (rf->readIdTracker_) {
             kh_destroy(readid_cbumi, rf->readIdTracker_);
@@ -169,6 +171,19 @@ void SoloFeature::sumThreads()
             ++nCB;
         };
     };
+
+    // Non-Flex direct hash bridge: global CB support is complete after addCounts; resolve merged
+    // ambiguous CB keys into readFeatSum's small hash and fold deferred read accounting before
+    // countCBgeneUMI (thread-local bulk hashes stay untouched until collapse drain).
+    if (nonFlexDirectBridge && readFeatSum) {
+        time_t rawTime;
+        time(&rawTime);
+        P.inOut->logMain << timeMonthDayTime(rawTime)
+                         << " ... Non-Flex hash bridge: post-merge ambiguous resolve + deferred accounting finalize"
+                         << endl;
+        resolvePendingAmbiguousForReadFeat(*readFeatSum, true);
+        finalizeDeferredBridgeAccountingForReadFeat(*readFeatSum);
+    }
     
 };
     

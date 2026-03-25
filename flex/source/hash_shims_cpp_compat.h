@@ -135,6 +135,80 @@ static inline void unpackBridgeCgAggKey(uint64_t key, uint32_t *cbIdx, uint32_t 
     if (geneIdx) *geneIdx = (uint16_t)(key & 0xFFFF);
 }
 
+// Packed bridge slot (8 bytes) for non-Flex direct-hash Unique insertion path.
+// Bit layout MSB→LSB: [reserved:2][overflow:1][count:18][gene:19][umi:24]
+static constexpr uint32_t kBridgePackedSlotCountMax = (1u << 18) - 1u;
+
+static inline uint64_t packBridgePackedSlot(uint32_t umi24, uint32_t geneId19, uint32_t count18, bool overflowBit)
+{
+    uint64_t w = (uint64_t)(umi24 & 0xFFFFFFu);
+    w |= (uint64_t)(geneId19 & 0x7FFFFu) << 24;
+    w |= (uint64_t)(count18 & 0x3FFFFu) << 43;
+    if (overflowBit) {
+        w |= (1ull << 61);
+    }
+    return w;
+}
+
+static inline void unpackBridgePackedSlot(uint64_t w, uint32_t *umi24, uint32_t *geneId19, uint32_t *count18,
+                                          bool *overflowBit)
+{
+    if (umi24) {
+        *umi24 = (uint32_t)(w & 0xFFFFFFu);
+    }
+    if (geneId19) {
+        *geneId19 = (uint32_t)((w >> 24) & 0x7FFFFu);
+    }
+    if (count18) {
+        *count18 = (uint32_t)((w >> 43) & 0x3FFFFu);
+    }
+    if (overflowBit) {
+        *overflowBit = ((w >> 61) & 1u) != 0;
+    }
+}
+
+// Add read counts to a packed slot; count saturates at kBridgePackedSlotCountMax; overflow bit sticks once set.
+// Increments *overflowEvents when an add would exceed the representable count range (including repeated adds at cap).
+static inline void bridgePackedSlotAddCount(uint64_t *slot, uint32_t delta, uint64_t *overflowEvents)
+{
+    if (delta == 0 || slot == nullptr) {
+        return;
+    }
+    uint32_t umi = 0, gene = 0, cnt = 0;
+    bool ov = false;
+    unpackBridgePackedSlot(*slot, &umi, &gene, &cnt, &ov);
+    const uint64_t sum = static_cast<uint64_t>(cnt) + static_cast<uint64_t>(delta);
+    if (sum > static_cast<uint64_t>(kBridgePackedSlotCountMax)) {
+        if (overflowEvents != nullptr) {
+            (*overflowEvents)++;
+        }
+        *slot = packBridgePackedSlot(umi, gene, kBridgePackedSlotCountMax, true);
+        return;
+    }
+    *slot = packBridgePackedSlot(umi, gene, static_cast<uint32_t>(sum), ov);
+}
+
+// Merge two slots for the same (umi,gene); used when folding thread/global tuples.
+static inline uint64_t bridgePackedSlotMerge(uint64_t a, uint64_t b, uint64_t *overflowEvents)
+{
+    uint32_t ua = 0, ub = 0, ga = 0, gb = 0, ca = 0, cb = 0;
+    bool oa = false, ob = false;
+    unpackBridgePackedSlot(a, &ua, &ga, &ca, &oa);
+    unpackBridgePackedSlot(b, &ub, &gb, &cb, &ob);
+    (void)ub;
+    (void)gb;
+    const uint64_t sum = static_cast<uint64_t>(ca) + static_cast<uint64_t>(cb);
+    bool ov = oa || ob;
+    if (sum > static_cast<uint64_t>(kBridgePackedSlotCountMax)) {
+        if (overflowEvents != nullptr) {
+            (*overflowEvents)++;
+        }
+        ov = true;
+        return packBridgePackedSlot(ua, ga, kBridgePackedSlotCountMax, true);
+    }
+    return packBridgePackedSlot(ua, ga, static_cast<uint32_t>(sum), ov);
+}
+
 // Pack/unpack functions for readid_cbumi hash value
 // Value format: [cbIdx:32][umi24:24][status:8] MSB→LSB
 static inline uint64_t packReadIdCbUmi(uint32_t cbIdx, uint32_t umi24, uint8_t status) {

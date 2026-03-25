@@ -138,6 +138,9 @@ class ReadAlign {
             std::unordered_map<uint32_t, uint32_t> umiCounts; // UMI24 -> count
             std::string cbSeq;                           // Original CB sequence
             std::string cbQual;                          // CB quality scores (for Bayesian resolution)
+            std::vector<double> cbLogLikMatch;           // Per-position sum log P(obs|candidate match)
+            std::vector<double> cbLogLikMismatch;        // Per-position sum log P(obs|candidate mismatch)
+            uint32_t cbEvidenceReads = 0;                // Number of reads folded into the aggregate evidence
             
             AmbiguousEntry() {}
         };

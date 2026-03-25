@@ -198,11 +198,12 @@ void SoloFeature::countCBgeneUMI()
     
     // Inline hash path: resolve/correct, then walk the hash directly (no materialization)
     if (pSolo.inlineHashMode) {
-        // Resolve ambiguous CBs (before collapse)
+        // Resolve ambiguous CBs (before collapse). For non-Flex hash bridge this is usually a no-op
+        // because sumThreads already resolved merged pending state after global CB counts.
         resolveAmbiguousCBs();
-        
-        // Run clique correction if enabled (operates on hash)
-        if (pSolo.umiCorrectionMode > 0) {
+
+        // Clique correction walks readFeatSum->inlineHash_ with Flex-style key unpacking; skip on bridge.
+        if (pSolo.umiCorrectionMode > 0 && !nonFlexBridgePath) {
             runCliqueCorrection();
         }
 

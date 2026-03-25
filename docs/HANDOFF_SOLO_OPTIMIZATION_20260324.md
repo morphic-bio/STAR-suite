@@ -2,8 +2,8 @@
 
 Date: 2026-03-24 (updated)
 Branch: `feature/solo-optimization-20260324-mastermerge`
-Tip commit (when handoff last revised): `ff30af9`
-Audience: next coding agent working on Solo / STARsolo post-map optimization
+Tip commit (when handoff last revised): `735ed6e` (verify with `git rev-parse HEAD`)
+Audience: next coding agent working on Solo / STARsolo post-map optimization — **quick start:** [HANDOFF_SOLO_OPTIMIZATION_NEXT_AGENT.md](./HANDOFF_SOLO_OPTIMIZATION_NEXT_AGENT.md)
 
 ## Scope
 
@@ -1496,3 +1496,644 @@ Conclusion after fix 5:
 - residual full-output drift is small but real
 - the direct bridge is now viable enough to iterate further, but it is not yet
   ready to replace the baseline path on either speed or parity
+
+### Post-spool-merge 2M `Unique` recheck before new direct-hash work (2026-03-24)
+
+Before attempting any new direct-from-hash-to-MEX implementation work, I reran
+the current bridge branch on the corrected 2M UCSF `iPSC2_1/GEX` fixture in
+plain `Unique` mode to decide whether the *existing* direct-hash path was worth
+pushing to full scale.
+
+Artifacts:
+
+- direct hash, current bridge branch after merging spool work:
+  `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_hashbridge_direct_postmerge_v1/`
+- legacy `Unique`, same branch / same FASTQs:
+  `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_legacy_postmerge_v1/`
+
+Timing:
+
+- wall time:
+  - direct hash: `1:34.97`
+  - legacy: `1:35.33`
+  - delta: direct hash faster by only `0.36 s`
+- peak RSS:
+  - direct hash: `40214324 kB`
+  - legacy: `40147048 kB`
+  - delta: direct hash higher by about `67 MB`
+- Solo timing:
+  - `countCBgeneUMI`: `0.466008 s` direct vs `1.02241 s` legacy
+  - `processRecords`: `3.37843 s` direct vs `3.89389 s` legacy
+  - `cellFiltering`: effectively tied (`2.72994 s` vs `2.71116 s`)
+
+Parity:
+
+- summary drift is still real:
+  - `Reads Mapped to GeneFull: Unique GeneFull`
+    - direct: `0.743136`
+    - legacy: `0.743445`
+  - `Estimated Number of Cells`
+    - direct: `7217`
+    - legacy: `7221`
+  - `UMIs in Cells`
+    - direct: `1301691`
+    - legacy: `1308644`
+  - `Total GeneFull Detected`
+    - direct: `17770`
+    - legacy: `17786`
+- raw and filtered matrices are not identical:
+  - raw `matrix.mtx`: different
+  - filtered `matrix.mtx`: different
+- `Features.stats` still drifts materially:
+  - `yesWLmatch`: `1486273` direct vs `1486890` legacy
+  - `yesUMIs`: `1352864` direct vs `1358744` legacy
+  - `yesCellBarcodes`: `41320` direct vs `40538` legacy
+  - `noTooManyWLmatches`: `5068` direct vs `4453` legacy
+
+Decision:
+
+- The current direct-hash `Unique` path is only marginally competitive on
+  runtime at 2M.
+- It is **not** parity-clean enough to justify a full-sample benchmark in its
+  current form.
+- If we revisit this direction, the next step should be a *new* direct-from-hash
+  matrix/MEX implementation rather than rerunning the current bridge path at
+  full scale.
+
+### Post-merge ambiguous + deferred finalize in `sumThreads` (direct bridge v2, 2026-03-24)
+
+**Code architecture**
+
+- `SoloFeature::resolvePendingAmbiguousForReadFeat` implements ambiguous-CB
+  resolution into a target `SoloReadFeature` hash (same Bayesian path as before);
+  `resolvePendingAmbiguousToHash` / `resolveAmbiguousCBs` delegate to it.
+- `SoloFeature::finalizeDeferredBridgeAccountingForReadFeat` folds merged
+  `bridgeDeferredAccounting_` using global `cbReadCount` into
+  `bridgeImmediateReadCounts_`, `readFlag`, and `stats` (logic aligned with the
+  former `populateBridgeReadAccounting` deferred loop), then releases deferred
+  vectors.
+- For `STAR_SOLO_NONFLEX_HASH_BRIDGE` + non-Flex inline hash,
+  `SoloFeature::sumThreads` calls both **after** per-thread `addCounts` (global
+  CB support known), **before** `countCBgeneUMI`. Thread-local bulk
+  `inlineHash_` remains unmerged into `readFeatSum` (unchanged from postmerge
+  v1); only ambiguous/deferred sidecars were merged during the per-thread loop.
+- `countCBgeneUMI`: `runCliqueCorrection` is **skipped** when the non-Flex hash
+  bridge applies, because correction assumes Flex-style packed keys on
+  `readFeatSum->inlineHash_`.
+
+**2M validation** (corrected UCSF `iPSC2_1/GEX` downsample, same FASTQs as
+postmerge v1; `STAR_SOLO_NONFLEX_HASH_BRIDGE=1`; `--outTmpDir` must not pre-exist)
+
+- Artifact (agent run; use
+  `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_hashbridge_direct_postmerge_v2/`
+  on hosts where that tree is writable):
+  `/tmp/iPSC2_1_GEX_2M_unique_hashbridge_direct_postmerge_v2/`
+- Wall time: `1:33.41`; max RSS: `40213524 kB` (essentially identical to v1).
+- Solo timing vs postmerge v1:
+  - `countCBgeneUMI`: `0.427338 s` vs `0.466008 s` (modest win)
+  - `collapseUMIall_fromBridgeHash`: `0.423546 s` vs `0.431201 s`
+  - `processRecords`: `3.3452 s` vs `3.37843 s`
+- `Summary.csv` vs postmerge v1 (direct):
+  - `Reads Mapped to GeneFull: Unique GeneFull`: `0.743137` vs `0.743136`
+  - `Estimated Number of Cells`: `7224` vs `7217`
+  - `UMIs in Cells`: `1301957` vs `1301691`
+  - `Total GeneFull Detected`: `17771` vs `17770`
+- Raw and filtered `matrix.mtx` still **differ** from v1 (`cmp` non-zero); parity
+  vs legacy remains incomplete. `Features.stats` moved slightly (e.g. `yesUMIs`
+  `1352828` v2 vs `1352864` v1).
+
+**Follow-up**
+
+- Re-run to the canonical `/storage/100K/.../postmerge_v2/` root on a machine
+  with write access; keep `README.md` out of doc-only commits if it remains a
+  noisy local diff.
+- Superseded for the global `recs` bottleneck by **postmerge v3** (CB-sharded
+  collapse below): the bridge path no longer builds one giant pre-sorted `recs`
+  vector for all barcodes.
+
+### CB-sharded bridge collapse (direct bridge v3, 2026-03-24)
+
+**Shard ownership**
+
+- Whitelist index `wlCb` is assigned to shard `wlCb % nShards` (default
+  `nShards=64`, override with `STAR_SOLO_BRIDGE_SHARDS`, clamped `1..1024`).
+- Every mapping thread and the merged ambiguous hash drain into **the same**
+  shard vectors using that rule, so a given barcode is owned by **exactly one**
+  shard before UMI collapse. Collapse is **not** done per original mapping
+  thread.
+
+**Cross-thread duplicates**
+
+- Within each shard, records are sorted by `(wlCb, gene, umi24)` and **adjacent
+  duplicates are coalesced** (summed `count`) so all sources agree on one row
+  per `(CB, gene, UMI)` before `1MM_CR` / `MultiGeneUMI_CR`.
+- Final `countCellGeneUMI` / indices are filled in **global** `indCB` order
+  (sorted whitelist indices), same as the old monolithic path.
+
+**2M validation** (same FASTQs as postmerge v1; `STAR_SOLO_NONFLEX_HASH_BRIDGE=1`)
+
+- Intended artifact root:
+  `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_hashbridge_direct_postmerge_v3/`
+- Agent mirror: `/tmp/iPSC2_1_GEX_2M_unique_hashbridge_direct_postmerge_v3/`
+- Wall time: `1:34.10`; max RSS: `40214380 kB` (in line with postmerge v1/v2).
+- Solo timing vs postmerge v1:
+  - `collapseUMIall_fromBridgeHash`: `0.407594 s` vs `0.431201 s`
+  - `countCBgeneUMI`: `0.411455 s` vs `0.466008 s`
+  - `processRecords`: `3.36736 s` vs `3.37843 s`
+- `Summary.csv` vs postmerge v1 (direct): `Unique GeneFull` `0.743137` vs
+  `0.743136`; cells `7224` vs `7217`; UMIs `1301937` vs `1301691`; genes
+  `17771` vs `17770` (same ballpark as v2; still not legacy-identical).
+- Raw/filtered `matrix.mtx` vs v1: `cmp` still non-zero (unchanged parity
+  story vs legacy).
+
+**Follow-up**
+
+- Optional: tune `STAR_SOLO_BRIDGE_SHARDS` vs thread count for cache behavior.
+- Full-sample gate remains **legacy / matrix parity**, not the sharded collapse
+  mechanics.
+
+### CB-sharded grouped hashes (direct bridge v4, 2026-03-24)
+
+**Storage**
+
+- Replaces v3’s per-shard `std::vector<BridgeHashRec>` staging with **`nShards`
+  `khash_t(cg_agg)` maps** (reuse `cg_agg`: `uint64_t` key, `uint32_t` count).
+- **Packed key** `packShardCollapseAggKey(wlCb, geneFull, umi24)`:
+  `[wlCb:22][geneFull:18][umi24:24]`. Values aggregate read counts at insert
+  (`shardAggAdd`). **Fail closed** if `wlCb >= 2^22` or `geneFull >= 2^18`.
+- After drain, each shard hash was walked once to size `(CB,gene)` segments and
+  populate `cbSeen`; then each shard hash was converted to
+  `unordered_map<wlCb, vector<GeneUmiCount>>`, the **khash was destroyed**, and
+  global `indCB` order drove per-CB **sort `(gene, umi)`** + existing
+  `1MM_CR` / `MultiGeneUMI_CR`. **Direct bridge v5** removes that
+  `unordered_map`/per-CB vector bucket rebuild; see the next subsection.
+
+**2M validation** (same FASTQs; agent mirror
+`/tmp/iPSC2_1_GEX_2M_unique_hashbridge_direct_postmerge_v4/`; canonical
+`/storage/100K/.../iPSC2_1_GEX_2M_unique_hashbridge_direct_postmerge_v4/`)
+
+- Wall: `1:31.62`; max RSS: `40214152 kB`.
+- Log: `unique_keys~=1354560` after grouped drain (vs raw row count ~1.35M on
+  v3 path).
+- Solo timing vs postmerge v1: `collapseUMIall_fromBridgeHash` `0.465473 s`
+  vs `0.431201 s` (hash + map conversion slower than v3’s shard vectors+sort);
+  `countCBgeneUMI` `0.469135 s` vs `0.466008 s`; `processRecords` `3.39021 s`
+  vs `3.37843 s`.
+- `Summary.csv` vs v1: `Unique GeneFull` `0.743136`; cells `7224`; UMIs
+  `1301962`; genes `17771` (in line with v3).
+- `matrix.mtx` vs v1: `cmp` non-zero (unchanged vs legacy). Agent check vs v3
+  tmp `matrix.mtx` also non-zero — if reproducible, worth a parity pass (e.g.
+  tie-breaking in correction); Summary-level metrics remain close to v3.
+
+**Follow-up**
+
+- If `geneFull` can exceed `2^18-1` on some references, extend packing or fail
+  with a clearer upgrade path.
+- ~~Consider reserving `shardByWl` bucket counts~~ — superseded by **v5** (no
+  `shardByWl` layer).
+
+### CB-sharded flat-vector merge (direct bridge v5, 2026-03-24)
+
+**Storage / dataflow**
+
+- Same **thread-local bulk hashes → merged ambiguous pool → single ambiguous
+  resolve → CB-shard ownership** as v2–v4.
+- Per-shard **`khash_t(cg_agg)`** with `packShardCollapseAggKey` (unchanged
+  from v4).
+- **After drain:** each shard is dumped into one flat **`std::vector<ShardRow>`**
+  `(wl, gene, umi24, count)`; the shard **khash is destroyed immediately**.
+- Rows are **sorted** by `(wl, gene, umi24)`; adjacent duplicate keys are
+  **coalesced** (sum counts).
+- `nCbGeneSeg` / `cbSeen` / `sortedCBs` → `indCB` / `indCBwl` use linear walks
+  over the flat shards (no per-shard `unordered_map`, no second full-size nested
+  container graph).
+- **Collapse:** multi-pointer scan in **global whitelist order**; for each CB,
+  advance each shard cursor to that barcode’s contiguous run, build one **temporary
+  slice**, run the same **`1MM_CR` + `MultiGeneUMI_CR`** collapse as before, append
+  into **`countCellGeneUMI`** / index, then drop the slice.
+- **`countMatMult`** is left empty on this path (`s = 0`, buffers cleared);
+  legacy multimapper redistribution matrices are not populated.
+
+**2M validation** (same FASTQs as postmerge v1; `STAR_SOLO_NONFLEX_HASH_BRIDGE=1`)
+
+- Canonical:
+  `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_hashbridge_direct_postmerge_v5/`
+- Agent mirror:
+  `/tmp/iPSC2_1_GEX_2M_unique_hashbridge_direct_postmerge_v5/`
+- Wall: `1:33.29`; max RSS: `40214436 kB` (same ~40 GB class as v1/v4).
+- Solo timing vs postmerge v1 (`Log.out`):
+  - `collapseUMIall_fromBridgeHash`: `0.442646 s` vs `0.431201 s`
+  - `countCBgeneUMI`: `0.446574 s` vs `0.466008 s`
+  - `processRecords`: `3.3965 s` vs `3.37843 s`
+- vs direct bridge v4 (same agent host): wall v5 `1:33.29` vs v4 `1:31.62` (~1.7 s
+  slower end-to-end); collapse v5 `0.442646 s` vs v4 `0.465473 s` (slightly
+  faster — no map rebuild).
+- `Summary.csv` vs postmerge v1 direct: `Unique GeneFull` `0.743136` (match);
+  `Estimated Number of Cells` `7237` vs `7217`; `UMIs in Cells` `1302362` vs
+  `1301691`; `Total GeneFull Detected` `17771` vs `17770` (same broad drift band
+  as v3/v4 vs legacy).
+- `matrix.mtx`: `cmp` non-zero vs legacy, v1, and v4. Raw third-line nnz:
+  v5 `1255539` vs v1 `1255639` (−100) vs v4 `1255603` (−64). Filtered nnz:
+  v5 `1206854` (7237 columns) vs v1 `1206217` (7217) vs v4 `1206195` (7217) —
+  header differs when cell counts differ; not byte-identical to prior direct
+  runs.
+
+**Readiness**
+
+- Removes the large **`khash → unordered_map<wlCb, vector<...>>`** reconstruction
+  from v4; memory profile remains dominated by the flat shard rows (~same unique
+  key cardinality as grouped khash).
+- Performance is **in the same band** as postmerge v1/v4 at 2M; not yet a large
+  wall-clock win over v4.
+- Parity vs legacy is **unchanged in kind** (summary/matrix still drift vs
+  legacy); vs direct v1/v4, matrices are **still not `cmp`-identical** (raw nnz
+  slightly lower than v1).
+- Full-sample `Unique` benchmark remains **reasonable to try** for throughput /
+  RSS smoke, but **not** as a legacy drop-in until matrix parity is understood.
+
+### Direct bridge v6 scratch / parity notes (2026-03-24)
+
+**Goal**
+
+- Reduce per-CB allocator churn (nested `unordered_map` MultiGene scratch) and
+  redundant shard metadata passes without changing the minimal Unique bridge
+  architecture.
+
+**What was tried**
+
+- **Flat MultiGene pass:** build `(umi, geneSlot, count)` runs from sorted
+  scratch vectors, then replicate winner + uncorrected tie-break logic. Produced
+  **non-trivial raw `matrix.mtx` drift** vs the stored v5 artifact (and vs a
+  thread-local single `umiCorr` map variant), so it was **dropped**.
+- **`unordered_map::reserve` on the outer `umiGeneMapCount` maps:** also moved
+  raw nnz on the 2M fixture (likely interaction with bucket layout and the legacy
+  `operator[]`-heavy tie-break loop), so **not** enabled.
+- **Single thread-local `umiCorr` map cleared per gene** (instead of
+  `vector<unordered_map>` per barcode): still **did not** match the on-disk v5
+  `matrix.mtx` byte-for-byte in spot checks — reverted to **per-gene
+  `umiCorrected[iG]`** matching `collapseUMIall`.
+
+**Unchanged (already optimal enough to leave alone)**
+
+- **`cbSeen` + `nCbGeneSeg`:** one linear pass over sorted flat shards (no extra
+  full scan added in v6 work).
+
+**Current code state**
+
+- Per-CB collapse matches **v5** (nested `umiGeneMapCount` / `umiGeneMapCount0`,
+  `vector<unordered_map>` `umiCorrected`). File comment in
+  `SoloFeature_collapseUMI_fromBridgeHash.cpp` records why the flat map remains.
+
+**What v6 did not change (and why “no speedup” is expected)**
+
+- **Per-CB hot path:** the allocator-heavy trio is still allocated and filled
+  every barcode: `umiGeneMapCount`, `umiGeneMapCount0`, and `umiCorrected`
+  (`SoloFeature_collapseUMI_fromBridgeHash.cpp`, current tree ~391–417). None of
+  that was removed or flattened in the shipped v6 outcome.
+- **Shard reconstruction:** the full pipeline remains **per-shard grouped khash
+  → extract to `std::vector<ShardRow>` → `std::sort` on `(wl, gene, umi)`**
+  (~270–297 in the same file), i.e. the second large representation and the
+  per-shard full sort are still there; v6 did not replace them with a cheaper
+  merge or streaming layout.
+- **Conclusion:** v6 was a **parity-first investigation**, not a landed hot-path
+  simplification. **Material wall-time improvement should not be expected** until
+  at least one of the above is actually removed or replaced with a
+  parity-checked cheaper structure.
+
+**2M validation** (same FASTQs; `STAR_SOLO_NONFLEX_HASH_BRIDGE=1`; no custom
+`--outTmpDir` — explicit tmp path hit `could not make temporary directory` on
+this host)
+
+- Canonical:
+  `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_hashbridge_direct_postmerge_v6/`
+- Wall: `1:32.32`; max RSS: `40213060 kB`.
+- Solo timing (`Log.out`): `collapseUMIall_fromBridgeHash` `0.437873 s`;
+  `countCBgeneUMI` `0.441747 s`; `processRecords` `3.39798 s`.
+- `Summary.csv`: `Unique GeneFull` `0.743137`; `Estimated Number of Cells`
+  `7212`; `UMIs in Cells` `1301465`; `Total GeneFull Detected` `17770`.
+- Raw `matrix.mtx` third-line nnz vs stored v5 artifact: `1255601` vs `1255539`
+  (`cmp` non-zero) — **similar** to other run-to-run / commit drift on this path,
+  not a large regression vs the direct-hash family.
+
+**Readiness**
+
+- **No material wall-time win** vs v5 — consistent with **no structural change**
+  to the per-CB maps or the khash→flat→sort shard path (see bullets above).
+- Full-sample `Unique` smoke: **same as v5** (ok for throughput/RSS probes;
+  legacy matrix parity still open).
+
+### Direct bridge v7a: khash retained + sorted `khiter_t` index (2026-03-24)
+
+**Change**
+
+- **Removed** the full-shard `std::vector<ShardRow>` materialization and the
+  **second** full copy of every aggregate row in unpacked form.
+- **Kept** per-shard `khash_t(cg_agg)` after drain until all barcodes are
+  collapsed; each shard gets a **`std::vector<khiter_t>`** sorted by **packed
+  64-bit key** (same order as `(wl, gene, umi24)`).
+- **Single pass** over each sorted iterator list: `cbSeen`, segment count
+  `nCbGeneSeg` (starts of `(wl, gene)` runs), matching the old flat-vector scan.
+- **Per barcode (global whitelist order):** advance a per-shard cursor in the
+  sorted `khiter_t` list, unpack only that barcode’s run into a **reused**
+  `cbScratch` `ShardRow[]`, run existing `collapseOneBarcodeRows`, then drop
+  the slice (no per-CB sort — slice already ordered by gene, UMI).
+- **After** all CBs: `kh_destroy` each shard hash; release iterator vectors.
+- **Unchanged:** per-CB MultiGene nested `unordered_map` path (v5/v6); no
+  `countMatMult`.
+
+**Trade-off**
+
+- Peak memory can be **khash + iterator arrays** concurrently (old path
+  destroyed khash when building flat rows). RSS on the 2M fixture stayed in the
+  same **~40 GB** band as v5/v6.
+
+**2M validation** (same FASTQs; `STAR_SOLO_NONFLEX_HASH_BRIDGE=1`)
+
+- Canonical:
+  `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_hashbridge_direct_postmerge_v7a/`
+- Wall: `1:31.77`; max RSS: `40213700 kB`.
+- Solo timing: `collapseUMIall_fromBridgeHash` `0.423618 s`;
+  `countCBgeneUMI` `0.427122 s`; `processRecords` `3.37419 s`.
+- `Summary.csv`: `Unique GeneFull` `0.743137`; cells `7226`; `UMIs in Cells`
+  `1302005`; `Total GeneFull Detected` `17772`.
+- Raw `matrix.mtx` nnz `1255564` vs stored v5 artifact `1255539`: `cmp` non-zero
+  (same **small** direct-hash vs archived-artifact drift class as v6).
+
+**Readiness**
+
+- Meets the structural goal (**no full-shard `ShardRow` vectors**); wall/RSS
+  **competitive** with v5/v6.
+- Full-sample `Unique`: **same gate as v5** — ok for smoke, not a legacy
+  drop-in until matrix parity vs legacy is closed.
+
+### Direct bridge v8: insert-time packed slots + per-wl slot-id index (2026-03-24)
+
+**Change**
+
+- **Primary lookup:** `khash_t(cg_agg)` maps bridge tuple key (`packBridgeCgAggKey`) → **stable
+  `uint32_t` slot id** (not `khiter_t`, not raw count).
+- **Slot storage:** one `uint64_t` per slot, layout MSB→LSB
+  `[reserved:2][overflow:1][count:18][gene:19][umi:24]` (`flex/source/hash_shims_cpp_compat.h`:
+  `packBridgePackedSlot`, `bridgePackedSlotAddCount`, `bridgePackedSlotMerge`).
+  Count saturates at `2^18-1`; further increments set **overflow** and bump event counters;
+  merge across threads uses the same saturation rules.
+- **Per-thread CB grouping (historical v8 code):** `bridgeSlotsByCompactCb_` was maintained at
+  insert but **not** read by collapse (drain always scanned `inlineHash_`); **removed in v9** (see
+  “Direct bridge v9” below).
+- **Collapse:** drain each thread into one **global** tuple hash (`packShardCollapseAggKey(wl,
+  geneFull, umi24)` → slot id) plus per-wl slot-id lists; **no** per-shard khash, **no**
+  sorted `khiter_t` vectors, **no** full-shard `vector<ShardRow>` materialization before the
+  per-CB pass. For each barcode in sorted whitelist order, unpack that CB’s global slots to
+  `cbScratch`, **sort by (gene, umi)**, then run unchanged `collapseOneBarcodeRows` (`1MM_CR` /
+  `MultiGeneUMI_CR`).
+- **Ambiguous resolve** and **mergeInlineHash** use `SoloReadFeature::bridgeDirectTupleAdd` /
+  packed-slot merge so slot ids stay stable across khash growth.
+
+**2M validation** (same FASTQs as v7a; `STAR_SOLO_NONFLEX_HASH_BRIDGE=1`)
+
+- Canonical:
+  `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_hashbridge_direct_postmerge_v8/`
+- Wall (`/usr/bin/time`): `1:31.74`; max RSS: `40238964 kB` (same band as v7a `40213700 kB`).
+- Solo timing (`Log.out`): `collapseUMIall_fromBridgeHash` `0.488444 s` (vs v7a `0.423618 s` —
+  extra per-CB sort and global merge bookkeeping); `countCBgeneUMI` `0.492501 s` (vs `0.427122 s`);
+  `processRecords` `3.40836 s` (vs `3.37419 s`).
+- Log lines report `thread_packed_slot_overflow_events=0` and
+  `merge_packed_slot_overflow_events=0` for this fixture.
+- `Summary.csv`: `Unique GeneFull` `0.743136`; cells `7217`; `UMIs in Cells` `1301664`;
+  `Total GeneFull Detected` `17771` (same broad drift band vs legacy / prior direct runs;
+  cell count differs from v7a `7226` due to EmptyDrops/bootstrap noise).
+- Raw `matrix.mtx` nnz `1255586` vs v7a `1255564` (+22); still the small **unordered_map
+  iteration / tie-break** sensitivity class, not a large regression.
+
+**Readiness**
+
+- Meets the structural goal: **no post-hoc shard regroup + sorted khiter index**; collapse only
+  does a lightweight global fold + per-CB sort. (Insert-time `bridgeSlotsByCompactCb_` was
+  redundant and removed in v9.)
+- End-to-end wall/RSS remain **competitive** with v7a; collapse phase is slightly **slower** on 2M
+  (per-CB `std::sort` cost).
+- **Packed-slot overflow** did not fire on 2M; full-sample `Unique` smoke remains reasonable,
+  with the same legacy parity caveats as v5–v7a.
+
+### Direct bridge v9: remove unused insert-time CB index + compact observed-WL slot map (2026-03-24)
+
+**Change**
+
+- **Removed** `bridgeSlotsByCompactCb_` entirely: collapse never consumed it (drain always scanned
+  thread-local `inlineHash_`). No more resize/push/merge/swap overhead on that path.
+- **`bridgeDirectTupleAdd`** signature drops the unused `compactCb` argument (call sites: record +
+  ambiguous resolve).
+- **Collapse:** replaced `slotsByWl.resize(pSolo.cbWLsize)` (one `vector` per whitelist entry)
+  with `std::unordered_map<uint32_t, std::vector<uint32_t>> slotIdsByObservedWl` keyed only by
+  barcodes that receive at least one global slot. **`sortedCBs`** is built once (sorted global
+  whitelist indices) and used for both **`nCbGeneSeg`** counting and the final collapse loop —
+  same deterministic **whitelist traversal order** as v8’s collapse loop (`indCB` / sorted CBs).
+
+**2M validation** (same FASTQs as v8; `STAR_SOLO_NONFLEX_HASH_BRIDGE=1`)
+
+- Canonical:
+  `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_hashbridge_direct_postmerge_v9/`
+- Wall (`/usr/bin/time`): `1:31.57`; max RSS: `40224884 kB` (vs stored v8 `1:31.74` / `40238964 kB` —
+  modest RSS reduction; wall noise band).
+- Solo timing (`Log.out`): `collapseUMIall_fromBridgeHash` `0.47482 s` (vs v8 `0.488444 s`);
+  `countCBgeneUMI` `0.478854 s` (vs `0.492501 s`); `processRecords` `3.40314 s` (vs `3.40836 s`).
+- Overflow counters: `0` / `0` (thread / merge).
+- `Summary.csv`: `Unique GeneFull` `0.743137`; cells `7224`; `UMIs in Cells` `1301972`;
+  `Total GeneFull Detected` `17773` (vs stored v8 artifact: small differences; see parity note).
+- Raw `matrix.mtx` nnz `1255619` vs stored v8 `1255586` (`cmp` non-zero).
+
+**Parity note (v9 vs stored v8 artifact)**
+
+- Byte-identical outputs vs the **on-disk v8 run** were **not** observed on this check (`cmp` on
+  raw `matrix.mtx` differs; `Summary.csv` differs modestly). `Log.out` also shows slightly different
+  pre-collapse hash entry totals vs the stored v8 log, which points to **run-to-run / binary /
+  scheduling variance** upstream of collapse as well as any second-order effects on EmptyDrops.
+- The v9 edits are **not** intended to change merge arithmetic or `MultiGeneUMI_CR` semantics; for a
+  strict collapse-only A/B, rerun v8 and v9 with the **same** binary back-to-back.
+
+**Readiness**
+
+- Same structural behavior as v8; less fixed and wasted auxiliary memory for large whitelists with
+  sparse observation; collapse timing slightly improved vs stored v8 on this host.
+
+### Direct bridge v10: flat MultiGeneUMI_CR aggregates inside `collapseOneBarcodeRows` (2026-03-24)
+
+**Goal**
+
+- Drop allocator-heavy nested `unordered_map<uintUMI, unordered_map<uint32_t,uint32_t>>` for corrected
+  and original MultiGene counts on the **non-Flex direct bridge** path, and drop
+  `vector<unordered_map<uintUMI,uintUMI>> umiCorrected` (unused after `umiArrayCorrect_CR` here:
+  `readInfoRec=false`; a single local dummy map satisfies the signature).
+
+**Replacements**
+
+| Legacy / v9 (nested) | v10 |
+|----------------------|-----|
+| `umiGeneMapCount[correctedUmi][iG] += count` | `corrUmiGeneCount[pack(umi,geneIdx)] += count` with `pack = (uint64_t{umi24}<<32) \| geneIdx`; first insert appends `pack` to `corrPackedKeys` |
+| `umiGeneMapCount0[origUmi][iG] += count` | `origByOrigUmi[origUmi]` vector of `(geneIdx,count)`; merge when the same `(origUmi,iG)` appears again in a gene slice |
+| `umiCorrected[iG]` for `umiArrayCorrect_CR(..., true, ...)` | `umiArrayCorrect_CR(..., false, false, umiCorrUnusedBridge)` — no persistent per-gene correction map |
+
+**64-bit pack for corrected aggregation**
+
+- **Layout (MSB→LSB):** `[corrected UMI: 32][gene slice index iG: 32]`.
+- **Rationale:** `std::sort` on the key vector groups all `(umi,gene)` rows for one corrected UMI in a contiguous run (`corrUmi` in the high half is identical), then breaks ties by gene index. Gene index is the same `iG` as in `SoloFeature_collapseUMIall.cpp` (index into the per-CB gene segment list), not the raw global gene id (that is still in `gID[iG]` when writing `countCellGeneUMI`).
+
+**Original-count tie-break (parity with `SoloFeature_collapseUMIall.cpp`)**
+
+- Legacy uses `umiGeneMapCount0[iu.first]` where `iu.first` is the **corrected** cluster key, i.e. the
+  inner map keyed by **original** UMI literal `C` lists `(gene → count)` for reads whose **original**
+  UMI was `C`. The second loop compares every such original count to `umiGeneMapCount0[iu.first][maxg]`.
+- v10 builds the same sparse view in `origByOrigUmi` while iterating each gene slice’s `umiArray`
+  **before** `umiArrayCorrect_CR`. Lookup `origByOrigUmi.find(correctedUmi)` matches `operator[]` on
+  the legacy outer map when the key exists; when the key is absent, both paths skip the inner
+  tie-break loop (legacy would create an empty inner map on first `[]` in the range-for; v10 has no
+  entry in `origByOrigUmi`).
+
+**2M validation** (same FASTQs as v9; `STAR_SOLO_NONFLEX_HASH_BRIDGE=1`)
+
+- Canonical:
+  `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_hashbridge_direct_postmerge_v10/`
+- Wall (`/usr/bin/time`): `1:31.15`; max RSS: `40224908 kB` (same band as stored v9 `1:31.57` /
+  `40224884 kB`).
+- Solo timing (`Log.out`): `collapseUMIall_fromBridgeHash` `0.324378 s` (vs stored v9 `0.47482 s`);
+  `countCBgeneUMI` `0.328652 s` (vs `0.478854 s`); `processRecords` `3.29183 s` (vs `3.40314 s`).
+- `Log.out`: `nCB=41329` at collapse finish (stored v9 artifact on the same host shows `nCB=41328` —
+  same printed `git` commit but different **working-tree** builds that day; not attributable to the
+  collapse-only diff alone). Treat byte `cmp` of `matrix.mtx` vs stored v9 as **not** a clean
+  single-variable experiment until both are rerun from one binary snapshot.
+- Raw `matrix.mtx` nnz `1255596` vs stored v9 `1255619` (`cmp` non-zero).
+- `Summary.csv` (vs stored v9): `Unique GeneFull` unchanged `0.743137`; cells `7217` vs `7224`;
+  `UMIs in Cells` `1301673` vs `1301972`; `Total GeneFull Detected` `17772` vs `17773` — same order
+  of drift as historical v8↔v9 Summary noise.
+
+**Parity vs legacy 2M control** (`iPSC2_1_GEX_2M_unique_legacy_postmerge_v1`)
+
+- Direct bridge (v10) remains **closer** to direct v9 than to legacy on these headers: legacy
+  `Unique GeneFull` `0.743445`, cells `7221`, `UMIs in Cells` `1308644`, `Total GeneFull Detected`
+  `17786` — unchanged “bridge vs legacy” product gap class.
+
+**Readiness**
+
+- Collapse hot path is **measurably faster** on 2M vs stored v9 timing lines; memory band unchanged.
+- For **strict** matrix parity vs a nested-map direct bridge, rerun v9 and v10 from the **same**
+  commit with only the collapse file differing (or accept the small nnz / `nCB` variance class until
+  upstream determinism is audited).
+- Reasonable to schedule a **full-sample** `Unique` direct-bridge benchmark next; treat Summary/matrix
+  deltas against legacy as the long-standing bridge semantics question, not a v10 regression signal.
+
+### Controlled clean v9 vs v10 paired validation (2026-03-24)
+
+**Goal**
+
+- Close the validation gap from the stored v9/v10 artifacts by rerunning both binaries from a **clean**
+  snapshot where the **only intended source difference** is the `collapseOneBarcodeRows` MultiGene hot
+  path in `SoloFeature_collapseUMI_fromBridgeHash.cpp`.
+
+**Method**
+
+- Built two clean detached trees from commit `735ed6e`:
+  - v9 control: nested `umiGeneMapCount` / `umiGeneMapCount0` / `umiCorrected`
+  - v10 candidate: flat `corrUmiGeneCount` + `corrPackedKeys` + sparse `origByOrigUmi`
+- Both trees were clean-rebuilt with:
+  - `make -C core/legacy/source clean && make -C core/legacy/source -j8 STAR`
+- Both runs used the same 2M UCSF FASTQs, same command line, same host, serialized back-to-back with
+  `STAR_SOLO_NONFLEX_HASH_BRIDGE=1`.
+
+**Artifacts**
+
+- v9 paired control:
+  `/storage/100K/ucsf_solo_optimization_20260324/validation_pair_20260324/iPSC2_1_GEX_2M_unique_hashbridge_direct_paired_v9/`
+- v10 paired candidate:
+  `/storage/100K/ucsf_solo_optimization_20260324/validation_pair_20260324/iPSC2_1_GEX_2M_unique_hashbridge_direct_paired_v10/`
+
+**Paired result**
+
+| Metric | v9 paired | v10 paired |
+|--------|-----------:|-----------:|
+| Wall | `1:31.33` | `1:31.75` |
+| Max RSS | `40224696 kB` | `40224320 kB` |
+| `collapseUMIall_fromBridgeHash` | `0.463459 s` | `0.316613 s` |
+| `countCBgeneUMI` | `0.4674 s` | `0.320512 s` |
+| `processRecords` | `3.40954 s` | `3.29096 s` |
+| Unique GeneFull | `0.743137` | `0.743137` |
+| Estimated Cells | `7225` | `7214` |
+| UMIs in Cells | `1302014` | `1301562` |
+| Total GeneFull Detected | `17773` | `17767` |
+
+**Parity**
+
+- This paired rerun shows the v10 differences are **real**, not just dirty-build or artifact-path noise.
+- `Summary.csv`: **different**
+- `Features.stats`: **different**
+  - `yesCellBarcodes`: `41319 -> 41320`
+  - `yesUMIs`: `1352870 -> 1352810`
+- Raw outputs:
+  - `raw/barcodes.tsv`: identical (`3686400`)
+  - `raw/features.tsv`: identical
+  - `raw/matrix.mtx`: **different**
+  - raw header nnz: `1255640 -> 1255585` (`-55`)
+- Filtered outputs:
+  - `filtered/features.tsv`: identical
+  - `filtered/barcodes.tsv`: **different**
+  - `filtered/matrix.mtx`: **different**
+  - filtered cells: `7225 -> 7214`
+  - filtered header nnz: `1206518 -> 1206089`
+  - filtered barcode set: `11` v9-only, `0` v10-only
+
+**Interpretation**
+
+- The validation problem is now resolved in the narrow experimental sense:
+  - the clean paired A/B proves the v10 hot-path rewrite is **not** parity-identical to v9
+  - the earlier stored-v9 vs stored-v10 ambiguity should no longer be used as evidence either way
+- v10 does improve the collapse section materially, but that speedup does **not** currently preserve the
+  v9 direct-bridge outputs.
+- A larger full-sample v10 benchmark should therefore wait until the v9/v10 parity gap is understood or
+  accepted explicitly.
+
+### Ambiguous CB quality aggregation fix (2026-03-25)
+
+**Problem**
+
+- The direct bridge ambiguous-CB path stored exactly one `cbQual` string per ambiguous key and preserved
+  the first one seen when thread-local ambiguous maps were merged.
+- That made Bayesian CB resolution sensitive to merge/input order even when the clique itself was fixed.
+
+**Fix**
+
+- Added deterministic per-position accumulated CB quality evidence to the shared ambiguous entry:
+  - `cbLogLikMatch`
+  - `cbLogLikMismatch`
+  - `cbEvidenceReads`
+- New evidence is accumulated on every ambiguous observation, merged by summation across threads/shards,
+  and consumed directly by `CbBayesianResolver`.
+- The legacy `cbQual` string is retained only as compatibility/debug context; the resolver now prefers
+  aggregated evidence when present.
+- This was wired through both:
+  - non-Flex direct bridge ambiguous-CB accumulation / merge / resolve
+  - shared `ReadAlign` ambiguous-CB resolve path
+  - Flex `InlineCBCorrection` merged ambiguous path
+
+**Focused 2M determinism check**
+
+- Binary: current branch after the aggregated-quality fix, clean rebuilt
+- Input: corrected UCSF `iPSC2_1/GEX` 2M downsample
+- Environment: `STAR_SOLO_NONFLEX_HASH_BRIDGE=1`, `STAR_SOLO_DEBUG_BARCODE_FILE=/tmp/solo_debug_barcode.txt`
+- Output roots:
+  - `/tmp/iPSC2_1_GEX_2M_aggqual_check_run1/`
+  - `/tmp/iPSC2_1_GEX_2M_aggqual_check_run2/`
+
+**Result**
+
+- Same binary, same input, serialized back-to-back:
+  - `Summary.csv`: identical
+  - `raw/matrix.mtx`: identical
+  - `filtered/matrix.mtx`: identical
+  - target barcode `AGGTTGTTCCCTCAAC`: `raw_total=1`, `raw_nnz=1` in both runs
+  - `AMBIG-CB-RESOLVE`: identical in both runs:
+    - `pending=20003 resolved=10847 still_ambiguous=9156 added_to_hash=14013`
+
+**Interpretation**
+
+- The direct bridge path is now stable in the narrow same-binary / same-input sense for the traced 2M case.
+- This does **not** by itself prove v9/v10 parity vs earlier stored artifacts; it removes the order-sensitive
+  representative-`cbQual` bug from the shared resolver path.
