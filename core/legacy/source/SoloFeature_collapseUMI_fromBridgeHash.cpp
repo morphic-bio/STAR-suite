@@ -23,9 +23,10 @@
 #include <cstdlib>
 #include <cstring>
 #include <omp.h>
-#include <unordered_map>
 #include <utility>
 #include <vector>
+
+KHASH_MAP_INIT_INT(cbcount, size_t)
 
 namespace {
 
@@ -157,8 +158,8 @@ void SoloFeature::collapseUMIall_fromBridgeHash()
             bridgeHashSnapshotWrite(snapPath);
     }
 
-    std::unordered_map<uint32_t, size_t> cbEntryCount;
-    cbEntryCount.reserve(std::min<size_t>(totalHashSize / 8 + 64, size_t{1} << 20));
+    khash_t(cbcount) *cbEntryCount = kh_init(cbcount);
+    kh_resize(cbcount, cbEntryCount, std::min<size_t>(totalHashSize / 8 + 64, size_t{1} << 20));
 
     auto countHashEntriesPerWlCb = [&](SoloReadFeature *srcFeat, khash_t(cg_agg) *hash) {
         (void)srcFeat;
@@ -173,7 +174,12 @@ void SoloFeature::collapseUMIall_fromBridgeHash()
             unpackBridgeWlUmiGeneKey(key, &wlCb, &umi24, &gene16);
             (void)umi24;
             (void)gene16;
-            ++cbEntryCount[wlCb];
+            int absent = 0;
+            khiter_t itCb = kh_put(cbcount, cbEntryCount, wlCb, &absent);
+            if (absent)
+                kh_val(cbEntryCount, itCb) = 1;
+            else
+                ++kh_val(cbEntryCount, itCb);
         }
     };
 
@@ -187,9 +193,12 @@ void SoloFeature::collapseUMIall_fromBridgeHash()
     }
 
     std::vector<uint32_t> sortedCBs;
-    sortedCBs.reserve(cbEntryCount.size());
-    for (const auto &kv : cbEntryCount)
-        sortedCBs.push_back(kv.first);
+    sortedCBs.reserve(kh_size(cbEntryCount));
+    for (khiter_t it = kh_begin(cbEntryCount); it != kh_end(cbEntryCount); ++it) {
+        if (!kh_exist(cbEntryCount, it))
+            continue;
+        sortedCBs.push_back(kh_key(cbEntryCount, it));
+    }
     std::sort(sortedCBs.begin(), sortedCBs.end());
 
     nCB = static_cast<uint32_t>(sortedCBs.size());
@@ -203,9 +212,12 @@ void SoloFeature::collapseUMIall_fromBridgeHash()
     std::vector<size_t> cbOffsets(nCB + 1, 0);
     for (uint32_t iCB = 0; iCB < nCB; ++iCB) {
         const uint32_t wl = indCB[iCB];
-        cbOffsets[iCB + 1] = cbOffsets[iCB] + cbEntryCount[wl];
+        const khiter_t itCb = kh_get(cbcount, cbEntryCount, wl);
+        const size_t wlCount = (itCb != kh_end(cbEntryCount)) ? kh_val(cbEntryCount, itCb) : 0;
+        cbOffsets[iCB + 1] = cbOffsets[iCB] + wlCount;
     }
-    std::unordered_map<uint32_t, size_t>().swap(cbEntryCount);
+    kh_destroy(cbcount, cbEntryCount);
+    cbEntryCount = nullptr;
     if (cbOffsets[nCB] != totalHashSize) {
         ostringstream errOut;
         errOut << "EXITING because of fatal ERROR: bridge hash CSR sizing mismatch (expected " << totalHashSize
