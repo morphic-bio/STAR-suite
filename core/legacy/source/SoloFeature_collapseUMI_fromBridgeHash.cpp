@@ -22,6 +22,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
+#include <omp.h>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -40,47 +41,6 @@ struct MgRow {
     uint32_t geneIdx;
     uint32_t count;
 };
-
-enum class CountMatAllocMode {
-    HashUpper,
-    SegUpper,
-    SegGuarded,
-    Grow
-};
-
-CountMatAllocMode countMatAllocMode()
-{
-    const char *mode = std::getenv("STAR_SOLO_BRIDGE_COUNTMAT_ALLOC_MODE");
-    if (mode == nullptr || mode[0] == '\0' || std::strcmp(mode, "hash_upper") == 0)
-        return CountMatAllocMode::HashUpper;
-    if (std::strcmp(mode, "seg_upper") == 0)
-        return CountMatAllocMode::SegUpper;
-    if (std::strcmp(mode, "seg_guarded") == 0)
-        return CountMatAllocMode::SegGuarded;
-    if (std::strcmp(mode, "grow") == 0)
-        return CountMatAllocMode::Grow;
-    return CountMatAllocMode::HashUpper;
-}
-
-size_t guardedAllocThresholdBytes()
-{
-    const char *env = std::getenv("STAR_SOLO_BRIDGE_COUNTMAT_ALLOC_THRESHOLD_MB");
-    if (env == nullptr || env[0] == '\0')
-        return static_cast<size_t>(4096) * 1024u * 1024u; // 4 GiB default guard
-    char *end = nullptr;
-    unsigned long long mb = std::strtoull(env, &end, 10);
-    if (end == env || (end != nullptr && *end != '\0'))
-        return static_cast<size_t>(4096) * 1024u * 1024u;
-    return static_cast<size_t>(mb) * 1024u * 1024u;
-}
-
-size_t nextGrowSize(size_t currentSize, size_t need)
-{
-    size_t next = currentSize == 0 ? 1024 : currentSize;
-    while (next < need)
-        next *= 2;
-    return next;
-}
 
 // Stable LSB radix on MgRow.corr (uint32). Replaces std::sort for large per-CB mgBuf.
 void radixSortMgRowsByCorr(std::vector<MgRow> &rows)
@@ -245,6 +205,7 @@ void SoloFeature::collapseUMIall_fromBridgeHash()
         const uint32_t wl = indCB[iCB];
         cbOffsets[iCB + 1] = cbOffsets[iCB] + cbEntryCount[wl];
     }
+    std::unordered_map<uint32_t, size_t>().swap(cbEntryCount);
     if (cbOffsets[nCB] != totalHashSize) {
         ostringstream errOut;
         errOut << "EXITING because of fatal ERROR: bridge hash CSR sizing mismatch (expected " << totalHashSize
@@ -315,319 +276,325 @@ void SoloFeature::collapseUMIall_fromBridgeHash()
     nGenePerCB.assign(nCB, 0);
     nReadPerCB.assign(nCB, 0);
     nReadPerCBmax = 0;
-
-    const size_t minSeed = static_cast<size_t>(nCB + 1u) * static_cast<size_t>(countMatStride);
-    const CountMatAllocMode allocMode = countMatAllocMode();
-    size_t nCbGeneSegUpper = 0;
-    if (allocMode == CountMatAllocMode::SegUpper || allocMode == CountMatAllocMode::SegGuarded) {
-        std::vector<uint32_t> geneStampUpper(65536, 0);
-        uint32_t stampUpper = 1;
-        for (uint32_t iCB = 0; iCB < nCB; ++iCB) {
-            const size_t cbBeg = cbOffsets[iCB];
-            const size_t cbEnd = cbOffsets[iCB + 1];
-            for (size_t j = cbBeg; j < cbEnd; ++j) {
-                const uint32_t g = flat[j].gene;
-                if (geneStampUpper[g] != stampUpper) {
-                    geneStampUpper[g] = stampUpper;
-                    ++nCbGeneSegUpper;
-                }
-            }
-            if (++stampUpper == 0u) {
-                std::fill(geneStampUpper.begin(), geneStampUpper.end(), 0u);
-                stampUpper = 1u;
-            }
-        }
-    }
-
-    size_t initialMatSlots = 0;
-    const size_t hashUpperSlots = totalHashSize * static_cast<size_t>(countMatStride);
-    if (allocMode == CountMatAllocMode::HashUpper) {
-        initialMatSlots = std::max(hashUpperSlots, minSeed);
-    } else if (allocMode == CountMatAllocMode::SegUpper) {
-        initialMatSlots = std::max(nCbGeneSegUpper * static_cast<size_t>(countMatStride), minSeed);
-    } else if (allocMode == CountMatAllocMode::SegGuarded) {
-        const size_t segSlots = std::max(nCbGeneSegUpper * static_cast<size_t>(countMatStride), minSeed);
-        const size_t segBytes = segSlots * sizeof(uint32_t);
-        initialMatSlots = (segBytes <= guardedAllocThresholdBytes()) ? segSlots : minSeed;
-    } else {
-        initialMatSlots = minSeed;
-    }
-    countCellGeneUMI.clear();
-    countCellGeneUMI.resize(initialMatSlots, 0);
     countCellGeneUMIindex.assign(nCB + 1, 0);
-
-    time(&rawTime);
-    P.inOut->logMain << timeMonthDayTime(rawTime)
-                     << " ... countCellGeneUMI alloc mode="
-                     << (allocMode == CountMatAllocMode::HashUpper ? "hash_upper"
-                         : allocMode == CountMatAllocMode::SegUpper ? "seg_upper"
-                         : allocMode == CountMatAllocMode::SegGuarded ? "seg_guarded"
-                         : "grow")
-                     << " initial_slots=" << initialMatSlots
-                     << " seg_upper=" << nCbGeneSegUpper
-                     << " hash_upper=" << totalHashSize
-                     << endl;
 
     countMatMult.s = 1 + pSolo.multiMap.yes.N * pSolo.umiDedup.yes.N;
     countMatMult.m.clear();
     countMatMult.i.assign(nCB + 1, 0);
 
-    std::vector<uint32_t> umiArray;
-    umiArray.reserve(umiArrayStride * 64);
+    struct ThreadScratch {
+        std::vector<uint32_t> umiArray;
+        std::vector<MgRow> mgBuf;
+        std::vector<std::pair<uint32_t, uint32_t>> aggGene;
+        std::vector<std::pair<uint32_t, uint32_t>> origAtCu;
+        vector<uint32> geneCounts;
+        std::unordered_map<uintUMI, uintUMI> emptyUmiCorr;
+        std::vector<uint32_t> geneStamp;
+        uint32_t stampVer;
+        size_t nCbGeneSegT;
+        uint32_t nReadPerCBmaxT;
+        std::vector<uint32_t> geneSeenBkt;
+        std::vector<uint32_t> geneDupCount;
+        std::vector<uint32_t> geneWriteScratch;
+        uint32_t geneBucketMark;
+        std::vector<uint32_t> touchedGenes;
+        std::vector<size_t> genePref;
+        std::vector<BridgeFlatSlot> geneBucketBuf;
+        std::vector<uint32_t> gID;
+        std::vector<size_t> gBeg;
+        std::vector<size_t> gEnd;
 
-    std::vector<MgRow> mgBuf;
-    std::vector<std::pair<uint32_t, uint32_t>> aggGene;
-    std::vector<std::pair<uint32_t, uint32_t>> origAtCu;
-    vector<uint32> geneCounts;
-    static std::unordered_map<uintUMI, uintUMI> s_emptyUmiCorr;
+        ThreadScratch()
+            : stampVer(1),
+              nCbGeneSegT(0),
+              nReadPerCBmaxT(0),
+              geneBucketMark(1),
+              geneStamp(65536, 0),
+              geneSeenBkt(65536, 0),
+              geneDupCount(65536, 0),
+              geneWriteScratch(65536, 0)
+        {
+            umiArray.reserve(umiArrayStride * 64);
+            touchedGenes.reserve(8192);
+            genePref.reserve(8192);
+        }
+    };
 
-    // Distinct (CB,gene) segments for logging only (fused into CB loop).
-    std::vector<uint32_t> geneStamp(65536, 0);
-    uint32_t stampVer = 1;
-    size_t nCbGeneSeg = 0;
+    std::vector<uint32_t> cbRowCounts(nCB, 0);
+    std::vector<std::vector<uint32_t>> cbRows(nCB);
+    const int collapseThreads = std::max(1, P.runThreadN);
+    std::vector<ThreadScratch> scratch(static_cast<size_t>(collapseThreads));
 
-    // Per-CB gene bucketing (separate from geneStamp used for segment counting across CBs).
-    std::vector<uint32_t> geneSeenBkt(65536, 0);
-    std::vector<uint32_t> geneDupCount(65536, 0);
-    std::vector<uint32_t> geneWriteScratch(65536, 0);
-    std::vector<uint32_t> touchedGenes;
-    touchedGenes.reserve(8192);
-    std::vector<size_t> genePref;
-    genePref.reserve(8192);
-    std::vector<BridgeFlatSlot> geneBucketBuf;
-    std::vector<uint32_t> gID;
-    std::vector<size_t> gBeg, gEnd;
+    #pragma omp parallel num_threads(collapseThreads)
+    {
+        ThreadScratch &ts = scratch[static_cast<size_t>(omp_get_thread_num())];
 
-    for (uint32_t iCB = 0; iCB < nCB; ++iCB) {
-        const size_t cbBeg = cbOffsets[iCB];
-        const size_t cbEnd = cbOffsets[iCB + 1];
-        const size_t sliceLen = cbEnd - cbBeg;
-        BridgeFlatSlot *const rawSlice = flat.data() + cbBeg;
+        #pragma omp for schedule(dynamic, 16)
+        for (uint32_t iCB = 0; iCB < nCB; ++iCB) {
+            const size_t cbBeg = cbOffsets[iCB];
+            const size_t cbEnd = cbOffsets[iCB + 1];
+            const size_t sliceLen = cbEnd - cbBeg;
+            BridgeFlatSlot *const rawSlice = flat.data() + cbBeg;
 
-        nGenePerCB[iCB] = 0;
-        nUMIperCB[iCB] = 0;
-        countCellGeneUMIindex[iCB + 1] = countCellGeneUMIindex[iCB];
+            nGenePerCB[iCB] = 0;
+            nUMIperCB[iCB] = 0;
+            cbRowCounts[iCB] = 0;
+            cbRows[iCB].clear();
 
-        if (sliceLen == 0) {
-            if (++stampVer == 0u) {
-                std::fill(geneStamp.begin(), geneStamp.end(), 0u);
-                stampVer = 1u;
+            if (sliceLen == 0) {
+                if (++ts.stampVer == 0u) {
+                    std::fill(ts.geneStamp.begin(), ts.geneStamp.end(), 0u);
+                    ts.stampVer = 1u;
+                }
+                continue;
             }
-            continue;
-        }
 
-        uint64_t readSum = 0;
-        for (size_t j = cbBeg; j < cbEnd; ++j) {
-            readSum += flat[j].count;
-            const uint32_t g = flat[j].gene;
-            if (geneStamp[g] != stampVer) {
-                geneStamp[g] = stampVer;
-                ++nCbGeneSeg;
+            uint64_t readSum = 0;
+            for (size_t j = cbBeg; j < cbEnd; ++j) {
+                readSum += flat[j].count;
+                const uint32_t g = flat[j].gene;
+                if (ts.geneStamp[g] != ts.stampVer) {
+                    ts.geneStamp[g] = ts.stampVer;
+                    ++ts.nCbGeneSegT;
+                }
             }
-        }
-        nReadPerCB[iCB] = static_cast<uint32_t>(readSum > UINT32_MAX ? UINT32_MAX : readSum);
-        if (nReadPerCB[iCB] > nReadPerCBmax)
-            nReadPerCBmax = nReadPerCB[iCB];
-        if (++stampVer == 0u) {
-            std::fill(geneStamp.begin(), geneStamp.end(), 0u);
-            stampVer = 1u;
-        }
+            nReadPerCB[iCB] = static_cast<uint32_t>(readSum > UINT32_MAX ? UINT32_MAX : readSum);
+            if (nReadPerCB[iCB] > ts.nReadPerCBmaxT)
+                ts.nReadPerCBmaxT = nReadPerCB[iCB];
+            if (++ts.stampVer == 0u) {
+                std::fill(ts.geneStamp.begin(), ts.geneStamp.end(), 0u);
+                ts.stampVer = 1u;
+            }
 
-        const uint32_t bktMark = iCB + 1u;
-        touchedGenes.clear();
-        for (size_t j = 0; j < sliceLen; ++j) {
-            const uint32_t g = rawSlice[j].gene;
-            if (g & geneMultMark) {
+            const uint32_t bktMark = ts.geneBucketMark++;
+            if (ts.geneBucketMark == 0u) {
+                std::fill(ts.geneSeenBkt.begin(), ts.geneSeenBkt.end(), 0u);
+                ts.geneBucketMark = 1u;
+            }
+            ts.touchedGenes.clear();
+            for (size_t j = 0; j < sliceLen; ++j) {
+                const uint32_t g = rawSlice[j].gene;
+                if (g & geneMultMark) {
+                    ostringstream errOut;
+                    errOut << "EXITING because of fatal ERROR: multimapper gene encountered in non-Flex bridge direct "
+                              "collapse.\n"
+                           << "This path requires unique-gene alignments only (--soloMultiMappers Unique).\n";
+                    exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_INCONSISTENT_DATA, P);
+                }
+                if (ts.geneSeenBkt[g] != bktMark) {
+                    ts.geneSeenBkt[g] = bktMark;
+                    ts.touchedGenes.push_back(g);
+                    ts.geneDupCount[g] = 1;
+                } else {
+                    ts.geneDupCount[g]++;
+                }
+            }
+
+            std::sort(ts.touchedGenes.begin(), ts.touchedGenes.end());
+
+            ts.genePref.resize(ts.touchedGenes.size() + 1);
+            ts.genePref[0] = 0;
+            for (size_t i = 0; i < ts.touchedGenes.size(); ++i)
+                ts.genePref[i + 1] = ts.genePref[i] + static_cast<size_t>(ts.geneDupCount[ts.touchedGenes[i]]);
+            if (ts.genePref.back() != sliceLen) {
                 ostringstream errOut;
-                errOut << "EXITING because of fatal ERROR: multimapper gene encountered in non-Flex bridge direct "
-                          "collapse.\n"
-                       << "This path requires unique-gene alignments only (--soloMultiMappers Unique).\n";
+                errOut << "EXITING because of fatal ERROR: bridge gene bucket size mismatch (expected " << sliceLen
+                       << ", got " << ts.genePref.back() << ").\n";
                 exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_INCONSISTENT_DATA, P);
             }
-            if (geneSeenBkt[g] != bktMark) {
-                geneSeenBkt[g] = bktMark;
-                touchedGenes.push_back(g);
-                geneDupCount[g] = 1;
-            } else {
-                geneDupCount[g]++;
+
+            if (ts.geneBucketBuf.size() < sliceLen)
+                ts.geneBucketBuf.resize(sliceLen);
+            BridgeFlatSlot *slice = ts.geneBucketBuf.data();
+            for (size_t i = 0; i < ts.touchedGenes.size(); ++i) {
+                const uint32_t g = ts.touchedGenes[i];
+                ts.geneWriteScratch[g] = static_cast<uint32_t>(ts.genePref[i]);
             }
-        }
-
-        std::sort(touchedGenes.begin(), touchedGenes.end());
-
-        genePref.resize(touchedGenes.size() + 1);
-        genePref[0] = 0;
-        for (size_t i = 0; i < touchedGenes.size(); ++i)
-            genePref[i + 1] = genePref[i] + static_cast<size_t>(geneDupCount[touchedGenes[i]]);
-        if (genePref.back() != sliceLen) {
-            ostringstream errOut;
-            errOut << "EXITING because of fatal ERROR: bridge gene bucket size mismatch (expected " << sliceLen
-                   << ", got " << genePref.back() << ").\n";
-            exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_INCONSISTENT_DATA, P);
-        }
-
-        if (geneBucketBuf.size() < sliceLen)
-            geneBucketBuf.resize(sliceLen);
-        BridgeFlatSlot *slice = geneBucketBuf.data();
-        for (size_t i = 0; i < touchedGenes.size(); ++i) {
-            const uint32_t g = touchedGenes[i];
-            geneWriteScratch[g] = static_cast<uint32_t>(genePref[i]);
-        }
-        for (size_t j = 0; j < sliceLen; ++j) {
-            const uint32_t g = rawSlice[j].gene;
-            slice[geneWriteScratch[g]++] = rawSlice[j];
-        }
-
-        gID.clear();
-        gBeg.clear();
-        gEnd.clear();
-        gID.reserve(touchedGenes.size());
-        gBeg.reserve(touchedGenes.size());
-        gEnd.reserve(touchedGenes.size());
-        for (size_t i = 0; i < touchedGenes.size(); ++i) {
-            gID.push_back(touchedGenes[i]);
-            gBeg.push_back(genePref[i]);
-            gEnd.push_back(genePref[i + 1]);
-        }
-
-        const uint32_t nGenes = static_cast<uint32_t>(gID.size());
-        mgBuf.clear();
-        mgBuf.reserve(sliceLen);
-
-        for (uint32_t iG = 0; iG < nGenes; ++iG) {
-            const size_t a = gBeg[iG];
-            const size_t b = gEnd[iG];
-            const uint32_t nU0 = static_cast<uint32_t>(b - a);
-            if (nU0 == 0)
-                continue;
-
-            if (umiArray.size() < static_cast<size_t>(nU0) * umiArrayStride)
-                umiArray.resize(static_cast<size_t>(nU0) * umiArrayStride);
-
-            for (uint32_t t = 0; t < nU0; ++t) {
-                const BridgeFlatSlot &rr = slice[a + t];
-                umiArray[static_cast<size_t>(t) * umiArrayStride + 0] = rr.umi24;
-                umiArray[static_cast<size_t>(t) * umiArrayStride + 1] = rr.count;
-                umiArray[static_cast<size_t>(t) * umiArrayStride + 2] = static_cast<uint32_t>(-1);
+            for (size_t j = 0; j < sliceLen; ++j) {
+                const uint32_t g = rawSlice[j].gene;
+                slice[ts.geneWriteScratch[g]++] = rawSlice[j];
             }
 
-            // readInfoRec=false: bridge path has no per-read recordReadInfo replay; skip umiCorr map inserts.
-            umiArrayCorrect_CR(nU0, umiArray.data(), false, false, s_emptyUmiCorr);
-
-            for (uint64_t iu = 0; iu < static_cast<uint64_t>(nU0) * umiArrayStride; iu += umiArrayStride) {
-                MgRow row;
-                row.orig = umiArray[iu + 0];
-                row.corr = umiArray[iu + 2];
-                row.geneIdx = iG;
-                row.count = umiArray[iu + 1];
-                mgBuf.push_back(row);
+            ts.gID.clear();
+            ts.gBeg.clear();
+            ts.gEnd.clear();
+            ts.gID.reserve(ts.touchedGenes.size());
+            ts.gBeg.reserve(ts.touchedGenes.size());
+            ts.gEnd.reserve(ts.touchedGenes.size());
+            for (size_t i = 0; i < ts.touchedGenes.size(); ++i) {
+                ts.gID.push_back(ts.touchedGenes[i]);
+                ts.gBeg.push_back(ts.genePref[i]);
+                ts.gEnd.push_back(ts.genePref[i + 1]);
             }
-        }
 
-        radixSortMgRowsByCorr(mgBuf);
+            const uint32_t nGenes = static_cast<uint32_t>(ts.gID.size());
+            ts.mgBuf.clear();
+            ts.mgBuf.reserve(sliceLen);
 
-        geneCounts.assign(static_cast<size_t>(nGenes), 0);
+            for (uint32_t iG = 0; iG < nGenes; ++iG) {
+                const size_t a = ts.gBeg[iG];
+                const size_t b = ts.gEnd[iG];
+                const uint32_t nU0 = static_cast<uint32_t>(b - a);
+                if (nU0 == 0)
+                    continue;
 
-        for (size_t p = 0; p < mgBuf.size();) {
-            size_t q = p + 1;
-            const uint32_t cu = mgBuf[p].corr;
-            while (q < mgBuf.size() && mgBuf[q].corr == cu)
-                ++q;
+                if (ts.umiArray.size() < static_cast<size_t>(nU0) * umiArrayStride)
+                    ts.umiArray.resize(static_cast<size_t>(nU0) * umiArrayStride);
 
-            std::sort(mgBuf.begin() + p, mgBuf.begin() + q,
-                      [](const MgRow &x, const MgRow &y) { return x.geneIdx < y.geneIdx; });
-
-            aggGene.clear();
-            for (size_t i = p; i < q;) {
-                const uint32_t g0 = mgBuf[i].geneIdx;
-                uint32_t s = 0;
-                while (i < q && mgBuf[i].geneIdx == g0) {
-                    s += mgBuf[i].count;
-                    ++i;
+                for (uint32_t t = 0; t < nU0; ++t) {
+                    const BridgeFlatSlot &rr = slice[a + t];
+                    ts.umiArray[static_cast<size_t>(t) * umiArrayStride + 0] = rr.umi24;
+                    ts.umiArray[static_cast<size_t>(t) * umiArrayStride + 1] = rr.count;
+                    ts.umiArray[static_cast<size_t>(t) * umiArrayStride + 2] = static_cast<uint32_t>(-1);
                 }
-                aggGene.push_back({g0, s});
-            }
 
-            uint32_t maxu = 0;
-            uint32_t maxg = static_cast<uint32_t>(-1);
-            for (const auto &pr : aggGene) {
-                if (pr.second > maxu) {
-                    maxu = pr.second;
-                    maxg = pr.first;
-                } else if (pr.second == maxu) {
-                    maxg = static_cast<uint32_t>(-1);
+                umiArrayCorrect_CR(nU0, ts.umiArray.data(), false, false, ts.emptyUmiCorr);
+
+                for (uint64_t iu = 0; iu < static_cast<uint64_t>(nU0) * umiArrayStride; iu += umiArrayStride) {
+                    MgRow row;
+                    row.orig = ts.umiArray[iu + 0];
+                    row.corr = ts.umiArray[iu + 2];
+                    row.geneIdx = iG;
+                    row.count = ts.umiArray[iu + 1];
+                    ts.mgBuf.push_back(row);
                 }
             }
 
-            if (maxg + 1u == 0u) {
-                p = q;
-                continue;
-            }
+            radixSortMgRowsByCorr(ts.mgBuf);
+            ts.geneCounts.assign(static_cast<size_t>(nGenes), 0);
 
-            origAtCu.clear();
-            for (size_t i = p; i < q; ++i) {
-                if (mgBuf[i].orig == cu)
-                    origAtCu.push_back({mgBuf[i].geneIdx, mgBuf[i].count});
-            }
-            std::sort(origAtCu.begin(), origAtCu.end(),
-                      [](const std::pair<uint32_t, uint32_t> &x, const std::pair<uint32_t, uint32_t> &y) {
-                          return x.first < y.first;
-                      });
-            {
-                size_t o = 0;
-                for (size_t i = 0; i < origAtCu.size();) {
-                    const uint32_t g0 = origAtCu[i].first;
+            for (size_t p = 0; p < ts.mgBuf.size();) {
+                size_t q = p + 1;
+                const uint32_t cu = ts.mgBuf[p].corr;
+                while (q < ts.mgBuf.size() && ts.mgBuf[q].corr == cu)
+                    ++q;
+
+                std::sort(ts.mgBuf.begin() + p, ts.mgBuf.begin() + q,
+                          [](const MgRow &x, const MgRow &y) { return x.geneIdx < y.geneIdx; });
+
+                ts.aggGene.clear();
+                for (size_t i = p; i < q;) {
+                    const uint32_t g0 = ts.mgBuf[i].geneIdx;
                     uint32_t s = 0;
-                    while (i < origAtCu.size() && origAtCu[i].first == g0) {
-                        s += origAtCu[i].second;
+                    while (i < q && ts.mgBuf[i].geneIdx == g0) {
+                        s += ts.mgBuf[i].count;
                         ++i;
                     }
-                    origAtCu[o++] = {g0, s};
+                    ts.aggGene.push_back({g0, s});
                 }
-                origAtCu.resize(o);
+
+                uint32_t maxu = 0;
+                uint32_t maxg = static_cast<uint32_t>(-1);
+                for (const auto &pr : ts.aggGene) {
+                    if (pr.second > maxu) {
+                        maxu = pr.second;
+                        maxg = pr.first;
+                    } else if (pr.second == maxu) {
+                        maxg = static_cast<uint32_t>(-1);
+                    }
+                }
+
+                if (maxg + 1u == 0u) {
+                    p = q;
+                    continue;
+                }
+
+                ts.origAtCu.clear();
+                for (size_t i = p; i < q; ++i) {
+                    if (ts.mgBuf[i].orig == cu)
+                        ts.origAtCu.push_back({ts.mgBuf[i].geneIdx, ts.mgBuf[i].count});
+                }
+                std::sort(ts.origAtCu.begin(), ts.origAtCu.end(),
+                          [](const std::pair<uint32_t, uint32_t> &x, const std::pair<uint32_t, uint32_t> &y) {
+                              return x.first < y.first;
+                          });
+                {
+                    size_t o = 0;
+                    for (size_t i = 0; i < ts.origAtCu.size();) {
+                        const uint32_t g0 = ts.origAtCu[i].first;
+                        uint32_t s = 0;
+                        while (i < ts.origAtCu.size() && ts.origAtCu[i].first == g0) {
+                            s += ts.origAtCu[i].second;
+                            ++i;
+                        }
+                        ts.origAtCu[o++] = {g0, s};
+                    }
+                    ts.origAtCu.resize(o);
+                }
+
+                uint32_t baseOrig = 0;
+                for (const auto &pr : ts.origAtCu) {
+                    if (pr.first == maxg) {
+                        baseOrig = pr.second;
+                        break;
+                    }
+                }
+
+                for (const auto &pr : ts.origAtCu) {
+                    if (pr.second > baseOrig) {
+                        maxg = static_cast<uint32_t>(-1);
+                        break;
+                    }
+                }
+
+                if (maxg + 1u != 0u)
+                    ts.geneCounts[maxg]++;
+
+                p = q;
             }
 
-            uint32_t baseOrig = 0;
-            for (const auto &pr : origAtCu) {
-                if (pr.first == maxg) {
-                    baseOrig = pr.second;
-                    break;
-                }
+            size_t cbNonzeroGenes = 0;
+            for (uint32_t ig = 0; ig < nGenes; ++ig)
+                if (ts.geneCounts[ig] != 0)
+                    ++cbNonzeroGenes;
+
+            cbRowCounts[iCB] = static_cast<uint32_t>(cbNonzeroGenes);
+            std::vector<uint32_t> &rows = cbRows[iCB];
+            rows.reserve(cbNonzeroGenes * countMatStride);
+            for (uint32_t ig = 0; ig < nGenes; ++ig) {
+                if (ts.geneCounts[ig] == 0)
+                    continue;
+                nGenePerCB[iCB]++;
+                nUMIperCB[iCB] += ts.geneCounts[ig];
+                rows.push_back(ts.gID[ig]);
+                rows.push_back(ts.geneCounts[ig]);
             }
-
-            for (const auto &pr : origAtCu) {
-                if (pr.second > baseOrig) {
-                    maxg = static_cast<uint32_t>(-1);
-                    break;
-                }
-            }
-
-            if (maxg + 1u != 0u)
-                geneCounts[maxg]++;
-
-            p = q;
-        }
-
-        size_t cbNonzeroGenes = 0;
-        for (uint32_t ig = 0; ig < nGenes; ++ig)
-            if (geneCounts[ig] != 0)
-                ++cbNonzeroGenes;
-        const size_t needEnd = static_cast<size_t>(countCellGeneUMIindex[iCB]) + cbNonzeroGenes * countMatStride;
-        if (countCellGeneUMI.size() < needEnd) {
-            const size_t newSize = nextGrowSize(countCellGeneUMI.size(), needEnd);
-            countCellGeneUMI.resize(newSize, 0);
-        }
-
-        for (uint32_t ig = 0; ig < nGenes; ++ig) {
-            if (geneCounts[ig] == 0)
-                continue;
-            nGenePerCB[iCB]++;
-            nUMIperCB[iCB] += geneCounts[ig];
-            countCellGeneUMI[countCellGeneUMIindex[iCB + 1] + 0] = gID[ig];
-            countCellGeneUMI[countCellGeneUMIindex[iCB + 1] + pSolo.umiDedup.countInd.CR] = geneCounts[ig];
-            countCellGeneUMIindex[iCB + 1] += countMatStride;
         }
     }
+
+    size_t nCbGeneSeg = 0;
+    for (const ThreadScratch &ts : scratch) {
+        nCbGeneSeg += ts.nCbGeneSegT;
+        if (ts.nReadPerCBmaxT > nReadPerCBmax)
+            nReadPerCBmax = ts.nReadPerCBmaxT;
+    }
+
+    {
+        std::vector<BridgeFlatSlot>().swap(flat);
+        std::vector<size_t>().swap(cbWrite);
+        std::vector<size_t>().swap(cbOffsets);
+    }
+
+    size_t finalMatSlots = 0;
+    for (uint32_t iCB = 0; iCB < nCB; ++iCB) {
+        countCellGeneUMIindex[iCB] = static_cast<uint32_t>(finalMatSlots);
+        finalMatSlots += static_cast<size_t>(cbRowCounts[iCB]) * countMatStride;
+    }
+    countCellGeneUMIindex[nCB] = static_cast<uint32_t>(finalMatSlots);
+    countCellGeneUMI.assign(finalMatSlots, 0);
+
+    for (uint32_t iCB = 0; iCB < nCB; ++iCB) {
+        const std::vector<uint32_t> &rows = cbRows[iCB];
+        if (!rows.empty())
+            std::copy(rows.begin(), rows.end(), countCellGeneUMI.begin() + countCellGeneUMIindex[iCB]);
+        std::vector<uint32_t>().swap(cbRows[iCB]);
+    }
+
+    time(&rawTime);
+    P.inOut->logMain << timeMonthDayTime(rawTime)
+                     << " ... Parallel CB collapse complete, exact matrix slots=" << finalMatSlots
+                     << " collapse_threads=" << collapseThreads
+                     << endl;
 
     time(&rawTime);
     P.inOut->logMain << timeMonthDayTime(rawTime) << " ... Unique (CB,gene) segments (matrix row upper bound)="
