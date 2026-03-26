@@ -130,6 +130,8 @@ cat "${MULTI_CONFIG}"
 echo ""
 
 # ── Build STAR command ───────────────────────────────────────────────
+# Default: zcat (paper repro / current benchmark default).
+export STAR_SOLO_NONFLEX_HASH_BRIDGE=1
 CMD=(
   "${STAR_BIN}"
   --runThreadN "${THREADS}"
@@ -144,6 +146,7 @@ CMD=(
   --soloType CB_UMI_Simple
   --soloCBstart 1 --soloCBlen 16 --soloUMIstart 17 --soloUMIlen 12
   --soloBarcodeReadLength 0
+  --soloInlineHashMode yes
   --soloCBwhitelist "${SOLO_CB_WHITELIST}"
   --soloStrand Forward
   --soloFeatures GeneFull

@@ -48,6 +48,15 @@ actionable; link to deeper docs rather than copying them.
   machine or from the same checkout.
 - Serialize benchmarking runs to avoid memory pressure, disk contention, and
   misleading performance results.
+- **Benchmark outdirs:** use a **fresh** output directory for each timed run so
+  completion artifacts are not confused with an earlier attempt.
+- **Completion signals (wrapper-driven runs):** treat **wrapper-written**
+  completion artifacts as authoritative when present (for example
+  `BENCHMARK_SUMMARY.txt` written only after the wrapped binary exits). If no
+  wrapper summary exists, use `Log.final.out` together with a successful wrapper
+  exit status or another explicit finished marker—**not** ambiguous partial logs.
+- **Do not** infer “still running” from `Log.out`, `Log.progress.out`, or
+  `pgrep` alone; those are weak or misleading signals for long Solo jobs.
 
 ## Build Hygiene
 

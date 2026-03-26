@@ -25,6 +25,7 @@ For module-specific scripts see `core/legacy/scripts/README.md` and
 | `report_additional_parity_metrics.py` | Python | Computes parity metrics for STAR vs Cell Ranger: gene-level Pearson correlation, cell-level correlation, and CRISPR feature-call set-match rates. This is the primary numeric parity tool referenced in the paper benchmarks. |
 | `compare_barcode_sets.py` | Python | Compares two barcode sets (e.g., STAR vs CR filtered barcodes) and reports overlap, Jaccard, and symmetric-difference statistics. Useful for quick cell-list parity checks. |
 | `run_gex_feature_parity_checks.sh` | Bash | End-to-end GEX feature parity: runs STAR and Cell Ranger, then compares gene counts and correlations. |
+| `run_ucsf_gexonly_gex_parity_vs_cr.sh` | Bash | GEX-only STAR `Solo.out/GeneFull` vs CR9 Gene Expression MEX; calls `report_additional_parity_metrics.py --skip-feature-call-parity` (no STAR `crispr_analysis`). |
 | `run_ucsf_call_parity_recovery.sh` | Bash | UCSF CRISPR call-only parity recovery: compares STAR vs Cell Ranger GMM-based guide calling on the UCSF dataset. |
 | `a375_feature_sweep.sh` | Bash | Runs `assignBarcodes` parameter sweeps on A375 CRISPR FASTQs with configurable barcode/UMI lengths and search settings. |
 | `a375_make_downsample_tiers.sh` | Bash | Builds tiered downsample FASTQ fixtures for A375 GEX and CRISPR via symlinks and the process_features downsample script. |

@@ -77,6 +77,10 @@ update this file with its output location.
 - `tests/nbem_crispat_vignette_output_0_4_fallback_dom/` (NB-EM outputs with fallback dominance on crispat vignette subset)
 - `tests/baselines/flex_pre_modular_*/` (Flex modular integration baselines)
 - `tests/emptydrops_parity_output_*/` (EmptyDrops legacy vs libscrna parity outputs)
+- `tests/ucsf_gex_gray_em_harness_output_*/` (post hoc UCSF gray-zone admission evaluation using CellGenI/EM-like labels inside the current run tail window)
+- `tests/ucsf_gex_gray_em_heuristics_output_*/` (cheap heuristic analysis for UCSF gray-zone barcodes, comparing CellGenI-style admissions against CR-supported tail cells)
+- `tests/ucsf_gex_gray_threshold_cv_output_*/` (5-fold validation outputs for a simple gray-zone threshold rule using genes_detected, entropy, and top_gene_frac)
+- `tests/ucsf_gex_gray_postqc_filter_output_*/` (gray-zone-only post-EmptyDrops QC cleanup mirroring downstream `combineFilters.py` semantics: min/max genes detected plus mitochondrial fraction cutoff)
 - `tests/flexfilter_parity_output_*/` (FlexFilter parity outputs vs production baseline)
 - `/tmp/*` (temporary scratch outputs)
 - `/tmp/ucsf_cr_config_1m_smoke_*` (real UCSF perturb CR-config fixture smoke outputs)
@@ -650,6 +654,53 @@ These scripts validate that default bundles work with minimal explicit parameter
     - fixed forced-spill validation run; exact `Summary.csv` + raw MEX parity
 - Full corrected UCSF `EBs2_2` chunked in-memory spool benchmark:
   - `/storage/paper_bench_solo_binary_spool_20260324/ucsf_ebs2_2_chunkedmem/`
+- Status: untracked
+
+## Solo overnight UCSF GEX-only no-BAM (`run_ucsf_gexonly_no_bam_benchmark.sh`) (2026-03-26)
+
+- Root: `/storage/solo_overnight_20260326/ucsf_gexonly_no_bam/`
+- **Completed — historical vanilla (`7a7fb08`):**
+  - `/storage/solo_overnight_20260326/ucsf_gexonly_no_bam/star_vanilla_7a7fb08_retry2/`
+  - Binary: `/tmp/star-7a7f-hist-retry/core/legacy/source/STAR` (commit `7a7fb08865edb8aa69285a3a0bc6e14c51feeb45`)
+  - `BENCHMARK_SUMMARY.txt`: 32 threads, **13872** filtered cells, wall **1435 s** (~23.9 min), `read_decompress=zcat`
+  - `/usr/bin/time -v`: max RSS **~66309 MiB** (~64.7 GiB), exit **0**; `nohup_time.log` shows mapping finished → Solo counting finished → `finished successfully`
+  - Do **not** rerun; wrapper + STAR completed successfully (see `AGENTS.md` **Benchmark Hygiene** for completion signals).
+- **Completed — modern optimized** (repo `core/legacy/source/STAR`, `feature/flex-optimization-using-solo-20260325` build):
+  - `/storage/solo_overnight_20260326/ucsf_gexonly_no_bam/star_optimized_current_retry2/`
+  - `BENCHMARK_SUMMARY.txt`: 32 threads, **13728** filtered cells, wall **947 s** (~15.8 min), `read_decompress=native_gzip`
+  - `/usr/bin/time -v` (`nohup_time.log`): max RSS **~56220720 KiB** (~54.9 GiB), elapsed **~15:47**, exit **0**
+  - **CR9 GEX parity (Gene Expression only):** `GEX_PARITY_vs_CR9.txt` (from `scripts/run_ucsf_gexonly_gex_parity_vs_cr.sh`; `report_additional_parity_metrics.py --skip-feature-call-parity`, NXT translation `--translate both`, min 20 counts / 1% cells per gene). CR reference: `/storage/ucsf-full/bench_20260218_dynamic_first/cellranger_runs/cr_full_iPSC2_1_AALG2_crstar32_20260218_205804/`.
+  - **Parity headline (read the full report; cell lists differ):** This CR `outs/filtered_feature_bc_matrix/barcodes.tsv.gz` has **7325** barcodes (multi-library count). STAR GEX-only Solo filtered **13728** TRU barcodes. After NXT→TRU translation, **filtered** barcode Jaccard **~0.002** (40 shared); **`filtered_vs_filtered`** per-barcode / per-gene correlations in the report are **not** comparable to the perturb-seq README table (almost no shared filtered cells). More informative slice: **`raw_restricted_to_cr_filtered`** — **5574** common barcodes; per-gene (filtered genes **171**) Pearson **~0.395**, Spearman **~0.488** (still not the full-sample perturb parity surface).
+- Status: untracked
+
+## Solo overnight perturb no-BAM (serialized matrix, native `.gz`, 2026-03-26)
+
+All three runs used **`USE_READFILES_ZCAT=0`** (no external `zcat`), **`--outSAMtype None`** where applicable, repo `core/legacy/source/STAR`, 32 threads, executed **serially** on one host.
+
+### UCSF EBs2_2
+
+- Root: `/storage/solo_overnight_20260326/ucsf_perturb_no_bam/`
+- **Completed:** `ebs2_2_no_bam_nativegzip_20260326_075154/` (`run_ucsf_ebs2_2_benchmark.sh` `--no-yremove`)
+- `BENCHMARK_SUMMARY.txt`: **13,721** cells, wall **1252 s** (~20.9 min)
+- `nohup_time.log` (`/usr/bin/time -v`): elapsed **~20:52**, max RSS **~68296484 KiB** (~66.7 GiB), exit **0**
+
+### MSK 30polyKO (3-library)
+
+- Root: `/storage/solo_overnight_20260326/msk_perturb_no_bam/`
+- **Completed:** `msk30ko_no_bam_nativegzip_20260326_081323/` (`run_msk_30polyko_benchmark.sh` `--no-bam`)
+- `BENCHMARK_SUMMARY.txt`: **30,567** cells, wall **1713 s** (~28.6 min)
+- `nohup_time.log`: elapsed **~28:33**, max RSS **~81650380 KiB** (~79.7 GiB), exit **0**
+
+### A375 1k CRISPR 5' GemX
+
+- Root: `/storage/solo_overnight_20260326/a375_perturb_no_bam/`
+- **Completed:** `a375_no_bam_nativegzip_20260326_084220/` (`run_a375_benchmark.sh` with `A375_OUTDIR=…`)
+- `BENCHMARK_SUMMARY.txt`: **1,187** cells, wall **258 s** (~4.3 min)
+- `nohup_time.log`: elapsed **~4:18**, max RSS **~44214344 KiB** (~43.2 GiB), exit **0**
+
+### Script note
+
+- `run_ucsf_ebs2_2_benchmark.sh`, `run_msk_30polyko_benchmark.sh`, and `run_a375_benchmark.sh` honor **`USE_READFILES_ZCAT=0`** to omit `--readFilesCommand zcat` (default remains zcat for paper repro).
 - Status: untracked
 
 ## Flex No-Align InlineCBCorrection Benchmark (2026-03-26)

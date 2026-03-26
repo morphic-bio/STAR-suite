@@ -22,7 +22,14 @@ This file tracks active top-level work only. Completed items and stale historica
 
 ## Priority 2: Performance / Architecture
 
-- No active top-level performance / architecture items at present.
+- Optimize the non-Flex scRNA / GEX internal gzip path using the staged harness approach in [docs/RUNBOOK_GZIP_PIPELINE_ITERATION_20260326.md](/mnt/pikachu/STAR-suite/docs/RUNBOOK_GZIP_PIPELINE_ITERATION_20260326.md).
+  - Treat this as a medium-priority follow-up, not an immediate blocker: the current `zcat` workaround is acceptable for published benchmarks, but it is now clear that an optimized internal gzip path can beat `zcat` on at least one real surface (`--flexNoAlign 1` full-sample Flex).
+  - Use the runbook sequence as written: Flex first, then a separate GEX harness.
+  - Keep the benchmark question narrow:
+    - baseline = external `zcat`
+    - target = current internal gzip
+    - candidate optimizations = buffered reads, delimiter scanning, and small batched handoff
+  - Reuse queue telemetry / occupancy as the primary signal, and only promote a new internal path if it matches or beats the current benchmark-default `zcat` surface on the corresponding workload.
 
 ## Priority 3: Dataset / Fixture Coverage
 
@@ -42,6 +49,7 @@ This file tracks active top-level work only. Completed items and stale historica
 - QC graphics consolidation is deferred rather than complete. The remaining work is mainly `process_features` heatmap consolidation/optimization, and it should be revisited the next time new graphical output work is active.
 - Feature-offset detection already has a preflight phase. Any deeper read-level consistency check should wait until there is a broader formal preflight framework to put it in.
 - `--readFilesCommand` remains for flexibility and legacy support, but active development should assume the direct internal gzip path. If an external command path with a newer feature diverges, that is a low-priority compatibility issue rather than a current roadmap item.
+- Gray-zone ambiguous-read / EM bookkeeping for EmptyDrops admission is demoted to a low-priority reminder. In principle some ambiguity signal could be recovered from BAM or a dedicated sidecar, but carrying the extra read-level state for a small number of borderline cells is not justified right now: the engineering cost is high, most of the affected barcodes are expected to be removed by downstream QC anyway, and the current UCSF evidence does not justify the complexity. Revisit only if a future dataset shows a materially larger cell-calling gain that survives downstream filtering.
 - CB/UB coupling is no longer an active behavior-change task. For FLEX, treat CB/UB coupling as the intended semantics and only revisit the stats/reporting consequences if they become confusing in practice.
 - Legacy FLEX `ZG/ZX` handling is demoted to dead-code cleanup rather than an active feature item. It came from the older BAM/sidecar workaround path and should only be revisited when there is time to simplify or replace it directly.
 - Perturb dynamic permit scheduling is treated as complete for now. The scheduler landed, Phase 5 validation was completed, and the later PF consumer-cap removal produced the expected large throughput improvement. Keep the smoke/benchmark coverage, and only revisit if new workloads show another clear scheduling bottleneck.
