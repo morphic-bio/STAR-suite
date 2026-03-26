@@ -1,6 +1,6 @@
 # STAR Suite
 
-STAR Suite updates the original STAR aligner by integrating four modules — STAR-perturb, STAR-Flex, STAR-SLAM, and TranscriptVB — to provide complete internal C/C++ pipelines for bulk RNA-seq, scRNA-seq, Perturb-seq, 10x Flex, and SLAM-seq. The integration results in **substantial speedups** (**1.7–2.4x for bulk RNA-seq**, **3.2–6.1x for Perturb-seq**, **2.5–28x for Flex**) and a simplified toolchain that can be **installed through pre-compiled binaries** for researchers and agents. **No new external dependencies** are required; the suite is built entirely with the existing STAR toolchain and vendored components. **This is a drop-in replacement for the STAR aligner.**
+STAR Suite updates the original STAR aligner by integrating four modules — STAR-perturb, STAR-Flex, STAR-SLAM, and TranscriptVB — to provide complete internal C/C++ pipelines for bulk RNA-seq, scRNA-seq, Perturb-seq, 10x Flex, and SLAM-seq. The integration results in **substantial speedups** (**1.7–2.4x for bulk RNA-seq**, **1.7–2.0x for UCSF GEX-only Solo vs historical STAR surfaces**, **3.2–6.1x for Perturb-seq**, **2.5–28x for Flex**) and a simplified toolchain that can be **installed through pre-compiled binaries** for researchers and agents. **No new external dependencies** are required; the suite is built entirely with the existing STAR toolchain and vendored components. **This is a drop-in replacement for the STAR aligner.**
 
 STAR Suite supports partial compilation: build only the module/tool targets you need instead of building the full suite every time.
 
@@ -8,7 +8,7 @@ Agent quickstart: see `AGENTS.md` for repo-specific guardrails, tests, and recen
 
 ## Core Additions over STAR 2.7.11b
 
-- **Speedup**: Bulk RNA-seq **1.7–2.4x faster** than external stepwise pipelines; Perturb-seq **3.2–6.1x faster** than Cell Ranger 9; Flex **2.5x faster** than Cell Ranger 9 (5.5x in no-align mode, ~13–28x vs Cell Ranger 7 with BAM) — all with near-identical parity.
+- **Speedup**: Bulk RNA-seq **1.7–2.4x faster** than external stepwise pipelines; UCSF GEX-only Solo **1.7–2.0x faster** than historical STAR surfaces on the full `EBs2_2` sample; Perturb-seq **3.2–6.1x faster** than Cell Ranger 9; Flex **2.5x faster** than Cell Ranger 9 (5.5x in no-align mode, ~13–28x vs Cell Ranger 7 with BAM) — all with near-identical parity.
 - **Batch Mode** (`--batchMode 1`): Processes multiple FASTQs in one STAR invocation while reusing the loaded genome. Removes the need for `--genomeLoad` keep-in-memory workflows. Single-pass only (no `--twopassMode`); not supported with Solo (`--soloType`). Use `--outFileNamePrefixAuto 1` for per-sample subdirectories.
 - **TranscriptVB Quantification** (`--quantMode TranscriptVB`): Variational Bayes and EM quantification for transcript-level abundance, with parity-oriented behavior against Salmon alignment-mode. Gene-level summarization via `--quantVBgenesMode Tximport`.
 - **Transcriptome Output** (`--quantTranscriptomeSAMoutput`): Replaces the former `--quantTranscriptomeBan` with more explicit control (e.g., `BanSingleEnd_ExtendSoftclip`).
@@ -91,13 +91,48 @@ Datasets: MorPHiC JAX KOLF PE RNA-seq (sample 21033-09-01-13-01, 6.5M read pairs
 - PPARG PE 35.1M noY: Integrated 9 min 35 s (STAR 8m36s + Salmon QC 59s) vs external stepwise 16 min 43 s (decompress 1m25s + trim 7m09s + STAR 7m12s + Salmon 57s). Same pipeline structure as JAX PE; larger dataset shows speedup dominated by elimination of decompress + trim steps.
 - PPARG PE 35.1M Y-removal: Integrated 11 min 58 s (STAR 11m52s + Salmon QC 6s) vs external stepwise 24 min 35 s (decompress 1m24s + trim 6m56s + STAR 8m54s + Y-removal 6m24s + Salmon 57s). Y-removal adds 6m24s externally but is free in the integrated path.
 
+### UCSF GEX-only Solo (full sample, no BAM)
+
+| Arm | STAR build | Reads | Filtered cells | Wall (32 thr) | Notes |
+|---|---|---:|---:|---:|---|
+| Historical vanilla | `7a7fb08` | 445M | 13,872 | **23.9 min** | `--readFilesCommand zcat`; `/storage/solo_overnight_20260326/ucsf_gexonly_no_bam/star_vanilla_7a7fb08_retry2/` |
+| Historical CellGenI-style | `7a7fb08` | 445M | 13,847 | **26.8 min** | CellGenI-style parameter surface, latest TRU whitelist, `GeneFull` only, `zcat`; `/storage/solo_overnight_20260326/ucsf_gexonly_no_bam/star_cellgeni_historical_7a7fb08_truwhitelist_genefullonly_20260326/` |
+| Modern optimized | current suite `STAR` | 445M | 13,723 | **13.75 min** | Best validated current surface, `zcat`; `/storage/solo_overnight_20260326/ucsf_gexonly_no_bam/star_optimized_current_zcat_20260326/` |
+| Modern optimized | current suite `STAR` | 445M | 13,728 | **15.8 min** | Native `.gz`; `/storage/solo_overnight_20260326/ucsf_gexonly_no_bam/star_optimized_current_retry2/` |
+
+`zcat` remains the fastest validated UCSF GEX-only read path on this host: current optimized `zcat` is 1.74x faster than the older local historical vanilla surface and 1.95x faster than the CellGenI-style historical rerun. The native `.gz` path is functional but still slower than `zcat` on this benchmark.
+
+**CR9 parity (corrected UCSF `EBs2_2` GEX-only reference: `/storage/cr9_ebs2_2_benchmark_20260318/cr9_ebs2_2`)**
+
+| Arm | Filtered cells | Cell Jaccard vs CR9 | Barcode Pearson vs CR9 | Gene Pearson vs CR9 |
+|---|---:|---:|---:|---:|
+| Current optimized `zcat` | 13,723 | 0.976 | 0.999946 | 0.994885 |
+| Historical vanilla `7a7fb08` | 13,872 | 0.986 | 0.998653 | 0.886463 |
+| Historical CellGenI-style `7a7fb08` | 13,847 | 0.989 | 0.999949 | 0.963561 |
+| Cell Ranger 9 reference | 13,760 | 1.000 | 1.000000 | 1.000000 |
+
+Current optimized `zcat` is the best overall UCSF GEX-only surface: it has the fastest wall time and the strongest gene-level agreement to CR9. The historical surfaces preserve slightly more CR9 filtered-barcode overlap, but both lose substantial gene-level parity relative to the current build.
+
+**Filtered-cell overlap across UCSF GEX-only arms**
+
+| Pair | Common cells | Jaccard |
+|---|---:|---:|
+| Current vs historical vanilla | 13,540 | 0.963 |
+| Current vs historical CellGenI-style | 13,549 | 0.966 |
+| Historical vanilla vs historical CellGenI-style | 13,809 | 0.993 |
+| Current vs CR9 | 13,578 | 0.976 |
+| Historical vanilla vs CR9 | 13,717 | 0.986 |
+| Historical CellGenI-style vs CR9 | 13,728 | 0.989 |
+
 ### Perturb-seq Wall Time
 
 | Dataset | Libraries | Chemistry | Reads | STAR cells | Wall time | Speedup |
 |---|---|---|---|---|---|---|
 | A375 1k CRISPR 5' GemX | GEX + CRISPR (2) | TRU | 47M | 1,187 | **4.0 min** | 3.8x |
-| UCSF EBs2_2 Perturb-seq | GEX + CRISPRa (2) | NXT→TRU | 445M | 13,721 | **19.0 min** | 3.2x |
-| MSK 30polyKO | GEX + gRNA + LARRY (3) | Mixed TRU/NXT | 669M | 30,567 | **27.6 min** | 6.1x |
+| UCSF EBs2_2 Perturb-seq | GEX + CRISPRa (2) | NXT→TRU | 445M | 13,719 | **16.4 min** | 3.7x |
+| MSK 30polyKO | GEX + gRNA + LARRY (3) | Mixed TRU/NXT | 669M | 30,557 | **25.0 min** | 6.7x |
+
+Current perturb benchmark defaults use `zcat` plus the non-Flex Solo bridge path. Serial **native `.gz`** comparison reruns (no external `zcat`, 32 threads, no BAM, 2026-03-26) remained slower: UCSF **20.9 min** (`/storage/solo_overnight_20260326/ucsf_perturb_no_bam/ebs2_2_no_bam_nativegzip_20260326_075154/`), MSK **28.6 min** (`…/msk_perturb_no_bam/msk30ko_no_bam_nativegzip_20260326_081323/`), A375 **4.3 min** (`…/a375_perturb_no_bam/a375_no_bam_nativegzip_20260326_084220/`). Details: `tests/ARTIFACTS.md`.
 
 ### Perturb-seq Parity (STAR vs Cell Ranger 9)
 
@@ -108,8 +143,8 @@ Datasets: MorPHiC JAX KOLF PE RNA-seq (sample 21033-09-01-13-01, 6.5M read pairs
 | MSK 30polyKO (3-lib, NXT+TRU) | 30,567 / 32,256 | 0.942 | 0.994 | 1.000 | 99.4% (23,210/23,341) |
 
 - A375: Gene Pearson on 15,673 filtered genes (min 20 counts, 1% cells); Cell Pearson 0.9995 on 1,160 common barcodes; CRISPR exact set-match on all 1,083 common cells (min-UMI 10), UMI Pearson 1.000; speedup = 4 min vs 15 min (32 threads, no BAM). CR9 reference: `refdata-gex-GRCh38-2024-A`, `1k_CRISPR_5p_gemx_count_refmatch_2024a_fullraw`.
-- UCSF EBs2_2: Gene Pearson on 18,061 filtered genes; Cell Pearson 1.000 on 13,571 common barcodes; CRISPR set-match 98.9% on 12,038 evaluated cells, target-level match 99.5%; UMI Pearson 0.999; speedup = 19 min vs 61 min CR9 (32 threads, no BAM). CR9 reference: `refdata-gex-GRCh38-2024-A`, run on same corrected FASTQs.
-- MSK: Gene Pearson on 17,460 filtered genes; Cell Pearson 1.000 on 30,481 common barcodes; CRISPR set-match 99.4% on 23,341 evaluated cells (30 guides, min-UMI 2), UMI Pearson 1.000; speedup = 28 min vs 168 min (32 threads, no BAM). CR requires two separate runs (GEX+gRNA 58 min + GEX+LARRY 110 min); STAR handles all three libraries in a single pass with per-library whitelist support.
+- UCSF EBs2_2: Gene Pearson on 18,061 filtered genes; Cell Pearson 1.000 on 13,571 common barcodes; CRISPR set-match 98.9% on 12,038 evaluated cells, target-level match 99.5%; UMI Pearson 0.999; speedup = 16 min vs 61 min CR9 (32 threads, no BAM). CR9 reference: `refdata-gex-GRCh38-2024-A`, run on same corrected FASTQs.
+- MSK: Gene Pearson on 17,460 filtered genes; Cell Pearson 1.000 on 30,481 common barcodes; CRISPR set-match 99.4% on 23,341 evaluated cells (30 guides, min-UMI 2), UMI Pearson 1.000; speedup = 25 min vs 168 min (32 threads, no BAM). CR requires two separate runs (GEX+gRNA 58 min + GEX+LARRY 110 min); STAR handles all three libraries in a single pass with per-library whitelist support.
 
 All parity metrics computed with `scripts/report_additional_parity_metrics.py --gene-corr-min-counts 20 --gene-corr-min-cells-pct 0.01` per `docs/PAPER_BENCHMARK_METHODOLOGY.md`. CR9 references use `refdata-gex-GRCh38-2024-A` (gencode v44, mkref 8.0.0).
 
@@ -118,11 +153,11 @@ All parity metrics computed with `scripts/report_additional_parity_metrics.py --
 | Phase | A375 (47M) | UCSF EBs2_2 (445M) | MSK 30polyKO (669M) |
 |---|---|---|---|
 | Genome load | 44s | 48s | 48s |
-| Feature assignment | 32s | 4m 17s | 19m 50s |
-| Mapping | 81s | 8m 31s | 14m 42s |
-| Solo counting | 69s | 7m 46s | 9m 29s |
-| PfMulti merge + calling | 10s | 1m 20s | 1m 59s |
-| writeCombinedMex (raw/filt) | 2.0s / 1.5s | 19.5s / 15.0s | 35.1s / 24.4s |
+| Feature assignment | 32s | 4m 57s | 21m 38s |
+| Mapping | 81s | 9m 24s | 14m 43s |
+| Solo counting | 69s | 4m 04s | 4m 31s |
+| PfMulti merge + calling | 10s | 1m 25s | 2m 00s |
+| writeCombinedMex (raw/filt) | 2.0s / 1.5s | 20.2s / 15.3s | 34.8s / 24.2s |
 
 Feature assignment and mapping run concurrently via `dynamicThreadInterface`.
 

@@ -175,11 +175,17 @@ This track is the simplest direct Solo timing comparison.
 
 ### Runs
 
-Run these three arms serially:
+Run these arms serially. **Do the historical vanilla STARsolo arm last** in the
+**full overnight plan** (after the perturb no-BAM matrix; see [Recommended
+Overnight Order](#recommended-overnight-order) step 5). Do not wrap it in a
+short tool timeout; allow multi-hour wall time. Logical order for the three
+arms:
 
-1. CR9 GEX-only no-BAM reference
-2. vanilla STARsolo no-BAM
-3. optimized STARsolo no-BAM
+1. optimized STARsolo no-BAM (internal gzip;
+   `scripts/paper/run_ucsf_gexonly_no_bam_benchmark.sh` `--modern-optimized`)
+2. CR9 GEX-only no-BAM reference (only if you are timing a fresh CR9 run;
+   otherwise reuse the stored reference run)
+3. vanilla STARsolo no-BAM (`7a7fb08` / `--historical-vanilla`) — **last**
 
 ### Binary provenance
 
@@ -415,18 +421,20 @@ Each carried fixture should include:
 
 Run serially in this order:
 
-1. UCSF GEX-only no-BAM:
-   - vanilla STARsolo
-   - optimized STARsolo
+1. UCSF GEX-only no-BAM — **everything except historical vanilla first:**
+   - optimized STARsolo (internal gzip)
    - CR9 if rerunning rather than reusing reference
 2. UCSF perturb no-BAM
 3. MSK perturb no-BAM
 4. A375 perturb no-BAM
+5. UCSF GEX-only historical vanilla STARsolo (`7a7fb08` / `--historical-vanilla`)
+   **last** — run **without** a short session/tool timeout (e.g. not 600s);
+   allow multi-hour wall time so Solo can finish naturally.
 
 If time remains after the primary matrix:
 
-5. refresh or regenerate the 100K smoke fixtures
-6. run the smoke fixtures on the optimized STAR build
+6. refresh or regenerate the 100K smoke fixtures
+7. run the smoke fixtures on the optimized STAR build
 
 ## Script Follow-Up Needed
 
