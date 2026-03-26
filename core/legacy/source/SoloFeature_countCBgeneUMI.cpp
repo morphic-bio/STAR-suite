@@ -130,15 +130,24 @@ void SoloFeature::countCBgeneUMI()
     
     // Inline hash path: resolve/correct, then walk the hash directly (no materialization)
     if (pSolo.inlineHashMode) {
-        const char *snapIn = std::getenv("STAR_SOLO_BRIDGE_HASH_SNAPSHOT_IN");
-        if (snapIn != nullptr && snapIn[0] != '\0' && !nonFlexBridgePath) {
+        const char *bridgeSnapIn = std::getenv("STAR_SOLO_BRIDGE_HASH_SNAPSHOT_IN");
+        if (bridgeSnapIn != nullptr && bridgeSnapIn[0] != '\0' && !nonFlexBridgePath) {
             exitWithError(
                 "EXITING because of fatal PARAMETERS error: STAR_SOLO_BRIDGE_HASH_SNAPSHOT_IN is only supported on the "
                 "non-Flex direct-hash bridge Gene* path (STAR_SOLO_NONFLEX_HASH_BRIDGE + --soloInlineHashMode).\n",
                 std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
         }
+        const char *flexSnapIn = std::getenv("STAR_SOLO_FLEX_HASH_SNAPSHOT_IN");
+        if (flexSnapIn != nullptr && flexSnapIn[0] != '\0' && !pSolo.flexMode) {
+            exitWithError(
+                "EXITING because of fatal PARAMETERS error: STAR_SOLO_FLEX_HASH_SNAPSHOT_IN is only supported on the "
+                "Flex inline-hash path (--flex yes + --soloInlineHashMode).\n",
+                std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
+        }
         const bool bridgeSnapReplay =
-            nonFlexBridgePath && snapIn != nullptr && snapIn[0] != '\0';
+            nonFlexBridgePath && bridgeSnapIn != nullptr && bridgeSnapIn[0] != '\0';
+        const bool flexSnapReplay =
+            pSolo.flexMode && flexSnapIn != nullptr && flexSnapIn[0] != '\0';
 
         if (bridgeSnapReplay) {
             if (std::getenv("STAR_SOLO_BRIDGE_HASH_SNAPSHOT_REPLAY_SKIP_READS") == nullptr) {
@@ -155,7 +164,29 @@ void SoloFeature::countCBgeneUMI()
                     "STAR_SOLO_BRIDGE_HASH_SNAPSHOT_OUT cannot be used together.\n",
                     std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
             }
-            bridgeHashSnapshotLoad(snapIn);
+            bridgeHashSnapshotLoad(bridgeSnapIn);
+        } else if (flexSnapReplay) {
+            if (std::getenv("STAR_SOLO_FLEX_HASH_SNAPSHOT_REPLAY_SKIP_READS") == nullptr) {
+                ostringstream errOut;
+                errOut << "EXITING because of fatal PARAMETERS error: STAR_SOLO_FLEX_HASH_SNAPSHOT_IN is set but "
+                          "STAR_SOLO_FLEX_HASH_SNAPSHOT_REPLAY_SKIP_READS is not set.\n"
+                       << "SOLUTION: export STAR_SOLO_FLEX_HASH_SNAPSHOT_REPLAY_SKIP_READS=1 for replay (mapping "
+                          "skip), or unset STAR_SOLO_FLEX_HASH_SNAPSHOT_IN for a normal seed run.\n";
+                exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
+            }
+            if (std::getenv("STAR_SOLO_FLEX_HASH_SNAPSHOT_OUT") != nullptr) {
+                exitWithError(
+                    "EXITING because of fatal PARAMETERS error: STAR_SOLO_FLEX_HASH_SNAPSHOT_IN and "
+                    "STAR_SOLO_FLEX_HASH_SNAPSHOT_OUT cannot be used together.\n",
+                    std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
+            }
+            if (pSolo.trackReadIdsForTags) {
+                exitWithError(
+                    "EXITING because of fatal PARAMETERS error: STAR_SOLO_FLEX_HASH_SNAPSHOT_IN does not currently "
+                    "support sorted-BAM CB/UB tag replay (trackReadIdsForTags/readIdTracker_).\n",
+                    std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
+            }
+            flexHashSnapshotLoad(flexSnapIn);
         } else {
             // Resolve ambiguous CBs (before collapse)
             resolveAmbiguousCBs();

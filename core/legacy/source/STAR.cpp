@@ -1673,8 +1673,8 @@ int main(int argInN, char *argIn[])
     const bool bridgeReplaySkipMapping = solo_bridge_hash_snapshot::replaySkipReadsEnabled(P);
 
     if (bridgeReplaySkipMapping) {
-        P.inOut->logMain << timeMonthDayTime() << " ..... bridge snapshot replay: skipping entire mapping phase\n" << flush;
-        *P.inOut->logStdOut << timeMonthDayTime() << " ..... bridge snapshot replay: skipping entire mapping phase\n" << flush;
+        P.inOut->logMain << timeMonthDayTime() << " ..... inline-hash snapshot replay: skipping entire mapping phase\n" << flush;
+        *P.inOut->logStdOut << timeMonthDayTime() << " ..... inline-hash snapshot replay: skipping entire mapping phase\n" << flush;
         P.closeReadsFiles();
     } else if (P.runRestart.type != 1 && !perFileMappingDone) {
         mapThreadsSpawn(P, RAchunk);

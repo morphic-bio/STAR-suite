@@ -131,7 +131,7 @@ Feature assignment and mapping run concurrently via `dynamicThreadInterface`.
 | Pipeline | Mode | BAM | Wall time | vs CR9 (no BAM) | vs CR7 (with BAM) |
 |---|---|---|---|---|---|
 | **STAR-Flex** | full | no | **23m 30s** | **2.5x** | **~12.8x** |
-| **STAR-Flex** | no-align | no | **10m 41s** | **5.5x** | **~28.1x** |
+| **STAR-Flex** | no-align | no | **10m 26s** | **5.7x** | **~28.8x** |
 | CellRanger 9.0.1 | multi | no | 59 min | 1.0x | ~5x |
 | CellRanger 7.0.0 | multi | yes | ~5 hr | 0.2x | 1.0x |
 
@@ -149,7 +149,7 @@ Dataset: JAX SC2300771 (4 Flex tags, 8 lanes, 2.011B paired-end reads). All runs
 
 ### Flex No-Align Mode (`--flexNoAlign 1`)
 
-No-align mode skips alignment for H0/H1 misses (~16% of reads), reducing wall time from 23m 30s to 10m 41s. Intended for rapid prototyping and iteration.
+No-align mode skips alignment for H0/H1 misses (~16% of reads), reducing wall time from 23m 30s to 10m 26s. Intended for rapid prototyping and iteration.
 
 | Tag (sample) | No-Align cells | Full cells | CR9 cells | Cells lost | Jaccard | Cell Pearson | Gene Pearson |
 |---|---|---|---|---|---|---|---|
@@ -163,7 +163,7 @@ Cell loss from no-align is negligible (<0.1%): BC004 loses one filtered cell, BC
 
 - Cell Pearson = per-barcode total-UMI Pearson on common barcodes. Gene Pearson = per-probe total-UMI Pearson on common features. Barcode Jaccard computed after truncating CR 24bp barcodes to 16bp GEM prefix.
 - Both STAR and CR9 use GRCh38-2024-A genome and probe set v1.1.0. Using mismatched annotations (e.g., v1.0.1 / GRCh38-2020-A) drops Gene Pearson to ~0.09 while Cell Pearson remains >0.999.
-- STAR full 23m30s = 20m55s to mapping complete + 2m07s Solo counting (`--outSAMtype None`). STAR no-align 10m41s = 8m34s to mapping complete + 1m45s Solo counting. CR9 58m59s = CellRanger 9.0.1 multi (32 cores, `--localmem 120`, `create-bam false`). CR7 ~5 hr = CellRanger 7.0.0 multi (32 cores, 160 GB, with BAM output).
+- STAR full 23m30s = 20m55s to mapping complete + 2m07s Solo counting (`--outSAMtype None`). STAR no-align 10m26s = ~8m49s to mapping complete + ~1m36s Solo counting. CR9 58m59s = CellRanger 9.0.1 multi (32 cores, `--localmem 120`, `create-bam false`). CR7 ~5 hr = CellRanger 7.0.0 multi (32 cores, 160 GB, with BAM output).
 - STAR-Flex uses a fully-fused lane-reader pipeline with H0+H1 hash-screen cache, sample pre-filter, and lane work-stealing with reader-to-aligner role switching.
 - Parity script: `scripts/paper/run_flex_parity.sh`. Underlying metric tool: `scripts/paper/compute_parity_metrics.py`.
 
