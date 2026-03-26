@@ -55,14 +55,28 @@ void SoloReadBarcode::matchCBtoWL(string &cbSeq1, string &cbQual1, vector<uint64
         cbMatch1=-2;
         //stats.V[stats.nNinBarcode]++;
         return;
-    } else if (posN==-1) {//no Ns, count only for featureType==gene
-        int64 cbI=binarySearchExact<uint64>(cbB1,cbWL.data(),cbWL.size());
-        if (cbI>=0) {//exact match
-            cbMatchInd1.push_back((uint64) cbI);
-            cbMatchString1 = to_string(cbMatchInd1[0]);
-            cbMatch1=0;
-            return;
-        };
+    };
+
+    khash_t(cbH0) *h = pSolo.cbWLhash;
+
+    if (posN==-1) {//no Ns
+        if (h) {
+            khiter_t k = kh_get(cbH0, h, static_cast<uint32_t>(cbB1));
+            if (k != kh_end(h)) {
+                cbMatchInd1.push_back(kh_val(h, k));
+                cbMatchString1 = to_string(cbMatchInd1[0]);
+                cbMatch1=0;
+                return;
+            }
+        } else {
+            int64 cbI=binarySearchExact<uint64>(cbB1,cbWL.data(),cbWL.size());
+            if (cbI>=0) {
+                cbMatchInd1.push_back((uint64) cbI);
+                cbMatchString1 = to_string(cbMatchInd1[0]);
+                cbMatch1=0;
+                return;
+            }
+        }
     };
     
     if (!pSolo.CBmatchWL.mm1) //only exact matches allowed
@@ -73,16 +87,16 @@ void SoloReadBarcode::matchCBtoWL(string &cbSeq1, string &cbQual1, vector<uint64
         uint32 posNshift=2*(cbSeq1.size()-1-posN);//shift bits for posN
         bool matched = false;
         for (uint32 jj=0; jj<4; jj++) {
-            uint64 cbB11=cbB1^(jj<<posNshift);
-            int64 cbI1=binarySearchExact<uint64>(cbB11,cbWL.data(),cbWL.size());
-            if (cbI1>=0) {//found match
+            uint32_t cbB11=static_cast<uint32_t>(cbB1^(jj<<posNshift));
+            khiter_t k = kh_get(cbH0, h, cbB11);
+            if (k != kh_end(h)) {
+                int64 cbI1 = kh_val(h, k);
                 if (!pSolo.CBmatchWL.mm1_multi_Nbase && matched) {
                     cbMatchInd1.clear();
                     cbMatch1=-3;
-                    break; //this is 2nd match, not allowed for N-bases
+                    break;
                 };
                 matched = true;
-                //output all
                 cbMatchInd1.push_back(cbI1);
                 ++cbMatch1;
                 cbMatchString1 += ' ' +to_string(cbI1) + ' ' + cbQual1[posN];
@@ -91,9 +105,10 @@ void SoloReadBarcode::matchCBtoWL(string &cbSeq1, string &cbQual1, vector<uint64
     } else {//look for 1MM; posN==-1, no Ns
         for (uint32 ii=0; ii<cbSeq1.size(); ii++) {
             for (uint32 jj=1; jj<4; jj++) {
-                int64 cbI1=binarySearchExact<uint64>(cbB1^(jj<<(ii*2)),cbWL.data(),cbWL.size());
-                if (cbI1>=0) {//found match
-                    //output all
+                uint32_t cbVar=static_cast<uint32_t>(cbB1^(jj<<(ii*2)));
+                khiter_t k = kh_get(cbH0, h, cbVar);
+                if (k != kh_end(h)) {
+                    int64 cbI1 = kh_val(h, k);
                     cbMatchInd1.push_back(cbI1);
                     ++cbMatch1;
                     cbMatchString1 += ' ' +to_string(cbI1) + ' ' + cbQual1.at(cbSeq1.size()-1-ii);

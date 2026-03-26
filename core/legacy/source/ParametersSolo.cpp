@@ -1140,6 +1140,18 @@ void ParametersSolo::initialize(Parameters *pPin)
 
         cbWLsize=cbWL.size();
         pP->inOut->logMain << "Number of CBs in the whitelist = " << cbWLsize <<endl;
+
+        // Build H0 hash: packed-CB(uint32) → WL index for O(1) exact lookup
+        if (cbWLhash) kh_destroy(cbH0, cbWLhash);
+        cbWLhash = kh_init(cbH0);
+        kh_resize(cbH0, cbWLhash, cbWLsize * 2);
+        for (uint32 i = 0; i < cbWLsize; i++) {
+            int absent;
+            khiter_t k = kh_put(cbH0, cbWLhash, static_cast<uint32_t>(cbWL[i]), &absent);
+            kh_val(cbWLhash, k) = i;
+        }
+        pP->inOut->logMain << "Built cbWLhash: " << kh_size(cbWLhash) << " entries, "
+                           << kh_n_buckets(cbWLhash) << " buckets" << endl;
         
         // Initialize CbCorrector instance for inline CB correction
         if (cbWLyes && !cbWLstr.empty()) {

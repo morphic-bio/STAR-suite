@@ -119,7 +119,7 @@ void SoloFeature::processRecords()
     if (solo_bridge_hash_snapshot::stopAfterCountEnabled(P)) {
         time(&rawTime);
         P.inOut->logMain << timeMonthDayTime(rawTime)
-                         << " ... bridge snapshot replay: stopping after countCBgeneUMI (skipping raw output/cell filtering)"
+                         << " ... inline-hash snapshot replay: stopping after countCBgeneUMI (skipping raw output/cell filtering)"
                          << endl;
         P.inOut->logMain << "Solo timing: processRecords " << soloElapsedSeconds(processStart) << " s" << endl;
         return;

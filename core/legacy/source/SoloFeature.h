@@ -121,9 +121,11 @@ public:
     void collapseUMIall_fromHash(); // Direct hash consumption (no materialization)
     void collapseUMIall_fromBridgeHash(); // Non-Flex bridge: collapse without rGeneUMI materialization
 
-    // Experimental bridge replay harness (env-gated callers): snapshot at pre-collapse boundary.
+    // Experimental inline-hash replay harnesses (env-gated callers): snapshot at pre-collapse boundary.
     void bridgeHashSnapshotWrite(const char *path);
     void bridgeHashSnapshotLoad(const char *path);
+    void flexHashSnapshotWrite(const char *path);
+    void flexHashSnapshotLoad(const char *path);
     void collapseUMIperCB(uint32 iCB, vector<uint32> &umiArray, vector<uint32> &gID,  vector<uint32> &gReadS, bool minimalMode);
     void materializeRGUFromHash(); // Materialize rGeneUMI/rCBp/rCBn from inlineHash_ (DEPRECATED)
     
@@ -131,10 +133,6 @@ public:
         SampleMatrixData matrixData;
         std::vector<MexWriter::Triplet> triplets;
     };
-
-    // Build matrix bundle from inline hash dedup counts
-    InlineMatrixBundle buildInlineMatrixFromHash(
-        const std::unordered_map<uint64_t, std::vector<std::pair<uint32_t, uint32_t>>>& cbTagGeneCounts);
 
     // Write MEX directly from inline-hash dedup data (no Solo, no replayer)
     void writeMexFromInlineHashDedup(
