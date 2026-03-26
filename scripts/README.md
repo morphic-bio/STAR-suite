@@ -36,6 +36,10 @@ For module-specific scripts see `core/legacy/scripts/README.md` and
 |--------|----------|---------|
 | `build_gene_full_velocyto_h5ad.py` | Python | Builds a `counts.h5ad` from GeneFull Cell-Ranger-style MEX output, packaging raw Velocyto spliced/unspliced/ambiguous layers alongside gene counts. |
 | `prepare_velocyto_mex.py` | Python | Packages STARsolo Velocyto raw outputs into raw/filtered MEX directories with total and per-layer matrices. |
+| `compare_velocyto_mex.py` | Python | Exact diff between two STAR runs: `--mode solo` (Velocyto `*.mtx` + mandatory `Solo.out/Gene/raw` axes), `--mode packaged`, `--mode all`, or `--mode genes` (`Solo.out/Gene` + `GeneFull` raw/filtered only; Phase 6). |
+| `report_velocyto_sorted_replay_rss.py` | Python | Reads `Log.out` for VmRSS after sorted-replay materialization and integrated-hash spill lines; prints `MAX_VM_RSS_KB` plus `PER_LOG_MAX_VM_RSS_KB[<subdir>]` per input log. |
+| `run_star_velocyto_canonical.sh` | Bash | Pinned UCSF perturb STAR for `Gene`/`GeneFull`/`Velocyto` parity; passes through `STAR_VELOCYTO_INTEGRATED_HASH` (Stage 2 CB-bucket path with deterministic replay). Refuses non-fresh `--out-prefix` unless `UCSF_VELOCYTO_REUSE_STAR_OUTDIR=1`. |
+| `save_velocyto_baseline.sh` | Bash | Canonical STAR + `prepare_velocyto_mex` (always); snapshot for `UCSF_VELOCYTO_BASELINE_OUTDIR` / `--mode all` parity. |
 | `integrate_feature_library.py` | Python | Merges a feature library (e.g., CRISPR guides) into an existing downstream h5ad, adding the feature counts as a new layer or `obsm` entry. |
 | `postprocess_downstream_filters.py` | Python | Rewrites downstream filtered outputs to produce both QC-only and default singlet-filtered versions of the AnnData. |
 | `propagate_anndata_layer.py` | Python | Copies an AnnData layer from a full source object into a target subset by matching `obs_names`, preserving target cell order. |

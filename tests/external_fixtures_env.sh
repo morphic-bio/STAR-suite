@@ -31,6 +31,11 @@ export UCSF_100K_FEATURE_REF="${UCSF_100K_FEATURE_REF:-/mnt/pikachu/ucsf-perturb
 export UCSF_100K_CB_WHITELIST="${UCSF_100K_CB_WHITELIST:-/home/lhhung/cellranger-9.0.1/lib/python/cellranger/barcodes/translation/3M-february-2018_NXT.txt}"
 export UCSF_100K_GENOME_DIR="${UCSF_100K_GENOME_DIR:-/storage/autoindex_110_44/bulk_index}"
 
+# UCSF full 2M perturb (GEX/guide roots; set UCSF_2M_PFCONFIG locally for canonical STAR runs)
+export UCSF_2M_GEX_DIR="${UCSF_2M_GEX_DIR:-$UCSF_2M_ROOT/GEX/iPSC2_1_AALG2}"
+export UCSF_2M_GUIDE_DIR="${UCSF_2M_GUIDE_DIR:-$UCSF_2M_ROOT/guides/iPSC2_1_AALG2}"
+# export UCSF_2M_PFCONFIG=/path/to/full_sample_multi_config.csv
+
 # UCSF full-sample perturb references
 export UCSF_FULL_ROOT="${UCSF_FULL_ROOT:-/storage/ucsf-full/bench_20260218_dynamic_first}"
 export UCSF_FULL_STAR_RUNS_ROOT="${UCSF_FULL_STAR_RUNS_ROOT:-$UCSF_FULL_ROOT/runs}"

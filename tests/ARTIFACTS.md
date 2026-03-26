@@ -44,6 +44,9 @@ update this file with its output location.
 - `tests/solo_yremove_smoke_output_*/` (vanilla Solo integrated Y-removal vs remove_y_reads smoke)
 - `tests/perturb_yremove_smoke_output_*/` (perturb integrated Y-removal vs remove_y_reads smoke)
 - `tests/perturb_velocyto_mex_smoke_output_*/` (UCSF 100K perturb smoke producing raw/filtered velocyto MEX surfaces)
+- `tests/ucsf_velocyto_exact_100k_output_*/` (canonical STAR Velocyto parity: deterministic 1 vs N threads on 100K fixture)
+- `tests/ucsf_velocyto_exact_2m_output_*/` (same on full UCSF 2M when `UCSF_2M_PFCONFIG` is set)
+- `tests/ucsf_velocyto_hash_100k_output_*/` / `tests/ucsf_velocyto_hash_2m_output_*/` (Stage 2: `STAR_VELOCYTO_INTEGRATED_HASH=1` vs global sorted replay; env `UCSF_VELOCYTO_HASH_*_OUTDIR`)
   - may also contain downstream STAR-cell QC outputs such as `downstream_genefull_velocyto_100k_starcells/`
   - may also contain per-feature-library downstream outputs such as:
     - `downstream_genefull_velocyto_100k_starcells_featurelibs_v2/feature_libraries/*/raw_feature_library.h5ad`
