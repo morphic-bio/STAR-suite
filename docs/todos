@@ -22,7 +22,14 @@ This file tracks active top-level work only. Completed items and stale historica
 
 ## Priority 2: Performance / Architecture
 
-- No active top-level performance / architecture items at present.
+- Optimize the non-Flex scRNA / GEX internal gzip path using the staged harness approach in [docs/RUNBOOK_GZIP_PIPELINE_ITERATION_20260326.md](/mnt/pikachu/STAR-suite/docs/RUNBOOK_GZIP_PIPELINE_ITERATION_20260326.md).
+  - Treat this as a medium-priority follow-up, not an immediate blocker: the current `zcat` workaround is acceptable for published benchmarks, but it is now clear that an optimized internal gzip path can beat `zcat` on at least one real surface (`--flexNoAlign 1` full-sample Flex).
+  - Use the runbook sequence as written: Flex first, then a separate GEX harness.
+  - Keep the benchmark question narrow:
+    - baseline = external `zcat`
+    - target = current internal gzip
+    - candidate optimizations = buffered reads, delimiter scanning, and small batched handoff
+  - Reuse queue telemetry / occupancy as the primary signal, and only promote a new internal path if it matches or beats the current benchmark-default `zcat` surface on the corresponding workload.
 
 ## Priority 3: Dataset / Fixture Coverage
 
