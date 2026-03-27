@@ -112,6 +112,10 @@ public:
     void countSmartSeq();
     void countCBgeneUMI();
     void countVelocyto();
+    void countVelocytoStreamThreads();
+    void countVelocytoSortedReplay();
+    void countVelocytoSortedReplayCBuckets(); // Stage 2: CB-first bucketed deterministic merge (env-gated)
+    void countVelocytoFinalizeFromCuMaps(vector<unordered_map<uintUMI, vector<trTypeStruct>>> &cuTrTypes);
     void quantTranscript();
     void prepareReadInfoOnly(); //minimal processing to populate readInfo without counting (for skipProcessing mode)
     

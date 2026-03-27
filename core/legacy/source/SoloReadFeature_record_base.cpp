@@ -291,6 +291,91 @@ bool shouldTraceBridgeBarcode(const ParametersSolo &pSolo, uint32_t wlIdx)
     return debugSet.count(pSolo.cbWLstr[wlIdx]) != 0;
 }
 
+bool shouldTraceBridgeBarcodeAnyCandidate(const ParametersSolo &pSolo, const std::vector<uint64> &wlIdxs)
+{
+    const auto &debugSet = bridgeDebugBarcodeSet();
+    if (debugSet.empty()) {
+        return false;
+    }
+    for (uint64 idx : wlIdxs) {
+        if (static_cast<size_t>(idx) < pSolo.cbWLstr.size()
+            && debugSet.count(pSolo.cbWLstr[static_cast<size_t>(idx)]) != 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+int64_t bridgeDebugTargetUmi24()
+{
+    static bool loaded = false;
+    static int64_t target = -1;
+    if (!loaded) {
+        loaded = true;
+        const char *env = std::getenv("STAR_SOLO_DEBUG_TARGET_UMI24");
+        if (env != nullptr && env[0] != '\0') {
+            target = std::strtoll(env, nullptr, 10);
+        }
+    }
+    return target;
+}
+
+int64_t bridgeDebugTargetGene()
+{
+    static bool loaded = false;
+    static int64_t target = -1;
+    if (!loaded) {
+        loaded = true;
+        const char *env = std::getenv("STAR_SOLO_DEBUG_TARGET_GENE");
+        if (env != nullptr && env[0] != '\0') {
+            target = std::strtoll(env, nullptr, 10);
+        }
+    }
+    return target;
+}
+
+bool bridgeTraceTargetMatch(uint32_t umi24, uint32_t geneIdx)
+{
+    const int64_t targetUmi = bridgeDebugTargetUmi24();
+    if (targetUmi >= 0 && static_cast<uint32_t>(targetUmi) != umi24) {
+        return false;
+    }
+    const int64_t targetGene = bridgeDebugTargetGene();
+    if (targetGene >= 0 && static_cast<uint32_t>(targetGene) != geneIdx) {
+        return false;
+    }
+    return true;
+}
+
+std::string formatBridgeGeneVector(const std::vector<uint32_t> &genes)
+{
+    std::ostringstream oss;
+    for (size_t i = 0; i < genes.size(); ++i) {
+        if (i != 0) {
+            oss << ',';
+        }
+        oss << genes[i];
+    }
+    return oss.str();
+}
+
+std::string formatBridgeCandidateVector(const ParametersSolo &pSolo, const std::vector<uint64> &wlIdxs)
+{
+    std::ostringstream oss;
+    for (size_t i = 0; i < wlIdxs.size(); ++i) {
+        if (i != 0) {
+            oss << ',';
+        }
+        const uint64 idx = wlIdxs[i];
+        if (static_cast<size_t>(idx) < pSolo.cbWLstr.size()) {
+            oss << pSolo.cbWLstr[static_cast<size_t>(idx)];
+        } else {
+            oss << idx;
+        }
+    }
+    return oss.str();
+}
+
 void insertInlineHashEntry(SoloReadFeature *soloReadFeat, const SoloReadBarcode &soloBar, uint32_t geneIdx)
 {
     if (soloReadFeat == nullptr
@@ -736,6 +821,34 @@ uint32 outputReadCB_base(fstream *streamOut, const uint64 iRead, const int32 fea
                 && soloReadFeat->pSolo.inlineHashMode
                 && !soloReadFeat->pSolo.flexMode
                 && std::getenv("STAR_SOLO_NONFLEX_HASH_BRIDGE") != nullptr;
+            if (!soloBar.cbMatchInd.empty()
+                && shouldTraceBridgeBarcodeAnyCandidate(soloBar.pSolo, soloBar.cbMatchInd)) {
+                const uint32_t umi24 = soloBar.umiB & 0xFFFFFFu;
+                bool matched = false;
+                if (!reFe.geneMult.empty()) {
+                    for (uint32_t geneIdx : reFe.geneMult) {
+                        const uint32_t resolvedGeneIdx = static_cast<uint32_t>(geneIdx ^ geneMultMark);
+                        if (bridgeTraceTargetMatch(umi24, resolvedGeneIdx)) {
+                            matched = true;
+                            break;
+                        }
+                    }
+                } else if (bridgeTraceTargetMatch(umi24, reFe.gene)) {
+                    matched = true;
+                }
+                if (matched) {
+                    soloReadFeat->P.inOut->logMain
+                        << "[GENEFULL-READ-TRACE] mode=" << (nonFlexHashBridge ? "bridge" : "legacy")
+                        << " stage=pre_record"
+                        << " cbCandidates={" << formatBridgeCandidateVector(soloBar.pSolo, soloBar.cbMatchInd) << "}"
+                        << " cbMatch=" << soloBar.cbMatch
+                        << " umi=" << umi24
+                        << " gene=" << reFe.gene
+                        << " geneMult={" << formatBridgeGeneVector(reFe.geneMult) << "}"
+                        << " iRead=" << iRead
+                        << endl;
+                }
+            }
             if (nonFlexHashBridge) {
                 const bool multiFeature = !reFe.geneMult.empty();
                 if (soloBar.cbMatch >= 0 && soloBar.cbMatch <= 1 && !soloBar.cbMatchInd.empty()) {

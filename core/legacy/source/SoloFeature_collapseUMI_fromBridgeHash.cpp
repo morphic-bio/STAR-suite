@@ -22,13 +22,75 @@
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
 #include <omp.h>
+#include <sstream>
+#include <string>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
 KHASH_MAP_INIT_INT(cbcount, size_t)
 
 namespace {
+
+const std::unordered_set<std::string>& collapseTraceBarcodeSet()
+{
+    static std::unordered_set<std::string> barcodes;
+    static bool loaded = false;
+    if (loaded) {
+        return barcodes;
+    }
+    loaded = true;
+
+    const char *path = std::getenv("STAR_SOLO_DEBUG_BARCODE_FILE");
+    if (path == nullptr || path[0] == '\0') {
+        return barcodes;
+    }
+
+    std::ifstream in(path);
+    std::string line;
+    while (std::getline(in, line)) {
+        if (!line.empty()) {
+            barcodes.insert(line);
+        }
+    }
+    return barcodes;
+}
+
+bool shouldTraceCollapseBarcode(const ParametersSolo &pSolo, uint32_t wlIdx)
+{
+    if (wlIdx >= pSolo.cbWLstr.size()) {
+        return false;
+    }
+    const auto &debugSet = collapseTraceBarcodeSet();
+    if (debugSet.empty()) {
+        return false;
+    }
+    return debugSet.count(pSolo.cbWLstr[wlIdx]) != 0;
+}
+
+std::string formatBridgeGeneCounts(const std::vector<std::pair<uint32_t, uint32_t>> &counts,
+                                   const std::vector<uint32_t> &gID)
+{
+    std::vector<std::pair<uint32_t, uint32_t>> ordered;
+    ordered.reserve(counts.size());
+    for (const auto &kv : counts) {
+        const uint32_t localIdx = kv.first;
+        const uint32_t geneId = localIdx < gID.size() ? gID[localIdx] : localIdx;
+        ordered.push_back({geneId, kv.second});
+    }
+    std::sort(ordered.begin(), ordered.end());
+
+    std::ostringstream oss;
+    for (size_t i = 0; i < ordered.size(); ++i) {
+        if (i != 0) {
+            oss << ',';
+        }
+        oss << ordered[i].first << ':' << ordered[i].second;
+    }
+    return oss.str();
+}
 
 struct BridgeFlatSlot {
     uint32_t gene;
@@ -547,6 +609,17 @@ void SoloFeature::collapseUMIall_fromBridgeHash()
                         maxg = static_cast<uint32_t>(-1);
                         break;
                     }
+                }
+
+                if (shouldTraceCollapseBarcode(pSolo, indCB[iCB])) {
+                    const int64_t chosenGene = (maxg + 1u == 0u) ? -1 : static_cast<int64_t>(ts.gID[maxg]);
+                    P.inOut->logMain << "[GENEFULL-CR-TRACE] mode=bridge"
+                                     << " cb=" << pSolo.cbWLstr[indCB[iCB]]
+                                     << " corr=" << cu
+                                     << " corrected={" << formatBridgeGeneCounts(ts.aggGene, ts.gID) << '}'
+                                     << " orig={" << formatBridgeGeneCounts(ts.origAtCu, ts.gID) << '}'
+                                     << " chosen=" << chosenGene
+                                     << endl;
                 }
 
                 if (maxg + 1u != 0u)

@@ -5,11 +5,13 @@
 #include "SequenceFuns.h"
 #include "serviceFuns.cpp"
 #include <unordered_map>
+#include <unordered_set>
 #include "SoloCommon.h"
 #include "UmiCodec.h"
 #include "UMICorrector.h"
 #include "ErrorWarning.h"
 #include <cstdio>
+#include <fstream>
 #include <vector>
 #include <algorithm>
 #include <chrono>
@@ -22,6 +24,64 @@ namespace {
 double soloElapsedSeconds(const std::chrono::steady_clock::time_point &start)
 {
     return std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+}
+
+const std::unordered_set<std::string>& collapseTraceBarcodeSet()
+{
+    static std::unordered_set<std::string> barcodes;
+    static bool loaded = false;
+    if (loaded) {
+        return barcodes;
+    }
+    loaded = true;
+
+    const char *path = std::getenv("STAR_SOLO_DEBUG_BARCODE_FILE");
+    if (path == nullptr || path[0] == '\0') {
+        return barcodes;
+    }
+
+    std::ifstream in(path);
+    std::string line;
+    while (std::getline(in, line)) {
+        if (!line.empty()) {
+            barcodes.insert(line);
+        }
+    }
+    return barcodes;
+}
+
+bool shouldTraceCollapseBarcode(const ParametersSolo &pSolo, uint32_t wlIdx)
+{
+    if (wlIdx >= pSolo.cbWLstr.size()) {
+        return false;
+    }
+    const auto &debugSet = collapseTraceBarcodeSet();
+    if (debugSet.empty()) {
+        return false;
+    }
+    return debugSet.count(pSolo.cbWLstr[wlIdx]) != 0;
+}
+
+std::string formatLegacyGeneCountMap(const std::unordered_map<uint32, uint32> &counts,
+                                     const std::vector<uint32> &gID)
+{
+    std::vector<std::pair<uint32, uint32>> ordered;
+    ordered.reserve(counts.size());
+    for (const auto &kv : counts) {
+        const uint32 localIdx = kv.first;
+        const uint32 geneId = localIdx < gID.size() ? gID[localIdx] : localIdx;
+        ordered.push_back({geneId, kv.second});
+    }
+    std::sort(ordered.begin(), ordered.end());
+
+    std::ostringstream oss;
+    for (size_t i = 0; i < ordered.size(); ++i) {
+        if (i != 0) {
+            oss << ',';
+        }
+        oss << ordered[i].first << ':' << ordered[i].second;
+    }
+    return oss.str();
 }
 }
 
@@ -632,6 +692,17 @@ void SoloFeature::collapseUMIperCB(uint32 iCB, vector<uint32> &umiArray, vector<
                     break;
                 };
             };
+
+            if (shouldTraceCollapseBarcode(pSolo, indCB[iCB])) {
+                const int64_t chosenGene = (maxg + 1u == 0u) ? -1 : static_cast<int64_t>(gID[maxg]);
+                P.inOut->logMain << "[GENEFULL-CR-TRACE] mode=legacy"
+                                 << " cb=" << pSolo.cbWLstr[indCB[iCB]]
+                                 << " corr=" << iu.first
+                                 << " corrected={" << formatLegacyGeneCountMap(iu.second, gID) << '}'
+                                 << " orig={" << formatLegacyGeneCountMap(umiGeneMapCount0[iu.first], gID) << '}'
+                                 << " chosen=" << chosenGene
+                                 << endl;
+            }
 
             if ( maxg+1!=0 ) {//this UMI is counted
                 geneCounts[maxg]++;
