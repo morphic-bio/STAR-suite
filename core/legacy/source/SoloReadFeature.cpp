@@ -32,7 +32,12 @@ SoloReadFeature::SoloReadFeature(int32 feTy, Parameters &Pin, int iChunk)
         exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
     }
 
-    if (pSolo.inlineHashMode) {
+    const bool keepLegacyVelocytoStream =
+        pSolo.inlineHashMode && !pSolo.flexMode
+        && std::getenv("STAR_SOLO_NONFLEX_HASH_BRIDGE") != nullptr
+        && featureType == SoloFeatureTypes::Velocyto;
+
+    if (pSolo.inlineHashMode && !keepLegacyVelocytoStream) {
         // Initialize inline hash instead of opening temp stream file
         inlineHash_ = kh_init(cg_agg);
         streamReads = nullptr; // Do NOT open stream file in inline hash mode

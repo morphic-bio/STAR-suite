@@ -84,6 +84,23 @@ update this file with its output location.
 - `tests/ucsf_gex_gray_em_heuristics_output_*/` (cheap heuristic analysis for UCSF gray-zone barcodes, comparing CellGenI-style admissions against CR-supported tail cells)
 - `tests/ucsf_gex_gray_threshold_cv_output_*/` (5-fold validation outputs for a simple gray-zone threshold rule using genes_detected, entropy, and top_gene_frac)
 - `tests/ucsf_gex_gray_postqc_filter_output_*/` (gray-zone-only post-EmptyDrops QC cleanup mirroring downstream `combineFilters.py` semantics: min/max genes detected plus mitochondrial fraction cutoff)
+- `tests/ucsf_velocyto_gexonly_exact_100k_output_*/` (GEX-only Velocyto exact/debug harness on a 100K downsampled corrected UCSF `EBs2_2/GEX` fixture; stream vs deterministic replay plus Gene/GeneFull parity)
+- `/storage/ucsf-velocyto-validation/` (GEX-only Velocyto baseline, parity, timing, and trace artifacts on corrected UCSF `EBs2_2/GEX`)
+  - small GEX-only frozen baseline:
+    - `/storage/ucsf-velocyto-validation/gexonly_baseline_100k_20260327_041314/`
+  - 10M GEX-only frozen baseline:
+    - `/storage/ucsf-velocyto-validation/gexonly_baseline_10m_20260327_050146/`
+  - 10M GEX-only parity + timing:
+    - `/storage/ucsf-velocyto-validation/gexonly_10m_parity_timing_20260327_051303/`
+  - 10M GEX-only Stage 2 hash validation:
+    - `/storage/ucsf-velocyto-validation/gexonly_10m_hash_stage2_20260327_055002/`
+  - full corrected `EBs2_2/GEX` stream vs hash at 32 threads:
+    - `/storage/ucsf-velocyto-validation/full_gex_velocyto_stream_vs_hash_t32_20260327_064213/`
+  - full corrected `EBs2_2/GEX` mixed `GeneFull` bridge + Velocyto hash run:
+    - `/storage/ucsf-velocyto-validation/full_gex_geneFull_bridge_velocyto_hash_t32_20260327_080206/`
+  - targeted `GeneFull` drift traces:
+    - `/storage/ucsf-velocyto-validation/geneFull_barcodewide_legacy_20260327_132834/`
+    - `/storage/ucsf-velocyto-validation/geneFull_barcodewide_bridge_20260327_133045/`
 - `tests/flexfilter_parity_output_*/` (FlexFilter parity outputs vs production baseline)
 - `/tmp/*` (temporary scratch outputs)
 - `/tmp/ucsf_cr_config_1m_smoke_*` (real UCSF perturb CR-config fixture smoke outputs)

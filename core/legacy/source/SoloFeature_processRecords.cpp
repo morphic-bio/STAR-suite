@@ -36,6 +36,7 @@ bool useDirectInlineHashOutput(const SoloFeature& feat)
         case SoloFeatureTypes::GeneFull:
         case SoloFeatureTypes::GeneFull_Ex50pAS:
         case SoloFeatureTypes::GeneFull_ExonOverIntron:
+        case SoloFeatureTypes::Velocyto:
             return false;
         default:
             return true;

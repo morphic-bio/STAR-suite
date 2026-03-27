@@ -8,11 +8,14 @@ Related docs:
 - `docs/RUNBOOK_VELOCYTO_OPTIMIZATION_PORT_20260326.md`
 - `docs/HANDOFF_SCRNA_DOWNSTREAM_MEX_VELOCYTO_FINDINGS_20260313.md`
 - `tests/run_perturb_velocyto_mex_smoke.sh`
+- `tests/run_ucsf_velocyto_gexonly_exact_100k.sh`
 - `tests/external_fixtures_env.sh`
 
 ## Branch status (do not overstate progress)
 
 **Stage 1** (sorted global replay + stream) and **Stage 2** (CB-bucket deterministic merge, env `STAR_VELOCYTO_INTEGRATED_HASH=1` with `STAR_VELOCYTO_DETERMINISTIC_REPLAY=1`) are implemented in `SoloFeature_countVelocytoBridge.cpp` / `SoloFeature_countVelocyto.cpp`. UCSF validation uses `tests/run_ucsf_velocyto_exact_*.sh` (Stage 1 gates + Phase 6 `Gene`/`GeneFull` parity via `compare_velocyto_mex.py --mode genes`) and `tests/run_ucsf_velocyto_hash_*.sh` (Stage 2 vs Stage 1 + thread parity + the same Gene/GeneFull checks). **Phase 4** (external `velocyto.py`) remains blocked without full BAMs (`tests/run_ucsf_velocyto_external_compare.sh`).
+
+**Status:** Implementation / code review for this bridge is effectively **closed**. **Formal acceptance** stays **open** until a host has valid UCSF fixture paths (or overrides below) and a chosen `UCSF_VELOCYTO_MAX_SORTED_REPLAY_RSS_KB` for the **2M** exact and hash harnesses (unless using the dev-only `UCSF_VELOCYTO_ALLOW_UNCAPPED_2M=1` opt-out).
 
 ## Goal
 
@@ -30,6 +33,34 @@ testing against:
 - legacy STAR `Velocyto`
 - packaged raw/filtered `Velocyto` MEX output
 - real external `velocyto.py` output when full retained BAMs are available
+
+## Preferred First Debug Loop
+
+Before going back to the full perturb / full-sample harnesses, use the smallest
+useful correctness surface:
+
+- **GEX-only**
+- **corrected `EBs2_2/GEX` source**
+- **100K downsample**
+- **1-thread vs N-thread only on that small fixture**
+
+Canonical small-loop harness:
+
+- `tests/run_ucsf_velocyto_gexonly_exact_100k.sh`
+
+That harness:
+
+1. creates a small GEX-only fixture from corrected `EBs2_2/GEX`
+2. runs `stream_t1`
+3. runs deterministic replay `det_t1`
+4. runs deterministic replay `det_tN`
+5. checks exact `Velocyto` packaged/raw parity plus `Gene` / `GeneFull` parity
+
+This is the preferred first step for correctness debugging because it avoids:
+
+- feature-calling / `pfMultiConfig` confounders
+- full-sample wall times
+- paying the cost of 1-thread full-sample runs just to debug exactness
 
 ## Non-Goal
 
@@ -159,28 +190,29 @@ Before touching code:
 
 Canonical local anchors:
 
-- UCSF 2M fixture env:
+- **Primary UCSF acceptance / benchmark surface (repo default today):** corrected
+  full-sample **EBs2_2** perturb layout — same family as
+  `scripts/paper/run_ucsf_ebs2_2_benchmark.sh` and `README.md` CR9 parity rows:
+  - `DATASET_ROOT=/mnt/pikachu/ucsf-perturb-seq-corrected/EBs2_2`
+  - `GEX` / `guides` under that root, plus a `pf_multi_config.csv` that lists
+    those directories (see the paper script’s emitted multi-config shape).
+- UCSF fixture env defaults (may be stale on some hosts; **override explicitly**
+  for Velocyto gates):
   - `tests/external_fixtures_env.sh`
 - UCSF **100K-only** perturb Velocyto MEX smoke (packaging invariants):
-  - `tests/run_perturb_velocyto_mex_smoke.sh` (wired to the staged 100K fixture; not a 2M runner)
-- Canonical STAR parameter surface + 100K/2M exact-parity harnesses:
+  - `tests/run_perturb_velocyto_mex_smoke.sh` (optional fast loop when a staged
+    100K tree exists; **not** the same as the EBs2_2 acceptance surface)
+- Canonical STAR parameter surface + exact/hash harnesses (`100k` and `2m`
+  profiles are harness names; `2m` is used for **full-sample** EBs2_2 runs):
   - `scripts/run_star_velocyto_canonical.sh`
   - `tests/run_ucsf_velocyto_exact_100k.sh`, `tests/run_ucsf_velocyto_exact_2m.sh`
 
-Canonical UCSF fixture paths from the local env:
-
-- UCSF 2M root:
-  - `/storage/ucsf-2M`
-- UCSF 2M sequential fixture:
-  - `/storage/ucsf-2M/star_runs/fixture_ucsf2m_current_sequential`
-- UCSF 2M dynamic fixture:
-  - `/storage/ucsf-2M/star_runs/fixture_ucsf2m_current_dynamic`
-- UCSF 100K staged perturb fixture:
-  - `/storage/ucsf-2M/fixtures/ucsf2m_iPSC2_AALG2_100k_pfconfig`
-- UCSF 2M GEX:
-  - `/storage/ucsf-2M/GEX/iPSC2_1_AALG2`
-- UCSF 2M guides:
-  - `/storage/ucsf-2M/guides/iPSC2_1_AALG2`
+**Legacy / historical (do not treat as canonical for new acceptance):** the old
+`/storage/ucsf-2M/.../iPSC2_1_AALG2` and bundled 100K pfconfig under
+`/storage/ucsf-2M/fixtures/ucsf2m_iPSC2_AALG2_100k_pfconfig` — kept only for
+`external_fixtures_env.sh` defaults and older notes. Validators targeting current
+paper-style UCSF work should use **corrected EBs2_2** paths and explicit
+`UCSF_2M_*` exports (see “Minimum fixture env” below), not the stale tree.
 
 ### Phase 1. Exact separate sidecar
 
@@ -203,10 +235,10 @@ Validation at this phase:
 - same filtered barcode subset
 - same `spliced`, `unspliced`, `ambiguous`, and total matrices
 
-### Phase 2. UCSF 100K exact parity
+### Phase 2. UCSF 100K exact parity (optional)
 
-Use the staged 100K perturb fixture first because it is fast enough for tight
-iteration.
+When a staged 100K perturb fixture is available, use it for fast iteration. Skip
+this phase if the host only has the full-sample tree (go to Phase 3).
 
 Required checks (automated in `tests/run_ucsf_velocyto_exact_100k.sh` when fixtures are available):
 
@@ -223,16 +255,25 @@ Required checks (automated in `tests/run_ucsf_velocyto_exact_100k.sh` when fixtu
 
 **Sorted-replay memory (100K):** optional cap via `UCSF_VELOCYTO_MAX_SORTED_REPLAY_RSS_KB`; `report_velocyto_sorted_replay_rss.py` reads `Log.out`.
 
-This is the gate before UCSF 2M.
+Optional **before** full sample: if a staged 100K tree is available, run
+`run_ucsf_velocyto_exact_100k.sh` for fast iteration. If it is **not** available,
+skip straight to full-sample gates (below); that is still valid acceptance when
+the full corrected surface passes.
 
-### Phase 3. UCSF 2M exact parity
+### Phase 3. Full-sample exact parity (`run_ucsf_velocyto_exact_2m.sh`)
 
-After UCSF 100K parity is solid, run the exact sidecar on UCSF 2M (`tests/run_ucsf_velocyto_exact_2m.sh`). That script **requires** `UCSF_VELOCYTO_MAX_SORTED_REPLAY_RSS_KB` unless `UCSF_VELOCYTO_ALLOW_UNCAPPED_2M=1` (dev-only); production acceptance must not use the opt-out.
+Run the exact sidecar on the **full-sample** perturb surface (canonical:
+corrected **EBs2_2** via `UCSF_2M_*` overrides and `UCSF_2M_PFCONFIG`). The
+harness name is `exact_2m`; it is **not** tied to the legacy iPSC2 path.
+
+That script **requires** `UCSF_VELOCYTO_MAX_SORTED_REPLAY_RSS_KB` unless
+`UCSF_VELOCYTO_ALLOW_UNCAPPED_2M=1` (dev-only); production acceptance must not
+use the opt-out.
 
 Required checks:
 
-1. legacy STAR `Velocyto` (stream) on UCSF 2M
-2. deterministic sorted-replay path on UCSF 2M
+1. legacy STAR `Velocyto` (stream) on the chosen full-sample inputs
+2. deterministic sorted-replay path on the same inputs
 3. raw/filtered MEX packaging (`prepare_velocyto_mex.py`) on both
 4. `compare_velocyto_mex.py --mode all` plus deterministic 1 vs N threads
 5. full exact diff of:
@@ -393,23 +434,118 @@ Planned extensions:
 - `tests/run_ucsf_velocyto_hash_*.sh` — Stage 1 sorted replay vs Stage 2 CB-bucket + thread parity (see script headers)
 - `tests/run_ucsf_velocyto_external_compare.sh` — prints **BLOCKED** until full retained BAMs + `velocyto.py` wiring exist (not a passing check)
 
+## Validation run order (implementation is done; acceptance is not)
+
+No further Velocyto bridge **implementation** is required for acceptance;
+**execution** of these gates is. Serialize benchmark-style runs (one job at a
+time). Use a **fresh** `--baseline-dir` / harness outdir per attempt.
+
+**Prerequisites (all runs):**
+
+- Pre-refactor **baseline** `STAR` binary (separate checkout or worktree at the
+  frozen commit); `export STAR_BIN=/path/to/baseline/STAR` when capturing
+  baselines.
+- Implementation checkout `STAR` for exact/hash harnesses:
+  `export STAR_BIN=/path/to/STAR-suite/core/legacy/source/STAR`.
+- `export UCSF_VELOCYTO_PARITY_THREADS=8` (or your target thread count).
+- After each `save_velocyto_baseline.sh` completes:
+  `export UCSF_VELOCYTO_BASELINE_OUTDIR=/path/to/baseline/star_run`.
+- **2M RSS budget:** set `export UCSF_VELOCYTO_MAX_SORTED_REPLAY_RSS_KB=<kB>`
+  before `run_ucsf_velocyto_exact_2m.sh` and `run_ucsf_velocyto_hash_2m.sh`
+  (Stage 1: global `MAX_VM_RSS_KB` from deterministic logs; Stage 2: cap
+  applies to `PER_LOG_MAX_VM_RSS_KB[det_hash_t1]` and `[det_hash_tN]` only).
+  Until this value is chosen (and fixtures exist), acceptance remains open.
+
+### Minimum fixture env (override when defaults in `tests/external_fixtures_env.sh` are wrong)
+
+Set host-specific GEX/guide roots and pfMultiConfig paths; keep genome,
+feature ref, and whitelist pinned if these defaults match your site:
+
+```bash
+export UCSF_100K_GEX_DIR="..."
+export UCSF_100K_GUIDE_DIR="..."
+export UCSF_100K_PFCONFIG="..."
+export UCSF_100K_FEATURE_REF="/mnt/pikachu/ucsf-perturb-seq/cellranger_feature_ref_hCRISPRa_v2_like_AALG2_pattern.csv"
+export UCSF_100K_CB_WHITELIST="/home/lhhung/cellranger-9.0.1/lib/python/cellranger/barcodes/translation/3M-february-2018_NXT.txt"
+export UCSF_100K_GENOME_DIR="/storage/autoindex_110_44/bulk_index"
+
+export UCSF_2M_GEX_DIR="..."
+export UCSF_2M_GUIDE_DIR="..."
+export UCSF_2M_PFCONFIG="..."
+export UCSF_2M_FEATURE_REF="/mnt/pikachu/ucsf-perturb-seq/cellranger_feature_ref_hCRISPRa_v2_like_AALG2_pattern.csv"
+export UCSF_2M_CB_WHITELIST="/home/lhhung/cellranger-9.0.1/lib/python/cellranger/barcodes/translation/3M-february-2018_NXT.txt"
+export UCSF_2M_GENOME_DIR="/storage/autoindex_110_44/bulk_index"
+```
+
+`scripts/run_star_velocyto_canonical.sh` resolves `UCSF_2M_FEATURE_REF` and
+`UCSF_2M_CB_WHITELIST` the same way as STAR: if unset, it falls back to
+`UCSF_100K_FEATURE_REF` / `UCSF_100K_CB_WHITELIST`, then to built-in paths under
+`/mnt/pikachu/...`. **Export them explicitly** when your site differs, so you
+do not accidentally inherit the wrong ref or whitelist.
+
+### Rerun sequence (flexible; full-sample acceptance is the bar)
+
+**Acceptance** for current UCSF work is **full corrected EBs2_2** (or equivalent
+full-sample surface) passing baseline + Stage 1 exact + Stage 2 hash with frozen
+baseline STAR. A staged **100K** run is **optional** for speed when that fixture
+exists; hosts that only have the full sample should run the **full-sample**
+steps directly with explicit `UCSF_2M_*` (and `UCSF_2M_PFCONFIG`) — do **not**
+require 100K first.
+
+**A. Optional fast path (only if 100K fixture + baseline binary available)**
+
+1. **100K frozen baseline:**  
+   `bash scripts/save_velocyto_baseline.sh --profile 100k --threads 1 --baseline-dir /path/to/baseline_100k`  
+   then `export UCSF_VELOCYTO_BASELINE_OUTDIR=/path/to/baseline_100k/star_run`.
+2. **Stage 1 exact — 100K:** `bash tests/run_ucsf_velocyto_exact_100k.sh`
+3. **Stage 2 hash — 100K:** same `UCSF_VELOCYTO_BASELINE_OUTDIR` as step 1:  
+   `bash tests/run_ucsf_velocyto_hash_100k.sh`
+
+**B. Full-sample path (required for acceptance; use EBs2_2 overrides above)**
+
+1. **Full-sample frozen baseline:**  
+   `bash scripts/save_velocyto_baseline.sh --profile 2m --threads 1 --baseline-dir /path/to/baseline_full`  
+   (set all relevant `UCSF_2M_*` first, including **feature ref** and **CB whitelist**),  
+   then `export UCSF_VELOCYTO_BASELINE_OUTDIR=/path/to/baseline_full/star_run`.
+2. **Stage 1 exact — full sample:**  
+   `bash tests/run_ucsf_velocyto_exact_2m.sh`  
+   (**requires** `UCSF_VELOCYTO_MAX_SORTED_REPLAY_RSS_KB` or dev opt-out).
+3. **Stage 2 hash — full sample:**  
+   `bash tests/run_ucsf_velocyto_hash_2m.sh`  
+   (same baseline `star_run` and RSS env as step B2).
+
+You may run **A then B** (recommended when both surfaces exist) or **B alone**.
+
+**Later:** external `velocyto.py` — still blocked without retained BAMs
+(`tests/run_ucsf_velocyto_external_compare.sh`).
+
+**Immediate next step:** set the **minimum fixture env** (including
+`UCSF_2M_FEATURE_REF` / `UCSF_2M_CB_WHITELIST`), choose fresh outdirs, and run
+**B**; add **A** only if a 100K tree is on the host.
+
 ## Acceptance Criteria
 
 ### Stage 1 accepted when
 
-- UCSF 100K / 2M: frozen baseline vs `stream_t1` (`UCSF_VELOCYTO_BASELINE_OUTDIR`, default-on in harness; opt out only with `UCSF_VELOCYTO_ALLOW_SAME_BINARY_ONLY=1`)
+- **Full-sample** (e.g. corrected EBs2_2): frozen baseline vs `stream_t1`
+  (`UCSF_VELOCYTO_BASELINE_OUTDIR`, default-on in harness; opt out only with
+  `UCSF_VELOCYTO_ALLOW_SAME_BINARY_ONLY=1`). Optional **100K** run is an extra
+  confidence check when that fixture exists, not a substitute for full-sample
+  gates.
 - Refactored stream matches deterministic sorted replay at 1 thread (`compare_velocyto_mex.py --mode all`)
 - **Thread determinism:** `STAR_VELOCYTO_DETERMINISTIC_REPLAY=1` runs match at 1 vs N threads with `--mode all`
-- **2M memory (Stage 2 hash harness):** `UCSF_VELOCYTO_MAX_SORTED_REPLAY_RSS_KB` is enforced per `PER_LOG_MAX_VM_RSS_KB[det_hash_t1]` and `[det_hash_tN]` (or dev opt-out `UCSF_VELOCYTO_ALLOW_UNCAPPED_2M=1`). Stage 1 `det_sort_t1` does not gate that cap. `report_velocyto_sorted_replay_rss.py` prints both global max and per-log lines.
+- **2M memory (Stage 1 exact harness):** `UCSF_VELOCYTO_MAX_SORTED_REPLAY_RSS_KB` enforced vs global `MAX_VM_RSS_KB` from deterministic logs (or `UCSF_VELOCYTO_ALLOW_UNCAPPED_2M=1` dev-only)
 - packaged raw/filtered MEX invariants pass (`tests/run_perturb_velocyto_mex_smoke.sh` on 100K)
 
 ### Stage 2 accepted when
 
 - Stage 2 hash-backed output is exactly equal to Stage 1 and legacy STAR
-- UCSF 100K and UCSF 2M both pass
+- **Full-sample** hash harness passes (`run_ucsf_velocyto_hash_2m.sh` with the
+  same surface as Stage 1). **100K** hash (`run_ucsf_velocyto_hash_100k.sh`) is
+  optional when the staged 100K fixture is unavailable.
 - **Thread determinism** for the hash-backed path (1 vs N threads) passes
 - normal `Gene` / `GeneFull` outputs remain unchanged
-- performance is not worse than Stage 1 on UCSF 2M
+- **2M memory (Stage 2 hash harness):** `UCSF_VELOCYTO_MAX_SORTED_REPLAY_RSS_KB` enforced per `PER_LOG_MAX_VM_RSS_KB[det_hash_t1]` and `[det_hash_tN]` (or `UCSF_VELOCYTO_ALLOW_UNCAPPED_2M=1`); compare Stage 2 per-log RSS to Stage 1 for memory claims
 
 ## Failure Modes To Watch
 
@@ -425,10 +561,15 @@ Planned extensions:
 The safe order is:
 
 1. exact separate sidecar first
-2. UCSF 100K exact parity
-3. UCSF 2M exact parity
-4. external `velocyto.py` comparison when full BAMs exist
-5. Stage 2 CB-bucket deterministic path (`STAR_VELOCYTO_INTEGRATED_HASH=1`), validated vs Stage 1 via `run_ucsf_velocyto_hash_*.sh`
+2. **Full-sample** frozen baseline + exact parity on corrected **EBs2_2** (or
+   equivalent), with explicit `UCSF_2M_*` including **feature ref** and **CB
+   whitelist**, and a chosen full-sample RSS cap
+3. **Optional:** if a staged 100K tree exists, repeat baseline + exact (+ hash)
+   on 100K for faster iteration — not required for acceptance if step 2 passes
+4. Stage 2 CB-bucket deterministic path (`STAR_VELOCYTO_INTEGRATED_HASH=1`),
+   validated vs Stage 1 via `run_ucsf_velocyto_hash_2m.sh` on the **same**
+   full-sample surface (and optionally `run_ucsf_velocyto_hash_100k.sh`)
+5. external `velocyto.py` comparison when full BAMs exist
 
 Further fusion of Velocyto with the GeneFull bridge hot path (single pass, no
 Velocyto temp stream) remains future work if profiling warrants it.
