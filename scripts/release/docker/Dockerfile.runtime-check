@@ -1,11 +1,15 @@
 ARG BASE_IMAGE=ubuntu:24.04
 FROM ${BASE_IMAGE}
 
+ENV DEBIAN_FRONTEND=noninteractive \
+    TZ=Etc/UTC
+
 COPY scripts/release/docker/container_check_tarball.sh /usr/local/bin/container_check_tarball.sh
 COPY scripts/release/docker/container_check_installer_bundle.sh /usr/local/bin/container_check_installer_bundle.sh
 COPY scripts/release/docker/container_check_release_smokes.sh /usr/local/bin/container_check_release_smokes.sh
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    tzdata \
     ca-certificates \
     git \
     git-lfs \
