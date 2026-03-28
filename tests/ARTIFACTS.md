@@ -107,6 +107,7 @@ update this file with its output location.
 - `/tmp/ucsf_batch_cr_multifeature_tiny_*` (synthetic UCSF perturb multifeature CR-config tiny smoke outputs)
 - `/tmp/flex_cr_config_smoke_*` (Flex CR-config smoke outputs)
 - `/tmp/flex_cr_config_star_section_smoke_*` (Flex CR-config smoke outputs using `[star]` probe catalog/offset extensions)
+- `/tmp/flex_tiny_public_smoke_*` (public tiny Flex smoke outputs used by Docker/release Tier A validation)
 - `/tmp/public_bulk_fixture_*` (public GEO bulk PE smoke fixtures downloaded via `scripts/download_public_bulk_fixture.sh`)
 - `/mnt/pikachu/ucsf-perturb-yremove*/samples/*/run/read_qc.trim_qc.{json,html}` (STAR read-level FastQC-like QC reports when UCSF perturb runners are launched with `--trim-qc`)
 - `/mnt/pikachu/ucsf-perturb-yremove_all_velocyto*/samples/*/qc/read_qc_r2.{json,html}` (standalone FASTQ replay QC reports on UCSF GEX R2 inputs, written into processed sample roots)

@@ -101,12 +101,17 @@ FROM suite-base AS test-tier-a
 
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    git-lfs \
+    python3 \
+    python3-pandas \
     samtools \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /build/tests /build/tests
 COPY --from=builder /build/scripts /build/scripts
+COPY --from=builder /build/flex/scripts /build/flex/scripts
 WORKDIR /build
 
 # -----------------------------------------------------------------------------
@@ -118,10 +123,12 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
     samtools \
     python3 \
+    python3-pandas \
     bc \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /build/tests /build/tests
 COPY --from=builder /build/scripts /build/scripts
+COPY --from=builder /build/flex/scripts /build/flex/scripts
 WORKDIR /build
