@@ -1,6 +1,6 @@
 # STAR Suite
 
-STAR Suite updates the original STAR aligner by integrating four modules — STAR-perturb, STAR-Flex, STAR-SLAM, and TranscriptVB — to provide complete internal C/C++ pipelines for bulk RNA-seq, scRNA-seq, Perturb-seq, 10x Flex, and SLAM-seq. The integration results in **substantial speedups** (**1.7–2.4x for bulk RNA-seq**, **1.7–2.0x for UCSF GEX-only Solo vs historical STAR surfaces**, **3.2–6.1x for Perturb-seq**, **2.5–28x for Flex**) and a simplified toolchain that can be **installed through pre-compiled binaries** for researchers and agents. **No new external dependencies** are required; the suite is built entirely with the existing STAR toolchain and vendored components. **This is a drop-in replacement for the STAR aligner.**
+STAR Suite updates the original STAR aligner by integrating four modules — STAR-perturb, STAR-Flex, STAR-SLAM, and TranscriptVB — to provide complete internal C/C++ pipelines for bulk RNA-seq, scRNA-seq, Perturb-seq, 10x Flex, and SLAM-seq. The integration results in **substantial speedups** (**1.7–2.4x for bulk RNA-seq**, **1.7–2.0x for UCSF GEX-only Solo vs CellGENI-style STARsolo**, **3.2–6.1x for Perturb-seq**, **2.5–28.8x for Flex**) and a simplified toolchain that can be **installed through pre-compiled binaries** for researchers and agents. **No new external dependencies** are required; the suite is built entirely with the existing STAR toolchain and vendored components. **This is a drop-in replacement for the STAR aligner.**
 
 STAR Suite supports partial compilation: build only the module/tool targets you need instead of building the full suite every time.
 
@@ -8,7 +8,7 @@ Agent quickstart: see `AGENTS.md` for repo-specific guardrails, tests, and recen
 
 ## Core Additions over STAR 2.7.11b
 
-- **Speedup**: Bulk RNA-seq **1.7–2.4x faster** than external stepwise pipelines; UCSF GEX-only Solo **1.7–2.0x faster** than historical STAR surfaces on the full `EBs2_2` sample; Perturb-seq **3.2–6.1x faster** than Cell Ranger 9; Flex **2.5x faster** than Cell Ranger 9 (5.5x in no-align mode, ~13–28x vs Cell Ranger 7 with BAM) — all with near-identical parity.
+- **Speedup**: Bulk RNA-seq **1.7–2.4x faster** than external stepwise pipelines; UCSF GEX-only Solo **1.7–2.0x faster** than the independent CellGENI STARsolo parameter surface on the full `EBs2_2` sample; Perturb-seq **3.2–6.1x faster** than Cell Ranger 9; Flex **2.5x faster** than Cell Ranger 9 (5.7x in no-align mode, ~12.8–28.8x vs Cell Ranger 7 with BAM) — all with near-identical parity.
 - **Batch Mode** (`--batchMode 1`): Processes multiple FASTQs in one STAR invocation while reusing the loaded genome. Removes the need for `--genomeLoad` keep-in-memory workflows. Single-pass only (no `--twopassMode`); not supported with Solo (`--soloType`). Use `--outFileNamePrefixAuto 1` for per-sample subdirectories.
 - **TranscriptVB Quantification** (`--quantMode TranscriptVB`): Variational Bayes and EM quantification for transcript-level abundance, with parity-oriented behavior against Salmon alignment-mode. Gene-level summarization via `--quantVBgenesMode Tximport`.
 - **Transcriptome Output** (`--quantTranscriptomeSAMoutput`): Replaces the former `--quantTranscriptomeBan` with more explicit control (e.g., `BanSingleEnd_ExtendSoftclip`).
@@ -95,36 +95,43 @@ Datasets: MorPHiC JAX KOLF PE RNA-seq (sample 21033-09-01-13-01, 6.5M read pairs
 
 ### UCSF GEX-only Solo (full sample, no BAM)
 
+Here, "CellGENI-style" refers to the independent CellGENI GitHub STARsolo workflow:
+STARsolo run with the parameter surface used by the CellGENI team, rather than
+the suite-integrated defaults in this repository.
+
 | Arm | STAR build | Reads | Filtered cells | Wall (32 thr) | Notes |
 |---|---|---:|---:|---:|---|
-| Historical vanilla | `7a7fb08` | 445M | 13,872 | **23.9 min** | `--readFilesCommand zcat`; `/storage/solo_overnight_20260326/ucsf_gexonly_no_bam/star_vanilla_7a7fb08_retry2/` |
-| Historical CellGenI-style | `7a7fb08` | 445M | 13,847 | **26.8 min** | CellGenI-style parameter surface, latest TRU whitelist, `GeneFull` only, `zcat`; `/storage/solo_overnight_20260326/ucsf_gexonly_no_bam/star_cellgeni_historical_7a7fb08_truwhitelist_genefullonly_20260326/` |
+| Historical CellGENI-style | `7a7fb08` | 445M | 13,847 | **26.8 min** | CellGENI-style parameter surface, latest TRU whitelist, `GeneFull` only, `zcat`; `/storage/solo_overnight_20260326/ucsf_gexonly_no_bam/star_cellgeni_historical_7a7fb08_truwhitelist_genefullonly_20260326/` |
 | Modern optimized | current suite `STAR` | 445M | 13,723 | **13.75 min** | Best validated current surface, `zcat`; `/storage/solo_overnight_20260326/ucsf_gexonly_no_bam/star_optimized_current_zcat_20260326/` |
 | Modern optimized | current suite `STAR` | 445M | 13,728 | **15.8 min** | Native `.gz`; `/storage/solo_overnight_20260326/ucsf_gexonly_no_bam/star_optimized_current_retry2/` |
 
-`zcat` remains the fastest validated UCSF GEX-only read path on this host: current optimized `zcat` is 1.74x faster than the older local historical vanilla surface and 1.95x faster than the CellGenI-style historical rerun. The native `.gz` path is functional but still slower than `zcat` on this benchmark; internal gzip tuning is not yet optimized for this non-Flex Solo surface.
+`zcat` remains the fastest validated UCSF GEX-only read path on this host:
+current optimized `zcat` is 1.95x faster than the CellGENI-style historical
+rerun, while the native `.gz` path is still 1.70x faster than that same
+CellGENI-style baseline. The native `.gz` path is functional but still slower
+than `zcat` on this benchmark; internal gzip tuning is not yet optimized for
+this non-Flex Solo surface.
 
 **CR9 parity (corrected UCSF `EBs2_2` GEX-only reference: `/storage/cr9_ebs2_2_benchmark_20260318/cr9_ebs2_2`)**
 
 | Arm | Filtered cells | Cell Jaccard vs CR9 | Barcode Pearson vs CR9 | Gene Pearson vs CR9 |
 |---|---:|---:|---:|---:|
 | Current optimized `zcat` | 13,723 | 0.976 | 0.999946 | 0.994885 |
-| Historical vanilla `7a7fb08` | 13,872 | 0.986 | 0.998653 | 0.886463 |
-| Historical CellGenI-style `7a7fb08` | 13,847 | 0.989 | 0.999949 | 0.963561 |
+| Historical CellGENI-style `7a7fb08` | 13,847 | 0.989 | 0.999949 | 0.963561 |
 | Cell Ranger 9 reference | 13,760 | 1.000 | 1.000000 | 1.000000 |
 
-Current optimized `zcat` is the best overall UCSF GEX-only surface: it has the fastest wall time and the strongest gene-level agreement to CR9. The historical surfaces preserve slightly more CR9 filtered-barcode overlap, but both lose substantial gene-level parity relative to the current build.
+Current optimized `zcat` is the best overall UCSF GEX-only surface: it has the
+fastest wall time and the strongest gene-level agreement to CR9. The
+CellGENI-style historical surface preserves slightly more CR9 filtered-barcode
+overlap, but loses substantial gene-level parity relative to the current build.
 
 **Filtered-cell overlap across UCSF GEX-only arms**
 
 | Pair | Common cells | Jaccard |
 |---|---:|---:|
-| Current vs historical vanilla | 13,540 | 0.963 |
-| Current vs historical CellGenI-style | 13,549 | 0.966 |
-| Historical vanilla vs historical CellGenI-style | 13,809 | 0.993 |
+| Current vs historical CellGENI-style | 13,549 | 0.966 |
 | Current vs CR9 | 13,578 | 0.976 |
-| Historical vanilla vs CR9 | 13,717 | 0.986 |
-| Historical CellGenI-style vs CR9 | 13,728 | 0.989 |
+| Historical CellGENI-style vs CR9 | 13,728 | 0.989 |
 
 ### Velocyto Bridge (UCSF `EBs2_2` GEX-only)
 
