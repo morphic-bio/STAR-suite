@@ -25,6 +25,11 @@ bool nonFlexHashBridgeEnabled()
     return std::getenv("STAR_SOLO_NONFLEX_HASH_BRIDGE") != nullptr;
 }
 
+bool soloPhaseDebugEnabled()
+{
+    return std::getenv("STAR_SOLO_PHASE_DEBUG") != nullptr;
+}
+
 bool nonFlexHashBridgeApplies(const SoloFeature& feat)
 {
     if (!feat.pSolo.inlineHashMode || feat.pSolo.flexMode || !nonFlexHashBridgeEnabled()) {
@@ -92,6 +97,15 @@ void SoloFeature::countCBgeneUMI()
         rguStride=3; //to keep readI column
 
     const bool nonFlexBridgePath = nonFlexHashBridgeApplies(*this);
+    if (soloPhaseDebugEnabled()) {
+        time(&rawTime);
+        P.inOut->logMain << timeMonthDayTime(rawTime)
+                         << " ... Solo debug: countCBgeneUMI enter"
+                         << " feature=" << SoloFeatureTypes::Names[featureType]
+                         << " inlineHash=" << (pSolo.inlineHashMode ? "yes" : "no")
+                         << " nonFlexBridge=" << (nonFlexBridgePath ? "yes" : "no")
+                         << endl;
+    }
 
 #ifdef DEBUG_CB_UB_PARITY
     // Skip parity validation when minimal memory flag is on (parity requires packed storage)
@@ -189,11 +203,35 @@ void SoloFeature::countCBgeneUMI()
             flexHashSnapshotLoad(flexSnapIn);
         } else {
             // Resolve ambiguous CBs (before collapse)
+            if (soloPhaseDebugEnabled()) {
+                time(&rawTime);
+                P.inOut->logMain << timeMonthDayTime(rawTime)
+                                 << " ... Solo debug: resolving ambiguous CBs before collapse"
+                                 << endl;
+            }
             resolveAmbiguousCBs();
+            if (soloPhaseDebugEnabled()) {
+                time(&rawTime);
+                P.inOut->logMain << timeMonthDayTime(rawTime)
+                                 << " ... Solo debug: finished resolving ambiguous CBs"
+                                 << endl;
+            }
 
             // Run clique correction if enabled (operates on hash)
             if (pSolo.umiCorrectionMode > 0) {
+                if (soloPhaseDebugEnabled()) {
+                    time(&rawTime);
+                    P.inOut->logMain << timeMonthDayTime(rawTime)
+                                     << " ... Solo debug: starting clique correction"
+                                     << endl;
+                }
                 runCliqueCorrection();
+                if (soloPhaseDebugEnabled()) {
+                    time(&rawTime);
+                    P.inOut->logMain << timeMonthDayTime(rawTime)
+                                     << " ... Solo debug: finished clique correction"
+                                     << endl;
+                }
             }
         }
 
@@ -203,9 +241,19 @@ void SoloFeature::countCBgeneUMI()
                              << " ... Experimental non-Flex inline-hash bridge: direct hash collapse"
                              << " (no materializeRGUFromHash / no legacy collapseUMIall)"
                              << endl;
+            if (soloPhaseDebugEnabled()) {
+                P.inOut->logMain << "Solo debug: starting collapseUMIall_fromBridgeHash" << endl;
+            }
 
             const auto bridgeCollapseStart = std::chrono::steady_clock::now();
             collapseUMIall_fromBridgeHash();
+            if (soloPhaseDebugEnabled()) {
+                time(&rawTime);
+                P.inOut->logMain << timeMonthDayTime(rawTime)
+                                 << " ... Solo debug: finished collapseUMIall_fromBridgeHash"
+                                 << " nCB=" << nCB
+                                 << endl;
+            }
             P.inOut->logMain << "Solo timing: collapseUMIall_fromBridgeHash "
                              << soloElapsedSeconds(bridgeCollapseStart) << " s" << endl;
 
@@ -217,6 +265,9 @@ void SoloFeature::countCBgeneUMI()
             }
 
             std::vector<uint32> nReadPerCBunique1(pSolo.cbWLsize), nReadPerCBmulti1(pSolo.cbWLsize);
+            if (soloPhaseDebugEnabled()) {
+                P.inOut->logMain << "Solo debug: populating bridge read accounting" << endl;
+            }
             populateBridgeReadAccounting(*this, nReadPerCBunique1, nReadPerCBmulti1);
 
             nReadPerCBunique.resize(nCB);
@@ -238,13 +289,29 @@ void SoloFeature::countCBgeneUMI()
             time(&rawTime);
             P.inOut->logMain << timeMonthDayTime(rawTime)
                              << " ... Finished collapsing UMIs (non-Flex inline-hash bridge, direct hash)" << endl;
+            if (soloPhaseDebugEnabled()) {
+                P.inOut->logMain << "Solo debug: countCBgeneUMI exit via non-Flex bridge"
+                                 << " nCB=" << nCB
+                                 << " count_seconds=" << soloElapsedSeconds(countStart)
+                                 << endl;
+            }
             P.inOut->logMain << "Solo timing: countCBgeneUMI " << soloElapsedSeconds(countStart) << " s" << endl;
             return;
         }
         
         // Direct hash consumption: no materialization/legacy collapse
+        if (soloPhaseDebugEnabled()) {
+            P.inOut->logMain << "Solo debug: starting collapseUMIall_fromHash" << endl;
+        }
         const auto hashCollapseStart = std::chrono::steady_clock::now();
         collapseUMIall_fromHash();
+        if (soloPhaseDebugEnabled()) {
+            time(&rawTime);
+            P.inOut->logMain << timeMonthDayTime(rawTime)
+                             << " ... Solo debug: finished collapseUMIall_fromHash"
+                             << " nCB=" << nCB
+                             << endl;
+        }
         P.inOut->logMain << "Solo timing: collapseUMIall_fromHash " << soloElapsedSeconds(hashCollapseStart) << " s" << endl;
         
         // Populate packedReadInfo from readIdTracker_ for sorted BAM CB/UB tag injection
@@ -280,6 +347,12 @@ void SoloFeature::countCBgeneUMI()
         
         time(&rawTime);
         P.inOut->logMain << timeMonthDayTime(rawTime) << " ... Finished collapsing UMIs (direct hash mode)" << endl;
+        if (soloPhaseDebugEnabled()) {
+            P.inOut->logMain << "Solo debug: countCBgeneUMI exit via direct hash mode"
+                             << " nCB=" << nCB
+                             << " count_seconds=" << soloElapsedSeconds(countStart)
+                             << endl;
+        }
         P.inOut->logMain << "Solo timing: countCBgeneUMI " << soloElapsedSeconds(countStart) << " s" << endl;
         return;
     }
@@ -392,6 +465,12 @@ void SoloFeature::countCBgeneUMI()
 
         time(&rawTime);
         P.inOut->logMain << timeMonthDayTime(rawTime) << " ... Finished collapsing UMIs" <<endl;
+        if (soloPhaseDebugEnabled()) {
+            P.inOut->logMain << "Solo debug: countCBgeneUMI exit via legacy collapse"
+                             << " nCB=" << nCB
+                             << " count_seconds=" << soloElapsedSeconds(countStart)
+                             << endl;
+        }
 #ifdef DEBUG_CB_UB_PARITY
         logDebugStatusCounters();
         logDebugStageCounters();

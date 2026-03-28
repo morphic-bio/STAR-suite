@@ -20,6 +20,11 @@ bool nonFlexHashBridgeEnabled()
     return std::getenv("STAR_SOLO_NONFLEX_HASH_BRIDGE") != nullptr;
 }
 
+bool soloPhaseDebugEnabled()
+{
+    return std::getenv("STAR_SOLO_PHASE_DEBUG") != nullptr;
+}
+
 bool useDirectInlineHashOutput(const SoloFeature& feat)
 {
     if (!feat.pSolo.inlineHashMode) {
@@ -79,7 +84,22 @@ void SoloFeature::processRecords()
         P.inOut->logMain <<"Read splice junctions for Solo SJ feature: "<< P.sjAll[0].size() <<endl;
     };
 
+    if (soloPhaseDebugEnabled()) {
+        time(&rawTime);
+        P.inOut->logMain << timeMonthDayTime(rawTime)
+                         << " ... Solo debug: " << SoloFeatureTypes::Names[featureType]
+                         << " entering sumThreads" << endl;
+    }
     SoloFeature::sumThreads();
+    if (soloPhaseDebugEnabled()) {
+        time(&rawTime);
+        P.inOut->logMain << timeMonthDayTime(rawTime)
+                         << " ... Solo debug: " << SoloFeatureTypes::Names[featureType]
+                         << " finished sumThreads"
+                         << " nCB=" << nCB
+                         << " nReadsMapped=" << nReadsMapped
+                         << endl;
+    }
     
     // Early exit for skipProcessing mode: populate readInfo but skip counting/matrices
     if (pSolo.skipProcessing) {
@@ -99,6 +119,10 @@ void SoloFeature::processRecords()
         time(&rawTime);
         P.inOut->logMain << timeMonthDayTime(rawTime) << " ... Solo: skipping counting and matrix output for " 
                          << SoloFeatureTypes::Names[featureType] << " (soloSkipProcessing=yes)" <<endl;
+        if (soloPhaseDebugEnabled()) {
+            P.inOut->logMain << "Solo debug: " << SoloFeatureTypes::Names[featureType]
+                             << " leaving processRecords via skipProcessing" << endl;
+        }
         P.inOut->logMain << "Solo timing: processRecords " << soloElapsedSeconds(processStart) << " s" << endl;
         return;
     }
@@ -116,12 +140,25 @@ void SoloFeature::processRecords()
             countCBgeneUMI();
         };
     };
+    if (soloPhaseDebugEnabled()) {
+        time(&rawTime);
+        P.inOut->logMain << timeMonthDayTime(rawTime)
+                         << " ... Solo debug: " << SoloFeatureTypes::Names[featureType]
+                         << " finished count phase"
+                         << " nCB=" << nCB
+                         << " nReadsMapped=" << nReadsMapped
+                         << endl;
+    }
 
     if (solo_bridge_hash_snapshot::stopAfterCountEnabled(P)) {
         time(&rawTime);
         P.inOut->logMain << timeMonthDayTime(rawTime)
                          << " ... inline-hash snapshot replay: stopping after countCBgeneUMI (skipping raw output/cell filtering)"
                          << endl;
+        if (soloPhaseDebugEnabled()) {
+            P.inOut->logMain << "Solo debug: " << SoloFeatureTypes::Names[featureType]
+                             << " leaving processRecords via stopAfterCount" << endl;
+        }
         P.inOut->logMain << "Solo timing: processRecords " << soloElapsedSeconds(processStart) << " s" << endl;
         return;
     }
@@ -131,6 +168,10 @@ void SoloFeature::processRecords()
     if (useDirectInlineHashOutput(*this)) {
         time(&rawTime);
         P.inOut->logMain << timeMonthDayTime(rawTime) << " ... Solo: inline-hash mode completed (skipping legacy output)" <<endl;
+        if (soloPhaseDebugEnabled()) {
+            P.inOut->logMain << "Solo debug: " << SoloFeatureTypes::Names[featureType]
+                             << " leaving processRecords via direct inline-hash output" << endl;
+        }
         P.inOut->logMain << "Solo timing: processRecords " << soloElapsedSeconds(processStart) << " s" << endl;
         return;
     }
@@ -175,5 +216,9 @@ void SoloFeature::processRecords()
 
     P.inOut->logMain << "RAM after completing solo:\n"
                      <<  linuxProcMemory() << flush;   
+    if (soloPhaseDebugEnabled()) {
+        P.inOut->logMain << "Solo debug: " << SoloFeatureTypes::Names[featureType]
+                         << " leaving processRecords after legacy output" << endl;
+    }
     P.inOut->logMain << "Solo timing: processRecords " << soloElapsedSeconds(processStart) << " s" << endl;
 };
