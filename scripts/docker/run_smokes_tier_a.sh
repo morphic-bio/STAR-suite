@@ -52,6 +52,7 @@ failed=0
 
 run_test "run_solo_smoke" "tests/run_solo_smoke.sh" || failed=1
 run_test "test_snp_mask_build_smoke" "tests/slam/test_snp_mask_build_smoke.sh" || failed=1
+run_test "run_flex_tiny_public_smoke" "tests/run_flex_tiny_public_smoke.sh" || failed=1
 
 echo ""
 if [ $failed -eq 0 ]; then

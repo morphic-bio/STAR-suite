@@ -13,7 +13,7 @@ Agent quickstart: see `AGENTS.md` for repo-specific guardrails, tests, and recen
 - **TranscriptVB Quantification** (`--quantMode TranscriptVB`): Variational Bayes and EM quantification for transcript-level abundance, with parity-oriented behavior against Salmon alignment-mode. Gene-level summarization via `--quantVBgenesMode Tximport`.
 - **Transcriptome Output** (`--quantTranscriptomeSAMoutput`): Replaces the former `--quantTranscriptomeBan` with more explicit control (e.g., `BanSingleEnd_ExtendSoftclip`).
 - **Reference Automation** (`--autoIndex Yes`): Automated reference download/build with `--cellrangerStyleIndex Yes` formatting and `--genomeGenerateTranscriptome Yes` for transcript-level quant workflows.
-- **Native Gzip FASTQ Handling**: Automatic detection of `.gz` FASTQ inputs with internal zlib streaming — no `--readFilesCommand zcat` needed. Legacy external helper available via `--readFilesLegacyZcat Yes`.
+- **Native Gzip FASTQ Handling**: Automatic detection of `.gz` FASTQ inputs with internal zlib streaming — no `--readFilesCommand zcat` needed for correctness. Performance tuning of the internal gzip path is currently specific to Flex, where it is faster than external `zcat`; on the other benchmarked alignment/Solo surfaces below, external `zcat` remains the faster validated path. Legacy external helper remains available via `--readFilesLegacyZcat Yes`.
 - **Cutadapt-Compatible Trimming** (`--trimCutadapt Yes`): Native cutadapt-style trimming for bulk/PE workflows. Compatibility mode: `--trimCutadaptCompat Cutadapt3`.
 - **Poly-G Trimming** (`--clip3pPolyG yes|no|auto`): Trims poly-G artifacts common on NovaSeq/NextSeq platforms. Default `auto` activates in CellRanger4 mode. Without this, poly-G reads can inflate specific genes (e.g., LINC00486) and degrade gene-level correlations.
 - **Samtools-style BAM Sorting** (`--outBAMsortMethod samtools`): Spill-to-disk sort to reduce peak RAM pressure. Works with all modes including Flex.
@@ -65,6 +65,8 @@ mcp_server/              # MCP server for scripted discovery/preflight/run workf
 
 All benchmarks run on pikachu (AMD, 32 threads, 128 GB RAM, NVMe SSD).
 Detailed artifacts: `comparisons/paper_benchmarks_20260318/`.
+Publication-facing wrapper scripts for the benchmark surfaces below:
+`publications/benchmarks/README.md`.
 
 Datasets: MorPHiC JAX KOLF PE RNA-seq (sample 21033-09-01-13-01, 6.5M read pairs, NovaSeq X Plus) and MorPHiC JAX PPARG PE RNA-seq (35.1M read pairs, NovaSeq X Plus).
 
@@ -100,7 +102,7 @@ Datasets: MorPHiC JAX KOLF PE RNA-seq (sample 21033-09-01-13-01, 6.5M read pairs
 | Modern optimized | current suite `STAR` | 445M | 13,723 | **13.75 min** | Best validated current surface, `zcat`; `/storage/solo_overnight_20260326/ucsf_gexonly_no_bam/star_optimized_current_zcat_20260326/` |
 | Modern optimized | current suite `STAR` | 445M | 13,728 | **15.8 min** | Native `.gz`; `/storage/solo_overnight_20260326/ucsf_gexonly_no_bam/star_optimized_current_retry2/` |
 
-`zcat` remains the fastest validated UCSF GEX-only read path on this host: current optimized `zcat` is 1.74x faster than the older local historical vanilla surface and 1.95x faster than the CellGenI-style historical rerun. The native `.gz` path is functional but still slower than `zcat` on this benchmark.
+`zcat` remains the fastest validated UCSF GEX-only read path on this host: current optimized `zcat` is 1.74x faster than the older local historical vanilla surface and 1.95x faster than the CellGenI-style historical rerun. The native `.gz` path is functional but still slower than `zcat` on this benchmark; internal gzip tuning is not yet optimized for this non-Flex Solo surface.
 
 **CR9 parity (corrected UCSF `EBs2_2` GEX-only reference: `/storage/cr9_ebs2_2_benchmark_20260318/cr9_ebs2_2`)**
 
@@ -201,7 +203,7 @@ bridge/hash implementation.
 | UCSF EBs2_2 Perturb-seq | GEX + CRISPRa (2) | NXT→TRU | 445M | 13,719 | **16.4 min** | 3.7x |
 | MSK 30polyKO | GEX + gRNA + LARRY (3) | Mixed TRU/NXT | 669M | 30,557 | **25.0 min** | 6.7x |
 
-Current perturb benchmark defaults use `zcat` plus the non-Flex Solo bridge path. Serial **native `.gz`** comparison reruns (no external `zcat`, 32 threads, no BAM, 2026-03-26) remained slower: UCSF **20.9 min** (`/storage/solo_overnight_20260326/ucsf_perturb_no_bam/ebs2_2_no_bam_nativegzip_20260326_075154/`), MSK **28.6 min** (`…/msk_perturb_no_bam/msk30ko_no_bam_nativegzip_20260326_081323/`), A375 **4.3 min** (`…/a375_perturb_no_bam/a375_no_bam_nativegzip_20260326_084220/`). Details: `tests/ARTIFACTS.md`.
+Current perturb benchmark defaults use `zcat` plus the non-Flex Solo bridge path. Serial **native `.gz`** comparison reruns (no external `zcat`, 32 threads, no BAM, 2026-03-26) remained slower: UCSF **20.9 min** (`/storage/solo_overnight_20260326/ucsf_perturb_no_bam/ebs2_2_no_bam_nativegzip_20260326_075154/`), MSK **28.6 min** (`…/msk_perturb_no_bam/msk30ko_no_bam_nativegzip_20260326_081323/`), A375 **4.3 min** (`…/a375_perturb_no_bam/a375_no_bam_nativegzip_20260326_084220/`). This matches the current tuning status: outside Flex, external `zcat` remains the faster validated read path. Details: `tests/ARTIFACTS.md`.
 
 ### Perturb-seq Parity (STAR vs Cell Ranger 9)
 
@@ -240,6 +242,8 @@ Feature assignment and mapping run concurrently via `dynamicThreadInterface`.
 | CellRanger 7.0.0 | multi | yes | ~5 hr | 0.2x | 1.0x |
 
 Dataset: JAX SC2300771 (4 Flex tags, 8 lanes, 2.011B paired-end reads). All runs: 32 threads.
+
+Unlike the non-Flex alignment/Solo surfaces above, the internal gzip reader has been tuned on the Flex path and is faster there than external `zcat`.
 
 ### Flex Parity (STAR vs Cell Ranger 9.0.1, GRCh38-2024-A)
 

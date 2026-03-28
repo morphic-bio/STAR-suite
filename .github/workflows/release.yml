@@ -136,6 +136,15 @@ jobs:
             --tarball "dist/release/STAR-suite-${GITHUB_REF_NAME}-linux-amd64-glibc239.tar.gz" \
             --manifest-out "dist/release/runtime-manifests/glibc239-ubuntu24.txt"
 
+      - name: Smoke test glibc239 tarball (Ubuntu 24.04)
+        run: |
+          scripts/release/run_release_smokes_container_check.sh \
+            --mode tarball \
+            --docker-image "star-suite-runtime-check:ubuntu24" \
+            --skip-image-build \
+            --base-image "ubuntu:24.04" \
+            --tarball "dist/release/STAR-suite-${GITHUB_REF_NAME}-linux-amd64-glibc239.tar.gz"
+
       - name: Validate installer bundle (Ubuntu 22.04)
         run: |
           scripts/release/run_installer_bundle_container_check.sh \
@@ -155,6 +164,16 @@ jobs:
             --bundle "dist/release/STAR-suite-${GITHUB_REF_NAME}-linux-amd64-installer.tar.gz" \
             --expected-label "glibc239" \
             --manifest-out "dist/release/runtime-manifests/installer-ubuntu24.txt"
+
+      - name: Smoke test installer bundle (Ubuntu 24.04)
+        run: |
+          scripts/release/run_release_smokes_container_check.sh \
+            --mode bundle \
+            --docker-image "star-suite-runtime-check:ubuntu24" \
+            --skip-image-build \
+            --base-image "ubuntu:24.04" \
+            --bundle "dist/release/STAR-suite-${GITHUB_REF_NAME}-linux-amd64-installer.tar.gz" \
+            --expected-label "glibc239"
 
       - name: Build Debian binary package
         run: |

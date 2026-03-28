@@ -54,6 +54,10 @@ Tag policy:
 
 - Tier A:
   - self-contained smoke tests
+  - public-data-only or synthetic surfaces
+  - current Docker set: `tests/run_solo_smoke.sh`,
+    `tests/slam/test_snp_mask_build_smoke.sh`,
+    `tests/run_flex_tiny_public_smoke.sh`
   - should run on PRs and all protected branch pipelines
 - Tier B:
   - fixture-backed tests (for example `/storage` data)
@@ -110,6 +114,7 @@ For Ubuntu discoverability and package updates:
   - includes:
     - Docker container runtime/version validation for release tarballs on Ubuntu 22.04 and 24.04
     - Docker container installer-bundle selection/version validation on Ubuntu 22.04 and 24.04
+    - Docker container smoke execution against installed release artifacts on Ubuntu 24.04
     - runtime dependency manifests captured from the validation containers and uploaded with release artifacts
     - Debian `.deb` install/uninstall validation in clean `ubuntu:24.04` container
     - optional Debian source package signing when signing secrets are configured
