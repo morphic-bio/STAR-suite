@@ -150,6 +150,10 @@ UCSF `EBs2_2/GEX`, without feature-assignment confounders.
 - On the full corrected GEX surface, the integrated-hash Velocyto path is a
   near timing tie with the stream path and reduces whole-run peak VmRSS by
   about 21% (`47.6 GB -> 37.7 GB`) in this run.
+- This `stream_t32` vs `hash_t32` comparison is the measured apples-to-apples
+  benchmark for the full `Gene + GeneFull + Velocyto` surface. In this pair,
+  `Gene` and `GeneFull` remain on the normal path while `Velocyto` switches to
+  the integrated-hash implementation.
 - The current RSS helper uses whole-`Log.out` `VmRSS` fallback on these runs,
   so the numbers above are whole-run peak RSS rather than a Velocyto-only phase
   metric.
@@ -163,6 +167,10 @@ UCSF `EBs2_2/GEX`, without feature-assignment confounders.
 - Relative to the earlier full `Gene + GeneFull + Velocyto` hash control
   (`23m 03s`, `37,651,052 kB`), the mixed path is materially faster and lower
   memory.
+- We did **not** benchmark a fully hash-based `Gene + GeneFull + Velocyto`
+  implementation, and we are not currently pursuing the engineering needed to
+  make `Gene` hash-based. The practical fast Velocyto-capable path today is:
+  omit `Gene`, then run `GeneFull + Velocyto` on the bridge/hash path.
 - `Velocyto` raw outputs matched exactly on the full set.
 - `GeneFull` had small sparse deltas. We traced one representative case:
   `TTTCACAGTTGGATCT / corr=7652715 / gene=4324` came from an ambiguous-CB read
@@ -170,6 +178,20 @@ UCSF `EBs2_2/GEX`, without feature-assignment confounders.
   The bridge did not retain that singleton under the target barcode. This was a
   targeted representative trace, not an exhaustive classification of all
   residual `GeneFull` deltas.
+
+**Bottom line timings**
+
+- Full corrected `EBs2_2/GEX`, `Gene + GeneFull + Velocyto`, normal stream:
+  **23m 05s**
+- Full corrected `EBs2_2/GEX`, `Gene + GeneFull + Velocyto`, hashed `Velocyto`
+  only: **23m 03s**
+- Full corrected `EBs2_2/GEX`, `GeneFull + Velocyto`, bridge/hash path
+  (drops `Gene`): **12m 55s**
+
+So the integrated-hash Velocyto path is roughly timing-neutral on the full
+`Gene + GeneFull + Velocyto` surface, while the practical fast path for
+Velocyto output is to skip `Gene` and run `GeneFull + Velocyto` on the
+bridge/hash implementation.
 
 ### Perturb-seq Wall Time
 

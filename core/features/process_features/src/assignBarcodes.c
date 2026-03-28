@@ -188,6 +188,17 @@ static void feature_mode_record(int feature_index, int offset) {
 static int *feature_mode_search_offsets = NULL;
 static int  feature_mode_n_search_offsets = 0;
 
+static int pf_trace_bootstrap_enabled(void) {
+    static int initialized = 0;
+    static int enabled = 0;
+    if (!initialized) {
+        const char *env = getenv("PF_TRACE_BOOTSTRAP");
+        enabled = (env && env[0] != '\0');
+        initialized = 1;
+    }
+    return enabled;
+}
+
 void feature_mode_search_offsets_reset(void) {
     free(feature_mode_search_offsets);
     feature_mode_search_offsets = NULL;
@@ -197,6 +208,13 @@ void feature_mode_search_offsets_reset(void) {
 static void feature_mode_finalize(const feature_arrays *features) {
     if (!features || !feature_mode_hist || !feature_mode_offsets) {
         return;
+    }
+    if (pf_trace_bootstrap_enabled()) {
+        fprintf(stderr,
+                "[bootstrap] finalize-start features=%d reads_seen=%llu max_offset=%d\n",
+                features->number_of_features,
+                (unsigned long long)__atomic_load_n(&feature_mode_reads_seen, __ATOMIC_ACQUIRE),
+                feature_mode_max_offset);
     }
     const int n = features->number_of_features;
     __sync_synchronize();
@@ -263,6 +281,13 @@ static void feature_mode_finalize(const feature_arrays *features) {
 
     fprintf(stderr, "[bootstrap] Finalized: %d unique base offsets -> %d search positions\n",
             n_unique, nd);
+    if (pf_trace_bootstrap_enabled()) {
+        fprintf(stderr,
+                "[bootstrap] finalize-end features=%d search_offsets=%d reads_seen=%llu\n",
+                features->number_of_features,
+                feature_mode_n_search_offsets,
+                (unsigned long long)__atomic_load_n(&feature_mode_reads_seen, __ATOMIC_ACQUIRE));
+    }
 }
 
 static void bootstrap_replay_drain(bootstrap_replay_buf_t *replay_buf,
@@ -4640,9 +4665,23 @@ static void process_feature_sequence_internal(char *sequence, feature_arrays *fe
         unsigned long long seen = __sync_add_and_fetch(&feature_mode_reads_seen, 1);
         if (feature_mode_bootstrap_done == 0 && seen >= (unsigned long long)feature_mode_bootstrap_reads) {
             if (__sync_bool_compare_and_swap(&feature_mode_bootstrap_done, 0, 2)) {
+                if (pf_trace_bootstrap_enabled()) {
+                    fprintf(stderr,
+                            "[bootstrap] state 0->2 winner pthread=%lu seen=%llu threshold=%d\n",
+                            (unsigned long)pthread_self(),
+                            seen,
+                            feature_mode_bootstrap_reads);
+                }
                 feature_mode_finalize(features);
                 __sync_synchronize();
                 feature_mode_bootstrap_done = 1;
+                if (pf_trace_bootstrap_enabled()) {
+                    fprintf(stderr,
+                            "[bootstrap] state 2->1 pthread=%lu seen=%llu search_offsets=%d\n",
+                            (unsigned long)pthread_self(),
+                            seen,
+                            feature_mode_n_search_offsets);
+                }
             }
         }
 
