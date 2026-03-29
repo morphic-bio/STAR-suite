@@ -14,7 +14,7 @@ void SoloReadFeature::record(SoloReadBarcode &soloBar, uint nTr, Transcript **al
 {
     if (nonFlexHashBridgeRecordMode(pSolo)) {
         record_base(this, soloBar, nTr, alignOut, iRead, readAnnot);
-    } else if (pSolo.flexMode || pSolo.inlineHashMode) {
+    } else if (pSolo.flexMode) {
         record_flex(this, soloBar, nTr, alignOut, iRead, readAnnot);
     } else {
         record_base(this, soloBar, nTr, alignOut, iRead, readAnnot);

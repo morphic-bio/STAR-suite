@@ -208,7 +208,7 @@ bridge/hash implementation.
 |---|---|---|---|---|---|---|
 | A375 1k CRISPR 5' GemX | GEX + CRISPR (2) | TRU | 47M | 1,187 | **4.0 min** | 3.8x |
 | UCSF EBs2_2 Perturb-seq | GEX + CRISPRa (2) | NXT→TRU | 445M | 13,719 | **16.4 min** | 3.7x |
-| MSK 30polyKO | GEX + gRNA + LARRY (3) | Mixed TRU/NXT | 669M | 30,557 | **25.0 min** | 6.7x |
+| MSK 30polyKO | GEX + gRNA + LARRY (3; 245,979 LARRY barcodes) | Mixed TRU/NXT | 669M | 30,557 | **25.0 min** | 6.7x |
 
 Current perturb benchmark defaults use `zcat` plus the non-Flex Solo bridge path. Serial **native `.gz`** comparison reruns (no external `zcat`, 32 threads, no BAM, 2026-03-26) remained slower: UCSF **20.9 min** (`/storage/solo_overnight_20260326/ucsf_perturb_no_bam/ebs2_2_no_bam_nativegzip_20260326_075154/`), MSK **28.6 min** (`…/msk_perturb_no_bam/msk30ko_no_bam_nativegzip_20260326_081323/`), A375 **4.3 min** (`…/a375_perturb_no_bam/a375_no_bam_nativegzip_20260326_084220/`). This matches the current tuning status: outside Flex, external `zcat` remains the faster validated read path. Details: `tests/ARTIFACTS.md`.
 
@@ -222,7 +222,7 @@ Current perturb benchmark defaults use `zcat` plus the non-Flex Solo bridge path
 
 - A375: Gene Pearson on 15,673 filtered genes (min 20 counts, 1% cells); Cell Pearson 0.9995 on 1,160 common barcodes; CRISPR exact set-match on all 1,083 common cells (min-UMI 10), UMI Pearson 1.000; speedup = 4 min vs 15 min (32 threads, no BAM). CR9 reference: `refdata-gex-GRCh38-2024-A`, `1k_CRISPR_5p_gemx_count_refmatch_2024a_fullraw`.
 - UCSF EBs2_2: Gene Pearson on 18,061 filtered genes; Cell Pearson 1.000 on 13,571 common barcodes; CRISPR set-match 98.9% on 12,038 evaluated cells, target-level match 99.5%; UMI Pearson 0.999; speedup = 16 min vs 61 min CR9 (32 threads, no BAM). CR9 reference: `refdata-gex-GRCh38-2024-A`, run on same corrected FASTQs.
-- MSK: Gene Pearson on 17,460 filtered genes; Cell Pearson 1.000 on 30,481 common barcodes; CRISPR set-match 99.4% on 23,341 evaluated cells (30 guides, min-UMI 2), UMI Pearson 1.000; speedup = 25 min vs 168 min (32 threads, no BAM). CR requires two separate runs (GEX+gRNA 58 min + GEX+LARRY 110 min); STAR handles all three libraries in a single pass with per-library whitelist support.
+- MSK: Gene Pearson on 17,460 filtered genes; Cell Pearson 1.000 on 30,481 common barcodes; CRISPR set-match 99.4% on 23,341 evaluated cells (30 guides, min-UMI 2), UMI Pearson 1.000; dataset includes 245,979 LARRY lineage barcodes; speedup = 25 min vs 168 min (32 threads, no BAM). CR requires two separate runs (GEX+gRNA 58 min + GEX+LARRY 110 min); STAR handles all three libraries in a single pass with per-library whitelist support.
 
 All parity metrics computed with `scripts/report_additional_parity_metrics.py --gene-corr-min-counts 20 --gene-corr-min-cells-pct 0.01` per `docs/PAPER_BENCHMARK_METHODOLOGY.md`. CR9 references use `refdata-gex-GRCh38-2024-A` (gencode v44, mkref 8.0.0).
 
@@ -264,7 +264,7 @@ Unlike the non-Flex alignment/Solo surfaces above, the internal gzip reader has 
 
 ### Flex No-Align Mode (`--flexNoAlign 1`)
 
-No-align mode skips alignment for H0/H1 misses (~16% of reads), reducing wall time from 23m 30s to 10m 26s. Intended for rapid prototyping and iteration.
+No-align mode skips alignment for H0/H1 misses (~16% of reads), reducing wall time from 23m 30s to 10m 26s. That ~16% figure is a read-routing fraction, not a matrix-level sensitivity loss. On the archived 2026-03-25 benchmark pair, filtered Gene Expression STAR totals changed from 209,077,430 to 209,076,273 UMIs (Δ = -1,157; 0.00055%). Intended for rapid prototyping and iteration.
 
 | Tag (sample) | No-Align cells | Full cells | CR9 cells | Cells lost | Jaccard | Cell Pearson | Gene Pearson |
 |---|---|---|---|---|---|---|---|
@@ -274,13 +274,13 @@ No-align mode skips alignment for H0/H1 misses (~16% of reads), reducing wall ti
 | BC008 (PAX6-PTC-D9-Day8) | 5,266 | 5,266 | 5,296 | 0 | 0.988 | 0.99998 | 0.99995 |
 | **Mean** | | | | | **0.981** | **0.99997** | **0.99993** |
 
-Cell loss from no-align is negligible (<0.1%): BC004 loses one filtered cell, BC006 gains one, and the other two benchmark tags are unchanged. The hash screen resolves ~84% of reads at offset 0; the remaining ~16% that would go to alignment change only one cell in this dataset while preserving the same mean CR9 parity to 3-5 decimal places.
+Cell loss from no-align is negligible (<0.1%): BC004 loses one filtered cell, BC006 gains one, and the other two benchmark tags are unchanged. The hash screen resolves ~84% of reads at offset 0; the remaining ~16% that would go to alignment change only one cell in this dataset while preserving the same mean CR9 parity to 3-5 decimal places. The parity wrapper now writes a de-duplicated STAR summary so totals are not accidentally double-counted across CR7/CR9 or `all`/`Gene_Expression` rows.
 
 - Cell Pearson = per-barcode total-UMI Pearson on common barcodes. Gene Pearson = per-probe total-UMI Pearson on common features. Barcode Jaccard computed after truncating CR 24bp barcodes to 16bp GEM prefix.
 - Both STAR and CR9 use GRCh38-2024-A genome and probe set v1.1.0. Using mismatched annotations (e.g., v1.0.1 / GRCh38-2020-A) drops Gene Pearson to ~0.09 while Cell Pearson remains >0.999.
 - STAR full 23m30s = 20m55s to mapping complete + 2m07s Solo counting (`--outSAMtype None`). STAR no-align 10m26s = ~8m49s to mapping complete + ~1m36s Solo counting. CR9 58m59s = CellRanger 9.0.1 multi (32 cores, `--localmem 120`, `create-bam false`). CR7 ~5 hr = CellRanger 7.0.0 multi (32 cores, 160 GB, with BAM output).
 - STAR-Flex uses a fully-fused lane-reader pipeline with H0+H1 hash-screen cache, sample pre-filter, and lane work-stealing with reader-to-aligner role switching.
-- Parity script: `scripts/paper/run_flex_parity.sh`. Underlying metric tool: `scripts/paper/compute_parity_metrics.py`.
+- Parity script: `scripts/paper/run_flex_parity.sh`. Underlying metric tool: `scripts/paper/compute_parity_metrics.py`. Use `flex_parity_star_unique_summary.tsv` or `flex_parity_star_unique_totals.txt` for aggregate STAR totals; do not sum `flex_parity_combined.tsv` directly.
 
 ### SLAM-seq (STAR-SLAM vs GrandSLAM/GEDI)
 

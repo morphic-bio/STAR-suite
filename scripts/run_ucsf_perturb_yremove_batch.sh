@@ -9,15 +9,17 @@ TRIM_QC_HELPER="${TRIM_QC_HELPER:-${SCRIPT_DIR}/lib/star_trim_qc.sh}"
 # shellcheck disable=SC1090
 source "${TRIM_QC_HELPER}"
 
-STAR_BIN="${STAR_BIN:-${REPO_ROOT}/core/legacy/source/STAR}"
-DATASET_ROOT="${DATASET_ROOT:-/mnt/pikachu/ucsf-perturb-seq}"
+STAR_BIN="${STAR_BIN:-${REPO_ROOT}/core/legacy/source/STAR.release}"
+PREPARE_VELOCYTO_MEX="${PREPARE_VELOCYTO_MEX:-${REPO_ROOT}/scripts/prepare_velocyto_mex.py}"
+DOWNSTREAM_WRAPPER="${DOWNSTREAM_WRAPPER:-${REPO_ROOT}/scripts/run_scrna_downstream_gene_full_velocyto.sh}"
+DATASET_ROOT="${DATASET_ROOT:-/mnt/pikachu/ucsf-perturb-seq-corrected}"
 SAMPLE_MAP="${SAMPLE_MAP:-${DATASET_ROOT}/sample_fastq_guide_map.csv}"
-FEATURE_REF="${FEATURE_REF:-${DATASET_ROOT}/cellranger_feature_ref_hCRISPRa_v2_like_AALG2_pattern.csv}"
+FEATURE_REF="${FEATURE_REF:-/mnt/pikachu/ucsf-perturb-seq/cellranger_feature_ref_hCRISPRa_v2_like_AALG2_pattern.csv}"
 GENOME_DIR="${GENOME_DIR:-/storage/autoindex_110_44/bulk_index}"
 SOLO_CB_WHITELIST="${SOLO_CB_WHITELIST:-/home/lhhung/cellranger-9.0.1/lib/python/cellranger/barcodes/translation/3M-february-2018_NXT.txt}"
 CR_WHITELIST="${CR_WHITELIST:-${SOLO_CB_WHITELIST}}"
 OUT_ROOT="${OUT_ROOT:-/mnt/pikachu/ucsf-perturb-yremove_$(date +%Y%m%d_%H%M%S)}"
-THREADS="${THREADS:-32}"
+THREADS="${THREADS:-24}"
 SAMPLES_CSV=""
 ALL_SAMPLES=0
 CR_CONFIG=""
@@ -30,6 +32,11 @@ GLOBUS_DST_ROOT="${GLOBUS_DST_ROOT:-}"
 GLOBUS_POLL_SECONDS="${GLOBUS_POLL_SECONDS:-30}"
 STAR_TRIM_QC_ENABLE="${STAR_TRIM_QC_ENABLE:-0}"
 STAR_TRIM_QC_MAX_READS="${STAR_TRIM_QC_MAX_READS:-250000}"
+RUN_DOWNSTREAM=0
+RUN_CELLBENDER=0
+DOWNSTREAM_OUTPUT_NAME=""
+CELLBENDER_CPU_CORES=""
+CELLBENDER_GPU=0
 DRY_RUN=0
 
 usage() {
@@ -55,6 +62,12 @@ Options:
   --globus-dst-endpoint ID Destination Globus collection ID
   --globus-dst-root PATH   Destination root path (e.g. /UCSF-perturb/run_name)
   --globus-poll-seconds N  Poll interval while waiting for transfer cleanup
+  --run-downstream         Build local h5ad outputs after each sample run
+  --run-cellbender         Run CellBender in downstream processing
+  --downstream-output-name NAME
+                           Downstream output directory name under each sample root
+  --cellbender-cpu-cores N CPU cores passed to CellBender (default: threads)
+  --cellbender-gpu         Run CellBender with GPU support
   --trim-qc                Emit STAR read-level FastQC-like HTML/JSON reports
   --trim-qc-max-reads N    Limit reads sampled by trim-QC reporting
   --dry-run                Write manifests/commands but do not run STAR
@@ -119,10 +132,16 @@ count_reads_gz() {
   pigz -dc "${path}" | awk 'END {print NR/4}'
 }
 
+find_fastq_files() {
+  local dir="$1"
+  local pattern="$2"
+  find -L "${dir}" -maxdepth 1 -type f -name "${pattern}" | sort
+}
+
 validate_pairs() {
   local dir="$1"
   local label="$2"
-  mapfile -t _r1_files < <(find "${dir}" -maxdepth 1 -type f -name '*_R1_001.fastq.gz' | sort)
+  mapfile -t _r1_files < <(find_fastq_files "${dir}" '*_R1_001.fastq.gz')
   [[ "${#_r1_files[@]}" -gt 0 ]] || die "No R1 FASTQs found for ${label} under ${dir}"
   local r1
   local expected_r2
@@ -134,6 +153,7 @@ validate_pairs() {
 
 lookup_sample_row() {
   local sample="$1"
+  if [[ -f "${SAMPLE_MAP}" ]]; then
   python3 - <<'PY' "${SAMPLE_MAP}" "${sample}"
 import csv, sys
 sample_map, sample = sys.argv[1], sys.argv[2]
@@ -151,6 +171,15 @@ with open(sample_map, newline='') as handle:
     else:
         sys.exit(1)
 PY
+    return
+  fi
+
+  local sample_root="${DATASET_ROOT}/${sample}"
+  local gex_dir="${sample_root}/GEX"
+  local guide_dir="${sample_root}/guides"
+  local sample_pf="${sample_root}/pf_multi_config.csv"
+  [[ -d "${gex_dir}" && -d "${guide_dir}" ]] || return 1
+  printf '%s\t%s\t%s\t%s\t%s\n' "${sample}" "${gex_dir}" "${guide_dir}" "${FEATURE_REF}" "${sample_pf}"
 }
 
 render_from_cr_config() {
@@ -180,12 +209,19 @@ enumerate_samples() {
     return
   fi
   if [[ "${ALL_SAMPLES}" == "1" ]]; then
+    if [[ -f "${SAMPLE_MAP}" ]]; then
     python3 - <<'PY' "${SAMPLE_MAP}"
 import csv, sys
 with open(sys.argv[1], newline='') as handle:
     for row in csv.DictReader(handle):
         print(row["sample"])
 PY
+    else
+      find "${DATASET_ROOT}" -mindepth 1 -maxdepth 1 -type d | while read -r sample_dir; do
+        [[ -d "${sample_dir}/GEX" && -d "${sample_dir}/guides" ]] || continue
+        basename "${sample_dir}"
+      done | sort
+    fi
     return
   fi
   [[ -n "${SAMPLES_CSV}" ]] || die "Specify --samples or --all-samples"
@@ -413,6 +449,79 @@ finalize_sample_outputs() {
   log "Completed sample ${sample}: ${sample_root}"
 }
 
+package_velocyto_outputs() {
+  local sample="$1"
+  local run_dir="$2"
+  local raw_dir="${run_dir}/outs/raw_velocyto_feature_bc_matrix"
+  local filtered_dir="${run_dir}/outs/filtered_velocyto_feature_bc_matrix"
+  local manifest="${run_dir}/outs/velocyto_feature_bc_matrix_manifest.json"
+
+  [[ -f "${PREPARE_VELOCYTO_MEX}" ]] || die "Missing helper: ${PREPARE_VELOCYTO_MEX}"
+  if [[ -d "${raw_dir}" && -d "${filtered_dir}" && -f "${manifest}" ]]; then
+    log "Velocyto packaged outputs already present for ${sample}"
+    return
+  fi
+
+  python3 "${PREPARE_VELOCYTO_MEX}" --run-dir "${run_dir}" >/dev/null
+  [[ -d "${raw_dir}" ]] || die "Missing packaged raw velocyto MEX for ${sample}"
+  [[ -d "${filtered_dir}" ]] || die "Missing packaged filtered velocyto MEX for ${sample}"
+  [[ -f "${manifest}" ]] || die "Missing velocyto manifest for ${sample}"
+}
+
+run_downstream_for_sample() {
+  local sample="$1"
+  local sample_root="$2"
+  local run_dir="$3"
+
+  [[ "${RUN_DOWNSTREAM}" == "1" ]] || return 0
+  [[ -x "${DOWNSTREAM_WRAPPER}" ]] || die "Missing downstream wrapper: ${DOWNSTREAM_WRAPPER}"
+
+  local output_name="${DOWNSTREAM_OUTPUT_NAME}"
+  if [[ -z "${output_name}" ]]; then
+    if [[ "${RUN_CELLBENDER}" == "1" ]]; then
+      output_name="downstream_genefull_velocyto_cellbender"
+    else
+      output_name="downstream_genefull_velocyto"
+    fi
+  fi
+
+  local output_dir="${sample_root}/${output_name}"
+  if [[ -f "${output_dir}/summary.txt" ]]; then
+    log "Downstream outputs already present for ${sample}: ${output_dir}"
+    return 0
+  fi
+
+  local cellbender_cores="${CELLBENDER_CPU_CORES:-${THREADS}}"
+  local args=(
+    "${DOWNSTREAM_WRAPPER}"
+    --run-dir "${run_dir}"
+    --output-dir "${output_dir}"
+    --adaptive-filter
+  )
+  if [[ "${RUN_CELLBENDER}" == "1" ]]; then
+    args+=(--run-cellbender --cellbender-cpu-cores "${cellbender_cores}")
+    if [[ "${CELLBENDER_GPU}" == "1" ]]; then
+      args+=(--cellbender-gpu)
+    fi
+  fi
+
+  "${args[@]}"
+}
+
+run_downstream_batch() {
+  [[ "${RUN_DOWNSTREAM}" == "1" ]] || return 0
+
+  local sample sample_root run_dir
+  while IFS= read -r sample; do
+    [[ -n "${sample}" ]] || continue
+    sample_root="${OUT_ROOT}/samples/${sample}"
+    run_dir="${sample_root}/run"
+    [[ -d "${run_dir}" ]] || die "Missing run directory for downstream sample ${sample}: ${run_dir}"
+    log "Starting downstream ${sample}"
+    run_downstream_for_sample "${sample}" "${sample_root}" "${run_dir}"
+  done < <(enumerate_samples)
+}
+
 downsample_library_dir() {
   local src_dir="$1"
   local dst_dir="$2"
@@ -421,7 +530,7 @@ downsample_library_dir() {
   local label="$5"
 
   mkdir -p "${dst_dir}"
-  mapfile -t r1_files < <(find "${src_dir}" -maxdepth 1 -type f -name '*_R1_001.fastq.gz' | sort)
+  mapfile -t r1_files < <(find_fastq_files "${src_dir}" '*_R1_001.fastq.gz')
   [[ "${#r1_files[@]}" -gt 0 ]] || die "No R1 FASTQs found under ${src_dir}"
 
   local counts_file="${dst_dir}/.lane_counts.tsv"
@@ -483,7 +592,7 @@ downsample_library_dir() {
 
 run_sample() {
   local sample="$1"
-  local gex_dir guide_dir feature_ref map_sample
+  local gex_dir guide_dir feature_ref map_sample sample_pf_config=""
   local cr_gene_expression_reference=""
   local cr_gene_expression_chemistry=""
   local -a gex_dirs=()
@@ -514,7 +623,7 @@ PY
   else
     local row
     row="$(lookup_sample_row "${sample}")" || die "Sample not found in map: ${sample}"
-    IFS=$'\t' read -r map_sample gex_dir guide_dir feature_ref <<< "${row}"
+    IFS=$'\t' read -r map_sample gex_dir guide_dir feature_ref sample_pf_config <<< "${row}"
     [[ -n "${feature_ref}" ]] || feature_ref="${FEATURE_REF}"
     gex_dirs=("${gex_dir}")
     feature_dirs=("${guide_dir}")
@@ -537,7 +646,12 @@ PY
     require_file "${feature_ref}"
   fi
 
-  mapfile -t src_fastqs < <(find "${all_input_dirs[@]}" -maxdepth 1 -type f -name '*.fastq.gz' | sort)
+  local input_dir
+  mapfile -t src_fastqs < <(
+    for input_dir in "${all_input_dirs[@]}"; do
+      find_fastq_files "${input_dir}" '*.fastq.gz'
+    done
+  )
   [[ "${#src_fastqs[@]}" -gt 0 ]] || die "No FASTQs found for ${sample}"
 
   local source_bytes
@@ -614,6 +728,9 @@ PY
   fi
 
   if [[ -z "${CR_CONFIG}" ]]; then
+    if [[ -n "${sample_pf_config}" && -f "${sample_pf_config}" && "${DOWNSAMPLE_READS}" -eq 0 ]]; then
+      cp -f "${sample_pf_config}" "${pf_config}"
+    else
     cat > "${pf_config}" <<EOF
 [libraries]
 fastqs,sample,library_type,feature_types
@@ -623,6 +740,7 @@ ${stage_guides},${sample},CRISPR Guide Capture,CRISPR Guide Capture
 [feature]
 ref,${feature_ref}
 EOF
+    fi
   fi
 
   local reads_r2 reads_r1
@@ -634,10 +752,10 @@ EOF
       reads_r1="${reads_r1},${FEATURE_R1}"
     fi
   else
-    mapfile -t gex_r2 < <(find "${stage_gex}" -maxdepth 1 -type f -name '*_R2_001.fastq.gz' | sort)
-    mapfile -t gex_r1 < <(find "${stage_gex}" -maxdepth 1 -type f -name '*_R1_001.fastq.gz' | sort)
-    mapfile -t guide_r2 < <(find "${stage_guides}" -maxdepth 1 -type f -name '*_R2_001.fastq.gz' | sort)
-    mapfile -t guide_r1 < <(find "${stage_guides}" -maxdepth 1 -type f -name '*_R1_001.fastq.gz' | sort)
+    mapfile -t gex_r2 < <(find_fastq_files "${stage_gex}" '*_R2_001.fastq.gz')
+    mapfile -t gex_r1 < <(find_fastq_files "${stage_gex}" '*_R1_001.fastq.gz')
+    mapfile -t guide_r2 < <(find_fastq_files "${stage_guides}" '*_R2_001.fastq.gz')
+    mapfile -t guide_r1 < <(find_fastq_files "${stage_guides}" '*_R1_001.fastq.gz')
     local all_r2=("${gex_r2[@]}" "${guide_r2[@]}")
     local all_r1=("${gex_r1[@]}" "${guide_r1[@]}")
     reads_r2="$(join_by_comma "${all_r2[@]}")"
@@ -657,6 +775,7 @@ EOF
     --emitYNoYFastq yes
     --emitYNoYFastqCompression gz
     --clipAdapterType CellRanger4
+    --clip3pPolyG yes
     --alignEndsType Local
     --chimSegmentMin 1000000
     --soloType CB_UMI_Simple
@@ -673,21 +792,27 @@ EOF
     --soloCellFilter EmptyDrops_CR
     --soloCbUbRequireTogether no
     --soloStrand Forward
-    --soloFeatures GeneFull
+    --soloFeatures GeneFull Velocyto
     --soloCrGexFeature genefull
     --soloCrMultimapRescue yes
     --pfMultiConfig "${pf_config}"
+    --crChemistry auto
+    --crOutputChemistry TRU
     --crWhitelist "${CR_WHITELIST}"
     --crMinUmi 3
     --crAssignMaxHamming 1
-    --crAssignFeatureOffset 0
+    --crAssignFeatureOffset -1
     --crAssignLimitSearch -1
     --crAssignMinCounts 0
     --crAssignMaxBarcodeMismatches 5
     --crAssignFeatureN 0
     --crAssignBarcodeN 1
-    --crAssignConsumerThreads 4
-    --crAssignSearchThreads 4
+    --crAssignConsumerThreads -1
+    --crAssignSearchThreads 1
+    --crAssignSkipQcOutputs 1
+    --dynamicThreadInterface 1
+    --dynamicThreadConstMapPermits "${THREADS}"
+    --dynamicThreadTelemetry 1
   )
   if [[ -n "${feature_ref}" ]]; then
     cmd+=(--crFeatureRef "${feature_ref}")
@@ -703,6 +828,7 @@ EOF
     printf 'solo_cb_whitelist=%s\n' "${SOLO_CB_WHITELIST}"
     printf 'cr_whitelist=%s\n' "${CR_WHITELIST}"
     printf 'threads=%s\n' "${THREADS}"
+    printf 'star_solo_nonflex_hash_bridge=%s\n' "disabled_for_bam_velocyto"
     printf 'downsample_reads=%s\n' "${DOWNSAMPLE_READS}"
     printf 'source_fastq_bytes=%s\n' "${source_bytes}"
     printf 'required_free_bytes=%s\n' "${required_bytes}"
@@ -726,6 +852,7 @@ EOF
   {
     echo '#!/usr/bin/env bash'
     echo 'set -euo pipefail'
+    echo 'unset STAR_SOLO_NONFLEX_HASH_BRIDGE 2>/dev/null || true'
     printf '%q ' "${cmd[@]}"
     printf '\n'
   } > "${command_script}"
@@ -738,12 +865,17 @@ EOF
 
   if [[ -f "${run_dir}/Aligned.out_Y.bam" && -f "${run_dir}/Aligned.out_noY.bam" && -d "${run_dir}/y_separated" ]]; then
     log "Existing STAR outputs found for ${sample}; regenerating transfer helpers only"
+    package_velocyto_outputs "${sample}" "${run_dir}"
     finalize_sample_outputs "${sample}" "${sample_root}" "${run_dir}" "${transfer_batch}" "${transfer_helper}" "${done_file}"
     submit_sample_transfer "${sample}" "${sample_root}" "${transfer_helper}"
     return
   fi
 
-  "${cmd[@]}"
+  (
+    unset STAR_SOLO_NONFLEX_HASH_BRIDGE 2>/dev/null || true
+    "${cmd[@]}"
+  )
+  package_velocyto_outputs "${sample}" "${run_dir}"
   finalize_sample_outputs "${sample}" "${sample_root}" "${run_dir}" "${transfer_batch}" "${transfer_helper}" "${done_file}"
   submit_sample_transfer "${sample}" "${sample_root}" "${transfer_helper}"
 }
@@ -768,6 +900,11 @@ while [[ $# -gt 0 ]]; do
     --globus-dst-endpoint) GLOBUS_DST_ENDPOINT="$2"; shift 2 ;;
     --globus-dst-root) GLOBUS_DST_ROOT="$2"; shift 2 ;;
     --globus-poll-seconds) GLOBUS_POLL_SECONDS="$2"; shift 2 ;;
+    --run-downstream) RUN_DOWNSTREAM=1; shift ;;
+    --run-cellbender) RUN_CELLBENDER=1; RUN_DOWNSTREAM=1; shift ;;
+    --downstream-output-name) DOWNSTREAM_OUTPUT_NAME="$2"; shift 2 ;;
+    --cellbender-cpu-cores) CELLBENDER_CPU_CORES="$2"; shift 2 ;;
+    --cellbender-gpu) CELLBENDER_GPU=1; RUN_CELLBENDER=1; RUN_DOWNSTREAM=1; shift ;;
     --trim-qc) STAR_TRIM_QC_ENABLE=1; shift ;;
     --trim-qc-max-reads) STAR_TRIM_QC_MAX_READS="$2"; shift 2 ;;
     --dry-run) DRY_RUN=1; shift ;;
@@ -782,16 +919,22 @@ if [[ -n "${CR_CONFIG}" ]]; then
   require_file "${CR_CONFIG}"
   require_exec "${CR_INPUT_HELPER}"
 else
-  require_file "${SAMPLE_MAP}"
+  if [[ -f "${SAMPLE_MAP}" ]]; then
+    require_file "${SAMPLE_MAP}"
+  fi
   require_file "${FEATURE_REF}"
 fi
 require_dir "${GENOME_DIR}"
 require_file "${SOLO_CB_WHITELIST}"
 require_file "${CR_WHITELIST}"
+require_file "${PREPARE_VELOCYTO_MEX}"
 command -v seqtk >/dev/null 2>&1 || die "seqtk not found on PATH"
 command -v pigz >/dev/null 2>&1 || die "pigz not found on PATH"
 if globus_enabled; then
   command -v globus >/dev/null 2>&1 || die "globus CLI not found on PATH"
+fi
+if [[ "${RUN_DOWNSTREAM}" == "1" ]]; then
+  [[ -x "${DOWNSTREAM_WRAPPER}" ]] || die "Downstream wrapper not executable: ${DOWNSTREAM_WRAPPER}"
 fi
 
 mkdir -p "${OUT_ROOT}"
@@ -809,6 +952,12 @@ log "Dataset root: ${DATASET_ROOT}"
 log "STAR binary: ${STAR_BIN}"
 log "Threads: ${THREADS}"
 log "Downsample reads per library: ${DOWNSAMPLE_READS}"
+if [[ "${RUN_DOWNSTREAM}" == "1" ]]; then
+  log "Downstream wrapper: ${DOWNSTREAM_WRAPPER}"
+  if [[ "${RUN_CELLBENDER}" == "1" ]]; then
+    log "CellBender CPU cores: ${CELLBENDER_CPU_CORES:-${THREADS}}"
+  fi
+fi
 if globus_enabled; then
   log "Globus source endpoint: ${GLOBUS_SRC_ENDPOINT}"
   log "Globus destination endpoint: ${GLOBUS_DST_ENDPOINT}"
@@ -825,5 +974,6 @@ while IFS= read -r sample; do
   printf '%s\t%s\t%s\n' "${sample}" "done" "${OUT_ROOT}/samples/${sample}" >> "${TOP_MANIFEST}"
 done < <(enumerate_samples)
 
+run_downstream_batch
 wait_for_all_transfers_and_cleanup
 log "All requested samples complete"

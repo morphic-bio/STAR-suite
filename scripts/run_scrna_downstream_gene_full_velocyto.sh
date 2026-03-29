@@ -49,7 +49,7 @@ Options:
   --feature-gather-image IMAGE
                          Feature-library integration image
                          (default: biodepot/gather_features:latest)
-  --run-cellbender       Run CellBender on raw-backed counts.h5ad and add denoised layer
+  --run-cellbender       Run CellBender on raw-backed unfiltered_counts.h5ad and add denoised layer
   --cellbender-image IMG CellBender image (default: biodepot/cellbender:0.3.2)
   --cellbender-gpu       Run CellBender with --gpus all instead of CPU mode
   --cellbender-cpu-cores INT
@@ -270,6 +270,8 @@ python3 "${POSTPROCESS_FILTERS}" \
 
 if [[ "${RUN_CELLBENDER}" == "1" ]]; then
   CELLBENDER_CB_FILE="${OUTPUT_DIR}/cellbender/cellbender_counts.h5"
+  CELLBENDER_FAILURE_NOTE="${OUTPUT_DIR}/cellbender/CELLBENDER_FAILED.txt"
+  rm -f "${CELLBENDER_FAILURE_NOTE}"
   CELLBENDER_ARGS=(
     run --rm
     --user "$(id -u):$(id -g)"
@@ -278,8 +280,8 @@ if [[ "${RUN_CELLBENDER}" == "1" ]]; then
     -e "alignsDir=${OUTPUT_DIR}"
     -e "NUMBA_CACHE_DIR=${OUTPUT_DIR}/.numba"
     -e "MPLCONFIGDIR=${OUTPUT_DIR}/.matplotlib"
-    -e "input_pattern=counts.h5ad"
-    -e "output_pattern=counts.h5ad"
+    -e "input_pattern=unfiltered_counts.h5ad"
+    -e "output_pattern=unfiltered_counts.h5ad"
     -e "cb_subdir=cellbender"
     -e "cb_file=cellbender_counts.h5"
     -e "layername=${CELLBENDER_LAYER}"
@@ -333,9 +335,17 @@ if [[ "${RUN_CELLBENDER}" == "1" ]]; then
     cp -f "${UNFILTERED_H5AD}" "${FINAL_H5AD}"
     PRIMARY_H5AD="${FILTERED_H5AD}"
   else
-    echo "ERROR: CellBender did not produce ${CELLBENDER_CB_FILE}" >&2
-    echo "ERROR: CellBender must finish successfully on raw-backed counts.h5ad before downstream layer propagation can occur." >&2
-    exit 1
+    {
+      echo "CellBender did not produce ${CELLBENDER_CB_FILE}"
+      echo "input_h5ad=${UNFILTERED_H5AD}"
+      echo "counts_h5ad=${COUNTS_H5AD}"
+      echo "fallback_h5ad=${FINAL_H5AD}"
+      echo "reason=sparse_or_prefiltered_input_can_fail_prior_estimation"
+    } > "${CELLBENDER_FAILURE_NOTE}"
+    echo "WARNING: CellBender did not produce ${CELLBENDER_CB_FILE}" >&2
+    echo "WARNING: Continuing without denoised layer; wrote ${CELLBENDER_FAILURE_NOTE}" >&2
+    cp -f "${UNFILTERED_H5AD}" "${FINAL_H5AD}"
+    PRIMARY_H5AD="${FILTERED_H5AD}"
   fi
 fi
 
@@ -399,7 +409,29 @@ rm -f \
   "${OUTPUT_DIR}/unfiltered_counts.summary.txt" \
   "${OUTPUT_DIR}/filtered_counts.summary.txt" \
   "${OUTPUT_DIR}/final_counts.summary.txt"
-python3 "${INSPECT_ANNDATA}" "${PRIMARY_H5AD}" > "${OUTPUT_DIR}/summary.txt"
+SUMMARY_H5AD="$(python3 - <<'PY' "${PRIMARY_H5AD}" "${FINAL_H5AD}" "${UNFILTERED_H5AD}" "${COUNTS_H5AD}" "${FILTERED_H5AD}" "${DEFAULT_SINGLET_FILTERED_H5AD}"
+import sys
+from pathlib import Path
+import anndata as ad
+
+for candidate in sys.argv[1:]:
+    path = Path(candidate)
+    if not path.exists():
+        continue
+    try:
+        adata = ad.read_h5ad(path, backed="r")
+        n_obs = adata.n_obs
+        adata.file.close()
+    except Exception:
+        continue
+    if n_obs > 0:
+        print(path)
+        break
+else:
+    print(sys.argv[1])
+PY
+)"
+python3 "${INSPECT_ANNDATA}" "${SUMMARY_H5AD}" > "${OUTPUT_DIR}/summary.txt"
 
 echo "PASS: downstream GeneFull + Velocyto"
 echo "counts.h5ad: ${COUNTS_H5AD}"
@@ -413,3 +445,4 @@ if (( ${#FEATURE_LIBRARY_DIRS[@]} > 0 )); then
   echo "feature_libraries/: ${FEATURE_OUTPUT_ROOT}"
 fi
 echo "summary.txt: ${OUTPUT_DIR}/summary.txt"
+echo "summary_source_h5ad: ${SUMMARY_H5AD}"

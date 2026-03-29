@@ -61,6 +61,35 @@ bool shouldTraceBridgeBarcode(const ParametersSolo &pSolo, uint32_t wlIdx)
     }
     return debugSet.count(pSolo.cbWLstr[wlIdx]) != 0;
 }
+
+int32 packedReadInfoVelocytoReferenceFeature(const ParametersSolo &pSolo)
+{
+    if (pSolo.featureInd[SoloFeatureTypes::Velocyto] < 0 &&
+        pSolo.featureInd[SoloFeatureTypes::VelocytoSimple] < 0) {
+        return -1;
+    }
+
+    const int32 candidates[] = {
+        SoloFeatureTypes::Gene,
+        SoloFeatureTypes::GeneFull,
+        SoloFeatureTypes::GeneFull_Ex50pAS,
+        SoloFeatureTypes::GeneFull_ExonOverIntron
+    };
+    for (const int32 candidate : candidates) {
+        if (pSolo.featureInd[candidate] >= 0) {
+            return candidate;
+        }
+    }
+    return -1;
+}
+
+bool keepPackedReadInfoAfterClearLarge(const ParametersSolo &pSolo, int32 featureType)
+{
+    if (pSolo.samAttrYes && featureType == pSolo.samAttrFeature) {
+        return true;
+    }
+    return featureType == packedReadInfoVelocytoReferenceFeature(pSolo);
+}
 }
 
 SoloFeature::SoloFeature(Parameters &Pin, ReadAlignChunk **RAchunk, Transcriptome &inTrans, int32 feTy, SoloReadBarcode *readBarSumIn, SoloFeature **soloFeatAll)
@@ -667,8 +696,12 @@ void SoloFeature::clearLarge()
         umiCorrectionHash = nullptr;
     }
 
-    packedReadInfo.data.clear();
-    packedReadInfo.data.shrink_to_fit();
+    // Keep packed read info alive while later phases may still consume it.
+    // This is a conservative lifetime guard for Velocyto and post-Solo BAM tag injection.
+    if (!keepPackedReadInfoAfterClearLarge(pSolo, featureType)) {
+        packedReadInfo.data.clear();
+        packedReadInfo.data.shrink_to_fit();
+    }
 
     if (readFeatSum != nullptr) {
         decltype(readFeatSum->bridgeImmediateReadCounts_)().swap(readFeatSum->bridgeImmediateReadCounts_);

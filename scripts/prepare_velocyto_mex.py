@@ -60,6 +60,12 @@ def build_filtered_indices(raw_barcodes: list[str], filtered_barcodes: list[str]
     return [raw_index[barcode] for barcode in filtered_barcodes]
 
 
+def strip_barcode_suffix(barcode: str) -> str:
+    if barcode.endswith("-1"):
+        return barcode[:-2]
+    return barcode
+
+
 def ensure_parent(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
 
@@ -120,13 +126,12 @@ def main() -> None:
     run_dir = Path(args.run_dir).resolve()
     output_root = Path(args.output_root).resolve() if args.output_root else run_dir / "outs"
 
-    gene_raw_dir = run_dir / "Solo.out" / "Gene" / "raw"
-    gene_filtered_dir = run_dir / "Solo.out" / "Gene" / "filtered"
     velocyto_raw_dir = run_dir / "Solo.out" / "Velocyto" / "raw"
+    velocyto_filtered_dir = run_dir / "Solo.out" / "Velocyto" / "filtered"
 
-    raw_barcodes_path = gene_raw_dir / "barcodes.tsv"
-    raw_features_path = gene_raw_dir / "features.tsv"
-    filtered_barcodes_path = gene_filtered_dir / "barcodes.tsv"
+    raw_barcodes_path = velocyto_raw_dir / "barcodes.tsv"
+    raw_features_path = velocyto_raw_dir / "features.tsv"
+    filtered_barcodes_path = velocyto_filtered_dir / "barcodes.tsv"
     spliced_path = velocyto_raw_dir / "spliced.mtx"
     unspliced_path = velocyto_raw_dir / "unspliced.mtx"
     ambiguous_path = velocyto_raw_dir / "ambiguous.mtx"
@@ -143,9 +148,9 @@ def main() -> None:
     if missing_paths:
         raise FileNotFoundError("Missing required inputs:\n" + "\n".join(missing_paths))
 
-    raw_barcodes = read_single_column(raw_barcodes_path)
+    raw_barcodes = [strip_barcode_suffix(value) for value in read_single_column(raw_barcodes_path)]
     raw_features = read_rows(raw_features_path)
-    filtered_barcodes = read_single_column(filtered_barcodes_path)
+    filtered_barcodes = [strip_barcode_suffix(value) for value in read_single_column(filtered_barcodes_path)]
 
     spliced = read_matrix(spliced_path)
     unspliced = read_matrix(unspliced_path)
@@ -157,7 +162,7 @@ def main() -> None:
     expected_shape = shapes.pop()
     if expected_shape != (len(raw_features), len(raw_barcodes)):
         raise ValueError(
-            "Velocyto layer shape does not match Gene feature/barcode axes: "
+            "Velocyto layer shape does not match Velocyto feature/barcode axes: "
             f"layers={expected_shape}, features={len(raw_features)}, barcodes={len(raw_barcodes)}"
         )
 
@@ -188,9 +193,8 @@ def main() -> None:
         "run_dir": str(run_dir),
         "output_root": str(output_root),
         "source": {
-            "gene_raw_dir": str(gene_raw_dir),
-            "gene_filtered_dir": str(gene_filtered_dir),
             "velocyto_raw_dir": str(velocyto_raw_dir),
+            "velocyto_filtered_dir": str(velocyto_filtered_dir),
         },
         "raw": raw_summary,
         "filtered": filtered_summary,

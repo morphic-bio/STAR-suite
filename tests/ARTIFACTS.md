@@ -44,6 +44,8 @@ update this file with its output location.
 - `tests/solo_yremove_smoke_output_*/` (vanilla Solo integrated Y-removal vs remove_y_reads smoke)
 - `tests/perturb_yremove_smoke_output_*/` (perturb integrated Y-removal vs remove_y_reads smoke)
 - `tests/perturb_velocyto_mex_smoke_output_*/` (UCSF 100K perturb smoke producing raw/filtered velocyto MEX surfaces)
+- `tests/ucsf_corrected_production_100k_output_*/` (corrected UCSF production 100K smoke: Y/noY BAM/FASTQ, packaged velocyto MEX, downstream h5ads, CellBender, and paper wrapper manifests)
+- `tests/ucsf_velocyto_100k_matrix_output_*/` (diagnostic 100K UCSF staged-input matrix varying `Gene`, BAM output, and Y-split emission to isolate zero-Velocyto conditions)
 - `tests/ucsf_velocyto_exact_100k_output_*/` (canonical STAR Velocyto parity: deterministic 1 vs N threads on 100K fixture)
 - `tests/ucsf_velocyto_exact_2m_output_*/` (same on full UCSF 2M when `UCSF_2M_PFCONFIG` is set)
 - `tests/ucsf_velocyto_hash_100k_output_*/` / `tests/ucsf_velocyto_hash_2m_output_*/` (Stage 2: `STAR_VELOCYTO_INTEGRATED_HASH=1` vs global sorted replay; env `UCSF_VELOCYTO_HASH_*_OUTDIR`)
@@ -101,6 +103,9 @@ update this file with its output location.
   - targeted `GeneFull` drift traces:
     - `/storage/ucsf-velocyto-validation/geneFull_barcodewide_legacy_20260327_132834/`
     - `/storage/ucsf-velocyto-validation/geneFull_barcodewide_bridge_20260327_133045/`
+- `/tmp/velocyto_bisect_runs/` (clean-build UCSF 100K Velocyto regression bisect and trace artifacts across upstream/current commits, including `velocyto_trace_{readinfo,count}.txt`)
+- `/tmp/ucsf_velocyto_cbub_smoke_*` (host-local UCSF 100K smoke for the shared `packedReadInfo` lifetime; validates non-zero Velocyto plus CB/UB tags in unsorted noY BAM; protected dataset, do not redistribute outputs)
+- `/tmp/ucsf_velocyto_cbub_stage_*` (host-local dry-run staging roots used by `tests/run_ucsf_velocyto_cbub_smoke.sh`; protected dataset, do not redistribute outputs)
 - `tests/flexfilter_parity_output_*/` (FlexFilter parity outputs vs production baseline)
 - `/tmp/*` (temporary scratch outputs)
 - `/tmp/ucsf_cr_config_1m_smoke_*` (real UCSF perturb CR-config fixture smoke outputs)
