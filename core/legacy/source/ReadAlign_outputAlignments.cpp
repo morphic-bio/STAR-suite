@@ -963,14 +963,13 @@ void ReadAlign::outputAlignments() {
             // Note: FLD collection without GC bias is also done in TranscriptQuantEC
         }
         
-        // Set detected sample token in SoloReadBarcode for tag extraction in inline hash capture
-        if ((P.pSolo.flexMode || P.pSolo.inlineHashMode) && soloRead && soloRead->readBar) {
+        // Flex-specific side effects stay off for standard non-Flex STARsolo.
+        if (P.pSolo.flexMode && soloRead && soloRead->readBar) {
             soloRead->readBar->detectedSampleToken = detectedSampleByte_;
         }
 
         // Populate optional MAPQ/CIGAR/score on transcripts for downstream consumers (Flex resolver)
-        // Gate Flex-only side effects so non-Flex STARsolo behaves like upstream
-        if ((P.pSolo.flexMode || P.pSolo.inlineHashMode) && unmapType < 0 && nTr > 0) {
+        if (P.pSolo.flexMode && unmapType < 0 && nTr > 0) {
             int mapqUnique = P.outSAMmapqUnique;
             for (uint64 i = 0; i < nTr; i++) {
                 if (trMult[i] == nullptr) continue;
@@ -987,7 +986,7 @@ void ReadAlign::outputAlignments() {
 
         // Store qname mapping for reject logging if enabled (Flex-only)
         // Forward declaration - function defined in flex/SoloReadFeature_record_flex.cpp
-        if (P.pSolo.flexMode || P.pSolo.inlineHashMode) {
+        if (P.pSolo.flexMode) {
             if (readName) {
                 storeQnameMapping(iReadAll, readName);
             }

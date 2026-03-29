@@ -23,6 +23,35 @@
 
 namespace {
 
+static int velocytoReferenceFeatureIndex(const ParametersSolo &pSolo)
+{
+    const int candidates[] = {
+        SoloFeatureTypes::Gene,
+        SoloFeatureTypes::GeneFull,
+        SoloFeatureTypes::GeneFull_Ex50pAS,
+        SoloFeatureTypes::GeneFull_ExonOverIntron,
+    };
+    for (auto featureType : candidates) {
+        if (pSolo.featureInd[featureType] >= 0)
+            return pSolo.featureInd[featureType];
+    }
+    return -1;
+}
+
+static SoloFeature *velocytoReferenceFeature(const ParametersSolo &pSolo,
+                                             SoloFeature **soloFeatAll,
+                                             Parameters &P)
+{
+    const int refIndex = velocytoReferenceFeatureIndex(pSolo);
+    if (refIndex < 0) {
+        exitWithError("EXITING because of fatal PARAMETERS error: Velocyto requires a gene-like Solo feature "
+                          "(Gene, GeneFull, GeneFull_Ex50pAS, or GeneFull_ExonOverIntron) for CB/UMI readInfo.\n"
+                          "SOLUTION: re-run STAR adding GeneFull or another gene-like feature to --soloFeatures.\n",
+                      std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
+    }
+    return soloFeatAll[refIndex];
+}
+
 struct VelocytoSortedRecord {
     uint64 iread;
     uint32 iCB;
@@ -123,6 +152,7 @@ static bool velocytoIntegratedHashInMemory() {
 void SoloFeature::countVelocytoStreamThreads()
 {
     time_t rawTime;
+    SoloFeature *readInfoSource = velocytoReferenceFeature(pSolo, soloFeatAll, P);
 
     nReadPerCB.resize(nCB);
 
@@ -141,9 +171,9 @@ void SoloFeature::countVelocytoStreamThreads()
 
         uint64 iread;
         while (*streamReads >> iread) {
-            uint32_t cb = soloFeatAll[pSolo.featureInd[SoloFeatureTypes::Gene]]->getPackedCB((uint32_t)iread);
-            uint32_t umi = soloFeatAll[pSolo.featureInd[SoloFeatureTypes::Gene]]->getPackedUMI((uint32_t)iread);
-            uint8_t status = soloFeatAll[pSolo.featureInd[SoloFeatureTypes::Gene]]->getPackedStatus((uint32_t)iread);
+            uint32_t cb = readInfoSource->getPackedCB((uint32_t)iread);
+            uint32_t umi = readInfoSource->getPackedUMI((uint32_t)iread);
+            uint8_t status = readInfoSource->getPackedStatus((uint32_t)iread);
             if (status != 1) {
                 streamReads->ignore((uint32)-1, '\n');
                 continue;
@@ -179,6 +209,7 @@ void SoloFeature::countVelocytoStreamThreads()
 void SoloFeature::countVelocytoSortedReplay()
 {
     time_t rawTime;
+    SoloFeature *readInfoSource = velocytoReferenceFeature(pSolo, soloFeatAll, P);
 
     nReadPerCB.resize(nCB);
 
@@ -204,9 +235,9 @@ void SoloFeature::countVelocytoSortedReplay()
 
         uint64 iread;
         while (*streamReads >> iread) {
-            uint32_t cb = soloFeatAll[pSolo.featureInd[SoloFeatureTypes::Gene]]->getPackedCB((uint32_t)iread);
-            uint32_t umi = soloFeatAll[pSolo.featureInd[SoloFeatureTypes::Gene]]->getPackedUMI((uint32_t)iread);
-            uint8_t status = soloFeatAll[pSolo.featureInd[SoloFeatureTypes::Gene]]->getPackedStatus((uint32_t)iread);
+            uint32_t cb = readInfoSource->getPackedCB((uint32_t)iread);
+            uint32_t umi = readInfoSource->getPackedUMI((uint32_t)iread);
+            uint8_t status = readInfoSource->getPackedStatus((uint32_t)iread);
             if (status != 1) {
                 streamReads->ignore((uint32)-1, '\n');
                 continue;
@@ -260,6 +291,7 @@ void SoloFeature::countVelocytoSortedReplay()
 void SoloFeature::countVelocytoSortedReplayCBuckets()
 {
     time_t rawTime;
+    SoloFeature *readInfoSource = velocytoReferenceFeature(pSolo, soloFeatAll, P);
 
     nReadPerCB.resize(nCB);
 
@@ -289,9 +321,9 @@ void SoloFeature::countVelocytoSortedReplayCBuckets()
 
             uint64 iread;
             while (*streamReads >> iread) {
-                uint32_t cb = soloFeatAll[pSolo.featureInd[SoloFeatureTypes::Gene]]->getPackedCB((uint32_t)iread);
-                uint32_t umi = soloFeatAll[pSolo.featureInd[SoloFeatureTypes::Gene]]->getPackedUMI((uint32_t)iread);
-                uint8_t status = soloFeatAll[pSolo.featureInd[SoloFeatureTypes::Gene]]->getPackedStatus((uint32_t)iread);
+                uint32_t cb = readInfoSource->getPackedCB((uint32_t)iread);
+                uint32_t umi = readInfoSource->getPackedUMI((uint32_t)iread);
+                uint8_t status = readInfoSource->getPackedStatus((uint32_t)iread);
                 if (status != 1) {
                     streamReads->ignore((uint32)-1, '\n');
                     continue;
@@ -377,9 +409,9 @@ void SoloFeature::countVelocytoSortedReplayCBuckets()
 
         uint64 iread;
         while (*streamReads >> iread) {
-            uint32_t cb = soloFeatAll[pSolo.featureInd[SoloFeatureTypes::Gene]]->getPackedCB((uint32_t)iread);
-            uint32_t umi = soloFeatAll[pSolo.featureInd[SoloFeatureTypes::Gene]]->getPackedUMI((uint32_t)iread);
-            uint8_t status = soloFeatAll[pSolo.featureInd[SoloFeatureTypes::Gene]]->getPackedStatus((uint32_t)iread);
+            uint32_t cb = readInfoSource->getPackedCB((uint32_t)iread);
+            uint32_t umi = readInfoSource->getPackedUMI((uint32_t)iread);
+            uint8_t status = readInfoSource->getPackedStatus((uint32_t)iread);
             if (status != 1) {
                 streamReads->ignore((uint32)-1, '\n');
                 continue;

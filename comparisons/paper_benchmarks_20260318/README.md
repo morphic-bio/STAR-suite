@@ -11,7 +11,7 @@
 |---|---|---|---|---|
 | A375 1k CRISPR 5' GemX | GEX + CRISPR (2) | TRU (single-column WL) | 47M | ~1,200 |
 | UCSF EBs2_2 Perturb-seq | GEX + CRISPRa guides (2) | NXT→TRU (2-column WL) | 445M | ~14,000 |
-| MSK 30polyKO | GEX + gRNA + LARRY (3) | Mixed TRU/NXT (per-library WL) | 669M | ~30,000 |
+| MSK 30polyKO | GEX + gRNA + LARRY (3; 245,979 LARRY barcodes) | Mixed TRU/NXT (per-library WL) | 669M | ~30,000 |
 
 ## Wall-Time Summary
 
@@ -43,7 +43,7 @@
 | Solo counting | 07:09:48 | 07:17:34 | 7m 46s |
 | PfMulti merge + CRISPR calling | 07:17:34 | 07:18:54 | 1m 20s |
 
-### MSK 30polyKO (669M reads, 3 libraries, 38K + 30 + 91K features)
+### MSK 30polyKO (669M reads, 3 libraries, ~38K genes + 30 gRNA features + 245,979 LARRY barcodes)
 
 | Phase | Start | End | Duration |
 |---|---|---|---|

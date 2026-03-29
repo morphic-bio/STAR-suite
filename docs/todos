@@ -4,10 +4,21 @@ This file tracks active top-level work only. Completed items and stale historica
 
 ## Priority 0: Paper-Critical Validation
 
-- No active paper-critical blockers at present.
+- Merge the current Velocyto/BAM `packedReadInfo` lifetime fix set to `master` before the UCSF production run.
+  - This is the production-critical fix for the `v0.90.1` Velocyto + BAM regression.
+  - Keep the conservative lifetime guard in place for production; defer any tighter early-free optimization until it has dedicated regression coverage.
+- After the UCSF production run, cut a prerelease that includes the `v0.90.1` Velocyto/BAM fix.
+  - Treat the next tag as a prerelease only; do not treat it as a stable/public release yet.
+  - The prerelease goal is to ensure the packaged binary path works with the production fix, not to declare final release readiness.
 
 ## Priority 1: Correctness / Parity
 
+- Create a small set of acceptable smoke-test artifacts that are safe to ship with the repo or easy to fetch from public sources.
+  - Cover the main regression surfaces now exercised only with restricted host-local datasets.
+  - Prefer tiny public or explicitly allowable fixtures over protected internal UCSF/Y-sensitive artifacts.
+  - Include at least one fixture that can validate shared read-level lifetime dependencies such as Velocyto plus BAM CB/UB tagging.
+- Do not make a stable/public release until acceptable/public regression coverage exists for the production-critical paths.
+  - In particular, replace or supplement the current host-local UCSF-only Velocyto/BAM smoke with allowable/public fixtures before treating the next release as stable.
 - Establish FLEX parity versus Cell Ranger 9.0 on a representative dataset.
   - This is not an immediate blocker, but it is the highest-value follow-up because other major comparisons were made against CR 9.0.
   - Include runtime comparison and inspect whether targeted acceleration in FLEX feature processing is worthwhile.
@@ -18,6 +29,9 @@ This file tracks active top-level work only. Completed items and stale historica
     - mixed-chemistry merge (`NXT + TRU` feature libraries with TRU GEX)
     - 2-column mapping edge cases and chemistry precedence
     - any remaining multi-library validation gaps beyond the new filtered-cell smoke
+- Tighten `packedReadInfo` lifetime after the conservative Velocyto/BAM-tagging fix.
+  - Current safe behavior keeps `packedReadInfo` alive when downstream Velocyto or BAM CB/UB tagging may still consume it.
+  - Follow up with a targeted post-consumer release point after `soloMain.processAndOutput()` / BAM finalization so peak RAM can drop earlier without reintroducing the regression.
 - Implement data-driven `--clip3pPolyG auto`.
 
 ## Priority 2: Performance / Architecture

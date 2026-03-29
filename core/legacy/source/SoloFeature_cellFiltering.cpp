@@ -2,6 +2,23 @@
 #include "serviceFuns.cpp"
 #include <math.h>
 
+namespace {
+int velocytoFilterSourceFeatureIndex(const ParametersSolo &pSolo)
+{
+    const int candidates[] = {
+        SoloFeatureTypes::Gene,
+        SoloFeatureTypes::GeneFull,
+        SoloFeatureTypes::GeneFull_Ex50pAS,
+        SoloFeatureTypes::GeneFull_ExonOverIntron,
+    };
+    for (auto featureType : candidates) {
+        if (pSolo.featureInd[featureType] >= 0)
+            return pSolo.featureInd[featureType];
+    }
+    return -1;
+}
+}
+
 void SoloFeature::cellFiltering()
 {    
 
@@ -16,8 +33,13 @@ void SoloFeature::cellFiltering()
         case SoloFeatureTypes::Velocyto: {
             filteredCells.reset(nCB);
             
-            //Velocyto: use filter from Gene
-            SoloFeature &soFeGe= *soloFeatAll[pSolo.featureInd[SoloFeatureTypes::Gene]];
+            // Velocyto inherits the filtered cell list from the first available
+            // gene-like feature on the run surface.
+            const int filterSource = velocytoFilterSourceFeatureIndex(pSolo);
+            if (filterSource < 0) {
+                return;
+            }
+            SoloFeature &soFeGe= *soloFeatAll[filterSource];
             for (uint32 ic=0; ic<soFeGe.nCB; ic++) {
                 if (soFeGe.filteredCells.filtVecBool[ic] && indCBwl[soFeGe.indCB[ic]] != (uint32)-1) {
                     //this cell passde Gene filtering, and is detected in Velocyto
