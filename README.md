@@ -276,11 +276,18 @@ No-align mode skips alignment for H0/H1 misses (~16% of reads), reducing wall ti
 
 Cell loss from no-align is negligible (<0.1%): BC004 loses one filtered cell, BC006 gains one, and the other two benchmark tags are unchanged. The hash screen resolves ~84% of reads at offset 0; the remaining ~16% that would go to alignment change only one cell in this dataset while preserving the same mean CR9 parity to 3-5 decimal places. The parity wrapper now writes a de-duplicated STAR summary so totals are not accidentally double-counted across CR7/CR9 or `all`/`Gene_Expression` rows.
 
+Using a fixed CR9 embedding removes the visual ambiguity from independently fit UMAPs. When full-align and no-align are both projected into the same CR9 PCA/UMAP space, they use the same 13 CR9 Leiden clusters and agree almost perfectly on shared cells: projected-label ARI `0.9979`, NMI `0.9967` on `20,315` shared cells.
+
+| CR9 Reference | STAR-Flex Full Projected To CR9 | STAR-Flex No-Align Projected To CR9 |
+|---|---|---|
+| ![CR9 reference Leiden UMAP](docs/images/flex_parity/umap_sc2300771_cr9_reference.png) | ![STAR-Flex full projected to CR9 Leiden UMAP](docs/images/flex_parity/umap_sc2300771_fullalign_projected_to_cr9.png) | ![STAR-Flex no-align projected to CR9 Leiden UMAP](docs/images/flex_parity/umap_sc2300771_noalign_projected_to_cr9.png) |
+
 - Cell Pearson = per-barcode total-UMI Pearson on common barcodes. Gene Pearson = per-probe total-UMI Pearson on common features. Barcode Jaccard computed after truncating CR 24bp barcodes to 16bp GEM prefix.
 - Both STAR and CR9 use GRCh38-2024-A genome and probe set v1.1.0. Using mismatched annotations (e.g., v1.0.1 / GRCh38-2020-A) drops Gene Pearson to ~0.09 while Cell Pearson remains >0.999.
 - STAR full 23m30s = 20m55s to mapping complete + 2m07s Solo counting (`--outSAMtype None`). STAR no-align 10m26s = ~8m49s to mapping complete + ~1m36s Solo counting. CR9 58m59s = CellRanger 9.0.1 multi (32 cores, `--localmem 120`, `create-bam false`). CR7 ~5 hr = CellRanger 7.0.0 multi (32 cores, 160 GB, with BAM output).
 - STAR-Flex uses a fully-fused lane-reader pipeline with H0+H1 hash-screen cache, sample pre-filter, and lane work-stealing with reader-to-aligner role switching.
 - Parity script: `scripts/paper/run_flex_parity.sh`. Underlying metric tool: `scripts/paper/compute_parity_metrics.py`. Use `flex_parity_star_unique_summary.tsv` or `flex_parity_star_unique_totals.txt` for aggregate STAR totals; do not sum `flex_parity_combined.tsv` directly.
+- CR9-projection parity script: `scripts/paper/project_flex_leiden_to_cr9.py`.
 
 ### SLAM-seq (STAR-SLAM vs GrandSLAM/GEDI)
 
