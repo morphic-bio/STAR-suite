@@ -254,25 +254,25 @@ Unlike the non-Flex alignment/Solo surfaces above, the internal gzip reader has 
 
 ### Flex Parity (STAR vs Cell Ranger 9.0.1, GRCh38-2024-A)
 
-| Tag (sample) | STAR cells | CR9 cells | Jaccard | Cell Pearson | Gene Pearson |
-|---|---|---|---|---|---|
-| BC004 (WT-Day-7) | 4,384 | 4,397 | 0.966 | 0.99997 | 0.99990 |
-| BC006 (PAX6-PTC-D9-Day7) | 5,283 | 5,343 | 0.979 | 0.99998 | 0.99992 |
-| BC007 (WT-Day-8) | 5,383 | 5,383 | 0.992 | 0.99997 | 0.99994 |
-| BC008 (PAX6-PTC-D9-Day8) | 5,266 | 5,296 | 0.988 | 0.99998 | 0.99995 |
-| **Mean** | | | **0.981** | **0.99997** | **0.99993** |
+| Tag (sample) | STAR cells | STAR GE UMIs | CR9 cells | Jaccard | Cell Pearson | Gene Pearson |
+|---|---|---|---|---|---|---|
+| BC004 (WT-Day-7) | 4,384 | 32,617,043 | 4,397 | 0.966 | 0.99997 | 0.99990 |
+| BC006 (PAX6-PTC-D9-Day7) | 5,283 | 42,528,029 | 5,343 | 0.979 | 0.99998 | 0.99992 |
+| BC007 (WT-Day-8) | 5,383 | 73,268,410 | 5,383 | 0.992 | 0.99997 | 0.99994 |
+| BC008 (PAX6-PTC-D9-Day8) | 5,266 | 60,663,948 | 5,296 | 0.988 | 0.99998 | 0.99995 |
+| **Mean / total** | | **209,077,430** | | **0.981** | **0.99997** | **0.99993** |
 
 ### Flex No-Align Mode (`--flexNoAlign 1`)
 
 No-align mode skips alignment for H0/H1 misses (~16% of reads), reducing wall time from 23m 30s to 10m 26s. That ~16% figure is a read-routing fraction, not a matrix-level sensitivity loss. On the archived 2026-03-25 benchmark pair, filtered Gene Expression STAR totals changed from 209,077,430 to 209,076,273 UMIs (Δ = -1,157; 0.00055%). Intended for rapid prototyping and iteration.
 
-| Tag (sample) | No-Align cells | Full cells | CR9 cells | Cells lost | Jaccard | Cell Pearson | Gene Pearson |
-|---|---|---|---|---|---|---|---|
-| BC004 (WT-Day-7) | 4,383 | 4,384 | 4,397 | 1 (<0.1%) | 0.966 | 0.99997 | 0.99990 |
-| BC006 (PAX6-PTC-D9-Day7) | 5,284 | 5,283 | 5,343 | 0 | 0.979 | 0.99998 | 0.99992 |
-| BC007 (WT-Day-8) | 5,383 | 5,383 | 5,383 | 0 | 0.992 | 0.99997 | 0.99994 |
-| BC008 (PAX6-PTC-D9-Day8) | 5,266 | 5,266 | 5,296 | 0 | 0.988 | 0.99998 | 0.99995 |
-| **Mean** | | | | | **0.981** | **0.99997** | **0.99993** |
+| Tag (sample) | No-Align cells | No-Align GE UMIs | Full cells | CR9 cells | Cells lost | Jaccard | Cell Pearson | Gene Pearson |
+|---|---|---|---|---|---|---|---|---|
+| BC004 (WT-Day-7) | 4,383 | 32,616,104 | 4,384 | 4,397 | 1 (<0.1%) | 0.966 | 0.99997 | 0.99990 |
+| BC006 (PAX6-PTC-D9-Day7) | 5,284 | 42,528,477 | 5,283 | 5,343 | 0 | 0.979 | 0.99998 | 0.99992 |
+| BC007 (WT-Day-8) | 5,383 | 73,268,111 | 5,383 | 5,383 | 0 | 0.992 | 0.99997 | 0.99994 |
+| BC008 (PAX6-PTC-D9-Day8) | 5,266 | 60,663,581 | 5,266 | 5,296 | 0 | 0.988 | 0.99998 | 0.99995 |
+| **Mean / total** | | **209,076,273** | | | | **0.981** | **0.99997** | **0.99993** |
 
 Cell loss from no-align is negligible (<0.1%): BC004 loses one filtered cell, BC006 gains one, and the other two benchmark tags are unchanged. The hash screen resolves ~84% of reads at offset 0; the remaining ~16% that would go to alignment change only one cell in this dataset while preserving the same mean CR9 parity to 3-5 decimal places. The parity wrapper now writes a de-duplicated STAR summary so totals are not accidentally double-counted across CR7/CR9 or `all`/`Gene_Expression` rows.
 
