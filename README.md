@@ -254,33 +254,40 @@ Unlike the non-Flex alignment/Solo surfaces above, the internal gzip reader has 
 
 ### Flex Parity (STAR vs Cell Ranger 9.0.1, GRCh38-2024-A)
 
-| Tag (sample) | STAR cells | CR9 cells | Jaccard | Cell Pearson | Gene Pearson |
-|---|---|---|---|---|---|
-| BC004 (WT-Day-7) | 4,384 | 4,397 | 0.966 | 0.99997 | 0.99990 |
-| BC006 (PAX6-PTC-D9-Day7) | 5,283 | 5,343 | 0.979 | 0.99998 | 0.99992 |
-| BC007 (WT-Day-8) | 5,383 | 5,383 | 0.992 | 0.99997 | 0.99994 |
-| BC008 (PAX6-PTC-D9-Day8) | 5,266 | 5,296 | 0.988 | 0.99998 | 0.99995 |
-| **Mean** | | | **0.981** | **0.99997** | **0.99993** |
+| Tag (sample) | STAR cells | STAR GE UMIs | CR9 cells | Jaccard | Cell Pearson | Gene Pearson |
+|---|---|---|---|---|---|---|
+| BC004 (WT-Day-7) | 4,384 | 32,617,043 | 4,397 | 0.966 | 0.99997 | 0.99990 |
+| BC006 (PAX6-PTC-D9-Day7) | 5,283 | 42,528,029 | 5,343 | 0.979 | 0.99998 | 0.99992 |
+| BC007 (WT-Day-8) | 5,383 | 73,268,410 | 5,383 | 0.992 | 0.99997 | 0.99994 |
+| BC008 (PAX6-PTC-D9-Day8) | 5,266 | 60,663,948 | 5,296 | 0.988 | 0.99998 | 0.99995 |
+| **Mean / total** | | **209,077,430** | | **0.981** | **0.99997** | **0.99993** |
 
 ### Flex No-Align Mode (`--flexNoAlign 1`)
 
 No-align mode skips alignment for H0/H1 misses (~16% of reads), reducing wall time from 23m 30s to 10m 26s. That ~16% figure is a read-routing fraction, not a matrix-level sensitivity loss. On the archived 2026-03-25 benchmark pair, filtered Gene Expression STAR totals changed from 209,077,430 to 209,076,273 UMIs (Δ = -1,157; 0.00055%). Intended for rapid prototyping and iteration.
 
-| Tag (sample) | No-Align cells | Full cells | CR9 cells | Cells lost | Jaccard | Cell Pearson | Gene Pearson |
-|---|---|---|---|---|---|---|---|
-| BC004 (WT-Day-7) | 4,383 | 4,384 | 4,397 | 1 (<0.1%) | 0.966 | 0.99997 | 0.99990 |
-| BC006 (PAX6-PTC-D9-Day7) | 5,284 | 5,283 | 5,343 | 0 | 0.979 | 0.99998 | 0.99992 |
-| BC007 (WT-Day-8) | 5,383 | 5,383 | 5,383 | 0 | 0.992 | 0.99997 | 0.99994 |
-| BC008 (PAX6-PTC-D9-Day8) | 5,266 | 5,266 | 5,296 | 0 | 0.988 | 0.99998 | 0.99995 |
-| **Mean** | | | | | **0.981** | **0.99997** | **0.99993** |
+| Tag (sample) | No-Align cells | No-Align GE UMIs | Full cells | CR9 cells | Cells lost | Jaccard | Cell Pearson | Gene Pearson |
+|---|---|---|---|---|---|---|---|---|
+| BC004 (WT-Day-7) | 4,383 | 32,616,104 | 4,384 | 4,397 | 1 (<0.1%) | 0.966 | 0.99997 | 0.99990 |
+| BC006 (PAX6-PTC-D9-Day7) | 5,284 | 42,528,477 | 5,283 | 5,343 | 0 | 0.979 | 0.99998 | 0.99992 |
+| BC007 (WT-Day-8) | 5,383 | 73,268,111 | 5,383 | 5,383 | 0 | 0.992 | 0.99997 | 0.99994 |
+| BC008 (PAX6-PTC-D9-Day8) | 5,266 | 60,663,581 | 5,266 | 5,296 | 0 | 0.988 | 0.99998 | 0.99995 |
+| **Mean / total** | | **209,076,273** | | | | **0.981** | **0.99997** | **0.99993** |
 
 Cell loss from no-align is negligible (<0.1%): BC004 loses one filtered cell, BC006 gains one, and the other two benchmark tags are unchanged. The hash screen resolves ~84% of reads at offset 0; the remaining ~16% that would go to alignment change only one cell in this dataset while preserving the same mean CR9 parity to 3-5 decimal places. The parity wrapper now writes a de-duplicated STAR summary so totals are not accidentally double-counted across CR7/CR9 or `all`/`Gene_Expression` rows.
+
+Using a fixed CR9 embedding removes the visual ambiguity from independently fit UMAPs. When full-align and no-align are both projected into the same CR9 PCA/UMAP space, they use the same 13 CR9 Leiden clusters and agree almost perfectly on shared cells: projected-label ARI `0.9979`, NMI `0.9967` on `20,315` shared cells.
+
+| CR9 Reference | STAR-Flex Full Projected To CR9 | STAR-Flex No-Align Projected To CR9 |
+|---|---|---|
+| ![CR9 reference Leiden UMAP](docs/images/flex_parity/umap_sc2300771_cr9_reference.png) | ![STAR-Flex full projected to CR9 Leiden UMAP](docs/images/flex_parity/umap_sc2300771_fullalign_projected_to_cr9.png) | ![STAR-Flex no-align projected to CR9 Leiden UMAP](docs/images/flex_parity/umap_sc2300771_noalign_projected_to_cr9.png) |
 
 - Cell Pearson = per-barcode total-UMI Pearson on common barcodes. Gene Pearson = per-probe total-UMI Pearson on common features. Barcode Jaccard computed after truncating CR 24bp barcodes to 16bp GEM prefix.
 - Both STAR and CR9 use GRCh38-2024-A genome and probe set v1.1.0. Using mismatched annotations (e.g., v1.0.1 / GRCh38-2020-A) drops Gene Pearson to ~0.09 while Cell Pearson remains >0.999.
 - STAR full 23m30s = 20m55s to mapping complete + 2m07s Solo counting (`--outSAMtype None`). STAR no-align 10m26s = ~8m49s to mapping complete + ~1m36s Solo counting. CR9 58m59s = CellRanger 9.0.1 multi (32 cores, `--localmem 120`, `create-bam false`). CR7 ~5 hr = CellRanger 7.0.0 multi (32 cores, 160 GB, with BAM output).
 - STAR-Flex uses a fully-fused lane-reader pipeline with H0+H1 hash-screen cache, sample pre-filter, and lane work-stealing with reader-to-aligner role switching.
 - Parity script: `scripts/paper/run_flex_parity.sh`. Underlying metric tool: `scripts/paper/compute_parity_metrics.py`. Use `flex_parity_star_unique_summary.tsv` or `flex_parity_star_unique_totals.txt` for aggregate STAR totals; do not sum `flex_parity_combined.tsv` directly.
+- CR9-projection parity script: `scripts/paper/project_flex_leiden_to_cr9.py`.
 
 ### SLAM-seq (STAR-SLAM vs GrandSLAM/GEDI)
 
