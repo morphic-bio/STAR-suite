@@ -10,6 +10,8 @@ REMOTE_ROOT="${REMOTE_ROOT:-/home/lhhung/ucsf_remote_cellbender_smoke}"
 SOURCE_DOWNSTREAM_DIR="${SOURCE_DOWNSTREAM_DIR:-${REPO_ROOT}/tests/ucsf_corrected_production_100k_output_20260329_171919/samples/EBs2_2/downstream_genefull_velocyto_cellbender}"
 CELLBENDER_IMAGE="${CELLBENDER_IMAGE:-biodepot/cellbender:0.3.2}"
 CELLBENDER_CPU_CORES="${CELLBENDER_CPU_CORES:-8}"
+CELLBENDER_GPU="${CELLBENDER_GPU:-0}"
+CELLBENDER_GPU_DEVICE="${CELLBENDER_GPU_DEVICE:-}"
 NO_SYNC_IMAGE="${NO_SYNC_IMAGE:-1}"
 STAMP="$(date +%Y%m%d_%H%M%S)"
 SMOKE_DIR="${REPO_ROOT}/tests/remote_cellbender_100k_smoke_${STAMP}"
@@ -34,6 +36,10 @@ echo "Smoke dir: ${SMOKE_DIR}"
 echo "Remote host: ${REMOTE_HOST}"
 echo "Remote root: ${REMOTE_ROOT}"
 echo "CellBender image: ${CELLBENDER_IMAGE}"
+echo "CellBender GPU: ${CELLBENDER_GPU}"
+if [[ -n "${CELLBENDER_GPU_DEVICE}" ]]; then
+  echo "CellBender GPU device: ${CELLBENDER_GPU_DEVICE}"
+fi
 echo "No sync image: ${NO_SYNC_IMAGE}"
 echo "Log file: ${LOG_FILE}"
 
@@ -45,6 +51,12 @@ RUNNER_ARGS=(
   --cellbender-cpu-cores "${CELLBENDER_CPU_CORES}"
   --local-log "${LOG_FILE}"
 )
+if [[ "${CELLBENDER_GPU}" == "1" ]]; then
+  RUNNER_ARGS+=(--cellbender-gpu)
+fi
+if [[ -n "${CELLBENDER_GPU_DEVICE}" ]]; then
+  RUNNER_ARGS+=(--cellbender-gpu-device "${CELLBENDER_GPU_DEVICE}")
+fi
 if [[ "${NO_SYNC_IMAGE}" == "1" ]]; then
   RUNNER_ARGS+=(--no-sync-image)
 fi

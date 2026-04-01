@@ -129,6 +129,8 @@ def annotate_feature_barcodes(adata: ad.AnnData, matrix_dir: Path):
         df.index = direct_index
         df["barcode_namespace_transform"] = "direct"
 
+    adata.obs["barcode_feature_namespace"] = df["barcode_namespace_transform"].iloc[0]
+
     for source_col, target_col in [
         ("num_features", "num_features"),
         ("top_feature_index", "top_feature_index"),
@@ -230,11 +232,7 @@ def build_feature_obs_table(adata: ad.AnnData) -> pd.DataFrame:
 
     obs["barcode_raw"] = obs.index.astype(str)
     obs["barcode_canonical"] = obs.index.map(canonical_barcode)
-    if obs["barcode_canonical"].duplicated().any():
-        dupes = obs.loc[obs["barcode_canonical"].duplicated(), "barcode_canonical"].tolist()[:5]
-        raise ValueError(f"Feature library produced duplicate canonical barcodes: {dupes}")
-
-    obs = obs.set_index("barcode_canonical", drop=False)
+    obs["barcode_translated"] = obs["barcode_raw"].map(translate_nxt_middle_two_bases)
     return obs
 
 
@@ -269,11 +267,27 @@ def integrate_calls(
 ):
     counts_adata = ad.read_h5ad(counts_path)
     counts_canonical = counts_adata.obs_names.map(canonical_barcode)
-    if counts_canonical.duplicated().any():
+    counts_index = pd.Index(counts_canonical, dtype=str, name="barcode")
+    if counts_index.duplicated().any():
         dupes = counts_canonical[counts_canonical.duplicated()].tolist()[:5]
         raise ValueError(f"{counts_path} produced duplicate canonical barcodes: {dupes}")
 
-    mapped = feature_obs.reindex(counts_canonical)
+    direct_index = pd.Index(feature_obs["barcode_canonical"].astype(str), dtype=str, name="barcode")
+    translated_index = pd.Index(feature_obs["barcode_translated"].astype(str), dtype=str, name="barcode")
+    direct_overlap = int(direct_index.isin(counts_index).sum())
+    translated_overlap = int(translated_index.isin(counts_index).sum())
+    if translated_overlap > direct_overlap:
+        barcode_key = "barcode_translated"
+        barcode_transform = "translated"
+    else:
+        barcode_key = "barcode_canonical"
+        barcode_transform = "direct"
+
+    if feature_obs[barcode_key].duplicated().any():
+        dupes = feature_obs.loc[feature_obs[barcode_key].duplicated(), barcode_key].astype(str).tolist()[:5]
+        raise ValueError(f"{counts_path} produced duplicate feature barcodes after {barcode_transform} mapping: {dupes}")
+
+    mapped = feature_obs.set_index(barcode_key, drop=False).reindex(counts_index)
 
     num_features = mapped["num_features"].fillna(0).astype(int)
     num_umis = mapped["total_deduped_umi"].fillna(0).astype(int)
@@ -307,6 +321,7 @@ def integrate_calls(
         "sample": provenance.get("sample", ""),
         "feature_type": provenance.get("feature_type", ""),
         "call_source": call_source,
+        "barcode_transform": barcode_transform,
         "obs_columns": [
             f"{prefix}__is_featured",
             f"{prefix}__feature_call",

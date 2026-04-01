@@ -11,8 +11,11 @@ KEEP_REMOTE="0"
 SYNC_IMAGE="1"
 CELLBENDER_CPU_CORES="8"
 CELLBENDER_IMAGE="biodepot/cellbender:0.3.2"
-CELLBENDER_LAYER="cellbender"
+CELLBENDER_LAYER="denoised"
 CELLBENDER_FLAGS=""
+CELLBENDER_USE_GPU="0"
+CELLBENDER_GPU_DEVICE=""
+FEATURE_GATHER_IMAGE="${FEATURE_GATHER_IMAGE:-biodepot/gather_features:latest}"
 LOCAL_LOG=""
 EXTRA_REMOTE_ENV=()
 
@@ -32,7 +35,9 @@ Options:
   --remote-host HOST          SSH target
   --remote-root PATH          Remote staging root on local disk (not NFS)
   --cellbender-image IMG      CellBender image (default: biodepot/cellbender:0.3.2)
-  --cellbender-cpu-cores N    CPU cores passed through to remove_noise.sh
+  --cellbender-gpu            Run CellBender with --gpus all on the remote host
+  --cellbender-gpu-device ID  Pin CellBender to a specific remote GPU device
+  --cellbender-cpu-cores N    CPU cores passed through to remove-background
   --cellbender-layer NAME     Output layer name (default: cellbender)
   --cellbender-flags STR      Extra CellBender flags
   --local-log PATH            Local log path
@@ -58,6 +63,15 @@ while [[ $# -gt 0 ]]; do
       ;;
     --cellbender-image)
       CELLBENDER_IMAGE="$2"
+      shift 2
+      ;;
+    --cellbender-gpu)
+      CELLBENDER_USE_GPU="1"
+      shift
+      ;;
+    --cellbender-gpu-device)
+      CELLBENDER_USE_GPU="1"
+      CELLBENDER_GPU_DEVICE="$2"
       shift 2
       ;;
     --cellbender-cpu-cores)
@@ -108,7 +122,10 @@ UNFILTERED_H5AD="${DOWNSTREAM_DIR}/unfiltered_counts.h5ad"
 FILTERED_H5AD="${DOWNSTREAM_DIR}/filtered_counts.h5ad"
 DEFAULT_SINGLET_H5AD="${DOWNSTREAM_DIR}/default_singlet_filtered_counts.h5ad"
 FINAL_H5AD="${DOWNSTREAM_DIR}/final_counts.h5ad"
+RUN_DIR="$(realpath "$(dirname "${DOWNSTREAM_DIR}")/run")"
 PROPAGATE_LAYER="${REPO_ROOT}/scripts/propagate_anndata_layer.py"
+ADD_CELLBENDER_LAYER="${REPO_ROOT}/scripts/add_cellbender_layer_from_h5.py"
+FEATURE_GATHER_SCRIPT="${REPO_ROOT}/scripts/integrate_feature_library.py"
 INSPECT_ANNDATA="${REPO_ROOT}/../scRNA-seq/utilities/inspect_anndata.py"
 
 for required in \
@@ -117,10 +134,13 @@ for required in \
   "${FILTERED_H5AD}" \
   "${DEFAULT_SINGLET_H5AD}" \
   "${PROPAGATE_LAYER}" \
+  "${ADD_CELLBENDER_LAYER}" \
+  "${FEATURE_GATHER_SCRIPT}" \
   "${INSPECT_ANNDATA}"
 do
   [[ -f "${required}" ]] || { echo "ERROR: missing required file ${required}" >&2; exit 1; }
 done
+[[ -d "${RUN_DIR}" ]] || { echo "ERROR: missing run dir ${RUN_DIR}" >&2; exit 1; }
 
 command -v rsync >/dev/null 2>&1 || { echo "ERROR: rsync is required" >&2; exit 1; }
 command -v ssh >/dev/null 2>&1 || { echo "ERROR: ssh is required" >&2; exit 1; }
@@ -142,6 +162,10 @@ echo "Downstream dir: ${DOWNSTREAM_DIR}"
 echo "Remote host: ${REMOTE_HOST}"
 echo "Remote job root: ${REMOTE_JOB_ROOT}"
 echo "Local log: ${LOCAL_LOG}"
+echo "CellBender GPU: ${CELLBENDER_USE_GPU}"
+if [[ -n "${CELLBENDER_GPU_DEVICE}" ]]; then
+  echo "CellBender GPU device: ${CELLBENDER_GPU_DEVICE}"
+fi
 
 sync_remote_image() {
   local image="$1"
@@ -184,6 +208,8 @@ ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new "${REMOTE_HOST}" bash -
   "${REMOTE_WORK_DIR}" \
   "${REMOTE_OUTPUT_DIR}" \
   "${CELLBENDER_IMAGE}" \
+  "${CELLBENDER_USE_GPU}" \
+  "${CELLBENDER_GPU_DEVICE}" \
   "${CELLBENDER_LAYER}" \
   "${CELLBENDER_CPU_CORES}" \
   "${CELLBENDER_FLAGS}" <<'EOF' >> "${LOCAL_LOG}" 2>&1
@@ -191,9 +217,11 @@ set -euo pipefail
 REMOTE_WORK_DIR="$1"
 REMOTE_OUTPUT_DIR="$2"
 CELLBENDER_IMAGE="$3"
-CELLBENDER_LAYER="$4"
-CELLBENDER_CPU_CORES="$5"
-CELLBENDER_FLAGS="${6-}"
+CELLBENDER_USE_GPU="$4"
+CELLBENDER_GPU_DEVICE="$5"
+CELLBENDER_LAYER="$6"
+CELLBENDER_CPU_CORES="$7"
+CELLBENDER_FLAGS="${8-}"
 
 mkdir -p "${REMOTE_WORK_DIR}/.numba" "${REMOTE_WORK_DIR}/.matplotlib" "${REMOTE_OUTPUT_DIR}"
 
@@ -205,6 +233,13 @@ DOCKER_ARGS=(
   -e "NUMBA_CACHE_DIR=${REMOTE_WORK_DIR}/.numba"
   -e "MPLCONFIGDIR=${REMOTE_WORK_DIR}/.matplotlib"
 )
+if [[ "${CELLBENDER_USE_GPU}" == "1" ]]; then
+  if [[ -n "${CELLBENDER_GPU_DEVICE}" ]]; then
+    DOCKER_ARGS+=(--gpus "device=${CELLBENDER_GPU_DEVICE}")
+  else
+    DOCKER_ARGS+=(--gpus all)
+  fi
+fi
 CELLBENDER_CMD=(
   cellbender
   remove-background
@@ -212,6 +247,9 @@ CELLBENDER_CMD=(
   --output "${REMOTE_OUTPUT_DIR}/cellbender_counts.h5"
   --cpu-threads "${CELLBENDER_CPU_CORES}"
 )
+if [[ "${CELLBENDER_USE_GPU}" == "1" ]]; then
+  CELLBENDER_CMD+=(--cuda)
+fi
 if [[ -n "${CELLBENDER_FLAGS}" ]]; then
   # shellcheck disable=SC2206
   EXTRA_FLAGS=( ${CELLBENDER_FLAGS} )
@@ -230,30 +268,32 @@ if [[ -f "${CELLBENDER_CB_FILE}" ]]; then
   docker run --rm \
     --user "$(id -u):$(id -g)" \
     -v "${DOWNSTREAM_DIR}:${DOWNSTREAM_DIR}" \
+    -v "${REPO_ROOT}:${REPO_ROOT}:ro" \
     -w "${DOWNSTREAM_DIR}" \
     -e "NUMBA_CACHE_DIR=${DOWNSTREAM_DIR}/.numba" \
     -e "MPLCONFIGDIR=${DOWNSTREAM_DIR}/.matplotlib" \
-    -e "overwrite_layer=1" \
     "${CELLBENDER_IMAGE}" \
-    addCounts.py \
-    -c "${CELLBENDER_CB_FILE}" \
-    -l "${CELLBENDER_LAYER}" \
-    -i "${COUNTS_H5AD}" \
-    -o "${COUNTS_H5AD}"
+    python \
+    "${ADD_CELLBENDER_LAYER}" \
+    --cellbender-h5 "${CELLBENDER_CB_FILE}" \
+    --layer-name "${CELLBENDER_LAYER}" \
+    --input-h5ad "${COUNTS_H5AD}" \
+    --output-h5ad "${COUNTS_H5AD}"
 
   docker run --rm \
     --user "$(id -u):$(id -g)" \
     -v "${DOWNSTREAM_DIR}:${DOWNSTREAM_DIR}" \
+    -v "${REPO_ROOT}:${REPO_ROOT}:ro" \
     -w "${DOWNSTREAM_DIR}" \
     -e "NUMBA_CACHE_DIR=${DOWNSTREAM_DIR}/.numba" \
     -e "MPLCONFIGDIR=${DOWNSTREAM_DIR}/.matplotlib" \
-    -e "overwrite_layer=1" \
     "${CELLBENDER_IMAGE}" \
-    addCounts.py \
-    -c "${CELLBENDER_CB_FILE}" \
-    -l "${CELLBENDER_LAYER}" \
-    -i "${UNFILTERED_H5AD}" \
-    -o "${UNFILTERED_H5AD}"
+    python \
+    "${ADD_CELLBENDER_LAYER}" \
+    --cellbender-h5 "${CELLBENDER_CB_FILE}" \
+    --layer-name "${CELLBENDER_LAYER}" \
+    --input-h5ad "${UNFILTERED_H5AD}" \
+    --output-h5ad "${UNFILTERED_H5AD}"
 
   python3 "${PROPAGATE_LAYER}" \
     --source-h5ad "${UNFILTERED_H5AD}" \
@@ -283,6 +323,56 @@ else
   cp -f "${UNFILTERED_H5AD}" "${FINAL_H5AD}"
   python3 "${INSPECT_ANNDATA}" "${FINAL_H5AD}" > "${DOWNSTREAM_DIR}/final_counts.summary.txt"
   python3 "${INSPECT_ANNDATA}" "${FINAL_H5AD}" > "${DOWNSTREAM_DIR}/summary.txt"
+fi
+
+FEATURE_OUTPUT_ROOT="${DOWNSTREAM_DIR}/feature_libraries"
+mapfile -t FEATURE_LIBRARY_DIRS < <(find "${RUN_DIR}/cr_assign" -type f -name 'pf_library_provenance.tsv' -print 2>/dev/null | sed 's#/pf_library_provenance.tsv$##' | sort)
+if (( ${#FEATURE_LIBRARY_DIRS[@]} > 0 )); then
+  CRISPR_CALLS_CSV="${RUN_DIR}/outs/crispr_analysis/protospacer_calls_per_cell.csv"
+  CRISPR_LIBRARY_COUNT=0
+  for feature_library in "${FEATURE_LIBRARY_DIRS[@]}"; do
+    feature_type_dir="$(basename "$(dirname "$(dirname "${feature_library}")")")"
+    if [[ "${feature_type_dir}" == "CRISPR_Guide_Capture" ]]; then
+      ((CRISPR_LIBRARY_COUNT += 1))
+    fi
+  done
+
+  if (( CRISPR_LIBRARY_COUNT > 1 )) && [[ -f "${CRISPR_CALLS_CSV}" ]]; then
+    echo "ERROR: Found ${CRISPR_LIBRARY_COUNT} CRISPR feature libraries but only one global call file at ${CRISPR_CALLS_CSV}" >&2
+    exit 1
+  fi
+
+  COUNTS_TARGETS=("${COUNTS_H5AD}" "${UNFILTERED_H5AD}" "${FILTERED_H5AD}" "${DEFAULT_SINGLET_H5AD}")
+  if [[ -f "${FINAL_H5AD}" ]]; then
+    COUNTS_TARGETS+=("${FINAL_H5AD}")
+  fi
+
+  for feature_library in "${FEATURE_LIBRARY_DIRS[@]}"; do
+    FEATURE_GATHER_ARGS=(
+      run --rm
+      --user "$(id -u):$(id -g)"
+      -v "${RUN_DIR}:${RUN_DIR}:ro"
+      -v "${DOWNSTREAM_DIR}:${DOWNSTREAM_DIR}"
+      -v "${REPO_ROOT}:${REPO_ROOT}:ro"
+      "${FEATURE_GATHER_IMAGE}"
+      python3 "${FEATURE_GATHER_SCRIPT}"
+      --library-dir "${feature_library}"
+      --feature-output-root "${FEATURE_OUTPUT_ROOT}"
+    )
+    for counts_target in "${COUNTS_TARGETS[@]}"; do
+      FEATURE_GATHER_ARGS+=(--counts-h5ad "${counts_target}")
+    done
+
+    feature_type_dir="$(basename "$(dirname "$(dirname "${feature_library}")")")"
+    if [[ "${feature_type_dir}" == "CRISPR_Guide_Capture" ]] && [[ -f "${CRISPR_CALLS_CSV}" ]]; then
+      FEATURE_GATHER_ARGS+=(--calls-csv "${CRISPR_CALLS_CSV}")
+      if (( ${#FEATURE_LIBRARY_DIRS[@]} == 1 )); then
+        FEATURE_GATHER_ARGS+=(--set-generic-aliases)
+      fi
+    fi
+
+    docker "${FEATURE_GATHER_ARGS[@]}"
+  done
 fi
 
 if [[ "${KEEP_REMOTE}" != "1" ]]; then

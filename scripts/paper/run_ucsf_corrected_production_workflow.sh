@@ -12,8 +12,8 @@ STAR_BIN="${STAR_BIN:-${REPO_ROOT}/core/legacy/source/STAR.release}"
 DATASET_ROOT="${UCSF_DATASET_ROOT:-/mnt/pikachu/ucsf-perturb-seq-corrected}"
 FEATURE_REF="${UCSF_FEATURE_REF:-/mnt/pikachu/ucsf-perturb-seq/cellranger_feature_ref_hCRISPRa_v2_like_AALG2_pattern.csv}"
 GENOME_DIR="${UCSF_GENOME_DIR:-/storage/autoindex_110_44/bulk_index}"
-SOLO_CB_WHITELIST="${UCSF_SOLO_WHITELIST:-/home/lhhung/cellranger-9.0.1/lib/python/cellranger/barcodes/translation/3M-february-2018_NXT.txt}"
-CR_WHITELIST="${UCSF_CR_WHITELIST:-${SOLO_CB_WHITELIST}}"
+SOLO_CB_WHITELIST="${UCSF_SOLO_WHITELIST:-/home/lhhung/cellranger-9.0.1/lib/python/cellranger/barcodes/3M-february-2018_TRU.txt}"
+CR_WHITELIST="${UCSF_CR_WHITELIST:-/home/lhhung/cellranger-9.0.1/lib/python/cellranger/barcodes/translation/3M-february-2018_NXT.txt}"
 THREADS="${UCSF_THREADS:-24}"
 CELLBENDER_CPU_CORES="${UCSF_CELLBENDER_CPU_CORES:-${THREADS}}"
 OUT_ROOT="${UCSF_OUT_ROOT:-/mnt/pikachu/ucsf-perturb-yremove_velocyto_cellbender_$(date +%Y%m%d_%H%M%S)}"
@@ -29,6 +29,7 @@ GLOBUS_POLL_SECONDS="${GLOBUS_POLL_SECONDS:-30}"
 CELLBENDER_GPU=0
 TRIM_QC=0
 DRY_RUN=0
+STAR_ONLY=0
 
 usage() {
   cat <<EOF
@@ -61,6 +62,7 @@ Options:
   --globus-dst-root PATH   Destination root path
   --globus-poll-seconds N  Globus cleanup poll interval
   --trim-qc                Emit read-level trim-QC reports
+  --star-only              Run STAR/Globus only; do not run downstream/CellBender
   --dry-run                Prepare manifests only
   -h, --help               Show help
 EOF
@@ -87,6 +89,7 @@ while [[ $# -gt 0 ]]; do
     --globus-dst-root) GLOBUS_DST_ROOT="$2"; shift 2 ;;
     --globus-poll-seconds) GLOBUS_POLL_SECONDS="$2"; shift 2 ;;
     --trim-qc) TRIM_QC=1; shift ;;
+    --star-only) STAR_ONLY=1; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown argument: $1" >&2; usage >&2; exit 1 ;;
@@ -112,11 +115,17 @@ ARGS=(
   --cr-whitelist "${CR_WHITELIST}"
   --star-bin "${STAR_BIN}"
   --threads "${THREADS}"
-  --run-downstream
-  --run-cellbender
-  --cellbender-cpu-cores "${CELLBENDER_CPU_CORES}"
   --globus-poll-seconds "${GLOBUS_POLL_SECONDS}"
 )
+
+if [[ "${STAR_ONLY}" != "1" ]]; then
+  ARGS+=(
+    --run-downstream
+    --adaptive-filter
+    --run-cellbender
+    --cellbender-cpu-cores "${CELLBENDER_CPU_CORES}"
+  )
+fi
 
 if [[ "${ALL_SAMPLES}" == "1" ]]; then
   ARGS+=(--all-samples)
@@ -135,7 +144,7 @@ fi
 if [[ -n "${GLOBUS_DST_ROOT}" ]]; then
   ARGS+=(--globus-dst-root "${GLOBUS_DST_ROOT}")
 fi
-if [[ "${CELLBENDER_GPU}" == "1" ]]; then
+if [[ "${CELLBENDER_GPU}" == "1" && "${STAR_ONLY}" != "1" ]]; then
   ARGS+=(--cellbender-gpu)
 fi
 if [[ "${TRIM_QC}" == "1" ]]; then
