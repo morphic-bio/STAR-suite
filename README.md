@@ -1,6 +1,6 @@
 # STAR Suite
 
-STAR Suite updates the original STAR aligner by integrating four modules — STAR-perturb, STAR-Flex, STAR-SLAM, and TranscriptVB — to provide complete internal C/C++ pipelines for bulk RNA-seq, scRNA-seq, Perturb-seq, 10x Flex, and SLAM-seq. The integration results in **substantial speedups** (**1.7–2.4x for bulk RNA-seq**, **1.7–2.0x for scRNA-seq GEX-only Solo vs historical STARsolo**, **3.2–6.1x for Perturb-seq**, **2.5–28.8x for Flex**) and a simplified toolchain that can be **installed through pre-compiled binaries** for researchers and agents. **No new external dependencies** are required; the suite is built entirely with the existing STAR toolchain and vendored components. **This is a drop-in replacement for the STAR aligner.**
+STAR Suite updates the original STAR aligner by integrating four modules — STAR-perturb, STAR-Flex, STAR-SLAM, and TranscriptVB — to provide complete internal C/C++ pipelines for bulk RNA-seq, scRNA-seq, Perturb-seq, 10x Flex, and SLAM-seq. The integration results in **substantial speedups** (**1.7–2.4x for bulk RNA-seq**, **1.5–2.0x for scRNA-seq GEX-only Solo vs CellGENI-style STARsolo**, **3.2–6.1x for Perturb-seq**, **2.5–28.8x for Flex**) and a simplified toolchain that can be **installed through pre-compiled binaries** for researchers and agents. **No new external dependencies** are required; the suite is built entirely with the existing STAR toolchain and vendored components. **This is a drop-in replacement for the STAR aligner.**
 
 STAR Suite supports partial compilation: build only the module/tool targets you need instead of building the full suite every time.
 
@@ -8,7 +8,7 @@ Agent quickstart: see `AGENTS.md` for repo-specific guardrails, tests, and recen
 
 ## Core Additions over STAR 2.7.11b
 
-- **Speedup**: Bulk RNA-seq **1.7–2.4x faster** than external stepwise pipelines; scRNA-seq GEX-only Solo **1.7–2.0x faster** than the historical STARsolo parameter surface (UCSF 14K cells 1.95x, MSK 30K cells 1.69x); Perturb-seq **3.2–6.1x faster** than Cell Ranger 9; Flex **2.5x faster** than Cell Ranger 9 (5.7x in no-align mode, ~12.8–28.8x vs Cell Ranger 7 with BAM) — all with near-identical parity.
+- **Speedup**: Bulk RNA-seq **1.7–2.4x faster** than external stepwise pipelines; scRNA-seq GEX-only Solo **1.5–2.0x faster** than the CellGENI-style STARsolo parameter surface (UCSF 14K cells 1.95x, MSK 30K cells 1.52x); Perturb-seq **3.2–6.1x faster** than Cell Ranger 9; Flex **2.5x faster** than Cell Ranger 9 (5.7x in no-align mode, ~12.8–28.8x vs Cell Ranger 7 with BAM) — all with near-identical parity.
 - **Batch Mode** (`--batchMode 1`): Processes multiple FASTQs in one STAR invocation while reusing the loaded genome. Removes the need for `--genomeLoad` keep-in-memory workflows. Single-pass only (no `--twopassMode`); not supported with Solo (`--soloType`). Use `--outFileNamePrefixAuto 1` for per-sample subdirectories.
 - **TranscriptVB Quantification** (`--quantMode TranscriptVB`): Variational Bayes and EM quantification for transcript-level abundance, with parity-oriented behavior against Salmon alignment-mode. Gene-level summarization via `--quantVBgenesMode Tximport`.
 - **Transcriptome Output** (`--quantTranscriptomeSAMoutput`): Replaces the former `--quantTranscriptomeBan` with more explicit control (e.g., `BanSingleEnd_ExtendSoftclip`).
@@ -137,39 +137,41 @@ overlap, but loses substantial gene-level parity relative to the current build.
 
 MSK 30polyKO is a mixed-chemistry 3-library Perturb-seq dataset (GEX TRU +
 gRNA NXT + LARRY TRU). This benchmark isolates the GEX mRNA lanes only
-(28 lanes, ~41 GB) for a Solo-only comparison against the same historical
-baseline (`7a7fb08`) and CellRanger 9.
+(28 lanes, ~41 GB) for a Solo-only comparison against the CellGENI-style
+historical baseline (`7a7fb08`) and CellRanger 9.
 
 | Arm | STAR build | Filtered cells | Wall (32 thr) | Notes |
 |---|---|---:|---:|---|
-| Historical vanilla | `7a7fb08` | 32,357 | **32.72 min** | `--soloMultiMappers Rescue`, `--soloStrand Unstranded`, `zcat`; `/storage/MSK-perturb-comparison/bench_legacy_msk_20260401_095729/` |
+| Historical CellGENI-style | `7a7fb08` | 32,304 | **29.52 min** | CellGENI-style parameter surface, `--soloMultiMappers EM`, `--soloStrand Forward`, `--outFilterScoreMin 30`, `zcat`; `/storage/MSK-perturb-comparison/bench_cellgeni_msk_20260401_162259/` |
 | Modern optimized | current suite `STAR` | 30,562 | **19.40 min** | Bridge + inline hash, `--soloMultiMappers Unique`, `--soloStrand Forward`, `zcat`; `/storage/MSK-perturb-comparison/bench_modern_msk_20260401_103023/` |
 
-Speedup: **1.69x** (13.3 min faster). Consistent with the 1.74x–1.95x range
-observed on the UCSF dataset above.
+Speedup: **1.52x** (10.1 min faster). Consistent with the 1.52x–1.95x range
+observed across datasets (UCSF 1.95x on 14K cells; the narrower gap here
+reflects the EM multimapper model being faster than Rescue on this dataset).
 
 **CR9 parity (MSK 30polyKO GEX+gRNA reference: `/storage/MSK-perturb-comparison/cr_full_grna_30crispr_20260306_173247/`)**
 
 | Arm | Filtered cells | Cell Jaccard vs CR9 | Barcode Pearson vs CR9 | Gene Pearson vs CR9 |
 |---|---:|---:|---:|---:|
 | Modern optimized | 30,562 | 0.942 | 0.999187 | 0.994575 |
-| Historical vanilla `7a7fb08` | 32,357 | 0.994 | 0.990390 | 0.882100 |
+| Historical CellGENI-style `7a7fb08` | 32,304 | 0.998 | 0.999303 | 0.954925 |
 | Cell Ranger 9 reference | 32,256 | 1.000 | 1.000000 | 1.000000 |
 
-Modern has dramatically better per-barcode parity (Pearson 0.999 vs 0.990) and
-gene-level parity (0.995 vs 0.882) with CR9 than the historical baseline.
-Legacy's superficially higher cell Jaccard (0.994) is an artifact of
-`--soloMultiMappers Rescue` inflating UMI counts, which pushes borderline
-barcodes over the EmptyDrops threshold — these extra ~1,800 cells are not
-in the CR9 reference either.
+Modern has better gene-level parity with CR9 (0.995 vs 0.955) despite calling
+fewer cells. The CellGENI-style historical run has slightly higher cell Jaccard
+(0.998 vs 0.942) and comparable barcode Pearson (0.999 vs 0.999). The cell count
+difference (30,562 vs 32,304) reflects `--soloMultiMappers Unique` (modern) vs
+`EM` (CellGENI) — the EM model distributes multimapped reads more broadly,
+inflating per-cell UMI counts and pushing more borderline barcodes over the
+EmptyDrops threshold.
 
 **Filtered-cell overlap across MSK GEX-only arms**
 
 | Pair | Common cells | Jaccard |
 |---|---:|---:|
 | Modern vs CR9 | 30,478 | 0.942 |
-| Historical vanilla vs CR9 | 32,209 | 0.994 |
-| Modern vs historical vanilla | 30,483 | 0.940 |
+| CellGENI-style vs CR9 | 32,240 | 0.998 |
+| Modern vs CellGENI-style | 30,467 | 0.940 |
 
 ### Velocyto Bridge (UCSF `EBs2_2` GEX-only)
 
