@@ -32,6 +32,16 @@ export CODESPACES_PUBLIC_HUMAN_GTF_URL="https://ftp.ensembl.org/pub/release-110/
 # tars are large, but they are uncompressed tar archives, so a future Codespaces
 # path can stream selected entries without downloading the full archive.
 
+# A375 5' GEM-X CRISPR (1K cells, 11 guides, ~4.7 GB tar, CC BY 4.0)
+export CODESPACES_PUBLIC_A375_5P_DATASET_URL="https://www.10xgenomics.com/datasets/1k-CRISPR-5p-gemx"
+export CODESPACES_PUBLIC_A375_5P_FASTQS_TAR_URL="https://cf.10xgenomics.com/samples/cell-vdj/8.0.0/1k_CRISPR_5p_gemx_Multiplex/1k_CRISPR_5p_gemx_Multiplex_fastqs.tar"
+export CODESPACES_PUBLIC_A375_5P_FEATURE_REF_URL="https://cf.10xgenomics.com/samples/cell-vdj/8.0.0/1k_CRISPR_5p_gemx_Multiplex/1k_CRISPR_5p_gemx_Multiplex_count_feature_reference.csv"
+
+# A375 3' v3 NextGEM CRISPR (10K cells, 2 guides, ~59 GB tar, CC BY 4.0)
+export CODESPACES_PUBLIC_A375_3P_DATASET_URL="https://support.10xgenomics.com/single-cell-gene-expression/datasets/4.0.0/SC3_v3_NextGem_DI_CRISPR_10K"
+export CODESPACES_PUBLIC_A375_3P_FASTQS_TAR_URL="https://cg.10xgenomics.com/samples/cell-exp/4.0.0/SC3_v3_NextGem_DI_CRISPR_10K/SC3_v3_NextGem_DI_CRISPR_10K_fastqs.tar"
+export CODESPACES_PUBLIC_A375_3P_FEATURE_REF_URL="https://cf.10xgenomics.com/samples/cell-exp/4.0.0/SC3_v3_NextGem_DI_CRISPR_10K/SC3_v3_NextGem_DI_CRISPR_10K_feature_ref.csv"
+
 # Perturb / CRISPR Guide Capture
 export CODESPACES_PUBLIC_PERTURB_DATASET_URL="https://www.10xgenomics.com/datasets/10k-k562-transduced-with-small-guide-library-5-ht-v2-0-chromium-x-2-standard"
 export CODESPACES_PUBLIC_PERTURB_FASTQS_TAR_URL="https://cf.10xgenomics.com/samples/cell-vdj/6.1.2/10k_K562sl_5pv2_nextgem_CRISPR_Chromium_X_Multiplex/10k_K562sl_5pv2_nextgem_CRISPR_Chromium_X_Multiplex_fastqs.tar"
