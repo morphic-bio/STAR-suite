@@ -17,6 +17,18 @@ export CR_GENOME_DIR="${CR_GENOME_DIR:-/storage/autoindex_110_44/bulk_index}"
 export CR_MULTI_GEX_OUTPREFIX="${CR_MULTI_GEX_OUTPREFIX:-/tmp/star_gex_smoke/}"
 export CR_MULTI_OUTPREFIX="${CR_MULTI_OUTPREFIX:-/tmp/star_multi_smoke_cpp/}"
 
+# A375 5' GEM-X downloadable fixture (scripts/download_a375_5prime_fixture.sh)
+export A375_5P_FIXTURE_ROOT="${A375_5P_FIXTURE_ROOT:-/tmp/a375_5prime_fixture}"
+export A375_5P_GEX_DIR="${A375_5P_GEX_DIR:-$A375_5P_FIXTURE_ROOT/fastqs/gex}"
+export A375_5P_CRISPR_DIR="${A375_5P_CRISPR_DIR:-$A375_5P_FIXTURE_ROOT/fastqs/crispr}"
+export A375_5P_FEATURE_REF="${A375_5P_FEATURE_REF:-$A375_5P_FIXTURE_ROOT/1k_CRISPR_5p_gemx_Multiplex_count_feature_reference.csv}"
+export A375_5P_DOWNSAMPLE_DIR="${A375_5P_DOWNSAMPLE_DIR:-$A375_5P_FIXTURE_ROOT/downsampled_100000}"
+
+# A375 3' v3 NextGEM downloadable fixture (scripts/download_a375_3prime_fixture.sh)
+export A375_3P_FIXTURE_ROOT="${A375_3P_FIXTURE_ROOT:-/tmp/a375_3prime_fixture}"
+export A375_3P_FEATURE_REF="${A375_3P_FEATURE_REF:-$A375_3P_FIXTURE_ROOT/SC3_v3_NextGem_DI_CRISPR_10K_feature_ref.csv}"
+export A375_3P_DOWNSAMPLE_DIR="${A375_3P_DOWNSAMPLE_DIR:-$A375_3P_FIXTURE_ROOT/downsampled_100000}"
+
 # UCSF 2M perturb fixtures (current canonical runs)
 export UCSF_2M_ROOT="${UCSF_2M_ROOT:-/storage/ucsf-2M}"
 export UCSF_2M_STAR_RUNS_ROOT="${UCSF_2M_STAR_RUNS_ROOT:-$UCSF_2M_ROOT/star_runs}"

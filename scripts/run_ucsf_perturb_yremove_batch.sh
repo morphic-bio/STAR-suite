@@ -16,8 +16,8 @@ DATASET_ROOT="${DATASET_ROOT:-/mnt/pikachu/ucsf-perturb-seq-corrected}"
 SAMPLE_MAP="${SAMPLE_MAP:-${DATASET_ROOT}/sample_fastq_guide_map.csv}"
 FEATURE_REF="${FEATURE_REF:-/mnt/pikachu/ucsf-perturb-seq/cellranger_feature_ref_hCRISPRa_v2_like_AALG2_pattern.csv}"
 GENOME_DIR="${GENOME_DIR:-/storage/autoindex_110_44/bulk_index}"
-SOLO_CB_WHITELIST="${SOLO_CB_WHITELIST:-/home/lhhung/cellranger-9.0.1/lib/python/cellranger/barcodes/translation/3M-february-2018_NXT.txt}"
-CR_WHITELIST="${CR_WHITELIST:-${SOLO_CB_WHITELIST}}"
+SOLO_CB_WHITELIST="${SOLO_CB_WHITELIST:-/home/lhhung/cellranger-9.0.1/lib/python/cellranger/barcodes/3M-february-2018_TRU.txt}"
+CR_WHITELIST="${CR_WHITELIST:-/home/lhhung/cellranger-9.0.1/lib/python/cellranger/barcodes/translation/3M-february-2018_NXT.txt}"
 OUT_ROOT="${OUT_ROOT:-/mnt/pikachu/ucsf-perturb-yremove_$(date +%Y%m%d_%H%M%S)}"
 THREADS="${THREADS:-24}"
 SAMPLES_CSV=""
@@ -34,6 +34,7 @@ STAR_TRIM_QC_ENABLE="${STAR_TRIM_QC_ENABLE:-0}"
 STAR_TRIM_QC_MAX_READS="${STAR_TRIM_QC_MAX_READS:-250000}"
 RUN_DOWNSTREAM=0
 RUN_CELLBENDER=0
+ADAPTIVE_FILTER=1
 DOWNSTREAM_OUTPUT_NAME=""
 CELLBENDER_CPU_CORES=""
 CELLBENDER_GPU=0
@@ -56,13 +57,14 @@ Options:
   --feature-ref FILE       CRISPR feature ref CSV (default: ${FEATURE_REF})
   --genome-dir DIR         STAR genomeDir (default: ${GENOME_DIR})
   --solo-cb-whitelist P    Solo CB whitelist (default: ${SOLO_CB_WHITELIST})
-  --cr-whitelist P         CR whitelist (default: same as solo whitelist)
+  --cr-whitelist P         CR whitelist (default: ${CR_WHITELIST})
   --star-bin PATH          STAR binary (default: ${STAR_BIN})
   --globus-src-endpoint ID Source Globus collection ID for pikachu outputs
   --globus-dst-endpoint ID Destination Globus collection ID
   --globus-dst-root PATH   Destination root path (e.g. /UCSF-perturb/run_name)
   --globus-poll-seconds N  Poll interval while waiting for transfer cleanup
   --run-downstream         Build local h5ad outputs after each sample run
+  --adaptive-filter        Use adaptive max_genes threshold in downstream QC (default: on)
   --run-cellbender         Run CellBender in downstream processing
   --downstream-output-name NAME
                            Downstream output directory name under each sample root
@@ -496,8 +498,10 @@ run_downstream_for_sample() {
     "${DOWNSTREAM_WRAPPER}"
     --run-dir "${run_dir}"
     --output-dir "${output_dir}"
-    --adaptive-filter
   )
+  if [[ "${ADAPTIVE_FILTER}" == "1" ]]; then
+    args+=(--adaptive-filter)
+  fi
   if [[ "${RUN_CELLBENDER}" == "1" ]]; then
     args+=(--run-cellbender --cellbender-cpu-cores "${cellbender_cores}")
     if [[ "${CELLBENDER_GPU}" == "1" ]]; then
@@ -901,6 +905,7 @@ while [[ $# -gt 0 ]]; do
     --globus-dst-root) GLOBUS_DST_ROOT="$2"; shift 2 ;;
     --globus-poll-seconds) GLOBUS_POLL_SECONDS="$2"; shift 2 ;;
     --run-downstream) RUN_DOWNSTREAM=1; shift ;;
+    --adaptive-filter) ADAPTIVE_FILTER=1; shift ;;
     --run-cellbender) RUN_CELLBENDER=1; RUN_DOWNSTREAM=1; shift ;;
     --downstream-output-name) DOWNSTREAM_OUTPUT_NAME="$2"; shift 2 ;;
     --cellbender-cpu-cores) CELLBENDER_CPU_CORES="$2"; shift 2 ;;
@@ -939,7 +944,7 @@ fi
 
 mkdir -p "${OUT_ROOT}"
 if globus_enabled && (( DRY_RUN == 0 )); then
-  globus mkdir "${GLOBUS_DST_ENDPOINT}:${GLOBUS_DST_ROOT}" >/dev/null
+  globus mkdir "${GLOBUS_DST_ENDPOINT}:${GLOBUS_DST_ROOT}" >/dev/null 2>&1 || true
 fi
 
 TOP_MANIFEST="${OUT_ROOT}/RUNS.tsv"

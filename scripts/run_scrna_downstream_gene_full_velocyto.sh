@@ -12,6 +12,7 @@ POSTPROCESS_FILTERS="${REPO_ROOT}/scripts/postprocess_downstream_filters.py"
 COMPUTE_ADAPTIVE_QC="${REPO_ROOT}/scripts/compute_adaptive_qc_threshold.py"
 GENERATE_QC_HISTOGRAM="${REPO_ROOT}/scripts/generate_qc_histogram.py"
 PROPAGATE_LAYER="${REPO_ROOT}/scripts/propagate_anndata_layer.py"
+ADD_CELLBENDER_LAYER="${REPO_ROOT}/scripts/add_cellbender_layer_from_h5.py"
 INSPECT_ANNDATA="${INSPECT_ANNDATA:-${SC_RNA_SEQ_ROOT}/utilities/inspect_anndata.py}"
 DOCKER_IMAGE="${SCRNA_DOWNSTREAM_IMAGE:-biodepot/scrna-matrices:latest}"
 CELLBENDER_IMAGE="${CELLBENDER_IMAGE:-biodepot/cellbender:0.3.2}"
@@ -23,9 +24,10 @@ MITO_GENES=""
 MIN_GENES="${MIN_GENES:-200}"
 MAX_GENES="${MAX_GENES:-2500}"
 MT_PCT_CUTOFF="${MT_PCT_CUTOFF:-5}"
-ADAPTIVE_FILTER="0"
+ADAPTIVE_FILTER="1"
 N_MAD="${N_MAD:-3}"
 RUN_CELLBENDER="0"
+REUSE_CELLBENDER="0"
 CELLBENDER_USE_GPU="0"
 CELLBENDER_CPU_CORES="${CELLBENDER_CPU_CORES:-8}"
 CELLBENDER_LAYER="${CELLBENDER_LAYER:-denoised}"
@@ -50,6 +52,7 @@ Options:
                          Feature-library integration image
                          (default: biodepot/gather_features:latest)
   --run-cellbender       Run CellBender on raw-backed unfiltered_counts.h5ad and add denoised layer
+  --reuse-cellbender     Skip CellBender denoising but integrate existing cellbender_counts.h5 layer
   --cellbender-image IMG CellBender image (default: biodepot/cellbender:0.3.2)
   --cellbender-gpu       Run CellBender with --gpus all instead of CPU mode
   --cellbender-cpu-cores INT
@@ -104,6 +107,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --run-cellbender)
       RUN_CELLBENDER="1"
+      shift
+      ;;
+    --reuse-cellbender)
+      REUSE_CELLBENDER="1"
       shift
       ;;
     --cellbender-image)
@@ -161,6 +168,7 @@ PRIMARY_H5AD="${FILTERED_H5AD}"
 [[ -f "${COMPUTE_ADAPTIVE_QC}" ]] || { echo "ERROR: Missing helper ${COMPUTE_ADAPTIVE_QC}" >&2; exit 1; }
 [[ -f "${GENERATE_QC_HISTOGRAM}" ]] || { echo "ERROR: Missing helper ${GENERATE_QC_HISTOGRAM}" >&2; exit 1; }
 [[ -f "${PROPAGATE_LAYER}" ]] || { echo "ERROR: Missing helper ${PROPAGATE_LAYER}" >&2; exit 1; }
+[[ -f "${ADD_CELLBENDER_LAYER}" ]] || { echo "ERROR: Missing helper ${ADD_CELLBENDER_LAYER}" >&2; exit 1; }
 [[ -f "${INSPECT_ANNDATA}" ]] || { echo "ERROR: Missing helper ${INSPECT_ANNDATA}" >&2; exit 1; }
 [[ -d "${RUN_DIR}/outs/filtered_feature_bc_matrix" ]] || { echo "ERROR: Missing ${RUN_DIR}/outs/filtered_feature_bc_matrix" >&2; exit 1; }
 [[ -d "${RUN_DIR}/outs/raw_velocyto_feature_bc_matrix" ]] || { echo "ERROR: Missing ${RUN_DIR}/outs/raw_velocyto_feature_bc_matrix" >&2; exit 1; }
@@ -268,57 +276,67 @@ python3 "${POSTPROCESS_FILTERS}" \
   --qc-output-h5ad "${FILTERED_H5AD}" \
   --default-singlet-output-h5ad "${DEFAULT_SINGLET_FILTERED_H5AD}"
 
-if [[ "${RUN_CELLBENDER}" == "1" ]]; then
+if [[ "${RUN_CELLBENDER}" == "1" || "${REUSE_CELLBENDER}" == "1" ]]; then
   CELLBENDER_CB_FILE="${OUTPUT_DIR}/cellbender/cellbender_counts.h5"
   CELLBENDER_FAILURE_NOTE="${OUTPUT_DIR}/cellbender/CELLBENDER_FAILED.txt"
   rm -f "${CELLBENDER_FAILURE_NOTE}"
-  CELLBENDER_ARGS=(
-    run --rm
-    --user "$(id -u):$(id -g)"
-    -v "${OUTPUT_DIR}:${OUTPUT_DIR}"
-    -w "${OUTPUT_DIR}"
-    -e "alignsDir=${OUTPUT_DIR}"
-    -e "NUMBA_CACHE_DIR=${OUTPUT_DIR}/.numba"
-    -e "MPLCONFIGDIR=${OUTPUT_DIR}/.matplotlib"
-    -e "input_pattern=unfiltered_counts.h5ad"
-    -e "output_pattern=unfiltered_counts.h5ad"
-    -e "cb_subdir=cellbender"
-    -e "cb_file=cellbender_counts.h5"
-    -e "layername=${CELLBENDER_LAYER}"
-    -e "nThreads=1"
-    -e "cpu_cores=${CELLBENDER_CPU_CORES}"
-    -e "overwrite_layer=1"
-  )
-  if [[ "${CELLBENDER_USE_GPU}" == "1" ]]; then
-    CELLBENDER_ARGS+=(--gpus all)
+
+  if [[ "${REUSE_CELLBENDER}" == "1" ]]; then
+    echo "Reusing existing CellBender output: ${CELLBENDER_CB_FILE}"
+    [[ -f "${CELLBENDER_CB_FILE}" ]] || { echo "ERROR: --reuse-cellbender requires existing ${CELLBENDER_CB_FILE}" >&2; exit 1; }
   else
-    CELLBENDER_ARGS+=(-e "usecpu=1")
-  fi
-  if [[ -n "${CELLBENDER_FLAGS}" ]]; then
-    CELLBENDER_ARGS+=(-e "additional_flags=${CELLBENDER_FLAGS}")
-  fi
-
-  docker "${CELLBENDER_ARGS[@]}" \
-    "${CELLBENDER_IMAGE}" \
-    remove_noise.sh
-
-  if [[ -f "${CELLBENDER_CB_FILE}" ]]; then
-    CELLBENDER_ADD_ARGS=(
+    CELLBENDER_ARGS=(
       run --rm
       --user "$(id -u):$(id -g)"
       -v "${OUTPUT_DIR}:${OUTPUT_DIR}"
       -w "${OUTPUT_DIR}"
       -e "NUMBA_CACHE_DIR=${OUTPUT_DIR}/.numba"
       -e "MPLCONFIGDIR=${OUTPUT_DIR}/.matplotlib"
-      -e "overwrite_layer=1"
+    )
+    CELLBENDER_CMD=(
+      cellbender
+      remove-background
+      --input "${UNFILTERED_H5AD}"
+      --output "${CELLBENDER_CB_FILE}"
+      --cpu-threads "${CELLBENDER_CPU_CORES}"
+    )
+    if [[ "${CELLBENDER_USE_GPU}" == "1" ]]; then
+      CELLBENDER_ARGS+=(--gpus all)
+    else
+      :
+    fi
+    if [[ "${CELLBENDER_USE_GPU}" == "1" ]]; then
+      CELLBENDER_CMD+=(--cuda)
+    fi
+    if [[ -n "${CELLBENDER_FLAGS}" ]]; then
+      # shellcheck disable=SC2206
+      EXTRA_CB_FLAGS=( ${CELLBENDER_FLAGS} )
+      CELLBENDER_CMD+=("${EXTRA_CB_FLAGS[@]}")
+    fi
+
+    docker "${CELLBENDER_ARGS[@]}" \
+      "${CELLBENDER_IMAGE}" \
+      "${CELLBENDER_CMD[@]}"
+  fi
+
+  if [[ -f "${CELLBENDER_CB_FILE}" ]]; then
+    CELLBENDER_ADD_ARGS=(
+      run --rm
+      --user "$(id -u):$(id -g)"
+      -v "${OUTPUT_DIR}:${OUTPUT_DIR}"
+      -v "${REPO_ROOT}:${REPO_ROOT}:ro"
+      -w "${OUTPUT_DIR}"
+      -e "NUMBA_CACHE_DIR=${OUTPUT_DIR}/.numba"
+      -e "MPLCONFIGDIR=${OUTPUT_DIR}/.matplotlib"
       "${CELLBENDER_IMAGE}"
-      addCounts.py
-      -c "${CELLBENDER_CB_FILE}"
-      -l "${CELLBENDER_LAYER}"
+      python
+      "${ADD_CELLBENDER_LAYER}"
+      --cellbender-h5 "${CELLBENDER_CB_FILE}"
+      --layer-name "${CELLBENDER_LAYER}"
     )
 
     for target_h5ad in "${COUNTS_H5AD}" "${UNFILTERED_H5AD}"; do
-      docker "${CELLBENDER_ADD_ARGS[@]}" -i "${target_h5ad}" -o "${target_h5ad}"
+      docker "${CELLBENDER_ADD_ARGS[@]}" --input-h5ad "${target_h5ad}" --output-h5ad "${target_h5ad}"
     done
 
     python3 "${PROPAGATE_LAYER}" \
@@ -438,7 +456,7 @@ echo "counts.h5ad: ${COUNTS_H5AD}"
 echo "unfiltered_counts.h5ad: ${UNFILTERED_H5AD}"
 echo "filtered_counts.h5ad: ${FILTERED_H5AD}"
 echo "default_singlet_filtered_counts.h5ad: ${DEFAULT_SINGLET_FILTERED_H5AD}"
-if [[ "${RUN_CELLBENDER}" == "1" ]]; then
+if [[ "${RUN_CELLBENDER}" == "1" || "${REUSE_CELLBENDER}" == "1" ]]; then
   echo "final_counts.h5ad: ${FINAL_H5AD}"
 fi
 if (( ${#FEATURE_LIBRARY_DIRS[@]} > 0 )); then

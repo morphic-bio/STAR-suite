@@ -116,6 +116,15 @@ update this file with its output location.
 - `/tmp/public_bulk_fixture_*` (public GEO bulk PE smoke fixtures downloaded via `scripts/download_public_bulk_fixture.sh`)
 - `/mnt/pikachu/ucsf-perturb-yremove*/samples/*/run/read_qc.trim_qc.{json,html}` (STAR read-level FastQC-like QC reports when UCSF perturb runners are launched with `--trim-qc`)
 - `/mnt/pikachu/ucsf-perturb-yremove_all_velocyto*/samples/*/qc/read_qc_r2.{json,html}` (standalone FASTQ replay QC reports on UCSF GEX R2 inputs, written into processed sample roots)
+- `/mnt/pikachu/ucsf-perturb-yremove_velocyto_cellbender_prod_globus_fixtruwl_20260330_225009/` (corrected UCSF production rerun with TRU Solo whitelist + NXT CR whitelist, remote CellBender watcher handoff, and 2026-03-31 adaptive downstream QC repair)
+  - STAR-only continuation log:
+    `/mnt/pikachu/ucsf-perturb-yremove_velocyto_cellbender_prod_globus_fixtruwl_20260330_225009/STAR_ONLY_RELAUNCH_FIX_20260331_072949.log`
+  - remote watcher log:
+    `/mnt/pikachu/ucsf-perturb-yremove_velocyto_cellbender_prod_globus_fixtruwl_20260330_225009/REMOTE_SCAN_RELAUNCH_FIX_20260331_072949.log`
+  - adaptive QC repair pilot:
+    `/mnt/pikachu/ucsf-perturb-yremove_velocyto_cellbender_prod_globus_fixtruwl_20260330_225009/samples/EBs1_1/downstream_genefull_velocyto_cellbender/adaptive_repair_20260331_085330.log`
+  - adaptive threshold artifact:
+    `/mnt/pikachu/ucsf-perturb-yremove_velocyto_cellbender_prod_globus_fixtruwl_20260330_225009/samples/EBs1_1/downstream_genefull_velocyto_cellbender/adaptive_qc_threshold.json`
 - `/storage/A375/` (external A375 datasets + smoke outputs; e.g. `star_gex_smoke/`, `star_multi_smoke_cpp/`, `fastqs/`, `outputs/`)
   - Downsampled MEX output: `/storage/A375/star_multi_smoke/assign/downsampled/`
   - NB-EM calls (A375 CRISPR-only MEX): `/storage/A375/nbem_a375_20260128_075248/`
@@ -266,6 +275,11 @@ update this file with its output location.
 - `/mnt/pikachu/compare_flex/figures_20260330_sc2300771_compare/` — local Flex Leiden/UMAP comparison bundle for SC2300771: independent pipeline runs, joint-pair UMAPs, gene correlations, and CR9-reference projections
   - source projection outputs: `/mnt/pikachu/compare_flex/figures_20260330_sc2300771_compare/cr9_reference_projection_20260330/`
   - tracked README figures copied to `docs/images/flex_parity/`
+- `tests/remote_ucsf_downstream_100k_smoke_*.log` — local orchestrator logs for `tests/run_remote_ucsf_downstream_100k_smoke.sh`
+  - per-run outputs are copied back under the sample root, e.g. `tests/ucsf_corrected_production_100k_output_20260329_171919/samples/EBs2_2/downstream_remote_100k_smoke_<timestamp>/`
+- `tests/remote_cellbender_100k_smoke_*.log` — local orchestrator logs for `tests/run_remote_cellbender_100k_smoke.sh`
+  - per-run copied-downstream smoke roots live under `tests/remote_cellbender_100k_smoke_<timestamp>/`
+  - expected outputs include `cellbender/cellbender_counts.h5` on success or `cellbender/CELLBENDER_FAILED.txt` on sparse 100K fallback, plus regenerated `final_counts.h5ad`
 
 ## Flex Modular Integration Baselines
 
