@@ -20,7 +20,58 @@ void ParametersSolo::initialize(Parameters *pPin)
 {
     pP=pPin;
 
+    auto parseEmptyDropsLegacy = [&]() {
+        string mode = emptyDropsLegacyStr;
+        transform(mode.begin(), mode.end(), mode.begin(), ::tolower);
+        if (mode == "yes") {
+            emptyDropsLegacy = true;
+        } else if (mode == "no" || mode.empty()) {
+            emptyDropsLegacy = false;
+        } else {
+            ostringstream errOut;
+            errOut << "EXITING because of fatal PARAMETERS error: unrecognized option in --soloEmptyDropsLegacy=" << emptyDropsLegacyStr << "\n";
+            errOut << "SOLUTION: use allowed option: yes OR no\n";
+            exitWithError(errOut.str(), std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
+        }
+    };
+
+    auto parseEmptyDropsLegacyKnee = [&]() {
+        string mode = emptyDropsLegacyKneeStr;
+        transform(mode.begin(), mode.end(), mode.begin(), ::tolower);
+        if (mode == "yes") {
+            emptyDropsLegacyKnee = true;
+        } else if (mode == "no" || mode.empty()) {
+            emptyDropsLegacyKnee = false;
+        } else {
+            ostringstream errOut;
+            errOut << "EXITING because of fatal PARAMETERS error: unrecognized option in --soloEmptyDropsLegacyKnee=" << emptyDropsLegacyKneeStr << "\n";
+            errOut << "SOLUTION: use allowed option: yes OR no\n";
+            exitWithError(errOut.str(), std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
+        }
+    };
+
+    auto parseEmptyDropsMode = [&]() {
+        string mode = emptyDropsModeStr;
+        transform(mode.begin(), mode.end(), mode.begin(), ::tolower);
+        if (mode == "auto" || mode.empty()) {
+            emptyDropsMode = EmptyDropsAuto;
+        } else if (mode == "simple" || mode == "simpleed" || mode == "ordmag" || mode == "simple_only") {
+            emptyDropsMode = EmptyDropsSimpleOnly;
+        } else if (mode == "union" || mode == "ed_union") {
+            emptyDropsMode = EmptyDropsUnion;
+        } else {
+            ostringstream errOut;
+            errOut << "EXITING because of fatal PARAMETERS error: unrecognized option in --soloEmptyDropsMode=" << emptyDropsModeStr << "\n";
+            errOut << "SOLUTION: use allowed option: auto OR simple OR union\n";
+            exitWithError(errOut.str(), std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
+        }
+    };
+
     cellFiltering();
+    parseEmptyDropsLegacy();
+    parseEmptyDropsLegacyKnee();
+    parseEmptyDropsMode();
+
     if (pP->runMode=="soloCellFiltering") {//only filtering happens, do not need any other parameters
         yes=true;
         umiDedup.typesIn = {"NoDedup"}; //this does not affect the results - the dedup had been done when raw matrix was generated
@@ -86,59 +137,6 @@ void ParametersSolo::initialize(Parameters *pPin)
         exitWithError(errOut.str(),std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
     };
     
-    //////////////////////////////////////////////////////////////////////////////////////////////////////
-    ///////////////////////////////--soloEmptyDropsLegacy
-    {
-        string mode = emptyDropsLegacyStr;
-        transform(mode.begin(), mode.end(), mode.begin(), ::tolower);
-        if (mode == "yes") {
-            emptyDropsLegacy = true;
-        } else if (mode == "no" || mode.empty()) {
-            emptyDropsLegacy = false;
-        } else {
-            ostringstream errOut;
-            errOut << "EXITING because of fatal PARAMETERS error: unrecognized option in --soloEmptyDropsLegacy=" << emptyDropsLegacyStr << "\n";
-            errOut << "SOLUTION: use allowed option: yes OR no\n";
-            exitWithError(errOut.str(), std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
-        }
-    }
-    
-    //////////////////////////////////////////////////////////////////////////////////////////////////////
-    ///////////////////////////////--soloEmptyDropsLegacyKnee
-    {
-        string mode = emptyDropsLegacyKneeStr;
-        transform(mode.begin(), mode.end(), mode.begin(), ::tolower);
-        if (mode == "yes") {
-            emptyDropsLegacyKnee = true;
-        } else if (mode == "no" || mode.empty()) {
-            emptyDropsLegacyKnee = false;
-        } else {
-            ostringstream errOut;
-            errOut << "EXITING because of fatal PARAMETERS error: unrecognized option in --soloEmptyDropsLegacyKnee=" << emptyDropsLegacyKneeStr << "\n";
-            errOut << "SOLUTION: use allowed option: yes OR no\n";
-            exitWithError(errOut.str(), std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
-        }
-    }
-
-    //////////////////////////////////////////////////////////////////////////////////////////////////////
-    ///////////////////////////////--soloEmptyDropsMode
-    {
-        string mode = emptyDropsModeStr;
-        transform(mode.begin(), mode.end(), mode.begin(), ::tolower);
-        if (mode == "auto" || mode.empty()) {
-            emptyDropsMode = EmptyDropsAuto;
-        } else if (mode == "simple" || mode == "simpleed" || mode == "ordmag" || mode == "simple_only") {
-            emptyDropsMode = EmptyDropsSimpleOnly;
-        } else if (mode == "union" || mode == "ed_union") {
-            emptyDropsMode = EmptyDropsUnion;
-        } else {
-            ostringstream errOut;
-            errOut << "EXITING because of fatal PARAMETERS error: unrecognized option in --soloEmptyDropsMode=" << emptyDropsModeStr << "\n";
-            errOut << "SOLUTION: use allowed option: auto OR simple OR union\n";
-            exitWithError(errOut.str(), std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
-        }
-    }
-
     // Keep skipProcessing disabled when running in soloCellFiltering mode to avoid side effects
     if (pP->runMode == "soloCellFiltering") {
         skipProcessing = false;
