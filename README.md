@@ -63,287 +63,40 @@ mcp_server/              # MCP server for scripted discovery/preflight/run workf
 
 ## Benchmarks
 
-All benchmarks run on pikachu (AMD, 32 threads, 128 GB RAM, NVMe SSD).
-Detailed artifacts: `comparisons/paper_benchmarks_20260318/`.
-Publication-facing wrapper scripts for the benchmark surfaces below:
-`publications/benchmarks/README.md`.
+All benchmarks run on pikachu (AMD, 32 threads, 128 GB RAM, NVMe SSD). The
+table below keeps the README focused on the headline results. Publication-facing
+wrappers live in [publications/benchmarks/README.md](publications/benchmarks/README.md),
+archived benchmark artifacts live in
+[comparisons/paper_benchmarks_20260318/README.md](comparisons/paper_benchmarks_20260318/README.md),
+and detailed Velocyto bridge results live in
+[docs/VELOCYTO_BENCHMARKS.md](docs/VELOCYTO_BENCHMARKS.md).
 
-Datasets: MorPHiC JAX KOLF PE RNA-seq (sample 21033-09-01-13-01, 6.5M read pairs, NovaSeq X Plus) and MorPHiC JAX PPARG PE RNA-seq (35.1M read pairs, NovaSeq X Plus).
-
-"External stepwise" = Trim Galore + STAR align + (optional remove\_y\_reads) + Salmon quant (sequential).
-
-### Bulk RNA-seq Wall Time
-
-| Dataset | Y-removal | Wall time (integrated) | Wall time (stepwise) | Speedup |
+| Workflow | Dataset / surface | Baseline | STAR-suite result | Key parity / note |
 |---|---|---|---|---|
-| JAX PE 6.5M (32 threads) | no | **37 s** | 87 s | 2.4x |
-| JAX PE 6.5M (32 threads) | yes | **61 s** | 125 s | 2.1x |
-| PPARG PE 35.1M (32 threads) | no | **9 min 35 s** | 16 min 43 s | 1.7x |
-| PPARG PE 35.1M (32 threads) | yes | **11 min 58 s** | 24 min 35 s | 2.1x |
+| Bulk RNA-seq | JAX PE 6.5M | External stepwise (Trim Galore + STAR + Salmon) | **37 s** without Y-removal, **61 s** with Y-removal; **2.4x / 2.1x** faster | Transcript Pearson **0.995**, gene Pearson **0.997** vs Salmon |
+| Bulk RNA-seq | PPARG PE 35.1M | External stepwise (Trim Galore + STAR + Salmon) | **9m 35s** without Y-removal, **11m 58s** with Y-removal; **1.7x / 2.1x** faster | Same integrated trim + align + TranscriptVB path |
+| scRNA-seq Solo | UCSF `EBs2_2` GEX-only | Historical CellGENI-style STARsolo (`7a7fb08`) | **13.75 min** optimized `zcat` vs **26.8 min** historical; **1.95x** faster | **13,723** cells, gene Pearson **0.994885** vs CR9; current `zcat` surface is the best validated UCSF run |
+| scRNA-seq Solo | MSK 30polyKO GEX-only | Historical CellGENI-style STARsolo (`7a7fb08`) | **19.40 min** modern vs **29.52 min** historical; **1.52x** faster | **30,562** cells, gene Pearson **0.994575** vs CR9 |
+| Perturb-seq | A375 1k CRISPR 5' GemX | Cell Ranger 9 | **4.0 min**; **3.8x** faster | Jaccard **0.976**, gene Pearson **0.975**, CRISPR match **100%** |
+| Perturb-seq | UCSF `EBs2_2` | Cell Ranger 9 | **16.4 min**; **3.7x** faster | Jaccard **0.976**, gene Pearson **0.995**, CRISPR match **98.9%** |
+| Perturb-seq | MSK 30polyKO | Cell Ranger 9 (separate GEX+gRNA and GEX+LARRY runs) | **25.0 min**; **6.7x** faster | Jaccard **0.942**, gene Pearson **0.994**, CRISPR match **99.4%** |
+| Flex | JAX SC2300771 full / no-align | Cell Ranger 9 / 7 | **23m 30s** full (**2.5x** vs CR9), **10m 26s** no-align (**5.7x** vs CR9) | Mean Jaccard **0.981**, cell Pearson **0.99997**, gene Pearson **0.99993** vs CR9 |
+| SLAM-seq | NW-5-21 ARID1A compat mode | GEDI / GRAND-SLAM family | Integrated single-pass alignment + quantification; no apples-to-apples end-to-end wall-time claim reported | NTR Pearson **0.967-0.978**, Spearman **0.985-0.990** vs GEDI |
 
-### Bulk RNA-seq Parity (STAR TranscriptVB vs Salmon)
+Perturb-seq is the main performance result: on A375, UCSF, and MSK surfaces,
+STAR-suite runs **3.8x-6.7x faster** than Cell Ranger 9 while maintaining
+near-identical GEX/cell metrics and **98.9-100%** CRISPR call agreement.
 
-| Dataset | Y-removal | Transcript Pearson | Gene Pearson |
-|---|---|---|---|
-| JAX PE 6.5M (32 threads) | no | 0.995 | 0.997 |
-| JAX PE 6.5M (32 threads) | yes | 0.995 | 0.997 |
+For non-Flex Solo, the README now summarizes only the historical CellGENI-style
+baseline versus the current optimized surface. On this host, external `zcat`
+remains the fastest validated read path for UCSF/MSK GEX-only and perturb runs;
+native `.gz` input is functional but not yet the fastest on those surfaces.
 
-- JAX PE 6.5M noY: TranscriptVB vs Salmon alignment-mode VB on expressed transcripts; integrated 37 s vs external stepwise 87 s (32 threads). Speedup reflects elimination of Trim Galore and Salmon as separate steps; single-pass STAR handles trimming, alignment, and quantification.
-- JAX PE 6.5M Y-removal: TranscriptVB vs Salmon alignment-mode VB on expressed transcripts; integrated 61 s vs external stepwise 125 s (32 threads). Y-removal adds chrY BAM splitting and noY FASTQ generation in both pipelines; integrated path handles this natively via `--emitNoYBAM yes`.
-- PPARG PE 35.1M noY: Integrated 9 min 35 s (STAR 8m36s + Salmon QC 59s) vs external stepwise 16 min 43 s (decompress 1m25s + trim 7m09s + STAR 7m12s + Salmon 57s). Same pipeline structure as JAX PE; larger dataset shows speedup dominated by elimination of decompress + trim steps.
-- PPARG PE 35.1M Y-removal: Integrated 11 min 58 s (STAR 11m52s + Salmon QC 6s) vs external stepwise 24 min 35 s (decompress 1m24s + trim 6m56s + STAR 8m54s + Y-removal 6m24s + Salmon 57s). Y-removal adds 6m24s externally but is free in the integrated path.
-
-### UCSF GEX-only Solo (full sample, no BAM)
-
-Here, "CellGENI-style" refers to the independent CellGENI GitHub STARsolo workflow:
-STARsolo run with the parameter surface used by the CellGENI team, rather than
-the suite-integrated defaults in this repository.
-
-| Arm | STAR build | Reads | Filtered cells | Wall (32 thr) | Notes |
-|---|---|---:|---:|---:|---|
-| Historical CellGENI-style | `7a7fb08` | 445M | 13,847 | **26.8 min** | CellGENI-style parameter surface, latest TRU whitelist, `GeneFull` only, `zcat`; `/storage/solo_overnight_20260326/ucsf_gexonly_no_bam/star_cellgeni_historical_7a7fb08_truwhitelist_genefullonly_20260326/` |
-| Modern optimized | current suite `STAR` | 445M | 13,723 | **13.75 min** | Best validated current surface, `zcat`; `/storage/solo_overnight_20260326/ucsf_gexonly_no_bam/star_optimized_current_zcat_20260326/` |
-| Modern optimized | current suite `STAR` | 445M | 13,728 | **15.8 min** | Native `.gz`; `/storage/solo_overnight_20260326/ucsf_gexonly_no_bam/star_optimized_current_retry2/` |
-
-`zcat` remains the fastest validated UCSF GEX-only read path on this host:
-current optimized `zcat` is 1.95x faster than the CellGENI-style historical
-rerun, while the native `.gz` path is still 1.70x faster than that same
-CellGENI-style baseline. The native `.gz` path is functional but still slower
-than `zcat` on this benchmark; internal gzip tuning is not yet optimized for
-this non-Flex Solo surface.
-
-**CR9 parity (corrected UCSF `EBs2_2` GEX-only reference: `/storage/cr9_ebs2_2_benchmark_20260318/cr9_ebs2_2`)**
-
-| Arm | Filtered cells | Cell Jaccard vs CR9 | Barcode Pearson vs CR9 | Gene Pearson vs CR9 |
-|---|---:|---:|---:|---:|
-| Current optimized `zcat` | 13,723 | 0.976 | 0.999946 | 0.994885 |
-| Historical CellGENI-style `7a7fb08` | 13,847 | 0.989 | 0.999949 | 0.963561 |
-| Cell Ranger 9 reference | 13,760 | 1.000 | 1.000000 | 1.000000 |
-
-Current optimized `zcat` is the best overall UCSF GEX-only surface: it has the
-fastest wall time and the strongest gene-level agreement to CR9. The
-CellGENI-style historical surface preserves slightly more CR9 filtered-barcode
-overlap, but loses substantial gene-level parity relative to the current build.
-
-**Filtered-cell overlap across UCSF GEX-only arms**
-
-| Pair | Common cells | Jaccard |
-|---|---:|---:|
-| Current vs historical CellGENI-style | 13,549 | 0.966 |
-| Current vs CR9 | 13,578 | 0.976 |
-| Historical CellGENI-style vs CR9 | 13,728 | 0.989 |
-
-### MSK 30polyKO GEX-only Solo (full sample, no BAM)
-
-MSK 30polyKO is a mixed-chemistry 3-library Perturb-seq dataset (GEX TRU +
-gRNA NXT + LARRY TRU). This benchmark isolates the GEX mRNA lanes only
-(28 lanes, ~41 GB) for a Solo-only comparison against the CellGENI-style
-historical baseline (`7a7fb08`) and CellRanger 9.
-
-| Arm | STAR build | Filtered cells | Wall (32 thr) | Notes |
-|---|---|---:|---:|---|
-| Historical CellGENI-style | `7a7fb08` | 32,304 | **29.52 min** | CellGENI-style parameter surface, `--soloMultiMappers EM`, `--soloStrand Forward`, `--outFilterScoreMin 30`, `zcat`; `/storage/MSK-perturb-comparison/bench_cellgeni_msk_20260401_162259/` |
-| Modern optimized | current suite `STAR` | 30,562 | **19.40 min** | Bridge + inline hash, `--soloMultiMappers Unique`, `--soloStrand Forward`, `zcat`; `/storage/MSK-perturb-comparison/bench_modern_msk_20260401_103023/` |
-
-Speedup: **1.52x** (10.1 min faster). Consistent with the 1.52x–1.95x range
-observed across datasets (UCSF 1.95x on 14K cells; the narrower gap here
-reflects the EM multimapper model being faster than Rescue on this dataset).
-
-**CR9 parity (MSK 30polyKO GEX+gRNA reference: `/storage/MSK-perturb-comparison/cr_full_grna_30crispr_20260306_173247/`)**
-
-| Arm | Filtered cells | Cell Jaccard vs CR9 | Barcode Pearson vs CR9 | Gene Pearson vs CR9 |
-|---|---:|---:|---:|---:|
-| Modern optimized | 30,562 | 0.942 | 0.999187 | 0.994575 |
-| Historical CellGENI-style `7a7fb08` | 32,304 | 0.998 | 0.999303 | 0.954925 |
-| Cell Ranger 9 reference | 32,256 | 1.000 | 1.000000 | 1.000000 |
-
-Modern has better gene-level parity with CR9 (0.995 vs 0.955) despite calling
-fewer cells. The CellGENI-style historical run has slightly higher cell Jaccard
-(0.998 vs 0.942) and comparable barcode Pearson (0.999 vs 0.999). The cell count
-difference (30,562 vs 32,304) reflects `--soloMultiMappers Unique` (modern) vs
-`EM` (CellGENI) — the EM model distributes multimapped reads more broadly,
-inflating per-cell UMI counts and pushing more borderline barcodes over the
-EmptyDrops threshold.
-
-**Filtered-cell overlap across MSK GEX-only arms**
-
-| Pair | Common cells | Jaccard |
-|---|---:|---:|
-| Modern vs CR9 | 30,478 | 0.942 |
-| CellGENI-style vs CR9 | 32,240 | 0.998 |
-| Modern vs CellGENI-style | 30,467 | 0.940 |
-
-### Velocyto Bridge (UCSF `EBs2_2` GEX-only)
-
-These runs isolate the new exact/deterministic Velocyto bridge on corrected
-UCSF `EBs2_2/GEX`, without feature-assignment confounders.
-
-**Correctness / parity ladder**
-
-| Surface | Threads | Checks | Result |
-|---|---:|---|---|
-| 100K downsampled GEX-only fixture | 1 vs 8 | frozen baseline vs `stream_t1`, `stream_t1` vs `det_t1`, `det_t1` vs `det_t8`, `Gene`/`GeneFull` parity | **PASS** |
-| 10M downsampled GEX-only fixture | 8 | frozen baseline vs `stream_t8`, `stream_t8` vs `det_t8`, `det_t8` vs `hash_t8`, `Gene`/`GeneFull` parity | **PASS** |
-| Full corrected `EBs2_2/GEX` | 32 | `stream_t32` vs integrated-hash `hash_t32`, full Velocyto packaged/raw parity, `Gene`/`GeneFull` parity | **PASS** |
-
-**Timing / RSS**
-
-| Surface | Arm | Reads | Wall | Speed | Peak VmRSS |
-|---|---|---:|---:|---:|---:|
-| 10M GEX-only | `stream_t8` | 10.0M | 1m 53s | 620.69 M reads/hour | 11,183,816 kB |
-| 10M GEX-only | `det_t8` | 10.0M | 1m 53s | 620.69 M reads/hour | 11,183,816 kB |
-| 10M GEX-only | `hash_t8` | 10.0M | 1m 54s | 620.69 M reads/hour | 11,109,796 kB |
-| Full corrected `EBs2_2/GEX` | `stream_t32` | 444.9M | 23m 05s | 1208.78 M reads/hour | 47,608,160 kB |
-| Full corrected `EBs2_2/GEX` | `hash_t32` | 444.9M | 23m 03s | 1210.60 M reads/hour | 37,651,052 kB |
-
-- On the full corrected GEX surface, the integrated-hash Velocyto path is a
-  near timing tie with the stream path and reduces whole-run peak VmRSS by
-  about 21% (`47.6 GB -> 37.7 GB`) in this run.
-- This `stream_t32` vs `hash_t32` comparison is the measured apples-to-apples
-  benchmark for the full `Gene + GeneFull + Velocyto` surface. In this pair,
-  `Gene` and `GeneFull` remain on the normal path while `Velocyto` switches to
-  the integrated-hash implementation.
-- The current RSS helper uses whole-`Log.out` `VmRSS` fallback on these runs,
-  so the numbers above are whole-run peak RSS rather than a Velocyto-only phase
-  metric.
-
-**Fused `GeneFull + Velocyto` experimental mixed path**
-
-| Surface | Arm | Reads | Wall | Speed | Peak VmRSS | Status |
-|---|---|---:|---:|---:|---:|---|
-| Full corrected `EBs2_2/GEX` | `GeneFull` bridge + Velocyto hash (32 threads) | 444.9M | 12m 55s | 2227.58 M reads/hour | 21,532,344 kB | Velocyto exact, `GeneFull` not yet exact |
-
-- Relative to the earlier full `Gene + GeneFull + Velocyto` hash control
-  (`23m 03s`, `37,651,052 kB`), the mixed path is materially faster and lower
-  memory.
-- We did **not** benchmark a fully hash-based `Gene + GeneFull + Velocyto`
-  implementation, and we are not currently pursuing the engineering needed to
-  make `Gene` hash-based. The practical fast Velocyto-capable path today is:
-  omit `Gene`, then run `GeneFull + Velocyto` on the bridge/hash path.
-- `Velocyto` raw outputs matched exactly on the full set.
-- `GeneFull` had small sparse deltas. We traced one representative case:
-  `TTTCACAGTTGGATCT / corr=7652715 / gene=4324` came from an ambiguous-CB read
-  with 4 whitelist candidates that was seen by both legacy and bridge paths.
-  The bridge did not retain that singleton under the target barcode. This was a
-  targeted representative trace, not an exhaustive classification of all
-  residual `GeneFull` deltas.
-
-**Bottom line timings**
-
-- Full corrected `EBs2_2/GEX`, `Gene + GeneFull + Velocyto`, normal stream:
-  **23m 05s**
-- Full corrected `EBs2_2/GEX`, `Gene + GeneFull + Velocyto`, hashed `Velocyto`
-  only: **23m 03s**
-- Full corrected `EBs2_2/GEX`, `GeneFull + Velocyto`, bridge/hash path
-  (drops `Gene`): **12m 55s**
-
-So the integrated-hash Velocyto path is roughly timing-neutral on the full
-`Gene + GeneFull + Velocyto` surface, while the practical fast path for
-Velocyto output is to skip `Gene` and run `GeneFull + Velocyto` on the
-bridge/hash implementation.
-
-### Perturb-seq Wall Time
-
-| Dataset | Libraries | Chemistry | Reads | STAR cells | Wall time | Speedup |
-|---|---|---|---|---|---|---|
-| A375 1k CRISPR 5' GemX | GEX + CRISPR (2) | TRU | 47M | 1,187 | **4.0 min** | 3.8x |
-| UCSF EBs2_2 Perturb-seq | GEX + CRISPRa (2) | NXT→TRU | 445M | 13,719 | **16.4 min** | 3.7x |
-| MSK 30polyKO | GEX + gRNA + LARRY (3; 245,979 LARRY barcodes) | Mixed TRU/NXT | 669M | 30,557 | **25.0 min** | 6.7x |
-
-Current perturb benchmark defaults use `zcat` plus the non-Flex Solo bridge path. Serial **native `.gz`** comparison reruns (no external `zcat`, 32 threads, no BAM, 2026-03-26) remained slower: UCSF **20.9 min** (`/storage/solo_overnight_20260326/ucsf_perturb_no_bam/ebs2_2_no_bam_nativegzip_20260326_075154/`), MSK **28.6 min** (`…/msk_perturb_no_bam/msk30ko_no_bam_nativegzip_20260326_081323/`), A375 **4.3 min** (`…/a375_perturb_no_bam/a375_no_bam_nativegzip_20260326_084220/`). This matches the current tuning status: outside Flex, external `zcat` remains the faster validated read path. Details: `tests/ARTIFACTS.md`.
-
-### Perturb-seq Parity (STAR vs Cell Ranger 9)
-
-| Dataset | Cells (STAR / CR) | Jaccard | Gene Pearson | Cell Pearson | CRISPR match |
-|---|---|---|---|---|---|
-| A375 1k CRISPR 5' (GeneFull) | 1,187 / 1,162 | 0.976 | 0.975 | 1.000 | 100% (1,083/1,083) |
-| UCSF EBs2_2 (full, NXT) | 13,721 / 13,760 | 0.976 | 0.995 | 1.000 | 98.9% (11,902/12,038) |
-| MSK 30polyKO (3-lib, NXT+TRU) | 30,567 / 32,256 | 0.942 | 0.994 | 1.000 | 99.4% (23,210/23,341) |
-
-- A375: Gene Pearson on 15,673 filtered genes (min 20 counts, 1% cells); Cell Pearson 0.9995 on 1,160 common barcodes; CRISPR exact set-match on all 1,083 common cells (min-UMI 10), UMI Pearson 1.000; speedup = 4 min vs 15 min (32 threads, no BAM). CR9 reference: `refdata-gex-GRCh38-2024-A`, `1k_CRISPR_5p_gemx_count_refmatch_2024a_fullraw`.
-- UCSF EBs2_2: Gene Pearson on 18,061 filtered genes; Cell Pearson 1.000 on 13,571 common barcodes; CRISPR set-match 98.9% on 12,038 evaluated cells, target-level match 99.5%; UMI Pearson 0.999; speedup = 16 min vs 61 min CR9 (32 threads, no BAM). CR9 reference: `refdata-gex-GRCh38-2024-A`, run on same corrected FASTQs.
-- MSK: Gene Pearson on 17,460 filtered genes; Cell Pearson 1.000 on 30,481 common barcodes; CRISPR set-match 99.4% on 23,341 evaluated cells (30 guides, min-UMI 2), UMI Pearson 1.000; dataset includes 245,979 LARRY lineage barcodes; speedup = 25 min vs 168 min (32 threads, no BAM). CR requires two separate runs (GEX+gRNA 58 min + GEX+LARRY 110 min); STAR handles all three libraries in a single pass with per-library whitelist support.
-
-All parity metrics computed with `scripts/report_additional_parity_metrics.py --gene-corr-min-counts 20 --gene-corr-min-cells-pct 0.01` per `docs/PAPER_BENCHMARK_METHODOLOGY.md`. CR9 references use `refdata-gex-GRCh38-2024-A` (gencode v44, mkref 8.0.0).
-
-### Perturb-seq Phase Breakdown (32 threads, no BAM)
-
-| Phase | A375 (47M) | UCSF EBs2_2 (445M) | MSK 30polyKO (669M) |
-|---|---|---|---|
-| Genome load | 44s | 48s | 48s |
-| Feature assignment | 32s | 4m 57s | 21m 38s |
-| Mapping | 81s | 9m 24s | 14m 43s |
-| Solo counting | 69s | 4m 04s | 4m 31s |
-| PfMulti merge + calling | 10s | 1m 25s | 2m 00s |
-| writeCombinedMex (raw/filt) | 2.0s / 1.5s | 20.2s / 15.3s | 34.8s / 24.2s |
-
-Feature assignment and mapping run concurrently via `dynamicThreadInterface`.
-
-### Flex Wall Time
-
-| Pipeline | Mode | BAM | Wall time | vs CR9 (no BAM) | vs CR7 (with BAM) |
-|---|---|---|---|---|---|
-| **STAR-Flex** | full | no | **23m 30s** | **2.5x** | **~12.8x** |
-| **STAR-Flex** | no-align | no | **10m 26s** | **5.7x** | **~28.8x** |
-| CellRanger 9.0.1 | multi | no | 59 min | 1.0x | ~5x |
-| CellRanger 7.0.0 | multi | yes | ~5 hr | 0.2x | 1.0x |
-
-Dataset: JAX SC2300771 (4 Flex tags, 8 lanes, 2.011B paired-end reads). All runs: 32 threads.
-
-Unlike the non-Flex alignment/Solo surfaces above, the internal gzip reader has been tuned on the Flex path and is faster there than external `zcat`.
-
-### Flex Parity (STAR vs Cell Ranger 9.0.1, GRCh38-2024-A)
-
-| Tag (sample) | STAR cells | STAR GE UMIs | CR9 cells | Jaccard | Cell Pearson | Gene Pearson |
-|---|---|---|---|---|---|---|
-| BC004 (WT-Day-7) | 4,384 | 32,617,043 | 4,397 | 0.966 | 0.99997 | 0.99990 |
-| BC006 (PAX6-PTC-D9-Day7) | 5,283 | 42,528,029 | 5,343 | 0.979 | 0.99998 | 0.99992 |
-| BC007 (WT-Day-8) | 5,383 | 73,268,410 | 5,383 | 0.992 | 0.99997 | 0.99994 |
-| BC008 (PAX6-PTC-D9-Day8) | 5,266 | 60,663,948 | 5,296 | 0.988 | 0.99998 | 0.99995 |
-| **Mean / total** | | **209,077,430** | | **0.981** | **0.99997** | **0.99993** |
-
-### Flex No-Align Mode (`--flexNoAlign 1`)
-
-No-align mode skips alignment for H0/H1 misses (~16% of reads), reducing wall time from 23m 30s to 10m 26s. That ~16% figure is a read-routing fraction, not a matrix-level sensitivity loss. On the archived 2026-03-25 benchmark pair, filtered Gene Expression STAR totals changed from 209,077,430 to 209,076,273 UMIs (Δ = -1,157; 0.00055%). Intended for rapid prototyping and iteration.
-
-| Tag (sample) | No-Align cells | No-Align GE UMIs | Full cells | CR9 cells | Cells lost | Jaccard | Cell Pearson | Gene Pearson |
-|---|---|---|---|---|---|---|---|---|
-| BC004 (WT-Day-7) | 4,383 | 32,616,104 | 4,384 | 4,397 | 1 (<0.1%) | 0.966 | 0.99997 | 0.99990 |
-| BC006 (PAX6-PTC-D9-Day7) | 5,284 | 42,528,477 | 5,283 | 5,343 | 0 | 0.979 | 0.99998 | 0.99992 |
-| BC007 (WT-Day-8) | 5,383 | 73,268,111 | 5,383 | 5,383 | 0 | 0.992 | 0.99997 | 0.99994 |
-| BC008 (PAX6-PTC-D9-Day8) | 5,266 | 60,663,581 | 5,266 | 5,296 | 0 | 0.988 | 0.99998 | 0.99995 |
-| **Mean / total** | | **209,076,273** | | | | **0.981** | **0.99997** | **0.99993** |
-
-Cell loss from no-align is negligible (<0.1%): BC004 loses one filtered cell, BC006 gains one, and the other two benchmark tags are unchanged. The hash screen resolves ~84% of reads at offset 0; the remaining ~16% that would go to alignment change only one cell in this dataset while preserving the same mean CR9 parity to 3-5 decimal places. The parity wrapper now writes a de-duplicated STAR summary so totals are not accidentally double-counted across CR7/CR9 or `all`/`Gene_Expression` rows.
-
-Using a fixed CR9 embedding removes the visual ambiguity from independently fit UMAPs. When full-align and no-align are both projected into the same CR9 PCA/UMAP space, they use the same 13 CR9 Leiden clusters and agree almost perfectly on shared cells: projected-label ARI `0.9979`, NMI `0.9967` on `20,315` shared cells.
-
-| CR9 Reference | STAR-Flex Full Projected To CR9 | STAR-Flex No-Align Projected To CR9 |
-|---|---|---|
-| ![CR9 reference Leiden UMAP](docs/images/flex_parity/umap_sc2300771_cr9_reference.png) | ![STAR-Flex full projected to CR9 Leiden UMAP](docs/images/flex_parity/umap_sc2300771_fullalign_projected_to_cr9.png) | ![STAR-Flex no-align projected to CR9 Leiden UMAP](docs/images/flex_parity/umap_sc2300771_noalign_projected_to_cr9.png) |
-
-- Cell Pearson = per-barcode total-UMI Pearson on common barcodes. Gene Pearson = per-probe total-UMI Pearson on common features. Barcode Jaccard computed after truncating CR 24bp barcodes to 16bp GEM prefix.
-- Both STAR and CR9 use GRCh38-2024-A genome and probe set v1.1.0. Using mismatched annotations (e.g., v1.0.1 / GRCh38-2020-A) drops Gene Pearson to ~0.09 while Cell Pearson remains >0.999.
-- STAR full 23m30s = 20m55s to mapping complete + 2m07s Solo counting (`--outSAMtype None`). STAR no-align 10m26s = ~8m49s to mapping complete + ~1m36s Solo counting. CR9 58m59s = CellRanger 9.0.1 multi (32 cores, `--localmem 120`, `create-bam false`). CR7 ~5 hr = CellRanger 7.0.0 multi (32 cores, 160 GB, with BAM output).
-- STAR-Flex uses a fully-fused lane-reader pipeline with H0+H1 hash-screen cache, sample pre-filter, and lane work-stealing with reader-to-aligner role switching.
-- Parity script: `scripts/paper/run_flex_parity.sh`. Underlying metric tool: `scripts/paper/compute_parity_metrics.py`. Use `flex_parity_star_unique_summary.tsv` or `flex_parity_star_unique_totals.txt` for aggregate STAR totals; do not sum `flex_parity_combined.tsv` directly.
-- CR9-projection parity script: `scripts/paper/project_flex_leiden_to_cr9.py`.
-
-### SLAM-seq (STAR-SLAM vs GrandSLAM/GEDI)
-
-**NTR parity (compat mode, GEDI is reference):**
-
-| Dataset | Sample | NTR Pearson | NTR Spearman |
-|---|---|---|---|
-| NW-5-21 ARID1A 1M (compat, no trim) | 0h | 0.978 | 0.990 |
-| NW-5-21 ARID1A 1M (compat, no trim) | 6h | 0.972 | 0.986 |
-| NW-5-21 ARID1A 1M (compat, no trim) | 24h | 0.967 | 0.985 |
-| 100K fixture (SNP BED, ≥20 reads) | -- | 0.999 | 0.981 |
-
-- Comparison uses SNP-masked BAMs; GEDI is reference.
-- `slam_requant` replay: Pearson/Spearman 1.0 (exact parity with STAR output).
-- Compat mode (`--slamCompatMode gedi`) adds negligible overhead (<0.1% wall time, <1% memory).
-- Direct speedup comparison is not reported because GRAND-SLAM depends on alignment being completed first (it operates on pre-aligned BAMs), whereas STAR-SLAM performs alignment and quantification in a single pass. On the ARID1A time-course (167M reads, 4 samples), GEDI quantification alone adds ~14% to the alignment time (~5.5 min on top of ~40 min alignment).
+All perturb parity metrics above were computed with
+`scripts/report_additional_parity_metrics.py --gene-corr-min-counts 20 --gene-corr-min-cells-pct 0.01`
+per `docs/PAPER_BENCHMARK_METHODOLOGY.md`. CR9 references use
+`refdata-gex-GRCh38-2024-A` unless noted otherwise in the archived benchmark
+artifacts.
 
 ## Building & Installing
 
