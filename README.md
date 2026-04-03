@@ -79,13 +79,13 @@ and detailed Velocyto bridge results live in
 | scRNA-seq Solo | MSK 30polyKO GEX-only | Historical CellGENI-style STARsolo (`7a7fb08`) | **19.40 min** archived modern wall vs **29.52 min** historical; **1.52x** faster | Guarded ambient rerun recovers **33,092** cells; Jaccard **0.974**, gene Pearson **0.994554** vs CR9 |
 | Perturb-seq | A375 1k CRISPR 5' GemX | Cell Ranger 9 | **4.0 min**; **3.8x** faster | Jaccard **0.976**, gene Pearson **0.975**, CRISPR match **100%** |
 | Perturb-seq | UCSF `EBs2_2` | Cell Ranger 9 | **16.4 min**; **3.7x** faster | Jaccard **0.976**, gene Pearson **0.995**, CRISPR match **98.9%** |
-| Perturb-seq | MSK 30polyKO | Cell Ranger 9 (separate GEX+gRNA and GEX+LARRY runs) | **27.1 min**; **6.2x** faster | Jaccard **0.974**, gene Pearson **0.995**, CRISPR match **97.7%** |
+| Perturb-seq | MSK 30polyKO | Cell Ranger 9 (separate GEX+gRNA and GEX+LARRY runs) | **26.9 min**; **6.2x** faster | Jaccard **0.9742**, gene Pearson **0.994554**, CRISPR match **98.0%** |
 | Flex | JAX SC2300771 full / no-align | Cell Ranger 9 / 7 | **23m 30s** full (**2.5x** vs CR9), **10m 26s** no-align (**5.7x** vs CR9) | Mean Jaccard **0.981**, cell Pearson **0.99997**, gene Pearson **0.99993** vs CR9 |
 | SLAM-seq | NW-5-21 ARID1A compat mode | GEDI / GRAND-SLAM family | Integrated single-pass alignment + quantification; no apples-to-apples end-to-end wall-time claim reported | NTR Pearson **0.967-0.978**, Spearman **0.985-0.990** vs GEDI |
 
 Perturb-seq is the main performance result: on A375, UCSF, and MSK surfaces,
 STAR-suite runs **3.7x-6.2x faster** than Cell Ranger 9 while maintaining
-near-identical GEX/cell metrics and **97.7-100%** CRISPR call agreement.
+near-identical GEX/cell metrics and **98.0-100%** CRISPR call agreement.
 
 For non-Flex Solo, the README now summarizes only the historical CellGENI-style
 baseline versus the current optimized surface. On this host, external `zcat`

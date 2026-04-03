@@ -12,7 +12,7 @@ actual guarded end-to-end benchmark surface so future reviews do not treat the
 | --- | --- | ---: | ---: | ---: | --- |
 | Historical raw GEX-only ambient isolation | `docs/MSK_AMBIENT_RESCUE_ISOLATION_20260402.md` | `32,303` | `0.997556` | n/a | Same historical raw MEX, same `libscrna` MC engine, ambient-only swap to legacy `45k-90k` rank window |
 | Modern GEX-only guarded bridge rerun | `/tmp/msk_gex_multimap_unique_guarded_20260403/` | `33,092` | `0.974260` | `0.994554` | Same bridge / `Unique` surface as the README scRNA benchmark, but with guarded ambient fallback |
-| Modern full perturb guarded rerun | `/storage/MSK-perturb-comparison/paper_bench_emptydrops_guarded_20260403_2/` | `33,095` | `0.974112` | `0.994554` | README-ready 3-library benchmark surface; `27.1` min wall, CRISPR exact-match `97.68%` |
+| Modern full perturb guarded rerun | `/storage/MSK-perturb-comparison/paper_bench_emptydrops_guarded_redo_20260403_214718/` | `33,095` | `0.9742` | `0.994554` | Fresh full 3-library completeness rerun on patched `master`; `26.9` min wall, CRISPR exact-match `98.04%` |
 
 ## Key Point
 
@@ -28,6 +28,14 @@ It does **not** answer:
 
 That second question is answered by the guarded modern reruns above, which land
 near `0.974`, not `0.997`.
+
+The fresh full perturb rerun reproduced the same guarded surface as the earlier
+README update while slightly improving the CRISPR call metric:
+
+- `33,095` STAR cells vs `32,256` CR9 cells
+- Gene Expression Jaccard `0.9742`
+- Gene Expression Pearson `0.994554`
+- CRISPR exact-match `23063 / 23525 = 98.04%`
 
 ## Knob Audit On The Modern GEX-only Surface
 
