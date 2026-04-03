@@ -1,6 +1,6 @@
 # STAR Suite
 
-STAR Suite updates the original STAR aligner by integrating four modules — STAR-perturb, STAR-Flex, STAR-SLAM, and TranscriptVB — to provide complete internal C/C++ pipelines for bulk RNA-seq, scRNA-seq, Perturb-seq, 10x Flex, and SLAM-seq. The integration results in **substantial speedups** (**1.7–2.4x for bulk RNA-seq**, **1.5–2.0x for scRNA-seq GEX-only Solo vs CellGENI-style STARsolo**, **3.2–6.1x for Perturb-seq**, **2.5–28.8x for Flex**) and a simplified toolchain that can be **installed through pre-compiled binaries** for researchers and agents. **No new external dependencies** are required; the suite is built entirely with the existing STAR toolchain and vendored components. **This is a drop-in replacement for the STAR aligner.**
+STAR Suite updates the original STAR aligner by integrating four modules — STAR-perturb, STAR-Flex, STAR-SLAM, and TranscriptVB — to provide complete internal C/C++ pipelines for bulk RNA-seq, scRNA-seq, Perturb-seq, 10x Flex, and SLAM-seq. The integration results in **substantial speedups** (**1.7–2.4x for bulk RNA-seq**, **1.5–2.0x for scRNA-seq GEX-only Solo vs CellGENI-style STARsolo**, **3.7–6.2x for Perturb-seq**, **2.5–28.8x for Flex**) and a simplified toolchain that can be **installed through pre-compiled binaries** for researchers and agents. **No new external dependencies** are required; the suite is built entirely with the existing STAR toolchain and vendored components. **This is a drop-in replacement for the STAR aligner.**
 
 STAR Suite supports partial compilation: build only the module/tool targets you need instead of building the full suite every time.
 
@@ -8,7 +8,7 @@ Agent quickstart: see `AGENTS.md` for repo-specific guardrails, tests, and recen
 
 ## Core Additions over STAR 2.7.11b
 
-- **Speedup**: Bulk RNA-seq **1.7–2.4x faster** than external stepwise pipelines; scRNA-seq GEX-only Solo **1.5–2.0x faster** than the CellGENI-style STARsolo parameter surface (UCSF 14K cells 1.95x, MSK 30K cells 1.52x); Perturb-seq **3.2–6.1x faster** than Cell Ranger 9; Flex **2.5x faster** than Cell Ranger 9 (5.7x in no-align mode, ~12.8–28.8x vs Cell Ranger 7 with BAM) — all with near-identical parity.
+- **Speedup**: Bulk RNA-seq **1.7–2.4x faster** than external stepwise pipelines; scRNA-seq GEX-only Solo **1.5–2.0x faster** than the CellGENI-style STARsolo parameter surface (UCSF 14K cells 1.95x, MSK 30K cells 1.52x); Perturb-seq **3.7–6.2x faster** than Cell Ranger 9; Flex **2.5x faster** than Cell Ranger 9 (5.7x in no-align mode, ~12.8–28.8x vs Cell Ranger 7 with BAM) — all with near-identical parity.
 - **Batch Mode** (`--batchMode 1`): Processes multiple FASTQs in one STAR invocation while reusing the loaded genome. Removes the need for `--genomeLoad` keep-in-memory workflows. Single-pass only (no `--twopassMode`); not supported with Solo (`--soloType`). Use `--outFileNamePrefixAuto 1` for per-sample subdirectories.
 - **TranscriptVB Quantification** (`--quantMode TranscriptVB`): Variational Bayes and EM quantification for transcript-level abundance, with parity-oriented behavior against Salmon alignment-mode. Gene-level summarization via `--quantVBgenesMode Tximport`.
 - **Transcriptome Output** (`--quantTranscriptomeSAMoutput`): Replaces the former `--quantTranscriptomeBan` with more explicit control (e.g., `BanSingleEnd_ExtendSoftclip`).
@@ -76,16 +76,16 @@ and detailed Velocyto bridge results live in
 | Bulk RNA-seq | JAX PE 6.5M | External stepwise (Trim Galore + STAR + Salmon) | **37 s** without Y-removal, **61 s** with Y-removal; **2.4x / 2.1x** faster | Transcript Pearson **0.995**, gene Pearson **0.997** vs Salmon |
 | Bulk RNA-seq | PPARG PE 35.1M | External stepwise (Trim Galore + STAR + Salmon) | **9m 35s** without Y-removal, **11m 58s** with Y-removal; **1.7x / 2.1x** faster | Same integrated trim + align + TranscriptVB path |
 | scRNA-seq Solo | UCSF `EBs2_2` GEX-only | Historical CellGENI-style STARsolo (`7a7fb08`) | **13.75 min** optimized `zcat` vs **26.8 min** historical; **1.95x** faster | **13,723** cells, gene Pearson **0.994885** vs CR9; current `zcat` surface is the best validated UCSF run |
-| scRNA-seq Solo | MSK 30polyKO GEX-only | Historical CellGENI-style STARsolo (`7a7fb08`) | **19.40 min** modern vs **29.52 min** historical; **1.52x** faster | **30,562** cells, gene Pearson **0.994575** vs CR9 |
+| scRNA-seq Solo | MSK 30polyKO GEX-only | Historical CellGENI-style STARsolo (`7a7fb08`) | **19.40 min** archived modern wall vs **29.52 min** historical; **1.52x** faster | Guarded ambient rerun recovers **33,092** cells; Jaccard **0.974**, gene Pearson **0.994554** vs CR9 |
 | Perturb-seq | A375 1k CRISPR 5' GemX | Cell Ranger 9 | **4.0 min**; **3.8x** faster | Jaccard **0.976**, gene Pearson **0.975**, CRISPR match **100%** |
 | Perturb-seq | UCSF `EBs2_2` | Cell Ranger 9 | **16.4 min**; **3.7x** faster | Jaccard **0.976**, gene Pearson **0.995**, CRISPR match **98.9%** |
-| Perturb-seq | MSK 30polyKO | Cell Ranger 9 (separate GEX+gRNA and GEX+LARRY runs) | **25.0 min**; **6.7x** faster | Jaccard **0.942**, gene Pearson **0.994**, CRISPR match **99.4%** |
+| Perturb-seq | MSK 30polyKO | Cell Ranger 9 (separate GEX+gRNA and GEX+LARRY runs) | **27.1 min**; **6.2x** faster | Jaccard **0.974**, gene Pearson **0.995**, CRISPR match **97.7%** |
 | Flex | JAX SC2300771 full / no-align | Cell Ranger 9 / 7 | **23m 30s** full (**2.5x** vs CR9), **10m 26s** no-align (**5.7x** vs CR9) | Mean Jaccard **0.981**, cell Pearson **0.99997**, gene Pearson **0.99993** vs CR9 |
 | SLAM-seq | NW-5-21 ARID1A compat mode | GEDI / GRAND-SLAM family | Integrated single-pass alignment + quantification; no apples-to-apples end-to-end wall-time claim reported | NTR Pearson **0.967-0.978**, Spearman **0.985-0.990** vs GEDI |
 
 Perturb-seq is the main performance result: on A375, UCSF, and MSK surfaces,
-STAR-suite runs **3.8x-6.7x faster** than Cell Ranger 9 while maintaining
-near-identical GEX/cell metrics and **98.9-100%** CRISPR call agreement.
+STAR-suite runs **3.7x-6.2x faster** than Cell Ranger 9 while maintaining
+near-identical GEX/cell metrics and **97.7-100%** CRISPR call agreement.
 
 For non-Flex Solo, the README now summarizes only the historical CellGENI-style
 baseline versus the current optimized surface. On this host, external `zcat`
@@ -97,6 +97,10 @@ All perturb parity metrics above were computed with
 per `docs/PAPER_BENCHMARK_METHODOLOGY.md`. CR9 references use
 `refdata-gex-GRCh38-2024-A` unless noted otherwise in the archived benchmark
 artifacts.
+
+For MSK specifically, the historical raw-matrix EmptyDrops isolation result and
+the real guarded end-to-end benchmark surface are separated in
+[docs/MSK_BENCHMARK_SURFACE_AUDIT_20260403.md](docs/MSK_BENCHMARK_SURFACE_AUDIT_20260403.md).
 
 ## Building & Installing
 
