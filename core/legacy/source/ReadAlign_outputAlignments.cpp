@@ -681,9 +681,6 @@ void ReadAlign::outputAlignments() {
         
         // Use CbCorrector for inline CB correction if available
         SoloReadBarcode *readBar = soloRead->readBar;
-        static int debugCount = 0;
-        const int MAX_DEBUG_LOGS = 10;
-        
         if (P.pSolo.cbCorrector && !readBar->cbSeq.empty()) {
             CbMatch match = P.pSolo.cbCorrector->correct(readBar->cbSeq);
             // Extract UMI first (needed for ambiguous accumulation)
@@ -773,22 +770,7 @@ void ReadAlign::outputAlignments() {
                 extractedCbSeq_.clear();
                 cbResolutionStats_.noMatch++;
             }
-            
-            // Debug logging for first few reads and specific failing CBs
-            if (debugCount++ < MAX_DEBUG_LOGS || readBar->cbSeq == "CNGTATTTCGGGCAGT") {
-                P.inOut->logMain << "CbCorrector::correct: cbSeq=" << readBar->cbSeq
-                                 << ", whitelistIdx=" << match.whitelistIdx
-                                 << ", hammingDist=" << (int)match.hammingDist
-                                 << ", ambiguous=" << match.ambiguous
-                                 << ", extractedCbIdxPlus1_=" << extractedCbIdxPlus1_ << endl;
-            }
         } else {
-            // Debug logging for why CbCorrector wasn't used
-            if (debugCount++ < MAX_DEBUG_LOGS) {
-                P.inOut->logMain << "CbCorrector NOT used: cbCorrector=" << (P.pSolo.cbCorrector ? "non-null" : "null")
-                                 << ", cbSeq.empty()=" << readBar->cbSeq.empty()
-                                 << ", cbSeq=" << (readBar->cbSeq.empty() ? "(empty)" : readBar->cbSeq) << endl;
-            }
             // Fallback to original SoloReadBarcode matching logic
             // cbMatch: 0=exact match, 1=one match with 1MM, -1=no match, -3=multiple matches (not allowed)
             if ((readBar->cbMatch == 0 || readBar->cbMatch == 1) && !readBar->cbMatchInd.empty()) {
@@ -819,16 +801,6 @@ void ReadAlign::outputAlignments() {
                 extractedUmiValid_ = (readBar->umiCheck >= 0);
             }
         }
-        
-        // Debug: log first few extractions
-        static int extractCount = 0;
-        if (extractCount++ < 5) {
-            P.inOut->logMain << "ReadAlign::outputAlignments: extractedCbIdxPlus1_=" << extractedCbIdxPlus1_
-                             << ", extractedUmi24_=0x" << std::hex << extractedUmi24_ << std::dec
-                             << ", cbMatch=" << readBar->cbMatch
-                             << ", umiSeq.length()=" << readBar->umiSeq.length() << std::endl;
-        }
-        
         const auto sampleDetectStart = std::chrono::steady_clock::now();
         detectSampleFromRawR2();
         const auto sampleDetectEnd = std::chrono::steady_clock::now();
