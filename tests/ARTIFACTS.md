@@ -117,6 +117,7 @@ update this file with its output location.
 - `/tmp/msk_libscrna_ambientswap_*` (MSK libscrna tool-only ambient-swap experiments isolating legacy rank-window ambient vs current `SimpleED` ambient)
 - `/tmp/msk_ambient_policy_*` / `/tmp/msk_ambient_policy_recheck_*` (MSK tool-only ambient fallback policy sweeps: current `10%`, `2%`, and absolute-minimum guarded rank-window experiments)
 - `/tmp/msk_gex_multimap_*guarded*` (MSK GEX-only guarded EmptyDrops reruns used for bridge vs conventional, `Unique` vs `EM`, score-floor, and poly-G toggle audits)
+- `/storage/MSK-perturb-comparison/bench_cellgeni_msk_rerun_clean_20260403_225322/` (fresh `7a7fb08` CellGENI-style MSK GEX-only rerun; barcode-identical to archived `bench_cellgeni_msk_20260401_162259/` and used to reconfirm the `0.9975` CR9 Jaccard)
 - `/storage/MSK-perturb-comparison/paper_bench_emptydrops_guarded_*` (MSK full 3-library perturb reruns after the guarded ambient EmptyDrops fix, including the completeness rerun `paper_bench_emptydrops_guarded_redo_20260403_214718`)
 - `/tmp/msk_guarded*_compute_parity.tsv` (headline MSK parity summaries from fresh guarded reruns)
 - `/tmp/public_bulk_fixture_*` (public GEO bulk PE smoke fixtures downloaded via `scripts/download_public_bulk_fixture.sh`)
@@ -714,6 +715,12 @@ These scripts validate that default bundles work with minimal explicit parameter
   - `BENCHMARK_SUMMARY.txt`: 32 threads, **13872** filtered cells, wall **1435 s** (~23.9 min), `read_decompress=zcat`
   - `/usr/bin/time -v`: max RSS **~66309 MiB** (~64.7 GiB), exit **0**; `nohup_time.log` shows mapping finished → Solo counting finished → `finished successfully`
   - Do **not** rerun; wrapper + STAR completed successfully (see `AGENTS.md` **Benchmark Hygiene** for completion signals).
+- **Completed — CellGENI-style historical replay (`7a7fb08`, exact archived surface):**
+  - `/storage/solo_overnight_20260326/ucsf_gexonly_no_bam/star_cellgeni_historical_7a7fb08_rerun_20260403_232313/`
+  - Binary: `/tmp/star-cellgeni-7a7fb08-rerun/core/legacy/source/STAR` (commit `7a7fb08865edb8aa69285a3a0bc6e14c51feeb45`)
+  - `BENCHMARK_SUMMARY.txt`: 32 threads, **13847** filtered cells, wall **0:22:04.00**
+  - `PARITY_vs_CR9.txt`: fresh rerun parity against `/storage/cr9_ebs2_2_benchmark_20260318/cr9_ebs2_2/outs/per_sample_outs/cr9_ebs2_2/count/sample_filtered_feature_bc_matrix`
+  - Rerun filtered barcodes are **exactly identical** to archived `star_cellgeni_historical_7a7fb08_truwhitelist_genefullonly_20260326/` (`13847/13847` shared; Jaccard `1.0`)
 - **Completed — modern optimized** (repo `core/legacy/source/STAR`, `feature/flex-optimization-using-solo-20260325` build):
   - `/storage/solo_overnight_20260326/ucsf_gexonly_no_bam/star_optimized_current_retry2/`
   - `BENCHMARK_SUMMARY.txt`: 32 threads, **13728** filtered cells, wall **947 s** (~15.8 min), `read_decompress=native_gzip`
