@@ -8,7 +8,7 @@ Agent quickstart: see `AGENTS.md` for repo-specific guardrails, tests, and recen
 
 ## Core Additions over STAR 2.7.11b
 
-- **Speedup**: Bulk RNA-seq **1.7–2.4x faster** than external stepwise pipelines; scRNA-seq GEX-only Solo **1.47–1.60x faster** than the CellGENI-style STARsolo parameter surface (UCSF 14K cells 1.60x, MSK 30K cells 1.47x on fresh `7a7fb08` reruns); Perturb-seq **3.7–6.2x faster** than Cell Ranger 9; Flex **2.5x faster** than Cell Ranger 9 (5.7x in no-align mode, ~12.8–28.8x vs Cell Ranger 7 with BAM) — all with near-identical parity.
+- **Speedup**: Bulk RNA-seq **1.7–2.4x faster** than external stepwise pipelines; scRNA-seq GEX-only Solo **1.47–1.60x faster** than the CellGENI-style STARsolo parameter surface (UCSF 14K cells 1.60x, MSK 30K cells 1.47x on fresh `7a7fb08` reruns); Perturb-seq **3.7–6.2x faster** than Cell Ranger 9; Flex **2.5x faster** than Cell Ranger 9 (5.6x in no-align mode, ~12.8–28.8x vs Cell Ranger 7 with BAM) — all with near-identical parity.
 - **Batch Mode** (`--batchMode 1`): Processes multiple FASTQs in one STAR invocation while reusing the loaded genome. Removes the need for `--genomeLoad` keep-in-memory workflows. Single-pass only (no `--twopassMode`); not supported with Solo (`--soloType`). Use `--outFileNamePrefixAuto 1` for per-sample subdirectories.
 - **TranscriptVB Quantification** (`--quantMode TranscriptVB`): Variational Bayes and EM quantification for transcript-level abundance, with parity-oriented behavior against Salmon alignment-mode. Gene-level summarization via `--quantVBgenesMode Tximport`.
 - **Transcriptome Output** (`--quantTranscriptomeSAMoutput`): Replaces the former `--quantTranscriptomeBan` with more explicit control (e.g., `BanSingleEnd_ExtendSoftclip`).
@@ -80,7 +80,7 @@ and detailed Velocyto bridge results live in
 | Perturb-seq | A375 1k CRISPR 5' GemX | Cell Ranger 9 | **4.0 min**; **3.8x** faster | Jaccard **0.976**, gene Pearson **0.975**, CRISPR match **100%** |
 | Perturb-seq | UCSF `EBs2_2` | Cell Ranger 9 | **16.4 min**; **3.7x** faster | Jaccard **0.976**, gene Pearson **0.995**, CRISPR match **98.9%** |
 | Perturb-seq | MSK 30polyKO | Cell Ranger 9 (separate GEX+gRNA and GEX+LARRY runs) | **26.9 min**; **6.2x** faster | Jaccard **0.9742**, gene Pearson **0.994554**, CRISPR match **98.0%** |
-| Flex | JAX SC2300771 full / no-align | Cell Ranger 9 / 7 | **23m 30s** full (**2.5x** vs CR9), **10m 26s** no-align (**5.7x** vs CR9) | Mean Jaccard **0.981**, cell Pearson **0.99997**, gene Pearson **0.99993** vs CR9 |
+| Flex | JAX SC2300771 4-tag full / no-align | Cell Ranger 9 / 7 | **23m 22s** full (**2.5x** vs CR9), **10m 33s** no-align (**5.6x** vs CR9) | Fresh canonical 4-tag reruns (`BC004/BC006/BC007/BC008`) reproduce **20,316** cells; mean Jaccard **0.981**, cell Pearson **0.99997**, gene Pearson **0.99993** vs CR9 |
 | SLAM-seq | NW-5-21 ARID1A compat mode | GEDI / GRAND-SLAM family | Integrated single-pass alignment + quantification; no apples-to-apples end-to-end wall-time claim reported | NTR Pearson **0.967-0.978**, Spearman **0.985-0.990** vs GEDI |
 
 Perturb-seq is the main performance result: on A375, UCSF, and MSK surfaces,

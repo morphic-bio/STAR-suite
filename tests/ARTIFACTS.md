@@ -262,9 +262,25 @@ update this file with its output location.
 - `/storage/flex_fullalign_2024ref_20260325_020044/` — refreshed full aligned Flex benchmark on GRCh38-2024-A: wall 23m30s, mapping complete 20m55s, Solo counting 2m07s
   - archived filtered per-sample MEX: `/storage/flex_fullalign_2024ref_20260325_020044/per_sample_filtered/`
   - parity TSV/log bundle vs CR9/CR7: `/storage/flex_fullalign_2024ref_20260325_020044/flex_parity_cr9/`
+- `/storage/flex_fullalign_2024ref_emptydrops_clean_20260404_010557/` — fresh full aligned Flex benchmark after EmptyDrops changes and clean rebuild, but run with the full 16-tag allowlist by mistake: wall 23m49s, final cells 52,461
+  - filtered per-sample MEX: `/storage/flex_fullalign_2024ref_emptydrops_clean_20260404_010557/per_sample_filtered/`
+  - parity TSV/log bundle vs CR9/CR7: `/storage/flex_fullalign_2024ref_emptydrops_clean_20260404_010557/flex_parity_cr9/`
+  - CR9 means: barcode Jaccard `0.981379`, cell Pearson `0.999974`, gene Pearson `0.999929`
+- `/storage/flex_fullalign_2024ref_emptydrops_4tags_20260404_030310/` — canonical fresh full aligned Flex benchmark after EmptyDrops changes on the 4-tag README/CR9 parity surface (`BC004/BC006/BC007/BC008`): wall 23m22s, final cells 20,316
+  - filtered per-sample MEX: `/storage/flex_fullalign_2024ref_emptydrops_4tags_20260404_030310/per_sample_filtered/`
+  - parity TSV/log bundle vs CR9/CR7: `/storage/flex_fullalign_2024ref_emptydrops_4tags_20260404_030310/flex_parity_cr9/`
+  - CR9 means: barcode Jaccard `0.981379`, cell Pearson `0.999974`, gene Pearson `0.999929`
 - `/storage/flex_noalign_full_20260325_022459/` — refreshed no-align Flex benchmark on GRCh38-2024-A: wall 10m41s, mapping complete 8m34s, Solo counting 1m45s
   - archived filtered per-sample MEX: `/storage/flex_noalign_full_20260325_022459/per_sample_filtered/`
   - parity TSV/log bundle vs CR9/CR7: `/storage/flex_noalign_full_20260325_022459/flex_parity_cr9/`
+- `/storage/flex_noalign_full_emptydrops_clean_20260404_013103/` — fresh no-align Flex benchmark after EmptyDrops changes and clean rebuild, but run with the full 16-tag allowlist by mistake: wall 10m33s, final cells 52,461
+  - filtered per-sample MEX: `/storage/flex_noalign_full_emptydrops_clean_20260404_013103/per_sample_filtered/`
+  - parity TSV/log bundle vs CR9/CR7: `/storage/flex_noalign_full_emptydrops_clean_20260404_013103/flex_parity_cr9/`
+  - CR9 means: barcode Jaccard `0.981387`, cell Pearson `0.999974`, gene Pearson `0.999929`
+- `/storage/flex_noalign_2024ref_emptydrops_4tags_20260404_032741/` — canonical fresh no-align Flex benchmark after EmptyDrops changes on the 4-tag README/CR9 parity surface (`BC004/BC006/BC007/BC008`): wall 10m33s, final cells 20,316
+  - filtered per-sample MEX: `/storage/flex_noalign_2024ref_emptydrops_4tags_20260404_032741/per_sample_filtered/`
+  - parity TSV/log bundle vs CR9/CR7: `/storage/flex_noalign_2024ref_emptydrops_4tags_20260404_032741/flex_parity_cr9/`
+  - CR9 means: barcode Jaccard `0.981387`, cell Pearson `0.999974`, gene Pearson `0.999929`
 - **FLEX no-align inline-hash snapshot harness (optimized collapse binary, 2026-03-26):** `tests/run_flex_snapshot_noalign_full.sh` on the full `/storage` Flex sample, internal gzip only. Logs show the khash accumulate + per-bucket gene sort path and `Collapse timing: accumulate=… bucket_build=… bucket_sort=…` (not the pre-optimization `extract/sort/group` lines). Snapshot **`/storage/flex_snapshot_noalign_opt_20260326/count_v1/flex_snapshot.bin`** (~**3.4 GiB**, **224,941,678** flex hash entries).
   - Count-mode replay (`FLEX_SNAPSHOT_COMPARE=count`): **`/storage/flex_snapshot_noalign_opt_20260326/count_v1/`** — count-surface validation in `compare.log`; replay skips mapping and stops after `countCBgeneUMI`. Seed wall ~**10:49**, max RSS ~**84.8M kB**; replay wall ~**1:47**, max RSS ~**38.4M kB**.
   - Full parity replay (`FLEX_SNAPSHOT_COMPARE=full`): **`/storage/flex_snapshot_noalign_opt_20260326/full_v1/`** — strict `diff` on `per_sample` (raw+filtered) and `Solo.out` OK; same snapshot size/entry count as count run. Seed/replay wall and RSS within a few seconds of the count run.
