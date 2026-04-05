@@ -1764,7 +1764,7 @@ int main(int argInN, char *argIn[])
     // TranscriptVB segfault on PPARG because transcript quant merges chunk-local EC state
     // after mapping. Audit all downstream RAchunk consumers before broadening this guard.
     // TranscriptVB, SLAM, and trim QC all merge chunk-local state after mapping completes.
-    if (RAchunk != nullptr && !P.outSAMbool && !P.quant.geCount.yes
+    if (RAchunk != nullptr && !P.outSAMbool && !P.outBAMcoord && !P.quant.geCount.yes
         && !P.quant.transcriptVB.yes && !P.quant.slam.yes && !P.trimQcEnabled
         && !P.emitYReadNamesyes && !P.emitYNoYFastqyes && !batchModeActive) {
         for (int ichunk = 0; ichunk < P.runThreadN; ++ichunk) {

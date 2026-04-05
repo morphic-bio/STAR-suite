@@ -42,7 +42,7 @@ Verify:
 ls .codespaces-demo/indices/public_human_chr22y_star/Genome
 ```
 
-Expected: file exists, ~60 MB.
+Expected: file exists, ~106 MB.
 
 ---
 

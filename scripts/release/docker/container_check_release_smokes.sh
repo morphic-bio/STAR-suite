@@ -8,12 +8,22 @@ BUNDLE=""
 EXPECTED_LABEL=""
 EXPECTED_VERSION="2.7.11b"
 REPO_ROOT=""
+PROFILE="core"
 
 usage() {
   cat <<USAGE
 Usage:
-  $0 --mode tarball --tarball <path> --repo-root <path> [--expected-version <version>]
-  $0 --mode bundle --bundle <path> --expected-label <label> --repo-root <path> [--expected-version <version>]
+  $0 --mode tarball --tarball <path> --repo-root <path> [options]
+  $0 --mode bundle --bundle <path> --expected-label <label> --repo-root <path> [options]
+
+Options:
+  --expected-version VER   STAR version to check (default: 2.7.11b)
+  --profile PROFILE        Smoke profile to run (default: core)
+
+Profiles:
+  core                     Original 3-test smoke (solo, SLAM snp-mask, Flex tiny)
+  binary-workflows-tier-a  Full Tier A binary workflow matrix
+  all                      Run both core and binary-workflows-tier-a
 USAGE
 }
 
@@ -25,6 +35,7 @@ while [[ $# -gt 0 ]]; do
     --expected-label) EXPECTED_LABEL="$2"; shift 2 ;;
     --expected-version) EXPECTED_VERSION="$2"; shift 2 ;;
     --repo-root) REPO_ROOT="$2"; shift 2 ;;
+    --profile) PROFILE="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "ERROR: unknown argument: $1" >&2; usage >&2; exit 1 ;;
   esac
@@ -73,12 +84,43 @@ STAR_BIN="${prefix}/bin/STAR"
 
 cp -a "${REPO_ROOT}/." "${repo_copy}/"
 
-(
-  cd "${repo_copy}"
-  export STAR_BIN
-  bash tests/run_solo_smoke.sh
-  bash tests/slam/test_snp_mask_build_smoke.sh
-  bash tests/run_flex_tiny_public_smoke.sh
-)
+run_core() {
+  echo "=== Profile: core ==="
+  (
+    cd "${repo_copy}"
+    export STAR_BIN
+    bash tests/run_solo_smoke.sh
+    bash tests/slam/test_snp_mask_build_smoke.sh
+    bash tests/run_flex_tiny_public_smoke.sh
+  )
+  echo "PASS: core profile"
+}
 
-echo "PASS: release smoke checks (${MODE})"
+run_binary_workflows_tier_a() {
+  echo "=== Profile: binary-workflows-tier-a ==="
+  (
+    cd "${repo_copy}"
+    export STAR_BIN
+    bash tests/run_binary_test_matrix.sh --tier a
+  )
+  echo "PASS: binary-workflows-tier-a profile"
+}
+
+case "${PROFILE}" in
+  core)
+    run_core
+    ;;
+  binary-workflows-tier-a)
+    run_binary_workflows_tier_a
+    ;;
+  all)
+    run_core
+    run_binary_workflows_tier_a
+    ;;
+  *)
+    echo "ERROR: unknown profile: ${PROFILE}" >&2
+    exit 1
+    ;;
+esac
+
+echo "PASS: release smoke checks (${MODE}, profile: ${PROFILE})"

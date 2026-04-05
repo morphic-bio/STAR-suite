@@ -11,11 +11,13 @@ COPY scripts/release/docker/container_check_release_smokes.sh /usr/local/bin/con
 RUN apt-get update && apt-get install -y --no-install-recommends \
     tzdata \
     ca-certificates \
+    curl \
     git \
     git-lfs \
     python3 \
     python3-pandas \
     samtools \
+    salmon \
     && rm -rf /var/lib/apt/lists/* \
     && chmod 0755 /usr/local/bin/container_check_tarball.sh /usr/local/bin/container_check_installer_bundle.sh /usr/local/bin/container_check_release_smokes.sh
 
