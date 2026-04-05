@@ -2,7 +2,7 @@
 
 **Date**: 2026-03-06  
 **Dataset**: MSK 30-guide polyKO Perturb-seq (NXT chemistry, 3 libraries: GEX + gRNA + LARRY lineage)  
-**Host**: pikachu (32 threads, 110 GB RAM)
+**Host**: pikachu (i9-13900KF, 126 GB RAM, 32 threads)
 
 ## Summary
 

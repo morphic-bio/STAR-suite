@@ -2,7 +2,7 @@
 
 **Date**: 2026-03-18
 **Branch**: `multi-feature` (post MSK CRISPR master repair + PfMultiMerge streaming optimization)
-**Host**: pikachu (AMD, 32 threads, 128 GB RAM, NVMe SSD)
+**Host**: pikachu (i9-13900KF, 126 GB RAM, 32 threads)
 **STAR version**: 2.7.11b (compiled 2026-03-18T06:31:31+00:00)
 
 ## Datasets

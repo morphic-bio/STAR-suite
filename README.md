@@ -63,7 +63,7 @@ mcp_server/              # MCP server for scripted discovery/preflight/run workf
 
 ## Benchmarks
 
-All benchmarks run on pikachu (AMD, 32 threads, 128 GB RAM, NVMe SSD). The
+All benchmarks run on pikachu (i9-13900KF, 126 GB RAM, 32 threads). The
 table below keeps the README focused on the headline results. Publication-facing
 wrappers live in [publications/benchmarks/README.md](publications/benchmarks/README.md),
 archived benchmark artifacts live in
@@ -75,8 +75,8 @@ and detailed Velocyto bridge results live in
 |---|---|---|---|---|
 | Bulk RNA-seq | JAX PE 6.5M | External stepwise (Trim Galore + STAR + Salmon) | **37 s** without Y-removal, **61 s** with Y-removal; **2.4x / 2.1x** faster | Transcript Pearson **0.995**, gene Pearson **0.997** vs Salmon |
 | Bulk RNA-seq | PPARG PE 35.1M | External stepwise (Trim Galore + STAR + Salmon) | **9m 35s** without Y-removal, **11m 58s** with Y-removal; **1.7x / 2.1x** faster | Same integrated trim + align + TranscriptVB path |
-| scRNA-seq Solo | UCSF `EBs2_2` GEX-only | Historical CellGENI-style STARsolo (`7a7fb08`) | **13.75 min** optimized `zcat` vs **22.1 min** historical rerun; **1.60x** faster | Fresh historical rerun reproduced **13,847** cells and Jaccard **0.9891** vs CR9; current `zcat` surface calls **13,723** cells with gene Pearson **0.994885** |
-| scRNA-seq Solo | MSK 30polyKO GEX-only | Historical CellGENI-style STARsolo (`7a7fb08`) | **19.40 min** archived modern wall vs **28.6 min** historical rerun; **1.47x** faster | Fresh historical rerun reproduced **32,304** cells and Jaccard **0.9975** vs CR9; guarded current surface calls **33,092** cells with Jaccard **0.974**, gene Pearson **0.994554** |
+| scRNA-seq Solo | UCSF `EBs2_2` GEX-only | Historical CellGENI-style STARsolo (`7a7fb08`) | **13.75 min** optimized `zcat` vs **22.1 min** historical rerun; **1.60x** faster | Fresh historical rerun reproduced **13,847** cells, Jaccard **0.9891**, gene Pearson **0.964305** vs CR9; current `zcat` surface calls **13,723** cells with gene Pearson **0.994885** |
+| scRNA-seq Solo | MSK 30polyKO GEX-only | Historical CellGENI-style STARsolo (`7a7fb08`) | **19.40 min** archived modern wall vs **28.6 min** historical rerun; **1.47x** faster | Fresh historical rerun reproduced **32,304** cells, Jaccard **0.9975**, gene Pearson **0.954925** vs CR9; guarded current surface calls **33,092** cells with Jaccard **0.974**, gene Pearson **0.994554** |
 | Perturb-seq | A375 1k CRISPR 5' GemX | Cell Ranger 9 | **4.0 min**; **3.8x** faster | Jaccard **0.976**, gene Pearson **0.975**, CRISPR match **100%** |
 | Perturb-seq | UCSF `EBs2_2` | Cell Ranger 9 | **16.4 min**; **3.7x** faster | Jaccard **0.976**, gene Pearson **0.995**, CRISPR match **98.9%** |
 | Perturb-seq | MSK 30polyKO | Cell Ranger 9 (separate GEX+gRNA and GEX+LARRY runs) | **26.9 min**; **6.2x** faster | Jaccard **0.9742**, gene Pearson **0.994554**, CRISPR match **98.0%** |
