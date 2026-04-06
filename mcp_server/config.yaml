@@ -40,8 +40,23 @@ disk_space:
   default_min_gb: 20           # smoke tests
   full_depth_min_gb: 100       # full A375/GeneFull runs
 
+# Structured workflow templates (agent-facing parameter surface)
+workflows:
+  - id: "ucsf_star_suite_production"
+    title: "UCSF STAR-suite Production Workflow"
+    summary: "Corrected UCSF GEX+guide workflow with optional downstream and remote CellBender stages."
+    entry_script: "scripts/paper/run_ucsf_corrected_production_workflow.sh"
+    kind: "shell_workflow"
+    schema_file: "mcp_server/workflows/ucsf_star_suite_production.yaml"
+
 # Allowlisted scripts with metadata
 scripts:
+  # Workflow entry scripts (also registered under workflows: for structured params)
+  - name: "ucsf_corrected_production"
+    path: "scripts/paper/run_ucsf_corrected_production_workflow.sh"
+    module: "workflow"
+    description: "UCSF corrected production workflow (GEX+guide, downstream, CellBender)"
+
   # Core / Solo
   - name: "cbub_regression"
     path: "tests/run_cbub_regression_test.sh"

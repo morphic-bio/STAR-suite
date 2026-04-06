@@ -1,0 +1,328 @@
+# UCSF STAR-suite Production Workflow Parameter Schema
+# Hand-authored from scripts/paper/run_ucsf_corrected_production_workflow.sh
+# Covers top-level wrapper parameters only (sub-script params are a later pass).
+
+id: "ucsf_star_suite_production"
+title: "UCSF STAR-suite Production Workflow"
+summary: "Corrected UCSF GEX+guide workflow with optional downstream and remote CellBender stages."
+kind: "shell_workflow"
+entry_script: "scripts/paper/run_ucsf_corrected_production_workflow.sh"
+supported_modes:
+  - "local"
+  - "dry-run-capable"
+caveats:
+  - "If neither --samples nor --all-samples is provided, defaults to all samples."
+  - "Globus transfer params must be supplied as a complete set if any is given."
+  - "--cellbender-gpu only has effect when --star-only is not set."
+default_output_layout: "/mnt/pikachu/ucsf-perturb-yremove_velocyto_cellbender_<timestamp>/"
+
+stages:
+  - name: "star_alignment"
+    title: "STAR Alignment + Solo"
+    script: "scripts/run_ucsf_perturb_yremove_batch.sh"
+    description: "Y-removal STAR alignment with GeneFull/Velocyto quantification."
+  - name: "downstream"
+    title: "Downstream h5ad + CellBender"
+    script: "scripts/run_scrna_downstream_gene_full_velocyto.sh"
+    description: "Scanpy QC, h5ad assembly, CellBender ambient RNA removal."
+    gated_by: "star_only"
+  - name: "remote_cellbender"
+    title: "Remote CellBender (GPU)"
+    script: "scripts/run_remote_cellbender_rsync.sh"
+    description: "Optional GPU-accelerated CellBender on a remote host."
+    gated_by: "star_only"
+  - name: "globus_transfer"
+    title: "Globus Transfer"
+    description: "Optional data transfer via Globus."
+
+parameter_groups:
+  - name: "selection"
+    title: "Sample Selection"
+    parameters: ["samples", "all_samples"]
+  - name: "inputs"
+    title: "Input Paths"
+    parameters:
+      - "dataset_root"
+      - "feature_ref"
+      - "genome_dir"
+      - "solo_cb_whitelist"
+      - "cr_whitelist"
+      - "star_bin"
+  - name: "performance"
+    title: "Performance"
+    parameters:
+      - "threads"
+      - "cellbender_cpu_cores"
+      - "downsample_reads"
+      - "downsample_seed"
+  - name: "execution_mode"
+    title: "Execution Mode"
+    parameters:
+      - "cellbender_gpu"
+      - "trim_qc"
+      - "star_only"
+      - "dry_run"
+  - name: "transfer"
+    title: "Globus Transfer"
+    parameters:
+      - "globus_src_endpoint"
+      - "globus_dst_endpoint"
+      - "globus_dst_root"
+      - "globus_poll_seconds"
+  - name: "output"
+    title: "Output"
+    parameters: ["out_root"]
+
+parameters:
+  # --- Selection ---
+  - name: "samples"
+    cli_flag: "--samples"
+    type: "string_list"
+    required: false
+    default: null
+    description: "Comma-separated sample IDs to process."
+    category: "selection"
+    source: "workflow_wrapper"
+
+  - name: "all_samples"
+    cli_flag: "--all-samples"
+    type: "bool"
+    required: false
+    default: true
+    description: "Run every corrected UCSF sample. Mutually exclusive with --samples. Defaults to true when --samples is not provided."
+    category: "selection"
+    source: "workflow_wrapper"
+
+  # --- Inputs ---
+  - name: "dataset_root"
+    cli_flag: "--dataset-root"
+    type: "directory"
+    required: false
+    default: "/mnt/pikachu/ucsf-perturb-seq-corrected"
+    description: "Root of corrected UCSF dataset."
+    path_must_exist: true
+    category: "inputs"
+    source: "workflow_wrapper"
+
+  - name: "feature_ref"
+    cli_flag: "--feature-ref"
+    type: "file"
+    required: false
+    default: "/mnt/pikachu/ucsf-perturb-seq/cellranger_feature_ref_hCRISPRa_v2_like_AALG2_pattern.csv"
+    description: "Feature reference CSV."
+    path_must_exist: true
+    category: "inputs"
+    source: "workflow_wrapper"
+
+  - name: "genome_dir"
+    cli_flag: "--genome-dir"
+    type: "directory"
+    required: false
+    default: "/storage/autoindex_110_44/bulk_index"
+    description: "STAR genomeDir."
+    path_must_exist: true
+    category: "inputs"
+    source: "workflow_wrapper"
+
+  - name: "solo_cb_whitelist"
+    cli_flag: "--solo-cb-whitelist"
+    type: "file"
+    required: false
+    default: "/home/lhhung/cellranger-9.0.1/lib/python/cellranger/barcodes/3M-february-2018_TRU.txt"
+    description: "Solo CB whitelist file."
+    path_must_exist: true
+    category: "inputs"
+    source: "workflow_wrapper"
+
+  - name: "cr_whitelist"
+    cli_flag: "--cr-whitelist"
+    type: "file"
+    required: false
+    default: "/home/lhhung/cellranger-9.0.1/lib/python/cellranger/barcodes/translation/3M-february-2018_NXT.txt"
+    description: "CellRanger whitelist file."
+    path_must_exist: true
+    category: "inputs"
+    source: "workflow_wrapper"
+
+  - name: "star_bin"
+    cli_flag: "--star-bin"
+    type: "file"
+    required: false
+    default: "core/legacy/source/STAR.release"
+    description: "STAR binary path. Default is relative to repo root."
+    path_must_exist: true
+    must_be_executable: true
+    category: "inputs"
+    source: "workflow_wrapper"
+
+  # --- Performance ---
+  - name: "threads"
+    cli_flag: "--threads"
+    type: "int"
+    required: false
+    default: 24
+    description: "STAR threads."
+    category: "performance"
+    source: "workflow_wrapper"
+
+  - name: "cellbender_cpu_cores"
+    cli_flag: "--cellbender-cpu-cores"
+    type: "int"
+    required: false
+    default: null
+    description: "CellBender CPU cores. Defaults to threads value."
+    category: "performance"
+    source: "workflow_wrapper"
+
+  - name: "downsample_reads"
+    cli_flag: "--downsample-reads"
+    type: "int"
+    required: false
+    default: 0
+    description: "Downsample each library to N reads before STAR. 0 = no downsampling."
+    skip_when_default: true
+    category: "performance"
+    source: "workflow_wrapper"
+
+  - name: "downsample_seed"
+    cli_flag: "--downsample-seed"
+    type: "int"
+    required: false
+    default: 1
+    description: "Downsampling seed (exported as env var DOWNSAMPLE_SEED)."
+    env_var: "DOWNSAMPLE_SEED"
+    category: "performance"
+    source: "workflow_wrapper"
+
+  # --- Execution mode ---
+  - name: "cellbender_gpu"
+    cli_flag: "--cellbender-gpu"
+    type: "bool"
+    required: false
+    default: false
+    description: "Enable GPU CellBender. Only effective when star_only is false."
+    category: "execution_mode"
+    source: "workflow_wrapper"
+
+  - name: "trim_qc"
+    cli_flag: "--trim-qc"
+    type: "bool"
+    required: false
+    default: false
+    description: "Emit read-level trim-QC reports."
+    category: "execution_mode"
+    source: "workflow_wrapper"
+
+  - name: "star_only"
+    cli_flag: "--star-only"
+    type: "bool"
+    required: false
+    default: false
+    description: "Run STAR alignment only; skip downstream and CellBender stages."
+    category: "execution_mode"
+    source: "workflow_wrapper"
+
+  - name: "dry_run"
+    cli_flag: "--dry-run"
+    type: "bool"
+    required: false
+    default: false
+    description: "Prepare manifests only, do not execute."
+    category: "execution_mode"
+    source: "workflow_wrapper"
+
+  # --- Transfer ---
+  - name: "globus_src_endpoint"
+    cli_flag: "--globus-src-endpoint"
+    type: "string"
+    required: false
+    default: ""
+    description: "Source Globus collection UUID."
+    category: "transfer"
+    source: "workflow_wrapper"
+
+  - name: "globus_dst_endpoint"
+    cli_flag: "--globus-dst-endpoint"
+    type: "string"
+    required: false
+    default: ""
+    description: "Destination Globus collection UUID."
+    category: "transfer"
+    source: "workflow_wrapper"
+
+  - name: "globus_dst_root"
+    cli_flag: "--globus-dst-root"
+    type: "string"
+    required: false
+    default: ""
+    description: "Destination root path for Globus transfer."
+    category: "transfer"
+    source: "workflow_wrapper"
+
+  - name: "globus_poll_seconds"
+    cli_flag: "--globus-poll-seconds"
+    type: "int"
+    required: false
+    default: 30
+    description: "Globus cleanup poll interval in seconds."
+    category: "transfer"
+    source: "workflow_wrapper"
+
+  # --- Output ---
+  - name: "out_root"
+    cli_flag: "--out-root"
+    type: "directory"
+    required: false
+    default: null
+    description: "Output root directory. Auto-timestamped if not provided."
+    path_must_exist: false
+    is_output_root: true
+    category: "output"
+    source: "workflow_wrapper"
+
+constraints:
+  - kind: "mutual_exclusion"
+    params: ["samples", "all_samples"]
+    message: "--samples and --all-samples are mutually exclusive. If neither is provided, defaults to --all-samples."
+
+  - kind: "group_required"
+    params: ["globus_src_endpoint", "globus_dst_endpoint", "globus_dst_root"]
+    message: "If any Globus transfer parameter is provided, all three (src-endpoint, dst-endpoint, dst-root) should be present."
+
+  - kind: "dependency"
+    params: ["cellbender_gpu", "star_only"]
+    message: "--cellbender-gpu only has effect when --star-only is not set."
+
+  - kind: "positive"
+    params: ["threads", "cellbender_cpu_cores", "globus_poll_seconds"]
+    message: "Must be a positive integer."
+
+  - kind: "non_negative"
+    params: ["downsample_reads"]
+    message: "Must be a non-negative integer."
+
+rendering:
+  bool_style: "flag_only"
+  omit_absent_optionals: true
+  csv_style: "quoted"
+  flag_order:
+    - "out_root"
+    - "dataset_root"
+    - "feature_ref"
+    - "genome_dir"
+    - "solo_cb_whitelist"
+    - "cr_whitelist"
+    - "star_bin"
+    - "threads"
+    - "cellbender_cpu_cores"
+    - "globus_poll_seconds"
+    - "samples"
+    - "all_samples"
+    - "downsample_reads"
+    - "globus_src_endpoint"
+    - "globus_dst_endpoint"
+    - "globus_dst_root"
+    - "cellbender_gpu"
+    - "trim_qc"
+    - "star_only"
+    - "dry_run"

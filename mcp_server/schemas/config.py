@@ -96,6 +96,17 @@ class BinaryConfig(BaseModel):
     paths: list[str] = Field(description="Paths to search for the binary")
 
 
+class WorkflowConfig(BaseModel):
+    """Configuration entry for a structured workflow."""
+
+    id: str = Field(description="Unique workflow identifier")
+    title: str = Field(description="Human-readable title")
+    summary: str = Field(default="", description="One-line summary")
+    entry_script: str = Field(description="Entry script path (relative to repo root)")
+    kind: str = Field(default="shell_workflow", description="Workflow kind")
+    schema_file: str = Field(description="Path to workflow schema YAML (relative to repo root)")
+
+
 class MCPConfig(BaseModel):
     """Root configuration model."""
 
@@ -108,6 +119,7 @@ class MCPConfig(BaseModel):
     scripts: list[ScriptConfig] = Field(default_factory=list)
     test_suites: list[TestSuiteConfig] = Field(default_factory=list)
     required_binaries: list[BinaryConfig] = Field(default_factory=list)
+    workflows: list[WorkflowConfig] = Field(default_factory=list)
 
     def get_script(self, name: str) -> Optional[ScriptConfig]:
         """Get a script by name."""
@@ -128,4 +140,11 @@ class MCPConfig(BaseModel):
         for dataset in self.datasets:
             if dataset.id == dataset_id:
                 return dataset
+        return None
+
+    def get_workflow(self, workflow_id: str) -> Optional["WorkflowConfig"]:
+        """Get a workflow config by ID."""
+        for wf in self.workflows:
+            if wf.id == workflow_id:
+                return wf
         return None

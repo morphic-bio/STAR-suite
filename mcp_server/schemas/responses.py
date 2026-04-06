@@ -176,6 +176,138 @@ class ReloadConfigResponse(BaseModel):
 # --- errors ---
 
 
+# --- workflows ---
+
+
+class WorkflowInfo(BaseModel):
+    """Summary information about a workflow."""
+
+    id: str
+    title: str
+    summary: str
+    kind: str
+    entry_script: str
+    supported_modes: list[str] = Field(default_factory=list)
+
+
+class ListWorkflowsResponse(BaseModel):
+    """Response from list_workflows."""
+
+    workflows: list[WorkflowInfo]
+
+
+class WorkflowStageInfo(BaseModel):
+    """Stage info returned by describe_workflow."""
+
+    name: str
+    title: str
+    script: Optional[str] = None
+    description: str = ""
+    gated_by: Optional[str] = None
+
+
+class DescribeWorkflowResponse(BaseModel):
+    """Response from describe_workflow."""
+
+    id: str
+    title: str
+    summary: str
+    kind: str
+    entry_script: str
+    supported_modes: list[str] = Field(default_factory=list)
+    caveats: list[str] = Field(default_factory=list)
+    default_output_layout: str = ""
+    stages: list[WorkflowStageInfo] = Field(default_factory=list)
+    parameter_groups: list["ParameterGroupInfo"] = Field(default_factory=list)
+
+
+class ParameterInfo(BaseModel):
+    """Machine-readable parameter definition."""
+
+    name: str
+    cli_flag: str
+    type: str
+    required: bool
+    default: Any = None
+    description: str = ""
+    choices: Optional[list[str]] = None
+    repeatable: bool = False
+    path_must_exist: bool = False
+    must_be_executable: bool = False
+    category: str = "general"
+    stage: str = "top_level"
+    source: str = "workflow_wrapper"
+    env_var: Optional[str] = None
+    skip_when_default: bool = False
+    is_output_root: bool = False
+
+
+class ConstraintInfo(BaseModel):
+    """Constraint between parameters."""
+
+    kind: str
+    params: list[str]
+    message: str = ""
+
+
+class ParameterGroupInfo(BaseModel):
+    """Ordered parameter group."""
+
+    name: str
+    title: str
+    parameters: list[str]
+
+
+class WorkflowParameterSchemaResponse(BaseModel):
+    """Response from get_workflow_parameter_schema."""
+
+    workflow_id: str
+    parameters: list[ParameterInfo]
+    parameter_groups: list[ParameterGroupInfo] = Field(default_factory=list)
+    constraints: list[ConstraintInfo] = Field(default_factory=list)
+
+
+class ValidateWorkflowResponse(BaseModel):
+    """Response from validate_workflow_parameters."""
+
+    valid: bool
+    normalized_params: dict[str, Any] = Field(default_factory=dict)
+    warnings: list[str] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)
+
+
+class RenderWorkflowResponse(BaseModel):
+    """Response from render_workflow_command."""
+
+    workflow_id: str
+    entry_script: str
+    argv: list[str]
+    shell_preview: str
+    env_overrides: dict[str, str] = Field(default_factory=dict)
+    output_root: Optional[str] = None
+
+
+# --- errors ---
+
+
+class ScaffoldWorkflowResponse(BaseModel):
+    """Response from scaffold_workflow_schema."""
+
+    draft_yaml: str
+    parameter_count: int
+    source_script: str
+    notes: list[str] = Field(default_factory=list)
+
+
+class ValidateDraftWorkflowResponse(BaseModel):
+    """Response from validate_draft_workflow_schema."""
+
+    valid: bool
+    errors: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    parameter_count: Optional[int] = None
+
+
 class ErrorResponse(BaseModel):
     """Structured error response."""
 

@@ -83,6 +83,48 @@ Environment variables in config use `${VAR_NAME}` syntax.
 
 **IMPORTANT**: Always use `ensure_fresh_build()` or `build_star(clean=True)` before running test suites to prevent stale binary issues that can cause segfaults.
 
+### Workflow Tools
+
+| Tool | Description |
+|------|-------------|
+| `list_workflows(auth_token?)` | List supported workflow templates |
+| `describe_workflow(workflow_id, auth_token?)` | Full workflow metadata with stages and parameter groups |
+| `get_workflow_parameter_schema(workflow_id, auth_token?)` | Machine-readable parameter schema with types, defaults, and constraints |
+| `validate_workflow_parameters(workflow_id, params, check_paths?, auth_token?)` | Validate structured params without executing |
+| `render_workflow_command(workflow_id, params, auth_token?)` | Render params into argv array and shell preview |
+
+**Workflow vs Script tools**: Workflows provide structured parameter contracts for agent consumption. Scripts provide raw allowlisted execution. They are complementary:
+
+```python
+# Agent workflow: discover -> validate -> render -> (optionally execute via run_script)
+wf = client.call_tool("list_workflows", {})
+schema = client.call_tool("get_workflow_parameter_schema", {
+    "workflow_id": "ucsf_star_suite_production"
+})
+
+# Validate with path checks (default) or skip path checks for dry planning
+val = client.call_tool("validate_workflow_parameters", {
+    "workflow_id": "ucsf_star_suite_production",
+    "params": {
+        "all_samples": True,
+        "threads": 16,
+        "dry_run": True,
+        "dataset_root": "/mnt/pikachu/ucsf-perturb-seq-corrected",
+        "genome_dir": "/storage/autoindex_110_44/bulk_index",
+    },
+    "check_paths": True,  # set False to skip file/dir existence checks
+})
+
+# Render normalized params into argv + shell preview
+cmd = client.call_tool("render_workflow_command", {
+    "workflow_id": "ucsf_star_suite_production",
+    "params": val["normalized_params"]
+})
+# cmd["argv"] is the canonical argv array
+# cmd["shell_preview"] is a shell-safe joined string
+# cmd["env_overrides"] contains e.g. {"DOWNSAMPLE_SEED": "1"}
+```
+
 ### Execution (Phase 3)
 
 | Tool | Description |
@@ -250,12 +292,16 @@ mcp_server/
 │   ├── discovery.py    # list_datasets, list_test_suites, find_docs, find_tests
 │   ├── preflight.py    # preflight validation
 │   ├── executor.py     # run_script, collect_outputs
+│   ├── workflows.py    # workflow discovery, validation, rendering
 │   ├── reload.py       # reload_config
 │   └── utils.py        # Path validation, run ID generation
 ├── schemas/
-│   ├── config.py       # Config models
+│   ├── config.py       # Config models (incl. WorkflowConfig)
+│   ├── workflow.py     # Workflow schema models (WorkflowSchema, params, constraints)
 │   ├── run_config.py   # Run request models
 │   └── responses.py    # Response models
+├── workflows/
+│   └── ucsf_star_suite_production.yaml  # UCSF workflow parameter schema
 └── tests/
     ├── conftest.py
     ├── test_config.py
@@ -263,7 +309,13 @@ mcp_server/
     ├── test_preflight.py
     ├── test_executor.py
     ├── test_auth.py
-    └── test_utils.py
+    ├── test_utils.py
+    ├── test_workflow_config.py
+    ├── test_workflow_discovery.py
+    ├── test_workflow_validation.py
+    ├── test_workflow_render.py
+    ├── test_workflow_integration.py
+    └── test_ucsf_workflow_e2e.py
 ```
 
 ## Implementation Status
@@ -273,6 +325,7 @@ mcp_server/
 - [x] **Phase 3**: Script execution (queue, timeout, logs, true concurrency)
 - [x] **Phase 4**: Stabilization + Docs (107 tests, AGENTS.md updated)
 - [x] **Phase 5**: Containerization (Dockerfile, docker-compose.yml)
+- [x] **Phase 6**: Workflow parameter service (structured schemas, validation, rendering)
 
 ## Docker Deployment
 
