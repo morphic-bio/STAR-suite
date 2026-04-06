@@ -27,16 +27,18 @@ from .utils import is_path_allowed
 
 # Matches case arms: --flag-name) body ;;
 # Also handles -h|--help) style combined short+long
+# DOTALL lets .*? span multi-line case bodies (body on separate lines from ;;)
 _CASE_ARM_RE = re.compile(
     r"^\s*(?:-\w[\s,|]+)?(--[\w][\w-]*)\)\s*(.*?);;",
-    re.MULTILINE,
+    re.MULTILINE | re.DOTALL,
 )
 
 # In a case body: VAR="$2" or VAR=${2} or VAR=$2
 _VALUE_BODY_RE = re.compile(r"(\w+)=[\"']?\$\{?2\}?[\"']?")
 
 # In a case body: VAR=1 or VAR=0 or VAR=true or VAR=false
-_BOOL_BODY_RE = re.compile(r"(\w+)=(0|1|true|false)\s*;")
+# \b ensures we don't partially match multi-digit numbers (e.g. VAR=10)
+_BOOL_BODY_RE = re.compile(r"(\w+)=(0|1|true|false)\b")
 
 # Default with env fallback: VAR="${ENV_VAR:-default}"
 _DEFAULT_ENV_FALLBACK_RE = re.compile(
