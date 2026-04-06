@@ -162,30 +162,69 @@ actionable; link to deeper docs rather than copying them.
 An MCP server is available for automated agent workflows:
 
 ```bash
-cd mcp_server && pip install -r requirements.txt
+pip install -r mcp_server/requirements.txt
 export MCP_AUTH_TOKEN="your-token"
-python -m mcp_server.app
+python3 -m mcp_server.app --transport http --host 0.0.0.0 --port 8765
 ```
 
-**Available tools**:
-- `list_datasets`, `list_test_suites`, `find_docs`, `find_tests` (discovery)
-- `preflight(script, ...)` - validate before running
-- `run_script(script, ...)` - execute allowlisted scripts
-- `collect_outputs(run_id)` - retrieve results
-- `reload_config()` - hot-reload config
+### Discovery tools (no auth required when `public_discovery: true`)
 
-**Key features**:
+| Tool | Purpose |
+|------|---------|
+| `list_datasets` | Enumerate configured datasets with paths and metadata |
+| `list_test_suites` | List test suites, scripts, and runnability status |
+| `find_docs` | Search documentation by keyword |
+| `find_tests` | Search test scripts by keyword |
+| `list_workflows` | List all registered workflows with summaries |
+| `describe_workflow` | Full workflow details: stages, parameter groups, caveats |
+| `get_workflow_parameter_schema` | Machine-readable parameter definitions with types, defaults, constraints |
+| `scaffold_workflow_schema` | Parse a shell script and generate a draft workflow schema YAML |
+| `validate_draft_workflow_schema` | Validate a draft schema against the WorkflowSchema model |
+
+### Authenticated tools (require `auth_token`)
+
+| Tool | Purpose |
+|------|---------|
+| `validate_workflow_parameters` | Validate parameter values (types, paths, constraints) |
+| `render_workflow_command` | Render a validated parameter set into a shell command (`argv` + env) |
+| `preflight` | Pre-run checks (disk space, binaries, script permissions) |
+| `run_script` | Execute an allowlisted script with timeout and logging |
+| `collect_outputs` | Retrieve run status, logs, and output file inventory |
+| `reload_config` | Hot-reload config and workflow schemas |
+
+### Workflow parameter pipeline
+
+The recommended agent workflow for running scripts:
+
+1. `list_workflows` / `describe_workflow` — discover available workflows
+2. `get_workflow_parameter_schema` — get parameter types, defaults, constraints
+3. `validate_workflow_parameters` — validate user-supplied parameters
+4. `render_workflow_command` — get the exact `argv` and env overrides
+5. `preflight` — verify disk space, binaries, permissions
+6. `run_script` — execute; get `run_id` for tracking
+7. `collect_outputs` — retrieve results when done
+
+### Schema authoring (propose-only)
+
+To add new workflows, agents can use `scaffold_workflow_schema` to parse an
+existing shell script and generate a draft YAML, then `validate_draft_workflow_schema`
+to check it. The draft must be committed to the repo and loaded via `reload_config`
+to become active — these tools never modify the running config.
+
+### Key features
+
 - All paths validated against trusted roots
 - Job queue (1 concurrent, 10 queued)
 - Timeout handling with process group cleanup
 - Logs stored in `plans/artifacts/mcp_runs_YYYYMMDD/`
 
 Documentation: `mcp_server/README.md`  
-Configuration: `mcp_server/config.yaml`
+Configuration: `mcp_server/config.yaml`  
+Workflow schemas: `mcp_server/workflows/`
 
 ### MCP Usage for New Agents
 
-- Prefer MCP tools for discovery/preflight/run rather than ad‑hoc shell scripts.
+- Prefer MCP tools for discovery/preflight/run rather than ad-hoc shell scripts.
 - Endpoints differ by client:
   - **Codex** (streamable-HTTP): `POST /`
   - **Cursor** (SSE): `GET /sse` + `POST /messages`
