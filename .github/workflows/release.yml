@@ -283,7 +283,20 @@ jobs:
           name: release-artifacts-${{ github.ref_name }}
           path: dist/release
 
+      - name: Check if release already exists
+        id: check-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "${{ github.ref_name }}" --repo "${{ github.repository }}" > /dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Release ${{ github.ref_name }} already exists — skipping publish."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Detect prerelease from tag
+        if: steps.check-release.outputs.exists != 'true'
         id: prerelease
         run: |
           if echo "${{ github.ref_name }}" | grep -qiE '^v0([.]|$)|[-](alpha|beta|rc|dev)'; then
@@ -293,6 +306,7 @@ jobs:
           fi
 
       - name: Publish GitHub release
+        if: steps.check-release.outputs.exists != 'true'
         uses: softprops/action-gh-release@v2
         with:
           files: |
