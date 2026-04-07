@@ -15,6 +15,8 @@ paths:
 trusted_roots:
   - "/mnt/pikachu/STAR-suite"
   - "/mnt/pikachu/prod-12-28"
+  - "/mnt/pikachu/ucsf-perturb-seq-corrected"
+  - "/mnt/pikachu/ucsf-perturb-seq"
   - "/storage"
   - "/tmp"
   - "/usr/bin"        # read-only for tool discovery
@@ -41,6 +43,7 @@ disk_space:
   full_depth_min_gb: 100       # full A375/GeneFull runs
 
 # Structured workflow templates (agent-facing parameter surface)
+# visibility: public (default) or private (requires auth_token to discover)
 workflows:
   - id: "ucsf_star_suite_production"
     title: "UCSF STAR-suite Production Workflow"
@@ -48,6 +51,71 @@ workflows:
     entry_script: "scripts/paper/run_ucsf_corrected_production_workflow.sh"
     kind: "shell_workflow"
     schema_file: "mcp_server/workflows/ucsf_star_suite_production.yaml"
+
+  # --- E2E test workflows (private, internal) ---
+
+  - id: "slam_end_to_end"
+    title: "SLAM End-to-End Correlation"
+    summary: "Full SLAM/GRAND-SLAM correlation comparison with GEDI."
+    entry_script: "tests/run_slam_end_to_end.sh"
+    schema_file: "mcp_server/workflows/slam_end_to_end.yaml"
+    visibility: "private"
+
+  - id: "slam_end_to_end_vb_commonmask"
+    title: "SLAM VB Common-Mask E2E"
+    summary: "VB-weighted SLAM vs GEDI with GEDI-derived common SNP mask."
+    entry_script: "tests/run_slam_end_to_end_vb_commonmask.sh"
+    schema_file: "mcp_server/workflows/slam_end_to_end_vb_commonmask.yaml"
+    visibility: "private"
+
+  - id: "slam_end_to_end_fixture"
+    title: "SLAM Fixture E2E"
+    summary: "Fixture-based SLAM E2E using 100K downsampled reads."
+    entry_script: "tests/run_slam_end_to_end_fixture.sh"
+    schema_file: "mcp_server/workflows/slam_end_to_end_fixture.yaml"
+    visibility: "private"
+
+  - id: "downsample_alignment_gedi"
+    title: "Downsample Alignment + GEDI Goal Set"
+    summary: "Downsample SLAM FASTQs, align with STAR, build GEDI goal-set fixtures."
+    entry_script: "tests/run_downsample10M_alignment_and_gedi_goalset.sh"
+    schema_file: "mcp_server/workflows/downsample_alignment_gedi.yaml"
+    visibility: "private"
+
+  - id: "adapter_clip_synthetic"
+    title: "Adapter Clip Synthetic Test"
+    summary: "Tier-A self-contained synthetic adapter clipping validation."
+    entry_script: "tests/run_adapter_clip_synthetic_test.sh"
+    schema_file: "mcp_server/workflows/adapter_clip_synthetic.yaml"
+    visibility: "private"
+
+  - id: "genome_generate_validation"
+    title: "Genome Generate Validation"
+    summary: "Tier-A self-contained synthetic genome index validation."
+    entry_script: "tests/run_genome_generate_validation.sh"
+    schema_file: "mcp_server/workflows/genome_generate_validation.yaml"
+    visibility: "private"
+
+  - id: "ucsf_production_100k_smoke"
+    title: "UCSF Production 100K Smoke"
+    summary: "Downsampled perturb-seq production workflow smoke test."
+    entry_script: "tests/run_ucsf_corrected_production_100k_smoke.sh"
+    schema_file: "mcp_server/workflows/ucsf_production_100k_smoke.yaml"
+    visibility: "private"
+
+  - id: "cr_parity_100k"
+    title: "CellRanger Parity 100K"
+    summary: "STAR-suite vs CellRanger MEX comparison at 100K tier."
+    entry_script: "tests/run_cr_parity_100k.sh"
+    schema_file: "mcp_server/workflows/cr_parity_100k.yaml"
+    visibility: "private"
+
+  - id: "parms_regression"
+    title: "Parameter Regression Suite"
+    summary: "Comprehensive parameter regression test runner."
+    entry_script: "tests/run_parms_tests.sh"
+    schema_file: "mcp_server/workflows/parms_regression.yaml"
+    visibility: "private"
 
 # Allowlisted scripts with metadata
 scripts:
@@ -125,22 +193,167 @@ scripts:
     module: "feature-tools"
     description: "assignBarcodes regression test"
 
-  # SLAM (optional - fixtures not yet confirmed; paths are placeholders)
-  - name: "slam_smoke"
-    path: "slam/tests/run_slam_smoke.sh"
+  # SLAM
+  - name: "slam_e2e"
+    path: "tests/run_slam_end_to_end.sh"
     module: "slam"
-    description: "SLAM-seq basic smoke test"
-    runnable: false
+    description: "SLAM/GEDI E2E correlation comparison"
+    timeout_seconds: 7200
     fixtures:
-      - "/storage/slam_fixtures"
+      - "/storage/SLAM-Seq-prod-compare-20260109"
+      - "/storage/autoindex_110_44"
 
-  - name: "slam_qc"
-    path: "slam/tests/run_slam_qc_test.sh"
+  - name: "slam_e2e_vb_commonmask"
+    path: "tests/run_slam_end_to_end_vb_commonmask.sh"
     module: "slam"
-    description: "SLAM-seq QC validation"
-    runnable: false
+    description: "SLAM VB-weighted E2E with GEDI common mask"
+    timeout_seconds: 7200
     fixtures:
-      - "/storage/slam_fixtures"
+      - "/storage/SLAM-Seq-prod-compare-20260109"
+      - "/storage/autoindex_110_44"
+
+  - name: "slam_e2e_fixture"
+    path: "tests/run_slam_end_to_end_fixture.sh"
+    module: "slam"
+    description: "SLAM fixture-based E2E (100K reads, fast)"
+
+  - name: "slam_compat"
+    path: "tests/run_slam_compat_test.sh"
+    module: "slam"
+    description: "SLAM compatibility unit tests"
+
+  - name: "slam_unit"
+    path: "tests/run_slam_unit_tests.sh"
+    module: "slam"
+    description: "SLAM solver unit tests"
+
+  - name: "slam_requant_parity"
+    path: "tests/run_slam_requant_parity.sh"
+    module: "slam"
+    description: "SLAM requant parity check"
+
+  - name: "slam_fixture_parity"
+    path: "tests/run_slam_fixture_parity.sh"
+    module: "slam"
+    description: "SLAM fixture parity validation"
+
+  - name: "slam_solver"
+    path: "tests/run_slam_solver_test.sh"
+    module: "slam"
+    description: "SLAM solver regression test"
+
+  # Tier-A self-contained (no external data)
+  - name: "adapter_clip_synthetic"
+    path: "tests/run_adapter_clip_synthetic_test.sh"
+    module: "tier-a"
+    description: "Synthetic adapter clipping validation (container-safe)"
+
+  - name: "genome_generate_validation"
+    path: "tests/run_genome_generate_validation.sh"
+    module: "tier-a"
+    description: "Synthetic genome index validation (container-safe)"
+
+  - name: "binary_test_matrix"
+    path: "tests/run_binary_test_matrix.sh"
+    module: "tier-a"
+    description: "Binary test validation matrix"
+
+  # Y-chromosome / BAM splitting
+  - name: "ychrom_regression"
+    path: "tests/run_ychrom_regression_test.sh"
+    module: "ychrom"
+    description: "Y-chromosome removal regression test"
+
+  - name: "ychrom_bulk_pe"
+    path: "tests/run_ychrom_bulk_pe_test.sh"
+    module: "ychrom"
+    description: "Y-chromosome bulk paired-end test"
+
+  - name: "ychrom_bam_split"
+    path: "tests/run_ychrom_bam_split_test.sh"
+    module: "ychrom"
+    description: "Y-chromosome BAM split test"
+
+  - name: "remove_y_reads"
+    path: "tests/run_remove_y_reads_test.sh"
+    module: "ychrom"
+    description: "Remove Y reads FASTQ test"
+
+  # CR-compat additional
+  - name: "cr_compat_unit"
+    path: "tests/run_cr_compat_unit_tests.sh"
+    module: "cr-compat"
+    description: "CellRanger compatibility unit tests (ASAN build)"
+
+  - name: "cr_compat_integration"
+    path: "tests/run_cr_compat_integration_smoke.sh"
+    module: "cr-compat"
+    description: "CellRanger compatibility integration smoke"
+
+  - name: "cr_parity_100k"
+    path: "tests/run_cr_parity_100k.sh"
+    module: "cr-compat"
+    description: "CellRanger parity at 100K tier"
+    timeout_seconds: 3600
+    fixtures:
+      - "/storage/A375"
+
+  # UCSF smoke tests
+  - name: "ucsf_100k_smoke"
+    path: "tests/run_ucsf_corrected_production_100k_smoke.sh"
+    module: "ucsf"
+    description: "UCSF corrected production 100K smoke test"
+    timeout_seconds: 3600
+    fixtures:
+      - "/mnt/pikachu/ucsf-perturb-seq-corrected"
+
+  - name: "ucsf_velocyto_100k"
+    path: "tests/run_ucsf_velocyto_100k_matrix.sh"
+    module: "ucsf"
+    description: "UCSF Velocyto 100K matrix test"
+    timeout_seconds: 3600
+
+  - name: "ucsf_solo_gex_100k"
+    path: "tests/run_ucsf_solo_gex_100k_benchmark.sh"
+    module: "ucsf"
+    description: "UCSF Solo GEX 100K benchmark"
+    timeout_seconds: 3600
+
+  # Flex additional
+  - name: "flex_tiny_public"
+    path: "tests/run_flex_tiny_public_smoke.sh"
+    module: "flex"
+    description: "Flex tiny public smoke (10x fixture, container-safe)"
+
+  - name: "flex_yremove"
+    path: "tests/run_flex_yremove_smoke.sh"
+    module: "flex"
+    description: "Flex Y-remove smoke test"
+
+  - name: "flex_cr_config"
+    path: "tests/run_flex_cr_config_smoke.sh"
+    module: "flex"
+    description: "Flex CR-config smoke test"
+
+  # Bulk RNA-seq
+  - name: "public_bulk_pe"
+    path: "tests/run_public_bulk_pe_smoke.sh"
+    module: "bulk"
+    description: "Public bulk paired-end RNA-seq smoke test"
+
+  # Parameter regression
+  - name: "parms_tests"
+    path: "tests/run_parms_tests.sh"
+    module: "regression"
+    description: "Comprehensive parameter regression suite"
+    timeout_seconds: 7200
+
+  # Downsample / fixture building
+  - name: "downsample_10m_gedi"
+    path: "tests/run_downsample10M_alignment_and_gedi_goalset.sh"
+    module: "slam"
+    description: "Downsample 10M reads + STAR alignment + GEDI goal set"
+    timeout_seconds: 7200
 
   # Build commands (special category)
   - name: "build_core"
@@ -171,12 +384,12 @@ test_suites:
 
   - module: "flex"
     description: "STAR-Flex tests"
-    scripts: ["flex_smoke", "flex_cbub_validation", "flex_multisample"]
+    scripts: ["flex_smoke", "flex_cbub_validation", "flex_multisample", "flex_tiny_public", "flex_yremove", "flex_cr_config"]
     disk_space_min_gb: 20
 
   - module: "cr-compat"
     description: "CellRanger compatibility tests"
-    scripts: ["crispr_calling", "a375_gex_features_cr_parity"]
+    scripts: ["crispr_calling", "a375_gex_features_cr_parity", "cr_compat_unit", "cr_compat_integration", "cr_parity_100k"]
     disk_space_min_gb: 100
 
   - module: "parity"
@@ -190,10 +403,39 @@ test_suites:
     disk_space_min_gb: 20
 
   - module: "slam"
-    description: "SLAM-seq tests (fixtures not yet confirmed)"
-    scripts: ["slam_smoke", "slam_qc"]
+    description: "SLAM-seq tests"
+    scripts: ["slam_e2e_fixture", "slam_compat", "slam_unit", "slam_solver", "slam_fixture_parity", "slam_requant_parity"]
     disk_space_min_gb: 20
-    runnable: false
+
+  - module: "slam-e2e"
+    description: "SLAM full-depth E2E tests (require /storage SLAM data)"
+    scripts: ["slam_e2e", "slam_e2e_vb_commonmask", "downsample_10m_gedi"]
+    disk_space_min_gb: 100
+
+  - module: "tier-a"
+    description: "Self-contained Tier-A tests (no external data, container-safe)"
+    scripts: ["adapter_clip_synthetic", "genome_generate_validation", "binary_test_matrix"]
+    disk_space_min_gb: 5
+
+  - module: "ychrom"
+    description: "Y-chromosome removal and BAM splitting tests"
+    scripts: ["ychrom_regression", "ychrom_bulk_pe", "ychrom_bam_split", "remove_y_reads"]
+    disk_space_min_gb: 20
+
+  - module: "ucsf"
+    description: "UCSF perturb-seq smoke tests"
+    scripts: ["ucsf_100k_smoke", "ucsf_velocyto_100k", "ucsf_solo_gex_100k"]
+    disk_space_min_gb: 50
+
+  - module: "bulk"
+    description: "Bulk RNA-seq tests"
+    scripts: ["public_bulk_pe"]
+    disk_space_min_gb: 20
+
+  - module: "regression"
+    description: "Parameter regression test suite"
+    scripts: ["parms_tests"]
+    disk_space_min_gb: 20
 
 # Required binaries for preflight checks
 required_binaries:

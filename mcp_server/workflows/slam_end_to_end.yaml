@@ -1,0 +1,61 @@
+# SLAM End-to-End Workflow Schema
+# Parsed from tests/run_slam_end_to_end.sh
+
+id: "slam_end_to_end"
+title: "SLAM End-to-End Correlation"
+summary: "Full SLAM/GRAND-SLAM correlation comparison: STAR alignment, SNP masking, VB quantification, and GEDI goal-set comparison."
+kind: "shell_workflow"
+entry_script: "tests/run_slam_end_to_end.sh"
+supported_modes:
+  - "local"
+caveats:
+  - "Requires GEDI installation with homo_sapiens_110_44.oml genome."
+  - "Threads parameter is hardcoded at 8 in the script; override via source edit."
+  - "Uses full-depth SLAM-Seq FASTQs from /storage; expect ~1h runtime."
+default_output_layout: "/storage/slam_e2e_<datestamp>/"
+
+stages:
+  - name: "alignment"
+    title: "STAR Alignment"
+    description: "Align WT (0h) and 6h SLAM-Seq reads with SNP-aware STAR."
+  - name: "snp_mask"
+    title: "SNP Mask Build"
+    description: "Build TC-aware SNP mask from WT BAM."
+  - name: "quantification"
+    title: "VB Quantification"
+    description: "Variational-Bayes SLAM quantification with slam_requant."
+  - name: "gedi_comparison"
+    title: "GEDI Comparison"
+    description: "Run GEDI GRAND-SLAM and compare conversion rates."
+
+parameter_groups:
+  - name: "paths"
+    title: "Paths"
+    parameters: ["work_dir"]
+  - name: "execution"
+    title: "Execution"
+    parameters: ["overwrite", "no_cleanup"]
+
+parameters:
+  - name: "work_dir"
+    cli_flag: "--work-dir"
+    type: "directory"
+    required: false
+    default: "/storage/slam_e2e"
+    description: "Working directory for all outputs."
+
+  - name: "overwrite"
+    cli_flag: "--overwrite"
+    type: "bool"
+    default: false
+    description: "Rerun steps even if outputs already exist."
+
+  - name: "no_cleanup"
+    cli_flag: "--no-cleanup"
+    type: "bool"
+    default: false
+    description: "Keep intermediate files after completion."
+
+rendering:
+  flag_order: ["work_dir", "overwrite", "no_cleanup"]
+  omit_absent_optionals: true

@@ -1,0 +1,66 @@
+# Downsample + Alignment + GEDI Goal-Set Workflow Schema
+# Parsed from tests/run_downsample10M_alignment_and_gedi_goalset.sh
+
+id: "downsample_alignment_gedi"
+title: "Downsample Alignment + GEDI Goal Set"
+summary: "Downsample SLAM FASTQs, align with STAR, and build GEDI goal-set fixtures."
+kind: "shell_workflow"
+entry_script: "tests/run_downsample10M_alignment_and_gedi_goalset.sh"
+supported_modes:
+  - "local"
+caveats:
+  - "Input FASTQ path is hardcoded to /mnt/pikachu/NW-5-21/SLAM-Seq/ARID1A-no4su."
+  - "Requires GEDI installation with homo_sapiens_110_44.oml genome."
+  - "Output directory is auto-timestamped under /storage/."
+default_output_layout: "/storage/slam_dev_arid1a_ds<reads>_<timestamp>/"
+
+stages:
+  - name: "downsample"
+    title: "Downsample"
+    description: "Deterministic seqtk-style downsampling of input FASTQ."
+  - name: "alignment"
+    title: "STAR Alignment"
+    description: "Align downsampled reads with STAR."
+  - name: "gedi_goalset"
+    title: "GEDI Goal Set"
+    description: "Run GEDI GRAND-SLAM and build goal-set fixture."
+
+parameter_groups:
+  - name: "performance"
+    title: "Performance"
+    parameters: ["threads", "reads", "seed"]
+  - name: "execution"
+    title: "Execution"
+    parameters: ["overwrite"]
+
+parameters:
+  - name: "threads"
+    cli_flag: "--threads"
+    type: "int"
+    required: false
+    default: 8
+    description: "Thread count for STAR alignment."
+
+  - name: "seed"
+    cli_flag: "--seed"
+    type: "int"
+    required: false
+    default: 1
+    description: "Deterministic seed for downsampling."
+
+  - name: "reads"
+    cli_flag: "--reads"
+    type: "int"
+    required: false
+    default: 10000000
+    description: "Number of reads to downsample to."
+
+  - name: "overwrite"
+    cli_flag: "--overwrite"
+    type: "bool"
+    default: false
+    description: "Rerun steps even if outputs already exist."
+
+rendering:
+  flag_order: ["threads", "seed", "reads", "overwrite"]
+  omit_absent_optionals: true
