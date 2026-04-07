@@ -136,6 +136,24 @@ def check_auth(token: Optional[str], is_discovery: bool = False) -> Optional[Err
     return None
 
 
+def is_authenticated(token: Optional[str]) -> bool:
+    """Return True if *token* is valid (or if auth is not configured)."""
+    config = get_config()
+    expected_token = config.server.auth_token
+    if not expected_token:
+        return True
+    return bool(token and token == expected_token)
+
+
+def get_workflow_visibility(workflow_id: str) -> str:
+    """Return the visibility setting for a workflow ('public' or 'private')."""
+    config = get_config()
+    wf_cfg = config.get_workflow(workflow_id)
+    if wf_cfg is None:
+        return "public"
+    return wf_cfg.visibility
+
+
 # --- MCP Tools ---
 
 
@@ -573,7 +591,7 @@ def list_workflows(auth_token: Optional[str] = None) -> dict:
         return auth_error.model_dump()
 
     try:
-        result = _list_workflows()
+        result = _list_workflows(authenticated=is_authenticated(auth_token))
         return result.model_dump()
     except Exception as e:
         return ErrorResponse(
@@ -601,7 +619,7 @@ def describe_workflow(
         return auth_error.model_dump()
 
     try:
-        result = _describe_workflow(workflow_id)
+        result = _describe_workflow(workflow_id, authenticated=is_authenticated(auth_token))
         return result.model_dump()
     except Exception as e:
         return ErrorResponse(
@@ -632,7 +650,9 @@ def get_workflow_parameter_schema(
         return auth_error.model_dump()
 
     try:
-        result = _get_workflow_parameter_schema(workflow_id)
+        result = _get_workflow_parameter_schema(
+            workflow_id, authenticated=is_authenticated(auth_token)
+        )
         return result.model_dump()
     except Exception as e:
         return ErrorResponse(

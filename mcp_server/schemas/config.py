@@ -105,6 +105,11 @@ class WorkflowConfig(BaseModel):
     entry_script: str = Field(description="Entry script path (relative to repo root)")
     kind: str = Field(default="shell_workflow", description="Workflow kind")
     schema_file: str = Field(description="Path to workflow schema YAML (relative to repo root)")
+    visibility: str = Field(
+        default="public",
+        pattern="^(public|private)$",
+        description="public = visible without auth; private = requires valid auth_token",
+    )
 
 
 class MCPConfig(BaseModel):

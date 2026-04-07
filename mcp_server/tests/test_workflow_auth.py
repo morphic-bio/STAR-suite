@@ -72,6 +72,22 @@ MINI_SCHEMA = {
     "rendering": {"flag_order": ["input_dir", "dry_run"]},
 }
 
+PRIVATE_SCHEMA = {
+    "id": "private_wf",
+    "title": "Private Workflow",
+    "summary": "Only visible with auth.",
+    "entry_script": "scripts/entry.sh",
+    "parameters": [
+        {
+            "name": "input_dir",
+            "cli_flag": "--input-dir",
+            "type": "directory",
+            "required": True,
+        },
+    ],
+    "rendering": {"flag_order": ["input_dir"]},
+}
+
 
 @pytest.fixture(autouse=True)
 def _reset():
@@ -118,11 +134,13 @@ def auth_env():
         input_dir = tmp / "data"
         input_dir.mkdir()
 
-        # Write workflow schema
+        # Write workflow schemas
         schema_dir = tmp / "workflows"
         schema_dir.mkdir()
         with open(schema_dir / "auth_wf.yaml", "w") as f:
             yaml.dump(MINI_SCHEMA, f)
+        with open(schema_dir / "private_wf.yaml", "w") as f:
+            yaml.dump(PRIVATE_SCHEMA, f)
 
         cfg = {
             "server": {
@@ -142,7 +160,15 @@ def auth_env():
                     "summary": "For auth tests.",
                     "entry_script": "scripts/entry.sh",
                     "schema_file": "workflows/auth_wf.yaml",
-                }
+                },
+                {
+                    "id": "private_wf",
+                    "title": "Private Workflow",
+                    "summary": "Only visible with auth.",
+                    "entry_script": "scripts/entry.sh",
+                    "schema_file": "workflows/private_wf.yaml",
+                    "visibility": "private",
+                },
             ],
         }
         cfg_path = tmp / "config.yaml"
@@ -347,3 +373,52 @@ class TestToolErrorHandling:
         result = scaffold_workflow_schema(script_path="/etc/passwd")
         assert result.get("error") is True
         assert result["code"] == "SCAFFOLD_FAILED"
+
+
+# ---------------------------------------------------------------------------
+# Visibility: content-level filtering by workflow visibility + auth
+# ---------------------------------------------------------------------------
+
+
+class TestWorkflowVisibility:
+    """Private workflows are hidden from unauthenticated callers."""
+
+    def test_list_omits_private_without_auth(self, auth_env):
+        result = list_workflows()
+        ids = [w["id"] for w in result["workflows"]]
+        assert "auth_wf" in ids
+        assert "private_wf" not in ids
+
+    def test_list_includes_private_with_auth(self, auth_env):
+        result = list_workflows(auth_token="secret-token")
+        ids = [w["id"] for w in result["workflows"]]
+        assert "auth_wf" in ids
+        assert "private_wf" in ids
+
+    def test_describe_private_without_auth_returns_error(self, auth_env):
+        result = describe_workflow(workflow_id="private_wf")
+        assert result.get("error") is True
+        assert result["code"] == "WORKFLOW_ERROR"
+
+    def test_describe_private_with_auth_succeeds(self, auth_env):
+        result = describe_workflow(workflow_id="private_wf", auth_token="secret-token")
+        assert result.get("error") is not True
+        assert result["id"] == "private_wf"
+
+    def test_schema_private_without_auth_returns_error(self, auth_env):
+        result = get_workflow_parameter_schema(workflow_id="private_wf")
+        assert result.get("error") is True
+        assert result["code"] == "WORKFLOW_ERROR"
+
+    def test_schema_private_with_auth_succeeds(self, auth_env):
+        result = get_workflow_parameter_schema(
+            workflow_id="private_wf", auth_token="secret-token"
+        )
+        assert result.get("error") is not True
+        assert result["workflow_id"] == "private_wf"
+
+    def test_public_workflow_visible_without_auth(self, auth_env):
+        """Public workflows remain visible without auth (no regression)."""
+        result = describe_workflow(workflow_id="auth_wf")
+        assert result.get("error") is not True
+        assert result["id"] == "auth_wf"

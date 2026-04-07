@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from ..config import get_config, get_workflow_schema, get_workflow_schemas
+from ..schemas.config import WorkflowConfig
 from ..schemas.responses import (
     ConstraintInfo,
     DescribeWorkflowResponse,
@@ -22,11 +23,29 @@ from ..schemas.workflow import WorkflowSchema
 from .utils import is_path_allowed, validate_path
 
 
-def list_workflows() -> ListWorkflowsResponse:
-    """Return all configured workflow templates."""
+def _get_workflow_config(workflow_id: str) -> Optional[WorkflowConfig]:
+    """Look up the WorkflowConfig entry for *workflow_id*."""
+    config = get_config()
+    return config.get_workflow(workflow_id)
+
+
+def _is_visible(workflow_id: str, authenticated: bool) -> bool:
+    """Return True if *workflow_id* should be exposed given the auth state."""
+    wf_cfg = _get_workflow_config(workflow_id)
+    if wf_cfg is None:
+        return True
+    if wf_cfg.visibility == "private" and not authenticated:
+        return False
+    return True
+
+
+def list_workflows(authenticated: bool = False) -> ListWorkflowsResponse:
+    """Return configured workflow templates visible to the caller."""
     schemas = get_workflow_schemas()
     items = []
     for schema in schemas.values():
+        if not _is_visible(schema.id, authenticated):
+            continue
         items.append(
             WorkflowInfo(
                 id=schema.id,
@@ -40,10 +59,13 @@ def list_workflows() -> ListWorkflowsResponse:
     return ListWorkflowsResponse(workflows=items)
 
 
-def describe_workflow(workflow_id: str) -> DescribeWorkflowResponse:
+def describe_workflow(
+    workflow_id: str,
+    authenticated: bool = False,
+) -> DescribeWorkflowResponse:
     """Return full metadata for a workflow."""
     schema = get_workflow_schema(workflow_id)
-    if schema is None:
+    if schema is None or not _is_visible(workflow_id, authenticated):
         raise ValueError(f"Unknown workflow: {workflow_id}")
 
     stages = [
@@ -76,10 +98,13 @@ def describe_workflow(workflow_id: str) -> DescribeWorkflowResponse:
     )
 
 
-def get_workflow_parameter_schema(workflow_id: str) -> WorkflowParameterSchemaResponse:
+def get_workflow_parameter_schema(
+    workflow_id: str,
+    authenticated: bool = False,
+) -> WorkflowParameterSchemaResponse:
     """Return the machine-readable parameter schema for a workflow."""
     schema = get_workflow_schema(workflow_id)
-    if schema is None:
+    if schema is None or not _is_visible(workflow_id, authenticated):
         raise ValueError(f"Unknown workflow: {workflow_id}")
 
     params = [
