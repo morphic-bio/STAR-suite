@@ -181,6 +181,13 @@ python3 -m mcp_server.app --transport http --host 0.0.0.0 --port 8765
 | `scaffold_workflow_schema` | Parse a shell script and generate a draft workflow schema YAML |
 | `validate_draft_workflow_schema` | Validate a draft schema against the WorkflowSchema model |
 
+**Workflow visibility**: Each workflow in `config.yaml` can set `visibility: public`
+(default) or `visibility: private`. Private workflows are omitted from
+`list_workflows` and return "unknown workflow" from `describe_workflow` /
+`get_workflow_parameter_schema` unless the caller provides a valid `auth_token`.
+This is content-level filtering — the same tool returns different results based
+on auth status.
+
 ### Authenticated tools (require `auth_token`)
 
 | Tool | Purpose |
@@ -243,6 +250,12 @@ Workflow schemas: `mcp_server/workflows/`
 - `docs/todos`
 - `tests/ARTIFACTS.md`
 - `mcp_server/README.md`
+
+## Commits
+
+- Never add `Co-Authored-By` trailers to commit messages. All commits are
+  authored by the human developer.
+- The default branch is `master`. Push to `master`, not `main`.
 
 ## Branching and Merges
 
