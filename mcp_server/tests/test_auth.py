@@ -6,10 +6,11 @@ import pytest
 import yaml
 
 from mcp_server.config import load_config
-from mcp_server.app import check_auth
+from mcp_server.app import check_auth, is_authenticated
 # Import the underlying functions, not the decorated tools
 from mcp_server.app import list_datasets as list_datasets_tool
 from mcp_server.app import find_docs as find_docs_tool
+import mcp_server.app as app_module
 import mcp_server.config as config_module
 
 
@@ -214,3 +215,56 @@ class TestToolsWithAuth:
         result = list_datasets()
         assert result.get("error") is not True
         assert "datasets" in result
+
+
+class TestTrustLocal:
+    """Tests for _trust_local (stdio transport auto-trust)."""
+
+    def test_trust_local_bypasses_auth(self, setup_auth_config):
+        """When _trust_local is True, auth is skipped even with a token configured."""
+        app_module._trust_local = True
+        try:
+            assert check_auth(None) is None
+            assert check_auth("wrong-token") is None
+            assert is_authenticated(None) is True
+        finally:
+            app_module._trust_local = False
+
+    def test_trust_local_grants_full_access(self, temp_dir: Path):
+        """When _trust_local is True, even sensitive tools work without token."""
+        config_dict = {
+            "server": {
+                "auth_token": "secret",
+                "public_discovery": False,
+            },
+            "paths": {
+                "repo_root": str(temp_dir),
+                "artifact_log_root": str(temp_dir / "artifacts"),
+            },
+            "trusted_roots": [str(temp_dir)],
+            "datasets": [],
+            "scripts": [],
+            "test_suites": [],
+        }
+        config_path = temp_dir / "config.yaml"
+        with open(config_path, "w") as f:
+            yaml.dump(config_dict, f)
+        load_config(config_path)
+
+        app_module._trust_local = True
+        try:
+            result = list_datasets()
+            assert result.get("error") is not True
+            assert "datasets" in result
+        finally:
+            app_module._trust_local = False
+            config_module._config = None
+            config_module._config_path = None
+            config_module._config_loaded_at = None
+
+    def test_auth_enforced_when_trust_local_false(self, setup_auth_config):
+        """When _trust_local is False, normal auth rules apply."""
+        app_module._trust_local = False
+        result = check_auth(None)
+        assert result is not None
+        assert result.code == "AUTH_FAILED"

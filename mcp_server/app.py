@@ -58,6 +58,10 @@ from .tools.scaffold import (
 # Create the MCP server
 mcp = FastMCP("star-suite")
 
+# Set to True when running in stdio transport (local to the host).
+# Stdio callers are implicitly trusted — they are pikachu-local processes.
+_trust_local: bool = False
+
 
 class AcceptHeaderMiddleware:
     """Ensure clients accept both JSON and event-stream responses."""
@@ -110,6 +114,10 @@ def check_auth(token: Optional[str], is_discovery: bool = False) -> Optional[Err
     Returns:
         ErrorResponse if auth fails, None if auth passes.
     """
+    # Stdio transport is local to the host — implicitly trusted.
+    if _trust_local:
+        return None
+
     config = get_config()
     expected_token = config.server.auth_token
 
@@ -138,6 +146,8 @@ def check_auth(token: Optional[str], is_discovery: bool = False) -> Optional[Err
 
 def is_authenticated(token: Optional[str]) -> bool:
     """Return True if *token* is valid (or if auth is not configured)."""
+    if _trust_local:
+        return True
     config = get_config()
     expected_token = config.server.auth_token
     if not expected_token:
@@ -842,7 +852,9 @@ def main():
     port = args.port or config.server.port
 
     # Run the server
+    global _trust_local
     if transport == "stdio":
+        _trust_local = True
         mcp.run(transport="stdio")
     else:
         # HTTP mode (serve both streamable-http at "/" and SSE at "/sse"/"/messages")
