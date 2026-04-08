@@ -268,11 +268,16 @@ class WorkflowParameterSchemaResponse(BaseModel):
 
 
 class WorkflowScriptDetail(BaseModel):
-    """Script detail returned by get_workflow_scripts."""
+    """Script detail returned by get_workflow_scripts.
+
+    ``absolute_path`` is only populated for authenticated / trusted-local
+    callers.  Public discovery receives ``None`` so host-specific filesystem
+    layout is not leaked.
+    """
 
     role: str
     path: str
-    absolute_path: str
+    absolute_path: Optional[str] = None
     description: str = ""
     language: str = "bash"
     exists: bool = True

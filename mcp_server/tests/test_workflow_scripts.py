@@ -227,6 +227,70 @@ class TestGetWorkflowScripts:
         assert len(result.scripts) == 1
 
 
+class TestPublicRedaction:
+    """Public/unauthenticated calls must not expose host-specific metadata."""
+
+    def test_public_omits_absolute_path(self, scripts_env):
+        result = get_workflow_scripts("wf_scripts", authenticated=False)
+        for s in result.scripts:
+            assert s.absolute_path is None, (
+                f"absolute_path should be None for public callers, "
+                f"got {s.absolute_path!r} on role={s.role}"
+            )
+
+    def test_public_omits_repo_root(self, scripts_env):
+        result = get_workflow_scripts("wf_scripts", authenticated=False)
+        assert "repo_root" not in result.provenance
+
+    def test_public_omits_git_commit(self, scripts_env):
+        result = get_workflow_scripts("wf_scripts", authenticated=False)
+        assert "git_commit" not in result.provenance
+
+    def test_public_omits_git_remote(self, scripts_env):
+        result = get_workflow_scripts("wf_scripts", authenticated=False)
+        assert "git_remote" not in result.provenance
+
+    def test_public_retains_structural_fields(self, scripts_env):
+        result = get_workflow_scripts("wf_scripts", authenticated=False)
+        assert result.workflow_id == "wf_scripts"
+        assert result.title == "Script Test Workflow"
+        assert result.entry_script == "scripts/entry.sh"
+        assert len(result.scripts) == 3
+        for s in result.scripts:
+            assert s.role
+            assert s.path
+            assert s.language
+
+    def test_public_retains_workflow_schema_in_provenance(self, scripts_env):
+        result = get_workflow_scripts("wf_scripts", authenticated=False)
+        assert result.provenance.get("workflow_schema") == "workflows/wf_scripts.yaml"
+
+    def test_public_retains_exists_flag(self, scripts_env):
+        result = get_workflow_scripts("wf_scripts", authenticated=False)
+        for s in result.scripts:
+            assert s.exists is True
+
+    def test_authenticated_includes_absolute_path(self, scripts_env):
+        result = get_workflow_scripts("wf_scripts", authenticated=True)
+        for s in result.scripts:
+            assert s.absolute_path is not None
+            assert str(scripts_env) in s.absolute_path
+
+    def test_authenticated_includes_repo_root(self, scripts_env):
+        result = get_workflow_scripts("wf_scripts", authenticated=True)
+        assert result.provenance["repo_root"] == str(scripts_env)
+
+    def test_fallback_entry_public_omits_absolute_path(self, scripts_env):
+        """Workflows without a scripts section: public still omits absolute_path."""
+        result = get_workflow_scripts("wf_no_scripts", authenticated=False)
+        assert len(result.scripts) == 1
+        assert result.scripts[0].absolute_path is None
+
+    def test_fallback_entry_authenticated_includes_absolute_path(self, scripts_env):
+        result = get_workflow_scripts("wf_no_scripts", authenticated=True)
+        assert result.scripts[0].absolute_path is not None
+
+
 class TestGetWorkflowScriptsAppWrapper:
     """Tests for the app.py wrapper (auth enforcement)."""
 
@@ -235,6 +299,36 @@ class TestGetWorkflowScriptsAppWrapper:
         assert result.get("error") is not True
         assert result["workflow_id"] == "wf_scripts"
         assert len(result["scripts"]) == 3
+
+    def test_public_discovery_redacts_absolute_path(self, scripts_env):
+        """App-layer public call must redact absolute_path."""
+        result = get_workflow_scripts_app(workflow_id="wf_scripts")
+        assert result.get("error") is not True
+        for s in result["scripts"]:
+            assert s["absolute_path"] is None
+
+    def test_public_discovery_redacts_provenance(self, scripts_env):
+        """App-layer public call must not include repo_root/git_commit/git_remote."""
+        result = get_workflow_scripts_app(workflow_id="wf_scripts")
+        prov = result["provenance"]
+        assert "repo_root" not in prov
+        assert "git_commit" not in prov
+        assert "git_remote" not in prov
+
+    def test_authenticated_discovery_includes_absolute_path(self, scripts_env):
+        result = get_workflow_scripts_app(
+            workflow_id="wf_scripts", auth_token="test-token"
+        )
+        assert result.get("error") is not True
+        for s in result["scripts"]:
+            assert s["absolute_path"] is not None
+
+    def test_authenticated_discovery_includes_provenance(self, scripts_env):
+        result = get_workflow_scripts_app(
+            workflow_id="wf_scripts", auth_token="test-token"
+        )
+        prov = result["provenance"]
+        assert "repo_root" in prov
 
     def test_private_workflow_hidden_without_token(self, scripts_env):
         result = get_workflow_scripts_app(workflow_id="wf_private_scripts")

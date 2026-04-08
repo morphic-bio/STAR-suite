@@ -107,8 +107,10 @@ schema = client.call_tool("get_workflow_parameter_schema", {
 scripts = client.call_tool("get_workflow_scripts", {
     "workflow_id": "ucsf_star_suite_production"
 })
-# scripts["scripts"] lists each script with role, path, absolute_path, language, exists
-# scripts["provenance"] has git_commit, git_remote, repo_root, workflow_schema
+# scripts["scripts"] lists each script with role, path, description, language, exists
+# Public callers: absolute_path is null; provenance has only workflow_schema
+# Authenticated callers: absolute_path populated; provenance adds repo_root,
+#   git_commit, git_remote
 
 # Validate with path checks (default) or skip path checks for dry planning
 val = client.call_tool("validate_workflow_parameters", {

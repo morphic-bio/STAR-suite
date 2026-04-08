@@ -107,8 +107,16 @@ def get_workflow_scripts(
 ) -> GetWorkflowScriptsResponse:
     """Return the scripts composing a workflow with provenance metadata.
 
-    Provides entry script, helper script paths, existence checks,
-    and repo provenance — enough for a downstream script-backed encoder.
+    When *authenticated* is False (public / unauthenticated callers),
+    host-specific details are redacted:
+
+    * ``absolute_path`` is omitted from each script entry.
+    * ``repo_root``, ``git_commit``, and ``git_remote`` are omitted from
+      provenance.
+
+    Structural information (role, relative path, description, language,
+    exists) is always returned so downstream agents can reason about
+    the workflow's script composition without gaining host metadata.
     """
     schema = get_workflow_schema(workflow_id)
     if schema is None or not _is_visible(workflow_id, authenticated):
@@ -126,7 +134,7 @@ def get_workflow_scripts(
         detail = WorkflowScriptDetail(
             role=s.role,
             path=s.path,
-            absolute_path=str(abs_path),
+            absolute_path=str(abs_path) if authenticated else None,
             description=s.description,
             language=s.language,
             exists=abs_path.exists(),
@@ -140,48 +148,52 @@ def get_workflow_scripts(
             WorkflowScriptDetail(
                 role="entry",
                 path=schema.entry_script,
-                absolute_path=str(entry_abs),
+                absolute_path=str(entry_abs) if authenticated else None,
                 description="Entry script",
                 language="bash",
                 exists=entry_abs.exists(),
             )
         )
 
-    # Build provenance from git if available
+    # Build provenance — public callers get only the schema file reference;
+    # authenticated callers additionally get repo_root, git_commit, git_remote.
     provenance: dict[str, Any] = {
-        "repo_root": str(repo_root),
         "workflow_schema": _get_workflow_config(workflow_id).schema_file
         if _get_workflow_config(workflow_id)
         else None,
     }
-    # Best-effort git info
-    import subprocess
 
-    try:
-        commit = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            capture_output=True,
-            text=True,
-            cwd=str(repo_root),
-            timeout=5,
-        )
-        if commit.returncode == 0:
-            provenance["git_commit"] = commit.stdout.strip()
-    except Exception:
-        pass
+    if authenticated:
+        provenance["repo_root"] = str(repo_root)
 
-    try:
-        remote = subprocess.run(
-            ["git", "remote", "get-url", "origin"],
-            capture_output=True,
-            text=True,
-            cwd=str(repo_root),
-            timeout=5,
-        )
-        if remote.returncode == 0:
-            provenance["git_remote"] = remote.stdout.strip()
-    except Exception:
-        pass
+        # Best-effort git info (authenticated only)
+        import subprocess
+
+        try:
+            commit = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                capture_output=True,
+                text=True,
+                cwd=str(repo_root),
+                timeout=5,
+            )
+            if commit.returncode == 0:
+                provenance["git_commit"] = commit.stdout.strip()
+        except Exception:
+            pass
+
+        try:
+            remote = subprocess.run(
+                ["git", "remote", "get-url", "origin"],
+                capture_output=True,
+                text=True,
+                cwd=str(repo_root),
+                timeout=5,
+            )
+            if remote.returncode == 0:
+                provenance["git_remote"] = remote.stdout.strip()
+        except Exception:
+            pass
 
     return GetWorkflowScriptsResponse(
         workflow_id=schema.id,
