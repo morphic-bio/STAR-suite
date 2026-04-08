@@ -535,6 +535,31 @@ class TestUCSFNewlyExposedParams:
         assert result.env_overrides.get("MT_PCT_CUTOFF") == "10.0"
         assert result.env_overrides.get("N_MAD") == "5.0"
 
+    def test_env_var_only_params_not_in_argv(self, ucsf_e2e_env):
+        """Env-var-backed sub-script params must not appear as CLI flags."""
+        sample_map_file = Path(ucsf_e2e_env["tmp"]) / "sample_map.csv"
+        sample_map_file.write_text("sample,fastq\n")
+        params = {
+            "dataset_root": ucsf_e2e_env["dataset_root"],
+            "sample_map": str(sample_map_file),
+            "trim_qc": True,
+            "trim_qc_max_reads": 500000,
+            "min_genes": 300,
+            "max_genes": 5000,
+            "mt_pct_cutoff": 10,
+            "n_mad": 5,
+            "dry_run": True,
+        }
+        result = render_workflow_command(UCSF_WORKFLOW_ID, params)
+        illegal_flags = [
+            "--sample-map", "--trim-qc-max-reads",
+            "--min-genes", "--max-genes", "--mt-pct-cutoff", "--n-mad",
+        ]
+        for flag in illegal_flags:
+            assert flag not in result.argv, (
+                f"{flag} should not appear in argv (env-var delivery only)"
+            )
+
     def test_downstream_qc_skip_when_default(self, ucsf_e2e_env):
         """Default downstream QC values are omitted from env_overrides."""
         params = {

@@ -502,6 +502,12 @@ def render_workflow_command(
             continue
 
         p_def = param_lookup[p_name]
+
+        # Params delivered via env_var from sub-scripts (source != workflow_wrapper)
+        # are already in env_overrides — do not emit as top-level CLI flags.
+        if p_def.env_var and p_def.source != "workflow_wrapper":
+            continue
+
         has_value = p_name in normalized
         val = normalized.get(p_name)
 
