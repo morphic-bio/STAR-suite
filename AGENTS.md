@@ -177,7 +177,7 @@ python3 -m mcp_server.app --transport http --host 0.0.0.0 --port 8765
 | `find_tests` | Search test scripts by keyword |
 | `list_workflows` | List all registered workflows with summaries |
 | `describe_workflow` | Full workflow details: stages, parameter groups, caveats |
-| `get_workflow_scripts` | Scripts composing a workflow: entry + helpers with provenance |
+| `get_workflow_scripts` | Scripts composing a workflow: entry + helpers (provenance detail requires auth) |
 | `get_workflow_parameter_schema` | Machine-readable parameter definitions with types, defaults, constraints |
 | `scaffold_workflow_schema` | Parse a shell script and generate a draft workflow schema YAML |
 | `validate_draft_workflow_schema` | Validate a draft schema against the WorkflowSchema model |
@@ -188,6 +188,18 @@ python3 -m mcp_server.app --transport http --host 0.0.0.0 --port 8765
 `get_workflow_scripts` / `get_workflow_parameter_schema` unless the caller
 provides a valid `auth_token`. This is content-level filtering — the same tool
 returns different results based on auth status.
+
+**Discovery detail levels**: `get_workflow_scripts` applies response redaction
+based on auth status:
+- **Public / unauthenticated**: returns safe structural information only —
+  `workflow_id`, `title`, `entry_script`, per-script `role`, relative `path`,
+  `description`, `language`, `exists`, and `workflow_schema` in provenance.
+  Host-specific fields (`absolute_path`, `repo_root`, `git_commit`,
+  `git_remote`) are omitted.
+- **Authenticated / trusted-local**: returns full detail including
+  `absolute_path` on each script and full provenance (`repo_root`,
+  `git_commit`, `git_remote`). This level is intended for same-host agents
+  and trusted local tooling.
 
 ### Authenticated tools (require `auth_token`)
 

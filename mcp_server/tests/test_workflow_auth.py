@@ -431,6 +431,29 @@ class TestWorkflowVisibility:
         assert result.get("error") is not True
         assert result["workflow_id"] == "private_wf"
 
+    def test_scripts_public_redacts_host_metadata(self, auth_env):
+        """Public discovery of scripts must not expose host-specific metadata."""
+        result = get_workflow_scripts(workflow_id="auth_wf")
+        assert result.get("error") is not True
+        # absolute_path must be None for public callers
+        for s in result["scripts"]:
+            assert s["absolute_path"] is None
+        # provenance must not contain repo_root, git_commit, git_remote
+        prov = result["provenance"]
+        assert "repo_root" not in prov
+        assert "git_commit" not in prov
+        assert "git_remote" not in prov
+
+    def test_scripts_authenticated_includes_host_metadata(self, auth_env):
+        """Authenticated callers get full provenance and absolute paths."""
+        result = get_workflow_scripts(
+            workflow_id="auth_wf", auth_token="secret-token"
+        )
+        assert result.get("error") is not True
+        for s in result["scripts"]:
+            assert s["absolute_path"] is not None
+        assert "repo_root" in result["provenance"]
+
     def test_schema_private_without_auth_returns_error(self, auth_env):
         result = get_workflow_parameter_schema(workflow_id="private_wf")
         assert result.get("error") is True
