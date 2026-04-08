@@ -45,6 +45,7 @@ from .tools.build import (
 from .tools.workflows import (
     list_workflows as _list_workflows,
     describe_workflow as _describe_workflow,
+    get_workflow_scripts as _get_workflow_scripts,
     get_workflow_parameter_schema as _get_workflow_parameter_schema,
     validate_workflow_parameters as _validate_workflow_parameters,
     render_workflow_command as _render_workflow_command,
@@ -630,6 +631,40 @@ def describe_workflow(
 
     try:
         result = _describe_workflow(workflow_id, authenticated=is_authenticated(auth_token))
+        return result.model_dump()
+    except Exception as e:
+        return ErrorResponse(
+            code="WORKFLOW_ERROR",
+            message=str(e),
+        ).model_dump()
+
+
+@mcp.tool()
+def get_workflow_scripts(
+    workflow_id: str,
+    auth_token: Optional[str] = None,
+) -> dict:
+    """Return the scripts composing a workflow with provenance metadata.
+
+    Provides entry script path, helper script paths, existence checks,
+    and repo provenance (git commit, remote). Intended for downstream
+    script-backed encoders that need to know which scripts a workflow uses.
+
+    Args:
+        workflow_id: Workflow identifier (e.g. "ucsf_star_suite_production").
+        auth_token: Authentication token (optional if public_discovery is enabled).
+
+    Returns:
+        GetWorkflowScriptsResponse with script details and provenance.
+    """
+    auth_error = check_auth(auth_token, is_discovery=True)
+    if auth_error:
+        return auth_error.model_dump()
+
+    try:
+        result = _get_workflow_scripts(
+            workflow_id, authenticated=is_authenticated(auth_token)
+        )
         return result.model_dump()
     except Exception as e:
         return ErrorResponse(

@@ -70,6 +70,15 @@ class WorkflowParameterGroup(BaseModel):
     parameters: list[str] = Field(description="Parameter names in this group (display order)")
 
 
+class WorkflowScriptDef(BaseModel):
+    """A script that participates in the workflow."""
+
+    role: str = Field(description="Script role (e.g. entry, batch_runner, downstream, helper)")
+    path: str = Field(description="Path relative to repo root")
+    description: str = Field(default="", description="What this script does")
+    language: str = Field(default="bash", description="Script language (bash, python)")
+
+
 class WorkflowStage(BaseModel):
     """A semantic stage within the workflow."""
 
@@ -123,6 +132,7 @@ class WorkflowSchema(BaseModel):
         description="Description of default output directory structure",
     )
 
+    scripts: list[WorkflowScriptDef] = Field(default_factory=list)
     stages: list[WorkflowStage] = Field(default_factory=list)
     parameter_groups: list[WorkflowParameterGroup] = Field(default_factory=list)
     parameters: list[WorkflowParameterDef] = Field(default_factory=list)

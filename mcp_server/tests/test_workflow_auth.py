@@ -18,6 +18,7 @@ from mcp_server.config import load_config
 from mcp_server.app import (
     list_workflows as list_workflows_tool,
     describe_workflow as describe_workflow_tool,
+    get_workflow_scripts as get_workflow_scripts_tool,
     get_workflow_parameter_schema as get_workflow_parameter_schema_tool,
     validate_workflow_parameters as validate_workflow_parameters_tool,
     render_workflow_command as render_workflow_command_tool,
@@ -41,6 +42,9 @@ def validate_workflow_parameters(**kw):
 
 def render_workflow_command(**kw):
     return render_workflow_command_tool.fn(**kw)
+
+def get_workflow_scripts(**kw):
+    return get_workflow_scripts_tool.fn(**kw)
 
 def scaffold_workflow_schema(**kw):
     return scaffold_workflow_schema_tool.fn(**kw)
@@ -201,6 +205,11 @@ class TestDiscoveryToolsPublicAccess:
         assert "error" not in result or result.get("error") is not True
         assert result["id"] == "auth_wf"
 
+    def test_get_workflow_scripts_no_auth(self, auth_env):
+        result = get_workflow_scripts(workflow_id="auth_wf")
+        assert "error" not in result or result.get("error") is not True
+        assert result["workflow_id"] == "auth_wf"
+
     def test_get_workflow_parameter_schema_no_auth(self, auth_env):
         result = get_workflow_parameter_schema(workflow_id="auth_wf")
         assert "error" not in result or result.get("error") is not True
@@ -344,6 +353,11 @@ class TestToolErrorHandling:
         assert result.get("error") is True
         assert result["code"] == "WORKFLOW_ERROR"
 
+    def test_scripts_unknown_workflow(self, auth_env):
+        result = get_workflow_scripts(workflow_id="nonexistent")
+        assert result.get("error") is True
+        assert result["code"] == "WORKFLOW_ERROR"
+
     def test_schema_unknown_workflow(self, auth_env):
         result = get_workflow_parameter_schema(workflow_id="nonexistent")
         assert result.get("error") is True
@@ -404,6 +418,18 @@ class TestWorkflowVisibility:
         result = describe_workflow(workflow_id="private_wf", auth_token="secret-token")
         assert result.get("error") is not True
         assert result["id"] == "private_wf"
+
+    def test_scripts_private_without_auth_returns_error(self, auth_env):
+        result = get_workflow_scripts(workflow_id="private_wf")
+        assert result.get("error") is True
+        assert result["code"] == "WORKFLOW_ERROR"
+
+    def test_scripts_private_with_auth_succeeds(self, auth_env):
+        result = get_workflow_scripts(
+            workflow_id="private_wf", auth_token="secret-token"
+        )
+        assert result.get("error") is not True
+        assert result["workflow_id"] == "private_wf"
 
     def test_schema_private_without_auth_returns_error(self, auth_env):
         result = get_workflow_parameter_schema(workflow_id="private_wf")

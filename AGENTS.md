@@ -177,6 +177,7 @@ python3 -m mcp_server.app --transport http --host 0.0.0.0 --port 8765
 | `find_tests` | Search test scripts by keyword |
 | `list_workflows` | List all registered workflows with summaries |
 | `describe_workflow` | Full workflow details: stages, parameter groups, caveats |
+| `get_workflow_scripts` | Scripts composing a workflow: entry + helpers with provenance |
 | `get_workflow_parameter_schema` | Machine-readable parameter definitions with types, defaults, constraints |
 | `scaffold_workflow_schema` | Parse a shell script and generate a draft workflow schema YAML |
 | `validate_draft_workflow_schema` | Validate a draft schema against the WorkflowSchema model |
@@ -184,9 +185,9 @@ python3 -m mcp_server.app --transport http --host 0.0.0.0 --port 8765
 **Workflow visibility**: Each workflow in `config.yaml` can set `visibility: public`
 (default) or `visibility: private`. Private workflows are omitted from
 `list_workflows` and return "unknown workflow" from `describe_workflow` /
-`get_workflow_parameter_schema` unless the caller provides a valid `auth_token`.
-This is content-level filtering — the same tool returns different results based
-on auth status.
+`get_workflow_scripts` / `get_workflow_parameter_schema` unless the caller
+provides a valid `auth_token`. This is content-level filtering — the same tool
+returns different results based on auth status.
 
 ### Authenticated tools (require `auth_token`)
 
@@ -204,12 +205,13 @@ on auth status.
 The recommended agent workflow for running scripts:
 
 1. `list_workflows` / `describe_workflow` — discover available workflows
-2. `get_workflow_parameter_schema` — get parameter types, defaults, constraints
-3. `validate_workflow_parameters` — validate user-supplied parameters
-4. `render_workflow_command` — get the exact `argv` and env overrides
-5. `preflight` — verify disk space, binaries, permissions
-6. `run_script` — execute; get `run_id` for tracking
-7. `collect_outputs` — retrieve results when done
+2. `get_workflow_scripts` — get entry + helper scripts with provenance (for encoders)
+3. `get_workflow_parameter_schema` — get parameter types, defaults, constraints
+4. `validate_workflow_parameters` — validate user-supplied parameters
+5. `render_workflow_command` — get the exact `argv` and env overrides
+6. `preflight` — verify disk space, binaries, permissions
+7. `run_script` — execute; get `run_id` for tracking
+8. `collect_outputs` — retrieve results when done
 
 ### Schema authoring (propose-only)
 

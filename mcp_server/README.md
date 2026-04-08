@@ -89,6 +89,7 @@ Environment variables in config use `${VAR_NAME}` syntax.
 |------|-------------|
 | `list_workflows(auth_token?)` | List supported workflow templates |
 | `describe_workflow(workflow_id, auth_token?)` | Full workflow metadata with stages and parameter groups |
+| `get_workflow_scripts(workflow_id, auth_token?)` | Scripts composing a workflow with provenance (for script-backed encoders) |
 | `get_workflow_parameter_schema(workflow_id, auth_token?)` | Machine-readable parameter schema with types, defaults, and constraints |
 | `validate_workflow_parameters(workflow_id, params, check_paths?, auth_token?)` | Validate structured params without executing |
 | `render_workflow_command(workflow_id, params, auth_token?)` | Render params into argv array and shell preview |
@@ -96,11 +97,18 @@ Environment variables in config use `${VAR_NAME}` syntax.
 **Workflow vs Script tools**: Workflows provide structured parameter contracts for agent consumption. Scripts provide raw allowlisted execution. They are complementary:
 
 ```python
-# Agent workflow: discover -> validate -> render -> (optionally execute via run_script)
+# Agent workflow: discover -> inspect scripts -> validate -> render -> (optionally execute)
 wf = client.call_tool("list_workflows", {})
 schema = client.call_tool("get_workflow_parameter_schema", {
     "workflow_id": "ucsf_star_suite_production"
 })
+
+# Get scripts composing the workflow (entry + helpers + provenance)
+scripts = client.call_tool("get_workflow_scripts", {
+    "workflow_id": "ucsf_star_suite_production"
+})
+# scripts["scripts"] lists each script with role, path, absolute_path, language, exists
+# scripts["provenance"] has git_commit, git_remote, repo_root, workflow_schema
 
 # Validate with path checks (default) or skip path checks for dry planning
 val = client.call_tool("validate_workflow_parameters", {
@@ -301,7 +309,7 @@ mcp_server/
 │   ├── run_config.py   # Run request models
 │   └── responses.py    # Response models
 ├── workflows/
-│   └── ucsf_star_suite_production.yaml  # UCSF workflow parameter schema
+│   └── ucsf_star_suite_production.yaml  # UCSF workflow parameter + script schema
 └── tests/
     ├── conftest.py
     ├── test_config.py

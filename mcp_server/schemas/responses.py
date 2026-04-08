@@ -267,6 +267,27 @@ class WorkflowParameterSchemaResponse(BaseModel):
     constraints: list[ConstraintInfo] = Field(default_factory=list)
 
 
+class WorkflowScriptDetail(BaseModel):
+    """Script detail returned by get_workflow_scripts."""
+
+    role: str
+    path: str
+    absolute_path: str
+    description: str = ""
+    language: str = "bash"
+    exists: bool = True
+
+
+class GetWorkflowScriptsResponse(BaseModel):
+    """Response from get_workflow_scripts."""
+
+    workflow_id: str
+    title: str
+    entry_script: str
+    scripts: list[WorkflowScriptDetail]
+    provenance: dict[str, Any] = Field(default_factory=dict)
+
+
 class ValidateWorkflowResponse(BaseModel):
     """Response from validate_workflow_parameters."""
 

@@ -364,13 +364,22 @@ class TestUCSFSchemaConsistency:
             return yaml.safe_load(f)
 
     def test_scaffolded_covers_curated_params(self, real_repo_env, curated_schema):
-        """Every param in the hand-curated schema should appear in the scaffold."""
+        """Every entry-script param in the curated schema should appear in the scaffold.
+
+        Params whose ``source`` is not ``workflow_wrapper`` come from sub-scripts
+        and are not discoverable by the scaffolder (which only parses the entry
+        script's getopts block), so they are excluded from coverage checks.
+        """
         script = "scripts/paper/run_ucsf_corrected_production_workflow.sh"
         _skip_if_missing(REPO_ROOT / script)
         result = scaffold_workflow_schema(script)
         parsed = yaml.safe_load(result.draft_yaml)
         scaffolded_names = {p["name"] for p in parsed["parameters"]}
-        curated_names = {p["name"] for p in curated_schema["parameters"]}
+        # Only check params that come from the entry script (workflow_wrapper)
+        curated_names = {
+            p["name"] for p in curated_schema["parameters"]
+            if p.get("source", "workflow_wrapper") == "workflow_wrapper"
+        }
 
         missing = curated_names - scaffolded_names
         assert not missing, (

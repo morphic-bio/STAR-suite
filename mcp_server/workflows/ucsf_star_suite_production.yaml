@@ -10,10 +10,58 @@ entry_script: "scripts/paper/run_ucsf_corrected_production_workflow.sh"
 supported_modes:
   - "local"
   - "dry-run-capable"
+scripts:
+  - role: "entry"
+    path: "scripts/paper/run_ucsf_corrected_production_workflow.sh"
+    description: "Top-level orchestrator: parses CLI flags, assembles batch runner invocation."
+    language: "bash"
+  - role: "batch_runner"
+    path: "scripts/run_ucsf_perturb_yremove_batch.sh"
+    description: "Per-sample STAR Y-removal + Solo alignment with GeneFull/Velocyto quantification."
+    language: "bash"
+  - role: "downstream"
+    path: "scripts/run_scrna_downstream_gene_full_velocyto.sh"
+    description: "Scanpy QC, h5ad assembly, adaptive filtering, CellBender ambient RNA removal."
+    language: "bash"
+  - role: "remote_cellbender"
+    path: "scripts/run_remote_cellbender_rsync.sh"
+    description: "rsync-based remote GPU CellBender execution and result retrieval."
+    language: "bash"
+  - role: "remote_scan"
+    path: "scripts/run_remote_cellbender_scan.sh"
+    description: "Watcher that monitors remote CellBender progress and triggers retrieval."
+    language: "bash"
+  - role: "helper"
+    path: "scripts/prepare_velocyto_mex.py"
+    description: "Package STAR Velocyto outputs into standard MEX directory layout."
+    language: "python"
+  - role: "helper"
+    path: "scripts/build_gene_full_velocyto_h5ad.py"
+    description: "Build AnnData h5ad from GeneFull + Velocyto MEX matrices."
+    language: "python"
+  - role: "helper"
+    path: "scripts/postprocess_downstream_filters.py"
+    description: "Apply QC filters (doublet, mito, adaptive) and write filtered h5ads."
+    language: "python"
+  - role: "helper"
+    path: "scripts/add_cellbender_layer_from_h5.py"
+    description: "Inject CellBender denoised counts as a layer into existing h5ads."
+    language: "python"
+  - role: "helper"
+    path: "scripts/propagate_anndata_layer.py"
+    description: "Propagate a named layer across filtered/unfiltered h5ad variants."
+    language: "python"
+  - role: "helper"
+    path: "scripts/integrate_feature_library.py"
+    description: "Integrate CRISPR/guide feature barcode library into final h5ads."
+    language: "python"
+
 caveats:
   - "If neither --samples nor --all-samples is provided, defaults to all samples."
   - "Globus transfer params must be supplied as a complete set if any is given."
   - "--cellbender-gpu only has effect when --star-only is not set."
+  - "Adaptive QC filtering is always enabled in production. The max_genes value serves as the base; the effective threshold is min(adaptive, max_genes). Set min_genes, max_genes, mt_pct_cutoff, n_mad via environment variables."
+  - "Downstream QC and trim-QC parameters are consumed via environment variables, not CLI flags on the entry script. They appear in env_overrides from render_workflow_command."
 default_output_layout: "/mnt/pikachu/ucsf-perturb-yremove_velocyto_cellbender_<timestamp>/"
 
 stages:
@@ -43,6 +91,7 @@ parameter_groups:
     title: "Input Paths"
     parameters:
       - "dataset_root"
+      - "sample_map"
       - "feature_ref"
       - "genome_dir"
       - "solo_cb_whitelist"
@@ -55,11 +104,19 @@ parameter_groups:
       - "cellbender_cpu_cores"
       - "downsample_reads"
       - "downsample_seed"
+  - name: "downstream_qc"
+    title: "Downstream QC Thresholds"
+    parameters:
+      - "min_genes"
+      - "max_genes"
+      - "mt_pct_cutoff"
+      - "n_mad"
   - name: "execution_mode"
     title: "Execution Mode"
     parameters:
       - "cellbender_gpu"
       - "trim_qc"
+      - "trim_qc_max_reads"
       - "star_only"
       - "dry_run"
   - name: "transfer"
@@ -103,6 +160,18 @@ parameters:
     path_must_exist: true
     category: "inputs"
     source: "workflow_wrapper"
+
+  - name: "sample_map"
+    cli_flag: "--sample-map"
+    type: "file"
+    required: false
+    default: null
+    description: "Sample-to-FASTQ lookup CSV. Defaults to sample_fastq_guide_map.csv inside dataset_root. When absent, samples are discovered from subdirectory layout."
+    path_must_exist: false
+    category: "inputs"
+    source: "batch_runner"
+    env_var: "SAMPLE_MAP"
+    skip_when_default: true
 
   - name: "feature_ref"
     cli_flag: "--feature-ref"
@@ -213,6 +282,17 @@ parameters:
     category: "execution_mode"
     source: "workflow_wrapper"
 
+  - name: "trim_qc_max_reads"
+    cli_flag: "--trim-qc-max-reads"
+    type: "int"
+    required: false
+    default: 250000
+    description: "Max reads sampled for trim-QC reporting. Only effective when trim_qc is enabled."
+    category: "execution_mode"
+    source: "batch_runner"
+    env_var: "STAR_TRIM_QC_MAX_READS"
+    skip_when_default: true
+
   - name: "star_only"
     cli_flag: "--star-only"
     type: "bool"
@@ -230,6 +310,51 @@ parameters:
     description: "Prepare manifests only, do not execute."
     category: "execution_mode"
     source: "workflow_wrapper"
+
+  # --- Downstream QC ---
+  - name: "min_genes"
+    cli_flag: "--min-genes"
+    type: "int"
+    required: false
+    default: 200
+    description: "Minimum genes per cell for QC filtering. Cells below this threshold are removed."
+    category: "downstream_qc"
+    source: "downstream_wrapper"
+    env_var: "MIN_GENES"
+    skip_when_default: true
+
+  - name: "max_genes"
+    cli_flag: "--max-genes"
+    type: "int"
+    required: false
+    default: 2500
+    description: "Maximum genes per cell for QC filtering (base value). Overridden by adaptive filtering when enabled."
+    category: "downstream_qc"
+    source: "downstream_wrapper"
+    env_var: "MAX_GENES"
+    skip_when_default: true
+
+  - name: "mt_pct_cutoff"
+    cli_flag: "--mt-pct-cutoff"
+    type: "float"
+    required: false
+    default: 5
+    description: "Mitochondrial gene percentage cutoff. Cells above this threshold are filtered."
+    category: "downstream_qc"
+    source: "downstream_wrapper"
+    env_var: "MT_PCT_CUTOFF"
+    skip_when_default: true
+
+  - name: "n_mad"
+    cli_flag: "--n-mad"
+    type: "float"
+    required: false
+    default: 3
+    description: "Number of MADs for adaptive max_genes threshold. Only effective when adaptive filtering is enabled (always on in production)."
+    category: "downstream_qc"
+    source: "downstream_wrapper"
+    env_var: "N_MAD"
+    skip_when_default: true
 
   # --- Transfer ---
   - name: "globus_src_endpoint"
@@ -293,9 +418,17 @@ constraints:
     params: ["cellbender_gpu", "star_only"]
     message: "--cellbender-gpu only has effect when --star-only is not set."
 
+  - kind: "dependency"
+    params: ["trim_qc_max_reads", "trim_qc"]
+    message: "--trim-qc-max-reads only has effect when --trim-qc is enabled."
+
   - kind: "positive"
-    params: ["threads", "cellbender_cpu_cores", "globus_poll_seconds"]
+    params: ["threads", "cellbender_cpu_cores", "globus_poll_seconds", "min_genes", "max_genes", "trim_qc_max_reads"]
     message: "Must be a positive integer."
+
+  - kind: "positive"
+    params: ["mt_pct_cutoff", "n_mad"]
+    message: "Must be a positive number."
 
   - kind: "non_negative"
     params: ["downsample_reads"]
@@ -308,6 +441,7 @@ rendering:
   flag_order:
     - "out_root"
     - "dataset_root"
+    - "sample_map"
     - "feature_ref"
     - "genome_dir"
     - "solo_cb_whitelist"
@@ -319,10 +453,15 @@ rendering:
     - "samples"
     - "all_samples"
     - "downsample_reads"
+    - "min_genes"
+    - "max_genes"
+    - "mt_pct_cutoff"
+    - "n_mad"
     - "globus_src_endpoint"
     - "globus_dst_endpoint"
     - "globus_dst_root"
     - "cellbender_gpu"
     - "trim_qc"
+    - "trim_qc_max_reads"
     - "star_only"
     - "dry_run"

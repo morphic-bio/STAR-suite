@@ -429,6 +429,181 @@ class TestUCSFE2EContractFlow:
         assert check_names["output_directory"].passed
 
 
+class TestUCSFNewlyExposedParams:
+    """Tests for the 6 params added in the parameter audit (2026-04-08).
+
+    Covers: sample_map, trim_qc_max_reads, min_genes, max_genes,
+    mt_pct_cutoff, n_mad.
+    """
+
+    # -- Discovery: new group and params appear in schema --
+
+    def test_downstream_qc_group_in_schema(self, ucsf_e2e_env):
+        result = get_workflow_parameter_schema(UCSF_WORKFLOW_ID)
+        group_names = [g.name for g in result.parameter_groups]
+        assert "downstream_qc" in group_names
+        grp = next(g for g in result.parameter_groups if g.name == "downstream_qc")
+        assert grp.title == "Downstream QC Thresholds"
+        assert set(grp.parameters) == {"min_genes", "max_genes", "mt_pct_cutoff", "n_mad"}
+
+    def test_new_params_present_in_schema(self, ucsf_e2e_env):
+        result = get_workflow_parameter_schema(UCSF_WORKFLOW_ID)
+        by_name = {p.name: p for p in result.parameters}
+        for name in ("sample_map", "trim_qc_max_reads", "min_genes",
+                     "max_genes", "mt_pct_cutoff", "n_mad"):
+            assert name in by_name, f"{name} missing from parameter schema"
+
+    def test_sample_map_metadata(self, ucsf_e2e_env):
+        result = get_workflow_parameter_schema(UCSF_WORKFLOW_ID)
+        by_name = {p.name: p for p in result.parameters}
+        sm = by_name["sample_map"]
+        assert sm.type == "file"
+        assert sm.env_var == "SAMPLE_MAP"
+        assert sm.source == "batch_runner"
+        assert sm.skip_when_default is True
+        assert sm.category == "inputs"
+
+    def test_downstream_qc_param_metadata(self, ucsf_e2e_env):
+        result = get_workflow_parameter_schema(UCSF_WORKFLOW_ID)
+        by_name = {p.name: p for p in result.parameters}
+
+        mg = by_name["min_genes"]
+        assert mg.type == "int"
+        assert mg.default == 200
+        assert mg.env_var == "MIN_GENES"
+        assert mg.source == "downstream_wrapper"
+        assert mg.skip_when_default is True
+
+        mx = by_name["max_genes"]
+        assert mx.type == "int"
+        assert mx.default == 2500
+        assert mx.env_var == "MAX_GENES"
+
+        mt = by_name["mt_pct_cutoff"]
+        assert mt.type == "float"
+        assert mt.default == 5
+        assert mt.env_var == "MT_PCT_CUTOFF"
+
+        nm = by_name["n_mad"]
+        assert nm.type == "float"
+        assert nm.default == 3
+        assert nm.env_var == "N_MAD"
+
+    def test_trim_qc_max_reads_metadata(self, ucsf_e2e_env):
+        result = get_workflow_parameter_schema(UCSF_WORKFLOW_ID)
+        by_name = {p.name: p for p in result.parameters}
+        tq = by_name["trim_qc_max_reads"]
+        assert tq.type == "int"
+        assert tq.default == 250000
+        assert tq.env_var == "STAR_TRIM_QC_MAX_READS"
+        assert tq.source == "batch_runner"
+        assert tq.skip_when_default is True
+
+    # -- Constraints: new positive / dependency constraints --
+
+    def test_positive_constraint_includes_new_params(self, ucsf_e2e_env):
+        result = get_workflow_parameter_schema(UCSF_WORKFLOW_ID)
+        pos_constraints = [c for c in result.constraints if c.kind == "positive"]
+        all_positive_params = set()
+        for c in pos_constraints:
+            all_positive_params.update(c.params)
+        for name in ("min_genes", "max_genes", "trim_qc_max_reads",
+                     "mt_pct_cutoff", "n_mad"):
+            assert name in all_positive_params, f"{name} not in positive constraints"
+
+    def test_trim_qc_max_reads_dependency_constraint(self, ucsf_e2e_env):
+        result = get_workflow_parameter_schema(UCSF_WORKFLOW_ID)
+        dep_constraints = [c for c in result.constraints if c.kind == "dependency"]
+        params_sets = [set(c.params) for c in dep_constraints]
+        assert {"trim_qc_max_reads", "trim_qc"} in params_sets
+
+    # -- Rendering: env_var params appear in env_overrides --
+
+    def test_downstream_qc_env_overrides(self, ucsf_e2e_env):
+        """Non-default downstream QC values appear in env_overrides."""
+        params = {
+            "dataset_root": ucsf_e2e_env["dataset_root"],
+            "min_genes": 300,
+            "max_genes": 5000,
+            "mt_pct_cutoff": 10,
+            "n_mad": 5,
+            "dry_run": True,
+        }
+        result = render_workflow_command(UCSF_WORKFLOW_ID, params)
+        assert result.env_overrides.get("MIN_GENES") == "300"
+        assert result.env_overrides.get("MAX_GENES") == "5000"
+        assert result.env_overrides.get("MT_PCT_CUTOFF") == "10.0"
+        assert result.env_overrides.get("N_MAD") == "5.0"
+
+    def test_downstream_qc_skip_when_default(self, ucsf_e2e_env):
+        """Default downstream QC values are omitted from env_overrides."""
+        params = {
+            "dataset_root": ucsf_e2e_env["dataset_root"],
+            "min_genes": 200,   # default
+            "max_genes": 2500,  # default
+            "mt_pct_cutoff": 5, # default
+            "n_mad": 3,         # default
+            "dry_run": True,
+        }
+        result = render_workflow_command(UCSF_WORKFLOW_ID, params)
+        for env_key in ("MIN_GENES", "MAX_GENES", "MT_PCT_CUTOFF", "N_MAD"):
+            assert env_key not in result.env_overrides, (
+                f"{env_key} should be omitted at default value"
+            )
+
+    def test_sample_map_env_override(self, ucsf_e2e_env):
+        """Non-null sample_map appears in env_overrides as SAMPLE_MAP."""
+        sample_map_file = Path(ucsf_e2e_env["tmp"]) / "sample_map.csv"
+        sample_map_file.write_text("sample,fastq\n")
+        params = {
+            "dataset_root": ucsf_e2e_env["dataset_root"],
+            "sample_map": str(sample_map_file),
+            "dry_run": True,
+        }
+        result = render_workflow_command(UCSF_WORKFLOW_ID, params)
+        assert result.env_overrides.get("SAMPLE_MAP") == str(sample_map_file)
+
+    def test_trim_qc_max_reads_env_override(self, ucsf_e2e_env):
+        """Non-default trim_qc_max_reads appears in env_overrides."""
+        params = {
+            "dataset_root": ucsf_e2e_env["dataset_root"],
+            "trim_qc": True,
+            "trim_qc_max_reads": 500000,
+            "dry_run": True,
+        }
+        result = render_workflow_command(UCSF_WORKFLOW_ID, params)
+        assert result.env_overrides.get("STAR_TRIM_QC_MAX_READS") == "500000"
+
+    # -- Validation: negative values rejected --
+
+    def test_negative_min_genes_rejected(self, ucsf_e2e_env):
+        params = {
+            "dataset_root": ucsf_e2e_env["dataset_root"],
+            "min_genes": -1,
+            "dry_run": True,
+        }
+        result = validate_workflow_parameters(UCSF_WORKFLOW_ID, params, check_paths=False)
+        assert not result.valid
+        assert any("min_genes" in e for e in result.errors)
+
+    def test_zero_mt_pct_rejected(self, ucsf_e2e_env):
+        params = {
+            "dataset_root": ucsf_e2e_env["dataset_root"],
+            "mt_pct_cutoff": 0,
+            "dry_run": True,
+        }
+        result = validate_workflow_parameters(UCSF_WORKFLOW_ID, params, check_paths=False)
+        assert not result.valid
+        assert any("mt_pct_cutoff" in e for e in result.errors)
+
+    # -- describe_workflow also reflects new group --
+
+    def test_describe_shows_downstream_qc_group(self, ucsf_e2e_env):
+        result = describe_workflow(UCSF_WORKFLOW_ID)
+        grp_names = [g.name for g in result.parameter_groups]
+        assert "downstream_qc" in grp_names
+
+
 class TestUCSFExecutableValidation:
     def test_non_executable_star_bin_fails_validation(self, ucsf_e2e_env):
         """A non-executable star_bin should produce a validation error."""

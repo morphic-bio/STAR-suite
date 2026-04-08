@@ -10,6 +10,7 @@ from ..schemas.config import WorkflowConfig
 from ..schemas.responses import (
     ConstraintInfo,
     DescribeWorkflowResponse,
+    GetWorkflowScriptsResponse,
     ListWorkflowsResponse,
     ParameterGroupInfo,
     ParameterInfo,
@@ -17,6 +18,7 @@ from ..schemas.responses import (
     ValidateWorkflowResponse,
     WorkflowInfo,
     WorkflowParameterSchemaResponse,
+    WorkflowScriptDetail,
     WorkflowStageInfo,
 )
 from ..schemas.workflow import WorkflowSchema
@@ -95,6 +97,98 @@ def describe_workflow(
         default_output_layout=schema.default_output_layout,
         stages=stages,
         parameter_groups=groups,
+    )
+
+
+def get_workflow_scripts(
+    workflow_id: str,
+    include_content: bool = False,
+    authenticated: bool = False,
+) -> GetWorkflowScriptsResponse:
+    """Return the scripts composing a workflow with provenance metadata.
+
+    Provides entry script, helper script paths, existence checks,
+    and repo provenance — enough for a downstream script-backed encoder.
+    """
+    schema = get_workflow_schema(workflow_id)
+    if schema is None or not _is_visible(workflow_id, authenticated):
+        raise ValueError(f"Unknown workflow: {workflow_id}")
+
+    config = get_config()
+    repo_root = Path(config.paths.repo_root)
+
+    scripts: list[WorkflowScriptDetail] = []
+    for s in schema.scripts:
+        abs_path = Path(s.path)
+        if not abs_path.is_absolute():
+            abs_path = repo_root / s.path
+
+        detail = WorkflowScriptDetail(
+            role=s.role,
+            path=s.path,
+            absolute_path=str(abs_path),
+            description=s.description,
+            language=s.language,
+            exists=abs_path.exists(),
+        )
+        scripts.append(detail)
+
+    # If no scripts section in the schema, at minimum return the entry script
+    if not scripts:
+        entry_abs = repo_root / schema.entry_script
+        scripts.append(
+            WorkflowScriptDetail(
+                role="entry",
+                path=schema.entry_script,
+                absolute_path=str(entry_abs),
+                description="Entry script",
+                language="bash",
+                exists=entry_abs.exists(),
+            )
+        )
+
+    # Build provenance from git if available
+    provenance: dict[str, Any] = {
+        "repo_root": str(repo_root),
+        "workflow_schema": _get_workflow_config(workflow_id).schema_file
+        if _get_workflow_config(workflow_id)
+        else None,
+    }
+    # Best-effort git info
+    import subprocess
+
+    try:
+        commit = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            cwd=str(repo_root),
+            timeout=5,
+        )
+        if commit.returncode == 0:
+            provenance["git_commit"] = commit.stdout.strip()
+    except Exception:
+        pass
+
+    try:
+        remote = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            capture_output=True,
+            text=True,
+            cwd=str(repo_root),
+            timeout=5,
+        )
+        if remote.returncode == 0:
+            provenance["git_remote"] = remote.stdout.strip()
+    except Exception:
+        pass
+
+    return GetWorkflowScriptsResponse(
+        workflow_id=schema.id,
+        title=schema.title,
+        entry_script=schema.entry_script,
+        scripts=scripts,
+        provenance=provenance,
     )
 
 
@@ -389,7 +483,19 @@ def render_workflow_command(
     # Collect env_var overrides from schema (declarative, not hardcoded)
     for p_def in schema.parameters:
         if p_def.env_var and p_def.name in normalized and normalized[p_def.name] is not None:
-            env_overrides[p_def.env_var] = str(normalized[p_def.name])
+            val = normalized[p_def.name]
+            # Respect skip_when_default for env_var params too
+            if p_def.skip_when_default and p_def.default is not None:
+                try:
+                    if p_def.type == "int" and int(val) == int(p_def.default):
+                        continue
+                    elif p_def.type == "float" and float(val) == float(p_def.default):
+                        continue
+                    elif p_def.type not in ("int", "float") and val == p_def.default:
+                        continue
+                except (TypeError, ValueError):
+                    pass
+            env_overrides[p_def.env_var] = str(val)
 
     for p_name in flag_order:
         if p_name not in param_lookup:
