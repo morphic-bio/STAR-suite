@@ -54,6 +54,14 @@ This file tracks active top-level work only. Completed items and stale historica
   - FLEX probes
   - antibody capture
 
+## MCP / STAR Launchpad (future)
+
+- **User-defined STAR workflows in Launchpad** (not started): today recipes are repo-registered YAML + `config.yaml`. Parameter values can be round-tripped via client-side JSON **Load/Save parameters** only (no custom schema editor yet).
+  - **Basic / high value**: templates (clone existing `star_*` schemas) and/or **paste STAR one-liner → draft YAML** + download; user commits YAML + config entry and restarts or `reload_config`. Loopback-only API acceptable.
+  - **Medium**: heuristic parser for common `--flag value` pairs; document limits for multi-operand flags (`--readFilesIn`, `--outSAMtype`) and `operand_group`.
+  - **Full customization**: **editor screen** to add/delete/reorder parameter rows (name, `cli_flag`, type, defaults, optional `operand_group`, `flag_order`). Validate with existing `validate_draft_workflow_schema` / `WorkflowSchema`.
+  - **Persist on server** (optional, higher risk): write under a fixed repo subdir + `reload_config`, loopback-only and path-sanitized; otherwise prefer download + manual commit.
+
 ## Notes
 
 - The multisample PE bulk batch-vs-sequential equivalence work is closed for now. The current smoke/regression coverage is sufficient to catch regressions, and a broader benchmark can be revisited later if needed for formal test expansion.

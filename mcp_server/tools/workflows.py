@@ -15,13 +15,14 @@ from ..schemas.responses import (
     ParameterGroupInfo,
     ParameterInfo,
     RenderWorkflowResponse,
+    RequiredFileParamInfo,
     ValidateWorkflowResponse,
     WorkflowInfo,
     WorkflowParameterSchemaResponse,
     WorkflowScriptDetail,
     WorkflowStageInfo,
 )
-from ..schemas.workflow import WorkflowSchema
+from ..schemas.workflow import WorkflowParameterDef, WorkflowSchema
 from .utils import is_path_allowed, validate_path
 
 
@@ -82,7 +83,12 @@ def describe_workflow(
     ]
 
     groups = [
-        ParameterGroupInfo(name=g.name, title=g.title, parameters=g.parameters)
+        ParameterGroupInfo(
+            name=g.name,
+            title=g.title,
+            parameters=g.parameters,
+            gated_by=g.gated_by,
+        )
         for g in schema.parameter_groups
     ]
 
@@ -204,6 +210,26 @@ def get_workflow_scripts(
     )
 
 
+def _required_file_params(schema: WorkflowSchema) -> list[RequiredFileParamInfo]:
+    """Derive a required-file checklist from schema metadata.
+
+    This is intended for UX (Launchpad / agents): parameters where path existence
+    matters when check_paths=True.
+    """
+    out: list[RequiredFileParamInfo] = []
+    for p in schema.parameters:
+        if p.type in ("file", "directory") and p.path_must_exist:
+            out.append(
+                RequiredFileParamInfo(
+                    name=p.name,
+                    cli_flag=p.cli_flag,
+                    type=p.type,
+                    description=p.description,
+                )
+            )
+    return out
+
+
 def get_workflow_parameter_schema(
     workflow_id: str,
     authenticated: bool = False,
@@ -223,6 +249,7 @@ def get_workflow_parameter_schema(
             description=p.description,
             choices=p.choices,
             repeatable=p.repeatable,
+            operand_group=p.operand_group,
             path_must_exist=p.path_must_exist,
             must_be_executable=p.must_be_executable,
             category=p.category,
@@ -231,12 +258,18 @@ def get_workflow_parameter_schema(
             env_var=p.env_var,
             skip_when_default=p.skip_when_default,
             is_output_root=p.is_output_root,
+            ui_gated_by=p.ui_gated_by,
         )
         for p in schema.parameters
     ]
 
     groups = [
-        ParameterGroupInfo(name=g.name, title=g.title, parameters=g.parameters)
+        ParameterGroupInfo(
+            name=g.name,
+            title=g.title,
+            parameters=g.parameters,
+            gated_by=g.gated_by,
+        )
         for g in schema.parameter_groups
     ]
 
@@ -250,6 +283,7 @@ def get_workflow_parameter_schema(
         parameters=params,
         parameter_groups=groups,
         constraints=constraints,
+        required_files=_required_file_params(schema),
     )
 
 
@@ -509,8 +543,50 @@ def render_workflow_command(
                     pass
             env_overrides[p_def.env_var] = str(val)
 
-    for p_name in flag_order:
+    def _operand_token(q: WorkflowParameterDef, q_name: str) -> Optional[str]:
+        """Single argv token for STAR-style multi-operand flags (--readFilesIn a b)."""
+        has_v = q_name in normalized
+        v = normalized.get(q_name)
+        if q.env_var and q.source != "workflow_wrapper":
+            return None
+        if omit_absent and not has_v and not q.required:
+            return None
+        if v is None:
+            return None
+        if q.skip_when_default and q.default is not None:
+            try:
+                if q.type == "int" and int(v) == int(q.default):
+                    return None
+                if q.type == "float" and float(v) == float(q.default):
+                    return None
+                if q.type not in ("int", "float") and v == q.default:
+                    return None
+            except (TypeError, ValueError):
+                pass
+        if q.type == "string_list":
+            if not v:
+                return None
+            if isinstance(v, list):
+                return ",".join(str(x) for x in v)
+            return str(v)
+        if q.type == "bool":
+            return None
+        if q.type == "string":
+            if not v or str(v) == "":
+                return None
+            return str(v)
+        if q.type in ("int", "float"):
+            return str(v)
+        if q.type in ("file", "directory"):
+            return str(v)
+        return str(v)
+
+    n_flags = len(flag_order)
+    fi = 0
+    while fi < n_flags:
+        p_name = flag_order[fi]
         if p_name not in param_lookup:
+            fi += 1
             continue
 
         p_def = param_lookup[p_name]
@@ -518,6 +594,38 @@ def render_workflow_command(
         # Params delivered via env_var from sub-scripts (source != workflow_wrapper)
         # are already in env_overrides — do not emit as top-level CLI flags.
         if p_def.env_var and p_def.source != "workflow_wrapper":
+            fi += 1
+            continue
+
+        if p_def.operand_group:
+            og = p_def.operand_group
+            cflag = p_def.cli_flag
+            group_names: list[str] = []
+            fj = fi
+            while fj < n_flags:
+                pn2 = flag_order[fj]
+                q = param_lookup.get(pn2)
+                if not q or q.operand_group != og or q.cli_flag != cflag:
+                    break
+                group_names.append(pn2)
+                fj += 1
+
+            pieces: list[str] = []
+            skip_group = False
+            for pn2 in group_names:
+                q = param_lookup[pn2]
+                val = normalized.get(pn2)
+                if q.is_output_root and val:
+                    output_root = str(val)
+                tok = _operand_token(q, pn2)
+                if tok is None:
+                    skip_group = True
+                    break
+                pieces.append(tok)
+            if not skip_group and pieces:
+                argv.append(cflag)
+                argv.extend(pieces)
+            fi = fj
             continue
 
         has_value = p_name in normalized
@@ -525,10 +633,12 @@ def render_workflow_command(
 
         # When omit_absent_optionals is true, skip absent optional params
         if omit_absent and not has_value and not p_def.required:
+            fi += 1
             continue
 
         # Skip None/empty values for non-required params
         if val is None:
+            fi += 1
             continue
 
         # Track output root (declarative via is_output_root)
@@ -539,10 +649,13 @@ def render_workflow_command(
         if p_def.skip_when_default and p_def.default is not None:
             try:
                 if p_def.type == "int" and int(val) == int(p_def.default):
+                    fi += 1
                     continue
                 elif p_def.type == "float" and float(val) == float(p_def.default):
+                    fi += 1
                     continue
                 elif p_def.type not in ("int", "float") and val == p_def.default:
+                    fi += 1
                     continue
             except (TypeError, ValueError):
                 pass
@@ -573,6 +686,8 @@ def render_workflow_command(
             if val is not None:
                 argv.append(p_def.cli_flag)
                 argv.append(str(val))
+
+        fi += 1
 
     # Build shell preview
     shell_preview = " ".join(shlex.quote(a) for a in argv)

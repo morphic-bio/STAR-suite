@@ -304,6 +304,127 @@ class TestDeclarativeIsOutputRoot:
         assert result.output_root is None
 
 
+OPERAND_SCHEMA = {
+    "id": "operand_wf",
+    "title": "Operand group test",
+    "summary": "Test.",
+    "entry_script": "bin/tool",
+    "parameters": [
+        {
+            "name": "out_root",
+            "cli_flag": "--out",
+            "type": "string",
+            "required": True,
+        },
+        {
+            "name": "mate1",
+            "cli_flag": "--readFilesIn",
+            "type": "string",
+            "required": True,
+            "operand_group": "pe",
+            "category": "reads",
+        },
+        {
+            "name": "mate2",
+            "cli_flag": "--readFilesIn",
+            "type": "string",
+            "required": True,
+            "operand_group": "pe",
+            "category": "reads",
+        },
+        {
+            "name": "sam_kind",
+            "cli_flag": "--outSAMtype",
+            "type": "string",
+            "required": True,
+            "default": "BAM",
+            "operand_group": "sam",
+            "category": "sam",
+        },
+        {
+            "name": "sam_sort",
+            "cli_flag": "--outSAMtype",
+            "type": "string",
+            "required": True,
+            "default": "SortedByCoordinate",
+            "operand_group": "sam",
+            "category": "sam",
+        },
+    ],
+    "constraints": [],
+    "rendering": {
+        "omit_absent_optionals": True,
+        "flag_order": ["out_root", "mate1", "mate2", "sam_kind", "sam_sort"],
+    },
+}
+
+
+@pytest.fixture
+def operand_render_env():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp = Path(tmpdir)
+        schema_rel = "workflows/operand_wf.yaml"
+        (tmp / "workflows").mkdir()
+        with open(tmp / schema_rel, "w") as f:
+            yaml.dump(OPERAND_SCHEMA, f)
+        (tmp / "bin").mkdir()
+        (tmp / "bin" / "tool").write_text("#!/bin/sh\necho\n")
+        (tmp / "bin" / "tool").chmod(0o755)
+
+        cfg = {
+            "server": {"host": "127.0.0.1", "port": 9999, "transport": "http"},
+            "paths": {
+                "repo_root": str(tmp),
+                "artifact_log_root": str(tmp / "artifacts"),
+                "temp_root": str(tmp / "tmp"),
+            },
+            "trusted_roots": [str(tmp), "/tmp"],
+            "workflows": [
+                {
+                    "id": "operand_wf",
+                    "title": "Operand",
+                    "entry_script": "bin/tool",
+                    "schema_file": schema_rel,
+                }
+            ],
+        }
+        cfg_path = tmp / "config.yaml"
+        with open(cfg_path, "w") as f:
+            yaml.dump(cfg, f)
+
+        load_config(cfg_path)
+        yield tmp
+
+
+class TestOperandGroupRendering:
+    def test_readfiles_emits_single_flag_two_operands(self, operand_render_env):
+        result = render_workflow_command(
+            "operand_wf",
+            {
+                "out_root": "/tmp/o",
+                "mate1": "A_1.fq,B_1.fq",
+                "mate2": "A_2.fq,B_2.fq",
+            },
+        )
+        tool = str(operand_render_env / "bin" / "tool")
+        assert result.argv[:4] == [tool, "--out", "/tmp/o", "--readFilesIn"]
+        assert result.argv[4:6] == ["A_1.fq,B_1.fq", "A_2.fq,B_2.fq"]
+        assert result.argv[6:9] == ["--outSAMtype", "BAM", "SortedByCoordinate"]
+
+    def test_outsamtype_operand_group(self, operand_render_env):
+        result = render_workflow_command(
+            "operand_wf",
+            {
+                "out_root": "/x",
+                "mate1": "m1",
+                "mate2": "m2",
+            },
+        )
+        assert "--outSAMtype" in result.argv
+        i = result.argv.index("--outSAMtype")
+        assert result.argv[i + 1 : i + 3] == ["BAM", "SortedByCoordinate"]
+
+
 class TestUnknownWorkflow:
     def test_raises(self, render_env):
         with pytest.raises(ValueError, match="Unknown workflow"):

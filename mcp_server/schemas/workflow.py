@@ -21,6 +21,13 @@ class WorkflowParameterDef(BaseModel):
         default=None, description="Allowed values for enum type"
     )
     repeatable: bool = Field(default=False, description="Whether the flag can appear multiple times")
+    operand_group: Optional[str] = Field(
+        default=None,
+        description=(
+            "If set, consecutive params in flag_order with the same operand_group and "
+            "cli_flag render as one flag followed by each value (e.g. STAR --readFilesIn mate1 mate2)."
+        ),
+    )
     path_must_exist: bool = Field(
         default=False, description="If true, path must exist at validation time"
     )
@@ -49,6 +56,13 @@ class WorkflowParameterDef(BaseModel):
         default=False,
         description="If true, this parameter's value is reported as the workflow output_root",
     )
+    ui_gated_by: Optional[str] = Field(
+        default=None,
+        description=(
+            "Optional boolean parameter name: human-facing UIs may hide this field "
+            "while that parameter is true (no effect on server validation/rendering)."
+        ),
+    )
 
 
 class WorkflowConstraint(BaseModel):
@@ -68,6 +82,13 @@ class WorkflowParameterGroup(BaseModel):
     name: str = Field(description="Group identifier")
     title: str = Field(description="Human-readable group title")
     parameters: list[str] = Field(description="Parameter names in this group (display order)")
+    gated_by: Optional[str] = Field(
+        default=None,
+        description=(
+            "When set, UIs may hide this entire group while the named boolean "
+            "parameter is true (e.g. star_only skips downstream-related fields)."
+        ),
+    )
 
 
 class WorkflowScriptDef(BaseModel):

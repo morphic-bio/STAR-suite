@@ -52,6 +52,47 @@ workflows:
     kind: "shell_workflow"
     schema_file: "mcp_server/workflows/ucsf_star_suite_production.yaml"
 
+  # --- Public STAR CLI recipes (single argv = STAR; see README Sample Commands) ---
+  - id: star_genome_generate
+    title: STAR genome index (genomeGenerate)
+    summary: One STAR command to build a genome index (--runMode genomeGenerate).
+    entry_script: core/legacy/source/STAR
+    kind: star_cli
+    schema_file: mcp_server/workflows/star_genome_generate.yaml
+    visibility: public
+
+  - id: star_bulk_pe_batch
+    title: STAR bulk RNA-seq (PE batch)
+    summary: One STAR alignReads command with --batchMode 1 and paired comma-separated mate lists.
+    entry_script: core/legacy/source/STAR
+    kind: star_cli
+    schema_file: mcp_server/workflows/star_bulk_pe_batch.yaml
+    visibility: public
+
+  - id: star_scrna_solo_droplet
+    title: STARsolo droplet scRNA-seq
+    summary: One STAR alignReads command for droplet scRNA-seq (--soloType Droplet + whitelist).
+    entry_script: core/legacy/source/STAR
+    kind: star_cli
+    schema_file: mcp_server/workflows/star_scrna_solo_droplet.yaml
+    visibility: public
+
+  - id: star_flex_fixed_rna
+    title: STAR-Flex (Fixed RNA Profiling)
+    summary: One STAR alignReads command with --flex yes and Fixed RNA whitelist layout.
+    entry_script: core/legacy/source/STAR
+    kind: star_cli
+    schema_file: mcp_server/workflows/star_flex_fixed_rna.yaml
+    visibility: public
+
+  - id: star_perturb_cr_compat
+    title: STAR-perturb (CR-compat alignReads)
+    summary: One STAR alignReads command with --pfMultiConfig and CR-compat threading defaults.
+    entry_script: core/legacy/source/STAR
+    kind: star_cli
+    schema_file: mcp_server/workflows/star_perturb_cr_compat.yaml
+    visibility: public
+
   # --- E2E test workflows (private, internal) ---
 
   - id: "slam_end_to_end"

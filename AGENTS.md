@@ -7,6 +7,9 @@ actionable; link to deeper docs rather than copying them.
 
 - STAR-suite reorganizes STAR into modules while keeping `core/legacy` as the
   single source of truth for the STAR core.
+- **Note on naming**: `core/legacy/` is the *current* canonical STAR core tree.
+  “legacy” refers to the upstream STAR directory layout we preserve for
+  compatibility and maintainability; it does not mean deprecated or “vanilla-only”.
 - Changes should preserve STAR CLI compatibility unless explicitly planned.
 - Large data and test outputs stay untracked; document their locations in
   `tests/ARTIFACTS.md`.
@@ -165,6 +168,13 @@ An MCP server is available for automated agent workflows:
 pip install -r mcp_server/requirements.txt
 export MCP_AUTH_TOKEN="your-token"
 python3 -m mcp_server.app --transport http --host 0.0.0.0 --port 8765
+```
+
+Convenience wrapper for humans (start/stop Launchpad + MCP on one port):
+
+```bash
+bash scripts/launchpad_server.sh up
+bash scripts/launchpad_server.sh down
 ```
 
 ### Discovery tools (no auth required when `public_discovery: true`)

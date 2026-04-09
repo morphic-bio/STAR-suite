@@ -1,0 +1,62 @@
+# Public recipe: one STAR invocation for genome index generation (see README / STAR manual).
+id: star_genome_generate
+title: STAR genome index (genomeGenerate)
+summary: Single STAR --runMode genomeGenerate command; build index before alignReads workflows.
+kind: star_cli
+entry_script: core/legacy/source/STAR
+supported_modes: [local]
+caveats:
+  - Build the binary first (make -C core/legacy/source STAR).
+  - genomeDir is the output directory; it is created by STAR (need not exist beforehand).
+default_output_layout: genomeDir contains the generated index files.
+
+scripts:
+  - role: entry
+    path: core/legacy/source/STAR
+    description: STAR binary
+    language: native
+
+parameter_groups:
+  - name: core
+    title: Index generation
+    parameters: [run_mode, genome_dir, genome_fasta, run_thread_n]
+
+parameters:
+  - name: run_mode
+    cli_flag: --runMode
+    type: string
+    required: true
+    default: genomeGenerate
+    description: STAR run mode (keep genomeGenerate).
+    category: core
+  - name: genome_dir
+    cli_flag: --genomeDir
+    type: directory
+    required: true
+    path_must_exist: false
+    description: Output directory for the STAR index (created by STAR).
+    category: core
+  - name: genome_fasta
+    cli_flag: --genomeFastaFiles
+    type: file
+    required: true
+    path_must_exist: true
+    description: Reference FASTA (single file; use additional genomeGenerate runs for multiple inputs if needed).
+    category: core
+  - name: run_thread_n
+    cli_flag: --runThreadN
+    type: int
+    required: true
+    default: 8
+    skip_when_default: true
+    description: Thread count for index build.
+    category: core
+
+constraints:
+  - kind: positive
+    params: [run_thread_n]
+    message: run_thread_n must be positive.
+
+rendering:
+  omit_absent_optionals: true
+  flag_order: [run_mode, genome_dir, genome_fasta, run_thread_n]

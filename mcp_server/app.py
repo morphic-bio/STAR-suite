@@ -54,6 +54,7 @@ from .tools.scaffold import (
     scaffold_workflow_schema as _scaffold_workflow_schema,
     validate_draft_workflow_schema as _validate_draft_workflow_schema,
 )
+from .launchpad.api import get_launchpad_routes
 
 
 # Create the MCP server
@@ -98,8 +99,11 @@ def build_http_app() -> Starlette:
     middleware = [Middleware(AcceptHeaderMiddleware)]
     middleware += stream_app.user_middleware + sse_app.user_middleware
 
+    # Launchpad API + static SPA under /launchpad/ (must precede generic /launchpad static catch-all)
+    launchpad = get_launchpad_routes()
+
     return Starlette(
-        routes=stream_app.routes + sse_app.routes,
+        routes=launchpad + stream_app.routes + sse_app.routes,
         middleware=middleware,
         lifespan=lifespan,
     )

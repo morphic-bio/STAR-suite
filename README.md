@@ -27,7 +27,7 @@ Agent quickstart: see `AGENTS.md` for repo-specific guardrails, tests, and recen
 
 ```
 core/
-  legacy/                        # Upstream STAR layout (single source of truth)
+  legacy/                        # Canonical STAR core tree (upstream layout preserved; not deprecated)
   features/                      # Shared overlays and feature tooling
     process_features/            # Perturb feature extraction/calling implementation
     feature_barcodes/            # Standalone barcode tools (assignBarcodes, demux)
@@ -58,7 +58,7 @@ mcp_server/              # MCP server for scripted discovery/preflight/run workf
   Build tools: `make process-features-tools`, `make star-feature-call`.
 - **Shared Feature Toolchains** (`core/features/`): Reusable tool layers used across modules, including `vbem` (TranscriptVB helpers), `yremove_*` (Y/noY splitting), `bamsort`, and `libscrna`.
   Build tools: `make vbem-tools`, `make yremove-tools`, plus in-core integrations.
-- **MCP Server (tooling)** (`mcp_server/`): Agent automation service for dataset/test discovery and controlled execution (`list_datasets`, `list_test_suites`, `preflight`, `run_script`, `collect_outputs`). This is repo tooling, not an analysis module.
+- **MCP Server (tooling)** (`mcp_server/`): Agent automation service for dataset/test discovery and controlled execution (`list_datasets`, `list_test_suites`, `preflight`, `run_script`, `collect_outputs`), plus **STAR Launchpad** (`/launchpad/`) in the browser for workflow recipes (defaults to **`star_*`** CLI recipes; optional full list). See [`mcp_server/README.md`](mcp_server/README.md).
 - **Helper Scripts** (`scripts/`): Standalone Python and Bash tools for FASTQ preflight, QC, parity benchmarking, downstream h5ad processing, and fixture management. These are not compiled into STAR; they run independently. Highlights include `preflight_library_pairing.py` (chemistry detection and library pairing for mislabeled Perturb-seq), `report_additional_parity_metrics.py` (STAR vs CR parity), and `build_gene_full_velocyto_h5ad.py` (Velocyto h5ad packaging). See [`scripts/README.md`](scripts/README.md) for the full catalogue.
 
 ## Benchmarks

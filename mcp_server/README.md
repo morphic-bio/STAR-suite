@@ -3,6 +3,16 @@
 A Model Context Protocol (MCP) server for agents working with the STAR-suite repository.
 Provides discovery, preflight validation, and script execution capabilities.
 
+**Terminology**
+
+| Term | Meaning |
+|------|---------|
+| **STAR-suite** | This repository and its tooling. |
+| **STAR Server** | The Python process (`python -m mcp_server.app`): serves MCP over HTTP, SSE, and the browser UI on one port. |
+| **STAR MCP** | The agent-facing MCP tool surface (`POST /` streamable-HTTP, `GET /sse` + `POST /messages` SSE). |
+| **Shared core** | `mcp_server/tools/workflows.py` and workflow YAML under `mcp_server/workflows/` — validation, rendering, schemas (used by both STAR MCP and STAR Launchpad). |
+| **STAR Launchpad** | Static SPA at `/launchpad/` with JSON API under `/launchpad/api/`. Validates and renders commands; **Load/Save parameters** uses a JSON file in the browser (client-side). **Run in shell** (loopback) starts the rendered argv on the **server host**. The **Include test & other recipes** checkbox (off by default) limits the Recipe list to **`star_*`** workflows (basic STAR CLI recipes); turn it on for UCSF production, E2E test workflows, and any private entries the API returns on localhost. See `plans/star_launchpad_v1_runbook.md`. |
+
 ## Quick Start
 
 ### Installation
@@ -22,6 +32,29 @@ export MCP_AUTH_TOKEN="your-secret-token"
 
 # Run server
 python -m mcp_server.app
+```
+
+Open `http://<host>:<port>/launchpad/` in a browser for **STAR Launchpad** (recipe builder). Remote browsers typically see **public** workflows only; on **loopback**, authenticated discovery can list **private** workflows too. The UI defaults to **`star_*`** recipes only; enable **Include test & other recipes** to show the full list. MCP clients continue to use `POST /` (streamable-HTTP) or `GET /sse` + `POST /messages` (SSE).
+
+#### Launchpad quick start / stop (recommended)
+
+Start in the background (writes a pidfile + log under `plans/artifacts/`):
+
+```bash
+bash scripts/launchpad_server.sh up
+```
+
+Stop it:
+
+```bash
+bash scripts/launchpad_server.sh down
+```
+
+Show status / tail logs:
+
+```bash
+bash scripts/launchpad_server.sh status
+bash scripts/launchpad_server.sh logs
 ```
 
 **stdio mode** (for local development):

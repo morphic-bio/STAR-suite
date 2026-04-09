@@ -22,6 +22,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 RUN_ROOT="${UCSF_RUN_ROOT:-/mnt/pikachu/ucsf-perturb-yremove_velocyto_cellbender_prod_globus_fixtruwl_20260330_225009}"
 OUT_ROOT=""
+DOWNSTREAM_SUFFIX="downstream_genefull_velocyto_cellbender"
 LINK_MODE="hardlink"
 DRY_RUN=0
 
@@ -40,6 +41,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --run-root)  RUN_ROOT="$2";  shift 2 ;;
     --out-root)  OUT_ROOT="$2";  shift 2 ;;
+    --downstream-suffix) DOWNSTREAM_SUFFIX="$2"; shift 2 ;;
     --copy)      LINK_MODE="copy"; shift ;;
     --dry-run)   DRY_RUN=1;     shift ;;
     -h|--help)   usage; exit 0 ;;
@@ -98,17 +100,18 @@ link_dir() {
 # ---------------------------------------------------------------------------
 
 echo "=== UCSF Release Packaging ==="
-echo "Run root:  ${RUN_ROOT}"
-echo "Out root:  ${OUT_ROOT}"
-echo "Link mode: ${LINK_MODE}"
-echo "Samples:   ${#SAMPLES[@]}"
+echo "Run root:     ${RUN_ROOT}"
+echo "Out root:     ${OUT_ROOT}"
+echo "Downstream:   ${DOWNSTREAM_SUFFIX}"
+echo "Link mode:    ${LINK_MODE}"
+echo "Samples:      ${#SAMPLES[@]}"
 echo ""
 
 (( DRY_RUN )) || mkdir -p "${OUT_ROOT}"
 
 for sample in "${SAMPLES[@]}"; do
   echo "--- ${sample} ---"
-  src_ds="${RUN_ROOT}/samples/${sample}/downstream_genefull_velocyto_cellbender"
+  src_ds="${RUN_ROOT}/samples/${sample}/${DOWNSTREAM_SUFFIX}"
   src_run="${RUN_ROOT}/samples/${sample}/run"
   dst="${OUT_ROOT}/${sample}"
 
@@ -168,7 +171,7 @@ echo "=== Generating samples.tsv ==="
 if (( DRY_RUN )); then
   echo "  (skipped in dry-run mode)"
 else
-  python3 - "${OUT_ROOT}" "${RUN_ROOT}" <<'PYEOF'
+  python3 - "${OUT_ROOT}" "${RUN_ROOT}" "${DOWNSTREAM_SUFFIX}" <<'PYEOF'
 import json, sys
 from pathlib import Path
 
@@ -176,6 +179,7 @@ import h5py
 
 out_root = Path(sys.argv[1])
 run_root = Path(sys.argv[2])
+ds_suffix = sys.argv[3]
 
 samples = [
     "EBs1_1","EBs1_2","EBs1_3","EBs1_4","EBs1_5",
@@ -198,7 +202,7 @@ header = [
 
 rows = []
 for sample in samples:
-    ds = run_root / "samples" / sample / "downstream_genefull_velocyto_cellbender"
+    ds = run_root / "samples" / sample / ds_suffix
 
     # Filtered cell count from h5ad shape
     with h5py.File(ds / "filtered_counts.h5ad", "r") as f:

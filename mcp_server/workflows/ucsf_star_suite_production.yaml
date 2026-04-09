@@ -106,6 +106,7 @@ parameter_groups:
       - "downsample_seed"
   - name: "downstream_qc"
     title: "Downstream QC Thresholds"
+    gated_by: "star_only"
     parameters:
       - "min_genes"
       - "max_genes"
@@ -240,6 +241,7 @@ parameters:
     required: false
     default: null
     description: "CellBender CPU cores. Defaults to threads value."
+    ui_gated_by: "star_only"
     category: "performance"
     source: "workflow_wrapper"
 
@@ -270,6 +272,7 @@ parameters:
     required: false
     default: false
     description: "Enable GPU CellBender. Only effective when star_only is false."
+    ui_gated_by: "star_only"
     category: "execution_mode"
     source: "workflow_wrapper"
 
@@ -298,7 +301,7 @@ parameters:
     type: "bool"
     required: false
     default: false
-    description: "Run STAR alignment only; skip downstream and CellBender stages."
+    description: "Run STAR alignment only; skip downstream and CellBender stages. STAR Launchpad pre-selects this for v1 (alignment-only) recipes; the schema default remains false for full-pipeline MCP usage."
     category: "execution_mode"
     source: "workflow_wrapper"
 

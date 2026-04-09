@@ -1,0 +1,126 @@
+# Public recipe: bulk paired-end batch alignment (README Sample Commands).
+id: star_bulk_pe_batch
+title: STAR bulk RNA-seq (PE batch)
+summary: Single STAR alignReads invocation with --batchMode 1 for paired-end comma-separated mate lists.
+kind: star_cli
+entry_script: core/legacy/source/STAR
+supported_modes: [local]
+caveats:
+  - Build the binary first (make -C core/legacy/source STAR).
+  - Each read_files_* value is a comma-separated list of FASTQs for that mate (batch samples).
+default_output_layout: Prefix from out_file_name_prefix; use out_file_name_prefix_auto for per-sample subdirs.
+
+scripts:
+  - role: entry
+    path: core/legacy/source/STAR
+    description: STAR binary
+    language: native
+
+parameter_groups:
+  - name: core
+    title: Alignment
+    parameters:
+      - run_mode
+      - genome_dir
+      - read_files_mate1
+      - read_files_mate2
+      - out_file_name_prefix
+      - out_file_name_prefix_auto
+      - batch_mode
+      - out_sam_kind
+      - out_sam_sort
+      - run_thread_n
+
+parameters:
+  - name: run_mode
+    cli_flag: --runMode
+    type: string
+    required: true
+    default: alignReads
+    description: STAR run mode.
+    category: core
+  - name: genome_dir
+    cli_flag: --genomeDir
+    type: directory
+    required: true
+    path_must_exist: true
+    description: Directory containing a STAR genome index.
+    category: core
+  - name: read_files_mate1
+    cli_flag: --readFilesIn
+    type: string
+    required: true
+    operand_group: readfiles_pe
+    description: Comma-separated mate-1 FASTQs (batch order matches mate 2).
+    category: core
+  - name: read_files_mate2
+    cli_flag: --readFilesIn
+    type: string
+    required: true
+    operand_group: readfiles_pe
+    description: Comma-separated mate-2 FASTQs.
+    category: core
+  - name: out_file_name_prefix
+    cli_flag: --outFileNamePrefix
+    type: string
+    required: true
+    is_output_root: true
+    description: Output prefix (directory path ending with / recommended).
+    category: core
+  - name: out_file_name_prefix_auto
+    cli_flag: --outFileNamePrefixAuto
+    type: int
+    required: true
+    default: 1
+    description: Set to 1 for per-batch-entry subdirectories.
+    category: core
+  - name: batch_mode
+    cli_flag: --batchMode
+    type: int
+    required: true
+    default: 1
+    description: Enable batch mode (single genome load, multiple libraries).
+    category: core
+  - name: out_sam_kind
+    cli_flag: --outSAMtype
+    type: string
+    required: true
+    default: BAM
+    operand_group: out_sam_type
+    description: outSAMtype first token (e.g. BAM).
+    category: core
+  - name: out_sam_sort
+    cli_flag: --outSAMtype
+    type: string
+    required: true
+    default: SortedByCoordinate
+    operand_group: out_sam_type
+    description: outSAMtype second token (e.g. SortedByCoordinate).
+    category: core
+  - name: run_thread_n
+    cli_flag: --runThreadN
+    type: int
+    required: true
+    default: 16
+    skip_when_default: true
+    description: Alignment thread count.
+    category: core
+
+constraints:
+  - kind: positive
+    params: [run_thread_n, batch_mode, out_file_name_prefix_auto]
+    message: Must be positive.
+
+rendering:
+  omit_absent_optionals: true
+  flag_order:
+    - run_mode
+    - genome_dir
+    - read_files_mate1
+    - read_files_mate2
+    - out_file_name_prefix
+    - out_file_name_prefix_auto
+    - batch_mode
+    - out_sam_kind
+    - out_sam_sort
+    - run_thread_n

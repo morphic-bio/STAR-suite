@@ -232,6 +232,7 @@ class ParameterInfo(BaseModel):
     description: str = ""
     choices: Optional[list[str]] = None
     repeatable: bool = False
+    operand_group: Optional[str] = None
     path_must_exist: bool = False
     must_be_executable: bool = False
     category: str = "general"
@@ -240,6 +241,7 @@ class ParameterInfo(BaseModel):
     env_var: Optional[str] = None
     skip_when_default: bool = False
     is_output_root: bool = False
+    ui_gated_by: Optional[str] = None
 
 
 class ConstraintInfo(BaseModel):
@@ -256,6 +258,16 @@ class ParameterGroupInfo(BaseModel):
     name: str
     title: str
     parameters: list[str]
+    gated_by: Optional[str] = None
+
+
+class RequiredFileParamInfo(BaseModel):
+    """A file/directory parameter that must exist when path checks are enabled."""
+
+    name: str
+    cli_flag: str
+    type: str  # "file" or "directory"
+    description: str = ""
 
 
 class WorkflowParameterSchemaResponse(BaseModel):
@@ -265,6 +277,10 @@ class WorkflowParameterSchemaResponse(BaseModel):
     parameters: list[ParameterInfo]
     parameter_groups: list[ParameterGroupInfo] = Field(default_factory=list)
     constraints: list[ConstraintInfo] = Field(default_factory=list)
+    required_files: list[RequiredFileParamInfo] = Field(
+        default_factory=list,
+        description="Parameters with type file/directory and path_must_exist=true (checklist for users).",
+    )
 
 
 class WorkflowScriptDetail(BaseModel):

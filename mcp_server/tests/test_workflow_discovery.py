@@ -8,6 +8,7 @@ import yaml
 
 import mcp_server.config as config_module
 from mcp_server.config import load_config
+from mcp_server.schemas.workflow import WorkflowSchema
 from mcp_server.tools.workflows import (
     describe_workflow,
     get_workflow_parameter_schema,
@@ -229,6 +230,46 @@ class TestGetWorkflowParameterSchema:
         assert c.params == ["threads"]
         assert c.message == "Must be positive."
 
+    def test_required_files_lists_path_must_exist(self, loaded_workflow_config):
+        result = get_workflow_parameter_schema("test_wf")
+        assert len(result.required_files) == 1
+        rf = result.required_files[0]
+        assert rf.name == "input_dir"
+        assert rf.type == "directory"
+        assert rf.cli_flag == "--input-dir"
+
     def test_unknown_workflow_raises(self, loaded_workflow_config):
         with pytest.raises(ValueError, match="Unknown workflow"):
             get_workflow_parameter_schema("missing")
+
+
+class TestUcsfSchemaLaunchpadHints:
+    """UCSF workflow YAML carries group/param hints for Launchpad gating."""
+
+    UCSF_SCHEMA = (
+        Path(__file__).resolve().parent.parent / "workflows" / "ucsf_star_suite_production.yaml"
+    )
+
+    def test_downstream_qc_group_gated_by_star_only(self):
+        if not self.UCSF_SCHEMA.exists():
+            pytest.skip("UCSF workflow schema not in tree")
+        raw = yaml.safe_load(self.UCSF_SCHEMA.read_text())
+        grp = next(g for g in raw["parameter_groups"] if g["name"] == "downstream_qc")
+        assert grp.get("gated_by") == "star_only"
+
+    def test_cellbender_gpu_ui_gated_by_star_only(self):
+        if not self.UCSF_SCHEMA.exists():
+            pytest.skip("UCSF workflow schema not in tree")
+        raw = yaml.safe_load(self.UCSF_SCHEMA.read_text())
+        p = next(x for x in raw["parameters"] if x["name"] == "cellbender_gpu")
+        assert p.get("ui_gated_by") == "star_only"
+
+    def test_workflow_schema_pydantic_loads_gated_fields(self):
+        if not self.UCSF_SCHEMA.exists():
+            pytest.skip("UCSF workflow schema not in tree")
+        raw = yaml.safe_load(self.UCSF_SCHEMA.read_text())
+        ws = WorkflowSchema(**raw)
+        dq = next(g for g in ws.parameter_groups if g.name == "downstream_qc")
+        assert dq.gated_by == "star_only"
+        cg = next(p for p in ws.parameters if p.name == "cellbender_gpu")
+        assert cg.ui_gated_by == "star_only"

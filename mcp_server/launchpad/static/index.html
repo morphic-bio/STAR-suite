@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>STAR Launchpad</title>
+  <link rel="stylesheet" href="./style.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.3/dist/cdn.min.js"></script>
+</head>
+<body>
+  <div class="app" x-data="launchpadApp()"
+       x-init="init(); $watch('params', () => ensureFocusVisible(), { deep: true })"
+       @keydown.window="handleGlobalKey($event)">
+    <header class="header">
+      <h1>STAR Launchpad</h1>
+      <p class="tagline">Generate validated STAR-suite commands from workflow recipes</p>
+      <button type="button" class="linklike" @click="showAbout = true">About</button>
+      <button
+        type="button"
+        class="linklike danger"
+        @click="confirmQuit()"
+        :disabled="loading || !launchSupported"
+        :title="launchSupported ? 'Stop the STAR Server (Launchpad + MCP) on this host' : 'Only available when Launchpad is opened via localhost on the server host'"
+      >Quit server</button>
+    </header>
+
+    <div class="toolbar recipe-toolbar">
+      <label class="field-inline">
+        <span>Recipe</span>
+        <select x-model="workflowId" @change="loadWorkflow()">
+          <template x-for="w in workflows" :key="w.id">
+            <option :value="w.id" x-text="w.title + ' (' + w.id + ')'"></option>
+          </template>
+        </select>
+      </label>
+      <label class="field-inline recipe-filter">
+        <input
+          type="checkbox"
+          x-model="includeTestWorkflows"
+          @change="onIncludeTestWorkflowsChange()"
+        />
+        <span title="Show UCSF, E2E test workflows, and other non–star_* recipes (loopback sees private entries)">Include test &amp; other recipes</span>
+      </label>
+    </div>
+
+    <div class="toolbar param-io-bar" x-show="schema">
+      <span class="param-io-title">Parameters file</span>
+      <span class="param-io-hint">JSON on your computer (client-side only)</span>
+      <input
+        type="file"
+        class="sr-only"
+        accept=".json,application/json"
+        x-ref="paramImportFile"
+        @change="loadParametersFromFile($event)"
+      />
+      <button
+        type="button"
+        class="btn secondary"
+        @click="$refs.paramImportFile.click()"
+        :disabled="loading"
+        title="Choose a JSON file to fill the form"
+      >
+        Load parameters
+      </button>
+      <button
+        type="button"
+        class="btn secondary"
+        @click="saveParametersToFile()"
+        :disabled="loading"
+        title="Download current field values as JSON"
+      >
+        Save parameters
+      </button>
+    </div>
+
+    <div class="main-grid" x-show="schema">
+      <section class="panel form-panel">
+        <h2>Parameters</h2>
+        <p class="gate-banner" x-show="gateIsActive('star_only') && paramByName('star_only')">
+          <strong>Alignment-only mode</strong> (<code>--star-only</code>): downstream-related fields are hidden. Turn it off to edit downstream QC and CellBender options.
+        </p>
+        <template x-for="group in displayGroups" :key="group.name">
+          <fieldset class="param-group" x-show="!groupHidden(group)">
+            <legend x-text="group.title"></legend>
+            <template x-for="pname in group.parameters" :key="pname">
+              <div class="field" :class="{ 'skip-default': paramByName(pname)?.skip_when_default }"
+                   x-show="paramRowVisible(pname)">
+                <label
+                    :title="paramTooltip(pname)"
+                    :class="{ 'has-param-tip': paramHasRichTip(pname) }">
+                  <span class="label-text" @click="focusParam = pname">
+                    <code x-text="paramByName(pname)?.cli_flag || pname"></code>
+                    <span class="req" x-show="paramByName(pname)?.required">*</span>
+                  </span>
+                  <input type="checkbox" x-show="paramByName(pname)?.type === 'bool'"
+                         x-model="params[pname]" @focus="focusParam = pname">
+                  <select x-show="paramByName(pname)?.type === 'enum'" x-model="params[pname]"
+                          @focus="focusParam = pname">
+                    <template x-for="c in (paramByName(pname)?.choices || [])" :key="c">
+                      <option :value="c" x-text="c"></option>
+                    </template>
+                  </select>
+                  <input type="number" step="any" x-show="paramByName(pname)?.type === 'int'"
+                         x-model="params[pname]" @focus="focusParam = pname">
+                  <input type="number" step="any" x-show="paramByName(pname)?.type === 'float'"
+                         x-model="params[pname]" @focus="focusParam = pname">
+                  <input type="text" x-show="['string','file','directory','string_list'].includes(paramByName(pname)?.type)"
+                         x-model="params[pname]" @focus="focusParam = pname"
+                         :placeholder="(paramByName(pname)?.description || '').slice(0, 96)">
+                </label>
+              </div>
+            </template>
+          </fieldset>
+        </template>
+
+        <div class="actions">
+          <button type="button" class="btn secondary" @click="doValidate()" :disabled="loading">Validate</button>
+          <button type="button" class="btn primary" @click="doRender()" :disabled="loading">Generate command</button>
+        </div>
+      </section>
+
+      <aside class="panel help-panel">
+        <h2>Help</h2>
+        <div class="help-section" x-show="focusParam && paramByName(focusParam) && paramVisibleInForm(focusParam)">
+          <h3>Selected parameter</h3>
+          <p class="help-desc" x-text="paramByName(focusParam)?.description"></p>
+          <p class="help-meta" x-show="paramByName(focusParam)?.env_var">
+            Env: <code x-text="paramByName(focusParam)?.env_var"></code>
+          </p>
+        </div>
+        <div class="help-section" x-show="constraintsForFocus().length">
+          <h3>Related constraints</h3>
+          <ul class="constraint-list">
+            <template x-for="c in constraintsForFocus()" :key="c.kind + (c.params || []).join(',')">
+              <li>
+                <span class="constraint-kind" x-text="c.kind"></span>
+                <span x-text="c.message || ('Involves: ' + (c.params || []).join(', '))"></span>
+              </li>
+            </template>
+          </ul>
+        </div>
+        <div class="help-section" x-show="describe?.caveats?.length">
+          <h3>Caveats</h3>
+          <ul>
+            <template x-for="c in (describe?.caveats || [])" :key="c">
+              <li x-text="c"></li>
+            </template>
+          </ul>
+        </div>
+        <div class="help-section" x-show="visibleStages().length">
+          <h3>Stages</h3>
+          <p class="help-hint" x-show="(describe?.stages || []).length > visibleStages().length">
+            Some stages are hidden while a gate (e.g. <code>--star-only</code>) is enabled.
+          </p>
+          <template x-for="s in visibleStages()" :key="s.name">
+            <details class="stage">
+              <summary><span x-text="s.title"></span>
+                <span class="gated" x-show="s.gated_by" x-text="'(gated by ' + s.gated_by + ')'"></span>
+              </summary>
+              <p x-text="s.description"></p>
+            </details>
+          </template>
+        </div>
+      </aside>
+    </div>
+
+    <section class="panel output-panel" x-show="schema">
+      <h2>Output</h2>
+      <p class="err" x-show="httpError" x-text="httpError"></p>
+      <p class="ok" x-show="notice" x-text="notice"></p>
+
+      <div x-show="validateResult">
+        <h3>Validation</h3>
+        <p :class="validateResult?.valid ? 'ok' : 'err'" x-text="validateResult?.valid ? 'Valid' : 'Invalid'"></p>
+        <ul class="messages" x-show="validateResult?.errors?.length">
+          <template x-for="e in (validateResult?.errors || [])" :key="e">
+            <li class="err" x-text="e"></li>
+          </template>
+        </ul>
+        <ul class="messages" x-show="validateResult?.warnings?.length">
+          <template x-for="w in (validateResult?.warnings || [])" :key="w">
+            <li class="warn" x-text="w"></li>
+          </template>
+        </ul>
+      </div>
+
+      <div x-show="renderResult">
+        <h3>Command</h3>
+        <pre class="cmd-block" id="cmd-block" x-text="renderBlock()"></pre>
+        <div class="btn-row">
+          <button type="button" class="btn secondary" @click="copyCmd()">Copy</button>
+          <button
+            type="button"
+            class="btn primary"
+            @click="doLaunch()"
+            :disabled="loading || !launchSupported"
+            :title="launchSupported ? 'Start this command on the machine running the MCP server (detached)' : 'Only available when Launchpad is opened via localhost (same host as the server)'"
+          >Run in shell</button>
+        </div>
+        <p class="launch-hint" x-show="renderResult && !launchSupported">
+          Run in shell is disabled: open Launchpad at <code>127.0.0.1</code> or <code>localhost</code> on the server host, or use <strong>Copy</strong> and paste into your terminal.
+        </p>
+        <div class="launch-result ok" x-show="launchResult?.ok">
+          <p x-text="launchResult?.message || ''"></p>
+          <p x-show="launchResult?.pid != null"><code>pid</code> <span x-text="launchResult?.pid"></span></p>
+        </div>
+      </div>
+
+      <div x-show="schema?.required_files?.length">
+        <h3>Required paths (must exist when validating with path checks)</h3>
+        <ul class="checklist">
+          <template x-for="r in (schema?.required_files || [])" :key="r.name">
+            <li><code x-text="r.cli_flag"></code> — <span x-text="r.name"></span></li>
+          </template>
+        </ul>
+      </div>
+    </section>
+
+    <div class="modal" x-show="showAbout" x-cloak @click.self="showAbout = false">
+      <div class="modal-inner">
+        <h2>About STAR Launchpad</h2>
+        <p>
+          STAR Launchpad is a browser helper that talks to the same workflow definitions as
+          <strong>STAR MCP</strong>. Use <strong>Copy</strong> to paste the command into your
+          terminal, or <strong>Run in shell</strong> (localhost only) to start the same command
+          on the <em>server host</em> in the background.
+        </p>
+        <p>
+          <strong>Load parameters</strong> / <strong>Save parameters</strong> read or write a
+          JSON file via the browser file picker (client-side only). Format:
+          <code>{ &quot;workflow_id&quot;: &quot;…&quot;, &quot;params&quot;: { … } }</code>
+          or a flat object of parameter names to values.
+        </p>
+        <p>
+          <strong>Quit server</strong> stops the STAR Server (Launchpad + MCP) running on this host.
+          Shortcut: <code>Ctrl</code>+<code>Shift</code>+<code>Q</code>. Localhost only (for safety).
+        </p>
+        <p>
+          By default the recipe list shows only <strong>basic STAR CLI</strong> workflows
+          (<code>star_*</code>). Enable <strong>Include test &amp; other recipes</strong> for
+          UCSF production, E2E tests, and the rest (private entries appear on localhost).
+        </p>
+        <p>
+          <strong>STAR Server</strong> hosts STAR MCP (for agents) and this UI on one port.
+        </p>
+        <button type="button" class="btn primary" @click="showAbout = false">Close</button>
+      </div>
+    </div>
+  </div>
+  <script src="./app.js?v=lp9"></script>
+</body>
+</html>
