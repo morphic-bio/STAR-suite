@@ -438,6 +438,43 @@ core/legacy/source/star_feature_call \
   --min-umi 10
 ```
 
+## STAR Launchpad (Recipe Builder)
+
+If you prefer not to assemble command lines by hand, STAR Launchpad is a
+browser-based recipe builder served from the STAR-suite MCP server. Select a
+workflow, fill in parameters through a guided form, and get a validated,
+copy-pasteable shell command.
+
+![STAR Launchpad screenshot](docs/images/launchpad/launch.png)
+
+### Quick start
+
+```bash
+# Install dependencies (once)
+pip install -r mcp_server/requirements.txt
+
+# Start the server
+python3 -m mcp_server.app --transport http --port 8765
+
+# Open in your browser
+# http://localhost:8765/launchpad/
+```
+
+### What it does
+
+1. **Pick a recipe** -- choose a workflow (e.g. A375 CR-compatible alignment).
+2. **Fill the form** -- parameters are grouped by category with defaults
+   pre-filled, descriptions as help text, and constraints shown inline.
+3. **Validate** -- the server checks required fields, types, and constraint
+   rules. Errors and warnings appear inline.
+4. **Generate** -- get the full bash command, environment variable overrides,
+   and a checklist of required input files.
+5. **Copy and run** -- paste the command into your terminal.
+
+Launchpad does not execute anything. It generates commands; you run them.
+
+Design details: [`plans/star_launchpad_v1_runbook.md`](plans/star_launchpad_v1_runbook.md)
+
 ## Codespaces Walkthroughs
 
 STAR Suite includes GitHub Codespaces walkthroughs for the main module entry points.
