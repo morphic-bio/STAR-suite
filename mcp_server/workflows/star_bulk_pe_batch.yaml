@@ -17,18 +17,29 @@ scripts:
     language: native
 
 parameter_groups:
-  - name: core
-    title: Alignment
+  - name: inputs
+    title: Reference & reads
+    description: Genome index directory and paired-end FASTQ inputs.
     parameters:
       - run_mode
       - genome_dir
       - read_files_mate1
       - read_files_mate2
+
+  - name: output
+    title: Output
+    description: Output prefix and batch subdirectory control.
+    parameters:
       - out_file_name_prefix
       - out_file_name_prefix_auto
-      - batch_mode
       - out_sam_kind
       - out_sam_sort
+
+  - name: performance
+    title: Performance
+    description: Threading and batch mode settings.
+    parameters:
+      - batch_mode
       - run_thread_n
 
 parameters:
@@ -37,74 +48,165 @@ parameters:
     type: string
     required: true
     default: alignReads
+    label: Run mode
     description: STAR run mode.
-    category: core
+    help: Must be alignReads for alignment workflows.
+    widget_hint: readonly
+    aliases: [runMode]
+    advanced: false
+    display_order: 0
+    category: inputs
+
   - name: genome_dir
     cli_flag: --genomeDir
     type: directory
     required: true
     path_must_exist: true
+    label: Genome directory
     description: Directory containing a STAR genome index.
-    category: core
+    help: >-
+      Path to a directory containing a previously built STAR genome index
+      (from genomeGenerate). Must contain SA, SAindex, Genome, etc.
+    example: /storage/autoindex_110_44/bulk_index
+    widget_hint: path
+    aliases: [genomeDir]
+    display_order: 1
+    category: inputs
+
   - name: read_files_mate1
     cli_flag: --readFilesIn
     type: string
     required: true
     operand_group: readfiles_pe
+    label: Mate 1 FASTQs
     description: Comma-separated mate-1 FASTQs (batch order matches mate 2).
-    category: core
+    help: >-
+      Comma-separated list of R1 FASTQ files. In batch mode, each comma-separated
+      entry corresponds to one sample/library. Order must match mate 2.
+    example: sampleA_R1.fq.gz,sampleB_R1.fq.gz
+    widget_hint: text
+    display_order: 2
+    category: inputs
+
   - name: read_files_mate2
     cli_flag: --readFilesIn
     type: string
     required: true
     operand_group: readfiles_pe
+    label: Mate 2 FASTQs
     description: Comma-separated mate-2 FASTQs.
-    category: core
+    help: >-
+      Comma-separated list of R2 FASTQ files. Must match mate 1 order and count.
+    example: sampleA_R2.fq.gz,sampleB_R2.fq.gz
+    widget_hint: text
+    display_order: 3
+    category: inputs
+
   - name: out_file_name_prefix
     cli_flag: --outFileNamePrefix
     type: string
     required: true
     is_output_root: true
+    label: Output prefix
     description: Output prefix (directory path ending with / recommended).
-    category: core
+    help: >-
+      Path prefix for STAR output files. Use a trailing slash to create a
+      dedicated output directory. Combined with outFileNamePrefixAuto for
+      per-sample subdirectories in batch mode.
+    example: /path/to/out_root/
+    widget_hint: path
+    aliases: [outFileNamePrefix]
+    display_order: 4
+    category: output
+
   - name: out_file_name_prefix_auto
     cli_flag: --outFileNamePrefixAuto
     type: int
     required: true
     default: 1
+    label: Auto prefix subdirs
     description: Set to 1 for per-batch-entry subdirectories.
-    category: core
+    help: >-
+      When 1, STAR creates a subdirectory per batch entry derived from the
+      first FASTQ filename. Recommended for batch mode.
+    widget_hint: number
+    aliases: [outFileNamePrefixAuto]
+    advanced: true
+    display_order: 5
+    min_value: 0
+    max_value: 1
+    category: output
+
   - name: batch_mode
     cli_flag: --batchMode
     type: int
     required: true
     default: 1
+    label: Batch mode
     description: Enable batch mode (single genome load, multiple libraries).
-    category: core
+    help: >-
+      When 1, STAR loads the genome index once and processes all comma-separated
+      FASTQ entries in sequence. Much faster than separate invocations.
+      Not compatible with --twopassMode or --soloType.
+    widget_hint: number
+    aliases: [batchMode]
+    advanced: true
+    display_order: 6
+    min_value: 0
+    max_value: 1
+    category: performance
+
   - name: out_sam_kind
     cli_flag: --outSAMtype
     type: string
     required: true
     default: BAM
     operand_group: out_sam_type
+    label: Output format
     description: outSAMtype first token (e.g. BAM).
-    category: core
+    help: >-
+      First token of --outSAMtype. Typically BAM; alternatives include SAM or None.
+    widget_hint: text
+    advanced: true
+    display_order: 7
+    category: output
+
   - name: out_sam_sort
     cli_flag: --outSAMtype
     type: string
     required: true
     default: SortedByCoordinate
     operand_group: out_sam_type
+    label: Sort order
     description: outSAMtype second token (e.g. SortedByCoordinate).
-    category: core
+    help: >-
+      Second token of --outSAMtype controlling sort order. SortedByCoordinate
+      is recommended for downstream tools (samtools, IGV). Unsorted is faster
+      but requires separate sorting.
+    widget_hint: text
+    advanced: true
+    display_order: 8
+    category: output
+
   - name: run_thread_n
     cli_flag: --runThreadN
     type: int
     required: true
     default: 16
     skip_when_default: true
+    label: Threads
     description: Alignment thread count.
-    category: core
+    help: >-
+      Number of threads for STAR alignment. Higher values speed up alignment
+      but increase memory pressure. Match to available CPU cores.
+    example: "16"
+    widget_hint: number
+    aliases: [runThreadN]
+    advanced: true
+    display_order: 9
+    min_value: 1
+    max_value: 128
+    category: performance
 
 constraints:
   - kind: positive

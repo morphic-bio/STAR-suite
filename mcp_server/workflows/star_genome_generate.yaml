@@ -19,6 +19,7 @@ scripts:
 parameter_groups:
   - name: core
     title: Index generation
+    description: Core parameters for building a STAR genome index from a reference FASTA.
     parameters: [run_mode, genome_dir, genome_fasta, run_thread_n]
 
 parameters:
@@ -27,29 +28,68 @@ parameters:
     type: string
     required: true
     default: genomeGenerate
+    label: Run mode
     description: STAR run mode (keep genomeGenerate).
+    help: >-
+      Must be genomeGenerate for index building. Other modes (alignReads)
+      are used in separate workflow schemas.
+    widget_hint: readonly
+    aliases: [runMode]
+    advanced: false
+    display_order: 0
     category: core
+
   - name: genome_dir
     cli_flag: --genomeDir
     type: directory
     required: true
     path_must_exist: false
+    label: Genome directory
     description: Output directory for the STAR index (created by STAR).
+    help: >-
+      STAR writes index files into this directory. It does not need to exist
+      beforehand; STAR creates it. Use an absolute path.
+    example: /tmp/star-demo-index
+    widget_hint: path
+    aliases: [genomeDir]
+    display_order: 1
     category: core
+
   - name: genome_fasta
     cli_flag: --genomeFastaFiles
     type: file
     required: true
     path_must_exist: true
+    label: Reference FASTA
     description: Reference FASTA (single file; use additional genomeGenerate runs for multiple inputs if needed).
+    help: >-
+      Primary genome assembly FASTA. Typically a .fa or .fasta file.
+      Multi-file input is possible with space-separated paths in the STAR CLI,
+      but this schema supports a single file for simplicity.
+    example: /data/refs/GRCh38.primary_assembly.genome.fa
+    widget_hint: path
+    aliases: [genomeFastaFiles]
+    display_order: 2
     category: core
+
   - name: run_thread_n
     cli_flag: --runThreadN
     type: int
     required: true
     default: 8
     skip_when_default: true
+    label: Threads
     description: Thread count for index build.
+    help: >-
+      Number of threads STAR uses for genome generation. Higher values
+      speed up indexing but increase memory pressure.
+    example: "8"
+    widget_hint: number
+    aliases: [runThreadN]
+    advanced: true
+    display_order: 3
+    min_value: 1
+    max_value: 128
     category: core
 
 constraints:

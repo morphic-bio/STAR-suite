@@ -64,6 +64,50 @@ class WorkflowParameterDef(BaseModel):
         ),
     )
 
+    # --- Advisory metadata for planners/forms (additive, optional) ---
+    label: Optional[str] = Field(
+        default=None,
+        description="Stable human-readable label for form/UI display (advisory).",
+    )
+    help: Optional[str] = Field(
+        default=None,
+        description="Extended help text beyond description; may contain usage guidance (advisory).",
+    )
+    example: Optional[str] = Field(
+        default=None,
+        description="Example value for documentation and placeholder hints (advisory).",
+    )
+    widget_hint: Optional[str] = Field(
+        default=None,
+        description=(
+            "Hint for UI rendering: text, number, checkbox, select, path, textarea, "
+            "readonly, hidden. Clients may ignore (advisory)."
+        ),
+    )
+    aliases: Optional[list[str]] = Field(
+        default=None,
+        description=(
+            "Canonical alternate names for this parameter (e.g. camelCase STAR flag names). "
+            "Used for alias normalization by planners and agents (advisory)."
+        ),
+    )
+    advanced: bool = Field(
+        default=False,
+        description="If true, UIs may collapse this field into an advanced section (advisory).",
+    )
+    display_order: Optional[int] = Field(
+        default=None,
+        description="Explicit sort key within its group for form rendering (advisory).",
+    )
+    min_value: Optional[float] = Field(
+        default=None,
+        description="Minimum allowed numeric value, if applicable (advisory).",
+    )
+    max_value: Optional[float] = Field(
+        default=None,
+        description="Maximum allowed numeric value, if applicable (advisory).",
+    )
+
 
 class WorkflowConstraint(BaseModel):
     """A constraint between parameters."""
@@ -81,6 +125,7 @@ class WorkflowParameterGroup(BaseModel):
 
     name: str = Field(description="Group identifier")
     title: str = Field(description="Human-readable group title")
+    description: str = Field(default="", description="Help text for this group (advisory).")
     parameters: list[str] = Field(description="Parameter names in this group (display order)")
     gated_by: Optional[str] = Field(
         default=None,

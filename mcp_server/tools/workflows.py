@@ -10,6 +10,7 @@ from ..schemas.config import WorkflowConfig
 from ..schemas.responses import (
     ConstraintInfo,
     DescribeWorkflowResponse,
+    FieldValidationError,
     GetWorkflowScriptsResponse,
     ListWorkflowsResponse,
     ParameterGroupInfo,
@@ -86,6 +87,7 @@ def describe_workflow(
         ParameterGroupInfo(
             name=g.name,
             title=g.title,
+            description=g.description,
             parameters=g.parameters,
             gated_by=g.gated_by,
         )
@@ -259,6 +261,16 @@ def get_workflow_parameter_schema(
             skip_when_default=p.skip_when_default,
             is_output_root=p.is_output_root,
             ui_gated_by=p.ui_gated_by,
+            # Advisory metadata
+            label=p.label,
+            help=p.help,
+            example=p.example,
+            widget_hint=p.widget_hint,
+            aliases=p.aliases,
+            advanced=p.advanced,
+            display_order=p.display_order,
+            min_value=p.min_value,
+            max_value=p.max_value,
         )
         for p in schema.parameters
     ]
@@ -267,6 +279,7 @@ def get_workflow_parameter_schema(
         ParameterGroupInfo(
             name=g.name,
             title=g.title,
+            description=g.description,
             parameters=g.parameters,
             gated_by=g.gated_by,
         )
@@ -320,6 +333,46 @@ def _normalize_params(
     return normalized
 
 
+def _resolve_aliases(
+    schema: WorkflowSchema, params: dict[str, Any]
+) -> tuple[dict[str, Any], list[str]]:
+    """Normalize aliased parameter names to their canonical names.
+
+    Returns ``(resolved_params, collision_errors)`` where *resolved_params*
+    has recognized alias keys replaced by their canonical name.  If a
+    canonical name appears both directly and via an alias, a collision error
+    is emitted instead of silently overwriting.
+    """
+    alias_map: dict[str, str] = {}
+    for p_def in schema.parameters:
+        if p_def.aliases:
+            for alias in p_def.aliases:
+                alias_map[alias] = p_def.name
+
+    if not alias_map:
+        return params, []
+
+    resolved: dict[str, Any] = {}
+    # Track which canonical name was already set and by which key,
+    # so we can detect alias-vs-canonical (or alias-vs-alias) collisions.
+    source_key: dict[str, str] = {}  # canonical -> original key that set it
+    collision_errors: list[str] = []
+
+    for key, val in params.items():
+        canonical = alias_map.get(key, key)
+        if canonical in resolved:
+            prev_key = source_key[canonical]
+            collision_errors.append(
+                f"Alias collision: '{key}' and '{prev_key}' both resolve "
+                f"to canonical parameter '{canonical}'. Provide one or the other."
+            )
+        else:
+            resolved[canonical] = val
+            source_key[canonical] = key
+
+    return resolved, collision_errors
+
+
 def validate_workflow_parameters(
     workflow_id: str,
     params: dict[str, Any],
@@ -330,19 +383,38 @@ def validate_workflow_parameters(
     if schema is None:
         raise ValueError(f"Unknown workflow: {workflow_id}")
 
+    # Resolve aliases before validation so consumers can use either name.
+    params, collision_errors = _resolve_aliases(schema, params)
+
     errors: list[str] = []
     warnings: list[str] = []
+    field_errors: list[FieldValidationError] = []
+
+    # Surface alias collision errors immediately.
+    for msg in collision_errors:
+        errors.append(msg)
+        field_errors.append(FieldValidationError(field="", message=msg, kind="error"))
+
+    def _add_error(msg: str, field: str = "") -> None:
+        errors.append(msg)
+        if field:
+            field_errors.append(FieldValidationError(field=field, message=msg, kind="error"))
+
+    def _add_warning(msg: str, field: str = "") -> None:
+        warnings.append(msg)
+        if field:
+            field_errors.append(FieldValidationError(field=field, message=msg, kind="warning"))
 
     # Check for unknown params
     known_names = {p.name for p in schema.parameters}
     for key in params:
         if key not in known_names:
-            errors.append(f"Unknown parameter: {key}")
+            _add_error(f"Unknown parameter: {key}", field=key)
 
     # Check required params
     for p_def in schema.parameters:
         if p_def.required and p_def.name not in params:
-            errors.append(f"Missing required parameter: {p_def.name}")
+            _add_error(f"Missing required parameter: {p_def.name}", field=p_def.name)
 
     # Type checks
     for p_def in schema.parameters:
@@ -356,19 +428,29 @@ def validate_workflow_parameters(
             try:
                 int(val)
             except (TypeError, ValueError):
-                errors.append(f"Parameter '{p_def.name}' must be an integer, got: {val!r}")
+                _add_error(
+                    f"Parameter '{p_def.name}' must be an integer, got: {val!r}",
+                    field=p_def.name,
+                )
         elif p_def.type == "float":
             try:
                 float(val)
             except (TypeError, ValueError):
-                errors.append(f"Parameter '{p_def.name}' must be a float, got: {val!r}")
+                _add_error(
+                    f"Parameter '{p_def.name}' must be a float, got: {val!r}",
+                    field=p_def.name,
+                )
         elif p_def.type == "bool":
             if not isinstance(val, (bool, int, str)):
-                errors.append(f"Parameter '{p_def.name}' must be a boolean, got: {val!r}")
+                _add_error(
+                    f"Parameter '{p_def.name}' must be a boolean, got: {val!r}",
+                    field=p_def.name,
+                )
         elif p_def.type == "enum":
             if p_def.choices and str(val) not in p_def.choices:
-                errors.append(
-                    f"Parameter '{p_def.name}' must be one of {p_def.choices}, got: {val!r}"
+                _add_error(
+                    f"Parameter '{p_def.name}' must be one of {p_def.choices}, got: {val!r}",
+                    field=p_def.name,
                 )
 
     # Normalize for constraint checking
@@ -383,10 +465,15 @@ def validate_workflow_parameters(
                 and params[p] != "" and params[p] != 0
             ]
             if len(present) > 1:
-                errors.append(
+                msg = (
                     f"Mutually exclusive parameters both provided: "
                     f"{', '.join(present)}. {constraint.message}"
                 )
+                errors.append(msg)
+                for p_name in present:
+                    field_errors.append(
+                        FieldValidationError(field=p_name, message=msg, kind="error")
+                    )
 
         elif constraint.kind == "group_required":
             present = [
@@ -396,24 +483,28 @@ def validate_workflow_parameters(
             ]
             if 0 < len(present) < len(constraint.params):
                 missing = [p for p in constraint.params if p not in present]
-                warnings.append(
+                msg = (
                     f"Incomplete parameter group: provided {present}, "
                     f"missing {missing}. {constraint.message}"
                 )
+                warnings.append(msg)
+                for p_name in missing:
+                    field_errors.append(
+                        FieldValidationError(field=p_name, message=msg, kind="warning")
+                    )
 
         elif constraint.kind == "dependency":
-            # For the cellbender_gpu / star_only dependency:
-            # warn if cellbender_gpu is set but star_only is also set
             if len(constraint.params) >= 2:
                 dep_param = constraint.params[0]
                 gate_param = constraint.params[1]
                 dep_val = normalized.get(dep_param)
                 gate_val = normalized.get(gate_param)
                 if dep_val and gate_val:
-                    warnings.append(
+                    msg = (
                         f"Parameter '{dep_param}' has no effect when "
                         f"'{gate_param}' is set. {constraint.message}"
                     )
+                    _add_warning(msg, field=dep_param)
 
         elif constraint.kind == "positive":
             for p_name in constraint.params:
@@ -421,8 +512,9 @@ def validate_workflow_parameters(
                 if val is not None:
                     try:
                         if int(val) <= 0:
-                            errors.append(
-                                f"Parameter '{p_name}' must be positive, got: {val}"
+                            _add_error(
+                                f"Parameter '{p_name}' must be positive, got: {val}",
+                                field=p_name,
                             )
                     except (TypeError, ValueError):
                         pass
@@ -433,8 +525,9 @@ def validate_workflow_parameters(
                 if val is not None:
                     try:
                         if int(val) < 0:
-                            errors.append(
-                                f"Parameter '{p_name}' must be non-negative, got: {val}"
+                            _add_error(
+                                f"Parameter '{p_name}' must be non-negative, got: {val}",
+                                field=p_name,
                             )
                     except (TypeError, ValueError):
                         pass
@@ -457,24 +550,29 @@ def validate_workflow_parameters(
                     path = repo_root / path
                     normalized[p_def.name] = str(path)
                 if not is_path_allowed(path):
-                    errors.append(
-                        f"Parameter '{p_def.name}' path outside trusted roots: {path}"
+                    _add_error(
+                        f"Parameter '{p_def.name}' path outside trusted roots: {path}",
+                        field=p_def.name,
                     )
                 elif not path.exists():
-                    errors.append(
-                        f"Parameter '{p_def.name}' path does not exist: {path}"
+                    _add_error(
+                        f"Parameter '{p_def.name}' path does not exist: {path}",
+                        field=p_def.name,
                     )
                 elif p_def.type == "file" and not path.is_file():
-                    errors.append(
-                        f"Parameter '{p_def.name}' is not a file: {path}"
+                    _add_error(
+                        f"Parameter '{p_def.name}' is not a file: {path}",
+                        field=p_def.name,
                     )
                 elif p_def.type == "directory" and not path.is_dir():
-                    errors.append(
-                        f"Parameter '{p_def.name}' is not a directory: {path}"
+                    _add_error(
+                        f"Parameter '{p_def.name}' is not a directory: {path}",
+                        field=p_def.name,
                     )
                 elif p_def.must_be_executable and not os.access(path, os.X_OK):
-                    errors.append(
-                        f"Parameter '{p_def.name}' is not executable: {path}"
+                    _add_error(
+                        f"Parameter '{p_def.name}' is not executable: {path}",
+                        field=p_def.name,
                     )
 
     return ValidateWorkflowResponse(
@@ -482,6 +580,7 @@ def validate_workflow_parameters(
         normalized_params=normalized,
         warnings=warnings,
         errors=errors,
+        field_errors=field_errors,
     )
 
 

@@ -243,6 +243,17 @@ class ParameterInfo(BaseModel):
     is_output_root: bool = False
     ui_gated_by: Optional[str] = None
 
+    # --- Advisory metadata (additive, optional) ---
+    label: Optional[str] = None
+    help: Optional[str] = None
+    example: Optional[str] = None
+    widget_hint: Optional[str] = None
+    aliases: Optional[list[str]] = None
+    advanced: bool = False
+    display_order: Optional[int] = None
+    min_value: Optional[float] = None
+    max_value: Optional[float] = None
+
 
 class ConstraintInfo(BaseModel):
     """Constraint between parameters."""
@@ -257,6 +268,7 @@ class ParameterGroupInfo(BaseModel):
 
     name: str
     title: str
+    description: str = ""
     parameters: list[str]
     gated_by: Optional[str] = None
 
@@ -309,6 +321,14 @@ class GetWorkflowScriptsResponse(BaseModel):
     provenance: dict[str, Any] = Field(default_factory=dict)
 
 
+class FieldValidationError(BaseModel):
+    """Structured validation error tied to a specific parameter (advisory)."""
+
+    field: str
+    message: str
+    kind: str = "error"  # "error" or "warning"
+
+
 class ValidateWorkflowResponse(BaseModel):
     """Response from validate_workflow_parameters."""
 
@@ -316,6 +336,13 @@ class ValidateWorkflowResponse(BaseModel):
     normalized_params: dict[str, Any] = Field(default_factory=dict)
     warnings: list[str] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)
+    field_errors: list[FieldValidationError] = Field(
+        default_factory=list,
+        description=(
+            "Structured per-field validation errors/warnings. Additive alongside "
+            "the flat errors/warnings lists for backward compatibility (advisory)."
+        ),
+    )
 
 
 class RenderWorkflowResponse(BaseModel):
