@@ -11,6 +11,7 @@ import mcp_server.config as config_module
 import mcp_server.launchpad.api as launchpad_api
 from mcp_server.app import build_http_app
 from mcp_server.config import load_config
+from mcp_server.tools.workflows import get_workflow_parameter_schema
 from starlette.requests import Request
 
 from .test_workflow_discovery import SAMPLE_WORKFLOW_SCHEMA
@@ -275,6 +276,13 @@ class TestLaunchpadApi:
         assert "input_dir" in names
         assert data["required_files"][0]["type"] == "directory"
 
+    def test_schema_matches_mcp_contract(self, launchpad_client):
+        r = launchpad_client.get("/launchpad/api/workflows/test_wf/schema")
+        assert r.status_code == 200
+
+        expected = get_workflow_parameter_schema("test_wf").model_dump()
+        assert r.json() == expected
+
     def test_schema_unknown(self, launchpad_client):
         r = launchpad_client.get("/launchpad/api/workflows/missing_wf/schema")
         assert r.status_code == 404
@@ -297,12 +305,46 @@ class TestLaunchpadApi:
         assert data["valid"] is True
         assert data["errors"] == []
 
+    def test_validate_checks_paths_when_requested(self, launchpad_client):
+        missing = "/tmp/launchpad-test-missing-input-dir"
+        r = launchpad_client.post(
+            "/launchpad/api/workflows/test_wf/validate",
+            json={
+                "params": {"input_dir": missing},
+                "check_paths": True,
+            },
+        )
+        assert r.status_code == 200
+        data = r.json()
+        assert data["valid"] is False
+        assert any("does not exist" in msg for msg in data["errors"])
+        assert any(fe["field"] == "input_dir" for fe in data["field_errors"])
+
+    def test_validate_rejects_path_checks_off_loopback(self, launchpad_client):
+        with mock.patch.object(
+            launchpad_api, "launchpad_request_trusted_local", return_value=False
+        ):
+            r = launchpad_client.post(
+                "/launchpad/api/workflows/test_wf/validate",
+                json={"params": {"input_dir": "/tmp"}, "check_paths": True},
+            )
+            assert r.status_code == 403
+            assert r.json()["code"] == "FORBIDDEN"
+
     def test_validate_bad_body(self, launchpad_client):
         r = launchpad_client.post(
             "/launchpad/api/workflows/test_wf/validate",
             json={},
         )
         assert r.status_code == 400
+
+    def test_validate_bad_check_paths_type(self, launchpad_client):
+        r = launchpad_client.post(
+            "/launchpad/api/workflows/test_wf/validate",
+            json={"params": {"input_dir": "/tmp"}, "check_paths": "yes"},
+        )
+        assert r.status_code == 400
+        assert r.json()["code"] == "BAD_REQUEST"
 
     def test_render(self, launchpad_client):
         r = launchpad_client.post(
@@ -349,7 +391,10 @@ class TestLaunchpadApi:
     def test_capabilities_loopback(self, launchpad_client):
         r = launchpad_client.get("/launchpad/api/capabilities")
         assert r.status_code == 200
-        assert r.json() == {"launch_supported": True}
+        assert r.json() == {
+            "launch_supported": True,
+            "server_path_check_supported": True,
+        }
 
     def test_capabilities_not_trusted_when_mocked(self, launchpad_client):
         with mock.patch.object(
@@ -357,7 +402,10 @@ class TestLaunchpadApi:
         ):
             r = launchpad_client.get("/launchpad/api/capabilities")
             assert r.status_code == 200
-            assert r.json() == {"launch_supported": False}
+            assert r.json() == {
+                "launch_supported": False,
+                "server_path_check_supported": False,
+            }
 
     def test_launch_starts_process(self, launchpad_client_launch_noop):
         r = launchpad_client_launch_noop.post(
@@ -380,6 +428,18 @@ class TestLaunchpadApi:
             )
             assert r.status_code == 403
             assert r.json().get("code") == "FORBIDDEN"
+
+    def test_launch_checks_paths_before_start(self, launchpad_client):
+        missing = "/tmp/launchpad-test-missing-input-dir"
+        r = launchpad_client.post(
+            "/launchpad/api/workflows/test_wf/launch",
+            json={"params": {"input_dir": missing}},
+        )
+        assert r.status_code == 400
+        data = r.json()
+        assert data.get("code") == "VALIDATION_FAILED"
+        assert data["validation"]["valid"] is False
+        assert any("input_dir" == fe["field"] for fe in data["validation"]["field_errors"])
 
     def test_quit_requires_confirm(self, launchpad_client):
         r = launchpad_client.post("/launchpad/api/quit", json={})

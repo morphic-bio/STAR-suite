@@ -197,6 +197,35 @@ class TestGenomeGenerateEnrichment:
         assert "core" in groups
         assert groups["core"].description != ""
         assert "index" in groups["core"].description.lower()
+        assert "annotation" in groups
+        assert "annotation" in groups["annotation"].description.lower()
+
+    def test_annotation_parameters_present(self, genome_generate_config):
+        result = get_workflow_parameter_schema("star_genome_generate")
+        params = {p.name: p for p in result.parameters}
+
+        assert params["sjdb_gtf_file"].cli_flag == "--sjdbGTFfile"
+        assert params["sjdb_gtf_file"].type == "file"
+        assert params["sjdb_gtf_file"].path_must_exist is True
+        assert params["sjdb_gtf_file"].aliases == ["sjdbGTFfile"]
+
+        assert params["sjdb_overhang"].default == 100
+        assert params["sjdb_overhang"].skip_when_default is True
+        assert params["sjdb_overhang"].aliases == ["sjdbOverhang"]
+        assert params["sjdb_overhang"].example is None
+        assert "default is 100" in params["sjdb_overhang"].help.lower()
+
+        assert params["sjdb_gtf_feature_exon"].default == "exon"
+        assert params["sjdb_gtf_tag_exon_parent_transcript"].default == "transcript_id"
+        assert params["sjdb_gtf_tag_exon_parent_gene"].default == "gene_id"
+
+    def test_optional_gtf_is_listed_in_required_files(self, genome_generate_config):
+        result = get_workflow_parameter_schema("star_genome_generate")
+        required = {p.name: p for p in result.required_files}
+
+        assert "sjdb_gtf_file" in required
+        assert required["sjdb_gtf_file"].cli_flag == "--sjdbGTFfile"
+        assert required["sjdb_gtf_file"].type == "file"
 
 
 # ---------------------------------------------------------------------------
@@ -359,6 +388,23 @@ class TestAliasNormalization:
         collision_msgs = [e for e in result.errors if "Alias collision" in e]
         assert len(collision_msgs) == 1
         assert "genome_dir" in collision_msgs[0]
+
+    def test_sjdb_alias_resolves_to_canonical(self, genome_generate_config):
+        result = validate_workflow_parameters(
+            "star_genome_generate",
+            {
+                "runMode": "genomeGenerate",
+                "genomeDir": "/tmp/test-idx",
+                "genomeFastaFiles": "/tmp/fake.fa",
+                "runThreadN": 4,
+                "sjdbGTFfile": "/tmp/genes.gtf",
+            },
+            check_paths=False,
+        )
+
+        assert result.valid is True
+        assert result.normalized_params["sjdb_gtf_file"] == "/tmp/genes.gtf"
+        assert "sjdbGTFfile" not in result.normalized_params
 
 
 # ---------------------------------------------------------------------------

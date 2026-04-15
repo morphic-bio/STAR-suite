@@ -70,9 +70,17 @@ function launchpadApp() {
     renderResult: null,
     launchResult: null,
     launchSupported: false,
+    serverPathCheckSupported: false,
+    checkPaths: false,
+    lastValidationCheckPaths: null,
     httpError: "",
     notice: "",
     showAbout: false,
+
+    selectedParam() {
+      if (!this.focusParam) return null;
+      return this.paramByName(this.focusParam);
+    },
 
     paramByName(name) {
       if (!this.schema?.parameters) return null;
@@ -94,10 +102,52 @@ function launchpadApp() {
       return pname;
     },
 
+    formatMetaValue(value) {
+      if (value === null || value === undefined) return "";
+      if (typeof value === "boolean") return value ? "true" : "false";
+      if (Array.isArray(value)) return value.join(", ");
+      if (typeof value === "object") return JSON.stringify(value);
+      return String(value);
+    },
+
+    paramRangeText(p) {
+      if (!p) return "";
+      const lo = p.min_value;
+      const hi = p.max_value;
+      if (lo === null || lo === undefined) {
+        if (hi === null || hi === undefined) return "";
+        return `<= ${this.formatMetaValue(hi)}`;
+      }
+      if (hi === null || hi === undefined) return `>= ${this.formatMetaValue(lo)}`;
+      return `${this.formatMetaValue(lo)} to ${this.formatMetaValue(hi)}`;
+    },
+
+    paramAliasesText(p) {
+      if (!p?.aliases?.length) return "";
+      return p.aliases.join(", ");
+    },
+
+    normalizedParamsText() {
+      const obj = this.validateResult?.normalized_params;
+      if (!obj) return "";
+      return JSON.stringify(obj, null, 2);
+    },
+
+    validationModeMessage() {
+      if (this.lastValidationCheckPaths === true) {
+        return "Validation included file and directory existence checks on the server host.";
+      }
+      if (this.lastValidationCheckPaths === false) {
+        return "Validation checked schema and types only. File and directory existence were not checked.";
+      }
+      return "";
+    },
+
     paramHasRichTip(pname) {
       const p = this.paramByName(pname);
       if (!p) return false;
       if (String(p.description || "").trim()) return true;
+      if (String(p.help || "").trim()) return true;
       if (p.env_var) return true;
       if (p.choices && p.choices.length) return true;
       return false;
@@ -398,8 +448,12 @@ function launchpadApp() {
       if (cap.ok) {
         const c = await cap.json();
         this.launchSupported = !!c.launch_supported;
+        this.serverPathCheckSupported = !!c.server_path_check_supported;
+        if (!this.serverPathCheckSupported) this.checkPaths = false;
       } else {
         this.launchSupported = false;
+        this.serverPathCheckSupported = false;
+        this.checkPaths = false;
       }
       if (!wr.ok) {
         this.httpError = await wr.text();
@@ -420,6 +474,7 @@ function launchpadApp() {
       this.loading = true;
       this.httpError = "";
       this.validateResult = null;
+      this.lastValidationCheckPaths = null;
       this.renderResult = null;
       this.launchResult = null;
       try {
@@ -446,9 +501,11 @@ function launchpadApp() {
       }
     },
 
-    async doValidate() {
+    async doValidate(opts = {}) {
+      const checkPaths = !!opts.checkPaths;
       this.loading = true;
       this.httpError = "";
+      this.lastValidationCheckPaths = checkPaths;
       try {
         const api = launchpadApiBase();
         const r = await fetch(
@@ -456,23 +513,32 @@ function launchpadApp() {
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ params: this.collectParams() }),
+            body: JSON.stringify({
+              params: this.collectParams(),
+              check_paths: checkPaths,
+            }),
           }
         );
         const data = await r.json();
         if (!r.ok) {
           this.httpError = data.message || r.statusText;
-          return;
+          return false;
         }
         this.validateResult = data;
+        return !!data.valid;
+      } catch (e) {
+        this.httpError = e && e.message ? e.message : String(e);
+        return false;
       } finally {
         this.loading = false;
       }
     },
 
     async doRender() {
-      await this.doValidate();
-      if (!this.validateResult?.valid) return;
+      const valid = await this.doValidate({
+        checkPaths: this.serverPathCheckSupported && this.checkPaths,
+      });
+      if (!valid) return;
       this.loading = true;
       this.httpError = "";
       try {
@@ -498,8 +564,8 @@ function launchpadApp() {
     },
 
     async doLaunch() {
-      await this.doValidate();
-      if (!this.validateResult?.valid) return;
+      const valid = await this.doValidate({ checkPaths: true });
+      if (!valid) return;
       this.loading = true;
       this.httpError = "";
       this.notice = "";
@@ -511,7 +577,10 @@ function launchpadApp() {
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ params: this.collectParams() }),
+            body: JSON.stringify({
+              params: this.collectParams(),
+              check_paths: true,
+            }),
           }
         );
         const data = await r.json();

@@ -4,7 +4,8 @@ Loopback clients see all workflows (including private), like authenticated MCP
 discovery. Non-loopback clients see public workflows only.
 
 Rendered commands still use schema-relative entry paths (no host path leak).
-Validation uses check_paths=False for path planning on the user's machine.
+Validation defaults to ``check_paths=False`` for browser-side planning, but
+trusted-local callers may opt into server-host path checks.
 
 ``POST .../launch`` starts the rendered argv on the server host with
 ``subprocess.Popen`` (detached, no shell). It is allowed only for loopback
@@ -69,9 +70,30 @@ def _json_error(code: str, message: str, status_code: int = 400) -> JSONResponse
 
 async def lp_capabilities(request: Request) -> JSONResponse:
     """Whether this browser session may use server-side Run in shell (loopback only)."""
+    trusted_local = launchpad_request_trusted_local(request)
     return JSONResponse(
-        {"launch_supported": launchpad_request_trusted_local(request)}
+        {
+            "launch_supported": trusted_local,
+            "server_path_check_supported": trusted_local,
+        }
     )
+
+
+def _extract_check_paths(body: dict, *, trusted_local: bool) -> tuple[bool, JSONResponse | None]:
+    """Return requested path-check mode, rejecting non-local server path probes."""
+    raw = body.get("check_paths", False)
+    if not isinstance(raw, bool):
+        return False, _json_error("BAD_REQUEST", "'check_paths' must be a boolean", 400)
+    if raw and not trusted_local:
+        return (
+            False,
+            _json_error(
+                "FORBIDDEN",
+                "Server-host path checks are only available from the same machine as the server.",
+                403,
+            ),
+        )
+    return raw, None
 
 
 def _schedule_self_terminate(
@@ -135,9 +157,13 @@ async def lp_validate(request: Request) -> JSONResponse:
     params = body.get("params")
     if params is None or not isinstance(params, dict):
         return _json_error("BAD_REQUEST", "Body must contain an object 'params'", 400)
+    trusted_local = launchpad_request_trusted_local(request)
+    check_paths, error = _extract_check_paths(body, trusted_local=trusted_local)
+    if error is not None:
+        return error
     try:
         result = validate_workflow_parameters(
-            wf_id, params, check_paths=False
+            wf_id, params, check_paths=check_paths
         )
         return JSONResponse(result.model_dump())
     except ValueError as e:
@@ -191,7 +217,7 @@ async def lp_launch(request: Request) -> JSONResponse:
         return _json_error("BAD_REQUEST", "Body must contain an object 'params'", 400)
 
     try:
-        val = validate_workflow_parameters(wf_id, params, check_paths=False)
+        val = validate_workflow_parameters(wf_id, params, check_paths=True)
     except ValueError as e:
         return _json_error("NOT_FOUND", str(e), 404)
 

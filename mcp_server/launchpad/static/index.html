@@ -73,6 +73,27 @@
       </button>
     </div>
 
+    <div class="toolbar validation-toolbar" x-show="schema">
+      <label class="field-inline validation-toggle">
+        <input
+          type="checkbox"
+          x-model="checkPaths"
+          :disabled="loading || !serverPathCheckSupported"
+        />
+        <span
+          :title="serverPathCheckSupported ? 'Validate file and directory existence on the server host before generating a command.' : 'Server-host path checks are only available when Launchpad is opened from the same machine as the server.'"
+        >Check paths on server host during Validate / Generate</span>
+      </label>
+      <p class="validation-toolbar-hint">
+        <span x-show="serverPathCheckSupported">
+          Off by default for planning. <strong>Run in shell</strong> always validates server-host paths before launch.
+        </span>
+        <span x-show="!serverPathCheckSupported">
+          Remote browsers stay in planning mode: schema and type checks only, no server-host path checks.
+        </span>
+      </p>
+    </div>
+
     <div class="main-grid" x-show="schema">
       <section class="panel form-panel">
         <h2>Parameters</h2>
@@ -121,11 +142,65 @@
 
       <aside class="panel help-panel">
         <h2>Help</h2>
-        <div class="help-section" x-show="focusParam && paramByName(focusParam) && paramVisibleInForm(focusParam)">
+        <div class="help-section" x-show="selectedParam() && paramVisibleInForm(focusParam)">
           <h3>Selected parameter</h3>
-          <p class="help-desc" x-text="paramByName(focusParam)?.description"></p>
-          <p class="help-meta" x-show="paramByName(focusParam)?.env_var">
-            Env: <code x-text="paramByName(focusParam)?.env_var"></code>
+          <p class="help-name">
+            <strong x-text="selectedParam()?.label || selectedParam()?.name"></strong>
+            <span class="help-code"><code x-text="selectedParam()?.cli_flag"></code></span>
+          </p>
+          <p class="help-desc" x-text="selectedParam()?.description"></p>
+          <p
+            class="help-detail"
+            x-show="selectedParam()?.help && selectedParam()?.help !== selectedParam()?.description"
+            x-text="selectedParam()?.help"
+          ></p>
+          <ul class="help-meta-list">
+            <li>
+              Type: <code x-text="selectedParam()?.type"></code>
+              <span x-show="selectedParam()?.required">, required</span>
+              <span x-show="!selectedParam()?.required">, optional</span>
+            </li>
+            <li x-show="selectedParam()?.default !== null && selectedParam()?.default !== undefined">
+              Default: <code x-text="formatMetaValue(selectedParam()?.default)"></code>
+            </li>
+            <li x-show="selectedParam()?.example !== null && selectedParam()?.example !== undefined && selectedParam()?.example !== ''">
+              Example: <code x-text="formatMetaValue(selectedParam()?.example)"></code>
+            </li>
+            <li x-show="selectedParam()?.choices?.length">
+              Choices: <code x-text="formatMetaValue(selectedParam()?.choices)"></code>
+            </li>
+            <li x-show="paramRangeText(selectedParam())">
+              Range: <code x-text="paramRangeText(selectedParam())"></code>
+            </li>
+            <li x-show="selectedParam()?.aliases?.length">
+              Aliases: <code x-text="paramAliasesText(selectedParam())"></code>
+            </li>
+            <li x-show="selectedParam()?.env_var">
+              Env: <code x-text="selectedParam()?.env_var"></code>
+            </li>
+            <li x-show="selectedParam()?.path_must_exist">
+              Must exist when server-host path checks are enabled.
+            </li>
+            <li x-show="selectedParam()?.must_be_executable">
+              Must be executable.
+            </li>
+            <li x-show="selectedParam()?.skip_when_default">
+              Omitted from the rendered command when left at its schema default.
+            </li>
+            <li x-show="selectedParam()?.advanced">
+              Marked advanced in the schema.
+            </li>
+            <li x-show="selectedParam()?.stage || selectedParam()?.category">
+              <span x-show="selectedParam()?.category">Category: <code x-text="selectedParam()?.category"></code></span>
+              <span x-show="selectedParam()?.stage"> | Stage: <code x-text="selectedParam()?.stage"></code></span>
+            </li>
+          </ul>
+        </div>
+        <div class="help-section" x-show="validationModeMessage()">
+          <h3>Validation mode</h3>
+          <p class="help-detail" x-text="validationModeMessage()"></p>
+          <p class="help-meta" x-show="launchSupported">
+            <strong>Run in shell</strong> always re-validates with server-host path checks before starting the command.
           </p>
         </div>
         <div class="help-section" x-show="constraintsForFocus().length">
@@ -172,6 +247,16 @@
       <div x-show="validateResult">
         <h3>Validation</h3>
         <p :class="validateResult?.valid ? 'ok' : 'err'" x-text="validateResult?.valid ? 'Valid' : 'Invalid'"></p>
+        <p class="validation-mode" :class="lastValidationCheckPaths ? 'ok' : 'warn'" x-show="validationModeMessage()" x-text="validationModeMessage()"></p>
+        <ul class="messages" x-show="validateResult?.field_errors?.length">
+          <template x-for="fe in (validateResult?.field_errors || [])" :key="fe.field + ':' + fe.kind + ':' + fe.message">
+            <li :class="fe.kind === 'warning' ? 'warn' : 'err'">
+              <code x-text="fe.field || '(workflow)'"></code>
+              <span> — </span>
+              <span x-text="fe.message"></span>
+            </li>
+          </template>
+        </ul>
         <ul class="messages" x-show="validateResult?.errors?.length">
           <template x-for="e in (validateResult?.errors || [])" :key="e">
             <li class="err" x-text="e"></li>
@@ -182,6 +267,10 @@
             <li class="warn" x-text="w"></li>
           </template>
         </ul>
+        <details class="json-detail" x-show="validateResult?.normalized_params && Object.keys(validateResult.normalized_params).length">
+          <summary>Normalized parameters</summary>
+          <pre class="json-block" x-text="normalizedParamsText()"></pre>
+        </details>
       </div>
 
       <div x-show="renderResult">
@@ -234,6 +323,12 @@
         <p>
           <strong>Quit server</strong> stops the STAR Server (Launchpad + MCP) running on this host.
           Shortcut: <code>Ctrl</code>+<code>Shift</code>+<code>Q</code>. Localhost only (for safety).
+        </p>
+        <p>
+          <strong>Validate</strong> and <strong>Generate command</strong> default to schema and type
+          checks only. Enable <strong>Check paths on server host</strong> when you want Launchpad to
+          verify file and directory existence on the machine running STAR Server. <strong>Run in shell</strong>
+          always does that stricter server-host validation before launch.
         </p>
         <p>
           By default the recipe list shows only <strong>basic STAR CLI</strong> workflows

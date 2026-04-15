@@ -120,6 +120,34 @@ body {
   flex: 1 1 160px;
 }
 
+.validation-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1rem;
+  padding: 0.65rem 0.85rem;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.validation-toggle {
+  font-size: 0.9rem;
+}
+
+.validation-toggle input[type="checkbox"] {
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
+}
+
+.validation-toolbar-hint {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--muted);
+  flex: 1 1 24rem;
+}
+
 .sr-only {
   position: absolute;
   width: 1px;
@@ -343,6 +371,21 @@ body {
   color: var(--muted);
 }
 
+.help-name {
+  margin: 0 0 0.35rem;
+  font-size: 0.88rem;
+}
+
+.help-code {
+  margin-left: 0.35rem;
+}
+
+.help-detail {
+  margin: 0.4rem 0 0;
+  font-size: 0.86rem;
+  color: var(--text);
+}
+
 .help-meta {
   font-size: 0.8rem;
   color: var(--muted);
@@ -353,6 +396,10 @@ body {
   padding-left: 1.2rem;
   font-size: 0.88rem;
   color: var(--muted);
+}
+
+.help-meta-list li {
+  margin-bottom: 0.2rem;
 }
 
 .stage {
@@ -400,6 +447,34 @@ body {
 .messages li {
   font-size: 0.88rem;
   margin-bottom: 0.25rem;
+}
+
+.validation-mode {
+  margin: 0.35rem 0 0.5rem;
+  font-size: 0.86rem;
+}
+
+.json-detail {
+  margin-top: 0.65rem;
+}
+
+.json-detail summary {
+  cursor: pointer;
+  font-size: 0.88rem;
+  color: var(--muted);
+}
+
+.json-block {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.85rem;
+  overflow-x: auto;
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0.5rem 0 0;
 }
 
 .err {
