@@ -52,8 +52,25 @@ function shellQuote(s) {
   return "'" + String(s).replace(/'/g, "'\\''") + "'";
 }
 
+/** Minimal annotated Bash used as the Script Lane placeholder (harmless ``cp`` step). */
+function scriptLaneDefaultScript() {
+  return [
+    "#!/usr/bin/env bash",
+    "set -euo pipefail",
+    "#@workflow id=launchpad_script_lane",
+    "#@input genome file required",
+    "#@output bam file",
+    "#@step id=copy tool=cp",
+    "#@uses genome",
+    "#@produces bam",
+    'cp "${genome}" "${bam}"',
+    "",
+  ].join("\n");
+}
+
 function launchpadApp() {
   return {
+    activeTab: "workflows",
     /** Full list from API (sorted); `workflows` is filtered for the dropdown. */
     allWorkflows: [],
     workflows: [],
@@ -71,11 +88,32 @@ function launchpadApp() {
     launchResult: null,
     launchSupported: false,
     serverPathCheckSupported: false,
+    scriptLaneUtilsReady: false,
+    scriptLaneViabilityInputsSupported: false,
+    scriptLaneExecuteSupported: false,
     checkPaths: false,
     lastValidationCheckPaths: null,
     httpError: "",
     notice: "",
     showAbout: false,
+
+    slScript: scriptLaneDefaultScript(),
+    slInputJson: "{}",
+    slWorkdir: "",
+    slTranslateResult: null,
+    slViabilityResult: null,
+    slExecuteResult: null,
+    slIr: null,
+    slNormalizedScript: null,
+
+    /** Drop IR and downstream Script Lane state (script edited, translate failed, etc.). */
+    slInvalidateScriptLaneDerivedState() {
+      this.slIr = null;
+      this.slNormalizedScript = null;
+      this.slTranslateResult = null;
+      this.slViabilityResult = null;
+      this.slExecuteResult = null;
+    },
 
     selectedParam() {
       if (!this.focusParam) return null;
@@ -449,10 +487,16 @@ function launchpadApp() {
         const c = await cap.json();
         this.launchSupported = !!c.launch_supported;
         this.serverPathCheckSupported = !!c.server_path_check_supported;
+        this.scriptLaneUtilsReady = !!c.script_lane_translate_supported;
+        this.scriptLaneViabilityInputsSupported = !!c.script_lane_viability_inputs_supported;
+        this.scriptLaneExecuteSupported = !!c.script_lane_execute_supported;
         if (!this.serverPathCheckSupported) this.checkPaths = false;
       } else {
         this.launchSupported = false;
         this.serverPathCheckSupported = false;
+        this.scriptLaneUtilsReady = false;
+        this.scriptLaneViabilityInputsSupported = false;
+        this.scriptLaneExecuteSupported = false;
         this.checkPaths = false;
       }
       if (!wr.ok) {
@@ -651,6 +695,163 @@ function launchpadApp() {
         e.preventDefault();
         this.confirmQuit();
       }
+    },
+
+    slParseInputValues() {
+      const raw = (this.slInputJson || "").trim();
+      if (!raw) return null;
+      const obj = JSON.parse(raw);
+      if (!obj || typeof obj !== "object" || Array.isArray(obj)) {
+        throw new Error("input_values JSON must be a non-array object");
+      }
+      return obj;
+    },
+
+    async slPostJson(path, payload) {
+      const api = launchpadApiBase();
+      const r = await fetch(`${api}${path}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await r.json().catch(() => ({}));
+      return { r, data };
+    },
+
+    async slTranslate() {
+      this.loading = true;
+      this.httpError = "";
+      this.slInvalidateScriptLaneDerivedState();
+      try {
+        const { r, data } = await this.slPostJson("/script-lane/translate", {
+          script_text: this.slScript,
+        });
+        if (!r.ok) {
+          this.httpError = data.message || r.statusText;
+          return;
+        }
+        this.slTranslateResult = data;
+        if (data && data.ok && data.ir) {
+          this.slIr = data.ir;
+          this.slNormalizedScript = data.normalized_script || null;
+        }
+      } catch (e) {
+        this.httpError = e && e.message ? e.message : String(e);
+      } finally {
+        this.loading = false;
+      }
+    },
+
+    async slViability() {
+      if (!this.slIr) {
+        this.httpError = "Translate successfully first so an IR is available.";
+        return;
+      }
+      this.loading = true;
+      this.httpError = "";
+      this.slViabilityResult = null;
+      this.slExecuteResult = null;
+      try {
+        let input_values = undefined;
+        try {
+          const parsed = this.slParseInputValues();
+          if (parsed && Object.keys(parsed).length) input_values = parsed;
+        } catch (e) {
+          this.httpError = e && e.message ? e.message : String(e);
+          return;
+        }
+        const body = { ir: this.slIr };
+        if (input_values !== undefined) body.input_values = input_values;
+        const { r, data } = await this.slPostJson("/script-lane/viability", body);
+        if (!r.ok) {
+          this.httpError = data.message || r.statusText;
+          return;
+        }
+        this.slViabilityResult = data;
+      } catch (e) {
+        this.httpError = e && e.message ? e.message : String(e);
+      } finally {
+        this.loading = false;
+      }
+    },
+
+    async slExecute() {
+      if (!this.slIr) {
+        this.httpError = "Translate successfully first so an IR is available.";
+        return;
+      }
+      const wd = (this.slWorkdir || "").trim();
+      if (!wd) {
+        this.httpError = "Set workdir to an existing or creatable directory on the server host.";
+        return;
+      }
+      let input_values;
+      try {
+        input_values = this.slParseInputValues();
+      } catch (e) {
+        this.httpError = e && e.message ? e.message : String(e);
+        return;
+      }
+      if (!input_values || !Object.keys(input_values).length) {
+        this.httpError = "input_values JSON must be a non-empty object for execute.";
+        return;
+      }
+      this.loading = true;
+      this.httpError = "";
+      this.slExecuteResult = null;
+      try {
+        const { r, data } = await this.slPostJson("/script-lane/execute", {
+          ir: this.slIr,
+          input_values,
+          workdir: wd,
+        });
+        if (!r.ok) {
+          this.httpError = data.message || r.statusText;
+          return;
+        }
+        this.slExecuteResult = data;
+      } catch (e) {
+        this.httpError = e && e.message ? e.message : String(e);
+      } finally {
+        this.loading = false;
+      }
+    },
+
+    slIrJsonText() {
+      if (!this.slIr) return "";
+      return JSON.stringify(this.slIr, null, 2);
+    },
+
+    async slCopyIr() {
+      const t = this.slIrJsonText();
+      if (!t) return;
+      try {
+        await navigator.clipboard.writeText(t);
+      } catch (e) {
+        this.httpError = "Clipboard unavailable: " + (e && e.message ? e.message : String(e));
+      }
+    },
+
+    slDownloadIr() {
+      const t = this.slIrJsonText();
+      if (!t) return;
+      const blob = new Blob([t], { type: "application/json" });
+      const a = document.createElement("a");
+      const url = URL.createObjectURL(blob);
+      a.href = url;
+      a.download = "script-lane-ir.json";
+      a.click();
+      URL.revokeObjectURL(url);
+    },
+
+    slTemporalFallbackBanner() {
+      const tr = this.slTranslateResult;
+      if (tr && tr.ok === false && tr.fallback_to_temporal) return true;
+      const v = this.slViabilityResult;
+      if (v && v.ok === false && v.fallback_to_temporal) return true;
+      const x = this.slExecuteResult;
+      if (x && x.ok === false && x.fallback_to_temporal) return true;
+      return false;
     },
   };
 }

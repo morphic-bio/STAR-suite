@@ -9,7 +9,7 @@
 </head>
 <body>
   <div class="app" x-data="launchpadApp()"
-       x-init="init(); $watch('params', () => ensureFocusVisible(), { deep: true })"
+       x-init="init(); $watch('params', () => ensureFocusVisible(), { deep: true }); $watch('slScript', () => slInvalidateScriptLaneDerivedState())"
        @keydown.window="handleGlobalKey($event)">
     <header class="header">
       <h1>STAR Launchpad</h1>
@@ -24,6 +24,22 @@
       >Quit server</button>
     </header>
 
+    <nav class="launchpad-tabs" aria-label="Launchpad mode">
+      <button
+        type="button"
+        class="tab"
+        :class="{ 'tab-active': activeTab === 'workflows' }"
+        @click="activeTab = 'workflows'"
+      >STAR workflows</button>
+      <button
+        type="button"
+        class="tab"
+        :class="{ 'tab-active': activeTab === 'script' }"
+        @click="activeTab = 'script'"
+      >Script Lane</button>
+    </nav>
+
+    <div x-show="activeTab === 'workflows'">
     <div class="toolbar recipe-toolbar">
       <label class="field-inline">
         <span>Recipe</span>
@@ -305,6 +321,116 @@
       </div>
     </section>
 
+    </div>
+
+    <section class="script-lane" x-show="activeTab === 'script'" x-cloak>
+      <p class="script-lane-intro">
+        Deterministic <strong>annotated Bash</strong> to Workflow IR, optional simple-local viability,
+        and optional local execution. Canonical logic lives in <code>bwb-nextflow-utils</code>;
+        this tab does not use <strong>Run in shell</strong> or the STAR recipe renderer.
+        Editing the script clears the cached IR until you <strong>Translate</strong> again.
+      </p>
+      <p class="err" x-show="activeTab === 'script' && httpError" x-text="httpError"></p>
+      <p class="warn banner" x-show="activeTab === 'script' && !scriptLaneUtilsReady">
+        Script Lane backend is unavailable (no <code>bwb-nextflow-utils</code> checkout found).
+        Set <code>BWB_NEXTFLOW_UTILS_ROOT</code> to the repo root and restart the server, or place
+        <code>bwb-nextflow-utils</code> beside STAR-suite.
+      </p>
+      <p class="warn banner" x-show="activeTab === 'script' && slTemporalFallbackBanner()">
+        <strong>Temporal fallback:</strong> this script or IR is not eligible for the simple-local lane.
+        Keep the IR below and use the existing bundle / Temporal path with the same document.
+      </p>
+
+      <label class="field block">
+        <span class="label-text">Annotated Bash script</span>
+        <textarea class="script-textarea" rows="14" x-model="slScript" :disabled="loading"></textarea>
+      </label>
+
+      <label class="field block">
+        <span class="label-text">input_values (JSON object, optional for viability structure-only)</span>
+        <textarea class="script-textarea" rows="5" x-model="slInputJson" :disabled="loading"
+          placeholder='{"genome": "/path/on/server"}'></textarea>
+      </label>
+      <p class="hint" x-show="!scriptLaneViabilityInputsSupported">
+        With <code>input_values</code> set, viability checks paths on the <strong>server host</strong> and
+        requires localhost Launchpad (same as recipe path checks).
+      </p>
+
+      <label class="field block">
+        <span class="label-text">workdir (server host path, required for Execute locally)</span>
+        <input type="text" class="text-wide" x-model="slWorkdir" :disabled="loading"
+          placeholder="/tmp/my_script_lane_run" />
+      </label>
+
+      <div class="actions script-lane-actions">
+        <button type="button" class="btn secondary" @click="slTranslate()" :disabled="loading || !scriptLaneUtilsReady">
+          Translate
+        </button>
+        <button type="button" class="btn secondary" @click="slViability()" :disabled="loading || !scriptLaneUtilsReady || !slIr">
+          Check local viability
+        </button>
+        <button type="button" class="btn primary" @click="slExecute()" :disabled="loading || !scriptLaneExecuteSupported || !slIr">
+          Execute locally
+        </button>
+        <button type="button" class="btn secondary" @click="slCopyIr()" :disabled="!slIr">Copy IR JSON</button>
+        <button type="button" class="btn secondary" @click="slDownloadIr()" :disabled="!slIr">Download IR JSON</button>
+      </div>
+
+      <div class="panel script-lane-out" x-show="slTranslateResult">
+        <h2>Translate</h2>
+        <p :class="slTranslateResult?.ok ? 'ok' : 'err'" x-text="slTranslateResult?.ok ? 'Accepted' : 'Refused'"></p>
+        <div x-show="slTranslateResult && !slTranslateResult.ok">
+            <p><code x-text="slTranslateResult.failure_category || ''"></code></p>
+            <ul class="messages">
+              <template x-for="reason in (slTranslateResult.reasons || [])" :key="reason">
+                <li class="err" x-text="reason"></li>
+              </template>
+            </ul>
+            <p x-show="slTranslateResult.fallback_to_temporal"><strong>fallback_to_temporal:</strong> true</p>
+        </div>
+        <details class="json-detail" x-show="slTranslateResult?.ok && slIr">
+          <summary>IR (canonical)</summary>
+          <pre class="json-block" x-text="slIrJsonText()"></pre>
+        </details>
+      </div>
+
+      <div class="panel script-lane-out" x-show="slViabilityResult">
+        <h2>Viability</h2>
+        <p :class="slViabilityResult?.ok ? 'ok' : 'err'" x-text="slViabilityResult?.ok ? 'OK for simple local' : 'Not viable locally'"></p>
+        <ul class="messages" x-show="slViabilityResult?.reasons?.length">
+          <template x-for="reason in (slViabilityResult.reasons || [])" :key="reason">
+            <li :class="slViabilityResult?.ok ? 'warn' : 'err'" x-text="reason"></li>
+          </template>
+        </ul>
+        <p x-show="slViabilityResult && slViabilityResult.fallback_to_temporal"><strong>fallback_to_temporal:</strong> true</p>
+      </div>
+
+      <div class="panel script-lane-out" x-show="slExecuteResult">
+        <h2>Execute</h2>
+        <p :class="slExecuteResult?.ok ? 'ok' : 'err'" x-text="slExecuteResult?.ok ? 'Finished' : 'Failed or refused'"></p>
+        <p class="help-meta" x-show="slExecuteResult?.workdir">workdir: <code x-text="slExecuteResult.workdir"></code></p>
+        <ul class="messages" x-show="slExecuteResult?.reasons?.length">
+          <template x-for="reason in (slExecuteResult.reasons || [])" :key="reason">
+            <li class="err" x-text="reason"></li>
+          </template>
+        </ul>
+        <p x-show="slExecuteResult && slExecuteResult.fallback_to_temporal && !slExecuteResult.ok">
+          <strong>fallback_to_temporal:</strong> true (IR above is still valid for Temporal)
+        </p>
+        <template x-for="st in (slExecuteResult?.steps || [])" :key="st.node_id + ':' + st.returncode">
+          <details class="stage">
+            <summary>Step <code x-text="st.node_id"></code> (exit <span x-text="st.returncode"></span>)</summary>
+            <p class="help-meta">argv</p>
+            <pre class="json-block" x-text="JSON.stringify(st.argv || [], null, 2)"></pre>
+            <p class="help-meta">stdout (tail)</p>
+            <pre class="json-block" x-text="st.stdout_tail || ''"></pre>
+            <p class="help-meta">stderr (tail)</p>
+            <pre class="json-block" x-text="st.stderr_tail || ''"></pre>
+          </details>
+        </template>
+      </div>
+    </section>
+
     <div class="modal" x-show="showAbout" x-cloak @click.self="showAbout = false">
       <div class="modal-inner">
         <h2>About STAR Launchpad</h2>
@@ -338,10 +464,15 @@
         <p>
           <strong>STAR Server</strong> hosts STAR MCP (for agents) and this UI on one port.
         </p>
+        <p>
+          <strong>Script Lane</strong> (second tab) translates annotated Bash to Workflow IR via
+          <code>bwb-nextflow-utils</code>, checks simple-local viability, and can execute locally on the
+          server host when Launchpad is opened over localhost. It never uses <strong>Run in shell</strong>.
+        </p>
         <button type="button" class="btn primary" @click="showAbout = false">Close</button>
       </div>
     </div>
   </div>
-  <script src="./app.js?v=lp9"></script>
+  <script src="./app.js?v=lp11"></script>
 </body>
 </html>

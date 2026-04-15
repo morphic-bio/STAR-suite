@@ -16,6 +16,8 @@ from starlette.requests import Request
 
 from .test_workflow_discovery import SAMPLE_WORKFLOW_SCHEMA
 
+BWB_NEXTFLOW_UTILS_ROOT = Path(__file__).resolve().parents[2].parent / "bwb-nextflow-utils"
+
 LAUNCH_TEST_SCHEMA = {
     "id": "launch_test_wf",
     "title": "Launch test",
@@ -391,10 +393,13 @@ class TestLaunchpadApi:
     def test_capabilities_loopback(self, launchpad_client):
         r = launchpad_client.get("/launchpad/api/capabilities")
         assert r.status_code == 200
-        assert r.json() == {
-            "launch_supported": True,
-            "server_path_check_supported": True,
-        }
+        data = r.json()
+        assert data["launch_supported"] is True
+        assert data["server_path_check_supported"] is True
+        assert "script_lane_translate_supported" in data
+        assert "script_lane_utils_ready" in data
+        assert "script_lane_viability_inputs_supported" in data
+        assert "script_lane_execute_supported" in data
 
     def test_capabilities_not_trusted_when_mocked(self, launchpad_client):
         with mock.patch.object(
@@ -402,10 +407,11 @@ class TestLaunchpadApi:
         ):
             r = launchpad_client.get("/launchpad/api/capabilities")
             assert r.status_code == 200
-            assert r.json() == {
-                "launch_supported": False,
-                "server_path_check_supported": False,
-            }
+            data = r.json()
+            assert data["launch_supported"] is False
+            assert data["server_path_check_supported"] is False
+            assert data["script_lane_viability_inputs_supported"] is False
+            assert data["script_lane_execute_supported"] is False
 
     def test_launch_starts_process(self, launchpad_client_launch_noop):
         r = launchpad_client_launch_noop.post(
@@ -461,5 +467,148 @@ class TestLaunchpadApi:
             launchpad_api, "launchpad_request_trusted_local", return_value=False
         ):
             r = launchpad_client.post("/launchpad/api/quit", json={"confirm": True})
+            assert r.status_code == 403
+            assert r.json().get("code") == "FORBIDDEN"
+
+
+def _minimal_script_lane_bash() -> str:
+    return "\n".join(
+        [
+            "#!/usr/bin/env bash",
+            "set -euo pipefail",
+            "#@workflow id=launchpad_sl_test",
+            "#@input genome file required",
+            "#@output bam file",
+            "#@step id=copy tool=cp",
+            "#@uses genome",
+            "#@produces bam",
+            'cp "${genome}" "${bam}"',
+        ]
+    )
+
+
+@pytest.fixture
+def script_lane_bwb(monkeypatch):
+    if not BWB_NEXTFLOW_UTILS_ROOT.is_dir():
+        pytest.skip("bwb-nextflow-utils not found (set BWB_NEXTFLOW_UTILS_ROOT or sibling checkout)")
+    monkeypatch.setenv("BWB_NEXTFLOW_UTILS_ROOT", str(BWB_NEXTFLOW_UTILS_ROOT))
+    import mcp_server.launchpad.script_lane_bridge as slb
+
+    slb._svc = None
+    yield
+    slb._svc = None
+
+
+@pytest.mark.usefixtures("script_lane_bwb")
+class TestLaunchpadScriptLaneApi:
+    def test_translate_success(self, launchpad_client):
+        r = launchpad_client.post(
+            "/launchpad/api/script-lane/translate",
+            json={"script_text": _minimal_script_lane_bash()},
+        )
+        assert r.status_code == 200
+        data = r.json()
+        assert data.get("ok") is True
+        assert data.get("ir", {}).get("metadata", {}).get("id") == "launchpad_sl_test"
+
+    def test_translate_refusal(self, launchpad_client):
+        r = launchpad_client.post(
+            "/launchpad/api/script-lane/translate",
+            json={"script_text": "not a bash workflow script"},
+        )
+        assert r.status_code == 200
+        data = r.json()
+        assert data.get("ok") is False
+        assert data.get("fallback_to_temporal") is True
+        assert data.get("reasons")
+
+    def test_viability_loopback_with_inputs(self, launchpad_client, tmp_path):
+        tr = launchpad_client.post(
+            "/launchpad/api/script-lane/translate",
+            json={"script_text": _minimal_script_lane_bash()},
+        )
+        assert tr.status_code == 200
+        ir = tr.json()["ir"]
+        src = tmp_path / "g.bin"
+        src.write_text("x")
+        r = launchpad_client.post(
+            "/launchpad/api/script-lane/viability",
+            json={"ir": ir, "input_values": {"genome": str(src)}},
+        )
+        assert r.status_code == 200
+        assert r.json().get("ok") is True
+
+    def test_viability_empty_input_values_dict_matches_omitted(self, launchpad_client):
+        """``input_values: {}`` must behave like omitted (no required-input probe)."""
+        tr = launchpad_client.post(
+            "/launchpad/api/script-lane/translate",
+            json={"script_text": _minimal_script_lane_bash()},
+        )
+        ir = tr.json()["ir"]
+        r_omit = launchpad_client.post(
+            "/launchpad/api/script-lane/viability",
+            json={"ir": ir},
+        )
+        r_empty = launchpad_client.post(
+            "/launchpad/api/script-lane/viability",
+            json={"ir": ir, "input_values": {}},
+        )
+        assert r_omit.status_code == 200
+        assert r_empty.status_code == 200
+        assert r_omit.json() == r_empty.json()
+        assert r_omit.json().get("ok") is True
+
+    def test_viability_remote_forbidden_with_nonempty_inputs(self, launchpad_client, tmp_path):
+        tr = launchpad_client.post(
+            "/launchpad/api/script-lane/translate",
+            json={"script_text": _minimal_script_lane_bash()},
+        )
+        ir = tr.json()["ir"]
+        with mock.patch.object(
+            launchpad_api, "launchpad_request_trusted_local", return_value=False
+        ):
+            r = launchpad_client.post(
+                "/launchpad/api/script-lane/viability",
+                json={"ir": ir, "input_values": {"genome": str(tmp_path / "nope")}},
+            )
+            assert r.status_code == 403
+            assert r.json().get("code") == "FORBIDDEN"
+
+    def test_execute_loopback(self, launchpad_client, tmp_path):
+        tr = launchpad_client.post(
+            "/launchpad/api/script-lane/translate",
+            json={"script_text": _minimal_script_lane_bash()},
+        )
+        ir = tr.json()["ir"]
+        src = tmp_path / "in.txt"
+        src.write_text("hello")
+        wd = tmp_path / "sl_run"
+        wd.mkdir()
+        r = launchpad_client.post(
+            "/launchpad/api/script-lane/execute",
+            json={"ir": ir, "input_values": {"genome": str(src)}, "workdir": str(wd)},
+        )
+        assert r.status_code == 200
+        data = r.json()
+        assert data.get("ok") is True
+        assert data.get("steps")
+
+    def test_execute_remote_forbidden(self, launchpad_client, tmp_path):
+        tr = launchpad_client.post(
+            "/launchpad/api/script-lane/translate",
+            json={"script_text": _minimal_script_lane_bash()},
+        )
+        ir = tr.json()["ir"]
+        with mock.patch.object(
+            launchpad_api, "launchpad_request_trusted_local", return_value=False
+        ):
+            r = launchpad_client.post(
+                "/launchpad/api/script-lane/execute",
+                json={
+                    "ir": ir,
+                    "input_values": {"genome": str(tmp_path / "x")},
+                    "workdir": str(tmp_path / "w"),
+                },
+            )
             assert r.status_code == 403
             assert r.json().get("code") == "FORBIDDEN"
