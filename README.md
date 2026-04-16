@@ -453,12 +453,78 @@ copy-pasteable shell command.
 # Install dependencies (once)
 pip install -r mcp_server/requirements.txt
 
-# Start the server
-python3 -m mcp_server.app --transport http --port 8765
+# Start Launchpad + MCP on one port
+bash scripts/launchpad_server.sh up
 
 # Open in your browser
 # http://localhost:8765/launchpad/
 ```
+
+### MCP endpoints
+
+When the server is running on port `8765`, the main endpoints are:
+
+- `http://127.0.0.1:8765/launchpad/` — Launchpad UI
+- `http://127.0.0.1:8765/` — MCP streamable-HTTP endpoint
+- `http://127.0.0.1:8765/sse` — MCP SSE endpoint
+
+### MCP client setup
+
+Use the endpoint that matches your client. If the server is running on another
+host or port, replace the URL accordingly.
+
+#### VS Code / GitHub Copilot
+
+VS Code and GitHub Copilot use MCP over HTTP. Add a workspace config at
+`.vscode/mcp.json`:
+
+```json
+{
+  "servers": {
+    "starSuite": {
+      "type": "http",
+      "url": "http://127.0.0.1:8765/"
+    }
+  }
+}
+```
+
+Then reload the VS Code window or use the MCP commands in the Command Palette
+to restart the server listing.
+
+#### Cursor
+
+Cursor uses the SSE MCP endpoint. Add this to your Cursor MCP config:
+
+```json
+{
+  "mcpServers": {
+    "star-suite": {
+      "url": "http://127.0.0.1:8765/sse"
+    }
+  }
+}
+```
+
+If Cursor is already open, reload the window after updating the config.
+
+#### Claude
+
+Claude can register the server over streamable HTTP:
+
+```bash
+claude mcp add --transport http star-suite http://127.0.0.1:8765/
+```
+
+Useful follow-up commands:
+
+```bash
+claude mcp list
+claude mcp get star-suite
+```
+
+If you are connecting from another machine, use the remote host or public URL
+instead of `127.0.0.1`.
 
 ### What it does
 
