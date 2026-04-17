@@ -1,0 +1,68 @@
+{
+  "name": "star-launchpad-bridge",
+  "displayName": "STAR Launchpad Bridge",
+  "description": "Bridge between STAR Launchpad and the VS Code / Cursor chat (Copilot / LM API).",
+  "version": "0.1.0",
+  "publisher": "star-suite",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "launchpadBridge.pair",
+        "title": "STAR Launchpad Bridge: Open pairing page"
+      },
+      {
+        "command": "launchpadBridge.resetToken",
+        "title": "STAR Launchpad Bridge: Reset auth token"
+      },
+      {
+        "command": "launchpadBridge.showStatus",
+        "title": "STAR Launchpad Bridge: Show status"
+      },
+      {
+        "command": "launchpadBridge.copyToken",
+        "title": "STAR Launchpad Bridge: Copy auth token"
+      }
+    ],
+    "configuration": {
+      "title": "STAR Launchpad Bridge",
+      "properties": {
+        "launchpadBridge.spaUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:8756/launchpad/",
+          "description": "Root URL of the STAR Launchpad SPA. Pairing query params are appended."
+        },
+        "launchpadBridge.portRange": {
+          "type": "array",
+          "default": [7777, 7790],
+          "items": {
+            "type": "integer"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "description": "Inclusive [low, high] TCP range the bridge WebSocket server may bind to on 127.0.0.1."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p .",
+    "watch": "tsc -p . --watch",
+    "package": "npm run compile && vsce package --no-dependencies"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "@types/ws": "^8.5.10",
+    "typescript": "^5.4.0"
+  }
+}

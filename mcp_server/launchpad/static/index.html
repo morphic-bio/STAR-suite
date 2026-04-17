@@ -17,12 +17,28 @@
       <button type="button" class="linklike" @click="showAbout = true">About</button>
       <button
         type="button"
+        class="linklike"
+        @click="showEditors = true"
+        :title="bridgeConnection?.status === 'connected'
+                ? 'Connected to ' + (bridgeConnection.app || 'editor')
+                : (bridgeEditors.length ? 'Paired editors' : 'No editors paired yet')">
+        <span x-show="bridgeConnection?.status === 'connected'" class="bridge-dot bridge-dot-ok">●</span>
+        <span x-show="!bridgeConnection || bridgeConnection?.status !== 'connected'" class="bridge-dot bridge-dot-off">○</span>
+        Editors<span x-show="bridgeEditors.length" x-text="' (' + bridgeEditors.length + ')'"></span>
+      </button>
+      <button
+        type="button"
         class="linklike danger"
         @click="confirmQuit()"
         :disabled="loading || !launchSupported"
         :title="launchSupported ? 'Stop the STAR Server (Launchpad + MCP) on this host' : 'Only available when Launchpad is opened via localhost on the server host'"
       >Quit server</button>
     </header>
+
+    <div class="bridge-banner" x-show="bridgeNotice" x-cloak>
+      <span x-text="bridgeNotice"></span>
+      <button type="button" class="linklike" @click="bridgeNotice = ''">dismiss</button>
+    </div>
 
     <nav class="launchpad-tabs" aria-label="Launchpad mode">
       <button
@@ -460,6 +476,51 @@
       </div>
     </section>
 
+    <div class="modal" x-show="showEditors" x-cloak @click.self="showEditors = false">
+      <div class="modal-inner editors-modal">
+        <h2>Paired editors</h2>
+        <p class="help-meta">
+          Phase 1: pairing + auth only. The editor runs a loopback WebSocket server;
+          this Launchpad connects with the token from the pair URL. LM integration
+          ships in phase 2.
+        </p>
+        <p x-show="!bridgeEditors.length" class="help-meta">
+          No editors paired yet. Install the <code>star-launchpad-bridge</code>
+          extension in VS Code / Cursor, then run
+          <code>STAR Launchpad Bridge: Open pairing page</code>.
+        </p>
+        <ul class="editor-list" x-show="bridgeEditors.length">
+          <template x-for="ed in bridgeEditors" :key="ed.id">
+            <li class="editor-row"
+                :class="{ 'editor-row-active': bridgeSelectedId === ed.id }">
+              <div class="editor-row-main">
+                <strong x-text="ed.label || 'Editor'"></strong>
+                <span class="help-meta" x-text="
+                  (ed.host ? ed.host : '127.0.0.1') + ':' + ed.port +
+                  (ed.workspace ? ' · ' + ed.workspace : '')"></span>
+              </div>
+              <div class="editor-row-actions">
+                <button type="button" class="btn btn-mini secondary"
+                        x-show="bridgeSelectedId !== ed.id"
+                        @click="bridgeConnect(ed.id)">Connect</button>
+                <button type="button" class="btn btn-mini secondary"
+                        x-show="bridgeSelectedId === ed.id"
+                        @click="bridgeDisconnect()">Disconnect</button>
+                <button type="button" class="btn btn-mini"
+                        @click="bridgeRemove(ed.id)">Remove</button>
+              </div>
+            </li>
+          </template>
+        </ul>
+        <p class="help-meta" x-show="bridgeConnection">
+          Status: <span x-text="bridgeStatusLabel()"></span>
+        </p>
+        <div class="btn-row">
+          <button type="button" class="btn primary" @click="showEditors = false">Close</button>
+        </div>
+      </div>
+    </div>
+
     <div class="modal file-picker-modal" x-show="showFilePicker" x-cloak @click.self="closeFilePicker()">
       <div class="modal-inner file-picker-inner">
         <header class="file-picker-header">
@@ -576,6 +637,7 @@
       </div>
     </div>
   </div>
-  <script src="./app.js?v=lp14"></script>
+  <script src="./bridge.js?v=br1"></script>
+  <script src="./app.js?v=lp15"></script>
 </body>
 </html>

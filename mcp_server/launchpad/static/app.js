@@ -104,6 +104,19 @@ function launchpadApp() {
     notice: "",
     showAbout: false,
 
+    // --- Editor bridge state (phase 1: pairing + auth only) --------------
+    bridgeEditors: [],
+    bridgeSelectedId: null,
+    /** { status, app?, workspace?, host?, protocol?, error? } | null */
+    bridgeConnection: null,
+    bridgeNotice: "",
+    /** { [requestId]: accumulated text } */
+    bridgeStreams: {},
+    /** Latest editor_event payload for lightweight UI feedback. */
+    bridgeLastEvent: null,
+    /** Toggles the "Paired editors" modal. */
+    showEditors: false,
+
     // --- Server file picker modal state ----------------------------------
     showFilePicker: false,
     /** Name of the param we'll write the chosen path into. */
@@ -736,7 +749,38 @@ function launchpadApp() {
       if (this.workflowId) await this.loadWorkflow();
     },
 
+    // --- Bridge helpers (phase 1) ----------------------------------------
+    bridgeConnect(id) {
+      if (this.$bridge) this.$bridge.connect(id);
+    },
+    bridgeDisconnect() {
+      if (this.$bridge) this.$bridge.disconnect();
+    },
+    bridgeRemove(id) {
+      if (this.$bridge) this.$bridge.remove ? this.$bridge.remove(id) : this.$bridge.removeEditor(id);
+    },
+    bridgeStatusLabel() {
+      const c = this.bridgeConnection;
+      if (!c) return "Not connected";
+      switch (c.status) {
+        case "connecting": return "Connecting…";
+        case "authenticating": return "Authenticating…";
+        case "connected":
+          return `Connected to ${c.app || "editor"}${c.workspace ? ` · ${c.workspace}` : ""}`;
+        case "reconnecting": return "Reconnecting…";
+        case "closed": return "Disconnected";
+        case "auth_failed": return `Auth failed: ${c.error || "unknown"}`;
+        case "error": return `Error: ${c.error || "unknown"}`;
+        default: return c.status;
+      }
+    },
+
     async init() {
+      if (typeof window.installLaunchpadBridge === "function") {
+        try { window.installLaunchpadBridge(this); } catch (e) {
+          console.warn("Bridge init failed:", e);
+        }
+      }
       const api = launchpadApiBase();
       const [wr, cap] = await Promise.all([
         fetch(`${api}/workflows`),
