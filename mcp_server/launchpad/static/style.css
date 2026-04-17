@@ -261,6 +261,19 @@ body {
   flex-direction: column;
   gap: 0.35rem;
   cursor: pointer;
+  align-items: stretch;
+}
+
+.field label > input[type="text"],
+.field label > input[type="number"],
+.field label > select {
+  align-self: flex-end;
+  width: 32rem;
+  max-width: 100%;
+}
+
+.field label > input[type="checkbox"] {
+  align-self: flex-end;
 }
 
 .label-text {
@@ -618,4 +631,214 @@ body {
 
 [x-cloak] {
   display: none !important;
+}
+
+/* Path input with inline icon buttons ------------------------------------- */
+/* Keep the whole group (input + icons) at the same 32rem width used by number
+   and text fields, so every field's right edge lines up on the right. */
+.path-input-group {
+  display: flex;
+  align-items: stretch;
+  align-self: flex-end;
+  width: 32rem;
+  max-width: 100%;
+}
+
+.path-text-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: left;
+  border-top-right-radius: 0 !important;
+  border-bottom-right-radius: 0 !important;
+}
+
+.path-input-group .icon-btn + .icon-btn {
+  border-left: 0;
+}
+
+.icon-btn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 0.5rem;
+  min-width: 1.9rem;
+  background: var(--panel);
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-left: 0;
+  border-radius: 0;
+  cursor: pointer;
+  font-family: inherit;
+  line-height: 1;
+}
+
+.icon-btn:last-child {
+  border-top-right-radius: 4px;
+  border-bottom-right-radius: 4px;
+}
+
+.icon-btn:hover:not(:disabled) {
+  background: rgba(88, 166, 255, 0.15);
+  color: var(--accent);
+}
+
+.icon-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.icon-btn.is-busy {
+  opacity: 0.7;
+  cursor: progress;
+}
+
+.btn.btn-mini {
+  padding: 0.25rem 0.6rem;
+  font-size: 0.8rem;
+  border-radius: 4px;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* File picker modal ------------------------------------------------------- */
+.file-picker-modal .modal-inner.file-picker-inner {
+  max-width: min(760px, 92vw);
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  max-height: 80vh;
+}
+
+.file-picker-header h2 {
+  margin: 0;
+  font-size: 1.2rem;
+}
+
+.file-picker-target {
+  margin: 0.15rem 0 0;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.file-picker-path {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.file-picker-cwd {
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  color: var(--muted);
+  word-break: break-all;
+}
+
+.file-picker-body {
+  flex: 1 1 auto;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  min-height: 12rem;
+}
+
+.file-picker-list {
+  list-style: none;
+  margin: 0;
+  padding: 0.25rem 0;
+}
+
+.file-picker-entry {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.35rem 0.7rem;
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  border-left: 3px solid transparent;
+}
+
+.file-picker-entry:hover {
+  background: rgba(88, 166, 255, 0.08);
+}
+
+.file-picker-entry.is-dir .file-picker-name {
+  color: var(--accent);
+}
+
+.file-picker-entry.is-other {
+  color: var(--muted);
+}
+
+.file-picker-entry.is-disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.file-picker-entry.is-selected {
+  background: rgba(63, 185, 80, 0.13);
+  border-left-color: var(--ok);
+}
+
+.file-picker-icon {
+  width: 1.2rem;
+  text-align: center;
+}
+
+.file-picker-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-picker-size {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.file-picker-empty,
+.file-picker-loading {
+  padding: 0.75rem 1rem;
+  color: var(--muted);
+  font-style: italic;
+}
+
+.file-picker-selection {
+  border-top: 1px solid var(--border);
+  padding-top: 0.5rem;
+  font-size: 0.85rem;
+}
+
+.file-picker-selection ul {
+  margin: 0.25rem 0 0;
+  padding-left: 1rem;
+  max-height: 5rem;
+  overflow: auto;
+}
+
+.file-picker-footer {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  padding-top: 0.4rem;
+  border-top: 1px solid var(--border);
+}
+
+.flex-spacer {
+  flex: 1 1 auto;
 }

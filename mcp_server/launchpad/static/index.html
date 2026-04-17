@@ -141,10 +141,39 @@
                          x-model="params[pname]" @focus="focusParam = pname">
                   <input type="number" step="any" x-show="paramByName(pname)?.type === 'float'"
                          x-model="params[pname]" @focus="focusParam = pname">
-                  <input type="text" x-show="['string','file','directory','string_list'].includes(paramByName(pname)?.type)"
-                         x-model="params[pname]" @focus="focusParam = pname"
-                         :placeholder="(paramByName(pname)?.description || '').slice(0, 96)">
+                  <span class="path-input-group"
+                        x-show="['string','file','directory','string_list'].includes(paramByName(pname)?.type)">
+                    <input type="text" class="path-text-input"
+                           x-model="params[pname]" @focus="focusParam = pname"
+                           :placeholder="(paramByName(pname)?.description || '').slice(0, 96)">
+                    <button type="button"
+                            class="icon-btn browse-icon"
+                            x-show="paramSupportsServerBrowse(paramByName(pname))"
+                            @click.prevent.stop="openFilePicker(pname)"
+                            :disabled="loading || !browseSupported"
+                            :title="trustedLocal ? 'Browse filesystem for ' + (paramByName(pname)?.type === 'directory' ? 'a directory' : (paramByName(pname)?.type === 'string_list' ? 'files or directories' : 'a file')) : 'Browse server filesystem for ' + (paramByName(pname)?.type === 'directory' ? 'a directory' : (paramByName(pname)?.type === 'string_list' ? 'files or directories' : 'a file'))"
+                            aria-label="Browse">
+                      <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M1.75 2h4.086a1.75 1.75 0 0 1 1.237.513l.914.914a.25.25 0 0 0 .177.073h6.086c.966 0 1.75.784 1.75 1.75v7A1.75 1.75 0 0 1 14.25 14H1.75A1.75 1.75 0 0 1 0 12.25v-8.5C0 2.784.784 2 1.75 2zM1.5 3.75v8.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7a.25.25 0 0 0-.25-.25H8.164a1.75 1.75 0 0 1-1.237-.513l-.914-.914a.25.25 0 0 0-.177-.073H1.75a.25.25 0 0 0-.25.25z"/></svg>
+                    </button>
+                    <button type="button"
+                            class="icon-btn upload-icon"
+                            x-show="paramSupportsLocalUpload(paramByName(pname))"
+                            :class="{ 'is-busy': uploadBusy && uploadTargetParam === pname }"
+                            :disabled="loading || uploadBusy || !uploadSupported"
+                            @click.prevent.stop="document.getElementById('lp-upload-' + pname)?.click()"
+                            title="Upload a file from your computer; the server path will be filled in for you."
+                            aria-label="Upload local file">
+                      <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M7.25 10.25a.75.75 0 0 0 1.5 0V4.56l2.22 2.22a.75.75 0 1 0 1.06-1.06L8.53 2.22a.75.75 0 0 0-1.06 0L3.97 5.72a.75.75 0 0 0 1.06 1.06l2.22-2.22v5.69zM2.75 12a.75.75 0 0 0 0 1.5h10.5a.75.75 0 0 0 0-1.5H2.75z"/></svg>
+                    </button>
+                  </span>
                 </label>
+                <template x-if="paramSupportsLocalUpload(paramByName(pname))">
+                  <input type="file"
+                         :id="'lp-upload-' + pname"
+                         class="sr-only"
+                         :disabled="loading || uploadBusy || !uploadSupported"
+                         @change="handleLocalUpload(pname, $event)">
+                </template>
               </div>
             </template>
           </fieldset>
@@ -431,6 +460,80 @@
       </div>
     </section>
 
+    <div class="modal file-picker-modal" x-show="showFilePicker" x-cloak @click.self="closeFilePicker()">
+      <div class="modal-inner file-picker-inner">
+        <header class="file-picker-header">
+          <h2>
+            <span x-show="trustedLocal">Browse filesystem</span>
+            <span x-show="!trustedLocal">Browse server filesystem</span>
+          </h2>
+          <p class="file-picker-target">
+            Picking <code x-text="fpMode"></code> for
+            <code x-text="fpTargetParam || ''"></code>
+            <span x-show="fpMode === 'string_list'" class="help-meta">(multi-select)</span>
+          </p>
+        </header>
+
+        <div class="file-picker-path">
+          <button type="button" class="btn btn-mini secondary"
+                  @click="fpNavigate('')" :disabled="fpLoading">Roots</button>
+          <button type="button" class="btn btn-mini secondary"
+                  x-show="fpParent" @click="fpNavigate(fpParent)"
+                  :disabled="fpLoading" title="Up one directory">Up</button>
+          <code class="file-picker-cwd" x-text="fpPath || 'Trusted roots'"></code>
+        </div>
+
+        <p class="err" x-show="fpError" x-text="fpError"></p>
+        <p class="warn" x-show="fpTruncated">
+          Directory truncated — only the first entries are shown.
+        </p>
+
+        <div class="file-picker-body">
+          <ul class="file-picker-list" x-show="!fpLoading">
+            <template x-for="entry in fpEntries" :key="entry.name">
+              <li class="file-picker-entry"
+                  :class="{
+                    'is-dir': entry.kind === 'dir',
+                    'is-file': entry.kind === 'file',
+                    'is-other': entry.kind === 'other',
+                    'is-selected': fpSelectedPath(entry),
+                    'is-disabled': !_entrySelectable(entry) && entry.kind !== 'dir'
+                  }"
+                  @click="_entrySelectable(entry) ? fpToggleSelect(entry) : (entry.kind === 'dir' ? fpActivate(entry) : null)"
+                  @dblclick="fpActivate(entry)">
+                <span class="file-picker-icon" x-text="entry.kind === 'dir' ? '📁' : (entry.kind === 'file' ? '📄' : '•')"></span>
+                <span class="file-picker-name" x-text="entry.name"></span>
+                <span class="file-picker-size" x-text="formatFileSize(entry.size)"></span>
+              </li>
+            </template>
+            <li class="file-picker-empty" x-show="!fpEntries.length">(empty)</li>
+          </ul>
+          <p class="file-picker-loading" x-show="fpLoading">Loading…</p>
+        </div>
+
+        <div class="file-picker-selection" x-show="fpSelected.length">
+          <strong>Selected:</strong>
+          <ul>
+            <template x-for="s in fpSelected" :key="s.path">
+              <li><code x-text="s.path"></code></li>
+            </template>
+          </ul>
+        </div>
+
+        <footer class="file-picker-footer">
+          <button type="button" class="btn secondary"
+                  x-show="fpMode === 'directory' && fpPath"
+                  @click="fpPickCurrentDirectory()"
+                  :disabled="fpLoading">Use this directory</button>
+          <span class="flex-spacer"></span>
+          <button type="button" class="btn secondary" @click="closeFilePicker()">Cancel</button>
+          <button type="button" class="btn primary"
+                  @click="fpApply()"
+                  :disabled="fpLoading || !fpSelected.length">Use selection</button>
+        </footer>
+      </div>
+    </div>
+
     <div class="modal" x-show="showAbout" x-cloak @click.self="showAbout = false">
       <div class="modal-inner">
         <h2>About STAR Launchpad</h2>
@@ -473,6 +576,6 @@
       </div>
     </div>
   </div>
-  <script src="./app.js?v=lp11"></script>
+  <script src="./app.js?v=lp14"></script>
 </body>
 </html>

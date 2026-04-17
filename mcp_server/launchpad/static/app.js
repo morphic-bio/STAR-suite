@@ -91,11 +91,37 @@ function launchpadApp() {
     scriptLaneUtilsReady: false,
     scriptLaneViabilityInputsSupported: false,
     scriptLaneExecuteSupported: false,
+    /** True when this browser is on the same host as the server (loopback). */
+    trustedLocal: false,
+    /** Whether the server exposes /browse (true when trusted_roots is non-empty). */
+    browseSupported: false,
+    uploadSupported: false,
+    /** Resolved trusted_roots, shown at the top of the server file picker. */
+    browseRoots: [],
     checkPaths: false,
     lastValidationCheckPaths: null,
     httpError: "",
     notice: "",
     showAbout: false,
+
+    // --- Server file picker modal state ----------------------------------
+    showFilePicker: false,
+    /** Name of the param we'll write the chosen path into. */
+    fpTargetParam: null,
+    /** 'file' | 'directory' | 'string_list' — decides what is selectable. */
+    fpMode: "file",
+    /** Current directory being viewed; empty string = virtual roots list. */
+    fpPath: "",
+    fpParent: null,
+    fpEntries: [],
+    /** {name, kind, size, mtime} of entries the user has clicked. */
+    fpSelected: [],
+    fpTruncated: false,
+    fpLoading: false,
+    fpError: "",
+    /** File input used by the local-file upload flow. */
+    uploadBusy: false,
+    uploadTargetParam: null,
 
     slScript: scriptLaneDefaultScript(),
     slInputJson: "{}",
@@ -453,6 +479,239 @@ function launchpadApp() {
       URL.revokeObjectURL(url);
     },
 
+    // --- File picker / upload ------------------------------------------
+    /** True if a parameter should get a server-browse button. */
+    paramSupportsServerBrowse(p) {
+      if (!p) return false;
+      return ["file", "directory", "string_list"].includes(p.type);
+    },
+
+    /** True if a parameter should get a local-file upload button. */
+    paramSupportsLocalUpload(p) {
+      if (!p || this.trustedLocal) return false;
+      if (!this.uploadSupported) return false;
+      // Uploads produce a single server path; only meaningful for file / list-of-files.
+      return p.type === "file" || p.type === "string_list";
+    },
+
+    /** True if both explorers would appear for this param (for layout). */
+    paramHasBothExplorers(p) {
+      return this.paramSupportsServerBrowse(p) && this.paramSupportsLocalUpload(p);
+    },
+
+    formatFileSize(bytes) {
+      if (bytes == null) return "";
+      const n = Number(bytes);
+      if (!Number.isFinite(n) || n < 0) return "";
+      if (n < 1024) return `${n} B`;
+      const units = ["KB", "MB", "GB", "TB"];
+      let v = n / 1024;
+      let i = 0;
+      while (v >= 1024 && i < units.length - 1) {
+        v /= 1024;
+        i++;
+      }
+      const rounded = v >= 10 ? Math.round(v) : Math.round(v * 10) / 10;
+      return `${rounded} ${units[i]}`;
+    },
+
+    /** Open the server file picker modal for this param. */
+    openFilePicker(pname) {
+      const p = this.paramByName(pname);
+      if (!p) return;
+      if (!this.browseSupported) {
+        this.httpError = "Server filesystem browsing is not available on this server.";
+        return;
+      }
+      this.fpTargetParam = pname;
+      this.fpMode = p.type;
+      this.fpSelected = [];
+      this.fpError = "";
+      this.fpTruncated = false;
+      this.fpEntries = [];
+      this.fpPath = "";
+      this.fpParent = null;
+      this.showFilePicker = true;
+      // Seed with a sensible starting directory: current value if it exists, else roots.
+      const current = String(this.params[pname] || "").trim();
+      // For string_list pick the first entry as starting dir.
+      const seed = current.split(",")[0].trim();
+      const startDir = seed ? this._dirnameGuess(seed) : "";
+      void this.fpNavigate(startDir);
+    },
+
+    closeFilePicker() {
+      this.showFilePicker = false;
+      this.fpTargetParam = null;
+      this.fpSelected = [];
+      this.fpEntries = [];
+      this.fpError = "";
+    },
+
+    /** Heuristic: strip the last path component for seeding browse-at-current-value. */
+    _dirnameGuess(p) {
+      if (!p) return "";
+      const s = String(p).replace(/\/+$/, "");
+      const i = s.lastIndexOf("/");
+      if (i < 0) return "";
+      return i === 0 ? "/" : s.slice(0, i);
+    },
+
+    async fpNavigate(path) {
+      this.fpLoading = true;
+      this.fpError = "";
+      try {
+        const api = launchpadApiBase();
+        const url = path
+          ? `${api}/browse?path=${encodeURIComponent(path)}`
+          : `${api}/browse`;
+        const r = await fetch(url);
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          // Fall back to root list on forbidden/missing so picker stays usable.
+          this.fpError = data.message || r.statusText;
+          if (path) await this.fpNavigate("");
+          return;
+        }
+        this.fpPath = data.is_root_list ? "" : (data.path || "");
+        this.fpParent = data.parent || null;
+        this.fpEntries = Array.isArray(data.entries) ? data.entries : [];
+        this.fpTruncated = !!data.truncated;
+      } catch (e) {
+        this.fpError = e && e.message ? e.message : String(e);
+      } finally {
+        this.fpLoading = false;
+      }
+    },
+
+    /** Double-click / Enter on an entry: navigate into dirs, toggle selection on files. */
+    fpActivate(entry) {
+      if (!entry) return;
+      if (entry.kind === "dir") {
+        const target = this.fpPath === "" ? entry.name : this._joinPath(this.fpPath, entry.name);
+        void this.fpNavigate(target);
+        return;
+      }
+      this.fpToggleSelect(entry);
+    },
+
+    /** Single click: select; semantics depend on param type. */
+    fpToggleSelect(entry) {
+      if (!entry) return;
+      const selectable = this._entrySelectable(entry);
+      if (!selectable) return;
+      const fullPath = this._entryFullPath(entry);
+      const multi = this.fpMode === "string_list";
+      const idx = this.fpSelected.findIndex((s) => s.path === fullPath);
+      if (idx >= 0) {
+        this.fpSelected.splice(idx, 1);
+        return;
+      }
+      const record = { path: fullPath, kind: entry.kind, name: entry.name };
+      if (multi) {
+        this.fpSelected.push(record);
+      } else {
+        this.fpSelected = [record];
+      }
+    },
+
+    _entrySelectable(entry) {
+      if (!entry) return false;
+      if (entry.kind === "dir") {
+        return this.fpMode === "directory" || this.fpMode === "string_list";
+      }
+      if (entry.kind === "file") {
+        return this.fpMode === "file" || this.fpMode === "string_list";
+      }
+      return false;
+    },
+
+    _entryFullPath(entry) {
+      if (!entry) return "";
+      if (this.fpPath === "") return entry.name;
+      return this._joinPath(this.fpPath, entry.name);
+    },
+
+    _joinPath(a, b) {
+      if (!a) return b;
+      if (a.endsWith("/")) return a + b;
+      return a + "/" + b;
+    },
+
+    /** "Select this directory" shortcut for directory params. */
+    fpPickCurrentDirectory() {
+      if (!this.fpPath || this.fpMode !== "directory") return;
+      this.fpSelected = [{ path: this.fpPath, kind: "dir", name: this.fpPath }];
+      this.fpApply();
+    },
+
+    /** Write the selection into the bound parameter and close. */
+    fpApply() {
+      if (!this.fpTargetParam) return this.closeFilePicker();
+      if (!this.fpSelected.length) {
+        this.fpError = "Pick at least one entry first.";
+        return;
+      }
+      const paths = this.fpSelected.map((s) => s.path);
+      if (this.fpMode === "string_list") {
+        this.params[this.fpTargetParam] = paths.join(",");
+      } else {
+        this.params[this.fpTargetParam] = paths[0];
+      }
+      this.validateResult = null;
+      this.renderResult = null;
+      this.launchResult = null;
+      this.closeFilePicker();
+    },
+
+    fpSelectedPath(entry) {
+      return this.fpSelected.some((s) => s.path === this._entryFullPath(entry));
+    },
+
+    /** Upload a file chosen on the user's machine; store returned server path. */
+    async handleLocalUpload(pname, event) {
+      const el = event.target;
+      const file = el.files && el.files[0];
+      el.value = "";
+      if (!file || !pname) return;
+      const p = this.paramByName(pname);
+      if (!p) return;
+      this.uploadTargetParam = pname;
+      this.uploadBusy = true;
+      this.httpError = "";
+      try {
+        const fd = new FormData();
+        fd.append("file", file, file.name);
+        const api = launchpadApiBase();
+        const r = await fetch(`${api}/upload`, { method: "POST", body: fd });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok || !data.ok) {
+          this.httpError = data.message || `Upload failed (${r.status}).`;
+          return;
+        }
+        const serverPath = String(data.path || "");
+        if (!serverPath) {
+          this.httpError = "Upload succeeded but the server did not return a path.";
+          return;
+        }
+        if (p.type === "string_list") {
+          const existing = String(this.params[pname] || "").trim();
+          this.params[pname] = existing ? `${existing},${serverPath}` : serverPath;
+        } else {
+          this.params[pname] = serverPath;
+        }
+        this.validateResult = null;
+        this.renderResult = null;
+        this.launchResult = null;
+        this.notice = `Uploaded ${data.filename} → ${serverPath}`;
+      } catch (e) {
+        this.httpError = e && e.message ? e.message : String(e);
+      } finally {
+        this.uploadBusy = false;
+        this.uploadTargetParam = null;
+      }
+    },
+
     applyWorkflowFilter() {
       if (this.includeTestWorkflows) {
         this.workflows = this.allWorkflows.slice();
@@ -490,6 +749,10 @@ function launchpadApp() {
         this.scriptLaneUtilsReady = !!c.script_lane_translate_supported;
         this.scriptLaneViabilityInputsSupported = !!c.script_lane_viability_inputs_supported;
         this.scriptLaneExecuteSupported = !!c.script_lane_execute_supported;
+        this.trustedLocal = !!c.trusted_local;
+        this.browseSupported = !!c.browse_supported;
+        this.uploadSupported = !!c.upload_supported;
+        this.browseRoots = Array.isArray(c.browse_roots) ? c.browse_roots : [];
         if (!this.serverPathCheckSupported) this.checkPaths = false;
       } else {
         this.launchSupported = false;
@@ -497,6 +760,10 @@ function launchpadApp() {
         this.scriptLaneUtilsReady = false;
         this.scriptLaneViabilityInputsSupported = false;
         this.scriptLaneExecuteSupported = false;
+        this.trustedLocal = false;
+        this.browseSupported = false;
+        this.uploadSupported = false;
+        this.browseRoots = [];
         this.checkPaths = false;
       }
       if (!wr.ok) {

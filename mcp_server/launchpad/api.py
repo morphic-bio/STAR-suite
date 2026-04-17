@@ -17,11 +17,13 @@ via ``script_lane_bridge``; they do not reuse ``/launch`` or workflow render.
 """
 
 import os
+import re
 import signal
 import shlex
 import subprocess
 import threading
 import time
+import uuid
 from pathlib import Path
 
 from starlette.requests import Request
@@ -29,6 +31,7 @@ from starlette.responses import JSONResponse
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
+from ..config import get_config
 from ..tools.workflows import (
     describe_workflow,
     get_workflow_parameter_schema,
@@ -80,11 +83,107 @@ def _json_error(code: str, message: str, status_code: int = 400) -> JSONResponse
     )
 
 
+# --- Filesystem browse / upload helpers --------------------------------------
+# Browsing is restricted to the config's ``trusted_roots``. Paths are resolved
+# (symlinks followed) and re-checked so clients can't escape via ``..`` or
+# symlinked directories.
+
+_UPLOAD_SUBDIR = "launchpad_uploads"
+_MAX_BROWSE_ENTRIES = 5000
+_MAX_UPLOAD_BYTES = 4 * 1024 * 1024 * 1024  # 4 GiB hard ceiling per file
+# Filesystems are byte-oriented, but we keep upload filenames ASCII-safe to
+# avoid path surprises when the same string later appears in shell commands.
+_FILENAME_SAFE = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+def _trusted_roots_resolved() -> list[Path]:
+    """Resolved trusted-root Paths (config must already be loaded)."""
+    cfg = get_config()
+    roots: list[Path] = []
+    for raw in cfg.trusted_roots or []:
+        try:
+            p = Path(str(raw)).expanduser().resolve()
+        except OSError:
+            continue
+        if p.is_dir():
+            roots.append(p)
+    return roots
+
+
+def _resolve_under_trusted(path_str: str) -> Path | None:
+    """Resolve ``path_str`` and return it only if it lives under a trusted root."""
+    try:
+        resolved = Path(path_str).expanduser().resolve()
+    except OSError:
+        return None
+    for root in _trusted_roots_resolved():
+        if resolved == root:
+            return resolved
+        try:
+            resolved.relative_to(root)
+        except ValueError:
+            continue
+        return resolved
+    return None
+
+
+def _entry_payload(name: str, child: Path) -> dict:
+    """Stat one directory entry; tolerate permission / race errors."""
+    try:
+        st = child.lstat()
+    except OSError:
+        return {"name": name, "kind": "other", "size": None, "mtime": None}
+    kind: str
+    size: int | None
+    if child.is_dir():
+        kind = "dir"
+        size = None
+    elif child.is_file():
+        kind = "file"
+        size = int(st.st_size)
+    elif child.is_symlink():
+        # Broken or non-resolving symlink.
+        kind = "other"
+        size = None
+    else:
+        kind = "other"
+        size = None
+    return {
+        "name": name,
+        "kind": kind,
+        "size": size,
+        "mtime": float(st.st_mtime),
+    }
+
+
+def _sanitize_upload_filename(raw: str) -> str:
+    """Strip directory separators and risky characters from an uploaded filename."""
+    base = os.path.basename(raw or "").strip()
+    if not base or base in (".", ".."):
+        return "upload.bin"
+    cleaned = _FILENAME_SAFE.sub("_", base)
+    # Avoid leading dots producing hidden files.
+    cleaned = cleaned.lstrip(".") or "upload.bin"
+    return cleaned[:200]
+
+
+def _upload_dir() -> Path:
+    """Create (if needed) and return the base directory for uploaded files."""
+    cfg = get_config()
+    base = Path(str(cfg.paths.temp_root)).expanduser().resolve() / _UPLOAD_SUBDIR
+    base.mkdir(parents=True, exist_ok=True)
+    return base
+
+
 async def lp_capabilities(request: Request) -> JSONResponse:
     """Whether this browser session may use server-side Run in shell (loopback only)."""
     trusted_local = launchpad_request_trusted_local(request)
     bs = backend_status()
     ready = bool(bs.get("ready"))
+    try:
+        roots = [str(p) for p in _trusted_roots_resolved()]
+    except Exception:
+        roots = []
     return JSONResponse(
         {
             "launch_supported": trusted_local,
@@ -93,6 +192,183 @@ async def lp_capabilities(request: Request) -> JSONResponse:
             "script_lane_translate_supported": ready,
             "script_lane_viability_inputs_supported": bool(ready and trusted_local),
             "script_lane_execute_supported": bool(ready and trusted_local),
+            "trusted_local": trusted_local,
+            "browse_supported": bool(roots),
+            "upload_supported": True,
+            "browse_roots": roots,
+        }
+    )
+
+
+async def lp_browse(request: Request) -> JSONResponse:
+    """List directory entries under a ``trusted_roots`` path.
+
+    With no ``path`` query param, returns the configured roots as virtual entries
+    so clients can render a "pick a root" first step.
+    """
+    raw_path = (request.query_params.get("path") or "").strip()
+    roots = _trusted_roots_resolved()
+    if not roots:
+        return _json_error(
+            "NO_TRUSTED_ROOTS",
+            "Server has no trusted_roots configured; filesystem browsing is disabled.",
+            503,
+        )
+
+    if not raw_path:
+        return JSONResponse(
+            {
+                "path": None,
+                "parent": None,
+                "is_root_list": True,
+                "entries": [
+                    {"name": str(p), "kind": "dir", "size": None, "mtime": None}
+                    for p in roots
+                ],
+                "roots": [str(p) for p in roots],
+            }
+        )
+
+    target = _resolve_under_trusted(raw_path)
+    if target is None:
+        return _json_error(
+            "FORBIDDEN",
+            "Path is outside the server's trusted_roots.",
+            403,
+        )
+    if not target.exists():
+        return _json_error("NOT_FOUND", f"Path does not exist: {target}", 404)
+    if not target.is_dir():
+        return _json_error(
+            "BAD_REQUEST",
+            "Path is a file; browse only lists directories.",
+            400,
+        )
+
+    try:
+        names = sorted(os.listdir(target), key=lambda n: n.lower())
+    except PermissionError:
+        return _json_error("FORBIDDEN", f"Permission denied reading: {target}", 403)
+    except OSError as e:
+        return _json_error("INTERNAL_ERROR", f"Could not list directory: {e}", 500)
+
+    entries: list[dict] = []
+    truncated = False
+    for name in names:
+        if len(entries) >= _MAX_BROWSE_ENTRIES:
+            truncated = True
+            break
+        entries.append(_entry_payload(name, target / name))
+    # Directories before files, each group alphabetical (case-insensitive).
+    entries.sort(key=lambda e: (0 if e["kind"] == "dir" else 1, e["name"].lower()))
+
+    parent: str | None
+    try:
+        # Only surface a parent link when it is itself within trusted_roots.
+        p_candidate = target.parent
+        parent = str(p_candidate) if _resolve_under_trusted(str(p_candidate)) else None
+    except Exception:
+        parent = None
+
+    return JSONResponse(
+        {
+            "path": str(target),
+            "parent": parent,
+            "is_root_list": False,
+            "entries": entries,
+            "truncated": truncated,
+            "roots": [str(p) for p in roots],
+        }
+    )
+
+
+async def lp_upload(request: Request) -> JSONResponse:
+    """Accept a multipart file upload and stage it under ``temp_root``.
+
+    Returns the absolute server path that workflow params can reference.
+    """
+    content_type = (request.headers.get("content-type") or "").lower()
+    if not content_type.startswith("multipart/form-data"):
+        return _json_error(
+            "BAD_REQUEST",
+            "Upload requires multipart/form-data with a 'file' field.",
+            400,
+        )
+    declared = request.headers.get("content-length")
+    if declared and declared.isdigit() and int(declared) > _MAX_UPLOAD_BYTES:
+        return _json_error(
+            "PAYLOAD_TOO_LARGE",
+            f"Upload exceeds server limit of {_MAX_UPLOAD_BYTES} bytes.",
+            413,
+        )
+    try:
+        form = await request.form()
+    except Exception as e:
+        return _json_error("BAD_REQUEST", f"Could not parse multipart body: {e}", 400)
+
+    upload = form.get("file")
+    try:
+        from starlette.datastructures import UploadFile
+    except ImportError:  # pragma: no cover
+        UploadFile = None  # type: ignore[assignment]
+
+    if UploadFile is None or not isinstance(upload, UploadFile):
+        return _json_error(
+            "BAD_REQUEST",
+            "Form must include a 'file' field with the uploaded content.",
+            400,
+        )
+
+    filename = _sanitize_upload_filename(upload.filename or "upload.bin")
+    try:
+        base = _upload_dir()
+    except Exception as e:
+        return _json_error("INTERNAL_ERROR", f"Upload staging unavailable: {e}", 500)
+
+    staging_dir = base / uuid.uuid4().hex
+    staging_dir.mkdir(parents=True, exist_ok=False)
+    dest = staging_dir / filename
+
+    total = 0
+    try:
+        with open(dest, "wb") as sink:
+            while True:
+                chunk = await upload.read(1024 * 1024)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > _MAX_UPLOAD_BYTES:
+                    sink.close()
+                    try:
+                        dest.unlink(missing_ok=True)
+                        staging_dir.rmdir()
+                    except OSError:
+                        pass
+                    return _json_error(
+                        "PAYLOAD_TOO_LARGE",
+                        f"Upload exceeds server limit of {_MAX_UPLOAD_BYTES} bytes.",
+                        413,
+                    )
+                sink.write(chunk)
+    except Exception as e:
+        try:
+            dest.unlink(missing_ok=True)
+            staging_dir.rmdir()
+        except OSError:
+            pass
+        return _json_error("INTERNAL_ERROR", f"Could not write upload: {e}", 500)
+    finally:
+        try:
+            await upload.close()
+        except Exception:
+            pass
+
+    return JSONResponse(
+        {
+            "ok": True,
+            "path": str(dest.resolve()),
+            "filename": filename,
+            "size": total,
         }
     )
 
@@ -452,6 +728,16 @@ def get_launchpad_routes() -> list:
             "/launchpad/api/capabilities",
             endpoint=lp_capabilities,
             methods=["GET"],
+        ),
+        Route(
+            "/launchpad/api/browse",
+            endpoint=lp_browse,
+            methods=["GET"],
+        ),
+        Route(
+            "/launchpad/api/upload",
+            endpoint=lp_upload,
+            methods=["POST"],
         ),
         Route(
             "/launchpad/api/quit",

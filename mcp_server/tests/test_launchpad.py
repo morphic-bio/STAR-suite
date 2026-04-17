@@ -499,6 +499,139 @@ def script_lane_bwb(monkeypatch):
     slb._svc = None
 
 
+class TestLaunchpadBrowseApi:
+    def test_capabilities_exposes_browse_roots(self, launchpad_client):
+        r = launchpad_client.get("/launchpad/api/capabilities")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["trusted_local"] is True
+        assert data["browse_supported"] is True
+        assert data["upload_supported"] is True
+        assert isinstance(data["browse_roots"], list)
+        assert data["browse_roots"], "expected at least one trusted root"
+
+    def test_browse_without_path_lists_roots(self, launchpad_client):
+        r = launchpad_client.get("/launchpad/api/browse")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["is_root_list"] is True
+        assert data["parent"] is None
+        names = {e["name"] for e in data["entries"]}
+        assert names, "expected trusted roots to be listed"
+        for e in data["entries"]:
+            assert e["kind"] == "dir"
+
+    def test_browse_directory_lists_entries(self, launchpad_client, tmp_path):
+        # tmp_path is under pytest's /tmp, which is in trusted_roots.
+        sub = tmp_path / "browse_fixture"
+        sub.mkdir()
+        (sub / "a.txt").write_text("hello")
+        (sub / "nested").mkdir()
+        r = launchpad_client.get(
+            "/launchpad/api/browse", params={"path": str(sub)}
+        )
+        assert r.status_code == 200, r.text
+        data = r.json()
+        assert data["is_root_list"] is False
+        assert data["path"] == str(sub)
+        kinds = {e["name"]: e["kind"] for e in data["entries"]}
+        assert kinds["a.txt"] == "file"
+        assert kinds["nested"] == "dir"
+        # Directories must sort before files.
+        order = [e["name"] for e in data["entries"]]
+        assert order.index("nested") < order.index("a.txt")
+
+    def test_browse_rejects_path_outside_trusted_roots(self, launchpad_client):
+        r = launchpad_client.get(
+            "/launchpad/api/browse", params={"path": "/etc"}
+        )
+        assert r.status_code == 403
+        assert r.json()["code"] == "FORBIDDEN"
+
+    def test_browse_rejects_traversal(self, launchpad_client):
+        # "/tmp/../etc" resolves to "/etc" (outside trusted_roots for this fixture).
+        r = launchpad_client.get(
+            "/launchpad/api/browse", params={"path": "/tmp/../etc"}
+        )
+        assert r.status_code == 403
+
+    def test_browse_rejects_symlink_escape(self, launchpad_client, tmp_path):
+        # A symlink that points outside trusted_roots must be rejected even though
+        # its nominal path lives under a trusted root.
+        target = Path("/etc")
+        if not target.is_dir():
+            pytest.skip("no /etc to symlink")
+        link = tmp_path / "escape"
+        link.symlink_to(target)
+        r = launchpad_client.get(
+            "/launchpad/api/browse", params={"path": str(link)}
+        )
+        assert r.status_code == 403
+
+    def test_browse_file_path_rejected(self, launchpad_client, tmp_path):
+        f = tmp_path / "solo.txt"
+        f.write_text("x")
+        r = launchpad_client.get(
+            "/launchpad/api/browse", params={"path": str(f)}
+        )
+        assert r.status_code == 400
+        assert r.json()["code"] == "BAD_REQUEST"
+
+    def test_browse_missing_path(self, launchpad_client, tmp_path):
+        r = launchpad_client.get(
+            "/launchpad/api/browse",
+            params={"path": str(tmp_path / "does_not_exist")},
+        )
+        assert r.status_code == 404
+
+    def test_upload_writes_file_to_temp_root(self, launchpad_client):
+        content = b"uploaded bytes\n"
+        r = launchpad_client.post(
+            "/launchpad/api/upload",
+            files={"file": ("hello.bin", content, "application/octet-stream")},
+        )
+        assert r.status_code == 200, r.text
+        data = r.json()
+        assert data["ok"] is True
+        assert data["filename"] == "hello.bin"
+        assert data["size"] == len(content)
+        written = Path(data["path"])
+        assert written.exists()
+        assert written.read_bytes() == content
+        # Must land under configured temp_root/launchpad_uploads/<uuid>/
+        cfg = config_module.get_config()
+        temp_root = Path(str(cfg.paths.temp_root)).resolve()
+        assert str(written).startswith(str(temp_root))
+        assert "launchpad_uploads" in written.parts
+
+    def test_upload_sanitizes_filename(self, launchpad_client):
+        r = launchpad_client.post(
+            "/launchpad/api/upload",
+            files={"file": ("../weird name!.tar.gz", b"x", "application/octet-stream")},
+        )
+        assert r.status_code == 200, r.text
+        data = r.json()
+        # No path separators; hostile chars replaced with underscores.
+        assert "/" not in data["filename"]
+        assert "\\" not in data["filename"]
+        assert data["filename"].startswith("weird") or data["filename"].startswith("_weird")
+
+    def test_upload_rejects_non_multipart(self, launchpad_client):
+        r = launchpad_client.post(
+            "/launchpad/api/upload",
+            json={"file": "not a real upload"},
+        )
+        assert r.status_code == 400
+        assert r.json()["code"] == "BAD_REQUEST"
+
+    def test_upload_requires_file_field(self, launchpad_client):
+        r = launchpad_client.post(
+            "/launchpad/api/upload",
+            files={"other": ("nope.txt", b"x", "text/plain")},
+        )
+        assert r.status_code == 400
+
+
 @pytest.mark.usefixtures("script_lane_bwb")
 class TestLaunchpadScriptLaneApi:
     def test_translate_success(self, launchpad_client):
