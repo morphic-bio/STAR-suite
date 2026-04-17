@@ -702,6 +702,93 @@ body {
   flex-shrink: 0;
 }
 
+.bridge-header {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.bridge-picker select {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 4px;
+  padding: 0.25rem 0.45rem;
+  font-family: var(--mono);
+  font-size: 0.82rem;
+}
+
+.bridge-panel {
+  margin-top: 1.25rem;
+  padding-top: 1rem;
+  border-top: 1px dashed var(--border);
+}
+
+.bridge-panel h3 {
+  margin-top: 0;
+}
+
+.bridge-last-event {
+  margin-left: 0.5rem;
+  color: var(--muted);
+}
+
+.bridge-status {
+  margin-left: auto;
+}
+
+.bridge-err {
+  margin: 0.4rem 0 0;
+  font-size: 0.85rem;
+}
+
+.bridge-streams {
+  margin-top: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.bridge-streams .cmd-block {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.bridge-install {
+  margin-top: 0.75rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: rgba(88, 166, 255, 0.06);
+}
+
+.bridge-install h3 {
+  margin-top: 0;
+  font-size: 1rem;
+}
+
+.bridge-install-steps {
+  margin: 0.5rem 0 0;
+  padding-left: 1.2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  font-size: 0.9rem;
+}
+
+.bridge-install-cmd {
+  margin: 0.25rem 0 0;
+  font-size: 0.8rem;
+  padding: 0.45rem 0.6rem;
+  background: var(--bg);
+}
+
+.bridge-install .btn.primary {
+  text-decoration: none;
+  display: inline-block;
+  margin-right: 0.5rem;
+}
+
 /* Path input with inline icon buttons ------------------------------------- */
 /* Keep the whole group (input + icons) at the same 32rem width used by number
    and text fields, so every field's right edge lines up on the right. */

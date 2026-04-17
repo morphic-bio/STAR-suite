@@ -1,8 +1,10 @@
 import * as vscode from "vscode";
 import { BridgeServer, BridgeState } from "./bridge-server";
+import { SessionManager } from "./session-manager";
 import { getOrCreateToken, rotateToken } from "./token";
 
 let server: BridgeServer | null = null;
+let sessions: SessionManager | null = null;
 let statusBar: vscode.StatusBarItem | null = null;
 let logger: vscode.OutputChannel;
 let currentToken: string;
@@ -13,8 +15,12 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
 
   currentToken = await getOrCreateToken(ctx);
 
-  server = new BridgeServer(() => currentToken, logger);
+  sessions = new SessionManager(logger);
+  server = new BridgeServer(() => currentToken, logger, sessions);
   ctx.subscriptions.push(server);
+  ctx.subscriptions.push({
+    dispose: () => sessions?.cancelAll(),
+  });
 
   statusBar = vscode.window.createStatusBarItem(
     vscode.StatusBarAlignment.Right,
@@ -54,6 +60,7 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
     ),
     vscode.commands.registerCommand("launchpadBridge.resetToken", async () => {
       currentToken = await rotateToken(ctx);
+      sessions?.cancelAll();
       server?.invalidateAllSessions("token rotated");
       vscode.window.showInformationMessage(
         "STAR Launchpad Bridge: auth token rotated; existing sessions closed."

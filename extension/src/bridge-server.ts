@@ -7,6 +7,7 @@ import {
   PROTOCOL_VERSION,
   ServerMessage,
 } from "./protocol";
+import { SessionManager } from "./session-manager";
 import { tokenMatches } from "./token";
 
 const AUTH_TIMEOUT_MS = 2000;
@@ -35,7 +36,8 @@ export class BridgeServer implements vscode.Disposable {
 
   constructor(
     private readonly getToken: () => string,
-    private readonly logger: vscode.OutputChannel
+    private readonly logger: vscode.OutputChannel,
+    private readonly sessions: SessionManager | null = null
   ) {}
 
   get currentPort(): number | null {
@@ -179,25 +181,46 @@ export class BridgeServer implements vscode.Disposable {
   private handleAuthenticated(socket: WebSocket, msg: ClientMessage): void {
     switch (msg.type) {
       case "submit": {
-        // Phase 1: LM wiring lands in phase 2. Ack + stub response so the SPA
-        // can verify the full round-trip today.
-        this.safeSend(socket, { type: "ack", id: msg.id });
-        const stubText =
-          `[bridge phase 1] received ${msg.mode} request with ` +
-          `${Object.keys(msg.formData || {}).length} form field(s) and ` +
-          `${(msg.context || []).length} context message(s). ` +
-          `LM streaming lands in phase 2.`;
-        this.safeSend(socket, { type: "chunk", id: msg.id, text: stubText });
-        this.safeSend(socket, { type: "complete", id: msg.id });
+        if (!this.sessions) {
+          this.stubSubmit(socket, msg.id, msg.mode, msg.formData, msg.context);
+          return;
+        }
+        void this.sessions.submit({
+          id: msg.id,
+          mode: msg.mode,
+          formData: msg.formData,
+          context: msg.context,
+          socket,
+          send: (out) => this.safeSend(socket, out),
+        });
         break;
       }
-      case "followup":
-      case "cancel": {
-        this.safeSend(socket, {
-          type: "error",
+      case "followup": {
+        if (!this.sessions) {
+          this.safeSend(socket, {
+            type: "error",
+            id: msg.id,
+            message: "session manager unavailable",
+          });
+          return;
+        }
+        void this.sessions.followup({
           id: msg.id,
-          message: `'${msg.type}' lands in phase 2`,
+          message: msg.message,
+          socket,
+          send: (out) => this.safeSend(socket, out),
         });
+        break;
+      }
+      case "cancel": {
+        const cancelled = this.sessions?.cancel(msg.id) ?? false;
+        if (!cancelled) {
+          this.safeSend(socket, {
+            type: "error",
+            id: msg.id,
+            message: "no in-flight request with that id",
+          });
+        }
         break;
       }
       case "auth": {
@@ -212,6 +235,23 @@ export class BridgeServer implements vscode.Disposable {
         });
       }
     }
+  }
+
+  /** Fallback used in tests / when no SessionManager is injected. */
+  private stubSubmit(
+    socket: WebSocket,
+    id: string,
+    mode: string,
+    formData: Record<string, unknown>,
+    context: Array<{ role: string; content: string }>
+  ): void {
+    this.safeSend(socket, { type: "ack", id });
+    const stub =
+      `[bridge stub] received ${mode} request with ` +
+      `${Object.keys(formData || {}).length} form field(s) and ` +
+      `${(context || []).length} context message(s).`;
+    this.safeSend(socket, { type: "chunk", id, text: stub });
+    this.safeSend(socket, { type: "complete", id });
   }
 
   private safeSend(socket: WebSocket, msg: ServerMessage): void {

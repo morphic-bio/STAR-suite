@@ -101,6 +101,34 @@
       this.reconnectTimer = null;
       this.manualClose = false;
       this.pendingIds = new Set();
+      /** id -> buffered chunk text that hasn't been flushed into component state yet. */
+      this._chunkBuffer = {};
+      this._rafHandle = null;
+    }
+
+    /**
+     * Coalesce chunk updates into one reactive write per animation frame so
+     * long streams don't thrash Alpine's deep-watch on bridgeStreams.
+     */
+    _queueChunk(id, text) {
+      this._chunkBuffer[id] = (this._chunkBuffer[id] || "") + text;
+      if (this._rafHandle) return;
+      const flush = () => {
+        this._rafHandle = null;
+        const pending = this._chunkBuffer;
+        this._chunkBuffer = {};
+        if (!Object.keys(pending).length) return;
+        const next = { ...this.c.bridgeStreams };
+        for (const [pid, delta] of Object.entries(pending)) {
+          next[pid] = (next[pid] || "") + delta;
+        }
+        this.c.bridgeStreams = next;
+      };
+      if (typeof requestAnimationFrame === "function") {
+        this._rafHandle = requestAnimationFrame(flush);
+      } else {
+        this._rafHandle = setTimeout(flush, 16);
+      }
     }
 
     /** Add an editor from a pair URL (dedupes by host+port+token). */
@@ -188,6 +216,8 @@
       const id = genEditorId();
       this.pendingIds.add(id);
       this.c.bridgeStreams = { ...this.c.bridgeStreams, [id]: "" };
+      this.c.bridgeActiveId = id;
+      this.c.bridgeNotice = "";
       try {
         this.ws.send(
           JSON.stringify({
@@ -201,6 +231,7 @@
       } catch (e) {
         this.c.bridgeNotice = "Bridge send failed: " + (e?.message || e);
         this.pendingIds.delete(id);
+        this.c.bridgeActiveId = null;
         return null;
       }
       return id;
@@ -292,19 +323,31 @@
           break;
         }
         case "chunk": {
-          const prev = this.c.bridgeStreams[msg.id] || "";
-          this.c.bridgeStreams = {
-            ...this.c.bridgeStreams,
-            [msg.id]: prev + (msg.text || ""),
-          };
+          if (msg.text) this._queueChunk(msg.id, msg.text);
           break;
         }
         case "complete": {
+          // Flush any buffered chunks before the consumer sees "complete".
+          if (this._rafHandle && typeof cancelAnimationFrame === "function") {
+            cancelAnimationFrame(this._rafHandle);
+            this._rafHandle = null;
+          }
+          const pending = this._chunkBuffer;
+          this._chunkBuffer = {};
+          if (Object.keys(pending).length) {
+            const next = { ...this.c.bridgeStreams };
+            for (const [pid, delta] of Object.entries(pending)) {
+              next[pid] = (next[pid] || "") + delta;
+            }
+            this.c.bridgeStreams = next;
+          }
           this.pendingIds.delete(msg.id);
+          this.c.bridgeActiveId = this.c.bridgeActiveId === msg.id ? null : this.c.bridgeActiveId;
           break;
         }
         case "error": {
           this.pendingIds.delete(msg.id);
+          this.c.bridgeActiveId = this.c.bridgeActiveId === msg.id ? null : this.c.bridgeActiveId;
           this.c.bridgeNotice = msg.message || "bridge error";
           break;
         }

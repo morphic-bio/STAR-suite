@@ -104,7 +104,7 @@ function launchpadApp() {
     notice: "",
     showAbout: false,
 
-    // --- Editor bridge state (phase 1: pairing + auth only) --------------
+    // --- Editor bridge state ---------------------------------------------
     bridgeEditors: [],
     bridgeSelectedId: null,
     /** { status, app?, workspace?, host?, protocol?, error? } | null */
@@ -112,10 +112,26 @@ function launchpadApp() {
     bridgeNotice: "",
     /** { [requestId]: accumulated text } */
     bridgeStreams: {},
+    /** Request id whose stream is currently the focused panel (or null). */
+    bridgeActiveId: null,
+    /** Optional free-text chat context sent with the next submit. */
+    bridgeChatInput: "",
     /** Latest editor_event payload for lightweight UI feedback. */
     bridgeLastEvent: null,
     /** Toggles the "Paired editors" modal. */
     showEditors: false,
+
+    /** Metadata for the downloadable bridge .vsix, populated from capabilities. */
+    bridgeExtension: { available: false, filename: "", size: 0, url: "", command: "" },
+
+    /**
+     * True when any bridge/chat UI should render. Basic Launchpad users (no
+     * editor paired and no bridge extension on the server) see nothing
+     * bridge-related: no header button, no "Ask editor AI" panel.
+     */
+    bridgeUiEnabled() {
+      return this.bridgeEditors.length > 0 || !!this.bridgeExtension.available;
+    },
 
     // --- Server file picker modal state ----------------------------------
     showFilePicker: false,
@@ -751,6 +767,7 @@ function launchpadApp() {
 
     // --- Bridge helpers (phase 1) ----------------------------------------
     bridgeConnect(id) {
+      if (!id) return;
       if (this.$bridge) this.$bridge.connect(id);
     },
     bridgeDisconnect() {
@@ -773,6 +790,80 @@ function launchpadApp() {
         case "error": return `Error: ${c.error || "unknown"}`;
         default: return c.status;
       }
+    },
+
+    bridgeConnected() {
+      return this.bridgeConnection?.status === "connected";
+    },
+
+    bridgeFormSnapshot() {
+      // Reuse collectParams so booleans / ints coerce the same way as other exits.
+      if (!this.schema?.parameters) return {};
+      try { return this.collectParams(); } catch { return {}; }
+    },
+
+    bridgeContext() {
+      const msg = (this.bridgeChatInput || "").trim();
+      return msg ? [{ role: "user", content: msg }] : [];
+    },
+
+    bridgeSubmit(mode) {
+      if (!this.$bridge || !this.bridgeConnected()) {
+        this.bridgeNotice = "Connect to a paired editor first (Editors → Connect).";
+        return;
+      }
+      const form = {
+        workflow_id: this.workflowId,
+        params: this.bridgeFormSnapshot(),
+      };
+      this.$bridge.submit(mode, form, this.bridgeContext());
+    },
+
+    bridgeCancelActive() {
+      if (!this.$bridge || !this.bridgeActiveId) return;
+      this.$bridge.cancel(this.bridgeActiveId);
+    },
+
+    bridgeClearOutput() {
+      this.bridgeStreams = {};
+      this.bridgeActiveId = null;
+    },
+
+    bridgeActiveStream() {
+      if (!this.bridgeActiveId) return "";
+      return this.bridgeStreams[this.bridgeActiveId] || "";
+    },
+
+    bridgeStreamEntries() {
+      return Object.entries(this.bridgeStreams || {}).map(([id, text]) => ({ id, text }));
+    },
+
+    async loadBridgeExtensionInfo(api) {
+      try {
+        const r = await fetch(`${api}/bridge/extension/info`);
+        if (!r.ok) return;
+        const data = await r.json();
+        if (!data || !data.available) return;
+        this.bridgeExtension = {
+          available: true,
+          filename: data.filename || "star-launchpad-bridge.vsix",
+          size: Number(data.size || 0),
+          url: data.download_url || "/launchpad/api/bridge/extension",
+          command: data.install_command || "",
+        };
+      } catch {
+        /* ignore */
+      }
+    },
+
+    bridgeEventLabel() {
+      const e = this.bridgeLastEvent;
+      if (!e) return "";
+      if (e.kind === "file_saved") {
+        const uri = e.payload?.uri || "";
+        return `Saved: ${uri.split("/").pop() || uri}`;
+      }
+      return `${e.kind}`;
     },
 
     async init() {
@@ -798,6 +889,9 @@ function launchpadApp() {
         this.uploadSupported = !!c.upload_supported;
         this.browseRoots = Array.isArray(c.browse_roots) ? c.browse_roots : [];
         if (!this.serverPathCheckSupported) this.checkPaths = false;
+        if (c.bridge_extension_available) {
+          void this.loadBridgeExtensionInfo(api);
+        }
       } else {
         this.launchSupported = false;
         this.serverPathCheckSupported = false;

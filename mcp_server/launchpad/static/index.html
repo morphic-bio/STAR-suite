@@ -15,17 +15,33 @@
       <h1>STAR Launchpad</h1>
       <p class="tagline">Generate validated STAR-suite commands from workflow recipes</p>
       <button type="button" class="linklike" @click="showAbout = true">About</button>
-      <button
-        type="button"
-        class="linklike"
-        @click="showEditors = true"
-        :title="bridgeConnection?.status === 'connected'
-                ? 'Connected to ' + (bridgeConnection.app || 'editor')
-                : (bridgeEditors.length ? 'Paired editors' : 'No editors paired yet')">
-        <span x-show="bridgeConnection?.status === 'connected'" class="bridge-dot bridge-dot-ok">●</span>
-        <span x-show="!bridgeConnection || bridgeConnection?.status !== 'connected'" class="bridge-dot bridge-dot-off">○</span>
-        Editors<span x-show="bridgeEditors.length" x-text="' (' + bridgeEditors.length + ')'"></span>
-      </button>
+      <template x-if="bridgeUiEnabled() && bridgeEditors.length > 1">
+        <span class="bridge-header">
+          <label class="field-inline bridge-picker">
+            <span>Active editor</span>
+            <select
+              @change="bridgeConnect($event.target.value)"
+              x-model="bridgeSelectedId">
+              <template x-for="ed in bridgeEditors" :key="ed.id">
+                <option :value="ed.id" x-text="(ed.label || 'Editor') + ' · ' + (ed.host || '127.0.0.1') + ':' + ed.port"></option>
+              </template>
+            </select>
+          </label>
+        </span>
+      </template>
+      <template x-if="bridgeUiEnabled()">
+        <button
+          type="button"
+          class="linklike"
+          @click="showEditors = true"
+          :title="bridgeConnection?.status === 'connected'
+                  ? 'Connected to ' + (bridgeConnection.app || 'editor')
+                  : (bridgeEditors.length ? 'Paired editors' : 'No editors paired yet')">
+          <span x-show="bridgeConnection?.status === 'connected'" class="bridge-dot bridge-dot-ok">●</span>
+          <span x-show="!bridgeConnection || bridgeConnection?.status !== 'connected'" class="bridge-dot bridge-dot-off">○</span>
+          Editors<span x-show="bridgeEditors.length" x-text="' (' + bridgeEditors.length + ')'"></span>
+        </button>
+      </template>
       <button
         type="button"
         class="linklike danger"
@@ -35,7 +51,7 @@
       >Quit server</button>
     </header>
 
-    <div class="bridge-banner" x-show="bridgeNotice" x-cloak>
+    <div class="bridge-banner" x-show="bridgeNotice && bridgeUiEnabled()" x-cloak>
       <span x-text="bridgeNotice"></span>
       <button type="button" class="linklike" @click="bridgeNotice = ''">dismiss</button>
     </div>
@@ -356,6 +372,55 @@
         </div>
       </div>
 
+      <div class="bridge-panel" x-show="bridgeEditors.length && bridgeUiEnabled()" x-cloak>
+        <h3>Ask editor AI</h3>
+        <p class="help-meta">
+          Send current form values to the paired editor's chat and stream the reply here.
+          <span x-show="bridgeLastEvent" class="bridge-last-event">
+            Last editor event: <code x-text="bridgeEventLabel()"></code>
+          </span>
+        </p>
+        <label class="field block">
+          <span class="label-text">Chat context (optional) — one message appended before the form summary.</span>
+          <textarea class="script-textarea" rows="3"
+                    x-model="bridgeChatInput"
+                    placeholder="e.g. prioritize memory safety over speed, or use bulk PE defaults"
+                    :disabled="bridgeActiveId"></textarea>
+        </label>
+        <div class="btn-row">
+          <button type="button" class="btn secondary"
+                  @click="bridgeSubmit('refine')"
+                  :disabled="!bridgeConnected() || !!bridgeActiveId">Refine</button>
+          <button type="button" class="btn secondary"
+                  @click="bridgeSubmit('research')"
+                  :disabled="!bridgeConnected() || !!bridgeActiveId">Research</button>
+          <button type="button" class="btn"
+                  @click="bridgeCancelActive()"
+                  x-show="bridgeActiveId"
+                  :disabled="!bridgeActiveId">Cancel</button>
+          <button type="button" class="btn"
+                  @click="bridgeClearOutput()"
+                  x-show="Object.keys(bridgeStreams || {}).length"
+                  :disabled="!!bridgeActiveId">Clear</button>
+          <span class="help-meta bridge-status" x-show="bridgeConnection"
+                x-text="bridgeStatusLabel()"></span>
+        </div>
+        <p class="err bridge-err" x-show="!bridgeConnected()">
+          Not connected. Pair or select an editor in the <strong>Editors</strong> menu.
+        </p>
+        <div class="bridge-streams" x-show="bridgeStreamEntries().length">
+          <template x-for="s in bridgeStreamEntries()" :key="s.id">
+            <details class="stage" :open="s.id === bridgeActiveId">
+              <summary>
+                <code x-text="s.id.slice(0, 8)"></code>
+                <span x-show="s.id === bridgeActiveId"> · streaming…</span>
+              </summary>
+              <pre class="cmd-block" x-text="s.text"></pre>
+            </details>
+          </template>
+        </div>
+      </div>
+
       <div x-show="schema?.required_files?.length">
         <h3>Required paths (must exist when validating with path checks)</h3>
         <ul class="checklist">
@@ -489,6 +554,30 @@
           extension in VS Code / Cursor, then run
           <code>STAR Launchpad Bridge: Open pairing page</code>.
         </p>
+        <div class="bridge-install" x-show="!bridgeEditors.length && bridgeExtension.available" x-cloak>
+          <h3>Install the bridge extension</h3>
+          <ol class="bridge-install-steps">
+            <li>
+              <a class="btn primary" :href="bridgeExtension.url" :download="bridgeExtension.filename">
+                Download .vsix
+              </a>
+              <span class="help-meta" x-show="bridgeExtension.size"
+                    x-text="'(' + (bridgeExtension.size / 1024).toFixed(0) + ' KB)'"></span>
+            </li>
+            <li>
+              In VS Code / Cursor: <strong>Extensions</strong> → <strong>⋯</strong> menu →
+              <strong>Install from VSIX</strong>, then pick the file you just downloaded.
+            </li>
+            <li>
+              Or from a terminal:
+              <pre class="cmd-block bridge-install-cmd" x-text="bridgeExtension.command"></pre>
+            </li>
+            <li>
+              The extension will show a notification — click <strong>Pair now</strong> and
+              this page will register the editor automatically.
+            </li>
+          </ol>
+        </div>
         <ul class="editor-list" x-show="bridgeEditors.length">
           <template x-for="ed in bridgeEditors" :key="ed.id">
             <li class="editor-row"
@@ -514,6 +603,10 @@
         </ul>
         <p class="help-meta" x-show="bridgeConnection">
           Status: <span x-text="bridgeStatusLabel()"></span>
+        </p>
+        <p class="help-meta" x-show="bridgeLastEvent">
+          Last editor event:
+          <code x-text="bridgeEventLabel()"></code>
         </p>
         <div class="btn-row">
           <button type="button" class="btn primary" @click="showEditors = false">Close</button>
@@ -637,7 +730,7 @@
       </div>
     </div>
   </div>
-  <script src="./bridge.js?v=br1"></script>
-  <script src="./app.js?v=lp15"></script>
+  <script src="./bridge.js?v=br3"></script>
+  <script src="./app.js?v=lp18"></script>
 </body>
 </html>

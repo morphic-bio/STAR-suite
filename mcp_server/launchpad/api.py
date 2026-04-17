@@ -27,7 +27,7 @@ import uuid
 from pathlib import Path
 
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import FileResponse, JSONResponse
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
@@ -49,6 +49,7 @@ from .script_lane_bridge import (
 )
 
 _LAUNCHPAD_STATIC = Path(__file__).resolve().parent / "static"
+_BRIDGE_DIST = Path(__file__).resolve().parents[2] / "extension" / "dist"
 
 
 def launchpad_request_trusted_local(request: Request) -> bool:
@@ -175,6 +176,60 @@ def _upload_dir() -> Path:
     return base
 
 
+def _pick_bridge_vsix() -> Path | None:
+    """Return the newest ``.vsix`` in extension/dist/, or None if none built."""
+    if not _BRIDGE_DIST.is_dir():
+        return None
+    candidates = sorted(
+        _BRIDGE_DIST.glob("*.vsix"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    return candidates[0] if candidates else None
+
+
+async def lp_bridge_extension_info(_request: Request) -> JSONResponse:
+    """Return metadata so the Launchpad can show a helpful install box."""
+    vsix = _pick_bridge_vsix()
+    if vsix is None:
+        return JSONResponse(
+            {
+                "available": False,
+                "message": (
+                    "No pre-built bridge extension is shipped with this STAR "
+                    "Server install. Build it with `cd extension && npm install "
+                    "&& npm run package` to populate extension/dist/."
+                ),
+            }
+        )
+    stat = vsix.stat()
+    return JSONResponse(
+        {
+            "available": True,
+            "filename": vsix.name,
+            "size": int(stat.st_size),
+            "download_url": "/launchpad/api/bridge/extension",
+            "install_command": f"code --install-extension {vsix.name}",
+        }
+    )
+
+
+async def lp_bridge_extension_download(_request: Request) -> FileResponse | JSONResponse:
+    """Stream the packaged bridge .vsix to the browser."""
+    vsix = _pick_bridge_vsix()
+    if vsix is None:
+        return _json_error(
+            "NOT_FOUND",
+            "No bridge extension .vsix has been built on this server.",
+            404,
+        )
+    return FileResponse(
+        path=str(vsix),
+        filename=vsix.name,
+        media_type="application/octet-stream",
+    )
+
+
 async def lp_capabilities(request: Request) -> JSONResponse:
     """Whether this browser session may use server-side Run in shell (loopback only)."""
     trusted_local = launchpad_request_trusted_local(request)
@@ -196,6 +251,7 @@ async def lp_capabilities(request: Request) -> JSONResponse:
             "browse_supported": bool(roots),
             "upload_supported": True,
             "browse_roots": roots,
+            "bridge_extension_available": _pick_bridge_vsix() is not None,
         }
     )
 
@@ -738,6 +794,16 @@ def get_launchpad_routes() -> list:
             "/launchpad/api/upload",
             endpoint=lp_upload,
             methods=["POST"],
+        ),
+        Route(
+            "/launchpad/api/bridge/extension/info",
+            endpoint=lp_bridge_extension_info,
+            methods=["GET"],
+        ),
+        Route(
+            "/launchpad/api/bridge/extension",
+            endpoint=lp_bridge_extension_download,
+            methods=["GET"],
         ),
         Route(
             "/launchpad/api/quit",
