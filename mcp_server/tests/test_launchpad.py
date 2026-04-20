@@ -11,6 +11,8 @@ import mcp_server.config as config_module
 import mcp_server.launchpad.api as launchpad_api
 from mcp_server.app import build_http_app
 from mcp_server.config import load_config
+from mcp_server.launchpad import composition_bridge
+from mcp_server.launchpad.script_lane_bridge import ScriptLaneBackendUnavailable
 from mcp_server.tools.workflows import get_workflow_parameter_schema
 from starlette.requests import Request
 
@@ -220,6 +222,18 @@ def launchpad_client_public_private():
             yield client
 
 
+class TestCompositionBulkIrAssets:
+    """STAR-suite composition IR for bulk defaults (no bwb-nextflow-utils import)."""
+
+    def test_bulk_composition_ir_map_loads_from_star_suite(self):
+        from mcp_server.launchpad.composition_bridge import _load_star_bulk_composition_ir_map
+
+        m = _load_star_bulk_composition_ir_map()
+        assert set(m.keys()) == {"star_genome_generate", "star_bulk_pe_batch"}
+        assert m["star_genome_generate"]["metadata"]["id"] == "star_genome_generate"
+        assert m["star_bulk_pe_batch"]["workflow"]["outputs"]["counts"]["type"] == "file"
+
+
 class TestLaunchpadTrustedLocal:
     def test_loopback_hosts_trusted(self):
         assert launchpad_api.launchpad_request_trusted_local(
@@ -398,6 +412,8 @@ class TestLaunchpadApi:
         assert data["server_path_check_supported"] is True
         assert "script_lane_translate_supported" in data
         assert "script_lane_utils_ready" in data
+        assert "composition_utils_ready" in data
+        assert data["composition_utils_ready"] == data["script_lane_utils_ready"]
         assert "script_lane_viability_inputs_supported" in data
         assert "script_lane_execute_supported" in data
 
@@ -745,3 +761,179 @@ class TestLaunchpadScriptLaneApi:
             )
             assert r.status_code == 403
             assert r.json().get("code") == "FORBIDDEN"
+
+
+@pytest.fixture
+def composition_bwb(monkeypatch):
+    if not BWB_NEXTFLOW_UTILS_ROOT.is_dir():
+        pytest.skip(
+            "bwb-nextflow-utils not found (set BWB_NEXTFLOW_UTILS_ROOT or sibling checkout)"
+        )
+    monkeypatch.setenv("BWB_NEXTFLOW_UTILS_ROOT", str(BWB_NEXTFLOW_UTILS_ROOT))
+    import mcp_server.launchpad.script_lane_bridge as slb
+
+    slb._svc = None
+    yield
+    slb._svc = None
+
+
+@pytest.mark.usefixtures("composition_bwb")
+class TestLaunchpadCompositionApi:
+    def test_composition_bulk_defaults_use_star_suite_ir(self):
+        ir_map = composition_bridge._load_star_bulk_composition_ir_map()
+        assert set(ir_map.keys()) == {"star_genome_generate", "star_bulk_pe_batch"}
+        for wid, doc in ir_map.items():
+            meta = doc.get("metadata") if isinstance(doc.get("metadata"), dict) else {}
+            assert meta.get("id") == wid
+            assert str(meta.get("source_path") or "").startswith(
+                "mcp_server/launchpad/composition_ir/"
+            )
+
+    def test_composition_profiles_list(self, launchpad_client):
+        r = launchpad_client.get("/launchpad/api/composition/profiles")
+        assert r.status_code == 200
+        data = r.json()
+        assert "profiles" in data
+        ids = {p["profile_id"] for p in data["profiles"]}
+        assert "star_bulk_de_deseq2_default_v0" in ids
+        assert "ucsf_scrna_default_v0" in ids
+        assert "ucsf_scrna_mex_full_default_v0" in ids
+
+    def test_composition_profile_describe(self, launchpad_client):
+        r = launchpad_client.get(
+            "/launchpad/api/composition/profiles/star_bulk_de_deseq2_default_v0"
+        )
+        assert r.status_code == 200
+        body = r.json()
+        assert body["archetype_id"] == "star_index_bulk_pe_then_bulk_de"
+        assert body["helper_ids_by_role"]["de"] == "bioc.deseq2.counts_matrix_v0"
+
+    def test_composition_profile_unknown(self, launchpad_client):
+        r = launchpad_client.get(
+            "/launchpad/api/composition/profiles/no_such_profile_v0"
+        )
+        assert r.status_code == 404
+        assert r.json().get("code") == "NOT_FOUND"
+
+    def test_composition_recipe_inputs_bulk_de(self, launchpad_client):
+        r = launchpad_client.post(
+            "/launchpad/api/composition/recipe-inputs",
+            json={"profile_id": "star_bulk_de_deseq2_default_v0"},
+        )
+        assert r.status_code == 200, r.text
+        data = r.json()
+        assert "coldata" in data["recipe_input_keys"]
+        assert data["recipe_inputs"]["coldata"]["kind"] == "path"
+        assert data["recipe_inputs"]["design"]["required"] is False
+
+    def test_composition_recipe_inputs_ucsf(self, launchpad_client):
+        r = launchpad_client.post(
+            "/launchpad/api/composition/recipe-inputs",
+            json={"profile_id": "ucsf_scrna_full_default_v0"},
+        )
+        assert r.status_code == 200, r.text
+        keys = set(r.json()["recipe_input_keys"])
+        assert "reference_sce" in keys
+        assert "reference_label_col" in keys
+        assert "guide_assignments" in keys
+        assert "cell_covariates" in keys
+
+    def test_composition_recipe_inputs_rejects_recipe_input_values(self, launchpad_client):
+        r = launchpad_client.post(
+            "/launchpad/api/composition/recipe-inputs",
+            json={
+                "profile_id": "ucsf_scrna_default_v0",
+                "recipe_input_values": {"nope": "1"},
+            },
+        )
+        assert r.status_code == 400
+        assert r.json().get("code") == "BAD_REQUEST"
+
+    def test_composition_draft_bulk(self, launchpad_client):
+        r = launchpad_client.post(
+            "/launchpad/api/composition/draft",
+            json={"profile_id": "star_bulk_de_deseq2_default_v0"},
+        )
+        assert r.status_code == 200, r.text
+        data = r.json()
+        assert data["recipe_draft"]["id"] == "star_index_bulk_pe_then_bulk_de"
+        assert data["archetype_id"] == "star_index_bulk_pe_then_bulk_de"
+        assert data["workflow_ir_by_id_keys"] == [
+            "star_bulk_pe_batch",
+            "star_genome_generate",
+        ]
+        assert any(
+            s.get("id") == "de" for s in (data["recipe_draft"].get("steps") or [])
+        )
+        de_step = next(s for s in (data["recipe_draft"].get("steps") or []) if s.get("id") == "de")
+        assert de_step.get("inputs", {}).get("design") == {
+            "from": "recipe.inputs.design"
+        }
+        assert de_step.get("inputs", {}).get("reference") == {
+            "from": "recipe.inputs.reference"
+        }
+
+    def test_composition_draft_with_recipe_literals(self, launchpad_client, tmp_path):
+        coldata = tmp_path / "coldata.tsv"
+        coldata.write_text("sample\tgroup\ns1\ta\n")
+        r = launchpad_client.post(
+            "/launchpad/api/composition/draft",
+            json={
+                "profile_id": "star_bulk_de_deseq2_default_v0",
+                "recipe_input_values": {"coldata": str(coldata)},
+            },
+        )
+        assert r.status_code == 200, r.text
+        steps = r.json()["recipe_draft"].get("steps") or []
+        de_step = next(s for s in steps if s.get("id") == "de")
+        assert de_step.get("inputs", {}).get("coldata") == {"value": str(coldata)}
+
+    def test_composition_draft_with_explicit_optional_bulk_overrides(
+        self, launchpad_client, tmp_path
+    ):
+        coldata = tmp_path / "coldata.tsv"
+        coldata.write_text("sample\tcondition\tbatch\ns1\tctrl\tb1\n")
+        r = launchpad_client.post(
+            "/launchpad/api/composition/draft",
+            json={
+                "profile_id": "star_bulk_de_deseq2_default_v0",
+                "recipe_input_values": {
+                    "coldata": str(coldata),
+                    "design": "~ batch + condition",
+                    "reference": "ctrl",
+                },
+            },
+        )
+        assert r.status_code == 200, r.text
+        steps = r.json()["recipe_draft"].get("steps") or []
+        de_step = next(s for s in steps if s.get("id") == "de")
+        assert de_step.get("inputs", {}).get("design") == {
+            "value": "~ batch + condition"
+        }
+        assert de_step.get("inputs", {}).get("reference") == {"value": "ctrl"}
+
+    def test_composition_artifacts_ucsf_phase1(self, launchpad_client):
+        r = launchpad_client.post(
+            "/launchpad/api/composition/artifacts",
+            json={"profile_id": "ucsf_scrna_default_v0"},
+        )
+        assert r.status_code == 200, r.text
+        data = r.json()
+        assert data["validation"]["ok"] is True
+        assert data["normalized_recipe"] is not None
+        assert data["preview"] is not None
+        assert data["generated_script"] is not None
+        assert data["generated_manifest"] is not None
+
+    def test_composition_backend_unavailable(self, launchpad_client, monkeypatch):
+        def _boom():
+            raise ScriptLaneBackendUnavailable("utils missing")
+
+        monkeypatch.setattr(
+            "mcp_server.launchpad.api.get_mcp_workflow_services",
+            _boom,
+        )
+        r = launchpad_client.get("/launchpad/api/composition/profiles")
+        assert r.status_code == 503
+        body = r.json()
+        assert body.get("code") == "SERVICE_UNAVAILABLE"

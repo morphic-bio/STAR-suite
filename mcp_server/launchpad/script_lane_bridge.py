@@ -91,6 +91,11 @@ def backend_status() -> dict[str, Any]:
         return {"ready": False, "message": str(e)}
 
 
+def get_mcp_workflow_services() -> ModuleType:
+    """Return the loaded ``mcp_workflow_services`` module (shared by Script Lane + Composition)."""
+    return _ensure_services()
+
+
 def translate_simple_script_to_ir(script_text: str) -> dict[str, Any]:
     return _ensure_services().translate_simple_script_to_ir(script_text)
 

@@ -14,7 +14,14 @@ clients so arbitrary remote browsers cannot trigger execution.
 Script Lane endpoints (``/launchpad/api/script-lane/*``) delegate annotated Bash,
 simple-local viability, and simple-local execution to ``bwb-nextflow-utils``
 via ``script_lane_bridge``; they do not reuse ``/launch`` or workflow render.
+
+Composition endpoints (``/launchpad/api/composition/*``) delegate profile
+discovery, recipe-input schemas, drafts, and artifact synthesis to
+``bwb-nextflow-utils`` via ``composition_bridge`` (same checkout resolution as
+Script Lane). Draft and artifact routes are side-effect free (no execution).
 """
+
+from __future__ import annotations
 
 import os
 import re
@@ -25,6 +32,7 @@ import threading
 import time
 import uuid
 from pathlib import Path
+from typing import Any
 
 from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse
@@ -40,11 +48,17 @@ from ..tools.workflows import (
     validate_workflow_parameters,
 )
 
+from .composition_bridge import (
+    build_composition_artifacts,
+    build_composition_draft,
+    describe_composition_recipe_inputs,
+)
 from .script_lane_bridge import (
     ScriptLaneBackendUnavailable,
     backend_status,
     check_simple_local_ir_viability,
     execute_simple_local_ir,
+    get_mcp_workflow_services,
     translate_simple_script_to_ir,
 )
 
@@ -244,6 +258,7 @@ async def lp_capabilities(request: Request) -> JSONResponse:
             "launch_supported": trusted_local,
             "server_path_check_supported": trusted_local,
             "script_lane_utils_ready": ready,
+            "composition_utils_ready": ready,
             "script_lane_translate_supported": ready,
             "script_lane_viability_inputs_supported": bool(ready and trusted_local),
             "script_lane_execute_supported": bool(ready and trusted_local),
@@ -743,6 +758,184 @@ async def lp_launch(request: Request) -> JSONResponse:
     )
 
 
+def _parse_composition_post_body(body: dict) -> tuple[str, dict[str, Any] | None, dict[str, str] | None, dict[str, Any] | None] | JSONResponse:
+    """Return (profile_id, workflow_ir_by_id, component_binding, recipe_input_values) or error response."""
+    profile_id = body.get("profile_id")
+    if not isinstance(profile_id, str) or not profile_id.strip():
+        return _json_error("BAD_REQUEST", "Body must contain non-empty string 'profile_id'", 400)
+    raw_ir = body.get("workflow_ir_by_id")
+    if raw_ir is not None and not isinstance(raw_ir, dict):
+        return _json_error("BAD_REQUEST", "'workflow_ir_by_id' must be an object when provided", 400)
+    raw_cb = body.get("component_binding")
+    if raw_cb is not None and not isinstance(raw_cb, dict):
+        return _json_error("BAD_REQUEST", "'component_binding' must be an object when provided", 400)
+    comp_binding: dict[str, str] | None
+    if raw_cb:
+        comp_binding = {str(k): str(v) for k, v in raw_cb.items()}
+    else:
+        comp_binding = None
+    raw_riv = body.get("recipe_input_values")
+    if raw_riv is not None and not isinstance(raw_riv, dict):
+        return _json_error("BAD_REQUEST", "'recipe_input_values' must be an object when provided", 400)
+    riv = dict(raw_riv) if raw_riv else None
+    return (
+        profile_id.strip(),
+        dict(raw_ir) if raw_ir else None,
+        comp_binding,
+        riv,
+    )
+
+
+async def lp_composition_profiles_list(_request: Request) -> JSONResponse:
+    try:
+        rows = get_mcp_workflow_services().list_constructor_profiles()
+        return JSONResponse({"profiles": rows})
+    except ScriptLaneBackendUnavailable as e:
+        return JSONResponse(
+            {"error": True, "code": "SERVICE_UNAVAILABLE", "message": str(e)},
+            status_code=503,
+        )
+    except Exception as e:
+        return _json_error("INTERNAL_ERROR", str(e), 500)
+
+
+async def lp_composition_profile_get(request: Request) -> JSONResponse:
+    pid = request.path_params.get("profile_id") or ""
+    try:
+        data = get_mcp_workflow_services().describe_constructor_profile(pid)
+        return JSONResponse(data)
+    except KeyError:
+        return _json_error("NOT_FOUND", f"Unknown profile_id {pid!r}", 404)
+    except ScriptLaneBackendUnavailable as e:
+        return JSONResponse(
+            {"error": True, "code": "SERVICE_UNAVAILABLE", "message": str(e)},
+            status_code=503,
+        )
+    except ValueError as e:
+        return _json_error("BAD_REQUEST", str(e), 400)
+    except Exception as e:
+        return _json_error("INTERNAL_ERROR", str(e), 500)
+
+
+async def lp_composition_recipe_inputs(request: Request) -> JSONResponse:
+    try:
+        body = await request.json()
+    except Exception:
+        return _json_error("BAD_REQUEST", "Expected JSON body", 400)
+    if not isinstance(body, dict):
+        return _json_error("BAD_REQUEST", "Body must be a JSON object", 400)
+    parsed = _parse_composition_post_body(body)
+    if isinstance(parsed, JSONResponse):
+        return parsed
+    profile_id, wf_ir, comp_b, riv = parsed
+    if riv is not None:
+        return _json_error(
+            "BAD_REQUEST",
+            "recipe_input_values is not used on this endpoint",
+            400,
+        )
+    try:
+        data = describe_composition_recipe_inputs(
+            profile_id,
+            workflow_ir_by_id=wf_ir,
+            component_binding=comp_b,
+        )
+        return JSONResponse(data)
+    except KeyError:
+        return _json_error("NOT_FOUND", f"Unknown profile_id {profile_id!r}", 404)
+    except FileNotFoundError as e:
+        return JSONResponse(
+            {"error": True, "code": "SERVICE_UNAVAILABLE", "message": str(e)},
+            status_code=503,
+        )
+    except ScriptLaneBackendUnavailable as e:
+        return JSONResponse(
+            {"error": True, "code": "SERVICE_UNAVAILABLE", "message": str(e)},
+            status_code=503,
+        )
+    except ValueError as e:
+        return _json_error("BAD_REQUEST", str(e), 400)
+    except Exception as e:
+        return _json_error("INTERNAL_ERROR", str(e), 500)
+
+
+async def lp_composition_draft(request: Request) -> JSONResponse:
+    try:
+        body = await request.json()
+    except Exception:
+        return _json_error("BAD_REQUEST", "Expected JSON body", 400)
+    if not isinstance(body, dict):
+        return _json_error("BAD_REQUEST", "Body must be a JSON object", 400)
+    parsed = _parse_composition_post_body(body)
+    if isinstance(parsed, JSONResponse):
+        return parsed
+    profile_id, wf_ir, comp_b, riv = parsed
+    try:
+        data = build_composition_draft(
+            profile_id,
+            workflow_ir_by_id=wf_ir,
+            component_binding=comp_b,
+            recipe_input_values=riv,
+        )
+        return JSONResponse(data)
+    except KeyError:
+        return _json_error("NOT_FOUND", f"Unknown profile_id {profile_id!r}", 404)
+    except FileNotFoundError as e:
+        return JSONResponse(
+            {"error": True, "code": "SERVICE_UNAVAILABLE", "message": str(e)},
+            status_code=503,
+        )
+    except ScriptLaneBackendUnavailable as e:
+        return JSONResponse(
+            {"error": True, "code": "SERVICE_UNAVAILABLE", "message": str(e)},
+            status_code=503,
+        )
+    except ValueError as e:
+        return _json_error("BAD_REQUEST", str(e), 400)
+    except Exception as e:
+        return _json_error("INTERNAL_ERROR", str(e), 500)
+
+
+async def lp_composition_artifacts(request: Request) -> JSONResponse:
+    try:
+        body = await request.json()
+    except Exception:
+        return _json_error("BAD_REQUEST", "Expected JSON body", 400)
+    if not isinstance(body, dict):
+        return _json_error("BAD_REQUEST", "Body must be a JSON object", 400)
+    parsed = _parse_composition_post_body(body)
+    if isinstance(parsed, JSONResponse):
+        return parsed
+    profile_id, wf_ir, comp_b, riv = parsed
+    raw_strict = body.get("strict", True)
+    strict = bool(raw_strict) if isinstance(raw_strict, bool) else True
+    try:
+        data = build_composition_artifacts(
+            profile_id,
+            workflow_ir_by_id=wf_ir,
+            component_binding=comp_b,
+            recipe_input_values=riv,
+            strict=strict,
+        )
+        return JSONResponse(data)
+    except KeyError:
+        return _json_error("NOT_FOUND", f"Unknown profile_id {profile_id!r}", 404)
+    except FileNotFoundError as e:
+        return JSONResponse(
+            {"error": True, "code": "SERVICE_UNAVAILABLE", "message": str(e)},
+            status_code=503,
+        )
+    except ScriptLaneBackendUnavailable as e:
+        return JSONResponse(
+            {"error": True, "code": "SERVICE_UNAVAILABLE", "message": str(e)},
+            status_code=503,
+        )
+    except ValueError as e:
+        return _json_error("BAD_REQUEST", str(e), 400)
+    except Exception as e:
+        return _json_error("INTERNAL_ERROR", str(e), 500)
+
+
 async def lp_quit(request: Request) -> JSONResponse:
     """Gracefully stop the STAR Server (Launchpad + MCP) on this host.
 
@@ -849,6 +1042,31 @@ def get_launchpad_routes() -> list:
         Route(
             "/launchpad/api/script-lane/execute",
             endpoint=lp_script_lane_execute,
+            methods=["POST"],
+        ),
+        Route(
+            "/launchpad/api/composition/profiles",
+            endpoint=lp_composition_profiles_list,
+            methods=["GET"],
+        ),
+        Route(
+            "/launchpad/api/composition/profiles/{profile_id}",
+            endpoint=lp_composition_profile_get,
+            methods=["GET"],
+        ),
+        Route(
+            "/launchpad/api/composition/recipe-inputs",
+            endpoint=lp_composition_recipe_inputs,
+            methods=["POST"],
+        ),
+        Route(
+            "/launchpad/api/composition/draft",
+            endpoint=lp_composition_draft,
+            methods=["POST"],
+        ),
+        Route(
+            "/launchpad/api/composition/artifacts",
+            endpoint=lp_composition_artifacts,
             methods=["POST"],
         ),
         Mount(

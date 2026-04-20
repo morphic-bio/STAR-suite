@@ -69,6 +69,12 @@
         :class="{ 'tab-active': activeTab === 'script' }"
         @click="activeTab = 'script'"
       >Script Lane</button>
+      <button
+        type="button"
+        class="tab"
+        :class="{ 'tab-active': activeTab === 'composition' }"
+        @click="activeTab = 'composition'; compOnTabActivated()"
+      >Composition</button>
     </nav>
 
     <div x-show="activeTab === 'workflows'">
@@ -541,6 +547,212 @@
       </div>
     </section>
 
+    <section class="composition-lane" x-show="activeTab === 'composition'" x-cloak>
+      <p class="script-lane-intro">
+        Profile-driven <strong>composition</strong>: discover curated constructor profiles, fill
+        backend-reported recipe inputs, and synthesize execution-recipe drafts and review artifacts.
+        Canonical semantics live in <code>bwb-nextflow-utils</code>; this tab does not run composed
+        workflows (no live execution here).
+      </p>
+      <p class="err" x-show="activeTab === 'composition' && compError" x-text="compError"></p>
+      <p class="warn banner" x-show="activeTab === 'composition' && !compositionUtilsReady">
+        Composition backend is unavailable (no <code>bwb-nextflow-utils</code> checkout found).
+        Set <code>BWB_NEXTFLOW_UTILS_ROOT</code> to the repo root and restart the server, or place
+        <code>bwb-nextflow-utils</code> beside STAR-suite.
+      </p>
+
+      <div class="toolbar recipe-toolbar" x-show="compositionUtilsReady">
+        <label class="field-inline">
+          <span>Profile</span>
+          <select
+            x-model="compProfileId"
+            @change="compOnProfileSelected()"
+            :disabled="loading">
+            <template x-for="p in compProfiles" :key="p.profile_id">
+              <option :value="p.profile_id" x-text="p.title + ' (' + p.profile_id + ')'"></option>
+            </template>
+          </select>
+        </label>
+        <button type="button" class="btn secondary" @click="compLoadProfiles()" :disabled="loading">
+          Reload profiles
+        </button>
+      </div>
+
+      <div class="composition-detail" x-show="compositionUtilsReady && compDescribe">
+        <h2>Profile</h2>
+        <p class="help-meta" x-text="compDescribe?.description || ''"></p>
+        <ul class="help-meta-list">
+          <li><strong>Archetype</strong>: <code x-text="compDescribe?.archetype_id || ''"></code></li>
+          <li><strong>Default recipe id</strong>: <code x-text="compDescribe?.default_recipe_id || ''"></code></li>
+          <li>
+            <strong>helper_ids_by_role</strong>:
+            <code x-text="JSON.stringify(compDescribe?.helper_ids_by_role || {}, null, 0)"></code>
+          </li>
+        </ul>
+        <template x-if="compDescribe?.notes?.length">
+          <div>
+            <h3>Notes</h3>
+            <ul>
+              <template x-for="n in (compDescribe?.notes || [])" :key="n">
+                <li x-text="n"></li>
+              </template>
+            </ul>
+          </div>
+        </template>
+      </div>
+
+      <div class="composition-inputs" x-show="compositionUtilsReady && compRecipeInputs">
+        <h2>Required inputs</h2>
+        <p class="help-meta">
+          Field types come from the backend (<code>kind</code>). Required fields are pre-filled only
+          when the backend marks them required (using schema defaults only for <em>required</em>
+          rows). Optional and defaulted recipe inputs stay out of the draft until you set them in
+          the optional section—defaults are not auto-injected.
+        </p>
+        <template x-for="key in compRequiredInputKeys()" :key="'req-' + key">
+          <div class="field">
+            <label>
+              <span class="label-text">
+                <code x-text="key"></code>
+                <span class="req">*</span>
+                <span class="help-meta" x-text="'(' + compDisplayKind(compRecipeInputs?.recipe_inputs?.[key]) + ')'"></span>
+              </span>
+              <template x-if="compDisplayKind(compRecipeInputs?.recipe_inputs?.[key]).toLowerCase() === 'boolean'">
+                <input type="checkbox" x-model="compInputValues[key]" :disabled="loading">
+              </template>
+              <template x-if="['integer', 'number'].includes(compDisplayKind(compRecipeInputs?.recipe_inputs?.[key]).toLowerCase())">
+                <input type="number" step="any" x-model="compInputValues[key]" :disabled="loading">
+              </template>
+              <template x-if="!['boolean', 'integer', 'number'].includes(compDisplayKind(compRecipeInputs?.recipe_inputs?.[key]).toLowerCase())">
+                <span class="path-input-group">
+                  <input type="text" class="path-text-input"
+                         x-model="compInputValues[key]"
+                         :disabled="loading"
+                         :placeholder="(compRecipeInputs?.recipe_inputs?.[key]?.description || '').slice(0, 96)">
+                  <button type="button"
+                          class="icon-btn browse-icon"
+                          x-show="compKindUsesPathPicker(compDisplayKind(compRecipeInputs?.recipe_inputs?.[key]))"
+                          @click.prevent.stop="compOpenPathPicker(key, compDisplayKind(compRecipeInputs?.recipe_inputs?.[key]))"
+                          :disabled="loading || !browseSupported"
+                          aria-label="Browse">
+                    <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M1.75 2h4.086a1.75 1.75 0 0 1 1.237.513l.914.914a.25.25 0 0 0 .177.073h6.086c.966 0 1.75.784 1.75 1.75v7A1.75 1.75 0 0 1 14.25 14H1.75A1.75 1.75 0 0 1 0 12.25v-8.5C0 2.784.784 2 1.75 2zM1.5 3.75v8.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7a.25.25 0 0 0-.25-.25H8.164a1.75 1.75 0 0 1-1.237-.513l-.914-.914a.25.25 0 0 0-.177-.073H1.75a.25.25 0 0 0-.25.25z"/></svg>
+                  </button>
+                </span>
+              </template>
+            </label>
+            <p class="help-meta" x-show="compRecipeInputs?.recipe_inputs?.[key]?.description"
+               x-text="compRecipeInputs?.recipe_inputs?.[key]?.description"></p>
+          </div>
+        </template>
+
+        <details class="stage" x-show="compOptionalInputKeys().length">
+          <summary>Optional / defaulted inputs (<span x-text="compOptionalInputKeys().length"></span>)</summary>
+          <template x-for="key in compOptionalInputKeys()" :key="'opt-' + key">
+            <div class="field">
+              <label>
+                <span class="label-text">
+                  <code x-text="key"></code>
+                  <span class="help-meta" x-text="'(' + compDisplayKind(compRecipeInputs?.recipe_inputs?.[key]) + ')'"></span>
+                </span>
+                <template x-if="compDisplayKind(compRecipeInputs?.recipe_inputs?.[key]).toLowerCase() === 'boolean'">
+                  <input type="checkbox" x-model="compInputValues[key]" :disabled="loading">
+                </template>
+                <template x-if="['integer', 'number'].includes(compDisplayKind(compRecipeInputs?.recipe_inputs?.[key]).toLowerCase())">
+                  <input type="number" step="any" x-model="compInputValues[key]" :disabled="loading">
+                </template>
+                <template x-if="!['boolean', 'integer', 'number'].includes(compDisplayKind(compRecipeInputs?.recipe_inputs?.[key]).toLowerCase())">
+                  <span class="path-input-group">
+                    <input type="text" class="path-text-input"
+                           x-model="compInputValues[key]"
+                           :disabled="loading"
+                           :placeholder="(compRecipeInputs?.recipe_inputs?.[key]?.description || '').slice(0, 96)">
+                    <button type="button"
+                            class="icon-btn browse-icon"
+                            x-show="compKindUsesPathPicker(compDisplayKind(compRecipeInputs?.recipe_inputs?.[key]))"
+                            @click.prevent.stop="compOpenPathPicker(key, compDisplayKind(compRecipeInputs?.recipe_inputs?.[key]))"
+                            :disabled="loading || !browseSupported"
+                            aria-label="Browse">
+                      <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M1.75 2h4.086a1.75 1.75 0 0 1 1.237.513l.914.914a.25.25 0 0 0 .177.073h6.086c.966 0 1.75.784 1.75 1.75v7A1.75 1.75 0 0 1 14.25 14H1.75A1.75 1.75 0 0 1 0 12.25v-8.5C0 2.784.784 2 1.75 2zM1.5 3.75v8.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7a.25.25 0 0 0-.25-.25H8.164a1.75 1.75 0 0 1-1.237-.513l-.914-.914a.25.25 0 0 0-.177-.073H1.75a.25.25 0 0 0-.25.25z"/></svg>
+                    </button>
+                  </span>
+                </template>
+              </label>
+              <p class="help-meta" x-show="compRecipeInputs?.recipe_inputs?.[key]?.description"
+                 x-text="compRecipeInputs?.recipe_inputs?.[key]?.description"></p>
+            </div>
+          </template>
+        </details>
+
+        <details class="stage">
+          <summary>Advanced: override <code>workflow_ir_by_id</code> / <code>component_binding</code> JSON</summary>
+          <p class="help-meta">
+            Bulk STAR profiles default to STAR-suite composition IR + mkindex/align binding from
+            the server. Leave empty to use those defaults. Invalid JSON is rejected on
+            <strong>Reload recipe inputs</strong>, <strong>Build draft</strong>, and
+            <strong>Generate artifacts</strong> (no silent fallback).
+          </p>
+          <label class="field block">
+            <span class="label-text">workflow_ir_by_id (JSON object)</span>
+            <textarea class="script-textarea" rows="4" x-model="compOverrideIrText" :disabled="loading"
+              placeholder="{}"></textarea>
+          </label>
+          <label class="field block">
+            <span class="label-text">component_binding (JSON object)</span>
+            <textarea class="script-textarea" rows="3" x-model="compOverrideBindingText" :disabled="loading"
+              placeholder="{}"></textarea>
+          </label>
+          <button type="button" class="btn secondary" @click="compLoadProfileDetail()" :disabled="loading">
+            Reload recipe inputs with overrides
+          </button>
+        </details>
+
+        <div class="actions composition-actions">
+          <button type="button" class="btn secondary" @click="compBuildDraft()" :disabled="loading || !compProfileId">
+            Build draft
+          </button>
+          <button type="button" class="btn primary" @click="compBuildArtifacts()" :disabled="loading || !compProfileId">
+            Generate artifacts
+          </button>
+        </div>
+      </div>
+
+      <div class="panel script-lane-out" x-show="compDraftResult?.recipe_draft">
+        <h2>Draft</h2>
+        <p class="help-meta">
+          Profile <code x-text="compDraftResult?.profile_id || ''"></code> ·
+          archetype <code x-text="compDraftResult?.archetype_id || ''"></code>
+        </p>
+        <pre class="json-block" x-text="JSON.stringify(compDraftResult?.recipe_draft || {}, null, 2)"></pre>
+      </div>
+
+      <div class="panel script-lane-out" x-show="compArtifactsResult">
+        <h2>Artifacts</h2>
+        <p :class="compArtifactsResult?.validation?.ok ? 'ok' : 'err'"
+           x-text="compArtifactsResult?.validation?.ok ? 'Validation OK' : 'Validation failed'"></p>
+        <ul class="messages" x-show="compArtifactsResult?.validation?.errors?.length">
+          <template x-for="err in (compArtifactsResult?.validation?.errors || [])" :key="err.message || err.code">
+            <li class="err" x-text="err.message || JSON.stringify(err)"></li>
+          </template>
+        </ul>
+        <details class="json-detail" x-show="compArtifactsResult?.normalized_recipe">
+          <summary>Normalized recipe</summary>
+          <pre class="json-block" x-text="JSON.stringify(compArtifactsResult?.normalized_recipe || {}, null, 2)"></pre>
+        </details>
+        <details class="json-detail" x-show="compArtifactsResult?.preview">
+          <summary>Preview</summary>
+          <pre class="json-block" x-text="JSON.stringify(compArtifactsResult?.preview || {}, null, 2)"></pre>
+        </details>
+        <details class="json-detail" x-show="compScriptText()">
+          <summary>Generated script</summary>
+          <pre class="cmd-block" x-text="compScriptText()"></pre>
+        </details>
+        <details class="json-detail" x-show="compManifestSummary()">
+          <summary>Manifest summary</summary>
+          <pre class="json-block" x-text="compManifestSummary()"></pre>
+        </details>
+      </div>
+    </section>
+
     <div class="modal" x-show="showEditors" x-cloak @click.self="showEditors = false">
       <div class="modal-inner editors-modal">
         <h2>Paired editors</h2>
@@ -623,7 +835,7 @@
           </h2>
           <p class="file-picker-target">
             Picking <code x-text="fpMode"></code> for
-            <code x-text="fpTargetParam || ''"></code>
+            <code x-text="compPickField || fpTargetParam || ''"></code>
             <span x-show="fpMode === 'string_list'" class="help-meta">(multi-select)</span>
           </p>
         </header>
@@ -726,11 +938,17 @@
           <code>bwb-nextflow-utils</code>, checks simple-local viability, and can execute locally on the
           server host when Launchpad is opened over localhost. It never uses <strong>Run in shell</strong>.
         </p>
+        <p>
+          <strong>Composition</strong> (third tab) lists curated constructor profiles from
+          <code>bwb-nextflow-utils</code>, shows backend-computed recipe inputs (<code>kind</code>-driven
+          fields), and builds execution-recipe drafts plus review artifacts (normalized recipe, preview,
+          script, manifest). It does not run composed workflows; execution stays out of band.
+        </p>
         <button type="button" class="btn primary" @click="showAbout = false">Close</button>
       </div>
     </div>
   </div>
   <script src="./bridge.js?v=br3"></script>
-  <script src="./app.js?v=lp18"></script>
+  <script src="./app.js?v=lp20"></script>
 </body>
 </html>

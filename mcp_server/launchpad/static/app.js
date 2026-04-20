@@ -161,6 +161,20 @@ function launchpadApp() {
     slIr: null,
     slNormalizedScript: null,
 
+    // --- Composition tab (bwb-nextflow-utils headless constructor) ----------
+    compositionUtilsReady: false,
+    compProfiles: [],
+    compProfileId: "",
+    compDescribe: null,
+    compRecipeInputs: null,
+    compInputValues: {},
+    compOverrideIrText: "",
+    compOverrideBindingText: "",
+    compPickField: null,
+    compError: "",
+    compDraftResult: null,
+    compArtifactsResult: null,
+
     /** Drop IR and downstream Script Lane state (script edited, translate failed, etc.). */
     slInvalidateScriptLaneDerivedState() {
       this.slIr = null;
@@ -572,6 +586,7 @@ function launchpadApp() {
     closeFilePicker() {
       this.showFilePicker = false;
       this.fpTargetParam = null;
+      this.compPickField = null;
       this.fpSelected = [];
       this.fpEntries = [];
       this.fpError = "";
@@ -676,6 +691,22 @@ function launchpadApp() {
 
     /** Write the selection into the bound parameter and close. */
     fpApply() {
+      if (this.compPickField) {
+        if (!this.fpSelected.length) {
+          this.fpError = "Pick at least one entry first.";
+          return;
+        }
+        const paths = this.fpSelected.map((s) => s.path);
+        const field = this.compPickField;
+        if (this.fpMode === "string_list") {
+          this.compInputValues[field] = paths.join(",");
+        } else {
+          this.compInputValues[field] = paths[0];
+        }
+        this.compPickField = null;
+        this.closeFilePicker();
+        return;
+      }
       if (!this.fpTargetParam) return this.closeFilePicker();
       if (!this.fpSelected.length) {
         this.fpError = "Pick at least one entry first.";
@@ -882,6 +913,7 @@ function launchpadApp() {
         this.launchSupported = !!c.launch_supported;
         this.serverPathCheckSupported = !!c.server_path_check_supported;
         this.scriptLaneUtilsReady = !!c.script_lane_translate_supported;
+        this.compositionUtilsReady = !!c.composition_utils_ready;
         this.scriptLaneViabilityInputsSupported = !!c.script_lane_viability_inputs_supported;
         this.scriptLaneExecuteSupported = !!c.script_lane_execute_supported;
         this.trustedLocal = !!c.trusted_local;
@@ -896,6 +928,7 @@ function launchpadApp() {
         this.launchSupported = false;
         this.serverPathCheckSupported = false;
         this.scriptLaneUtilsReady = false;
+        this.compositionUtilsReady = false;
         this.scriptLaneViabilityInputsSupported = false;
         this.scriptLaneExecuteSupported = false;
         this.trustedLocal = false;
@@ -1257,6 +1290,292 @@ function launchpadApp() {
       const x = this.slExecuteResult;
       if (x && x.ok === false && x.fallback_to_temporal) return true;
       return false;
+    },
+
+    compDisplayKind(spec) {
+      if (!spec || typeof spec !== "object") return "string";
+      const k = spec.kind || spec.type;
+      return k ? String(k) : "string";
+    },
+
+    compRecipeInputKeys() {
+      const specs = this.compRecipeInputs?.recipe_inputs;
+      if (!specs || typeof specs !== "object") return [];
+      return Object.keys(specs).sort();
+    },
+
+    compRequiredInputKeys() {
+      return this.compRecipeInputKeys().filter((k) => {
+        const s = this.compRecipeInputs?.recipe_inputs?.[k];
+        return s && s.required;
+      });
+    },
+
+    compOptionalInputKeys() {
+      return this.compRecipeInputKeys().filter((k) => {
+        const s = this.compRecipeInputs?.recipe_inputs?.[k];
+        return s && !s.required;
+      });
+    },
+
+    compKindUsesPathPicker(kind) {
+      const k = String(kind || "").toLowerCase();
+      return k === "path" || k === "path_list";
+    },
+
+    compOpenPathPicker(field, kind) {
+      if (!this.browseSupported) {
+        this.compError = "Server filesystem browsing is not available on this server.";
+        return;
+      }
+      const k = String(kind || "path").toLowerCase();
+      this.fpTargetParam = null;
+      this.compPickField = field;
+      this.fpMode = k === "path_list" || k === "string_list" ? "string_list" : "file";
+      this.fpSelected = [];
+      this.fpError = "";
+      this.fpTruncated = false;
+      this.fpEntries = [];
+      this.fpPath = "";
+      this.fpParent = null;
+      this.showFilePicker = true;
+      void this.fpNavigate("");
+    },
+
+    compSeedInputDefaults() {
+      const specs = this.compRecipeInputs?.recipe_inputs || {};
+      const next = {};
+      for (const key of Object.keys(specs)) {
+        const spec = specs[key];
+        if (!spec || typeof spec !== "object") continue;
+        if (!spec.required) continue;
+        if ("default" in spec && spec.default !== null && spec.default !== undefined) {
+          next[key] = spec.default;
+        } else {
+          const kind = this.compDisplayKind(spec).toLowerCase();
+          next[key] = kind === "boolean" ? false : "";
+        }
+      }
+      this.compInputValues = next;
+    },
+
+    compParseOverrides() {
+      let workflow_ir_by_id;
+      let component_binding;
+      const irText = (this.compOverrideIrText || "").trim();
+      if (irText) {
+        const parsed = JSON.parse(irText);
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+          throw new Error("workflow_ir_by_id JSON must be a non-array object");
+        }
+        workflow_ir_by_id = parsed;
+      }
+      const bindText = (this.compOverrideBindingText || "").trim();
+      if (bindText) {
+        const parsed = JSON.parse(bindText);
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+          throw new Error("component_binding JSON must be a non-array object");
+        }
+        component_binding = parsed;
+      }
+      return { workflow_ir_by_id, component_binding };
+    },
+
+    compCollectRecipePayload() {
+      const riv = {};
+      const specs = this.compRecipeInputs?.recipe_inputs || {};
+      for (const key of this.compRecipeInputKeys()) {
+        if (!Object.prototype.hasOwnProperty.call(this.compInputValues, key)) continue;
+        let v = this.compInputValues[key];
+        if (v === undefined || v === null) continue;
+        if (typeof v === "string" && !v.trim()) continue;
+        const spec = specs[key];
+        if (spec && !spec.required) {
+          const hasDefault =
+            "default" in spec && spec.default !== null && spec.default !== undefined;
+          if (hasDefault && v === spec.default) continue;
+        }
+        riv[key] = v;
+      }
+      return riv;
+    },
+
+    async compLoadProfiles() {
+      this.compError = "";
+      const api = launchpadApiBase();
+      const r = await fetch(`${api}/composition/profiles`);
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        this.compError = data.message || r.statusText;
+        this.compProfiles = [];
+        return;
+      }
+      this.compProfiles = Array.isArray(data.profiles) ? data.profiles : [];
+      if (!this.compProfileId && this.compProfiles.length) {
+        this.compProfileId = this.compProfiles[0].profile_id || "";
+        await this.compLoadProfileDetail();
+      }
+    },
+
+    async compLoadProfileDetail() {
+      this.compError = "";
+      this.compDescribe = null;
+      this.compRecipeInputs = null;
+      this.compDraftResult = null;
+      this.compArtifactsResult = null;
+      const pid = (this.compProfileId || "").trim();
+      if (!pid) return;
+      this.loading = true;
+      try {
+        const api = launchpadApiBase();
+        const dRes = await fetch(
+          `${api}/composition/profiles/${encodeURIComponent(pid)}`
+        );
+        const d = await dRes.json().catch(() => ({}));
+        if (!dRes.ok) {
+          this.compError = d.message || dRes.statusText;
+          return;
+        }
+        this.compDescribe = d;
+        let overrides;
+        try {
+          overrides = this.compParseOverrides();
+        } catch (e) {
+          this.compError = e && e.message ? e.message : String(e);
+          return;
+        }
+        let body = { profile_id: pid };
+        if (overrides.workflow_ir_by_id) body.workflow_ir_by_id = overrides.workflow_ir_by_id;
+        if (overrides.component_binding) body.component_binding = overrides.component_binding;
+        const ri = await fetch(`${api}/composition/recipe-inputs`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const riData = await ri.json().catch(() => ({}));
+        if (!ri.ok) {
+          this.compError = riData.message || ri.statusText;
+          return;
+        }
+        this.compRecipeInputs = riData;
+        this.compInputValues = {};
+        this.compSeedInputDefaults();
+      } catch (e) {
+        this.compError = e && e.message ? e.message : String(e);
+      } finally {
+        this.loading = false;
+      }
+    },
+
+    async compOnProfileSelected() {
+      await this.compLoadProfileDetail();
+    },
+
+    async compBuildDraft() {
+      this.compError = "";
+      this.compDraftResult = null;
+      this.compArtifactsResult = null;
+      const pid = (this.compProfileId || "").trim();
+      if (!pid) {
+        this.compError = "Select a composition profile.";
+        return;
+      }
+      let overrides;
+      try {
+        overrides = this.compParseOverrides();
+      } catch (e) {
+        this.compError = e && e.message ? e.message : String(e);
+        return;
+      }
+      this.loading = true;
+      try {
+        const api = launchpadApiBase();
+        const body = {
+          profile_id: pid,
+          recipe_input_values: this.compCollectRecipePayload(),
+        };
+        if (overrides.workflow_ir_by_id) body.workflow_ir_by_id = overrides.workflow_ir_by_id;
+        if (overrides.component_binding) body.component_binding = overrides.component_binding;
+        const r = await fetch(`${api}/composition/draft`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          this.compError = data.message || r.statusText;
+          return;
+        }
+        this.compDraftResult = data;
+      } catch (e) {
+        this.compError = e && e.message ? e.message : String(e);
+      } finally {
+        this.loading = false;
+      }
+    },
+
+    async compBuildArtifacts() {
+      this.compError = "";
+      this.compArtifactsResult = null;
+      const pid = (this.compProfileId || "").trim();
+      if (!pid) {
+        this.compError = "Select a composition profile.";
+        return;
+      }
+      let overrides;
+      try {
+        overrides = this.compParseOverrides();
+      } catch (e) {
+        this.compError = e && e.message ? e.message : String(e);
+        return;
+      }
+      this.loading = true;
+      try {
+        const api = launchpadApiBase();
+        const body = {
+          profile_id: pid,
+          recipe_input_values: this.compCollectRecipePayload(),
+        };
+        if (overrides.workflow_ir_by_id) body.workflow_ir_by_id = overrides.workflow_ir_by_id;
+        if (overrides.component_binding) body.component_binding = overrides.component_binding;
+        const r = await fetch(`${api}/composition/artifacts`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          this.compError = data.message || r.statusText;
+          return;
+        }
+        this.compArtifactsResult = data;
+        if (data.recipe_draft) this.compDraftResult = data;
+      } catch (e) {
+        this.compError = e && e.message ? e.message : String(e);
+      } finally {
+        this.loading = false;
+      }
+    },
+
+    async compOnTabActivated() {
+      if (!this.compositionUtilsReady) return;
+      if (!this.compProfiles.length) await this.compLoadProfiles();
+    },
+
+    compManifestSummary() {
+      const m = this.compArtifactsResult?.generated_manifest;
+      if (!m || typeof m !== "object") return "";
+      try {
+        return JSON.stringify(m, null, 2);
+      } catch {
+        return "";
+      }
+    },
+
+    compScriptText() {
+      const s = this.compArtifactsResult?.generated_script;
+      if (s && typeof s.script === "string") return s.script;
+      return "";
     },
   };
 }

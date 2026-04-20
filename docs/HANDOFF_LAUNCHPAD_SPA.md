@@ -209,6 +209,42 @@ positive, non_negative), `params`, `message`
 - Manual: start server, visit `http://localhost:8765/launchpad/`, select a
   workflow, fill the form, verify the generated command.
 
+## Composition tab (Phase C)
+
+Third Launchpad tab: **Composition**. It is a separate workbench from **STAR
+workflows** and **Script Lane**. It lists constructor profiles and drives
+`bwb-nextflow-utils` headless constructor APIs (same checkout resolution as
+Script Lane: `BWB_NEXTFLOW_UTILS_ROOT` or sibling `bwb-nextflow-utils`).
+
+**HTTP API (JSON):**
+
+- `GET /launchpad/api/composition/profiles` — `list_constructor_profiles`
+- `GET /launchpad/api/composition/profiles/{profile_id}` — `describe_constructor_profile`
+- `POST /launchpad/api/composition/recipe-inputs` — `describe_constructor_profile_recipe_inputs` (optional `workflow_ir_by_id`, `component_binding`; bulk STAR defaults apply **STAR-suite** IR JSON from `mcp_server/launchpad/composition_ir/*.json` plus mkindex/align binding server-side—not `bwb-nextflow-utils` test fixtures)
+- `POST /launchpad/api/composition/draft` — `build_headless_recipe_draft` (+ optional `recipe_input_values` → literal bindings)
+- `POST /launchpad/api/composition/artifacts` — draft + validate / normalize / preview / script / manifest (side-effect free)
+
+**Capabilities:** `composition_utils_ready` mirrors `script_lane_utils_ready` (same backend import).
+
+**First-wave profiles** supported end-to-end (among others the backend lists):
+`star_bulk_de_deseq2_default_v0`, `ucsf_scrna_default_v0`, `ucsf_scrna_mex_default_v0`,
+`ucsf_scrna_full_default_v0`, `ucsf_scrna_mex_full_default_v0`.
+
+**Behavioral notes:**
+
+- Bulk STAR defaults are **STAR-suite-owned** (`mcp_server/launchpad/composition_ir/*.json`),
+  so Launchpad does not silently fall back to `bwb-nextflow-utils` test fixtures.
+- Optional/defaulted recipe inputs are shown in the UI but are **not injected into
+  the draft** unless the user explicitly sets them.
+- Invalid override JSON for `workflow_ir_by_id` / `component_binding` is rejected on
+  **Reload recipe inputs**, **Build draft**, and **Generate artifacts** (no silent fallback).
+
+**Intentionally deferred:** executing composed recipes from Launchpad, planner/chat
+integration, generic arbitrary composition authoring, and any server-side path
+probing beyond recipe validation rules.
+
+Adapter implementation: `mcp_server/launchpad/composition_bridge.py`.
+
 ## Out of scope
 
 - Remote execution (Launchpad generates commands, not runs them)

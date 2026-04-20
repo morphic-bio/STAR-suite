@@ -1,0 +1,150 @@
+{
+  "schema": "biodepot.workflow-ir/v0",
+  "metadata": {
+    "id": "star_bulk_pe_batch",
+    "name": "STAR Bulk Paired-End Batch Align + Counts",
+    "source_language": "star-suite",
+    "source_path": "mcp_server/launchpad/composition_ir/star_bulk_pe_batch.json",
+    "description": "STAR-suite–owned Workflow IR for Launchpad bulk composition (align role). Maintained next to mcp_server/workflows/star_bulk_pe_batch.yaml; update both when bulk PE / GeneCounts handoffs change."
+  },
+  "workflow": {
+    "inputs": {
+      "genome_index": {
+        "type": "directory",
+        "required": true,
+        "description": "STAR genome directory produced by star_genome_generate."
+      },
+      "reads": {
+        "type": "array",
+        "required": true,
+        "items": {
+          "type": "record",
+          "fields": {
+            "sample_id": {
+              "type": "string"
+            },
+            "read1": {
+              "type": "file"
+            },
+            "read2": {
+              "type": "file"
+            }
+          }
+        },
+        "description": "Per-sample paired-end FASTQ records."
+      },
+      "threads": {
+        "type": "int",
+        "required": false,
+        "default": 8,
+        "description": "--runThreadN; per-sample STAR worker threads."
+      },
+      "out_file_name_prefix": {
+        "type": "string",
+        "required": false,
+        "description": "STAR --outFileNamePrefix; coordinator-supplied output prefix."
+      }
+    },
+    "outputs": {
+      "bam": {
+        "type": "array",
+        "items": {
+          "type": "file"
+        },
+        "description": "Per-sample coordinate-sorted BAM files."
+      },
+      "counts": {
+        "type": "file",
+        "description": "Per-sample counts table emitted via STAR --quantMode GeneCounts; the bioc demo downstream helper consumes this."
+      }
+    },
+    "nodes": [
+      {
+        "id": "star_bulk_pe_batch",
+        "name": "star_bulk_pe_batch",
+        "kind": "module",
+        "module_ref": "star.bulk_pe_batch",
+        "inputs": {
+          "genome_index": {
+            "type": "directory",
+            "required": true
+          },
+          "reads": {
+            "type": "array",
+            "required": true,
+            "items": {
+              "type": "record",
+              "fields": {
+                "sample_id": {
+                  "type": "string"
+                },
+                "read1": {
+                  "type": "file"
+                },
+                "read2": {
+                  "type": "file"
+                }
+              }
+            }
+          },
+          "threads": {
+            "type": "int",
+            "required": false,
+            "default": 8
+          },
+          "out_file_name_prefix": {
+            "type": "string",
+            "required": false
+          }
+        },
+        "outputs": {
+          "bam": {
+            "type": "array",
+            "items": {
+              "type": "file"
+            }
+          },
+          "counts": {
+            "type": "file"
+          }
+        }
+      }
+    ],
+    "edges": [],
+    "subworkflows": [],
+    "conditions": []
+  },
+  "annotations": {
+    "star_suite": {
+      "workflow_id": "star_bulk_pe_batch",
+      "run_mode": "alignReads",
+      "notes": [
+        "Authoritative for STAR Launchpad Composition bulk defaults (not bwb-nextflow-utils fixtures).",
+        "Mirrors the parameter set surfaced by the STAR-suite MCP catalog for star_bulk_pe_batch.",
+        "Per-sample BAMs and a GeneCounts table are the handoff artifacts the bioc demo downstream Bioconductor helpers expect."
+      ]
+    }
+  },
+  "execution_hints": {
+    "nodes": {
+      "star_bulk_pe_batch": {
+        "iterate": {
+          "inputs": [
+            "reads"
+          ],
+          "mode": "element"
+        },
+        "gather": {
+          "outputs": [
+            "bam",
+            "counts"
+          ],
+          "mode": "list"
+        }
+      }
+    }
+  },
+  "optional_specs": {
+    "interactive": null
+  }
+}
