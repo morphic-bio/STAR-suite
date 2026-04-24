@@ -38,7 +38,9 @@ actionable; link to deeper docs rather than copying them.
 
 ## Build and Smoke Tests
 
-- Core build: `make core` (binary: `core/legacy/source/STAR`).
+- Core build: `make core` (binary: `core/legacy/source/STAR`). Default STAR does
+  **not** link libchromap; for in-process Chromap ATAC (`--chromapAtacEnable 1`),
+  build with `make core WITH_CHROMAP=1` (see `docs/LIBCHROMAP_CONTRACT.md`).
 - Flex tools: `make flex` or `make flex-tools`.
 - Feature tools: `make feature-barcodes-tools`.
 - CB/UB regression: `tests/run_cbub_regression_test.sh`.

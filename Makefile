@@ -39,6 +39,7 @@ help:
 	@echo "  make slam            Build core + SLAM tools"
 	@echo "  make tools           Build all external tools"
 	@echo "  make feature-barcodes-tools  Build feature barcode tools (assignBarcodes/demux)"
+	@echo "  make star-libchromap-contract Build STAR-owned libchromap contract runner"
 	@echo "  make                 Default build (core + common tools)"
 	@echo "  make default         Same as make"
 	@echo "  make default EXCLUDE=\"slam-tools\""

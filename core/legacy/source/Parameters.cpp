@@ -692,6 +692,19 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "crAssignSkipQcOutputs", &pfMulti.crAssignSkipQcOutputs));
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "crAssignFilteredBarcodes", &pfMulti.crAssignFilteredBarcodes));
     parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "crAssignAllowUnionWhitelist", &pfMulti.crAssignAllowUnionWhitelist));
+    parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "chromapAtacEnable", &chromapAtac.enabled));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacReferenceFasta", &chromapAtac.referenceFasta));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacIndex", &chromapAtac.chromapIndex));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacRead1", &chromapAtac.read1Csv));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacRead2", &chromapAtac.read2Csv));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacBarcode", &chromapAtac.barcodeCsv));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacBarcodeWhitelist", &chromapAtac.barcodeWhitelist));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacBarcodeTranslate", &chromapAtac.barcodeTranslate));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacOutputFragments", &chromapAtac.outputFragments));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacSummary", &chromapAtac.summary));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacTempDir", &chromapAtac.tempDir));
+    parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "chromapAtacThreads", &chromapAtac.threads));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacTn5ShiftMode", &chromapAtac.tn5ShiftMode));
 
     // Default module flag groups
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "defaultBulk", &defaultGroups.bulk));
@@ -815,6 +828,58 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
         }
         if (p->nameString == "crAssignAllowUnionWhitelist" && p->inputLevel < 0) {
             pfMulti.crAssignAllowUnionWhitelist = 0;
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "chromapAtacEnable" && p->inputLevel < 0) {
+            chromapAtac.enabled = 0;
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "chromapAtacReferenceFasta" && p->inputLevel < 0) {
+            chromapAtac.referenceFasta = "-";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "chromapAtacIndex" && p->inputLevel < 0) {
+            chromapAtac.chromapIndex = "-";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "chromapAtacRead1" && p->inputLevel < 0) {
+            chromapAtac.read1Csv = "-";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "chromapAtacRead2" && p->inputLevel < 0) {
+            chromapAtac.read2Csv = "-";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "chromapAtacBarcode" && p->inputLevel < 0) {
+            chromapAtac.barcodeCsv = "-";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "chromapAtacBarcodeWhitelist" && p->inputLevel < 0) {
+            chromapAtac.barcodeWhitelist = "-";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "chromapAtacBarcodeTranslate" && p->inputLevel < 0) {
+            chromapAtac.barcodeTranslate = "-";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "chromapAtacOutputFragments" && p->inputLevel < 0) {
+            chromapAtac.outputFragments = "-";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "chromapAtacSummary" && p->inputLevel < 0) {
+            chromapAtac.summary = "-";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "chromapAtacTempDir" && p->inputLevel < 0) {
+            chromapAtac.tempDir = "-";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "chromapAtacThreads" && p->inputLevel < 0) {
+            chromapAtac.threads = 1;
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "chromapAtacTn5ShiftMode" && p->inputLevel < 0) {
+            chromapAtac.tn5ShiftMode = "classical";
             p->inputLevel = 0;
         }
     }

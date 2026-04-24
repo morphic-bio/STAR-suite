@@ -1,4 +1,4 @@
-.PHONY: tools tools-clean vbem-tools yremove-tools feature-barcodes-tools process-features-tools process-features-lib star-feature-call
+.PHONY: tools tools-clean vbem-tools yremove-tools feature-barcodes-tools process-features-tools process-features-lib star-feature-call star-libchromap-contract
 .PHONY: vbem-compute-expected-gc vbem-sample-fld vbem-compute-gc-bias vbem-em-quant
 .PHONY: vbem-ec-filter-test vbem-tximport-compat vbem-trimvalidate
 
@@ -46,6 +46,9 @@ process-features-lib:
 star-feature-call:
 	$(MAKE) -C $(LEGACY_SRC_DIR) star_feature_call
 
+star-libchromap-contract:
+	$(MAKE) -C $(LIBCHROMAP_CONTRACT_DIR)
+
 tools-clean:
 	$(MAKE) -C $(VBEM_DIR)/tools/compute_expected_gc clean
 	$(MAKE) -C $(VBEM_DIR)/tools/sample_fld clean
@@ -60,3 +63,4 @@ tools-clean:
 	$(MAKE) -C $(YREMOVE_FASTQ_DIR)/tools/remove_y_reads clean
 	$(MAKE) -C $(FEATURE_BARCODES_DIR) clean
 	$(MAKE) -C $(PROCESS_FEATURES_DIR) clean
+	$(MAKE) -C $(LIBCHROMAP_CONTRACT_DIR) clean

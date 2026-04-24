@@ -1960,6 +1960,47 @@ crAssignSkipQcOutputs      0
                             0 ... write full feature QC outputs (default).
                             1 ... skip feature histograms and heatmaps, keep core matrices/stats.
 
+chromapAtacEnable           0
+    int:                    run in-process Chromap ATAC after STAR mapping completes (non-batch only).
+                            0 ... disabled (default; STAR behavior unchanged).
+                            1 ... run star::multiome::runChromapAtac with fixed thread count (no dynamic permits).
+
+chromapAtacReferenceFasta   -
+    string:                 reference FASTA for Chromap (required when chromapAtacEnable=1).
+
+chromapAtacIndex            -
+    string:                 Chromap index path (required when chromapAtacEnable=1).
+
+chromapAtacRead1            -
+    string:                 comma-separated ATAC read1 FASTQ paths (same order as read2/barcode lists).
+
+chromapAtacRead2            -
+    string:                 comma-separated ATAC read2 FASTQ paths.
+
+chromapAtacBarcode          -
+    string:                 comma-separated ATAC barcode FASTQ paths.
+
+chromapAtacBarcodeWhitelist -
+    string:                 barcode whitelist file for Chromap.
+
+chromapAtacBarcodeTranslate -
+    string:                 optional barcode translation table (- or empty to omit).
+
+chromapAtacOutputFragments  -
+    string:                 output fragments file path (Chromap BED-style fragments).
+
+chromapAtacSummary          -
+    string:                 optional Chromap summary path (- to omit).
+
+chromapAtacTempDir          -
+    string:                 optional temp directory for Chromap (- to use Chromap default).
+
+chromapAtacThreads          1
+    int:                    thread count passed to the Chromap contract (fixed; not coordinated with STAR permits).
+
+chromapAtacTn5ShiftMode     classical
+    string:                 Tn5 shift mode for Chromap: classical|symmetric (default classical).
+
 ### Default Module Flag Groups
 ### These flags apply predefined parameter bundles for common workflows.
 ### Explicit command-line options always override defaults from these groups.

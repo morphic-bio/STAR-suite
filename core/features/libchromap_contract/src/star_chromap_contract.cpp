@@ -1,0 +1,239 @@
+#include "star_chromap_contract.h"
+
+#include <cctype>
+#include <sstream>
+
+#include "libchromap.h"
+
+namespace star {
+namespace multiome {
+namespace {
+
+ChromapAtacResult makeResult(ChromapContractStatus status,
+                             int exit_code,
+                             const std::string &message,
+                             const ChromapAtacConfig &config) {
+  ChromapAtacResult result;
+  result.status = status;
+  result.exit_code = exit_code;
+  result.message = message;
+  result.output_path = config.output_path;
+  result.summary_path = config.summary_path;
+  return result;
+}
+
+std::string trimCopy(const std::string &input) {
+  size_t first = input.find_first_not_of(" \t\r\n");
+  if (first == std::string::npos) {
+    return "";
+  }
+  size_t last = input.find_last_not_of(" \t\r\n");
+  return input.substr(first, last - first + 1);
+}
+
+std::string lowerCopy(std::string s) {
+  for (size_t i = 0; i < s.size(); ++i) {
+    s[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(s[i])));
+  }
+  return s;
+}
+
+bool isUnsetToken(const std::string &input) {
+  const std::string value = lowerCopy(trimCopy(input));
+  return value.empty() || value == "-" || value == "none";
+}
+
+bool hasUnsetPath(const std::vector<std::string> &paths) {
+  for (size_t i = 0; i < paths.size(); ++i) {
+    if (isUnsetToken(paths[i])) {
+      return true;
+    }
+  }
+  return false;
+}
+
+std::vector<std::string> trimPaths(const std::vector<std::string> &paths) {
+  std::vector<std::string> trimmed;
+  trimmed.reserve(paths.size());
+  for (size_t i = 0; i < paths.size(); ++i) {
+    trimmed.push_back(trimCopy(paths[i]));
+  }
+  return trimmed;
+}
+
+std::string validateConfig(const ChromapAtacConfig &config) {
+  if (isUnsetToken(config.reference_fasta)) {
+    return "reference FASTA is required";
+  }
+  if (isUnsetToken(config.chromap_index)) {
+    return "Chromap index is required";
+  }
+  if (config.read1_fastqs.empty() || hasUnsetPath(config.read1_fastqs)) {
+    return "ATAC read1 FASTQs are required";
+  }
+  if (config.read2_fastqs.empty() || hasUnsetPath(config.read2_fastqs)) {
+    return "ATAC read2 FASTQs are required";
+  }
+  if (config.barcode_fastqs.empty() || hasUnsetPath(config.barcode_fastqs)) {
+    return "ATAC barcode FASTQs are required";
+  }
+  if (config.read1_fastqs.size() != config.read2_fastqs.size()) {
+    return "read1 and read2 FASTQ counts differ";
+  }
+  if (config.read1_fastqs.size() != config.barcode_fastqs.size()) {
+    return "read1 and barcode FASTQ counts differ";
+  }
+  if (isUnsetToken(config.barcode_whitelist)) {
+    return "ATAC barcode whitelist is required";
+  }
+  if (isUnsetToken(config.output_path)) {
+    return "Chromap output path is required";
+  }
+  if (config.threads < 1) {
+    return "thread count must be >= 1";
+  }
+  if (config.mapq_threshold < 0 || config.mapq_threshold > 255) {
+    return "MAPQ threshold must be in [0, 255]";
+  }
+  if ((config.permit_hooks.acquire == nullptr) !=
+      (config.permit_hooks.release == nullptr)) {
+    return "permit acquire and release hooks must be supplied together";
+  }
+  return "";
+}
+
+chromap::MappingOutputFormat toChromapOutputFormat(
+    ChromapOutputFormat format) {
+  switch (format) {
+    case ChromapOutputFormat::BED:
+      return chromap::MAPPINGFORMAT_BED;
+    case ChromapOutputFormat::TAGALIGN:
+      return chromap::MAPPINGFORMAT_TAGALIGN;
+    case ChromapOutputFormat::PAF:
+      return chromap::MAPPINGFORMAT_PAF;
+    case ChromapOutputFormat::SAM:
+      return chromap::MAPPINGFORMAT_SAM;
+    case ChromapOutputFormat::BAM:
+      return chromap::MAPPINGFORMAT_BAM;
+    case ChromapOutputFormat::CRAM:
+      return chromap::MAPPINGFORMAT_CRAM;
+    case ChromapOutputFormat::PAIRS:
+      return chromap::MAPPINGFORMAT_PAIRS;
+  }
+  return chromap::MAPPINGFORMAT_UNKNOWN;
+}
+
+chromap::MappingParameters toChromapParameters(
+    const ChromapAtacConfig &config) {
+  chromap::MappingParameters parameters;
+
+  parameters.reference_file_path = trimCopy(config.reference_fasta);
+  parameters.index_file_path = trimCopy(config.chromap_index);
+  parameters.read_file1_paths = trimPaths(config.read1_fastqs);
+  parameters.read_file2_paths = trimPaths(config.read2_fastqs);
+  parameters.barcode_file_paths = trimPaths(config.barcode_fastqs);
+  parameters.barcode_whitelist_file_path = trimCopy(config.barcode_whitelist);
+  if (!isUnsetToken(config.barcode_translate_table)) {
+    parameters.barcode_translate_table_file_path =
+        trimCopy(config.barcode_translate_table);
+  }
+  parameters.mapping_output_file_path = trimCopy(config.output_path);
+  if (!isUnsetToken(config.summary_path)) {
+    parameters.summary_metadata_file_path = trimCopy(config.summary_path);
+  }
+  if (!isUnsetToken(config.temp_dir)) {
+    parameters.temp_directory_path = trimCopy(config.temp_dir);
+  }
+  if (!isUnsetToken(config.read_format)) {
+    parameters.read_format = trimCopy(config.read_format);
+  }
+  if (!isUnsetToken(config.chromosome_order)) {
+    parameters.custom_rid_order_file_path = trimCopy(config.chromosome_order);
+  }
+  if (!isUnsetToken(config.pairs_flipping_chromosome_order)) {
+    parameters.pairs_flipping_custom_rid_order_file_path =
+        trimCopy(config.pairs_flipping_chromosome_order);
+  }
+
+  parameters.num_threads = config.threads;
+  parameters.max_insert_size = config.max_insert_size;
+  parameters.mapq_threshold = static_cast<uint8_t>(config.mapq_threshold);
+  parameters.min_read_length = config.min_read_length;
+  parameters.barcode_correction_error_threshold =
+      config.barcode_correction_error_threshold;
+  parameters.barcode_correction_probability_threshold =
+      config.barcode_correction_probability_threshold;
+  parameters.error_threshold = config.error_threshold;
+  parameters.min_num_seeds_required_for_mapping =
+      config.min_num_seeds_required_for_mapping;
+  parameters.drop_repetitive_reads = config.drop_repetitive_reads;
+
+  parameters.trim_adapters = config.trim_adapters;
+  parameters.remove_pcr_duplicates = config.remove_pcr_duplicates;
+  parameters.remove_pcr_duplicates_at_bulk_level =
+      !config.remove_pcr_duplicates_at_cell_level;
+  parameters.is_bulk_data = false;
+  parameters.Tn5_shift = config.tn5_shift;
+  if (config.tn5_shift_mode == Tn5ShiftMode::CLASSICAL) {
+    parameters.Tn5_forward_shift = 4;
+    parameters.Tn5_reverse_shift = -5;
+  } else {
+    parameters.Tn5_forward_shift = 4;
+    parameters.Tn5_reverse_shift = -4;
+  }
+  parameters.output_mappings_not_in_whitelist =
+      config.output_mappings_not_in_whitelist;
+  parameters.allocate_multi_mappings = config.allocate_multi_mappings;
+  parameters.only_output_unique_mappings = !config.allocate_multi_mappings;
+  parameters.low_memory_mode = config.low_memory_mode;
+  parameters.low_mem_ram_limit = config.low_memory_ram_limit;
+  parameters.skip_barcode_check = config.skip_barcode_check;
+  parameters.mapping_output_format = toChromapOutputFormat(config.output_format);
+
+  return parameters;
+}
+
+}  // namespace
+
+ChromapAtacResult runChromapAtac(const ChromapAtacConfig &config) {
+  const std::string validation_error = validateConfig(config);
+  if (!validation_error.empty()) {
+    return makeResult(ChromapContractStatus::INVALID_CONFIG, 2,
+                      validation_error, config);
+  }
+
+  if (config.permit_hooks.acquire != nullptr) {
+    return makeResult(
+        ChromapContractStatus::INVALID_CONFIG, 2,
+        "permit hooks are part of the contract but are not wired to Chromap yet",
+        config);
+  }
+
+  chromap::MappingParameters parameters = toChromapParameters(config);
+  const chromap::ChromapRunResult chromap_result =
+      chromap::RunAtacMapping(parameters);
+  if (!chromap_result.ok) {
+    return makeResult(ChromapContractStatus::CHROMAP_FAILED,
+                      chromap_result.exit_code == 0 ? 1
+                                                    : chromap_result.exit_code,
+                      chromap_result.message, config);
+  }
+
+  return makeResult(ChromapContractStatus::OK, 0, chromap_result.message,
+                    config);
+}
+
+const char *chromapContractStatusName(ChromapContractStatus status) {
+  switch (status) {
+    case ChromapContractStatus::OK:
+      return "OK";
+    case ChromapContractStatus::INVALID_CONFIG:
+      return "INVALID_CONFIG";
+    case ChromapContractStatus::CHROMAP_FAILED:
+      return "CHROMAP_FAILED";
+  }
+  return "UNKNOWN";
+}
+
+}  // namespace multiome
+}  // namespace star

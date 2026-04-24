@@ -67,6 +67,8 @@ Depend.list
 /core/features/vbem/tools/tximport_compat/libtximport/test_tximport
 /core/features/vbem/tools/trimvalidate/trimvalidate
 /core/features/yremove_fastq/tools/remove_y_reads/remove_y_reads
+/core/features/libchromap_contract/libstar_chromap_contract.a
+/core/features/libchromap_contract/star_libchromap_contract_runner
 /core/features/feature_barcodes/assignBarcodes
 /core/features/feature_barcodes/demux_bam
 /core/features/feature_barcodes/demux_fastq

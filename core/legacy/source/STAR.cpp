@@ -52,6 +52,7 @@
 #include "SnpMaskBuild.h"
 #include "PfMultiProcess.h"
 #include "PfMultiConfig.h"
+#include "star_chromap_orchestration.h"
 // Note: effective_length.h not included due to Transcriptome class name conflict
 // Use wrapper function instead
 #include "effective_length_wrapper.h"
@@ -855,6 +856,13 @@ int main(int argInN, char *argIn[])
     bool batchPaired = (P.readNends > 1);
     bool batchModeActive = P.batchMode;
     bool batchErrorRateFromBlank = (batchModeActive && P.quant.slam.yes && P.quant.slam.errorRateFromBlank);
+
+    if (!preflightStarChromapAtacIfEnabled(P, batchModeActive)) {
+        ostringstream errOut;
+        errOut << "EXITING because of fatal ERROR: invalid Chromap ATAC integration configuration\n"
+               << "SOLUTION: fix --chromapAtac* inputs, disable --chromapAtacEnable, or rebuild with WITH_CHROMAP=1.\n";
+        exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
+    }
     
     if (batchModeActive) {
         P.batchPaired = batchPaired;
@@ -2525,6 +2533,13 @@ int main(int argInN, char *argIn[])
                          << flush;
         string wigOutFileNamePrefix = P.outFileNamePrefix + "Signal";
         signalFromBAM(P.outBAMfileCoordName, wigOutFileNamePrefix, P);
+    }
+
+    if (!runStarChromapAtacIfEnabled(P, batchModeActive)) {
+        ostringstream errOut;
+        errOut << "EXITING because of fatal ERROR: Chromap ATAC integration failed\n"
+               << "SOLUTION: check --chromapAtac* inputs and Chromap logs above.\n";
+        exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_RUNTIME, P);
     }
 
     if (!batchModeActive) {

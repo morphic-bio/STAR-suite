@@ -645,6 +645,23 @@ class Parameters {
             int crAssignAllowUnionWhitelist; // Accept mixed NXT+TRU filtered barcode sets
         } pfMulti;
 
+        // In-process Chromap ATAC (STAR libchromap contract); off unless chromapAtacEnable=1
+        struct {
+            int enabled = 0;
+            string referenceFasta;
+            string chromapIndex;
+            string read1Csv;
+            string read2Csv;
+            string barcodeCsv;
+            string barcodeWhitelist;
+            string barcodeTranslate;
+            string outputFragments;
+            string summary;
+            string tempDir;
+            int threads = 1;
+            string tn5ShiftMode = "classical";
+        } chromapAtac;
+
         // Default module flag groups - apply predefined parameter bundles
         struct {
             string bulk;             // Yes/No - permissive bulk RNA-seq defaults
