@@ -656,10 +656,17 @@ class Parameters {
             string barcodeWhitelist;
             string barcodeTranslate;
             string outputFragments;
+            string secondaryFragments;
+            string outputFormat = "BED";
             string summary;
             string tempDir;
             int threads = 1;
+            int htsThreads = 0;
+            int sortBam = 0;
+            int writeIndex = 0;
+            uint64 sortBamRam = 8ULL * 1024 * 1024 * 1024;
             string tn5ShiftMode = "classical";
+            string startMode = "postMapping";
         } chromapAtac;
 
         // Default module flag groups - apply predefined parameter bundles

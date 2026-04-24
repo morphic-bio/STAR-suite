@@ -3,6 +3,9 @@
 #include "IncludeDefine.h"
 #include "Parameters.h"
 
+StarChromapAtacAsyncRun::StarChromapAtacAsyncRun() : impl_(nullptr) {}
+StarChromapAtacAsyncRun::~StarChromapAtacAsyncRun() {}
+
 bool preflightStarChromapAtacIfEnabled(Parameters &P, bool /*batchModeActive*/) {
   if (P.chromapAtac.enabled == 0) {
     return true;
@@ -13,6 +16,14 @@ bool preflightStarChromapAtacIfEnabled(Parameters &P, bool /*batchModeActive*/) 
   return false;
 }
 
-bool runStarChromapAtacIfEnabled(Parameters &P, bool batchModeActive) {
+bool startStarChromapAtacIfEnabled(Parameters &P,
+                                   bool batchModeActive,
+                                   StarChromapAtacAsyncRun & /*run*/) {
+  return preflightStarChromapAtacIfEnabled(P, batchModeActive);
+}
+
+bool runStarChromapAtacIfEnabled(Parameters &P,
+                                 bool batchModeActive,
+                                 StarChromapAtacAsyncRun & /*run*/) {
   return preflightStarChromapAtacIfEnabled(P, batchModeActive);
 }

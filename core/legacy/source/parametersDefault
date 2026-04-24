@@ -1987,7 +1987,13 @@ chromapAtacBarcodeTranslate -
     string:                 optional barcode translation table (- or empty to omit).
 
 chromapAtacOutputFragments  -
-    string:                 output fragments file path (Chromap BED-style fragments).
+    string:                 Chromap primary output path (BED/TagAlign fragments file, or SAM/BAM/CRAM path per chromapAtacOutputFormat).
+
+chromapAtacSecondaryFragments -
+    string:                 optional scATAC fragments path when chromapAtacOutputFormat is BAM or CRAM (dual output; must differ from chromapAtacOutputFragments). Pass - to omit.
+
+chromapAtacOutputFormat     BED
+    string:                 Chromap output format: BED|fragments|TagAlign|SAM|BAM|CRAM|pairs.
 
 chromapAtacSummary          -
     string:                 optional Chromap summary path (- to omit).
@@ -1998,8 +2004,25 @@ chromapAtacTempDir          -
 chromapAtacThreads          1
     int:                    thread count passed to the Chromap contract (fixed; not coordinated with STAR permits).
 
+chromapAtacHtsThreads       0
+    int:                    HTS compression threads for Chromap BAM/CRAM output (0 = Chromap default).
+
+chromapAtacSortBam          0
+    int:                    coordinate-sort Chromap BAM/CRAM output when 1.
+
+chromapAtacWriteIndex       0
+    int:                    write BAM/CRAM index when 1; requires chromapAtacSortBam=1.
+
+chromapAtacSortBamRam       8589934592
+    uint:                   RAM limit in bytes for Chromap BAM/CRAM sorting.
+
 chromapAtacTn5ShiftMode     classical
     string:                 Tn5 shift mode for Chromap: classical|symmetric (default classical).
+
+chromapAtacStartMode        postMapping
+    string:                 Chromap launch mode when chromapAtacEnable=1.
+                            postMapping ... run Chromap after STAR mapping (compatibility default).
+                            concurrent  ... launch Chromap before STAR mapping and join before final success.
 
 ### Default Module Flag Groups
 ### These flags apply predefined parameter bundles for common workflows.

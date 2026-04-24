@@ -57,6 +57,9 @@ struct ChromapAtacConfig {
   std::string barcode_whitelist;
   std::string barcode_translate_table;
   std::string output_path;
+  // Optional: with BAM/CRAM output_path, emit scATAC fragments to this path
+  // (one Chromap pass; same semantics as Chromap --atac-fragments).
+  std::string fragment_output_path;
   std::string summary_path;
   std::string temp_dir;
   std::string read_format;
@@ -72,6 +75,7 @@ struct ChromapAtacConfig {
   int error_threshold = 8;
   int min_num_seeds_required_for_mapping = 2;
   int drop_repetitive_reads = 500000;
+  int hts_threads = 0;
 
   bool trim_adapters = true;
   bool remove_pcr_duplicates = true;
@@ -83,6 +87,9 @@ struct ChromapAtacConfig {
   bool low_memory_mode = false;
   uint64_t low_memory_ram_limit = 0;
   bool skip_barcode_check = false;
+  bool sort_bam = false;
+  bool write_index = false;
+  uint64_t sort_bam_ram_limit = 8ULL * 1024 * 1024 * 1024;
 
   ChromapOutputFormat output_format = ChromapOutputFormat::BED;
   ChromapPermitHooks permit_hooks;

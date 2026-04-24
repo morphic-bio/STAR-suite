@@ -15,8 +15,10 @@ Orchestration (compile-time optional + runtime opt-in):
   `make core WITH_CHROMAP=1` (same flag for `STAR` / `STARstatic` / `gdb` in
   `core/legacy/source`).
 - **Runtime:** With a Chromap-enabled binary, `star_chromap_orchestration.cpp`
-  calls `star::multiome::runChromapAtac` after STAR mapping completes (after
-  optional wiggle output, before `Log.final.out` / “finished successfully”).
+  calls `star::multiome::runChromapAtac` either after STAR mapping completes
+  (`--chromapAtacStartMode postMapping`, default) or in a background thread
+  before STAR mapping (`--chromapAtacStartMode concurrent`). Concurrent mode
+  joins before `Log.final.out` / “finished successfully”.
 - **Preflight:** When `--chromapAtacEnable 1`, required Chromap inputs, batch
   compatibility, thread count, and Tn5 shift mode are checked before STAR starts
   expensive mapping work.
@@ -28,18 +30,28 @@ Orchestration (compile-time optional + runtime opt-in):
 - **Batch mode** (`--batchMode` / SLAM batch) with `--chromapAtacEnable 1` **fails**
   fast (Chromap is not supported in batch in this gate).
 - Required `--chromapAtac*` paths must not be `-` / empty / `none`; optional
-  fields (`summary`, `temp`, `translate`) may be `-`.
+  fields (`summary`, `temp`, `translate`, `chromapAtacSecondaryFragments`) may be `-`.
+- **Dual ATAC output (BAM/CRAM + fragments):** When `chromapAtacOutputFormat` is
+  `BAM` or `CRAM`, set `chromapAtacOutputFragments` to the primary BAM/CRAM path
+  and `chromapAtacSecondaryFragments` to the fragments file (e.g. `.tsv.gz`).
+  This maps to Chromap `--atac-fragments`. **Intended invariants:** retained
+  fragment lines match a fragment-only BED run with the same mapping options;
+  BAM record count is **exactly 2 ×** fragment rows (fragment-level BAM, not
+  the read-level `--BAM` path). Do **not** expect dual BAM to match a standalone
+  BAM-only row count.
 - **`--chromapAtacTn5ShiftMode`** must be exactly `classical` or `symmetric`
   (case-insensitive); other values error.
-- **Threads:** `--chromapAtacThreads` is passed straight through to the contract.
-  It is **not** coordinated with STAR `runThreadN` or dynamic permits (fixed
-  thread count for this integration gate).
+- **Threads:** `--chromapAtacThreads` and `--chromapAtacHtsThreads` are passed
+  straight through to the contract. They are **not** coordinated with STAR
+  `runThreadN` or dynamic permits (fixed thread counts for this integration
+  gate), so concurrent runs should split the machine thread budget explicitly.
 
 CLI / parameters file (all names also work in a parameters file):
 
 | Parameter | Role |
 |-----------|------|
-| `chromapAtacEnable` | `0` (default) off; `1` run Chromap after mapping (non-batch only). |
+| `chromapAtacEnable` | `0` (default) off; `1` run Chromap (non-batch only). |
+| `chromapAtacStartMode` | `postMapping` (default) or `concurrent`. |
 | `chromapAtacReferenceFasta` | Reference FASTA. |
 | `chromapAtacIndex` | Chromap index path. |
 | `chromapAtacRead1` | Comma-separated ATAC R1 FASTQs (same lane order as R2/barcode). |
@@ -47,10 +59,16 @@ CLI / parameters file (all names also work in a parameters file):
 | `chromapAtacBarcode` | Comma-separated ATAC barcode FASTQs. |
 | `chromapAtacBarcodeWhitelist` | Whitelist file. |
 | `chromapAtacBarcodeTranslate` | Optional translation table; `-` to omit. |
-| `chromapAtacOutputFragments` | Fragments output path. |
+| `chromapAtacOutputFragments` | Chromap **primary** output path: fragment file when format is BED/TagAlign, or SAM/BAM/CRAM path when format is SAM/BAM/CRAM. |
+| `chromapAtacSecondaryFragments` | Optional **secondary** scATAC fragments path when `chromapAtacOutputFormat` is `BAM` or `CRAM` (dual output in one Chromap pass). Must differ from `chromapAtacOutputFragments`; `-` to omit. |
+| `chromapAtacOutputFormat` | `BED`, `fragments`, `TagAlign`, `SAM`, `BAM`, `CRAM`, or `pairs`. |
 | `chromapAtacSummary` | Optional summary path; `-` to omit. |
 | `chromapAtacTempDir` | Optional temp dir; `-` for Chromap default. |
 | `chromapAtacThreads` | Chromap thread count (default `1`). |
+| `chromapAtacHtsThreads` | HTS compression threads for BAM/CRAM output. |
+| `chromapAtacSortBam` | Sort BAM/CRAM output when `1`. |
+| `chromapAtacWriteIndex` | Write BAM/CRAM index when `1`; requires sorted BAM/CRAM output. |
+| `chromapAtacSortBamRam` | Chromap BAM/CRAM sort RAM limit in bytes. |
 | `chromapAtacTn5ShiftMode` | `classical` or `symmetric`. |
 
 Build:
@@ -93,7 +111,9 @@ Validation order:
 4. Build `make core WITH_CHROMAP=1` and re-run the same fixture through STAR with
    `--chromapAtacEnable 1` and matching `--chromapAtac*` paths; compare fragments
    again.
-5. Run the end-to-end benchmark gate on the 100K multiome fixture, then the full
+5. Repeat the STAR run with `--chromapAtacStartMode concurrent` and a split
+   thread budget to validate same-process simultaneous execution.
+6. Run the end-to-end benchmark gate on the 100K multiome fixture, then the full
    10x demo dataset, before adding dynamic permit sharing.
 
 Initial validation:
@@ -116,3 +136,43 @@ STAR-integrated spot check (same tuples as CLI reference):
   `compare_fragment_tuples.sh` should report `exact_fragment_tuple_match` true and
   `per_barcode_counts_match` true. Summary CSV differences may still appear in
   cache telemetry fields documented in the multiomic runbook.
+
+**Example (dual fragments + sorted BAM, 100K fixture paths illustrative):**
+
+```text
+--chromapAtacEnable 1
+--chromapAtacOutputFormat BAM
+--chromapAtacSortBam 1
+--chromapAtacOutputFragments ./atac_possorted.bam
+--chromapAtacSecondaryFragments ./atac_fragments.tsv.gz
+... (reference, index, read1/read2/barcode CSVs, whitelist, threads, etc.)
+```
+
+Contract runner equivalent:
+
+```bash
+star_libchromap_contract_runner \
+  --ref genome.fa --index genome.index \
+  --read1 'R1_L001.fastq.gz,...' --read2 'R3_L001.fastq.gz,...' --barcode 'R2_L001.fastq.gz,...' \
+  --barcode-whitelist whitelist.txt \
+  --output ./atac_possorted.bam --output-format BAM --sort-bam \
+  --atac-fragments ./atac_fragments.tsv.gz --threads 8
+```
+
+Concurrent BAM smoke from a clean Chromap-enabled build (100K multiome fixture):
+
+- Run root: `/mnt/pikachu/atac-seq/benchmarks/pbmc_unsorted_3k_100k/star_chromap_concurrent_bam_final_20260424_162434`
+- Build: `make -C /mnt/pikachu/STAR-suite/core/legacy/source STAR WITH_CHROMAP=1`
+- Launch mode: `--chromapAtacStartMode concurrent`
+- Thread budget: STAR `--runThreadN 8`; Chromap `--chromapAtacThreads 8`;
+  Chromap HTS `--chromapAtacHtsThreads 2`
+- Wall time: `31.20 s`
+- Max RSS: `21,780,764 KB`
+- Output checks: GEX and ATAC BAMs pass `samtools quickcheck`
+- ATAC records: `640,088`
+- ATAC record MD5: `5d9a2f771d821e5f203bf3b2a28ab805`
+- ATAC idxstats MD5: `e1072493d751ead3ac0f6808c349a086`
+- GEX records: `246,287`
+- GEX record MD5: `9d6bd9242cd27c64978619de550d8edb`
+- Log ordering confirms Chromap starts before STAR mapping and STAR waits for it
+  before final success.

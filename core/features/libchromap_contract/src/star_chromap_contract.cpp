@@ -95,6 +95,35 @@ std::string validateConfig(const ChromapAtacConfig &config) {
   if (config.mapq_threshold < 0 || config.mapq_threshold > 255) {
     return "MAPQ threshold must be in [0, 255]";
   }
+  if (config.hts_threads < 0) {
+    return "HTS thread count must be >= 0";
+  }
+  if (config.write_index && !config.sort_bam) {
+    return "BAM/CRAM index output requires coordinate sorting";
+  }
+  if (config.sort_bam &&
+      config.output_format != ChromapOutputFormat::BAM &&
+      config.output_format != ChromapOutputFormat::CRAM) {
+    return "coordinate sorting requires BAM or CRAM output";
+  }
+  if (config.write_index &&
+      config.output_format != ChromapOutputFormat::BAM &&
+      config.output_format != ChromapOutputFormat::CRAM) {
+    return "index output requires BAM or CRAM output";
+  }
+  if (!isUnsetToken(config.fragment_output_path) &&
+      config.output_format != ChromapOutputFormat::BAM &&
+      config.output_format != ChromapOutputFormat::CRAM) {
+    return "fragment output path requires BAM or CRAM Chromap output";
+  }
+  if (!isUnsetToken(config.fragment_output_path) &&
+      !isUnsetToken(config.output_path) &&
+      trimCopy(config.fragment_output_path) == trimCopy(config.output_path)) {
+    return "fragment output path must differ from primary output path";
+  }
+  if (!isUnsetToken(config.fragment_output_path) && config.low_memory_mode) {
+    return "dual ATAC BAM/fragments output is not supported with low-memory mode";
+  }
   if ((config.permit_hooks.acquire == nullptr) !=
       (config.permit_hooks.release == nullptr)) {
     return "permit acquire and release hooks must be supplied together";
@@ -138,6 +167,10 @@ chromap::MappingParameters toChromapParameters(
         trimCopy(config.barcode_translate_table);
   }
   parameters.mapping_output_file_path = trimCopy(config.output_path);
+  if (!isUnsetToken(config.fragment_output_path)) {
+    parameters.atac_fragment_output_file_path =
+        trimCopy(config.fragment_output_path);
+  }
   if (!isUnsetToken(config.summary_path)) {
     parameters.summary_metadata_file_path = trimCopy(config.summary_path);
   }
@@ -167,6 +200,7 @@ chromap::MappingParameters toChromapParameters(
   parameters.min_num_seeds_required_for_mapping =
       config.min_num_seeds_required_for_mapping;
   parameters.drop_repetitive_reads = config.drop_repetitive_reads;
+  parameters.hts_threads = config.hts_threads;
 
   parameters.trim_adapters = config.trim_adapters;
   parameters.remove_pcr_duplicates = config.remove_pcr_duplicates;
@@ -189,6 +223,9 @@ chromap::MappingParameters toChromapParameters(
   parameters.low_mem_ram_limit = config.low_memory_ram_limit;
   parameters.skip_barcode_check = config.skip_barcode_check;
   parameters.mapping_output_format = toChromapOutputFormat(config.output_format);
+  parameters.sort_bam = config.sort_bam;
+  parameters.write_index = config.write_index;
+  parameters.sort_bam_ram_limit = config.sort_bam_ram_limit;
 
   return parameters;
 }

@@ -701,10 +701,17 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacBarcodeWhitelist", &chromapAtac.barcodeWhitelist));
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacBarcodeTranslate", &chromapAtac.barcodeTranslate));
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacOutputFragments", &chromapAtac.outputFragments));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacSecondaryFragments", &chromapAtac.secondaryFragments));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacOutputFormat", &chromapAtac.outputFormat));
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacSummary", &chromapAtac.summary));
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacTempDir", &chromapAtac.tempDir));
     parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "chromapAtacThreads", &chromapAtac.threads));
+    parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "chromapAtacHtsThreads", &chromapAtac.htsThreads));
+    parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "chromapAtacSortBam", &chromapAtac.sortBam));
+    parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "chromapAtacWriteIndex", &chromapAtac.writeIndex));
+    parArray.push_back(new ParameterInfoScalar<uint64>(-1, -1, "chromapAtacSortBamRam", &chromapAtac.sortBamRam));
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacTn5ShiftMode", &chromapAtac.tn5ShiftMode));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacStartMode", &chromapAtac.startMode));
 
     // Default module flag groups
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "defaultBulk", &defaultGroups.bulk));
@@ -866,6 +873,14 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
             chromapAtac.outputFragments = "-";
             p->inputLevel = 0;
         }
+        if (p->nameString == "chromapAtacSecondaryFragments" && p->inputLevel < 0) {
+            chromapAtac.secondaryFragments = "-";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "chromapAtacOutputFormat" && p->inputLevel < 0) {
+            chromapAtac.outputFormat = "BED";
+            p->inputLevel = 0;
+        }
         if (p->nameString == "chromapAtacSummary" && p->inputLevel < 0) {
             chromapAtac.summary = "-";
             p->inputLevel = 0;
@@ -878,8 +893,28 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
             chromapAtac.threads = 1;
             p->inputLevel = 0;
         }
+        if (p->nameString == "chromapAtacHtsThreads" && p->inputLevel < 0) {
+            chromapAtac.htsThreads = 0;
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "chromapAtacSortBam" && p->inputLevel < 0) {
+            chromapAtac.sortBam = 0;
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "chromapAtacWriteIndex" && p->inputLevel < 0) {
+            chromapAtac.writeIndex = 0;
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "chromapAtacSortBamRam" && p->inputLevel < 0) {
+            chromapAtac.sortBamRam = 8ULL * 1024 * 1024 * 1024;
+            p->inputLevel = 0;
+        }
         if (p->nameString == "chromapAtacTn5ShiftMode" && p->inputLevel < 0) {
             chromapAtac.tn5ShiftMode = "classical";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "chromapAtacStartMode" && p->inputLevel < 0) {
+            chromapAtac.startMode = "postMapping";
             p->inputLevel = 0;
         }
     }

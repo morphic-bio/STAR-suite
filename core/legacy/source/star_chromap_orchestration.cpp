@@ -10,6 +10,8 @@
 #include "star_chromap_contract.h"
 
 #include <cctype>
+#include <exception>
+#include <thread>
 
 namespace {
 
@@ -50,6 +52,16 @@ bool isUnsetToken(const std::string &input) {
   return t == "-" || t == "none";
 }
 
+bool isConcurrentStartMode(const std::string &input) {
+  return lowerCopy(trimCopy(input)) == "concurrent";
+}
+
+bool isPostMappingStartMode(const std::string &input) {
+  const std::string mode = lowerCopy(trimCopy(input));
+  return mode == "postmapping" || mode == "post_mapping" ||
+         mode == "sequential";
+}
+
 bool hasUnsetPath(const std::vector<std::string> &paths) {
   for (size_t i = 0; i < paths.size(); ++i) {
     if (isUnsetToken(paths[i])) {
@@ -77,6 +89,19 @@ bool validateAndBuildConfig(Parameters &P,
                      << P.chromapAtac.threads << ")\n";
     return false;
   }
+  if (P.chromapAtac.htsThreads < 0) {
+    P.inOut->logMain << "ERROR: --chromapAtacHtsThreads must be >= 0 (got "
+                     << P.chromapAtac.htsThreads << ")\n";
+    return false;
+  }
+
+  if (!isConcurrentStartMode(P.chromapAtac.startMode) &&
+      !isPostMappingStartMode(P.chromapAtac.startMode)) {
+    P.inOut->logMain
+        << "ERROR: --chromapAtacStartMode must be postMapping or concurrent (got \""
+        << P.chromapAtac.startMode << "\")\n";
+    return false;
+  }
 
   const std::string tn5Raw = trimCopy(P.chromapAtac.tn5ShiftMode);
   const std::string tn5 = lowerCopy(tn5Raw);
@@ -90,6 +115,56 @@ bool validateAndBuildConfig(Parameters &P,
         << "ERROR: --chromapAtacTn5ShiftMode must be classical or symmetric (got \""
         << tn5Raw << "\")\n";
     return false;
+  }
+
+  const std::string formatRaw = trimCopy(P.chromapAtac.outputFormat);
+  const std::string format = lowerCopy(formatRaw);
+  star::multiome::ChromapOutputFormat outputFormat;
+  if (format == "bed" || format == "fragments") {
+    outputFormat = star::multiome::ChromapOutputFormat::BED;
+  } else if (format == "tagalign") {
+    outputFormat = star::multiome::ChromapOutputFormat::TAGALIGN;
+  } else if (format == "sam") {
+    outputFormat = star::multiome::ChromapOutputFormat::SAM;
+  } else if (format == "bam") {
+    outputFormat = star::multiome::ChromapOutputFormat::BAM;
+  } else if (format == "cram") {
+    outputFormat = star::multiome::ChromapOutputFormat::CRAM;
+  } else if (format == "pairs") {
+    outputFormat = star::multiome::ChromapOutputFormat::PAIRS;
+  } else {
+    P.inOut->logMain
+        << "ERROR: --chromapAtacOutputFormat must be BED, fragments, TagAlign, SAM, BAM, CRAM, or pairs (got \""
+        << formatRaw << "\")\n";
+    return false;
+  }
+  if (P.chromapAtac.sortBam != 0 &&
+      outputFormat != star::multiome::ChromapOutputFormat::BAM &&
+      outputFormat != star::multiome::ChromapOutputFormat::CRAM) {
+    P.inOut->logMain
+        << "ERROR: --chromapAtacSortBam 1 requires --chromapAtacOutputFormat BAM or CRAM\n";
+    return false;
+  }
+  if (P.chromapAtac.writeIndex != 0 && P.chromapAtac.sortBam == 0) {
+    P.inOut->logMain
+        << "ERROR: --chromapAtacWriteIndex 1 requires --chromapAtacSortBam 1\n";
+    return false;
+  }
+
+  if (!isUnsetToken(P.chromapAtac.secondaryFragments)) {
+    if (outputFormat != star::multiome::ChromapOutputFormat::BAM &&
+        outputFormat != star::multiome::ChromapOutputFormat::CRAM) {
+      P.inOut->logMain
+          << "ERROR: --chromapAtacSecondaryFragments requires --chromapAtacOutputFormat BAM or CRAM\n";
+      return false;
+    }
+    const std::string primaryOut = trimCopy(P.chromapAtac.outputFragments);
+    const std::string secondaryOut = trimCopy(P.chromapAtac.secondaryFragments);
+    if (primaryOut == secondaryOut) {
+      P.inOut->logMain
+          << "ERROR: --chromapAtacSecondaryFragments must differ from --chromapAtacOutputFragments\n";
+      return false;
+    }
   }
 
   if (isUnsetToken(P.chromapAtac.referenceFasta)) {
@@ -155,6 +230,10 @@ bool validateAndBuildConfig(Parameters &P,
     cfg->barcode_translate_table = trimCopy(P.chromapAtac.barcodeTranslate);
   }
   cfg->output_path = trimCopy(P.chromapAtac.outputFragments);
+  cfg->fragment_output_path.clear();
+  if (!isUnsetToken(P.chromapAtac.secondaryFragments)) {
+    cfg->fragment_output_path = trimCopy(P.chromapAtac.secondaryFragments);
+  }
   if (!isUnsetToken(P.chromapAtac.summary)) {
     cfg->summary_path = trimCopy(P.chromapAtac.summary);
   }
@@ -162,23 +241,150 @@ bool validateAndBuildConfig(Parameters &P,
     cfg->temp_dir = trimCopy(P.chromapAtac.tempDir);
   }
   cfg->threads = P.chromapAtac.threads;
+  cfg->hts_threads = P.chromapAtac.htsThreads;
   cfg->tn5_shift_mode = tn5Mode;
+  cfg->output_format = outputFormat;
+  cfg->sort_bam = P.chromapAtac.sortBam != 0;
+  cfg->write_index = P.chromapAtac.writeIndex != 0;
+  cfg->sort_bam_ram_limit = P.chromapAtac.sortBamRam;
   return true;
 }
 
 }  // namespace
 
+struct StarChromapAtacAsyncRun::Impl {
+  explicit Impl(const star::multiome::ChromapAtacConfig &config)
+      : cfg(config),
+        worker([this]() {
+          try {
+            result = star::multiome::runChromapAtac(cfg);
+          } catch (...) {
+            exception = std::current_exception();
+          }
+        }) {}
+
+  star::multiome::ChromapAtacConfig cfg;
+  star::multiome::ChromapAtacResult result;
+  std::exception_ptr exception;
+  std::thread worker;
+};
+
+StarChromapAtacAsyncRun::StarChromapAtacAsyncRun() : impl_(nullptr) {}
+
+StarChromapAtacAsyncRun::~StarChromapAtacAsyncRun() {
+  if (impl_ != nullptr) {
+    if (impl_->worker.joinable()) {
+      impl_->worker.join();
+    }
+    delete impl_;
+    impl_ = nullptr;
+  }
+}
+
 bool preflightStarChromapAtacIfEnabled(Parameters &P, bool batchModeActive) {
   return validateAndBuildConfig(P, batchModeActive, nullptr);
 }
 
-bool runStarChromapAtacIfEnabled(Parameters &P, bool batchModeActive) {
+bool startStarChromapAtacIfEnabled(Parameters &P,
+                                   bool batchModeActive,
+                                   StarChromapAtacAsyncRun &run) {
   star::multiome::ChromapAtacConfig cfg;
   if (!validateAndBuildConfig(P, batchModeActive, &cfg)) {
     return false;
   }
   if (P.chromapAtac.enabled == 0) {
     return true;
+  }
+  if (!isConcurrentStartMode(P.chromapAtac.startMode)) {
+    return true;
+  }
+  if (run.impl_ != nullptr) {
+    P.inOut->logMain
+        << "ERROR: Chromap ATAC concurrent run was already started\n";
+    return false;
+  }
+
+  P.inOut->logMain << timeMonthDayTime()
+                   << " ..... starting concurrent in-process Chromap ATAC "
+                      "(libchromap contract)\n"
+                   << flush;
+
+  try {
+    run.impl_ = new StarChromapAtacAsyncRun::Impl(cfg);
+  } catch (const std::exception &error) {
+    P.inOut->logMain << "ERROR: failed to start concurrent Chromap ATAC: "
+                     << error.what() << "\n";
+    return false;
+  } catch (...) {
+    P.inOut->logMain
+        << "ERROR: failed to start concurrent Chromap ATAC: unknown exception\n";
+    return false;
+  }
+
+  return true;
+}
+
+bool runStarChromapAtacIfEnabled(Parameters &P,
+                                 bool batchModeActive,
+                                 StarChromapAtacAsyncRun &run) {
+  if (run.impl_ != nullptr) {
+    P.inOut->logMain << timeMonthDayTime()
+                     << " ..... waiting for concurrent in-process Chromap ATAC\n"
+                     << flush;
+
+    if (run.impl_->worker.joinable()) {
+      run.impl_->worker.join();
+    }
+
+    if (run.impl_->exception) {
+      try {
+        std::rethrow_exception(run.impl_->exception);
+      } catch (const std::exception &error) {
+        P.inOut->logMain
+            << "ERROR: concurrent Chromap ATAC threw exception: "
+            << error.what() << "\n";
+      } catch (...) {
+        P.inOut->logMain
+            << "ERROR: concurrent Chromap ATAC threw unknown exception\n";
+      }
+      delete run.impl_;
+      run.impl_ = nullptr;
+      return false;
+    }
+
+    const star::multiome::ChromapAtacResult result = run.impl_->result;
+    delete run.impl_;
+    run.impl_ = nullptr;
+
+    if (result.status != star::multiome::ChromapContractStatus::OK) {
+      P.inOut->logMain << "ERROR: Chromap ATAC contract failed: status="
+                       << star::multiome::chromapContractStatusName(result.status)
+                       << " exit_code=" << result.exit_code;
+      if (!result.message.empty()) {
+        P.inOut->logMain << " message=" << result.message;
+      }
+      P.inOut->logMain << "\n";
+      return false;
+    }
+
+    P.inOut->logMain << timeMonthDayTime()
+                     << " ..... finished concurrent in-process Chromap ATAC successfully\n"
+                     << flush;
+    return true;
+  }
+
+  star::multiome::ChromapAtacConfig cfg;
+  if (!validateAndBuildConfig(P, batchModeActive, &cfg)) {
+    return false;
+  }
+  if (P.chromapAtac.enabled == 0) {
+    return true;
+  }
+  if (isConcurrentStartMode(P.chromapAtac.startMode)) {
+    P.inOut->logMain
+        << "ERROR: --chromapAtacStartMode concurrent was requested, but Chromap "
+           "was not started before STAR mapping\n";
+    return false;
   }
 
   P.inOut->logMain << timeMonthDayTime()

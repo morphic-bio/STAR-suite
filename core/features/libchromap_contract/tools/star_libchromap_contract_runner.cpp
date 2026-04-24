@@ -14,6 +14,9 @@ void usage() {
          "--read1 CSV --read2 CSV --barcode CSV --barcode-whitelist FILE "
          "--output FILE [options]\n"
       << "\nOptions:\n"
+      << "  --output-format BED|BAM|CRAM|SAM|TagAlign|pairs (default BED)\n"
+      << "  --sort-bam            coordinate-sort BAM/CRAM (needs --output-format BAM|CRAM)\n"
+      << "  --atac-fragments FILE secondary scATAC fragments path (dual mode; BAM|CRAM only)\n"
       << "  --summary FILE\n"
       << "  --barcode-translate FILE\n"
       << "  --temp-dir DIR\n"
@@ -87,6 +90,28 @@ int main(int argc, char **argv) {
       config.barcode_translate_table = argv[++i];
     } else if (arg == "--output" && requireValue(argc, argv, i)) {
       config.output_path = argv[++i];
+    } else if (arg == "--output-format" && requireValue(argc, argv, i)) {
+      const std::string f = argv[++i];
+      if (f == "BED" || f == "bed" || f == "fragments") {
+        config.output_format = star::multiome::ChromapOutputFormat::BED;
+      } else if (f == "TagAlign" || f == "tagalign") {
+        config.output_format = star::multiome::ChromapOutputFormat::TAGALIGN;
+      } else if (f == "SAM" || f == "sam") {
+        config.output_format = star::multiome::ChromapOutputFormat::SAM;
+      } else if (f == "BAM" || f == "bam") {
+        config.output_format = star::multiome::ChromapOutputFormat::BAM;
+      } else if (f == "CRAM" || f == "cram") {
+        config.output_format = star::multiome::ChromapOutputFormat::CRAM;
+      } else if (f == "pairs") {
+        config.output_format = star::multiome::ChromapOutputFormat::PAIRS;
+      } else {
+        std::cerr << "Invalid --output-format: " << f << "\n";
+        return 2;
+      }
+    } else if (arg == "--sort-bam") {
+      config.sort_bam = true;
+    } else if (arg == "--atac-fragments" && requireValue(argc, argv, i)) {
+      config.fragment_output_path = argv[++i];
     } else if (arg == "--summary" && requireValue(argc, argv, i)) {
       config.summary_path = argv[++i];
     } else if (arg == "--temp-dir" && requireValue(argc, argv, i)) {
@@ -114,6 +139,19 @@ int main(int argc, char **argv) {
     } else {
       std::cerr << "Unknown or incomplete option: " << arg << "\n";
       usage();
+      return 2;
+    }
+  }
+
+  if (!config.fragment_output_path.empty()) {
+    if (config.output_format != star::multiome::ChromapOutputFormat::BAM &&
+        config.output_format != star::multiome::ChromapOutputFormat::CRAM) {
+      std::cerr
+          << "Config error: --atac-fragments requires --output-format BAM or CRAM\n";
+      return 2;
+    }
+    if (config.fragment_output_path == config.output_path) {
+      std::cerr << "Config error: --atac-fragments must differ from --output\n";
       return 2;
     }
   }

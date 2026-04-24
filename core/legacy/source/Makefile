@@ -62,11 +62,15 @@ CHROMAP_CXXFLAGS := -I$(LIBCHROMAP_CONTRACT_INC) -DWITH_CHROMAP=1
 CHROMAP_ORCH_OBJ := star_chromap_orchestration.o
 CHROMAP_LINK_LINE := $(LIBCHROMAP_CONTRACT_LIB) $(CHROMAP_LIB) $(CHROMAP_SYS_HTS) $(CHROMAP_EXTRA_LIBS)
 CHROMAP_STAR_DEPS := $(LIBCHROMAP_CONTRACT_LIB) $(CHROMAP_LIB)
+STAR_HTSLIB_INC :=
+STAR_HTSLIB_LINK :=
 else
 CHROMAP_CXXFLAGS := -DWITH_CHROMAP=0
 CHROMAP_ORCH_OBJ := star_chromap_orchestration_stub.o
 CHROMAP_LINK_LINE :=
 CHROMAP_STAR_DEPS :=
+STAR_HTSLIB_INC := -Ihtslib
+STAR_HTSLIB_LINK := -Lhtslib -Bstatic -lhts -Bdynamic
 endif
 
 ifeq ($(WITH_CHROMAP),1)
@@ -86,7 +90,7 @@ endif
 VPATH := $(FLEX_SRC_DIR) $(SLAM_SRC_DIR) $(SLAM_LIBEM_DIR) $(VBEM_SRC_DIR) $(BAMSORT_SRC_DIR)
 
 # pre-defined flags
-LDFLAGS_shared := -pthread -Lhtslib -Bstatic -lhts -Bdynamic -lz -lssl -lcrypto
+LDFLAGS_shared := -pthread $(STAR_HTSLIB_LINK) -lz -lssl -lcrypto
 # "Static" build follows upstream STAR behavior: link STAR objects and vendored
 # htslib statically while keeping system libs dynamic for broad compatibility.
 LIBGOMP_STATIC := $(shell $(CXX) -print-file-name=libgomp.a 2>/dev/null)
@@ -133,7 +137,7 @@ CXXFLAGS_SIMD ?= -mavx2
 # Include flex (klib/libflex), vbem (libtrim/libem), slam, and process_features headers
 # Include current directory for IncludeDefine.h and other source headers
 PROCESS_FEATURES_INC := $(ROOT_DIR)/core/features/process_features/include
-CXXFLAGS_common := -std=c++11 -fopenmp -I. -Ihtslib -I$(FLEX_SRC_DIR) -I$(LIBFLEX_DIR) -I$(LIBSCRNA_INC) -I$(VBEM_SRC_DIR) -I$(LIBEM_DIR) -I$(SLAM_SRC_DIR) -I$(BAMSORT_SRC_DIR) -I$(PROCESS_FEATURES_INC) $(CHROMAP_CXXFLAGS) $(COMPTIMEPLACE) $(GIT_BRANCH_COMMIT_DIFF)
+CXXFLAGS_common := -std=c++11 -fopenmp -I. $(STAR_HTSLIB_INC) -I$(FLEX_SRC_DIR) -I$(LIBFLEX_DIR) -I$(LIBSCRNA_INC) -I$(VBEM_SRC_DIR) -I$(LIBEM_DIR) -I$(SLAM_SRC_DIR) -I$(BAMSORT_SRC_DIR) -I$(PROCESS_FEATURES_INC) $(CHROMAP_CXXFLAGS) $(COMPTIMEPLACE) $(GIT_BRANCH_COMMIT_DIFF)
 CXXFLAGS_main := -O3 $(CXXFLAGS_common)
 CXXFLAGS_gdb := -O0 -g3 $(CXXFLAGS_common)
 
@@ -425,6 +429,9 @@ ctest: test
 # This applies to files like SoloFeature_flexfilter.cpp that need the third_party include path
 # Subdirectories (opal/, solo/, flex/) have their own specific rules that take precedence
 %.o: %.cpp
+	$(CXX) -c $(CPPFLAGS) $(CXXFLAGS) $(CXXFLAGS_common) $< -o $@
+
+%.o: %.c
 	$(CXX) -c $(CPPFLAGS) $(CXXFLAGS) $(CXXFLAGS_common) $< -o $@
 
 flex/%.o: flex/%.cpp

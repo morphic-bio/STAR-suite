@@ -69,7 +69,11 @@
 
 #include "twoPassRunPass1.h"
 
+#if defined(WITH_CHROMAP) && WITH_CHROMAP
+#include <htslib/sam.h>
+#else
 #include "htslib/htslib/sam.h"
+#endif
 
 namespace {
 
@@ -862,6 +866,14 @@ int main(int argInN, char *argIn[])
         errOut << "EXITING because of fatal ERROR: invalid Chromap ATAC integration configuration\n"
                << "SOLUTION: fix --chromapAtac* inputs, disable --chromapAtacEnable, or rebuild with WITH_CHROMAP=1.\n";
         exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
+    }
+
+    StarChromapAtacAsyncRun chromapAtacAsyncRun;
+    if (!startStarChromapAtacIfEnabled(P, batchModeActive, chromapAtacAsyncRun)) {
+        ostringstream errOut;
+        errOut << "EXITING because of fatal ERROR: could not start Chromap ATAC integration\n"
+               << "SOLUTION: check --chromapAtac* inputs and --chromapAtacStartMode.\n";
+        exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_RUNTIME, P);
     }
     
     if (batchModeActive) {
@@ -2535,7 +2547,7 @@ int main(int argInN, char *argIn[])
         signalFromBAM(P.outBAMfileCoordName, wigOutFileNamePrefix, P);
     }
 
-    if (!runStarChromapAtacIfEnabled(P, batchModeActive)) {
+    if (!runStarChromapAtacIfEnabled(P, batchModeActive, chromapAtacAsyncRun)) {
         ostringstream errOut;
         errOut << "EXITING because of fatal ERROR: Chromap ATAC integration failed\n"
                << "SOLUTION: check --chromapAtac* inputs and Chromap logs above.\n";
