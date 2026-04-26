@@ -56,6 +56,10 @@ struct ChromapAtacConfig {
   std::vector<std::string> barcode_fastqs;
   std::string barcode_whitelist;
   std::string barcode_translate_table;
+  // If true, the barcode translate table is read in natural <from_bc>\t<to_bc>
+  // order (col1 = source / hash key). Default false preserves the historical
+  // Chromap convention where col1 is the destination and col2 is the key.
+  bool barcode_translate_from_first_column = false;
   std::string output_path;
   // Optional: with BAM/CRAM output_path, emit scATAC fragments to this path
   // (one Chromap pass; same semantics as Chromap --atac-fragments).

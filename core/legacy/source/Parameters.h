@@ -655,6 +655,11 @@ class Parameters {
             string barcodeCsv;
             string barcodeWhitelist;
             string barcodeTranslate;
+            // If 1, the barcode translate table is read in natural
+            // <from_bc>\t<to_bc> order (col1 = source / hash key). Default 0
+            // preserves the historical Chromap convention where col2 is the
+            // hash key.
+            int barcodeTranslateFromFirst = 0;
             string outputFragments;
             string secondaryFragments;
             string outputFormat = "BED";

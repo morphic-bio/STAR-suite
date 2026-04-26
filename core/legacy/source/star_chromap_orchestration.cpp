@@ -229,6 +229,8 @@ bool validateAndBuildConfig(Parameters &P,
   if (!isUnsetToken(P.chromapAtac.barcodeTranslate)) {
     cfg->barcode_translate_table = trimCopy(P.chromapAtac.barcodeTranslate);
   }
+  cfg->barcode_translate_from_first_column =
+      P.chromapAtac.barcodeTranslateFromFirst != 0;
   cfg->output_path = trimCopy(P.chromapAtac.outputFragments);
   cfg->fragment_output_path.clear();
   if (!isUnsetToken(P.chromapAtac.secondaryFragments)) {

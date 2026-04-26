@@ -166,6 +166,8 @@ chromap::MappingParameters toChromapParameters(
     parameters.barcode_translate_table_file_path =
         trimCopy(config.barcode_translate_table);
   }
+  parameters.barcode_translate_from_first_column =
+      config.barcode_translate_from_first_column;
   parameters.mapping_output_file_path = trimCopy(config.output_path);
   if (!isUnsetToken(config.fragment_output_path)) {
     parameters.atac_fragment_output_file_path =

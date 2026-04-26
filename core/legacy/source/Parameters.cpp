@@ -700,6 +700,7 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacBarcode", &chromapAtac.barcodeCsv));
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacBarcodeWhitelist", &chromapAtac.barcodeWhitelist));
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacBarcodeTranslate", &chromapAtac.barcodeTranslate));
+    parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "chromapAtacBarcodeTranslateFromFirst", &chromapAtac.barcodeTranslateFromFirst));
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacOutputFragments", &chromapAtac.outputFragments));
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacSecondaryFragments", &chromapAtac.secondaryFragments));
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacOutputFormat", &chromapAtac.outputFormat));
@@ -867,6 +868,10 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
         }
         if (p->nameString == "chromapAtacBarcodeTranslate" && p->inputLevel < 0) {
             chromapAtac.barcodeTranslate = "-";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "chromapAtacBarcodeTranslateFromFirst" && p->inputLevel < 0) {
+            chromapAtac.barcodeTranslateFromFirst = 0;
             p->inputLevel = 0;
         }
         if (p->nameString == "chromapAtacOutputFragments" && p->inputLevel < 0) {

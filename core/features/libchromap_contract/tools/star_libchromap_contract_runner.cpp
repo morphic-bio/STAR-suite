@@ -19,6 +19,10 @@ void usage() {
       << "  --atac-fragments FILE secondary scATAC fragments path (dual mode; BAM|CRAM only)\n"
       << "  --summary FILE\n"
       << "  --barcode-translate FILE\n"
+      << "  --barcode-translate-from-first\n"
+      << "        Read translation table as <from_bc>\\t<to_bc> (col1 is the\n"
+      << "        hash key / source). Default is the historical Chromap\n"
+      << "        convention <to_bc>\\t<from_bc> (col2 is the hash key).\n"
       << "  --temp-dir DIR\n"
       << "  --threads N\n"
       << "  --tn5-shift-mode classical|symmetric\n"
@@ -88,6 +92,8 @@ int main(int argc, char **argv) {
       config.barcode_whitelist = argv[++i];
     } else if (arg == "--barcode-translate" && requireValue(argc, argv, i)) {
       config.barcode_translate_table = argv[++i];
+    } else if (arg == "--barcode-translate-from-first") {
+      config.barcode_translate_from_first_column = true;
     } else if (arg == "--output" && requireValue(argc, argv, i)) {
       config.output_path = argv[++i];
     } else if (arg == "--output-format" && requireValue(argc, argv, i)) {
