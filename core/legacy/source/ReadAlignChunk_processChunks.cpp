@@ -396,12 +396,13 @@ void ReadAlignChunk::processChunks() {//read-map-write chunks
         const bool permitEnabled = g_threadChunks.mapPermitEnabled();
         uint64_t waitNs = 0;
         if (permitEnabled) {
-            if (P.variableThreads == 1 && P.variableThreadsRetuneEveryAcquires <= 0) {
-                const int requestedPermits = (P.dynamicThreadConstMapPermits > 0)
-                    ? std::min(P.dynamicThreadConstMapPermits, P.runThreadN)
-                    : P.runThreadN;
-                g_threadChunks.mapPermitSetTargetPermits(requestedPermits);
-            }
+            // Pool size is configured once at startup by mapThreadsSpawn.cpp
+            // (and may be re-targeted by a deliberately-ticking controller
+            // such as PfPermitController). Re-targeting from every map-worker
+            // acquire is policy in the hot path and silently re-clamped the
+            // pool to runThreadN, undoing the wider chromapAtac budget.
+            // See multiomic-atac-scrna plans/2026-04-27-atac-permits-controller-followups.md
+            // Step 3.
             waitNs = g_threadChunks.mapPermitAcquire();
         }
         const auto workStart = std::chrono::steady_clock::now();
