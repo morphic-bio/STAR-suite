@@ -155,6 +155,7 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "dynamicThreadMapFloor", &dynamicThreadMapFloor));
     parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "dynamicThreadAtacFloor", &dynamicThreadAtacFloor));
     parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "dynamicThreadFeatureFloor", &dynamicThreadFeatureFloor));
+    parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "dynamicThreadAtacController", &dynamicThreadAtacController));
     parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "variableThreads", &variableThreads));
     parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "variableThreadsRetuneEveryAcquires", &variableThreadsRetuneEveryAcquires));
     parArray.push_back(new ParameterInfoVector <int> (-1, -1, "variableThreadsPermitSequence", &variableThreadsPermitSequence));
@@ -1659,6 +1660,12 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
     if (dynamicThreadMapFloor < 0 || dynamicThreadAtacFloor < 0 || dynamicThreadFeatureFloor < 0) {
         ostringstream errOut;
         errOut <<"EXITING: fatal input ERROR: per-domain floors (--dynamicThread{Map,Atac,Feature}Floor) must be >=0\n";
+        exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+    }
+    if (dynamicThreadAtacController != 0 && dynamicThreadAtacController != 1) {
+        ostringstream errOut;
+        errOut <<"EXITING: fatal input ERROR: --dynamicThreadAtacController must be 0 or 1, user-defined value="
+               <<dynamicThreadAtacController<<"\n";
         exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
     }
     if (dynamicThreadConstMapPermits < 0) {

@@ -65,6 +65,19 @@ dynamicThreadFeatureFloor       0
     int: borrowable per-domain floor for process_features FEATURE permits.
          Same semantics as dynamicThreadMapFloor. 0 disables the FEATURE floor.
 
+dynamicThreadAtacController     0
+    int: enable the ATAC drain-time controller (Step 6).
+         When 1, the chromap-side sampler thread also runs a rate-balance
+         controller that adjusts MAP/ATAC floors based on observed
+         work-unit drain rates so both domains finish their mapping
+         phase at roughly the same time. Mirrors the pf eta/chunked
+         controller for FEATURE/MAP that has been the load-balancing
+         core of pf/STAR since the start.
+         Requires dynamicThreadInterface=1 + chromapAtacEnable=1 + at
+         least one of dynamicThread{Map,Atac}Floor > 0.
+                                0 ... disabled (default)
+                                1 ... enable rate-balance controller (~1 retune per sampler tick)
+
 variableThreads                 0
     int: allow runtime updates to active mapping permits when dynamicThreadInterface=1.
                                 0 ... fixed map permits.
