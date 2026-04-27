@@ -44,6 +44,14 @@ class Parameters {
         int dynamicThreadConstMapPermits = 0; // <=0 means use runThreadN
         int dynamicThreadTelemetry = 0; // 0: off, 1: on
         int dynamicThreadTelemetryIntervalSec = 10; // periodic mapPermitSnapshot emit (sec) when chromapAtacEnabled+dynamicThreadTelemetry; 0 disables periodic sampler (end-of-run summary still emits)
+        // Per-domain borrowable permit floors (Step 5a). Each domain reserves
+        // at LEAST `floor` concurrent permits whenever it has waiters; surplus
+        // permits are fully shared. 0 disables that domain's floor. Setting
+        // any floor > 0 activates the floor-aware acquire/release path with
+        // per-domain CVs (eliminates the notify_one wakeup-fairness pathology).
+        int dynamicThreadMapFloor = 0;
+        int dynamicThreadAtacFloor = 0;
+        int dynamicThreadFeatureFloor = 0;
         int variableThreads = 0; // 0: fixed map permits, 1: allow runtime map permit retuning
         int variableThreadsRetuneEveryAcquires = 0; // <=0 disables auto-retune sequence
         vector<int> variableThreadsPermitSequence; // sequence of permit targets applied at retune cadence

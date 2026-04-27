@@ -48,6 +48,23 @@ dynamicThreadTelemetryIntervalSec 10
                                 0 ... disable periodic sampler (end-of-run summary still emits)
                                 10 ... default; 30 recommended after tuning is done
 
+dynamicThreadMapFloor           0
+    int: borrowable per-domain floor for STAR GEX MAP permits.
+         When this domain has waiters, the permit pool reserves at least
+         N concurrent active permits for it; surplus permits are fully
+         shared with other domains. 0 disables the MAP floor.
+         Setting any of dynamicThread{Map,Atac,Feature}Floor > 0 activates
+         the floor-aware acquire/release path with per-domain CVs (eliminates
+         the notify_one wakeup-fairness pathology under contention).
+
+dynamicThreadAtacFloor          0
+    int: borrowable per-domain floor for chromap ATAC permits.
+         Same semantics as dynamicThreadMapFloor. 0 disables the ATAC floor.
+
+dynamicThreadFeatureFloor       0
+    int: borrowable per-domain floor for process_features FEATURE permits.
+         Same semantics as dynamicThreadMapFloor. 0 disables the FEATURE floor.
+
 variableThreads                 0
     int: allow runtime updates to active mapping permits when dynamicThreadInterface=1.
                                 0 ... fixed map permits.
