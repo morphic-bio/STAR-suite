@@ -4,16 +4,50 @@
 #error "star_chromap_orchestration.cpp must be compiled with WITH_CHROMAP=1"
 #endif
 
+#include "GlobalVariables.h"
 #include "IncludeDefine.h"
 #include "Parameters.h"
+#include "ThreadControl.h"
 #include "TimeFunctions.h"
 #include "star_chromap_contract.h"
 
 #include <cctype>
+#include <cstdint>
 #include <exception>
 #include <thread>
 
 namespace {
+
+// Permit-hook shims for the chromap libchromap_contract that mirror the
+// process_features pf_api shape (PfMultiAssign.cpp). Each chromap PE worker
+// thread acquires one permit per mini-batch (~64 mapped pairs) via these
+// functions, which forward to ThreadControl's PermitDomain::ATAC counters.
+ThreadControl::PermitHookContext kAtacPermitHookContext{
+    ThreadControl::PermitDomain::ATAC};
+
+extern "C" uint64_t chromapStarDynamicPermitAcquire(void *hookCtx) {
+  const ThreadControl::PermitHookContext *permitCtx =
+      static_cast<const ThreadControl::PermitHookContext *>(hookCtx);
+  const ThreadControl::PermitDomain domain =
+      (permitCtx == nullptr) ? ThreadControl::PermitDomain::ATAC
+                             : permitCtx->domain;
+  return g_threadChunks.mapPermitAcquireForDomain(domain);
+}
+
+extern "C" void chromapStarDynamicPermitRelease(
+    void *hookCtx,
+    uint64_t waitNs,
+    uint64_t workUnits,
+    uint64_t workBytes,
+    uint64_t workNs) {
+  const ThreadControl::PermitHookContext *permitCtx =
+      static_cast<const ThreadControl::PermitHookContext *>(hookCtx);
+  const ThreadControl::PermitDomain domain =
+      (permitCtx == nullptr) ? ThreadControl::PermitDomain::ATAC
+                             : permitCtx->domain;
+  g_threadChunks.mapPermitReleaseForDomain(domain, waitNs, workUnits, workBytes,
+                                           workNs);
+}
 
 std::string lowerCopy(std::string s) {
   for (size_t i = 0; i < s.size(); ++i) {
@@ -296,6 +330,21 @@ bool validateAndBuildConfig(Parameters &P,
   cfg->macs3_frag_uint8_counts = P.chromapAtac.macs3FragUint8Counts != 0;
   cfg->macs3_frag_peaks_source = macs3FragPeaksSource;
   cfg->macs3_frag_low_mem = P.chromapAtac.macs3FragLowMem != 0;
+
+  // Wire the ATAC permit shims into the contract whenever STAR's dynamic
+  // thread interface is enabled, mirroring how PfMultiProcess sets
+  // assignOpts.enableStarDynamicPermitHooks = (P.dynamicThreadInterface == 1).
+  // chromap's MapPairedEndReads then issues acquire/release per per-thread
+  // mini-batch (~64 read pairs).
+  if (P.dynamicThreadInterface == 1) {
+    cfg->permit_hooks.acquire = chromapStarDynamicPermitAcquire;
+    cfg->permit_hooks.release = chromapStarDynamicPermitRelease;
+    cfg->permit_hooks.hook_ctx = &kAtacPermitHookContext;
+  } else {
+    cfg->permit_hooks.acquire = nullptr;
+    cfg->permit_hooks.release = nullptr;
+    cfg->permit_hooks.hook_ctx = nullptr;
+  }
   return true;
 }
 
@@ -419,6 +468,19 @@ bool runStarChromapAtacIfEnabled(Parameters &P,
     P.inOut->logMain << timeMonthDayTime()
                      << " ..... finished concurrent in-process Chromap ATAC successfully\n"
                      << flush;
+
+    // ATAC permit telemetry summary (only when dynamicThreadInterface=1).
+    if (P.dynamicThreadInterface == 1) {
+      const auto snap = g_threadChunks.mapPermitSnapshot();
+      P.inOut->logMain
+          << "ATAC permit telemetry: acquireCalls=" << snap.atacDomain.acquireCalls
+          << " waitNsTotal=" << snap.atacDomain.waitNsTotal
+          << " waitNsMax=" << snap.atacDomain.waitNsMax
+          << " workUnitsTotal=" << snap.atacDomain.workUnitsTotal
+          << " workNsTotal=" << snap.atacDomain.workNsTotal
+          << " workNsMax=" << snap.atacDomain.workNsMax << "\n"
+          << flush;
+    }
     return true;
   }
 

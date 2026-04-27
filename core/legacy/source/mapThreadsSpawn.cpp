@@ -321,10 +321,19 @@ void mapThreadsSpawn (Parameters &P, ReadAlignChunk** RAchunk) {
     const bool interfaceEnabled = (P.dynamicThreadInterface == 1);
     const bool telemetryEnabled = (P.dynamicThreadTelemetry == 1);
     const bool variableThreadsEnabled = (P.variableThreads == 1);
-    const int configuredPermits = (P.dynamicThreadConstMapPermits > 0)
-        ? std::min(P.dynamicThreadConstMapPermits, P.runThreadN)
+    // Permit-pool budget. With chromapAtac concurrent the pool spans STAR's
+    // GEX MAP/FEATURE workers AND chromap's ATAC workers, so the budget is
+    // runThreadN + chromapAtac.threads (a separate thread budget than runThreadN
+    // alone). When chromapAtac is off, pool stays at runThreadN. The user can
+    // override via --dynamicThreadConstMapPermits, which is now honored as-is
+    // (no clamp to runThreadN); pass 0 for the auto-sized default.
+    const int permitTotalThreads = (P.chromapAtac.enabled == 1)
+        ? (P.runThreadN + std::max(0, P.chromapAtac.threads))
         : P.runThreadN;
-    g_threadChunks.mapPermitConfigure(interfaceEnabled, P.runThreadN, configuredPermits, telemetryEnabled, variableThreadsEnabled);
+    const int configuredPermits = (P.dynamicThreadConstMapPermits > 0)
+        ? P.dynamicThreadConstMapPermits
+        : permitTotalThreads;
+    g_threadChunks.mapPermitConfigure(interfaceEnabled, permitTotalThreads, configuredPermits, telemetryEnabled, variableThreadsEnabled);
     g_threadChunks.mapPermitConfigureCpuAware(
         interfaceEnabled && P.dynamicThreadPfControllerCpuAware == 1,
         P.dynamicThreadPfControllerCpuSampleMs,

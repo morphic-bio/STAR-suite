@@ -34,23 +34,21 @@ enum class ChromapContractStatus {
   CHROMAP_FAILED
 };
 
-struct ChromapPermitWork {
-  uint64_t work_units = 0;
-  uint64_t work_bytes = 0;
-  uint64_t elapsed_ns = 0;
-};
-
-typedef bool (*ChromapPermitAcquireFn)(void *context,
-                                       uint32_t requested_permits,
-                                       ChromapPermitWork *work);
-typedef void (*ChromapPermitReleaseFn)(void *context,
-                                       uint32_t released_permits,
-                                       const ChromapPermitWork *work);
+// Acquire returns waitNs (time blocked while obtaining the permit). Release
+// reports waitNs from the matching acquire plus per-batch telemetry. Signatures
+// mirror process_features' pf_permit_{acquire,release}_fn so the same STAR-side
+// shim shape can serve both domains.
+typedef uint64_t (*ChromapPermitAcquireFn)(void *hook_ctx);
+typedef void (*ChromapPermitReleaseFn)(void *hook_ctx,
+                                       uint64_t wait_ns,
+                                       uint64_t work_units,
+                                       uint64_t work_bytes,
+                                       uint64_t work_ns);
 
 struct ChromapPermitHooks {
   ChromapPermitAcquireFn acquire = nullptr;
   ChromapPermitReleaseFn release = nullptr;
-  void *context = nullptr;
+  void *hook_ctx = nullptr;
 };
 
 struct ChromapAtacConfig {
