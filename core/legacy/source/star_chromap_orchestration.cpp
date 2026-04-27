@@ -151,6 +151,20 @@ bool validateAndBuildConfig(Parameters &P,
     return false;
   }
 
+  const std::string peaksSourceRaw = trimCopy(P.chromapAtac.macs3FragPeaksSource);
+  const std::string peaksSource = lowerCopy(peaksSourceRaw);
+  star::multiome::ChromapMacs3FragPeaksSource macs3FragPeaksSource;
+  if (peaksSource == "file") {
+    macs3FragPeaksSource = star::multiome::ChromapMacs3FragPeaksSource::FILE;
+  } else if (peaksSource == "memory") {
+    macs3FragPeaksSource = star::multiome::ChromapMacs3FragPeaksSource::MEMORY;
+  } else {
+    P.inOut->logMain
+        << "ERROR: --chromapAtacMacs3FragPeaksSource must be file or memory (got \""
+        << peaksSourceRaw << "\")\n";
+    return false;
+  }
+
   if (!isUnsetToken(P.chromapAtac.secondaryFragments)) {
     if (outputFormat != star::multiome::ChromapOutputFormat::BAM &&
         outputFormat != star::multiome::ChromapOutputFormat::CRAM) {
@@ -197,6 +211,20 @@ bool validateAndBuildConfig(Parameters &P,
     P.inOut->logMain
         << "ERROR: --chromapAtacOutputFragments is required when --chromapAtacEnable 1\n";
     return false;
+  }
+  if (P.chromapAtac.callMacs3FragPeaks != 0) {
+    if (isUnsetToken(P.chromapAtac.macs3FragPeaksOutput)) {
+      P.inOut->logMain
+          << "ERROR: --chromapAtacMacs3FragPeaksOutput is required when "
+             "--chromapAtacCallMacs3FragPeaks 1\n";
+      return false;
+    }
+    if (isUnsetToken(P.chromapAtac.macs3FragSummitsOutput)) {
+      P.inOut->logMain
+          << "ERROR: --chromapAtacMacs3FragSummitsOutput is required when "
+             "--chromapAtacCallMacs3FragPeaks 1\n";
+      return false;
+    }
   }
 
   const std::vector<std::string> r1 = splitCsvPaths(P.chromapAtac.read1Csv);
@@ -249,6 +277,25 @@ bool validateAndBuildConfig(Parameters &P,
   cfg->sort_bam = P.chromapAtac.sortBam != 0;
   cfg->write_index = P.chromapAtac.writeIndex != 0;
   cfg->sort_bam_ram_limit = P.chromapAtac.sortBamRam;
+  cfg->low_memory_mode = P.chromapAtac.lowMem != 0;
+  cfg->low_memory_ram_limit = P.chromapAtac.lowMemRam;
+  cfg->call_macs3_frag_peaks = P.chromapAtac.callMacs3FragPeaks != 0;
+  if (!isUnsetToken(P.chromapAtac.macs3FragPeaksOutput)) {
+    cfg->macs3_frag_peaks_output = trimCopy(P.chromapAtac.macs3FragPeaksOutput);
+  }
+  if (!isUnsetToken(P.chromapAtac.macs3FragSummitsOutput)) {
+    cfg->macs3_frag_summits_output = trimCopy(P.chromapAtac.macs3FragSummitsOutput);
+  }
+  if (!isUnsetToken(P.chromapAtac.macs3FragKeepIntermediates)) {
+    cfg->macs3_frag_keep_intermediates_dir =
+        trimCopy(P.chromapAtac.macs3FragKeepIntermediates);
+  }
+  cfg->macs3_frag_pvalue = P.chromapAtac.macs3FragPvalue;
+  cfg->macs3_frag_min_length = P.chromapAtac.macs3FragMinLength;
+  cfg->macs3_frag_max_gap = P.chromapAtac.macs3FragMaxGap;
+  cfg->macs3_frag_uint8_counts = P.chromapAtac.macs3FragUint8Counts != 0;
+  cfg->macs3_frag_peaks_source = macs3FragPeaksSource;
+  cfg->macs3_frag_low_mem = P.chromapAtac.macs3FragLowMem != 0;
   return true;
 }
 

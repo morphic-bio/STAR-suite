@@ -5,6 +5,8 @@ CHROMAP_DIR ?= /mnt/pikachu/Chromap-suite
 CHROMAP_LIB ?= $(CHROMAP_DIR)/libchromap.a
 CHROMAP_SRC_DIR := $(CHROMAP_DIR)/src
 CHROMAP_HTSLIB_DIR := $(CHROMAP_DIR)/third_party/htslib
+LIBMACS3_INCLUDE_DIR ?= $(CHROMAP_DIR)/third_party/libMACS3/include
+LIBMACS3_LIB ?= $(CHROMAP_DIR)/third_party/libMACS3/lib/libmacs3.a
 
 SRC_DIR := src
 INC_DIR := include
@@ -15,7 +17,7 @@ LIB := libstar_chromap_contract.a
 RUNNER := star_libchromap_contract_runner
 
 CXXFLAGS ?= -std=c++11 -Wall -Wextra -O3 -fopenmp
-CXXFLAGS += -I$(INC_DIR) -I$(CHROMAP_SRC_DIR) -I$(CHROMAP_HTSLIB_DIR)
+CXXFLAGS += -I$(INC_DIR) -I$(CHROMAP_SRC_DIR) -I$(CHROMAP_HTSLIB_DIR) -I$(LIBMACS3_INCLUDE_DIR)
 LDFLAGS ?=
 CHROMAP_LDFLAGS := -L$(CHROMAP_HTSLIB_DIR) -lhts -lm -lz -lpthread -lcurl -lcrypto -lbz2 -llzma -ldeflate
 
@@ -42,7 +44,7 @@ $(LIB): $(LIB_OBJS)
 	$(AR) rcs $@ $^
 
 $(RUNNER): chromap-lib $(LIB) $(RUNNER_OBJS)
-	$(CXX) $(CXXFLAGS) $(RUNNER_OBJS) $(LIB) $(CHROMAP_LIB) -o $@ $(LDFLAGS) $(CHROMAP_LDFLAGS)
+	$(CXX) $(CXXFLAGS) $(RUNNER_OBJS) $(LIB) $(CHROMAP_LIB) $(LIBMACS3_LIB) -o $@ $(LDFLAGS) $(CHROMAP_LDFLAGS)
 
 clean:
 	rm -rf $(OBJ_DIR) $(LIB) $(RUNNER)
