@@ -341,6 +341,16 @@ void mapThreadsSpawn (Parameters &P, ReadAlignChunk** RAchunk) {
     );
     g_threadChunks.mapPermitConfigureRetunePlan(P.variableThreadsPermitSequence, P.variableThreadsRetuneEveryAcquires);
 
+    // Per-domain borrowable floors (Step 5a). Index order must match
+    // ThreadControl::permitDomainIndex(): MAP=0, FEATURE=1, ATAC=2.
+    {
+        std::vector<int> domainFloors(3, 0);
+        domainFloors[0] = std::max(0, P.dynamicThreadMapFloor);
+        domainFloors[1] = std::max(0, P.dynamicThreadFeatureFloor);
+        domainFloors[2] = std::max(0, P.dynamicThreadAtacFloor);
+        g_threadChunks.mapPermitConfigureDomainFloors(domainFloors);
+    }
+
     if (interfaceEnabled) {
         pthread_mutex_lock(&g_threadChunks.mutexLogMain);
         P.inOut->logMain << "Dynamic thread interface enabled: map permits=" << configuredPermits

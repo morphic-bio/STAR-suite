@@ -95,6 +95,14 @@ public:
     void mapPermitConfigure(bool enabled, int totalThreads, int configuredPermits, bool telemetryEnabled, bool variableThreads);
     void mapPermitConfigureCpuAware(bool enabled, int sampleIntervalMs, double emaAlpha);
     void mapPermitConfigureRetunePlan(const std::vector<int> &permitSequence, int retuneEveryAcquires);
+    // Per-domain borrowable floors (Step 5a in
+    // multiomic-atac-scrna plans/2026-04-27-atac-permits-controller-followups.md
+    // v6). Each domain reserves at LEAST `floor` concurrent permits whenever
+    // it has waiters; surplus permits are fully shared. floors must be
+    // length mapPermitDomainCount, indexed by permitDomainIndex(domain).
+    // Pass all-zero floors (or skip configuring) to disable the floor-aware
+    // path and fall through to the legacy global-cv behavior.
+    void mapPermitConfigureDomainFloors(const std::vector<int> &floorsByDomainIndex);
     void mapPermitSetTargetPermits(int targetPermits);
     bool mapPermitEnabled() const;
     bool mapPermitCpuMaybeSample();
@@ -137,6 +145,16 @@ private:
     int mapPermitAvailable = 0;
     mutable std::mutex mapPermitMutex;
     std::condition_variable mapPermitCv;
+    // Per-domain borrowable-floor state. Active iff any element of
+    // mapPermitDomainFloor is > 0 (mapPermitFloorsActive). The floor-aware
+    // acquire/release path uses one CV per domain so release can wake the
+    // specific domain whose floor is unmet, eliminating the notify_one()
+    // wakeup-fairness pathology under contention.
+    bool mapPermitFloorsActive = false;
+    int mapPermitDomainFloor[mapPermitDomainCount]{};
+    int mapPermitDomainInUse[mapPermitDomainCount]{};
+    int mapPermitDomainWaiters[mapPermitDomainCount]{};
+    std::condition_variable mapPermitDomainCv[mapPermitDomainCount];
 
     std::atomic<uint64_t> mapPermitAcquireCalls{0};
     std::atomic<uint64_t> mapPermitAcquireOrdinal{0};
