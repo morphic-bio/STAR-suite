@@ -121,8 +121,13 @@ std::string validateConfig(const ChromapAtacConfig &config) {
       trimCopy(config.fragment_output_path) == trimCopy(config.output_path)) {
     return "fragment output path must differ from primary output path";
   }
-  if (!isUnsetToken(config.fragment_output_path) && config.low_memory_mode) {
-    return "dual ATAC BAM/fragments output is not supported with low-memory mode";
+  if (config.call_macs3_frag_peaks) {
+    if (isUnsetToken(config.macs3_frag_peaks_output)) {
+      return "MACS3 FRAG narrowPeak output is required when peak calling is enabled";
+    }
+    if (isUnsetToken(config.macs3_frag_summits_output)) {
+      return "MACS3 FRAG summits output is required when peak calling is enabled";
+    }
   }
   if ((config.permit_hooks.acquire == nullptr) !=
       (config.permit_hooks.release == nullptr)) {
@@ -228,6 +233,28 @@ chromap::MappingParameters toChromapParameters(
   parameters.sort_bam = config.sort_bam;
   parameters.write_index = config.write_index;
   parameters.sort_bam_ram_limit = config.sort_bam_ram_limit;
+  parameters.call_macs3_frag_peaks = config.call_macs3_frag_peaks;
+  if (!isUnsetToken(config.macs3_frag_peaks_output)) {
+    parameters.macs3_frag_peaks_narrowpeak_path =
+        trimCopy(config.macs3_frag_peaks_output);
+  }
+  if (!isUnsetToken(config.macs3_frag_summits_output)) {
+    parameters.macs3_frag_peaks_summits_path =
+        trimCopy(config.macs3_frag_summits_output);
+  }
+  if (!isUnsetToken(config.macs3_frag_keep_intermediates_dir)) {
+    parameters.macs3_frag_keep_intermediates_dir =
+        trimCopy(config.macs3_frag_keep_intermediates_dir);
+  }
+  parameters.macs3_frag_pvalue = config.macs3_frag_pvalue;
+  parameters.macs3_frag_min_length = config.macs3_frag_min_length;
+  parameters.macs3_frag_max_gap = config.macs3_frag_max_gap;
+  parameters.macs3_frag_uint8_counts = config.macs3_frag_uint8_counts;
+  parameters.macs3_frag_peaks_source =
+      (config.macs3_frag_peaks_source == ChromapMacs3FragPeaksSource::MEMORY)
+          ? chromap::Macs3FragPeaksSource::kMemory
+          : chromap::Macs3FragPeaksSource::kFile;
+  parameters.macs3_frag_low_mem = config.macs3_frag_low_mem;
 
   return parameters;
 }

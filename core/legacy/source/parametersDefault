@@ -2016,6 +2016,15 @@ chromapAtacWriteIndex       0
 chromapAtacSortBamRam       8589934592
     uint:                   RAM limit in bytes for Chromap BAM/CRAM sorting.
 
+chromapAtacLowMem           0
+    int:                    enable Chromap mapping low-memory mode (overflow-spill to disk) when 1. Reduces peak RSS at the cost of disk I/O. Compatible with --atac-fragments dual output and BED-only output.
+
+chromapAtacLowMemRam        0
+    uint:                   RAM threshold in bytes for chromapAtacLowMem before spilling overflow files. 0 means use Chromap's defaults (1 GB / 512 MB).
+
+chromapAtacMacs3FragLowMem  0
+    int:                    use libMACS3 sweep-line workspace (in-memory streaming, ~tens of KB peak) instead of the events workspace (~3.8 GB on PBMC 3k) when 1. Sweep is ~73 s slower on this hardware but saves ~3.8 GB peak RSS; use together with chromapAtacLowMem=1 for the full lo-mem stack.
+
 chromapAtacTn5ShiftMode     classical
     string:                 Tn5 shift mode for Chromap: classical|symmetric (default classical).
 

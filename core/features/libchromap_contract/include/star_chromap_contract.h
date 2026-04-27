@@ -23,6 +23,11 @@ enum class Tn5ShiftMode {
   SYMMETRIC
 };
 
+enum class ChromapMacs3FragPeaksSource {
+  FILE,
+  MEMORY
+};
+
 enum class ChromapContractStatus {
   OK,
   INVALID_CONFIG,
@@ -94,6 +99,18 @@ struct ChromapAtacConfig {
   bool sort_bam = false;
   bool write_index = false;
   uint64_t sort_bam_ram_limit = 8ULL * 1024 * 1024 * 1024;
+
+  bool call_macs3_frag_peaks = false;
+  std::string macs3_frag_peaks_output;
+  std::string macs3_frag_summits_output;
+  std::string macs3_frag_keep_intermediates_dir;
+  double macs3_frag_pvalue = 1e-5;
+  int macs3_frag_min_length = 200;
+  int macs3_frag_max_gap = 30;
+  bool macs3_frag_uint8_counts = true;
+  ChromapMacs3FragPeaksSource macs3_frag_peaks_source =
+      ChromapMacs3FragPeaksSource::FILE;
+  bool macs3_frag_low_mem = false;
 
   ChromapOutputFormat output_format = ChromapOutputFormat::BED;
   ChromapPermitHooks permit_hooks;

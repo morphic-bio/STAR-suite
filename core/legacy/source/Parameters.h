@@ -670,6 +670,18 @@ class Parameters {
             int sortBam = 0;
             int writeIndex = 0;
             uint64 sortBamRam = 8ULL * 1024 * 1024 * 1024;
+            int lowMem = 0;
+            uint64 lowMemRam = 0;
+            int callMacs3FragPeaks = 0;
+            string macs3FragPeaksOutput;
+            string macs3FragSummitsOutput;
+            string macs3FragKeepIntermediates;
+            double macs3FragPvalue = 1e-5;
+            int macs3FragMinLength = 200;
+            int macs3FragMaxGap = 30;
+            int macs3FragUint8Counts = 1;
+            string macs3FragPeaksSource = "file";
+            int macs3FragLowMem = 0;
             string tn5ShiftMode = "classical";
             string startMode = "postMapping";
         } chromapAtac;

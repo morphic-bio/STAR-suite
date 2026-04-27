@@ -18,6 +18,16 @@ void usage() {
       << "  --sort-bam            coordinate-sort BAM/CRAM (needs --output-format BAM|CRAM)\n"
       << "  --atac-fragments FILE secondary scATAC fragments path (dual mode; BAM|CRAM only)\n"
       << "  --summary FILE\n"
+      << "  --call-macs3-frag-peaks\n"
+      << "  --macs3-frag-peaks-output FILE\n"
+      << "  --macs3-frag-summits-output FILE\n"
+      << "  --macs3-frag-pvalue FLOAT\n"
+      << "  --macs3-frag-min-length N\n"
+      << "  --macs3-frag-max-gap N\n"
+      << "  --macs3-frag-peaks-source file|memory\n"
+      << "  --macs3-frag-keep-intermediates DIR\n"
+      << "  --macs3-frag-no-uint8-counts\n"
+      << "  --macs3-frag-low-mem\n"
       << "  --barcode-translate FILE\n"
       << "  --barcode-translate-from-first\n"
       << "        Read translation table as <from_bc>\\t<to_bc> (col1 is the\n"
@@ -66,6 +76,16 @@ int parseInt(const std::string &value, const std::string &name) {
     std::exit(2);
   }
   return static_cast<int>(parsed);
+}
+
+double parseDouble(const std::string &value, const std::string &name) {
+  char *end = nullptr;
+  const double parsed = std::strtod(value.c_str(), &end);
+  if (end == value.c_str() || *end != '\0') {
+    std::cerr << "Invalid number for " << name << ": " << value << "\n";
+    std::exit(2);
+  }
+  return parsed;
 }
 
 }  // namespace
@@ -120,6 +140,36 @@ int main(int argc, char **argv) {
       config.fragment_output_path = argv[++i];
     } else if (arg == "--summary" && requireValue(argc, argv, i)) {
       config.summary_path = argv[++i];
+    } else if (arg == "--call-macs3-frag-peaks") {
+      config.call_macs3_frag_peaks = true;
+    } else if (arg == "--macs3-frag-peaks-output" && requireValue(argc, argv, i)) {
+      config.macs3_frag_peaks_output = argv[++i];
+    } else if (arg == "--macs3-frag-summits-output" && requireValue(argc, argv, i)) {
+      config.macs3_frag_summits_output = argv[++i];
+    } else if (arg == "--macs3-frag-pvalue" && requireValue(argc, argv, i)) {
+      config.macs3_frag_pvalue = parseDouble(argv[++i], "--macs3-frag-pvalue");
+    } else if (arg == "--macs3-frag-min-length" && requireValue(argc, argv, i)) {
+      config.macs3_frag_min_length = parseInt(argv[++i], "--macs3-frag-min-length");
+    } else if (arg == "--macs3-frag-max-gap" && requireValue(argc, argv, i)) {
+      config.macs3_frag_max_gap = parseInt(argv[++i], "--macs3-frag-max-gap");
+    } else if (arg == "--macs3-frag-peaks-source" && requireValue(argc, argv, i)) {
+      const std::string source = argv[++i];
+      if (source == "file") {
+        config.macs3_frag_peaks_source =
+            star::multiome::ChromapMacs3FragPeaksSource::FILE;
+      } else if (source == "memory") {
+        config.macs3_frag_peaks_source =
+            star::multiome::ChromapMacs3FragPeaksSource::MEMORY;
+      } else {
+        std::cerr << "Invalid --macs3-frag-peaks-source: " << source << "\n";
+        return 2;
+      }
+    } else if (arg == "--macs3-frag-keep-intermediates" && requireValue(argc, argv, i)) {
+      config.macs3_frag_keep_intermediates_dir = argv[++i];
+    } else if (arg == "--macs3-frag-no-uint8-counts") {
+      config.macs3_frag_uint8_counts = false;
+    } else if (arg == "--macs3-frag-low-mem") {
+      config.macs3_frag_low_mem = true;
     } else if (arg == "--temp-dir" && requireValue(argc, argv, i)) {
       config.temp_dir = argv[++i];
     } else if (arg == "--threads" && requireValue(argc, argv, i)) {
