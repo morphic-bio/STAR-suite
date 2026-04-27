@@ -52,6 +52,15 @@ class Parameters {
         int dynamicThreadMapFloor = 0;
         int dynamicThreadAtacFloor = 0;
         int dynamicThreadFeatureFloor = 0;
+        // ATAC drain-time controller (Step 6). When 1, the chromap-side
+        // sampler thread also runs a rate-balance controller that adjusts
+        // per-domain floors based on observed work-unit drain rates. Goal:
+        // keep MAP and ATAC drain rates in rough balance so both finish
+        // their mapping phase at roughly the same time. Requires
+        // dynamicThreadInterface=1 + chromapAtacEnable=1 + at least one
+        // floor > 0. 0 disables (default; the existing static-floor path
+        // remains active).
+        int dynamicThreadAtacController = 0;
         int variableThreads = 0; // 0: fixed map permits, 1: allow runtime map permit retuning
         int variableThreadsRetuneEveryAcquires = 0; // <=0 disables auto-retune sequence
         vector<int> variableThreadsPermitSequence; // sequence of permit targets applied at retune cadence

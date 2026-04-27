@@ -431,6 +431,44 @@ struct StarChromapAtacAsyncRun::Impl {
                        : 0.0;
     };
 
+    // ATAC drain-time controller state (Step 6). Activated when
+    // P.dynamicThreadAtacController == 1 AND at least one of MAP/ATAC
+    // floor is set initially. The controller observes per-domain
+    // workUnitsTotal deltas, smooths them via EWMA, and adjusts the
+    // MAP/ATAC floors so both domains finish their mapping phase at
+    // roughly the same rate. Mirrors the pf eta/chunked load-balancing
+    // mechanism that has been the load-balancing core of pf/STAR since
+    // the start.
+    const bool controllerEnabled =
+        (P_for_sampler_->dynamicThreadAtacController == 1) &&
+        (P_for_sampler_->dynamicThreadInterface == 1) &&
+        (P_for_sampler_->chromapAtac.enabled == 1) &&
+        (P_for_sampler_->dynamicThreadMapFloor > 0 ||
+         P_for_sampler_->dynamicThreadAtacFloor > 0);
+    int curMapFloor = P_for_sampler_->dynamicThreadMapFloor;
+    int curAtacFloor = P_for_sampler_->dynamicThreadAtacFloor;
+    const int curFeatureFloor = P_for_sampler_->dynamicThreadFeatureFloor;
+    uint64_t prevMapDone = 0;
+    uint64_t prevAtacDone = 0;
+    auto prevTick = std::chrono::steady_clock::now();
+    double mapRateEwma = 0.0;
+    double atacRateEwma = 0.0;
+    constexpr double kEwmaAlpha = 0.30;
+    constexpr double kRateGapThreshold = 0.20; // 20% imbalance triggers a retune
+    bool primed = false; // first tick: just sample baseline, don't retune
+    if (controllerEnabled) {
+      pthread_mutex_lock(&g_threadChunks.mutexLogMain);
+      P_for_sampler_->inOut->logMain
+          << "[ATAC drain-time controller] enabled: mapFloor=" << curMapFloor
+          << " atacFloor=" << curAtacFloor
+          << " featureFloor=" << curFeatureFloor
+          << " intervalSec=" << intervalSec
+          << " ewmaAlpha=" << kEwmaAlpha
+          << " gapThreshold=" << kRateGapThreshold << "\n";
+      P_for_sampler_->inOut->logMain.flush();
+      pthread_mutex_unlock(&g_threadChunks.mutexLogMain);
+    }
+
     while (true) {
       std::unique_lock<std::mutex> lk(samplerMutex_);
       samplerCv_.wait_for(lk, std::chrono::seconds(intervalSec),
@@ -471,6 +509,104 @@ struct StarChromapAtacAsyncRun::Impl {
       P_for_sampler_->inOut->logMain << line.str();
       P_for_sampler_->inOut->logMain.flush();
       pthread_mutex_unlock(&g_threadChunks.mutexLogMain);
+
+      // ATAC drain-time controller: rate-balance retune of MAP/ATAC floors.
+      if (controllerEnabled) {
+        const uint64_t mapDone = snap.mapDomain.workUnitsTotal;
+        const uint64_t atacDone = snap.atacDomain.workUnitsTotal;
+        const double dt = std::chrono::duration<double>(now - prevTick).count();
+        prevTick = now;
+
+        if (!primed) {
+          prevMapDone = mapDone;
+          prevAtacDone = atacDone;
+          primed = true;
+          continue; // baseline only, no retune on first tick
+        }
+
+        const double mapInst = (dt > 0 && mapDone >= prevMapDone)
+            ? static_cast<double>(mapDone - prevMapDone) / dt
+            : 0.0;
+        const double atacInst = (dt > 0 && atacDone >= prevAtacDone)
+            ? static_cast<double>(atacDone - prevAtacDone) / dt
+            : 0.0;
+        prevMapDone = mapDone;
+        prevAtacDone = atacDone;
+
+        mapRateEwma = (mapRateEwma <= 0.0)
+            ? mapInst
+            : (kEwmaAlpha * mapInst + (1.0 - kEwmaAlpha) * mapRateEwma);
+        atacRateEwma = (atacRateEwma <= 0.0)
+            ? atacInst
+            : (kEwmaAlpha * atacInst + (1.0 - kEwmaAlpha) * atacRateEwma);
+
+        // Skip retune when either domain is idle (no work this tick AND
+        // no smoothed history) or the pool is barely contended (waiters=0
+        // means no domain is being starved).
+        if (mapRateEwma <= 0.0 || atacRateEwma <= 0.0 ||
+            snap.currentWaiters == 0) {
+          continue;
+        }
+
+        // Imbalance: ratio of fast/slow rates. When imbalance > threshold,
+        // shift one floor up by 1 and the other floor down by 1 to push
+        // more permits toward the slow domain.
+        const double ratio = (atacRateEwma > mapRateEwma)
+            ? (atacRateEwma / mapRateEwma)
+            : (mapRateEwma / atacRateEwma);
+        if (ratio < (1.0 + kRateGapThreshold)) {
+          continue; // balanced enough
+        }
+
+        const int poolHalf = std::max(1, snap.configuredPermits / 2);
+        int newMap = curMapFloor;
+        int newAtac = curAtacFloor;
+        const char *direction = nullptr;
+
+        if (mapRateEwma > atacRateEwma) {
+          // MAP is draining faster → ATAC is being starved → grow ATAC floor
+          if (curAtacFloor < poolHalf) {
+            newAtac = curAtacFloor + 1;
+            if (curMapFloor > 1) newMap = curMapFloor - 1;
+            direction = "atac++";
+          }
+        } else {
+          // ATAC is draining faster → MAP is being starved (rare) →
+          // grow MAP floor
+          if (curMapFloor < poolHalf) {
+            newMap = curMapFloor + 1;
+            if (curAtacFloor > 1) newAtac = curAtacFloor - 1;
+            direction = "map++";
+          }
+        }
+
+        if (direction != nullptr &&
+            (newMap != curMapFloor || newAtac != curAtacFloor)) {
+          std::vector<int> floors(3, 0);
+          floors[0] = newMap;          // MAP
+          floors[1] = curFeatureFloor; // FEATURE (unchanged)
+          floors[2] = newAtac;         // ATAC
+          g_threadChunks.mapPermitConfigureDomainFloors(floors);
+          curMapFloor = newMap;
+          curAtacFloor = newAtac;
+
+          std::ostringstream ctrLine;
+          ctrLine << "[ATAC drain-time controller] retune"
+                  << "\ttimeSec=" << std::fixed << std::setprecision(1) << timeSec
+                  << "\tmapRate=" << std::fixed << std::setprecision(1)
+                  << mapRateEwma
+                  << "\tatacRate=" << atacRateEwma
+                  << "\tratio=" << std::setprecision(3) << ratio
+                  << "\tdirection=" << direction
+                  << "\tnewMapFloor=" << newMap
+                  << "\tnewAtacFloor=" << newAtac
+                  << "\n";
+          pthread_mutex_lock(&g_threadChunks.mutexLogMain);
+          P_for_sampler_->inOut->logMain << ctrLine.str();
+          P_for_sampler_->inOut->logMain.flush();
+          pthread_mutex_unlock(&g_threadChunks.mutexLogMain);
+        }
+      }
     }
   }
 
