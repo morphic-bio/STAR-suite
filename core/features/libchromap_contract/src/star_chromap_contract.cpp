@@ -268,14 +268,10 @@ ChromapAtacResult runChromapAtac(const ChromapAtacConfig &config) {
                       validation_error, config);
   }
 
-  if (config.permit_hooks.acquire != nullptr) {
-    return makeResult(
-        ChromapContractStatus::INVALID_CONFIG, 2,
-        "permit hooks are part of the contract but are not wired to Chromap yet",
-        config);
-  }
-
   chromap::MappingParameters parameters = toChromapParameters(config);
+  parameters.permit_acquire_hook = config.permit_hooks.acquire;
+  parameters.permit_release_hook = config.permit_hooks.release;
+  parameters.permit_hook_ctx = config.permit_hooks.hook_ctx;
   const chromap::ChromapRunResult chromap_result =
       chromap::RunAtacMapping(parameters);
   if (!chromap_result.ok) {

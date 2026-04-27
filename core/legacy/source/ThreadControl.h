@@ -16,7 +16,8 @@ class ThreadControl {
 public:
     enum class PermitDomain : uint8_t {
         MAP = 0,
-        FEATURE = 1
+        FEATURE = 1,
+        ATAC = 2
     };
 
     struct PermitHookContext {
@@ -88,6 +89,7 @@ public:
         double cpuIdleEma;
         PermitDomainSnapshot mapDomain;
         PermitDomainSnapshot featureDomain;
+        PermitDomainSnapshot atacDomain;
     };
 
     void mapPermitConfigure(bool enabled, int totalThreads, int configuredPermits, bool telemetryEnabled, bool variableThreads);
@@ -109,7 +111,7 @@ public:
     };
 
 private:
-    static constexpr size_t mapPermitDomainCount = 2;
+    static constexpr size_t mapPermitDomainCount = 3;
     bool mapPermitEnabledFlag = false;
     bool mapPermitTelemetryEnabledFlag = false;
     bool mapPermitVariableThreadsEnabledFlag = false;

@@ -22,11 +22,21 @@ inline int normalizePermitCount(int configuredPermits, int totalThreads) {
 }
 
 inline size_t permitDomainIndex(ThreadControl::PermitDomain domain) {
-    return domain == ThreadControl::PermitDomain::FEATURE ? 1 : 0;
+    switch (domain) {
+        case ThreadControl::PermitDomain::FEATURE: return 1;
+        case ThreadControl::PermitDomain::ATAC:    return 2;
+        case ThreadControl::PermitDomain::MAP:
+        default:                                   return 0;
+    }
 }
 
 inline const char* permitDomainName(ThreadControl::PermitDomain domain) {
-    return domain == ThreadControl::PermitDomain::FEATURE ? "feature" : "map";
+    switch (domain) {
+        case ThreadControl::PermitDomain::FEATURE: return "feature";
+        case ThreadControl::PermitDomain::ATAC:    return "atac";
+        case ThreadControl::PermitDomain::MAP:
+        default:                                   return "map";
+    }
 }
 
 inline uint64_t steadyNowNs() {
@@ -477,5 +487,12 @@ ThreadControl::MapPermitSnapshot ThreadControl::mapPermitSnapshot() const {
     snapshot.featureDomain.workBytesTotal = mapPermitWorkBytesTotalByDomain[permitDomainIndex(PermitDomain::FEATURE)].load(std::memory_order_relaxed);
     snapshot.featureDomain.workNsTotal = mapPermitWorkNsTotalByDomain[permitDomainIndex(PermitDomain::FEATURE)].load(std::memory_order_relaxed);
     snapshot.featureDomain.workNsMax = mapPermitWorkNsMaxByDomain[permitDomainIndex(PermitDomain::FEATURE)].load(std::memory_order_relaxed);
+    snapshot.atacDomain.acquireCalls = mapPermitAcquireCallsByDomain[permitDomainIndex(PermitDomain::ATAC)].load(std::memory_order_relaxed);
+    snapshot.atacDomain.waitNsTotal = mapPermitWaitNsTotalByDomain[permitDomainIndex(PermitDomain::ATAC)].load(std::memory_order_relaxed);
+    snapshot.atacDomain.waitNsMax = mapPermitWaitNsMaxByDomain[permitDomainIndex(PermitDomain::ATAC)].load(std::memory_order_relaxed);
+    snapshot.atacDomain.workUnitsTotal = mapPermitWorkUnitsTotalByDomain[permitDomainIndex(PermitDomain::ATAC)].load(std::memory_order_relaxed);
+    snapshot.atacDomain.workBytesTotal = mapPermitWorkBytesTotalByDomain[permitDomainIndex(PermitDomain::ATAC)].load(std::memory_order_relaxed);
+    snapshot.atacDomain.workNsTotal = mapPermitWorkNsTotalByDomain[permitDomainIndex(PermitDomain::ATAC)].load(std::memory_order_relaxed);
+    snapshot.atacDomain.workNsMax = mapPermitWorkNsMaxByDomain[permitDomainIndex(PermitDomain::ATAC)].load(std::memory_order_relaxed);
     return snapshot;
 }
