@@ -43,6 +43,7 @@ class Parameters {
         int dynamicThreadInterface = 0; // 0: off, 1: constant map permits + telemetry hooks
         int dynamicThreadConstMapPermits = 0; // <=0 means use runThreadN
         int dynamicThreadTelemetry = 0; // 0: off, 1: on
+        int dynamicThreadTelemetryIntervalSec = 10; // periodic mapPermitSnapshot emit (sec) when chromapAtacEnabled+dynamicThreadTelemetry; 0 disables periodic sampler (end-of-run summary still emits)
         int variableThreads = 0; // 0: fixed map permits, 1: allow runtime map permit retuning
         int variableThreadsRetuneEveryAcquires = 0; // <=0 disables auto-retune sequence
         vector<int> variableThreadsPermitSequence; // sequence of permit targets applied at retune cadence
