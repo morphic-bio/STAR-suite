@@ -151,6 +151,7 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "dynamicThreadInterface", &dynamicThreadInterface));
     parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "dynamicThreadConstMapPermits", &dynamicThreadConstMapPermits));
     parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "dynamicThreadTelemetry", &dynamicThreadTelemetry));
+    parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "dynamicThreadTelemetryIntervalSec", &dynamicThreadTelemetryIntervalSec));
     parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "variableThreads", &variableThreads));
     parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "variableThreadsRetuneEveryAcquires", &variableThreadsRetuneEveryAcquires));
     parArray.push_back(new ParameterInfoVector <int> (-1, -1, "variableThreadsPermitSequence", &variableThreadsPermitSequence));
@@ -1644,6 +1645,12 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
         ostringstream errOut;
         errOut <<"EXITING: fatal input ERROR: --dynamicThreadTelemetry must be 0 or 1, user-defined value="
                <<dynamicThreadTelemetry<<"\n";
+        exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+    }
+    if (dynamicThreadTelemetryIntervalSec < 0) {
+        ostringstream errOut;
+        errOut <<"EXITING: fatal input ERROR: --dynamicThreadTelemetryIntervalSec must be >=0, user-defined value="
+               <<dynamicThreadTelemetryIntervalSec<<"\n";
         exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
     }
     if (dynamicThreadConstMapPermits < 0) {

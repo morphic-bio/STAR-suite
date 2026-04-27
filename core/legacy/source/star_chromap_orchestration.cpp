@@ -11,9 +11,16 @@
 #include "TimeFunctions.h"
 #include "star_chromap_contract.h"
 
+#include <atomic>
 #include <cctype>
+#include <chrono>
+#include <condition_variable>
 #include <cstdint>
+#include <cstdio>
 #include <exception>
+#include <iomanip>
+#include <mutex>
+#include <sstream>
 #include <thread>
 
 namespace {
@@ -351,7 +358,9 @@ bool validateAndBuildConfig(Parameters &P,
 }  // namespace
 
 struct StarChromapAtacAsyncRun::Impl {
-  explicit Impl(const star::multiome::ChromapAtacConfig &config)
+  explicit Impl(const star::multiome::ChromapAtacConfig &config,
+                Parameters *p_for_sampler,
+                int telemetryIntervalSec)
       : cfg(config),
         worker([this]() {
           try {
@@ -359,12 +368,127 @@ struct StarChromapAtacAsyncRun::Impl {
           } catch (...) {
             exception = std::current_exception();
           }
-        }) {}
+        }),
+        samplerStop_(false),
+        samplerStartTime_(std::chrono::steady_clock::now()) {
+    // Periodic mapPermitSnapshot sampler: locked column schema (see
+    // multiomic-atac-scrna plans/2026-04-27-atac-permits-controller-followups.md
+    // v4). Header + per-emit flush so SIGTERM-kill keeps trajectory data.
+    // Only runs when the dynamic-thread interface AND telemetry are on,
+    // and the user-set interval is positive.
+    if (p_for_sampler != nullptr && telemetryIntervalSec > 0 &&
+        p_for_sampler->dynamicThreadInterface == 1 &&
+        p_for_sampler->dynamicThreadTelemetry == 1) {
+      P_for_sampler_ = p_for_sampler;
+      samplerThread_ = std::thread([this, telemetryIntervalSec]() {
+        runSampler(telemetryIntervalSec);
+      });
+    }
+  }
+
+  ~Impl() {
+    stopSampler();
+    if (worker.joinable()) {
+      worker.join();
+    }
+  }
+
+  void stopSampler() {
+    if (samplerThread_.joinable()) {
+      {
+        std::lock_guard<std::mutex> lk(samplerMutex_);
+        samplerStop_.store(true);
+      }
+      samplerCv_.notify_all();
+      samplerThread_.join();
+    }
+  }
+
+  void runSampler(int intervalSec) {
+    if (P_for_sampler_ == nullptr) {
+      return;
+    }
+    // Header (column names) + samples (values). Tab-separated, prefixed
+    // with "[ATAC permit telemetry]" so they grep cleanly out of Log.out.
+    // Header uses the same prefix + column names as values, so awk-style
+    // parsing of "header row vs data rows" works naturally.
+    {
+      pthread_mutex_lock(&g_threadChunks.mutexLogMain);
+      P_for_sampler_->inOut->logMain
+          << "[ATAC permit telemetry]"
+             "\ttimeSec\tconfigured\ttarget"
+             "\tavailable\tinUse\twaiters"
+             "\tmapAcquire\tmapWaitMaxMs\tmapWorkAvgMs"
+             "\tatacAcquire\tatacWaitMaxMs\tatacWorkAvgMs"
+             "\tretunes\n";
+      P_for_sampler_->inOut->logMain.flush();
+      pthread_mutex_unlock(&g_threadChunks.mutexLogMain);
+    }
+
+    auto avgMs = [](uint64_t totalNs, uint64_t calls) -> double {
+      return calls > 0 ? (static_cast<double>(totalNs) / 1.0e6 /
+                          static_cast<double>(calls))
+                       : 0.0;
+    };
+
+    while (true) {
+      std::unique_lock<std::mutex> lk(samplerMutex_);
+      samplerCv_.wait_for(lk, std::chrono::seconds(intervalSec),
+                          [this]() { return samplerStop_.load(); });
+      const bool stop = samplerStop_.load();
+      lk.unlock();
+      if (stop) {
+        break;
+      }
+
+      const auto snap = g_threadChunks.mapPermitSnapshot();
+      const auto now = std::chrono::steady_clock::now();
+      const double timeSec = std::chrono::duration<double>(
+                                 now - samplerStartTime_)
+                                 .count();
+
+      std::ostringstream line;
+      line << "[ATAC permit telemetry]"
+           << "\t" << std::fixed << std::setprecision(1) << timeSec
+           << "\t" << snap.configuredPermits
+           << "\t" << snap.targetPermits
+           << "\t" << snap.availablePermits
+           << "\t" << snap.inUsePermits
+           << "\t" << snap.currentWaiters
+           << "\t" << snap.mapDomain.acquireCalls
+           << "\t" << std::fixed << std::setprecision(3)
+           << (snap.mapDomain.waitNsMax / 1.0e6)
+           << "\t" << avgMs(snap.mapDomain.workNsTotal,
+                            snap.mapDomain.acquireCalls)
+           << "\t" << snap.atacDomain.acquireCalls
+           << "\t" << (snap.atacDomain.waitNsMax / 1.0e6)
+           << "\t" << avgMs(snap.atacDomain.workNsTotal,
+                            snap.atacDomain.acquireCalls)
+           << "\t" << snap.retuneCalls
+           << "\n";
+
+      pthread_mutex_lock(&g_threadChunks.mutexLogMain);
+      P_for_sampler_->inOut->logMain << line.str();
+      P_for_sampler_->inOut->logMain.flush();
+      pthread_mutex_unlock(&g_threadChunks.mutexLogMain);
+    }
+  }
 
   star::multiome::ChromapAtacConfig cfg;
   star::multiome::ChromapAtacResult result;
   std::exception_ptr exception;
   std::thread worker;
+
+  // Periodic permit-snapshot sampler. Started in the ctor when the
+  // dynamic-thread interface and telemetry are both on; joined in
+  // ~Impl or via stopSampler() called from runStarChromapAtacIfEnabled
+  // before the result is consumed.
+  Parameters *P_for_sampler_ = nullptr;
+  std::atomic<bool> samplerStop_;
+  std::mutex samplerMutex_;
+  std::condition_variable samplerCv_;
+  std::thread samplerThread_;
+  std::chrono::steady_clock::time_point samplerStartTime_;
 };
 
 StarChromapAtacAsyncRun::StarChromapAtacAsyncRun() : impl_(nullptr) {}
@@ -408,7 +532,8 @@ bool startStarChromapAtacIfEnabled(Parameters &P,
                    << flush;
 
   try {
-    run.impl_ = new StarChromapAtacAsyncRun::Impl(cfg);
+    run.impl_ = new StarChromapAtacAsyncRun::Impl(
+        cfg, &P, P.dynamicThreadTelemetryIntervalSec);
   } catch (const std::exception &error) {
     P.inOut->logMain << "ERROR: failed to start concurrent Chromap ATAC: "
                      << error.what() << "\n";
@@ -433,6 +558,9 @@ bool runStarChromapAtacIfEnabled(Parameters &P,
     if (run.impl_->worker.joinable()) {
       run.impl_->worker.join();
     }
+    // Stop the periodic snapshot sampler before reading the result so the
+    // end-of-chromap summary line lands cleanly after the last sample.
+    run.impl_->stopSampler();
 
     if (run.impl_->exception) {
       try {

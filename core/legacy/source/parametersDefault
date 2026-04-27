@@ -38,6 +38,16 @@ dynamicThreadTelemetry          0
                                 0 ... disabled.
                                 1 ... emit map permit wait/work timing summary to Log.out.
 
+dynamicThreadTelemetryIntervalSec 10
+    int: periodic mapPermitSnapshot emit cadence (seconds) when chromapAtacEnable=1
+         and dynamicThreadInterface=1. Header line + tab-separated columns:
+         timeSec configured target available inUse waiters
+         mapAcquire mapWaitMaxMs mapWorkAvgMs
+         atacAcquire atacWaitMaxMs atacWorkAvgMs retunes
+         Each line is flushed so SIGTERM-kill captures buffered output.
+                                0 ... disable periodic sampler (end-of-run summary still emits)
+                                10 ... default; 30 recommended after tuning is done
+
 variableThreads                 0
     int: allow runtime updates to active mapping permits when dynamicThreadInterface=1.
                                 0 ... fixed map permits.
