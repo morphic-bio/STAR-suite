@@ -78,6 +78,19 @@ dynamicThreadAtacController     0
                                 0 ... disabled (default)
                                 1 ... enable rate-balance controller (~1 retune per sampler tick)
 
+dynamicThreadFifoWaiters        0
+    int: FIFO waiter-queue admission. When 1, ThreadControl routes acquires
+         through a queue under the permit mutex: queued waiters are served
+         in arrival order, and new arrivals cannot fast-path past existing
+         waiters even when a permit is momentarily available. Release and
+         retune grant permits to queued waiters under the lock, eliminating
+         the notify_one() wakeup-bypass race. With no floor active the
+         queue is strict FIFO across domains; with floors active the helper
+         preserves per-domain FIFO ordering and lets a tail waiter on an
+         under-floor domain bypass an at-floor head.
+                                0 ... disabled (default; legacy notify_one path)
+                                1 ... FIFO admission (composable with floors/controller)
+
 variableThreads                 0
     int: allow runtime updates to active mapping permits when dynamicThreadInterface=1.
                                 0 ... fixed map permits.

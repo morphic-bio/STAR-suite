@@ -350,6 +350,10 @@ void mapThreadsSpawn (Parameters &P, ReadAlignChunk** RAchunk) {
         domainFloors[2] = std::max(0, P.dynamicThreadAtacFloor);
         g_threadChunks.mapPermitConfigureDomainFloors(domainFloors);
     }
+    // FIFO waiter queue (Step 7). When enabled, ThreadControl serves
+    // queued waiters in strict arrival order; new arrivals cannot
+    // fast-path past existing waiters.
+    g_threadChunks.mapPermitConfigureFifoWaiters(P.dynamicThreadFifoWaiters == 1);
 
     if (interfaceEnabled) {
         pthread_mutex_lock(&g_threadChunks.mutexLogMain);
