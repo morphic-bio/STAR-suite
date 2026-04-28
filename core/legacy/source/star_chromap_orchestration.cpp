@@ -11,9 +11,11 @@
 #include "TimeFunctions.h"
 #include "star_chromap_contract.h"
 
+#include <algorithm>
 #include <atomic>
 #include <cctype>
 #include <chrono>
+#include <cmath>
 #include <condition_variable>
 #include <cstdint>
 #include <cstdio>
@@ -517,28 +519,35 @@ struct StarChromapAtacAsyncRun::Impl {
         const double dt = std::chrono::duration<double>(now - prevTick).count();
         prevTick = now;
 
-        if (!primed) {
-          prevMapDone = mapDone;
-          prevAtacDone = atacDone;
-          primed = true;
-          continue; // baseline only, no retune on first tick
-        }
-
-        const double mapInst = (dt > 0 && mapDone >= prevMapDone)
-            ? static_cast<double>(mapDone - prevMapDone) / dt
-            : 0.0;
-        const double atacInst = (dt > 0 && atacDone >= prevAtacDone)
-            ? static_cast<double>(atacDone - prevAtacDone) / dt
-            : 0.0;
+        // Raw deltas this tick; used both for the EWMA update and for the
+        // per-tick idle guards below. Computing these before the EWMA
+        // smoothing means the smoothed rate can stay nonzero from prior
+        // history while we still see "this domain did literally no work
+        // this tick" — and refuse to grow its floor in that case.
+        const uint64_t mapDelta =
+            (mapDone >= prevMapDone) ? (mapDone - prevMapDone) : 0;
+        const uint64_t atacDelta =
+            (atacDone >= prevAtacDone) ? (atacDone - prevAtacDone) : 0;
+        const double mapInst = (dt > 0)
+            ? static_cast<double>(mapDelta) / dt : 0.0;
+        const double atacInst = (dt > 0)
+            ? static_cast<double>(atacDelta) / dt : 0.0;
         prevMapDone = mapDone;
         prevAtacDone = atacDone;
 
-        mapRateEwma = (mapRateEwma <= 0.0)
-            ? mapInst
-            : (kEwmaAlpha * mapInst + (1.0 - kEwmaAlpha) * mapRateEwma);
-        atacRateEwma = (atacRateEwma <= 0.0)
-            ? atacInst
-            : (kEwmaAlpha * atacInst + (1.0 - kEwmaAlpha) * atacRateEwma);
+        if (!primed) {
+          // Seed the EWMA from the first interval rather than skipping
+          // entirely — at high ratios we already know the right direction
+          // and a 10s primer-skip costs us a full step of correction.
+          mapRateEwma = mapInst;
+          atacRateEwma = atacInst;
+          primed = true;
+          // Fall through and possibly retune on this same tick when the
+          // imbalance is already large.
+        } else {
+          mapRateEwma = kEwmaAlpha * mapInst + (1.0 - kEwmaAlpha) * mapRateEwma;
+          atacRateEwma = kEwmaAlpha * atacInst + (1.0 - kEwmaAlpha) * atacRateEwma;
+        }
 
         // Skip retune when either domain is idle (no work this tick AND
         // no smoothed history) or the pool is barely contended (waiters=0
@@ -548,9 +557,9 @@ struct StarChromapAtacAsyncRun::Impl {
           continue;
         }
 
-        // Imbalance: ratio of fast/slow rates. When imbalance > threshold,
-        // shift one floor up by 1 and the other floor down by 1 to push
-        // more permits toward the slow domain.
+        // Imbalance: ratio of fast/slow rates. Step size scales with the
+        // log of the imbalance so a 100x ratio gets a chunky correction
+        // instead of +1.
         const double ratio = (atacRateEwma > mapRateEwma)
             ? (atacRateEwma / mapRateEwma)
             : (mapRateEwma / atacRateEwma);
@@ -558,24 +567,47 @@ struct StarChromapAtacAsyncRun::Impl {
           continue; // balanced enough
         }
 
-        const int poolHalf = std::max(1, snap.configuredPermits / 2);
+        // Step grows with imbalance: log2(ratio) clamped to [1, headroom].
+        // ratio=2 -> step=1, ratio=4 -> 2, ratio=16 -> 4, ratio=100 -> 6+,
+        // ratio=1024 -> 10. The clamp against headroom is applied below.
+        const int chunkyStep = std::max<int>(
+            1, static_cast<int>(std::ceil(std::log2(std::max(2.0, ratio)))));
+
+        // Cap: let the slow domain reserve nearly the whole pool, leaving
+        // only a one-permit floor for the fast domain so it can still make
+        // forward progress (and so the FIFO grant logic doesn't deadlock
+        // on a fully-claimed pool). Was poolHalf; now poolFull-1.
+        const int slowDomainCap = std::max(1, snap.configuredPermits - 1);
         int newMap = curMapFloor;
         int newAtac = curAtacFloor;
         const char *direction = nullptr;
 
         if (mapRateEwma > atacRateEwma) {
-          // MAP is draining faster → ATAC is being starved → grow ATAC floor
-          if (curAtacFloor < poolHalf) {
-            newAtac = curAtacFloor + 1;
-            if (curMapFloor > 1) newMap = curMapFloor - 1;
+          // MAP is draining faster → ATAC is being starved → grow ATAC floor.
+          // Raw-delta idle guard: if ATAC didn't actually advance this tick,
+          // the EWMA may still be nonzero from history but ATAC is already
+          // done (or stuck on something other than permits). Don't grow its
+          // floor — that would just leave permits idle.
+          if (atacDelta == 0) {
+            // skip atac++ this tick
+          } else if (curAtacFloor < slowDomainCap) {
+            const int step = std::min(chunkyStep, slowDomainCap - curAtacFloor);
+            newAtac = curAtacFloor + step;
+            // Drop MAP floor symmetrically but keep at least 0 (fast
+            // domain doesn't need a floor to make progress; its threads
+            // grab permits via FIFO when slow domain isn't using them).
+            newMap = std::max(0, curMapFloor - step);
             direction = "atac++";
           }
         } else {
           // ATAC is draining faster → MAP is being starved (rare) →
-          // grow MAP floor
-          if (curMapFloor < poolHalf) {
-            newMap = curMapFloor + 1;
-            if (curAtacFloor > 1) newAtac = curAtacFloor - 1;
+          // grow MAP floor. Same raw-delta idle guard for MAP.
+          if (mapDelta == 0) {
+            // skip map++ this tick
+          } else if (curMapFloor < slowDomainCap) {
+            const int step = std::min(chunkyStep, slowDomainCap - curMapFloor);
+            newMap = curMapFloor + step;
+            newAtac = std::max(0, curAtacFloor - step);
             direction = "map++";
           }
         }
