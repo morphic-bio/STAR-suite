@@ -156,6 +156,7 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "dynamicThreadAtacFloor", &dynamicThreadAtacFloor));
     parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "dynamicThreadFeatureFloor", &dynamicThreadFeatureFloor));
     parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "dynamicThreadAtacController", &dynamicThreadAtacController));
+    parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "dynamicThreadFifoWaiters", &dynamicThreadFifoWaiters));
     parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "variableThreads", &variableThreads));
     parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "variableThreadsRetuneEveryAcquires", &variableThreadsRetuneEveryAcquires));
     parArray.push_back(new ParameterInfoVector <int> (-1, -1, "variableThreadsPermitSequence", &variableThreadsPermitSequence));
@@ -1668,6 +1669,17 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
                <<dynamicThreadAtacController<<"\n";
         exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
     }
+    if (dynamicThreadFifoWaiters != 0 && dynamicThreadFifoWaiters != 1) {
+        ostringstream errOut;
+        errOut <<"EXITING: fatal input ERROR: --dynamicThreadFifoWaiters must be 0 or 1, user-defined value="
+               <<dynamicThreadFifoWaiters<<"\n";
+        exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+    }
+    // FIFO + floors/controller are now composable (Step 8f): the FIFO
+    // helper updates mapPermitDomainInUse/Waiters under the lock and picks
+    // the first admittable queued waiter when floors are active, so the
+    // ATAC drain-time controller can shift floors and the queue grant logic
+    // routes new permits to the under-floor domain.
     if (dynamicThreadConstMapPermits < 0) {
         ostringstream errOut;
         errOut <<"EXITING: fatal input ERROR: --dynamicThreadConstMapPermits must be >=0, user-defined value="

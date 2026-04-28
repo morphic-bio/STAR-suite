@@ -288,11 +288,66 @@ void ThreadControl::mapPermitConfigureDomainFloors(const std::vector<int> &floor
     mapPermitFloorsActive = mapPermitEnabledFlag && anyFloor;
 }
 
+void ThreadControl::mapPermitConfigureFifoWaiters(bool enabled) {
+    std::lock_guard<std::mutex> lock(mapPermitMutex);
+    mapPermitFifoEnabled = enabled && mapPermitEnabledFlag;
+}
+
+void ThreadControl::grantFifoWaitersLocked(std::vector<PermitWaiter*> &toWake) {
+    // When floors are inactive: strict FIFO from the head.
+    // When floors are active: scan the queue and grant the first waiter
+    // whose domain can be admitted without starving another domain that
+    // has waiters AND is below its floor. Within a single domain this
+    // preserves arrival order; across domains it lets a tail waiter on a
+    // below-floor domain bypass a head waiter that's already at-floor.
+    while (mapPermitAvailable > 0 && !mapPermitWaitQueue.empty()) {
+        auto pickIt = mapPermitWaitQueue.end();
+        if (!mapPermitFloorsActive) {
+            pickIt = mapPermitWaitQueue.begin();
+        } else {
+            for (auto it = mapPermitWaitQueue.begin();
+                 it != mapPermitWaitQueue.end(); ++it) {
+                const size_t di = permitDomainIndex((*it)->domain);
+                if (mapPermitDomainInUse[di] < mapPermitDomainFloor[di]) {
+                    pickIt = it; break;
+                }
+                bool blockedByFloor = false;
+                for (size_t j = 0; j < mapPermitDomainCount; ++j) {
+                    if (j == di) continue;
+                    if (mapPermitDomainWaiters[j] > 0
+                            && mapPermitDomainInUse[j]
+                                    < mapPermitDomainFloor[j]) {
+                        blockedByFloor = true; break;
+                    }
+                }
+                if (!blockedByFloor) {
+                    pickIt = it; break;
+                }
+            }
+            if (pickIt == mapPermitWaitQueue.end()) {
+                // No queued waiter can be admitted under current floors;
+                // hold the freed permit until a release/retune changes
+                // either the floors or the queue composition.
+                break;
+            }
+        }
+        PermitWaiter *waiter = *pickIt;
+        const size_t di = permitDomainIndex(waiter->domain);
+        mapPermitWaitQueue.erase(pickIt);
+        --mapPermitDomainWaiters[di];
+        ++mapPermitDomainInUse[di];
+        waiter->granted = true;
+        --mapPermitAvailable;
+        toWake.push_back(waiter);
+    }
+}
+
 void ThreadControl::mapPermitSetTargetPermits(int targetPermits) {
     if (!mapPermitEnabledFlag || !mapPermitVariableThreadsEnabledFlag) {
         return;
     }
 
+    std::vector<PermitWaiter*> toWake;
     {
         std::lock_guard<std::mutex> lock(mapPermitMutex);
         const int normalizedTarget = normalizePermitCount(targetPermits, mapPermitTotalThreads);
@@ -317,6 +372,15 @@ void ThreadControl::mapPermitSetTargetPermits(int targetPermits) {
         }
         mapPermitAvailable = newAvailable;
 
+        // If FIFO is on and the retune raised available permits, hand them
+        // to queued waiters under the same lock. On shrink (newAvailable <
+        // previous), the helper is a no-op because mapPermitAvailable is
+        // already clamped down. The legacy mapPermitCv only wakes the
+        // floor-aware/legacy paths; FIFO waiters need their per-waiter CV.
+        if (mapPermitFifoEnabled) {
+            grantFifoWaitersLocked(toWake);
+        }
+
         if (mapPermitRetuneTraceEnabled) {
             if (mapPermitRetuneTraceTargets.size() < mapPermitRetuneTraceLimit) {
                 mapPermitRetuneTraceTargets.push_back(normalizedTarget);
@@ -326,6 +390,9 @@ void ThreadControl::mapPermitSetTargetPermits(int targetPermits) {
         }
     }
 
+    for (PermitWaiter *w : toWake) {
+        w->cv.notify_one();
+    }
     mapPermitRetuneCalls.fetch_add(1, std::memory_order_relaxed);
     mapPermitCv.notify_all();
 }
@@ -356,6 +423,106 @@ uint64_t ThreadControl::mapPermitAcquireForDomain(PermitDomain domain) {
     bool blocked = false;
     uint64_t nextWarnNs = kPermitStallWarnEveryNs;
     const size_t domainIndex = permitDomainIndex(domain);
+
+    // FIFO waiter-queue path. New arrivals can only fast-path when the
+    // pool has a permit AND the queue is empty AND (when floors are
+    // active) admitting this domain wouldn't violate another domain's
+    // floor. Otherwise they enqueue at the tail and wait for an
+    // under-the-lock grant from release/retune, eliminating the
+    // notify_one() bypass race.
+    if (mapPermitFifoEnabled) {
+        std::unique_lock<std::mutex> lock(mapPermitMutex);
+        // Domain-aware fast path: only take a free permit if the queue is
+        // empty AND admitting this domain wouldn't violate another domain's
+        // floor. When floors are inactive this collapses to the simple check.
+        auto canAdmitFifo = [&]() -> bool {
+            if (mapPermitAvailable <= 0) return false;
+            if (!mapPermitFloorsActive) return true;
+            if (mapPermitDomainInUse[domainIndex]
+                    < mapPermitDomainFloor[domainIndex]) {
+                return true;
+            }
+            for (size_t i = 0; i < mapPermitDomainCount; ++i) {
+                if (i == domainIndex) continue;
+                if (mapPermitDomainWaiters[i] > 0
+                        && mapPermitDomainInUse[i]
+                                < mapPermitDomainFloor[i]) {
+                    return false;
+                }
+            }
+            return true;
+        };
+        if (mapPermitWaitQueue.empty() && canAdmitFifo()) {
+            --mapPermitAvailable;
+            ++mapPermitDomainInUse[domainIndex];
+        } else {
+            PermitWaiter waiter;
+            waiter.domain = domain;
+            mapPermitWaitQueue.push_back(&waiter);
+            mapPermitBlockedAcquireCalls.fetch_add(1, std::memory_order_relaxed);
+            ++mapPermitDomainWaiters[domainIndex];
+            const uint64_t waiters =
+                mapPermitCurrentWaiters.fetch_add(1, std::memory_order_relaxed) + 1;
+            atomicStoreMax(mapPermitMaxWaiters, waiters);
+            while (!waiter.granted) {
+                if (waiter.cv.wait_for(
+                        lock, std::chrono::nanoseconds(kPermitWaitPollNs)) ==
+                    std::cv_status::timeout) {
+                    if (mapPermitTelemetryEnabledFlag) {
+                        const uint64_t elapsedNs = static_cast<uint64_t>(
+                            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                std::chrono::steady_clock::now() - waitStart)
+                                .count());
+                        if (elapsedNs >= nextWarnNs) {
+                            const int inUse =
+                                mapPermitConfigured - mapPermitAvailable;
+                            const uint64_t sinceReleaseNs =
+                                steadyNowNs() -
+                                mapPermitLastReleaseNs.load(
+                                    std::memory_order_relaxed);
+                            mapPermitStallWarnEvents.fetch_add(
+                                1, std::memory_order_relaxed);
+                            std::fprintf(
+                                stderr,
+                                "WARNING: dynamic-permit stall domain=%s "
+                                "waitMs=%.3f configured=%d target=%d "
+                                "available=%d inUse=%d waiters=%llu retunes=%llu "
+                                "sinceReleaseMs=%.3f fifo=on\n",
+                                permitDomainName(domain), elapsedNs / 1.0e6,
+                                mapPermitConfigured, mapPermitTargetPermits,
+                                mapPermitAvailable, inUse,
+                                static_cast<unsigned long long>(
+                                    mapPermitCurrentWaiters.load(
+                                        std::memory_order_relaxed)),
+                                static_cast<unsigned long long>(
+                                    mapPermitRetuneCalls.load(
+                                        std::memory_order_relaxed)),
+                                sinceReleaseNs / 1.0e6);
+                            nextWarnNs += kPermitStallWarnEveryNs;
+                        }
+                    }
+                }
+            }
+            // Release/grantFifoWaitersLocked already popped us from the
+            // queue, pre-decremented mapPermitAvailable, decremented our
+            // domain waiter count, and incremented our domain in-use count
+            // — all under the same lock.
+            mapPermitCurrentWaiters.fetch_sub(1, std::memory_order_relaxed);
+        }
+        // Common acquire-end accounting (telemetry).
+        const auto waitEnd = std::chrono::steady_clock::now();
+        const uint64_t waitNs = static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(waitEnd -
+                                                                  waitStart)
+                .count());
+        if (mapPermitTelemetryEnabledFlag) {
+            mapPermitAcquireCalls.fetch_add(1, std::memory_order_relaxed);
+            mapPermitAcquireCallsByDomain[domainIndex].fetch_add(
+                1, std::memory_order_relaxed);
+        }
+        return waitNs;
+    }
+
     {
         std::unique_lock<std::mutex> lock(mapPermitMutex);
         // Floor-aware admission: a domain that has reached its floor cannot
@@ -472,6 +639,45 @@ void ThreadControl::mapPermitReleaseForDomain(
     uint64_t workNs
 ) {
     if (!mapPermitEnabledFlag) {
+        return;
+    }
+
+    // FIFO release: grant the next permit directly to the head waiter,
+    // under the lock, before any new arrival can race in.
+    if (mapPermitFifoEnabled) {
+        std::vector<PermitWaiter*> toWake;
+        {
+            std::lock_guard<std::mutex> lock(mapPermitMutex);
+            ++mapPermitAvailable;
+            if (mapPermitAvailable > mapPermitConfigured) {
+                mapPermitAvailable = mapPermitConfigured;
+            }
+            const size_t releasingIdx = permitDomainIndex(domain);
+            if (mapPermitDomainInUse[releasingIdx] > 0) {
+                --mapPermitDomainInUse[releasingIdx];
+            }
+            grantFifoWaitersLocked(toWake);
+        }
+        mapPermitLastReleaseNs.store(steadyNowNs(), std::memory_order_relaxed);
+        for (PermitWaiter *w : toWake) {
+            w->cv.notify_one();
+        }
+
+        if (mapPermitTelemetryEnabledFlag) {
+            const size_t domainIndex = permitDomainIndex(domain);
+            mapPermitWaitNsTotal.fetch_add(waitNs, std::memory_order_relaxed);
+            atomicStoreMax(mapPermitWaitNsMax, waitNs);
+            mapPermitWaitNsTotalByDomain[domainIndex].fetch_add(waitNs, std::memory_order_relaxed);
+            atomicStoreMax(mapPermitWaitNsMaxByDomain[domainIndex], waitNs);
+            mapPermitWorkUnitsTotal.fetch_add(workUnits, std::memory_order_relaxed);
+            mapPermitWorkUnitsTotalByDomain[domainIndex].fetch_add(workUnits, std::memory_order_relaxed);
+            mapPermitWorkBytesTotal.fetch_add(workBytes, std::memory_order_relaxed);
+            mapPermitWorkBytesTotalByDomain[domainIndex].fetch_add(workBytes, std::memory_order_relaxed);
+            mapPermitWorkNsTotal.fetch_add(workNs, std::memory_order_relaxed);
+            mapPermitWorkNsTotalByDomain[domainIndex].fetch_add(workNs, std::memory_order_relaxed);
+            atomicStoreMax(mapPermitWorkNsMax, workNs);
+            atomicStoreMax(mapPermitWorkNsMaxByDomain[domainIndex], workNs);
+        }
         return;
     }
 

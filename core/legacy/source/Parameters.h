@@ -61,6 +61,16 @@ class Parameters {
         // floor > 0. 0 disables (default; the existing static-floor path
         // remains active).
         int dynamicThreadAtacController = 0;
+        // FIFO waiter-queue admission. When 1, ThreadControl routes acquires
+        // through a queue under the permit mutex: queued waiters are served
+        // in arrival order, and new arrivals cannot fast-path past existing
+        // waiters — eliminating the notify_one wakeup-bypass race.
+        // Composes with floors and the drain-time controller: with no floor
+        // active the queue is strict FIFO across domains; with floors active
+        // the helper preserves per-domain FIFO ordering and lets a tail
+        // waiter on an under-floor domain bypass an at-floor head.
+        // 0 disables (default; legacy path).
+        int dynamicThreadFifoWaiters = 0;
         int variableThreads = 0; // 0: fixed map permits, 1: allow runtime map permit retuning
         int variableThreadsRetuneEveryAcquires = 0; // <=0 disables auto-retune sequence
         vector<int> variableThreadsPermitSequence; // sequence of permit targets applied at retune cadence
