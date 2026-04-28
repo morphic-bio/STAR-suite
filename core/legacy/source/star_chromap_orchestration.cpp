@@ -11,6 +11,8 @@
 #include "TimeFunctions.h"
 #include "star_chromap_contract.h"
 
+#include "libscrna/AtacEvidenceFromPeaks.h"
+
 #include <algorithm>
 #include <atomic>
 #include <cctype>
@@ -354,6 +356,69 @@ bool validateAndBuildConfig(Parameters &P,
     cfg->permit_hooks.release = nullptr;
     cfg->permit_hooks.hook_ctx = nullptr;
   }
+  return true;
+}
+
+// Optional posthoc-but-in-process step: per-barcode ATAC evidence from
+// the just-produced fragments TSV + libMACS3 narrowPeak. Replaces the
+// standalone `scrna_build_atac_evidence_from_peaks` CLI for multiome
+// benchmark + paper contexts so the whole chain (alignment + Solo +
+// EmptyDrops + concurrent libchromap + libMACS3 FRAG peaks + ATAC
+// evidence) is a single STAR invocation.
+//
+// Output is byte-identical to the standalone CLI (verified on PBMC 3k).
+// When chromapAtac.evidenceFromPeaksOutput is empty or "-" this is a
+// no-op. When the FRAG narrowPeak isn't produced (callMacs3FragPeaks=0
+// or the path is empty), we log a warning and skip rather than fail.
+bool runEvidenceFromPeaksIfEnabled(Parameters &P) {
+  const std::string outPath = trimCopy(P.chromapAtac.evidenceFromPeaksOutput);
+  if (isUnsetToken(outPath)) {
+    return true;
+  }
+  const std::string peaksPath = trimCopy(P.chromapAtac.macs3FragPeaksOutput);
+  if (P.chromapAtac.callMacs3FragPeaks == 0 || isUnsetToken(peaksPath)) {
+    P.inOut->logMain
+        << "WARNING: --chromapAtacEvidenceFromPeaksOutput is set but no MACS3 "
+           "FRAG narrowPeak is being produced (callMacs3FragPeaks=0 or "
+           "macs3FragPeaksOutput unset); skipping evidence-from-peaks step.\n"
+        << flush;
+    return true;
+  }
+  // Prefer the secondary fragments TSV (typical when primary output is BAM);
+  // fall back to outputFragments when the primary IS the TSV.
+  std::string fragmentsPath = trimCopy(P.chromapAtac.secondaryFragments);
+  if (isUnsetToken(fragmentsPath)) {
+    fragmentsPath = trimCopy(P.chromapAtac.outputFragments);
+  }
+  if (isUnsetToken(fragmentsPath)) {
+    P.inOut->logMain
+        << "ERROR: --chromapAtacEvidenceFromPeaksOutput requires either "
+           "--chromapAtacSecondaryFragments or --chromapAtacOutputFragments "
+           "to point at a fragments TSV; neither is set.\n"
+        << flush;
+    return false;
+  }
+  P.inOut->logMain << timeMonthDayTime()
+                   << " ..... starting in-process ATAC evidence-from-peaks "
+                      "(libscrna)\n"
+                   << flush;
+  libscrna::atac::AtacEvidenceFromPeaksOptions opts;
+  opts.fragments_path = fragmentsPath;
+  opts.peaks_path = peaksPath;
+  opts.out_path = outPath;
+  std::ostringstream evidenceLog;
+  const int rc = libscrna::atac::RunAtacEvidenceFromPeaks(opts, &evidenceLog);
+  P.inOut->logMain << evidenceLog.str() << flush;
+  if (rc != 0) {
+    P.inOut->logMain
+        << "ERROR: ATAC evidence-from-peaks failed (rc=" << rc << ")\n"
+        << flush;
+    return false;
+  }
+  P.inOut->logMain << timeMonthDayTime()
+                   << " ..... finished in-process ATAC evidence-from-peaks "
+                      "successfully\n"
+                   << flush;
   return true;
 }
 
@@ -797,6 +862,9 @@ bool runStarChromapAtacIfEnabled(Parameters &P,
         return false;
       }
     }
+    if (!runEvidenceFromPeaksIfEnabled(P)) {
+      return false;
+    }
     return true;
   }
 
@@ -835,5 +903,8 @@ bool runStarChromapAtacIfEnabled(Parameters &P,
   P.inOut->logMain << timeMonthDayTime()
                    << " ..... finished in-process Chromap ATAC successfully\n"
                    << flush;
+  if (!runEvidenceFromPeaksIfEnabled(P)) {
+    return false;
+  }
   return true;
 }

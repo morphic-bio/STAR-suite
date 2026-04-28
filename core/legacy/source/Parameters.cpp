@@ -729,6 +729,7 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "chromapAtacMacs3FragUint8Counts", &chromapAtac.macs3FragUint8Counts));
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacMacs3FragPeaksSource", &chromapAtac.macs3FragPeaksSource));
     parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "chromapAtacMacs3FragLowMem", &chromapAtac.macs3FragLowMem));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacEvidenceFromPeaksOutput", &chromapAtac.evidenceFromPeaksOutput));
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacTn5ShiftMode", &chromapAtac.tn5ShiftMode));
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacStartMode", &chromapAtac.startMode));
 
@@ -954,6 +955,10 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
         }
         if (p->nameString == "chromapAtacMacs3FragKeepIntermediates" && p->inputLevel < 0) {
             chromapAtac.macs3FragKeepIntermediates = "-";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "chromapAtacEvidenceFromPeaksOutput" && p->inputLevel < 0) {
+            chromapAtac.evidenceFromPeaksOutput = "-";
             p->inputLevel = 0;
         }
         if (p->nameString == "chromapAtacMacs3FragPvalue" && p->inputLevel < 0) {
