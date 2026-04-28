@@ -710,6 +710,15 @@ class Parameters {
             int macs3FragUint8Counts = 1;
             string macs3FragPeaksSource = "file";
             int macs3FragLowMem = 0;
+            // Optional per-barcode ATAC evidence-from-peaks output (single-
+            // process equivalent of the standalone scrna_build_atac_evidence
+            // _from_peaks tool). When set to a real path, after concurrent
+            // chromap ATAC + MACS3 FRAG peaks finish, STAR's orchestration
+            // calls libscrna::atac::RunAtacEvidenceFromPeaks on the
+            // just-produced atac_fragments.tsv.gz + atac_peaks.narrowPeak
+            // and writes the per-barcode evidence TSV here. Empty / "-"
+            // disables. No effect when the FRAG narrowPeak isn't produced.
+            string evidenceFromPeaksOutput;
             string tn5ShiftMode = "classical";
             string startMode = "postMapping";
         } chromapAtac;

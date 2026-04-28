@@ -2078,6 +2078,21 @@ chromapAtacLowMemRam        0
 chromapAtacMacs3FragLowMem  0
     int:                    use libMACS3 sweep-line workspace (in-memory streaming, ~tens of KB peak) instead of the events workspace (~3.8 GB on PBMC 3k) when 1. Sweep is ~73 s slower on this hardware but saves ~3.8 GB peak RSS; use together with chromapAtacLowMem=1 for the full lo-mem stack.
 
+chromapAtacEvidenceFromPeaksOutput  -
+    string:                 optional path for per-barcode ATAC evidence-from-peaks
+                            TSV (columns: barcode, atac_peak_region_cutsites,
+                            atac_peak_region_fragments, atac_fragments,
+                            atac_peak_fraction). When set to a real path,
+                            after concurrent chromap ATAC and libMACS3 FRAG
+                            peaks finish, STAR's orchestration runs
+                            libscrna::atac::RunAtacEvidenceFromPeaks on the
+                            just-produced atac_fragments.tsv.gz +
+                            atac_peaks.narrowPeak and writes the per-barcode
+                            evidence here. Output is byte-identical to the
+                            standalone scrna_build_atac_evidence_from_peaks
+                            CLI; this avoids the two-binary chain in
+                            multiome benchmark contexts. - / empty disables.
+
 chromapAtacTn5ShiftMode     classical
     string:                 Tn5 shift mode for Chromap: classical|symmetric (default classical).
 
