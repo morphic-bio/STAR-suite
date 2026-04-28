@@ -744,6 +744,26 @@ bool runStarChromapAtacIfEnabled(Parameters &P,
           << " workNsTotal=" << snap.atacDomain.workNsTotal
           << " workNsMax=" << snap.atacDomain.workNsMax << "\n"
           << flush;
+      // Integration guard: when STAR has wired the ATAC permit hooks into
+      // the contract (dynamicThreadInterface == 1) and Chromap actually ran
+      // an ATAC mapping, the linked libchromap *must* invoke the hook per
+      // mini-batch. If acquireCalls is still 0 after the run, the linked
+      // libchromap.a does not honor the hooks (header/lib mismatch) and any
+      // fairness benchmark over this binary is non-diagnostic. Fail loudly
+      // rather than producing misleading numbers.
+      if (snap.atacDomain.acquireCalls == 0) {
+        P.inOut->logMain
+            << "ERROR: ATAC permit integration check failed: acquireCalls=0 "
+               "with --dynamicThreadInterface 1 and --chromapAtacEnable 1.\n"
+               "SOLUTION: build against a hook-enabled Chromap-suite tree "
+               "whose mapping_parameters.h defines permit_acquire_hook / "
+               "permit_release_hook / permit_hook_ctx, and point both the "
+               "libchromap_contract and STAR builds at it via "
+               "CHROMAP_SUITE_DIR=/path/to/that/tree (and "
+               "CHROMAP_DIR=/path/to/that/tree for the contract sub-Makefile).\n"
+            << flush;
+        return false;
+      }
     }
     return true;
   }
