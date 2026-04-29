@@ -1,29 +1,25 @@
 #ifndef LIBSCRNA_ATAC_EVIDENCE_FROM_PEAKS_H
 #define LIBSCRNA_ATAC_EVIDENCE_FROM_PEAKS_H
 
+#include <cstdint>
 #include <ostream>
 #include <string>
 
 namespace libscrna {
 namespace atac {
 
-struct AtacEvidenceFromPeaksOptions {
-    std::string fragments_path;       // Chromap/ARC 5-col TSV (.tsv or .tsv.gz)
-    std::string peaks_path;           // narrowPeak (BED-like; first 3 cols used)
-    std::string out_path;             // per-barcode evidence TSV out
-    std::string whitelist_path;       // optional CB whitelist (one per line)
-    std::string barcode_suffix;       // optional suffix appended to whitelist barcodes
-};
+typedef bool (*AtacEvidenceBarcodeDecoderFn)(uint64_t key,
+                                             uint32_t barcode_length,
+                                             void* ctx,
+                                             std::string* out);
 
-// Read fragments (column 5 = per-row count, ARC-style) and peaks; emit
-// per-barcode evidence with columns:
-//   barcode, atac_peak_region_cutsites, atac_peak_region_fragments,
-//   atac_fragments, atac_peak_fraction
-//
-// Returns 0 on success, non-zero on failure. Diagnostic / progress messages
-// are written to `*err` (default std::cerr).
-int RunAtacEvidenceFromPeaks(const AtacEvidenceFromPeaksOptions& opts,
-                             std::ostream* err = nullptr);
+int RunAtacEvidenceFromBinary(
+    const std::string& sidecar_path,
+    const std::string& peaks_path,
+    const std::string& out_path,
+    AtacEvidenceBarcodeDecoderFn decoder,
+    void* decoder_ctx,
+    std::ostream* err = nullptr);
 
 }  // namespace atac
 }  // namespace libscrna

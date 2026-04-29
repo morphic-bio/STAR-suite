@@ -2043,7 +2043,7 @@ chromapAtacOutputFragments  -
     string:                 Chromap primary output path (BED/TagAlign fragments file, or SAM/BAM/CRAM path per chromapAtacOutputFormat).
 
 chromapAtacSecondaryFragments -
-    string:                 optional scATAC fragments path when chromapAtacOutputFormat is BAM or CRAM (dual output; must differ from chromapAtacOutputFragments). Pass - to omit.
+    string:                 optional scATAC binary sidecar path when chromapAtacOutputFormat is BAM or CRAM (dual output; must differ from chromapAtacOutputFragments). Chromap writes fixed-record fragments here plus PATH.chroms.tsv. Pass - to omit.
 
 chromapAtacOutputFormat     BED
     string:                 Chromap output format: BED|fragments|TagAlign|SAM|BAM|CRAM|pairs.
@@ -2084,14 +2084,11 @@ chromapAtacEvidenceFromPeaksOutput  -
                             atac_peak_region_fragments, atac_fragments,
                             atac_peak_fraction). When set to a real path,
                             after concurrent chromap ATAC and libMACS3 FRAG
-                            peaks finish, STAR's orchestration runs
-                            libscrna::atac::RunAtacEvidenceFromPeaks on the
-                            just-produced atac_fragments.tsv.gz +
-                            atac_peaks.narrowPeak and writes the per-barcode
-                            evidence here. Output is byte-identical to the
-                            standalone scrna_build_atac_evidence_from_peaks
-                            CLI; this avoids the two-binary chain in
-                            multiome benchmark contexts. - / empty disables.
+                            peaks finish, the libchromap contract runs
+                            libscrna::atac::RunAtacEvidenceFromBinary on the
+                            binary sidecar from chromapAtacSecondaryFragments
+                            plus atac_peaks.narrowPeak and writes the
+                            per-barcode evidence here. - / empty disables.
 
 chromapAtacTn5ShiftMode     classical
     string:                 Tn5 shift mode for Chromap: classical|symmetric (default classical).

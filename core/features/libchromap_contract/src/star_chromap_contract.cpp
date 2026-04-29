@@ -1,9 +1,13 @@
 #include "star_chromap_contract.h"
 
 #include <cctype>
+#include <iostream>
 #include <sstream>
+#include <vector>
 
+#include "barcode_translator.h"
 #include "libchromap.h"
+#include "libscrna/AtacEvidenceFromPeaks.h"
 
 namespace star {
 namespace multiome {
@@ -129,6 +133,15 @@ std::string validateConfig(const ChromapAtacConfig &config) {
       return "MACS3 FRAG summits output is required when peak calling is enabled";
     }
   }
+  if (!isUnsetToken(config.atac_evidence_from_peaks_output) &&
+      isUnsetToken(config.fragment_output_path)) {
+    return "in-process ATAC evidence requires --chromapAtacSecondaryFragments to point at the binary sidecar output";
+  }
+  if (!isUnsetToken(config.atac_evidence_from_peaks_output) &&
+      (!config.call_macs3_frag_peaks ||
+       config.macs3_frag_peaks_source != ChromapMacs3FragPeaksSource::MEMORY)) {
+    return "in-process ATAC evidence requires MACS3 FRAG peak calling with memory source";
+  }
   if ((config.permit_hooks.acquire == nullptr) !=
       (config.permit_hooks.release == nullptr)) {
     return "permit acquire and release hooks must be supplied together";
@@ -176,6 +189,8 @@ chromap::MappingParameters toChromapParameters(
   parameters.mapping_output_file_path = trimCopy(config.output_path);
   if (!isUnsetToken(config.fragment_output_path)) {
     parameters.atac_fragment_output_file_path =
+        trimCopy(config.fragment_output_path);
+    parameters.atac_fragment_binary_output_file_path =
         trimCopy(config.fragment_output_path);
   }
   if (!isUnsetToken(config.summary_path)) {
@@ -259,6 +274,26 @@ chromap::MappingParameters toChromapParameters(
   return parameters;
 }
 
+struct EvidenceBarcodeDecoderCtx {
+  chromap::BarcodeTranslator *translator = nullptr;
+};
+
+bool decodeEvidenceBarcode(uint64_t barcode_key,
+                           uint32_t barcode_length,
+                           void *ctx,
+                           std::string *out) {
+  if (ctx == nullptr || out == nullptr) {
+    return false;
+  }
+  EvidenceBarcodeDecoderCtx *decoder =
+      static_cast<EvidenceBarcodeDecoderCtx *>(ctx);
+  if (decoder->translator == nullptr) {
+    return false;
+  }
+  *out = decoder->translator->Translate(barcode_key, barcode_length);
+  return true;
+}
+
 }  // namespace
 
 ChromapAtacResult runChromapAtac(const ChromapAtacConfig &config) {
@@ -272,6 +307,14 @@ ChromapAtacResult runChromapAtac(const ChromapAtacConfig &config) {
   parameters.permit_acquire_hook = config.permit_hooks.acquire;
   parameters.permit_release_hook = config.permit_hooks.release;
   parameters.permit_hook_ctx = config.permit_hooks.hook_ctx;
+
+  const std::string evidence_out =
+      trimCopy(config.atac_evidence_from_peaks_output);
+  const bool run_binary_evidence =
+      !evidence_out.empty() && evidence_out != "-" &&
+      config.call_macs3_frag_peaks &&
+      config.macs3_frag_peaks_source == ChromapMacs3FragPeaksSource::MEMORY;
+
   const chromap::ChromapRunResult chromap_result =
       chromap::RunAtacMapping(parameters);
   if (!chromap_result.ok) {
@@ -279,6 +322,31 @@ ChromapAtacResult runChromapAtac(const ChromapAtacConfig &config) {
                       chromap_result.exit_code == 0 ? 1
                                                     : chromap_result.exit_code,
                       chromap_result.message, config);
+  }
+
+  if (run_binary_evidence) {
+    const std::string sidecar_path = trimCopy(config.fragment_output_path);
+    chromap::BarcodeTranslator evidence_barcode_translator;
+    if (!isUnsetToken(config.barcode_translate_table)) {
+      evidence_barcode_translator.SetTranslateTable(
+          trimCopy(config.barcode_translate_table),
+          config.barcode_translate_from_first_column);
+    }
+    EvidenceBarcodeDecoderCtx decoder_ctx;
+    decoder_ctx.translator = &evidence_barcode_translator;
+    std::ostringstream evidence_log;
+    const int rc = libscrna::atac::RunAtacEvidenceFromBinary(
+        sidecar_path, parameters.macs3_frag_peaks_narrowpeak_path,
+        evidence_out, decodeEvidenceBarcode, &decoder_ctx, &evidence_log);
+    if (rc != 0) {
+      return makeResult(ChromapContractStatus::CHROMAP_FAILED, rc,
+                        "atac_evidence_from_peaks (binary sidecar): " +
+                            evidence_log.str(),
+                        config);
+    }
+    return makeResult(ChromapContractStatus::OK, 0,
+                      chromap_result.message + "\n" + evidence_log.str(),
+                      config);
   }
 
   return makeResult(ChromapContractStatus::OK, 0, chromap_result.message,

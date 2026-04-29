@@ -110,6 +110,13 @@ struct ChromapAtacConfig {
       ChromapMacs3FragPeaksSource::FILE;
   bool macs3_frag_low_mem = false;
 
+  // Optional per-barcode ATAC evidence-from-peaks output. When set with
+  // MACS3 FRAG peaks from the memory source, libchromap writes
+  // fragment_output_path as the fixed-record binary sidecar and the
+  // contract calls libscrna's sidecar reader after peak calling. Empty
+  // disables.
+  std::string atac_evidence_from_peaks_output;
+
   ChromapOutputFormat output_format = ChromapOutputFormat::BED;
   ChromapPermitHooks permit_hooks;
 };
