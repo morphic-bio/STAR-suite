@@ -110,27 +110,3 @@ test: lib
 	@echo "Tests moved to tests/emptydrops/"
 	@echo "Run: make -C ../../tests/emptydrops test"
 	$(MAKE) -C ../../tests/emptydrops test
-
-# --- ATAC evidence from peaks (self-contained tool) ----------------------
-# Consumes a Chromap fragments TSV plus a MACS3 narrowPeak file and emits
-# per-barcode ATAC evidence (atac_peak_region_cutsites,
-# atac_peak_region_fragments, atac_fragments, atac_peak_fraction).
-#
-# Deliberately not part of the aggregate `tools:` target because that target
-# also depends on sibling tool sources that may not be tracked. Build this
-# tool explicitly:
-#   make -C core/features/libscrna scrna_build_atac_evidence_from_peaks
-#   make -C core/features/libscrna clean-atac-evidence-from-peaks
-ATAC_EVIDENCE_FROM_PEAKS_TOOL := $(BIN_DIR)/scrna_build_atac_evidence_from_peaks
-
-.PHONY: scrna_build_atac_evidence_from_peaks clean-atac-evidence-from-peaks
-
-scrna_build_atac_evidence_from_peaks: $(ATAC_EVIDENCE_FROM_PEAKS_TOOL)
-
-$(ATAC_EVIDENCE_FROM_PEAKS_TOOL): $(TOOLS_DIR)/scrna_build_atac_evidence_from_peaks.cpp $(TARGET)
-	@mkdir -p $(BIN_DIR)
-	$(CXX) $(CXXFLAGS) $(INCLUDES) -o $@ $< $(TARGET)
-	@echo "Built $(ATAC_EVIDENCE_FROM_PEAKS_TOOL)"
-
-clean-atac-evidence-from-peaks:
-	rm -f $(ATAC_EVIDENCE_FROM_PEAKS_TOOL)
