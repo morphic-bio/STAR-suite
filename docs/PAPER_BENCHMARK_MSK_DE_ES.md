@@ -26,35 +26,32 @@ NXT↔TRU translation file
 Both samples were measured on the same host
 (pikachu, i9-13900KF / 126 GB RAM / 32 threads), Cell Ranger 9.0.1.
 
-| Metric | DE (2026-03-06) | ES (2026-04-30) |
+| Metric | DE (post-permits-fix, 2026-04-03) | ES (2026-04-30) |
 |---|---|---|
-| STAR cells (Solo GeneFull filtered) | 30,497 | **33,226** |
+| STAR cells (Solo GeneFull filtered) | 33,095 | **33,226** |
 | Cell Ranger cells (gRNA run, filtered) | 32,256 | **32,670** |
-| Common cells (filtered ∩ filtered, after NXT translation) | 30,417 | **32,652** |
-| Barcode Jaccard | 0.94 | **0.982** |
-| Per-barcode UMI Pearson (filtered_vs_filtered) | 0.9999 | **0.999928** |
-| Per-gene Pearson (filtered, ≥20 counts) | 0.993 (17,448 genes) | **0.993687** (16,958 genes) |
-| CRISPR set-equivalent calls | 98.5% (22,200/22,531) | **98.97%** (25,894/26,164) |
-| CRISPR call UMI Pearson | 0.999 | **0.999434** |
+| Common cells (filtered ∩ filtered, after NXT translation) | 32,248 | **32,652** |
+| Barcode Jaccard | 0.9742 | **0.982** |
+| Per-barcode UMI Pearson (Gene Expression, common cells) | 0.999903 | **0.999928** |
+| Per-feature Pearson (Gene Expression) | 0.994554 (all common features) | **0.993687** (filtered, ≥20 counts, 16,958 genes) |
+| CRISPR set-equivalent calls | 98.04% (23,063/23,525) | **98.97%** (25,894/26,164) |
+| CRISPR call UMI Pearson | 0.999708 | **0.999434** |
 | LARRY (Custom) per-barcode Pearson (common cells) | — | **0.9941** |
 | LARRY (Custom) per-feature Pearson (co-observed features) | — | **0.9509** (3,325 features) |
-| **STAR wall time** (single 3-library run) | 42 min | **30.2 min** |
+| **STAR wall time** (single 3-library run) | **26.9 min** | **30.2 min** |
 | Cell Ranger wall (gRNA + GEX) | 58 min | 59.4 min |
 | Cell Ranger wall (LARRY + GEX) | 110 min | 107.7 min |
 | **Cell Ranger total wall** | 168 min | **167.1 min** |
-| **Speedup STAR vs CR total** | **4.0×** | **5.5×** |
+| **Speedup STAR vs CR total** | **6.24×** | **5.53×** |
 
-The DE numbers are the canonical paired benchmark from
-[`comparisons/msk_30polyko_full_benchmark_20260306/`](../comparisons/msk_30polyko_full_benchmark_20260306/).
-The ES numbers (this rerun) are from
+The DE numbers are from the **post-permits-fix** rerun
+([`comparisons/msk_30polyko_full_benchmark_20260306/post_permits_20260403/`](../comparisons/msk_30polyko_full_benchmark_20260306/post_permits_20260403/)).
+The earlier 2026-03-06 paired run (STAR 42 min, 4.0× speedup) used a
+pre-permits-fix STAR build and is now superseded by the 2026-04-03 STAR
+rerun on the same staged FASTQs paired with the same (deterministic) CR
+outputs. The ES numbers (this rerun) are paired in a single orchestrated
+pipeline:
 [`comparisons/msk_30polyko_full_benchmark_ES_20260430/`](../comparisons/msk_30polyko_full_benchmark_ES_20260430/).
-Subsequent STAR optimizations have reduced the DE wall time further (a
-2026-04-03 rerun completed DE STAR in 26.9 min on the same staged FASTQs,
-under
-[`paper_bench_emptydrops_guarded_redo_20260403_214718`](../comparisons/msk_30polyko_full_benchmark_20260306/) →
-output dir on `/storage`); however that rerun was **not** paired with a
-contemporaneous CR run, so it is **not** used for the speedup claim above
-to keep the comparison strictly paired.
 
 ## Reproducibility
 
@@ -77,7 +74,7 @@ Key invariants between the two runs:
 
 ## Take-aways for the paper
 
-1. **Replicated speedup**: The 4–5.5× STAR-vs-CR wall-time advantage on a
+1. **Replicated speedup**: The 5.5–6.2× STAR-vs-CR wall-time advantage on a
    3-library Perturb-seq dataset is reproduced on a second biological sample
    processed independently from staging through parity computation.
 2. **Stable parity**: Per-barcode UMI Pearson, per-gene Pearson, and CRISPR

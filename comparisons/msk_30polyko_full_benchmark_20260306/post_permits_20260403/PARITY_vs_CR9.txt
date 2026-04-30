@@ -1,0 +1,66 @@
+======================================================================
+Parity Metrics: MSK_guarded_redo_20260403
+======================================================================
+CR MEX:   /storage/MSK-perturb-comparison/cr_full_grna_30crispr_20260306_173247/cr9_gex_grna_30crispr/outs/per_sample_outs/cr9_gex_grna_30crispr/count/sample_filtered_feature_bc_matrix
+STAR MEX: /storage/MSK-perturb-comparison/paper_bench_emptydrops_guarded_redo_20260403_214718/outs/filtered_feature_bc_matrix
+
+--- all ---
+  CR cells:       32256
+  STAR cells:     33095
+  CR features:    38636
+  STAR features:  284615
+  CR total UMIs:  268,753,455
+  STAR total UMIs:279,613,704
+
+  Barcode Jaccard:           0.9742
+  Common barcodes:           32248
+  Per-barcode Pearson:       0.999709
+  Per-barcode Spearman:      0.999468
+
+  Common features:           34341
+  Per-feature Pearson:       0.994591
+  Per-feature Spearman:      0.990320
+
+--- Gene Expression ---
+  CR cells:       32256
+  STAR cells:     33095
+  CR features:    38606
+  STAR features:  38606
+  CR total UMIs:  265,642,094
+  STAR total UMIs:269,565,719
+
+  Barcode Jaccard:           0.9742
+  Common barcodes:           32248
+  Per-barcode Pearson:       0.999903
+  Per-barcode Spearman:      0.999832
+
+  Common features:           34311
+  Per-feature Pearson:       0.994554
+  Per-feature Spearman:      0.990296
+
+--- CRISPR Guide Capture ---
+  CR cells:       32256
+  STAR cells:     33095
+  CR features:    30
+  STAR features:  30
+  CR total UMIs:  3,111,361
+  STAR total UMIs:3,285,764
+
+  Barcode Jaccard:           0.9750
+  Common barcodes:           32008
+  Per-barcode Pearson:       0.999737
+  Per-barcode Spearman:      0.999290
+
+  Common features:           30
+  Per-feature Pearson:       0.999921
+  Per-feature Spearman:      0.999555
+
+--- CRISPR Call Concordance ---
+  CR cells with calls:       23527
+  STAR cells with calls:     33095
+  Common cells:              23525
+  Exact call match:          23063 / 23525
+  Exact match %:             98.04
+  UMI Pearson:               0.999708
+  UMI Spearman:              0.999339
+
