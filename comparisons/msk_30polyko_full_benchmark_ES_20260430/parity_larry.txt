@@ -1,0 +1,58 @@
+======================================================================
+Parity Metrics: MSK_30polyKO_ES_LARRY
+======================================================================
+CR MEX:   /storage/MSK-perturb-comparison/cr_paper_bench_ES_20260430_054814/cr_gex_larry/cr9_gex_larry/outs/per_sample_outs/cr9_gex_larry/count/sample_filtered_feature_bc_matrix
+STAR MEX: /storage/MSK-perturb-comparison/paper_bench_ES_20260430_054814/outs/filtered_feature_bc_matrix
+
+--- all ---
+  CR cells:       32667
+  STAR cells:     33226
+  CR features:    284585
+  STAR features:  284615
+  CR total UMIs:  273,383,709
+  STAR total UMIs:290,463,730
+
+  Barcode Jaccard:           0.9821
+  Common barcodes:           32649
+  Per-barcode Pearson:       0.991322
+  Per-barcode Spearman:      0.989978
+
+  Common features:           37581
+  Per-feature Pearson:       0.993617
+  Per-feature Spearman:      0.986685
+
+--- GEX ---
+  CR cells:       32667
+  STAR cells:     33226
+  CR features:    0
+  STAR features:  0
+  CR total UMIs:  0
+  STAR total UMIs:0
+
+  Barcode Jaccard:           1.0000
+  Common barcodes:           0
+  Per-barcode Pearson:       NA
+  Per-barcode Spearman:      NA
+
+  Common features:           0
+  Per-feature Pearson:       NA
+  Per-feature Spearman:      NA
+
+--- Custom ---
+  CR cells:       32667
+  STAR cells:     33226
+  CR features:    245979
+  STAR features:  245979
+  CR total UMIs:  10,506,672
+  STAR total UMIs:10,588,558
+
+  Barcode Jaccard:           0.9838
+  Common barcodes:           32637
+  Per-barcode Pearson:       0.994126
+  Per-barcode Spearman:      0.991945
+
+  Common features:           3325
+  Per-feature Pearson:       0.950873
+  Per-feature Spearman:      0.958505
+
+TSV written to /mnt/pikachu/STAR-suite/comparisons/msk_30polyko_full_benchmark_ES_20260430/parity_larry.tsv

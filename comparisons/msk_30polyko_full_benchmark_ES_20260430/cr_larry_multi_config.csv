@@ -1,0 +1,12 @@
+[gene-expression]
+reference,/storage/A375-CR-9.01/refdata-gex-GRCh38-2024-A
+create-bam,false
+no-secondary-analysis,true
+
+[feature]
+reference,/mnt/pikachu/MSK-whitelists/ref_feature_larryBC.csv
+
+[libraries]
+fastq_id,fastqs,feature_types
+mRNA,/storage/MSK-perturb-comparison/msk30ko_full_3lib_ES_20260430_054814/fastqs/mRNA,Gene Expression
+LARRY,/storage/MSK-perturb-comparison/msk30ko_full_3lib_ES_20260430_054814/fastqs/LARRY,Custom
