@@ -1,0 +1,5 @@
+[libraries]
+fastqs,sample,library_type,feature_types,star_chemistry,star_whitelist,star_feature_ref,star_library_id,star_max_hamming
+/storage/MSK-perturb-comparison/msk30ko_full_3lib_ES_20260430_054814/fastqs/mRNA,DE_30KO,Gene Expression,Gene Expression,TRU,,,gex_de,
+/storage/MSK-perturb-comparison/msk30ko_full_3lib_ES_20260430_054814/fastqs/PolyIII,DE_30KO,CRISPR Guide Capture,CRISPR Guide Capture,NXT,/storage/scRNAseq_output/whitelists/3M-february-2018_NXT.txt,/mnt/pikachu/MSK-whitelists/ref_feature_geneBC.csv,grna_de,1
+/storage/MSK-perturb-comparison/msk30ko_full_3lib_ES_20260430_054814/fastqs/LARRY,DE_30KO,Custom,Custom,TRU,/storage/scRNAseq_output/whitelists/3M-february-2018_TRU.txt,/mnt/pikachu/MSK-whitelists/ref_feature_larryBC.csv,larry_de,1

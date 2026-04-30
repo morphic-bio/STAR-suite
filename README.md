@@ -1,6 +1,6 @@
 # STAR Suite
 
-STAR Suite updates the original STAR aligner by integrating four modules — STAR-perturb, STAR-Flex, STAR-SLAM, and TranscriptVB — to provide complete internal C/C++ pipelines for bulk RNA-seq, scRNA-seq, Perturb-seq, 10x Flex, and SLAM-seq. The integration results in **substantial speedups** (**1.7–2.4x for bulk RNA-seq**, **1.47–1.60x for scRNA-seq GEX-only Solo vs CellGENI-style STARsolo**, **3.7–6.2x for Perturb-seq**, **2.5–28.8x for Flex**) and a simplified toolchain that can be **installed through pre-compiled binaries** for researchers and agents. **No new external dependencies** are required; the suite is built entirely with the existing STAR toolchain and vendored components. **This is a drop-in replacement for the STAR aligner.**
+STAR Suite updates the original STAR aligner by integrating four modules — STAR-perturb, STAR-Flex, STAR-SLAM, and TranscriptVB — to provide complete internal C/C++ pipelines for bulk RNA-seq, scRNA-seq, Perturb-seq, 10x Flex, and SLAM-seq. The integration results in **substantial speedups** (**1.7–2.4x for bulk RNA-seq**, **1.47–1.60x for scRNA-seq GEX-only Solo vs CellGENI-style STARsolo**, **3.7–5.5x for Perturb-seq**, **2.5–28.8x for Flex**) and a simplified toolchain that can be **installed through pre-compiled binaries** for researchers and agents. **No new external dependencies** are required; the suite is built entirely with the existing STAR toolchain and vendored components. **This is a drop-in replacement for the STAR aligner.**
 
 STAR Suite supports partial compilation: build only the module/tool targets you need instead of building the full suite every time.
 
@@ -79,14 +79,18 @@ and detailed Velocyto bridge results live in
 | scRNA-seq Solo | MSK 30polyKO GEX-only | Historical CellGENI-style STARsolo (`7a7fb08`) | **19.40 min** archived modern wall vs **28.6 min** historical rerun; **1.47x** faster | Fresh historical rerun reproduced **32,304** cells, Jaccard **0.9975**, gene Pearson **0.954925** vs CR9; guarded current surface calls **33,092** cells with Jaccard **0.974**, gene Pearson **0.994554** |
 | Perturb-seq | A375 1k CRISPR 5' GemX | Cell Ranger 9 | **4.0 min**; **3.8x** faster | Jaccard **0.976**, gene Pearson **0.975**, CRISPR match **100%** |
 | Perturb-seq | UCSF `EBs2_2` | Cell Ranger 9 | **16.4 min**; **3.7x** faster | Jaccard **0.976**, gene Pearson **0.995**, CRISPR match **98.9%** |
-| Perturb-seq | MSK 30polyKO | Cell Ranger 9 (separate GEX+gRNA and GEX+LARRY runs) | **26.9 min**; **6.2x** faster | Jaccard **0.9742**, gene Pearson **0.994554**, CRISPR match **98.0%** |
+| Perturb-seq | MSK 30polyKO (DE sample) | Cell Ranger 9 (separate GEX+gRNA and GEX+LARRY runs) | STAR **42 min** vs CR **168 min**; **4.0x** faster (paired 2026-03-06) | 30,497 STAR cells / 32,256 CR cells, Jaccard **0.94**, per-barcode Pearson **0.9999**, gene Pearson **0.993** (filtered, 17,448 genes), CRISPR set-equivalent **98.5%** (22,200/22,531). Full report: [`comparisons/msk_30polyko_full_benchmark_20260306/README.md`](comparisons/msk_30polyko_full_benchmark_20260306/README.md) |
+| Perturb-seq | MSK 30polyKO (ES sample) | Cell Ranger 9 (separate GEX+gRNA and GEX+LARRY runs) | **30.2 min** vs CR **167.1 min**; **5.5x** faster | 33,226 STAR cells / 32,670 CR cells, Jaccard **0.982**, per-barcode Pearson **0.9999**, gene Pearson **0.9937** (filtered, 16,958 genes), CRISPR set-equivalent **98.97%** (25,894/26,164), CRISPR UMI Pearson **0.9994**. Full report: [`comparisons/msk_30polyko_full_benchmark_ES_20260430/README.md`](comparisons/msk_30polyko_full_benchmark_ES_20260430/README.md) |
 | Flex | JAX SC2300771 4-tag full / no-align | Cell Ranger 9 / 7 | **23m 22s** full (**2.5x** vs CR9), **10m 33s** no-align (**5.6x** vs CR9) | Fresh canonical 4-tag reruns (`BC004/BC006/BC007/BC008`) reproduce **20,316** cells; mean Jaccard **0.981**, cell Pearson **0.99997**, gene Pearson **0.99993** vs CR9 |
 | SLAM-seq | NW-5-21 ARID1A compat mode | GEDI / GRAND-SLAM family | Integrated single-pass alignment + quantification; no apples-to-apples end-to-end wall-time claim reported | NTR Pearson **0.967-0.978**, Spearman **0.985-0.990** vs GEDI |
 | Multiome ATAC | PBMC 3k 10x Multiome — single `STAR` invocation: alignment + Solo + GEX `EmptyDrops_CR` + concurrent libchromap + libMACS3 FRAG peaks + in-process ATAC `evidence-from-peaks` via `--chromapAtacEvidenceFromPeaksOutput` and binary sidecar `--chromapAtacSecondaryFragments star_out/atac_fragments.bin` (T=32, lease=256, pool=48, `--dynamicThreadFifoWaiters 1 --dynamicThreadAtacController 1`) | Cell Ranger ARC v2.2.0 same fixture (`cellranger-arc count --create-bam=true --nosecondary --disable-cell-annotation --localcores=32`); **40:04 (2404 s)** | **18:17.52 (1097.52 s); 2.19x faster** than ARC | Apples-to-apples scope: alignment + GEX UMI counting + GEX `EmptyDrops_CR` + ATAC mapping + libMACS3 FRAG peaks + ATAC per-barcode `peak_cutsites >= 1` cell call (the same set of stages ARC bundles inline). One STAR command, no chained tool. ATAC evidence step lives in `libscrna::atac::RunAtacEvidenceFromBinary`, reading Chromap's fixed-record `AEV1` sidecar instead of gzipped fragments TSV; `atac_evidence.tsv` md5 **a4251bbcba7af7b5011e70ebb754c663**. Sidecar validation: **53,969,811** records, **1,295,275,496 B**, `record_size=24`, `barcode_length=16`, **194** chrom rows. GEX `nCellsSimple` **2974** (Gene) / **2976** (GeneFull). Integration guard fires when `--chromapAtacEnable 1 --dynamicThreadInterface 1` ends with `atacAcquire=0`. |
 
 Perturb-seq is the main performance result: on A375, UCSF, and MSK surfaces,
-STAR-suite runs **3.7x-6.2x faster** than Cell Ranger 9 while maintaining
-near-identical GEX/cell metrics and **98.0-100%** CRISPR call agreement.
+STAR-suite runs **3.7x-5.5x faster** than Cell Ranger 9 while maintaining
+near-identical GEX/cell metrics and **97.7–100%** CRISPR call agreement.
+The MSK 30polyKO comparison has been replicated on two independent samples
+(DE and ES) — see [`docs/PAPER_BENCHMARK_MSK_DE_ES.md`](docs/PAPER_BENCHMARK_MSK_DE_ES.md)
+for the side-by-side paper-grade table.
 
 For non-Flex Solo, the README now summarizes only the historical CellGENI-style
 baseline versus the current optimized surface. On this host, external `zcat`
@@ -105,6 +109,16 @@ artifacts.
 For MSK specifically, the historical raw-matrix EmptyDrops isolation result and
 the real guarded end-to-end benchmark surface are separated in
 [docs/MSK_BENCHMARK_SURFACE_AUDIT_20260403.md](docs/MSK_BENCHMARK_SURFACE_AUDIT_20260403.md).
+The MSK 30polyKO Perturb-seq comparison is now reported on **two independent
+samples** from the same NXT chemistry: DE
+([comparisons/msk_30polyko_full_benchmark_20260306/](comparisons/msk_30polyko_full_benchmark_20260306/))
+and ES
+([comparisons/msk_30polyko_full_benchmark_ES_20260430/](comparisons/msk_30polyko_full_benchmark_ES_20260430/)).
+Both use the same wrappers
+(`scripts/paper/run_msk_30polyko_benchmark.sh` for STAR,
+`scripts/paper/run_msk_30polyko_cr_benchmark.sh` for CellRanger 9), with parity
+computed by `scripts/report_additional_parity_metrics.py` per
+`docs/PAPER_BENCHMARK_METHODOLOGY.md`.
 
 ## Building & Installing
 
