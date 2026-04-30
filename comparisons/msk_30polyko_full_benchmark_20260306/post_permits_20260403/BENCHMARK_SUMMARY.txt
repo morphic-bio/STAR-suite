@@ -1,0 +1,12 @@
+dataset=MSK_30polyKO
+chemistry=mixed_TRU_NXT
+libraries=3 (GEX + gRNA + LARRY)
+star_cells=33095
+wall_seconds=1612
+wall_minutes=26.9
+threads=32
+bam=none
+dynamic_permits=32
+bootstrap_tiered_hash=yes
+multimap_rescue=yes
+outdir=/storage/MSK-perturb-comparison/paper_bench_emptydrops_guarded_redo_20260403_214718

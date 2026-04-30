@@ -1,0 +1,63 @@
+                                 Started job on |	Apr 03 21:47:18
+                             Started mapping on |	Apr 03 21:48:28
+                                    Finished on |	Apr 03 22:13:40
+       Mapping speed, Million of reads per hour |	1592.15
+
+                          Number of input reads |	668705043
+                      Average input read length |	85
+                                    UNIQUE READS:
+                   Uniquely mapped reads number |	624216501
+                        Uniquely mapped reads % |	93.35%
+                          Average mapped length |	85.85
+
+                              FLEX STAGE TIMING |
+             Sample calling (output path) calls |	668705043
+          Sample calling (output path) total ms |	10824.91
+      Sample calling (output path) mean us/call |	0.02
+                           Core alignment calls |	668705043
+                        Core alignment total ms |	12477204.78
+                    Core alignment mean us/call |	18.66
+                       Number of splices: Total |	88458381
+            Number of splices: Annotated (sjdb) |	85656137
+                       Number of splices: GT/AG |	86525161
+                       Number of splices: GC/AG |	468387
+                       Number of splices: AT/AC |	53896
+               Number of splices: Non-canonical |	1410937
+                      Mismatch rate per base, % |	0.21%
+                         Deletion rate per base |	0.01%
+                        Deletion average length |	1.50
+                        Insertion rate per base |	0.02%
+                       Insertion average length |	1.32
+                             MULTI-MAPPING READS:
+        Number of reads mapped to multiple loci |	25949633
+             % of reads mapped to multiple loci |	3.88%
+        Number of reads mapped to too many loci |	1965899
+             % of reads mapped to too many loci |	0.29%
+                                  UNMAPPED READS:
+  Number of reads unmapped: too many mismatches |	0
+       % of reads unmapped: too many mismatches |	0.00%
+            Number of reads unmapped: too short |	10754611
+                 % of reads unmapped: too short |	1.61%
+                Number of reads unmapped: other |	5818399
+                     % of reads unmapped: other |	0.87%
+                                  CHIMERIC READS:
+                       Number of chimeric reads |	0
+                            % of chimeric reads |	0.00%
+
+                                CR-COMPAT RESCUE:
+           Multimap reads entering rescue block |	53769067
+          Rescued by gene-vs-non-gene fast path |	19368598
+           Fast-path rejected (failed 50% rule) |	96006
+               Fast-path intronic, fallback off |	0
+             Rescued by exonic winner (Phase 3) |	8406475
+         Rescued by intronic fallback (Phase 3) |	44361
+                No rescue: multiple exonic loci |	4045151
+              No rescue: multiple intronic loci |	14239574
+            No rescue: 1 intronic, fallback off |	0
+                      No rescue: all intergenic |	7568902
+
+         CR-COMPAT GENEFULL EXONIC-OVER-INTRONIC:
+    Alignments with intronic-only genes dropped |	4909215
+          Reads resolved to unique after filter |	4295883
+            Reads still multi-gene (all exonic) |	567805
+             Reads multi-gene across alignments |	16593590
