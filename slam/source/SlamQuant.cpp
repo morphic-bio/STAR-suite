@@ -62,10 +62,13 @@ SlamQuant::SlamQuant(uint32_t nGenes, std::vector<uint8_t> allowedGenes, bool sn
       allowedGenes_(std::move(allowedGenes)) {}
 
 void SlamQuant::enableVarianceAnalysis(uint32_t maxReads, uint32_t minReads,
-                                       uint32_t smoothWindow, uint32_t minSegLen, uint32_t maxTrim) {
+                                       uint32_t smoothWindow, uint32_t minSegLen, uint32_t maxTrim,
+                                       bool separateMateHistograms) {
     varianceMaxReads_ = maxReads;
     varianceMinReads_ = minReads;
+    varianceSeparateMates_ = separateMateHistograms;
     varianceAnalyzer_.reset(new SlamVarianceAnalyzer(maxReads, minReads, smoothWindow, minSegLen, maxTrim));
+    varianceAnalyzer_->setSeparateMateHistograms(separateMateHistograms);
 }
 
 uint32_t SlamQuant::getVarianceMaxReads() const {
@@ -89,20 +92,41 @@ bool SlamQuant::recordVarianceRead() {
     return false;
 }
 
-void SlamQuant::recordVariancePosition(uint32_t readPos, uint8_t qual, bool isT, bool isTc) {
-    if (varianceAnalyzer_) {
-        varianceAnalyzer_->recordPosition(readPos, qual, isT, isTc);
+void SlamQuant::recordVariancePosition(uint32_t mateLocalPos, uint8_t mateIndex,
+                                       uint8_t qual, bool isT, bool isTc) {
+    if (!varianceAnalyzer_) {
+        return;
+    }
+    if (varianceSeparateMates_) {
+        varianceAnalyzer_->recordPositionMate(mateLocalPos, mateIndex, qual, isT, isTc);
+    } else {
+        varianceAnalyzer_->recordPosition(mateLocalPos, qual, isT, isTc);
     }
 }
 
-SlamVarianceTrimResult SlamQuant::computeVarianceTrim(uint32_t readLength) {
+void SlamQuant::recordVariancePosition(uint32_t readPos, uint8_t qual, bool isT, bool isTc) {
+    recordVariancePosition(readPos, 0, qual, isT, isTc);
+}
+
+SlamVarianceTrimResult SlamQuant::computeVarianceTrim(uint32_t concatenatedLen) {
     if (!varianceAnalyzer_) {
         SlamVarianceTrimResult result;
         result.success = false;
         result.mode = "disabled";
         return result;
     }
-    return varianceAnalyzer_->computeTrim(readLength);
+    return varianceAnalyzer_->computeTrimUnified(concatenatedLen, concatenatedLen, 0, varianceSeparateMates_);
+}
+
+SlamVarianceTrimResult SlamQuant::computeVarianceTrim(uint32_t concatenatedLen, uint32_t mateLen0,
+                                                      uint32_t mateLen1) {
+    if (!varianceAnalyzer_) {
+        SlamVarianceTrimResult result;
+        result.success = false;
+        result.mode = "disabled";
+        return result;
+    }
+    return varianceAnalyzer_->computeTrimUnified(concatenatedLen, mateLen0, mateLen1, varianceSeparateMates_);
 }
 
 void SlamQuant::initDebug(const Transcriptome& tr,
@@ -618,6 +642,7 @@ void SlamQuant::merge(const SlamQuant& other) {
         uint32_t maxReads = other.varianceAnalyzer_->readsAnalyzed() > 0 ? 
             static_cast<uint32_t>(other.varianceAnalyzer_->readsAnalyzed()) : 100000;
         varianceAnalyzer_.reset(new SlamVarianceAnalyzer(maxReads, 1000, 5, 3, 15));
+        varianceAnalyzer_->setSeparateMateHistograms(other.varianceSeparateMates_);
         varianceAnalyzer_->merge(*other.varianceAnalyzer_);
     }
     
@@ -1857,7 +1882,7 @@ uint64_t SlamQuant::replayBufferedReads(SlamCompat* compat, const SlamSnpMask* s
                 }
                 
                 // Check trim guards
-                if (!compat->compatShouldCountPos(mateLocalPos, mateLen)) {
+                if (!compat->compatShouldCountPos(mateLocalPos, mateLen, pos.secondMate ? 1u : 0u)) {
                     diag_.compatPositionsSkippedTrim++;
                     continue;
                 }

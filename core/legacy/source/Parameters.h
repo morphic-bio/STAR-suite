@@ -492,8 +492,9 @@ class Parameters {
                 bool compatLenientOverlap = false;// 50% overlap + SJ concordance
                 bool compatOverlapWeight = false; // Divide weight by gene count
                 bool compatIgnoreOverlap = false; // Skip PE overlap positions
-                int compatTrim5p = 0;             // 5' trim guard
-                int compatTrim3p = 0;             // 3' trim guard
+                // Per-mate compat trims. Index [1] uses -1 as sentinel = inherit mate0 after CLI parse.
+                int compatTrim5p[2] = {0, -1};       // 5' trim guard (per mate)
+                int compatTrim3p[2] = {0, -1};       // 3' trim guard (per mate)
 
                 // VB over-dispersed solver (beta-binomial mixture)
                 int vbOverdispInt = 0;            // --slamVbOverdisp (0/1)
@@ -516,11 +517,14 @@ class Parameters {
                 string slamQcReport = "";          // Prefix for comprehensive QC report (JSON + HTML, empty=disabled)
                 int grandSlamOut = 1;              // --slamGrandSlamOut (0/1, default: 1)
                 string grandSlamOutFile = "";      // Optional override for GRAND-SLAM TSV output
-                int autoTrim5p = 0;               // Auto-computed 5' trim (0=not computed)
-                int autoTrim3p = 0;                // Auto-computed 3' trim (0=not computed)
-                bool autoTrimComputed = false;    // Whether auto-trim has been computed
+                int autoTrim5p[2] = {0, 0};               // Auto-computed 5' trim
+                int autoTrim3p[2] = {0, 0};                // Auto-computed 3' trim
+                bool autoTrimComputed[2] = {false, false}; // Mate has auto-trim loaded
+                string slamAutoTrimPerMate = "Auto"; // Auto|Yes|No — Auto: per-mate when PE (readNends>=2)
+                bool autoTrimPerMate = true;     // derived
                 uint32_t autoTrimFileIndex = 0;    // File index where auto-trim was computed
-                std::vector<double> varianceStddevTcRate; // Variance curve from detection pass (optional)
+                std::vector<double> varianceStddevTcRate;            // Mate-local stdev curve (mate1 / concat) from detection
+                std::vector<double> varianceStddevTcRateMate2;     // Mate2-local stdev when separateMateHistograms PE
                 
                 // Global SNP error rate estimation (from auto-trim detection pass)
                 double snpErrEst = 0.0;           // Estimated T→C error rate (p_err)

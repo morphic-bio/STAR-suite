@@ -202,7 +202,14 @@ void Transcriptome::classifyAlign (Transcript **alignG, uint64 nAlignG, ReadAnno
             continue; //this alignment is outside of range of all transcripts
         }
 
-        uint64 aGend=aG.exons[aG.nExons-1][EX_G]+aG.exons[aG.nExons-1][EX_L]-1; //TODO: this estimate does work if 2nd mate end is < 1st mate end
+        // Largest genomic coordinate covered by any exon (FR overlap: inner mate must not underestimate span).
+        uint64 aGend = aG.exons[0][EX_G] + aG.exons[0][EX_L] - 1;
+        for (uint ix = 1; ix < aG.nExons; ix++) {
+            uint64 cand = aG.exons[ix][EX_G] + aG.exons[ix][EX_L] - 1;
+            if (cand > aGend) {
+                aGend = cand;
+            }
+        }
 
         ++tr1;
         do {//cycle back through all the transcripts

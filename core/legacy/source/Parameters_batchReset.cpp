@@ -162,14 +162,18 @@ void Parameters::resetForBatchSample(int sampleIndex, const std::string& sampleN
     
     if (quant.slam.yes) {
         // Reset SLAM-specific state
-        quant.slam.autoTrimComputed = false;
-        quant.slam.autoTrim5p = 0;
-        quant.slam.autoTrim3p = 0;
+        quant.slam.autoTrimComputed[0] = false;
+        quant.slam.autoTrimComputed[1] = false;
+        quant.slam.autoTrim5p[0] = 0;
+        quant.slam.autoTrim5p[1] = 0;
+        quant.slam.autoTrim3p[0] = 0;
+        quant.slam.autoTrim3p[1] = 0;
         quant.slam.autoTrimFileIndex = 0;
         quant.slam.autoTrimReplayDone = false;
         quant.slam.autoTrimDetectionPass = false;
         quant.slam.currentFileIndex = 0;
         quant.slam.varianceStddevTcRate.clear();
+        quant.slam.varianceStddevTcRateMate2.clear();
         quant.slam.snpErrEst = 0.0;
         quant.slam.snpErrFallbackReason.clear();
 

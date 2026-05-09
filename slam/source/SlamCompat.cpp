@@ -68,15 +68,14 @@ double SlamCompat::compatOverlapWeight(double baseWeight, size_t readLevelGeneCo
     return baseWeight / static_cast<double>(readLevelGeneCount);
 }
 
-bool SlamCompat::compatShouldCountPos(uint32_t mateLocalPos, uint32_t mateLen) const {
-    // Guard against underflow: if trim >= mateLen, skip all positions
-    uint32_t trim5 = static_cast<uint32_t>(cfg_.trim5p);
-    uint32_t trim3 = static_cast<uint32_t>(cfg_.trim3p);
+bool SlamCompat::compatShouldCountPos(uint32_t mateLocalPos, uint32_t mateLen,
+                                       uint32_t mateIndex) const {
+    mateIndex = (mateIndex >= 2 ? 1 : mateIndex);
+    uint32_t trim5 = static_cast<uint32_t>(cfg_.trim5p[mateIndex]);
+    uint32_t trim3 = static_cast<uint32_t>(cfg_.trim3p[mateIndex]);
     if (trim5 + trim3 >= mateLen) return false;
-    
-    // 5' trim guard (from mate start)
+
     if (mateLocalPos < trim5) return false;
-    // 3' trim guard (from mate end) - safe now due to guard above
     if (mateLocalPos >= mateLen - trim3) return false;
     return true;
 }

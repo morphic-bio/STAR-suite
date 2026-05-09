@@ -1256,10 +1256,25 @@ slamCompatIgnoreOverlap              -1
     int: -1/0/1 - Skip all PE overlap positions (-1=use mode default, 0=disable, 1=enable)
 
 slamCompatTrim5p                     0
-    int: Number of bases to trim from 5' end of each mate
+    int: Mate1 / R1: bases trimmed from 5' (see also slamCompatTrim5pMate1). For PE, mate2 defaults to the same value unless slamCompatTrim5pMate2 is set (use -1 sentinel = inherit mate1; default).
+
+slamCompatTrim5pMate1              0
+    int: Alias for mate1 5' trim (same storage as slamCompatTrim5p)
+
+slamCompatTrim5pMate2                -1
+    int: Mate2 / R2: 5' trim bases; -1 means inherit mate1 after parse
 
 slamCompatTrim3p                     0
-    int: Number of bases to trim from 3' end of each mate
+    int: Mate1 / R1: bases trimmed from 3'
+
+slamCompatTrim3pMate1                0
+    int: Alias for mate1 3' trim (same storage as slamCompatTrim3p)
+
+slamCompatTrim3pMate2                -1
+    int: Mate2 3' trim; -1 means inherit mate1 after parse
+
+slamAutoTrimPerMate                  Auto
+    string: Auto|Yes|No. Auto uses separate per-mate variance histograms for paired-end reads and a combined histogram for single-end reads; Yes forces per-mate mode, No forces one combined trim profile for both mates.
 
 autoTrim                             -
     string: Auto-trim mode: "variance" for variance-based trimming, "-" to disable.

@@ -4,8 +4,10 @@
 #include "SequenceFuns.h"
 #include "GlobalVariables.h"
 #include "FlexDebugCounters.h"
+#include "IncludeDefine.h"
 #include <algorithm>
 #include <chrono>
+#include <sstream>
 
 inline uint64 fastqReadOneLine(ifstream &streamIn, char *arrIn);
 inline void removeStringEndControl(string &str);
@@ -354,7 +356,28 @@ void ReadAlignChunk::processChunks() {//read-map-write chunks
                         newFile=false;
                 };
             };
-            //TODO: check here that both mates are zero or non-zero
+            if (P.readNends == 2U) {
+                const bool m0Empty = (chunkInSizeBytesTotal[0] == 0ULL);
+                const bool m1Empty = (chunkInSizeBytesTotal[1] == 0ULL);
+                if (m0Empty != m1Empty) {
+                    ostringstream errOut;
+                    errOut << ERROR_OUT
+                           << " EXITING because of FATAL INPUT ERROR: paired mates have unequal "
+                              "FASTQ buffering for this chunk (truncated pair or mismatched mate file lists).\n"
+                           << "chunkInSizeBytesTotal mate1(bytes)=" << chunkInSizeBytesTotal[0]
+                           << ", mate2(bytes)=" << chunkInSizeBytesTotal[1] << "\n";
+                    if (m0Empty && !m1Empty) {
+                        errOut << "Mate 1 produced no bytes for this chunk while mate 2 still has buffered data "
+                                  "(mate 1 stream likely exhausted first).\n";
+                    } else {
+                        errOut << "Mate 2 produced no bytes for this chunk while mate 1 still has buffered data "
+                                  "(mate 2 stream likely exhausted first).\n";
+                    }
+                    errOut << "SOLUTION: verify R1 and R2 have the same record counts and matching order "
+                              "in --readFilesIn.\n";
+                    exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_INPUT_FILES, P);
+                }
+            }
             if (chunkInSizeBytesTotal[0]==0) {
                 noReadsLeft=true; //true if there no more reads left in the file
                 iChunkIn=g_threadChunks.chunkInN;//to keep things consistent

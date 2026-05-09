@@ -342,20 +342,27 @@ bool ReadAlign::slamCollect(const Transcript& trOut, const std::set<uint32_t>& g
             // Record variance stats for auto-trim (before trim filtering, only during detection pass)
             // Only collect if varianceCollecting is true (read was recorded and under maxReads limit)
             if (varianceCollecting) {
-                // Determine if this is a T base and if it's a T→C conversion
                 bool isT = false;
                 bool isTc = false;
                 if (!isIntronic) {
                     if (!isMinus) {
-                        isT = (g1 == 3); // T
-                        isTc = (g1 == 3 && r1 == 1); // T→C
+                        isT = (g1 == 3);
+                        isTc = (g1 == 3 && r1 == 1);
                     } else {
-                        isT = (g1 == 0); // A (complement of T)
-                        isTc = (g1 == 0 && r1 == 2); // A→G (complement of T→C)
+                        isT = (g1 == 0);
+                        isTc = (g1 == 0 && r1 == 2);
                     }
                 }
-                
-                slamQuant->recordVariancePosition(readPos, qual, isT, isTc);
+                if (hasMate && readLength[1] > 0 && slamQuant->varianceSeparateMates()) {
+                    uint32_t mateVarLocal =
+                        secondMate ? static_cast<uint32_t>(
+                                         readPos - static_cast<uint32_t>(readLength[0]))
+                                   : static_cast<uint32_t>(readPos);
+                    uint8_t mateVarIndex = secondMate ? 1 : 0;
+                    slamQuant->recordVariancePosition(mateVarLocal, mateVarIndex, qual, isT, isTc);
+                } else {
+                    slamQuant->recordVariancePosition(readPos, qual, isT, isTc);
+                }
             }
 
             // Buffer for external re-quant dump (before trim filtering)
@@ -389,7 +396,8 @@ bool ReadAlign::slamCollect(const Transcript& trOut, const std::set<uint32_t>& g
                     mateLen = static_cast<uint32_t>(readLength[0]);
                 }
                 // Check trim guards (applies even in overlap regions if ignoreOverlap is off)
-                if (!slamCompat->compatShouldCountPos(mateLocalPos, mateLen)) {
+                if (!slamCompat->compatShouldCountPos(mateLocalPos, mateLen,
+                                                     secondMate ? 1u : 0u)) {
                     slamQuant->diagnostics().compatPositionsSkippedTrim++;
                     continue;
                 }

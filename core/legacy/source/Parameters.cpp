@@ -492,8 +492,12 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "slamCompatLenientOverlap", &quant.slam.compatLenientOverlapInt));
     parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "slamCompatOverlapWeight", &quant.slam.compatOverlapWeightInt));
     parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "slamCompatIgnoreOverlap", &quant.slam.compatIgnoreOverlapInt));
-    parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "slamCompatTrim5p", &quant.slam.compatTrim5p));
-    parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "slamCompatTrim3p", &quant.slam.compatTrim3p));
+    parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "slamCompatTrim5p", &quant.slam.compatTrim5p[0]));
+    parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "slamCompatTrim3p", &quant.slam.compatTrim3p[0]));
+    parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "slamCompatTrim5pMate1", &quant.slam.compatTrim5p[0]));
+    parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "slamCompatTrim3pMate1", &quant.slam.compatTrim3p[0]));
+    parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "slamCompatTrim5pMate2", &quant.slam.compatTrim5p[1]));
+    parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "slamCompatTrim3pMate2", &quant.slam.compatTrim3p[1]));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "autoTrim", &quant.slam.autoTrimMode));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "trimScope", &quant.slam.trimScope));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "trimSource", &quant.slam.trimSource));
@@ -504,6 +508,7 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "autoTrimMaxTrim", &quant.slam.autoTrimMaxTrim));
     parArray.push_back(new ParameterInfoScalar <uint64_t> (-1, -1, "autoTrimBufferReads", &quant.slam.autoTrimBufferReads));
     parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "autoTrimDetectionReads", &quant.slam.autoTrimDetectionReads));
+    parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "slamAutoTrimPerMate", &quant.slam.slamAutoTrimPerMate));
     parArray.push_back(new ParameterInfoScalar <double>  (-1, -1, "snpErrMinThreshold", &quant.slam.snpErrMinThreshold));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "slamQcJson", &quant.slam.slamQcJson));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "slamQcHtml", &quant.slam.slamQcHtml));
@@ -2290,6 +2295,33 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
                    << "--slamCompatMode must be none or gedi\n"
                    << "Got: " << quant.slam.compatModeStr << "\n";
             exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+        }
+
+        // Mate2 defaults to mate1 unless explicitly set (sentinel -1 before resolve)
+        if (quant.slam.compatTrim5p[1] < 0) {
+            quant.slam.compatTrim5p[1] = quant.slam.compatTrim5p[0];
+        }
+        if (quant.slam.compatTrim3p[1] < 0) {
+            quant.slam.compatTrim3p[1] = quant.slam.compatTrim3p[0];
+        }
+        {
+            string atm = quant.slam.slamAutoTrimPerMate;
+            for (auto& c : atm) {
+                c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            }
+            if (atm.empty() || atm == "auto" || atm == "-") {
+                quant.slam.autoTrimPerMate = (readNends >= 2);
+            } else if (atm == "yes" || atm == "true" || atm == "1") {
+                quant.slam.autoTrimPerMate = true;
+            } else if (atm == "no" || atm == "false" || atm == "0") {
+                quant.slam.autoTrimPerMate = false;
+            } else {
+                ostringstream errOut;
+                errOut << "EXITING because of FATAL PARAMETER ERROR: "
+                       << "--slamAutoTrimPerMate must be Auto, Yes, or No\n"
+                       << "Got: " << quant.slam.slamAutoTrimPerMate << "\n";
+                exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+            }
         }
         
         // Apply SNP mask defaults and compatibility mode (--slamSnpMaskCompat gedi)
