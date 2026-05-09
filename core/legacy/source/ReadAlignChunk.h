@@ -56,8 +56,8 @@ public:
     void chunkFstreamCat (fstream &chunkOut, ofstream &allOut, bool mutexFlag, pthread_mutex_t &mutexVal);
     void chunkFilesCat(ostream *allOut, string filePrefix, uint &iC);
     void reopenYNoYFastqOutputsForReuse();
-    
-    // Reinitialize SlamCompat with new trim values (for mid-run auto-trim)
+
+    void reinitSlamCompat(int trim5p_m1, int trim3p_m1, int trim5p_m2, int trim3p_m2);
     void reinitSlamCompat(int trim5p, int trim3p);
 
     Genome &mapGen;

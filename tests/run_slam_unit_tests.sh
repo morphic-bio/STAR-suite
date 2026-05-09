@@ -4,7 +4,7 @@
 # - test_slam_snp_em
 # - test_slam_vb_overdisp
 # - test_qc_transition_orientation
-# - test_slam_qc_output
+# - test_slam_variance_mate_tc_rate
 
 set -euo pipefail
 
@@ -38,7 +38,7 @@ TESTS_FAILED=0
 FAILED_TESTS=""
 
 # Test 1: SLAM SNP EM
-echo "[1/4] Building test_slam_snp_em..."
+echo "[1/5] Building test_slam_snp_em..."
 OUT_BIN_SNP_EM="$TMP_DIR/test_slam_snp_em"
 if [[ ! -f "$TEST_DIR/test_slam_snp_em.cpp" ]]; then
     echo "FAIL: test_slam_snp_em.cpp not found at $TEST_DIR/test_slam_snp_em.cpp"
@@ -66,7 +66,7 @@ fi
 echo
 
 # Test 2: SLAM VB Overdisp Solver
-echo "[2/4] Building test_slam_vb_overdisp..."
+echo "[2/5] Building test_slam_vb_overdisp..."
 OUT_BIN_VB="$TMP_DIR/test_slam_vb_overdisp"
 if [[ ! -f "$TEST_DIR/test_slam_vb_overdisp.cpp" ]]; then
     echo "FAIL: test_slam_vb_overdisp.cpp not found at $TEST_DIR/test_slam_vb_overdisp.cpp"
@@ -94,7 +94,7 @@ fi
 echo
 
 # Test 3: QC Transition Orientation
-echo "[3/4] Building test_qc_transition_orientation..."
+echo "[3/5] Building test_qc_transition_orientation..."
 OUT_BIN_QC_ORIENT="$TMP_DIR/test_qc_transition_orientation"
 if [[ ! -f "$TEST_DIR/test_qc_transition_orientation.cpp" ]]; then
     echo "FAIL: test_qc_transition_orientation.cpp not found at $TEST_DIR/test_qc_transition_orientation.cpp"
@@ -105,6 +105,7 @@ else
         "$TEST_DIR/test_qc_transition_orientation.cpp" "$SOURCE_DIR/SlamQuant.cpp" \
         "$SOURCE_DIR/SlamSolver.cpp" "$SOURCE_DIR/libem/slam_vb_overdisp.cpp" \
         "$SOURCE_DIR/SlamVarianceAnalysis.cpp" "$SOURCE_DIR/SlamReadBuffer.cpp" "$SOURCE_DIR/SlamCompat.cpp" \
+        "$SOURCE_DIR/SlamDump.cpp" \
         -L"$HTSLIB_DIR" -lhts -lz -lssl -lcrypto -lpthread \
         -o "$OUT_BIN_QC_ORIENT" 2>&1; then
         echo "Running test_qc_transition_orientation..."
@@ -125,7 +126,7 @@ fi
 echo
 
 # Test 4: SLAM QC Output
-echo "[4/4] Building test_slam_qc_output..."
+echo "[4/5] Building test_slam_qc_output..."
 OUT_BIN_QC_OUT="$TMP_DIR/test_slam_qc_output"
 if [[ ! -f "$TEST_DIR/test_slam_qc_output.cpp" ]]; then
     echo "FAIL: test_slam_qc_output.cpp not found at $TEST_DIR/test_slam_qc_output.cpp"
@@ -136,6 +137,7 @@ else
         "$TEST_DIR/test_slam_qc_output.cpp" "$SOURCE_DIR/SlamQuant.cpp" "$SOURCE_DIR/SlamQcOutput.cpp" \
         "$SOURCE_DIR/SlamSolver.cpp" "$SOURCE_DIR/libem/slam_vb_overdisp.cpp" \
         "$SOURCE_DIR/SlamVarianceAnalysis.cpp" "$SOURCE_DIR/SlamReadBuffer.cpp" "$SOURCE_DIR/SlamCompat.cpp" \
+        "$SOURCE_DIR/SlamDump.cpp" \
         -L"$HTSLIB_DIR" -lhts -lz -lssl -lcrypto -lpthread \
         -o "$OUT_BIN_QC_OUT" 2>&1; then
         echo "Running test_slam_qc_output..."
@@ -151,6 +153,34 @@ else
         echo "FAIL: Compilation failed for test_slam_qc_output"
         TESTS_FAILED=$((TESTS_FAILED + 1))
         FAILED_TESTS="$FAILED_TESTS test_slam_qc_output(compile)"
+    fi
+fi
+echo
+
+# Test 5: per-mate T→C error window (asymmetric trims)
+echo "[5/5] Building test_slam_variance_mate_tc_rate..."
+OUT_BIN_MATE="$TMP_DIR/test_slam_variance_mate_tc_rate"
+if [[ ! -f "$TEST_DIR/test_slam_variance_mate_tc_rate.cpp" ]]; then
+    echo "FAIL: test_slam_variance_mate_tc_rate.cpp not found at $TEST_DIR/test_slam_variance_mate_tc_rate.cpp"
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+    FAILED_TESTS="$FAILED_TESTS test_slam_variance_mate_tc_rate(missing)"
+else
+    if "$CXX" $CXXFLAGS -I"$SOURCE_DIR" \
+        "$TEST_DIR/test_slam_variance_mate_tc_rate.cpp" "$SOURCE_DIR/SlamVarianceAnalysis.cpp" \
+        -o "$OUT_BIN_MATE" -lm 2>&1; then
+        echo "Running test_slam_variance_mate_tc_rate..."
+        if "$OUT_BIN_MATE" 2>&1; then
+            echo "✓ test_slam_variance_mate_tc_rate PASSED"
+            TESTS_PASSED=$((TESTS_PASSED + 1))
+        else
+            echo "✗ test_slam_variance_mate_tc_rate FAILED"
+            TESTS_FAILED=$((TESTS_FAILED + 1))
+            FAILED_TESTS="$FAILED_TESTS test_slam_variance_mate_tc_rate(run)"
+        fi
+    else
+        echo "FAIL: Compilation failed for test_slam_variance_mate_tc_rate"
+        TESTS_FAILED=$((TESTS_FAILED + 1))
+        FAILED_TESTS="$FAILED_TESTS test_slam_variance_mate_tc_rate(compile)"
     fi
 fi
 echo

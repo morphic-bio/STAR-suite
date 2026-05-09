@@ -193,12 +193,17 @@ public:
     
     // Variance analysis for auto-trim
     bool recordVarianceRead(); // Returns false if max reads reached
+    void recordVariancePosition(uint32_t mateLocalPos, uint8_t mateIndex,
+                                uint8_t qual, bool isT, bool isTc);
     void recordVariancePosition(uint32_t readPos, uint8_t qual, bool isT, bool isTc);
-    SlamVarianceTrimResult computeVarianceTrim(uint32_t readLength);
+    SlamVarianceTrimResult computeVarianceTrim(uint32_t concatenatedLen);
+    SlamVarianceTrimResult computeVarianceTrim(uint32_t concatenatedLen, uint32_t mateLen0, uint32_t mateLen1);
+    bool varianceSeparateMates() const { return varianceSeparateMates_; }
     bool varianceAnalysisEnabled() const { return varianceAnalyzer_ != nullptr; }
     const SlamVarianceAnalyzer* varianceAnalyzer() const { return varianceAnalyzer_.get(); }
     void enableVarianceAnalysis(uint32_t maxReads, uint32_t minReads,
-                                uint32_t smoothWindow = 5, uint32_t minSegLen = 3, uint32_t maxTrim = 15);
+                                uint32_t smoothWindow = 5, uint32_t minSegLen = 3, uint32_t maxTrim = 15,
+                                bool separateMateHistograms = false);
     void resetVarianceAnalysis();
     uint32_t getVarianceMaxReads() const;
     uint32_t getVarianceMinReads() const;
@@ -328,6 +333,7 @@ private:
     std::unique_ptr<SlamVarianceAnalyzer> varianceAnalyzer_;
     uint32_t varianceMaxReads_ = 0;
     uint32_t varianceMinReads_ = 0;
+    bool varianceSeparateMates_ = false;
     
     // Read buffer for auto-trim replay
     std::unique_ptr<SlamReadBuffer> readBuffer_;

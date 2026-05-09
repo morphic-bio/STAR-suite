@@ -1075,8 +1075,18 @@ void ReadAlign::writeSAM(uint64 nTrOutSAM, Transcript **trOutSAM, Transcript *tr
         
         ////////////////////////////////////////////////////////////////////////////////////////////////////////////
         ////// write SAM/BAM 
-        auto nTrOutWrite=min(P.outSAMmultNmax,nTrOutSAM); //number of aligns to write to SAM/BAM files            
-        
+        auto nTrOutWrite=min(P.outSAMmultNmax,nTrOutSAM); //number of aligns to write to SAM/BAM files
+
+        // Union mate presence across transcripts that are actually written (outSAMmultNmax),
+        // not a higher-SAM candidate that is truncated and never emitted.
+        for (uint iTrAll = 0; iTrAll < nTrOutWrite; ++iTrAll) {
+            if (trOutSAM[iTrAll] == nullptr) {
+                continue;
+            }
+            mateMapped[trOutSAM[iTrAll]->exons[0][EX_iFrag]] = true;
+            mateMapped[trOutSAM[iTrAll]->exons[trOutSAM[iTrAll]->nExons-1][EX_iFrag]] = true;
+        }
+
         for (uint iTr=0;iTr<nTrOutWrite;iTr++) {//write transcripts
             //mateMapped1 = true if a mate is present in this transcript
             bool mateMapped1[2]={false,false};
@@ -1137,9 +1147,7 @@ void ReadAlign::writeSAM(uint64 nTrOutSAM, Transcript **trOutSAM, Transcript *tr
 
         /////////////////////////////////////////////////////////////////////////////////////////////
         //////// write unmapped ends
-        //TODO it's better to check all transcripts in the loop above for presence of both mates
-        mateMapped[trBestSAM->exons[0][EX_iFrag]] = true;
-        mateMapped[trBestSAM->exons[trBestSAM->nExons-1][EX_iFrag]] = true;
+        // mateMapped was accumulated over all transcripts in nTrOutSAM (see union loop above).
 
         if (P.readNmates>1 && !(mateMapped[0] && mateMapped[1]) ) {//not readNends: this is alignment
             unmapType=4;

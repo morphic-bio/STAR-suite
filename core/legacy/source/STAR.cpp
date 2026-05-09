@@ -1069,7 +1069,8 @@ int main(int argInN, char *argIn[])
     // Always run detection pass when SLAM is enabled to collect variance stats and compute error rate
     // Trims are only computed/applied if --autoTrim variance is set
     volatile bool runSlamDetectionPass = true;  // keep main mapping flow independent of SLAM detection
-    bool doSlamDetectionPass = (P.quant.slam.yes && P.quant.slam.trimScope == "first" && !P.quant.slam.autoTrimComputed);
+    bool doSlamDetectionPass =
+        (P.quant.slam.yes && P.quant.slam.trimScope == "first" && !P.quant.slam.autoTrimComputed[0]);
     
     if (runSlamDetectionPass) {
         if (doSlamDetectionPass) {
@@ -1140,29 +1141,32 @@ int main(int argInN, char *argIn[])
         // Compute global error rate and trims from variance stats
         if (RAdetect->slamQuant != nullptr && RAdetect->slamQuant->varianceAnalysisEnabled()) {
             // Estimate read length from processed reads
-            uint32_t readLength = 100;
+            uint32_t mateLen0 = 100;
+            uint32_t mateLen1 = 0;
             if (RAdetect->RA != nullptr && RAdetect->RA->readLength[0] > 0) {
-                readLength = static_cast<uint32_t>(RAdetect->RA->readLength[0] + RAdetect->RA->readLength[1]);
+                mateLen0 = static_cast<uint32_t>(RAdetect->RA->readLength[0]);
+                mateLen1 = static_cast<uint32_t>(RAdetect->RA->readLength[1]);
             }
-            
+            const uint32_t readLengthConcat = mateLen0 + mateLen1;
+
             const SlamVarianceAnalyzer* analyzer = RAdetect->slamQuant->varianceAnalyzer();
-            
+
             // Compute global T→C error rate (always, even if trimming disabled)
             uint64_t t_total = 0, tc_total = 0;
             double p_est = 0.0;
-            // Initialize trim windows from manual trims (will be updated if auto-trim succeeds)
-            int trim5p_for_err = P.quant.slam.compatTrim5p;
-            int trim3p_for_err = P.quant.slam.compatTrim3p;
-            
+            int trim5p_for_err[2] = {P.quant.slam.compatTrim5p[0], P.quant.slam.compatTrim5p[1]};
+            int trim3p_for_err[2] = {P.quant.slam.compatTrim3p[0], P.quant.slam.compatTrim3p[1]};
+
             if (analyzer != nullptr) {
                 // Compute trims only if auto-trim mode is explicitly enabled
                 SlamVarianceTrimResult trimResult;
                 bool trimComputed = false;
-                
-                if (P.quant.slam.autoTrimMode == "variance") {
-                    trimResult = RAdetect->slamQuant->computeVarianceTrim(readLength);
 
-                    if (!trimResult.success || trimResult.readsAnalyzed < static_cast<uint64_t>(P.quant.slam.autoTrimMinReads)) {
+                if (P.quant.slam.autoTrimMode == "variance") {
+                    trimResult = RAdetect->slamQuant->computeVarianceTrim(readLengthConcat, mateLen0, mateLen1);
+
+                    if (!trimResult.success ||
+                        trimResult.readsAnalyzed < static_cast<uint64_t>(P.quant.slam.autoTrimMinReads)) {
                         ostringstream errOut;
                         errOut << "EXITING because of FATAL ERROR: --autoTrim variance requested but insufficient stdev data to compute trims.\n"
                                << "DETAILS: reads_analyzed=" << trimResult.readsAnalyzed
@@ -1173,23 +1177,37 @@ int main(int argInN, char *argIn[])
                         exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_RUNTIME, P);
                     }
 
-                    P.quant.slam.autoTrim5p = trimResult.trim5p;
-                    P.quant.slam.autoTrim3p = trimResult.trim3p;
-                    P.quant.slam.autoTrimComputed = true;
+                    P.quant.slam.autoTrim5p[0] = trimResult.mates[0].trim5p;
+                    P.quant.slam.autoTrim3p[0] = trimResult.mates[0].trim3p;
+                    if (mateLen1 > 0 && P.quant.slam.autoTrimPerMate) {
+                        P.quant.slam.autoTrim5p[1] = trimResult.mates[1].trim5p;
+                        P.quant.slam.autoTrim3p[1] = trimResult.mates[1].trim3p;
+                    } else {
+                        P.quant.slam.autoTrim5p[1] = P.quant.slam.autoTrim5p[0];
+                        P.quant.slam.autoTrim3p[1] = P.quant.slam.autoTrim3p[0];
+                    }
+
+                    P.quant.slam.compatTrim5p[0] = P.quant.slam.autoTrim5p[0];
+                    P.quant.slam.compatTrim5p[1] = P.quant.slam.autoTrim5p[1];
+                    P.quant.slam.compatTrim3p[0] = P.quant.slam.autoTrim3p[0];
+                    P.quant.slam.compatTrim3p[1] = P.quant.slam.autoTrim3p[1];
+
+                    P.quant.slam.autoTrimComputed[0] = true;
+                    P.quant.slam.autoTrimComputed[1] = (mateLen1 > 0 && P.quant.slam.autoTrimPerMate);
+
+                    trim5p_for_err[0] = P.quant.slam.compatTrim5p[0];
+                    trim5p_for_err[1] = P.quant.slam.compatTrim5p[1];
+                    trim3p_for_err[0] = P.quant.slam.compatTrim3p[0];
+                    trim3p_for_err[1] = P.quant.slam.compatTrim3p[1];
+                    trimComputed = true;
                     P.quant.slam.autoTrimFileIndex = 0;
 
-                    // Update manual trim settings so SlamCompat uses them
-                    P.quant.slam.compatTrim5p = trimResult.trim5p;
-                    P.quant.slam.compatTrim3p = trimResult.trim3p;
-
-                    trim5p_for_err = trimResult.trim5p;
-                    trim3p_for_err = trimResult.trim3p;
-                    trimComputed = true;
-
                     P.inOut->logMain << "SLAM auto-trim (segmented regression) computed:\n"
-                                     << "    trim5p=" << trimResult.trim5p
-                                     << " trim3p=" << trimResult.trim3p
-                                     << " mode=" << trimResult.mode << "\n"
+                                     << "    trim5p_m1=" << trimResult.mates[0].trim5p
+                                     << " trim3p_m1=" << trimResult.mates[0].trim3p
+                                     << " trim5p_m2=" << trimResult.mates[1].trim5p
+                                     << " trim3p_m2=" << trimResult.mates[1].trim3p << " mode=" << trimResult.mode
+                                     << "\n"
                                      << "    breakpoints: b1=" << trimResult.kneeBin5p
                                      << " b2=" << trimResult.kneeBin3p
                                      << " total_sse=" << trimResult.totalSSE << "\n"
@@ -1203,10 +1221,14 @@ int main(int argInN, char *argIn[])
                                      << "    trim_source=" << trimSourcePath
                                      << (usingTrimSource ? " (--trimSource)" : " (first input)") << "\n";
                 }
-                
-                // Compute error rate: use trimmed window if trims were computed, otherwise full window
-                std::tie(t_total, tc_total, p_est) = analyzer->computeGlobalTcErrorRate(
-                    trim5p_for_err, trim3p_for_err, readLength);
+
+                if (analyzer->separateMateHistograms() && mateLen1 > 0) {
+                    std::tie(t_total, tc_total, p_est) = analyzer->computeGlobalTcErrorRatePerMate(
+                        trim5p_for_err, trim3p_for_err, mateLen0, mateLen1);
+                } else {
+                    std::tie(t_total, tc_total, p_est) = analyzer->computeGlobalTcErrorRate(
+                        trim5p_for_err[0], trim3p_for_err[0], readLengthConcat);
+                }
                 P.quant.slam.snpErrEst = p_est;
                 
                 // Apply fallback threshold
@@ -1252,7 +1274,9 @@ int main(int argInN, char *argIn[])
                 
                 // Cache variance curve for comprehensive QC (detection pass)
                 if (analyzer != nullptr) {
-                    const auto& vstats = analyzer->getStats();
+                    P.quant.slam.varianceStddevTcRateMate2.clear();
+                    const auto& vstats =
+                        analyzer->separateMateHistograms() ? analyzer->getStats(0) : analyzer->getStats();
                     uint32_t maxPos = 0;
                     for (const auto& kv : vstats) {
                         if (kv.first > maxPos) {
@@ -1263,8 +1287,23 @@ int main(int argInN, char *argIn[])
                     for (const auto& kv : vstats) {
                         P.quant.slam.varianceStddevTcRate[kv.first] = kv.second.stddevTcRate();
                     }
+                    if (analyzer->separateMateHistograms()) {
+                        const auto& v2 = analyzer->getStats(1);
+                        uint32_t maxP2 = 0;
+                        for (const auto& kv : v2) {
+                            if (kv.first > maxP2) {
+                                maxP2 = kv.first;
+                            }
+                        }
+                        P.quant.slam.varianceStddevTcRateMate2.assign(maxP2 + 1,
+                                                                      std::numeric_limits<double>::quiet_NaN());
+                        for (const auto& kv : v2) {
+                            P.quant.slam.varianceStddevTcRateMate2[kv.first] = kv.second.stddevTcRate();
+                        }
+                    }
                 } else {
                     P.quant.slam.varianceStddevTcRate.clear();
+                    P.quant.slam.varianceStddevTcRateMate2.clear();
                 }
 
                 // Write QC outputs (always write if analyzer exists, even when trim detection fails)
@@ -1275,12 +1314,14 @@ int main(int argInN, char *argIn[])
                     }
                     // For stats-only mode or failed trim detection, pass null trimResult
                     const SlamVarianceTrimResult* trimResultPtr = trimComputed ? &trimResult : nullptr;
-                    int trim5p_val = trimComputed ? trimResult.trim5p : trim5p_for_err;
-                    int trim3p_val = trimComputed ? trimResult.trim3p : trim3p_for_err;
+                    int trim5p_m1 = trimComputed ? trimResult.mates[0].trim5p : trim5p_for_err[0];
+                    int trim3p_m1 = trimComputed ? trimResult.mates[0].trim3p : trim3p_for_err[0];
+                    int trim5p_m2 = trimComputed ? trimResult.mates[1].trim5p : trim5p_for_err[1];
+                    int trim3p_m2 = trimComputed ? trimResult.mates[1].trim3p : trim3p_for_err[1];
                     uint64_t readsAnalyzed_val = trimComputed ? trimResult.readsAnalyzed : analyzer->readsAnalyzed();
-                    bool writeResult = writeSlamQcJson(*analyzer, qcJsonPath, 
+                    bool writeResult = writeSlamQcJson(*analyzer, qcJsonPath,
                                         P.quant.slam.autoTrimFileIndex, P.quant.slam.trimScope,
-                                        trim5p_val, trim3p_val, readsAnalyzed_val, trimResultPtr,
+                                        trim5p_m1, trim3p_m1, trim5p_m2, trim3p_m2, readsAnalyzed_val, trimResultPtr,
                                         trimSourcePath,
                                         P.quant.slam.snpErrEst, P.quant.slam.snpErrUsed, P.quant.slam.snpErrFallbackReason);
                     if (writeResult) {
@@ -1296,7 +1337,8 @@ int main(int argInN, char *argIn[])
                     }
                 }
             }
-        
+        }
+
         // Clean up detection RAchunk
         delete RAdetect;
         
@@ -1331,10 +1373,11 @@ int main(int argInN, char *argIn[])
         g_statsAll.timeLastReport = g_statsAll.timeStartMap;
         
         const bool usingBlankForQuant = (P.batchMode && P.quant.slam.batchBlankProcessed && !P.quant.slam.errorRateFromBlank);
-        if (P.quant.slam.autoTrimComputed) {
+        if (P.quant.slam.autoTrimComputed[0]) {
             P.inOut->logMain << timeMonthDayTime() << " ..... finished SLAM stats collection (trims computed)\n" << flush;
             *P.inOut->logStdOut << timeMonthDayTime() << " ..... finished SLAM stats collection (QC), "
-                               << "trim5p=" << P.quant.slam.autoTrim5p << " trim3p=" << P.quant.slam.autoTrim3p
+                               << "trim5p_m1=" << P.quant.slam.autoTrim5p[0] << " trim3p_m1=" << P.quant.slam.autoTrim3p[0]
+                               << " trim5p_m2=" << P.quant.slam.autoTrim5p[1] << " trim3p_m2=" << P.quant.slam.autoTrim3p[1]
                                << " snp_err_used(QC-only)=" << std::fixed << std::setprecision(6) << P.quant.slam.snpErrUsed;
             if (usingBlankForQuant) {
                 *P.inOut->logStdOut << " ; slamErrorRate(used)=" << std::fixed << std::setprecision(6)
@@ -1417,7 +1460,8 @@ int main(int argInN, char *argIn[])
             
             P.quant.slam.skipToFileIndex = fileIdx;  // Skip to target file
             P.quant.slam.autoTrimDetectionPass = true;
-            P.quant.slam.autoTrimComputed = false;  // Reset for this file
+            P.quant.slam.autoTrimComputed[0] = false;   // Reset for this file
+            P.quant.slam.autoTrimComputed[1] = false;
             P.runThreadN = 1;  // Single-threaded for detection
             P.readMapNumber = static_cast<uint64_t>(P.quant.slam.autoTrimDetectionReads);
             
@@ -1432,63 +1476,87 @@ int main(int argInN, char *argIn[])
             
             // Compute trims and global error rate from variance stats
             if (RAdetect->slamQuant != nullptr && RAdetect->slamQuant->varianceAnalysisEnabled()) {
-                uint32_t readLength = 100;
+                uint32_t mateLen0 = 100;
+                uint32_t mateLen1 = 0;
                 if (RAdetect->RA != nullptr && RAdetect->RA->readLength[0] > 0) {
-                    readLength = static_cast<uint32_t>(RAdetect->RA->readLength[0] + RAdetect->RA->readLength[1]);
+                    mateLen0 = static_cast<uint32_t>(RAdetect->RA->readLength[0]);
+                    mateLen1 = static_cast<uint32_t>(RAdetect->RA->readLength[1]);
                 }
-                
+                const uint32_t readLengthConcat = mateLen0 + mateLen1;
+
                 const SlamVarianceAnalyzer* analyzer = RAdetect->slamQuant->varianceAnalyzer();
+
                 uint64_t t_total = 0, tc_total = 0;
                 double p_est = 0.0;
-                // Initialize trim windows from manual trims (will be updated if auto-trim succeeds)
-                int trim5p_for_err = P.quant.slam.compatTrim5p;
-                int trim3p_for_err = P.quant.slam.compatTrim3p;
-            
-            // Compute trims first (if auto-trim enabled, not stats-only)
-            SlamVarianceTrimResult trimResult;
-            bool trimComputed = false;
-            
-            if (P.quant.slam.autoTrimMode == "variance") {
-                trimResult = RAdetect->slamQuant->computeVarianceTrim(readLength);
+                int trim5p_for_err[2] = {P.quant.slam.compatTrim5p[0], P.quant.slam.compatTrim5p[1]};
+                int trim3p_for_err[2] = {P.quant.slam.compatTrim3p[0], P.quant.slam.compatTrim3p[1]};
 
-                if (!trimResult.success || trimResult.readsAnalyzed < static_cast<uint64_t>(P.quant.slam.autoTrimMinReads)) {
-                    ostringstream errOut;
-                    errOut << "EXITING because of FATAL ERROR: --autoTrim variance requested but insufficient stdev data to compute trims.\n"
-                           << "DETAILS: file_index=" << fileIdx
-                           << " reads_analyzed=" << trimResult.readsAnalyzed
-                           << " min_reads=" << P.quant.slam.autoTrimMinReads << "\n"
-                           << "SOLUTION: increase --autoTrimDetectionReads/--autoTrimMinReads, "
-                           << "or ensure the detection pass collects T->C stdev data.\n";
-                    exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_RUNTIME, P);
-                }
+                SlamVarianceTrimResult trimResult;
+                bool trimComputed = false;
 
-                P.quant.slam.autoTrim5p = trimResult.trim5p;
-                P.quant.slam.autoTrim3p = trimResult.trim3p;
-                P.quant.slam.autoTrimComputed = true;
-                P.quant.slam.autoTrimFileIndex = fileIdx;
-                P.quant.slam.compatTrim5p = trimResult.trim5p;
-                P.quant.slam.compatTrim3p = trimResult.trim3p;
-
-                trim5p_for_err = trimResult.trim5p;
-                trim3p_for_err = trimResult.trim3p;
-                trimComputed = true;
-
-                P.inOut->logMain << "SLAM auto-trim (file " << fileIdx << ", segmented regression):\n"
-                                 << "    trim5p=" << trimResult.trim5p
-                                 << " trim3p=" << trimResult.trim3p
-                                 << " mode=" << trimResult.mode << "\n"
-                                 << "    breakpoints: b1=" << trimResult.kneeBin5p
-                                 << " b2=" << trimResult.kneeBin3p
-                                 << " total_sse=" << trimResult.totalSSE << "\n"
-                                 << "    reads_analyzed=" << trimResult.readsAnalyzed << "\n";
-            }
-                
-                // Compute error rate: use trimmed window if trims were computed, otherwise full window
                 if (analyzer != nullptr) {
-                    std::tie(t_total, tc_total, p_est) = analyzer->computeGlobalTcErrorRate(
-                        trim5p_for_err, trim3p_for_err, readLength);
+                    if (P.quant.slam.autoTrimMode == "variance") {
+                        trimResult = RAdetect->slamQuant->computeVarianceTrim(readLengthConcat, mateLen0, mateLen1);
+
+                        if (!trimResult.success ||
+                            trimResult.readsAnalyzed < static_cast<uint64_t>(P.quant.slam.autoTrimMinReads)) {
+                            ostringstream errOut;
+                            errOut << "EXITING because of FATAL ERROR: --autoTrim variance requested but insufficient stdev data to compute trims.\n"
+                                   << "DETAILS: file_index=" << fileIdx
+                                   << " reads_analyzed=" << trimResult.readsAnalyzed
+                                   << " min_reads=" << P.quant.slam.autoTrimMinReads << "\n"
+                                   << "SOLUTION: increase --autoTrimDetectionReads/--autoTrimMinReads, "
+                                   << "or ensure the detection pass collects T->C stdev data.\n";
+                            exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_RUNTIME, P);
+                        }
+
+                        P.quant.slam.autoTrim5p[0] = trimResult.mates[0].trim5p;
+                        P.quant.slam.autoTrim3p[0] = trimResult.mates[0].trim3p;
+                        if (mateLen1 > 0 && P.quant.slam.autoTrimPerMate) {
+                            P.quant.slam.autoTrim5p[1] = trimResult.mates[1].trim5p;
+                            P.quant.slam.autoTrim3p[1] = trimResult.mates[1].trim3p;
+                        } else {
+                            P.quant.slam.autoTrim5p[1] = P.quant.slam.autoTrim5p[0];
+                            P.quant.slam.autoTrim3p[1] = P.quant.slam.autoTrim3p[0];
+                        }
+
+                        P.quant.slam.compatTrim5p[0] = P.quant.slam.autoTrim5p[0];
+                        P.quant.slam.compatTrim5p[1] = P.quant.slam.autoTrim5p[1];
+                        P.quant.slam.compatTrim3p[0] = P.quant.slam.autoTrim3p[0];
+                        P.quant.slam.compatTrim3p[1] = P.quant.slam.autoTrim3p[1];
+
+                        P.quant.slam.autoTrimComputed[0] = true;
+                        P.quant.slam.autoTrimComputed[1] = (mateLen1 > 0 && P.quant.slam.autoTrimPerMate);
+
+                        trim5p_for_err[0] = P.quant.slam.compatTrim5p[0];
+                        trim5p_for_err[1] = P.quant.slam.compatTrim5p[1];
+                        trim3p_for_err[0] = P.quant.slam.compatTrim3p[0];
+                        trim3p_for_err[1] = P.quant.slam.compatTrim3p[1];
+                        trimComputed = true;
+                        P.quant.slam.autoTrimFileIndex = fileIdx;
+
+                        P.inOut->logMain << "SLAM auto-trim (file " << fileIdx << ", segmented regression):\n"
+                                         << "    trim5p_m1=" << trimResult.mates[0].trim5p
+                                         << " trim3p_m1=" << trimResult.mates[0].trim3p
+                                         << " trim5p_m2=" << trimResult.mates[1].trim5p
+                                         << " trim3p_m2=" << trimResult.mates[1].trim3p
+                                         << " mode=" << trimResult.mode << "\n"
+                                         << "    breakpoints: b1=" << trimResult.kneeBin5p
+                                         << " b2=" << trimResult.kneeBin3p
+                                         << " total_sse=" << trimResult.totalSSE << "\n"
+                                         << "    reads_analyzed=" << trimResult.readsAnalyzed
+                                         << " detection_reads_processed=" << detectionReadsProcessed << "\n";
+                    }
+
+                    if (analyzer->separateMateHistograms() && mateLen1 > 0) {
+                        std::tie(t_total, tc_total, p_est) = analyzer->computeGlobalTcErrorRatePerMate(
+                            trim5p_for_err, trim3p_for_err, mateLen0, mateLen1);
+                    } else {
+                        std::tie(t_total, tc_total, p_est) = analyzer->computeGlobalTcErrorRate(
+                            trim5p_for_err[0], trim3p_for_err[0], readLengthConcat);
+                    }
                     P.quant.slam.snpErrEst = p_est;
-                    
+
                     // Apply fallback threshold
                     if (p_est >= P.quant.slam.snpErrMinThreshold) {
                         P.quant.slam.snpErrUsed = p_est;
@@ -1497,7 +1565,7 @@ int main(int argInN, char *argIn[])
                         P.quant.slam.snpErrUsed = P.quant.slam.snpErrMinThreshold;
                         P.quant.slam.snpErrFallbackReason = "p_est < threshold";
                     }
-                    
+
                     P.inOut->logMain << "SLAM global T→C error rate (file " << fileIdx;
                     if (trimComputed) {
                         P.inOut->logMain << ", trimmed window";
@@ -1510,54 +1578,66 @@ int main(int argInN, char *argIn[])
                         P.inOut->logMain << " (fallback: " << P.quant.slam.snpErrFallbackReason << ")";
                     }
                     P.inOut->logMain << "\n";
-                    
+
                     // Cache variance curve for comprehensive QC (per-file detection pass)
-                    if (analyzer != nullptr) {
-                        const auto& vstats = analyzer->getStats();
-                        uint32_t maxPos = 0;
-                        for (const auto& kv : vstats) {
-                            if (kv.first > maxPos) {
-                                maxPos = kv.first;
+                    P.quant.slam.varianceStddevTcRateMate2.clear();
+                    const auto& vstats =
+                        analyzer->separateMateHistograms() ? analyzer->getStats(0) : analyzer->getStats();
+                    uint32_t maxPos = 0;
+                    for (const auto& kv : vstats) {
+                        if (kv.first > maxPos) {
+                            maxPos = kv.first;
+                        }
+                    }
+                    P.quant.slam.varianceStddevTcRate.assign(maxPos + 1, std::numeric_limits<double>::quiet_NaN());
+                    for (const auto& kv : vstats) {
+                        P.quant.slam.varianceStddevTcRate[kv.first] = kv.second.stddevTcRate();
+                    }
+                    if (analyzer->separateMateHistograms()) {
+                        const auto& v2 = analyzer->getStats(1);
+                        uint32_t maxP2 = 0;
+                        for (const auto& kv : v2) {
+                            if (kv.first > maxP2) {
+                                maxP2 = kv.first;
                             }
                         }
-                        P.quant.slam.varianceStddevTcRate.assign(maxPos + 1, std::numeric_limits<double>::quiet_NaN());
-                        for (const auto& kv : vstats) {
-                            P.quant.slam.varianceStddevTcRate[kv.first] = kv.second.stddevTcRate();
+                        P.quant.slam.varianceStddevTcRateMate2.assign(maxP2 + 1,
+                                                                      std::numeric_limits<double>::quiet_NaN());
+                        for (const auto& kv : v2) {
+                            P.quant.slam.varianceStddevTcRateMate2[kv.first] = kv.second.stddevTcRate();
                         }
-                    } else {
-                        P.quant.slam.varianceStddevTcRate.clear();
                     }
 
                     // Write per-file QC outputs (always write if analyzer exists)
-                    if (analyzer != nullptr) {
-                        std::string qcJsonPath = P.quant.slam.slamQcJson;
-                        if (qcJsonPath.empty() || qcJsonPath == "-") {
-                            qcJsonPath = P.outFileNamePrefix + "slam_qc_file" + std::to_string(fileIdx) + ".json";
-                        } else if (P.quant.slam.totalFileCount > 1) {
-                            // Append file index to user-specified path
-                            size_t dotPos = qcJsonPath.rfind('.');
-                            if (dotPos != std::string::npos) {
-                                qcJsonPath = qcJsonPath.substr(0, dotPos) + "_file" + std::to_string(fileIdx) + qcJsonPath.substr(dotPos);
-                            }
+                    std::string qcJsonPath = P.quant.slam.slamQcJson;
+                    if (qcJsonPath.empty() || qcJsonPath == "-") {
+                        qcJsonPath = P.outFileNamePrefix + "slam_qc_file" + std::to_string(fileIdx) + ".json";
+                    } else if (P.quant.slam.totalFileCount > 1) {
+                        // Append file index to user-specified path
+                        size_t dotPos = qcJsonPath.rfind('.');
+                        if (dotPos != std::string::npos) {
+                            qcJsonPath = qcJsonPath.substr(0, dotPos) + "_file" + std::to_string(fileIdx) + qcJsonPath.substr(dotPos);
                         }
-                        // For per-file mode, each file is its own trim source
-                        std::string perFileTrimSource = P.readFilesNames[0].size() > static_cast<size_t>(fileIdx) ? 
-                            P.readFilesNames[0][fileIdx] : "";
-                        // For stats-only mode or failed trim detection, pass null trimResult
-                        const SlamVarianceTrimResult* trimResultPtr = trimComputed ? &trimResult : nullptr;
-                        int trim5p_val = trimComputed ? trimResult.trim5p : trim5p_for_err;
-                        int trim3p_val = trimComputed ? trimResult.trim3p : trim3p_for_err;
-                        uint64_t readsAnalyzed_val = trimComputed ? trimResult.readsAnalyzed : analyzer->readsAnalyzed();
-                        if (writeSlamQcJson(*analyzer, qcJsonPath, fileIdx, P.quant.slam.trimScope,
-                                            trim5p_val, trim3p_val, readsAnalyzed_val, trimResultPtr,
-                                            perFileTrimSource,
-                                            P.quant.slam.snpErrEst, P.quant.slam.snpErrUsed, P.quant.slam.snpErrFallbackReason)) {
-                            P.inOut->logMain << "SLAM QC JSON written to: " << qcJsonPath << "\n";
-                        }
+                    }
+                    // For per-file mode, each file is its own trim source
+                    std::string perFileTrimSource = P.readFilesNames[0].size() > static_cast<size_t>(fileIdx)
+                                                        ? P.readFilesNames[0][fileIdx]
+                                                        : "";
+                    const SlamVarianceTrimResult* trimResultPtr = trimComputed ? &trimResult : nullptr;
+                    int trim5p_m1 = trimComputed ? trimResult.mates[0].trim5p : trim5p_for_err[0];
+                    int trim3p_m1 = trimComputed ? trimResult.mates[0].trim3p : trim3p_for_err[0];
+                    int trim5p_m2 = trimComputed ? trimResult.mates[1].trim5p : trim5p_for_err[1];
+                    int trim3p_m2 = trimComputed ? trimResult.mates[1].trim3p : trim3p_for_err[1];
+                    uint64_t readsAnalyzed_val = trimComputed ? trimResult.readsAnalyzed : analyzer->readsAnalyzed();
+                    if (writeSlamQcJson(*analyzer, qcJsonPath, fileIdx, P.quant.slam.trimScope,
+                                        trim5p_m1, trim3p_m1, trim5p_m2, trim3p_m2, readsAnalyzed_val, trimResultPtr,
+                                        perFileTrimSource,
+                                        P.quant.slam.snpErrEst, P.quant.slam.snpErrUsed,
+                                        P.quant.slam.snpErrFallbackReason)) {
+                        P.inOut->logMain << "SLAM QC JSON written to: " << qcJsonPath << "\n";
                     }
                 }
             }
-            
             delete RAdetect;
             P.quant.slam.autoTrimDetectionPass = false;
             
@@ -1573,9 +1653,11 @@ int main(int argInN, char *argIn[])
             }
             
             // --- PHASE 2: Rewind to start of this file and map ---
-            P.inOut->logMain << timeMonthDayTime() << " ..... mapping phase for file " << fileIdx 
-                             << " with trim5p=" << P.quant.slam.compatTrim5p 
-                             << " trim3p=" << P.quant.slam.compatTrim3p << "\n";
+            P.inOut->logMain << timeMonthDayTime() << " ..... mapping phase for file " << fileIdx
+                             << " with trim5p_m1=" << P.quant.slam.compatTrim5p[0]
+                             << " trim3p_m1=" << P.quant.slam.compatTrim3p[0]
+                             << " trim5p_m2=" << P.quant.slam.compatTrim5p[1]
+                             << " trim3p_m2=" << P.quant.slam.compatTrim3p[1] << "\n";
             
             // Rewind to start of files and skip to target file
             P.closeReadsFiles();
@@ -1594,7 +1676,8 @@ int main(int argInN, char *argIn[])
             // Reinitialize SlamCompat for all threads with new trims
             for (int ii = 0; ii < P.runThreadN; ii++) {
                 if (RAchunk[ii] != nullptr) {
-                    RAchunk[ii]->reinitSlamCompat(P.quant.slam.compatTrim5p, P.quant.slam.compatTrim3p);
+                    RAchunk[ii]->reinitSlamCompat(P.quant.slam.compatTrim5p[0], P.quant.slam.compatTrim3p[0],
+                                                  P.quant.slam.compatTrim5p[1], P.quant.slam.compatTrim3p[1]);
                 }
             }
             
@@ -2298,19 +2381,22 @@ int main(int argInN, char *argIn[])
                          << diagFile << "\n";
         
         // Log auto-trim summary
-        if (P.quant.slam.autoTrimComputed) {
-            P.inOut->logMain << "SLAM auto-trim applied: trim5p=" << P.quant.slam.autoTrim5p
-                             << " trim3p=" << P.quant.slam.autoTrim3p
+        if (P.quant.slam.autoTrimComputed[0]) {
+            P.inOut->logMain << "SLAM auto-trim applied: trim5p_m1=" << P.quant.slam.autoTrim5p[0]
+                             << " trim3p_m1=" << P.quant.slam.autoTrim3p[0]
+                             << " trim5p_m2=" << P.quant.slam.autoTrim5p[1]
+                             << " trim3p_m2=" << P.quant.slam.autoTrim3p[1]
                              << " scope=" << P.quant.slam.trimScope
                              << " file_index=" << P.quant.slam.autoTrimFileIndex
                              << " mode=rewind\n";
         }
-        
+
         // Log compat mode summary if enabled
         if (P.quant.slam.compatIntronic || P.quant.slam.compatLenientOverlap ||
             P.quant.slam.compatOverlapWeight || P.quant.slam.compatIgnoreOverlap ||
-            P.quant.slam.compatTrim5p != 0 || P.quant.slam.compatTrim3p != 0 ||
-            P.quant.slam.autoTrimComputed) {
+            P.quant.slam.compatTrim5p[0] != 0 || P.quant.slam.compatTrim5p[1] != 0 ||
+            P.quant.slam.compatTrim3p[0] != 0 || P.quant.slam.compatTrim3p[1] != 0 ||
+            P.quant.slam.autoTrimComputed[0] || P.quant.slam.autoTrimComputed[1]) {
             P.inOut->logMain << "SLAM compat(" << P.quant.slam.compatModeStr << "): "
                              << "alignsIntronic=" << mergedSlam.diagnostics().compatAlignsReclassifiedIntronic
                              << " alignsLenient=" << mergedSlam.diagnostics().compatAlignsLenientAccepted
@@ -2334,27 +2420,44 @@ int main(int argInN, char *argIn[])
         if (!P.quant.slam.slamQcReport.empty()) {
             std::string qcJsonPath = P.quant.slam.slamQcReport + ".slam_qc.json";
             std::string qcHtmlPath = P.quant.slam.slamQcReport + ".slam_qc.html";
-            
+            uint32_t mateLen0_qc = 100;
+            uint32_t mateLen1_qc = 0;
+            for (int ichunk = 0; ichunk < P.runThreadN; ++ichunk) {
+                if (RAchunk[ichunk] != nullptr && RAchunk[ichunk]->RA != nullptr &&
+                    RAchunk[ichunk]->RA->readLength[0] > 0) {
+                    mateLen0_qc = static_cast<uint32_t>(RAchunk[ichunk]->RA->readLength[0]);
+                    mateLen1_qc = static_cast<uint32_t>(RAchunk[ichunk]->RA->readLength[1]);
+                    break;
+                }
+            }
+            const uint32_t readLengthConcat_qc = mateLen0_qc + mateLen1_qc;
+
             // Get trim result if available (recompute from merged SlamQuant if variance analysis enabled)
             SlamVarianceTrimResult* trimResultPtr = nullptr;
             SlamVarianceTrimResult trimResult;
-            if (mergedSlam.varianceAnalysisEnabled() && P.quant.slam.autoTrimComputed) {
-                // Use default read length (100) - trim result is optional for QC report
-                uint32_t readLength = 100;
-                trimResult = mergedSlam.computeVarianceTrim(readLength);
+            if (mergedSlam.varianceAnalysisEnabled() && P.quant.slam.autoTrimComputed[0]) {
+                trimResult = mergedSlam.computeVarianceTrim(readLengthConcat_qc, mateLen0_qc, mateLen1_qc);
                 if (trimResult.success) {
                     trimResultPtr = &trimResult;
                 }
             }
-            
-            int trim5p = P.quant.slam.autoTrimComputed ? P.quant.slam.autoTrim5p : 0;
-            int trim3p = P.quant.slam.autoTrimComputed ? P.quant.slam.autoTrim3p : 0;
-            
-            const std::vector<double>* varianceCurve = nullptr;
+
+            int trim5p_m1 = P.quant.slam.autoTrimComputed[0] ? P.quant.slam.autoTrim5p[0] : P.quant.slam.compatTrim5p[0];
+            int trim3p_m1 = P.quant.slam.autoTrimComputed[0] ? P.quant.slam.autoTrim3p[0] : P.quant.slam.compatTrim3p[0];
+            int trim5p_m2 = P.quant.slam.autoTrimComputed[1] ? P.quant.slam.autoTrim5p[1] : P.quant.slam.compatTrim5p[1];
+            int trim3p_m2 = P.quant.slam.autoTrimComputed[1] ? P.quant.slam.autoTrim3p[1] : P.quant.slam.compatTrim3p[1];
+
+            const std::vector<double>* varianceCurve0 = nullptr;
+            const std::vector<double>* varianceCurve1 = nullptr;
             if (!P.quant.slam.varianceStddevTcRate.empty()) {
-                varianceCurve = &P.quant.slam.varianceStddevTcRate;
+                varianceCurve0 = &P.quant.slam.varianceStddevTcRate;
             }
-            if (writeSlamQcComprehensiveJson(mergedSlam, qcJsonPath, trim5p, trim3p, trimResultPtr, varianceCurve)) {
+            if (!P.quant.slam.varianceStddevTcRateMate2.empty()) {
+                varianceCurve1 = &P.quant.slam.varianceStddevTcRateMate2;
+            }
+            if (writeSlamQcComprehensiveJson(mergedSlam, qcJsonPath, trim5p_m1, trim3p_m1, trim5p_m2, trim3p_m2,
+                                            trimResultPtr, varianceCurve0, varianceCurve1, mateLen0_qc,
+                                            mateLen1_qc)) {
                 P.inOut->logMain << "SLAM comprehensive QC JSON written to: " << qcJsonPath << "\n";
                 
                 if (writeSlamQcComprehensiveHtml(qcJsonPath, qcHtmlPath)) {
@@ -2488,8 +2591,6 @@ int main(int argInN, char *argIn[])
     }
 
     ++batchSampleIdx;  // Explicit increment
-
-    }  // closes if(runSlamDetectionPass)
 
     } // =========================================================================
       // END OF WHILE LOOP - closes the batch loop 
