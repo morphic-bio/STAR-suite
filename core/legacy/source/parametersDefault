@@ -1240,6 +1240,16 @@ slamGrandSlamOut                      1
     int: Enable GRAND-SLAM-style output table (0/1).
          Output path: <prefix>SlamQuant.grandslam.tsv (default on)
 
+slamCbOut                             0
+    int: Enable STAR-SLAM count-binomial output table (0/1).
+         Output path: <prefix>SlamQuant.cB.tsv when enabled
+
+slamCbOutFile                         -
+    string: Output file for count-binomial TSV. A .gz suffix writes gzip-compressed TSV.
+
+slamCbFormat                          star
+    string: Count-binomial output schema: star or ezbakr
+
 slamCompatMode                        none
     string: SLAM compatibility mode (none, gedi)
 

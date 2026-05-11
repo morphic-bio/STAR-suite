@@ -450,10 +450,9 @@ bool ReadAlign::slamCollect(const Transcript& trOut, const std::set<uint32_t>& g
         slamQuant->bufferDumpRead(std::move(dumpRead));
     }
 
-    uint8_t k8 = static_cast<uint8_t>(k > 255 ? 255 : k);
     if (debugEnabled && slamQuant->debugGenesEnabled()) {
         for (uint32_t geneId : geneIds) {
-            slamQuant->debugAddAssignment(geneId, weight, isIntronic, oppositeStrand, nT, k8);
+            slamQuant->debugAddAssignment(geneId, weight, isIntronic, oppositeStrand, nT, k);
         }
     }
     std::string convReadPosStr;
@@ -494,7 +493,7 @@ bool ReadAlign::slamCollect(const Transcript& trOut, const std::set<uint32_t>& g
                 rec.oppositeStrand = oppositeStrand;
                 rec.weight = weight;
                 rec.nT = nT;
-                rec.k = k8;
+                rec.k = k;
                 rec.readLength = readLen;
                 rec.status = SlamDebugDropReason::None;
                 rec.snpBuffered = snpBuffered;
@@ -512,7 +511,7 @@ bool ReadAlign::slamCollect(const Transcript& trOut, const std::set<uint32_t>& g
             }
         } else {
             for (uint32_t geneId : geneIds) {
-                slamQuant->addRead(geneId, nT, k8, weight);
+                slamQuant->addRead(geneId, nT, k, weight);
             }
         }
     }

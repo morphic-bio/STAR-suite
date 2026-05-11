@@ -514,6 +514,9 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "slamQcHtml", &quant.slam.slamQcHtml));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "slamQcReport", &quant.slam.slamQcReport));
     parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "slamGrandSlamOut", &quant.slam.grandSlamOut));
+    parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "slamCbOut", &quant.slam.cbOut));
+    parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "slamCbOutFile", &quant.slam.cbOutFile));
+    parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "slamCbFormat", &quant.slam.cbFormat));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "slamDumpBinary", &quant.slam.dumpBinary));
     parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "slamDumpStream", &quant.slam.dumpStreamInt));
     parArray.push_back(new ParameterInfoScalar <uint64_t> (-1, -1, "slamDumpMaxReads", &quant.slam.dumpMaxReads));
@@ -2115,6 +2118,30 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
         if (quant.slam.outFile.empty() || quant.slam.outFile == "-") {
             quant.slam.outFile = outFileNamePrefix + "SlamQuant.out";
         }
+        if (quant.slam.cbOut != 0 && quant.slam.cbOut != 1) {
+            ostringstream errOut;
+            errOut << "EXITING because of FATAL PARAMETER ERROR: "
+                   << "--slamCbOut must be 0 or 1\n";
+            exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+        }
+        string cbFormatLower = quant.slam.cbFormat;
+        if (cbFormatLower.empty() || cbFormatLower == "-") {
+            cbFormatLower = "star";
+        }
+        for (auto& c : cbFormatLower) {
+            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        }
+        if (cbFormatLower != "star" && cbFormatLower != "ezbakr") {
+            ostringstream errOut;
+            errOut << "EXITING because of FATAL PARAMETER ERROR: "
+                   << "--slamCbFormat must be star or ezbakr\n"
+                   << "Got: " << quant.slam.cbFormat << "\n";
+            exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+        }
+        quant.slam.cbFormat = cbFormatLower;
+        if (quant.slam.cbOut != 0 && (quant.slam.cbOutFile.empty() || quant.slam.cbOutFile == "-")) {
+            quant.slam.cbOutFile = outFileNamePrefix + "SlamQuant.cB.tsv";
+        }
         if (quant.slam.errorRate <= 0.0 || quant.slam.errorRate >= 1.0) {
             ostringstream errOut;
             errOut << "EXITING because of FATAL PARAMETER ERROR: "
@@ -2828,6 +2855,10 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
             }
             if (quant.slam.grandSlamOut != 0 && quant.slam.grandSlamOutFile.empty()) {
                 quant.slam.grandSlamOutFile = countsDir + outFileNamePrefixAutoSample + ".SlamQuant.grandslam.tsv";
+            }
+            if (quant.slam.cbOut != 0 &&
+                (quant.slam.cbOutFile.empty() || quant.slam.cbOutFile == outFileNamePrefix + "SlamQuant.cB.tsv")) {
+                quant.slam.cbOutFile = countsDir + outFileNamePrefixAutoSample + ".SlamQuant.cB.tsv";
             }
             if (quant.slam.slamQcJson.empty() || quant.slam.slamQcJson == "-") {
                 quant.slam.slamQcJson = qcDir + outFileNamePrefixAutoSample + ".slam_qc.json";

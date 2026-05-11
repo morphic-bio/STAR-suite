@@ -11,9 +11,23 @@ struct SlamResult {
     bool converged = false;
 };
 
-// Key: (Total_Ts << 8) | Mismatch_Count
+// Key: (Total_Ts << 16) | Mismatch_Count
 // Value: Frequency (weighted count of reads with this pattern)
-using MismatchHistogram = std::map<uint16_t, double>;
+using MismatchHistogramKey = uint32_t;
+using MismatchHistogram = std::map<MismatchHistogramKey, double>;
+
+inline MismatchHistogramKey slamPackMismatchKey(uint16_t nT, uint16_t tc) {
+    return (static_cast<MismatchHistogramKey>(nT) << 16) |
+           static_cast<MismatchHistogramKey>(tc);
+}
+
+inline uint16_t slamKeyNT(MismatchHistogramKey key) {
+    return static_cast<uint16_t>(key >> 16);
+}
+
+inline uint16_t slamKeyTC(MismatchHistogramKey key) {
+    return static_cast<uint16_t>(key & 0xFFFFu);
+}
 
 class SlamSolver {
 public:
@@ -27,7 +41,7 @@ private:
     double p_conversion_rate_;
 
     double calc_log_likelihood(const MismatchHistogram& data, double pi) const;
-    double log_binom_pmf(uint16_t n, uint8_t k, double p) const;
+    double log_binom_pmf(uint16_t n, uint16_t tc, double p) const;
 };
 
 #endif

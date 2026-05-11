@@ -9,6 +9,7 @@
 #include <unordered_map>
 #include <algorithm>
 #include <array>
+#include <cctype>
 
 struct Args {
     std::string dumpPath;
@@ -23,10 +24,13 @@ struct Args {
     std::string qcReportPrefix;
     std::string dumpOut;
     std::string dumpWeightsOut;
+    std::string cbOutFile;
+    std::string cbFormat = "star";
     std::array<int, 2> trim5pMate{{0, 0}};
     std::array<int, 2> trim3pMate{{0, 0}};
     double errorRate = -1.0;
     double convRate = -1.0;
+    int cbOut = 0;
     uint32_t autoTrimMaxReads = 100000;
     uint32_t autoTrimMinReads = 1000;
     uint32_t autoTrimSmoothWindow = 5;
@@ -66,6 +70,9 @@ static bool parseArgs(int argc, char** argv, Args* args) {
         else if (a == "--slamQcReport") args->qcReportPrefix = next("--slamQcReport");
         else if (a == "--dumpOut") args->dumpOut = next("--dumpOut");
         else if (a == "--dumpWeightsOut") args->dumpWeightsOut = next("--dumpWeightsOut");
+        else if (a == "--slamCbOut") args->cbOut = std::stoi(next("--slamCbOut"));
+        else if (a == "--slamCbOutFile") args->cbOutFile = next("--slamCbOutFile");
+        else if (a == "--slamCbFormat") args->cbFormat = next("--slamCbFormat");
         else if (a == "--errorRate") args->errorRate = std::stod(next("--errorRate"));
         else if (a == "--convRate") args->convRate = std::stod(next("--convRate"));
         else if (a == "--autoTrimDetectionReads") args->autoTrimMaxReads = static_cast<uint32_t>(std::stoul(next("--autoTrimDetectionReads")));
@@ -81,7 +88,21 @@ static bool parseArgs(int argc, char** argv, Args* args) {
     if (args->dumpPath.empty() || args->outPrefix.empty()) {
         std::cerr << "Usage: --dump <path> --out <prefix> [--slamSnpMaskIn <bed.gz>] [--trim5p N --trim3p N] "
                      "[--slamWeightMode dump|alignments|uniform] [--slamWeightFile <path>] [--slamWeightMatch auto|order|key] "
-                     "[--dumpOut <path>] [--dumpWeightsOut <path>]\n";
+                     "[--dumpOut <path>] [--dumpWeightsOut <path>] "
+                     "[--slamCbOut 0|1] [--slamCbOutFile <path>] [--slamCbFormat star|ezbakr]\n";
+        return false;
+    }
+    if (args->cbOut != 0 && args->cbOut != 1) {
+        std::cerr << "--slamCbOut must be 0 or 1\n";
+        return false;
+    }
+    if (args->cbFormat.empty() || args->cbFormat == "-") {
+        args->cbFormat = "star";
+    }
+    std::transform(args->cbFormat.begin(), args->cbFormat.end(), args->cbFormat.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    if (args->cbFormat != "star" && args->cbFormat != "ezbakr") {
+        std::cerr << "--slamCbFormat must be star or ezbakr\n";
         return false;
     }
     return true;
@@ -400,6 +421,15 @@ int main(int argc, char** argv) {
 
     std::string outBase = args.outPrefix;
     writeSlamOut(outBase + "SlamQuant.out", meta.geneIds, meta.geneNames, merged, errorRate, convRate);
+    if (args.cbOut != 0) {
+        std::string cbPath = (args.cbOutFile.empty() || args.cbOutFile == "-")
+                             ? (outBase + "SlamQuant.cB.tsv")
+                             : args.cbOutFile;
+        if (!merged.writeCountBinomial(meta.geneIds, meta.geneNames, cbPath, outBase, args.cbFormat)) {
+            std::cerr << "Failed to write count-binomial output: " << cbPath << "\n";
+            return 1;
+        }
+    }
     merged.writeDiagnostics(outBase + "SlamQuant.out.diagnostics");
     merged.writeTransitions(outBase + "SlamQuant.out.transitions.tsv");
     merged.writeMismatches(outBase + "SlamQuant.out.mismatches.tsv", outBase);

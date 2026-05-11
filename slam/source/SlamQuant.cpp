@@ -5,10 +5,17 @@
 
 #include "Genome.h"
 #include "Transcriptome.h"
+#if defined(WITH_CHROMAP) && WITH_CHROMAP
+#include <htslib/bgzf.h>
+#include <htslib/kstring.h>
+#include <htslib/tbx.h>
+#include <htslib/vcf.h>
+#else
 #include "htslib/htslib/bgzf.h"
 #include "htslib/htslib/kstring.h"
 #include "htslib/htslib/tbx.h"
 #include "htslib/htslib/vcf.h"
+#endif
 
 #include <fstream>
 #include <sstream>
@@ -18,9 +25,12 @@
 #include <tuple>
 #include <algorithm>
 #include <cmath>
+#include <cctype>
 #include <cstdio>
+#include <iomanip>
 #include <memory>
 #include <cstdlib>
+#include <zlib.h>
 
 namespace {
 constexpr uint32_t kSnpMinCoverage = 10;
@@ -218,7 +228,7 @@ void SlamQuant::debugCountDrop(uint32_t geneId, SlamDebugDropReason reason) {
 }
 
 void SlamQuant::debugAddAssignment(uint32_t geneId, double weight, bool intronic,
-                                   bool oppositeStrand, uint16_t nT, uint8_t k) {
+                                   bool oppositeStrand, uint16_t nT, uint16_t tc) {
     if (!debugGeneEnabled(geneId)) {
         return;
     }
@@ -230,7 +240,7 @@ void SlamQuant::debugAddAssignment(uint32_t geneId, double weight, bool intronic
     } else {
         stats.exonicWeight += weight;
         stats.coverage += static_cast<double>(nT) * weight;
-        stats.conversions += static_cast<double>(k) * weight;
+        stats.conversions += static_cast<double>(tc) * weight;
     }
     if (oppositeStrand) {
         stats.antisenseWeight += weight;
@@ -339,20 +349,18 @@ const char* slamMismatchCategoryName(SlamMismatchCategory cat) {
     }
 }
 
-void SlamQuant::addRead(uint32_t geneId, uint16_t nT, uint8_t k, double weight) {
+void SlamQuant::addRead(uint32_t geneId, uint16_t nT, uint16_t tc, double weight) {
     if (geneId >= geneStats_.size() || weight <= 0.0) {
         return;
     }
     if (!allowedGenes_.empty() && geneId < allowedGenes_.size() && allowedGenes_[geneId] == 0) {
         return;
     }
-    if (nT > 511) nT = 511;
-    if (k > 255) k = 255;
-    uint16_t key = static_cast<uint16_t>((nT << 8) | k);
+    MismatchHistogramKey key = slamPackMismatchKey(nT, tc);
     SlamGeneStats& stats = geneStats_[geneId];
     stats.histogram[key] += weight;
     stats.readCount += weight;
-    stats.conversions += weight * static_cast<double>(k);
+    stats.conversions += weight * static_cast<double>(tc);
     stats.coverage += weight * static_cast<double>(nT);
 }
 
@@ -568,8 +576,7 @@ void SlamQuant::finalizeSnpMask(SlamSnpBufferStats* outStats) {
             }
         }
         totalMismatchesKept += validK;
-        uint8_t k8 = static_cast<uint8_t>(validK > 255 ? 255 : validK);
-        addRead(geneId, nT, k8, snpReadWeights_[readIdx]);
+        addRead(geneId, nT, validK, snpReadWeights_[readIdx]);
         ++readIdx;
     }
     if (outStats) {
@@ -836,6 +843,69 @@ static std::string cleanSlamLabel(const std::string& rawLabel) {
     return base;
 }
 
+static bool slamEndsWith(const std::string& s, const std::string& suffix) {
+    return s.size() >= suffix.size() &&
+           s.compare(s.size() - suffix.size(), suffix.size(), suffix) == 0;
+}
+
+static std::string normalizeSlamCbFormat(const std::string& format) {
+    std::string out = format.empty() ? "star" : format;
+    for (char& c : out) {
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    }
+    return out;
+}
+
+class SlamTextOutput {
+public:
+    ~SlamTextOutput() {
+        close();
+    }
+
+    bool open(const std::string& path) {
+        gzip_ = slamEndsWith(path, ".gz");
+        if (gzip_) {
+            gz_ = gzopen(path.c_str(), "wb");
+            return gz_ != nullptr;
+        }
+        out_.open(path.c_str());
+        return out_.good();
+    }
+
+    bool write(const std::string& text) {
+        if (gzip_) {
+            if (gz_ == nullptr) {
+                return false;
+            }
+            const int written = gzwrite(gz_, text.data(), static_cast<unsigned int>(text.size()));
+            return written == static_cast<int>(text.size());
+        }
+        out_ << text;
+        return out_.good();
+    }
+
+    bool close() {
+        if (gzip_) {
+            if (gz_ == nullptr) {
+                return true;
+            }
+            const int rc = gzclose(gz_);
+            gz_ = nullptr;
+            return rc == Z_OK;
+        }
+        if (out_.is_open()) {
+            out_.close();
+            return !out_.fail();
+        }
+        return true;
+    }
+
+private:
+    std::ofstream out_;
+    gzFile gz_ = nullptr;
+    bool gzip_ = false;
+};
+
 void SlamQuant::writeGrandSlam(const Transcriptome& tr, const std::string& outFile,
                                const std::string& outFileNamePrefix,
                                double errorRate, double convRate,
@@ -899,6 +969,70 @@ void SlamQuant::writeGrandSlam(const Transcriptome& tr, const std::string& outFi
             << 0 << "\t"
             << 0 << "\n";
     }
+}
+
+bool SlamQuant::writeCountBinomial(const Transcriptome& tr, const std::string& outFile,
+                                   const std::string& sampleLabel,
+                                   const std::string& format) const {
+    return writeCountBinomial(tr.geID, tr.geName, outFile, sampleLabel, format);
+}
+
+bool SlamQuant::writeCountBinomial(const std::vector<std::string>& geneIds,
+                                   const std::vector<std::string>& geneNames,
+                                   const std::string& outFile,
+                                   const std::string& sampleLabel,
+                                   const std::string& format) const {
+    const std::string fmt = normalizeSlamCbFormat(format);
+    if (fmt != "star" && fmt != "ezbakr") {
+        return false;
+    }
+
+    SlamTextOutput out;
+    if (!out.open(outFile)) {
+        return false;
+    }
+
+    if (fmt == "ezbakr") {
+        if (!out.write("sample\trname\tsj\tGF\tXF\tnT\tTC\tn\n")) {
+            return false;
+        }
+    } else {
+        if (!out.write("sample\tfeature_id\tfeature_name\tnT\tTC\tn\n")) {
+            return false;
+        }
+    }
+
+    const std::string sample = cleanSlamLabel(sampleLabel);
+    for (size_t i = 0; i < geneStats_.size(); ++i) {
+        const SlamGeneStats& stats = geneStats_[i];
+        if (stats.histogram.empty()) {
+            continue;
+        }
+        const std::string fallbackId = std::string("GENE_") + std::to_string(i);
+        const std::string& geneId = (i < geneIds.size() && !geneIds[i].empty()) ? geneIds[i] : fallbackId;
+        const std::string& geneName = (i < geneNames.size() && !geneNames[i].empty()) ? geneNames[i] : geneId;
+
+        for (const auto& kv : stats.histogram) {
+            if (kv.second <= 0.0) {
+                continue;
+            }
+            std::ostringstream line;
+            line << std::setprecision(15);
+            const uint16_t nT = slamKeyNT(kv.first);
+            const uint16_t tc = slamKeyTC(kv.first);
+            if (fmt == "ezbakr") {
+                line << sample << "\t.\t.\t" << geneId << "\t.\t"
+                     << nT << "\t" << tc << "\t" << kv.second << "\n";
+            } else {
+                line << sample << "\t" << geneId << "\t" << geneName << "\t"
+                     << nT << "\t" << tc << "\t" << kv.second << "\n";
+            }
+            if (!out.write(line.str())) {
+                return false;
+            }
+        }
+    }
+    return out.close();
 }
 
 void SlamQuant::writeDiagnostics(const std::string& diagFile) const {
@@ -1925,15 +2059,13 @@ uint64_t SlamQuant::replayBufferedReads(SlamCompat* compat, const SlamSnpMask* s
         
         // Add to gene counts (same logic as ReadAlign_slamQuant)
         if (!read.isIntronic) {
-            uint8_t k8 = static_cast<uint8_t>(k > 255 ? 255 : k);
-            
             if (snpDetect && !mismatchPositions.empty()) {
                 for (uint32_t geneId : read.geneIds) {
                     bufferSnpRead(geneId, nT, mismatchPositions, read.weight);
                 }
             } else {
                 for (uint32_t geneId : read.geneIds) {
-                    addRead(geneId, nT, k8, read.weight);
+                    addRead(geneId, nT, k, read.weight);
                 }
             }
         }

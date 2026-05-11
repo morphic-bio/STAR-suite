@@ -517,6 +517,9 @@ class Parameters {
                 string slamQcReport = "";          // Prefix for comprehensive QC report (JSON + HTML, empty=disabled)
                 int grandSlamOut = 1;              // --slamGrandSlamOut (0/1, default: 1)
                 string grandSlamOutFile = "";      // Optional override for GRAND-SLAM TSV output
+                int cbOut = 0;                     // --slamCbOut (0/1, default: 0)
+                string cbOutFile = "";             // --slamCbOutFile (default: <prefix>SlamQuant.cB.tsv when enabled)
+                string cbFormat = "star";          // --slamCbFormat (star|ezbakr)
                 int autoTrim5p[2] = {0, 0};               // Auto-computed 5' trim
                 int autoTrim3p[2] = {0, 0};                // Auto-computed 3' trim
                 bool autoTrimComputed[2] = {false, false}; // Mate has auto-trim loaded
