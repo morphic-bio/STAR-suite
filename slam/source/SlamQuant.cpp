@@ -56,6 +56,53 @@ const char* debugDropReasonName(SlamDebugDropReason reason) {
             return "UNKNOWN";
     }
 }
+
+struct SlamBufferedConsensusObservation {
+    const SlamBufferedPosition* pos = nullptr;
+    bool trimPass = true;
+};
+
+bool chooseBufferedConsensusObservation(const std::vector<SlamBufferedConsensusObservation>& observations,
+                                        size_t begin, size_t end, bool requireTrimPass,
+                                        const SlamBufferedPosition*& chosen) {
+    if (begin >= end) {
+        return false;
+    }
+
+    int agreedBase = -1;
+    for (size_t i = begin; i < end; ++i) {
+        if (observations[i].pos == nullptr) {
+            continue;
+        }
+        int base = static_cast<int>(observations[i].pos->readBase);
+        if (agreedBase < 0) {
+            agreedBase = base;
+        } else if (agreedBase != base) {
+            return false;
+        }
+    }
+
+    const SlamBufferedPosition* best = nullptr;
+    for (size_t i = begin; i < end; ++i) {
+        const SlamBufferedConsensusObservation& obs = observations[i];
+        if (obs.pos == nullptr) {
+            continue;
+        }
+        if (requireTrimPass && !obs.trimPass) {
+            continue;
+        }
+        if (best == nullptr || obs.pos->qual > best->qual ||
+            (obs.pos->qual == best->qual && best->secondMate && !obs.pos->secondMate)) {
+            best = obs.pos;
+        }
+    }
+
+    if (best == nullptr) {
+        return false;
+    }
+    chosen = best;
+    return true;
+}
 }
 
 SlamQuant::SlamQuant(uint32_t nGenes, bool snpDetect, double snpMismatchFrac, bool snpObsAnyMismatch)
@@ -1995,8 +2042,10 @@ uint64_t SlamQuant::replayBufferedReads(SlamCompat* compat, const SlamSnpMask* s
         std::vector<uint32_t> mismatchPositions;
         bool snpDetect = snpDetectEnabled_ && !read.isIntronic;
         
+        std::vector<SlamBufferedConsensusObservation> observations;
+        observations.reserve(read.positions.size());
         for (const SlamBufferedPosition& pos : read.positions) {
-            // Apply trim filtering via SlamCompat
+            bool trimPass = true;
             if (compat) {
                 // Convert readPos to mate-local coordinates
                 uint32_t mateLocalPos;
@@ -2009,28 +2058,74 @@ uint64_t SlamQuant::replayBufferedReads(SlamCompat* compat, const SlamSnpMask* s
                     mateLen = read.readLength0;
                 }
                 
-                // Check overlap skip (if enabled)
                 if (compat->cfg().ignoreOverlap && pos.overlap) {
-                    diag_.compatPositionsSkippedOverlap++;
-                    continue;
-                }
-                
-                // Check trim guards
-                if (!compat->compatShouldCountPos(mateLocalPos, mateLen, pos.secondMate ? 1u : 0u)) {
-                    diag_.compatPositionsSkippedTrim++;
-                    continue;
+                    trimPass = false;
+                } else if (!compat->compatShouldCountPos(mateLocalPos, mateLen,
+                                                        pos.secondMate ? 1u : 0u)) {
+                    trimPass = false;
                 }
             }
-            
-            // Record transition base (same logic as ReadAlign_slamQuant)
-            bool skipMismatch = pos.overlap && pos.secondMate;
-            if (!skipMismatch) {
-                addTransitionBase(category, pos.readPos, pos.secondMate, pos.overlap, 
-                                  read.oppositeStrand, pos.refBase, pos.readBase, read.weight);
-                if (!read.oppositeStrand) {
-                    addTransitionBase(senseCategory, pos.readPos, pos.secondMate, pos.overlap,
-                                      false, pos.refBase, pos.readBase, read.weight);
+
+            SlamBufferedConsensusObservation obs;
+            obs.pos = &pos;
+            obs.trimPass = trimPass;
+            observations.push_back(obs);
+        }
+
+        std::sort(observations.begin(), observations.end(),
+                  [](const SlamBufferedConsensusObservation& a,
+                     const SlamBufferedConsensusObservation& b) {
+                      const SlamBufferedPosition* ap = a.pos;
+                      const SlamBufferedPosition* bp = b.pos;
+                      if (ap == nullptr || bp == nullptr) {
+                          return bp != nullptr;
+                      }
+                      if (ap->genomicPos != bp->genomicPos) {
+                          return ap->genomicPos < bp->genomicPos;
+                      }
+                      if (ap->secondMate != bp->secondMate) {
+                          return !ap->secondMate;
+                      }
+                      return ap->qual > bp->qual;
+                  });
+
+        for (size_t begin = 0; begin < observations.size();) {
+            size_t end = begin + 1;
+            while (end < observations.size() &&
+                   observations[end].pos != nullptr &&
+                   observations[begin].pos != nullptr &&
+                   observations[end].pos->genomicPos == observations[begin].pos->genomicPos) {
+                ++end;
+            }
+
+            const SlamBufferedPosition* chosen = nullptr;
+            if (!chooseBufferedConsensusObservation(observations, begin, end, true, chosen)) {
+                if (compat) {
+                    bool anyTrimmed = false;
+                    bool anyOverlapSkipped = false;
+                    for (size_t i = begin; i < end; ++i) {
+                        if (!observations[i].trimPass && observations[i].pos != nullptr) {
+                            anyTrimmed = true;
+                            anyOverlapSkipped = anyOverlapSkipped ||
+                                (compat->cfg().ignoreOverlap && observations[i].pos->overlap);
+                        }
+                    }
+                    if (anyOverlapSkipped) {
+                        diag_.compatPositionsSkippedOverlap++;
+                    } else if (anyTrimmed) {
+                        diag_.compatPositionsSkippedTrim++;
+                    }
                 }
+                begin = end;
+                continue;
+            }
+
+            const SlamBufferedPosition& pos = *chosen;
+            addTransitionBase(category, pos.readPos, pos.secondMate, pos.overlap,
+                              read.oppositeStrand, pos.refBase, pos.readBase, read.weight);
+            if (!read.oppositeStrand) {
+                addTransitionBase(senseCategory, pos.readPos, pos.secondMate, pos.overlap,
+                                  false, pos.refBase, pos.readBase, read.weight);
             }
             
             // Count T bases and conversions (for EM histogram)
@@ -2055,6 +2150,8 @@ uint64_t SlamQuant::replayBufferedReads(SlamCompat* compat, const SlamSnpMask* s
                     }
                 }
             }
+
+            begin = end;
         }
         
         // Add to gene counts (same logic as ReadAlign_slamQuant)
