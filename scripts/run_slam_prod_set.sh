@@ -34,6 +34,7 @@ GLOBUS_DST_ROOT="${GLOBUS_DST_ROOT:-SLAM-seq-PE-results}"
 GLOBUS_POLL_SECONDS="${GLOBUS_POLL_SECONDS:-30}"
 SUBMIT_GLOBUS=1
 WAIT_FOR_GLOBUS=0
+WAIT_FOR_FINAL_GLOBUS=1
 CLEANUP_AFTER_GLOBUS=1
 
 DRY_RUN=0
@@ -82,6 +83,7 @@ Globus:
                              (default: ${GLOBUS_DST_ROOT})
   --no-globus                Do not submit Globus transfers; still write batch manifests.
   --wait-for-globus          Wait for each submitted transfer before starting next sample.
+  --no-wait-for-final-globus Do not wait at the end for outstanding transfers.
   --no-cleanup-after-globus  Keep local Y/noY BAM and FASTQ files after Globus succeeds.
   --globus-poll-seconds N    Poll interval when waiting (default: ${GLOBUS_POLL_SECONDS})
 
@@ -294,6 +296,29 @@ reap_completed_transfers() {
   done < <(find "${OUT_BASE}/samples" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort)
 }
 
+wait_for_final_transfers() {
+  globus_enabled || return 0
+  [[ "$CLEANUP_AFTER_GLOBUS" == "1" ]] || return 0
+  [[ "$WAIT_FOR_FINAL_GLOBUS" == "1" ]] || return 0
+  [[ -d "${OUT_BASE}/samples" ]] || return 0
+
+  local sample_root sample submitted_file cleaned_file task_file task_id
+  while IFS= read -r sample_root; do
+    sample="$(basename "$sample_root")"
+    submitted_file="${sample_root}/TRANSFER_SUBMITTED.ok"
+    cleaned_file="${sample_root}/TRANSFER_CLEANED.ok"
+    task_file="${sample_root}/TRANSFER_TASK.txt"
+    [[ -f "$submitted_file" ]] || continue
+    [[ ! -f "$cleaned_file" ]] || continue
+    [[ -f "$task_file" ]] || die "Missing transfer task file for ${sample}: ${task_file}"
+    task_id="$(awk -F': *' '/Task ID/ {print $2; exit}' "$task_file")"
+    [[ -n "$task_id" ]] || die "Could not parse Globus task ID for ${sample}"
+    log "Waiting for final Globus cleanup for ${sample}: ${task_id}"
+    wait_for_globus_task "$task_id"
+    cleanup_sample_large_outputs "$sample" "$sample_root"
+  done < <(find "${OUT_BASE}/samples" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort)
+}
+
 write_top_level_manifests() {
   mkdir -p "${OUT_BASE}/manifests" "${OUT_BASE}/logs"
   cat > "${OUT_BASE}/manifests/run_config.env" <<EOF
@@ -317,6 +342,7 @@ PE_TRIM3P_M2=${PE_TRIM3P_M2}
 GLOBUS_SRC_ENDPOINT=${GLOBUS_SRC_ENDPOINT}
 GLOBUS_DST_ENDPOINT=${GLOBUS_DST_ENDPOINT}
 GLOBUS_DST_ROOT=${GLOBUS_DST_ROOT}
+WAIT_FOR_FINAL_GLOBUS=${WAIT_FOR_FINAL_GLOBUS}
 CLEANUP_AFTER_GLOBUS=${CLEANUP_AFTER_GLOBUS}
 EOF
   printf 'sample\tmode\tr1\tr2\tsample_root\trun_dir\tcounts_dir\tqc_dir\n' \
@@ -577,6 +603,8 @@ while [[ $# -gt 0 ]]; do
     --globus-poll-seconds) GLOBUS_POLL_SECONDS="$2"; shift 2 ;;
     --no-globus) SUBMIT_GLOBUS=0; shift ;;
     --wait-for-globus) WAIT_FOR_GLOBUS=1; shift ;;
+    --wait-for-final-globus) WAIT_FOR_FINAL_GLOBUS=1; shift ;;
+    --no-wait-for-final-globus) WAIT_FOR_FINAL_GLOBUS=0; shift ;;
     --no-cleanup-after-globus) CLEANUP_AFTER_GLOBUS=0; shift ;;
     -h|--help) usage; exit 0 ;;
     *) die "Unknown argument: $1" ;;
@@ -639,7 +667,11 @@ done
 
 log "Done. Selected samples: ${selected}"
 if [[ "$DRY_RUN" == "0" ]]; then
-  reap_completed_transfers
+  if [[ "$WAIT_FOR_FINAL_GLOBUS" == "1" ]]; then
+    wait_for_final_transfers
+  else
+    reap_completed_transfers
+  fi
 fi
 log "Sample manifest: ${OUT_BASE}/manifests/samples.tsv"
 log "Command manifest: ${OUT_BASE}/manifests/commands.tsv"
