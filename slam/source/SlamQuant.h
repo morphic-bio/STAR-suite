@@ -74,11 +74,13 @@ struct SlamGeneStats {
 struct SlamDiagnostics {
     uint64_t readsDroppedSnpMask = 0;
     uint64_t readsDroppedStrandness = 0;
+    uint64_t readsDroppedCallableLength = 0;
     uint64_t readsZeroGenes = 0;
     uint64_t readsProcessed = 0;
     uint64_t readsNAlignWithGeneZero = 0;  // reads where nAlignWithGene == 0
     uint64_t readsSumWeightLessThanOne = 0;  // reads where sumWeight < 1.0
     std::map<size_t, uint64_t> nTrDistribution;  // nTr -> count
+    std::map<size_t, uint64_t> callableLengthDistribution;  // post-trim consensus callable positions -> count
     std::map<size_t, uint64_t> geneSetSizeDistribution;  // gene set size -> count
     std::map<size_t, uint64_t> nAlignWithGeneDistribution;  // nAlignWithGene -> count
     std::map<double, uint64_t> sumWeightDistribution;  // sumWeight bucket -> count (bucketed)
@@ -221,7 +223,8 @@ public:
     
     // Replay buffered reads with trim applied
     // Returns number of reads replayed
-    uint64_t replayBufferedReads(SlamCompat* compat, const SlamSnpMask* snpMask, int strandness);
+    uint64_t replayBufferedReads(SlamCompat* compat, const SlamSnpMask* snpMask, int strandness,
+                                 uint32_t minCallableLength = 30);
 
     // Dump buffer/stream for external re-quantification
     void enableDumpBuffer(uint64_t maxReads);

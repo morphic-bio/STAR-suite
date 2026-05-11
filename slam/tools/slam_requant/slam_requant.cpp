@@ -36,6 +36,7 @@ struct Args {
     uint32_t autoTrimSmoothWindow = 5;
     uint32_t autoTrimSegMinLen = 3;
     uint32_t autoTrimMaxTrim = 15;
+    uint32_t minCallableLength = 30;
 };
 
 static bool parseArgs(int argc, char** argv, Args* args) {
@@ -80,6 +81,9 @@ static bool parseArgs(int argc, char** argv, Args* args) {
         else if (a == "--autoTrimSmoothWindow") args->autoTrimSmoothWindow = static_cast<uint32_t>(std::stoul(next("--autoTrimSmoothWindow")));
         else if (a == "--autoTrimSegMinLen") args->autoTrimSegMinLen = static_cast<uint32_t>(std::stoul(next("--autoTrimSegMinLen")));
         else if (a == "--autoTrimMaxTrim") args->autoTrimMaxTrim = static_cast<uint32_t>(std::stoul(next("--autoTrimMaxTrim")));
+        else if (a == "--slamMinCallableLength" || a == "--minCallableLength") {
+            args->minCallableLength = static_cast<uint32_t>(std::stoul(next(a.c_str())));
+        }
         else {
             std::cerr << "Unknown arg: " << a << "\n";
             return false;
@@ -89,7 +93,8 @@ static bool parseArgs(int argc, char** argv, Args* args) {
         std::cerr << "Usage: --dump <path> --out <prefix> [--slamSnpMaskIn <bed.gz>] [--trim5p N --trim3p N] "
                      "[--slamWeightMode dump|alignments|uniform] [--slamWeightFile <path>] [--slamWeightMatch auto|order|key] "
                      "[--dumpOut <path>] [--dumpWeightsOut <path>] "
-                     "[--slamCbOut 0|1] [--slamCbOutFile <path>] [--slamCbFormat star|ezbakr]\n";
+                     "[--slamCbOut 0|1] [--slamCbOutFile <path>] [--slamCbFormat star|ezbakr] "
+                     "[--slamMinCallableLength N]\n";
         return false;
     }
     if (args->cbOut != 0 && args->cbOut != 1) {
@@ -391,7 +396,8 @@ int main(int argc, char** argv) {
         cfg.trim5p = trim5pVals;
         cfg.trim3p = trim3pVals;
         SlamCompat compat(cfg, {}, {});
-        q.replayBufferedReads(&compat, maskPtr, strandnessToInt(args.strandness));
+        q.replayBufferedReads(&compat, maskPtr, strandnessToInt(args.strandness),
+                              args.minCallableLength);
         return q;
     };
 
