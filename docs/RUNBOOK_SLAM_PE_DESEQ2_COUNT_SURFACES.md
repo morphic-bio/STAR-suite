@@ -50,6 +50,16 @@ For primary DESeq2, total expression evidence is the correct default. The SLAM
 count surface and the expression count surface should be interpreted as related
 but distinct measurements.
 
+Important caveat: callable-filtering both the SLAM surface and the DESeq2
+surface does not remove the core assumption. If short-read or callable-length
+bias is strong enough to distort interpretation, it can affect both T->C
+assignment and expression detection. Using the same filtered read population for
+both analyses simply assumes that the filtered population is representative,
+while potentially sacrificing substantial expression signal. Keeping the full
+DESeq2 surface and using the callable-filtered surface only as a sensitivity
+analysis makes that assumption testable instead of hiding it in the primary
+analysis.
+
 ## Callable-Filtered DESeq2 Sensitivity
 
 Callable-filtered DESeq2 is possible as a sensitivity analysis, but it requires
