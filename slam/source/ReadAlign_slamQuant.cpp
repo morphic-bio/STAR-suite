@@ -2,6 +2,8 @@
 #include "SlamQuant.h"
 #include "SlamCompat.h"
 #include "SlamReadBuffer.h"
+#include <algorithm>
+#include <cstring>
 #include <sstream>
 
 namespace {
@@ -16,11 +18,13 @@ inline void addInterval(std::vector<GenomicInterval>& intervals, uint64_t start,
     }
 }
 
-inline bool containsPos(const std::vector<GenomicInterval>& intervals, size_t& idx, uint64_t pos) {
-    while (idx < intervals.size() && pos > intervals[idx].end) {
-        ++idx;
+inline bool containsPosAny(const std::vector<GenomicInterval>& intervals, uint64_t pos) {
+    for (const GenomicInterval& interval : intervals) {
+        if (pos >= interval.start && pos <= interval.end) {
+            return true;
+        }
     }
-    return idx < intervals.size() && pos >= intervals[idx].start && pos <= intervals[idx].end;
+    return false;
 }
 
 inline bool isOppositeStrand(const Transcriptome& tr, const std::set<uint32_t>& geneIds, uint8_t readStr) {
@@ -45,6 +49,57 @@ inline bool isOppositeStrand(const Transcriptome& tr, const std::set<uint32_t>& 
         return false;
     }
     return anyOpposite;
+}
+
+struct SlamConsensusObservation {
+    uint64_t genomicPos = 0;
+    uint32_t readPos = 0;
+    uint32_t mateLocalPos = 0;
+    uint32_t mateLen = 0;
+    uint8_t refBase = 0;
+    uint8_t readBase = 0;
+    uint8_t qual = 0;
+    bool secondMate = false;
+    bool overlap = false;
+    bool trimPass = true;
+    bool isT = false;
+    bool isTc = false;
+    bool isSnpConv = false;
+};
+
+inline bool chooseConsensusObservation(const std::vector<SlamConsensusObservation>& observations,
+                                       size_t begin, size_t end, bool requireTrimPass,
+                                       SlamConsensusObservation& chosen) {
+    if (begin >= end) {
+        return false;
+    }
+
+    int agreedBase = -1;
+    for (size_t i = begin; i < end; ++i) {
+        int base = static_cast<int>(observations[i].readBase);
+        if (agreedBase < 0) {
+            agreedBase = base;
+        } else if (agreedBase != base) {
+            return false;
+        }
+    }
+
+    const SlamConsensusObservation* best = nullptr;
+    for (size_t i = begin; i < end; ++i) {
+        const SlamConsensusObservation& obs = observations[i];
+        if (requireTrimPass && !obs.trimPass) {
+            continue;
+        }
+        if (best == nullptr || obs.qual > best->qual ||
+            (obs.qual == best->qual && best->secondMate && !obs.secondMate)) {
+            best = &obs;
+        }
+    }
+    if (best == nullptr) {
+        return false;
+    }
+    chosen = *best;
+    return true;
 }
 
 inline std::string buildReadLoc(const Transcript& trOut, const Genome& genOut) {
@@ -256,36 +311,99 @@ bool ReadAlign::slamCollect(const Transcript& trOut, const std::set<uint32_t>& g
         }
     }
 
-    std::vector<GenomicInterval> mate1Intervals;
-    std::vector<GenomicInterval> mate2Intervals;
+    std::vector<GenomicInterval> mateIntervals[2];
     bool hasMate = (readLength[1] > 0);
     if (hasMate) {
-        mate1Intervals.reserve(trOut.nExons);
-        mate2Intervals.reserve(trOut.nExons);
-        uint32_t split = readLength[0];
+        mateIntervals[0].reserve(trOut.nExons);
+        mateIntervals[1].reserve(trOut.nExons);
+        for (uint iex = 0; iex < trOut.nExons; ++iex) {
+            uint mate = trOut.exons[iex][EX_iFrag];
+            if (mate > 1) {
+                continue;
+            }
+            uint64 gStart = trOut.exons[iex][EX_G];
+            uint64 len = trOut.exons[iex][EX_L];
+            addInterval(mateIntervals[mate], gStart, gStart + len - 1);
+        }
+        for (int mate = 0; mate < 2; ++mate) {
+            std::sort(mateIntervals[mate].begin(), mateIntervals[mate].end(),
+                      [](const GenomicInterval& a, const GenomicInterval& b) {
+                          if (a.start != b.start) {
+                              return a.start < b.start;
+                          }
+                          return a.end < b.end;
+                      });
+        }
+    } else if (readLength[0] > 0) {
+        mateIntervals[0].reserve(trOut.nExons);
         for (uint iex = 0; iex < trOut.nExons; ++iex) {
             uint64 gStart = trOut.exons[iex][EX_G];
-            uint64 rStart = trOut.exons[iex][EX_R];
             uint64 len = trOut.exons[iex][EX_L];
-            uint64 rEnd = rStart + len;
-            if (rEnd <= split) {
-                addInterval(mate1Intervals, gStart, gStart + len - 1);
-            } else if (rStart > split) {
-                addInterval(mate2Intervals, gStart, gStart + len - 1);
-            } else {
-                if (rStart < split) {
-                    uint64 len1 = split - rStart;
-                    addInterval(mate1Intervals, gStart, gStart + len1 - 1);
-                    uint64 len2 = len - len1;
-                    if (len2 > 0) {
-                        addInterval(mate2Intervals, gStart + len1, gStart + len1 + len2 - 1);
-                    }
-                }
-            }
+            addInterval(mateIntervals[0], gStart, gStart + len - 1);
         }
     }
-    size_t mate1Idx = 0;
-    size_t mate2Idx = 0;
+
+    auto mateInfoForPosition = [&](uint exonIndex, uint64_t rposRaw,
+                                   uint32_t& readPos, uint32_t& mateLocalPos,
+                                   uint32_t& mateLen, bool& secondMate) -> bool {
+        uint mate = hasMate ? trOut.exons[exonIndex][EX_iFrag] : 0;
+        if (mate > 1) {
+            return false;
+        }
+        const uint leftMate = hasMate ? trOut.Str : 0;
+        const uint32_t leftMateLen = static_cast<uint32_t>(readLength[leftMate]);
+        if (hasMate && rposRaw == leftMateLen) {
+            return false;
+        }
+        uint64_t mateOffset = 0;
+        if (hasMate && mate != leftMate) {
+            mateOffset = static_cast<uint64_t>(leftMateLen) + 1;
+        }
+        if (rposRaw < mateOffset) {
+            return false;
+        }
+        uint64_t orientedMatePos = rposRaw - mateOffset;
+        mateLen = static_cast<uint32_t>(readLength[mate]);
+        if (orientedMatePos >= mateLen || mateLen == 0) {
+            return false;
+        }
+
+        bool mateReversed = false;
+        if (hasMate) {
+            mateReversed = (mate == 0) ? (trOut.Str == 1) : (trOut.Str == 0);
+        } else {
+            mateReversed = (trOut.Str == 1);
+        }
+        mateLocalPos = mateReversed ?
+            (mateLen - 1 - static_cast<uint32_t>(orientedMatePos)) :
+            static_cast<uint32_t>(orientedMatePos);
+        secondMate = (mate == 1);
+        readPos = secondMate ?
+            static_cast<uint32_t>(readLength[0]) + mateLocalPos :
+            mateLocalPos;
+        return true;
+    };
+
+    auto qualityForPosition = [&](bool secondMate, uint32_t mateLocalPos,
+                                  uint32_t mateLen) -> uint8_t {
+        uint8_t qual = 30;
+        const uint mate = secondMate ? 1 : 0;
+        if (Qual0 && Qual0[mate] && mateLocalPos < mateLen && mateLocalPos < strlen(Qual0[mate])) {
+            qual = static_cast<uint8_t>(Qual0[mate][mateLocalPos] - 33);
+        }
+        return qual;
+    };
+
+    auto overlapForPosition = [&](bool secondMate, uint64_t gpos) -> bool {
+        if (!hasMate) {
+            return false;
+        }
+        const int mate = secondMate ? 1 : 0;
+        return containsPosAny(mateIntervals[1 - mate], gpos);
+    };
+
+    std::vector<SlamConsensusObservation> observations;
+    observations.reserve(static_cast<size_t>(readLength[0] + readLength[1]));
 
     for (uint iex = 0; iex < trOut.nExons; ++iex) {
         uint64 gStart = trOut.exons[iex][EX_G];
@@ -299,69 +417,28 @@ bool ReadAlign::slamCollect(const Transcript& trOut, const std::set<uint32_t>& g
             if (r1 > 3 || g1 > 3) {
                 continue;
             }
-            if (snpDetect) {
-                // For SLAM-seq SNP detection, only count T→C conversions
-                // STAR base encoding: A=0, C=1, G=2, T=3
-                // T→C: genomic T (3) → read C (1)
-                // A→G: genomic A (0) → read G (2) (opposite strand equivalent)
-                bool isTtoC = (g1 == 3 && r1 == 1);
-                bool isAtoG = (g1 == 0 && r1 == 2);
-                bool isConv = (isTtoC || isAtoG);
-                bool isAnyMis = (g1 != r1);
-                if (slamQuant->snpSiteDebugEnabled()) {
-                    slamQuant->debugSnpSiteObserve(gpos, isAnyMis, isConv, weight, trOut.primaryFlag, trOut.mapq);
-                }
-                slamQuant->recordSnpObservation(gpos, isAnyMis, isConv);
-            }
             uint64 rposRaw = rStart + ii;
-            if (readLength[0] > 0 && rposRaw == readLength[0]) {
-                continue; // skip spacer between mates
+            uint32_t readPos = 0;
+            uint32_t mateLocalPos = 0;
+            uint32_t mateLen = 0;
+            bool secondMate = false;
+            if (!mateInfoForPosition(iex, rposRaw, readPos, mateLocalPos, mateLen, secondMate)) {
+                continue;
             }
-            bool secondMate = (readLength[1] > 0 && rposRaw > readLength[0]);
-            uint32_t readPos = static_cast<uint32_t>(secondMate ? rposRaw - 1 : rposRaw);
-            bool overlap = false;
-            if (hasMate) {
-                if (secondMate) {
-                    overlap = containsPos(mate1Intervals, mate1Idx, gpos);
-                } else {
-                    overlap = containsPos(mate2Intervals, mate2Idx, gpos);
-                }
-            }
+            bool overlap = overlapForPosition(secondMate, gpos);
             
             // Get quality score for this position (needed for variance and buffering)
-            uint8_t qual = 30; // Default quality if not available
-            if (Qual0 && !secondMate && readPos < readLength[0] && Qual0[0] && readPos < strlen(Qual0[0])) {
-                qual = static_cast<uint8_t>(Qual0[0][readPos] - 33); // Convert ASCII to Phred
-            } else if (Qual0 && secondMate && readLength[1] > 0 && Qual0[1]) {
-                uint32_t mateLocalPos = readPos - static_cast<uint32_t>(readLength[0]);
-                if (mateLocalPos < strlen(Qual0[1])) {
-                    qual = static_cast<uint8_t>(Qual0[1][mateLocalPos] - 33);
-                }
-            }
-            
-            // Record variance stats for auto-trim (before trim filtering, only during detection pass)
-            // Only collect if varianceCollecting is true (read was recorded and under maxReads limit)
-            if (varianceCollecting) {
-                bool isT = false;
-                bool isTc = false;
-                if (!isIntronic) {
-                    if (!isMinus) {
-                        isT = (g1 == 3);
-                        isTc = (g1 == 3 && r1 == 1);
-                    } else {
-                        isT = (g1 == 0);
-                        isTc = (g1 == 0 && r1 == 2);
-                    }
-                }
-                if (hasMate && readLength[1] > 0 && slamQuant->varianceSeparateMates()) {
-                    uint32_t mateVarLocal =
-                        secondMate ? static_cast<uint32_t>(
-                                         readPos - static_cast<uint32_t>(readLength[0]))
-                                   : static_cast<uint32_t>(readPos);
-                    uint8_t mateVarIndex = secondMate ? 1 : 0;
-                    slamQuant->recordVariancePosition(mateVarLocal, mateVarIndex, qual, isT, isTc);
+            uint8_t qual = qualityForPosition(secondMate, mateLocalPos, mateLen);
+
+            bool isT = false;
+            bool isTc = false;
+            if (!isIntronic) {
+                if (!isMinus) {
+                    isT = (g1 == 3);
+                    isTc = (g1 == 3 && r1 == 1);
                 } else {
-                    slamQuant->recordVariancePosition(readPos, qual, isT, isTc);
+                    isT = (g1 == 0);
+                    isTc = (g1 == 0 && r1 == 2);
                 }
             }
 
@@ -377,72 +454,118 @@ bool ReadAlign::slamCollect(const Transcript& trOut, const std::set<uint32_t>& g
                 bp.overlap = overlap;
                 dumpRead.positions.push_back(bp);
             }
-            
-            // Compat position filtering (overlap and trim)
+
+            bool trimPass = true;
             if (slamCompat) {
-                // Check overlap skip first (only when compatIgnoreOverlap is enabled)
                 if (slamCompat->cfg().ignoreOverlap && overlap) {
-                    slamQuant->diagnostics().compatPositionsSkippedOverlap++;
-                    continue;
-                }
-                // Convert concatenated readPos to mate-local coordinates
-                uint32_t mateLocalPos;
-                uint32_t mateLen;
-                if (secondMate) {
-                    mateLocalPos = readPos - static_cast<uint32_t>(readLength[0]);
-                    mateLen = static_cast<uint32_t>(readLength[1]);
-                } else {
-                    mateLocalPos = readPos;
-                    mateLen = static_cast<uint32_t>(readLength[0]);
-                }
-                // Check trim guards (applies even in overlap regions if ignoreOverlap is off)
-                if (!slamCompat->compatShouldCountPos(mateLocalPos, mateLen,
-                                                     secondMate ? 1u : 0u)) {
-                    slamQuant->diagnostics().compatPositionsSkippedTrim++;
-                    continue;
+                    trimPass = false;
+                } else if (!slamCompat->compatShouldCountPos(mateLocalPos, mateLen,
+                                                            secondMate ? 1u : 0u)) {
+                    trimPass = false;
                 }
             }
-            
-            bool skipMismatch = overlap && secondMate;
-            if (!skipMismatch) {
-                slamQuant->addTransitionBase(category, readPos, secondMate, overlap, oppositeStrand, g1, r1, weight);
-                if (!oppositeStrand) {
-                    slamQuant->addTransitionBase(senseCategory, readPos, secondMate, overlap, false, g1, r1, weight);
+
+            SlamConsensusObservation obs;
+            obs.genomicPos = gpos;
+            obs.readPos = readPos;
+            obs.mateLocalPos = mateLocalPos;
+            obs.mateLen = mateLen;
+            obs.refBase = g1;
+            obs.readBase = r1;
+            obs.qual = qual;
+            obs.secondMate = secondMate;
+            obs.overlap = overlap;
+            obs.trimPass = trimPass;
+            obs.isT = isT;
+            obs.isTc = isTc;
+            obs.isSnpConv = (g1 == 3 && r1 == 1) || (g1 == 0 && r1 == 2);
+            observations.push_back(obs);
+        }
+    }
+
+    std::sort(observations.begin(), observations.end(),
+              [](const SlamConsensusObservation& a, const SlamConsensusObservation& b) {
+                  if (a.genomicPos != b.genomicPos) {
+                      return a.genomicPos < b.genomicPos;
+                  }
+                  if (a.secondMate != b.secondMate) {
+                      return !a.secondMate;
+                  }
+                  return a.qual > b.qual;
+              });
+
+    for (size_t begin = 0; begin < observations.size();) {
+        size_t end = begin + 1;
+        while (end < observations.size() &&
+               observations[end].genomicPos == observations[begin].genomicPos) {
+            ++end;
+        }
+
+        SlamConsensusObservation untrimmedObs;
+        if (chooseConsensusObservation(observations, begin, end, false, untrimmedObs)) {
+            if (varianceCollecting) {
+                if (hasMate && readLength[1] > 0 && slamQuant->varianceSeparateMates()) {
+                    uint8_t mateVarIndex = untrimmedObs.secondMate ? 1 : 0;
+                    slamQuant->recordVariancePosition(untrimmedObs.mateLocalPos, mateVarIndex,
+                                                      untrimmedObs.qual, untrimmedObs.isT,
+                                                      untrimmedObs.isTc);
+                } else {
+                    slamQuant->recordVariancePosition(untrimmedObs.readPos, untrimmedObs.qual,
+                                                      untrimmedObs.isT, untrimmedObs.isTc);
                 }
             }
-            
-            if (!isIntronic) {
-                if (!isMinus) {
-                    if (g1 == 3) { // T
-                        ++nT;
-                        if (r1 == 1) { // C
-                            ++k;
-                            if (capturePositions) {
-                                debugConvReadPos.push_back(readPos);
-                                debugConvGenPos.push_back(gpos);
-                            }
-                            if (snpDetect) {
-                                mismatchPositions.push_back(static_cast<uint32_t>(gpos));
-                            }
-                        }
-                    }
-                } else {
-                    if (g1 == 0) { // A
-                        ++nT;
-                        if (r1 == 2) { // G
-                            ++k;
-                            if (capturePositions) {
-                                debugConvReadPos.push_back(readPos);
-                                debugConvGenPos.push_back(gpos);
-                            }
-                            if (snpDetect) {
-                                mismatchPositions.push_back(static_cast<uint32_t>(gpos));
-                            }
-                        }
-                    }
+            if (snpDetect) {
+                bool isAnyMis = (untrimmedObs.refBase != untrimmedObs.readBase);
+                if (slamQuant->snpSiteDebugEnabled()) {
+                    slamQuant->debugSnpSiteObserve(untrimmedObs.genomicPos, isAnyMis,
+                                                   untrimmedObs.isSnpConv, weight,
+                                                   trOut.primaryFlag, trOut.mapq);
                 }
+                slamQuant->recordSnpObservation(untrimmedObs.genomicPos, isAnyMis,
+                                                untrimmedObs.isSnpConv);
             }
         }
+
+        SlamConsensusObservation obs;
+        if (chooseConsensusObservation(observations, begin, end, true, obs)) {
+            slamQuant->addTransitionBase(category, obs.readPos, obs.secondMate, obs.overlap,
+                                         oppositeStrand, obs.refBase, obs.readBase, weight);
+            if (!oppositeStrand) {
+                slamQuant->addTransitionBase(senseCategory, obs.readPos, obs.secondMate,
+                                             obs.overlap, false, obs.refBase, obs.readBase, weight);
+            }
+
+            if (!isIntronic && obs.isT) {
+                ++nT;
+                if (obs.isTc) {
+                    ++k;
+                    if (capturePositions) {
+                        debugConvReadPos.push_back(obs.readPos);
+                        debugConvGenPos.push_back(obs.genomicPos);
+                    }
+                    if (snpDetect) {
+                        mismatchPositions.push_back(static_cast<uint32_t>(obs.genomicPos));
+                    }
+                }
+            }
+        } else if (slamCompat) {
+            bool anyTrimmed = false;
+            bool anyOverlapSkipped = false;
+            for (size_t i = begin; i < end; ++i) {
+                if (!observations[i].trimPass) {
+                    anyTrimmed = true;
+                    anyOverlapSkipped = anyOverlapSkipped ||
+                        (slamCompat->cfg().ignoreOverlap && observations[i].overlap);
+                }
+            }
+            if (anyOverlapSkipped) {
+                slamQuant->diagnostics().compatPositionsSkippedOverlap++;
+            } else if (anyTrimmed) {
+                slamQuant->diagnostics().compatPositionsSkippedTrim++;
+            }
+        }
+
+        begin = end;
     }
 
     // Commit dump record (after position buffering)
