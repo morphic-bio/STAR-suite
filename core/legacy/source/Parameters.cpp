@@ -2062,6 +2062,26 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
     quant.trSAM.indel=false;
     quant.trSAM.softClip=false;
     quant.trSAM.singleEnd=false; 
+    auto configureQuantTranscriptomeOutput = [&]() {
+        if (quant.trSAM.output=="BanSingleEnd_BanIndels_ExtendSoftclip") {
+            quant.trSAM.indel=false;
+            quant.trSAM.softClip=false;
+            quant.trSAM.singleEnd=false;
+        } else if (quant.trSAM.output=="BanSingleEnd") {
+            quant.trSAM.indel=true;
+            quant.trSAM.softClip=true;
+            quant.trSAM.singleEnd=false;
+        } else if (quant.trSAM.output=="BanSingleEnd_ExtendSoftclip") {
+            quant.trSAM.indel=true;
+            quant.trSAM.softClip=false;
+            quant.trSAM.singleEnd=false;
+        } else {
+            ostringstream errOut;
+            errOut << "EXITING because of fatal INPUT error: unrecognized option in --quantTranscriptomeSAMoutput=" << quant.trSAM.output << "\n";
+            errOut << "SOLUTION: use one of the allowed values of --quantTranscriptomeSAMoutput : BanSingleEnd_BanIndels_ExtendSoftclip, BanSingleEnd, or BanSingleEnd_ExtendSoftclip.\n";
+            exitWithError(errOut.str(),std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+        };
+    };
     if (quant.mode.at(0) != "-") {
         quant.yes=true;
         for (uint32 ii=0; ii<quant.mode.size(); ii++) {
@@ -2079,19 +2099,6 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
                     };
                     inOut->outQuantBAMfile=bgzf_open(outQuantBAMfileName.c_str(),("w"+to_string((long long) quant.trSAM.bamCompression)).c_str());
                 };
-                if (quant.trSAM.output=="BanSingleEnd_BanIndels_ExtendSoftclip") {
-                    quant.trSAM.indel=false;
-                    quant.trSAM.softClip=false;
-                    quant.trSAM.singleEnd=false;
-                } else if (quant.trSAM.output=="BanSingleEnd") {
-                    quant.trSAM.indel=true;
-                    quant.trSAM.softClip=true;
-                    quant.trSAM.singleEnd=false;
-                } else if (quant.trSAM.output=="BanSingleEnd_ExtendSoftclip") {
-                    quant.trSAM.indel=true;
-                    quant.trSAM.softClip=false;
-                    quant.trSAM.singleEnd=false;
-                };
             } else if  (quant.mode.at(ii)=="GeneCounts") {
                 quant.geCount.yes=true;
                 quant.geCount.outFile=outFileNamePrefix + "ReadsPerGene.out.tab";
@@ -2104,6 +2111,9 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
                 errOut << "SOLUTION: use one of the allowed values of --quantMode : TranscriptomeSAM, GeneCounts, TranscriptVB, or - .\n";
                 exitWithError(errOut.str(),std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
             };
+        };
+        if (quant.trSAM.yes || quant.transcriptVB.yes) {
+            configureQuantTranscriptomeOutput();
         };
     };
     //these may be set in STARsolo or in SAM attributes
