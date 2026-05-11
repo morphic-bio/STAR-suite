@@ -495,6 +495,7 @@ class Parameters {
                 // Per-mate compat trims. Index [1] uses -1 as sentinel = inherit mate0 after CLI parse.
                 int compatTrim5p[2] = {0, -1};       // 5' trim guard (per mate)
                 int compatTrim3p[2] = {0, -1};       // 3' trim guard (per mate)
+                int minCallableLength = 30;           // Minimum post-trim consensus positions per read; 0 disables
 
                 // VB over-dispersed solver (beta-binomial mixture)
                 int vbOverdispInt = 0;            // --slamVbOverdisp (0/1)

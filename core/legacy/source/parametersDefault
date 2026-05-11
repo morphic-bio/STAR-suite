@@ -1283,6 +1283,9 @@ slamCompatTrim3pMate1                0
 slamCompatTrim3pMate2                -1
     int: Mate2 3' trim; -1 means inherit mate1 after parse
 
+slamMinCallableLength                30
+    int: Minimum post-trim, overlap-consensus callable positions required for a SLAM read to contribute to transition and nT/k counts. Use 0 to disable.
+
 slamAutoTrimPerMate                  Auto
     string: Auto|Yes|No. Auto uses separate per-mate variance histograms for paired-end reads and a combined histogram for single-end reads; Yes forces per-mate mode, No forces one combined trim profile for both mates.
 

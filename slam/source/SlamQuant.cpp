@@ -703,6 +703,7 @@ void SlamQuant::merge(const SlamQuant& other) {
     // Merge diagnostics
     diag_.readsDroppedSnpMask += other.diag_.readsDroppedSnpMask;
     diag_.readsDroppedStrandness += other.diag_.readsDroppedStrandness;
+    diag_.readsDroppedCallableLength += other.diag_.readsDroppedCallableLength;
     diag_.readsZeroGenes += other.diag_.readsZeroGenes;
     diag_.readsProcessed += other.diag_.readsProcessed;
     diag_.readsNAlignWithGeneZero += other.diag_.readsNAlignWithGeneZero;
@@ -714,6 +715,9 @@ void SlamQuant::merge(const SlamQuant& other) {
     diag_.readsSumWeightLessThanOne += other.diag_.readsSumWeightLessThanOne;
     for (const auto& kv : other.diag_.nTrDistribution) {
         diag_.nTrDistribution[kv.first] += kv.second;
+    }
+    for (const auto& kv : other.diag_.callableLengthDistribution) {
+        diag_.callableLengthDistribution[kv.first] += kv.second;
     }
     for (const auto& kv : other.diag_.geneSetSizeDistribution) {
         diag_.geneSetSizeDistribution[kv.first] += kv.second;
@@ -1091,12 +1095,17 @@ void SlamQuant::writeDiagnostics(const std::string& diagFile) const {
     out << "readsProcessed\t" << diag_.readsProcessed << "\n";
     out << "readsDroppedSnpMask\t" << diag_.readsDroppedSnpMask << "\n";
     out << "readsDroppedStrandness\t" << diag_.readsDroppedStrandness << "\n";
+    out << "readsDroppedCallableLength\t" << diag_.readsDroppedCallableLength << "\n";
     out << "readsZeroGenes\t" << diag_.readsZeroGenes << "\n";
     out << "readsNAlignWithGeneZero\t" << diag_.readsNAlignWithGeneZero << "\n";
     out << "readsSumWeightLessThanOne\t" << diag_.readsSumWeightLessThanOne << "\n";
     out << "\nnTrDistribution:\n";
     for (const auto& kv : diag_.nTrDistribution) {
         out << "nTr_" << kv.first << "\t" << kv.second << "\n";
+    }
+    out << "\ncallableLengthDistribution:\n";
+    for (const auto& kv : diag_.callableLengthDistribution) {
+        out << "callableLength_" << kv.first << "\t" << kv.second << "\n";
     }
     out << "\ngeneSetSizeDistribution:\n";
     for (const auto& kv : diag_.geneSetSizeDistribution) {
@@ -1993,7 +2002,8 @@ void SlamQuant::closeDumpWriter() {
 // Replay buffered reads with trim applied
 // This is the core replay logic - processes buffered reads through the same
 // counting paths but with trim filtering applied
-uint64_t SlamQuant::replayBufferedReads(SlamCompat* compat, const SlamSnpMask* snpMask, int strandness) {
+uint64_t SlamQuant::replayBufferedReads(SlamCompat* compat, const SlamSnpMask* snpMask,
+                                        int strandness, uint32_t minCallableLength) {
     if (!readBuffer_ || readBuffer_->size() == 0) {
         return 0;
     }
@@ -2089,6 +2099,9 @@ uint64_t SlamQuant::replayBufferedReads(SlamCompat* compat, const SlamSnpMask* s
                       return ap->qual > bp->qual;
                   });
 
+        std::vector<const SlamBufferedPosition*> callablePositions;
+        callablePositions.reserve(observations.size());
+
         for (size_t begin = 0; begin < observations.size();) {
             size_t end = begin + 1;
             while (end < observations.size() &&
@@ -2121,13 +2134,29 @@ uint64_t SlamQuant::replayBufferedReads(SlamCompat* compat, const SlamSnpMask* s
             }
 
             const SlamBufferedPosition& pos = *chosen;
+            callablePositions.push_back(&pos);
+            begin = end;
+        }
+
+        const size_t callableLength = callablePositions.size();
+        diag_.callableLengthDistribution[callableLength]++;
+        if (minCallableLength > 0 && callableLength < static_cast<size_t>(minCallableLength)) {
+            diag_.readsDroppedCallableLength++;
+            continue;
+        }
+
+        for (const SlamBufferedPosition* posPtr : callablePositions) {
+            if (posPtr == nullptr) {
+                continue;
+            }
+            const SlamBufferedPosition& pos = *posPtr;
             addTransitionBase(category, pos.readPos, pos.secondMate, pos.overlap,
                               read.oppositeStrand, pos.refBase, pos.readBase, read.weight);
             if (!read.oppositeStrand) {
                 addTransitionBase(senseCategory, pos.readPos, pos.secondMate, pos.overlap,
                                   false, pos.refBase, pos.readBase, read.weight);
             }
-            
+
             // Count T bases and conversions (for EM histogram)
             if (!read.isIntronic) {
                 bool isT = false;
@@ -2150,8 +2179,6 @@ uint64_t SlamQuant::replayBufferedReads(SlamCompat* compat, const SlamSnpMask* s
                     }
                 }
             }
-
-            begin = end;
         }
         
         // Add to gene counts (same logic as ReadAlign_slamQuant)

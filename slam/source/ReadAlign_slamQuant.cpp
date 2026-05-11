@@ -494,6 +494,9 @@ bool ReadAlign::slamCollect(const Transcript& trOut, const std::set<uint32_t>& g
                   return a.qual > b.qual;
               });
 
+    std::vector<SlamConsensusObservation> callableObservations;
+    callableObservations.reserve(observations.size());
+
     for (size_t begin = 0; begin < observations.size();) {
         size_t end = begin + 1;
         while (end < observations.size() &&
@@ -528,26 +531,7 @@ bool ReadAlign::slamCollect(const Transcript& trOut, const std::set<uint32_t>& g
 
         SlamConsensusObservation obs;
         if (chooseConsensusObservation(observations, begin, end, true, obs)) {
-            slamQuant->addTransitionBase(category, obs.readPos, obs.secondMate, obs.overlap,
-                                         oppositeStrand, obs.refBase, obs.readBase, weight);
-            if (!oppositeStrand) {
-                slamQuant->addTransitionBase(senseCategory, obs.readPos, obs.secondMate,
-                                             obs.overlap, false, obs.refBase, obs.readBase, weight);
-            }
-
-            if (!isIntronic && obs.isT) {
-                ++nT;
-                if (obs.isTc) {
-                    ++k;
-                    if (capturePositions) {
-                        debugConvReadPos.push_back(obs.readPos);
-                        debugConvGenPos.push_back(obs.genomicPos);
-                    }
-                    if (snpDetect) {
-                        mismatchPositions.push_back(static_cast<uint32_t>(obs.genomicPos));
-                    }
-                }
-            }
+            callableObservations.push_back(obs);
         } else if (slamCompat) {
             bool anyTrimmed = false;
             bool anyOverlapSkipped = false;
@@ -571,6 +555,37 @@ bool ReadAlign::slamCollect(const Transcript& trOut, const std::set<uint32_t>& g
     // Commit dump record (after position buffering)
     if (dumpEnabled) {
         slamQuant->bufferDumpRead(std::move(dumpRead));
+    }
+
+    const size_t callableLength = callableObservations.size();
+    slamQuant->diagnostics().callableLengthDistribution[callableLength]++;
+    const int minCallableLength = P.quant.slam.minCallableLength;
+    if (minCallableLength > 0 && callableLength < static_cast<size_t>(minCallableLength)) {
+        slamQuant->diagnostics().readsDroppedCallableLength++;
+        return false;
+    }
+
+    for (const SlamConsensusObservation& obs : callableObservations) {
+        slamQuant->addTransitionBase(category, obs.readPos, obs.secondMate, obs.overlap,
+                                     oppositeStrand, obs.refBase, obs.readBase, weight);
+        if (!oppositeStrand) {
+            slamQuant->addTransitionBase(senseCategory, obs.readPos, obs.secondMate,
+                                         obs.overlap, false, obs.refBase, obs.readBase, weight);
+        }
+
+        if (!isIntronic && obs.isT) {
+            ++nT;
+            if (obs.isTc) {
+                ++k;
+                if (capturePositions) {
+                    debugConvReadPos.push_back(obs.readPos);
+                    debugConvGenPos.push_back(obs.genomicPos);
+                }
+                if (snpDetect) {
+                    mismatchPositions.push_back(static_cast<uint32_t>(obs.genomicPos));
+                }
+            }
+        }
     }
 
     if (debugEnabled && slamQuant->debugGenesEnabled()) {

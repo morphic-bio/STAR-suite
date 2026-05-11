@@ -498,6 +498,7 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "slamCompatTrim3pMate1", &quant.slam.compatTrim3p[0]));
     parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "slamCompatTrim5pMate2", &quant.slam.compatTrim5p[1]));
     parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "slamCompatTrim3pMate2", &quant.slam.compatTrim3p[1]));
+    parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "slamMinCallableLength", &quant.slam.minCallableLength));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "autoTrim", &quant.slam.autoTrimMode));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "trimScope", &quant.slam.trimScope));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "trimSource", &quant.slam.trimSource));
@@ -2340,6 +2341,13 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
         }
         if (quant.slam.compatTrim3p[1] < 0) {
             quant.slam.compatTrim3p[1] = quant.slam.compatTrim3p[0];
+        }
+        if (quant.slam.minCallableLength < 0) {
+            ostringstream errOut;
+            errOut << "EXITING because of FATAL PARAMETER ERROR: "
+                   << "--slamMinCallableLength must be >= 0\n"
+                   << "Got: " << quant.slam.minCallableLength << "\n";
+            exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
         }
         {
             string atm = quant.slam.slamAutoTrimPerMate;
