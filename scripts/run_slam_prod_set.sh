@@ -103,6 +103,8 @@ die() {
   exit 1
 }
 
+trap 'die "Command failed at line ${LINENO}: ${BASH_COMMAND}"' ERR
+
 require_file() {
   [[ -f "$1" ]] || die "Missing file: $1"
 }
@@ -205,7 +207,20 @@ detect_globus_src_endpoint() {
 }
 
 globus_task_status() {
-  globus task show "$1" | awk -F': *' '/^Status:/ {print $2; exit}'
+  local output
+  output="$(globus task show "$1" 2>&1)" || return $?
+  awk -F': *' '
+    /^Status:/ {
+      print $2
+      found = 1
+      exit
+    }
+    END {
+      if (!found) {
+        exit 1
+      }
+    }
+  ' <<< "$output"
 }
 
 wait_for_globus_task() {
@@ -262,12 +277,15 @@ reap_completed_transfers() {
     [[ -f "$task_file" ]] || die "Missing transfer task file for ${sample}: ${task_file}"
     task_id="$(awk -F': *' '/Task ID/ {print $2; exit}' "$task_file")"
     [[ -n "$task_id" ]] || die "Could not parse Globus task ID for ${sample}"
-    status="$(globus_task_status "$task_id")"
+    status="$(globus_task_status "$task_id" || true)"
     case "$status" in
       SUCCEEDED)
         cleanup_sample_large_outputs "$sample" "$sample_root"
         ;;
       ACTIVE|INACTIVE|QUEUED|PENDING|"")
+        if [[ -z "$status" ]]; then
+          log "Globus status unavailable for ${sample} (${task_id}); will retry later"
+        fi
         ;;
       *)
         die "Globus transfer for ${sample} entered unexpected status ${status} (task ${task_id})"
