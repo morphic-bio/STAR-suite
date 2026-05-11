@@ -2207,6 +2207,22 @@ int main(int argInN, char *argIn[])
                                       P.quant.slam.vbOverdisp, P.quant.slam.vbOverdispPhi,
                                       P.quant.slam.vbOverdispPriorAlpha, P.quant.slam.vbOverdispPriorBeta);
         }
+        if (P.quant.slam.cbOut != 0) {
+            std::string cbOut = P.quant.slam.cbOutFile.empty()
+                                ? (P.outFileNamePrefix + "SlamQuant.cB.tsv")
+                                : P.quant.slam.cbOutFile;
+            std::string sampleLabel = P.outFileNamePrefixAutoSample.empty()
+                                      ? P.outFileNamePrefix
+                                      : P.outFileNamePrefixAutoSample;
+            if (!mergedSlam.writeCountBinomial(*transcriptomeMain, cbOut, sampleLabel,
+                                               P.quant.slam.cbFormat)) {
+                P.inOut->logMain << "ERROR: Failed to write SLAM count-binomial output: "
+                                 << cbOut << "\n";
+            } else {
+                P.inOut->logMain << "SLAM count-binomial output written to: "
+                                 << cbOut << "\n";
+            }
+        }
 
         const bool wantDump = !P.quant.slam.dumpBinary.empty() && P.quant.slam.dumpBinary != "-" &&
                               P.quant.slam.dumpBinary != "None";

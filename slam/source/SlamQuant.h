@@ -175,7 +175,7 @@ public:
     explicit SlamQuant(uint32_t nGenes, bool snpDetect = false, double snpMismatchFrac = -1.0, bool snpObsAnyMismatch = false);
     SlamQuant(uint32_t nGenes, std::vector<uint8_t> allowedGenes, bool snpDetect = false, double snpMismatchFrac = -1.0, bool snpObsAnyMismatch = false);
 
-    void addRead(uint32_t geneId, uint16_t nT, uint8_t k, double weight);
+    void addRead(uint32_t geneId, uint16_t nT, uint16_t tc, double weight);
     void addTransitionBase(SlamMismatchCategory category, uint32_t readPos, bool secondMate,
                            bool overlap, bool opposite, int genomicBase, int readBase, double weight);
     bool snpDetectEnabled() const { return snpDetectEnabled_; }
@@ -247,6 +247,14 @@ public:
                         double errorRate, double convRate,
                         bool vbOverdisp, double vbPhi,
                         double vbPriorAlpha, double vbPriorBeta) const;
+    bool writeCountBinomial(const Transcriptome& tr, const std::string& outFile,
+                            const std::string& sampleLabel,
+                            const std::string& format) const;
+    bool writeCountBinomial(const std::vector<std::string>& geneIds,
+                            const std::vector<std::string>& geneNames,
+                            const std::string& outFile,
+                            const std::string& sampleLabel,
+                            const std::string& format) const;
     void writeDiagnostics(const std::string& diagFile) const;
     void writeTransitions(const std::string& outFile) const;
     void writeMismatches(const std::string& outFile, const std::string& condition) const;
@@ -268,7 +276,7 @@ public:
     bool debugReadMatch(const char* readName) const;
     void debugCountDrop(uint32_t geneId, SlamDebugDropReason reason);
     void debugAddAssignment(uint32_t geneId, double weight, bool intronic,
-                            bool oppositeStrand, uint16_t nT, uint8_t k);
+                            bool oppositeStrand, uint16_t nT, uint16_t tc);
     void debugLogRead(const SlamDebugReadRecord& record);
     void writeDebug(const Transcriptome& tr, double errorRate, double convRate,
                     bool vbOverdisp, double vbPhi,

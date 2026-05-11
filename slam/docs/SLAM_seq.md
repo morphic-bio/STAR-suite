@@ -109,6 +109,9 @@ STAR \
 *   `--slamQuantMode 1`: Enables SLAM-seq quantification.
 *   `--slamGrandSlamOut 1`: (Default: 1) Enables generation of the GRAND-SLAM compatible output file `<prefix>SlamQuant.grandslam.tsv`.
 *   `--slamOutFile`: (Optional) Custom name for the standard STAR-style output (default: `<prefix>SlamQuant.out`).
+*   `--slamCbOut 1`: Enables model-ready count-binomial output `<prefix>SlamQuant.cB.tsv`.
+*   `--slamCbOutFile`: (Optional) Custom cB output path. A `.gz` suffix writes gzip-compressed TSV.
+*   `--slamCbFormat star|ezbakr`: Selects the compact STAR-SLAM cB schema or an EZbakR-like schema.
 *   `--slamErrorRateFromBlank 1`: Derive `slamErrorRate` from the detection pass (useful when the first file is a blank).
 *   `--trimScope first` + `--trimSource <blank>`: Use the blank to define trimming parameters that apply to all files.
 
@@ -145,7 +148,11 @@ To avoid counting native SNPs as metabolic conversions, you must mask them.
     *   Columns: `Gene`, `Symbol`, `Readcount`, `0.05 quantile`, `Mean`, `MAP`, `0.95 quantile`, `alpha`, `beta`, `Conversions`, `Coverage`, `Double-Hits`, `Double-Hit Coverage`, `min2`, `Length`.
     *   Note: `MAP` (Maximum A Posteriori) and `Mean` correspond to the NTR (New Transcript Ratio).
 2.  **`<prefix>SlamQuant.out`**: The standard STAR-Slam output format.
-3.  **`<prefix>.slam_qc.html`**: The interactive QC report (if `--slamQcReport` is used).
+3.  **`<prefix>SlamQuant.cB.tsv`**: Optional count-binomial output when `--slamCbOut 1`.
+    *   STAR schema: `sample`, `feature_id`, `feature_name`, `nT`, `TC`, `n`.
+    *   EZbakR-like schema: `sample`, `rname`, `sj`, `GF`, `XF`, `nT`, `TC`, `n`.
+    *   `n` is the STAR-SLAM weighted read count for that `(sample, feature, nT, TC)` bin and can be fractional.
+4.  **`<prefix>.slam_qc.html`**: The interactive QC report (if `--slamQcReport` is used).
 
 ## Binary Dump Format
 

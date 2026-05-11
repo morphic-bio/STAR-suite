@@ -294,6 +294,9 @@ void Parameters::reconfigureOutputPathsForSample(const std::string& sampleName) 
         if (quant.slam.grandSlamOut) {
             quant.slam.grandSlamOutFile = countsDir + sampleName + ".SlamQuant.grandslam.tsv";
         }
+        if (quant.slam.cbOut) {
+            quant.slam.cbOutFile = countsDir + sampleName + ".SlamQuant.cB.tsv";
+        }
         quant.slam.slamQcJson = qcDir + sampleName + ".slam_qc.json";
         quant.slam.slamQcHtml = qcDir + sampleName + ".slam_qc.html";
         if (quant.slam.dumpBinary != "-" && quant.slam.dumpBinary != "None" && !quant.slam.dumpBinary.empty()) {

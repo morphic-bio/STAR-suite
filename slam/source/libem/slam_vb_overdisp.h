@@ -1,8 +1,9 @@
 #ifndef SLAM_VB_OVERDISP_H
 #define SLAM_VB_OVERDISP_H
 
+#include "SlamSolver.h"
+
 #include <cstdint>
-#include <map>
 #include <vector>
 
 struct VbOverdispResult {
@@ -26,7 +27,7 @@ public:
           prior_alpha_(prior_alpha),
           prior_beta_(prior_beta) {}
 
-    VbOverdispResult solve(const std::map<uint16_t, double>& gene_data) const;
+    VbOverdispResult solve(const MismatchHistogram& gene_data) const;
 
 private:
     double p_error_rate_;
@@ -35,8 +36,8 @@ private:
     double prior_alpha_;
     double prior_beta_;
 
-    double log_beta_binom_pmf(uint16_t n, uint8_t k, double p, double phi) const;
-    double calc_log_likelihood(const std::map<uint16_t, double>& data, double pi) const;
+    double log_beta_binom_pmf(uint16_t n, uint16_t tc, double p, double phi) const;
+    double calc_log_likelihood(const MismatchHistogram& data, double pi) const;
 };
 
 #endif

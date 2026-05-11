@@ -10,13 +10,13 @@ static inline double clamp_prob(double p) {
     return p;
 }
 
-double SlamVbOverdispSolver::log_beta_binom_pmf(uint16_t n, uint8_t k, double p, double phi) const {
-    if (phi <= 0.0) {
+double SlamVbOverdispSolver::log_beta_binom_pmf(uint16_t n, uint16_t tc, double p, double phi) const {
+    if (tc > n || phi <= 0.0) {
         return -std::numeric_limits<double>::infinity();
     }
     p = clamp_prob(p);
     double nn = static_cast<double>(n);
-    double kk = static_cast<double>(k);
+    double kk = static_cast<double>(tc);
     double alpha = p * phi;
     double beta = (1.0 - p) * phi;
 
@@ -27,15 +27,15 @@ double SlamVbOverdispSolver::log_beta_binom_pmf(uint16_t n, uint8_t k, double p,
     return log_coeff + log_beta_num - log_beta_den;
 }
 
-double SlamVbOverdispSolver::calc_log_likelihood(const std::map<uint16_t, double>& data, double pi) const {
+double SlamVbOverdispSolver::calc_log_likelihood(const MismatchHistogram& data, double pi) const {
     double ll = 0.0;
     for (const auto& entry : data) {
-        uint16_t n = entry.first >> 8;
-        uint8_t k = static_cast<uint8_t>(entry.first & 0xFFu);
+        uint16_t n = slamKeyNT(entry.first);
+        uint16_t tc = slamKeyTC(entry.first);
         double count = entry.second;
 
-        double log_old = std::log(1.0 - pi) + log_beta_binom_pmf(n, k, p_error_rate_, dispersion_phi_);
-        double log_new = std::log(pi) + log_beta_binom_pmf(n, k, p_conversion_rate_, dispersion_phi_);
+        double log_old = std::log(1.0 - pi) + log_beta_binom_pmf(n, tc, p_error_rate_, dispersion_phi_);
+        double log_new = std::log(pi) + log_beta_binom_pmf(n, tc, p_conversion_rate_, dispersion_phi_);
 
         double max_log = (log_old > log_new) ? log_old : log_new;
         double sum = std::exp(log_old - max_log) + std::exp(log_new - max_log);
@@ -44,7 +44,7 @@ double SlamVbOverdispSolver::calc_log_likelihood(const std::map<uint16_t, double
     return ll;
 }
 
-VbOverdispResult SlamVbOverdispSolver::solve(const std::map<uint16_t, double>& gene_data) const {
+VbOverdispResult SlamVbOverdispSolver::solve(const MismatchHistogram& gene_data) const {
     VbOverdispResult result;
     result.p_err_used = p_error_rate_;
     result.p_conv_used = p_conversion_rate_;
@@ -76,12 +76,12 @@ VbOverdispResult SlamVbOverdispSolver::solve(const std::map<uint16_t, double>& g
         double ll = 0.0;
 
         for (const auto& entry : gene_data) {
-            uint16_t n = entry.first >> 8;
-            uint8_t k = static_cast<uint8_t>(entry.first & 0xFFu);
+            uint16_t n = slamKeyNT(entry.first);
+            uint16_t tc = slamKeyTC(entry.first);
             double count = entry.second;
 
-            double log_old = std::log(1.0 - pi) + log_beta_binom_pmf(n, k, p_error_rate_, dispersion_phi_);
-            double log_new = std::log(pi) + log_beta_binom_pmf(n, k, p_conversion_rate_, dispersion_phi_);
+            double log_old = std::log(1.0 - pi) + log_beta_binom_pmf(n, tc, p_error_rate_, dispersion_phi_);
+            double log_new = std::log(pi) + log_beta_binom_pmf(n, tc, p_conversion_rate_, dispersion_phi_);
             double max_log = (log_old > log_new) ? log_old : log_new;
             double sum = std::exp(log_old - max_log) + std::exp(log_new - max_log);
             double gamma = std::exp(log_new - max_log) / sum;
@@ -116,11 +116,11 @@ VbOverdispResult SlamVbOverdispSolver::solve(const std::map<uint16_t, double>& g
     // Posterior mean for pi under Beta prior
     double sum_gamma = 0.0;
     for (const auto& entry : gene_data) {
-        uint16_t n = entry.first >> 8;
-        uint8_t k = static_cast<uint8_t>(entry.first & 0xFFu);
+        uint16_t n = slamKeyNT(entry.first);
+        uint16_t tc = slamKeyTC(entry.first);
         double count = entry.second;
-        double log_old = std::log(1.0 - pi) + log_beta_binom_pmf(n, k, p_error_rate_, dispersion_phi_);
-        double log_new = std::log(pi) + log_beta_binom_pmf(n, k, p_conversion_rate_, dispersion_phi_);
+        double log_old = std::log(1.0 - pi) + log_beta_binom_pmf(n, tc, p_error_rate_, dispersion_phi_);
+        double log_new = std::log(pi) + log_beta_binom_pmf(n, tc, p_conversion_rate_, dispersion_phi_);
         double max_log = (log_old > log_new) ? log_old : log_new;
         double sum = std::exp(log_old - max_log) + std::exp(log_new - max_log);
         double gamma = std::exp(log_new - max_log) / sum;
