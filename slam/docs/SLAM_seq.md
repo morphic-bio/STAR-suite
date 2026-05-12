@@ -9,12 +9,15 @@ SLAM-seq (Thiol-linked Alkylation for the Metabolic sequencing of RNA) uses 4-th
 STAR-Slam performs the following steps:
 1.  **Alignment**: Maps reads to the reference genome.
 2.  **SNP Handling**: Masks native SNPs (T->C) to avoid false positives, either using an input VCF/BED or internal detection.
-3.  **Trimming**: Identifies and excludes read ends with high error rates (auto-trimming).
+3.  **Trimming and PE overlap handling**: Identifies noisy read ends and, for paired-end reads, resolves mate overlaps before transition counting.
 4.  **Quantification**: Counts T->C conversions and estimates the New-to-Total Ratio (NTR) for each gene using a binomial or EM model.
 
 ## New Features in STAR-SLAM
 
 *   **GRAND-SLAM Compatible Output**: Generates `<prefix>SlamQuant.grandslam.tsv` with the exact column schema required by downstream tools expecting GRAND-SLAM output.
+*   **Count-binomial Output**: Generates `<prefix>SlamQuant.cB.tsv` for model-ready `(sample, feature, nT, TC, n)` count-binomial bins in compact STAR or EZbakR-like schemas.
+*   **Paired-end SLAM Counting**: Supports paired-end inputs with independent mate trim windows, overlap consensus, and a minimum callable-length gate for transition statistics.
+*   **TranscriptVB / tximport Surface**: Can emit Salmon-compatible `star_quant.sf` plus tximport gene counts for DESeq2. This is the recommended expression surface for DESeq2; do not use internal STAR gene counts for the primary SLAM DE analysis.
 *   **Variance-based Auto-trimming**: Automatically detects optimal 5' and 3' trim points by analyzing the variance of T->C rates across read positions.
 *   **Self-contained QC Reports**: Generates interactive HTML reports visualizing T->C conversion rates, error profiles, and trimming decisions.
 
@@ -30,10 +33,45 @@ STAR \
   --readFilesCommand zcat \
   --slamQuantMode 1 \
   --slamGrandSlamOut 1 \
+  --slamCbOut 1 \
+  --slamCbFormat star \
   --autoTrim variance \
   --slamQcReport qc_output/my_sample \
   --outFileNamePrefix output/
 ```
+
+### Current Paired-end Smoke and Production Surface
+
+The 2026-05 paired-end NW panel is smoke-tested by comparing the same 100K R1
+downsample as single-end against the matched R1/R2 paired-end input:
+
+```bash
+bash scripts/run_slam_100k_se_pe_smoke.sh \
+  --sample ARID1A-no4su_S50 \
+  --sample ARID1A-6h-1_S43 \
+  --threads 16
+```
+
+Pinned smoke/production settings:
+
+- SE trim: `--slamCompatTrim5p 8 --slamCompatTrim3p 12`.
+- PE trim: R1 `--slamCompatTrim5pMate1 8 --slamCompatTrim3pMate1 13`, R2 `--slamCompatTrim5pMate2 19 --slamCompatTrim3pMate2 14`.
+- Callable gate: `--slamMinCallableLength 30`.
+- TranscriptVB: `--quantMode TranscriptVB --quantTranscriptomeSAMoutput BanSingleEnd --quantVBgenesMode Tximport`.
+- SLAM outputs: `--slamGrandSlamOut 1 --slamCbOut 1 --slamCbFormat star`.
+- SNP mask: `/mnt/pikachu/slam_blank_artifacts_20260201/mask/snps_from_vcf.bed.gz`.
+
+Latest 100K treatment smoke result: PE vs R1-only SE NTR Pearson `0.972806`
+on high-confidence genes; tximport gene NumReads Pearson `0.932203`
+for the treatment sample and `0.938455` for noSU. The noSU NTR correlation is
+not a pass/fail gate because background conversion is sparse. Full metrics are
+recorded in `docs/RUNBOOK_SLAM_PE_100K_SMOKE.md`.
+
+For the full panel, use `scripts/run_slam_prod_set.sh`. It runs one sample at a
+time, emits Y/noY BAM and FASTQ derivatives, submits Globus transfers in the
+background by default, and cleans transferred large files to keep local disk
+usage reasonable. Launchpad/MCP expose this as the private
+`slam_pe_production` recipe; its empty-form default is `--pilot --dry-run`.
 
 ### Batch Layout + Blank-First Error Rate
 
@@ -112,6 +150,7 @@ STAR \
 *   `--slamCbOut 1`: Enables model-ready count-binomial output `<prefix>SlamQuant.cB.tsv`.
 *   `--slamCbOutFile`: (Optional) Custom cB output path. A `.gz` suffix writes gzip-compressed TSV.
 *   `--slamCbFormat star|ezbakr`: Selects the compact STAR-SLAM cB schema or an EZbakR-like schema.
+*   `--slamMinCallableLength <N>`: Minimum callable bases after SLAM trim windows and paired-end overlap consensus. Reads or pairs below the threshold are excluded from SLAM transition/NTR/cB/GrandSLAM statistics.
 *   `--slamErrorRateFromBlank 1`: Derive `slamErrorRate` from the detection pass (useful when the first file is a blank).
 *   `--trimScope first` + `--trimSource <blank>`: Use the blank to define trimming parameters that apply to all files.
 
@@ -153,6 +192,22 @@ To avoid counting native SNPs as metabolic conversions, you must mask them.
     *   EZbakR-like schema: `sample`, `rname`, `sj`, `GF`, `XF`, `nT`, `TC`, `n`.
     *   `n` is the STAR-SLAM weighted read count for that `(sample, feature, nT, TC)` bin and can be fractional.
 4.  **`<prefix>.slam_qc.html`**: The interactive QC report (if `--slamQcReport` is used).
+5.  **TranscriptVB / tximport files**: When `--quantMode TranscriptVB --quantVBgenesMode Tximport` is enabled, STAR-SLAM writes Salmon-compatible transcript quantification (`star_quant.sf`) and tximport-ready gene counts. Use this surface for primary DESeq2 analysis.
+
+## DESeq2 Surface
+
+Use the Salmon-compatible TranscriptVB surface for primary DESeq2:
+
+```text
+star_quant.sf -> tximport -> DESeqDataSetFromTximport
+```
+
+The SLAM callable gate is an evidence gate for T->C transition statistics, not
+the default expression gate. Primary DESeq2 should use the full TranscriptVB
+expression surface. Callable-filtered DESeq2 can be run only as a sensitivity
+analysis after creating a separate matched quantification surface. See
+`docs/RUNBOOK_SLAM_PE_DESEQ2_COUNT_SURFACES.md` for the design caveat and the
+pinned DESeq2 container version.
 
 ## Binary Dump Format
 

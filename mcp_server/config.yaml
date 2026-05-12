@@ -17,6 +17,9 @@ trusted_roots:
   - "/mnt/pikachu/prod-12-28"
   - "/mnt/pikachu/ucsf-perturb-seq-corrected"
   - "/mnt/pikachu/ucsf-perturb-seq"
+  - "/mnt/pikachu/SLAM-Seq"
+  - "/mnt/pikachu/SLAM-Seq-PE-results"
+  - "/mnt/pikachu/slam_blank_artifacts_20260201"
   - "/storage"
   - "/tmp"
   - "/usr/bin"        # read-only for tool discovery
@@ -30,6 +33,9 @@ datasets:
   - id: "sc2300771"
     path: "/mnt/pikachu/prod-12-28/SC2300771"
     description: "SC2300771 production run (Flex MEX + per-sample summaries)"
+  - id: "slam_seq_pe"
+    path: "/mnt/pikachu/SLAM-Seq"
+    description: "NW SLAM-seq paired-end R1/R2 panel used by 2026-05 PE smoke and production runs"
   # Add more datasets as discovered from /storage scan
 
 execution:
@@ -92,6 +98,32 @@ workflows:
     kind: star_cli
     schema_file: mcp_server/workflows/star_perturb_cr_compat.yaml
     visibility: public
+
+  # --- SLAM paired-end production recipes (private, local data) ---
+
+  - id: "slam_pe_100k_smoke"
+    title: "SLAM PE 100K SE/PE Smoke"
+    summary: "Downsampled R1-only vs paired-end STAR-SLAM smoke with fixed noSU-derived trims."
+    entry_script: "scripts/run_slam_100k_se_pe_smoke.sh"
+    kind: "shell_workflow"
+    schema_file: "mcp_server/workflows/slam_pe_100k_smoke.yaml"
+    visibility: "private"
+
+  - id: "slam_pe_production"
+    title: "SLAM PE Production Panel"
+    summary: "Full paired-end STAR-SLAM panel runner with TranscriptVB tximport counts, cB, Y/noY outputs, and Globus cleanup."
+    entry_script: "scripts/run_slam_prod_set.sh"
+    kind: "shell_workflow"
+    schema_file: "mcp_server/workflows/slam_pe_production.yaml"
+    visibility: "private"
+
+  - id: "slam_deseq2_container"
+    title: "SLAM DESeq2 Container"
+    summary: "Build and verify the pinned DESeq2/tximport container for SLAM differential expression."
+    entry_script: "scripts/docker/build_slam_deseq2_image.sh"
+    kind: "shell_workflow"
+    schema_file: "mcp_server/workflows/slam_deseq2_container.yaml"
+    visibility: "private"
 
   # --- E2E test workflows (private, internal) ---
 
@@ -257,6 +289,32 @@ scripts:
     path: "tests/run_slam_end_to_end_fixture.sh"
     module: "slam"
     description: "SLAM fixture-based E2E (100K reads, fast)"
+
+  - name: "slam_pe_100k_smoke"
+    path: "scripts/run_slam_100k_se_pe_smoke.sh"
+    module: "slam"
+    description: "SLAM PE 100K R1-only vs paired-end smoke"
+    timeout_seconds: 7200
+    fixtures:
+      - "/mnt/pikachu/SLAM-Seq"
+      - "/storage/autoindex_110_44"
+      - "/mnt/pikachu/slam_blank_artifacts_20260201"
+
+  - name: "slam_pe_production"
+    path: "scripts/run_slam_prod_set.sh"
+    module: "slam"
+    description: "SLAM paired-end production panel runner with Globus cleanup"
+    timeout_seconds: 604800
+    fixtures:
+      - "/mnt/pikachu/SLAM-Seq"
+      - "/storage/autoindex_110_44"
+      - "/mnt/pikachu/slam_blank_artifacts_20260201"
+
+  - name: "slam_deseq2_container"
+    path: "scripts/docker/build_slam_deseq2_image.sh"
+    module: "slam"
+    description: "Build and verify pinned SLAM DESeq2/tximport Docker image"
+    timeout_seconds: 7200
 
   - name: "slam_compat"
     path: "tests/run_slam_compat_test.sh"
@@ -447,6 +505,11 @@ test_suites:
     description: "SLAM-seq tests"
     scripts: ["slam_e2e_fixture", "slam_compat", "slam_unit", "slam_solver", "slam_fixture_parity", "slam_requant_parity"]
     disk_space_min_gb: 20
+
+  - module: "slam-pe-smoke"
+    description: "SLAM paired-end 100K SE/PE smoke (requires local NW R1/R2 dataset)"
+    scripts: ["slam_pe_100k_smoke"]
+    disk_space_min_gb: 50
 
   - module: "slam-e2e"
     description: "SLAM full-depth E2E tests (require /storage SLAM data)"

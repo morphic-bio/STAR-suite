@@ -16,6 +16,19 @@ star_quant.sf -> containerized R tximport -> DESeqDataSetFromTximport
 Do not use STAR `ReadsPerGene.out.tab`, `SlamQuant.out`, or count-binomial `n`
 values for the primary DESeq2 analysis.
 
+Pinned container for this analysis:
+
+```text
+star-suite/slam-deseq2:bioc3.23-deseq2-1.52.0-tximport-1.40.0
+```
+
+Pinned package surface:
+
+- R/Bioconductor base: `bioconductor/bioconductor_docker:RELEASE_3_23-r-4.6.0`
+- Bioconductor: `3.23`
+- DESeq2: `1.52.0`
+- tximport: `1.40.0`
+
 The primary DESeq2 estimand is expression abundance from the best available
 transcript-quantifiable evidence. It should not be restricted to reads that are
 also informative for T->C conversion, because that changes the estimand to

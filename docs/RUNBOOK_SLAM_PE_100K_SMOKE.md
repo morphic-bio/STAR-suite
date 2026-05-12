@@ -16,7 +16,9 @@ bash scripts/run_slam_100k_se_pe_smoke.sh \
 ```
 
 Default outputs go under `/tmp/slam_pe_100k_smoke_<timestamp>/`. The script
-writes:
+writes enough provenance to reproduce the exact STAR invocations. The same
+surface is exposed to MCP/Launchpad as the private `slam_pe_100k_smoke`
+workflow. It writes:
 
 - `manifests/run_config.env`
 - `manifests/samples.tsv`
