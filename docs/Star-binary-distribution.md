@@ -122,6 +122,19 @@ Ship discoverable, installable Ubuntu binaries for STAR Suite with low-friction 
   - clean `ubuntu:24.04` container install from the published installer bundle selected `glibc239` and `STAR --version` returned `2.7.11b`
 - This confirms the published release assets, checksums, and installer selection behavior match the intended compatibility model outside the repo build environment
 
+## Next Release Prep (2026-05-12)
+
+- Candidate tag: `v0.94.0`
+- Release notes: `docs/RELEASE_NOTES_v0.94.0.md`
+- Packaging metadata: `debian/changelog` entry `0.94.0-1`
+- Scope added since `v0.93.1`: SLAM PE smoke/production docs and MCP recipes,
+  pinned SLAM DESeq2 container metadata, Launchpad workflow updates, and recent
+  ATAC/Launchpad integration work.
+- Local caveat: release compilation and artifact builds were intentionally not
+  run during this documentation pass because a SLAM PE production job was active
+  on the host. Tag/build from CI or from an idle host after normal clean-build
+  and release smoke gates pass.
+
 ## Distribution Strategy
 
 Use two channels in parallel:

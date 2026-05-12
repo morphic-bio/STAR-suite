@@ -1,3 +1,16 @@
+star-suite (0.94.0-1) unstable; urgency=medium
+
+  * Add SLAM paired-end smoke and production documentation, including
+    noSU-derived PE trim defaults, callable-length gating, cB output, and
+    TranscriptVB tximport count surfaces.
+  * Register private MCP/Launchpad recipes for SLAM PE smoke, SLAM PE
+    production, and the pinned SLAM DESeq2 container.
+  * Update publication benchmark metadata for the current SLAM PE runner.
+  * Include recent Launchpad and ATAC integration work in the next release
+    candidate metadata.
+
+ -- STAR-suite Maintainers <maintainers@biodepot.example>  Tue, 12 May 2026 01:04:00 +0000
+
 star-suite (0.50.3-1) unstable; urgency=medium
 
   * Add Dockerfile-defined release build environments for Ubuntu 22.04 and 24.04.

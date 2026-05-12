@@ -124,6 +124,10 @@ update this file with its output location.
 - `/tmp/slam_pe_100k_smoke_*` and `/tmp/slam_min_callable_smoke_*` (SLAM-seq
   paired-end 100K SE/PE smoke outputs, compare logs, and TranscriptVB/cB/GrandSLAM
   count surfaces; reproduced by `scripts/run_slam_100k_se_pe_smoke.sh`)
+- `/mnt/pikachu/SLAM-Seq-PE-results/prod_full_20260511T103908Z/` (active
+  2026-05 SLAM paired-end full-panel production root; protected local dataset,
+  Y/noY BAM/FASTQ derivatives are uploaded by Globus and cleaned locally, do
+  not redistribute outputs)
 - `/mnt/pikachu/ucsf-perturb-yremove*/samples/*/run/read_qc.trim_qc.{json,html}` (STAR read-level FastQC-like QC reports when UCSF perturb runners are launched with `--trim-qc`)
 - `/mnt/pikachu/ucsf-perturb-yremove_all_velocyto*/samples/*/qc/read_qc_r2.{json,html}` (standalone FASTQ replay QC reports on UCSF GEX R2 inputs, written into processed sample roots)
 - `/mnt/pikachu/ucsf-perturb-yremove_velocyto_cellbender_prod_globus_fixtruwl_20260330_225009/` (corrected UCSF production rerun with TRU Solo whitelist + NXT CR whitelist, remote CellBender watcher handoff, and 2026-03-31 adaptive downstream QC repair)

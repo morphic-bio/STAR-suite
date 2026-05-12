@@ -28,7 +28,7 @@ to start.
 | MSK perturb benchmark | `run_msk_perturb_benchmark.sh` | `scripts/paper/run_msk_30polyko_benchmark.sh` | private |
 | Flex benchmark run surface | `run_flex_benchmark.sh` | `scripts/run_flex_cr_config.sh` | private/JAX Flex |
 | Flex parity summary | `run_flex_parity.sh` | `scripts/paper/run_flex_parity.sh` | private/JAX Flex |
-| SLAM production benchmark surface | `run_slam_benchmark.sh` | `scripts/run_slam_prod_batch_mode.sh` | private |
+| SLAM PE smoke / production surface | `run_slam_benchmark.sh` | `scripts/run_slam_prod_set.sh` (`scripts/run_slam_100k_se_pe_smoke.sh` for 100K SE/PE smoke) | private |
 
 ## Public smoke equivalents
 
@@ -37,4 +37,5 @@ checks rather than the full paper fixtures:
 
 - `tests/run_solo_smoke.sh`
 - `tests/slam/test_snp_mask_build_smoke.sh`
+- `scripts/run_slam_100k_se_pe_smoke.sh` (private local FASTQ fixture; use for pre-production PE validation, not public CI)
 - `tests/run_flex_tiny_public_smoke.sh`

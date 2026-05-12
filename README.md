@@ -82,7 +82,7 @@ and detailed Velocyto bridge results live in
 | Perturb-seq | MSK 30polyKO (DE sample, post-permits-fix) | Cell Ranger 9 (separate GEX+gRNA and GEX+LARRY runs) | STAR **26.9 min** vs CR **168 min**; **6.2x** faster (paired 2026-04-03 STAR + 2026-03-06 CR; CR is deterministic) | 33,095 STAR cells / 32,256 CR cells, Jaccard **0.9742**, per-barcode Pearson **0.9999**, gene Pearson **0.994554** (Gene Expression, all common features), CRISPR set-equivalent **98.04%** (23,063/23,525). Full report: [`comparisons/msk_30polyko_full_benchmark_20260306/post_permits_20260403/README.md`](comparisons/msk_30polyko_full_benchmark_20260306/post_permits_20260403/README.md) |
 | Perturb-seq | MSK 30polyKO (ES sample) | Cell Ranger 9 (separate GEX+gRNA and GEX+LARRY runs) | **30.2 min** vs CR **167.1 min**; **5.5x** faster | 33,226 STAR cells / 32,670 CR cells, Jaccard **0.982**, per-barcode Pearson **0.9999**, gene Pearson **0.9937** (filtered, 16,958 genes), CRISPR set-equivalent **98.97%** (25,894/26,164), CRISPR UMI Pearson **0.9994**. Full report: [`comparisons/msk_30polyko_full_benchmark_ES_20260430/README.md`](comparisons/msk_30polyko_full_benchmark_ES_20260430/README.md) |
 | Flex | JAX SC2300771 4-tag full / no-align | Cell Ranger 9 / 7 | **23m 22s** full (**2.5x** vs CR9), **10m 33s** no-align (**5.6x** vs CR9) | Fresh canonical 4-tag reruns (`BC004/BC006/BC007/BC008`) reproduce **20,316** cells; mean Jaccard **0.981**, cell Pearson **0.99997**, gene Pearson **0.99993** vs CR9 |
-| SLAM-seq | NW-5-21 ARID1A compat mode | GEDI / GRAND-SLAM family | Integrated single-pass alignment + quantification; no apples-to-apples end-to-end wall-time claim reported | NTR Pearson **0.967-0.978**, Spearman **0.985-0.990** vs GEDI |
+| SLAM-seq | NW SLAM R1/R2 PE smoke + NW-5-21 ARID1A compat mode | SE/PE 100K smoke, GEDI / GRAND-SLAM family | Integrated alignment + TranscriptVB quantification with GrandSLAM and cB outputs; no apples-to-apples end-to-end wall-time claim reported | PE smoke treatment NTR Pearson **0.9728** vs R1-only SE; Tximport gene NumReads Pearson **0.9322** treatment / **0.9385** noSU; historical GEDI NTR Pearson **0.967-0.978** |
 | Multiome ATAC | PBMC 3k 10x Multiome — single `STAR` invocation: alignment + Solo + GEX `EmptyDrops_CR` + concurrent libchromap + libMACS3 FRAG peaks + in-process ATAC `evidence-from-peaks` via `--chromapAtacEvidenceFromPeaksOutput` and binary sidecar `--chromapAtacSecondaryFragments star_out/atac_fragments.bin` (T=32, lease=256, pool=48, `--dynamicThreadFifoWaiters 1 --dynamicThreadAtacController 1`) | Cell Ranger ARC v2.2.0 same fixture (`cellranger-arc count --create-bam=true --nosecondary --disable-cell-annotation --localcores=32`); **40:04 (2404 s)** | **18:17.52 (1097.52 s); 2.19x faster** than ARC | Apples-to-apples scope: alignment + GEX UMI counting + GEX `EmptyDrops_CR` + ATAC mapping + libMACS3 FRAG peaks + ATAC per-barcode `peak_cutsites >= 1` cell call (the same set of stages ARC bundles inline). One STAR command, no chained tool. ATAC evidence step lives in `libscrna::atac::RunAtacEvidenceFromBinary`, reading Chromap's fixed-record `AEV1` sidecar instead of gzipped fragments TSV; `atac_evidence.tsv` md5 **a4251bbcba7af7b5011e70ebb754c663**. Sidecar validation: **53,969,811** records, **1,295,275,496 B**, `record_size=24`, `barcode_length=16`, **194** chrom rows. GEX `nCellsSimple` **2974** (Gene) / **2976** (GeneFull). Integration guard fires when `--chromapAtacEnable 1 --dynamicThreadInterface 1` ends with `atacAcquire=0`. |
 
 Perturb-seq is the main performance result: on A375, UCSF, and MSK surfaces,
@@ -269,25 +269,33 @@ Using a fixed CR9 embedding removes the visual ambiguity from independently fit 
 
 See [slam/docs/SLAM_COMPATIBILITY_MODE.md](slam/docs/SLAM_COMPATIBILITY_MODE.md) and [slam/docs/SLAM_seq.md](slam/docs/SLAM_seq.md).
 
-Integrated SLAM-seq quantification with GRAND-SLAM parity:
+Integrated SLAM-seq quantification with paired-end support, GRAND-SLAM parity,
+count-binomial output, and tximport-ready TranscriptVB gene counts:
 
 Key flags:
 - `--slamQuantMode 1`: Enable SLAM quantification.
 - `--slamGrandSlamOut 1`: Generate GRAND-SLAM compatible output.
+- `--slamCbOut 1 --slamCbFormat star|ezbakr`: Generate model-ready count-binomial output.
+- `--slamMinCallableLength 30`: Require a minimum callable post-trim/overlap-consensus evidence length for SLAM transition statistics.
 - `--slamCompatMode gedi`: Enable GEDI compatibility (intronic classification, lenient overlap, overlap weighting).
 - `--slamCompatIntronic`, `--slamCompatLenientOverlap`: Fine-grained compat control.
 - `--autoTrim variance`: Variance-based detection of artifact-prone read ends.
-- `--slamTrim5p`, `--slamTrim3p`: Manual trim guards.
+- `--slamTrim5p`, `--slamTrim3p`, `--slamCompatTrim5pMate1`, `--slamCompatTrim3pMate1`, `--slamCompatTrim5pMate2`, `--slamCompatTrim3pMate2`: Manual SE/PE trim guards.
 - `--slamErrorRateFromBlank 1`: Seed error rate from a blank (e.g. no4sU) sample.
 - `--outFileNamePrefixAuto 1`: Derive sample name from first FASTQ and route outputs into subdirs.
 - `--slamDumpBinary 1 --slamDumpWeights 1`: Emit binary dumps for offline re-quantification with `slam_requant`.
 
 Features:
 - Full gene-level NTR estimation (Binomial/EM models).
+- Paired-end transition coordinate handling with overlap consensus before counting.
+- Fixed 2026-05 PE smoke trims for the NW panel: SE R1 `8/12`; PE R1 `8/13`, R2 `19/14`.
 - Auto-trimming: variance-based detection of artifact-prone read ends.
 - QC: comprehensive interactive HTML reports for T->C rates and error modeling.
 - Batch layout organizes outputs into `alignments/`, `counts/`, `qc/`, `y_separated/`.
 - Binary dump format documented in `slam/docs/SLAM_DUMP_FORMAT.md`.
+- Reproducible PE smoke and production runbooks: `docs/RUNBOOK_SLAM_PE_100K_SMOKE.md`,
+  `docs/RUNBOOK_SLAM_PE_DESEQ2_COUNT_SURFACES.md`, and
+  `docs/RUNBOOK_SLAM_PE_PRODUCTION.md`.
 
 ### STAR-perturb / CR-Compat
 
@@ -404,6 +412,25 @@ core/legacy/source/STAR \
   --slamCompatMode gedi \
   --autoTrim variance \
   --outFileNamePrefix output/
+```
+
+**SLAM PE 100K smoke (R1-only SE vs R1/R2 PE):**
+
+```bash
+bash scripts/run_slam_100k_se_pe_smoke.sh \
+  --sample ARID1A-no4su_S50 \
+  --sample ARID1A-6h-1_S43 \
+  --threads 16
+```
+
+**SLAM PE production panel (safe dry-run default):**
+
+```bash
+bash scripts/run_slam_prod_set.sh \
+  --pilot \
+  --dry-run \
+  --globus-dst-endpoint 61fb8b9a-9b52-456e-928c-30c0fb0140bf \
+  --globus-dst-root SLAM-seq-PE-results
 ```
 
 **SLAM Batch Mode (blank-first, SE/PE):**

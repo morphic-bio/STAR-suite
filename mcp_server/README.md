@@ -11,7 +11,7 @@ Provides discovery, preflight validation, and script execution capabilities.
 | **STAR Server** | The Python process (`python -m mcp_server.app`): serves MCP over HTTP, SSE, and the browser UI on one port. |
 | **STAR MCP** | The agent-facing MCP tool surface (`POST /` streamable-HTTP, `GET /sse` + `POST /messages` SSE). |
 | **Shared core** | `mcp_server/tools/workflows.py` and workflow YAML under `mcp_server/workflows/` — validation, rendering, schemas (used by both STAR MCP and STAR Launchpad). |
-| **STAR Launchpad** | Static SPA at `/launchpad/` with JSON API under `/launchpad/api/`. **STAR workflows** tab: validates and renders recipe commands; **Load/Save parameters** uses a JSON file in the browser (client-side). **Run in shell** (loopback) starts the rendered argv on the **server host**. **Script Lane** tab: annotated Bash to Workflow IR, simple-local viability, and local execute via `bwb-nextflow-utils` (`POST /launchpad/api/script-lane/*`); separate from **Run in shell**. Discovery: set `BWB_NEXTFLOW_UTILS_ROOT` or place `bwb-nextflow-utils` beside this repo. The **Include test & other recipes** checkbox (off by default) limits the recipe list to **`star_*`** workflows; turn it on for UCSF production, E2E tests, and private entries on localhost. See `plans/star_launchpad_v1_runbook.md`. |
+| **STAR Launchpad** | Static SPA at `/launchpad/` with JSON API under `/launchpad/api/`. **STAR workflows** tab: validates and renders recipe commands; **Load/Save parameters** uses a JSON file in the browser (client-side). **Run in shell** (loopback) starts the rendered argv on the **server host**. **Script Lane** tab: annotated Bash to Workflow IR, simple-local viability, and local execute via `bwb-nextflow-utils` (`POST /launchpad/api/script-lane/*`); separate from **Run in shell**. Discovery: set `BWB_NEXTFLOW_UTILS_ROOT` or place `bwb-nextflow-utils` beside this repo. The **Include test & other recipes** checkbox (off by default) limits the recipe list to **`star_*`** workflows; turn it on for UCSF production, SLAM PE smoke/production, E2E tests, and private entries on localhost. See `plans/star_launchpad_v1_runbook.md`. |
 
 ## Quick Start
 
@@ -34,7 +34,7 @@ export MCP_AUTH_TOKEN="your-secret-token"
 python -m mcp_server.app
 ```
 
-Open `http://<host>:<port>/launchpad/` in a browser for **STAR Launchpad** (recipe builder). Remote browsers typically see **public** workflows only; on **loopback**, authenticated discovery can list **private** workflows too. The UI defaults to **`star_*`** recipes only; enable **Include test & other recipes** to show the full list. MCP clients continue to use `POST /` (streamable-HTTP) or `GET /sse` + `POST /messages` (SSE).
+Open `http://<host>:<port>/launchpad/` in a browser for **STAR Launchpad** (recipe builder). Remote browsers typically see **public** workflows only; on **loopback**, authenticated discovery can list **private** workflows too. The UI defaults to **`star_*`** recipes only; enable **Include test & other recipes** to show the full list, including the private SLAM PE recipes. MCP clients continue to use `POST /` (streamable-HTTP) or `GET /sse` + `POST /messages` (SSE).
 
 #### Launchpad quick start / stop (recommended)
 
@@ -128,6 +128,17 @@ Environment variables in config use `${VAR_NAME}` syntax.
 | `render_workflow_command(workflow_id, params, auth_token?)` | Render params into argv array and shell preview |
 
 **Workflow vs Script tools**: Workflows provide structured parameter contracts for agent consumption. Scripts provide raw allowlisted execution. They are complementary:
+
+Current local/private SLAM workflows:
+
+| Workflow ID | Purpose | Default render |
+|-------------|---------|----------------|
+| `slam_pe_100k_smoke` | Reproduce the 100K R1-only vs R1/R2 smoke with fixed noSU-derived trims. | Runs the two-sample ARID1A smoke unless `dry_run` is set. |
+| `slam_pe_production` | Full PE panel runner with TranscriptVB tximport counts, GrandSLAM, cB, Y/noY outputs, and Globus cleanup. | `--pilot --dry-run` for safety. |
+| `slam_deseq2_container` | Build and verify the pinned R/Bioconductor/DESeq2/tximport container. | Docker build with pinned versions via environment overrides. |
+
+Do not launch the SLAM production or DESeq2 container workflows while another
+STAR-SLAM production/benchmark run is active on the same host.
 
 ```python
 # Agent workflow: discover -> inspect scripts -> validate -> render -> (optionally execute)

@@ -20,30 +20,28 @@ function launchpadApiBase() {
   return "/launchpad/api";
 }
 
-/** Core STAR CLI recipes first (order matches typical use: index → align modes). */
-const STAR_WORKFLOW_ORDER = [
+/** Core STAR CLI recipes first, then local/private production recipes. */
+const LAUNCHPAD_WORKFLOW_ORDER = [
   "star_genome_generate",
   "star_bulk_pe_batch",
   "star_scrna_solo_droplet",
   "star_flex_fixed_rna",
   "star_perturb_cr_compat",
+  "slam_pe_100k_smoke",
+  "slam_pe_production",
+  "slam_deseq2_container",
 ];
 
-function starWorkflowRank(id) {
-  const i = STAR_WORKFLOW_ORDER.indexOf(id);
+function launchpadWorkflowRank(id) {
+  const i = LAUNCHPAD_WORKFLOW_ORDER.indexOf(id);
   return i >= 0 ? i : 999;
 }
 
 function sortWorkflowsForLaunchpad(list) {
   return list.slice().sort((a, b) => {
-    const aStar = String(a.id || "").startsWith("star_");
-    const bStar = String(b.id || "").startsWith("star_");
-    if (aStar !== bStar) return aStar ? -1 : 1;
-    if (aStar && bStar) {
-      const ra = starWorkflowRank(a.id);
-      const rb = starWorkflowRank(b.id);
-      if (ra !== rb) return ra - rb;
-    }
+    const ra = launchpadWorkflowRank(a.id);
+    const rb = launchpadWorkflowRank(b.id);
+    if (ra !== rb) return ra - rb;
     return String(a.id || "").localeCompare(String(b.id || ""));
   });
 }
