@@ -45,6 +45,7 @@ update this file with its output location.
 - `tests/perturb_yremove_smoke_output_*/` (perturb integrated Y-removal vs remove_y_reads smoke)
 - `tests/perturb_velocyto_mex_smoke_output_*/` (UCSF 100K perturb smoke producing raw/filtered velocyto MEX surfaces)
 - `tests/ucsf_corrected_production_100k_output_*/` (corrected UCSF production 100K smoke: Y/noY BAM/FASTQ, packaged velocyto MEX, downstream h5ads, CellBender, and paper wrapper manifests)
+- `tests/multiome_mudata_smoke_output_*/` (PBMC 3K multiome MEX/MuData smoke outputs: split GEX/ATAC MEX, prototype h5ad/h5mu files, evidence/cell-call summaries)
 - `tests/ucsf_velocyto_100k_matrix_output_*/` (diagnostic 100K UCSF staged-input matrix varying `Gene`, BAM output, and Y-split emission to isolate zero-Velocyto conditions)
 - `tests/ucsf_velocyto_exact_100k_output_*/` (canonical STAR Velocyto parity: deterministic 1 vs N threads on 100K fixture)
 - `tests/ucsf_velocyto_exact_2m_output_*/` (same on full UCSF 2M when `UCSF_2M_PFCONFIG` is set)

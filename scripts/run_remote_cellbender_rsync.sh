@@ -209,10 +209,10 @@ ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new "${REMOTE_HOST}" bash -
   "${REMOTE_OUTPUT_DIR}" \
   "${CELLBENDER_IMAGE}" \
   "${CELLBENDER_USE_GPU}" \
-  "${CELLBENDER_GPU_DEVICE}" \
+  "${CELLBENDER_GPU_DEVICE:-__EMPTY__}" \
   "${CELLBENDER_LAYER}" \
   "${CELLBENDER_CPU_CORES}" \
-  "${CELLBENDER_FLAGS}" <<'EOF' >> "${LOCAL_LOG}" 2>&1
+  "${CELLBENDER_FLAGS:-__EMPTY__}" <<'EOF' >> "${LOCAL_LOG}" 2>&1
 set -euo pipefail
 REMOTE_WORK_DIR="$1"
 REMOTE_OUTPUT_DIR="$2"
@@ -222,6 +222,12 @@ CELLBENDER_GPU_DEVICE="$5"
 CELLBENDER_LAYER="$6"
 CELLBENDER_CPU_CORES="$7"
 CELLBENDER_FLAGS="${8-}"
+if [[ "${CELLBENDER_GPU_DEVICE}" == "__EMPTY__" ]]; then
+  CELLBENDER_GPU_DEVICE=""
+fi
+if [[ "${CELLBENDER_FLAGS}" == "__EMPTY__" ]]; then
+  CELLBENDER_FLAGS=""
+fi
 
 mkdir -p "${REMOTE_WORK_DIR}/.numba" "${REMOTE_WORK_DIR}/.matplotlib" "${REMOTE_OUTPUT_DIR}"
 

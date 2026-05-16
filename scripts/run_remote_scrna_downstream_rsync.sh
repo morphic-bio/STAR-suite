@@ -158,6 +158,7 @@ SCRIPTS_TO_STAGE=(
   "scripts/compute_adaptive_qc_threshold.py"
   "scripts/generate_qc_histogram.py"
   "scripts/propagate_anndata_layer.py"
+  "scripts/add_cellbender_layer_from_h5.py"
 )
 
 echo "=== Remote UCSF downstream rsync runner ==="

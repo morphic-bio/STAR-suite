@@ -128,10 +128,17 @@ def main() -> None:
 
     velocyto_raw_dir = run_dir / "Solo.out" / "Velocyto" / "raw"
     velocyto_filtered_dir = run_dir / "Solo.out" / "Velocyto" / "filtered"
+    genefull_filtered_dir = run_dir / "Solo.out" / "GeneFull" / "filtered"
 
     raw_barcodes_path = velocyto_raw_dir / "barcodes.tsv"
     raw_features_path = velocyto_raw_dir / "features.tsv"
     filtered_barcodes_path = velocyto_filtered_dir / "barcodes.tsv"
+    filtered_barcodes_source = "Solo.out/Velocyto/filtered/barcodes.tsv"
+    if not filtered_barcodes_path.exists():
+        genefull_filtered_barcodes_path = genefull_filtered_dir / "barcodes.tsv"
+        if genefull_filtered_barcodes_path.exists():
+            filtered_barcodes_path = genefull_filtered_barcodes_path
+            filtered_barcodes_source = "Solo.out/GeneFull/filtered/barcodes.tsv"
     spliced_path = velocyto_raw_dir / "spliced.mtx"
     unspliced_path = velocyto_raw_dir / "unspliced.mtx"
     ambiguous_path = velocyto_raw_dir / "ambiguous.mtx"
@@ -195,6 +202,7 @@ def main() -> None:
         "source": {
             "velocyto_raw_dir": str(velocyto_raw_dir),
             "velocyto_filtered_dir": str(velocyto_filtered_dir),
+            "filtered_barcodes_source": filtered_barcodes_source,
         },
         "raw": raw_summary,
         "filtered": filtered_summary,
