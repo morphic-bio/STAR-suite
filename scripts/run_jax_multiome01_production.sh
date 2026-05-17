@@ -4,6 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 SMOKE_RUNNER="${REPO_ROOT}/scripts/run_star_multiome_lane_smoke.sh"
+GLOBUS_UPLOADER="${REPO_ROOT}/scripts/upload_jax_multiome01_large_files_globus.sh"
 
 RAW_DIR="/mnt/pikachu/JAX_Multiome01/raw"
 METADATA_XLSX="/mnt/pikachu/DPC_metadata_template_Multiome1-complete.xlsx"
@@ -19,6 +20,10 @@ KEEP_REMOTE="0"
 FORCE="0"
 SKIP_BUILD="0"
 MANIFEST_ONLY="0"
+GLOBUS_UPLOAD_LARGE_FILES="${JAX_MULTIOME_GLOBUS_UPLOAD_LARGE_FILES:-0}"
+GLOBUS_SOURCE_ENDPOINT="${JAX_MULTIOME_GLOBUS_SOURCE_ENDPOINT:-07446cad-33b8-11f0-8c0c-0afffb017b7d}"
+GLOBUS_DEST_ENDPOINT="${JAX_MULTIOME_GLOBUS_DEST_ENDPOINT:-61fb8b9a-9b52-456e-928c-30c0fb0140bf}"
+GLOBUS_DEST_ROOT="${JAX_MULTIOME_GLOBUS_DEST_ROOT:-/JAX_Multiome01_processed/large_files}"
 START_AT=""
 SAMPLES=""
 
@@ -47,6 +52,10 @@ Options:
   --skip-build
   --manifest-only
   --dry-run                 Alias for --manifest-only
+  --globus-upload-large-files
+  --globus-source-endpoint UUID
+  --globus-dest-endpoint UUID
+  --globus-dest-root PATH
   --force
   --start-at SAMPLE_LABEL_OR_SLUG
   --samples CSV_LABELS_OR_SLUGS
@@ -69,6 +78,10 @@ while [[ $# -gt 0 ]]; do
     --keep-remote) KEEP_REMOTE="1"; shift ;;
     --skip-build) SKIP_BUILD="1"; shift ;;
     --manifest-only|--dry-run) MANIFEST_ONLY="1"; shift ;;
+    --globus-upload-large-files) GLOBUS_UPLOAD_LARGE_FILES="1"; shift ;;
+    --globus-source-endpoint) GLOBUS_SOURCE_ENDPOINT="$2"; shift 2 ;;
+    --globus-dest-endpoint) GLOBUS_DEST_ENDPOINT="$2"; shift 2 ;;
+    --globus-dest-root) GLOBUS_DEST_ROOT="$2"; shift 2 ;;
     --force) FORCE="1"; shift ;;
     --start-at) START_AT="$2"; shift 2 ;;
     --samples) SAMPLES="$2"; shift 2 ;;
@@ -251,6 +264,15 @@ tail -n +2 "${MANIFEST}" | while IFS=$'\t' read -r sample sample_slug atac_lib g
 
   "${args[@]}" 2>&1 | tee "${sample_log}"
   log "Completed ${sample}"
+  if [[ "${GLOBUS_UPLOAD_LARGE_FILES}" == "1" ]]; then
+    log "Submitting Globus large-file upload for ${sample}"
+    "${GLOBUS_UPLOADER}" \
+      --run-root "${OUTPUT_ROOT}" \
+      --samples "${sample_slug}" \
+      --source-endpoint "${GLOBUS_SOURCE_ENDPOINT}" \
+      --dest-endpoint "${GLOBUS_DEST_ENDPOINT}" \
+      --dest-root "${GLOBUS_DEST_ROOT}" | tee "${OUTPUT_ROOT}/logs/${sample_slug}.globus_large_files.log"
+  fi
 done
 
 log "PASS: JAX_Multiome01 production workflow complete"
