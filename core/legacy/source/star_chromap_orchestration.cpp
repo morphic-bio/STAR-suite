@@ -296,6 +296,9 @@ bool validateAndBuildConfig(Parameters &P,
   cfg->read1_fastqs = r1;
   cfg->read2_fastqs = r2;
   cfg->barcode_fastqs = bc;
+  if (!isUnsetToken(P.chromapAtac.readFormat)) {
+    cfg->read_format = trimCopy(P.chromapAtac.readFormat);
+  }
   cfg->barcode_whitelist = trimCopy(P.chromapAtac.barcodeWhitelist);
   if (!isUnsetToken(P.chromapAtac.barcodeTranslate)) {
     cfg->barcode_translate_table = trimCopy(P.chromapAtac.barcodeTranslate);

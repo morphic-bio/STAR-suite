@@ -45,6 +45,11 @@ Orchestration (compile-time optional + runtime opt-in):
   straight through to the contract. They are **not** coordinated with STAR
   `runThreadN` or dynamic permits (fixed thread counts for this integration
   gate), so concurrent runs should split the machine thread budget explicitly.
+- **MACS3 FRAG peaks:** Optional and disabled by default. Peak calling uses the
+  same libchromap/Chromap C++ path as `chromap_callpeaks`; when enabled, provide
+  narrowPeak and summits outputs. File source re-reads
+  `chromapAtacSecondaryFragments`; memory source accumulates fragment events
+  during the Chromap mapping pass.
 
 CLI / parameters file (all names also work in a parameters file):
 
@@ -57,6 +62,7 @@ CLI / parameters file (all names also work in a parameters file):
 | `chromapAtacRead1` | Comma-separated ATAC R1 FASTQs (same lane order as R2/barcode). |
 | `chromapAtacRead2` | Comma-separated ATAC R2 FASTQs. |
 | `chromapAtacBarcode` | Comma-separated ATAC barcode FASTQs. |
+| `chromapAtacReadFormat` | Optional Chromap read-format string. Use `bc:8:23:-` for ARC barcode reads where 1-based bases 9-24 are reverse-complemented. |
 | `chromapAtacBarcodeWhitelist` | Whitelist file. |
 | `chromapAtacBarcodeTranslate` | Optional translation table; `-` to omit. |
 | `chromapAtacOutputFragments` | Chromap **primary** output path: fragment file when format is BED/TagAlign, or SAM/BAM/CRAM path when format is SAM/BAM/CRAM. |
@@ -70,6 +76,15 @@ CLI / parameters file (all names also work in a parameters file):
 | `chromapAtacWriteIndex` | Write BAM/CRAM index when `1`; requires sorted BAM/CRAM output. |
 | `chromapAtacSortBamRam` | Chromap BAM/CRAM sort RAM limit in bytes. |
 | `chromapAtacTn5ShiftMode` | `classical` or `symmetric`. |
+| `chromapAtacCallMacs3FragPeaks` | `0` (default) off; `1` run MACS3-compatible FRAG peak calling after Chromap ATAC mapping. |
+| `chromapAtacMacs3FragPeaksOutput` | narrowPeak output path, required when peak calling is enabled. |
+| `chromapAtacMacs3FragSummitsOutput` | summits output path, required when peak calling is enabled. |
+| `chromapAtacMacs3FragPvalue` | MACS3 FRAG p-value threshold; default `1e-5`. |
+| `chromapAtacMacs3FragMinLength` | minimum peak length; default `200`. |
+| `chromapAtacMacs3FragMaxGap` | max gap for peak merging; default `30`. |
+| `chromapAtacMacs3FragPeaksSource` | `file` (default) re-read fragments, or `memory` use in-memory fragment events from the mapping pass. |
+| `chromapAtacMacs3FragKeepIntermediates` | optional directory to keep intermediate bedGraph-style outputs; `-` to omit. |
+| `chromapAtacMacs3FragUint8Counts` | `1` (default) use MACS3 uint8 count semantics; `0` disables. |
 
 Build:
 
@@ -108,12 +123,16 @@ Validation order:
 2. Run `star_libchromap_contract_runner` on the 100K ATAC fixture.
 3. Compare its fragments against the existing Chromap CLI/libchromap parity
    outputs with `scripts/compare_fragment_tuples.sh` from the coordination repo.
-4. Build `make core WITH_CHROMAP=1` and re-run the same fixture through STAR with
+4. Repeat the contract runner with `--call-macs3-frag-peaks` plus narrowPeak and
+   summits paths; compare peaks against a Chromap CLI/libchromap reference.
+5. Build `make core WITH_CHROMAP=1` and re-run the same fixture through STAR with
    `--chromapAtacEnable 1` and matching `--chromapAtac*` paths; compare fragments
    again.
-5. Repeat the STAR run with `--chromapAtacStartMode concurrent` and a split
+6. Repeat the STAR run with `--chromapAtacCallMacs3FragPeaks 1` to validate peak
+   outputs from STAR orchestration.
+7. Repeat the STAR run with `--chromapAtacStartMode concurrent` and a split
    thread budget to validate same-process simultaneous execution.
-6. Run the end-to-end benchmark gate on the 100K multiome fixture, then the full
+8. Run the end-to-end benchmark gate on the 100K multiome fixture, then the full
    10x demo dataset, before adding dynamic permit sharing.
 
 Initial validation:
@@ -155,8 +174,25 @@ star_libchromap_contract_runner \
   --ref genome.fa --index genome.index \
   --read1 'R1_L001.fastq.gz,...' --read2 'R3_L001.fastq.gz,...' --barcode 'R2_L001.fastq.gz,...' \
   --barcode-whitelist whitelist.txt \
+  --read-format 'bc:8:23:-' \
   --output ./atac_possorted.bam --output-format BAM --sort-bam \
   --atac-fragments ./atac_fragments.tsv.gz --threads 8
+```
+
+Peak-calling extension:
+
+```bash
+star_libchromap_contract_runner \
+  --ref genome.fa --index genome.index \
+  --read1 'R1_L001.fastq.gz,...' --read2 'R3_L001.fastq.gz,...' --barcode 'R2_L001.fastq.gz,...' \
+  --barcode-whitelist whitelist.txt \
+  --read-format 'bc:8:23:-' \
+  --output ./atac_possorted.bam --output-format BAM --sort-bam \
+  --atac-fragments ./atac_fragments.tsv.gz --threads 8 \
+  --call-macs3-frag-peaks \
+  --macs3-frag-peaks-output ./atac_peaks.narrowPeak \
+  --macs3-frag-summits-output ./atac_summits.bed \
+  --macs3-frag-peaks-source memory
 ```
 
 Concurrent BAM smoke from a clean Chromap-enabled build (100K multiome fixture):

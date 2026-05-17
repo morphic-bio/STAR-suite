@@ -10,7 +10,8 @@ PACKAGE_GENEFULL="${REPO_ROOT}/scripts/package_star_genefull_mex.py"
 PREPARE_VELOCYTO="${REPO_ROOT}/scripts/prepare_velocyto_mex.py"
 REMOTE_DOWNSTREAM="${REPO_ROOT}/scripts/run_remote_scrna_downstream_rsync.sh"
 LOCAL_DOWNSTREAM="${REPO_ROOT}/scripts/run_scrna_downstream_gene_full_velocyto.sh"
-BUILD_ATAC_MEX="${REPO_ROOT}/scripts/build_atac_peak_matrix_from_fragments.py"
+BUILD_ATAC_MEX_NATIVE="${REPO_ROOT}/core/features/libchromap_contract/star_multiome_atac_peak_mex"
+BUILD_ATAC_MEX_PY="${REPO_ROOT}/scripts/build_atac_peak_matrix_from_fragments.py"
 BUILD_MUDATA="${REPO_ROOT}/scripts/build_multiome_mudata.py"
 
 GEX_R1=""
@@ -30,6 +31,7 @@ ATAC_TO_GEX="${STAR_MULTIOME_ATAC_TO_GEX:-/mnt/pikachu/atac-seq/benchmarks/pbmc_
 SOLO_STRAND="${STAR_MULTIOME_SOLO_STRAND:-Forward}"
 ATAC_BARCODE_START="${STAR_MULTIOME_ATAC_BARCODE_START:-9}"
 ATAC_BARCODE_LENGTH="${STAR_MULTIOME_ATAC_BARCODE_LENGTH:-16}"
+ATAC_BARCODE_READ_FORMAT="${STAR_MULTIOME_ATAC_READ_FORMAT:-}"
 REMOTE_HOST="${MULTIOME_REMOTE_HOST:-}"
 REMOTE_ROOT="${MULTIOME_REMOTE_ROOT:-}"
 REMOTE_OUTPUT_NAME="${MULTIOME_REMOTE_OUTPUT_NAME:-downstream_genefull_velocyto_cellbender}"
@@ -42,6 +44,8 @@ FORCE="0"
 FORCE_ATAC_BARCODE="0"
 SKIP_BUILD="0"
 SOLO_INLINE_HASH="0"
+USE_NATIVE_ATAC_BARCODE="${STAR_MULTIOME_USE_NATIVE_ATAC_BARCODE:-1}"
+USE_NATIVE_ATAC_MEX="${STAR_MULTIOME_USE_NATIVE_ATAC_MEX:-1}"
 
 usage() {
   cat <<'EOF'
@@ -50,11 +54,11 @@ Usage:
     --atac-r1 PATH --atac-barcode PATH --atac-r2 PATH --out-dir PATH [options]
 
 Runs a one-lane 10x Multiome STAR-suite smoke:
-  1. normalize the ATAC i5/barcode read to a 16 bp ARC ATAC barcode FASTQ
+  1. run Chromap against the raw ATAC i5/barcode read using native read-format support
   2. run STAR GEX with GeneFull+Velocyto, Y/noY outputs, and in-process Chromap ATAC
   3. package GeneFull/Velocyto MEX
   4. run GeneFull+Velocyto downstream h5ad, preferably with remote CellBender
-  5. build ATAC peak MEX from Chromap fragments + peaks
+  5. build ATAC peak MEX from Chromap fragments + peaks with the native C++ builder
   6. build and validate final MuData outputs
 
 Required:
@@ -89,6 +93,10 @@ Other:
   --chromap-threads N
   --atac-barcode-start N    1-based barcode window start in ATAC barcode read (default: 9)
   --atac-barcode-length N   barcode length (default: 16)
+  --chromap-atac-read-format FORMAT
+                            Native Chromap read format (default derived as bc:8:23:-)
+  --normalize-atac-barcode  Use the legacy Python barcode FASTQ normalizer fallback
+  --python-atac-mex         Use the legacy Python/bedtools ATAC peak-MEX fallback
   --skip-build              Do not rebuild STAR WITH_CHROMAP=1
   --force                   Regenerate outputs
   --force-atac-barcode      Regenerate normalized ATAC barcode FASTQ
@@ -116,6 +124,7 @@ while [[ $# -gt 0 ]]; do
     --solo-strand) SOLO_STRAND="$2"; shift 2 ;;
     --atac-barcode-start) ATAC_BARCODE_START="$2"; shift 2 ;;
     --atac-barcode-length) ATAC_BARCODE_LENGTH="$2"; shift 2 ;;
+    --chromap-atac-read-format) ATAC_BARCODE_READ_FORMAT="$2"; shift 2 ;;
     --remote-host) REMOTE_HOST="$2"; shift 2 ;;
     --remote-root) REMOTE_ROOT="$2"; shift 2 ;;
     --remote-output-name) REMOTE_OUTPUT_NAME="$2"; shift 2 ;;
@@ -128,6 +137,8 @@ while [[ $# -gt 0 ]]; do
     --force) FORCE="1"; shift ;;
     --force-atac-barcode) FORCE_ATAC_BARCODE="1"; shift ;;
     --solo-inline-hash) SOLO_INLINE_HASH="1"; shift ;;
+    --normalize-atac-barcode) USE_NATIVE_ATAC_BARCODE="0"; shift ;;
+    --python-atac-mex) USE_NATIVE_ATAC_MEX="0"; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "ERROR: unknown argument $1" >&2; usage >&2; exit 1 ;;
   esac
@@ -152,16 +163,23 @@ OUT_DIR="$(realpath -m "${OUT_DIR}")"
 
 for path in "${GEX_R1}" "${GEX_R2}" "${ATAC_R1}" "${ATAC_BARCODE}" "${ATAC_R2}" \
   "${GENOME_DIR}" "${GEX_WHITELIST}" "${CHROMAP_REF}" "${CHROMAP_INDEX}" \
-  "${ATAC_WHITELIST}" "${ATAC_TO_GEX}" "${NORMALIZE_ATAC_BC}" "${PACKAGE_GENEFULL}" \
-  "${PREPARE_VELOCYTO}" "${BUILD_ATAC_MEX}" "${BUILD_MUDATA}"
+  "${ATAC_WHITELIST}" "${ATAC_TO_GEX}" "${PACKAGE_GENEFULL}" \
+  "${PREPARE_VELOCYTO}" "${BUILD_MUDATA}"
 do
   [[ -e "${path}" ]] || { echo "ERROR: missing ${path}" >&2; exit 1; }
 done
+if [[ "${USE_NATIVE_ATAC_BARCODE}" != "1" ]]; then
+  [[ -e "${NORMALIZE_ATAC_BC}" ]] || { echo "ERROR: missing ${NORMALIZE_ATAC_BC}" >&2; exit 1; }
+fi
+if [[ "${USE_NATIVE_ATAC_MEX}" != "1" ]]; then
+  [[ -e "${BUILD_ATAC_MEX_PY}" ]] || { echo "ERROR: missing ${BUILD_ATAC_MEX_PY}" >&2; exit 1; }
+fi
 
 mkdir -p "${OUT_DIR}/logs" "${OUT_DIR}/atac" "${OUT_DIR}/mudata"
 SAMPLE_DIR="${OUT_DIR}/star_sample"
 RUN_DIR="${SAMPLE_DIR}/run"
 ATAC_BC_NORM="${OUT_DIR}/atac/$(basename "${ATAC_BARCODE%.fastq.gz}").arc_atac_bc.fastq.gz"
+ATAC_BC_FOR_CHROMAP="${ATAC_BARCODE}"
 ATAC_FRAGMENTS="${RUN_DIR}/atac_fragments.tsv.gz"
 ATAC_PEAKS="${RUN_DIR}/atac_peaks.narrowPeak"
 ATAC_SUMMITS="${RUN_DIR}/atac_summits.bed"
@@ -195,9 +213,37 @@ if [[ "${SKIP_BUILD}" != "1" ]]; then
   log "Clean rebuilding STAR with Chromap support"
   make -C "${REPO_ROOT}/core/legacy/source" clean > "${OUT_DIR}/logs/build_clean.log" 2>&1
   make -C "${REPO_ROOT}/core/legacy/source" -j8 STAR WITH_CHROMAP=1 > "${OUT_DIR}/logs/build_star_with_chromap.log" 2>&1
+  if [[ "${USE_NATIVE_ATAC_MEX}" == "1" ]]; then
+    log "Building native ATAC peak-MEX tool"
+    make -C "${REPO_ROOT}/core/features/libchromap_contract" star_multiome_atac_peak_mex > "${OUT_DIR}/logs/build_star_multiome_atac_peak_mex.log" 2>&1
+  fi
 fi
 
-if [[ "${FORCE_ATAC_BARCODE}" == "1" || ! -f "${ATAC_BC_NORM}" ]]; then
+if [[ "${USE_NATIVE_ATAC_MEX}" == "1" && ! -x "${BUILD_ATAC_MEX_NATIVE}" ]]; then
+  log "Building native ATAC peak-MEX tool"
+  make -C "${REPO_ROOT}/core/features/libchromap_contract" star_multiome_atac_peak_mex > "${OUT_DIR}/logs/build_star_multiome_atac_peak_mex.log" 2>&1
+fi
+
+if [[ "${USE_NATIVE_ATAC_BARCODE}" == "1" ]]; then
+  if [[ -z "${ATAC_BARCODE_READ_FORMAT}" ]]; then
+    if ! [[ "${ATAC_BARCODE_START}" =~ ^[0-9]+$ && "${ATAC_BARCODE_LENGTH}" =~ ^[0-9]+$ ]]; then
+      echo "ERROR: --atac-barcode-start/--atac-barcode-length must be positive integers" >&2
+      exit 1
+    fi
+    if (( ATAC_BARCODE_START < 1 || ATAC_BARCODE_LENGTH < 1 )); then
+      echo "ERROR: --atac-barcode-start/--atac-barcode-length must be positive integers" >&2
+      exit 1
+    fi
+    atac_zero_start=$((ATAC_BARCODE_START - 1))
+    atac_zero_end=$((atac_zero_start + ATAC_BARCODE_LENGTH - 1))
+    ATAC_BARCODE_READ_FORMAT="bc:${atac_zero_start}:${atac_zero_end}:-"
+  fi
+  log "Using native Chromap ATAC barcode read format: ${ATAC_BARCODE_READ_FORMAT}"
+else
+  ATAC_BC_FOR_CHROMAP="${ATAC_BC_NORM}"
+fi
+
+if [[ "${USE_NATIVE_ATAC_BARCODE}" != "1" && ( "${FORCE_ATAC_BARCODE}" == "1" || ! -f "${ATAC_BC_NORM}" ) ]]; then
   log "Normalizing ATAC barcode FASTQ"
   normalize_args=(
     python3 "${NORMALIZE_ATAC_BC}"
@@ -209,7 +255,7 @@ if [[ "${FORCE_ATAC_BARCODE}" == "1" || ! -f "${ATAC_BC_NORM}" ]]; then
   )
   [[ "${FORCE_ATAC_BARCODE}" == "1" ]] && normalize_args+=(--force)
   "${normalize_args[@]}" > "${OUT_DIR}/logs/normalize_atac_barcode.log"
-else
+elif [[ "${USE_NATIVE_ATAC_BARCODE}" != "1" ]]; then
   log "Reusing normalized ATAC barcode FASTQ"
 fi
 
@@ -221,6 +267,10 @@ mkdir -p "${RUN_DIR}"
 STAR_COMMAND="${OUT_DIR}/RUN_STAR_MULTIOME.sh"
 solo_inline_hash_mode="no"
 [[ "${SOLO_INLINE_HASH}" == "1" ]] && solo_inline_hash_mode="yes"
+chromap_read_format_block=""
+if [[ "${USE_NATIVE_ATAC_BARCODE}" == "1" ]]; then
+  printf -v chromap_read_format_block '  --chromapAtacReadFormat "%s" \\\n' "${ATAC_BARCODE_READ_FORMAT}"
+fi
 cat > "${STAR_COMMAND}" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
@@ -265,8 +315,8 @@ set -euo pipefail
   --chromapAtacIndex "${CHROMAP_INDEX}" \\
   --chromapAtacRead1 "${ATAC_R1}" \\
   --chromapAtacRead2 "${ATAC_R2}" \\
-  --chromapAtacBarcode "${ATAC_BC_NORM}" \\
-  --chromapAtacBarcodeWhitelist "${ATAC_WHITELIST}" \\
+  --chromapAtacBarcode "${ATAC_BC_FOR_CHROMAP}" \\
+${chromap_read_format_block}  --chromapAtacBarcodeWhitelist "${ATAC_WHITELIST}" \\
   --chromapAtacBarcodeTranslate "${ATAC_TO_GEX}" \\
   --chromapAtacBarcodeTranslateFromFirst 1 \\
   --chromapAtacOutputFormat fragments \\
@@ -340,11 +390,19 @@ fi
 if [[ "${FORCE}" == "1" || ! -f "${ATAC_MEX}/matrix.mtx.gz" || ! -f "${ATAC_METRICS}" ]]; then
   log "Building ATAC peak MEX from Chromap fragments"
   rm -rf "${ATAC_MEX}"
-  python3 "${BUILD_ATAC_MEX}" \
-    --fragments "${ATAC_FRAGMENTS}" \
-    --peaks "${ATAC_PEAKS}" \
-    --out-dir "${ATAC_MEX}" \
-    --metrics-tsv "${ATAC_METRICS}" | tee "${OUT_DIR}/logs/build_atac_peak_matrix.log"
+  if [[ "${USE_NATIVE_ATAC_MEX}" == "1" ]]; then
+    "${BUILD_ATAC_MEX_NATIVE}" \
+      --fragments "${ATAC_FRAGMENTS}" \
+      --peaks "${ATAC_PEAKS}" \
+      --out-dir "${ATAC_MEX}" \
+      --metrics-tsv "${ATAC_METRICS}" | tee "${OUT_DIR}/logs/build_atac_peak_matrix.log"
+  else
+    python3 "${BUILD_ATAC_MEX_PY}" \
+      --fragments "${ATAC_FRAGMENTS}" \
+      --peaks "${ATAC_PEAKS}" \
+      --out-dir "${ATAC_MEX}" \
+      --metrics-tsv "${ATAC_METRICS}" | tee "${OUT_DIR}/logs/build_atac_peak_matrix.log"
+  fi
 else
   log "Reusing ATAC peak MEX"
 fi
@@ -416,7 +474,8 @@ PY
   printf 'gex_r2=%s\n' "${GEX_R2}"
   printf 'atac_r1=%s\n' "${ATAC_R1}"
   printf 'atac_barcode_raw=%s\n' "${ATAC_BARCODE}"
-  printf 'atac_barcode_normalized=%s\n' "${ATAC_BC_NORM}"
+  printf 'atac_barcode_for_chromap=%s\n' "${ATAC_BC_FOR_CHROMAP}"
+  printf 'atac_barcode_normalized=%s\n' "$([[ "${USE_NATIVE_ATAC_BARCODE}" == "1" ]] && echo "-" || echo "${ATAC_BC_NORM}")"
   printf 'atac_r2=%s\n' "${ATAC_R2}"
   printf 'genome_dir=%s\n' "${GENOME_DIR}"
   printf 'gex_whitelist=%s\n' "${GEX_WHITELIST}"
@@ -426,7 +485,10 @@ PY
   printf 'atac_to_gex=%s\n' "${ATAC_TO_GEX}"
   printf 'solo_strand=%s\n' "${SOLO_STRAND}"
   printf 'solo_inline_hash=%s\n' "${SOLO_INLINE_HASH}"
+  printf 'native_atac_barcode=%s\n' "${USE_NATIVE_ATAC_BARCODE}"
+  printf 'native_atac_mex=%s\n' "${USE_NATIVE_ATAC_MEX}"
   printf 'atac_barcode_window=%s:%s_rc\n' "${ATAC_BARCODE_START}" "${ATAC_BARCODE_LENGTH}"
+  printf 'chromap_atac_read_format=%s\n' "$([[ "${USE_NATIVE_ATAC_BARCODE}" == "1" ]] && echo "${ATAC_BARCODE_READ_FORMAT}" || echo "-")"
   printf 'run_dir=%s\n' "${RUN_DIR}"
   printf 'downstream_dir=%s\n' "${DOWNSTREAM_DIR}"
   printf 'atac_mex=%s\n' "${ATAC_MEX}"
