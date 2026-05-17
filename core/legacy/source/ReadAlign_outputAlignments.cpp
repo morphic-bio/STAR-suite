@@ -1254,6 +1254,7 @@ void ReadAlign::writeFastxRecord(uint imate, bool isY)
             gzprintf(stream, "+\n");
             gzprintf(stream, "%s\n", Qual0[imate]);
         }
+        gzflush(stream, Z_SYNC_FLUSH);
     } else {
         fstream &stream = isY ? chunkOutYFastqStream[imate] : chunkOutNoYFastqStream[imate];
         // Check if stream is open (not in bad state from gzip mode)
@@ -1270,6 +1271,7 @@ void ReadAlign::writeFastxRecord(uint imate, bool isY)
             stream << "+\n";
             stream << Qual0[imate] << "\n";
         }
+        stream.flush();
     }
 }
 

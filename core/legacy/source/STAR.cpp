@@ -1054,12 +1054,28 @@ int main(int argInN, char *argIn[])
     // Initialize unsorted tag buffer for unsorted BAM CB/UB tag injection
     // Uses SamtoolsSorter in noSort mode - buffers records to disk, then streams with tag injection
     if (P.outBAMunsorted && P.pSolo.samAttrYes && !P.pSolo.skipProcessing) {
-        g_unsortedTagBuffer = new SamtoolsSorter(P.limitBAMsortRAM,
+        uint64_t unsortedTagBufferRAM = P.limitBAMsortRAM;
+        if (unsortedTagBufferRAM == 0) {
+            unsortedTagBufferRAM = 4000000000ULL;
+            P.inOut->logMain
+                << "WARNING: --limitBAMsortRAM=0 with unsorted BAM CB/UB tag injection; "
+                << "using 4000000000 bytes for the disk-spill buffer.\n";
+        }
+
+        string unsortedTagTmpDir = P.outBAMsortTmpDir;
+        if (unsortedTagTmpDir.empty()) {
+            unsortedTagTmpDir = P.outFileTmp + "/BAMunsorted";
+            mkdir(unsortedTagTmpDir.c_str(), P.runDirPerm);
+        }
+
+        g_unsortedTagBuffer = new SamtoolsSorter(unsortedTagBufferRAM,
                                                   P.outBAMsortingThreadNactual,
-                                                  P.outBAMsortTmpDir,
+                                                  unsortedTagTmpDir,
                                                   P,
                                                   true);  // noSort = true
-        P.inOut->logMain << "NOTE: Using buffered mode for unsorted BAM CB/UB tag injection.\n";
+        P.inOut->logMain << "NOTE: Using buffered mode for unsorted BAM CB/UB tag injection"
+                          << " (spill RAM cap=" << unsortedTagBufferRAM
+                          << ", tmpDir=" << unsortedTagTmpDir << ").\n";
     }
 
     // this does not seem to work at the moment
