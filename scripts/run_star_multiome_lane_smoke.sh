@@ -53,7 +53,8 @@ Usage:
   run_star_multiome_lane_smoke.sh --gex-r1 PATH --gex-r2 PATH \
     --atac-r1 PATH --atac-barcode PATH --atac-r2 PATH --out-dir PATH [options]
 
-Runs a one-lane 10x Multiome STAR-suite smoke:
+Runs a 10x Multiome STAR-suite sample workflow; FASTQ arguments may be a single
+path or a comma-separated multi-lane path list:
   1. run Chromap against the raw ATAC i5/barcode read using native read-format support
   2. run STAR GEX with GeneFull+Velocyto, Y/noY outputs, and in-process Chromap ATAC
   3. package GeneFull/Velocyto MEX
@@ -148,11 +149,41 @@ for required_name in GEX_R1 GEX_R2 ATAC_R1 ATAC_BARCODE ATAC_R2 OUT_DIR; do
   [[ -n "${!required_name}" ]] || { echo "ERROR: --${required_name,,} is required" >&2; exit 1; }
 done
 
-GEX_R1="$(realpath "${GEX_R1}")"
-GEX_R2="$(realpath "${GEX_R2}")"
-ATAC_R1="$(realpath "${ATAC_R1}")"
-ATAC_BARCODE="$(realpath "${ATAC_BARCODE}")"
-ATAC_R2="$(realpath "${ATAC_R2}")"
+realpath_csv() {
+  local csv="$1"
+  local out=()
+  local field
+  IFS=',' read -r -a fields <<< "${csv}"
+  for field in "${fields[@]}"; do
+    [[ -n "${field}" ]] || { echo "ERROR: empty path in CSV: ${csv}" >&2; exit 1; }
+    out+=("$(realpath "${field}")")
+  done
+  local joined
+  joined="$(IFS=','; echo "${out[*]}")"
+  echo "${joined}"
+}
+
+check_csv_paths_exist() {
+  local csv="$1"
+  local field
+  IFS=',' read -r -a fields <<< "${csv}"
+  for field in "${fields[@]}"; do
+    [[ -e "${field}" ]] || { echo "ERROR: missing ${field}" >&2; exit 1; }
+  done
+}
+
+first_csv_path() {
+  local csv="$1"
+  local first
+  IFS=',' read -r first _ <<< "${csv}"
+  echo "${first}"
+}
+
+GEX_R1="$(realpath_csv "${GEX_R1}")"
+GEX_R2="$(realpath_csv "${GEX_R2}")"
+ATAC_R1="$(realpath_csv "${ATAC_R1}")"
+ATAC_BARCODE="$(realpath_csv "${ATAC_BARCODE}")"
+ATAC_R2="$(realpath_csv "${ATAC_R2}")"
 GENOME_DIR="$(realpath "${GENOME_DIR}")"
 GEX_WHITELIST="$(realpath "${GEX_WHITELIST}")"
 CHROMAP_REF="$(realpath "${CHROMAP_REF}")"
@@ -161,8 +192,11 @@ ATAC_WHITELIST="$(realpath "${ATAC_WHITELIST}")"
 ATAC_TO_GEX="$(realpath "${ATAC_TO_GEX}")"
 OUT_DIR="$(realpath -m "${OUT_DIR}")"
 
-for path in "${GEX_R1}" "${GEX_R2}" "${ATAC_R1}" "${ATAC_BARCODE}" "${ATAC_R2}" \
-  "${GENOME_DIR}" "${GEX_WHITELIST}" "${CHROMAP_REF}" "${CHROMAP_INDEX}" \
+for csv_paths in "${GEX_R1}" "${GEX_R2}" "${ATAC_R1}" "${ATAC_BARCODE}" "${ATAC_R2}"
+do
+  check_csv_paths_exist "${csv_paths}"
+done
+for path in "${GENOME_DIR}" "${GEX_WHITELIST}" "${CHROMAP_REF}" "${CHROMAP_INDEX}" \
   "${ATAC_WHITELIST}" "${ATAC_TO_GEX}" "${PACKAGE_GENEFULL}" \
   "${PREPARE_VELOCYTO}" "${BUILD_MUDATA}"
 do
@@ -178,7 +212,7 @@ fi
 mkdir -p "${OUT_DIR}/logs" "${OUT_DIR}/atac" "${OUT_DIR}/mudata"
 SAMPLE_DIR="${OUT_DIR}/star_sample"
 RUN_DIR="${SAMPLE_DIR}/run"
-ATAC_BC_NORM="${OUT_DIR}/atac/$(basename "${ATAC_BARCODE%.fastq.gz}").arc_atac_bc.fastq.gz"
+ATAC_BC_NORM="${OUT_DIR}/atac/$(basename "$(first_csv_path "${ATAC_BARCODE}")" .fastq.gz).arc_atac_bc.fastq.gz"
 ATAC_BC_FOR_CHROMAP="${ATAC_BARCODE}"
 ATAC_FRAGMENTS="${RUN_DIR}/atac_fragments.tsv.gz"
 ATAC_PEAKS="${RUN_DIR}/atac_peaks.narrowPeak"
