@@ -334,7 +334,7 @@ set -euo pipefail
   --outFileNamePrefix "${RUN_DIR}/" \\
   --outTmpDir "${SAMPLE_DIR}/tmp" \\
   --outSAMtype BAM Unsorted \\
-  --outSAMattributes NH HI AS nM NM GX GN CB UB \\
+  --outSAMattributes NH HI AS nM NM GX GN \\
   --emitNoYBAM yes \\
   --emitYNoYFastq yes \\
   --emitYNoYFastqCompression gz \\
