@@ -707,6 +707,92 @@ MuData checks:
   and `arc_is_cell`.
 - `mdata.uns["multiome"]["y_removal_enabled"] == "true"`.
 
+## Tested JAX One-Lane STAR/Chromap Smoke
+
+Completed on 2026-05-17 in:
+
+```bash
+tests/jax_multiome_lane_smoke_20260517T052512Z
+```
+
+This is the first tested STAR-side Multiome path that uses STAR GEX and
+in-process Chromap ATAC from raw FASTQs rather than ARC MEX for the ATAC side.
+
+Inputs:
+
+- GEX lane: `25E113-L13_GT25-09244_TGTCCCAACG-TGGACATCGA_S113_L008_R1/R2_001.fastq.gz`.
+- ATAC lane: `25E113-L1_GT25-09222_SI-NA-G2_S8_L005_R1/R2/R3_001.fastq.gz`.
+- GEX reference: `/storage/autoindex_110_44/bulk_index`.
+- ATAC barcode window: bases 9-24 of the ATAC R2/i5 read, reverse-complemented.
+- ATAC-to-GEX barcode translation:
+  `/mnt/pikachu/atac-seq/benchmarks/pbmc_unsorted_3k_100k/chromap_index/atac2gex.tsv`.
+
+Command shape:
+
+```bash
+scripts/run_star_multiome_lane_smoke.sh \
+  --gex-r1 /mnt/pikachu/JAX_Multiome01/raw/25E113-L13_GT25-09244_TGTCCCAACG-TGGACATCGA_S113_L008_R1_001.fastq.gz \
+  --gex-r2 /mnt/pikachu/JAX_Multiome01/raw/25E113-L13_GT25-09244_TGTCCCAACG-TGGACATCGA_S113_L008_R2_001.fastq.gz \
+  --atac-r1 /mnt/pikachu/JAX_Multiome01/raw/25E113-L1_GT25-09222_SI-NA-G2_S8_L005_R1_001.fastq.gz \
+  --atac-barcode /mnt/pikachu/JAX_Multiome01/raw/25E113-L1_GT25-09222_SI-NA-G2_S8_L005_R2_001.fastq.gz \
+  --atac-r2 /mnt/pikachu/JAX_Multiome01/raw/25E113-L1_GT25-09222_SI-NA-G2_S8_L005_R3_001.fastq.gz \
+  --out-dir tests/jax_multiome_lane_smoke_$(date -u +%Y%m%dT%H%M%SZ) \
+  --remote-host 10.159.4.53 \
+  --remote-root /home/lhhung/jax_multiome_remote_downstream_smoke \
+  --remote-output-name downstream_genefull_velocyto_cellbender \
+  --cellbender-cpu-cores 24 \
+  --cellbender-gpu
+```
+
+STAR/Chromap checks:
+
+- `--soloFeatures GeneFull Velocyto`.
+- `--soloInlineHashMode no`; inline-hash mode skipped standard MEX emission in
+  this checkout and should stay off for this smoke.
+- Y-removal enabled with `--emitNoYBAM yes`, `--emitYNoYFastq yes`, and
+  `--emitYNoYFastqCompression gz`.
+- `Aligned.out_Y.bam`, `Aligned.out_noY.bam`, and paired `y_separated/` FASTQs
+  were emitted.
+- Chromap wrote fragments plus MACS3 peaks/summits:
+  - `atac_fragments.tsv.gz` (plain TSV content despite the suffix)
+  - `atac_peaks.narrowPeak`
+  - `atac_summits.bed`
+- ATAC peak MEX:
+  - 70,940 peaks
+  - 241,858 barcodes
+  - 25,640,564 nonzero peak-barcode entries
+
+Remote downstream checks:
+
+- remote host: `10.159.4.53`.
+- Python helper backend used the `biodepot/scrna-matrices:latest` Docker image
+  because the remote host did not have `anndata`/`scanpy` installed in host
+  Python.
+- CellBender ran in `biodepot/cellbender:0.3.2` and wrote
+  `cellbender/cellbender_counts.h5`.
+- RNA h5ads include `layers["denoised"]`.
+
+MuData checks:
+
+- `star_chromap_unfiltered_multiome.h5mu`: 241,858 obs, 38,606 RNA vars,
+  70,940 ATAC vars.
+- `star_chromap_filtered_multiome.h5mu`: 4,943 obs, 38,606 RNA vars,
+  70,940 ATAC vars.
+- modalities: `rna`, `atac`.
+- RNA layers: `ambiguous`, `counts`, `denoised`, `spliced`, `unspliced`.
+- ATAC layers: `counts`.
+- `mdata.uns["multiome"]["y_removal_enabled"] == "true"`.
+
+Native adapter follow-up:
+
+- `scripts/normalize_multiome_atac_barcode_fastq.py` is a tested smoke bridge,
+  not the preferred production interface.
+- Replace it with a native STAR/libchromap adapter that accepts the ATAC barcode
+  read plus an explicit window/strand, for example a parameter shaped like
+  `--chromapAtacBarcodeReadFormat 9:16:rc`.
+- The native path should pass the read-format into `ChromapAtacConfig` and avoid
+  materializing a normalized barcode FASTQ before Chromap starts.
+
 ## Promotion Criteria
 
 Do not apply this to a production set until all are true:
@@ -731,8 +817,9 @@ Do not apply this to a production set until all are true:
 
 ## Open Implementation Tasks
 
-1. Add a small STAR/libchromap ATAC evidence normalization tool or extend
-   `scrna_multiome_combine` to consume raw evidence-from-peaks columns directly.
+1. Replace the ATAC barcode FASTQ normalization helper with a native
+   STAR/libchromap barcode-window adapter, and then remove the production need
+   to materialize normalized ATAC barcode FASTQs.
 2. Add postflight summaries similar to UCSF/MSK `summary.txt`, including modality
    shapes, count sums, cell counts, and source artifacts.
 3. Repeat the STAR-side run on the full public PBMC 3K set before moving to the
