@@ -12,7 +12,10 @@ OUTPUT_ROOT="/mnt/pikachu/JAX_Multiome01_processed/star_multiome_$(date -u +%Y%m
 REMOTE_HOST="${MULTIOME_REMOTE_HOST:-10.159.4.53}"
 REMOTE_ROOT="${MULTIOME_REMOTE_ROOT:-/home/lhhung/jax_multiome_remote_downstream_production}"
 THREADS="${STAR_MULTIOME_THREADS:-16}"
-CHROMAP_THREADS="${STAR_MULTIOME_CHROMAP_THREADS:-8}"
+CHROMAP_THREADS="${STAR_MULTIOME_CHROMAP_THREADS:-16}"
+CHROMAP_LOW_MEM="${STAR_MULTIOME_CHROMAP_LOW_MEM:-1}"
+CHROMAP_LOW_MEM_RAM="${STAR_MULTIOME_CHROMAP_LOW_MEM_RAM:-0}"
+CHROMAP_MACS3_FRAG_LOW_MEM="${STAR_MULTIOME_CHROMAP_MACS3_FRAG_LOW_MEM:-1}"
 CELLBENDER_CPU_CORES="${MULTIOME_CELLBENDER_CPU_CORES:-24}"
 CELLBENDER_GPU="1"
 NO_SYNC_IMAGES="0"
@@ -45,6 +48,9 @@ Options:
   --remote-root PATH
   --threads N
   --chromap-threads N
+  --chromap-low-mem
+  --chromap-low-mem-ram N
+  --chromap-macs3-frag-low-mem
   --cellbender-cpu-cores N
   --no-cellbender-gpu
   --no-sync-images
@@ -72,6 +78,9 @@ while [[ $# -gt 0 ]]; do
     --remote-root) REMOTE_ROOT="$2"; shift 2 ;;
     --threads) THREADS="$2"; shift 2 ;;
     --chromap-threads) CHROMAP_THREADS="$2"; shift 2 ;;
+    --chromap-low-mem) CHROMAP_LOW_MEM="1"; shift ;;
+    --chromap-low-mem-ram) CHROMAP_LOW_MEM_RAM="$2"; shift 2 ;;
+    --chromap-macs3-frag-low-mem) CHROMAP_MACS3_FRAG_LOW_MEM="1"; shift ;;
     --cellbender-cpu-cores) CELLBENDER_CPU_CORES="$2"; shift 2 ;;
     --no-cellbender-gpu) CELLBENDER_GPU="0"; shift ;;
     --no-sync-images) NO_SYNC_IMAGES="1"; shift ;;
@@ -191,6 +200,7 @@ PY
 
 sample_count="$(tail -n +2 "${MANIFEST}" | wc -l)"
 log "Manifest contains ${sample_count} samples with all required workflow FASTQs present"
+log "Production settings: STAR threads=${THREADS}, Chromap threads=${CHROMAP_THREADS}, Chromap low-mem=${CHROMAP_LOW_MEM}, Chromap low-mem RAM=${CHROMAP_LOW_MEM_RAM}, MACS3 fragment low-mem=${CHROMAP_MACS3_FRAG_LOW_MEM}"
 if [[ "${MANIFEST_ONLY}" == "1" ]]; then
   log "Manifest-only mode complete"
   echo "Manifest: ${MANIFEST}"
@@ -255,8 +265,11 @@ tail -n +2 "${MANIFEST}" | while IFS=$'\t' read -r sample sample_slug atac_lib g
     --cellbender-cpu-cores "${CELLBENDER_CPU_CORES}"
     --threads "${THREADS}"
     --chromap-threads "${CHROMAP_THREADS}"
+    --chromap-low-mem-ram "${CHROMAP_LOW_MEM_RAM}"
     --skip-build
   )
+  [[ "${CHROMAP_LOW_MEM}" == "1" ]] && args+=(--chromap-low-mem)
+  [[ "${CHROMAP_MACS3_FRAG_LOW_MEM}" == "1" ]] && args+=(--chromap-macs3-frag-low-mem)
   [[ "${CELLBENDER_GPU}" == "1" ]] && args+=(--cellbender-gpu)
   [[ "${NO_SYNC_IMAGES}" == "1" ]] && args+=(--no-sync-images)
   [[ "${KEEP_REMOTE}" == "1" ]] && args+=(--keep-remote)
