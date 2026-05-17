@@ -28,6 +28,9 @@ CHROMAP_REF="${STAR_MULTIOME_CHROMAP_REF:-/storage/autoindex_110_44/bulk_index/c
 CHROMAP_INDEX="${STAR_MULTIOME_CHROMAP_INDEX:-/mnt/pikachu/atac-seq/benchmarks/pbmc_unsorted_3k_100k/chromap_index/genome.index}"
 ATAC_WHITELIST="${STAR_MULTIOME_ATAC_WHITELIST:-/mnt/pikachu/atac-seq/benchmarks/pbmc_unsorted_3k_100k/chromap_index/737K-arc-v1_atac.txt}"
 ATAC_TO_GEX="${STAR_MULTIOME_ATAC_TO_GEX:-/mnt/pikachu/atac-seq/benchmarks/pbmc_unsorted_3k_100k/chromap_index/atac2gex.tsv}"
+CHROMAP_LOW_MEM="${STAR_MULTIOME_CHROMAP_LOW_MEM:-0}"
+CHROMAP_LOW_MEM_RAM="${STAR_MULTIOME_CHROMAP_LOW_MEM_RAM:-0}"
+CHROMAP_MACS3_FRAG_LOW_MEM="${STAR_MULTIOME_CHROMAP_MACS3_FRAG_LOW_MEM:-0}"
 SOLO_STRAND="${STAR_MULTIOME_SOLO_STRAND:-Forward}"
 ATAC_BARCODE_START="${STAR_MULTIOME_ATAC_BARCODE_START:-9}"
 ATAC_BARCODE_LENGTH="${STAR_MULTIOME_ATAC_BARCODE_LENGTH:-16}"
@@ -92,6 +95,10 @@ Remote downstream:
 Other:
   --threads N
   --chromap-threads N
+  --chromap-low-mem        Enable STAR/Chromap low-memory overflow-spill mode
+  --chromap-low-mem-ram N  RAM threshold in bytes for low-memory spill; 0 uses Chromap defaults
+  --chromap-macs3-frag-low-mem
+                           Enable low-memory MACS3 fragment peak workspace
   --atac-barcode-start N    1-based barcode window start in ATAC barcode read (default: 9)
   --atac-barcode-length N   barcode length (default: 16)
   --chromap-atac-read-format FORMAT
@@ -116,6 +123,9 @@ while [[ $# -gt 0 ]]; do
     --out-dir) OUT_DIR="$2"; shift 2 ;;
     --threads) THREADS="$2"; shift 2 ;;
     --chromap-threads) CHROMAP_THREADS="$2"; shift 2 ;;
+    --chromap-low-mem) CHROMAP_LOW_MEM="1"; shift ;;
+    --chromap-low-mem-ram) CHROMAP_LOW_MEM_RAM="$2"; shift 2 ;;
+    --chromap-macs3-frag-low-mem) CHROMAP_MACS3_FRAG_LOW_MEM="1"; shift ;;
     --genome-dir) GENOME_DIR="$2"; shift 2 ;;
     --gex-whitelist) GEX_WHITELIST="$2"; shift 2 ;;
     --chromap-ref) CHROMAP_REF="$2"; shift 2 ;;
@@ -277,6 +287,13 @@ else
   ATAC_BC_FOR_CHROMAP="${ATAC_BC_NORM}"
 fi
 
+for numeric_name in THREADS CHROMAP_THREADS CHROMAP_LOW_MEM CHROMAP_LOW_MEM_RAM CHROMAP_MACS3_FRAG_LOW_MEM; do
+  if ! [[ "${!numeric_name}" =~ ^[0-9]+$ ]]; then
+    echo "ERROR: ${numeric_name} must be a non-negative integer" >&2
+    exit 1
+  fi
+done
+
 if [[ "${USE_NATIVE_ATAC_BARCODE}" != "1" && ( "${FORCE_ATAC_BARCODE}" == "1" || ! -f "${ATAC_BC_NORM}" ) ]]; then
   log "Normalizing ATAC barcode FASTQ"
   normalize_args=(
@@ -357,6 +374,9 @@ ${chromap_read_format_block}  --chromapAtacBarcodeWhitelist "${ATAC_WHITELIST}" 
   --chromapAtacOutputFragments "${ATAC_FRAGMENTS}" \\
   --chromapAtacSummary "${RUN_DIR}/chromap_summary.csv" \\
   --chromapAtacThreads "${CHROMAP_THREADS}" \\
+  --chromapAtacLowMem "${CHROMAP_LOW_MEM}" \\
+  --chromapAtacLowMemRam "${CHROMAP_LOW_MEM_RAM}" \\
+  --chromapAtacMacs3FragLowMem "${CHROMAP_MACS3_FRAG_LOW_MEM}" \\
   --chromapAtacTempDir "${SAMPLE_DIR}/chromap_tmp" \\
   --chromapAtacTn5ShiftMode classical \\
   --chromapAtacCallMacs3FragPeaks 1 \\
@@ -515,6 +535,10 @@ PY
   printf 'gex_whitelist=%s\n' "${GEX_WHITELIST}"
   printf 'chromap_ref=%s\n' "${CHROMAP_REF}"
   printf 'chromap_index=%s\n' "${CHROMAP_INDEX}"
+  printf 'chromap_threads=%s\n' "${CHROMAP_THREADS}"
+  printf 'chromap_low_mem=%s\n' "${CHROMAP_LOW_MEM}"
+  printf 'chromap_low_mem_ram=%s\n' "${CHROMAP_LOW_MEM_RAM}"
+  printf 'chromap_macs3_frag_low_mem=%s\n' "${CHROMAP_MACS3_FRAG_LOW_MEM}"
   printf 'atac_whitelist=%s\n' "${ATAC_WHITELIST}"
   printf 'atac_to_gex=%s\n' "${ATAC_TO_GEX}"
   printf 'solo_strand=%s\n' "${SOLO_STRAND}"

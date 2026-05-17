@@ -8,8 +8,10 @@ DEST_ROOT="${JAX_MULTIOME_GLOBUS_DEST_ROOT:-/JAX_Multiome01_processed/large_file
 SAMPLES=""
 WATCH="0"
 INTERVAL_SECONDS="300"
+TASK_POLL_SECONDS="60"
 DRY_RUN="0"
 FORCE="0"
+DELETE_GENERATED_AFTER_TRANSFER="${JAX_MULTIOME_DELETE_GENERATED_AFTER_TRANSFER:-1}"
 INCLUDE_INPUT_FASTQS="1"
 INCLUDE_GENERATED_FASTQS="1"
 INCLUDE_BAMS="1"
@@ -33,8 +35,13 @@ Options:
   --samples CSV             Restrict to sample labels or slugs
   --watch                   Poll until all selected samples are complete and submitted
   --interval-seconds N      Poll interval for --watch (default: 300)
+  --task-poll-seconds N     Globus task wait polling interval before deletion (default: 60)
   --dry-run                 Write batch files and validate with Globus dry-run only
   --force                   Resubmit even if a sample is already in the upload state file
+  --delete-generated-after-transfer
+                            Wait for Globus success, then delete generated local BAM/FASTQ files (default)
+  --no-delete-generated-after-transfer
+                            Leave generated local BAM/FASTQ files in place after transfer
   --no-input-fastqs         Do not upload raw input FASTQs listed in the manifest
   --no-generated-fastqs     Do not upload STAR-generated Y/noY FASTQs
   --no-bams                 Do not upload BAMs
@@ -52,8 +59,11 @@ while [[ $# -gt 0 ]]; do
     --samples) SAMPLES="$2"; shift 2 ;;
     --watch) WATCH="1"; shift ;;
     --interval-seconds) INTERVAL_SECONDS="$2"; shift 2 ;;
+    --task-poll-seconds) TASK_POLL_SECONDS="$2"; shift 2 ;;
     --dry-run) DRY_RUN="1"; shift ;;
     --force) FORCE="1"; shift ;;
+    --delete-generated-after-transfer) DELETE_GENERATED_AFTER_TRANSFER="1"; shift ;;
+    --no-delete-generated-after-transfer) DELETE_GENERATED_AFTER_TRANSFER="0"; shift ;;
     --no-input-fastqs) INCLUDE_INPUT_FASTQS="0"; shift ;;
     --no-generated-fastqs) INCLUDE_GENERATED_FASTQS="0"; shift ;;
     --no-bams) INCLUDE_BAMS="0"; shift ;;
@@ -73,6 +83,10 @@ if ! [[ "${INTERVAL_SECONDS}" =~ ^[0-9]+$ && "${INTERVAL_SECONDS}" -gt 0 ]]; the
   echo "ERROR: --interval-seconds must be a positive integer" >&2
   exit 1
 fi
+if ! [[ "${TASK_POLL_SECONDS}" =~ ^[0-9]+$ && "${TASK_POLL_SECONDS}" -gt 0 ]]; then
+  echo "ERROR: --task-poll-seconds must be a positive integer" >&2
+  exit 1
+fi
 
 RUN_LABEL="$(basename "${RUN_ROOT}")"
 LOG_DIR="${RUN_ROOT}/logs/globus_large_files"
@@ -80,7 +94,7 @@ BATCH_DIR="${LOG_DIR}/batches"
 STATE_FILE="${LOG_DIR}/upload_state.tsv"
 mkdir -p "${BATCH_DIR}"
 if [[ ! -f "${STATE_FILE}" ]]; then
-  printf 'date_utc\tsample\tsample_slug\ttask_id\tfile_count\tbyte_count\tbatch_file\n' > "${STATE_FILE}"
+  printf 'date_utc\tsample\tsample_slug\ttask_id\tfile_count\tbyte_count\tdelete_count\tstatus\tbatch_file\n' > "${STATE_FILE}"
 fi
 
 log() {
@@ -116,11 +130,12 @@ sample_already_submitted() {
 append_pair() {
   local batch_file="$1"
   local inventory_file="$2"
-  local source_path="$3"
-  local dest_path="$4"
+  local role="$3"
+  local source_path="$4"
+  local dest_path="$5"
   [[ -f "${source_path}" ]] || return 0
   printf '%s %s\n' "$(batch_quote "${source_path}")" "$(batch_quote "${dest_path}")" >> "${batch_file}"
-  printf '%s\t%s\t%s\n' "$(stat -c '%s' "${source_path}")" "${source_path}" "${dest_path}" >> "${inventory_file}"
+  printf '%s\t%s\t%s\t%s\n' "$(stat -c '%s' "${source_path}")" "${role}" "${source_path}" "${dest_path}" >> "${inventory_file}"
 }
 
 append_csv_fastqs() {
@@ -135,6 +150,7 @@ append_csv_fastqs() {
     append_pair \
       "${batch_file}" \
       "${inventory_file}" \
+      "raw_fastq" \
       "${source_path}" \
       "${DEST_ROOT}/${RUN_LABEL}/raw/${sample_slug}/$(basename "${source_path}")"
   done
@@ -145,16 +161,39 @@ append_generated_files() {
   local inventory_file="$2"
   local sample_dir="$3"
   local sample_slug="$4"
-  shift 4
+  local role="$5"
+  shift 5
   local source_path rel_path
   while IFS= read -r -d '' source_path; do
     rel_path="${source_path#${sample_dir}/}"
     append_pair \
       "${batch_file}" \
       "${inventory_file}" \
+      "${role}" \
       "${source_path}" \
       "${DEST_ROOT}/${RUN_LABEL}/samples/${sample_slug}/${rel_path}"
   done < <(find "${sample_dir}" -type f "$@" -print0 2>/dev/null)
+}
+
+delete_generated_files() {
+  local inventory_file="$1"
+  local delete_log="$2"
+  local source_path role
+  local deleted=0
+  : > "${delete_log}"
+  while IFS=$'\t' read -r bytes role source_path dest_path; do
+    [[ "${bytes}" != "bytes" ]] || continue
+    case "${role}" in
+      generated_bam|generated_fastq|generated_fragment)
+        if [[ -f "${source_path}" ]]; then
+          rm -f -- "${source_path}"
+          printf '%s\t%s\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${role}" "${source_path}" >> "${delete_log}"
+          deleted=$((deleted + 1))
+        fi
+        ;;
+    esac
+  done < "${inventory_file}"
+  echo "${deleted}"
 }
 
 submit_sample() {
@@ -178,7 +217,7 @@ submit_sample() {
   local batch_file="${BATCH_DIR}/${sample_slug}.batch"
   local inventory_file="${BATCH_DIR}/${sample_slug}.inventory.tsv"
   : > "${batch_file}"
-  printf 'bytes\tsource\tdestination\n' > "${inventory_file}"
+  printf 'bytes\trole\tsource\tdestination\n' > "${inventory_file}"
 
   if [[ "${INCLUDE_INPUT_FASTQS}" == "1" ]]; then
     append_csv_fastqs "${batch_file}" "${inventory_file}" "${gex_r1}" "${sample_slug}"
@@ -189,13 +228,13 @@ submit_sample() {
   fi
 
   if [[ "${INCLUDE_BAMS}" == "1" ]]; then
-    append_generated_files "${batch_file}" "${inventory_file}" "${sample_dir}" "${sample_slug}" -name '*.bam'
+    append_generated_files "${batch_file}" "${inventory_file}" "${sample_dir}" "${sample_slug}" "generated_bam" -name '*.bam'
   fi
   if [[ "${INCLUDE_GENERATED_FASTQS}" == "1" ]]; then
-    append_generated_files "${batch_file}" "${inventory_file}" "${sample_dir}" "${sample_slug}" -path '*/y_separated/*' -name '*.fastq.gz'
+    append_generated_files "${batch_file}" "${inventory_file}" "${sample_dir}" "${sample_slug}" "generated_fastq" -path '*/y_separated/*' -name '*.fastq.gz'
   fi
   if [[ "${INCLUDE_FRAGMENTS}" == "1" ]]; then
-    append_generated_files "${batch_file}" "${inventory_file}" "${sample_dir}" "${sample_slug}" -name 'atac_fragments.tsv.gz'
+    append_generated_files "${batch_file}" "${inventory_file}" "${sample_dir}" "${sample_slug}" "generated_fragment" -name 'atac_fragments.tsv.gz'
   fi
 
   local file_count
@@ -206,6 +245,8 @@ submit_sample() {
   fi
   local byte_count
   byte_count="$(awk -F'\t' 'NR > 1 { total += $1 } END { printf "%.0f", total }' "${inventory_file}")"
+  local generated_count
+  generated_count="$(awk -F'\t' 'NR > 1 && $2 != "raw_fastq" { total += 1 } END { printf "%.0f", total }' "${inventory_file}")"
   local label="JAX_Multiome01 ${RUN_LABEL} ${sample_slug} large files"
 
   if [[ "${DRY_RUN}" == "1" ]]; then
@@ -220,7 +261,7 @@ submit_sample() {
     return 0
   fi
 
-  local submit_json task_id
+  local submit_json task_id delete_count status
   submit_json="$(globus transfer \
     "${SOURCE_ENDPOINT}" \
     "${DEST_ENDPOINT}" \
@@ -231,15 +272,26 @@ submit_sample() {
   printf '%s\n' "${submit_json}" > "${BATCH_DIR}/${sample_slug}.submit.json"
   task_id="$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("task_id",""))' <<< "${submit_json}")"
   [[ -n "${task_id}" ]] || { echo "ERROR: Globus submission did not return a task_id for ${sample}" >&2; exit 1; }
-  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+  log "Submitted ${sample}: task=${task_id}, files=${file_count}, bytes=${byte_count}"
+  delete_count=0
+  status="submitted"
+  if [[ "${DELETE_GENERATED_AFTER_TRANSFER}" == "1" && "${generated_count}" -gt 0 ]]; then
+    log "Waiting for Globus task ${task_id} before deleting ${generated_count} generated local files for ${sample}"
+    globus task wait --polling-interval "${TASK_POLL_SECONDS}" "${task_id}" > "${BATCH_DIR}/${sample_slug}.task_wait.log"
+    delete_count="$(delete_generated_files "${inventory_file}" "${BATCH_DIR}/${sample_slug}.deleted.tsv")"
+    status="transferred_deleted_generated"
+    log "Deleted ${delete_count} generated local files for ${sample}; raw input FASTQs were preserved"
+  fi
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
     "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     "${sample}" \
     "${sample_slug}" \
     "${task_id}" \
     "${file_count}" \
     "${byte_count}" \
+    "${delete_count}" \
+    "${status}" \
     "${batch_file}" >> "${STATE_FILE}"
-  log "Submitted ${sample}: task=${task_id}, files=${file_count}, bytes=${byte_count}"
   return 0
 }
 
