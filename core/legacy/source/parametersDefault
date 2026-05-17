@@ -2061,6 +2061,9 @@ chromapAtacRead2            -
 chromapAtacBarcode          -
     string:                 comma-separated ATAC barcode FASTQ paths.
 
+chromapAtacReadFormat       -
+    string:                 optional Chromap read-format string applied to ATAC reads/barcodes, e.g. bc:8:23:- extracts 0-based barcode bases 8-23 and reverse-complements them.
+
 chromapAtacBarcodeWhitelist -
     string:                 barcode whitelist file for Chromap.
 

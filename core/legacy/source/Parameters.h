@@ -689,6 +689,7 @@ class Parameters {
             string read1Csv;
             string read2Csv;
             string barcodeCsv;
+            string readFormat;
             string barcodeWhitelist;
             string barcodeTranslate;
             // If 1, the barcode translate table is read in natural

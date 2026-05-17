@@ -29,6 +29,9 @@ void usage() {
       << "  --macs3-frag-no-uint8-counts\n"
       << "  --macs3-frag-low-mem\n"
       << "  --barcode-translate FILE\n"
+      << "  --read-format FORMAT\n"
+      << "        Chromap read-format string, e.g. bc:8:23:- to extract and\n"
+      << "        reverse-complement ATAC barcode-read bases 9-24.\n"
       << "  --barcode-translate-from-first\n"
       << "        Read translation table as <from_bc>\\t<to_bc> (col1 is the\n"
       << "        hash key / source). Default is the historical Chromap\n"
@@ -112,6 +115,8 @@ int main(int argc, char **argv) {
       config.barcode_whitelist = argv[++i];
     } else if (arg == "--barcode-translate" && requireValue(argc, argv, i)) {
       config.barcode_translate_table = argv[++i];
+    } else if (arg == "--read-format" && requireValue(argc, argv, i)) {
+      config.read_format = argv[++i];
     } else if (arg == "--barcode-translate-from-first") {
       config.barcode_translate_from_first_column = true;
     } else if (arg == "--output" && requireValue(argc, argv, i)) {
