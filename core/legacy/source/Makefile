@@ -211,7 +211,8 @@ OBJECTS = systemFunctions.o funPrimaryAlignMark.o \
 	ZGZXTags.o \
 	FlexProbeIndex.o \
 	CellRangerFormatter.o \
-	PfMultiConfig.o PfMultiMexStub.o PfMultiAssign.o PfMultiMerge.o PfMultiProcess.o \
+	PfMultiConfig.o PfMultiMexStub.o PfMultiAssign.o PfMultiMerge.o PfMultiProcess.o VelocytoMexWriter.o \
+	OcmMultiConfig.o OcmMultiMaterialize.o \
 	CbUbTagInjector.o
 
 # Unit tests for CR-compat regression components (built as a single binary)
@@ -223,6 +224,13 @@ compat-unit-tests : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
 compat-unit-tests : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS) $(shell pkg-config --libs glib-2.0 2>/dev/null || echo "")
 compat-unit-tests : Depend.list parametersDefault.xxd $(OBJECTS_NO_MAIN) libflex libtrim libem $(COMPAT_UNIT_TEST_SRC)
 	$(CXX) -o compat_unit_tests $(CXXFLAGS) $(COMPAT_UNIT_TEST_SRC) $(OBJECTS_NO_MAIN) $(LIBFLEX_LIB) $(LIBTRIM_LIB) $(LIBEM_LIB) $(LDFLAGS)
+
+OCM_UNIT_TEST_SRC := $(ROOT_DIR)/tests/test_ocm_multi_unit.cpp
+.PHONY: ocm-multi-unit-tests
+ocm-multi-unit-tests : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
+ocm-multi-unit-tests : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS) $(shell pkg-config --libs glib-2.0 2>/dev/null || echo "")
+ocm-multi-unit-tests : Depend.list parametersDefault.xxd $(OBJECTS_NO_MAIN) libflex libtrim libem libprocess_features $(LIBSCRNA_LIB) $(OCM_UNIT_TEST_SRC)
+	$(CXX) -o ocm_multi_unit_tests $(CXXFLAGS) $(OCM_UNIT_TEST_SRC) $(OBJECTS_NO_MAIN) $(LIBFLEX_LIB) $(LIBTRIM_LIB) $(LIBEM_LIB) $(PROCESS_FEATURES_LIB) $(LIBSCRNA_LIB) $(LDFLAGS)
 
 SOURCES := $(SRC_CPP_ROOT) $(FLEX_SRC_DIR)/ReadAlign_resolveAmbiguousCBs.cpp $(wildcard *.c) $(wildcard flex/*.cpp)
 

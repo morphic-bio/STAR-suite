@@ -679,6 +679,9 @@ class Parameters {
             int crAssignSkipQcOutputs;      // Skip feature histograms/heatmaps in assignBarcodes outputs
             string crAssignFilteredBarcodes;// Optional filtered barcode file for assignBarcodes
             int crAssignAllowUnionWhitelist; // Accept mixed NXT+TRU filtered barcode sets
+            string ocmMultiEnable;           // no|yes|auto - OCM per-sample MEX materialization
+            string ocmMultiConfig;           // Cell Ranger multi config with [samples]
+            string ocmMultiOutputCompat;     // cellranger (default) - output layout compat mode
         } pfMulti;
 
         // In-process Chromap ATAC (STAR libchromap contract); off unless chromapAtacEnable=1

@@ -1991,6 +1991,17 @@ soloFlexMinimalMemory         auto
 pfMultiConfig               -
     string:                 pf-multi config CSV (Cell Ranger-style input; enables pf-multi processing)
 
+ocmMultiEnable              no
+    string:                 no|yes|auto - materialize OCM per-sample MEX from pool-level GeneFull outputs
+                            yes requires --ocmMultiConfig or --pfMultiConfig with [samples]
+                            auto runs when [samples] with ocm_barcode_ids is present
+
+ocmMultiConfig              -
+    string:                 Cell Ranger multi config CSV with [samples] for OCM materialization
+
+ocmMultiOutputCompat        cellranger
+    string:                 Output layout compatibility mode (cellranger)
+
 crChemistry                auto
     string:                 chemistry mode for pf-multi compatibility behavior
                             auto        ... detect chemistry from inputs/whitelist hints (default)

@@ -707,6 +707,9 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "crAssignSkipQcOutputs", &pfMulti.crAssignSkipQcOutputs));
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "crAssignFilteredBarcodes", &pfMulti.crAssignFilteredBarcodes));
     parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "crAssignAllowUnionWhitelist", &pfMulti.crAssignAllowUnionWhitelist));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "ocmMultiEnable", &pfMulti.ocmMultiEnable));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "ocmMultiConfig", &pfMulti.ocmMultiConfig));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "ocmMultiOutputCompat", &pfMulti.ocmMultiOutputCompat));
     parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "chromapAtacEnable", &chromapAtac.enabled));
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacReferenceFasta", &chromapAtac.referenceFasta));
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacIndex", &chromapAtac.chromapIndex));
@@ -865,6 +868,18 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
         }
         if (p->nameString == "crAssignAllowUnionWhitelist" && p->inputLevel < 0) {
             pfMulti.crAssignAllowUnionWhitelist = 0;
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "ocmMultiEnable" && p->inputLevel < 0) {
+            pfMulti.ocmMultiEnable = "no";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "ocmMultiConfig" && p->inputLevel < 0) {
+            pfMulti.ocmMultiConfig = "-";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "ocmMultiOutputCompat" && p->inputLevel < 0) {
+            pfMulti.ocmMultiOutputCompat = "cellranger";
             p->inputLevel = 0;
         }
         if (p->nameString == "chromapAtacEnable" && p->inputLevel < 0) {
