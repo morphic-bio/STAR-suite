@@ -19,6 +19,18 @@ namespace PfMultiConfig {
  * @struct LibraryEntry
  * @brief Single library entry from [libraries] section
  */
+/**
+ * @struct SampleEntry
+ * @brief OCM multiplexing sample from [samples] section
+ */
+struct SampleEntry {
+    string sample_id;
+    string ocm_barcode_ids;     // OB1, OB2, or pipe-union OB1|OB2
+    string description;
+
+    vector<string> resolvedOcmIds() const;
+};
+
 struct LibraryEntry {
     string fastqs;              // FASTQ directory path
     string feature_types;       // Feature type (e.g., "Gene Expression", "CRISPR Guide Capture")
@@ -41,9 +53,12 @@ struct LibraryEntry {
  */
 struct Config {
     vector<LibraryEntry> libraries;    // All library entries
+    vector<SampleEntry> samples;         // OCM samples from [samples] section
     string featureRef;                  // Feature reference path from [feature] section
     string referencePath;               // Reference path from [reference] section
     
+    bool hasOcmSamples() const { return !samples.empty(); }
+
     // Classify libraries by feature type
     vector<LibraryEntry> getGexLibraries() const;
     vector<LibraryEntry> getFeatureLibraries(const string& featureType) const;

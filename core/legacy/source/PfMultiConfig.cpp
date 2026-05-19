@@ -22,6 +22,92 @@ static void trimInPlace(string& s) {
     s = s.substr(first, last - first + 1);
 }
 
+static vector<string> parseCsvFields(const string& row) {
+    vector<string> fields;
+    string field;
+    bool inQuotes = false;
+    for (char c : row) {
+        if (c == '"') {
+            inQuotes = !inQuotes;
+        } else if (c == ',' && !inQuotes) {
+            fields.push_back(field);
+            field.clear();
+        } else {
+            field += c;
+        }
+    }
+    if (!field.empty() || (!row.empty() && row.back() == ',')) {
+        fields.push_back(field);
+    }
+    for (auto& value : fields) {
+        trimInPlace(value);
+        if (!value.empty() && value.front() == '"' && value.back() == '"') {
+            value = value.substr(1, value.length() - 2);
+            trimInPlace(value);
+        }
+    }
+    return fields;
+}
+
+static void parseSamplesRows(const vector<string>& samplesHeader,
+                             const vector<string>& rows,
+                             vector<SampleEntry>& samplesOut) {
+    if (samplesHeader.empty()) {
+        throw runtime_error("samples section has no header");
+    }
+    for (const auto& row : rows) {
+        if (row.empty()) {
+            continue;
+        }
+        vector<string> fields = parseCsvFields(row);
+        while (fields.size() < samplesHeader.size()) {
+            fields.push_back(string());
+        }
+        SampleEntry entry;
+        for (size_t i = 0; i < samplesHeader.size() && i < fields.size(); ++i) {
+            string header = samplesHeader[i];
+            std::transform(header.begin(), header.end(), header.begin(), ::tolower);
+            const string& value = fields[i];
+            if (header == "sample_id") {
+                entry.sample_id = value;
+            } else if (header == "ocm_barcode_ids") {
+                entry.ocm_barcode_ids = value;
+            } else if (header == "description") {
+                entry.description = value;
+            }
+        }
+        if (!entry.sample_id.empty() || !entry.ocm_barcode_ids.empty()) {
+            samplesOut.push_back(entry);
+        }
+    }
+}
+
+vector<string> SampleEntry::resolvedOcmIds() const {
+    vector<string> ids;
+    string field = ocm_barcode_ids;
+    trimInPlace(field);
+    if (field.empty()) {
+        return ids;
+    }
+    string token;
+    for (char c : field) {
+        if (c == '|') {
+            trimInPlace(token);
+            if (!token.empty()) {
+                ids.push_back(token);
+            }
+            token.clear();
+        } else {
+            token.push_back(c);
+        }
+    }
+    trimInPlace(token);
+    if (!token.empty()) {
+        ids.push_back(token);
+    }
+    return ids;
+}
+
 string LibraryEntry::normalizedFeatureType() const {
     string normalized;
     normalized.reserve(feature_types.size());
@@ -76,7 +162,9 @@ Config parseConfig(const string& configPath) {
     string currentSection;
     vector<string> currentLines;
     bool inLibraries = false;
+    bool inSamples = false;
     vector<string> librariesHeader;
+    vector<string> samplesHeader;
     
     string line;
     while (getline(file, line)) {
@@ -218,6 +306,8 @@ Config parseConfig(const string& configPath) {
                         config.referencePath = value;
                     }
                 }
+            } else if (currentSection == "samples" && inSamples) {
+                parseSamplesRows(samplesHeader, currentLines, config.samples);
             }
             
             // Start new section
@@ -225,6 +315,8 @@ Config parseConfig(const string& configPath) {
             std::transform(currentSection.begin(), currentSection.end(), currentSection.begin(), ::tolower);
             currentLines.clear();
             inLibraries = false;
+            inSamples = false;
+            samplesHeader.clear();
             
             if (currentSection == "libraries") {
                 inLibraries = true;
@@ -245,6 +337,23 @@ Config parseConfig(const string& configPath) {
                     headerField.erase(headerField.find_last_not_of(" \t") + 1);
                     std::transform(headerField.begin(), headerField.end(), headerField.begin(), ::tolower);
                     librariesHeader.push_back(headerField);
+                }
+            } else if (currentSection == "samples") {
+                inSamples = true;
+                if (!getline(file, line)) {
+                    break;
+                }
+                size_t commentPosSamples = line.find_first_of("#;");
+                if (commentPosSamples != string::npos) {
+                    line = line.substr(0, commentPosSamples);
+                }
+                trimInPlace(line);
+                istringstream headerStream(line);
+                string headerField;
+                while (getline(headerStream, headerField, ',')) {
+                    trimInPlace(headerField);
+                    std::transform(headerField.begin(), headerField.end(), headerField.begin(), ::tolower);
+                    samplesHeader.push_back(headerField);
                 }
             }
         } else {
@@ -360,6 +469,8 @@ Config parseConfig(const string& configPath) {
                 config.referencePath = value;
             }
         }
+    } else if (currentSection == "samples" && inSamples) {
+        parseSamplesRows(samplesHeader, currentLines, config.samples);
     }
     
     // Auto-generate star_library_id when absent; check for duplicates

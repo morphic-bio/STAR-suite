@@ -52,6 +52,8 @@
 #include "SnpMaskBuild.h"
 #include "PfMultiProcess.h"
 #include "PfMultiConfig.h"
+#include "VelocytoMexWriter.h"
+#include "OcmMultiMaterialize.h"
 #include "star_chromap_orchestration.h"
 // Note: effective_length.h not included due to Transcriptome class name conflict
 // Use wrapper function instead
@@ -1867,6 +1869,16 @@ int main(int argInN, char *argIn[])
         soloMain.processAndOutput();
     } else {
         P.inOut->logMain << timeMonthDayTime() << " ..... skipping Solo processing (inline replayer already produced MEX)" << endl;
+    }
+
+    // Package Velocyto layer outputs into the downstream outs/ MEX contract.
+    if (VelocytoMexWriter::runVelocytoMexMaterialize(P) != 0) {
+        return 1;
+    }
+
+    // OCM per-sample MEX materialization (pool-level GeneFull -> outs/multi + per_sample_outs).
+    if (runOcmMultiMaterialize(P) != 0) {
+        return 1;
     }
 
     // Finish pf-multi merge/filtering once Solo outputs are available.

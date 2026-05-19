@@ -6,6 +6,7 @@ Branch intent: `feature/velocyto-optimizations-20260326`
 Related docs:
 - `docs/RUNBOOK_VELOCYTO_COUNT_RESOLUTION_20260326.md`
 - `docs/RUNBOOK_VELOCYTO_OPTIMIZATION_PORT_20260326.md`
+- `docs/RUNBOOK_SCRNA_OCM_MULTI_MEX_MATERIALIZER_IMPLEMENTATION_20260519.md`
 - `docs/HANDOFF_SCRNA_DOWNSTREAM_MEX_VELOCYTO_FINDINGS_20260313.md`
 - `tests/run_perturb_velocyto_mex_smoke.sh`
 - `tests/run_ucsf_velocyto_gexonly_exact_100k.sh`
@@ -16,6 +17,14 @@ Related docs:
 **Stage 1** (sorted global replay + stream) and **Stage 2** (CB-bucket deterministic merge, env `STAR_VELOCYTO_INTEGRATED_HASH=1` with `STAR_VELOCYTO_DETERMINISTIC_REPLAY=1`) are implemented in `SoloFeature_countVelocytoBridge.cpp` / `SoloFeature_countVelocyto.cpp`. UCSF validation uses `tests/run_ucsf_velocyto_exact_*.sh` (Stage 1 gates + Phase 6 `Gene`/`GeneFull` parity via `compare_velocyto_mex.py --mode genes`) and `tests/run_ucsf_velocyto_hash_*.sh` (Stage 2 vs Stage 1 + thread parity + the same Gene/GeneFull checks). **Phase 4** (external `velocyto.py`) remains blocked without full BAMs (`tests/run_ucsf_velocyto_external_compare.sh`).
 
 **Status:** Implementation / code review for this bridge is effectively **closed**. **Formal acceptance** stays **open** until a host has valid UCSF fixture paths (or overrides below) and a chosen `UCSF_VELOCYTO_MAX_SORTED_REPLAY_RSS_KB` for the **2M** exact and hash harnesses (unless using the dev-only `UCSF_VELOCYTO_ALLOW_UNCAPPED_2M=1` opt-out).
+
+**OCM materialization note:** New OCM production runs should not call the legacy
+`prepare_velocyto_mex.py` helper. STAR now packages run-level raw/filtered
+Velocyto MEX through `VelocytoMexWriter`, and the OCM materializer writes
+per-sample `raw_velocyto_feature_bc_matrix` and
+`filtered_velocyto_feature_bc_matrix` mirrors. The per-sample subsetting maps
+GeneFull columns to Velocyto columns by normalized barcode key, so it does not
+depend on GeneFull and Velocyto barcode order being identical.
 
 ## Goal
 
@@ -245,7 +254,7 @@ Required checks (automated in `tests/run_ucsf_velocyto_exact_100k.sh` when fixtu
 0. **Independent reference (default):** `UCSF_VELOCYTO_BASELINE_OUTDIR` must point to outputs from an unmodified STAR build / pre-refactor commit (`scripts/save_velocyto_baseline.sh`). Dev-only without baseline: `UCSF_VELOCYTO_ALLOW_SAME_BINARY_ONLY=1` (prints WARNING; not publication-grade).
 1. run STAR `Velocyto` stream path (default, no `STAR_VELOCYTO_DETERMINISTIC_REPLAY`)
 2. run the deterministic sorted-replay path (`STAR_VELOCYTO_DETERMINISTIC_REPLAY=1`) at the same thread count
-3. run `scripts/prepare_velocyto_mex.py` on both (canonical runner: `--prepare-mex`)
+3. verify native STAR Velocyto `outs/` MEX on both (canonical runner: `--prepare-mex`)
 4. verify with `scripts/compare_velocyto_mex.py --mode all`:
    - identical `Solo.out/Gene/raw` feature and barcode axes (solo mode always checks these; Velocyto/raw often has only `*.mtx`)
    - matrix shapes `(n_features, n_barcodes)` on each layer vs those axes
@@ -274,7 +283,7 @@ Required checks:
 
 1. legacy STAR `Velocyto` (stream) on the chosen full-sample inputs
 2. deterministic sorted-replay path on the same inputs
-3. raw/filtered MEX packaging (`prepare_velocyto_mex.py`) on both
+3. native raw/filtered Velocyto `outs/` MEX packaging on both
 4. `compare_velocyto_mex.py --mode all` plus deterministic 1 vs N threads
 5. full exact diff of:
    - features
@@ -395,7 +404,7 @@ Reuse the current packaging invariants already exercised in:
 
 - `tests/run_perturb_velocyto_mex_smoke.sh`
 
-Exact-parity harnesses also diff packaged trees via `scripts/compare_velocyto_mex.py --mode all`: per-run `velocyto_feature_bc_matrix_manifest.json` is checked against that run’s gz MEX axes and nnz, then cross-run diffs. `scripts/save_velocyto_baseline.sh` always runs `prepare_velocyto_mex` so baselines include packaged outs.
+Exact-parity harnesses also diff packaged trees via `scripts/compare_velocyto_mex.py --mode all`: per-run `velocyto_feature_bc_matrix_manifest.json` is checked against that run’s gz MEX axes and nnz, then cross-run diffs. `scripts/save_velocyto_baseline.sh` now expects STAR's native Velocyto `outs/` writer so baselines include packaged outs without Python backfill.
 
 Packaging invariants:
 
@@ -422,7 +431,7 @@ Keep publication / audit scripts in-repo.
 In-repo (initial wiring):
 
 - `scripts/run_star_velocyto_canonical.sh` — pinned STAR args for `100k` / `2m` profiles
-- `scripts/save_velocyto_baseline.sh` — canonical STAR + mandatory `prepare_velocyto_mex` for baseline dirs used with `--mode all`
+- `scripts/save_velocyto_baseline.sh` — canonical STAR + mandatory native Velocyto `outs/` MEX for baseline dirs used with `--mode all`
 - `tests/run_ucsf_velocyto_exact_100k.sh` — default: frozen baseline vs stream_t1, then stream vs det, det@1t vs Nt (`UCSF_VELOCYTO_ALLOW_SAME_BINARY_ONLY=1` skips baseline)
 - `tests/run_ucsf_velocyto_exact_2m.sh` — same; **requires** `UCSF_VELOCYTO_MAX_SORTED_REPLAY_RSS_KB` or `UCSF_VELOCYTO_ALLOW_UNCAPPED_2M=1`
 - `tests/run_ucsf_velocyto_hash_100k.sh` / `tests/run_ucsf_velocyto_hash_2m.sh` — Stage 2: baseline/stream/stage-1-det vs CB-bucket det + 1 vs N threads (`STAR_VELOCYTO_INTEGRATED_HASH=1`). When `UCSF_VELOCYTO_MAX_SORTED_REPLAY_RSS_KB` is set, the **2M (and optional 100K) cap checks `PER_LOG_MAX_VM_RSS_KB[det_hash_t1]` and `[det_hash_tN]` only**, not the global `MAX_VM_RSS_KB` across `det_sort_t1`.
