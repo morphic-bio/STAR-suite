@@ -709,6 +709,8 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "crAssignAllowUnionWhitelist", &pfMulti.crAssignAllowUnionWhitelist));
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "ocmMultiEnable", &pfMulti.ocmMultiEnable));
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "ocmMultiConfig", &pfMulti.ocmMultiConfig));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "ocmMultiBarcodeMode", &pfMulti.ocmMultiBarcodeMode));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "ocmMultiBamSplit", &pfMulti.ocmMultiBamSplit));
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "ocmMultiOutputCompat", &pfMulti.ocmMultiOutputCompat));
     parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "chromapAtacEnable", &chromapAtac.enabled));
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacReferenceFasta", &chromapAtac.referenceFasta));
@@ -740,7 +742,6 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "chromapAtacMacs3FragMinLength", &chromapAtac.macs3FragMinLength));
     parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "chromapAtacMacs3FragMaxGap", &chromapAtac.macs3FragMaxGap));
     parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "chromapAtacMacs3FragUint8Counts", &chromapAtac.macs3FragUint8Counts));
-    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacMacs3FragPeaksSource", &chromapAtac.macs3FragPeaksSource));
     parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "chromapAtacMacs3FragLowMem", &chromapAtac.macs3FragLowMem));
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacEvidenceFromPeaksOutput", &chromapAtac.evidenceFromPeaksOutput));
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacTn5ShiftMode", &chromapAtac.tn5ShiftMode));
@@ -878,6 +879,14 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
             pfMulti.ocmMultiConfig = "-";
             p->inputLevel = 0;
         }
+        if (p->nameString == "ocmMultiBarcodeMode" && p->inputLevel < 0) {
+            pfMulti.ocmMultiBarcodeMode = "posthoc";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "ocmMultiBamSplit" && p->inputLevel < 0) {
+            pfMulti.ocmMultiBamSplit = "no";
+            p->inputLevel = 0;
+        }
         if (p->nameString == "ocmMultiOutputCompat" && p->inputLevel < 0) {
             pfMulti.ocmMultiOutputCompat = "cellranger";
             p->inputLevel = 0;
@@ -1004,10 +1013,6 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
         }
         if (p->nameString == "chromapAtacMacs3FragUint8Counts" && p->inputLevel < 0) {
             chromapAtac.macs3FragUint8Counts = 1;
-            p->inputLevel = 0;
-        }
-        if (p->nameString == "chromapAtacMacs3FragPeaksSource" && p->inputLevel < 0) {
-            chromapAtac.macs3FragPeaksSource = "file";
             p->inputLevel = 0;
         }
         if (p->nameString == "chromapAtacMacs3FragLowMem" && p->inputLevel < 0) {

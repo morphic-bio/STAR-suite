@@ -1,0 +1,111 @@
+{
+  "schema_version": "morphic-plotly-shiny-v1",
+  "viewer": "plotly_shiny",
+  "plot_id": "ucsf_target_knockdown_qc_by_sample",
+  "plot_kind": "target_qc_dotplot",
+  "title": "UCSF CRISPRi: target knockdown QC by sample",
+  "subtitle": "Dot size = perturbed cells; color = log2FC vs NTC",
+  "datasets": [
+    {
+      "dataset_id": "target_sample_summary",
+      "format": "parquet",
+      "s3_key": "plotly/ucsf/qc/target_sample_summary.parquet",
+      "grain": "target_sample",
+      "required_columns": [
+        "target_gene",
+        "sample_label",
+        "lineage_label",
+        "n_target_cells",
+        "n_ntc_cells",
+        "baseline_expression",
+        "log2fc_vs_ntc",
+        "fdr",
+        "is_evaluable",
+        "non_evaluable_reason"
+      ]
+    }
+  ],
+  "encodings": {
+    "x": {
+      "dataset_id": "target_sample_summary",
+      "field": "sample_label",
+      "type": "categorical"
+    },
+    "y": {
+      "dataset_id": "target_sample_summary",
+      "field": "target_gene",
+      "type": "categorical"
+    },
+    "color": {
+      "dataset_id": "target_sample_summary",
+      "field": "log2fc_vs_ntc",
+      "type": "quantitative",
+      "colorscale": "RdBu",
+      "midpoint": 0
+    },
+    "size": {
+      "dataset_id": "target_sample_summary",
+      "field": "n_target_cells",
+      "type": "quantitative"
+    },
+    "hover": [
+      "target_gene",
+      "sample_label",
+      "lineage_label",
+      "n_target_cells",
+      "n_ntc_cells",
+      "baseline_expression",
+      "log2fc_vs_ntc",
+      "fdr",
+      "is_evaluable",
+      "non_evaluable_reason"
+    ]
+  },
+  "controls": {
+    "filters": [
+      "lineage_label",
+      "is_evaluable"
+    ],
+    "threshold_overlays": [
+      "min_target_cells",
+      "max_fdr"
+    ]
+  },
+  "defaults": {
+    "lineage_label": "Embryoid body",
+    "is_evaluable": true,
+    "min_target_cells": 30,
+    "max_fdr": 0.05
+  },
+  "thresholds": {
+    "max_fdr": 0.05,
+    "min_target_cells": 30
+  },
+  "plotly_defaults": {
+    "trace_type": "scatter",
+    "layout": {
+      "template": "plotly_white"
+    },
+    "config": {
+      "responsive": true,
+      "displaylogo": false
+    }
+  },
+  "analysis_context": {
+    "plot_kind": "knockdown_qc",
+    "study_assay": "Perturb-seq",
+    "comparison_label": "target-guide vs NTC"
+  },
+  "downloads": [
+    {
+      "label": "Power-ranked summary TSV",
+      "format": "tsv.gz",
+      "s3_key": "tsv/ucsf/qc/power_ranked_summary.tsv.gz"
+    }
+  ],
+  "provenance": {
+    "pipeline": "perturbseq_qc_dotplot.py",
+    "pipeline_version": "v1",
+    "generated_at": "2026-04-17T00:00:00Z"
+  }
+}

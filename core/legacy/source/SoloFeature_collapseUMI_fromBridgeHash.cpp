@@ -13,6 +13,7 @@
 #include "SoloReadFeature.h"
 #include "SoloCommon.h"
 #include "ParametersSolo.h"
+#include "SoloHDMoleculeWriter.h"
 #include "hash_shims_cpp_compat.h"
 #include "streamFuns.h"
 #include "TimeFunctions.h"
@@ -171,6 +172,40 @@ void SoloFeature::collapseUMIall_fromBridgeHash()
         exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
     }
 
+    const char *hdMoleculeOutPath = std::getenv("STAR_SOLO_HD_MOLECULE_OUT");
+    const bool hdMoleculeOut = hdMoleculeOutPath != nullptr && hdMoleculeOutPath[0] != '\0';
+    SoloHDBarcodeMap hdBarcodeMap;
+    if (hdMoleculeOut) {
+        if (pSolo.umiL == 0 || pSolo.umiL > 12) {
+            ostringstream errOut;
+            errOut << "EXITING because of fatal PARAMETER error: STAR_SOLO_HD_MOLECULE_OUT requires "
+                      "1 <= --soloUMIlen <= 12 on the non-Flex direct-hash bridge path.\n"
+                   << "Reason: this bridge stores UMI identity in the existing 24-bit internal hash key.\n";
+            exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
+        }
+
+        const char *coordPathEnv = std::getenv("STAR_SOLO_HD_BARCODE_COORDS");
+        const std::string coordPath = coordPathEnv != nullptr ? coordPathEnv : "";
+        std::string hdError;
+        if (!hdBarcodeMap.initialize(pSolo, coordPath, hdError)) {
+            ostringstream errOut;
+            errOut << "EXITING because of fatal PARAMETER error: could not initialize HD barcode coordinates for "
+                      "STAR_SOLO_HD_MOLECULE_OUT.\n";
+            if (!hdError.empty()) {
+                errOut << "Reason: " << hdError << "\n";
+            } else {
+                errOut << "Reason: no whitelist barcodes resolved to s_002um row/column coordinates.\n";
+            }
+            errOut << "SOLUTION: use s_002um_<row>_<col> barcodes in the Solo whitelist/output whitelist, or set "
+                      "STAR_SOLO_HD_BARCODE_COORDS to a TSV/CSV mapping barcode row2 col2.\n";
+            exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
+        }
+        P.inOut->logMain << "Experimental STAR-Spatial HD molecule export enabled: "
+                         << hdMoleculeOutPath
+                         << " coordinate_barcodes=" << hdBarcodeMap.validCount()
+                         << endl;
+    }
+
     if (!readFeatSum) {
         P.inOut->logMain << "WARNING: collapseUMIall_fromBridgeHash: readFeatSum is null" << endl;
         nCB = 0;
@@ -269,6 +304,39 @@ void SoloFeature::collapseUMIall_fromBridgeHash()
     for (uint32_t i = 0; i < nCB; ++i) {
         indCB[i] = sortedCBs[i];
         indCBwl[sortedCBs[i]] = i;
+    }
+
+    std::vector<uint32_t> hdRow2;
+    std::vector<uint32_t> hdCol2;
+    SoloHDMoleculeWriter hdWriter;
+    bool hdWriteOk = true;
+    std::string hdWriteError;
+    if (hdMoleculeOut) {
+        hdRow2.resize(nCB);
+        hdCol2.resize(nCB);
+        for (uint32_t iCB = 0; iCB < nCB; ++iCB) {
+            if (!hdBarcodeMap.coordForWL(indCB[iCB], hdRow2[iCB], hdCol2[iCB])) {
+                ostringstream errOut;
+                errOut << "EXITING because of fatal INPUT error: observed Solo whitelist barcode does not have an "
+                          "HD coordinate mapping.\n"
+                       << "Observed whitelist index: " << indCB[iCB] << "\n";
+                if (indCB[iCB] < pSolo.cbWLstr.size()) {
+                    errOut << "Barcode: " << pSolo.cbWLstr[indCB[iCB]] << "\n";
+                }
+                errOut << "SOLUTION: include this barcode in STAR_SOLO_HD_BARCODE_COORDS or use an s_002um output "
+                          "whitelist.\n";
+                exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_INPUT_FILES, P);
+            }
+        }
+        if (!hdWriter.open(hdMoleculeOutPath,
+                           featuresNumber,
+                           SoloHDMoleculeWriter::kFlagPrededuplicated,
+                           hdWriteError)) {
+            ostringstream errOut;
+            errOut << "EXITING because of fatal OUTPUT FILE error: could not open STAR-Spatial HD molecule stream.\n"
+                   << "Reason: " << hdWriteError << "\n";
+            exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
+        }
     }
 
     std::vector<size_t> cbOffsets(nCB + 1, 0);
@@ -377,6 +445,7 @@ void SoloFeature::collapseUMIall_fromBridgeHash()
         std::vector<uint32_t> gID;
         std::vector<size_t> gBeg;
         std::vector<size_t> gEnd;
+        std::vector<SoloHDMoleculeRecord> hdRecords;
 
         ThreadScratch()
             : stampVer(1),
@@ -391,6 +460,7 @@ void SoloFeature::collapseUMIall_fromBridgeHash()
             umiArray.reserve(umiArrayStride * 64);
             touchedGenes.reserve(8192);
             genePref.reserve(8192);
+            hdRecords.reserve(1024);
         }
     };
 
@@ -414,6 +484,9 @@ void SoloFeature::collapseUMIall_fromBridgeHash()
             nUMIperCB[iCB] = 0;
             cbRowCounts[iCB] = 0;
             cbRows[iCB].clear();
+            if (hdMoleculeOut) {
+                ts.hdRecords.clear();
+            }
 
             if (sliceLen == 0) {
                 if (++ts.stampVer == 0u) {
@@ -622,8 +695,29 @@ void SoloFeature::collapseUMIall_fromBridgeHash()
                                      << endl;
                 }
 
-                if (maxg + 1u != 0u)
+                if (maxg + 1u != 0u) {
                     ts.geneCounts[maxg]++;
+                    if (hdMoleculeOut) {
+                        SoloHDMoleculeRecord record;
+                        record.row2 = hdRow2[iCB];
+                        record.col2 = hdCol2[iCB];
+                        record.featureIdx = ts.gID[maxg];
+                        record.umiLength = static_cast<uint16_t>(pSolo.umiL);
+                        record.flags = 0;
+                        if (!SoloHDMoleculeWriter::packStarUmi(
+                                cu, record.umiLength, record.umiLow, record.umiHigh)) {
+                            #pragma omp critical(star_hd_molecule_writer)
+                            {
+                                if (hdWriteOk) {
+                                    hdWriteOk = false;
+                                    hdWriteError = "could not pack corrected STAR UMI for HD molecule output";
+                                }
+                            }
+                        } else {
+                            ts.hdRecords.push_back(record);
+                        }
+                    }
+                }
 
                 p = q;
             }
@@ -644,7 +738,37 @@ void SoloFeature::collapseUMIall_fromBridgeHash()
                 rows.push_back(ts.gID[ig]);
                 rows.push_back(ts.geneCounts[ig]);
             }
+
+            if (hdMoleculeOut && !ts.hdRecords.empty()) {
+                #pragma omp critical(star_hd_molecule_writer)
+                {
+                    if (hdWriteOk && !hdWriter.writeRecords(ts.hdRecords, hdWriteError)) {
+                        hdWriteOk = false;
+                    }
+                }
+            }
         }
+    }
+
+    if (hdMoleculeOut) {
+        if (!hdWriteOk) {
+            ostringstream errOut;
+            errOut << "EXITING because of fatal OUTPUT FILE error: failed while writing STAR-Spatial HD molecule "
+                      "stream.\n"
+                   << "Reason: " << hdWriteError << "\n";
+            exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
+        }
+        if (!hdWriter.close(hdWriteError)) {
+            ostringstream errOut;
+            errOut << "EXITING because of fatal OUTPUT FILE error: failed while finalizing STAR-Spatial HD molecule "
+                      "stream.\n"
+                   << "Reason: " << hdWriteError << "\n";
+            exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
+        }
+        P.inOut->logMain << "Finished STAR-Spatial HD molecule export: records="
+                         << hdWriter.recordCount()
+                         << " path=" << hdMoleculeOutPath
+                         << endl;
     }
 
     size_t nCbGeneSeg = 0;

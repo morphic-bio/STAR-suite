@@ -3,8 +3,13 @@
 #include "ReadAlign.h"
 #include "Transcriptome.h"
 #include "ErrorWarning.h"
+#if defined(WITH_CHROMAP) && WITH_CHROMAP
+#include <htslib/bgzf.h>
+#include <htslib/tbx.h>
+#else
 #include "htslib/htslib/bgzf.h"
 #include "htslib/htslib/tbx.h"
+#endif
 #include <fstream>
 #include <sstream>
 #include <algorithm>

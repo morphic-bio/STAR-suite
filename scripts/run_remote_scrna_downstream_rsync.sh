@@ -34,7 +34,7 @@ Options:
   --output-name NAME         Output directory name copied back under sample-dir
                              (default: downstream_genefull_velocyto_cellbender_remote)
   --run-cellbender           Enable CellBender
-  --adaptive-filter          Enable adaptive filtering
+  --adaptive-filter          Enable adaptive n_genes and MT percentage filtering
   --cellbender-cpu-cores N   Pass through to downstream wrapper
   --docker-image IMAGE       Pass through to downstream wrapper
   --cellbender-image IMAGE   Pass through to downstream wrapper
@@ -156,7 +156,9 @@ SCRIPTS_TO_STAGE=(
   "scripts/integrate_feature_library.py"
   "scripts/postprocess_downstream_filters.py"
   "scripts/compute_adaptive_qc_threshold.py"
-  "scripts/generate_qc_histogram.py"
+  "scripts/scrna_mt_adaptive.py"
+  "scripts/apply_adaptive_mt_filter.py"
+  "scripts/generate_qc_histogram_mt_adaptive.py"
   "scripts/propagate_anndata_layer.py"
   "scripts/add_cellbender_layer_from_h5.py"
 )

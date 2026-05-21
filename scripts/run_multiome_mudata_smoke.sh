@@ -8,6 +8,7 @@ EXTRACT_MEX="${REPO_ROOT}/scripts/extract_cr_feature_type_mex.py"
 BUILD_MUDATA="${REPO_ROOT}/scripts/build_multiome_mudata.py"
 PACKAGE_GENEFULL="${REPO_ROOT}/scripts/package_star_genefull_mex.py"
 PREPARE_VELOCYTO="${REPO_ROOT}/scripts/prepare_velocyto_mex.py"
+ALLOW_LEGACY_PREPARE_VELOCYTO="${ALLOW_LEGACY_PREPARE_VELOCYTO:-0}"
 LOCAL_DOWNSTREAM="${REPO_ROOT}/scripts/run_scrna_downstream_gene_full_velocyto.sh"
 REMOTE_DOWNSTREAM="${REPO_ROOT}/scripts/run_remote_scrna_downstream_rsync.sh"
 REMOTE_CELLBENDER="${REPO_ROOT}/scripts/run_remote_cellbender_rsync.sh"
@@ -160,9 +161,12 @@ ARC_OUT="$(realpath "${ARC_OUT}")"
 [[ -d "${ARC_OUT}/filtered_feature_bc_matrix" ]] || { echo "ERROR: missing ${ARC_OUT}/filtered_feature_bc_matrix" >&2; exit 1; }
 [[ -f "${ARC_OUT}/per_barcode_metrics.csv" ]] || { echo "ERROR: missing ${ARC_OUT}/per_barcode_metrics.csv" >&2; exit 1; }
 
-for helper in "${EXTRACT_MEX}" "${BUILD_MUDATA}" "${PACKAGE_GENEFULL}" "${PREPARE_VELOCYTO}" "${LOCAL_DOWNSTREAM}"; do
+for helper in "${EXTRACT_MEX}" "${BUILD_MUDATA}" "${PACKAGE_GENEFULL}" "${LOCAL_DOWNSTREAM}"; do
   [[ -f "${helper}" ]] || { echo "ERROR: missing helper ${helper}" >&2; exit 1; }
 done
+if [[ "${ALLOW_LEGACY_PREPARE_VELOCYTO}" == "1" ]]; then
+  [[ -f "${PREPARE_VELOCYTO}" ]] || { echo "ERROR: missing helper ${PREPARE_VELOCYTO}" >&2; exit 1; }
+fi
 
 OUT_DIR="${OUT_DIR:-${REPO_ROOT}/tests/multiome_mudata_smoke_output_$(date -u +%Y%m%dT%H%M%SZ)}"
 OUT_DIR="$(realpath -m "${OUT_DIR}")"
@@ -252,12 +256,17 @@ velocyto_packaging_ok() {
 ensure_velocyto_packaging() {
   local run_dir="$1"
   if velocyto_packaging_ok "${run_dir}"; then
-    log "Velocyto MEX packaging is present"
+    log "Native Velocyto MEX packaging is present"
     return 0
   fi
 
-  log "Velocyto MEX packaging missing or incomplete; regenerating with prepare_velocyto_mex.py"
-  python3 "${PREPARE_VELOCYTO}" --run-dir "${run_dir}" > "${OUT_DIR}/logs/prepare_velocyto_mex.log"
+  if [[ "${ALLOW_LEGACY_PREPARE_VELOCYTO}" == "1" ]]; then
+    log "WARNING: native Velocyto MEX missing; using legacy prepare_velocyto_mex.py fallback"
+    python3 "${PREPARE_VELOCYTO}" --run-dir "${run_dir}" > "${OUT_DIR}/logs/prepare_velocyto_mex.log"
+  else
+    echo "ERROR: Native Velocyto MEX packaging is missing under ${run_dir}/outs" >&2
+    exit 1
+  fi
   if ! velocyto_packaging_ok "${run_dir}"; then
     echo "ERROR: Velocyto MEX packaging is still incomplete after regeneration" >&2
     exit 1

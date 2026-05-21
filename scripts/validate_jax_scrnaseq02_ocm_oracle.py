@@ -131,13 +131,38 @@ def main() -> None:
         "--max-tag-proportion-delta",
         type=float,
         default=0.25,
-        help="Maximum absolute OCM tag proportion delta before failing (default: 0.25)",
+        help=(
+            "Maximum absolute OCM tag proportion delta before warning "
+            "(default: 0.25). Use --strict-tag-proportion-delta to fail on this."
+        ),
+    )
+    parser.add_argument(
+        "--strict-tag-proportion-delta",
+        action="store_true",
+        help=(
+            "Fail when --max-tag-proportion-delta is exceeded. By default this "
+            "is a warning because the oracle is exonic Gene while production "
+            "STAR outputs use GeneFull/EmptyDrops_CR cell calls."
+        ),
     )
     parser.add_argument(
         "--min-oracle-overlap",
         type=float,
         default=0.0,
-        help="Optional minimum fraction of STAR-called OCM barcodes present in Cell Ranger oracle tags",
+        help=(
+            "Optional minimum fraction of STAR-called OCM barcodes present in "
+            "Cell Ranger oracle tags. This is precision against the oracle and "
+            "is usually left unset for GeneFull production outputs."
+        ),
+    )
+    parser.add_argument(
+        "--min-oracle-recall",
+        type=float,
+        default=0.90,
+        help=(
+            "Minimum fraction of Cell Ranger oracle barcodes recovered in the "
+            "matching STAR OCM tag before failing (default: 0.90)."
+        ),
     )
     args = parser.parse_args()
 
@@ -228,33 +253,61 @@ def main() -> None:
     output_props = proportions(output_counts)
     tag_delta = max_abs_delta(oracle_props, output_props, OCM_IDS)
     if output_total > 0 and tag_delta > args.max_tag_proportion_delta:
-        errors.append(
-            f"max OCM tag proportion delta {tag_delta:.3f} exceeds {args.max_tag_proportion_delta:.3f}"
+        message = (
+            f"max OCM tag proportion delta {tag_delta:.3f} exceeds "
+            f"{args.max_tag_proportion_delta:.3f}; STAR GeneFull/EmptyDrops_CR "
+            "may call additional cells relative to the exonic Cell Ranger oracle"
         )
+        if args.strict_tag_proportion_delta:
+            errors.append(message)
+        else:
+            warnings.append(message)
 
     overlap_by_tag: dict[str, dict[str, float | int]] = {}
     output_overlap_total = 0
     output_cell_total_for_overlap = 0
+    oracle_overlap_total = 0
+    oracle_cell_total_for_overlap = 0
     for key in OCM_IDS:
         oracle_set = set(oracle_cells.get(key, []))
         output_set = set(output_cells.get(key, []))
         overlap = len(oracle_set & output_set)
-        denom = len(output_set)
-        frac = overlap / denom if denom else 0.0
+        output_denom = len(output_set)
+        oracle_denom = len(oracle_set)
+        output_frac = overlap / output_denom if output_denom else 0.0
+        oracle_recall = overlap / oracle_denom if oracle_denom else 0.0
         output_overlap_total += overlap
-        output_cell_total_for_overlap += denom
+        output_cell_total_for_overlap += output_denom
+        oracle_overlap_total += overlap
+        oracle_cell_total_for_overlap += oracle_denom
         overlap_by_tag[key] = {
-            "output": denom,
-            "oracle": len(oracle_set),
+            "output": output_denom,
+            "oracle": oracle_denom,
             "overlap": overlap,
-            "overlap_fraction_of_output": frac,
+            "overlap_fraction_of_output": output_frac,
+            "oracle_recall": oracle_recall,
+            "star_extra": len(output_set - oracle_set),
+            "oracle_missed": len(oracle_set - output_set),
         }
+        if oracle_denom and oracle_recall < args.min_oracle_recall:
+            errors.append(
+                f"{key}: oracle recall {oracle_recall:.3f} is below minimum "
+                f"{args.min_oracle_recall:.3f}"
+            )
     overall_overlap = (
         output_overlap_total / output_cell_total_for_overlap if output_cell_total_for_overlap else 0.0
+    )
+    overall_oracle_recall = (
+        oracle_overlap_total / oracle_cell_total_for_overlap if oracle_cell_total_for_overlap else 0.0
     )
     if args.min_oracle_overlap and overall_overlap < args.min_oracle_overlap:
         errors.append(
             f"oracle barcode overlap {overall_overlap:.3f} is below minimum {args.min_oracle_overlap:.3f}"
+        )
+    if oracle_cell_total_for_overlap and overall_oracle_recall < args.min_oracle_recall:
+        errors.append(
+            f"overall oracle recall {overall_oracle_recall:.3f} is below minimum "
+            f"{args.min_oracle_recall:.3f}"
         )
 
     report = {
@@ -273,8 +326,10 @@ def main() -> None:
         "oracle_tag_proportions": oracle_props,
         "output_tag_proportions": output_props,
         "max_tag_proportion_delta": tag_delta,
+        "strict_tag_proportion_delta": bool(args.strict_tag_proportion_delta),
         "oracle_overlap": {
             "overall_fraction_of_output": overall_overlap,
+            "overall_fraction_of_oracle": overall_oracle_recall,
             "by_tag": overlap_by_tag,
         },
         "warnings": warnings,
@@ -290,6 +345,7 @@ def main() -> None:
     print(f"Oracle OCM cells: {oracle_counts} total={sum(oracle_counts.values())}")
     print(f"Max tag proportion delta: {tag_delta:.3f}")
     print(f"Oracle overlap fraction of output: {overall_overlap:.3f}")
+    print(f"Oracle recall fraction: {overall_oracle_recall:.3f}")
     print("Gene model caveat: oracle is Gene/exonic; matrix-value parity is not asserted.")
     print(f"Report: {report_path}")
     if warnings:

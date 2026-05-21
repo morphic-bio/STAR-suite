@@ -30,8 +30,13 @@
 #define ERROR_OUT string ( __FILE__ ) +":"+ to_string ( (uint) __LINE__ ) +":"+ string ( __FUNCTION__ )
 
 //external libs
+#if defined(WITH_CHROMAP) && WITH_CHROMAP
+#define SAMTOOLS_BGZF_H <htslib/bgzf.h>
+#define SAMTOOLS_SAM_H  <htslib/sam.h>
+#else
 #define SAMTOOLS_BGZF_H "htslib/htslib/bgzf.h"
 #define SAMTOOLS_SAM_H  "htslib/htslib/sam.h"
+#endif
 
 using namespace std;
 

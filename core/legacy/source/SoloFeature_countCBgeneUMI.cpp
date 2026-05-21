@@ -6,6 +6,7 @@
 #include "systemFunctions.h"
 #include "SoloReadInfoLoader.h"
 #include "SoloReadInfoSink.h"
+#include "SoloMemoryProfile.h"
 #include "hash_shims_cpp_compat.h"  // For unpackReadIdCbUmi
 #include "ErrorWarning.h"
 #include <algorithm>
@@ -81,6 +82,8 @@ void populateBridgeReadAccounting(SoloFeature &feat,
 void SoloFeature::countCBgeneUMI()
 {    
     const auto countStart = std::chrono::steady_clock::now();
+    soloMemoryProfileCheckpoint(P.inOut->logMain,
+                              std::string("countCBgeneUMI_enter:") + SoloFeatureTypes::Names[featureType]);
 
     // Skip legacy Solo counting when inline CB correction is active, but continue to inline-hash flow
     if (pSolo.inlineCBCorrection) {
@@ -124,16 +127,23 @@ void SoloFeature::countCBgeneUMI()
     }
 #endif
 
-    // Allocate packedReadInfo if:
-    // 1. readInfoYes is set for this feature type, OR
-    // 2. trackReadIdsForTags is enabled (for sorted BAM CB/UB tag injection)
-    // Non-Flex direct bridge mode does not use packed read info for this benchmark path.
-    // Skip only if soloFlexMinimalMemory is on AND inlineHashMode is on AND trackReadIdsForTags is off
-    bool needPackedReadInfo = pSolo.trackReadIdsForTags
-        || (pSolo.readInfoYes[featureType] && !nonFlexBridgePath);
+    // Allocate packedReadInfo only for feature streams that actually carry a
+    // read index. trackReadIdsForTags is a run-level requirement; forcing it
+    // onto every Gene-like feature is unsafe because stride-2 streams do not
+    // have rGU[rguR]. In that case collapseUMIall() would read the next field
+    // as a readId and create impossible readId->CB conflicts.
+    bool needPackedReadInfo =
+        pSolo.readIndexYes[featureType] &&
+        (pSolo.trackReadIdsForTags || (pSolo.readInfoYes[featureType] && !nonFlexBridgePath));
     bool skipForMinimalMemory = pSolo.soloFlexMinimalMemory && pSolo.inlineHashMode && !pSolo.trackReadIdsForTags;
     if (needPackedReadInfo && !skipForMinimalMemory) {
         resetPackedStorage(nReadsInput);
+        {
+            std::ostringstream extra;
+            extra << "packedReadInfo_words=" << packedReadInfo.data.size()
+                  << " packedReadInfo_bytes_est=" << (packedReadInfo.data.size() * sizeof(uint64_t));
+            soloMemoryProfileCheckpoint(P.inOut->logMain, "packedReadInfo_allocated", extra.str());
+        }
         time(&rawTime);
 #ifdef SOLO_USE_PACKED_READINFO
         P.inOut->logMain << timeMonthDayTime(rawTime) << " ... Allocated and initialized packed readInfo array, nReadsInput = " << nReadsInput <<endl;
@@ -303,6 +313,13 @@ void SoloFeature::countCBgeneUMI()
         if (soloPhaseDebugEnabled()) {
             P.inOut->logMain << "Solo debug: starting collapseUMIall_fromHash" << endl;
         }
+        if (readFeatSum != nullptr && readFeatSum->inlineHash_ != nullptr) {
+            std::ostringstream extra;
+            extra << "inlineHash_entries=" << kh_size(readFeatSum->inlineHash_);
+            soloMemoryProfileCheckpoint(P.inOut->logMain, "collapseUMIall_fromHash_begin", extra.str());
+        } else {
+            soloMemoryProfileCheckpoint(P.inOut->logMain, "collapseUMIall_fromHash_begin");
+        }
         const auto hashCollapseStart = std::chrono::steady_clock::now();
         collapseUMIall_fromHash();
         if (soloPhaseDebugEnabled()) {
@@ -370,6 +387,7 @@ void SoloFeature::countCBgeneUMI()
 
         SoloReadInfoLoader loader;
         CountingSink sink;
+        soloMemoryProfileCheckpoint(P.inOut->logMain, "CountingSink_loader_begin");
         for (int ii=0; ii<P.runThreadN; ii++) {
             // Defensive check: verify readFeatAll[ii] and its streamReads are valid
             // This guards against wiring issues in SoloFeature_sumThreads or featureInd mismatch
@@ -399,6 +417,7 @@ void SoloFeature::countCBgeneUMI()
         }
         readFlagCounts.countsAddNoCBarray(readFeatSum->readFlag.flagCountsNoCB);
 
+        soloMemoryProfileCheckpoint(P.inOut->logMain, "CountingSink_loader_done");
         sink.finalize(*this);
 
 #ifdef DEBUG_CB_UB_PARITY
@@ -450,9 +469,16 @@ void SoloFeature::countCBgeneUMI()
         }
 
         // Collapse UMIs once here; CountingSink no longer calls collapseUMIall.
+        soloMemoryProfileCheckpoint(P.inOut->logMain, "collapseUMIall_begin");
         const auto collapseStart = std::chrono::steady_clock::now();
         collapseUMIall();
         P.inOut->logMain << "Solo timing: collapseUMIall (countCBgeneUMI wrapper) " << soloElapsedSeconds(collapseStart) << " s" << endl;
+        {
+            std::ostringstream extra;
+            extra << "countCellGeneUMI_slots=" << countCellGeneUMI.size()
+                  << " countCellGeneUMIindex_len=" << countCellGeneUMIindex.size();
+            soloMemoryProfileCheckpoint(P.inOut->logMain, "collapseUMIall_done", extra.str());
+        }
 
         // Free temporary arrays allocated via CountingSink::finalize
         if (rGeneUMI) { delete[] rGeneUMI; rGeneUMI=nullptr; }

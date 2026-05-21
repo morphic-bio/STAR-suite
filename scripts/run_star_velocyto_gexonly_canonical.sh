@@ -23,7 +23,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 STAR_BIN="${STAR_BIN:-${REPO_ROOT}/core/legacy/source/STAR}"
-PREPARE_VELOCYTO_MEX="${REPO_ROOT}/scripts/prepare_velocyto_mex.py"
 GENOME_DIR="${UCSF_VELOCYTO_GEX_GENOME_DIR:-/storage/autoindex_110_44/bulk_index}"
 WHITELIST="${UCSF_VELOCYTO_GEX_CB_WHITELIST:-/home/lhhung/cellranger-9.0.1/lib/python/cellranger/barcodes/3M-february-2018_TRU.txt}"
 SOLO_STRAND="${UCSF_VELOCYTO_GEX_STRAND:-Forward}"
@@ -135,8 +134,9 @@ fi
   --soloFeatures Gene GeneFull Velocyto
 
 if [[ "${PREPARE_MEX}" -eq 1 ]]; then
-  [[ -f "${PREPARE_VELOCYTO_MEX}" ]] || die "Missing ${PREPARE_VELOCYTO_MEX}"
-  python3 "${PREPARE_VELOCYTO_MEX}" --run-dir "${OUT_PREFIX}"
+  [[ -f "${OUT_PREFIX}/outs/velocyto_feature_bc_matrix_manifest.json" ]] || die "Missing native Velocyto MEX manifest in ${OUT_PREFIX}/outs"
+  [[ -f "${OUT_PREFIX}/outs/raw_velocyto_feature_bc_matrix/matrix.mtx.gz" ]] || die "Missing native raw Velocyto MEX in ${OUT_PREFIX}/outs"
+  [[ -f "${OUT_PREFIX}/outs/filtered_velocyto_feature_bc_matrix/matrix.mtx.gz" ]] || die "Missing native filtered Velocyto MEX in ${OUT_PREFIX}/outs"
 fi
 
 echo "OK: ${OUT_PREFIX}"

@@ -6,13 +6,13 @@ REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 UNIT_BIN="${REPO_ROOT}/core/legacy/source/ocm_multi_unit_tests"
 FIXTURE_ROOT="${REPO_ROOT}/tests/fixtures/ocm_multi_velocyto_shuffle"
 RUN_DIR="${FIXTURE_ROOT}/run"
-OUTS_DIR="${RUN_DIR}/outs"
+OUTS_DIR="${FIXTURE_ROOT}/outs"
 
 if [[ ! -x "${UNIT_BIN}" ]]; then
   make -C "${REPO_ROOT}/core/legacy/source" -j8 ocm-multi-unit-tests
 fi
 
-rm -rf "${OUTS_DIR}" "${FIXTURE_ROOT}/samples"
+rm -rf "${OUTS_DIR}" "${RUN_DIR}/outs" "${FIXTURE_ROOT}/samples"
 unset OCM_TEST_RUN_DIR OCM_TEST_CONFIG OCM_TEST_LOG
 export OCM_TEST_FIXTURE_ROOT="${FIXTURE_ROOT}"
 "${UNIT_BIN}" materialize
@@ -41,7 +41,7 @@ assert nnz == 1, nnz
 gene_idx, cell_idx, count = map(int, lines[1].split())
 assert gene_idx == 1 and cell_idx == 1 and count == 10, (gene_idx, cell_idx, count)
 
-gex_dir = fixture / "run/outs/per_sample_outs/GCM1-Day-4/count/sample_raw_feature_bc_matrix"
+gex_dir = fixture / "outs/per_sample_outs/GCM1-Day-4/count/sample_raw_feature_bc_matrix"
 with gzip.open(gex_dir / "matrix.mtx.gz", "rt", encoding="utf-8") as handle:
     gex_lines = [line.strip() for line in handle if line.strip() and not line.startswith("%")]
 _, gex_barcodes, gex_nnz = map(int, gex_lines[0].split())

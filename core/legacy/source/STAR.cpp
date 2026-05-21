@@ -26,6 +26,7 @@
 #include "bamSortByCoordinate.h"
 #include "SamtoolsSorter.h"
 #include "Transcriptome.h"
+#include "CountingSinkStress.h"
 #include "signalFromBAM.h"
 #include "mapThreadsSpawn.h"
 #include "SjdbClass.h"
@@ -425,7 +426,8 @@ int main(int argInN, char *argIn[])
                           << flush;
 
     // runMode
-    if (P.runMode == "alignReads" || P.runMode == "soloCellFiltering" || P.runMode == "hashCacheGenerate")
+    if (P.runMode == "alignReads" || P.runMode == "soloCellFiltering" || P.runMode == "hashCacheGenerate"
+        || P.runMode == "countingSinkStress")
     {
         // continue
     }
@@ -481,6 +483,12 @@ int main(int argInN, char *argIn[])
     if (P.runMode == "soloCellFiltering") {
         Transcriptome transcriptomeCellFilter(P);
         Solo soloCellFilter(P, transcriptomeCellFilter);
+    }
+
+    if (P.runMode == "countingSinkStress") {
+        runCountingSinkStress(P);
+        P.cleanupParInfoForExit();
+        exit(0);
     }
 
     ////////////////////////////////////////////////////////////////////////
@@ -1041,6 +1049,8 @@ int main(int argInN, char *argIn[])
 
     // SAM headers
     samHeaders(P, *genomeMain.genomeOut.g, transcriptomeMain);
+    g_bamHeaderChrNames = &genomeMain.genomeOut.g->chrNameAll;
+    g_bamHeaderChrLengths = &genomeMain.genomeOut.g->chrLengthAll;
 
     // initialize chimeric parameters here - note that chimeric parameters require samHeader
     P.pCh.initialize(&P);
@@ -1993,6 +2003,7 @@ int main(int argInN, char *argIn[])
     
     // Finalize unsorted BAM with CB/UB tag injection (if buffered mode was used)
     bamUnsortedWithTags(P, *genomeMain.genomeOut.g, soloMain);
+    closeDirectOcmBamRouter(P);
     
     // Transcript quantification (TranscriptVB mode)
     // TODO: Debug - check if transcriptomeMain is valid

@@ -1,11 +1,13 @@
 #include "OcmMultiConfig.h"
 #include "OcmMultiMaterialize.h"
 #include "PfMultiConfig.h"
+#include "PfMultiMerge.h"
 #include "VelocytoMexWriter.h"
 #include "Parameters.h"
 #include "InOutStreams.h"
 #include "SoloFeature.h"
 
+#include <climits>
 #include <cstdlib>
 #include <fstream>
 #include <sys/stat.h>
@@ -13,6 +15,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 static int failures = 0;
 
@@ -52,6 +55,28 @@ static int testBarcodeClassifier() {
     }
     if (check(OcmMultiMaterialize::classifyBarcodeTag("AAAAAAAAAAAAAAAA-1").empty(),
               "unknown overhang rejected") != 0) {
+        return 1;
+    }
+    if (check(OcmMultiMaterialize::tag8ForOcmId("OB1") == "GTGTGTGT",
+              "OB1 TAG8 mapping") != 0) {
+        return 1;
+    }
+    if (check(OcmMultiMaterialize::appendFlexTag8("AAACCCTGTAAGCGCG") ==
+                  "AAACCCTGTAAGCGCGGTGTGTGT",
+              "append OCM TAG8 from CB16 overhang") != 0) {
+        return 1;
+    }
+    if (check(OcmMultiMaterialize::appendFlexTag8("AAAAAAAAAAAAAAAA").empty(),
+              "do not append TAG8 to unknown OCM overhang") != 0) {
+        return 1;
+    }
+    if (check(OcmMultiMaterialize::classifyBarcodeTag("AAAAAAAAAAAAAAAAGTGTGTGT-1") == "OB1",
+              "classify OCM TAG8 suffix before CB16 overhang") != 0) {
+        return 1;
+    }
+    if (check(OcmMultiMaterialize::stripFlexTag8("AAACCCTGTAAGCGCGGTGTGTGT-1") ==
+                  "AAACCCTGTAAGCGCG-1",
+              "strip OCM TAG8 while preserving GEM suffix") != 0) {
         return 1;
     }
     return 0;
@@ -165,7 +190,7 @@ static std::string downstreamSamplesRoot(const std::string& root, const std::str
 static int testMaterializerTiny() {
     const std::string root = fixtureRoot();
     const std::string runDir = materializeRunDir(root);
-    const std::string outsDir = runDir + "/outs";
+    const std::string outsDir = downstreamSamplesRoot(root, runDir) + "outs";
 
     Parameters P;
     P.inOut = new InOutStreams();
@@ -217,6 +242,102 @@ static int testMaterializerTiny() {
     return 0;
 }
 
+static bool barcodeHasGemSuffix(const std::string& bc) {
+    const size_t dashPos = bc.find_last_of('-');
+    if (dashPos == std::string::npos || dashPos == bc.size() - 1) {
+        return false;
+    }
+    for (size_t i = dashPos + 1; i < bc.size(); ++i) {
+        if (!std::isdigit(static_cast<unsigned char>(bc[i]))) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static int testCrBarcodeSuffixNormalization() {
+    const std::vector<std::string> unsuffixed = {"AAACCCTGTAAGCGCG", "AAACCCGCAACTAGAC"};
+    const std::vector<uint32_t> colIndices = {0, 1};
+    std::ostringstream log;
+    const PfMultiMerge::CrBarcodeLayout layout =
+        PfMultiMerge::buildCrBarcodeLayoutForColumns(unsuffixed,
+                                                     colIndices,
+                                                     "1",
+                                                     "TRU",
+                                                     "TRU",
+                                                     log);
+    if (check(layout.sortedBarcodes.size() == 2, "CR layout keeps both barcodes") != 0) {
+        return 1;
+    }
+    for (const std::string& bc : layout.sortedBarcodes) {
+        if (check(barcodeHasGemSuffix(bc), "CR layout adds GEM suffix: " + bc) != 0) {
+            return 1;
+        }
+    }
+    if (check(layout.sortedBarcodes[0] < layout.sortedBarcodes[1], "CR layout sorts lexicographically") != 0) {
+        return 1;
+    }
+    if (check(layout.sourceColToSorted[0] == 1 && layout.sourceColToSorted[1] == 0,
+              "CR layout remap matches sorted order") != 0) {
+        return 1;
+    }
+
+    const std::string root = fixtureRoot();
+    const std::string srcDir = root + "/run/Solo.out/GeneFull/raw";
+    const std::string tmpDir = root + "/run/_cr_suffix_test_raw";
+    const std::string outDir = root + "/run/_cr_suffix_test_out";
+    std::string cmd = "rm -rf \"" + tmpDir + "\" \"" + outDir + "\" && mkdir -p \"" + tmpDir +
+                      "\" && cp \"" + srcDir + "/features.tsv\" \"" + srcDir + "/matrix.mtx\" \"" +
+                      tmpDir + "/\"";
+    if (system(cmd.c_str()) != 0) {
+        return 1;
+    }
+    {
+        std::ifstream in((srcDir + "/barcodes.tsv").c_str());
+        std::ofstream out((tmpDir + "/barcodes.tsv").c_str());
+        std::string line;
+        while (std::getline(in, line)) {
+            const size_t dash = line.find_last_of('-');
+            if (dash != std::string::npos) {
+                line = line.substr(0, dash);
+            }
+            out << line << "\n";
+        }
+    }
+    const PfMultiMerge::MexAxes axes = PfMultiMerge::readMexAxes(tmpDir);
+    std::vector<uint32_t> allCols(axes.barcodes.size());
+    for (size_t i = 0; i < allCols.size(); ++i) {
+        allCols[i] = static_cast<uint32_t>(i);
+    }
+    const PfMultiMerge::CrBarcodeLayout fileLayout =
+        PfMultiMerge::buildCrBarcodeLayoutForColumns(axes.barcodes,
+                                                     allCols,
+                                                     "1",
+                                                     "TRU",
+                                                     "TRU",
+                                                     log);
+    Parameters P;
+    P.runDirPerm = static_cast<mode_t>(0775);
+    if (PfMultiMerge::writeColumnSubsetMexGz(tmpDir,
+                                             outDir,
+                                             axes,
+                                             fileLayout,
+                                             P,
+                                             log) != 0) {
+        check(false, "writeColumnSubsetMexGz on unsuffixed fixture");
+        return 1;
+    }
+    const PfMultiMerge::MexAxes outAxes = PfMultiMerge::readMexAxes(outDir);
+    for (const std::string& bc : outAxes.barcodes) {
+        if (check(barcodeHasGemSuffix(bc), "streamed MEX barcodes suffixed: " + bc) != 0) {
+            return 1;
+        }
+    }
+    cmd = "rm -rf \"" + tmpDir + "\" \"" + outDir + "\"";
+    (void)system(cmd.c_str());
+    return 0;
+}
+
 static int testVelocytoRunWriterTiny() {
     const std::string root = fixtureRoot();
     const std::string runDir = root + "/run";
@@ -259,6 +380,9 @@ int main(int argc, char** argv) {
     if (mode == "sample_id") {
         return testSampleIdValidation();
     }
+    if (mode == "cr_barcode") {
+        return testCrBarcodeSuffixNormalization();
+    }
     if (testBarcodeClassifier() != 0) {
         return 1;
     }
@@ -266,6 +390,9 @@ int main(int argc, char** argv) {
         return 1;
     }
     if (testSampleIdValidation() != 0) {
+        return 1;
+    }
+    if (testCrBarcodeSuffixNormalization() != 0) {
         return 1;
     }
     if (testVelocytoRunWriterTiny() != 0) {

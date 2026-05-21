@@ -45,7 +45,7 @@ Options:
   --no-input-fastqs         Do not upload raw input FASTQs listed in the manifest
   --no-generated-fastqs     Do not upload STAR-generated Y/noY FASTQs
   --no-bams                 Do not upload BAMs
-  --include-fragments       Also upload ATAC fragments TSV.GZ files
+  --include-fragments       Also upload generated ATAC fragment sidecars/files
   --help
 EOF
 }
@@ -234,7 +234,7 @@ submit_sample() {
     append_generated_files "${batch_file}" "${inventory_file}" "${sample_dir}" "${sample_slug}" "generated_fastq" -path '*/y_separated/*' -name '*.fastq.gz'
   fi
   if [[ "${INCLUDE_FRAGMENTS}" == "1" ]]; then
-    append_generated_files "${batch_file}" "${inventory_file}" "${sample_dir}" "${sample_slug}" "generated_fragment" -name 'atac_fragments.tsv.gz'
+    append_generated_files "${batch_file}" "${inventory_file}" "${sample_dir}" "${sample_slug}" "generated_fragment" \( -name 'atac_fragments.tsv.gz' -o -name 'atac_fragments.bin' -o -name 'atac_fragments.bin.chroms.tsv' \)
   fi
 
   local file_count

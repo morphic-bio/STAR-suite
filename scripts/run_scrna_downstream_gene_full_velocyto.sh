@@ -10,7 +10,8 @@ DOUBLET_SCRIPT="${REPO_ROOT}/scripts/run_star_cell_doublets.R"
 FEATURE_GATHER_SCRIPT="${REPO_ROOT}/scripts/integrate_feature_library.py"
 POSTPROCESS_FILTERS="${REPO_ROOT}/scripts/postprocess_downstream_filters.py"
 COMPUTE_ADAPTIVE_QC="${REPO_ROOT}/scripts/compute_adaptive_qc_threshold.py"
-GENERATE_QC_HISTOGRAM="${REPO_ROOT}/scripts/generate_qc_histogram.py"
+APPLY_ADAPTIVE_MT="${REPO_ROOT}/scripts/apply_adaptive_mt_filter.py"
+GENERATE_QC_HISTOGRAM_MT="${REPO_ROOT}/scripts/generate_qc_histogram_mt_adaptive.py"
 PROPAGATE_LAYER="${REPO_ROOT}/scripts/propagate_anndata_layer.py"
 ADD_CELLBENDER_LAYER="${REPO_ROOT}/scripts/add_cellbender_layer_from_h5.py"
 INSPECT_ANNDATA="${INSPECT_ANNDATA:-${SC_RNA_SEQ_ROOT}/utilities/inspect_anndata.py}"
@@ -45,9 +46,9 @@ Options:
   --mito-genes PATH      Optional mito genes file for combineFilters.py
   --min-genes INT        Minimum genes cutoff (default: 200)
   --max-genes INT        Maximum genes cutoff (default: 2500)
-  --mt-pct-cutoff FLOAT  MT percentage cutoff (default: 5)
-  --adaptive-filter      Use adaptive max_genes threshold
-  --n-mad FLOAT          Number of MADs for adaptive filtering (default: 3)
+  --mt-pct-cutoff FLOAT  MT percentage floor/fixed cutoff (default: 5)
+  --adaptive-filter      Use adaptive n_genes and MT percentage thresholds
+  --n-mad FLOAT          Number of MADs for adaptive QC thresholds (default: 3)
   --docker-image IMAGE   Downstream container image (default: biodepot/scrna-matrices:latest)
   --feature-gather-image IMAGE
                          Feature-library integration image
@@ -172,7 +173,8 @@ PRIMARY_H5AD="${FILTERED_H5AD}"
 [[ -f "${FEATURE_GATHER_SCRIPT}" ]] || { echo "ERROR: Missing helper ${FEATURE_GATHER_SCRIPT}" >&2; exit 1; }
 [[ -f "${POSTPROCESS_FILTERS}" ]] || { echo "ERROR: Missing helper ${POSTPROCESS_FILTERS}" >&2; exit 1; }
 [[ -f "${COMPUTE_ADAPTIVE_QC}" ]] || { echo "ERROR: Missing helper ${COMPUTE_ADAPTIVE_QC}" >&2; exit 1; }
-[[ -f "${GENERATE_QC_HISTOGRAM}" ]] || { echo "ERROR: Missing helper ${GENERATE_QC_HISTOGRAM}" >&2; exit 1; }
+[[ -f "${APPLY_ADAPTIVE_MT}" ]] || { echo "ERROR: Missing helper ${APPLY_ADAPTIVE_MT}" >&2; exit 1; }
+[[ -f "${GENERATE_QC_HISTOGRAM_MT}" ]] || { echo "ERROR: Missing helper ${GENERATE_QC_HISTOGRAM_MT}" >&2; exit 1; }
 [[ -f "${PROPAGATE_LAYER}" ]] || { echo "ERROR: Missing helper ${PROPAGATE_LAYER}" >&2; exit 1; }
 [[ -f "${ADD_CELLBENDER_LAYER}" ]] || { echo "ERROR: Missing helper ${ADD_CELLBENDER_LAYER}" >&2; exit 1; }
 [[ -f "${INSPECT_ANNDATA}" ]] || { echo "ERROR: Missing helper ${INSPECT_ANNDATA}" >&2; exit 1; }
@@ -327,16 +329,18 @@ docker "${DOCKER_ARGS[@]}" \
   python3 /usr/local/bin/combineFilters.py "${COMBINE_ARGS[@]}"
 
 if [[ "${ADAPTIVE_FILTER}" == "1" ]]; then
+  run_py "${APPLY_ADAPTIVE_MT}" \
+    --input-h5ad "${UNFILTERED_H5AD}" \
+    --threshold-json "${ADAPTIVE_QC_JSON}" \
+    --mt-floor "${MT_PCT_CUTOFF}" \
+    --n-mad "${N_MAD}"
+
   docker "${DOCKER_ARGS[@]}" \
     "${DOCKER_IMAGE}" \
-    python3 "${GENERATE_QC_HISTOGRAM}" \
+    python3 "${GENERATE_QC_HISTOGRAM_MT}" \
       --input-h5ad "${UNFILTERED_H5AD}" \
       --output-dir "${OUTPUT_DIR}" \
-      --min-genes "${MIN_GENES}" \
-      --max-genes "${EFFECTIVE_MAX_GENES}" \
-      --mt-pct-cutoff "${MT_PCT_CUTOFF}" \
-      --n-mad "${N_MAD}" \
-      --raw-adaptive-max "${RAW_ADAPTIVE_MAX_GENES}"
+      --threshold-json "${ADAPTIVE_QC_JSON}"
 fi
 
 run_py "${POSTPROCESS_FILTERS}" \

@@ -111,7 +111,10 @@ def main() -> None:
     else:
         row_indices = np.arange(len(raw_feature_ids), dtype=np.int64)
 
-    velocyto_barcode_index = build_indexer(velocyto_barcodes)
+    velocyto_barcode_keys = [strip_barcode_suffix(barcode) for barcode in velocyto_barcodes]
+    if len(set(velocyto_barcode_keys)) != len(velocyto_barcode_keys):
+        raise ValueError("Velocyto barcodes are not unique after -1 suffix normalization")
+    velocyto_barcode_index = build_indexer(velocyto_barcode_keys)
     raw_barcodes = [strip_barcode_suffix(barcode) for barcode in adata_raw.obs_names.tolist()]
     missing_barcodes = [barcode for barcode in raw_barcodes if barcode not in velocyto_barcode_index]
     if missing_barcodes:

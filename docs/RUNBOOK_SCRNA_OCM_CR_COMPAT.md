@@ -28,8 +28,10 @@ The OCM-specific work is only:
 
 1. parse Cell Ranger multi-style OCM config/sample metadata;
 2. use the correct GEM-X whitelist family;
-3. demultiplex raw and filtered GEX matrices by OCM overhang;
-4. write Cell Ranger-style per-sample outputs and downstream per-sample
+3. promote `CB16` to the effective `CB16+OCM_TAG8` barcode before barcode
+   correction and counting;
+4. demultiplex raw and filtered GEX matrices by OCM tag;
+5. write Cell Ranger-style per-sample outputs and downstream per-sample
    GeneFull/Velocyto mirrors.
 
 The code-level implementation plan for item 4 lives in
@@ -93,6 +95,13 @@ make -C core/legacy/source -j8 STAR
 
 export STAR_SOLO_NONFLEX_HASH_BRIDGE=1
 
+export STAR_VELOCYTO_LOW_MEM=1
+export STAR_VELOCYTO_INTEGRATED_HASH_SPILL_BUCKETS=8192
+export STAR_VELOCYTO_UMI_RESERVE_CAP=32
+export STAR_SOLO_BINARY_SPOOL=1
+export MALLOC_ARENA_MAX=2
+export MALLOC_TRIM_THRESHOLD_=131072
+
 core/legacy/source/STAR \
   --runThreadN 32 \
   --dynamicThreadInterface 1 \
@@ -115,6 +124,7 @@ core/legacy/source/STAR \
   --soloBarcodeReadLength 0 \
   --soloCBwhitelist /storage/scRNAseq_output/whitelists/3M-3pgex-may-2023_TRU.txt \
   --soloCBmatchWLtype 1MM_multi_Nbase_pseudocounts \
+  --soloInlineCBCorrection yes \
   --soloUMIfiltering MultiGeneUMI_CR \
   --soloUMIdedup 1MM_CR \
   --soloMultiMappers Unique \
@@ -127,6 +137,7 @@ core/legacy/source/STAR \
   --soloInlineHashMode no \
   --ocmMultiEnable yes \
   --ocmMultiConfig /mnt/pikachu/JAX_scRNAseq02/cellranger-logs/config.csv \
+  --ocmMultiBarcodeMode flex \
   --ocmMultiOutputCompat cellranger
 ```
 
@@ -135,12 +146,20 @@ Notes:
 - If using a source checkout, clean rebuild before crash or parity debugging.
 - Use `GeneFull Velocyto` for production OCM runs so downstream h5ad generation
   receives both expression counts and raw/filtered Velocyto layers.
+- Use `STAR_VELOCYTO_LOW_MEM=1` for OCM production. This selects the Velocyto
+  range-spill path and avoids holding all per-CB UMI maps in RAM at once.
 - Use `--soloInlineHashMode no` on the production BAM/Y-removal surface. The
   inline hash no-BAM surface is useful for benchmarks, but it is not the OCM
   production path.
 - `--ocmMultiEnable yes` materializes OCM outputs natively after Solo completes.
   `--ocmMultiConfig` may be omitted only when `--pfMultiConfig` points at the
   same Cell Ranger multi config with `[samples]`.
+- `--ocmMultiBarcodeMode flex` makes the effective correction/counting barcode
+  `CB16+OCM_TAG8`, matching the STAR-Flex strategy of putting the sample tag on
+  the barcode axis before correction, UMI collapse, EmptyDrops, and Velocyto.
+- `--soloInlineCBCorrection yes` is required in `flex` mode because the
+  effective 24 bp barcode uses the 64-bit inline corrector; the legacy
+  `cbWLhash` path is 32-bit and is intentionally rejected for this mode.
 - `--ocmMultiOutputCompat cellranger` is the only implemented layout mode.
 - Do not add `--soloCellFilter CellRanger2.2`; that is the vanilla STARsolo
   path and is not the STAR-suite standard.
@@ -156,18 +175,23 @@ Solo.out/GeneFull/raw/
 Solo.out/GeneFull/filtered/
 ```
 
-`--ocmMultiEnable yes` splits both matrices into per-sample outputs using the
-corrected cell barcode. Strip any `-1` suffix only for classification; preserve
-the output barcode namespace used by STAR-suite.
+With `--ocmMultiBarcodeMode flex`, STAR first derives the OCM tag from bases
+8-9 of the raw `CB16`, appends the fixed OCM TAG8 suffix, and corrects/counts
+on that effective `CB16+TAG8` barcode. `--ocmMultiEnable yes` then splits raw
+and filtered matrices into per-sample outputs using the corrected effective
+barcode. Strip the TAG8 and any `-1` suffix only for Cell Ranger-compatible
+output labels and classification; preserve the STAR-suite matrix column order
+while streaming the split.
 
-OCM assignment is based on bases 8-9 of the 16 bp cell barcode:
+OCM assignment is based on bases 8-9 of the 16 bp cell barcode and maps to the
+following internal TAG8 suffixes:
 
-| Overhang | OCM ID |
-| --- | --- |
-| `GT` | `OB1` |
-| `CA` | `OB2` |
-| `TC` | `OB3` |
-| `AG` | `OB4` |
+| Overhang | OCM ID | Internal TAG8 |
+| --- | --- | --- |
+| `GT` | `OB1` | `GTGTGTGT` |
+| `CA` | `OB2` | `CACACACA` |
+| `TC` | `OB3` | `TCTCTCTC` |
+| `AG` | `OB4` | `AGAGAGAG` |
 
 Map `OB1`-`OB4` to sample IDs from the Cell Ranger multi config `[samples]`
 section. Do not hardcode donor names.
@@ -190,11 +214,13 @@ samples/<sample_id>/run/outs/
   multiplexing_analysis/cells_per_tag.json
 ```
 
-Velocyto per-sample mirrors are also native. STAR writes run-level raw/filtered
-Velocyto MEX through `VelocytoMexWriter`, then the OCM materializer maps
-GeneFull sample columns to Velocyto columns by barcode key before subsetting
-`spliced`, `unspliced`, `ambiguous`, and total matrices. Do not use
-`prepare_velocyto_mex.py` for new OCM production runs.
+Velocyto per-sample mirrors are also native. In OCM mode STAR skips the pooled
+run-level Velocyto `outs/` materializer because that path would load pooled
+Velocyto layers into memory. The OCM materializer streams per-sample Velocyto
+outputs directly from `Solo.out/Velocyto`, mapping GeneFull sample columns to
+Velocyto columns by barcode key before subsetting `spliced`, `unspliced`,
+`ambiguous`, and total matrices. Do not use `prepare_velocyto_mex.py` for new
+OCM production runs.
 
 ## Validation Plan
 

@@ -3,11 +3,13 @@
 #include <algorithm>
 #include <cerrno>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <memory>
 #include <sstream>
 #include <string>
 #include <sys/stat.h>
@@ -16,14 +18,29 @@
 #include <unordered_set>
 #include <vector>
 
+#include "libmacs3/macs3_frag_peak_pipeline.h"
+
 namespace {
 
 struct Args {
   std::string fragments;
+  std::string sidecar;
   std::string peaks;
+  std::string summits_out;
   std::string out_dir;
   std::string metrics_tsv;
+  std::string barcode_translate;
+  bool barcode_translate_from_first = false;
+  bool call_peaks_from_sidecar = false;
+  bool force = false;
   uint64_t max_barcodes = 0;
+  int threads = 1;
+  double macs3_pvalue = 1e-5;
+  int macs3_min_length = 200;
+  int macs3_max_gap = 30;
+  bool macs3_uint8_counts = true;
+  std::string temp_dir;
+  std::string keep_intermediates_dir;
   bool help = false;
 };
 
@@ -58,14 +75,53 @@ struct BarcodeMetrics {
   uint64_t peak_fragments = 0;
 };
 
+struct AtacEvidenceBinaryHeader {
+  char magic[4];
+  uint32_t format_version;
+  uint32_t record_size;
+  uint32_t barcode_length;
+  uint32_t num_chroms;
+  uint32_t flags;
+  uint64_t num_records;
+};
+
+struct AtacEvidenceBinaryRecord {
+  int32_t chrom_id;
+  int32_t start;
+  int32_t end;
+  uint32_t count;
+  uint64_t barcode_key;
+};
+
+static_assert(sizeof(AtacEvidenceBinaryHeader) == 32,
+              "ATAC evidence binary header must be 32 bytes");
+static_assert(sizeof(AtacEvidenceBinaryRecord) == 24,
+              "ATAC evidence binary record must be 24 bytes");
+
 void usage(const char *prog) {
   std::cerr
       << "Usage: " << prog
-      << " --fragments fragments.tsv[.gz] --peaks peaks.narrowPeak "
-         "--out-dir peak_mex --metrics-tsv atac_metrics.tsv [options]\n"
+      << " (--fragments fragments.tsv[.gz] | --sidecar atac_fragments.bin) "
+         "--peaks peaks.narrowPeak --out-dir peak_mex "
+         "--metrics-tsv atac_metrics.tsv [options]\n"
       << "\nOptions:\n"
-      << "  --max-barcodes N   Keep only the top N barcodes by total fragments; "
-         "0 keeps all (default 0)\n";
+      << "  --summits-out PATH              Summits BED output when calling peaks\n"
+      << "  --call-peaks-from-sidecar       Call MACS3-compatible FRAG peaks from "
+         "the binary sidecar before building MEX\n"
+      << "  --barcode-translate PATH        Optional source-to-destination barcode "
+         "translation table for sidecar input\n"
+      << "  --barcode-translate-from-first  Treat column 1 as source and column 2 "
+         "as destination\n"
+      << "  --threads N                     Peak-caller threads (default 1)\n"
+      << "  --macs3-frag-pvalue P           MACS3 FRAG p-value (default 1e-5)\n"
+      << "  --macs3-frag-min-length N       Peak min length (default 200)\n"
+      << "  --macs3-frag-max-gap N          Peak max gap (default 30)\n"
+      << "  --macs3-frag-no-uint8-counts    Disable uint8 count workspace\n"
+      << "  --temp-dir PATH                 MACS3 temporary parent directory\n"
+      << "  --keep-intermediates-dir PATH   Keep MACS3 intermediate bedGraphs\n"
+      << "  --max-barcodes N                Keep only top N barcodes by total "
+         "fragments; 0 keeps all (default 0)\n"
+      << "  --force                         Rebuild peaks even if output paths exist\n";
 }
 
 bool parse_uint64(const std::string &value, uint64_t *out) {
@@ -78,6 +134,32 @@ bool parse_uint64(const std::string &value, uint64_t *out) {
     return false;
   }
   *out = static_cast<uint64_t>(parsed);
+  return true;
+}
+
+bool parse_int(const std::string &value, int *out) {
+  if (out == nullptr || value.empty()) {
+    return false;
+  }
+  char *end = nullptr;
+  const long parsed = std::strtol(value.c_str(), &end, 10);
+  if (end == value.c_str() || *end != '\0') {
+    return false;
+  }
+  *out = static_cast<int>(parsed);
+  return true;
+}
+
+bool parse_double(const std::string &value, double *out) {
+  if (out == nullptr || value.empty()) {
+    return false;
+  }
+  char *end = nullptr;
+  const double parsed = std::strtod(value.c_str(), &end);
+  if (end == value.c_str() || *end != '\0') {
+    return false;
+  }
+  *out = parsed;
   return true;
 }
 
@@ -121,29 +203,87 @@ bool parse_args(int argc, char **argv, Args *args) {
       return true;
     } else if (arg == "--fragments" && i + 1 < argc) {
       args->fragments = argv[++i];
+    } else if (arg == "--sidecar" && i + 1 < argc) {
+      args->sidecar = argv[++i];
     } else if (arg == "--peaks" && i + 1 < argc) {
       args->peaks = argv[++i];
+    } else if (arg == "--summits-out" && i + 1 < argc) {
+      args->summits_out = argv[++i];
     } else if (arg == "--out-dir" && i + 1 < argc) {
       args->out_dir = argv[++i];
     } else if (arg == "--metrics-tsv" && i + 1 < argc) {
       args->metrics_tsv = argv[++i];
+    } else if (arg == "--barcode-translate" && i + 1 < argc) {
+      args->barcode_translate = argv[++i];
+    } else if (arg == "--barcode-translate-from-first") {
+      args->barcode_translate_from_first = true;
+    } else if (arg == "--call-peaks-from-sidecar") {
+      args->call_peaks_from_sidecar = true;
+    } else if (arg == "--force") {
+      args->force = true;
     } else if (arg == "--max-barcodes" && i + 1 < argc) {
       if (!parse_uint64(argv[++i], &args->max_barcodes)) {
         std::cerr << "Invalid --max-barcodes value\n";
         return false;
       }
+    } else if (arg == "--threads" && i + 1 < argc) {
+      if (!parse_int(argv[++i], &args->threads) || args->threads < 1) {
+        std::cerr << "Invalid --threads value\n";
+        return false;
+      }
+    } else if (arg == "--macs3-frag-pvalue" && i + 1 < argc) {
+      if (!parse_double(argv[++i], &args->macs3_pvalue) ||
+          args->macs3_pvalue <= 0.0 || args->macs3_pvalue > 1.0) {
+        std::cerr << "Invalid --macs3-frag-pvalue value\n";
+        return false;
+      }
+    } else if (arg == "--macs3-frag-min-length" && i + 1 < argc) {
+      if (!parse_int(argv[++i], &args->macs3_min_length) ||
+          args->macs3_min_length < 1) {
+        std::cerr << "Invalid --macs3-frag-min-length value\n";
+        return false;
+      }
+    } else if (arg == "--macs3-frag-max-gap" && i + 1 < argc) {
+      if (!parse_int(argv[++i], &args->macs3_max_gap) ||
+          args->macs3_max_gap < 0) {
+        std::cerr << "Invalid --macs3-frag-max-gap value\n";
+        return false;
+      }
+    } else if (arg == "--macs3-frag-no-uint8-counts") {
+      args->macs3_uint8_counts = false;
+    } else if (arg == "--temp-dir" && i + 1 < argc) {
+      args->temp_dir = argv[++i];
+    } else if (arg == "--keep-intermediates-dir" && i + 1 < argc) {
+      args->keep_intermediates_dir = argv[++i];
     } else {
       std::cerr << "Unknown or incomplete argument: " << arg << "\n";
       usage(argv[0]);
       return false;
     }
   }
-  if (args->fragments.empty() || args->peaks.empty() || args->out_dir.empty() ||
-      args->metrics_tsv.empty()) {
+  const bool have_fragments = !args->fragments.empty();
+  const bool have_sidecar = !args->sidecar.empty();
+  if (have_fragments == have_sidecar || args->peaks.empty() ||
+      args->out_dir.empty() || args->metrics_tsv.empty()) {
     usage(argv[0]);
     return false;
   }
+  if (args->call_peaks_from_sidecar) {
+    if (!have_sidecar) {
+      std::cerr << "--call-peaks-from-sidecar requires --sidecar\n";
+      return false;
+    }
+    if (args->summits_out.empty()) {
+      std::cerr << "--call-peaks-from-sidecar requires --summits-out\n";
+      return false;
+    }
+  }
   return true;
+}
+
+bool file_exists(const std::string &path) {
+  struct stat st;
+  return !path.empty() && stat(path.c_str(), &st) == 0 && S_ISREG(st.st_mode);
 }
 
 bool is_gzip_file(const std::string &path) {
@@ -235,6 +375,26 @@ std::vector<std::string> split_tab(const std::string &line) {
     fields.push_back(line.substr(begin, pos - begin));
     begin = pos + 1;
   }
+  return fields;
+}
+
+std::vector<std::string> split_translate_line(const std::string &line) {
+  const size_t tab = line.find('\t');
+  const size_t comma = line.find(',');
+  size_t sep = std::string::npos;
+  if (tab == std::string::npos) {
+    sep = comma;
+  } else if (comma == std::string::npos) {
+    sep = tab;
+  } else {
+    sep = std::min(tab, comma);
+  }
+  if (sep == std::string::npos) {
+    return std::vector<std::string>();
+  }
+  std::vector<std::string> fields;
+  fields.push_back(line.substr(0, sep));
+  fields.push_back(line.substr(sep + 1));
   return fields;
 }
 
@@ -369,7 +529,327 @@ bool load_peaks(const std::string &path, std::vector<Peak> *peaks,
   return true;
 }
 
-bool collect_total_fragments(
+bool validate_sidecar_header(FILE *fp, const std::string &path,
+                             AtacEvidenceBinaryHeader *header,
+                             uint64_t *records_to_read,
+                             std::ostream &err) {
+  if (fp == nullptr || header == nullptr || records_to_read == nullptr) {
+    return false;
+  }
+  if (std::fread(header, sizeof(*header), 1, fp) != 1) {
+    err << "Failed to read binary sidecar header: " << path << "\n";
+    return false;
+  }
+  if (header->magic[0] != 'A' || header->magic[1] != 'E' ||
+      header->magic[2] != 'V' || header->magic[3] != '1' ||
+      header->format_version != 1 ||
+      header->record_size != sizeof(AtacEvidenceBinaryRecord) ||
+      header->flags != 0 || header->barcode_length == 0 ||
+      header->barcode_length > 32) {
+    err << "Invalid ATAC evidence binary header: " << path << "\n";
+    return false;
+  }
+  if (fseeko(fp, 0, SEEK_END) != 0) {
+    err << "Failed to seek binary sidecar: " << path << "\n";
+    return false;
+  }
+  const off_t file_size = ftello(fp);
+  if (file_size < static_cast<off_t>(sizeof(AtacEvidenceBinaryHeader)) ||
+      (static_cast<uint64_t>(file_size) - sizeof(AtacEvidenceBinaryHeader)) %
+          sizeof(AtacEvidenceBinaryRecord) != 0) {
+    err << "Binary sidecar size is not header + N fixed records: " << path
+        << "\n";
+    return false;
+  }
+  const uint64_t records_by_size =
+      (static_cast<uint64_t>(file_size) - sizeof(AtacEvidenceBinaryHeader)) /
+      sizeof(AtacEvidenceBinaryRecord);
+  *records_to_read =
+      (header->num_records == 0) ? records_by_size : header->num_records;
+  if (*records_to_read != records_by_size) {
+    err << "Binary sidecar header num_records (" << header->num_records
+        << ") does not match file size records (" << records_by_size
+        << "): " << path << "\n";
+    return false;
+  }
+  if (fseeko(fp, sizeof(AtacEvidenceBinaryHeader), SEEK_SET) != 0) {
+    err << "Failed to seek to binary sidecar records: " << path << "\n";
+    return false;
+  }
+  return true;
+}
+
+bool open_sidecar_records(const std::string &path, FILE **fp_out,
+                          AtacEvidenceBinaryHeader *header,
+                          uint64_t *records_to_read, std::ostream &err) {
+  FILE *fp = std::fopen(path.c_str(), "rb");
+  if (fp == nullptr) {
+    err << "Failed to open binary sidecar: " << path << "\n";
+    return false;
+  }
+  if (!validate_sidecar_header(fp, path, header, records_to_read, err)) {
+    std::fclose(fp);
+    return false;
+  }
+  *fp_out = fp;
+  return true;
+}
+
+bool parse_chrom_id(const std::string &value, int64_t *out) {
+  if (value.empty()) {
+    return false;
+  }
+  char *end = nullptr;
+  const long long parsed = std::strtoll(value.c_str(), &end, 10);
+  if (end == value.c_str() || *end != '\0') {
+    return false;
+  }
+  *out = static_cast<int64_t>(parsed);
+  return true;
+}
+
+bool load_chroms(const std::string &path, std::vector<std::string> *chrom_names,
+                 std::ostream &err) {
+  if (chrom_names == nullptr) {
+    return false;
+  }
+  std::ifstream in(path.c_str());
+  if (!in.is_open()) {
+    err << "Failed to open chrom metadata: " << path << "\n";
+    return false;
+  }
+  std::string line;
+  uint64_t line_no = 0;
+  while (std::getline(in, line)) {
+    ++line_no;
+    trim_cr(&line);
+    if (line.empty()) {
+      continue;
+    }
+    const std::vector<std::string> fields = split_tab(line);
+    if (fields.size() < 2) {
+      err << "Chrom metadata line " << line_no
+          << " has fewer than 2 columns\n";
+      return false;
+    }
+    int64_t chrom_id = -1;
+    if (!parse_chrom_id(fields[0], &chrom_id) || chrom_id < 0) {
+      err << "Chrom metadata line " << line_no << " has invalid chrom_id\n";
+      return false;
+    }
+    if (static_cast<size_t>(chrom_id) >= chrom_names->size()) {
+      chrom_names->resize(static_cast<size_t>(chrom_id) + 1);
+    }
+    (*chrom_names)[static_cast<size_t>(chrom_id)] = fields[1];
+  }
+  return true;
+}
+
+bool load_sidecar_info(const std::string &path,
+                       AtacEvidenceBinaryHeader *header,
+                       uint64_t *records_to_read,
+                       std::vector<std::string> *chrom_names,
+                       std::ostream &err) {
+  FILE *fp = nullptr;
+  if (!open_sidecar_records(path, &fp, header, records_to_read, err)) {
+    return false;
+  }
+  std::fclose(fp);
+  if (!load_chroms(path + ".chroms.tsv", chrom_names, err)) {
+    return false;
+  }
+  if (chrom_names->size() != header->num_chroms) {
+    err << "Chrom metadata row count (" << chrom_names->size()
+        << ") does not match binary header num_chroms ("
+        << header->num_chroms << ")\n";
+    return false;
+  }
+  return true;
+}
+
+class SidecarFragmentIterator final : public macs3::FragmentIterator {
+ public:
+  explicit SidecarFragmentIterator(const std::string &path) : path_(path) {
+    std::ostringstream err;
+    if (!open_sidecar_records(path_, &fp_, &header_, &records_to_read_, err)) {
+      error_ = err.str();
+      return;
+    }
+    if (!load_chroms(path_ + ".chroms.tsv", &chrom_names_, err)) {
+      error_ = err.str();
+      return;
+    }
+    if (chrom_names_.size() != header_.num_chroms) {
+      std::ostringstream msg;
+      msg << "Chrom metadata row count (" << chrom_names_.size()
+          << ") does not match binary header num_chroms ("
+          << header_.num_chroms << ")";
+      error_ = msg.str();
+      return;
+    }
+  }
+
+  ~SidecarFragmentIterator() override {
+    if (fp_ != nullptr) {
+      std::fclose(fp_);
+    }
+  }
+
+  bool Next(macs3::FragmentRecord *out) override {
+    if (out == nullptr || fp_ == nullptr || !error_.empty() ||
+        records_read_ >= records_to_read_) {
+      return false;
+    }
+    AtacEvidenceBinaryRecord row;
+    if (std::fread(&row, sizeof(row), 1, fp_) != 1) {
+      error_ = "Short read in binary sidecar records: " + path_;
+      return false;
+    }
+    ++records_read_;
+    if (row.chrom_id < 0 ||
+        static_cast<size_t>(row.chrom_id) >= chrom_names_.size()) {
+      std::ostringstream msg;
+      msg << "Sidecar chrom_id out of range: " << row.chrom_id;
+      error_ = msg.str();
+      return false;
+    }
+    if (row.end <= row.start || row.count == 0) {
+      return Next(out);
+    }
+    out->chrom_id = row.chrom_id;
+    out->start = row.start;
+    out->end = row.end;
+    out->count = row.count;
+    return true;
+  }
+
+  const std::vector<std::string> &ChromNames() const override {
+    return chrom_names_;
+  }
+
+  const std::string &Error() const override { return error_; }
+
+ private:
+  std::string path_;
+  FILE *fp_ = nullptr;
+  AtacEvidenceBinaryHeader header_{};
+  uint64_t records_to_read_ = 0;
+  uint64_t records_read_ = 0;
+  std::vector<std::string> chrom_names_;
+  std::string error_;
+};
+
+std::string decode_barcode_key(uint64_t key, uint32_t length) {
+  static const char bases[4] = {'A', 'C', 'G', 'T'};
+  std::string out;
+  out.reserve(length);
+  for (uint32_t i = 0; i < length; ++i) {
+    const uint32_t shift = (length - 1 - i) * 2;
+    out.push_back(bases[(key >> shift) & 0x3u]);
+  }
+  return out;
+}
+
+bool load_translate_table(
+    const std::string &path, bool from_first,
+    std::unordered_map<std::string, std::string> *translate,
+    std::ostream &err) {
+  if (translate == nullptr || path.empty()) {
+    return true;
+  }
+  LineReader reader(path);
+  if (!reader.open(err)) {
+    return false;
+  }
+  std::string line;
+  uint64_t line_no = 0;
+  while (reader.getline(&line)) {
+    ++line_no;
+    trim_cr(&line);
+    if (line.empty() || line[0] == '#') {
+      continue;
+    }
+    const std::vector<std::string> fields = split_translate_line(line);
+    if (fields.size() < 2) {
+      continue;
+    }
+    const std::string source = from_first ? fields[0] : fields[1];
+    const std::string dest = from_first ? fields[1] : fields[0];
+    if (source.empty() || dest.empty()) {
+      err << "Barcode translate line " << line_no
+          << " has an empty source or destination barcode\n";
+      return false;
+    }
+    (*translate)[source] = dest;
+  }
+  return true;
+}
+
+bool resolve_barcode_name(
+    uint64_t key, uint32_t barcode_length,
+    const std::unordered_map<std::string, std::string> &translate,
+    std::string *out, std::ostream &err) {
+  if (out == nullptr) {
+    return false;
+  }
+  const std::string source = decode_barcode_key(key, barcode_length);
+  if (translate.empty()) {
+    *out = source;
+    return true;
+  }
+  const auto it = translate.find(source);
+  if (it == translate.end()) {
+    err << "Barcode " << source
+        << " was not found in the translation table\n";
+    return false;
+  }
+  *out = it->second;
+  return true;
+}
+
+bool call_peaks_from_sidecar_if_needed(const Args &args, std::ostream &err) {
+  if (!args.call_peaks_from_sidecar) {
+    return true;
+  }
+  if (!args.force && file_exists(args.peaks) && file_exists(args.summits_out)) {
+    err << "Reusing existing sidecar-derived peaks: " << args.peaks << "\n";
+    return true;
+  }
+
+  SidecarFragmentIterator iter(args.sidecar);
+  if (!iter.Error().empty()) {
+    err << iter.Error() << "\n";
+    return false;
+  }
+
+  chromap::peaks::Macs3FragPeakPipelineParams pr;
+  pr.bdgpeakcall_cutoff =
+      chromap::peaks::BdgPeakCallCutoffFromPValue(args.macs3_pvalue);
+  if (pr.bdgpeakcall_cutoff <= 0.f) {
+    err << "Invalid MACS3 FRAG p-value for bdgpeakcall cutoff\n";
+    return false;
+  }
+  pr.min_length = args.macs3_min_length;
+  pr.max_gap = args.macs3_max_gap;
+  pr.macs3_uint8_counts = args.macs3_uint8_counts;
+  pr.peak_caller_threads = args.threads;
+
+  std::string work_used;
+  std::string peak_error;
+  if (!chromap::peaks::RunMacs3FragPeakPipelineFromSortedIterator(
+          iter, pr, chromap::peaks::Macs3FragPeakPipelinePaths(), args.peaks,
+          args.summits_out, args.keep_intermediates_dir, args.temp_dir,
+          &work_used, &peak_error)) {
+    err << "MACS3 FRAG peaks from binary sidecar failed: " << peak_error
+        << "\n";
+    return false;
+  }
+  err << "Wrote sidecar-derived peaks: " << args.peaks << "\n";
+  err << "Wrote sidecar-derived summits: " << args.summits_out << "\n";
+  return true;
+}
+
+bool collect_total_fragments_text(
     const std::string &fragments_path,
     std::unordered_map<std::string, BarcodeMetrics> *metrics,
     std::ostream &err) {
@@ -397,7 +877,46 @@ bool collect_total_fragments(
   return true;
 }
 
-std::unordered_set<std::string> select_barcodes(
+bool collect_total_fragments_sidecar(
+    const std::string &sidecar_path,
+    std::unordered_map<uint64_t, BarcodeMetrics> *metrics,
+    std::ostream &err) {
+  if (metrics == nullptr) {
+    return false;
+  }
+  FILE *fp = nullptr;
+  AtacEvidenceBinaryHeader header{};
+  uint64_t records_to_read = 0;
+  if (!open_sidecar_records(sidecar_path, &fp, &header, &records_to_read, err)) {
+    return false;
+  }
+  const size_t chunk_records = 1 << 14;
+  std::vector<AtacEvidenceBinaryRecord> records(chunk_records);
+  uint64_t records_read = 0;
+  while (records_read < records_to_read) {
+    const size_t want = static_cast<size_t>(
+        std::min<uint64_t>(chunk_records, records_to_read - records_read));
+    const size_t got =
+        std::fread(records.data(), sizeof(AtacEvidenceBinaryRecord), want, fp);
+    if (got != want) {
+      err << "Short read in binary sidecar records: " << sidecar_path << "\n";
+      std::fclose(fp);
+      return false;
+    }
+    records_read += got;
+    for (size_t i = 0; i < got; ++i) {
+      const AtacEvidenceBinaryRecord &row = records[i];
+      if (row.end <= row.start || row.count == 0) {
+        continue;
+      }
+      (*metrics)[row.barcode_key].total_fragments += row.count;
+    }
+  }
+  std::fclose(fp);
+  return true;
+}
+
+std::unordered_set<std::string> select_barcodes_text(
     const std::unordered_map<std::string, BarcodeMetrics> &metrics,
     uint64_t max_barcodes) {
   std::unordered_set<std::string> keep;
@@ -429,6 +948,38 @@ std::unordered_set<std::string> select_barcodes(
   return keep;
 }
 
+std::unordered_set<uint64_t> select_barcodes_sidecar(
+    const std::unordered_map<uint64_t, BarcodeMetrics> &metrics,
+    uint64_t max_barcodes) {
+  std::unordered_set<uint64_t> keep;
+  if (max_barcodes == 0 || metrics.size() <= max_barcodes) {
+    keep.reserve(metrics.size());
+    for (const auto &kv : metrics) {
+      keep.insert(kv.first);
+    }
+    return keep;
+  }
+
+  std::vector<std::pair<uint64_t, uint64_t> > ranked;
+  ranked.reserve(metrics.size());
+  for (const auto &kv : metrics) {
+    ranked.push_back(std::make_pair(kv.first, kv.second.total_fragments));
+  }
+  std::sort(ranked.begin(), ranked.end(),
+            [](const std::pair<uint64_t, uint64_t> &a,
+               const std::pair<uint64_t, uint64_t> &b) {
+              if (a.second != b.second) {
+                return a.second > b.second;
+              }
+              return a.first < b.first;
+            });
+  keep.reserve(static_cast<size_t>(max_barcodes));
+  for (uint64_t i = 0; i < max_barcodes && i < ranked.size(); ++i) {
+    keep.insert(ranked[static_cast<size_t>(i)].first);
+  }
+  return keep;
+}
+
 template <typename Fn>
 void for_each_overlap(const ChromPeakIndex &index, int64_t start, int64_t end,
                       Fn fn) {
@@ -448,7 +999,7 @@ void for_each_overlap(const ChromPeakIndex &index, int64_t start, int64_t end,
   }
 }
 
-uint32_t barcode_index_for(
+uint32_t barcode_index_for_text(
     const std::string &barcode, std::unordered_map<std::string, uint32_t> *lookup,
     std::vector<std::string> *barcodes) {
   auto found = lookup->find(barcode);
@@ -461,7 +1012,20 @@ uint32_t barcode_index_for(
   return index;
 }
 
-bool build_matrix(
+uint32_t barcode_index_for_key(
+    uint64_t barcode_key, std::unordered_map<uint64_t, uint32_t> *lookup,
+    std::vector<uint64_t> *barcode_keys) {
+  auto found = lookup->find(barcode_key);
+  if (found != lookup->end()) {
+    return found->second;
+  }
+  const uint32_t index = static_cast<uint32_t>(barcode_keys->size());
+  (*lookup)[barcode_key] = index;
+  barcode_keys->push_back(barcode_key);
+  return index;
+}
+
+bool build_matrix_text(
     const std::string &fragments_path,
     const std::unordered_map<std::string, ChromPeakIndex> &peaks_by_chrom,
     const std::unordered_set<std::string> &keep_barcodes,
@@ -502,7 +1066,7 @@ bool build_matrix(
     for_each_overlap(chrom_it->second, fragment.start, fragment.end,
                      [&](const PeakRef &peak) {
                        if (!overlapped_any) {
-                         barcode_index = barcode_index_for(
+                         barcode_index = barcode_index_for_text(
                              fragment.barcode, &barcode_to_index, barcodes);
                          overlapped_any = true;
                        }
@@ -516,6 +1080,91 @@ bool build_matrix(
       (*metrics)[fragment.barcode].peak_fragments += fragment.count;
     }
   }
+  return true;
+}
+
+bool build_matrix_sidecar(
+    const std::string &sidecar_path,
+    const std::vector<std::string> &chrom_names,
+    const std::unordered_map<std::string, ChromPeakIndex> &peaks_by_chrom,
+    const std::unordered_set<uint64_t> &keep_barcodes,
+    std::unordered_map<uint64_t, BarcodeMetrics> *metrics,
+    std::unordered_map<uint64_t, uint64_t> *entries,
+    std::vector<uint64_t> *barcode_keys, std::ostream &err) {
+  if (metrics == nullptr || entries == nullptr || barcode_keys == nullptr) {
+    return false;
+  }
+  std::vector<const ChromPeakIndex *> peaks_by_chrom_id(chrom_names.size(),
+                                                        nullptr);
+  for (size_t i = 0; i < chrom_names.size(); ++i) {
+    const auto it = peaks_by_chrom.find(chrom_names[i]);
+    if (it != peaks_by_chrom.end()) {
+      peaks_by_chrom_id[i] = &it->second;
+    }
+  }
+
+  FILE *fp = nullptr;
+  AtacEvidenceBinaryHeader header{};
+  uint64_t records_to_read = 0;
+  if (!open_sidecar_records(sidecar_path, &fp, &header, &records_to_read, err)) {
+    return false;
+  }
+  std::unordered_map<uint64_t, uint32_t> barcode_to_index;
+  const size_t chunk_records = 1 << 14;
+  std::vector<AtacEvidenceBinaryRecord> records(chunk_records);
+  uint64_t records_read = 0;
+  while (records_read < records_to_read) {
+    const size_t want = static_cast<size_t>(
+        std::min<uint64_t>(chunk_records, records_to_read - records_read));
+    const size_t got =
+        std::fread(records.data(), sizeof(AtacEvidenceBinaryRecord), want, fp);
+    if (got != want) {
+      err << "Short read in binary sidecar records: " << sidecar_path << "\n";
+      std::fclose(fp);
+      return false;
+    }
+    records_read += got;
+    for (size_t i = 0; i < got; ++i) {
+      const AtacEvidenceBinaryRecord &row = records[i];
+      if (row.end <= row.start || row.count == 0) {
+        continue;
+      }
+      if (keep_barcodes.find(row.barcode_key) == keep_barcodes.end()) {
+        continue;
+      }
+      if (row.chrom_id < 0 ||
+          static_cast<size_t>(row.chrom_id) >= peaks_by_chrom_id.size()) {
+        err << "Sidecar chrom_id out of range: " << row.chrom_id << "\n";
+        std::fclose(fp);
+        return false;
+      }
+      const ChromPeakIndex *chrom_index =
+          peaks_by_chrom_id[static_cast<size_t>(row.chrom_id)];
+      if (chrom_index == nullptr) {
+        continue;
+      }
+
+      bool overlapped_any = false;
+      uint32_t barcode_index = 0;
+      for_each_overlap(*chrom_index, row.start, row.end,
+                       [&](const PeakRef &peak) {
+                         if (!overlapped_any) {
+                           barcode_index = barcode_index_for_key(
+                               row.barcode_key, &barcode_to_index,
+                               barcode_keys);
+                           overlapped_any = true;
+                         }
+                         const uint64_t key =
+                             (static_cast<uint64_t>(peak.index) << 32) |
+                             static_cast<uint64_t>(barcode_index);
+                         (*entries)[key] += row.count;
+                       });
+      if (overlapped_any) {
+        (*metrics)[row.barcode_key].peak_fragments += row.count;
+      }
+    }
+  }
+  std::fclose(fp);
   return true;
 }
 
@@ -654,10 +1303,10 @@ bool write_matrix(const std::string &path, size_t num_peaks,
   return true;
 }
 
-bool write_metrics(const std::string &path,
-                   const std::vector<std::string> &barcodes,
-                   const std::unordered_map<std::string, BarcodeMetrics> &metrics,
-                   std::ostream &err) {
+bool write_metrics_text(
+    const std::string &path, const std::vector<std::string> &barcodes,
+    const std::unordered_map<std::string, BarcodeMetrics> &metrics,
+    std::ostream &err) {
   if (!mkdir_p(parent_dir(path), err)) {
     return false;
   }
@@ -671,7 +1320,8 @@ bool write_metrics(const std::string &path,
   out << std::setprecision(8);
   for (const std::string &barcode : barcodes) {
     const auto it = metrics.find(barcode);
-    const BarcodeMetrics m = (it == metrics.end()) ? BarcodeMetrics() : it->second;
+    const BarcodeMetrics m =
+        (it == metrics.end()) ? BarcodeMetrics() : it->second;
     const double frac =
         (m.total_fragments == 0)
             ? 0.0
@@ -683,11 +1333,48 @@ bool write_metrics(const std::string &path,
   return true;
 }
 
-bool write_outputs(const Args &args, const std::vector<Peak> &peaks,
-                   const std::vector<std::string> &barcodes,
-                   const std::unordered_map<uint64_t, uint64_t> &entries,
-                   const std::unordered_map<std::string, BarcodeMetrics> &metrics,
-                   std::ostream &err) {
+bool write_metrics_sidecar(
+    const std::string &path, const std::vector<uint64_t> &barcode_keys,
+    uint32_t barcode_length,
+    const std::unordered_map<uint64_t, BarcodeMetrics> &metrics,
+    const std::unordered_map<std::string, std::string> &translate,
+    const std::vector<std::string> *barcode_names, std::ostream &err) {
+  if (barcode_names == nullptr || barcode_names->size() != barcode_keys.size()) {
+    return false;
+  }
+  (void)barcode_length;
+  (void)translate;
+  if (!mkdir_p(parent_dir(path), err)) {
+    return false;
+  }
+  std::ofstream out(path.c_str());
+  if (!out.is_open()) {
+    err << "Failed to open metrics output: " << path << "\n";
+    return false;
+  }
+  out << "barcode\tatac_fragments\tatac_peak_region_fragments\t"
+         "atac_peak_region_cutsites\tatac_peak_fraction\n";
+  out << std::setprecision(8);
+  for (size_t i = 0; i < barcode_keys.size(); ++i) {
+    const auto it = metrics.find(barcode_keys[i]);
+    const BarcodeMetrics m =
+        (it == metrics.end()) ? BarcodeMetrics() : it->second;
+    const double frac =
+        (m.total_fragments == 0)
+            ? 0.0
+            : static_cast<double>(m.peak_fragments) /
+                  static_cast<double>(m.total_fragments);
+    out << (*barcode_names)[i] << '\t' << m.total_fragments << '\t'
+        << m.peak_fragments << '\t' << (m.peak_fragments * 2) << '\t'
+        << frac << '\n';
+  }
+  return true;
+}
+
+bool write_core_outputs(const Args &args, const std::vector<Peak> &peaks,
+                        const std::vector<std::string> &barcodes,
+                        const std::unordered_map<uint64_t, uint64_t> &entries,
+                        std::ostream &err) {
   if (!mkdir_p(args.out_dir, err)) {
     return false;
   }
@@ -697,11 +1384,92 @@ bool write_outputs(const Args &args, const std::vector<Peak> &peaks,
   if (!write_barcodes(args.out_dir + "/barcodes.tsv.gz", barcodes, err)) {
     return false;
   }
-  if (!write_matrix(args.out_dir + "/matrix.mtx.gz", peaks.size(),
-                    barcodes.size(), entries, err)) {
+  return write_matrix(args.out_dir + "/matrix.mtx.gz", peaks.size(),
+                      barcodes.size(), entries, err);
+}
+
+bool run_text_path(const Args &args, const std::vector<Peak> &peaks,
+                   const std::unordered_map<std::string, ChromPeakIndex> &peaks_by_chrom,
+                   std::ostream &err) {
+  std::unordered_map<std::string, BarcodeMetrics> metrics;
+  if (!collect_total_fragments_text(args.fragments, &metrics, err)) {
     return false;
   }
-  return write_metrics(args.metrics_tsv, barcodes, metrics, err);
+  const std::unordered_set<std::string> keep =
+      select_barcodes_text(metrics, args.max_barcodes);
+
+  std::unordered_map<uint64_t, uint64_t> entries;
+  std::vector<std::string> barcodes;
+  if (!build_matrix_text(args.fragments, peaks_by_chrom, keep, &metrics,
+                         &entries, &barcodes, err)) {
+    return false;
+  }
+  if (barcodes.empty()) {
+    err << "No peak-overlapping barcodes were found\n";
+    return false;
+  }
+  if (!write_core_outputs(args, peaks, barcodes, entries, err)) {
+    return false;
+  }
+  return write_metrics_text(args.metrics_tsv, barcodes, metrics, err);
+}
+
+bool run_sidecar_path(
+    const Args &args, const std::vector<Peak> &peaks,
+    const std::unordered_map<std::string, ChromPeakIndex> &peaks_by_chrom,
+    std::ostream &err) {
+  AtacEvidenceBinaryHeader header{};
+  uint64_t records_to_read = 0;
+  std::vector<std::string> chrom_names;
+  if (!load_sidecar_info(args.sidecar, &header, &records_to_read, &chrom_names,
+                         err)) {
+    return false;
+  }
+  (void)records_to_read;
+
+  std::unordered_map<uint64_t, BarcodeMetrics> metrics;
+  if (!collect_total_fragments_sidecar(args.sidecar, &metrics, err)) {
+    return false;
+  }
+  const std::unordered_set<uint64_t> keep =
+      select_barcodes_sidecar(metrics, args.max_barcodes);
+
+  std::unordered_map<uint64_t, uint64_t> entries;
+  std::vector<uint64_t> barcode_keys;
+  if (!build_matrix_sidecar(args.sidecar, chrom_names, peaks_by_chrom, keep,
+                            &metrics, &entries, &barcode_keys, err)) {
+    return false;
+  }
+  if (barcode_keys.empty()) {
+    err << "No peak-overlapping barcodes were found\n";
+    return false;
+  }
+
+  std::unordered_map<std::string, std::string> translate;
+  if (!args.barcode_translate.empty() &&
+      !load_translate_table(args.barcode_translate,
+                            args.barcode_translate_from_first, &translate,
+                            err)) {
+    return false;
+  }
+
+  std::vector<std::string> barcodes;
+  barcodes.reserve(barcode_keys.size());
+  for (uint64_t key : barcode_keys) {
+    std::string barcode;
+    if (!resolve_barcode_name(key, header.barcode_length, translate, &barcode,
+                              err)) {
+      return false;
+    }
+    barcodes.push_back(barcode);
+  }
+
+  if (!write_core_outputs(args, peaks, barcodes, entries, err)) {
+    return false;
+  }
+  return write_metrics_sidecar(args.metrics_tsv, barcode_keys,
+                               header.barcode_length, metrics, translate,
+                               &barcodes, err);
 }
 
 }  // namespace
@@ -715,38 +1483,26 @@ int main(int argc, char **argv) {
     return 0;
   }
 
+  if (!call_peaks_from_sidecar_if_needed(args, std::cerr)) {
+    return 1;
+  }
+
   std::vector<Peak> peaks;
   std::unordered_map<std::string, ChromPeakIndex> peaks_by_chrom;
   if (!load_peaks(args.peaks, &peaks, &peaks_by_chrom, std::cerr)) {
     return 1;
   }
 
-  std::unordered_map<std::string, BarcodeMetrics> metrics;
-  if (!collect_total_fragments(args.fragments, &metrics, std::cerr)) {
-    return 1;
-  }
-  const std::unordered_set<std::string> keep =
-      select_barcodes(metrics, args.max_barcodes);
-
-  std::unordered_map<uint64_t, uint64_t> entries;
-  std::vector<std::string> barcodes;
-  if (!build_matrix(args.fragments, peaks_by_chrom, keep, &metrics, &entries,
-                    &barcodes, std::cerr)) {
-    return 1;
-  }
-  if (barcodes.empty()) {
-    std::cerr << "No peak-overlapping barcodes were found\n";
-    return 1;
-  }
-
-  if (!write_outputs(args, peaks, barcodes, entries, metrics, std::cerr)) {
+  const bool ok =
+      !args.sidecar.empty()
+          ? run_sidecar_path(args, peaks, peaks_by_chrom, std::cerr)
+          : run_text_path(args, peaks, peaks_by_chrom, std::cerr);
+  if (!ok) {
     return 1;
   }
 
   std::cout << "Wrote " << args.out_dir << "\n";
   std::cout << "Wrote " << args.metrics_tsv << "\n";
   std::cout << "peaks=" << peaks.size() << "\n";
-  std::cout << "barcodes=" << barcodes.size() << "\n";
-  std::cout << "matrix_nnz=" << entries.size() << "\n";
   return 0;
 }

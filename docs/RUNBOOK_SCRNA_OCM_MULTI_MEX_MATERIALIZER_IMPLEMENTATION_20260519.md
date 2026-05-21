@@ -3,7 +3,7 @@
 Date: 2026-05-19
 Status: implemented in STAR-suite (`OcmMultiMaterialize`, `OcmMultiConfig`,
 `VelocytoMexWriter`, `--ocmMultiEnable`, `--ocmMultiConfig`,
-`--ocmMultiOutputCompat`). Unit tests:
+`--ocmMultiBarcodeMode`, `--ocmMultiOutputCompat`). Unit tests:
 `tests/test_ocm_{config_parser,barcode_classifier,mex_materializer_tiny,sample_id_validation,velocyto_barcode_shuffle}.sh`.
 Run the 2M oracle smoke with `scripts/run_jax_scrnaseq02_ocm_oracle_smoke.sh
 --run-star --validate` (rebuild STAR first) to confirm validator `PASS`.
@@ -20,7 +20,7 @@ existing STAR-suite path. The new work is the final materialization step:
 
 ```text
 pool-level GeneFull raw/filtered MEX
-  -> OCM tag classification from corrected cell barcode bases 8-9
+  -> OCM tag classification from corrected CB16 or effective CB16+TAG8 barcode
   -> Cell Ranger multi-compatible outs/multi and outs/per_sample_outs
   -> STAR downstream per-sample MEX mirrors, including Velocyto
 ```
@@ -65,10 +65,17 @@ feature workflows are not changed by surprise:
 ```text
 --ocmMultiEnable yes|no|auto
 --ocmMultiConfig <Cell Ranger multi config.csv>
+--ocmMultiBarcodeMode posthoc|flex
 --ocmMultiOutputCompat cellranger
 ```
 
 - `--ocmMultiEnable no` by default.
+- `--ocmMultiBarcodeMode posthoc` is the default historical materializer
+  behavior: correct/count on CB16 first, then split materialized matrices by
+  OCM.
+- `--ocmMultiBarcodeMode flex` derives an internal `CB16+OCM_TAG8` effective
+  barcode before barcode correction/counting and strips TAG8 from
+  Cell Ranger-compatible output labels.
 - `--ocmMultiEnable yes` requires `--ocmMultiConfig` or a reusable
   `--pfMultiConfig`.
 - `--ocmMultiEnable auto` is accepted, but still requires an explicit config
@@ -90,6 +97,7 @@ For JAX scRNAseq02, production/smoke commands should keep:
 
 ```text
 --soloFeatures GeneFull Velocyto
+--soloInlineCBCorrection yes
 --soloInlineHashMode no
 --outSAMtype BAM Unsorted
 --emitNoYBAM yes
@@ -140,20 +148,25 @@ Validation rules:
 
 ## OCM Classification
 
-Classify corrected 16 bp cell barcodes by bases 8-9 using 1-based indexing.
-In C++ this is `barcode.substr(7, 2)` after stripping an optional `-1` suffix
-for classification only.
+In `posthoc` mode, classify corrected 16 bp cell barcodes by bases 8-9 using
+1-based indexing. In C++ this is `barcode.substr(7, 2)` after stripping an
+optional `-1` suffix for classification only.
 
-| Bases 8-9 | OCM ID |
-| --- | --- |
-| `GT` | `OB1` |
-| `CA` | `OB2` |
-| `TC` | `OB3` |
-| `AG` | `OB4` |
+In `flex` mode, STAR appends an OCM TAG8 suffix to the raw CB16 before
+correction/counting. The materializer classifies TAG8 first, then falls back to
+the CB16 overhang for historical fixtures.
+
+| Bases 8-9 | OCM ID | Internal TAG8 |
+| --- | --- | --- |
+| `GT` | `OB1` | `GTGTGTGT` |
+| `CA` | `OB2` | `CACACACA` |
+| `TC` | `OB3` | `TCTCTCTC` |
+| `AG` | `OB4` | `AGAGAGAG` |
 
 Important compatibility details:
 
-- Preserve the original output barcode string, including `-1` if present.
+- Preserve the original output barcode string, including `-1` if present; in
+  `flex` mode strip the internal TAG8 from CR-compatible output barcodes.
 - Use the stripped barcode only for overhang classification and joins.
 - Unknown overhangs are excluded from per-tag outputs and counted in a summary.
 - The Cell Ranger oracle `cells_per_tag.json` preserves `-1` suffixes.
@@ -361,7 +374,8 @@ scripts/run_jax_scrnaseq02_ocm_oracle_smoke.sh \
   --validate \
   -- \
   --ocmMultiEnable yes \
-  --ocmMultiConfig /mnt/pikachu/JAX_scRNAseq02/cellranger-logs/config.csv
+  --ocmMultiConfig /mnt/pikachu/JAX_scRNAseq02/cellranger-logs/config.csv \
+  --ocmMultiBarcodeMode flex
 ```
 
 Expected pre-implementation result:
