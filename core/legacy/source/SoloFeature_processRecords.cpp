@@ -6,8 +6,10 @@
 #include "ErrorWarning.h"
 #include "SoloFeature_bridgeHashSnapshot.h"
 #include "systemFunctions.h"
+#include "SoloMemoryProfile.h"
 #include <chrono>
 #include <cstdlib>
+#include <sstream>
 
 namespace {
 double soloElapsedSeconds(const std::chrono::steady_clock::time_point &start)
@@ -91,6 +93,13 @@ void SoloFeature::processRecords()
                          << " entering sumThreads" << endl;
     }
     SoloFeature::sumThreads();
+    {
+        std::ostringstream extra;
+        extra << "nReadsInput=" << nReadsInput << " nReadsMapped=" << nReadsMapped;
+        soloMemoryProfileCheckpoint(P.inOut->logMain,
+                                    std::string("sumThreads_done:") + SoloFeatureTypes::Names[featureType],
+                                    extra.str());
+    }
     if (soloPhaseDebugEnabled()) {
         time(&rawTime);
         P.inOut->logMain << timeMonthDayTime(rawTime)
@@ -140,6 +149,13 @@ void SoloFeature::processRecords()
             countCBgeneUMI();
         };
     };
+    {
+        std::ostringstream extra;
+        extra << "nCB=" << nCB << " nReadsMapped=" << nReadsMapped;
+        soloMemoryProfileCheckpoint(P.inOut->logMain,
+                                    std::string("count_phase_done:") + SoloFeatureTypes::Names[featureType],
+                                    extra.str());
+    }
     if (soloPhaseDebugEnabled()) {
         time(&rawTime);
         P.inOut->logMain << timeMonthDayTime(rawTime)

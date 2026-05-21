@@ -11,7 +11,6 @@ if [[ -f "${EXTERNAL_ENV}" ]]; then
 fi
 
 STAR_BIN="${STAR_BIN:-${REPO_ROOT}/core/legacy/source/STAR}"
-PREPARE_VELOCYTO_MEX="${REPO_ROOT}/scripts/prepare_velocyto_mex.py"
 
 OUT_DIR="${PERTURB_VELOCYTO_MEX_SMOKE_OUTDIR:-${SCRIPT_DIR}/perturb_velocyto_mex_smoke_output_$(date +%Y%m%d_%H%M%S)}"
 RUN_DIR="${OUT_DIR}/run"
@@ -37,7 +36,6 @@ join_by_comma() {
 }
 
 [[ -x "${STAR_BIN}" ]] || die "STAR binary not found: ${STAR_BIN}"
-[[ -f "${PREPARE_VELOCYTO_MEX}" ]] || die "Missing helper: ${PREPARE_VELOCYTO_MEX}"
 [[ -d "${GEX_DIR}" ]] || die "Missing GEX fixture dir: ${GEX_DIR}"
 [[ -d "${GUIDE_DIR}" ]] || die "Missing guide fixture dir: ${GUIDE_DIR}"
 [[ -f "${PF_MULTI_CONFIG}" ]] || die "Missing pfMultiConfig: ${PF_MULTI_CONFIG}"
@@ -96,8 +94,6 @@ echo "Guide cDNA lanes: ${#GUIDE_R2_FILES[@]}"
   --crFeatureRef "${FEATURE_REF}" \
   --crWhitelist "${WHITELIST}" \
   --crMinUmi 10
-
-python3 "${PREPARE_VELOCYTO_MEX}" --run-dir "${RUN_DIR}"
 
 RAW_VELO_DIR="${RUN_DIR}/outs/raw_velocyto_feature_bc_matrix"
 FILTERED_VELO_DIR="${RUN_DIR}/outs/filtered_velocyto_feature_bc_matrix"

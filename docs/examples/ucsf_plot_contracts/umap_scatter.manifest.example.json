@@ -1,0 +1,107 @@
+{
+  "schema_version": "morphic-plotly-shiny-v1",
+  "viewer": "plotly_shiny",
+  "plot_id": "ucsf_ebs2_2_umap_leiden",
+  "plot_kind": "umap_scatter",
+  "title": "UCSF CRISPRi EBs2_2: UMAP colored by Leiden",
+  "subtitle": "Filtered cells; per-sample Scanpy embedding",
+  "datasets": [
+    {
+      "dataset_id": "cells",
+      "format": "parquet",
+      "s3_key": "plotly/ucsf/ebs2_2/cells.parquet",
+      "grain": "cell",
+      "required_columns": [
+        "cell_id",
+        "sample_label",
+        "lineage_label",
+        "umap_1",
+        "umap_2",
+        "leiden",
+        "feature_call_category",
+        "best_feature",
+        "n_genes",
+        "total_counts",
+        "mt_pct"
+      ]
+    }
+  ],
+  "encodings": {
+    "x": {
+      "dataset_id": "cells",
+      "field": "umap_1",
+      "type": "quantitative"
+    },
+    "y": {
+      "dataset_id": "cells",
+      "field": "umap_2",
+      "type": "quantitative"
+    },
+    "color": {
+      "dataset_id": "cells",
+      "field": "leiden",
+      "type": "categorical"
+    },
+    "hover": [
+      "cell_id",
+      "sample_label",
+      "best_feature",
+      "feature_call_category",
+      "n_genes",
+      "mt_pct"
+    ]
+  },
+  "controls": {
+    "color_by": [
+      "leiden",
+      "sample_label",
+      "feature_call_category",
+      "n_genes",
+      "mt_pct"
+    ],
+    "filters": [
+      "sample_label",
+      "feature_call_category",
+      "leiden"
+    ]
+  },
+  "defaults": {
+    "color_by": "leiden",
+    "point_size": 4,
+    "opacity": 0.8
+  },
+  "plotly_defaults": {
+    "trace_type": "scattergl",
+    "layout": {
+      "template": "plotly_white"
+    },
+    "config": {
+      "responsive": true,
+      "displaylogo": false
+    }
+  },
+  "summary": {
+    "n_cells": 10897,
+    "n_clusters": 14
+  },
+  "analysis_context": {
+    "plot_kind": "umap",
+    "lineage_label": "Embryoid body",
+    "sample_label": "EBs2_2",
+    "study_assay": "Perturb-seq",
+    "cluster_key": "leiden",
+    "embedding_key": "X_umap"
+  },
+  "downloads": [
+    {
+      "label": "Cluster counts TSV",
+      "format": "tsv.gz",
+      "s3_key": "tsv/ucsf/ebs2_2/leiden_cluster_counts.tsv.gz"
+    }
+  ],
+  "provenance": {
+    "pipeline": "scanpy",
+    "pipeline_version": "v1",
+    "generated_at": "2026-04-17T00:00:00Z"
+  }
+}

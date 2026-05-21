@@ -1,0 +1,7 @@
+[samples]
+sample_id,ocm_barcode_ids,description
+GCM1-Day-4,OB1,iPSCs
+GRHL1-Day-4,OB2,iPSCs
+OVOL1-Day-4,OB3,iPSCs
+WT-PrS-20pct-Day-4,OB4,iPSCs
+Union-Test,OB1|OB2,union

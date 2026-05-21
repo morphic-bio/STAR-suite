@@ -26,6 +26,7 @@
 #include "bamSortByCoordinate.h"
 #include "SamtoolsSorter.h"
 #include "Transcriptome.h"
+#include "CountingSinkStress.h"
 #include "signalFromBAM.h"
 #include "mapThreadsSpawn.h"
 #include "SjdbClass.h"
@@ -52,6 +53,8 @@
 #include "SnpMaskBuild.h"
 #include "PfMultiProcess.h"
 #include "PfMultiConfig.h"
+#include "VelocytoMexWriter.h"
+#include "OcmMultiMaterialize.h"
 #include "star_chromap_orchestration.h"
 // Note: effective_length.h not included due to Transcriptome class name conflict
 // Use wrapper function instead
@@ -423,7 +426,8 @@ int main(int argInN, char *argIn[])
                           << flush;
 
     // runMode
-    if (P.runMode == "alignReads" || P.runMode == "soloCellFiltering" || P.runMode == "hashCacheGenerate")
+    if (P.runMode == "alignReads" || P.runMode == "soloCellFiltering" || P.runMode == "hashCacheGenerate"
+        || P.runMode == "countingSinkStress")
     {
         // continue
     }
@@ -479,6 +483,12 @@ int main(int argInN, char *argIn[])
     if (P.runMode == "soloCellFiltering") {
         Transcriptome transcriptomeCellFilter(P);
         Solo soloCellFilter(P, transcriptomeCellFilter);
+    }
+
+    if (P.runMode == "countingSinkStress") {
+        runCountingSinkStress(P);
+        P.cleanupParInfoForExit();
+        exit(0);
     }
 
     ////////////////////////////////////////////////////////////////////////
@@ -1039,6 +1049,8 @@ int main(int argInN, char *argIn[])
 
     // SAM headers
     samHeaders(P, *genomeMain.genomeOut.g, transcriptomeMain);
+    g_bamHeaderChrNames = &genomeMain.genomeOut.g->chrNameAll;
+    g_bamHeaderChrLengths = &genomeMain.genomeOut.g->chrLengthAll;
 
     // initialize chimeric parameters here - note that chimeric parameters require samHeader
     P.pCh.initialize(&P);
@@ -1054,12 +1066,28 @@ int main(int argInN, char *argIn[])
     // Initialize unsorted tag buffer for unsorted BAM CB/UB tag injection
     // Uses SamtoolsSorter in noSort mode - buffers records to disk, then streams with tag injection
     if (P.outBAMunsorted && P.pSolo.samAttrYes && !P.pSolo.skipProcessing) {
-        g_unsortedTagBuffer = new SamtoolsSorter(P.limitBAMsortRAM,
+        uint64_t unsortedTagBufferRAM = P.limitBAMsortRAM;
+        if (unsortedTagBufferRAM == 0) {
+            unsortedTagBufferRAM = 4000000000ULL;
+            P.inOut->logMain
+                << "WARNING: --limitBAMsortRAM=0 with unsorted BAM CB/UB tag injection; "
+                << "using 4000000000 bytes for the disk-spill buffer.\n";
+        }
+
+        string unsortedTagTmpDir = P.outBAMsortTmpDir;
+        if (unsortedTagTmpDir.empty()) {
+            unsortedTagTmpDir = P.outFileTmp + "/BAMunsorted";
+            mkdir(unsortedTagTmpDir.c_str(), P.runDirPerm);
+        }
+
+        g_unsortedTagBuffer = new SamtoolsSorter(unsortedTagBufferRAM,
                                                   P.outBAMsortingThreadNactual,
-                                                  P.outBAMsortTmpDir,
+                                                  unsortedTagTmpDir,
                                                   P,
                                                   true);  // noSort = true
-        P.inOut->logMain << "NOTE: Using buffered mode for unsorted BAM CB/UB tag injection.\n";
+        P.inOut->logMain << "NOTE: Using buffered mode for unsorted BAM CB/UB tag injection"
+                          << " (spill RAM cap=" << unsortedTagBufferRAM
+                          << ", tmpDir=" << unsortedTagTmpDir << ").\n";
     }
 
     // this does not seem to work at the moment
@@ -1853,6 +1881,16 @@ int main(int argInN, char *argIn[])
         P.inOut->logMain << timeMonthDayTime() << " ..... skipping Solo processing (inline replayer already produced MEX)" << endl;
     }
 
+    // Package Velocyto layer outputs into the downstream outs/ MEX contract.
+    if (VelocytoMexWriter::runVelocytoMexMaterialize(P) != 0) {
+        return 1;
+    }
+
+    // OCM per-sample MEX materialization (pool-level GeneFull -> outs/multi + per_sample_outs).
+    if (runOcmMultiMaterialize(P) != 0) {
+        return 1;
+    }
+
     // Finish pf-multi merge/filtering once Solo outputs are available.
     if (!isUnsetToken(P.pfMulti.pfMultiConfig)) {
         if (processPfMultiConfig(P, &soloMain, pfMultiPreload, pfAssignHandle) != 0) {
@@ -1965,6 +2003,7 @@ int main(int argInN, char *argIn[])
     
     // Finalize unsorted BAM with CB/UB tag injection (if buffered mode was used)
     bamUnsortedWithTags(P, *genomeMain.genomeOut.g, soloMain);
+    closeDirectOcmBamRouter(P);
     
     // Transcript quantification (TranscriptVB mode)
     // TODO: Debug - check if transcriptomeMain is valid

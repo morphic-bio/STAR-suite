@@ -50,7 +50,7 @@ Options:
   --poll-seconds N           Scan interval in seconds (default: 60)
   --expected-samples N       Exit once at least N sample dirs exist and all N
                              have completed CellBender
-  --adaptive-filter          Pass through to local downstream prep
+  --adaptive-filter          Pass through adaptive n_genes and MT percentage QC
   --min-genes INT            Pass through to local downstream prep
   --max-genes INT            Pass through to local downstream prep
   --mt-pct-cutoff FLOAT      Pass through to local downstream prep

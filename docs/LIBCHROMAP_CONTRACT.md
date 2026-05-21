@@ -1,6 +1,9 @@
 # STAR libchromap Contract
 
-Status: initial implementation + STAR orchestration hook (opt-in)
+Status: implemented STAR orchestration hook (opt-in). Current production
+multiome runs use STAR/Chromap for local BAM plus binary sidecar
+materialization, then call peaks and build ATAC peak MEX from that sidecar
+outside STAR.
 
 The STAR-side Chromap integration uses a direct contract instead of a process
 sidecar. The contract lives in:
@@ -33,18 +36,25 @@ Orchestration (compile-time optional + runtime opt-in):
   fields (`summary`, `temp`, `translate`, `chromapAtacSecondaryFragments`) may be `-`.
 - **Dual ATAC output (BAM/CRAM + fragments):** When `chromapAtacOutputFormat` is
   `BAM` or `CRAM`, set `chromapAtacOutputFragments` to the primary BAM/CRAM path
-  and `chromapAtacSecondaryFragments` to the fragments file (e.g. `.tsv.gz`).
-  This maps to Chromap `--atac-fragments`. **Intended invariants:** retained
-  fragment lines match a fragment-only BED run with the same mapping options;
-  BAM record count is **exactly 2 ×** fragment rows (fragment-level BAM, not
-  the read-level `--BAM` path). Do **not** expect dual BAM to match a standalone
-  BAM-only row count.
+  and `chromapAtacSecondaryFragments` to the scATAC fragment sidecar. Production
+  uses a binary sidecar path such as `atac_fragments.bin` plus the generated
+  `atac_fragments.bin.chroms.tsv`. This maps to Chromap `--atac-fragments`.
+  **Intended invariants:** retained fragment events match a fragment-only run
+  with the same mapping options; BAM record count is **exactly 2 x** fragment
+  rows (fragment-level BAM, not the read-level `--BAM` path). Do **not** expect
+  dual BAM to match a standalone BAM-only row count.
 - **`--chromapAtacTn5ShiftMode`** must be exactly `classical` or `symmetric`
   (case-insensitive); other values error.
 - **Threads:** `--chromapAtacThreads` and `--chromapAtacHtsThreads` are passed
   straight through to the contract. They are **not** coordinated with STAR
   `runThreadN` or dynamic permits (fixed thread counts for this integration
   gate), so concurrent runs should split the machine thread budget explicitly.
+- **MACS3 FRAG peaks:** Optional and disabled by default in STAR. The current
+  production multiome wrapper does not run peak calling inside STAR; it writes
+  BAM plus the binary sidecar locally and then invokes
+  `core/features/libchromap_contract/star_multiome_atac_peak_mex` to call peaks
+  from the sidecar and build the ATAC peak MEX. This avoids the legacy
+  file-source spill/re-read path.
 
 CLI / parameters file (all names also work in a parameters file):
 
@@ -57,10 +67,12 @@ CLI / parameters file (all names also work in a parameters file):
 | `chromapAtacRead1` | Comma-separated ATAC R1 FASTQs (same lane order as R2/barcode). |
 | `chromapAtacRead2` | Comma-separated ATAC R2 FASTQs. |
 | `chromapAtacBarcode` | Comma-separated ATAC barcode FASTQs. |
+| `chromapAtacReadFormat` | Optional Chromap read-format string. Use `bc:8:23:-` for ARC barcode reads where 1-based bases 9-24 are reverse-complemented. |
 | `chromapAtacBarcodeWhitelist` | Whitelist file. |
 | `chromapAtacBarcodeTranslate` | Optional translation table; `-` to omit. |
+| `chromapAtacBarcodeTranslateFromFirst` | `1` means treat the first column of the translation table as the source barcode namespace. Required for the current ARC ATAC-to-GEX table. |
 | `chromapAtacOutputFragments` | Chromap **primary** output path: fragment file when format is BED/TagAlign, or SAM/BAM/CRAM path when format is SAM/BAM/CRAM. |
-| `chromapAtacSecondaryFragments` | Optional **secondary** scATAC fragments path when `chromapAtacOutputFormat` is `BAM` or `CRAM` (dual output in one Chromap pass). Must differ from `chromapAtacOutputFragments`; `-` to omit. |
+| `chromapAtacSecondaryFragments` | Optional **secondary** scATAC fragment sidecar path when `chromapAtacOutputFormat` is `BAM` or `CRAM` (dual output in one Chromap pass). Production uses `atac_fragments.bin`, which also writes `atac_fragments.bin.chroms.tsv`. Must differ from `chromapAtacOutputFragments`; `-` to omit. |
 | `chromapAtacOutputFormat` | `BED`, `fragments`, `TagAlign`, `SAM`, `BAM`, `CRAM`, or `pairs`. |
 | `chromapAtacSummary` | Optional summary path; `-` to omit. |
 | `chromapAtacTempDir` | Optional temp dir; `-` for Chromap default. |
@@ -69,7 +81,24 @@ CLI / parameters file (all names also work in a parameters file):
 | `chromapAtacSortBam` | Sort BAM/CRAM output when `1`. |
 | `chromapAtacWriteIndex` | Write BAM/CRAM index when `1`; requires sorted BAM/CRAM output. |
 | `chromapAtacSortBamRam` | Chromap BAM/CRAM sort RAM limit in bytes. |
+| `chromapAtacLowMem` | `0` (default) off; `1` enables Chromap low-memory overflow-spill mode. Production JAX multiome uses `1`. |
+| `chromapAtacLowMemRam` | RAM threshold in bytes for low-memory spill; `0` uses Chromap defaults. |
+| `chromapAtacMacs3FragLowMem` | `1` uses the low-memory libMACS3 fragment workspace for in-process peak calling. Production keeps this enabled in wrappers but performs peak/MEX construction from the sidecar outside STAR. |
 | `chromapAtacTn5ShiftMode` | `classical` or `symmetric`. |
+| `chromapAtacCallMacs3FragPeaks` | `0` (default) off; `1` run MACS3-compatible FRAG peak calling after Chromap ATAC mapping. |
+| `chromapAtacMacs3FragPeaksOutput` | narrowPeak output path, required when peak calling is enabled. |
+| `chromapAtacMacs3FragSummitsOutput` | summits output path, required when peak calling is enabled. |
+| `chromapAtacMacs3FragPvalue` | MACS3 FRAG p-value threshold; default `1e-5`. |
+| `chromapAtacMacs3FragMinLength` | minimum peak length; default `200`. |
+| `chromapAtacMacs3FragMaxGap` | max gap for peak merging; default `30`. |
+| `chromapAtacMacs3FragKeepIntermediates` | optional directory to keep intermediate bedGraph-style outputs; `-` to omit. |
+| `chromapAtacMacs3FragUint8Counts` | `1` (default) use MACS3 uint8 count semantics; `0` disables. |
+
+The STAR CLI no longer exposes `chromapAtacMacs3FragPeaksSource`. Production
+multiome should use the post-materialization boundary: write BAM plus the
+binary sidecar locally, then call peaks and build ATAC peak MEX from that
+sidecar outside STAR. Do not route production through a gzipped BED/fragments
+spill file that will be read again for peak/MEX construction.
 
 Build:
 
@@ -108,12 +137,20 @@ Validation order:
 2. Run `star_libchromap_contract_runner` on the 100K ATAC fixture.
 3. Compare its fragments against the existing Chromap CLI/libchromap parity
    outputs with `scripts/compare_fragment_tuples.sh` from the coordination repo.
-4. Build `make core WITH_CHROMAP=1` and re-run the same fixture through STAR with
+4. Repeat the contract runner with `--call-macs3-frag-peaks` plus narrowPeak and
+   summits paths; compare peaks against a Chromap CLI/libchromap reference.
+5. Build `make core WITH_CHROMAP=1` and re-run the same fixture through STAR with
    `--chromapAtacEnable 1` and matching `--chromapAtac*` paths; compare fragments
    again.
-5. Repeat the STAR run with `--chromapAtacStartMode concurrent` and a split
-   thread budget to validate same-process simultaneous execution.
-6. Run the end-to-end benchmark gate on the 100K multiome fixture, then the full
+6. Build peaks and ATAC peak MEX from the binary sidecar with
+   `star_multiome_atac_peak_mex`; this is the production boundary.
+7. Repeat the STAR run with `--chromapAtacStartMode concurrent`, low-memory
+   Chromap enabled, and a split thread budget to validate same-process
+   simultaneous execution.
+8. Treat STAR `--chromapAtacCallMacs3FragPeaks 1` as legacy/integration
+   validation only. Do not use it as the production multiome path unless the
+   runbook is intentionally revised.
+9. Run the end-to-end benchmark gate on the 100K multiome fixture, then the full
    10x demo dataset, before adding dynamic permit sharing.
 
 Initial validation:
@@ -144,7 +181,10 @@ STAR-integrated spot check (same tuples as CLI reference):
 --chromapAtacOutputFormat BAM
 --chromapAtacSortBam 1
 --chromapAtacOutputFragments ./atac_possorted.bam
---chromapAtacSecondaryFragments ./atac_fragments.tsv.gz
+--chromapAtacSecondaryFragments ./atac_fragments.bin
+--chromapAtacReadFormat bc:8:23:-
+--chromapAtacLowMem 1
+--chromapAtacLowMemRam 0
 ... (reference, index, read1/read2/barcode CSVs, whitelist, threads, etc.)
 ```
 
@@ -155,8 +195,25 @@ star_libchromap_contract_runner \
   --ref genome.fa --index genome.index \
   --read1 'R1_L001.fastq.gz,...' --read2 'R3_L001.fastq.gz,...' --barcode 'R2_L001.fastq.gz,...' \
   --barcode-whitelist whitelist.txt \
+  --read-format 'bc:8:23:-' \
   --output ./atac_possorted.bam --output-format BAM --sort-bam \
-  --atac-fragments ./atac_fragments.tsv.gz --threads 8
+  --atac-fragments ./atac_fragments.bin --threads 8
+```
+
+Peak-calling extension:
+
+```bash
+star_multiome_atac_peak_mex \
+  --sidecar ./atac_fragments.bin \
+  --barcode-translate ./atac2gex.tsv \
+  --barcode-translate-from-first \
+  --call-peaks-from-sidecar \
+  --peaks ./atac_peaks.narrowPeak \
+  --summits-out ./atac_summits.bed \
+  --out-dir ./atac/peak_mex \
+  --metrics-tsv ./atac/atac_metrics.tsv \
+  --threads 16 \
+  --temp-dir ./chromap_tmp
 ```
 
 Concurrent BAM smoke from a clean Chromap-enabled build (100K multiome fixture):

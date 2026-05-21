@@ -59,6 +59,12 @@ The preflight should write a machine-readable report per run, for example:
 - `preflight_pairing_matrix.tsv`
 - `preflight_pairing_report.json`
 
+For whitelist-family checks, `scripts/preflight_whitelist_family.py` writes:
+
+- `whitelist_family_summary.tsv`
+- `whitelist_family_rates.tsv`
+- `whitelist_family_report.json`
+
 Per FASTQ set, record at minimum:
 
 - inferred library type: `GEX`, `GUIDE`, `AMBIGUOUS`, `UNKNOWN`
@@ -110,6 +116,44 @@ Suggested chemistry call:
 
 This stage should reuse existing namespace normalization logic where possible,
 not invent a new translation path.
+
+### 2b. Detect whitelist family from `R1`
+
+Chemistry alone is not enough for GEM-X-era data because different 10x barcode
+whitelist families can share the same `TRU` / `NXT` namespace labels. Before
+production, score sampled `R1` cell barcodes against every plausible whitelist
+family for the run.
+
+Implemented entrypoint:
+
+```bash
+scripts/preflight_whitelist_family.py \
+  --manifest docs/MSK_30KO_FASTQ_MANIFEST.tsv \
+  --whitelist feb2018:TRU:/storage/scRNAseq_output/whitelists/3M-february-2018_TRU.txt \
+  --whitelist feb2018:NXT:/storage/scRNAseq_output/whitelists/3M-february-2018_NXT.txt \
+  --whitelist may2023_gemx:TRU:/storage/scRNAseq_output/whitelists/3M-3pgex-may-2023_TRU.txt \
+  --whitelist may2023_gemx:NXT:/storage/scRNAseq_output/whitelists/3M-3pgex-may-2023_NXT.txt \
+  --outdir /tmp/msk_30ko_whitelist_preflight
+```
+
+The script:
+
+- samples R1 cell barcodes directly from FASTQs
+- scores exact hit rates against each supplied `family:chemistry` whitelist
+- compares the best observed whitelist to the manifest `whitelist` field
+- exits non-zero on `FAIL_*` rows unless `--no-fail` is supplied
+
+For MSK 30KO, use the wrapper:
+
+```bash
+scripts/run_msk_30ko_fastq_preflight.sh \
+  --manifest docs/MSK_30KO_FASTQ_MANIFEST.tsv \
+  --outdir plans/artifacts/msk_30ko_fastq_preflight_YYYYMMDD
+```
+
+The MSK wrapper checks February-2018 and May-2023/GEM-X TRU/NXT whitelist
+families. It is a guard against running GEM-X FASTQs through February-2018
+whitelists or vice versa.
 
 ### 3. Detect library type from `R2`
 

@@ -28,7 +28,7 @@ Options:
   --samples-root PATH       Root containing per-sample directories with run/
   --output-name NAME        Per-sample output dir name
                             (default: downstream_genefull_velocyto_cellbender)
-  --adaptive-filter         Enable adaptive filtering
+  --adaptive-filter         Enable adaptive n_genes and MT percentage filtering
   --run-cellbender          Enable CellBender
   --min-genes INT           Pass through to downstream wrapper
   --max-genes INT           Pass through to downstream wrapper

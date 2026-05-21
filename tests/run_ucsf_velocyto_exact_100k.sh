@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# UCSF 100K Stage 1 gates (canonical runner + prepare_velocyto_mex):
+# UCSF 100K Stage 1 gates (canonical runner + native Velocyto outs writer):
 #
 # DEFAULT (matches runbook acceptance):
 #   UCSF_VELOCYTO_BASELINE_OUTDIR must point to a frozen pre-refactor STAR outFileNamePrefix (+ packaged outs).

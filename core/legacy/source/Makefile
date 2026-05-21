@@ -158,10 +158,11 @@ CXXFLAGSextra += -DDEBUG_CB_UB_PARITY
 endif
 
 ##########################################################################################################
-OBJECTS = systemFunctions.o funPrimaryAlignMark.o \
+OBJECTS = systemFunctions.o SoloMemoryProfile.o CountingSinkStress.o funPrimaryAlignMark.o \
 	SoloFeature_loadRawMatrix.o SoloFeature_emptyDrops_CR.o SoloFeature_emptyDrops_libscrna.o soloInputFeatureUMI.o SoloFeature_countSmartSeq.o SoloFeature_redistributeReadsByCB.o \
 	SoloFeature_quantTranscript.o SoloFeature_sumThreads.o SoloFeature_countVelocyto.o SoloFeature_countVelocytoBridge.o SoloFeature_countCBgeneUMI.o \
 	SoloFeature_collapseUMI_Graph.o SoloFeature_collapseUMIall.o SoloFeature_collapseUMI_fromHash.o SoloFeature_collapseUMI_fromBridgeHash.o SoloFeature_bridgeHashSnapshot.o SoloFeature_umiCorrection.o SoloFeature_materializeFromHash.o SoloFeature_metricsOutput.o SoloFeature_writeMexFromInlineHashDedup.o SoloFeature_flexfilter.o SoloFeature_addBAMtags.o SoloFeature_writeTagTable.o \
+	SoloHDMoleculeWriter.o \
 	MexWriter.o MexWriterUtil.o \
 	UMICorrector.o \
 	ParametersClip_initialize.o ClipMate_clip.o ClipCR4.o opal/opal.o ClipMate_clipChunk.o ClipMate_initialize.o \
@@ -211,7 +212,8 @@ OBJECTS = systemFunctions.o funPrimaryAlignMark.o \
 	ZGZXTags.o \
 	FlexProbeIndex.o \
 	CellRangerFormatter.o \
-	PfMultiConfig.o PfMultiMexStub.o PfMultiAssign.o PfMultiMerge.o PfMultiProcess.o \
+	PfMultiConfig.o PfMultiMexStub.o PfMultiAssign.o PfMultiMerge.o PfMultiProcess.o VelocytoMexWriter.o \
+	OcmMultiConfig.o OcmMultiMaterialize.o \
 	CbUbTagInjector.o
 
 # Unit tests for CR-compat regression components (built as a single binary)
@@ -223,6 +225,13 @@ compat-unit-tests : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
 compat-unit-tests : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS) $(shell pkg-config --libs glib-2.0 2>/dev/null || echo "")
 compat-unit-tests : Depend.list parametersDefault.xxd $(OBJECTS_NO_MAIN) libflex libtrim libem $(COMPAT_UNIT_TEST_SRC)
 	$(CXX) -o compat_unit_tests $(CXXFLAGS) $(COMPAT_UNIT_TEST_SRC) $(OBJECTS_NO_MAIN) $(LIBFLEX_LIB) $(LIBTRIM_LIB) $(LIBEM_LIB) $(LDFLAGS)
+
+OCM_UNIT_TEST_SRC := $(ROOT_DIR)/tests/test_ocm_multi_unit.cpp
+.PHONY: ocm-multi-unit-tests
+ocm-multi-unit-tests : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
+ocm-multi-unit-tests : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS) $(shell pkg-config --libs glib-2.0 2>/dev/null || echo "")
+ocm-multi-unit-tests : Depend.list parametersDefault.xxd $(OBJECTS_NO_MAIN) libflex libtrim libem libprocess_features $(LIBSCRNA_LIB) $(OCM_UNIT_TEST_SRC)
+	$(CXX) -o ocm_multi_unit_tests $(CXXFLAGS) $(OCM_UNIT_TEST_SRC) $(OBJECTS_NO_MAIN) $(LIBFLEX_LIB) $(LIBTRIM_LIB) $(LIBEM_LIB) $(PROCESS_FEATURES_LIB) $(LIBSCRNA_LIB) $(LDFLAGS)
 
 SOURCES := $(SRC_CPP_ROOT) $(FLEX_SRC_DIR)/ReadAlign_resolveAmbiguousCBs.cpp $(wildcard *.c) $(wildcard flex/*.cpp)
 
@@ -331,7 +340,13 @@ test_SoloReadInfoBaseline: Depend.list parametersDefault.xxd $(filter-out STAR.o
 	../test/solo_readinfo_baseline
 
 .PHONY: test
-test: test_packed_readinfo test_SoloReadInfoBaseline test_SoloReadInfoLoader test_SoloReadInfoParity test_MinimalSink test_CbCorrector test_CbBayesianResolver test_CbBayesianResolverPhase2 test_inline_hash_record_capture test_inline_hash_resolver test_inline_hash_clique test_inline_hash_parity test_gene_resolver
+test: test_packed_readinfo test_SoloHDMoleculeWriter test_SoloReadInfoBaseline test_SoloReadInfoLoader test_SoloReadInfoParity test_MinimalSink test_CbCorrector test_CbBayesianResolver test_CbBayesianResolverPhase2 test_inline_hash_record_capture test_inline_hash_resolver test_inline_hash_clique test_inline_hash_parity test_gene_resolver
+
+.PHONY: test_SoloHDMoleculeWriter
+test_SoloHDMoleculeWriter: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
+test_SoloHDMoleculeWriter: SoloHDMoleculeWriter.o
+	$(CXX) $(CXXFLAGS) -I./ ../test/test_solo_hd_molecule_writer.cpp SoloHDMoleculeWriter.o $(LDFLAGS_shared) -o ../test/test_solo_hd_molecule_writer
+	../test/test_solo_hd_molecule_writer
 
 .PHONY: test_MinimalSink
 test_MinimalSink: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)

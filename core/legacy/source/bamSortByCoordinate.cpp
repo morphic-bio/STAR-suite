@@ -6,7 +6,203 @@
 #include "bam_cat.h"
 #include "SamtoolsSorter.h"
 #include "GlobalVariables.h"
+#include "OcmMultiConfig.h"
+#include "OcmMultiMaterialize.h"
+#include "SoloBamParsing.h"
+#include "streamFuns.h"
 #include <sys/stat.h>
+#include <algorithm>
+#include <cctype>
+#include <map>
+#include <stdexcept>
+#include <vector>
+
+namespace {
+
+static string lowerStringLocal(string s) {
+    std::transform(s.begin(), s.end(), s.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return s;
+}
+
+static bool unsetTokenLocal(const string& value) {
+    return value.empty() || value == "-";
+}
+
+static string resolveOcmConfigPath(const Parameters& P) {
+    if (!unsetTokenLocal(P.pfMulti.ocmMultiConfig)) {
+        return P.pfMulti.ocmMultiConfig;
+    }
+    if (!unsetTokenLocal(P.pfMulti.pfMultiConfig)) {
+        return P.pfMulti.pfMultiConfig;
+    }
+    return string();
+}
+
+static string resolveOcmProjectRoot(const string& outPrefix) {
+    string prefix = outPrefix;
+    if (!prefix.empty() && prefix.back() != '/') {
+        prefix.push_back('/');
+    }
+    const string runSuffix = "/run/";
+    size_t runPos = prefix.rfind(runSuffix);
+    if (runPos != string::npos) {
+        const string samplesToken = "/samples/";
+        size_t samplesPos = prefix.rfind(samplesToken, runPos);
+        if (samplesPos != string::npos) {
+            return prefix.substr(0, samplesPos + 1);
+        }
+        if (runPos == 0) {
+            return "./";
+        }
+        return prefix.substr(0, runPos + 1);
+    }
+    size_t lastSlash = prefix.find_last_of('/');
+    if (lastSlash == string::npos || lastSlash == 0) {
+        return "./";
+    }
+    return prefix.substr(0, lastSlash + 1);
+}
+
+struct OcmBamSampleHandle {
+    string sampleId;
+    BGZF* bam = nullptr;
+    uint64_t records = 0;
+};
+
+struct OcmBamRouter {
+    bool enabled = false;
+    vector<OcmBamSampleHandle> samples;
+    map<string, vector<size_t>> tagToSampleIndices;
+    BGZF* unassigned = nullptr;
+    uint64_t unassignedRecords = 0;
+    uint64_t assignedRecords = 0;
+};
+
+static void closeOcmBamRouter(OcmBamRouter& router) {
+    for (auto& sample : router.samples) {
+        if (sample.bam != nullptr) {
+            bgzf_close(sample.bam);
+            sample.bam = nullptr;
+        }
+    }
+    if (router.unassigned != nullptr) {
+        bgzf_close(router.unassigned);
+        router.unassigned = nullptr;
+    }
+}
+
+static BGZF* openOcmBamFile(const string& path, Parameters& P) {
+    BGZF* bam = bgzf_open(path.c_str(), ("w" + to_string((long long)P.outBAMcompression)).c_str());
+    if (bam == nullptr) {
+        ostringstream errOut;
+        errOut << "EXITING because of fatal ERROR: could not open OCM BAM output: " << path << "\n";
+        errOut << "SOLUTION: check that the disk is not full and the output directory is writable";
+        exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
+    }
+    return bam;
+}
+
+static void initializeOcmBamRouter(Parameters& P, Genome& genome, OcmBamRouter& router) {
+    const string mode = lowerStringLocal(P.pfMulti.ocmMultiBamSplit);
+    if (mode == "no" || mode.empty()) {
+        return;
+    }
+    if (!P.outBAMunsorted) {
+        if (mode == "yes") {
+            P.inOut->logMain << "WARNING: --ocmMultiBamSplit yes requires unsorted BAM output; skipping OCM BAM split.\n";
+        }
+        return;
+    }
+    const string configPath = resolveOcmConfigPath(P);
+    if (configPath.empty()) {
+        if (mode == "yes") {
+            P.inOut->logMain << "WARNING: --ocmMultiBamSplit yes requires --ocmMultiConfig or --pfMultiConfig; skipping OCM BAM split.\n";
+        }
+        return;
+    }
+
+    PfMultiConfig::Config config;
+    try {
+        config = OcmMultiConfig::parseAndValidate(configPath, P.inOut->logMain);
+    } catch (const std::exception& ex) {
+        if (mode == "auto") {
+            P.inOut->logMain << "WARNING: --ocmMultiBamSplit auto could not parse OCM config; skipping: "
+                             << ex.what() << "\n";
+            return;
+        }
+        exitWithError("EXITING because of fatal OCM BAM split config error: " + string(ex.what()) + "\n",
+                      std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
+    }
+    if (config.samples.empty()) {
+        if (mode == "yes") {
+            P.inOut->logMain << "WARNING: OCM BAM split requested but config has no [samples]; skipping.\n";
+        }
+        return;
+    }
+
+    const string projectRoot = resolveOcmProjectRoot(P.outFileNamePrefix);
+    const string multiCountDir = projectRoot + "outs/multi/count/";
+    createDirectory(multiCountDir, P.runDirPerm, "OCM multi BAM output", P);
+    router.unassigned = openOcmBamFile(multiCountDir + "unassigned_alignments.bam", P);
+    outBAMwriteHeader(router.unassigned, P.samHeader, genome.chrNameAll, genome.chrLengthAll);
+
+    for (const auto& sample : config.samples) {
+        const string sampleCountDir = projectRoot + "outs/per_sample_outs/" + sample.sample_id + "/count/";
+        createDirectory(sampleCountDir, P.runDirPerm, "OCM per-sample BAM output", P);
+        OcmBamSampleHandle handle;
+        handle.sampleId = sample.sample_id;
+        handle.bam = openOcmBamFile(sampleCountDir + "sample_alignments.bam", P);
+        outBAMwriteHeader(handle.bam, P.samHeader, genome.chrNameAll, genome.chrLengthAll);
+        const size_t index = router.samples.size();
+        router.samples.push_back(handle);
+        for (const auto& ocmId : sample.resolvedOcmIds()) {
+            router.tagToSampleIndices[ocmId].push_back(index);
+        }
+    }
+
+    router.enabled = true;
+    P.inOut->logMain << "OCM BAM split enabled during tagged unsorted BAM replay: "
+                     << router.samples.size() << " samples, projectRoot=" << projectRoot << "\n";
+}
+
+static void routeOcmBamRecord(OcmBamRouter& router, const char* bamData, uint32_t bamSize) {
+    if (!router.enabled) {
+        return;
+    }
+    const string cb = SoloBamParsing::parseCB(bamData, bamSize);
+    const string ocmId = cb.empty() ? string() : OcmMultiMaterialize::classifyBarcodeTag(cb);
+    auto it = router.tagToSampleIndices.find(ocmId);
+    if (it == router.tagToSampleIndices.end() || it->second.empty()) {
+        if (router.unassigned != nullptr) {
+            bgzf_write(router.unassigned, bamData, bamSize);
+            ++router.unassignedRecords;
+        }
+        return;
+    }
+    for (size_t sampleIndex : it->second) {
+        if (sampleIndex >= router.samples.size() || router.samples[sampleIndex].bam == nullptr) {
+            continue;
+        }
+        bgzf_write(router.samples[sampleIndex].bam, bamData, bamSize);
+        ++router.samples[sampleIndex].records;
+    }
+    ++router.assignedRecords;
+}
+
+static void logOcmBamRouterSummary(const OcmBamRouter& router, Parameters& P) {
+    if (!router.enabled) {
+        return;
+    }
+    P.inOut->logMain << "OCM BAM split completed: assigned_records=" << router.assignedRecords
+                     << " unassigned_records=" << router.unassignedRecords << "\n";
+    for (const auto& sample : router.samples) {
+        P.inOut->logMain << "  OCM BAM sample " << sample.sampleId
+                         << " records=" << sample.records << "\n";
+    }
+}
+
+} // namespace
 
 // Helper function to check if a chromosome is Y chromosome using genome.yTids
 static bool isYChromosome(const char* bamData, const Genome& genome) {
@@ -360,6 +556,9 @@ void bamUnsortedWithTags(Parameters &P, Genome &genome, Solo &solo) {
         }
         outBAMwriteHeader(bgzfNoY, P.samHeader, genome.chrNameAll, genome.chrLengthAll);
     }
+
+    OcmBamRouter ocmRouter;
+    initializeOcmBamRouter(P, genome, ocmRouter);
     
     // Temp buffer for tag injection
     char bam1[BAM_ATTR_MaxSize];
@@ -383,6 +582,7 @@ void bamUnsortedWithTags(Parameters &P, Genome &genome, Solo &solo) {
         
         // Write to output (bam0/size0 may point to bam1 after tag injection)
         bgzf_write(bgzfOut, bam0, size0);
+        routeOcmBamRecord(ocmRouter, bam0, size0);
         
         // Y/noY split
         if (P.emitNoYBAMyes) {
@@ -398,8 +598,10 @@ void bamUnsortedWithTags(Parameters &P, Genome &genome, Solo &solo) {
     bgzf_close(bgzfOut);
     if (bgzfY) bgzf_close(bgzfY);
     if (bgzfNoY) bgzf_close(bgzfNoY);
+    closeOcmBamRouter(ocmRouter);
     
     P.inOut->logMain << "Unsorted BAM with CB/UB tags completed: " << recordCount << " records\n";
+    logOcmBamRouterSummary(ocmRouter, P);
     
     // Cleanup
     delete g_unsortedTagBuffer;

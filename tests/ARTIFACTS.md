@@ -46,7 +46,12 @@ update this file with its output location.
 - `tests/perturb_velocyto_mex_smoke_output_*/` (UCSF 100K perturb smoke producing raw/filtered velocyto MEX surfaces)
 - `tests/ucsf_corrected_production_100k_output_*/` (corrected UCSF production 100K smoke: Y/noY BAM/FASTQ, packaged velocyto MEX, downstream h5ads, CellBender, and paper wrapper manifests)
 - `tests/multiome_mudata_smoke_output_*/` (PBMC 3K multiome MEX/MuData smoke outputs: split GEX/ATAC MEX, prototype h5ad/h5mu files, evidence/cell-call summaries)
-- `tests/jax_multiome_lane_smoke_*/` (JAX Multiome one-lane STAR/Chromap smoke outputs: Y/noY BAM/FASTQ, GeneFull/Velocyto MEX, remote CellBender h5ads, ATAC peak MEX, and `.h5mu` files)
+- `tests/jax_multiome_lane_smoke_*/` (JAX Multiome one-lane STAR/Chromap smoke outputs: `LOCAL_MEX_READY.txt`, Y/noY BAM/FASTQ, GeneFull/Velocyto MEX, Chromap sorted BAM + binary sidecar, sidecar-derived peaks/summits, native ATAC peak MEX/metrics, remote CellBender h5ads, `REMOTE_POST_MEX_READY.txt`, and `.h5mu` files)
+- `/mnt/pikachu/JAX_Multiome01_processed/star_multiome*/` (JAX_Multiome01 STAR/Chromap production roots: metadata-derived sample manifests, per-sample local STAR/Chromap MEX boundary outputs, remote post-MEX h5ads/CellBender/MuData, production logs, and Globus large-file transfer state. Generated BAM and Y/noY FASTQ derivatives may be removed locally after successful Globus transfer; raw input FASTQs under `/mnt/pikachu/JAX_Multiome01/raw` are preserved.)
+- `/mnt/pikachu/JAX_scRNAseq02_processed/ocm_oracle_smoke_*/` (JAX scRNAseq02 `25E32-L3` OCM oracle smoke roots: staged 2M read-pair FASTQ downsample, rendered existing-binary STAR command, GeneFull/Velocyto/Y-removal smoke outputs when run, native OCM multi MEX materialization under `outs/multi` and `outs/per_sample_outs`, and Cell Ranger multi layout validation reports. Raw source FASTQs under `/mnt/pikachu/JAX_scRNAseq02/raw` are preserved.)
+- `/mnt/pikachu/JAX_scRNAseq02_processed/ocm_lowmem*_smoke_*/` (JAX OCM low-memory/aggressive-spill smoke roots, including 8192-bucket Velocyto range spill and optional binary GeneFull spool checks.)
+- `/mnt/pikachu/JAX_scRNAseq02_processed/ocm_prod_25E32-L3_*/` (full-depth first-sample JAX OCM production attempts; contains large BAM/FASTQ/MEX outputs and logs, not for commit.)
+- `/mnt/pikachu/JAX_scRNAseq02_processed/ocm_memprof_*` (Solo memory profile harness outputs: `STAR_SOLO_MEMORY_PROFILE=1`, `tests/run_solo_memory_profile_harness.sh --ladder` or `--downsample-read-pairs`; checkpoints in `logs/star.log`.)
 - `tests/ucsf_velocyto_100k_matrix_output_*/` (diagnostic 100K UCSF staged-input matrix varying `Gene`, BAM output, and Y-split emission to isolate zero-Velocyto conditions)
 - `tests/ucsf_velocyto_exact_100k_output_*/` (canonical STAR Velocyto parity: deterministic 1 vs N threads on 100K fixture)
 - `tests/ucsf_velocyto_exact_2m_output_*/` (same on full UCSF 2M when `UCSF_2M_PFCONFIG` is set)
@@ -796,3 +801,17 @@ All three runs used **`USE_READFILES_ZCAT=0`** (no external `zcat`), **`--outSAM
   - Bit-identical output. No wall-clock improvement — mapping is gzip-I/O-bound, not CB-lookup-bound.
   - Details: `docs/HANDOFF_FLEX_NOALIGN_SNAPSHOT_HARNESS_20260325.md` § "Lean H0 khash"
 - Status: untracked
+
+## JAX scRNAseq02 OCM Composite-Barcode Smoke (2026-05-20)
+
+- Harness: `scripts/run_jax_scrnaseq02_ocm_composite_smoke.sh`
+- Adapter: `scripts/ocm_composite_adapter.py`
+- Runbook: `docs/RUNBOOK_SCRNA_OCM_COMPOSITE_BARCODE_METHOD_20260520.md`
+- Default STAR mode: native `--ocmMultiBarcodeMode flex`
+  (`CB16+OCM_TAG8` before correction/counting); adapter also supports the old
+  helper-only `CB17` fixtures.
+- External output roots:
+  - `/mnt/pikachu/JAX_scRNAseq02_processed/ocm_composite_smoke_100k_*`
+  - `/mnt/pikachu/JAX_scRNAseq02_processed/ocm_composite_smoke_50m_*`
+- Status: untracked; do not commit staged FASTQs, STAR outputs, Cell Ranger
+  pipestances, materialized MEX outputs, or parity reports.

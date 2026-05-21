@@ -144,6 +144,7 @@ struct PfMultiFeatureRun {
     string assignOut;
     string featureRefPath;
     string whitelistPath;
+    string barcodeOutputMapPath;
     string effectiveChem;
     string effectiveReadNamespace;
     string assignmentWhitelistNamespace;
@@ -2656,13 +2657,21 @@ std::shared_ptr<PfMultiAssignPhaseResult> runPfMultiAssignPhase(
             run.assignOut = assignOut;
             run.featureRefPath = refPath;
             run.whitelistPath = wlInfo.normalizedPath;
+            run.barcodeOutputMapPath =
+                (wlInfo.hasTwoColumnSource && assignmentWhitelistNamespace == "NXT")
+                    ? wlInfo.sourcePath
+                    : "";
             run.effectiveChem = effectiveReadNamespace;
             run.effectiveReadNamespace = nsCtx.effectiveReadNamespace;
             run.assignmentWhitelistNamespace = nsCtx.assignmentWhitelistNamespace;
             run.translateNxtForAssign = false;
             // Whitelist is now in read namespace; translateNxt is false so
             // assignBarcodes outputs barcodes in the assignment/read namespace.
-            run.featureMexOutputNamespace = nsCtx.assignmentWhitelistNamespace;
+            // A two-column 10x translation whitelist maps NXT assignment
+            // barcodes to TRU MEX barcodes at stub generation. Keep the MEX
+            // namespace aligned with the barcode TSV that downstream merge reads.
+            run.featureMexOutputNamespace =
+                !run.barcodeOutputMapPath.empty() ? "TRU" : nsCtx.assignmentWhitelistNamespace;
             run.outputNamespace = nsCtx.outputNamespace;
             run.namespaceConfident = nsCtx.isNamespaceConfident;
             run.detectedMatchMode = detectedMatchMode;
@@ -2699,7 +2708,9 @@ std::shared_ptr<PfMultiAssignPhaseResult> runPfMultiAssignPhase(
         for (auto& run : featureRuns) {
             int stubRet = PfMultiMexStub::processAssignOutput(
                 run.assignOut, run.featureRefPath, run.featureType,
-                true, run.whitelistPath, run.featureType);
+                true,
+                run.barcodeOutputMapPath.empty() ? run.whitelistPath : run.barcodeOutputMapPath,
+                run.featureType);
             if (stubRet != 0) {
                 throw runtime_error("Failed to generate MEX stub for library: type="
                     + run.featureType + ", library_id=" + run.libraryId
@@ -2755,6 +2766,7 @@ std::shared_ptr<PfMultiAssignPhaseResult> runPfMultiAssignPhase(
                 manifest << "fastq_dir\t" << run.resolvedFastq << "\n";
                 manifest << "feature_ref\t" << run.featureRefPath << "\n";
                 manifest << "whitelist\t" << run.whitelistPath << "\n";
+                manifest << "barcode_output_map\t" << run.barcodeOutputMapPath << "\n";
                 manifest << "chemistry_request\t" << run.resolvedChemRequest << "\n";
                 manifest << "chemistry_explicit\t" << (run.explicitChem ? "yes" : "no") << "\n";
                 manifest << "effective_chemistry\t" << run.effectiveChem << "\n";
@@ -3088,7 +3100,8 @@ int finalizePfMultiConfig(Parameters& P,
             for (const auto& run : featureRuns) {
                 writeDeferredFilteredAssignOutput(
                     run.assignOut, filteredGexBarcodes, run.featureMexOutputNamespace,
-                    run.whitelistPath, P.inOut->logMain);
+                    run.barcodeOutputMapPath.empty() ? run.whitelistPath : run.barcodeOutputMapPath,
+                    P.inOut->logMain);
             }
         }
 

@@ -1,11 +1,12 @@
 # Multiome MEX to MuData Runbook
 
-Date: 2026-05-16
+Date: 2026-05-18
 
-Status: implemented test-set runbook. STAR-suite now has a reusable MuData
-builder and a production-shaped smoke wrapper. Earlier mentions of MuData in
-handoffs should be treated as aspirational references that are superseded by
-the scripts listed here.
+Status: implemented STAR-side multiome path. STAR-suite now has a reusable
+MuData builder, a STAR/Chromap local MEX boundary, a remote post-MEX
+CellBender/MuData handoff, and a manifest-driven JAX_Multiome01 production
+wrapper. Earlier mentions of MuData in handoffs should be treated as
+aspirational references that are superseded by the scripts listed here.
 
 ## Goal
 
@@ -46,6 +47,25 @@ Local STAR-suite:
 
 - `scripts/build_multiome_mudata.py` - production-oriented RNA+ATAC `.h5mu`
   builder from RNA h5ad or GEX MEX plus ATAC peak MEX.
+- `scripts/run_star_multiome_lane_smoke.sh` - STAR/Chromap multiome sample
+  runner. Preferred production mode stops after local STAR cell calling,
+  Velocyto packaging, Chromap BAM/sidecar materialization, and ATAC peak-MEX
+  construction.
+- `scripts/run_remote_multiome_post_mex_rsync.sh` - preferred post-MEX remote
+  boundary. It stages RNA MEX plus local ATAC peak MEX/metrics to the GPU
+  server, runs RNA downstream/CellBender and MuData there, then syncs only
+  downstream outputs back.
+- `scripts/run_jax_multiome01_production.sh` - manifest-driven production
+  wrapper for the nine JAX_Multiome01 samples. It runs the local STAR/Chromap
+  boundary sample-by-sample, queues serialized remote post-MEX jobs, and can
+  invoke per-sample Globus large-file transfer/cleanup.
+- `scripts/upload_jax_multiome01_large_files_globus.sh` - Globus uploader for
+  raw FASTQs, generated Y/noY FASTQs, and BAMs. Generated local BAM/FASTQ files
+  are deleted only after the Globus task succeeds; raw input FASTQs are
+  preserved.
+- `scripts/normalize_multiome_atac_barcode_fastq.py` - legacy fallback for
+  materializing normalized ATAC barcode FASTQs. Production uses native
+  `--chromapAtacReadFormat` instead.
 - `scripts/run_multiome_mudata_smoke.sh` - smoke/production wrapper that splits
   ARC MEX, verifies or regenerates GeneFull and Velocyto MEX packaging, uses
   the remote downstream/CellBender path when configured, and writes MuData
@@ -55,6 +75,9 @@ Local STAR-suite:
   `outs/raw_feature_bc_matrix` and `outs/filtered_feature_bc_matrix`.
 - `scripts/run_scrna_downstream_gene_full_velocyto.sh` - current downstream h5ad
   wrapper for UCSF/MSK-style RNA objects.
+- `docs/RUNBOOK_VELOCYTO_CR_COMPAT_POLICY_20260519.md` - planned
+  GeneFull-count-preserving Velocyto policy for production velocity layers where
+  `spliced + unspliced + ambiguous` must equal the GeneFull count matrix.
 - `scripts/run_remote_cellbender_rsync.sh` - remote-only CellBender runner for
   an existing downstream h5ad directory.
 - `scripts/build_gene_full_velocyto_h5ad.py` - current GeneFull plus Velocyto
@@ -69,8 +92,11 @@ Local STAR-suite:
   GEX MEX extraction plus SimpleED.
 - `core/features/libscrna/tools/scrna_*` - ARC table, GEX evidence, ATAC
   evidence, and combiner tools.
-- `core/features/libscrna/src/AtacEvidenceFromPeaks.cc` - STAR/libchromap
-  binary-sidecar to per-barcode ATAC evidence implementation.
+- `core/features/libchromap_contract/tools/star_multiome_atac_peak_mex.cpp` -
+  native binary-sidecar peak caller, peak-MEX builder, and ATAC metrics writer.
+- `core/features/libscrna/src/AtacEvidenceFromPeaks.cc` - lower-level
+  binary-sidecar to per-barcode ATAC evidence implementation used by the native
+  materialization path.
 - `docs/LIBCHROMAP_CONTRACT.md` - STAR `--chromapAtac*` contract and validation.
 - `docs/HANDOFF_STAR_LIBCHROMAP_MACS3_INTEGRATION_20260425.md` - prior
   handoff, including the now-addressed ATAC evidence-from-peaks direction.
@@ -127,15 +153,19 @@ Known useful fixture files:
 - STAR/Chromap 100K outputs exist under the same fixture root and can be used
   after the ARC-only packaging prototype is stable.
 
-Then validate on the full public PBMC 3K multiome set:
+The full public PBMC 3K multiome set remains useful for regression and parity
+checks:
 
 ```bash
 FULL_ROOT=/mnt/pikachu/atac-seq/10xMultiome/pbmc_unsorted_3k
 FULL_ARC_OUT=${FULL_ROOT}/pbmc_unsorted_3k_full_arc_live/outs
 ```
 
-Do not start with production data. The 100K fixture has both ARC MEX and ARC
-per-barcode metrics, so it is the safest schema and parity target.
+For new schema work, do not start with production data. The 100K fixture has
+both ARC MEX and ARC per-barcode metrics, so it remains the safest schema and
+parity target. For the current production implementation, the JAX one-lane smoke
+is the closest end-to-end rehearsal because it exercises native ATAC barcode
+parsing, low-memory Chromap, remote post-MEX, and MuData assembly.
 
 ## GEX Reference Policy
 
@@ -167,6 +197,29 @@ grep -E 'cellrangerRefRelease|sjdbGTFfile|genomeFastaFiles' \
 ATAC chrom sizes and peak coordinates should remain GRCh38-compatible with this
 GEX reference. For SnapATAC2 prototypes, `snap.genome.hg38` is acceptable only
 after confirming contig names match the Chromap fragments and peak file.
+
+Current STAR/Chromap production defaults:
+
+```bash
+GEX_GENOME_DIR=/storage/autoindex_110_44/bulk_index
+GEX_WHITELIST=/mnt/pikachu/atac-seq/10xMultiome/pbmc_unsorted_3k/open_source_full_20260424_015259/refs/737K-arc-v1_gex.txt
+CHROMAP_REF=/storage/autoindex_110_44/bulk_index/cellranger_ref/genome.fa
+CHROMAP_INDEX=/mnt/pikachu/atac-seq/benchmarks/pbmc_unsorted_3k_100k/chromap_index/genome.index
+ATAC_WHITELIST=/mnt/pikachu/atac-seq/benchmarks/pbmc_unsorted_3k_100k/chromap_index/737K-arc-v1_atac.txt
+ATAC_TO_GEX=/mnt/pikachu/atac-seq/benchmarks/pbmc_unsorted_3k_100k/chromap_index/atac2gex.tsv
+```
+
+The JAX ARC ATAC barcode read uses bases 9-24 of the ATAC i5/read2 file,
+reverse-complemented. Production should express this natively as:
+
+```text
+--chromapAtacReadFormat bc:8:23:-
+--chromapAtacBarcodeTranslate <ATAC_TO_GEX>
+--chromapAtacBarcodeTranslateFromFirst 1
+```
+
+Do not pre-normalize the ATAC barcode FASTQ unless debugging the legacy fallback
+path explicitly.
 
 ## Implemented Smoke Driver
 
@@ -253,17 +306,28 @@ it automatically runs:
 python3 scripts/package_star_genefull_mex.py --run-dir <star_run_dir>
 ```
 
-If any required Velocyto MEX file is missing, it automatically runs:
-
-```bash
-python3 scripts/prepare_velocyto_mex.py --run-dir <star_run_dir>
-```
+Velocyto MEX is produced by STAR's internal post-Solo writer. If the required
+Velocyto MEX files are missing, treat the STAR run as incomplete or rerun with a
+current binary. The legacy `prepare_velocyto_mex.py` path is a repair/backfill
+tool only and is not part of the preferred production boundary.
 
 When STAR does not write `Solo.out/Velocyto/filtered/barcodes.tsv`, the
 Velocyto packager uses `Solo.out/GeneFull/filtered/barcodes.tsv` as the
 filtered barcode axis and subsets the raw Velocyto layers accordingly.
 
-Remote CellBender behavior:
+Preferred post-MEX boundary:
+
+- local STAR/Chromap produces the RNA GeneFull MEX, Velocyto MEX, ATAC BAM,
+  binary ATAC fragment sidecar, sidecar-derived peaks/summits, ATAC peak MEX,
+  and ATAC metrics;
+- the remote GPU server receives only post-MEX inputs, runs RNA downstream
+  h5ad/CellBender and MuData assembly, then rsyncs downstream h5ad and `.h5mu`
+  outputs back;
+- STAR, Chromap, libchromap, libMACS3, and the native sidecar reader stay on
+  the local STAR/Chromap host. This is the preferred boundary for production
+  now, but the downstream side may evolve as the MuData schema matures.
+
+Remote CellBender behavior for older ARC/hybrid wrappers:
 
 - if no downstream dir is supplied, the wrapper uses
   `scripts/run_remote_scrna_downstream_rsync.sh` with `--run-cellbender`;
@@ -272,6 +336,68 @@ Remote CellBender behavior:
   `scripts/run_remote_cellbender_rsync.sh`;
 - local downstream without remote CellBender is refused unless
   `--allow-local-downstream` is passed explicitly.
+
+## Current STAR/Chromap Driver
+
+Use `scripts/run_star_multiome_lane_smoke.sh` for one sample. FASTQ arguments
+may be comma-separated lane lists; this is how the production wrapper passes
+the multi-lane JAX libraries.
+
+For production-shaped local materialization only:
+
+```bash
+scripts/run_star_multiome_lane_smoke.sh \
+  --gex-r1 <gex_R1.fastq.gz[,lane2...]> \
+  --gex-r2 <gex_R2.fastq.gz[,lane2...]> \
+  --atac-r1 <atac_R1.fastq.gz[,lane2...]> \
+  --atac-barcode <atac_R2_i5.fastq.gz[,lane2...]> \
+  --atac-r2 <atac_R3.fastq.gz[,lane2...]> \
+  --out-dir <sample_out> \
+  --threads 16 \
+  --chromap-threads 16 \
+  --chromap-low-mem \
+  --chromap-macs3-frag-low-mem \
+  --chromap-start-mode concurrent \
+  --stop-after-local-mex
+```
+
+This writes `LOCAL_MEX_READY.txt` only after all local boundary artifacts are
+present:
+
+- STAR GeneFull raw/filtered MEX and Velocyto raw/filtered MEX under
+  `star_sample/run/outs/`;
+- Y/noY BAM and FASTQ outputs from the expression run;
+- Chromap ATAC sorted BAM, binary fragment sidecar, and `.chroms.tsv`;
+- sidecar-derived `atac_peaks.narrowPeak` and `atac_summits.bed`;
+- native C++ ATAC peak MEX under `atac/peak_mex/`;
+- per-barcode ATAC metrics in `atac/atac_metrics.tsv`.
+
+Post-MEX remote handoff:
+
+```bash
+scripts/run_remote_multiome_post_mex_rsync.sh \
+  --sample-dir <sample_out>/star_sample \
+  --remote-host 10.159.4.53 \
+  --remote-root /home/lhhung/jax_multiome_remote_downstream_production \
+  --output-name downstream_genefull_velocyto_cellbender \
+  --run-cellbender \
+  --adaptive-filter \
+  --cellbender-cpu-cores 24 \
+  --cellbender-gpu
+```
+
+The remote host receives only RNA MEX, Velocyto MEX, ATAC peak MEX, ATAC
+metrics, and the scripts needed for downstream processing, including the
+adaptive n_genes/MT QC helpers. It runs
+`run_scrna_downstream_gene_full_velocyto.sh`, CellBender, and
+`build_multiome_mudata.py`, validates required RNA Velocyto layers plus ATAC
+`counts`, syncs h5ad and `.h5mu` outputs back, excludes the remote
+`mudata_venv/`, and writes `REMOTE_POST_MEX_READY.txt`.
+
+For sparse smoke tests only, the filtered RNA/ATAC barcode intersection may be
+empty. The remote wrapper passes `--allow-empty-barcode-intersection` for the
+filtered `.h5mu` so the path can be validated; production samples should treat
+zero filtered observations as a QC warning that requires review.
 
 ## Barcode Namespace Policy
 
@@ -304,7 +430,7 @@ same downstream h5ad surface as the UCSF/MSK perturb-seq work:
   - `outs/raw_feature_bc_matrix/`
   - `outs/filtered_feature_bc_matrix/`
   - `outs/gene_full_feature_bc_matrix_manifest.json`
-- package Velocyto MEX with `scripts/prepare_velocyto_mex.py`, producing:
+- STAR internally packages Velocyto MEX, producing:
   - `outs/raw_velocyto_feature_bc_matrix/`
   - `outs/filtered_velocyto_feature_bc_matrix/`
   - `outs/velocyto_feature_bc_matrix_manifest.json`
@@ -408,12 +534,14 @@ Expected work:
    Policy".
 2. Run `scripts/package_star_genefull_mex.py --run-dir <star_run_dir>` if the
    packaged GeneFull MEX surface is not already present.
-3. Run `scripts/prepare_velocyto_mex.py --run-dir <star_run_dir>` if the
-   packaged Velocyto MEX surface is not already present.
+3. Confirm STAR wrote `outs/raw_velocyto_feature_bc_matrix`,
+   `outs/filtered_velocyto_feature_bc_matrix`, and
+   `outs/velocyto_feature_bc_matrix_manifest.json`.
 4. Run `scripts/run_scrna_downstream_gene_full_velocyto.sh --run-dir <star_run_dir>
    --output-dir <downstream_dir>` using the same options selected for the
-   UCSF/MSK-style h5ad path, including CellBender when the test goal includes it.
-   Y-removal remains enabled independently of this downstream h5ad wrapper.
+   UCSF/MSK-style h5ad path, including adaptive n_genes/MT QC and CellBender
+   when the test goal includes it. Y-removal remains enabled independently of
+   this downstream h5ad wrapper.
 5. Build `rna` for MuData from the downstream h5ad, preserving counts and
    Velocyto layers instead of re-reading only GeneFull MEX.
 6. Build `atac` from ARC peak MEX.
@@ -437,12 +565,14 @@ This phase replaces ARC ATAC with Chromap-suite outputs.
 Preferred production-shaped ATAC artifacts from STAR:
 
 - `atac_possorted.bam`
-- `atac_fragments.tsv.gz`
-- `atac_fragments.tsv.gz.bin` plus `.chroms.tsv` sidecar when binary evidence is
-  enabled
+- `atac_fragments.bin` plus `atac_fragments.bin.chroms.tsv` binary sidecar
+
+Preferred local post-materialization ATAC artifacts:
+
 - `atac_peaks.narrowPeak`
 - `atac_summits.bed`
-- `atac_evidence.tsv` from `--chromapAtacEvidenceFromPeaksOutput`
+- `atac/peak_mex/{matrix.mtx.gz,features.tsv.gz,barcodes.tsv.gz}`
+- `atac/atac_metrics.tsv`
 
 STAR must be built cleanly with Chromap support before debugging this path:
 
@@ -458,31 +588,53 @@ STAR parameter shape:
 --chromapAtacStartMode concurrent
 --chromapAtacOutputFormat BAM
 --chromapAtacOutputFragments <out>/atac_possorted.bam
---chromapAtacSecondaryFragments <out>/atac_fragments.tsv.gz
+--chromapAtacSecondaryFragments <out>/atac_fragments.bin
 --chromapAtacSortBam 1
---chromapAtacCallMacs3FragPeaks 1
---chromapAtacMacs3FragPeaksOutput <out>/atac_peaks.narrowPeak
---chromapAtacMacs3FragSummitsOutput <out>/atac_summits.bed
---chromapAtacMacs3FragPeaksSource memory
---chromapAtacEvidenceFromPeaksOutput <out>/atac_evidence.tsv
---dynamicThreadInterface 1
---dynamicThreadFifoWaiters 1
---dynamicThreadAtacController 1
+--chromapAtacReadFormat bc:8:23:-
+--chromapAtacBarcodeTranslate <refs>/atac2gex.tsv
+--chromapAtacBarcodeTranslateFromFirst 1
+--chromapAtacLowMem 1
+--chromapAtacLowMemRam 0
+--chromapAtacMacs3FragLowMem 1
+--chromapAtacTempDir <sample>/star_sample/chromap_tmp
 ```
 
-For standalone ATAC iteration, use Chromap-suite's
-`chromap_atac_bam_fragments` workflow schema as the command model, with
-`--call-macs3-frag-peaks` enabled.
+After STAR/Chromap materializes the sidecar, build peaks, ATAC peak MEX, and
+metrics locally:
+
+```bash
+core/features/libchromap_contract/star_multiome_atac_peak_mex \
+  --sidecar <out>/atac_fragments.bin \
+  --barcode-translate <refs>/atac2gex.tsv \
+  --barcode-translate-from-first \
+  --call-peaks-from-sidecar \
+  --peaks <out>/atac_peaks.narrowPeak \
+  --summits-out <out>/atac_summits.bed \
+  --out-dir <sample>/atac/peak_mex \
+  --metrics-tsv <sample>/atac/atac_metrics.tsv \
+  --threads 16 \
+  --temp-dir <sample>/star_sample/chromap_tmp
+```
+
+Do not use the removed `chromapAtacMacs3FragPeaksSource` STAR flag. The old
+file-source path could spill/re-read a misleading `.tsv.gz` fragments file and
+is not the production boundary. Low-memory production runs should spill through
+Chromap's native low-memory path and the binary sidecar, then read that sidecar
+once in `star_multiome_atac_peak_mex`.
+
+The current sample wrapper uses fixed thread budgets for STAR and Chromap
+(`--threads 16` and `--chromap-threads 16` in production) rather than dynamic
+permit sharing. Keep those budgets explicit when using concurrent mode.
 
 ATAC AnnData construction options:
 
-1. SnapATAC2 route, recommended for production-shaped fragment input:
+1. SnapATAC2 route, only when an explicit text fragment export exists:
 
    ```python
    import snapatac2 as snap
 
    adata_frag = snap.pp.import_data(
-       "atac_fragments.tsv.gz",
+       "<exported_atac_fragments.tsv.gz>",
        chrom_sizes=snap.genome.hg38,
        file="atac_fragments.h5ad",
        sorted_by_barcode=False,
@@ -497,7 +649,7 @@ ATAC AnnData construction options:
    )
    ```
 
-2. Direct MEX route, only when a peak-by-barcode MEX already exists:
+2. Direct MEX route, recommended for the current STAR/Chromap production path:
    read with `scanpy.read_10x_mtx`, then apply the same ATAC `.var` and `.obs`
    schema as Phase 1.
 
@@ -507,9 +659,10 @@ SnapATAC2 import expects fragment rows with at least:
 chrom  start  end  barcode  count
 ```
 
-Chromap-suite fragments match this downstream shape. Leave `shift_left` and
-`shift_right` at 0 when fragments were already generated with the intended Tn5
-shift policy.
+Chromap-suite text fragments match this downstream shape when explicitly
+exported. The current production wrapper does not export a text fragments file
+for ATAC AnnData construction; it reads the native ATAC peak MEX produced from
+the binary sidecar.
 
 ## ATAC Evidence and Cell Calls
 
@@ -524,10 +677,10 @@ There are two evidence surfaces:
    This produces `gex_evidence.tsv`, `atac_evidence.tsv`,
    `multiome_calls.tsv`, and comparison outputs against ARC.
 
-2. STAR/libchromap evidence-from-peaks, written by
-   `--chromapAtacEvidenceFromPeaksOutput`.
+2. STAR/libchromap sidecar-derived evidence, written by the native ATAC
+   peak-MEX materializer as `atac/atac_metrics.tsv`.
 
-Current STAR/libchromap evidence-from-peaks writes:
+Current STAR/libchromap ATAC metrics include:
 
 ```text
 barcode
@@ -543,11 +696,13 @@ step or extend the toolchain to derive:
 ```text
 atac_module_call = atac_peak_region_cutsites >= 1
 atac_low_targeting = atac_peak_fraction < <threshold> when threshold > 0
-atac_source = chromap_evidence_from_peaks
+atac_source = chromap_sidecar_peak_mex
 ```
 
 Until that adapter exists, keep ARC-derived multiome calls as the validation
-baseline and attach STAR/libchromap evidence to `.obs` as metrics only.
+baseline and attach STAR/libchromap evidence to `.obs` as metrics only. The
+optional STAR flag `--chromapAtacEvidenceFromPeaksOutput` belongs to the older
+in-STAR peak/evidence path and is not part of the current production wrapper.
 
 ## Target MuData Schema
 
@@ -556,7 +711,11 @@ Write two outputs for the smoke:
 - `unfiltered_multiome.h5mu`: all barcodes present in both modalities after
   namespace normalization.
 - `filtered_multiome.h5mu`: final usable cells only. For Phase 1 this can be
-  ARC `is_cell`; for STAR/Chromap it should be `multiome_calls.final_is_cell`.
+  ARC `is_cell`; for the current STAR/Chromap production path it is the
+  intersection of the downstream RNA filtered h5ad and ATAC peak MEX barcodes,
+  with `cell_call_source = star_downstream_filtered_h5ad_chromap_atac`. Once
+  the multiome combiner is promoted, this should move to
+  `multiome_calls.final_is_cell`.
 
 Global `.obs` columns:
 
@@ -627,7 +786,10 @@ Run these before trying the full PBMC 3K set:
 4. Cell set checks:
    - Phase 1 filtered cells match ARC filtered MEX barcode set exactly.
    - Phase 2 STAR RNA filtered cells match STAR filtered barcode set exactly.
-   - Phase 3 final cells match `multiome_calls.tsv` where `final_is_cell == 1`.
+   - Current Phase 3 filtered cells match the barcode intersection between the
+     downstream RNA filtered h5ad and the ATAC peak MEX.
+   - Future promoted multiome-combiner runs should instead match
+     `multiome_calls.tsv` where `final_is_cell == 1`.
 
 5. Y-removal checks when enabled:
    - `Aligned.out_Y.bam` and `Aligned.out_noY.bam` exist.
@@ -643,6 +805,9 @@ Run these before trying the full PBMC 3K set:
 7. Reload checks:
    - `mudata.read_h5mu(..., backed=True)` succeeds.
    - each modality can be read independently from the `.h5mu`.
+   - filtered `.h5mu` with zero observations is acceptable only for sparse smoke
+     tests that passed `--allow-empty-barcode-intersection`; production output
+     should be reviewed before handoff if this happens.
 
 ## Tested STAR-Side Smoke
 
@@ -723,7 +888,8 @@ Inputs:
 - GEX lane: `25E113-L13_GT25-09244_TGTCCCAACG-TGGACATCGA_S113_L008_R1/R2_001.fastq.gz`.
 - ATAC lane: `25E113-L1_GT25-09222_SI-NA-G2_S8_L005_R1/R2/R3_001.fastq.gz`.
 - GEX reference: `/storage/autoindex_110_44/bulk_index`.
-- ATAC barcode window: bases 9-24 of the ATAC R2/i5 read, reverse-complemented.
+- ATAC barcode window: bases 9-24 of the ATAC R2/i5 read, reverse-complemented
+  by native Chromap read-format support (`--chromapAtacReadFormat bc:8:23:-`).
 - ATAC-to-GEX barcode translation:
   `/mnt/pikachu/atac-seq/benchmarks/pbmc_unsorted_3k_100k/chromap_index/atac2gex.tsv`.
 
@@ -737,6 +903,11 @@ scripts/run_star_multiome_lane_smoke.sh \
   --atac-barcode /mnt/pikachu/JAX_Multiome01/raw/25E113-L1_GT25-09222_SI-NA-G2_S8_L005_R2_001.fastq.gz \
   --atac-r2 /mnt/pikachu/JAX_Multiome01/raw/25E113-L1_GT25-09222_SI-NA-G2_S8_L005_R3_001.fastq.gz \
   --out-dir tests/jax_multiome_lane_smoke_$(date -u +%Y%m%dT%H%M%SZ) \
+  --threads 16 \
+  --chromap-threads 16 \
+  --chromap-low-mem \
+  --chromap-macs3-frag-low-mem \
+  --chromap-start-mode concurrent \
   --remote-host 10.159.4.53 \
   --remote-root /home/lhhung/jax_multiome_remote_downstream_smoke \
   --remote-output-name downstream_genefull_velocyto_cellbender \
@@ -753,10 +924,18 @@ STAR/Chromap checks:
   `--emitYNoYFastqCompression gz`.
 - `Aligned.out_Y.bam`, `Aligned.out_noY.bam`, and paired `y_separated/` FASTQs
   were emitted.
-- Chromap wrote fragments plus MACS3 peaks/summits:
-  - `atac_fragments.tsv.gz` (plain TSV content despite the suffix)
+- Chromap consumed the raw ATAC barcode FASTQ directly; the Python barcode
+  normalizer is retained only behind `--normalize-atac-barcode` for fallback.
+- Chromap wrote BAM plus binary sidecar, then local sidecar post-processing
+  wrote peaks/summits:
+  - `atac_possorted.bam`
+  - `atac_fragments.bin` plus `.chroms.tsv`
   - `atac_peaks.narrowPeak`
   - `atac_summits.bed`
+- ATAC peak MEX was generated by the native C++ builder
+  `core/features/libchromap_contract/star_multiome_atac_peak_mex` from the
+  binary sidecar; the Python/bedtools helper is not compatible with this
+  production boundary.
 - ATAC peak MEX:
   - 70,940 peaks
   - 241,858 barcodes
@@ -783,46 +962,127 @@ MuData checks:
 - ATAC layers: `counts`.
 - `mdata.uns["multiome"]["y_removal_enabled"] == "true"`.
 
-Native adapter follow-up:
+Native adapter status:
 
-- `scripts/normalize_multiome_atac_barcode_fastq.py` is a tested smoke bridge,
-  not the preferred production interface.
-- Replace it with a native STAR/libchromap adapter that accepts the ATAC barcode
-  read plus an explicit window/strand, for example a parameter shaped like
-  `--chromapAtacBarcodeReadFormat 9:16:rc`.
-- The native path should pass the read-format into `ChromapAtacConfig` and avoid
-  materializing a normalized barcode FASTQ before Chromap starts.
+- STAR exposes `--chromapAtacReadFormat` and passes it through
+  `ChromapAtacConfig.read_format` to Chromap. For this JAX ARC lane the
+  production-shaped setting is `bc:8:23:-`, equivalent to 1-based bases 9-24
+  with reverse-complement.
+- `scripts/run_star_multiome_lane_smoke.sh` now defaults to the native barcode
+  path and avoids materializing a normalized barcode FASTQ.
+- `core/features/libchromap_contract/star_multiome_atac_peak_mex` replaces the
+  Python/bedtools ATAC peak-MEX helper for production-shaped smoke runs.
 
-## Promotion Criteria
+## JAX_Multiome01 Production Recipe
 
-Do not apply this to a production set until all are true:
+Inputs:
+
+- raw FASTQs: `/mnt/pikachu/JAX_Multiome01/raw`
+- metadata workbook:
+  `/mnt/pikachu/DPC_metadata_template_Multiome1-complete.xlsx`
+- output root:
+  `/mnt/pikachu/JAX_Multiome01_processed/star_multiome_<timestamp>`
+- remote downstream root:
+  `/home/lhhung/jax_multiome_remote_downstream_production` on `10.159.4.53`
+- Globus destination endpoint: `61fb8b9a-9b52-456e-928c-30c0fb0140bf`
+- Globus destination root: `/JAX_Multiome01_processed/large_files`
+
+Production launch shape:
+
+```bash
+scripts/run_jax_multiome01_production.sh \
+  --threads 16 \
+  --chromap-threads 16 \
+  --chromap-low-mem \
+  --chromap-macs3-frag-low-mem \
+  --chromap-start-mode concurrent \
+  --globus-upload-large-files \
+  --no-sync-images
+```
+
+Resume an existing output root after a completed sample:
+
+```bash
+scripts/run_jax_multiome01_production.sh \
+  --output-root /mnt/pikachu/JAX_Multiome01_processed/star_multiome_prod_globus_20260517T183219Z \
+  --threads 16 \
+  --chromap-threads 16 \
+  --chromap-low-mem \
+  --chromap-macs3-frag-low-mem \
+  --chromap-start-mode concurrent \
+  --globus-upload-large-files \
+  --no-sync-images \
+  --skip-build \
+  --start-at <sample_label_or_slug>
+```
+
+Operational notes:
+
+- the wrapper builds STAR with Chromap support once unless `--skip-build` is
+  supplied. Do not rebuild while an active production run is using the binary.
+- each sample runs local STAR/Chromap through `--stop-after-local-mex`, then a
+  background post-MEX worker runs the remote downstream/MuData handoff and,
+  when requested, the Globus large-file upload.
+- remote post-MEX workers are serialized with
+  `logs/remote_post_mex.lock`, so the GPU server is not oversubscribed.
+- the background post-MEX subshell must keep stdin redirected from `/dev/null`.
+  Do not remove the `< /dev/null` on that block: SSH or child processes can
+  otherwise consume the manifest stream and make the wrapper stop after an
+  early sample.
+- Globus upload waits for task success before deleting generated local BAM and
+  Y/noY FASTQ files. Raw input FASTQs listed in the manifest are uploaded but
+  not deleted.
+- fragment sidecars are not uploaded by default. Add `--include-fragments` to
+  `scripts/upload_jax_multiome01_large_files_globus.sh` only if the handoff
+  needs generated ATAC sidecars outside the local result tree.
+
+Per-sample completion markers:
+
+- local boundary: `<sample_out>/LOCAL_MEX_READY.txt`
+- remote downstream/MuData boundary: `<sample_out>/REMOTE_POST_MEX_READY.txt`
+- final MuData:
+  `<sample_out>/mudata/star_chromap_unfiltered_multiome.h5mu` and
+  `<sample_out>/mudata/star_chromap_filtered_multiome.h5mu`
+- Globus state:
+  `<run_root>/logs/globus_large_files/upload_state.tsv`
+
+## Production Readiness Criteria
+
+Keep the production path on this shape only while all are true:
 
 - `scripts/build_multiome_mudata.py --help` and
-  `scripts/run_multiome_mudata_smoke.sh --help` work in the production
+  `scripts/run_star_multiome_lane_smoke.sh --help` work in the production
   environment.
-- The production Python environment has `mudata` available.
+- `scripts/run_remote_multiome_post_mex_rsync.sh --help` works on the local
+  host, and the remote host can run `mudata` directly or create the per-job
+  `mudata_venv`.
 - The script accepts either combined ARC-style MEX or separate STAR/Chromap
   artifacts.
-- Barcode namespace normalization is explicit and tested.
+- Barcode namespace normalization is explicit and tested through
+  `--chromapAtacReadFormat` plus `chromapAtacBarcodeTranslate`.
 - Phase 2/3 expression-side tests preserve STAR Velocyto layers and validate
   the selected Y-removal mode.
-- The ATAC evidence adapter for STAR/libchromap output exists, or the runbook
-  explicitly stays ARC-derived for cell-call validation.
+- The ATAC peak-MEX adapter for STAR/libchromap output is native C++ and has
+  parity checks against the Python/bedtools smoke output.
 - The 100K fixture writes valid `unfiltered_multiome.h5mu` and
   `filtered_multiome.h5mu`.
-- The full PBMC 3K public set writes valid `.h5mu` files and matches expected
-  cell/peak/gene counts.
+- The JAX one-lane and production samples write valid `.h5mu` files with
+  required RNA layers (`counts`, `spliced`, `unspliced`, `ambiguous`, and
+  `denoised` when CellBender ran) plus ATAC `counts`.
+- The production wrapper keeps the post-MEX background subshell stdin redirected
+  from `/dev/null` so manifest iteration cannot be drained by `ssh`.
 - Generated outputs stay under `tests/multiome_mudata_smoke_output_*`,
-  `/tmp`, or another untracked artifact root documented in `tests/ARTIFACTS.md`.
+  `tests/jax_multiome_lane_smoke_*`,
+  `/mnt/pikachu/JAX_Multiome01_processed/star_multiome*`, `/tmp`, or another
+  untracked artifact root documented in `tests/ARTIFACTS.md`.
 
 ## Open Implementation Tasks
 
-1. Replace the ATAC barcode FASTQ normalization helper with a native
-   STAR/libchromap barcode-window adapter, and then remove the production need
-   to materialize normalized ATAC barcode FASTQs.
-2. Add postflight summaries similar to UCSF/MSK `summary.txt`, including modality
+1. Add postflight summaries similar to UCSF/MSK `summary.txt`, including modality
    shapes, count sums, cell counts, and source artifacts.
-3. Repeat the STAR-side run on the full public PBMC 3K set before moving to the
-   JAX KOLF-2 production set.
-4. After the 100K and full PBMC 3K tests pass, draft the production-set run
-   command and artifact layout.
+2. Add a regression harness for the production wrapper manifest loop so
+   background remote workers cannot inherit and consume the loop stdin.
+3. Promote the STAR/libchromap ATAC metrics adapter into the multiome combiner
+   once the desired final GEX/ATAC cell-call policy is agreed.
+4. Add a compact post-MEX validation report for each `.h5mu`, including layer
+   names, modality shapes, barcode intersections, and Y-removal provenance.

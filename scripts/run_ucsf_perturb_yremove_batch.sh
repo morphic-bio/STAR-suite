@@ -11,6 +11,7 @@ source "${TRIM_QC_HELPER}"
 
 STAR_BIN="${STAR_BIN:-${REPO_ROOT}/core/legacy/source/STAR.release}"
 PREPARE_VELOCYTO_MEX="${PREPARE_VELOCYTO_MEX:-${REPO_ROOT}/scripts/prepare_velocyto_mex.py}"
+ALLOW_LEGACY_PREPARE_VELOCYTO="${ALLOW_LEGACY_PREPARE_VELOCYTO:-0}"
 DOWNSTREAM_WRAPPER="${DOWNSTREAM_WRAPPER:-${REPO_ROOT}/scripts/run_scrna_downstream_gene_full_velocyto.sh}"
 DATASET_ROOT="${DATASET_ROOT:-/mnt/pikachu/ucsf-perturb-seq-corrected}"
 SAMPLE_MAP="${SAMPLE_MAP:-${DATASET_ROOT}/sample_fastq_guide_map.csv}"
@@ -64,7 +65,7 @@ Options:
   --globus-dst-root PATH   Destination root path (e.g. /UCSF-perturb/run_name)
   --globus-poll-seconds N  Poll interval while waiting for transfer cleanup
   --run-downstream         Build local h5ad outputs after each sample run
-  --adaptive-filter        Use adaptive max_genes threshold in downstream QC (default: on)
+  --adaptive-filter        Use adaptive n_genes and MT percentage downstream QC (default: on)
   --run-cellbender         Run CellBender in downstream processing
   --downstream-output-name NAME
                            Downstream output directory name under each sample root
@@ -458,13 +459,17 @@ package_velocyto_outputs() {
   local filtered_dir="${run_dir}/outs/filtered_velocyto_feature_bc_matrix"
   local manifest="${run_dir}/outs/velocyto_feature_bc_matrix_manifest.json"
 
-  [[ -f "${PREPARE_VELOCYTO_MEX}" ]] || die "Missing helper: ${PREPARE_VELOCYTO_MEX}"
   if [[ -d "${raw_dir}" && -d "${filtered_dir}" && -f "${manifest}" ]]; then
-    log "Velocyto packaged outputs already present for ${sample}"
+    log "Native Velocyto packaged outputs present for ${sample}"
     return
   fi
 
-  python3 "${PREPARE_VELOCYTO_MEX}" --run-dir "${run_dir}" >/dev/null
+  if [[ "${ALLOW_LEGACY_PREPARE_VELOCYTO}" == "1" ]]; then
+    [[ -f "${PREPARE_VELOCYTO_MEX}" ]] || die "Missing helper: ${PREPARE_VELOCYTO_MEX}"
+    log "WARNING: using legacy prepare_velocyto_mex.py fallback for ${sample}"
+    python3 "${PREPARE_VELOCYTO_MEX}" --run-dir "${run_dir}" >/dev/null
+  fi
+
   [[ -d "${raw_dir}" ]] || die "Missing packaged raw velocyto MEX for ${sample}"
   [[ -d "${filtered_dir}" ]] || die "Missing packaged filtered velocyto MEX for ${sample}"
   [[ -f "${manifest}" ]] || die "Missing velocyto manifest for ${sample}"
@@ -932,7 +937,9 @@ fi
 require_dir "${GENOME_DIR}"
 require_file "${SOLO_CB_WHITELIST}"
 require_file "${CR_WHITELIST}"
-require_file "${PREPARE_VELOCYTO_MEX}"
+if [[ "${ALLOW_LEGACY_PREPARE_VELOCYTO}" == "1" ]]; then
+  require_file "${PREPARE_VELOCYTO_MEX}"
+fi
 command -v seqtk >/dev/null 2>&1 || die "seqtk not found on PATH"
 command -v pigz >/dev/null 2>&1 || die "pigz not found on PATH"
 if globus_enabled; then

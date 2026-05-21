@@ -5,6 +5,7 @@ import argparse
 import gzip
 import json
 import re
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -49,6 +50,14 @@ def parse_args() -> argparse.Namespace:
         "--require-rna-velocyto-layers",
         action="store_true",
         help="Require RNA layers spliced, unspliced, and ambiguous",
+    )
+    parser.add_argument(
+        "--allow-empty-barcode-intersection",
+        action="store_true",
+        help=(
+            "Permit writing a zero-observation MuData object when RNA and ATAC "
+            "barcodes do not overlap. Intended for sparse smoke-test filtered outputs."
+        ),
     )
     parser.add_argument(
         "--y-removal-enabled",
@@ -454,8 +463,15 @@ def main() -> None:
         validate_velocyto_layers(rna)
 
     common = rna.obs_names.intersection(atac.obs_names)
-    if len(common) == 0:
+    if len(common) == 0 and not args.allow_empty_barcode_intersection:
         raise ValueError("RNA and ATAC modalities have no overlapping barcodes")
+    if len(common) == 0:
+        print(
+            "WARNING: RNA and ATAC modalities have no overlapping barcodes; "
+            "writing a zero-observation MuData object because "
+            "--allow-empty-barcode-intersection was set.",
+            file=sys.stderr,
+        )
     rna = rna[common, :].copy()
     atac = atac[common, :].copy()
 

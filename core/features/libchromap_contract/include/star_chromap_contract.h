@@ -107,7 +107,7 @@ struct ChromapAtacConfig {
   int macs3_frag_max_gap = 30;
   bool macs3_frag_uint8_counts = true;
   ChromapMacs3FragPeaksSource macs3_frag_peaks_source =
-      ChromapMacs3FragPeaksSource::FILE;
+      ChromapMacs3FragPeaksSource::MEMORY;
   bool macs3_frag_low_mem = false;
 
   // Optional per-barcode ATAC evidence-from-peaks output. When set with
