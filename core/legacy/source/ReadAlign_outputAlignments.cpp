@@ -145,40 +145,6 @@ static bool isSenseForGene(const Transcript& aln, uint8_t geneStr, int32 strandT
     return readStr == static_cast<uint32_t>(geneStr - 1);
 }
 
-static bool alignmentHasSenseGeneOverlap(const Transcriptome& tr,
-                                         const Transcript& aln,
-                                         int32 strandType) {
-    for (uint32_t ib = 0; ib < aln.nExons; ++ib) {
-        if (aln.exons[ib][EX_L] == 0) {
-            continue;
-        }
-        const uint64_t bStart = aln.exons[ib][EX_G];
-        const uint64_t bEnd = bStart + aln.exons[ib][EX_L];
-        const int64_t gi0 = findLastStartLE(tr.geneFull.s, tr.nGe, bEnd - 1);
-        for (int64_t gi = gi0; gi >= 0; --gi) {
-            if (tr.geneFull.eMax[gi] < bStart) {
-                break;
-            }
-            if (tr.geneFull.e[gi] < bStart) {
-                continue;
-            }
-            const uint64_t gStart = tr.geneFull.s[gi];
-            const uint64_t gEnd = tr.geneFull.e[gi] + 1;
-            const uint64_t ov = (std::min(bEnd, gEnd) > std::max(bStart, gStart))
-                                    ? (std::min(bEnd, gEnd) - std::max(bStart, gStart))
-                                    : 0;
-            if (ov == 0) {
-                continue;
-            }
-            if (!isSenseForGene(aln, tr.geneFull.str[gi], strandType)) {
-                continue;
-            }
-            return true;
-        }
-    }
-    return false;
-}
-
 static uint64_t alignmentMappedLength(const Transcript& aln) {
     if (aln.mappedLength > 0) {
         return static_cast<uint64_t>(aln.mappedLength);
@@ -387,66 +353,34 @@ void ReadAlign::outputAlignments() {
                 statsRA.crRescueTotal++;
                 const uint64_t nTrBefore = nTr;
 
-                uint64_t geneSenseCount = 0;
-                uint64_t geneSenseWinner = 0;
+                std::vector<CrRescueRegion> states;
+                states.reserve(static_cast<size_t>(nTr));
                 for (uint64_t ia = 0; ia < nTr; ++ia) {
                     if (trMult[ia] == nullptr) {
+                        states.push_back(CrRescueRegion::Intergenic);
                         continue;
                     }
-                    if (alignmentHasSenseGeneOverlap(*chunkTr, *trMult[ia], P.pSolo.strand)) {
-                        ++geneSenseCount;
-                        geneSenseWinner = ia;
-                    }
+                    states.push_back(classifyAlignmentCrRescue(*chunkTr, *trMult[ia], P.pSolo.strand));
                 }
 
-                CrRescueDecision decision;
-                if (geneSenseCount == 1) {
-                    CrRescueRegion winnerRegion = classifyAlignmentCrRescue(
-                        *chunkTr, *trMult[geneSenseWinner], P.pSolo.strand);
-                    if (winnerRegion == CrRescueRegion::Exonic) {
-                        decision.rescued = true;
-                        decision.intronicFallback = false;
-                        decision.winnerAlignIndex = geneSenseWinner;
-                        statsRA.crRescueGeneVsNonGene++;
-                    } else if (winnerRegion == CrRescueRegion::Intronic
-                               && P.pSolo.crMultimapRescueIntronic) {
-                        decision.rescued = true;
-                        decision.intronicFallback = true;
-                        decision.winnerAlignIndex = geneSenseWinner;
-                        statsRA.crRescueGeneVsNonGene++;
-                    } else if (winnerRegion == CrRescueRegion::Intergenic) {
-                        statsRA.crRescueFastPathRejected50pct++;
+                CrRescueDecision decision = evaluateCrRescueDecision(
+                    states, P.pSolo.crMultimapRescueIntronic);
+                if (decision.rescued) {
+                    if (decision.intronicFallback) {
+                        statsRA.crRescueIntronicFallback++;
                     } else {
-                        statsRA.crRescueFastPathIntronicFallbackOff++;
+                        statsRA.crRescueExonicWinner++;
                     }
                 } else {
-                    std::vector<CrRescueRegion> states;
-                    states.reserve(static_cast<size_t>(nTr));
-                    for (uint64_t ia = 0; ia < nTr; ++ia) {
-                        if (trMult[ia] == nullptr) {
-                            states.push_back(CrRescueRegion::Intergenic);
-                            continue;
-                        }
-                        states.push_back(classifyAlignmentCrRescue(*chunkTr, *trMult[ia], P.pSolo.strand));
-                    }
-                    decision = evaluateCrRescueDecision(states, P.pSolo.crMultimapRescueIntronic);
-                    if (decision.rescued) {
-                        if (decision.intronicFallback) {
-                            statsRA.crRescueIntronicFallback++;
-                        } else {
-                            statsRA.crRescueExonicWinner++;
-                        }
+                    if (decision.exonicCount > 1) {
+                        statsRA.crRescueMultiExonicNoRescue++;
+                    } else if (decision.intronicCount > 1) {
+                        statsRA.crRescueMultiIntronicNoRescue++;
+                    } else if (decision.exonicCount == 0 && decision.intronicCount == 1
+                               && !P.pSolo.crMultimapRescueIntronic) {
+                        statsRA.crRescueIntronicFallbackOffNoRescue++;
                     } else {
-                        if (decision.exonicCount > 1) {
-                            statsRA.crRescueMultiExonicNoRescue++;
-                        } else if (decision.intronicCount > 1) {
-                            statsRA.crRescueMultiIntronicNoRescue++;
-                        } else if (decision.exonicCount == 0 && decision.intronicCount == 1
-                                   && !P.pSolo.crMultimapRescueIntronic) {
-                            statsRA.crRescueIntronicFallbackOffNoRescue++;
-                        } else {
-                            statsRA.crRescueAllIntergenicNoRescue++;
-                        }
+                        statsRA.crRescueAllIntergenicNoRescue++;
                     }
                 }
 
@@ -767,7 +701,7 @@ void ReadAlign::outputAlignments() {
             } else {
                 // No match
                 extractedCbIdxPlus1_ = 0;
-                extractedCbSeq_.clear();
+                extractedCbSeq_ = readBar->cbSeq;
                 cbResolutionStats_.noMatch++;
             }
         } else {
@@ -1254,6 +1188,7 @@ void ReadAlign::writeFastxRecord(uint imate, bool isY)
             gzprintf(stream, "+\n");
             gzprintf(stream, "%s\n", Qual0[imate]);
         }
+        gzflush(stream, Z_SYNC_FLUSH);
     } else {
         fstream &stream = isY ? chunkOutYFastqStream[imate] : chunkOutNoYFastqStream[imate];
         // Check if stream is open (not in bad state from gzip mode)
@@ -1270,6 +1205,7 @@ void ReadAlign::writeFastxRecord(uint imate, bool isY)
             stream << "+\n";
             stream << Qual0[imate] << "\n";
         }
+        stream.flush();
     }
 }
 

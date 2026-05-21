@@ -571,10 +571,26 @@ void SoloFeature::recordReadInfo(uint32_t readId, uint32_t cbIdx, uint32_t umiPa
     if (existingStatus != 0) { // already written once
         uint32_t existingCB = packedReadInfo.getCB(readId);
         uint32_t existingUMI = packedReadInfo.getUMI(readId);
-        if ((existingCB != cbStore || existingUMI != umiStore || existingStatus != status) && !allowCbConflict) {
-            fprintf(stderr, "[ERROR] Conflicting CB/UMI/status for readId=%u existing(cb=%u,umi=%u,status=%u) new(cb=%u,umi=%u,status=%u)\n",
-                    readId, existingCB, existingUMI, existingStatus, cbStore, umiStore, status);
-            std::exit(1);
+        if (existingCB != cbStore || existingUMI != umiStore || existingStatus != status) {
+            if (!allowCbConflict && existingCB != cbStore) {
+                fprintf(stderr, "[ERROR] Conflicting CB/UMI/status for readId=%u existing(cb=%u,umi=%u,status=%u) new(cb=%u,umi=%u,status=%u)\n",
+                        readId, existingCB, existingUMI, existingStatus, cbStore, umiStore, status);
+                std::exit(1);
+            }
+            if (!allowCbConflict) {
+                static uint64_t cbUbConflictWarnCount = 0;
+                if (cbUbConflictWarnCount < 10) {
+                    P.inOut->logMain
+                        << "WARNING: duplicate readId CB/UB tag assignment with same CB; keeping first good assignment"
+                        << " readId=" << readId
+                        << " existing(cb=" << existingCB << ",umi=" << existingUMI << ",status=" << static_cast<uint32_t>(existingStatus) << ")"
+                        << " new(cb=" << cbStore << ",umi=" << umiStore << ",status=" << static_cast<uint32_t>(status) << ")\n";
+                }
+                ++cbUbConflictWarnCount;
+                if (existingStatus == 1 || status != 1) {
+                    return;
+                }
+            }
         }
     }
     packedReadInfo.set(readId, cbStore, umiStore, status);

@@ -24,8 +24,10 @@
 
 // Forward declaration
 class ProbeListIndex;
+class CountingSink;
 
 class SoloFeature {
+    friend class CountingSink;
 private:
     Parameters &P;
     ReadAlignChunk **RAchunk;    
@@ -116,6 +118,9 @@ public:
     void countVelocytoSortedReplay();
     void countVelocytoSortedReplayCBuckets(); // Stage 2: CB-first bucketed deterministic merge (env-gated)
     void countVelocytoFinalizeFromCuMaps(vector<unordered_map<uintUMI, vector<trTypeStruct>>> &cuTrTypes);
+    void countVelocytoFinalizeInit();
+    void countVelocytoFinalizeOneCb(uint32 iCB, unordered_map<uintUMI, vector<trTypeStruct>> &cuMap);
+    void countVelocytoFinalizeFinish();
     void quantTranscript();
     void prepareReadInfoOnly(); //minimal processing to populate readInfo without counting (for skipProcessing mode)
     

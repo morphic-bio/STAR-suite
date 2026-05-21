@@ -3,6 +3,7 @@
 
 #include "IncludeDefine.h"
 #include "MexWriter.h"
+#include "Parameters.h"
 #include <vector>
 #include <fstream>
 #include <chrono>
@@ -43,10 +44,80 @@ struct MexData {
     vector<MexWriter::Triplet> triplets; // Sparse matrix entries (row, col, count)
 };
 
+/** Feature/barcode axes only (no matrix triplets). */
+struct MexAxes {
+    vector<string> features;
+    vector<string> featureNames;
+    vector<string> featureTypes;
+    vector<string> barcodes;
+};
+
+/** Cell Ranger–compatible sorted/suffixed barcode column layout for MEX output. */
+struct CrBarcodeLayout {
+    vector<string> sortedBarcodes;
+    /** sourceColToSorted[source_col] = output column (0-based), or UINT32_MAX if dropped. */
+    vector<uint32_t> sourceColToSorted;
+};
+
+/**
+ * Apply GEM-well suffixing, optional NXT/TRU namespace translation, duplicate checks,
+ * and lexicographic sort (same rules as writeCombinedMex).
+ */
+CrBarcodeLayout buildCrBarcodeLayoutForColumns(const vector<string>& sourceBarcodes,
+                                               const vector<uint32_t>& colIndices,
+                                               const string& gemWell,
+                                               const string& inputChemistry,
+                                               const string& outputChemistry,
+                                               ostream& logStream);
+
 string resolveMexFile(const string& mexDir, const string& basename);
 vector<string> readLines(const string& path);
 
 MexData readMex(const string& mexDir);
+
+/** Load features + barcodes without reading matrix.mtx into memory. */
+MexAxes readMexAxes(const string& mexDir);
+
+/**
+ * @brief Build old_col -> new_col remap; vector length = source column count.
+ * Only indices listed in colIndices receive dense 0..N-1 targets.
+ */
+vector<uint32_t> buildColumnRemap(const vector<uint32_t>& colIndices, size_t sourceColumnCount);
+
+/**
+ * @brief Stream column-subset of matrix.mtx(.gz) to output matrix.mtx.gz (two-pass for nnz).
+ */
+uint64_t streamMatrixColumnSubset(const string& inputMatrixPath,
+                                  const string& outputMatrixGzPath,
+                                  const vector<uint32_t>& oldToNew,
+                                  size_t nRows,
+                                  size_t nColsOut);
+
+/**
+ * @brief Write features/barcodes.gz + streamed matrix subset with CR-compat barcodes.
+ */
+int writeColumnSubsetMexGz(const string& inputMexDir,
+                           const string& outputDir,
+                           const MexAxes& sourceAxes,
+                           const CrBarcodeLayout& layout,
+                           Parameters& P,
+                           ostream& logStream);
+
+/**
+ * @brief Stream full pool MEX with full raw barcode axis + CR-compat barcodes (multi/count/raw).
+ */
+int writeStreamedPoolMexGzCrCompat(const string& inputMexDir,
+                                   const string& outputDir,
+                                   const MexAxes& sourceAxes,
+                                   Parameters& P,
+                                   ostream& logStream,
+                                   const string& gemWell = "1",
+                                   const vector<string>& gexBarcodeFilter = vector<string>(),
+                                   const string& inputChemistry = "TRU",
+                                   const string& outputChemistry = "TRU");
+
+/** Copy pre-formatted gzip MEX files (downstream mirrors; barcodes already CR-compat). */
+int copyMexGzDir(const string& inputMexDir, const string& outputDir, Parameters& P);
 
 MexData filterByFeatureType(const MexData& data, const string& featureType);
 

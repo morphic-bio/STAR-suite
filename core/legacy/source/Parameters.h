@@ -679,6 +679,11 @@ class Parameters {
             int crAssignSkipQcOutputs;      // Skip feature histograms/heatmaps in assignBarcodes outputs
             string crAssignFilteredBarcodes;// Optional filtered barcode file for assignBarcodes
             int crAssignAllowUnionWhitelist; // Accept mixed NXT+TRU filtered barcode sets
+            string ocmMultiEnable;           // no|yes|auto - OCM per-sample MEX materialization
+            string ocmMultiConfig;           // Cell Ranger multi config with [samples]
+            string ocmMultiBarcodeMode;      // posthoc|flex - when flex, use CB16+OCM_TAG8 before CB correction
+            string ocmMultiBamSplit;         // no|yes|auto - write OCM per-sample BAMs during tagged BAM replay
+            string ocmMultiOutputCompat;     // cellranger (default) - output layout compat mode
         } pfMulti;
 
         // In-process Chromap ATAC (STAR libchromap contract); off unless chromapAtacEnable=1
@@ -689,6 +694,7 @@ class Parameters {
             string read1Csv;
             string read2Csv;
             string barcodeCsv;
+            string readFormat;
             string barcodeWhitelist;
             string barcodeTranslate;
             // If 1, the barcode translate table is read in natural
@@ -716,16 +722,15 @@ class Parameters {
             int macs3FragMinLength = 200;
             int macs3FragMaxGap = 30;
             int macs3FragUint8Counts = 1;
-            string macs3FragPeaksSource = "file";
             int macs3FragLowMem = 0;
             // Optional per-barcode ATAC evidence-from-peaks output (single-
             // process equivalent of the standalone scrna_build_atac_evidence
             // _from_peaks tool). When set to a real path, after concurrent
             // chromap ATAC + MACS3 FRAG peaks finish, STAR's orchestration
             // calls libscrna::atac::RunAtacEvidenceFromPeaks on the
-            // just-produced atac_fragments.tsv.gz + atac_peaks.narrowPeak
-            // and writes the per-barcode evidence TSV here. Empty / "-"
-            // disables. No effect when the FRAG narrowPeak isn't produced.
+            // just-produced binary sidecar + atac_peaks.narrowPeak and writes
+            // the per-barcode evidence TSV here. Empty / "-" disables. No
+            // effect when the FRAG narrowPeak isn't produced.
             string evidenceFromPeaksOutput;
             string tn5ShiftMode = "classical";
             string startMode = "postMapping";

@@ -145,6 +145,13 @@ actionable; link to deeper docs rather than copying them.
 - Use `GeneFull` for GEX parity (CR includes introns since v7).
 - `--soloCrGexFeature` controls which GEX MEX is merged in CR-compat mode.
 - CB/UB tags are independent (CB can be present without UB and vice versa).
+- OCM scRNA-seq support belongs on the STAR-suite CR-compatible GEX path, not
+  a vanilla STARsolo-only path. Use `--soloCellFilter EmptyDrops_CR`,
+  `GeneFull`, the standard CR-compatible multimapper/UMI/barcode flags, and the
+  dataset-specific OCM whitelist/demultiplexing. Do not use
+  `--soloCellFilter CellRanger2.2` or standalone `--runMode soloCellFiltering`
+  for OCM unless a user explicitly asks for a comparison run. Runbook:
+  `docs/RUNBOOK_SCRNA_OCM_CR_COMPAT.md`.
 
 ### Poly-G Trimming
 

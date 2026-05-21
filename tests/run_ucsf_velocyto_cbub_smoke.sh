@@ -25,7 +25,6 @@ fi
 
 STAR_BIN="${STAR_BIN:-${REPO_ROOT}/core/legacy/source/STAR.release}"
 BATCH_RUNNER="${REPO_ROOT}/scripts/run_ucsf_perturb_yremove_batch.sh"
-PREPARE_VELOCYTO_MEX="${REPO_ROOT}/scripts/prepare_velocyto_mex.py"
 
 SAMPLE="${UCSF_VELOCYTO_CBUB_SAMPLE:-EBs2_2}"
 THREADS="${UCSF_VELOCYTO_CBUB_THREADS:-24}"
@@ -96,7 +95,6 @@ require_generated_stage() {
 }
 
 [[ -x "${STAR_BIN}" ]] || skip "STAR binary not found: ${STAR_BIN}"
-[[ -f "${PREPARE_VELOCYTO_MEX}" ]] || skip "Missing helper: ${PREPARE_VELOCYTO_MEX}"
 command -v samtools >/dev/null 2>&1 || skip "samtools not found in PATH"
 command -v python3 >/dev/null 2>&1 || skip "python3 not found in PATH"
 
@@ -193,8 +191,6 @@ echo "Threads: ${THREADS}"
   --dynamicThreadInterface 1 \
   --dynamicThreadConstMapPermits "${THREADS}" \
   --dynamicThreadTelemetry 1
-
-python3 "${PREPARE_VELOCYTO_MEX}" --run-dir "${RUN_DIR}"
 
 for path in \
   "${RUN_DIR}/Aligned.out.bam" \

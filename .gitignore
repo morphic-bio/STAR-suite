@@ -103,6 +103,9 @@ Depend.list
 /test/test_*
 !/test/test_*.c
 !/test/test_*.cpp
+/core/legacy/test/test_*
+!/core/legacy/test/test_*.c
+!/core/legacy/test/test_*.cpp
 
 ## Test outputs / temp
 /test_*/
@@ -124,6 +127,11 @@ Depend.list
 /tests/solo_smoke
 /tests/ychrom_test
 /tests/-/
+/core/legacy/source/ocm_multi_unit_tests
+/tests/fixtures/ocm_multi_*/run/outs/
+/tests/fixtures/ocm_multi_*/samples/
+/tests/fixtures/ocm_multi_*/run/velocyto_writer_test.log
+/tests/fixtures/ocm_multi_*/config_bad_sample_id.csv
 /tmp/samtools_sorter_test_*
 /comparison_results
 /comparison_results_filtered
