@@ -7,7 +7,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 RAW_DIR="${RAW_DIR:-/mnt/pikachu/JAX_scRNAseq02/raw}"
 OUT_PARENT="${OUT_PARENT:-/mnt/pikachu/JAX_scRNAseq02_processed}"
 BATCH_ROOT="${BATCH_ROOT:-${OUT_PARENT}/ocm_prod_batch_$(date -u +%Y%m%dT%H%M%SZ)}"
-FIRST_RUN_ROOT="${FIRST_RUN_ROOT:-/mnt/pikachu/JAX_scRNAseq02_processed/ocm_prod_25E32-L3_aggressive_lowmem_20260519T201025Z}"
+FIRST_RUN_ROOT="${FIRST_RUN_ROOT:-}"
 STAR_BIN="${STAR_BIN:-${REPO_ROOT}/core/legacy/source/STAR}"
 GENOME_DIR="${GENOME_DIR:-/storage/autoindex_110_44/bulk_index}"
 SOLO_CB_WHITELIST="${SOLO_CB_WHITELIST:-/storage/scRNAseq_output/whitelists/3M-3pgex-may-2023_TRU.txt}"
@@ -53,6 +53,7 @@ require_dir() {
 }
 
 LIBRARIES=(
+  "25E32-L3"
   "25E32-L4"
   "25E34-L3"
   "25E34-L4"
@@ -413,9 +414,9 @@ build_large_file_inventory() {
   : > "${large_batch}"
   printf 'source_path\tsize_bytes\tdestination_path\n' > "${large_inventory}"
 
-  add_large_file "${run_root}" "${run_dir}/Aligned.out.bam" "${large_batch}" "${large_inventory}"
-  add_large_file "${run_root}" "${run_dir}/Aligned.out_Y.bam" "${large_batch}" "${large_inventory}"
-  add_large_file "${run_root}" "${run_dir}/Aligned.out_noY.bam" "${large_batch}" "${large_inventory}"
+  while IFS= read -r -d '' file; do
+    add_large_file "${run_root}" "${file}" "${large_batch}" "${large_inventory}"
+  done < <(find "${run_root}" -type f -name '*.bam' -print0 | sort -z)
 
   if [[ -d "${run_dir}/y_separated" ]]; then
     while IFS= read -r -d '' file; do
@@ -530,7 +531,7 @@ main() {
 
   local post_pids=()
 
-  if [[ "${SKIP_FIRST_POST}" != "1" ]]; then
+  if [[ "${SKIP_FIRST_POST}" != "1" && -n "${FIRST_RUN_ROOT}" ]]; then
     require_dir "${FIRST_RUN_ROOT}"
     if ! star_finished "25E32-L3" "${FIRST_RUN_ROOT}"; then
       die "first run root is not a completed STAR run: ${FIRST_RUN_ROOT}"
@@ -544,6 +545,10 @@ main() {
   if [[ "${SKIP_REMAINING_STAR}" != "1" ]]; then
     local lib run_root cfg
     for lib in "${LIBRARIES[@]}"; do
+      if [[ "${SKIP_FIRST_POST}" != "1" && -n "${FIRST_RUN_ROOT}" && "${lib}" == "25E32-L3" ]]; then
+        log "Skipping fresh ${lib}; using FIRST_RUN_ROOT=${FIRST_RUN_ROOT}"
+        continue
+      fi
       run_root="$(run_root_for_library "${lib}")"
       cfg="$(config_for_library "${lib}")"
       mkdir -p "${run_root}/logs"
