@@ -35,10 +35,16 @@ This file tracks active top-level work only. Completed items and stale historica
 - Add regression coverage for unsorted BAM CB/UB tag-injection spilling.
   - `g_unsortedTagBuffer` must always use a bounded disk-spill buffer when CB/UB tags are requested.
   - `--limitBAMsortRAM=0` must not mean "keep all unsorted tag-injection records in RAM", and unsorted-only runs must use a valid temp directory for spill files.
+- Add regression coverage for the JAX/multiome production wrapper manifest loop.
+  - Background remote post-MEX workers must redirect stdin from `/dev/null`.
+  - SSH or child processes must not be able to consume the `while read` manifest stream and silently skip later samples.
 - Implement data-driven `--clip3pPolyG auto`.
 
 ## Priority 2: Performance / Architecture
 
+- Optimize JAX OCM GeneFull and Velocyto materialization using the staged plan in [docs/RUNBOOK_SCRNA_OCM_MATERIALIZATION_OPTIMIZATION_20260520.md](/mnt/pikachu/STAR-suite/docs/RUNBOOK_SCRNA_OCM_MATERIALIZATION_OPTIMIZATION_20260520.md).
+  - Production should materialize `GeneFull` + Velocyto once, share OCM maps and per-sample cell calls, and skip `Gene` unless a Cell Ranger comparator run explicitly requests it.
+  - Replace repeated count/write MatrixMarket scans with a streaming router that writes raw and filtered outputs from the same pass.
 - Optimize the non-Flex scRNA / GEX internal gzip path using the staged harness approach in [docs/RUNBOOK_GZIP_PIPELINE_ITERATION_20260326.md](/mnt/pikachu/STAR-suite/docs/RUNBOOK_GZIP_PIPELINE_ITERATION_20260326.md).
   - Treat this as a medium-priority follow-up, not an immediate blocker: the current `zcat` workaround is acceptable for published benchmarks, but it is now clear that an optimized internal gzip path can beat `zcat` on at least one real surface (`--flexNoAlign 1` full-sample Flex).
   - Use the runbook sequence as written: Flex first, then a separate GEX harness.

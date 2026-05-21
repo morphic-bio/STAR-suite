@@ -1,9 +1,13 @@
 #include "star_chromap_contract.h"
 
+#include <cerrno>
 #include <cctype>
+#include <cstring>
 #include <iostream>
 #include <sstream>
 #include <vector>
+#include <sys/stat.h>
+#include <sys/types.h>
 
 #include "barcode_translator.h"
 #include "libchromap.h"
@@ -54,6 +58,60 @@ bool hasUnsetPath(const std::vector<std::string> &paths) {
     }
   }
   return false;
+}
+
+bool isDirectory(const std::string &path) {
+  struct stat st;
+  return stat(path.c_str(), &st) == 0 && S_ISDIR(st.st_mode);
+}
+
+bool ensureDirectory(const std::string &path, std::string *error) {
+  const std::string trimmed = trimCopy(path);
+  if (trimmed.empty() || trimmed == "/") {
+    return true;
+  }
+  if (isDirectory(trimmed)) {
+    return true;
+  }
+
+  std::string current;
+  size_t pos = 0;
+  if (!trimmed.empty() && trimmed[0] == '/') {
+    current = "/";
+    pos = 1;
+  }
+
+  while (pos <= trimmed.size()) {
+    size_t next = trimmed.find('/', pos);
+    std::string part = trimmed.substr(
+        pos, next == std::string::npos ? std::string::npos : next - pos);
+    pos = (next == std::string::npos) ? trimmed.size() + 1 : next + 1;
+    if (part.empty()) {
+      continue;
+    }
+    if (!current.empty() && current[current.size() - 1] != '/') {
+      current += '/';
+    }
+    current += part;
+    if (isDirectory(current)) {
+      continue;
+    }
+    if (mkdir(current.c_str(), 0775) != 0 && errno != EEXIST) {
+      if (error != nullptr) {
+        *error = "could not create directory " + current + ": " +
+                 std::strerror(errno);
+      }
+      return false;
+    }
+    if (!isDirectory(current)) {
+      if (error != nullptr) {
+        *error = "path exists but is not a directory: " + current;
+      }
+      return false;
+    }
+  }
+
+  return true;
 }
 
 std::vector<std::string> trimPaths(const std::vector<std::string> &paths) {
@@ -301,6 +359,14 @@ ChromapAtacResult runChromapAtac(const ChromapAtacConfig &config) {
   if (!validation_error.empty()) {
     return makeResult(ChromapContractStatus::INVALID_CONFIG, 2,
                       validation_error, config);
+  }
+
+  if (!isUnsetToken(config.temp_dir)) {
+    std::string mkdir_error;
+    if (!ensureDirectory(config.temp_dir, &mkdir_error)) {
+      return makeResult(ChromapContractStatus::INVALID_CONFIG, 2,
+                        "Chromap temp directory: " + mkdir_error, config);
+    }
   }
 
   chromap::MappingParameters parameters = toChromapParameters(config);

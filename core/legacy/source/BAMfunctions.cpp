@@ -1,5 +1,9 @@
 #include "BAMfunctions.h"
+#if defined(WITH_CHROMAP) && WITH_CHROMAP
+#include <htslib/kstring.h>
+#else
 #include "htslib/htslib/kstring.h"
+#endif
 
 
 string bam_cigarString (bam1_t *b) {//output CIGAR string
@@ -190,5 +194,4 @@ int bamAttrArrayWriteSAMtags(string &attrStr, char *attrArray, Parameters &P) {/
 
     return nattr;
 };
-
 

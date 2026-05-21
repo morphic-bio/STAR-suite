@@ -150,7 +150,7 @@ Note: `X = spliced + unspliced + ambiguous` for each cell.
 | `total_counts` | float32 | Total UMI count |
 | `mt_counts` | float32 | Mitochondrial gene UMI count |
 | `mt_pct` | float32 | Mitochondrial fraction (%) |
-| `filter` | bool | Passes QC thresholds (`min_genes <= n_genes <= effective_max_genes` and `mt_pct <= 5`) |
+| `filter` | bool | Passes QC thresholds (`min_genes <= n_genes <= effective_max_genes` and `mt_pct <= mt_pct_threshold`) |
 
 **Doublet detection (scDblFinder):**
 
@@ -165,6 +165,8 @@ Note: `X = spliced + unspliced + ambiguous` for each cell.
 | Column | Type | Description |
 |--------|------|-------------|
 | `singlet_filtered` | bool | `singlet and filter` (the default usable-cell mask) |
+| `filter_strict_mt5` | bool | Legacy strict-5% MT QC mask, preserved for audit when adaptive MT filtering was applied |
+| `singlet_filtered_strict_mt5` | bool | Legacy strict-5% singlet-filtered mask, preserved for audit when adaptive MT filtering was applied |
 
 **CRISPR guide assignments (library-specific, long-prefix columns):**
 
@@ -218,17 +220,19 @@ Index (`var_names`) is the Ensembl gene ID.
 
 ## Adaptive QC methodology
 
-Each sample uses an adaptive maximum-genes threshold instead of a fixed
-cutoff:
+Each sample uses adaptive n_genes and mitochondrial-percentage thresholds
+instead of fixed QC cutoffs:
 
 ```
 effective_max_genes = median(n_genes among singlets) + 3 * MAD(n_genes among singlets)
+mt_pct_threshold = max(5, median(mt_pct among singlets) + 3 * MAD(mt_pct among singlets))
 ```
 
 This prevents the high gene-complexity of these perturb-seq samples from
 being erroneously filtered. The fixed `max_genes=2500` threshold used in
 standard Seurat-like QC would discard the majority of real cells in this
-dataset.
+dataset. The 5% mitochondrial cutoff is retained as a floor, while samples with
+biologically elevated baseline mt% use the per-sample MAD soft guard.
 
 Thresholds per sample are recorded in `qc/adaptive_qc_threshold.json`.
 

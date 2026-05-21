@@ -1,0 +1,199 @@
+{
+  "schema_version": "morphic-plotly-shiny-v1",
+  "viewer": "plotly_shiny",
+  "plot_id": "ucsf_16sample_overview_umap",
+  "plot_kind": "sample_overview_umap",
+  "card_role": "dataset_orientation_full",
+  "card_role_variants": [
+    "dataset_tenor_light",
+    "dataset_orientation_full"
+  ],
+  "title": "UCSF CRISPRi Perturb-seq: 16-sample dataset overview",
+  "subtitle": "Integrated UMAP with per-sample small multiples; Leiden structure and sample coverage at a glance",
+  "datasets": [
+    {
+      "dataset_id": "cells",
+      "format": "parquet",
+      "s3_key": "plotly/ucsf/overview/cells.parquet",
+      "grain": "cell",
+      "required_columns": [
+        "cell_id",
+        "sample_label",
+        "lineage_label",
+        "umap_1",
+        "umap_2",
+        "leiden",
+        "mixscape_class",
+        "feature_call_category"
+      ]
+    },
+    {
+      "dataset_id": "sample_summary",
+      "format": "parquet",
+      "s3_key": "plotly/ucsf/overview/sample_summary.parquet",
+      "grain": "sample",
+      "required_columns": [
+        "sample_label",
+        "lineage_label",
+        "n_cells",
+        "n_mixscape_perturbed",
+        "frac_mixscape_perturbed",
+        "median_n_genes",
+        "median_mt_pct",
+        "dominant_leiden_cluster"
+      ]
+    },
+    {
+      "dataset_id": "cluster_by_sample",
+      "format": "parquet",
+      "s3_key": "plotly/ucsf/overview/cluster_by_sample.parquet",
+      "grain": "cluster_sample",
+      "required_columns": [
+        "leiden",
+        "sample_label",
+        "n_cells",
+        "frac_of_sample",
+        "frac_of_cluster"
+      ]
+    }
+  ],
+  "layout": {
+    "mode": "composite",
+    "panels": [
+      {
+        "panel_id": "main_umap",
+        "kind": "scatter",
+        "dataset_id": "cells",
+        "x_field": "umap_1",
+        "y_field": "umap_2",
+        "color_field": "leiden",
+        "color_type": "categorical",
+        "cluster_label_field": "leiden",
+        "show_cluster_labels": true
+      },
+      {
+        "panel_id": "small_multiples",
+        "kind": "scatter_facets",
+        "dataset_id": "cells",
+        "x_field": "umap_1",
+        "y_field": "umap_2",
+        "facet_field": "sample_label",
+        "facet_grid": {
+          "rows": 4,
+          "cols": 4
+        },
+        "backdrop": {
+          "source": "all_cells",
+          "color": "#cccccc",
+          "opacity": 0.2
+        },
+        "foreground_color_field": "lineage_label",
+        "shared_axes": true
+      },
+      {
+        "panel_id": "cluster_by_sample_strip",
+        "kind": "heatmap",
+        "dataset_id": "cluster_by_sample",
+        "x_field": "sample_label",
+        "y_field": "leiden",
+        "color_field": "frac_of_sample",
+        "colorscale": "Blues"
+      },
+      {
+        "panel_id": "sample_qc_table",
+        "kind": "table",
+        "dataset_id": "sample_summary",
+        "columns": [
+          "sample_label",
+          "lineage_label",
+          "n_cells",
+          "frac_mixscape_perturbed",
+          "median_n_genes",
+          "median_mt_pct"
+        ]
+      }
+    ]
+  },
+  "controls": {
+    "layout_mode": [
+      "composite",
+      "pooled_only",
+      "small_multiples_only",
+      "lineage_split"
+    ],
+    "main_color_by": [
+      "leiden",
+      "sample_label",
+      "lineage_label",
+      "mixscape_class",
+      "feature_call_category"
+    ],
+    "highlight_sample": {
+      "field": "sample_label",
+      "mode": "foreground_vs_backdrop"
+    },
+    "filters": [
+      "lineage_label",
+      "sample_label",
+      "mixscape_class"
+    ],
+    "small_multiples_sort": [
+      "lineage_then_sample",
+      "alphabetical",
+      "n_cells_desc"
+    ]
+  },
+  "defaults": {
+    "layout_mode": "composite",
+    "main_color_by": "leiden",
+    "small_multiples_sort": "lineage_then_sample",
+    "point_size": 3,
+    "opacity": 0.7
+  },
+  "plotly_defaults": {
+    "trace_type": "scattergl",
+    "layout": {
+      "template": "plotly_white"
+    },
+    "config": {
+      "responsive": true,
+      "displaylogo": false
+    }
+  },
+  "summary": {
+    "n_cells": 156648,
+    "n_samples": 16,
+    "n_lineages": 2,
+    "n_clusters": null,
+    "integration_method": "harmony"
+  },
+  "analysis_context": {
+    "plot_kind": "sample_overview",
+    "study_assay": "Perturb-seq",
+    "pool_label": "all_samples_cross_lineage",
+    "cluster_key": "leiden",
+    "embedding_key": "X_umap_harmony",
+    "integration_method": "harmony",
+    "integration_batch_key": "sample_label"
+  },
+  "downloads": [
+    {
+      "label": "Per-sample summary TSV",
+      "format": "tsv.gz",
+      "s3_key": "tsv/ucsf/overview/sample_summary.tsv.gz"
+    },
+    {
+      "label": "Cluster \u00d7 sample composition TSV",
+      "format": "tsv.gz",
+      "s3_key": "tsv/ucsf/overview/cluster_by_sample.tsv.gz"
+    }
+  ],
+  "provenance": {
+    "pipeline": "scanpy+harmony",
+    "pipeline_version": "v1",
+    "generated_at": "2026-04-18T00:00:00Z",
+    "input_sources": [
+      "filtered_counts.h5ad (per sample, 16 samples)"
+    ]
+  }
+}

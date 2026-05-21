@@ -5,6 +5,7 @@
 #include "GlobalVariables.h"
 #include "UmiCodec.h"
 #include "InlineCBCorrection.h"
+#include "OcmMultiMaterialize.h"
 #include <chrono>
 #include <cstdlib>
 #include <thread>
@@ -320,6 +321,21 @@ void SoloReadBarcode::getCBandUMI(char **readSeq, char **readQual, uint64 *readL
             cbQual=bQual.substr(pSolo.cbS-1,pSolo.cbL);
             umiQual=bQual.substr(pSolo.umiS-1,pSolo.umiL);
 
+            bool ocmFlexTagRejected = false;
+            if (OcmMultiMaterialize::isFlexBarcodeMode(P)) {
+                const string tag8 = OcmMultiMaterialize::tag8ForBarcode(cbSeq);
+                if (tag8.empty()) {
+                    cbMatch = -1;
+                    cbSeqCorrected = "-";
+                    cbMatchInd.clear();
+                    cbMatchString = "";
+                    ocmFlexTagRejected = true;
+                } else {
+                    cbSeq += tag8;
+                    cbQual.append(tag8.size(), 'I');
+                }
+            }
+
 
             for (uint64 ix=0; ix<cbQual.size(); ix++) {
                 qualHist[(uint8)cbQual[ix]]++;
@@ -329,7 +345,9 @@ void SoloReadBarcode::getCBandUMI(char **readSeq, char **readQual, uint64 *readL
             };               
             
             // Inline CB correction: use fast-path (with N-handling) if enabled, otherwise legacy matchCBtoWL
-            if (pSolo.inlineCBCorrection) {
+            if (ocmFlexTagRejected) {
+                // Unknown OCM overhangs are not part of the effective CB16+TAG8 whitelist.
+            } else if (pSolo.inlineCBCorrection) {
                 std::string correctedCB;
                 int correctionResult = -1;
                 bool nRescued = false;

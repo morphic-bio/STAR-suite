@@ -153,6 +153,7 @@ CONFIG_CSV=/path/to/cellranger_multi_config.csv
   --soloBarcodeReadLength 0 \
   --soloCBwhitelist "${WL}" \
   --soloCBmatchWLtype 1MM_multi_Nbase_pseudocounts \
+  --soloInlineCBCorrection yes \
   --soloUMIfiltering MultiGeneUMI_CR \
   --soloUMIdedup 1MM_CR \
   --soloMultiMappers Unique \
@@ -165,6 +166,7 @@ CONFIG_CSV=/path/to/cellranger_multi_config.csv
   --soloInlineHashMode no \
   --ocmMultiEnable yes \
   --ocmMultiConfig "${CONFIG_CSV}" \
+  --ocmMultiBarcodeMode flex \
   --ocmMultiOutputCompat cellranger
 ```
 
@@ -260,14 +262,23 @@ scripts/run_jax_scrnaseq02_ocm_oracle_smoke.sh \
   --validate
 ```
 
-The smoke harness now passes these STAR flags by default:
+The smoke harness now passes these STAR flags and Velocyto low-memory
+environment defaults:
 
 ```text
 --ocmMultiEnable yes
 --ocmMultiConfig /mnt/pikachu/JAX_scRNAseq02/cellranger-logs/config.csv
+--ocmMultiBarcodeMode flex
+STAR_VELOCYTO_LOW_MEM=1
+STAR_VELOCYTO_INTEGRATED_HASH_SPILL_BUCKETS=8192
+STAR_VELOCYTO_UMI_RESERVE_CAP=32
+STAR_SOLO_BINARY_SPOOL=1
+MALLOC_ARENA_MAX=2
+MALLOC_TRIM_THRESHOLD_=131072
 ```
 
-Override or extend them after `--` if needed.
+Override the environment before invoking the harness if a different spill budget
+is needed. Override or extend STAR flags after `--`.
 
 The validator can also be run independently against an existing smoke run:
 
@@ -285,14 +296,21 @@ The smoke validator checks:
 - `outs/per_sample_outs/<sample>/count/sample_filtered_feature_bc_matrix/`;
 - `outs/per_sample_outs/<sample>/count/sample_filtered_barcodes.csv`;
 - per-sample filtered barcode count consistency;
-- OCM tag proportions against the full `25E32-L3` Cell Ranger oracle;
-- optional barcode overlap against the full oracle cells.
+- OCM tag proportions against the full `25E32-L3` Cell Ranger oracle as a
+  warning by default;
+- Cell Ranger oracle barcode recall in the matching STAR OCM tags;
+- optional oracle-precision overlap against the full oracle cells.
 
 The validator intentionally does not compare matrix values against the Cell
 Ranger MEX because the oracle is `Gene` while the planned STAR output is
-`GeneFull`. If exact Cell Ranger count parity is needed later, run a separate
-STAR comparison surface with `--soloFeatures Gene` and keep that out of the
-production downstream path.
+`GeneFull`. For the same reason, full-depth STAR `GeneFull`/`EmptyDrops_CR`
+outputs may call additional cells relative to the exonic Cell Ranger oracle.
+The default pass/fail check is therefore oracle recall, not equality of tag
+proportions. Use `--strict-tag-proportion-delta` only for a same-feature-surface
+comparison where extra STAR-called cells should be treated as a failure. If
+exact Cell Ranger count parity is needed later, run a separate STAR comparison
+surface with `--soloFeatures Gene` and keep that out of the production
+downstream path.
 
 If the 2M smoke passes and we still want a deeper compatibility check, reuse
 the same harness for full-depth `25E32-L3` structure/cell-assignment validation
@@ -304,8 +322,7 @@ scripts/run_jax_scrnaseq02_ocm_oracle_smoke.sh \
   --out-root /mnt/pikachu/JAX_scRNAseq02_processed/ocm_oracle_full_<stamp> \
   --full-fastqs \
   --run-star \
-  --validate \
-  -- <native OCM multi writer STAR flags>
+  --validate
 ```
 
 ## Remote GPU Downstream

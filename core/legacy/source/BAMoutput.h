@@ -98,4 +98,6 @@ private:
     std::array<char, BAM_ATTR_MaxSize> bamTagScratch_;
 };
 
+void closeDirectOcmBamRouter(Parameters &P);
+
 #endif

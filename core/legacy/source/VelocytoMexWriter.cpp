@@ -2,6 +2,7 @@
 #include "PfMultiMerge.h"
 #include "SoloFeature.h"
 #include "TimeFunctions.h"
+#include "streamFuns.h"
 
 #include <algorithm>
 #include <cctype>
@@ -605,6 +606,13 @@ int runVelocytoMexMaterialize(Parameters& P) {
     if (!P.pSolo.featureYes[SoloFeatureTypes::Velocyto]) {
         return 0;
     }
+    const string ocmEnable = P.pfMulti.ocmMultiEnable;
+    if (ocmEnable == "yes" || ocmEnable == "auto") {
+        P.inOut->logMain << "WARNING: skipping pooled native Velocyto outs/ MEX materialization "
+                         << "because OCM materialization will stream per-sample Velocyto outputs from "
+                            "Solo.out/Velocyto without loading pooled layers in memory\n";
+        return 0;
+    }
     if (P.pSolo.useInlineReplayer) {
         P.inOut->logMain << "WARNING: skipping native Velocyto outs/ MEX materialization "
                          << "because inline replayer mode does not expose the standard Solo.out/Velocyto tree\n";
@@ -620,6 +628,222 @@ int runVelocytoMexMaterialize(Parameters& P) {
                          << ex.what() << "\n";
         return 1;
     }
+}
+
+VelocytoAxes readVelocytoAxes(const string& mexDir) {
+    VelocytoAxes axes;
+    const vector<string> featureLines =
+        PfMultiMerge::readLines(PfMultiMerge::resolveMexFile(mexDir, "features.tsv"));
+    for (const auto& line : featureLines) {
+        istringstream ss(line);
+        string id;
+        string name;
+        string type;
+        if (getline(ss, id, '\t')) {
+            axes.features.push_back(id);
+            if (getline(ss, name, '\t')) {
+                axes.featureNames.push_back(name);
+                if (getline(ss, type, '\t')) {
+                    axes.featureTypes.push_back(type);
+                } else {
+                    axes.featureTypes.push_back("Gene Expression");
+                }
+            } else {
+                axes.featureNames.push_back(id);
+                axes.featureTypes.push_back("Gene Expression");
+            }
+        }
+    }
+    axes.barcodes = PfMultiMerge::readLines(PfMultiMerge::resolveMexFile(mexDir, "barcodes.tsv"));
+    return axes;
+}
+
+VelocytoRunAxes loadSoloVelocytoAxes(const string& soloOut) {
+    const string rawSource = soloOut + "/Velocyto/raw";
+    const string filteredSource = soloOut + "/Velocyto/filtered";
+    if (!soloVelocytoRawReady(soloOut)) {
+        throw std::runtime_error("OCM Velocyto axes: missing Solo.out/Velocyto/raw under " + rawSource);
+    }
+
+    VelocytoRunAxes out;
+    out.rawDir = rawSource;
+    out.filteredDir = filteredSource;
+    out.raw = readVelocytoAxes(rawSource);
+
+    if (!resolveOptionalMexFile(filteredSource, "features.tsv").empty() &&
+        !resolveOptionalMexFile(filteredSource, "spliced.mtx").empty()) {
+        out.filtered = readVelocytoAxes(filteredSource);
+    } else {
+        string filteredBarcodesPath = resolveOptionalMexFile(filteredSource, "barcodes.tsv");
+        if (filteredBarcodesPath.empty()) {
+            const string geneFullFiltered = soloOut + "/GeneFull/filtered";
+            filteredBarcodesPath = resolveOptionalMexFile(geneFullFiltered, "barcodes.tsv");
+        }
+        if (filteredBarcodesPath.empty()) {
+            const string geneFiltered = soloOut + "/Gene/filtered";
+            filteredBarcodesPath = resolveOptionalMexFile(geneFiltered, "barcodes.tsv");
+        }
+        if (filteredBarcodesPath.empty()) {
+            throw std::runtime_error("OCM Velocyto axes: no filtered barcode source under " + soloOut);
+        }
+        out.filtered = out.raw;
+        out.filtered.barcodes = PfMultiMerge::readLines(filteredBarcodesPath);
+    }
+    return out;
+}
+
+static bool gzGetLineLocal(gzFile file, string& lineOut) {
+    lineOut.clear();
+    if (file == nullptr) {
+        return false;
+    }
+    char buffer[8192];
+    while (true) {
+        char* ret = gzgets(file, buffer, static_cast<int>(sizeof(buffer)));
+        if (ret == nullptr) {
+            return !lineOut.empty();
+        }
+        lineOut.append(buffer);
+        const size_t n = lineOut.size();
+        if (n > 0 && lineOut[n - 1] == '\n') {
+            while (!lineOut.empty() && (lineOut.back() == '\n' || lineOut.back() == '\r')) {
+                lineOut.pop_back();
+            }
+            return true;
+        }
+    }
+}
+
+static void accumulateVelocytoLayerTotals(const string& inputPath,
+                                          const vector<uint32_t>& oldToNew,
+                                          map<pair<uint32_t, uint32_t>, uint32_t>& totalSums) {
+    const bool isGz =
+        (inputPath.length() > 3 && inputPath.substr(inputPath.length() - 3) == ".gz");
+
+    auto processLine = [&](const string& line, bool& headerDone) {
+        if (line.empty() || line[0] == '%') {
+            return;
+        }
+        if (!headerDone) {
+            headerDone = true;
+            return;
+        }
+        istringstream ss(line);
+        uint32_t row = 0;
+        uint32_t col = 0;
+        double val = 0;
+        if (ss >> row >> col >> val) {
+            const uint32_t oldCol = col - 1;
+            if (oldCol < oldToNew.size() && oldToNew[oldCol] != UINT32_MAX) {
+                totalSums[{oldToNew[oldCol], row - 1}] += static_cast<uint32_t>(val);
+            }
+        }
+    };
+
+    if (isGz) {
+        gzFile inGz = gzopen(inputPath.c_str(), "rb");
+        if (inGz == nullptr) {
+            throw std::runtime_error("accumulateVelocytoLayerTotals: open failed " + inputPath);
+        }
+        string line;
+        bool headerDone = false;
+        while (gzGetLineLocal(inGz, line)) {
+            processLine(line, headerDone);
+        }
+        gzclose(inGz);
+        return;
+    }
+
+    ifstream inFile(inputPath.c_str());
+    if (!inFile.is_open()) {
+        throw std::runtime_error("accumulateVelocytoLayerTotals: open failed " + inputPath);
+    }
+    string line;
+    bool headerDone = false;
+    while (getline(inFile, line)) {
+        while (!line.empty() && (line.back() == '\n' || line.back() == '\r')) {
+            line.pop_back();
+        }
+        processLine(line, headerDone);
+    }
+}
+
+int streamVelocytoColumnSubsetToDir(const string& inputMexDir,
+                                    const string& outputDir,
+                                    const vector<uint32_t>& veloColIndices,
+                                    const VelocytoAxes& sourceAxes,
+                                    const vector<uint32_t>& veloColToOut,
+                                    const vector<string>& sortedOutputBarcodes,
+                                    Parameters& P) {
+    createDirectory(outputDir + "/", P.runDirPerm, "Velocyto MEX output", P);
+
+    const vector<string>& barcodesOut = sortedOutputBarcodes;
+
+    vector<string> featureLines;
+    featureLines.reserve(sourceAxes.features.size());
+    for (size_t i = 0; i < sourceAxes.features.size(); ++i) {
+        const string name =
+            (i < sourceAxes.featureNames.size()) ? sourceAxes.featureNames[i] : sourceAxes.features[i];
+        const string type =
+            (i < sourceAxes.featureTypes.size()) ? sourceAxes.featureTypes[i] : "Gene Expression";
+        featureLines.push_back(sourceAxes.features[i] + "\t" + name + "\t" + type);
+    }
+    if (!writeGzLines(outputDir + "/features.tsv.gz", featureLines)) {
+        return -1;
+    }
+    if (!writeGzLines(outputDir + "/barcodes.tsv.gz", barcodesOut)) {
+        return -1;
+    }
+    if (barcodesOut.empty()) {
+        VelocytoMexData empty;
+        empty.features = sourceAxes.features;
+        empty.featureNames = sourceAxes.featureNames;
+        empty.featureTypes = sourceAxes.featureTypes;
+        return writeVelocytoGzDir(outputDir, empty);
+    }
+
+    const vector<uint32_t>& oldToNew = veloColToOut;
+    map<pair<uint32_t, uint32_t>, uint32_t> totalSums;
+
+    const char* layers[] = {"spliced.mtx", "unspliced.mtx", "ambiguous.mtx"};
+    for (const char* layer : layers) {
+        const string inputPath = PfMultiMerge::resolveMexFile(inputMexDir, layer);
+        const string outputPath = outputDir + "/" + layer + ".gz";
+        try {
+            PfMultiMerge::streamMatrixColumnSubset(inputPath,
+                                                   outputPath,
+                                                   oldToNew,
+                                                   sourceAxes.features.size(),
+                                                   barcodesOut.size());
+        } catch (const std::exception& ex) {
+            throw std::runtime_error(string("Velocyto layer ") + layer + ": " + ex.what());
+        }
+        accumulateVelocytoLayerTotals(inputPath, oldToNew, totalSums);
+    }
+
+    vector<MexWriter::Triplet> totalTriplets;
+    totalTriplets.reserve(totalSums.size());
+    for (const auto& kv : totalSums) {
+        MexWriter::Triplet t;
+        t.cell_idx = kv.first.first;
+        t.gene_idx = kv.first.second;
+        t.count = kv.second;
+        totalTriplets.push_back(t);
+    }
+    std::sort(totalTriplets.begin(), totalTriplets.end(),
+              [](const MexWriter::Triplet& a, const MexWriter::Triplet& b) {
+                  if (a.cell_idx != b.cell_idx) {
+                      return a.cell_idx < b.cell_idx;
+                  }
+                  return a.gene_idx < b.gene_idx;
+              });
+    if (!writeVelocytoMatrixGz(outputDir + "/matrix.mtx.gz",
+                               sourceAxes.features.size(),
+                               barcodesOut.size(),
+                               totalTriplets)) {
+        return -1;
+    }
+    return 0;
 }
 
 } // namespace VelocytoMexWriter

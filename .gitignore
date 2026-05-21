@@ -103,6 +103,9 @@ Depend.list
 /test/test_*
 !/test/test_*.c
 !/test/test_*.cpp
+/core/legacy/test/test_*
+!/core/legacy/test/test_*.c
+!/core/legacy/test/test_*.cpp
 
 ## Test outputs / temp
 /test_*/

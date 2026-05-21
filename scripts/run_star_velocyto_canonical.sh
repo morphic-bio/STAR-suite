@@ -8,7 +8,7 @@
 # Optional env:
 #   STAR_BIN, STAR_VELOCYTO_DETERMINISTIC_REPLAY, STAR_VELOCYTO_INTEGRATED_HASH (passed through to STAR)
 #   INTEGRATED_HASH=1 with DETERMINISTIC_REPLAY=1 selects Stage 2 (default: disk spill shards; see below).
-#   STAR_VELOCYTO_INTEGRATED_HASH_SPILL_BUCKETS (default 128, max 4096) — shard records to bound RAM during merge.
+#   STAR_VELOCYTO_INTEGRATED_HASH_SPILL_BUCKETS (default 128, low-mem default 4096, max 16384) — shard records to bound RAM during merge.
 #   STAR_VELOCYTO_INTEGRATED_HASH_INMEMORY=1 — hold all per-CB records in RAM (debug / A–B vs spill only).
 #   For profile=2m (full-sample harness; canonical UCSF surface is corrected EBs2_2):
 #     UCSF_2M_PFCONFIG — required; pfMultiConfig CSV (no default).
@@ -35,7 +35,6 @@ if [[ -f "${EXTERNAL_ENV}" ]]; then
 fi
 
 STAR_BIN="${STAR_BIN:-${REPO_ROOT}/core/legacy/source/STAR}"
-PREPARE_VELOCYTO_MEX="${REPO_ROOT}/scripts/prepare_velocyto_mex.py"
 
 PROFILE=""
 THREADS=""
@@ -184,8 +183,9 @@ fi
   --crMinUmi 10
 
 if [[ "${PREPARE_MEX}" -eq 1 ]]; then
-  [[ -f "${PREPARE_VELOCYTO_MEX}" ]] || die "Missing ${PREPARE_VELOCYTO_MEX}"
-  python3 "${PREPARE_VELOCYTO_MEX}" --run-dir "${OUT_PREFIX}"
+  [[ -f "${OUT_PREFIX}/outs/velocyto_feature_bc_matrix_manifest.json" ]] || die "Missing native Velocyto MEX manifest in ${OUT_PREFIX}/outs"
+  [[ -f "${OUT_PREFIX}/outs/raw_velocyto_feature_bc_matrix/matrix.mtx.gz" ]] || die "Missing native raw Velocyto MEX in ${OUT_PREFIX}/outs"
+  [[ -f "${OUT_PREFIX}/outs/filtered_velocyto_feature_bc_matrix/matrix.mtx.gz" ]] || die "Missing native filtered Velocyto MEX in ${OUT_PREFIX}/outs"
 fi
 
 echo "OK: ${OUT_PREFIX}"

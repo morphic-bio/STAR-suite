@@ -8,7 +8,8 @@ STAR_BIN="${REPO_ROOT}/core/legacy/source/STAR"
 NORMALIZE_ATAC_BC="${REPO_ROOT}/scripts/normalize_multiome_atac_barcode_fastq.py"
 PACKAGE_GENEFULL="${REPO_ROOT}/scripts/package_star_genefull_mex.py"
 PREPARE_VELOCYTO="${REPO_ROOT}/scripts/prepare_velocyto_mex.py"
-REMOTE_DOWNSTREAM="${REPO_ROOT}/scripts/run_remote_scrna_downstream_rsync.sh"
+ALLOW_LEGACY_PREPARE_VELOCYTO="${ALLOW_LEGACY_PREPARE_VELOCYTO:-0}"
+REMOTE_POST_MEX="${REPO_ROOT}/scripts/run_remote_multiome_post_mex_rsync.sh"
 LOCAL_DOWNSTREAM="${REPO_ROOT}/scripts/run_scrna_downstream_gene_full_velocyto.sh"
 BUILD_ATAC_MEX_NATIVE="${REPO_ROOT}/core/features/libchromap_contract/star_multiome_atac_peak_mex"
 BUILD_ATAC_MEX_PY="${REPO_ROOT}/scripts/build_atac_peak_matrix_from_fragments.py"
@@ -31,6 +32,7 @@ ATAC_TO_GEX="${STAR_MULTIOME_ATAC_TO_GEX:-/mnt/pikachu/atac-seq/benchmarks/pbmc_
 CHROMAP_LOW_MEM="${STAR_MULTIOME_CHROMAP_LOW_MEM:-0}"
 CHROMAP_LOW_MEM_RAM="${STAR_MULTIOME_CHROMAP_LOW_MEM_RAM:-0}"
 CHROMAP_MACS3_FRAG_LOW_MEM="${STAR_MULTIOME_CHROMAP_MACS3_FRAG_LOW_MEM:-0}"
+CHROMAP_START_MODE="${STAR_MULTIOME_CHROMAP_START_MODE:-concurrent}"
 SOLO_STRAND="${STAR_MULTIOME_SOLO_STRAND:-Forward}"
 ATAC_BARCODE_START="${STAR_MULTIOME_ATAC_BARCODE_START:-9}"
 ATAC_BARCODE_LENGTH="${STAR_MULTIOME_ATAC_BARCODE_LENGTH:-16}"
@@ -46,6 +48,7 @@ ALLOW_LOCAL_DOWNSTREAM="0"
 FORCE="0"
 FORCE_ATAC_BARCODE="0"
 SKIP_BUILD="0"
+STOP_AFTER_LOCAL_MEX="0"
 SOLO_INLINE_HASH="0"
 USE_NATIVE_ATAC_BARCODE="${STAR_MULTIOME_USE_NATIVE_ATAC_BARCODE:-1}"
 USE_NATIVE_ATAC_MEX="${STAR_MULTIOME_USE_NATIVE_ATAC_MEX:-1}"
@@ -61,9 +64,8 @@ path or a comma-separated multi-lane path list:
   1. run Chromap against the raw ATAC i5/barcode read using native read-format support
   2. run STAR GEX with GeneFull+Velocyto, Y/noY outputs, and in-process Chromap ATAC
   3. package GeneFull/Velocyto MEX
-  4. run GeneFull+Velocyto downstream h5ad, preferably with remote CellBender
-  5. build ATAC peak MEX from Chromap fragments + peaks with the native C++ builder
-  6. build and validate final MuData outputs
+  4. materialize ATAC peak MEX locally from the Chromap binary sidecar
+  5. run post-MEX downstream h5ad, CellBender, and MuData remotely when configured
 
 Required:
   --gex-r1 PATH             GEX R1 FASTQ containing CB/UMI
@@ -91,6 +93,7 @@ Remote downstream:
   --no-sync-images
   --keep-remote
   --allow-local-downstream  Permit local downstream without CellBender
+  --stop-after-local-mex    Stop after local STAR MEX packaging and ATAC peak MEX
 
 Other:
   --threads N
@@ -99,6 +102,9 @@ Other:
   --chromap-low-mem-ram N  RAM threshold in bytes for low-memory spill; 0 uses Chromap defaults
   --chromap-macs3-frag-low-mem
                            Enable low-memory MACS3 fragment peak workspace
+  --chromap-start-mode MODE
+                           STAR/Chromap scheduling: postMapping or concurrent
+                           (default: concurrent)
   --atac-barcode-start N    1-based barcode window start in ATAC barcode read (default: 9)
   --atac-barcode-length N   barcode length (default: 16)
   --chromap-atac-read-format FORMAT
@@ -126,6 +132,7 @@ while [[ $# -gt 0 ]]; do
     --chromap-low-mem) CHROMAP_LOW_MEM="1"; shift ;;
     --chromap-low-mem-ram) CHROMAP_LOW_MEM_RAM="$2"; shift 2 ;;
     --chromap-macs3-frag-low-mem) CHROMAP_MACS3_FRAG_LOW_MEM="1"; shift ;;
+    --chromap-start-mode) CHROMAP_START_MODE="$2"; shift 2 ;;
     --genome-dir) GENOME_DIR="$2"; shift 2 ;;
     --gex-whitelist) GEX_WHITELIST="$2"; shift 2 ;;
     --chromap-ref) CHROMAP_REF="$2"; shift 2 ;;
@@ -144,6 +151,7 @@ while [[ $# -gt 0 ]]; do
     --no-sync-images) NO_SYNC_IMAGES="1"; shift ;;
     --keep-remote) KEEP_REMOTE="1"; shift ;;
     --allow-local-downstream) ALLOW_LOCAL_DOWNSTREAM="1"; shift ;;
+    --stop-after-local-mex) STOP_AFTER_LOCAL_MEX="1"; shift ;;
     --skip-build) SKIP_BUILD="1"; shift ;;
     --force) FORCE="1"; shift ;;
     --force-atac-barcode) FORCE_ATAC_BARCODE="1"; shift ;;
@@ -158,6 +166,11 @@ done
 for required_name in GEX_R1 GEX_R2 ATAC_R1 ATAC_BARCODE ATAC_R2 OUT_DIR; do
   [[ -n "${!required_name}" ]] || { echo "ERROR: --${required_name,,} is required" >&2; exit 1; }
 done
+
+case "${CHROMAP_START_MODE}" in
+  postMapping|concurrent) ;;
+  *) echo "ERROR: --chromap-start-mode must be postMapping or concurrent" >&2; exit 1 ;;
+esac
 
 realpath_csv() {
   local csv="$1"
@@ -208,10 +221,13 @@ do
 done
 for path in "${GENOME_DIR}" "${GEX_WHITELIST}" "${CHROMAP_REF}" "${CHROMAP_INDEX}" \
   "${ATAC_WHITELIST}" "${ATAC_TO_GEX}" "${PACKAGE_GENEFULL}" \
-  "${PREPARE_VELOCYTO}" "${BUILD_MUDATA}"
+  "${BUILD_MUDATA}"
 do
   [[ -e "${path}" ]] || { echo "ERROR: missing ${path}" >&2; exit 1; }
 done
+if [[ "${ALLOW_LEGACY_PREPARE_VELOCYTO}" == "1" ]]; then
+  [[ -e "${PREPARE_VELOCYTO}" ]] || { echo "ERROR: missing ${PREPARE_VELOCYTO}" >&2; exit 1; }
+fi
 if [[ "${USE_NATIVE_ATAC_BARCODE}" != "1" ]]; then
   [[ -e "${NORMALIZE_ATAC_BC}" ]] || { echo "ERROR: missing ${NORMALIZE_ATAC_BC}" >&2; exit 1; }
 fi
@@ -224,12 +240,15 @@ SAMPLE_DIR="${OUT_DIR}/star_sample"
 RUN_DIR="${SAMPLE_DIR}/run"
 ATAC_BC_NORM="${OUT_DIR}/atac/$(basename "$(first_csv_path "${ATAC_BARCODE}")" .fastq.gz).arc_atac_bc.fastq.gz"
 ATAC_BC_FOR_CHROMAP="${ATAC_BARCODE}"
-ATAC_FRAGMENTS="${RUN_DIR}/atac_fragments.tsv.gz"
+ATAC_BAM="${RUN_DIR}/atac_possorted.bam"
+ATAC_SIDECAR="${RUN_DIR}/atac_fragments.bin"
 ATAC_PEAKS="${RUN_DIR}/atac_peaks.narrowPeak"
 ATAC_SUMMITS="${RUN_DIR}/atac_summits.bed"
 ATAC_MEX="${OUT_DIR}/atac/peak_mex"
 ATAC_METRICS="${OUT_DIR}/atac/atac_metrics.tsv"
 DOWNSTREAM_DIR="${SAMPLE_DIR}/${REMOTE_OUTPUT_NAME}"
+UNFILTERED_H5MU="${OUT_DIR}/mudata/star_chromap_unfiltered_multiome.h5mu"
+FILTERED_H5MU="${OUT_DIR}/mudata/star_chromap_filtered_multiome.h5mu"
 
 log() {
   printf '[%s] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"
@@ -361,7 +380,7 @@ set -euo pipefail
   --soloCrMultimapRescue yes \\
   --soloInlineHashMode "${solo_inline_hash_mode}" \\
   --chromapAtacEnable 1 \\
-  --chromapAtacStartMode concurrent \\
+  --chromapAtacStartMode "${CHROMAP_START_MODE}" \\
   --chromapAtacReferenceFasta "${CHROMAP_REF}" \\
   --chromapAtacIndex "${CHROMAP_INDEX}" \\
   --chromapAtacRead1 "${ATAC_R1}" \\
@@ -370,25 +389,24 @@ set -euo pipefail
 ${chromap_read_format_block}  --chromapAtacBarcodeWhitelist "${ATAC_WHITELIST}" \\
   --chromapAtacBarcodeTranslate "${ATAC_TO_GEX}" \\
   --chromapAtacBarcodeTranslateFromFirst 1 \\
-  --chromapAtacOutputFormat fragments \\
-  --chromapAtacOutputFragments "${ATAC_FRAGMENTS}" \\
+  --chromapAtacOutputFormat BAM \\
+  --chromapAtacOutputFragments "${ATAC_BAM}" \\
+  --chromapAtacSecondaryFragments "${ATAC_SIDECAR}" \\
+  --chromapAtacSortBam 1 \\
   --chromapAtacSummary "${RUN_DIR}/chromap_summary.csv" \\
   --chromapAtacThreads "${CHROMAP_THREADS}" \\
   --chromapAtacLowMem "${CHROMAP_LOW_MEM}" \\
   --chromapAtacLowMemRam "${CHROMAP_LOW_MEM_RAM}" \\
   --chromapAtacMacs3FragLowMem "${CHROMAP_MACS3_FRAG_LOW_MEM}" \\
   --chromapAtacTempDir "${SAMPLE_DIR}/chromap_tmp" \\
-  --chromapAtacTn5ShiftMode classical \\
-  --chromapAtacCallMacs3FragPeaks 1 \\
-  --chromapAtacMacs3FragPeaksOutput "${ATAC_PEAKS}" \\
-  --chromapAtacMacs3FragSummitsOutput "${ATAC_SUMMITS}" \\
-  --chromapAtacMacs3FragPeaksSource file
+  --chromapAtacTn5ShiftMode classical
 EOF
 chmod +x "${STAR_COMMAND}"
 
-if [[ "${FORCE}" == "1" || ! -f "${RUN_DIR}/Log.final.out" || ! -f "${ATAC_FRAGMENTS}" || ! -f "${ATAC_PEAKS}" ]]; then
+if [[ "${FORCE}" == "1" || ! -f "${RUN_DIR}/Log.final.out" || ! -f "${ATAC_BAM}" || ! -f "${ATAC_SIDECAR}" || ! -f "${ATAC_SIDECAR}.chroms.tsv" ]]; then
   log "Running STAR-suite GEX + Chromap ATAC"
   rm -rf "${SAMPLE_DIR}/tmp" "${SAMPLE_DIR}/chromap_tmp"
+  mkdir -p "${SAMPLE_DIR}/chromap_tmp"
   bash "${STAR_COMMAND}" > "${OUT_DIR}/logs/star_multiome.stdout.log" 2> "${OUT_DIR}/logs/star_multiome.stderr.log"
 else
   log "Reusing STAR/Chromap run"
@@ -397,38 +415,99 @@ fi
 if [[ "${FORCE}" == "1" \
   || ! -f "${RUN_DIR}/outs/gene_full_feature_bc_matrix_manifest.json" \
   || ! -f "${RUN_DIR}/outs/raw_feature_bc_matrix/matrix.mtx.gz" \
-  || ! -f "${RUN_DIR}/outs/filtered_feature_bc_matrix/matrix.mtx.gz" \
-  || ! -f "${RUN_DIR}/outs/velocyto_feature_bc_matrix_manifest.json" \
-  || ! -f "${RUN_DIR}/outs/raw_velocyto_feature_bc_matrix/unspliced.mtx.gz" \
-  || ! -f "${RUN_DIR}/outs/filtered_velocyto_feature_bc_matrix/unspliced.mtx.gz" ]]; then
-  log "Packaging GeneFull and Velocyto MEX"
+  || ! -f "${RUN_DIR}/outs/filtered_feature_bc_matrix/matrix.mtx.gz" ]]; then
+  log "Packaging GeneFull MEX"
   python3 "${PACKAGE_GENEFULL}" --run-dir "${RUN_DIR}" > "${OUT_DIR}/logs/package_star_genefull_mex.log"
-  python3 "${PREPARE_VELOCYTO}" --run-dir "${RUN_DIR}" > "${OUT_DIR}/logs/prepare_velocyto_mex.log"
 else
-  log "Reusing packaged GeneFull and Velocyto MEX"
+  log "Reusing packaged GeneFull MEX"
 fi
 
+if [[ ! -f "${RUN_DIR}/outs/velocyto_feature_bc_matrix_manifest.json" \
+  || ! -f "${RUN_DIR}/outs/raw_velocyto_feature_bc_matrix/unspliced.mtx.gz" \
+  || ! -f "${RUN_DIR}/outs/filtered_velocyto_feature_bc_matrix/unspliced.mtx.gz" ]]; then
+  if [[ "${ALLOW_LEGACY_PREPARE_VELOCYTO}" == "1" ]]; then
+    log "WARNING: using legacy prepare_velocyto_mex.py fallback"
+    python3 "${PREPARE_VELOCYTO}" --run-dir "${RUN_DIR}" > "${OUT_DIR}/logs/prepare_velocyto_mex.log"
+  else
+    echo "ERROR: Native STAR Velocyto MEX outputs are missing under ${RUN_DIR}/outs" >&2
+    exit 1
+  fi
+else
+  log "Native Velocyto MEX outputs present"
+fi
+
+if [[ "${FORCE}" == "1" || ! -f "${ATAC_MEX}/matrix.mtx.gz" || ! -f "${ATAC_METRICS}" ]]; then
+  log "Building local ATAC peak MEX from Chromap binary sidecar"
+  rm -rf "${ATAC_MEX}"
+  mkdir -p "${SAMPLE_DIR}/chromap_tmp"
+  if [[ "${USE_NATIVE_ATAC_MEX}" == "1" ]]; then
+    atac_mex_args=(
+      "${BUILD_ATAC_MEX_NATIVE}"
+      --sidecar "${ATAC_SIDECAR}"
+      --barcode-translate "${ATAC_TO_GEX}"
+      --barcode-translate-from-first
+      --call-peaks-from-sidecar
+      --peaks "${ATAC_PEAKS}" \
+      --summits-out "${ATAC_SUMMITS}" \
+      --out-dir "${ATAC_MEX}" \
+      --metrics-tsv "${ATAC_METRICS}" \
+      --threads "${CHROMAP_THREADS}" \
+      --temp-dir "${SAMPLE_DIR}/chromap_tmp"
+    )
+    [[ "${FORCE}" == "1" ]] && atac_mex_args+=(--force)
+    "${atac_mex_args[@]}" | tee "${OUT_DIR}/logs/build_atac_peak_matrix.log"
+  else
+    echo "ERROR: --python-atac-mex is not compatible with the binary-sidecar production boundary" >&2
+    exit 1
+  fi
+else
+  log "Reusing ATAC peak MEX"
+fi
+
+if [[ "${STOP_AFTER_LOCAL_MEX}" == "1" ]]; then
+  {
+    printf 'date_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    printf 'run_dir=%s\n' "${RUN_DIR}"
+    printf 'rna_raw_mex=%s\n' "${RUN_DIR}/outs/raw_feature_bc_matrix"
+    printf 'rna_filtered_mex=%s\n' "${RUN_DIR}/outs/filtered_feature_bc_matrix"
+    printf 'velocyto_raw_mex=%s\n' "${RUN_DIR}/outs/raw_velocyto_feature_bc_matrix"
+    printf 'atac_bam=%s\n' "${ATAC_BAM}"
+    printf 'atac_sidecar=%s\n' "${ATAC_SIDECAR}"
+    printf 'atac_peaks=%s\n' "${ATAC_PEAKS}"
+    printf 'atac_summits=%s\n' "${ATAC_SUMMITS}"
+    printf 'atac_mex=%s\n' "${ATAC_MEX}"
+    printf 'atac_metrics=%s\n' "${ATAC_METRICS}"
+    printf 'post_mex_boundary=local_star_chromap_matrices_ready\n'
+  } > "${OUT_DIR}/LOCAL_MEX_READY.txt"
+  log "PASS: local STAR/Chromap MEX boundary complete"
+  echo "Output dir: ${OUT_DIR}"
+  exit 0
+fi
+
+POST_MEX_BUILT_MUDATA="0"
 if [[ "${FORCE}" != "1" \
-  && -f "${DOWNSTREAM_DIR}/final_counts.h5ad" \
-  && -f "${DOWNSTREAM_DIR}/filtered_counts.h5ad" ]]; then
-  log "Reusing RNA downstream output"
+  && -f "${UNFILTERED_H5MU}" \
+  && -f "${FILTERED_H5MU}" ]]; then
+  log "Reusing post-MEX MuData outputs"
+  POST_MEX_BUILT_MUDATA="1"
 elif [[ -n "${REMOTE_HOST}" && -n "${REMOTE_ROOT}" ]]; then
   remote_args=(
-    "${REMOTE_DOWNSTREAM}"
+    "${REMOTE_POST_MEX}"
     --sample-dir "${SAMPLE_DIR}"
     --remote-host "${REMOTE_HOST}"
     --remote-root "${REMOTE_ROOT}"
     --output-name "${REMOTE_OUTPUT_NAME}"
     --run-cellbender
     --adaptive-filter
-    --local-log "${OUT_DIR}/logs/remote_downstream.log"
+    --local-log "${OUT_DIR}/logs/remote_post_mex.log"
   )
   [[ -n "${CELLBENDER_CPU_CORES}" ]] && remote_args+=(--cellbender-cpu-cores "${CELLBENDER_CPU_CORES}")
   [[ "${CELLBENDER_GPU}" == "1" ]] && remote_args+=(--cellbender-gpu)
   [[ "${NO_SYNC_IMAGES}" == "1" ]] && remote_args+=(--no-sync-images)
   [[ "${KEEP_REMOTE}" == "1" ]] && remote_args+=(--keep-remote)
-  log "Running remote RNA downstream with CellBender"
-  "${remote_args[@]}" | tee "${OUT_DIR}/logs/remote_downstream.wrapper.log"
+  log "Running remote post-MEX downstream, CellBender, and MuData"
+  "${remote_args[@]}" | tee "${OUT_DIR}/logs/remote_post_mex.wrapper.log"
+  POST_MEX_BUILT_MUDATA="1"
 elif [[ "${ALLOW_LOCAL_DOWNSTREAM}" == "1" ]]; then
   DOWNSTREAM_DIR="${SAMPLE_DIR}/downstream_genefull_velocyto"
   log "Running local RNA downstream without CellBender"
@@ -437,28 +516,8 @@ elif [[ "${ALLOW_LOCAL_DOWNSTREAM}" == "1" ]]; then
     --output-dir "${DOWNSTREAM_DIR}" \
     --adaptive-filter | tee "${OUT_DIR}/logs/local_downstream.log"
 else
-  echo "ERROR: provide --remote-host/--remote-root for CellBender, or pass --allow-local-downstream" >&2
+  echo "ERROR: provide --remote-host/--remote-root for post-MEX CellBender/MuData, or pass --allow-local-downstream" >&2
   exit 1
-fi
-
-if [[ "${FORCE}" == "1" || ! -f "${ATAC_MEX}/matrix.mtx.gz" || ! -f "${ATAC_METRICS}" ]]; then
-  log "Building ATAC peak MEX from Chromap fragments"
-  rm -rf "${ATAC_MEX}"
-  if [[ "${USE_NATIVE_ATAC_MEX}" == "1" ]]; then
-    "${BUILD_ATAC_MEX_NATIVE}" \
-      --fragments "${ATAC_FRAGMENTS}" \
-      --peaks "${ATAC_PEAKS}" \
-      --out-dir "${ATAC_MEX}" \
-      --metrics-tsv "${ATAC_METRICS}" | tee "${OUT_DIR}/logs/build_atac_peak_matrix.log"
-  else
-    python3 "${BUILD_ATAC_MEX_PY}" \
-      --fragments "${ATAC_FRAGMENTS}" \
-      --peaks "${ATAC_PEAKS}" \
-      --out-dir "${ATAC_MEX}" \
-      --metrics-tsv "${ATAC_METRICS}" | tee "${OUT_DIR}/logs/build_atac_peak_matrix.log"
-  fi
-else
-  log "Reusing ATAC peak MEX"
 fi
 
 RNA_UNFILTERED="${DOWNSTREAM_DIR}/final_counts.h5ad"
@@ -468,40 +527,42 @@ RNA_FILTERED="${DOWNSTREAM_DIR}/filtered_counts.h5ad"
 [[ -f "${RNA_FILTERED}" ]] || { echo "ERROR: missing filtered RNA h5ad ${RNA_FILTERED}" >&2; exit 1; }
 
 MUDATA_PYTHON="$(ensure_mudata_python)"
-UNFILTERED_H5MU="${OUT_DIR}/mudata/star_chromap_unfiltered_multiome.h5mu"
-FILTERED_H5MU="${OUT_DIR}/mudata/star_chromap_filtered_multiome.h5mu"
 
-log "Building MuData outputs"
-"${MUDATA_PYTHON}" "${BUILD_MUDATA}" \
-  --rna-h5ad "${RNA_UNFILTERED}" \
-  --atac-mex-dir "${ATAC_MEX}" \
-  --per-barcode-metrics "${ATAC_METRICS}" \
-  --metrics-barcode-column barcode \
-  --require-rna-velocyto-layers \
-  --cell-call-source star_downstream_h5ad_chromap_atac \
-  --rna-source "${RNA_UNFILTERED}" \
-  --atac-source "${ATAC_MEX}" \
-  --fragments-source "${ATAC_FRAGMENTS}" \
-  --peaks-source "${ATAC_PEAKS}" \
-  --evidence-source "${ATAC_METRICS}" \
-  --y-removal-enabled true \
-  --output-h5mu "${UNFILTERED_H5MU}" | tee "${OUT_DIR}/logs/build_unfiltered_h5mu.log"
+if [[ "${POST_MEX_BUILT_MUDATA}" != "1" ]]; then
+  log "Building MuData outputs locally"
+  "${MUDATA_PYTHON}" "${BUILD_MUDATA}" \
+    --rna-h5ad "${RNA_UNFILTERED}" \
+    --atac-mex-dir "${ATAC_MEX}" \
+    --per-barcode-metrics "${ATAC_METRICS}" \
+    --metrics-barcode-column barcode \
+    --require-rna-velocyto-layers \
+    --cell-call-source star_downstream_h5ad_chromap_atac \
+    --rna-source "${RNA_UNFILTERED}" \
+    --atac-source "${ATAC_MEX}" \
+    --fragments-source "${ATAC_SIDECAR}" \
+    --peaks-source "${ATAC_PEAKS}" \
+    --evidence-source "${ATAC_METRICS}" \
+    --y-removal-enabled true \
+    --output-h5mu "${UNFILTERED_H5MU}" | tee "${OUT_DIR}/logs/build_unfiltered_h5mu.log"
 
-"${MUDATA_PYTHON}" "${BUILD_MUDATA}" \
-  --rna-h5ad "${RNA_FILTERED}" \
-  --atac-mex-dir "${ATAC_MEX}" \
-  --per-barcode-metrics "${ATAC_METRICS}" \
-  --metrics-barcode-column barcode \
-  --all-barcodes-are-cells \
-  --require-rna-velocyto-layers \
-  --cell-call-source star_downstream_filtered_h5ad_chromap_atac \
-  --rna-source "${RNA_FILTERED}" \
-  --atac-source "${ATAC_MEX}" \
-  --fragments-source "${ATAC_FRAGMENTS}" \
-  --peaks-source "${ATAC_PEAKS}" \
-  --evidence-source "${ATAC_METRICS}" \
-  --y-removal-enabled true \
-  --output-h5mu "${FILTERED_H5MU}" | tee "${OUT_DIR}/logs/build_filtered_h5mu.log"
+  "${MUDATA_PYTHON}" "${BUILD_MUDATA}" \
+    --rna-h5ad "${RNA_FILTERED}" \
+    --atac-mex-dir "${ATAC_MEX}" \
+    --per-barcode-metrics "${ATAC_METRICS}" \
+    --metrics-barcode-column barcode \
+    --all-barcodes-are-cells \
+    --require-rna-velocyto-layers \
+    --cell-call-source star_downstream_filtered_h5ad_chromap_atac \
+    --rna-source "${RNA_FILTERED}" \
+    --atac-source "${ATAC_MEX}" \
+    --fragments-source "${ATAC_SIDECAR}" \
+    --peaks-source "${ATAC_PEAKS}" \
+    --evidence-source "${ATAC_METRICS}" \
+    --y-removal-enabled true \
+    --output-h5mu "${FILTERED_H5MU}" | tee "${OUT_DIR}/logs/build_filtered_h5mu.log"
+else
+  log "Using remote-built MuData outputs"
+fi
 
 "${MUDATA_PYTHON}" - <<PY | tee "${OUT_DIR}/logs/validate_h5mu.log"
 import mudata as md
@@ -549,6 +610,10 @@ PY
   printf 'chromap_atac_read_format=%s\n' "$([[ "${USE_NATIVE_ATAC_BARCODE}" == "1" ]] && echo "${ATAC_BARCODE_READ_FORMAT}" || echo "-")"
   printf 'run_dir=%s\n' "${RUN_DIR}"
   printf 'downstream_dir=%s\n' "${DOWNSTREAM_DIR}"
+  printf 'atac_bam=%s\n' "${ATAC_BAM}"
+  printf 'atac_sidecar=%s\n' "${ATAC_SIDECAR}"
+  printf 'atac_peaks=%s\n' "${ATAC_PEAKS}"
+  printf 'atac_summits=%s\n' "${ATAC_SUMMITS}"
   printf 'atac_mex=%s\n' "${ATAC_MEX}"
   printf 'atac_metrics=%s\n' "${ATAC_METRICS}"
   printf 'unfiltered_h5mu=%s\n' "${UNFILTERED_H5MU}"

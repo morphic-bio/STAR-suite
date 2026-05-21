@@ -194,20 +194,6 @@ bool validateAndBuildConfig(Parameters &P,
     return false;
   }
 
-  const std::string peaksSourceRaw = trimCopy(P.chromapAtac.macs3FragPeaksSource);
-  const std::string peaksSource = lowerCopy(peaksSourceRaw);
-  star::multiome::ChromapMacs3FragPeaksSource macs3FragPeaksSource;
-  if (peaksSource == "file") {
-    macs3FragPeaksSource = star::multiome::ChromapMacs3FragPeaksSource::FILE;
-  } else if (peaksSource == "memory") {
-    macs3FragPeaksSource = star::multiome::ChromapMacs3FragPeaksSource::MEMORY;
-  } else {
-    P.inOut->logMain
-        << "ERROR: --chromapAtacMacs3FragPeaksSource must be file or memory (got \""
-        << peaksSourceRaw << "\")\n";
-    return false;
-  }
-
   if (!isUnsetToken(P.chromapAtac.secondaryFragments)) {
     if (outputFormat != star::multiome::ChromapOutputFormat::BAM &&
         outputFormat != star::multiome::ChromapOutputFormat::CRAM) {
@@ -344,7 +330,8 @@ bool validateAndBuildConfig(Parameters &P,
   cfg->macs3_frag_min_length = P.chromapAtac.macs3FragMinLength;
   cfg->macs3_frag_max_gap = P.chromapAtac.macs3FragMaxGap;
   cfg->macs3_frag_uint8_counts = P.chromapAtac.macs3FragUint8Counts != 0;
-  cfg->macs3_frag_peaks_source = macs3FragPeaksSource;
+  cfg->macs3_frag_peaks_source =
+      star::multiome::ChromapMacs3FragPeaksSource::MEMORY;
   cfg->macs3_frag_low_mem = P.chromapAtac.macs3FragLowMem != 0;
 
   // Wire the ATAC permit shims into the contract whenever STAR's dynamic

@@ -7,7 +7,7 @@
 # Usage:
 #   save_velocyto_baseline.sh --profile 100k|2m --threads N --baseline-dir /path/to/baseline
 #
-# Always runs prepare_velocyto_mex (packaged outs + manifest) so UCSF_VELOCYTO_BASELINE_OUTDIR is --mode-all safe.
+# Requires the native STAR Velocyto outs writer so UCSF_VELOCYTO_BASELINE_OUTDIR is --mode-all safe.
 #
 # Requires: scripts/run_star_velocyto_canonical.sh and a writable baseline directory.
 # star_run must be fresh (no Solo.out) unless UCSF_VELOCYTO_REUSE_STAR_OUTDIR=1 — see run_star_velocyto_canonical.sh.
@@ -71,9 +71,9 @@ fi
 
 "${CANONICAL}" --profile "${PROFILE}" --threads "${THREADS}" --out-prefix "${RUN_DIR}" --prepare-mex
 
-[[ -f "${RUN_DIR}/outs/velocyto_feature_bc_matrix_manifest.json" ]] || die "Missing packaged manifest (prepare_velocyto_mex failed?)"
-[[ -f "${RUN_DIR}/outs/raw_velocyto_feature_bc_matrix/matrix.mtx.gz" ]] || die "Missing packaged raw MEX"
-[[ -f "${RUN_DIR}/outs/filtered_velocyto_feature_bc_matrix/matrix.mtx.gz" ]] || die "Missing packaged filtered MEX"
+[[ -f "${RUN_DIR}/outs/velocyto_feature_bc_matrix_manifest.json" ]] || die "Missing native Velocyto manifest"
+[[ -f "${RUN_DIR}/outs/raw_velocyto_feature_bc_matrix/matrix.mtx.gz" ]] || die "Missing native raw Velocyto MEX"
+[[ -f "${RUN_DIR}/outs/filtered_velocyto_feature_bc_matrix/matrix.mtx.gz" ]] || die "Missing native filtered Velocyto MEX"
 
 STAMP="${BASELINE_DIR}/BASELINE_MANIFEST.txt"
 STAR_ABS="$(readlink -f "${STAR_BIN}" 2>/dev/null || echo "${STAR_BIN}")"

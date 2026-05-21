@@ -4,6 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 SMOKE_RUNNER="${REPO_ROOT}/scripts/run_star_multiome_lane_smoke.sh"
+REMOTE_POST_MEX="${REPO_ROOT}/scripts/run_remote_multiome_post_mex_rsync.sh"
 GLOBUS_UPLOADER="${REPO_ROOT}/scripts/upload_jax_multiome01_large_files_globus.sh"
 
 RAW_DIR="/mnt/pikachu/JAX_Multiome01/raw"
@@ -16,6 +17,7 @@ CHROMAP_THREADS="${STAR_MULTIOME_CHROMAP_THREADS:-16}"
 CHROMAP_LOW_MEM="${STAR_MULTIOME_CHROMAP_LOW_MEM:-1}"
 CHROMAP_LOW_MEM_RAM="${STAR_MULTIOME_CHROMAP_LOW_MEM_RAM:-0}"
 CHROMAP_MACS3_FRAG_LOW_MEM="${STAR_MULTIOME_CHROMAP_MACS3_FRAG_LOW_MEM:-1}"
+CHROMAP_START_MODE="${STAR_MULTIOME_CHROMAP_START_MODE:-concurrent}"
 CELLBENDER_CPU_CORES="${MULTIOME_CELLBENDER_CPU_CORES:-24}"
 CELLBENDER_GPU="1"
 NO_SYNC_IMAGES="0"
@@ -37,8 +39,10 @@ Usage:
 
 Runs the 9-sample JAX_Multiome01 STAR/Chromap production workflow from the
 metadata workbook. Each sample is processed independently with multi-lane FASTQ
-CSVs, native ATAC barcode parsing, GeneFull+Velocyto RNA, Y/noY outputs, remote
-CellBender, native ATAC peak MEX, and final MuData validation.
+CSVs, native ATAC barcode parsing, GeneFull+Velocyto RNA, Y/noY outputs, local
+ATAC sidecar/peak-MEX materialization, and remote post-MEX CellBender/MuData
+validation. The local STAR/Chromap phase stops at the MEX/sidecar boundary so
+the next sample can start while remote post-MEX work runs.
 
 Options:
   --raw-dir PATH
@@ -51,6 +55,9 @@ Options:
   --chromap-low-mem
   --chromap-low-mem-ram N
   --chromap-macs3-frag-low-mem
+  --chromap-start-mode MODE
+                           STAR/Chromap scheduling: postMapping or concurrent
+                           (default: concurrent)
   --cellbender-cpu-cores N
   --no-cellbender-gpu
   --no-sync-images
@@ -81,6 +88,7 @@ while [[ $# -gt 0 ]]; do
     --chromap-low-mem) CHROMAP_LOW_MEM="1"; shift ;;
     --chromap-low-mem-ram) CHROMAP_LOW_MEM_RAM="$2"; shift 2 ;;
     --chromap-macs3-frag-low-mem) CHROMAP_MACS3_FRAG_LOW_MEM="1"; shift ;;
+    --chromap-start-mode) CHROMAP_START_MODE="$2"; shift 2 ;;
     --cellbender-cpu-cores) CELLBENDER_CPU_CORES="$2"; shift 2 ;;
     --no-cellbender-gpu) CELLBENDER_GPU="0"; shift ;;
     --no-sync-images) NO_SYNC_IMAGES="1"; shift ;;
@@ -102,6 +110,11 @@ done
 RAW_DIR="$(realpath "${RAW_DIR}")"
 METADATA_XLSX="$(realpath "${METADATA_XLSX}")"
 OUTPUT_ROOT="$(realpath -m "${OUTPUT_ROOT}")"
+
+case "${CHROMAP_START_MODE}" in
+  postMapping|concurrent) ;;
+  *) echo "ERROR: --chromap-start-mode must be postMapping or concurrent" >&2; exit 1 ;;
+esac
 
 mkdir -p "${OUTPUT_ROOT}/metadata" "${OUTPUT_ROOT}/logs" "${OUTPUT_ROOT}/samples"
 MANIFEST="${OUTPUT_ROOT}/metadata/sample_manifest.tsv"
@@ -228,8 +241,11 @@ sample_selected() {
 
 start_reached="0"
 [[ -z "${START_AT}" ]] && start_reached="1"
+REMOTE_POST_MEX_LOCK="${OUTPUT_ROOT}/logs/remote_post_mex.lock"
+post_mex_pids=()
+post_mex_samples=()
 
-tail -n +2 "${MANIFEST}" | while IFS=$'\t' read -r sample sample_slug atac_lib gex_lib gex_r1 gex_r2 atac_r1 atac_barcode atac_r2 gex_run_ids atac_run_ids; do
+while IFS=$'\t' read -r sample sample_slug atac_lib gex_lib gex_r1 gex_r2 atac_r1 atac_barcode atac_r2 gex_run_ids atac_run_ids; do
   if [[ "${start_reached}" != "1" ]]; then
     if [[ "${START_AT}" == "${sample}" || "${START_AT}" == "${sample_slug}" ]]; then
       start_reached="1"
@@ -259,34 +275,68 @@ tail -n +2 "${MANIFEST}" | while IFS=$'\t' read -r sample sample_slug atac_lib g
     --atac-barcode "${atac_barcode}"
     --atac-r2 "${atac_r2}"
     --out-dir "${sample_out}"
-    --remote-host "${REMOTE_HOST}"
-    --remote-root "${REMOTE_ROOT}"
-    --remote-output-name downstream_genefull_velocyto_cellbender
-    --cellbender-cpu-cores "${CELLBENDER_CPU_CORES}"
     --threads "${THREADS}"
     --chromap-threads "${CHROMAP_THREADS}"
     --chromap-low-mem-ram "${CHROMAP_LOW_MEM_RAM}"
+    --chromap-start-mode "${CHROMAP_START_MODE}"
     --skip-build
+    --stop-after-local-mex
   )
   [[ "${CHROMAP_LOW_MEM}" == "1" ]] && args+=(--chromap-low-mem)
   [[ "${CHROMAP_MACS3_FRAG_LOW_MEM}" == "1" ]] && args+=(--chromap-macs3-frag-low-mem)
-  [[ "${CELLBENDER_GPU}" == "1" ]] && args+=(--cellbender-gpu)
-  [[ "${NO_SYNC_IMAGES}" == "1" ]] && args+=(--no-sync-images)
-  [[ "${KEEP_REMOTE}" == "1" ]] && args+=(--keep-remote)
   [[ "${FORCE}" == "1" ]] && args+=(--force)
 
   "${args[@]}" 2>&1 | tee "${sample_log}"
-  log "Completed ${sample}"
-  if [[ "${GLOBUS_UPLOAD_LARGE_FILES}" == "1" ]]; then
-    log "Submitting Globus large-file upload for ${sample}"
-    "${GLOBUS_UPLOADER}" \
-      --run-root "${OUTPUT_ROOT}" \
-      --samples "${sample_slug}" \
-      --source-endpoint "${GLOBUS_SOURCE_ENDPOINT}" \
-      --dest-endpoint "${GLOBUS_DEST_ENDPOINT}" \
-      --dest-root "${GLOBUS_DEST_ROOT}" | tee "${OUTPUT_ROOT}/logs/${sample_slug}.globus_large_files.log"
+  log "Local MEX boundary complete for ${sample}; queueing remote post-MEX work"
+
+  post_log="${OUTPUT_ROOT}/logs/${sample_slug}.post_mex_remote.log"
+  (
+    set -euo pipefail
+    remote_args=(
+      "${REMOTE_POST_MEX}"
+      --sample-dir "${sample_out}/star_sample"
+      --remote-host "${REMOTE_HOST}"
+      --remote-root "${REMOTE_ROOT}"
+      --output-name downstream_genefull_velocyto_cellbender
+      --run-cellbender
+      --adaptive-filter
+      --cellbender-cpu-cores "${CELLBENDER_CPU_CORES}"
+      --local-log "${sample_out}/logs/remote_post_mex.log"
+    )
+    [[ "${CELLBENDER_GPU}" == "1" ]] && remote_args+=(--cellbender-gpu)
+    [[ "${NO_SYNC_IMAGES}" == "1" ]] && remote_args+=(--no-sync-images)
+    [[ "${KEEP_REMOTE}" == "1" ]] && remote_args+=(--keep-remote)
+    flock "${REMOTE_POST_MEX_LOCK}" "${remote_args[@]}"
+    if [[ "${GLOBUS_UPLOAD_LARGE_FILES}" == "1" ]]; then
+      "${GLOBUS_UPLOADER}" \
+        --run-root "${OUTPUT_ROOT}" \
+        --samples "${sample_slug}" \
+        --source-endpoint "${GLOBUS_SOURCE_ENDPOINT}" \
+        --dest-endpoint "${GLOBUS_DEST_ENDPOINT}" \
+        --dest-root "${GLOBUS_DEST_ROOT}"
+    fi
+  ) > "${post_log}" 2>&1 < /dev/null &
+  post_mex_pids+=("$!")
+  post_mex_samples+=("${sample_slug}")
+  log "Remote post-MEX PID for ${sample}: ${post_mex_pids[-1]} (log ${post_log})"
+done < <(tail -n +2 "${MANIFEST}")
+
+post_failures=0
+for i in "${!post_mex_pids[@]}"; do
+  pid="${post_mex_pids[$i]}"
+  slug="${post_mex_samples[$i]}"
+  if wait "${pid}"; then
+    log "Remote post-MEX complete for ${slug}"
+  else
+    log "ERROR: remote post-MEX failed for ${slug}; see ${OUTPUT_ROOT}/logs/${slug}.post_mex_remote.log"
+    post_failures=$((post_failures + 1))
   fi
 done
+
+if [[ "${post_failures}" -gt 0 ]]; then
+  echo "ERROR: ${post_failures} remote post-MEX jobs failed" >&2
+  exit 1
+fi
 
 log "PASS: JAX_Multiome01 production workflow complete"
 echo "Output root: ${OUTPUT_ROOT}"

@@ -6,13 +6,13 @@ REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 UNIT_BIN="${REPO_ROOT}/core/legacy/source/ocm_multi_unit_tests"
 FIXTURE_ROOT="${REPO_ROOT}/tests/fixtures/ocm_multi_tiny"
 RUN_DIR="${FIXTURE_ROOT}/run"
-OUTS_DIR="${RUN_DIR}/outs"
+OUTS_DIR="${FIXTURE_ROOT}/outs"
 
 if [[ ! -x "${UNIT_BIN}" ]]; then
   make -C "${REPO_ROOT}/core/legacy/source" -j8 ocm-multi-unit-tests
 fi
 
-rm -rf "${OUTS_DIR}" "${FIXTURE_ROOT}/samples"
+rm -rf "${OUTS_DIR}" "${RUN_DIR}/outs" "${FIXTURE_ROOT}/samples"
 unset OCM_TEST_RUN_DIR OCM_TEST_CONFIG OCM_TEST_LOG
 export OCM_TEST_FIXTURE_ROOT="${FIXTURE_ROOT}"
 "${UNIT_BIN}" all
@@ -36,17 +36,24 @@ assert filtered_csv == ["GRCh38,AAACCCTGTAAGCGCG-1"]
 raw_bc = outs / "multi/count/raw_feature_bc_matrix/barcodes.tsv.gz"
 with gzip.open(raw_bc, "rt", encoding="utf-8") as handle:
     barcodes = [line.strip() for line in handle if line.strip()]
-assert barcodes == sorted([
-    "AAACCCTGTAAGCGCG-1",
-    "AAACCCGCAACTAGAC-1",
-    "AAACCATTCACCTGGG-1",
+assert barcodes == [
+    "AAAAAAAAAAAAAAAA-1",
     "AAACCAAAGCATTGAT-1",
-])
+    "AAACCATTCACCTGGG-1",
+    "AAACCCGCAACTAGAC-1",
+    "AAACCCTGTAAGCGCG-1",
+]
+
+raw_mtx = outs / "multi/count/raw_feature_bc_matrix/matrix.mtx.gz"
+with gzip.open(raw_mtx, "rt", encoding="utf-8") as handle:
+    raw_lines = [line.strip() for line in handle if line.strip() and not line.startswith("%")]
+assert raw_lines[0] == "2 5 4", raw_lines[0]
+assert raw_lines[1:] == ["1 5 1", "2 4 2", "1 3 3", "2 2 4"], raw_lines[1:]
 
 union_dir = outs / "per_sample_outs/Union-Test/count/sample_raw_feature_bc_matrix/barcodes.tsv.gz"
 with gzip.open(union_dir, "rt", encoding="utf-8") as handle:
     union_barcodes = [line.strip() for line in handle if line.strip()]
-assert union_barcodes == sorted(["AAACCCTGTAAGCGCG-1", "AAACCCGCAACTAGAC-1"])
+assert sorted(union_barcodes) == sorted(["AAACCCTGTAAGCGCG-1", "AAACCCGCAACTAGAC-1"])
 
 fixture_root = Path(sys.argv[2])
 sample_velo = fixture_root / "samples/GCM1-Day-4/run/outs/raw_velocyto_feature_bc_matrix"

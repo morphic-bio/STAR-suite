@@ -260,6 +260,7 @@ render_star_script() {
     --soloBarcodeReadLength 0
     --soloCBwhitelist "${SOLO_CB_WHITELIST}"
     --soloCBmatchWLtype 1MM_multi_Nbase_pseudocounts
+    --soloInlineCBCorrection yes
     --soloUMIfiltering MultiGeneUMI_CR
     --soloUMIdedup 1MM_CR
     --soloMultiMappers Unique
@@ -272,6 +273,7 @@ render_star_script() {
     --soloInlineHashMode "${SOLO_INLINE_HASH_MODE}"
     --ocmMultiEnable yes
     --ocmMultiConfig "${ORACLE_DIR}/config.csv"
+    --ocmMultiBarcodeMode flex
     --ocmMultiOutputCompat cellranger
   )
   if (( ${#EXTRA_STAR_ARGS[@]} > 0 )); then
@@ -282,8 +284,16 @@ render_star_script() {
     printf '#!/usr/bin/env bash\n'
     printf 'set -euo pipefail\n\n'
     printf 'cd %q\n' "${REPO_ROOT}"
+    printf ': "${STAR_VELOCYTO_LOW_MEM:=1}"\n'
+    printf ': "${STAR_VELOCYTO_INTEGRATED_HASH_SPILL_BUCKETS:=8192}"\n'
+    printf ': "${STAR_VELOCYTO_UMI_RESERVE_CAP:=32}"\n'
+    printf ': "${STAR_SOLO_BINARY_SPOOL:=1}"\n'
+    printf ': "${MALLOC_ARENA_MAX:=2}"\n'
+    printf ': "${MALLOC_TRIM_THRESHOLD_:=131072}"\n'
+    printf 'export STAR_VELOCYTO_LOW_MEM STAR_VELOCYTO_INTEGRATED_HASH_SPILL_BUCKETS STAR_VELOCYTO_UMI_RESERVE_CAP STAR_SOLO_BINARY_SPOOL MALLOC_ARENA_MAX MALLOC_TRIM_THRESHOLD_\n'
     printf 'mkdir -p %q %q\n' "${RUN_DIR}" "${LOG_DIR}"
     printf 'printf "started_utc=%%s\\n" "$(date -u +%%Y-%%m-%%dT%%H:%%M:%%SZ)" > %q\n' "${OUT_ROOT}/STAR_STARTED.txt"
+    printf 'printf "STAR_VELOCYTO_LOW_MEM=%%s\\nSTAR_VELOCYTO_INTEGRATED_HASH_SPILL_BUCKETS=%%s\\nSTAR_VELOCYTO_UMI_RESERVE_CAP=%%s\\nSTAR_SOLO_BINARY_SPOOL=%%s\\nMALLOC_ARENA_MAX=%%s\\nMALLOC_TRIM_THRESHOLD_=%%s\\n" "$STAR_VELOCYTO_LOW_MEM" "$STAR_VELOCYTO_INTEGRATED_HASH_SPILL_BUCKETS" "$STAR_VELOCYTO_UMI_RESERVE_CAP" "$STAR_SOLO_BINARY_SPOOL" "$MALLOC_ARENA_MAX" "$MALLOC_TRIM_THRESHOLD_" > %q\n' "${LOG_DIR}/star.env.txt"
     printf 'cmd=('
     local arg
     for arg in "${cmd[@]}"; do

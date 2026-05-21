@@ -6,6 +6,7 @@ Branch intent: `feature/velocyto-optimizations-20260326`
 Related docs:
 - `docs/RUNBOOK_VELOCYTO_COUNT_RESOLUTION_20260326.md`
 - `docs/RUNBOOK_VELOCYTO_OPTIMIZATION_PORT_20260326.md`
+- `docs/RUNBOOK_VELOCYTO_CR_COMPAT_POLICY_20260519.md`
 - `docs/RUNBOOK_SCRNA_OCM_MULTI_MEX_MATERIALIZER_IMPLEMENTATION_20260519.md`
 - `docs/HANDOFF_SCRNA_DOWNSTREAM_MEX_VELOCYTO_FINDINGS_20260313.md`
 - `tests/run_perturb_velocyto_mex_smoke.sh`
@@ -339,11 +340,16 @@ In-repo placeholder: `tests/run_ucsf_velocyto_external_compare.sh` prints **BLOC
 
 **Implemented (Stage 2):** `STAR_VELOCYTO_INTEGRATED_HASH=1` with
 `STAR_VELOCYTO_DETERMINISTIC_REPLAY=1` runs `countVelocytoSortedReplayCBuckets`.
+`STAR_VELOCYTO_LOW_MEM=1` selects this bounded path directly for production
+surfaces without requiring the deterministic replay env pair.
 **Default:** records are **sharded to temporary binary spill files** under
-`Solo.out/Velocyto/` (`mkdtemp`), `iCB % STAR_VELOCYTO_INTEGRATED_HASH_SPILL_BUCKETS`
-(default **128**, max 4096). After the scan, each shard is loaded, sorted by
-`(iCB, UMI, readId)`, merged with `applyVelocytoMerge`, then deleted—peak RAM is
-roughly **one shard’s records** plus merge state, not the full dataset at once.
+`Solo.out/Velocyto/` (`mkdtemp`) by contiguous CB range. The requested shard
+count is `STAR_VELOCYTO_INTEGRATED_HASH_SPILL_BUCKETS` (default **128**, max
+16384; **4096** by default when `STAR_VELOCYTO_LOW_MEM=1`) and is capped at
+`nCB`. After the scan, each shard is loaded, sorted by `(iCB, UMI, readId)`,
+merged with `applyVelocytoMerge`, finalized into `countCellGeneUMI`, released,
+and deleted. Peak RAM is roughly **one shard’s records + one shard’s CB maps**
+plus the final sparse count matrix, not the full dataset at once.
 `STAR_VELOCYTO_INTEGRATED_HASH_INMEMORY=1` restores the all-in-RAM per-CB vector
 path for debugging only.
 

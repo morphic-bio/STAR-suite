@@ -19,6 +19,7 @@ runMode                         alignReads
                                 inputAlignmentsFromBAM ... input alignments from BAM. Presently only works with --outWigType and --bamRemoveDuplicates options.
                                 liftOver               ... lift-over of GTF files (--sjdbGTFfile) between genome assemblies using chain file(s) from --genomeChainFiles.
                                 soloCellFiltering  </path/to/raw/count/dir/>   </path/to/output/prefix>    ... STARsolo cell filtering ("calling") without remapping, followed by the path to raw count directory and output (filtered) prefix
+                                countingSinkStress ... synthetic post-map replay into CountingSink (no mapping). Requires --genomeDir and --soloCBwhitelist. Scale via env STAR_COUNTING_SINK_STRESS_NRECORDS (default 50000000), STAR_COUNTING_SINK_STRESS_ACTIVE_CBS (default 20000). Optional STAR_COUNTING_SINK_STRESS_COLLAPSE=1 to run collapseUMIall after finalize.
 
 runThreadN                      1
     int: number of threads to run STAR
@@ -1999,6 +2000,17 @@ ocmMultiEnable              no
 ocmMultiConfig              -
     string:                 Cell Ranger multi config CSV with [samples] for OCM materialization
 
+ocmMultiBarcodeMode         posthoc
+    string:                 posthoc|flex
+                            posthoc     ... legacy path: correct CB16 first, then materialize OCM samples from MEX
+                            flex        ... native OCM effective barcode: append OCM TAG8 to CB16 before CB correction/counting
+
+ocmMultiBamSplit           no
+    string:                 no|yes|auto - write OCM per-sample BAMs during final tagged unsorted BAM replay
+                            yes         ... write outs/per_sample_outs/<sample>/count/sample_alignments.bam plus outs/multi/count/unassigned_alignments.bam
+                            auto        ... enable when OCM samples are present and unsorted BAM output is active
+                            no          ... write only the standard STAR BAM outputs
+
 ocmMultiOutputCompat        cellranger
     string:                 Output layout compatibility mode (cellranger)
 
@@ -2118,7 +2130,7 @@ chromapAtacLowMemRam        0
     uint:                   RAM threshold in bytes for chromapAtacLowMem before spilling overflow files. 0 means use Chromap's defaults (1 GB / 512 MB).
 
 chromapAtacMacs3FragLowMem  0
-    int:                    use libMACS3 sweep-line workspace (in-memory streaming, ~tens of KB peak) instead of the events workspace (~3.8 GB on PBMC 3k) when 1. Sweep is ~73 s slower on this hardware but saves ~3.8 GB peak RSS; use together with chromapAtacLowMem=1 for the full lo-mem stack.
+    int:                    use libMACS3 sweep-line workspace for in-process MACS3 FRAG peaks when 1. For production multiome, prefer the post-materialization sidecar boundary: write chromapAtacSecondaryFragments locally, then run native sidecar peak-MEX construction outside STAR.
 
 chromapAtacEvidenceFromPeaksOutput  -
     string:                 optional path for per-barcode ATAC evidence-from-peaks
