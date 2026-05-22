@@ -133,6 +133,19 @@ actionable; link to deeper docs rather than copying them.
 - Full reference command: `docs/feature_barcodes.md` § "Optimized Benchmark
   Parameters".
 
+### CellBender CUDA Policy (CRITICAL)
+
+- **NEVER** run CellBender without CUDA for production or handoff workflows.
+- Any command that enables CellBender must also enable GPU mode:
+  `--cellbender-gpu` for STAR-suite wrappers, which must propagate to
+  Docker `--gpus all` and CellBender `--cuda`.
+- Before launching remote downstream/CellBender jobs, verify the rendered
+  command contains `--cellbender-gpu`. If it does not, stop and fix the launch
+  command rather than accepting the CPU default.
+- After launch, confirm `nvidia-smi` shows the CellBender process using GPU
+  memory/utilization. Treat `cellbender remove-background --cpu-threads ...`
+  without `--cuda` as a mislaunch.
+
 ## Flex Integration Notes
 
 - Flex now uses `libscrna` for EmptyDrops/OrdMag/Occupancy (no duplicate
@@ -280,6 +293,7 @@ Workflow schemas: `mcp_server/workflows/`
 - `docs/Github-actions.md`
 - `docs/Star-binary-distribution.md`
 - `docs/feature_barcodes.md`
+- `docs/RUNBOOK_REPOSITORY_SPLIT_RECIPES_PROVENANCE.md`
 - `docs/todos`
 - `tests/ARTIFACTS.md`
 - `mcp_server/README.md`
