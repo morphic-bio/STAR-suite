@@ -1,0 +1,301 @@
+# Private recipe: JAX scRNAseq02 OCM native composite-barcode smoke.
+id: jax_scrnaseq02_ocm_composite_smoke
+title: JAX scRNAseq02 OCM Composite Smoke
+summary: Native STAR OCM-Flex composite-barcode smoke with optional STAR execution, materialization, and CR artifact comparison.
+kind: shell_workflow
+entry_script: scripts/run_jax_scrnaseq02_ocm_composite_smoke.sh
+supported_modes: [local, dry-run-capable]
+caveats:
+  - "Default rendering is safe: it prepares the downsample and run scripts only."
+  - "Production OCM semantics use --ocmMultiBarcodeMode flex through STAR_OCM_BARCODE_MODE=flex."
+  - "Do not set --run-cr unless intentionally regenerating the Cell Ranger oracle; existing CR artifacts are reused by default."
+default_output_layout: /mnt/pikachu/JAX_scRNAseq02_processed/ocm_composite_smoke_<timestamp>/
+
+scripts:
+  - role: entry
+    path: scripts/run_jax_scrnaseq02_ocm_composite_smoke.sh
+    description: Stages deterministic OCM downsample, renders STAR/CR commands, optionally runs STAR and compares per-sample MEX outputs.
+    language: bash
+  - role: comparator
+    path: scripts/validate_jax_scrnaseq02_ocm_oracle.py
+    description: Checks OCM multi-compatible output layout and oracle barcode recall for 25E32-L3.
+    language: python
+
+stages:
+  - name: prepare
+    title: Prepare Downsample
+    script: scripts/run_jax_scrnaseq02_ocm_composite_smoke.sh
+    description: Build staged FASTQs, composite whitelist, and command scripts.
+  - name: star
+    title: STAR OCM
+    script: scripts/run_jax_scrnaseq02_ocm_composite_smoke.sh
+    description: Run native STAR GeneFull+Velocyto OCM composite-barcode path.
+  - name: materialize_compare
+    title: Materialize And Compare
+    script: scripts/run_jax_scrnaseq02_ocm_composite_smoke.sh
+    description: Materialize STAR comparison surface and compare with reused CR9 multi outputs.
+
+parameter_groups:
+  - name: selection
+    title: Sample Selection
+    parameters: [sample_id, sample_stem, lanes, read_pairs]
+  - name: inputs
+    title: Input Paths
+    parameters: [raw_dir, config, star_bin, genome_dir, solo_cb_whitelist, cr_reference]
+  - name: output
+    title: Output
+    parameters: [out_root]
+  - name: star
+    title: STAR OCM Flags
+    parameters: [threads, star_out_samtype, star_yremove, star_bam_cbub, star_bam_gxgn, star_solo_features, star_compare_feature]
+  - name: stages
+    title: Execution Stages
+    parameters: [prepare, run_star, materialize, compare, run_cr, force]
+
+parameters:
+  - name: sample_id
+    cli_flag: SAMPLE_ID
+    type: string
+    required: false
+    default: "25E32-L3"
+    description: JAX library set ID.
+    env_var: SAMPLE_ID
+    source: environment
+    category: selection
+
+  - name: sample_stem
+    cli_flag: SAMPLE_STEM
+    type: string
+    required: false
+    default: "25E32-L3_GT25-03394_ACCTCGAGCT-ATCGAACACA_S44"
+    description: FASTQ stem prefix for the selected library.
+    env_var: SAMPLE_STEM
+    source: environment
+    category: selection
+
+  - name: lanes
+    cli_flag: LANES
+    type: string
+    required: false
+    default: "L007,L008"
+    description: Comma-separated lane IDs.
+    env_var: LANES
+    source: environment
+    category: selection
+
+  - name: read_pairs
+    cli_flag: --read-pairs
+    type: int
+    required: false
+    default: 100000
+    description: Total read pairs across lanes for the smoke.
+    category: selection
+
+  - name: raw_dir
+    cli_flag: RAW_DIR
+    type: directory
+    required: false
+    default: /mnt/pikachu/JAX_scRNAseq02/raw
+    path_must_exist: true
+    description: Root containing JAX scRNAseq02 raw FASTQs.
+    env_var: RAW_DIR
+    source: environment
+    category: inputs
+
+  - name: config
+    cli_flag: CONFIG
+    type: file
+    required: false
+    default: /mnt/pikachu/JAX_scRNAseq02/cellranger-logs/config.csv
+    path_must_exist: true
+    description: Cell Ranger multi config with OCM sample definitions.
+    env_var: CONFIG
+    source: environment
+    category: inputs
+
+  - name: star_bin
+    cli_flag: STAR_BIN
+    type: file
+    required: false
+    default: /mnt/pikachu/STAR-suite/core/legacy/source/STAR
+    path_must_exist: true
+    must_be_executable: true
+    description: STAR binary.
+    env_var: STAR_BIN
+    source: environment
+    category: inputs
+
+  - name: genome_dir
+    cli_flag: GENOME_DIR
+    type: directory
+    required: false
+    default: /storage/autoindex_110_44/bulk_index
+    path_must_exist: true
+    description: STAR genomeDir matching MSK/UCSF GEX production.
+    env_var: GENOME_DIR
+    source: environment
+    category: inputs
+
+  - name: solo_cb_whitelist
+    cli_flag: SOLO_CB_WHITELIST
+    type: file
+    required: false
+    default: /storage/scRNAseq_output/whitelists/3M-3pgex-may-2023_TRU.txt
+    path_must_exist: true
+    description: GEM-X 3' v4 OCM TRU whitelist.
+    env_var: SOLO_CB_WHITELIST
+    source: environment
+    category: inputs
+
+  - name: cr_reference
+    cli_flag: CR_REFERENCE
+    type: directory
+    required: false
+    default: /mnt/pikachu/CR-references/refdata-gex-GRCh38-2024-A
+    path_must_exist: false
+    description: Cell Ranger reference path used only if --run-cr is selected.
+    env_var: CR_REFERENCE
+    source: environment
+    category: inputs
+
+  - name: out_root
+    cli_flag: --out-root
+    type: directory
+    required: false
+    default: null
+    description: Output root. Omit for timestamped default.
+    is_output_root: true
+    category: output
+
+  - name: threads
+    cli_flag: --threads
+    type: int
+    required: false
+    default: 16
+    description: STAR and CR local cores.
+    category: star
+
+  - name: star_out_samtype
+    cli_flag: --star-out-samtype
+    type: enum
+    required: false
+    default: "BAM Unsorted"
+    choices: ["BAM Unsorted", "None"]
+    description: STAR BAM output mode for the smoke.
+    category: star
+
+  - name: star_yremove
+    cli_flag: --star-yremove
+    type: enum
+    required: false
+    default: "yes"
+    choices: ["yes", "no"]
+    description: Emit Y/noY BAM and FASTQ sidecars.
+    category: star
+
+  - name: star_bam_cbub
+    cli_flag: --star-bam-cbub
+    type: enum
+    required: false
+    default: "no"
+    choices: ["yes", "no"]
+    description: Emit CB/UB tags in BAM; production OCM split BAMs do not need them.
+    category: star
+
+  - name: star_bam_gxgn
+    cli_flag: --star-bam-gxgn
+    type: enum
+    required: false
+    default: "no"
+    choices: ["yes", "no"]
+    description: Emit GX/GN gene tags in BAM.
+    category: star
+
+  - name: star_solo_features
+    cli_flag: --star-solo-features
+    type: string
+    required: false
+    default: "GeneFull Velocyto"
+    description: STAR solo features requested.
+    category: star
+
+  - name: star_compare_feature
+    cli_flag: --star-compare-feature
+    type: string
+    required: false
+    default: GeneFull
+    description: STAR count feature used for CR comparison.
+    category: star
+
+  - name: prepare
+    cli_flag: --prepare
+    type: bool
+    required: false
+    default: true
+    description: Prepare staged downsample and run scripts.
+    category: stages
+
+  - name: run_star
+    cli_flag: --run-star
+    type: bool
+    required: false
+    default: false
+    description: Execute STAR after preparation.
+    category: stages
+
+  - name: materialize
+    cli_flag: --materialize
+    type: bool
+    required: false
+    default: false
+    description: Materialize STAR comparison feature.
+    category: stages
+
+  - name: compare
+    cli_flag: --compare
+    type: bool
+    required: false
+    default: false
+    description: Compare STAR outputs against existing CR artifacts.
+    category: stages
+
+  - name: run_cr
+    cli_flag: --run-cr
+    type: bool
+    required: false
+    default: false
+    description: Force a fresh Cell Ranger multi run.
+    category: stages
+
+  - name: force
+    cli_flag: --force
+    type: bool
+    required: false
+    default: false
+    description: Recreate staged/scripted outputs.
+    category: stages
+
+constraints:
+  - kind: positive
+    params: [read_pairs, threads]
+    message: Must be a positive integer.
+
+rendering:
+  bool_style: flag_only
+  omit_absent_optionals: true
+  flag_order:
+    - read_pairs
+    - out_root
+    - threads
+    - prepare
+    - run_star
+    - materialize
+    - compare
+    - run_cr
+    - force
+    - star_out_samtype
+    - star_yremove
+    - star_bam_cbub
+    - star_bam_gxgn
+    - star_solo_features
+    - star_compare_feature

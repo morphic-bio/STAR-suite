@@ -122,18 +122,22 @@ Ship discoverable, installable Ubuntu binaries for STAR Suite with low-friction 
   - clean `ubuntu:24.04` container install from the published installer bundle selected `glibc239` and `STAR --version` returned `2.7.11b`
 - This confirms the published release assets, checksums, and installer selection behavior match the intended compatibility model outside the repo build environment
 
-## Next Release Prep (2026-05-12)
+## Production Release Prep (2026-05-22)
 
-- Candidate tag: `v0.94.0`
-- Release notes: `docs/RELEASE_NOTES_v0.94.0.md`
-- Packaging metadata: `debian/changelog` entry `0.94.0-1`
-- Scope added since `v0.93.1`: SLAM PE smoke/production docs and MCP recipes,
-  pinned SLAM DESeq2 container metadata, Launchpad workflow updates, and recent
-  ATAC/Launchpad integration work.
-- Local caveat: release compilation and artifact builds were intentionally not
-  run during this documentation pass because a SLAM PE production job was active
-  on the host. Tag/build from CI or from an idle host after normal clean-build
-  and release smoke gates pass.
+- Candidate tag: `v1.0.0`
+- Release notes: `docs/RELEASE_NOTES_v1.0.0.md`
+- Packaging metadata: `debian/changelog` entry `1.0.0-1`
+- Scope added since `v0.94.0`: native OCM composite-barcode production mode,
+  native per-sample OCM MEX/Velocyto materialization, updated JAX OCM and MSK
+  40KO production recipes, adaptive MT downstream packaging, and the current
+  multiome post-MEX handoff docs.
+- Version note: release artifacts and Debian packages use STAR Suite `1.0.0`;
+  `STAR --version` reports `1.0.0`. Upstream provenance is reported by
+  `STAR --upstream-version` (`2.7.11b`), and genome index compatibility is
+  reported by `STAR --genome-compat-version` (`2.7.4a`).
+- Local caveat: rebuild release binaries only from an idle production checkout
+  or from CI so no running wrapper observes a partially rebuilt
+  `core/legacy/source/STAR`.
 
 ## Distribution Strategy
 
@@ -175,6 +179,8 @@ Notes:
 - The installer bundle is the preferred non-`.deb` installation path.
 - Direct compatibility tarballs are for manual installs and HPC/container edge cases.
 - `v0.*` tags are prereleases for testing. They publish release artifacts and a versioned container tag, but do not move `latest`.
+- `v1.0.0` is the first production release and may move the `latest` container
+  tag when release CI succeeds.
 - Native `build_static_tarball.sh` runs still inherit the host toolchain/glibc baseline.
 - The CI/release path publishes multiple tarballs because Linux may reject a binary built for a newer runtime environment before STAR Suite starts.
 - The installer bundle checks the host environment and selects the highest compatible bundled binary automatically.

@@ -365,7 +365,9 @@ void usage(int usageType)
 {
     cout << "Usage: STAR  [options]... --genomeDir /path/to/genome/index/   --readFilesIn R1.fq R2.fq\n";
     cout << "Spliced Transcripts Alignment to a Reference (c) Alexander Dobin, 2009-2022\n\n";
-    cout << "STAR version=" << STAR_VERSION << "\n";
+    cout << "STAR-suite version=" << STAR_SUITE_VERSION << "\n";
+    cout << "STAR upstream version=" << STAR_UPSTREAM_VERSION << "\n";
+    cout << "STAR genome compatibility version=" << STAR_GENOME_COMPAT_VERSION << "\n";
     cout << "STAR compilation time,server,dir=" << COMPILATION_TIME_PLACE << "\n";
     cout << "For more details see:\n";
     cout << "<https://github.com/alexdobin/STAR>\n";
@@ -421,7 +423,10 @@ int main(int argInN, char *argIn[])
     }
 
     *(P.inOut->logStdOut) << "\t" << P.commandLine << '\n';
-    *(P.inOut->logStdOut) << "\tSTAR version: " << STAR_VERSION << "   compiled: " << COMPILATION_TIME_PLACE << '\n';
+    *(P.inOut->logStdOut) << "\tSTAR-suite version: " << STAR_SUITE_VERSION
+                          << "   STAR upstream: " << STAR_UPSTREAM_VERSION
+                          << "   genome compatibility: " << P.versionGenome
+                          << "   compiled: " << COMPILATION_TIME_PLACE << '\n';
     *(P.inOut->logStdOut) << timeMonthDayTime(g_statsAll.timeStart) << " ..... started STAR run\n"
                           << flush;
 

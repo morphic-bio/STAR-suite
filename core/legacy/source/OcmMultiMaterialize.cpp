@@ -1004,6 +1004,9 @@ static void writeMaterializationSummary(const string& path,
     out << "  \"config_path\": \"" << jsonEscape(configPath) << "\",\n";
     out << "  \"gex_feature_surface\": \"" << jsonEscape(gexFeatureLabel) << "\",\n";
     out << "  \"star_version\": \"" << jsonEscape(STAR_VERSION) << "\",\n";
+    out << "  \"star_suite_version\": \"" << jsonEscape(STAR_SUITE_VERSION) << "\",\n";
+    out << "  \"star_upstream_version\": \"" << jsonEscape(STAR_UPSTREAM_VERSION) << "\",\n";
+    out << "  \"star_genome_compat_version\": \"" << jsonEscape(STAR_GENOME_COMPAT_VERSION) << "\",\n";
     out << "  \"raw_unknown_overhangs\": " << rawUnknown << ",\n";
     out << "  \"filtered_unknown_overhangs\": " << filteredUnknown << ",\n";
     out << "  \"per_tag\": {\n";

@@ -2,6 +2,13 @@
 
 Date: 2026-05-15
 
+Status: production path implemented for STAR Suite v1.0.0. Use
+`--ocmMultiBarcodeMode flex` for new OCM production; `posthoc` is retained for
+historical comparison and rematerialization only. Current production uses the
+split-before-ED path: STAR writes raw GeneFull/Velocyto on the effective
+`CB16+OCM_TAG8` axis with `--soloCellFilter None`, then the native OCM
+materializer applies CR-compatible EmptyDrops per OCM sample.
+
 ## Policy
 
 OCM support is a small extension to the existing STAR-suite scRNA-seq
@@ -11,7 +18,8 @@ Default OCM processing must use the STAR-suite CR-compatible routines:
 
 - STAR-suite `core/legacy/source/STAR`, after a clean rebuild when source
   changed or branches were switched.
-- `--soloCellFilter EmptyDrops_CR`, which uses the libscrna backend by default.
+- split-before-ED OCM materialization, which applies the libscrna
+  `EmptyDrops_CR` backend per OCM sample.
 - `GeneFull` GEX counting for Cell Ranger compatibility.
 - the same multimapper, UMI, barcode, adapter, poly-G, and dynamic-thread flags
   used by the MSK/UCSF CR-compatible scRNA-seq surfaces.
@@ -30,7 +38,8 @@ The OCM-specific work is only:
 2. use the correct GEM-X whitelist family;
 3. promote `CB16` to the effective `CB16+OCM_TAG8` barcode before barcode
    correction and counting;
-4. demultiplex raw and filtered GEX matrices by OCM tag;
+4. demultiplex raw GEX matrices by OCM tag and run per-sample
+   CR-compatible EmptyDrops;
 5. write Cell Ranger-style per-sample outputs and downstream per-sample
    GeneFull/Velocyto mirrors.
 
@@ -128,14 +137,14 @@ core/legacy/source/STAR \
   --soloUMIfiltering MultiGeneUMI_CR \
   --soloUMIdedup 1MM_CR \
   --soloMultiMappers Unique \
-  --soloCellFilter EmptyDrops_CR \
+  --soloCellFilter None \
   --soloCbUbRequireTogether no \
   --soloStrand Forward \
   --soloFeatures GeneFull Velocyto \
   --soloCrGexFeature genefull \
   --soloCrMultimapRescue yes \
   --soloInlineHashMode no \
-  --ocmMultiEnable yes \
+  --ocmMultiEnable auto \
   --ocmMultiConfig /mnt/pikachu/JAX_scRNAseq02/cellranger-logs/config.csv \
   --ocmMultiBarcodeMode flex \
   --ocmMultiOutputCompat cellranger
@@ -146,12 +155,16 @@ Notes:
 - If using a source checkout, clean rebuild before crash or parity debugging.
 - Use `GeneFull Velocyto` for production OCM runs so downstream h5ad generation
   receives both expression counts and raw/filtered Velocyto layers.
+- Use `--soloCellFilter None` for split-before-ED production OCM runs. The OCM
+  materializer runs the same CR-compatible EmptyDrops implementation separately
+  for each OCM biological sample after raw per-sample MEX streaming.
 - Use `STAR_VELOCYTO_LOW_MEM=1` for OCM production. This selects the Velocyto
   range-spill path and avoids holding all per-CB UMI maps in RAM at once.
 - Use `--soloInlineHashMode no` on the production BAM/Y-removal surface. The
   inline hash no-BAM surface is useful for benchmarks, but it is not the OCM
   production path.
-- `--ocmMultiEnable yes` materializes OCM outputs natively after Solo completes.
+- `--ocmMultiEnable auto` or `yes` materializes OCM outputs natively after Solo
+  completes.
   `--ocmMultiConfig` may be omitted only when `--pfMultiConfig` points at the
   same Cell Ranger multi config with `[samples]`.
 - `--ocmMultiBarcodeMode flex` makes the effective correction/counting barcode
@@ -177,11 +190,12 @@ Solo.out/GeneFull/filtered/
 
 With `--ocmMultiBarcodeMode flex`, STAR first derives the OCM tag from bases
 8-9 of the raw `CB16`, appends the fixed OCM TAG8 suffix, and corrects/counts
-on that effective `CB16+TAG8` barcode. `--ocmMultiEnable yes` then splits raw
-and filtered matrices into per-sample outputs using the corrected effective
-barcode. Strip the TAG8 and any `-1` suffix only for Cell Ranger-compatible
-output labels and classification; preserve the STAR-suite matrix column order
-while streaming the split.
+on that effective `CB16+TAG8` barcode. In split-before-ED mode the native OCM
+materializer streams raw per-sample matrices, runs CR-compatible EmptyDrops per
+sample, and then writes filtered matrices from those per-sample calls. Strip the
+TAG8 and any `-1` suffix only for Cell Ranger-compatible output labels and
+classification; preserve the STAR-suite matrix column order while streaming the
+split.
 
 OCM assignment is based on bases 8-9 of the 16 bp cell barcode and maps to the
 following internal TAG8 suffixes:
@@ -232,8 +246,9 @@ OCM production runs.
 2. Dry-run STAR command:
    - confirm `/storage/autoindex_110_44/bulk_index`;
    - confirm `/storage/scRNAseq_output/whitelists/3M-3pgex-may-2023_TRU.txt`;
-   - confirm `EmptyDrops_CR`, `GeneFull`, `soloCrGexFeature genefull`,
-     `soloCrMultimapRescue yes`, and no `CellRanger2.2`.
+   - confirm `--soloCellFilter None`, native OCM per-sample EmptyDrops,
+     `GeneFull`, `soloCrGexFeature genefull`, `soloCrMultimapRescue yes`, and
+     no `CellRanger2.2`.
 
 3. Full FASTQ-to-MEX run:
    - write to a fresh external output directory;
@@ -241,9 +256,11 @@ OCM production runs.
      final logs as completion signals.
 
 4. OCM split:
-   - split raw and filtered matrices by OCM overhang through
-     `--ocmMultiEnable yes`;
-   - write `cells_per_tag.json` from the filtered split.
+   - split raw matrices by OCM overhang through `--ocmMultiEnable auto` or
+     `yes`;
+   - run per-sample CR-compatible EmptyDrops and write filtered matrices from
+     those sample-specific calls;
+   - write `cells_per_tag.json` from the per-sample filtered calls.
    - verify `raw_velocyto_feature_bc_matrix` and
      `filtered_velocyto_feature_bc_matrix` exist for each sample.
 

@@ -20,7 +20,13 @@ Verify:
 core/legacy/source/STAR --version
 ```
 
-Expected: `2.7.11b`
+Expected: `1.0.0`
+
+For upstream STAR provenance, run:
+
+```bash
+core/legacy/source/STAR --upstream-version
+```
 
 ---
 
