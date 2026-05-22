@@ -1,0 +1,344 @@
+# Private recipe: MSK 40KO GEX/PolyIII/LARRY production wrapper.
+id: msk_40ko_production
+title: MSK 40KO Production Workflow
+summary: Manifest-driven MSK 40KO CR-compatible STAR production wrapper with optional remote downstream and Globus BAM transfer.
+kind: shell_workflow
+entry_script: scripts/run_msk_40ko_pipeline_from_manifest.py
+supported_modes: [local, dry-run-capable]
+caveats:
+  - "Default rendering is safe: --dry-run is enabled."
+  - "Whitelist preflight should pass first: scripts/run_msk_40ko_fastq_preflight.sh."
+  - "No Y-removal is enabled for MSK 40KO, matching the MSK 30KO policy."
+  - "Use --downstream-async for production so remote CellBender/downstream does not block the next local sample."
+default_output_layout: /mnt/pikachu/MSK_40KO_processed/msk40ko_prod_<timestamp>/
+
+scripts:
+  - role: entry
+    path: scripts/run_msk_40ko_pipeline_from_manifest.py
+    description: Stages per-sample FASTQs, writes pf_multi_config.csv, runs STAR, optionally submits remote downstream and Globus BAM transfer.
+    language: python
+  - role: preflight
+    path: scripts/run_msk_40ko_fastq_preflight.sh
+    description: Validates manifest FASTQs against expected February-2018 TRU/NXT whitelist families.
+    language: bash
+  - role: downstream
+    path: scripts/run_remote_scrna_downstream_rsync.sh
+    description: Stages MEX-level outputs to the GPU host and runs adaptive QC plus optional CellBender.
+    language: bash
+
+stages:
+  - name: preflight
+    title: FASTQ Preflight
+    script: scripts/run_msk_40ko_fastq_preflight.sh
+    description: Confirms GEX/LARRY are February-2018 TRU and PolyIII/gRNA is February-2018 NXT.
+  - name: star
+    title: STAR CR-Compatible Run
+    script: scripts/run_msk_40ko_pipeline_from_manifest.py
+    description: Runs GeneFull+Velocyto, CR-compatible EmptyDrops and feature calling.
+  - name: downstream
+    title: Remote Downstream
+    script: scripts/run_remote_scrna_downstream_rsync.sh
+    description: Runs h5ad construction, adaptive MT/n_genes QC, and optional CellBender on the GPU host.
+  - name: globus
+    title: Globus BAM Transfer
+    script: scripts/run_msk_40ko_pipeline_from_manifest.py
+    description: Transfers generated BAMs and optionally deletes local copies after successful Globus completion.
+
+parameter_groups:
+  - name: selection
+    title: Sample Selection
+    parameters: [samples, exclude_samples]
+  - name: inputs
+    title: Input Paths
+    parameters: [manifest, star_bin, genome_dir]
+  - name: output
+    title: Output
+    parameters: [out_root]
+  - name: star
+    title: STAR And CRISPR
+    parameters: [threads, out_samtype, cr_min_umi, low_mem]
+  - name: downstream
+    title: Remote Downstream
+    parameters: [run_downstream, downstream_async, downstream_max_active, remote_host, remote_root, run_cellbender, cellbender_gpu, cellbender_cpu_cores]
+  - name: transfer
+    title: Globus Transfer
+    parameters: [globus_src_endpoint, globus_dst_endpoint, globus_dst_root, bam_archive_root, globus_poll_seconds, globus_wait, delete_local_bam_after_transfer]
+  - name: execution
+    title: Execution Mode
+    parameters: [dry_run, skip_existing, force_stage]
+
+parameters:
+  - name: samples
+    cli_flag: --samples
+    type: string_list
+    required: false
+    default: null
+    description: Comma-separated provider_group values, e.g. 40_KO_ES or 40_KO_DE.
+    category: selection
+
+  - name: exclude_samples
+    cli_flag: --exclude-samples
+    type: string_list
+    required: false
+    default: null
+    description: Comma-separated provider_group values to skip.
+    category: selection
+
+  - name: manifest
+    cli_flag: --manifest
+    type: file
+    required: false
+    default: /mnt/pikachu/STAR-suite/docs/MSK_40KO_FASTQ_MANIFEST.tsv
+    path_must_exist: true
+    description: MSK 40KO FASTQ/library manifest.
+    category: inputs
+
+  - name: star_bin
+    cli_flag: --star-bin
+    type: file
+    required: false
+    default: /mnt/pikachu/STAR-suite/core/legacy/source/STAR
+    path_must_exist: true
+    must_be_executable: true
+    description: STAR binary.
+    category: inputs
+
+  - name: genome_dir
+    cli_flag: --genome-dir
+    type: directory
+    required: false
+    default: /storage/autoindex_110_44/bulk_index
+    path_must_exist: true
+    description: STAR genomeDir used for MSK/UCSF GEX production.
+    category: inputs
+
+  - name: out_root
+    cli_flag: --out-root
+    type: directory
+    required: false
+    default: null
+    path_must_exist: false
+    is_output_root: true
+    description: Output root. Omit for script timestamp default.
+    category: output
+
+  - name: threads
+    cli_flag: --threads
+    type: int
+    required: false
+    default: 32
+    description: STAR thread count.
+    category: star
+
+  - name: out_samtype
+    cli_flag: --out-samtype
+    type: enum
+    required: false
+    default: "BAM Unsorted"
+    choices: ["BAM Unsorted", "None"]
+    description: STAR --outSAMtype value.
+    category: star
+
+  - name: cr_min_umi
+    cli_flag: --cr-min-umi
+    type: int
+    required: false
+    default: 2
+    description: Minimum guide UMI threshold for PolyIII CRISPR calling.
+    category: star
+
+  - name: low_mem
+    cli_flag: --low-mem
+    type: bool
+    required: false
+    default: true
+    description: Enable STAR_VELOCYTO_LOW_MEM and STAR_SOLO_BINARY_SPOOL.
+    category: star
+
+  - name: run_downstream
+    cli_flag: --run-downstream
+    type: bool
+    required: false
+    default: false
+    description: Submit downstream h5ad/CellBender workflow after STAR.
+    category: downstream
+
+  - name: downstream_async
+    cli_flag: --downstream-async
+    type: bool
+    required: false
+    default: true
+    description: Launch remote downstream in the background between local samples.
+    category: downstream
+
+  - name: downstream_max_active
+    cli_flag: --downstream-max-active
+    type: int
+    required: false
+    default: 4
+    description: Maximum concurrent async remote downstream jobs.
+    category: downstream
+
+  - name: remote_host
+    cli_flag: --remote-host
+    type: string
+    required: false
+    default: "10.159.4.53"
+    description: Remote GPU host for downstream processing.
+    category: downstream
+
+  - name: remote_root
+    cli_flag: --remote-root
+    type: directory
+    required: false
+    default: /tmp/msk40ko_cellbender
+    path_must_exist: false
+    description: Remote staging root.
+    category: downstream
+
+  - name: run_cellbender
+    cli_flag: --run-cellbender
+    type: bool
+    required: false
+    default: false
+    description: Run CellBender in downstream workflow.
+    category: downstream
+
+  - name: cellbender_gpu
+    cli_flag: --cellbender-gpu
+    type: bool
+    required: false
+    default: false
+    description: Use GPU CellBender on the remote host.
+    category: downstream
+
+  - name: cellbender_cpu_cores
+    cli_flag: --cellbender-cpu-cores
+    type: int
+    required: false
+    default: 8
+    description: CPU cores requested by CellBender/downstream.
+    category: downstream
+
+  - name: globus_src_endpoint
+    cli_flag: --globus-src-endpoint
+    type: string
+    required: false
+    default: ""
+    description: Source Globus collection UUID.
+    category: transfer
+
+  - name: globus_dst_endpoint
+    cli_flag: --globus-dst-endpoint
+    type: string
+    required: false
+    default: ""
+    description: Destination Globus collection UUID.
+    category: transfer
+
+  - name: globus_dst_root
+    cli_flag: --globus-dst-root
+    type: string
+    required: false
+    default: ""
+    description: Destination root for uploaded BAMs.
+    category: transfer
+
+  - name: bam_archive_root
+    cli_flag: --bam-archive-root
+    type: directory
+    required: false
+    default: null
+    path_must_exist: false
+    description: Local archive root used as Globus source for BAMs.
+    category: transfer
+
+  - name: globus_poll_seconds
+    cli_flag: --globus-poll-seconds
+    type: int
+    required: false
+    default: 60
+    description: Globus wait poll interval.
+    category: transfer
+
+  - name: globus_wait
+    cli_flag: --globus-wait
+    type: bool
+    required: false
+    default: true
+    description: Wait for BAM Globus task completion.
+    category: transfer
+
+  - name: delete_local_bam_after_transfer
+    cli_flag: --delete-local-bam-after-transfer
+    type: bool
+    required: false
+    default: false
+    description: Delete generated local BAM copies only after successful Globus transfer.
+    category: transfer
+
+  - name: dry_run
+    cli_flag: --dry-run
+    type: bool
+    required: false
+    default: true
+    description: Stage manifests and commands only.
+    category: execution
+
+  - name: skip_existing
+    cli_flag: --skip-existing
+    type: bool
+    required: false
+    default: false
+    description: Skip samples with RUN_COMPLETE.ok.
+    category: execution
+
+  - name: force_stage
+    cli_flag: --force-stage
+    type: bool
+    required: false
+    default: false
+    description: Replace existing staged FASTQ symlinks if they differ.
+    category: execution
+
+constraints:
+  - kind: positive
+    params: [threads, cr_min_umi, downstream_max_active, cellbender_cpu_cores, globus_poll_seconds]
+    message: Must be a positive integer.
+  - kind: group_required
+    params: [globus_src_endpoint, globus_dst_endpoint, globus_dst_root]
+    message: If any Globus transfer parameter is provided, all three endpoint/root parameters should be present.
+
+rendering:
+  bool_style: flag_only
+  omit_absent_optionals: true
+  csv_style: quoted
+  flag_order:
+    - manifest
+    - out_root
+    - samples
+    - exclude_samples
+    - threads
+    - star_bin
+    - genome_dir
+    - out_samtype
+    - cr_min_umi
+    - low_mem
+    - run_downstream
+    - downstream_async
+    - downstream_max_active
+    - remote_host
+    - remote_root
+    - run_cellbender
+    - cellbender_gpu
+    - cellbender_cpu_cores
+    - globus_src_endpoint
+    - globus_dst_endpoint
+    - globus_dst_root
+    - bam_archive_root
+    - globus_poll_seconds
+    - globus_wait
+    - delete_local_bam_after_transfer
+    - dry_run
+    - skip_existing
+    - force_stage

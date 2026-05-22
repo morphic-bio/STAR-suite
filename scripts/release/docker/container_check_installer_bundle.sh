@@ -4,7 +4,7 @@ set -euo pipefail
 
 BUNDLE=""
 EXPECTED_LABEL=""
-EXPECTED_VERSION="2.7.11b"
+EXPECTED_VERSION="1.0.0"
 MANIFEST_OUT=""
 
 usage() {
@@ -91,7 +91,7 @@ prefix="$workdir/prefix"
 "$workdir/unpack/install.sh" --prefix "$prefix" --force
 version_output="$($prefix/bin/STAR --version)"
 if [[ "$version_output" != "$EXPECTED_VERSION" ]]; then
-  echo "ERROR: expected STAR version $EXPECTED_VERSION, got $version_output" >&2
+  echo "ERROR: expected STAR-suite version $EXPECTED_VERSION, got $version_output" >&2
   exit 1
 fi
 
@@ -100,7 +100,7 @@ Container glibc: $(detect_glibc)
 Selected label: ${selected_label}
 Selected baseline: ${selected_baseline}
 Selected description: ${selected_description}
-STAR version: ${version_output}
+STAR-suite version: ${version_output}
 "
 
 printf '%s' "$manifest"

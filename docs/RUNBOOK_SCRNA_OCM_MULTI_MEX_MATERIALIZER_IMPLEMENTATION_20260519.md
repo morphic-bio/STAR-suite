@@ -7,6 +7,8 @@ Status: implemented in STAR-suite (`OcmMultiMaterialize`, `OcmMultiConfig`,
 `tests/test_ocm_{config_parser,barcode_classifier,mex_materializer_tiny,sample_id_validation,velocyto_barcode_shuffle}.sh`.
 Run the 2M oracle smoke with `scripts/run_jax_scrnaseq02_ocm_oracle_smoke.sh
 --run-star --validate` (rebuild STAR first) to confirm validator `PASS`.
+Production OCM runs should use `--ocmMultiBarcodeMode flex`; `posthoc` is kept
+for historical materialization comparisons only.
 
 ## Goal
 
@@ -14,9 +16,10 @@ Add a native STAR-suite OCM materializer that takes a completed OCM GEX run and
 writes Cell Ranger multi-compatible outputs with one raw and filtered MEX per
 OCM biological sample.
 
-This is not a new mapper or a new cell caller. Mapping, CR-compatible UMI
-collapse, `EmptyDrops_CR`, Y-removal, and Velocyto counting remain on the
-existing STAR-suite path. The new work is the final materialization step:
+This is not a new mapper. Mapping, CR-compatible UMI collapse, Y-removal, and
+Velocyto counting remain on the existing STAR-suite path. In the current OCM
+production mode, CR-compatible EmptyDrops is applied by the native OCM
+materializer per biological sample after the raw OCM split:
 
 ```text
 pool-level GeneFull raw/filtered MEX
@@ -97,6 +100,7 @@ For JAX scRNAseq02, production/smoke commands should keep:
 
 ```text
 --soloFeatures GeneFull Velocyto
+--soloCellFilter None
 --soloInlineCBCorrection yes
 --soloInlineHashMode no
 --outSAMtype BAM Unsorted
@@ -261,7 +265,13 @@ For union samples, subset by the union of all declared OCM IDs.
 
 ## Materialization Algorithm
 
-1. Read raw and filtered GeneFull MEX.
+In the historical/posthoc path, the pool run already has raw and filtered MEX.
+In the current split-before-ED production path, STAR writes raw MEX only and the
+OCM materializer runs per-sample CR-compatible EmptyDrops after streaming raw
+per-sample matrices.
+
+1. Read raw GeneFull MEX, and read filtered GeneFull MEX only if the pool
+   filtered tree exists.
 2. Validate raw and filtered feature axes match exactly.
 3. Build `tag -> raw column indices` from raw barcodes.
 4. Build `tag -> filtered column indices` from filtered barcodes.
@@ -281,7 +291,8 @@ For union samples, subset by the union of all declared OCM IDs.
 7. For each configured sample:
    - resolve its tag set, including pipe unions;
    - subset raw GeneFull columns by raw tag indices;
-   - subset filtered GeneFull columns by filtered tag indices;
+   - subset filtered GeneFull columns by filtered tag indices, or run
+     per-sample EmptyDrops from the raw per-sample MEX in split-before-ED mode;
    - write per-sample raw and filtered MEX;
    - write `sample_filtered_barcodes.csv` as `GRCh38,<barcode>` rows.
 8. If Velocyto is present:
@@ -398,7 +409,7 @@ can be run later with `--full-fastqs` if deeper confidence is needed.
 
 ## Production Gate
 
-Do not start full JAX scRNAseq02 production until:
+Full JAX scRNAseq02 production is allowed only after:
 
 1. Tiny materializer tests pass.
 2. The Velocyto barcode-order shuffle and sample-id validation tests pass.
@@ -409,3 +420,10 @@ Do not start full JAX scRNAseq02 production until:
    output location.
 7. The runbook command in `docs/RUNBOOK_JAX_SCRNASEQ02_OCM_20260518.md`
    matches the implemented flags.
+
+For production, keep the native writer on the critical path. Do not route new
+OCM runs through Python-only materialization unless debugging requires a
+side-by-side comparison surface. The native path should write per-sample
+GeneFull and Velocyto mirrors directly under `samples/<sample_id>/run/outs/`
+so the existing downstream h5ad/CellBender wrapper can treat every OCM
+biological sample like a normal single-cell sample.

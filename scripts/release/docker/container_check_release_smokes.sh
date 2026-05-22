@@ -6,7 +6,7 @@ MODE=""
 TARBALL=""
 BUNDLE=""
 EXPECTED_LABEL=""
-EXPECTED_VERSION="2.7.11b"
+EXPECTED_VERSION="1.0.0"
 REPO_ROOT=""
 PROFILE="core"
 
@@ -17,7 +17,7 @@ Usage:
   $0 --mode bundle --bundle <path> --expected-label <label> --repo-root <path> [options]
 
 Options:
-  --expected-version VER   STAR version to check (default: 2.7.11b)
+  --expected-version VER   STAR-suite version to check (default: 1.0.0)
   --profile PROFILE        Smoke profile to run (default: core)
 
 Profiles:
@@ -78,7 +78,7 @@ esac
 STAR_BIN="${prefix}/bin/STAR"
 [[ -x "${STAR_BIN}" ]] || { echo "ERROR: installed STAR missing: ${STAR_BIN}" >&2; exit 1; }
 [[ "$("${STAR_BIN}" --version)" == "${EXPECTED_VERSION}" ]] || {
-  echo "ERROR: installed STAR version mismatch" >&2
+  echo "ERROR: installed STAR-suite version mismatch" >&2
   exit 1
 }
 

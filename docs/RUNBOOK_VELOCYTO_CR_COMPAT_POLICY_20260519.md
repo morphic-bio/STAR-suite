@@ -2,7 +2,22 @@
 
 Date: 2026-05-19
 
-Status: design runbook for implementation. This is not implemented yet.
+Status: design runbook for the future count-preserving `CRCompat` policy. The
+native Velocyto MEX writer for the current legacy STAR Velocyto policy is
+implemented and is the production packaging path today; `CRCompat` remains a
+planned compatibility policy until the tests below pass.
+
+Current production note:
+
+- New UCSF/MSK/JAX production runs should not call `prepare_velocyto_mex.py`.
+  STAR writes `outs/raw_velocyto_feature_bc_matrix` and
+  `outs/filtered_velocyto_feature_bc_matrix` internally through
+  `VelocytoMexWriter`.
+- OCM production splits per-sample Velocyto MEX natively and maps GeneFull
+  columns to Velocyto columns by normalized barcode key, not by position.
+- The current delivered velocity layers follow legacy STAR Velocyto semantics.
+  They are not guaranteed to sum exactly to `GeneFull` until `CRCompat` is
+  implemented and selected explicitly.
 
 ## Goal
 

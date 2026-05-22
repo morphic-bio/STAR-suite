@@ -2,6 +2,12 @@
 
 STAR Suite updates the original STAR aligner by integrating four modules — STAR-perturb, STAR-Flex, STAR-SLAM, and TranscriptVB — to provide complete internal C/C++ pipelines for bulk RNA-seq, scRNA-seq, Perturb-seq, 10x Flex, and SLAM-seq. The integration results in **substantial speedups** (**1.7–2.4x for bulk RNA-seq**, **1.47–1.60x for scRNA-seq GEX-only Solo vs CellGENI-style STARsolo**, **3.7–6.2x for Perturb-seq**, **2.5–28.8x for Flex**) and a simplified toolchain that can be **installed through pre-compiled binaries** for researchers and agents. **No new external dependencies** are required; the suite is built entirely with the existing STAR toolchain and vendored components. **This is a drop-in replacement for the STAR aligner.**
 
+Current production release: **STAR Suite v1.0.0**. The suite release tag and
+packaging version are `v1.0.0` / `1.0.0-1`; `STAR --version` reports `1.0.0`.
+Use `STAR --upstream-version` for the underlying upstream STAR base
+(`2.7.11b`) and `STAR --genome-compat-version` for the genome index
+compatibility string (`2.7.4a`).
+
 STAR Suite supports partial compilation: build only the module/tool targets you need instead of building the full suite every time.
 
 Agent quickstart: see `AGENTS.md` for repo-specific guardrails, tests, and recent changes.
@@ -21,6 +27,16 @@ Agent quickstart: see `AGENTS.md` for repo-specific guardrails, tests, and recen
 - **EmptyDrops_CR Integration**: CR-compatible EmptyDrops path (including libscrna-backed behavior in scRNA/perturb flows).
 - **Solo Features**: `sF` BAM tag for feature type, `--soloCBtype String` for arbitrary barcode strings, `--soloCellReadStats Standard` for improved cell filtering.
 - **CR-compat GEX** (`--soloCrGexFeature auto|gene|genefull`): Controls which GEX source is merged in CR-compat mode.
+- **Native Velocyto MEX Packaging**: Current production binaries write raw and
+  filtered Velocyto MEX under `outs/` internally. `prepare_velocyto_mex.py` is a
+  legacy repair/backfill helper for old STAR outputs, not the normal production
+  path.
+- **OCM Composite Barcode Mode** (`--ocmMultiEnable yes`,
+  `--ocmMultiBarcodeMode flex`): 10x OCM runs can promote the barcode to an
+  effective `CB16+OCM_TAG8` before correction, UMI collapse, and Velocyto,
+  run per-sample CR-compatible EmptyDrops after the OCM split, then emit Cell
+  Ranger multi-compatible `outs/multi`,
+  `outs/per_sample_outs`, and per-sample downstream mirrors.
 - **CB/UB Tag Pairing** (`--soloCbUbRequireTogether yes|no`): Enforce CB/UB tag pairing for tag injection (default `yes`).
 
 ## Folder Structure
@@ -48,6 +64,10 @@ mcp_server/              # MCP server for scripted discovery/preflight/run workf
   Build: `make core` (binary at `core/legacy/source/STAR`).
 - **STAR-perturb** (`core/legacy/` + `core/features/process_features/`): CR-compatible perturb-seq path with integrated feature extraction/calling (`process_features` + `call_features`) and `crispr_analysis/` outputs in CR-compat mode.
   Primary run path: `STAR --pfMultiConfig ... --defaultCrCompat yes` (see STAR-perturb section below).
+- **STAR-OCM scRNA-seq** (`core/legacy/`): GEM-X OCM support on the CR-compatible
+  GEX path. Production uses `GeneFull Velocyto`, per-sample `EmptyDrops_CR`
+  after OCM split, native `CB16+OCM_TAG8` effective barcodes, native per-sample
+  MEX/Velocyto materialization, and optional Y/noY side outputs.
 - **STAR-Flex** (`flex/`): FlexFilter pipeline and Flex-specific integrations.
   Build tools: `make flex` or `make flex-tools`.
 - **STAR-SLAM** (`slam/`): SLAM-seq quantification, SNP masking, trimming/QC.
@@ -328,6 +348,36 @@ Standalone tool (`star_feature_call`):
 - `--call-only --mex-dir`: call_features-only pass on existing MEX.
 - `--emptydrops-use-fdr`, `--min-umi`, `--ratio-test`: calling controls.
 
+### OCM scRNA-seq
+
+See [docs/RUNBOOK_SCRNA_OCM_CR_COMPAT.md](docs/RUNBOOK_SCRNA_OCM_CR_COMPAT.md),
+[docs/RUNBOOK_SCRNA_OCM_MULTI_MEX_MATERIALIZER_IMPLEMENTATION_20260519.md](docs/RUNBOOK_SCRNA_OCM_MULTI_MEX_MATERIALIZER_IMPLEMENTATION_20260519.md),
+and [docs/RUNBOOK_JAX_SCRNASEQ02_OCM_20260518.md](docs/RUNBOOK_JAX_SCRNASEQ02_OCM_20260518.md).
+
+OCM is treated as a CR-compatible GEX run with an effective sample-aware cell
+barcode, not as a guide-feature library. In production, STAR derives an OCM tag
+from bases 8-9 of the raw 16 bp barcode, appends the internal TAG8 suffix before
+barcode correction/counting, runs per-sample CR-compatible EmptyDrops after the
+OCM split, and later strips that suffix from Cell Ranger-compatible output
+labels.
+
+Key flags:
+- `--ocmMultiEnable yes`: emit OCM multi-compatible outputs.
+- `--ocmMultiConfig <config.csv>`: Cell Ranger multi-style config with
+  `[samples]` and `ocm_barcode_ids`.
+- `--ocmMultiBarcodeMode flex`: production mode; count on `CB16+OCM_TAG8`.
+- `--ocmMultiOutputCompat cellranger`: writes `outs/multi`,
+  `outs/per_sample_outs`, and downstream `samples/<sample>/run/outs` mirrors.
+- `--soloFeatures GeneFull Velocyto`: expression and velocity surface used by
+  the downstream h5ad/CellBender path.
+- `--soloCellFilter None`: current split-before-ED OCM production mode; the
+  native OCM materializer applies CR-compatible EmptyDrops separately per OCM
+  sample.
+
+OCM production should also use the dataset-specific whitelist family, the
+MSK/UCSF GRCh38 2024-A STAR reference, and Y-removal for KOLF2-derived JAX
+samples.
+
 ### QC Outputs
 
 - **SLAM QC** (`--slamQcReport <prefix>`): Interactive HTML report (`.html`) and JSON metrics (`.json`) for T->C conversion rates, variance analysis, and trimming overlays.
@@ -464,6 +514,36 @@ core/legacy/source/STAR \
   --crAssignSearchThreads 1 \
   --defaultCrCompat yes \
   --outFileNamePrefix /path/to/outs/
+```
+
+**OCM scRNA-seq (native composite barcode mode):**
+
+```bash
+core/legacy/source/STAR \
+  --runMode alignReads \
+  --runThreadN 16 \
+  --genomeDir /storage/autoindex_110_44/bulk_index \
+  --readFilesIn "${R2_FILES}" "${R1_FILES}" \
+  --readFilesCommand zcat \
+  --outFileNamePrefix /path/to/library/run/ \
+  --outSAMtype BAM Unsorted \
+  --emitNoYBAM yes \
+  --emitYNoYFastq yes \
+  --clipAdapterType CellRanger4 \
+  --clip3pPolyG yes \
+  --soloType CB_UMI_Simple \
+  --soloCBstart 1 --soloCBlen 16 \
+  --soloUMIstart 17 --soloUMIlen 12 \
+  --soloCBwhitelist /storage/scRNAseq_output/whitelists/3M-3pgex-may-2023_TRU.txt \
+  --soloInlineCBCorrection yes \
+  --soloCellFilter None \
+  --soloFeatures GeneFull Velocyto \
+  --soloCrGexFeature genefull \
+  --soloCrMultimapRescue yes \
+  --ocmMultiEnable auto \
+  --ocmMultiConfig /path/to/cellranger_multi_config.csv \
+  --ocmMultiBarcodeMode flex \
+  --ocmMultiOutputCompat cellranger
 ```
 
 **STAR-perturb (standalone feature pipeline):**
@@ -612,6 +692,9 @@ Helpful follow-up guides:
 - SLAM compatibility: [slam/docs/SLAM_COMPATIBILITY_MODE.md](slam/docs/SLAM_COMPATIBILITY_MODE.md)
 - SLAM methodology: [slam/docs/SLAM_seq.md](slam/docs/SLAM_seq.md)
 - STAR-perturb feature docs: [docs/feature_barcodes.md](docs/feature_barcodes.md)
+- OCM scRNA-seq runbook: [docs/RUNBOOK_SCRNA_OCM_CR_COMPAT.md](docs/RUNBOOK_SCRNA_OCM_CR_COMPAT.md)
+- Velocyto CR-compat policy runbook: [docs/RUNBOOK_VELOCYTO_CR_COMPAT_POLICY_20260519.md](docs/RUNBOOK_VELOCYTO_CR_COMPAT_POLICY_20260519.md)
+- STAR Suite binary distribution: [docs/Star-binary-distribution.md](docs/Star-binary-distribution.md)
 - STAR-perturb A375 parity report: [tests/crispr_feature_calling_comparison_report.md](tests/crispr_feature_calling_comparison_report.md)
 - Cell Ranger multi smoke tool: [docs/cr_multi.md](docs/cr_multi.md)
 - Docker validation: [docs/docker_validation.md](docs/docker_validation.md)

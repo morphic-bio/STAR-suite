@@ -81,10 +81,14 @@ Also keep the UCSF/MSK expression surface:
 
 ```text
 --soloFeatures GeneFull Velocyto
---soloCellFilter EmptyDrops_CR
+--soloCellFilter None
 --soloCrGexFeature genefull
 --soloCrMultimapRescue yes
 ```
+
+The OCM production route is split-before-ED. STAR counts on the effective
+`CB16+OCM_TAG8` barcode axis and the native OCM materializer then runs the
+CR-compatible EmptyDrops implementation separately per OCM biological sample.
 
 ## Preferred Boundary
 
@@ -97,7 +101,9 @@ Local work:
 2. Per-library STAR GeneFull/Velocyto run with Y-removal.
 3. Velocyto MEX materialization.
 4. STAR core OCM multi-compatibility writer materializes raw/filtered GeneFull
-   and raw/filtered Velocyto matrices into per-sample run directories.
+   and raw/filtered Velocyto matrices into per-sample run directories,
+   including per-sample CR-compatible EmptyDrops when no pool filtered MEX is
+   present.
 5. Globus transfer of generated large files, followed by local cleanup after
    Globus success.
 
@@ -157,14 +163,14 @@ CONFIG_CSV=/path/to/cellranger_multi_config.csv
   --soloUMIfiltering MultiGeneUMI_CR \
   --soloUMIdedup 1MM_CR \
   --soloMultiMappers Unique \
-  --soloCellFilter EmptyDrops_CR \
+  --soloCellFilter None \
   --soloCbUbRequireTogether no \
   --soloStrand Forward \
   --soloFeatures GeneFull Velocyto \
   --soloCrGexFeature genefull \
   --soloCrMultimapRescue yes \
   --soloInlineHashMode no \
-  --ocmMultiEnable yes \
+  --ocmMultiEnable auto \
   --ocmMultiConfig "${CONFIG_CSV}" \
   --ocmMultiBarcodeMode flex \
   --ocmMultiOutputCompat cellranger
@@ -242,7 +248,7 @@ tracked in
 
 Do not rebuild STAR while another production run is using the binary. The smoke
 harness uses an existing binary and is safe to prepare while production mapping
-continues:
+or downstream handoff continues:
 
 ```bash
 scripts/run_jax_scrnaseq02_ocm_oracle_smoke.sh \
@@ -252,8 +258,8 @@ scripts/run_jax_scrnaseq02_ocm_oracle_smoke.sh \
 By default this only stages a 2,000,000 read-pair downsample of the `25E32-L3`
 oracle library and writes `RUN_STAR.sh`. It does not launch STAR.
 
-After the current production mapping run is done, run the smoke with a rebuilt
-STAR binary that includes the native OCM materializer:
+When the production STAR binary is safe to update, run the smoke with a cleanly
+rebuilt STAR binary that includes the native OCM materializer:
 
 ```bash
 scripts/run_jax_scrnaseq02_ocm_oracle_smoke.sh \
@@ -266,7 +272,7 @@ The smoke harness now passes these STAR flags and Velocyto low-memory
 environment defaults:
 
 ```text
---ocmMultiEnable yes
+--ocmMultiEnable auto
 --ocmMultiConfig /mnt/pikachu/JAX_scRNAseq02/cellranger-logs/config.csv
 --ocmMultiBarcodeMode flex
 STAR_VELOCYTO_LOW_MEM=1
@@ -303,14 +309,14 @@ The smoke validator checks:
 
 The validator intentionally does not compare matrix values against the Cell
 Ranger MEX because the oracle is `Gene` while the planned STAR output is
-`GeneFull`. For the same reason, full-depth STAR `GeneFull`/`EmptyDrops_CR`
-outputs may call additional cells relative to the exonic Cell Ranger oracle.
-The default pass/fail check is therefore oracle recall, not equality of tag
-proportions. Use `--strict-tag-proportion-delta` only for a same-feature-surface
-comparison where extra STAR-called cells should be treated as a failure. If
-exact Cell Ranger count parity is needed later, run a separate STAR comparison
-surface with `--soloFeatures Gene` and keep that out of the production
-downstream path.
+`GeneFull`. For the same reason, full-depth STAR `GeneFull` outputs with native
+per-sample OCM EmptyDrops may call additional cells relative to the exonic Cell
+Ranger oracle. The default pass/fail check is therefore oracle recall, not
+equality of tag proportions. Use `--strict-tag-proportion-delta` only for a
+same-feature-surface comparison where extra STAR-called cells should be treated
+as a failure. If exact Cell Ranger count parity is needed later, run a separate
+STAR comparison surface with `--soloFeatures Gene` and keep that out of the
+production downstream path.
 
 If the 2M smoke passes and we still want a deeper compatibility check, reuse
 the same harness for full-depth `25E32-L3` structure/cell-assignment validation
@@ -387,17 +393,19 @@ Globus batch manifests, task IDs, and cleanup markers
 
 ## Validation Gates
 
-Before production:
+Before a new production launch:
 
 1. Generate a manifest from FASTQ stems and the OCM design; verify exactly six
    library sets and 22 OCM biological samples.
 2. Preflight one `R1` per library against the May-2023 GEM-X TRU whitelist.
 3. Dry-run STAR commands and confirm the reference, whitelist, `GeneFull
-   Velocyto`, `EmptyDrops_CR`, and Y-removal flags.
+   Velocyto`, `--soloCellFilter None`, native OCM per-sample EmptyDrops, and
+   Y-removal flags.
 4. Prepare the 2M `25E32-L3` oracle smoke harness without launching STAR while
-   the current production mapping run is active.
-5. After production mapping is clear, run the 2M `25E32-L3` smoke through STAR,
-   native Velocyto packaging, the OCM multi writer, and the oracle validator.
+   another production mapping run is active from the same checkout.
+5. Once the STAR binary is free to update, run the 2M `25E32-L3` smoke through
+   STAR, native Velocyto packaging, the OCM multi writer, and the oracle
+   validator.
 6. Compare the `25E32-L3` smoke against the bundled Cell Ranger log oracle:
    filtered total near 15,088 and `cells_per_tag.json` counts close to
    `4114/3830/4010/3134` for `OB1/OB2/OB3/OB4` on the full run. For the 2M

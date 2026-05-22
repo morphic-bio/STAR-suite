@@ -1,3 +1,14 @@
+star-suite (1.0.0-1) unstable; urgency=medium
+
+  * First production STAR Suite release.
+  * Document native OCM composite-barcode production mode and native OCM
+    per-sample MEX/Velocyto materialization.
+  * Add JAX scRNAseq02 OCM and MSK 40KO production runbooks and MCP recipes.
+  * Report STAR Suite 1.0.0 from STAR --version, with explicit upstream and
+    genome-compatibility version flags for provenance.
+
+ -- STAR-suite Maintainers <maintainers@biodepot.example>  Fri, 22 May 2026 05:30:00 +0000
+
 star-suite (0.94.0-1) unstable; urgency=medium
 
   * Add SLAM paired-end smoke and production documentation, including

@@ -3,7 +3,7 @@
 set -euo pipefail
 
 TARBALL=""
-EXPECTED_VERSION="2.7.11b"
+EXPECTED_VERSION="1.0.0"
 MANIFEST_OUT=""
 
 usage() {
@@ -144,7 +144,7 @@ fi
 
 version_output="$($binary --version)"
 if [[ "$version_output" != "$EXPECTED_VERSION" ]]; then
-  echo "ERROR: expected STAR version $EXPECTED_VERSION, got $version_output" >&2
+  echo "ERROR: expected STAR-suite version $EXPECTED_VERSION, got $version_output" >&2
   exit 1
 fi
 
@@ -191,7 +191,7 @@ Compatibility label: ${compat_label:-unknown}
 Documented glibc baseline: ${glibc_baseline:-unknown}
 Container glibc: ${container_glibc}
 Maximum referenced GLIBC symbol: ${max_glibc_symbol:-unknown}
-STAR version: ${version_output}
+STAR-suite version: ${version_output}
 Minimum runtime packages (Ubuntu/Debian package names): ${package_list:-unknown}
 Dynamic libraries:
 "

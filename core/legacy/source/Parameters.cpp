@@ -1046,8 +1046,24 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
         for (int iarg=1; iarg<argInN; iarg++) {
             string oneArg=string(argIn[iarg]);
 
-            if (oneArg=="--version") {//print version and exit
+            if (oneArg=="--version") {//print suite version and exit
                 std::cout << STAR_VERSION <<std::endl;
+                exit(0);
+            };
+            if (oneArg=="--suite-version") {
+                std::cout << STAR_SUITE_VERSION << std::endl;
+                exit(0);
+            };
+            if (oneArg=="--upstream-version") {
+                std::cout << STAR_UPSTREAM_VERSION << std::endl;
+                exit(0);
+            };
+            if (oneArg=="--genome-compat-version") {
+                std::cout << versionGenome << std::endl;
+                exit(0);
+            };
+            if (oneArg=="--accepted-genome-versions") {
+                std::cout << versionGenome << "," << STAR_LEGACY_GENOME_COMPAT_VERSION << std::endl;
                 exit(0);
             };
 
@@ -1099,7 +1115,9 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
         exitWithError(errOut.str(),std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
     };
 
-    inOut->logMain << "STAR version=" << STAR_VERSION << "\n";
+    inOut->logMain << "STAR-suite version=" << STAR_SUITE_VERSION << "\n";
+    inOut->logMain << "STAR upstream version=" << STAR_UPSTREAM_VERSION << "\n";
+    inOut->logMain << "STAR genome compatibility version=" << versionGenome << "\n";
     inOut->logMain << "STAR compilation time,server,dir=" << COMPILATION_TIME_PLACE << "\n";
     inOut->logMain << "STAR git: " << GIT_BRANCH_COMMIT_DIFF << "\n";
     #ifdef COMPILE_FOR_LONG_READS
