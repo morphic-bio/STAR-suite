@@ -1,7 +1,7 @@
 # Repository Split Runbook: Core, Recipes, Provenance
 
 Date: 2026-05-22
-Status: proposed transition policy.
+Status: Phase 0/early Phase 1 started locally.
 
 ## Goal
 
@@ -22,6 +22,28 @@ The target end state:
 
 Repository names are placeholders until the repos are created. The boundaries
 below are the source of truth.
+
+## Initial Local Repos
+
+Initial local split targets were scaffolded on 2026-05-22:
+
+```text
+/mnt/pikachu/morphic-recipes
+/mnt/pikachu/morphic-provenance
+```
+
+Initial commits:
+
+```text
+morphic-recipes:     682f554 Initial Morphic recipe mirror
+morphic-provenance:  19f0fe9 Initial Morphic provenance scaffold
+```
+
+No STAR-suite files have been removed. The first recipes repo commit is a mirror
+of selected production scripts, runbooks, manifests, and workflow YAMLs copied
+from STAR-suite commit `43a5853af0c627925f827ab576814b770d1874c1`. Treat
+STAR-suite as the core source and the recipes repo as the preferred home for new
+production recipe work during the transition.
 
 ## Definitions
 
