@@ -1,7 +1,7 @@
 # Repository Split Runbook: Core, Recipes, Provenance
 
 Date: 2026-05-22
-Status: Phase 0/early Phase 1 started locally.
+Status: Phase 1 cutover implemented locally and pushed to the split repos.
 
 ## Goal
 
@@ -14,14 +14,13 @@ The target end state:
 
 1. `STAR-suite`: core STAR/Flex/Solo processing, compiled tools, core tests,
    release packaging, and generic workflow machinery.
-2. `star-recipes` or `morphic-recipes`: dataset and project recipes, launch
+2. `morphic-recipes`: dataset and project recipes, launch
    wrappers, downstream h5ad/QC/CellBender/celltyping/Globus helpers, and
    workflow schemas for production runs.
-3. `morphic-provenance` or `run-registry`: immutable run records, manifests,
+3. `morphic-provenance`: immutable run records, manifests,
    checksums, rendered commands, environment pins, and handoff provenance.
 
-Repository names are placeholders until the repos are created. The boundaries
-below are the source of truth.
+The boundaries below are the source of truth.
 
 ## Initial Local Repos
 
@@ -48,9 +47,17 @@ morphic-provenance:  19f0fe9 Initial Morphic provenance scaffold
 
 No STAR-suite files have been removed. The first recipes repo commit is a mirror
 of selected production scripts, runbooks, manifests, and workflow YAMLs copied
-from STAR-suite commit `43a5853af0c627925f827ab576814b770d1874c1`. Treat
-STAR-suite as the core source and the recipes repo as the preferred home for new
-production recipe work during the transition.
+from STAR-suite commit `43a5853af0c627925f827ab576814b770d1874c1`.
+
+Phase 1 cutover is now active:
+
+- `morphic-recipes` is the canonical home for new production recipe work.
+- Recipe launchers that need core binaries use an external STAR-suite checkout
+  through `STAR_SUITE_ROOT` instead of assuming `core/` exists in the recipes
+  repo.
+- STAR-suite keeps compatibility launchers for active MSK/JAX/Multiome
+  production entrypoints and remote downstream helpers. Those launchers delegate
+  to `MORPHIC_RECIPES_ROOT` and should not receive new recipe logic.
 
 ## Definitions
 
