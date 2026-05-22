@@ -8,6 +8,15 @@ independently with Python 3 or Bash.
 For module-specific scripts see `core/legacy/scripts/README.md` and
 `flex/scripts/README.md`.
 
+## Production Recipe Boundary
+
+Morphic/JAX/MSK production launchers and remote downstream/CellBender helpers
+are moving to `/mnt/pikachu/morphic-recipes`. The STAR-suite copies of those
+entrypoints are compatibility launchers that delegate through
+`MORPHIC_RECIPES_ROOT` when present. New production recipe work should be made
+in `morphic-recipes`; keep STAR-suite focused on core processing, shared
+regression tools, and generic fixtures.
+
 ## Preflight and QC
 
 | Script | Language | Purpose |
