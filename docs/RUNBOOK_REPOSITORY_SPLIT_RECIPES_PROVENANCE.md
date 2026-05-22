@@ -32,6 +32,13 @@ Initial local split targets were scaffolded on 2026-05-22:
 /mnt/pikachu/morphic-provenance
 ```
 
+GitHub remotes:
+
+```text
+git@github.com:morphic-bio/morphic-recipes.git
+git@github.com:morphic-bio/morphic-provenance.git
+```
+
 Initial commits:
 
 ```text
