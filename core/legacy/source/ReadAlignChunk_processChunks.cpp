@@ -5,12 +5,191 @@
 #include "GlobalVariables.h"
 #include "FlexDebugCounters.h"
 #include "IncludeDefine.h"
+#include "input/FastxInputModule.h"
 #include <algorithm>
 #include <chrono>
+#include <cstring>
 #include <sstream>
 
 inline uint64 fastqReadOneLine(ifstream &streamIn, char *arrIn);
 inline void removeStringEndControl(string &str);
+
+namespace {
+
+bool fastxChunkHasBytes(const ReadAlignChunk& chunk) {
+    for (uint imate = 0; imate < chunk.P.readNends; ++imate) {
+        if (chunk.chunkInSizeBytesTotal[imate] > 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool fastxChunkUnderTarget(const ReadAlignChunk& chunk) {
+    for (uint imate = 0; imate < chunk.P.readNends; ++imate) {
+        if (chunk.chunkInSizeBytesTotal[imate] >= chunk.P.chunkInSizeBytes) {
+            return false;
+        }
+    }
+    return true;
+}
+
+string fastxHeaderLine(const Parameters& P,
+                       const star::input::InputRecord& record,
+                       const star::input::InputMateRecord& mate,
+                       uint64 ordinal) {
+    const char headerPrefix = mate.has_quality ? '@' : '>';
+    string header;
+    if (P.outSAMreadIDnumber) {
+        header = string(1, headerPrefix) + to_string(ordinal);
+    } else {
+        header = string(1, headerPrefix) + record.read_name;
+    }
+    header += ' ' + to_string(ordinal) + ' ' + record.read_filter + ' ' + to_string(record.lane_index);
+    return header;
+}
+
+uint64 fastxMateChunkBytes(const Parameters& P,
+                           const star::input::InputRecord& record,
+                           const star::input::InputMateRecord& mate,
+                           uint64 ordinal) {
+    uint64 nBytes = fastxHeaderLine(P, record, mate, ordinal).size() + 1;
+    nBytes += mate.sequence.size() + 1;
+    if (mate.has_quality) {
+        nBytes += 2; // "+\n"
+        nBytes += mate.quality.size() + 1;
+    }
+    return nBytes;
+}
+
+bool fastxRecordFits(ReadAlignChunk& chunk,
+                     const star::input::InputRecord& record,
+                     uint64 ordinal,
+                     string& errorOut) {
+    if (record.mates.size() < chunk.P.readNends) {
+        errorOut = "Fastx input module returned fewer mates than STAR expects";
+        return false;
+    }
+
+    for (uint imate = 0; imate < chunk.P.readNends; ++imate) {
+        const uint64 mateBytes = fastxMateChunkBytes(chunk.P, record, record.mates[imate], ordinal);
+        if (mateBytes + 2 >= chunk.P.chunkInSizeBytesArray) {
+            ostringstream err;
+            err << "Fastx record " << record.read_name << " mate " << (imate + 1)
+                << " requires " << mateBytes << " bytes, larger than STAR input chunk buffer "
+                << chunk.P.chunkInSizeBytesArray;
+            errorOut = err.str();
+            return false;
+        }
+        if (chunk.chunkInSizeBytesTotal[imate] + mateBytes + 2 >= chunk.P.chunkInSizeBytesArray) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+void fastxAppendLine(char* buffer, uint64& offset, const string& line) {
+    if (!line.empty()) {
+        std::memcpy(buffer + offset, line.data(), line.size());
+        offset += line.size();
+    }
+    buffer[offset++] = '\n';
+}
+
+void fastxAppendRecord(ReadAlignChunk& chunk, const star::input::InputRecord& record) {
+    for (uint imate = 0; imate < chunk.P.readNends; ++imate) {
+        const star::input::InputMateRecord& mate = record.mates[imate];
+        uint64& offset = chunk.chunkInSizeBytesTotal[imate];
+        fastxAppendLine(chunk.chunkIn[imate], offset, fastxHeaderLine(chunk.P, record, mate, chunk.P.iReadAll));
+        fastxAppendLine(chunk.chunkIn[imate], offset, mate.sequence);
+        if (mate.has_quality) {
+            chunk.chunkIn[imate][offset++] = '+';
+            chunk.chunkIn[imate][offset++] = '\n';
+            fastxAppendLine(chunk.chunkIn[imate], offset, mate.quality);
+        }
+    }
+}
+
+void fastxLogLaneStart(Parameters& P, uint32 laneIndex) {
+    if (P.fastxInputLastLoggedLane == static_cast<int>(laneIndex)) {
+        return;
+    }
+    P.fastxInputLastLoggedLane = static_cast<int>(laneIndex);
+
+    if (P.readFilesN <= 1 && P.readFilesCommandString.empty()) {
+        return;
+    }
+
+    pthread_mutex_lock(&g_threadChunks.mutexLogMain);
+    P.inOut->logMain << "Starting to map file # " << laneIndex << "\n";
+    for (uint imate = 0; imate < P.readFilesNames.size(); imate++) {
+        if (laneIndex < P.readFilesNames.at(imate).size()) {
+            P.inOut->logMain << "mate " << imate + 1 << ":   " << P.readFilesNames.at(imate).at(laneIndex) << "\n";
+        }
+    }
+    P.inOut->logMain << flush;
+    pthread_mutex_unlock(&g_threadChunks.mutexLogMain);
+}
+
+bool fastxStopBeforeLane(Parameters& P, uint32 laneIndex, int detectionStartFileIndex) {
+    if (P.quant.slam.autoTrimDetectionPass && P.quant.slam.trimScope == "first" &&
+        static_cast<int>(laneIndex) > detectionStartFileIndex) {
+        P.inOut->logMain << "SLAM auto-trim detection: stopping at file boundary "
+                         << "(file " << detectionStartFileIndex << " -> " << laneIndex << ")\n";
+        return true;
+    }
+
+    if (P.quant.slam.perFileProcessing &&
+        static_cast<int>(laneIndex) > P.quant.slam.currentFileIndex) {
+        P.inOut->logMain << "SLAM per-file processing: stopping at file boundary "
+                         << "(completed file " << P.quant.slam.currentFileIndex << ")\n";
+        return true;
+    }
+
+    return false;
+}
+
+void fastxSkipToTargetLane(ReadAlignChunk& chunk) {
+    Parameters& P = chunk.P;
+    bool foundTarget = false;
+
+    while (P.quant.slam.skipToFileIndex > 0 && P.readFilesIndex < P.quant.slam.skipToFileIndex) {
+        star::input::InputRecord record;
+        string inputError;
+        const star::input::InputStatus status = P.fastxInputModule->next_record(&record, &inputError);
+        if (status == star::input::InputStatus::Error) {
+            ostringstream errOut;
+            errOut << ERROR_OUT << " EXITING because of FATAL ERROR in Fastx input module while skipping to file "
+                   << P.quant.slam.skipToFileIndex << "\n"
+                   << inputError << "\n";
+            exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_INPUT_FILES, P);
+        }
+        if (status == star::input::InputStatus::End) {
+            P.fastxInputExhausted = true;
+            break;
+        }
+
+        P.readFilesIndex = static_cast<int>(record.lane_index);
+        if (P.readFilesIndex >= P.quant.slam.skipToFileIndex) {
+            P.fastxInputPendingRecord.reset(new star::input::InputRecord(record));
+            P.fastxInputPendingRecordValid = true;
+            foundTarget = true;
+            P.inOut->logMain << "SLAM per-file: reached file " << P.readFilesIndex << "\n";
+            break;
+        }
+    }
+
+    if (!foundTarget && P.readFilesIndex < P.quant.slam.skipToFileIndex) {
+        P.inOut->logMain << "WARNING: SLAM per-file: reached end of input before finding file "
+                         << P.quant.slam.skipToFileIndex << ". Current file index: "
+                         << P.readFilesIndex << "\n";
+    }
+
+    P.quant.slam.skipToFileIndex = -1;
+}
+
+} // namespace
 
 
 void ReadAlignChunk::processChunks() {//read-map-write chunks
@@ -21,7 +200,7 @@ void ReadAlignChunk::processChunks() {//read-map-write chunks
         reopenYNoYFastqOutputsForReuse();
     }
     processRuns++;
-    
+
     noReadsLeft=false; //true if there no more reads left in the file
     bool newFile=false; //new file marker in the input stream
     
@@ -40,6 +219,10 @@ void ReadAlignChunk::processChunks() {//read-map-write chunks
         if (P.quant.slam.skipToFileIndex > 0 && P.readFilesIndex < P.quant.slam.skipToFileIndex) {
             P.inOut->logMain << "SLAM per-file: skipping to file " << P.quant.slam.skipToFileIndex 
                              << " (currently at file " << P.readFilesIndex << ")\n";
+
+            if (P.readFilesTypeN == 1 && P.fastxInputActive) {
+                fastxSkipToTargetLane(*this);
+            } else {
         
             // Skip reads until we reach the target file
             // For paired-end: advance ALL mate streams in sync
@@ -106,6 +289,7 @@ void ReadAlignChunk::processChunks() {//read-map-write chunks
         
             // Reset skipToFileIndex after skipping
             P.quant.slam.skipToFileIndex = -1;
+            }
         }  // end re-check condition
         
         if (P.runThreadN > 1) pthread_mutex_unlock(&g_threadChunks.mutexInRead);
@@ -124,6 +308,66 @@ void ReadAlignChunk::processChunks() {//read-map-write chunks
             chunkInSizeBytesTotal={0,0};
             const uint64_t chunkReadStart = P.iReadAll;
             
+            if (P.readFilesTypeN == 1 && P.fastxInputActive) {
+                while (fastxChunkUnderTarget(*this)) {
+                    if (P.iReadAll == P.readMapNumber) {
+                        break;
+                    }
+                    if (P.fastxInputExhausted && !P.fastxInputPendingRecordValid) {
+                        break;
+                    }
+
+                    star::input::InputRecord record;
+                    if (P.fastxInputPendingRecordValid) {
+                        record = *P.fastxInputPendingRecord;
+                        P.fastxInputPendingRecordValid = false;
+                        P.fastxInputPendingRecord.reset();
+                    } else {
+                        string inputError;
+                        const star::input::InputStatus status = P.fastxInputModule->next_record(&record, &inputError);
+                        if (status == star::input::InputStatus::Error) {
+                            ostringstream errOut;
+                            errOut << ERROR_OUT << " EXITING because of FATAL ERROR in Fastx input module\n"
+                                   << inputError << "\n";
+                            exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_INPUT_FILES, P);
+                        }
+                        if (status == star::input::InputStatus::End) {
+                            P.fastxInputExhausted = true;
+                            break;
+                        }
+                    }
+
+                    P.readFilesIndex = static_cast<int>(record.lane_index);
+                    if (fastxStopBeforeLane(P, record.lane_index, detectionStartFileIndex)) {
+                        noReadsLeft = true;
+                        break;
+                    }
+
+                    string fitError;
+                    if (!fastxRecordFits(*this, record, static_cast<uint64>(P.iReadAll) + 1, fitError)) {
+                        if (fastxChunkHasBytes(*this) && fitError.empty()) {
+                            P.fastxInputPendingRecord.reset(new star::input::InputRecord(record));
+                            P.fastxInputPendingRecordValid = true;
+                            break;
+                        }
+
+                        ostringstream errOut;
+                        errOut << ERROR_OUT << " EXITING because of FATAL ERROR in Fastx input buffering\n";
+                        if (!fitError.empty()) {
+                            errOut << fitError << "\n";
+                        } else {
+                            errOut << "Fastx record does not fit in the STAR input chunk buffer\n";
+                        }
+                        errOut << "SOLUTION: increase --limitIObufferSize or reduce maximum read/header length.\n";
+                        exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_INPUT_FILES, P);
+                    }
+
+                    fastxLogLaneStart(P, record.lane_index);
+                    P.iReadAll++;
+                    P.readFilesIndex = static_cast<int>(record.lane_index);
+                    fastxAppendRecord(*this, record);
+                }
+            } else {
             while (chunkInSizeBytesTotal[0] < P.chunkInSizeBytes && chunkInSizeBytesTotal[1] < P.chunkInSizeBytes && P.inOut->readIn[0].good() && P.inOut->readIn[1].good()) {
                 char nextChar=P.inOut->readIn[0].peek();
                 if (P.iReadAll==P.readMapNumber) {//do not read any more reads
@@ -356,6 +600,7 @@ void ReadAlignChunk::processChunks() {//read-map-write chunks
                         newFile=false;
                 };
             };
+            }
             if (P.readNends == 2U) {
                 const bool m0Empty = (chunkInSizeBytesTotal[0] == 0ULL);
                 const bool m1Empty = (chunkInSizeBytesTotal[1] == 0ULL);

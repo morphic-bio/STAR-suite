@@ -387,6 +387,20 @@ FastxInputModule::FastxInputModule() {
     impl_.reset(new Impl());
 }
 
+FastxInputModule::FastxInputModule(const FastxInputModule& other)
+    : plan_(other.plan_), configured_(other.configured_), impl_(new Impl()) {
+}
+
+FastxInputModule& FastxInputModule::operator=(const FastxInputModule& other) {
+    if (this != &other) {
+        close();
+        plan_ = other.plan_;
+        configured_ = other.configured_;
+        impl_.reset(new Impl());
+    }
+    return *this;
+}
+
 FastxInputModule::~FastxInputModule() = default;
 
 const char* FastxInputModule::name() const {

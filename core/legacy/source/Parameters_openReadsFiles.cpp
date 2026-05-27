@@ -1,13 +1,37 @@
 #include "Parameters.h"
 #include "ErrorWarning.h"
+#include "input/FastxInputModule.h"
 #include <fstream>
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <cerrno>
+#include <cctype>
 #include <zlib.h>
 
 namespace {
+bool endsWithCaseInsensitiveLocal(const string& value, const string& suffix) {
+    if (suffix.size() > value.size()) {
+        return false;
+    }
+    const size_t offset = value.size() - suffix.size();
+    for (size_t ii = 0; ii < suffix.size(); ++ii) {
+        const unsigned char c1 = static_cast<unsigned char>(value[offset + ii]);
+        const unsigned char c2 = static_cast<unsigned char>(suffix[ii]);
+        if (std::tolower(c1) != std::tolower(c2)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool isFastqPathLocal(const string& value) {
+    return endsWithCaseInsensitiveLocal(value, ".fastq") ||
+           endsWithCaseInsensitiveLocal(value, ".fq") ||
+           endsWithCaseInsensitiveLocal(value, ".fastq.gz") ||
+           endsWithCaseInsensitiveLocal(value, ".fq.gz");
+}
+
 bool writeAll(int fd, const char* data, size_t size) {
     while (size > 0) {
         const ssize_t written = ::write(fd, data, size);
@@ -107,6 +131,63 @@ void Parameters::openReadsFiles()
                << "Do not include index reads (I1/I2) in --readFilesIn.\n";
         exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
     };
+
+    if (readFilesTypeN == 1 && fastxInputActive) {
+        for (uint imate = 0; imate < MAX_N_MATES; imate++) {
+            readFilesCommandPID[imate] = 0;
+            if (inOut->readIn[imate].is_open()) {
+                inOut->readIn[imate].close();
+            }
+        }
+
+        if (emitYNoYFastqyes) {
+            for (uint32 imate = 0; imate < readFilesNames.size(); ++imate) {
+                for (const auto& fastxName : readFilesNames[imate]) {
+                    if (!isFastqPathLocal(fastxName)) {
+                        ostringstream errOut;
+                        errOut << "EXITING because of FATAL INPUT ERROR: --emitYNoYFastq currently requires FASTQ input files.\n";
+                        errOut << "Offending --readFilesIn entry: " << fastxName << "\n";
+                        errOut << "SOLUTION: provide .fastq/.fq files, optionally gzip-compressed as .fastq.gz/.fq.gz, or disable --emitYNoYFastq.\n";
+                        // TODO: Y-removal/Y-noY FASTQ emission is needed for other input formats.
+                        exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+                    }
+                }
+            }
+        }
+
+        vector<string> fastxReadGroups;
+        if (!readFilesNames.empty() && outSAMattrRG.size() == readFilesNames.front().size()) {
+            fastxReadGroups = outSAMattrRG;
+        }
+        star::input::InputSourcePlan fastxInputPlan =
+            star::input::make_fastx_input_source_plan(
+                readFilesNames,
+                fastxReadGroups,
+                readFilesCommandString,
+                readFilesPrefixFinal,
+                readFilesUseInternalGzip);
+
+        string inputContractError;
+        fastxInputModule.reset(new star::input::FastxInputModule());
+        if (!fastxInputModule->configure(fastxInputPlan, &inputContractError)) {
+            ostringstream errOut;
+            errOut << "EXITING because of fatal input ERROR: invalid Fastx input source plan at open\n";
+            errOut << inputContractError << "\n";
+            exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+        }
+        if (!fastxInputModule->open(&inputContractError)) {
+            ostringstream errOut;
+            errOut << "EXITING because of fatal input ERROR: could not open Fastx input module\n";
+            errOut << inputContractError << "\n";
+            exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_INPUT_FILES, *this);
+        }
+        readFilesIndex = 0;
+        fastxInputPendingRecordValid = false;
+        fastxInputExhausted = false;
+        fastxInputPendingRecord.reset();
+        fastxInputLastLoggedLane = -1;
+        return;
+    }
 
     if (readFilesCommandString=="") {//read from file
         for (uint ii=0;ii<readFilesIn.size();ii++) {//open readIn files

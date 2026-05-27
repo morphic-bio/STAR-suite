@@ -20,6 +20,8 @@ InputSourcePlan make_fastx_input_source_plan(
 class FastxInputModule : public InputModule {
 public:
     FastxInputModule();
+    FastxInputModule(const FastxInputModule& other);
+    FastxInputModule& operator=(const FastxInputModule& other);
     ~FastxInputModule() override;
 
     const char* name() const override;

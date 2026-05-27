@@ -42,6 +42,13 @@ This file tracks active top-level work only. Completed items and stale historica
 
 ## Priority 2: Performance / Architecture
 
+- Extend Y-removal/Y-noY emission beyond FASTQ once additional input modules
+  land.
+  - Current `--emitYNoYFastq yes` behavior is deliberately gated to FASTQ
+    paths (`.fastq`, `.fq`, `.fastq.gz`, `.fq.gz`) while Fastx is the only
+    production input module.
+  - BINSEQ or other future input formats need explicit Y-removal support and
+    smoke coverage before the gate is relaxed.
 - Optimize JAX OCM GeneFull and Velocyto materialization using the staged plan in [docs/RUNBOOK_SCRNA_OCM_MATERIALIZATION_OPTIMIZATION_20260520.md](/mnt/pikachu/STAR-suite/docs/RUNBOOK_SCRNA_OCM_MATERIALIZATION_OPTIMIZATION_20260520.md).
   - Production should materialize `GeneFull` + Velocyto once, share OCM maps and per-sample cell calls, and skip `Gene` unless a Cell Ranger comparator run explicitly requests it.
   - Replace repeated count/write MatrixMarket scans with a streaming router that writes raw and filtered outputs from the same pass.

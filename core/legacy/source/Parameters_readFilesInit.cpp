@@ -23,6 +23,13 @@ bool endsWithCaseInsensitive(const string& value, const string& suffix) {
     }
     return true;
 }
+
+bool isFastqPath(const string& value) {
+    return endsWithCaseInsensitive(value, ".fastq") ||
+           endsWithCaseInsensitive(value, ".fq") ||
+           endsWithCaseInsensitive(value, ".fastq.gz") ||
+           endsWithCaseInsensitive(value, ".fq.gz");
+}
 }
 
 void Parameters::readFilesInit() 
@@ -56,6 +63,14 @@ void Parameters::readFilesInit()
         errOut <<"SOLUTION: specify one of the allowed values: Fastx or SAM\n";
         exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
     };
+
+    if (emitYNoYFastqyes && readFilesTypeN != 1) {
+        ostringstream errOut;
+        errOut << "EXITING because of FATAL INPUT ERROR: --emitYNoYFastq currently requires FASTQ input through --readFilesType Fastx.\n";
+        errOut << "SOLUTION: use FASTQ input files with --readFilesType Fastx or disable --emitYNoYFastq.\n";
+        // TODO: Y-removal/Y-noY FASTQ emission is needed for non-FASTQ input formats.
+        exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+    }
 
     readFilesPrefixFinal=(readFilesPrefix=="-" ? "" : readFilesPrefix);
     
@@ -259,6 +274,21 @@ void Parameters::readFilesInit()
     readNmates=readNends; //this may be changed later if one of the reads is barcode rea
 
     if (readFilesTypeN==1) {
+        if (emitYNoYFastqyes) {
+            for (uint32 imate = 0; imate < readFilesNames.size(); ++imate) {
+                for (const auto& fastxName : readFilesNames[imate]) {
+                    if (!isFastqPath(fastxName)) {
+                        ostringstream errOut;
+                        errOut << "EXITING because of FATAL INPUT ERROR: --emitYNoYFastq currently requires FASTQ input files.\n";
+                        errOut << "Offending --readFilesIn entry: " << fastxName << "\n";
+                        errOut << "SOLUTION: provide .fastq/.fq files, optionally gzip-compressed as .fastq.gz/.fq.gz, or disable --emitYNoYFastq.\n";
+                        // TODO: Y-removal/Y-noY FASTQ emission is needed for other input formats.
+                        exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+                    }
+                }
+            }
+        }
+
         star::input::InputSourcePlan fastxInputPlan =
             star::input::make_fastx_input_source_plan(
                 readFilesNames,
@@ -266,13 +296,19 @@ void Parameters::readFilesInit()
                 readFilesCommandString,
                 readFilesPrefixFinal,
                 readFilesUseInternalGzip);
-        star::input::FastxInputModule fastxInputModule;
+        fastxInputActive = false;
+        fastxInputPendingRecordValid = false;
+        fastxInputExhausted = false;
+        fastxInputLastLoggedLane = -1;
+        fastxInputPendingRecord.reset();
+        fastxInputModule.reset(new star::input::FastxInputModule());
         string inputContractError;
-        if (!fastxInputModule.configure(fastxInputPlan, &inputContractError)) {
+        if (!fastxInputModule->configure(fastxInputPlan, &inputContractError)) {
             ostringstream errOut;
             errOut << "EXITING because of FATAL INPUT ERROR: invalid Fastx input source plan\n";
             errOut << inputContractError << "\n";
             exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
         };
+        fastxInputActive = true;
     };
 };
