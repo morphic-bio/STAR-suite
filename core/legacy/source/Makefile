@@ -274,6 +274,14 @@ fastx-input-harness : LDFLAGS := $(LDFLAGSextra) -lz -lcrypto
 fastx-input-harness : FastxInputModule.o input/fastx_input_harness.cpp
 	$(CXX) -o fastx_input_harness $(CXXFLAGS) input/fastx_input_harness.cpp FastxInputModule.o $(LDFLAGS)
 
+# Standalone BINSEQ probe harness. This is not production STAR integration; it
+# decodes CBQ through bqtools and validates the result through the input contract.
+.PHONY: binseq-probe-harness
+binseq-probe-harness : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
+binseq-probe-harness : LDFLAGS := $(LDFLAGSextra) -lz -lcrypto
+binseq-probe-harness : FastxInputModule.o BinseqInputProbeModule.o input/binseq_probe_harness.cpp
+	$(CXX) -o binseq_probe_harness $(CXXFLAGS) input/binseq_probe_harness.cpp BinseqInputProbeModule.o FastxInputModule.o $(LDFLAGS)
+
 # Standalone star_feature_call tool for perturb-seq processing
 # Requires libprocess_features.a to be built first
 .PHONY: star_feature_call libprocess_features
@@ -468,6 +476,9 @@ flex/%.o: flex/%.cpp
 FastxInputModule.o: input/FastxInputModule.cpp input/FastxInputModule.h input/InputContract.h
 	$(CXX) -c $(CPPFLAGS) $(CXXFLAGS) $(CXXFLAGS_common) $< -o $@
 
+BinseqInputProbeModule.o: input/BinseqInputProbeModule.cpp input/BinseqInputProbeModule.h input/FastxInputModule.h input/InputContract.h
+	$(CXX) -c $(CPPFLAGS) $(CXXFLAGS) $(CXXFLAGS_common) $< -o $@
+
 opal/opal.o : opal/opal.cpp opal/opal.h
 	cd opal && \
 	$(CXX) -c -I./ -std=c++11 $(CPPFLAGS) $(CXXFLAGS) $(CXXFLAGSextra) $(CXXFLAGS_SIMD) opal.cpp
@@ -482,7 +493,7 @@ solo/CbBayesianResolver.o : $(FLEX_SRC_DIR)/solo/CbBayesianResolver.cpp $(FLEX_S
 
 .PHONY: clean
 clean:
-	'rm' -f *.o opal/opal.o solo/*.o flex/*.o STAR STARstatic STARlong star_feature_call fastx_input_harness Depend.list parametersDefault.xxd star_chromap_orchestration.o star_chromap_orchestration_stub.o .depend.with_chromap_*
+	'rm' -f *.o opal/opal.o solo/*.o flex/*.o STAR STARstatic STARlong star_feature_call fastx_input_harness binseq_probe_harness Depend.list parametersDefault.xxd star_chromap_orchestration.o star_chromap_orchestration_stub.o .depend.with_chromap_*
 	$(MAKE) -C $(LIBFLEX_DIR) clean
 	$(MAKE) -C $(LIBTRIM_DIR) clean
 	$(MAKE) -C $(LIBEM_DIR) clean

@@ -276,6 +276,23 @@ Exit criteria:
 - Module failures produce actionable errors for unsupported variants or missing
   qualities.
 
+Implementation status on `feature/binseq-input`:
+
+- Added `BinseqInputProbeModule`, a non-production `InputModule` that shells out
+  to `bqtools decode`, writes decoded FASTQ into a caller-provided scratch
+  directory, and delegates record iteration to `FastxInputModule`.
+- Added the `binseq-probe-harness` Makefile target and
+  `core/legacy/source/binseq_probe_harness` for normalized contract dumps from
+  paired CBQ files or a BINSEQ manifest row (`CBQ<TAB>-<TAB>ReadGroup`).
+- Added `tests/run_binseq_probe_smoke.sh`, which creates paired synthetic FASTQ,
+  encodes it to CBQ with `bqtools`, records `bqtools info`, and compares direct
+  plus manifest BINSEQ probe dumps against the source FASTQ dump.
+- The smoke skips cleanly when `bqtools` is unavailable. Set
+  `BQTOOLS=/path/to/bqtools` to run it on hosts without `bqtools` in `PATH`.
+- This is intentionally a probe-only stage: STAR CLI routing for
+  `--readFilesType Binseq` remains Phase 6 work after real CBQ fixtures pass
+  the harness.
+
 ### Phase 5: Find Real BINSEQ Files
 
 Goal: test against externally produced BINSEQ, not only files generated from our
