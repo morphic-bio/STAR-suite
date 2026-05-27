@@ -115,6 +115,7 @@ update this file with its output location.
 - `/tmp/ucsf_velocyto_cbub_stage_*` (host-local dry-run staging roots used by `tests/run_ucsf_velocyto_cbub_smoke.sh`; protected dataset, do not redistribute outputs)
 - `tests/flexfilter_parity_output_*/` (FlexFilter parity outputs vs production baseline)
 - `/tmp/*` (temporary scratch outputs)
+- `/tmp/star_suite_fastx_contract_star_smoke` (synthetic STAR Fastx input-contract smoke: tiny genome, FASTQ/FASTQ.gz/manifest runs, and Y/noY FASTQ gate logs)
 - `/tmp/ucsf_cr_config_1m_smoke_*` (real UCSF perturb CR-config fixture smoke outputs)
 - `/tmp/ucsf_batch_cr_multifeature_tiny_*` (synthetic UCSF perturb multifeature CR-config tiny smoke outputs)
 - `/tmp/flex_cr_config_smoke_*` (Flex CR-config smoke outputs)

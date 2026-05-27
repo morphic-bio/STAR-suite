@@ -21,6 +21,12 @@
 // Forward declaration for library format detector
 class LibFormatDetector;
 class SlamSnpMask;
+namespace star {
+namespace input {
+class FastxInputModule;
+struct InputRecord;
+} // namespace input
+} // namespace star
 
 class Parameters {
 
@@ -135,6 +141,12 @@ class Parameters {
         string readFilesCommandString; //actual command string
         int readFilesIndex;
         pid_t readFilesCommandPID[MAX_N_MATES];
+        std::shared_ptr<star::input::FastxInputModule> fastxInputModule;
+        std::shared_ptr<star::input::InputRecord> fastxInputPendingRecord;
+        bool fastxInputActive = false;
+        bool fastxInputPendingRecordValid = false;
+        bool fastxInputExhausted = false;
+        int fastxInputLastLoggedLane = -1;
 
         uint readMapNumber;
         uint iReadAll;

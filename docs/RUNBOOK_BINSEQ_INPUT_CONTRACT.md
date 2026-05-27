@@ -201,8 +201,8 @@ Implementation status on `feature/binseq-input`:
   lanes, manifest lanes, single-end FASTQ, and a compact three-mate FASTQ
   case.
 - The smoke compares normalized dumps across plain/gzip/zcat and
-  comma-lane/manifest paths. The historical STAR hot path is still unchanged;
-  full replacement waits for Phase 3.
+  comma-lane/manifest paths. Phase 3 now exercises the same module through
+  STAR's mapping chunk path.
 
 ### Phase 3: Re-implement FASTQ Behind The Contract
 
@@ -221,6 +221,22 @@ Exit criteria:
 - All Phase 2 harness cases pass.
 - Core smoke tests pass.
 - A clean rebuild is performed before investigating any mismatch.
+
+Implementation status on `feature/binseq-input`:
+
+- `FastxInputModule` is now wired into STAR chunk ingestion for
+  `--readFilesType Fastx`, while preserving `readFilesNames`, `readFilesN`,
+  `readNends`, and read group compatibility fields for existing code paths.
+- The runtime path consumes module `InputRecord`s directly and handles EOF
+  without falling back to the legacy `istream` parser for Fastx input.
+- `tests/run_fastx_contract_star_smoke.sh` covers plain FASTQ, internal gzip,
+  explicit `zcat`, comma-separated lanes, manifest input, and the current
+  Y/noY FASTQ gate.
+- Y/noY FASTQ emission is intentionally FASTQ-only for now: when
+  `--emitYNoYFastq yes` is set, every Fastx input path must end in
+  `.fastq`, `.fq`, `.fastq.gz`, or `.fq.gz`. TODO: extend Y-removal/Y-noY
+  emission to future non-FASTQ input modules, including BINSEQ, before enabling
+  those combinations.
 
 ### Phase 4: BINSEQ Probe Module
 
