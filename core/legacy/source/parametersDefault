@@ -2152,6 +2152,47 @@ chromapAtacStartMode        postMapping
                             postMapping ... run Chromap after STAR mapping (compatibility default).
                             concurrent  ... launch Chromap before STAR mapping and join before final success.
 
+multiomeAtacPeakMexInline   no
+    string:                 run ATAC peak/MEX materialization inside STAR after
+                            the Chromap AEV1 sidecar is fully written.
+                            no  ... disabled (Phase B default).
+                            yes ... call RunMultiomeAtacPeakMex before STAR exits.
+
+multiomeAtacPeakBarcodeTranslate -
+    string:                 optional ATAC-to-GEX barcode translation table for
+                            inline peak/MEX materialization. If unset, STAR
+                            reuses chromapAtacBarcodeTranslate when available.
+
+multiomeAtacPeakBarcodeTranslateFromFirst yes
+    string:                 yes/no. When yes, column 1 is source ATAC barcode
+                            and column 2 is destination GEX barcode.
+
+multiomeAtacPeakMetricsTsv  -
+    string:                 inline ATAC metrics TSV. Default when unset:
+                            <outFileNamePrefix>/atac/atac_metrics.tsv.
+
+multiomeAtacPeakMexOutDir   -
+    string:                 inline peak MEX output directory. Default when
+                            unset: <outFileNamePrefix>/atac/peak_mex.
+
+multiomeAtacPeakNarrowPeak  -
+    string:                 inline narrowPeak output. Default when unset:
+                            chromapAtacMacs3FragPeaksOutput if set, otherwise
+                            <outFileNamePrefix>/atac/atac_peaks.narrowPeak.
+
+multiomeAtacPeakSummits     -
+    string:                 inline summits BED output. Default when unset:
+                            chromapAtacMacs3FragSummitsOutput if set, otherwise
+                            <outFileNamePrefix>/atac/atac_summits.bed.
+
+multiomeAtacPeakThreads     0
+    int:                    peak/MEX materialization threads. 0 inherits
+                            runThreadN.
+
+multiomeAtacPeakMaxBarcodes 0
+    uint:                   keep only the top N ATAC barcodes by total
+                            fragments; 0 keeps all barcodes.
+
 ### Default Module Flag Groups
 ### These flags apply predefined parameter bundles for common workflows.
 ### Explicit command-line options always override defaults from these groups.
