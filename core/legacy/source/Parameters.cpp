@@ -746,6 +746,15 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacEvidenceFromPeaksOutput", &chromapAtac.evidenceFromPeaksOutput));
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacTn5ShiftMode", &chromapAtac.tn5ShiftMode));
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacStartMode", &chromapAtac.startMode));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "multiomeAtacPeakMexInline", &multiomeAtacPeakMex.inlineMode));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "multiomeAtacPeakBarcodeTranslate", &multiomeAtacPeakMex.barcodeTranslate));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "multiomeAtacPeakBarcodeTranslateFromFirst", &multiomeAtacPeakMex.barcodeTranslateFromFirst));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "multiomeAtacPeakMetricsTsv", &multiomeAtacPeakMex.metricsTsv));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "multiomeAtacPeakMexOutDir", &multiomeAtacPeakMex.mexOutDir));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "multiomeAtacPeakNarrowPeak", &multiomeAtacPeakMex.narrowPeak));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "multiomeAtacPeakSummits", &multiomeAtacPeakMex.summits));
+    parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "multiomeAtacPeakThreads", &multiomeAtacPeakMex.threads));
+    parArray.push_back(new ParameterInfoScalar<uint64>(-1, -1, "multiomeAtacPeakMaxBarcodes", &multiomeAtacPeakMex.maxBarcodes));
 
     // Default module flag groups
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "defaultBulk", &defaultGroups.bulk));
@@ -1025,6 +1034,42 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
         }
         if (p->nameString == "chromapAtacStartMode" && p->inputLevel < 0) {
             chromapAtac.startMode = "postMapping";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "multiomeAtacPeakMexInline" && p->inputLevel < 0) {
+            multiomeAtacPeakMex.inlineMode = "no";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "multiomeAtacPeakBarcodeTranslate" && p->inputLevel < 0) {
+            multiomeAtacPeakMex.barcodeTranslate = "-";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "multiomeAtacPeakBarcodeTranslateFromFirst" && p->inputLevel < 0) {
+            multiomeAtacPeakMex.barcodeTranslateFromFirst = "yes";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "multiomeAtacPeakMetricsTsv" && p->inputLevel < 0) {
+            multiomeAtacPeakMex.metricsTsv = "-";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "multiomeAtacPeakMexOutDir" && p->inputLevel < 0) {
+            multiomeAtacPeakMex.mexOutDir = "-";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "multiomeAtacPeakNarrowPeak" && p->inputLevel < 0) {
+            multiomeAtacPeakMex.narrowPeak = "-";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "multiomeAtacPeakSummits" && p->inputLevel < 0) {
+            multiomeAtacPeakMex.summits = "-";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "multiomeAtacPeakThreads" && p->inputLevel < 0) {
+            multiomeAtacPeakMex.threads = 0;
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "multiomeAtacPeakMaxBarcodes" && p->inputLevel < 0) {
+            multiomeAtacPeakMex.maxBarcodes = 0;
             p->inputLevel = 0;
         }
     }

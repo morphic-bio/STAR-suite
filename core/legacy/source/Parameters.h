@@ -736,6 +736,20 @@ class Parameters {
             string startMode = "postMapping";
         } chromapAtac;
 
+        // Phase-2 Multiome ATAC peak/MEX materialization from the Chromap AEV1
+        // sidecar. This is off by default for Phase B parity validation.
+        struct {
+            string inlineMode = "no";
+            string barcodeTranslate;
+            string barcodeTranslateFromFirst = "yes";
+            string metricsTsv;
+            string mexOutDir;
+            string narrowPeak;
+            string summits;
+            int threads = 0;       // 0 inherits runThreadN
+            uint64 maxBarcodes = 0;
+        } multiomeAtacPeakMex;
+
         // Default module flag groups - apply predefined parameter bundles
         struct {
             string bulk;             // Yes/No - permissive bulk RNA-seq defaults
