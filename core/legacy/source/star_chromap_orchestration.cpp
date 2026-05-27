@@ -9,6 +9,7 @@
 #include "Parameters.h"
 #include "ThreadControl.h"
 #include "TimeFunctions.h"
+#include "multiome_atac_peak_mex.h"
 #include "star_chromap_contract.h"
 
 #include <algorithm>
@@ -95,6 +96,22 @@ bool isUnsetToken(const std::string &input) {
   return t == "-" || t == "none";
 }
 
+bool parseYesNo(const std::string &input, bool *out) {
+  if (out == nullptr) {
+    return false;
+  }
+  const std::string t = lowerCopy(trimCopy(input));
+  if (t == "yes" || t == "y" || t == "true" || t == "1") {
+    *out = true;
+    return true;
+  }
+  if (t == "no" || t == "n" || t == "false" || t == "0") {
+    *out = false;
+    return true;
+  }
+  return false;
+}
+
 bool isConcurrentStartMode(const std::string &input) {
   return lowerCopy(trimCopy(input)) == "concurrent";
 }
@@ -114,9 +131,68 @@ bool hasUnsetPath(const std::vector<std::string> &paths) {
   return false;
 }
 
+std::string outPrefixPath(const Parameters &P, const std::string &relative) {
+  std::string base = trimCopy(P.outFileNamePrefix);
+  if (base.empty()) {
+    base = "./";
+  }
+  if (!base.empty() && base[base.size() - 1] != '/') {
+    base += "/";
+  }
+  return base + relative;
+}
+
+std::string chooseOutputPath(const std::string &explicitPath,
+                             const std::string &fallbackPath,
+                             const Parameters &P,
+                             const std::string &defaultRelative) {
+  if (!isUnsetToken(explicitPath)) {
+    return trimCopy(explicitPath);
+  }
+  if (!isUnsetToken(fallbackPath)) {
+    return trimCopy(fallbackPath);
+  }
+  return outPrefixPath(P, defaultRelative);
+}
+
+std::string chooseOutputPath(const std::string &explicitPath,
+                             const Parameters &P,
+                             const std::string &defaultRelative) {
+  if (!isUnsetToken(explicitPath)) {
+    return trimCopy(explicitPath);
+  }
+  return outPrefixPath(P, defaultRelative);
+}
+
 bool validateAndBuildConfig(Parameters &P,
                             bool batchModeActive,
                             star::multiome::ChromapAtacConfig *cfg) {
+  bool inlinePeakMex = false;
+  if (!parseYesNo(P.multiomeAtacPeakMex.inlineMode, &inlinePeakMex)) {
+    P.inOut->logMain
+        << "ERROR: --multiomeAtacPeakMexInline must be yes or no (got \""
+        << P.multiomeAtacPeakMex.inlineMode << "\")\n";
+    return false;
+  }
+  bool peakTranslateFromFirst = false;
+  if (!parseYesNo(P.multiomeAtacPeakMex.barcodeTranslateFromFirst,
+                  &peakTranslateFromFirst)) {
+    P.inOut->logMain
+        << "ERROR: --multiomeAtacPeakBarcodeTranslateFromFirst must be yes or no (got \""
+        << P.multiomeAtacPeakMex.barcodeTranslateFromFirst << "\")\n";
+    return false;
+  }
+  (void)peakTranslateFromFirst;
+  if (P.multiomeAtacPeakMex.threads < 0) {
+    P.inOut->logMain
+        << "ERROR: --multiomeAtacPeakThreads must be >= 0 (0 inherits --runThreadN)\n";
+    return false;
+  }
+  if (inlinePeakMex && P.chromapAtac.enabled == 0) {
+    P.inOut->logMain
+        << "ERROR: --multiomeAtacPeakMexInline yes requires --chromapAtacEnable 1\n";
+    return false;
+  }
   if (P.chromapAtac.enabled == 0) {
     return true;
   }
@@ -208,6 +284,12 @@ bool validateAndBuildConfig(Parameters &P,
           << "ERROR: --chromapAtacSecondaryFragments must differ from --chromapAtacOutputFragments\n";
       return false;
     }
+  }
+  if (inlinePeakMex && isUnsetToken(P.chromapAtac.secondaryFragments)) {
+    P.inOut->logMain
+        << "ERROR: --multiomeAtacPeakMexInline yes requires "
+           "--chromapAtacSecondaryFragments to point at the AEV1 binary sidecar\n";
+    return false;
   }
 
   if (isUnsetToken(P.chromapAtac.referenceFasta)) {
@@ -356,6 +438,83 @@ bool validateAndBuildConfig(Parameters &P,
 // orchestration only routes --chromapAtacEvidenceFromPeaksOutput into the
 // contract config; this compatibility stub remains a no-op at old call sites.
 bool runEvidenceFromPeaksIfEnabled(Parameters & /*P*/) { return true; }
+
+bool runInlinePeakMexIfEnabled(Parameters &P) {
+  bool inlinePeakMex = false;
+  if (!parseYesNo(P.multiomeAtacPeakMex.inlineMode, &inlinePeakMex)) {
+    P.inOut->logMain
+        << "ERROR: --multiomeAtacPeakMexInline must be yes or no (got \""
+        << P.multiomeAtacPeakMex.inlineMode << "\")\n";
+    return false;
+  }
+  if (!inlinePeakMex) {
+    return true;
+  }
+
+  bool translateFromFirst = true;
+  if (!parseYesNo(P.multiomeAtacPeakMex.barcodeTranslateFromFirst,
+                  &translateFromFirst)) {
+    P.inOut->logMain
+        << "ERROR: --multiomeAtacPeakBarcodeTranslateFromFirst must be yes or no (got \""
+        << P.multiomeAtacPeakMex.barcodeTranslateFromFirst << "\")\n";
+    return false;
+  }
+
+  star::multiome::MultiomeAtacPeakMexArgs args;
+  args.sidecar = trimCopy(P.chromapAtac.secondaryFragments);
+  if (!isUnsetToken(P.multiomeAtacPeakMex.barcodeTranslate)) {
+    args.barcode_translate = trimCopy(P.multiomeAtacPeakMex.barcodeTranslate);
+  } else if (!isUnsetToken(P.chromapAtac.barcodeTranslate)) {
+    args.barcode_translate = trimCopy(P.chromapAtac.barcodeTranslate);
+  }
+  args.barcode_translate_from_first = translateFromFirst;
+  args.peaks = chooseOutputPath(P.multiomeAtacPeakMex.narrowPeak,
+                                P.chromapAtac.macs3FragPeaksOutput,
+                                P, "atac/atac_peaks.narrowPeak");
+  args.summits_out = chooseOutputPath(P.multiomeAtacPeakMex.summits,
+                                      P.chromapAtac.macs3FragSummitsOutput,
+                                      P, "atac/atac_summits.bed");
+  args.out_dir = chooseOutputPath(P.multiomeAtacPeakMex.mexOutDir,
+                                  P, "atac/peak_mex");
+  args.metrics_tsv = chooseOutputPath(P.multiomeAtacPeakMex.metricsTsv,
+                                      P, "atac/atac_metrics.tsv");
+  if (!isUnsetToken(P.chromapAtac.tempDir)) {
+    args.temp_dir = trimCopy(P.chromapAtac.tempDir);
+  }
+  if (!isUnsetToken(P.chromapAtac.macs3FragKeepIntermediates)) {
+    args.keep_intermediates_dir = trimCopy(P.chromapAtac.macs3FragKeepIntermediates);
+  }
+  args.threads = (P.multiomeAtacPeakMex.threads > 0)
+                     ? P.multiomeAtacPeakMex.threads
+                     : P.runThreadN;
+  args.call_peaks_from_sidecar = true;
+  args.max_barcodes = P.multiomeAtacPeakMex.maxBarcodes;
+  args.macs3_pvalue = P.chromapAtac.macs3FragPvalue;
+  args.macs3_min_length = P.chromapAtac.macs3FragMinLength;
+  args.macs3_max_gap = P.chromapAtac.macs3FragMaxGap;
+  args.macs3_uint8_counts = P.chromapAtac.macs3FragUint8Counts != 0;
+
+  P.inOut->logMain << timeMonthDayTime()
+                   << " ..... starting inline Multiome ATAC peak/MEX materialization\n"
+                   << "       sidecar=" << args.sidecar << "\n"
+                   << "       peaks=" << args.peaks << "\n"
+                   << "       summits=" << args.summits_out << "\n"
+                   << "       peak_mex=" << args.out_dir << "\n"
+                   << "       metrics=" << args.metrics_tsv << "\n"
+                   << flush;
+
+  const int rc = star::multiome::RunMultiomeAtacPeakMex(args);
+  if (rc != 0) {
+    P.inOut->logMain
+        << "ERROR: inline Multiome ATAC peak/MEX materialization failed "
+        << "with exit_code=" << rc << "\n";
+    return false;
+  }
+  P.inOut->logMain << timeMonthDayTime()
+                   << " ..... finished inline Multiome ATAC peak/MEX materialization\n"
+                   << flush;
+  return true;
+}
 
 }  // namespace
 
@@ -800,6 +959,9 @@ bool runStarChromapAtacIfEnabled(Parameters &P,
     if (!runEvidenceFromPeaksIfEnabled(P)) {
       return false;
     }
+    if (!runInlinePeakMexIfEnabled(P)) {
+      return false;
+    }
     return true;
   }
 
@@ -839,6 +1001,9 @@ bool runStarChromapAtacIfEnabled(Parameters &P,
                    << " ..... finished in-process Chromap ATAC successfully\n"
                    << flush;
   if (!runEvidenceFromPeaksIfEnabled(P)) {
+    return false;
+  }
+  if (!runInlinePeakMexIfEnabled(P)) {
     return false;
   }
   return true;

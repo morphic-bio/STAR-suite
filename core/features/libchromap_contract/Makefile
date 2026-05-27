@@ -30,7 +30,8 @@ DEPFLAGS ?= -MMD -MP
 LDFLAGS ?=
 CHROMAP_LDFLAGS := -L$(CHROMAP_HTSLIB_DIR) -lhts -lm -lz -lpthread -lcurl -lcrypto -lbz2 -llzma -ldeflate
 
-LIB_OBJS := $(OBJ_DIR)/star_chromap_contract.o
+MULTIOME_PEAK_MEX_OBJS := $(OBJ_DIR)/multiome_atac_peak_mex.o
+LIB_OBJS := $(OBJ_DIR)/star_chromap_contract.o $(MULTIOME_PEAK_MEX_OBJS)
 RUNNER_OBJS := $(OBJ_DIR)/star_libchromap_contract_runner.o
 PEAK_MEX_OBJS := $(OBJ_DIR)/star_multiome_atac_peak_mex.o
 DEPS := $(LIB_OBJS:.o=.d) $(RUNNER_OBJS:.o=.d) $(PEAK_MEX_OBJS:.o=.d)
@@ -48,10 +49,13 @@ $(OBJ_DIR):
 $(OBJ_DIR)/star_chromap_contract.o: $(SRC_DIR)/star_chromap_contract.cpp $(INC_DIR)/star_chromap_contract.h | $(OBJ_DIR)
 	$(CXX) $(CXXFLAGS) $(DEPFLAGS) -c $< -o $@
 
+$(OBJ_DIR)/multiome_atac_peak_mex.o: $(SRC_DIR)/multiome_atac_peak_mex.cpp $(INC_DIR)/multiome_atac_peak_mex.h | $(OBJ_DIR)
+	$(CXX) $(CXXFLAGS) $(DEPFLAGS) -c $< -o $@
+
 $(OBJ_DIR)/star_libchromap_contract_runner.o: $(TOOLS_DIR)/star_libchromap_contract_runner.cpp $(INC_DIR)/star_chromap_contract.h | $(OBJ_DIR)
 	$(CXX) $(CXXFLAGS) $(DEPFLAGS) -c $< -o $@
 
-$(OBJ_DIR)/star_multiome_atac_peak_mex.o: $(TOOLS_DIR)/star_multiome_atac_peak_mex.cpp | $(OBJ_DIR)
+$(OBJ_DIR)/star_multiome_atac_peak_mex.o: $(TOOLS_DIR)/star_multiome_atac_peak_mex.cpp $(INC_DIR)/multiome_atac_peak_mex.h | $(OBJ_DIR)
 	$(CXX) $(CXXFLAGS) $(DEPFLAGS) -c $< -o $@
 
 $(LIB): $(LIB_OBJS)
@@ -60,8 +64,8 @@ $(LIB): $(LIB_OBJS)
 $(RUNNER): chromap-lib $(LIB) $(RUNNER_OBJS)
 	$(CXX) $(CXXFLAGS) $(RUNNER_OBJS) $(LIB) $(CHROMAP_LIB) $(LIBMACS3_LIB) $(LIBSCRNA_LIB) -o $@ $(LDFLAGS) $(CHROMAP_LDFLAGS)
 
-$(PEAK_MEX): $(PEAK_MEX_OBJS) $(LIBMACS3_LIB)
-	$(CXX) $(CXXFLAGS) $(PEAK_MEX_OBJS) $(LIBMACS3_LIB) -o $@ $(LDFLAGS) $(CHROMAP_LDFLAGS)
+$(PEAK_MEX): $(PEAK_MEX_OBJS) $(LIB) $(LIBMACS3_LIB)
+	$(CXX) $(CXXFLAGS) $(PEAK_MEX_OBJS) $(LIB) $(LIBMACS3_LIB) -o $@ $(LDFLAGS) $(CHROMAP_LDFLAGS)
 
 clean:
 	rm -rf $(OBJ_DIR) $(LIB) $(RUNNER) $(PEAK_MEX)
