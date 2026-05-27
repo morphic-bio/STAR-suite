@@ -202,6 +202,7 @@ OBJECTS = systemFunctions.o SoloMemoryProfile.o CountingSinkStress.o funPrimaryA
 	Transcriptome.o Transcriptome_quantAlign.o Transcriptome_geneFullAlignOverlap.o \
 	ReadAlign_quantTranscriptome.o Quantifications.o Transcriptome_geneCountsAddAlign.o \
 	sjdbLoadFromFiles.o sjdbLoadFromStream.o sjdbPrepare.o sjdbBuildIndex.o sjdbInsertJunctions.o mapThreadsSpawn.o \
+	FastxInputModule.o \
 	Parameters_readFilesInit.o Parameters_openReadsFiles.cpp Parameters_closeReadsFiles.cpp Parameters_batchReset.cpp Parameters_readSAMheader.o \
 	bam_cat.o serviceFuns.o GlobalVariables.cpp \
 	BAMoutput.o BAMfunctions.o ReadAlign_alignBAM.o BAMbinSortByCoordinate.o signalFromBAM.o bamRemoveDuplicates.o BAMbinSortUnmapped.o \
@@ -233,7 +234,7 @@ ocm-multi-unit-tests : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS) $
 ocm-multi-unit-tests : Depend.list parametersDefault.xxd $(OBJECTS_NO_MAIN) libflex libtrim libem libprocess_features $(LIBSCRNA_LIB) $(OCM_UNIT_TEST_SRC)
 	$(CXX) -o ocm_multi_unit_tests $(CXXFLAGS) $(OCM_UNIT_TEST_SRC) $(OBJECTS_NO_MAIN) $(LIBFLEX_LIB) $(LIBTRIM_LIB) $(LIBEM_LIB) $(PROCESS_FEATURES_LIB) $(LIBSCRNA_LIB) $(LDFLAGS)
 
-SOURCES := $(SRC_CPP_ROOT) $(FLEX_SRC_DIR)/ReadAlign_resolveAmbiguousCBs.cpp $(wildcard *.c) $(wildcard flex/*.cpp)
+SOURCES := $(SRC_CPP_ROOT) $(wildcard input/*.cpp) $(FLEX_SRC_DIR)/ReadAlign_resolveAmbiguousCBs.cpp $(wildcard *.c) $(wildcard flex/*.cpp)
 
 %.o : %.c
 	$(CXX) -c $(CPPFLAGS) $(CFLAGS) $<
@@ -265,6 +266,13 @@ trim_qc_fastq : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
 trim_qc_fastq : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS)
 trim_qc_fastq : htslib/libhts.a TrimQc.o TrimQcOutput.o Stats.o TimeFunctions.o trim_qc_fastq.cpp
 	$(CXX) -o trim_qc_fastq $(CXXFLAGS) trim_qc_fastq.cpp TrimQc.o TrimQcOutput.o Stats.o TimeFunctions.o $(LDFLAGS)
+
+# Standalone input-contract harness for FASTX module parity/smoke tests.
+.PHONY: fastx-input-harness
+fastx-input-harness : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
+fastx-input-harness : LDFLAGS := $(LDFLAGSextra) -lz -lcrypto
+fastx-input-harness : FastxInputModule.o input/fastx_input_harness.cpp
+	$(CXX) -o fastx_input_harness $(CXXFLAGS) input/fastx_input_harness.cpp FastxInputModule.o $(LDFLAGS)
 
 # Standalone star_feature_call tool for perturb-seq processing
 # Requires libprocess_features.a to be built first
@@ -457,6 +465,9 @@ flex/%.o: flex/%.cpp
 	@mkdir -p flex
 	$(CXX) -c $(CPPFLAGS) $(CXXFLAGS) $(CXXFLAGS_common) $< -o $@
 
+FastxInputModule.o: input/FastxInputModule.cpp input/FastxInputModule.h input/InputContract.h
+	$(CXX) -c $(CPPFLAGS) $(CXXFLAGS) $(CXXFLAGS_common) $< -o $@
+
 opal/opal.o : opal/opal.cpp opal/opal.h
 	cd opal && \
 	$(CXX) -c -I./ -std=c++11 $(CPPFLAGS) $(CXXFLAGS) $(CXXFLAGSextra) $(CXXFLAGS_SIMD) opal.cpp
@@ -471,7 +482,7 @@ solo/CbBayesianResolver.o : $(FLEX_SRC_DIR)/solo/CbBayesianResolver.cpp $(FLEX_S
 
 .PHONY: clean
 clean:
-	'rm' -f *.o opal/opal.o solo/*.o flex/*.o STAR STARstatic STARlong star_feature_call Depend.list parametersDefault.xxd star_chromap_orchestration.o star_chromap_orchestration_stub.o .depend.with_chromap_*
+	'rm' -f *.o opal/opal.o solo/*.o flex/*.o STAR STARstatic STARlong star_feature_call fastx_input_harness Depend.list parametersDefault.xxd star_chromap_orchestration.o star_chromap_orchestration_stub.o .depend.with_chromap_*
 	$(MAKE) -C $(LIBFLEX_DIR) clean
 	$(MAKE) -C $(LIBTRIM_DIR) clean
 	$(MAKE) -C $(LIBEM_DIR) clean

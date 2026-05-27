@@ -49,6 +49,7 @@ Depend.list
 /core/legacy/source/STARlong
 /core/legacy/source/compat_unit_tests
 /core/legacy/source/trim_qc_fastq
+/core/legacy/source/fastx_input_harness
 /core/legacy/source/Aligned.out.sam
 /core/legacy/source/Log.progress.out
 /core/features/vbem/source/libem/libem.a
