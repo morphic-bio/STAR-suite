@@ -1,5 +1,6 @@
 #include "Parameters.h"
 #include "ErrorWarning.h"
+#include "input/FastxInputModule.h"
 #include "streamFuns.h"
 #include <fstream>
 #include <sys/stat.h>
@@ -256,4 +257,22 @@ void Parameters::readFilesInit()
     };
     
     readNmates=readNends; //this may be changed later if one of the reads is barcode rea
+
+    if (readFilesTypeN==1) {
+        star::input::InputSourcePlan fastxInputPlan =
+            star::input::make_fastx_input_source_plan(
+                readFilesNames,
+                outSAMattrRG,
+                readFilesCommandString,
+                readFilesPrefixFinal,
+                readFilesUseInternalGzip);
+        star::input::FastxInputModule fastxInputModule;
+        string inputContractError;
+        if (!fastxInputModule.configure(fastxInputPlan, &inputContractError)) {
+            ostringstream errOut;
+            errOut << "EXITING because of FATAL INPUT ERROR: invalid Fastx input source plan\n";
+            errOut << inputContractError << "\n";
+            exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+        };
+    };
 };
