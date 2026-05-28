@@ -873,8 +873,11 @@ int main(int argInN, char *argIn[])
     std::vector<std::string> batchFastqsR1;
     std::vector<std::string> batchFastqsR2;
     bool batchPaired = (P.readNends > 1);
+    bool batchSplitMateLists = false;
     bool batchModeActive = P.batchMode;
     bool batchErrorRateFromBlank = (batchModeActive && P.quant.slam.yes && P.quant.slam.errorRateFromBlank);
+    std::vector<std::string> batchOutSAMattrRG;
+    std::vector<std::string> batchOutSAMattrRGlineSplit;
 
     if (!preflightStarChromapAtacIfEnabled(P, batchModeActive)) {
         ostringstream errOut;
@@ -894,10 +897,13 @@ int main(int argInN, char *argIn[])
     if (batchModeActive) {
         P.batchPaired = batchPaired;
         P.batchResumeHasList = false;
+        batchSplitMateLists = batchPaired && P.readFilesNames.size() > 1;
+        batchOutSAMattrRG = P.outSAMattrRG;
+        batchOutSAMattrRGlineSplit = P.outSAMattrRGlineSplit;
         if (P.readFilesNames.size() > 0) {
             batchFastqsR1 = P.readFilesNames[0];
         }
-        if (batchPaired && P.readFilesNames.size() > 1) {
+        if (batchSplitMateLists) {
             batchFastqsR2 = P.readFilesNames[1];
         }
         
@@ -918,8 +924,8 @@ int main(int argInN, char *argIn[])
         }
         for (size_t i = 0; i < batchFastqsR1.size(); ++i) {
             P.inOut->logMain << "  [" << i << "] " << extractSampleNameFromFastq(batchFastqsR1[i]) 
-                             << " (R1=" << batchFastqsR1[i];
-            if (batchPaired && i < batchFastqsR2.size()) {
+                             << (P.readFilesTypeN == 20 ? " (CBQ=" : " (R1=") << batchFastqsR1[i];
+            if (batchSplitMateLists && i < batchFastqsR2.size()) {
                 P.inOut->logMain << ", R2=" << batchFastqsR2[i];
             }
             P.inOut->logMain << ")\n";
@@ -995,11 +1001,28 @@ int main(int argInN, char *argIn[])
             // Set readFilesNames to single file for this sample (per mate)
             P.readFilesNames[0].clear();
             P.readFilesNames[0].push_back(samplePath);
-            if (batchPaired) {
+            if (batchSplitMateLists) {
                 P.readFilesNames[1].clear();
                 P.readFilesNames[1].push_back(batchFastqsR2[batchSampleIdx]);
+            } else if (batchPaired && P.readFilesTypeN == 20) {
+                // Paired CBQ stores both mates in one external source, so batch
+                // mode iterates one CBQ list rather than two split mate lists.
+                P.readFilesNames.resize(1);
             }
             P.readFilesN = 1;
+
+            if (batchOutSAMattrRG.size() == batchFastqsR1.size()) {
+                P.outSAMattrRG.clear();
+                P.outSAMattrRG.push_back(batchOutSAMattrRG[batchSampleIdx]);
+            } else {
+                P.outSAMattrRG = batchOutSAMattrRG;
+            }
+            if (batchOutSAMattrRGlineSplit.size() == batchFastqsR1.size()) {
+                P.outSAMattrRGlineSplit.clear();
+                P.outSAMattrRGlineSplit.push_back(batchOutSAMattrRGlineSplit[batchSampleIdx]);
+            } else {
+                P.outSAMattrRGlineSplit = batchOutSAMattrRGlineSplit;
+            }
             
             // Close any open read files from previous sample
             P.closeReadsFiles();
@@ -1020,7 +1043,7 @@ int main(int argInN, char *argIn[])
                 P.batchResumeFastqListR1 = joinStrings(resumeR1, ",");
                 P.batchResumeHasList = true;
             }
-            if (batchPaired && !batchFastqsR2.empty()) {
+            if (batchSplitMateLists && !batchFastqsR2.empty()) {
                 std::vector<std::string> resumeR2;
                 resumeR2.push_back(batchFastqsR2[0]);
                 int startIdx = (batchSampleIdx == 0 ? 1 : batchSampleIdx);
@@ -2659,10 +2682,12 @@ int main(int argInN, char *argIn[])
     // Restore original file list if batch mode was active
     if (batchModeActive && !batchFastqsR1.empty()) {
         P.readFilesNames[0] = batchFastqsR1;
-        if (batchPaired && !batchFastqsR2.empty()) {
+        if (batchSplitMateLists && !batchFastqsR2.empty()) {
             P.readFilesNames[1] = batchFastqsR2;
         }
         P.readFilesN = batchFastqsR1.size();
+        P.outSAMattrRG = batchOutSAMattrRG;
+        P.outSAMattrRGlineSplit = batchOutSAMattrRGlineSplit;
     }
 
     // Free genome memory after batch loop completes (was deferred during batch processing)

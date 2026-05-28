@@ -446,10 +446,15 @@ Implementation status on `feature/cbq_reader`:
   for CBQ until the non-FASTQ per-file boundary semantics are implemented.
 - `tests/run_cbq_star_input_smoke.sh` maps synthetic paired and single-end FASTQ
   fixtures plus their CBQ conversions through STAR, then requires
-  byte-identical SAM body output for direct CBQ and manifest-style paired CBQ
-  input.
+  byte-identical SAM body output for direct CBQ, manifest-style paired CBQ,
+  comma-separated multi-lane/multi-sample CBQ, and paired-CBQ `--batchMode 1`
+  output routing. Batch manifest inputs are also checked for per-sample read
+  group isolation.
 - `parametersDefault` documents `Binseq SE` and `Binseq PE`, and
   `parametersDefault.xxd` has been regenerated.
+- `mcp_server/workflows/star_binseq_pe_batch.yaml` exposes a public MCP recipe
+  for paired-CBQ direct-list or manifest inputs, with Y/noY explicitly gated as
+  FASTQ-only for now.
 
 ### Phase 6B: App-Specific CBQ Adapters
 
