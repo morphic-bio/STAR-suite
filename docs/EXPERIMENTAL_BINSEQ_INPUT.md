@@ -34,12 +34,19 @@ STAR --readFilesType Binseq SE --readFilesIn sample.cbq ...
   single-end reads from FASTQ and CBQ through production STAR and verifies
   byte-identical SAM body output, including manifest-style paired CBQ input,
   comma-separated multi-lane/multi-sample CBQ input, and paired-CBQ
-  `--batchMode 1` output routing.
+  `--batchMode 1` output routing. Default-compressed and level-0 CBQ inputs
+  are both covered.
+- `tests/run_cbq_solo_e2e_smoke.sh` runs a synthetic STARsolo fixture through
+  FASTQ and CBQ input and requires byte-identical raw Gene MEX output for
+  direct CBQ, level-0 CBQ, and manifest-style CBQ input.
 - Single-end `.cbq` files are covered by the synthetic conversion smoke.
 - process_features CBQ input is covered by a FASTQ-vs-CBQ MEX/count parity
   smoke on a synthetic feature-barcode fixture with valid nucleotide UMIs.
 - Chromap CBQ input is covered by a CBQ-to-Chromap-FASTQ adapter smoke and, on
   hosts with Chromap available, a tiny synthetic mapping run.
+- `tests/run_cbq_e2e_module_regression.sh` runs the downsampled CBQ module
+  suite for the reader, STAR mapper, STARsolo, process_features, and Chromap
+  adapter surfaces.
 - Direct `--readFilesIn sample.cbq` and manifest-style
   `CBQ<TAB>-<TAB>ReadGroup` probe inputs are covered.
 - Default-compressed and uncompressed CBQ files are smoke-tested.
@@ -48,8 +55,9 @@ STAR --readFilesType Binseq SE --readFilesIn sample.cbq ...
 
 ## Experimental Limitations
 
-- Solo, Flex, SLAM, batch mode, and large production alignment outputs have not
-  been validated directly from BINSEQ input.
+- Flex and SLAM production workflows, native Chromap in-memory integration, and
+  large production alignment outputs have not been validated directly from
+  BINSEQ input.
 - Chromap integration currently adapts CBQ to Chromap's existing FASTQ path
   contract; it is not yet an in-memory libchromap reader API.
 - SLAM per-file skipping is currently rejected for BINSEQ input.
@@ -125,10 +133,18 @@ BQTOOLS=/path/to/bqtools tests/run_cbq_cpp_reader_smoke.sh
 ```
 
 Production STAR mapper smoke, covering paired and single-end FASTQ-vs-CBQ SAM
-body parity plus manifest, multi-sample, and paired-CBQ batch inputs:
+body parity plus manifest, multi-sample, paired-CBQ batch inputs, and level-0
+CBQ:
 
 ```bash
 BQTOOLS=/path/to/bqtools tests/run_cbq_star_input_smoke.sh
+```
+
+STARsolo E2E smoke, covering raw Gene MEX parity for FASTQ, direct CBQ,
+level-0 CBQ, and manifest CBQ:
+
+```bash
+BQTOOLS=/path/to/bqtools tests/run_cbq_solo_e2e_smoke.sh
 ```
 
 process_features adapter smoke, covering gzipped FASTQ reference input versus
@@ -144,6 +160,12 @@ tiny Chromap mapping check:
 
 ```bash
 BQTOOLS=/path/to/bqtools tests/run_cbq_chromap_adapter_smoke.sh
+```
+
+Downsampled CBQ E2E/module regression suite:
+
+```bash
+BQTOOLS=/path/to/bqtools tests/run_cbq_e2e_module_regression.sh
 ```
 
 Upstream ARC paired-CBQ fixture smoke:
@@ -270,7 +292,9 @@ normal mapper path for the modes that have been validated.
 - Synthetic smoke: `tests/run_binseq_probe_smoke.sh`
 - Native C++ reader smoke: `tests/run_cbq_cpp_reader_smoke.sh`
 - STAR mapper smoke: `tests/run_cbq_star_input_smoke.sh`
+- STARsolo E2E smoke: `tests/run_cbq_solo_e2e_smoke.sh`
 - process_features adapter smoke: `tests/run_cbq_pf_adapter_smoke.sh`
 - Chromap adapter smoke: `tests/run_cbq_chromap_adapter_smoke.sh`
+- CBQ module regression suite: `tests/run_cbq_e2e_module_regression.sh`
 - Upstream fixture smoke: `tests/run_binseq_upstream_fixture_smoke.sh`
 - Artifact policy: `tests/ARTIFACTS.md`
