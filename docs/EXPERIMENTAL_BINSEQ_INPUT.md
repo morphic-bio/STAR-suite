@@ -294,6 +294,8 @@ normal mapper path for the modes that have been validated.
 - Implementation runbook: `docs/RUNBOOK_BINSEQ_INPUT_CONTRACT.md`
 - Native reader and STAR adapter prototype:
   `docs/RUNBOOK_BINSEQ_CPP_READER_PROTOTYPE.md`
+- Chromap ATAC in-memory integration plan:
+  `docs/RUNBOOK_CHROMAP_ATAC_CBQ_IN_MEMORY.md`
 - Synthetic smoke: `tests/run_binseq_probe_smoke.sh`
 - Native C++ reader smoke: `tests/run_cbq_cpp_reader_smoke.sh`
 - STAR mapper smoke: `tests/run_cbq_star_input_smoke.sh`
