@@ -180,6 +180,7 @@ bool BinseqInputProbeModule::configure(const InputSourcePlan& plan, std::string*
     plan_ = plan;
     plan_.format = SourceFormat::Binseq;
     plan_.module_name = "BinseqProbe";
+    plan_.preserves_source_order = false;
     plan_.read_files_n = static_cast<uint32_t>(plan.mate_files.front().size());
     configured_ = true;
     return true;

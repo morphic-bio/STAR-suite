@@ -1,6 +1,6 @@
 # STAR libchromap Contract
 
-Status: implemented STAR orchestration hook (opt-in). Current production
+Status: implemented STAR orchestration hook. Current production
 multiome runs use STAR/Chromap for local BAM plus binary sidecar
 materialization, then call peaks and build ATAC peak MEX from that sidecar
 outside STAR.
@@ -11,12 +11,14 @@ sidecar. The contract lives in:
 - `core/features/libchromap_contract/include/star_chromap_contract.h`
 - `core/features/libchromap_contract/src/star_chromap_contract.cpp`
 
-Orchestration (compile-time optional + runtime opt-in):
+Orchestration (default compiled in + runtime opt-in):
 
-- **Build:** Default `make core` uses a stub (`star_chromap_orchestration_stub.cpp`):
-  no `libchromap`, no extra `libhts.so` at link time. Chromap integration requires
-  `make core WITH_CHROMAP=1` (same flag for `STAR` / `STARstatic` / `gdb` in
-  `core/legacy/source`).
+- **Build:** Default `make core` builds the Chromap-enabled multiome-capable
+  STAR binary and links `libchromap`, `libMACS3`, the STAR libchromap contract,
+  and system `libhts`. Use `make core-portable` or `make core WITH_CHROMAP=0`
+  only for explicit no-Chromap compatibility builds. The stub
+  (`star_chromap_orchestration_stub.cpp`) remains available for that portable
+  mode.
 - **Runtime:** With a Chromap-enabled binary, `star_chromap_orchestration.cpp`
   calls `star::multiome::runChromapAtac` either after STAR mapping completes
   (`--chromapAtacStartMode postMapping`, default) or in a background thread
@@ -26,8 +28,8 @@ Orchestration (compile-time optional + runtime opt-in):
   compatibility, thread count, and Tn5 shift mode are checked before STAR starts
   expensive mapping work.
 - GEX/mapping behavior is unchanged when `--chromapAtacEnable` is absent or `0`.
-- A stub-only binary with `--chromapAtacEnable 1` **fails** with a clear rebuild
-  message (no silent skip).
+- A portable/stub-only binary with `--chromapAtacEnable 1` **fails** with a
+  clear rebuild message (no silent skip).
 - When `--chromapAtacEnable 1`, Chromap failures call `exitWithError` with
   `EXIT_CODE_RUNTIME` so the run does not report success.
 - **Batch mode** (`--batchMode` / SLAM batch) with `--chromapAtacEnable 1` **fails**
@@ -104,12 +106,13 @@ Build:
 
 ```bash
 make star-libchromap-contract          # contract runner + libstar_chromap_contract.a
-make core                              # default: portable STAR (no Chromap link)
-make core WITH_CHROMAP=1               # STAR + libchromap + system libhts for Chromap symbols
+make core                              # default: STAR + libchromap + system libhts
+make core-portable                     # explicit portable STAR (no Chromap link)
+make core WITH_CHROMAP=0               # same no-Chromap compatibility mode
 ```
 
-With `WITH_CHROMAP=1`, the legacy Makefile builds `libchromap.a` in
-`Chromap-suite` if needed. Override paths:
+With the default Chromap-enabled build, the legacy Makefile builds
+`libchromap.a` in `Chromap-suite` if needed. Override paths:
 
 - `CHROMAP_SUITE_DIR` — default `/mnt/pikachu/Chromap-suite`
 - `CHROMAP_SYS_HTS` — shared `libhts` passed **after** `libchromap.a` on the link
@@ -118,9 +121,10 @@ With `WITH_CHROMAP=1`, the legacy Makefile builds `libchromap.a` in
   on non-Debian layouts.
 
 Chromap-enabled builds are currently supported only for `STAR`, `STARstatic`, and
-`gdb` targets. `STARlong`, `STARlongStatic`, `POSIXSHARED`, `gdb-long`, and Mac
-static targets fail fast with `WITH_CHROMAP=1` rather than attempting an
-incomplete link. Switching between `WITH_CHROMAP=0` and `WITH_CHROMAP=1`
+`gdb` targets. Top-level `make core-long` forces `WITH_CHROMAP=0`; direct
+`STARlong`, `STARlongStatic`, `POSIXSHARED`, `gdb-long`, and Mac static targets
+fail fast with `WITH_CHROMAP=1` rather than attempting an incomplete link.
+Switching between `WITH_CHROMAP=0` and `WITH_CHROMAP=1`
 regenerates dependency state automatically.
 
 The contract implementation links `Chromap-suite` and calls
@@ -139,7 +143,7 @@ Validation order:
    outputs with `scripts/compare_fragment_tuples.sh` from the coordination repo.
 4. Repeat the contract runner with `--call-macs3-frag-peaks` plus narrowPeak and
    summits paths; compare peaks against a Chromap CLI/libchromap reference.
-5. Build `make core WITH_CHROMAP=1` and re-run the same fixture through STAR with
+5. Build `make core` and re-run the same fixture through STAR with
    `--chromapAtacEnable 1` and matching `--chromapAtac*` paths; compare fragments
    again.
 6. Build peaks and ATAC peak MEX from the binary sidecar with

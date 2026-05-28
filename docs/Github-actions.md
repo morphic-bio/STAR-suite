@@ -15,10 +15,26 @@ and when artifacts are published.
 | Event | Branch/Tag | Build Scope | Tests | Publish |
 |---|---|---|---|---|
 | Pull Request | any | Docker build sanity (`amd64`) | Tier A | No |
-| Push | `dev` | integration build (`amd64`) | Tier A + selected fixture-free checks | Optional `dev-<sha>` image |
+| Push | `dev-release`, `dev-release-*` | integration build (`amd64`) | Tier A + selected fixture-free checks | Optional `dev-release-<sha>` image |
 | Push | `master` | full multi-arch build (`amd64`,`arm64`) | required checks | Yes (`latest`, `master-<sha>`) |
 | Tag Push | `v*` | release multi-arch build | release gates | Yes (version tags + release assets + PPA source upload) |
 | Scheduled (optional) | nightly | drift detection build | extended checks | Optional `nightly` tag |
+
+Branch and tag policy:
+
+- `master` is production/stable. Stable release tags (`vX.Y.Z`) are cut from
+  `master` after release-candidate validation.
+- `dev-release` is the moving advanced-user preview branch for the next release.
+  It should contain only work that is intended for the next production release,
+  not raw experimental development.
+- `dev-release-vX.Y.Z` is the optional version-scoped release-candidate branch.
+  Use it when a candidate needs multiple fixes without moving the general
+  `dev-release` pointer unpredictably.
+- `vX.Y.Z-rcN` tags are immutable prerelease tags cut from `dev-release` or
+  `dev-release-vX.Y.Z`. Use these for reproducible advanced-user testing and
+  bug reports.
+- After an RC is accepted, merge the version branch to `master` with
+  `git merge --no-ff`, then tag `vX.Y.Z`.
 
 Tag policy:
 
@@ -29,10 +45,10 @@ Tag policy:
 
 ## Path Filters (Implemented)
 
-`ci-pr.yml`, `ci-dev.yml`, and `ci-master.yml` are path-scoped and trigger only when at least one of these changes:
+`ci-pr.yml`, `ci-dev-release.yml`, and `ci-master.yml` are path-scoped and trigger only when at least one of these changes:
 
 - `.github/workflows/ci-pr.yml`
-- `.github/workflows/ci-dev.yml`
+- `.github/workflows/ci-dev-release.yml`
 - `.github/workflows/ci-master.yml`
 - `.github/workflows/release.yml`
 - `docker/**`
@@ -67,8 +83,9 @@ Tag policy:
 ## Container Publishing Policy
 
 - Image name: `biodepot/star-suite`
-- `dev` pushes:
-  - optional `biodepot/star-suite:dev-<sha>`
+- `dev-release` pushes:
+  - optional `biodepot/star-suite:dev-release-<sha>`
+  - optional `biodepot/star-suite:dev-release-latest`
 - `master` pushes:
   - `biodepot/star-suite:latest`
   - `biodepot/star-suite:master-<sha>`
@@ -90,10 +107,10 @@ For Ubuntu discoverability and package updates:
 - `ci-pr.yml`
   - trigger: pull_request
   - checks: lint + `amd64` build + Tier A
-- `ci-dev.yml`
-  - trigger: push to `dev`
+- `ci-dev-release.yml`
+  - trigger: push to `dev-release` and `dev-release-*`
   - checks: integration build + Tier A (+ optional lightweight extras)
-  - publish: optional `dev-<sha>`
+  - publish: optional `dev-release-<sha>` and `dev-release-latest`
 - `ci-master.yml`
   - trigger: push to `master`
   - checks: required checks
@@ -122,14 +139,38 @@ For Ubuntu discoverability and package updates:
 ## Implemented Workflow Files
 
 - `.github/workflows/ci-pr.yml`
-- `.github/workflows/ci-dev.yml`
+- `.github/workflows/ci-dev-release.yml`
 - `.github/workflows/ci-master.yml`
 - `.github/workflows/release.yml`
+
+## Local Make Helpers
+
+The top-level Makefile includes release-branch helpers. They create local
+branches/tags only; pushing remains a human-controlled step.
+
+```bash
+# Show the dev-release workflow commands.
+make dev-release-help
+
+# Create local dev-release and version-scoped candidate branches.
+make dev-release-branch RELEASE_VERSION=1.1.0
+# Optionally set DEV_RELEASE_BASE=<branch-or-sha> to seed the shared branch.
+
+# Run the local build/preflight checks expected before pushing a candidate.
+make dev-release-check
+
+# After committing on dev-release-v1.1.0, create an immutable RC tag.
+make dev-release-tag RELEASE_VERSION=1.1.0 RC=1
+```
 
 ## Branch Protection and Release Gates
 
 - Require PR checks before merge to protected branches.
-- Restrict release workflow to tags created from `master`.
+- Require `CI Dev Release` before promoting from `dev-release-vX.Y.Z` to
+  `master`.
+- Restrict stable release tags to commits reachable from `master`.
+- Restrict prerelease tags (`vX.Y.Z-rcN`) to commits reachable from
+  `dev-release` or `dev-release-vX.Y.Z`.
 - Use immutable tags for release images (`vX.Y.Z`) and keep checksums for all
   published assets.
 

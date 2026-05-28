@@ -38,6 +38,7 @@ Log.out
 ## Build artifacts
 *.o
 Depend.list
+.depend.with_chromap_*
 /source/*.d
 /source/Depend.list
 /source/STAR

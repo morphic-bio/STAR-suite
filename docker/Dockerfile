@@ -10,8 +10,10 @@
 FROM ubuntu:24.04 AS builder
 
 ARG MAKE_JOBS=16
+ARG STAR_WITH_CHROMAP=0
 ENV DEBIAN_FRONTEND=noninteractive
 ENV MAKE_JOBS=$MAKE_JOBS
+ENV STAR_WITH_CHROMAP=$STAR_WITH_CHROMAP
 
 # Build dependencies
 # - core/legacy uses vendored htslib
@@ -44,13 +46,16 @@ COPY . .
 # Remove host-generated artifacts that may contain host paths (Depend.list, etc.)
 RUN rm -f core/legacy/source/Depend.list core/legacy/source/*.o core/legacy/source/htslib/*.a 2>/dev/null || true
 
-# Validate Makefile targets in order
-RUN make -j"${MAKE_JOBS}" core \
-    && make -j"${MAKE_JOBS}" flex \
-    && make -j"${MAKE_JOBS}" slam \
+# Validate Makefile targets in order. This single-repo Docker context does not
+# include the sibling Chromap-suite checkout, so it uses the explicit portable
+# compatibility build unless STAR_WITH_CHROMAP=1 is provided with Chromap-suite
+# available in the image.
+RUN make -j"${MAKE_JOBS}" core WITH_CHROMAP="${STAR_WITH_CHROMAP}" \
+    && make -j"${MAKE_JOBS}" flex WITH_CHROMAP="${STAR_WITH_CHROMAP}" \
+    && make -j"${MAKE_JOBS}" slam WITH_CHROMAP="${STAR_WITH_CHROMAP}" \
     && make -j"${MAKE_JOBS}" feature-barcodes-tools \
-    && make default \
-    && make all
+    && make default WITH_CHROMAP="${STAR_WITH_CHROMAP}" \
+    && make all WITH_CHROMAP="${STAR_WITH_CHROMAP}"
 
 # Pre-build SLAM SNP EM test helper so Tier A can run without a compiler.
 RUN g++ -std=c++11 -O2 \
