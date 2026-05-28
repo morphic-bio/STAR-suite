@@ -42,6 +42,8 @@ struct CbqReadView;
 #include <vector>
 
 class ReadAlign {
+    friend class ReadAlignChunk;
+
     public:
         ReadAlign (Parameters& Pin, Genome &genomeIn, Transcriptome *TrIn, int iChunk,
                    const libem::Transcriptome* libemTr = nullptr);//allocate arrays

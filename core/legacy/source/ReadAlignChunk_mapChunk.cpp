@@ -2,6 +2,7 @@
 #include "GlobalVariables.h"
 #include "ThreadControl.h"
 #include "ErrorWarning.h"
+#include "input/CbqStarAdapter.h"
 #include SAMTOOLS_BGZF_H
 
 void ReadAlignChunk::mapChunk() {//map one chunk. Input reads stream has to be setup in RA->readInStream[ii]
@@ -192,8 +193,54 @@ void ReadAlignChunk::mapCbqChunk() {//map one owned CBQ chunk through STAR read 
         };
     };
 
-    for (const CbqChunkRecord& record : cbqChunkRecords) {
-        const int readStatus = RA->oneReadFromCbqView(record.view);
+    star::input::CbqStarAdapterOptions cbqOptions;
+    cbqOptions.read_nends = P.readNends;
+    cbqOptions.out_sam_read_id_number = P.outSAMreadIDnumber;
+    cbqOptions.out_qs_conversion_add = P.outQSconversionAdd;
+    cbqOptions.trim_cutadapt_enabled = (P.trimCutadapt == "Yes");
+    cbqOptions.preserve_read_name_extra = false;
+
+    star::input::CbqStarReadBuffers cbqBuffers;
+    cbqBuffers.read_name_mates = RA->readNameMates;
+    cbqBuffers.read0 = RA->Read0;
+    cbqBuffers.read1 = RA->Read1;
+    cbqBuffers.qual0 = RA->Qual0;
+    cbqBuffers.read_name_extra = &RA->readNameExtra;
+    cbqBuffers.read_length = RA->readLength;
+    cbqBuffers.read_length_original = RA->readLengthOriginal;
+    cbqBuffers.i_read_all = &RA->iReadAll;
+    cbqBuffers.read_files_index = &RA->readFilesIndex;
+    cbqBuffers.read_filter = &RA->readFilter;
+    cbqBuffers.read_file_type = &RA->readFileType;
+    string cbqLoadError;
+
+    for (uint32 imate = 0; imate < P.readNends; ++imate) {
+        cbqLoadError.clear();
+        if (!star::input::prepare_cbq_star_chunk_clip_info(&cbqStarChunk,
+                                                           imate,
+                                                           &RA->clipMates[imate][0],
+                                                           &cbqLoadError)) {
+            ostringstream errOut;
+            errOut << "EXITING because of FATAL ERROR in CBQ input adapter clip preparation\n";
+            errOut << cbqLoadError << "\n";
+            exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_INPUT_FILES, P);
+        }
+    }
+
+    for (size_t irecord = 0; irecord < cbqStarChunk.read_count(); ++irecord) {
+        cbqLoadError.clear();
+        if (!star::input::load_cbq_star_chunk_read_into_star_mates(cbqStarChunk,
+                                                                   irecord,
+                                                                   cbqOptions,
+                                                                   &cbqBuffers,
+                                                                   &RA->clipMates,
+                                                                   &cbqLoadError)) {
+            ostringstream errOut;
+            errOut << "EXITING because of FATAL ERROR in CBQ input adapter\n";
+            errOut << cbqLoadError << "\n";
+            exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_INPUT_FILES, P);
+        }
+        const int readStatus = RA->oneReadLoaded(RA->readFileType);
 
         if (readStatus==0) {
             RA->iRead++;
