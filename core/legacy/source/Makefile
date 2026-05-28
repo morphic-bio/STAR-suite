@@ -283,6 +283,14 @@ binseq-probe-harness : LDFLAGS := $(LDFLAGSextra) -lz -lcrypto
 binseq-probe-harness : FastxInputModule.o BinseqInputProbeModule.o input/binseq_probe_harness.cpp
 	$(CXX) -o binseq_probe_harness $(CXXFLAGS) input/binseq_probe_harness.cpp BinseqInputProbeModule.o FastxInputModule.o $(LDFLAGS)
 
+# Standalone native CBQ reader harness. This is the Phase 6A correctness
+# prototype for BINSEQ and does not route CBQ through production STAR mapping.
+.PHONY: cbq-reader-harness
+cbq-reader-harness : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
+cbq-reader-harness : LDFLAGS := $(LDFLAGSextra) -lcrypto -ldl
+cbq-reader-harness : CbqInputModule.o input/cbq_reader_harness.cpp
+	$(CXX) -o cbq_reader_harness $(CXXFLAGS) input/cbq_reader_harness.cpp CbqInputModule.o $(LDFLAGS)
+
 # Standalone star_feature_call tool for perturb-seq processing
 # Requires libprocess_features.a to be built first
 .PHONY: star_feature_call libprocess_features
@@ -480,6 +488,9 @@ FastxInputModule.o: input/FastxInputModule.cpp input/FastxInputModule.h input/In
 BinseqInputProbeModule.o: input/BinseqInputProbeModule.cpp input/BinseqInputProbeModule.h input/FastxInputModule.h input/InputContract.h
 	$(CXX) -c $(CPPFLAGS) $(CXXFLAGS) $(CXXFLAGS_common) $< -o $@
 
+CbqInputModule.o: input/CbqInputModule.cpp input/CbqInputModule.h input/InputContract.h
+	$(CXX) -c $(CPPFLAGS) $(CXXFLAGS) $(CXXFLAGS_common) $< -o $@
+
 opal/opal.o : opal/opal.cpp opal/opal.h
 	cd opal && \
 	$(CXX) -c -I./ -std=c++11 $(CPPFLAGS) $(CXXFLAGS) $(CXXFLAGSextra) $(CXXFLAGS_SIMD) opal.cpp
@@ -494,7 +505,7 @@ solo/CbBayesianResolver.o : $(FLEX_SRC_DIR)/solo/CbBayesianResolver.cpp $(FLEX_S
 
 .PHONY: clean
 clean:
-	'rm' -f *.o opal/opal.o solo/*.o flex/*.o STAR STARstatic STARlong star_feature_call fastx_input_harness binseq_probe_harness Depend.list parametersDefault.xxd star_chromap_orchestration.o star_chromap_orchestration_stub.o .depend.with_chromap_*
+	'rm' -f *.o opal/opal.o solo/*.o flex/*.o STAR STARstatic STARlong star_feature_call fastx_input_harness binseq_probe_harness cbq_reader_harness Depend.list parametersDefault.xxd star_chromap_orchestration.o star_chromap_orchestration_stub.o .depend.with_chromap_*
 	$(MAKE) -C $(LIBFLEX_DIR) clean
 	$(MAKE) -C $(LIBTRIM_DIR) clean
 	$(MAKE) -C $(LIBEM_DIR) clean

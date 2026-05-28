@@ -52,6 +52,7 @@ Depend.list
 /core/legacy/source/trim_qc_fastq
 /core/legacy/source/fastx_input_harness
 /core/legacy/source/binseq_probe_harness
+/core/legacy/source/cbq_reader_harness
 /core/legacy/source/Aligned.out.sam
 /core/legacy/source/Log.progress.out
 /core/features/vbem/source/libem/libem.a
