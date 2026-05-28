@@ -132,6 +132,12 @@ should adapt that view into STAR, Chromap, or feature-calling structs directly.
 The owned-string `InputRecord` contract remains useful for harness parity and
 legacy compatibility, but should not be the production CBQ handoff surface.
 
+Production CBQ support means an in-memory decoded sequence view to the consumer,
+or a direct adapter from decoded CBQ state into the consumer's native structs.
+It does not mean materializing FASTQ or another text intermediary. Temporary
+FASTQ is reserved for oracle tests, debugging, and explicit compatibility
+adapters for tools that only expose FASTQ-path contracts.
+
 ## Implementation Language Policy
 
 Default to a native C++ CBQ reader for production STAR integration. Keep Rust
@@ -474,6 +480,8 @@ Implementation status on `feature/cbq_reader`:
 - Chromap's current integration contract is path-based
   (`read1_fastqs`, `read2_fastqs`, `barcode_fastqs`), so `CbqChromapAdapter`
   materializes synchronized FASTQs from a paired-read CBQ plus a barcode CBQ.
+  This is a compatibility adapter, not full production CBQ support under the
+  project definition above.
 - `tests/run_cbq_chromap_adapter_smoke.sh` verifies sequence/quality payload
   parity for those materialized FASTQs and runs a tiny Chromap mapping smoke
   when `CHROMAP_BIN` is available.
