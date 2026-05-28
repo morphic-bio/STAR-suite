@@ -20,7 +20,7 @@ Verify:
 core/legacy/source/STAR --version
 ```
 
-Expected: `1.0.0`
+Expected: `1.0.1`
 
 For upstream STAR provenance, run:
 
