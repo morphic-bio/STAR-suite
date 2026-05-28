@@ -129,6 +129,17 @@ Environment variables in config use `${VAR_NAME}` syntax.
 
 **Workflow vs Script tools**: Workflows provide structured parameter contracts for agent consumption. Scripts provide raw allowlisted execution. They are complementary:
 
+Current public STAR CLI recipes:
+
+| Workflow ID | Purpose | Default render |
+|-------------|---------|----------------|
+| `star_genome_generate` | Build a STAR genome index. | `--runMode genomeGenerate` with caller-supplied FASTA and output genomeDir. |
+| `star_bulk_pe_batch` | FASTQ paired-end batch alignment. | `--batchMode 1` with two comma-separated mate lists. |
+| `star_binseq_pe_batch` | Paired CBQ/BINSEQ alignment or batch processing. | `--readFilesType Binseq PE --batchMode 1` with one comma-separated CBQ list or a CBQ manifest. |
+| `star_scrna_solo_droplet` | Droplet STARsolo command. | Caller-supplied FASTQs, genomeDir, and whitelist. |
+| `star_flex_fixed_rna` | STAR-Flex Fixed RNA command. | Caller-supplied Fixed RNA inputs and whitelist layout. |
+| `star_perturb_cr_compat` | Perturb-seq CR-compatible STAR command. | CR-compatible threading defaults and feature config inputs. |
+
 Current local/private SLAM workflows:
 
 | Workflow ID | Purpose | Default render |

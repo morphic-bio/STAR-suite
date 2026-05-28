@@ -32,7 +32,9 @@ STAR --readFilesType Binseq SE --readFilesIn sample.cbq ...
   read buffers without materializing synthetic FASTQ streams.
 - `tests/run_cbq_star_input_smoke.sh` maps the same synthetic paired and
   single-end reads from FASTQ and CBQ through production STAR and verifies
-  byte-identical SAM body output, including manifest-style paired CBQ input.
+  byte-identical SAM body output, including manifest-style paired CBQ input,
+  comma-separated multi-lane/multi-sample CBQ input, and paired-CBQ
+  `--batchMode 1` output routing.
 - Single-end `.cbq` files are covered by the synthetic conversion smoke.
 - process_features CBQ input is covered by a FASTQ-vs-CBQ MEX/count parity
   smoke on a synthetic feature-barcode fixture with valid nucleotide UMIs.
@@ -123,7 +125,7 @@ BQTOOLS=/path/to/bqtools tests/run_cbq_cpp_reader_smoke.sh
 ```
 
 Production STAR mapper smoke, covering paired and single-end FASTQ-vs-CBQ SAM
-body parity plus manifest-style paired CBQ input:
+body parity plus manifest, multi-sample, and paired-CBQ batch inputs:
 
 ```bash
 BQTOOLS=/path/to/bqtools tests/run_cbq_star_input_smoke.sh

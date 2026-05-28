@@ -1,0 +1,243 @@
+# Public recipe: paired CBQ/BINSEQ batch alignment.
+id: star_binseq_pe_batch
+title: STAR BINSEQ/CBQ paired-end batch
+summary: Single STAR alignReads invocation for paired CBQ inputs using --readFilesType Binseq PE.
+kind: star_cli
+entry_script: core/legacy/source/STAR
+supported_modes: [local]
+caveats:
+  - Build the binary first (make -C core/legacy/source STAR).
+  - Paired CBQ stores R1/R2 in one external file, so pass one comma-separated CBQ list to read_files_cbq.
+  - Alternatively provide a STAR readFilesManifest with rows formatted as CBQ<TAB>-<TAB>ID:sample.
+  - Y/noY FASTQ emission remains FASTQ-only; do not enable --emitYNoYFastq with BINSEQ/CBQ.
+default_output_layout: Prefix from out_file_name_prefix; use out_file_name_prefix_auto for per-sample subdirs when batch_mode is 1.
+
+scripts:
+  - role: entry
+    path: core/legacy/source/STAR
+    description: STAR binary
+    language: native
+
+parameter_groups:
+  - name: inputs
+    title: Reference & CBQ reads
+    description: Genome index directory and paired CBQ input list or manifest.
+    parameters:
+      - run_mode
+      - genome_dir
+      - read_files_type
+      - read_files_layout
+      - read_files_cbq
+      - read_files_manifest
+
+  - name: output
+    title: Output
+    description: Output prefix and batch subdirectory control.
+    parameters:
+      - out_file_name_prefix
+      - out_file_name_prefix_auto
+      - out_sam_kind
+      - out_sam_sort
+
+  - name: performance
+    title: Performance
+    description: Threading and batch mode settings.
+    parameters:
+      - batch_mode
+      - run_thread_n
+
+parameters:
+  - name: run_mode
+    cli_flag: --runMode
+    type: string
+    required: true
+    default: alignReads
+    label: Run mode
+    description: STAR run mode.
+    widget_hint: readonly
+    aliases: [runMode]
+    display_order: 0
+    category: inputs
+
+  - name: genome_dir
+    cli_flag: --genomeDir
+    type: directory
+    required: true
+    path_must_exist: true
+    label: Genome directory
+    description: Directory containing a STAR genome index.
+    example: /storage/autoindex_110_44/bulk_index
+    widget_hint: path
+    aliases: [genomeDir]
+    display_order: 1
+    category: inputs
+
+  - name: read_files_type
+    cli_flag: --readFilesType
+    type: enum
+    required: true
+    default: Binseq
+    choices: [Binseq]
+    operand_group: read_files_type
+    label: Input format
+    description: STAR input format token.
+    widget_hint: readonly
+    display_order: 2
+    category: inputs
+
+  - name: read_files_layout
+    cli_flag: --readFilesType
+    type: enum
+    required: true
+    default: PE
+    choices: [PE]
+    operand_group: read_files_type
+    label: Read layout
+    description: BINSEQ read layout token; paired CBQ carries both mates in one file.
+    widget_hint: readonly
+    display_order: 3
+    category: inputs
+
+  - name: read_files_cbq
+    cli_flag: --readFilesIn
+    type: string
+    required: false
+    default: null
+    label: CBQ files
+    description: Comma-separated paired-CBQ files. In batch mode, each entry is one sample/library.
+    help: Use one list, e.g. sampleA.cbq,sampleB.cbq. Do not provide a second mate list for paired CBQ.
+    example: sampleA.cbq,sampleB.cbq
+    widget_hint: text
+    display_order: 4
+    category: inputs
+
+  - name: read_files_manifest
+    cli_flag: --readFilesManifest
+    type: file
+    required: false
+    default: null
+    path_must_exist: true
+    label: CBQ manifest
+    description: Optional STAR readFilesManifest for CBQ inputs.
+    help: Rows must be CBQ<TAB>-<TAB>ID:sample. Use instead of read_files_cbq.
+    example: /path/to/binseq_manifest.tsv
+    widget_hint: path
+    display_order: 5
+    category: inputs
+
+  - name: out_file_name_prefix
+    cli_flag: --outFileNamePrefix
+    type: string
+    required: true
+    is_output_root: true
+    label: Output prefix
+    description: Output prefix (directory path ending with / recommended).
+    example: /path/to/out_root/
+    widget_hint: path
+    aliases: [outFileNamePrefix]
+    display_order: 6
+    category: output
+
+  - name: out_file_name_prefix_auto
+    cli_flag: --outFileNamePrefixAuto
+    type: int
+    required: true
+    default: 1
+    label: Auto prefix subdirs
+    description: Set to 1 for per-batch-entry subdirectories.
+    widget_hint: number
+    aliases: [outFileNamePrefixAuto]
+    advanced: true
+    display_order: 7
+    min_value: 0
+    max_value: 1
+    category: output
+
+  - name: batch_mode
+    cli_flag: --batchMode
+    type: int
+    required: true
+    default: 1
+    label: Batch mode
+    description: Enable batch mode (single genome load, multiple CBQ libraries).
+    help: Set to 0 to process all CBQ entries as one multi-lane sample instead of separate batch samples.
+    widget_hint: number
+    aliases: [batchMode]
+    advanced: true
+    display_order: 8
+    min_value: 0
+    max_value: 1
+    category: performance
+
+  - name: out_sam_kind
+    cli_flag: --outSAMtype
+    type: string
+    required: true
+    default: BAM
+    operand_group: out_sam_type
+    label: Output format
+    description: outSAMtype first token.
+    widget_hint: text
+    advanced: true
+    display_order: 9
+    category: output
+
+  - name: out_sam_sort
+    cli_flag: --outSAMtype
+    type: string
+    required: true
+    default: SortedByCoordinate
+    operand_group: out_sam_type
+    label: Sort order
+    description: outSAMtype second token.
+    widget_hint: text
+    advanced: true
+    display_order: 10
+    category: output
+
+  - name: run_thread_n
+    cli_flag: --runThreadN
+    type: int
+    required: true
+    default: 16
+    skip_when_default: true
+    label: Threads
+    description: Alignment thread count.
+    example: "16"
+    widget_hint: number
+    aliases: [runThreadN]
+    advanced: true
+    display_order: 11
+    min_value: 1
+    max_value: 128
+    category: performance
+
+constraints:
+  - kind: at_least_one
+    params: [read_files_cbq, read_files_manifest]
+    message: Provide either a comma-separated CBQ list or a manifest.
+  - kind: mutual_exclusion
+    params: [read_files_cbq, read_files_manifest]
+    message: Provide either a comma-separated CBQ list or a manifest, not both.
+  - kind: positive
+    params: [run_thread_n]
+    message: Must be positive.
+  - kind: non_negative
+    params: [batch_mode, out_file_name_prefix_auto]
+    message: Batch mode and auto-prefix mode must be 0 or 1.
+
+rendering:
+  omit_absent_optionals: true
+  flag_order:
+    - run_mode
+    - genome_dir
+    - read_files_type
+    - read_files_layout
+    - read_files_cbq
+    - read_files_manifest
+    - out_file_name_prefix
+    - out_file_name_prefix_auto
+    - batch_mode
+    - out_sam_kind
+    - out_sam_sort
+    - run_thread_n
