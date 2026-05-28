@@ -30,7 +30,7 @@ if [[ ! -x "$STAR_BIN" ]]; then
 fi
 
 rm -rf "$OUT_ROOT"
-mkdir -p "$OUT_ROOT"/{inputs,genome,fastx,fastx_b,fastx_multi,binseq,binseq_manifest,binseq_multi,binseq_multi_manifest,fastx_se,binseq_se,batch_binseq,batch_binseq_manifest}
+mkdir -p "$OUT_ROOT"/{inputs,genome,fastx,fastx_b,fastx_multi,binseq,binseq_level0,binseq_manifest,binseq_multi,binseq_multi_manifest,fastx_se,binseq_se,binseq_se_level0,batch_binseq,batch_binseq_manifest}
 
 python3 - "$OUT_ROOT" <<'PY'
 import random
@@ -78,34 +78,39 @@ FASTQ_A_R2="$OUT_ROOT/inputs/sampleA_S1_L001_R2_001.fastq"
 FASTQ_B_R1="$OUT_ROOT/inputs/sampleB_S2_L001_R1_001.fastq"
 FASTQ_B_R2="$OUT_ROOT/inputs/sampleB_S2_L001_R2_001.fastq"
 CBQ="$OUT_ROOT/inputs/sampleA_S1_L001.cbq"
+CBQ_LEVEL0="$OUT_ROOT/inputs/sampleA_S1_L001_level0.cbq"
 CBQ_B="$OUT_ROOT/inputs/sampleB_S2_L001.cbq"
 SE_CBQ="$OUT_ROOT/inputs/reads_single.cbq"
+SE_CBQ_LEVEL0="$OUT_ROOT/inputs/reads_single_level0.cbq"
 
 encode_pair_cbq() {
     local r1="$1"
     local r2="$2"
     local out="$3"
+    local level="${4:-}"
+    local level_args=()
+    [[ -n "$level" ]] && level_args=(-l "$level")
 
     rm -f "$out"
-    if "$BQTOOLS_BIN" encode "$r1" "$r2" --mode cbq -o "$out" -T 2 \
+    if "$BQTOOLS_BIN" encode "$r1" "$r2" --mode cbq "${level_args[@]}" -o "$out" -T 2 \
         > "$OUT_ROOT/encode_pair.stdout" 2> "$OUT_ROOT/encode_pair.stderr"; then
         [[ -s "$out" ]] && return 0
     fi
 
     rm -f "$out"
-    if "$BQTOOLS_BIN" encode "$r1" "$r2" -o "$out" --mode cbq -T 2 \
+    if "$BQTOOLS_BIN" encode "$r1" "$r2" -o "$out" --mode cbq "${level_args[@]}" -T 2 \
         >> "$OUT_ROOT/encode_pair.stdout" 2>> "$OUT_ROOT/encode_pair.stderr"; then
         [[ -s "$out" ]] && return 0
     fi
 
     rm -f "$out"
-    if "$BQTOOLS_BIN" encode "$r1" "$r2" -o "$out" -T 2 \
+    if "$BQTOOLS_BIN" encode "$r1" "$r2" -o "$out" "${level_args[@]}" -T 2 \
         >> "$OUT_ROOT/encode_pair.stdout" 2>> "$OUT_ROOT/encode_pair.stderr"; then
         [[ -s "$out" ]] && return 0
     fi
 
     rm -f "$out"
-    "$BQTOOLS_BIN" encode "$r1" "$r2" -o "$out" \
+    "$BQTOOLS_BIN" encode "$r1" "$r2" -o "$out" "${level_args[@]}" \
         >> "$OUT_ROOT/encode_pair.stdout" 2>> "$OUT_ROOT/encode_pair.stderr"
     [[ -s "$out" ]]
 }
@@ -113,33 +118,42 @@ encode_pair_cbq() {
 encode_single_cbq() {
     local r1="$1"
     local out="$2"
+    local level="${3:-}"
+    local level_args=()
+    [[ -n "$level" ]] && level_args=(-l "$level")
 
     rm -f "$out"
-    if "$BQTOOLS_BIN" encode "$r1" --mode cbq -o "$out" -T 2 \
+    if "$BQTOOLS_BIN" encode "$r1" --mode cbq "${level_args[@]}" -o "$out" -T 2 \
         > "$OUT_ROOT/encode_single.stdout" 2> "$OUT_ROOT/encode_single.stderr"; then
         [[ -s "$out" ]] && return 0
     fi
 
     rm -f "$out"
-    if "$BQTOOLS_BIN" encode "$r1" -o "$out" --mode cbq -T 2 \
+    if "$BQTOOLS_BIN" encode "$r1" -o "$out" --mode cbq "${level_args[@]}" -T 2 \
         >> "$OUT_ROOT/encode_single.stdout" 2>> "$OUT_ROOT/encode_single.stderr"; then
         [[ -s "$out" ]] && return 0
     fi
 
     rm -f "$out"
-    if "$BQTOOLS_BIN" encode "$r1" -o "$out" -T 2 \
+    if "$BQTOOLS_BIN" encode "$r1" -o "$out" "${level_args[@]}" -T 2 \
         >> "$OUT_ROOT/encode_single.stdout" 2>> "$OUT_ROOT/encode_single.stderr"; then
         [[ -s "$out" ]] && return 0
     fi
 
     rm -f "$out"
-    "$BQTOOLS_BIN" encode "$r1" -o "$out" \
+    "$BQTOOLS_BIN" encode "$r1" -o "$out" "${level_args[@]}" \
         >> "$OUT_ROOT/encode_single.stdout" 2>> "$OUT_ROOT/encode_single.stderr"
     [[ -s "$out" ]]
 }
 
 if ! encode_pair_cbq "$FASTQ_A_R1" "$FASTQ_A_R2" "$CBQ"; then
     echo "ERROR: failed to encode paired FASTQ to CBQ with bqtools" >&2
+    echo "See $OUT_ROOT/encode_pair.stderr" >&2
+    exit 1
+fi
+
+if ! encode_pair_cbq "$FASTQ_A_R1" "$FASTQ_A_R2" "$CBQ_LEVEL0" 0; then
+    echo "ERROR: failed to encode paired FASTQ to level-0 CBQ with bqtools" >&2
     echo "See $OUT_ROOT/encode_pair.stderr" >&2
     exit 1
 fi
@@ -152,6 +166,12 @@ fi
 
 if ! encode_single_cbq "$OUT_ROOT/inputs/reads_SE.fastq" "$SE_CBQ"; then
     echo "ERROR: failed to encode single-end FASTQ to CBQ with bqtools" >&2
+    echo "See $OUT_ROOT/encode_single.stderr" >&2
+    exit 1
+fi
+
+if ! encode_single_cbq "$OUT_ROOT/inputs/reads_SE.fastq" "$SE_CBQ_LEVEL0" 0; then
+    echo "ERROR: failed to encode single-end FASTQ to level-0 CBQ with bqtools" >&2
     echo "See $OUT_ROOT/encode_single.stderr" >&2
     exit 1
 fi
@@ -200,6 +220,13 @@ RG_ATTRS=(--outSAMattributes NH HI AS nM RG)
     --outFileNamePrefix "$OUT_ROOT/binseq/" \
     > "$OUT_ROOT/binseq/star.stdout" \
     2> "$OUT_ROOT/binseq/star.stderr"
+
+"$STAR_BIN" "${COMMON_ARGS[@]}" "${BASE_ATTRS[@]}" \
+    --readFilesType Binseq PE \
+    --readFilesIn "$CBQ_LEVEL0" \
+    --outFileNamePrefix "$OUT_ROOT/binseq_level0/" \
+    > "$OUT_ROOT/binseq_level0/star.stdout" \
+    2> "$OUT_ROOT/binseq_level0/star.stderr"
 
 printf '%s\t-\tID:lane1\n' "$CBQ" > "$OUT_ROOT/inputs/manifest.tsv"
 "$STAR_BIN" "${COMMON_ARGS[@]}" "${BASE_ATTRS[@]}" \
@@ -263,27 +290,38 @@ printf '%s\t-\tID:sampleA\n%s\t-\tID:sampleB\n' "$CBQ" "$CBQ_B" > "$OUT_ROOT/inp
     > "$OUT_ROOT/binseq_se/star.stdout" \
     2> "$OUT_ROOT/binseq_se/star.stderr"
 
+"$STAR_BIN" "${COMMON_ARGS[@]}" "${BASE_ATTRS[@]}" \
+    --readFilesType Binseq SE \
+    --readFilesIn "$SE_CBQ_LEVEL0" \
+    --outFileNamePrefix "$OUT_ROOT/binseq_se_level0/" \
+    > "$OUT_ROOT/binseq_se_level0/star.stdout" \
+    2> "$OUT_ROOT/binseq_se_level0/star.stderr"
+
 awk 'substr($0, 1, 1) != "@" { print }' "$OUT_ROOT/fastx/Aligned.out.sam" > "$OUT_ROOT/fastx/body.sam"
 awk 'substr($0, 1, 1) != "@" { print }' "$OUT_ROOT/fastx_b/Aligned.out.sam" > "$OUT_ROOT/fastx_b/body.sam"
 awk 'substr($0, 1, 1) != "@" { print }' "$OUT_ROOT/binseq/Aligned.out.sam" > "$OUT_ROOT/binseq/body.sam"
+awk 'substr($0, 1, 1) != "@" { print }' "$OUT_ROOT/binseq_level0/Aligned.out.sam" > "$OUT_ROOT/binseq_level0/body.sam"
 awk 'substr($0, 1, 1) != "@" { print }' "$OUT_ROOT/binseq_manifest/Aligned.out.sam" > "$OUT_ROOT/binseq_manifest/body.sam"
 awk 'substr($0, 1, 1) != "@" { print }' "$OUT_ROOT/fastx_multi/Aligned.out.sam" > "$OUT_ROOT/fastx_multi/body.sam"
 awk 'substr($0, 1, 1) != "@" { print }' "$OUT_ROOT/binseq_multi/Aligned.out.sam" > "$OUT_ROOT/binseq_multi/body.sam"
 awk 'substr($0, 1, 1) != "@" { print }' "$OUT_ROOT/binseq_multi_manifest/Aligned.out.sam" > "$OUT_ROOT/binseq_multi_manifest/body.sam"
 awk 'substr($0, 1, 1) != "@" { print }' "$OUT_ROOT/fastx_se/Aligned.out.sam" > "$OUT_ROOT/fastx_se/body.sam"
 awk 'substr($0, 1, 1) != "@" { print }' "$OUT_ROOT/binseq_se/Aligned.out.sam" > "$OUT_ROOT/binseq_se/body.sam"
+awk 'substr($0, 1, 1) != "@" { print }' "$OUT_ROOT/binseq_se_level0/Aligned.out.sam" > "$OUT_ROOT/binseq_se_level0/body.sam"
 awk 'substr($0, 1, 1) != "@" { print }' "$OUT_ROOT/batch_binseq/alignments/sampleA/sampleA_Aligned.out.sam" > "$OUT_ROOT/batch_binseq/sampleA.body.sam"
 awk 'substr($0, 1, 1) != "@" { print }' "$OUT_ROOT/batch_binseq/alignments/sampleB/sampleB_Aligned.out.sam" > "$OUT_ROOT/batch_binseq/sampleB.body.sam"
 awk 'substr($0, 1, 1) != "@" { print }' "$OUT_ROOT/batch_binseq_manifest/alignments/sampleA/sampleA_Aligned.out.sam" > "$OUT_ROOT/batch_binseq_manifest/sampleA.body.sam"
 awk 'substr($0, 1, 1) != "@" { print }' "$OUT_ROOT/batch_binseq_manifest/alignments/sampleB/sampleB_Aligned.out.sam" > "$OUT_ROOT/batch_binseq_manifest/sampleB.body.sam"
 
 cmp -s "$OUT_ROOT/fastx/body.sam" "$OUT_ROOT/binseq/body.sam"
+cmp -s "$OUT_ROOT/fastx/body.sam" "$OUT_ROOT/binseq_level0/body.sam"
 cmp -s "$OUT_ROOT/fastx/body.sam" "$OUT_ROOT/binseq_manifest/body.sam"
 cmp -s "$OUT_ROOT/fastx_multi/body.sam" "$OUT_ROOT/binseq_multi/body.sam"
 cmp -s "$OUT_ROOT/fastx_multi/body.sam" "$OUT_ROOT/binseq_multi_manifest/body.sam"
 cmp -s "$OUT_ROOT/fastx/body.sam" "$OUT_ROOT/batch_binseq/sampleA.body.sam"
 cmp -s "$OUT_ROOT/fastx_b/body.sam" "$OUT_ROOT/batch_binseq/sampleB.body.sam"
 cmp -s "$OUT_ROOT/fastx_se/body.sam" "$OUT_ROOT/binseq_se/body.sam"
+cmp -s "$OUT_ROOT/fastx_se/body.sam" "$OUT_ROOT/binseq_se_level0/body.sam"
 
 grep -q $'\tRG:Z:sampleA' "$OUT_ROOT/batch_binseq_manifest/sampleA.body.sam"
 grep -q $'\tRG:Z:sampleB' "$OUT_ROOT/batch_binseq_manifest/sampleB.body.sam"
