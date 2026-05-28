@@ -101,6 +101,7 @@ std::string extractSampleNameFromFastq(const std::string& path) {
     // Remove common suffixes in order
     std::vector<std::string> suffixes = {
         ".fastq.gz", ".fq.gz", ".fastq", ".fq",
+        ".cbq", ".vbq", ".bq",
         "_R1_001", "_R2_001", "_R1", "_R2",
         "_1", "_2"
     };
@@ -286,6 +287,19 @@ void Parameters::reconfigureOutputPathsForSample(const std::string& sampleName) 
     }
     if (outBAMcoord) {
         outBAMfileCoordName = newPrefix + "Aligned.sortedByCoord.out.bam";
+    }
+    if (outSAMbool && outStd != "SAM") {
+        if (inOut->outSAMfile.is_open()) {
+            inOut->outSAMfile.close();
+        }
+        inOut->outSAMfile.open((newPrefix + "Aligned.out.sam").c_str());
+        if (!inOut->outSAMfile.good()) {
+            std::ostringstream errOut;
+            errOut << "EXITING: cannot create SAM output file "
+                   << newPrefix << "Aligned.out.sam\n";
+            exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_RUNTIME, *this);
+        }
+        inOut->outSAM = &inOut->outSAMfile;
     }
     
     // Update SLAM output paths
