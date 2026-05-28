@@ -11,7 +11,10 @@
 #include <vector>
 
 using star::input::CbqInputModule;
-using star::input::InputRecord;
+using star::input::CbqByteSpan;
+using star::input::CbqReadBatchView;
+using star::input::CbqReadView;
+using star::input::CbqSegmentView;
 using star::input::InputSourcePlan;
 using star::input::InputStatus;
 using star::input::SourceFormat;
@@ -52,9 +55,13 @@ std::string read_group_id(const std::string& rg_line) {
     return line.substr(3, tab == std::string::npos ? std::string::npos : tab - 3);
 }
 
-std::string sha256_hex(const std::string& value) {
+std::string sha256_hex(CbqByteSpan value) {
     unsigned char digest[SHA256_DIGEST_LENGTH];
-    SHA256(reinterpret_cast<const unsigned char*>(value.data()), value.size(), digest);
+    const unsigned char* data = reinterpret_cast<const unsigned char*>("");
+    if (value.data != nullptr && value.size != 0) {
+        data = reinterpret_cast<const unsigned char*>(value.data);
+    }
+    SHA256(data, value.size, digest);
 
     std::ostringstream out;
     out << std::hex << std::setfill('0');
@@ -211,30 +218,41 @@ InputSourcePlan build_plan(const HarnessOptions& opts) {
     return plan;
 }
 
-void emit_tsv(const InputRecord& record, std::ostream& out) {
-    for (uint32_t imate = 0; imate < record.mate_count; ++imate) {
-        const auto& mate = record.mates[imate];
-        out << record.lane_index << '\t'
-            << record.read_ordinal << '\t'
-            << record.read_filter << '\t'
-            << record.read_name << '\t'
-            << (imate + 1) << '\t'
-            << mate.original_length << '\t'
-            << sha256_hex(mate.sequence) << '\t'
-            << sha256_hex(mate.quality) << '\n';
+void write_span(std::ostream& out, CbqByteSpan span) {
+    if (span.data != nullptr && span.size != 0) {
+        out.write(span.data, static_cast<std::streamsize>(span.size));
     }
 }
 
-void emit_fastq(const InputRecord& record, std::ostream& out) {
-    for (uint32_t imate = 0; imate < record.mate_count; ++imate) {
-        const auto& mate = record.mates[imate];
-        out << '@' << record.read_name
+void emit_tsv(const CbqReadView& record, std::ostream& out) {
+    for (uint32_t isegment = 0; isegment < record.segment_count; ++isegment) {
+        const CbqSegmentView& segment = record.segments[isegment];
+        out << record.lane_index << '\t'
+            << record.read_ordinal << '\t'
+            << record.read_filter << '\t';
+        write_span(out, record.read_name);
+        out << '\t'
+            << (segment.source_index + 1) << '\t'
+            << segment.original_length << '\t'
+            << sha256_hex(segment.sequence) << '\t'
+            << sha256_hex(segment.quality) << '\n';
+    }
+}
+
+void emit_fastq(const CbqReadView& record, std::ostream& out) {
+    for (uint32_t isegment = 0; isegment < record.segment_count; ++isegment) {
+        const CbqSegmentView& segment = record.segments[isegment];
+        out << '@';
+        write_span(out, record.read_name);
+        out
             << " lane:" << record.lane_index
             << " ordinal:" << record.read_ordinal
-            << " mate:" << (imate + 1)
-            << " filter:" << record.read_filter << '\n'
-            << mate.sequence << "\n+\n"
-            << mate.quality << '\n';
+            << " mate:" << (segment.source_index + 1)
+            << " filter:" << record.read_filter << '\n';
+        write_span(out, segment.sequence);
+        out << "\n+\n";
+        write_span(out, segment.quality);
+        out << '\n';
     }
 }
 
@@ -251,10 +269,10 @@ int run(const HarnessOptions& opts) {
         return 2;
     }
 
-    InputRecord record;
+    CbqReadBatchView batch;
     while (true) {
         error.clear();
-        const InputStatus status = module.next_record(&record, &error);
+        const InputStatus status = module.next_batch(&batch, &error);
         if (status == InputStatus::End) {
             break;
         }
@@ -262,10 +280,13 @@ int run(const HarnessOptions& opts) {
             std::cerr << "read failed: " << error << "\n";
             return 3;
         }
-        if (opts.dump_fastq) {
-            emit_fastq(record, std::cout);
-        } else {
-            emit_tsv(record, std::cout);
+        for (uint32_t irecord = 0; irecord < batch.record_count; ++irecord) {
+            const CbqReadView& record = batch.records[irecord];
+            if (opts.dump_fastq) {
+                emit_fastq(record, std::cout);
+            } else {
+                emit_tsv(record, std::cout);
+            }
         }
     }
     module.close();

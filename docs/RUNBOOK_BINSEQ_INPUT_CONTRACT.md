@@ -125,6 +125,13 @@ framework, but the call site should stop assuming "input equals `istream`
 containing FASTQ text". Keep the old `readLoad()` parser as the FASTX module's
 implementation detail.
 
+Current CBQ-native direction: do not force optimized FASTQ paths through a new
+layer just to generalize. The native CBQ reader emits a borrowed
+`CbqReadBatchView` that points into decoded CBQ block buffers. App integrations
+should adapt that view into STAR, Chromap, or feature-calling structs directly.
+The owned-string `InputRecord` contract remains useful for harness parity and
+legacy compatibility, but should not be the production CBQ handoff surface.
+
 ## Implementation Language Policy
 
 Default to a native C++ CBQ reader for production STAR integration. Keep Rust
@@ -401,9 +408,11 @@ Search status on 2026-05-27:
 
 Goal: make BINSEQ a production input option.
 
-Phase 6A is the native reader correctness prototype described in
-`docs/RUNBOOK_BINSEQ_CPP_READER_PROTOTYPE.md`. It must pass input-contract
-parity before the production STAR CLI path is wired.
+Phase 6A is the native reader and STAR-adapter correctness prototype described
+in `docs/RUNBOOK_BINSEQ_CPP_READER_PROTOTYPE.md`. It must pass input-contract
+parity and byte-identical STAR internal read-buffer parity before production app
+paths are wired. The production adapters should consume `CbqReadBatchView`
+spans rather than materializing synthetic FASTQ or generic owned records.
 
 Tasks:
 
@@ -425,6 +434,50 @@ Exit criteria:
 - Input harness tests pass.
 - At least one STAR smoke test using `--readFilesType Binseq PE` passes.
 
+Implementation status on `feature/cbq_reader`:
+
+- `--readFilesType Binseq PE|SE` is wired through `Parameters`, rejects
+  `--readFilesCommand`, validates manifest column 2 as `-`, and builds a
+  native `CbqInputModule` source plan.
+- Production mapping reads owned CBQ chunk records copied from
+  `CbqReadBatchView` and calls `ReadAlign::oneReadFromCbqView()` through the
+  STAR adapter; existing FASTQ stream/chunk paths are unchanged.
+- `readMapNumber` is honored for CBQ input. SLAM per-file skipping is rejected
+  for CBQ until the non-FASTQ per-file boundary semantics are implemented.
+- `tests/run_cbq_star_input_smoke.sh` maps synthetic paired and single-end FASTQ
+  fixtures plus their CBQ conversions through STAR, then requires
+  byte-identical SAM body output for direct CBQ and manifest-style paired CBQ
+  input.
+- `parametersDefault` documents `Binseq SE` and `Binseq PE`, and
+  `parametersDefault.xxd` has been regenerated.
+
+### Phase 6B: App-Specific CBQ Adapters
+
+Goal: cover the other STAR-suite surfaces that consume FASTQ-like records
+without perturbing their optimized FASTQ paths.
+
+Implementation status on `feature/cbq_reader`:
+
+- process_features now has `pf_process_records()`, a C API that accepts
+  in-memory barcode/feature records. The CBQ harness decodes paired CBQ records
+  into that API and avoids temporary FASTQ materialization.
+- `tests/run_cbq_pf_adapter_smoke.sh` compares gzipped FASTQ reference output
+  against the CBQ record path for stable count/MEX files.
+- Chromap's current integration contract is path-based
+  (`read1_fastqs`, `read2_fastqs`, `barcode_fastqs`), so `CbqChromapAdapter`
+  materializes synchronized FASTQs from a paired-read CBQ plus a barcode CBQ.
+- `tests/run_cbq_chromap_adapter_smoke.sh` verifies sequence/quality payload
+  parity for those materialized FASTQs and runs a tiny Chromap mapping smoke
+  when `CHROMAP_BIN` is available.
+
+Remaining work:
+
+- Wire these adapter surfaces into production STAR-suite CLI/workflow entry
+  points once real CBQ feature and multiome inputs are available.
+- Decide whether Chromap-suite should grow a true in-memory read-provider API.
+  Until then, the CBQ adapter is intentionally limited to Chromap-compatible
+  FASTQ materialization.
+
 ## Risk Register
 
 - Rust dependency in STAR core: avoid it by default. Use native C++ for the CBQ
@@ -435,6 +488,8 @@ Exit criteria:
   fixture until parity is strong.
 - Three-mate workflows: BINSEQ paired records cover common R1/R2 cases; barcode
   reads may require split sources or an extended adapter plan.
+- Chromap CBQ support currently uses split sources: one paired CBQ for genomic
+  R1/R2 and one single-end CBQ for the barcode stream.
 - Quality semantics: BQ lacks qualities, so it must not silently substitute
   qualities for production alignment.
 - Header semantics: STAR currently stores useful metadata in FASTQ header

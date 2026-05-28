@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FASTX_BIN="${FASTX_INPUT_HARNESS_BIN:-$ROOT_DIR/core/legacy/source/fastx_input_harness}"
 CBQ_BIN="${CBQ_READER_HARNESS_BIN:-$ROOT_DIR/core/legacy/source/cbq_reader_harness}"
+CBQ_STAR_BIN="${CBQ_STAR_ADAPTER_HARNESS_BIN:-$ROOT_DIR/core/legacy/source/cbq_star_adapter_harness}"
 OUT_ROOT="${OUT_ROOT:-/tmp/star_suite_cbq_cpp_reader_smoke}"
 
 skip() {
@@ -26,8 +27,8 @@ else
     BQTOOLS_BIN="$(command -v bqtools)"
 fi
 
-if [[ ! -x "$FASTX_BIN" || ! -x "$CBQ_BIN" ]]; then
-    make -C "$ROOT_DIR/core/legacy/source" fastx-input-harness cbq-reader-harness
+if [[ ! -x "$FASTX_BIN" || ! -x "$CBQ_BIN" || ! -x "$CBQ_STAR_BIN" ]]; then
+    make -C "$ROOT_DIR/core/legacy/source" fastx-input-harness cbq-reader-harness cbq-star-adapter-harness
 fi
 
 rm -rf "$OUT_ROOT"
@@ -197,11 +198,35 @@ fi
     > "$OUT_ROOT/dumps/cbq_reader_pair.tsv"
 compare_contract_tsv_unordered "$OUT_ROOT/dumps/source_fastq_pair.tsv" "$OUT_ROOT/dumps/cbq_reader_pair.tsv"
 
+"$CBQ_STAR_BIN" --readNameSeparator / \
+    --mateCount 2 \
+    --readFilesIn "$CBQ" \
+    --mode direct \
+    > "$OUT_ROOT/dumps/cbq_star_pair.direct.bin"
+"$CBQ_STAR_BIN" --readNameSeparator / \
+    --mateCount 2 \
+    --readFilesIn "$CBQ" \
+    --mode reference \
+    > "$OUT_ROOT/dumps/cbq_star_pair.reference.bin"
+cmp -s "$OUT_ROOT/dumps/cbq_star_pair.direct.bin" "$OUT_ROOT/dumps/cbq_star_pair.reference.bin"
+
 "$CBQ_BIN" --readNameSeparator / \
     --mateCount 2 \
     --readFilesIn "$CBQ_LEVEL0" \
     > "$OUT_ROOT/dumps/cbq_reader_pair_level0.tsv"
 compare_contract_tsv_unordered "$OUT_ROOT/dumps/source_fastq_pair.tsv" "$OUT_ROOT/dumps/cbq_reader_pair_level0.tsv"
+
+"$CBQ_STAR_BIN" --readNameSeparator / \
+    --mateCount 2 \
+    --readFilesIn "$CBQ_LEVEL0" \
+    --mode direct \
+    > "$OUT_ROOT/dumps/cbq_star_pair_level0.direct.bin"
+"$CBQ_STAR_BIN" --readNameSeparator / \
+    --mateCount 2 \
+    --readFilesIn "$CBQ_LEVEL0" \
+    --mode reference \
+    > "$OUT_ROOT/dumps/cbq_star_pair_level0.reference.bin"
+cmp -s "$OUT_ROOT/dumps/cbq_star_pair_level0.direct.bin" "$OUT_ROOT/dumps/cbq_star_pair_level0.reference.bin"
 
 printf '%s\t-\tID:lane1\n' "$CBQ" > "$OUT_ROOT/manifest.tsv"
 "$CBQ_BIN" --readNameSeparator / \
@@ -220,10 +245,34 @@ compare_contract_tsv_unordered "$OUT_ROOT/dumps/source_fastq_pair.tsv" "$OUT_ROO
     > "$OUT_ROOT/dumps/cbq_reader_single.tsv"
 compare_contract_tsv_unordered "$OUT_ROOT/dumps/source_fastq_single.tsv" "$OUT_ROOT/dumps/cbq_reader_single.tsv"
 
+"$CBQ_STAR_BIN" --readNameSeparator / \
+    --mateCount 1 \
+    --readFilesIn "$SE_CBQ" \
+    --mode direct \
+    > "$OUT_ROOT/dumps/cbq_star_single.direct.bin"
+"$CBQ_STAR_BIN" --readNameSeparator / \
+    --mateCount 1 \
+    --readFilesIn "$SE_CBQ" \
+    --mode reference \
+    > "$OUT_ROOT/dumps/cbq_star_single.reference.bin"
+cmp -s "$OUT_ROOT/dumps/cbq_star_single.direct.bin" "$OUT_ROOT/dumps/cbq_star_single.reference.bin"
+
 "$CBQ_BIN" --readNameSeparator / \
     --mateCount 1 \
     --readFilesIn "$SE_CBQ_LEVEL0" \
     > "$OUT_ROOT/dumps/cbq_reader_single_level0.tsv"
 compare_contract_tsv_unordered "$OUT_ROOT/dumps/source_fastq_single.tsv" "$OUT_ROOT/dumps/cbq_reader_single_level0.tsv"
+
+"$CBQ_STAR_BIN" --readNameSeparator / \
+    --mateCount 1 \
+    --readFilesIn "$SE_CBQ_LEVEL0" \
+    --mode direct \
+    > "$OUT_ROOT/dumps/cbq_star_single_level0.direct.bin"
+"$CBQ_STAR_BIN" --readNameSeparator / \
+    --mateCount 1 \
+    --readFilesIn "$SE_CBQ_LEVEL0" \
+    --mode reference \
+    > "$OUT_ROOT/dumps/cbq_star_single_level0.reference.bin"
+cmp -s "$OUT_ROOT/dumps/cbq_star_single_level0.direct.bin" "$OUT_ROOT/dumps/cbq_star_single_level0.reference.bin"
 
 echo "PASS: native CBQ C++ reader smoke completed at $OUT_ROOT"

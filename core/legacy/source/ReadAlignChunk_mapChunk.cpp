@@ -129,3 +129,95 @@ void ReadAlignChunk::mapChunk() {//map one chunk. Input reads stream has to be s
     g_statsAll.progressReport(P.inOut->logProgress);
     if (P.runThreadN>1) pthread_mutex_unlock(&g_threadChunks.mutexStats);
 };
+
+void ReadAlignChunk::mapCbqChunk() {//map one owned CBQ chunk through STAR read buffers
+
+    RA->statsRA.resetN();
+
+    if ( P.outSAMorder == "PairedKeepInputOrder" && P.runThreadN>1 ) {//open chunk file
+        ostringstream name1("");
+        name1 << P.outFileTmp + "/Aligned.tmp.sam.chunk"<<iChunkIn;
+        chunkOutBAMfileName = name1.str();
+        chunkOutBAMfile.open(chunkOutBAMfileName.c_str());
+    };
+
+    auto flushOutputsIfNeeded = [&](int readStatus) {
+        if (P.outSAMbool) {
+            if ( chunkOutBAMtotal > P.chunkOutBAMsizeBytes ) {
+                ostringstream errOut;
+                errOut <<"EXITING because of fatal error: buffer size for SAM/BAM output is too small\n";
+                errOut <<"Solution: increase input parameter --limitOutSAMoneReadBytes\n";
+                exitWithError(errOut.str(),std::cerr, P.inOut->logMain, EXIT_CODE_INPUT_FILES, P);
+            } else if ( chunkOutBAMtotal + P.limitOutSAMoneReadBytes > P.chunkOutBAMsizeBytes || (readStatus==-1 && noReadsLeft) ) {
+                if ( P.outSAMorder == "PairedKeepInputOrder" && P.runThreadN>1 ) {
+                    chunkOutBAMfile.write(chunkOutBAM,chunkOutBAMtotal);
+                    chunkOutBAMfile.clear();
+                } else {
+                    if (P.runThreadN>1) pthread_mutex_lock(&g_threadChunks.mutexOutSAM);
+                    P.inOut->outSAM->write(chunkOutBAM,chunkOutBAMtotal);
+                    P.inOut->outSAM->clear();
+                    if (P.runThreadN>1) pthread_mutex_unlock(&g_threadChunks.mutexOutSAM);
+                };
+                RA->outSAMstream->seekp(0,ios::beg);
+                chunkOutBAMtotal=0;
+            };
+        };
+
+        if ( !P.outSJ.yes ) {
+        } else if ( chunkOutSJ->N > chunkOutSJ->Nstore ) {
+            ostringstream errOut;
+            errOut <<"EXITING because of fatal error: buffer size for SJ output is too small\n";
+            errOut <<"Solution: increase input parameter --limitOutSJoneRead\n";
+            exitWithError(errOut.str(),std::cerr, P.inOut->logMain, EXIT_CODE_INPUT_FILES, P);
+        } else if ( chunkOutSJ->N + P.limitOutSJoneRead > chunkOutSJ->Nstore || (readStatus==-1 && noReadsLeft) ) {
+            chunkOutSJ->collapseSJ();
+            if ( chunkOutSJ->N + 2*P.limitOutSJoneRead > chunkOutSJ->Nstore ) {
+                chunkOutSJ->dataSizeIncrease();
+                P.inOut->logMain << "Increased the size of chunkOutSJ to " << chunkOutSJ->Nstore <<'\n';
+            };
+        };
+
+        if ( P.outFilterBySJoutStage != 1 ) {
+        } else if ( chunkOutSJ1->N > chunkOutSJ->Nstore ) {
+            ostringstream errOut;
+            errOut <<"EXITING because of fatal error: buffer size for SJ output is too small\n";
+            errOut <<"Solution: increase input parameter --limitOutSJoneRead\n";
+            exitWithError(errOut.str(),std::cerr, P.inOut->logMain, EXIT_CODE_INPUT_FILES, P);
+        } else if ( chunkOutSJ1->N + P.limitOutSJoneRead > chunkOutSJ->Nstore || (readStatus==-1 && noReadsLeft) ) {
+            chunkOutSJ1->collapseSJ();
+            if ( chunkOutSJ1->N + 2*P.limitOutSJoneRead > chunkOutSJ->Nstore ) {
+                chunkOutSJ->dataSizeIncrease();
+                P.inOut->logMain << "Increased the size of chunkOutSJ to " << chunkOutSJ->Nstore <<'\n';
+            };
+        };
+    };
+
+    for (const CbqChunkRecord& record : cbqChunkRecords) {
+        const int readStatus = RA->oneReadFromCbqView(record.view);
+
+        if (readStatus==0) {
+            RA->iRead++;
+            chunkOutBAMtotal+=RA->outBAMbytes;
+        };
+
+        flushOutputsIfNeeded(readStatus);
+    };
+
+    flushOutputsIfNeeded(-1);
+
+    if ( P.outSAMbool && P.outSAMorder == "PairedKeepInputOrder" && P.runThreadN>1 ) {
+        chunkOutBAMfile.write(chunkOutBAM,chunkOutBAMtotal);
+        chunkOutBAMfile.clear();
+        chunkOutBAMfile.close();
+        RA->outSAMstream->seekp(0,ios::beg);
+        chunkOutBAMtotal=0;
+        ostringstream name2("");
+        name2 << P.outFileTmp + "/Aligned.out.sam.chunk"<<iChunkIn;
+        rename(chunkOutBAMfileName.c_str(),name2.str().c_str());
+    };
+
+    if (P.runThreadN>1) pthread_mutex_lock(&g_threadChunks.mutexStats);
+    g_statsAll.addStats(RA->statsRA);
+    g_statsAll.progressReport(P.inOut->logProgress);
+    if (P.runThreadN>1) pthread_mutex_unlock(&g_threadChunks.mutexStats);
+};
