@@ -139,6 +139,19 @@ Ship discoverable, installable Ubuntu binaries for STAR Suite with low-friction 
   or from CI so no running wrapper observes a partially rebuilt
   `core/legacy/source/STAR`.
 
+## Hotfix Release Prep (2026-05-28)
+
+- Candidate tag: `v1.0.1`
+- Release notes: `docs/RELEASE_NOTES_v1.0.1.md`
+- Packaging metadata: `debian/changelog` entry `1.0.1-1`
+- Scope added since `v1.0.0`: deterministic `process_features`
+  feature-bootstrap handling for CR-compatible dynamic multi-consumer runs and
+  corrected single-thread feature-match position reporting for
+  `--crAssignSearchThreads 1`.
+- Version note: release artifacts and Debian packages use STAR Suite `1.0.1`;
+  `STAR --version` reports `1.0.1`. Upstream provenance and genome index
+  compatibility remain `2.7.11b` and `2.7.4a`.
+
 ## Distribution Strategy
 
 Use two channels in parallel:

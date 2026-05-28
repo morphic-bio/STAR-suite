@@ -1,3 +1,14 @@
+star-suite (1.0.1-1) unstable; urgency=medium
+
+  * Hotfix process_features CR-compatible feature bootstrap determinism when
+    dynamic multi-consumer assignment is enabled.
+  * Fix single-thread feature matching to report the selected match position
+    for non-exact hits, preserving barcode correction parity with parallel
+    search.
+  * Report STAR Suite 1.0.1 from STAR --version.
+
+ -- STAR-suite Maintainers <maintainers@biodepot.example>  Thu, 28 May 2026 16:45:32 +0000
+
 star-suite (1.0.0-1) unstable; urgency=medium
 
   * First production STAR Suite release.
