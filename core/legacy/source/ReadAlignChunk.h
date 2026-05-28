@@ -8,8 +8,7 @@
 #include "Transcriptome.h"
 #include "BAMoutput.h"
 #include "Quantifications.h"
-#include "input/CbqInputModule.h"
-#include <memory>
+#include "input/CbqStarAdapter.h"
 
 // Forward declaration
 namespace libem {
@@ -30,15 +29,8 @@ public:
     char **chunkIn; //space for the chunk of input reads
     array<uint64, MAX_N_MATES> chunkInSizeBytesTotal;    
 
-    struct CbqChunkRecord {
-        string readName;
-        string readNameExtra;
-        vector<string> sequence;
-        vector<string> quality;
-        vector<star::input::CbqSegmentView> segments;
-        star::input::CbqReadView view;
-    };
-    vector<CbqChunkRecord> cbqChunkRecords;
+    star::input::CbqStarChunk cbqStarChunk;
+    uint64 cbqChunkReadN;
     
     char *chunkOutBAM, *chunkOutBAM1;//space for the chunk of output SAM
     OutSJ *chunkOutSJ, *chunkOutSJ1;
