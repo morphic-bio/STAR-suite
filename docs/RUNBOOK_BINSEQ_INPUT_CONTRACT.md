@@ -448,8 +448,11 @@ Implementation status on `feature/cbq_reader`:
   fixtures plus their CBQ conversions through STAR, then requires
   byte-identical SAM body output for direct CBQ, manifest-style paired CBQ,
   comma-separated multi-lane/multi-sample CBQ, and paired-CBQ `--batchMode 1`
-  output routing. Batch manifest inputs are also checked for per-sample read
-  group isolation.
+  output routing. Default-compressed and level-0 CBQ are both covered. Batch
+  manifest inputs are also checked for per-sample read group isolation.
+- `tests/run_cbq_solo_e2e_smoke.sh` runs a synthetic STARsolo fixture through
+  FASTQ, direct CBQ, level-0 CBQ, and manifest-style CBQ input and requires
+  byte-identical raw Gene MEX output with nonzero counts.
 - `parametersDefault` documents `Binseq SE` and `Binseq PE`, and
   `parametersDefault.xxd` has been regenerated.
 - `mcp_server/workflows/star_binseq_pe_batch.yaml` exposes a public MCP recipe
@@ -474,6 +477,13 @@ Implementation status on `feature/cbq_reader`:
 - `tests/run_cbq_chromap_adapter_smoke.sh` verifies sequence/quality payload
   parity for those materialized FASTQs and runs a tiny Chromap mapping smoke
   when `CHROMAP_BIN` is available.
+- `tests/run_cbq_e2e_module_regression.sh` aggregates the downsampled CBQ
+  module regressions: bqtools-backed probe, native C++ reader, production STAR
+  mapper, STARsolo, process_features, and Chromap adapter. The ARC upstream
+  fixture case is available behind `RUN_NETWORK=1`.
+- `tests/production_module_regression_manifest.tsv` registers the CBQ reader,
+  STAR mapper, STARsolo, process_features, Chromap adapter, and aggregate suite
+  cases as contract-scale regressions.
 
 Remaining work:
 
@@ -482,6 +492,10 @@ Remaining work:
 - Decide whether Chromap-suite should grow a true in-memory read-provider API.
   Until then, the CBQ adapter is intentionally limited to Chromap-compatible
   FASTQ materialization.
+- Validate real production-scale CBQ datasets when they exist, especially
+  feature-barcode and multiome inputs.
+- Flex and SLAM remain FASTQ-production surfaces until their CBQ contracts are
+  explicitly designed and tested.
 
 ## Risk Register
 
