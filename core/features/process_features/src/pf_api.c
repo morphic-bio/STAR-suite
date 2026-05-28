@@ -884,6 +884,117 @@ pf_error pf_load_filtered_barcodes(pf_context *ctx, const char *filtered_path) {
  * Processing Implementation
  * ============================================================================ */
 
+static pf_error pf_prepare_feature_offset_config(pf_context *ctx) {
+    if (ctx->config->use_feature_offset_array && ctx->config->feature_offset_explicit) {
+        snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                 "Cannot specify both use_feature_offset_array and explicit feature_offset");
+        return PF_ERR_OFFSET_CONFLICT;
+    }
+
+    if (!ctx->config->use_feature_offset_array && !ctx->config->feature_offset_explicit &&
+        ctx->features && feature_offsets && feature_offsets_count > 0) {
+        int offset_counts[256] = {0};
+        int max_offset_seen = -1;
+        int valid_offsets = 0;
+
+        for (int i = 0; i < feature_offsets_count; i++) {
+            int off = feature_offsets[i];
+            if (off >= 0 && off < 256) {
+                offset_counts[off]++;
+                valid_offsets++;
+                if (off > max_offset_seen) max_offset_seen = off;
+            }
+        }
+
+        if (valid_offsets > 0) {
+            int dominant_offset = 0;
+            int dominant_count = 0;
+            int second_count = 0;
+
+            for (int i = 0; i <= max_offset_seen; i++) {
+                if (offset_counts[i] > dominant_count) {
+                    second_count = dominant_count;
+                    dominant_count = offset_counts[i];
+                    dominant_offset = i;
+                } else if (offset_counts[i] > second_count) {
+                    second_count = offset_counts[i];
+                }
+            }
+
+            double heterogeneity_threshold = 0.05;
+            if (second_count > 0 &&
+                (double)second_count / (double)dominant_count > heterogeneity_threshold) {
+                if (ctx->config->strict_offset_check) {
+                    snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                             "Multiple feature offsets detected (strict mode). "
+                             "Dominant: %d (%d features), second: %d features. "
+                             "Use pf_config_set_feature_offset() or pf_config_set_use_feature_offset_array(1).",
+                             dominant_offset, dominant_count, second_count);
+                    return PF_ERR_MULTI_OFFSET_DETECTED;
+                }
+                fprintf(stderr, "\nWARNING: Multiple feature offsets detected in pattern column.\n");
+                fprintf(stderr, "         Dominant offset: %d (used by %d features)\n",
+                        dominant_offset, dominant_count);
+                fprintf(stderr, "         Other offsets detected:\n");
+                for (int i = 0; i <= max_offset_seen; i++) {
+                    if (i != dominant_offset && offset_counts[i] > 0) {
+                        double pct = 100.0 * offset_counts[i] / dominant_count;
+                        fprintf(stderr, "           offset %d: %d features (%.1f%%)\n",
+                                i, offset_counts[i], pct);
+                    }
+                }
+                fprintf(stderr, "\n         Proceeding with dominant offset %d.\n\n",
+                        dominant_offset);
+            }
+
+            ctx->config->feature_offset = dominant_offset;
+            fprintf(stderr, "[offset-detect] Auto-detected global offset: %d (from %d features with pattern)\n",
+                    dominant_offset, valid_offsets);
+        } else {
+            fprintf(stderr, "[offset-detect] No pattern offsets found, using default offset: 0\n");
+        }
+    }
+
+    return PF_OK;
+}
+
+static pf_error pf_create_directory_if_needed(pf_context *ctx, const char *path) {
+    struct stat st = {0};
+    if (stat(path, &st) == -1) {
+        if (mkdir(path, 0755) != 0) {
+            snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                     "Failed to create output directory: %.900s", path);
+            return PF_ERR_IO_ERROR;
+        }
+    }
+    return PF_OK;
+}
+
+static int pf_copy_record_field(pf_context *ctx, char *dst, const char *src, const char *field_name) {
+    if (!src) {
+        snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                 "In-memory record is missing %s", field_name);
+        return 0;
+    }
+    size_t len = strlen(src);
+    if (len >= LINE_LENGTH) {
+        snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                 "In-memory record %s length %zu exceeds LINE_LENGTH=%d",
+                 field_name, len, LINE_LENGTH);
+        return 0;
+    }
+    memcpy(dst, src, len + 1);
+    return 1;
+}
+
+static void pf_default_quality(char *dst, size_t sequence_len) {
+    if (sequence_len >= LINE_LENGTH) {
+        sequence_len = LINE_LENGTH - 1;
+    }
+    memset(dst, 'I', sequence_len);
+    dst[sequence_len] = '\0';
+}
+
 pf_error pf_process_fastq_dir(pf_context *ctx,
                                const char *fastq_dir,
                                const char *output_dir,
@@ -1399,6 +1510,183 @@ pf_error pf_process_fastqs(pf_context *ctx,
     free(fastq_files.sample_offsets);
     free(fastq_files.sorted_index);
     
+    if (sample_error) {
+        snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                 "Sample processing failed");
+        pthread_mutex_unlock(&g_pf_runtime_mutex);
+        return PF_ERR_IO_ERROR;
+    }
+
+    pthread_mutex_unlock(&g_pf_runtime_mutex);
+    return PF_OK;
+}
+
+pf_error pf_process_records(pf_context *ctx,
+                            const pf_read_record *records,
+                            size_t n_records,
+                            const char *output_dir,
+                            const char *sample_name,
+                            pf_stats *stats_out) {
+    if (!ctx || !records || n_records == 0 || !output_dir) {
+        return PF_ERR_INVALID_ARG;
+    }
+    if (!ctx->initialized) return PF_ERR_NOT_INITIALIZED;
+
+    pthread_mutex_lock(&g_pf_runtime_mutex);
+    pf_apply_context_globals(ctx);
+
+    ctx->chem_detect_raw_hits = 0;
+    ctx->chem_detect_nxt_hits = 0;
+    ctx->chem_detect_ticket = 0;
+    ctx->chem_detect_done = 0;
+    ctx->detected_match_mode = 0;
+
+    if (!ctx->features) {
+        snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE, "Features not loaded");
+        pthread_mutex_unlock(&g_pf_runtime_mutex);
+        return PF_ERR_NOT_INITIALIZED;
+    }
+    if (!ctx->whitelist_hash) {
+        snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE, "Whitelist not loaded");
+        pthread_mutex_unlock(&g_pf_runtime_mutex);
+        return PF_ERR_NOT_INITIALIZED;
+    }
+
+    pf_error prep = pf_prepare_feature_offset_config(ctx);
+    if (prep != PF_OK) {
+        pthread_mutex_unlock(&g_pf_runtime_mutex);
+        return prep;
+    }
+
+    pf_error mkdir_err = pf_create_directory_if_needed(ctx, output_dir);
+    if (mkdir_err != PF_OK) {
+        pthread_mutex_unlock(&g_pf_runtime_mutex);
+        return mkdir_err;
+    }
+
+    const char *sname = sample_name ? sample_name : "sample";
+    char sample_directory[FILENAME_LENGTH];
+    snprintf(sample_directory, sizeof(sample_directory), "%s/%s/", output_dir, sname);
+    mkdir_err = pf_create_directory_if_needed(ctx, sample_directory);
+    if (mkdir_err != PF_OK) {
+        pthread_mutex_unlock(&g_pf_runtime_mutex);
+        return mkdir_err;
+    }
+
+    statistics stats;
+    data_structures hashes;
+    memory_pool_collection *pools = NULL;
+    initialize_statistics(&stats);
+    initialize_data_structures(&hashes);
+    pools = initialize_memory_pool_collection();
+    if (!pools) {
+        destroy_data_structures(&hashes);
+        snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                 "Failed to initialize process_features memory pools");
+        pthread_mutex_unlock(&g_pf_runtime_mutex);
+        return PF_ERR_OUT_OF_MEMORY;
+    }
+
+    double start_time = get_time_in_seconds();
+    int sample_error = 0;
+    int failed = 0;
+    for (size_t i = 0; i < n_records; ++i) {
+        char barcode_seq[LINE_LENGTH];
+        char barcode_qual[LINE_LENGTH];
+        char feature_seq[LINE_LENGTH];
+        char feature_seq2[LINE_LENGTH];
+        char *barcode_lines[2] = {barcode_seq, barcode_qual};
+
+        if (!pf_copy_record_field(ctx, barcode_seq, records[i].barcode_sequence, "barcode_sequence") ||
+            !pf_copy_record_field(ctx, feature_seq, records[i].feature_sequence, "feature_sequence")) {
+            failed = 1;
+            break;
+        }
+        if (records[i].barcode_quality) {
+            if (!pf_copy_record_field(ctx, barcode_qual, records[i].barcode_quality, "barcode_quality")) {
+                failed = 1;
+                break;
+            }
+        } else {
+            pf_default_quality(barcode_qual, strlen(barcode_seq));
+        }
+
+        uint32_t feature_index = 0;
+        int hamming_distance = 0;
+        uint16_t match_position = 0;
+        char matching_sequence[LINE_LENGTH];
+        matching_sequence[0] = '\0';
+
+        if (records[i].feature_sequence2) {
+            if (!pf_copy_record_field(ctx, feature_seq2, records[i].feature_sequence2, "feature_sequence2")) {
+                failed = 1;
+                break;
+            }
+            char *sequences[2] = {feature_seq, feature_seq2};
+            int orientations[2] = {1, 0};
+            process_multiple_feature_sequences(
+                2, sequences, orientations, ctx->features,
+                ctx->config->max_hamming_distance, ctx->config->search_threads,
+                ctx->config->feature_offset, ctx->config->max_feature_n,
+                &feature_index, &hamming_distance, matching_sequence,
+                &match_position, &stats);
+        } else {
+            process_feature_sequence(
+                feature_seq, ctx->features, ctx->config->max_hamming_distance,
+                ctx->config->search_threads, ctx->config->feature_offset,
+                ctx->config->max_feature_n, &feature_index, &hamming_distance,
+                matching_sequence, &match_position, &stats);
+        }
+
+        if (feature_index) {
+            matching_sequence[ctx->features->feature_lengths[feature_index - 1]] = '\0';
+            insert_feature_sequence(matching_sequence, feature_index,
+                                    hamming_distance, match_position,
+                                    &hashes, pools);
+            checkAndCorrectBarcode(barcode_lines, ctx->config->max_barcode_n,
+                                   feature_index, match_position,
+                                   &hashes, pools, &stats,
+                                   ctx->config->barcode_offset);
+        } else {
+            stats.nMismatches++;
+            stats.total_unmatched_features++;
+        }
+
+        stats.number_of_reads++;
+    }
+
+    if (!failed && !ctx->config->probe_only) {
+        finalize_processing(ctx->features, &hashes, sample_directory, pools,
+                            &stats, ctx->config->stringency,
+                            ctx->config->min_counts, ctx->config->min_posterior,
+                            ctx->config->legacy_cb_rescue,
+                            ctx->filtered_barcodes_hash,
+                            ctx->config->skip_emptydrops,
+                            ctx->config->emptydrops_failure_fatal,
+                            ctx->config->expected_cells,
+                            ctx->config->emptydrops_use_fdr,
+                            ctx->config->skip_qc_outputs,
+                            &sample_error);
+    }
+
+    double end_time = get_time_in_seconds();
+
+    if (stats_out) {
+        memset(stats_out, 0, sizeof(pf_stats));
+        stats_out->total_reads = stats.number_of_reads;
+        stats_out->matched_reads = stats.valid;
+        stats_out->unmatched_reads = stats.total_unmatched_features;
+        stats_out->total_features = ctx->features->number_of_features;
+        stats_out->processing_time_sec = end_time - start_time;
+    }
+
+    destroy_data_structures(&hashes);
+    free_memory_pool_collection(pools);
+
+    if (failed) {
+        pthread_mutex_unlock(&g_pf_runtime_mutex);
+        return PF_ERR_INVALID_ARG;
+    }
     if (sample_error) {
         snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
                  "Sample processing failed");

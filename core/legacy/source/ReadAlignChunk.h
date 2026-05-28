@@ -8,6 +8,7 @@
 #include "Transcriptome.h"
 #include "BAMoutput.h"
 #include "Quantifications.h"
+#include "input/CbqInputModule.h"
 #include <memory>
 
 // Forward declaration
@@ -28,6 +29,16 @@ public:
 
     char **chunkIn; //space for the chunk of input reads
     array<uint64, MAX_N_MATES> chunkInSizeBytesTotal;    
+
+    struct CbqChunkRecord {
+        string readName;
+        string readNameExtra;
+        vector<string> sequence;
+        vector<string> quality;
+        vector<star::input::CbqSegmentView> segments;
+        star::input::CbqReadView view;
+    };
+    vector<CbqChunkRecord> cbqChunkRecords;
     
     char *chunkOutBAM, *chunkOutBAM1;//space for the chunk of output SAM
     OutSJ *chunkOutSJ, *chunkOutSJ1;
@@ -52,6 +63,7 @@ public:
     ~ReadAlignChunk();  // Destructor to clean up owned resources
     void processChunks();
     void mapChunk();
+    void mapCbqChunk();
     void chunkFstreamOpen(string filePrefix, int iChunk, fstream &fstreamOut);
     void chunkFstreamCat (fstream &chunkOut, ofstream &allOut, bool mutexFlag, pthread_mutex_t &mutexVal);
     void chunkFilesCat(ostream *allOut, string filePrefix, uint &iC);

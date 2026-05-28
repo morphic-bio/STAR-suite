@@ -28,6 +28,11 @@ class SlamCompat;
 namespace libem {
 class Transcriptome;
 }
+namespace star {
+namespace input {
+struct CbqReadView;
+} // namespace input
+} // namespace star
 
 #include <time.h>
 #include <random>
@@ -42,6 +47,9 @@ class ReadAlign {
                    const libem::Transcriptome* libemTr = nullptr);//allocate arrays
         ~ReadAlign();
         int oneRead();
+        int oneReadLoaded(int readStatus0);
+        int loadCbqReadView(const star::input::CbqReadView& view);
+        int oneReadFromCbqView(const star::input::CbqReadView& view);
 
         /** Pipeline mode: load from EnrichedPacket, restore CB/UMI, run H1+alignment. */
         int oneReadFromPacket(struct EnrichedPacket &pkt);

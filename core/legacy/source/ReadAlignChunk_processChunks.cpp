@@ -5,6 +5,7 @@
 #include "GlobalVariables.h"
 #include "FlexDebugCounters.h"
 #include "IncludeDefine.h"
+#include "input/CbqInputModule.h"
 #include "input/FastxInputModule.h"
 #include <algorithm>
 #include <chrono>
@@ -23,6 +24,53 @@ bool fastxChunkHasBytes(const ReadAlignChunk& chunk) {
         }
     }
     return false;
+}
+
+string cbqSpanToString(star::input::CbqByteSpan span) {
+    if (span.data == nullptr || span.size == 0) {
+        return string();
+    }
+    return string(span.data, span.size);
+}
+
+star::input::CbqByteSpan cbqStringSpan(const string& value) {
+    star::input::CbqByteSpan span;
+    span.data = value.data();
+    span.size = value.size();
+    return span;
+}
+
+void cbqAssignChunkRecord(ReadAlignChunk::CbqChunkRecord& out,
+                          const star::input::CbqReadView& in,
+                          uint32 mateCount) {
+    out.readName = cbqSpanToString(in.read_name);
+    out.readNameExtra = cbqSpanToString(in.read_name_extra);
+    out.sequence.assign(mateCount, string());
+    out.quality.assign(mateCount, string());
+    out.segments.assign(mateCount, star::input::CbqSegmentView());
+    out.view = in;
+    out.view.read_name = cbqStringSpan(out.readName);
+    out.view.read_name_extra = cbqStringSpan(out.readNameExtra);
+    out.view.segment_count = mateCount;
+    out.view.segments = out.segments.data();
+
+    for (uint32 imate = 0; imate < mateCount; ++imate) {
+        const star::input::CbqSegmentView& segmentIn = in.segments[imate];
+        out.sequence[imate] = cbqSpanToString(segmentIn.sequence);
+        out.quality[imate] = cbqSpanToString(segmentIn.quality);
+        out.segments[imate] = segmentIn;
+        out.segments[imate].sequence = cbqStringSpan(out.sequence[imate]);
+        out.segments[imate].quality = cbqStringSpan(out.quality[imate]);
+    }
+}
+
+uint64 cbqRecordWorkBytes(const star::input::CbqReadView& record) {
+    uint64 bytes = record.read_name.size + record.read_name_extra.size;
+    for (uint32 imate = 0; imate < record.segment_count; ++imate) {
+        bytes += record.segments[imate].sequence.size;
+        bytes += record.segments[imate].quality.size;
+    }
+    return bytes;
 }
 
 bool fastxChunkUnderTarget(const ReadAlignChunk& chunk) {
@@ -220,7 +268,12 @@ void ReadAlignChunk::processChunks() {//read-map-write chunks
             P.inOut->logMain << "SLAM per-file: skipping to file " << P.quant.slam.skipToFileIndex 
                              << " (currently at file " << P.readFilesIndex << ")\n";
 
-            if (P.readFilesTypeN == 1 && P.fastxInputActive) {
+            if (P.readFilesTypeN == 20 && P.cbqInputActive) {
+                ostringstream errOut;
+                errOut << ERROR_OUT << " EXITING because SLAM per-file skipping is not yet implemented for Binseq/CBQ input.\n";
+                errOut << "SOLUTION: use Fastx input for SLAM per-file processing or disable per-file SLAM mode.\n";
+                exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
+            } else if (P.readFilesTypeN == 1 && P.fastxInputActive) {
                 fastxSkipToTargetLane(*this);
             } else {
         
@@ -306,9 +359,44 @@ void ReadAlignChunk::processChunks() {//read-map-write chunks
             const auto mutexAcquired = std::chrono::steady_clock::now();
 
             chunkInSizeBytesTotal={0,0};
+            cbqChunkRecords.clear();
             const uint64_t chunkReadStart = P.iReadAll;
             
-            if (P.readFilesTypeN == 1 && P.fastxInputActive) {
+            if (P.readFilesTypeN == 20 && P.cbqInputActive) {
+                if (!P.cbqInputExhausted && P.iReadAll != P.readMapNumber) {
+                    star::input::CbqReadBatchView batch;
+                    string inputError;
+                    const star::input::InputStatus status = P.cbqInputModule->next_batch(&batch, &inputError);
+                    if (status == star::input::InputStatus::Error) {
+                        ostringstream errOut;
+                        errOut << ERROR_OUT << " EXITING because of FATAL ERROR in Binseq/CBQ input module\n"
+                               << inputError << "\n";
+                        exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_INPUT_FILES, P);
+                    }
+                    if (status == star::input::InputStatus::End) {
+                        P.cbqInputExhausted = true;
+                    } else {
+                        P.readFilesIndex = static_cast<int>(batch.lane_index);
+                        if (fastxStopBeforeLane(P, batch.lane_index, detectionStartFileIndex)) {
+                            noReadsLeft = true;
+                        } else {
+                            fastxLogLaneStart(P, batch.lane_index);
+                            uint32 recordsToCopy = 0;
+                            while (recordsToCopy < batch.record_count && P.iReadAll != P.readMapNumber) {
+                                ++recordsToCopy;
+                                ++P.iReadAll;
+                            }
+                            cbqChunkRecords.resize(recordsToCopy);
+                            for (uint32 irecord = 0; irecord < recordsToCopy; ++irecord) {
+                                cbqAssignChunkRecord(cbqChunkRecords[irecord],
+                                                     batch.records[irecord],
+                                                     P.readNends);
+                                chunkWorkBytes += cbqRecordWorkBytes(cbqChunkRecords[irecord].view);
+                            }
+                        }
+                    }
+                }
+            } else if (P.readFilesTypeN == 1 && P.fastxInputActive) {
                 while (fastxChunkUnderTarget(*this)) {
                     if (P.iReadAll == P.readMapNumber) {
                         break;
@@ -601,7 +689,7 @@ void ReadAlignChunk::processChunks() {//read-map-write chunks
                 };
             };
             }
-            if (P.readNends == 2U) {
+            if (P.readFilesTypeN != 20 && P.readNends == 2U) {
                 const bool m0Empty = (chunkInSizeBytesTotal[0] == 0ULL);
                 const bool m1Empty = (chunkInSizeBytesTotal[1] == 0ULL);
                 if (m0Empty != m1Empty) {
@@ -623,7 +711,17 @@ void ReadAlignChunk::processChunks() {//read-map-write chunks
                     exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_INPUT_FILES, P);
                 }
             }
-            if (chunkInSizeBytesTotal[0]==0) {
+            if (P.readFilesTypeN == 20 && P.cbqInputActive) {
+                if (cbqChunkRecords.empty()) {
+                    noReadsLeft=true;
+                    iChunkIn=g_threadChunks.chunkInN;
+                    g_threadChunks.chunkInN++;
+                } else {
+                    noReadsLeft=false;
+                    iChunkIn=g_threadChunks.chunkInN;
+                    g_threadChunks.chunkInN++;
+                }
+            } else if (chunkInSizeBytesTotal[0]==0) {
                 noReadsLeft=true; //true if there no more reads left in the file
                 iChunkIn=g_threadChunks.chunkInN;//to keep things consistent
                 g_threadChunks.chunkInN++;
@@ -633,11 +731,15 @@ void ReadAlignChunk::processChunks() {//read-map-write chunks
                 g_threadChunks.chunkInN++;
             };
 
-            for (uint imate=0; imate<P.readNends; imate++) 
-                chunkIn[imate][chunkInSizeBytesTotal[imate]]='\n';//extra empty line at the end of the chunks
+            if (!(P.readFilesTypeN == 20 && P.cbqInputActive)) {
+                for (uint imate=0; imate<P.readNends; imate++)
+                    chunkIn[imate][chunkInSizeBytesTotal[imate]]='\n';//extra empty line at the end of the chunks
+            }
             chunkReadN = P.iReadAll - chunkReadStart;
-            for (uint imate=0; imate<P.readNends; imate++) {
-                chunkWorkBytes += chunkInSizeBytesTotal[imate];
+            if (!(P.readFilesTypeN == 20 && P.cbqInputActive)) {
+                for (uint imate=0; imate<P.readNends; imate++) {
+                    chunkWorkBytes += chunkInSizeBytesTotal[imate];
+                }
             }
 
             if (P.runThreadN>1) pthread_mutex_unlock(&g_threadChunks.mutexInRead);
@@ -675,7 +777,11 @@ void ReadAlignChunk::processChunks() {//read-map-write chunks
         }
         const auto workStart = std::chrono::steady_clock::now();
         const uint64_t readCountBefore = RA->iRead;
-        mapChunk();
+        if (P.readFilesTypeN == 20 && P.cbqInputActive) {
+            mapCbqChunk();
+        } else {
+            mapChunk();
+        }
         const auto workEnd = std::chrono::steady_clock::now();
         RA->statsRA.pipelineMapChunkNs += static_cast<uint64>(
             std::chrono::duration_cast<std::chrono::nanoseconds>(workEnd - workStart).count());
