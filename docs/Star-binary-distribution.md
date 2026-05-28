@@ -55,7 +55,7 @@ Ship discoverable, installable Ubuntu binaries for STAR Suite with low-friction 
 - Phase 5 (CI/CD Automation): **implemented (initial)**
   - Completed:
     - `.github/workflows/ci-pr.yml`
-    - `.github/workflows/ci-dev.yml`
+    - `.github/workflows/ci-dev-release.yml`
     - `.github/workflows/ci-master.yml`
     - `.github/workflows/release.yml`
   - Pending:
@@ -262,9 +262,10 @@ For technical users:
 1. Add `ci-pr.yml`:
    - Trigger: `pull_request`
    - Run fast checks only (`amd64` build + Tier A smoke), no publish.
-2. Add `ci-dev.yml`:
-   - Trigger: push to `dev`
-   - Run integration checks and optional publish to `dev-<sha>`.
+2. Add `ci-dev-release.yml`:
+   - Trigger: push to `dev-release` and `dev-release-*`
+   - Run integration checks and optional publish to `dev-release-<sha>` /
+     `dev-release-latest`.
 3. Add `ci-master.yml`:
    - Trigger: push to `master`
    - Build/push multi-arch runtime images (`amd64`, `arm64`).

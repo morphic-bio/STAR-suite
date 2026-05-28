@@ -43,9 +43,10 @@ LIBSCRNA_DIR := $(ROOT_DIR)/core/features/libscrna
 LIBSCRNA_INC := $(LIBSCRNA_DIR)/include
 LIBSCRNA_LIB := $(LIBSCRNA_DIR)/libscrna.a
 
-# Optional in-process Chromap (default off: no libchromap / system libhts link; portable STAR).
-# Build with: make core WITH_CHROMAP=1  (and CHROMAP_SUITE_DIR / CHROMAP_SYS_HTS as needed)
-WITH_CHROMAP ?= 0
+# In-process Chromap is the default STAR-suite build because production
+# multiome workflows depend on it. Use WITH_CHROMAP=0 only for explicit
+# portable/no-Chromap compatibility builds.
+WITH_CHROMAP ?= 1
 CHROMAP_ORCH_CPP_REAL := star_chromap_orchestration.cpp
 CHROMAP_ORCH_CPP_STUB := star_chromap_orchestration_stub.cpp
 LIBCHROMAP_CONTRACT_DIR := $(ROOT_DIR)/core/features/libchromap_contract

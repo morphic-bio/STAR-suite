@@ -373,6 +373,7 @@ InputSourcePlan make_fastx_input_source_plan(
     plan.read_groups = read_groups;
     plan.read_files_n = read_files_names.empty() ? 0 : static_cast<uint32_t>(read_files_names.front().size());
     plan.mate_count = static_cast<uint32_t>(read_files_names.size());
+    plan.preserves_source_order = true;
     plan.uses_helper_stream = !command_string.empty();
     plan.uses_internal_gzip = uses_internal_gzip;
     plan.command_string = command_string;

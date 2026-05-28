@@ -28,10 +28,16 @@ struct InputMateRecord {
     bool has_quality = true;
 };
 
+// Input modules emit records in module-defined order. The contract preserves
+// record content and mate synchronization, but does not require this order to
+// match the original source file order unless the source plan advertises that
+// stronger guarantee.
 struct InputRecord {
     std::string read_name;
     std::string read_name_extra;
     uint32_t lane_index = 0;
+    // Ordinal in the module-emitted stream. This is not a
+    // source-file ordinal unless preserves_source_order is true for the plan.
     uint64_t read_ordinal = 0;
     char read_filter = 'Y';
     uint32_t mate_count = 0;
@@ -46,6 +52,7 @@ struct InputSourcePlan {
     std::vector<char> read_name_separator_chars;
     uint32_t read_files_n = 0;
     uint32_t mate_count = 0;
+    bool preserves_source_order = false;
     bool uses_helper_stream = false;
     bool uses_internal_gzip = false;
     int out_qs_conversion_add = 0;

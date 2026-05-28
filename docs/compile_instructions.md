@@ -107,8 +107,14 @@ The repository Docker builder stage validates compilation in a clean Ubuntu 24.0
 docker build --no-cache --target builder -f docker/Dockerfile --build-arg MAKE_JOBS=8 .
 ```
 
-The builder stage runs:
-- `make core`
+The builder stage runs with `STAR_WITH_CHROMAP=0` by default because the
+single-repo Docker context does not include the sibling Chromap-suite checkout.
+Local builds use the Chromap-enabled multiome binary by default with
+`make core`; use `make core-portable` or `make core WITH_CHROMAP=0` only for an
+explicit no-Chromap compatibility build.
+
+The builder stage validates:
+- `make core WITH_CHROMAP=${STAR_WITH_CHROMAP}`
 - `make flex`
 - `make slam`
 - `make feature-barcodes-tools`

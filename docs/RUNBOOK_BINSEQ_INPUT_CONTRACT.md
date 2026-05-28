@@ -76,17 +76,38 @@ Minimum record fields:
   and Solo barcode extraction paths.
 - `lane_index`: existing `readFilesIndex` semantics for read group lookup,
   batch accounting, and SLAM resume behavior.
-- `read_ordinal`: existing `iReadAll` semantics where available.
+- `read_ordinal`: ordinal in the module-emitted stream. It is not a source-file
+  ordinal unless the module explicitly advertises source-order preservation.
 - `read_filter`: existing filter character, defaulting to `Y`.
 - `mate_count`: 1, 2, or current `MAX_N_MATES` upper bound.
 - For each mate: sequence, quality, original length, and a flag indicating
   FASTA/no-quality fallback.
 
+Record order is intentionally a module-level capability, not a global input
+contract requirement. Input modules must conserve record identity, sequence,
+quality, filters, lane assignment, and mate synchronization, but downstream code
+must not assume records arrive in original source FASTQ/file order unless the
+selected module advertises that stronger guarantee. The FASTX module preserves
+the order of the parsed FASTX streams it consumes. BINSEQ modules may emit a
+BINSEQ-internal or decoder-defined order; source-order preservation is optional.
+
+Consequences for downstream code and tests:
+
+- Treat `read_ordinal` as the emitted-stream ordinal, not an original source
+  ordinal.
+- Compare FASTQ and BINSEQ parity order-independently by read name/pair identity
+  plus sequence and quality unless a case is specifically testing an advertised
+  source-order guarantee.
+- If a downstream feature requires stable source order, it must declare and
+  gate on that capability explicitly rather than inheriting it from the generic
+  input contract.
+
 Minimum module interface:
 
 ```text
 InputModule::configure(Parameters)
-InputModule::describe_sources() -> lanes, mates, read groups, counts-if-known
+InputModule::describe_sources() -> lanes, mates, read groups, counts-if-known,
+                                   source-order capability
 InputModule::open()
 InputModule::next_record() -> InputRecord | EOF
 InputModule::close()
@@ -254,7 +275,7 @@ cargo install bqtools
 
 ```bash
 bqtools encode R1.fastq.gz R2.fastq.gz --mode cbq -o tiny_pair.cbq -T 4
-bqtools info tiny_pair.cbq --json
+bqtools info --json tiny_pair.cbq
 bqtools decode tiny_pair.cbq --prefix decoded
 ```
 
@@ -285,8 +306,15 @@ Implementation status on `feature/binseq-input`:
   `core/legacy/source/binseq_probe_harness` for normalized contract dumps from
   paired CBQ files or a BINSEQ manifest row (`CBQ<TAB>-<TAB>ReadGroup`).
 - Added `tests/run_binseq_probe_smoke.sh`, which creates paired synthetic FASTQ,
-  encodes it to CBQ with `bqtools`, records `bqtools info`, and compares direct
-  plus manifest BINSEQ probe dumps against the source FASTQ dump.
+  encodes it to default-compressed and uncompressed (`-l 0`) CBQ with `bqtools`,
+  records `bqtools info`, and compares direct plus manifest BINSEQ probe dumps
+  against the source FASTQ dump.
+- Extended the same smoke to convert a single-end FASTQ fixture to CBQ and
+  compare default-compressed and uncompressed single-end BINSEQ probe dumps
+  against the FASTX module dump.
+- Added `tests/run_binseq_upstream_fixture_smoke.sh`, which clones the upstream
+  `ArcInstitute/binseq` repository and validates the external `data/subset.cbq`
+  fixture through the BINSEQ probe harness.
 - The smoke skips cleanly when `bqtools` is unavailable. Set
   `BQTOOLS=/path/to/bqtools` to run it on hosts without `bqtools` in `PATH`.
 - This is intentionally a probe-only stage: STAR CLI routing for
@@ -317,6 +345,29 @@ Exit criteria:
   harness.
 - Any unsupported BINSEQ variants are documented with explicit errors.
 
+Search status on 2026-05-27:
+
+- A bounded local search across `/storage` and `/mnt/pikachu` did not yield any
+  externally produced `.cbq`, `.vbq`, or `.bq` files before the search timeout.
+  Permission-denied directories were skipped by `find`.
+- Public source search found no matching Zenodo record for the preprint DOI or
+  title, but the `ArcInstitute/binseq` GitHub repository contains small example
+  files under `data/`: `subset.cbq`, `subset.vbq`, `subset.bq`, `subset_R1.bq`,
+  `subset_R2.bq`, `subset_R1.fastq.gz`, and `subset_R2.fastq.gz`.
+- The upstream `data/subset.cbq` file is a real external paired CBQ fixture and
+  passes order-independent FASTQ parity against bundled `subset_R1.fastq.gz` and
+  `subset_R2.fastq.gz`. These files contain the same reads but in a different
+  order, so direct ordered `diff` is not valid.
+- The real paired-CBQ part of the Phase 5 exit criteria is now covered by the
+  upstream fixture. The real single-end CBQ fixture is still missing.
+- The only verified local BINSEQ files at this point are self-converted test
+  artifacts under `/tmp/star_suite_binseq_probe_smoke/` plus cloned upstream
+  smoke artifacts under `/tmp/star_suite_binseq_upstream_fixture_smoke/`.
+- Self-converted FASTQ-to-CBQ parity is useful for the contract, but it does not
+  satisfy the Phase 5 exit criterion for externally produced BINSEQ.
+- `bqtools` v0.5.6 exposes `bqtools info --json`; keep JSON metadata in fixture
+  smoke output for provenance.
+
 ### Phase 6: STAR-suite Integration
 
 Goal: make BINSEQ a production input option.
@@ -335,8 +386,9 @@ Tasks:
 
 Exit criteria:
 
-- `make core` passes.
-- `make core WITH_CHROMAP=1` passes.
+- `make core` passes with the default Chromap-enabled multiome build.
+- `make core WITH_CHROMAP=0` passes for explicit portable/no-Chromap
+  compatibility.
 - Input harness tests pass.
 - At least one STAR smoke test using `--readFilesType Binseq PE` passes.
 
