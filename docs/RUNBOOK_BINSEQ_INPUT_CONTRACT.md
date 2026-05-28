@@ -500,6 +500,9 @@ Remaining work:
 - Decide whether Chromap-suite should grow a true in-memory read-provider API.
   Until then, the CBQ adapter is intentionally limited to Chromap-compatible
   FASTQ materialization.
+- Chromap ATAC in-memory provider work is tracked in
+  `docs/RUNBOOK_CHROMAP_ATAC_CBQ_IN_MEMORY.md`. Keep that work ATAC-only until
+  other Chromap modalities have explicit contracts.
 - Validate real production-scale CBQ datasets when they exist, especially
   feature-barcode and multiome inputs.
 - Flex and SLAM remain FASTQ-production surfaces until their CBQ contracts are
