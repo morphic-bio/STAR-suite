@@ -92,9 +92,14 @@ planned STAR integration should read CBQ directly in C++. The reader is
 intentionally narrow: CBQ file/block/index parsing, zstd column decompression,
 two-bit sequence decoding, block-level `N` position restoration, qualities,
 headers, paired/single-end record iteration, and adapter handoff into native
-app input structs. Production app integrations should adapt from
-`CbqReadBatchView` spans into the target app's native input structs rather than
-materializing generic records or synthetic FASTQ.
+app input structs.
+
+For CBQ, "production support" means the consumer receives either an in-memory
+decoded read-batch view such as `CbqReadBatchView` or a direct adapter into its
+native structs. The view is a thin sequence/quality/header layer over decoded
+CBQ state, not FASTQ text. FASTQ materialization is acceptable for oracle tests,
+debugging, or explicit compatibility adapters, but it is not considered a
+production CBQ integration surface.
 
 ## Required Tool
 
