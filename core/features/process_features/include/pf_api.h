@@ -28,6 +28,16 @@ extern "C" {
 typedef struct pf_config pf_config;
 typedef struct pf_context pf_context;
 
+/* In-memory read record for non-FASTQ input providers. */
+typedef struct {
+    const char *barcode_sequence;
+    const char *barcode_quality;
+    const char *feature_sequence;
+    const char *feature_quality;
+    const char *feature_sequence2;
+    const char *feature_quality2;
+} pf_read_record;
+
 /* Optional permit hook API for external schedulers */
 typedef uint64_t (*pf_permit_acquire_fn)(void *hook_ctx);
 typedef void (*pf_permit_release_fn)(
@@ -294,6 +304,28 @@ pf_error pf_process_fastqs(pf_context *ctx,
                             const char **barcode_fastqs,
                             const char **feature_fastqs,
                             int n_files,
+                            const char *output_dir,
+                            const char *sample_name,
+                            pf_stats *stats_out);
+
+/**
+ * Process in-memory barcode + feature records.
+ * This is the adapter surface for native non-FASTQ readers. Records are
+ * expected to provide barcode_sequence as CB+UMI and feature_sequence as the
+ * feature/protospacer read. feature_sequence2 is optional for dual-orientation
+ * feature libraries. All strings must be NUL-terminated for this initial API.
+ *
+ * @param ctx Context handle.
+ * @param records Array of input records.
+ * @param n_records Number of records in the array.
+ * @param output_dir Directory to write output files.
+ * @param sample_name Sample name for output subdirectory.
+ * @param stats_out Optional pointer to receive processing statistics.
+ * @return PF_OK on success, error code otherwise.
+ */
+pf_error pf_process_records(pf_context *ctx,
+                            const pf_read_record *records,
+                            size_t n_records,
                             const char *output_dir,
                             const char *sample_name,
                             pf_stats *stats_out);

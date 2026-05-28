@@ -1,5 +1,6 @@
 #include "Parameters.h"
 #include "ErrorWarning.h"
+#include "input/CbqInputModule.h"
 #include "input/FastxInputModule.h"
 #include <fstream>
 #include <sys/stat.h>
@@ -186,6 +187,44 @@ void Parameters::openReadsFiles()
         fastxInputExhausted = false;
         fastxInputPendingRecord.reset();
         fastxInputLastLoggedLane = -1;
+        return;
+    }
+
+    if (readFilesTypeN == 20 && cbqInputActive) {
+        for (uint imate = 0; imate < MAX_N_MATES; imate++) {
+            readFilesCommandPID[imate] = 0;
+            if (inOut->readIn[imate].is_open()) {
+                inOut->readIn[imate].close();
+            }
+        }
+
+        vector<string> cbqReadGroups;
+        if (!readFilesNames.empty() && outSAMattrRG.size() == readFilesNames.front().size()) {
+            cbqReadGroups = outSAMattrRG;
+        }
+        star::input::InputSourcePlan cbqInputPlan =
+            star::input::make_cbq_input_source_plan(
+                readFilesNames,
+                cbqReadGroups,
+                readNends);
+
+        string inputContractError;
+        cbqInputModule.reset(new star::input::CbqInputModule());
+        if (!cbqInputModule->configure(cbqInputPlan, &inputContractError)) {
+            ostringstream errOut;
+            errOut << "EXITING because of fatal input ERROR: invalid Binseq/CBQ input source plan at open\n";
+            errOut << inputContractError << "\n";
+            exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+        }
+        if (!cbqInputModule->open(&inputContractError)) {
+            ostringstream errOut;
+            errOut << "EXITING because of fatal input ERROR: could not open Binseq/CBQ input module\n";
+            errOut << inputContractError << "\n";
+            exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_INPUT_FILES, *this);
+        }
+        readFilesIndex = 0;
+        cbqInputExhausted = false;
+        cbqInputLastLoggedLane = -1;
         return;
     }
 

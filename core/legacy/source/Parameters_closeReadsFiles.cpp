@@ -1,5 +1,6 @@
 #include "Parameters.h"
 #include "ErrorWarning.h"
+#include "input/CbqInputModule.h"
 #include "input/FastxInputModule.h"
 #include <fstream>
 #include <sys/stat.h>
@@ -14,6 +15,12 @@ void Parameters::closeReadsFiles() {
         fastxInputExhausted = false;
         fastxInputPendingRecord.reset();
         fastxInputLastLoggedLane = -1;
+    }
+
+    if (cbqInputActive && cbqInputModule) {
+        cbqInputModule->close();
+        cbqInputExhausted = false;
+        cbqInputLastLoggedLane = -1;
     }
 
     // Close all potential read streams (not just readFilesIn.size()).
