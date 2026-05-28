@@ -1,0 +1,1209 @@
+#include "input/CbqInputModule.h"
+
+#include <algorithm>
+#include <array>
+#include <cerrno>
+#include <cctype>
+#include <cstring>
+#include <dlfcn.h>
+#include <fstream>
+#include <limits>
+#include <memory>
+#include <sstream>
+#include <stdexcept>
+#include <vector>
+
+namespace star {
+namespace input {
+
+InputSourcePlan make_cbq_input_source_plan(
+    const std::vector<std::vector<std::string>>& read_files_names,
+    const std::vector<std::string>& read_groups,
+    uint32_t mate_count) {
+    InputSourcePlan plan;
+    plan.format = SourceFormat::Binseq;
+    plan.module_name = "Cbq";
+    plan.mate_files = read_files_names;
+    plan.read_groups = read_groups;
+    plan.read_files_n = read_files_names.empty()
+        ? 0
+        : static_cast<uint32_t>(read_files_names.front().size());
+    plan.mate_count = mate_count;
+    plan.preserves_source_order = true;
+    plan.uses_helper_stream = false;
+    plan.uses_internal_gzip = false;
+    return plan;
+}
+
+namespace {
+
+const uint64_t PRESENCE_PAIRED = 1ULL << 0;
+const uint64_t PRESENCE_QUALITIES = 1ULL << 1;
+const uint64_t PRESENCE_HEADERS = 1ULL << 2;
+const uint64_t PRESENCE_FLAGS = 1ULL << 3;
+
+bool set_error(std::string* error, const std::string& message) {
+    if (error != nullptr) {
+        *error = message;
+    }
+    return false;
+}
+
+uint64_t read_le64(const uint8_t* bytes) {
+    uint64_t value = 0;
+    for (unsigned ii = 0; ii < 8; ++ii) {
+        value |= static_cast<uint64_t>(bytes[ii]) << (8 * ii);
+    }
+    return value;
+}
+
+uint16_t read_le16(const uint8_t* bytes) {
+    return static_cast<uint16_t>(bytes[0]) |
+           static_cast<uint16_t>(static_cast<uint16_t>(bytes[1]) << 8);
+}
+
+bool checked_size(uint64_t value, size_t* out) {
+    if (value > static_cast<uint64_t>(std::numeric_limits<size_t>::max())) {
+        return false;
+    }
+    *out = static_cast<size_t>(value);
+    return true;
+}
+
+bool is_space_char(char value) {
+    return std::isspace(static_cast<unsigned char>(value)) != 0;
+}
+
+CbqByteSpan make_span(const std::string& value, size_t begin, size_t size) {
+    CbqByteSpan span;
+    span.data = value.data() + begin;
+    span.size = size;
+    return span;
+}
+
+CbqByteSpan make_empty_span() {
+    CbqByteSpan span;
+    span.data = "";
+    span.size = 0;
+    return span;
+}
+
+void assign_from_span(std::string* out, CbqByteSpan span) {
+    if (span.data == nullptr || span.size == 0) {
+        out->clear();
+        return;
+    }
+    out->assign(span.data, span.size);
+}
+
+CbqSegmentRole role_for_segment(uint32_t segment_index) {
+    if (segment_index == 0) {
+        return CbqSegmentRole::Read1;
+    }
+    if (segment_index == 1) {
+        return CbqSegmentRole::Read2;
+    }
+    return CbqSegmentRole::Unknown;
+}
+
+char parse_read_filter_span(char record_type, CbqByteSpan read_name_extra) {
+    if (record_type != '@') {
+        return 'N';
+    }
+
+    size_t field_size = 0;
+    while (field_size < read_name_extra.size && !is_space_char(read_name_extra.data[field_size])) {
+        ++field_size;
+    }
+    if (field_size > 3 &&
+        read_name_extra.data[1] == ':' &&
+        read_name_extra.data[2] == 'Y' &&
+        read_name_extra.data[3] == ':') {
+        return 'Y';
+    }
+    return 'N';
+}
+
+void apply_quality_conversion(std::string& quality, int add) {
+    if (add == 0) {
+        return;
+    }
+    for (char& qchar : quality) {
+        int qs = static_cast<int>(qchar) + add;
+        if (qs < 33) {
+            qs = 33;
+        } else if (qs > 126) {
+            qs = 126;
+        }
+        qchar = static_cast<char>(qs);
+    }
+}
+
+struct ParsedHeaderSpan {
+    CbqByteSpan read_name;
+    CbqByteSpan read_name_extra;
+    char read_filter = 'N';
+};
+
+ParsedHeaderSpan parse_header_payload_span(
+    const std::string& backing,
+    size_t payload_begin,
+    size_t payload_size,
+    bool has_qualities,
+    const std::vector<char>& read_name_separator_chars) {
+
+    char record_type = has_qualities ? '@' : '>';
+    size_t cursor = payload_begin;
+    const size_t payload_end = payload_begin + payload_size;
+    if (cursor < payload_end && (backing[cursor] == '@' || backing[cursor] == '>')) {
+        record_type = backing[cursor];
+        ++cursor;
+    }
+
+    while (cursor < payload_end && is_space_char(backing[cursor])) {
+        ++cursor;
+    }
+
+    const size_t name_begin = cursor;
+    while (cursor < payload_end && !is_space_char(backing[cursor])) {
+        ++cursor;
+    }
+    size_t name_end = cursor;
+    for (char separator : read_name_separator_chars) {
+        for (size_t pos = name_begin; pos < name_end; ++pos) {
+            if (backing[pos] == separator) {
+                name_end = pos;
+                break;
+            }
+        }
+    }
+
+    while (cursor < payload_end && is_space_char(backing[cursor])) {
+        ++cursor;
+    }
+
+    ParsedHeaderSpan parsed;
+    parsed.read_name = make_span(backing, name_begin, name_end - name_begin);
+    parsed.read_name_extra = make_span(backing, cursor, payload_end - cursor);
+    parsed.read_filter = parse_read_filter_span(record_type, parsed.read_name_extra);
+    return parsed;
+}
+
+struct FileHeaderFields {
+    uint8_t version = 0;
+    uint64_t presence_flags = 0;
+    uint64_t compression_level = 0;
+    uint64_t block_size = 0;
+
+    bool is_paired() const {
+        return (presence_flags & PRESENCE_PAIRED) != 0;
+    }
+    bool has_qualities() const {
+        return (presence_flags & PRESENCE_QUALITIES) != 0;
+    }
+    bool has_headers() const {
+        return (presence_flags & PRESENCE_HEADERS) != 0;
+    }
+    bool has_flags() const {
+        return (presence_flags & PRESENCE_FLAGS) != 0;
+    }
+};
+
+bool parse_file_header(const std::array<uint8_t, 64>& bytes,
+                       FileHeaderFields* header,
+                       std::string* error) {
+    if (std::memcmp(bytes.data(), "CBQFILE", 7) != 0) {
+        return set_error(error, "CBQ file header magic is not CBQFILE");
+    }
+    header->version = bytes[7];
+    if (header->version != 1) {
+        std::ostringstream msg;
+        msg << "unsupported CBQ file version: " << static_cast<unsigned>(header->version);
+        return set_error(error, msg.str());
+    }
+    header->presence_flags = read_le64(bytes.data() + 8);
+    header->compression_level = read_le64(bytes.data() + 16);
+    header->block_size = read_le64(bytes.data() + 24);
+    return true;
+}
+
+struct BlockHeaderFields {
+    uint8_t version = 0;
+    uint64_t len_z_seq_len = 0;
+    uint64_t len_z_header_len = 0;
+    uint64_t len_z_npos = 0;
+    uint64_t len_z_seq = 0;
+    uint64_t len_z_flags = 0;
+    uint64_t len_z_headers = 0;
+    uint64_t len_z_qual = 0;
+    uint64_t nuclen = 0;
+    uint64_t len_nef = 0;
+    uint64_t num_records = 0;
+    uint64_t num_sequences = 0;
+};
+
+bool parse_block_header(const std::array<uint8_t, 96>& bytes,
+                        BlockHeaderFields* header,
+                        std::string* error) {
+    if (std::memcmp(bytes.data(), "BLK", 3) != 0) {
+        return set_error(error, "CBQ block header magic is not BLK");
+    }
+    header->version = bytes[3];
+    if (header->version != 1) {
+        std::ostringstream msg;
+        msg << "unsupported CBQ block version: " << static_cast<unsigned>(header->version);
+        return set_error(error, msg.str());
+    }
+    header->len_z_seq_len = read_le64(bytes.data() + 8);
+    header->len_z_header_len = read_le64(bytes.data() + 16);
+    header->len_z_npos = read_le64(bytes.data() + 24);
+    header->len_z_seq = read_le64(bytes.data() + 32);
+    header->len_z_flags = read_le64(bytes.data() + 40);
+    header->len_z_headers = read_le64(bytes.data() + 48);
+    header->len_z_qual = read_le64(bytes.data() + 56);
+    header->nuclen = read_le64(bytes.data() + 64);
+    header->len_nef = read_le64(bytes.data() + 72);
+    header->num_records = read_le64(bytes.data() + 80);
+    header->num_sequences = read_le64(bytes.data() + 88);
+    return true;
+}
+
+class ZstdRuntime {
+public:
+    ZstdRuntime() : handle_(nullptr), decompress_(nullptr), is_error_(nullptr), get_error_name_(nullptr) {}
+
+    ~ZstdRuntime() {
+        if (handle_ != nullptr) {
+            dlclose(handle_);
+        }
+    }
+
+    bool load(std::string* error) {
+        if (decompress_ != nullptr) {
+            return true;
+        }
+        handle_ = dlopen("libzstd.so.1", RTLD_LAZY | RTLD_LOCAL);
+        if (handle_ == nullptr) {
+            handle_ = dlopen("libzstd.so", RTLD_LAZY | RTLD_LOCAL);
+        }
+        if (handle_ == nullptr) {
+            return set_error(error, "could not load libzstd.so.1 or libzstd.so");
+        }
+
+        decompress_ = reinterpret_cast<DecompressFn>(dlsym(handle_, "ZSTD_decompress"));
+        is_error_ = reinterpret_cast<IsErrorFn>(dlsym(handle_, "ZSTD_isError"));
+        get_error_name_ = reinterpret_cast<GetErrorNameFn>(dlsym(handle_, "ZSTD_getErrorName"));
+        if (decompress_ == nullptr || is_error_ == nullptr || get_error_name_ == nullptr) {
+            return set_error(error, "libzstd is missing required ZSTD_decompress symbols");
+        }
+        return true;
+    }
+
+    bool decompress(const std::vector<uint8_t>& compressed,
+                    size_t expected_size,
+                    std::vector<uint8_t>* out,
+                    const std::string& column_name,
+                    std::string* error) {
+        if (!load(error)) {
+            return false;
+        }
+        out->assign(expected_size, 0);
+        if (expected_size == 0 && compressed.empty()) {
+            return true;
+        }
+        const size_t nbytes = decompress_(
+            out->data(),
+            out->size(),
+            compressed.data(),
+            compressed.size());
+        if (is_error_(nbytes)) {
+            std::ostringstream msg;
+            msg << "zstd decompression failed for CBQ column " << column_name
+                << ": " << get_error_name_(nbytes);
+            return set_error(error, msg.str());
+        }
+        if (nbytes != expected_size) {
+            std::ostringstream msg;
+            msg << "zstd decompressed CBQ column " << column_name << " to "
+                << nbytes << " bytes, expected " << expected_size;
+            return set_error(error, msg.str());
+        }
+        return true;
+    }
+
+private:
+    using DecompressFn = size_t (*)(void*, size_t, const void*, size_t);
+    using IsErrorFn = unsigned (*)(size_t);
+    using GetErrorNameFn = const char* (*)(size_t);
+
+    void* handle_;
+    DecompressFn decompress_;
+    IsErrorFn is_error_;
+    GetErrorNameFn get_error_name_;
+};
+
+ZstdRuntime& zstd_runtime() {
+    static ZstdRuntime runtime;
+    return runtime;
+}
+
+struct BitVectorLite {
+    std::vector<uint64_t> words;
+    uint64_t len = 0;
+
+    bool bit(uint64_t pos) const {
+        if (pos >= len) {
+            return false;
+        }
+        return ((words[static_cast<size_t>(pos / 64)] >> (pos % 64)) & 1ULL) != 0;
+    }
+
+    uint64_t bits(uint64_t pos, uint64_t nbits) const {
+        uint64_t value = 0;
+        for (uint64_t ii = 0; ii < nbits; ++ii) {
+            if (bit(pos + ii)) {
+                value |= 1ULL << ii;
+            }
+        }
+        return value;
+    }
+};
+
+class SliceReader {
+public:
+    explicit SliceReader(const std::vector<uint8_t>& bytes) : bytes_(bytes), offset_(0) {}
+
+    bool read_u8(uint8_t* value, std::string* error) {
+        if (offset_ + 1 > bytes_.size()) {
+            return set_error(error, "truncated sucds payload while reading u8");
+        }
+        *value = bytes_[offset_++];
+        return true;
+    }
+
+    bool read_bool(bool* value, std::string* error) {
+        uint8_t byte = 0;
+        if (!read_u8(&byte, error)) {
+            return false;
+        }
+        *value = byte != 0;
+        return true;
+    }
+
+    bool read_u16(uint16_t* value, std::string* error) {
+        if (offset_ + 2 > bytes_.size()) {
+            return set_error(error, "truncated sucds payload while reading u16");
+        }
+        *value = read_le16(bytes_.data() + offset_);
+        offset_ += 2;
+        return true;
+    }
+
+    bool read_u64(uint64_t* value, std::string* error) {
+        if (offset_ + 8 > bytes_.size()) {
+            return set_error(error, "truncated sucds payload while reading u64");
+        }
+        *value = read_le64(bytes_.data() + offset_);
+        offset_ += 8;
+        return true;
+    }
+
+    bool skip_bytes(uint64_t nbytes, std::string* error) {
+        size_t n = 0;
+        if (!checked_size(nbytes, &n) || offset_ + n > bytes_.size()) {
+            return set_error(error, "truncated sucds payload while skipping bytes");
+        }
+        offset_ += n;
+        return true;
+    }
+
+    bool read_bitvector(BitVectorLite* bv, std::string* error) {
+        if (!read_vec_u64(&bv->words, error)) {
+            return false;
+        }
+        if (!read_u64(&bv->len, error)) {
+            return false;
+        }
+        const uint64_t expected_words = (bv->len + 63) / 64;
+        if (expected_words > bv->words.size()) {
+            return set_error(error, "sucds BitVector has fewer words than its bit length requires");
+        }
+        return true;
+    }
+
+    bool read_darray_bitvector(BitVectorLite* high_bits, std::string* error) {
+        if (!read_bitvector(high_bits, error)) {
+            return false;
+        }
+        if (!skip_darray_index(error)) {
+            return false;
+        }
+        if (!skip_optional_darray_index(error)) {
+            return false;
+        }
+        return skip_optional_rank9sel_index(error);
+    }
+
+    bool at_end() const {
+        return offset_ == bytes_.size();
+    }
+
+private:
+    bool read_vec_u64(std::vector<uint64_t>* values, std::string* error) {
+        uint64_t len64 = 0;
+        if (!read_u64(&len64, error)) {
+            return false;
+        }
+        size_t len = 0;
+        if (!checked_size(len64, &len)) {
+            return set_error(error, "sucds Vec length exceeds platform size");
+        }
+        values->clear();
+        values->reserve(len);
+        for (size_t ii = 0; ii < len; ++ii) {
+            uint64_t value = 0;
+            if (!read_u64(&value, error)) {
+                return false;
+            }
+            values->push_back(value);
+        }
+        return true;
+    }
+
+    bool skip_vec_i64(std::string* error) {
+        uint64_t len = 0;
+        if (!read_u64(&len, error)) {
+            return false;
+        }
+        return skip_bytes(len * 8, error);
+    }
+
+    bool skip_vec_u16(std::string* error) {
+        uint64_t len = 0;
+        if (!read_u64(&len, error)) {
+            return false;
+        }
+        return skip_bytes(len * 2, error);
+    }
+
+    bool skip_vec_u64(std::string* error) {
+        uint64_t len = 0;
+        if (!read_u64(&len, error)) {
+            return false;
+        }
+        return skip_bytes(len * 8, error);
+    }
+
+    bool skip_optional_vec_u64(std::string* error) {
+        bool present = false;
+        if (!read_bool(&present, error)) {
+            return false;
+        }
+        return present ? skip_vec_u64(error) : true;
+    }
+
+    bool skip_darray_index(std::string* error) {
+        uint64_t unused = 0;
+        bool unused_bool = false;
+        return skip_vec_i64(error) &&
+               skip_vec_u16(error) &&
+               skip_vec_u64(error) &&
+               read_u64(&unused, error) &&
+               read_bool(&unused_bool, error);
+    }
+
+    bool skip_optional_darray_index(std::string* error) {
+        bool present = false;
+        if (!read_bool(&present, error)) {
+            return false;
+        }
+        return present ? skip_darray_index(error) : true;
+    }
+
+    bool skip_rank9sel_index(std::string* error) {
+        uint64_t unused = 0;
+        return read_u64(&unused, error) &&
+               skip_vec_u64(error) &&
+               skip_optional_vec_u64(error) &&
+               skip_optional_vec_u64(error);
+    }
+
+    bool skip_optional_rank9sel_index(std::string* error) {
+        bool present = false;
+        if (!read_bool(&present, error)) {
+            return false;
+        }
+        return present ? skip_rank9sel_index(error) : true;
+    }
+
+    const std::vector<uint8_t>& bytes_;
+    size_t offset_;
+};
+
+bool decode_elias_fano_positions(const std::vector<uint8_t>& bytes,
+                                 std::vector<uint64_t>* positions,
+                                 std::string* error) {
+    positions->clear();
+    if (bytes.empty()) {
+        return true;
+    }
+
+    SliceReader reader(bytes);
+    BitVectorLite high_bits;
+    BitVectorLite low_bits;
+    uint64_t low_len = 0;
+    uint64_t universe = 0;
+
+    if (!reader.read_darray_bitvector(&high_bits, error) ||
+        !reader.read_bitvector(&low_bits, error) ||
+        !reader.read_u64(&low_len, error) ||
+        !reader.read_u64(&universe, error)) {
+        return false;
+    }
+    if (low_len > 63) {
+        return set_error(error, "unsupported sucds Elias-Fano low-bit length > 63");
+    }
+
+    uint64_t ordinal = 0;
+    for (uint64_t pos = 0; pos < high_bits.len; ++pos) {
+        if (!high_bits.bit(pos)) {
+            continue;
+        }
+        if (low_len != 0 && ordinal * low_len + low_len > low_bits.len) {
+            return set_error(error, "sucds Elias-Fano low-bit vector is too short");
+        }
+        const uint64_t high = pos - ordinal;
+        const uint64_t low = low_bits.bits(ordinal * low_len, low_len);
+        const uint64_t value = (high << low_len) | low;
+        if (value >= universe) {
+            return set_error(error, "decoded Elias-Fano value exceeds universe");
+        }
+        positions->push_back(value);
+        ++ordinal;
+    }
+
+    if (!reader.at_end()) {
+        return set_error(error, "trailing bytes after sucds Elias-Fano payload");
+    }
+    return true;
+}
+
+bool read_exact(std::ifstream& stream,
+                uint8_t* dest,
+                size_t nbytes,
+                const std::string& description,
+                std::string* error) {
+    stream.read(reinterpret_cast<char*>(dest), static_cast<std::streamsize>(nbytes));
+    if (stream.gcount() != static_cast<std::streamsize>(nbytes)) {
+        return set_error(error, "truncated CBQ stream while reading " + description);
+    }
+    return true;
+}
+
+bool read_vector(std::ifstream& stream,
+                 uint64_t nbytes64,
+                 std::vector<uint8_t>* dest,
+                 const std::string& description,
+                 std::string* error) {
+    size_t nbytes = 0;
+    if (!checked_size(nbytes64, &nbytes)) {
+        return set_error(error, "CBQ column length exceeds platform size for " + description);
+    }
+    dest->assign(nbytes, 0);
+    if (nbytes == 0) {
+        return true;
+    }
+    return read_exact(stream, dest->data(), nbytes, description, error);
+}
+
+bool bytes_to_u64_vector(const std::vector<uint8_t>& bytes,
+                         std::vector<uint64_t>* values,
+                         const std::string& description,
+                         std::string* error) {
+    if (bytes.size() % 8 != 0) {
+        return set_error(error, "CBQ column " + description + " byte length is not a multiple of 8");
+    }
+    values->clear();
+    values->reserve(bytes.size() / 8);
+    for (size_t offset = 0; offset < bytes.size(); offset += 8) {
+        values->push_back(read_le64(bytes.data() + offset));
+    }
+    return true;
+}
+
+std::string decode_twobit_sequence(const std::vector<uint8_t>& bytes, uint64_t nuclen) {
+    static const char lookup[4] = {'A', 'C', 'G', 'T'};
+    std::string sequence;
+    sequence.resize(static_cast<size_t>(nuclen));
+    for (uint64_t ibase = 0; ibase < nuclen; ++ibase) {
+        const uint64_t word_index = ibase / 32;
+        const uint64_t offset_in_word = ibase % 32;
+        const uint64_t word = read_le64(bytes.data() + static_cast<size_t>(word_index * 8));
+        sequence[static_cast<size_t>(ibase)] = lookup[(word >> (offset_in_word * 2)) & 0x3ULL];
+    }
+    return sequence;
+}
+
+struct DecodedBlock {
+    uint64_t num_records = 0;
+    uint64_t num_sequences = 0;
+    std::vector<uint64_t> seq_lengths;
+    std::vector<uint64_t> seq_offsets;
+    std::vector<uint64_t> header_lengths;
+    std::vector<uint64_t> header_offsets;
+    std::string sequences;
+    std::string headers;
+    std::string qualities;
+    size_t record_index = 0;
+
+    void clear() {
+        num_records = 0;
+        num_sequences = 0;
+        seq_lengths.clear();
+        seq_offsets.clear();
+        header_lengths.clear();
+        header_offsets.clear();
+        sequences.clear();
+        headers.clear();
+        qualities.clear();
+        record_index = 0;
+    }
+};
+
+bool make_offsets(const std::vector<uint64_t>& lengths,
+                  uint64_t expected_total,
+                  std::vector<uint64_t>* offsets,
+                  const std::string& description,
+                  std::string* error) {
+    offsets->assign(lengths.size() + 1, 0);
+    uint64_t total = 0;
+    for (size_t ii = 0; ii < lengths.size(); ++ii) {
+        total += lengths[ii];
+        (*offsets)[ii + 1] = total;
+    }
+    if (total != expected_total) {
+        std::ostringstream msg;
+        msg << "CBQ " << description << " lengths sum to " << total
+            << ", expected " << expected_total;
+        return set_error(error, msg.str());
+    }
+    return true;
+}
+
+enum class BlockLoadStatus {
+    Block,
+    End,
+    Error
+};
+
+} // namespace
+
+struct CbqInputModule::Impl {
+    std::ifstream stream;
+    uint32_t lane_index = 0;
+    uint64_t read_ordinal = 0;
+    uint64_t lane_record_index = 0;
+    bool opened = false;
+    FileHeaderFields file_header;
+    DecodedBlock block;
+    std::vector<std::string> synthetic_read_names;
+    std::vector<CbqSegmentView> segment_views;
+    std::vector<CbqReadView> read_views;
+
+    void clear_batch_views() {
+        synthetic_read_names.clear();
+        segment_views.clear();
+        read_views.clear();
+    }
+
+    bool build_batch_views(const InputSourcePlan& plan, std::string* error) {
+        clear_batch_views();
+
+        size_t num_records = 0;
+        if (!checked_size(block.num_records, &num_records)) {
+            return set_error(error, "CBQ block record count exceeds platform size");
+        }
+        if (num_records > static_cast<size_t>(std::numeric_limits<uint32_t>::max())) {
+            return set_error(error, "CBQ block record count exceeds uint32_t");
+        }
+        if (plan.mate_count == 0 ||
+            num_records > std::numeric_limits<size_t>::max() / plan.mate_count) {
+            return set_error(error, "CBQ block segment count exceeds platform size");
+        }
+
+        const size_t segment_count = num_records * plan.mate_count;
+        read_views.assign(num_records, CbqReadView());
+        segment_views.assign(segment_count, CbqSegmentView());
+        synthetic_read_names.reserve((file_header.has_headers() && !block.headers.empty()) ? 0 : num_records);
+
+        for (size_t irecord = 0; irecord < num_records; ++irecord) {
+            const uint64_t first_sequence_index = static_cast<uint64_t>(irecord) * plan.mate_count;
+
+            ParsedHeaderSpan parsed;
+            if (file_header.has_headers() && !block.headers.empty()) {
+                const size_t begin = static_cast<size_t>(block.header_offsets[static_cast<size_t>(first_sequence_index)]);
+                const size_t end = static_cast<size_t>(block.header_offsets[static_cast<size_t>(first_sequence_index + 1)]);
+                parsed = parse_header_payload_span(
+                    block.headers,
+                    begin,
+                    end - begin,
+                    file_header.has_qualities(),
+                    plan.read_name_separator_chars);
+            } else {
+                synthetic_read_names.push_back(std::to_string(lane_record_index + irecord + 1));
+                parsed.read_name = make_span(synthetic_read_names.back(), 0, synthetic_read_names.back().size());
+                parsed.read_name_extra = make_empty_span();
+                parsed.read_filter = 'N';
+            }
+
+            CbqReadView& record = read_views[irecord];
+            record.read_name = parsed.read_name;
+            record.read_name_extra = parsed.read_name_extra;
+            record.lane_index = lane_index;
+            record.read_ordinal = read_ordinal + irecord + 1;
+            record.lane_read_ordinal = lane_record_index + irecord + 1;
+            record.read_filter = parsed.read_filter;
+            record.segment_count = plan.mate_count;
+            record.segments = segment_views.data() + (irecord * plan.mate_count);
+
+            for (uint32_t isegment = 0; isegment < plan.mate_count; ++isegment) {
+                const uint64_t seq_index = first_sequence_index + isegment;
+                const size_t begin = static_cast<size_t>(block.seq_offsets[static_cast<size_t>(seq_index)]);
+                const size_t end = static_cast<size_t>(block.seq_offsets[static_cast<size_t>(seq_index + 1)]);
+                const size_t length = end - begin;
+                if (length > static_cast<size_t>(std::numeric_limits<uint32_t>::max())) {
+                    return set_error(error, "CBQ sequence length exceeds uint32_t");
+                }
+
+                CbqSegmentView& segment = segment_views[irecord * plan.mate_count + isegment];
+                segment.role = role_for_segment(isegment);
+                segment.source_index = isegment;
+                segment.sequence = make_span(block.sequences, begin, length);
+                segment.quality = make_span(block.qualities, begin, length);
+                segment.original_length = static_cast<uint32_t>(length);
+                segment.has_quality = file_header.has_qualities();
+            }
+        }
+
+        read_ordinal += static_cast<uint64_t>(num_records);
+        lane_record_index += static_cast<uint64_t>(num_records);
+        return true;
+    }
+
+    bool open_lane(const InputSourcePlan& plan, uint32_t lane, std::string* error) {
+        close_lane();
+        const std::string& path = plan.mate_files.front().at(lane);
+        stream.open(path.c_str(), std::ios::binary);
+        if (!stream.good()) {
+            return set_error(error, "could not open CBQ file: " + path);
+        }
+
+        std::array<uint8_t, 64> header_bytes{};
+        if (!read_exact(stream, header_bytes.data(), header_bytes.size(), "file header", error)) {
+            close_lane();
+            return false;
+        }
+        if (!parse_file_header(header_bytes, &file_header, error)) {
+            close_lane();
+            return false;
+        }
+
+        const bool file_paired = file_header.is_paired();
+        if ((plan.mate_count == 2) != file_paired) {
+            std::ostringstream msg;
+            msg << "CBQ mate-count mismatch for " << path << ": file paired="
+                << (file_paired ? "true" : "false")
+                << " but plan mate_count=" << plan.mate_count;
+            close_lane();
+            return set_error(error, msg.str());
+        }
+
+        lane_index = lane;
+        lane_record_index = 0;
+        block.clear();
+        opened = true;
+        return true;
+    }
+
+    void close_lane() {
+        if (stream.is_open()) {
+            stream.close();
+        }
+        block.clear();
+        clear_batch_views();
+    }
+
+    BlockLoadStatus load_next_block(const InputSourcePlan& plan, std::string* error) {
+        block.clear();
+
+        std::array<uint8_t, 8> first{};
+        stream.read(reinterpret_cast<char*>(first.data()), static_cast<std::streamsize>(first.size()));
+        if (stream.gcount() == 0 && stream.eof()) {
+            return BlockLoadStatus::End;
+        }
+        if (stream.gcount() != static_cast<std::streamsize>(first.size())) {
+            set_error(error, "truncated CBQ stream while reading block/index magic");
+            return BlockLoadStatus::Error;
+        }
+        if (std::memcmp(first.data(), "CBQINDEX", 8) == 0) {
+            return BlockLoadStatus::End;
+        }
+
+        std::array<uint8_t, 96> header_bytes{};
+        std::copy(first.begin(), first.end(), header_bytes.begin());
+        if (!read_exact(stream,
+                        header_bytes.data() + first.size(),
+                        header_bytes.size() - first.size(),
+                        "block header",
+                        error)) {
+            return BlockLoadStatus::Error;
+        }
+
+        BlockHeaderFields header;
+        if (!parse_block_header(header_bytes, &header, error)) {
+            return BlockLoadStatus::Error;
+        }
+
+        const uint64_t expected_sequences = header.num_records * plan.mate_count;
+        if (header.num_sequences != expected_sequences) {
+            std::ostringstream msg;
+            msg << "CBQ block has num_sequences=" << header.num_sequences
+                << " but expected " << expected_sequences
+                << " for num_records=" << header.num_records
+                << " mate_count=" << plan.mate_count;
+            set_error(error, msg.str());
+            return BlockLoadStatus::Error;
+        }
+
+        std::vector<uint8_t> z_seq_len;
+        std::vector<uint8_t> z_header_len;
+        std::vector<uint8_t> z_npos;
+        std::vector<uint8_t> z_seq;
+        std::vector<uint8_t> z_flags;
+        std::vector<uint8_t> z_headers;
+        std::vector<uint8_t> z_qual;
+
+        if (!read_vector(stream, header.len_z_seq_len, &z_seq_len, "z_seq_len", error) ||
+            !read_vector(stream, header.len_z_header_len, &z_header_len, "z_header_len", error) ||
+            !read_vector(stream, header.len_z_npos, &z_npos, "z_npos", error) ||
+            !read_vector(stream, header.len_z_seq, &z_seq, "z_seq", error) ||
+            !read_vector(stream, header.len_z_flags, &z_flags, "z_flags", error) ||
+            !read_vector(stream, header.len_z_headers, &z_headers, "z_headers", error) ||
+            !read_vector(stream, header.len_z_qual, &z_qual, "z_qual", error)) {
+            return BlockLoadStatus::Error;
+        }
+
+        size_t num_sequences = 0;
+        size_t nuclen = 0;
+        size_t ef_len = 0;
+        if (!checked_size(header.num_sequences, &num_sequences) ||
+            !checked_size(header.nuclen, &nuclen) ||
+            !checked_size(header.len_nef, &ef_len)) {
+            set_error(error, "CBQ block metadata exceeds platform size");
+            return BlockLoadStatus::Error;
+        }
+
+        std::vector<uint8_t> seq_len_bytes;
+        std::vector<uint8_t> header_len_bytes;
+        std::vector<uint8_t> npos_bytes;
+        std::vector<uint8_t> seq_word_bytes;
+        std::vector<uint8_t> flags_bytes;
+        std::vector<uint8_t> header_bytes_column;
+        std::vector<uint8_t> qual_bytes;
+
+        const size_t seq_len_bytes_expected = num_sequences * 8;
+        const size_t seq_word_bytes_expected = ((nuclen + 31) / 32) * 8;
+        if (!zstd_runtime().decompress(z_seq_len, seq_len_bytes_expected, &seq_len_bytes, "seq_len", error)) {
+            return BlockLoadStatus::Error;
+        }
+        if (!bytes_to_u64_vector(seq_len_bytes, &block.seq_lengths, "seq_len", error)) {
+            return BlockLoadStatus::Error;
+        }
+        if (!make_offsets(block.seq_lengths, header.nuclen, &block.seq_offsets, "sequence", error)) {
+            return BlockLoadStatus::Error;
+        }
+
+        if (file_header.has_headers()) {
+            if (!zstd_runtime().decompress(z_header_len, seq_len_bytes_expected, &header_len_bytes, "header_len", error) ||
+                !bytes_to_u64_vector(header_len_bytes, &block.header_lengths, "header_len", error)) {
+                return BlockLoadStatus::Error;
+            }
+        } else {
+            block.header_lengths.assign(num_sequences, 0);
+        }
+
+        if (!z_npos.empty()) {
+            if (!zstd_runtime().decompress(z_npos, ef_len, &npos_bytes, "npos", error)) {
+                return BlockLoadStatus::Error;
+            }
+        }
+
+        std::vector<uint64_t> n_positions;
+        if (!decode_elias_fano_positions(npos_bytes, &n_positions, error)) {
+            return BlockLoadStatus::Error;
+        }
+
+        if (!zstd_runtime().decompress(z_seq, seq_word_bytes_expected, &seq_word_bytes, "seq", error)) {
+            return BlockLoadStatus::Error;
+        }
+        block.sequences = decode_twobit_sequence(seq_word_bytes, header.nuclen);
+        for (uint64_t npos : n_positions) {
+            if (npos >= header.nuclen) {
+                set_error(error, "CBQ N-position exceeds decoded sequence length");
+                return BlockLoadStatus::Error;
+            }
+            block.sequences[static_cast<size_t>(npos)] = 'N';
+        }
+
+        if (file_header.has_flags()) {
+            const size_t flags_expected = static_cast<size_t>(header.num_records) * 8;
+            if (!zstd_runtime().decompress(z_flags, flags_expected, &flags_bytes, "flags", error)) {
+                return BlockLoadStatus::Error;
+            }
+        }
+
+        uint64_t total_header_len = 0;
+        for (uint64_t length : block.header_lengths) {
+            total_header_len += length;
+        }
+        if (!make_offsets(block.header_lengths, total_header_len, &block.header_offsets, "header", error)) {
+            return BlockLoadStatus::Error;
+        }
+        if (file_header.has_headers()) {
+            size_t total_header_size = 0;
+            if (!checked_size(total_header_len, &total_header_size)) {
+                set_error(error, "CBQ header payload exceeds platform size");
+                return BlockLoadStatus::Error;
+            }
+            if (!zstd_runtime().decompress(z_headers, total_header_size, &header_bytes_column, "headers", error)) {
+                return BlockLoadStatus::Error;
+            }
+            block.headers.assign(reinterpret_cast<const char*>(header_bytes_column.data()), header_bytes_column.size());
+        }
+
+        if (file_header.has_qualities()) {
+            if (!zstd_runtime().decompress(z_qual, nuclen, &qual_bytes, "qual", error)) {
+                return BlockLoadStatus::Error;
+            }
+            block.qualities.assign(reinterpret_cast<const char*>(qual_bytes.data()), qual_bytes.size());
+        } else {
+            block.qualities.assign(nuclen, 'A');
+        }
+
+        block.num_records = header.num_records;
+        block.num_sequences = header.num_sequences;
+        block.record_index = 0;
+        if (!build_batch_views(plan, error)) {
+            return BlockLoadStatus::Error;
+        }
+        return BlockLoadStatus::Block;
+    }
+
+    BlockLoadStatus load_next_available_block(const InputSourcePlan& plan, std::string* error) {
+        while (lane_index < plan.read_files_n) {
+            if (block.record_index < static_cast<size_t>(block.num_records)) {
+                return BlockLoadStatus::Block;
+            }
+
+            const BlockLoadStatus status = load_next_block(plan, error);
+            if (status == BlockLoadStatus::Error) {
+                return BlockLoadStatus::Error;
+            }
+            if (status == BlockLoadStatus::Block) {
+                if (block.num_records == 0) {
+                    continue;
+                }
+                return BlockLoadStatus::Block;
+            }
+
+            close_lane();
+            ++lane_index;
+            if (lane_index >= plan.read_files_n) {
+                opened = false;
+                return BlockLoadStatus::End;
+            }
+            if (!open_lane(plan, lane_index, error)) {
+                return BlockLoadStatus::Error;
+            }
+        }
+
+        opened = false;
+        return BlockLoadStatus::End;
+    }
+};
+
+CbqInputModule::CbqInputModule() : configured_(false), impl_(new Impl()) {
+    plan_.format = SourceFormat::Binseq;
+    plan_.module_name = "Cbq";
+}
+
+CbqInputModule::~CbqInputModule() = default;
+
+const char* CbqInputModule::name() const {
+    return "CbqInputModule";
+}
+
+bool CbqInputModule::configure(const InputSourcePlan& plan, std::string* error) {
+    if (plan.format != SourceFormat::Binseq) {
+        return set_error(error, "CbqInputModule received a non-BINSEQ input source plan");
+    }
+    if (plan.mate_files.size() != 1) {
+        return set_error(error, "CBQ input expects one CBQ path per lane, not split external mate files");
+    }
+    if (plan.mate_files.front().empty()) {
+        return set_error(error, "CBQ input requires at least one CBQ input path");
+    }
+    if (plan.mate_count != 1 && plan.mate_count != 2) {
+        return set_error(error, "CBQ input currently supports mate_count 1 or 2");
+    }
+    if (plan.read_files_n != 0 && plan.read_files_n != plan.mate_files.front().size()) {
+        std::ostringstream msg;
+        msg << "CBQ input read_files_n=" << plan.read_files_n
+            << " does not match CBQ lane count=" << plan.mate_files.front().size();
+        return set_error(error, msg.str());
+    }
+    if (!plan.read_groups.empty() && plan.read_groups.size() != plan.mate_files.front().size()) {
+        std::ostringstream msg;
+        msg << "CBQ input has " << plan.mate_files.front().size()
+            << " lanes but " << plan.read_groups.size() << " read groups";
+        return set_error(error, msg.str());
+    }
+
+    plan_ = plan;
+    plan_.format = SourceFormat::Binseq;
+    plan_.module_name = "Cbq";
+    plan_.preserves_source_order = true;
+    plan_.uses_helper_stream = false;
+    plan_.read_files_n = static_cast<uint32_t>(plan.mate_files.front().size());
+    if (plan_.read_name_separator_chars.empty()) {
+        plan_.read_name_separator_chars.push_back(' ');
+    }
+    configured_ = true;
+    return true;
+}
+
+const InputSourcePlan& CbqInputModule::plan() const {
+    return plan_;
+}
+
+bool CbqInputModule::supports_record_iteration() const {
+    return true;
+}
+
+bool CbqInputModule::open(std::string* error) {
+    if (!configured_) {
+        return set_error(error, "CbqInputModule must be configured before open()");
+    }
+    close();
+    if (plan_.read_files_n == 0) {
+        return set_error(error, "CBQ input source plan has no lanes");
+    }
+
+    impl_->lane_index = 0;
+    impl_->read_ordinal = 0;
+    impl_->opened = false;
+    if (!impl_->open_lane(plan_, impl_->lane_index, error)) {
+        return false;
+    }
+    impl_->opened = true;
+    return true;
+}
+
+InputStatus CbqInputModule::next_batch(CbqReadBatchView* batch, std::string* error) {
+    if (batch == nullptr) {
+        if (error != nullptr) {
+            *error = "next_batch() requires a non-null CbqReadBatchView";
+        }
+        return InputStatus::Error;
+    }
+    if (!impl_->opened) {
+        if (error != nullptr) {
+            *error = "CbqInputModule is not open";
+        }
+        return InputStatus::Error;
+    }
+
+    const BlockLoadStatus status = impl_->load_next_available_block(plan_, error);
+    if (status == BlockLoadStatus::Error) {
+        return InputStatus::Error;
+    }
+    if (status == BlockLoadStatus::End) {
+        return InputStatus::End;
+    }
+
+    const size_t start = impl_->block.record_index;
+    const size_t remaining = static_cast<size_t>(impl_->block.num_records) - start;
+    if (remaining > static_cast<size_t>(std::numeric_limits<uint32_t>::max())) {
+        if (error != nullptr) {
+            *error = "CBQ unread batch size exceeds uint32_t";
+        }
+        return InputStatus::Error;
+    }
+
+    batch->records = impl_->read_views.data() + start;
+    batch->record_count = static_cast<uint32_t>(remaining);
+    batch->lane_index = impl_->lane_index;
+    batch->preserves_source_order = true;
+    batch->backing_storage_owned_by_reader = true;
+
+    impl_->block.record_index = static_cast<size_t>(impl_->block.num_records);
+    return InputStatus::Record;
+}
+
+InputStatus CbqInputModule::next_record(InputRecord* record, std::string* error) {
+    if (record == nullptr) {
+        if (error != nullptr) {
+            *error = "next_record() requires a non-null InputRecord";
+        }
+        return InputStatus::Error;
+    }
+    if (!impl_->opened) {
+        if (error != nullptr) {
+            *error = "CbqInputModule is not open";
+        }
+        return InputStatus::Error;
+    }
+
+    const BlockLoadStatus status = impl_->load_next_available_block(plan_, error);
+    if (status == BlockLoadStatus::Error) {
+        return InputStatus::Error;
+    }
+    if (status == BlockLoadStatus::End) {
+        return InputStatus::End;
+    }
+
+    const CbqReadView& view = impl_->read_views[impl_->block.record_index++];
+
+    assign_from_span(&record->read_name, view.read_name);
+    assign_from_span(&record->read_name_extra, view.read_name_extra);
+    record->lane_index = view.lane_index;
+    record->read_ordinal = view.read_ordinal;
+    record->read_filter = view.read_filter;
+    record->mate_count = view.segment_count;
+    record->mates.clear();
+    record->mates.reserve(view.segment_count);
+
+    for (uint32_t isegment = 0; isegment < view.segment_count; ++isegment) {
+        const CbqSegmentView& segment = view.segments[isegment];
+        InputMateRecord mate;
+        assign_from_span(&mate.sequence, segment.sequence);
+        assign_from_span(&mate.quality, segment.quality);
+        apply_quality_conversion(mate.quality, plan_.out_qs_conversion_add);
+        mate.original_length = segment.original_length;
+        mate.has_quality = segment.has_quality;
+        record->mates.push_back(mate);
+    }
+
+    return InputStatus::Record;
+}
+
+void CbqInputModule::close() {
+    if (impl_) {
+        impl_->close_lane();
+        impl_->lane_index = 0;
+        impl_->opened = false;
+    }
+}
+
+} // namespace input
+} // namespace star
