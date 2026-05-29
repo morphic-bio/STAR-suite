@@ -15,6 +15,9 @@ SOLO_UMI_START="${SOLO_UMI_START:-17}"
 SOLO_UMI_LEN="${SOLO_UMI_LEN:-12}"
 SAMPLE_PROBE_CATALOG="${SAMPLE_PROBE_CATALOG:-/mnt/pikachu/JAX_scRNAseq01_processed/probe-barcodes-fixed-rna-profiling-rna.txt}"
 SAMPLE_PROBE_OFFSET="${SAMPLE_PROBE_OFFSET:-68}"
+INPUT_FORMAT="${INPUT_FORMAT:-fastq}"
+CBQ_FILE="${CBQ_FILE:-}"
+OUT_SAMTYPE="${OUT_SAMTYPE:-bam-unsorted}"
 CR_CONFIG="${CR_CONFIG:-}"
 OUT_BASE="${OUT_BASE:-/tmp/flex_cr_config_runs}"
 RUN_ID="${RUN_ID:-flex_cr_config_$(date +%Y%m%d_%H%M%S)}"
@@ -37,6 +40,10 @@ Options:
   --solo-umi-len N           UMI length on R1 (default: ${SOLO_UMI_LEN})
   --sample-probe-catalog P   Probe barcode catalog (default: ${SAMPLE_PROBE_CATALOG})
   --sample-probe-offset N    Probe offset relative to cDNA read (default: ${SAMPLE_PROBE_OFFSET})
+  --input-format fastq|cbq   Input source for STAR (default: ${INPUT_FORMAT})
+  --cbq-file FILE            Ordered paired CBQ for --input-format cbq. Store mates in
+                              the same order as the FASTQ path: cDNA R2, then barcode R1.
+  --out-samtype MODE         Output alignment mode: bam-unsorted or none (default: ${OUT_SAMTYPE})
   --out-base DIR             Output base directory (default: ${OUT_BASE})
   --run-id ID                Run directory name (default: ${RUN_ID})
   --dry-run                  Write manifest/command/helpers only
@@ -61,6 +68,9 @@ while [[ $# -gt 0 ]]; do
     --solo-umi-len) SOLO_UMI_LEN="$2"; shift 2 ;;
     --sample-probe-catalog) SAMPLE_PROBE_CATALOG="$2"; SAMPLE_PROBE_CATALOG_EXPLICIT=1; shift 2 ;;
     --sample-probe-offset) SAMPLE_PROBE_OFFSET="$2"; SAMPLE_PROBE_OFFSET_EXPLICIT=1; shift 2 ;;
+    --input-format) INPUT_FORMAT="$2"; shift 2 ;;
+    --cbq-file) CBQ_FILE="$2"; shift 2 ;;
+    --out-samtype) OUT_SAMTYPE="$2"; shift 2 ;;
     --out-base) OUT_BASE="$2"; shift 2 ;;
     --run-id) RUN_ID="$2"; shift 2 ;;
     --dry-run) DRY_RUN=1; shift ;;
@@ -75,6 +85,21 @@ done
 [[ -x "${FLEX_INPUT_HELPER}" ]] || die "Missing helper: ${FLEX_INPUT_HELPER}"
 [[ -d "${GENOME_DIR}" ]] || die "Missing genomeDir: ${GENOME_DIR}"
 [[ -f "${SOLO_CB_WHITELIST}" ]] || die "Missing whitelist: ${SOLO_CB_WHITELIST}"
+case "${INPUT_FORMAT}" in
+  fastq|cbq) ;;
+  *) die "Unsupported --input-format: ${INPUT_FORMAT}" ;;
+esac
+case "${OUT_SAMTYPE}" in
+  bam-unsorted|none) ;;
+  *) die "Unsupported --out-samtype: ${OUT_SAMTYPE}" ;;
+esac
+if [[ "${INPUT_FORMAT}" == "cbq" ]]; then
+  [[ -n "${CBQ_FILE}" ]] || die "--input-format cbq requires --cbq-file FILE"
+  IFS=',' read -r -a cbq_paths <<< "${CBQ_FILE}"
+  for cbq_path in "${cbq_paths[@]}"; do
+    [[ -f "${cbq_path}" ]] || die "Missing CBQ file: ${cbq_path}"
+  done
+fi
 
 OUT_DIR="${OUT_BASE}/${RUN_ID}"
 mkdir -p "${OUT_DIR}"
@@ -106,14 +131,26 @@ fi
 
 [[ -f "${SAMPLE_PROBE_CATALOG}" ]] || die "Missing sample probe catalog: ${SAMPLE_PROBE_CATALOG}"
 
+READ_ARGS=()
+if [[ "${INPUT_FORMAT}" == "cbq" ]]; then
+  READ_ARGS=(--readFilesType Binseq PE --readFilesIn "${CBQ_FILE}")
+else
+  READ_ARGS=(--readFilesIn "${GEX_R2}" "${GEX_R1}" --readFilesCommand zcat)
+fi
+SAM_ARGS=()
+if [[ "${OUT_SAMTYPE}" == "none" ]]; then
+  SAM_ARGS=(--outSAMtype None --outSAMattributes None)
+else
+  SAM_ARGS=(--outSAMtype BAM Unsorted --outBAMcompression 6 --outSAMattributes NH HI AS nM NM GX GN)
+fi
+
 CMD=(
   "${STAR_BIN}"
   --runThreadN "${THREADS}"
   --genomeDir "${GENOME_DIR}"
-  --readFilesIn "${GEX_R2}" "${GEX_R1}"
-  --readFilesCommand zcat
+  "${READ_ARGS[@]}"
   --outFileNamePrefix "${OUT_DIR}/"
-  --outSAMtype BAM Unsorted
+  "${SAM_ARGS[@]}"
   --soloType CB_UMI_Simple
   --soloCBstart "${SOLO_CB_START}"
   --soloCBlen "${SOLO_CB_LEN}"
@@ -131,7 +168,6 @@ CMD=(
   --soloFlexOutputPrefix "${OUT_DIR}/per_sample"
   --limitIObufferSize 50000000 50000000
   --outSJtype None
-  --outBAMcompression 6
   --soloMultiMappers Rescue
   --alignIntronMax 500000
   --outFilterMismatchNmax 6
@@ -146,7 +182,6 @@ CMD=(
   --outSAMprimaryFlag AllBestScore
   --outFilterScoreMin 0
   --outFilterScoreMinOverLread 0
-  --outSAMattributes NH HI AS nM NM GX GN
   --soloCBmatchWLtype 1MM_multi_Nbase_pseudocounts
   --soloUMIfiltering MultiGeneUMI_CR
   --soloUMIdedup 1MM_CR
@@ -166,6 +201,9 @@ CMD=(
   printf 'star_bin=%s\n' "${STAR_BIN}"
   printf 'threads=%s\n' "${THREADS}"
   printf 'out_dir=%s\n' "${OUT_DIR}"
+  printf 'input_format=%s\n' "${INPUT_FORMAT}"
+  printf 'cbq_file=%s\n' "${CBQ_FILE}"
+  printf 'out_samtype=%s\n' "${OUT_SAMTYPE}"
   printf 'cr_config=%s\n' "${CR_CONFIG}"
   printf 'cr_gene_expression_reference=%s\n' "${CR_GENE_EXPRESSION_REFERENCE:-}"
   printf 'cr_gene_expression_probe_set=%s\n' "${CR_GENE_EXPRESSION_PROBE_SET:-}"
