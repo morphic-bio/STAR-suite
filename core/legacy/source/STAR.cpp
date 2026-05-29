@@ -2302,6 +2302,13 @@ int main(int argInN, char *argIn[])
             meta.weightMode = P.quant.slam.weightMode;
             meta.geneIds = transcriptomeMain->geID;
             meta.geneNames = transcriptomeMain->geName;
+            for (int ichunk = 0; ichunk < P.runThreadN; ++ichunk) {
+                if (RAchunk[ichunk] != nullptr && RAchunk[ichunk]->slamQuant != nullptr &&
+                    !RAchunk[ichunk]->slamQuant->allowedGenes().empty()) {
+                    meta.allowedGenes = RAchunk[ichunk]->slamQuant->allowedGenes();
+                    break;
+                }
+            }
             if (genomeMain.genomeOut.g != nullptr) {
                 meta.chrNames = genomeMain.genomeOut.g->chrName;
                 meta.chrStart.clear();

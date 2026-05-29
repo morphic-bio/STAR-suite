@@ -75,7 +75,9 @@ export FLEX_INLINE_TMP_DIR="${FLEX_INLINE_TMP_DIR:-/tmp/flex_inline_test}"
 # SLAM fixture (external, not in repo)
 export SLAM_FIXTURE_ROOT="${SLAM_FIXTURE_ROOT:-/mnt/pikachu/STAR-Flex/test/tmp_slam_fixture}"
 export SLAM_FIXTURE_FASTQ="${SLAM_FIXTURE_FASTQ:-/mnt/pikachu/STAR-Flex/test/tmp_slam_fixture/SRR32576116.fastq.gz}"
-export SLAM_FIXTURE_REF_TSV="${SLAM_FIXTURE_REF_TSV:-/mnt/pikachu/STAR-Flex/test/tmp_slam_fixture/fixture_ref_human.tsv.gz}"
+export SLAM_FIXTURE_LEGACY_REF_TSV="${SLAM_FIXTURE_LEGACY_REF_TSV:-/mnt/pikachu/STAR-Flex/test/tmp_slam_fixture/fixture_ref_human.tsv.gz}"
+export SLAM_FIXTURE_NOSNP_REF_TSV="${SLAM_FIXTURE_NOSNP_REF_TSV:-/mnt/pikachu/STAR-Flex/test/tmp_slam_fixture/from_nosnp.tsv.gz}"
+export SLAM_FIXTURE_REF_TSV="${SLAM_FIXTURE_REF_TSV:-$SLAM_FIXTURE_NOSNP_REF_TSV}"
 export SLAM_FIXTURE_STAR_INDEX="${SLAM_FIXTURE_STAR_INDEX:-/mnt/pikachu/STAR-Flex/test/fixtures/slam/ref/STAR-index}"
 export SLAM_FIXTURE_SNPS_BED="${SLAM_FIXTURE_SNPS_BED:-/mnt/pikachu/STAR-Flex/test/tmp_slam_fixture/snps.bed}"
 

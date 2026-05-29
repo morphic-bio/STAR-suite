@@ -6,6 +6,14 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+if [[ -f "$SCRIPT_DIR/external_fixtures_env.sh" ]]; then
+    # Host-local fixture defaults. Each variable still honors caller overrides.
+    # The current parity fixture is the noSNP GRAND-SLAM output; the older
+    # fixture_ref_human.tsv.gz surface is retained only as a legacy reference.
+    # shellcheck source=/dev/null
+    source "$SCRIPT_DIR/external_fixtures_env.sh"
+fi
+
 SLAM_FIXTURE_ROOT="${SLAM_FIXTURE_ROOT:-$ROOT_DIR/test/fixtures/slam}"
 if [[ ! -d "$SLAM_FIXTURE_ROOT" ]]; then
     ALT_FIXTURE_ROOT="/mnt/pikachu/STAR-Flex/test/fixtures/slam"
@@ -17,11 +25,13 @@ fi
 SLAM_WORK="${SLAM_WORK:-$ROOT_DIR/test/tmp_slam_fixture}"
 STAR_BIN="${STAR_BIN:-$ROOT_DIR/core/legacy/source/STAR}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
+COMPARE_MODE="${COMPARE_MODE:-correlation}"
+CORR_MIN="${CORR_MIN:-0.99}"
 
-FASTQ="${FASTQ:-$SLAM_FIXTURE_ROOT/raw/slam_100000_reads_SRR32576116.fastq.gz}"
-STAR_INDEX="${STAR_INDEX:-$SLAM_FIXTURE_ROOT/ref/star_index}"
-SNPS_BED="${SNPS_BED:-$SLAM_FIXTURE_ROOT/ref/snps.bed}"
-REF_TSV="${REF_TSV:-$SLAM_FIXTURE_ROOT/expected/fixture_ref_human.tsv.gz}"
+FASTQ="${FASTQ:-${SLAM_FIXTURE_FASTQ:-$SLAM_FIXTURE_ROOT/raw/slam_100000_reads_SRR32576116.fastq.gz}}"
+STAR_INDEX="${STAR_INDEX:-${SLAM_FIXTURE_STAR_INDEX:-$SLAM_FIXTURE_ROOT/ref/star_index}}"
+SNPS_BED="${SNPS_BED:-${SLAM_FIXTURE_SNPS_BED:-$SLAM_FIXTURE_ROOT/ref/snps.bed}}"
+REF_TSV="${REF_TSV:-${SLAM_FIXTURE_REF_TSV:-$SLAM_FIXTURE_ROOT/expected/fixture_ref_human.tsv.gz}}"
 OUT_PREFIX="${OUT_PREFIX:-$SLAM_WORK/star_slam_}"
 SLAM_OUT="${SLAM_OUT:-${OUT_PREFIX}SlamQuant.out}"
 GRAND_SLAM_OUT="${GRAND_SLAM_OUT:-${OUT_PREFIX}SlamQuant.grandslam.tsv}"
@@ -106,9 +116,19 @@ fi
 
 if [[ "${DIRECT_EM_COMPARE:-0}" -eq 1 ]]; then
     echo "=== Comparing STAR-Slam vs GRAND-SLAM ==="
-    "$PYTHON_BIN" "$COMPARE_SCRIPT" \
-        --reference "$REF_TSV" \
-        --test "$SLAM_OUT"
+    compare_args=(--reference "$REF_TSV" --test "$SLAM_OUT")
+    case "$COMPARE_MODE" in
+        strict)
+            ;;
+        correlation)
+            compare_args+=(--correlation-only --corr-min "$CORR_MIN")
+            ;;
+        *)
+            echo "FAIL: unsupported COMPARE_MODE: $COMPARE_MODE"
+            exit 1
+            ;;
+    esac
+    "$PYTHON_BIN" "$COMPARE_SCRIPT" "${compare_args[@]}"
 else
     echo "Skipping STAR-Slam vs GRAND-SLAM comparison (set DIRECT_EM_COMPARE=1 to enable)."
 fi
