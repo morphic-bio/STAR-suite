@@ -24,6 +24,7 @@ class SlamSnpMask;
 namespace star {
 namespace input {
 class CbqInputModule;
+struct CbqReadBatchView;
 class FastxInputModule;
 struct InputRecord;
 } // namespace input
@@ -149,6 +150,8 @@ class Parameters {
         bool fastxInputExhausted = false;
         int fastxInputLastLoggedLane = -1;
         std::shared_ptr<star::input::CbqInputModule> cbqInputModule;
+        std::shared_ptr<star::input::CbqReadBatchView> cbqInputPendingBatch;
+        uint32 cbqInputPendingBatchOffset = 0;
         bool cbqInputActive = false;
         bool cbqInputExhausted = false;
         int cbqInputLastLoggedLane = -1;

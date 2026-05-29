@@ -16,15 +16,20 @@ STAR --readFilesType Binseq SE --readFilesIn sample.cbq ...
   `core/legacy/source/binseq_probe_harness`.
 - Paired and single-end `.cbq` files can be read directly by the native C++
   prototype harness `core/legacy/source/cbq_reader_harness`.
+- `core/legacy/source/cbq_ordered_encoder` creates paired or single-end CBQ
+  from FASTQ/FASTQ.gz while preserving source record order. Use this encoder
+  for production parity tests where read order can affect downstream
+  deterministic boundaries.
 - The native reader now emits a borrowed, block-backed `CbqReadBatchView`
   interchange format. The harness consumes that view directly; the older
   `InputRecord` path remains only as a compatibility adapter.
 - `core/legacy/source/cbq_star_adapter_harness` verifies that the direct CBQ
   adapter produces byte-identical STAR internal read-buffer state relative to a
-  FASTQ/readLoad reference emulation.
-- `core/legacy/source/cbq_pf_adapter_harness` verifies a direct
-  process_features in-memory record API for CBQ barcode/feature records without
-  materializing temporary FASTQ.
+  FASTQ/readLoad reference emulation, and has a decoded-batch benchmark mode for
+  isolating adapter cost after CBQ block decode.
+- `core/legacy/source/cbq_pf_adapter_harness` verifies that CBQ
+  barcode/feature records can stream through the process_features decoded input
+  gate and existing consumer path without materializing temporary FASTQ.
 - `core/legacy/source/cbq_chromap_adapter_harness` materializes synchronized
   R1/R2/barcode FASTQs from paired-read and barcode CBQ files for Chromap's
   current FASTQ-path contract.
@@ -41,7 +46,9 @@ STAR --readFilesType Binseq SE --readFilesIn sample.cbq ...
   direct CBQ, level-0 CBQ, and manifest-style CBQ input.
 - Single-end `.cbq` files are covered by the synthetic conversion smoke.
 - process_features CBQ input is covered by a FASTQ-vs-CBQ MEX/count parity
-  smoke on a synthetic feature-barcode fixture with valid nucleotide UMIs.
+  smoke on a synthetic feature-barcode fixture with valid nucleotide UMIs. This
+  currently exercises the harness/API surface; the production PF CLI flag is
+  still pending.
 - Chromap CBQ input is covered by a CBQ-to-Chromap-FASTQ adapter smoke and, on
   hosts with Chromap available, a tiny synthetic mapping run.
 - `tests/run_cbq_e2e_module_regression.sh` runs the downsampled CBQ module
@@ -68,6 +75,8 @@ STAR --readFilesType Binseq SE --readFilesIn sample.cbq ...
 - BINSEQ input order is not guaranteed by the generic input contract. Downstream
   code and tests must compare by read identity, sequence, quality, mate, and
   lane/read group unless a module advertises source-order preservation.
+- CBQs produced by external parallel encoders may not preserve FASTQ source
+  order. Use `cbq_ordered_encoder` when exact FASTQ-vs-CBQ order parity matters.
 
 ## How This Differs From FASTQ
 
@@ -95,11 +104,12 @@ headers, paired/single-end record iteration, and adapter handoff into native
 app input structs.
 
 For CBQ, "production support" means the consumer receives either an in-memory
-decoded read-batch view such as `CbqReadBatchView` or a direct adapter into its
-native structs. The view is a thin sequence/quality/header layer over decoded
-CBQ state, not FASTQ text. FASTQ materialization is acceptable for oracle tests,
-debugging, or explicit compatibility adapters, but it is not considered a
-production CBQ integration surface.
+read-batch view such as `CbqReadBatchView` or a direct adapter into its native
+structs. The production STAR view keeps sequence in CBQ's packed two-bit block
+storage and carries `N` positions as side metadata; it does not expand the full
+block to ASCII sequence text. ASCII materialization is acceptable for oracle
+tests, debugging, process_features compatibility, or explicit path-based
+adapters, but it is not considered the production STAR CBQ integration surface.
 
 ## Required Tool
 
@@ -118,7 +128,7 @@ make -C core/legacy/source binseq-probe-harness
 To build STAR plus FASTX and BINSEQ comparison harnesses:
 
 ```bash
-make -C core/legacy/source STAR fastx-input-harness binseq-probe-harness cbq-reader-harness cbq-star-adapter-harness cbq-pf-adapter-harness cbq-chromap-adapter-harness
+make -C core/legacy/source STAR fastx-input-harness binseq-probe-harness cbq-reader-harness cbq-ordered-encoder cbq-star-adapter-harness cbq-pf-adapter-harness cbq-chromap-adapter-harness
 ```
 
 ## Run The Smokes
@@ -135,6 +145,13 @@ compression cases plus byte-identical STAR internal adapter dumps:
 
 ```bash
 BQTOOLS=/path/to/bqtools tests/run_cbq_cpp_reader_smoke.sh
+```
+
+Ordered C++ FASTQ/FASTQ.gz-to-CBQ encoder smoke, covering paired, gzipped
+paired, single-end, N-position round trip, and exact ordered contract parity:
+
+```bash
+tests/run_cbq_ordered_encoder_smoke.sh
 ```
 
 Production STAR mapper smoke, covering paired and single-end FASTQ-vs-CBQ SAM
@@ -260,6 +277,22 @@ core/legacy/source/cbq_star_adapter_harness \
 cmp sample.cbq_star_adapter.direct.bin sample.cbq_star_adapter.reference.bin
 ```
 
+Decoded-batch STAR adapter benchmark:
+
+```bash
+core/legacy/source/cbq_star_adapter_harness \
+  --readFilesIn sample.cbq \
+  --mateCount 2 \
+  --mode benchmark \
+  --maxRecords 1000000 \
+  --iterations 5
+```
+
+The benchmark preloads decoded `CbqReadBatchView` batches once, then replays the
+STAR adapter into reusable STAR read buffers. `preload_seconds` measures CBQ
+block decode plus view construction; `adapter_seconds` measures the STAR adapter
+only.
+
 process_features adapter probe:
 
 ```bash
@@ -294,6 +327,8 @@ normal mapper path for the modes that have been validated.
 - Implementation runbook: `docs/RUNBOOK_BINSEQ_INPUT_CONTRACT.md`
 - Native reader and STAR adapter prototype:
   `docs/RUNBOOK_BINSEQ_CPP_READER_PROTOTYPE.md`
+- process_features native CBQ production plan:
+  `docs/RUNBOOK_PROCESS_FEATURES_CBQ_NATIVE.md`
 - Chromap ATAC in-memory integration plan:
   `docs/RUNBOOK_CHROMAP_ATAC_CBQ_IN_MEMORY.md`
 - Synthetic smoke: `tests/run_binseq_probe_smoke.sh`

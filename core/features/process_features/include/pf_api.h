@@ -27,6 +27,12 @@ extern "C" {
 /* Opaque handles */
 typedef struct pf_config pf_config;
 typedef struct pf_context pf_context;
+typedef struct pf_record_stream pf_record_stream;
+
+typedef struct {
+    const char *data;
+    size_t length;
+} pf_sequence_view;
 
 /* In-memory read record for non-FASTQ input providers. */
 typedef struct {
@@ -37,6 +43,16 @@ typedef struct {
     const char *feature_sequence2;
     const char *feature_quality2;
 } pf_read_record;
+
+/* Borrowed-span read record for native non-FASTQ providers. */
+typedef struct {
+    pf_sequence_view barcode_sequence;
+    pf_sequence_view barcode_quality;
+    pf_sequence_view feature_sequence;
+    pf_sequence_view feature_quality;
+    pf_sequence_view feature_sequence2;
+    pf_sequence_view feature_quality2;
+} pf_read_record_view;
 
 /* Optional permit hook API for external schedulers */
 typedef uint64_t (*pf_permit_acquire_fn)(void *hook_ctx);
@@ -329,6 +345,45 @@ pf_error pf_process_records(pf_context *ctx,
                             const char *output_dir,
                             const char *sample_name,
                             pf_stats *stats_out);
+
+/**
+ * Begin streaming in-memory barcode + feature records for one sample.
+ * The returned stream owns process_features sample state until
+ * pf_process_records_end() or pf_process_records_abort() is called.
+ */
+pf_error pf_process_records_begin(pf_context *ctx,
+                                  const char *output_dir,
+                                  const char *sample_name,
+                                  pf_record_stream **stream_out);
+
+/**
+ * Process a batch of NUL-terminated in-memory records through an open stream.
+ */
+pf_error pf_process_record_batch(pf_record_stream *stream,
+                                 const pf_read_record *records,
+                                 size_t n_records);
+
+/**
+ * Process a batch of borrowed-span records through an open stream.
+ * Required sequence spans must have non-NULL data. Missing quality spans are
+ * represented by data == NULL and are replaced with default qualities.
+ */
+pf_error pf_process_record_views(pf_record_stream *stream,
+                                 const pf_read_record_view *records,
+                                 size_t n_records);
+
+/**
+ * Finish a streaming in-memory sample, write outputs, destroy stream state,
+ * and release the process_features runtime lock.
+ */
+pf_error pf_process_records_end(pf_record_stream *stream,
+                                pf_stats *stats_out);
+
+/**
+ * Abort a streaming in-memory sample without writing final outputs and release
+ * the process_features runtime lock.
+ */
+void pf_process_records_abort(pf_record_stream *stream);
 
 /* ============================================================================
  * Output API

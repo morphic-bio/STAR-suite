@@ -225,6 +225,8 @@ void Parameters::openReadsFiles()
         readFilesIndex = 0;
         cbqInputExhausted = false;
         cbqInputLastLoggedLane = -1;
+        cbqInputPendingBatch.reset();
+        cbqInputPendingBatchOffset = 0;
         return;
     }
 

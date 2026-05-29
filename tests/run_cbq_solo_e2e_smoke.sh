@@ -148,6 +148,7 @@ COMMON_ARGS=(
     --outFilterMismatchNmax 0
     --alignIntronMax 1
     --alignMatesGapMax 1000
+    --clipAdapterType CellRanger4
     --soloType CB_UMI_Simple
     --soloCBstart 1
     --soloCBlen 16
@@ -226,5 +227,24 @@ compare_solo_raw "$OUT_ROOT/cbq"
 compare_solo_raw "$OUT_ROOT/cbq_level0"
 compare_solo_raw "$OUT_ROOT/cbq_manifest"
 require_nonzero_matrix "$OUT_ROOT/fastq/Solo.out/Gene/raw/matrix.mtx"
+
+avg_input_read_length() {
+    awk -F'|' '/Average input read length/ { gsub(/[ \t]/, "", $2); print $2 }' "$1/Log.final.out"
+}
+
+compare_avg_input_read_length() {
+    local observed_dir="$1"
+    local expected observed
+    expected="$(avg_input_read_length "$OUT_ROOT/fastq")"
+    observed="$(avg_input_read_length "$observed_dir")"
+    if [[ -z "$expected" || -z "$observed" || "$expected" != "$observed" ]]; then
+        echo "ERROR: STARsolo CBQ average input read length mismatch for $observed_dir: expected $expected observed $observed" >&2
+        exit 1
+    fi
+}
+
+compare_avg_input_read_length "$OUT_ROOT/cbq"
+compare_avg_input_read_length "$OUT_ROOT/cbq_level0"
+compare_avg_input_read_length "$OUT_ROOT/cbq_manifest"
 
 echo "PASS: STARsolo CBQ E2E smoke completed at $OUT_ROOT"

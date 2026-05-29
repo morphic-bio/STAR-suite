@@ -71,6 +71,13 @@ std::string sha256_hex(CbqByteSpan value) {
     return out.str();
 }
 
+std::string sha256_hex_string(const std::string& value) {
+    CbqByteSpan span;
+    span.data = value.data();
+    span.size = value.size();
+    return sha256_hex(span);
+}
+
 struct HarnessOptions {
     std::vector<std::string> read_files_in;
     std::string read_files_manifest = "-";
@@ -227,14 +234,16 @@ void write_span(std::ostream& out, CbqByteSpan span) {
 void emit_tsv(const CbqReadView& record, std::ostream& out) {
     for (uint32_t isegment = 0; isegment < record.segment_count; ++isegment) {
         const CbqSegmentView& segment = record.segments[isegment];
+        std::string sequence;
+        materialize_cbq_segment_sequence(segment, &sequence);
         out << record.lane_index << '\t'
             << record.read_ordinal << '\t'
             << record.read_filter << '\t';
         write_span(out, record.read_name);
         out << '\t'
             << (segment.source_index + 1) << '\t'
-            << segment.original_length << '\t'
-            << sha256_hex(segment.sequence) << '\t'
+            << cbq_segment_sequence_length(segment) << '\t'
+            << sha256_hex_string(sequence) << '\t'
             << sha256_hex(segment.quality) << '\n';
     }
 }
@@ -242,6 +251,8 @@ void emit_tsv(const CbqReadView& record, std::ostream& out) {
 void emit_fastq(const CbqReadView& record, std::ostream& out) {
     for (uint32_t isegment = 0; isegment < record.segment_count; ++isegment) {
         const CbqSegmentView& segment = record.segments[isegment];
+        std::string sequence;
+        materialize_cbq_segment_sequence(segment, &sequence);
         out << '@';
         write_span(out, record.read_name);
         out
@@ -249,7 +260,7 @@ void emit_fastq(const CbqReadView& record, std::ostream& out) {
             << " ordinal:" << record.read_ordinal
             << " mate:" << (segment.source_index + 1)
             << " filter:" << record.read_filter << '\n';
-        write_span(out, segment.sequence);
+        out.write(sequence.data(), static_cast<std::streamsize>(sequence.size()));
         out << "\n+\n";
         write_span(out, segment.quality);
         out << '\n';

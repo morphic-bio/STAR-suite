@@ -49,6 +49,7 @@ struct AssignOptions {
     int featureModeBootstrapReads = 0;
     bool useHotHash = false;
     bool skipHeatmaps = false;
+    string sampleName;
 };
 
 struct AssignResult {

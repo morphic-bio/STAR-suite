@@ -62,6 +62,7 @@ update this file with its output location.
     - `downstream_genefull_velocyto_100k_starcells_featurelibs_v2/feature_libraries/*/filtered_feature_library.h5ad`
 - `tests/trim_qc_replay_smoke_output/` (standalone alignment replay smoke for FastQC-like trim-QC JSON/HTML)
 - `tests/trim_qc_fastq_smoke_output/` (standalone FASTQ replay smoke for FastQC-like trim-QC JSON/HTML)
+- `/tmp/star_suite_cbq_ordered_encoder_smoke/` (ordered C++ FASTQ/FASTQ.gz to CBQ encoder smoke outputs and contract dumps)
 - `tests/sceptre_example_output_*` (SCEPTRE vignette runs)
 - `tests/sceptre_example_*_mex` (SCEPTRE vignette MEX exports)
 - `tests/nbem_sceptre_example_*` (NB-EM outputs on SCEPTRE vignette MEX)
@@ -124,6 +125,7 @@ update this file with its output location.
 - `/tmp/star_suite_cbq_pf_adapter_smoke` (synthetic process_features CBQ adapter smoke: assignBarcodes baseline fixture, gzipped FASTQ reference run, CBQ in-memory record run, and MEX/count parity outputs)
 - `/tmp/star_suite_cbq_chromap_adapter_smoke` (synthetic Chromap CBQ adapter smoke: paired-read and barcode CBQ inputs, materialized Chromap FASTQ contract files, payload parity dumps, and optional Chromap mapping output)
 - `/tmp/star_suite_cbq_e2e_module_regression_*` (aggregate CBQ E2E/module regression wrapper logs for BINSEQ probe, native CBQ reader, STAR mapper, STARsolo, process_features, and Chromap adapter smokes)
+- `/mnt/pikachu/cbq_solo_ingestion_benchmark_*` (FASTQ-vs-native-CBQ STARsolo ingestion timing runs from `tests/run_cbq_solo_ingestion_benchmark.sh`; per-mode `BENCHMARK_SUMMARY.txt` files are the authoritative completion artifacts)
 - `/tmp/star_suite_production_module_regression_*` (manifest-driven production-module regression wrapper logs, per-case stdout/stderr, and preflight/run summaries)
 - `/tmp/ucsf_cr_config_1m_smoke_*` (real UCSF perturb CR-config fixture smoke outputs)
 - `/tmp/ucsf_batch_cr_multifeature_tiny_*` (synthetic UCSF perturb multifeature CR-config tiny smoke outputs)
