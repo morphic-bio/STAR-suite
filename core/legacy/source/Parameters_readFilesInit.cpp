@@ -1,5 +1,7 @@
 #include "Parameters.h"
 #include "ErrorWarning.h"
+#include "input/CbqInputModule.h"
+#include "input/FastxInputModule.h"
 #include "streamFuns.h"
 #include <fstream>
 #include <sys/stat.h>
@@ -22,6 +24,13 @@ bool endsWithCaseInsensitive(const string& value, const string& suffix) {
     }
     return true;
 }
+
+bool isFastqPath(const string& value) {
+    return endsWithCaseInsensitive(value, ".fastq") ||
+           endsWithCaseInsensitive(value, ".fq") ||
+           endsWithCaseInsensitive(value, ".fastq.gz") ||
+           endsWithCaseInsensitive(value, ".fq.gz");
+}
 }
 
 void Parameters::readFilesInit() 
@@ -29,6 +38,8 @@ void Parameters::readFilesInit()
 
     if (readFilesType.at(0) == "Fastx") {
         readFilesTypeN=1;
+    } else if (readFilesType.at(0) == "Binseq") {
+        readFilesTypeN=20;
     } else if (readFilesType.at(0) == "SAM"){
         readFilesTypeN=10;
         readFiles.samAttrKeepAll = false;
@@ -52,9 +63,17 @@ void Parameters::readFilesInit()
     } else {
         ostringstream errOut;
         errOut <<"EXITING because of FATAL INPUT ERROR: unknown/unimplemented value for --readFilesType: "<<readFilesType.at(0) <<"\n";
-        errOut <<"SOLUTION: specify one of the allowed values: Fastx or SAM\n";
+        errOut <<"SOLUTION: specify one of the allowed values: Fastx, Binseq, or SAM\n";
         exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
     };
+
+    if (emitYNoYFastqyes && readFilesTypeN != 1) {
+        ostringstream errOut;
+        errOut << "EXITING because of FATAL INPUT ERROR: --emitYNoYFastq currently requires FASTQ input through --readFilesType Fastx.\n";
+        errOut << "SOLUTION: use FASTQ input files with --readFilesType Fastx or disable --emitYNoYFastq.\n";
+        // TODO: Y-removal/Y-noY FASTQ emission is needed for non-FASTQ input formats.
+        exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+    }
 
     readFilesPrefixFinal=(readFilesPrefix=="-" ? "" : readFilesPrefix);
     
@@ -151,12 +170,24 @@ void Parameters::readFilesInit()
         };
         rfM.close();
         
-        readNends = ( readFilesNames[1][0].back()=='-' ? 1 : 2);
-        readFilesNames.resize(readNends);//resize if readFilesN=1
+        if (readFilesTypeN == 20) {
+            for (const auto& mate2Name : readFilesNames[1]) {
+                if (mate2Name != "-") {
+                    ostringstream errOut;
+                    errOut << "EXITING because of FATAL INPUT FILE error: --readFilesType Binseq expects one CBQ file per lane.\n";
+                    errOut << "In readFilesManifest, the second column must be '-' for Binseq input.\n";
+                    exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_INPUT_FILES, *this);
+                }
+            }
+            readFilesNames.resize(1);
+        } else {
+            readNends = ( readFilesNames[1][0].back()=='-' ? 1 : 2);
+            readFilesNames.resize(readNends);//resize if readFilesN=1
+        }
         readFilesN = readFilesNames[0].size();
     };
 
-    inOut->logMain << "Number of fastq files for each mate = " << readFilesN << endl;
+    inOut->logMain << "Number of input files for each source = " << readFilesN << endl;
     
     // Parse legacy gzip override
     {
@@ -175,6 +206,12 @@ void Parameters::readFilesInit()
     }
 
     const bool hasReadFilesCommand = (readFilesCommand.at(0) != "-");
+    if (readFilesTypeN == 20 && hasReadFilesCommand) {
+        ostringstream errOut;
+        errOut << "EXITING because of FATAL INPUT ERROR: --readFilesCommand is not supported with --readFilesType Binseq.\n";
+        errOut << "SOLUTION: pass CBQ files directly through --readFilesIn or --readFilesManifest.\n";
+        exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+    }
     string explicitReadFilesCommandLower;
     if (hasReadFilesCommand) {
         for (const auto& token : readFilesCommand) {
@@ -221,7 +258,7 @@ void Parameters::readFilesInit()
     } else if (readFilesTypeN == 1 && allFastqGz && readFilesLegacyZcat) {
         // Compatibility override: keep legacy FIFO + external zcat behavior.
         readFilesCommandString = "zcat   ";
-    } else if (readFilesN > 1) {
+    } else if (readFilesN > 1 && readFilesTypeN != 20) {
         readFilesCommandString = "cat   "; // concatenate multiple plain-text files
     }
 
@@ -242,6 +279,23 @@ void Parameters::readFilesInit()
     
     if (readFilesTypeN==1) {
         readNends=readFilesNames.size(); //for now the number of mates is defined by the number of input files
+    } else if (readFilesTypeN==20) {
+        if (readFilesType.size()==2 && readFilesType.at(1)=="SE") {
+            readNends=1;
+        } else if (readFilesType.size()==2 && readFilesType.at(1)=="PE") {
+            readNends=2;
+        } else {
+            ostringstream errOut;
+            errOut <<"EXITING because of FATAL INPUT ERROR: --readFilesType Binseq requires specifying SE or PE reads"<<"\n";
+            errOut <<"SOLUTION: specify --readFilesType Binseq SE for single-end CBQ or --readFilesType Binseq PE for paired-end CBQ\n";
+            exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+        };
+        if (readFilesNames.size() != 1) {
+            ostringstream errOut;
+            errOut << "EXITING because of FATAL INPUT ERROR: --readFilesType Binseq expects one CBQ source list in --readFilesIn.\n";
+            errOut << "SOLUTION: pass one comma-separated CBQ list, e.g. --readFilesType Binseq PE --readFilesIn lane1.cbq,lane2.cbq\n";
+            exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+        }
     } else if (readFilesTypeN==10) {//find the number of mates from the SAM file
         if (readFilesType.size()==2 && readFilesType.at(1)=="SE") {
             readNends=1;
@@ -256,4 +310,67 @@ void Parameters::readFilesInit()
     };
     
     readNmates=readNends; //this may be changed later if one of the reads is barcode rea
+
+    if (readFilesTypeN==1) {
+        if (emitYNoYFastqyes) {
+            for (uint32 imate = 0; imate < readFilesNames.size(); ++imate) {
+                for (const auto& fastxName : readFilesNames[imate]) {
+                    if (!isFastqPath(fastxName)) {
+                        ostringstream errOut;
+                        errOut << "EXITING because of FATAL INPUT ERROR: --emitYNoYFastq currently requires FASTQ input files.\n";
+                        errOut << "Offending --readFilesIn entry: " << fastxName << "\n";
+                        errOut << "SOLUTION: provide .fastq/.fq files, optionally gzip-compressed as .fastq.gz/.fq.gz, or disable --emitYNoYFastq.\n";
+                        // TODO: Y-removal/Y-noY FASTQ emission is needed for other input formats.
+                        exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+                    }
+                }
+            }
+        }
+
+        star::input::InputSourcePlan fastxInputPlan =
+            star::input::make_fastx_input_source_plan(
+                readFilesNames,
+                outSAMattrRG,
+                readFilesCommandString,
+                readFilesPrefixFinal,
+                readFilesUseInternalGzip);
+        fastxInputActive = false;
+        fastxInputPendingRecordValid = false;
+        fastxInputExhausted = false;
+        fastxInputLastLoggedLane = -1;
+        fastxInputPendingRecord.reset();
+        fastxInputModule.reset(new star::input::FastxInputModule());
+        string inputContractError;
+        if (!fastxInputModule->configure(fastxInputPlan, &inputContractError)) {
+            ostringstream errOut;
+            errOut << "EXITING because of FATAL INPUT ERROR: invalid Fastx input source plan\n";
+            errOut << inputContractError << "\n";
+            exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+        };
+        fastxInputActive = true;
+    } else if (readFilesTypeN==20) {
+        vector<string> cbqReadGroups;
+        if (!readFilesNames.empty() && outSAMattrRG.size() == readFilesNames.front().size()) {
+            cbqReadGroups = outSAMattrRG;
+        }
+        star::input::InputSourcePlan cbqInputPlan =
+            star::input::make_cbq_input_source_plan(
+                readFilesNames,
+                cbqReadGroups,
+                readNends);
+        cbqInputActive = false;
+        cbqInputExhausted = false;
+        cbqInputLastLoggedLane = -1;
+        cbqInputPendingBatch.reset();
+        cbqInputPendingBatchOffset = 0;
+        cbqInputModule.reset(new star::input::CbqInputModule());
+        string inputContractError;
+        if (!cbqInputModule->configure(cbqInputPlan, &inputContractError)) {
+            ostringstream errOut;
+            errOut << "EXITING because of FATAL INPUT ERROR: invalid Binseq/CBQ input source plan\n";
+            errOut << inputContractError << "\n";
+            exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+        };
+        cbqInputActive = true;
+    };
 };

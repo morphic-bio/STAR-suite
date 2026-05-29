@@ -24,6 +24,7 @@ function launchpadApiBase() {
 const LAUNCHPAD_WORKFLOW_ORDER = [
   "star_genome_generate",
   "star_bulk_pe_batch",
+  "star_binseq_pe_batch",
   "star_scrna_solo_droplet",
   "star_flex_fixed_rna",
   "star_perturb_cr_compat",

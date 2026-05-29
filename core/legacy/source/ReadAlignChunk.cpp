@@ -81,6 +81,7 @@ ReadAlignChunk::ReadAlignChunk(Parameters& Pin, Genome &genomeIn, Transcriptome 
     chunkOutBAMquant = nullptr;
     chunkQuants = nullptr;
     chunkOutBAMstream = nullptr;
+    cbqChunkReadN = 0;
 
     if ( P.quant.yes ) {//allocate transcriptome structures
         chunkTr=new Transcriptome(*TrIn);

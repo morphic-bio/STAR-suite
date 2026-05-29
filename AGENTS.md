@@ -38,9 +38,10 @@ actionable; link to deeper docs rather than copying them.
 
 ## Build and Smoke Tests
 
-- Core build: `make core` (binary: `core/legacy/source/STAR`). Default STAR does
-  **not** link libchromap; for in-process Chromap ATAC (`--chromapAtacEnable 1`),
-  build with `make core WITH_CHROMAP=1` (see `docs/LIBCHROMAP_CONTRACT.md`).
+- Core build: `make core` (binary: `core/legacy/source/STAR`) builds the
+  Chromap-enabled multiome-capable STAR by default. Use `make core-portable` or
+  `make core WITH_CHROMAP=0` only for explicit no-Chromap compatibility builds
+  (see `docs/LIBCHROMAP_CONTRACT.md`).
 - Flex tools: `make flex` or `make flex-tools`.
 - Feature tools: `make feature-barcodes-tools`.
 - CB/UB regression: `tests/run_cbub_regression_test.sh`.
@@ -73,6 +74,8 @@ actionable; link to deeper docs rather than copying them.
   binary.
 - Clean rebuild command:
   `make -C core/legacy/source clean && make -C core/legacy/source -j8 STAR`.
+  This now builds the Chromap-enabled multiome binary by default; pass
+  `WITH_CHROMAP=0` only when intentionally testing the portable stub build.
 - This applies after switching branches/commits, cherry-picking, reverting
   files, or any operation that changes source without rebuilding all objects.
 - This is especially important for Flex/Solo debugging; stale objects can
@@ -306,7 +309,13 @@ Workflow schemas: `mcp_server/workflows/`
 
 ## Branching and Merges
 
-- Feature branches merge into `perturb`, then merge into `master`.
+- Feature branches merge into `perturb` for active integration when needed.
+- Release-candidate work merges into `dev-release` or a version-scoped
+  `dev-release-vX.Y.Z` branch for advanced-user testing.
+- Stable production releases merge from the accepted dev-release candidate into
+  `master` with `git merge --no-ff`, then tag `vX.Y.Z` from `master`.
+- Immutable prerelease tags use `vX.Y.Z-rcN` and should be cut from
+  `dev-release` or `dev-release-vX.Y.Z`.
 - Do not squash-merge branches that touch shared core files; preserve the DAG
   with `git merge --no-ff` so later integrations keep a usable merge base.
 - Keep large binaries and datasets untracked; update `.gitignore` if needed.
@@ -342,12 +351,15 @@ code when two branches modify the same file. Follow these rules:
 
 - Do not publish images or release artifacts on every push.
 - Pull requests: run fast checks only (build sanity + Tier A smoke); no publish.
-- Push to `dev`: run integration checks and optionally publish `dev-<sha>` images.
+- Push to `dev-release` or `dev-release-*`: run integration checks and
+  optionally publish `dev-release-<sha>` / `dev-release-latest` images for
+  advanced users.
 - Push to `master`: run required checks and publish multi-arch images (`amd64`,
   `arm64`) to stable tags (`latest`, `master-<sha>`).
 - Tags `v*`: run release pipeline (multi-arch publish + GitHub Release artifacts
-  + source package upload for PPA build).
-- CI path filters are enabled for `ci-pr.yml`, `ci-dev.yml`, and
+  + source package upload for PPA build). `vX.Y.Z-rcN` tags are prereleases and
+  do not move Docker `latest`.
+- CI path filters are enabled for `ci-pr.yml`, `ci-dev-release.yml`, and
   `ci-master.yml`; these workflows run only when build/test/release infra paths
   change (see exact globs in `docs/Github-actions.md`).
 - `release.yml` remains tag-triggered on `v*` and is intentionally not path-scoped.

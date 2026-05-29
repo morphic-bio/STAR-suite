@@ -100,6 +100,31 @@ struct pf_context {
     int detected_match_mode;    /* 0=unknown, 1=RAW_MATCH, 2=TRANSLATED_MATCH, 3=AMBIGUOUS */
 };
 
+struct pf_record_stream {
+    pf_context *ctx;
+    sample_args sample_args;
+    statistics *stats;
+    data_structures *hashes;
+    memory_pool_collection **pools;
+    fastq_reader_set *reader_sets[1];
+    fastq_processor *processors;
+    pthread_t *consumer_threads;
+    struct chem_detect_state chem_detect;
+    char sample_directory[FILENAME_LENGTH];
+    double start_time;
+    int nconsumers;
+    int nreaders;
+    int lines_per_block;
+    int queue_initialized;
+    int consumers_started;
+    int consumers_joined;
+    int processors_initialized;
+    int worker_state_initialized;
+    int chem_detect_enabled;
+    int failed;
+    int closed;
+};
+
 /* Global initialization flag */
 static int g_pf_global_initialized = 0;
 /* process_features legacy core still uses process-global mutable state.
@@ -884,6 +909,534 @@ pf_error pf_load_filtered_barcodes(pf_context *ctx, const char *filtered_path) {
  * Processing Implementation
  * ============================================================================ */
 
+static pf_error pf_prepare_feature_offset_config(pf_context *ctx) {
+    if (ctx->config->use_feature_offset_array && ctx->config->feature_offset_explicit) {
+        snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                 "Cannot specify both use_feature_offset_array and explicit feature_offset");
+        return PF_ERR_OFFSET_CONFLICT;
+    }
+
+    if (!ctx->config->use_feature_offset_array && !ctx->config->feature_offset_explicit &&
+        ctx->features && feature_offsets && feature_offsets_count > 0) {
+        int offset_counts[256] = {0};
+        int max_offset_seen = -1;
+        int valid_offsets = 0;
+
+        for (int i = 0; i < feature_offsets_count; i++) {
+            int off = feature_offsets[i];
+            if (off >= 0 && off < 256) {
+                offset_counts[off]++;
+                valid_offsets++;
+                if (off > max_offset_seen) max_offset_seen = off;
+            }
+        }
+
+        if (valid_offsets > 0) {
+            int dominant_offset = 0;
+            int dominant_count = 0;
+            int second_count = 0;
+
+            for (int i = 0; i <= max_offset_seen; i++) {
+                if (offset_counts[i] > dominant_count) {
+                    second_count = dominant_count;
+                    dominant_count = offset_counts[i];
+                    dominant_offset = i;
+                } else if (offset_counts[i] > second_count) {
+                    second_count = offset_counts[i];
+                }
+            }
+
+            double heterogeneity_threshold = 0.05;
+            if (second_count > 0 &&
+                (double)second_count / (double)dominant_count > heterogeneity_threshold) {
+                if (ctx->config->strict_offset_check) {
+                    snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                             "Multiple feature offsets detected (strict mode). "
+                             "Dominant: %d (%d features), second: %d features. "
+                             "Use pf_config_set_feature_offset() or pf_config_set_use_feature_offset_array(1).",
+                             dominant_offset, dominant_count, second_count);
+                    return PF_ERR_MULTI_OFFSET_DETECTED;
+                }
+                fprintf(stderr, "\nWARNING: Multiple feature offsets detected in pattern column.\n");
+                fprintf(stderr, "         Dominant offset: %d (used by %d features)\n",
+                        dominant_offset, dominant_count);
+                fprintf(stderr, "         Other offsets detected:\n");
+                for (int i = 0; i <= max_offset_seen; i++) {
+                    if (i != dominant_offset && offset_counts[i] > 0) {
+                        double pct = 100.0 * offset_counts[i] / dominant_count;
+                        fprintf(stderr, "           offset %d: %d features (%.1f%%)\n",
+                                i, offset_counts[i], pct);
+                    }
+                }
+                fprintf(stderr, "\n         Proceeding with dominant offset %d.\n\n",
+                        dominant_offset);
+            }
+
+            ctx->config->feature_offset = dominant_offset;
+            fprintf(stderr, "[offset-detect] Auto-detected global offset: %d (from %d features with pattern)\n",
+                    dominant_offset, valid_offsets);
+        } else {
+            fprintf(stderr, "[offset-detect] No pattern offsets found, using default offset: 0\n");
+        }
+    }
+
+    return PF_OK;
+}
+
+static pf_error pf_create_directory_if_needed(pf_context *ctx, const char *path) {
+    struct stat st = {0};
+    if (stat(path, &st) == -1) {
+        if (mkdir(path, 0755) != 0) {
+            snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                     "Failed to create output directory: %.900s", path);
+            return PF_ERR_IO_ERROR;
+        }
+    }
+    return PF_OK;
+}
+
+static void pf_default_quality(char *dst, size_t sequence_len) {
+    if (sequence_len >= LINE_LENGTH - 1) {
+        sequence_len = LINE_LENGTH - 2;
+    }
+    memset(dst, 'I', sequence_len);
+    dst[sequence_len] = '\n';
+    dst[sequence_len + 1] = '\0';
+}
+
+static pf_sequence_view pf_view_from_cstr(const char *src) {
+    pf_sequence_view view;
+    view.data = src;
+    view.length = src ? strlen(src) : 0;
+    return view;
+}
+
+static int pf_copy_record_view_line(pf_context *ctx,
+                                    char *dst,
+                                    pf_sequence_view view,
+                                    const char *field_name,
+                                    int required) {
+    if (!view.data) {
+        if (required || view.length > 0) {
+            snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                     "In-memory record is missing %s", field_name);
+            return 0;
+        }
+        dst[0] = '\0';
+        return 1;
+    }
+    const int has_newline = view.length > 0 && view.data[view.length - 1] == '\n';
+    if ((!has_newline && view.length >= LINE_LENGTH - 1) ||
+        (has_newline && view.length >= LINE_LENGTH)) {
+        snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                 "In-memory record %s length %zu exceeds LINE_LENGTH=%d "
+                 "after adding FASTQ-line newline",
+                 field_name, view.length, LINE_LENGTH);
+        return 0;
+    }
+    memcpy(dst, view.data, view.length);
+    if (has_newline) {
+        dst[view.length] = '\0';
+    } else {
+        dst[view.length] = '\n';
+        dst[view.length + 1] = '\0';
+    }
+    return 1;
+}
+
+static int pf_validate_record_view_field(pf_context *ctx,
+                                         pf_sequence_view view,
+                                         const char *field_name,
+                                         int required) {
+    if (!view.data) {
+        if (required || view.length > 0) {
+            snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                     "In-memory record is missing %s", field_name);
+            return 0;
+        }
+        return 1;
+    }
+    const int has_newline = view.length > 0 && view.data[view.length - 1] == '\n';
+    if ((!has_newline && view.length >= LINE_LENGTH - 1) ||
+        (has_newline && view.length >= LINE_LENGTH)) {
+        snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                 "In-memory record %s length %zu exceeds LINE_LENGTH=%d "
+                 "after adding FASTQ-line newline",
+                 field_name, view.length, LINE_LENGTH);
+        return 0;
+    }
+    return 1;
+}
+
+static fastq_reader *pf_allocate_decoded_reader(int filetype) {
+    fastq_reader *reader = (fastq_reader *)calloc(1, sizeof(fastq_reader));
+    if (reader) {
+        reader->filetype = filetype;
+    }
+    return reader;
+}
+
+static fastq_reader_set *pf_allocate_decoded_reader_set(pf_context *ctx,
+                                                        int nreaders,
+                                                        size_t read_size,
+                                                        size_t read_buffer_lines) {
+    if (nreaders != 2 && nreaders != 3) {
+        snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                 "Decoded process_features input supports 2 or 3 readers, got %d",
+                 nreaders);
+        return NULL;
+    }
+
+    fastq_reader_set *set = (fastq_reader_set *)calloc(1, sizeof(fastq_reader_set));
+    if (!set) {
+        snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                 "Failed to allocate decoded process_features reader set");
+        return NULL;
+    }
+
+    set->barcode_reader = pf_allocate_decoded_reader(1);
+    set->forward_reader = pf_allocate_decoded_reader(2);
+    set->reverse_reader = (nreaders == 3) ? pf_allocate_decoded_reader(3) : NULL;
+    set->read_buffer_lines = read_buffer_lines;
+    set->buffer_storage = (char *)malloc(read_buffer_lines * (read_size + 1));
+    set->buffer = (char **)malloc(read_buffer_lines * sizeof(char *));
+
+    if (!set->barcode_reader || !set->forward_reader ||
+        (nreaders == 3 && !set->reverse_reader) ||
+        !set->buffer_storage || !set->buffer) {
+        snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                 "Failed to allocate decoded process_features buffers");
+        free_fastq_reader(set->barcode_reader);
+        free_fastq_reader(set->forward_reader);
+        free_fastq_reader(set->reverse_reader);
+        free(set->buffer_storage);
+        free(set->buffer);
+        free(set);
+        return NULL;
+    }
+
+    for (size_t i = 0; i < read_buffer_lines; ++i) {
+        set->buffer[i] = set->buffer_storage + i * (read_size + 1);
+    }
+
+    pthread_mutex_init(&set->mutex, NULL);
+    pthread_cond_init(&set->can_produce, NULL);
+    pthread_cond_init(&set->can_consume, NULL);
+    return set;
+}
+
+static void pf_stream_signal_done(pf_record_stream *stream) {
+    if (!stream || !stream->queue_initialized || !stream->reader_sets[0]) {
+        return;
+    }
+    fastq_reader_set *set = stream->reader_sets[0];
+    pthread_mutex_lock(&set->mutex);
+    set->done = 1;
+    pthread_cond_broadcast(&set->can_consume);
+    pthread_cond_broadcast(&set->can_produce);
+    pthread_mutex_unlock(&set->mutex);
+}
+
+static void pf_stream_join_consumers(pf_record_stream *stream) {
+    if (!stream || stream->consumers_joined) {
+        return;
+    }
+    pf_stream_signal_done(stream);
+    for (int i = 0; i < stream->consumers_started; ++i) {
+        pthread_join(stream->consumer_threads[i], NULL);
+    }
+    stream->consumers_joined = 1;
+
+    if (stream->chem_detect_enabled) {
+        pf_context *ctx = stream->ctx;
+        ctx->chem_detect_raw_hits = stream->chem_detect.raw_hits;
+        ctx->chem_detect_nxt_hits = stream->chem_detect.nxt_hits;
+        ctx->chem_detect_ticket = stream->chem_detect.ticket;
+        ctx->chem_detect_done = stream->chem_detect.done;
+        ctx->detected_match_mode = stream->chem_detect.match_mode;
+    }
+}
+
+static void pf_stream_cleanup_runtime(pf_record_stream *stream) {
+    if (!stream) {
+        return;
+    }
+
+    if (stream->queue_initialized && !stream->consumers_joined) {
+        pf_stream_join_consumers(stream);
+    }
+
+    if (stream->reader_sets[0]) {
+        free_fastq_reader_set(stream->reader_sets[0]);
+        stream->reader_sets[0] = NULL;
+    }
+
+    if (stream->processors) {
+        for (int i = 0; i < stream->processors_initialized; ++i) {
+            pthread_mutex_destroy(&stream->processors[i].process_mutex);
+        }
+        free(stream->processors);
+        stream->processors = NULL;
+    }
+
+    free(stream->consumer_threads);
+    stream->consumer_threads = NULL;
+
+    if (stream->hashes) {
+        for (int i = 0; i < stream->worker_state_initialized; ++i) {
+            destroy_data_structures(&stream->hashes[i]);
+        }
+        free(stream->hashes);
+        stream->hashes = NULL;
+    }
+    if (stream->pools) {
+        for (int i = 0; i < stream->worker_state_initialized; ++i) {
+            if (stream->pools[i]) {
+                free_memory_pool_collection(stream->pools[i]);
+            }
+        }
+        free(stream->pools);
+        stream->pools = NULL;
+    }
+    free(stream->stats);
+    stream->stats = NULL;
+}
+
+static int pf_stream_initialize_queue(pf_record_stream *stream, int nreaders) {
+    if (stream->queue_initialized) {
+        if (stream->nreaders != nreaders) {
+            snprintf(stream->ctx->error_buf, PF_ERROR_BUF_SIZE,
+                     "Mixed decoded record layouts in one process_features stream");
+            return 0;
+        }
+        return 1;
+    }
+
+    pf_context *ctx = stream->ctx;
+    const int nconsumers = ctx->config->consumer_threads > 0
+        ? ctx->config->consumer_threads
+        : 1;
+    stream->nconsumers = nconsumers;
+    stream->nreaders = nreaders;
+    stream->lines_per_block = 2 * nreaders;
+
+    stream->reader_sets[0] = pf_allocate_decoded_reader_set(
+        ctx, nreaders, LINE_LENGTH, READ_BUFFER_LINES);
+    if (!stream->reader_sets[0]) {
+        return 0;
+    }
+    stream->reader_sets[0]->thread_id = 0;
+
+    stream->stats = (statistics *)calloc((size_t)nconsumers, sizeof(statistics));
+    stream->hashes = (data_structures *)calloc((size_t)nconsumers, sizeof(data_structures));
+    stream->pools = (memory_pool_collection **)calloc((size_t)nconsumers,
+                                                      sizeof(memory_pool_collection *));
+    stream->processors = (fastq_processor *)calloc((size_t)nconsumers,
+                                                   sizeof(fastq_processor));
+    stream->consumer_threads = (pthread_t *)calloc((size_t)nconsumers,
+                                                   sizeof(pthread_t));
+    if (!stream->stats || !stream->hashes || !stream->pools ||
+        !stream->processors || !stream->consumer_threads) {
+        snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                 "Failed to allocate decoded process_features consumer state");
+        pf_stream_cleanup_runtime(stream);
+        return 0;
+    }
+
+    for (int i = 0; i < nconsumers; ++i) {
+        initialize_statistics(&stream->stats[i]);
+        initialize_data_structures(&stream->hashes[i]);
+        stream->pools[i] = initialize_memory_pool_collection();
+    }
+    stream->worker_state_initialized = nconsumers;
+
+    memset(&stream->sample_args, 0, sizeof(stream->sample_args));
+    stream->sample_args.sample_index = 0;
+    stream->sample_args.directory = stream->sample_directory;
+    stream->sample_args.filtered_barcodes_name = NULL;
+    stream->sample_args.fastq_files = NULL;
+    stream->sample_args.features = ctx->features;
+    stream->sample_args.maxHammingDistance = ctx->config->max_hamming_distance;
+    stream->sample_args.nThreads = ctx->config->search_threads;
+    stream->sample_args.pools = stream->pools;
+    stream->sample_args.stats = stream->stats;
+    stream->sample_args.hashes = stream->hashes;
+    stream->sample_args.stringency = ctx->config->stringency;
+    stream->sample_args.min_counts = ctx->config->min_counts;
+    stream->sample_args.read_buffer_lines = READ_BUFFER_LINES;
+    stream->sample_args.average_read_length = AVERAGE_READ_LENGTH;
+    stream->sample_args.barcode_constant_offset = ctx->config->barcode_offset;
+    stream->sample_args.feature_constant_offset = ctx->config->feature_offset;
+    stream->sample_args.min_posterior = ctx->config->min_posterior;
+    stream->sample_args.legacy_cb_rescue = ctx->config->legacy_cb_rescue;
+    stream->sample_args.consumer_threads_per_set = nconsumers;
+    stream->sample_args.permit_acquire_hook = ctx->config->permit_acquire_cb;
+    stream->sample_args.permit_release_hook = ctx->config->permit_release_cb;
+    stream->sample_args.permit_hook_ctx = ctx->config->permit_hook_ctx;
+    stream->sample_args.permit_hooks_enabled =
+        (ctx->config->permit_acquire_cb != NULL &&
+         ctx->config->permit_release_cb != NULL);
+    stream->sample_args.filtered_barcodes_hash = ctx->filtered_barcodes_hash;
+    stream->sample_args.min_prediction = 1;
+    stream->sample_args.min_heatmap = 0;
+    stream->sample_args.demux_nsamples = 1;
+    stream->sample_args.sample_barcodes = NULL;
+    stream->sample_args.sample_max_hamming = 1;
+    stream->sample_args.sample_max_N = 0;
+    stream->sample_args.sample_constant_offset = -1;
+    stream->sample_args.sample_offset_relative = 0;
+    stream->sample_args.skip_emptydrops = ctx->config->skip_emptydrops;
+    stream->sample_args.emptydrops_failure_fatal = ctx->config->emptydrops_failure_fatal;
+    stream->sample_args.expected_cells = ctx->config->expected_cells;
+    stream->sample_args.emptydrops_use_fdr = ctx->config->emptydrops_use_fdr;
+    stream->sample_args.probe_only = ctx->config->probe_only;
+    stream->sample_args.skip_qc_outputs = ctx->config->skip_qc_outputs;
+
+    if (ctx->config->autodetect_chemistry) {
+        memset(&stream->chem_detect, 0, sizeof(stream->chem_detect));
+        stream->chem_detect.max_reads = ctx->config->autodetect_chemistry_reads;
+        stream->chem_detect.min_hits = ctx->config->autodetect_chemistry_min_hits;
+        stream->sample_args.chem_detect = &stream->chem_detect;
+        stream->reader_sets[0]->chem_detect = &stream->chem_detect;
+        stream->chem_detect_enabled = 1;
+    }
+
+    stream->reader_sets[0]->probe_only = ctx->config->probe_only;
+
+    for (int i = 0; i < nconsumers; ++i) {
+        stream->processors[i].sample_args = &stream->sample_args;
+        stream->processors[i].reader_sets = stream->reader_sets;
+        stream->processors[i].nsets = 1;
+        stream->processors[i].thread_id = i;
+        stream->processors[i].nreaders = nreaders;
+        pthread_mutex_init(&stream->processors[i].process_mutex, NULL);
+        stream->processors_initialized++;
+    }
+
+    stream->queue_initialized = 1;
+
+    for (int i = 0; i < nconsumers; ++i) {
+        if (pthread_create(&stream->consumer_threads[i], NULL,
+                           consume_reads, &stream->processors[i]) != 0) {
+            snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                     "Failed to create decoded process_features consumer thread");
+            pf_stream_join_consumers(stream);
+            pf_stream_cleanup_runtime(stream);
+            return 0;
+        }
+        stream->consumers_started++;
+    }
+
+    return 1;
+}
+
+static int pf_record_view_reader_count(pf_context *ctx,
+                                       const pf_read_record_view *record,
+                                       int *nreaders_out) {
+    const int has_feature2 =
+        (record->feature_sequence2.data || record->feature_sequence2.length > 0);
+
+    if (!pf_validate_record_view_field(ctx, record->barcode_sequence,
+                                       "barcode_sequence", 1) ||
+        !pf_validate_record_view_field(ctx, record->barcode_quality,
+                                       "barcode_quality", 0) ||
+        !pf_validate_record_view_field(ctx, record->feature_sequence,
+                                       "feature_sequence", 1) ||
+        !pf_validate_record_view_field(ctx, record->feature_quality,
+                                       "feature_quality", 0)) {
+        return 0;
+    }
+
+    if (has_feature2) {
+        if (!pf_validate_record_view_field(ctx, record->feature_sequence2,
+                                           "feature_sequence2", 1) ||
+            !pf_validate_record_view_field(ctx, record->feature_quality2,
+                                           "feature_quality2", 0)) {
+            return 0;
+        }
+        *nreaders_out = 3;
+    } else {
+        if (record->feature_quality2.data || record->feature_quality2.length > 0) {
+            snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                     "feature_quality2 was provided without feature_sequence2");
+            return 0;
+        }
+        *nreaders_out = 2;
+    }
+
+    return 1;
+}
+
+static void pf_copy_quality_or_default(char *dst,
+                                       pf_sequence_view quality,
+                                       size_t sequence_len) {
+    if (quality.data || quality.length > 0) {
+        memcpy(dst, quality.data, quality.length);
+        if (quality.length > 0 && quality.data[quality.length - 1] == '\n') {
+            dst[quality.length] = '\0';
+        } else {
+            dst[quality.length] = '\n';
+            dst[quality.length + 1] = '\0';
+        }
+    } else {
+        pf_default_quality(dst, sequence_len);
+    }
+}
+
+static int pf_stream_push_record_view(pf_record_stream *stream,
+                                      const pf_read_record_view *record) {
+    pf_context *ctx = stream->ctx;
+    int nreaders = 0;
+    if (!pf_record_view_reader_count(ctx, record, &nreaders)) {
+        return 0;
+    }
+    if (!pf_stream_initialize_queue(stream, nreaders)) {
+        return 0;
+    }
+
+    if (stream->sample_args.probe_only &&
+        stream->sample_args.chem_detect &&
+        stream->sample_args.chem_detect->done) {
+        return 1;
+    }
+
+    fastq_reader_set *set = stream->reader_sets[0];
+    pthread_mutex_lock(&set->mutex);
+    while (set->filled >= set->read_buffer_lines - (size_t)stream->lines_per_block) {
+        pthread_cond_wait(&set->can_produce, &set->mutex);
+    }
+
+    const size_t p = set->produce_index;
+    pf_copy_record_view_line(ctx, set->buffer[p],
+                             record->barcode_sequence, "barcode_sequence", 1);
+    pf_copy_quality_or_default(set->buffer[(p + 1) % set->read_buffer_lines],
+                               record->barcode_quality,
+                               record->barcode_sequence.length);
+
+    pf_copy_record_view_line(ctx, set->buffer[(p + 2) % set->read_buffer_lines],
+                             record->feature_sequence, "feature_sequence", 1);
+    pf_copy_quality_or_default(set->buffer[(p + 3) % set->read_buffer_lines],
+                               record->feature_quality,
+                               record->feature_sequence.length);
+
+    if (nreaders == 3) {
+        pf_copy_record_view_line(ctx,
+                                 set->buffer[(p + 4) % set->read_buffer_lines],
+                                 record->feature_sequence2,
+                                 "feature_sequence2", 1);
+        pf_copy_quality_or_default(
+            set->buffer[(p + 5) % set->read_buffer_lines],
+            record->feature_quality2,
+            record->feature_sequence2.length);
+    }
+
+    set->produce_index = (p + (size_t)stream->lines_per_block) % set->read_buffer_lines;
+    set->filled += (size_t)stream->lines_per_block;
+    pthread_cond_signal(&set->can_consume);
+    pthread_mutex_unlock(&set->mutex);
+    return 1;
+}
+
 pf_error pf_process_fastq_dir(pf_context *ctx,
                                const char *fastq_dir,
                                const char *output_dir,
@@ -1408,6 +1961,223 @@ pf_error pf_process_fastqs(pf_context *ctx,
 
     pthread_mutex_unlock(&g_pf_runtime_mutex);
     return PF_OK;
+}
+
+pf_error pf_process_records_begin(pf_context *ctx,
+                                  const char *output_dir,
+                                  const char *sample_name,
+                                  pf_record_stream **stream_out) {
+    if (stream_out) {
+        *stream_out = NULL;
+    }
+    if (!ctx || !output_dir || !stream_out) {
+        return PF_ERR_INVALID_ARG;
+    }
+    if (!ctx->initialized) return PF_ERR_NOT_INITIALIZED;
+
+    pthread_mutex_lock(&g_pf_runtime_mutex);
+    pf_apply_context_globals(ctx);
+
+    ctx->chem_detect_raw_hits = 0;
+    ctx->chem_detect_nxt_hits = 0;
+    ctx->chem_detect_ticket = 0;
+    ctx->chem_detect_done = 0;
+    ctx->detected_match_mode = 0;
+
+    if (!ctx->features) {
+        snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE, "Features not loaded");
+        pthread_mutex_unlock(&g_pf_runtime_mutex);
+        return PF_ERR_NOT_INITIALIZED;
+    }
+    if (!ctx->whitelist_hash) {
+        snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE, "Whitelist not loaded");
+        pthread_mutex_unlock(&g_pf_runtime_mutex);
+        return PF_ERR_NOT_INITIALIZED;
+    }
+
+    pf_error prep = pf_prepare_feature_offset_config(ctx);
+    if (prep != PF_OK) {
+        pthread_mutex_unlock(&g_pf_runtime_mutex);
+        return prep;
+    }
+
+    pf_error mkdir_err = pf_create_directory_if_needed(ctx, output_dir);
+    if (mkdir_err != PF_OK) {
+        pthread_mutex_unlock(&g_pf_runtime_mutex);
+        return mkdir_err;
+    }
+
+    const char *sname = sample_name ? sample_name : "sample";
+    pf_record_stream *stream = (pf_record_stream *)calloc(1, sizeof(pf_record_stream));
+    if (!stream) {
+        snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                 "Failed to allocate process_features record stream");
+        pthread_mutex_unlock(&g_pf_runtime_mutex);
+        return PF_ERR_OUT_OF_MEMORY;
+    }
+
+    stream->ctx = ctx;
+    snprintf(stream->sample_directory, sizeof(stream->sample_directory),
+             "%s/%s/", output_dir, sname);
+    mkdir_err = pf_create_directory_if_needed(ctx, stream->sample_directory);
+    if (mkdir_err != PF_OK) {
+        free(stream);
+        pthread_mutex_unlock(&g_pf_runtime_mutex);
+        return mkdir_err;
+    }
+
+    stream->start_time = get_time_in_seconds();
+    *stream_out = stream;
+    return PF_OK;
+}
+
+pf_error pf_process_record_views(pf_record_stream *stream,
+                                 const pf_read_record_view *records,
+                                 size_t n_records) {
+    if (!stream || (!records && n_records > 0) || stream->closed) {
+        return PF_ERR_INVALID_ARG;
+    }
+    if (stream->failed) {
+        return PF_ERR_INVALID_ARG;
+    }
+
+    for (size_t i = 0; i < n_records; ++i) {
+        if (!pf_stream_push_record_view(stream, &records[i])) {
+            stream->failed = 1;
+            return PF_ERR_INVALID_ARG;
+        }
+    }
+
+    return PF_OK;
+}
+
+pf_error pf_process_record_batch(pf_record_stream *stream,
+                                 const pf_read_record *records,
+                                 size_t n_records) {
+    if (!stream || (!records && n_records > 0)) {
+        return PF_ERR_INVALID_ARG;
+    }
+    for (size_t i = 0; i < n_records; ++i) {
+        pf_read_record_view view;
+        view.barcode_sequence = pf_view_from_cstr(records[i].barcode_sequence);
+        view.barcode_quality = pf_view_from_cstr(records[i].barcode_quality);
+        view.feature_sequence = pf_view_from_cstr(records[i].feature_sequence);
+        view.feature_quality = pf_view_from_cstr(records[i].feature_quality);
+        view.feature_sequence2 = pf_view_from_cstr(records[i].feature_sequence2);
+        view.feature_quality2 = pf_view_from_cstr(records[i].feature_quality2);
+        pf_error err = pf_process_record_views(stream, &view, 1);
+        if (err != PF_OK) {
+            return err;
+        }
+    }
+    return PF_OK;
+}
+
+pf_error pf_process_records_end(pf_record_stream *stream,
+                                pf_stats *stats_out) {
+    if (!stream || stream->closed) {
+        return PF_ERR_INVALID_ARG;
+    }
+    pf_context *ctx = stream->ctx;
+    int sample_error = 0;
+    pf_error result = PF_OK;
+
+    stream->closed = 1;
+
+    if (stream->failed) {
+        result = PF_ERR_INVALID_ARG;
+    } else if (!stream->queue_initialized) {
+        if (!pf_stream_initialize_queue(stream, 2)) {
+            result = PF_ERR_OUT_OF_MEMORY;
+        }
+    }
+
+    if (result == PF_OK) {
+        pf_stream_join_consumers(stream);
+    }
+
+    if (result == PF_OK && stream->nconsumers > 1) {
+        for (int i = 1; i < stream->nconsumers; ++i) {
+            merge_process_feature_thread_data(&stream->hashes[0],
+                                              stream->pools[0],
+                                              &stream->stats[0],
+                                              &stream->hashes[i],
+                                              stream->pools[i],
+                                              &stream->stats[i]);
+        }
+    }
+
+    if (result == PF_OK && !ctx->config->probe_only) {
+        finalize_processing(ctx->features, &stream->hashes[0],
+                            stream->sample_directory, stream->pools[0],
+                            &stream->stats[0], ctx->config->stringency,
+                            ctx->config->min_counts, ctx->config->min_posterior,
+                            ctx->config->legacy_cb_rescue,
+                            ctx->filtered_barcodes_hash,
+                            ctx->config->skip_emptydrops,
+                            ctx->config->emptydrops_failure_fatal,
+                            ctx->config->expected_cells,
+                            ctx->config->emptydrops_use_fdr,
+                            ctx->config->skip_qc_outputs,
+                            &sample_error);
+        if (sample_error) {
+            snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                     "Sample processing failed");
+            result = PF_ERR_IO_ERROR;
+        }
+    }
+
+    double end_time = get_time_in_seconds();
+    if (stats_out) {
+        memset(stats_out, 0, sizeof(pf_stats));
+        if (stream->stats) {
+            stats_out->total_reads = stream->stats[0].number_of_reads;
+            stats_out->matched_reads = stream->stats[0].valid;
+            stats_out->unmatched_reads = stream->stats[0].total_unmatched_features;
+        }
+        stats_out->total_features = ctx->features->number_of_features;
+        stats_out->processing_time_sec = end_time - stream->start_time;
+    }
+
+    pf_stream_cleanup_runtime(stream);
+    free(stream);
+    pthread_mutex_unlock(&g_pf_runtime_mutex);
+    return result;
+}
+
+void pf_process_records_abort(pf_record_stream *stream) {
+    if (!stream || stream->closed) {
+        return;
+    }
+    stream->closed = 1;
+    pf_stream_cleanup_runtime(stream);
+    free(stream);
+    pthread_mutex_unlock(&g_pf_runtime_mutex);
+}
+
+pf_error pf_process_records(pf_context *ctx,
+                            const pf_read_record *records,
+                            size_t n_records,
+                            const char *output_dir,
+                            const char *sample_name,
+                            pf_stats *stats_out) {
+    if (!ctx || !records || n_records == 0 || !output_dir) {
+        return PF_ERR_INVALID_ARG;
+    }
+
+    pf_record_stream *stream = NULL;
+    pf_error err = pf_process_records_begin(ctx, output_dir, sample_name, &stream);
+    if (err != PF_OK) {
+        return err;
+    }
+
+    err = pf_process_record_batch(stream, records, n_records);
+    if (err != PF_OK) {
+        pf_process_records_abort(stream);
+        return err;
+    }
+
+    return pf_process_records_end(stream, stats_out);
 }
 
 /* ============================================================================

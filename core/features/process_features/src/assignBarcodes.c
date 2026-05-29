@@ -6019,6 +6019,50 @@ void merge_unmatched_barcodes(unmatched_barcodes_features_block_list *merged_lis
     thread_list->first_entry = NULL;
     thread_list->last_entry = NULL;
 }
+
+void merge_process_feature_thread_data(data_structures *dst_hashes,
+                                       memory_pool_collection *dst_pool,
+                                       statistics *dst_stats,
+                                       data_structures *src_hashes,
+                                       memory_pool_collection *src_pool,
+                                       statistics *src_stats) {
+    (void)src_pool;
+    merge_stats(dst_stats, src_stats);
+
+    merge_context ctx;
+    ctx.dst_pool = dst_pool;
+
+    ctx.dst_hash = dst_hashes->filtered_hash;
+    khint_t k;
+    for (k = kh_begin(src_hashes->filtered_hash); k != kh_end(src_hashes->filtered_hash); ++k) {
+        if (!kh_exist(src_hashes->filtered_hash, k)) continue;
+        merge_feature_counts(kh_key(src_hashes->filtered_hash, k),
+                             kh_val(src_hashes->filtered_hash, k),
+                             &ctx);
+    }
+
+    ctx.dst_hash = dst_hashes->sequence_umi_hash;
+    for (k = kh_begin(src_hashes->sequence_umi_hash); k != kh_end(src_hashes->sequence_umi_hash); ++k) {
+        if (!kh_exist(src_hashes->sequence_umi_hash, k)) continue;
+        merge_feature_umi_counts(kh_key(src_hashes->sequence_umi_hash, k),
+                                 kh_val(src_hashes->sequence_umi_hash, k),
+                                 &ctx);
+    }
+
+    ctx.dst_hash = dst_hashes->unique_features_match;
+    for (k = kh_begin(src_hashes->unique_features_match); k != kh_end(src_hashes->unique_features_match); ++k) {
+        if (!kh_exist(src_hashes->unique_features_match, k)) continue;
+        merge_feature_sequences(kh_key(src_hashes->unique_features_match, k),
+                                kh_val(src_hashes->unique_features_match, k),
+                                &ctx);
+    }
+
+    merge_unmatched_barcodes(&dst_stats->unmatched_list,
+                             &src_stats->unmatched_list,
+                             dst_pool);
+    merge_queues(dst_hashes->neighbors_queue, src_hashes->neighbors_queue);
+}
+
 void process_files_in_sample(sample_args *args) {
     //allocate buffers here
     //number of lines to read into the buffer

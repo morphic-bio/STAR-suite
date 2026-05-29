@@ -114,7 +114,7 @@ class WorkflowConstraint(BaseModel):
 
     kind: str = Field(
         description="Constraint type",
-        pattern="^(mutual_exclusion|dependency|group_required|positive|non_negative)$",
+        pattern="^(mutual_exclusion|at_least_one|dependency|group_required|positive|non_negative)$",
     )
     params: list[str] = Field(description="Parameters involved in the constraint")
     message: str = Field(default="", description="Human-readable constraint description")

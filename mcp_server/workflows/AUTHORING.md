@@ -151,6 +151,7 @@ agents can find where results will land.
 | Kind | Behavior |
 |------|----------|
 | `mutual_exclusion` | Error if more than one of `params` is set |
+| `at_least_one` | Error if none of `params` is set |
 | `group_required` | Warn if some but not all of `params` are set |
 | `dependency` | Warn if `params[0]` is set but `params[1]` makes it irrelevant |
 | `positive` | Error if any of `params` is <= 0 |

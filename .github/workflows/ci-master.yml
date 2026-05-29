@@ -6,7 +6,7 @@ on:
       - master
     paths:
       - ".github/workflows/ci-pr.yml"
-      - ".github/workflows/ci-dev.yml"
+      - ".github/workflows/ci-dev-release.yml"
       - ".github/workflows/ci-master.yml"
       - ".github/workflows/release.yml"
       - "docker/**"

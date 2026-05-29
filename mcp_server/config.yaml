@@ -86,6 +86,14 @@ workflows:
     schema_file: mcp_server/workflows/star_bulk_pe_batch.yaml
     visibility: public
 
+  - id: star_binseq_pe_batch
+    title: STAR BINSEQ/CBQ paired-end batch
+    summary: One STAR alignReads command for paired CBQ inputs with --readFilesType Binseq PE and optional --batchMode.
+    entry_script: core/legacy/source/STAR
+    kind: star_cli
+    schema_file: mcp_server/workflows/star_binseq_pe_batch.yaml
+    visibility: public
+
   - id: star_scrna_solo_droplet
     title: STARsolo droplet scRNA-seq
     summary: One STAR alignReads command for droplet scRNA-seq (--soloType Droplet + whitelist).
@@ -486,6 +494,12 @@ scripts:
     description: "Comprehensive parameter regression suite"
     timeout_seconds: 7200
 
+  - name: "production_module_regression"
+    path: "tests/run_production_module_regression_suite.sh"
+    module: "regression"
+    description: "Manifest-driven production-module regression suite; defaults to preflight"
+    timeout_seconds: 604800
+
   # Downsample / fixture building
   - name: "downsample_10m_gedi"
     path: "tests/run_downsample10M_alignment_and_gedi_goalset.sh"
@@ -579,6 +593,11 @@ test_suites:
     description: "Parameter regression test suite"
     scripts: ["parms_tests"]
     disk_space_min_gb: 20
+
+  - module: "production-module-regression"
+    description: "Manifest-driven production-file regression suite across STAR-suite modules"
+    scripts: ["production_module_regression"]
+    disk_space_min_gb: 100
 
 # Required binaries for preflight checks
 required_binaries:

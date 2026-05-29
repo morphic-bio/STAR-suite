@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # Smoke: STAR + libchromap + MACS3 concurrent on 100K fixture, full lo-mem stack.
 # Validates that --chromapAtacLowMem 1 + --chromapAtacMacs3FragLowMem 1 produce
-# byte-identical narrowPeak vs the standalone chromap_callpeaks reference.
+# byte-identical narrowPeak vs the sidecar-native peak/MEX reference.
 #
 # Defaults:
-#   STAR     := /mnt/pikachu/STAR-suite/core/legacy/source/STAR (built WITH_CHROMAP=1)
-#   CALLPEAKS:= /tmp/chromap-suite-relink/chromap_callpeaks (or libMACS3/bin/macs3frag)
+#   STAR    := /mnt/pikachu/STAR-suite/core/legacy/source/STAR (Chromap-enabled build)
+#   PEAK_MEX:= core/features/libchromap_contract/star_multiome_atac_peak_mex
 set -euo pipefail
 
 STAR_BIN="${STAR_BIN:-/mnt/pikachu/STAR-suite/core/legacy/source/STAR}"
-CALLPEAKS="${CALLPEAKS:-/tmp/chromap-suite-relink/chromap_callpeaks}"
+PEAK_MEX="${PEAK_MEX:-/mnt/pikachu/STAR-suite/core/features/libchromap_contract/star_multiome_atac_peak_mex}"
 
 GENOME_DIR="${GENOME_DIR:-/mnt/pikachu/refdata-cellranger-arc-GRCh38-2020-A-2.0.0/star}"
 REF_FA="${REF_FA:-/mnt/pikachu/refdata-cellranger-arc-GRCh38-2020-A-2.0.0/fasta/genome.fa}"
@@ -21,6 +21,10 @@ GEX_DIR="${GEX_DIR:-/mnt/pikachu/atac-seq/benchmarks/pbmc_unsorted_3k_100k/fixtu
 
 OUT="${OUT:-$(mktemp -d /tmp/star_chromap_macs3_lowmem_smoke_100k.XXXXXX)}"
 mkdir -p "${OUT}/out" "${OUT}/tmp"
+
+if [[ ! -x "${PEAK_MEX}" ]]; then
+  make -C "$(dirname "${PEAK_MEX}")" star_multiome_atac_peak_mex
+fi
 
 ATAC_R1="${ATAC_DIR}/pbmc_unsorted_3k_S3_L001_R1_001.fastq.gz,${ATAC_DIR}/pbmc_unsorted_3k_S3_L002_R1_001.fastq.gz,${ATAC_DIR}/pbmc_unsorted_3k_S3_L003_R1_001.fastq.gz,${ATAC_DIR}/pbmc_unsorted_3k_S3_L004_R1_001.fastq.gz"
 ATAC_R2="${ATAC_DIR}/pbmc_unsorted_3k_S3_L001_R3_001.fastq.gz,${ATAC_DIR}/pbmc_unsorted_3k_S3_L002_R3_001.fastq.gz,${ATAC_DIR}/pbmc_unsorted_3k_S3_L003_R3_001.fastq.gz,${ATAC_DIR}/pbmc_unsorted_3k_S3_L004_R3_001.fastq.gz"
@@ -50,7 +54,7 @@ echo "[smoke] STAR=${STAR_BIN}"
   --chromapAtacRead1 "${ATAC_R1}" --chromapAtacRead2 "${ATAC_R2}" --chromapAtacBarcode "${ATAC_BC}" \
   --chromapAtacBarcodeWhitelist "${ATAC_WL}" \
   --chromapAtacOutputFragments "${OUT}/out/atac_possorted_bam.bam" \
-  --chromapAtacSecondaryFragments "${OUT}/out/atac_fragments.tsv.gz" \
+  --chromapAtacSecondaryFragments "${OUT}/out/atac_fragments.bin" \
   --chromapAtacOutputFormat BAM --chromapAtacSummary "${OUT}/out/chromap_summary.csv" \
   --chromapAtacThreads 8 --chromapAtacHtsThreads 2 \
   --chromapAtacSortBam 1 --chromapAtacWriteIndex 1 \
@@ -60,28 +64,32 @@ echo "[smoke] STAR=${STAR_BIN}"
   --chromapAtacCallMacs3FragPeaks 1 \
   --chromapAtacMacs3FragPeaksOutput "${OUT}/out/atac_peaks.narrowPeak" \
   --chromapAtacMacs3FragSummitsOutput "${OUT}/out/atac_summits.bed" \
-  --chromapAtacMacs3FragPeaksSource memory \
   --chromapAtacMacs3FragLowMem 1 \
   > "${OUT}/star.stdout.log" 2> "${OUT}/star.stderr.log"
 
-echo "[smoke] STAR finished, validating peaks against standalone reference..."
+echo "[smoke] STAR finished, validating peaks against sidecar reference..."
 
-# Standalone reference: chromap_callpeaks on the same fragments.
-"${CALLPEAKS}" -i "${OUT}/out/atac_fragments.tsv.gz" \
-  --frag-pileup-macs3-uint8-counts \
-  --macs3-frag-narrowpeak "${OUT}/ref.narrowPeak" \
-  --macs3-frag-summits "${OUT}/ref.summits.bed" \
-  --bdgpeakcall-cutoff 5 --bdgpeakcall-min-len 200 --bdgpeakcall-max-gap 30 \
-  --frag-score-pseudocount 0 \
-  > "${OUT}/callpeaks.log" 2>&1
+# Independent reference: production sidecar-native peak/MEX path on the same
+# binary sidecar that STAR wrote during the Chromap run.
+"${PEAK_MEX}" \
+  --sidecar "${OUT}/out/atac_fragments.bin" \
+  --call-peaks-from-sidecar \
+  --peaks "${OUT}/ref.narrowPeak" \
+  --summits-out "${OUT}/ref.summits.bed" \
+  --out-dir "${OUT}/ref_peak_mex" \
+  --metrics-tsv "${OUT}/ref_atac_metrics.tsv" \
+  --threads 8 \
+  --temp-dir "${OUT}/tmp" \
+  --force \
+  > "${OUT}/sidecar_peak_mex.log" 2>&1
 
 if cmp -s "${OUT}/out/atac_peaks.narrowPeak" "${OUT}/ref.narrowPeak" \
    && cmp -s "${OUT}/out/atac_summits.bed" "${OUT}/ref.summits.bed" ; then
   np_md5=$(md5sum "${OUT}/out/atac_peaks.narrowPeak" | cut -d' ' -f1)
   n=$(wc -l < "${OUT}/out/atac_peaks.narrowPeak")
-  echo "PASS: lo-mem stack narrowPeak byte-identical to standalone (md5=${np_md5}, peaks=${n})"
+  echo "PASS: lo-mem stack narrowPeak byte-identical to sidecar reference (md5=${np_md5}, peaks=${n})"
 else
-  echo "FAIL: lo-mem stack output diverges from standalone reference"
+  echo "FAIL: lo-mem stack output diverges from sidecar reference"
   diff <(head -5 "${OUT}/out/atac_peaks.narrowPeak") <(head -5 "${OUT}/ref.narrowPeak") | head -20
   exit 1
 fi

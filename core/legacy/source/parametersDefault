@@ -397,6 +397,8 @@ inputBAMfile                -
 readFilesType               Fastx
     string: format of input read files
                             Fastx       ... FASTA or FASTQ
+                            Binseq SE   ... ARC BINSEQ CBQ single-end reads
+                            Binseq PE   ... ARC BINSEQ CBQ paired-end reads packed in one CBQ file per lane
                             SAM SE      ... SAM or BAM single-end reads; for BAM use --readFilesCommand samtools view
                             SAM PE      ... SAM or BAM paired-end reads; for BAM use --readFilesCommand samtools view
                             

@@ -75,6 +75,7 @@ void merge_feature_umi_counts(uint64_t key, void *value, void *user_data);
 void merge_feature_sequences(const char *key, void *value, void *user_data);
 void merge_queues(Queue *dest_q, Queue *src_q);
 void merge_unmatched_barcodes(unmatched_barcodes_features_block_list *merged_list, unmatched_barcodes_features_block_list *thread_list, memory_pool_collection *merged_pool);
+void merge_process_feature_thread_data(data_structures *dst_hashes, memory_pool_collection *dst_pool, statistics *dst_stats, data_structures *src_hashes, memory_pool_collection *src_pool, statistics *src_stats);
 void process_files_in_sample(sample_args *args);
 void initialize_data_structures(data_structures *hashes);
 void destroy_data_structures(data_structures *hashes);
