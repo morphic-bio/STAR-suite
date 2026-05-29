@@ -24,7 +24,12 @@ FASTX_BIN="${FASTX_INPUT_HARNESS_BIN:-${ROOT_DIR}/core/legacy/source/fastx_input
 CBQ_BIN="${CBQ_READER_HARNESS_BIN:-${ROOT_DIR}/core/legacy/source/cbq_reader_harness}"
 ENCODER_BIN="${CBQ_ORDERED_ENCODER_BIN:-${ROOT_DIR}/core/legacy/source/cbq_ordered_encoder}"
 
+MODE="${MODE:-se}"
 FASTQ="${FASTQ:-${SLAM_FIXTURE_FASTQ:-${ROOT_DIR}/test/fixtures/slam/raw/slam_100000_reads_SRR32576116.fastq.gz}}"
+FASTQ_R1="${FASTQ_R1:-${FASTQ}}"
+FASTQ_R2="${FASTQ_R2:-${SLAM_FIXTURE_FASTQ_R2:-}}"
+FASTQ_DIR="${FASTQ_DIR:-${SLAM_PE_FASTQ_DIR:-/mnt/pikachu/SLAM-Seq}}"
+PE_SAMPLE="${PE_SAMPLE:-${SLAM_PE_FIXTURE_SAMPLE:-ARID1A-no4su_S50}}"
 STAR_INDEX="${STAR_INDEX:-${SLAM_FIXTURE_STAR_INDEX:-${ROOT_DIR}/test/fixtures/slam/ref/star_index}}"
 SNPS_BED="${SNPS_BED:-${SLAM_FIXTURE_SNPS_BED:-${ROOT_DIR}/test/fixtures/slam/ref/snps.bed}}"
 
@@ -36,21 +41,28 @@ EXACT_MIN_PEARSON="${EXACT_MIN_PEARSON:-0.999999}"
 ENCODER_COMPRESSION_LEVEL="${ENCODER_COMPRESSION_LEVEL:-0}"
 ENCODER_BLOCK_SIZE="${ENCODER_BLOCK_SIZE:-1048576}"
 AUTO_BUILD="${AUTO_BUILD:-1}"
+READS="${READS:-0}"
 
 usage() {
   cat <<EOF
 Usage: $(basename "$0") [options]
 
-Runs a staged SLAM FASTQ-vs-CBQ divergence harness on a single-end fixture.
+Runs a staged SLAM FASTQ-vs-CBQ divergence harness on a single-end or paired-end fixture.
 
 Options:
+  --mode se|pe             Input mode (default: ${MODE})
   --outdir DIR              Output root (default: ${OUT_BASE})
   --star-bin PATH           STAR binary (default: ${STAR_BIN})
   --requant-bin PATH        slam_requant binary (default: ${REQ_BIN})
   --fastx-bin PATH          fastx_input_harness binary (default: ${FASTX_BIN})
   --cbq-bin PATH            cbq_reader_harness binary (default: ${CBQ_BIN})
   --encoder-bin PATH        cbq_ordered_encoder binary (default: ${ENCODER_BIN})
-  --fastq PATH              Single-end FASTQ[.gz] (default: ${FASTQ})
+  --fastq PATH              Alias for --fastq-r1
+  --fastq-r1 PATH           R1/single-end FASTQ[.gz] (default: ${FASTQ_R1})
+  --fastq-r2 PATH           R2 FASTQ[.gz] for --mode pe (default: ${FASTQ_R2:-auto PE fixture})
+  --fastq-dir DIR           PE fixture directory for --mode pe auto-discovery (default: ${FASTQ_DIR})
+  --sample NAME             PE fixture sample for auto-discovery (default: ${PE_SAMPLE})
+  --reads N                 Downsample to N reads per mate before encoding/running (default: ${READS}; PE auto default: 100000)
   --genome-dir DIR          STAR genomeDir (default: ${STAR_INDEX})
   --snp-bed PATH            SNP mask BED (default: ${SNPS_BED})
   --threads N               Main STAR threads (default: ${THREADS})
@@ -79,15 +91,102 @@ quote_cmd() {
   printf '%q ' "$@"
 }
 
+find_mate_fastq() {
+  local sample="$1"
+  local mate="$2"
+  local direct
+  local sample_id
+  local -a candidates=()
+
+  direct="${FASTQ_DIR}/${sample}_${mate}_001.fastq.gz"
+  if [[ -f "${direct}" ]]; then
+    echo "${direct}"
+    return 0
+  fi
+
+  sample_id="$(sed -nE 's/^.*_(S[0-9]+)$/\1/p' <<< "${sample}")"
+  if [[ -n "${sample_id}" ]]; then
+    mapfile -t candidates < <(find "${FASTQ_DIR}" -maxdepth 1 -type f -name "*_${sample_id}_${mate}_001.fastq.gz" | sort)
+    if [[ "${#candidates[@]}" -eq 1 ]]; then
+      echo "${candidates[0]}"
+      return 0
+    fi
+  fi
+
+  return 1
+}
+
+count_fastq_reads() {
+  python3 - "$1" <<'PY'
+import gzip
+import sys
+
+path = sys.argv[1]
+opener = gzip.open if path.endswith(".gz") else open
+lines = 0
+with opener(path, "rt", encoding="utf-8", errors="replace") as handle:
+    for lines, _ in enumerate(handle, 1):
+        pass
+if lines % 4:
+    raise SystemExit(f"{path}: FASTQ line count is not divisible by 4: {lines}")
+print(lines // 4)
+PY
+}
+
+downsample_fastq() {
+  local src="$1"
+  local dst="$2"
+  local reads="$3"
+  local observed
+
+  if [[ -s "${dst}" ]]; then
+    observed="$(count_fastq_reads "${dst}")"
+    if [[ "${observed}" == "${reads}" ]]; then
+      log "Reusing downsampled FASTQ: ${dst}"
+      return 0
+    fi
+  fi
+
+  mkdir -p "$(dirname -- "${dst}")"
+  python3 - "$src" "$dst" "$reads" <<'PY'
+import gzip
+import sys
+
+src, dst, reads_s = sys.argv[1:4]
+reads = int(reads_s)
+limit = reads * 4
+written = 0
+src_opener = gzip.open if src.endswith(".gz") else open
+dst_opener = gzip.open if dst.endswith(".gz") else open
+with src_opener(src, "rt", encoding="utf-8", errors="replace") as inp, \
+     dst_opener(dst, "wt", encoding="utf-8") as out:
+    for line in inp:
+        if written >= limit:
+            break
+        out.write(line)
+        written += 1
+if written != limit:
+    raise SystemExit(f"{src}: requested {reads} reads but found only {written // 4}")
+PY
+
+  observed="$(count_fastq_reads "${dst}")"
+  [[ "${observed}" == "${reads}" ]] || die "${dst}: expected ${reads} reads, observed ${observed}"
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --mode) MODE="$2"; shift 2 ;;
     --outdir|--out-base) OUT_BASE="$2"; shift 2 ;;
     --star-bin) STAR_BIN="$2"; shift 2 ;;
     --requant-bin) REQ_BIN="$2"; shift 2 ;;
     --fastx-bin) FASTX_BIN="$2"; shift 2 ;;
     --cbq-bin) CBQ_BIN="$2"; shift 2 ;;
     --encoder-bin) ENCODER_BIN="$2"; shift 2 ;;
-    --fastq) FASTQ="$2"; shift 2 ;;
+    --fastq|--fastq-r1) FASTQ_R1="$2"; shift 2 ;;
+    --fastq-r2) FASTQ_R2="$2"; shift 2 ;;
+    --fastq-dir) FASTQ_DIR="$2"; shift 2 ;;
+    --sample) PE_SAMPLE="$2"; shift 2 ;;
+    --reads) READS="$2"; shift 2 ;;
     --genome-dir) STAR_INDEX="$2"; shift 2 ;;
     --snp-bed) SNPS_BED="$2"; shift 2 ;;
     --threads) THREADS="$2"; shift 2 ;;
@@ -100,9 +199,24 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+[[ "${MODE}" == "se" || "${MODE}" == "pe" ]] || die "--mode must be se or pe"
 [[ "${THREADS}" =~ ^[0-9]+$ && "${THREADS}" -gt 0 ]] || die "--threads must be a positive integer"
 [[ "${CONTROL_THREADS}" =~ ^[0-9]+$ && "${CONTROL_THREADS}" -gt 0 ]] || die "--control-threads must be a positive integer"
-[[ -f "${FASTQ}" ]] || skip "SLAM FASTQ not found: ${FASTQ}"
+[[ "${READS}" =~ ^[0-9]+$ ]] || die "--reads must be a non-negative integer"
+
+if [[ "${MODE}" == "pe" && -z "${FASTQ_R2}" ]]; then
+  [[ -d "${FASTQ_DIR}" ]] || skip "SLAM PE FASTQ directory not found: ${FASTQ_DIR}"
+  FASTQ_R1="$(find_mate_fastq "${PE_SAMPLE}" R1)" || skip "SLAM PE R1 FASTQ not found for ${PE_SAMPLE} under ${FASTQ_DIR}"
+  FASTQ_R2="$(find_mate_fastq "${PE_SAMPLE}" R2)" || skip "SLAM PE R2 FASTQ not found for ${PE_SAMPLE} under ${FASTQ_DIR}"
+  if [[ "${READS}" == "0" ]]; then
+    READS=100000
+  fi
+fi
+
+[[ -f "${FASTQ_R1}" ]] || skip "SLAM FASTQ R1 not found: ${FASTQ_R1}"
+if [[ "${MODE}" == "pe" ]]; then
+  [[ -f "${FASTQ_R2}" ]] || skip "SLAM FASTQ R2 not found: ${FASTQ_R2}"
+fi
 [[ -d "${STAR_INDEX}" ]] || skip "SLAM STAR index not found: ${STAR_INDEX}"
 [[ -f "${SNPS_BED}" ]] || skip "SLAM SNP BED not found: ${SNPS_BED}"
 
@@ -131,11 +245,27 @@ REPORT="${OUT_BASE}/DIVERGENCE_REPORT.txt"
 STAGE_TSV="${OUT_BASE}/stage_status.tsv"
 FIRST_STAGE=""
 FASTQ_CONTROL_FAILED=0
+SOURCE_FASTQ_R1="${FASTQ_R1}"
+SOURCE_FASTQ_R2="${FASTQ_R2}"
+
+if [[ "${READS}" != "0" ]]; then
+  downsample_fastq "${SOURCE_FASTQ_R1}" "${OUT_BASE}/inputs/fixture_R1_${READS}.fastq.gz" "${READS}"
+  FASTQ_R1="${OUT_BASE}/inputs/fixture_R1_${READS}.fastq.gz"
+  if [[ "${MODE}" == "pe" ]]; then
+    downsample_fastq "${SOURCE_FASTQ_R2}" "${OUT_BASE}/inputs/fixture_R2_${READS}.fastq.gz" "${READS}"
+    FASTQ_R2="${OUT_BASE}/inputs/fixture_R2_${READS}.fastq.gz"
+  fi
+fi
 
 {
   printf 'SLAM CBQ divergence harness\n'
   printf 'timestamp=%s\n' "${STAMP}"
-  printf 'fastq=%s\n' "${FASTQ}"
+  printf 'mode=%s\n' "${MODE}"
+  printf 'source_fastq_r1=%s\n' "${SOURCE_FASTQ_R1}"
+  printf 'source_fastq_r2=%s\n' "${SOURCE_FASTQ_R2:-}"
+  printf 'fastq_r1=%s\n' "${FASTQ_R1}"
+  printf 'fastq_r2=%s\n' "${FASTQ_R2:-}"
+  printf 'reads=%s\n' "${READS}"
   printf 'star_bin=%s\n' "${STAR_BIN}"
   printf 'requant_bin=%s\n' "${REQ_BIN}"
   printf 'genome_dir=%s\n' "${STAR_INDEX}"
@@ -238,11 +368,18 @@ run_star_fastq() {
   local threads="$2"
   local run_dir="${OUT_BASE}/${label}"
   local prefix="${run_dir}/star_"
+  local read_files=("${FASTQ_R1}")
+  local clip_args=(--clip3pAdapterSeq AGATCGGAAGAG --clip3pAdapterMMp 0.1)
   mkdir -p "${run_dir}/logs"
   rm -rf "${run_dir}/tmp"
 
+  if [[ "${MODE}" == "pe" ]]; then
+    read_files+=("${FASTQ_R2}")
+    clip_args=(--clip3pAdapterSeq AGATCGGAAGAG AGATCGGAAGAG --clip3pAdapterMMp 0.1 0.1)
+  fi
+
   local read_cmd=()
-  if [[ "${FASTQ}" == *.gz ]]; then
+  if [[ "${FASTQ_R1}" == *.gz || "${FASTQ_R2:-}" == *.gz ]]; then
     read_cmd=(--readFilesCommand zcat)
   fi
 
@@ -251,16 +388,16 @@ run_star_fastq() {
     --runThreadN "${threads}"
     --genomeDir "${STAR_INDEX}"
     --readFilesType Fastx
-    --readFilesIn "${FASTQ}"
+    --readFilesIn "${read_files[@]}"
     "${read_cmd[@]}"
     --outFileNamePrefix "${prefix}"
     --outTmpDir "${run_dir}/tmp"
     --outSAMtype SAM
-    --clip3pAdapterSeq AGATCGGAAGAG
-    --clip3pAdapterMMp 0.1
+    "${clip_args[@]}"
     --slamQuantMode 1
     --slamSnpMaskIn "${SNPS_BED}"
     --slamGrandSlamOut 1
+    --slamQcReport "${run_dir}/star_qc"
     --slamDumpBinary "${run_dir}/star_slam.dump.bin"
     --slamDumpWeights "${run_dir}/star_slam.weights.bin"
   )
@@ -277,23 +414,30 @@ run_star_cbq() {
   local cbq="$3"
   local run_dir="${OUT_BASE}/${label}"
   local prefix="${run_dir}/star_"
+  local binseq_mode="SE"
+  local clip_args=(--clip3pAdapterSeq AGATCGGAAGAG --clip3pAdapterMMp 0.1)
   mkdir -p "${run_dir}/logs"
   rm -rf "${run_dir}/tmp"
+
+  if [[ "${MODE}" == "pe" ]]; then
+    binseq_mode="PE"
+    clip_args=(--clip3pAdapterSeq AGATCGGAAGAG AGATCGGAAGAG --clip3pAdapterMMp 0.1 0.1)
+  fi
 
   local cmd=(
     "${STAR_BIN}"
     --runThreadN "${threads}"
     --genomeDir "${STAR_INDEX}"
-    --readFilesType Binseq SE
+    --readFilesType Binseq "${binseq_mode}"
     --readFilesIn "${cbq}"
     --outFileNamePrefix "${prefix}"
     --outTmpDir "${run_dir}/tmp"
     --outSAMtype SAM
-    --clip3pAdapterSeq AGATCGGAAGAG
-    --clip3pAdapterMMp 0.1
+    "${clip_args[@]}"
     --slamQuantMode 1
     --slamSnpMaskIn "${SNPS_BED}"
     --slamGrandSlamOut 1
+    --slamQcReport "${run_dir}/star_qc"
     --slamDumpBinary "${run_dir}/star_slam.dump.bin"
     --slamDumpWeights "${run_dir}/star_slam.weights.bin"
   )
@@ -326,9 +470,16 @@ run_requant() {
 }
 
 CBQ_FILE="${OUT_BASE}/inputs/slam_fixture.cbq"
+MATE_COUNT=1
+FASTQ_INPUTS=("${FASTQ_R1}")
+if [[ "${MODE}" == "pe" ]]; then
+  MATE_COUNT=2
+  FASTQ_INPUTS+=("${FASTQ_R2}")
+fi
+
 log "Encoding ordered CBQ fixture"
 "${ENCODER_BIN}" \
-  --readFilesIn "${FASTQ}" \
+  --readFilesIn "${FASTQ_INPUTS[@]}" \
   --outFile "${CBQ_FILE}" \
   --compressionLevel "${ENCODER_COMPRESSION_LEVEL}" \
   --blockSize "${ENCODER_BLOCK_SIZE}" \
@@ -337,9 +488,9 @@ log "Encoding ordered CBQ fixture"
 [[ -s "${CBQ_FILE}" ]] || die "Ordered CBQ encoder did not produce ${CBQ_FILE}"
 
 log "Comparing FASTQ and CBQ input payloads"
-"${FASTX_BIN}" --readNameSeparator space --readFilesIn "${FASTQ}" --dump-fastq \
+"${FASTX_BIN}" --readNameSeparator space --readFilesIn "${FASTQ_INPUTS[@]}" --dump-fastq \
   > "${OUT_BASE}/stages/input.fastq.dump"
-"${CBQ_BIN}" --readNameSeparator space --mateCount 1 --readFilesIn "${CBQ_FILE}" --dump-fastq \
+"${CBQ_BIN}" --readNameSeparator space --mateCount "${MATE_COUNT}" --readFilesIn "${CBQ_FILE}" --dump-fastq \
   > "${OUT_BASE}/stages/input.cbq.dump"
 cmp_stage input_payload_fastq_vs_cbq cbq-specific \
   "${OUT_BASE}/stages/input.fastq.dump" \
