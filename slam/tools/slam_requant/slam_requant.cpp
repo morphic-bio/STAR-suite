@@ -378,7 +378,7 @@ int main(int argc, char** argv) {
     auto runPartition = [&](const std::vector<SlamBufferedRead>& partReads,
                             const std::array<int, 2>& trim5pVals,
                             const std::array<int, 2>& trim3pVals) {
-        SlamQuant q(meta.geneIds.size(), false);
+        SlamQuant q(meta.geneIds.size(), meta.allowedGenes, false);
         q.enableReadBuffer(static_cast<uint64_t>(partReads.size()));
         for (const auto& r : partReads) {
             SlamBufferedRead adjusted(r);
@@ -401,7 +401,7 @@ int main(int argc, char** argv) {
         return q;
     };
 
-    SlamQuant merged(meta.geneIds.size(), false);
+    SlamQuant merged(meta.geneIds.size(), meta.allowedGenes, false);
     if (args.trimScope == "per-file") {
         std::unordered_map<uint32_t, std::vector<SlamBufferedRead>> byFile;
         for (const auto& r : reads) {

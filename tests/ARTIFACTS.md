@@ -144,9 +144,13 @@ update this file with its output location.
 - `/storage/MSK-perturb-comparison/paper_bench_emptydrops_guarded_*` (MSK full 3-library perturb reruns after the guarded ambient EmptyDrops fix, including the completeness rerun `paper_bench_emptydrops_guarded_redo_20260403_214718`)
 - `/tmp/msk_guarded*_compute_parity.tsv` (headline MSK parity summaries from fresh guarded reruns)
 - `/tmp/public_bulk_fixture_*` (public GEO bulk PE smoke fixtures downloaded via `scripts/download_public_bulk_fixture.sh`)
-- `/tmp/slam_pe_100k_smoke_*` and `/tmp/slam_min_callable_smoke_*` (SLAM-seq
-  paired-end 100K SE/PE smoke outputs, compare logs, and TranscriptVB/cB/GrandSLAM
-  count surfaces; reproduced by `scripts/run_slam_100k_se_pe_smoke.sh`)
+- `/tmp/slam_pe_100k_smoke_*`, `/tmp/slam_min_callable_smoke_*`,
+  `/tmp/slam_parity_smoke_*`, and `/tmp/slam_cbq_divergence_harness_*`
+  (SLAM-seq paired-end 100K SE/PE smoke outputs, compare logs,
+  TranscriptVB/cB/GrandSLAM count surfaces, exact STAR-vs-dump-requant pre-NTR
+  parity, and staged FASTQ-vs-CBQ divergence reports; reproduced by
+  `scripts/run_slam_100k_se_pe_smoke.sh`, `tests/run_slam_parity_smoke.sh`, and
+  `tests/run_slam_cbq_divergence_harness.sh`)
 - `/mnt/pikachu/SLAM-Seq-PE-results/prod_full_20260511T103908Z/` (active
   2026-05 SLAM paired-end full-panel production root; protected local dataset,
   Y/noY BAM/FASTQ derivatives are uploaded by Globus and cleaned locally, do

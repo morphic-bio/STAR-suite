@@ -9,7 +9,7 @@
 #include <fstream>
 
 struct SlamDumpMetadata {
-    uint32_t version = 1;
+    uint32_t version = 2;
     // 0=Alignments (1/nTr), 1=Uniform (1.0); stored in header flags.
     uint32_t weightMode = 0;
     uint64_t nReads = 0;
@@ -17,6 +17,9 @@ struct SlamDumpMetadata {
     double convRate = 0.0;
     std::vector<std::string> geneIds;
     std::vector<std::string> geneNames;
+    // Optional per-gene mask from the live STAR-SLAM quantifier. Empty means
+    // no filtering; otherwise 0 entries are excluded by SlamQuant::addRead().
+    std::vector<uint8_t> allowedGenes;
     std::vector<std::string> chrNames;
     std::vector<uint64_t> chrStart;
 };
