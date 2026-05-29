@@ -294,6 +294,7 @@ Workflow schemas: `mcp_server/workflows/`
 - `docs/CRISPR_FEATURE_CALLING_IMPLEMENTATION_SUMMARY.md`
 - `docs/HEATMAP_REFACTOR_SUMMARY.md`
 - `docs/Github-actions.md`
+- `docs/CBQ_FORMAT_AND_IMPLEMENTATION.md`
 - `docs/Star-binary-distribution.md`
 - `docs/feature_barcodes.md`
 - `docs/RUNBOOK_REPOSITORY_SPLIT_RECIPES_PROVENANCE.md`

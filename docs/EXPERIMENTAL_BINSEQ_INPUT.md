@@ -11,6 +11,10 @@ STAR --readFilesType Binseq PE --readFilesIn sample.cbq ...
 STAR --readFilesType Binseq SE --readFilesIn sample.cbq ...
 ```
 
+Technical details for the on-disk CBQ subset, ordered encoder, native reader,
+and STAR/process_features/Chromap adapter surfaces are documented in
+`docs/CBQ_FORMAT_AND_IMPLEMENTATION.md`.
+
 ## What Works Now
 
 - Paired `.cbq` files can be decoded through `bqtools` and read by
@@ -324,6 +328,8 @@ normal mapper path for the modes that have been validated.
 
 ## Developer References
 
+- Technical format and implementation reference:
+  `docs/CBQ_FORMAT_AND_IMPLEMENTATION.md`
 - Implementation runbook: `docs/RUNBOOK_BINSEQ_INPUT_CONTRACT.md`
 - Native reader and STAR adapter prototype:
   `docs/RUNBOOK_BINSEQ_CPP_READER_PROTOTYPE.md`
