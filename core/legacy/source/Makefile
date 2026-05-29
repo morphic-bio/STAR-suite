@@ -43,9 +43,10 @@ LIBSCRNA_DIR := $(ROOT_DIR)/core/features/libscrna
 LIBSCRNA_INC := $(LIBSCRNA_DIR)/include
 LIBSCRNA_LIB := $(LIBSCRNA_DIR)/libscrna.a
 
-# Optional in-process Chromap (default off: no libchromap / system libhts link; portable STAR).
-# Build with: make core WITH_CHROMAP=1  (and CHROMAP_SUITE_DIR / CHROMAP_SYS_HTS as needed)
-WITH_CHROMAP ?= 0
+# In-process Chromap is the default STAR-suite build because production
+# multiome workflows depend on it. Use WITH_CHROMAP=0 only for explicit
+# portable/no-Chromap compatibility builds.
+WITH_CHROMAP ?= 1
 CHROMAP_ORCH_CPP_REAL := star_chromap_orchestration.cpp
 CHROMAP_ORCH_CPP_STUB := star_chromap_orchestration_stub.cpp
 LIBCHROMAP_CONTRACT_DIR := $(ROOT_DIR)/core/features/libchromap_contract
@@ -94,7 +95,7 @@ endif
 VPATH := $(FLEX_SRC_DIR) $(SLAM_SRC_DIR) $(SLAM_LIBEM_DIR) $(VBEM_SRC_DIR) $(BAMSORT_SRC_DIR)
 
 # pre-defined flags
-LDFLAGS_shared := -pthread $(STAR_HTSLIB_LINK) -lz -lssl -lcrypto
+LDFLAGS_shared := -pthread $(STAR_HTSLIB_LINK) -lz -lssl -lcrypto -ldl
 # "Static" build follows upstream STAR behavior: link STAR objects and vendored
 # htslib statically while keeping system libs dynamic for broad compatibility.
 LIBGOMP_STATIC := $(shell $(CXX) -print-file-name=libgomp.a 2>/dev/null)
@@ -103,7 +104,7 @@ LDFLAGS_static_gomp := $(LIBGOMP_STATIC)
 else
 LDFLAGS_static_gomp := -lgomp
 endif
-LDFLAGS_static := -static-libgcc -static-libstdc++ -pthread -Lhtslib -Bstatic -lhts $(LDFLAGS_static_gomp) -Bdynamic -lz -lbz2 -llzma -lcurl -lssl -lcrypto
+LDFLAGS_static := -static-libgcc -static-libstdc++ -pthread -Lhtslib -Bstatic -lhts $(LDFLAGS_static_gomp) -Bdynamic -lz -lbz2 -llzma -lcurl -lssl -lcrypto -ldl
 LDFLAGS_Mac :=-pthread -lz htslib/libhts.a
 LDFLAGS_Mac_static :=-pthread -lz -static-libgcc htslib/libhts.a
 LDFLAGS_gdb := $(LDFLAGS_shared)
@@ -185,6 +186,7 @@ OBJECTS = systemFunctions.o SoloMemoryProfile.o CountingSinkStress.o funPrimaryA
 	Transcript.o Transcript_alignScore.o Transcript_generateCigarP.o Chain.o \
 	Transcript_variationAdjust.o Variation.o ReadAlign_waspMap.o \
 	ReadAlign_storeAligns.o ReadAlign_stitchPieces.o ReadAlign_multMapSelect.o ReadAlign_mapOneRead.o readLoad.o \
+	ReadAlign_loadCbqReadView.o CbqStarAdapter.o \
 	ReadAlignChunk.o ReadAlignChunk_processChunks.o ReadAlignChunk_mapChunk.o \
 	OutSJ.o outputSJ.o blocksOverlap.o ThreadControl.o sysRemoveDir.o \
 	ReadAlign_maxMappableLength2strands.o binarySearch2.o\
@@ -202,6 +204,7 @@ OBJECTS = systemFunctions.o SoloMemoryProfile.o CountingSinkStress.o funPrimaryA
 	Transcriptome.o Transcriptome_quantAlign.o Transcriptome_geneFullAlignOverlap.o \
 	ReadAlign_quantTranscriptome.o Quantifications.o Transcriptome_geneCountsAddAlign.o \
 	sjdbLoadFromFiles.o sjdbLoadFromStream.o sjdbPrepare.o sjdbBuildIndex.o sjdbInsertJunctions.o mapThreadsSpawn.o \
+	FastxInputModule.o CbqInputModule.o \
 	Parameters_readFilesInit.o Parameters_openReadsFiles.cpp Parameters_closeReadsFiles.cpp Parameters_batchReset.cpp Parameters_readSAMheader.o \
 	bam_cat.o serviceFuns.o GlobalVariables.cpp \
 	BAMoutput.o BAMfunctions.o ReadAlign_alignBAM.o BAMbinSortByCoordinate.o signalFromBAM.o bamRemoveDuplicates.o BAMbinSortUnmapped.o \
@@ -233,7 +236,7 @@ ocm-multi-unit-tests : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS) $
 ocm-multi-unit-tests : Depend.list parametersDefault.xxd $(OBJECTS_NO_MAIN) libflex libtrim libem libprocess_features $(LIBSCRNA_LIB) $(OCM_UNIT_TEST_SRC)
 	$(CXX) -o ocm_multi_unit_tests $(CXXFLAGS) $(OCM_UNIT_TEST_SRC) $(OBJECTS_NO_MAIN) $(LIBFLEX_LIB) $(LIBTRIM_LIB) $(LIBEM_LIB) $(PROCESS_FEATURES_LIB) $(LIBSCRNA_LIB) $(LDFLAGS)
 
-SOURCES := $(SRC_CPP_ROOT) $(FLEX_SRC_DIR)/ReadAlign_resolveAmbiguousCBs.cpp $(wildcard *.c) $(wildcard flex/*.cpp)
+SOURCES := $(SRC_CPP_ROOT) $(wildcard input/*.cpp) $(FLEX_SRC_DIR)/ReadAlign_resolveAmbiguousCBs.cpp $(wildcard *.c) $(wildcard flex/*.cpp)
 
 %.o : %.c
 	$(CXX) -c $(CPPFLAGS) $(CFLAGS) $<
@@ -265,6 +268,61 @@ trim_qc_fastq : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
 trim_qc_fastq : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS)
 trim_qc_fastq : htslib/libhts.a TrimQc.o TrimQcOutput.o Stats.o TimeFunctions.o trim_qc_fastq.cpp
 	$(CXX) -o trim_qc_fastq $(CXXFLAGS) trim_qc_fastq.cpp TrimQc.o TrimQcOutput.o Stats.o TimeFunctions.o $(LDFLAGS)
+
+# Standalone input-contract harness for FASTX module parity/smoke tests.
+.PHONY: fastx-input-harness
+fastx-input-harness : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
+fastx-input-harness : LDFLAGS := $(LDFLAGSextra) -lz -lcrypto
+fastx-input-harness : FastxInputModule.o input/fastx_input_harness.cpp
+	$(CXX) -o fastx_input_harness $(CXXFLAGS) input/fastx_input_harness.cpp FastxInputModule.o $(LDFLAGS)
+
+# Standalone BINSEQ probe harness. This is not production STAR integration; it
+# decodes CBQ through bqtools and validates the result through the input contract.
+.PHONY: binseq-probe-harness
+binseq-probe-harness : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
+binseq-probe-harness : LDFLAGS := $(LDFLAGSextra) -lz -lcrypto
+binseq-probe-harness : FastxInputModule.o BinseqInputProbeModule.o input/binseq_probe_harness.cpp
+	$(CXX) -o binseq_probe_harness $(CXXFLAGS) input/binseq_probe_harness.cpp BinseqInputProbeModule.o FastxInputModule.o $(LDFLAGS)
+
+# Standalone native CBQ reader harness. This is the Phase 6A correctness
+# prototype for BINSEQ and does not route CBQ through production STAR mapping.
+.PHONY: cbq-reader-harness
+cbq-reader-harness : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
+cbq-reader-harness : LDFLAGS := $(LDFLAGSextra) -lcrypto -ldl
+cbq-reader-harness : CbqInputModule.o input/cbq_reader_harness.cpp
+	$(CXX) -o cbq_reader_harness $(CXXFLAGS) input/cbq_reader_harness.cpp CbqInputModule.o $(LDFLAGS)
+
+# Ordered FASTQ/FASTQ.gz to CBQ encoder. This is intentionally sequential at
+# the write boundary so CBQ record order matches FASTQ source order.
+.PHONY: cbq-ordered-encoder
+cbq-ordered-encoder : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
+cbq-ordered-encoder : LDFLAGS := $(LDFLAGSextra) -lz -ldl
+cbq-ordered-encoder : input/cbq_ordered_encoder.cpp
+	$(CXX) -o cbq_ordered_encoder $(CXXFLAGS) input/cbq_ordered_encoder.cpp $(LDFLAGS)
+
+# Standalone adapter parity harness. It compares the direct CBQ-to-STAR-buffer
+# adapter against STAR's current synthetic FASTQ/readLoad input state.
+.PHONY: cbq-star-adapter-harness
+cbq-star-adapter-harness : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
+cbq-star-adapter-harness : LDFLAGS := $(LDFLAGSextra) -ldl
+cbq-star-adapter-harness : CbqInputModule.o CbqStarAdapter.o SequenceFuns.o ClipMate_clip.o ClipCR4.o opal/opal.o input/cbq_star_adapter_harness.cpp
+	$(CXX) -o cbq_star_adapter_harness $(CXXFLAGS) input/cbq_star_adapter_harness.cpp CbqInputModule.o CbqStarAdapter.o SequenceFuns.o ClipMate_clip.o ClipCR4.o opal/opal.o $(LDFLAGS)
+
+# Standalone process_features adapter harness. This exercises the native
+# in-memory record API without routing CBQ through temporary FASTQ files.
+.PHONY: cbq-pf-adapter-harness
+cbq-pf-adapter-harness : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
+cbq-pf-adapter-harness : LDFLAGS_PF := $(LDFLAGSextra) -L$(PROCESS_FEATURES_DIR) -lprocess_features -L$(LIBSCRNA_DIR) -lscrna $(CHROMAP_SYS_HTS) -lm -lpthread -lz -fopenmp -ldl
+cbq-pf-adapter-harness : CbqInputModule.o libprocess_features $(LIBSCRNA_LIB) input/cbq_pf_adapter_harness.cpp
+	$(CXX) -o cbq_pf_adapter_harness $(CXXFLAGS) input/cbq_pf_adapter_harness.cpp CbqInputModule.o $(LDFLAGS_PF)
+
+# Standalone Chromap input adapter harness. Chromap's current contract accepts
+# FASTQ paths, so this materializes synchronized R1/R2/barcode FASTQs from CBQ.
+.PHONY: cbq-chromap-adapter-harness
+cbq-chromap-adapter-harness : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
+cbq-chromap-adapter-harness : LDFLAGS := $(LDFLAGSextra) -ldl
+cbq-chromap-adapter-harness : CbqInputModule.o CbqChromapAdapter.o input/cbq_chromap_adapter_harness.cpp
+	$(CXX) -o cbq_chromap_adapter_harness $(CXXFLAGS) input/cbq_chromap_adapter_harness.cpp CbqChromapAdapter.o CbqInputModule.o $(LDFLAGS)
 
 # Standalone star_feature_call tool for perturb-seq processing
 # Requires libprocess_features.a to be built first
@@ -457,6 +515,21 @@ flex/%.o: flex/%.cpp
 	@mkdir -p flex
 	$(CXX) -c $(CPPFLAGS) $(CXXFLAGS) $(CXXFLAGS_common) $< -o $@
 
+FastxInputModule.o: input/FastxInputModule.cpp input/FastxInputModule.h input/InputContract.h
+	$(CXX) -c $(CPPFLAGS) $(CXXFLAGS) $(CXXFLAGS_common) $< -o $@
+
+BinseqInputProbeModule.o: input/BinseqInputProbeModule.cpp input/BinseqInputProbeModule.h input/FastxInputModule.h input/InputContract.h
+	$(CXX) -c $(CPPFLAGS) $(CXXFLAGS) $(CXXFLAGS_common) $< -o $@
+
+CbqInputModule.o: input/CbqInputModule.cpp input/CbqInputModule.h input/InputContract.h
+	$(CXX) -c $(CPPFLAGS) $(CXXFLAGS) $(CXXFLAGS_common) $< -o $@
+
+CbqStarAdapter.o: input/CbqStarAdapter.cpp input/CbqStarAdapter.h input/CbqInputModule.h input/InputContract.h
+	$(CXX) -c $(CPPFLAGS) $(CXXFLAGS) $(CXXFLAGS_common) $< -o $@
+
+CbqChromapAdapter.o: input/CbqChromapAdapter.cpp input/CbqChromapAdapter.h input/CbqInputModule.h input/InputContract.h
+	$(CXX) -c $(CPPFLAGS) $(CXXFLAGS) $(CXXFLAGS_common) $< -o $@
+
 opal/opal.o : opal/opal.cpp opal/opal.h
 	cd opal && \
 	$(CXX) -c -I./ -std=c++11 $(CPPFLAGS) $(CXXFLAGS) $(CXXFLAGSextra) $(CXXFLAGS_SIMD) opal.cpp
@@ -471,7 +544,7 @@ solo/CbBayesianResolver.o : $(FLEX_SRC_DIR)/solo/CbBayesianResolver.cpp $(FLEX_S
 
 .PHONY: clean
 clean:
-	'rm' -f *.o opal/opal.o solo/*.o flex/*.o STAR STARstatic STARlong star_feature_call Depend.list parametersDefault.xxd star_chromap_orchestration.o star_chromap_orchestration_stub.o .depend.with_chromap_*
+	'rm' -f *.o opal/opal.o solo/*.o flex/*.o STAR STARstatic STARlong star_feature_call fastx_input_harness binseq_probe_harness cbq_reader_harness cbq_ordered_encoder cbq_star_adapter_harness cbq_pf_adapter_harness cbq_chromap_adapter_harness Depend.list parametersDefault.xxd star_chromap_orchestration.o star_chromap_orchestration_stub.o .depend.with_chromap_*
 	$(MAKE) -C $(LIBFLEX_DIR) clean
 	$(MAKE) -C $(LIBTRIM_DIR) clean
 	$(MAKE) -C $(LIBEM_DIR) clean

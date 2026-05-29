@@ -339,6 +339,64 @@ class TestMutualExclusion:
         assert result.valid
 
 
+class TestAtLeastOne:
+    def test_missing_group_fails(self, tmp_path):
+        schema = {
+            "id": "oneof_wf",
+            "title": "One of test",
+            "summary": "Validation test.",
+            "entry_script": "scripts/test.sh",
+            "parameters": [
+                {"name": "read_files_cbq", "cli_flag": "--readFilesIn", "type": "string"},
+                {"name": "read_files_manifest", "cli_flag": "--readFilesManifest", "type": "file"},
+            ],
+            "constraints": [
+                {
+                    "kind": "at_least_one",
+                    "params": ["read_files_cbq", "read_files_manifest"],
+                    "message": "Provide CBQ list or manifest.",
+                }
+            ],
+            "rendering": {"flag_order": []},
+        }
+        (tmp_path / "workflows").mkdir()
+        (tmp_path / "scripts").mkdir()
+        (tmp_path / "scripts" / "test.sh").write_text("#!/bin/bash\n")
+        schema_rel = "workflows/oneof_wf.yaml"
+        (tmp_path / schema_rel).write_text(yaml.dump(schema))
+        cfg = {
+            "server": {"host": "127.0.0.1", "port": 9999, "transport": "http"},
+            "paths": {
+                "repo_root": str(tmp_path),
+                "artifact_log_root": str(tmp_path / "artifacts"),
+                "temp_root": str(tmp_path / "tmp"),
+            },
+            "trusted_roots": [str(tmp_path), "/tmp"],
+            "workflows": [
+                {
+                    "id": "oneof_wf",
+                    "title": "One of test",
+                    "entry_script": "scripts/test.sh",
+                    "schema_file": schema_rel,
+                }
+            ],
+        }
+        cfg_path = tmp_path / "config.yaml"
+        cfg_path.write_text(yaml.dump(cfg))
+        load_config(cfg_path)
+
+        missing = validate_workflow_parameters("oneof_wf", {}, check_paths=False)
+        assert not missing.valid
+        assert any("At least one" in e for e in missing.errors)
+
+        present = validate_workflow_parameters(
+            "oneof_wf",
+            {"read_files_cbq": "sampleA.cbq"},
+            check_paths=False,
+        )
+        assert present.valid
+
+
 class TestGroupRequired:
     def test_partial_group_warns(self, workflow_env):
         result = validate_workflow_parameters(

@@ -456,13 +456,23 @@ def validate_workflow_parameters(
     # Normalize for constraint checking
     normalized = _normalize_params(schema, params)
 
+    def _constraint_value_present(value: Any) -> bool:
+        if value is None or value is False:
+            return False
+        if isinstance(value, (str, bytes)) and value == "":
+            return False
+        if isinstance(value, (list, tuple, set, dict)) and len(value) == 0:
+            return False
+        if value == 0:
+            return False
+        return True
+
     # Constraint validation
     for constraint in schema.constraints:
         if constraint.kind == "mutual_exclusion":
             present = [
                 p for p in constraint.params
-                if p in params and params[p] is not None and params[p] is not False
-                and params[p] != "" and params[p] != 0
+                if p in params and _constraint_value_present(params[p])
             ]
             if len(present) > 1:
                 msg = (
@@ -471,6 +481,22 @@ def validate_workflow_parameters(
                 )
                 errors.append(msg)
                 for p_name in present:
+                    field_errors.append(
+                        FieldValidationError(field=p_name, message=msg, kind="error")
+                    )
+
+        elif constraint.kind == "at_least_one":
+            present = [
+                p for p in constraint.params
+                if p in params and _constraint_value_present(params[p])
+            ]
+            if not present:
+                msg = (
+                    f"At least one parameter must be provided from: "
+                    f"{', '.join(constraint.params)}. {constraint.message}"
+                )
+                errors.append(msg)
+                for p_name in constraint.params:
                     field_errors.append(
                         FieldValidationError(field=p_name, message=msg, kind="error")
                     )

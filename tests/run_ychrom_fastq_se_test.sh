@@ -61,8 +61,9 @@ echo "=== Running STAR (single-end) ==="
     --outFileNamePrefix "$OUT_DIR/" \
     > "$OUT_DIR/star.log" 2>&1
 
-Y_R1="$OUT_DIR/sample_Y_R1_001.fastq.gz"
-NOY_R1="$OUT_DIR/sample_noY_R1_001.fastq.gz"
+Y_OUT_DIR="$OUT_DIR/y_separated"
+Y_R1="$Y_OUT_DIR/sample_Y_R1_001.fastq.gz"
+NOY_R1="$Y_OUT_DIR/sample_noY_R1_001.fastq.gz"
 
 echo "=== Validating outputs ==="
 if [[ ! -f "$Y_R1" || ! -f "$NOY_R1" ]]; then
@@ -70,7 +71,7 @@ if [[ ! -f "$Y_R1" || ! -f "$NOY_R1" ]]; then
     exit 1
 fi
 
-if [[ -f "$OUT_DIR/sample_Y_R2_001.fastq.gz" || -f "$OUT_DIR/sample_noY_R2_001.fastq.gz" ]]; then
+if [[ -f "$Y_OUT_DIR/sample_Y_R2_001.fastq.gz" || -f "$Y_OUT_DIR/sample_noY_R2_001.fastq.gz" ]]; then
     echo "FAIL: R2 outputs should not be created for single-end reads"
     exit 1
 fi

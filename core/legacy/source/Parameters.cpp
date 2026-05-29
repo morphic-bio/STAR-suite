@@ -2764,8 +2764,9 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
         if (quant.slam.batchTotalCount < 1) {
             ostringstream errOut;
             errOut << "EXITING because of FATAL PARAMETER ERROR: "
-                   << "--batchMode requires at least one FASTQ in --readFilesIn\n"
-                   << "SOLUTION: use comma-separated files: --readFilesIn file1.fq,file2.fq,file3.fq\n";
+                   << "--batchMode requires at least one input source in --readFilesIn\n"
+                   << "SOLUTION: use comma-separated files, e.g. --readFilesIn file1.fq,file2.fq,file3.fq "
+                   << "or --readFilesType Binseq PE --readFilesIn file1.cbq,file2.cbq\n";
             exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
         }
 
@@ -2793,7 +2794,7 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
                    << "SOLUTION: use 1 or 2 mates in --readFilesIn.\n";
             exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
         }
-        if (readNends > 1) {
+        if (readNends > 1 && readFilesTypeN != 20) {
             if (readFilesNames.size() < 2) {
                 ostringstream errOut;
                 errOut << "EXITING because of FATAL PARAMETER ERROR: "

@@ -1,7 +1,10 @@
 #include "PfMultiAssign.h"
 #include "GlobalVariables.h"
+#include "input/CbqInputModule.h"
 #include "pf_api.h"
 #include <cstdlib>
+#include <cstring>
+#include <dirent.h>
 #include <fstream>
 #include <sstream>
 #include <iostream>
@@ -15,6 +18,8 @@ using std::endl;
 
 namespace {
 ThreadControl::PermitHookContext kFeaturePermitHookContext{ThreadControl::PermitDomain::FEATURE};
+constexpr size_t kPfLineLength = 1024;
+constexpr size_t kPfSequenceCapacity = kPfLineLength - 1;
 }
 
 extern "C" uint64_t pfStarDynamicPermitAcquire(void *hookCtx) {
@@ -51,6 +56,104 @@ static bool fileExists(const string& path) {
 static bool dirExists(const string& path) {
     struct stat st;
     return stat(path.c_str(), &st) == 0 && S_ISDIR(st.st_mode);
+}
+
+static string lowerCopyLocal(string value) {
+    std::transform(value.begin(), value.end(), value.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return value;
+}
+
+static bool hasSuffix(const string& value, const string& suffix) {
+    return value.size() >= suffix.size() &&
+           value.compare(value.size() - suffix.size(), suffix.size(), suffix) == 0;
+}
+
+static string stripOuterQuotes(const string& value) {
+    size_t first = value.find_first_not_of(" \t\r\n");
+    if (first == string::npos) {
+        return "";
+    }
+    size_t last = value.find_last_not_of(" \t\r\n");
+    string stripped = value.substr(first, last - first + 1);
+    if (stripped.size() >= 2 &&
+        ((stripped.front() == '"' && stripped.back() == '"') ||
+         (stripped.front() == '\'' && stripped.back() == '\''))) {
+        stripped = stripped.substr(1, stripped.size() - 2);
+    }
+    return stripped;
+}
+
+static bool isCbqPath(const string& path) {
+    return hasSuffix(lowerCopyLocal(path), ".cbq");
+}
+
+static vector<string> splitCommaList(const string& value) {
+    vector<string> out;
+    std::stringstream ss(value);
+    string item;
+    while (std::getline(ss, item, ',')) {
+        size_t first = item.find_first_not_of(" \t\r\n");
+        if (first == string::npos) {
+            continue;
+        }
+        size_t last = item.find_last_not_of(" \t\r\n");
+        const string stripped = stripOuterQuotes(item.substr(first, last - first + 1));
+        if (!stripped.empty()) {
+            out.push_back(stripped);
+        }
+    }
+    return out;
+}
+
+static vector<string> listCbqFilesInDirectory(const string& dirPath) {
+    vector<string> files;
+    DIR* dir = opendir(dirPath.c_str());
+    if (dir == nullptr) {
+        return files;
+    }
+    struct dirent* entry = nullptr;
+    while ((entry = readdir(dir)) != nullptr) {
+        if (entry->d_name[0] == '.') {
+            continue;
+        }
+        const string full = dirPath + "/" + entry->d_name;
+        if (!isCbqPath(full)) {
+            continue;
+        }
+        struct stat st;
+        if (stat(full.c_str(), &st) == 0 && S_ISREG(st.st_mode)) {
+            files.push_back(full);
+        }
+    }
+    closedir(dir);
+    std::sort(files.begin(), files.end());
+    return files;
+}
+
+static bool resolveCbqSources(const string& source, vector<string>* cbqPaths) {
+    if (cbqPaths == nullptr) {
+        return false;
+    }
+    cbqPaths->clear();
+    const string normalizedSource = stripOuterQuotes(source);
+    if (dirExists(normalizedSource)) {
+        *cbqPaths = listCbqFilesInDirectory(normalizedSource);
+        return !cbqPaths->empty();
+    }
+
+    vector<string> candidates = splitCommaList(normalizedSource);
+    if (candidates.empty()) {
+        return false;
+    }
+    for (const string& path : candidates) {
+        if (!isCbqPath(path) || !fileExists(path)) {
+            cbqPaths->clear();
+            return false;
+        }
+        cbqPaths->push_back(path);
+    }
+    return !cbqPaths->empty();
 }
 
 static bool looksLikeMultiColumnWhitelist(const string& whitelistPath) {
@@ -372,6 +475,136 @@ static string pfErrorMessage(pf_context* ctx, pf_error err, const string& stage)
     return oss.str();
 }
 
+static pf_sequence_view pfViewFromCbqSpan(star::input::CbqByteSpan span) {
+    pf_sequence_view view;
+    view.data = span.data;
+    view.length = span.size;
+    return view;
+}
+
+static pf_sequence_view pfViewFromBuffer(const char* data, size_t length) {
+    pf_sequence_view view;
+    view.data = data;
+    view.length = length;
+    return view;
+}
+
+static pf_error processCbqSources(pf_context* ctx,
+                                  const vector<string>& cbqPaths,
+                                  const string& outputDir,
+                                  const string& sampleName,
+                                  long long maxReads,
+                                  pf_stats* stats,
+                                  string* errorMessage) {
+    std::vector<std::vector<std::string>> readFiles(1);
+    readFiles[0] = cbqPaths;
+    star::input::InputSourcePlan plan =
+        star::input::make_cbq_input_source_plan(readFiles, std::vector<std::string>(), 2);
+    plan.read_name_separator_chars.clear();
+    plan.read_name_separator_chars.push_back(' ');
+
+    std::string inputError;
+    star::input::CbqInputModule module;
+    if (!module.configure(plan, &inputError) || !module.open(&inputError)) {
+        if (errorMessage != nullptr) {
+            *errorMessage = "CBQ feature assignment input error: " + inputError;
+        }
+        return PF_ERR_IO_ERROR;
+    }
+
+    pf_record_stream* stream = nullptr;
+    pf_error err = pf_process_records_begin(ctx, outputDir.c_str(),
+                                            sampleName.c_str(), &stream);
+    if (err != PF_OK) {
+        module.close();
+        return err;
+    }
+
+    long long emitted = 0;
+    for (;;) {
+        star::input::CbqReadBatchView batch;
+        const star::input::InputStatus status = module.next_batch(&batch, &inputError);
+        if (status == star::input::InputStatus::Error) {
+            pf_process_records_abort(stream);
+            module.close();
+            if (errorMessage != nullptr) {
+                *errorMessage = "CBQ feature assignment read error: " + inputError;
+            }
+            return PF_ERR_IO_ERROR;
+        }
+        if (status == star::input::InputStatus::End) {
+            break;
+        }
+
+        uint32_t recordsToProcess = batch.record_count;
+        if (maxReads > 0) {
+            const long long remaining = maxReads - emitted;
+            if (remaining <= 0) {
+                break;
+            }
+            if (static_cast<long long>(recordsToProcess) > remaining) {
+                recordsToProcess = static_cast<uint32_t>(remaining);
+            }
+        }
+        if (recordsToProcess == 0) {
+            continue;
+        }
+
+        std::vector<pf_read_record_view> records;
+        std::vector<char> sequenceStorage(static_cast<size_t>(recordsToProcess) *
+                                          2U * kPfLineLength);
+        records.reserve(recordsToProcess);
+        for (uint32_t i = 0; i < recordsToProcess; ++i) {
+            const star::input::CbqReadView& view = batch.records[i];
+            if (view.segment_count < 2 || view.segments == nullptr) {
+                pf_process_records_abort(stream);
+                module.close();
+                if (errorMessage != nullptr) {
+                    *errorMessage = "CBQ feature assignment expects paired CBQ records";
+                }
+                return PF_ERR_PARSE_ERROR;
+            }
+
+            pf_read_record_view rec = {};
+            char* barcodeSequence = sequenceStorage.data() +
+                (static_cast<size_t>(i) * 2U * kPfLineLength);
+            char* featureSequence = barcodeSequence + kPfLineLength;
+            size_t barcodeLength = 0;
+            size_t featureLength = 0;
+            if (!star::input::materialize_cbq_segment_sequence_to_buffer(
+                    view.segments[0], barcodeSequence, kPfSequenceCapacity,
+                    &barcodeLength, &inputError) ||
+                !star::input::materialize_cbq_segment_sequence_to_buffer(
+                    view.segments[1], featureSequence, kPfSequenceCapacity,
+                    &featureLength, &inputError)) {
+                pf_process_records_abort(stream);
+                module.close();
+                if (errorMessage != nullptr) {
+                    *errorMessage = "CBQ feature assignment sequence decode error: " + inputError;
+                }
+                return PF_ERR_PARSE_ERROR;
+            }
+
+            rec.barcode_sequence = pfViewFromBuffer(barcodeSequence, barcodeLength);
+            rec.barcode_quality = pfViewFromCbqSpan(view.segments[0].quality);
+            rec.feature_sequence = pfViewFromBuffer(featureSequence, featureLength);
+            rec.feature_quality = pfViewFromCbqSpan(view.segments[1].quality);
+            records.push_back(rec);
+        }
+
+        err = pf_process_record_views(stream, records.data(), records.size());
+        if (err != PF_OK) {
+            pf_process_records_abort(stream);
+            module.close();
+            return err;
+        }
+        emitted += static_cast<long long>(recordsToProcess);
+    }
+
+    module.close();
+    return pf_process_records_end(stream, stats);
+}
+
 static void writeApiRunSummary(const string& assignOut,
                                const WhitelistNormalizationResult& whitelistInfo,
                                const string& featureRef,
@@ -540,6 +773,9 @@ AssignResult runAssignBarcodes(const string& whitelist,
                      const string& featureRef, const string& fastqDir,
                      const string& assignOut,
                      const AssignOptions& options) {
+    vector<string> cbqPaths;
+    const bool useCbqInput = resolveCbqSources(fastqDir, &cbqPaths);
+
     // Check inputs exist
     if (!fileExists(whitelist)) {
         ostringstream err;
@@ -551,9 +787,9 @@ AssignResult runAssignBarcodes(const string& whitelist,
         err << "Feature reference file not found: " << featureRef;
         throw runtime_error(err.str());
     }
-    if (!dirExists(fastqDir)) {
+    if (!useCbqInput && !dirExists(fastqDir)) {
         ostringstream err;
-        err << "FASTQ directory not found: " << fastqDir;
+        err << "FASTQ directory or CBQ source not found: " << fastqDir;
         throw runtime_error(err.str());
     }
     
@@ -616,9 +852,23 @@ AssignResult runAssignBarcodes(const string& whitelist,
     }
 
     pf_stats stats = {};
-    err = pf_process_fastq_dir(ctx, fastqDir.c_str(), assignOut.c_str(), &stats);
+    string cbqErrorMessage;
+    if (useCbqInput) {
+        const string sampleName = options.sampleName.empty() ? "sample" : options.sampleName;
+        err = processCbqSources(ctx, cbqPaths, assignOut, sampleName,
+                                options.maxReads, &stats, &cbqErrorMessage);
+    } else {
+        err = pf_process_fastq_dir(ctx, fastqDir.c_str(), assignOut.c_str(), &stats);
+    }
     if (err != PF_OK) {
-        string msg = pfErrorMessage(ctx, err, "pf_process_fastq_dir");
+        string msg;
+        if (useCbqInput && !cbqErrorMessage.empty()) {
+            msg = "pf_api failed at process_cbq_sources (" + pfErrorCodeString(err) + "): " +
+                  cbqErrorMessage;
+        } else {
+            msg = pfErrorMessage(ctx, err,
+                                 useCbqInput ? "process_cbq_sources" : "pf_process_fastq_dir");
+        }
         pf_destroy(ctx);
         throw runtime_error(msg);
     }

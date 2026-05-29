@@ -1,12 +1,13 @@
-name: CI Dev
+name: CI Dev Release
 
 on:
   push:
     branches:
-      - dev
+      - dev-release
+      - "dev-release-*"
     paths:
       - ".github/workflows/ci-pr.yml"
-      - ".github/workflows/ci-dev.yml"
+      - ".github/workflows/ci-dev-release.yml"
       - ".github/workflows/ci-master.yml"
       - ".github/workflows/release.yml"
       - "docker/**"
@@ -52,16 +53,16 @@ jobs:
       - name: Build suite base image
         run: |
           chmod +x scripts/docker/*.sh
-          MAKE_JOBS=8 IMAGE_TAG=biodepot/star-suite:ci-dev-${{ github.sha }} \
+          MAKE_JOBS=8 IMAGE_TAG=biodepot/star-suite:ci-dev-release-${{ github.sha }} \
             scripts/docker/build_image.sh
 
       - name: Run Tier A smoke tests
         run: |
           MAKE_JOBS=8 \
-          TEST_IMAGE_TAG=biodepot/star-suite:ci-dev-tier-a-${{ github.sha }} \
+          TEST_IMAGE_TAG=biodepot/star-suite:ci-dev-release-tier-a-${{ github.sha }} \
             scripts/docker/run_smokes_tier_a.sh
 
-  publish-dev-image:
+  publish-dev-release-image:
     needs: [build-and-tier-a, check-secrets]
     runs-on: ubuntu-24.04
     timeout-minutes: 90
@@ -81,7 +82,7 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and push dev image (amd64)
+      - name: Build and push dev-release image (amd64)
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -92,5 +93,5 @@ jobs:
           build-args: |
             MAKE_JOBS=8
           tags: |
-            biodepot/star-suite:dev-${{ github.sha }}
-            biodepot/star-suite:dev-latest
+            biodepot/star-suite:dev-release-${{ github.sha }}
+            biodepot/star-suite:dev-release-latest

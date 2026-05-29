@@ -8,6 +8,10 @@ Use `STAR --upstream-version` for the underlying upstream STAR base
 (`2.7.11b`) and `STAR --genome-compat-version` for the genome index
 compatibility string (`2.7.4a`).
 
+Advanced-user previews live on `dev-release` or version-scoped
+`dev-release-vX.Y.Z` branches. Immutable prerelease tags use `vX.Y.Z-rcN`;
+stable releases are tagged from `master`.
+
 STAR Suite supports partial compilation: build only the module/tool targets you need instead of building the full suite every time.
 
 Agent quickstart: see `AGENTS.md` for repo-specific guardrails, tests, and recent changes.
@@ -61,7 +65,9 @@ mcp_server/              # MCP server for scripted discovery/preflight/run workf
 ## Modules
 
 - **STAR-core** (`core/`): Legacy STAR (indexing, bulk, Solo) plus shared utilities.
-  Build: `make core` (binary at `core/legacy/source/STAR`).
+  Build: `make core` for the Chromap-enabled multiome-capable binary at
+  `core/legacy/source/STAR`; use `make core-portable` for an explicit
+  no-Chromap compatibility build.
 - **STAR-perturb** (`core/legacy/` + `core/features/process_features/`): CR-compatible perturb-seq path with integrated feature extraction/calling (`process_features` + `call_features`) and `crispr_analysis/` outputs in CR-compat mode.
   Primary run path: `STAR --pfMultiConfig ... --defaultCrCompat yes` (see STAR-perturb section below).
 - **STAR-OCM scRNA-seq** (`core/legacy/`): GEM-X OCM support on the CR-compatible
