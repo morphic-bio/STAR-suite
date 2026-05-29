@@ -519,7 +519,7 @@ int main(int argc, char *argv[]) {
             case 1009: cfg.emptydrops_expected_cells = atoi(optarg); break;
             case 1010: cfg.emptydrops_use_fdr = true; break;
             case 'v':
-                printf("star_feature_call version 1.0.1\n");
+                printf("star_feature_call version 1.0.2\n");
                 printf("Part of STAR-suite\n");
                 return 0;
             case 'h':

@@ -24,6 +24,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <limits>
 #include <omp.h>
 #include <sstream>
 #include <string>
@@ -581,18 +582,35 @@ void SoloFeature::collapseUMIall_fromBridgeHash()
             for (uint32_t iG = 0; iG < nGenes; ++iG) {
                 const size_t a = ts.gBeg[iG];
                 const size_t b = ts.gEnd[iG];
-                const uint32_t nU0 = static_cast<uint32_t>(b - a);
-                if (nU0 == 0)
+                if (b == a)
                     continue;
 
-                if (ts.umiArray.size() < static_cast<size_t>(nU0) * umiArrayStride)
-                    ts.umiArray.resize(static_cast<size_t>(nU0) * umiArrayStride);
+                std::sort(slice + a, slice + b,
+                          [](const BridgeFlatSlot &x, const BridgeFlatSlot &y) {
+                              return x.umi24 < y.umi24;
+                          });
 
-                for (uint32_t t = 0; t < nU0; ++t) {
-                    const BridgeFlatSlot &rr = slice[a + t];
-                    ts.umiArray[static_cast<size_t>(t) * umiArrayStride + 0] = rr.umi24;
-                    ts.umiArray[static_cast<size_t>(t) * umiArrayStride + 1] = rr.count;
-                    ts.umiArray[static_cast<size_t>(t) * umiArrayStride + 2] = static_cast<uint32_t>(-1);
+                if (ts.umiArray.size() < (b - a) * umiArrayStride)
+                    ts.umiArray.resize((b - a) * umiArrayStride);
+
+                uint32_t nU0 = 0;
+                for (size_t t = a; t < b;) {
+                    const uint32_t umi24 = slice[t].umi24;
+                    uint64_t count = 0;
+                    while (t < b && slice[t].umi24 == umi24) {
+                        count += slice[t].count;
+                        ++t;
+                    }
+                    if (count > std::numeric_limits<uint32_t>::max()) {
+                        ostringstream errOut;
+                        errOut << "EXITING because of fatal ERROR: bridge exact UMI count overflow for CB "
+                               << iCB << ", gene " << ts.gID[iG] << ".\n";
+                        exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_INCONSISTENT_DATA, P);
+                    }
+                    ts.umiArray[static_cast<size_t>(nU0) * umiArrayStride + 0] = umi24;
+                    ts.umiArray[static_cast<size_t>(nU0) * umiArrayStride + 1] = static_cast<uint32_t>(count);
+                    ts.umiArray[static_cast<size_t>(nU0) * umiArrayStride + 2] = static_cast<uint32_t>(-1);
+                    ++nU0;
                 }
 
                 umiArrayCorrect_CR(nU0, ts.umiArray.data(), false, false, ts.emptyUmiCorr);

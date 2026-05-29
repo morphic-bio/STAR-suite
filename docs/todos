@@ -13,6 +13,16 @@ This file tracks active top-level work only. Completed items and stale historica
 
 ## Priority 1: Correctness / Parity
 
+- Add production-scale Solo direct-bridge repeatability regression coverage.
+  - The required invariant is exact raw GeneFull MEX identity for repeated
+    runs with the same FASTQ input, same binary, and same production
+    non-Flex inline-hash bridge flags.
+  - Include a large enough A375-style perturb fixture to expose
+    worker-local UMI collapse and scheduling sensitivity; tiny smoke fixtures
+    are not sufficient for this bug class.
+  - Compare raw and filtered MEX exactly, and record `STAR_INPUT_CHUNK_TRACE`
+    or equivalent chunk ownership metadata when available so input chunking can
+    be separated from downstream reduction nondeterminism.
 - Create a small set of acceptable smoke-test artifacts that are safe to ship with the repo or easy to fetch from public sources.
   - Cover the main regression surfaces now exercised only with restricted host-local datasets.
   - Prefer tiny public or explicitly allowable fixtures over protected internal UCSF/Y-sensitive artifacts.

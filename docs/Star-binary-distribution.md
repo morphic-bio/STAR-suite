@@ -152,6 +152,19 @@ Ship discoverable, installable Ubuntu binaries for STAR Suite with low-friction 
   `STAR --version` reports `1.0.1`. Upstream provenance and genome index
   compatibility remain `2.7.11b` and `2.7.4a`.
 
+## Hotfix Release Prep (2026-05-29)
+
+- Candidate tag: `v1.0.2`
+- Release notes: `docs/RELEASE_NOTES_v1.0.2.md`
+- Packaging metadata: `debian/changelog` entry `1.0.2-1`
+- Scope added since `v1.0.1`: exact duplicate UMI rows are combined before
+  1MM_CR correction on the non-Flex Solo direct inline-hash bridge collapse
+  path. This prevents duplicate exact UMIs split across worker-local bridge
+  hashes from entering the CR correction routine as independent observations.
+- Version note: release artifacts and Debian packages use STAR Suite `1.0.2`;
+  `STAR --version` reports `1.0.2`. Upstream provenance and genome index
+  compatibility remain `2.7.11b` and `2.7.4a`.
+
 ## Distribution Strategy
 
 Use two channels in parallel:
