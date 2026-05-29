@@ -2,7 +2,7 @@
 // (tagless key [wlCb24][UMI24][geneFull16]) without materializeRGUFromHash() / rGeneUMI.
 //
 // Data flow (no global sort over the full tuple set):
-// 1) Two passes over thread-local + merged hashes: count entries per whitelist CB, then CSR-fill
+// 1) Canonicalize thread-local + merged hashes, count entries per whitelist CB, then CSR-fill
 //    a flat (gene, umi24, count) array with per-CB slices [cbOffsets[i], cbOffsets[i+1]).
 // 2) Per CB: count/scatter into a local buffer grouped by gene (no comparison sort of the slice);
 //    per gene bucket run 1MM_CR via umiArrayCorrect_CR (which sorts UMIs internally).
@@ -72,6 +72,50 @@ bool shouldTraceCollapseBarcode(const ParametersSolo &pSolo, uint32_t wlIdx)
     return debugSet.count(pSolo.cbWLstr[wlIdx]) != 0;
 }
 
+struct BridgeStageDigest {
+    uint64_t records = 0;
+    uint64_t totalCount = 0;
+    uint64_t hashSum = 0;
+    uint64_t hashXor = 0;
+    uint64_t hashSum2 = 0;
+
+    void add(uint64_t h, uint32_t count)
+    {
+        ++records;
+        totalCount += count;
+        hashSum += h;
+        hashXor ^= h;
+        hashSum2 += h * h + 0x9e3779b97f4a7c15ull;
+    }
+
+    void merge(const BridgeStageDigest &other)
+    {
+        records += other.records;
+        totalCount += other.totalCount;
+        hashSum += other.hashSum;
+        hashXor ^= other.hashXor;
+        hashSum2 += other.hashSum2;
+    }
+};
+
+uint64_t bridgeSplitMix64(uint64_t x)
+{
+    x += 0x9e3779b97f4a7c15ull;
+    x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ull;
+    x = (x ^ (x >> 27)) * 0x94d049bb133111ebull;
+    return x ^ (x >> 31);
+}
+
+uint64_t bridgeTupleHash(uint64_t stageTag, uint32_t wlCb, uint32_t gene, uint32_t umi,
+                         uint32_t corr, uint32_t count)
+{
+    uint64_t h = bridgeSplitMix64(stageTag);
+    h ^= bridgeSplitMix64(static_cast<uint64_t>(wlCb) | (static_cast<uint64_t>(gene) << 32));
+    h ^= bridgeSplitMix64(static_cast<uint64_t>(umi) | (static_cast<uint64_t>(corr) << 32));
+    h ^= bridgeSplitMix64(static_cast<uint64_t>(count) | 0xd1b54a32d192ed03ull);
+    return bridgeSplitMix64(h);
+}
+
 std::string formatBridgeGeneCounts(const std::vector<std::pair<uint32_t, uint32_t>> &counts,
                                    const std::vector<uint32_t> &gID)
 {
@@ -107,6 +151,30 @@ struct MgRow {
     uint32_t count;
 };
 
+size_t bridgeHashLiveSize(khash_t(cg_agg) *hash)
+{
+    return hash == nullptr ? 0 : kh_size(hash);
+}
+
+void mergeBridgeHashInto(khash_t(cg_agg) *src, khash_t(cg_agg) *dst)
+{
+    if (src == nullptr || dst == nullptr) {
+        return;
+    }
+    for (khiter_t it = kh_begin(src); it != kh_end(src); ++it) {
+        if (!kh_exist(src, it)) {
+            continue;
+        }
+        int absent = 0;
+        khiter_t dest = kh_put(cg_agg, dst, kh_key(src, it), &absent);
+        if (absent) {
+            kh_val(dst, dest) = kh_val(src, it);
+        } else {
+            kh_val(dst, dest) += kh_val(src, it);
+        }
+    }
+}
+
 // Stable LSB radix on MgRow.corr (uint32). Replaces std::sort for large per-CB mgBuf.
 void radixSortMgRowsByCorr(std::vector<MgRow> &rows)
 {
@@ -136,6 +204,88 @@ void radixSortMgRowsByCorr(std::vector<MgRow> &rows)
     }
     if (!srcIsRows)
         rows.swap(tmp);
+}
+
+void writeBridgeDeterminismDigest(const std::string &path,
+                                  const ParametersSolo &pSolo,
+                                  uint32_t nCB,
+                                  const std::vector<uint32_t> &indCB,
+                                  size_t totalHashSize,
+                                  size_t mergedAmbigHashSize,
+                                  const BridgeStageDigest &preCr,
+                                  const BridgeStageDigest &postCr,
+                                  const BridgeStageDigest &resolved,
+                                  const BridgeStageDigest &finalMatrix,
+                                  const std::vector<BridgeStageDigest> *cbPreCr,
+                                  const std::vector<BridgeStageDigest> *cbPostCr,
+                                  const std::vector<BridgeStageDigest> *cbResolved,
+                                  const std::vector<BridgeStageDigest> *cbFinalMatrix,
+                                  Parameters &P)
+{
+    std::ofstream out(path.c_str());
+    if (!out.good()) {
+        ostringstream errOut;
+        errOut << "EXITING because of fatal OUTPUT FILE error: could not open STAR_SOLO_BRIDGE_DETERMINISM_OUT="
+               << path << "\n";
+        exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
+    }
+
+    out << "# total_hash_entries=" << totalHashSize << "\n";
+    out << "# merged_ambiguous_hash_entries=" << mergedAmbigHashSize << "\n";
+    out << "# nCB=" << nCB << "\n";
+    out << "stage\trecords\ttotal_count\thash_sum\thash_xor\thash_sum2\n";
+    auto emit = [&](const char *stage, const BridgeStageDigest &d) {
+        out << stage << '\t'
+            << d.records << '\t'
+            << d.totalCount << '\t'
+            << d.hashSum << '\t'
+            << d.hashXor << '\t'
+            << d.hashSum2 << '\n';
+    };
+    emit("pre_cr_exact", preCr);
+    emit("post_cr", postCr);
+    emit("resolved_umi_gene", resolved);
+    emit("final_gene_count", finalMatrix);
+    out.close();
+
+    if (cbPreCr == nullptr || cbPostCr == nullptr || cbResolved == nullptr || cbFinalMatrix == nullptr) {
+        return;
+    }
+
+    const std::string cbPath = path + ".cb.tsv";
+    std::ofstream cbOut(cbPath.c_str());
+    if (!cbOut.good()) {
+        ostringstream errOut;
+        errOut << "EXITING because of fatal OUTPUT FILE error: could not open bridge per-CB digest file="
+               << cbPath << "\n";
+        exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
+    }
+    cbOut << "stage\tiCB\twl_cb\tbarcode\trecords\ttotal_count\thash_sum\thash_xor\thash_sum2\n";
+    auto emitCb = [&](const char *stage, const std::vector<BridgeStageDigest> &digests) {
+        for (uint32_t iCB = 0; iCB < nCB; ++iCB) {
+            const BridgeStageDigest &d = digests[iCB];
+            if (d.records == 0) {
+                continue;
+            }
+            const uint32_t wlCb = indCB[iCB];
+            cbOut << stage << '\t'
+                  << iCB << '\t'
+                  << wlCb << '\t';
+            if (wlCb < pSolo.cbWLstr.size()) {
+                cbOut << pSolo.cbWLstr[wlCb];
+            }
+            cbOut << '\t'
+                  << d.records << '\t'
+                  << d.totalCount << '\t'
+                  << d.hashSum << '\t'
+                  << d.hashXor << '\t'
+                  << d.hashSum2 << '\n';
+        }
+    };
+    emitCb("pre_cr_exact", *cbPreCr);
+    emitCb("post_cr", *cbPostCr);
+    emitCb("resolved_umi_gene", *cbResolved);
+    emitCb("final_gene_count", *cbFinalMatrix);
 }
 
 } // namespace
@@ -213,19 +363,39 @@ void SoloFeature::collapseUMIall_fromBridgeHash()
         return;
     }
 
-    size_t totalHashSize = 0;
+    size_t rawThreadHashSize = 0;
     size_t threadHashCount = 0;
     for (int ii = 0; ii < P.runThreadN; ++ii) {
         if (readFeatAll[ii] && readFeatAll[ii]->inlineHash_) {
             const size_t sz = kh_size(readFeatAll[ii]->inlineHash_);
             if (sz > 0) {
-                totalHashSize += sz;
+                rawThreadHashSize += sz;
                 ++threadHashCount;
             }
         }
     }
-    const size_t mergedAmbigHashSize = (readFeatSum->inlineHash_ != nullptr) ? kh_size(readFeatSum->inlineHash_) : 0;
-    totalHashSize += mergedAmbigHashSize;
+    const size_t mergedAmbigHashSize = bridgeHashLiveSize(readFeatSum->inlineHash_);
+    const size_t rawHashSize = rawThreadHashSize + mergedAmbigHashSize;
+
+    if (readFeatSum->inlineHash_ == nullptr) {
+        readFeatSum->inlineHash_ = kh_init(cg_agg);
+    }
+
+    const size_t khMax = static_cast<size_t>(std::numeric_limits<khint_t>::max());
+    const size_t resizeTarget = rawHashSize > (khMax - 1) / 2 ? khMax : rawHashSize * 2 + 1;
+    if (resizeTarget > 0) {
+        kh_resize(cg_agg, readFeatSum->inlineHash_, static_cast<khint_t>(resizeTarget));
+    }
+    for (int ii = 0; ii < P.runThreadN; ++ii) {
+        if (readFeatAll[ii] && readFeatAll[ii]->inlineHash_) {
+            mergeBridgeHashInto(readFeatAll[ii]->inlineHash_, readFeatSum->inlineHash_);
+            kh_destroy(cg_agg, readFeatAll[ii]->inlineHash_);
+            readFeatAll[ii]->inlineHash_ = nullptr;
+        }
+    }
+
+    const size_t totalHashSize = bridgeHashLiveSize(readFeatSum->inlineHash_);
+    const size_t coalescedHashEntries = rawHashSize >= totalHashSize ? rawHashSize - totalHashSize : 0;
 
     if (totalHashSize == 0) {
         P.inOut->logMain << "WARNING: collapseUMIall_fromBridgeHash: no thread-local or merged bridge hash entries"
@@ -245,16 +415,24 @@ void SoloFeature::collapseUMIall_fromBridgeHash()
     time_t rawTime;
     time(&rawTime);
     P.inOut->logMain << timeMonthDayTime(rawTime)
-                     << " ... Direct bridge-hash UMI collapse (CSR + flat MultiGene; no global tuple sort), hash_entries="
+                     << " ... Direct bridge-hash UMI collapse (canonical hash + CSR + flat MultiGene), hash_entries="
                      << totalHashSize
-                     << " thread_hashes=" << threadHashCount
+                     << " raw_thread_hashes=" << threadHashCount
+                     << " raw_thread_hash_entries=" << rawThreadHashSize
                      << " merged_ambiguous_hash_entries=" << mergedAmbigHashSize
+                     << " coalesced_hash_entries=" << coalescedHashEntries
                      << endl;
 
     if (const char *snapPath = std::getenv("STAR_SOLO_BRIDGE_HASH_SNAPSHOT_OUT")) {
         if (snapPath[0] != '\0')
             bridgeHashSnapshotWrite(snapPath);
     }
+
+    const char *determinismPathEnv = std::getenv("STAR_SOLO_BRIDGE_DETERMINISM_OUT");
+    const bool bridgeDeterminismTrace = determinismPathEnv != nullptr && determinismPathEnv[0] != '\0';
+    const std::string bridgeDeterminismPath = bridgeDeterminismTrace ? determinismPathEnv : "";
+    const bool bridgeDeterminismPerCb = bridgeDeterminismTrace
+        && std::getenv("STAR_SOLO_BRIDGE_DETERMINISM_CB") != nullptr;
 
     khash_t(cbcount) *cbEntryCount = kh_init(cbcount);
     kh_resize(cbcount, cbEntryCount, std::min<size_t>(totalHashSize / 8 + 64, size_t{1} << 20));
@@ -447,6 +625,10 @@ void SoloFeature::collapseUMIall_fromBridgeHash()
         std::vector<size_t> gBeg;
         std::vector<size_t> gEnd;
         std::vector<SoloHDMoleculeRecord> hdRecords;
+        BridgeStageDigest detPreCr;
+        BridgeStageDigest detPostCr;
+        BridgeStageDigest detResolved;
+        BridgeStageDigest detFinalMatrix;
 
         ThreadScratch()
             : stampVer(1),
@@ -467,6 +649,16 @@ void SoloFeature::collapseUMIall_fromBridgeHash()
 
     std::vector<uint32_t> cbRowCounts(nCB, 0);
     std::vector<std::vector<uint32_t>> cbRows(nCB);
+    std::vector<BridgeStageDigest> cbDetPreCr;
+    std::vector<BridgeStageDigest> cbDetPostCr;
+    std::vector<BridgeStageDigest> cbDetResolved;
+    std::vector<BridgeStageDigest> cbDetFinalMatrix;
+    if (bridgeDeterminismPerCb) {
+        cbDetPreCr.resize(nCB);
+        cbDetPostCr.resize(nCB);
+        cbDetResolved.resize(nCB);
+        cbDetFinalMatrix.resize(nCB);
+    }
     const int collapseThreads = std::max(1, P.runThreadN);
     std::vector<ThreadScratch> scratch(static_cast<size_t>(collapseThreads));
 
@@ -476,6 +668,7 @@ void SoloFeature::collapseUMIall_fromBridgeHash()
 
         #pragma omp for schedule(dynamic, 16)
         for (uint32_t iCB = 0; iCB < nCB; ++iCB) {
+            const uint32_t wlCb = indCB[iCB];
             const size_t cbBeg = cbOffsets[iCB];
             const size_t cbEnd = cbOffsets[iCB + 1];
             const size_t sliceLen = cbEnd - cbBeg;
@@ -580,6 +773,7 @@ void SoloFeature::collapseUMIall_fromBridgeHash()
             ts.mgBuf.reserve(sliceLen);
 
             for (uint32_t iG = 0; iG < nGenes; ++iG) {
+                const uint32_t geneId = ts.gID[iG];
                 const size_t a = ts.gBeg[iG];
                 const size_t b = ts.gEnd[iG];
                 if (b == a)
@@ -604,12 +798,20 @@ void SoloFeature::collapseUMIall_fromBridgeHash()
                     if (count > std::numeric_limits<uint32_t>::max()) {
                         ostringstream errOut;
                         errOut << "EXITING because of fatal ERROR: bridge exact UMI count overflow for CB "
-                               << iCB << ", gene " << ts.gID[iG] << ".\n";
+                               << iCB << ", gene " << geneId << ".\n";
                         exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_INCONSISTENT_DATA, P);
                     }
+                    const uint32_t count32 = static_cast<uint32_t>(count);
                     ts.umiArray[static_cast<size_t>(nU0) * umiArrayStride + 0] = umi24;
-                    ts.umiArray[static_cast<size_t>(nU0) * umiArrayStride + 1] = static_cast<uint32_t>(count);
+                    ts.umiArray[static_cast<size_t>(nU0) * umiArrayStride + 1] = count32;
                     ts.umiArray[static_cast<size_t>(nU0) * umiArrayStride + 2] = static_cast<uint32_t>(-1);
+                    if (bridgeDeterminismTrace) {
+                        const uint64_t h = bridgeTupleHash(0x50524543525f4558ull, wlCb, geneId, umi24, 0, count32);
+                        ts.detPreCr.add(h, count32);
+                        if (bridgeDeterminismPerCb) {
+                            cbDetPreCr[iCB].add(h, count32);
+                        }
+                    }
                     ++nU0;
                 }
 
@@ -621,6 +823,14 @@ void SoloFeature::collapseUMIall_fromBridgeHash()
                     row.corr = ts.umiArray[iu + 2];
                     row.geneIdx = iG;
                     row.count = ts.umiArray[iu + 1];
+                    if (bridgeDeterminismTrace) {
+                        const uint64_t h = bridgeTupleHash(0x504f53545f43525full, wlCb, geneId,
+                                                           row.orig, row.corr, row.count);
+                        ts.detPostCr.add(h, row.count);
+                        if (bridgeDeterminismPerCb) {
+                            cbDetPostCr[iCB].add(h, row.count);
+                        }
+                    }
                     ts.mgBuf.push_back(row);
                 }
             }
@@ -714,12 +924,20 @@ void SoloFeature::collapseUMIall_fromBridgeHash()
                 }
 
                 if (maxg + 1u != 0u) {
+                    const uint32_t chosenGene = ts.gID[maxg];
+                    if (bridgeDeterminismTrace) {
+                        const uint64_t h = bridgeTupleHash(0x5245534f4c564544ull, wlCb, chosenGene, cu, cu, 1);
+                        ts.detResolved.add(h, 1);
+                        if (bridgeDeterminismPerCb) {
+                            cbDetResolved[iCB].add(h, 1);
+                        }
+                    }
                     ts.geneCounts[maxg]++;
                     if (hdMoleculeOut) {
                         SoloHDMoleculeRecord record;
                         record.row2 = hdRow2[iCB];
                         record.col2 = hdCol2[iCB];
-                        record.featureIdx = ts.gID[maxg];
+                        record.featureIdx = chosenGene;
                         record.umiLength = static_cast<uint16_t>(pSolo.umiL);
                         record.flags = 0;
                         if (!SoloHDMoleculeWriter::packStarUmi(
@@ -753,6 +971,14 @@ void SoloFeature::collapseUMIall_fromBridgeHash()
                     continue;
                 nGenePerCB[iCB]++;
                 nUMIperCB[iCB] += ts.geneCounts[ig];
+                if (bridgeDeterminismTrace) {
+                    const uint64_t h = bridgeTupleHash(0x46494e414c4d4154ull, wlCb, ts.gID[ig],
+                                                       0, 0, ts.geneCounts[ig]);
+                    ts.detFinalMatrix.add(h, ts.geneCounts[ig]);
+                    if (bridgeDeterminismPerCb) {
+                        cbDetFinalMatrix[iCB].add(h, ts.geneCounts[ig]);
+                    }
+                }
                 rows.push_back(ts.gID[ig]);
                 rows.push_back(ts.geneCounts[ig]);
             }
@@ -790,10 +1016,20 @@ void SoloFeature::collapseUMIall_fromBridgeHash()
     }
 
     size_t nCbGeneSeg = 0;
+    BridgeStageDigest detPreCr;
+    BridgeStageDigest detPostCr;
+    BridgeStageDigest detResolved;
+    BridgeStageDigest detFinalMatrix;
     for (const ThreadScratch &ts : scratch) {
         nCbGeneSeg += ts.nCbGeneSegT;
         if (ts.nReadPerCBmaxT > nReadPerCBmax)
             nReadPerCBmax = ts.nReadPerCBmaxT;
+        if (bridgeDeterminismTrace) {
+            detPreCr.merge(ts.detPreCr);
+            detPostCr.merge(ts.detPostCr);
+            detResolved.merge(ts.detResolved);
+            detFinalMatrix.merge(ts.detFinalMatrix);
+        }
     }
 
     {
@@ -815,6 +1051,25 @@ void SoloFeature::collapseUMIall_fromBridgeHash()
         if (!rows.empty())
             std::copy(rows.begin(), rows.end(), countCellGeneUMI.begin() + countCellGeneUMIindex[iCB]);
         std::vector<uint32_t>().swap(cbRows[iCB]);
+    }
+
+    if (bridgeDeterminismTrace) {
+        writeBridgeDeterminismDigest(bridgeDeterminismPath,
+                                     pSolo,
+                                     nCB,
+                                     indCB,
+                                     totalHashSize,
+                                     mergedAmbigHashSize,
+                                     detPreCr,
+                                     detPostCr,
+                                     detResolved,
+                                     detFinalMatrix,
+                                     bridgeDeterminismPerCb ? &cbDetPreCr : nullptr,
+                                     bridgeDeterminismPerCb ? &cbDetPostCr : nullptr,
+                                     bridgeDeterminismPerCb ? &cbDetResolved : nullptr,
+                                     bridgeDeterminismPerCb ? &cbDetFinalMatrix : nullptr,
+                                     P);
+        P.inOut->logMain << "Wrote bridge determinism digest: " << bridgeDeterminismPath << endl;
     }
 
     time(&rawTime);

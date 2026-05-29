@@ -154,6 +154,17 @@ Ship discoverable, installable Ubuntu binaries for STAR Suite with low-friction 
 
 ## Hotfix Release Prep (2026-05-29)
 
+- Candidate tag: `v1.0.3`
+- Release notes: `docs/RELEASE_NOTES_v1.0.3.md`
+- Packaging metadata: `debian/changelog` entry `1.0.3-1`
+- Scope added since `v1.0.2`: non-Flex Solo bridge determinism is hardened by
+  canonicalizing worker-local bridge hashes before collapse, aggregating
+  ambiguous cell-barcode evidence deterministically, and using the resolved
+  bridge result for read-accounting statistics.
+- Version note: release artifacts and Debian packages use STAR Suite `1.0.3`;
+  `STAR --version` reports `1.0.3`. Upstream provenance and genome index
+  compatibility remain `2.7.11b` and `2.7.4a`.
+
 - Candidate tag: `v1.0.2`
 - Release notes: `docs/RELEASE_NOTES_v1.0.2.md`
 - Packaging metadata: `debian/changelog` entry `1.0.2-1`

@@ -399,7 +399,15 @@ void SoloFeature::resolvePendingAmbiguousToHash(bool useBridgeCompactMapping)
             continue;
         }
 
-        CBContext context(entry.cbSeq, entry.cbQual);
+        CBContext context = (entry.cbEvidenceReads > 0
+                             && entry.cbLogLikMatch.size() == entry.cbSeq.size()
+                             && entry.cbLogLikMismatch.size() == entry.cbSeq.size())
+            ? CBContext(entry.cbSeq,
+                        entry.cbQual,
+                        entry.cbLogLikMatch,
+                        entry.cbLogLikMismatch,
+                        entry.cbEvidenceReads)
+            : CBContext(entry.cbSeq, entry.cbQual);
 
         std::vector<Candidate> candidates;
         candidates.reserve(entry.candidateIdx.size());

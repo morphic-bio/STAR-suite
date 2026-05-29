@@ -10,6 +10,8 @@
 #include "SoloBinarySpool.h"
 #include "SoloReadFeature_record_shared.h"
 #include "ErrorWarning.h"
+#include "solo/CbBayesianResolver.h"
+#include <algorithm>
 #include <unordered_set>
 #include <sstream>
 #include <string>
@@ -43,6 +45,68 @@ int64_t bridgeCbQualTotalScoreLocal(const std::string &qual, char qsBase, uint32
         s += v;
     }
     return s;
+}
+
+template <typename T>
+bool bridgeVectorLessLocal(const std::vector<T> &lhs, const std::vector<T> &rhs)
+{
+    return std::lexicographical_compare(lhs.begin(), lhs.end(), rhs.begin(), rhs.end());
+}
+
+bool bridgeRepresentativeBetterLocal(const std::string &newSeq,
+                                     const std::string &newQual,
+                                     const std::vector<uint8_t> &newPinCandQuals,
+                                     const std::vector<uint32_t> &newCandidateIdx,
+                                     const std::string &oldSeq,
+                                     const std::string &oldQual,
+                                     const std::vector<uint8_t> &oldPinCandQuals,
+                                     const std::vector<uint32_t> &oldCandidateIdx,
+                                     char qsBase,
+                                     uint32_t qsMax)
+{
+    const int64_t oldScore = bridgeCbQualTotalScoreLocal(oldQual, qsBase, qsMax);
+    const int64_t newScore = bridgeCbQualTotalScoreLocal(newQual, qsBase, qsMax);
+    if (newScore != oldScore) {
+        return newScore > oldScore;
+    }
+    if (newQual != oldQual) {
+        return newQual < oldQual;
+    }
+    if (newSeq != oldSeq) {
+        return newSeq < oldSeq;
+    }
+    if (newPinCandQuals.empty() != oldPinCandQuals.empty()) {
+        return !newPinCandQuals.empty();
+    }
+    if (newPinCandQuals != oldPinCandQuals) {
+        return bridgeVectorLessLocal(newPinCandQuals, oldPinCandQuals);
+    }
+    return bridgeVectorLessLocal(newCandidateIdx, oldCandidateIdx);
+}
+
+bool bridgeSampleFlagBetterLocal(bool oldHave,
+                                 SoloReadFlagClass::typeFlag oldFlag,
+                                 bool newHave,
+                                 SoloReadFlagClass::typeFlag newFlag)
+{
+    return newHave && (!oldHave || newFlag < oldFlag);
+}
+
+void bridgeMergePinCandQualsMaxLocal(std::vector<uint8_t> &dst,
+                                     const std::vector<uint8_t> &src,
+                                     char qsBase)
+{
+    if (src.empty()) {
+        return;
+    }
+    if (dst.size() < src.size()) {
+        dst.resize(src.size(), static_cast<uint8_t>(qsBase));
+    }
+    for (size_t ii = 0; ii < src.size(); ++ii) {
+        if (src[ii] > dst[ii]) {
+            dst[ii] = src[ii];
+        }
+    }
 }
 
 void ensureBridgeAmbigEntryBase(SoloReadFeature *soloReadFeat, const SoloReadBarcode &soloBar)
@@ -87,17 +151,25 @@ void maybeUpgradeBridgeAmbigRepresentativeQual(SoloReadFeature::ExtendedAmbiguou
             newQual = newQual.substr(0, soloBar.cbSeq.length());
         }
     }
-    const int64_t oldScore = bridgeCbQualTotalScoreLocal(entry.cbQual, qsBase, qsMax);
-    const int64_t newScore = bridgeCbQualTotalScoreLocal(newQual, qsBase, qsMax);
-    if (newScore > oldScore || (newScore == oldScore && newQual < entry.cbQual)) {
+    const uint32_t kCand = static_cast<uint32_t>(entry.candidateIdx.size());
+    const std::vector<uint8_t> quals = bridgeCandidateQuals(soloBar);
+    std::vector<uint8_t> normalizedQuals(kCand, static_cast<uint8_t>(qsBase));
+    for (uint32_t ii = 0; ii < kCand && ii < quals.size(); ++ii) {
+        normalizedQuals[ii] = quals[ii];
+    }
+    bridgeMergePinCandQualsMaxLocal(entry.bridgeAmbigPinCandQuals_, normalizedQuals, qsBase);
+    if (bridgeRepresentativeBetterLocal(soloBar.cbSeq,
+                                        newQual,
+                                        normalizedQuals,
+                                        entry.candidateIdx,
+                                        entry.cbSeq,
+                                        entry.cbQual,
+                                        entry.bridgeAmbigPinCandQuals_,
+                                        entry.candidateIdx,
+                                        qsBase,
+                                        qsMax)) {
         entry.cbQual = std::move(newQual);
         entry.cbSeq = soloBar.cbSeq;
-        const uint32_t kCand = static_cast<uint32_t>(entry.candidateIdx.size());
-        const std::vector<uint8_t> quals = bridgeCandidateQuals(soloBar);
-        entry.bridgeAmbigPinCandQuals_.resize(kCand);
-        for (uint32_t ii = 0; ii < kCand; ++ii) {
-            entry.bridgeAmbigPinCandQuals_[ii] = ii < quals.size() ? quals[ii] : static_cast<uint8_t>(qsBase);
-        }
     }
 }
 
@@ -114,17 +186,25 @@ void maybeUpgradeBridgeAmbigOrphanQual(SoloReadFeature::BridgeAmbigReadInfoOrpha
             newQual = newQual.substr(0, soloBar.cbSeq.length());
         }
     }
-    const int64_t oldScore = bridgeCbQualTotalScoreLocal(orph.cbQual, qsBase, qsMax);
-    const int64_t newScore = bridgeCbQualTotalScoreLocal(newQual, qsBase, qsMax);
-    if (newScore > oldScore || (newScore == oldScore && newQual < orph.cbQual)) {
+    const uint32_t kCand = static_cast<uint32_t>(orph.candidateIdx.size());
+    const std::vector<uint8_t> quals = bridgeCandidateQuals(soloBar);
+    std::vector<uint8_t> normalizedQuals(kCand, static_cast<uint8_t>(qsBase));
+    for (uint32_t ii = 0; ii < kCand && ii < quals.size(); ++ii) {
+        normalizedQuals[ii] = quals[ii];
+    }
+    bridgeMergePinCandQualsMaxLocal(orph.pinCandQuals_, normalizedQuals, qsBase);
+    if (bridgeRepresentativeBetterLocal(soloBar.cbSeq,
+                                        newQual,
+                                        normalizedQuals,
+                                        orph.candidateIdx,
+                                        orph.cbSeq,
+                                        orph.cbQual,
+                                        orph.pinCandQuals_,
+                                        orph.candidateIdx,
+                                        qsBase,
+                                        qsMax)) {
         orph.cbQual = std::move(newQual);
         orph.cbSeq = soloBar.cbSeq;
-        const uint32_t kCand = static_cast<uint32_t>(orph.candidateIdx.size());
-        const std::vector<uint8_t> quals = bridgeCandidateQuals(soloBar);
-        orph.pinCandQuals_.resize(kCand);
-        for (uint32_t ii = 0; ii < kCand; ++ii) {
-            orph.pinCandQuals_[ii] = ii < quals.size() ? quals[ii] : static_cast<uint8_t>(qsBase);
-        }
     }
 }
 
@@ -144,13 +224,19 @@ void accumulateBridgeAmbigGeneAggregates(SoloReadFeature *soloReadFeat,
     auto &entry = it->second;
     if (multiFeature) {
         entry.bridgeAmbigGeneFeatM_++;
-        if (!entry.bridgeAmbigGeneHaveSampleM_) {
+        if (bridgeSampleFlagBetterLocal(entry.bridgeAmbigGeneHaveSampleM_,
+                                        entry.bridgeAmbigGeneSampleFlagM_,
+                                        true,
+                                        readFlag.flag)) {
             entry.bridgeAmbigGeneSampleFlagM_ = readFlag.flag;
             entry.bridgeAmbigGeneHaveSampleM_ = true;
         }
     } else {
         entry.bridgeAmbigGeneFeatU_++;
-        if (!entry.bridgeAmbigGeneHaveSampleU_) {
+        if (bridgeSampleFlagBetterLocal(entry.bridgeAmbigGeneHaveSampleU_,
+                                        entry.bridgeAmbigGeneSampleFlagU_,
+                                        true,
+                                        readFlag.flag)) {
             entry.bridgeAmbigGeneSampleFlagU_ = readFlag.flag;
             entry.bridgeAmbigGeneHaveSampleU_ = true;
         }
@@ -170,7 +256,10 @@ void accumulateBridgeAmbigReadInfoAggregates(SoloReadFeature *soloReadFeat,
         auto &entry = pit->second;
         maybeUpgradeBridgeAmbigRepresentativeQual(entry, soloBar, soloBar.pSolo.QSbase, soloBar.pSolo.QSmax);
         entry.bridgeAmbigReadInfoN_++;
-        if (!entry.bridgeAmbigReadInfoHaveSample_) {
+        if (bridgeSampleFlagBetterLocal(entry.bridgeAmbigReadInfoHaveSample_,
+                                        entry.bridgeAmbigReadInfoSampleFlag_,
+                                        true,
+                                        readFlag.flag)) {
             entry.bridgeAmbigReadInfoSampleFlag_ = readFlag.flag;
             entry.bridgeAmbigReadInfoHaveSample_ = true;
         }
@@ -202,7 +291,7 @@ void accumulateBridgeAmbigReadInfoAggregates(SoloReadFeature *soloReadFeat,
         maybeUpgradeBridgeAmbigOrphanQual(orph, soloBar, soloBar.pSolo.QSbase, soloBar.pSolo.QSmax);
     }
     orph.readInfoN_++;
-    if (!orph.haveSample_) {
+    if (bridgeSampleFlagBetterLocal(orph.haveSample_, orph.sampleFlag_, true, readFlag.flag)) {
         orph.sampleFlag_ = readFlag.flag;
         orph.haveSample_ = true;
     }
@@ -462,14 +551,38 @@ void accumulateBridgeAmbiguousCB(SoloReadFeature *soloReadFeat,
     ReadAlign::AmbigKey ambigKey = ReadAlign::hashCbSeq(soloBar.cbSeq);
     auto &entry = soloReadFeat->pendingAmbiguous_[ambigKey];
     maybeUpgradeBridgeAmbigRepresentativeQual(entry, soloBar, soloBar.pSolo.QSbase, soloBar.pSolo.QSmax);
+    cb_bayesian::accumulateCbQualityEvidence(entry.cbSeq,
+                                             soloBar.cbQual,
+                                             entry.cbLogLikMatch,
+                                             entry.cbLogLikMismatch,
+                                             entry.cbEvidenceReads);
 
     auto oit = soloReadFeat->bridgeAmbigReadInfoOrphan_.find(ambigKey);
     if (oit != soloReadFeat->bridgeAmbigReadInfoOrphan_.end()) {
         entry.bridgeAmbigReadInfoN_ += oit->second.readInfoN_;
-        if (!entry.bridgeAmbigReadInfoHaveSample_ && oit->second.haveSample_) {
+        if (bridgeSampleFlagBetterLocal(entry.bridgeAmbigReadInfoHaveSample_,
+                                        entry.bridgeAmbigReadInfoSampleFlag_,
+                                        oit->second.haveSample_,
+                                        oit->second.sampleFlag_)) {
             entry.bridgeAmbigReadInfoSampleFlag_ = oit->second.sampleFlag_;
             entry.bridgeAmbigReadInfoHaveSample_ = true;
         }
+        if (bridgeRepresentativeBetterLocal(oit->second.cbSeq,
+                                            oit->second.cbQual,
+                                            oit->second.pinCandQuals_,
+                                            oit->second.candidateIdx,
+                                            entry.cbSeq,
+                                            entry.cbQual,
+                                            entry.bridgeAmbigPinCandQuals_,
+                                            entry.candidateIdx,
+                                            soloBar.pSolo.QSbase,
+                                            soloBar.pSolo.QSmax)) {
+            entry.cbSeq = oit->second.cbSeq;
+            entry.cbQual = oit->second.cbQual;
+        }
+        bridgeMergePinCandQualsMaxLocal(entry.bridgeAmbigPinCandQuals_,
+                                        oit->second.pinCandQuals_,
+                                        soloBar.pSolo.QSbase);
         soloReadFeat->bridgeAmbigReadInfoOrphan_.erase(oit);
     }
 
