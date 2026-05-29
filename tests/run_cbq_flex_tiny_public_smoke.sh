@@ -141,6 +141,8 @@ grep -F "cbq_file=${CBQ_FILE}" "${CBQ_RUN}/RUN_MANIFEST.txt" >/dev/null || die "
 grep -E "readFilesType[[:space:]]+Binseq[[:space:]]+PE" \
   "${CBQ_RUN}/Log.out" >/dev/null || die "CBQ log missing Binseq PE input type"
 grep -F -- "--flex yes" "${CBQ_RUN}/Log.out" >/dev/null || die "CBQ log missing Flex mode"
+grep -F "Flex pipeline: not active (CBQ/Binseq input uses the standard STAR CBQ adapter path)" \
+  "${CBQ_RUN}/Log.out" >/dev/null || die "CBQ log missing FlexPipeline CBQ guard"
 
 cmp -s "${FASTQ_RUN}/Solo.out/Barcodes.stats" "${CBQ_RUN}/Solo.out/Barcodes.stats" || {
   diff -u "${FASTQ_RUN}/Solo.out/Barcodes.stats" "${CBQ_RUN}/Solo.out/Barcodes.stats" >&2 || true

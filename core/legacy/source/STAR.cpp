@@ -111,6 +111,15 @@ bool isUnsetToken(const std::string& input) {
     return t.empty() || t == "-" || t == "none";
 }
 
+bool flexNoGenomeCountOnlyRequested(const Parameters& P) {
+    return P.runMode == "alignReads" &&
+           P.pSolo.flexMode &&
+           P.pSolo.flexNoAlign != 0 &&
+           P.pSolo.flexPipelineStr != "no" &&
+           !P.outSAMtype.empty() &&
+           P.outSAMtype[0] == "None";
+}
+
 std::string normalizePathNoTrailingSlash(const std::string& input) {
     std::string out = trimCopy(input);
     while (!out.empty() && out.back() == '/') {
@@ -494,6 +503,34 @@ int main(int argInN, char *argIn[])
         runCountingSinkStress(P);
         P.cleanupParInfoForExit();
         exit(0);
+    }
+
+    std::string flexNoGenomeReason;
+    if (flexNoGenomeCountOnlyActivationGuard(P, &flexNoGenomeReason)) {
+        P.inOut->logMain << "Flex count-only no-genome: active\n" << flush;
+        runFlexNoGenomeCountOnly(P);
+
+        g_statsAll.progressReport(P.inOut->logProgress);
+        P.inOut->logProgress << "ALL DONE!\n" << flush;
+        P.inOut->logFinal.open((P.outFileNamePrefix + "Log.final.out").c_str());
+        g_statsAll.reportFinal(P.inOut->logFinal);
+        *P.inOut->logStdOut << timeMonthDayTime(g_statsAll.timeFinish) << " ..... finished successfully\n"
+                            << flush;
+
+        P.inOut->logMain << "ALL DONE!\n" << flush;
+        if (P.outTmpKeep == "None") {
+            sysRemoveDir(P.outFileTmp);
+        }
+
+        P.closeReadsFiles();
+        P.cleanupParInfoForExit();
+        delete P.inOut;
+        return 0;
+    }
+    if (flexNoGenomeCountOnlyRequested(P)) {
+        P.inOut->logMain << "Flex count-only no-genome: not active ("
+                         << (flexNoGenomeReason.empty() ? "strict predicate rejected command" : flexNoGenomeReason)
+                         << ")\n" << flush;
     }
 
     ////////////////////////////////////////////////////////////////////////
