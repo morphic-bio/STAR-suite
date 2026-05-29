@@ -49,6 +49,17 @@ STAR --readFilesType Binseq SE --readFilesIn sample.cbq ...
   smoke on a synthetic feature-barcode fixture with valid nucleotide UMIs. This
   currently exercises the harness/API surface; the production PF CLI flag is
   still pending.
+- FLEX CBQ input uses the standard STAR CBQ adapter path for general
+  genome-backed runs. Fully fused count-only FlexPipeline runs
+  (`--flexPipelineNTriage 0 --flexPipelineNSolo 0 --flexNoAlign 1`) use the
+  CBQ-native lane producer. `tests/run_cbq_flex_tiny_public_smoke.sh` covers
+  FASTQ-vs-CBQ parity on a generated public tiny FLEX fixture; the host-local
+  SC2300771 100K FLEX downsample also passed count parity and order-normalized
+  BAM payload parity.
+- FLEX count-only no-genome production is the first full-size topline CBQ use
+  case. On SC2300771, level-0 CBQ no-genome completed in `8:38.52` versus
+  FASTQ.gz no-genome in `12:01.95`, with byte-identical `Solo.out/Gene`,
+  `Barcodes.stats`, and `per_sample_filtered` outputs.
 - Chromap CBQ input is covered by a CBQ-to-Chromap-FASTQ adapter smoke and, on
   hosts with Chromap available, a tiny synthetic mapping run.
 - `tests/run_cbq_e2e_module_regression.sh` runs the downsampled CBQ module
@@ -62,9 +73,11 @@ STAR --readFilesType Binseq SE --readFilesIn sample.cbq ...
 
 ## Experimental Limitations
 
-- Flex and SLAM production workflows, native Chromap in-memory integration, and
-  large production alignment outputs have not been validated directly from
-  BINSEQ input.
+- SLAM production workflows, native Chromap in-memory integration, and large
+  production alignment outputs have not been validated directly from BINSEQ
+  input. FLEX has full-size production count-only no-genome parity/timing, but
+  genome-backed FLEX alignment and BAM/SAM output surfaces still need separate
+  full-size validation.
 - Chromap integration currently adapts CBQ to Chromap's existing FASTQ path
   contract; it is not yet an in-memory libchromap reader API.
 - SLAM per-file skipping is currently rejected for BINSEQ input.
@@ -90,6 +103,14 @@ C++ reader reads CBQ directly, emits a CBQ-native batch view, and fills
 STAR-style internal read buffers through the adapter used by the production
 mapper path. This avoids decode-to-FASTQ in the STAR run while preserving the
 optimized FASTQ path unchanged.
+
+For FLEX count-only production runs, CBQ is now a validated performance path.
+With the strict no-genome FLEX surface, both FASTQ.gz and level-0 CBQ avoid STAR
+genome loading and produce byte-identical counts. On the full SC2300771
+production run, CBQ completed in `8:38.52` while FASTQ.gz completed in
+`12:01.95`, with essentially identical peak RSS (`43.4 GB` vs `43.3 GB`). The
+remaining speedup is attributable to avoiding gzip FASTQ decode and using the
+native CBQ lane reader for the same Flex hash/count workload.
 
 ## Production Implementation Direction
 
@@ -188,6 +209,18 @@ Downsampled CBQ E2E/module regression suite:
 
 ```bash
 BQTOOLS=/path/to/bqtools tests/run_cbq_e2e_module_regression.sh
+```
+
+Include network/public-fixture CBQ smokes, including FLEX tiny public:
+
+```bash
+RUN_NETWORK=1 BQTOOLS=/path/to/bqtools tests/run_cbq_e2e_module_regression.sh
+```
+
+FLEX FASTQ-vs-CBQ public tiny smoke only:
+
+```bash
+tests/run_cbq_flex_tiny_public_smoke.sh
 ```
 
 Upstream ARC paired-CBQ fixture smoke:
