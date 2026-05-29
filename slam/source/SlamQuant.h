@@ -292,6 +292,7 @@ public:
                              double weight, bool primaryFlag, int mapq);
 
     const std::vector<SlamGeneStats>& genes() const { return geneStats_; }
+    const std::vector<uint8_t>& allowedGenes() const { return allowedGenes_; }
     SlamDiagnostics& diagnostics() { return diag_; }
     const SlamDiagnostics& diagnostics() const { return diag_; }
 
