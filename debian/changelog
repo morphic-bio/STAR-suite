@@ -1,3 +1,13 @@
+star-suite (1.0.2-1) unstable; urgency=medium
+
+  * Hotfix non-Flex Solo direct bridge UMI collapse to combine exact duplicate
+    UMI rows before 1MM_CR correction.
+  * Book production repeat-run Solo matrix determinism regression coverage for
+    the direct inline-hash bridge path.
+  * Report STAR Suite 1.0.2 from STAR --version.
+
+ -- STAR-suite Maintainers <maintainers@biodepot.example>  Fri, 29 May 2026 05:50:34 +0000
+
 star-suite (1.0.1-1) unstable; urgency=medium
 
   * Hotfix process_features CR-compatible feature bootstrap determinism when
