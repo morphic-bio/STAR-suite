@@ -49,6 +49,17 @@ This file tracks active top-level work only. Completed items and stale historica
     production input module.
   - BINSEQ or other future input formats need explicit Y-removal support and
     smoke coverage before the gate is relaxed.
+- Reduce the process_features decoded-record interface surface after the
+  production PF CBQ input gate lands.
+  - CBQ is the immediate driver, but this is a general PF input architecture
+    cleanup. The shared CBQ reader keeps STAR-facing sequence packed; the PF
+    adapter still materializes bounded in-memory ASCII sequence/quality lines
+    because that matches the existing PF consumer path.
+  - Hide newline synthesis, default-quality handling, and record-shape
+    conversion behind a smaller decoded-record adapter. A narrower surface
+    makes all non-FASTQ producers more robust and lets PF change its internal
+    sequence representation without spreading compatibility work across every
+    input module.
 - Optimize JAX OCM GeneFull and Velocyto materialization using the staged plan in [docs/RUNBOOK_SCRNA_OCM_MATERIALIZATION_OPTIMIZATION_20260520.md](/mnt/pikachu/STAR-suite/docs/RUNBOOK_SCRNA_OCM_MATERIALIZATION_OPTIMIZATION_20260520.md).
   - Production should materialize `GeneFull` + Velocyto once, share OCM maps and per-sample cell calls, and skip `Gene` unless a Cell Ranger comparator run explicitly requests it.
   - Replace repeated count/write MatrixMarket scans with a streaming router that writes raw and filtered outputs from the same pass.

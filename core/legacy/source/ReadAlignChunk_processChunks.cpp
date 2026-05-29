@@ -9,8 +9,12 @@
 #include "input/FastxInputModule.h"
 #include "input/CbqStarAdapter.h"
 #include <algorithm>
+#include <array>
 #include <chrono>
+#include <cstdlib>
 #include <cstring>
+#include <fstream>
+#include <pthread.h>
 #include <sstream>
 
 inline uint64 fastqReadOneLine(ifstream &streamIn, char *arrIn);
@@ -27,15 +31,6 @@ bool fastxChunkHasBytes(const ReadAlignChunk& chunk) {
     return false;
 }
 
-uint64 cbqRecordWorkBytes(const star::input::CbqReadView& record) {
-    uint64 bytes = record.read_name.size + record.read_name_extra.size;
-    for (uint32 imate = 0; imate < record.segment_count; ++imate) {
-        bytes += star::input::cbq_segment_sequence_length(record.segments[imate]);
-        bytes += record.segments[imate].quality.size;
-    }
-    return bytes;
-}
-
 bool fastxChunkUnderTarget(const ReadAlignChunk& chunk) {
     for (uint imate = 0; imate < chunk.P.readNends; ++imate) {
         if (chunk.chunkInSizeBytesTotal[imate] >= chunk.P.chunkInSizeBytes) {
@@ -43,6 +38,15 @@ bool fastxChunkUnderTarget(const ReadAlignChunk& chunk) {
         }
     }
     return true;
+}
+
+uint64 decimalDigitCount(uint64 value) {
+    uint64 digits = 1;
+    while (value >= 10) {
+        value /= 10;
+        ++digits;
+    }
+    return digits;
 }
 
 string fastxHeaderLine(const Parameters& P,
@@ -71,6 +75,133 @@ uint64 fastxMateChunkBytes(const Parameters& P,
         nBytes += mate.quality.size() + 1;
     }
     return nBytes;
+}
+
+uint64 cbqFastqHeaderLineBytes(const Parameters& P,
+                               const star::input::CbqReadView& record,
+                               uint64 ordinal) {
+    const uint64 readNameCoreBytes = P.outSAMreadIDnumber
+        ? decimalDigitCount(ordinal)
+        : static_cast<uint64>(record.read_name.size);
+
+    uint64 bytes = 1; // '@' or '>'
+    bytes += readNameCoreBytes;
+    bytes += 1; // space before ordinal
+    bytes += decimalDigitCount(ordinal);
+    bytes += 1; // space before read filter
+    bytes += 1; // read filter character
+    bytes += 1; // space before lane index
+    bytes += decimalDigitCount(record.lane_index);
+    return bytes;
+}
+
+uint64 cbqMateFastqChunkBytes(const Parameters& P,
+                              const star::input::CbqReadView& record,
+                              uint32 imate,
+                              uint64 ordinal) {
+    const star::input::CbqSegmentView& mate = record.segments[imate];
+    const uint64 sequenceLength =
+        static_cast<uint64>(star::input::cbq_segment_sequence_length(mate));
+
+    uint64 bytes = cbqFastqHeaderLineBytes(P, record, ordinal) + 1; // header newline
+    bytes += sequenceLength + 1; // sequence newline
+    if (mate.has_quality) {
+        bytes += 2; // "+\n"
+        bytes += static_cast<uint64>(mate.quality.size) + 1; // quality newline
+    }
+    return bytes;
+}
+
+const char* inputChunkTracePath() {
+    static const char* path = std::getenv("STAR_INPUT_CHUNK_TRACE");
+    return (path != nullptr && path[0] != '\0') ? path : nullptr;
+}
+
+const char* inputChunkTraceSource(const Parameters& P) {
+    if (P.readFilesTypeN == 20 && P.cbqInputActive) {
+        return "cbq";
+    }
+    if (P.readFilesTypeN == 1 && P.fastxInputActive) {
+        return "fastx";
+    }
+    return "legacy";
+}
+
+void writeInputChunkTrace(const ReadAlignChunk& chunk,
+                          uint64 chunkIndex,
+                          uint64 chunkReadStart,
+                          uint64 chunkReadN,
+                          uint64 chunkWorkBytes,
+                          bool noReadsLeft) {
+    const char* path = inputChunkTracePath();
+    if (path == nullptr) {
+        return;
+    }
+
+    static pthread_mutex_t traceMutex = PTHREAD_MUTEX_INITIALIZER;
+    static bool headerWritten = false;
+
+    pthread_mutex_lock(&traceMutex);
+    std::ofstream out(path, std::ios::app);
+    if (out.good()) {
+        if (!headerWritten) {
+            out << "chunk_index\tthread\tsource\tread_start\tread_end\tread_count"
+                << "\tmate1_bytes\tmate2_bytes\twork_bytes\tread_files_index\tno_reads_left\n";
+            headerWritten = true;
+        }
+        const uint64 readStart = chunkReadN == 0 ? chunkReadStart : chunkReadStart + 1;
+        const uint64 readEnd = chunk.P.iReadAll;
+        const uint64 mate1Bytes = chunk.chunkInSizeBytesTotal[0];
+        const uint64 mate2Bytes = chunk.P.readNends > 1 ? chunk.chunkInSizeBytesTotal[1] : 0;
+        out << chunkIndex << '\t'
+            << chunk.iThread << '\t'
+            << inputChunkTraceSource(chunk.P) << '\t'
+            << readStart << '\t'
+            << readEnd << '\t'
+            << chunkReadN << '\t'
+            << mate1Bytes << '\t'
+            << mate2Bytes << '\t'
+            << chunkWorkBytes << '\t'
+            << chunk.P.readFilesIndex << '\t'
+            << (noReadsLeft ? 1 : 0) << '\n';
+    }
+    pthread_mutex_unlock(&traceMutex);
+}
+
+bool cbqRecordFits(ReadAlignChunk& chunk,
+                   const star::input::CbqReadView& record,
+                   uint64 ordinal,
+                   std::array<uint64, MAX_N_MATES>* mateBytes,
+                   string& errorOut) {
+    if (record.segment_count < chunk.P.readNends || record.segments == nullptr) {
+        errorOut = "CBQ input module returned fewer segments than STAR expects";
+        return false;
+    }
+
+    mateBytes->fill(0);
+    for (uint imate = 0; imate < chunk.P.readNends; ++imate) {
+        const uint64 bytes = cbqMateFastqChunkBytes(chunk.P, record, imate, ordinal);
+        (*mateBytes)[imate] = bytes;
+        if (bytes + 2 >= chunk.P.chunkInSizeBytesArray) {
+            ostringstream err;
+            err << "CBQ record ";
+            if (record.read_name.data != nullptr && record.read_name.size > 0) {
+                err.write(record.read_name.data, static_cast<std::streamsize>(record.read_name.size));
+            } else {
+                err << ordinal;
+            }
+            err << " mate " << (imate + 1)
+                << " requires " << bytes << " FASTQ-equivalent bytes, larger than STAR input chunk buffer "
+                << chunk.P.chunkInSizeBytesArray;
+            errorOut = err.str();
+            return false;
+        }
+        if (chunk.chunkInSizeBytesTotal[imate] + bytes + 2 >= chunk.P.chunkInSizeBytesArray) {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 bool fastxRecordFits(ReadAlignChunk& chunk,
@@ -330,50 +461,87 @@ void ReadAlignChunk::processChunks() {//read-map-write chunks
             const uint64_t chunkReadStart = P.iReadAll;
             
             if (P.readFilesTypeN == 20 && P.cbqInputActive) {
-                while ((cbqChunkReadN == 0 || chunkWorkBytes < P.chunkInSizeBytes) &&
+                while (fastxChunkUnderTarget(*this) &&
                        !P.cbqInputExhausted && P.iReadAll != P.readMapNumber) {
-                    star::input::CbqReadBatchView batch;
-                    string inputError;
-                    const star::input::InputStatus status = P.cbqInputModule->next_batch(&batch, &inputError);
-                    if (status == star::input::InputStatus::Error) {
+                    if (!P.cbqInputPendingBatch ||
+                        P.cbqInputPendingBatchOffset >= P.cbqInputPendingBatch->record_count) {
+                        P.cbqInputPendingBatch.reset();
+                        P.cbqInputPendingBatchOffset = 0;
+
+                        star::input::CbqReadBatchView batch;
+                        string inputError;
+                        const star::input::InputStatus status = P.cbqInputModule->next_batch(&batch, &inputError);
+                        if (status == star::input::InputStatus::Error) {
+                            ostringstream errOut;
+                            errOut << ERROR_OUT << " EXITING because of FATAL ERROR in Binseq/CBQ input module\n"
+                                   << inputError << "\n";
+                            exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_INPUT_FILES, P);
+                        }
+                        if (status == star::input::InputStatus::End) {
+                            P.cbqInputExhausted = true;
+                            break;
+                        }
+                        P.cbqInputPendingBatch.reset(new star::input::CbqReadBatchView(batch));
+                    }
+
+                    star::input::CbqReadBatchView& batch = *P.cbqInputPendingBatch;
+                    P.readFilesIndex = static_cast<int>(batch.lane_index);
+                    if (fastxStopBeforeLane(P, batch.lane_index, detectionStartFileIndex)) {
+                        noReadsLeft = true;
+                        break;
+                    }
+
+                    fastxLogLaneStart(P, batch.lane_index);
+                    const uint32 batchStart = P.cbqInputPendingBatchOffset;
+                    uint32 recordsToCopy = 0;
+                    while (P.cbqInputPendingBatchOffset + recordsToCopy < batch.record_count &&
+                           P.iReadAll != P.readMapNumber &&
+                           fastxChunkUnderTarget(*this)) {
+                        const star::input::CbqReadView& record =
+                            batch.records[P.cbqInputPendingBatchOffset + recordsToCopy];
+                        std::array<uint64, MAX_N_MATES> mateBytes{};
+                        string fitError;
+                        if (!cbqRecordFits(*this, record, P.iReadAll + 1, &mateBytes, fitError)) {
+                            if (!fitError.empty() && cbqChunkReadN == 0 && recordsToCopy == 0) {
+                                ostringstream errOut;
+                                errOut << ERROR_OUT << " EXITING because of FATAL ERROR in Binseq/CBQ STAR chunk accounting\n"
+                                       << fitError << "\n";
+                                exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_INPUT_FILES, P);
+                            }
+                            break;
+                        }
+
+                        ++recordsToCopy;
+                        ++P.iReadAll;
+                        for (uint imate = 0; imate < P.readNends; ++imate) {
+                            chunkInSizeBytesTotal[imate] += mateBytes[imate];
+                            chunkWorkBytes += mateBytes[imate];
+                        }
+                    }
+
+                    if (recordsToCopy == 0) {
+                        break;
+                    }
+
+                    star::input::CbqReadBatchView subBatch = batch;
+                    subBatch.records = batch.records + batchStart;
+                    subBatch.record_count = recordsToCopy;
+                    string adapterError;
+                    if (!star::input::append_cbq_batch_to_star_chunk(subBatch,
+                                                                     recordsToCopy,
+                                                                     P.readNends,
+                                                                     &cbqStarChunk,
+                                                                     &adapterError)) {
                         ostringstream errOut;
-                        errOut << ERROR_OUT << " EXITING because of FATAL ERROR in Binseq/CBQ input module\n"
-                               << inputError << "\n";
+                        errOut << ERROR_OUT << " EXITING because of FATAL ERROR in Binseq/CBQ STAR adapter\n"
+                               << adapterError << "\n";
                         exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_INPUT_FILES, P);
                     }
-                    if (status == star::input::InputStatus::End) {
-                        P.cbqInputExhausted = true;
-                        break;
-                    } else {
-                        P.readFilesIndex = static_cast<int>(batch.lane_index);
-                        if (fastxStopBeforeLane(P, batch.lane_index, detectionStartFileIndex)) {
-                            noReadsLeft = true;
-                            break;
-                        } else {
-                            fastxLogLaneStart(P, batch.lane_index);
-                            uint32 recordsToCopy = 0;
-                            while (recordsToCopy < batch.record_count && P.iReadAll != P.readMapNumber) {
-                                ++recordsToCopy;
-                                ++P.iReadAll;
-                            }
-                            if (recordsToCopy > 0) {
-                                string adapterError;
-                                if (!star::input::append_cbq_batch_to_star_chunk(batch,
-                                                                                 recordsToCopy,
-                                                                                 P.readNends,
-                                                                                 &cbqStarChunk,
-                                                                                 &adapterError)) {
-                                    ostringstream errOut;
-                                    errOut << ERROR_OUT << " EXITING because of FATAL ERROR in Binseq/CBQ STAR adapter\n"
-                                           << adapterError << "\n";
-                                    exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_INPUT_FILES, P);
-                                }
-                                cbqChunkReadN += recordsToCopy;
-                                for (uint32 irecord = 0; irecord < recordsToCopy; ++irecord) {
-                                    chunkWorkBytes += cbqRecordWorkBytes(batch.records[irecord]);
-                                }
-                            }
-                        }
+                    cbqChunkReadN += recordsToCopy;
+                    P.cbqInputPendingBatchOffset += recordsToCopy;
+                    if (P.cbqInputPendingBatchOffset >= batch.record_count) {
+                        P.cbqInputPendingBatch.reset();
+                        P.cbqInputPendingBatchOffset = 0;
                     }
                 }
             } else if (P.readFilesTypeN == 1 && P.fastxInputActive) {
@@ -721,6 +889,7 @@ void ReadAlignChunk::processChunks() {//read-map-write chunks
                     chunkWorkBytes += chunkInSizeBytesTotal[imate];
                 }
             }
+            writeInputChunkTrace(*this, iChunkIn, chunkReadStart, chunkReadN, chunkWorkBytes, noReadsLeft);
 
             if (P.runThreadN>1) pthread_mutex_unlock(&g_threadChunks.mutexInRead);
 

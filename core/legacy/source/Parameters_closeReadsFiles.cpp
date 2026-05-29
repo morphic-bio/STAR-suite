@@ -21,6 +21,8 @@ void Parameters::closeReadsFiles() {
         cbqInputModule->close();
         cbqInputExhausted = false;
         cbqInputLastLoggedLane = -1;
+        cbqInputPendingBatch.reset();
+        cbqInputPendingBatchOffset = 0;
     }
 
     // Close all potential read streams (not just readFilesIn.size()).

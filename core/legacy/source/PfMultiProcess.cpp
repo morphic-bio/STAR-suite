@@ -2036,6 +2036,7 @@ std::shared_ptr<PfMultiAssignPhaseResult> runPfMultiAssignPhase(
             if (preparedLib.starMaxHamming >= 0) {
                 runAssignOpts.maxHammingDistance = preparedLib.starMaxHamming;
             }
+            runAssignOpts.sampleName = sampleName;
             runAssignOpts.consumerThreadsPerSet = pfConsumerThreadsForRun;
             runAssignOpts.filteredBarcodesPath.clear();
 

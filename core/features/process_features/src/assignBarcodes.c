@@ -175,7 +175,7 @@ static void feature_mode_record(int feature_index, int offset) {
     if (!feature_mode_hist || !feature_mode_offsets) {
         return;
     }
-    if (feature_mode_bootstrap_done != 0) {
+    if (__atomic_load_n(&feature_mode_bootstrap_done, __ATOMIC_ACQUIRE) != 0) {
         return;
     }
     if (offset < 0 || offset >= feature_mode_max_offset) {
@@ -197,6 +197,28 @@ static int pf_trace_bootstrap_enabled(void) {
         initialized = 1;
     }
     return enabled;
+}
+
+static void feature_mode_wait_for_finalize(void) {
+    while (__atomic_load_n(&feature_mode_bootstrap_done, __ATOMIC_ACQUIRE) == 2) {
+        usleep(100);
+    }
+}
+
+static int feature_mode_reader_sets_drained(fastq_reader_set **reader_sets, int nsets) {
+    int drained = 1;
+    for (int i = 0; i < nsets; i++) {
+        fastq_reader_set *set = reader_sets[i];
+        pthread_mutex_lock(&set->mutex);
+        if (!set->done || set->filled > 0) {
+            drained = 0;
+        }
+        pthread_mutex_unlock(&set->mutex);
+        if (!drained) {
+            break;
+        }
+    }
+    return drained;
 }
 
 void feature_mode_search_offsets_reset(void) {
@@ -2054,6 +2076,7 @@ int find_feature_match_single(feature_arrays *features, char *lineR2, int maxHam
     if (bestHammingDistance <= maxHammingDistance){
         *bestScore=bestHammingDistance;
         *matching_sequence=lineR2+best_sequence_offset;
+        *match_position=best_sequence_offset;
         if (!ambiguous){
             return best_feature;
         }
@@ -4663,7 +4686,9 @@ static void process_feature_sequence_internal(char *sequence, feature_arrays *fe
         unsigned char offset_cache_valid[offset_cache_len > 0 ? offset_cache_len : 1];
         memset(offset_cache_valid, 0, sizeof(offset_cache_valid));
         unsigned long long seen = __sync_add_and_fetch(&feature_mode_reads_seen, 1);
-        if (feature_mode_bootstrap_done == 0 && seen >= (unsigned long long)feature_mode_bootstrap_reads) {
+        int bootstrap_state =
+            __atomic_load_n(&feature_mode_bootstrap_done, __ATOMIC_ACQUIRE);
+        if (bootstrap_state == 0 && seen >= (unsigned long long)feature_mode_bootstrap_reads) {
             if (__sync_bool_compare_and_swap(&feature_mode_bootstrap_done, 0, 2)) {
                 if (pf_trace_bootstrap_enabled()) {
                     fprintf(stderr,
@@ -4674,7 +4699,7 @@ static void process_feature_sequence_internal(char *sequence, feature_arrays *fe
                 }
                 feature_mode_finalize(features);
                 __sync_synchronize();
-                feature_mode_bootstrap_done = 1;
+                __atomic_store_n(&feature_mode_bootstrap_done, 1, __ATOMIC_RELEASE);
                 if (pf_trace_bootstrap_enabled()) {
                     fprintf(stderr,
                             "[bootstrap] state 2->1 pthread=%lu seen=%llu search_offsets=%d\n",
@@ -4684,8 +4709,11 @@ static void process_feature_sequence_internal(char *sequence, feature_arrays *fe
                 }
             }
         }
+        feature_mode_wait_for_finalize();
+        bootstrap_state =
+            __atomic_load_n(&feature_mode_bootstrap_done, __ATOMIC_ACQUIRE);
 
-        if (feature_mode_bootstrap_done == 1) {
+        if (bootstrap_state == 1) {
             /* CRITICAL_PATH: tiered hash search at bootstrap-learned offsets.
              * Uses pf_search_hash_offsets for O(n_offsets) hash probes instead
              * of O(N_features) iteration. */
@@ -4984,7 +5012,8 @@ static void process_feature_sequence_internal(char *sequence, feature_arrays *fe
             }
         }
 
-        if (!bestFeature && feature_mode_bootstrap_done == 0) {
+        if (!bestFeature &&
+            __atomic_load_n(&feature_mode_bootstrap_done, __ATOMIC_ACQUIRE) == 0) {
             char bf_ambiguous = 0;
             int bf_hamming = maxHammingDistance;
             char bf_match_seq[LINE_LENGTH];
@@ -5367,6 +5396,14 @@ void *consume_reads(void *arg) {
     const int nThreads = sample_args->nThreads;
     int nreaders=(reader_sets[0]->forward_reader && reader_sets[0]->reverse_reader)?3:2;
     const int lines_per_block=2*nreaders;           /* NEW – 4 or 6 lines */
+    const int bootstrap_serial_waiter =
+        (thread_id != 0 &&
+         feature_mode_bootstrap_reads > 0 &&
+         features &&
+         features->feature_offsets &&
+         feature_mode_hist &&
+         feature_mode_offsets &&
+         pf_has_anchor_arrays(features));
     pf_trace_reads_init_once();
     pf_trace_anchor_init_once();
     seq_hash_t thread_hot_d0;
@@ -5413,6 +5450,21 @@ void *consume_reads(void *arg) {
                 pthread_mutex_unlock(&reader_sets[k]->mutex);
             }
             break;
+        }
+
+        if (bootstrap_serial_waiter) {
+            int bootstrap_state =
+                __atomic_load_n(&feature_mode_bootstrap_done, __ATOMIC_ACQUIRE);
+            if (bootstrap_state != 1) {
+                if (bootstrap_state == 2) {
+                    feature_mode_wait_for_finalize();
+                } else if (feature_mode_reader_sets_drained(reader_sets, nsets)) {
+                    break;
+                } else {
+                    usleep(100);
+                }
+                continue;
+            }
         }
 
         if (empty_sweeps >= 2)
@@ -5967,6 +6019,50 @@ void merge_unmatched_barcodes(unmatched_barcodes_features_block_list *merged_lis
     thread_list->first_entry = NULL;
     thread_list->last_entry = NULL;
 }
+
+void merge_process_feature_thread_data(data_structures *dst_hashes,
+                                       memory_pool_collection *dst_pool,
+                                       statistics *dst_stats,
+                                       data_structures *src_hashes,
+                                       memory_pool_collection *src_pool,
+                                       statistics *src_stats) {
+    (void)src_pool;
+    merge_stats(dst_stats, src_stats);
+
+    merge_context ctx;
+    ctx.dst_pool = dst_pool;
+
+    ctx.dst_hash = dst_hashes->filtered_hash;
+    khint_t k;
+    for (k = kh_begin(src_hashes->filtered_hash); k != kh_end(src_hashes->filtered_hash); ++k) {
+        if (!kh_exist(src_hashes->filtered_hash, k)) continue;
+        merge_feature_counts(kh_key(src_hashes->filtered_hash, k),
+                             kh_val(src_hashes->filtered_hash, k),
+                             &ctx);
+    }
+
+    ctx.dst_hash = dst_hashes->sequence_umi_hash;
+    for (k = kh_begin(src_hashes->sequence_umi_hash); k != kh_end(src_hashes->sequence_umi_hash); ++k) {
+        if (!kh_exist(src_hashes->sequence_umi_hash, k)) continue;
+        merge_feature_umi_counts(kh_key(src_hashes->sequence_umi_hash, k),
+                                 kh_val(src_hashes->sequence_umi_hash, k),
+                                 &ctx);
+    }
+
+    ctx.dst_hash = dst_hashes->unique_features_match;
+    for (k = kh_begin(src_hashes->unique_features_match); k != kh_end(src_hashes->unique_features_match); ++k) {
+        if (!kh_exist(src_hashes->unique_features_match, k)) continue;
+        merge_feature_sequences(kh_key(src_hashes->unique_features_match, k),
+                                kh_val(src_hashes->unique_features_match, k),
+                                &ctx);
+    }
+
+    merge_unmatched_barcodes(&dst_stats->unmatched_list,
+                             &src_stats->unmatched_list,
+                             dst_pool);
+    merge_queues(dst_hashes->neighbors_queue, src_hashes->neighbors_queue);
+}
+
 void process_files_in_sample(sample_args *args) {
     //allocate buffers here
     //number of lines to read into the buffer

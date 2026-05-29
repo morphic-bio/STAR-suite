@@ -292,6 +292,14 @@ cbq-reader-harness : LDFLAGS := $(LDFLAGSextra) -lcrypto -ldl
 cbq-reader-harness : CbqInputModule.o input/cbq_reader_harness.cpp
 	$(CXX) -o cbq_reader_harness $(CXXFLAGS) input/cbq_reader_harness.cpp CbqInputModule.o $(LDFLAGS)
 
+# Ordered FASTQ/FASTQ.gz to CBQ encoder. This is intentionally sequential at
+# the write boundary so CBQ record order matches FASTQ source order.
+.PHONY: cbq-ordered-encoder
+cbq-ordered-encoder : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
+cbq-ordered-encoder : LDFLAGS := $(LDFLAGSextra) -lz -ldl
+cbq-ordered-encoder : input/cbq_ordered_encoder.cpp
+	$(CXX) -o cbq_ordered_encoder $(CXXFLAGS) input/cbq_ordered_encoder.cpp $(LDFLAGS)
+
 # Standalone adapter parity harness. It compares the direct CBQ-to-STAR-buffer
 # adapter against STAR's current synthetic FASTQ/readLoad input state.
 .PHONY: cbq-star-adapter-harness
@@ -536,7 +544,7 @@ solo/CbBayesianResolver.o : $(FLEX_SRC_DIR)/solo/CbBayesianResolver.cpp $(FLEX_S
 
 .PHONY: clean
 clean:
-	'rm' -f *.o opal/opal.o solo/*.o flex/*.o STAR STARstatic STARlong star_feature_call fastx_input_harness binseq_probe_harness cbq_reader_harness cbq_star_adapter_harness cbq_pf_adapter_harness cbq_chromap_adapter_harness Depend.list parametersDefault.xxd star_chromap_orchestration.o star_chromap_orchestration_stub.o .depend.with_chromap_*
+	'rm' -f *.o opal/opal.o solo/*.o flex/*.o STAR STARstatic STARlong star_feature_call fastx_input_harness binseq_probe_harness cbq_reader_harness cbq_ordered_encoder cbq_star_adapter_harness cbq_pf_adapter_harness cbq_chromap_adapter_harness Depend.list parametersDefault.xxd star_chromap_orchestration.o star_chromap_orchestration_stub.o .depend.with_chromap_*
 	$(MAKE) -C $(LIBFLEX_DIR) clean
 	$(MAKE) -C $(LIBTRIM_DIR) clean
 	$(MAKE) -C $(LIBEM_DIR) clean

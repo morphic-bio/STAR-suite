@@ -49,8 +49,10 @@ is now handled in Phase 6 of `docs/RUNBOOK_BINSEQ_INPUT_CONTRACT.md`.
    - sequence lengths and header lengths are little-endian `u64` arrays;
    - sequence words hold 32 bases per `u64`, low bits first,
      `A/C/G/T = 0/1/2/3`;
-   - `N` positions are restored after two-bit decode;
-   - sequence and quality spans point into the decoded CBQ block storage;
+   - `N` positions remain as a compact per-segment side view over the decoded
+     Elias-Fano positions;
+   - sequence views point at the packed two-bit CBQ block storage, while quality
+     spans point into the decoded quality column;
    - the first mate's header drives `read_name`, `read_name_extra`, and
      `read_filter`, matching `FastxInputModule`.
 5. Keep `next_record()` as a compatibility adapter from `CbqReadBatchView` to
@@ -70,8 +72,11 @@ is now handled in Phase 6 of `docs/RUNBOOK_BINSEQ_INPUT_CONTRACT.md`.
      still path-based.
 
 The CBQ interchange view is block-backed and borrowed: no per-read string
-ownership, no synthetic FASTQ text, and no FASTQ reparse. Its pointers remain
-valid until the next reader call that may load another CBQ block, or `close()`.
+ownership, no full-block ASCII sequence expansion, no synthetic FASTQ text, and
+no FASTQ reparse. The batch exposes shared backing storage; consumers that queue
+a batch beyond the next reader call must keep that backing alive. ASCII sequence
+materialization is a compatibility helper for probes and non-STAR adapters, not
+the production STAR mapper path.
 
 ## Acceptance Tests
 

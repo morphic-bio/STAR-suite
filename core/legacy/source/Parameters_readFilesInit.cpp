@@ -361,6 +361,8 @@ void Parameters::readFilesInit()
         cbqInputActive = false;
         cbqInputExhausted = false;
         cbqInputLastLoggedLane = -1;
+        cbqInputPendingBatch.reset();
+        cbqInputPendingBatchOffset = 0;
         cbqInputModule.reset(new star::input::CbqInputModule());
         string inputContractError;
         if (!cbqInputModule->configure(cbqInputPlan, &inputContractError)) {

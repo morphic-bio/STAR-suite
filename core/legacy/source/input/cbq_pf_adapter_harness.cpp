@@ -3,15 +3,16 @@
 #include "pf_api.h"
 
 #include <cstdlib>
-#include <cstring>
 #include <iostream>
 #include <memory>
 #include <sstream>
 #include <string>
-#include <utility>
 #include <vector>
 
 namespace {
+
+constexpr size_t kPfLineLength = 1024;
+constexpr size_t kPfSequenceCapacity = kPfLineLength - 1;
 
 struct Args {
     std::string mode;
@@ -134,26 +135,26 @@ bool parse_args(int argc, char** argv, Args* args) {
     return true;
 }
 
-std::string span_to_string(star::input::CbqByteSpan span) {
-    if (span.data == nullptr || span.size == 0) {
-        return std::string();
-    }
-    return std::string(span.data, span.size);
+pf_sequence_view to_pf_view(star::input::CbqByteSpan span) {
+    pf_sequence_view view;
+    view.data = span.data;
+    view.length = span.size;
+    return view;
 }
 
-struct OwnedPfRecord {
-    std::string barcode_sequence;
-    std::string barcode_quality;
-    std::string feature_sequence;
-    std::string feature_quality;
-    pf_read_record record;
-};
+pf_sequence_view to_pf_view_buffer(const char* data, size_t length) {
+    pf_sequence_view view;
+    view.data = data;
+    view.length = length;
+    return view;
+}
 
-bool load_cbq_records(const std::string& cbq,
-                      std::vector<OwnedPfRecord>* owned_records,
-                      std::string* error) {
+bool process_cbq_records(pf_context* ctx,
+                         const Args& args,
+                         pf_stats* stats,
+                         std::string* error) {
     std::vector<std::vector<std::string>> read_files(1);
-    read_files[0].push_back(cbq);
+    read_files[0].push_back(args.cbq);
     star::input::InputSourcePlan plan =
         star::input::make_cbq_input_source_plan(read_files, std::vector<std::string>(), 2);
     plan.read_name_separator_chars.clear();
@@ -164,45 +165,91 @@ bool load_cbq_records(const std::string& cbq,
         return false;
     }
 
+    pf_record_stream* stream = nullptr;
+    pf_error err = pf_process_records_begin(ctx,
+                                            args.output_dir.c_str(),
+                                            args.sample_name.c_str(),
+                                            &stream);
+    if (err != PF_OK) {
+        if (error) {
+            const char* pf_error_message = pf_get_error(ctx);
+            *error = pf_error_message ? pf_error_message : "process_features stream begin failed";
+        }
+        module.close();
+        return false;
+    }
+
     for (;;) {
         star::input::CbqReadBatchView batch;
         const star::input::InputStatus status = module.next_batch(&batch, error);
         if (status == star::input::InputStatus::Error) {
+            pf_process_records_abort(stream);
             module.close();
             return false;
         }
         if (status == star::input::InputStatus::End) {
             break;
         }
+        std::vector<pf_read_record_view> records;
+        std::vector<char> sequence_storage(static_cast<size_t>(batch.record_count) *
+                                           2U * kPfLineLength);
+        records.reserve(batch.record_count);
         for (uint32_t i = 0; i < batch.record_count; ++i) {
             const star::input::CbqReadView& view = batch.records[i];
             if (view.segment_count < 2 || view.segments == nullptr) {
                 if (error) *error = "CBQ PF adapter expects paired CBQ records";
+                pf_process_records_abort(stream);
                 module.close();
                 return false;
             }
-            OwnedPfRecord rec;
-            rec.barcode_sequence = span_to_string(view.segments[0].sequence);
-            rec.barcode_quality = span_to_string(view.segments[0].quality);
-            rec.feature_sequence = span_to_string(view.segments[1].sequence);
-            rec.feature_quality = span_to_string(view.segments[1].quality);
-            rec.record.barcode_sequence = rec.barcode_sequence.c_str();
-            rec.record.barcode_quality = rec.barcode_quality.c_str();
-            rec.record.feature_sequence = rec.feature_sequence.c_str();
-            rec.record.feature_quality = rec.feature_quality.c_str();
-            rec.record.feature_sequence2 = nullptr;
-            rec.record.feature_quality2 = nullptr;
-            owned_records->push_back(std::move(rec));
+            pf_read_record_view rec = {};
+            char* barcode_sequence = sequence_storage.data() +
+                (static_cast<size_t>(i) * 2U * kPfLineLength);
+            char* feature_sequence = barcode_sequence + kPfLineLength;
+            size_t barcode_length = 0;
+            size_t feature_length = 0;
+            if (!star::input::materialize_cbq_segment_sequence_to_buffer(view.segments[0],
+                                                                         barcode_sequence,
+                                                                         kPfSequenceCapacity,
+                                                                         &barcode_length,
+                                                                         error) ||
+                !star::input::materialize_cbq_segment_sequence_to_buffer(view.segments[1],
+                                                                         feature_sequence,
+                                                                         kPfSequenceCapacity,
+                                                                         &feature_length,
+                                                                         error)) {
+                pf_process_records_abort(stream);
+                module.close();
+                return false;
+            }
+            rec.barcode_sequence = to_pf_view_buffer(barcode_sequence, barcode_length);
+            rec.barcode_quality = to_pf_view(view.segments[0].quality);
+            rec.feature_sequence = to_pf_view_buffer(feature_sequence, feature_length);
+            rec.feature_quality = to_pf_view(view.segments[1].quality);
+            records.push_back(rec);
+        }
+        if (!records.empty()) {
+            err = pf_process_record_views(stream, records.data(), records.size());
+            if (err != PF_OK) {
+                if (error) {
+                    const char* pf_error_message = pf_get_error(ctx);
+                    *error = pf_error_message ? pf_error_message : "process_features CBQ batch failed";
+                }
+                pf_process_records_abort(stream);
+                module.close();
+                return false;
+            }
         }
     }
 
     module.close();
-
-    for (OwnedPfRecord& rec : *owned_records) {
-        rec.record.barcode_sequence = rec.barcode_sequence.c_str();
-        rec.record.barcode_quality = rec.barcode_quality.c_str();
-        rec.record.feature_sequence = rec.feature_sequence.c_str();
-        rec.record.feature_quality = rec.feature_quality.c_str();
+    err = pf_process_records_end(stream, stats);
+    if (err != PF_OK) {
+        if (error) {
+            const char* pf_error_message = pf_get_error(ctx);
+            *error = pf_error_message ? pf_error_message : "process_features stream finish failed";
+        }
+        return false;
     }
     return true;
 }
@@ -257,23 +304,12 @@ int run_pf(const Args& args) {
                                 args.sample_name.c_str(),
                                 &stats);
     } else {
-        std::vector<OwnedPfRecord> owned_records;
         std::string input_error;
-        if (!load_cbq_records(args.cbq, &owned_records, &input_error)) {
-            std::cerr << "Failed to load CBQ records: " << input_error << "\n";
+        if (!process_cbq_records(ctx.get(), args, &stats, &input_error)) {
+            std::cerr << "Failed to process CBQ records: " << input_error << "\n";
             return 1;
         }
-        std::vector<pf_read_record> records;
-        records.reserve(owned_records.size());
-        for (const OwnedPfRecord& rec : owned_records) {
-            records.push_back(rec.record);
-        }
-        err = pf_process_records(ctx.get(),
-                                 records.data(),
-                                 records.size(),
-                                 args.output_dir.c_str(),
-                                 args.sample_name.c_str(),
-                                 &stats);
+        err = PF_OK;
     }
 
     if (err != PF_OK) {

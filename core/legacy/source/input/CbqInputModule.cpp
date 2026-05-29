@@ -631,19 +631,6 @@ bool bytes_to_u64_vector(const std::vector<uint8_t>& bytes,
     return true;
 }
 
-std::string decode_twobit_sequence(const std::vector<uint8_t>& bytes, uint64_t nuclen) {
-    static const char lookup[4] = {'A', 'C', 'G', 'T'};
-    std::string sequence;
-    sequence.resize(static_cast<size_t>(nuclen));
-    for (uint64_t ibase = 0; ibase < nuclen; ++ibase) {
-        const uint64_t word_index = ibase / 32;
-        const uint64_t offset_in_word = ibase % 32;
-        const uint64_t word = read_le64(bytes.data() + static_cast<size_t>(word_index * 8));
-        sequence[static_cast<size_t>(ibase)] = lookup[(word >> (offset_in_word * 2)) & 0x3ULL];
-    }
-    return sequence;
-}
-
 struct DecodedBlock {
     uint64_t num_records = 0;
     uint64_t num_sequences = 0;
@@ -651,6 +638,8 @@ struct DecodedBlock {
     std::vector<uint64_t> seq_offsets;
     std::vector<uint64_t> header_lengths;
     std::vector<uint64_t> header_offsets;
+    std::vector<uint8_t> seq_word_bytes;
+    std::vector<uint64_t> n_positions;
     std::string sequences;
     std::string headers;
     std::string qualities;
@@ -663,6 +652,8 @@ struct DecodedBlock {
         seq_offsets.clear();
         header_lengths.clear();
         header_offsets.clear();
+        seq_word_bytes.clear();
+        n_positions.clear();
         sequences.clear();
         headers.clear();
         qualities.clear();
@@ -698,6 +689,201 @@ enum class BlockLoadStatus {
 
 } // namespace
 
+struct CbqBatchBacking {
+    DecodedBlock block;
+    std::vector<std::string> synthetic_read_names;
+    std::vector<CbqSegmentView> segment_views;
+    std::vector<CbqReadView> read_views;
+};
+
+size_t cbq_segment_sequence_length(const CbqSegmentView& segment) {
+    if (segment.packed_sequence.available) {
+        return segment.packed_sequence.length;
+    }
+    return segment.sequence.size;
+}
+
+namespace {
+
+bool cbq_segment_base_is_n(const CbqPackedSequenceView& packed, uint64_t global_offset) {
+    if (packed.n_positions == nullptr || packed.n_positions_count == 0) {
+        return false;
+    }
+    const uint64_t* begin = packed.n_positions;
+    const uint64_t* end = begin + packed.n_positions_count;
+    return std::binary_search(begin, end, global_offset);
+}
+
+unsigned char cbq_ascii_base_to_star_number(char base) {
+    switch (base) {
+        case 'A':
+        case 'a':
+            return 0;
+        case 'C':
+        case 'c':
+            return 1;
+        case 'G':
+        case 'g':
+            return 2;
+        case 'T':
+        case 't':
+            return 3;
+        default:
+            return 4;
+    }
+}
+
+unsigned char cbq_packed_base_number(const CbqPackedSequenceView& packed, size_t index) {
+    const uint64_t global_offset = packed.base_offset + static_cast<uint64_t>(index);
+    if (cbq_segment_base_is_n(packed, global_offset)) {
+        return 4;
+    }
+    const uint64_t word_index = global_offset / 32;
+    const uint64_t offset_in_word = global_offset % 32;
+    const size_t byte_offset = static_cast<size_t>(word_index * 8);
+    if (packed.words == nullptr || byte_offset + 8 > packed.word_bytes) {
+        return 4;
+    }
+    const uint64_t word = read_le64(packed.words + byte_offset);
+    return static_cast<unsigned char>((word >> (offset_in_word * 2)) & 0x3ULL);
+}
+
+char cbq_number_to_ascii(unsigned char base) {
+    static const char lookup[5] = {'A', 'C', 'G', 'T', 'N'};
+    return lookup[base < 5 ? base : 4];
+}
+
+struct CbqPackedByteDecode {
+    char ascii[4];
+};
+
+const std::array<CbqPackedByteDecode, 256>& cbq_packed_ascii_lookup() {
+    static const std::array<CbqPackedByteDecode, 256> lookup = [] {
+        std::array<CbqPackedByteDecode, 256> table = {};
+        static const char ascii_lookup[4] = {'A', 'C', 'G', 'T'};
+        for (unsigned byte = 0; byte < table.size(); ++byte) {
+            for (unsigned base = 0; base < 4; ++base) {
+                const unsigned code = (byte >> (base * 2)) & 0x3U;
+                table[byte].ascii[base] = ascii_lookup[code];
+            }
+        }
+        return table;
+    }();
+    return lookup;
+}
+
+} // namespace
+
+char cbq_segment_base_ascii(const CbqSegmentView& segment, size_t index) {
+    if (segment.sequence.data != nullptr && index < segment.sequence.size) {
+        return segment.sequence.data[index];
+    }
+    if (segment.packed_sequence.available && index < segment.packed_sequence.length) {
+        return cbq_number_to_ascii(cbq_packed_base_number(segment.packed_sequence, index));
+    }
+    return 'N';
+}
+
+unsigned char cbq_segment_base_star_number(const CbqSegmentView& segment, size_t index) {
+    if (segment.packed_sequence.available && index < segment.packed_sequence.length) {
+        return cbq_packed_base_number(segment.packed_sequence, index);
+    }
+    if (segment.sequence.data != nullptr && index < segment.sequence.size) {
+        return cbq_ascii_base_to_star_number(segment.sequence.data[index]);
+    }
+    return 4;
+}
+
+void materialize_cbq_segment_sequence(const CbqSegmentView& segment, std::string* sequence) {
+    if (sequence == nullptr) {
+        return;
+    }
+    const size_t length = cbq_segment_sequence_length(segment);
+    sequence->resize(length);
+    for (size_t ii = 0; ii < length; ++ii) {
+        (*sequence)[ii] = cbq_segment_base_ascii(segment, ii);
+    }
+}
+
+bool materialize_cbq_segment_sequence_to_buffer(const CbqSegmentView& segment,
+                                                char* dest,
+                                                size_t capacity,
+                                                size_t* length_out,
+                                                std::string* error) {
+    if (dest == nullptr) {
+        return set_error(error, "CBQ sequence materialization destination is null");
+    }
+    const size_t length = cbq_segment_sequence_length(segment);
+    if (length >= capacity) {
+        std::ostringstream msg;
+        msg << "CBQ sequence length " << length
+            << " exceeds destination capacity " << capacity;
+        return set_error(error, msg.str());
+    }
+
+    if (segment.sequence.data != nullptr && segment.sequence.size == length) {
+        std::memcpy(dest, segment.sequence.data, length);
+        dest[length] = '\0';
+        if (length_out != nullptr) {
+            *length_out = length;
+        }
+        return true;
+    }
+
+    if (!segment.packed_sequence.available) {
+        std::fill(dest, dest + length, 'N');
+        dest[length] = '\0';
+        if (length_out != nullptr) {
+            *length_out = length;
+        }
+        return true;
+    }
+
+    const CbqPackedSequenceView& packed = segment.packed_sequence;
+    const auto& lookup = cbq_packed_ascii_lookup();
+    size_t ii = 0;
+    while (ii < length) {
+        const uint64_t global_offset = packed.base_offset + static_cast<uint64_t>(ii);
+        const size_t byte_offset = static_cast<size_t>(global_offset >> 2);
+        const unsigned base_in_byte = static_cast<unsigned>(global_offset & 0x3ULL);
+        const size_t take = std::min<size_t>(4U - base_in_byte, length - ii);
+
+        if (packed.words == nullptr || byte_offset >= packed.word_bytes) {
+            std::fill(dest + ii, dest + ii + take, 'N');
+        } else if (base_in_byte == 0 && take == 4) {
+            const CbqPackedByteDecode& decoded = lookup[packed.words[byte_offset]];
+            std::memcpy(dest + ii, decoded.ascii, 4);
+        } else {
+            const CbqPackedByteDecode& decoded = lookup[packed.words[byte_offset]];
+            for (size_t jj = 0; jj < take; ++jj) {
+                dest[ii + jj] = decoded.ascii[base_in_byte + jj];
+            }
+        }
+
+        ii += take;
+    }
+
+    if (packed.n_positions != nullptr) {
+        for (size_t inpos = 0; inpos < packed.n_positions_count; ++inpos) {
+            const uint64_t npos = packed.n_positions[inpos];
+            if (npos < packed.base_offset) {
+                continue;
+            }
+            const uint64_t local = npos - packed.base_offset;
+            if (local >= length) {
+                break;
+            }
+            dest[local] = 'N';
+        }
+    }
+
+    dest[length] = '\0';
+    if (length_out != nullptr) {
+        *length_out = length;
+    }
+    return true;
+}
+
 struct CbqInputModule::Impl {
     std::ifstream stream;
     uint32_t lane_index = 0;
@@ -705,18 +891,26 @@ struct CbqInputModule::Impl {
     uint64_t lane_record_index = 0;
     bool opened = false;
     FileHeaderFields file_header;
-    DecodedBlock block;
-    std::vector<std::string> synthetic_read_names;
-    std::vector<CbqSegmentView> segment_views;
-    std::vector<CbqReadView> read_views;
+    std::shared_ptr<CbqBatchBacking> batch;
 
     void clear_batch_views() {
-        synthetic_read_names.clear();
-        segment_views.clear();
-        read_views.clear();
+        if (!batch) {
+            return;
+        }
+        batch->synthetic_read_names.clear();
+        batch->segment_views.clear();
+        batch->read_views.clear();
     }
 
     bool build_batch_views(const InputSourcePlan& plan, std::string* error) {
+        if (!batch) {
+            return set_error(error, "CBQ batch storage is not initialized");
+        }
+        DecodedBlock& block = batch->block;
+        std::vector<std::string>& synthetic_read_names = batch->synthetic_read_names;
+        std::vector<CbqSegmentView>& segment_views = batch->segment_views;
+        std::vector<CbqReadView>& read_views = batch->read_views;
+
         clear_batch_views();
 
         size_t num_records = 0;
@@ -778,8 +972,20 @@ struct CbqInputModule::Impl {
                 CbqSegmentView& segment = segment_views[irecord * plan.mate_count + isegment];
                 segment.role = role_for_segment(isegment);
                 segment.source_index = isegment;
-                segment.sequence = make_span(block.sequences, begin, length);
+                segment.sequence = make_empty_span();
                 segment.quality = make_span(block.qualities, begin, length);
+                segment.packed_sequence.words = block.seq_word_bytes.empty() ? nullptr : block.seq_word_bytes.data();
+                segment.packed_sequence.word_bytes = block.seq_word_bytes.size();
+                segment.packed_sequence.base_offset = begin;
+                segment.packed_sequence.length = static_cast<uint32_t>(length);
+                const auto n_begin = std::lower_bound(block.n_positions.begin(), block.n_positions.end(), begin);
+                const auto n_end = std::lower_bound(block.n_positions.begin(), block.n_positions.end(), end);
+                segment.packed_sequence.n_positions_count =
+                    static_cast<size_t>(std::distance(n_begin, n_end));
+                segment.packed_sequence.n_positions = segment.packed_sequence.n_positions_count == 0
+                    ? nullptr
+                    : &(*n_begin);
+                segment.packed_sequence.available = !block.seq_word_bytes.empty();
                 segment.original_length = static_cast<uint32_t>(length);
                 segment.has_quality = file_header.has_qualities();
             }
@@ -820,7 +1026,7 @@ struct CbqInputModule::Impl {
 
         lane_index = lane;
         lane_record_index = 0;
-        block.clear();
+        batch.reset();
         opened = true;
         return true;
     }
@@ -829,12 +1035,11 @@ struct CbqInputModule::Impl {
         if (stream.is_open()) {
             stream.close();
         }
-        block.clear();
-        clear_batch_views();
+        batch.reset();
     }
 
     BlockLoadStatus load_next_block(const InputSourcePlan& plan, std::string* error) {
-        block.clear();
+        batch.reset();
 
         std::array<uint8_t, 8> first{};
         stream.read(reinterpret_cast<char*>(first.data()), static_cast<std::streamsize>(first.size()));
@@ -875,6 +1080,9 @@ struct CbqInputModule::Impl {
             return BlockLoadStatus::Error;
         }
 
+        batch = std::make_shared<CbqBatchBacking>();
+        DecodedBlock& block = batch->block;
+
         std::vector<uint8_t> z_seq_len;
         std::vector<uint8_t> z_header_len;
         std::vector<uint8_t> z_npos;
@@ -906,7 +1114,6 @@ struct CbqInputModule::Impl {
         std::vector<uint8_t> seq_len_bytes;
         std::vector<uint8_t> header_len_bytes;
         std::vector<uint8_t> npos_bytes;
-        std::vector<uint8_t> seq_word_bytes;
         std::vector<uint8_t> flags_bytes;
         std::vector<uint8_t> header_bytes_column;
         std::vector<uint8_t> qual_bytes;
@@ -938,21 +1145,18 @@ struct CbqInputModule::Impl {
             }
         }
 
-        std::vector<uint64_t> n_positions;
-        if (!decode_elias_fano_positions(npos_bytes, &n_positions, error)) {
+        if (!decode_elias_fano_positions(npos_bytes, &block.n_positions, error)) {
             return BlockLoadStatus::Error;
         }
 
-        if (!zstd_runtime().decompress(z_seq, seq_word_bytes_expected, &seq_word_bytes, "seq", error)) {
+        if (!zstd_runtime().decompress(z_seq, seq_word_bytes_expected, &block.seq_word_bytes, "seq", error)) {
             return BlockLoadStatus::Error;
         }
-        block.sequences = decode_twobit_sequence(seq_word_bytes, header.nuclen);
-        for (uint64_t npos : n_positions) {
+        for (uint64_t npos : block.n_positions) {
             if (npos >= header.nuclen) {
-                set_error(error, "CBQ N-position exceeds decoded sequence length");
+                set_error(error, "CBQ N-position exceeds sequence length");
                 return BlockLoadStatus::Error;
             }
-            block.sequences[static_cast<size_t>(npos)] = 'N';
         }
 
         if (file_header.has_flags()) {
@@ -1001,7 +1205,8 @@ struct CbqInputModule::Impl {
 
     BlockLoadStatus load_next_available_block(const InputSourcePlan& plan, std::string* error) {
         while (lane_index < plan.read_files_n) {
-            if (block.record_index < static_cast<size_t>(block.num_records)) {
+            if (batch &&
+                batch->block.record_index < static_cast<size_t>(batch->block.num_records)) {
                 return BlockLoadStatus::Block;
             }
 
@@ -1010,7 +1215,7 @@ struct CbqInputModule::Impl {
                 return BlockLoadStatus::Error;
             }
             if (status == BlockLoadStatus::Block) {
-                if (block.num_records == 0) {
+                if (!batch || batch->block.num_records == 0) {
                     continue;
                 }
                 return BlockLoadStatus::Block;
@@ -1130,9 +1335,16 @@ InputStatus CbqInputModule::next_batch(CbqReadBatchView* batch, std::string* err
     if (status == BlockLoadStatus::End) {
         return InputStatus::End;
     }
+    if (!impl_->batch) {
+        if (error != nullptr) {
+            *error = "CBQ batch storage is not available";
+        }
+        return InputStatus::Error;
+    }
 
-    const size_t start = impl_->block.record_index;
-    const size_t remaining = static_cast<size_t>(impl_->block.num_records) - start;
+    DecodedBlock& block = impl_->batch->block;
+    const size_t start = block.record_index;
+    const size_t remaining = static_cast<size_t>(block.num_records) - start;
     if (remaining > static_cast<size_t>(std::numeric_limits<uint32_t>::max())) {
         if (error != nullptr) {
             *error = "CBQ unread batch size exceeds uint32_t";
@@ -1140,13 +1352,14 @@ InputStatus CbqInputModule::next_batch(CbqReadBatchView* batch, std::string* err
         return InputStatus::Error;
     }
 
-    batch->records = impl_->read_views.data() + start;
+    batch->records = impl_->batch->read_views.data() + start;
     batch->record_count = static_cast<uint32_t>(remaining);
     batch->lane_index = impl_->lane_index;
     batch->preserves_source_order = true;
     batch->backing_storage_owned_by_reader = true;
+    batch->backing = impl_->batch;
 
-    impl_->block.record_index = static_cast<size_t>(impl_->block.num_records);
+    block.record_index = static_cast<size_t>(block.num_records);
     return InputStatus::Record;
 }
 
@@ -1171,8 +1384,15 @@ InputStatus CbqInputModule::next_record(InputRecord* record, std::string* error)
     if (status == BlockLoadStatus::End) {
         return InputStatus::End;
     }
+    if (!impl_->batch) {
+        if (error != nullptr) {
+            *error = "CBQ batch storage is not available";
+        }
+        return InputStatus::Error;
+    }
 
-    const CbqReadView& view = impl_->read_views[impl_->block.record_index++];
+    DecodedBlock& block = impl_->batch->block;
+    const CbqReadView& view = impl_->batch->read_views[block.record_index++];
 
     assign_from_span(&record->read_name, view.read_name);
     assign_from_span(&record->read_name_extra, view.read_name_extra);
@@ -1186,7 +1406,7 @@ InputStatus CbqInputModule::next_record(InputRecord* record, std::string* error)
     for (uint32_t isegment = 0; isegment < view.segment_count; ++isegment) {
         const CbqSegmentView& segment = view.segments[isegment];
         InputMateRecord mate;
-        assign_from_span(&mate.sequence, segment.sequence);
+        materialize_cbq_segment_sequence(segment, &mate.sequence);
         assign_from_span(&mate.quality, segment.quality);
         apply_quality_conversion(mate.quality, plan_.out_qs_conversion_add);
         mate.original_length = segment.original_length;

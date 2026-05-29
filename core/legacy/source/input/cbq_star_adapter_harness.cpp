@@ -2,10 +2,13 @@
 #include "input/CbqStarAdapter.h"
 #include "SequenceFuns.h"
 
+#include <chrono>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -72,6 +75,8 @@ struct HarnessOptions {
     std::vector<char> read_name_separator_chars{' '};
     uint32_t mate_count = 2;
     std::string mode = "direct";
+    uint64_t benchmark_iterations = 5;
+    uint64_t benchmark_max_records = 1000000;
 };
 
 void usage(std::ostream& out) {
@@ -81,7 +86,9 @@ void usage(std::ostream& out) {
         << "  --mateCount 1|2\n"
         << "  --readFilesPrefix PREFIX\n"
         << "  --readNameSeparator space|none|CHAR[,CHAR...]\n"
-        << "  --mode direct|reference\n";
+        << "  --mode direct|reference|benchmark\n"
+        << "  --iterations N          # benchmark mode only, default 5\n"
+        << "  --maxRecords N          # benchmark mode only, 0 means all, default 1000000\n";
 }
 
 std::vector<char> parse_separators(const std::string& value) {
@@ -143,9 +150,22 @@ HarnessOptions parse_args(int argc, char* argv[]) {
                 throw std::runtime_error("--mode requires a value");
             }
             opts.mode = argv[ii];
-            if (opts.mode != "direct" && opts.mode != "reference") {
-                throw std::runtime_error("--mode must be direct or reference");
+            if (opts.mode != "direct" && opts.mode != "reference" && opts.mode != "benchmark") {
+                throw std::runtime_error("--mode must be direct, reference, or benchmark");
             }
+        } else if (arg == "--iterations") {
+            if (++ii >= argc) {
+                throw std::runtime_error("--iterations requires a value");
+            }
+            opts.benchmark_iterations = std::stoull(argv[ii]);
+            if (opts.benchmark_iterations == 0) {
+                throw std::runtime_error("--iterations must be > 0");
+            }
+        } else if (arg == "--maxRecords") {
+            if (++ii >= argc) {
+                throw std::runtime_error("--maxRecords requires a value");
+            }
+            opts.benchmark_max_records = std::stoull(argv[ii]);
         } else {
             throw std::runtime_error("unknown option: " + arg);
         }
@@ -335,10 +355,12 @@ void load_reference_state(const CbqReadView& view, StarReadState* state) {
 
     for (uint32_t imate = 0; imate < state->nends; ++imate) {
         const CbqSegmentView& segment = view.segments[imate];
+        std::string sequence;
+        materialize_cbq_segment_sequence(segment, &sequence);
         copy_string_checked(parsed_name, state->read_name_mates[imate], DEF_readNameLengthMax, "read name");
-        copy_span_checked(segment.sequence, state->read0[imate], DEF_readSeqLengthMax + 1, "sequence");
+        copy_string_checked(sequence, state->read0[imate], DEF_readSeqLengthMax + 1, "sequence");
 
-        const uint length = static_cast<uint>(segment.sequence.size);
+        const uint length = static_cast<uint>(sequence.size());
         if (segment.has_quality) {
             copy_span_checked(segment.quality, state->qual0[imate], DEF_readSeqLengthMax + 1, "quality");
             apply_quality_conversion(state->qual0[imate], length, 0);
@@ -435,8 +457,171 @@ void emit_state(const StarReadState& state, std::ostream& out) {
     }
 }
 
+struct PreloadedBatch {
+    CbqReadBatchView batch;
+};
+
+struct PreloadedData {
+    std::vector<PreloadedBatch> batches;
+    uint64_t record_count = 0;
+    uint64_t mate_count = 0;
+    uint64_t base_count = 0;
+};
+
+double elapsed_seconds(std::chrono::steady_clock::time_point begin,
+                       std::chrono::steady_clock::time_point end) {
+    return std::chrono::duration_cast<std::chrono::duration<double>>(end - begin).count();
+}
+
+void hash_mix(uint64_t* hash, uint64_t value) {
+    *hash ^= value;
+    *hash *= 1099511628211ULL;
+}
+
+void hash_bytes(uint64_t* hash, const char* data, size_t size) {
+    for (size_t ii = 0; ii < size; ++ii) {
+        hash_mix(hash, static_cast<unsigned char>(data[ii]));
+    }
+}
+
+void hash_sampled_bytes(uint64_t* hash, const char* data, size_t size) {
+    if (data == nullptr || size == 0) {
+        hash_mix(hash, 0);
+        return;
+    }
+    hash_mix(hash, size);
+    if (size <= 16) {
+        hash_bytes(hash, data, size);
+        return;
+    }
+    hash_bytes(hash, data, 8);
+    hash_bytes(hash, data + size - 8, 8);
+}
+
+uint64_t hash_state_summary(uint64_t hash, const StarReadState& state) {
+    hash_mix(&hash, state.i_read_all);
+    hash_mix(&hash, state.read_files_index);
+    hash_mix(&hash, static_cast<unsigned char>(state.read_filter));
+    hash_mix(&hash, static_cast<uint64_t>(state.read_file_type));
+    for (uint32_t imate = 0; imate < state.nends; ++imate) {
+        const uint length = state.read_length[imate];
+        hash_mix(&hash, length);
+        hash_mix(&hash, state.read_length_original[imate]);
+        hash_sampled_bytes(&hash, state.read_name_mates[imate], std::strlen(state.read_name_mates[imate]));
+        hash_sampled_bytes(&hash, state.read0[imate], length);
+        hash_sampled_bytes(&hash, state.read1[imate], length);
+        hash_sampled_bytes(&hash, state.qual0[imate], length);
+        hash_mix(&hash, static_cast<unsigned char>(state.clip_mates[imate][0].clippedInfo));
+        hash_mix(&hash, static_cast<unsigned char>(state.clip_mates[imate][1].clippedInfo));
+    }
+    return hash;
+}
+
+PreloadedData preload_decoded_batches(CbqInputModule* module,
+                                      uint64_t max_records,
+                                      uint32_t mate_count) {
+    PreloadedData data;
+    CbqReadBatchView batch;
+    std::string error;
+    while (true) {
+        error.clear();
+        const InputStatus status = module->next_batch(&batch, &error);
+        if (status == InputStatus::End) {
+            break;
+        }
+        if (status == InputStatus::Error) {
+            throw std::runtime_error("read failed: " + error);
+        }
+
+        CbqReadBatchView stored = batch;
+        if (max_records != 0 && data.record_count + stored.record_count > max_records) {
+            stored.record_count = static_cast<uint32_t>(max_records - data.record_count);
+        }
+        if (stored.record_count == 0) {
+            break;
+        }
+
+        for (uint32_t irecord = 0; irecord < stored.record_count; ++irecord) {
+            const CbqReadView& record = stored.records[irecord];
+            const uint32_t nends = std::min<uint32_t>(record.segment_count, mate_count);
+            data.mate_count += nends;
+            for (uint32_t imate = 0; imate < nends; ++imate) {
+                data.base_count += cbq_segment_sequence_length(record.segments[imate]);
+            }
+        }
+
+        data.record_count += stored.record_count;
+        data.batches.push_back(PreloadedBatch{stored});
+        if (max_records != 0 && data.record_count >= max_records) {
+            break;
+        }
+    }
+    return data;
+}
+
+int run_benchmark(const HarnessOptions& opts, const InputSourcePlan& plan) {
+    CbqInputModule module;
+    std::string error;
+    if (!module.configure(plan, &error)) {
+        std::cerr << "configure failed: " << error << "\n";
+        return 2;
+    }
+    if (!module.open(&error)) {
+        std::cerr << "open failed: " << error << "\n";
+        return 2;
+    }
+
+    const auto preload_begin = std::chrono::steady_clock::now();
+    PreloadedData data = preload_decoded_batches(&module, opts.benchmark_max_records, opts.mate_count);
+    const auto preload_end = std::chrono::steady_clock::now();
+    module.close();
+
+    if (data.record_count == 0) {
+        std::cerr << "benchmark loaded zero records\n";
+        return 4;
+    }
+
+    StarReadState state(opts.mate_count);
+    uint64_t checksum = 1469598103934665603ULL;
+    const auto adapter_begin = std::chrono::steady_clock::now();
+    for (uint64_t iter = 0; iter < opts.benchmark_iterations; ++iter) {
+        for (const PreloadedBatch& loaded : data.batches) {
+            for (uint32_t irecord = 0; irecord < loaded.batch.record_count; ++irecord) {
+                load_direct_state(loaded.batch.records[irecord], &state);
+                checksum = hash_state_summary(checksum, state);
+            }
+        }
+    }
+    const auto adapter_end = std::chrono::steady_clock::now();
+
+    const double preload_seconds = elapsed_seconds(preload_begin, preload_end);
+    const double adapter_seconds = elapsed_seconds(adapter_begin, adapter_end);
+    const uint64_t adapter_records = data.record_count * opts.benchmark_iterations;
+    const uint64_t adapter_bases = data.base_count * opts.benchmark_iterations;
+
+    std::cout << std::fixed << std::setprecision(6)
+              << "mode=benchmark\n"
+              << "records_loaded=" << data.record_count << "\n"
+              << "mates_loaded=" << data.mate_count << "\n"
+              << "bases_loaded=" << data.base_count << "\n"
+              << "batches_loaded=" << data.batches.size() << "\n"
+              << "iterations=" << opts.benchmark_iterations << "\n"
+              << "preload_seconds=" << preload_seconds << "\n"
+              << "adapter_seconds=" << adapter_seconds << "\n"
+              << "adapter_records=" << adapter_records << "\n"
+              << "adapter_bases=" << adapter_bases << "\n"
+              << "adapter_records_per_second=" << (static_cast<double>(adapter_records) / adapter_seconds) << "\n"
+              << "adapter_bases_per_second=" << (static_cast<double>(adapter_bases) / adapter_seconds) << "\n"
+              << "checksum=" << checksum << "\n";
+    return 0;
+}
+
 int run(const HarnessOptions& opts) {
     InputSourcePlan plan = build_plan(opts);
+    if (opts.mode == "benchmark") {
+        return run_benchmark(opts, plan);
+    }
+
     CbqInputModule module;
     std::string error;
     if (!module.configure(plan, &error)) {
