@@ -152,6 +152,19 @@ Ship discoverable, installable Ubuntu binaries for STAR Suite with low-friction 
   `STAR --version` reports `1.0.1`. Upstream provenance and genome index
   compatibility remain `2.7.11b` and `2.7.4a`.
 
+## Feature Release Prep (2026-05-29)
+
+- Candidate tag: `v1.1.0`
+- Release notes: `docs/RELEASE_NOTES_v1.1.0.md`
+- Packaging metadata: `debian/changelog` entry `1.1.0-1`
+- Scope added since `v1.0.3`: native CBQ/BINSEQ input support through the
+  shared C++ reader, STAR read-buffer adapter, ordered FASTQ/FASTQ.gz-to-CBQ
+  encoder, STAR mapper/STARsolo/OCM/Flex/SLAM/process_features smoke coverage,
+  and PE-SLAM CBQ divergence testing.
+- Version note: release artifacts and Debian packages use STAR Suite `1.1.0`;
+  `STAR --version` reports `1.1.0`. Upstream provenance and genome index
+  compatibility remain `2.7.11b` and `2.7.4a`.
+
 ## Hotfix Release Prep (2026-05-29)
 
 - Candidate tag: `v1.0.3`

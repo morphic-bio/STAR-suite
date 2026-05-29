@@ -1,3 +1,16 @@
+star-suite (1.1.0-1) unstable; urgency=medium
+
+  * Feature release for native CBQ/BINSEQ input support.
+  * Add the native C++ CBQ reader, STAR read-buffer adapter, process_features
+    adapter coverage, and an order-preserving FASTQ/FASTQ.gz-to-CBQ encoder.
+  * Wire CBQ input through STAR mapper, STARsolo, OCM, Flex, and SLAM smoke
+    coverage, including paired-end SLAM divergence checks.
+  * Register CBQ module, production-local, and network-backed regression cases
+    in the production module manifest.
+  * Report STAR Suite 1.1.0 from STAR --version.
+
+ -- STAR-suite Maintainers <maintainers@biodepot.example>  Fri, 29 May 2026 19:20:00 +0000
+
 star-suite (1.0.3-1) unstable; urgency=medium
 
   * Hotfix non-Flex Solo bridge determinism by canonicalizing worker-local

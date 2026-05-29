@@ -226,7 +226,7 @@ run_selected_cases() {
         set +e
         (
             cd "$ROOT_DIR"
-            env "${ENV_TOKENS[@]}" bash "$(resolve_path "$script")"
+            env OUT_ROOT="${case_dir}/work" "${ENV_TOKENS[@]}" bash "$(resolve_path "$script")"
         ) > "${case_dir}/stdout.log" 2> "${case_dir}/stderr.log"
         local status=$?
         set -e
