@@ -9,7 +9,9 @@
 #include "Parameters.h"
 #include "ReadAlign.h"
 #include "Stats.h"
+#include "input/CbqInputModule.h"
 
+#include <algorithm>
 #include <cstring>
 #include <cstdlib>
 #include <fstream>
@@ -28,6 +30,22 @@ bool gzReadLine(gzFile gz, char *buf, int maxLen) {
     int len = static_cast<int>(strlen(buf));
     if (len > 0 && buf[len - 1] == '\n') buf[len - 1] = '\0';
     return true;
+}
+
+bool copyCbqSpanToBuffer(star::input::CbqByteSpan span, char *dest, size_t capacity, size_t *lengthOut) {
+    if (dest == nullptr || capacity == 0) return false;
+    const size_t n = std::min(span.size, capacity - 1);
+    if (n > 0 && span.data != nullptr) {
+        std::memcpy(dest, span.data, n);
+    }
+    dest[n] = '\0';
+    if (lengthOut != nullptr) *lengthOut = n;
+    return span.size < capacity;
+}
+
+void copyCbqReadName(star::input::CbqByteSpan span, char *dest, size_t capacity) {
+    size_t ignored = 0;
+    copyCbqSpanToBuffer(span, dest, capacity, &ignored);
 }
 
 } // namespace
@@ -430,6 +448,174 @@ static uint64_t processOneLane(
     return nReads;
 }
 
+static uint64_t processOneCbqLane(
+    FlexPipelineState *st, Parameters &P, int laneId,
+    const std::string &cbqPath,
+    SoloReadFeature *readFeat, Stats *stats,
+    const std::unordered_set<uint32_t> &samplePreFilter,
+    SampleDetector *sampleDet, bool sampleDetReady,
+    SoloReadBarcode &localBar, bool noAlign = false)
+{
+    auto &cache = FlexHashScreenCache::instance();
+    const uint32_t sampleTagOffset = P.pSolo.sampleProbeOffset;
+    const bool hasSamplePreFilter = !samplePreFilter.empty();
+
+    std::vector<std::vector<std::string>> readFiles(1);
+    readFiles[0].push_back(cbqPath);
+    star::input::InputSourcePlan plan =
+        star::input::make_cbq_input_source_plan(readFiles, std::vector<std::string>(), 2);
+
+    star::input::CbqInputModule module;
+    std::string inputError;
+    if (!module.configure(plan, &inputError) || !module.open(&inputError)) {
+        P.inOut->logMain << "ERROR: Flex CBQ pipeline could not open " << cbqPath
+                         << ": " << inputError << "\n" << std::flush;
+        return 0;
+    }
+
+    uint8_t packedScratch[4];
+    char dummySeq[4] = {'\0'};
+    char dummyQual[4] = {'\0'};
+
+    char seq0[kFlexPipeSeqMax], seq1[kFlexPipeSeqMax];
+    char qual0[kFlexPipeSeqMax], qual1[kFlexPipeSeqMax];
+    char name[kFlexPipeNameMax];
+
+    uint64_t nReads = 0;
+    star::input::CbqReadBatchView batch;
+    while (true) {
+        inputError.clear();
+        const star::input::InputStatus status = module.next_batch(&batch, &inputError);
+        if (status == star::input::InputStatus::End) break;
+        if (status == star::input::InputStatus::Error) {
+            P.inOut->logMain << "ERROR: Flex CBQ pipeline failed while reading " << cbqPath
+                             << ": " << inputError << "\n" << std::flush;
+            break;
+        }
+
+        for (uint32_t i = 0; i < batch.record_count; ++i) {
+            const star::input::CbqReadView &record = batch.records[i];
+            if (record.segment_count < 2) {
+                P.inOut->logMain << "ERROR: Flex CBQ pipeline expected paired reads in "
+                                 << cbqPath << "\n" << std::flush;
+                module.close();
+                return nReads;
+            }
+
+            size_t readLen0Size = 0;
+            size_t readLen1Size = 0;
+            if (!star::input::materialize_cbq_segment_sequence_to_buffer(
+                    record.segments[0], seq0, sizeof(seq0), &readLen0Size, &inputError) ||
+                !star::input::materialize_cbq_segment_sequence_to_buffer(
+                    record.segments[1], seq1, sizeof(seq1), &readLen1Size, &inputError)) {
+                P.inOut->logMain << "ERROR: Flex CBQ sequence materialization failed in "
+                                 << cbqPath << ": " << inputError << "\n" << std::flush;
+                module.close();
+                return nReads;
+            }
+
+            size_t qualLen0 = 0;
+            size_t qualLen1 = 0;
+            if (!copyCbqSpanToBuffer(record.segments[0].quality, qual0, sizeof(qual0), &qualLen0) ||
+                !copyCbqSpanToBuffer(record.segments[1].quality, qual1, sizeof(qual1), &qualLen1)) {
+                P.inOut->logMain << "ERROR: Flex CBQ quality length exceeds buffer in "
+                                 << cbqPath << "\n" << std::flush;
+                module.close();
+                return nReads;
+            }
+            const uint32_t readLen0 = static_cast<uint32_t>(readLen0Size);
+            const uint32_t readLen1 = static_cast<uint32_t>(readLen1Size);
+            copyCbqReadName(record.read_name, name, sizeof(name));
+
+            uint64_t iReadAll = st->iReadAllGlobal.fetch_add(1);
+            st->counters.perLaneReads[laneId]++;
+            nReads++;
+
+            bool sampleOK = true;
+            if (hasSamplePreFilter && sampleTagOffset + 8 <= readLen0) {
+                uint32_t tagCode = 0;
+                bool encodable = true;
+                for (int j = 0; j < 8; ++j) {
+                    uint8_t nib = g_asciiToNib[static_cast<uint8_t>(seq0[sampleTagOffset + j])];
+                    if (nib == 0) { encodable = false; break; }
+                    tagCode = (tagCode << 4) | nib;
+                }
+                if (!encodable || samplePreFilter.find(tagCode) == samplePreFilter.end()) {
+                    sampleOK = false;
+                }
+            }
+
+            FlexHashScreenDecision decision;
+            if (sampleOK) {
+                decision = cache.classifyReadH0H1Offset0(seq0, readLen0);
+            } else {
+                decision.action = FlexHashScreenDecision::Pass;
+            }
+
+            if (decision.action == FlexHashScreenDecision::Keep ||
+                decision.action == FlexHashScreenDecision::Deny) {
+
+                char *readSeqPtrs[2]  = { dummySeq, seq1 };
+                char *readQualPtrs[2] = { dummyQual, qual1 };
+                uint64 readLens[2]    = { 0, readLen1 };
+                std::string readNameExtra;
+
+                localBar.getCBandUMI(readSeqPtrs, readQualPtrs, readLens, readNameExtra,
+                                      static_cast<uint32_t>(laneId), name);
+
+                uint8_t detectedSampleToken = 0xFF;
+                if (sampleDetReady && sampleTagOffset + 8 <= readLen0) {
+                    nuclPackBAM(seq0 + sampleTagOffset, reinterpret_cast<char *>(packedScratch), 8);
+                    uint32_t detIdx = sampleDet->detectSampleFromPackedTag(packedScratch);
+                    if (detIdx > 0) {
+                        detectedSampleToken = static_cast<uint8_t>(detIdx & 0x1Fu);
+                    }
+                }
+                localBar.detectedSampleToken = detectedSampleToken;
+
+                if (decision.action == FlexHashScreenDecision::Keep) {
+                    record_flex_hash_screen_keep(readFeat, localBar, iReadAll,
+                                                 decision.geneIdx15, decision.cacheClass);
+                    stats->hashScreenKeep++;
+                    st->counters.triageKeep.fetch_add(1);
+                } else {
+                    record_flex_hash_screen_deny(readFeat, localBar, iReadAll, "NEG_PROBE_AMBIG");
+                    stats->hashScreenDeny++;
+                    st->counters.triageDeny.fetch_add(1);
+                }
+            } else {
+                st->counters.triageMiss.fetch_add(1);
+                if (!noAlign) {
+                    EnrichedPacket ep;
+                    std::memcpy(ep.name, name, kFlexPipeNameMax);
+                    std::memcpy(ep.seq[0], seq0, readLen0 + 1);
+                    std::memcpy(ep.seq[1], seq1, readLen1 + 1);
+                    std::memcpy(ep.qual[0], qual0, readLen0 + 1);
+                    std::memcpy(ep.qual[1], qual1, readLen1 + 1);
+                    ep.readLen[0] = readLen0;
+                    ep.readLen[1] = readLen1;
+                    ep.iReadAll = iReadAll;
+                    ep.laneId = static_cast<uint8_t>(laneId);
+                    ep.readFilesIndex = static_cast<uint32_t>(laneId);
+                    ep.readFilter = record.read_filter;
+                    ep.eof = false;
+                    ep.cbMatch = -1;
+                    ep.cbMatchIndN = 0;
+                    ep.umiB = 0;
+                    ep.detectedSampleToken = 0xFF;
+                    ep.hashScreenSampleIdx = 0;
+                    st->alignQ.push(std::move(ep));
+                }
+            }
+
+            st->counters.readsTotal.fetch_add(1);
+        }
+    }
+
+    module.close();
+    return nReads;
+}
+
 void *flexLaneReaderFullThread(void *arg) {
     FlexLaneReaderArgs *ctx = static_cast<FlexLaneReaderArgs *>(arg);
     FlexPipelineState *st = ctx->state;
@@ -467,19 +653,24 @@ void *flexLaneReaderFullThread(void *arg) {
         }
 
         const std::string &r2path = st->laneFiles[lane].r2path;
-        const std::string &r1path = st->laneFiles[lane].r1path;
-        gzFile gzR2 = gzopen(r2path.c_str(), "rb");
-        gzFile gzR1 = gzopen(r1path.c_str(), "rb");
-        if (!gzR2 || !gzR1) {
-            if (gzR2) gzclose(gzR2);
-            if (gzR1) gzclose(gzR1);
-            continue;
-        }
-        gzbuffer(gzR2, kGzBufSize);
-        gzbuffer(gzR1, kGzBufSize);
+        if (P.readFilesTypeN == 20 && P.cbqInputActive) {
+            processOneCbqLane(st, P, lane, r2path, readFeat, stats,
+                              samplePreFilter, sampleDet, sampleDetReady, localBar, noAlign);
+        } else {
+            const std::string &r1path = st->laneFiles[lane].r1path;
+            gzFile gzR2 = gzopen(r2path.c_str(), "rb");
+            gzFile gzR1 = gzopen(r1path.c_str(), "rb");
+            if (!gzR2 || !gzR1) {
+                if (gzR2) gzclose(gzR2);
+                if (gzR1) gzclose(gzR1);
+                continue;
+            }
+            gzbuffer(gzR2, kGzBufSize);
+            gzbuffer(gzR1, kGzBufSize);
 
-        processOneLane(st, P, lane, gzR2, gzR1, readFeat, stats,
-                       samplePreFilter, sampleDet, sampleDetReady, localBar, noAlign);
+            processOneLane(st, P, lane, gzR2, gzR1, readFeat, stats,
+                           samplePreFilter, sampleDet, sampleDetReady, localBar, noAlign);
+        }
     }
 
     // Signal that this reader is done; last one closes alignQ

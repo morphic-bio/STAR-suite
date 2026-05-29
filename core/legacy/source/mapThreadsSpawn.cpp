@@ -49,6 +49,10 @@ static bool flexPipelineActivationGuard(Parameters &P) {
     int nTriage = ps.flexPipelineNTriage;
     int nSolo = ps.flexPipelineNSolo;
     bool fullyFused = (nTriage == 0 && nSolo == 0);
+    if (P.readFilesTypeN == 20 && !fullyFused) {
+        P.inOut->logMain << "Flex pipeline: not active (CBQ/Binseq input currently requires fully-fused mode: --flexPipelineNTriage 0 --flexPipelineNSolo 0)\n" << std::flush;
+        return false;
+    }
     int minThreads = fullyFused ? 1 : (nLanes + nTriage + nSolo + 1);
     if (P.runThreadN < minThreads) {
         P.inOut->logMain << "Flex pipeline: not active (runThreadN=" << P.runThreadN
@@ -98,8 +102,13 @@ static void mapThreadsSpawnFlexPipeline(Parameters &P, ReadAlignChunk** RAchunk)
     if (fullyFused) {
         state.laneFiles.resize(nLanes);
         for (int lane = 0; lane < nLanes; ++lane) {
-            state.laneFiles[lane].r2path = P.readFilesNames[0][lane];
-            state.laneFiles[lane].r1path = P.readFilesNames[1][lane];
+            if (P.readFilesTypeN == 20 && P.cbqInputActive) {
+                state.laneFiles[lane].r2path = P.readFilesNames[0][lane];
+                state.laneFiles[lane].r1path.clear();
+            } else {
+                state.laneFiles[lane].r2path = P.readFilesNames[0][lane];
+                state.laneFiles[lane].r1path = P.readFilesNames[1][lane];
+            }
         }
         state.nFusedThreads = nFusedThreads;
     }
