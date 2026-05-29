@@ -8,6 +8,7 @@ supported_modes: [local, dry-run-capable]
 caveats:
   - "Default rendering is safe: it prepares the downsample and run scripts only."
   - "Production OCM semantics use --ocmMultiBarcodeMode flex through STAR_OCM_BARCODE_MODE=flex."
+  - "CBQ mode uses ordered per-lane paired CBQ files in STAR mate order and must run with star_yremove=no until Y/noY emission supports non-FASTQ input."
   - "Do not set --run-cr unless intentionally regenerating the Cell Ranger oracle; existing CR artifacts are reused by default."
 default_output_layout: /mnt/pikachu/JAX_scRNAseq02_processed/ocm_composite_smoke_<timestamp>/
 
@@ -47,7 +48,7 @@ parameter_groups:
     parameters: [out_root]
   - name: star
     title: STAR OCM Flags
-    parameters: [threads, star_out_samtype, star_yremove, star_bam_cbub, star_bam_gxgn, star_solo_features, star_compare_feature]
+    parameters: [threads, star_input_format, cbq_ordered_encoder_bin, cbq_compression_level, cbq_block_size, star_out_samtype, star_yremove, star_bam_cbub, star_bam_gxgn, star_solo_features, star_compare_feature]
   - name: stages
     title: Execution Stages
     parameters: [prepare, run_star, materialize, compare, run_cr, force]
@@ -175,6 +176,47 @@ parameters:
     description: STAR and CR local cores.
     category: star
 
+  - name: star_input_format
+    cli_flag: --star-input-format
+    type: enum
+    required: false
+    default: fastq
+    choices: [fastq, cbq]
+    description: STAR input surface. CBQ stages ordered paired CBQ files from the downsampled STAR FASTQs.
+    category: star
+
+  - name: cbq_ordered_encoder_bin
+    cli_flag: CBQ_ORDERED_ENCODER_BIN
+    type: file
+    required: false
+    default: /mnt/pikachu/STAR-suite/core/legacy/source/cbq_ordered_encoder
+    path_must_exist: false
+    must_be_executable: false
+    description: Ordered FASTQ-to-CBQ encoder used when star_input_format=cbq; the recipe validates this only for CBQ mode.
+    env_var: CBQ_ORDERED_ENCODER_BIN
+    source: environment
+    category: star
+
+  - name: cbq_compression_level
+    cli_flag: CBQ_COMPRESSION_LEVEL
+    type: int
+    required: false
+    default: 0
+    description: Compression level passed to cbq_ordered_encoder.
+    env_var: CBQ_COMPRESSION_LEVEL
+    source: environment
+    category: star
+
+  - name: cbq_block_size
+    cli_flag: CBQ_BLOCK_SIZE
+    type: int
+    required: false
+    default: 1048576
+    description: Virtual CBQ block size passed to cbq_ordered_encoder.
+    env_var: CBQ_BLOCK_SIZE
+    source: environment
+    category: star
+
   - name: star_out_samtype
     cli_flag: --star-out-samtype
     type: enum
@@ -277,7 +319,7 @@ parameters:
 
 constraints:
   - kind: positive
-    params: [read_pairs, threads]
+    params: [read_pairs, threads, cbq_block_size]
     message: Must be a positive integer.
 
 rendering:
@@ -287,6 +329,7 @@ rendering:
     - read_pairs
     - out_root
     - threads
+    - star_input_format
     - prepare
     - run_star
     - materialize
