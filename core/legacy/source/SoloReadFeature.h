@@ -63,6 +63,9 @@ public:
         std::vector<AmbiguousObservation> observations; // Flex: per-read observations (unchanged)
         // Non-Flex direct bridge: aggregate (umi24,gene16) -> read counts (no per-read observation vector)
         std::unordered_map<uint64_t, uint32_t> bridgeAmbigUmiGene_;
+        std::vector<double> cbLogLikMatch;
+        std::vector<double> cbLogLikMismatch;
+        uint32_t cbEvidenceReads = 0;
         // Per-key ambiguous read accounting (non-Flex bridge): no per-read replay vectors
         uint32_t bridgeAmbigGeneFeatU_ = 0;
         uint32_t bridgeAmbigGeneFeatM_ = 0;
