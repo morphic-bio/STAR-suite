@@ -115,6 +115,10 @@ update this file with its output location.
 - `/tmp/ucsf_velocyto_cbub_stage_*` (host-local dry-run staging roots used by `tests/run_ucsf_velocyto_cbub_smoke.sh`; protected dataset, do not redistribute outputs)
 - `tests/flexfilter_parity_output_*/` (FlexFilter parity outputs vs production baseline)
 - `/tmp/*` (temporary scratch outputs)
+- `/mnt/pikachu/solo_bridge_determinism_*` (non-Flex Solo bridge determinism
+  harness outputs from `tests/run_solo_bridge_determinism_harness.sh`: paired
+  STAR runs, bridge-stage digest TSVs, optional per-CB digest TSVs, raw/filtered
+  GeneFull MEX outputs, logs, and comparison summaries)
 - `/tmp/ucsf_cr_config_1m_smoke_*` (real UCSF perturb CR-config fixture smoke outputs)
 - `/tmp/ucsf_batch_cr_multifeature_tiny_*` (synthetic UCSF perturb multifeature CR-config tiny smoke outputs)
 - `/tmp/flex_cr_config_smoke_*` (Flex CR-config smoke outputs)

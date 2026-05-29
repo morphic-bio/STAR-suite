@@ -3,9 +3,10 @@
 #include "SoloBinarySpool.h"
 #include "streamFuns.h"
 #include "SoloFeatureTypes.h"
+#include "solo/CbBayesianResolver.h"
+#include <algorithm>
 #include <cstdlib>
 #include <cstdio>
-#include <cmath>
 
 SoloReadFeature::SoloReadFeature(int32 feTy, Parameters &Pin, int iChunk)
              : featureType(feTy), P(Pin), pSolo(P.pSolo), binarySpool(false), binarySpoolInMemory(false), binarySpoolMemoryLimitBytes(0), streamReads(nullptr), binarySpoolReadPos(0), inlineHash_(nullptr), readIdTracker_(nullptr)
@@ -204,6 +205,68 @@ int64_t bridgeCbQualTotalScore(const std::string &qual, char qsBase, uint32_t qs
     }
     return s;
 }
+
+template <typename T>
+bool bridgeVectorLess(const std::vector<T> &lhs, const std::vector<T> &rhs)
+{
+    return std::lexicographical_compare(lhs.begin(), lhs.end(), rhs.begin(), rhs.end());
+}
+
+bool bridgeRepresentativeBetter(const std::string &newSeq,
+                                const std::string &newQual,
+                                const std::vector<uint8_t> &newPinCandQuals,
+                                const std::vector<uint32_t> &newCandidateIdx,
+                                const std::string &oldSeq,
+                                const std::string &oldQual,
+                                const std::vector<uint8_t> &oldPinCandQuals,
+                                const std::vector<uint32_t> &oldCandidateIdx,
+                                char qsBase,
+                                uint32_t qsMax)
+{
+    const int64_t oldScore = bridgeCbQualTotalScore(oldQual, qsBase, qsMax);
+    const int64_t newScore = bridgeCbQualTotalScore(newQual, qsBase, qsMax);
+    if (newScore != oldScore) {
+        return newScore > oldScore;
+    }
+    if (newQual != oldQual) {
+        return newQual < oldQual;
+    }
+    if (newSeq != oldSeq) {
+        return newSeq < oldSeq;
+    }
+    if (newPinCandQuals.empty() != oldPinCandQuals.empty()) {
+        return !newPinCandQuals.empty();
+    }
+    if (newPinCandQuals != oldPinCandQuals) {
+        return bridgeVectorLess(newPinCandQuals, oldPinCandQuals);
+    }
+    return bridgeVectorLess(newCandidateIdx, oldCandidateIdx);
+}
+
+bool bridgeSampleFlagBetter(bool oldHave,
+                            SoloReadFlagClass::typeFlag oldFlag,
+                            bool newHave,
+                            SoloReadFlagClass::typeFlag newFlag)
+{
+    return newHave && (!oldHave || newFlag < oldFlag);
+}
+
+void bridgeMergePinCandQualsMax(std::vector<uint8_t> &dst,
+                                const std::vector<uint8_t> &src,
+                                char qsBase)
+{
+    if (src.empty()) {
+        return;
+    }
+    if (dst.size() < src.size()) {
+        dst.resize(src.size(), static_cast<uint8_t>(qsBase));
+    }
+    for (size_t ii = 0; ii < src.size(); ++ii) {
+        if (src[ii] > dst[ii]) {
+            dst[ii] = src[ii];
+        }
+    }
+}
 } // namespace
 
 void SoloReadFeature::mergePendingAmbiguous(const SoloReadFeature &other)
@@ -224,6 +287,9 @@ void SoloReadFeature::mergePendingAmbiguous(const SoloReadFeature &other)
             entry.umiCounts = otherEntry.umiCounts;
             entry.observations = otherEntry.observations;
             entry.bridgeAmbigUmiGene_ = otherEntry.bridgeAmbigUmiGene_;
+            entry.cbLogLikMatch = otherEntry.cbLogLikMatch;
+            entry.cbLogLikMismatch = otherEntry.cbLogLikMismatch;
+            entry.cbEvidenceReads = otherEntry.cbEvidenceReads;
             entry.bridgeAmbigGeneFeatU_ = otherEntry.bridgeAmbigGeneFeatU_;
             entry.bridgeAmbigGeneFeatM_ = otherEntry.bridgeAmbigGeneFeatM_;
             entry.bridgeAmbigGeneHaveSampleU_ = otherEntry.bridgeAmbigGeneHaveSampleU_;
@@ -244,32 +310,52 @@ void SoloReadFeature::mergePendingAmbiguous(const SoloReadFeature &other)
             for (const auto &ug : otherEntry.bridgeAmbigUmiGene_) {
                 entry.bridgeAmbigUmiGene_[ug.first] += ug.second;
             }
+            cb_bayesian::mergeCbQualityEvidence(otherEntry.cbLogLikMatch,
+                                                otherEntry.cbLogLikMismatch,
+                                                otherEntry.cbEvidenceReads,
+                                                entry.cbLogLikMatch,
+                                                entry.cbLogLikMismatch,
+                                                entry.cbEvidenceReads);
+            bridgeMergePinCandQualsMax(entry.bridgeAmbigPinCandQuals_,
+                                       otherEntry.bridgeAmbigPinCandQuals_,
+                                       qsBase);
             entry.bridgeAmbigGeneFeatU_ += otherEntry.bridgeAmbigGeneFeatU_;
             entry.bridgeAmbigGeneFeatM_ += otherEntry.bridgeAmbigGeneFeatM_;
-            if (!entry.bridgeAmbigGeneHaveSampleU_ && otherEntry.bridgeAmbigGeneHaveSampleU_) {
+            if (bridgeSampleFlagBetter(entry.bridgeAmbigGeneHaveSampleU_,
+                                       entry.bridgeAmbigGeneSampleFlagU_,
+                                       otherEntry.bridgeAmbigGeneHaveSampleU_,
+                                       otherEntry.bridgeAmbigGeneSampleFlagU_)) {
                 entry.bridgeAmbigGeneSampleFlagU_ = otherEntry.bridgeAmbigGeneSampleFlagU_;
                 entry.bridgeAmbigGeneHaveSampleU_ = true;
             }
-            if (!entry.bridgeAmbigGeneHaveSampleM_ && otherEntry.bridgeAmbigGeneHaveSampleM_) {
+            if (bridgeSampleFlagBetter(entry.bridgeAmbigGeneHaveSampleM_,
+                                       entry.bridgeAmbigGeneSampleFlagM_,
+                                       otherEntry.bridgeAmbigGeneHaveSampleM_,
+                                       otherEntry.bridgeAmbigGeneSampleFlagM_)) {
                 entry.bridgeAmbigGeneSampleFlagM_ = otherEntry.bridgeAmbigGeneSampleFlagM_;
                 entry.bridgeAmbigGeneHaveSampleM_ = true;
             }
             entry.bridgeAmbigReadInfoN_ += otherEntry.bridgeAmbigReadInfoN_;
-            if (!entry.bridgeAmbigReadInfoHaveSample_ && otherEntry.bridgeAmbigReadInfoHaveSample_) {
+            if (bridgeSampleFlagBetter(entry.bridgeAmbigReadInfoHaveSample_,
+                                       entry.bridgeAmbigReadInfoSampleFlag_,
+                                       otherEntry.bridgeAmbigReadInfoHaveSample_,
+                                       otherEntry.bridgeAmbigReadInfoSampleFlag_)) {
                 entry.bridgeAmbigReadInfoSampleFlag_ = otherEntry.bridgeAmbigReadInfoSampleFlag_;
                 entry.bridgeAmbigReadInfoHaveSample_ = true;
             }
 
-            const int64_t oldScore = bridgeCbQualTotalScore(entry.cbQual, qsBase, qsMax);
-            const int64_t newScore = bridgeCbQualTotalScore(otherEntry.cbQual, qsBase, qsMax);
-            if (newScore > oldScore
-                || (newScore == oldScore && otherEntry.cbQual < entry.cbQual)) {
+            if (bridgeRepresentativeBetter(otherEntry.cbSeq,
+                                           otherEntry.cbQual,
+                                           otherEntry.bridgeAmbigPinCandQuals_,
+                                           otherEntry.candidateIdx,
+                                           entry.cbSeq,
+                                           entry.cbQual,
+                                           entry.bridgeAmbigPinCandQuals_,
+                                           entry.candidateIdx,
+                                           qsBase,
+                                           qsMax)) {
                 entry.cbQual = otherEntry.cbQual;
                 entry.cbSeq = otherEntry.cbSeq;
-                entry.bridgeAmbigPinCandQuals_ = otherEntry.bridgeAmbigPinCandQuals_;
-            } else if (entry.bridgeAmbigPinCandQuals_.empty()
-                       && !otherEntry.bridgeAmbigPinCandQuals_.empty()) {
-                entry.bridgeAmbigPinCandQuals_ = otherEntry.bridgeAmbigPinCandQuals_;
             }
         }
     }
@@ -282,16 +368,26 @@ void SoloReadFeature::mergePendingAmbiguous(const SoloReadFeature &other)
         if (pit != pendingAmbiguous_.end() && !pit->second.candidateIdx.empty()) {
             auto &pent = pit->second;
             pent.bridgeAmbigReadInfoN_ += oe.readInfoN_;
-            if (!pent.bridgeAmbigReadInfoHaveSample_ && oe.haveSample_) {
+            if (bridgeSampleFlagBetter(pent.bridgeAmbigReadInfoHaveSample_,
+                                       pent.bridgeAmbigReadInfoSampleFlag_,
+                                       oe.haveSample_,
+                                       oe.sampleFlag_)) {
                 pent.bridgeAmbigReadInfoSampleFlag_ = oe.sampleFlag_;
                 pent.bridgeAmbigReadInfoHaveSample_ = true;
             }
-            const int64_t oldScore = bridgeCbQualTotalScore(pent.cbQual, qsBase, qsMax);
-            const int64_t newScore = bridgeCbQualTotalScore(oe.cbQual, qsBase, qsMax);
-            if (newScore > oldScore || (newScore == oldScore && oe.cbQual < pent.cbQual)) {
+            bridgeMergePinCandQualsMax(pent.bridgeAmbigPinCandQuals_, oe.pinCandQuals_, qsBase);
+            if (bridgeRepresentativeBetter(oe.cbSeq,
+                                           oe.cbQual,
+                                           oe.pinCandQuals_,
+                                           oe.candidateIdx,
+                                           pent.cbSeq,
+                                           pent.cbQual,
+                                           pent.bridgeAmbigPinCandQuals_,
+                                           pent.candidateIdx,
+                                           qsBase,
+                                           qsMax)) {
                 pent.cbQual = oe.cbQual;
                 pent.cbSeq = oe.cbSeq;
-                pent.bridgeAmbigPinCandQuals_ = oe.pinCandQuals_;
             }
             continue;
         }
@@ -301,70 +397,33 @@ void SoloReadFeature::mergePendingAmbiguous(const SoloReadFeature &other)
             dest = oe;
         } else {
             dest.readInfoN_ += oe.readInfoN_;
-            if (!dest.haveSample_ && oe.haveSample_) {
+            if (bridgeSampleFlagBetter(dest.haveSample_,
+                                       dest.sampleFlag_,
+                                       oe.haveSample_,
+                                       oe.sampleFlag_)) {
                 dest.sampleFlag_ = oe.sampleFlag_;
                 dest.haveSample_ = true;
             }
-            const int64_t oldScore = bridgeCbQualTotalScore(dest.cbQual, qsBase, qsMax);
-            const int64_t newScore = bridgeCbQualTotalScore(oe.cbQual, qsBase, qsMax);
-            if (newScore > oldScore || (newScore == oldScore && oe.cbQual < dest.cbQual)) {
+            if (bridgeRepresentativeBetter(oe.cbSeq,
+                                           oe.cbQual,
+                                           oe.pinCandQuals_,
+                                           oe.candidateIdx,
+                                           dest.cbSeq,
+                                           dest.cbQual,
+                                           dest.pinCandQuals_,
+                                           dest.candidateIdx,
+                                           qsBase,
+                                           qsMax)) {
                 dest.cbQual = oe.cbQual;
                 dest.cbSeq = oe.cbSeq;
                 dest.candidateIdx = oe.candidateIdx;
-                dest.pinCandQuals_ = oe.pinCandQuals_;
             }
+            bridgeMergePinCandQualsMax(dest.pinCandQuals_, oe.pinCandQuals_, qsBase);
         }
     }
 }
 
 namespace {
-void bridgeEvalAmbigKeyPin(const SoloReadFeature::ExtendedAmbiguousEntry &entry,
-                           const std::vector<uint32_t> &cbReadCount,
-                           const Parameters &P,
-                           uint32_t *outPinCb,
-                           bool *outPinOk)
-{
-    const uint32_t kCand = static_cast<uint32_t>(entry.candidateIdx.size());
-    const char qsBase = P.pSolo.QSbase;
-    const uint32_t qsMax = P.pSolo.QSmax;
-    uint32_t cb = 0;
-#ifdef MATCH_CellRanger
-    double ptot = 0.0, pmax = 0.0, pin;
-#else
-    float ptot = 0.0, pmax = 0.0, pin;
-#endif
-    for (uint32_t ii = 0; ii < kCand; ++ii) {
-        const uint32_t cbinOneBased = entry.candidateIdx[ii];
-        if (cbinOneBased == 0) {
-            continue;
-        }
-        const uint32_t cbin = cbinOneBased - 1u;
-        const uint8_t qraw = ii < entry.bridgeAmbigPinCandQuals_.size()
-            ? entry.bridgeAmbigPinCandQuals_[ii]
-            : static_cast<uint8_t>(qsBase);
-        char qin = static_cast<char>(qraw);
-        if (cbin < cbReadCount.size() && cbReadCount[cbin] > 0) {
-            qin -= qsBase;
-            qin = qin < static_cast<char>(qsMax) ? qin : static_cast<char>(qsMax);
-#ifdef MATCH_CellRanger
-            pin = static_cast<double>(cbReadCount[cbin])
-                * std::pow(10.0, -static_cast<double>(qin) / 10.0);
-#else
-            pin = static_cast<float>(cbReadCount[cbin])
-                * std::pow(10.0f, -static_cast<float>(qin) / 10.0f);
-#endif
-            ptot += pin;
-            if (pin > pmax) {
-                cb = cbin;
-                pmax = pin;
-            }
-        }
-    }
-    const bool pinOk = (ptot > 0.0 && pmax >= P.pSolo.cbMinP * ptot);
-    *outPinCb = cb;
-    *outPinOk = pinOk;
-}
-
 void bridgeBulkAddFlagCounts(SoloReadFlagClass &rf,
                              uint32_t cb,
                              SoloReadFlagClass::typeFlag f,
@@ -429,10 +488,6 @@ void SoloReadFeature::applyBridgeAmbiguousAggregatedReadAccounting(Parameters &P
                                                                    bool bayesResolved,
                                                                    uint32_t resolvedCbIdx0)
 {
-    uint32_t pinCb0 = 0;
-    bool pinOk = false;
-    bridgeEvalAmbigKeyPin(entry, cbReadCount, P, &pinCb0, &pinOk);
-
     const size_t wlN = P.pSolo.cbWLsize;
     if (bridgePinNreadUnique_.size() < wlN) {
         bridgePinNreadUnique_.assign(wlN, 0);
@@ -444,7 +499,8 @@ void SoloReadFeature::applyBridgeAmbiguousAggregatedReadAccounting(Parameters &P
     const uint32_t geneFeatM = entry.bridgeAmbigGeneFeatM_;
     const uint32_t readInfoN = entry.bridgeAmbigReadInfoN_;
 
-    const uint32_t accountCb = (bayesResolved && pinOk) ? resolvedCbIdx0 : pinCb0;
+    const uint32_t accountCb = bayesResolved ? resolvedCbIdx0 : 0;
+    const bool pinOk = bayesResolved && accountCb < bridgePinNreadUnique_.size();
 
     if (!pinOk) {
         const uint64_t nGeneAmbig = static_cast<uint64_t>(geneFeatU) + static_cast<uint64_t>(geneFeatM);
