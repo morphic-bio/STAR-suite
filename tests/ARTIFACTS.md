@@ -148,7 +148,7 @@ update this file with its output location.
   `/tmp/slam_parity_smoke_*`, and `/tmp/slam_cbq_divergence_harness_*`
   (SLAM-seq paired-end 100K SE/PE smoke outputs, compare logs,
   TranscriptVB/cB/GrandSLAM count surfaces, exact STAR-vs-dump-requant pre-NTR
-  parity, and staged FASTQ-vs-CBQ divergence reports; reproduced by
+  parity, and staged SE/PE FASTQ-vs-CBQ divergence reports; reproduced by
   `scripts/run_slam_100k_se_pe_smoke.sh`, `tests/run_slam_parity_smoke.sh`, and
   `tests/run_slam_cbq_divergence_harness.sh`)
 - `/mnt/pikachu/SLAM-Seq-PE-results/prod_full_20260511T103908Z/` (active
