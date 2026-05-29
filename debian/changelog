@@ -1,3 +1,16 @@
+star-suite (1.0.3-1) unstable; urgency=medium
+
+  * Hotfix non-Flex Solo bridge determinism by canonicalizing worker-local
+    bridge hash entries before collapse.
+  * Aggregate ambiguous cell-barcode evidence deterministically before
+    Bayesian resolution and use the resolved bridge result for read-accounting
+    statistics.
+  * Add an A375 repeat-run bridge determinism harness for production-scale
+    matrix and stats parity checks.
+  * Report STAR Suite 1.0.3 from STAR --version.
+
+ -- STAR-suite Maintainers <maintainers@biodepot.example>  Fri, 29 May 2026 09:00:00 +0000
+
 star-suite (1.0.2-1) unstable; urgency=medium
 
   * Hotfix non-Flex Solo direct bridge UMI collapse to combine exact duplicate
