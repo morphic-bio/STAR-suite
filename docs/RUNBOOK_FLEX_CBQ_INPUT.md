@@ -158,6 +158,50 @@ The fully fused CBQ pipeline was also smoke-tested on eight 100K lane CBQs:
 
 ## Full Production Benchmark
 
+### Topline no-genome FLEX results
+
+On 2026-05-29, SC2300771 was benchmarked on the full production FLEX
+count-only surface with the no-genome path active. These are the current
+topline FLEX results for production count-only runs:
+
+| Input | Wall time | Max RSS | Mapping speed | Input reads |
+| --- | ---: | ---: | ---: | ---: |
+| FASTQ.gz | `12:01.95` | `43,281,404 KB` | `10,538.67M reads/hour` | `2,011,130,186` |
+| Level-0 CBQ | `8:38.52` | `43,378,292 KB` | `14,538.29M reads/hour` | `2,011,130,186` |
+
+The level-0 CBQ run was `3:23.43` faster than FASTQ.gz on the same SSD-hosted
+production surface, about `1.39x` faster by wall time, while using effectively
+the same memory. This is the clearest production use case for CBQ in FLEX:
+count-only no-genome runs avoid STAR genome load, and CBQ removes the remaining
+FASTQ gzip decode bottleneck.
+
+FASTQ no-genome and CBQ no-genome produced byte-identical outputs for:
+
+- `Solo.out/Gene`
+- `Solo.out/Barcodes.stats`
+- `per_sample_filtered`
+
+Both runs produced identical hash-screen counters:
+
+```text
+Flex pipeline complete: total=2011130186, triageKeep=1681459858, triageDeny=16111757, triageMiss=313558571
+```
+
+Artifact roots:
+
+- FASTQ no-genome:
+  `/tmp/star_flex_fastq_full_ssd_20260529T222432Z`
+- CBQ no-genome and current-path comparison:
+  `/tmp/star_flex_no_genome_full_ssd_20260529T213833Z`
+
+For an apples-to-apples no-genome implementation check, the same level-0 CBQ
+command was also forced through the current genome-load path with
+`STAR_DISABLE_FLEX_NO_GENOME=1`. That run took `9:19.20` and peaked at
+`84,395,816 KB`; the no-genome CBQ run took `8:38.52` and peaked at
+`43,378,292 KB`.
+
+### Earlier full production CBQ benchmark
+
 On 2026-05-29, SC2300771 was benchmarked on the full production FLEX no-align
 surface from uncompressed level-0 CBQ on the SSD.
 

@@ -40,9 +40,26 @@ void SoloFeature::sumThreads()
         && !pSolo.flexMode
         && std::getenv("STAR_SOLO_NONFLEX_HASH_BRIDGE") != nullptr;
     
-    ///////////////////////////// collect RAchunk->RA->soloRead->readFeat            
+    ///////////////////////////// collect per-thread SoloReadFeature objects
     for (int ii=0; ii<P.runThreadN; ii++) {//point to
-        readFeatAll[ii]= RAchunk[ii]->RA->soloRead->readFeat[pSolo.featureInd[featureType]];
+        if (RAchunk != nullptr) {
+            if (RAchunk[ii] == nullptr || RAchunk[ii]->RA == nullptr ||
+                RAchunk[ii]->RA->soloRead == nullptr ||
+                RAchunk[ii]->RA->soloRead->readFeat[pSolo.featureInd[featureType]] == nullptr) {
+                ostringstream errOut;
+                errOut << "EXITING because of fatal ERROR: missing per-thread Solo feature for "
+                       << SoloFeatureTypes::Names[featureType]
+                       << " thread " << ii << "\n";
+                exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_INPUT_FILES, P);
+            }
+            readFeatAll[ii]= RAchunk[ii]->RA->soloRead->readFeat[pSolo.featureInd[featureType]];
+        } else if (readFeatAll[ii] == nullptr) {
+            ostringstream errOut;
+            errOut << "EXITING because of fatal ERROR: no-genome Solo aggregation missing thread feature for "
+                   << SoloFeatureTypes::Names[featureType]
+                   << " thread " << ii << "\n";
+            exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_INPUT_FILES, P);
+        }
         readFeatAll[ii]->setOwner(this);
         if (readFeatAll[ii]->streamReads) {
             readFeatAll[ii]->streamReads->flush();

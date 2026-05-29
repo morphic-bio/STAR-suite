@@ -127,6 +127,8 @@ update this file with its output location.
 - `/tmp/star_suite_cbq_pf_adapter_smoke` (synthetic process_features CBQ adapter smoke: assignBarcodes baseline fixture, gzipped FASTQ reference run, CBQ in-memory record run, and MEX/count parity outputs)
 - `/tmp/star_suite_cbq_chromap_adapter_smoke` (synthetic Chromap CBQ adapter smoke: paired-read and barcode CBQ inputs, materialized Chromap FASTQ contract files, payload parity dumps, and optional Chromap mapping output)
 - `/tmp/star_suite_cbq_e2e_module_regression_*` (aggregate CBQ E2E/module regression wrapper logs for BINSEQ probe, native CBQ reader, STAR mapper, STARsolo, process_features, and Chromap adapter smokes)
+- `/tmp/star_suite_cbq_flex_tiny_public_smoke_*` (public tiny FLEX FASTQ-vs-CBQ smoke: generated Flex fixture, ordered cDNA/barcode CBQ, FASTQ and CBQ STAR-Flex outputs, and optional BAM-body parity dumps)
+- `/tmp/star_suite_cbq_flex_100k_*` (host-local SC2300771 100K FLEX FASTQ-vs-CBQ runs: ordered lane CBQs, FASTQ and CBQ STAR-Flex outputs, count parity diffs, and order-normalized BAM-body parity dumps)
 - `/mnt/pikachu/cbq_solo_ingestion_benchmark_*` (FASTQ-vs-native-CBQ STARsolo ingestion timing runs from `tests/run_cbq_solo_ingestion_benchmark.sh`; per-mode `BENCHMARK_SUMMARY.txt` files are the authoritative completion artifacts)
 - `/tmp/star_suite_production_module_regression_*` (manifest-driven production-module regression wrapper logs, per-case stdout/stderr, and preflight/run summaries)
 - `/tmp/ucsf_cr_config_1m_smoke_*` (real UCSF perturb CR-config fixture smoke outputs)
