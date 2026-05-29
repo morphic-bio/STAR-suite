@@ -78,6 +78,7 @@ run_case() {
 
 run_case binseq_probe_contract tests/run_binseq_probe_smoke.sh
 run_case cbq_cpp_reader_contract tests/run_cbq_cpp_reader_smoke.sh
+run_case cbq_ordered_encoder tests/run_cbq_ordered_encoder_smoke.sh
 run_case cbq_star_mapper_e2e tests/run_cbq_star_input_smoke.sh
 run_case cbq_starsolo_e2e tests/run_cbq_solo_e2e_smoke.sh
 run_case cbq_process_features_adapter tests/run_cbq_pf_adapter_smoke.sh

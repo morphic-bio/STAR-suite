@@ -1,9 +1,10 @@
-# Experimental BINSEQ Input
+# CBQ/BINSEQ Input
 
-Status: experimental on `dev-release`. Current BINSEQ support validates `.cbq`
-files against the STAR-suite input contract through both the original
-bqtools-backed probe and the native C++ CBQ reader, and it is wired into the
-STAR mapper as an experimental native input path:
+Status: released in STAR Suite `v1.1.0` for the STAR mapper, STARsolo, OCM,
+Flex, SLAM, and process_features adapter surfaces listed below. Current BINSEQ
+support validates `.cbq` files against the STAR-suite input contract through
+both the original bqtools-backed probe and the native C++ CBQ reader, and it is
+wired into the STAR mapper as a native input path:
 
 ```bash
 STAR --readFilesType Binseq PE --readFilesIn sample.cbq ...
@@ -52,19 +53,18 @@ STAR --readFilesType Binseq SE --readFilesIn sample.cbq ...
 - Chromap CBQ input is covered by a CBQ-to-Chromap-FASTQ adapter smoke and, on
   hosts with Chromap available, a tiny synthetic mapping run.
 - `tests/run_cbq_e2e_module_regression.sh` runs the downsampled CBQ module
-  suite for the reader, STAR mapper, STARsolo, process_features, and Chromap
-  adapter surfaces.
+  suite for the reader, ordered encoder, STAR mapper, STARsolo,
+  process_features, and Chromap adapter surfaces.
+- Flex, OCM, and SLAM CBQ workflows are covered by production-shaped smokes in
+  `tests/production_module_regression_manifest.tsv`.
 - Direct `--readFilesIn sample.cbq` and manifest-style
   `CBQ<TAB>-<TAB>ReadGroup` probe inputs are covered.
 - Default-compressed and uncompressed CBQ files are smoke-tested.
 - The upstream ARC `data/subset.cbq` fixture is tested as an external paired
   CBQ example.
 
-## Experimental Limitations
+## Current Limitations
 
-- Flex and SLAM production workflows, native Chromap in-memory integration, and
-  large production alignment outputs have not been validated directly from
-  BINSEQ input.
 - Chromap integration currently adapts CBQ to Chromap's existing FASTQ path
   contract; it is not yet an in-memory libchromap reader API.
 - SLAM per-file skipping is currently rejected for BINSEQ input.
