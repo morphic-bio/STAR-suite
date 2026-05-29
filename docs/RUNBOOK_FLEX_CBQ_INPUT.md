@@ -92,6 +92,9 @@ Non-pipeline FLEX CBQ runs continue to use the standard STAR CBQ adapter path.
    This builds the generated public tiny FLEX fixture, encodes cDNA R2 plus
    barcode R1 into an ordered CBQ, runs FASTQ and CBQ STAR-Flex, compares
    `Barcodes.stats`, and compares BAM bodies when `samtools` is available.
+   This tiny fixture uses the standard non-hash-screen path, so the key log
+   assertion is `readFilesType Binseq PE` plus `--flex yes`, not a hash-screen
+   pipeline activation message.
 
 4. For production-scale validation, encode a FLEX FASTQ fixture with
    `cbq_ordered_encoder`, using the same
@@ -132,7 +135,9 @@ parity through the standard STAR CBQ adapter path:
 - Unsorted BAM body: record order differs, but sorted SAM body is
   byte-identical.
 
-The standard-adapter log confirms CBQ uses the non-pipeline path:
+The standard-adapter log confirms CBQ uses the non-pipeline path. Depending on
+the surrounding Flex options, the reason can be the ordinary hash-screen gate or
+the CBQ-specific fully-fused requirement:
 
 ```text
 Flex pipeline: not active (CBQ/Binseq input uses the standard STAR CBQ adapter path)
