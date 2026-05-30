@@ -733,9 +733,12 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "chromapAtacEnable", &chromapAtac.enabled));
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacReferenceFasta", &chromapAtac.referenceFasta));
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacIndex", &chromapAtac.chromapIndex));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacInputFormat", &chromapAtac.inputFormat));
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacRead1", &chromapAtac.read1Csv));
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacRead2", &chromapAtac.read2Csv));
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacBarcode", &chromapAtac.barcodeCsv));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacReadPairCbq", &chromapAtac.readPairCbqCsv));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacBarcodeCbq", &chromapAtac.barcodeCbqCsv));
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacReadFormat", &chromapAtac.readFormat));
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacBarcodeWhitelist", &chromapAtac.barcodeWhitelist));
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacBarcodeTranslate", &chromapAtac.barcodeTranslate));
@@ -750,6 +753,10 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "chromapAtacSortBam", &chromapAtac.sortBam));
     parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "chromapAtacWriteIndex", &chromapAtac.writeIndex));
     parArray.push_back(new ParameterInfoScalar<uint64>(-1, -1, "chromapAtacSortBamRam", &chromapAtac.sortBamRam));
+    parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "chromapAtacEmitNoYBam", &chromapAtac.emitNoYBam));
+    parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "chromapAtacEmitYBam", &chromapAtac.emitYBam));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacNoYOutput", &chromapAtac.noYOutput));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacYOutput", &chromapAtac.YOutput));
     parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "chromapAtacLowMem", &chromapAtac.lowMem));
     parArray.push_back(new ParameterInfoScalar<uint64>(-1, -1, "chromapAtacLowMemRam", &chromapAtac.lowMemRam));
     parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "chromapAtacCallMacs3FragPeaks", &chromapAtac.callMacs3FragPeaks));
@@ -930,6 +937,10 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
             chromapAtac.chromapIndex = "-";
             p->inputLevel = 0;
         }
+        if (p->nameString == "chromapAtacInputFormat" && p->inputLevel < 0) {
+            chromapAtac.inputFormat = "fastq";
+            p->inputLevel = 0;
+        }
         if (p->nameString == "chromapAtacRead1" && p->inputLevel < 0) {
             chromapAtac.read1Csv = "-";
             p->inputLevel = 0;
@@ -940,6 +951,14 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
         }
         if (p->nameString == "chromapAtacBarcode" && p->inputLevel < 0) {
             chromapAtac.barcodeCsv = "-";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "chromapAtacReadPairCbq" && p->inputLevel < 0) {
+            chromapAtac.readPairCbqCsv = "-";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "chromapAtacBarcodeCbq" && p->inputLevel < 0) {
+            chromapAtac.barcodeCbqCsv = "-";
             p->inputLevel = 0;
         }
         if (p->nameString == "chromapAtacReadFormat" && p->inputLevel < 0) {
@@ -996,6 +1015,22 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
         }
         if (p->nameString == "chromapAtacSortBamRam" && p->inputLevel < 0) {
             chromapAtac.sortBamRam = 8ULL * 1024 * 1024 * 1024;
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "chromapAtacEmitNoYBam" && p->inputLevel < 0) {
+            chromapAtac.emitNoYBam = 0;
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "chromapAtacEmitYBam" && p->inputLevel < 0) {
+            chromapAtac.emitYBam = 0;
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "chromapAtacNoYOutput" && p->inputLevel < 0) {
+            chromapAtac.noYOutput = "-";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "chromapAtacYOutput" && p->inputLevel < 0) {
+            chromapAtac.YOutput = "-";
             p->inputLevel = 0;
         }
         if (p->nameString == "chromapAtacLowMem" && p->inputLevel < 0) {

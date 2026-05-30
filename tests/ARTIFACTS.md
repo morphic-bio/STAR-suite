@@ -131,6 +131,7 @@ update this file with its output location.
 - `/tmp/star_suite_cbq_solo_e2e_smoke` (synthetic STARsolo CBQ E2E smoke: tiny genome/GTF, whitelist, FASTQ-vs-CBQ raw Gene MEX parity, level-0 CBQ parity, and manifest CBQ parity)
 - `/tmp/star_suite_cbq_pf_adapter_smoke` (synthetic process_features CBQ adapter smoke: assignBarcodes baseline fixture, gzipped FASTQ reference run, CBQ in-memory record run, and MEX/count parity outputs)
 - `/tmp/star_suite_cbq_chromap_adapter_smoke` (synthetic Chromap CBQ adapter smoke: paired-read and barcode CBQ inputs, materialized Chromap FASTQ contract files, payload parity dumps, and optional Chromap mapping output)
+- `/tmp/star_suite_libchromap_cbq_contract_smoke` (synthetic STAR libchromap CBQ contract smoke: generated ATAC FASTQ/CBQ inputs, Chromap index, FASTQ-vs-CBQ contract-runner fragments, and parity dumps)
 - `/tmp/star_suite_cbq_e2e_module_regression_*` (aggregate CBQ E2E/module regression wrapper logs for BINSEQ probe, native CBQ reader, STAR mapper, STARsolo, process_features, and Chromap adapter smokes)
 - `/tmp/star_suite_cbq_flex_tiny_public_smoke_*` (public 10x tiny FLEX FASTQ-vs-ordered-CBQ smoke: downloaded tiny fixtures, generated FLEX assets, filtered STAR index, encoded CBQ, FASTQ/CBQ STAR-Flex runs, and parity dumps)
 - `/tmp/star_suite_cbq_flex_100k_*` (host-local SC2300771 100K FLEX FASTQ-vs-CBQ runs: ordered lane CBQs, FASTQ and CBQ STAR-Flex outputs, count parity diffs, and order-normalized BAM-body parity dumps)

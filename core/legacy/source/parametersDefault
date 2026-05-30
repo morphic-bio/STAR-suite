@@ -2102,6 +2102,11 @@ chromapAtacReferenceFasta   -
 chromapAtacIndex            -
     string:                 Chromap index path (required when chromapAtacEnable=1).
 
+chromapAtacInputFormat      fastq
+    string:                 ATAC input format for libchromap.
+                            fastq ... use chromapAtacRead1/chromapAtacRead2/chromapAtacBarcode (default).
+                            cbq   ... use chromapAtacReadPairCbq/chromapAtacBarcodeCbq.
+
 chromapAtacRead1            -
     string:                 comma-separated ATAC read1 FASTQ paths (same order as read2/barcode lists).
 
@@ -2110,6 +2115,12 @@ chromapAtacRead2            -
 
 chromapAtacBarcode          -
     string:                 comma-separated ATAC barcode FASTQ paths.
+
+chromapAtacReadPairCbq      -
+    string:                 comma-separated paired-read ATAC CBQ paths when chromapAtacInputFormat=cbq.
+
+chromapAtacBarcodeCbq       -
+    string:                 comma-separated barcode ATAC CBQ paths when chromapAtacInputFormat=cbq.
 
 chromapAtacReadFormat       -
     string:                 optional Chromap read-format string applied to ATAC reads/barcodes, e.g. bc:8:23:- extracts 0-based barcode bases 8-23 and reverse-complements them.
@@ -2149,6 +2160,18 @@ chromapAtacWriteIndex       0
 
 chromapAtacSortBamRam       8589934592
     uint:                   RAM limit in bytes for Chromap BAM/CRAM sorting.
+
+chromapAtacEmitNoYBam       0
+    int:                    emit an additional Chromap SAM/BAM/CRAM stream excluding reads with Y-chromosome alignments when 1. Requires chromapAtacOutputFormat=SAM|BAM|CRAM.
+
+chromapAtacEmitYBam         0
+    int:                    emit an additional Chromap SAM/BAM/CRAM stream containing reads with Y-chromosome alignments when 1. Requires chromapAtacOutputFormat=SAM|BAM|CRAM.
+
+chromapAtacNoYOutput        -
+    string:                 optional explicit noY Chromap stream output path. If unset and chromapAtacEmitNoYBam=1, STAR derives it from chromapAtacOutputFragments using Chromap's .noY suffix convention.
+
+chromapAtacYOutput          -
+    string:                 optional explicit Y Chromap stream output path. If unset and chromapAtacEmitYBam=1, STAR derives it from chromapAtacOutputFragments using Chromap's .Y suffix convention.
 
 chromapAtacLowMem           0
     int:                    enable Chromap mapping low-memory mode (overflow-spill to disk) when 1. Reduces peak RSS at the cost of disk I/O. Compatible with --atac-fragments dual output and BED-only output.

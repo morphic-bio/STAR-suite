@@ -28,6 +28,11 @@ enum class ChromapMacs3FragPeaksSource {
   MEMORY
 };
 
+enum class ChromapInputFormat {
+  FASTQ,
+  CBQ
+};
+
 enum class ChromapContractStatus {
   OK,
   INVALID_CONFIG,
@@ -54,9 +59,12 @@ struct ChromapPermitHooks {
 struct ChromapAtacConfig {
   std::string reference_fasta;
   std::string chromap_index;
+  ChromapInputFormat input_format = ChromapInputFormat::FASTQ;
   std::vector<std::string> read1_fastqs;
   std::vector<std::string> read2_fastqs;
   std::vector<std::string> barcode_fastqs;
+  std::vector<std::string> read_pair_cbqs;
+  std::vector<std::string> barcode_cbqs;
   std::string barcode_whitelist;
   std::string barcode_translate_table;
   // If true, the barcode translate table is read in natural <from_bc>\t<to_bc>
@@ -97,6 +105,10 @@ struct ChromapAtacConfig {
   bool sort_bam = false;
   bool write_index = false;
   uint64_t sort_bam_ram_limit = 8ULL * 1024 * 1024 * 1024;
+  bool emit_no_y_bam = false;
+  bool emit_y_bam = false;
+  std::string no_y_output_path;
+  std::string y_output_path;
 
   bool call_macs3_frag_peaks = false;
   std::string macs3_frag_peaks_output;
