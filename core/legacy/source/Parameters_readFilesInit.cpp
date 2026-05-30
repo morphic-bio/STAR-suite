@@ -75,6 +75,13 @@ void Parameters::readFilesInit()
         exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
     }
 
+    if (emitYNoYCbqyes && batchModeInt != 0) {
+        ostringstream errOut;
+        errOut << "EXITING because of FATAL INPUT ERROR: --emitYNoYFormat cbq is not implemented for --batchMode.\n";
+        errOut << "SOLUTION: run CBQ Y/noY emission without batch mode or split batches explicitly.\n";
+        exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+    }
+
     readFilesPrefixFinal=(readFilesPrefix=="-" ? "" : readFilesPrefix);
     
     if (readFilesManifest[0]=="-") {//no manifest, file names in readFilesIn

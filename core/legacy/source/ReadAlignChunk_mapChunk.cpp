@@ -3,7 +3,79 @@
 #include "ThreadControl.h"
 #include "ErrorWarning.h"
 #include "input/CbqStarAdapter.h"
+#include "input/CbqYNoYWriter.h"
 #include SAMTOOLS_BGZF_H
+
+std::string ReadAlignChunk::cbqYNoYHeaderPayload(uint32 imate) const {
+    const char* rawName = RA->readNameMates[imate];
+    std::string header;
+    if (rawName != nullptr && rawName[0] != 0) {
+        const char* name = rawName;
+        if (name[0] == '@' || name[0] == '>') {
+            ++name;
+        }
+        header = name;
+    } else {
+        header = "read_" + std::to_string(RA->iReadAll);
+    }
+
+    if (RA->readNameExtra.size() > imate && !RA->readNameExtra[imate].empty()) {
+        header += " ";
+        header += RA->readNameExtra[imate];
+    }
+    return header;
+}
+
+bool ReadAlignChunk::makeCbqYNoYRecordFromCurrentRead(bool isY,
+                                                      star::input::CbqYNoYRecord* record,
+                                                      std::string* error) {
+    if (record == nullptr) {
+        if (error != nullptr) {
+            *error = "CBQ Y/noY record destination is null";
+        }
+        return false;
+    }
+    const uint32 emitCount = P.yFastqEmitReadCount();
+    record->is_y = isY;
+    record->segments.clear();
+    record->segments.resize(emitCount);
+    for (uint32 imate = 0; imate < emitCount; ++imate) {
+        if (imate >= P.readNends) {
+            if (error != nullptr) {
+                *error = "CBQ Y/noY emit count exceeds loaded read ends";
+            }
+            return false;
+        }
+        star::input::CbqWriterSegment& segment = record->segments[imate];
+        segment.header_payload = cbqYNoYHeaderPayload(imate);
+        const uint readLen = RA->readLength[imate];
+        segment.sequence.assign(RA->Read0[imate], RA->Read0[imate] + readLen);
+        if (RA->readFileType == 2 && RA->Qual0[imate] != nullptr) {
+            segment.quality.assign(RA->Qual0[imate], RA->Qual0[imate] + readLen);
+        } else {
+            segment.quality.assign(readLen, 'A');
+        }
+    }
+    return true;
+}
+
+void ReadAlignChunk::submitCbqYNoYChunkOrDie(uint64 chunkId,
+                                             const std::vector<star::input::CbqYNoYRecord>& records) {
+    if (g_cbqYNoYWriter == nullptr) {
+        ostringstream errOut;
+        errOut << "EXITING because of FATAL ERROR: CBQ Y/noY writer was not initialized\n";
+        exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_INPUT_FILES, P);
+    }
+    std::string cbqWriterError;
+    if (!g_cbqYNoYWriter->submit_chunk(chunkId, records, &cbqWriterError)) {
+        ostringstream errOut;
+        errOut << "EXITING because of FATAL ERROR while writing ordered Y/noY CBQ chunk " << chunkId << "\n";
+        if (!cbqWriterError.empty()) {
+            errOut << cbqWriterError << "\n";
+        }
+        exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_INPUT_FILES, P);
+    }
+}
 
 void ReadAlignChunk::mapChunk() {//map one chunk. Input reads stream has to be setup in RA->readInStream[ii]
 
@@ -28,11 +100,28 @@ void ReadAlignChunk::mapChunk() {//map one chunk. Input reads stream has to be s
     };
 
     int readStatus=0;
+    std::vector<star::input::CbqYNoYRecord> cbqYNoYRecords;
+    if (P.emitYNoYCbqyes) {
+        cbqYNoYRecords.reserve(chunkInSizeBytesTotal[0] / 256 + 1);
+    }
     while (readStatus==0) {//main cycle over all reads
 
         readStatus=RA->oneRead(); //map one read
 
         if (readStatus==0) {//there was a read processed
+            if (P.emitYNoYCbqyes) {
+                star::input::CbqYNoYRecord record;
+                std::string cbqRecordError;
+                if (!makeCbqYNoYRecordFromCurrentRead(RA->hasYAlignment_, &record, &cbqRecordError)) {
+                    ostringstream errOut;
+                    errOut << "EXITING because of FATAL ERROR while preparing Y/noY CBQ record\n";
+                    if (!cbqRecordError.empty()) {
+                        errOut << cbqRecordError << "\n";
+                    }
+                    exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_INPUT_FILES, P);
+                }
+                cbqYNoYRecords.push_back(record);
+            }
             RA->iRead++;
 //         chunkOutBAMtotal=(uint) RA->outSAMstream->tellp();
             chunkOutBAMtotal+=RA->outBAMbytes;
@@ -112,6 +201,10 @@ void ReadAlignChunk::mapChunk() {//map one chunk. Input reads stream has to be s
 
     // Phase 2: Resolve accumulated ambiguous CBs using Bayesian inference
     RA->resolveAmbiguousCBs();
+
+    if (P.emitYNoYCbqyes) {
+        submitCbqYNoYChunkOrDie(iChunkIn, cbqYNoYRecords);
+    }
 
     if ( P.outSAMbool && P.outSAMorder == "PairedKeepInputOrder" && P.runThreadN>1 ) {//write the remaining part of the buffer, close and rename chunk files
         chunkOutBAMfile.write(chunkOutBAM,chunkOutBAMtotal);
@@ -213,6 +306,10 @@ void ReadAlignChunk::mapCbqChunk() {//map one owned CBQ chunk through STAR read 
     cbqBuffers.read_filter = &RA->readFilter;
     cbqBuffers.read_file_type = &RA->readFileType;
     string cbqLoadError;
+    std::vector<star::input::CbqYNoYRecord> cbqYNoYRecords;
+    if (P.emitYNoYCbqyes) {
+        cbqYNoYRecords.reserve(cbqStarChunk.read_count());
+    }
 
     for (uint32 imate = 0; imate < P.readNends; ++imate) {
         cbqLoadError.clear();
@@ -241,6 +338,19 @@ void ReadAlignChunk::mapCbqChunk() {//map one owned CBQ chunk through STAR read 
             exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_INPUT_FILES, P);
         }
         const int readStatus = RA->oneReadLoaded(RA->readFileType);
+        if (P.emitYNoYCbqyes) {
+            star::input::CbqYNoYRecord record;
+            std::string cbqRecordError;
+            if (!makeCbqYNoYRecordFromCurrentRead((readStatus == 0 && RA->hasYAlignment_), &record, &cbqRecordError)) {
+                ostringstream errOut;
+                errOut << "EXITING because of FATAL ERROR while preparing Y/noY CBQ record\n";
+                if (!cbqRecordError.empty()) {
+                    errOut << cbqRecordError << "\n";
+                }
+                exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_INPUT_FILES, P);
+            }
+            cbqYNoYRecords.push_back(record);
+        }
 
         if (readStatus==0) {
             RA->iRead++;
@@ -251,6 +361,10 @@ void ReadAlignChunk::mapCbqChunk() {//map one owned CBQ chunk through STAR read 
     };
 
     flushOutputsIfNeeded(-1);
+
+    if (P.emitYNoYCbqyes) {
+        submitCbqYNoYChunkOrDie(iChunkIn, cbqYNoYRecords);
+    }
 
     if ( P.outSAMbool && P.outSAMorder == "PairedKeepInputOrder" && P.runThreadN>1 ) {
         chunkOutBAMfile.write(chunkOutBAM,chunkOutBAMtotal);

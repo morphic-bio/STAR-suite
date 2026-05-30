@@ -186,7 +186,7 @@ OBJECTS = systemFunctions.o SoloMemoryProfile.o CountingSinkStress.o funPrimaryA
 	Transcript.o Transcript_alignScore.o Transcript_generateCigarP.o Chain.o \
 	Transcript_variationAdjust.o Variation.o ReadAlign_waspMap.o \
 	ReadAlign_storeAligns.o ReadAlign_stitchPieces.o ReadAlign_multMapSelect.o ReadAlign_mapOneRead.o readLoad.o \
-	ReadAlign_loadCbqReadView.o CbqStarAdapter.o \
+	ReadAlign_loadCbqReadView.o CbqStarAdapter.o CbqWriter.o CbqYNoYWriter.o \
 	ReadAlignChunk.o ReadAlignChunk_processChunks.o ReadAlignChunk_mapChunk.o \
 	OutSJ.o outputSJ.o blocksOverlap.o ThreadControl.o sysRemoveDir.o \
 	ReadAlign_maxMappableLength2strands.o binarySearch2.o\
@@ -525,6 +525,12 @@ CbqInputModule.o: input/CbqInputModule.cpp input/CbqInputModule.h input/InputCon
 	$(CXX) -c $(CPPFLAGS) $(CXXFLAGS) $(CXXFLAGS_common) $< -o $@
 
 CbqStarAdapter.o: input/CbqStarAdapter.cpp input/CbqStarAdapter.h input/CbqInputModule.h input/InputContract.h
+	$(CXX) -c $(CPPFLAGS) $(CXXFLAGS) $(CXXFLAGS_common) $< -o $@
+
+CbqWriter.o: input/CbqWriter.cpp input/CbqWriter.h
+	$(CXX) -c $(CPPFLAGS) $(CXXFLAGS) $(CXXFLAGS_common) $< -o $@
+
+CbqYNoYWriter.o: input/CbqYNoYWriter.cpp input/CbqYNoYWriter.h input/CbqWriter.h input/CbqStarAdapter.h
 	$(CXX) -c $(CPPFLAGS) $(CXXFLAGS) $(CXXFLAGS_common) $< -o $@
 
 CbqChromapAdapter.o: input/CbqChromapAdapter.cpp input/CbqChromapAdapter.h input/CbqInputModule.h input/InputContract.h

@@ -753,8 +753,16 @@ YReadNamesOutput        -
     string:                 override path for Y-read names list
                             Default: <outFileNamePrefix>Aligned.out_Y.names.txt
 
+emitYNoY               no
+    string:                 yes|no - emit Y/noY read sidecars in emitYNoYFormat
+
+emitYNoYFormat         fastq
+    string:                 fastq|cbq - sidecar output format for emitYNoY
+                            fastq: emit FASTQ sidecars
+                            cbq: emit ordered CBQ sidecars
+
 emitYNoYFastq          no
-    string:                 yes|no - emit Y/noY FASTQ files directly during alignment
+    string:                 yes|no - compatibility alias for --emitYNoY yes --emitYNoYFormat fastq
                             Emits separate FASTQ files for reads with/without Y-chromosome alignments
                             Works with both bulk PE and Flex/solo modes
 
@@ -774,6 +782,23 @@ noYFastqOutputPrefix    -
                             Default: derived from input FASTQ name (first file per mate)
                             Inserts _noY before the last _R1/_R2
                             If no _R1/_R2 token is found, falls back to <outFileNamePrefix>noY_reads.mateN
+
+emitYNoYCbq             no
+    string:                 yes|no - compatibility alias for --emitYNoY yes --emitYNoYFormat cbq
+                            Emits one paired/single-end CBQ per Y class while preserving source record order
+                            The CBQ writer is independent of input format and accepts FASTQ or Binseq reads
+
+emitYNoYCbqCompressionLevel 0
+    int:                    zstd compression level for Y/noY CBQ output
+
+emitYNoYCbqBlockSize    1048576
+    int:                    virtual block size for Y/noY CBQ output
+
+YCbqOutput              -
+    string:                 override path for Y CBQ output
+
+noYCbqOutput            -
+    string:                 override path for noY CBQ output
 
 ### BAM processing
 bamRemoveDuplicatesType  -

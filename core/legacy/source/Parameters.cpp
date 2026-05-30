@@ -61,6 +61,17 @@ string stripFastqExt(string name) {
     return name;
 }
 
+string stripCbqExt(string name) {
+    static const char* exts[] = {".cbq", ".CBQ"};
+    for (const auto* ext : exts) {
+        if (endsWith(name, ext)) {
+            name.erase(name.size() - strlen(ext));
+            break;
+        }
+    }
+    return name;
+}
+
 string stripReadToken(string name) {
     static const char* tokens[] = {"_R1_001", "_R2_001", "_R1", "_R2", ".R1", ".R2"};
     for (const auto* token : tokens) {
@@ -291,10 +302,17 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar <string>     (-1, -1, "noYOutput", &noYOutput));
     parArray.push_back(new ParameterInfoScalar <string>     (-1, -1, "YOutput", &YOutput));
     parArray.push_back(new ParameterInfoScalar <string>     (-1, -1, "YReadNamesOutput", &YReadNamesOutput));
+    parArray.push_back(new ParameterInfoScalar <string>     (-1, -1, "emitYNoY", &emitYNoY));
+    parArray.push_back(new ParameterInfoScalar <string>     (-1, -1, "emitYNoYFormat", &emitYNoYFormat));
     parArray.push_back(new ParameterInfoScalar <string>     (-1, -1, "emitYNoYFastq", &emitYNoYFastq));
     parArray.push_back(new ParameterInfoScalar <string>     (-1, -1, "emitYNoYFastqCompression", &emitYNoYFastqCompression));
     parArray.push_back(new ParameterInfoScalar <string>     (-1, -1, "YFastqOutputPrefix", &YFastqOutputPrefix));
     parArray.push_back(new ParameterInfoScalar <string>     (-1, -1, "noYFastqOutputPrefix", &noYFastqOutputPrefix));
+    parArray.push_back(new ParameterInfoScalar <string>     (-1, -1, "emitYNoYCbq", &emitYNoYCbq));
+    parArray.push_back(new ParameterInfoScalar <int>        (-1, -1, "emitYNoYCbqCompressionLevel", &emitYNoYCbqCompressionLevel));
+    parArray.push_back(new ParameterInfoScalar <uint64>     (-1, -1, "emitYNoYCbqBlockSize", &emitYNoYCbqBlockSize));
+    parArray.push_back(new ParameterInfoScalar <string>     (-1, -1, "YCbqOutput", &YCbqOutput));
+    parArray.push_back(new ParameterInfoScalar <string>     (-1, -1, "noYCbqOutput", &noYCbqOutput));
     parArray.push_back(new ParameterInfoVector <string>     (-1, -1, "outSAMfilter", &outSAMfilter.mode));
     parArray.push_back(new ParameterInfoScalar <uint>     (-1, -1, "outSAMmultNmax", &outSAMmultNmax));
     parArray.push_back(new ParameterInfoScalar <uint>     (-1, -1, "outSAMattrIHstart", &outSAMattrIHstart));
@@ -1478,7 +1496,9 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
     emitNoYBAMyes=false;
     emitYReadNamesyes=false;
     keepBAMyes=false;
+    emitYNoYyes=false;
     emitYNoYFastqyes=false;
+    emitYNoYCbqyes=false;
     if (runMode=="alignReads" && outSAMmode != "None") {//open SAM file and write header
         if (outSAMtype.at(0)=="BAM") {
             if (outSAMtype.size()<2) {
@@ -1692,7 +1712,31 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
         }
     }
     
-    // Parse Y-chromosome FASTQ emission parameters
+    // Parse Y-chromosome read sidecar emission parameters.
+    {
+        string t = emitYNoY; std::transform(t.begin(), t.end(), t.begin(), ::tolower);
+        if (t == "yes") emitYNoYyes = true;
+        else if (t == "no" || t.empty()) emitYNoYyes = false;
+        else {
+            ostringstream errOut;
+            errOut << "EXITING because of fatal PARAMETERS error: unrecognized option in --emitYNoY=" << emitYNoY << "\n";
+            errOut << "SOLUTION: use allowed option: yes OR no\n";
+            exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+        }
+    }
+    {
+        string t = emitYNoYFormat; std::transform(t.begin(), t.end(), t.begin(), ::tolower);
+        if (t.empty() || t == "fastq") {
+            emitYNoYFormat = "fastq";
+        } else if (t == "cbq") {
+            emitYNoYFormat = "cbq";
+        } else {
+            ostringstream errOut;
+            errOut << "EXITING because of fatal PARAMETERS error: unrecognized option in --emitYNoYFormat=" << emitYNoYFormat << "\n";
+            errOut << "SOLUTION: use allowed option: fastq OR cbq\n";
+            exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+        }
+    }
     {
         string t = emitYNoYFastq; std::transform(t.begin(), t.end(), t.begin(), ::tolower);
         if (t == "yes") emitYNoYFastqyes = true;
@@ -1714,6 +1758,49 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
             ostringstream errOut;
             errOut << "EXITING because of fatal PARAMETERS error: unrecognized option in --emitYNoYFastqCompression=" << emitYNoYFastqCompression << "\n";
             errOut << "SOLUTION: use allowed option: gz OR none\n";
+            exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+        }
+    }
+    {
+        string t = emitYNoYCbq; std::transform(t.begin(), t.end(), t.begin(), ::tolower);
+        if (t == "yes") emitYNoYCbqyes = true;
+        else if (t == "no" || t.empty()) emitYNoYCbqyes = false;
+        else {
+            ostringstream errOut;
+            errOut << "EXITING because of fatal PARAMETERS error: unrecognized option in --emitYNoYCbq=" << emitYNoYCbq << "\n";
+            errOut << "SOLUTION: use allowed option: yes OR no\n";
+            exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+        }
+    }
+    const bool emitYNoYGenericFastq = emitYNoYyes && emitYNoYFormat == "fastq";
+    const bool emitYNoYGenericCbq = emitYNoYyes && emitYNoYFormat == "cbq";
+    if ((emitYNoYGenericFastq && emitYNoYCbqyes) ||
+        (emitYNoYGenericCbq && emitYNoYFastqyes) ||
+        (emitYNoYFastqyes && emitYNoYCbqyes)) {
+        ostringstream errOut;
+        errOut << "EXITING because of fatal PARAMETERS error: conflicting Y/noY sidecar formats requested\n";
+        errOut << "SOLUTION: use one of --emitYNoY yes --emitYNoYFormat fastq, "
+               << "--emitYNoY yes --emitYNoYFormat cbq, --emitYNoYFastq yes, or --emitYNoYCbq yes\n";
+        exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+    }
+    if (emitYNoYGenericFastq) {
+        emitYNoYFastqyes = true;
+    }
+    if (emitYNoYGenericCbq) {
+        emitYNoYCbqyes = true;
+    }
+    if (emitYNoYFastqyes) {
+        emitYNoYyes = true;
+        emitYNoYFormat = "fastq";
+    }
+    if (emitYNoYCbqyes) {
+        emitYNoYyes = true;
+        emitYNoYFormat = "cbq";
+    }
+    if (emitYNoYCbqyes) {
+        if (emitYNoYCbqBlockSize == 0) {
+            ostringstream errOut;
+            errOut << "EXITING because of fatal PARAMETERS error: --emitYNoYCbqBlockSize must be positive\n";
             exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
         }
     }
@@ -2079,6 +2166,20 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
             exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
         };
     };
+
+    if (emitYNoYCbqyes) {
+        if (runMode != "alignReads") {
+            ostringstream errOut;
+            errOut << "EXITING because of fatal PARAMETERS error: --emitYNoYFormat cbq can only be used with --runMode alignReads\n";
+            exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+        }
+        if (twoPass.yes) {
+            ostringstream errOut;
+            errOut << "EXITING because of fatal PARAMETERS error: --emitYNoYFormat cbq does not support --twopassMode.\n";
+            errOut << "SOLUTION: disable two-pass mapping for ordered CBQ Y/noY emission.\n";
+            exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+        }
+    }
 
     // openReadFiles depends on twoPass for reading SAM header
     if (runMode=="alignReads" && pGe.gLoad!="Remove" && pGe.gLoad!="LoadAndExit") {//open reads files to check if they are present
@@ -2902,6 +3003,12 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
             inOut->logMain << "NOTE: --quantVBLibType=A not supported for single-end reads; "
                            << "using --quantVBLibType=U (unstranded SE).\n";
         }
+        if (emitYNoYCbqyes && quant.transcriptVB.libType == "A") {
+            ostringstream errOut;
+            errOut << "EXITING because of fatal PARAMETERS error: --emitYNoYFormat cbq does not support TranscriptVB automatic library detection.\n";
+            errOut << "SOLUTION: set --quantVBLibType explicitly or disable CBQ Y/noY emission.\n";
+            exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+        }
         
         // Normalize errorModelMode to lowercase
         string errorModelModeLower = quant.transcriptVB.errorModelMode;
@@ -3097,7 +3204,45 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
                 outNoYFastqFile[imate] = outFileNamePrefix + "noY_reads.mate" + to_string(imate + 1) + ext;
             }
         }
+        }
     }
+
+    // Derive Y/noY CBQ output paths. CBQ sidecars are one paired/single-end
+    // stream per Y class, preserving input mate order inside each CBQ record.
+    if (emitYNoYCbqyes) {
+        const uint32 yFastqEmitCount = yFastqEmitReadCount();
+        if (yFastqEmitCount != 1 && yFastqEmitCount != 2) {
+            ostringstream errOut;
+            errOut << "EXITING because of fatal PARAMETERS error: --emitYNoYFormat cbq supports one or two emitted read ends, got "
+                   << yFastqEmitCount << "\n";
+            exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+        }
+        const bool hasYOutput = !YCbqOutput.empty() && YCbqOutput != "-";
+        const bool hasNoYOutput = !noYCbqOutput.empty() && noYCbqOutput != "-";
+        string outputDir = outputDirFromPrefix(outFileNamePrefix);
+        if (outFileNamePrefixAuto) {
+            outputDir = outFileNamePrefixAutoRoot + "y_separated/" + outFileNamePrefixAutoSample + "/";
+            createDirectory(outputDir, runDirPerm, "--emitYNoYCbq y_separated", *this);
+        } else {
+            if (outputDir.empty()) {
+                outputDir = "y_separated/";
+            } else {
+                outputDir += "y_separated/";
+            }
+            createDirectory(outputDir, runDirPerm, "--emitYNoYCbq y_separated", *this);
+        }
+
+        string base = "reads";
+        if (!readFilesNames.empty() && !readFilesNames[0].empty()) {
+            base = stripReadToken(stripCbqExt(stripFastqExt(pathBasename(readFilesNames[0][0]))));
+        }
+        if (readFilesN > 1 && (!hasYOutput || !hasNoYOutput)) {
+            warningMessage(" emitYNoYFormat cbq: multiple input files detected; combined output CBQ names are derived from the first input file",
+                           std::cerr, inOut->logMain, *this);
+        }
+
+        outYCbqFile = hasYOutput ? YCbqOutput : outputDir + base + "_Y.cbq";
+        outNoYCbqFile = hasNoYOutput ? noYCbqOutput : outputDir + base + "_noY.cbq";
     }
 
     // Open Y/noY FASTQ output files (uncompressed only)
@@ -3423,6 +3568,13 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
         errOut << "EXITING because of FATAL PARAMETER ERROR: "
                << "--batchMode does not support --outFilterType BySJout\n"
                << "SOLUTION: use --outFilterType Normal or disable --batchMode\n";
+        exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+    }
+    if (emitYNoYCbqyes && outFilterBySJoutStage != 0) {
+        ostringstream errOut;
+        errOut << "EXITING because of FATAL PARAMETER ERROR: "
+               << "--emitYNoYFormat cbq does not support --outFilterType BySJout.\n"
+               << "SOLUTION: use --outFilterType Normal for ordered CBQ Y/noY emission.\n";
         exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
     }
     
