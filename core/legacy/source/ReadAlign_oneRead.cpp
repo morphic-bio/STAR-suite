@@ -95,6 +95,8 @@ int ReadAlign::oneRead() {//process one read: load, map, write
 };
 
 int ReadAlign::oneReadLoaded(const int readStatus0) {
+    hasYAlignment_ = false;
+
     // Increment read counters BEFORE trimming (so dropped reads are counted)
     statsRA.readN++;
     statsRA.readBases += readLength[0] + (P.readNmates == 2 ? readLength[1] : 0);

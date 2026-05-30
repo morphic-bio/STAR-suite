@@ -291,12 +291,21 @@ class Parameters {
         string YReadNamesOutput; // user-specified override path for Y-read names list
         string outYReadNamesFile; // derived output path for Y-read names list
         
-        //Y-chromosome FASTQ emission
+        //Y-chromosome read sidecar emission
+        string emitYNoY;  // raw CLI: yes|no - emit Y/noY read sidecars in emitYNoYFormat
+        bool emitYNoYyes; // resolved: true if generic sidecar switch is enabled
+        string emitYNoYFormat; // raw CLI: fastq|cbq - sidecar output format
         string emitYNoYFastq;  // raw CLI: yes|no - emit Y/noY FASTQ files
         bool emitYNoYFastqyes; // resolved: true if enabled
         string emitYNoYFastqCompression;  // raw CLI: gz|none - compression for FASTQ output
         string YFastqOutputPrefix, noYFastqOutputPrefix;  // user-specified output prefixes
         string outYFastqFile[MAX_N_MATES], outNoYFastqFile[MAX_N_MATES];  // derived output paths per mate
+        string emitYNoYCbq;  // raw CLI: yes|no - compatibility alias for emitYNoYFormat=cbq
+        bool emitYNoYCbqyes; // resolved: true if enabled
+        int emitYNoYCbqCompressionLevel; // zstd compression level for emitted CBQ files
+        uint64 emitYNoYCbqBlockSize; // virtual block size for emitted CBQ files
+        string YCbqOutput, noYCbqOutput; // user-specified output paths
+        string outYCbqFile, outNoYCbqFile; // derived output paths
         uint32 yFastqEmitReadCount() const {
             const bool singleCellOrFlex = (pSolo.type != ParametersSolo::SoloTypes::None) || pSolo.flexMode;
             if (singleCellOrFlex && readNends > readNmates) {
