@@ -9,6 +9,7 @@
 #include "BAMoutput.h"
 #include "Quantifications.h"
 #include "input/CbqStarAdapter.h"
+#include "input/CbqYNoYWriter.h"
 
 // Forward declaration
 namespace libem {
@@ -66,5 +67,8 @@ public:
 
     Genome &mapGen;
 private:
+    string cbqYNoYHeaderPayload(uint32 imate) const;
+    bool makeCbqYNoYRecordFromCurrentRead(bool isY, star::input::CbqYNoYRecord* record, string* error);
+    void submitCbqYNoYChunkOrDie(uint64 chunkId, const vector<star::input::CbqYNoYRecord>& records);
 };
 #endif

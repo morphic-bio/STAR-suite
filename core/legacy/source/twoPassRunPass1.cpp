@@ -36,8 +36,12 @@ void twoPassRunPass1(Parameters &P, Genome &genomeMain, Transcriptome *transcrip
     P1.outFilterBySJoutStage=0;
 
     P1.outReadsUnmapped="None";
+    P1.emitYNoY="no";
+    P1.emitYNoYyes=false;
     P1.emitYNoYFastq="no";
     P1.emitYNoYFastqyes=false;
+    P1.emitYNoYCbq="no";
+    P1.emitYNoYCbqyes=false;
 
     P1.outFileNamePrefix=P.twoPass.dir;
 

@@ -8,6 +8,7 @@
 
 // Forward declaration
 class SamtoolsSorter;
+namespace star { namespace input { class CbqYNoYOrderedWriter; } }
 
 extern Stats g_statsAll;
 extern ThreadControl g_threadChunks;
@@ -16,5 +17,6 @@ extern SamtoolsSorter* g_samtoolsSorter;
 extern SamtoolsSorter* g_unsortedTagBuffer;  // For unsorted BAM CB/UB tag injection (noSort mode)
 extern const std::vector<std::string>* g_bamHeaderChrNames;
 extern const std::vector<uint>* g_bamHeaderChrLengths;
+extern star::input::CbqYNoYOrderedWriter* g_cbqYNoYWriter;
 
 #endif

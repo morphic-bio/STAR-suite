@@ -544,7 +544,7 @@ void ReadAlign::outputAlignments() {
         // This matches the external stepwise path, which derives Y read names from
         // the emitted Y BAM rather than from filtered-out candidate alignments.
         hasYAlignment_ = false;
-        if (P.emitNoYBAMyes || P.emitYReadNamesyes || P.emitYNoYFastqyes) {
+        if (P.emitNoYBAMyes || P.emitYReadNamesyes || P.emitYNoYFastqyes || P.emitYNoYCbqyes) {
             // Use transformed genome alignments if available, otherwise use original.
             if (unmapType < 0) {
                 uint64 nTrCheck = nTr;

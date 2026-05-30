@@ -65,6 +65,7 @@ update this file with its output location.
 - `tests/trim_qc_replay_smoke_output/` (standalone alignment replay smoke for FastQC-like trim-QC JSON/HTML)
 - `tests/trim_qc_fastq_smoke_output/` (standalone FASTQ replay smoke for FastQC-like trim-QC JSON/HTML)
 - `/tmp/star_suite_cbq_ordered_encoder_smoke/` (ordered C++ FASTQ/FASTQ.gz to CBQ encoder smoke outputs and contract dumps)
+- `/tmp/star_suite_cbq_ynoy_smoke/` (ordered CBQ Y/noY emission smoke outputs, dumps, and synthetic genome)
 - `tests/sceptre_example_output_*` (SCEPTRE vignette runs)
 - `tests/sceptre_example_*_mex` (SCEPTRE vignette MEX exports)
 - `tests/nbem_sceptre_example_*` (NB-EM outputs on SCEPTRE vignette MEX)
