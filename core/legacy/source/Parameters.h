@@ -720,9 +720,12 @@ class Parameters {
             int enabled = 0;
             string referenceFasta;
             string chromapIndex;
+            string inputFormat = "fastq";
             string read1Csv;
             string read2Csv;
             string barcodeCsv;
+            string readPairCbqCsv;
+            string barcodeCbqCsv;
             string readFormat;
             string barcodeWhitelist;
             string barcodeTranslate;
@@ -741,6 +744,10 @@ class Parameters {
             int sortBam = 0;
             int writeIndex = 0;
             uint64 sortBamRam = 8ULL * 1024 * 1024 * 1024;
+            int emitNoYBam = 0;
+            int emitYBam = 0;
+            string noYOutput;
+            string YOutput;
             int lowMem = 0;
             uint64 lowMemRam = 0;
             int callMacs3FragPeaks = 0;
