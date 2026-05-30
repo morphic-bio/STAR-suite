@@ -130,20 +130,39 @@ std::string validateConfig(const ChromapAtacConfig &config) {
   if (isUnsetToken(config.chromap_index)) {
     return "Chromap index is required";
   }
-  if (config.read1_fastqs.empty() || hasUnsetPath(config.read1_fastqs)) {
-    return "ATAC read1 FASTQs are required";
-  }
-  if (config.read2_fastqs.empty() || hasUnsetPath(config.read2_fastqs)) {
-    return "ATAC read2 FASTQs are required";
-  }
-  if (config.barcode_fastqs.empty() || hasUnsetPath(config.barcode_fastqs)) {
-    return "ATAC barcode FASTQs are required";
-  }
-  if (config.read1_fastqs.size() != config.read2_fastqs.size()) {
-    return "read1 and read2 FASTQ counts differ";
-  }
-  if (config.read1_fastqs.size() != config.barcode_fastqs.size()) {
-    return "read1 and barcode FASTQ counts differ";
+  if (config.input_format == ChromapInputFormat::CBQ) {
+    if (!config.read1_fastqs.empty() || !config.read2_fastqs.empty() ||
+        !config.barcode_fastqs.empty()) {
+      return "FASTQ inputs cannot be mixed with CBQ input";
+    }
+    if (config.read_pair_cbqs.empty() || hasUnsetPath(config.read_pair_cbqs)) {
+      return "ATAC read-pair CBQs are required";
+    }
+    if (config.barcode_cbqs.empty() || hasUnsetPath(config.barcode_cbqs)) {
+      return "ATAC barcode CBQs are required";
+    }
+    if (config.read_pair_cbqs.size() != config.barcode_cbqs.size()) {
+      return "read-pair CBQ and barcode CBQ counts differ";
+    }
+  } else {
+    if (!config.read_pair_cbqs.empty() || !config.barcode_cbqs.empty()) {
+      return "CBQ inputs require CBQ input format";
+    }
+    if (config.read1_fastqs.empty() || hasUnsetPath(config.read1_fastqs)) {
+      return "ATAC read1 FASTQs are required";
+    }
+    if (config.read2_fastqs.empty() || hasUnsetPath(config.read2_fastqs)) {
+      return "ATAC read2 FASTQs are required";
+    }
+    if (config.barcode_fastqs.empty() || hasUnsetPath(config.barcode_fastqs)) {
+      return "ATAC barcode FASTQs are required";
+    }
+    if (config.read1_fastqs.size() != config.read2_fastqs.size()) {
+      return "read1 and read2 FASTQ counts differ";
+    }
+    if (config.read1_fastqs.size() != config.barcode_fastqs.size()) {
+      return "read1 and barcode FASTQ counts differ";
+    }
   }
   if (isUnsetToken(config.barcode_whitelist)) {
     return "ATAC barcode whitelist is required";
@@ -172,6 +191,30 @@ std::string validateConfig(const ChromapAtacConfig &config) {
       config.output_format != ChromapOutputFormat::BAM &&
       config.output_format != ChromapOutputFormat::CRAM) {
     return "index output requires BAM or CRAM output";
+  }
+  if ((config.emit_no_y_bam || config.emit_y_bam) &&
+      config.output_format != ChromapOutputFormat::SAM &&
+      config.output_format != ChromapOutputFormat::BAM &&
+      config.output_format != ChromapOutputFormat::CRAM) {
+    return "Y/noY stream output requires SAM, BAM, or CRAM output";
+  }
+  if (config.emit_no_y_bam && isUnsetToken(config.no_y_output_path)) {
+    return "noY output path is required when noY stream output is enabled";
+  }
+  if (config.emit_y_bam && isUnsetToken(config.y_output_path)) {
+    return "Y output path is required when Y stream output is enabled";
+  }
+  if (config.emit_no_y_bam &&
+      trimCopy(config.no_y_output_path) == trimCopy(config.output_path)) {
+    return "noY output path must differ from primary output path";
+  }
+  if (config.emit_y_bam &&
+      trimCopy(config.y_output_path) == trimCopy(config.output_path)) {
+    return "Y output path must differ from primary output path";
+  }
+  if (config.emit_no_y_bam && config.emit_y_bam &&
+      trimCopy(config.no_y_output_path) == trimCopy(config.y_output_path)) {
+    return "Y and noY output paths must differ";
   }
   if (!isUnsetToken(config.fragment_output_path) &&
       config.output_format != ChromapOutputFormat::BAM &&
@@ -234,9 +277,16 @@ chromap::MappingParameters toChromapParameters(
 
   parameters.reference_file_path = trimCopy(config.reference_fasta);
   parameters.index_file_path = trimCopy(config.chromap_index);
-  parameters.read_file1_paths = trimPaths(config.read1_fastqs);
-  parameters.read_file2_paths = trimPaths(config.read2_fastqs);
-  parameters.barcode_file_paths = trimPaths(config.barcode_fastqs);
+  if (config.input_format == ChromapInputFormat::CBQ) {
+    parameters.read_input_format = chromap::ReadInputFormat::kCbq;
+    parameters.read_pair_cbq_paths = trimPaths(config.read_pair_cbqs);
+    parameters.barcode_cbq_paths = trimPaths(config.barcode_cbqs);
+  } else {
+    parameters.read_input_format = chromap::ReadInputFormat::kFastq;
+    parameters.read_file1_paths = trimPaths(config.read1_fastqs);
+    parameters.read_file2_paths = trimPaths(config.read2_fastqs);
+    parameters.barcode_file_paths = trimPaths(config.barcode_fastqs);
+  }
   parameters.barcode_whitelist_file_path = trimCopy(config.barcode_whitelist);
   if (!isUnsetToken(config.barcode_translate_table)) {
     parameters.barcode_translate_table_file_path =
@@ -306,6 +356,14 @@ chromap::MappingParameters toChromapParameters(
   parameters.sort_bam = config.sort_bam;
   parameters.write_index = config.write_index;
   parameters.sort_bam_ram_limit = config.sort_bam_ram_limit;
+  parameters.emit_noY_stream = config.emit_no_y_bam;
+  parameters.emit_Y_stream = config.emit_y_bam;
+  if (config.emit_no_y_bam) {
+    parameters.noY_output_path = trimCopy(config.no_y_output_path);
+  }
+  if (config.emit_y_bam) {
+    parameters.Y_output_path = trimCopy(config.y_output_path);
+  }
   parameters.call_macs3_frag_peaks = config.call_macs3_frag_peaks;
   if (!isUnsetToken(config.macs3_frag_peaks_output)) {
     parameters.macs3_frag_peaks_narrowpeak_path =

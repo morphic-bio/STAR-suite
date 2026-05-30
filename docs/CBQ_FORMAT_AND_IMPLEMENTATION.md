@@ -286,17 +286,27 @@ Relevant files:
 
 ### Chromap
 
-Chromap ATAC currently uses a compatibility adapter that materializes
-synchronized FASTQ inputs from paired-read and barcode CBQ files before calling
-Chromap's existing FASTQ contract. Native in-memory libchromap CBQ input is a
-planned follow-up and is documented in
-`docs/RUNBOOK_CHROMAP_ATAC_CBQ_IN_MEMORY.md`.
+STAR still keeps the historical Chromap compatibility adapter as a test oracle,
+but the production libchromap contract can now pass CBQ paths directly to
+Chromap-suite's native CBQ reader:
+
+```text
+--chromapAtacInputFormat cbq
+--chromapAtacReadPairCbq lane1.reads.cbq,lane2.reads.cbq
+--chromapAtacBarcodeCbq lane1.barcodes.cbq,lane2.barcodes.cbq
+```
+
+This path avoids temporary FASTQ materialization and shares the existing
+Chromap ATAC mapping, BAM/fragments, sidecar, and peak-MEX surfaces.
 
 Relevant files:
 
 - `core/legacy/source/input/CbqChromapAdapter.h`
 - `core/legacy/source/input/CbqChromapAdapter.cpp`
 - `core/legacy/source/input/cbq_chromap_adapter_harness.cpp`
+- `core/features/libchromap_contract/include/star_chromap_contract.h`
+- `core/features/libchromap_contract/src/star_chromap_contract.cpp`
+- `core/legacy/source/star_chromap_orchestration.cpp`
 
 ## Command Surface
 
@@ -360,8 +370,8 @@ harnesses with pre-NTR parity.
 - Y/noY FASTQ emission remains FASTQ-only until non-FASTQ emission has a
   separate contract.
 - SLAM per-file skipping is rejected for BINSEQ input.
-- Chromap ATAC CBQ currently uses the compatibility FASTQ materialization
-  adapter; native in-memory libchromap CBQ input is pending.
+- Chromap ATAC CBQ requires Chromap-suite with native CBQ support and uses
+  split sources: one paired-read CBQ plus one barcode CBQ per lane.
 - The STAR Suite reader streams blocks and does not use the CBQ index for
   random access.
 - External CBQ encoders may not preserve source order. Use

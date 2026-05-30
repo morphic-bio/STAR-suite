@@ -11,12 +11,21 @@ namespace {
 void usage() {
   std::cerr
       << "Usage: star_libchromap_contract_runner --ref FASTA --index INDEX "
-         "--read1 CSV --read2 CSV --barcode CSV --barcode-whitelist FILE "
+         "[--read1 CSV --read2 CSV --barcode CSV | "
+         "--input-format cbq --read-pair-cbq CSV --barcode-cbq CSV] "
+         "--barcode-whitelist FILE "
          "--output FILE [options]\n"
       << "\nOptions:\n"
+      << "  --input-format fastq|cbq (default fastq)\n"
+      << "  --read-pair-cbq CSV paired-read CBQ file(s), comma separated\n"
+      << "  --barcode-cbq CSV   barcode CBQ file(s), comma separated\n"
       << "  --output-format BED|BAM|CRAM|SAM|TagAlign|pairs (default BED)\n"
       << "  --sort-bam            coordinate-sort BAM/CRAM (needs --output-format BAM|CRAM)\n"
       << "  --atac-fragments FILE secondary scATAC fragments path (dual mode; BAM|CRAM only)\n"
+      << "  --emit-noY-bam        emit a noY SAM/BAM/CRAM stream\n"
+      << "  --noY-output FILE     explicit noY stream output path\n"
+      << "  --emit-Y-bam          emit a Y-only SAM/BAM/CRAM stream\n"
+      << "  --Y-output FILE       explicit Y stream output path\n"
       << "  --summary FILE\n"
       << "  --call-macs3-frag-peaks\n"
       << "  --macs3-frag-peaks-output FILE\n"
@@ -105,12 +114,27 @@ int main(int argc, char **argv) {
       config.reference_fasta = argv[++i];
     } else if (arg == "--index" && requireValue(argc, argv, i)) {
       config.chromap_index = argv[++i];
+    } else if (arg == "--input-format" && requireValue(argc, argv, i)) {
+      const std::string f = argv[++i];
+      if (f == "fastq" || f == "FASTQ") {
+        config.input_format = star::multiome::ChromapInputFormat::FASTQ;
+      } else if (f == "cbq" || f == "CBQ" || f == "binseq" ||
+                 f == "BINSEQ") {
+        config.input_format = star::multiome::ChromapInputFormat::CBQ;
+      } else {
+        std::cerr << "Invalid --input-format: " << f << "\n";
+        return 2;
+      }
     } else if (arg == "--read1" && requireValue(argc, argv, i)) {
       config.read1_fastqs = splitCsv(argv[++i]);
     } else if (arg == "--read2" && requireValue(argc, argv, i)) {
       config.read2_fastqs = splitCsv(argv[++i]);
     } else if (arg == "--barcode" && requireValue(argc, argv, i)) {
       config.barcode_fastqs = splitCsv(argv[++i]);
+    } else if (arg == "--read-pair-cbq" && requireValue(argc, argv, i)) {
+      config.read_pair_cbqs = splitCsv(argv[++i]);
+    } else if (arg == "--barcode-cbq" && requireValue(argc, argv, i)) {
+      config.barcode_cbqs = splitCsv(argv[++i]);
     } else if (arg == "--barcode-whitelist" && requireValue(argc, argv, i)) {
       config.barcode_whitelist = argv[++i];
     } else if (arg == "--barcode-translate" && requireValue(argc, argv, i)) {
@@ -143,6 +167,14 @@ int main(int argc, char **argv) {
       config.sort_bam = true;
     } else if (arg == "--atac-fragments" && requireValue(argc, argv, i)) {
       config.fragment_output_path = argv[++i];
+    } else if (arg == "--emit-noY-bam") {
+      config.emit_no_y_bam = true;
+    } else if (arg == "--noY-output" && requireValue(argc, argv, i)) {
+      config.no_y_output_path = argv[++i];
+    } else if (arg == "--emit-Y-bam") {
+      config.emit_y_bam = true;
+    } else if (arg == "--Y-output" && requireValue(argc, argv, i)) {
+      config.y_output_path = argv[++i];
     } else if (arg == "--summary" && requireValue(argc, argv, i)) {
       config.summary_path = argv[++i];
     } else if (arg == "--call-macs3-frag-peaks") {

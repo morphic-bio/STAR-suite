@@ -36,6 +36,12 @@ Orchestration (default compiled in + runtime opt-in):
   fast (Chromap is not supported in batch in this gate).
 - Required `--chromapAtac*` paths must not be `-` / empty / `none`; optional
   fields (`summary`, `temp`, `translate`, `chromapAtacSecondaryFragments`) may be `-`.
+- **Input format:** `chromapAtacInputFormat fastq` is the default and preserves
+  the existing `chromapAtacRead1` / `chromapAtacRead2` / `chromapAtacBarcode`
+  surface. `chromapAtacInputFormat cbq` routes STAR's libchromap contract to
+  Chromap-suite's native CBQ reader using `chromapAtacReadPairCbq` and
+  `chromapAtacBarcodeCbq`; it does not materialize FASTQ files. The paired-read
+  and barcode CBQ lane lists must have the same length and stay record-aligned.
 - **Dual ATAC output (BAM/CRAM + fragments):** When `chromapAtacOutputFormat` is
   `BAM` or `CRAM`, set `chromapAtacOutputFragments` to the primary BAM/CRAM path
   and `chromapAtacSecondaryFragments` to the scATAC fragment sidecar. Production
@@ -45,6 +51,12 @@ Orchestration (default compiled in + runtime opt-in):
   with the same mapping options; BAM record count is **exactly 2 x** fragment
   rows (fragment-level BAM, not the read-level `--BAM` path). Do **not** expect
   dual BAM to match a standalone BAM-only row count.
+- **ATAC Y/noY BAM streams:** When `chromapAtacOutputFormat` is `SAM`, `BAM`,
+  or `CRAM`, `chromapAtacEmitNoYBam 1` and `chromapAtacEmitYBam 1` request
+  additional Chromap streams from the same libchromap mapping run. Explicit
+  `chromapAtacNoYOutput` / `chromapAtacYOutput` paths are accepted; if omitted,
+  STAR derives Chromap-style `.noY` and `.Y` paths from
+  `chromapAtacOutputFragments`.
 - **`--chromapAtacTn5ShiftMode`** must be exactly `classical` or `symmetric`
   (case-insensitive); other values error.
 - **Threads:** `--chromapAtacThreads` and `--chromapAtacHtsThreads` are passed
@@ -66,9 +78,12 @@ CLI / parameters file (all names also work in a parameters file):
 | `chromapAtacStartMode` | `postMapping` (default) or `concurrent`. |
 | `chromapAtacReferenceFasta` | Reference FASTA. |
 | `chromapAtacIndex` | Chromap index path. |
+| `chromapAtacInputFormat` | `fastq` (default) or `cbq`. |
 | `chromapAtacRead1` | Comma-separated ATAC R1 FASTQs (same lane order as R2/barcode). |
 | `chromapAtacRead2` | Comma-separated ATAC R2 FASTQs. |
 | `chromapAtacBarcode` | Comma-separated ATAC barcode FASTQs. |
+| `chromapAtacReadPairCbq` | Comma-separated paired-read ATAC CBQs when `chromapAtacInputFormat=cbq`. |
+| `chromapAtacBarcodeCbq` | Comma-separated barcode ATAC CBQs when `chromapAtacInputFormat=cbq`. |
 | `chromapAtacReadFormat` | Optional Chromap read-format string. Use `bc:8:23:-` for ARC barcode reads where 1-based bases 9-24 are reverse-complemented. |
 | `chromapAtacBarcodeWhitelist` | Whitelist file. |
 | `chromapAtacBarcodeTranslate` | Optional translation table; `-` to omit. |
@@ -83,6 +98,10 @@ CLI / parameters file (all names also work in a parameters file):
 | `chromapAtacSortBam` | Sort BAM/CRAM output when `1`. |
 | `chromapAtacWriteIndex` | Write BAM/CRAM index when `1`; requires sorted BAM/CRAM output. |
 | `chromapAtacSortBamRam` | Chromap BAM/CRAM sort RAM limit in bytes. |
+| `chromapAtacEmitNoYBam` | Emit an additional SAM/BAM/CRAM stream excluding reads with Y-chromosome alignments when `1`. |
+| `chromapAtacEmitYBam` | Emit an additional SAM/BAM/CRAM stream containing reads with Y-chromosome alignments when `1`. |
+| `chromapAtacNoYOutput` | Optional explicit noY stream path; `-` derives from `chromapAtacOutputFragments`. |
+| `chromapAtacYOutput` | Optional explicit Y stream path; `-` derives from `chromapAtacOutputFragments`. |
 | `chromapAtacLowMem` | `0` (default) off; `1` enables Chromap low-memory overflow-spill mode. Production JAX multiome uses `1`. |
 | `chromapAtacLowMemRam` | RAM threshold in bytes for low-memory spill; `0` uses Chromap defaults. |
 | `chromapAtacMacs3FragLowMem` | `1` uses the low-memory libMACS3 fragment workspace for in-process peak calling. Production keeps this enabled in wrappers but performs peak/MEX construction from the sidecar outside STAR. |
@@ -186,6 +205,8 @@ STAR-integrated spot check (same tuples as CLI reference):
 --chromapAtacSortBam 1
 --chromapAtacOutputFragments ./atac_possorted.bam
 --chromapAtacSecondaryFragments ./atac_fragments.bin
+--chromapAtacEmitNoYBam 1
+--chromapAtacEmitYBam 1
 --chromapAtacReadFormat bc:8:23:-
 --chromapAtacLowMem 1
 --chromapAtacLowMemRam 0
@@ -201,7 +222,27 @@ star_libchromap_contract_runner \
   --barcode-whitelist whitelist.txt \
   --read-format 'bc:8:23:-' \
   --output ./atac_possorted.bam --output-format BAM --sort-bam \
-  --atac-fragments ./atac_fragments.bin --threads 8
+  --atac-fragments ./atac_fragments.bin \
+  --emit-noY-bam --noY-output ./atac_possorted.noY.bam \
+  --emit-Y-bam --Y-output ./atac_possorted.Y.bam \
+  --threads 8
+```
+
+CBQ contract-runner equivalent:
+
+```bash
+star_libchromap_contract_runner \
+  --ref genome.fa --index genome.index \
+  --input-format cbq \
+  --read-pair-cbq 'ATAC_L001.reads.cbq,...' \
+  --barcode-cbq 'ATAC_L001.barcodes.cbq,...' \
+  --barcode-whitelist whitelist.txt \
+  --read-format 'bc:8:23:-' \
+  --output ./atac_possorted.bam --output-format BAM --sort-bam \
+  --atac-fragments ./atac_fragments.bin \
+  --emit-noY-bam --noY-output ./atac_possorted.noY.bam \
+  --emit-Y-bam --Y-output ./atac_possorted.Y.bam \
+  --threads 8
 ```
 
 Peak-calling extension:
