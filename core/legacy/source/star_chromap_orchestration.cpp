@@ -164,6 +164,41 @@ std::string chooseOutputPath(const std::string &explicitPath,
   return outPrefixPath(P, defaultRelative);
 }
 
+std::string deriveSecondaryOutputPath(const std::string &primaryPath,
+                                      const std::string &suffix) {
+  const std::string primary = trimCopy(primaryPath);
+  if (primary == "-" || primary == "/dev/stdout" || primary == "/dev/stderr") {
+    return "chromap_output" + suffix + ".sam";
+  }
+
+  const size_t slashPos = primary.find_last_of("/\\");
+  const size_t searchStart = slashPos == std::string::npos ? 0 : slashPos + 1;
+  const std::string lower = lowerCopy(primary);
+
+  if (lower.size() > 7 &&
+      lower.compare(lower.size() - 7, 7, ".sam.gz") == 0) {
+    return primary.substr(0, primary.size() - 7) + suffix + ".sam.gz";
+  }
+  if (lower.size() > 4 &&
+      lower.compare(lower.size() - 4, 4, ".bam") == 0) {
+    return primary.substr(0, primary.size() - 4) + suffix + ".bam";
+  }
+  if (lower.size() > 5 &&
+      lower.compare(lower.size() - 5, 5, ".cram") == 0) {
+    return primary.substr(0, primary.size() - 5) + suffix + ".cram";
+  }
+  if (lower.size() > 4 &&
+      lower.compare(lower.size() - 4, 4, ".sam") == 0) {
+    return primary.substr(0, primary.size() - 4) + suffix + ".sam";
+  }
+
+  const size_t dotPos = primary.rfind('.');
+  if (dotPos != std::string::npos && dotPos > searchStart) {
+    return primary.substr(0, dotPos) + suffix + primary.substr(dotPos);
+  }
+  return primary + suffix + ".sam";
+}
+
 bool validateAndBuildConfig(Parameters &P,
                             bool batchModeActive,
                             star::multiome::ChromapAtacConfig *cfg) {
@@ -222,6 +257,22 @@ bool validateAndBuildConfig(Parameters &P,
     return false;
   }
 
+  const std::string inputFormatRaw = trimCopy(P.chromapAtac.inputFormat);
+  const std::string inputFormat = lowerCopy(inputFormatRaw);
+  star::multiome::ChromapInputFormat chromapInputFormat;
+  if (inputFormat == "fastq") {
+    chromapInputFormat = star::multiome::ChromapInputFormat::FASTQ;
+  } else if (inputFormat == "cbq" || inputFormat == "binseq") {
+    chromapInputFormat = star::multiome::ChromapInputFormat::CBQ;
+  } else {
+    P.inOut->logMain
+        << "ERROR: --chromapAtacInputFormat must be fastq or cbq (got \""
+        << inputFormatRaw << "\")\n";
+    return false;
+  }
+  const bool cbqInput =
+      chromapInputFormat == star::multiome::ChromapInputFormat::CBQ;
+
   const std::string tn5Raw = trimCopy(P.chromapAtac.tn5ShiftMode);
   const std::string tn5 = lowerCopy(tn5Raw);
   star::multiome::Tn5ShiftMode tn5Mode;
@@ -269,6 +320,15 @@ bool validateAndBuildConfig(Parameters &P,
         << "ERROR: --chromapAtacWriteIndex 1 requires --chromapAtacSortBam 1\n";
     return false;
   }
+  if ((P.chromapAtac.emitNoYBam != 0 || P.chromapAtac.emitYBam != 0) &&
+      outputFormat != star::multiome::ChromapOutputFormat::SAM &&
+      outputFormat != star::multiome::ChromapOutputFormat::BAM &&
+      outputFormat != star::multiome::ChromapOutputFormat::CRAM) {
+    P.inOut->logMain
+        << "ERROR: chromapAtacEmitNoYBam/chromapAtacEmitYBam require "
+           "--chromapAtacOutputFormat SAM, BAM, or CRAM\n";
+    return false;
+  }
 
   if (!isUnsetToken(P.chromapAtac.secondaryFragments)) {
     if (outputFormat != star::multiome::ChromapOutputFormat::BAM &&
@@ -301,18 +361,6 @@ bool validateAndBuildConfig(Parameters &P,
     P.inOut->logMain << "ERROR: --chromapAtacIndex is required when --chromapAtacEnable 1\n";
     return false;
   }
-  if (isUnsetToken(P.chromapAtac.read1Csv)) {
-    P.inOut->logMain << "ERROR: --chromapAtacRead1 is required when --chromapAtacEnable 1\n";
-    return false;
-  }
-  if (isUnsetToken(P.chromapAtac.read2Csv)) {
-    P.inOut->logMain << "ERROR: --chromapAtacRead2 is required when --chromapAtacEnable 1\n";
-    return false;
-  }
-  if (isUnsetToken(P.chromapAtac.barcodeCsv)) {
-    P.inOut->logMain << "ERROR: --chromapAtacBarcode is required when --chromapAtacEnable 1\n";
-    return false;
-  }
   if (isUnsetToken(P.chromapAtac.barcodeWhitelist)) {
     P.inOut->logMain
         << "ERROR: --chromapAtacBarcodeWhitelist is required when --chromapAtacEnable 1\n";
@@ -338,21 +386,83 @@ bool validateAndBuildConfig(Parameters &P,
     }
   }
 
-  const std::vector<std::string> r1 = splitCsvPaths(P.chromapAtac.read1Csv);
-  const std::vector<std::string> r2 = splitCsvPaths(P.chromapAtac.read2Csv);
-  const std::vector<std::string> bc = splitCsvPaths(P.chromapAtac.barcodeCsv);
-  if (r1.empty() || r2.empty() || bc.empty() ||
-      hasUnsetPath(r1) || hasUnsetPath(r2) || hasUnsetPath(bc)) {
-    P.inOut->logMain
-        << "ERROR: --chromapAtacRead1, --chromapAtacRead2, and --chromapAtacBarcode must "
-           "list at least one non-empty FASTQ path each\n";
-    return false;
-  }
-  if (r1.size() != r2.size() || r1.size() != bc.size()) {
-    P.inOut->logMain
-        << "ERROR: --chromapAtacRead1, --chromapAtacRead2, and --chromapAtacBarcode "
-           "must list the same number of FASTQ paths\n";
-    return false;
+  std::vector<std::string> r1;
+  std::vector<std::string> r2;
+  std::vector<std::string> bc;
+  std::vector<std::string> readPairCbq;
+  std::vector<std::string> barcodeCbq;
+  if (cbqInput) {
+    if (!isUnsetToken(P.chromapAtac.read1Csv) ||
+        !isUnsetToken(P.chromapAtac.read2Csv) ||
+        !isUnsetToken(P.chromapAtac.barcodeCsv)) {
+      P.inOut->logMain
+          << "ERROR: --chromapAtacInputFormat cbq cannot be mixed with "
+             "--chromapAtacRead1, --chromapAtacRead2, or --chromapAtacBarcode\n";
+      return false;
+    }
+    if (isUnsetToken(P.chromapAtac.readPairCbqCsv)) {
+      P.inOut->logMain
+          << "ERROR: --chromapAtacReadPairCbq is required when "
+             "--chromapAtacInputFormat cbq\n";
+      return false;
+    }
+    if (isUnsetToken(P.chromapAtac.barcodeCbqCsv)) {
+      P.inOut->logMain
+          << "ERROR: --chromapAtacBarcodeCbq is required when "
+             "--chromapAtacInputFormat cbq\n";
+      return false;
+    }
+    readPairCbq = splitCsvPaths(P.chromapAtac.readPairCbqCsv);
+    barcodeCbq = splitCsvPaths(P.chromapAtac.barcodeCbqCsv);
+    if (readPairCbq.empty() || barcodeCbq.empty() ||
+        hasUnsetPath(readPairCbq) || hasUnsetPath(barcodeCbq)) {
+      P.inOut->logMain
+          << "ERROR: --chromapAtacReadPairCbq and --chromapAtacBarcodeCbq must "
+             "list at least one non-empty CBQ path each\n";
+      return false;
+    }
+    if (readPairCbq.size() != barcodeCbq.size()) {
+      P.inOut->logMain
+          << "ERROR: --chromapAtacReadPairCbq and --chromapAtacBarcodeCbq "
+             "must list the same number of CBQ paths\n";
+      return false;
+    }
+  } else {
+    if (!isUnsetToken(P.chromapAtac.readPairCbqCsv) ||
+        !isUnsetToken(P.chromapAtac.barcodeCbqCsv)) {
+      P.inOut->logMain
+          << "ERROR: --chromapAtacReadPairCbq and --chromapAtacBarcodeCbq "
+             "require --chromapAtacInputFormat cbq\n";
+      return false;
+    }
+    if (isUnsetToken(P.chromapAtac.read1Csv)) {
+      P.inOut->logMain << "ERROR: --chromapAtacRead1 is required when --chromapAtacEnable 1\n";
+      return false;
+    }
+    if (isUnsetToken(P.chromapAtac.read2Csv)) {
+      P.inOut->logMain << "ERROR: --chromapAtacRead2 is required when --chromapAtacEnable 1\n";
+      return false;
+    }
+    if (isUnsetToken(P.chromapAtac.barcodeCsv)) {
+      P.inOut->logMain << "ERROR: --chromapAtacBarcode is required when --chromapAtacEnable 1\n";
+      return false;
+    }
+    r1 = splitCsvPaths(P.chromapAtac.read1Csv);
+    r2 = splitCsvPaths(P.chromapAtac.read2Csv);
+    bc = splitCsvPaths(P.chromapAtac.barcodeCsv);
+    if (r1.empty() || r2.empty() || bc.empty() ||
+        hasUnsetPath(r1) || hasUnsetPath(r2) || hasUnsetPath(bc)) {
+      P.inOut->logMain
+          << "ERROR: --chromapAtacRead1, --chromapAtacRead2, and --chromapAtacBarcode must "
+             "list at least one non-empty FASTQ path each\n";
+      return false;
+    }
+    if (r1.size() != r2.size() || r1.size() != bc.size()) {
+      P.inOut->logMain
+          << "ERROR: --chromapAtacRead1, --chromapAtacRead2, and --chromapAtacBarcode "
+             "must list the same number of FASTQ paths\n";
+      return false;
+    }
   }
 
   if (cfg == nullptr) {
@@ -361,9 +471,15 @@ bool validateAndBuildConfig(Parameters &P,
 
   cfg->reference_fasta = trimCopy(P.chromapAtac.referenceFasta);
   cfg->chromap_index = trimCopy(P.chromapAtac.chromapIndex);
-  cfg->read1_fastqs = r1;
-  cfg->read2_fastqs = r2;
-  cfg->barcode_fastqs = bc;
+  cfg->input_format = chromapInputFormat;
+  if (cbqInput) {
+    cfg->read_pair_cbqs = readPairCbq;
+    cfg->barcode_cbqs = barcodeCbq;
+  } else {
+    cfg->read1_fastqs = r1;
+    cfg->read2_fastqs = r2;
+    cfg->barcode_fastqs = bc;
+  }
   if (!isUnsetToken(P.chromapAtac.readFormat)) {
     cfg->read_format = trimCopy(P.chromapAtac.readFormat);
   }
@@ -391,6 +507,20 @@ bool validateAndBuildConfig(Parameters &P,
   cfg->sort_bam = P.chromapAtac.sortBam != 0;
   cfg->write_index = P.chromapAtac.writeIndex != 0;
   cfg->sort_bam_ram_limit = P.chromapAtac.sortBamRam;
+  cfg->emit_no_y_bam = P.chromapAtac.emitNoYBam != 0;
+  cfg->emit_y_bam = P.chromapAtac.emitYBam != 0;
+  if (cfg->emit_no_y_bam) {
+    cfg->no_y_output_path =
+        isUnsetToken(P.chromapAtac.noYOutput)
+            ? deriveSecondaryOutputPath(cfg->output_path, ".noY")
+            : trimCopy(P.chromapAtac.noYOutput);
+  }
+  if (cfg->emit_y_bam) {
+    cfg->y_output_path =
+        isUnsetToken(P.chromapAtac.YOutput)
+            ? deriveSecondaryOutputPath(cfg->output_path, ".Y")
+            : trimCopy(P.chromapAtac.YOutput);
+  }
   cfg->low_memory_mode = P.chromapAtac.lowMem != 0;
   cfg->low_memory_ram_limit = P.chromapAtac.lowMemRam;
   cfg->call_macs3_frag_peaks = P.chromapAtac.callMacs3FragPeaks != 0;

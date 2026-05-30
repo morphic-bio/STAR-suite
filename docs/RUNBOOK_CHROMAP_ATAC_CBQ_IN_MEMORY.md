@@ -2,16 +2,17 @@
 
 Date: 2026-05-28
 
-Status: planned. This runbook defines the ATAC-only path for replacing the
-current CBQ-to-Chromap FASTQ materialization adapter with production CBQ
-support.
+Status: STAR-side pass-through implemented against Chromap-suite
+`feature/cbq-atac-input`. Chromap-suite now owns the native CBQ reader for
+libchromap ATAC, and STAR-suite routes explicit CBQ path lists into that
+contract without materializing FASTQ.
 
 ## Goal
 
 Support Chromap ATAC from CBQ without temporary FASTQ files:
 
 ```text
-shared CBQ reader -> decoded read-batch view -> libchromap ATAC provider ->
+Chromap-suite CBQ reader -> decoded read-batch view -> libchromap ATAC provider ->
 Chromap ATAC mapping/fragments/peaks
 ```
 
@@ -28,7 +29,8 @@ In scope:
 - STAR-suite multiome `chromapAtac*` integration.
 - Chromap ATAC fragments, BAM/CRAM, binary fragment sidecar, MACS3 FRAG peak
   materialization, and ATAC peak-MEX/evidence flows that already exist.
-- Native CBQ reader reuse; no separate Chromap CBQ parser.
+- Chromap ATAC Y/noY SAM/BAM/CRAM stream outputs from the same libchromap run.
+- Native CBQ input through Chromap-suite's libchromap reader.
 
 Out of scope for this runbook:
 
@@ -46,10 +48,14 @@ STAR-suite currently has an ATAC-specific libchromap contract:
 - `core/features/libchromap_contract/src/star_chromap_contract.cpp`
 - `core/legacy/source/star_chromap_orchestration.cpp`
 
-That contract is path based today: it carries `read1_fastqs`, `read2_fastqs`,
-and `barcode_fastqs`, then converts them into Chromap
+That contract is path based. FASTQ mode carries `read1_fastqs`,
+`read2_fastqs`, and `barcode_fastqs`, then converts them into Chromap
 `MappingParameters.read_file1_paths`, `read_file2_paths`, and
-`barcode_file_paths`.
+`barcode_file_paths`. CBQ mode carries `read_pair_cbqs` and `barcode_cbqs`,
+sets `MappingParameters.read_input_format = kCbq`, and fills
+`read_pair_cbq_paths` plus `barcode_cbq_paths`. The same STAR contract also
+passes optional Chromap Y/noY stream flags and output paths through to
+libchromap for SAM/BAM/CRAM output formats.
 
 Chromap-suite has `libchromap` entrypoints:
 
@@ -57,13 +63,10 @@ Chromap-suite has `libchromap` entrypoints:
 - `/mnt/pikachu/Chromap-suite/src/libchromap.cc`
 - `/mnt/pikachu/Chromap-suite/src/chromap_lib_runner.cc`
 
-However, verify the active Chromap-suite branch before starting work. In the
-current local checkout inspected for this runbook, the main `chromap` CLI still
-constructs `Chromap` and dispatches `MapSingleEndReads` /
-`MapPairedEndReads` directly in `src/chromap_driver.cc`, while
-`chromap_lib_runner` calls `chromap::RunMapping()`. The first implementation
-phase is therefore to make `libchromap` the ATAC mapping source of truth for
-the CLI, runner, and STAR-suite contract.
+Verify the active Chromap-suite branch before building. The STAR pass-through
+requires the Chromap-suite CBQ API (`ReadInputFormat::kCbq`,
+`read_pair_cbq_paths`, and `barcode_cbq_paths`), which is present on
+`feature/cbq-atac-input` at the time this note was updated.
 
 Chromap internally maps from `SequenceBatch` objects. That makes an in-memory
 CBQ provider tractable: the adapter can populate or feed the same sequence,
@@ -240,14 +243,15 @@ Update STAR-suite docs:
 Update Morphic recipes and MCP workflows after the code path is real:
 
 - add CBQ ATAC input parameters alongside existing FASTQ ATAC parameters;
-- mark Y/noY FASTQ emission as unsupported for CBQ unless implemented later;
+- expose ATAC Y/noY SAM/BAM/CRAM stream parameters for CBQ and FASTQ inputs;
 - document that CBQ ATAC production means in-memory provider, not FASTQ
   materialization;
 - expose smoke/regression commands for agents.
 
 ## Risks And Guardrails
 
-- Do not implement a second CBQ reader in Chromap-suite.
+- Do not add another STAR-side CBQ-to-FASTQ shim for the libchromap production
+  path; route CBQ through the native Chromap-suite CBQ API.
 - Do not use temporary FASTQ as the default production path.
 - Do not expand scope to non-ATAC modalities while doing this integration.
 - Do not break existing FASTQ ATAC production behavior.
@@ -278,6 +282,8 @@ This runbook is complete when:
 
 - ATAC FASTQ and ATAC CBQ in-memory paths share libchromap dispatch.
 - STAR-suite can run Chromap ATAC from CBQ without materializing FASTQ.
+- STAR-suite can request Chromap ATAC Y/noY BAM streams from the same CBQ or
+  FASTQ libchromap mapping run.
 - Synthetic and PBMC 3K 100K parity pass.
 - JAX multiome one-lane smoke passes.
 - Documentation and MCP/recipe surfaces clearly distinguish FASTQ production,
