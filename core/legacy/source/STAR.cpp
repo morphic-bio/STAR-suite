@@ -29,6 +29,7 @@
 #include "CountingSinkStress.h"
 #include "signalFromBAM.h"
 #include "mapThreadsSpawn.h"
+#include "input/CbqYNoYWriter.h"
 #include "SjdbClass.h"
 #include "sjdbInsertJunctions.h"
 #include "Variation.h"
@@ -1867,12 +1868,27 @@ int main(int argInN, char *argIn[])
     }
 
     const bool bridgeReplaySkipMapping = solo_bridge_hash_snapshot::replaySkipReadsEnabled(P);
+    bool cbqYNoYWriterOpened = false;
 
     if (bridgeReplaySkipMapping) {
         P.inOut->logMain << timeMonthDayTime() << " ..... inline-hash snapshot replay: skipping entire mapping phase\n" << flush;
         *P.inOut->logStdOut << timeMonthDayTime() << " ..... inline-hash snapshot replay: skipping entire mapping phase\n" << flush;
         P.closeReadsFiles();
     } else if (P.runRestart.type != 1 && !perFileMappingDone) {
+        if (P.emitYNoYCbqyes) {
+            std::string cbqWriterError;
+            if (!star::input::openGlobalCbqYNoYWriter(P, &cbqWriterError)) {
+                ostringstream errOut;
+                errOut << "EXITING because of fatal OUTPUT ERROR: could not create Y/noY CBQ output files\n";
+                if (!cbqWriterError.empty()) {
+                    errOut << cbqWriterError << "\n";
+                }
+                exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
+            }
+            cbqYNoYWriterOpened = true;
+            P.inOut->logMain << "Y/noY CBQ output: Y=" << P.outYCbqFile
+                             << " noY=" << P.outNoYCbqFile << "\n" << flush;
+        }
         mapThreadsSpawn(P, RAchunk);
     }
 
@@ -1894,6 +1910,18 @@ int main(int argInN, char *argIn[])
 
         mapThreadsSpawn(P, RAchunk);
     };
+
+    if (cbqYNoYWriterOpened) {
+        std::string cbqWriterError;
+        if (!star::input::finishGlobalCbqYNoYWriter(&cbqWriterError)) {
+            ostringstream errOut;
+            errOut << "EXITING because of fatal OUTPUT ERROR: could not finalize Y/noY CBQ output files\n";
+            if (!cbqWriterError.empty()) {
+                errOut << cbqWriterError << "\n";
+            }
+            exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
+        }
+    }
 
     // close some BAM files
     if (P.inOut->outBAMfileUnsorted != NULL)
@@ -1971,8 +1999,8 @@ int main(int argInN, char *argIn[])
     // after mapping. Audit all downstream RAchunk consumers before broadening this guard.
     // TranscriptVB, SLAM, and trim QC all merge chunk-local state after mapping completes.
     if (RAchunk != nullptr && !P.outSAMbool && !P.outBAMcoord && !P.quant.geCount.yes
-        && !P.quant.transcriptVB.yes && !P.quant.slam.yes && !P.trimQcEnabled
-        && !P.emitYReadNamesyes && !P.emitYNoYFastqyes && !batchModeActive) {
+	        && !P.quant.transcriptVB.yes && !P.quant.slam.yes && !P.trimQcEnabled
+	        && !P.emitYReadNamesyes && !P.emitYNoYFastqyes && !P.emitYNoYCbqyes && !batchModeActive) {
         for (int ichunk = 0; ichunk < P.runThreadN; ++ichunk) {
             delete RAchunk[ichunk];
             RAchunk[ichunk] = nullptr;

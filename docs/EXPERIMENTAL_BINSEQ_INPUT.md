@@ -65,6 +65,13 @@ and STAR/process_features/Chromap adapter surfaces are documented in
   case. On SC2300771, level-0 CBQ no-genome completed in `8:38.52` versus
   FASTQ.gz no-genome in `12:01.95`, with byte-identical `Solo.out/Gene`,
   `Barcodes.stats`, and `per_sample_filtered` outputs.
+- STAR can emit native ordered Y/noY CBQ sidecars with
+  `--emitYNoY yes --emitYNoYFormat cbq`. The writer is selected by the
+  requested Y/noY output format and is independent of input format, so it works
+  for FASTQ and CBQ inputs. Each output preserves source record order within
+  that Y class. `tests/run_cbq_ynoy_smoke.sh` covers paired FASTQ input and
+  paired CBQ input with interleaved chr1/chrY reads and a multi-threaded STAR
+  run.
 - Chromap CBQ input is covered by a CBQ-to-Chromap-FASTQ adapter smoke and, on
   hosts with Chromap available, a tiny synthetic mapping run.
 - `tests/run_cbq_e2e_module_regression.sh` runs the downsampled CBQ module
@@ -86,8 +93,9 @@ and STAR/process_features/Chromap adapter surfaces are documented in
 - Chromap integration currently adapts CBQ to Chromap's existing FASTQ path
   contract; it is not yet an in-memory libchromap reader API.
 - SLAM per-file skipping is currently rejected for BINSEQ input.
-- Y/noY FASTQ emission remains FASTQ-only until non-FASTQ input modules have an
-  explicit emission contract.
+- Y/noY FASTQ emission remains FASTQ-only. Use
+  `--emitYNoY yes --emitYNoYFormat cbq` when the desired Y/noY sidecar format
+  is CBQ; that writer does not require CBQ input.
 - `--readFilesCommand` is not supported with BINSEQ input; pass `.cbq` files
   directly through `--readFilesIn` or `--readFilesManifest`.
 - BINSEQ input order is not guaranteed by the generic input contract. Downstream

@@ -185,7 +185,7 @@ bool flexNoGenomeCountOnlyActivationGuard(Parameters &P, std::string *reason) {
     if (P.pCh.segmentMin > 0) {
         return reject("chimeric detection/output is enabled");
     }
-    if (P.outWigFlags.yes || P.emitNoYBAMyes || P.emitYReadNamesyes || P.emitYNoYFastqyes) {
+    if (P.outWigFlags.yes || P.emitNoYBAMyes || P.emitYReadNamesyes || P.emitYNoYFastqyes || P.emitYNoYCbqyes) {
         return reject("genome-backed auxiliary output is enabled");
     }
     if (P.quant.geCount.yes || P.quant.trSAM.yes || P.quant.transcriptVB.yes || P.quant.slam.yes) {
