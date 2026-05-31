@@ -136,6 +136,8 @@ update this file with its output location.
 - `/tmp/star_suite_cbq_e2e_module_regression_*` (aggregate CBQ E2E/module regression wrapper logs for BINSEQ probe, native CBQ reader, STAR mapper, STARsolo, process_features, and Chromap adapter smokes)
 - `/tmp/star_suite_cbq_flex_tiny_public_smoke_*` (public 10x tiny FLEX FASTQ-vs-ordered-CBQ smoke: downloaded tiny fixtures, generated FLEX assets, filtered STAR index, encoded CBQ, FASTQ/CBQ STAR-Flex runs, and parity dumps)
 - `/tmp/star_suite_cbq_flex_100k_*` (host-local SC2300771 100K FLEX FASTQ-vs-CBQ runs: ordered lane CBQs, FASTQ and CBQ STAR-Flex outputs, count parity diffs, and order-normalized BAM-body parity dumps)
+- `/tmp/star_suite_cbq_flex_range_100k_*` (host-local SC2300771 800K FLEX no-genome FASTQ-vs-indexed-CBQ-range parity runs: ordered lane CBQs, count-only STAR-Flex outputs, range activation logs, and byte-level count-output parity)
+- `/tmp/star_flex_cbq_range_full_ssd_*` (host-local SC2300771 full-production FLEX no-genome indexed-CBQ-range benchmark outputs on SSD, including `BENCHMARK_TIME.txt`, STAR logs, raw Gene MEX, and filtered per-sample summaries)
 - `/mnt/pikachu/cbq_solo_ingestion_benchmark_*` (FASTQ-vs-native-CBQ STARsolo ingestion timing runs from `tests/run_cbq_solo_ingestion_benchmark.sh`; per-mode `BENCHMARK_SUMMARY.txt` files are the authoritative completion artifacts)
 - `/tmp/star_suite_production_module_regression_*` (manifest-driven production-module regression wrapper logs, per-case stdout/stderr, and preflight/run summaries)
 - `/tmp/ucsf_cr_config_1m_smoke_*` (real UCSF perturb CR-config fixture smoke outputs)
@@ -322,6 +324,10 @@ update this file with its output location.
   - filtered per-sample MEX: `/storage/flex_noalign_2024ref_emptydrops_4tags_20260404_032741/per_sample_filtered/`
   - parity TSV/log bundle vs CR9/CR7: `/storage/flex_noalign_2024ref_emptydrops_4tags_20260404_032741/flex_parity_cr9/`
   - CR9 means: barcode Jaccard `0.981387`, cell Pearson `0.999974`, gene Pearson `0.999929`
+- `/tmp/star_flex_cbq_range_full_ssd_20260531T111048Z/` — current topline Flex count-only no-genome CBQ benchmark on the full SC2300771 2.011B-read sample, using SSD-staged level-0 CBQs and indexed CBQ range readers: wall `7:22.46`, mapping complete `3:50`, Solo counting `3:12`, max RSS `47,982,080 KB`, mapping speed `17,156.56M reads/hour`
+  - range planner log: `39 ranges across 8 lanes and 2011130186 records`
+  - counters: `triageKeep=1681459858`, `triageDeny=16111757`, `triageMiss=313558571`
+  - old whole-lane CBQ no-genome comparison: `8:38.52`, `43,378,292 KB`, `14,538.29M reads/hour`
 - **FLEX no-align inline-hash snapshot harness (optimized collapse binary, 2026-03-26):** `tests/run_flex_snapshot_noalign_full.sh` on the full `/storage` Flex sample, internal gzip only. Logs show the khash accumulate + per-bucket gene sort path and `Collapse timing: accumulate=… bucket_build=… bucket_sort=…` (not the pre-optimization `extract/sort/group` lines). Snapshot **`/storage/flex_snapshot_noalign_opt_20260326/count_v1/flex_snapshot.bin`** (~**3.4 GiB**, **224,941,678** flex hash entries).
   - Count-mode replay (`FLEX_SNAPSHOT_COMPARE=count`): **`/storage/flex_snapshot_noalign_opt_20260326/count_v1/`** — count-surface validation in `compare.log`; replay skips mapping and stops after `countCBgeneUMI`. Seed wall ~**10:49**, max RSS ~**84.8M kB**; replay wall ~**1:47**, max RSS ~**38.4M kB**.
   - Full parity replay (`FLEX_SNAPSHOT_COMPARE=full`): **`/storage/flex_snapshot_noalign_opt_20260326/full_v1/`** — strict `diff` on `per_sample` (raw+filtered) and `Solo.out` OK; same snapshot size/entry count as count run. Seed/replay wall and RSS within a few seconds of the count run.

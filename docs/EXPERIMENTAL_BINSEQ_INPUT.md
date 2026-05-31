@@ -62,9 +62,12 @@ and STAR/process_features/Chromap adapter surfaces are documented in
   SC2300771 100K FLEX downsample also passed count parity and order-normalized
   BAM payload parity.
 - FLEX count-only no-genome production is the first full-size topline CBQ use
-  case. On SC2300771, level-0 CBQ no-genome completed in `8:38.52` versus
-  FASTQ.gz no-genome in `12:01.95`, with byte-identical `Solo.out/Gene`,
-  `Barcodes.stats`, and `per_sample_filtered` outputs.
+  case. On SC2300771, indexed level-0 CBQ no-genome completed in `7:22.46`
+  versus FASTQ.gz no-genome in `12:01.95`; the earlier whole-lane CBQ result
+  was `8:38.52`. The FASTQ and original CBQ no-genome outputs were
+  byte-identical for `Solo.out/Gene`, `Barcodes.stats`, and
+  `per_sample_filtered`; the indexed range run matched the documented
+  hash-screen counters.
 - STAR can emit native ordered Y/noY CBQ sidecars with
   `--emitYNoY yes --emitYNoYFormat cbq`. The writer is selected by the
   requested Y/noY output format and is independent of input format, so it works
@@ -119,11 +122,14 @@ optimized FASTQ path unchanged.
 
 For FLEX count-only production runs, CBQ is now a validated performance path.
 With the strict no-genome FLEX surface, both FASTQ.gz and level-0 CBQ avoid STAR
-genome loading and produce byte-identical counts. On the full SC2300771
-production run, CBQ completed in `8:38.52` while FASTQ.gz completed in
-`12:01.95`, with essentially identical peak RSS (`43.4 GB` vs `43.3 GB`). The
-remaining speedup is attributable to avoiding gzip FASTQ decode and using the
-native CBQ lane reader for the same Flex hash/count workload.
+genome loading and produce byte-identical counts on the original parity pair.
+On the full SC2300771 production run, indexed level-0 CBQ completed in
+`7:22.46` while FASTQ.gz completed in `12:01.95`; the previous whole-lane CBQ
+reader completed in `8:38.52`. The indexed CBQ run improves over whole-lane CBQ
+by `1.17x` wall time and over FASTQ.gz by `1.63x`, at a higher peak RSS
+(`47.98M KB` vs `43.38M KB` for whole-lane CBQ). The remaining speedup is
+attributable to avoiding gzip FASTQ decode and using parallel indexed CBQ range
+readers for the same Flex hash/count workload.
 
 ## Production Implementation Direction
 
