@@ -536,6 +536,17 @@ void runFlexNoGenomeCountOnly(Parameters &P) {
         }
     }
     state.nFusedThreads = nFusedThreads;
+    if (P.readFilesTypeN == 20 && P.cbqInputActive) {
+        std::string cbqRangeReason;
+        if (flexPrepareCbqRangeTasks(&state, P, nFusedThreads, &cbqRangeReason)) {
+            P.inOut->logMain << "Flex CBQ range: active ("
+                             << cbqRangeReason << ")\n" << std::flush;
+        } else {
+            P.inOut->logMain << "Flex CBQ range: not active ("
+                             << cbqRangeReason
+                             << "); using whole-lane CBQ readers\n" << std::flush;
+        }
+    }
 
     std::vector<SoloReadFeature *> fusedFeats(nFusedThreads, nullptr);
     std::vector<Stats> fusedStats(nFusedThreads);

@@ -161,6 +161,42 @@ The fully fused CBQ pipeline was also smoke-tested on eight 100K lane CBQs:
   Flex pipeline: runThreadN=32, nLanes=8, triage=0 (fully fused + lane steal + role switch), soloConsumers=0, fusedThreads=32, dedicatedWorkers=0, noAlign=ON (alignment skipped)
   ```
 
+### Indexed CBQ range smoke
+
+On 2026-05-31, the no-genome count-only CBQ path was extended to partition
+indexed CBQ input by logical record range. This is intentionally narrower than
+the general STAR CBQ adapter: it activates only for strict no-genome,
+no-alignment, no-BAM FLEX count-only runs. If indexed range setup fails, the
+pipeline falls back to the existing whole-lane CBQ readers.
+
+Fresh same-binary 800K parity pair:
+
+- Artifact root: `/tmp/star_suite_cbq_flex_range_100k_20260531T105047Z`
+- FASTQ.gz run:
+  `/tmp/star_suite_cbq_flex_range_100k_20260531T105047Z/run_fastq_no_genome_parity_20260531T105739Z`
+- CBQ range run:
+  `/tmp/star_suite_cbq_flex_range_100k_20260531T105047Z/run_cbq_range_no_genome_clean_20260531T105506Z`
+- Threads: 32
+- Input reads: `800000`
+- FASTQ.gz wall/RSS: `0:33.19`, `3,412,488 KB`
+- CBQ range wall/RSS: `0:33.13`, `3,619,508 KB`
+- `Solo.out/Gene`: byte-identical.
+- `Solo.out/Barcodes.stats`: byte-identical.
+- `per_sample_filtered`: byte-identical.
+- Hash-screen counters matched:
+  `total=800000, triageKeep=649698, triageDeny=6218, triageMiss=144084`.
+
+The CBQ log confirms both the no-genome guard and indexed range planner:
+
+```text
+Flex count-only no-genome: active
+Flex CBQ range: active (32 ranges across 8 lanes and 800000 records)
+```
+
+This 800K run is a correctness gate, not a production performance claim; the
+input is small and cache effects dominate. Use the full SC2300771 production
+surface below for topline timing.
+
 ## Full Production Benchmark
 
 ### Topline no-genome FLEX results
@@ -204,6 +240,30 @@ command was also forced through the current genome-load path with
 `STAR_DISABLE_FLEX_NO_GENOME=1`. That run took `9:19.20` and peaked at
 `84,395,816 KB`; the no-genome CBQ run took `8:38.52` and peaked at
 `43,378,292 KB`.
+
+### Full CBQ indexed-range benchmark
+
+On 2026-05-31, the full SC2300771 level-0 CBQ no-genome count-only benchmark
+was rerun from the existing SSD-staged CBQs with indexed CBQ range readers
+enabled.
+
+- Output root: `/tmp/star_flex_cbq_range_full_ssd_20260531T111048Z`
+- Input list:
+  `/tmp/star_suite_cbq_flex_full_level0_p8_20260529T125516Z/cbq_list.txt`
+- Threads: 32
+- Range planner: `39 ranges across 8 lanes and 2011130186 records`
+- Wall time: `7:22.46`
+- Max RSS: `47,982,080 KB`
+- STAR mapping speed: `17,156.56M reads/hour`
+- Input reads: `2,011,130,186`
+- Counter sanity check:
+  `triageKeep=1681459858, triageDeny=16111757, triageMiss=313558571`
+
+Compared with the previous full level-0 CBQ no-genome result (`8:38.52`,
+`43,378,292 KB`, `14,538.29M reads/hour`), indexed range reading improved wall
+time by `1:16.06` (`1.17x`, `14.7%` reduction) and mapping speed by `18.0%`,
+with about `4.39 GiB` higher max RSS. FASTQ baseline was not rerun for this
+checkpoint.
 
 ### Earlier full production CBQ benchmark
 
