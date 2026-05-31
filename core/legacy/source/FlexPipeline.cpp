@@ -778,7 +778,7 @@ void *flexLaneReaderFullThread(void *arg) {
     };
 
     const bool useCbqRangeTasks = (P.readFilesTypeN == 20 && P.cbqInputActive &&
-                                   noAlign && !st->cbqRangeTasks.empty());
+                                   !st->cbqRangeTasks.empty());
     if (useCbqRangeTasks) {
         FlexCbqRangeTask task;
         while (st->claimNextCbqRange(&task)) {

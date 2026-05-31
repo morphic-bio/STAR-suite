@@ -17,6 +17,7 @@ SAMPLE_PROBE_CATALOG="${SAMPLE_PROBE_CATALOG:-/mnt/pikachu/JAX_scRNAseq01_proces
 SAMPLE_PROBE_OFFSET="${SAMPLE_PROBE_OFFSET:-68}"
 INPUT_FORMAT="${INPUT_FORMAT:-fastq}"
 CBQ_FILE="${CBQ_FILE:-}"
+USE_READFILES_ZCAT="${USE_READFILES_ZCAT:-0}"
 OUT_SAMTYPE="${OUT_SAMTYPE:-bam-unsorted}"
 CR_CONFIG="${CR_CONFIG:-}"
 OUT_BASE="${OUT_BASE:-/tmp/flex_cr_config_runs}"
@@ -43,6 +44,8 @@ Options:
   --input-format fastq|cbq   Input source for STAR (default: ${INPUT_FORMAT})
   --cbq-file FILE            Ordered paired CBQ for --input-format cbq. Store mates in
                               the same order as the FASTQ path: cDNA R2, then barcode R1.
+  USE_READFILES_ZCAT=1       Legacy FASTQ override: add --readFilesCommand zcat.
+                              Default FASTQ ingestion uses STAR internal gzip.
   --out-samtype MODE         Output alignment mode: bam-unsorted or none (default: ${OUT_SAMTYPE})
   --out-base DIR             Output base directory (default: ${OUT_BASE})
   --run-id ID                Run directory name (default: ${RUN_ID})
@@ -88,6 +91,10 @@ done
 case "${INPUT_FORMAT}" in
   fastq|cbq) ;;
   *) die "Unsupported --input-format: ${INPUT_FORMAT}" ;;
+esac
+case "${USE_READFILES_ZCAT}" in
+  0|1) ;;
+  *) die "USE_READFILES_ZCAT must be 0 or 1" ;;
 esac
 case "${OUT_SAMTYPE}" in
   bam-unsorted|none) ;;
@@ -135,7 +142,10 @@ READ_ARGS=()
 if [[ "${INPUT_FORMAT}" == "cbq" ]]; then
   READ_ARGS=(--readFilesType Binseq PE --readFilesIn "${CBQ_FILE}")
 else
-  READ_ARGS=(--readFilesIn "${GEX_R2}" "${GEX_R1}" --readFilesCommand zcat)
+  READ_ARGS=(--readFilesIn "${GEX_R2}" "${GEX_R1}")
+  if [[ "${USE_READFILES_ZCAT}" == "1" ]]; then
+    READ_ARGS+=(--readFilesCommand zcat)
+  fi
 fi
 SAM_ARGS=()
 if [[ "${OUT_SAMTYPE}" == "none" ]]; then

@@ -155,6 +155,20 @@ class Parameters {
         bool cbqInputActive = false;
         bool cbqInputExhausted = false;
         int cbqInputLastLoggedLane = -1;
+        string readFilesCbqRangeMode = "auto"; // auto|off|range: indexed CBQ logical range readers
+        struct CbqRangeTask {
+            uint32 laneIndex = 0;
+            uint64 firstRecord = 0;  // zero-based lane-local record offset
+            uint64 recordCount = 0;
+            uint64 globalFirst = 0;  // zero-based logical offset across concatenated lanes
+            uint64 taskOrdinal = 0;
+        };
+        vector<CbqRangeTask> cbqRangeTasks;
+        bool cbqRangeActive = false;
+        string cbqRangeFallbackReason;
+        uint64 cbqRangeTotalRecords = 0;
+        std::shared_ptr<std::atomic<uint32_t>> cbqRangeNextTask = std::make_shared<std::atomic<uint32_t>>(0);
+        std::shared_ptr<std::atomic<uint32_t>> cbqRangeNextChunk = std::make_shared<std::atomic<uint32_t>>(0);
 
         uint readMapNumber;
         uint iReadAll;

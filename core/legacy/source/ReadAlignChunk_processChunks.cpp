@@ -132,7 +132,8 @@ void writeInputChunkTrace(const ReadAlignChunk& chunk,
                           uint64 chunkReadStart,
                           uint64 chunkReadN,
                           uint64 chunkWorkBytes,
-                          bool noReadsLeft) {
+                          bool noReadsLeft,
+                          int readFilesIndexOverride = -1) {
     const char* path = inputChunkTracePath();
     if (path == nullptr) {
         return;
@@ -150,9 +151,12 @@ void writeInputChunkTrace(const ReadAlignChunk& chunk,
             headerWritten = true;
         }
         const uint64 readStart = chunkReadN == 0 ? chunkReadStart : chunkReadStart + 1;
-        const uint64 readEnd = chunk.P.iReadAll;
+        const uint64 readEnd = chunkReadStart + chunkReadN;
         const uint64 mate1Bytes = chunk.chunkInSizeBytesTotal[0];
         const uint64 mate2Bytes = chunk.P.readNends > 1 ? chunk.chunkInSizeBytesTotal[1] : 0;
+        const int readFilesIndex = readFilesIndexOverride >= 0
+            ? readFilesIndexOverride
+            : chunk.P.readFilesIndex;
         out << chunkIndex << '\t'
             << chunk.iThread << '\t'
             << inputChunkTraceSource(chunk.P) << '\t'
@@ -162,7 +166,7 @@ void writeInputChunkTrace(const ReadAlignChunk& chunk,
             << mate1Bytes << '\t'
             << mate2Bytes << '\t'
             << chunkWorkBytes << '\t'
-            << chunk.P.readFilesIndex << '\t'
+            << readFilesIndex << '\t'
             << (noReadsLeft ? 1 : 0) << '\n';
     }
     pthread_mutex_unlock(&traceMutex);
@@ -331,6 +335,256 @@ void fastxSkipToTargetLane(ReadAlignChunk& chunk) {
     P.quant.slam.skipToFileIndex = -1;
 }
 
+[[noreturn]] void exitCbqRangeError(ReadAlignChunk& chunk,
+                                    const string& message,
+                                    const string& detail = string()) {
+    ostringstream errOut;
+    errOut << ERROR_OUT << " EXITING because of FATAL ERROR in Binseq/CBQ indexed range input\n"
+           << message << "\n";
+    if (!detail.empty()) {
+        errOut << detail << "\n";
+    }
+    exitWithError(errOut.str(), std::cerr, chunk.P.inOut->logMain, EXIT_CODE_INPUT_FILES, chunk.P);
+}
+
+void mapPreparedCbqRangeChunk(ReadAlignChunk& chunk,
+                              uint64 chunkReadStart,
+                              uint64 chunkReadN,
+                              uint64 chunkWorkBytes,
+                              uint32 laneIndex) {
+    Parameters& P = chunk.P;
+    chunk.noReadsLeft = false;
+    chunk.iChunkIn = P.cbqRangeNextChunk
+        ? P.cbqRangeNextChunk->fetch_add(1)
+        : 0;
+
+    if (P.runThreadN > 1) {
+        pthread_mutex_lock(&g_threadChunks.mutexInRead);
+    }
+    P.iReadAll += static_cast<uint>(chunkReadN);
+    if (P.runThreadN > 1) {
+        pthread_mutex_unlock(&g_threadChunks.mutexInRead);
+    }
+
+    writeInputChunkTrace(chunk,
+                         chunk.iChunkIn,
+                         chunkReadStart,
+                         chunkReadN,
+                         chunkWorkBytes,
+                         false,
+                         static_cast<int>(laneIndex));
+
+    const bool permitEnabled = g_threadChunks.mapPermitEnabled();
+    uint64_t waitNs = 0;
+    if (permitEnabled) {
+        waitNs = g_threadChunks.mapPermitAcquire();
+    }
+    const auto workStart = std::chrono::steady_clock::now();
+    const uint64_t readCountBefore = chunk.RA->iRead;
+    chunk.mapCbqChunk();
+    const auto workEnd = std::chrono::steady_clock::now();
+    const uint64_t pipelineMapChunkNs = static_cast<uint64>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(workEnd - workStart).count());
+
+    if (P.runThreadN > 1) {
+        pthread_mutex_lock(&g_threadChunks.mutexStats);
+    }
+    g_statsAll.pipelineChunkReadBytes += chunkWorkBytes;
+    g_statsAll.pipelineChunksProcessed += 1;
+    g_statsAll.pipelineMapChunkNs += pipelineMapChunkNs;
+    if (P.runThreadN > 1) {
+        pthread_mutex_unlock(&g_threadChunks.mutexStats);
+    }
+
+    if (permitEnabled) {
+        const uint64_t workNs = static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(workEnd - workStart).count());
+        const uint64_t readsProcessed = chunk.RA->iRead >= readCountBefore
+            ? (chunk.RA->iRead - readCountBefore)
+            : chunkReadN;
+        g_threadChunks.mapPermitRelease(waitNs, readsProcessed, chunkWorkBytes, workNs);
+    }
+}
+
+void processCbqRangeTask(ReadAlignChunk& chunk, const Parameters::CbqRangeTask& task) {
+    Parameters& P = chunk.P;
+    star::input::CbqInputModule rangeReader;
+    string inputError;
+    if (!rangeReader.configure(P.cbqInputModule->plan(), &inputError) ||
+        !rangeReader.open_range(task.laneIndex, task.firstRecord, task.recordCount, &inputError)) {
+        exitCbqRangeError(chunk,
+                          "could not open a worker-local CBQ range reader",
+                          inputError);
+    }
+
+    std::shared_ptr<star::input::CbqReadBatchView> pendingBatch;
+    uint32 pendingBatchOffset = 0;
+    uint64 taskOffset = 0;
+    bool rangeExhausted = false;
+
+    while (taskOffset < task.recordCount) {
+        const auto chunkReadStartTime = std::chrono::steady_clock::now();
+        const uint64 chunkReadStart = task.globalFirst + taskOffset;
+        uint64 chunkWorkBytes = 0;
+
+        chunk.chunkInSizeBytesTotal = {0, 0};
+        chunk.cbqStarChunk.clear();
+        chunk.cbqChunkReadN = 0;
+
+        while (fastxChunkUnderTarget(chunk) &&
+               taskOffset < task.recordCount &&
+               !rangeExhausted) {
+            if (!pendingBatch ||
+                pendingBatchOffset >= pendingBatch->record_count) {
+                pendingBatch.reset();
+                pendingBatchOffset = 0;
+
+                star::input::CbqReadBatchView batch;
+                inputError.clear();
+                const star::input::InputStatus status = rangeReader.next_batch(&batch, &inputError);
+                if (status == star::input::InputStatus::Error) {
+                    exitCbqRangeError(chunk,
+                                      "worker-local CBQ range reader failed",
+                                      inputError);
+                }
+                if (status == star::input::InputStatus::End) {
+                    rangeExhausted = true;
+                    break;
+                }
+                pendingBatch.reset(new star::input::CbqReadBatchView(batch));
+            }
+
+            star::input::CbqReadBatchView& batch = *pendingBatch;
+            const uint32 batchStart = pendingBatchOffset;
+            uint32 recordsToCopy = 0;
+            while (pendingBatchOffset + recordsToCopy < batch.record_count &&
+                   taskOffset + recordsToCopy < task.recordCount &&
+                   fastxChunkUnderTarget(chunk)) {
+                const star::input::CbqReadView& record =
+                    batch.records[pendingBatchOffset + recordsToCopy];
+                const uint64 ordinal = task.globalFirst + taskOffset + recordsToCopy + 1;
+                std::array<uint64, MAX_N_MATES> mateBytes{};
+                string fitError;
+                if (!cbqRecordFits(chunk, record, ordinal, &mateBytes, fitError)) {
+                    if (!fitError.empty() && chunk.cbqChunkReadN == 0 && recordsToCopy == 0) {
+                        exitCbqRangeError(chunk,
+                                          "CBQ record does not fit in the STAR input chunk accounting",
+                                          fitError);
+                    }
+                    break;
+                }
+
+                ++recordsToCopy;
+                for (uint imate = 0; imate < P.readNends; ++imate) {
+                    chunk.chunkInSizeBytesTotal[imate] += mateBytes[imate];
+                    chunkWorkBytes += mateBytes[imate];
+                }
+            }
+
+            if (recordsToCopy == 0) {
+                break;
+            }
+
+            star::input::CbqReadBatchView subBatch = batch;
+            subBatch.records = batch.records + batchStart;
+            subBatch.record_count = recordsToCopy;
+            const size_t firstAppendedRead = chunk.cbqStarChunk.reads.size();
+            string adapterError;
+            if (!star::input::append_cbq_batch_to_star_chunk(subBatch,
+                                                             recordsToCopy,
+                                                             P.readNends,
+                                                             &chunk.cbqStarChunk,
+                                                             &adapterError)) {
+                exitCbqRangeError(chunk,
+                                  "CBQ range adapter append failed",
+                                  adapterError);
+            }
+            for (uint32 irecord = 0; irecord < recordsToCopy; ++irecord) {
+                star::input::CbqStarChunkRead& read =
+                    chunk.cbqStarChunk.reads[firstAppendedRead + irecord];
+                read.read_ordinal = task.globalFirst + taskOffset + irecord + 1;
+                read.lane_index = task.laneIndex;
+            }
+
+            chunk.cbqChunkReadN += recordsToCopy;
+            taskOffset += recordsToCopy;
+            pendingBatchOffset += recordsToCopy;
+            if (pendingBatchOffset >= batch.record_count) {
+                pendingBatch.reset();
+                pendingBatchOffset = 0;
+            }
+        }
+
+        if (chunk.cbqChunkReadN == 0) {
+            if (rangeExhausted && taskOffset < task.recordCount) {
+                ostringstream detail;
+                detail << "range ended at " << taskOffset
+                       << " records, expected " << task.recordCount;
+                exitCbqRangeError(chunk,
+                                  "CBQ range reader ended before the planned task was complete",
+                                  detail.str());
+            }
+            exitCbqRangeError(chunk,
+                              "CBQ range chunk accounting produced an empty chunk before task completion");
+        }
+
+        const auto chunkReadEndTime = std::chrono::steady_clock::now();
+        const uint64_t chunkReadNs = static_cast<uint64>(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(chunkReadEndTime - chunkReadStartTime).count());
+
+        if (P.runThreadN > 1) {
+            pthread_mutex_lock(&g_threadChunks.mutexStats);
+        }
+        g_statsAll.pipelineChunkReadNs += chunkReadNs;
+        if (P.runThreadN > 1) {
+            pthread_mutex_unlock(&g_threadChunks.mutexStats);
+        }
+
+        mapPreparedCbqRangeChunk(chunk,
+                                 chunkReadStart,
+                                 chunk.cbqChunkReadN,
+                                 chunkWorkBytes,
+                                 task.laneIndex);
+    }
+}
+
+void flushCbqRangeResidualSam(ReadAlignChunk& chunk) {
+    Parameters& P = chunk.P;
+    if (!P.outSAMbool ||
+        P.outSAMorder == "PairedKeepInputOrder" ||
+        chunk.chunkOutBAMtotal == 0) {
+        return;
+    }
+
+    if (P.runThreadN > 1) {
+        pthread_mutex_lock(&g_threadChunks.mutexOutSAM);
+    }
+    P.inOut->outSAM->write(chunk.chunkOutBAM, chunk.chunkOutBAMtotal);
+    P.inOut->outSAM->clear();
+    if (P.runThreadN > 1) {
+        pthread_mutex_unlock(&g_threadChunks.mutexOutSAM);
+    }
+    chunk.RA->outSAMstream->seekp(0, ios::beg);
+    chunk.chunkOutBAMtotal = 0;
+}
+
+void processCbqRangeChunks(ReadAlignChunk& chunk) {
+    Parameters& P = chunk.P;
+    if (!P.cbqRangeNextTask) {
+        exitCbqRangeError(chunk, "CBQ range task cursor is not initialized");
+    }
+
+    for (;;) {
+        const uint32 taskIndex = P.cbqRangeNextTask->fetch_add(1);
+        if (taskIndex >= P.cbqRangeTasks.size()) {
+            break;
+        }
+        processCbqRangeTask(chunk, P.cbqRangeTasks[taskIndex]);
+    }
+    flushCbqRangeResidualSam(chunk);
+    chunk.noReadsLeft = true;
+}
+
 } // namespace
 
 
@@ -442,6 +696,9 @@ void ReadAlignChunk::processChunks() {//read-map-write chunks
         if (P.runThreadN > 1) pthread_mutex_unlock(&g_threadChunks.mutexInRead);
     }
     
+    if (P.readFilesTypeN == 20 && P.cbqInputActive && P.cbqRangeActive) {
+        processCbqRangeChunks(*this);
+    } else {
     while (!noReadsLeft) {//continue until the input EOF
             uint64_t chunkReadN = 0;
             uint64_t chunkWorkBytes = 0;
@@ -954,6 +1211,7 @@ void ReadAlignChunk::processChunks() {//read-map-write chunks
         };
 
     };//cycle over input chunks
+    }
 
     // Close Y/noY FASTQ gzip streams even if no reads were processed in this thread
     if (P.emitYNoYFastqyes && P.emitYNoYFastqCompression == "gz") {

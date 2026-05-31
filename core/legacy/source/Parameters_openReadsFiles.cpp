@@ -8,6 +8,8 @@
 #include <unistd.h>
 #include <cerrno>
 #include <cctype>
+#include <algorithm>
+#include <limits>
 #include <zlib.h>
 
 namespace {
@@ -108,6 +110,170 @@ bool streamGzipFileToFd(const string& gzipPath, int outFd, string& errorOut) {
 
     close(outFd);
     _exit(0);
+}
+
+string lowerCopyLocal(string value) {
+    std::transform(value.begin(), value.end(), value.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return value;
+}
+
+bool cbqCoreRangeGateReject(Parameters& P, string& reason) {
+    auto reject = [&](const string& message) {
+        reason = message;
+        return true;
+    };
+
+    const string mode = lowerCopyLocal(P.readFilesCbqRangeMode);
+    if (mode == "off") {
+        return reject("disabled by --readFilesCbqRangeMode off");
+    }
+    if (mode != "auto" && mode != "range") {
+        return reject("unrecognized --readFilesCbqRangeMode=" + P.readFilesCbqRangeMode);
+    }
+    P.readFilesCbqRangeMode = mode;
+
+    if (P.readFilesTypeN != 20 || !P.cbqInputActive) {
+        return reject("input is not active Binseq/CBQ");
+    }
+    if (P.runThreadN <= 1) {
+        return reject("runThreadN <= 1");
+    }
+    if (P.outSAMtype.empty()) {
+        return reject("outSAMtype is empty");
+    }
+    const bool noAlignmentOutput = (P.outSAMtype[0] == "None" &&
+                                    !P.outSAMbool && !P.outBAMcoord && !P.outBAMunsorted);
+    const bool sortedBamOnly = (P.outSAMtype[0] == "BAM" &&
+                                P.outBAMcoord && !P.outBAMunsorted && !P.outSAMbool);
+    if (!noAlignmentOutput && !sortedBamOnly) {
+        return reject("CBQ range mode currently supports --outSAMtype None or BAM SortedByCoordinate without SAM/Unsorted side output");
+    }
+    if (P.emitYNoYyes || P.emitYNoYFastqyes || P.emitYNoYCbqyes) {
+        return reject("Y/noY sidecar emission is order-dependent");
+    }
+    if (P.outSAMorder == "PairedKeepInputOrder") {
+        return reject("--outSAMorder PairedKeepInputOrder is order-dependent");
+    }
+    if (P.batchMode || P.batchModeInt != 0 || P.quant.slam.batchMode || P.quant.slam.batchModeInt != 0) {
+        return reject("batch mode is not supported by initial CBQ range mode");
+    }
+    if (P.quant.slam.autoTrimDetectionPass || P.quant.slam.perFileProcessing || P.quant.slam.skipToFileIndex > 0) {
+        return reject("SLAM per-file or auto-trim pass is not supported by initial CBQ range mode");
+    }
+    if (P.twoPass.yes || P.sjdbInsert.yes) {
+        return reject("two-pass or run-time SJ insertion is not supported by initial CBQ range mode");
+    }
+    if (P.outFilterBySJoutStage != 0 || P.outFilterType == "BySJout") {
+        return reject("two-stage SJ filtering is not supported by initial CBQ range mode");
+    }
+    if (P.readFilesNames.empty() || P.readFilesNames.front().empty()) {
+        return reject("no CBQ input lanes");
+    }
+    reason.clear();
+    return false;
+}
+
+bool prepareCbqCoreRangeTasks(Parameters& P,
+                              const star::input::InputSourcePlan& cbqInputPlan,
+                              string& reason) {
+    P.cbqRangeTasks.clear();
+    P.cbqRangeActive = false;
+    P.cbqRangeFallbackReason.clear();
+    P.cbqRangeTotalRecords = 0;
+    if (!P.cbqRangeNextTask) {
+        P.cbqRangeNextTask.reset(new std::atomic<uint32_t>(0));
+    }
+    if (!P.cbqRangeNextChunk) {
+        P.cbqRangeNextChunk.reset(new std::atomic<uint32_t>(0));
+    }
+    P.cbqRangeNextTask->store(0);
+    P.cbqRangeNextChunk->store(0);
+
+    if (cbqCoreRangeGateReject(P, reason)) {
+        return false;
+    }
+
+    const uint32 laneCount = static_cast<uint32>(cbqInputPlan.mate_files.front().size());
+    vector<uint64> laneCounts(laneCount, 0);
+    vector<uint64> laneStarts(laneCount + 1, 0);
+    for (uint32 lane = 0; lane < laneCount; ++lane) {
+        star::input::CbqInputModule laneReader;
+        string inputError;
+        if (!laneReader.configure(cbqInputPlan, &inputError) ||
+            !laneReader.open_range(lane, 0, std::numeric_limits<uint64>::max(), &inputError)) {
+            reason = inputError.empty()
+                ? ("could not open indexed CBQ range for lane " + to_string(lane))
+                : inputError;
+            return false;
+        }
+        laneCounts[lane] = laneReader.current_lane_record_count();
+        laneStarts[lane + 1] = laneStarts[lane] + laneCounts[lane];
+        laneReader.close();
+    }
+
+    const uint64 inputRecords = laneStarts.back();
+    const uint64 totalRecords = P.readMapNumber == static_cast<uint>(-1)
+        ? inputRecords
+        : std::min<uint64>(inputRecords, static_cast<uint64>(P.readMapNumber));
+    if (totalRecords == 0) {
+        reason = "CBQ input contains no records";
+        return false;
+    }
+    P.cbqRangeTotalRecords = totalRecords;
+
+    const uint64 targetRangeCount = std::min<uint64>(static_cast<uint64>(P.runThreadN), totalRecords);
+    const uint64 targetRecordsPerRange = (totalRecords + targetRangeCount - 1) / targetRangeCount;
+    uint64 taskOrdinal = 0;
+    uint64 globalStart = 0;
+    while (globalStart < totalRecords) {
+        const uint64 globalEnd = std::min<uint64>(totalRecords, globalStart + targetRecordsPerRange);
+        uint64 cursor = globalStart;
+        while (cursor < globalEnd) {
+            const auto laneIt = std::upper_bound(laneStarts.begin(), laneStarts.end(), cursor);
+            if (laneIt == laneStarts.begin()) {
+                reason = "internal CBQ range planning error: invalid lane start";
+                return false;
+            }
+            uint32 lane = static_cast<uint32>(std::distance(laneStarts.begin(), laneIt) - 1);
+            if (lane >= laneCount) {
+                reason = "internal CBQ range planning error: lane exceeds lane count";
+                return false;
+            }
+            const uint64 laneEndGlobal = laneStarts[lane] + laneCounts[lane];
+            const uint64 take = std::min<uint64>(globalEnd, laneEndGlobal) - cursor;
+            if (take == 0) {
+                reason = "internal CBQ range planning error: empty task";
+                return false;
+            }
+
+            Parameters::CbqRangeTask task;
+            task.laneIndex = lane;
+            task.firstRecord = cursor - laneStarts[lane];
+            task.recordCount = take;
+            task.globalFirst = cursor;
+            task.taskOrdinal = taskOrdinal++;
+            P.cbqRangeTasks.push_back(task);
+            cursor += take;
+        }
+        globalStart = globalEnd;
+    }
+
+    if (P.cbqRangeTasks.empty()) {
+        reason = "CBQ range planner produced no tasks";
+        return false;
+    }
+    P.cbqRangeActive = true;
+    reason.clear();
+    return true;
+}
+
+void fatalCbqRangeMode(Parameters& P, const string& reason) {
+    ostringstream errOut;
+    errOut << "EXITING because of fatal input ERROR: --readFilesCbqRangeMode range could not be activated.\n";
+    errOut << reason << "\n";
+    errOut << "SOLUTION: use indexed CBQ inputs with supported order-independent settings, or set --readFilesCbqRangeMode auto/off.\n";
+    exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
 }
 }
 
@@ -215,6 +381,30 @@ void Parameters::openReadsFiles()
             errOut << "EXITING because of fatal input ERROR: invalid Binseq/CBQ input source plan at open\n";
             errOut << inputContractError << "\n";
             exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+        }
+        string cbqRangeReason;
+        const bool cbqRangePrepared = prepareCbqCoreRangeTasks(*this, cbqInputPlan, cbqRangeReason);
+        const string cbqRangeMode = lowerCopyLocal(readFilesCbqRangeMode);
+        if (cbqRangePrepared) {
+            inOut->logMain << "CBQ indexed range reader: active with "
+                           << cbqRangeTasks.size() << " tasks across "
+                           << readFilesN << " lanes and "
+                           << cbqRangeTotalRecords << " records\n";
+            readFilesIndex = 0;
+            cbqInputExhausted = false;
+            cbqInputLastLoggedLane = -1;
+            cbqInputPendingBatch.reset();
+            cbqInputPendingBatchOffset = 0;
+            return;
+        }
+        cbqRangeFallbackReason = cbqRangeReason;
+        if (cbqRangeMode == "range" || (cbqRangeMode != "auto" && cbqRangeMode != "off")) {
+            fatalCbqRangeMode(*this, cbqRangeReason);
+        }
+        if (cbqRangeMode == "auto") {
+            inOut->logMain << "CBQ indexed range reader: not active ("
+                           << (cbqRangeReason.empty() ? "gate rejected command" : cbqRangeReason)
+                           << "); using shared CBQ reader\n";
         }
         if (!cbqInputModule->open(&inputContractError)) {
             ostringstream errOut;
