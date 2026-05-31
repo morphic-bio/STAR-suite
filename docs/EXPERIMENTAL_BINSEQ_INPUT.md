@@ -100,10 +100,13 @@ and STAR/process_features/Chromap adapter surfaces are documented in
 - FLEX has full-size production count-only no-genome parity/timing, but
   genome-backed FLEX alignment and BAM/SAM output surfaces still need separate
   full-size validation.
-- STAR core indexed CBQ range mode is intentionally limited to order-independent
-  `--outSAMtype None` runs. SAM/BAM output, `PairedKeepInputOrder`, Y/noY
-  sidecars, read caps, batch mode, SLAM per-file passes, and two-pass/SJ-filter
-  modes currently fall back in `auto` mode or fail in forced `range` mode.
+- STAR core indexed CBQ range mode supports order-independent `None` and
+  coordinate-sorted `BAM` outputs, including `--readMapNumber` caps. Direct
+  `SAM`, `BAM Unsorted`, `PairedKeepInputOrder`, Y/noY sidecars, batch mode,
+  SLAM per-file passes, and two-pass/SJ-filter modes currently fall back in
+  `auto` mode or fail in forced `range` mode. Flex unsorted BAM remains on the
+  shared reader because CB/UB tag injection depends on the current unsorted BAM
+  output-order contract.
 - Chromap integration currently adapts CBQ to Chromap's existing FASTQ path
   contract; it is not yet an in-memory libchromap reader API.
 - SLAM per-file skipping is currently rejected for BINSEQ input.
