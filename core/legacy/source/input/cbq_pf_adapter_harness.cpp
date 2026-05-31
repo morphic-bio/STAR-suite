@@ -2,11 +2,15 @@
 
 #include "pf_api.h"
 
+#include <algorithm>
+#include <chrono>
 #include <cstdlib>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -28,16 +32,22 @@ struct Args {
     int threads = 1;
     int search_threads = 1;
     int consumer_threads = 1;
+    int read_buffer_lines = -1;
+    int feature_offset = -1;
+    std::string materialize_mode = "none";
     bool skip_emptydrops = true;
     bool skip_heatmaps = true;
 };
 
 void usage(const char* prog) {
     std::cerr
-        << "Usage: " << prog << " --mode fastq|cbq --whitelist WL --featureRef CSV "
+        << "Usage: " << prog << " --mode fastq|cbq|cbq-direct-decode|cbq-direct-pf --whitelist WL --featureRef CSV "
         << "--outputDir OUT [--sampleName NAME]\n"
         << "  FASTQ mode: --barcodeFastq R1 --featureFastq R2\n"
-        << "  CBQ mode:   --readFilesIn paired.cbq\n";
+        << "  CBQ mode:   --readFilesIn paired.cbq\n"
+        << "  Direct CBQ decode mode: --readFilesIn paired.cbq [--consumerThreads N] "
+        << "[--materializeMode none|sequence]\n"
+        << "  Optional:   --readBufferLines N [--featureOffset N]\n";
 }
 
 bool parse_args(int argc, char** argv, Args* args) {
@@ -103,6 +113,18 @@ bool parse_args(int argc, char** argv, Args* args) {
             const char* value = need_value("--consumerThreads");
             if (!value) return false;
             args->consumer_threads = std::atoi(value);
+        } else if (key == "--readBufferLines") {
+            const char* value = need_value("--readBufferLines");
+            if (!value) return false;
+            args->read_buffer_lines = std::atoi(value);
+        } else if (key == "--featureOffset") {
+            const char* value = need_value("--featureOffset");
+            if (!value) return false;
+            args->feature_offset = std::atoi(value);
+        } else if (key == "--materializeMode") {
+            const char* value = need_value("--materializeMode");
+            if (!value) return false;
+            args->materialize_mode = value;
         } else if (key == "--runEmptyDrops") {
             args->skip_emptydrops = false;
         } else if (key == "--runHeatmaps") {
@@ -115,9 +137,25 @@ bool parse_args(int argc, char** argv, Args* args) {
         }
     }
 
-    if (args->mode != "fastq" && args->mode != "cbq") {
-        std::cerr << "--mode must be fastq or cbq\n";
+    if (args->mode != "fastq" && args->mode != "cbq" &&
+        args->mode != "cbq-direct-decode" && args->mode != "cbq-direct-pf") {
+        std::cerr << "--mode must be fastq, cbq, cbq-direct-decode, or cbq-direct-pf\n";
         return false;
+    }
+    if (args->consumer_threads <= 0) {
+        std::cerr << "--consumerThreads must be positive\n";
+        return false;
+    }
+    if (args->mode == "cbq-direct-decode") {
+        if (args->cbq.empty()) {
+            std::cerr << "CBQ direct decode mode requires --readFilesIn\n";
+            return false;
+        }
+        if (args->materialize_mode != "none" && args->materialize_mode != "sequence") {
+            std::cerr << "--materializeMode must be none or sequence\n";
+            return false;
+        }
+        return true;
     }
     if (args->whitelist.empty() || args->feature_ref.empty() || args->output_dir.empty()) {
         std::cerr << "--whitelist, --featureRef, and --outputDir are required\n";
@@ -130,6 +168,10 @@ bool parse_args(int argc, char** argv, Args* args) {
     }
     if (args->mode == "cbq" && args->cbq.empty()) {
         std::cerr << "CBQ mode requires --readFilesIn\n";
+        return false;
+    }
+    if (args->mode == "cbq-direct-pf" && args->cbq.empty()) {
+        std::cerr << "CBQ direct PF mode requires --readFilesIn\n";
         return false;
     }
     return true;
@@ -149,16 +191,381 @@ pf_sequence_view to_pf_view_buffer(const char* data, size_t length) {
     return view;
 }
 
-bool process_cbq_records(pf_context* ctx,
-                         const Args& args,
-                         pf_stats* stats,
-                         std::string* error) {
+star::input::InputSourcePlan make_cbq_pair_plan(const Args& args) {
     std::vector<std::vector<std::string>> read_files(1);
     read_files[0].push_back(args.cbq);
     star::input::InputSourcePlan plan =
         star::input::make_cbq_input_source_plan(read_files, std::vector<std::string>(), 2);
     plan.read_name_separator_chars.clear();
     plan.read_name_separator_chars.push_back(' ');
+    return plan;
+}
+
+struct DirectDecodeStats {
+    uint64_t records = 0;
+    uint64_t batches = 0;
+    uint64_t bases = 0;
+    uint64_t read_ordinal_sum = 0;
+    uint64_t lane_ordinal_sum = 0;
+};
+
+bool process_cbq_direct_range(const Args& args,
+                              const star::input::InputSourcePlan& plan,
+                              uint64_t first_record,
+                              uint64_t record_count,
+                              DirectDecodeStats* stats,
+                              std::string* error) {
+    star::input::CbqInputModule module;
+    if (!module.configure(plan, error) ||
+        !module.open_range(0, first_record, record_count, error)) {
+        return false;
+    }
+
+    std::vector<char> sequence_storage;
+    for (;;) {
+        star::input::CbqReadBatchView batch;
+        const star::input::InputStatus status = module.next_batch(&batch, error);
+        if (status == star::input::InputStatus::Error) {
+            module.close();
+            return false;
+        }
+        if (status == star::input::InputStatus::End) {
+            break;
+        }
+
+        ++stats->batches;
+        stats->records += batch.record_count;
+        if (args.materialize_mode == "sequence") {
+            const size_t required_sequence_storage =
+                static_cast<size_t>(batch.record_count) * 2U * kPfLineLength;
+            if (sequence_storage.size() < required_sequence_storage) {
+                sequence_storage.resize(required_sequence_storage);
+            }
+            for (uint32_t i = 0; i < batch.record_count; ++i) {
+                const star::input::CbqReadView& view = batch.records[i];
+                if (view.segment_count < 2 || view.segments == nullptr) {
+                    if (error) *error = "CBQ direct decode expects paired CBQ records";
+                    module.close();
+                    return false;
+                }
+                stats->read_ordinal_sum += view.read_ordinal;
+                stats->lane_ordinal_sum += view.lane_read_ordinal;
+
+                char* barcode_sequence = sequence_storage.data() +
+                    (static_cast<size_t>(i) * 2U * kPfLineLength);
+                char* feature_sequence = barcode_sequence + kPfLineLength;
+                size_t barcode_length = 0;
+                size_t feature_length = 0;
+                if (!star::input::materialize_cbq_segment_sequence_to_buffer(view.segments[0],
+                                                                             barcode_sequence,
+                                                                             kPfSequenceCapacity,
+                                                                             &barcode_length,
+                                                                             error) ||
+                    !star::input::materialize_cbq_segment_sequence_to_buffer(view.segments[1],
+                                                                             feature_sequence,
+                                                                             kPfSequenceCapacity,
+                                                                             &feature_length,
+                                                                             error)) {
+                    module.close();
+                    return false;
+                }
+                stats->bases += static_cast<uint64_t>(barcode_length + feature_length);
+            }
+        }
+    }
+
+    module.close();
+    return true;
+}
+
+int run_cbq_direct_decode(const Args& args) {
+    const star::input::InputSourcePlan plan = make_cbq_pair_plan(args);
+    std::string error;
+    star::input::CbqInputModule metadata_module;
+    if (!metadata_module.configure(plan, &error) ||
+        !metadata_module.open_range(0, 0, std::numeric_limits<uint64_t>::max(), &error)) {
+        std::cerr << "Failed to inspect CBQ index: " << error << "\n";
+        return 1;
+    }
+    const uint64_t total_records = metadata_module.current_lane_record_count();
+    metadata_module.close();
+
+    const int requested_threads = args.consumer_threads > 0 ? args.consumer_threads : 1;
+    const uint64_t chunk_size = total_records == 0
+        ? 0
+        : (total_records + static_cast<uint64_t>(requested_threads) - 1U) /
+              static_cast<uint64_t>(requested_threads);
+
+    struct Range {
+        uint64_t first = 0;
+        uint64_t count = 0;
+    };
+    std::vector<Range> ranges;
+    for (int ithread = 0; ithread < requested_threads && chunk_size != 0; ++ithread) {
+        const uint64_t first = static_cast<uint64_t>(ithread) * chunk_size;
+        if (first >= total_records) {
+            break;
+        }
+        Range range;
+        range.first = first;
+        range.count = std::min(chunk_size, total_records - first);
+        ranges.push_back(range);
+    }
+
+    std::vector<DirectDecodeStats> per_thread(ranges.size());
+    std::vector<std::string> errors(ranges.size());
+    std::vector<int> ok(ranges.size(), 0);
+    std::vector<std::thread> workers;
+    workers.reserve(ranges.size());
+
+    const std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
+    for (size_t irange = 0; irange < ranges.size(); ++irange) {
+        workers.push_back(std::thread([&, irange]() {
+            ok[irange] = process_cbq_direct_range(args,
+                                                  plan,
+                                                  ranges[irange].first,
+                                                  ranges[irange].count,
+                                                  &per_thread[irange],
+                                                  &errors[irange]) ? 1 : 0;
+        }));
+    }
+    for (size_t iworker = 0; iworker < workers.size(); ++iworker) {
+        workers[iworker].join();
+    }
+    const std::chrono::steady_clock::time_point finish = std::chrono::steady_clock::now();
+
+    for (size_t irange = 0; irange < ok.size(); ++irange) {
+        if (!ok[irange]) {
+            std::cerr << "CBQ direct decode worker failed";
+            if (!errors[irange].empty()) {
+                std::cerr << ": " << errors[irange];
+            }
+            std::cerr << "\n";
+            return 1;
+        }
+    }
+
+    DirectDecodeStats total;
+    for (size_t irange = 0; irange < per_thread.size(); ++irange) {
+        total.records += per_thread[irange].records;
+        total.batches += per_thread[irange].batches;
+        total.bases += per_thread[irange].bases;
+        total.read_ordinal_sum += per_thread[irange].read_ordinal_sum;
+        total.lane_ordinal_sum += per_thread[irange].lane_ordinal_sum;
+    }
+    const std::chrono::duration<double> elapsed = finish - start;
+    std::cout << "processed_reads\t" << total.records << "\n";
+    std::cout << "indexed_reads\t" << total_records << "\n";
+    std::cout << "batches\t" << total.batches << "\n";
+    std::cout << "bases_materialized\t" << total.bases << "\n";
+    std::cout << "read_ordinal_sum\t" << total.read_ordinal_sum << "\n";
+    std::cout << "lane_ordinal_sum\t" << total.lane_ordinal_sum << "\n";
+    std::cout << "reader_threads_requested\t" << requested_threads << "\n";
+    std::cout << "reader_threads_used\t" << ranges.size() << "\n";
+    std::cout << "materialize_mode\t" << args.materialize_mode << "\n";
+    std::cout << "elapsed_seconds\t" << elapsed.count() << "\n";
+    return total.records == total_records ? 0 : 1;
+}
+
+struct CbqRange {
+    uint64_t first = 0;
+    uint64_t count = 0;
+};
+
+std::vector<CbqRange> make_ranges(uint64_t total_records, int requested_threads) {
+    std::vector<CbqRange> ranges;
+    const int threads = requested_threads > 0 ? requested_threads : 1;
+    const uint64_t chunk_size = total_records == 0
+        ? 0
+        : (total_records + static_cast<uint64_t>(threads) - 1U) /
+              static_cast<uint64_t>(threads);
+    for (int ithread = 0; ithread < threads && chunk_size != 0; ++ithread) {
+        const uint64_t first = static_cast<uint64_t>(ithread) * chunk_size;
+        if (first >= total_records) {
+            break;
+        }
+        CbqRange range;
+        range.first = first;
+        range.count = std::min(chunk_size, total_records - first);
+        ranges.push_back(range);
+    }
+    return ranges;
+}
+
+bool inspect_cbq_records(const star::input::InputSourcePlan& plan,
+                         uint64_t* total_records,
+                         std::string* error) {
+    star::input::CbqInputModule metadata_module;
+    if (!metadata_module.configure(plan, error) ||
+        !metadata_module.open_range(0, 0, std::numeric_limits<uint64_t>::max(), error)) {
+        return false;
+    }
+    *total_records = metadata_module.current_lane_record_count();
+    metadata_module.close();
+    return true;
+}
+
+bool process_cbq_direct_pf_range(pf_context* ctx,
+                                 pf_direct_range_job* job,
+                                 const star::input::InputSourcePlan& plan,
+                                 int worker_id,
+                                 uint64_t first_record,
+                                 uint64_t record_count,
+                                 std::string* error) {
+    star::input::CbqInputModule module;
+    if (!module.configure(plan, error) ||
+        !module.open_range(0, first_record, record_count, error)) {
+        return false;
+    }
+
+    std::vector<pf_read_record_view> records;
+    std::vector<char> sequence_storage;
+    for (;;) {
+        star::input::CbqReadBatchView batch;
+        const star::input::InputStatus status = module.next_batch(&batch, error);
+        if (status == star::input::InputStatus::Error) {
+            module.close();
+            return false;
+        }
+        if (status == star::input::InputStatus::End) {
+            break;
+        }
+
+        records.clear();
+        records.resize(batch.record_count);
+        const size_t required_sequence_storage =
+            static_cast<size_t>(batch.record_count) * 2U * kPfLineLength;
+        if (sequence_storage.size() < required_sequence_storage) {
+            sequence_storage.resize(required_sequence_storage);
+        }
+        for (uint32_t i = 0; i < batch.record_count; ++i) {
+            const star::input::CbqReadView& view = batch.records[i];
+            if (view.segment_count < 2 || view.segments == nullptr) {
+                if (error) *error = "CBQ direct PF expects paired CBQ records";
+                module.close();
+                return false;
+            }
+
+            char* barcode_sequence = sequence_storage.data() +
+                (static_cast<size_t>(i) * 2U * kPfLineLength);
+            char* feature_sequence = barcode_sequence + kPfLineLength;
+            size_t barcode_length = 0;
+            size_t feature_length = 0;
+            if (!star::input::materialize_cbq_segment_sequence_to_buffer(view.segments[0],
+                                                                         barcode_sequence,
+                                                                         kPfSequenceCapacity,
+                                                                         &barcode_length,
+                                                                         error) ||
+                !star::input::materialize_cbq_segment_sequence_to_buffer(view.segments[1],
+                                                                         feature_sequence,
+                                                                         kPfSequenceCapacity,
+                                                                         &feature_length,
+                                                                         error)) {
+                module.close();
+                return false;
+            }
+
+            pf_read_record_view rec = {};
+            rec.barcode_sequence = to_pf_view_buffer(barcode_sequence, barcode_length);
+            rec.barcode_quality = to_pf_view(view.segments[0].quality);
+            rec.feature_sequence = to_pf_view_buffer(feature_sequence, feature_length);
+            rec.feature_quality = to_pf_view(view.segments[1].quality);
+            records[i] = rec;
+        }
+
+        if (!records.empty()) {
+            const pf_error err = pf_direct_range_process_record_views(
+                job, worker_id, records.data(), batch.record_count);
+            if (err != PF_OK) {
+                if (error) {
+                    const char* pf_error_message = pf_get_error(ctx);
+                    *error = pf_error_message ? pf_error_message : "process_features direct CBQ batch failed";
+                }
+                module.close();
+                return false;
+            }
+        }
+    }
+
+    module.close();
+    return true;
+}
+
+bool process_cbq_direct_pf_records(pf_context* ctx,
+                                   const Args& args,
+                                   pf_stats* stats,
+                                   std::string* error) {
+    const star::input::InputSourcePlan plan = make_cbq_pair_plan(args);
+    uint64_t total_records = 0;
+    if (!inspect_cbq_records(plan, &total_records, error)) {
+        return false;
+    }
+
+    const int requested_threads = args.consumer_threads > 0 ? args.consumer_threads : 1;
+    const std::vector<CbqRange> ranges = make_ranges(total_records, requested_threads);
+
+    pf_direct_range_job* job = nullptr;
+    pf_error err = pf_direct_range_begin(ctx,
+                                         args.output_dir.c_str(),
+                                         args.sample_name.c_str(),
+                                         requested_threads,
+                                         2,
+                                         &job);
+    if (err != PF_OK) {
+        if (error) {
+            const char* pf_error_message = pf_get_error(ctx);
+            *error = pf_error_message ? pf_error_message : "process_features direct range begin failed";
+        }
+        return false;
+    }
+
+    std::vector<std::thread> workers;
+    std::vector<int> ok(ranges.size(), 0);
+    std::vector<std::string> errors(ranges.size());
+    workers.reserve(ranges.size());
+    for (size_t irange = 0; irange < ranges.size(); ++irange) {
+        workers.push_back(std::thread([&, irange]() {
+            ok[irange] = process_cbq_direct_pf_range(ctx,
+                                                     job,
+                                                     plan,
+                                                     static_cast<int>(irange),
+                                                     ranges[irange].first,
+                                                     ranges[irange].count,
+                                                     &errors[irange]) ? 1 : 0;
+        }));
+    }
+    for (size_t iworker = 0; iworker < workers.size(); ++iworker) {
+        workers[iworker].join();
+    }
+
+    for (size_t irange = 0; irange < ok.size(); ++irange) {
+        if (!ok[irange]) {
+            if (error) {
+                *error = errors[irange].empty()
+                    ? "process_features direct CBQ worker failed"
+                    : errors[irange];
+            }
+            pf_direct_range_abort(job);
+            return false;
+        }
+    }
+
+    err = pf_direct_range_end(job, stats);
+    if (err != PF_OK) {
+        if (error) {
+            const char* pf_error_message = pf_get_error(ctx);
+            *error = pf_error_message ? pf_error_message : "process_features direct range finish failed";
+        }
+        return false;
+    }
+    return true;
+}
+
+bool process_cbq_records(pf_context* ctx,
+                         const Args& args,
+                         pf_stats* stats,
+                         std::string* error) {
+    star::input::InputSourcePlan plan = make_cbq_pair_plan(args);
 
     star::input::CbqInputModule module;
     if (!module.configure(plan, error) || !module.open(error)) {
@@ -179,6 +586,8 @@ bool process_cbq_records(pf_context* ctx,
         return false;
     }
 
+    std::vector<pf_read_record_view> records;
+    std::vector<char> sequence_storage;
     for (;;) {
         star::input::CbqReadBatchView batch;
         const star::input::InputStatus status = module.next_batch(&batch, error);
@@ -190,10 +599,13 @@ bool process_cbq_records(pf_context* ctx,
         if (status == star::input::InputStatus::End) {
             break;
         }
-        std::vector<pf_read_record_view> records;
-        std::vector<char> sequence_storage(static_cast<size_t>(batch.record_count) *
-                                           2U * kPfLineLength);
-        records.reserve(batch.record_count);
+        records.clear();
+        records.resize(batch.record_count);
+        const size_t required_sequence_storage =
+            static_cast<size_t>(batch.record_count) * 2U * kPfLineLength;
+        if (sequence_storage.size() < required_sequence_storage) {
+            sequence_storage.resize(required_sequence_storage);
+        }
         for (uint32_t i = 0; i < batch.record_count; ++i) {
             const star::input::CbqReadView& view = batch.records[i];
             if (view.segment_count < 2 || view.segments == nullptr) {
@@ -226,10 +638,10 @@ bool process_cbq_records(pf_context* ctx,
             rec.barcode_quality = to_pf_view(view.segments[0].quality);
             rec.feature_sequence = to_pf_view_buffer(feature_sequence, feature_length);
             rec.feature_quality = to_pf_view(view.segments[1].quality);
-            records.push_back(rec);
+            records[i] = rec;
         }
         if (!records.empty()) {
-            err = pf_process_record_views(stream, records.data(), records.size());
+            err = pf_process_record_views(stream, records.data(), batch.record_count);
             if (err != PF_OK) {
                 if (error) {
                     const char* pf_error_message = pf_get_error(ctx);
@@ -273,6 +685,12 @@ int run_pf(const Args& args) {
     pf_config_set_threads(config.get(), args.threads);
     pf_config_set_search_threads(config.get(), args.search_threads);
     pf_config_set_consumer_threads(config.get(), args.consumer_threads);
+    if (args.read_buffer_lines > 0) {
+        pf_config_set_read_buffer_lines(config.get(), args.read_buffer_lines);
+    }
+    if (args.feature_offset >= 0) {
+        pf_config_set_feature_offset(config.get(), args.feature_offset);
+    }
     pf_config_set_skip_emptydrops(config.get(), args.skip_emptydrops ? 1 : 0);
     pf_config_set_skip_heatmaps(config.get(), args.skip_heatmaps ? 1 : 0);
 
@@ -303,6 +721,13 @@ int run_pf(const Args& args) {
                                 args.output_dir.c_str(),
                                 args.sample_name.c_str(),
                                 &stats);
+    } else if (args.mode == "cbq-direct-pf") {
+        std::string input_error;
+        if (!process_cbq_direct_pf_records(ctx.get(), args, &stats, &input_error)) {
+            std::cerr << "Failed to process direct CBQ records: " << input_error << "\n";
+            return 1;
+        }
+        err = PF_OK;
     } else {
         std::string input_error;
         if (!process_cbq_records(ctx.get(), args, &stats, &input_error)) {
@@ -333,6 +758,9 @@ int main(int argc, char** argv) {
     if (!parse_args(argc, argv, &args)) {
         usage(argv[0]);
         return 2;
+    }
+    if (args.mode == "cbq-direct-decode") {
+        return run_cbq_direct_decode(args);
     }
     return run_pf(args);
 }

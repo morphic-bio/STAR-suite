@@ -9,6 +9,7 @@
 #include <fstream>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <sstream>
 #include <stdexcept>
 #include <vector>
@@ -279,6 +280,7 @@ public:
     }
 
     bool load(std::string* error) {
+        std::lock_guard<std::mutex> lock(load_mutex_);
         if (decompress_ != nullptr) {
             return true;
         }
@@ -340,6 +342,7 @@ private:
     DecompressFn decompress_;
     IsErrorFn is_error_;
     GetErrorNameFn get_error_name_;
+    std::mutex load_mutex_;
 };
 
 ZstdRuntime& zstd_runtime() {
@@ -885,6 +888,11 @@ bool materialize_cbq_segment_sequence_to_buffer(const CbqSegmentView& segment,
 }
 
 struct CbqInputModule::Impl {
+    struct BlockIndexEntry {
+        uint64_t offset = 0;
+        uint64_t cumulative_records = 0;
+    };
+
     std::ifstream stream;
     uint32_t lane_index = 0;
     uint64_t read_ordinal = 0;
@@ -892,6 +900,12 @@ struct CbqInputModule::Impl {
     bool opened = false;
     FileHeaderFields file_header;
     std::shared_ptr<CbqBatchBacking> batch;
+    std::vector<BlockIndexEntry> block_index;
+    uint64_t current_lane_records = 0;
+    uint64_t batch_first_record = 0;
+    bool range_mode = false;
+    uint64_t range_first_record = 0;
+    uint64_t range_end_record = 0;
 
     void clear_batch_views() {
         if (!batch) {
@@ -996,6 +1010,134 @@ struct CbqInputModule::Impl {
         return true;
     }
 
+    bool read_current_lane_index(const InputSourcePlan& plan, std::string* error) {
+        const std::string& path = plan.mate_files.front().at(lane_index);
+        stream.clear();
+        stream.seekg(0, std::ios::end);
+        const std::streampos end_pos = stream.tellg();
+        if (end_pos < 0) {
+            return set_error(error, "could not seek CBQ file for index: " + path);
+        }
+        const uint64_t file_size = static_cast<uint64_t>(end_pos);
+        const uint64_t index_header_size = 24U;
+        const uint64_t index_footer_size = 16U;
+        if (file_size < 64U + index_header_size + index_footer_size) {
+            return set_error(error, "CBQ range mode requires a CBQINDEX footer: " + path);
+        }
+
+        std::array<uint8_t, 16> footer{};
+        stream.seekg(static_cast<std::streamoff>(file_size - index_footer_size), std::ios::beg);
+        if (!read_exact(stream, footer.data(), footer.size(), "index footer", error)) {
+            return false;
+        }
+        if (std::memcmp(footer.data() + 8, "CBQINDEX", 8) != 0) {
+            return set_error(error, "CBQ range mode requires a CBQINDEX footer: " + path);
+        }
+
+        const uint64_t z_index_size = read_le64(footer.data());
+        if (file_size < 64U + index_header_size + index_footer_size + z_index_size) {
+            return set_error(error, "CBQ index footer points before file header: " + path);
+        }
+        const uint64_t index_header_offset =
+            file_size - index_footer_size - z_index_size - index_header_size;
+
+        std::array<uint8_t, 24> index_header{};
+        stream.seekg(static_cast<std::streamoff>(index_header_offset), std::ios::beg);
+        if (!read_exact(stream, index_header.data(), index_header.size(), "index header", error)) {
+            return false;
+        }
+        if (std::memcmp(index_header.data(), "CBQINDEX", 8) != 0) {
+            return set_error(error, "CBQ index header magic mismatch: " + path);
+        }
+
+        const uint64_t index_size = read_le64(index_header.data() + 8);
+        const uint64_t compressed_index_size = read_le64(index_header.data() + 16);
+        if (compressed_index_size != z_index_size) {
+            return set_error(error, "CBQ index footer/header compressed-size mismatch: " + path);
+        }
+        if (index_size % 16U != 0) {
+            return set_error(error, "CBQ index size is not a multiple of 16 bytes: " + path);
+        }
+        size_t index_size_size_t = 0;
+        if (!checked_size(index_size, &index_size_size_t)) {
+            return set_error(error, "CBQ index size exceeds platform size: " + path);
+        }
+
+        std::vector<uint8_t> z_index;
+        if (!read_vector(stream, compressed_index_size, &z_index, "z_index", error)) {
+            return false;
+        }
+
+        std::vector<uint8_t> index_bytes;
+        if (!zstd_runtime().decompress(z_index, index_size_size_t, &index_bytes, "index", error)) {
+            return false;
+        }
+        if (index_bytes.size() != index_size_size_t) {
+            return set_error(error, "CBQ index decompressed to an unexpected size: " + path);
+        }
+
+        block_index.clear();
+        block_index.reserve(index_bytes.size() / 16U);
+        uint64_t previous_cumulative_records = 0;
+        for (size_t offset = 0; offset < index_bytes.size(); offset += 16U) {
+            BlockIndexEntry entry;
+            entry.offset = read_le64(index_bytes.data() + offset);
+            entry.cumulative_records = read_le64(index_bytes.data() + offset + 8U);
+            if (entry.offset < 64U || entry.offset >= index_header_offset) {
+                return set_error(error, "CBQ index contains an invalid block offset: " + path);
+            }
+            if (entry.cumulative_records < previous_cumulative_records) {
+                return set_error(error, "CBQ index cumulative records are not monotonic: " + path);
+            }
+            previous_cumulative_records = entry.cumulative_records;
+            block_index.push_back(entry);
+        }
+
+        current_lane_records = block_index.empty() ? 0U : block_index.back().cumulative_records;
+        stream.clear();
+        return true;
+    }
+
+    bool seek_to_range_start(uint64_t first_record, std::string* error) {
+        if (first_record >= current_lane_records || block_index.empty()) {
+            lane_record_index = current_lane_records;
+            read_ordinal = current_lane_records;
+            batch.reset();
+            return true;
+        }
+
+        std::vector<BlockIndexEntry>::const_iterator it =
+            std::upper_bound(block_index.begin(),
+                             block_index.end(),
+                             first_record,
+                             [](uint64_t value, const BlockIndexEntry& entry) {
+                                 return value < entry.cumulative_records;
+                             });
+        if (it == block_index.end()) {
+            lane_record_index = current_lane_records;
+            read_ordinal = current_lane_records;
+            batch.reset();
+            return true;
+        }
+
+        std::vector<BlockIndexEntry>::const_iterator index_begin = block_index.begin();
+        const size_t block_index_position =
+            static_cast<size_t>(std::distance(index_begin, it));
+        const uint64_t block_first_record = block_index_position == 0
+            ? 0U
+            : block_index[block_index_position - 1U].cumulative_records;
+
+        stream.clear();
+        stream.seekg(static_cast<std::streamoff>(it->offset), std::ios::beg);
+        if (!stream.good()) {
+            return set_error(error, "could not seek CBQ stream to indexed block");
+        }
+        lane_record_index = block_first_record;
+        read_ordinal = block_first_record;
+        batch.reset();
+        return true;
+    }
+
     bool open_lane(const InputSourcePlan& plan, uint32_t lane, std::string* error) {
         close_lane();
         const std::string& path = plan.mate_files.front().at(lane);
@@ -1026,6 +1168,7 @@ struct CbqInputModule::Impl {
 
         lane_index = lane;
         lane_record_index = 0;
+        batch_first_record = 0;
         batch.reset();
         opened = true;
         return true;
@@ -1036,6 +1179,12 @@ struct CbqInputModule::Impl {
             stream.close();
         }
         batch.reset();
+        block_index.clear();
+        current_lane_records = 0;
+        batch_first_record = 0;
+        range_mode = false;
+        range_first_record = 0;
+        range_end_record = 0;
     }
 
     BlockLoadStatus load_next_block(const InputSourcePlan& plan, std::string* error) {
@@ -1197,6 +1346,7 @@ struct CbqInputModule::Impl {
         block.num_records = header.num_records;
         block.num_sequences = header.num_sequences;
         block.record_index = 0;
+        batch_first_record = lane_record_index;
         if (!build_batch_views(plan, error)) {
             return BlockLoadStatus::Error;
         }
@@ -1205,9 +1355,18 @@ struct CbqInputModule::Impl {
 
     BlockLoadStatus load_next_available_block(const InputSourcePlan& plan, std::string* error) {
         while (lane_index < plan.read_files_n) {
+            if (range_mode &&
+                range_first_record >= range_end_record) {
+                opened = false;
+                return BlockLoadStatus::End;
+            }
             if (batch &&
                 batch->block.record_index < static_cast<size_t>(batch->block.num_records)) {
                 return BlockLoadStatus::Block;
+            }
+            if (range_mode && lane_record_index >= range_end_record) {
+                opened = false;
+                return BlockLoadStatus::End;
             }
 
             const BlockLoadStatus status = load_next_block(plan, error);
@@ -1221,6 +1380,10 @@ struct CbqInputModule::Impl {
                 return BlockLoadStatus::Block;
             }
 
+            if (range_mode) {
+                opened = false;
+                return BlockLoadStatus::End;
+            }
             close_lane();
             ++lane_index;
             if (lane_index >= plan.read_files_n) {
@@ -1314,6 +1477,64 @@ bool CbqInputModule::open(std::string* error) {
     return true;
 }
 
+bool CbqInputModule::open_range(uint32_t lane_index,
+                                uint64_t first_record,
+                                uint64_t record_count,
+                                std::string* error) {
+    if (!configured_) {
+        return set_error(error, "CbqInputModule must be configured before open_range()");
+    }
+    close();
+    if (plan_.read_files_n == 0) {
+        return set_error(error, "CBQ input source plan has no lanes");
+    }
+    if (lane_index >= plan_.read_files_n) {
+        std::ostringstream msg;
+        msg << "CBQ range lane " << lane_index
+            << " is outside lane count " << plan_.read_files_n;
+        return set_error(error, msg.str());
+    }
+
+    impl_->lane_index = lane_index;
+    impl_->read_ordinal = 0;
+    impl_->opened = false;
+    if (!impl_->open_lane(plan_, lane_index, error)) {
+        return false;
+    }
+    if (!impl_->read_current_lane_index(plan_, error)) {
+        close();
+        return false;
+    }
+    if (first_record > impl_->current_lane_records) {
+        std::ostringstream msg;
+        msg << "CBQ range starts at record " << first_record
+            << " but lane has only " << impl_->current_lane_records << " records";
+        close();
+        return set_error(error, msg.str());
+    }
+
+    uint64_t end_record = impl_->current_lane_records;
+    if (record_count != std::numeric_limits<uint64_t>::max()) {
+        if (record_count <= impl_->current_lane_records - first_record) {
+            end_record = first_record + record_count;
+        }
+    }
+
+    impl_->range_mode = true;
+    impl_->range_first_record = first_record;
+    impl_->range_end_record = end_record;
+    if (!impl_->seek_to_range_start(first_record, error)) {
+        close();
+        return false;
+    }
+    impl_->opened = true;
+    return true;
+}
+
+uint64_t CbqInputModule::current_lane_record_count() const {
+    return impl_ ? impl_->current_lane_records : 0U;
+}
+
 InputStatus CbqInputModule::next_batch(CbqReadBatchView* batch, std::string* error) {
     if (batch == nullptr) {
         if (error != nullptr) {
@@ -1328,39 +1549,69 @@ InputStatus CbqInputModule::next_batch(CbqReadBatchView* batch, std::string* err
         return InputStatus::Error;
     }
 
-    const BlockLoadStatus status = impl_->load_next_available_block(plan_, error);
-    if (status == BlockLoadStatus::Error) {
-        return InputStatus::Error;
-    }
-    if (status == BlockLoadStatus::End) {
-        return InputStatus::End;
-    }
-    if (!impl_->batch) {
-        if (error != nullptr) {
-            *error = "CBQ batch storage is not available";
+    for (;;) {
+        const BlockLoadStatus status = impl_->load_next_available_block(plan_, error);
+        if (status == BlockLoadStatus::Error) {
+            return InputStatus::Error;
         }
-        return InputStatus::Error;
-    }
-
-    DecodedBlock& block = impl_->batch->block;
-    const size_t start = block.record_index;
-    const size_t remaining = static_cast<size_t>(block.num_records) - start;
-    if (remaining > static_cast<size_t>(std::numeric_limits<uint32_t>::max())) {
-        if (error != nullptr) {
-            *error = "CBQ unread batch size exceeds uint32_t";
+        if (status == BlockLoadStatus::End) {
+            return InputStatus::End;
         }
-        return InputStatus::Error;
+        if (!impl_->batch) {
+            if (error != nullptr) {
+                *error = "CBQ batch storage is not available";
+            }
+            return InputStatus::Error;
+        }
+
+        DecodedBlock& block = impl_->batch->block;
+        size_t start = block.record_index;
+        size_t remaining = static_cast<size_t>(block.num_records) - start;
+        if (impl_->range_mode) {
+            const uint64_t block_first_record = impl_->batch_first_record;
+            const uint64_t current_record = block_first_record + static_cast<uint64_t>(start);
+            if (current_record < impl_->range_first_record) {
+                const uint64_t local_start = impl_->range_first_record - block_first_record;
+                if (local_start >= block.num_records) {
+                    block.record_index = static_cast<size_t>(block.num_records);
+                    continue;
+                }
+                start = static_cast<size_t>(local_start);
+                remaining = static_cast<size_t>(block.num_records) - start;
+            }
+
+            const uint64_t absolute_start = block_first_record + static_cast<uint64_t>(start);
+            if (absolute_start >= impl_->range_end_record) {
+                block.record_index = static_cast<size_t>(block.num_records);
+                continue;
+            }
+            const uint64_t range_remaining = impl_->range_end_record - absolute_start;
+            if (range_remaining < static_cast<uint64_t>(remaining)) {
+                remaining = static_cast<size_t>(range_remaining);
+            }
+        }
+
+        if (remaining == 0) {
+            block.record_index = static_cast<size_t>(block.num_records);
+            continue;
+        }
+        if (remaining > static_cast<size_t>(std::numeric_limits<uint32_t>::max())) {
+            if (error != nullptr) {
+                *error = "CBQ unread batch size exceeds uint32_t";
+            }
+            return InputStatus::Error;
+        }
+
+        batch->records = impl_->batch->read_views.data() + start;
+        batch->record_count = static_cast<uint32_t>(remaining);
+        batch->lane_index = impl_->lane_index;
+        batch->preserves_source_order = true;
+        batch->backing_storage_owned_by_reader = true;
+        batch->backing = impl_->batch;
+
+        block.record_index = static_cast<size_t>(block.num_records);
+        return InputStatus::Record;
     }
-
-    batch->records = impl_->batch->read_views.data() + start;
-    batch->record_count = static_cast<uint32_t>(remaining);
-    batch->lane_index = impl_->lane_index;
-    batch->preserves_source_order = true;
-    batch->backing_storage_owned_by_reader = true;
-    batch->backing = impl_->batch;
-
-    block.record_index = static_cast<size_t>(block.num_records);
-    return InputStatus::Record;
 }
 
 InputStatus CbqInputModule::next_record(InputRecord* record, std::string* error) {
@@ -1377,22 +1628,49 @@ InputStatus CbqInputModule::next_record(InputRecord* record, std::string* error)
         return InputStatus::Error;
     }
 
-    const BlockLoadStatus status = impl_->load_next_available_block(plan_, error);
-    if (status == BlockLoadStatus::Error) {
-        return InputStatus::Error;
-    }
-    if (status == BlockLoadStatus::End) {
-        return InputStatus::End;
-    }
-    if (!impl_->batch) {
-        if (error != nullptr) {
-            *error = "CBQ batch storage is not available";
+    const CbqReadView* selected = nullptr;
+    for (;;) {
+        const BlockLoadStatus status = impl_->load_next_available_block(plan_, error);
+        if (status == BlockLoadStatus::Error) {
+            return InputStatus::Error;
         }
-        return InputStatus::Error;
+        if (status == BlockLoadStatus::End) {
+            return InputStatus::End;
+        }
+        if (!impl_->batch) {
+            if (error != nullptr) {
+                *error = "CBQ batch storage is not available";
+            }
+            return InputStatus::Error;
+        }
+
+        DecodedBlock& block = impl_->batch->block;
+        if (impl_->range_mode) {
+            const uint64_t block_first_record = impl_->batch_first_record;
+            const uint64_t current_record =
+                block_first_record + static_cast<uint64_t>(block.record_index);
+            if (current_record < impl_->range_first_record) {
+                const uint64_t local_start = impl_->range_first_record - block_first_record;
+                if (local_start >= block.num_records) {
+                    block.record_index = static_cast<size_t>(block.num_records);
+                    continue;
+                }
+                block.record_index = static_cast<size_t>(local_start);
+            }
+
+            const uint64_t absolute_record =
+                block_first_record + static_cast<uint64_t>(block.record_index);
+            if (absolute_record >= impl_->range_end_record) {
+                block.record_index = static_cast<size_t>(block.num_records);
+                continue;
+            }
+        }
+
+        selected = &impl_->batch->read_views[block.record_index++];
+        break;
     }
 
-    DecodedBlock& block = impl_->batch->block;
-    const CbqReadView& view = impl_->batch->read_views[block.record_index++];
+    const CbqReadView& view = *selected;
 
     assign_from_span(&record->read_name, view.read_name);
     assign_from_span(&record->read_name_extra, view.read_name_extra);

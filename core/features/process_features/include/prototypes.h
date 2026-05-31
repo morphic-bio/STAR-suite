@@ -66,6 +66,16 @@ fastq_reader* allocate_fastq_reader( char **filenames, int nfiles, int filetype,
 fastq_reader_set *  allocate_fastq_reader_set( char **barcode_filenames, char **forward_filenames, char **reverse_filenames, int nfiles, size_t read_size, size_t read_buffer_lines);
 void *read_fastqs_by_set(void *arg);
 void *consume_reads(void *arg);
+typedef struct pf_direct_consumer_state pf_direct_consumer_state;
+pf_direct_consumer_state *pf_direct_consumer_state_create(fastq_processor *processor_args, int nreaders);
+int pf_direct_consumer_process_record(pf_direct_consumer_state *state,
+                                      const char *barcode_sequence,
+                                      const char *barcode_quality,
+                                      const char *feature_sequence,
+                                      const char *feature_quality,
+                                      const char *feature_sequence2,
+                                      const char *feature_quality2);
+void pf_direct_consumer_state_destroy(pf_direct_consumer_state *state);
 void free_fastq_reader(fastq_reader *reader);
 void free_fastq_reader_set(fastq_reader_set *reader_set);
 void free_fastq_processor(fastq_processor *processor_args);

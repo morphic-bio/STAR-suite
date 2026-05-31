@@ -11,6 +11,8 @@
 #include <vector>
 #include <algorithm>
 #include <cctype>
+#include <limits>
+#include <thread>
 #include <sys/stat.h>
 #include <stdexcept>
 using std::cerr;
@@ -408,6 +410,9 @@ static void applyAssignOptions(pf_config* cfg, const AssignOptions& options) {
     if (options.searchThreads > 0) {
         pf_config_set_search_threads(cfg, options.searchThreads);
     }
+    if (options.readBufferLines > 0) {
+        pf_config_set_read_buffer_lines(cfg, options.readBufferLines);
+    }
     if (options.minPosterior >= 0.0) {
         pf_config_set_min_posterior(cfg, options.minPosterior);
     }
@@ -489,6 +494,302 @@ static pf_sequence_view pfViewFromBuffer(const char* data, size_t length) {
     return view;
 }
 
+static string normalizeCbqMode(string mode) {
+    mode = lowerCopyLocal(stripOuterQuotes(mode));
+    if (mode.empty() || mode == "-") {
+        return "auto";
+    }
+    if (mode == "direct") {
+        return "range";
+    }
+    return mode;
+}
+
+static star::input::InputSourcePlan makeCbqPairPlan(const vector<string>& cbqPaths) {
+    std::vector<std::vector<std::string>> readFiles(1);
+    readFiles[0] = cbqPaths;
+    star::input::InputSourcePlan plan =
+        star::input::make_cbq_input_source_plan(readFiles, std::vector<std::string>(), 2);
+    plan.read_name_separator_chars.clear();
+    plan.read_name_separator_chars.push_back(' ');
+    return plan;
+}
+
+struct CbqLaneRange {
+    uint32_t lane = 0;
+    uint64_t first = 0;
+    uint64_t count = 0;
+};
+
+struct CbqLaneCount {
+    uint32_t lane = 0;
+    uint64_t count = 0;
+};
+
+static bool directCbqSettingsSupported(const AssignOptions& options,
+                                       string* fallbackReason) {
+    if (options.legacyCbRescue) {
+        if (fallbackReason != nullptr) {
+            *fallbackReason = "legacy_cb_rescue";
+        }
+        return false;
+    }
+    if (options.featureModeBootstrapReads > 0) {
+        if (fallbackReason != nullptr) {
+            *fallbackReason = "feature_mode_bootstrap";
+        }
+        return false;
+    }
+    return true;
+}
+
+static bool inspectCbqLaneCounts(const star::input::InputSourcePlan& plan,
+                                 long long maxReads,
+                                 vector<CbqLaneCount>* lanes,
+                                 uint64_t* totalRecords,
+                                 string* errorMessage) {
+    lanes->clear();
+    *totalRecords = 0;
+    uint64_t remaining = maxReads > 0
+        ? static_cast<uint64_t>(maxReads)
+        : std::numeric_limits<uint64_t>::max();
+
+    for (uint32_t lane = 0; lane < plan.read_files_n; ++lane) {
+        std::string inputError;
+        star::input::CbqInputModule module;
+        if (!module.configure(plan, &inputError) ||
+            !module.open_range(lane, 0, std::numeric_limits<uint64_t>::max(), &inputError)) {
+            if (errorMessage != nullptr) {
+                *errorMessage = inputError;
+            }
+            return false;
+        }
+        const uint64_t laneRecords = module.current_lane_record_count();
+        module.close();
+
+        const uint64_t allowed = remaining == std::numeric_limits<uint64_t>::max()
+            ? laneRecords
+            : std::min(laneRecords, remaining);
+        CbqLaneCount laneCount;
+        laneCount.lane = lane;
+        laneCount.count = allowed;
+        lanes->push_back(laneCount);
+        *totalRecords += allowed;
+        if (remaining != std::numeric_limits<uint64_t>::max()) {
+            remaining -= allowed;
+            if (remaining == 0) {
+                for (uint32_t rest = lane + 1; rest < plan.read_files_n; ++rest) {
+                    CbqLaneCount zero;
+                    zero.lane = rest;
+                    zero.count = 0;
+                    lanes->push_back(zero);
+                }
+                break;
+            }
+        }
+    }
+    return true;
+}
+
+static vector<vector<CbqLaneRange>> makeDirectWorkerRanges(const vector<CbqLaneCount>& lanes,
+                                                           uint64_t totalRecords,
+                                                           int nworkers) {
+    vector<vector<CbqLaneRange>> workerRanges(static_cast<size_t>(nworkers));
+    if (nworkers <= 0 || totalRecords == 0) {
+        return workerRanges;
+    }
+
+    const uint64_t chunkSize =
+        (totalRecords + static_cast<uint64_t>(nworkers) - 1U) /
+        static_cast<uint64_t>(nworkers);
+    for (int worker = 0; worker < nworkers; ++worker) {
+        const uint64_t globalFirst = static_cast<uint64_t>(worker) * chunkSize;
+        if (globalFirst >= totalRecords) {
+            break;
+        }
+        const uint64_t globalEnd = std::min(totalRecords, globalFirst + chunkSize);
+        uint64_t laneGlobalFirst = 0;
+        for (const CbqLaneCount& lane : lanes) {
+            const uint64_t laneGlobalEnd = laneGlobalFirst + lane.count;
+            if (lane.count > 0 && globalFirst < laneGlobalEnd && globalEnd > laneGlobalFirst) {
+                const uint64_t overlapFirst = std::max(globalFirst, laneGlobalFirst);
+                const uint64_t overlapEnd = std::min(globalEnd, laneGlobalEnd);
+                CbqLaneRange range;
+                range.lane = lane.lane;
+                range.first = overlapFirst - laneGlobalFirst;
+                range.count = overlapEnd - overlapFirst;
+                workerRanges[static_cast<size_t>(worker)].push_back(range);
+            }
+            laneGlobalFirst = laneGlobalEnd;
+            if (laneGlobalFirst >= globalEnd) {
+                break;
+            }
+        }
+    }
+    return workerRanges;
+}
+
+static bool processCbqDirectRangeWorker(pf_context* ctx,
+                                        pf_direct_range_job* job,
+                                        const star::input::InputSourcePlan& plan,
+                                        int workerId,
+                                        const vector<CbqLaneRange>& ranges,
+                                        string* errorMessage) {
+    std::vector<pf_read_record_view> records;
+    std::vector<char> sequenceStorage;
+    for (const CbqLaneRange& range : ranges) {
+        if (range.count == 0) {
+            continue;
+        }
+        std::string inputError;
+        star::input::CbqInputModule module;
+        if (!module.configure(plan, &inputError) ||
+            !module.open_range(range.lane, range.first, range.count, &inputError)) {
+            if (errorMessage != nullptr) {
+                *errorMessage = "CBQ direct range open error: " + inputError;
+            }
+            return false;
+        }
+
+        for (;;) {
+            star::input::CbqReadBatchView batch;
+            const star::input::InputStatus status = module.next_batch(&batch, &inputError);
+            if (status == star::input::InputStatus::Error) {
+                module.close();
+                if (errorMessage != nullptr) {
+                    *errorMessage = "CBQ direct range read error: " + inputError;
+                }
+                return false;
+            }
+            if (status == star::input::InputStatus::End) {
+                break;
+            }
+            if (batch.record_count == 0) {
+                continue;
+            }
+
+            records.clear();
+            records.resize(batch.record_count);
+            const size_t requiredSequenceStorage =
+                static_cast<size_t>(batch.record_count) * 2U * kPfLineLength;
+            if (sequenceStorage.size() < requiredSequenceStorage) {
+                sequenceStorage.resize(requiredSequenceStorage);
+            }
+
+            for (uint32_t i = 0; i < batch.record_count; ++i) {
+                const star::input::CbqReadView& view = batch.records[i];
+                if (view.segment_count < 2 || view.segments == nullptr) {
+                    module.close();
+                    if (errorMessage != nullptr) {
+                        *errorMessage = "CBQ direct range expects paired CBQ records";
+                    }
+                    return false;
+                }
+
+                pf_read_record_view rec = {};
+                char* barcodeSequence = sequenceStorage.data() +
+                    (static_cast<size_t>(i) * 2U * kPfLineLength);
+                char* featureSequence = barcodeSequence + kPfLineLength;
+                size_t barcodeLength = 0;
+                size_t featureLength = 0;
+                if (!star::input::materialize_cbq_segment_sequence_to_buffer(
+                        view.segments[0], barcodeSequence, kPfSequenceCapacity,
+                        &barcodeLength, &inputError) ||
+                    !star::input::materialize_cbq_segment_sequence_to_buffer(
+                        view.segments[1], featureSequence, kPfSequenceCapacity,
+                        &featureLength, &inputError)) {
+                    module.close();
+                    if (errorMessage != nullptr) {
+                        *errorMessage = "CBQ direct range sequence decode error: " + inputError;
+                    }
+                    return false;
+                }
+
+                rec.barcode_sequence = pfViewFromBuffer(barcodeSequence, barcodeLength);
+                rec.barcode_quality = pfViewFromCbqSpan(view.segments[0].quality);
+                rec.feature_sequence = pfViewFromBuffer(featureSequence, featureLength);
+                rec.feature_quality = pfViewFromCbqSpan(view.segments[1].quality);
+                records[i] = rec;
+            }
+
+            pf_error err = pf_direct_range_process_record_views(
+                job, workerId, records.data(), batch.record_count);
+            if (err != PF_OK) {
+                module.close();
+                if (errorMessage != nullptr) {
+                    const char* pfMsg = pf_get_error(ctx);
+                    *errorMessage = "CBQ direct range PF worker error";
+                    if (pfMsg != nullptr && pfMsg[0] != '\0') {
+                        *errorMessage += ": ";
+                        *errorMessage += pfMsg;
+                    }
+                }
+                return false;
+            }
+        }
+        module.close();
+    }
+    return true;
+}
+
+static pf_error processCbqSourcesDirect(pf_context* ctx,
+                                        const vector<string>& cbqPaths,
+                                        const string& outputDir,
+                                        const string& sampleName,
+                                        long long maxReads,
+                                        int requestedWorkers,
+                                        pf_stats* stats,
+                                        string* errorMessage) {
+    const star::input::InputSourcePlan plan = makeCbqPairPlan(cbqPaths);
+    vector<CbqLaneCount> laneCounts;
+    uint64_t totalRecords = 0;
+    if (!inspectCbqLaneCounts(plan, maxReads, &laneCounts, &totalRecords, errorMessage)) {
+        return PF_ERR_IO_ERROR;
+    }
+
+    const int nworkers = std::max(1, requestedWorkers);
+    const vector<vector<CbqLaneRange>> workerRanges =
+        makeDirectWorkerRanges(laneCounts, totalRecords, nworkers);
+
+    pf_direct_range_job* job = nullptr;
+    pf_error err = pf_direct_range_begin(ctx, outputDir.c_str(),
+                                         sampleName.c_str(), nworkers, 2, &job);
+    if (err != PF_OK) {
+        return err;
+    }
+
+    vector<std::thread> workers;
+    vector<int> ok(static_cast<size_t>(nworkers), 1);
+    vector<string> workerErrors(static_cast<size_t>(nworkers));
+    workers.reserve(static_cast<size_t>(nworkers));
+    for (int worker = 0; worker < nworkers; ++worker) {
+        workers.push_back(std::thread([&, worker]() {
+            ok[static_cast<size_t>(worker)] =
+                processCbqDirectRangeWorker(ctx, job, plan, worker,
+                                            workerRanges[static_cast<size_t>(worker)],
+                                            &workerErrors[static_cast<size_t>(worker)])
+                ? 1 : 0;
+        }));
+    }
+    for (std::thread& worker : workers) {
+        worker.join();
+    }
+
+    for (int worker = 0; worker < nworkers; ++worker) {
+        if (!ok[static_cast<size_t>(worker)]) {
+            if (errorMessage != nullptr) {
+                *errorMessage = workerErrors[static_cast<size_t>(worker)].empty()
+                    ? "CBQ direct range worker failed"
+                    : workerErrors[static_cast<size_t>(worker)];
+            }
+            pf_direct_range_abort(job);
+            return PF_ERR_IO_ERROR;
+        }
+    }
+
+    return pf_direct_range_end(job, stats);
+}
+
 static pf_error processCbqSources(pf_context* ctx,
                                   const vector<string>& cbqPaths,
                                   const string& outputDir,
@@ -496,12 +797,7 @@ static pf_error processCbqSources(pf_context* ctx,
                                   long long maxReads,
                                   pf_stats* stats,
                                   string* errorMessage) {
-    std::vector<std::vector<std::string>> readFiles(1);
-    readFiles[0] = cbqPaths;
-    star::input::InputSourcePlan plan =
-        star::input::make_cbq_input_source_plan(readFiles, std::vector<std::string>(), 2);
-    plan.read_name_separator_chars.clear();
-    plan.read_name_separator_chars.push_back(' ');
+    star::input::InputSourcePlan plan = makeCbqPairPlan(cbqPaths);
 
     std::string inputError;
     star::input::CbqInputModule module;
@@ -521,6 +817,8 @@ static pf_error processCbqSources(pf_context* ctx,
     }
 
     long long emitted = 0;
+    std::vector<pf_read_record_view> records;
+    std::vector<char> sequenceStorage;
     for (;;) {
         star::input::CbqReadBatchView batch;
         const star::input::InputStatus status = module.next_batch(&batch, &inputError);
@@ -550,10 +848,13 @@ static pf_error processCbqSources(pf_context* ctx,
             continue;
         }
 
-        std::vector<pf_read_record_view> records;
-        std::vector<char> sequenceStorage(static_cast<size_t>(recordsToProcess) *
-                                          2U * kPfLineLength);
-        records.reserve(recordsToProcess);
+        records.clear();
+        records.resize(recordsToProcess);
+        const size_t requiredSequenceStorage =
+            static_cast<size_t>(recordsToProcess) * 2U * kPfLineLength;
+        if (sequenceStorage.size() < requiredSequenceStorage) {
+            sequenceStorage.resize(requiredSequenceStorage);
+        }
         for (uint32_t i = 0; i < recordsToProcess; ++i) {
             const star::input::CbqReadView& view = batch.records[i];
             if (view.segment_count < 2 || view.segments == nullptr) {
@@ -589,10 +890,10 @@ static pf_error processCbqSources(pf_context* ctx,
             rec.barcode_quality = pfViewFromCbqSpan(view.segments[0].quality);
             rec.feature_sequence = pfViewFromBuffer(featureSequence, featureLength);
             rec.feature_quality = pfViewFromCbqSpan(view.segments[1].quality);
-            records.push_back(rec);
+            records[i] = rec;
         }
 
-        err = pf_process_record_views(stream, records.data(), records.size());
+        err = pf_process_record_views(stream, records.data(), recordsToProcess);
         if (err != PF_OK) {
             pf_process_records_abort(stream);
             module.close();
@@ -609,6 +910,10 @@ static void writeApiRunSummary(const string& assignOut,
                                const WhitelistNormalizationResult& whitelistInfo,
                                const string& featureRef,
                                const string& fastqDir,
+                               const string& inputFormat,
+                               const string& cbqModeRequested,
+                               const string& cbqModeEffective,
+                               const string& cbqModeFallbackReason,
                                const AssignOptions& options,
                                const pf_stats& stats,
                                const ThreadControl::MapPermitSnapshot* permitBefore,
@@ -626,6 +931,10 @@ static void writeApiRunSummary(const string& assignOut,
     out << "whitelist_namespace_confidence=" << (whitelistInfo.namespaceConfidence ? 1 : 0) << "\n";
     out << "whitelist_normalized_rows=" << whitelistInfo.normalizedRowCount << "\n";
     out << "feature_ref=" << featureRef << "\n";
+    out << "input_format=" << inputFormat << "\n";
+    out << "cbq_mode_requested=" << cbqModeRequested << "\n";
+    out << "cbq_mode_effective=" << cbqModeEffective << "\n";
+    out << "cbq_mode_fallback_reason=" << cbqModeFallbackReason << "\n";
     out << "fastq_dir=" << fastqDir << "\n";
     out << "maxHammingDistance=" << options.maxHammingDistance << "\n";
     out << "featureConstantOffset=" << options.featureConstantOffset << "\n";
@@ -636,6 +945,7 @@ static void writeApiRunSummary(const string& assignOut,
     out << "barcodeN=" << options.barcodeN << "\n";
     out << "consumerThreadsPerSet=" << options.consumerThreadsPerSet << "\n";
     out << "searchThreads=" << options.searchThreads << "\n";
+    out << "readBufferLines=" << options.readBufferLines << "\n";
     out << "minPosterior=" << options.minPosterior << "\n";
     out << "maxReads=" << options.maxReads << "\n";
     out << "legacyCbRescue=" << (options.legacyCbRescue ? 1 : 0) << "\n";
@@ -775,6 +1085,13 @@ AssignResult runAssignBarcodes(const string& whitelist,
                      const AssignOptions& options) {
     vector<string> cbqPaths;
     const bool useCbqInput = resolveCbqSources(fastqDir, &cbqPaths);
+    const string cbqModeRequested = normalizeCbqMode(options.cbqMode);
+    if (cbqModeRequested != "auto" &&
+        cbqModeRequested != "stream" &&
+        cbqModeRequested != "range") {
+        throw runtime_error("Invalid CBQ assignment mode '" + options.cbqMode +
+                            "'; expected auto, stream, or range");
+    }
 
     // Check inputs exist
     if (!fileExists(whitelist)) {
@@ -853,10 +1170,55 @@ AssignResult runAssignBarcodes(const string& whitelist,
 
     pf_stats stats = {};
     string cbqErrorMessage;
+    string inputFormat = useCbqInput ? "cbq_stream" : "fastq";
+    string cbqModeEffective = useCbqInput ? "stream" : "";
+    string cbqModeFallbackReason;
     if (useCbqInput) {
         const string sampleName = options.sampleName.empty() ? "sample" : options.sampleName;
-        err = processCbqSources(ctx, cbqPaths, assignOut, sampleName,
-                                options.maxReads, &stats, &cbqErrorMessage);
+        bool runStreamCbq = (cbqModeRequested == "stream");
+        if (!runStreamCbq) {
+            string unsupportedReason;
+            if (!directCbqSettingsSupported(options, &unsupportedReason)) {
+                cbqModeFallbackReason = unsupportedReason;
+                if (cbqModeRequested == "range") {
+                    pf_destroy(ctx);
+                    throw runtime_error("CBQ range mode is unsupported for this PF configuration: " +
+                                        unsupportedReason);
+                }
+                runStreamCbq = true;
+            } else {
+                const star::input::InputSourcePlan preflightPlan = makeCbqPairPlan(cbqPaths);
+                vector<CbqLaneCount> preflightLaneCounts;
+                uint64_t preflightRecords = 0;
+                string preflightError;
+                if (!inspectCbqLaneCounts(preflightPlan, options.maxReads,
+                                          &preflightLaneCounts, &preflightRecords,
+                                          &preflightError)) {
+                    cbqModeFallbackReason = "cbq_index_unavailable: " + preflightError;
+                    if (cbqModeRequested == "range") {
+                        pf_destroy(ctx);
+                        throw runtime_error("CBQ range mode requires indexed CBQ input: " +
+                                            preflightError);
+                    }
+                    runStreamCbq = true;
+                } else {
+                    err = processCbqSourcesDirect(ctx, cbqPaths, assignOut, sampleName,
+                                                  options.maxReads,
+                                                  options.consumerThreadsPerSet > 0
+                                                      ? options.consumerThreadsPerSet
+                                                      : 1,
+                                                  &stats, &cbqErrorMessage);
+                    inputFormat = "cbq_range";
+                    cbqModeEffective = "range";
+                }
+            }
+        }
+        if (runStreamCbq) {
+            err = processCbqSources(ctx, cbqPaths, assignOut, sampleName,
+                                    options.maxReads, &stats, &cbqErrorMessage);
+            inputFormat = "cbq_stream";
+            cbqModeEffective = "stream";
+        }
     } else {
         err = pf_process_fastq_dir(ctx, fastqDir.c_str(), assignOut.c_str(), &stats);
     }
@@ -882,6 +1244,10 @@ AssignResult runAssignBarcodes(const string& whitelist,
         whitelistInfo,
         featureRef,
         fastqDir,
+        inputFormat,
+        cbqModeRequested,
+        cbqModeEffective,
+        cbqModeFallbackReason,
         options,
         stats,
         capturePermitDelta ? &permitBefore : nullptr,
@@ -891,6 +1257,10 @@ AssignResult runAssignBarcodes(const string& whitelist,
     AssignResult result;
     result.returnCode = 0;
     result.whitelistNormalization = whitelistInfo;
+    result.inputFormat = inputFormat;
+    result.cbqModeRequested = cbqModeRequested;
+    result.cbqModeEffective = cbqModeEffective;
+    result.cbqModeFallbackReason = cbqModeFallbackReason;
     if (options.autodetectChemistry) {
         const char* mode = pf_get_detected_match_mode(ctx);
         result.detectedMatchMode = (mode != nullptr) ? mode : "UNKNOWN";

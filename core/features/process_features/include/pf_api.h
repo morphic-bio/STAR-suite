@@ -28,6 +28,7 @@ extern "C" {
 typedef struct pf_config pf_config;
 typedef struct pf_context pf_context;
 typedef struct pf_record_stream pf_record_stream;
+typedef struct pf_direct_range_job pf_direct_range_job;
 
 typedef struct {
     const char *data;
@@ -160,6 +161,7 @@ void pf_config_set_max_barcode_n(pf_config *config, int max_n);
 void pf_config_set_threads(pf_config *config, int threads);
 void pf_config_set_search_threads(pf_config *config, int threads);
 void pf_config_set_consumer_threads(pf_config *config, int threads);
+void pf_config_set_read_buffer_lines(pf_config *config, int lines);
 void pf_config_set_permit_hooks(
     pf_config *config,
     pf_permit_acquire_fn acquire_cb,
@@ -371,6 +373,39 @@ pf_error pf_process_record_batch(pf_record_stream *stream,
 pf_error pf_process_record_views(pf_record_stream *stream,
                                  const pf_read_record_view *records,
                                  size_t n_records);
+
+/**
+ * Begin direct worker-owned processing for externally range-partitioned input.
+ * Each caller thread must use a stable worker_id in [0, nworkers).
+ */
+pf_error pf_direct_range_begin(pf_context *ctx,
+                               const char *output_dir,
+                               const char *sample_name,
+                               int nworkers,
+                               int nreaders,
+                               pf_direct_range_job **job_out);
+
+/**
+ * Process borrowed-span records on one direct worker. Calls are thread-safe
+ * only when different threads use different worker_id values.
+ */
+pf_error pf_direct_range_process_record_views(pf_direct_range_job *job,
+                                              int worker_id,
+                                              const pf_read_record_view *records,
+                                              size_t n_records);
+
+/**
+ * Finish direct worker processing, merge worker-local counts, write outputs,
+ * destroy job state, and release the process_features runtime lock.
+ */
+pf_error pf_direct_range_end(pf_direct_range_job *job,
+                             pf_stats *stats_out);
+
+/**
+ * Abort direct worker processing without final outputs and release the
+ * process_features runtime lock.
+ */
+void pf_direct_range_abort(pf_direct_range_job *job);
 
 /**
  * Finish a streaming in-memory sample, write outputs, destroy stream state,

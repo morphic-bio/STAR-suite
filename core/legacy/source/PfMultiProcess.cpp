@@ -1894,6 +1894,14 @@ std::shared_ptr<PfMultiAssignPhaseResult> runPfMultiAssignPhase(
         assignOpts.barcodeN = P.pfMulti.crAssignBarcodeN;
         assignOpts.consumerThreadsPerSet = P.pfMulti.crAssignConsumerThreads;
         assignOpts.searchThreads = P.pfMulti.crAssignSearchThreads;
+        assignOpts.readBufferLines = P.pfMulti.crAssignReadBufferLines;
+        assignOpts.cbqMode = lowerCopy(P.pfMulti.crAssignCbqMode);
+        if (assignOpts.cbqMode != "auto" &&
+            assignOpts.cbqMode != "stream" &&
+            assignOpts.cbqMode != "range") {
+            throw runtime_error("Invalid crAssignCbqMode '" + P.pfMulti.crAssignCbqMode +
+                                "'; expected auto, stream, or range");
+        }
         assignOpts.minPosterior = P.pfMulti.crAssignMinPosterior;
         assignOpts.maxReads = (P.readMapNumber > 0) ? static_cast<long long>(P.readMapNumber) : -1;
         assignOpts.legacyCbRescue = (P.pfMulti.crAssignLegacyCbRescue != 0);
@@ -1901,7 +1909,8 @@ std::shared_ptr<PfMultiAssignPhaseResult> runPfMultiAssignPhase(
         assignOpts.allowUnionWhitelist = (P.pfMulti.crAssignAllowUnionWhitelist != 0);
         assignOpts.useFeatureAnchorSearch = true;
         assignOpts.requireFeatureAnchorMatch = true;
-        assignOpts.featureModeBootstrapReads = 100000;
+        assignOpts.featureModeBootstrapReads =
+            (assignOpts.featureConstantOffset >= 0) ? 0 : 100000;
         assignOpts.skipHeatmaps = true;
         if (const char* env = std::getenv("STAR_PF_USE_FEATURE_ANCHOR_SEARCH")) {
             assignOpts.useFeatureAnchorSearch = (std::atoi(env) != 0);
@@ -2650,6 +2659,16 @@ std::shared_ptr<PfMultiAssignPhaseResult> runPfMultiAssignPhase(
                     + ", featureRef=" + refPath
                     + ", fastq=" + resolvedFastq);
             }
+            P.inOut->logMain << "NOTICE: assignBarcodes completed for library_id="
+                             << preparedLib.libraryId
+                             << " input_format=" << assignResult.inputFormat
+                             << " cbq_mode_requested=" << assignResult.cbqModeRequested
+                             << " cbq_mode_effective=" << assignResult.cbqModeEffective;
+            if (!assignResult.cbqModeFallbackReason.empty()) {
+                P.inOut->logMain << " cbq_mode_fallback_reason="
+                                 << assignResult.cbqModeFallbackReason;
+            }
+            P.inOut->logMain << "\n";
 
             appendAssignNormalizationStats(assignOut, nsCtx, wlInfo);
 

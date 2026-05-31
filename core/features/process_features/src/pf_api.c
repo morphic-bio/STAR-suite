@@ -42,6 +42,7 @@ struct pf_config {
     int max_threads;
     int search_threads;
     int consumer_threads;
+    int read_buffer_lines;
     pf_permit_acquire_fn permit_acquire_cb;
     pf_permit_release_fn permit_release_cb;
     void *permit_hook_ctx;
@@ -120,6 +121,27 @@ struct pf_record_stream {
     int consumers_joined;
     int processors_initialized;
     int worker_state_initialized;
+    int chem_detect_enabled;
+    int failed;
+    int closed;
+};
+
+struct pf_direct_range_job {
+    pf_context *ctx;
+    sample_args sample_args;
+    statistics *stats;
+    data_structures *hashes;
+    memory_pool_collection **pools;
+    fastq_processor *processors;
+    pf_direct_consumer_state **consumer_states;
+    struct chem_detect_state chem_detect;
+    char sample_directory[FILENAME_LENGTH];
+    double start_time;
+    int nworkers;
+    int nreaders;
+    int worker_state_initialized;
+    int processors_initialized;
+    int consumer_states_initialized;
     int chem_detect_enabled;
     int failed;
     int closed;
@@ -258,6 +280,7 @@ pf_config* pf_config_create(void) {
     config->max_threads = 8;
     config->search_threads = 4;
     config->consumer_threads = 1;
+    config->read_buffer_lines = READ_BUFFER_LINES;
     config->permit_acquire_cb = NULL;
     config->permit_release_cb = NULL;
     config->permit_hook_ctx = NULL;
@@ -376,6 +399,10 @@ void pf_config_set_search_threads(pf_config *config, int threads) {
 
 void pf_config_set_consumer_threads(pf_config *config, int threads) {
     if (config) config->consumer_threads = threads;
+}
+
+void pf_config_set_read_buffer_lines(pf_config *config, int lines) {
+    if (config && lines > 0) config->read_buffer_lines = lines;
 }
 
 void pf_config_set_permit_hooks(
@@ -1011,6 +1038,22 @@ static pf_sequence_view pf_view_from_cstr(const char *src) {
     return view;
 }
 
+static size_t pf_trimmed_line_length(pf_sequence_view view) {
+    if (!view.data || view.length == 0) {
+        return 0;
+    }
+    return view.data[view.length - 1] == '\n' ? view.length - 1 : view.length;
+}
+
+static int pf_effective_read_buffer_lines(const pf_config *config,
+                                          int lines_per_block) {
+    int lines = (config && config->read_buffer_lines > 0)
+        ? config->read_buffer_lines
+        : READ_BUFFER_LINES;
+    const int minimum = lines_per_block * 2;
+    return lines < minimum ? minimum : lines;
+}
+
 static int pf_copy_record_view_line(pf_context *ctx,
                                     char *dst,
                                     pf_sequence_view view,
@@ -1202,6 +1245,49 @@ static void pf_stream_cleanup_runtime(pf_record_stream *stream) {
     stream->stats = NULL;
 }
 
+static void pf_direct_range_cleanup_runtime(pf_direct_range_job *job) {
+    if (!job) {
+        return;
+    }
+
+    if (job->consumer_states) {
+        for (int i = 0; i < job->consumer_states_initialized; ++i) {
+            pf_direct_consumer_state_destroy(job->consumer_states[i]);
+            job->consumer_states[i] = NULL;
+        }
+        free(job->consumer_states);
+        job->consumer_states = NULL;
+    }
+
+    if (job->processors) {
+        for (int i = 0; i < job->processors_initialized; ++i) {
+            pthread_mutex_destroy(&job->processors[i].process_mutex);
+        }
+        free(job->processors);
+        job->processors = NULL;
+    }
+
+    if (job->hashes) {
+        for (int i = 0; i < job->worker_state_initialized; ++i) {
+            destroy_data_structures(&job->hashes[i]);
+        }
+        free(job->hashes);
+        job->hashes = NULL;
+    }
+    if (job->pools) {
+        for (int i = 0; i < job->worker_state_initialized; ++i) {
+            if (job->pools[i]) {
+                free_memory_pool_collection(job->pools[i]);
+                job->pools[i] = NULL;
+            }
+        }
+        free(job->pools);
+        job->pools = NULL;
+    }
+    free(job->stats);
+    job->stats = NULL;
+}
+
 static int pf_stream_initialize_queue(pf_record_stream *stream, int nreaders) {
     if (stream->queue_initialized) {
         if (stream->nreaders != nreaders) {
@@ -1221,7 +1307,8 @@ static int pf_stream_initialize_queue(pf_record_stream *stream, int nreaders) {
     stream->lines_per_block = 2 * nreaders;
 
     stream->reader_sets[0] = pf_allocate_decoded_reader_set(
-        ctx, nreaders, LINE_LENGTH, READ_BUFFER_LINES);
+        ctx, nreaders, LINE_LENGTH,
+        (size_t)pf_effective_read_buffer_lines(ctx->config, stream->lines_per_block));
     if (!stream->reader_sets[0]) {
         return 0;
     }
@@ -1263,7 +1350,8 @@ static int pf_stream_initialize_queue(pf_record_stream *stream, int nreaders) {
     stream->sample_args.hashes = stream->hashes;
     stream->sample_args.stringency = ctx->config->stringency;
     stream->sample_args.min_counts = ctx->config->min_counts;
-    stream->sample_args.read_buffer_lines = READ_BUFFER_LINES;
+    stream->sample_args.read_buffer_lines =
+        pf_effective_read_buffer_lines(ctx->config, stream->lines_per_block);
     stream->sample_args.average_read_length = AVERAGE_READ_LENGTH;
     stream->sample_args.barcode_constant_offset = ctx->config->barcode_offset;
     stream->sample_args.feature_constant_offset = ctx->config->feature_offset;
@@ -1362,6 +1450,35 @@ static int pf_record_view_reader_count(pf_context *ctx,
             return 0;
         }
         *nreaders_out = 2;
+    }
+
+    const size_t barcode_len = pf_trimmed_line_length(record->barcode_sequence);
+    const size_t barcode_qual_len = pf_trimmed_line_length(record->barcode_quality);
+    if (record->barcode_quality.data && barcode_qual_len != barcode_len) {
+        snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                 "barcode_quality length %zu does not match barcode_sequence length %zu",
+                 barcode_qual_len, barcode_len);
+        return 0;
+    }
+
+    const size_t feature_len = pf_trimmed_line_length(record->feature_sequence);
+    const size_t feature_qual_len = pf_trimmed_line_length(record->feature_quality);
+    if (record->feature_quality.data && feature_qual_len != feature_len) {
+        snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                 "feature_quality length %zu does not match feature_sequence length %zu",
+                 feature_qual_len, feature_len);
+        return 0;
+    }
+
+    if (has_feature2) {
+        const size_t feature2_len = pf_trimmed_line_length(record->feature_sequence2);
+        const size_t feature2_qual_len = pf_trimmed_line_length(record->feature_quality2);
+        if (record->feature_quality2.data && feature2_qual_len != feature2_len) {
+            snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                     "feature_quality2 length %zu does not match feature_sequence2 length %zu",
+                     feature2_qual_len, feature2_len);
+            return 0;
+        }
     }
 
     return 1;
@@ -1619,7 +1736,7 @@ pf_error pf_process_fastq_dir(pf_context *ctx,
         args.min_counts = ctx->config->min_counts;
         args.barcode_constant_offset = ctx->config->barcode_offset;
         args.feature_constant_offset = ctx->config->feature_offset;
-        args.read_buffer_lines = READ_BUFFER_LINES;
+        args.read_buffer_lines = pf_effective_read_buffer_lines(ctx->config, 6);
         args.average_read_length = AVERAGE_READ_LENGTH;
         args.min_posterior = ctx->config->min_posterior;
         args.legacy_cb_rescue = ctx->config->legacy_cb_rescue;
@@ -1882,7 +1999,7 @@ pf_error pf_process_fastqs(pf_context *ctx,
     args.min_counts = ctx->config->min_counts;
     args.barcode_constant_offset = ctx->config->barcode_offset;
     args.feature_constant_offset = ctx->config->feature_offset;
-    args.read_buffer_lines = READ_BUFFER_LINES;
+    args.read_buffer_lines = pf_effective_read_buffer_lines(ctx->config, 6);
     args.average_read_length = AVERAGE_READ_LENGTH;
     args.min_posterior = ctx->config->min_posterior;
     args.legacy_cb_rescue = ctx->config->legacy_cb_rescue;
@@ -2049,6 +2166,366 @@ pf_error pf_process_record_views(pf_record_stream *stream,
     }
 
     return PF_OK;
+}
+
+pf_error pf_direct_range_begin(pf_context *ctx,
+                               const char *output_dir,
+                               const char *sample_name,
+                               int nworkers,
+                               int nreaders,
+                               pf_direct_range_job **job_out) {
+    if (job_out) {
+        *job_out = NULL;
+    }
+    if (!ctx || !output_dir || !job_out || nworkers <= 0) {
+        return PF_ERR_INVALID_ARG;
+    }
+    if (!ctx->initialized) return PF_ERR_NOT_INITIALIZED;
+    if (nreaders != 2) {
+        snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                 "Direct range PF currently supports nreaders=2 only, got %d",
+                 nreaders);
+        return PF_ERR_INVALID_ARG;
+    }
+    if (ctx->config->legacy_cb_rescue) {
+        snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                 "Direct range PF does not support legacy order-dependent CB rescue");
+        return PF_ERR_INVALID_ARG;
+    }
+    if (ctx->config->feature_mode_bootstrap_reads > 0) {
+        snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                 "Direct range PF requires explicit feature offsets; bootstrap offset mode is unsupported");
+        return PF_ERR_INVALID_ARG;
+    }
+
+    pthread_mutex_lock(&g_pf_runtime_mutex);
+    pf_apply_context_globals(ctx);
+
+    ctx->chem_detect_raw_hits = 0;
+    ctx->chem_detect_nxt_hits = 0;
+    ctx->chem_detect_ticket = 0;
+    ctx->chem_detect_done = 0;
+    ctx->detected_match_mode = 0;
+
+    if (!ctx->features) {
+        snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE, "Features not loaded");
+        pthread_mutex_unlock(&g_pf_runtime_mutex);
+        return PF_ERR_NOT_INITIALIZED;
+    }
+    if (!ctx->whitelist_hash) {
+        snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE, "Whitelist not loaded");
+        pthread_mutex_unlock(&g_pf_runtime_mutex);
+        return PF_ERR_NOT_INITIALIZED;
+    }
+
+    pf_error prep = pf_prepare_feature_offset_config(ctx);
+    if (prep != PF_OK) {
+        pthread_mutex_unlock(&g_pf_runtime_mutex);
+        return prep;
+    }
+
+    pf_error mkdir_err = pf_create_directory_if_needed(ctx, output_dir);
+    if (mkdir_err != PF_OK) {
+        pthread_mutex_unlock(&g_pf_runtime_mutex);
+        return mkdir_err;
+    }
+
+    pf_direct_range_job *job = (pf_direct_range_job *)calloc(1, sizeof(pf_direct_range_job));
+    if (!job) {
+        snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                 "Failed to allocate direct range process_features job");
+        pthread_mutex_unlock(&g_pf_runtime_mutex);
+        return PF_ERR_OUT_OF_MEMORY;
+    }
+
+    job->ctx = ctx;
+    job->nworkers = nworkers;
+    job->nreaders = nreaders;
+    const char *sname = sample_name ? sample_name : "sample";
+    snprintf(job->sample_directory, sizeof(job->sample_directory),
+             "%s/%s/", output_dir, sname);
+    mkdir_err = pf_create_directory_if_needed(ctx, job->sample_directory);
+    if (mkdir_err != PF_OK) {
+        pf_direct_range_cleanup_runtime(job);
+        free(job);
+        pthread_mutex_unlock(&g_pf_runtime_mutex);
+        return mkdir_err;
+    }
+
+    job->stats = (statistics *)calloc((size_t)nworkers, sizeof(statistics));
+    job->hashes = (data_structures *)calloc((size_t)nworkers, sizeof(data_structures));
+    job->pools = (memory_pool_collection **)calloc((size_t)nworkers,
+                                                   sizeof(memory_pool_collection *));
+    job->processors = (fastq_processor *)calloc((size_t)nworkers,
+                                                sizeof(fastq_processor));
+    job->consumer_states = (pf_direct_consumer_state **)calloc(
+        (size_t)nworkers, sizeof(pf_direct_consumer_state *));
+    if (!job->stats || !job->hashes || !job->pools ||
+        !job->processors || !job->consumer_states) {
+        snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                 "Failed to allocate direct range process_features worker state");
+        pf_direct_range_cleanup_runtime(job);
+        free(job);
+        pthread_mutex_unlock(&g_pf_runtime_mutex);
+        return PF_ERR_OUT_OF_MEMORY;
+    }
+
+    for (int i = 0; i < nworkers; ++i) {
+        initialize_statistics(&job->stats[i]);
+        initialize_data_structures(&job->hashes[i]);
+        job->pools[i] = initialize_memory_pool_collection();
+        if (!job->pools[i]) {
+            snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                     "Failed to allocate direct range process_features memory pools");
+            pf_direct_range_cleanup_runtime(job);
+            free(job);
+            pthread_mutex_unlock(&g_pf_runtime_mutex);
+            return PF_ERR_OUT_OF_MEMORY;
+        }
+        job->worker_state_initialized++;
+    }
+
+    memset(&job->sample_args, 0, sizeof(job->sample_args));
+    job->sample_args.sample_index = 0;
+    job->sample_args.directory = job->sample_directory;
+    job->sample_args.filtered_barcodes_name = NULL;
+    job->sample_args.fastq_files = NULL;
+    job->sample_args.features = ctx->features;
+    job->sample_args.maxHammingDistance = ctx->config->max_hamming_distance;
+    job->sample_args.nThreads = ctx->config->search_threads;
+    job->sample_args.pools = job->pools;
+    job->sample_args.stats = job->stats;
+    job->sample_args.hashes = job->hashes;
+    job->sample_args.stringency = ctx->config->stringency;
+    job->sample_args.min_counts = ctx->config->min_counts;
+    job->sample_args.read_buffer_lines =
+        pf_effective_read_buffer_lines(ctx->config, 2 * nreaders);
+    job->sample_args.average_read_length = AVERAGE_READ_LENGTH;
+    job->sample_args.barcode_constant_offset = ctx->config->barcode_offset;
+    job->sample_args.feature_constant_offset = ctx->config->feature_offset;
+    job->sample_args.min_posterior = ctx->config->min_posterior;
+    job->sample_args.legacy_cb_rescue = ctx->config->legacy_cb_rescue;
+    job->sample_args.consumer_threads_per_set = nworkers;
+    job->sample_args.permit_acquire_hook = ctx->config->permit_acquire_cb;
+    job->sample_args.permit_release_hook = ctx->config->permit_release_cb;
+    job->sample_args.permit_hook_ctx = ctx->config->permit_hook_ctx;
+    job->sample_args.permit_hooks_enabled =
+        (ctx->config->permit_acquire_cb != NULL &&
+         ctx->config->permit_release_cb != NULL);
+    job->sample_args.filtered_barcodes_hash = ctx->filtered_barcodes_hash;
+    job->sample_args.min_prediction = 1;
+    job->sample_args.min_heatmap = 0;
+    job->sample_args.demux_nsamples = 1;
+    job->sample_args.sample_barcodes = NULL;
+    job->sample_args.sample_max_hamming = 1;
+    job->sample_args.sample_max_N = 0;
+    job->sample_args.sample_constant_offset = -1;
+    job->sample_args.sample_offset_relative = 0;
+    job->sample_args.skip_emptydrops = ctx->config->skip_emptydrops;
+    job->sample_args.emptydrops_failure_fatal = ctx->config->emptydrops_failure_fatal;
+    job->sample_args.expected_cells = ctx->config->expected_cells;
+    job->sample_args.emptydrops_use_fdr = ctx->config->emptydrops_use_fdr;
+    job->sample_args.probe_only = ctx->config->probe_only;
+    job->sample_args.skip_qc_outputs = ctx->config->skip_qc_outputs;
+
+    if (ctx->config->autodetect_chemistry) {
+        memset(&job->chem_detect, 0, sizeof(job->chem_detect));
+        job->chem_detect.max_reads = ctx->config->autodetect_chemistry_reads;
+        job->chem_detect.min_hits = ctx->config->autodetect_chemistry_min_hits;
+        job->sample_args.chem_detect = &job->chem_detect;
+        job->chem_detect_enabled = 1;
+    }
+
+    for (int i = 0; i < nworkers; ++i) {
+        job->processors[i].sample_args = &job->sample_args;
+        job->processors[i].reader_sets = NULL;
+        job->processors[i].nsets = 0;
+        job->processors[i].thread_id = i;
+        job->processors[i].nreaders = nreaders;
+        pthread_mutex_init(&job->processors[i].process_mutex, NULL);
+        job->processors_initialized++;
+
+        job->consumer_states[i] =
+            pf_direct_consumer_state_create(&job->processors[i], nreaders);
+        if (!job->consumer_states[i]) {
+            snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                     "Failed to initialize direct range process_features worker %d", i);
+            pf_direct_range_cleanup_runtime(job);
+            free(job);
+            pthread_mutex_unlock(&g_pf_runtime_mutex);
+            return PF_ERR_OUT_OF_MEMORY;
+        }
+        job->consumer_states_initialized++;
+    }
+
+    job->start_time = get_time_in_seconds();
+    *job_out = job;
+    return PF_OK;
+}
+
+pf_error pf_direct_range_process_record_views(pf_direct_range_job *job,
+                                              int worker_id,
+                                              const pf_read_record_view *records,
+                                              size_t n_records) {
+    if (!job || worker_id < 0 || worker_id >= job->nworkers ||
+        (!records && n_records > 0) || job->closed || job->failed) {
+        return PF_ERR_INVALID_ARG;
+    }
+
+    pf_context *ctx = job->ctx;
+    for (size_t i = 0; i < n_records; ++i) {
+        int nreaders = 0;
+        if (!pf_record_view_reader_count(ctx, &records[i], &nreaders)) {
+            job->failed = 1;
+            return PF_ERR_INVALID_ARG;
+        }
+        if (nreaders != job->nreaders) {
+            snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                     "Mixed direct range record layouts in one process_features job");
+            job->failed = 1;
+            return PF_ERR_INVALID_ARG;
+        }
+
+        char barcode_sequence[LINE_LENGTH];
+        char barcode_quality[LINE_LENGTH];
+        char feature_sequence[LINE_LENGTH];
+        char feature_quality[LINE_LENGTH];
+        char feature_sequence2[LINE_LENGTH];
+        char feature_quality2[LINE_LENGTH];
+        feature_sequence2[0] = '\0';
+        feature_quality2[0] = '\0';
+
+        if (!pf_copy_record_view_line(ctx, barcode_sequence,
+                                      records[i].barcode_sequence,
+                                      "barcode_sequence", 1)) {
+            job->failed = 1;
+            return PF_ERR_INVALID_ARG;
+        }
+        pf_copy_quality_or_default(barcode_quality,
+                                   records[i].barcode_quality,
+                                   records[i].barcode_sequence.length);
+        if (!pf_copy_record_view_line(ctx, feature_sequence,
+                                      records[i].feature_sequence,
+                                      "feature_sequence", 1)) {
+            job->failed = 1;
+            return PF_ERR_INVALID_ARG;
+        }
+        pf_copy_quality_or_default(feature_quality,
+                                   records[i].feature_quality,
+                                   records[i].feature_sequence.length);
+        if (job->nreaders == 3) {
+            if (!pf_copy_record_view_line(ctx, feature_sequence2,
+                                          records[i].feature_sequence2,
+                                          "feature_sequence2", 1)) {
+                job->failed = 1;
+                return PF_ERR_INVALID_ARG;
+            }
+            pf_copy_quality_or_default(feature_quality2,
+                                       records[i].feature_quality2,
+                                       records[i].feature_sequence2.length);
+        }
+
+        if (!pf_direct_consumer_process_record(job->consumer_states[worker_id],
+                                               barcode_sequence,
+                                               barcode_quality,
+                                               feature_sequence,
+                                               feature_quality,
+                                               feature_sequence2,
+                                               feature_quality2)) {
+            snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                     "Direct range process_features worker %d failed", worker_id);
+            job->failed = 1;
+            return PF_ERR_INVALID_ARG;
+        }
+    }
+
+    return PF_OK;
+}
+
+pf_error pf_direct_range_end(pf_direct_range_job *job,
+                             pf_stats *stats_out) {
+    if (!job || job->closed) {
+        return PF_ERR_INVALID_ARG;
+    }
+
+    pf_context *ctx = job->ctx;
+    pf_error result = job->failed ? PF_ERR_INVALID_ARG : PF_OK;
+    int sample_error = 0;
+    job->closed = 1;
+
+    if (job->consumer_states) {
+        for (int i = 0; i < job->consumer_states_initialized; ++i) {
+            pf_direct_consumer_state_destroy(job->consumer_states[i]);
+            job->consumer_states[i] = NULL;
+        }
+        job->consumer_states_initialized = 0;
+    }
+
+    if (job->chem_detect_enabled) {
+        ctx->chem_detect_raw_hits = job->chem_detect.raw_hits;
+        ctx->chem_detect_nxt_hits = job->chem_detect.nxt_hits;
+        ctx->chem_detect_ticket = job->chem_detect.ticket;
+        ctx->chem_detect_done = job->chem_detect.done;
+        ctx->detected_match_mode = job->chem_detect.match_mode;
+    }
+
+    if (result == PF_OK && job->nworkers > 1) {
+        for (int i = 1; i < job->nworkers; ++i) {
+            merge_process_feature_thread_data(&job->hashes[0],
+                                              job->pools[0],
+                                              &job->stats[0],
+                                              &job->hashes[i],
+                                              job->pools[i],
+                                              &job->stats[i]);
+        }
+    }
+
+    if (result == PF_OK && !ctx->config->probe_only) {
+        finalize_processing(ctx->features, &job->hashes[0],
+                            job->sample_directory, job->pools[0],
+                            &job->stats[0], ctx->config->stringency,
+                            ctx->config->min_counts, ctx->config->min_posterior,
+                            ctx->config->legacy_cb_rescue,
+                            ctx->filtered_barcodes_hash,
+                            ctx->config->skip_emptydrops,
+                            ctx->config->emptydrops_failure_fatal,
+                            ctx->config->expected_cells,
+                            ctx->config->emptydrops_use_fdr,
+                            ctx->config->skip_qc_outputs,
+                            &sample_error);
+        if (sample_error) {
+            snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                     "Sample processing failed");
+            result = PF_ERR_IO_ERROR;
+        }
+    }
+
+    double end_time = get_time_in_seconds();
+    if (stats_out) {
+        memset(stats_out, 0, sizeof(pf_stats));
+        if (job->stats) {
+            stats_out->total_reads = job->stats[0].number_of_reads;
+            stats_out->matched_reads = job->stats[0].valid;
+            stats_out->unmatched_reads = job->stats[0].total_unmatched_features;
+        }
+        stats_out->total_features = ctx->features->number_of_features;
+        stats_out->processing_time_sec = end_time - job->start_time;
+    }
+
+    pf_direct_range_cleanup_runtime(job);
+    free(job);
+    pthread_mutex_unlock(&g_pf_runtime_mutex);
+    return result;
+}
+
+void pf_direct_range_abort(pf_direct_range_job *job) {
+    if (!job || job->closed) {
+        return;
+    }
+    job->closed = 1;
+    pf_direct_range_cleanup_runtime(job);
+    free(job);
+    pthread_mutex_unlock(&g_pf_runtime_mutex);
 }
 
 pf_error pf_process_record_batch(pf_record_stream *stream,
