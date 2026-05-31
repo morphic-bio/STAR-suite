@@ -393,7 +393,72 @@ For FLEX 100K and production timing, use the existing host-local artifacts
 recorded in `tests/ARTIFACTS.md`:
 
 - `/tmp/star_suite_cbq_flex_100k_*`
+- `/tmp/star_suite_cbq_flex_range_100k_*`
 - `/storage/downsampled_100K/SC2300771`
+
+### 2026-05-31 FLEX no-genome indexed range checkpoint
+
+Implemented the first FLEX use of the indexed CBQ range reader for the strict
+count-only surface:
+
+- active only when `--flexNoAlign 1`, fully fused FlexPipeline, CBQ input, and
+  no-genome mode are active;
+- partitions the logical concatenation of ordered CBQ lanes into worker ranges;
+- opens one `CbqInputModule::open_range(...)` reader per claimed range;
+- preserves deterministic read IDs from the logical input ordinal;
+- falls back to existing whole-lane CBQ readers when indexes are unavailable.
+
+Smoke/parity root:
+
+```text
+/tmp/star_suite_cbq_flex_range_100k_20260531T105047Z
+```
+
+Same-binary 800K SC2300771 no-genome pair:
+
+| Input | Threads | Wall time | Max RSS | Range log | Parity |
+| --- | ---: | ---: | ---: | --- | --- |
+| FASTQ.gz | 32 | `0:33.19` | `3,412,488 KB` | n/a | baseline |
+| CBQ indexed range | 32 | `0:33.13` | `3,619,508 KB` | `32 ranges across 8 lanes and 800000 records` | PASS |
+
+Byte-identical outputs:
+
+- `Solo.out/Gene`
+- `Solo.out/Barcodes.stats`
+- `per_sample_filtered`
+
+Regression guards:
+
+```bash
+OUT_ROOT=/tmp/star_suite_cbq_star_input_smoke_flex_range_guard_20260531T105635Z \
+  tests/run_cbq_star_input_smoke.sh
+
+OUT_ROOT=/tmp/star_suite_cbq_ynoy_smoke_flex_range_guard_20260531T105638Z \
+  tests/run_cbq_ynoy_smoke.sh
+```
+
+Both passed. The next meaningful FLEX step is a full-production rerun on the
+same storage tier as the current topline no-genome FASTQ/CBQ results.
+
+Full-production follow-up on SSD:
+
+- Output root: `/tmp/star_flex_cbq_range_full_ssd_20260531T111048Z`
+- Input: existing level-0 CBQs under
+  `/tmp/star_suite_cbq_flex_full_level0_p8_20260529T125516Z/cbq/`
+- Threads: 32
+- Input reads: `2,011,130,186`
+- Range planner: `39 ranges across 8 lanes and 2011130186 records`
+- Wall time: `7:22.46`
+- Max RSS: `47,982,080 KB`
+- Mapping speed: `17,156.56M reads/hour`
+- Counters matched the documented topline CBQ no-genome run:
+  `triageKeep=1681459858, triageDeny=16111757, triageMiss=313558571`
+
+Comparison against the old full level-0 CBQ no-genome result (`8:38.52`,
+`43,378,292 KB`, `14,538.29M reads/hour`): indexed range reading is `1:16.06`
+faster (`1.17x`, `14.7%` wall reduction) with `18.0%` higher mapping speed and
+about `4.39 GiB` higher max RSS. FASTQ baseline was intentionally not rerun for
+this checkpoint.
 
 ## Chromap-suite/libchromap Follow-On
 

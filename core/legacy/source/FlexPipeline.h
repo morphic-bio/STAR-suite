@@ -6,6 +6,7 @@
 #include <condition_variable>
 #include <cstring>
 #include <mutex>
+#include <string>
 #include <vector>
 #include <zlib.h>
 
@@ -143,6 +144,13 @@ struct LaneFiles {
     std::string r1path;
 };
 
+struct FlexCbqRangeTask {
+    int laneId = 0;
+    uint64_t firstRecord = 0;
+    uint64_t recordCount = 0;
+    uint64_t globalFirst = 0;
+};
+
 struct FlexPipelineState {
     BoundedQueue<ReadPacket> readerQ;
     std::vector<BoundedQueue<DecisionPacket>*> soloQ;
@@ -162,6 +170,8 @@ struct FlexPipelineState {
     std::vector<LaneFiles> laneFiles;
     // Track how many fused threads are still active (reading or aligning)
     int nFusedThreads = 0;
+    std::vector<FlexCbqRangeTask> cbqRangeTasks;
+    std::atomic<int> nextCbqRangeIdx{0};
 
     ~FlexPipelineState() {
         for (auto* q : soloQ) delete q;
@@ -179,6 +189,17 @@ struct FlexPipelineState {
     int claimNextLane() {
         int lane = nextLaneIdx.fetch_add(1, std::memory_order_relaxed);
         return (lane < nLanes) ? lane : -1;
+    }
+
+    bool claimNextCbqRange(FlexCbqRangeTask *task) {
+        int index = nextCbqRangeIdx.fetch_add(1, std::memory_order_relaxed);
+        if (index < 0 || index >= static_cast<int>(cbqRangeTasks.size())) {
+            return false;
+        }
+        if (task != nullptr) {
+            *task = cbqRangeTasks[static_cast<size_t>(index)];
+        }
+        return true;
     }
 };
 
@@ -229,5 +250,7 @@ void *flexTriageThread(void *arg);
 void *flexSoloConsumerThread(void *arg);
 void *flexAlignWorkerThread(void *arg);
 void *flexStatsReporterThread(void *arg);
+bool flexPrepareCbqRangeTasks(FlexPipelineState *state, Parameters &P,
+                              int nWorkers, std::string *reason);
 
 #endif
