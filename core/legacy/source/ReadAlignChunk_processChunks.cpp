@@ -548,6 +548,26 @@ void processCbqRangeTask(ReadAlignChunk& chunk, const Parameters::CbqRangeTask& 
     }
 }
 
+void flushCbqRangeResidualSam(ReadAlignChunk& chunk) {
+    Parameters& P = chunk.P;
+    if (!P.outSAMbool ||
+        P.outSAMorder == "PairedKeepInputOrder" ||
+        chunk.chunkOutBAMtotal == 0) {
+        return;
+    }
+
+    if (P.runThreadN > 1) {
+        pthread_mutex_lock(&g_threadChunks.mutexOutSAM);
+    }
+    P.inOut->outSAM->write(chunk.chunkOutBAM, chunk.chunkOutBAMtotal);
+    P.inOut->outSAM->clear();
+    if (P.runThreadN > 1) {
+        pthread_mutex_unlock(&g_threadChunks.mutexOutSAM);
+    }
+    chunk.RA->outSAMstream->seekp(0, ios::beg);
+    chunk.chunkOutBAMtotal = 0;
+}
+
 void processCbqRangeChunks(ReadAlignChunk& chunk) {
     Parameters& P = chunk.P;
     if (!P.cbqRangeNextTask) {
@@ -561,6 +581,7 @@ void processCbqRangeChunks(ReadAlignChunk& chunk) {
         }
         processCbqRangeTask(chunk, P.cbqRangeTasks[taskIndex]);
     }
+    flushCbqRangeResidualSam(chunk);
     chunk.noReadsLeft = true;
 }
 

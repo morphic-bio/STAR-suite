@@ -139,17 +139,21 @@ bool cbqCoreRangeGateReject(Parameters& P, string& reason) {
     if (P.runThreadN <= 1) {
         return reject("runThreadN <= 1");
     }
-    if (P.outSAMtype.empty() || P.outSAMtype[0] != "None" || P.outSAMbool || P.outBAMcoord || P.outBAMunsorted) {
-        return reject("initial STAR-core CBQ range mode requires --outSAMtype None");
+    if (P.outSAMtype.empty()) {
+        return reject("outSAMtype is empty");
+    }
+    const bool noAlignmentOutput = (P.outSAMtype[0] == "None" &&
+                                    !P.outSAMbool && !P.outBAMcoord && !P.outBAMunsorted);
+    const bool sortedBamOnly = (P.outSAMtype[0] == "BAM" &&
+                                P.outBAMcoord && !P.outBAMunsorted && !P.outSAMbool);
+    if (!noAlignmentOutput && !sortedBamOnly) {
+        return reject("CBQ range mode currently supports --outSAMtype None or BAM SortedByCoordinate without SAM/Unsorted side output");
     }
     if (P.emitYNoYyes || P.emitYNoYFastqyes || P.emitYNoYCbqyes) {
         return reject("Y/noY sidecar emission is order-dependent");
     }
     if (P.outSAMorder == "PairedKeepInputOrder") {
         return reject("--outSAMorder PairedKeepInputOrder is order-dependent");
-    }
-    if (P.readMapNumber != static_cast<uint>(-1)) {
-        return reject("--readMapNumber is not supported by initial CBQ range mode");
     }
     if (P.batchMode || P.batchModeInt != 0 || P.quant.slam.batchMode || P.quant.slam.batchModeInt != 0) {
         return reject("batch mode is not supported by initial CBQ range mode");
@@ -208,7 +212,10 @@ bool prepareCbqCoreRangeTasks(Parameters& P,
         laneReader.close();
     }
 
-    const uint64 totalRecords = laneStarts.back();
+    const uint64 inputRecords = laneStarts.back();
+    const uint64 totalRecords = P.readMapNumber == static_cast<uint>(-1)
+        ? inputRecords
+        : std::min<uint64>(inputRecords, static_cast<uint64>(P.readMapNumber));
     if (totalRecords == 0) {
         reason = "CBQ input contains no records";
         return false;
