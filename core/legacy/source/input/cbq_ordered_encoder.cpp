@@ -67,8 +67,20 @@ void append_vec_u16(std::vector<uint8_t>* out, const std::vector<uint16_t>& valu
     }
 }
 
+struct StringPiece {
+    const char* data;
+    size_t size;
+};
+
 void append_bytes(std::vector<uint8_t>* out, const std::string& value) {
     out->insert(out->end(), value.begin(), value.end());
+}
+
+void append_bytes(std::vector<uint8_t>* out, StringPiece value) {
+    if (value.size == 0) {
+        return;
+    }
+    out->insert(out->end(), value.data, value.data + value.size);
 }
 
 uint64_t floor_log2_u64(uint64_t value) {
@@ -82,21 +94,33 @@ uint64_t floor_log2_u64(uint64_t value) {
     return result;
 }
 
-std::string trim_fastq_header_payload(const std::string& header_line) {
+StringPiece trim_fastq_header_payload(const std::string& header_line) {
+    StringPiece out;
     if (!header_line.empty() && header_line[0] == '@') {
-        return header_line.substr(1);
+        out.data = header_line.data() + 1;
+        out.size = header_line.size() - 1;
+    } else {
+        out.data = header_line.data();
+        out.size = header_line.size();
     }
-    return header_line;
+    return out;
 }
 
-std::string canonical_read_id(const std::string& header_payload) {
-    size_t end = header_payload.find_first_of(" \t\r\n");
-    std::string id = header_payload.substr(0, end == std::string::npos ? header_payload.size() : end);
-    if (id.size() > 2 && id[id.size() - 2] == '/' &&
-        (id[id.size() - 1] == '1' || id[id.size() - 1] == '2')) {
-        id.resize(id.size() - 2);
+std::string canonical_read_id(StringPiece header_payload) {
+    size_t end = 0;
+    while (end < header_payload.size) {
+        const char ch = header_payload.data[end];
+        if (ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n') {
+            break;
+        }
+        ++end;
     }
-    return id;
+    if (end > 2 && header_payload.data[end - 2] == '/' &&
+        (header_payload.data[end - 1] == '1' ||
+         header_payload.data[end - 1] == '2')) {
+        end -= 2;
+    }
+    return std::string(header_payload.data, end);
 }
 
 std::string parse_error_context(const std::string& path, uint64_t record_ordinal) {
@@ -578,14 +602,17 @@ struct CbqBlock {
         return num_records == 0;
     }
 
-    uint64_t estimate_record_size(const FastqRecord& first, const FastqRecord* second) const {
+    uint64_t estimate_record_size(const FastqRecord& first,
+                                  StringPiece first_header,
+                                  const FastqRecord* second,
+                                  StringPiece second_header) const {
         uint64_t size = 0;
         size += ((static_cast<uint64_t>(first.sequence.size()) + 31U) / 32U) * 8U;
-        size += static_cast<uint64_t>(trim_fastq_header_payload(first.header).size());
+        size += static_cast<uint64_t>(first_header.size);
         size += static_cast<uint64_t>(first.quality.size());
         if (second != NULL) {
             size += ((static_cast<uint64_t>(second->sequence.size()) + 31U) / 32U) * 8U;
-            size += static_cast<uint64_t>(trim_fastq_header_payload(second->header).size());
+            size += static_cast<uint64_t>(second_header.size);
             size += static_cast<uint64_t>(second->quality.size());
         }
         return size;
@@ -593,12 +620,12 @@ struct CbqBlock {
 
     void add_sequence(const std::string& sequence,
                       const std::string& quality,
-                      const std::string& header_payload) {
+                      StringPiece header_payload) {
         if (sequence.size() != quality.size()) {
             throw std::runtime_error("internal sequence/quality length mismatch");
         }
         seq_lengths.push_back(static_cast<uint64_t>(sequence.size()));
-        header_lengths.push_back(static_cast<uint64_t>(header_payload.size()));
+        header_lengths.push_back(static_cast<uint64_t>(header_payload.size));
         append_bytes(&headers, header_payload);
         append_bytes(&qualities, quality);
 
@@ -619,13 +646,17 @@ struct CbqBlock {
         ++num_sequences;
     }
 
-    void add_record(const FastqRecord& first, const FastqRecord* second) {
-        add_sequence(first.sequence, first.quality, trim_fastq_header_payload(first.header));
+    void add_record(const FastqRecord& first,
+                    StringPiece first_header,
+                    const FastqRecord* second,
+                    StringPiece second_header,
+                    uint64_t estimated_size) {
+        add_sequence(first.sequence, first.quality, first_header);
         if (second != NULL) {
-            add_sequence(second->sequence, second->quality, trim_fastq_header_payload(second->header));
+            add_sequence(second->sequence, second->quality, second_header);
         }
         ++num_records;
-        virtual_size += estimate_record_size(first, second);
+        virtual_size += estimated_size;
     }
 };
 
@@ -767,13 +798,18 @@ public:
     }
 
     bool add_record(const FastqRecord& first, const FastqRecord* second, std::string* error) {
-        const uint64_t estimated = block_.estimate_record_size(first, second);
+        const StringPiece first_header = trim_fastq_header_payload(first.header);
+        const StringPiece second_header = second == NULL
+            ? StringPiece{NULL, 0}
+            : trim_fastq_header_payload(second->header);
+        const uint64_t estimated =
+            block_.estimate_record_size(first, first_header, second, second_header);
         if (!block_.empty() && block_.virtual_size + estimated > block_size_) {
             if (!flush(error)) {
                 return false;
             }
         }
-        block_.add_record(first, second);
+        block_.add_record(first, first_header, second, second_header, estimated);
         if (block_.virtual_size >= block_size_) {
             return flush(error);
         }

@@ -703,6 +703,8 @@ class Parameters {
             int crAssignBarcodeN;           // Optional: pass --barcode_n to assignBarcodes (default: unset)
             int crAssignConsumerThreads;    // Optional: pass --consumer_threads_per_set (default: unset)
             int crAssignSearchThreads;      // Optional: pass --search_threads (default: unset)
+            int crAssignReadBufferLines;    // Optional: PF reader queue lines (default: unset)
+            string crAssignCbqMode;         // auto|stream|range for CBQ feature assignment
             double crAssignMinPosterior;    // Optional: pass --min_posterior (default: unset)
             int crAssignLegacyCbRescue;     // Optional: pass legacy order-dependent pending CB rescue mode
             int crAssignSkipQcOutputs;      // Skip feature histograms/heatmaps in assignBarcodes outputs

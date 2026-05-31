@@ -31,7 +31,7 @@ if [[ ! -x "$PF_BIN" ]]; then
 fi
 
 rm -rf "$OUT_ROOT"
-mkdir -p "$OUT_ROOT"/{inputs,fastq,cbq}
+mkdir -p "$OUT_ROOT"/{inputs,fastq,cbq,cbq_direct_pf,direct_none,direct_sequence}
 
 FEATURES="$FIXTURE_DIR/features.csv"
 WHITELIST="$FIXTURE_DIR/whitelist.txt"
@@ -123,6 +123,7 @@ fi
     --sampleName sample \
     --barcodeLength 16 \
     --umiLength 12 \
+    --readBufferLines 128 \
     > "$OUT_ROOT/fastq/stdout.tsv" \
     2> "$OUT_ROOT/fastq/stderr.log"
 
@@ -135,14 +136,50 @@ fi
     --sampleName sample \
     --barcodeLength 16 \
     --umiLength 12 \
+    --readBufferLines 128 \
     > "$OUT_ROOT/cbq/stdout.tsv" \
     2> "$OUT_ROOT/cbq/stderr.log"
+
+"$PF_BIN" \
+    --mode cbq-direct-pf \
+    --readFilesIn "$CBQ" \
+    --whitelist "$WHITELIST" \
+    --featureRef "$FEATURES" \
+    --outputDir "$OUT_ROOT/cbq_direct_pf" \
+    --sampleName sample \
+    --barcodeLength 16 \
+    --umiLength 12 \
+    --consumerThreads 2 \
+    --readBufferLines 128 \
+    > "$OUT_ROOT/cbq_direct_pf/stdout.tsv" \
+    2> "$OUT_ROOT/cbq_direct_pf/stderr.log"
+
+"$PF_BIN" \
+    --mode cbq-direct-decode \
+    --readFilesIn "$CBQ" \
+    --consumerThreads 2 \
+    --materializeMode none \
+    > "$OUT_ROOT/direct_none/stdout.tsv" \
+    2> "$OUT_ROOT/direct_none/stderr.log"
+
+"$PF_BIN" \
+    --mode cbq-direct-decode \
+    --readFilesIn "$CBQ" \
+    --consumerThreads 2 \
+    --materializeMode sequence \
+    > "$OUT_ROOT/direct_sequence/stdout.tsv" \
+    2> "$OUT_ROOT/direct_sequence/stderr.log"
 
 compare_file() {
     local rel="$1"
     cmp -s "$OUT_ROOT/fastq/sample/$rel" "$OUT_ROOT/cbq/sample/$rel" || {
         echo "ERROR: process_features CBQ adapter parity failed for $rel" >&2
         diff -u "$OUT_ROOT/fastq/sample/$rel" "$OUT_ROOT/cbq/sample/$rel" >&2 || true
+        exit 1
+    }
+    cmp -s "$OUT_ROOT/fastq/sample/$rel" "$OUT_ROOT/cbq_direct_pf/sample/$rel" || {
+        echo "ERROR: process_features direct CBQ parity failed for $rel" >&2
+        diff -u "$OUT_ROOT/fastq/sample/$rel" "$OUT_ROOT/cbq_direct_pf/sample/$rel" >&2 || true
         exit 1
     }
 }
@@ -153,5 +190,23 @@ compare_file feature_sequences.txt
 compare_file matrix.mtx
 compare_file feature_per_cell.csv
 compare_file deduped_counts_histograms.txt
+
+for direct_mode in direct_none direct_sequence; do
+    grep -qx $'processed_reads\t7' "$OUT_ROOT/$direct_mode/stdout.tsv" || {
+        echo "ERROR: $direct_mode did not process expected read count" >&2
+        cat "$OUT_ROOT/$direct_mode/stdout.tsv" >&2
+        exit 1
+    }
+    grep -qx $'indexed_reads\t7' "$OUT_ROOT/$direct_mode/stdout.tsv" || {
+        echo "ERROR: $direct_mode did not report expected indexed read count" >&2
+        cat "$OUT_ROOT/$direct_mode/stdout.tsv" >&2
+        exit 1
+    }
+done
+grep -qx $'lane_ordinal_sum\t28' "$OUT_ROOT/direct_sequence/stdout.tsv" || {
+    echo "ERROR: direct_sequence did not report expected lane ordinal checksum" >&2
+    cat "$OUT_ROOT/direct_sequence/stdout.tsv" >&2
+    exit 1
+}
 
 echo "PASS: process_features CBQ adapter smoke completed at $OUT_ROOT"

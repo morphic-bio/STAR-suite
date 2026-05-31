@@ -98,6 +98,11 @@ public:
     const InputSourcePlan& plan() const override;
     bool supports_record_iteration() const override;
     bool open(std::string* error) override;
+    bool open_range(uint32_t lane_index,
+                    uint64_t first_record,
+                    uint64_t record_count,
+                    std::string* error);
+    uint64_t current_lane_record_count() const;
     InputStatus next_batch(CbqReadBatchView* batch, std::string* error);
     InputStatus next_record(InputRecord* record, std::string* error) override;
     void close() override;
