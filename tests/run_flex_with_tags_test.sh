@@ -79,7 +79,6 @@ LOG_FILE="$OUT_DIR/Log.out"
   --soloStrand Unstranded \
   --chimSegmentMin 1000000 \
   --outSAMtype BAM Unsorted \
-  --readFilesCommand zcat \
   --readFilesIn "$READS_R2" "$READS_R1" \
   --outFileNamePrefix "$OUT_DIR/" \
   > "$LOG_FILE" 2>&1
@@ -118,4 +117,3 @@ grep -E "Flex pipeline enabled|SampleDetector|inlineHashMode|detected sample|Bui
 
 echo ""
 echo "Test script completed."
-

@@ -96,7 +96,6 @@ python3 "${SCRIPT_DIR}/flex_h01_pilot.py" h2-make-synth-fastq \
   --soloKeysCompat cr \
   --outSAMtype BAM Unsorted \
   --outFileNamePrefix "${OUT_DIR}/alignment/" \
-  --readFilesCommand zcat \
   --readFilesIn "${OUT_DIR}/synthetic/h2_R2.fastq.gz" "${OUT_DIR}/synthetic/h2_R1.fastq.gz"
 
 python3 "${SCRIPT_DIR}/flex_h01_pilot.py" h2-build-cache-from-mex \

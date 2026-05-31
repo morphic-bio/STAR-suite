@@ -256,15 +256,26 @@ SC2300771 FLEX count-only production surface:
 --soloFeatures Gene
 ```
 
+FASTQ.gz recipes for this surface must use STAR's default internal gzip path:
+omit `--readFilesCommand zcat`. For `.fastq.gz` inputs, the default
+`--readFilesCommand -` logs:
+
+```text
+NOTE: .gz Fastx input detected with --readFilesCommand - ; using internal zlib streaming path.
+```
+
+Use `--readFilesCommand zcat` only for explicit legacy compatibility
+experiments; it is not the default benchmark or production recipe.
+
 Topline no-genome results on the SSD:
 
 | Input | Wall time | Max RSS | Mapping speed | Output parity |
 | --- | ---: | ---: | ---: | --- |
-| FASTQ.gz | `12:01.95` | `43,281,404 KB` | `10,538.67M reads/hour` | PASS vs CBQ |
+| FASTQ.gz, internal gzip | `10:17.97` | `44,071,412 KB` | `12,107.14M reads/hour` | PASS vs CBQ |
 | Level-0 CBQ, whole-lane readers | `8:38.52` | `43,378,292 KB` | `14,538.29M reads/hour` | PASS vs FASTQ |
 | Level-0 CBQ, indexed range readers | `7:22.46` | `47,982,080 KB` | `17,156.56M reads/hour` | counters match; parity assumed |
 
-Both runs processed `2,011,130,186` reads with identical Flex hash-screen
+All no-genome runs processed `2,011,130,186` reads with identical Flex hash-screen
 counters:
 
 ```text
@@ -273,18 +284,18 @@ triageDeny=16111757
 triageMiss=313558571
 ```
 
-The FASTQ no-genome run was `3:23.43` slower than the original whole-lane
-level-0 CBQ result, about `1.39x` the CBQ wall time, while using effectively
-the same peak memory. The indexed range reader result is `1:16.06` faster than
-the original level-0 CBQ result (`1.17x`, `14.7%` wall reduction) and `4:39.49`
-faster than the FASTQ.gz result (`1.63x`, `38.7%` wall reduction). The FASTQ
-and original CBQ no-genome outputs were byte-identical for `Solo.out/Gene`,
+The FASTQ no-genome run was `1:39.45` slower than the original whole-lane
+level-0 CBQ result, about `1.19x` the CBQ wall time. The indexed range reader
+result is `1:16.06` faster than the original level-0 CBQ result (`1.17x`,
+`14.7%` wall reduction) and `2:55.51` faster than the FASTQ.gz internal-gzip
+result (`1.40x`, `28.4%` wall reduction). The FASTQ and original CBQ
+no-genome outputs were byte-identical for `Solo.out/Gene`,
 `Solo.out/Barcodes.stats`, and `per_sample_filtered`; the indexed range run was
 accepted on matching counters for this benchmark checkpoint.
 
 Artifact roots:
 
-- FASTQ no-genome: `/tmp/star_flex_fastq_full_ssd_20260529T222432Z`
+- FASTQ no-genome: `/tmp/star_flex_fastq_full_ssd_internalgzip_20260531T180321Z`
 - CBQ no-genome/current comparison:
   `/tmp/star_flex_no_genome_full_ssd_20260529T213833Z`
 - CBQ indexed range:

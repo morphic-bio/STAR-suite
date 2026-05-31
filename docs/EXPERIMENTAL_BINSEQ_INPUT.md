@@ -70,8 +70,8 @@ and STAR/process_features/Chromap adapter surfaces are documented in
   BAM payload parity.
 - FLEX count-only no-genome production is the first full-size topline CBQ use
   case. On SC2300771, indexed level-0 CBQ no-genome completed in `7:22.46`
-  versus FASTQ.gz no-genome in `12:01.95`; the earlier whole-lane CBQ result
-  was `8:38.52`. The FASTQ and original CBQ no-genome outputs were
+  versus FASTQ.gz internal-gzip no-genome in `10:17.97`; the earlier whole-lane
+  CBQ result was `8:38.52`. The FASTQ and original CBQ no-genome outputs were
   byte-identical for `Solo.out/Gene`, `Barcodes.stats`, and
   `per_sample_filtered`; the indexed range run matched the documented
   hash-screen counters.
@@ -138,10 +138,10 @@ For FLEX count-only production runs, CBQ is now a validated performance path.
 With the strict no-genome FLEX surface, both FASTQ.gz and level-0 CBQ avoid STAR
 genome loading and produce byte-identical counts on the original parity pair.
 On the full SC2300771 production run, indexed level-0 CBQ completed in
-`7:22.46` while FASTQ.gz completed in `12:01.95`; the previous whole-lane CBQ
+`7:22.46` while FASTQ.gz internal gzip completed in `10:17.97`; the previous whole-lane CBQ
 reader completed in `8:38.52`. The indexed CBQ run improves over whole-lane CBQ
-by `1.17x` wall time and over FASTQ.gz by `1.63x`, at a higher peak RSS
-(`47.98M KB` vs `43.38M KB` for whole-lane CBQ). The remaining speedup is
+by `1.17x` wall time and over FASTQ.gz by `1.40x`, at a higher peak RSS
+(`47.98M KB` vs `44.07M KB` for FASTQ.gz). The remaining speedup is
 attributable to avoiding gzip FASTQ decode and using parallel indexed CBQ range
 readers for the same Flex hash/count workload.
 

@@ -128,7 +128,6 @@ STAR_EMIT_READID_TAG=1 STAR_EMIT_CBUB_TABLE=1 "$STAR_BIN" \
   --outSAMtype BAM SortedByCoordinate \
   --outBAMsortMethod samtools \
   --soloSampleSearchNearby no \
-  --readFilesCommand zcat \
   --readFilesIn \
     "$FLEX_FASTQ_R2" \
     "$FLEX_FASTQ_R1" \

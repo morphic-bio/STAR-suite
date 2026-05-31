@@ -97,7 +97,6 @@ STAR_COMMON_ARGS=(
     --chimSegmentMin 1000000
     --soloKeysCompat cr
     --outSAMtype BAM Unsorted
-    --readFilesCommand zcat
 )
 
 echo "[$(date +%H:%M:%S)] Genome loaded. Starting ${NUM_SHARDS} shards..."
