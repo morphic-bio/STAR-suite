@@ -300,8 +300,6 @@ void SoloFeature::collapseUMIall_fromBridgeHash()
     const char *why = nullptr;
     if (pSolo.trackReadIdsForTags)
         why = "trackReadIdsForTags is enabled (needs per-read recordReadInfo)";
-    else if (pSolo.CBmatchWL.oneExact)
-        why = "CB oneExact gating is not supported on the non-Flex direct bridge path";
     else if (P.outSAMtype.empty() || P.outSAMtype[0] != "None")
         why = "--outSAMtype must be None for direct bridge collapse (or disable STAR_SOLO_NONFLEX_HASH_BRIDGE)";
     else if (pSolo.multiMap.yes.multi)
@@ -394,7 +392,7 @@ void SoloFeature::collapseUMIall_fromBridgeHash()
         }
     }
 
-    const size_t totalHashSize = bridgeHashLiveSize(readFeatSum->inlineHash_);
+    size_t totalHashSize = bridgeHashLiveSize(readFeatSum->inlineHash_);
     const size_t coalescedHashEntries = rawHashSize >= totalHashSize ? rawHashSize - totalHashSize : 0;
 
     if (totalHashSize == 0) {
@@ -411,6 +409,24 @@ void SoloFeature::collapseUMIall_fromBridgeHash()
         nCB = 0;
         return;
     }
+
+    const std::vector<uint32> *exactCbReadCount = nullptr;
+    if (pSolo.CBmatchWL.oneExact) {
+        if (readBarSum == nullptr || readBarSum->cbReadCountExact.size() < pSolo.cbWLsize) {
+            ostringstream errOut;
+            errOut << "EXITING because of fatal ERROR: non-Flex direct bridge oneExact gating requires exact CB "
+                      "read counts for every whitelist barcode.\n"
+                   << "Reason: readBarSum->cbReadCountExact is missing or shorter than the whitelist "
+                   << "(size="
+                   << (readBarSum == nullptr ? 0 : readBarSum->cbReadCountExact.size())
+                   << ", whitelist_size=" << pSolo.cbWLsize << ").\n";
+            exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_INCONSISTENT_DATA, P);
+        }
+        exactCbReadCount = &readBarSum->cbReadCountExact;
+    }
+    auto cbAllowedByOneExact = [&](uint32_t wlCb) -> bool {
+        return exactCbReadCount == nullptr || (*exactCbReadCount)[wlCb] > 0;
+    };
 
     time_t rawTime;
     time(&rawTime);
@@ -436,6 +452,7 @@ void SoloFeature::collapseUMIall_fromBridgeHash()
 
     khash_t(cbcount) *cbEntryCount = kh_init(cbcount);
     kh_resize(cbcount, cbEntryCount, std::min<size_t>(totalHashSize / 8 + 64, size_t{1} << 20));
+    size_t acceptedHashSize = 0;
 
     auto countHashEntriesPerWlCb = [&](SoloReadFeature *srcFeat, khash_t(cg_agg) *hash) {
         (void)srcFeat;
@@ -450,6 +467,9 @@ void SoloFeature::collapseUMIall_fromBridgeHash()
             unpackBridgeWlUmiGeneKey(key, &wlCb, &umi24, &gene16);
             (void)umi24;
             (void)gene16;
+            if (!cbAllowedByOneExact(wlCb))
+                continue;
+            ++acceptedHashSize;
             int absent = 0;
             khiter_t itCb = kh_put(cbcount, cbEntryCount, wlCb, &absent);
             if (absent)
@@ -466,6 +486,25 @@ void SoloFeature::collapseUMIall_fromBridgeHash()
     }
     if (readFeatSum->inlineHash_ && kh_size(readFeatSum->inlineHash_) > 0) {
         countHashEntriesPerWlCb(readFeatSum, readFeatSum->inlineHash_);
+    }
+
+    if (acceptedHashSize == 0) {
+        kh_destroy(cbcount, cbEntryCount);
+        cbEntryCount = nullptr;
+        P.inOut->logMain << "WARNING: collapseUMIall_fromBridgeHash: no bridge hash entries remain after "
+                            "oneExact CB gating"
+                         << endl;
+        if (readFeatSum->inlineHash_) {
+            kh_destroy(cg_agg, readFeatSum->inlineHash_);
+            readFeatSum->inlineHash_ = nullptr;
+        }
+        nCB = 0;
+        return;
+    }
+    if (acceptedHashSize != totalHashSize) {
+        P.inOut->logMain << "Direct bridge-hash oneExact gating retained " << acceptedHashSize
+                         << " of " << totalHashSize << " hash entries" << endl;
+        totalHashSize = acceptedHashSize;
     }
 
     std::vector<uint32_t> sortedCBs;
@@ -553,6 +592,8 @@ void SoloFeature::collapseUMIall_fromBridgeHash()
             uint32_t wlCb = 0, umi24 = 0;
             uint16_t gene16 = 0;
             unpackBridgeWlUmiGeneKey(key, &wlCb, &umi24, &gene16);
+            if (!cbAllowedByOneExact(wlCb))
+                continue;
 
             const uint32_t iCB = indCBwl[wlCb];
             const size_t pos = cbWrite[iCB]++;
