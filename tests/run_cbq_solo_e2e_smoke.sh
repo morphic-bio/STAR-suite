@@ -30,7 +30,7 @@ if [[ ! -x "$STAR_BIN" ]]; then
 fi
 
 rm -rf "$OUT_ROOT"
-mkdir -p "$OUT_ROOT"/{inputs,genome,fastq,cbq,cbq_level0,cbq_manifest}
+mkdir -p "$OUT_ROOT"/{inputs,genome,fastq,cbq,cbq_level0,cbq_manifest,cbq_range}
 
 python3 - "$OUT_ROOT" <<'PY'
 import random
@@ -162,6 +162,14 @@ COMMON_ARGS=(
     --soloFeatures Gene
 )
 
+RANGE_ARGS=("${COMMON_ARGS[@]}")
+for i in "${!RANGE_ARGS[@]}"; do
+    if [[ "${RANGE_ARGS[$i]}" == "--runThreadN" ]]; then
+        RANGE_ARGS[$((i + 1))]=4
+        break
+    fi
+done
+
 "$STAR_BIN" "${COMMON_ARGS[@]}" \
     --readFilesType Fastx \
     --readFilesIn "$CDNA_FASTQ" "$BARCODE_FASTQ" \
@@ -182,6 +190,14 @@ COMMON_ARGS=(
     --outFileNamePrefix "$OUT_ROOT/cbq_level0/" \
     > "$OUT_ROOT/cbq_level0/star.stdout" \
     2> "$OUT_ROOT/cbq_level0/star.stderr"
+
+"$STAR_BIN" "${RANGE_ARGS[@]}" \
+    --readFilesCbqRangeMode range \
+    --readFilesType Binseq PE \
+    --readFilesIn "$CBQ" \
+    --outFileNamePrefix "$OUT_ROOT/cbq_range/" \
+    > "$OUT_ROOT/cbq_range/star.stdout" \
+    2> "$OUT_ROOT/cbq_range/star.stderr"
 
 printf '%s\t-\tID:solo_cbq\n' "$CBQ" > "$OUT_ROOT/inputs/manifest.tsv"
 "$STAR_BIN" "${COMMON_ARGS[@]}" \
@@ -226,7 +242,9 @@ PY
 compare_solo_raw "$OUT_ROOT/cbq"
 compare_solo_raw "$OUT_ROOT/cbq_level0"
 compare_solo_raw "$OUT_ROOT/cbq_manifest"
+compare_solo_raw "$OUT_ROOT/cbq_range"
 require_nonzero_matrix "$OUT_ROOT/fastq/Solo.out/Gene/raw/matrix.mtx"
+grep -q "CBQ indexed range reader: active" "$OUT_ROOT/cbq_range/Log.out"
 
 avg_input_read_length() {
     awk -F'|' '/Average input read length/ { gsub(/[ \t]/, "", $2); print $2 }' "$1/Log.final.out"
@@ -246,5 +264,6 @@ compare_avg_input_read_length() {
 compare_avg_input_read_length "$OUT_ROOT/cbq"
 compare_avg_input_read_length "$OUT_ROOT/cbq_level0"
 compare_avg_input_read_length "$OUT_ROOT/cbq_manifest"
+compare_avg_input_read_length "$OUT_ROOT/cbq_range"
 
 echo "PASS: STARsolo CBQ E2E smoke completed at $OUT_ROOT"

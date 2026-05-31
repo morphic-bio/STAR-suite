@@ -430,6 +430,12 @@ readFilesLegacyZcat         No
                             No  ... default; auto-detect .gz FASTQ and use internal zlib streaming path
                             Yes ... disable internal gzip path and use legacy external zcat helper
 
+readFilesCbqRangeMode       auto
+    string: auto|off|range - indexed CBQ logical range readers for --readFilesType Binseq
+                            auto  ... enable only for supported order-independent CBQ runs with indexed inputs
+                            off   ... use the shared CBQ reader
+                            range ... require indexed range readers; unsupported configurations are fatal
+
 readMapNumber               -1
     int: number of reads to map from the beginning of the file
                             -1: map all reads
