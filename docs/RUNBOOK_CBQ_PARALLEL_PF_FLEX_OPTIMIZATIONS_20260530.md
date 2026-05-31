@@ -457,8 +457,10 @@ Full-production follow-up on SSD:
 Comparison against the old full level-0 CBQ no-genome result (`8:38.52`,
 `43,378,292 KB`, `14,538.29M reads/hour`): indexed range reading is `1:16.06`
 faster (`1.17x`, `14.7%` wall reduction) with `18.0%` higher mapping speed and
-about `4.39 GiB` higher max RSS. FASTQ baseline was intentionally not rerun for
-this checkpoint.
+about `4.39 GiB` higher max RSS. The corrected full FASTQ.gz internal-gzip
+no-genome baseline is `/tmp/star_flex_fastq_full_ssd_internalgzip_20260531T180321Z`
+at `10:17.97`, `44,071,412 KB`, and `12,107.14M reads/hour`; indexed CBQ is
+`2:55.51` faster (`1.40x`, `28.4%` wall reduction).
 
 ## Chromap-suite/libchromap Follow-On
 

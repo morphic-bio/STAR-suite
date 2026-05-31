@@ -324,6 +324,8 @@ update this file with its output location.
   - filtered per-sample MEX: `/storage/flex_noalign_2024ref_emptydrops_4tags_20260404_032741/per_sample_filtered/`
   - parity TSV/log bundle vs CR9/CR7: `/storage/flex_noalign_2024ref_emptydrops_4tags_20260404_032741/flex_parity_cr9/`
   - CR9 means: barcode Jaccard `0.981387`, cell Pearson `0.999974`, gene Pearson `0.999929`
+- `/tmp/star_flex_fastq_full_ssd_internalgzip_20260531T180321Z/` — current topline Flex count-only no-genome FASTQ.gz benchmark on SSD, using STAR internal gzip (no `--readFilesCommand zcat`): wall `10:17.97`, mapping complete `8:13`, max RSS `44,071,412 KB`, mapping speed `12,107.14M reads/hour`
+  - byte-identical count outputs vs whole-lane CBQ no-genome for `Solo.out/Gene`, `Solo.out/Barcodes.stats`, and `per_sample_filtered`
 - `/tmp/star_flex_cbq_range_full_ssd_20260531T111048Z/` — current topline Flex count-only no-genome CBQ benchmark on the full SC2300771 2.011B-read sample, using SSD-staged level-0 CBQs and indexed CBQ range readers: wall `7:22.46`, mapping complete `3:50`, Solo counting `3:12`, max RSS `47,982,080 KB`, mapping speed `17,156.56M reads/hour`
   - range planner log: `39 ranges across 8 lanes and 2011130186 records`
   - counters: `triageKeep=1681459858`, `triageDeny=16111757`, `triageMiss=313558571`
