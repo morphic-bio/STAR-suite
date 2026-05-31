@@ -40,6 +40,12 @@ and STAR/process_features/Chromap adapter surfaces are documented in
   current FASTQ-path contract.
 - `STAR --readFilesType Binseq PE|SE` routes CBQ batches directly into STAR
   read buffers without materializing synthetic FASTQ streams.
+- STAR core has indexed CBQ logical range readers for order-independent
+  MEX-only runs. Use `--readFilesCbqRangeMode auto|off|range`; `auto` activates
+  only for supported `--outSAMtype None` CBQ runs with indexed inputs, while
+  `range` makes unsupported settings or missing indexes fatal. The first
+  supported surface is STARsolo raw/filtered MEX output without BAM/SAM or
+  Y/noY sidecars.
 - `tests/run_cbq_star_input_smoke.sh` maps the same synthetic paired and
   single-end reads from FASTQ and CBQ through production STAR and verifies
   byte-identical SAM body output, including manifest-style paired CBQ input,
@@ -48,7 +54,8 @@ and STAR/process_features/Chromap adapter surfaces are documented in
   are both covered.
 - `tests/run_cbq_solo_e2e_smoke.sh` runs a synthetic STARsolo fixture through
   FASTQ and CBQ input and requires byte-identical raw Gene MEX output for
-  direct CBQ, level-0 CBQ, and manifest-style CBQ input.
+  direct CBQ, level-0 CBQ, manifest-style CBQ input, and forced indexed CBQ
+  range mode.
 - Single-end `.cbq` files are covered by the synthetic conversion smoke.
 - process_features CBQ input is covered by a FASTQ-vs-CBQ MEX/count parity
   smoke on a synthetic feature-barcode fixture with valid nucleotide UMIs. This
@@ -93,6 +100,10 @@ and STAR/process_features/Chromap adapter surfaces are documented in
 - FLEX has full-size production count-only no-genome parity/timing, but
   genome-backed FLEX alignment and BAM/SAM output surfaces still need separate
   full-size validation.
+- STAR core indexed CBQ range mode is intentionally limited to order-independent
+  `--outSAMtype None` runs. SAM/BAM output, `PairedKeepInputOrder`, Y/noY
+  sidecars, read caps, batch mode, SLAM per-file passes, and two-pass/SJ-filter
+  modes currently fall back in `auto` mode or fail in forced `range` mode.
 - Chromap integration currently adapts CBQ to Chromap's existing FASTQ path
   contract; it is not yet an in-memory libchromap reader API.
 - SLAM per-file skipping is currently rejected for BINSEQ input.
@@ -203,7 +214,7 @@ BQTOOLS=/path/to/bqtools tests/run_cbq_star_input_smoke.sh
 ```
 
 STARsolo E2E smoke, covering raw Gene MEX parity for FASTQ, direct CBQ,
-level-0 CBQ, and manifest CBQ:
+level-0 CBQ, manifest CBQ, and forced indexed CBQ range mode:
 
 ```bash
 BQTOOLS=/path/to/bqtools tests/run_cbq_solo_e2e_smoke.sh

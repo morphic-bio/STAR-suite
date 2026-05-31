@@ -101,6 +101,10 @@ run_case() {
         > "$OUT_ROOT/logs/star_${case_name}.stdout" \
         2> "$OUT_ROOT/logs/star_${case_name}.stderr"
 
+    if [[ "$case_name" == "cbq_input" ]]; then
+        grep -q "CBQ indexed range reader: not active (Y/noY sidecar emission is order-dependent)" "$star_dir/Log.out"
+    fi
+
     local y_cbq="$star_dir/y_separated/mixed_Y.cbq"
     local noy_cbq="$star_dir/y_separated/mixed_noY.cbq"
     [[ -s "$y_cbq" ]] || { echo "ERROR: missing Y CBQ output: $y_cbq" >&2; exit 1; }
