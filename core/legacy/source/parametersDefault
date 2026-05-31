@@ -2081,6 +2081,17 @@ crAssignSearchThreads      -1
                             -1 ... auto (default). Uses assignBarcodes internal default (4).
                             >0 ... explicit search thread count passed to assignBarcodes.
 
+crAssignReadBufferLines    -1
+    int:                    reader queue line slots for in-process assignBarcodes.
+                            -1 ... use process_features default.
+                            >0 ... explicit queue line count for FASTQ and CBQ record streams.
+
+crAssignCbqMode            auto
+    string:                 CBQ input strategy for pf-multi feature assignment.
+                            auto   ... use indexed direct range counting when supported, otherwise stream.
+                            stream ... force existing queue-backed CBQ streaming path.
+                            range  ... require indexed direct range counting; unsupported settings are fatal.
+
 crAssignLegacyCbRescue     0
     int:                    pending CB rescue mode for assignBarcodes.
                             0 ... default deterministic frozen-pass rescue (order-independent).

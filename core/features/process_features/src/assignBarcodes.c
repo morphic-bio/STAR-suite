@@ -16,10 +16,37 @@
 //will  print if DEBUG is set or debug=1
 //code for feature sequences stats
 
+#ifndef PF_FASTQ_GZBUFFER_SIZE
+#define PF_FASTQ_GZBUFFER_SIZE (1U << 20)
+#endif
+
+static gzFile open_fastq_gz_reader(const char *path, const char *role) {
+    gzFile file = gzopen(path, "rb");
+    if (file == NULL) {
+        fprintf(stderr, "Error: Unable to open %s FASTQ file %s\n", role, path);
+        exit(EXIT_FAILURE);
+    }
+#if defined(ZLIB_VERNUM) && ZLIB_VERNUM >= 0x1240
+    (void)gzbuffer(file, PF_FASTQ_GZBUFFER_SIZE);
+#endif
+    return file;
+}
+
 static int pf_trace_rescue_inited = 0;
 static int pf_trace_rescue_enabled = 0;
 static const char *pf_trace_rescue_list = NULL;
 static FILE *pf_trace_rescue_fp = NULL;
+
+static int pf_trace_tiered_enabled(void) {
+    static int initialized = 0;
+    static int enabled = 0;
+    if (!initialized) {
+        const char *env = getenv("PF_TRACE_TIERED");
+        enabled = (env && env[0] != '\0' && env[0] != '0');
+        initialized = 1;
+    }
+    return enabled;
+}
 static int pf_trace_counts_inited = 0;
 static int pf_trace_counts_enabled = 0;
 static const char *pf_trace_counts_list = NULL;
@@ -4404,24 +4431,12 @@ void finalize_processing(feature_arrays *features, data_structures *hashes, char
 }
 
 void open_fastq_files(const char *barcode_fastq, const char *forward_fastq, const char *reverse_fastq, gzFile *barcode_fastqgz, gzFile *forward_fastqgz, gzFile *reverse_fastqgz) {
-    *barcode_fastqgz = gzopen(barcode_fastq, "r");
-    if (*barcode_fastqgz == NULL) {
-        fprintf(stderr, "Error: Unable to open R1 FASTQ file %s\n", barcode_fastq);
-        exit(EXIT_FAILURE);
-    }
+    *barcode_fastqgz = open_fastq_gz_reader(barcode_fastq, "R1");
     if (forward_fastq != NULL) {
-        *forward_fastqgz = gzopen(forward_fastq, "r");
-        if (*forward_fastqgz == NULL) {
-            fprintf(stderr, "Error: Unable to open R2 FASTQ file %s\n", forward_fastq);
-            exit(EXIT_FAILURE);
-        }
+        *forward_fastqgz = open_fastq_gz_reader(forward_fastq, "R2");
     }
     if (reverse_fastq != NULL) {
-        *reverse_fastqgz = gzopen(reverse_fastq, "r");
-        if (*reverse_fastqgz == NULL) {
-            fprintf(stderr, "Error: Unable to open R3 FASTQ file %s\n", reverse_fastq);
-            exit(EXIT_FAILURE);
-        }
+        *reverse_fastqgz = open_fastq_gz_reader(reverse_fastq, "R3");
     }
 }
 fastq_reader* allocate_fastq_reader( char **filenames, int nfiles, int filetype, size_t read_size, size_t read_buffer_lines) {
@@ -4503,11 +4518,7 @@ void *read_fastqs_by_set(void *arg) {
     int file_index=0;
     for (int j=0; j<number_of_readers; j++){
         fprintf(stderr, "Opening file %s\n", readers[j]->filenames[file_index]);
-        readers[j]->gz_pointer = gzopen(readers[j]->filenames[file_index], "rb");
-        if (readers[j]->gz_pointer == NULL) {
-            fprintf(stderr, "Error: Unable to open file %s\n", readers[j]->filenames[file_index]);
-            exit(EXIT_FAILURE);
-        }
+        readers[j]->gz_pointer = open_fastq_gz_reader(readers[j]->filenames[file_index], "input");
     }
     while(!done){
         if (set->probe_only && set->chem_detect && set->chem_detect->done) {
@@ -4551,11 +4562,7 @@ void *read_fastqs_by_set(void *arg) {
                 // Open the next set of files
                 for (int j = 0; j < number_of_readers; j++) {
                     fprintf(stderr, "Thread %d opening next file: %s\n", thread_id, readers[j]->filenames[file_index]);
-                    readers[j]->gz_pointer = gzopen(readers[j]->filenames[file_index], "rb");
-                    if (readers[j]->gz_pointer == NULL) {
-                        fprintf(stderr, "Error: Unable to open file %s\n", readers[j]->filenames[file_index]);
-                        exit(EXIT_FAILURE);
-                    }
+                    readers[j]->gz_pointer = open_fastq_gz_reader(readers[j]->filenames[file_index], "input");
                 }
             }
             continue; // Restart the while loop
@@ -5210,10 +5217,11 @@ static void process_feature_sequence_internal(char *sequence, feature_arrays *fe
     static __thread unsigned long long _trace_legacy = 0;
     static __thread unsigned long long _trace_fallthrough = 0;
     static __thread unsigned long long _trace_total = 0;
+    const int trace_tiered = pf_trace_tiered_enabled();
     int bestHammingDistance=0;
     int variableMaxHammingDistance=maxHammingDistance;
     uint32_t myFeatureIndex=0;
-    _trace_total++;
+    if (trace_tiered) _trace_total++;
     if (!use_feature_offset_array && feature_constant_offset >= 0) {
         const int feat_len = features->common_length;
         const int can_use_tiered = (features->number_of_mismatched_features == 0 &&
@@ -5238,7 +5246,7 @@ static void process_feature_sequence_internal(char *sequence, feature_arrays *fe
                 &tiered_match_position);
 
             if (tiered_feature_index > 0) {
-                _trace_tiered_hit++;
+                if (trace_tiered) _trace_tiered_hit++;
                 *feature_index = (uint32_t)tiered_feature_index;
                 *hamming_distance = tiered_hamming;
                 *match_position = tiered_match_position;
@@ -5249,16 +5257,16 @@ static void process_feature_sequence_internal(char *sequence, feature_arrays *fe
                 return;
             }
             if (tiered_hamming <= maxHammingDistance) {
-                _trace_tiered_ambig++;
+                if (trace_tiered) _trace_tiered_ambig++;
                 *feature_index = 0;
                 *hamming_distance = tiered_hamming;
                 *match_position = tiered_match_position;
                 return;
             }
-            _trace_tiered_miss++;
+            if (trace_tiered) _trace_tiered_miss++;
 
         } else {
-            _trace_legacy++;
+            if (trace_tiered) _trace_legacy++;
             /* Legacy per-offset cascade for mismatched-length features */
             int constantHammingDistance=0;
             myFeatureIndex = simpleCorrectFeature(sequence + feature_constant_offset, features, max_feature_n, maxHammingDistance, &constantHammingDistance, stats);
@@ -5334,10 +5342,10 @@ static void process_feature_sequence_internal(char *sequence, feature_arrays *fe
     if (bestHammingDistance > maxHammingDistance) {
         myFeatureIndex = 0;
     }
-    if (!myFeatureIndex && !bestHammingDistance) _trace_fallthrough++;
+    if (trace_tiered && !myFeatureIndex && !bestHammingDistance) _trace_fallthrough++;
     *feature_index = myFeatureIndex;
     *hamming_distance = bestHammingDistance;
-    if ((_trace_total & 0x1FFF) == 0 && _trace_total > 0) {
+    if (trace_tiered && (_trace_total & 0x1FFF) == 0 && _trace_total > 0) {
         fprintf(stderr, "[TRACE tid=%d] total=%llu tiered_hit=%llu tiered_miss=%llu tiered_ambig=%llu legacy=%llu fallthrough=%llu le1_enabled=%d common_len=%d mismatched=%d\n",
                 (int)(unsigned long)pthread_self() % 1000, _trace_total,
                 _trace_tiered_hit, _trace_tiered_miss, _trace_tiered_ambig,
@@ -5354,6 +5362,299 @@ void process_feature_sequence(char *sequence, feature_arrays *features, int maxH
                                       feature_index, hamming_distance,
                                       matching_sequence, match_position,
                                       stats, NULL);
+}
+
+struct pf_direct_consumer_state {
+    fastq_processor *processor_args;
+    const sample_args *sample_args;
+    struct chem_detect_state *chem_detect;
+    int permit_hooks_enabled;
+    uint64_t (*permit_acquire_hook)(void *hook_ctx);
+    void (*permit_release_hook)(void *hook_ctx,
+                                uint64_t wait_ns,
+                                uint64_t work_units,
+                                uint64_t work_bytes,
+                                uint64_t work_ns);
+    void *permit_hook_ctx;
+    statistics *stats;
+    data_structures *hashes;
+    memory_pool_collection *pools;
+    int thread_id;
+    int nreaders;
+    char *lines_buffer;
+    char *lines[6];
+    char **barcode_lines;
+    char **forward_lines;
+    char **reverse_lines;
+    int permit_batch_count;
+    uint64_t permit_batch_wait_ns;
+    double permit_batch_start_sec;
+    uint64_t permit_batch_work_bytes;
+    seq_hash_t thread_hot_d0;
+    int thread_hot_d0_active;
+    unsigned int hot_check_counter;
+};
+
+static void pf_direct_consumer_flush_permit(pf_direct_consumer_state *state) {
+    if (!state || !state->permit_hooks_enabled || state->permit_batch_count <= 0) {
+        return;
+    }
+    const double work_end_sec = get_time_in_seconds();
+    uint64_t work_ns = 0;
+    if (work_end_sec > state->permit_batch_start_sec) {
+        work_ns = (uint64_t)((work_end_sec - state->permit_batch_start_sec) * 1000000000.0);
+    }
+    state->permit_release_hook(state->permit_hook_ctx,
+                               state->permit_batch_wait_ns,
+                               (uint64_t)state->permit_batch_count,
+                               state->permit_batch_work_bytes,
+                               work_ns);
+    state->permit_batch_count = 0;
+    state->permit_batch_wait_ns = 0;
+    state->permit_batch_start_sec = 0.0;
+    state->permit_batch_work_bytes = 0;
+}
+
+pf_direct_consumer_state *pf_direct_consumer_state_create(fastq_processor *processor_args,
+                                                          int nreaders) {
+    if (!processor_args || !processor_args->sample_args ||
+        (nreaders != 2 && nreaders != 3)) {
+        return NULL;
+    }
+
+    pf_direct_consumer_state *state =
+        (pf_direct_consumer_state *)calloc(1, sizeof(pf_direct_consumer_state));
+    if (!state) {
+        return NULL;
+    }
+
+    const sample_args *sample_args = processor_args->sample_args;
+    const int thread_id = processor_args->thread_id;
+    state->processor_args = processor_args;
+    state->sample_args = sample_args;
+    state->chem_detect = sample_args->chem_detect;
+    state->permit_hooks_enabled = sample_args->permit_hooks_enabled &&
+                                  sample_args->permit_acquire_hook != NULL &&
+                                  sample_args->permit_release_hook != NULL;
+    state->permit_acquire_hook = sample_args->permit_acquire_hook;
+    state->permit_release_hook = sample_args->permit_release_hook;
+    state->permit_hook_ctx = sample_args->permit_hook_ctx;
+    state->stats = &sample_args->stats[thread_id];
+    state->hashes = &sample_args->hashes[thread_id];
+    state->pools = sample_args->pools[thread_id];
+    state->thread_id = thread_id;
+    state->nreaders = nreaders;
+    state->lines_buffer = (char *)malloc(6 * LINE_LENGTH);
+    if (!state->lines_buffer) {
+        free(state);
+        return NULL;
+    }
+    for (int i = 0; i < 6; i++) {
+        state->lines[i] = state->lines_buffer + i * LINE_LENGTH;
+    }
+    state->barcode_lines = state->lines;
+    if (nreaders == 3) {
+        state->forward_lines = state->lines + 2;
+        state->reverse_lines = state->lines + 4;
+    } else {
+        state->forward_lines = state->lines + 2;
+        state->reverse_lines = NULL;
+    }
+
+    pf_trace_reads_init_once();
+    pf_trace_anchor_init_once();
+    memset(&state->thread_hot_d0, 0, sizeof(state->thread_hot_d0));
+    feature_arrays *features = sample_args->features;
+    if ((pf_get_lookup_strategy() >= PF_STRATEGY_HOT_D0 || use_hot_hash) &&
+        features &&
+        features->number_of_mismatched_features == 0 &&
+        features->common_length > 0) {
+        seq_hash_init(&state->thread_hot_d0, features->code_hash_mode);
+        if ((features->code_hash_mode == SEQ_KEY_64 && state->thread_hot_d0.h64) ||
+            (features->code_hash_mode == SEQ_KEY_128 && state->thread_hot_d0.h128)) {
+            state->thread_hot_d0_active = 1;
+        }
+    }
+
+    return state;
+}
+
+int pf_direct_consumer_process_record(pf_direct_consumer_state *state,
+                                      const char *barcode_sequence,
+                                      const char *barcode_quality,
+                                      const char *feature_sequence,
+                                      const char *feature_quality,
+                                      const char *feature_sequence2,
+                                      const char *feature_quality2) {
+    if (!state || !barcode_sequence || !barcode_quality ||
+        !feature_sequence || !feature_quality) {
+        return 0;
+    }
+    if (state->nreaders == 3 && (!feature_sequence2 || !feature_quality2)) {
+        return 0;
+    }
+    if (state->sample_args->probe_only &&
+        state->chem_detect &&
+        state->chem_detect->done) {
+        return 1;
+    }
+
+    uint64_t work_bytes = 0;
+    char *end;
+    end = stpcpy(state->barcode_lines[0], barcode_sequence);
+    work_bytes += (uint64_t)(end - state->barcode_lines[0]);
+    end = stpcpy(state->barcode_lines[1], barcode_quality);
+    work_bytes += (uint64_t)(end - state->barcode_lines[1]);
+    end = stpcpy(state->forward_lines[0], feature_sequence);
+    work_bytes += (uint64_t)(end - state->forward_lines[0]);
+    end = stpcpy(state->forward_lines[1], feature_quality);
+    work_bytes += (uint64_t)(end - state->forward_lines[1]);
+    if (state->reverse_lines) {
+        end = stpcpy(state->reverse_lines[0], feature_sequence2);
+        work_bytes += (uint64_t)(end - state->reverse_lines[0]);
+        end = stpcpy(state->reverse_lines[1], feature_quality2);
+        work_bytes += (uint64_t)(end - state->reverse_lines[1]);
+    }
+
+    const sample_args *sample_args = state->sample_args;
+    const int feature_constant_offset = sample_args->feature_constant_offset;
+    const int barcode_constant_offset = sample_args->barcode_constant_offset;
+    feature_arrays *features = sample_args->features;
+    const int maxHammingDistance = sample_args->maxHammingDistance;
+    const int nThreads = sample_args->nThreads;
+    statistics *stats = state->stats;
+    data_structures *hashes = state->hashes;
+    memory_pool_collection *pools = state->pools;
+
+    if (state->chem_detect && !state->chem_detect->done) {
+        unsigned long long ticket = __sync_add_and_fetch(&state->chem_detect->ticket, 1);
+        if (ticket <= (unsigned long long)state->chem_detect->max_reads) {
+            char *barcode_seq = state->barcode_lines[0] + barcode_constant_offset;
+            if (strlen(barcode_seq) >= (size_t)barcode_length) {
+                char bc_buf[barcode_length + 1];
+                memcpy(bc_buf, barcode_seq, barcode_length);
+                bc_buf[barcode_length] = '\0';
+
+                unsigned char raw_code[barcode_code_length];
+                string2code(bc_buf, barcode_length, raw_code);
+                uint32_t raw_key = *(uint32_t*)raw_code;
+                if (kh_get(u32ptr, whitelist_hash, raw_key) != kh_end(whitelist_hash)) {
+                    __sync_add_and_fetch(&state->chem_detect->raw_hits, 1);
+                }
+
+                translate_nxt_inplace(bc_buf, barcode_length);
+                unsigned char nxt_code[barcode_code_length];
+                string2code(bc_buf, barcode_length, nxt_code);
+                uint32_t nxt_key = *(uint32_t*)nxt_code;
+                if (kh_get(u32ptr, whitelist_hash, nxt_key) != kh_end(whitelist_hash)) {
+                    __sync_add_and_fetch(&state->chem_detect->nxt_hits, 1);
+                }
+            }
+
+            if (ticket == (unsigned long long)state->chem_detect->max_reads) {
+                chem_detect_decide(state->chem_detect);
+            }
+        }
+    }
+
+    if (sample_args->probe_only && state->chem_detect && state->chem_detect->done) {
+        return 1;
+    }
+
+    if (state->permit_hooks_enabled && state->permit_batch_count == 0) {
+        state->permit_batch_wait_ns = state->permit_acquire_hook(state->permit_hook_ctx);
+        state->permit_batch_start_sec = get_time_in_seconds();
+        state->permit_batch_work_bytes = 0;
+    }
+
+    char matching_sequence[LINE_LENGTH];
+    int hamming_distance = 0;
+    uint32_t feature_index = 0;
+    uint16_t match_position = 0;
+    int missing_flag = 0;
+    int barcode_ok = 0;
+
+    if (state->forward_lines && state->reverse_lines) {
+        char *sequences[2] = {0, 0};
+        int orientations[2] = {0, 0};
+        sequences[0] = state->forward_lines[0];
+        sequences[1] = state->reverse_lines[0];
+        orientations[0] = 1;
+        orientations[1] = 0;
+        process_multiple_feature_sequences(2, sequences, orientations, features,
+                                           maxHammingDistance, nThreads,
+                                           feature_constant_offset, max_feature_n,
+                                           &feature_index, &hamming_distance,
+                                           matching_sequence, &match_position,
+                                           stats);
+    } else {
+        char *sequence = state->forward_lines ? state->forward_lines[0] : state->reverse_lines[0];
+        process_feature_sequence_internal(sequence, features, maxHammingDistance, nThreads,
+                                          feature_constant_offset, max_feature_n,
+                                          &feature_index, &hamming_distance,
+                                          matching_sequence, &match_position,
+                                          stats,
+                                          state->thread_hot_d0_active ? &state->thread_hot_d0 : NULL);
+    }
+
+    if (feature_index) {
+        matching_sequence[features->feature_lengths[feature_index - 1]] = '\0';
+        insert_feature_sequence(matching_sequence, feature_index, hamming_distance,
+                                match_position, hashes, pools);
+        barcode_ok = checkAndCorrectBarcode(state->barcode_lines, max_barcode_n,
+                                            feature_index, match_position,
+                                            hashes, pools, stats,
+                                            barcode_constant_offset);
+    } else {
+        missing_flag = 1;
+    }
+
+    stats->number_of_reads++;
+    if (state->thread_hot_d0_active && features && ((++state->hot_check_counter & 0x3FFFu) == 0u)) {
+        khint_t hot_sz = seq_hash_size(&state->thread_hot_d0, features->code_hash_mode);
+        khint_t full_sz = seq_hash_size(&features->feature_code_hash, features->code_hash_mode);
+        if (full_sz > 0 && hot_sz >= full_sz / 10) {
+            seq_hash_destroy(&state->thread_hot_d0, features->code_hash_mode);
+            memset(&state->thread_hot_d0, 0, sizeof(state->thread_hot_d0));
+            state->thread_hot_d0_active = 0;
+        }
+    }
+    if (stats->number_of_reads % 1000000 == 0) {
+        double elapsed_time = get_time_in_seconds() - stats->start_time;
+        fprintf(stderr, "Processed %ld million reads in %.1f seconds\n",
+                stats->number_of_reads / 1000000, elapsed_time);
+    }
+    if (missing_flag) {
+        stats->nMismatches++;
+        stats->total_unmatched_features++;
+    }
+
+    if (state->permit_hooks_enabled) {
+        (void)barcode_ok;
+        state->permit_batch_work_bytes += work_bytes;
+        state->permit_batch_count++;
+        if (state->permit_batch_count >= 64) {
+            pf_direct_consumer_flush_permit(state);
+        }
+    }
+
+    return 1;
+}
+
+void pf_direct_consumer_state_destroy(pf_direct_consumer_state *state) {
+    if (!state) {
+        return;
+    }
+    pf_direct_consumer_flush_permit(state);
+    if (state->chem_detect && !state->chem_detect->done) {
+        chem_detect_decide(state->chem_detect);
+    }
+    if (state->thread_hot_d0_active && state->sample_args && state->sample_args->features) {
+        seq_hash_destroy(&state->thread_hot_d0, state->sample_args->features->code_hash_mode);
+        state->thread_hot_d0_active = 0;
+    }
+    free(state->lines_buffer);
+    free(state);
 }
 
 void *consume_reads(void *arg) {

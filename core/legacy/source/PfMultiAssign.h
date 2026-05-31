@@ -30,6 +30,7 @@ struct AssignOptions {
     int barcodeN = -1;
     int consumerThreadsPerSet = -1;
     int searchThreads = -1;
+    int readBufferLines = -1;
     double minPosterior = -1.0;
     long long maxReads = -1; // <=0 means unlimited
     bool legacyCbRescue = false;
@@ -49,12 +50,17 @@ struct AssignOptions {
     int featureModeBootstrapReads = 0;
     bool useHotHash = false;
     bool skipHeatmaps = false;
+    string cbqMode = "auto"; // auto | stream | range
     string sampleName;
 };
 
 struct AssignResult {
     int returnCode = 0;
     string detectedMatchMode = "UNKNOWN";
+    string inputFormat = "fastq";
+    string cbqModeRequested = "auto";
+    string cbqModeEffective;
+    string cbqModeFallbackReason;
     WhitelistNormalizationResult whitelistNormalization;
 };
 
