@@ -128,11 +128,16 @@ output path through prefilled per-thread `SoloReadFeature` objects. Commands
 that do not satisfy the strict count-only predicate fall through to the
 existing STAR genome-loading path unchanged.
 
+FASTQ.gz recipes should omit `--readFilesCommand zcat`; STAR's default
+`--readFilesCommand -` activates the internal gzip stream for `.fastq.gz`
+inputs. Treat zcat as a legacy compatibility override, not the production
+default for FLEX.
+
 Full SC2300771 SSD production results:
 
 | Input | Wall time | Max RSS | Mapping speed |
 | --- | ---: | ---: | ---: |
-| FASTQ.gz no-genome | `12:01.95` | `43,281,404 KB` | `10,538.67M reads/hour` |
+| FASTQ.gz no-genome, internal gzip | `10:17.97` | `44,071,412 KB` | `12,107.14M reads/hour` |
 | Level-0 CBQ no-genome | `8:38.52` | `43,378,292 KB` | `14,538.29M reads/hour` |
 | Level-0 CBQ current path | `9:19.20` | `84,395,816 KB` | `13,869.86M reads/hour` |
 

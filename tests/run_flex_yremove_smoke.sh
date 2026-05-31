@@ -115,7 +115,6 @@ echo "cDNA lanes: ${#R2_FILES[@]}"
   --chimSegmentMin 1000000 \
   --soloKeysCompat cr \
   --soloSampleSearchNearby no \
-  --readFilesCommand zcat \
   --readFilesIn "${R2_LIST}" "${R1_LIST}" \
   --outSAMtype BAM Unsorted \
   --emitNoYBAM yes \

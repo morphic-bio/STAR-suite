@@ -201,17 +201,22 @@ surface below for topline timing.
 
 ### Topline no-genome FLEX results
 
-On 2026-05-29, SC2300771 was benchmarked on the full production FLEX
-count-only surface with the no-genome path active. These are the current
-topline FLEX results for production count-only runs:
+On 2026-05-31, SC2300771 was benchmarked on the full production FLEX
+count-only surface with the no-genome path active and FASTQ.gz using STAR's
+internal gzip path. These are the current topline FLEX results for production
+count-only runs:
+
+For FASTQ.gz inputs, production recipes should omit `--readFilesCommand zcat`.
+The default `--readFilesCommand -` uses STAR's internal gzip streaming path;
+zcat is only a legacy compatibility override.
 
 | Input | Wall time | Max RSS | Mapping speed | Input reads |
 | --- | ---: | ---: | ---: | ---: |
-| FASTQ.gz | `12:01.95` | `43,281,404 KB` | `10,538.67M reads/hour` | `2,011,130,186` |
+| FASTQ.gz, internal gzip | `10:17.97` | `44,071,412 KB` | `12,107.14M reads/hour` | `2,011,130,186` |
 | Level-0 CBQ | `8:38.52` | `43,378,292 KB` | `14,538.29M reads/hour` | `2,011,130,186` |
 
-The level-0 CBQ run was `3:23.43` faster than FASTQ.gz on the same SSD-hosted
-production surface, about `1.39x` faster by wall time, while using effectively
+The level-0 CBQ run was `1:39.45` faster than FASTQ.gz on the same SSD-hosted
+production surface, about `1.19x` faster by wall time, while using effectively
 the same memory. This is the clearest production use case for CBQ in FLEX:
 count-only no-genome runs avoid STAR genome load, and CBQ removes the remaining
 FASTQ gzip decode bottleneck.
@@ -231,7 +236,7 @@ Flex pipeline complete: total=2011130186, triageKeep=1681459858, triageDeny=1611
 Artifact roots:
 
 - FASTQ no-genome:
-  `/tmp/star_flex_fastq_full_ssd_20260529T222432Z`
+  `/tmp/star_flex_fastq_full_ssd_internalgzip_20260531T180321Z`
 - CBQ no-genome and current-path comparison:
   `/tmp/star_flex_no_genome_full_ssd_20260529T213833Z`
 
@@ -263,7 +268,8 @@ Compared with the previous full level-0 CBQ no-genome result (`8:38.52`,
 `43,378,292 KB`, `14,538.29M reads/hour`), indexed range reading improved wall
 time by `1:16.06` (`1.17x`, `14.7%` reduction) and mapping speed by `18.0%`,
 with about `4.39 GiB` higher max RSS. FASTQ baseline was not rerun for this
-checkpoint.
+checkpoint; the corrected internal-gzip FASTQ rerun above is now the current
+FASTQ topline.
 
 ### Earlier full production CBQ benchmark
 
