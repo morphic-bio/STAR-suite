@@ -12,7 +12,7 @@ core-long:
 	$(MAKE) -C $(LEGACY_SRC_DIR) STARlong WITH_CHROMAP=0
 
 core-static:
-	$(MAKE) -C $(LEGACY_SRC_DIR) STARstatic
+	$(MAKE) -C $(LEGACY_SRC_DIR) STARstatic WITH_CHROMAP=0
 
 core-htslib:
 	$(MAKE) -C $(LEGACY_SRC_DIR)/htslib lib-static
