@@ -1,3 +1,13 @@
+star-suite (1.3.0-1) unstable; urgency=medium
+
+  * Feature release for parallel CBQ integration across STAR core, Flex,
+    process_features, and native libchromap multiome ATAC input.
+  * Add native multiome GEX+ATAC CBQ production benchmark documentation for the
+    PBMC 3k 10x Multiome fixture, including Y/noY ATAC BAM validation.
+  * Report STAR Suite 1.3.0 from STAR --version.
+
+ -- STAR-suite Maintainers <maintainers@biodepot.example>  Mon, 01 Jun 2026 06:20:00 +0000
+
 star-suite (1.1.0-1) unstable; urgency=medium
 
   * Feature release for native CBQ/BINSEQ input support.

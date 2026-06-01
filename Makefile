@@ -73,23 +73,23 @@ clean: core-clean tools-clean
 
 require-release-version:
 	@if [ -z "$(strip $(RELEASE_VERSION))" ]; then \
-		echo "ERROR: set RELEASE_VERSION, for example: make $@ RELEASE_VERSION=1.1.0" >&2; \
+		echo "ERROR: set RELEASE_VERSION, for example: make $@ RELEASE_VERSION=1.3.0" >&2; \
 		exit 2; \
 	fi
 
 dev-release-help:
 	@echo "Dev-release branch workflow:"
-	@echo "  make dev-release-branch RELEASE_VERSION=1.1.0"
+	@echo "  make dev-release-branch RELEASE_VERSION=1.3.0"
 	@echo "  # Optional: add DEV_RELEASE_BASE=<branch-or-sha> to seed dev-release"
-	@echo "  git switch dev-release-v1.1.0"
+	@echo "  git switch dev-release-v1.3.0"
 	@echo "  make dev-release-check"
-	@echo "  git tag -a v1.1.0-rc1 -m 'STAR Suite v1.1.0-rc1'"
-	@echo "  git push origin dev-release dev-release-v1.1.0"
-	@echo "  git push origin v1.1.0-rc1"
+	@echo "  git tag -a v1.3.0-rc1 -m 'STAR Suite v1.3.0-rc1'"
+	@echo "  git push origin dev-release dev-release-v1.3.0"
+	@echo "  git push origin v1.3.0-rc1"
 	@echo
 	@echo "Stable promotion after RC validation:"
-	@echo "  git switch master && git merge --no-ff dev-release-v1.1.0"
-	@echo "  git tag -a v1.1.0 -m 'STAR Suite v1.1.0'"
+	@echo "  git switch master && git merge --no-ff dev-release-v1.3.0"
+	@echo "  git tag -a v1.3.0 -m 'STAR Suite v1.3.0'"
 
 dev-release-branch: require-release-version
 	@if git rev-parse --verify "$(DEV_RELEASE_BRANCH)" >/dev/null 2>&1; then \

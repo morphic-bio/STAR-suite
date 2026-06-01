@@ -165,6 +165,19 @@ Ship discoverable, installable Ubuntu binaries for STAR Suite with low-friction 
   `STAR --version` reports `1.1.0`. Upstream provenance and genome index
   compatibility remain `2.7.11b` and `2.7.4a`.
 
+## Feature Release Prep (2026-06-01)
+
+- Candidate tag: `v1.3.0`
+- Release notes: `docs/RELEASE_NOTES_v1.3.0.md`
+- Packaging metadata: `debian/changelog` entry `1.3.0-1`
+- Scope added since `v1.1.0`: parallel CBQ integration across STAR core and
+  Flex, native process_features CBQ range-reader coverage, native libchromap
+  multiome ATAC CBQ input, and PBMC multiome GEX+ATAC CBQ benchmark
+  documentation with ATAC Y/noY BAM validation.
+- Version note: release artifacts and Debian packages use STAR Suite `1.3.0`;
+  `STAR --version` reports `1.3.0`. Upstream provenance and genome index
+  compatibility remain `2.7.11b` and `2.7.4a`.
+
 ## Hotfix Release Prep (2026-05-29)
 
 - Candidate tag: `v1.0.3`
