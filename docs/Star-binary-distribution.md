@@ -177,10 +177,10 @@ Ship discoverable, installable Ubuntu binaries for STAR Suite with low-friction 
 - Version note: release artifacts and Debian packages use STAR Suite
   `1.3.0b`; `STAR --version` reports `1.3.0b`. Upstream provenance and genome
   index compatibility remain `2.7.11b` and `2.7.4a`.
-- Hosted static tarballs are built through the portable no-Chromap target so
-  GitHub release artifacts do not depend on a sibling Chromap-suite checkout;
-  local production multiome builds still use the Chromap-enabled `make core`
-  default.
+- Hosted static tarballs and Debian packages are built through the portable
+  no-Chromap target so GitHub release artifacts do not depend on a sibling
+  Chromap-suite checkout; local production multiome builds still use the
+  Chromap-enabled `make core` default.
 
 ## Feature Release Prep (2026-06-01)
 
