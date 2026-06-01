@@ -19,10 +19,15 @@ compatibility string remains `2.7.4a`.
   `--gex-cbq`, `--atac-read-pair-cbq`, and `--atac-barcode-cbq`.
 - Update OCM CBQ recipe metadata for CBQ Y/noY sidecar support through
   `--emitYNoY yes --emitYNoYFormat cbq`.
+- Keep the hosted release static tarball target on the portable no-Chromap
+  build path; local production multiome builds remain Chromap-enabled by
+  default through `make core`.
 
 ## Validation
 
 - Parsed updated MCP workflow YAMLs.
 - Ran shell syntax checks for updated recipe wrappers.
 - Verified Debian changelog version parsing for `1.3.0b-1`.
+- Verified the top-level static release target uses the portable no-Chromap
+  build path for hosted release artifacts.
 - Rebuilt STAR and verified `STAR --version` reports `1.3.0b`.
