@@ -107,8 +107,9 @@ and STAR/process_features/Chromap adapter surfaces are documented in
   `auto` mode or fail in forced `range` mode. Flex unsorted BAM remains on the
   shared reader because CB/UB tag injection depends on the current unsorted BAM
   output-order contract.
-- Chromap integration currently adapts CBQ to Chromap's existing FASTQ path
-  contract; it is not yet an in-memory libchromap reader API.
+- Chromap integration now has a native libchromap CBQ path. Use
+  `--chromapAtacInputFormat cbq` with `--chromapAtacReadPairCbq` and
+  `--chromapAtacBarcodeCbq`; this path does not materialize FASTQ files.
 - SLAM per-file skipping is currently rejected for BINSEQ input.
 - Y/noY FASTQ emission remains FASTQ-only. Use
   `--emitYNoY yes --emitYNoYFormat cbq` when the desired Y/noY sidecar format
@@ -123,9 +124,11 @@ and STAR/process_features/Chromap adapter surfaces are documented in
 
 ## How This Differs From FASTQ
 
-FASTQ/FASTX remains the normal production input path. `STAR --readFilesType
-Fastx` supports plain FASTQ, `.gz` FASTQ, manifest inputs, helper commands,
-Solo, Flex, SLAM, and production alignment outputs.
+FASTQ/FASTX remains the broadest input path. Validated production CBQ surfaces
+now include FLEX count-only/no-genome, STAR-Flex CR-config runs, generic paired
+CBQ alignment, and multiome GEX plus libchromap ATAC CBQ. `STAR
+--readFilesType Fastx` still supports plain FASTQ, `.gz` FASTQ, manifest
+inputs, helper commands, Solo, Flex, SLAM, and production alignment outputs.
 
 BINSEQ now has a narrow native mapper path. The first probe module still decodes
 CBQ through `bqtools` for oracle checks and normalized record dumps. The native

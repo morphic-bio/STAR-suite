@@ -9,7 +9,7 @@ caveats:
   - Build the binary first (make -C core/legacy/source STAR).
   - Paired CBQ stores R1/R2 in one external file, so pass one comma-separated CBQ list to read_files_cbq.
   - Alternatively provide a STAR readFilesManifest with rows formatted as CBQ<TAB>-<TAB>ID:sample.
-  - Y/noY FASTQ emission remains FASTQ-only; do not enable --emitYNoYFastq with BINSEQ/CBQ.
+  - Do not enable --emitYNoYFastq with BINSEQ/CBQ; use --emitYNoY yes --emitYNoYFormat cbq for CBQ sidecars.
 default_output_layout: Prefix from out_file_name_prefix; use out_file_name_prefix_auto for per-sample subdirs when batch_mode is 1.
 
 scripts:

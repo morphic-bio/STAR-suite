@@ -138,6 +138,7 @@ Current public STAR CLI recipes:
 | `star_binseq_pe_batch` | Paired CBQ/BINSEQ alignment or batch processing. | `--readFilesType Binseq PE --batchMode 1` with one comma-separated CBQ list or a CBQ manifest. |
 | `star_scrna_solo_droplet` | Droplet STARsolo command. | Caller-supplied FASTQs, genomeDir, and whitelist. |
 | `star_flex_fixed_rna` | STAR-Flex Fixed RNA command. | Caller-supplied Fixed RNA inputs and whitelist layout. |
+| `star_flex_fixed_rna_cbq` | STAR-Flex Fixed RNA command with CBQ input. | `--readFilesType Binseq PE --flex yes` with paired CBQ files in Flex mate order. |
 | `star_perturb_cr_compat` | Perturb-seq CR-compatible STAR command. | CR-compatible threading defaults and feature config inputs. |
 
 Current local/private SLAM workflows:

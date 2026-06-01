@@ -110,6 +110,14 @@ workflows:
     schema_file: mcp_server/workflows/star_flex_fixed_rna.yaml
     visibility: public
 
+  - id: star_flex_fixed_rna_cbq
+    title: STAR-Flex Fixed RNA CBQ
+    summary: One STAR alignReads command with --readFilesType Binseq PE, paired CBQ input, and --flex yes.
+    entry_script: core/legacy/source/STAR
+    kind: star_cli
+    schema_file: mcp_server/workflows/star_flex_fixed_rna_cbq.yaml
+    visibility: public
+
   - id: star_perturb_cr_compat
     title: STAR-perturb (CR-compat alignReads)
     summary: One STAR alignReads command with --pfMultiConfig and CR-compat threading defaults.
