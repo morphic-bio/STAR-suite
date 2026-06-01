@@ -44,7 +44,7 @@ process-features-lib:
 	$(MAKE) -C $(PROCESS_FEATURES_DIR) lib
 
 star-feature-call:
-	$(MAKE) -C $(LEGACY_SRC_DIR) star_feature_call
+	$(MAKE) -C $(LEGACY_SRC_DIR) star_feature_call WITH_CHROMAP=0
 
 star-libchromap-contract:
 	$(MAKE) -C $(LIBCHROMAP_CONTRACT_DIR)

@@ -8,10 +8,11 @@ NUM_JOBS ?= $(shell nproc)
 	dh $@
 
 override_dh_auto_build:
-	$(MAKE) -j$(NUM_JOBS) core
+	$(MAKE) -j$(NUM_JOBS) core-portable
 	$(MAKE) -j$(NUM_JOBS) star-feature-call
-	$(MAKE) -j$(NUM_JOBS) flex-tools
-	$(MAKE) -j$(NUM_JOBS) slam-tools
+	$(MAKE) -j$(NUM_JOBS) -C flex/tools/flexfilter
+	$(MAKE) -j$(NUM_JOBS) -C slam/tools/slam_requant
+	$(MAKE) -j$(NUM_JOBS) -C slam/tools/pileup_snp
 	$(MAKE) -j$(NUM_JOBS) yremove-tools
 
 override_dh_auto_install:
