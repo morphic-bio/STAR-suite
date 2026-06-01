@@ -1,0 +1,171 @@
+# Public recipe: STAR-Flex Fixed RNA Profiling with paired CBQ input.
+id: star_flex_fixed_rna_cbq
+title: STAR-Flex Fixed RNA CBQ
+summary: Single STAR alignReads with --readFilesType Binseq PE and --flex yes; paired CBQ stores cDNA R2 then barcode R1.
+kind: star_cli
+entry_script: core/legacy/source/STAR
+supported_modes: [local]
+caveats:
+  - Build the binary first (make -C core/legacy/source STAR).
+  - Paired CBQ stores both mates in one file; pass one comma-separated CBQ list to read_files_cbq.
+  - Encode mates in the same order as the FASTQ Flex recipe: cDNA R2 first, barcode/UMI R1 second.
+  - Do not set --readFilesCommand with CBQ input.
+default_output_layout: Outputs under out_file_name_prefix.
+
+scripts:
+  - role: entry
+    path: core/legacy/source/STAR
+    description: STAR binary
+    language: native
+
+parameter_groups:
+  - name: core
+    title: Flex CBQ alignment
+    parameters:
+      - run_mode
+      - genome_dir
+      - read_files_type
+      - read_files_layout
+      - read_files_cbq
+      - flex_enable
+      - solo_type
+      - solo_cb_whitelist
+      - solo_sample_whitelist
+      - out_file_name_prefix
+      - out_sam_kind
+      - out_sam_sort
+      - run_thread_n
+
+parameters:
+  - name: run_mode
+    cli_flag: --runMode
+    type: string
+    required: true
+    default: alignReads
+    description: STAR run mode.
+    category: core
+
+  - name: genome_dir
+    cli_flag: --genomeDir
+    type: directory
+    required: true
+    path_must_exist: true
+    description: STAR genome index directory.
+    category: core
+
+  - name: read_files_type
+    cli_flag: --readFilesType
+    type: enum
+    required: true
+    default: Binseq
+    choices: [Binseq]
+    operand_group: read_files_type
+    description: STAR input format token.
+    category: core
+
+  - name: read_files_layout
+    cli_flag: --readFilesType
+    type: enum
+    required: true
+    default: PE
+    choices: [PE]
+    operand_group: read_files_type
+    description: BINSEQ paired-end layout token.
+    category: core
+
+  - name: read_files_cbq
+    cli_flag: --readFilesIn
+    type: string
+    required: true
+    description: "Comma-separated paired-CBQ files in STAR Flex mate order: cDNA R2, then barcode R1."
+    example: sample_L001_R2_R1.cbq,sample_L002_R2_R1.cbq
+    category: core
+
+  - name: flex_enable
+    cli_flag: --flex
+    type: string
+    required: true
+    default: "yes"
+    description: Enable Flex mode.
+    category: core
+
+  - name: solo_type
+    cli_flag: --soloType
+    type: string
+    required: true
+    default: CB_UMI_Simple
+    description: Flex uses CB_UMI_Simple with whitelist files.
+    category: core
+
+  - name: solo_cb_whitelist
+    cli_flag: --soloCBwhitelist
+    type: file
+    required: true
+    path_must_exist: true
+    description: Fixed RNA cell barcode whitelist.
+    category: core
+
+  - name: solo_sample_whitelist
+    cli_flag: --soloSampleWhitelist
+    type: file
+    required: false
+    path_must_exist: true
+    description: Optional sample/feature barcode whitelist TSV.
+    category: core
+
+  - name: out_file_name_prefix
+    cli_flag: --outFileNamePrefix
+    type: string
+    required: true
+    is_output_root: true
+    description: Output prefix.
+    category: core
+
+  - name: out_sam_kind
+    cli_flag: --outSAMtype
+    type: string
+    required: true
+    default: BAM
+    operand_group: out_sam_type
+    description: outSAMtype first token.
+    category: core
+
+  - name: out_sam_sort
+    cli_flag: --outSAMtype
+    type: string
+    required: true
+    default: Unsorted
+    operand_group: out_sam_type
+    description: outSAMtype second token.
+    category: core
+
+  - name: run_thread_n
+    cli_flag: --runThreadN
+    type: int
+    required: true
+    default: 16
+    skip_when_default: true
+    description: Thread count.
+    category: core
+
+constraints:
+  - kind: positive
+    params: [run_thread_n]
+    message: run_thread_n must be positive.
+
+rendering:
+  omit_absent_optionals: true
+  flag_order:
+    - run_mode
+    - genome_dir
+    - read_files_type
+    - read_files_layout
+    - read_files_cbq
+    - flex_enable
+    - solo_type
+    - solo_cb_whitelist
+    - solo_sample_whitelist
+    - out_file_name_prefix
+    - out_sam_kind
+    - out_sam_sort
+    - run_thread_n

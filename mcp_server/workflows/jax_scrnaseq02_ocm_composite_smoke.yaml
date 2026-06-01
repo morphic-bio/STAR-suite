@@ -8,7 +8,7 @@ supported_modes: [local, dry-run-capable]
 caveats:
   - "Default rendering is safe: it prepares the downsample and run scripts only."
   - "Production OCM semantics use --ocmMultiBarcodeMode flex through STAR_OCM_BARCODE_MODE=flex."
-  - "CBQ mode uses ordered per-lane paired CBQ files in STAR mate order and must run with star_yremove=no until Y/noY emission supports non-FASTQ input."
+  - "CBQ mode uses ordered per-lane paired CBQ files in STAR mate order; star_yremove_format=auto emits CBQ sidecars for CBQ input."
   - "Do not set --run-cr unless intentionally regenerating the Cell Ranger oracle; existing CR artifacts are reused by default."
 default_output_layout: /mnt/pikachu/JAX_scRNAseq02_processed/ocm_composite_smoke_<timestamp>/
 
@@ -48,7 +48,7 @@ parameter_groups:
     parameters: [out_root]
   - name: star
     title: STAR OCM Flags
-    parameters: [threads, star_input_format, cbq_ordered_encoder_bin, cbq_compression_level, cbq_block_size, star_out_samtype, star_yremove, star_bam_cbub, star_bam_gxgn, star_solo_features, star_compare_feature]
+    parameters: [threads, star_input_format, cbq_ordered_encoder_bin, cbq_compression_level, cbq_block_size, star_out_samtype, star_yremove, star_yremove_format, star_bam_cbub, star_bam_gxgn, star_solo_features, star_compare_feature]
   - name: stages
     title: Execution Stages
     parameters: [prepare, run_star, materialize, compare, run_cr, force]
@@ -232,7 +232,16 @@ parameters:
     required: false
     default: "yes"
     choices: ["yes", "no"]
-    description: Emit Y/noY BAM and FASTQ sidecars.
+    description: Emit Y/noY BAM and read sidecars.
+    category: star
+
+  - name: star_yremove_format
+    cli_flag: --star-yremove-format
+    type: enum
+    required: false
+    default: "auto"
+    choices: ["auto", "fastq", "cbq"]
+    description: Y/noY read sidecar format; auto emits FASTQ for FASTQ input and CBQ for CBQ input.
     category: star
 
   - name: star_bam_cbub
