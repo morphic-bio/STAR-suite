@@ -165,6 +165,19 @@ Ship discoverable, installable Ubuntu binaries for STAR Suite with low-friction 
   `STAR --version` reports `1.1.0`. Upstream provenance and genome index
   compatibility remain `2.7.11b` and `2.7.4a`.
 
+## Minor Feature-Label Refresh (2026-06-01)
+
+- Candidate tag: `v1.3.0b`
+- Release notes: `docs/RELEASE_NOTES_v1.3.0b.md`
+- Packaging metadata: `debian/changelog` entry `1.3.0b-1`
+- Scope added since `v1.3.0`: explicit STAR-Flex Fixed RNA CBQ MCP recipe,
+  CBQ-native multiome recipe inputs for GEX plus libchromap ATAC, OCM CBQ
+  Y/noY recipe metadata, and recipe defaults that avoid FLEX `zcat` unless
+  explicitly requested.
+- Version note: release artifacts and Debian packages use STAR Suite
+  `1.3.0b`; `STAR --version` reports `1.3.0b`. Upstream provenance and genome
+  index compatibility remain `2.7.11b` and `2.7.4a`.
+
 ## Feature Release Prep (2026-06-01)
 
 - Candidate tag: `v1.3.0`
