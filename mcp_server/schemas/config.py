@@ -112,6 +112,22 @@ class WorkflowConfig(BaseModel):
     )
 
 
+DEFAULT_AGENT_PROTOCOL = (
+    "PROVENANCE-FIRST EXECUTION. Recipes and workflows are STARTING POINTS, not "
+    "turnkey commands. Resource/scale parameters (thread counts, memory, "
+    "--*-low-mem flags, start mode) MUST come from a known-good run, never invented. "
+    "Before running at non-trivial scale: (1) consult morphic-provenance (local: "
+    "/mnt/pikachu/morphic-provenance) runs/<project>/<run_id>/{run.json,commands/} "
+    "for the exact parameters that actually worked; (2) reproduce them, adapting only "
+    "what the new input/machine requires and noting the deviation; (3) if none exists "
+    "at your scale, start from the closest run, scale conservatively, and record a new "
+    "run. Recipes live in morphic-recipes (local: /mnt/pikachu/morphic-recipes); this "
+    "server exposes suite workflows only — cross-reference recipes + provenance before "
+    "executing. Inventing thread/memory params and running blind is a known OOM "
+    "failure mode."
+)
+
+
 class MCPConfig(BaseModel):
     """Root configuration model."""
 
@@ -125,6 +141,10 @@ class MCPConfig(BaseModel):
     test_suites: list[TestSuiteConfig] = Field(default_factory=list)
     required_binaries: list[BinaryConfig] = Field(default_factory=list)
     workflows: list[WorkflowConfig] = Field(default_factory=list)
+    agent_protocol: str = Field(
+        default=DEFAULT_AGENT_PROTOCOL,
+        description="Provenance-first usage protocol surfaced to agents on workflow discovery.",
+    )
 
     def get_script(self, name: str) -> Optional[ScriptConfig]:
         """Get a script by name."""

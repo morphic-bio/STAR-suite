@@ -1,5 +1,22 @@
 # STAR-suite MCP Server Configuration
 
+# Provenance-first usage protocol surfaced to agents by list_workflows /
+# describe_workflow. Recipes are starting points; resource params come from
+# morphic-provenance, not invented. Keep in sync with the Chromap-suite server.
+agent_protocol: |
+  PROVENANCE-FIRST EXECUTION. Recipes and workflows are STARTING POINTS, not
+  turnkey commands. Resource/scale parameters (thread counts, memory,
+  --*-low-mem flags, start mode) MUST come from a known-good run, never invented.
+  Before running at non-trivial scale: (1) consult morphic-provenance
+  (local: /mnt/pikachu/morphic-provenance) runs/<project>/<run_id>/{run.json,commands/}
+  for the exact parameters that actually worked; (2) reproduce them, adapting only
+  what the new input/machine requires and noting the deviation; (3) if none exists
+  at your scale, start from the closest run, scale conservatively, and record a new
+  run. Recipes live in morphic-recipes (local: /mnt/pikachu/morphic-recipes); this
+  server exposes suite workflows only — cross-reference recipes + provenance before
+  executing. Inventing thread/memory params and running blind is a known OOM
+  failure mode.
+
 server:
   host: "0.0.0.0"
   port: 8765
@@ -479,6 +496,12 @@ scripts:
     module: "flex"
     description: "Flex tiny public smoke (10x fixture, container-safe)"
 
+  - name: "cbq_flex_tiny_public"
+    path: "tests/run_cbq_flex_tiny_public_smoke.sh"
+    module: "flex"
+    description: "FLEX FASTQ-vs-CBQ tiny public smoke"
+    timeout_seconds: 3600
+
   - name: "flex_yremove"
     path: "tests/run_flex_yremove_smoke.sh"
     module: "flex"
@@ -544,7 +567,7 @@ test_suites:
 
   - module: "flex"
     description: "STAR-Flex tests"
-    scripts: ["flex_smoke", "flex_cbub_validation", "flex_multisample", "flex_tiny_public", "flex_yremove", "flex_cr_config"]
+    scripts: ["flex_smoke", "flex_cbub_validation", "flex_multisample", "flex_tiny_public", "cbq_flex_tiny_public", "flex_yremove", "flex_cr_config"]
     disk_space_min_gb: 20
 
   - module: "cr-compat"

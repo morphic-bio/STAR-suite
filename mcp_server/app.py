@@ -607,7 +607,9 @@ def list_workflows(auth_token: Optional[str] = None) -> dict:
 
     try:
         result = _list_workflows(authenticated=is_authenticated(auth_token))
-        return result.model_dump()
+        payload = result.model_dump()
+        payload["agent_protocol"] = get_config().agent_protocol
+        return payload
     except Exception as e:
         return ErrorResponse(
             code="WORKFLOW_ERROR",
@@ -635,7 +637,9 @@ def describe_workflow(
 
     try:
         result = _describe_workflow(workflow_id, authenticated=is_authenticated(auth_token))
-        return result.model_dump()
+        payload = result.model_dump()
+        payload["agent_protocol"] = get_config().agent_protocol
+        return payload
     except Exception as e:
         return ErrorResponse(
             code="WORKFLOW_ERROR",
