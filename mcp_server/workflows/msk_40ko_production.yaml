@@ -10,6 +10,7 @@ caveats:
   - "Whitelist preflight should pass first: scripts/run_msk_40ko_fastq_preflight.sh."
   - "No Y-removal is enabled for MSK 40KO, matching the MSK 30KO policy."
   - "Use --downstream-async for production so remote CellBender/downstream does not block the next local sample."
+  - "PROVENANCE-FIRST: copy thread/memory/low-mem params from the known-good run at morphic-provenance/runs/msk_40ko/ (run.json + commands/); do not invent resource params."
 default_output_layout: /mnt/pikachu/MSK_40KO_processed/msk40ko_prod_<timestamp>/
 
 scripts:
