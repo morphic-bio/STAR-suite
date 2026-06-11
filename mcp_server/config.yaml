@@ -2,15 +2,22 @@
 
 # Agent usage protocol (provenance-first + compose-up), surfaced to agents on MCP
 # workflow discovery (list_workflows / describe_workflow). The server ships a
-# self-contained built-in default — DEFAULT_AGENT_PROTOCOL in
-# mcp_server/schemas/config.py — so it needs nothing else to run. That constant is
+# self-contained, LAB-AGNOSTIC built-in default — DEFAULT_AGENT_PROTOCOL in
+# mcp_server/schemas/config.py — so it needs nothing else to run. That template is
 # kept in sync with the canonical text at
 # morphic-recipes/docs/authoring/agent_protocol.txt by
 # morphic-recipes/tests/check_agent_protocol_sync.py.
 #
-# To customize for YOUR site, uncomment an `agent_protocol: |` block here and set
-# your own provenance/recipe locations; left unset, the built-in default is used.
-# (Kept out of this file by default to avoid duplicating the built-in text.)
+# LOCALIZE for your site by filling the protocol's ${PROVENANCE_ROOT} /
+# ${RECIPES_ROOT} placeholders here (defaults mirror morphic's, see
+# morphic-recipes/docs/authoring/localization.example.yaml):
+#
+# locations:
+#   PROVENANCE_ROOT: /path/to/your/provenance
+#   RECIPES_ROOT: /path/to/your/recipes
+#
+# To replace the protocol wording entirely (rare), set an `agent_protocol: |` block.
+# Left unset, the built-in template + DEFAULT_LOCATIONS are used.
 
 server:
   host: "0.0.0.0"

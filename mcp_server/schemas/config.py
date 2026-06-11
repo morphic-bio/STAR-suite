@@ -112,16 +112,28 @@ class WorkflowConfig(BaseModel):
     )
 
 
+# Site-specific paths that fill the ${...} placeholders in DEFAULT_AGENT_PROTOCOL.
+# These are morphic's values, mirrored from the canonical
+# morphic-recipes/docs/authoring/localization.example.yaml. Other sites override
+# via `locations:` in config.yaml (the protocol text itself stays unchanged).
+DEFAULT_LOCATIONS = {
+    "PROVENANCE_ROOT": "/mnt/pikachu/morphic-provenance",
+    "RECIPES_ROOT": "/mnt/pikachu/morphic-recipes",
+}
+
+# Lab-agnostic protocol TEMPLATE. ${PROVENANCE_ROOT}/${RECIPES_ROOT} are filled at
+# load time from `locations` (see MCPConfig.rendered_agent_protocol). Canonical
+# copy: morphic-recipes/docs/authoring/agent_protocol.txt.
 DEFAULT_AGENT_PROTOCOL = (
     "PROVENANCE-FIRST EXECUTION. Recipes and workflows are STARTING POINTS, not "
     "turnkey commands. Resource/scale parameters (thread counts, memory, "
     "--*-low-mem flags, start mode) MUST come from a known-good run, never invented. "
-    "Before running at non-trivial scale: (1) consult morphic-provenance (local: "
-    "/mnt/pikachu/morphic-provenance) runs/<project>/<run_id>/{run.json,commands/} "
+    "Before running at non-trivial scale: (1) consult your provenance record "
+    "(${PROVENANCE_ROOT}) runs/<project>/<run_id>/{run.json,commands/} "
     "for the exact parameters that actually worked; (2) reproduce them, adapting only "
     "what the new input/machine requires and noting the deviation; (3) if none exists "
     "at your scale, start from the closest run, scale conservatively, and record a new "
-    "run. Recipes live in morphic-recipes (local: /mnt/pikachu/morphic-recipes); this "
+    "run. Recipes live in your recipe repo (${RECIPES_ROOT}); this "
     "server exposes suite workflows only — cross-reference recipes + provenance before "
     "executing. Inventing thread/memory params and running blind is a known OOM "
     "failure mode. "
@@ -152,8 +164,18 @@ class MCPConfig(BaseModel):
     workflows: list[WorkflowConfig] = Field(default_factory=list)
     agent_protocol: str = Field(
         default=DEFAULT_AGENT_PROTOCOL,
-        description="Provenance-first usage protocol surfaced to agents on workflow discovery.",
+        description="Provenance-first + compose-up protocol TEMPLATE surfaced to agents on workflow discovery.",
     )
+    locations: dict[str, str] = Field(
+        default_factory=lambda: dict(DEFAULT_LOCATIONS),
+        description="Site-specific paths that fill the ${...} placeholders in agent_protocol.",
+    )
+
+    @property
+    def rendered_agent_protocol(self) -> str:
+        """agent_protocol with ${PROVENANCE_ROOT}/${RECIPES_ROOT} filled from locations."""
+        from string import Template
+        return Template(self.agent_protocol).safe_substitute(self.locations)
 
     def get_script(self, name: str) -> Optional[ScriptConfig]:
         """Get a script by name."""
