@@ -124,7 +124,16 @@ DEFAULT_AGENT_PROTOCOL = (
     "run. Recipes live in morphic-recipes (local: /mnt/pikachu/morphic-recipes); this "
     "server exposes suite workflows only — cross-reference recipes + provenance before "
     "executing. Inventing thread/memory params and running blind is a known OOM "
-    "failure mode."
+    "failure mode. "
+    "COMPOSE-UP EXECUTION. A recipe often emits a SUPERSET of outputs; do not run the "
+    "maximal set blindly. (1) Start from the MINIMAL functional core (the tested floor); "
+    "(2) ADD only the output layers your target workflow actually consumes — check the "
+    "recipe's COMPOSITION block for what is optional, how to add/drop it, and which "
+    "provenance run is the parameter oracle for each layer; (3) preview with --dry-run "
+    "(hand to a human if useful) before the real run. Emitting layers the target never "
+    "uses wastes compute and distorts benchmark comparisons against tools that emitted "
+    "less (e.g. RNA-velocity / extra BAMs vs Cell Ranger ARC --no-bam). Step back and "
+    "match outputs to the task instead of running a recipe verbatim."
 )
 
 

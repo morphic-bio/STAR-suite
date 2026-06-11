@@ -250,6 +250,56 @@ Create `mcp_server/tests/test_<workflow_id>_e2e.py` following the pattern in
 2. Test the full contract: schema load -> validate -> render -> assert argv
 3. Use `dry_run=true` -- never execute the real workflow in tests
 
+## Compose-up recipes (output composition contract)
+
+Author recipes **minimal-first**: a small functional CORE an agent can run as-is,
+plus optional ADD-ON layers it composes UP from — never a maximal "kitchen sink"
+the agent must reverse-engineer and strip down. This is the lesson from the
+2026-06 CAT-ATAC benchmark, where an agent ran the full MorPhiC multiome recipe
+(Velocyto + GEX BAM + Y/noY) against a matrices+peaks target that needed none of
+it — wasting compute and distorting the comparison against Cell Ranger ARC
+`--no-bam`.
+
+Why compose-up, not strip-down: the *default mindset* differs. Strip-down makes
+"emit everything" the path of least resistance; compose-up makes the agent
+consciously ADD each layer and justify it against the target — i.e. "step back and
+evaluate rather than blindly use a recipe."
+
+When you author or extend a recipe that can emit optional outputs, provide:
+
+1. **A `COMPOSITION:` header block** declaring the MINIMAL CORE (the tested
+   analysis-ready floor every run emits) and each OPTIONAL ADD-ON layer with:
+   *add when* (which target needs it), *how* (the flag/profile that adds/drops
+   it), and the *parameter oracle* (`morphic-provenance/runs/<project>` whose
+   values to copy) plus a doc pointer for the underlying tool flag.
+2. **Umbrella `--profile` presets** — at minimum a minimal one (= the core) and
+   `full` (= core + every add-on). Defaults MUST reproduce the production
+   superset so existing wrappers are unaffected.
+3. **A thin minimal wrapper** (e.g. `run_multiome_minimal.sh`) that only sets the
+   minimal profile on the one engine — so the floor and the full recipe cannot
+   drift. Do not fork a second implementation.
+4. **A `--dry-run`** that resolves and prints the composed command + the output
+   layers it will emit, then exits 0 — the preview an agent self-checks and a
+   human can review before the real run or smoke.
+5. **A composition smoke test** that (a) asserts the minimal profile and the full
+   recipe agree on the core outputs, (b) **executes** the minimal profile
+   end-to-end on a tiny downsampled fixture and asserts the CORE outputs appear
+   (a dry-run text check is NOT sufficient — it never invokes the underlying tool,
+   so it misses parameter incompatibilities like the lean profile's
+   `--outSAMtype None` vs the `GX` SAM tag), and (c) gives a fresh agent a scoped
+   task and checks it composes the right layers (see
+   `morphic-recipes/tests/agent_protocol_composition_smoke.md`).
+6. **A tiny downsampled fixture generator** (e.g.
+   `tests/make_multiome_tiny_fixture.sh`) so that end-to-end smoke runs in ~1–2
+   min instead of the full pipeline. Keep the fixture optional and generated (not
+   committed); an agent looks for it as a quick pre-flight before a real run.
+
+This is the output-composition complement to PROVENANCE-FIRST: provenance is the
+oracle for the *parameter values* of whatever layers you include; compose-up
+governs *which layers* you include. The MCP `agent_protocol` surfaces both. Other
+recipes with provenance runs (multiome is done; see the retrofit backlog in
+`morphic-recipes/AGENTS.md`) should be reviewed and retrofitted the same way.
+
 ## Checklist
 
 - [ ] Schema YAML created in `mcp_server/workflows/`
@@ -259,3 +309,4 @@ Create `mcp_server/tests/test_<workflow_id>_e2e.py` following the pattern in
 - [ ] `validate_workflow_parameters` catches missing required params, bad types, constraint violations
 - [ ] `render_workflow_command` produces correct argv with deterministic flag order
 - [ ] E2E test passes with temp fixtures and dry-run mode
+- [ ] If the recipe emits optional output layers: COMPOSITION block + `--profile` presets + `--dry-run` + minimal wrapper (compose-up contract)
