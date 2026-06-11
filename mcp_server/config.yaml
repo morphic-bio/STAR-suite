@@ -1,31 +1,16 @@
 # STAR-suite MCP Server Configuration
 
-# Provenance-first + compose-up usage protocol surfaced to agents by
-# list_workflows / describe_workflow. Recipes are starting points; resource
-# params come from morphic-provenance (not invented) and outputs are composed up
-# from the minimal core. Keep in sync with the Chromap-suite server.
-agent_protocol: |
-  PROVENANCE-FIRST EXECUTION. Recipes and workflows are STARTING POINTS, not
-  turnkey commands. Resource/scale parameters (thread counts, memory,
-  --*-low-mem flags, start mode) MUST come from a known-good run, never invented.
-  Before running at non-trivial scale: (1) consult morphic-provenance
-  (local: /mnt/pikachu/morphic-provenance) runs/<project>/<run_id>/{run.json,commands/}
-  for the exact parameters that actually worked; (2) reproduce them, adapting only
-  what the new input/machine requires and noting the deviation; (3) if none exists
-  at your scale, start from the closest run, scale conservatively, and record a new
-  run. Recipes live in morphic-recipes (local: /mnt/pikachu/morphic-recipes); this
-  server exposes suite workflows only — cross-reference recipes + provenance before
-  executing. Inventing thread/memory params and running blind is a known OOM
-  failure mode.
-  COMPOSE-UP EXECUTION. A recipe often emits a SUPERSET of outputs; do not run the
-  maximal set blindly. (1) Start from the MINIMAL functional core (the tested floor);
-  (2) ADD only the output layers your target workflow actually consumes — check the
-  recipe's COMPOSITION block for what is optional, how to add/drop it, and which
-  provenance run is the parameter oracle for each layer; (3) preview with --dry-run
-  (hand to a human if useful) before the real run. Emitting layers the target never
-  uses wastes compute and distorts benchmark comparisons against tools that emitted
-  less (e.g. RNA-velocity / extra BAMs vs Cell Ranger ARC --no-bam). Step back and
-  match outputs to the task instead of running a recipe verbatim.
+# Agent usage protocol (provenance-first + compose-up), surfaced to agents on MCP
+# workflow discovery (list_workflows / describe_workflow). The server ships a
+# self-contained built-in default — DEFAULT_AGENT_PROTOCOL in
+# mcp_server/schemas/config.py — so it needs nothing else to run. That constant is
+# kept in sync with the canonical text at
+# morphic-recipes/docs/authoring/agent_protocol.txt by
+# morphic-recipes/tests/check_agent_protocol_sync.py.
+#
+# To customize for YOUR site, uncomment an `agent_protocol: |` block here and set
+# your own provenance/recipe locations; left unset, the built-in default is used.
+# (Kept out of this file by default to avoid duplicating the built-in text.)
 
 server:
   host: "0.0.0.0"
