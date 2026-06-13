@@ -2076,9 +2076,10 @@ crMexUseGexBarcodes        -
     string:                 DEPRECATED: CR-compat MEX now always writes both raw_feature_bc_matrix and filtered_feature_bc_matrix using GEX barcodes
                             This parameter is ignored and kept for backward compatibility only
 
-crGuideCaller              gmm
+crGuideCaller              auto
     string:                 guide caller for CRISPR Guide Capture features in pf-multi output
-                            gmm         ... Cell Ranger-compatible GMM caller only (default)
+                            auto        ... GMM compatibility calls plus ambient-FDR QC when raw guide MEX is available (default)
+                            gmm         ... Cell Ranger-compatible GMM caller only
                             ambient-fdr ... ambient-background FDR caller only
                             both        ... run GMM plus ambient-FDR secondary outputs
                             none        ... skip guide calling
@@ -2304,7 +2305,7 @@ defaultCrCompat             No
                             Enables: soloType Droplet, soloFeatures Gene GeneFull,
                             soloCellFilter EmptyDrops_CR, soloCrMode CR,
                             soloCrGexFeature GeneFull, soloCrMultimapRescue yes, crMinUmi 3,
-                            crGuideCaller gmm,
+                            crGuideCaller auto,
                             soloCBmatchWLtype 1MM_multi_Nbase_pseudocounts,
                             soloUMIdedup 1MM_CR, soloUMIfiltering MultiGeneUMI_CR,
                             soloMultiMappers Rescue, soloCbUbRequireTogether no
@@ -2335,7 +2336,7 @@ defaultVbem                 No
 defaultA375Parity           No
     string:                 yes/no - apply A375 GEX+feature parity defaults
                             Enables: soloCrMode CR, soloCrGexFeature GeneFull,
-                            soloCrMultimapRescue yes, crMinUmi 10, crGuideCaller gmm
+                            soloCrMultimapRescue yes, crMinUmi 10, crGuideCaller auto
 
 #####UnderDevelopment_begin : not supported - do not use
 soloClusterCBfile           -

@@ -16,7 +16,8 @@ typedef enum {
     MODE_GMM = 1,
     MODE_NBEM = 2,
     MODE_AMBIENT_FDR = 3,
-    MODE_BOTH = 4
+    MODE_BOTH = 4,
+    MODE_AUTO = 5
 } call_mode;
 
 static void print_usage(const char *prog) {
@@ -28,7 +29,7 @@ static void print_usage(const char *prog) {
     fprintf(stderr, "Mode selection (mutually exclusive):\n");
     fprintf(stderr, "      --gmm                  Use CR9-compatible GMM calling\n");
     fprintf(stderr, "      --nb-em                Use NB-EM calling (SCEPTRE-style)\n");
-    fprintf(stderr, "      --guide-caller <mode>  Guide caller: dominant|gmm|ambient-fdr|both\n");
+    fprintf(stderr, "      --guide-caller <mode>  Guide caller: dominant|gmm|ambient-fdr|both|auto\n");
     fprintf(stderr, "      (default: dominant mode)\n\n");
     fprintf(stderr, "Dominant mode options:\n");
     fprintf(stderr, "  -m, --min_counts <int>     Minimum UMI count for a feature to be considered (default: 2)\n");
@@ -68,7 +69,8 @@ static void print_usage(const char *prog) {
     fprintf(stderr, "    protospacer_umi_thresholds.csv, protospacer_umi_thresholds.json\n");
     fprintf(stderr, "  Ambient-FDR mode:\n");
     fprintf(stderr, "    guide_fdr_calls_per_cell.csv, guide_fdr_summary.json,\n");
-    fprintf(stderr, "    guide_ambient_rates.tsv, guide_qvalues.mtx and axes\n");
+    fprintf(stderr, "    guide_fdr_threshold_sweep.tsv, guide_ambient_rates.tsv,\n");
+    fprintf(stderr, "    guide_qvalues.mtx and axes\n");
     fprintf(stderr, "  NB-EM mode:\n");
     fprintf(stderr, "    protospacer_calls_per_cell.csv, protospacer_calls_summary.csv,\n");
     fprintf(stderr, "    nbem_feature_params.csv, nbem_cell_posteriors.mtx, nbem_summary.json\n\n");
@@ -162,8 +164,8 @@ int main(int argc, char *argv[]) {
                 break;
             case 'G':
             case OPT_GMM:
-                if (mode == MODE_NBEM || mode == MODE_AMBIENT_FDR || mode == MODE_BOTH) {
-                    fprintf(stderr, "Error: --gmm and --nb-em are mutually exclusive\n");
+                if (mode == MODE_NBEM || mode == MODE_AMBIENT_FDR || mode == MODE_BOTH || mode == MODE_AUTO) {
+                    fprintf(stderr, "Error: --gmm cannot be combined with --nb-em or --guide-caller\n");
                     return 1;
                 }
                 mode = MODE_GMM;
@@ -184,10 +186,12 @@ int main(int argc, char *argv[]) {
                     mode = MODE_AMBIENT_FDR;
                 } else if (strcmp(optarg, "both") == 0) {
                     mode = MODE_BOTH;
+                } else if (strcmp(optarg, "auto") == 0) {
+                    mode = MODE_AUTO;
                 } else if (strcmp(optarg, "nb-em") == 0) {
                     mode = MODE_NBEM;
                 } else {
-                    fprintf(stderr, "Error: --guide-caller must be dominant, gmm, ambient-fdr, both, or nb-em\n");
+                    fprintf(stderr, "Error: --guide-caller must be dominant, gmm, ambient-fdr, both, auto, or nb-em\n");
                     return 1;
                 }
                 break;
@@ -303,7 +307,12 @@ int main(int argc, char *argv[]) {
     
     int result;
     
-    switch (mode) {
+    call_mode effective_mode = mode;
+    if (effective_mode == MODE_AUTO) {
+        effective_mode = raw_mex_dir ? MODE_BOTH : MODE_GMM;
+    }
+
+    switch (effective_mode) {
         case MODE_GMM:
             /* GMM mode (CR9-compatible) */
             printf("=== call_features (GMM mode) ===\n");

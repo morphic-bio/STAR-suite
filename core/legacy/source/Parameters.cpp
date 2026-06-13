@@ -857,7 +857,7 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
             p->inputLevel = 0;
         }
         if (p->nameString == "crGuideCaller" && p->inputLevel < 0) {
-            pfMulti.crGuideCaller = "gmm";
+            pfMulti.crGuideCaller = "auto";
             p->inputLevel = 0;
         }
         if (p->nameString == "crGuideFdr" && p->inputLevel < 0) {
@@ -3773,7 +3773,7 @@ void Parameters::applyDefaultGroups() {
         setStringIfDefault("soloCrGexFeature", "GeneFull");
         setStringIfDefault("soloCrMultimapRescue", "yes");
         setIntIfDefault("crMinUmi", 10);
-        setStringIfDefault("crGuideCaller", "gmm");
+        setStringIfDefault("crGuideCaller", "auto");
         // Note: soloKeysCompat cr requires soloProbeList, so we don't set it by default
         setStringIfDefault("soloCBmatchWLtype", "1MM_multi_Nbase_pseudocounts");
         setStringIfDefault("soloUMIdedup", "1MM_CR");
@@ -3858,7 +3858,7 @@ void Parameters::applyDefaultGroups() {
         setStringIfDefault("soloCrGexFeature", "GeneFull");
         setStringIfDefault("soloCrMultimapRescue", "yes");
         setIntIfDefault("crMinUmi", 10);
-        setStringIfDefault("crGuideCaller", "gmm");
+        setStringIfDefault("crGuideCaller", "auto");
     }
     
     inOut->logMain << "\n";

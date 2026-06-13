@@ -1515,7 +1515,7 @@ static int writeCrisprOnlyMex(const PfMultiMerge::MexData& crisprData,
  * @param filteredMexDir Directory containing filtered_feature_bc_matrix
  * @param outputDir Output directory for crispr_analysis/
  * @param minUmi Minimum UMI threshold for GMM calling
- * @param guideCaller gmm|ambient-fdr|both|none
+ * @param guideCaller auto|gmm|ambient-fdr|both|none
  * @param guideFdr Ambient-FDR default threshold
  * @param guideFdrMinUmi Ambient-FDR minimum observed UMI floor
  * @param guideFdrEmitQvalues sparse|none
@@ -1533,31 +1533,33 @@ static int runCrisprFeatureCalling(const string& rawMexDir,
                                     ostream& logStream) {
     logStream << timeMonthDayTime() << " ..... starting CRISPR feature calling\n";
 
-    const string caller = lowerCopy(trimCopy(guideCaller.empty() ? "gmm" : guideCaller));
-    const bool runGmm = (caller == "gmm" || caller == "both");
-    const bool runAmbient = (caller == "ambient-fdr" || caller == "both");
+    const string caller = lowerCopy(trimCopy(guideCaller.empty() ? "auto" : guideCaller));
+    const bool runGmm = (caller == "auto" || caller == "gmm" || caller == "both");
+    const bool runAmbient = (caller == "auto" || caller == "ambient-fdr" || caller == "both");
     if (caller == "none") {
         logStream << "  Calling mode: none; skipping CRISPR guide calling\n";
         return 0;
     }
     if (!runGmm && !runAmbient) {
         logStream << "ERROR: Invalid crGuideCaller '" << guideCaller
-                  << "' (expected gmm|ambient-fdr|both|none)\n";
+                  << "' (expected auto|gmm|ambient-fdr|both|none)\n";
         return -1;
     }
     const string emitMode = lowerCopy(trimCopy(guideFdrEmitQvalues.empty() ? "sparse" : guideFdrEmitQvalues));
-    if (emitMode != "sparse" && emitMode != "none") {
-        logStream << "ERROR: Invalid crGuideFdrEmitQvalues '" << guideFdrEmitQvalues
-                  << "' (expected sparse|none)\n";
-        return -1;
-    }
-    if (!(guideFdr > 0.0 && guideFdr <= 1.0)) {
-        logStream << "ERROR: Invalid crGuideFdr " << guideFdr << " (expected 0 < FDR <= 1)\n";
-        return -1;
-    }
-    if (guideFdrMinUmi < 1) {
-        logStream << "ERROR: Invalid crGuideFdrMinUmi " << guideFdrMinUmi << " (expected >= 1)\n";
-        return -1;
+    if (runAmbient) {
+        if (emitMode != "sparse" && emitMode != "none") {
+            logStream << "ERROR: Invalid crGuideFdrEmitQvalues '" << guideFdrEmitQvalues
+                      << "' (expected sparse|none)\n";
+            return -1;
+        }
+        if (!(guideFdr > 0.0 && guideFdr <= 1.0)) {
+            logStream << "ERROR: Invalid crGuideFdr " << guideFdr << " (expected 0 < FDR <= 1)\n";
+            return -1;
+        }
+        if (guideFdrMinUmi < 1) {
+            logStream << "ERROR: Invalid crGuideFdrMinUmi " << guideFdrMinUmi << " (expected >= 1)\n";
+            return -1;
+        }
     }
     
     // Step 1: Read the filtered MEX

@@ -35,7 +35,7 @@ struct Config {
     bool call_mode = true;           // Run MEX → calls
     bool compat_perturb = false;     // CR9-compatible output layout
     bool gmm_mode = true;            // Use GMM calling (vs ratio test)
-    std::string guide_caller = "gmm"; // dominant|gmm|ambient-fdr|both
+    std::string guide_caller = "auto"; // auto|dominant|gmm|ambient-fdr|both
     
     // Input paths
     std::string feature_ref;         // Feature reference CSV
@@ -121,7 +121,7 @@ static void print_usage(const char *prog) {
     fprintf(stderr, "    --extract-only          Skip calling, only run FASTQ → MEX extraction\n");
     fprintf(stderr, "    --compat-perturb        CR9-compatible output layout (crispr_analysis/)\n");
     fprintf(stderr, "    --ratio-test            Use ratio test instead of GMM for calling\n");
-    fprintf(stderr, "    --guide-caller MODE     Guide caller: gmm|ambient-fdr|both|dominant (default: gmm)\n");
+    fprintf(stderr, "    --guide-caller MODE     Guide caller: auto|gmm|ambient-fdr|both|dominant (default: auto)\n");
     fprintf(stderr, "\n");
     fprintf(stderr, "  Extraction parameters:\n");
     fprintf(stderr, "    --barcode-length N      Barcode length (default: 16)\n");
@@ -322,11 +322,12 @@ static std::vector<std::string> find_sample_dirs(const std::string &base_dir, bo
 }
 
 static bool guide_runs_gmm(const Config &cfg) {
-    return cfg.guide_caller == "gmm" || cfg.guide_caller == "both";
+    return cfg.guide_caller == "auto" || cfg.guide_caller == "gmm" || cfg.guide_caller == "both";
 }
 
-static bool guide_runs_ambient_fdr(const Config &cfg) {
-    return cfg.guide_caller == "ambient-fdr" || cfg.guide_caller == "both";
+static bool guide_runs_ambient_fdr(const Config &cfg, bool raw_available) {
+    return cfg.guide_caller == "ambient-fdr" || cfg.guide_caller == "both" ||
+           (cfg.guide_caller == "auto" && raw_available);
 }
 
 static bool guide_runs_dominant(const Config &cfg) {
@@ -370,7 +371,7 @@ static int run_calling_on_mex(const std::string &mex_dir, const std::string &cal
         if (ret != 0) return ret;
     }
 
-    if (guide_runs_ambient_fdr(cfg)) {
+    if (guide_runs_ambient_fdr(cfg, !raw_mex_dir.empty())) {
         if (raw_mex_dir.empty()) {
             fprintf(stderr, "Error: raw MEX directory is required for ambient-FDR guide calling\n");
             return -1;
@@ -385,7 +386,7 @@ static int run_calling_on_mex(const std::string &mex_dir, const std::string &cal
         ambient_cfg->emit_sparse_qvalues = cfg.guide_fdr_emit_qvalues ? 1 : 0;
 
         std::string ambient_output_dir = call_output_dir;
-        if (cfg.compat_perturb || cfg.guide_caller == "both") {
+        if (cfg.compat_perturb || guide_runs_gmm(cfg)) {
             ambient_output_dir = call_output_dir + "/ambient_fdr";
         }
         fprintf(stderr, "  Raw MEX directory: %s\n", raw_mex_dir.c_str());
@@ -417,7 +418,7 @@ static int run_calling(const Config &cfg) {
         fprintf(stderr, "  dominance_fraction: %.2f\n", cfg.dominance_fraction);
         fprintf(stderr, "  dominance_margin: %d\n", cfg.dominance_margin);
     }
-    if (guide_runs_ambient_fdr(cfg)) {
+    if (guide_runs_ambient_fdr(cfg, true)) {
         fprintf(stderr, "  guide_fdr: %.6g\n", cfg.guide_fdr);
         fprintf(stderr, "  guide_fdr_min_umi: %d\n", cfg.guide_fdr_min_umi);
         fprintf(stderr, "  guide_fdr_emit_qvalues: %s\n", cfg.guide_fdr_emit_qvalues ? "sparse" : "none");
@@ -497,14 +498,17 @@ static int run_calling(const Config &cfg) {
         }
 
         std::string raw_mex_dir_for_call = cfg.raw_mex_dir;
-        if (guide_runs_ambient_fdr(cfg) && raw_mex_dir_for_call.empty()) {
-            if (cfg.compat_perturb && sample_dir != mex_dir) {
+        if (raw_mex_dir_for_call.empty()) {
+            if (cfg.guide_caller == "auto" && cfg.compat_perturb && sample_dir != mex_dir) {
                 raw_mex_dir_for_call = sample_dir;
-            } else {
-                raw_mex_dir_for_call = base_mex_dir;
+            } else if (cfg.guide_caller != "auto" && guide_runs_ambient_fdr(cfg, true)) {
+                if (cfg.compat_perturb && sample_dir != mex_dir) {
+                    raw_mex_dir_for_call = sample_dir;
+                } else {
+                    raw_mex_dir_for_call = base_mex_dir;
+                }
             }
         }
-
         int ret = run_calling_on_mex(mex_dir_for_call, call_output_dir, raw_mex_dir_for_call, cfg);
         if (ret != 0) {
             fprintf(stderr, "Warning: Feature calling failed for sample %s\n", sample_name.c_str());
@@ -581,14 +585,17 @@ int main(int argc, char *argv[]) {
             case 1011: cfg.consumer_threads = atoi(optarg); break;
             case 1012: cfg.search_threads = atoi(optarg); break;
             case 1014:
-                if (strcmp(optarg, "gmm") == 0 ||
+                if (strcmp(optarg, "auto") == 0 ||
+                    strcmp(optarg, "gmm") == 0 ||
                     strcmp(optarg, "ambient-fdr") == 0 ||
                     strcmp(optarg, "both") == 0 ||
                     strcmp(optarg, "dominant") == 0) {
                     cfg.guide_caller = optarg;
-                    cfg.gmm_mode = (cfg.guide_caller == "gmm" || cfg.guide_caller == "both");
+                    cfg.gmm_mode = (cfg.guide_caller == "auto" ||
+                                    cfg.guide_caller == "gmm" ||
+                                    cfg.guide_caller == "both");
                 } else {
-                    fprintf(stderr, "Error: --guide-caller must be gmm, ambient-fdr, both, or dominant\n");
+                    fprintf(stderr, "Error: --guide-caller must be auto, gmm, ambient-fdr, both, or dominant\n");
                     return 1;
                 }
                 break;
@@ -656,7 +663,8 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    if (cfg.call_mode && guide_runs_ambient_fdr(cfg)) {
+    bool ambient_validation_raw_available = cfg.extract_mode || !cfg.raw_mex_dir.empty();
+    if (cfg.call_mode && guide_runs_ambient_fdr(cfg, ambient_validation_raw_available)) {
         if (!(cfg.guide_fdr > 0.0 && cfg.guide_fdr <= 1.0)) {
             fprintf(stderr, "Error: --guide-fdr must satisfy 0 < FDR <= 1\n");
             return 1;
