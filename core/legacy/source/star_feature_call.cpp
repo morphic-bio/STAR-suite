@@ -35,6 +35,7 @@ struct Config {
     bool call_mode = true;           // Run MEX → calls
     bool compat_perturb = false;     // CR9-compatible output layout
     bool gmm_mode = true;            // Use GMM calling (vs ratio test)
+    std::string guide_caller = "gmm"; // dominant|gmm|ambient-fdr|both
     
     // Input paths
     std::string feature_ref;         // Feature reference CSV
@@ -42,6 +43,7 @@ struct Config {
     std::string filtered_barcodes;   // Filtered barcodes (cells)
     std::string fastq_dir;           // FASTQ input directory
     std::string mex_dir;             // MEX input (for call-only mode)
+    std::string raw_mex_dir;         // Raw MEX input for ambient-FDR
     
     // Output
     std::string output_dir;          // Output directory
@@ -56,6 +58,9 @@ struct Config {
     
     // GMM calling params
     int min_umi = 3;
+    double guide_fdr = 0.01;
+    int guide_fdr_min_umi = 1;
+    bool guide_fdr_emit_qvalues = true;
     
     // Ratio test params (for non-GMM mode)
     int min_counts = 2;
@@ -108,6 +113,7 @@ static void print_usage(const char *prog) {
     fprintf(stderr, "    --filtered-barcodes FILE  Filtered barcodes/cells (recommended)\n");
     fprintf(stderr, "    --fastq-dir DIR         FASTQ input directory\n");
     fprintf(stderr, "    --mex-dir DIR           MEX input directory (for --call-only)\n");
+    fprintf(stderr, "    --raw-mex-dir DIR       Raw MEX for ambient-FDR guide calling\n");
     fprintf(stderr, "    --output-dir DIR        Output directory (required)\n");
     fprintf(stderr, "\n");
     fprintf(stderr, "  Mode:\n");
@@ -115,6 +121,7 @@ static void print_usage(const char *prog) {
     fprintf(stderr, "    --extract-only          Skip calling, only run FASTQ → MEX extraction\n");
     fprintf(stderr, "    --compat-perturb        CR9-compatible output layout (crispr_analysis/)\n");
     fprintf(stderr, "    --ratio-test            Use ratio test instead of GMM for calling\n");
+    fprintf(stderr, "    --guide-caller MODE     Guide caller: gmm|ambient-fdr|both|dominant (default: gmm)\n");
     fprintf(stderr, "\n");
     fprintf(stderr, "  Extraction parameters:\n");
     fprintf(stderr, "    --barcode-length N      Barcode length (default: 16)\n");
@@ -132,6 +139,9 @@ static void print_usage(const char *prog) {
     fprintf(stderr, "\n");
     fprintf(stderr, "  GMM calling parameters:\n");
     fprintf(stderr, "    --min-umi N             Minimum UMI threshold (default: 3)\n");
+    fprintf(stderr, "    --guide-fdr F           Ambient-FDR default threshold (default: 0.01)\n");
+    fprintf(stderr, "    --guide-fdr-min-umi N   Ambient-FDR minimum UMI count for calls (default: 1)\n");
+    fprintf(stderr, "    --guide-fdr-emit-qvalues MODE  sparse|none (default: sparse)\n");
     fprintf(stderr, "\n");
     fprintf(stderr, "  Ratio test parameters:\n");
     fprintf(stderr, "    --min-counts N          Minimum counts threshold (default: 2)\n");
@@ -311,16 +321,28 @@ static std::vector<std::string> find_sample_dirs(const std::string &base_dir, bo
     return sample_dirs;
 }
 
+static bool guide_runs_gmm(const Config &cfg) {
+    return cfg.guide_caller == "gmm" || cfg.guide_caller == "both";
+}
+
+static bool guide_runs_ambient_fdr(const Config &cfg) {
+    return cfg.guide_caller == "ambient-fdr" || cfg.guide_caller == "both";
+}
+
+static bool guide_runs_dominant(const Config &cfg) {
+    return cfg.guide_caller == "dominant";
+}
+
 // Run calling on a single MEX directory
 static int run_calling_on_mex(const std::string &mex_dir, const std::string &call_output_dir,
-                               const Config &cfg) {
+                               const std::string &raw_mex_dir, const Config &cfg) {
     fprintf(stderr, "  MEX directory: %s\n", mex_dir.c_str());
     fprintf(stderr, "  Output directory: %s\n", call_output_dir.c_str());
     
     mkdir_p(call_output_dir.c_str());
     
-    int ret;
-    if (cfg.gmm_mode) {
+    int ret = 0;
+    if (guide_runs_gmm(cfg)) {
         cf_gmm_config *gmm_cfg = cf_gmm_config_create();
         if (!gmm_cfg) {
             fprintf(stderr, "Error: Failed to create GMM config\n");
@@ -330,7 +352,10 @@ static int run_calling_on_mex(const std::string &mex_dir, const std::string &cal
         
         ret = cf_process_mex_dir_gmm(mex_dir.c_str(), call_output_dir.c_str(), gmm_cfg);
         cf_gmm_config_destroy(gmm_cfg);
-    } else {
+        if (ret != 0) return ret;
+    }
+
+    if (guide_runs_dominant(cfg)) {
         cf_config *ratio_cfg = cf_config_create();
         if (!ratio_cfg) {
             fprintf(stderr, "Error: Failed to create ratio config\n");
@@ -342,6 +367,32 @@ static int run_calling_on_mex(const std::string &mex_dir, const std::string &cal
         
         ret = cf_process_mex_dir(mex_dir.c_str(), call_output_dir.c_str(), ratio_cfg);
         cf_config_destroy(ratio_cfg);
+        if (ret != 0) return ret;
+    }
+
+    if (guide_runs_ambient_fdr(cfg)) {
+        if (raw_mex_dir.empty()) {
+            fprintf(stderr, "Error: raw MEX directory is required for ambient-FDR guide calling\n");
+            return -1;
+        }
+        cf_ambient_fdr_config *ambient_cfg = cf_ambient_fdr_config_create();
+        if (!ambient_cfg) {
+            fprintf(stderr, "Error: Failed to create ambient-FDR config\n");
+            return -1;
+        }
+        ambient_cfg->fdr_threshold = cfg.guide_fdr;
+        ambient_cfg->min_umi = cfg.guide_fdr_min_umi;
+        ambient_cfg->emit_sparse_qvalues = cfg.guide_fdr_emit_qvalues ? 1 : 0;
+
+        std::string ambient_output_dir = call_output_dir;
+        if (cfg.compat_perturb || cfg.guide_caller == "both") {
+            ambient_output_dir = call_output_dir + "/ambient_fdr";
+        }
+        fprintf(stderr, "  Raw MEX directory: %s\n", raw_mex_dir.c_str());
+        fprintf(stderr, "  Ambient-FDR output: %s\n", ambient_output_dir.c_str());
+        ret = cf_process_mex_dir_ambient_fdr(raw_mex_dir.c_str(), mex_dir.c_str(),
+                                             ambient_output_dir.c_str(), ambient_cfg);
+        cf_ambient_fdr_config_destroy(ambient_cfg);
     }
     
     return ret;
@@ -357,13 +408,19 @@ static int run_calling(const Config &cfg) {
         base_mex_dir = cfg.output_dir;
     }
     
-    fprintf(stderr, "Calling mode: %s\n", cfg.gmm_mode ? "GMM (CR9-compatible)" : "Ratio test");
-    if (cfg.gmm_mode) {
+    fprintf(stderr, "Calling mode: %s\n", cfg.guide_caller.c_str());
+    if (guide_runs_gmm(cfg)) {
         fprintf(stderr, "  min_umi: %d\n", cfg.min_umi);
-    } else {
+    }
+    if (guide_runs_dominant(cfg)) {
         fprintf(stderr, "  min_counts: %d\n", cfg.min_counts);
         fprintf(stderr, "  dominance_fraction: %.2f\n", cfg.dominance_fraction);
         fprintf(stderr, "  dominance_margin: %d\n", cfg.dominance_margin);
+    }
+    if (guide_runs_ambient_fdr(cfg)) {
+        fprintf(stderr, "  guide_fdr: %.6g\n", cfg.guide_fdr);
+        fprintf(stderr, "  guide_fdr_min_umi: %d\n", cfg.guide_fdr_min_umi);
+        fprintf(stderr, "  guide_fdr_emit_qvalues: %s\n", cfg.guide_fdr_emit_qvalues ? "sparse" : "none");
     }
     
     // Find sample directories containing MEX files
@@ -439,7 +496,16 @@ static int run_calling(const Config &cfg) {
             }
         }
 
-        int ret = run_calling_on_mex(mex_dir_for_call, call_output_dir, cfg);
+        std::string raw_mex_dir_for_call = cfg.raw_mex_dir;
+        if (guide_runs_ambient_fdr(cfg) && raw_mex_dir_for_call.empty()) {
+            if (cfg.compat_perturb && sample_dir != mex_dir) {
+                raw_mex_dir_for_call = sample_dir;
+            } else {
+                raw_mex_dir_for_call = base_mex_dir;
+            }
+        }
+
+        int ret = run_calling_on_mex(mex_dir_for_call, call_output_dir, raw_mex_dir_for_call, cfg);
         if (ret != 0) {
             fprintf(stderr, "Warning: Feature calling failed for sample %s\n", sample_name.c_str());
             total_failures++;
@@ -468,11 +534,13 @@ int main(int argc, char *argv[]) {
         {"filtered-barcodes",   required_argument, 0, 'b'},
         {"fastq-dir",           required_argument, 0, 'q'},
         {"mex-dir",             required_argument, 0, 'm'},
+        {"raw-mex-dir",         required_argument, 0, 1013},
         {"output-dir",          required_argument, 0, 'o'},
         {"call-only",           no_argument,       0, 'C'},
         {"extract-only",        no_argument,       0, 'E'},
         {"compat-perturb",      no_argument,       0, 'P'},
         {"ratio-test",          no_argument,       0, 'R'},
+        {"guide-caller",        required_argument, 0, 1014},
         {"barcode-length",      required_argument, 0, 1001},
         {"umi-length",          required_argument, 0, 1002},
         {"max-hamming",         required_argument, 0, 1003},
@@ -480,6 +548,9 @@ int main(int argc, char *argv[]) {
         {"consumer-threads",    required_argument, 0, 1011},
         {"search-threads",      required_argument, 0, 1012},
         {"min-umi",             required_argument, 0, 1004},
+        {"guide-fdr",           required_argument, 0, 1015},
+        {"guide-fdr-min-umi",   required_argument, 0, 1016},
+        {"guide-fdr-emit-qvalues", required_argument, 0, 1017},
         {"min-counts",          required_argument, 0, 1005},
         {"dominance-fraction",  required_argument, 0, 1006},
         {"dominance-margin",    required_argument, 0, 1007},
@@ -500,18 +571,43 @@ int main(int argc, char *argv[]) {
             case 'b': cfg.filtered_barcodes = optarg; break;
             case 'q': cfg.fastq_dir = optarg; break;
             case 'm': cfg.mex_dir = optarg; break;
+            case 1013: cfg.raw_mex_dir = optarg; break;
             case 'o': cfg.output_dir = optarg; break;
             case 'C': cfg.extract_mode = false; cfg.call_mode = true; break;
             case 'E': cfg.extract_mode = true; cfg.call_mode = false; break;
             case 'P': cfg.compat_perturb = true; break;
-            case 'R': cfg.gmm_mode = false; break;
+            case 'R': cfg.gmm_mode = false; cfg.guide_caller = "dominant"; break;
             case 't': cfg.threads = atoi(optarg); break;
             case 1011: cfg.consumer_threads = atoi(optarg); break;
             case 1012: cfg.search_threads = atoi(optarg); break;
+            case 1014:
+                if (strcmp(optarg, "gmm") == 0 ||
+                    strcmp(optarg, "ambient-fdr") == 0 ||
+                    strcmp(optarg, "both") == 0 ||
+                    strcmp(optarg, "dominant") == 0) {
+                    cfg.guide_caller = optarg;
+                    cfg.gmm_mode = (cfg.guide_caller == "gmm" || cfg.guide_caller == "both");
+                } else {
+                    fprintf(stderr, "Error: --guide-caller must be gmm, ambient-fdr, both, or dominant\n");
+                    return 1;
+                }
+                break;
             case 1001: cfg.barcode_length = atoi(optarg); break;
             case 1002: cfg.umi_length = atoi(optarg); break;
             case 1003: cfg.max_hamming = atoi(optarg); break;
             case 1004: cfg.min_umi = atoi(optarg); break;
+            case 1015: cfg.guide_fdr = atof(optarg); break;
+            case 1016: cfg.guide_fdr_min_umi = atoi(optarg); break;
+            case 1017:
+                if (strcmp(optarg, "sparse") == 0) {
+                    cfg.guide_fdr_emit_qvalues = true;
+                } else if (strcmp(optarg, "none") == 0) {
+                    cfg.guide_fdr_emit_qvalues = false;
+                } else {
+                    fprintf(stderr, "Error: --guide-fdr-emit-qvalues must be sparse or none\n");
+                    return 1;
+                }
+                break;
             case 1005: cfg.min_counts = atoi(optarg); break;
             case 1006: cfg.dominance_fraction = atof(optarg); break;
             case 1007: cfg.dominance_margin = atoi(optarg); break;
@@ -559,11 +655,26 @@ int main(int argc, char *argv[]) {
         print_usage(argv[0]);
         return 1;
     }
+
+    if (cfg.call_mode && guide_runs_ambient_fdr(cfg)) {
+        if (!(cfg.guide_fdr > 0.0 && cfg.guide_fdr <= 1.0)) {
+            fprintf(stderr, "Error: --guide-fdr must satisfy 0 < FDR <= 1\n");
+            return 1;
+        }
+        if (cfg.guide_fdr_min_umi < 1) {
+            fprintf(stderr, "Error: --guide-fdr-min-umi must be >= 1\n");
+            return 1;
+        }
+        if (!cfg.extract_mode && cfg.raw_mex_dir.empty()) {
+            fprintf(stderr, "Error: --raw-mex-dir is required for ambient-FDR in --call-only mode\n");
+            return 1;
+        }
+    }
     
     // Validate compat-perturb constraints
     if (cfg.compat_perturb) {
         // CR9 compat prefers GMM mode - ratio test outputs non-CR9 files
-        if (!cfg.gmm_mode) {
+        if (guide_runs_dominant(cfg)) {
             fprintf(stderr, "Warning: --compat-perturb with --ratio-test\n");
             fprintf(stderr, "  CR9-compatible output normally uses GMM calling; results may diverge.\n");
         }
@@ -596,7 +707,7 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "Output layout: CR9-compatible (crispr_analysis/)\n");
     }
     if (cfg.call_mode) {
-        fprintf(stderr, "Calling mode: %s\n", cfg.gmm_mode ? "GMM (CR9-compatible)" : "Ratio test");
+        fprintf(stderr, "Calling mode: %s\n", cfg.guide_caller.c_str());
     }
     
     // Run extraction if requested

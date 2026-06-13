@@ -5,7 +5,7 @@
 
 ## Overview
 
-Implemented automatic CRISPR feature calling in STAR's CR-compat mode (`--pfMultiConfig`). When processing multi-configs with CRISPR Guide Capture libraries, STAR now automatically generates `crispr_analysis/*` outputs matching Cell Ranger's format.
+Implemented automatic CRISPR feature calling in STAR's CR-compat mode (`--pfMultiConfig`). When processing multi-configs with CRISPR Guide Capture libraries, STAR now automatically generates `crispr_analysis/*` outputs matching Cell Ranger's format. An optional ambient-FDR guide caller is also available as a secondary STAR-suite output; GMM remains the default compatibility caller.
 
 ## Key Results
 
@@ -35,12 +35,15 @@ Implemented automatic CRISPR feature calling in STAR's CR-compat mode (`--pfMult
 - Filters merged MEX to CRISPR Guide Capture features only
 - Runs GMM calling with configurable min_umi threshold
 - Writes to `outs/crispr_analysis/`
+- Optional `--crGuideCaller ambient-fdr|both` path writes ambient-FDR outputs under `outs/crispr_analysis/ambient_fdr/`
 
 #### `core/legacy/source/Parameters.h`
 - Added `crMinUmi` field to `pfMulti` struct
+- Added ambient-FDR guide-caller fields (`crGuideCaller`, `crGuideFdr`, `crGuideFdrMinUmi`, `crGuideFdrEmitQvalues`)
 
 #### `core/legacy/source/Parameters.cpp`
 - Added `--crMinUmi` parameter (default: 3)
+- Added optional ambient-FDR guide-caller parameters; current CR-compatible defaults remain `--crGuideCaller gmm`
 
 #### `core/legacy/source/Makefile`
 - Added `libprocess_features.a` and `libscrna.a` as STAR dependencies
@@ -82,8 +85,28 @@ When CRISPR Guide Capture features are present:
     ├── protospacer_calls_per_cell.csv
     ├── protospacer_calls_summary.csv
     ├── protospacer_umi_thresholds.csv
-    └── protospacer_umi_thresholds.json
+    ├── protospacer_umi_thresholds.json
+    └── ambient_fdr/                # optional when --crGuideCaller ambient-fdr|both
+        ├── guide_fdr_calls_per_cell.csv
+        ├── guide_fdr_summary.json
+        ├── guide_ambient_rates.tsv
+        ├── guide_qvalues.mtx
+        ├── guide_qvalues_barcodes.tsv
+        └── guide_qvalues_features.tsv
 ```
+
+Ambient-FDR estimates guide ambient rates from raw non-cell barcodes and writes
+sparse q-values only for observed guide counts in filtered cells. Missing
+cell-guide entries imply q-value 1 and are not materialized. BH correction uses
+`n_filtered_cells * n_guides` tests.
+
+`guide_fdr_calls_per_cell.csv` carries both the statistical call and the UMI
+support needed for downstream manual tuning: `num_umis`, `min_called_umi`,
+`max_called_umi`, `min_qvalue`, `call_status`, `default_fdr`, and `caller`.
+`scripts/integrate_feature_library.py --ambient-fdr-calls-csv` imports these
+fields into h5ad `obs` as `guide_fdr_*` columns, and
+`scripts/build_multiome_mudata.py` propagates those columns to top-level
+MuData `obs`.
 
 ## Assay-Specific Recommendations
 

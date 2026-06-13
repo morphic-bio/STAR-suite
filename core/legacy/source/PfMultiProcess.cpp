@@ -1483,18 +1483,82 @@ static PfMultiPreparedContext buildPfMultiPreparedContext(const PfMultiPreloadIn
     return context;
 }
 
+static int writeCrisprOnlyMex(const PfMultiMerge::MexData& crisprData,
+                              const string& tempMexDir,
+                              ostream& logStream) {
+    string mkdirCmd = "mkdir -p \"" + tempMexDir + "\"";
+    if (system(mkdirCmd.c_str()) != 0) {
+        logStream << "ERROR: Failed to create temp directory: " << tempMexDir << "\n";
+        return -1;
+    }
+
+    vector<MexWriter::Feature> features;
+    for (size_t i = 0; i < crisprData.features.size(); ++i) {
+        string name = (i < crisprData.featureNames.size()) ? crisprData.featureNames[i] : crisprData.features[i];
+        string type = (i < crisprData.featureTypes.size()) ? crisprData.featureTypes[i] : "CRISPR Guide Capture";
+        features.emplace_back(crisprData.features[i], name, type);
+    }
+
+    string mexPrefix = tempMexDir + "/";
+    int ret = MexWriter::writeMex(mexPrefix, crisprData.barcodes, features, crisprData.triplets, -1);
+    if (ret != 0) {
+        logStream << "ERROR: Failed to write temporary CRISPR MEX: " << tempMexDir << "\n";
+        return -1;
+    }
+    return 0;
+}
+
 /**
  * Run CRISPR feature calling on filtered MEX with CRISPR Guide Capture features.
- * 
+ *
+ * @param rawMexDir Directory containing raw_feature_bc_matrix
  * @param filteredMexDir Directory containing filtered_feature_bc_matrix
  * @param outputDir Output directory for crispr_analysis/
  * @param minUmi Minimum UMI threshold for GMM calling
+ * @param guideCaller gmm|ambient-fdr|both|none
+ * @param guideFdr Ambient-FDR default threshold
+ * @param guideFdrMinUmi Ambient-FDR minimum observed UMI floor
+ * @param guideFdrEmitQvalues sparse|none
  * @param logStream Log output stream
  * @return 0 on success, -1 on failure
  */
-static int runCrisprFeatureCalling(const string& filteredMexDir, const string& outputDir,
-                                    int minUmi, ostream& logStream) {
+static int runCrisprFeatureCalling(const string& rawMexDir,
+                                    const string& filteredMexDir,
+                                    const string& outputDir,
+                                    int minUmi,
+                                    const string& guideCaller,
+                                    double guideFdr,
+                                    int guideFdrMinUmi,
+                                    const string& guideFdrEmitQvalues,
+                                    ostream& logStream) {
     logStream << timeMonthDayTime() << " ..... starting CRISPR feature calling\n";
+
+    const string caller = lowerCopy(trimCopy(guideCaller.empty() ? "gmm" : guideCaller));
+    const bool runGmm = (caller == "gmm" || caller == "both");
+    const bool runAmbient = (caller == "ambient-fdr" || caller == "both");
+    if (caller == "none") {
+        logStream << "  Calling mode: none; skipping CRISPR guide calling\n";
+        return 0;
+    }
+    if (!runGmm && !runAmbient) {
+        logStream << "ERROR: Invalid crGuideCaller '" << guideCaller
+                  << "' (expected gmm|ambient-fdr|both|none)\n";
+        return -1;
+    }
+    const string emitMode = lowerCopy(trimCopy(guideFdrEmitQvalues.empty() ? "sparse" : guideFdrEmitQvalues));
+    if (emitMode != "sparse" && emitMode != "none") {
+        logStream << "ERROR: Invalid crGuideFdrEmitQvalues '" << guideFdrEmitQvalues
+                  << "' (expected sparse|none)\n";
+        return -1;
+    }
+    if (!(guideFdr > 0.0 && guideFdr <= 1.0)) {
+        logStream << "ERROR: Invalid crGuideFdr " << guideFdr << " (expected 0 < FDR <= 1)\n";
+        return -1;
+    }
+    if (guideFdrMinUmi < 1) {
+        logStream << "ERROR: Invalid crGuideFdrMinUmi " << guideFdrMinUmi << " (expected >= 1)\n";
+        return -1;
+    }
     
     // Step 1: Read the filtered MEX
     PfMultiMerge::MexData mexData;
@@ -1517,72 +1581,127 @@ static int runCrisprFeatureCalling(const string& filteredMexDir, const string& o
     logStream << "  Barcodes: " << crisprData.barcodes.size() << "\n";
     logStream << "  Non-zero entries: " << crisprData.triplets.size() << "\n";
     
-    // Step 3: Write CRISPR-only MEX to temporary directory
-    string tempMexDir = outputDir + "/.crispr_mex_tmp";
-    string mkdirCmd = "mkdir -p \"" + tempMexDir + "\"";
-    if (system(mkdirCmd.c_str()) != 0) {
-        logStream << "ERROR: Failed to create temp directory: " << tempMexDir << "\n";
-        return -1;
-    }
-    
-    // Convert MexData to MexWriter format
-    vector<MexWriter::Feature> features;
-    for (size_t i = 0; i < crisprData.features.size(); ++i) {
-        string name = (i < crisprData.featureNames.size()) ? crisprData.featureNames[i] : crisprData.features[i];
-        string type = (i < crisprData.featureTypes.size()) ? crisprData.featureTypes[i] : "CRISPR Guide Capture";
-        features.emplace_back(crisprData.features[i], name, type);
-    }
-    
-    // Write MEX (uncompressed for call_features compatibility)
-    string mexPrefix = tempMexDir + "/";
-    int ret = MexWriter::writeMex(mexPrefix, crisprData.barcodes, features, crisprData.triplets, -1);
+    string filteredTempMexDir = outputDir + "/.crispr_filtered_mex_tmp";
+    int ret = writeCrisprOnlyMex(crisprData, filteredTempMexDir, logStream);
     if (ret != 0) {
-        logStream << "ERROR: Failed to write temporary CRISPR MEX\n";
         return -1;
     }
     
-    // Step 4: Run GMM feature calling with min_umi=10 (CR-compatible default)
     string crisprAnalysisDir = outputDir + "/crispr_analysis";
-    mkdirCmd = "mkdir -p \"" + crisprAnalysisDir + "\"";
+    string mkdirCmd = "mkdir -p \"" + crisprAnalysisDir + "\"";
     if (system(mkdirCmd.c_str()) != 0) {
         logStream << "ERROR: Failed to create crispr_analysis directory\n";
-        string rmCmd = "rm -rf \"" + tempMexDir + "\"";
+        string rmCmd = "rm -rf \"" + filteredTempMexDir + "\"";
         system(rmCmd.c_str());
         return -1;
     }
-    
-    cf_gmm_config *gmm_cfg = cf_gmm_config_create();
-    if (!gmm_cfg) {
-        logStream << "ERROR: Failed to create GMM config\n";
-        return -1;
+
+    int callersRequested = 0;
+    int callersSucceeded = 0;
+
+    if (runGmm) {
+        callersRequested++;
+        cf_gmm_config *gmm_cfg = cf_gmm_config_create();
+        if (!gmm_cfg) {
+            logStream << "ERROR: Failed to create GMM config\n";
+        } else {
+            gmm_cfg->min_umi_threshold = minUmi;
+
+            logStream << "  Calling mode: GMM (CR9-compatible)\n";
+            logStream << "  min_umi: " << gmm_cfg->min_umi_threshold << "\n";
+            logStream << "  Output: " << crisprAnalysisDir << "\n";
+
+            ret = cf_process_mex_dir_gmm(filteredTempMexDir.c_str(), crisprAnalysisDir.c_str(), gmm_cfg);
+            cf_gmm_config_destroy(gmm_cfg);
+
+            if (ret != 0) {
+                logStream << "ERROR: CRISPR GMM feature calling failed\n";
+            } else {
+                callersSucceeded++;
+            }
+        }
     }
-    gmm_cfg->min_umi_threshold = minUmi;
-    
-    logStream << "  Calling mode: GMM (CR9-compatible)\n";
-    logStream << "  min_umi: " << gmm_cfg->min_umi_threshold << "\n";
-    logStream << "  Output: " << crisprAnalysisDir << "\n";
-    
-    ret = cf_process_mex_dir_gmm(tempMexDir.c_str(), crisprAnalysisDir.c_str(), gmm_cfg);
-    cf_gmm_config_destroy(gmm_cfg);
-    
-    if (ret != 0) {
-        logStream << "ERROR: CRISPR feature calling failed\n";
-        // Cleanup temp dir
-        string rmCmd = "rm -rf \"" + tempMexDir + "\"";
-        system(rmCmd.c_str());
-        return -1;
+
+    if (runAmbient) {
+        callersRequested++;
+        string rawTempMexDir = outputDir + "/.crispr_raw_mex_tmp";
+        PfMultiMerge::MexData rawMexData;
+        try {
+            rawMexData = PfMultiMerge::readMex(rawMexDir);
+        } catch (const exception& e) {
+            logStream << "ERROR: Failed to read raw MEX for ambient-FDR guide calling: " << e.what() << "\n";
+            rawMexData.features.clear();
+        }
+
+        if (!rawMexData.features.empty()) {
+            PfMultiMerge::MexData rawCrisprData = PfMultiMerge::filterByFeatureType(rawMexData, "CRISPR Guide Capture");
+            if (rawCrisprData.features.empty()) {
+                logStream << "WARNING: No raw CRISPR Guide Capture features found for ambient-FDR guide calling\n";
+            } else if (writeCrisprOnlyMex(rawCrisprData, rawTempMexDir, logStream) != 0) {
+                logStream << "ERROR: Failed to prepare raw CRISPR MEX for ambient-FDR guide calling\n";
+            } else {
+                cf_ambient_fdr_config *ambient_cfg = cf_ambient_fdr_config_create();
+                if (!ambient_cfg) {
+                    logStream << "ERROR: Failed to create ambient-FDR config\n";
+                } else {
+                    ambient_cfg->fdr_threshold = guideFdr;
+                    ambient_cfg->min_umi = guideFdrMinUmi;
+                    ambient_cfg->emit_sparse_qvalues = (emitMode == "sparse") ? 1 : 0;
+
+                    string ambientDir = crisprAnalysisDir + "/ambient_fdr";
+                    logStream << "  Calling mode: ambient-FDR\n";
+                    logStream << "  guide_fdr: " << ambient_cfg->fdr_threshold << "\n";
+                    logStream << "  guide_fdr_min_umi: " << ambient_cfg->min_umi << "\n";
+                    logStream << "  guide_fdr_emit_qvalues: " << emitMode << "\n";
+                    logStream << "  Output: " << ambientDir << "\n";
+
+                    ret = cf_process_mex_dir_ambient_fdr(rawTempMexDir.c_str(),
+                                                         filteredTempMexDir.c_str(),
+                                                         ambientDir.c_str(),
+                                                         ambient_cfg);
+                    cf_ambient_fdr_config_destroy(ambient_cfg);
+                    if (ret != 0) {
+                        logStream << "ERROR: ambient-FDR guide calling failed\n";
+                    } else {
+                        callersSucceeded++;
+                    }
+                }
+            }
+        }
+
+        string rmRawCmd = "rm -rf \"" + rawTempMexDir + "\"";
+        system(rmRawCmd.c_str());
     }
-    
-    // Step 5: Cleanup temporary MEX directory
-    string rmCmd = "rm -rf \"" + tempMexDir + "\"";
+
+    string rmCmd = "rm -rf \"" + filteredTempMexDir + "\"";
     system(rmCmd.c_str());
-    
+
+    if (callersSucceeded == 0) {
+        logStream << "ERROR: All requested CRISPR guide callers failed\n";
+        return -1;
+    }
+
+    if (callersSucceeded < callersRequested) {
+        logStream << "WARNING: One CRISPR guide caller failed; continuing with successful outputs\n";
+    }
+
     logStream << timeMonthDayTime() << " ..... finished CRISPR feature calling\n";
+    logStream << "  Output: " << crisprAnalysisDir << "\n";
     logStream << "  Output files:\n";
-    logStream << "    " << crisprAnalysisDir << "/protospacer_calls_per_cell.csv\n";
-    logStream << "    " << crisprAnalysisDir << "/protospacer_calls_summary.csv\n";
-    logStream << "    " << crisprAnalysisDir << "/protospacer_umi_thresholds.csv\n";
-    logStream << "    " << crisprAnalysisDir << "/protospacer_umi_thresholds.json\n";
+    if (runGmm) {
+        logStream << "    " << crisprAnalysisDir << "/protospacer_calls_per_cell.csv\n";
+        logStream << "    " << crisprAnalysisDir << "/protospacer_calls_summary.csv\n";
+        logStream << "    " << crisprAnalysisDir << "/protospacer_umi_thresholds.csv\n";
+        logStream << "    " << crisprAnalysisDir << "/protospacer_umi_thresholds.json\n";
+    }
+    if (runAmbient) {
+        logStream << "    " << crisprAnalysisDir << "/ambient_fdr/guide_fdr_calls_per_cell.csv\n";
+        logStream << "    " << crisprAnalysisDir << "/ambient_fdr/guide_fdr_summary.json\n";
+        logStream << "    " << crisprAnalysisDir << "/ambient_fdr/guide_ambient_rates.tsv\n";
+        if (emitMode == "sparse") {
+            logStream << "    " << crisprAnalysisDir << "/ambient_fdr/guide_qvalues.mtx\n";
+        }
+    }
     
     return 0;
 }
@@ -3160,7 +3279,15 @@ int finalizePfMultiConfig(Parameters& P,
         }
         if (hasCrisprFeatures) {
             string outsDir = outPrefix + "/outs";
-            ret = runCrisprFeatureCalling(filteredOutDir, outsDir, P.pfMulti.crMinUmi, P.inOut->logMain);
+            ret = runCrisprFeatureCalling(rawOutDir,
+                                          filteredOutDir,
+                                          outsDir,
+                                          P.pfMulti.crMinUmi,
+                                          P.pfMulti.crGuideCaller,
+                                          P.pfMulti.crGuideFdr,
+                                          P.pfMulti.crGuideFdrMinUmi,
+                                          P.pfMulti.crGuideFdrEmitQvalues,
+                                          P.inOut->logMain);
             if (ret != 0) {
                 P.inOut->logMain << "WARNING: CRISPR feature calling failed, continuing without crispr_analysis/\n";
             }

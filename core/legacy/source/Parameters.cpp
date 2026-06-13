@@ -712,6 +712,10 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoVector<string>(-1, -1, "crFastqMap", &pfMulti.crFastqMap));
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "crMexUseGexBarcodes", &pfMulti.crMexUseGexBarcodes));
     parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "crMinUmi", &pfMulti.crMinUmi));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "crGuideCaller", &pfMulti.crGuideCaller));
+    parArray.push_back(new ParameterInfoScalar<double>(-1, -1, "crGuideFdr", &pfMulti.crGuideFdr));
+    parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "crGuideFdrMinUmi", &pfMulti.crGuideFdrMinUmi));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "crGuideFdrEmitQvalues", &pfMulti.crGuideFdrEmitQvalues));
     parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "crAssignMaxHamming", &pfMulti.crAssignMaxHamming));
     parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "crAssignFeatureOffset", &pfMulti.crAssignFeatureOffset));
     parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "crAssignLimitSearch", &pfMulti.crAssignLimitSearch));
@@ -850,6 +854,22 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
         }
         if (p->nameString == "crMinUmi" && p->inputLevel < 0) {
             pfMulti.crMinUmi = 3;  // General default; parity scripts can override
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "crGuideCaller" && p->inputLevel < 0) {
+            pfMulti.crGuideCaller = "gmm";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "crGuideFdr" && p->inputLevel < 0) {
+            pfMulti.crGuideFdr = 0.01;
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "crGuideFdrMinUmi" && p->inputLevel < 0) {
+            pfMulti.crGuideFdrMinUmi = 1;
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "crGuideFdrEmitQvalues" && p->inputLevel < 0) {
+            pfMulti.crGuideFdrEmitQvalues = "sparse";
             p->inputLevel = 0;
         }
         if (p->nameString == "crAssignMaxHamming" && p->inputLevel < 0) {
@@ -3753,6 +3773,7 @@ void Parameters::applyDefaultGroups() {
         setStringIfDefault("soloCrGexFeature", "GeneFull");
         setStringIfDefault("soloCrMultimapRescue", "yes");
         setIntIfDefault("crMinUmi", 10);
+        setStringIfDefault("crGuideCaller", "gmm");
         // Note: soloKeysCompat cr requires soloProbeList, so we don't set it by default
         setStringIfDefault("soloCBmatchWLtype", "1MM_multi_Nbase_pseudocounts");
         setStringIfDefault("soloUMIdedup", "1MM_CR");
@@ -3837,6 +3858,7 @@ void Parameters::applyDefaultGroups() {
         setStringIfDefault("soloCrGexFeature", "GeneFull");
         setStringIfDefault("soloCrMultimapRescue", "yes");
         setIntIfDefault("crMinUmi", 10);
+        setStringIfDefault("crGuideCaller", "gmm");
     }
     
     inOut->logMain << "\n";
