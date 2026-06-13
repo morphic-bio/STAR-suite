@@ -2076,6 +2076,24 @@ crMexUseGexBarcodes        -
     string:                 DEPRECATED: CR-compat MEX now always writes both raw_feature_bc_matrix and filtered_feature_bc_matrix using GEX barcodes
                             This parameter is ignored and kept for backward compatibility only
 
+crGuideCaller              gmm
+    string:                 guide caller for CRISPR Guide Capture features in pf-multi output
+                            gmm         ... Cell Ranger-compatible GMM caller only (default)
+                            ambient-fdr ... ambient-background FDR caller only
+                            both        ... run GMM plus ambient-FDR secondary outputs
+                            none        ... skip guide calling
+
+crGuideFdr                 0.01
+    float:                  default FDR threshold for ambient-FDR guide calls
+
+crGuideFdrMinUmi           1
+    int:                    minimum observed guide UMI count for ambient-FDR calls
+
+crGuideFdrEmitQvalues      sparse
+    string:                 ambient-FDR q-value output mode
+                            sparse ... write sparse observed-entry q-values (default)
+                            none   ... skip q-value matrix output
+
 crAssignConsumerThreads    -1
     int:                    number of consumer (barcode-matching) threads per feature library in assignBarcodes.
                             -1 ... auto (default). When dynamicThreadInterface=1, auto-sized from runThreadN
@@ -2286,6 +2304,7 @@ defaultCrCompat             No
                             Enables: soloType Droplet, soloFeatures Gene GeneFull,
                             soloCellFilter EmptyDrops_CR, soloCrMode CR,
                             soloCrGexFeature GeneFull, soloCrMultimapRescue yes, crMinUmi 3,
+                            crGuideCaller gmm,
                             soloCBmatchWLtype 1MM_multi_Nbase_pseudocounts,
                             soloUMIdedup 1MM_CR, soloUMIfiltering MultiGeneUMI_CR,
                             soloMultiMappers Rescue, soloCbUbRequireTogether no
@@ -2316,7 +2335,7 @@ defaultVbem                 No
 defaultA375Parity           No
     string:                 yes/no - apply A375 GEX+feature parity defaults
                             Enables: soloCrMode CR, soloCrGexFeature GeneFull,
-                            soloCrMultimapRescue yes, crMinUmi 10
+                            soloCrMultimapRescue yes, crMinUmi 10, crGuideCaller gmm
 
 #####UnderDevelopment_begin : not supported - do not use
 soloClusterCBfile           -
