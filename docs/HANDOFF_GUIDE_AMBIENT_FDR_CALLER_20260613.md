@@ -2,6 +2,12 @@
 
 Date: 2026-06-13
 
+Update after QC default work: the implemented integrated STAR default is
+`--crGuideCaller auto`, which preserves the root Cell Ranger-compatible GMM
+outputs and writes the ambient-FDR sidecar under `outs/crispr_analysis/ambient_fdr/`
+when raw and filtered guide MEX are available. Use explicit `--crGuideCaller gmm`
+for strict GMM-only parity output.
+
 ## Agent Start And Branching
 
 The primary checkout at `/mnt/pikachu/STAR-suite` may be dirty with unrelated
@@ -242,7 +248,7 @@ For compatibility with existing downstream code, `feature_call` should use
 For integrated STAR:
 
 ```text
---crGuideCaller gmm|ambient-fdr|both|none
+--crGuideCaller auto|gmm|ambient-fdr|both|none
 --crGuideFdr 0.01
 --crGuideFdrMinUmi 1
 --crGuideFdrEmitQvalues sparse|none
@@ -250,24 +256,25 @@ For integrated STAR:
 
 Recommended defaults:
 
-- current CR-compat profiles: `--crGuideCaller gmm`
-- new perturb-QC profiles: `--crGuideCaller both`
-- Multiomics/CAT-ATAC profiles: `--crGuideCaller both`
+- current CR-compat profiles: `--crGuideCaller auto`
+- new perturb-QC profiles: `--crGuideCaller auto` or explicit `both`
+- Multiomics/CAT-ATAC profiles: `--crGuideCaller auto` where raw+filtered guide MEX are available
 - default FDR: `0.01`
 - default q-value storage: `sparse`
 
 For `star_feature_call`:
 
 ```text
---guide-caller gmm|ambient-fdr|both|dominant
+--guide-caller auto|gmm|ambient-fdr|both|dominant
 --guide-fdr 0.01
 --guide-fdr-min-umi 1
 --raw-mex-dir DIR
 --filtered-barcodes FILE
 ```
 
-`--compat-perturb` should still imply GMM unless the user explicitly requests
-`ambient-fdr` or `both`.
+`--compat-perturb` in `auto` mode writes GMM compatibility outputs and adds
+ambient-FDR QC when raw guide MEX are available. Explicit `gmm` skips the
+ambient-FDR sidecar.
 
 ## Implementation Order
 
@@ -390,7 +397,7 @@ Validate:
 Run on A375/CR-compatible guide data:
 
 - confirm existing GMM files are byte-stable when `--crGuideCaller gmm`;
-- run `both` and compare ambient-FDR calls to GMM as secondary output;
+- run `auto` or `both` and compare ambient-FDR calls to GMM as secondary output;
 - report assignment-rate/FDR curve.
 
 ### CAT-ATAC

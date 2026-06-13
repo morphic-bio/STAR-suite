@@ -540,7 +540,12 @@ def main():
             ambient_fdr_calls_csv = calls_csv_path
             calls_csv = candidate_calls
         else:
-            calls_csv = None
+            sibling = calls_csv_path.parent / "ambient_fdr" / "guide_fdr_calls_per_cell.csv"
+            if sibling.exists():
+                ambient_fdr_calls_csv = sibling
+                calls_csv = load_calls_csv(sibling)
+            else:
+                calls_csv = None
     elif ambient_fdr_calls_csv is not None:
         calls_csv = load_calls_csv(ambient_fdr_calls_csv)
     else:

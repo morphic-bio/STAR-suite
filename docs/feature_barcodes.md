@@ -172,13 +172,16 @@ CR-compat mode produces `outs/crispr_analysis/`:
 
 See `tests/crispr_feature_calling_comparison_report.md` for validation details.
 
-### Optional: Ambient-FDR Guide Calling
+### Ambient-FDR Guide Calling and QC
 
-The Cell Ranger-compatible GMM caller remains the default. Perturb-seq runs can
-also request an ambient-background FDR caller:
+Perturb-seq runs default to `auto`: Cell Ranger-compatible GMM calls stay in
+the standard root `crispr_analysis/` files, and ambient-background FDR calls are
+written as QC/tuning sidecar outputs when raw and filtered guide MEX are
+available.
 
 ```bash
-STAR ... --pfMultiConfig config.csv --crGuideCaller both
+STAR ... --pfMultiConfig config.csv
+STAR ... --pfMultiConfig config.csv --crGuideCaller gmm
 STAR ... --pfMultiConfig config.csv --crGuideCaller ambient-fdr --crGuideFdr 0.01
 ```
 
@@ -186,10 +189,16 @@ Parameters:
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `--crGuideCaller` | `gmm` | `gmm`, `ambient-fdr`, `both`, or `none` |
+| `--crGuideCaller` | `auto` | `auto`, `gmm`, `ambient-fdr`, `both`, or `none` |
 | `--crGuideFdr` | `0.01` | Default FDR threshold for ambient-FDR calls |
 | `--crGuideFdrMinUmi` | `1` | Minimum observed guide UMI count for ambient-FDR calls |
 | `--crGuideFdrEmitQvalues` | `sparse` | `sparse` writes observed-entry q-values; `none` skips the q-value matrix |
+
+`auto` preserves compatibility mode root outputs by running the
+Cell Ranger-compatible GMM caller, and also writes ambient-FDR QC outputs when
+raw and filtered guide MEX are available. Use `gmm` for strict GMM-only output,
+`both` for explicit GMM plus ambient-FDR, `ambient-fdr` for FDR-only outputs,
+and `none` to skip guide calling.
 
 Ambient-FDR estimates guide background from raw CRISPR guide UMIs in non-cell
 barcodes, then computes q-values only for final filtered cells. It applies BH
@@ -201,6 +210,7 @@ Ambient-FDR outputs are written under `outs/crispr_analysis/ambient_fdr/`:
 
 - `guide_fdr_calls_per_cell.csv`
 - `guide_fdr_summary.json`
+- `guide_fdr_threshold_sweep.tsv`
 - `guide_ambient_rates.tsv`
 - `guide_qvalues.mtx`
 - `guide_qvalues_barcodes.tsv`
@@ -217,10 +227,13 @@ threshold plus count support for downstream QC:
 
 The UMI floor is intentionally a call filter, not part of the q-value
 calculation. Downstream h5ad integration can annotate these fields with
-`scripts/integrate_feature_library.py --ambient-fdr-calls-csv`, and the
-MuData builder propagates `guide_fdr_*` columns from RNA AnnData to top-level
-`mdata.obs`. This keeps manual tuning simple after inspecting QC plots, e.g.
-filtering on `guide_fdr_min_qvalue` and `guide_fdr_min_called_umi`.
+`scripts/integrate_feature_library.py --ambient-fdr-calls-csv`. If an existing
+compatibility workflow passes `--calls-csv protospacer_calls_per_cell.csv`, the
+script also auto-discovers the sibling
+`ambient_fdr/guide_fdr_calls_per_cell.csv` when present. The MuData builder
+propagates `guide_fdr_*` columns from RNA AnnData to top-level `mdata.obs`.
+This keeps manual tuning simple after inspecting QC plots, e.g. filtering on
+`guide_fdr_min_qvalue` and `guide_fdr_min_called_umi`.
 
 `star_feature_call --call-only` can run the same caller from existing MEX
 outputs by passing the filtered-cell MEX as `--mex-dir` and the raw MEX as

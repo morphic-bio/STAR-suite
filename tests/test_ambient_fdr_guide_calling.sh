@@ -106,7 +106,6 @@ PY
 "${STAR_FEATURE_CALL}" \
   --call-only \
   --compat-perturb \
-  --guide-caller both \
   --raw-mex-dir "${RAW_DIR}" \
   --mex-dir "${FILTERED_DIR}" \
   --output-dir "${OUT_STAR}"
@@ -227,6 +226,12 @@ assert summary["cells_1_feature"] == 1
 assert summary["cells_multi_feature"] == 1
 assert summary["cells_no_call"] == 3
 
+sweep = out / "guide_fdr_threshold_sweep.tsv"
+assert sweep.exists()
+sweep_lines = sweep.read_text().strip().splitlines()
+assert sweep_lines[0] == "fdr\tmin_umi\tcells_no_call\tcells_1_feature\tcells_multi_feature\tassigned_cells\tassignment_rate"
+assert any(line.startswith("0.01\t10\t") for line in sweep_lines[1:])
+
 low_summary = json.loads((out_low / "guide_fdr_summary.json").read_text())
 assert low_summary["assigned_cells"] < summary["assigned_cells"]
 
@@ -248,6 +253,7 @@ assert (star_crispr / "protospacer_calls_per_cell.csv").exists()
 assert "geneX" not in (star_crispr / "protospacer_calls_per_cell.csv").read_text()
 assert (star_crispr / "ambient_fdr" / "guide_fdr_summary.json").exists()
 assert (star_crispr / "ambient_fdr" / "guide_qvalues.mtx").exists()
+assert (star_crispr / "ambient_fdr" / "guide_fdr_threshold_sweep.tsv").exists()
 PY
 
 echo "ambient-FDR guide caller synthetic test passed"

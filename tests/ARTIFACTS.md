@@ -99,7 +99,7 @@ update this file with its output location.
 - `tests/ucsf_gex_gray_postqc_filter_output_*/` (gray-zone-only post-EmptyDrops QC cleanup mirroring downstream `combineFilters.py` semantics: min/max genes detected plus mitochondrial fraction cutoff)
 - `/mnt/pikachu/guide_ambient_fdr_bench_*/` (ambient-FDR guide-caller call-only benchmark artifacts: guide-only MEX links, regenerated `calls/`, threshold/AUC/low-UMI summary TSVs, and run metadata)
 - `/storage/A375/guide_ambient_fdr_callonly_*/` (A375 call-only `star_feature_call --guide-caller both` CRISPR artifacts with GMM and ambient-FDR outputs)
-- `/storage/A375/test_cr_compat_ambient_fdr_*/` (A375 integrated CR-compatible STAR runs with `--crGuideCaller both`, including combined MEX and `outs/crispr_analysis/ambient_fdr/`)
+- `/storage/A375/test_cr_compat_ambient_fdr_*/` (A375 integrated CR-compatible STAR runs with `--crGuideCaller auto` or `both`, including combined MEX and `outs/crispr_analysis/ambient_fdr/`)
 - `tests/ucsf_velocyto_gexonly_exact_100k_output_*/` (GEX-only Velocyto exact/debug harness on a 100K downsampled corrected UCSF `EBs2_2/GEX` fixture; stream vs deterministic replay plus Gene/GeneFull parity)
 - `/storage/ucsf-velocyto-validation/` (GEX-only Velocyto baseline, parity, timing, and trace artifacts on corrected UCSF `EBs2_2/GEX`)
   - small GEX-only frozen baseline:

@@ -35,7 +35,8 @@ Implemented automatic CRISPR feature calling in STAR's CR-compat mode (`--pfMult
 - Filters merged MEX to CRISPR Guide Capture features only
 - Runs GMM calling with configurable min_umi threshold
 - Writes to `outs/crispr_analysis/`
-- Optional `--crGuideCaller ambient-fdr|both` path writes ambient-FDR outputs under `outs/crispr_analysis/ambient_fdr/`
+- Default `--crGuideCaller auto` preserves GMM compatibility outputs and writes ambient-FDR QC outputs under `outs/crispr_analysis/ambient_fdr/` when raw guide MEX is available
+- Explicit `--crGuideCaller gmm` keeps strict GMM-only output; `ambient-fdr`, `both`, and `none` remain available
 
 #### `core/legacy/source/Parameters.h`
 - Added `crMinUmi` field to `pfMulti` struct
@@ -43,7 +44,7 @@ Implemented automatic CRISPR feature calling in STAR's CR-compat mode (`--pfMult
 
 #### `core/legacy/source/Parameters.cpp`
 - Added `--crMinUmi` parameter (default: 3)
-- Added optional ambient-FDR guide-caller parameters; current CR-compatible defaults remain `--crGuideCaller gmm`
+- Added optional ambient-FDR guide-caller parameters; current CR-compatible root outputs remain GMM, while default `--crGuideCaller auto` emits the ambient-FDR sidecar for QC/tuning
 
 #### `core/legacy/source/Makefile`
 - Added `libprocess_features.a` and `libscrna.a` as STAR dependencies
@@ -86,9 +87,10 @@ When CRISPR Guide Capture features are present:
     ├── protospacer_calls_summary.csv
     ├── protospacer_umi_thresholds.csv
     ├── protospacer_umi_thresholds.json
-    └── ambient_fdr/                # optional when --crGuideCaller ambient-fdr|both
+    └── ambient_fdr/                # default QC sidecar in auto mode; optional for ambient-fdr|both
         ├── guide_fdr_calls_per_cell.csv
         ├── guide_fdr_summary.json
+        ├── guide_fdr_threshold_sweep.tsv
         ├── guide_ambient_rates.tsv
         ├── guide_qvalues.mtx
         ├── guide_qvalues_barcodes.tsv
@@ -103,8 +105,12 @@ cell-guide entries imply q-value 1 and are not materialized. BH correction uses
 `guide_fdr_calls_per_cell.csv` carries both the statistical call and the UMI
 support needed for downstream manual tuning: `num_umis`, `min_called_umi`,
 `max_called_umi`, `min_qvalue`, `call_status`, `default_fdr`, and `caller`.
+`guide_fdr_threshold_sweep.tsv` reports assigned/no-call/singlet/multiplet
+counts across a small FDR x min-UMI grid for QC plots.
 `scripts/integrate_feature_library.py --ambient-fdr-calls-csv` imports these
-fields into h5ad `obs` as `guide_fdr_*` columns, and
+fields into h5ad `obs` as `guide_fdr_*` columns. Existing compatibility
+workflows that pass `--calls-csv protospacer_calls_per_cell.csv` also
+auto-discover the sibling `ambient_fdr/guide_fdr_calls_per_cell.csv`.
 `scripts/build_multiome_mudata.py` propagates those columns to top-level
 MuData `obs`.
 

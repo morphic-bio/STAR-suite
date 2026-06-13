@@ -56,7 +56,21 @@ def main() -> None:
         var = pd.DataFrame(index=pd.Index(["gene1", "gene2"], name=None))
         ad.AnnData(X=sp.csr_matrix(np.array([[1, 0], [0, 1], [1, 1]], dtype=np.float32)), obs=obs, var=var).write_h5ad(counts)
 
-        calls = work / "guide_fdr_calls_per_cell.csv"
+        crispr_analysis = work / "crispr_analysis"
+        gmm_calls = crispr_analysis / "protospacer_calls_per_cell.csv"
+        calls = crispr_analysis / "ambient_fdr" / "guide_fdr_calls_per_cell.csv"
+        write_text(
+            gmm_calls,
+            "\n".join(
+                [
+                    "cell_barcode,num_features,feature_call,num_umis",
+                    "cell1-1,1,guideA,7",
+                    "cell2-1,1,guideB,3",
+                    "cell3-1,0,None,0",
+                    "",
+                ]
+            ),
+        )
         write_text(
             calls,
             "\n".join(
@@ -80,8 +94,8 @@ def main() -> None:
                 str(work / "feature_libraries"),
                 "--counts-h5ad",
                 str(counts),
-                "--ambient-fdr-calls-csv",
-                str(calls),
+                "--calls-csv",
+                str(gmm_calls),
                 "--set-generic-aliases",
             ],
             check=True,

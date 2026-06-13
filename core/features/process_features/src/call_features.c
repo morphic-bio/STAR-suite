@@ -1674,6 +1674,72 @@ static void cf_count_calls_at_threshold(const cf_ambient_entry *entries, size_t 
     free(counts);
 }
 
+static int cf_double_seen(const double *values, int n_values, double value) {
+    for (int i = 0; i < n_values; i++) {
+        if (fabs(values[i] - value) <= 1e-15) return 1;
+    }
+    return 0;
+}
+
+static int cf_int_seen(const int *values, int n_values, int value) {
+    for (int i = 0; i < n_values; i++) {
+        if (values[i] == value) return 1;
+    }
+    return 0;
+}
+
+static int cf_write_ambient_threshold_sweep(const char *output_dir,
+                                            const cf_ambient_entry *entries,
+                                            size_t n_entries,
+                                            int n_cells,
+                                            double default_fdr,
+                                            int default_min_umi) {
+    char path[MAX_LINE_LENGTH];
+    snprintf(path, sizeof(path), "%s/guide_fdr_threshold_sweep.tsv", output_dir);
+    FILE *fp = fopen(path, "w");
+    if (!fp) return -1;
+
+    double fdr_values[16];
+    int n_fdr = 0;
+    const double base_fdr[] = {1e-6, 1e-5, 1e-4, 0.001, 0.005, 0.01, 0.02, 0.05, 0.1};
+    const int n_base_fdr = (int)(sizeof(base_fdr) / sizeof(base_fdr[0]));
+    for (int i = 0; i < n_base_fdr; i++) {
+        fdr_values[n_fdr++] = base_fdr[i];
+    }
+    if (default_fdr > 0.0 && default_fdr <= 1.0 && !cf_double_seen(fdr_values, n_fdr, default_fdr)) {
+        fdr_values[n_fdr++] = default_fdr;
+    }
+
+    int min_umi_values[8];
+    int n_min_umi = 0;
+    const int base_min_umi[] = {1, 2, 3, 5, 10};
+    const int n_base_min_umi = (int)(sizeof(base_min_umi) / sizeof(base_min_umi[0]));
+    for (int i = 0; i < n_base_min_umi; i++) {
+        min_umi_values[n_min_umi++] = base_min_umi[i];
+    }
+    if (default_min_umi > 0 && !cf_int_seen(min_umi_values, n_min_umi, default_min_umi)) {
+        min_umi_values[n_min_umi++] = default_min_umi;
+    }
+
+    fprintf(fp, "fdr\tmin_umi\tcells_no_call\tcells_1_feature\tcells_multi_feature\tassigned_cells\tassignment_rate\n");
+    for (int i = 0; i < n_fdr; i++) {
+        for (int j = 0; j < n_min_umi; j++) {
+            int no_call = 0, one = 0, multi = 0;
+            cf_count_calls_at_threshold(entries, n_entries, n_cells,
+                                        fdr_values[i], min_umi_values[j],
+                                        &no_call, &one, &multi);
+            int assigned = one + multi;
+            fprintf(fp, "%.17g\t%d\t%d\t%d\t%d\t%d\t%.17g\n",
+                    fdr_values[i], min_umi_values[j],
+                    no_call, one, multi, assigned,
+                    n_cells > 0 ? (double)assigned / (double)n_cells : 0.0);
+        }
+    }
+
+    fclose(fp);
+    return 0;
+}
+
 static int cf_write_ambient_skip_summary(const char *output_dir, const char *status,
                                          const char *message) {
     if (cf_mkdir_p(output_dir) != 0) return -1;
@@ -1874,6 +1940,11 @@ static int cf_write_ambient_summary(const char *output_dir,
         fprintf(qc, "  \"ambient_total_umis\": %" PRIu64 "\n", ambient_total);
         fprintf(qc, "}\n");
         fclose(qc);
+    }
+
+    if (cf_write_ambient_threshold_sweep(output_dir, entries, n_entries, n_cells,
+                                         fdr_threshold, min_umi) != 0) {
+        return -1;
     }
     return 0;
 }
