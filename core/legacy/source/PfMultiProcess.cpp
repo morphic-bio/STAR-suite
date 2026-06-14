@@ -57,6 +57,10 @@ struct PfPreparedFeatureLibrary {
     bool explicitChem = false;    // true when star_chemistry column provided NXT/TRU
     bool usedFilteredRef = false;
     int starMaxHamming = -1;    // Per-library max Hamming override (-1 = use global)
+    bool useSplitReadLayout = false;
+    pf_split_read_layout splitReadLayout = {};
+    string starBarcodeOutputMap;
+    string starFeatureSearchMode;
     AnchoredReadEstimate featureEstimate;
 };
 
@@ -1404,6 +1408,12 @@ static PfMultiPreparedContext buildPfMultiPreparedContext(const PfMultiPreloadIn
                 : lib.sample;
             prepared.libraryId = lib.starLibraryId;
             prepared.starMaxHamming = lib.starMaxHamming;
+            prepared.useSplitReadLayout = lib.hasSplitReadLayout();
+            if (prepared.useSplitReadLayout) {
+                prepared.splitReadLayout = PfMultiConfig::buildSplitReadLayout(lib);
+                prepared.starBarcodeOutputMap = lib.starBarcodeOutputMap;
+                prepared.starFeatureSearchMode = lib.starFeatureSearchMode;
+            }
             prepared.assignOut =
                 assignBase + "/" + sanitizeDirName(prepared.libraryId);
 
@@ -2049,16 +2059,41 @@ std::shared_ptr<PfMultiAssignPhaseResult> runPfMultiAssignPhase(
             runAssignOpts.consumerThreadsPerSet = pfConsumerThreadsForRun;
             runAssignOpts.filteredBarcodesPath.clear();
 
+            const bool splitReadLayout = preparedLib.useSplitReadLayout;
+            if (splitReadLayout) {
+                runAssignOpts.useSplitReadLayout = true;
+                runAssignOpts.splitReadLayout = preparedLib.splitReadLayout;
+                runAssignOpts.autodetectChemistry = false;
+                runAssignOpts.translateNxt = false;
+                const string searchMode = lowerCopy(
+                    preparedLib.starFeatureSearchMode.empty()
+                        ? "free"
+                        : preparedLib.starFeatureSearchMode);
+                if (searchMode == "free") {
+                    runAssignOpts.useFeatureAnchorSearch = false;
+                    runAssignOpts.requireFeatureAnchorMatch = false;
+                    runAssignOpts.featureModeBootstrapReads = 0;
+                    runAssignOpts.limitSearch = -1;
+                }
+                P.inOut->logMain << "NOTICE: split-read guide layout enabled for library_id="
+                                 << preparedLib.libraryId
+                                 << " feature_search_mode=" << searchMode << "\n";
+            }
+
             // --- Phase 1: Probe original whitelist to determine read namespace ---
             PfMultiAssign::WhitelistNormalizationResult wlInfo =
                 PfMultiAssign::normalizeWhitelistForAssign(whitelist, assignOut);
             string originalWhitelistNamespace = upperCopy(wlInfo.assignmentNamespace);
-            if (!isKnownNamespace(originalWhitelistNamespace) && isKnownNamespace(effectiveChem)) {
+            if (splitReadLayout) {
+                originalWhitelistNamespace = "ATAC";
+            } else if (!isKnownNamespace(originalWhitelistNamespace) && isKnownNamespace(effectiveChem)) {
                 originalWhitelistNamespace = effectiveChem;
             }
-            const bool originalNamespaceKnown = isKnownNamespace(originalWhitelistNamespace);
+            const bool originalNamespaceKnown =
+                splitReadLayout || isKnownNamespace(originalWhitelistNamespace);
 
-            const bool useAutodetect = !preparedLib.explicitChem
+            const bool useAutodetect = !splitReadLayout
+                                      && !preparedLib.explicitChem
                                       && (preparedLib.resolvedChemRequest == "auto");
             string effectiveReadNamespace = upperCopy(preparedLib.effectiveChem);
             string detectedMatchMode = "UNKNOWN";
@@ -2113,7 +2148,7 @@ std::shared_ptr<PfMultiAssignPhaseResult> runPfMultiAssignPhase(
                     P.inOut->logMain << "WARNING: failed to clean auto-detect probe dir: "
                                      << detectOut << "\n";
                 }
-            } else if (!useAutodetect && !preparedLib.explicitChem) {
+            } else if (!splitReadLayout && !useAutodetect && !preparedLib.explicitChem) {
                 if (originalNamespaceKnown && isKnownNamespace(effectiveReadNamespace)) {
                     // Both known, no probe needed.
                 } else {
@@ -2125,12 +2160,17 @@ std::shared_ptr<PfMultiAssignPhaseResult> runPfMultiAssignPhase(
                     throw runtime_error(oss.str());
                 }
             }
+            if (splitReadLayout) {
+                effectiveReadNamespace = "ATAC";
+                detectedMatchMode = "RAW_MATCH";
+            }
             runAssignOpts.autodetectChemistry = false;
 
             // --- Phase 2: Normalize whitelist to match read namespace ---
             // After probe, effectiveReadNamespace is determined. Translate
             // whitelist so assignBarcodes matches in read namespace directly.
-            if (isKnownNamespace(effectiveReadNamespace) && originalNamespaceKnown &&
+            if (!splitReadLayout &&
+                isKnownNamespace(effectiveReadNamespace) && originalNamespaceKnown &&
                 effectiveReadNamespace != originalWhitelistNamespace) {
                 PfMultiAssign::WhitelistNormalizationResult nsWlInfo =
                     PfMultiAssign::normalizeWhitelistToNamespace(
@@ -2678,9 +2718,11 @@ std::shared_ptr<PfMultiAssignPhaseResult> runPfMultiAssignPhase(
             run.featureRefPath = refPath;
             run.whitelistPath = wlInfo.normalizedPath;
             run.barcodeOutputMapPath =
-                (wlInfo.hasTwoColumnSource && assignmentWhitelistNamespace == "NXT")
-                    ? wlInfo.sourcePath
-                    : "";
+                !preparedLib.starBarcodeOutputMap.empty()
+                    ? preparedLib.starBarcodeOutputMap
+                    : ((wlInfo.hasTwoColumnSource && assignmentWhitelistNamespace == "NXT")
+                        ? wlInfo.sourcePath
+                        : "");
             run.effectiveChem = effectiveReadNamespace;
             run.effectiveReadNamespace = nsCtx.effectiveReadNamespace;
             run.assignmentWhitelistNamespace = nsCtx.assignmentWhitelistNamespace;
@@ -2691,7 +2733,9 @@ std::shared_ptr<PfMultiAssignPhaseResult> runPfMultiAssignPhase(
             // barcodes to TRU MEX barcodes at stub generation. Keep the MEX
             // namespace aligned with the barcode TSV that downstream merge reads.
             run.featureMexOutputNamespace =
-                !run.barcodeOutputMapPath.empty() ? "TRU" : nsCtx.assignmentWhitelistNamespace;
+                !run.barcodeOutputMapPath.empty()
+                    ? (splitReadLayout ? "GEX" : "TRU")
+                    : nsCtx.assignmentWhitelistNamespace;
             run.outputNamespace = nsCtx.outputNamespace;
             run.namespaceConfident = nsCtx.isNamespaceConfident;
             run.detectedMatchMode = detectedMatchMode;
