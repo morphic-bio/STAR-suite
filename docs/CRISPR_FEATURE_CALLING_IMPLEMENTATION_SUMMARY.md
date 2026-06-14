@@ -98,9 +98,12 @@ When CRISPR Guide Capture features are present:
 ```
 
 Ambient-FDR estimates guide ambient rates from raw non-cell barcodes and writes
-sparse q-values only for observed guide counts in filtered cells. Missing
-cell-guide entries imply q-value 1 and are not materialized. BH correction uses
-`n_filtered_cells * n_guides` tests.
+sparse q-values only for observed guide counts in finalized called cells. In
+integrated STAR runs, both GMM and ambient-FDR use the EmptyDrops simple-cell
+knee (`is_simple_cell == 1`) as the guide-call universe; permissive rescued-tail
+barcodes from `outs/filtered_feature_bc_matrix` remain in the ambient pool.
+Missing cell-guide entries imply q-value 1 and are not materialized. BH
+correction uses `n_called_cells * n_guides` tests.
 
 `guide_fdr_calls_per_cell.csv` carries both the statistical call and the UMI
 support needed for downstream manual tuning: `num_umis`, `min_called_umi`,

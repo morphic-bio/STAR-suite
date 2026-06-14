@@ -1524,12 +1524,200 @@ static int writeCrisprOnlyMex(const PfMultiMerge::MexData& crisprData,
     return 0;
 }
 
+static bool pathExists(const string& path) {
+    struct stat st;
+    return stat(path.c_str(), &st) == 0;
+}
+
+static string resolveOptionalEmptyDropsResultsPath(const string& gexFilteredDir) {
+    const vector<string> candidates = {
+        gexFilteredDir + "/EmptyDrops/EmptyDrops/emptydrops_results.tsv",
+        gexFilteredDir + "/EmptyDrops/EmptyDrops/emptydrops_results.tsv.gz",
+        gexFilteredDir + "/EmptyDrops/emptydrops_results.tsv",
+        gexFilteredDir + "/EmptyDrops/emptydrops_results.tsv.gz"
+    };
+    for (const auto& path : candidates) {
+        if (pathExists(path)) {
+            return path;
+        }
+    }
+    return "";
+}
+
+static vector<string> splitTabFields(const string& line) {
+    vector<string> fields;
+    string field;
+    std::istringstream ss(line);
+    while (std::getline(ss, field, '\t')) {
+        fields.push_back(field);
+    }
+    if (!line.empty() && line.back() == '\t') {
+        fields.push_back("");
+    }
+    return fields;
+}
+
+static string stripCrisprBarcodeSuffix(const string& barcode) {
+    size_t dashPos = barcode.find_last_of('-');
+    if (dashPos != string::npos && dashPos < barcode.size() - 1) {
+        bool digits = true;
+        for (size_t i = dashPos + 1; i < barcode.size(); ++i) {
+            if (!std::isdigit(static_cast<unsigned char>(barcode[i]))) {
+                digits = false;
+                break;
+            }
+        }
+        if (digits) {
+            return barcode.substr(0, dashPos);
+        }
+    }
+    return barcode;
+}
+
+static string crisprBarcodeRawKey(const string& barcode) {
+    return upperCopy(stripCrisprBarcodeSuffix(trimCopy(barcode)));
+}
+
+struct FinalGuideCellBarcodeSet {
+    string sourcePath;
+    std::unordered_set<string> rawKeys;
+    std::unordered_set<string> truKeys;
+    uint64_t rows = 0;
+    uint64_t simpleRows = 0;
+    uint64_t invalidRows = 0;
+};
+
+static bool isSimpleCellValue(const string& value) {
+    const string token = lowerCopy(trimCopy(value));
+    return token == "1" || token == "true" || token == "yes";
+}
+
+static bool loadFinalGuideCellBarcodesFromEmptyDrops(const string& emptyDropsResultsPath,
+                                                     const string& emptyDropsBarcodeChem,
+                                                     FinalGuideCellBarcodeSet& out,
+                                                     string& error) {
+    out = FinalGuideCellBarcodeSet();
+    out.sourcePath = emptyDropsResultsPath;
+    if (emptyDropsResultsPath.empty()) {
+        error = "EmptyDrops results path is empty";
+        return false;
+    }
+
+    vector<string> lines;
+    try {
+        lines = PfMultiMerge::readLines(emptyDropsResultsPath);
+    } catch (const exception& e) {
+        error = e.what();
+        return false;
+    }
+    if (lines.empty()) {
+        error = "EmptyDrops results file is empty";
+        return false;
+    }
+
+    const vector<string> header = splitTabFields(lines.front());
+    int barcodeCol = -1;
+    int simpleCol = -1;
+    for (size_t i = 0; i < header.size(); ++i) {
+        const string name = lowerCopy(trimCopy(header[i]));
+        if (name == "barcode") {
+            barcodeCol = static_cast<int>(i);
+        } else if (name == "is_simple_cell") {
+            simpleCol = static_cast<int>(i);
+        }
+    }
+    if (barcodeCol < 0 || simpleCol < 0) {
+        error = "EmptyDrops results must contain barcode and is_simple_cell columns";
+        return false;
+    }
+
+    out.rawKeys.reserve(lines.size());
+    out.truKeys.reserve(lines.size());
+    for (size_t lineIdx = 1; lineIdx < lines.size(); ++lineIdx) {
+        const vector<string> fields = splitTabFields(lines[lineIdx]);
+        out.rows++;
+        if (barcodeCol >= static_cast<int>(fields.size()) ||
+            simpleCol >= static_cast<int>(fields.size())) {
+            out.invalidRows++;
+            continue;
+        }
+        if (!isSimpleCellValue(fields[simpleCol])) {
+            continue;
+        }
+        const string rawKey = crisprBarcodeRawKey(fields[barcodeCol]);
+        if (rawKey.empty()) {
+            out.invalidRows++;
+            continue;
+        }
+        out.simpleRows++;
+        out.rawKeys.insert(rawKey);
+        out.truKeys.insert(normalizeBarcodeToTru(rawKey, emptyDropsBarcodeChem));
+    }
+
+    if (out.rawKeys.empty() && out.truKeys.empty()) {
+        error = "EmptyDrops results contained no is_simple_cell == 1 barcodes";
+        return false;
+    }
+    return true;
+}
+
+static bool finalGuideCellSetContains(const FinalGuideCellBarcodeSet& finalCells,
+                                      const string& barcode,
+                                      const string& mexBarcodeChem) {
+    const string rawKey = crisprBarcodeRawKey(barcode);
+    if (finalCells.rawKeys.find(rawKey) != finalCells.rawKeys.end()) {
+        return true;
+    }
+    const string truKey = normalizeBarcodeToTru(rawKey, mexBarcodeChem);
+    return finalCells.truKeys.find(truKey) != finalCells.truKeys.end();
+}
+
+static PfMultiMerge::MexData subsetCrisprMexToFinalCells(const PfMultiMerge::MexData& crisprData,
+                                                         const FinalGuideCellBarcodeSet& finalCells,
+                                                         const string& mexBarcodeChem) {
+    PfMultiMerge::MexData subset;
+    subset.features = crisprData.features;
+    subset.featureNames = crisprData.featureNames;
+    subset.featureTypes = crisprData.featureTypes;
+
+    vector<uint32_t> oldToNew(crisprData.barcodes.size(), std::numeric_limits<uint32_t>::max());
+    subset.barcodes.reserve(std::min(crisprData.barcodes.size(), finalCells.rawKeys.size()));
+    for (size_t i = 0; i < crisprData.barcodes.size(); ++i) {
+        if (finalGuideCellSetContains(finalCells, crisprData.barcodes[i], mexBarcodeChem)) {
+            oldToNew[i] = static_cast<uint32_t>(subset.barcodes.size());
+            subset.barcodes.push_back(crisprData.barcodes[i]);
+        }
+    }
+
+    subset.triplets.reserve(crisprData.triplets.size());
+    for (const auto& t : crisprData.triplets) {
+        if (t.cell_idx >= oldToNew.size()) {
+            continue;
+        }
+        const uint32_t newCell = oldToNew[t.cell_idx];
+        if (newCell == std::numeric_limits<uint32_t>::max()) {
+            continue;
+        }
+        MexWriter::Triplet newT;
+        newT.cell_idx = newCell;
+        newT.gene_idx = t.gene_idx;
+        newT.count = t.count;
+        subset.triplets.push_back(newT);
+    }
+    return subset;
+}
+
 /**
- * Run CRISPR feature calling on filtered MEX with CRISPR Guide Capture features.
+ * Run CRISPR feature calling on CRISPR Guide Capture features.
  *
  * @param rawMexDir Directory containing raw_feature_bc_matrix
  * @param filteredMexDir Directory containing filtered_feature_bc_matrix
  * @param outputDir Output directory for crispr_analysis/
+ * @param emptyDropsResultsPath EmptyDrops results whose is_simple_cell==1 rows
+ *        define the guide-calling/q-value universe. If unavailable, falls back
+ *        to filteredMexDir for non-EmptyDrops workflows.
+ * @param emptyDropsBarcodeChem Barcode namespace of EmptyDrops results
+ * @param mexBarcodeChem Barcode namespace of raw/filtered output MEX files
  * @param minUmi Minimum UMI threshold for GMM calling
  * @param guideCaller auto|gmm|ambient-fdr|both|none
  * @param guideFdr Ambient-FDR default threshold
@@ -1541,6 +1729,9 @@ static int writeCrisprOnlyMex(const PfMultiMerge::MexData& crisprData,
 static int runCrisprFeatureCalling(const string& rawMexDir,
                                     const string& filteredMexDir,
                                     const string& outputDir,
+                                    const string& emptyDropsResultsPath,
+                                    const string& emptyDropsBarcodeChem,
+                                    const string& mexBarcodeChem,
                                     int minUmi,
                                     const string& guideCaller,
                                     double guideFdr,
@@ -1596,8 +1787,50 @@ static int runCrisprFeatureCalling(const string& rawMexDir,
     }
     
     logStream << "  CRISPR features found: " << crisprData.features.size() << "\n";
-    logStream << "  Barcodes: " << crisprData.barcodes.size() << "\n";
-    logStream << "  Non-zero entries: " << crisprData.triplets.size() << "\n";
+    logStream << "  Candidate filtered barcodes: " << crisprData.barcodes.size() << "\n";
+    logStream << "  Candidate non-zero entries: " << crisprData.triplets.size() << "\n";
+
+    bool usingFinalCells = false;
+    FinalGuideCellBarcodeSet finalCells;
+    if (!emptyDropsResultsPath.empty()) {
+        string loadError;
+        if (loadFinalGuideCellBarcodesFromEmptyDrops(emptyDropsResultsPath,
+                                                     emptyDropsBarcodeChem,
+                                                     finalCells,
+                                                     loadError)) {
+            PfMultiMerge::MexData finalCrisprData =
+                subsetCrisprMexToFinalCells(crisprData, finalCells, mexBarcodeChem);
+            if (finalCrisprData.barcodes.empty()) {
+                logStream << "ERROR: EmptyDrops simple-cell set matched zero CRISPR MEX barcodes: "
+                          << emptyDropsResultsPath << "\n";
+                return -1;
+            }
+            usingFinalCells = true;
+            logStream << "  Guide cell universe: EmptyDrops simple-cell knee\n";
+            logStream << "  EmptyDrops results: " << emptyDropsResultsPath << "\n";
+            logStream << "  EmptyDrops rows: " << finalCells.rows
+                      << ", simple rows: " << finalCells.simpleRows
+                      << ", unique simple barcodes: " << finalCells.rawKeys.size()
+                      << ", invalid rows: " << finalCells.invalidRows << "\n";
+            logStream << "  Final guide-call barcodes: " << finalCrisprData.barcodes.size() << "\n";
+            logStream << "  Permissive filtered barcodes moved to ambient pool: "
+                      << (crisprData.barcodes.size() - finalCrisprData.barcodes.size()) << "\n";
+            logStream << "  Final guide non-zero entries: " << finalCrisprData.triplets.size() << "\n";
+            crisprData = std::move(finalCrisprData);
+        } else {
+            logStream << "WARNING: Failed to load EmptyDrops simple-cell guide universe from "
+                      << emptyDropsResultsPath << ": " << loadError
+                      << "; falling back to filtered_feature_bc_matrix barcodes\n";
+        }
+    } else {
+        logStream << "WARNING: EmptyDrops simple-cell results not found; falling back to "
+                  << "filtered_feature_bc_matrix barcodes for CRISPR guide calling\n";
+    }
+    if (!usingFinalCells) {
+        logStream << "  Guide cell universe: filtered_feature_bc_matrix barcodes\n";
+        logStream << "  Final guide-call barcodes: " << crisprData.barcodes.size() << "\n";
+        logStream << "  Final guide non-zero entries: " << crisprData.triplets.size() << "\n";
+    }
     
     string filteredTempMexDir = outputDir + "/.crispr_filtered_mex_tmp";
     int ret = writeCrisprOnlyMex(crisprData, filteredTempMexDir, logStream);
@@ -3338,9 +3571,13 @@ int finalizePfMultiConfig(Parameters& P,
         }
         if (hasCrisprFeatures) {
             string outsDir = outPrefix + "/outs";
+            const string emptyDropsResultsPath = resolveOptionalEmptyDropsResultsPath(filteredOut);
             ret = runCrisprFeatureCalling(rawOutDir,
                                           filteredOutDir,
                                           outsDir,
+                                          emptyDropsResultsPath,
+                                          gexNormalizationChem,
+                                          outputChem,
                                           P.pfMulti.crMinUmi,
                                           P.pfMulti.crGuideCaller,
                                           P.pfMulti.crGuideFdr,

@@ -5,8 +5,8 @@ Date: 2026-06-13
 Update after QC default work: the implemented integrated STAR default is
 `--crGuideCaller auto`, which preserves the root Cell Ranger-compatible GMM
 outputs and writes the ambient-FDR sidecar under `outs/crispr_analysis/ambient_fdr/`
-when raw and filtered guide MEX are available. Use explicit `--crGuideCaller gmm`
-for strict GMM-only parity output.
+when raw guide MEX and the finalized EmptyDrops simple-cell knee are available.
+Use explicit `--crGuideCaller gmm` for strict GMM-only parity output.
 
 ## Agent Start And Branching
 
@@ -71,8 +71,12 @@ Out of scope for the first implementation:
 - materializing dense cell-by-guide q-value matrices;
 - computing q-values for rejected/non-cell barcodes.
 
-The raw MEX participates in ambient estimation only. The call universe is the
-final filtered cell barcode set.
+The raw MEX participates in ambient estimation only. In the integrated STAR
+path, the call universe is the finalized EmptyDrops simple-cell knee: barcodes
+with `is_simple_cell == 1` in
+`Solo.out/<Gene|GeneFull>/filtered/EmptyDrops/EmptyDrops/emptydrops_results.tsv`.
+The broader `outs/filtered_feature_bc_matrix` can include permissive rescued
+tail barcodes and must not define guide calls or q-values.
 
 
 ## Why This Matters
@@ -112,19 +116,21 @@ Relevant code:
 Current automatic path:
 
 1. `PfMultiProcess.cpp` writes `outs/raw_feature_bc_matrix/`.
-2. It writes `outs/filtered_feature_bc_matrix/` on the final GEX cell set.
+2. It writes `outs/filtered_feature_bc_matrix/` on STARsolo's permissive
+   filtered candidate set, which may include rescued low-UMI tail barcodes.
 3. If any `CRISPR Guide Capture` feature library is present, it filters the
-   **filtered** combined MEX to CRISPR features.
-4. It writes a temporary CRISPR-only MEX.
+   combined MEX to CRISPR features and restricts the caller universe to
+   EmptyDrops `is_simple_cell == 1` barcodes.
+4. It writes a temporary CRISPR-only MEX for the finalized guide-cell universe.
 5. It calls `cf_process_mex_dir_gmm()`.
 6. Outputs land under `outs/crispr_analysis/`.
 
 That is sufficient for GMM compatibility. Ambient-FDR additionally needs raw
 guide counts from non-cell barcodes to estimate the ambient null.
 
-The existing GMM caller is already post-cell-calling: it reads the filtered MEX,
-filters that matrix to `CRISPR Guide Capture`, and emits calls only for filtered
-cell barcodes. Ambient-FDR should preserve that boundary.
+The existing GMM caller is post-cell-calling: integrated STAR must pass it the
+same finalized guide-cell universe used by ambient-FDR, not the permissive
+filtered matrix barcode set.
 
 ## Required Inputs
 
@@ -140,12 +146,13 @@ In the integrated STAR path, use:
 
 ```text
 ambient source:   outs/raw_feature_bc_matrix filtered to CRISPR Guide Capture
-call/qvalue set:  outs/filtered_feature_bc_matrix/barcodes.tsv(.gz)
+call/qvalue set:  EmptyDrops is_simple_cell == 1 knee barcodes
 output location:  outs/crispr_analysis/ambient_fdr/
 ```
 
-Raw non-cell barcodes are for background estimation only. Do not compute or
-store guide q-values for rejected barcodes.
+Raw barcodes not in the finalized knee, including rescued-tail candidates in
+`outs/filtered_feature_bc_matrix`, are for background estimation only. Do not
+compute or store guide q-values for rejected or rescued-tail barcodes.
 
 In `star_feature_call --call-only`, require either:
 
@@ -258,7 +265,8 @@ Recommended defaults:
 
 - current CR-compat profiles: `--crGuideCaller auto`
 - new perturb-QC profiles: `--crGuideCaller auto` or explicit `both`
-- Multiomics/CAT-ATAC profiles: `--crGuideCaller auto` where raw+filtered guide MEX are available
+- Multiomics/CAT-ATAC profiles: `--crGuideCaller auto` where raw guide MEX and
+  finalized called-cell metadata are available
 - default FDR: `0.01`
 - default q-value storage: `sparse`
 
@@ -281,8 +289,9 @@ ambient-FDR sidecar.
 1. Add a shared ambient-FDR implementation in `process_features`.
    - Read raw and filtered MEX.
    - Filter both matrices to `CRISPR Guide Capture`.
-   - Use raw barcodes not present in the filtered cell set as the ambient pool.
-   - Compute q-values only for observed entries in filtered cells.
+   - Use raw barcodes not present in the finalized called-cell set as the
+     ambient pool.
+   - Compute q-values only for observed entries in finalized called cells.
    - Write sparse q-value output and per-cell calls.
 2. Expose the caller through `call_features` / `star_feature_call`.
    - Add CLI options for `--guide-caller`, `--guide-fdr`,
@@ -290,7 +299,8 @@ ambient-FDR sidecar.
      equivalent existing MEX controls.
    - Keep `--compat-perturb` behavior GMM-only unless explicitly overridden.
 3. Integrate with STAR `PfMultiProcess.cpp` and `CrMultiProcess.cpp`.
-   - Pass both `raw_feature_bc_matrix` and `filtered_feature_bc_matrix`.
+   - Pass raw guide MEX plus a called-cell guide MEX subset to EmptyDrops
+     `is_simple_cell == 1` barcodes.
    - Run the selected caller(s) after filtered MEX is written.
    - Preserve current GMM outputs and locations.
 4. Add parameters in `Parameters.*` and `parametersDefault`.
@@ -325,7 +335,7 @@ implementation centered on:
 
 ```text
 ambient counts from raw non-cell barcodes
-observed guide counts from filtered cells
+observed guide counts from finalized called cells
 ```
 
 Do not create a second divergent statistical implementation in STAR core.
@@ -420,8 +430,8 @@ Run after guide-arm support lands:
 - Keep memory O(nnz + n_cells + n_guides), not O(n_cells * n_guides).
 - Preserve existing `crispr_analysis/` files and names for compatibility.
 - Use sparse Matrix Market orientation consistently with existing MEX writers.
-- Log the number of raw barcodes, filtered cells, ambient barcodes, guides,
-  observed filtered guide entries, and calls at the default FDR.
+- Log the number of raw barcodes, finalized called cells, ambient barcodes,
+  guides, observed guide entries, and calls at the default FDR.
 
 ## Done Criteria
 

@@ -190,8 +190,8 @@ See `tests/crispr_feature_calling_comparison_report.md` for validation details.
 
 Perturb-seq runs default to `auto`: Cell Ranger-compatible GMM calls stay in
 the standard root `crispr_analysis/` files, and ambient-background FDR calls are
-written as QC/tuning sidecar outputs when raw and filtered guide MEX are
-available.
+written as QC/tuning sidecar outputs when raw guide MEX and the finalized
+EmptyDrops simple-cell knee are available.
 
 ```bash
 STAR ... --pfMultiConfig config.csv
@@ -210,15 +210,18 @@ Parameters:
 
 `auto` preserves compatibility mode root outputs by running the
 Cell Ranger-compatible GMM caller, and also writes ambient-FDR QC outputs when
-raw and filtered guide MEX are available. Use `gmm` for strict GMM-only output,
-`both` for explicit GMM plus ambient-FDR, `ambient-fdr` for FDR-only outputs,
-and `none` to skip guide calling.
+raw guide MEX and the finalized cell set are available. Use `gmm` for strict
+GMM-only output, `both` for explicit GMM plus ambient-FDR, `ambient-fdr` for
+FDR-only outputs, and `none` to skip guide calling.
 
 Ambient-FDR estimates guide background from raw CRISPR guide UMIs in non-cell
-barcodes, then computes q-values only for final filtered cells. It applies BH
-over the full filtered-cell by guide universe (`n_cells * n_guides`) while
-sorting only observed cell-guide p-values. Missing cell-guide entries are not
-materialized; they imply `qvalue = 1` and are non-calls.
+barcodes, then computes q-values only for the finalized called-cell universe.
+In integrated STAR runs that universe is the EmptyDrops simple-cell knee
+(`is_simple_cell == 1`), not rescued-tail candidates that may also appear in
+`outs/filtered_feature_bc_matrix`. It applies BH over the full called-cell by
+guide universe (`n_cells * n_guides`) while sorting only observed cell-guide
+p-values. Missing cell-guide entries are not materialized; they imply
+`qvalue = 1` and are non-calls.
 
 Ambient-FDR outputs are written under `outs/crispr_analysis/ambient_fdr/`:
 
@@ -250,8 +253,9 @@ This keeps manual tuning simple after inspecting QC plots, e.g. filtering on
 `guide_fdr_min_qvalue` and `guide_fdr_min_called_umi`.
 
 `star_feature_call --call-only` can run the same caller from existing MEX
-outputs by passing the filtered-cell MEX as `--mex-dir` and the raw MEX as
-`--raw-mex-dir`:
+outputs by passing the desired called-cell MEX as `--mex-dir` and the raw MEX
+as `--raw-mex-dir`. For post hoc CAT-ATAC/Perturb-seq QC, use a knee-filtered
+MEX if you want the integrated STAR cell universe.
 
 ```bash
 star_feature_call --call-only --compat-perturb \
