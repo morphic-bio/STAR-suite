@@ -305,6 +305,8 @@ MexData readMex(const string& mexDir) {
     
     string matrixPath = resolveMexFile(mexDir, "matrix.mtx");
     bool isGz = (matrixPath.length() > 3 && matrixPath.substr(matrixPath.length() - 3) == ".gz");
+    uint32_t matrixNrows = 0;
+    uint32_t matrixNcols = 0;
     
     if (isGz) {
         gzFile file = gzopen(matrixPath.c_str(), "rb");
@@ -316,7 +318,6 @@ MexData readMex(const string& mexDir) {
 
         string line;
         bool headerDone = false;
-        uint32_t nrows = 0, ncols = 0;
         uint64_t nnz = 0;
         
         while (gzGetLine(file, line)) {
@@ -328,7 +329,7 @@ MexData readMex(const string& mexDir) {
             
             if (!headerDone) {
                 istringstream ss(line);
-                ss >> nrows >> ncols >> nnz;
+                ss >> matrixNrows >> matrixNcols >> nnz;
                 headerDone = true;
                 continue;
             }
@@ -362,7 +363,6 @@ MexData readMex(const string& mexDir) {
         
         string line;
         bool headerDone = false;
-        uint32_t nrows = 0, ncols = 0;
         uint64_t nnz = 0;
         
         while (getline(file, line)) {
@@ -371,7 +371,7 @@ MexData readMex(const string& mexDir) {
             
             if (!headerDone) {
                 istringstream ss(line);
-                ss >> nrows >> ncols >> nnz;
+                ss >> matrixNrows >> matrixNcols >> nnz;
                 headerDone = true;
                 continue;
             }
@@ -394,6 +394,15 @@ MexData readMex(const string& mexDir) {
     if (data.features.size() != data.featureNames.size() || 
         data.features.size() != data.featureTypes.size()) {
         throw runtime_error("Features array size mismatch");
+    }
+
+    if (matrixNrows != data.features.size() || matrixNcols != data.barcodes.size()) {
+        ostringstream err;
+        err << "Matrix Market dimension mismatch in " << matrixPath
+            << ": header rows=" << matrixNrows << " cols=" << matrixNcols
+            << " but features.tsv has " << data.features.size()
+            << " rows and barcodes.tsv has " << data.barcodes.size() << " columns";
+        throw runtime_error(err.str());
     }
     
     return data;

@@ -17,6 +17,7 @@ void check_filecounts(fastq_files_collection *fastq_files);
 int count_character(char *string, char character);
 int compare_filenames(const void *a, const void *b);
 int count_files_with_pattern(const char *directory_path, const char *pattern);
+char **find_files_with_pattern(const char *directory_path, const char *pattern, int *num_files_found);
 void organize_fastq_files_by_directory(int positional_arg_count, int argc, char *argv[], int optind, char *barcodeFastqFilesString, char *forwardFastqFilesString, char *reverseFastqFilesString, fastq_files_collection *fastq_files, char *barcode_pattern, char *forward_pattern, char *reverse_pattern);
 void organize_fastq_files_by_type(int positional_arg_count, int argc, char *argv[], int optind, char *barcodeFastqFilesString, char *forwardFastqFilesString, char *reverseFastqFilesString, fastq_files_collection *fastq_files, char *barcode_pattern, char *forward_pattern, char *reverse_pattern, int sample_flag);
 void sort_samples_by_size(fastq_files_collection *fastq_files, int *sample_order);

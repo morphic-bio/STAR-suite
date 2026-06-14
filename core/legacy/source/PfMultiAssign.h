@@ -3,6 +3,7 @@
 
 #include "IncludeDefine.h"
 #include "PfMultiConfig.h"
+#include "pf_split_read.h"
 
 /**
  * @file PfMultiAssign.h
@@ -52,6 +53,8 @@ struct AssignOptions {
     bool skipHeatmaps = false;
     string cbqMode = "auto"; // auto | stream | range
     string sampleName;
+    bool useSplitReadLayout = false;
+    pf_split_read_layout splitReadLayout = {};
 };
 
 struct AssignResult {
