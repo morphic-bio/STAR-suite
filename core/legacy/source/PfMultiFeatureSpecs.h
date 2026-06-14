@@ -14,11 +14,36 @@ struct FeatureSpec {
 };
 
 // Keys are normalized: lowercase, alphanumeric only (matching normalizedFeatureType output)
+inline string normalizedFeatureRole(const string& value) {
+    string normalized;
+    normalized.reserve(value.size());
+    for (unsigned char c : value) {
+        if (std::isalnum(c)) {
+            normalized.push_back(static_cast<char>(std::tolower(c)));
+        }
+    }
+    return normalized;
+}
+
+inline bool isProteinAdtFeatureRole(const string& normalizedRole) {
+    return normalizedRole == "antibodycapture"
+        || normalizedRole == "adt"
+        || normalizedRole == "protein";
+}
+
+inline bool shouldEmitAdtMexOutput(const string& featureRefType,
+                                   const string& libraryType) {
+    return isProteinAdtFeatureRole(normalizedFeatureRole(featureRefType))
+        || isProteinAdtFeatureRole(normalizedFeatureRole(libraryType));
+}
+
 inline map<string, string> knownFeatureRefTypeMap() {
     return {
         {"crisprguidecapture", "CRISPR Guide Capture"},
         {"crisprguide", "CRISPR Guide Capture"},
         {"antibodycapture", "Antibody Capture"},
+        {"adt", "Antibody Capture"},
+        {"protein", "Antibody Capture"},
         {"cellplexcmo", "Multiplexing Capture"},
         {"multiplexingcapture", "Multiplexing Capture"}
     };

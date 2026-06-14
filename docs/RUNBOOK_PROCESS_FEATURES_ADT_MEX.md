@@ -102,3 +102,25 @@ core/features/process_features/tests/test_adt_mex.sh
 Merged to `master` on 2026-06-13 from `feature/process-features-adt-mex` (commits
 `3f6f02a`–`bd41418`). ADT MEX output is available on `master` via
 `assignBarcodes --output-mode adt_mex`.
+
+## pf-multi feature library arm
+
+ADT/protein quantification is **not** a separate orchestration layer. In pf-multi
+configs it is another `assignBarcodes` library arm, matching gRNA/LARRY:
+
+| `feature_types` value | Routed `featureRefType` | pf-multi assign mode |
+|-----------------------|-------------------------|----------------------|
+| `Antibody Capture` | Antibody Capture | ADT MEX (`output_mode=adt_mex`) |
+| `ADT` | Antibody Capture | ADT MEX |
+| `Protein` | Antibody Capture | ADT MEX |
+
+Output layout: `cr_assign/<feature_types>/<star_library_id>/<sample>/` with
+gzipped MEX plus `feature_reference.csv`, `protein_quant_summary.json`, and
+`protein_quant_command.txt`. Multiomics Suite reads `protein.mex_dir` from that
+sample directory.
+
+Synthetic multi-library smoke test:
+
+```bash
+bash tests/multi_feature/test_adt_protein_multifeature_arm.sh
+```
