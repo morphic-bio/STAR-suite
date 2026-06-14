@@ -81,7 +81,8 @@ int main(int argc, char** argv) {
 HARNESS_EOF
 
 SOURCE_DIR="$REPO_ROOT/core/legacy/source"
-g++ -std=c++11 -O2 -I"$SOURCE_DIR" \
+PF_INCLUDE="$REPO_ROOT/core/features/process_features/include"
+g++ -std=c++11 -O2 -I"$SOURCE_DIR" -I"$PF_INCLUDE" \
     "$WORK_DIR/test_specs.cpp" \
     "$SOURCE_DIR/PfMultiConfig.o" \
     -o "$HARNESS" 2>&1
@@ -119,6 +120,38 @@ if echo "$OUTPUT" | grep -q 'SPEC:1.*libraryType=Antibody Capture.*featureRefTyp
     pass "Antibody spec: correct type and exactly 1 match"
 else
     fail "Antibody spec should match exactly 1 library"
+fi
+
+# --- Test 1b: Protein/ADT aliases map to Antibody Capture ---
+echo ""
+echo "--- Test 1b: Protein/ADT aliases ---"
+cat > "$WORK_DIR/config_protein_aliases.csv" << EOF
+[libraries]
+fastqs,sample,feature_types
+/path/to/mRNA,S1,Gene Expression
+/path/to/adt,S1,ADT
+/path/to/protein,S1,Protein
+EOF
+
+OUTPUT=$("$HARNESS" "$WORK_DIR/config_protein_aliases.csv" 2>&1)
+echo "$OUTPUT"
+
+if echo "$OUTPUT" | grep -q 'TOTAL_SPECS=2'; then
+    pass "2 feature specs (ADT + Protein aliases)"
+else
+    fail "expected 2 feature specs for ADT and Protein"
+fi
+
+if echo "$OUTPUT" | grep -q 'libraryType=ADT.*featureRefType=Antibody Capture'; then
+    pass "ADT alias maps to Antibody Capture featureRefType"
+else
+    fail "ADT alias should map to Antibody Capture"
+fi
+
+if echo "$OUTPUT" | grep -q 'libraryType=Protein.*featureRefType=Antibody Capture'; then
+    pass "Protein alias maps to Antibody Capture featureRefType"
+else
+    fail "Protein alias should map to Antibody Capture"
 fi
 
 # --- Test 2: Custom type routes with verbatim featureRefType ---

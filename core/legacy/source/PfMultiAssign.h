@@ -51,6 +51,7 @@ struct AssignOptions {
     int featureModeBootstrapReads = 0;
     bool useHotHash = false;
     bool skipHeatmaps = false;
+    bool adtMexOutput = false; // emit 10x protein MEX sidecars (assignBarcodes --output-mode adt_mex)
     string cbqMode = "auto"; // auto | stream | range
     string sampleName;
     bool useSplitReadLayout = false;

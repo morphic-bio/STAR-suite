@@ -86,7 +86,8 @@ int main(int argc, char** argv) {
 HARNESS_EOF
 
 SOURCE_DIR="$REPO_ROOT/core/legacy/source"
-g++ -std=c++11 -O2 -I"$SOURCE_DIR" \
+PF_INCLUDE="$REPO_ROOT/core/features/process_features/include"
+g++ -std=c++11 -O2 -I"$SOURCE_DIR" -I"$PF_INCLUDE" \
     "$WORK_DIR/test_guard.cpp" \
     "$SOURCE_DIR/PfMultiConfig.o" \
     -o "$HARNESS" 2>&1

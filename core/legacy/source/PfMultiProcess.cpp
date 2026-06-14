@@ -58,6 +58,7 @@ struct PfPreparedFeatureLibrary {
     bool usedFilteredRef = false;
     int starMaxHamming = -1;    // Per-library max Hamming override (-1 = use global)
     bool useSplitReadLayout = false;
+    bool adtMexOutput = false;
     pf_split_read_layout splitReadLayout = {};
     string starBarcodeOutputMap;
     string starFeatureSearchMode;
@@ -164,6 +165,7 @@ struct PfMultiFeatureRun {
     string resolvedFastq;
     string resolvedChemRequest;
     bool explicitChem = false;
+    bool adtMexOutput = false;
     int returnCode = 0;
 };
 
@@ -1401,6 +1403,9 @@ static PfMultiPreparedContext buildPfMultiPreparedContext(const PfMultiPreloadIn
             PfPreparedFeatureLibrary prepared;
             prepared.libraryType = spec.libraryType;
             prepared.featureRefType = spec.featureRefType;
+            prepared.adtMexOutput =
+                PfMultiFeatureSpecs::shouldEmitAdtMexOutput(
+                    spec.featureRefType, spec.libraryType);
             prepared.resolvedFastq =
                 PfMultiConfig::resolveFastqDir(lib.fastqs, input.crFastqRoot, fastqMap);
             prepared.sampleName = lib.sample.empty()
@@ -1462,6 +1467,7 @@ static PfMultiPreparedContext buildPfMultiPreparedContext(const PfMultiPreloadIn
                     << ", star_max_hamming=" << (prepared.starMaxHamming >= 0 ? std::to_string(prepared.starMaxHamming) : "(global)")
                     << ", whitelist=" << prepared.whitelistPath
                     << ", featureRef=" << prepared.featureRefPath
+                    << ", adt_mex_output=" << (prepared.adtMexOutput ? "yes" : "no")
                     << "\n";
 
             if (!prepared.usedFilteredRef && lib.starFeatureRef.empty()) {
@@ -2052,6 +2058,11 @@ std::shared_ptr<PfMultiAssignPhaseResult> runPfMultiAssignPhase(
                 pfConsumerBudgetThreads = std::max(pfConsumerThreadsForRun, pfConsumerBudgetThreads);
             }
             PfMultiAssign::AssignOptions runAssignOpts = assignOpts;
+            runAssignOpts.adtMexOutput = preparedLib.adtMexOutput;
+            if (preparedLib.adtMexOutput) {
+                P.inOut->logMain << "NOTICE: protein/ADT library_id=" << preparedLib.libraryId
+                                 << " will emit assignBarcodes ADT MEX output (output_mode=adt_mex)\n";
+            }
             if (preparedLib.starMaxHamming >= 0) {
                 runAssignOpts.maxHammingDistance = preparedLib.starMaxHamming;
             }
@@ -2746,6 +2757,7 @@ std::shared_ptr<PfMultiAssignPhaseResult> runPfMultiAssignPhase(
             run.resolvedFastq = resolvedFastq;
             run.resolvedChemRequest = preparedLib.resolvedChemRequest;
             run.explicitChem = preparedLib.explicitChem;
+            run.adtMexOutput = preparedLib.adtMexOutput;
             run.returnCode = assignResult.returnCode;
             featureRuns.push_back(run);
         }
@@ -2827,6 +2839,7 @@ std::shared_ptr<PfMultiAssignPhaseResult> runPfMultiAssignPhase(
                 manifest << "library_id\t" << run.libraryId << "\n";
                 manifest << "sample\t" << run.sampleName << "\n";
                 manifest << "feature_type\t" << run.featureType << "\n";
+                manifest << "adt_mex_output\t" << (run.adtMexOutput ? "yes" : "no") << "\n";
                 manifest << "fastq_dir\t" << run.resolvedFastq << "\n";
                 manifest << "feature_ref\t" << run.featureRefPath << "\n";
                 manifest << "whitelist\t" << run.whitelistPath << "\n";
