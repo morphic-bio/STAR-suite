@@ -43,6 +43,8 @@ update this file with its output location.
 - `/mnt/pikachu/catatac_gse288996/full_bench/catatac_trimodal_staged/` (persistent per-read-count ATAC triplet downsample cache for trimodal smokes, e.g. `atac_100000/`, `atac_2000000/`)
 - `/mnt/pikachu/catatac_gse288996/full_bench/catatac_trimodal_smoke_100k_20260614T023346Z/` (fresh 2026-06-14 CAT-ATAC trimodal 100K smoke output retained outside the repo checkout; wrapper passed and `trimodal_verify.json` records GEX, ATAC, guide, and merged-MEX checks)
 - `/mnt/pikachu/catatac_gse288996/full_bench/catatac_trimodal_smoke_100k_ambient_fdr_*/` (CAT-ATAC trimodal 100K smokes run from merged ambient-FDR builds; includes GEX, Chromap ATAC, guide pf-multi, CR-compatible GMM outputs, and `outs/crispr_analysis/ambient_fdr/` sparse q-value sidecars)
+- `/mnt/pikachu/catatac_gse288996/full_bench/catatac_trimodal_smoke_100k_knee_fdr_*/` (CAT-ATAC trimodal 100K smokes for EmptyDrops simple-cell guide-caller universe validation; includes GMM and ambient-FDR CRISPR outputs plus `trimodal_verify.json`)
+- `/mnt/pikachu/catatac_gse288996/full_bench/catatac_ambient_fdr_knee_validation_*/` (post hoc CAT-ATAC full-run guide-caller validation artifacts: CRISPR-only raw MEX, EmptyDrops-knee filtered MEX, ambient-FDR/GMM outputs, rescued-tail barcode list, and denominator/call-overlap summaries)
 - `tests/catatac_srr_naming_output/` (SRR32265756_{1,2,3}.fastq.gz symlink naming discovery smoke)
 - `tests/bulk_pe_multisample_equivalence_output_*/` (batch vs sequential bulk PE multisample equivalence smoke)
 - `tests/mixed_chemistry_filtered_smoke_output_*/` (downsampled MSK mixed-chemistry filtered-cell smoke)
@@ -107,6 +109,7 @@ update this file with its output location.
 - `/mnt/pikachu/guide_ambient_fdr_bench_*/` (ambient-FDR guide-caller call-only benchmark artifacts: guide-only MEX links, regenerated `calls/`, threshold/AUC/low-UMI summary TSVs, and run metadata)
 - `/storage/A375/guide_ambient_fdr_callonly_*/` (A375 call-only `star_feature_call --guide-caller both` CRISPR artifacts with GMM and ambient-FDR outputs)
 - `/storage/A375/test_cr_compat_ambient_fdr_*/` (A375 integrated CR-compatible STAR runs with `--crGuideCaller auto` or `both`, including combined MEX and `outs/crispr_analysis/ambient_fdr/`)
+- `/storage/A375/test_cr_compat_crispr_*/` (A375 integrated CR-compatible CRISPR regression outputs from `tests/test_cr_compat_crispr_calling.sh`, including combined MEX, sorted BAM, and root `outs/crispr_analysis/protospacer_*` compatibility files)
 - `tests/ucsf_velocyto_gexonly_exact_100k_output_*/` (GEX-only Velocyto exact/debug harness on a 100K downsampled corrected UCSF `EBs2_2/GEX` fixture; stream vs deterministic replay plus Gene/GeneFull parity)
 - `/storage/ucsf-velocyto-validation/` (GEX-only Velocyto baseline, parity, timing, and trace artifacts on corrected UCSF `EBs2_2/GEX`)
   - small GEX-only frozen baseline:

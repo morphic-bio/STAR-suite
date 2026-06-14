@@ -42,13 +42,14 @@ Core behavior:
 
 - Use raw CRISPR guide counts from `outs/raw_feature_bc_matrix` to estimate the
   ambient guide background from non-cell barcodes.
-- Use only the final filtered cell barcode set for q-values and calls.
+- Use only the finalized EmptyDrops simple-cell knee for q-values and calls in
+  integrated STAR runs (`is_simple_cell == 1` in `emptydrops_results.tsv`).
 - Do not compute or store q-values for rejected/non-cell barcodes.
 - Do not emit dense cell-by-guide q-value matrices. Dense is out of scope.
-- Emit sparse q-values only for observed guide counts in filtered cells.
+- Emit sparse q-values only for observed guide counts in finalized called cells.
 - Treat missing cell-guide entries as non-calls; statistically their q-value is
   1 and they are not materialized.
-- Apply BH using `n_filtered_cells * n_guides` as the number of tests, while
+- Apply BH using `n_called_cells * n_guides` as the number of tests, while
   sorting only observed-entry p-values.
 - Keep memory O(nnz + n_cells + n_guides), never O(n_cells * n_guides).
 
@@ -65,7 +66,7 @@ null[c,g] = Poisson(ambient_rate[g] * cell_depth[c])
 
 pvalue[c,g] = P(X >= observed_count[c,g] | null[c,g])
 
-Then apply Benjamini-Hochberg over the full filtered-cell by guide universe.
+Then apply Benjamini-Hochberg over the full called-cell by guide universe.
 
 Implementation targets:
 
