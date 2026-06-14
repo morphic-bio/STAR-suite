@@ -14,7 +14,10 @@
 typedef enum {
     MODE_DOMINANT = 0,
     MODE_GMM = 1,
-    MODE_NBEM = 2
+    MODE_NBEM = 2,
+    MODE_AMBIENT_FDR = 3,
+    MODE_BOTH = 4,
+    MODE_AUTO = 5
 } call_mode;
 
 static void print_usage(const char *prog) {
@@ -26,6 +29,7 @@ static void print_usage(const char *prog) {
     fprintf(stderr, "Mode selection (mutually exclusive):\n");
     fprintf(stderr, "      --gmm                  Use CR9-compatible GMM calling\n");
     fprintf(stderr, "      --nb-em                Use NB-EM calling (SCEPTRE-style)\n");
+    fprintf(stderr, "      --guide-caller <mode>  Guide caller: dominant|gmm|ambient-fdr|both|auto\n");
     fprintf(stderr, "      (default: dominant mode)\n\n");
     fprintf(stderr, "Dominant mode options:\n");
     fprintf(stderr, "  -m, --min_counts <int>     Minimum UMI count for a feature to be considered (default: 2)\n");
@@ -33,6 +37,11 @@ static void print_usage(const char *prog) {
     fprintf(stderr, "  -g, --margin <int>         Required margin over second-best feature (default: 1)\n\n");
     fprintf(stderr, "GMM mode options:\n");
     fprintf(stderr, "  -u, --min_umi <int>        Minimum UMI threshold for GMM calls (default: 3)\n\n");
+    fprintf(stderr, "Ambient-FDR guide options:\n");
+    fprintf(stderr, "      --raw-mex-dir DIR      Raw MEX for ambient estimation (required for ambient-fdr/both)\n");
+    fprintf(stderr, "      --guide-fdr <float>    Default FDR threshold (default: 0.01)\n");
+    fprintf(stderr, "      --guide-fdr-min-umi N  Minimum observed UMI count for calls (default: 1)\n");
+    fprintf(stderr, "      --guide-fdr-emit-qvalues <sparse|none>  Sparse q-value output (default: sparse)\n\n");
     fprintf(stderr, "NB-EM mode options:\n");
     fprintf(stderr, "      --moi <auto|low|high>  MOI mode (default: auto)\n");
     fprintf(stderr, "      --moi-min-umi <int>    Min UMI for guide presence in MOI calc (default: 1)\n");
@@ -58,6 +67,10 @@ static void print_usage(const char *prog) {
     fprintf(stderr, "  GMM mode:\n");
     fprintf(stderr, "    protospacer_calls_per_cell.csv, protospacer_calls_summary.csv,\n");
     fprintf(stderr, "    protospacer_umi_thresholds.csv, protospacer_umi_thresholds.json\n");
+    fprintf(stderr, "  Ambient-FDR mode:\n");
+    fprintf(stderr, "    guide_fdr_calls_per_cell.csv, guide_fdr_summary.json,\n");
+    fprintf(stderr, "    guide_fdr_threshold_sweep.tsv, guide_ambient_rates.tsv,\n");
+    fprintf(stderr, "    guide_qvalues.mtx and axes\n");
     fprintf(stderr, "  NB-EM mode:\n");
     fprintf(stderr, "    protospacer_calls_per_cell.csv, protospacer_calls_summary.csv,\n");
     fprintf(stderr, "    nbem_feature_params.csv, nbem_cell_posteriors.mtx, nbem_summary.json\n\n");
@@ -68,13 +81,15 @@ int main(int argc, char *argv[]) {
     cf_config *config = cf_config_create();
     cf_gmm_config *gmm_config = cf_gmm_config_create();
     cf_nbem_config *nbem_config = cf_nbem_config_create();
+    cf_ambient_fdr_config *ambient_config = cf_ambient_fdr_config_create();
     
-    if (!config || !gmm_config || !nbem_config) {
+    if (!config || !gmm_config || !nbem_config || !ambient_config) {
         fprintf(stderr, "Failed to create config\n");
         return 1;
     }
     
     call_mode mode = MODE_DOMINANT;
+    const char *raw_mex_dir = NULL;
     
     /* Long option codes for options without short equivalents */
     enum {
@@ -95,7 +110,12 @@ int main(int argc, char *argv[]) {
         OPT_NBEM_DEBUG_MAX,
         OPT_NBEM_DEBUG_CSV,
         OPT_NBEM_DEBUG_FEATURE,
-        OPT_NBEM_DEBUG_ITER_CSV
+        OPT_NBEM_DEBUG_ITER_CSV,
+        OPT_GUIDE_CALLER,
+        OPT_RAW_MEX_DIR,
+        OPT_GUIDE_FDR,
+        OPT_GUIDE_FDR_MIN_UMI,
+        OPT_GUIDE_FDR_EMIT_QVALUES
     };
     
     static struct option long_options[] = {
@@ -104,6 +124,11 @@ int main(int argc, char *argv[]) {
         {"margin", required_argument, 0, 'g'},
         {"gmm", no_argument, 0, OPT_GMM},
         {"nb-em", no_argument, 0, OPT_NBEM},
+        {"guide-caller", required_argument, 0, OPT_GUIDE_CALLER},
+        {"raw-mex-dir", required_argument, 0, OPT_RAW_MEX_DIR},
+        {"guide-fdr", required_argument, 0, OPT_GUIDE_FDR},
+        {"guide-fdr-min-umi", required_argument, 0, OPT_GUIDE_FDR_MIN_UMI},
+        {"guide-fdr-emit-qvalues", required_argument, 0, OPT_GUIDE_FDR_EMIT_QVALUES},
         {"min_umi", required_argument, 0, 'u'},
         {"moi", required_argument, 0, OPT_MOI},
         {"moi-min-umi", required_argument, 0, OPT_MOI_MIN_UMI},
@@ -139,18 +164,55 @@ int main(int argc, char *argv[]) {
                 break;
             case 'G':
             case OPT_GMM:
-                if (mode == MODE_NBEM) {
-                    fprintf(stderr, "Error: --gmm and --nb-em are mutually exclusive\n");
+                if (mode == MODE_NBEM || mode == MODE_AMBIENT_FDR || mode == MODE_BOTH || mode == MODE_AUTO) {
+                    fprintf(stderr, "Error: --gmm cannot be combined with --nb-em or --guide-caller\n");
                     return 1;
                 }
                 mode = MODE_GMM;
                 break;
             case OPT_NBEM:
-                if (mode == MODE_GMM) {
-                    fprintf(stderr, "Error: --gmm and --nb-em are mutually exclusive\n");
+                if (mode != MODE_DOMINANT) {
+                    fprintf(stderr, "Error: --nb-em cannot be combined with other guide caller modes\n");
                     return 1;
                 }
                 mode = MODE_NBEM;
+                break;
+            case OPT_GUIDE_CALLER:
+                if (strcmp(optarg, "dominant") == 0) {
+                    mode = MODE_DOMINANT;
+                } else if (strcmp(optarg, "gmm") == 0) {
+                    mode = MODE_GMM;
+                } else if (strcmp(optarg, "ambient-fdr") == 0) {
+                    mode = MODE_AMBIENT_FDR;
+                } else if (strcmp(optarg, "both") == 0) {
+                    mode = MODE_BOTH;
+                } else if (strcmp(optarg, "auto") == 0) {
+                    mode = MODE_AUTO;
+                } else if (strcmp(optarg, "nb-em") == 0) {
+                    mode = MODE_NBEM;
+                } else {
+                    fprintf(stderr, "Error: --guide-caller must be dominant, gmm, ambient-fdr, both, auto, or nb-em\n");
+                    return 1;
+                }
+                break;
+            case OPT_RAW_MEX_DIR:
+                raw_mex_dir = optarg;
+                break;
+            case OPT_GUIDE_FDR:
+                ambient_config->fdr_threshold = atof(optarg);
+                break;
+            case OPT_GUIDE_FDR_MIN_UMI:
+                ambient_config->min_umi = atoi(optarg);
+                break;
+            case OPT_GUIDE_FDR_EMIT_QVALUES:
+                if (strcmp(optarg, "sparse") == 0) {
+                    ambient_config->emit_sparse_qvalues = 1;
+                } else if (strcmp(optarg, "none") == 0) {
+                    ambient_config->emit_sparse_qvalues = 0;
+                } else {
+                    fprintf(stderr, "Error: --guide-fdr-emit-qvalues must be sparse or none\n");
+                    return 1;
+                }
                 break;
             case 'u':
                 gmm_config->min_umi_threshold = atoi(optarg);
@@ -218,12 +280,14 @@ int main(int argc, char *argv[]) {
                 cf_config_destroy(config);
                 cf_gmm_config_destroy(gmm_config);
                 cf_nbem_config_destroy(nbem_config);
+                cf_ambient_fdr_config_destroy(ambient_config);
                 return 0;
             default:
                 print_usage(argv[0]);
                 cf_config_destroy(config);
                 cf_gmm_config_destroy(gmm_config);
                 cf_nbem_config_destroy(nbem_config);
+                cf_ambient_fdr_config_destroy(ambient_config);
                 return 1;
         }
     }
@@ -234,6 +298,7 @@ int main(int argc, char *argv[]) {
         cf_config_destroy(config);
         cf_gmm_config_destroy(gmm_config);
         cf_nbem_config_destroy(nbem_config);
+        cf_ambient_fdr_config_destroy(ambient_config);
         return 1;
     }
     
@@ -242,7 +307,12 @@ int main(int argc, char *argv[]) {
     
     int result;
     
-    switch (mode) {
+    call_mode effective_mode = mode;
+    if (effective_mode == MODE_AUTO) {
+        effective_mode = raw_mex_dir ? MODE_BOTH : MODE_GMM;
+    }
+
+    switch (effective_mode) {
         case MODE_GMM:
             /* GMM mode (CR9-compatible) */
             printf("=== call_features (GMM mode) ===\n");
@@ -251,6 +321,46 @@ int main(int argc, char *argv[]) {
             printf("Config:\n");
             printf("  min_umi:        %d\n\n", gmm_config->min_umi_threshold);
             result = cf_process_mex_dir_gmm(mex_dir, output_dir, gmm_config);
+            break;
+
+        case MODE_AMBIENT_FDR:
+            if (!raw_mex_dir) {
+                fprintf(stderr, "Error: --raw-mex-dir is required for --guide-caller ambient-fdr\n");
+                result = -1;
+                break;
+            }
+            printf("=== call_features (ambient-FDR guide mode) ===\n");
+            printf("Raw MEX directory:      %s\n", raw_mex_dir);
+            printf("Filtered MEX directory: %s\n", mex_dir);
+            printf("Output directory:       %s\n", output_dir);
+            printf("Config:\n");
+            printf("  guide_fdr:            %.6g\n", ambient_config->fdr_threshold);
+            printf("  guide_fdr_min_umi:    %d\n", ambient_config->min_umi);
+            printf("  emit_qvalues:         %s\n\n", ambient_config->emit_sparse_qvalues ? "sparse" : "none");
+            result = cf_process_mex_dir_ambient_fdr(raw_mex_dir, mex_dir, output_dir, ambient_config);
+            break;
+
+        case MODE_BOTH:
+            if (!raw_mex_dir) {
+                fprintf(stderr, "Error: --raw-mex-dir is required for --guide-caller both\n");
+                result = -1;
+                break;
+            }
+            printf("=== call_features (GMM + ambient-FDR guide mode) ===\n");
+            printf("Filtered MEX directory: %s\n", mex_dir);
+            printf("Output directory:       %s\n", output_dir);
+            printf("Raw MEX directory:      %s\n", raw_mex_dir);
+            printf("Config:\n");
+            printf("  min_umi:              %d\n", gmm_config->min_umi_threshold);
+            printf("  guide_fdr:            %.6g\n", ambient_config->fdr_threshold);
+            printf("  guide_fdr_min_umi:    %d\n", ambient_config->min_umi);
+            printf("  emit_qvalues:         %s\n\n", ambient_config->emit_sparse_qvalues ? "sparse" : "none");
+            result = cf_process_mex_dir_gmm(mex_dir, output_dir, gmm_config);
+            if (result == 0) {
+                char ambient_dir[4096];
+                snprintf(ambient_dir, sizeof(ambient_dir), "%s/ambient_fdr", output_dir);
+                result = cf_process_mex_dir_ambient_fdr(raw_mex_dir, mex_dir, ambient_dir, ambient_config);
+            }
             break;
             
         case MODE_NBEM:
@@ -294,5 +404,6 @@ int main(int argc, char *argv[]) {
     cf_config_destroy(config);
     cf_gmm_config_destroy(gmm_config);
     cf_nbem_config_destroy(nbem_config);
+    cf_ambient_fdr_config_destroy(ambient_config);
     return (result == 0) ? 0 : 1;
 }

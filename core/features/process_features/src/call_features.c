@@ -11,6 +11,9 @@
 #include <errno.h>
 #include <inttypes.h>
 #include <zlib.h>
+#include <math.h>
+#include <ctype.h>
+#include <htslib/kfunc.h>
 
 #define MAX_LINE_LENGTH 4096
 
@@ -291,6 +294,161 @@ void cf_free_matrix(cf_sparse_matrix *matrix) {
     free(matrix->row_names_storage);
     free(matrix->col_names_storage);
     free(matrix);
+}
+
+static void cf_gmm_rstrip_line(char *line) {
+    if (!line) return;
+    size_t len = strlen(line);
+    while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r')) {
+        line[--len] = '\0';
+    }
+}
+
+static int cf_copy_name_subset(char ***names_out, char **storage_out,
+                               char **source_names, const int *selected_rows,
+                               int n_selected) {
+    size_t total_len = 0;
+    for (int i = 0; i < n_selected; i++) {
+        const char *name = source_names[selected_rows ? selected_rows[i] : i];
+        total_len += strlen(name ? name : "") + 1;
+    }
+
+    char **names = calloc(n_selected > 0 ? n_selected : 1, sizeof(char *));
+    char *storage = calloc(total_len > 0 ? total_len : 1, 1);
+    if (!names || !storage) {
+        free(names);
+        free(storage);
+        return -1;
+    }
+
+    char *ptr = storage;
+    for (int i = 0; i < n_selected; i++) {
+        const char *name = source_names[selected_rows ? selected_rows[i] : i];
+        size_t len = strlen(name ? name : "");
+        memcpy(ptr, name ? name : "", len + 1);
+        names[i] = ptr;
+        ptr += len + 1;
+    }
+
+    *names_out = names;
+    *storage_out = storage;
+    return 0;
+}
+
+static cf_sparse_matrix *cf_filter_matrix_rows(const cf_sparse_matrix *matrix,
+                                               const int *row_map,
+                                               const int *selected_rows,
+                                               int n_selected) {
+    if (!matrix || !row_map || !selected_rows || n_selected <= 0) return NULL;
+
+    cf_sparse_matrix *filtered = calloc(1, sizeof(cf_sparse_matrix));
+    if (!filtered) return NULL;
+
+    filtered->num_rows = n_selected;
+    filtered->num_cols = matrix->num_cols;
+
+    if (cf_copy_name_subset(&filtered->row_names, &filtered->row_names_storage,
+                            matrix->row_names, selected_rows, n_selected) != 0 ||
+        cf_copy_name_subset(&filtered->col_names, &filtered->col_names_storage,
+                            matrix->col_names, NULL, matrix->num_cols) != 0) {
+        cf_free_matrix(filtered);
+        return NULL;
+    }
+
+    int kept_entries = 0;
+    for (int i = 0; i < matrix->num_entries; i++) {
+        uint32_t row = matrix->entries[i].row;
+        if (row < (uint32_t)matrix->num_rows && row_map[row] >= 0) {
+            kept_entries++;
+        }
+    }
+
+    filtered->entries = calloc(kept_entries > 0 ? kept_entries : 1, sizeof(cf_matrix_entry));
+    if (!filtered->entries) {
+        cf_free_matrix(filtered);
+        return NULL;
+    }
+
+    for (int i = 0; i < matrix->num_entries; i++) {
+        uint32_t row = matrix->entries[i].row;
+        if (row >= (uint32_t)matrix->num_rows || row_map[row] < 0) continue;
+        filtered->entries[filtered->num_entries].row = (uint32_t)row_map[row];
+        filtered->entries[filtered->num_entries].col = matrix->entries[i].col;
+        filtered->entries[filtered->num_entries].value = matrix->entries[i].value;
+        filtered->num_entries++;
+    }
+
+    return filtered;
+}
+
+static cf_sparse_matrix *cf_filter_matrix_to_crispr_guides(const char *mex_dir,
+                                                          cf_sparse_matrix *matrix,
+                                                          int *filtered_out) {
+    if (filtered_out) *filtered_out = 0;
+    if (!mex_dir || !matrix) return NULL;
+
+    char features_path[MAX_LINE_LENGTH];
+    snprintf(features_path, sizeof(features_path), "%s/features.tsv", mex_dir);
+    if (!file_exists_with_gz(features_path)) {
+        snprintf(features_path, sizeof(features_path), "%s/features.txt", mex_dir);
+    }
+    if (!file_exists_with_gz(features_path)) {
+        return matrix;
+    }
+
+    cf_file fh;
+    if (open_text_file(features_path, &fh) != 0) {
+        return matrix;
+    }
+
+    int *row_map = malloc(matrix->num_rows * sizeof(int));
+    int *selected_rows = malloc(matrix->num_rows * sizeof(int));
+    if (!row_map || !selected_rows) {
+        free(row_map);
+        free(selected_rows);
+        close_text_file(&fh);
+        return NULL;
+    }
+    for (int i = 0; i < matrix->num_rows; i++) row_map[i] = -1;
+
+    char line[MAX_LINE_LENGTH];
+    int row = 0;
+    int n_guides = 0;
+    while (row < matrix->num_rows && cf_gets(&fh, line, sizeof(line))) {
+        cf_gmm_rstrip_line(line);
+        char *name = NULL;
+        char *type = NULL;
+        char *tab1 = strchr(line, '\t');
+        if (tab1) {
+            *tab1 = '\0';
+            name = tab1 + 1;
+            char *tab2 = strchr(name, '\t');
+            if (tab2) {
+                *tab2 = '\0';
+                type = tab2 + 1;
+            }
+        }
+        if (type && strcmp(type, "CRISPR Guide Capture") == 0) {
+            row_map[row] = n_guides;
+            selected_rows[n_guides] = row;
+            n_guides++;
+        }
+        row++;
+    }
+    close_text_file(&fh);
+
+    if (n_guides == 0 || n_guides == matrix->num_rows) {
+        free(row_map);
+        free(selected_rows);
+        return matrix;
+    }
+
+    cf_sparse_matrix *filtered = cf_filter_matrix_rows(matrix, row_map, selected_rows, n_guides);
+    free(row_map);
+    free(selected_rows);
+    if (!filtered) return NULL;
+    if (filtered_out) *filtered_out = 1;
+    return filtered;
 }
 
 /* ============================================================================
@@ -989,6 +1147,22 @@ int cf_process_mex_dir_gmm(const char *mex_dir, const char *output_dir, const cf
     }
     printf("  Features: %d, Barcodes: %d, Non-zero entries: %d\n",
            matrix->num_rows, matrix->num_cols, matrix->num_entries);
+
+    int filtered_to_guides = 0;
+    cf_sparse_matrix *guide_matrix = cf_filter_matrix_to_crispr_guides(mex_dir, matrix, &filtered_to_guides);
+    if (!guide_matrix) {
+        fprintf(stderr, "Failed to filter MEX to CRISPR Guide Capture rows\n");
+        cf_free_matrix(matrix);
+        return -1;
+    }
+    if (guide_matrix != matrix) {
+        cf_free_matrix(matrix);
+        matrix = guide_matrix;
+    }
+    if (filtered_to_guides) {
+        printf("  CRISPR Guide Capture rows: %d, guide non-zero entries: %d\n",
+               matrix->num_rows, matrix->num_entries);
+    }
     
     /* Call features with GMM */
     printf("Calling features with CR9-style GMM...\n");
@@ -1028,6 +1202,1050 @@ int cf_process_mex_dir_gmm(const char *mex_dir, const char *output_dir, const cf
     cf_free_gmm_results(results);
     cf_free_matrix(matrix);
     return 0;
+}
+
+/* ============================================================================
+ * Ambient-FDR Guide Calling Implementation
+ * ============================================================================ */
+
+typedef struct cf_feature_meta {
+    char *id;
+    char *name;
+    char *type;
+} cf_feature_meta;
+
+typedef struct cf_feature_table {
+    cf_feature_meta *features;
+    int count;
+} cf_feature_table;
+
+typedef struct cf_id_map_entry {
+    const char *id;
+    int guide_index;
+} cf_id_map_entry;
+
+typedef struct cf_ambient_entry {
+    int cell;
+    int guide;
+    uint64_t count;
+    double pvalue;
+    double qvalue;
+} cf_ambient_entry;
+
+typedef struct cf_pvalue_rank {
+    int entry_index;
+    double pvalue;
+} cf_pvalue_rank;
+
+static int cf_mkdir_p(const char *path) {
+    if (!path || !*path) return -1;
+
+    char tmp[MAX_LINE_LENGTH];
+    snprintf(tmp, sizeof(tmp), "%s", path);
+    size_t len = strlen(tmp);
+    if (len == 0) return -1;
+    if (tmp[len - 1] == '/') tmp[len - 1] = '\0';
+
+    for (char *p = tmp + 1; *p; p++) {
+        if (*p == '/') {
+            *p = '\0';
+            if (mkdir(tmp, 0755) != 0 && errno != EEXIST) return -1;
+            *p = '/';
+        }
+    }
+    if (mkdir(tmp, 0755) != 0 && errno != EEXIST) return -1;
+    return 0;
+}
+
+static char *cf_strdup_safe(const char *s) {
+    return strdup(s ? s : "");
+}
+
+static void cf_rstrip_line(char *line) {
+    if (!line) return;
+    size_t len = strlen(line);
+    while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r')) {
+        line[--len] = '\0';
+    }
+}
+
+static void cf_json_write_string(FILE *fp, const char *s) {
+    fputc('"', fp);
+    if (s) {
+        for (const unsigned char *p = (const unsigned char *)s; *p; ++p) {
+            switch (*p) {
+                case '\\': fputs("\\\\", fp); break;
+                case '"': fputs("\\\"", fp); break;
+                case '\b': fputs("\\b", fp); break;
+                case '\f': fputs("\\f", fp); break;
+                case '\n': fputs("\\n", fp); break;
+                case '\r': fputs("\\r", fp); break;
+                case '\t': fputs("\\t", fp); break;
+                default:
+                    if (*p < 0x20) {
+                        fprintf(fp, "\\u%04x", *p);
+                    } else {
+                        fputc(*p, fp);
+                    }
+                    break;
+            }
+        }
+    }
+    fputc('"', fp);
+}
+
+static int cf_resolve_features_path(const char *mex_dir, char *path, size_t path_size) {
+    snprintf(path, path_size, "%s/features.txt", mex_dir);
+    if (file_exists_with_gz(path)) return 0;
+    snprintf(path, path_size, "%s/features.tsv", mex_dir);
+    if (file_exists_with_gz(path)) return 0;
+    return -1;
+}
+
+static int cf_load_feature_table(const char *mex_dir, cf_feature_table *table) {
+    if (!mex_dir || !table) return -1;
+    memset(table, 0, sizeof(*table));
+
+    char path[MAX_LINE_LENGTH];
+    if (cf_resolve_features_path(mex_dir, path, sizeof(path)) != 0) {
+        fprintf(stderr, "Failed to find features.tsv/features.txt in %s\n", mex_dir);
+        return -1;
+    }
+
+    cf_file fh;
+    if (open_text_file(path, &fh) != 0) {
+        fprintf(stderr, "Failed to open features file %s\n", path);
+        return -1;
+    }
+
+    int capacity = 128;
+    cf_feature_meta *features = calloc(capacity, sizeof(cf_feature_meta));
+    if (!features) {
+        close_text_file(&fh);
+        return -1;
+    }
+
+    char line[MAX_LINE_LENGTH];
+    int count = 0;
+    while (cf_gets(&fh, line, sizeof(line))) {
+        cf_rstrip_line(line);
+        if (line[0] == '\0') continue;
+
+        char *id = line;
+        char *name = NULL;
+        char *type = NULL;
+
+        char *tab1 = strchr(line, '\t');
+        if (tab1) {
+            *tab1 = '\0';
+            name = tab1 + 1;
+            char *tab2 = strchr(name, '\t');
+            if (tab2) {
+                *tab2 = '\0';
+                type = tab2 + 1;
+            }
+        }
+        if (!name || !*name) name = id;
+        if (!type) type = "";
+
+        if (count >= capacity) {
+            capacity *= 2;
+            cf_feature_meta *grown = realloc(features, capacity * sizeof(cf_feature_meta));
+            if (!grown) {
+                close_text_file(&fh);
+                for (int i = 0; i < count; i++) {
+                    free(features[i].id);
+                    free(features[i].name);
+                    free(features[i].type);
+                }
+                free(features);
+                return -1;
+            }
+            memset(grown + count, 0, (capacity - count) * sizeof(cf_feature_meta));
+            features = grown;
+        }
+
+        features[count].id = cf_strdup_safe(id);
+        features[count].name = cf_strdup_safe(name);
+        features[count].type = cf_strdup_safe(type);
+        if (!features[count].id || !features[count].name || !features[count].type) {
+            close_text_file(&fh);
+            for (int i = 0; i <= count; i++) {
+                free(features[i].id);
+                free(features[i].name);
+                free(features[i].type);
+            }
+            free(features);
+            return -1;
+        }
+        count++;
+    }
+
+    close_text_file(&fh);
+    table->features = features;
+    table->count = count;
+    return 0;
+}
+
+static void cf_free_feature_table(cf_feature_table *table) {
+    if (!table || !table->features) return;
+    for (int i = 0; i < table->count; i++) {
+        free(table->features[i].id);
+        free(table->features[i].name);
+        free(table->features[i].type);
+    }
+    free(table->features);
+    table->features = NULL;
+    table->count = 0;
+}
+
+static int cf_has_crispr_feature_type(const cf_feature_table *table) {
+    if (!table) return 0;
+    for (int i = 0; i < table->count; i++) {
+        if (table->features[i].type && strcmp(table->features[i].type, "CRISPR Guide Capture") == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int cf_feature_is_guide(const cf_feature_table *table, int row, int require_crispr_type) {
+    if (!table || row < 0 || row >= table->count) return 0;
+    if (!require_crispr_type) return 1;
+    return table->features[row].type && strcmp(table->features[row].type, "CRISPR Guide Capture") == 0;
+}
+
+static int cf_compare_id_map(const void *a, const void *b) {
+    const cf_id_map_entry *ea = (const cf_id_map_entry *)a;
+    const cf_id_map_entry *eb = (const cf_id_map_entry *)b;
+    return strcmp(ea->id, eb->id);
+}
+
+static int cf_compare_id_key(const void *key, const void *elem) {
+    const char *id = *(const char * const *)key;
+    const cf_id_map_entry *entry = (const cf_id_map_entry *)elem;
+    return strcmp(id, entry->id);
+}
+
+static int cf_lookup_guide_id(const cf_id_map_entry *map, int n, const char *id) {
+    if (!map || n <= 0 || !id) return -1;
+    const char *key = id;
+    cf_id_map_entry *found = bsearch(&key, map, n, sizeof(cf_id_map_entry), cf_compare_id_key);
+    return found ? found->guide_index : -1;
+}
+
+static int cf_compare_string_ptr(const void *a, const void *b) {
+    const char *sa = *(const char * const *)a;
+    const char *sb = *(const char * const *)b;
+    return strcmp(sa, sb);
+}
+
+static int cf_string_set_contains(char **sorted, int n, const char *value) {
+    if (!sorted || n <= 0 || !value) return 0;
+    char *key = (char *)value;
+    return bsearch(&key, sorted, n, sizeof(char *), cf_compare_string_ptr) != NULL;
+}
+
+static int cf_compare_ambient_entry_cell_guide(const void *a, const void *b) {
+    const cf_ambient_entry *ea = (const cf_ambient_entry *)a;
+    const cf_ambient_entry *eb = (const cf_ambient_entry *)b;
+    if (ea->cell != eb->cell) return ea->cell - eb->cell;
+    return ea->guide - eb->guide;
+}
+
+static int cf_compare_pvalue_rank(const void *a, const void *b) {
+    const cf_pvalue_rank *ra = (const cf_pvalue_rank *)a;
+    const cf_pvalue_rank *rb = (const cf_pvalue_rank *)b;
+    if (ra->pvalue < rb->pvalue) return -1;
+    if (ra->pvalue > rb->pvalue) return 1;
+    return ra->entry_index - rb->entry_index;
+}
+
+static int cf_append_ambient_entry(cf_ambient_entry **entries, size_t *n, size_t *cap,
+                                   int cell, int guide, uint64_t count) {
+    if (*n >= *cap) {
+        size_t new_cap = *cap ? (*cap * 2) : 1024;
+        cf_ambient_entry *grown = realloc(*entries, new_cap * sizeof(cf_ambient_entry));
+        if (!grown) return -1;
+        *entries = grown;
+        *cap = new_cap;
+    }
+    (*entries)[*n].cell = cell;
+    (*entries)[*n].guide = guide;
+    (*entries)[*n].count = count;
+    (*entries)[*n].pvalue = 1.0;
+    (*entries)[*n].qvalue = 1.0;
+    (*n)++;
+    return 0;
+}
+
+static size_t cf_collapse_ambient_entries(cf_ambient_entry *entries, size_t n) {
+    if (!entries || n == 0) return 0;
+    qsort(entries, n, sizeof(cf_ambient_entry), cf_compare_ambient_entry_cell_guide);
+
+    size_t out = 0;
+    for (size_t i = 0; i < n; i++) {
+        if (out > 0 &&
+            entries[out - 1].cell == entries[i].cell &&
+            entries[out - 1].guide == entries[i].guide) {
+            entries[out - 1].count += entries[i].count;
+        } else {
+            entries[out++] = entries[i];
+        }
+    }
+    return out;
+}
+
+static double cf_poisson_upper_tail(uint64_t observed, double lambda) {
+    if (observed == 0) return 1.0;
+    if (lambda <= 0.0) return 0.0;
+
+    double p = kf_gammap((double)observed, lambda);
+    if (isnan(p)) return 1.0;
+    if (p < 0.0) return 0.0;
+    if (p > 1.0) return 1.0;
+    return p;
+}
+
+static void cf_apply_bh(cf_ambient_entry *entries, size_t n_entries, uint64_t total_tests) {
+    if (!entries || n_entries == 0 || total_tests == 0) return;
+
+    cf_pvalue_rank *ranks = malloc(n_entries * sizeof(cf_pvalue_rank));
+    if (!ranks) {
+        for (size_t i = 0; i < n_entries; i++) entries[i].qvalue = 1.0;
+        return;
+    }
+
+    for (size_t i = 0; i < n_entries; i++) {
+        ranks[i].entry_index = (int)i;
+        ranks[i].pvalue = entries[i].pvalue;
+    }
+    qsort(ranks, n_entries, sizeof(cf_pvalue_rank), cf_compare_pvalue_rank);
+
+    double running_min = 1.0;
+    double m = (double)total_tests;
+    for (size_t rev = n_entries; rev > 0; rev--) {
+        size_t i = rev - 1;
+        double rank = (double)(i + 1);
+        double q = ranks[i].pvalue * m / rank;
+        if (q > 1.0) q = 1.0;
+        if (q > running_min) q = running_min;
+        running_min = q;
+        entries[ranks[i].entry_index].qvalue = q;
+    }
+
+    free(ranks);
+}
+
+static int cf_append_call_name(char **call, const char *name) {
+    const char *safe = (name && *name) ? name : "Unknown";
+    size_t old_len = (*call) ? strlen(*call) : 0;
+    size_t add_len = strlen(safe);
+    size_t sep = old_len > 0 ? 1 : 0;
+    char *grown = realloc(*call, old_len + sep + add_len + 1);
+    if (!grown) return -1;
+    if (sep) grown[old_len++] = '|';
+    memcpy(grown + old_len, safe, add_len + 1);
+    *call = grown;
+    return 0;
+}
+
+static int cf_build_cell_calls(const cf_ambient_entry *entries, size_t n_entries,
+                               const char **guide_names, int n_cells,
+                               double threshold, int min_umi,
+                               char ***cell_calls_out, int **cell_num_features_out,
+                               uint64_t **cell_num_umis_out, double **cell_min_q_out,
+                               uint64_t **cell_min_called_umi_out,
+                               uint64_t **cell_max_called_umi_out,
+                               int *cells_no_call_out, int *cells_1_feature_out,
+                               int *cells_multi_feature_out) {
+    char **cell_calls = calloc(n_cells, sizeof(char *));
+    int *cell_num_features = calloc(n_cells, sizeof(int));
+    uint64_t *cell_num_umis = calloc(n_cells, sizeof(uint64_t));
+    double *cell_min_q = malloc(n_cells * sizeof(double));
+    uint64_t *cell_min_called_umi = malloc(n_cells * sizeof(uint64_t));
+    uint64_t *cell_max_called_umi = calloc(n_cells, sizeof(uint64_t));
+    if (!cell_calls || !cell_num_features || !cell_num_umis || !cell_min_q ||
+        !cell_min_called_umi || !cell_max_called_umi) {
+        free(cell_calls);
+        free(cell_num_features);
+        free(cell_num_umis);
+        free(cell_min_q);
+        free(cell_min_called_umi);
+        free(cell_max_called_umi);
+        return -1;
+    }
+
+    for (int c = 0; c < n_cells; c++) {
+        cell_min_q[c] = 1.0;
+        cell_min_called_umi[c] = UINT64_MAX;
+    }
+
+    for (size_t i = 0; i < n_entries; i++) {
+        int cell = entries[i].cell;
+        int guide = entries[i].guide;
+        if (cell < 0 || cell >= n_cells) continue;
+        if (entries[i].qvalue < cell_min_q[cell]) cell_min_q[cell] = entries[i].qvalue;
+
+        if (entries[i].count >= (uint64_t)min_umi && entries[i].qvalue <= threshold) {
+            if (cf_append_call_name(&cell_calls[cell], guide_names ? guide_names[guide] : "Unknown") != 0) {
+                for (int c = 0; c < n_cells; c++) free(cell_calls[c]);
+                free(cell_calls);
+                free(cell_num_features);
+                free(cell_num_umis);
+                free(cell_min_q);
+                return -1;
+            }
+            cell_num_features[cell]++;
+            cell_num_umis[cell] += entries[i].count;
+            if (entries[i].count < cell_min_called_umi[cell]) {
+                cell_min_called_umi[cell] = entries[i].count;
+            }
+            if (entries[i].count > cell_max_called_umi[cell]) {
+                cell_max_called_umi[cell] = entries[i].count;
+            }
+        }
+    }
+
+    int no_call = 0, one = 0, multi = 0;
+    for (int c = 0; c < n_cells; c++) {
+        if (cell_num_features[c] == 0) {
+            cell_min_called_umi[c] = 0;
+            no_call++;
+        } else if (cell_num_features[c] == 1) {
+            one++;
+        } else {
+            multi++;
+        }
+    }
+
+    *cell_calls_out = cell_calls;
+    *cell_num_features_out = cell_num_features;
+    *cell_num_umis_out = cell_num_umis;
+    *cell_min_q_out = cell_min_q;
+    *cell_min_called_umi_out = cell_min_called_umi;
+    *cell_max_called_umi_out = cell_max_called_umi;
+    if (cells_no_call_out) *cells_no_call_out = no_call;
+    if (cells_1_feature_out) *cells_1_feature_out = one;
+    if (cells_multi_feature_out) *cells_multi_feature_out = multi;
+    return 0;
+}
+
+static void cf_free_cell_calls(char **cell_calls, int n_cells,
+                               int *cell_num_features, uint64_t *cell_num_umis,
+                               double *cell_min_q,
+                               uint64_t *cell_min_called_umi,
+                               uint64_t *cell_max_called_umi) {
+    if (cell_calls) {
+        for (int c = 0; c < n_cells; c++) free(cell_calls[c]);
+    }
+    free(cell_calls);
+    free(cell_num_features);
+    free(cell_num_umis);
+    free(cell_min_q);
+    free(cell_min_called_umi);
+    free(cell_max_called_umi);
+}
+
+static void cf_count_calls_at_threshold(const cf_ambient_entry *entries, size_t n_entries,
+                                        int n_cells, double threshold, int min_umi,
+                                        int *no_call, int *one, int *multi) {
+    int *counts = calloc(n_cells, sizeof(int));
+    if (!counts) {
+        *no_call = n_cells;
+        *one = 0;
+        *multi = 0;
+        return;
+    }
+
+    for (size_t i = 0; i < n_entries; i++) {
+        if (entries[i].count >= (uint64_t)min_umi && entries[i].qvalue <= threshold &&
+            entries[i].cell >= 0 && entries[i].cell < n_cells) {
+            counts[entries[i].cell]++;
+        }
+    }
+
+    *no_call = *one = *multi = 0;
+    for (int c = 0; c < n_cells; c++) {
+        if (counts[c] == 0) (*no_call)++;
+        else if (counts[c] == 1) (*one)++;
+        else (*multi)++;
+    }
+    free(counts);
+}
+
+static int cf_double_seen(const double *values, int n_values, double value) {
+    for (int i = 0; i < n_values; i++) {
+        if (fabs(values[i] - value) <= 1e-15) return 1;
+    }
+    return 0;
+}
+
+static int cf_int_seen(const int *values, int n_values, int value) {
+    for (int i = 0; i < n_values; i++) {
+        if (values[i] == value) return 1;
+    }
+    return 0;
+}
+
+static int cf_write_ambient_threshold_sweep(const char *output_dir,
+                                            const cf_ambient_entry *entries,
+                                            size_t n_entries,
+                                            int n_cells,
+                                            double default_fdr,
+                                            int default_min_umi) {
+    char path[MAX_LINE_LENGTH];
+    snprintf(path, sizeof(path), "%s/guide_fdr_threshold_sweep.tsv", output_dir);
+    FILE *fp = fopen(path, "w");
+    if (!fp) return -1;
+
+    double fdr_values[16];
+    int n_fdr = 0;
+    const double base_fdr[] = {1e-6, 1e-5, 1e-4, 0.001, 0.005, 0.01, 0.02, 0.05, 0.1};
+    const int n_base_fdr = (int)(sizeof(base_fdr) / sizeof(base_fdr[0]));
+    for (int i = 0; i < n_base_fdr; i++) {
+        fdr_values[n_fdr++] = base_fdr[i];
+    }
+    if (default_fdr > 0.0 && default_fdr <= 1.0 && !cf_double_seen(fdr_values, n_fdr, default_fdr)) {
+        fdr_values[n_fdr++] = default_fdr;
+    }
+
+    int min_umi_values[8];
+    int n_min_umi = 0;
+    const int base_min_umi[] = {1, 2, 3, 5, 10};
+    const int n_base_min_umi = (int)(sizeof(base_min_umi) / sizeof(base_min_umi[0]));
+    for (int i = 0; i < n_base_min_umi; i++) {
+        min_umi_values[n_min_umi++] = base_min_umi[i];
+    }
+    if (default_min_umi > 0 && !cf_int_seen(min_umi_values, n_min_umi, default_min_umi)) {
+        min_umi_values[n_min_umi++] = default_min_umi;
+    }
+
+    fprintf(fp, "fdr\tmin_umi\tcells_no_call\tcells_1_feature\tcells_multi_feature\tassigned_cells\tassignment_rate\n");
+    for (int i = 0; i < n_fdr; i++) {
+        for (int j = 0; j < n_min_umi; j++) {
+            int no_call = 0, one = 0, multi = 0;
+            cf_count_calls_at_threshold(entries, n_entries, n_cells,
+                                        fdr_values[i], min_umi_values[j],
+                                        &no_call, &one, &multi);
+            int assigned = one + multi;
+            fprintf(fp, "%.17g\t%d\t%d\t%d\t%d\t%d\t%.17g\n",
+                    fdr_values[i], min_umi_values[j],
+                    no_call, one, multi, assigned,
+                    n_cells > 0 ? (double)assigned / (double)n_cells : 0.0);
+        }
+    }
+
+    fclose(fp);
+    return 0;
+}
+
+static int cf_write_ambient_skip_summary(const char *output_dir, const char *status,
+                                         const char *message) {
+    if (cf_mkdir_p(output_dir) != 0) return -1;
+
+    char path[MAX_LINE_LENGTH];
+    snprintf(path, sizeof(path), "%s/guide_fdr_summary.json", output_dir);
+    FILE *fp = fopen(path, "w");
+    if (!fp) return -1;
+    fprintf(fp, "{\n");
+    fprintf(fp, "  \"caller\": \"ambient-fdr\",\n");
+    fprintf(fp, "  \"status\": ");
+    cf_json_write_string(fp, status);
+    fprintf(fp, ",\n  \"message\": ");
+    cf_json_write_string(fp, message);
+    fprintf(fp, "\n}\n");
+    fclose(fp);
+    return 0;
+}
+
+static int cf_write_ambient_rates(const char *output_dir,
+                                  const char **guide_ids,
+                                  const char **guide_names,
+                                  const uint64_t *ambient_counts,
+                                  const double *ambient_rates,
+                                  int n_guides) {
+    char path[MAX_LINE_LENGTH];
+    snprintf(path, sizeof(path), "%s/guide_ambient_rates.tsv", output_dir);
+    FILE *fp = fopen(path, "w");
+    if (!fp) return -1;
+
+    fprintf(fp, "feature_id\tfeature_name\tambient_umis\tambient_rate\n");
+    for (int g = 0; g < n_guides; g++) {
+        fprintf(fp, "%s\t%s\t%" PRIu64 "\t%.17g\n",
+                guide_ids[g] ? guide_ids[g] : "",
+                guide_names[g] ? guide_names[g] : "",
+                ambient_counts[g],
+                ambient_rates[g]);
+    }
+    fclose(fp);
+    return 0;
+}
+
+static int cf_write_ambient_qvalues(const char *output_dir,
+                                    const cf_ambient_entry *entries,
+                                    size_t n_entries,
+                                    const cf_sparse_matrix *filtered_matrix,
+                                    const char **guide_ids,
+                                    const char **guide_names,
+                                    int n_guides) {
+    char path[MAX_LINE_LENGTH];
+
+    snprintf(path, sizeof(path), "%s/guide_qvalues.mtx", output_dir);
+    FILE *mtx = fopen(path, "w");
+    if (!mtx) return -1;
+    fprintf(mtx, "%%%%MatrixMarket matrix coordinate real general\n");
+    fprintf(mtx, "%% rows are filtered cell barcodes; columns are CRISPR guides; missing entries imply qvalue=1\n");
+    fprintf(mtx, "%d %d %zu\n", filtered_matrix->num_cols, n_guides, n_entries);
+    for (size_t i = 0; i < n_entries; i++) {
+        fprintf(mtx, "%d %d %.17g\n",
+                entries[i].cell + 1,
+                entries[i].guide + 1,
+                entries[i].qvalue);
+    }
+    fclose(mtx);
+
+    snprintf(path, sizeof(path), "%s/guide_qvalues_barcodes.tsv", output_dir);
+    FILE *bc = fopen(path, "w");
+    if (!bc) return -1;
+    for (int c = 0; c < filtered_matrix->num_cols; c++) {
+        fprintf(bc, "%s\n", filtered_matrix->col_names[c]);
+    }
+    fclose(bc);
+
+    snprintf(path, sizeof(path), "%s/guide_qvalues_features.tsv", output_dir);
+    FILE *feat = fopen(path, "w");
+    if (!feat) return -1;
+    for (int g = 0; g < n_guides; g++) {
+        fprintf(feat, "%s\t%s\tCRISPR Guide Capture\n",
+                guide_ids[g] ? guide_ids[g] : "",
+                guide_names[g] ? guide_names[g] : "");
+    }
+    fclose(feat);
+
+    return 0;
+}
+
+static int cf_write_ambient_calls(const char *output_dir,
+                                  const cf_sparse_matrix *filtered_matrix,
+                                  char **cell_calls,
+                                  const int *cell_num_features,
+                                  const uint64_t *cell_num_umis,
+                                  const uint64_t *cell_min_called_umi,
+                                  const uint64_t *cell_max_called_umi,
+                                  const double *cell_min_q,
+                                  double fdr_threshold) {
+    char path[MAX_LINE_LENGTH];
+    snprintf(path, sizeof(path), "%s/guide_fdr_calls_per_cell.csv", output_dir);
+    FILE *fp = fopen(path, "w");
+    if (!fp) return -1;
+
+    fprintf(fp, "cell_barcode,num_features,feature_call,num_umis,min_called_umi,max_called_umi,min_qvalue,num_features_at_default_fdr,call_status,default_fdr,caller\n");
+    for (int c = 0; c < filtered_matrix->num_cols; c++) {
+        const char *call = cell_calls[c] ? cell_calls[c] : "None";
+        const char *status = "none";
+        if (cell_num_features[c] == 1) status = "singlet";
+        else if (cell_num_features[c] > 1) status = "multiplet";
+
+        fprintf(fp, "%s,%d,%s,%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%.17g,%d,%s,%.17g,ambient-fdr\n",
+                filtered_matrix->col_names[c],
+                cell_num_features[c],
+                call,
+                cell_num_umis[c],
+                cell_min_called_umi[c],
+                cell_max_called_umi[c],
+                cell_min_q[c],
+                cell_num_features[c],
+                status,
+                fdr_threshold);
+    }
+
+    fclose(fp);
+    return 0;
+}
+
+static int cf_write_ambient_summary(const char *output_dir,
+                                    const cf_ambient_entry *entries,
+                                    size_t n_entries,
+                                    int n_cells,
+                                    int n_guides,
+                                    uint64_t total_tests,
+                                    int raw_barcodes,
+                                    int ambient_barcodes,
+                                    int filtered_cells_absent_from_raw,
+                                    uint64_t ambient_total,
+                                    int min_umi,
+                                    double fdr_threshold,
+                                    int emit_sparse_qvalues,
+                                    int cells_no_call,
+                                    int cells_1_feature,
+                                    int cells_multi_feature) {
+    char path[MAX_LINE_LENGTH];
+    snprintf(path, sizeof(path), "%s/guide_fdr_summary.json", output_dir);
+    FILE *fp = fopen(path, "w");
+    if (!fp) return -1;
+
+    int assigned = cells_1_feature + cells_multi_feature;
+    fprintf(fp, "{\n");
+    fprintf(fp, "  \"caller\": \"ambient-fdr\",\n");
+    fprintf(fp, "  \"status\": \"ok\",\n");
+    fprintf(fp, "  \"default_fdr\": %.17g,\n", fdr_threshold);
+    fprintf(fp, "  \"min_umi\": %d,\n", min_umi);
+    fprintf(fp, "  \"emit_qvalues\": \"%s\",\n", emit_sparse_qvalues ? "sparse" : "none");
+    fprintf(fp, "  \"num_filtered_cells\": %d,\n", n_cells);
+    fprintf(fp, "  \"num_guides\": %d,\n", n_guides);
+    fprintf(fp, "  \"total_tests\": %" PRIu64 ",\n", total_tests);
+    fprintf(fp, "  \"observed_filtered_entries\": %zu,\n", n_entries);
+    fprintf(fp, "  \"qvalue_entries\": %zu,\n", emit_sparse_qvalues ? n_entries : 0);
+    fprintf(fp, "  \"raw_barcodes\": %d,\n", raw_barcodes);
+    fprintf(fp, "  \"ambient_barcodes\": %d,\n", ambient_barcodes);
+    fprintf(fp, "  \"filtered_cells_absent_from_raw\": %d,\n", filtered_cells_absent_from_raw);
+    fprintf(fp, "  \"ambient_total_umis\": %" PRIu64 ",\n", ambient_total);
+    fprintf(fp, "  \"cells_no_call\": %d,\n", cells_no_call);
+    fprintf(fp, "  \"cells_1_feature\": %d,\n", cells_1_feature);
+    fprintf(fp, "  \"cells_multi_feature\": %d,\n", cells_multi_feature);
+    fprintf(fp, "  \"assigned_cells\": %d,\n", assigned);
+    fprintf(fp, "  \"assignment_rate\": %.17g,\n", n_cells > 0 ? (double)assigned / (double)n_cells : 0.0);
+    fprintf(fp, "  \"fdr_grid\": [\n");
+
+    const double grid[] = {0.001, 0.005, 0.01, 0.05, 0.1};
+    const int n_grid = (int)(sizeof(grid) / sizeof(grid[0]));
+    for (int i = 0; i < n_grid; i++) {
+        int no_call = 0, one = 0, multi = 0;
+        cf_count_calls_at_threshold(entries, n_entries, n_cells, grid[i], min_umi,
+                                    &no_call, &one, &multi);
+        int grid_assigned = one + multi;
+        fprintf(fp, "    {\"fdr\": %.17g, \"cells_no_call\": %d, \"cells_1_feature\": %d, \"cells_multi_feature\": %d, \"assigned_cells\": %d, \"assignment_rate\": %.17g}%s\n",
+                grid[i], no_call, one, multi, grid_assigned,
+                n_cells > 0 ? (double)grid_assigned / (double)n_cells : 0.0,
+                (i + 1 < n_grid) ? "," : "");
+    }
+    fprintf(fp, "  ]\n");
+    fprintf(fp, "}\n");
+    fclose(fp);
+
+    snprintf(path, sizeof(path), "%s/guide_fdr_qc.json", output_dir);
+    FILE *qc = fopen(path, "w");
+    if (qc) {
+        fprintf(qc, "{\n");
+        fprintf(qc, "  \"caller\": \"ambient-fdr\",\n");
+        fprintf(qc, "  \"status\": \"ok\",\n");
+        fprintf(qc, "  \"default_fdr\": %.17g,\n", fdr_threshold);
+        fprintf(qc, "  \"assigned_cells\": %d,\n", assigned);
+        fprintf(qc, "  \"assignment_rate\": %.17g,\n", n_cells > 0 ? (double)assigned / (double)n_cells : 0.0);
+        fprintf(qc, "  \"cells_no_call\": %d,\n", cells_no_call);
+        fprintf(qc, "  \"cells_1_feature\": %d,\n", cells_1_feature);
+        fprintf(qc, "  \"cells_multi_feature\": %d,\n", cells_multi_feature);
+        fprintf(qc, "  \"ambient_barcodes\": %d,\n", ambient_barcodes);
+        fprintf(qc, "  \"ambient_total_umis\": %" PRIu64 "\n", ambient_total);
+        fprintf(qc, "}\n");
+        fclose(qc);
+    }
+
+    if (cf_write_ambient_threshold_sweep(output_dir, entries, n_entries, n_cells,
+                                         fdr_threshold, min_umi) != 0) {
+        return -1;
+    }
+    return 0;
+}
+
+cf_ambient_fdr_config* cf_ambient_fdr_config_create(void) {
+    cf_ambient_fdr_config *config = calloc(1, sizeof(cf_ambient_fdr_config));
+    if (!config) return NULL;
+    config->fdr_threshold = 0.01;
+    config->min_umi = 1;
+    config->emit_sparse_qvalues = 1;
+    return config;
+}
+
+void cf_ambient_fdr_config_destroy(cf_ambient_fdr_config *config) {
+    if (config) free(config);
+}
+
+int cf_process_mex_dir_ambient_fdr(const char *raw_mex_dir,
+                                   const char *filtered_mex_dir,
+                                   const char *output_dir,
+                                   const cf_ambient_fdr_config *config) {
+    if (!raw_mex_dir || !filtered_mex_dir || !output_dir) return -1;
+
+    cf_ambient_fdr_config default_config;
+    if (!config) {
+        default_config.fdr_threshold = 0.01;
+        default_config.min_umi = 1;
+        default_config.emit_sparse_qvalues = 1;
+        config = &default_config;
+    }
+    double fdr_threshold = config->fdr_threshold;
+    if (!(fdr_threshold > 0.0 && fdr_threshold <= 1.0)) {
+        fprintf(stderr, "Invalid Ambient-FDR threshold %.17g; expected 0 < FDR <= 1\n", fdr_threshold);
+        return -1;
+    }
+    int min_umi = config->min_umi > 0 ? config->min_umi : 1;
+
+    if (cf_mkdir_p(output_dir) != 0) {
+        fprintf(stderr, "Failed to create output directory: %s\n", output_dir);
+        return -1;
+    }
+
+    printf("Loading raw MEX from: %s\n", raw_mex_dir);
+    cf_sparse_matrix *raw_matrix = cf_load_mex(raw_mex_dir);
+    if (!raw_matrix) {
+        fprintf(stderr, "Failed to load raw MEX directory\n");
+        return -1;
+    }
+    printf("Loading filtered MEX from: %s\n", filtered_mex_dir);
+    cf_sparse_matrix *filtered_matrix = cf_load_mex(filtered_mex_dir);
+    if (!filtered_matrix) {
+        cf_free_matrix(raw_matrix);
+        fprintf(stderr, "Failed to load filtered MEX directory\n");
+        return -1;
+    }
+
+    cf_feature_table raw_features = {0};
+    cf_feature_table filtered_features = {0};
+    if (cf_load_feature_table(raw_mex_dir, &raw_features) != 0) {
+        cf_free_matrix(raw_matrix);
+        cf_free_matrix(filtered_matrix);
+        return -1;
+    }
+    if (cf_load_feature_table(filtered_mex_dir, &filtered_features) != 0) {
+        cf_free_feature_table(&raw_features);
+        cf_free_matrix(raw_matrix);
+        cf_free_matrix(filtered_matrix);
+        return -1;
+    }
+
+    if (raw_features.count != raw_matrix->num_rows) {
+        fprintf(stderr, "Warning: raw features count (%d) != matrix rows (%d)\n",
+                raw_features.count, raw_matrix->num_rows);
+    }
+    if (filtered_features.count != filtered_matrix->num_rows) {
+        fprintf(stderr, "Warning: filtered features count (%d) != matrix rows (%d)\n",
+                filtered_features.count, filtered_matrix->num_rows);
+    }
+
+    int filtered_has_crispr_type = cf_has_crispr_feature_type(&filtered_features);
+    int raw_has_crispr_type = cf_has_crispr_feature_type(&raw_features);
+
+    int n_guides = 0;
+    for (int r = 0; r < filtered_features.count && r < filtered_matrix->num_rows; r++) {
+        if (cf_feature_is_guide(&filtered_features, r, filtered_has_crispr_type)) n_guides++;
+    }
+    if (n_guides == 0 || filtered_matrix->num_cols == 0) {
+        cf_free_feature_table(&raw_features);
+        cf_free_feature_table(&filtered_features);
+        cf_free_matrix(raw_matrix);
+        cf_free_matrix(filtered_matrix);
+        return cf_write_ambient_skip_summary(output_dir, "skipped_no_guides",
+                                             "No CRISPR Guide Capture features or filtered cells were found.");
+    }
+
+    const char **guide_ids = calloc(n_guides, sizeof(char *));
+    const char **guide_names = calloc(n_guides, sizeof(char *));
+    int *filtered_row_to_guide = malloc(filtered_matrix->num_rows * sizeof(int));
+    int *raw_row_to_guide = malloc(raw_matrix->num_rows * sizeof(int));
+    cf_id_map_entry *id_map = calloc(n_guides, sizeof(cf_id_map_entry));
+    uint64_t *ambient_counts = calloc(n_guides, sizeof(uint64_t));
+    double *ambient_rates = calloc(n_guides, sizeof(double));
+    uint64_t *cell_depth = calloc(filtered_matrix->num_cols, sizeof(uint64_t));
+
+    if (!guide_ids || !guide_names || !filtered_row_to_guide || !raw_row_to_guide ||
+        !id_map || !ambient_counts || !ambient_rates || !cell_depth) {
+        free(guide_ids); free(guide_names); free(filtered_row_to_guide); free(raw_row_to_guide);
+        free(id_map); free(ambient_counts); free(ambient_rates); free(cell_depth);
+        cf_free_feature_table(&raw_features);
+        cf_free_feature_table(&filtered_features);
+        cf_free_matrix(raw_matrix);
+        cf_free_matrix(filtered_matrix);
+        return -1;
+    }
+
+    for (int r = 0; r < filtered_matrix->num_rows; r++) filtered_row_to_guide[r] = -1;
+    for (int r = 0; r < raw_matrix->num_rows; r++) raw_row_to_guide[r] = -1;
+
+    int guide_index = 0;
+    for (int r = 0; r < filtered_features.count && r < filtered_matrix->num_rows; r++) {
+        if (!cf_feature_is_guide(&filtered_features, r, filtered_has_crispr_type)) continue;
+        filtered_row_to_guide[r] = guide_index;
+        guide_ids[guide_index] = filtered_features.features[r].id;
+        guide_names[guide_index] = filtered_features.features[r].name;
+        id_map[guide_index].id = filtered_features.features[r].id;
+        id_map[guide_index].guide_index = guide_index;
+        guide_index++;
+    }
+    qsort(id_map, n_guides, sizeof(cf_id_map_entry), cf_compare_id_map);
+
+    for (int r = 0; r < raw_features.count && r < raw_matrix->num_rows; r++) {
+        if (!cf_feature_is_guide(&raw_features, r, raw_has_crispr_type)) continue;
+        raw_row_to_guide[r] = cf_lookup_guide_id(id_map, n_guides, raw_features.features[r].id);
+    }
+
+    char **filtered_barcodes_sorted = malloc(filtered_matrix->num_cols * sizeof(char *));
+    char **raw_barcodes_sorted = malloc(raw_matrix->num_cols * sizeof(char *));
+    unsigned char *raw_is_filtered_cell = calloc(raw_matrix->num_cols, sizeof(unsigned char));
+    if (!filtered_barcodes_sorted || !raw_barcodes_sorted || !raw_is_filtered_cell) {
+        free(filtered_barcodes_sorted); free(raw_barcodes_sorted); free(raw_is_filtered_cell);
+        free(guide_ids); free(guide_names); free(filtered_row_to_guide); free(raw_row_to_guide);
+        free(id_map); free(ambient_counts); free(ambient_rates); free(cell_depth);
+        cf_free_feature_table(&raw_features);
+        cf_free_feature_table(&filtered_features);
+        cf_free_matrix(raw_matrix);
+        cf_free_matrix(filtered_matrix);
+        return -1;
+    }
+    for (int c = 0; c < filtered_matrix->num_cols; c++) filtered_barcodes_sorted[c] = filtered_matrix->col_names[c];
+    for (int c = 0; c < raw_matrix->num_cols; c++) raw_barcodes_sorted[c] = raw_matrix->col_names[c];
+    qsort(filtered_barcodes_sorted, filtered_matrix->num_cols, sizeof(char *), cf_compare_string_ptr);
+    qsort(raw_barcodes_sorted, raw_matrix->num_cols, sizeof(char *), cf_compare_string_ptr);
+
+    int ambient_barcodes = 0;
+    for (int c = 0; c < raw_matrix->num_cols; c++) {
+        if (cf_string_set_contains(filtered_barcodes_sorted, filtered_matrix->num_cols, raw_matrix->col_names[c])) {
+            raw_is_filtered_cell[c] = 1;
+        } else {
+            ambient_barcodes++;
+        }
+    }
+
+    int filtered_cells_absent_from_raw = 0;
+    for (int c = 0; c < filtered_matrix->num_cols; c++) {
+        if (!cf_string_set_contains(raw_barcodes_sorted, raw_matrix->num_cols, filtered_matrix->col_names[c])) {
+            filtered_cells_absent_from_raw++;
+        }
+    }
+
+    uint64_t ambient_total = 0;
+    for (int i = 0; i < raw_matrix->num_entries; i++) {
+        int row = (int)raw_matrix->entries[i].row;
+        int col = (int)raw_matrix->entries[i].col;
+        if (row < 0 || row >= raw_matrix->num_rows || col < 0 || col >= raw_matrix->num_cols) continue;
+        int guide = raw_row_to_guide[row];
+        if (guide < 0) continue;
+        if (raw_is_filtered_cell[col]) continue;
+        ambient_counts[guide] += raw_matrix->entries[i].value;
+        ambient_total += raw_matrix->entries[i].value;
+    }
+
+    if (ambient_barcodes == 0 || ambient_total == 0) {
+        cf_write_ambient_skip_summary(output_dir, "skipped_no_ambient",
+                                      "No non-cell raw guide UMIs were available to estimate ambient rates.");
+        free(filtered_barcodes_sorted); free(raw_barcodes_sorted); free(raw_is_filtered_cell);
+        free(guide_ids); free(guide_names); free(filtered_row_to_guide); free(raw_row_to_guide);
+        free(id_map); free(ambient_counts); free(ambient_rates); free(cell_depth);
+        cf_free_feature_table(&raw_features);
+        cf_free_feature_table(&filtered_features);
+        cf_free_matrix(raw_matrix);
+        cf_free_matrix(filtered_matrix);
+        return 0;
+    }
+
+    for (int g = 0; g < n_guides; g++) {
+        ambient_rates[g] = (double)ambient_counts[g] / (double)ambient_total;
+    }
+
+    cf_ambient_entry *entries = NULL;
+    size_t n_entries = 0;
+    size_t entries_cap = 0;
+    for (int i = 0; i < filtered_matrix->num_entries; i++) {
+        int row = (int)filtered_matrix->entries[i].row;
+        int col = (int)filtered_matrix->entries[i].col;
+        if (row < 0 || row >= filtered_matrix->num_rows || col < 0 || col >= filtered_matrix->num_cols) continue;
+        int guide = filtered_row_to_guide[row];
+        if (guide < 0 || filtered_matrix->entries[i].value == 0) continue;
+        cell_depth[col] += filtered_matrix->entries[i].value;
+        if (cf_append_ambient_entry(&entries, &n_entries, &entries_cap,
+                                    col, guide, filtered_matrix->entries[i].value) != 0) {
+            free(entries);
+            free(filtered_barcodes_sorted); free(raw_barcodes_sorted); free(raw_is_filtered_cell);
+            free(guide_ids); free(guide_names); free(filtered_row_to_guide); free(raw_row_to_guide);
+            free(id_map); free(ambient_counts); free(ambient_rates); free(cell_depth);
+            cf_free_feature_table(&raw_features);
+            cf_free_feature_table(&filtered_features);
+            cf_free_matrix(raw_matrix);
+            cf_free_matrix(filtered_matrix);
+            return -1;
+        }
+    }
+    n_entries = cf_collapse_ambient_entries(entries, n_entries);
+
+    for (size_t i = 0; i < n_entries; i++) {
+        double lambda = ambient_rates[entries[i].guide] * (double)cell_depth[entries[i].cell];
+        entries[i].pvalue = cf_poisson_upper_tail(entries[i].count, lambda);
+    }
+
+    uint64_t total_tests = (uint64_t)filtered_matrix->num_cols * (uint64_t)n_guides;
+    cf_apply_bh(entries, n_entries, total_tests);
+
+    char **cell_calls = NULL;
+    int *cell_num_features = NULL;
+    uint64_t *cell_num_umis = NULL;
+    uint64_t *cell_min_called_umi = NULL;
+    uint64_t *cell_max_called_umi = NULL;
+    double *cell_min_q = NULL;
+    int cells_no_call = 0, cells_1_feature = 0, cells_multi_feature = 0;
+    if (cf_build_cell_calls(entries, n_entries, guide_names, filtered_matrix->num_cols,
+                            fdr_threshold, min_umi,
+                            &cell_calls, &cell_num_features, &cell_num_umis, &cell_min_q,
+                            &cell_min_called_umi, &cell_max_called_umi,
+                            &cells_no_call, &cells_1_feature, &cells_multi_feature) != 0) {
+        free(entries);
+        free(filtered_barcodes_sorted); free(raw_barcodes_sorted); free(raw_is_filtered_cell);
+        free(guide_ids); free(guide_names); free(filtered_row_to_guide); free(raw_row_to_guide);
+        free(id_map); free(ambient_counts); free(ambient_rates); free(cell_depth);
+        cf_free_feature_table(&raw_features);
+        cf_free_feature_table(&filtered_features);
+        cf_free_matrix(raw_matrix);
+        cf_free_matrix(filtered_matrix);
+        return -1;
+    }
+
+    int ret = 0;
+    if (cf_write_ambient_rates(output_dir, guide_ids, guide_names, ambient_counts, ambient_rates, n_guides) != 0) ret = -1;
+    if (cf_write_ambient_calls(output_dir, filtered_matrix, cell_calls, cell_num_features,
+                               cell_num_umis, cell_min_called_umi, cell_max_called_umi,
+                               cell_min_q, fdr_threshold) != 0) ret = -1;
+    if (config->emit_sparse_qvalues) {
+        if (cf_write_ambient_qvalues(output_dir, entries, n_entries, filtered_matrix,
+                                     guide_ids, guide_names, n_guides) != 0) ret = -1;
+    }
+    if (cf_write_ambient_summary(output_dir, entries, n_entries,
+                                 filtered_matrix->num_cols, n_guides, total_tests,
+                                 raw_matrix->num_cols, ambient_barcodes, filtered_cells_absent_from_raw,
+                                 ambient_total, min_umi, fdr_threshold,
+                                 config->emit_sparse_qvalues,
+                                 cells_no_call, cells_1_feature, cells_multi_feature) != 0) ret = -1;
+
+    printf("\n=== Ambient-FDR Guide Calling Summary ===\n");
+    printf("Filtered cells:          %d\n", filtered_matrix->num_cols);
+    printf("Guides:                  %d\n", n_guides);
+    printf("Raw barcodes:            %d\n", raw_matrix->num_cols);
+    printf("Ambient barcodes:        %d\n", ambient_barcodes);
+    printf("Ambient guide UMIs:      %" PRIu64 "\n", ambient_total);
+    printf("Observed guide entries:  %zu\n", n_entries);
+    printf("Total BH tests:          %" PRIu64 "\n", total_tests);
+    printf("Calls at FDR %.4g:       %d singlet, %d multiplet, %d none\n",
+           fdr_threshold, cells_1_feature, cells_multi_feature, cells_no_call);
+
+    cf_free_cell_calls(cell_calls, filtered_matrix->num_cols, cell_num_features,
+                       cell_num_umis, cell_min_q,
+                       cell_min_called_umi, cell_max_called_umi);
+    free(entries);
+    free(filtered_barcodes_sorted);
+    free(raw_barcodes_sorted);
+    free(raw_is_filtered_cell);
+    free(guide_ids);
+    free(guide_names);
+    free(filtered_row_to_guide);
+    free(raw_row_to_guide);
+    free(id_map);
+    free(ambient_counts);
+    free(ambient_rates);
+    free(cell_depth);
+    cf_free_feature_table(&raw_features);
+    cf_free_feature_table(&filtered_features);
+    cf_free_matrix(raw_matrix);
+    cf_free_matrix(filtered_matrix);
+    return ret;
 }
 
 /* ============================================================================

@@ -251,7 +251,7 @@ typedef struct {
 } vec_u32_t;
 
 static inline vec_u32_t* vec_u32_init(void) {
-    vec_u32_t *v = calloc(1, sizeof(vec_u32_t));
+    vec_u32_t *v = (vec_u32_t*)calloc(1, sizeof(vec_u32_t));
     return v;
 }
 
@@ -270,7 +270,7 @@ static inline void vec_u32_resize(vec_u32_t *v, size_t new_size) {
     if (new_size > v->m) {
         size_t new_m = v->m ? v->m * 2 : 8;
         while (new_m < new_size) new_m *= 2;
-        v->a = realloc(v->a, new_m * sizeof(uint32_t));
+        v->a = (uint32_t*)realloc(v->a, new_m * sizeof(uint32_t));
         memset(v->a + v->m, 0, (new_m - v->m) * sizeof(uint32_t));
         v->m = new_m;
     }
@@ -311,7 +311,7 @@ typedef struct {
 } vec_ptr_t;
 
 static inline vec_ptr_t* vec_ptr_init(void (*free_func)(void*)) {
-    vec_ptr_t *v = calloc(1, sizeof(vec_ptr_t));
+    vec_ptr_t *v = (vec_ptr_t*)calloc(1, sizeof(vec_ptr_t));
     v->free_func = free_func;
     return v;
 }
@@ -331,7 +331,7 @@ static inline void vec_ptr_destroy(vec_ptr_t *v) {
 static inline void vec_ptr_add(vec_ptr_t *v, void *item) {
     if (v->n >= v->m) {
         size_t new_m = v->m ? v->m * 2 : 8;
-        v->a = realloc(v->a, new_m * sizeof(void*));
+        v->a = (void**)realloc(v->a, new_m * sizeof(void*));
         v->m = new_m;
     }
     v->a[v->n++] = item;
@@ -353,7 +353,7 @@ typedef struct {
 } barcode_list_t;
 
 static inline barcode_list_t* barcode_list_init(void) {
-    barcode_list_t *bl = calloc(1, sizeof(barcode_list_t));
+    barcode_list_t *bl = (barcode_list_t*)calloc(1, sizeof(barcode_list_t));
     return bl;
 }
 
@@ -367,7 +367,7 @@ static inline void barcode_list_destroy(barcode_list_t *bl) {
 static inline void barcode_list_add(barcode_list_t *bl, uint32_t key) {
     if (bl->n >= bl->m) {
         size_t new_m = bl->m ? bl->m * 2 : 8;
-        bl->keys = realloc(bl->keys, new_m * sizeof(uint32_t));
+        bl->keys = (uint32_t*)realloc(bl->keys, new_m * sizeof(uint32_t));
         bl->m = new_m;
     }
     bl->keys[bl->n++] = key;

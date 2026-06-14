@@ -42,6 +42,7 @@ update this file with its output location.
 - `tests/catatac_trimodal_downsample_smoke_output/` (CAT-ATAC trimodal STAR smoke: GEX Solo + Chromap ATAC + guide pf-multi in one invocation; default 100K via `CATATAC_TRIMODAL_MAX_READS`, optional inline ATAC peak MEX via `CATATAC_TRIMODAL_INLINE_ATAC_PEAK_MEX=yes`; `trimodal_verify.json`)
 - `/mnt/pikachu/catatac_gse288996/full_bench/catatac_trimodal_staged/` (persistent per-read-count ATAC triplet downsample cache for trimodal smokes, e.g. `atac_100000/`, `atac_2000000/`)
 - `/mnt/pikachu/catatac_gse288996/full_bench/catatac_trimodal_smoke_100k_20260614T023346Z/` (fresh 2026-06-14 CAT-ATAC trimodal 100K smoke output retained outside the repo checkout; wrapper passed and `trimodal_verify.json` records GEX, ATAC, guide, and merged-MEX checks)
+- `/mnt/pikachu/catatac_gse288996/full_bench/catatac_trimodal_smoke_100k_ambient_fdr_*/` (CAT-ATAC trimodal 100K smokes run from merged ambient-FDR builds; includes GEX, Chromap ATAC, guide pf-multi, CR-compatible GMM outputs, and `outs/crispr_analysis/ambient_fdr/` sparse q-value sidecars)
 - `tests/catatac_srr_naming_output/` (SRR32265756_{1,2,3}.fastq.gz symlink naming discovery smoke)
 - `tests/bulk_pe_multisample_equivalence_output_*/` (batch vs sequential bulk PE multisample equivalence smoke)
 - `tests/mixed_chemistry_filtered_smoke_output_*/` (downsampled MSK mixed-chemistry filtered-cell smoke)
@@ -103,6 +104,9 @@ update this file with its output location.
 - `tests/ucsf_gex_gray_em_heuristics_output_*/` (cheap heuristic analysis for UCSF gray-zone barcodes, comparing CellGenI-style admissions against CR-supported tail cells)
 - `tests/ucsf_gex_gray_threshold_cv_output_*/` (5-fold validation outputs for a simple gray-zone threshold rule using genes_detected, entropy, and top_gene_frac)
 - `tests/ucsf_gex_gray_postqc_filter_output_*/` (gray-zone-only post-EmptyDrops QC cleanup mirroring downstream `combineFilters.py` semantics: min/max genes detected plus mitochondrial fraction cutoff)
+- `/mnt/pikachu/guide_ambient_fdr_bench_*/` (ambient-FDR guide-caller call-only benchmark artifacts: guide-only MEX links, regenerated `calls/`, threshold/AUC/low-UMI summary TSVs, and run metadata)
+- `/storage/A375/guide_ambient_fdr_callonly_*/` (A375 call-only `star_feature_call --guide-caller both` CRISPR artifacts with GMM and ambient-FDR outputs)
+- `/storage/A375/test_cr_compat_ambient_fdr_*/` (A375 integrated CR-compatible STAR runs with `--crGuideCaller auto` or `both`, including combined MEX and `outs/crispr_analysis/ambient_fdr/`)
 - `tests/ucsf_velocyto_gexonly_exact_100k_output_*/` (GEX-only Velocyto exact/debug harness on a 100K downsampled corrected UCSF `EBs2_2/GEX` fixture; stream vs deterministic replay plus Gene/GeneFull parity)
 - `/storage/ucsf-velocyto-validation/` (GEX-only Velocyto baseline, parity, timing, and trace artifacts on corrected UCSF `EBs2_2/GEX`)
   - small GEX-only frozen baseline:
