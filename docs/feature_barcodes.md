@@ -138,6 +138,13 @@ For Multiomics Suite protein quantification, `assignBarcodes` can emit a gzipped
 with `Antibody Capture` feature rows and provenance sidecars. See
 `docs/RUNBOOK_PROCESS_FEATURES_ADT_MEX.md`.
 
+In **pf-multi** configs, ADT/protein is another feature-library arm (same path as
+gRNA or LARRY): declare a non-GEX `feature_types` value such as `Antibody Capture`,
+`ADT`, or `Protein`, provide `star_feature_ref`, and the permits-based runner
+calls `assignBarcodes` with ADT MEX mode for that library only. Multiomics Suite
+consumes the resulting `protein.mex_dir`; STAR-suite does not orchestrate CLR or
+downstream packaging.
+
 ---
 
 ## CRISPR Feature Calling (CR-Compat Mode)
@@ -276,6 +283,7 @@ fastqs,sample,library_type,feature_types,star_chemistry,star_feature_ref,star_li
 /path/to/mRNA,DE_30KO,Gene Expression,Gene Expression,TRU,,gex_de
 /path/to/PolyIII,DE_30KO,CRISPR Guide Capture,CRISPR Guide Capture,NXT,/path/to/ref_grna.csv,grna_de
 /path/to/LARRY,DE_30KO,Custom,Custom,TRU,/path/to/ref_larry.csv,larry_de
+/path/to/ADT,DE_30KO,Protein,Protein,TRU,/path/to/ref_protein.csv,adt_de
 
 [feature]
 ref,/path/to/ref_grna.csv
@@ -284,6 +292,10 @@ ref,/path/to/ref_grna.csv
 In this example:
 - The gRNA library uses its own `star_feature_ref` (no filtering needed).
 - The LARRY lineage library uses a separate reference CSV with LARRY barcodes.
+- The ADT/protein library is routed like any other feature library; pf-multi
+  enables `assignBarcodes --output-mode adt_mex` for `Antibody Capture`, `ADT`,
+  or `Protein` rows and writes protein MEX sidecars under
+  `cr_assign/<feature_types>/<star_library_id>/`.
 - The global `[feature] ref` is a fallback for libraries without `star_feature_ref`.
 
 ### Validation
