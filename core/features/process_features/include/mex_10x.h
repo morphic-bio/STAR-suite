@@ -1,6 +1,8 @@
 #ifndef MEX_10X_H
 #define MEX_10X_H
 
+#include "common.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -19,6 +21,12 @@ int pf_write_mex_10x(const char *input_dir,
                      const char *output_dir,
                      const char *feature_type,
                      int gzip_output);
+
+int pf_write_mex_10x_from_features(const char *input_dir,
+                                   const char *output_dir,
+                                   feature_arrays *features,
+                                   const char *default_feature_type,
+                                   int gzip_output);
 
 #ifdef __cplusplus
 }

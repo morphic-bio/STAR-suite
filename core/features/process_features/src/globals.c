@@ -111,6 +111,9 @@ int *feature_mode_offsets = NULL;
 unsigned int *feature_mode_hist = NULL;
 int use_hot_hash = 0;
 int skip_heatmaps = 0;
+int adt_mex_output = 0;
+char adt_feature_ref_path[4096] = "";
+char adt_command_line[8192] = "";
 
 void clear_feature_lookup_hashes(void) {
     /* Global hash is now a non-owning alias; just null the pointer.

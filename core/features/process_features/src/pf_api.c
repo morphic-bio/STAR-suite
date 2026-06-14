@@ -2119,7 +2119,8 @@ pf_error pf_process_records_end(pf_record_stream *stream,
                             ctx->config->expected_cells,
                             ctx->config->emptydrops_use_fdr,
                             ctx->config->skip_qc_outputs,
-                            &sample_error);
+                            &sample_error,
+                            &stream->sample_args);
         if (sample_error) {
             snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
                      "Sample processing failed");

@@ -104,11 +104,17 @@ void free_feature_arrays(feature_arrays *features) {
     free(features->feature_no_ambiguity_le1);
     free(features->feature_no_ambiguity_le2);
     free(features->feature_names_storage);
+    free(features->feature_ids_storage);
+    free(features->feature_types_storage);
+    free(features->source_csv_path);
+    free(features->source_csv_fingerprint);
     free(features->feature_lengths);
     free(features->feature_code_lengths);
     free(features->feature_sequences_storage);
     free(features->feature_codes_storage);
     free(features->feature_names);
+    free(features->feature_ids);
+    free(features->feature_types);
     free(features->feature_sequences);
     free(features->feature_codes);
     free(features->feature_anchors_storage);
