@@ -119,6 +119,40 @@ if ! grep -q 'ITGB1' "${SAMPLE_OUT}/feature_reference.csv"; then
 fi
 pass "provenance records feature ref and mode"
 
+python3 - <<'PY' "${SAMPLE_OUT}/protein_quant_summary.json"
+import json, sys
+with open(sys.argv[1], encoding="utf-8") as fh:
+    json.load(fh)
+print("json ok")
+PY
+pass "protein_quant_summary.json is valid JSON"
+
+# Provenance escapes quotes/backslashes in paths, commands, and feature names.
+cat > "${INPUT}/escape_ref.csv" <<'EOF'
+id,name,sequence,feature_type
+"CD""29","CD""29",ATCGATCGATCGATCG,Antibody Capture
+EOF
+ESCAPE_OUT="$(mktemp -d /tmp/adt_escape_test.XXXXXX)"
+"${ASSIGN}" \
+    -w "${INPUT}/whitelist.txt" \
+    -f "${INPUT}/escape_ref.csv" \
+    -d "${ESCAPE_OUT}" \
+    --output-mode adt_mex \
+    --skip_empty_drops \
+    --skip_qc_outputs \
+    "${INPUT}" \
+    -b 16 -u 12 > "${WORK_DIR}/escape_run.log" 2>&1
+python3 - <<'PY' "${ESCAPE_OUT}/input/protein_quant_summary.json"
+import json, sys
+summary = json.load(open(sys.argv[1], encoding="utf-8"))
+keys = list(summary["per_feature_assigned_umis"])
+assert keys, "expected per-feature UMI keys"
+assert any('"' in k for k in keys), f"expected quoted feature name, got {keys!r}"
+print("escape ok")
+PY
+pass "provenance JSON escapes special characters in feature names"
+rm -rf "${ESCAPE_OUT}"
+
 # feature_type in ref may differ from emitted MEX type; snapshot keeps original.
 cat > "${INPUT}/adt_type_ref.csv" <<'EOF'
 id,name,sequence,feature_type
