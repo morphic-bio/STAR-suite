@@ -119,4 +119,55 @@ if ! grep -q 'ITGB1' "${SAMPLE_OUT}/feature_reference.csv"; then
 fi
 pass "provenance records feature ref and mode"
 
+# feature_type in ref may differ from emitted MEX type; snapshot keeps original.
+cat > "${INPUT}/adt_type_ref.csv" <<'EOF'
+id,name,sequence,feature_type
+CD29,CD29,ATCGATCGATCGATCG,ADT
+EOF
+ADT_TYPE_OUT="$(mktemp -d /tmp/adt_type_test.XXXXXX)"
+"${ASSIGN}" \
+    -w "${INPUT}/whitelist.txt" \
+    -f "${INPUT}/adt_type_ref.csv" \
+    -d "${ADT_TYPE_OUT}" \
+    --output-mode adt_mex \
+    --skip_empty_drops \
+    --skip_qc_outputs \
+    "${INPUT}" \
+    -b 16 -u 12 > "${WORK_DIR}/adt_type_run.log" 2>&1
+if zgrep -q $'\tADT$' "${ADT_TYPE_OUT}/input/features.tsv.gz"; then
+    fail "features.tsv.gz must emit Antibody Capture, not raw ADT feature_type"
+fi
+if ! zgrep -q "ADT" "${ADT_TYPE_OUT}/input/feature_reference.csv"; then
+    fail "feature_reference.csv should preserve original ADT feature_type"
+fi
+pass "features.tsv.gz normalizes feature_type to Antibody Capture"
+rm -rf "${ADT_TYPE_OUT}"
+
+# --filtered_barcodes restricts ADT MEX barcodes to the GEX-called set.
+cat > "${INPUT}/filtered_barcodes.txt" <<'EOF'
+AAACCCAAGAAACCAT
+EOF
+FILTER_OUT="$(mktemp -d /tmp/adt_filter_test.XXXXXX)"
+"${ASSIGN}" \
+    -w "${INPUT}/whitelist.txt" \
+    -f "${INPUT}/feature_ref.csv" \
+    -d "${FILTER_OUT}" \
+    --filtered_barcodes "${INPUT}/filtered_barcodes.txt" \
+    --source_namespace NXT \
+    --target_namespace NXT \
+    --output-mode adt_mex \
+    --skip_empty_drops \
+    --skip_qc_outputs \
+    "${INPUT}" \
+    -b 16 -u 12 > "${WORK_DIR}/filter_run.log" 2>&1
+FILTER_BC=$(zgrep -c . "${FILTER_OUT}/input/barcodes.tsv.gz" || true)
+if [ "${FILTER_BC}" -ne 1 ]; then
+    fail "filtered ADT MEX expected 1 barcode, got ${FILTER_BC}"
+fi
+if ! zgrep -Fxq "AAACCCAAGAAACCAT" "${FILTER_OUT}/input/barcodes.tsv.gz"; then
+    fail "filtered ADT MEX missing expected barcode"
+fi
+pass "--filtered_barcodes restricts ADT MEX to GEX-called cells"
+rm -rf "${FILTER_OUT}"
+
 echo -e "${GREEN}ADT protein MEX test passed${NC}"

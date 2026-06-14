@@ -105,9 +105,7 @@ static int write_features_from_ref(const char *output_dir, feature_arrays *featu
     for (int i = 0; i < features->number_of_features; ++i) {
         const char *id = features->feature_ids ? features->feature_ids[i] : features->feature_names[i];
         const char *name = features->feature_names[i];
-        const char *ftype = (features->feature_types && features->feature_types[i][0])
-            ? features->feature_types[i]
-            : default_feature_type;
+        const char *ftype = default_feature_type;
         if (!id || !id[0]) id = name;
         if (!name || !name[0]) name = id;
         if (out_printf(&out, "%s\t%s\t%s\n", id, name, ftype) != 0) {

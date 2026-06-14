@@ -63,6 +63,9 @@ ADT mode defaults:
 
 Use `--filtered_barcodes` with `--source_namespace` / `--target_namespace` when
 restricting to a GEX-called cell set while preserving barcode namespace parity.
+ADT MEX (`barcodes.tsv.gz`, `matrix.mtx.gz`) is built from the filtered barcode
+set when a filter is supplied; unfiltered artifacts remain under the sample
+directory for debugging.
 
 ## Output contract
 
@@ -71,7 +74,7 @@ Directory (one sample subdirectory per input FASTQ folder) contains:
 | File | Description |
 |------|-------------|
 | `barcodes.tsv.gz` | Cell barcodes (GEX namespace) |
-| `features.tsv.gz` | `id`, `name`, `Antibody Capture` |
+| `features.tsv.gz` | `id`, `name`, `Antibody Capture` (always normalized for MEX) |
 | `matrix.mtx.gz` | Feature × barcode UMI counts (deduplicated) |
 | `feature_reference.csv` | Snapshot of input feature ref |
 | `protein_quant_summary.json` | Mode, ref fingerprint, layout, counts |

@@ -4385,7 +4385,10 @@ void finalize_processing(feature_arrays *features, data_structures *hashes, char
     
     // Write filtered results if we have a filter (either external or from EmptyDrops)
     // mex_write_all() clears and re-populates counts arrays internally.
-    if (active_filter && !(sample && sample->adt_mex_output)) {
+    char adt_assign_dir[FILENAME_LENGTH];
+    strcpy(adt_assign_dir, directory);
+    if (active_filter) {
+        snprintf(adt_assign_dir, FILENAME_LENGTH, "%s/filtered", directory);
         config.filtered_barcodes_hash = active_filter;
         if (mex_write_all(&config, counts_result) != 0) {
             fprintf(stderr, "Error: mex_write_all failed for filtered output\n");
@@ -4403,7 +4406,7 @@ void finalize_processing(feature_arrays *features, data_structures *hashes, char
     if (sample && sample->adt_mex_output) {
         pf_adt_mex_config adt_cfg;
         memset(&adt_cfg, 0, sizeof(adt_cfg));
-        adt_cfg.assign_output_dir = directory;
+        adt_cfg.assign_output_dir = adt_assign_dir;
         adt_cfg.mex_output_dir = directory;
         adt_cfg.features = features;
         adt_cfg.counts = counts_result;
