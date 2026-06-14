@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <cctype>
 #include <limits>
+#include <chrono>
 #include <thread>
 #include <sys/stat.h>
 #include <stdexcept>
@@ -1326,6 +1327,58 @@ int processFeatureLibraries(const PfMultiConfig::Config& config,
     }
     
     return 0;
+}
+
+void waitForFeaturePermitInterface(bool hooksEnabled) {
+    if (!hooksEnabled) {
+        return;
+    }
+    if (g_threadChunks.mapPermitEnabled()) {
+        return;
+    }
+    constexpr int kPollIntervalMs = 10;
+    constexpr int kTimeoutMs = 30 * 60 * 1000;
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::milliseconds(kTimeoutMs);
+    while (!g_threadChunks.mapPermitEnabled()) {
+        if (std::chrono::steady_clock::now() >= deadline) {
+            throw std::runtime_error(
+                "table import: timed out waiting for dynamic FEATURE permit interface");
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(kPollIntervalMs));
+    }
+}
+
+bool acquireFeaturePermitChunk(bool enabled, uint64_t& waitNsOut) {
+    if (!enabled || !g_threadChunks.mapPermitEnabled()) {
+        waitNsOut = 0;
+        return false;
+    }
+    const auto t0 = std::chrono::steady_clock::now();
+    g_threadChunks.mapPermitAcquireForDomain(ThreadControl::PermitDomain::FEATURE);
+    const auto t1 = std::chrono::steady_clock::now();
+    waitNsOut = static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count());
+    return true;
+}
+
+void releaseFeaturePermitChunk(bool enabled,
+                             uint64_t waitNs,
+                             uint64_t workUnits,
+                             uint64_t workBytes) {
+    if (!enabled || !g_threadChunks.mapPermitEnabled()) {
+        return;
+    }
+    g_threadChunks.mapPermitReleaseForDomain(
+        ThreadControl::PermitDomain::FEATURE, waitNs, workUnits, workBytes, 0);
+}
+
+bool featurePermitTelemetryEnabled(bool hooksEnabled) {
+    return hooksEnabled && g_threadChunks.mapPermitEnabled();
+}
+
+ThreadControl::MapPermitSnapshot featurePermitSnapshot() {
+    return g_threadChunks.mapPermitSnapshot();
 }
 
 } // namespace PfMultiAssign

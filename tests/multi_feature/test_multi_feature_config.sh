@@ -49,6 +49,7 @@ int main(int argc, char** argv) {
                  << " star_chemistry=" << lib.starChemistry
                  << " star_feature_ref=" << lib.starFeatureRef
                  << " star_library_id=" << lib.starLibraryId
+                 << " star_input_format=" << lib.starInputFormat
                  << endl;
         }
         return 0;
@@ -373,6 +374,86 @@ if echo "$OUTPUT" | grep -q 'EXPECTED_FAIL.*collides.*after path sanitization.*l
     pass "sanitized collision (lib:a vs lib/a → lib_a) rejected"
 else
     fail "sanitized ID collision should be rejected"
+fi
+
+# --- Test 13: default star_input_format is fastq (empty) ---
+echo ""
+echo "--- Test 13: default star_input_format ---"
+cat > "$WORK_DIR/config_fmt_default.csv" << EOF
+[libraries]
+fastqs,sample,feature_types,star_feature_ref
+/path/to/gRNA,S1,CRISPR Guide Capture,$WORK_DIR/ref_grna.csv
+EOF
+OUTPUT=$("$HARNESS" "$WORK_DIR/config_fmt_default.csv" 2>&1)
+if echo "$OUTPUT" | grep -q 'star_input_format=$'; then
+    pass "default star_input_format is empty (fastq)"
+else
+    fail "default star_input_format should be empty"
+fi
+
+# --- Test 14: explicit fastq ---
+echo ""
+echo "--- Test 14: explicit star_input_format=fastq ---"
+cat > "$WORK_DIR/config_fmt_fastq.csv" << EOF
+[libraries]
+fastqs,sample,feature_types,star_input_format,star_feature_ref
+/path/to/gRNA,S1,CRISPR Guide Capture,fastq,$WORK_DIR/ref_grna.csv
+EOF
+OUTPUT=$("$HARNESS" "$WORK_DIR/config_fmt_fastq.csv" 2>&1)
+if echo "$OUTPUT" | grep -q 'star_input_format=fastq'; then
+    pass "explicit star_input_format=fastq accepted"
+else
+    fail "explicit fastq should parse"
+fi
+
+# --- Test 15: table format ---
+echo ""
+echo "--- Test 15: star_input_format=table ---"
+cat > "$WORK_DIR/hiv_counts.tsv" << 'EOF'
+barcode	feature_id	count
+GTATGTTCAGTAGCCT-1	HIV_DNA	5
+GTATGTTCAGTAGCCT-1	HIV_RNA	2
+EOF
+cat > "$WORK_DIR/config_fmt_table.csv" << EOF
+[libraries]
+fastqs,sample,feature_types,star_input_format,star_feature_ref,star_library_id
+$WORK_DIR/hiv_counts.tsv,YW8,Custom,table,$WORK_DIR/ref_larry.csv,hiv_state_yw8
+EOF
+OUTPUT=$("$HARNESS" "$WORK_DIR/config_fmt_table.csv" 2>&1)
+if echo "$OUTPUT" | grep -q 'star_input_format=table'; then
+    pass "star_input_format=table accepted"
+else
+    fail "table format should parse"
+fi
+
+# --- Test 16: invalid star_input_format ---
+echo ""
+echo "--- Test 16: invalid star_input_format rejected ---"
+cat > "$WORK_DIR/config_fmt_bad.csv" << EOF
+[libraries]
+fastqs,sample,feature_types,star_input_format,star_feature_ref
+/path/to/gRNA,S1,Custom,counts,$WORK_DIR/ref_larry.csv
+EOF
+OUTPUT=$("$HARNESS" "$WORK_DIR/config_fmt_bad.csv" "expect_fail" 2>&1)
+if echo "$OUTPUT" | grep -q 'EXPECTED_FAIL.*Invalid star_input_format'; then
+    pass "invalid star_input_format rejected"
+else
+    fail "invalid star_input_format should fail"
+fi
+
+# --- Test 17: table without star_feature_ref on non-GEX ---
+echo ""
+echo "--- Test 17: table non-GEX requires star_feature_ref ---"
+cat > "$WORK_DIR/config_table_noref.csv" << EOF
+[libraries]
+fastqs,sample,feature_types,star_input_format
+$WORK_DIR/hiv_counts.tsv,YW8,Custom,table
+EOF
+OUTPUT=$("$HARNESS" "$WORK_DIR/config_table_noref.csv" "expect_fail" 2>&1)
+if echo "$OUTPUT" | grep -q 'EXPECTED_FAIL.*star_feature_ref is required'; then
+    pass "table non-GEX without star_feature_ref rejected"
+else
+    fail "table non-GEX should require star_feature_ref"
 fi
 
 echo ""
