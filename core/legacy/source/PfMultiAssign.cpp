@@ -468,6 +468,11 @@ static void applyAssignOptions(pf_config* cfg, const AssignOptions& options) {
     if (options.skipHeatmaps) {
         pf_config_set_skip_heatmaps(cfg, 1);
     }
+    if (options.useSplitReadLayout) {
+        pf_config_set_split_read_layout(cfg, &options.splitReadLayout);
+    } else {
+        pf_config_clear_split_read_layout(cfg);
+    }
 }
 
 static string pfErrorMessage(pf_context* ctx, pf_error err, const string& stage) {
@@ -1219,6 +1224,11 @@ AssignResult runAssignBarcodes(const string& whitelist,
             inputFormat = "cbq_stream";
             cbqModeEffective = "stream";
         }
+    } else if (options.useSplitReadLayout) {
+        pf_split_read_metrics splitMetrics = {};
+        err = pf_process_split_fastq_dir(ctx, fastqDir.c_str(), assignOut.c_str(),
+                                         &stats, &splitMetrics);
+        inputFormat = "split_read";
     } else {
         err = pf_process_fastq_dir(ctx, fastqDir.c_str(), assignOut.c_str(), &stats);
     }

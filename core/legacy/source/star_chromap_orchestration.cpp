@@ -1058,24 +1058,25 @@ bool runStarChromapAtacIfEnabled(Parameters &P,
     if (P.dynamicThreadInterface == 1) {
       const auto snap = g_threadChunks.mapPermitSnapshot();
       P.inOut->logMain
-          << "ATAC permit telemetry: acquireCalls=" << snap.atacDomain.acquireCalls
+          << "ATAC permit telemetry: enabled="
+          << (snap.telemetryEnabled ? "yes" : "no")
+          << " acquireCalls=" << snap.atacDomain.acquireCalls
           << " waitNsTotal=" << snap.atacDomain.waitNsTotal
           << " waitNsMax=" << snap.atacDomain.waitNsMax
           << " workUnitsTotal=" << snap.atacDomain.workUnitsTotal
           << " workNsTotal=" << snap.atacDomain.workNsTotal
           << " workNsMax=" << snap.atacDomain.workNsMax << "\n"
           << flush;
-      // Integration guard: when STAR has wired the ATAC permit hooks into
-      // the contract (dynamicThreadInterface == 1) and Chromap actually ran
-      // an ATAC mapping, the linked libchromap *must* invoke the hook per
-      // mini-batch. If acquireCalls is still 0 after the run, the linked
-      // libchromap.a does not honor the hooks (header/lib mismatch) and any
-      // fairness benchmark over this binary is non-diagnostic. Fail loudly
-      // rather than producing misleading numbers.
-      if (snap.atacDomain.acquireCalls == 0) {
+      // Integration guard: acquireCalls are telemetry counters, so they are
+      // intentionally zero when --dynamicThreadTelemetry=0. When telemetry is
+      // enabled, a successful Chromap ATAC mapping must exercise the hook at
+      // least once; otherwise the linked libchromap/contract combination is
+      // non-diagnostic for permit-sharing benchmarks.
+      if (snap.telemetryEnabled && snap.atacDomain.acquireCalls == 0) {
         P.inOut->logMain
             << "ERROR: ATAC permit integration check failed: acquireCalls=0 "
-               "with --dynamicThreadInterface 1 and --chromapAtacEnable 1.\n"
+               "with --dynamicThreadInterface 1, --dynamicThreadTelemetry 1, "
+               "and --chromapAtacEnable 1.\n"
                "SOLUTION: build against a hook-enabled Chromap-suite tree "
                "whose mapping_parameters.h defines permit_acquire_hook / "
                "permit_release_hook / permit_hook_ctx, and point both the "
@@ -1084,6 +1085,12 @@ bool runStarChromapAtacIfEnabled(Parameters &P,
                "CHROMAP_DIR=/path/to/that/tree for the contract sub-Makefile).\n"
             << flush;
         return false;
+      }
+      if (!snap.telemetryEnabled) {
+        P.inOut->logMain
+            << "NOTICE: ATAC permit integration check skipped because "
+               "--dynamicThreadTelemetry=0; acquire counters are disabled.\n"
+            << flush;
       }
     }
     if (!runEvidenceFromPeaksIfEnabled(P)) {

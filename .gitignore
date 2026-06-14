@@ -156,6 +156,8 @@ __pycache__/
 /tests/remote_cellbender_100k_smoke_*/
 /tests/ucsf_velocyto_*/
 core/features/process_features/tests/fixtures/assignbarcodes_baseline/actual/
+core/features/process_features/tests/test_catatac_split_read
+core/features/process_features/tests/test_feature_duplicate_names
 /tools/cr_multi/__pycache__/
 
 ## Clique replay tool binaries
