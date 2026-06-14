@@ -295,6 +295,11 @@ def attach_metrics(adata, metrics, columns: list[str]) -> None:
         adata.obs[column] = metrics[column].values
 
 
+def should_propagate_guide_fdr_column(column: str) -> bool:
+    lower = column.lower()
+    return lower.startswith("guide_fdr_") or "__guide_fdr_" in lower
+
+
 def add_metrics_and_calls(
     rna,
     atac,
@@ -374,6 +379,10 @@ def add_metrics_and_calls(
             normalize_bool(atac) and not normalize_bool(gex)
             for atac, gex in zip(obs["effective_atac_module_call"].values, obs["gex_module_call"].values)
         ]
+
+    for column in rna.obs.columns:
+        if should_propagate_guide_fdr_column(str(column)):
+            obs[column] = rna.obs.loc[common, column].values
 
     rna_columns = [
         "barcode_raw",

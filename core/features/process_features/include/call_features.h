@@ -266,6 +266,48 @@ int cf_write_protospacer_umi_thresholds_json(const cf_gmm_results *results, cons
 int cf_process_mex_dir_gmm(const char *mex_dir, const char *output_dir, const cf_gmm_config *config);
 
 /* ============================================================================
+ * Ambient-FDR Guide Calling
+ * ============================================================================ */
+
+/* Ambient-FDR call configuration */
+typedef struct cf_ambient_fdr_config {
+    double fdr_threshold;        /* Default FDR threshold for calls (default: 0.01) */
+    int min_umi;                 /* Minimum observed UMI count for a call (default: 1) */
+    int emit_sparse_qvalues;     /* Write guide_qvalues.mtx and axes (default: 1) */
+} cf_ambient_fdr_config;
+
+/**
+ * Create Ambient-FDR config with defaults.
+ */
+cf_ambient_fdr_config* cf_ambient_fdr_config_create(void);
+
+/**
+ * Destroy Ambient-FDR config.
+ */
+void cf_ambient_fdr_config_destroy(cf_ambient_fdr_config *config);
+
+/**
+ * Convenience function: load raw and filtered MEX, estimate ambient guide
+ * rates from raw non-cell barcodes, and write sparse q-values/calls for
+ * filtered cells only.
+ *
+ * Both raw and filtered MEX inputs may be CRISPR-only or combined 10x MEX.
+ * When feature types are present, only rows with type "CRISPR Guide Capture"
+ * are used. If no feature type column is present, all rows are treated as
+ * guide rows.
+ *
+ * @param raw_mex_dir Directory containing raw MEX files.
+ * @param filtered_mex_dir Directory containing filtered-cell MEX files.
+ * @param output_dir Directory for ambient-FDR output files.
+ * @param config Ambient-FDR configuration (NULL for defaults).
+ * @return 0 on success or intentional skip with summary JSON, -1 on failure.
+ */
+int cf_process_mex_dir_ambient_fdr(const char *raw_mex_dir,
+                                   const char *filtered_mex_dir,
+                                   const char *output_dir,
+                                   const cf_ambient_fdr_config *config);
+
+/* ============================================================================
  * NB-EM Feature Calling (SCEPTRE-style)
  * ============================================================================ */
 

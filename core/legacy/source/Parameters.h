@@ -708,6 +708,10 @@ class Parameters {
             vector<string> crFastqMap;     // Map config FASTQ paths to actual paths (key=value pairs)
             string crMexUseGexBarcodes;    // DEPRECATED: CR-compat MEX now always uses GEX barcodes (ignored, kept for backward compatibility)
             int crMinUmi;                   // Minimum UMI threshold for CRISPR feature calling (default: 3)
+            string crGuideCaller;           // auto|gmm|ambient-fdr|both|none (default: auto)
+            double crGuideFdr;              // Ambient-FDR guide calling threshold (default: 0.01)
+            int crGuideFdrMinUmi;           // Ambient-FDR minimum UMI floor for calls (default: 1)
+            string crGuideFdrEmitQvalues;   // sparse|none (default: sparse)
             int crAssignMaxHamming;         // Optional: pass --maxHammingDistance to assignBarcodes (default: unset)
             int crAssignFeatureOffset;      // Optional: pass --feature_constant_offset to assignBarcodes (default: unset)
             int crAssignLimitSearch;        // Optional: pass --limit_search to assignBarcodes; -2 means unset
