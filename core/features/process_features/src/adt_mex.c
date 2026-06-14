@@ -27,19 +27,32 @@ static int write_provenance(const pf_adt_mex_config *config, int n_features, int
     if (!fp) return -1;
 
     fprintf(fp, "{\n");
-    fprintf(fp, "  \"mode\": \"adt_mex\",\n");
-    fprintf(fp, "  \"feature_type\": \"%s\",\n", PF_ADT_FEATURE_TYPE_DEFAULT);
+    fprintf(fp, "  \"mode\": ");
+    pf_fprint_json_string(fp, "adt_mex");
+    fprintf(fp, ",\n  \"feature_type\": ");
+    pf_fprint_json_string(fp, PF_ADT_FEATURE_TYPE_DEFAULT);
+    fprintf(fp, ",\n");
     if (config->features && config->features->source_csv_path) {
-        fprintf(fp, "  \"feature_ref_path\": \"%s\",\n", config->features->source_csv_path);
+        fprintf(fp, "  \"feature_ref_path\": ");
+        pf_fprint_json_string(fp, config->features->source_csv_path);
+        fprintf(fp, ",\n");
     } else if (adt_feature_ref_path[0]) {
-        fprintf(fp, "  \"feature_ref_path\": \"%s\",\n", adt_feature_ref_path);
+        fprintf(fp, "  \"feature_ref_path\": ");
+        pf_fprint_json_string(fp, adt_feature_ref_path);
+        fprintf(fp, ",\n");
     }
     if (config->features && config->features->source_csv_fingerprint) {
-        fprintf(fp, "  \"feature_ref_fingerprint\": \"%s\",\n", config->features->source_csv_fingerprint);
+        fprintf(fp, "  \"feature_ref_fingerprint\": ");
+        pf_fprint_json_string(fp, config->features->source_csv_fingerprint);
+        fprintf(fp, ",\n");
     }
-    fprintf(fp, "  \"read_layout\": \"10x_feature_barcode\",\n");
-    fprintf(fp, "  \"barcode_read\": \"R1\",\n");
-    fprintf(fp, "  \"feature_read\": \"R2\",\n");
+    fprintf(fp, "  \"read_layout\": ");
+    pf_fprint_json_string(fp, "10x_feature_barcode");
+    fprintf(fp, ",\n  \"barcode_read\": ");
+    pf_fprint_json_string(fp, "R1");
+    fprintf(fp, ",\n  \"feature_read\": ");
+    pf_fprint_json_string(fp, "R2");
+    fprintf(fp, ",\n");
     fprintf(fp, "  \"barcode_length\": %d,\n", config->barcode_length);
     fprintf(fp, "  \"umi_length\": %d,\n", config->umi_length);
     fprintf(fp, "  \"barcode_offset\": %d,\n", config->barcode_offset);
@@ -54,27 +67,29 @@ static int write_provenance(const pf_adt_mex_config *config, int n_features, int
         for (int i = 0; i < config->features->number_of_features; ++i) {
             const char *label = config->features->feature_names[i];
             long long umi = (long long)config->counts->total_deduped_counts[i];
-            fprintf(fp, "    \"%s\": %lld%s\n", label, umi, (i + 1 < config->features->number_of_features) ? "," : "");
+            fprintf(fp, "    ");
+            pf_fprint_json_string(fp, label);
+            fprintf(fp, ": %lld%s\n", umi, (i + 1 < config->features->number_of_features) ? "," : "");
         }
     }
     fprintf(fp, "  },\n");
     fprintf(fp, "  \"multiomics_manifest\": {\n");
-    fprintf(fp, "    \"protein.mex_dir\": \"%s\",\n", config->mex_output_dir);
+    fprintf(fp, "    \"protein.mex_dir\": ");
+    pf_fprint_json_string(fp, config->mex_output_dir);
+    fprintf(fp, ",\n");
     if (config->features && config->features->source_csv_path) {
         char snapshot[4096];
         snprintf(snapshot, sizeof(snapshot), "%s/feature_reference.csv", config->mex_output_dir);
-        fprintf(fp, "    \"protein.feature_ref\": \"%s\",\n", snapshot);
+        fprintf(fp, "    \"protein.feature_ref\": ");
+        pf_fprint_json_string(fp, snapshot);
+        fprintf(fp, ",\n");
     }
-    fprintf(fp, "    \"protein.normalization\": \"clr\"\n");
-    fprintf(fp, "  }");
+    fprintf(fp, "    \"protein.normalization\": ");
+    pf_fprint_json_string(fp, "clr");
+    fprintf(fp, "\n  }");
     if (config->command_line && config->command_line[0]) {
         fprintf(fp, ",\n  \"command\": ");
-        fputc('"', fp);
-        for (const char *p = config->command_line; *p; ++p) {
-            if (*p == '"' || *p == '\\') fputc('\\', fp);
-            fputc(*p, fp);
-        }
-        fputc('"', fp);
+        pf_fprint_json_string(fp, config->command_line);
     }
     fprintf(fp, "\n}\n");
     fclose(fp);

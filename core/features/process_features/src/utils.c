@@ -115,3 +115,29 @@ int pf_file_fingerprint(const char *path, char *out_hex, size_t out_hex_len) {
     snprintf(out_hex, out_hex_len, "%016llx", hash);
     return 0;
 }
+
+void pf_fprint_json_string(FILE *fp, const char *str) {
+    if (!fp) return;
+    if (!str) str = "";
+    fputc('"', fp);
+    for (const char *p = str; *p; ++p) {
+        unsigned char c = (unsigned char)*p;
+        switch (c) {
+            case '"':  fputs("\\\"", fp); break;
+            case '\\': fputs("\\\\", fp); break;
+            case '\b': fputs("\\b", fp); break;
+            case '\f': fputs("\\f", fp); break;
+            case '\n': fputs("\\n", fp); break;
+            case '\r': fputs("\\r", fp); break;
+            case '\t': fputs("\\t", fp); break;
+            default:
+                if (c < 0x20) {
+                    fprintf(fp, "\\u%04x", c);
+                } else {
+                    fputc((int)c, fp);
+                }
+                break;
+        }
+    }
+    fputc('"', fp);
+}
