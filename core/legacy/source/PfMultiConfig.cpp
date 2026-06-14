@@ -108,6 +108,15 @@ vector<string> SampleEntry::resolvedOcmIds() const {
     return ids;
 }
 
+bool LibraryEntry::isTableBacked() const {
+    string fmt = starInputFormat;
+    if (fmt.empty()) {
+        return false;
+    }
+    std::transform(fmt.begin(), fmt.end(), fmt.begin(), ::tolower);
+    return fmt == "table";
+}
+
 bool LibraryEntry::hasSplitReadLayout() const {
     string layout = starLayout;
     std::transform(layout.begin(), layout.end(), layout.begin(), ::tolower);
@@ -350,6 +359,16 @@ Config parseConfig(const string& configPath) {
                             entry.starFeatureRef = value;
                         } else if (header == "star_library_id" || header == "starlibraryid") {
                             entry.starLibraryId = value;
+                        } else if (header == "star_input_format" || header == "starinputformat") {
+                            if (!value.empty()) {
+                                string lower = value;
+                                std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+                                if (lower != "fastq" && lower != "table") {
+                                    throw runtime_error("Invalid star_input_format value '" + value
+                                        + "'; must be fastq, table, or empty (defaults to fastq)");
+                                }
+                                entry.starInputFormat = lower;
+                            }
                         } else if (header == "star_max_hamming" || header == "starmaxhamming") {
                             if (!value.empty()) {
                                 entry.starMaxHamming = std::atoi(value.c_str());
@@ -518,6 +537,16 @@ Config parseConfig(const string& configPath) {
                         entry.starFeatureRef = value;
                     } else if (header == "star_library_id" || header == "starlibraryid") {
                         entry.starLibraryId = value;
+                    } else if (header == "star_input_format" || header == "starinputformat") {
+                        if (!value.empty()) {
+                            string lower = value;
+                            std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+                            if (lower != "fastq" && lower != "table") {
+                                throw runtime_error("Invalid star_input_format value '" + value
+                                    + "'; must be fastq, table, or empty (defaults to fastq)");
+                            }
+                            entry.starInputFormat = lower;
+                        }
                     } else if (header == "star_max_hamming" || header == "starmaxhamming") {
                         if (!value.empty()) {
                             entry.starMaxHamming = std::atoi(value.c_str());
@@ -625,6 +654,30 @@ Config parseConfig(const string& configPath) {
                 throw runtime_error("star_feature_ref path does not exist or is not a file: "
                     + lib.starFeatureRef);
             }
+        }
+        if (lib.isTableBacked()) {
+            if (lib.hasSplitReadLayout()) {
+                throw runtime_error("star_input_format=table is incompatible with split-read layout "
+                    "columns for library_id=" + lib.starLibraryId);
+            }
+            string norm = lib.normalizedFeatureType();
+            if (norm != "geneexpression" && norm != "gex" && lib.starFeatureRef.empty()) {
+                throw runtime_error("star_feature_ref is required for table-backed non-GEX library "
+                    + lib.starLibraryId);
+            }
+            string tablePath = lib.fastqs;
+            if (tablePath.empty()) {
+                throw runtime_error("table-backed library " + lib.starLibraryId
+                    + " requires fastqs column as table path");
+            }
+            if (tablePath[0] != '/') {
+                tablePath = configDir + "/" + tablePath;
+            }
+            struct stat tableSt;
+            if (stat(tablePath.c_str(), &tableSt) != 0 || !S_ISREG(tableSt.st_mode)) {
+                throw runtime_error("table input path does not exist or is not a file: " + tablePath);
+            }
+            lib.fastqs = tablePath;
         }
         finalizeSplitReadLayout(lib);
         if (!lib.starBarcodeOutputMap.empty()) {

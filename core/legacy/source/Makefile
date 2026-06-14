@@ -215,7 +215,7 @@ OBJECTS = systemFunctions.o SoloMemoryProfile.o CountingSinkStress.o funPrimaryA
 	ZGZXTags.o \
 	FlexProbeIndex.o \
 	CellRangerFormatter.o \
-	PfMultiConfig.o PfMultiMexStub.o PfMultiAssign.o PfMultiMerge.o PfMultiProcess.o VelocytoMexWriter.o \
+	PfMultiConfig.o PfMultiMexStub.o PfMultiAssign.o PfMultiTableImport.o PfMultiMerge.o PfMultiProcess.o VelocytoMexWriter.o \
 	OcmMultiConfig.o OcmMultiMaterialize.o \
 	CbUbTagInjector.o
 
