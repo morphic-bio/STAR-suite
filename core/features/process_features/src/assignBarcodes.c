@@ -12,6 +12,7 @@
 #include "../include/pf_counts.h"
 #include "../include/mex_writer.h"
 #include "../include/barcode_filter.h"
+#include "../include/adt_mex.h"
 
 //will  print if DEBUG is set or debug=1
 //code for feature sequences stats
@@ -4251,7 +4252,7 @@ int checkAndCorrectBarcode(char **lines, int maxN, uint32_t feature_index, uint1
 }
 
 
-void finalize_processing(feature_arrays *features, data_structures *hashes, char *directory, memory_pool_collection *pools, statistics *stats, uint16_t stringency, uint16_t min_counts, double min_posterior, int legacy_cb_rescue, khash_t(strptr)* filtered_barcodes_hash, int skip_emptydrops, int emptydrops_failure_fatal, int expected_cells, int emptydrops_use_fdr, int skip_qc_outputs, int *error_out){
+void finalize_processing(feature_arrays *features, data_structures *hashes, char *directory, memory_pool_collection *pools, statistics *stats, uint16_t stringency, uint16_t min_counts, double min_posterior, int legacy_cb_rescue, khash_t(strptr)* filtered_barcodes_hash, int skip_emptydrops, int emptydrops_failure_fatal, int expected_cells, int emptydrops_use_fdr, int skip_qc_outputs, int *error_out, sample_args *sample){
     process_pending_barcodes(hashes, pools, stats, min_posterior, legacy_cb_rescue);
     double elapsed_time = get_time_in_seconds() - stats->start_time;
     fprintf(stderr, "Finished processing %ld reads in %.2f seconds (%.1f thousand reads/second)\n", stats->number_of_reads, elapsed_time, stats->number_of_reads / (double)elapsed_time / 1000.0);
@@ -4384,7 +4385,7 @@ void finalize_processing(feature_arrays *features, data_structures *hashes, char
     
     // Write filtered results if we have a filter (either external or from EmptyDrops)
     // mex_write_all() clears and re-populates counts arrays internally.
-    if (active_filter) {
+    if (active_filter && !(sample && sample->adt_mex_output)) {
         config.filtered_barcodes_hash = active_filter;
         if (mex_write_all(&config, counts_result) != 0) {
             fprintf(stderr, "Error: mex_write_all failed for filtered output\n");
@@ -4397,6 +4398,27 @@ void finalize_processing(feature_arrays *features, data_structures *hashes, char
     // Clean up the filter if we created it (EmptyDrops case)
     if (filter_is_owned) {
         pf_filter_free(active_filter);
+    }
+
+    if (sample && sample->adt_mex_output) {
+        pf_adt_mex_config adt_cfg;
+        memset(&adt_cfg, 0, sizeof(adt_cfg));
+        adt_cfg.assign_output_dir = directory;
+        adt_cfg.mex_output_dir = directory;
+        adt_cfg.features = features;
+        adt_cfg.counts = counts_result;
+        adt_cfg.stats = stats;
+        adt_cfg.barcode_length = barcode_length;
+        adt_cfg.umi_length = umi_length;
+        adt_cfg.barcode_offset = sample->barcode_constant_offset;
+        adt_cfg.feature_offset = sample->feature_constant_offset;
+        adt_cfg.max_hamming_distance = sample->maxHammingDistance;
+        adt_cfg.stringency = stringency;
+        adt_cfg.command_line = adt_command_line[0] ? adt_command_line : NULL;
+        if (pf_write_adt_protein_outputs(&adt_cfg) != 0) {
+            fprintf(stderr, "Error: ADT protein MEX output failed\n");
+            if (error_out) *error_out = 1;
+        }
     }
     
     // Clean up the counts result (frees all nested hash tables and arrays)
@@ -6202,7 +6224,7 @@ void process_files_in_sample(sample_args *args) {
     }
     if (!args->probe_only) {
         // Since merging is not required, finalize using the first thread's data.
-        finalize_processing(args->features, &args->hashes[0], args->directory, args->pools[0], &args->stats[0], args->stringency, args->min_counts, min_posterior, args->legacy_cb_rescue, args->filtered_barcodes_hash, args->skip_emptydrops, args->emptydrops_failure_fatal, args->expected_cells, args->emptydrops_use_fdr, args->skip_qc_outputs, args->error_out);
+        finalize_processing(args->features, &args->hashes[0], args->directory, args->pools[0], &args->stats[0], args->stringency, args->min_counts, min_posterior, args->legacy_cb_rescue, args->filtered_barcodes_hash, args->skip_emptydrops, args->emptydrops_failure_fatal, args->expected_cells, args->emptydrops_use_fdr, args->skip_qc_outputs, args->error_out, args);
     }
    
     // Free the reader sets

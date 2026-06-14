@@ -131,6 +131,13 @@ This writes `features.tsv` and `barcodes.tsv` alongside the existing `matrix.mtx
 - Canonical implementation path: `core/features/process_features`.
 - `core/features/feature_barcodes` is retained only as a compatibility path.
 
+## ADT / Protein MEX (`--output-mode adt_mex`)
+
+For Multiomics Suite protein quantification, `assignBarcodes` can emit a gzipped
+10x MEX directory directly (`barcodes.tsv.gz`, `features.tsv.gz`, `matrix.mtx.gz`)
+with `Antibody Capture` feature rows and provenance sidecars. See
+`docs/RUNBOOK_PROCESS_FEATURES_ADT_MEX.md`.
+
 ---
 
 ## CRISPR Feature Calling (CR-Compat Mode)
@@ -171,6 +178,25 @@ CR-compat mode produces `outs/crispr_analysis/`:
 - `protospacer_umi_thresholds.csv` - GMM-derived UMI thresholds
 
 See `tests/crispr_feature_calling_comparison_report.md` for validation details.
+
+### Planned: Ambient-FDR Guide Calling
+
+The current CR-compatible caller should remain available for Cell Ranger parity.
+For perturb-seq QC, STAR-suite should also support an ambient-FDR guide caller
+that uses raw guide counts in non-cell barcodes as the noise floor and emits
+tunable q-values for the final called-cell set:
+
+```text
+call at FDR alpha = guide_qvalue <= alpha
+```
+
+This mode should run in addition to compatibility calling, not replace it. Raw
+non-cell barcodes should be used only to estimate ambient guide rates; q-values
+and calls should be stored only for filtered cells. The intended output is a
+sparse q-value matrix plus per-cell calls at a default FDR, so downstream QC and
+MuData builders can expose an FDR slider without re-running guide assignment.
+The implementation contract is tracked in
+`docs/HANDOFF_GUIDE_AMBIENT_FDR_CALLER_20260613.md`.
 
 ---
 

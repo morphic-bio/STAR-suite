@@ -1,4 +1,8 @@
 #include "../include/utils.h"
+#include <errno.h>
+#include <stdio.h>
+#include <string.h>
+#include <sys/stat.h>
 
 // Hash functions removed - khash provides built-in hash functions
 void free_fastq_files_collection(fastq_files_collection *fastq_files){
@@ -68,5 +72,46 @@ int mkdir_p(const char *path) {
         perror("mkdir");
         return -1;
     }
+    return 0;
+}
+
+int pf_copy_file(const char *src_path, const char *dst_path) {
+    if (!src_path || !dst_path) return -1;
+    FILE *src = fopen(src_path, "rb");
+    if (!src) return -1;
+    FILE *dst = fopen(dst_path, "wb");
+    if (!dst) {
+        fclose(src);
+        return -1;
+    }
+    char buf[8192];
+    size_t nread;
+    while ((nread = fread(buf, 1, sizeof(buf), src)) > 0) {
+        if (fwrite(buf, 1, nread, dst) != nread) {
+            fclose(src);
+            fclose(dst);
+            return -1;
+        }
+    }
+    fclose(src);
+    fclose(dst);
+    return 0;
+}
+
+int pf_file_fingerprint(const char *path, char *out_hex, size_t out_hex_len) {
+    if (!path || !out_hex || out_hex_len < 17) return -1;
+    FILE *fp = fopen(path, "rb");
+    if (!fp) return -1;
+    unsigned long long hash = 1469598103934665603ULL;
+    char buf[8192];
+    size_t nread;
+    while ((nread = fread(buf, 1, sizeof(buf), fp)) > 0) {
+        for (size_t i = 0; i < nread; ++i) {
+            hash ^= (unsigned char)buf[i];
+            hash *= 1099511628211ULL;
+        }
+    }
+    fclose(fp);
+    snprintf(out_hex, out_hex_len, "%016llx", hash);
     return 0;
 }

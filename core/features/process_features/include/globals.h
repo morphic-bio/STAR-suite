@@ -67,6 +67,11 @@ extern unsigned int *feature_mode_hist;
 extern int use_hot_hash;
 extern int skip_heatmaps;
 
+/* ADT/protein 10x MEX output mode */
+extern int adt_mex_output;
+extern char adt_feature_ref_path[4096];
+extern char adt_command_line[8192];
+
 /* Hash lifecycle helpers for feature matching tables */
 void clear_feature_lookup_hashes(void);
 

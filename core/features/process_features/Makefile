@@ -23,7 +23,7 @@ DEFINES :=
 # Note: heatmap.c now uses Plotly (HTML+JSON), no external dependencies
 # pf_counts.c and mex_writer.c provide modular counts/output stages
 # nbem.c provides NB-EM feature calling (SCEPTRE-style)
-CORE_SRCS = assignBarcodes.c queue.c globals.c utils.c memory.c io.c barcode_match.c pf_api.c call_features.c gmm.c nbem.c mex_10x.c plot_histogram.c pf_counts.c mex_writer.c emptydrops_bridge.c barcode_filter.c heatmap.c
+CORE_SRCS = assignBarcodes.c queue.c globals.c utils.c memory.c io.c barcode_match.c pf_api.c call_features.c gmm.c nbem.c mex_10x.c adt_mex.c plot_histogram.c pf_counts.c mex_writer.c emptydrops_bridge.c barcode_filter.c heatmap.c
 
 # CLI-specific sources
 MAIN_SRCS = main.c
@@ -76,7 +76,7 @@ TEST_PREHASH_AMBIGUITY_TARGET=tests/test_prehash_ambiguity
 TEST_UNION_WHITELIST_TARGET=tests/test_union_whitelist
 TEST_PREHASH_MEMORY_TARGET=tests/test_prehash_memory_safety
 
-.PHONY: all clean lib tools test
+.PHONY: all clean lib tools test test-adt-mex
 
 all: lib tools
 
@@ -176,6 +176,10 @@ $(TEST_PREHASH_MEMORY_TARGET): tests/test_prehash_memory_safety.c $(LIB_TARGET) 
 test-regression: $(TARGET)
 	@echo "Running assignBarcodes regression test..."
 	@./tests/test_assignbarcodes_regression.sh
+
+test-adt-mex: $(TARGET)
+	@chmod +x tests/test_adt_mex.sh
+	@./tests/test_adt_mex.sh
 
 clean:
 	rm -f *.o $(TARGET) $(DEMUX_TARGET) $(DEMUX_BAM_TARGET) $(CALL_FEATURES_TARGET) $(LIB_TARGET) $(TEST_API_TARGET) $(TEST_PF_COUNTS_TARGET) $(TEST_MEX_WRITER_TARGET) $(TEST_MEX_PARITY_TARGET) $(TEST_BARCODE_FILTER_TARGET) $(TEST_OFFSET_DETECTION_TARGET) $(TEST_ANCHOR_PATTERN_TARGET) $(TEST_FILTERED_NAMESPACE_TARGET) $(TEST_PF_API_ISOLATION_TARGET) $(TEST_PREHASH_AMBIGUITY_TARGET) $(TEST_UNION_WHITELIST_TARGET) $(TEST_PREHASH_MEMORY_TARGET) tests/*.o
