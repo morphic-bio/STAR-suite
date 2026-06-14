@@ -4,6 +4,7 @@
 #include "IncludeDefine.h"
 #include "PfMultiConfig.h"
 #include "pf_split_read.h"
+#include "ThreadControl.h"
 
 /**
  * @file PfMultiAssign.h
@@ -105,6 +106,19 @@ AssignResult runAssignBarcodes(const string& whitelist,
                      const string& featureRef, const string& fastqDir,
                      const string& assignOut,
                      const AssignOptions& options = AssignOptions());
+
+/** Block until the dynamic permit interface is active (mapThreadsSpawn configured). */
+void waitForFeaturePermitInterface(bool hooksEnabled);
+
+/** Feature-domain permit chunk helpers for table import and other non-pf_api workloads. */
+/** @return true when a FEATURE permit was acquired (hooks on and interface active). */
+bool acquireFeaturePermitChunk(bool enabled, uint64_t& waitNsOut);
+void releaseFeaturePermitChunk(bool enabled,
+                               uint64_t waitNs,
+                               uint64_t workUnits,
+                               uint64_t workBytes);
+bool featurePermitTelemetryEnabled(bool hooksEnabled);
+ThreadControl::MapPermitSnapshot featurePermitSnapshot();
 
 /**
  * @brief Process all feature libraries from config
