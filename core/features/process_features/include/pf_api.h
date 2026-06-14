@@ -210,6 +210,9 @@ void pf_config_set_autodetect_chemistry_min_hits(pf_config *config, int min_hits
 void pf_config_set_probe_only(pf_config *config, int enabled);
 void pf_config_set_skip_qc_outputs(pf_config *config, int enabled);
 
+/* ADT / protein MEX output (assignBarcodes --output-mode adt_mex) */
+void pf_config_set_adt_mex_output(pf_config *config, int enable);
+
 /**
  * Allow union (mixed NXT+TRU) whitelists and filtered barcode sets.
  * When enabled, filtered barcodes are expanded at ingress: each barcode's

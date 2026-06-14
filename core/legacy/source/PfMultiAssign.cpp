@@ -468,6 +468,10 @@ static void applyAssignOptions(pf_config* cfg, const AssignOptions& options) {
     if (options.skipHeatmaps) {
         pf_config_set_skip_heatmaps(cfg, 1);
     }
+    if (options.adtMexOutput) {
+        pf_config_set_adt_mex_output(cfg, 1);
+        pf_config_set_skip_emptydrops(cfg, 1);
+    }
     if (options.useSplitReadLayout) {
         pf_config_set_split_read_layout(cfg, &options.splitReadLayout);
     } else {
@@ -957,6 +961,8 @@ static void writeApiRunSummary(const string& assignOut,
     out << "translateNxt=" << (options.translateNxt ? 1 : 0) << "\n";
     out << "probeOnly=" << (options.probeOnly ? 1 : 0) << "\n";
     out << "skipQcOutputs=" << (options.skipQcOutputs ? 1 : 0) << "\n";
+    out << "adtMexOutput=" << (options.adtMexOutput ? 1 : 0) << "\n";
+    out << "output_mode=" << (options.adtMexOutput ? "adt_mex" : "default") << "\n";
     out << "enableStarDynamicPermitHooks=" << (options.enableStarDynamicPermitHooks ? 1 : 0) << "\n";
     out << "filteredBarcodesPath=" << options.filteredBarcodesPath << "\n";
     out << "stats.total_reads=" << stats.total_reads << "\n";

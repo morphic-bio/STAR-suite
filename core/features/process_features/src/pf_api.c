@@ -79,6 +79,7 @@ struct pf_config {
     int autodetect_chemistry_min_hits;  /* minimum total hits for decision (default 50) */
     int probe_only;                     /* 1=lightweight chemistry probe, no outputs */
     int skip_qc_outputs;                /* 1=skip feature histograms/heatmaps */
+    int adt_mex_output;                 /* 1=emit 10x protein MEX sidecars */
 
     /* Union whitelist support (legacy compat) */
     int allow_union_whitelist;          /* 0=strict, 1=accept mixed NXT+TRU */
@@ -319,6 +320,7 @@ pf_config* pf_config_create(void) {
     config->autodetect_chemistry_min_hits = 50;
     config->probe_only = 0;
     config->skip_qc_outputs = 0;
+    config->adt_mex_output = 0;
 
     /* Union whitelist: off by default (strict namespace) */
     config->allow_union_whitelist = 0;
@@ -534,6 +536,10 @@ void pf_config_set_probe_only(pf_config *config, int enabled) {
 
 void pf_config_set_skip_qc_outputs(pf_config *config, int enabled) {
     if (config) config->skip_qc_outputs = enabled;
+}
+
+void pf_config_set_adt_mex_output(pf_config *config, int enable) {
+    if (config) config->adt_mex_output = (enable != 0);
 }
 
 void pf_config_set_allow_union_whitelist(pf_config *config, int enable) {
@@ -1388,6 +1394,7 @@ static int pf_stream_initialize_queue(pf_record_stream *stream, int nreaders) {
     stream->sample_args.emptydrops_use_fdr = ctx->config->emptydrops_use_fdr;
     stream->sample_args.probe_only = ctx->config->probe_only;
     stream->sample_args.skip_qc_outputs = ctx->config->skip_qc_outputs;
+    stream->sample_args.adt_mex_output = ctx->config->adt_mex_output;
 
     if (ctx->config->autodetect_chemistry) {
         memset(&stream->chem_detect, 0, sizeof(stream->chem_detect));
@@ -1773,6 +1780,7 @@ pf_error pf_process_fastq_dir(pf_context *ctx,
         args.chem_detect = chem_detect_ptr;
         args.probe_only = ctx->config->probe_only;
         args.skip_qc_outputs = ctx->config->skip_qc_outputs;
+        args.adt_mex_output = ctx->config->adt_mex_output;
         args.error_out = &sample_error;
         
         /* Process the sample */
@@ -2044,6 +2052,7 @@ pf_error pf_process_fastqs(pf_context *ctx,
     args.chem_detect = chem_detect_ptr2;
     args.probe_only = ctx->config->probe_only;
     args.skip_qc_outputs = ctx->config->skip_qc_outputs;
+    args.adt_mex_output = ctx->config->adt_mex_output;
     args.error_out = &sample_error;
     
     process_files_in_sample(&args);
@@ -2336,6 +2345,7 @@ pf_error pf_direct_range_begin(pf_context *ctx,
     job->sample_args.emptydrops_use_fdr = ctx->config->emptydrops_use_fdr;
     job->sample_args.probe_only = ctx->config->probe_only;
     job->sample_args.skip_qc_outputs = ctx->config->skip_qc_outputs;
+    job->sample_args.adt_mex_output = ctx->config->adt_mex_output;
 
     if (ctx->config->autodetect_chemistry) {
         memset(&job->chem_detect, 0, sizeof(job->chem_detect));
