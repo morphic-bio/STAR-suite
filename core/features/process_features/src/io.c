@@ -25,6 +25,54 @@ static void parse_feature_pattern(const char *pattern, int *offset, const char *
     if (suffix_len) *suffix_len = suffix_length;
 }
 
+static const char *feature_name_from_csv_line(char *line, int nameIndex, const char *filename, int line_number) {
+    char *fields[LINE_LENGTH];
+    line[strcspn(line, "\r\n")] = '\0';
+    int nFields = split_line(line, fields, ",");
+    if (nameIndex >= nFields) {
+        fprintf(stderr, "Error: Invalid feature line %s:%d - too few fields %d\n",
+                filename, line_number, nFields);
+        exit(EXIT_FAILURE);
+    }
+    return fields[nameIndex];
+}
+
+static int feature_name_seen_or_add(khash_t(strptr) *seen_names,
+                                    const char *feature_name,
+                                    const char *filename,
+                                    int line_number,
+                                    int warn_on_duplicate) {
+    khint_t k = kh_get(strptr, seen_names, feature_name);
+    if (k != kh_end(seen_names)) {
+        if (warn_on_duplicate) {
+            fprintf(stderr,
+                    "Warning: duplicate feature name '%s' in %s at line %d; "
+                    "ignoring later definition and keeping the first\n",
+                    feature_name, filename, line_number);
+        }
+        return 1;
+    }
+
+    char *feature_name_copy = strdup(feature_name);
+    if (!feature_name_copy) {
+        fprintf(stderr, "Failed to allocate memory for feature-name deduplication\n");
+        exit(EXIT_FAILURE);
+    }
+    int ret = 0;
+    k = kh_put(strptr, seen_names, feature_name_copy, &ret);
+    if (ret < 0) {
+        free(feature_name_copy);
+        fprintf(stderr, "Failed to allocate feature-name deduplication hash entry\n");
+        exit(EXIT_FAILURE);
+    }
+    if (ret == 0) {
+        free(feature_name_copy);
+        return 1;
+    }
+    kh_val(seen_names, k) = NULL;
+    return 0;
+}
+
 /* Packed payload for cumulative feature prehash entries:
  * bits [0..28]: feature id (1-based)
  * bits [29..30]: best hamming distance (0..2)
@@ -412,8 +460,18 @@ feature_arrays* read_features_file(const char* filename) {
     find_name_and_sequence_fields(line, &nameIndex, &seqIndex, &patternIndex);
     
     khash_t(u32u32)* length_counts = kh_init(u32u32);
+    khash_t(strptr)* seen_feature_names = kh_init(strptr);
+    int line_number = 1;
 
     while (fgets(line, LINE_LENGTH, file) != NULL) {
+        line_number++;
+        char name_line[LINE_LENGTH];
+        strncpy(name_line, line, sizeof(name_line) - 1);
+        name_line[sizeof(name_line) - 1] = '\0';
+        const char *feature_name = feature_name_from_csv_line(name_line, nameIndex, filename, line_number);
+        if (feature_name_seen_or_add(seen_feature_names, feature_name, filename, line_number, 1)) {
+            continue;
+        }
         int length = get_feature_line_sizes(line, nameIndex, seqIndex, patternIndex,
                                             &name_size, &seq_size, &code_size, &anchor_size, &suffix_anchor_size, &maxFeatureLength);
         if (length > 0) {
@@ -430,6 +488,7 @@ feature_arrays* read_features_file(const char* filename) {
         }
         count++;
     }
+    free_strptr_hash(seen_feature_names);
 
     int most_common_length = 0;
     int max_count = 0;
@@ -445,7 +504,7 @@ feature_arrays* read_features_file(const char* filename) {
     }
     kh_destroy(u32u32, length_counts);
 
-    fprintf(stderr, "Read %d tags with max length %d and most common length %d\n", count, maxFeatureLength, most_common_length);
+    fprintf(stderr, "Read %d unique tags with max length %d and most common length %d\n", count, maxFeatureLength, most_common_length);
 
     feature_arrays *myfeatures = allocate_feature_arrays(name_size, seq_size, code_size, anchor_size, suffix_anchor_size, count, maxFeatureLength);
     myfeatures->common_length = most_common_length;
@@ -469,12 +528,23 @@ feature_arrays* read_features_file(const char* filename) {
         perror("Failed to headers file");
         exit(EXIT_FAILURE);
     }
+    khash_t(strptr)* emitted_feature_names = kh_init(strptr);
     count=0;
+    line_number = 1;
     while (fgets(line, LINE_LENGTH, file) != NULL) {
+        line_number++;
+        char name_line[LINE_LENGTH];
+        strncpy(name_line, line, sizeof(name_line) - 1);
+        name_line[sizeof(name_line) - 1] = '\0';
+        const char *feature_name = feature_name_from_csv_line(name_line, nameIndex, filename, line_number);
+        if (feature_name_seen_or_add(emitted_feature_names, feature_name, filename, line_number, 0)) {
+            continue;
+        }
         process_feature_line(line, nameIndex, seqIndex, patternIndex, myfeatures, count);
         count++;
     }
-    fprintf(stderr, "Read %d tags\n", count);
+    free_strptr_hash(emitted_feature_names);
+    fprintf(stderr, "Read %d unique tags\n", count);
     fclose(file);
 
     int mismatched_count = 0;

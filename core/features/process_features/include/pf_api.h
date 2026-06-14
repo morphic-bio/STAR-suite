@@ -20,6 +20,8 @@
 #include <stdint.h>
 #include <stddef.h>
 
+#include "pf_split_read.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -184,6 +186,14 @@ void pf_config_set_feature_mode_bootstrap_reads(pf_config *config, int n_reads);
 void pf_config_set_use_hot_hash(pf_config *config, int enable);
 void pf_config_set_skip_heatmaps(pf_config *config, int enable);
 
+void pf_config_set_split_read_layout(pf_config *config, const pf_split_read_layout *layout);
+void pf_config_set_split_read_fastq_patterns(pf_config *config,
+                                             const char *r1_pattern,
+                                             const char *r2_pattern,
+                                             const char *r3_pattern);
+void pf_config_clear_split_read_layout(pf_config *config);
+const pf_split_read_layout *pf_config_get_split_read_layout(const pf_config *config);
+
 /* Prehash memory budget (0 = auto-detect from system memory) */
 void pf_config_set_prehash_memory_budget(pf_config *config, unsigned long long budget);
 
@@ -306,6 +316,12 @@ pf_error pf_process_fastq_dir(pf_context *ctx,
                                const char *fastq_dir,
                                const char *output_dir,
                                pf_stats *stats_out);
+
+pf_error pf_process_split_fastq_dir(pf_context *ctx,
+                                    const char *fastq_dir,
+                                    const char *output_dir,
+                                    pf_stats *stats_out,
+                                    pf_split_read_metrics *metrics_out);
 
 /**
  * Process explicit FASTQ file lists.

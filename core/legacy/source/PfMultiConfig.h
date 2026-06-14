@@ -2,6 +2,7 @@
 #define PF_MULTI_CONFIG_H
 
 #include "IncludeDefine.h"
+#include "pf_split_read.h"
 #include <map>
 #include <vector>
 
@@ -42,6 +43,22 @@ struct LibraryEntry {
     string starFeatureRef;      // Per-library feature reference CSV path (skip global filtering when set)
     string starLibraryId;       // Stable output/provenance key (auto-generated if absent)
     int starMaxHamming = -1;    // Per-library max Hamming distance override (-1 = use global)
+
+    // Split-read guide layout (CAT-ATAC and similar assays)
+    string starLayout;              // Named preset, e.g. catatac_guide
+    string starBarcodeRead;         // R1, R2, or R3
+    string starBarcodeFormat;       // Chromap-style, e.g. bc:8:23:-
+    string starUmiRead;             // R1, R2, or R3
+    int starUmiStart = -1;
+    int starUmiLength = -1;
+    string starFeatureRead;         // R1, R2, or R3
+    string starCaptureRead;         // R1, R2, or R3
+    string starCaptureSequences;    // Pipe-separated capture kmers
+    int starCaptureMaxHamming = 0;
+    string starBarcodeOutputMap;    // Two-column ATAC->GEX map for MEX output
+    string starFeatureSearchMode;   // free | anchor
+
+    bool hasSplitReadLayout() const;
     
     // Normalized feature type for matching
     string normalizedFeatureType() const;
@@ -88,6 +105,18 @@ string resolveFastqDir(const string& configPath, const string& fastqRoot,
  * @return Map of config paths to actual paths
  */
 map<string, string> parseFastqMap(const vector<string>& fastqMapVec);
+
+/**
+ * @brief Resolve read token (R1/R2/R3) to 0-based index.
+ */
+int parseReadIndexToken(const string& token);
+
+/**
+ * @brief Apply named layout presets and validate split-read fields.
+ */
+void finalizeSplitReadLayout(LibraryEntry& entry);
+
+pf_split_read_layout buildSplitReadLayout(const LibraryEntry& entry);
 
 } // namespace PfMultiConfig
 

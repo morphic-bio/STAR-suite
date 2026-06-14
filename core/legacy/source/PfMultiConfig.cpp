@@ -108,6 +108,94 @@ vector<string> SampleEntry::resolvedOcmIds() const {
     return ids;
 }
 
+bool LibraryEntry::hasSplitReadLayout() const {
+    string layout = starLayout;
+    std::transform(layout.begin(), layout.end(), layout.begin(), ::tolower);
+    if (layout == "catatac_guide") {
+        return true;
+    }
+    return !starBarcodeFormat.empty() ||
+           !starBarcodeRead.empty() ||
+           !starUmiRead.empty() ||
+           !starFeatureRead.empty();
+}
+
+int parseReadIndexToken(const string& token) {
+    string value = token;
+    trimInPlace(value);
+    std::transform(value.begin(), value.end(), value.begin(), ::tolower);
+    if (value == "r1" || value == "1") return 0;
+    if (value == "r2" || value == "2") return 1;
+    if (value == "r3" || value == "3") return 2;
+    return -1;
+}
+
+static void applySplitReadHeader(LibraryEntry& entry, const string& header, const string& value) {
+    if (header == "star_layout" || header == "starlayout") {
+        entry.starLayout = value;
+    } else if (header == "star_barcode_read" || header == "starbarcoderead") {
+        entry.starBarcodeRead = value;
+    } else if (header == "star_barcode_format" || header == "starbarcodeformat") {
+        entry.starBarcodeFormat = value;
+    } else if (header == "star_umi_read" || header == "starumiread") {
+        entry.starUmiRead = value;
+    } else if (header == "star_umi_start" || header == "starumistart") {
+        if (!value.empty()) entry.starUmiStart = std::atoi(value.c_str());
+    } else if (header == "star_umi_length" || header == "starumilength") {
+        if (!value.empty()) entry.starUmiLength = std::atoi(value.c_str());
+    } else if (header == "star_feature_read" || header == "starfeatureread") {
+        entry.starFeatureRead = value;
+    } else if (header == "star_capture_read" || header == "starcaptureread") {
+        entry.starCaptureRead = value;
+    } else if (header == "star_capture_sequences" || header == "starcapturesequences") {
+        entry.starCaptureSequences = value;
+    } else if (header == "star_capture_max_hamming" || header == "starcapturemaxhamming") {
+        if (!value.empty()) entry.starCaptureMaxHamming = std::atoi(value.c_str());
+    } else if (header == "star_barcode_output_map" || header == "starbarcodeoutputmap") {
+        entry.starBarcodeOutputMap = value;
+    } else if (header == "star_feature_search_mode" || header == "starfeaturesearchmode") {
+        entry.starFeatureSearchMode = value;
+    }
+}
+
+void finalizeSplitReadLayout(LibraryEntry& entry) {
+    string layout = entry.starLayout;
+    std::transform(layout.begin(), layout.end(), layout.begin(), ::tolower);
+    if (layout == "catatac_guide") {
+        if (entry.starBarcodeRead.empty()) entry.starBarcodeRead = "R2";
+        if (entry.starBarcodeFormat.empty()) entry.starBarcodeFormat = "bc:8:23:-";
+        if (entry.starUmiRead.empty()) entry.starUmiRead = "R1";
+        if (entry.starUmiStart < 0) entry.starUmiStart = 0;
+        if (entry.starUmiLength < 0) entry.starUmiLength = 12;
+        if (entry.starFeatureRead.empty()) entry.starFeatureRead = "R3";
+        if (entry.starCaptureRead.empty()) entry.starCaptureRead = "R1";
+        if (entry.starCaptureSequences.empty()) {
+            entry.starCaptureSequences =
+                "CAAGTTGATAACGGACTAGCC|CAAGTTGTAAACGGACTAGCC";
+        }
+        if (entry.starFeatureSearchMode.empty()) {
+            entry.starFeatureSearchMode = "free";
+        }
+    }
+    if (!entry.hasSplitReadLayout()) {
+        return;
+    }
+    if (entry.starBarcodeFormat.empty()) {
+        throw runtime_error("split-read library requires star_barcode_format");
+    }
+    if (parseReadIndexToken(entry.starBarcodeRead) < 0 ||
+        parseReadIndexToken(entry.starUmiRead) < 0 ||
+        parseReadIndexToken(entry.starFeatureRead) < 0) {
+        throw runtime_error("split-read library has invalid read token; expected R1/R2/R3");
+    }
+    if (entry.starUmiStart < 0 || entry.starUmiLength <= 0) {
+        throw runtime_error("split-read library requires star_umi_start and star_umi_length");
+    }
+    if (!entry.starCaptureRead.empty() && parseReadIndexToken(entry.starCaptureRead) < 0) {
+        throw runtime_error("split-read library has invalid star_capture_read token");
+    }
+}
+
 string LibraryEntry::normalizedFeatureType() const {
     string normalized;
     normalized.reserve(feature_types.size());
@@ -266,6 +354,8 @@ Config parseConfig(const string& configPath) {
                             if (!value.empty()) {
                                 entry.starMaxHamming = std::atoi(value.c_str());
                             }
+                        } else {
+                            applySplitReadHeader(entry, header, value);
                         }
                     }
                     if (!entry.fastqs.empty()) {
@@ -432,6 +522,8 @@ Config parseConfig(const string& configPath) {
                         if (!value.empty()) {
                             entry.starMaxHamming = std::atoi(value.c_str());
                         }
+                    } else {
+                        applySplitReadHeader(entry, header, value);
                     }
                 }
                 if (!entry.fastqs.empty()) {
@@ -534,6 +626,17 @@ Config parseConfig(const string& configPath) {
                     + lib.starFeatureRef);
             }
         }
+        finalizeSplitReadLayout(lib);
+        if (!lib.starBarcodeOutputMap.empty()) {
+            if (lib.starBarcodeOutputMap[0] != '/') {
+                lib.starBarcodeOutputMap = configDir + "/" + lib.starBarcodeOutputMap;
+            }
+            struct stat st;
+            if (stat(lib.starBarcodeOutputMap.c_str(), &st) != 0 || !S_ISREG(st.st_mode)) {
+                throw runtime_error("star_barcode_output_map path does not exist or is not a file: "
+                    + lib.starBarcodeOutputMap);
+            }
+        }
     }
 
     return config;
@@ -573,6 +676,28 @@ string resolveFastqDir(const string& configPath, const string& fastqRoot,
     
     // Return original path (will fail later if invalid)
     return configPath;
+}
+
+pf_split_read_layout buildSplitReadLayout(const LibraryEntry& entry) {
+    pf_split_read_layout layout;
+    memset(&layout, 0, sizeof(layout));
+    layout.enabled = 1;
+    strncpy(layout.barcode_format, entry.starBarcodeFormat.c_str(),
+            sizeof(layout.barcode_format) - 1);
+    layout.barcode_read_idx = parseReadIndexToken(entry.starBarcodeRead);
+    layout.umi_read_idx = parseReadIndexToken(entry.starUmiRead);
+    layout.umi_start = entry.starUmiStart;
+    layout.umi_length = entry.starUmiLength;
+    layout.feature_read_idx = parseReadIndexToken(entry.starFeatureRead);
+    if (!entry.starCaptureRead.empty()) {
+        layout.capture_read_idx = parseReadIndexToken(entry.starCaptureRead);
+    } else {
+        layout.capture_read_idx = -1;
+    }
+    strncpy(layout.capture_sequences, entry.starCaptureSequences.c_str(),
+            sizeof(layout.capture_sequences) - 1);
+    layout.capture_max_hamming = entry.starCaptureMaxHamming;
+    return layout;
 }
 
 map<string, string> parseFastqMap(const vector<string>& fastqMapVec) {

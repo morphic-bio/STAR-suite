@@ -4,16 +4,20 @@
  */
 
 #include "../include/pf_api.h"
+#include "../include/pf_split_read.h"
 #include "../include/common.h"
 #include "../include/globals.h"
 #include "../include/prototypes.h"
 #include "../include/io.h"
 #include "../include/utils.h"
+
+#include <zlib.h>
 #include "../include/memory.h"
 
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <ctype.h>
 #include <sys/stat.h>
 #include <errno.h>
 #include <pthread.h>
@@ -82,6 +86,8 @@ struct pf_config {
     /* Namespace normalization */
     pf_namespace_t source_namespace;    /* namespace of filtered barcode file (PF_NS_UNKNOWN = not set) */
     pf_namespace_t target_namespace;    /* namespace of assignment output (PF_NS_UNKNOWN = not set) */
+
+    pf_split_read_layout split_read_layout;
 };
 
 struct pf_context {
@@ -335,6 +341,9 @@ pf_config* pf_config_clone(const pf_config *config) {
     pf_config *clone = malloc(sizeof(pf_config));
     if (!clone) return NULL;
     memcpy(clone, config, sizeof(pf_config));
+    if (clone->split_read_layout.enabled) {
+        pf_split_read_layout_prepare(&clone->split_read_layout);
+    }
     return clone;
 }
 
@@ -3078,6 +3087,510 @@ cleanup:
     free(n_genes_per_cell);
     
     return (rc == 0) ? PF_OK : PF_ERR_IO_ERROR;
+}
+
+void pf_config_set_split_read_layout(pf_config *config, const pf_split_read_layout *layout) {
+    if (!config || !layout) {
+        return;
+    }
+    config->split_read_layout = *layout;
+    config->split_read_layout.enabled = 1;
+    pf_split_read_layout_prepare(&config->split_read_layout);
+}
+
+void pf_config_set_split_read_fastq_patterns(pf_config *config,
+                                             const char *r1_pattern,
+                                             const char *r2_pattern,
+                                             const char *r3_pattern) {
+    if (!config) {
+        return;
+    }
+    if (r1_pattern) {
+        strncpy(config->split_read_layout.fastq_r1_pattern, r1_pattern,
+                sizeof(config->split_read_layout.fastq_r1_pattern) - 1);
+        config->split_read_layout.fastq_r1_pattern[
+            sizeof(config->split_read_layout.fastq_r1_pattern) - 1] = '\0';
+    }
+    if (r2_pattern) {
+        strncpy(config->split_read_layout.fastq_r2_pattern, r2_pattern,
+                sizeof(config->split_read_layout.fastq_r2_pattern) - 1);
+        config->split_read_layout.fastq_r2_pattern[
+            sizeof(config->split_read_layout.fastq_r2_pattern) - 1] = '\0';
+    }
+    if (r3_pattern) {
+        strncpy(config->split_read_layout.fastq_r3_pattern, r3_pattern,
+                sizeof(config->split_read_layout.fastq_r3_pattern) - 1);
+        config->split_read_layout.fastq_r3_pattern[
+            sizeof(config->split_read_layout.fastq_r3_pattern) - 1] = '\0';
+    }
+}
+
+void pf_config_clear_split_read_layout(pf_config *config) {
+    if (!config) {
+        return;
+    }
+    memset(&config->split_read_layout, 0, sizeof(config->split_read_layout));
+}
+
+const pf_split_read_layout *pf_config_get_split_read_layout(const pf_config *config) {
+    if (!config || !config->split_read_layout.enabled) {
+        return NULL;
+    }
+    return &config->split_read_layout;
+}
+
+static void pf_trim_fastq_line(char *s) {
+    if (!s) {
+        return;
+    }
+    size_t len = strlen(s);
+    while (len > 0 && (s[len - 1] == '\n' || s[len - 1] == '\r')) {
+        s[--len] = '\0';
+    }
+}
+
+static void pf_copy_truncated_for_log(const char *src, char *dst, size_t dst_cap) {
+    if (!dst || dst_cap == 0) {
+        return;
+    }
+    dst[0] = '\0';
+    if (!src) {
+        return;
+    }
+    const size_t src_len = strlen(src);
+    if (src_len < dst_cap) {
+        memcpy(dst, src, src_len + 1);
+        return;
+    }
+    if (dst_cap <= 4) {
+        memcpy(dst, src, dst_cap - 1);
+        dst[dst_cap - 1] = '\0';
+        return;
+    }
+    memcpy(dst, src, dst_cap - 4);
+    memcpy(dst + dst_cap - 4, "...", 4);
+}
+
+static void pf_copy_bounded_cstr(const char *src, char *dst, size_t dst_cap) {
+    if (!dst || dst_cap == 0) {
+        return;
+    }
+    if (!src) {
+        dst[0] = '\0';
+        return;
+    }
+    size_t len = strnlen(src, dst_cap - 1);
+    memcpy(dst, src, len);
+    dst[len] = '\0';
+}
+
+static int pf_read_fastq_record_gz(gzFile fp, char *header, char *seq, char *plus, char *qual) {
+    if (!gzgets(fp, header, LINE_LENGTH)) {
+        return 0;
+    }
+    if (!gzgets(fp, seq, LINE_LENGTH) ||
+        !gzgets(fp, plus, LINE_LENGTH) ||
+        !gzgets(fp, qual, LINE_LENGTH)) {
+        return -1;
+    }
+    pf_trim_fastq_line(header);
+    pf_trim_fastq_line(seq);
+    pf_trim_fastq_line(plus);
+    pf_trim_fastq_line(qual);
+    return 1;
+}
+
+static pf_sequence_view pf_view_from_buffer(const char *data, size_t length) {
+    pf_sequence_view view;
+    view.data = data;
+    view.length = length;
+    return view;
+}
+
+#define PF_SPLIT_BATCH_SIZE 256
+
+typedef struct {
+    const char *r1;
+    const char *r2;
+    const char *r3;
+} pf_split_read_pattern_triplet;
+
+static const pf_split_read_pattern_triplet k_pf_split_read_default_patterns[] = {
+    {"_R1", "_R2", "_R3"},
+    {"_R1_", "_R2_", "_R3_"},
+    {"_1.fastq", "_2.fastq", "_3.fastq"},
+    {"_1.fq", "_2.fq", "_3.fq"},
+    {NULL, NULL, NULL}
+};
+
+static void pf_free_file_list(char **files, int n_files) {
+    if (!files) {
+        return;
+    }
+    for (int i = 0; i < n_files; ++i) {
+        free(files[i]);
+    }
+    free(files);
+}
+
+static int pf_discover_split_read_triplets(const char *fastq_dir,
+                                           const pf_split_read_layout *layout,
+                                           char ***r1_files_out,
+                                           char ***r2_files_out,
+                                           char ***r3_files_out,
+                                           int *n_triplets_out) {
+    if (!fastq_dir || !layout || !r1_files_out || !r2_files_out || !r3_files_out ||
+        !n_triplets_out) {
+        return 0;
+    }
+    *r1_files_out = NULL;
+    *r2_files_out = NULL;
+    *r3_files_out = NULL;
+    *n_triplets_out = 0;
+
+    if (layout->fastq_r1_pattern[0] && layout->fastq_r2_pattern[0] &&
+        layout->fastq_r3_pattern[0]) {
+        int n_r1 = 0;
+        int n_r2 = 0;
+        int n_r3 = 0;
+        char **r1 = find_files_with_pattern(fastq_dir, layout->fastq_r1_pattern, &n_r1);
+        char **r2 = find_files_with_pattern(fastq_dir, layout->fastq_r2_pattern, &n_r2);
+        char **r3 = find_files_with_pattern(fastq_dir, layout->fastq_r3_pattern, &n_r3);
+        if (r1 && r2 && r3 && n_r1 > 0 && n_r1 == n_r2 && n_r2 == n_r3) {
+            *r1_files_out = r1;
+            *r2_files_out = r2;
+            *r3_files_out = r3;
+            *n_triplets_out = n_r1;
+            return 1;
+        }
+        pf_free_file_list(r1, n_r1);
+        pf_free_file_list(r2, n_r2);
+        pf_free_file_list(r3, n_r3);
+        return 0;
+    }
+
+    for (int i = 0; k_pf_split_read_default_patterns[i].r1 != NULL; ++i) {
+        int n_r1 = 0;
+        int n_r2 = 0;
+        int n_r3 = 0;
+        const pf_split_read_pattern_triplet *pat = &k_pf_split_read_default_patterns[i];
+        char **r1 = find_files_with_pattern(fastq_dir, pat->r1, &n_r1);
+        char **r2 = find_files_with_pattern(fastq_dir, pat->r2, &n_r2);
+        char **r3 = find_files_with_pattern(fastq_dir, pat->r3, &n_r3);
+        if (r1 && r2 && r3 && n_r1 > 0 && n_r1 == n_r2 && n_r2 == n_r3) {
+            *r1_files_out = r1;
+            *r2_files_out = r2;
+            *r3_files_out = r3;
+            *n_triplets_out = n_r1;
+            return 1;
+        }
+        pf_free_file_list(r1, n_r1);
+        pf_free_file_list(r2, n_r2);
+        pf_free_file_list(r3, n_r3);
+    }
+    return 0;
+}
+
+static void pf_fastq_read_key(const char *header, char *key_out, size_t key_cap) {
+    if (!key_out || key_cap == 0) {
+        return;
+    }
+    key_out[0] = '\0';
+    if (!header || header[0] != '@') {
+        return;
+    }
+    const char *start = header + 1;
+    const char *end = start;
+    while (*end && !isspace((unsigned char)*end) && *end != '/') {
+        ++end;
+    }
+    size_t len = (size_t)(end - start);
+    if (len >= key_cap) {
+        len = key_cap - 1;
+    }
+    memcpy(key_out, start, len);
+    key_out[len] = '\0';
+}
+
+static int pf_split_headers_compatible(const char *h0, const char *h1, const char *h2) {
+    char key0[LINE_LENGTH];
+    char key1[LINE_LENGTH];
+    char key2[LINE_LENGTH];
+    pf_fastq_read_key(h0, key0, sizeof(key0));
+    pf_fastq_read_key(h1, key1, sizeof(key1));
+    pf_fastq_read_key(h2, key2, sizeof(key2));
+    if (key0[0] == '\0' || key1[0] == '\0' || key2[0] == '\0') {
+        return 0;
+    }
+    return strcmp(key0, key1) == 0 && strcmp(key0, key2) == 0;
+}
+
+static pf_error pf_process_split_read_triplet_files(
+    pf_context *ctx,
+    pf_record_stream *stream,
+    const pf_split_read_layout *layout,
+    const char *r1_path,
+    const char *r2_path,
+    const char *r3_path,
+    long long max_reads,
+    unsigned long long *emitted_inout,
+    pf_split_read_metrics *metrics,
+    pf_read_record_view *batch,
+    char synth_seq[][LINE_LENGTH],
+    char synth_qual[][LINE_LENGTH],
+    char feature_seq_buf[][LINE_LENGTH],
+    char feature_qual_buf[][LINE_LENGTH],
+    size_t *batch_count_inout) {
+    gzFile readers[3] = {
+        gzopen(r1_path, "rb"),
+        gzopen(r2_path, "rb"),
+        gzopen(r3_path, "rb")
+    };
+    if (!readers[0] || !readers[1] || !readers[2]) {
+        snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                 "Failed to open split-read FASTQ triplet: %s | %s | %s",
+                 r1_path, r2_path, r3_path);
+        for (int i = 0; i < 3; ++i) {
+            if (readers[i]) {
+                gzclose(readers[i]);
+            }
+        }
+        return PF_ERR_IO_ERROR;
+    }
+
+    pf_error err = PF_OK;
+    while (err == PF_OK) {
+        if (max_reads > 0 && (long long)*emitted_inout >= max_reads) {
+            break;
+        }
+
+        char headers[3][LINE_LENGTH];
+        char seqs[3][LINE_LENGTH];
+        char pluses[3][LINE_LENGTH];
+        char quals[3][LINE_LENGTH];
+        const char *seq_ptrs[3] = {NULL, NULL, NULL};
+        const char *qual_ptrs[3] = {NULL, NULL, NULL};
+
+        int rc[3] = {0, 0, 0};
+        int eof_count = 0;
+        for (int i = 0; i < 3; ++i) {
+            rc[i] = pf_read_fastq_record_gz(readers[i], headers[i], seqs[i],
+                                            pluses[i], quals[i]);
+            if (rc[i] == 0) {
+                ++eof_count;
+            } else if (rc[i] < 0) {
+                err = PF_ERR_IO_ERROR;
+                snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                         "Truncated FASTQ while reading split-read triplet from %s",
+                         i == 0 ? r1_path : (i == 1 ? r2_path : r3_path));
+                break;
+            } else {
+                seq_ptrs[i] = seqs[i];
+                qual_ptrs[i] = quals[i];
+            }
+        }
+        if (err != PF_OK) {
+            break;
+        }
+        if (eof_count > 0) {
+            if (eof_count != 3) {
+                err = PF_ERR_IO_ERROR;
+                snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                         "Uneven EOF across split-read FASTQs (%s, %s, %s)",
+                         r1_path, r2_path, r3_path);
+            }
+            break;
+        }
+        if (!pf_split_headers_compatible(headers[0], headers[1], headers[2])) {
+            err = PF_ERR_PARSE_ERROR;
+            char key0[160];
+            char key1[160];
+            char key2[160];
+            char path0[96];
+            char path1[96];
+            char path2[96];
+            pf_fastq_read_key(headers[0], key0, sizeof(key0));
+            pf_fastq_read_key(headers[1], key1, sizeof(key1));
+            pf_fastq_read_key(headers[2], key2, sizeof(key2));
+            pf_copy_truncated_for_log(r1_path, path0, sizeof(path0));
+            pf_copy_truncated_for_log(r2_path, path1, sizeof(path1));
+            pf_copy_truncated_for_log(r3_path, path2, sizeof(path2));
+            snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                     "Split-read FASTQ headers do not match: R1=%s (%s), R2=%s (%s), R3=%s (%s)",
+                     key0, path0, key1, path1, key2, path2);
+            break;
+        }
+
+        char synth_one[LINE_LENGTH];
+        char synth_qual_one[LINE_LENGTH];
+        const char *feature_seq = NULL;
+        const char *feature_qual = NULL;
+        int synth_rc = pf_split_read_synthesize_record(
+            layout, seq_ptrs, qual_ptrs,
+            synth_one, sizeof(synth_one),
+            synth_qual_one, sizeof(synth_qual_one),
+            &feature_seq, &feature_qual,
+            metrics);
+        if (synth_rc < 0) {
+            err = PF_ERR_PARSE_ERROR;
+            snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                     "Failed to synthesize split-read barcode record");
+            break;
+        }
+        if (synth_rc == 0) {
+            continue;
+        }
+
+        size_t batch_count = *batch_count_inout;
+        pf_copy_bounded_cstr(synth_one, synth_seq[batch_count], LINE_LENGTH);
+        pf_copy_bounded_cstr(synth_qual_one, synth_qual[batch_count], LINE_LENGTH);
+        pf_copy_bounded_cstr(feature_seq, feature_seq_buf[batch_count], LINE_LENGTH);
+        if (feature_qual) {
+            pf_copy_bounded_cstr(feature_qual, feature_qual_buf[batch_count], LINE_LENGTH);
+        } else {
+            feature_qual_buf[batch_count][0] = '\0';
+        }
+
+        batch[batch_count].barcode_sequence =
+            pf_view_from_buffer(synth_seq[batch_count], strlen(synth_seq[batch_count]));
+        batch[batch_count].barcode_quality =
+            pf_view_from_buffer(synth_qual[batch_count], strlen(synth_qual[batch_count]));
+        batch[batch_count].feature_sequence =
+            pf_view_from_buffer(feature_seq_buf[batch_count],
+                                strlen(feature_seq_buf[batch_count]));
+        batch[batch_count].feature_quality =
+            pf_view_from_buffer(feature_qual_buf[batch_count],
+                                strlen(feature_qual_buf[batch_count]));
+        batch[batch_count].feature_sequence2.data = NULL;
+        batch[batch_count].feature_sequence2.length = 0;
+        batch[batch_count].feature_quality2.data = NULL;
+        batch[batch_count].feature_quality2.length = 0;
+        batch_count++;
+        (*emitted_inout)++;
+
+        if (batch_count == PF_SPLIT_BATCH_SIZE) {
+            err = pf_process_record_views(stream, batch, batch_count);
+            batch_count = 0;
+        }
+        *batch_count_inout = batch_count;
+    }
+
+    for (int i = 0; i < 3; ++i) {
+        if (readers[i]) {
+            gzclose(readers[i]);
+        }
+    }
+    return err;
+}
+
+pf_error pf_process_split_fastq_dir(pf_context *ctx,
+                                    const char *fastq_dir,
+                                    const char *output_dir,
+                                    pf_stats *stats_out,
+                                    pf_split_read_metrics *metrics_out) {
+    if (!ctx || !fastq_dir || !output_dir) {
+        return PF_ERR_INVALID_ARG;
+    }
+    pf_split_read_layout *layout = &ctx->config->split_read_layout;
+    if (!layout->enabled) {
+        snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                 "Split-read layout is not configured");
+        return PF_ERR_INVALID_ARG;
+    }
+    if (pf_split_read_layout_prepare_ex(layout, ctx->error_buf, PF_ERROR_BUF_SIZE) != 0) {
+        return PF_ERR_INVALID_ARG;
+    }
+    if (!ctx->initialized) {
+        return PF_ERR_NOT_INITIALIZED;
+    }
+
+    pf_split_read_metrics metrics;
+    memset(&metrics, 0, sizeof(metrics));
+
+    if (!ctx->features || !ctx->whitelist_hash) {
+        snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                 "Features and whitelist must be loaded before split-read processing");
+        return PF_ERR_NOT_INITIALIZED;
+    }
+
+    if (!pf_is_directory(fastq_dir)) {
+        snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                 "FASTQ directory not found: %s", fastq_dir);
+        return PF_ERR_FILE_NOT_FOUND;
+    }
+
+    char **r1_files = NULL;
+    char **r2_files = NULL;
+    char **r3_files = NULL;
+    int n_triplets = 0;
+    if (!pf_discover_split_read_triplets(fastq_dir, layout,
+                                         &r1_files, &r2_files, &r3_files,
+                                         &n_triplets)) {
+        snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                 "Split-read directory must contain synchronized read-1/2/3 FASTQs "
+                 "(patterns: _R1/_R2/_R3, _1.fastq/_2.fastq/_3.fastq, or custom): %s",
+                 fastq_dir);
+        return PF_ERR_FILE_NOT_FOUND;
+    }
+
+    pf_record_stream *stream = NULL;
+    pf_error err = pf_process_records_begin(ctx, output_dir, "sample", &stream);
+    if (err != PF_OK || !stream) {
+        pf_free_file_list(r1_files, n_triplets);
+        pf_free_file_list(r2_files, n_triplets);
+        pf_free_file_list(r3_files, n_triplets);
+        return err;
+    }
+
+    pf_read_record_view batch[PF_SPLIT_BATCH_SIZE];
+    char synth_seq[PF_SPLIT_BATCH_SIZE][LINE_LENGTH];
+    char synth_qual[PF_SPLIT_BATCH_SIZE][LINE_LENGTH];
+    char feature_seq_buf[PF_SPLIT_BATCH_SIZE][LINE_LENGTH];
+    char feature_qual_buf[PF_SPLIT_BATCH_SIZE][LINE_LENGTH];
+    size_t batch_count = 0;
+    unsigned long long emitted = 0;
+    const long long max_reads = ctx->config->max_reads;
+
+    for (int triplet_idx = 0; triplet_idx < n_triplets && err == PF_OK; ++triplet_idx) {
+        if (max_reads > 0 && (long long)emitted >= max_reads) {
+            break;
+        }
+        err = pf_process_split_read_triplet_files(
+            ctx, stream, layout,
+            r1_files[triplet_idx], r2_files[triplet_idx], r3_files[triplet_idx],
+            max_reads, &emitted, &metrics,
+            batch, synth_seq, synth_qual, feature_seq_buf, feature_qual_buf,
+            &batch_count);
+    }
+
+    if (err == PF_OK && batch_count > 0) {
+        err = pf_process_record_views(stream, batch, batch_count);
+        batch_count = 0;
+    }
+
+    pf_free_file_list(r1_files, n_triplets);
+    pf_free_file_list(r2_files, n_triplets);
+    pf_free_file_list(r3_files, n_triplets);
+
+    if (err == PF_OK) {
+        pf_stats local_stats;
+        err = pf_process_records_end(stream, &local_stats);
+        stream = NULL;
+        if (err == PF_OK && stats_out) {
+            *stats_out = local_stats;
+        }
+        if (err == PF_OK) {
+            pf_write_split_read_metrics(output_dir, &metrics);
+        }
+        if (err == PF_OK && metrics_out) {
+            *metrics_out = metrics;
+        }
+    }
+    if (err != PF_OK && stream) {
+        pf_process_records_abort(stream);
+    }
+
+    return err;
 }
 
 /* ============================================================================
