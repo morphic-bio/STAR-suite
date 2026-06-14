@@ -99,9 +99,14 @@ core/features/process_features/tests/test_adt_mex.sh
 
 ## Master integration
 
-Merged to `master` on 2026-06-13 from `feature/process-features-adt-mex` (commits
-`3f6f02a`–`bd41418`). ADT MEX output is available on `master` via
-`assignBarcodes --output-mode adt_mex`.
+**process_features ADT MEX** — merged to `master` on 2026-06-13 from
+`feature/process-features-adt-mex` (commits `3f6f02a`–`bd41418`). Standalone
+`assignBarcodes --output-mode adt_mex` is on `master`.
+
+**pf-multi feature library arm** — merged to `master` on 2026-06-14 from
+`feature/multi-feature-adt-protein-arm` (commits `c143009`–`c316486`). pf-multi
+routes `Antibody Capture` / `ADT` / `Protein` libraries through
+`PfMultiAssign::runAssignBarcodes` with `adtMexOutput` (no separate orchestration).
 
 ## pf-multi feature library arm
 
