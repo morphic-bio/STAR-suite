@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
 # Tiny multi-feature smoke: gRNA + Custom + ADT/protein arms share the pf-multi
-# library routing path. ADT/protein libraries trigger assignBarcodes ADT MEX mode.
+# library routing path. ADT/protein libraries trigger assignBarcodes ADT MEX mode
+# via PfMultiAssign/pf_api (not the standalone CLI --output-mode flag).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 PF_DIR="$REPO_ROOT/core/features/process_features"
-ASSIGN="$PF_DIR/assignBarcodes"
+SOURCE_DIR="$REPO_ROOT/core/legacy/source"
+PF_INCLUDE="$REPO_ROOT/core/features/process_features/include"
+INC_FLAGS="-I${SOURCE_DIR} -I${REPO_ROOT}/core/features/libscrna/include -I${REPO_ROOT}/core/features/vbem/source -I${REPO_ROOT}/core/features/vbem/source/libem -I${REPO_ROOT}/slam/source -I${REPO_ROOT}/core/features/bamsort/source -I${PF_INCLUDE} -I${REPO_ROOT}/flex/source -I${REPO_ROOT}/flex/source/libflex -I${SOURCE_DIR}/htslib"
 WORK_DIR="$(mktemp -d /tmp/multi_adt_arm_test.XXXXXX)"
 trap 'rm -rf "$WORK_DIR"' EXIT
 
@@ -17,16 +20,8 @@ fail() { echo "  FAIL: $1"; FAIL_COUNT=$((FAIL_COUNT + 1)); }
 
 echo "=== Test: multi-feature ADT/protein library arm ==="
 
-if [[ ! -x "$ASSIGN" ]]; then
-    echo "Building assignBarcodes..."
-    make -C "$PF_DIR" -j8 assignBarcodes
-fi
-
-SOURCE_DIR="$REPO_ROOT/core/legacy/source"
-PF_INCLUDE="$REPO_ROOT/core/features/process_features/include"
-if [[ ! -f "$SOURCE_DIR/PfMultiConfig.o" ]]; then
-    make -C "$SOURCE_DIR" -j8 PfMultiConfig.o
-fi
+make -C "$PF_DIR" -j8 libprocess_features.a >/dev/null
+make -C "$SOURCE_DIR" -j8 PfMultiConfig.o PfMultiAssign.o ThreadControl.o input/CbqInputModule.o >/dev/null
 
 HARNESS="$WORK_DIR/test_adt_arm"
 cat > "$WORK_DIR/test_adt_arm.cpp" << 'HARNESS_EOF'
@@ -98,6 +93,130 @@ g++ -std=c++11 -O2 -I"$SOURCE_DIR" -I"$PF_INCLUDE" \
     "$WORK_DIR/test_adt_arm.cpp" \
     "$SOURCE_DIR/PfMultiConfig.o" \
     -o "$HARNESS"
+
+ASSIGN_HARNESS="$WORK_DIR/test_pf_multi_assign_adt"
+cat > "$WORK_DIR/test_pf_multi_assign_adt.cpp" << 'ASSIGN_EOF'
+#include "PfMultiAssign.h"
+#include "PfMultiConfig.h"
+#include "PfMultiFeatureSpecs.h"
+#include "ThreadControl.h"
+#include <fstream>
+#include <iostream>
+#include <sstream>
+#include <string>
+#include <vector>
+
+ThreadControl g_threadChunks;
+
+static std::string sanitizeDirName(const std::string& input) {
+    std::string out = input;
+    for (char& c : out) {
+        if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+              (c >= '0' && c <= '9') || c == '-' || c == '_')) {
+            c = '_';
+        }
+    }
+    return out;
+}
+
+static std::string readKeyValue(const std::string& path, const std::string& key) {
+    std::ifstream in(path.c_str());
+    std::string line;
+    const std::string prefix = key + "=";
+    while (std::getline(in, line)) {
+        if (line.compare(0, prefix.size(), prefix) == 0) {
+            return line.substr(prefix.size());
+        }
+    }
+    return "";
+}
+
+static bool fileExists(const std::string& path) {
+    std::ifstream in(path.c_str());
+    return in.good();
+}
+
+int main(int argc, char** argv) {
+    if (argc != 4) {
+        std::cerr << "usage: test_pf_multi_assign_adt <config.csv> <out_prefix> <whitelist.txt>\n";
+        return 2;
+    }
+
+    try {
+        PfMultiConfig::Config cfg = PfMultiConfig::parseConfig(argv[1]);
+        const std::string outPrefix = argv[2];
+        const std::string whitelist = argv[3];
+        std::ostringstream log;
+        std::vector<PfMultiFeatureSpecs::FeatureSpec> specs =
+            PfMultiFeatureSpecs::buildFeatureSpecsFromConfig(cfg, log);
+
+        int failures = 0;
+        for (const auto& spec : specs) {
+            std::vector<PfMultiConfig::LibraryEntry> libs =
+                cfg.getFeatureLibraries(spec.libraryType);
+            for (const auto& lib : libs) {
+                const std::string assignOut = outPrefix + "/cr_assign/"
+                    + sanitizeDirName(spec.libraryType) + "/"
+                    + sanitizeDirName(lib.starLibraryId);
+
+                PfMultiAssign::AssignOptions opts;
+                opts.adtMexOutput = PfMultiFeatureSpecs::shouldEmitAdtMexOutput(
+                    spec.featureRefType, spec.libraryType);
+                opts.skipQcOutputs = true;
+                opts.sampleName = lib.sample.empty() ? lib.starLibraryId : lib.sample;
+
+                PfMultiAssign::AssignResult result = PfMultiAssign::runAssignBarcodes(
+                    whitelist, lib.starFeatureRef, lib.fastqs, assignOut, opts);
+
+                const std::string apiRun = assignOut + "/assignBarcodes.api_run.txt";
+                const std::string adtFlag = readKeyValue(apiRun, "adtMexOutput");
+                const std::string outputMode = readKeyValue(apiRun, "output_mode");
+
+                std::cout << "ASSIGN_RESULT"
+                          << " id=" << lib.starLibraryId
+                          << " adt_mex_expected=" << (opts.adtMexOutput ? "yes" : "no")
+                          << " api_adtMexOutput=" << adtFlag
+                          << " api_output_mode=" << outputMode
+                          << " rc=" << result.returnCode
+                          << " api_run=" << apiRun
+                          << "\n";
+
+                if (result.returnCode != 0) {
+                    std::cerr << "ERROR: assign failed for " << lib.starLibraryId << "\n";
+                    failures++;
+                    continue;
+                }
+                if (opts.adtMexOutput) {
+                    if (adtFlag != "1" || outputMode != "adt_mex") {
+                        std::cerr << "ERROR: ADT library missing pf_api ADT MEX flags in "
+                                  << apiRun << "\n";
+                        failures++;
+                    }
+                } else if (adtFlag != "0" || outputMode != "default") {
+                    std::cerr << "ERROR: non-ADT library should not enable ADT MEX in "
+                              << apiRun << "\n";
+                    failures++;
+                }
+            }
+        }
+        return failures == 0 ? 0 : 1;
+    } catch (const std::exception& e) {
+        std::cerr << "ERROR: " << e.what() << "\n";
+        return 1;
+    }
+}
+ASSIGN_EOF
+
+g++ -std=c++11 -O2 -fopenmp ${INC_FLAGS} \
+    "$WORK_DIR/test_pf_multi_assign_adt.cpp" \
+    "$SOURCE_DIR/PfMultiAssign.o" \
+    "$SOURCE_DIR/input/CbqInputModule.o" \
+    "$SOURCE_DIR/ThreadControl.o" \
+    "$SOURCE_DIR/PfMultiConfig.o" \
+    -L"$PF_DIR" -lprocess_features \
+    -L"$REPO_ROOT/core/features/libscrna" -lscrna \
+    -lpthread -lz -lstdc++ -lhts -lglib-2.0 \
+    -o "$ASSIGN_HARNESS"
 
 touch "$WORK_DIR/ref_grna.csv" "$WORK_DIR/ref_larry.csv" "$WORK_DIR/ref_adt.csv"
 
@@ -194,29 +313,48 @@ make_fastqs "$WORK_DIR/fastq_grna" "ATCGATCG"
 make_fastqs "$WORK_DIR/fastq_larry" "TTAATTAATTAATTAA"
 make_fastqs "$WORK_DIR/fastq_adt" "ATCGATCGATCGATCG"
 
-mkdir -p "$GRNA_OUT" "$LARRY_OUT" "$ADT_OUT"
+echo ""
+echo "--- PfMultiAssign API path (feature spec -> adtMexOutput -> pf_api) ---"
+ASSIGN_OUTPUT="$("$ASSIGN_HARNESS" "$WORK_DIR/multi_config.csv" "$WORK_DIR/out" "$WORK_DIR/whitelist.txt" 2>&1)" || {
+    echo "$ASSIGN_OUTPUT"
+    fail "PfMultiAssign harness failed"
+    echo ""
+    echo "Results: $PASS_COUNT passed, $FAIL_COUNT failed"
+    exit 1
+}
+echo "$ASSIGN_OUTPUT"
 
-"$ASSIGN" \
-    --whitelist "$WORK_DIR/whitelist.txt" \
-    --featurelist "$WORK_DIR/ref_grna.csv" \
-    --directory "$GRNA_OUT" \
-    --skip_empty_drops \
-    "$WORK_DIR/fastq_grna" -b 16 -u 12
+if echo "$ASSIGN_OUTPUT" | grep -q 'ASSIGN_RESULT id=grna_de .*adt_mex_expected=no api_adtMexOutput=0 api_output_mode=default rc=0'; then
+    pass "gRNA PfMultiAssign path leaves ADT MEX off (api_run)"
+else
+    fail "gRNA PfMultiAssign path should not enable ADT MEX"
+fi
 
-"$ASSIGN" \
-    --whitelist "$WORK_DIR/whitelist.txt" \
-    --featurelist "$WORK_DIR/ref_larry.csv" \
-    --directory "$LARRY_OUT" \
-    --skip_empty_drops \
-    "$WORK_DIR/fastq_larry" -b 16 -u 12
+if echo "$ASSIGN_OUTPUT" | grep -q 'ASSIGN_RESULT id=larry_de .*adt_mex_expected=no api_adtMexOutput=0 api_output_mode=default rc=0'; then
+    pass "Custom PfMultiAssign path leaves ADT MEX off (api_run)"
+else
+    fail "Custom PfMultiAssign path should not enable ADT MEX"
+fi
 
-"$ASSIGN" \
-    --whitelist "$WORK_DIR/whitelist.txt" \
-    --featurelist "$WORK_DIR/ref_adt.csv" \
-    --directory "$ADT_OUT" \
-    --output-mode adt_mex \
-    --skip_empty_drops \
-    "$WORK_DIR/fastq_adt" -b 16 -u 12
+if echo "$ASSIGN_OUTPUT" | grep -q 'ASSIGN_RESULT id=adt_de .*adt_mex_expected=yes api_adtMexOutput=1 api_output_mode=adt_mex rc=0'; then
+    pass "Protein feature spec alone enables ADT MEX via PfMultiAssign/pf_api"
+else
+    fail "Protein library should enable ADT MEX from feature spec without CLI flag"
+fi
+
+GRNA_API_RUN="$GRNA_OUT/assignBarcodes.api_run.txt"
+ADT_API_RUN="$ADT_OUT/assignBarcodes.api_run.txt"
+if [[ -f "$GRNA_API_RUN" ]] && grep -q '^output_mode=default$' "$GRNA_API_RUN" && grep -q '^adtMexOutput=0$' "$GRNA_API_RUN"; then
+    pass "gRNA assignBarcodes.api_run.txt records default output mode"
+else
+    fail "gRNA assignBarcodes.api_run.txt missing expected pf_api flags"
+fi
+
+if [[ -f "$ADT_API_RUN" ]] && grep -q '^output_mode=adt_mex$' "$ADT_API_RUN" && grep -q '^adtMexOutput=1$' "$ADT_API_RUN"; then
+    pass "ADT assignBarcodes.api_run.txt records adt_mex output mode"
+else
+    fail "ADT assignBarcodes.api_run.txt missing expected pf_api flags"
+fi
 
 find_sample_dir() {
     local root="$1"
