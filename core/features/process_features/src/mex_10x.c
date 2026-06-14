@@ -1,4 +1,5 @@
 #include "../include/mex_10x.h"
+#include "../include/common.h"
 #include <errno.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -90,6 +91,31 @@ static int write_barcodes(const char *input_dir, const char *output_dir, int gzi
     fclose(in);
     out_close(&out);
     return rc;
+}
+
+static int write_features_from_ref(const char *output_dir, feature_arrays *features, const char *default_feature_type, int gzip) {
+    char out_path[4096];
+    snprintf(out_path, sizeof(out_path), "%s/features.tsv%s", output_dir, gzip ? ".gz" : "");
+
+    out_handle out;
+    if (out_open(&out, out_path, gzip) != 0) {
+        return -1;
+    }
+
+    for (int i = 0; i < features->number_of_features; ++i) {
+        const char *id = features->feature_ids ? features->feature_ids[i] : features->feature_names[i];
+        const char *name = features->feature_names[i];
+        const char *ftype = default_feature_type;
+        if (!id || !id[0]) id = name;
+        if (!name || !name[0]) name = id;
+        if (out_printf(&out, "%s\t%s\t%s\n", id, name, ftype) != 0) {
+            out_close(&out);
+            return -1;
+        }
+    }
+
+    out_close(&out);
+    return 0;
 }
 
 static int write_features(const char *input_dir, const char *output_dir, const char *feature_type, int gzip) {
@@ -186,6 +212,29 @@ static int write_matrix(const char *input_dir, const char *output_dir, int gzip)
 
     fclose(in);
     out_close(&out);
+    return 0;
+}
+
+int pf_write_mex_10x_from_features(const char *input_dir,
+                                   const char *output_dir,
+                                   feature_arrays *features,
+                                   const char *default_feature_type,
+                                   int gzip_output) {
+    if (!input_dir || !output_dir || !features || !default_feature_type) return -1;
+    if (ensure_dir(output_dir) != 0) return -1;
+
+    int same_dir = (strcmp(input_dir, output_dir) == 0);
+
+    if (write_barcodes(input_dir, output_dir, 0) != 0) return -1;
+    if (write_features_from_ref(output_dir, features, default_feature_type, 0) != 0) return -1;
+    if (!same_dir && write_matrix(input_dir, output_dir, 0) != 0) return -1;
+
+    if (gzip_output) {
+        if (write_barcodes(input_dir, output_dir, 1) != 0) return -1;
+        if (write_features_from_ref(output_dir, features, default_feature_type, 1) != 0) return -1;
+        if (write_matrix(input_dir, output_dir, 1) != 0) return -1;
+    }
+
     return 0;
 }
 
