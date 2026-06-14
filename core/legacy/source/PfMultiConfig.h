@@ -42,7 +42,10 @@ struct LibraryEntry {
     string starWhitelist;       // Per-library barcode whitelist override (defaults to global --crWhitelist)
     string starFeatureRef;      // Per-library feature reference CSV path (skip global filtering when set)
     string starLibraryId;       // Stable output/provenance key (auto-generated if absent)
+    string starInputFormat;     // fastq (default) or table (resolved count table in fastqs column)
     int starMaxHamming = -1;    // Per-library max Hamming distance override (-1 = use global)
+
+    bool isTableBacked() const;
 
     // Split-read guide layout (CAT-ATAC and similar assays)
     string starLayout;              // Named preset, e.g. catatac_guide

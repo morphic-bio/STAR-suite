@@ -2,6 +2,7 @@
 #include "Solo.h"
 #include "PfMultiConfig.h"
 #include "PfMultiAssign.h"
+#include "PfMultiTableImport.h"
 #include "PfMultiMexStub.h"
 #include "PfMultiMerge.h"
 #include "ErrorWarning.h"
@@ -59,6 +60,8 @@ struct PfPreparedFeatureLibrary {
     int starMaxHamming = -1;    // Per-library max Hamming override (-1 = use global)
     bool useSplitReadLayout = false;
     bool adtMexOutput = false;
+    bool tableBacked = false;
+    string starInputFormat;
     pf_split_read_layout splitReadLayout = {};
     string starBarcodeOutputMap;
     string starFeatureSearchMode;
@@ -166,6 +169,9 @@ struct PfMultiFeatureRun {
     string resolvedChemRequest;
     bool explicitChem = false;
     bool adtMexOutput = false;
+    bool tableBacked = false;
+    string starInputFormat;
+    PfMultiTableImport::TableImportStats tableImportStats;
     int returnCode = 0;
 };
 
@@ -1406,8 +1412,15 @@ static PfMultiPreparedContext buildPfMultiPreparedContext(const PfMultiPreloadIn
             prepared.adtMexOutput =
                 PfMultiFeatureSpecs::shouldEmitAdtMexOutput(
                     spec.featureRefType, spec.libraryType);
-            prepared.resolvedFastq =
-                PfMultiConfig::resolveFastqDir(lib.fastqs, input.crFastqRoot, fastqMap);
+            prepared.tableBacked = lib.isTableBacked();
+            prepared.starInputFormat = lib.starInputFormat.empty() ? "fastq" : lib.starInputFormat;
+            if (prepared.tableBacked) {
+                prepared.resolvedFastq = lib.fastqs;
+                prepLog << "  table-backed library: input_table=" << prepared.resolvedFastq << "\n";
+            } else {
+                prepared.resolvedFastq =
+                    PfMultiConfig::resolveFastqDir(lib.fastqs, input.crFastqRoot, fastqMap);
+            }
             prepared.sampleName = lib.sample.empty()
                 ? basenameOf(prepared.resolvedFastq)
                 : lib.sample;
@@ -1468,6 +1481,7 @@ static PfMultiPreparedContext buildPfMultiPreparedContext(const PfMultiPreloadIn
                     << ", whitelist=" << prepared.whitelistPath
                     << ", featureRef=" << prepared.featureRefPath
                     << ", adt_mex_output=" << (prepared.adtMexOutput ? "yes" : "no")
+                    << ", star_input_format=" << prepared.starInputFormat
                     << "\n";
 
             if (!prepared.usedFilteredRef && lib.starFeatureRef.empty()) {
@@ -1481,11 +1495,22 @@ static PfMultiPreparedContext buildPfMultiPreparedContext(const PfMultiPreloadIn
 
             vector<string> allFastqs = listFastqFilesInDirectory(prepared.resolvedFastq);
             vector<string> featurePrimaryFastqs = filterFastqFilesByMarker(allFastqs, "_R1_");
+            if (prepared.tableBacked) {
+                bool lineOk = false;
+                const uint64_t tableLines = countNewlinesInPlainFile(prepared.resolvedFastq, &lineOk);
+                prepared.featureEstimate.valid = lineOk;
+                prepared.featureEstimate.estimatedReads = lineOk ? std::max<uint64_t>(1, tableLines) : 1;
+                prepared.featureEstimate.fileCount = 1;
+                prepared.featureEstimate.totalBytes = fileSizeBytes(prepared.resolvedFastq);
+                prepLog << "  table row estimate=" << prepared.featureEstimate.estimatedReads
+                        << ", bytes=" << prepared.featureEstimate.totalBytes << "\n";
+            } else {
             if (featurePrimaryFastqs.empty()) {
                 featurePrimaryFastqs.swap(allFastqs);
             }
             prepared.featureEstimate =
                 estimateReadsAnchored(featurePrimaryFastqs, "feature", prepLog);
+            }
 
             context.featureLibraries.push_back(std::move(prepared));
         }
@@ -2413,7 +2438,12 @@ std::shared_ptr<PfMultiAssignPhaseResult> runPfMultiAssignPhase(
             }
             PfMultiAssign::AssignOptions runAssignOpts = assignOpts;
             runAssignOpts.adtMexOutput = preparedLib.adtMexOutput;
-            if (preparedLib.adtMexOutput) {
+            const bool tableBacked = preparedLib.tableBacked;
+            if (tableBacked) {
+                P.inOut->logMain << "NOTICE: table-backed feature library_id=" << preparedLib.libraryId
+                                 << " table=" << resolvedFastq << "\n";
+            }
+            if (preparedLib.adtMexOutput && !tableBacked) {
                 P.inOut->logMain << "NOTICE: protein/ADT library_id=" << preparedLib.libraryId
                                  << " will emit assignBarcodes ADT MEX output (output_mode=adt_mex)\n";
             }
@@ -2457,7 +2487,8 @@ std::shared_ptr<PfMultiAssignPhaseResult> runPfMultiAssignPhase(
             const bool originalNamespaceKnown =
                 splitReadLayout || isKnownNamespace(originalWhitelistNamespace);
 
-            const bool useAutodetect = !splitReadLayout
+            const bool useAutodetect = !tableBacked
+                                      && !splitReadLayout
                                       && !preparedLib.explicitChem
                                       && (preparedLib.resolvedChemRequest == "auto");
             string effectiveReadNamespace = upperCopy(preparedLib.effectiveChem);
@@ -2467,6 +2498,12 @@ std::shared_ptr<PfMultiAssignPhaseResult> runPfMultiAssignPhase(
                                  << " star_chemistry=" << preparedLib.resolvedChemRequest
                                  << " → effectiveChem=" << preparedLib.effectiveChem
                                  << " (auto-detect skipped)\n";
+            }
+            if (tableBacked) {
+                effectiveReadNamespace = upperCopy(preparedLib.effectiveChem);
+                detectedMatchMode = "TABLE_INPUT";
+                P.inOut->logMain << "NOTICE: table import library_id=" << preparedLib.libraryId
+                                 << " effectiveReadNamespace=" << effectiveReadNamespace << "\n";
             }
             if (useAutodetect) {
                 PfMultiAssign::AssignOptions detectOpts = runAssignOpts;
@@ -2952,8 +2989,23 @@ std::shared_ptr<PfMultiAssignPhaseResult> runPfMultiAssignPhase(
             }
 
             PfMultiAssign::AssignResult assignResult;
+            PfMultiTableImport::TableImportResult tableResult;
             try {
-                assignResult = PfMultiAssign::runAssignBarcodes(wlInfo.normalizedPath, refPath, resolvedFastq, assignOut, runAssignOpts);
+                if (tableBacked) {
+                    PfMultiTableImport::TableImportOptions tableOpts;
+                    tableOpts.enableStarDynamicPermitHooks = runAssignOpts.enableStarDynamicPermitHooks;
+                    tableOpts.filteredBarcodesPath = runAssignOpts.filteredBarcodesPath;
+                    tableOpts.featureTypeLabel = featureRefType;
+                    tableOpts.sampleName = sampleName;
+                    tableOpts.assignmentWhitelistNamespace = assignmentWhitelistNamespace;
+                    tableResult = PfMultiTableImport::runTableFeatureImport(
+                        wlInfo.normalizedPath, refPath, resolvedFastq, assignOut, tableOpts);
+                    assignResult.returnCode = tableResult.returnCode;
+                    assignResult.inputFormat = "table";
+                } else {
+                    assignResult = PfMultiAssign::runAssignBarcodes(
+                        wlInfo.normalizedPath, refPath, resolvedFastq, assignOut, runAssignOpts);
+                }
             } catch (...) {
                 stopPfController.store(true, std::memory_order_relaxed);
                 if (pfControllerThread.joinable()) {
@@ -3062,8 +3114,20 @@ std::shared_ptr<PfMultiAssignPhaseResult> runPfMultiAssignPhase(
                     + ", libraryId=" + preparedLib.libraryId
                     + ", sample=" + sampleName
                     + ", featureRef=" + refPath
-                    + ", fastq=" + resolvedFastq);
+                    + ", input=" + resolvedFastq
+                    + ", input_format=" + assignResult.inputFormat);
             }
+            if (tableBacked) {
+                P.inOut->logMain << "NOTICE: table feature import completed for library_id="
+                                 << preparedLib.libraryId
+                                 << " rows_read=" << tableResult.stats.rowsRead
+                                 << " rows_retained=" << tableResult.stats.rowsRetained
+                                 << " rejected_barcode=" << tableResult.stats.rowsRejectedBarcode
+                                 << " rejected_feature=" << tableResult.stats.rowsRejectedFeature
+                                 << " rejected_count=" << tableResult.stats.rowsRejectedCount
+                                 << " duplicate_pairs_collapsed="
+                                 << tableResult.stats.duplicatePairsCollapsed << "\n";
+            } else {
             P.inOut->logMain << "NOTICE: assignBarcodes completed for library_id="
                              << preparedLib.libraryId
                              << " input_format=" << assignResult.inputFormat
@@ -3074,6 +3138,7 @@ std::shared_ptr<PfMultiAssignPhaseResult> runPfMultiAssignPhase(
                                  << assignResult.cbqModeFallbackReason;
             }
             P.inOut->logMain << "\n";
+            }
 
             appendAssignNormalizationStats(assignOut, nsCtx, wlInfo);
 
@@ -3112,6 +3177,11 @@ std::shared_ptr<PfMultiAssignPhaseResult> runPfMultiAssignPhase(
             run.resolvedChemRequest = preparedLib.resolvedChemRequest;
             run.explicitChem = preparedLib.explicitChem;
             run.adtMexOutput = preparedLib.adtMexOutput;
+            run.tableBacked = tableBacked;
+            run.starInputFormat = preparedLib.starInputFormat;
+            if (tableBacked) {
+                run.tableImportStats = tableResult.stats;
+            }
             run.returnCode = assignResult.returnCode;
             featureRuns.push_back(run);
         }
@@ -3194,6 +3264,8 @@ std::shared_ptr<PfMultiAssignPhaseResult> runPfMultiAssignPhase(
                 manifest << "sample\t" << run.sampleName << "\n";
                 manifest << "feature_type\t" << run.featureType << "\n";
                 manifest << "adt_mex_output\t" << (run.adtMexOutput ? "yes" : "no") << "\n";
+                manifest << "star_input_format\t"
+                         << (run.starInputFormat.empty() ? "fastq" : run.starInputFormat) << "\n";
                 manifest << "fastq_dir\t" << run.resolvedFastq << "\n";
                 manifest << "feature_ref\t" << run.featureRefPath << "\n";
                 manifest << "whitelist\t" << run.whitelistPath << "\n";
@@ -3217,6 +3289,31 @@ std::shared_ptr<PfMultiAssignPhaseResult> runPfMultiAssignPhase(
                 manifest << "barcode_norm_unmatched\t" << run.normalizationStats.unmatched << "\n";
                 manifest << "barcode_norm_dedup_dropped\t" << run.normalizationStats.dedupDropped << "\n";
                 manifest << "barcode_norm_output_count\t" << run.normalizationStats.outputCount << "\n";
+                if (run.tableBacked) {
+                    manifest << "table_input_path\t" << run.tableImportStats.inputPath << "\n";
+                    manifest << "table_delimiter\t"
+                             << (run.tableImportStats.delimiter == "\t" ? "tab" : "comma") << "\n";
+                    manifest << "table_rows_read\t" << run.tableImportStats.rowsRead << "\n";
+                    manifest << "table_rows_retained\t" << run.tableImportStats.rowsRetained << "\n";
+                    manifest << "table_rows_rejected_barcode\t"
+                             << run.tableImportStats.rowsRejectedBarcode << "\n";
+                    manifest << "table_rows_rejected_feature\t"
+                             << run.tableImportStats.rowsRejectedFeature << "\n";
+                    manifest << "table_rows_rejected_count\t"
+                             << run.tableImportStats.rowsRejectedCount << "\n";
+                    manifest << "table_duplicate_pairs_collapsed\t"
+                             << run.tableImportStats.duplicatePairsCollapsed << "\n";
+                    manifest << "table_rows_suffix_normalized\t"
+                             << run.tableImportStats.rowsSuffixNormalized << "\n";
+                manifest << "table_permit_chunks_processed\t"
+                             << run.tableImportStats.permitChunksProcessed << "\n";
+                    manifest << "table_feature_permit_acquires\t"
+                             << run.tableImportStats.featurePermitAcquires << "\n";
+                    manifest << "barcode_namespace_input\t"
+                             << run.tableImportStats.barcodeNamespaceInput << "\n";
+                    manifest << "barcode_namespace_output\t"
+                             << run.tableImportStats.barcodeNamespaceOutput << "\n";
+                }
                 manifest << "return_code\t" << run.returnCode << "\n";
                 manifest << "status\tOK\n";
                 manifest << "assign_output_dir\t" << run.assignOut << "\n";
