@@ -77,7 +77,13 @@ static void print_usage(const char *prog){
 
     fprintf(stderr, "ADT/Protein Output:\n");
     fprintf(stderr, "      --output-mode <adt_mex>       Emit 10x protein MEX (barcodes/features/matrix .tsv.gz)\n");
-    fprintf(stderr, "      --adt-mex                     Alias for --output-mode adt_mex\n\n");
+    fprintf(stderr, "      --adt-mex                     Alias for --output-mode adt_mex\n");
+    fprintf(stderr, "      --hash-demux <yes|no|auto>    Hash demux from hash feature counts (default auto)\n");
+    fprintf(stderr, "      --hash-feature-selector SPEC  Select hash rows (feature_type:HTO, id_prefix:hashtag)\n");
+    fprintf(stderr, "      --hash-demux-method <ratio>   Hash demux classifier (default ratio)\n");
+    fprintf(stderr, "      --hash-min-total N            Min total hash UMIs (default 3)\n");
+    fprintf(stderr, "      --hash-min-top N              Min top hash UMI count (default 3)\n");
+    fprintf(stderr, "      --hash-min-ratio X            Singlet top/second ratio (default 2.0)\n\n");
 
     fprintf(stderr, "Namespace & Compatibility:\n");
     fprintf(stderr, "      --translate_NXT               Complement positions 8 and 9 of cell barcodes at output/filter stages\n");
@@ -247,6 +253,12 @@ int main(int argc, char *argv[])
         {"target-namespace", required_argument, 0, 38},
         {"output-mode", required_argument, 0, 43},
         {"adt-mex", no_argument, 0, 44},
+        {"hash-demux", required_argument, 0, 45},
+        {"hash-feature-selector", required_argument, 0, 46},
+        {"hash-demux-method", required_argument, 0, 47},
+        {"hash-min-total", required_argument, 0, 48},
+        {"hash-min-top", required_argument, 0, 49},
+        {"hash-min-ratio", required_argument, 0, 50},
         {"help", no_argument, 0, 'h'},
         {0, 0, 0, 0}
     };
@@ -385,6 +397,32 @@ int main(int argc, char *argv[])
                 break;
             case 44:
                 adt_mex_output_cli = 1;
+                break;
+            case 45:
+                if (strcmp(optarg, "yes") == 0) hash_demux_mode = 1;
+                else if (strcmp(optarg, "no") == 0) hash_demux_mode = 0;
+                else if (strcmp(optarg, "auto") == 0) hash_demux_mode = -1;
+                else {
+                    fprintf(stderr, "ERROR: --hash-demux must be yes, no, or auto (got '%s')\n", optarg);
+                    return 1;
+                }
+                break;
+            case 46:
+                strncpy(hash_feature_selector, optarg, sizeof(hash_feature_selector) - 1);
+                hash_feature_selector[sizeof(hash_feature_selector) - 1] = '\0';
+                break;
+            case 47:
+                strncpy(hash_demux_method, optarg, sizeof(hash_demux_method) - 1);
+                hash_demux_method[sizeof(hash_demux_method) - 1] = '\0';
+                break;
+            case 48:
+                hash_min_total = atoi(optarg);
+                break;
+            case 49:
+                hash_min_top = atoi(optarg);
+                break;
+            case 50:
+                hash_min_ratio = atof(optarg);
                 break;
             case 'h': print_usage(argv[0]); return 0;
             default: print_usage(argv[0]); return 1;
@@ -747,6 +785,13 @@ int main(int argc, char *argv[])
             args.skip_qc_outputs = skip_qc_outputs;
             args.adt_mex_output = adt_mex_output;
             args.feature_ref_path = adt_feature_ref_path[0] ? adt_feature_ref_path : NULL;
+            args.hash_demux_mode = hash_demux_mode;
+            args.hash_feature_selector = hash_feature_selector[0] ? hash_feature_selector : NULL;
+            args.hash_demux_method = hash_demux_method[0] ? hash_demux_method : NULL;
+            args.library_feature_type = library_feature_type_cli[0] ? library_feature_type_cli : NULL;
+            args.hash_min_total = hash_min_total;
+            args.hash_min_top = hash_min_top;
+            args.hash_min_ratio = hash_min_ratio;
             args.error_out = &child_error;
             struct chem_detect_state chem_detect_buf;
             if (autodetect_chemistry_cli) {

@@ -14,6 +14,12 @@ dynamic FEATURE permit telemetry, per-library MEX output, provenance manifests,
 and merge into `outs/raw_feature_bc_matrix` and
 `outs/filtered_feature_bc_matrix`.
 
+**HTO/CMO hash demultiplexing** is not a table-backed arm. When raw hashtag or
+cell-multiplexing feature FASTQs are available, use the normal FASTQ-backed
+`assignBarcodes --output-mode adt_mex` path with optional `star_hash_*` columns
+(see `docs/RUNBOOK_NATIVE_HTO_CMO_FEATURE_DEMUX_20260615.md`). Do not reconstruct
+hash assignments from a merged feature MEX when raw reads exist.
+
 ## Config
 
 Minimal non-GEX table-backed library row:

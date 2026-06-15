@@ -72,6 +72,15 @@ extern int adt_mex_output;
 extern char adt_feature_ref_path[4096];
 extern char adt_command_line[8192];
 
+/* Hash / HTO / CMO demux settings (adt_mex extension) */
+extern int hash_demux_mode;
+extern char hash_feature_selector[256];
+extern char hash_demux_method[64];
+extern char library_feature_type_cli[128];
+extern int hash_min_total;
+extern int hash_min_top;
+extern double hash_min_ratio;
+
 /* Hash lifecycle helpers for feature matching tables */
 void clear_feature_lookup_hashes(void);
 

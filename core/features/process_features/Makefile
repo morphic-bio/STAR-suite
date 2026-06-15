@@ -23,7 +23,7 @@ DEFINES :=
 # Note: heatmap.c now uses Plotly (HTML+JSON), no external dependencies
 # pf_counts.c and mex_writer.c provide modular counts/output stages
 # nbem.c provides NB-EM feature calling (SCEPTRE-style)
-CORE_SRCS = assignBarcodes.c queue.c globals.c utils.c memory.c io.c barcode_match.c pf_api.c pf_split_read.c call_features.c gmm.c nbem.c mex_10x.c adt_mex.c plot_histogram.c pf_counts.c mex_writer.c emptydrops_bridge.c barcode_filter.c heatmap.c
+CORE_SRCS = assignBarcodes.c queue.c globals.c utils.c memory.c io.c barcode_match.c pf_api.c pf_split_read.c call_features.c gmm.c nbem.c mex_10x.c adt_mex.c hash_demux.c plot_histogram.c pf_counts.c mex_writer.c emptydrops_bridge.c barcode_filter.c heatmap.c
 
 # CLI-specific sources
 MAIN_SRCS = main.c
@@ -189,6 +189,10 @@ test-regression: $(TARGET)
 test-adt-mex: $(TARGET)
 	@chmod +x tests/test_adt_mex.sh
 	@./tests/test_adt_mex.sh
+
+test-hash-demux-mex: $(TARGET)
+	@chmod +x tests/test_hash_demux_mex.sh
+	@./tests/test_hash_demux_mex.sh
 
 clean:
 	rm -f *.o $(TARGET) $(DEMUX_TARGET) $(DEMUX_BAM_TARGET) $(CALL_FEATURES_TARGET) $(LIB_TARGET) $(TEST_API_TARGET) $(TEST_PF_COUNTS_TARGET) $(TEST_MEX_WRITER_TARGET) $(TEST_MEX_PARITY_TARGET) $(TEST_BARCODE_FILTER_TARGET) $(TEST_OFFSET_DETECTION_TARGET) $(TEST_ANCHOR_PATTERN_TARGET) $(TEST_FILTERED_NAMESPACE_TARGET) $(TEST_PF_API_ISOLATION_TARGET) $(TEST_PREHASH_AMBIGUITY_TARGET) $(TEST_UNION_WHITELIST_TARGET) $(TEST_PREHASH_MEMORY_TARGET) $(TEST_CATATAC_SPLIT_TARGET) $(TEST_FEATURE_DUPLICATES_TARGET) tests/*.o
