@@ -316,6 +316,15 @@ typedef struct sample_args {
     int adt_mex_output;
     const char *feature_ref_path;
 
+    /* Hash / HTO / CMO demux (adt_mex output mode extension) */
+    int hash_demux_mode;              /* PF_HASH_DEMUX_AUTO|NO|YES */
+    const char *hash_feature_selector;
+    const char *hash_demux_method;
+    const char *library_feature_type;
+    int hash_min_total;
+    int hash_min_top;
+    double hash_min_ratio;
+
     /* Error propagation */
     int *error_out;                  /* Set to non-zero if fatal error occurred */
 } sample_args;
