@@ -53,6 +53,13 @@ struct AssignOptions {
     bool useHotHash = false;
     bool skipHeatmaps = false;
     bool adtMexOutput = false; // emit 10x protein MEX sidecars (assignBarcodes --output-mode adt_mex)
+    int hashDemuxMode = -1;    // PF_HASH_DEMUX_AUTO
+    string hashFeatureSelector;
+    string hashDemuxMethod;
+    string libraryFeatureType;
+    int hashMinTotal = 3;
+    int hashMinTop = 3;
+    double hashMinRatio = 2.0;
     string cbqMode = "auto"; // auto | stream | range
     string sampleName;
     bool useSplitReadLayout = false;

@@ -213,6 +213,15 @@ void pf_config_set_skip_qc_outputs(pf_config *config, int enabled);
 /* ADT / protein MEX output (assignBarcodes --output-mode adt_mex) */
 void pf_config_set_adt_mex_output(pf_config *config, int enable);
 
+/* Hash / HTO / CMO demux (adt_mex extension) */
+void pf_config_set_hash_demux_mode(pf_config *config, int mode);
+void pf_config_set_hash_feature_selector(pf_config *config, const char *selector);
+void pf_config_set_hash_demux_method(pf_config *config, const char *method);
+void pf_config_set_library_feature_type(pf_config *config, const char *feature_type);
+void pf_config_set_hash_min_total(pf_config *config, int min_total);
+void pf_config_set_hash_min_top(pf_config *config, int min_top);
+void pf_config_set_hash_min_ratio(pf_config *config, double min_ratio);
+
 /**
  * Allow union (mixed NXT+TRU) whitelists and filtered barcode sets.
  * When enabled, filtered barcodes are expanded at ingress: each barcode's

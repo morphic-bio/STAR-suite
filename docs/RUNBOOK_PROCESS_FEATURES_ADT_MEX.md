@@ -95,7 +95,25 @@ are still written for debugging.
 
 ```bash
 core/features/process_features/tests/test_adt_mex.sh
+core/features/process_features/tests/test_hash_demux_mex.sh
 ```
+
+## Hash / HTO / CMO demux (adt_mex extension)
+
+When hash-like rows are present in the feature reference, `adt_mex` can also emit:
+
+| path | description |
+|------|-------------|
+| `hash/` | hash-only gz MEX (`Multiplexing Capture`) |
+| `protein/` | optional protein-only gz MEX for mixed ADT+HTO refs |
+| `hash_demux_assignments.tsv` | per-barcode ratio classifier output |
+| `singlet_barcodes.tsv` / `doublet_barcodes.tsv` / `negative_barcodes.tsv` | classification lists |
+| `hash_demux_summary.json` / `hash_demux_command.txt` | provenance |
+
+CLI flags: `--hash-demux`, `--hash-feature-selector`, `--hash-demux-method`,
+`--hash-min-total`, `--hash-min-top`, `--hash-min-ratio`. pf-multi exposes the
+same controls via `star_hash_*` columns. Full contract:
+`docs/RUNBOOK_NATIVE_HTO_CMO_FEATURE_DEMUX_20260615.md`.
 
 ## Master integration
 
@@ -118,6 +136,7 @@ configs it is another `assignBarcodes` library arm, matching gRNA/LARRY:
 | `Antibody Capture` | Antibody Capture | ADT MEX (`output_mode=adt_mex`) |
 | `ADT` | Antibody Capture | ADT MEX |
 | `Protein` | Antibody Capture | ADT MEX |
+| `Multiplexing Capture` / `HTO` / `CMO` | Multiplexing Capture | ADT MEX + `hash/` outputs |
 
 Output layout: `cr_assign/<feature_types>/<star_library_id>/<sample>/` with
 gzipped MEX plus `feature_reference.csv`, `protein_quant_summary.json`, and

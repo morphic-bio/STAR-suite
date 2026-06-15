@@ -45,6 +45,14 @@ struct LibraryEntry {
     string starInputFormat;     // fastq (default) or table (resolved count table in fastqs column)
     int starMaxHamming = -1;    // Per-library max Hamming distance override (-1 = use global)
 
+    // Hash / HTO / CMO demux (assignBarcodes adt_mex extension)
+    string starHashDemux;              // yes | no | auto | empty (auto)
+    string starHashFeatureSelector;    // feature_type:HTO, id_prefix:hashtag, ...
+    string starHashDemuxMethod;        // ratio (default)
+    int starHashMinTotal = -1;
+    int starHashMinTop = -1;
+    double starHashMinRatio = -1.0;
+
     bool isTableBacked() const;
 
     // Split-read guide layout (CAT-ATAC and similar assays)

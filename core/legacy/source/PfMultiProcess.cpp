@@ -61,6 +61,12 @@ struct PfPreparedFeatureLibrary {
     bool useSplitReadLayout = false;
     bool adtMexOutput = false;
     bool tableBacked = false;
+    string starHashDemux;
+    string starHashFeatureSelector;
+    string starHashDemuxMethod;
+    int starHashMinTotal = -1;
+    int starHashMinTop = -1;
+    double starHashMinRatio = -1.0;
     string starInputFormat;
     pf_split_read_layout splitReadLayout = {};
     string starBarcodeOutputMap;
@@ -171,6 +177,16 @@ struct PfMultiFeatureRun {
     bool adtMexOutput = false;
     bool tableBacked = false;
     string starInputFormat;
+    string hashFeatureSelector;
+    string hashDemuxMethod;
+    int hashDemuxMode = -1;
+    int hashMinTotal = 3;
+    int hashMinTop = 3;
+    double hashMinRatio = 2.0;
+    int nHashFeatures = 0;
+    int nHashSinglet = 0;
+    int nHashDoublet = 0;
+    int nHashNegative = 0;
     PfMultiTableImport::TableImportStats tableImportStats;
     int returnCode = 0;
 };
@@ -260,6 +276,39 @@ static string lowerCopy(string input) {
 static bool isUnsetToken(const string& input) {
     string token = lowerCopy(trimCopy(input));
     return token.empty() || token == "-" || token == "none";
+}
+
+static int parseHashDemuxModeToken(const string& token) {
+    const string mode = lowerCopy(trimCopy(token));
+    if (mode.empty() || mode == "auto") return -1;
+    if (mode == "yes" || mode == "1" || mode == "true") return 1;
+    if (mode == "no" || mode == "0" || mode == "false") return 0;
+    return -1;
+}
+
+static void applyPreparedHashDemuxOptions(const PfPreparedFeatureLibrary& preparedLib,
+                                          PfMultiAssign::AssignOptions& runAssignOpts) {
+    runAssignOpts.libraryFeatureType = preparedLib.libraryType;
+    if (!preparedLib.starHashDemux.empty()) {
+        if (!PfMultiFeatureSpecs::isValidStarHashDemuxValue(preparedLib.starHashDemux)) {
+            throw runtime_error("Invalid star_hash_demux value '" + preparedLib.starHashDemux
+                + "'; must be auto, yes, no, or empty");
+        }
+        runAssignOpts.hashDemuxMode = parseHashDemuxModeToken(preparedLib.starHashDemux);
+    }
+    runAssignOpts.hashFeatureSelector = preparedLib.starHashFeatureSelector;
+    if (!preparedLib.starHashDemuxMethod.empty()) {
+        runAssignOpts.hashDemuxMethod = preparedLib.starHashDemuxMethod;
+    }
+    if (preparedLib.starHashMinTotal >= 0) {
+        runAssignOpts.hashMinTotal = preparedLib.starHashMinTotal;
+    }
+    if (preparedLib.starHashMinTop >= 0) {
+        runAssignOpts.hashMinTop = preparedLib.starHashMinTop;
+    }
+    if (preparedLib.starHashMinRatio >= 0.0) {
+        runAssignOpts.hashMinRatio = preparedLib.starHashMinRatio;
+    }
 }
 
 static string basenameOf(const string& path);
@@ -949,6 +998,40 @@ static bool hasMexFiles(const string& dirPath) {
     return (stat(features.c_str(), &st) == 0) || (stat(featuresGz.c_str(), &st) == 0);
 }
 
+struct PfAssignMexSource {
+    string mexDir;
+    string featureTypeOverride;
+};
+
+static vector<PfAssignMexSource> resolveAssignMexSources(const string& assignOut) {
+    vector<PfAssignMexSource> sources;
+    const string hashDir = assignOut + "/hash";
+    const string proteinDir = assignOut + "/protein";
+    const bool hasHash = hasMexFiles(hashDir);
+    const bool hasProtein = hasMexFiles(proteinDir);
+    if (hasHash) {
+        sources.push_back({hashDir, "Multiplexing Capture"});
+    }
+    if (hasProtein) {
+        sources.push_back({proteinDir, ""});
+    }
+    if (sources.empty() && hasMexFiles(assignOut)) {
+        sources.push_back({assignOut, ""});
+    }
+    return sources;
+}
+
+static string resolveAssignStubFeatureRef(const PfAssignMexSource& source,
+                                          const string& /*assignOut*/,
+                                          const string& defaultFeatureRef) {
+    const string subdirRef = source.mexDir + "/feature_reference.csv";
+    struct stat st;
+    if (stat(subdirRef.c_str(), &st) == 0 && S_ISREG(st.st_mode)) {
+        return subdirRef;
+    }
+    return defaultFeatureRef;
+}
+
 static bool filterFeatureRefCsv(const string& inputPath, const string& featureType,
                                 const string& outputPath) {
     ifstream in(inputPath);
@@ -1412,6 +1495,12 @@ static PfMultiPreparedContext buildPfMultiPreparedContext(const PfMultiPreloadIn
             prepared.adtMexOutput =
                 PfMultiFeatureSpecs::shouldEmitAdtMexOutput(
                     spec.featureRefType, spec.libraryType);
+            prepared.starHashDemux = lib.starHashDemux;
+            prepared.starHashFeatureSelector = lib.starHashFeatureSelector;
+            prepared.starHashDemuxMethod = lib.starHashDemuxMethod;
+            prepared.starHashMinTotal = lib.starHashMinTotal;
+            prepared.starHashMinTop = lib.starHashMinTop;
+            prepared.starHashMinRatio = lib.starHashMinRatio;
             prepared.tableBacked = lib.isTableBacked();
             prepared.starInputFormat = lib.starInputFormat.empty() ? "fastq" : lib.starInputFormat;
             if (prepared.tableBacked) {
@@ -2040,16 +2129,13 @@ static string stripBarcodeSuffix(const string& barcode) {
     return barcode;
 }
 
-static void writeDeferredFilteredAssignOutput(const string& assignOut,
-                                              const vector<string>& filteredGexBarcodes,
-                                              const string& featureBarcodeNamespace,
-                                              const string& whitelistPath,
-                                              ofstream& logStream) {
-    if (filteredGexBarcodes.empty()) {
-        return;
-    }
-
-    PfMultiMerge::MexData rawData = PfMultiMerge::readMex(assignOut);
+static void writeDeferredFilteredAssignOutputForMexDir(const string& mexDir,
+                                                       const string& assignOut,
+                                                       const vector<string>& filteredGexBarcodes,
+                                                       const string& featureBarcodeNamespace,
+                                                       const string& whitelistPath,
+                                                       ofstream& logStream) {
+    PfMultiMerge::MexData rawData = PfMultiMerge::readMex(mexDir);
     vector<string> nativeBarcodes;
     {
         const string nativeBarcodePath = assignOut + "/barcodes.txt";
@@ -2093,13 +2179,13 @@ static void writeDeferredFilteredAssignOutput(const string& assignOut,
         }
     }
 
-    const string filteredDir = assignOut + "/filtered";
+    const string filteredDir = mexDir + "/filtered";
     const string resetCmd = "rm -rf \"" + filteredDir + "\" && mkdir -p \"" + filteredDir + "\"";
     if (system(resetCmd.c_str()) != 0) {
         throw runtime_error("Failed to reset deferred filtered assign output dir: " + filteredDir);
     }
     if (subsetBarcodes.empty()) {
-        logStream << "WARNING: deferred filtered assign output for " << assignOut
+        logStream << "WARNING: deferred filtered assign output for " << mexDir
                   << " matched zero GEX barcodes\n";
         return;
     }
@@ -2133,7 +2219,7 @@ static void writeDeferredFilteredAssignOutput(const string& assignOut,
         features.emplace_back(rawData.features[i], name, type);
     }
     if (MexWriter::writeMex(filteredDir + "/", subsetBarcodes, features, subsetTriplets, -1) != 0) {
-        throw runtime_error("Failed to write deferred filtered MEX for assign output: " + assignOut);
+        throw runtime_error("Failed to write deferred filtered MEX for assign output: " + mexDir);
     }
 
     {
@@ -2222,9 +2308,30 @@ static void writeDeferredFilteredAssignOutput(const string& assignOut,
         }
     }
 
-    logStream << "NOTICE: wrote deferred filtered assign output for " << assignOut
+    logStream << "NOTICE: wrote deferred filtered assign output for " << mexDir
               << " (barcodes=" << subsetBarcodes.size()
               << ", deduped_counts=" << dedupedCount << ")\n";
+}
+
+static void writeDeferredFilteredAssignOutput(const string& assignOut,
+                                              const vector<string>& filteredGexBarcodes,
+                                              const string& featureBarcodeNamespace,
+                                              const string& whitelistPath,
+                                              ofstream& logStream) {
+    if (filteredGexBarcodes.empty()) {
+        return;
+    }
+
+    const vector<PfAssignMexSource> sources = resolveAssignMexSources(assignOut);
+    if (sources.empty()) {
+        logStream << "WARNING: deferred filtered assign output skipped for " << assignOut
+                  << " (no assign MEX sources found)\n";
+        return;
+    }
+    for (const auto& source : sources) {
+        writeDeferredFilteredAssignOutputForMexDir(source.mexDir, assignOut, filteredGexBarcodes,
+                                                   featureBarcodeNamespace, whitelistPath, logStream);
+    }
 }
 
 std::shared_ptr<PfMultiPreloadHandle> startPfMultiConfigPreload(const Parameters& P) {
@@ -2438,14 +2545,15 @@ std::shared_ptr<PfMultiAssignPhaseResult> runPfMultiAssignPhase(
             }
             PfMultiAssign::AssignOptions runAssignOpts = assignOpts;
             runAssignOpts.adtMexOutput = preparedLib.adtMexOutput;
+            applyPreparedHashDemuxOptions(preparedLib, runAssignOpts);
             const bool tableBacked = preparedLib.tableBacked;
             if (tableBacked) {
                 P.inOut->logMain << "NOTICE: table-backed feature library_id=" << preparedLib.libraryId
                                  << " table=" << resolvedFastq << "\n";
             }
             if (preparedLib.adtMexOutput && !tableBacked) {
-                P.inOut->logMain << "NOTICE: protein/ADT library_id=" << preparedLib.libraryId
-                                 << " will emit assignBarcodes ADT MEX output (output_mode=adt_mex)\n";
+                P.inOut->logMain << "NOTICE: feature MEX library_id=" << preparedLib.libraryId
+                                 << " will emit assignBarcodes adt_mex output (protein and/or hash)\n";
             }
             if (preparedLib.starMaxHamming >= 0) {
                 runAssignOpts.maxHammingDistance = preparedLib.starMaxHamming;
@@ -3179,6 +3287,14 @@ std::shared_ptr<PfMultiAssignPhaseResult> runPfMultiAssignPhase(
             run.adtMexOutput = preparedLib.adtMexOutput;
             run.tableBacked = tableBacked;
             run.starInputFormat = preparedLib.starInputFormat;
+            run.hashFeatureSelector = runAssignOpts.hashFeatureSelector;
+            run.hashDemuxMethod = runAssignOpts.hashDemuxMethod.empty()
+                ? string("ratio")
+                : runAssignOpts.hashDemuxMethod;
+            run.hashDemuxMode = runAssignOpts.hashDemuxMode;
+            run.hashMinTotal = runAssignOpts.hashMinTotal;
+            run.hashMinTop = runAssignOpts.hashMinTop;
+            run.hashMinRatio = runAssignOpts.hashMinRatio;
             if (tableBacked) {
                 run.tableImportStats = tableResult.stats;
             }
@@ -3196,6 +3312,23 @@ std::shared_ptr<PfMultiAssignPhaseResult> runPfMultiAssignPhase(
         for (auto& run : featureRuns) {
             string realOut = findAssignOutputDir(run.assignOut);
             run.assignOut = realOut;
+            const string summaryPath = run.assignOut + "/hash_demux_summary.json";
+            std::ifstream summaryIn(summaryPath.c_str());
+            if (summaryIn.is_open()) {
+                string content((std::istreambuf_iterator<char>(summaryIn)),
+                               std::istreambuf_iterator<char>());
+                auto parseIntField = [&](const string& key, int& out) {
+                    const string needle = "\"" + key + "\": ";
+                    size_t pos = content.find(needle);
+                    if (pos == string::npos) return;
+                    pos += needle.size();
+                    out = std::atoi(content.c_str() + pos);
+                };
+                parseIntField("n_hash_features", run.nHashFeatures);
+                parseIntField("n_singlet", run.nHashSinglet);
+                parseIntField("n_doublet", run.nHashDoublet);
+                parseIntField("n_negative", run.nHashNegative);
+            }
             for (const char* suffix : {"pf_library_provenance.tsv", "pf_library_provenance.tsv.tmp"}) {
                 string path = run.assignOut + "/" + suffix;
                 if (remove(path.c_str()) != 0 && errno != ENOENT) {
@@ -3206,15 +3339,30 @@ std::shared_ptr<PfMultiAssignPhaseResult> runPfMultiAssignPhase(
         }
 
         for (auto& run : featureRuns) {
-            int stubRet = PfMultiMexStub::processAssignOutput(
-                run.assignOut, run.featureRefPath, run.featureType,
-                true,
-                run.barcodeOutputMapPath.empty() ? run.whitelistPath : run.barcodeOutputMapPath,
-                run.featureType);
-            if (stubRet != 0) {
-                throw runtime_error("Failed to generate MEX stub for library: type="
+            const vector<PfAssignMexSource> mexSources = resolveAssignMexSources(run.assignOut);
+            if (mexSources.empty()) {
+                throw runtime_error("No assign MEX outputs found for library: type="
                     + run.featureType + ", library_id=" + run.libraryId
                     + ", assign_out=" + run.assignOut);
+            }
+            const string whitelistPath = run.barcodeOutputMapPath.empty()
+                ? run.whitelistPath : run.barcodeOutputMapPath;
+            for (const auto& source : mexSources) {
+                const bool splitSource = (source.mexDir != run.assignOut);
+                const string featureRefPath = resolveAssignStubFeatureRef(
+                    source, run.assignOut, run.featureRefPath);
+                const string typeOverride = source.featureTypeOverride.empty()
+                    ? run.featureType : source.featureTypeOverride;
+                int stubRet = PfMultiMexStub::processAssignOutput(
+                    source.mexDir, featureRefPath, run.featureType,
+                    !splitSource,
+                    whitelistPath,
+                    typeOverride);
+                if (stubRet != 0) {
+                    throw runtime_error("Failed to generate MEX stub for library: type="
+                        + run.featureType + ", library_id=" + run.libraryId
+                        + ", assign_out=" + source.mexDir);
+                }
             }
             // With the namespace refactor, the whitelist is pre-normalized to
             // the read namespace before assignment. barcodes.txt is already in
@@ -3228,18 +3376,32 @@ std::shared_ptr<PfMultiAssignPhaseResult> runPfMultiAssignPhase(
         // Read feature MEX to validate before writing provenance (fail-fast on read errors)
         vector<PfMultiFeatureMexEntry> featureMexEntries;
         for (const auto& run : featureRuns) {
-            try {
-                PfMultiFeatureMexEntry entry;
-                entry.data = PfMultiMerge::readMex(run.assignOut);
-                entry.effectiveChem = run.effectiveChem;
-                entry.featureMexOutputNamespace = run.featureMexOutputNamespace;
-                entry.featureType = run.featureType;
-                entry.libraryId = run.libraryId;
-                featureMexEntries.push_back(std::move(entry));
-            } catch (const exception& e) {
-                throw runtime_error("Failed to read feature MEX for library: type="
+            const vector<PfAssignMexSource> mexSources = resolveAssignMexSources(run.assignOut);
+            if (mexSources.empty()) {
+                throw runtime_error("No assign MEX outputs found for library: type="
                     + run.featureType + ", library_id=" + run.libraryId
-                    + ", assign_out=" + run.assignOut + ": " + e.what());
+                    + ", assign_out=" + run.assignOut);
+            }
+            for (const auto& source : mexSources) {
+                try {
+                    PfMultiFeatureMexEntry entry;
+                    entry.data = PfMultiMerge::readMex(source.mexDir);
+                    if (!source.featureTypeOverride.empty()) {
+                        for (auto& featureType : entry.data.featureTypes) {
+                            featureType = source.featureTypeOverride;
+                        }
+                    }
+                    entry.effectiveChem = run.effectiveChem;
+                    entry.featureMexOutputNamespace = run.featureMexOutputNamespace;
+                    entry.featureType = source.featureTypeOverride.empty()
+                        ? run.featureType : source.featureTypeOverride;
+                    entry.libraryId = run.libraryId;
+                    featureMexEntries.push_back(std::move(entry));
+                } catch (const exception& e) {
+                    throw runtime_error("Failed to read feature MEX for library: type="
+                        + run.featureType + ", library_id=" + run.libraryId
+                        + ", assign_out=" + source.mexDir + ": " + e.what());
+                }
             }
         }
 
@@ -3264,6 +3426,17 @@ std::shared_ptr<PfMultiAssignPhaseResult> runPfMultiAssignPhase(
                 manifest << "sample\t" << run.sampleName << "\n";
                 manifest << "feature_type\t" << run.featureType << "\n";
                 manifest << "adt_mex_output\t" << (run.adtMexOutput ? "yes" : "no") << "\n";
+                manifest << "hash_demux_enabled\t"
+                         << ((run.hashDemuxMode != 0 && run.nHashFeatures > 0) ? "yes" : "no") << "\n";
+                manifest << "hash_demux_method\t" << run.hashDemuxMethod << "\n";
+                manifest << "hash_feature_selector\t" << run.hashFeatureSelector << "\n";
+                manifest << "hash_min_total\t" << run.hashMinTotal << "\n";
+                manifest << "hash_min_top\t" << run.hashMinTop << "\n";
+                manifest << "hash_min_ratio\t" << run.hashMinRatio << "\n";
+                manifest << "n_hash_features\t" << run.nHashFeatures << "\n";
+                manifest << "n_hash_singlet\t" << run.nHashSinglet << "\n";
+                manifest << "n_hash_doublet\t" << run.nHashDoublet << "\n";
+                manifest << "n_hash_negative\t" << run.nHashNegative << "\n";
                 manifest << "star_input_format\t"
                          << (run.starInputFormat.empty() ? "fastq" : run.starInputFormat) << "\n";
                 manifest << "fastq_dir\t" << run.resolvedFastq << "\n";
