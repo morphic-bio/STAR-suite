@@ -138,6 +138,13 @@ For Multiomics Suite protein quantification, `assignBarcodes` can emit a gzipped
 with `Antibody Capture` feature rows and provenance sidecars. See
 `docs/RUNBOOK_PROCESS_FEATURES_ADT_MEX.md`.
 
+Validation and benchmark runbook: `docs/RUNBOOK_CITESEQ_MEX_VALIDATION_20260615.md`.
+The public PBMC 1k TotalSeq-B benchmark runs only the ADT feature assignment
+step from official 10x FASTQs and compares the resulting `Antibody Capture` MEX
+against the official Cell Ranger filtered feature-barcode MEX.
+TotalSeq-C uses the same `Antibody Capture` MEX contract, but STAR-suite has not
+yet completed dataset-level validation against a TotalSeq-C raw-read benchmark.
+
 The same `adt_mex` mode also supports **HTO/CMO hash libraries** and mixed
 ADT+HTO references: hash rows emit under `hash/` (feature type
 `Multiplexing Capture`), optional protein-only rows under `protein/`, and native

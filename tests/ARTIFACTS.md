@@ -44,6 +44,8 @@ update this file with its output location.
 - `/tmp/hiv_dogma_hto_demux_smoke_*` (native HTO demux assignBarcodes smoke; `tests/multi_feature/test_hiv_dogma_hto_demux_smoke.sh`)
 - `/tmp/table_gex_pf_multi_star_smoke_*/` (fast GEX + table Custom pf-multi STAR smoke; `tests/multi_feature/test_table_gex_pf_multi_star_smoke.sh`)
 - `/tmp/mixed_adt_hto_pf_multi_star_smoke_*/` (GEX + mixed ADT+HTO hash demux pf-multi merge smoke; `tests/multi_feature/test_mixed_adt_hto_pf_multi_star_smoke.sh`)
+- `/mnt/pikachu/citeseq_pbmc1k_totalseqb_v31/` (downloaded public 10x PBMC 1k TotalSeq-B fixture staged by `scripts/download_10x_citeseq_pbmc1k_fixture.sh`; contains FASTQ tar/extracts, feature reference, and official Cell Ranger raw/filtered feature-barcode MEX)
+- `/mnt/pikachu/citeseq_pbmc1k_pf_benchmark_*/` (process_features-only CITE-seq benchmark outputs from `tests/run_citeseq_pbmc1k_pf_benchmark.sh`: ADT MEX, `assignBarcodes.log`, comparison JSON/TSV, and `BENCHMARK_SUMMARY.txt`)
 - `/mnt/pikachu/catatac_gse288996/full_bench/catatac_trimodal_staged/` (persistent per-read-count ATAC triplet downsample cache for trimodal smokes, e.g. `atac_100000/`, `atac_2000000/`)
 - `/mnt/pikachu/catatac_gse288996/full_bench/catatac_trimodal_smoke_100k_20260614T023346Z/` (fresh 2026-06-14 CAT-ATAC trimodal 100K smoke output retained outside the repo checkout; wrapper passed and `trimodal_verify.json` records GEX, ATAC, guide, and merged-MEX checks)
 - `/mnt/pikachu/catatac_gse288996/full_bench/catatac_trimodal_smoke_100k_ambient_fdr_*/` (CAT-ATAC trimodal 100K smokes run from merged ambient-FDR builds; includes GEX, Chromap ATAC, guide pf-multi, CR-compatible GMM outputs, and `outs/crispr_analysis/ambient_fdr/` sparse q-value sidecars)

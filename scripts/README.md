@@ -93,6 +93,7 @@ regression tools, and generic fixtures.
 | Script | Language | Purpose |
 |--------|----------|---------|
 | `download_public_bulk_fixture.sh` | Bash | Downloads a fixed public human bulk RNA-seq paired-end fixture from GEO/SRA (default: GSE88509 / GSM2344101). Used by bulk RNA-seq smoke tests. |
+| `download_10x_citeseq_pbmc1k_fixture.sh` | Bash | Downloads and stages the public 10x PBMC 1k TotalSeq-B CITE-seq fixture: FASTQs, feature reference, and Cell Ranger raw/filtered feature-barcode MEX for process_features ADT benchmarking. |
 | `check_links.sh` | Bash | Validates a symlink manifest: checks that each link exists, is a symlink, and its target is present. |
 | `sync_links.sh` | Bash | Creates symlinks from a tab-separated manifest (`link_path<TAB>target_path`). |
 
