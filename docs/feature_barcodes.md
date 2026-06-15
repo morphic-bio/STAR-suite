@@ -138,12 +138,24 @@ For Multiomics Suite protein quantification, `assignBarcodes` can emit a gzipped
 with `Antibody Capture` feature rows and provenance sidecars. See
 `docs/RUNBOOK_PROCESS_FEATURES_ADT_MEX.md`.
 
+The same `adt_mex` mode also supports **HTO/CMO hash libraries** and mixed
+ADT+HTO references: hash rows emit under `hash/` (feature type
+`Multiplexing Capture`), optional protein-only rows under `protein/`, and native
+hash demux sidecars (`hash_demux_assignments.tsv`, singlet/doublet/negative lists,
+`hash_demux_summary.json`). See `docs/RUNBOOK_NATIVE_HTO_CMO_FEATURE_DEMUX_20260615.md`.
+
 In **pf-multi** configs, ADT/protein is another feature-library arm (same path as
 gRNA or LARRY): declare a non-GEX `feature_types` value such as `Antibody Capture`,
 `ADT`, or `Protein`, provide `star_feature_ref`, and the permits-based runner
 calls `assignBarcodes` with ADT MEX mode for that library only. Multiomics Suite
 consumes the resulting `protein.mex_dir`; STAR-suite does not orchestrate CLR or
 downstream packaging.
+
+HTO/CMO libraries use the same `adt_mex` assign path with `feature_types` such as
+`Multiplexing Capture`, `HTO`, or `CMO`. Optional pf-multi columns
+`star_hash_demux`, `star_hash_feature_selector`, `star_hash_demux_method`,
+`star_hash_min_total`, `star_hash_min_top`, and `star_hash_min_ratio` map to the
+matching `assignBarcodes` CLI flags.
 
 ---
 

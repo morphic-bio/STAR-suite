@@ -31,10 +31,38 @@ inline bool isProteinAdtFeatureRole(const string& normalizedRole) {
         || normalizedRole == "protein";
 }
 
+inline bool isHashLikeFeatureRole(const string& normalizedRole) {
+    return normalizedRole == "multiplexingcapture"
+        || normalizedRole == "hto"
+        || normalizedRole == "cmo"
+        || normalizedRole == "cellplexcmo";
+}
+
+inline bool isValidStarHashDemuxValue(const string& value) {
+    if (value.empty()) {
+        return true;
+    }
+    string mode;
+    mode.reserve(value.size());
+    for (unsigned char c : value) {
+        if (c == ' ' || c == '\t' || c == '\r' || c == '\n') {
+            continue;
+        }
+        mode.push_back(static_cast<char>(std::tolower(c)));
+    }
+    return mode == "auto" || mode == "-" || mode == "none"
+        || mode == "yes" || mode == "1" || mode == "true"
+        || mode == "no" || mode == "0" || mode == "false";
+}
+
 inline bool shouldEmitAdtMexOutput(const string& featureRefType,
                                    const string& libraryType) {
-    return isProteinAdtFeatureRole(normalizedFeatureRole(featureRefType))
-        || isProteinAdtFeatureRole(normalizedFeatureRole(libraryType));
+    const string refRole = normalizedFeatureRole(featureRefType);
+    const string libRole = normalizedFeatureRole(libraryType);
+    return isProteinAdtFeatureRole(refRole)
+        || isProteinAdtFeatureRole(libRole)
+        || isHashLikeFeatureRole(refRole)
+        || isHashLikeFeatureRole(libRole);
 }
 
 inline map<string, string> knownFeatureRefTypeMap() {
@@ -45,7 +73,9 @@ inline map<string, string> knownFeatureRefTypeMap() {
         {"adt", "Antibody Capture"},
         {"protein", "Antibody Capture"},
         {"cellplexcmo", "Multiplexing Capture"},
-        {"multiplexingcapture", "Multiplexing Capture"}
+        {"multiplexingcapture", "Multiplexing Capture"},
+        {"hto", "Multiplexing Capture"},
+        {"cmo", "Multiplexing Capture"}
     };
 }
 

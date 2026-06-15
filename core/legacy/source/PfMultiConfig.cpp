@@ -1,4 +1,5 @@
 #include "PfMultiConfig.h"
+#include "PfMultiFeatureSpecs.h"
 #include "ErrorWarning.h"
 #include "serviceFuns.cpp"
 #include <fstream>
@@ -373,6 +374,18 @@ Config parseConfig(const string& configPath) {
                             if (!value.empty()) {
                                 entry.starMaxHamming = std::atoi(value.c_str());
                             }
+                        } else if (header == "star_hash_demux" || header == "starhashdemux") {
+                            entry.starHashDemux = value;
+                        } else if (header == "star_hash_feature_selector" || header == "starhashfeatureselector") {
+                            entry.starHashFeatureSelector = value;
+                        } else if (header == "star_hash_demux_method" || header == "starhashdemuxmethod") {
+                            entry.starHashDemuxMethod = value;
+                        } else if (header == "star_hash_min_total" || header == "starhashmintotal") {
+                            if (!value.empty()) entry.starHashMinTotal = std::atoi(value.c_str());
+                        } else if (header == "star_hash_min_top" || header == "starhashmintop") {
+                            if (!value.empty()) entry.starHashMinTop = std::atoi(value.c_str());
+                        } else if (header == "star_hash_min_ratio" || header == "starhashminratio") {
+                            if (!value.empty()) entry.starHashMinRatio = std::atof(value.c_str());
                         } else {
                             applySplitReadHeader(entry, header, value);
                         }
@@ -680,6 +693,11 @@ Config parseConfig(const string& configPath) {
             lib.fastqs = tablePath;
         }
         finalizeSplitReadLayout(lib);
+        if (!lib.starHashDemux.empty() && !PfMultiFeatureSpecs::isValidStarHashDemuxValue(lib.starHashDemux)) {
+            throw runtime_error("Invalid star_hash_demux value '" + lib.starHashDemux
+                + "' for library_id=" + lib.starLibraryId
+                + "; must be auto, yes, no, or empty");
+        }
         if (!lib.starBarcodeOutputMap.empty()) {
             if (lib.starBarcodeOutputMap[0] != '/') {
                 lib.starBarcodeOutputMap = configDir + "/" + lib.starBarcodeOutputMap;

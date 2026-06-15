@@ -473,6 +473,25 @@ static void applyAssignOptions(pf_config* cfg, const AssignOptions& options) {
         pf_config_set_adt_mex_output(cfg, 1);
         pf_config_set_skip_emptydrops(cfg, 1);
     }
+    if (!options.libraryFeatureType.empty()) {
+        pf_config_set_library_feature_type(cfg, options.libraryFeatureType.c_str());
+    }
+    pf_config_set_hash_demux_mode(cfg, options.hashDemuxMode);
+    if (!options.hashFeatureSelector.empty()) {
+        pf_config_set_hash_feature_selector(cfg, options.hashFeatureSelector.c_str());
+    }
+    if (!options.hashDemuxMethod.empty()) {
+        pf_config_set_hash_demux_method(cfg, options.hashDemuxMethod.c_str());
+    }
+    if (options.hashMinTotal >= 0) {
+        pf_config_set_hash_min_total(cfg, options.hashMinTotal);
+    }
+    if (options.hashMinTop >= 0) {
+        pf_config_set_hash_min_top(cfg, options.hashMinTop);
+    }
+    if (options.hashMinRatio >= 0.0) {
+        pf_config_set_hash_min_ratio(cfg, options.hashMinRatio);
+    }
     if (options.useSplitReadLayout) {
         pf_config_set_split_read_layout(cfg, &options.splitReadLayout);
     } else {
@@ -964,6 +983,13 @@ static void writeApiRunSummary(const string& assignOut,
     out << "skipQcOutputs=" << (options.skipQcOutputs ? 1 : 0) << "\n";
     out << "adtMexOutput=" << (options.adtMexOutput ? 1 : 0) << "\n";
     out << "output_mode=" << (options.adtMexOutput ? "adt_mex" : "default") << "\n";
+    out << "hashDemuxMode=" << options.hashDemuxMode << "\n";
+    out << "hashFeatureSelector=" << options.hashFeatureSelector << "\n";
+    out << "hashDemuxMethod=" << options.hashDemuxMethod << "\n";
+    out << "hashMinTotal=" << options.hashMinTotal << "\n";
+    out << "hashMinTop=" << options.hashMinTop << "\n";
+    out << "hashMinRatio=" << options.hashMinRatio << "\n";
+    out << "libraryFeatureType=" << options.libraryFeatureType << "\n";
     out << "enableStarDynamicPermitHooks=" << (options.enableStarDynamicPermitHooks ? 1 : 0) << "\n";
     out << "filteredBarcodesPath=" << options.filteredBarcodesPath << "\n";
     out << "stats.total_reads=" << stats.total_reads << "\n";

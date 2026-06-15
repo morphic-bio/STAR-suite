@@ -50,6 +50,12 @@ int main(int argc, char** argv) {
                  << " star_feature_ref=" << lib.starFeatureRef
                  << " star_library_id=" << lib.starLibraryId
                  << " star_input_format=" << lib.starInputFormat
+                 << " star_hash_demux=" << lib.starHashDemux
+                 << " star_hash_feature_selector=" << lib.starHashFeatureSelector
+                 << " star_hash_demux_method=" << lib.starHashDemuxMethod
+                 << " star_hash_min_total=" << lib.starHashMinTotal
+                 << " star_hash_min_top=" << lib.starHashMinTop
+                 << " star_hash_min_ratio=" << lib.starHashMinRatio
                  << endl;
         }
         return 0;
@@ -385,7 +391,7 @@ fastqs,sample,feature_types,star_feature_ref
 /path/to/gRNA,S1,CRISPR Guide Capture,$WORK_DIR/ref_grna.csv
 EOF
 OUTPUT=$("$HARNESS" "$WORK_DIR/config_fmt_default.csv" 2>&1)
-if echo "$OUTPUT" | grep -q 'star_input_format=$'; then
+if echo "$OUTPUT" | grep -q 'star_input_format= star_hash'; then
     pass "default star_input_format is empty (fastq)"
 else
     fail "default star_input_format should be empty"
@@ -454,6 +460,52 @@ if echo "$OUTPUT" | grep -q 'EXPECTED_FAIL.*star_feature_ref is required'; then
     pass "table non-GEX without star_feature_ref rejected"
 else
     fail "table non-GEX should require star_feature_ref"
+fi
+
+# --- Test 18: star_hash_* columns ---
+echo ""
+echo "--- Test 18: star_hash_* demux columns ---"
+cat > "$WORK_DIR/config_hash.csv" << EOF
+[libraries]
+fastqs,sample,feature_types,star_library_id,star_hash_demux,star_hash_feature_selector,star_hash_demux_method,star_hash_min_total,star_hash_min_top,star_hash_min_ratio
+/path/to/adt,S1,Protein,adt_s1,auto,id_prefix:hashtag,ratio,3,3,2.0
+
+[feature]
+ref,$WORK_DIR/ref_grna.csv
+EOF
+OUTPUT=$("$HARNESS" "$WORK_DIR/config_hash.csv" 2>&1)
+if echo "$OUTPUT" | grep -q 'star_hash_demux=auto'; then
+    pass "star_hash_demux parsed"
+else
+    fail "star_hash_demux should parse"
+fi
+if echo "$OUTPUT" | grep -q 'star_hash_feature_selector=id_prefix:hashtag'; then
+    pass "star_hash_feature_selector parsed"
+else
+    fail "star_hash_feature_selector should parse"
+fi
+if echo "$OUTPUT" | grep -q 'star_hash_min_ratio=2'; then
+    pass "star_hash_min_ratio parsed"
+else
+    fail "star_hash_min_ratio should parse"
+fi
+
+# --- Test 19: invalid star_hash_demux ---
+echo ""
+echo "--- Test 19: invalid star_hash_demux rejected ---"
+cat > "$WORK_DIR/config_hash_bad.csv" << EOF
+[libraries]
+fastqs,sample,feature_types,star_library_id,star_hash_demux,star_feature_ref
+/path/to/adt,S1,Protein,bad_hash,ye,$WORK_DIR/ref_grna.csv
+
+[feature]
+ref,$WORK_DIR/ref_grna.csv
+EOF
+OUTPUT=$("$HARNESS" "$WORK_DIR/config_hash_bad.csv" 2>&1 || true)
+if echo "$OUTPUT" | grep -q 'Invalid star_hash_demux'; then
+    pass "invalid star_hash_demux rejected"
+else
+    fail "invalid star_hash_demux should fail config validation"
 fi
 
 echo ""

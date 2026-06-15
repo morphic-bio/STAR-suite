@@ -4,6 +4,7 @@
  */
 
 #include "../include/pf_api.h"
+#include "../include/hash_demux.h"
 #include "../include/pf_split_read.h"
 #include "../include/common.h"
 #include "../include/globals.h"
@@ -80,6 +81,15 @@ struct pf_config {
     int probe_only;                     /* 1=lightweight chemistry probe, no outputs */
     int skip_qc_outputs;                /* 1=skip feature histograms/heatmaps */
     int adt_mex_output;                 /* 1=emit 10x protein MEX sidecars */
+
+    /* Hash / HTO / CMO demux (adt_mex extension) */
+    int hash_demux_mode;                /* PF_HASH_DEMUX_AUTO|NO|YES */
+    char hash_feature_selector[256];
+    char hash_demux_method[64];
+    char library_feature_type[128];
+    int hash_min_total;
+    int hash_min_top;
+    double hash_min_ratio;
 
     /* Union whitelist support (legacy compat) */
     int allow_union_whitelist;          /* 0=strict, 1=accept mixed NXT+TRU */
@@ -321,6 +331,13 @@ pf_config* pf_config_create(void) {
     config->probe_only = 0;
     config->skip_qc_outputs = 0;
     config->adt_mex_output = 0;
+    config->hash_demux_mode = PF_HASH_DEMUX_AUTO;
+    config->hash_feature_selector[0] = '\0';
+    strncpy(config->hash_demux_method, PF_HASH_DEMUX_METHOD_RATIO, sizeof(config->hash_demux_method) - 1);
+    config->library_feature_type[0] = '\0';
+    config->hash_min_total = 3;
+    config->hash_min_top = 3;
+    config->hash_min_ratio = 2.0;
 
     /* Union whitelist: off by default (strict namespace) */
     config->allow_union_whitelist = 0;
@@ -540,6 +557,63 @@ void pf_config_set_skip_qc_outputs(pf_config *config, int enabled) {
 
 void pf_config_set_adt_mex_output(pf_config *config, int enable) {
     if (config) config->adt_mex_output = (enable != 0);
+}
+
+void pf_config_set_hash_demux_mode(pf_config *config, int mode) {
+    if (config) config->hash_demux_mode = mode;
+}
+
+void pf_config_set_hash_feature_selector(pf_config *config, const char *selector) {
+    if (!config) return;
+    if (!selector) {
+        config->hash_feature_selector[0] = '\0';
+        return;
+    }
+    strncpy(config->hash_feature_selector, selector, sizeof(config->hash_feature_selector) - 1);
+    config->hash_feature_selector[sizeof(config->hash_feature_selector) - 1] = '\0';
+}
+
+void pf_config_set_hash_demux_method(pf_config *config, const char *method) {
+    if (!config) return;
+    if (!method || !method[0]) {
+        strncpy(config->hash_demux_method, PF_HASH_DEMUX_METHOD_RATIO, sizeof(config->hash_demux_method) - 1);
+        return;
+    }
+    strncpy(config->hash_demux_method, method, sizeof(config->hash_demux_method) - 1);
+    config->hash_demux_method[sizeof(config->hash_demux_method) - 1] = '\0';
+}
+
+void pf_config_set_library_feature_type(pf_config *config, const char *feature_type) {
+    if (!config) return;
+    if (!feature_type) {
+        config->library_feature_type[0] = '\0';
+        return;
+    }
+    strncpy(config->library_feature_type, feature_type, sizeof(config->library_feature_type) - 1);
+    config->library_feature_type[sizeof(config->library_feature_type) - 1] = '\0';
+}
+
+void pf_config_set_hash_min_total(pf_config *config, int min_total) {
+    if (config) config->hash_min_total = min_total;
+}
+
+void pf_config_set_hash_min_top(pf_config *config, int min_top) {
+    if (config) config->hash_min_top = min_top;
+}
+
+void pf_config_set_hash_min_ratio(pf_config *config, double min_ratio) {
+    if (config) config->hash_min_ratio = min_ratio;
+}
+
+static void pf_apply_hash_demux_config(sample_args *args, const pf_config *config) {
+    if (!args || !config) return;
+    args->hash_demux_mode = config->hash_demux_mode;
+    args->hash_feature_selector = config->hash_feature_selector[0] ? config->hash_feature_selector : NULL;
+    args->hash_demux_method = config->hash_demux_method[0] ? config->hash_demux_method : NULL;
+    args->library_feature_type = config->library_feature_type[0] ? config->library_feature_type : NULL;
+    args->hash_min_total = config->hash_min_total;
+    args->hash_min_top = config->hash_min_top;
+    args->hash_min_ratio = config->hash_min_ratio;
 }
 
 void pf_config_set_allow_union_whitelist(pf_config *config, int enable) {
@@ -1395,6 +1469,7 @@ static int pf_stream_initialize_queue(pf_record_stream *stream, int nreaders) {
     stream->sample_args.probe_only = ctx->config->probe_only;
     stream->sample_args.skip_qc_outputs = ctx->config->skip_qc_outputs;
     stream->sample_args.adt_mex_output = ctx->config->adt_mex_output;
+    pf_apply_hash_demux_config(&stream->sample_args, ctx->config);
 
     if (ctx->config->autodetect_chemistry) {
         memset(&stream->chem_detect, 0, sizeof(stream->chem_detect));
@@ -1781,6 +1856,7 @@ pf_error pf_process_fastq_dir(pf_context *ctx,
         args.probe_only = ctx->config->probe_only;
         args.skip_qc_outputs = ctx->config->skip_qc_outputs;
         args.adt_mex_output = ctx->config->adt_mex_output;
+        pf_apply_hash_demux_config(&args, ctx->config);
         args.error_out = &sample_error;
         
         /* Process the sample */
@@ -2053,6 +2129,7 @@ pf_error pf_process_fastqs(pf_context *ctx,
     args.probe_only = ctx->config->probe_only;
     args.skip_qc_outputs = ctx->config->skip_qc_outputs;
     args.adt_mex_output = ctx->config->adt_mex_output;
+    pf_apply_hash_demux_config(&args, ctx->config);
     args.error_out = &sample_error;
     
     process_files_in_sample(&args);
@@ -2346,6 +2423,7 @@ pf_error pf_direct_range_begin(pf_context *ctx,
     job->sample_args.probe_only = ctx->config->probe_only;
     job->sample_args.skip_qc_outputs = ctx->config->skip_qc_outputs;
     job->sample_args.adt_mex_output = ctx->config->adt_mex_output;
+    pf_apply_hash_demux_config(&job->sample_args, ctx->config);
 
     if (ctx->config->autodetect_chemistry) {
         memset(&job->chem_detect, 0, sizeof(job->chem_detect));

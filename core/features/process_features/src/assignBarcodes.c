@@ -12,7 +12,8 @@
 #include "../include/pf_counts.h"
 #include "../include/mex_writer.h"
 #include "../include/barcode_filter.h"
-#include "../include/adt_mex.h"
+#include "adt_mex.h"
+#include "hash_demux.h"
 
 //will  print if DEBUG is set or debug=1
 //code for feature sequences stats
@@ -4431,22 +4432,29 @@ void finalize_processing(feature_arrays *features, data_structures *hashes, char
     }
 
     if (sample && sample->adt_mex_output) {
-        pf_adt_mex_config adt_cfg;
-        memset(&adt_cfg, 0, sizeof(adt_cfg));
-        adt_cfg.assign_output_dir = adt_assign_dir;
-        adt_cfg.mex_output_dir = directory;
-        adt_cfg.features = features;
-        adt_cfg.counts = counts_result;
-        adt_cfg.stats = stats;
-        adt_cfg.barcode_length = barcode_length;
-        adt_cfg.umi_length = umi_length;
-        adt_cfg.barcode_offset = sample->barcode_constant_offset;
-        adt_cfg.feature_offset = sample->feature_constant_offset;
-        adt_cfg.max_hamming_distance = sample->maxHammingDistance;
-        adt_cfg.stringency = stringency;
-        adt_cfg.command_line = adt_command_line[0] ? adt_command_line : NULL;
-        if (pf_write_adt_protein_outputs(&adt_cfg) != 0) {
-            fprintf(stderr, "Error: ADT protein MEX output failed\n");
+        pf_hash_mex_config hash_cfg;
+        memset(&hash_cfg, 0, sizeof(hash_cfg));
+        hash_cfg.base.assign_output_dir = adt_assign_dir;
+        hash_cfg.base.mex_output_dir = directory;
+        hash_cfg.base.features = features;
+        hash_cfg.base.counts = counts_result;
+        hash_cfg.base.stats = stats;
+        hash_cfg.base.barcode_length = barcode_length;
+        hash_cfg.base.umi_length = umi_length;
+        hash_cfg.base.barcode_offset = sample->barcode_constant_offset;
+        hash_cfg.base.feature_offset = sample->feature_constant_offset;
+        hash_cfg.base.max_hamming_distance = sample->maxHammingDistance;
+        hash_cfg.base.stringency = stringency;
+        hash_cfg.base.command_line = adt_command_line[0] ? adt_command_line : NULL;
+        hash_cfg.hash_demux_mode = sample->hash_demux_mode;
+        hash_cfg.hash_feature_selector = sample->hash_feature_selector;
+        hash_cfg.hash_demux_method = sample->hash_demux_method;
+        hash_cfg.library_feature_type = sample->library_feature_type;
+        hash_cfg.hash_min_total = sample->hash_min_total;
+        hash_cfg.hash_min_top = sample->hash_min_top;
+        hash_cfg.hash_min_ratio = sample->hash_min_ratio;
+        if (pf_write_adt_mex_outputs(&hash_cfg) != 0) {
+            fprintf(stderr, "Error: ADT/hash MEX output failed\n");
             if (error_out) *error_out = 1;
         }
     }
