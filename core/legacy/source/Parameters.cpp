@@ -771,6 +771,7 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacMacs3FragSummitsOutput", &chromapAtac.macs3FragSummitsOutput));
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacMacs3FragKeepIntermediates", &chromapAtac.macs3FragKeepIntermediates));
     parArray.push_back(new ParameterInfoScalar<double>(-1, -1, "chromapAtacMacs3FragPvalue", &chromapAtac.macs3FragPvalue));
+    parArray.push_back(new ParameterInfoScalar<double>(-1, -1, "chromapAtacMacs3FragQvalue", &chromapAtac.macs3FragQvalue));
     parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "chromapAtacMacs3FragMinLength", &chromapAtac.macs3FragMinLength));
     parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "chromapAtacMacs3FragMaxGap", &chromapAtac.macs3FragMaxGap));
     parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "chromapAtacMacs3FragUint8Counts", &chromapAtac.macs3FragUint8Counts));
@@ -1094,6 +1095,10 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
         }
         if (p->nameString == "chromapAtacMacs3FragPvalue" && p->inputLevel < 0) {
             chromapAtac.macs3FragPvalue = 1e-5;
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "chromapAtacMacs3FragQvalue" && p->inputLevel < 0) {
+            chromapAtac.macs3FragQvalue = 0.0;
             p->inputLevel = 0;
         }
         if (p->nameString == "chromapAtacMacs3FragMinLength" && p->inputLevel < 0) {

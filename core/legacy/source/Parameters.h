@@ -775,6 +775,7 @@ class Parameters {
             string macs3FragSummitsOutput;
             string macs3FragKeepIntermediates;
             double macs3FragPvalue = 1e-5;
+            double macs3FragQvalue = 0.0;
             int macs3FragMinLength = 200;
             int macs3FragMaxGap = 30;
             int macs3FragUint8Counts = 1;

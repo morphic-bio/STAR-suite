@@ -31,6 +31,7 @@ void usage() {
       << "  --macs3-frag-peaks-output FILE\n"
       << "  --macs3-frag-summits-output FILE\n"
       << "  --macs3-frag-pvalue FLOAT\n"
+      << "  --macs3-frag-qvalue FLOAT\n"
       << "  --macs3-frag-min-length N\n"
       << "  --macs3-frag-max-gap N\n"
       << "  --macs3-frag-peaks-source file|memory\n"
@@ -104,6 +105,8 @@ double parseDouble(const std::string &value, const std::string &name) {
 
 int main(int argc, char **argv) {
   star::multiome::ChromapAtacConfig config;
+  bool saw_macs3_frag_pvalue = false;
+  bool saw_macs3_frag_qvalue = false;
 
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
@@ -184,7 +187,13 @@ int main(int argc, char **argv) {
     } else if (arg == "--macs3-frag-summits-output" && requireValue(argc, argv, i)) {
       config.macs3_frag_summits_output = argv[++i];
     } else if (arg == "--macs3-frag-pvalue" && requireValue(argc, argv, i)) {
+      saw_macs3_frag_pvalue = true;
       config.macs3_frag_pvalue = parseDouble(argv[++i], "--macs3-frag-pvalue");
+    } else if (arg == "--macs3-frag-qvalue" && requireValue(argc, argv, i)) {
+      saw_macs3_frag_qvalue = true;
+      config.macs3_frag_threshold_mode =
+          star::multiome::ChromapMacs3FragThresholdMode::Q_VALUE;
+      config.macs3_frag_qvalue = parseDouble(argv[++i], "--macs3-frag-qvalue");
     } else if (arg == "--macs3-frag-min-length" && requireValue(argc, argv, i)) {
       config.macs3_frag_min_length = parseInt(argv[++i], "--macs3-frag-min-length");
     } else if (arg == "--macs3-frag-max-gap" && requireValue(argc, argv, i)) {
@@ -234,6 +243,24 @@ int main(int argc, char **argv) {
       usage();
       return 2;
     }
+  }
+
+  if (saw_macs3_frag_pvalue && saw_macs3_frag_qvalue) {
+    std::cerr << "Config error: --macs3-frag-pvalue and --macs3-frag-qvalue "
+              << "are mutually exclusive\n";
+    return 2;
+  }
+  if (saw_macs3_frag_pvalue &&
+      !(config.macs3_frag_pvalue > 0.0 &&
+        config.macs3_frag_pvalue <= 1.0)) {
+    std::cerr << "Config error: --macs3-frag-pvalue must be in (0, 1]\n";
+    return 2;
+  }
+  if (saw_macs3_frag_qvalue &&
+      !(config.macs3_frag_qvalue > 0.0 &&
+        config.macs3_frag_qvalue <= 1.0)) {
+    std::cerr << "Config error: --macs3-frag-qvalue must be in (0, 1]\n";
+    return 2;
   }
 
   if (!config.fragment_output_path.empty()) {

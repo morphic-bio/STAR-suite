@@ -616,6 +616,9 @@ core/features/libchromap_contract/star_multiome_atac_peak_mex \
   --temp-dir <sample>/star_sample/chromap_tmp
 ```
 
+Add `--macs3-frag-qvalue Q` to the peak-MEX command when the MACS3 FRAG peak
+call should use q-value/FDR thresholding instead of the default p-value cutoff.
+
 Do not use the removed `chromapAtacMacs3FragPeaksSource` STAR flag. The old
 file-source path could spill/re-read a misleading `.tsv.gz` fragments file and
 is not the production boundary. Low-memory production runs should spill through

@@ -110,6 +110,7 @@ CLI / parameters file (all names also work in a parameters file):
 | `chromapAtacMacs3FragPeaksOutput` | narrowPeak output path, required when peak calling is enabled. |
 | `chromapAtacMacs3FragSummitsOutput` | summits output path, required when peak calling is enabled. |
 | `chromapAtacMacs3FragPvalue` | MACS3 FRAG p-value threshold; default `1e-5`. |
+| `chromapAtacMacs3FragQvalue` | MACS3 FRAG q-value/FDR threshold; default `0` disables q-value mode. A positive value in `(0,1]` uses q-value mode and rejects an explicit `chromapAtacMacs3FragPvalue`. |
 | `chromapAtacMacs3FragMinLength` | minimum peak length; default `200`. |
 | `chromapAtacMacs3FragMaxGap` | max gap for peak merging; default `30`. |
 | `chromapAtacMacs3FragKeepIntermediates` | optional directory to keep intermediate bedGraph-style outputs; `-` to omit. |
@@ -258,8 +259,14 @@ star_multiome_atac_peak_mex \
   --out-dir ./atac/peak_mex \
   --metrics-tsv ./atac/atac_metrics.tsv \
   --threads 16 \
+  --macs3-frag-qvalue 0.05 \
   --temp-dir ./chromap_tmp
 ```
+
+Use either `--macs3-frag-pvalue` or `--macs3-frag-qvalue` with
+`star_multiome_atac_peak_mex`; the flags are mutually exclusive. The STAR
+parameter equivalent is `--chromapAtacMacs3FragQvalue 0.05` for the in-process
+Chromap/libMACS3 path or inline peak/MEX path.
 
 Concurrent BAM smoke from a clean Chromap-enabled build (100K multiome fixture):
 

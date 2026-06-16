@@ -233,6 +233,16 @@ std::string validateConfig(const ChromapAtacConfig &config) {
     if (isUnsetToken(config.macs3_frag_summits_output)) {
       return "MACS3 FRAG summits output is required when peak calling is enabled";
     }
+    if (config.macs3_frag_threshold_mode ==
+        ChromapMacs3FragThresholdMode::Q_VALUE) {
+      if (!(config.macs3_frag_qvalue > 0.0 &&
+            config.macs3_frag_qvalue <= 1.0)) {
+        return "MACS3 FRAG q-value must be in (0, 1]";
+      }
+    } else if (!(config.macs3_frag_pvalue > 0.0 &&
+                 config.macs3_frag_pvalue <= 1.0)) {
+      return "MACS3 FRAG p-value must be in (0, 1]";
+    }
   }
   if (!isUnsetToken(config.atac_evidence_from_peaks_output) &&
       isUnsetToken(config.fragment_output_path)) {
@@ -377,7 +387,13 @@ chromap::MappingParameters toChromapParameters(
     parameters.macs3_frag_keep_intermediates_dir =
         trimCopy(config.macs3_frag_keep_intermediates_dir);
   }
+  parameters.macs3_frag_threshold_mode =
+      (config.macs3_frag_threshold_mode ==
+       ChromapMacs3FragThresholdMode::Q_VALUE)
+          ? chromap::peaks::Macs3FragThresholdMode::kQValue
+          : chromap::peaks::Macs3FragThresholdMode::kPValue;
   parameters.macs3_frag_pvalue = config.macs3_frag_pvalue;
+  parameters.macs3_frag_qvalue = config.macs3_frag_qvalue;
   parameters.macs3_frag_min_length = config.macs3_frag_min_length;
   parameters.macs3_frag_max_gap = config.macs3_frag_max_gap;
   parameters.macs3_frag_uint8_counts = config.macs3_frag_uint8_counts;

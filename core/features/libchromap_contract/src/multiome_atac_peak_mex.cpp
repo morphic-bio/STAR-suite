@@ -39,7 +39,10 @@ struct Args {
   bool force = false;
   uint64_t max_barcodes = 0;
   int threads = 1;
+  MultiomeAtacPeakMexThresholdMode macs3_threshold_mode =
+      MultiomeAtacPeakMexThresholdMode::P_VALUE;
   double macs3_pvalue = 1e-5;
+  double macs3_qvalue = 0.0;
   int macs3_min_length = 200;
   int macs3_max_gap = 30;
   bool macs3_uint8_counts = true;
@@ -679,11 +682,18 @@ bool call_peaks_from_sidecar_if_needed(const Args &args, std::ostream &err) {
   }
 
   chromap::peaks::Macs3FragPeakPipelineParams pr;
-  pr.bdgpeakcall_cutoff =
-      chromap::peaks::BdgPeakCallCutoffFromPValue(args.macs3_pvalue);
-  if (pr.bdgpeakcall_cutoff <= 0.f) {
-    err << "Invalid MACS3 FRAG p-value for bdgpeakcall cutoff\n";
-    return false;
+  if (args.macs3_threshold_mode ==
+      MultiomeAtacPeakMexThresholdMode::Q_VALUE) {
+    pr.threshold_mode = chromap::peaks::Macs3FragThresholdMode::kQValue;
+    pr.qvalue_cutoff = args.macs3_qvalue;
+  } else {
+    pr.threshold_mode = chromap::peaks::Macs3FragThresholdMode::kPValue;
+    pr.bdgpeakcall_cutoff =
+        chromap::peaks::BdgPeakCallCutoffFromPValue(args.macs3_pvalue);
+    if (pr.bdgpeakcall_cutoff <= 0.f) {
+      err << "Invalid MACS3 FRAG p-value for bdgpeakcall cutoff\n";
+      return false;
+    }
   }
   pr.min_length = args.macs3_min_length;
   pr.max_gap = args.macs3_max_gap;
@@ -1342,7 +1352,9 @@ Args to_internal_args(const MultiomeAtacPeakMexArgs &input) {
   args.force = input.force;
   args.max_barcodes = input.max_barcodes;
   args.threads = input.threads;
+  args.macs3_threshold_mode = input.macs3_threshold_mode;
   args.macs3_pvalue = input.macs3_pvalue;
+  args.macs3_qvalue = input.macs3_qvalue;
   args.macs3_min_length = input.macs3_min_length;
   args.macs3_max_gap = input.macs3_max_gap;
   args.macs3_uint8_counts = input.macs3_uint8_counts;
@@ -1374,7 +1386,13 @@ bool validate_args(const Args &args, std::ostream &err) {
     err << "Thread count must be >= 1\n";
     return false;
   }
-  if (args.macs3_pvalue <= 0.0 || args.macs3_pvalue > 1.0) {
+  if (args.macs3_threshold_mode ==
+      MultiomeAtacPeakMexThresholdMode::Q_VALUE) {
+    if (!(args.macs3_qvalue > 0.0 && args.macs3_qvalue <= 1.0)) {
+      err << "MACS3 FRAG q-value must be in (0, 1]\n";
+      return false;
+    }
+  } else if (!(args.macs3_pvalue > 0.0 && args.macs3_pvalue <= 1.0)) {
     err << "MACS3 FRAG p-value must be in (0, 1]\n";
     return false;
   }
