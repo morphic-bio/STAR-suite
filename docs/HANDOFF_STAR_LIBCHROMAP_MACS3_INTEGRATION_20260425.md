@@ -74,6 +74,7 @@ The contract now exposes optional MACS3 FRAG peak-calling fields:
 - `macs3_frag_summits_output`
 - `macs3_frag_keep_intermediates_dir`
 - `macs3_frag_pvalue`
+- `macs3_frag_qvalue` plus q-value threshold mode
 - `macs3_frag_min_length`
 - `macs3_frag_max_gap`
 - `macs3_frag_uint8_counts`
@@ -87,6 +88,7 @@ STAR runtime parameters were added with the `chromapAtac*` naming style:
 - `chromapAtacMacs3FragSummitsOutput`
 - `chromapAtacMacs3FragKeepIntermediates`
 - `chromapAtacMacs3FragPvalue`
+- `chromapAtacMacs3FragQvalue` (`0` disables q-value mode)
 - `chromapAtacMacs3FragMinLength`
 - `chromapAtacMacs3FragMaxGap`
 - `chromapAtacMacs3FragUint8Counts`
@@ -97,6 +99,7 @@ The contract runner now accepts matching flags:
 - `--macs3-frag-peaks-output`
 - `--macs3-frag-summits-output`
 - `--macs3-frag-pvalue`
+- `--macs3-frag-qvalue`
 - `--macs3-frag-min-length`
 - `--macs3-frag-max-gap`
 - `--macs3-frag-peaks-source file|memory` (contract-runner validation only)

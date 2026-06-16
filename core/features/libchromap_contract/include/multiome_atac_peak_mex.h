@@ -7,6 +7,11 @@
 namespace star {
 namespace multiome {
 
+enum class MultiomeAtacPeakMexThresholdMode {
+  P_VALUE,
+  Q_VALUE
+};
+
 struct MultiomeAtacPeakMexArgs {
   std::string fragments;
   std::string sidecar;
@@ -25,7 +30,10 @@ struct MultiomeAtacPeakMexArgs {
   bool force = false;
   uint64_t max_barcodes = 0;
 
+  MultiomeAtacPeakMexThresholdMode macs3_threshold_mode =
+      MultiomeAtacPeakMexThresholdMode::P_VALUE;
   double macs3_pvalue = 1e-5;
+  double macs3_qvalue = 0.0;
   int macs3_min_length = 200;
   int macs3_max_gap = 30;
   bool macs3_uint8_counts = true;

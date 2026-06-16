@@ -28,6 +28,11 @@ enum class ChromapMacs3FragPeaksSource {
   MEMORY
 };
 
+enum class ChromapMacs3FragThresholdMode {
+  P_VALUE,
+  Q_VALUE
+};
+
 enum class ChromapInputFormat {
   FASTQ,
   CBQ
@@ -114,7 +119,10 @@ struct ChromapAtacConfig {
   std::string macs3_frag_peaks_output;
   std::string macs3_frag_summits_output;
   std::string macs3_frag_keep_intermediates_dir;
+  ChromapMacs3FragThresholdMode macs3_frag_threshold_mode =
+      ChromapMacs3FragThresholdMode::P_VALUE;
   double macs3_frag_pvalue = 1e-5;
+  double macs3_frag_qvalue = 0.0;
   int macs3_frag_min_length = 200;
   int macs3_frag_max_gap = 30;
   bool macs3_frag_uint8_counts = true;

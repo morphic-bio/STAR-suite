@@ -23,6 +23,7 @@ void usage(const char *prog) {
          "as destination\n"
       << "  --threads N                     Peak-caller threads (default 1)\n"
       << "  --macs3-frag-pvalue P           MACS3 FRAG p-value (default 1e-5)\n"
+      << "  --macs3-frag-qvalue Q           MACS3 FRAG q-value/FDR threshold\n"
       << "  --macs3-frag-min-length N       Peak min length (default 200)\n"
       << "  --macs3-frag-max-gap N          Peak max gap (default 30)\n"
       << "  --macs3-frag-no-uint8-counts    Disable uint8 count workspace\n"
@@ -78,6 +79,8 @@ bool parse_args(int argc, char **argv,
   if (args == nullptr || help == nullptr) {
     return false;
   }
+  bool saw_macs3_pvalue = false;
+  bool saw_macs3_qvalue = false;
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
     if (arg == "--help" || arg == "-h") {
@@ -130,12 +133,24 @@ bool parse_args(int argc, char **argv,
       }
     } else if (arg == "--macs3-frag-pvalue") {
       std::string value;
+      saw_macs3_pvalue = true;
       if (!take_value(arg, argc, argv, &i, &value) ||
           !parse_double(value, &args->macs3_pvalue) ||
-          args->macs3_pvalue <= 0.0 || args->macs3_pvalue > 1.0) {
+          !(args->macs3_pvalue > 0.0 && args->macs3_pvalue <= 1.0)) {
         std::cerr << "Invalid --macs3-frag-pvalue value\n";
         return false;
       }
+    } else if (arg == "--macs3-frag-qvalue") {
+      std::string value;
+      saw_macs3_qvalue = true;
+      if (!take_value(arg, argc, argv, &i, &value) ||
+          !parse_double(value, &args->macs3_qvalue) ||
+          !(args->macs3_qvalue > 0.0 && args->macs3_qvalue <= 1.0)) {
+        std::cerr << "Invalid --macs3-frag-qvalue value\n";
+        return false;
+      }
+      args->macs3_threshold_mode =
+          star::multiome::MultiomeAtacPeakMexThresholdMode::Q_VALUE;
     } else if (arg == "--macs3-frag-min-length") {
       std::string value;
       if (!take_value(arg, argc, argv, &i, &value) ||
@@ -157,6 +172,11 @@ bool parse_args(int argc, char **argv,
       usage(argv[0]);
       return false;
     }
+  }
+  if (saw_macs3_pvalue && saw_macs3_qvalue) {
+    std::cerr << "--macs3-frag-pvalue and --macs3-frag-qvalue are mutually "
+              << "exclusive\n";
+    return false;
   }
   return true;
 }

@@ -35,6 +35,27 @@ GEX_R2="${GEX_DIR}/pbmc_unsorted_3k_S01_L003_R2_001.fastq.gz,${GEX_DIR}/pbmc_uns
 echo "[smoke] outputs in ${OUT}"
 echo "[smoke] STAR=${STAR_BIN}"
 
+MACS3_QVALUE="${MACS3_QVALUE:-}"
+MACS3_PVALUE="${MACS3_PVALUE:-}"
+if [[ -n "${MACS3_QVALUE}" && -n "${MACS3_PVALUE}" ]]; then
+  echo "ERROR: set only one of MACS3_QVALUE or MACS3_PVALUE" >&2
+  exit 2
+fi
+
+star_macs3_threshold_args=()
+peak_macs3_threshold_args=()
+if [[ -n "${MACS3_QVALUE}" ]]; then
+  star_macs3_threshold_args+=(--chromapAtacMacs3FragQvalue "${MACS3_QVALUE}")
+  peak_macs3_threshold_args+=(--macs3-frag-qvalue "${MACS3_QVALUE}")
+  echo "[smoke] MACS3 threshold: q=${MACS3_QVALUE}"
+elif [[ -n "${MACS3_PVALUE}" ]]; then
+  star_macs3_threshold_args+=(--chromapAtacMacs3FragPvalue "${MACS3_PVALUE}")
+  peak_macs3_threshold_args+=(--macs3-frag-pvalue "${MACS3_PVALUE}")
+  echo "[smoke] MACS3 threshold: p=${MACS3_PVALUE}"
+else
+  echo "[smoke] MACS3 threshold: default p=1e-5"
+fi
+
 /usr/bin/time -v "${STAR_BIN}" \
   --runThreadN 8 --genomeDir "${GENOME_DIR}" \
   --readFilesIn "${GEX_R2}" "${GEX_R1}" --readFilesCommand zcat \
@@ -64,6 +85,7 @@ echo "[smoke] STAR=${STAR_BIN}"
   --chromapAtacCallMacs3FragPeaks 1 \
   --chromapAtacMacs3FragPeaksOutput "${OUT}/out/atac_peaks.narrowPeak" \
   --chromapAtacMacs3FragSummitsOutput "${OUT}/out/atac_summits.bed" \
+  "${star_macs3_threshold_args[@]}" \
   --chromapAtacMacs3FragLowMem 1 \
   > "${OUT}/star.stdout.log" 2> "${OUT}/star.stderr.log"
 
@@ -79,6 +101,7 @@ echo "[smoke] STAR finished, validating peaks against sidecar reference..."
   --out-dir "${OUT}/ref_peak_mex" \
   --metrics-tsv "${OUT}/ref_atac_metrics.tsv" \
   --threads 8 \
+  "${peak_macs3_threshold_args[@]}" \
   --temp-dir "${OUT}/tmp" \
   --force \
   > "${OUT}/sidecar_peak_mex.log" 2>&1

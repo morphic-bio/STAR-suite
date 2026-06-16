@@ -96,6 +96,15 @@ bool isUnsetToken(const std::string &input) {
   return t == "-" || t == "none";
 }
 
+int parameterInputLevel(const Parameters &P, const std::string &name) {
+  for (size_t i = 0; i < P.parArray.size(); ++i) {
+    if (P.parArray[i] != nullptr && P.parArray[i]->nameString == name) {
+      return P.parArray[i]->inputLevel;
+    }
+  }
+  return -1;
+}
+
 bool parseYesNo(const std::string &input, bool *out) {
   if (out == nullptr) {
     return false;
@@ -386,6 +395,37 @@ bool validateAndBuildConfig(Parameters &P,
     }
   }
 
+  const int macs3PvalueInputLevel =
+      parameterInputLevel(P, "chromapAtacMacs3FragPvalue");
+  const int macs3QvalueInputLevel =
+      parameterInputLevel(P, "chromapAtacMacs3FragQvalue");
+  const bool macs3QvalueExplicit = macs3QvalueInputLevel > 0;
+  const bool macs3UseQvalue =
+      macs3QvalueExplicit && P.chromapAtac.macs3FragQvalue > 0.0;
+  const bool needsMacs3Threshold =
+      P.chromapAtac.callMacs3FragPeaks != 0 || inlinePeakMex;
+  if (needsMacs3Threshold && macs3UseQvalue && macs3PvalueInputLevel > 0) {
+    P.inOut->logMain
+        << "ERROR: --chromapAtacMacs3FragPvalue and "
+           "--chromapAtacMacs3FragQvalue are mutually exclusive\n";
+    return false;
+  }
+  if (needsMacs3Threshold && macs3QvalueExplicit) {
+    if (!(P.chromapAtac.macs3FragQvalue >= 0.0 &&
+          P.chromapAtac.macs3FragQvalue <= 1.0)) {
+      P.inOut->logMain
+          << "ERROR: --chromapAtacMacs3FragQvalue must be 0 or in (0, 1]\n";
+      return false;
+    }
+  }
+  if (needsMacs3Threshold && !macs3UseQvalue &&
+      !(P.chromapAtac.macs3FragPvalue > 0.0 &&
+        P.chromapAtac.macs3FragPvalue <= 1.0)) {
+    P.inOut->logMain
+        << "ERROR: --chromapAtacMacs3FragPvalue must be in (0, 1]\n";
+    return false;
+  }
+
   std::vector<std::string> r1;
   std::vector<std::string> r2;
   std::vector<std::string> bc;
@@ -539,6 +579,14 @@ bool validateAndBuildConfig(Parameters &P,
         trimCopy(P.chromapAtac.evidenceFromPeaksOutput);
   }
   cfg->macs3_frag_pvalue = P.chromapAtac.macs3FragPvalue;
+  if (macs3UseQvalue) {
+    cfg->macs3_frag_threshold_mode =
+        star::multiome::ChromapMacs3FragThresholdMode::Q_VALUE;
+    cfg->macs3_frag_qvalue = P.chromapAtac.macs3FragQvalue;
+  } else {
+    cfg->macs3_frag_threshold_mode =
+        star::multiome::ChromapMacs3FragThresholdMode::P_VALUE;
+  }
   cfg->macs3_frag_min_length = P.chromapAtac.macs3FragMinLength;
   cfg->macs3_frag_max_gap = P.chromapAtac.macs3FragMaxGap;
   cfg->macs3_frag_uint8_counts = P.chromapAtac.macs3FragUint8Counts != 0;
@@ -619,6 +667,15 @@ bool runInlinePeakMexIfEnabled(Parameters &P) {
                      : P.runThreadN;
   args.call_peaks_from_sidecar = true;
   args.max_barcodes = P.multiomeAtacPeakMex.maxBarcodes;
+  if (parameterInputLevel(P, "chromapAtacMacs3FragQvalue") > 0 &&
+      P.chromapAtac.macs3FragQvalue > 0.0) {
+    args.macs3_threshold_mode =
+        star::multiome::MultiomeAtacPeakMexThresholdMode::Q_VALUE;
+    args.macs3_qvalue = P.chromapAtac.macs3FragQvalue;
+  } else {
+    args.macs3_threshold_mode =
+        star::multiome::MultiomeAtacPeakMexThresholdMode::P_VALUE;
+  }
   args.macs3_pvalue = P.chromapAtac.macs3FragPvalue;
   args.macs3_min_length = P.chromapAtac.macs3FragMinLength;
   args.macs3_max_gap = P.chromapAtac.macs3FragMaxGap;

@@ -2215,6 +2215,33 @@ chromapAtacLowMem           0
 chromapAtacLowMemRam        0
     uint:                   RAM threshold in bytes for chromapAtacLowMem before spilling overflow files. 0 means use Chromap's defaults (1 GB / 512 MB).
 
+chromapAtacCallMacs3FragPeaks  0
+    int:                    run in-process MACS3-compatible FRAG peak calling after Chromap ATAC mapping when 1.
+
+chromapAtacMacs3FragPeaksOutput  -
+    string:                 narrowPeak output path, required when chromapAtacCallMacs3FragPeaks=1.
+
+chromapAtacMacs3FragSummitsOutput  -
+    string:                 summits BED output path, required when chromapAtacCallMacs3FragPeaks=1.
+
+chromapAtacMacs3FragKeepIntermediates  -
+    string:                 optional directory to keep intermediate MACS3 FRAG bedGraph-style outputs.
+
+chromapAtacMacs3FragPvalue  1e-5
+    double:                 MACS3 FRAG p-value threshold. Ignored when chromapAtacMacs3FragQvalue is set to a positive value.
+
+chromapAtacMacs3FragQvalue  0
+    double:                 MACS3 FRAG q-value/FDR threshold. 0 disables q-value mode; a value in (0,1] switches peak scoring/cutoff to q-value mode and is mutually exclusive with explicit chromapAtacMacs3FragPvalue.
+
+chromapAtacMacs3FragMinLength  200
+    int:                    minimum MACS3 FRAG peak length.
+
+chromapAtacMacs3FragMaxGap  30
+    int:                    maximum gap for MACS3 FRAG peak merging.
+
+chromapAtacMacs3FragUint8Counts  1
+    int:                    use MACS3 uint8 count semantics when 1.
+
 chromapAtacMacs3FragLowMem  0
     int:                    use libMACS3 sweep-line workspace for in-process MACS3 FRAG peaks when 1. For production multiome, prefer the post-materialization sidecar boundary: write chromapAtacSecondaryFragments locally, then run native sidecar peak-MEX construction outside STAR.
 
