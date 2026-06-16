@@ -129,7 +129,7 @@ Environment variables in config use `${VAR_NAME}` syntax.
 
 **Workflow vs Script tools**: Workflows provide structured parameter contracts for agent consumption. Scripts provide raw allowlisted execution. They are complementary:
 
-Current public STAR CLI recipes:
+Current public workflows:
 
 | Workflow ID | Purpose | Default render |
 |-------------|---------|----------------|
@@ -140,6 +140,7 @@ Current public STAR CLI recipes:
 | `star_flex_fixed_rna` | STAR-Flex Fixed RNA command. | Caller-supplied Fixed RNA inputs and whitelist layout. |
 | `star_flex_fixed_rna_cbq` | STAR-Flex Fixed RNA command with CBQ input. | `--readFilesType Binseq PE --flex yes` with paired CBQ files in Flex mate order. |
 | `star_perturb_cr_compat` | Perturb-seq CR-compatible STAR command. | CR-compatible threading defaults and feature config inputs. |
+| `morphic_multiome` | Cross-repo Morphic 10x Multiome recipe from `/mnt/pikachu/morphic-recipes`. | Minimal compose-up floor (`--profile matrices-peaks --dry-run`) with low-memory Chromap and optional `chromap_macs3_frag_qvalue` for MACS3 q-value peak selection. |
 
 Current local/private SLAM workflows:
 

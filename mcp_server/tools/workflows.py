@@ -1,5 +1,6 @@
 """Workflow discovery, validation, and rendering tools."""
 
+import math
 import os
 import shlex
 from pathlib import Path
@@ -455,6 +456,39 @@ def validate_workflow_parameters(
 
     # Normalize for constraint checking
     normalized = _normalize_params(schema, params)
+
+    # Numeric range validation from per-parameter schema metadata.
+    for p_def in schema.parameters:
+        if p_def.name not in normalized:
+            continue
+        if p_def.type not in ("int", "float"):
+            continue
+        if p_def.min_value is None and p_def.max_value is None:
+            continue
+
+        val = normalized[p_def.name]
+        if val is None:
+            continue
+        try:
+            numeric_val = float(val)
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(numeric_val):
+            _add_error(
+                f"Parameter '{p_def.name}' must be finite, got: {val}",
+                field=p_def.name,
+            )
+            continue
+        if p_def.min_value is not None and numeric_val < p_def.min_value:
+            _add_error(
+                f"Parameter '{p_def.name}' must be >= {p_def.min_value:g}, got: {val}",
+                field=p_def.name,
+            )
+        if p_def.max_value is not None and numeric_val > p_def.max_value:
+            _add_error(
+                f"Parameter '{p_def.name}' must be <= {p_def.max_value:g}, got: {val}",
+                field=p_def.name,
+            )
 
     def _constraint_value_present(value: Any) -> bool:
         if value is None or value is False:

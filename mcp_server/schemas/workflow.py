@@ -64,7 +64,7 @@ class WorkflowParameterDef(BaseModel):
         ),
     )
 
-    # --- Advisory metadata for planners/forms (additive, optional) ---
+    # --- Planner/form metadata and optional numeric validation hints ---
     label: Optional[str] = Field(
         default=None,
         description="Stable human-readable label for form/UI display (advisory).",
@@ -101,11 +101,11 @@ class WorkflowParameterDef(BaseModel):
     )
     min_value: Optional[float] = Field(
         default=None,
-        description="Minimum allowed numeric value, if applicable (advisory).",
+        description="Minimum allowed numeric value, if applicable.",
     )
     max_value: Optional[float] = Field(
         default=None,
-        description="Maximum allowed numeric value, if applicable (advisory).",
+        description="Maximum allowed numeric value, if applicable.",
     )
 
 

@@ -20,7 +20,7 @@ function launchpadApiBase() {
   return "/launchpad/api";
 }
 
-/** Core STAR CLI recipes first, then local/private production recipes. */
+/** Core STAR CLI and curated cross-repo recipes first, then local/private recipes. */
 const LAUNCHPAD_WORKFLOW_ORDER = [
   "star_genome_generate",
   "star_bulk_pe_batch",
@@ -28,10 +28,18 @@ const LAUNCHPAD_WORKFLOW_ORDER = [
   "star_scrna_solo_droplet",
   "star_flex_fixed_rna",
   "star_perturb_cr_compat",
+  "morphic_multiome",
   "slam_pe_100k_smoke",
   "slam_pe_production",
   "slam_deseq2_container",
 ];
+
+const LAUNCHPAD_DEFAULT_WORKFLOWS = new Set(["morphic_multiome"]);
+
+function launchpadIsDefaultWorkflow(id) {
+  const s = String(id || "");
+  return s.startsWith("star_") || LAUNCHPAD_DEFAULT_WORKFLOWS.has(s);
+}
 
 function launchpadWorkflowRank(id) {
   const i = LAUNCHPAD_WORKFLOW_ORDER.indexOf(id);
@@ -73,7 +81,7 @@ function launchpadApp() {
     /** Full list from API (sorted); `workflows` is filtered for the dropdown. */
     allWorkflows: [],
     workflows: [],
-    /** When false, recipe list is only `star_*` CLI recipes. */
+    /** When false, recipe list is core STAR plus curated cross-repo recipes. */
     includeTestWorkflows: false,
     workflowId: "",
     schema: null,
@@ -775,9 +783,7 @@ function launchpadApp() {
       if (this.includeTestWorkflows) {
         this.workflows = this.allWorkflows.slice();
       } else {
-        this.workflows = this.allWorkflows.filter((w) =>
-          String(w.id || "").startsWith("star_")
-        );
+        this.workflows = this.allWorkflows.filter((w) => launchpadIsDefaultWorkflow(w.id));
       }
     },
 

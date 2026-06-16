@@ -33,6 +33,8 @@ paths:
 
 trusted_roots:
   - "/mnt/pikachu/STAR-suite"
+  - "/mnt/pikachu/morphic-recipes"
+  - "/mnt/pikachu/morphic-provenance"
   - "/mnt/pikachu/prod-12-28"
   - "/mnt/pikachu/ucsf-perturb-seq-corrected"
   - "/mnt/pikachu/ucsf-perturb-seq"
@@ -143,6 +145,14 @@ workflows:
     entry_script: core/legacy/source/STAR
     kind: star_cli
     schema_file: mcp_server/workflows/star_perturb_cr_compat.yaml
+    visibility: public
+
+  - id: morphic_multiome
+    title: Morphic 10x Multiome (GEX + Chromap ATAC + MACS peaks)
+    summary: Public cross-repo recipe surface for morphic-recipes/scripts/run_star_multiome_lane_smoke.sh, including compose-up profiles and MACS3 q-value peak selection.
+    entry_script: /mnt/pikachu/morphic-recipes/scripts/run_star_multiome_lane_smoke.sh
+    kind: shell_workflow
+    schema_file: mcp_server/workflows/morphic_multiome.yaml
     visibility: public
 
   - id: "jax_scrnaseq02_ocm_composite_smoke"

@@ -44,6 +44,8 @@ WORKFLOW_SCHEMA = {
             "cli_flag": "--ratio",
             "type": "float",
             "default": 0.5,
+            "min_value": 0,
+            "max_value": 1,
             "category": "performance",
         },
         {
@@ -251,6 +253,35 @@ class TestTypeChecks:
             check_paths=False,
         )
         assert result.valid
+
+
+class TestNumericRanges:
+    def test_min_value_fails(self, workflow_env):
+        result = validate_workflow_parameters(
+            "val_wf",
+            {"input_dir": workflow_env["input_dir"], "ratio": -0.1},
+            check_paths=False,
+        )
+        assert not result.valid
+        assert any("ratio" in e and ">= 0" in e for e in result.errors)
+
+    def test_max_value_fails(self, workflow_env):
+        result = validate_workflow_parameters(
+            "val_wf",
+            {"input_dir": workflow_env["input_dir"], "ratio": 1.1},
+            check_paths=False,
+        )
+        assert not result.valid
+        assert any("ratio" in e and "<= 1" in e for e in result.errors)
+
+    def test_non_finite_value_fails(self, workflow_env):
+        result = validate_workflow_parameters(
+            "val_wf",
+            {"input_dir": workflow_env["input_dir"], "ratio": "nan"},
+            check_paths=False,
+        )
+        assert not result.valid
+        assert any("ratio" in e and "finite" in e for e in result.errors)
 
 
 class TestEnumValidation:
