@@ -93,7 +93,7 @@
           x-model="includeTestWorkflows"
           @change="onIncludeTestWorkflowsChange()"
         />
-        <span title="Show UCSF, E2E test workflows, and other non–star_* recipes (loopback sees private entries)">Include test &amp; other recipes</span>
+        <span title="Show UCSF, E2E test workflows, and other recipes outside the default public set (loopback sees private entries)">Include test &amp; other recipes</span>
       </label>
     </div>
 
@@ -926,9 +926,10 @@
           always does that stricter server-host validation before launch.
         </p>
         <p>
-          By default the recipe list shows only <strong>basic STAR CLI</strong> workflows
-          (<code>star_*</code>). Enable <strong>Include test &amp; other recipes</strong> for
-          UCSF production, E2E tests, and the rest (private entries appear on localhost).
+          By default the recipe list shows <strong>core STAR CLI</strong> workflows plus curated
+          cross-repo workflows such as <code>morphic_multiome</code>. Enable
+          <strong>Include test &amp; other recipes</strong> for UCSF production, E2E tests,
+          and the rest (private entries appear on localhost).
         </p>
         <p>
           <strong>STAR Server</strong> hosts STAR MCP (for agents) and this UI on one port.

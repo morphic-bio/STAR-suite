@@ -8,7 +8,7 @@ supported_modes: [local]
 caveats:
   - Build the binary first (make -C core/legacy/source STAR).
   - Paired CBQ stores both mates in one file; pass one comma-separated CBQ list to read_files_cbq.
-  - Encode mates in the same order as the FASTQ Flex recipe: cDNA R2 first, barcode/UMI R1 second.
+  - "Encode mates in the same order as the FASTQ Flex recipe: cDNA R2 first, barcode/UMI R1 second."
   - Do not set --readFilesCommand with CBQ input.
 default_output_layout: Outputs under out_file_name_prefix.
 
