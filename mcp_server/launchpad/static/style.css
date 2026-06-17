@@ -162,28 +162,34 @@ body {
 
 .field-inline {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.5rem;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .field-inline select {
-  min-width: 280px;
+  flex: 1 1 280px;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .main-grid {
   display: grid;
-  grid-template-columns: 1fr 320px;
+  grid-template-columns: minmax(0, 1fr) 320px;
   gap: 1rem;
   align-items: start;
 }
 
 @media (max-width: 900px) {
   .main-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
 .panel {
+  min-width: 0;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -232,6 +238,7 @@ body {
 }
 
 .param-group {
+  min-width: 0;
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 0.75rem 1rem;
@@ -245,6 +252,7 @@ body {
 }
 
 .field {
+  min-width: 0;
   margin-bottom: 0.75rem;
 }
 
@@ -268,8 +276,8 @@ body {
 .field label > input[type="number"],
 .field label > select {
   align-self: flex-end;
-  width: 32rem;
-  max-width: 100%;
+  width: 100%;
+  max-width: 32rem;
 }
 
 .field label > input[type="checkbox"] {
@@ -305,6 +313,7 @@ body {
 
 .actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.75rem;
   margin-top: 1rem;
 }
@@ -796,8 +805,9 @@ body {
   display: flex;
   align-items: stretch;
   align-self: flex-end;
-  width: 32rem;
-  max-width: 100%;
+  width: 100%;
+  max-width: 32rem;
+  min-width: 0;
 }
 
 .path-text-input {
@@ -997,4 +1007,36 @@ body {
 
 .flex-spacer {
   flex: 1 1 auto;
+}
+
+@media (max-width: 520px) {
+  .app {
+    padding: 1rem 0.75rem 2rem;
+  }
+
+  .panel {
+    padding: 0.85rem;
+  }
+
+  .param-group {
+    padding: 0.7rem;
+  }
+
+  .field-inline {
+    align-items: stretch;
+    width: 100%;
+  }
+
+  .field-inline > span {
+    flex: 0 0 100%;
+  }
+
+  .field-inline select {
+    flex-basis: 100%;
+    width: 100%;
+  }
+
+  .btn {
+    flex: 1 1 10rem;
+  }
 }
