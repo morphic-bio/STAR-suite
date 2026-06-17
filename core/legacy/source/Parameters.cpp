@@ -786,6 +786,8 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "multiomeAtacPeakMexOutDir", &multiomeAtacPeakMex.mexOutDir));
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "multiomeAtacPeakNarrowPeak", &multiomeAtacPeakMex.narrowPeak));
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "multiomeAtacPeakSummits", &multiomeAtacPeakMex.summits));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "multiomeAtacPeakCallMode", &multiomeAtacPeakMex.peakCallMode));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "multiomeAtacPeakMacsProfile", &multiomeAtacPeakMex.macsProfile));
     parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "multiomeAtacPeakThreads", &multiomeAtacPeakMex.threads));
     parArray.push_back(new ParameterInfoScalar<uint64>(-1, -1, "multiomeAtacPeakMaxBarcodes", &multiomeAtacPeakMex.maxBarcodes));
 
@@ -1151,6 +1153,14 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
         }
         if (p->nameString == "multiomeAtacPeakSummits" && p->inputLevel < 0) {
             multiomeAtacPeakMex.summits = "-";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "multiomeAtacPeakCallMode" && p->inputLevel < 0) {
+            multiomeAtacPeakMex.peakCallMode = "frag";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "multiomeAtacPeakMacsProfile" && p->inputLevel < 0) {
+            multiomeAtacPeakMex.macsProfile = "-";
             p->inputLevel = 0;
         }
         if (p->nameString == "multiomeAtacPeakThreads" && p->inputLevel < 0) {

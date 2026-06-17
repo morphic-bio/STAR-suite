@@ -121,6 +121,63 @@ bool parseYesNo(const std::string &input, bool *out) {
   return false;
 }
 
+bool parsePeakCallMode(const std::string &input,
+                       star::multiome::MultiomeAtacPeakCallMode *out) {
+  if (out == nullptr) {
+    return false;
+  }
+  const std::string mode = lowerCopy(trimCopy(input));
+  if (mode == "frag" || mode == "macs3-frag" || mode == "macs3_frag") {
+    *out = star::multiome::MultiomeAtacPeakCallMode::FRAG;
+    return true;
+  }
+  if (mode == "macs-bed" || mode == "macs_bed" || mode == "bed") {
+    *out = star::multiome::MultiomeAtacPeakCallMode::MACS_BED;
+    return true;
+  }
+  return false;
+}
+
+const char *peakCallModeName(star::multiome::MultiomeAtacPeakCallMode mode) {
+  return mode == star::multiome::MultiomeAtacPeakCallMode::MACS_BED
+             ? "macs-bed"
+             : "frag";
+}
+
+bool resolveInlinePeakCallMode(
+    const Parameters &P,
+    star::multiome::MultiomeAtacPeakCallMode *mode,
+    std::string *profile,
+    std::ostream &log) {
+  if (mode == nullptr || profile == nullptr) {
+    return false;
+  }
+  if (!parsePeakCallMode(P.multiomeAtacPeakMex.peakCallMode, mode)) {
+    log << "ERROR: --multiomeAtacPeakCallMode must be frag or macs-bed (got \""
+        << P.multiomeAtacPeakMex.peakCallMode << "\")\n";
+    return false;
+  }
+
+  const bool modeExplicit =
+      parameterInputLevel(P, "multiomeAtacPeakCallMode") > 0;
+  const bool profileSet = !isUnsetToken(P.multiomeAtacPeakMex.macsProfile);
+  profile->clear();
+  if (profileSet) {
+    *profile = trimCopy(P.multiomeAtacPeakMex.macsProfile);
+    if (*mode == star::multiome::MultiomeAtacPeakCallMode::FRAG) {
+      if (modeExplicit) {
+        log << "ERROR: --multiomeAtacPeakMacsProfile requires "
+               "--multiomeAtacPeakCallMode macs-bed, not frag\n";
+        return false;
+      }
+      *mode = star::multiome::MultiomeAtacPeakCallMode::MACS_BED;
+    }
+  } else if (*mode == star::multiome::MultiomeAtacPeakCallMode::MACS_BED) {
+    *profile = "signac-atac";
+  }
+  return true;
+}
+
 bool isConcurrentStartMode(const std::string &input) {
   return lowerCopy(trimCopy(input)) == "concurrent";
 }
@@ -231,6 +288,14 @@ bool validateAndBuildConfig(Parameters &P,
     P.inOut->logMain
         << "ERROR: --multiomeAtacPeakThreads must be >= 0 (0 inherits --runThreadN)\n";
     return false;
+  }
+  if (inlinePeakMex) {
+    star::multiome::MultiomeAtacPeakCallMode peakCallMode;
+    std::string macsProfile;
+    if (!resolveInlinePeakCallMode(P, &peakCallMode, &macsProfile,
+                                   P.inOut->logMain)) {
+      return false;
+    }
   }
   if (inlinePeakMex && P.chromapAtac.enabled == 0) {
     P.inOut->logMain
@@ -667,23 +732,42 @@ bool runInlinePeakMexIfEnabled(Parameters &P) {
                      : P.runThreadN;
   args.call_peaks_from_sidecar = true;
   args.max_barcodes = P.multiomeAtacPeakMex.maxBarcodes;
-  if (parameterInputLevel(P, "chromapAtacMacs3FragQvalue") > 0 &&
+  if (!resolveInlinePeakCallMode(P, &args.peak_call_mode, &args.macs_profile,
+                                 P.inOut->logMain)) {
+    return false;
+  }
+  const int macs3PvalueInputLevel =
+      parameterInputLevel(P, "chromapAtacMacs3FragPvalue");
+  const int macs3QvalueInputLevel =
+      parameterInputLevel(P, "chromapAtacMacs3FragQvalue");
+  if (macs3QvalueInputLevel > 0 &&
       P.chromapAtac.macs3FragQvalue > 0.0) {
     args.macs3_threshold_mode =
         star::multiome::MultiomeAtacPeakMexThresholdMode::Q_VALUE;
     args.macs3_qvalue = P.chromapAtac.macs3FragQvalue;
+    args.macs3_threshold_explicit = true;
   } else {
     args.macs3_threshold_mode =
         star::multiome::MultiomeAtacPeakMexThresholdMode::P_VALUE;
+    args.macs3_threshold_explicit = macs3PvalueInputLevel > 0;
   }
   args.macs3_pvalue = P.chromapAtac.macs3FragPvalue;
   args.macs3_min_length = P.chromapAtac.macs3FragMinLength;
   args.macs3_max_gap = P.chromapAtac.macs3FragMaxGap;
   args.macs3_uint8_counts = P.chromapAtac.macs3FragUint8Counts != 0;
+  args.macs3_min_length_explicit =
+      parameterInputLevel(P, "chromapAtacMacs3FragMinLength") > 0;
+  args.macs3_max_gap_explicit =
+      parameterInputLevel(P, "chromapAtacMacs3FragMaxGap") > 0;
 
   P.inOut->logMain << timeMonthDayTime()
                    << " ..... starting inline Multiome ATAC peak/MEX materialization\n"
                    << "       sidecar=" << args.sidecar << "\n"
+                   << "       peak_call_mode="
+                   << peakCallModeName(args.peak_call_mode) << "\n"
+                   << "       macs_profile="
+                   << (args.macs_profile.empty() ? "-" : args.macs_profile)
+                   << "\n"
                    << "       peaks=" << args.peaks << "\n"
                    << "       summits=" << args.summits_out << "\n"
                    << "       peak_mex=" << args.out_dir << "\n"

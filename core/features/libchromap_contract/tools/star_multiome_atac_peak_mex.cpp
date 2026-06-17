@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <cstdlib>
+#include <cctype>
 #include <iostream>
 #include <string>
 
@@ -17,6 +18,10 @@ void usage(const char *prog) {
       << "  --summits-out PATH              Summits BED output when calling peaks\n"
       << "  --call-peaks-from-sidecar       Call MACS3-compatible FRAG peaks from "
          "the binary sidecar before building MEX\n"
+      << "  --peak-call-mode MODE           Peak caller: frag (default) or "
+         "macs-bed\n"
+      << "  --macs-profile NAME             MACS BED profile, e.g. signac-atac; "
+         "implies --peak-call-mode macs-bed\n"
       << "  --barcode-translate PATH        Optional source-to-destination barcode "
          "translation table for sidecar input\n"
       << "  --barcode-translate-from-first  Treat column 1 as source and column 2 "
@@ -74,6 +79,31 @@ bool parse_double(const std::string &value, double *out) {
   return true;
 }
 
+std::string lower_copy(std::string value) {
+  for (size_t i = 0; i < value.size(); ++i) {
+    value[i] =
+        static_cast<char>(std::tolower(static_cast<unsigned char>(value[i])));
+  }
+  return value;
+}
+
+bool parse_peak_call_mode(const std::string &value,
+                          star::multiome::MultiomeAtacPeakCallMode *out) {
+  if (out == nullptr) {
+    return false;
+  }
+  const std::string mode = lower_copy(value);
+  if (mode == "frag" || mode == "macs3-frag" || mode == "macs3_frag") {
+    *out = star::multiome::MultiomeAtacPeakCallMode::FRAG;
+    return true;
+  }
+  if (mode == "macs-bed" || mode == "macs_bed" || mode == "bed") {
+    *out = star::multiome::MultiomeAtacPeakCallMode::MACS_BED;
+    return true;
+  }
+  return false;
+}
+
 bool parse_args(int argc, char **argv,
                 star::multiome::MultiomeAtacPeakMexArgs *args, bool *help) {
   if (args == nullptr || help == nullptr) {
@@ -113,6 +143,19 @@ bool parse_args(int argc, char **argv,
       args->barcode_translate_from_first = true;
     } else if (arg == "--call-peaks-from-sidecar") {
       args->call_peaks_from_sidecar = true;
+    } else if (arg == "--peak-call-mode") {
+      std::string value;
+      if (!take_value(arg, argc, argv, &i, &value) ||
+          !parse_peak_call_mode(value, &args->peak_call_mode)) {
+        std::cerr << "Invalid --peak-call-mode value\n";
+        return false;
+      }
+    } else if (arg == "--macs-profile") {
+      if (!take_value(arg, argc, argv, &i, &args->macs_profile)) {
+        return false;
+      }
+      args->peak_call_mode =
+          star::multiome::MultiomeAtacPeakCallMode::MACS_BED;
     } else if (arg == "--force") {
       args->force = true;
     } else if (arg == "--macs3-frag-no-uint8-counts") {
@@ -140,6 +183,9 @@ bool parse_args(int argc, char **argv,
         std::cerr << "Invalid --macs3-frag-pvalue value\n";
         return false;
       }
+      args->macs3_threshold_mode =
+          star::multiome::MultiomeAtacPeakMexThresholdMode::P_VALUE;
+      args->macs3_threshold_explicit = true;
     } else if (arg == "--macs3-frag-qvalue") {
       std::string value;
       saw_macs3_qvalue = true;
@@ -151,6 +197,7 @@ bool parse_args(int argc, char **argv,
       }
       args->macs3_threshold_mode =
           star::multiome::MultiomeAtacPeakMexThresholdMode::Q_VALUE;
+      args->macs3_threshold_explicit = true;
     } else if (arg == "--macs3-frag-min-length") {
       std::string value;
       if (!take_value(arg, argc, argv, &i, &value) ||
@@ -159,6 +206,7 @@ bool parse_args(int argc, char **argv,
         std::cerr << "Invalid --macs3-frag-min-length value\n";
         return false;
       }
+      args->macs3_min_length_explicit = true;
     } else if (arg == "--macs3-frag-max-gap") {
       std::string value;
       if (!take_value(arg, argc, argv, &i, &value) ||
@@ -167,6 +215,7 @@ bool parse_args(int argc, char **argv,
         std::cerr << "Invalid --macs3-frag-max-gap value\n";
         return false;
       }
+      args->macs3_max_gap_explicit = true;
     } else {
       std::cerr << "Unknown argument: " << arg << "\n";
       usage(argv[0]);

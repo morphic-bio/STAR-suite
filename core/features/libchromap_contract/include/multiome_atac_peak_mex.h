@@ -12,6 +12,11 @@ enum class MultiomeAtacPeakMexThresholdMode {
   Q_VALUE
 };
 
+enum class MultiomeAtacPeakCallMode {
+  FRAG,
+  MACS_BED
+};
+
 struct MultiomeAtacPeakMexArgs {
   std::string fragments;
   std::string sidecar;
@@ -30,6 +35,8 @@ struct MultiomeAtacPeakMexArgs {
   bool force = false;
   uint64_t max_barcodes = 0;
 
+  MultiomeAtacPeakCallMode peak_call_mode = MultiomeAtacPeakCallMode::FRAG;
+  std::string macs_profile;
   MultiomeAtacPeakMexThresholdMode macs3_threshold_mode =
       MultiomeAtacPeakMexThresholdMode::P_VALUE;
   double macs3_pvalue = 1e-5;
@@ -37,6 +44,9 @@ struct MultiomeAtacPeakMexArgs {
   int macs3_min_length = 200;
   int macs3_max_gap = 30;
   bool macs3_uint8_counts = true;
+  bool macs3_threshold_explicit = false;
+  bool macs3_min_length_explicit = false;
+  bool macs3_max_gap_explicit = false;
 };
 
 // Returns 0 on success and non-zero on validation or materialization errors.
