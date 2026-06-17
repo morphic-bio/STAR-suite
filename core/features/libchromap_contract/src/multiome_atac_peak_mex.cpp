@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <cctype>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -16,10 +17,12 @@
 #include <string>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <unistd.h>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
+#include "libmacs3/macs3_bed_callpeak.h"
 #include "libmacs3/macs3_frag_peak_pipeline.h"
 
 namespace star {
@@ -39,6 +42,8 @@ struct Args {
   bool force = false;
   uint64_t max_barcodes = 0;
   int threads = 1;
+  MultiomeAtacPeakCallMode peak_call_mode = MultiomeAtacPeakCallMode::FRAG;
+  std::string macs_profile;
   MultiomeAtacPeakMexThresholdMode macs3_threshold_mode =
       MultiomeAtacPeakMexThresholdMode::P_VALUE;
   double macs3_pvalue = 1e-5;
@@ -46,6 +51,9 @@ struct Args {
   int macs3_min_length = 200;
   int macs3_max_gap = 30;
   bool macs3_uint8_counts = true;
+  bool macs3_threshold_explicit = false;
+  bool macs3_min_length_explicit = false;
+  bool macs3_max_gap_explicit = false;
   std::string temp_dir;
   std::string keep_intermediates_dir;
 };
@@ -661,6 +669,214 @@ bool resolve_barcode_name(
 std::string parent_dir(const std::string &path);
 bool mkdir_p(const std::string &path, std::ostream &err);
 
+std::string join_path(const std::string &dir, const std::string &name) {
+  if (dir.empty() || dir == ".") {
+    return name;
+  }
+  if (dir[dir.size() - 1] == '/') {
+    return dir + name;
+  }
+  return dir + "/" + name;
+}
+
+std::string sanitize_profile_for_path(const std::string &profile) {
+  std::string out;
+  out.reserve(profile.size());
+  for (size_t i = 0; i < profile.size(); ++i) {
+    const unsigned char c = static_cast<unsigned char>(profile[i]);
+    if (std::isalnum(c) || profile[i] == '_' || profile[i] == '-' ||
+        profile[i] == '.') {
+      out.push_back(static_cast<char>(profile[i]));
+    } else {
+      out.push_back('_');
+    }
+  }
+  return out.empty() ? "macs_bed" : out;
+}
+
+bool make_temp_dir(const Args &args, const std::string &profile,
+                   std::string *dir, std::ostream &err) {
+  if (dir == nullptr) {
+    return false;
+  }
+  std::string base = args.temp_dir.empty() ? parent_dir(args.peaks)
+                                           : args.temp_dir;
+  if (base.empty()) {
+    base = ".";
+  }
+  if (!mkdir_p(base, err)) {
+    return false;
+  }
+  std::string templ = join_path(base, "star_macs_bed_" +
+                                         sanitize_profile_for_path(profile) +
+                                         ".XXXXXX");
+  std::vector<char> writable(templ.begin(), templ.end());
+  writable.push_back('\0');
+  char *created = mkdtemp(writable.data());
+  if (created == nullptr) {
+    err << "Failed to create temporary MACS BED directory under " << base
+        << ": " << std::strerror(errno) << "\n";
+    return false;
+  }
+  *dir = created;
+  return true;
+}
+
+bool write_sidecar_as_macs_bed(const Args &args, const std::string &bed_path,
+                               std::ostream &err) {
+  AtacEvidenceBinaryHeader header{};
+  uint64_t records_to_read = 0;
+  std::vector<std::string> chrom_names;
+  FILE *in = nullptr;
+  if (!open_sidecar_records(args.sidecar, &in, &header, &records_to_read,
+                            err)) {
+    return false;
+  }
+  if (!load_chroms(args.sidecar + ".chroms.tsv", &chrom_names, err)) {
+    std::fclose(in);
+    return false;
+  }
+  if (chrom_names.size() != header.num_chroms) {
+    err << "Chrom metadata row count (" << chrom_names.size()
+        << ") does not match binary header num_chroms (" << header.num_chroms
+        << ")\n";
+    std::fclose(in);
+    return false;
+  }
+
+  FILE *out = std::fopen(bed_path.c_str(), "w");
+  if (out == nullptr) {
+    err << "Failed to open projected MACS BED: " << bed_path << "\n";
+    std::fclose(in);
+    return false;
+  }
+
+  const size_t chunk_records = 1 << 14;
+  std::vector<AtacEvidenceBinaryRecord> records(chunk_records);
+  uint64_t remaining = records_to_read;
+  bool ok = true;
+  while (remaining > 0 && ok) {
+    const size_t want = static_cast<size_t>(
+        std::min<uint64_t>(remaining, records.size()));
+    const size_t got = std::fread(records.data(), sizeof(records[0]), want, in);
+    if (got != want) {
+      err << "Short read in binary sidecar records: " << args.sidecar << "\n";
+      ok = false;
+      break;
+    }
+    remaining -= got;
+    for (size_t i = 0; i < got; ++i) {
+      const AtacEvidenceBinaryRecord &row = records[i];
+      if (row.end <= row.start || row.count == 0) {
+        continue;
+      }
+      if (row.chrom_id < 0 ||
+          static_cast<size_t>(row.chrom_id) >= chrom_names.size()) {
+        err << "Sidecar chrom_id out of range: " << row.chrom_id << "\n";
+        ok = false;
+        break;
+      }
+      const std::string barcode =
+          decode_barcode_key(row.barcode_key, header.barcode_length);
+      if (std::fprintf(out, "%s\t%d\t%d\t%s\t%u\n",
+                       chrom_names[static_cast<size_t>(row.chrom_id)].c_str(),
+                       row.start, row.end, barcode.c_str(), row.count) < 0) {
+        err << "Failed to write projected MACS BED: " << bed_path << "\n";
+        ok = false;
+        break;
+      }
+    }
+  }
+  if (std::fclose(out) != 0) {
+    err << "Failed to close projected MACS BED: " << bed_path << "\n";
+    ok = false;
+  }
+  std::fclose(in);
+  return ok;
+}
+
+bool call_macs_bed_peaks_from_sidecar(const Args &args, std::ostream &err) {
+  std::string profile_name = args.macs_profile.empty() ? "signac-atac"
+                                                       : args.macs_profile;
+  chromap::peaks::Macs3BedCallPeakProfile profile;
+  std::string profile_error;
+  if (!chromap::peaks::ResolveMacs3BedCallPeakProfile(
+          profile_name, &profile, &profile_error)) {
+    err << "Invalid MACS BED profile \"" << profile_name << "\": "
+        << profile_error << "\n"
+        << "Supported MACS BED profiles: "
+        << chromap::peaks::SupportedMacs3BedCallPeakProfiles() << "\n";
+    return false;
+  }
+
+  chromap::peaks::Macs3BedCallPeakParams pr = profile.params;
+  if (args.macs3_threshold_explicit) {
+    if (args.macs3_threshold_mode ==
+        MultiomeAtacPeakMexThresholdMode::Q_VALUE) {
+      pr.threshold_mode = chromap::peaks::Macs3FragThresholdMode::kQValue;
+      pr.qvalue_cutoff = args.macs3_qvalue;
+      pr.pvalue_cutoff = 0.0;
+    } else {
+      pr.threshold_mode = chromap::peaks::Macs3FragThresholdMode::kPValue;
+      pr.pvalue_cutoff = args.macs3_pvalue;
+      pr.qvalue_cutoff = 0.0;
+    }
+  }
+  if (args.macs3_min_length_explicit) {
+    pr.min_length = args.macs3_min_length;
+  }
+  if (args.macs3_max_gap_explicit) {
+    pr.max_gap = args.macs3_max_gap;
+  }
+
+  std::string bed_path;
+  std::string temp_dir_created;
+  bool remove_bed = false;
+  bool remove_dir = false;
+  if (!args.keep_intermediates_dir.empty()) {
+    if (!mkdir_p(args.keep_intermediates_dir, err)) {
+      return false;
+    }
+    bed_path = join_path(args.keep_intermediates_dir,
+                         "sidecar_" + sanitize_profile_for_path(profile_name) +
+                             "_macs_bed.tsv");
+  } else {
+    if (!make_temp_dir(args, profile_name, &temp_dir_created, err)) {
+      return false;
+    }
+    bed_path = join_path(temp_dir_created, "sidecar_macs_bed.tsv");
+    remove_bed = true;
+    remove_dir = true;
+  }
+
+  bool ok = write_sidecar_as_macs_bed(args, bed_path, err);
+  if (ok) {
+    chromap::peaks::Macs3BedCallPeakStats stats;
+    std::string peak_error;
+    ok = chromap::peaks::RunMacs3BedCallPeak(
+        bed_path, pr, args.peaks, args.summits_out, &stats, &peak_error);
+    if (!ok) {
+      err << "MACS BED peaks from binary sidecar failed: " << peak_error
+          << "\n";
+    } else {
+      err << "Wrote sidecar-derived MACS BED peaks: " << args.peaks << "\n";
+      err << "Wrote sidecar-derived MACS BED summits: " << args.summits_out
+          << "\n";
+      err << "MACS BED profile=" << profile.name
+          << " input_format=" << profile.input_format
+          << " total_tags=" << stats.total_tags
+          << " peaks=" << stats.peak_count << "\n";
+    }
+  }
+  if (remove_bed) {
+    std::remove(bed_path.c_str());
+  }
+  if (remove_dir) {
+    rmdir(temp_dir_created.c_str());
+  }
+  return ok;
+}
+
 bool call_peaks_from_sidecar_if_needed(const Args &args, std::ostream &err) {
   if (!args.call_peaks_from_sidecar) {
     return true;
@@ -670,14 +886,18 @@ bool call_peaks_from_sidecar_if_needed(const Args &args, std::ostream &err) {
     return true;
   }
 
-  SidecarFragmentIterator iter(args.sidecar);
-  if (!iter.Error().empty()) {
-    err << iter.Error() << "\n";
+  if (!mkdir_p(parent_dir(args.peaks), err) ||
+      !mkdir_p(parent_dir(args.summits_out), err)) {
     return false;
   }
 
-  if (!mkdir_p(parent_dir(args.peaks), err) ||
-      !mkdir_p(parent_dir(args.summits_out), err)) {
+  if (args.peak_call_mode == MultiomeAtacPeakCallMode::MACS_BED) {
+    return call_macs_bed_peaks_from_sidecar(args, err);
+  }
+
+  SidecarFragmentIterator iter(args.sidecar);
+  if (!iter.Error().empty()) {
+    err << iter.Error() << "\n";
     return false;
   }
 
@@ -1352,12 +1572,17 @@ Args to_internal_args(const MultiomeAtacPeakMexArgs &input) {
   args.force = input.force;
   args.max_barcodes = input.max_barcodes;
   args.threads = input.threads;
+  args.peak_call_mode = input.peak_call_mode;
+  args.macs_profile = input.macs_profile;
   args.macs3_threshold_mode = input.macs3_threshold_mode;
   args.macs3_pvalue = input.macs3_pvalue;
   args.macs3_qvalue = input.macs3_qvalue;
   args.macs3_min_length = input.macs3_min_length;
   args.macs3_max_gap = input.macs3_max_gap;
   args.macs3_uint8_counts = input.macs3_uint8_counts;
+  args.macs3_threshold_explicit = input.macs3_threshold_explicit;
+  args.macs3_min_length_explicit = input.macs3_min_length_explicit;
+  args.macs3_max_gap_explicit = input.macs3_max_gap_explicit;
   args.temp_dir = input.temp_dir;
   args.keep_intermediates_dir = input.keep_intermediates_dir;
   return args;
@@ -1385,6 +1610,25 @@ bool validate_args(const Args &args, std::ostream &err) {
   if (args.threads < 1) {
     err << "Thread count must be >= 1\n";
     return false;
+  }
+  if (args.peak_call_mode == MultiomeAtacPeakCallMode::FRAG &&
+      !args.macs_profile.empty()) {
+    err << "MACS BED profile requires peak_call_mode=macs-bed\n";
+    return false;
+  }
+  if (args.peak_call_mode == MultiomeAtacPeakCallMode::MACS_BED) {
+    const std::string profile_name =
+        args.macs_profile.empty() ? "signac-atac" : args.macs_profile;
+    chromap::peaks::Macs3BedCallPeakProfile profile;
+    std::string profile_error;
+    if (!chromap::peaks::ResolveMacs3BedCallPeakProfile(
+            profile_name, &profile, &profile_error)) {
+      err << "Invalid MACS BED profile \"" << profile_name << "\": "
+          << profile_error << "\n"
+          << "Supported MACS BED profiles: "
+          << chromap::peaks::SupportedMacs3BedCallPeakProfiles() << "\n";
+      return false;
+    }
   }
   if (args.macs3_threshold_mode ==
       MultiomeAtacPeakMexThresholdMode::Q_VALUE) {

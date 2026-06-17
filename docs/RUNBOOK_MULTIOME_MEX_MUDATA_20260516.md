@@ -619,6 +619,29 @@ core/features/libchromap_contract/star_multiome_atac_peak_mex \
 Add `--macs3-frag-qvalue Q` to the peak-MEX command when the MACS3 FRAG peak
 call should use q-value/FDR thresholding instead of the default p-value cutoff.
 
+For Signac-style paper parity checks, keep the same sidecar and peak-MEX
+materialization boundary but switch the peak caller:
+
+```bash
+core/features/libchromap_contract/star_multiome_atac_peak_mex \
+  --sidecar <out>/atac_fragments.bin \
+  --barcode-translate <refs>/atac2gex.tsv \
+  --barcode-translate-from-first \
+  --call-peaks-from-sidecar \
+  --peak-call-mode macs-bed \
+  --macs-profile signac-atac \
+  --peaks <out>/signac_atac_peaks.narrowPeak \
+  --summits-out <out>/signac_atac_summits.bed \
+  --out-dir <sample>/atac/peak_mex_signac \
+  --metrics-tsv <sample>/atac/atac_metrics_signac.tsv \
+  --threads 16 \
+  --temp-dir <sample>/star_sample/chromap_tmp
+```
+
+This is an opt-in MACS BED compatibility lane. It does not change the default
+Chromap/MorPHiC FRAG caller or the default `multiomeAtacPeakCallMode frag`
+inline behavior.
+
 Do not use the removed `chromapAtacMacs3FragPeaksSource` STAR flag. The old
 file-source path could spill/re-read a misleading `.tsv.gz` fragments file and
 is not the production boundary. Low-memory production runs should spill through

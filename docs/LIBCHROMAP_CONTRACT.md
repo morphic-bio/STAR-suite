@@ -69,6 +69,12 @@ Orchestration (default compiled in + runtime opt-in):
   `core/features/libchromap_contract/star_multiome_atac_peak_mex` to call peaks
   from the sidecar and build the ATAC peak MEX. This avoids the legacy
   file-source spill/re-read path.
+- **Signac-style MACS BED peaks:** Opt-in compatibility mode for paper parity
+  checks. Set `multiomeAtacPeakCallMode macs-bed` and
+  `multiomeAtacPeakMacsProfile signac-atac`, or use
+  `star_multiome_atac_peak_mex --peak-call-mode macs-bed --macs-profile
+  signac-atac`. This projects the AEV1 sidecar to MACS BED input before calling
+  libMACS3. It does not change Chromap/MorPHiC FRAG defaults.
 
 CLI / parameters file (all names also work in a parameters file):
 
@@ -115,6 +121,8 @@ CLI / parameters file (all names also work in a parameters file):
 | `chromapAtacMacs3FragMaxGap` | max gap for peak merging; default `30`. |
 | `chromapAtacMacs3FragKeepIntermediates` | optional directory to keep intermediate bedGraph-style outputs; `-` to omit. |
 | `chromapAtacMacs3FragUint8Counts` | `1` (default) use MACS3 uint8 count semantics; `0` disables. |
+| `multiomeAtacPeakCallMode` | Inline sidecar peak caller: `frag` (default) or `macs-bed`. |
+| `multiomeAtacPeakMacsProfile` | Optional MACS BED compatibility profile. `signac-atac` currently reproduces the Signac-style `macs3 callpeak -f BED --nomodel --extsize 200 --shift -100 -q 0.05 --keep-dup 1 --llocal 10000` surface. Setting this implies `macs-bed` unless `multiomeAtacPeakCallMode frag` is explicitly set, which is rejected. |
 
 The STAR CLI no longer exposes `chromapAtacMacs3FragPeaksSource`. Production
 multiome should use the post-materialization boundary: write BAM plus the
@@ -267,6 +275,21 @@ Use either `--macs3-frag-pvalue` or `--macs3-frag-qvalue` with
 `star_multiome_atac_peak_mex`; the flags are mutually exclusive. The STAR
 parameter equivalent is `--chromapAtacMacs3FragQvalue 0.05` for the in-process
 Chromap/libMACS3 path or inline peak/MEX path.
+
+For Signac-style compatibility calls from the same sidecar, switch the peak
+caller while leaving the MEX construction path unchanged:
+
+```bash
+star_multiome_atac_peak_mex \
+  --sidecar ./atac_fragments.bin \
+  --call-peaks-from-sidecar \
+  --peak-call-mode macs-bed \
+  --macs-profile signac-atac \
+  --peaks ./signac_atac_peaks.narrowPeak \
+  --summits-out ./signac_atac_summits.bed \
+  --out-dir ./atac/peak_mex_signac \
+  --metrics-tsv ./atac/atac_metrics_signac.tsv
+```
 
 Concurrent BAM smoke from a clean Chromap-enabled build (100K multiome fixture):
 

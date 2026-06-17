@@ -2298,6 +2298,19 @@ multiomeAtacPeakSummits     -
                             chromapAtacMacs3FragSummitsOutput if set, otherwise
                             <outFileNamePrefix>/atac/atac_summits.bed.
 
+multiomeAtacPeakCallMode    frag
+    string:                 inline peak caller for sidecar-derived peaks.
+                            frag ... use Chromap/MorPHiC MACS3 FRAG defaults.
+                            macs-bed ... project the AEV1 sidecar to MACS BED
+                            input and call peaks with a named MACS BED profile.
+
+multiomeAtacPeakMacsProfile -
+    string:                 optional MACS BED compatibility profile for
+                            multiomeAtacPeakCallMode=macs-bed. Currently
+                            supports signac-atac; when set it implies
+                            macs-bed unless multiomeAtacPeakCallMode is
+                            explicitly set to frag, which is invalid.
+
 multiomeAtacPeakThreads     0
     int:                    peak/MEX materialization threads. 0 inherits
                             runThreadN.

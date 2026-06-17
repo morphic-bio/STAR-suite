@@ -803,6 +803,8 @@ class Parameters {
             string mexOutDir;
             string narrowPeak;
             string summits;
+            string peakCallMode = "frag";
+            string macsProfile;
             int threads = 0;       // 0 inherits runThreadN
             uint64 maxBarcodes = 0;
         } multiomeAtacPeakMex;
