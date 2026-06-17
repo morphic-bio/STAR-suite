@@ -993,9 +993,19 @@ static string findAssignOutputDir(const string& baseDir) {
 
 static bool hasMexFiles(const string& dirPath) {
     struct stat st;
-    string features = dirPath + "/features.tsv";
-    string featuresGz = dirPath + "/features.tsv.gz";
-    return (stat(features.c_str(), &st) == 0) || (stat(featuresGz.c_str(), &st) == 0);
+    auto exists = [&](const string& basename) {
+        const string plain = dirPath + "/" + basename;
+        const string gz = plain + ".gz";
+        return stat(plain.c_str(), &st) == 0 || stat(gz.c_str(), &st) == 0;
+    };
+
+    if (exists("features.tsv") && exists("barcodes.tsv") && exists("matrix.mtx")) {
+        return true;
+    }
+
+    // Native assignBarcodes output has text axes until processAssignOutput()
+    // materializes the 10x-compatible features.tsv/barcodes.tsv stubs.
+    return exists("features.txt") && exists("barcodes.txt") && exists("matrix.mtx");
 }
 
 struct PfAssignMexSource {
