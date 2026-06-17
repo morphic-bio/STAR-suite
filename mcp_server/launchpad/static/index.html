@@ -496,13 +496,13 @@
         <h2>Translate</h2>
         <p :class="slTranslateResult?.ok ? 'ok' : 'err'" x-text="slTranslateResult?.ok ? 'Accepted' : 'Refused'"></p>
         <div x-show="slTranslateResult && !slTranslateResult.ok">
-            <p><code x-text="slTranslateResult.failure_category || ''"></code></p>
+            <p><code x-text="slTranslateResult?.failure_category || ''"></code></p>
             <ul class="messages">
-              <template x-for="reason in (slTranslateResult.reasons || [])" :key="reason">
+              <template x-for="reason in (slTranslateResult?.reasons || [])" :key="reason">
                 <li class="err" x-text="reason"></li>
               </template>
             </ul>
-            <p x-show="slTranslateResult.fallback_to_temporal"><strong>fallback_to_temporal:</strong> true</p>
+            <p x-show="slTranslateResult?.fallback_to_temporal"><strong>fallback_to_temporal:</strong> true</p>
         </div>
         <details class="json-detail" x-show="slTranslateResult?.ok && slIr">
           <summary>IR (canonical)</summary>
@@ -514,23 +514,23 @@
         <h2>Viability</h2>
         <p :class="slViabilityResult?.ok ? 'ok' : 'err'" x-text="slViabilityResult?.ok ? 'OK for simple local' : 'Not viable locally'"></p>
         <ul class="messages" x-show="slViabilityResult?.reasons?.length">
-          <template x-for="reason in (slViabilityResult.reasons || [])" :key="reason">
+          <template x-for="reason in (slViabilityResult?.reasons || [])" :key="reason">
             <li :class="slViabilityResult?.ok ? 'warn' : 'err'" x-text="reason"></li>
           </template>
         </ul>
-        <p x-show="slViabilityResult && slViabilityResult.fallback_to_temporal"><strong>fallback_to_temporal:</strong> true</p>
+        <p x-show="slViabilityResult?.fallback_to_temporal"><strong>fallback_to_temporal:</strong> true</p>
       </div>
 
       <div class="panel script-lane-out" x-show="slExecuteResult">
         <h2>Execute</h2>
         <p :class="slExecuteResult?.ok ? 'ok' : 'err'" x-text="slExecuteResult?.ok ? 'Finished' : 'Failed or refused'"></p>
-        <p class="help-meta" x-show="slExecuteResult?.workdir">workdir: <code x-text="slExecuteResult.workdir"></code></p>
+        <p class="help-meta" x-show="slExecuteResult?.workdir">workdir: <code x-text="slExecuteResult?.workdir"></code></p>
         <ul class="messages" x-show="slExecuteResult?.reasons?.length">
-          <template x-for="reason in (slExecuteResult.reasons || [])" :key="reason">
+          <template x-for="reason in (slExecuteResult?.reasons || [])" :key="reason">
             <li class="err" x-text="reason"></li>
           </template>
         </ul>
-        <p x-show="slExecuteResult && slExecuteResult.fallback_to_temporal && !slExecuteResult.ok">
+        <p x-show="slExecuteResult?.fallback_to_temporal && !slExecuteResult?.ok">
           <strong>fallback_to_temporal:</strong> true (IR above is still valid for Temporal)
         </p>
         <template x-for="st in (slExecuteResult?.steps || [])" :key="st.node_id + ':' + st.returncode">
