@@ -8,7 +8,13 @@ STAR_BIN="${STAR_BIN:-$REPO_ROOT/core/legacy/source/STAR}"
 
 ROOT="${HIV_DOGMA_ROOT:-/tmp/hiv_dogma_gse239916}"
 FOUR_ARM_ROOT="${HIV_FOUR_ARM_ROOT:-$ROOT/star_four_arm_downsample}"
-FASTQ_ROOT="$ROOT/star_trimodal_downsample/fastq"
+FASTQ_ROOT="${HIV_DOGMA_FASTQ_ROOT:-$ROOT/star_trimodal_downsample/fastq}"
+GEX_FASTQ_DIR="${HIV_DOGMA_GEX_FASTQ_DIR:-$ROOT/star_trimodal_downsample/gex}"
+ADT_FASTQ_DIR="${HIV_DOGMA_ADT_FASTQ_DIR:-$ROOT/star_trimodal_downsample/adt}"
+PROTEIN_FEATURE_REF="${HIV_DOGMA_PROTEIN_FEATURE_REF:-$ROOT/refs/YW8_viremic_protein_feature_ref.csv}"
+STATE_FEATURE_REF="${HIV_DOGMA_STATE_FEATURE_REF:-$ROOT/refs/YW8_viremic_state_feature_ref.csv}"
+HIV_STATE_COUNTS="${HIV_DOGMA_HIV_STATE_COUNTS:-$FOUR_ARM_ROOT/hiv_state_counts.tsv}"
+MATERIALIZE_HIV_TABLE="${HIV_DOGMA_MATERIALIZE_HIV_TABLE:-1}"
 GENOME="${HIV_DOGMA_GENOME:-/mnt/pikachu/autoindex_98_32/pe_index}"
 GEX_WL="${HIV_DOGMA_GEX_WL:-/mnt/pikachu/GEX_whitelist/737K-arc-v1.txt}"
 ATAC_WL="/mnt/pikachu/atac-seq/benchmarks/pbmc_unsorted_3k_100k/chromap_index/737K-arc-v1_atac.txt"
@@ -92,7 +98,14 @@ if pgrep -x STAR >/dev/null 2>&1; then
   exit 1
 fi
 
-bash "$SCRIPT_DIR/materialize_hiv_table_counts.sh" "$FOUR_ARM_ROOT" YW8
+mkdir -p "$FOUR_ARM_ROOT"
+if [[ "$MATERIALIZE_HIV_TABLE" == "1" ]]; then
+  bash "$SCRIPT_DIR/materialize_hiv_table_counts.sh" "$FOUR_ARM_ROOT" YW8
+  HIV_STATE_COUNTS="$FOUR_ARM_ROOT/hiv_state_counts.tsv"
+elif [[ ! -r "$HIV_STATE_COUNTS" ]]; then
+  echo "ERROR: missing HIV state counts table: $HIV_STATE_COUNTS" >&2
+  exit 1
+fi
 
 OUT_DIR="$FOUR_ARM_ROOT/star_run_$(date +%Y%m%d_%H%M%S)"
 mkdir -p "$OUT_DIR" "$FOUR_ARM_ROOT/chromap_tmp"
@@ -102,16 +115,16 @@ CONFIG="$FOUR_ARM_ROOT/pf_multi_config_four_arm.csv"
 cat > "$CONFIG" << EOF
 [libraries]
 fastqs,sample,library_type,feature_types,star_chemistry,star_library_id,star_feature_ref,star_whitelist,star_input_format
-$ROOT/star_trimodal_downsample/gex,YW8,Gene Expression,Gene Expression,TRU,gex_yw8,,,fastq
-$ROOT/star_trimodal_downsample/adt,YW8,Antibody Capture,Protein,TRU,adt_yw8,$ROOT/refs/YW8_viremic_protein_feature_ref.csv,$GEX_WL,fastq
-$FOUR_ARM_ROOT/hiv_state_counts.tsv,YW8,Custom,Custom,TRU,hiv_state_yw8,$ROOT/refs/YW8_viremic_state_feature_ref.csv,$GEX_WL,table
+$GEX_FASTQ_DIR,YW8,Gene Expression,Gene Expression,TRU,gex_yw8,,,fastq
+$ADT_FASTQ_DIR,YW8,Antibody Capture,Protein,TRU,adt_yw8,$PROTEIN_FEATURE_REF,$GEX_WL,fastq
+$HIV_STATE_COUNTS,YW8,Custom,Custom,TRU,hiv_state_yw8,$STATE_FEATURE_REF,$GEX_WL,table
 EOF
 
 for path in "$STAR_BIN" "$GENOME/Genome" "$FASTQ_ROOT/gex_R1.fastq.gz" "$FASTQ_ROOT/gex_R2.fastq.gz" \
-  "$ROOT/star_trimodal_downsample/adt" \
+  "$GEX_FASTQ_DIR" "$ADT_FASTQ_DIR" \
   "$FASTQ_ROOT/atac_R1.fastq.gz" "$FASTQ_ROOT/atac_R3.fastq.gz" "$FASTQ_ROOT/atac_barcode.fastq.gz" \
-  "$FOUR_ARM_ROOT/hiv_state_counts.tsv" "$ROOT/refs/YW8_viremic_state_feature_ref.csv" \
-  "$ROOT/refs/YW8_viremic_protein_feature_ref.csv" "$GEX_WL" "$ATAC_WL" "$ATAC2GEX" "$CHROMAP_FASTA" "$CHROMAP_IDX"; do
+  "$HIV_STATE_COUNTS" "$STATE_FEATURE_REF" \
+  "$PROTEIN_FEATURE_REF" "$GEX_WL" "$ATAC_WL" "$ATAC2GEX" "$CHROMAP_FASTA" "$CHROMAP_IDX"; do
   [[ -r "$path" ]] || { echo "ERROR: missing $path" >&2; exit 1; }
 done
 
