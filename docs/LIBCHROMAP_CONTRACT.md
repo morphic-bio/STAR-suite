@@ -76,6 +76,20 @@ Orchestration (default compiled in + runtime opt-in):
   signac-atac`. This projects the AEV1 sidecar to MACS BED input before calling
   libMACS3. It does not change Chromap/MorPHiC FRAG defaults.
 
+2026-06-18 component validation: STAR-suite `master` was rebuilt against
+Chromap-suite `5f09c90c090affa0705db60c2cde8583e415d0a3`, which vendors
+libMACS3 `0479d356695f3e09e8d019f6a1b8b18bd5b1c361`. That libMACS3 revision
+closes the DOGMA-HIV Signac/MACS3 BED-callpeak residual while keeping native
+FRAG output precision unchanged. Validation passed:
+
+```text
+make -C /mnt/pikachu/Chromap-suite libmacs3 chromap_callpeaks libchromap.a
+make -C /mnt/pikachu/STAR-suite star-libchromap-contract
+make -C /mnt/pikachu/STAR-suite core
+bash tests/test_star_multiome_atac_peak_mex_signac_profile.sh
+bash tests/run_star_chromap_macs3_lowmem_smoke_100k.sh
+```
+
 CLI / parameters file (all names also work in a parameters file):
 
 | Parameter | Role |
