@@ -17,7 +17,8 @@ set -euo pipefail
 # Options:
 #   --threads N          STAR threads (default: 2)
 #   --read-limit N       Subsample reads (default: 2000)
-#   --write-bam sorted   Write sorted BAM and validate
+#   --out-samtype MODE   STAR alignment output mode: none or bam-unsorted (default: none)
+#   --write-bam sorted   Write an unsorted BAM, sort it with samtools, and validate
 #   --write-bam unsorted Write unsorted BAM and validate
 #   --outdir DIR         Output directory
 #   -h, --help           Show help
@@ -29,6 +30,7 @@ STAR_BIN="${STAR_BIN:-${REPO_ROOT}/core/legacy/source/STAR}"
 THREADS="${THREADS:-2}"
 READ_LIMIT="${READ_LIMIT:-2000}"
 BAM_MODE="none"
+OUT_SAMTYPE=""
 OUTDIR=""
 
 die() { echo "FAIL: $*" >&2; exit 1; }
@@ -45,6 +47,7 @@ while [[ $# -gt 0 ]]; do
     --threads)    THREADS="$2";    shift 2 ;;
     --read-limit) READ_LIMIT="$2"; shift 2 ;;
     --write-bam)  BAM_MODE="$2";   shift 2 ;;
+    --out-samtype) OUT_SAMTYPE="$2"; shift 2 ;;
     --outdir)     OUTDIR="$2";     shift 2 ;;
     -h|--help)    usage; exit 0 ;;
     *) die "Unknown argument: $1" ;;
@@ -65,6 +68,28 @@ case "${BAM_MODE}" in
   *) die "--write-bam must be none, sorted, or unsorted" ;;
 esac
 
+if [[ -z "${OUT_SAMTYPE}" ]]; then
+  case "${BAM_MODE}" in
+    none) OUT_SAMTYPE="none" ;;
+    sorted|unsorted) OUT_SAMTYPE="bam-unsorted" ;;
+  esac
+else
+  case "${OUT_SAMTYPE}" in
+    none)
+      if [[ "${BAM_MODE}" == "unsorted" || "${BAM_MODE}" == "sorted" ]]; then
+        die "--out-samtype none conflicts with --write-bam ${BAM_MODE}"
+      fi
+      BAM_MODE="none"
+      ;;
+    bam-unsorted)
+      if [[ "${BAM_MODE}" == "none" ]]; then
+        BAM_MODE="unsorted"
+      fi
+      ;;
+    *) die "--out-samtype must be none or bam-unsorted" ;;
+  esac
+fi
+
 if [[ "${BAM_MODE}" != "none" ]]; then
   need_cmd samtools
 fi
@@ -75,6 +100,7 @@ log "STAR:       ${STAR_BIN}"
 log "Threads:    ${THREADS}"
 log "Read limit: ${READ_LIMIT}"
 log "BAM mode:   ${BAM_MODE}"
+log "outSAMtype: ${OUT_SAMTYPE}"
 log "Outdir:     ${OUTDIR}"
 
 # ── Fetch and generate tiny Flex fixture ────────────────────────────
@@ -142,10 +168,6 @@ log "Building STAR index..."
   --sa-index-n-bases 11 \
   --star-bin "${STAR_BIN}"
 
-# Note: run_flex_cr_config.sh hardcodes --outSAMtype BAM Unsorted. The Flex
-# wrapper requires BAM output for its pipeline. The --write-bam flag here
-# controls validation expectations, not the wrapper's BAM behavior.
-
 log "Running Flex pipeline..."
 "${REPO_ROOT}/scripts/run_flex_cr_config.sh" \
   --cr-config "${CONFIG}" \
@@ -157,6 +179,7 @@ log "Running Flex pipeline..."
   --solo-umi-len 10 \
   --sample-probe-catalog "${PROBE_CATALOG}" \
   --sample-probe-offset 68 \
+  --out-samtype "${OUT_SAMTYPE}" \
   --out-base "${OUT_BASE}" \
   --run-id "${RUN_ID}" \
   --threads "${THREADS}"
@@ -212,8 +235,63 @@ else
   ((++FAIL))
 fi
 
-# Flex wrapper always produces unsorted BAM
-check "Aligned.out.bam" "${RUN_ROOT}/Aligned.out.bam"
+if grep -qF "out_samtype=${OUT_SAMTYPE}" "${RUN_ROOT}/RUN_MANIFEST.txt" 2>/dev/null; then
+  log "  PASS: manifest has out_samtype=${OUT_SAMTYPE}"
+  ((++PASS))
+else
+  log "  FAIL: manifest missing out_samtype=${OUT_SAMTYPE}"
+  ((++FAIL))
+fi
+
+# BAM validation
+case "${BAM_MODE}" in
+  sorted)
+    check "Aligned.out.bam" "${RUN_ROOT}/Aligned.out.bam"
+    if [[ -f "${RUN_ROOT}/Aligned.out.bam" ]]; then
+      SORTED_BAM="${RUN_ROOT}/Aligned.sortedByCoord.out.bam"
+      if samtools sort -@ "${THREADS}" -o "${SORTED_BAM}" "${RUN_ROOT}/Aligned.out.bam"; then
+        log "  PASS: sorted BAM created"
+        ((++PASS))
+      else
+        log "  FAIL: sorted BAM creation failed"
+        ((++FAIL))
+      fi
+      if [[ -f "${SORTED_BAM}" ]] && samtools quickcheck "${SORTED_BAM}" 2>/dev/null; then
+        log "  PASS: sorted BAM quickcheck"
+        ((++PASS))
+      else
+        log "  FAIL: sorted BAM quickcheck failed"
+        ((++FAIL))
+      fi
+      if [[ -f "${SORTED_BAM}" ]] && samtools view -H "${SORTED_BAM}" | grep -q "SO:coordinate"; then
+        log "  PASS: sorted BAM sort order = coordinate"
+        ((++PASS))
+      else
+        log "  FAIL: sorted BAM missing SO:coordinate"
+        ((++FAIL))
+      fi
+    fi
+    ;;
+  unsorted)
+    check "Aligned.out.bam" "${RUN_ROOT}/Aligned.out.bam"
+    if [[ -f "${RUN_ROOT}/Aligned.out.bam" ]] && samtools quickcheck "${RUN_ROOT}/Aligned.out.bam" 2>/dev/null; then
+      log "  PASS: unsorted BAM quickcheck"
+      ((++PASS))
+    else
+      log "  FAIL: unsorted BAM quickcheck failed"
+      ((++FAIL))
+    fi
+    ;;
+  none)
+    if [[ ! -f "${RUN_ROOT}/Aligned.out.bam" && ! -f "${RUN_ROOT}/Aligned.sortedByCoord.out.bam" ]]; then
+      log "  PASS: no BAM output"
+      ((++PASS))
+    else
+      log "  FAIL: BAM written in no-BAM mode"
+      ((++FAIL))
+    fi
+    ;;
+esac
 
 log "--- Results: ${PASS} passed, ${FAIL} failed ---"
 
