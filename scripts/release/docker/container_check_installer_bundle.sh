@@ -4,7 +4,7 @@ set -euo pipefail
 
 BUNDLE=""
 EXPECTED_LABEL=""
-EXPECTED_VERSION="1.3.0b"
+EXPECTED_VERSION="1.4.1"
 MANIFEST_OUT=""
 
 usage() {

@@ -116,6 +116,7 @@ jobs:
             --skip-image-build \
             --base-image "ubuntu:22.04" \
             --tarball "dist/release/STAR-suite-${GITHUB_REF_NAME}-linux-amd64-glibc234.tar.gz" \
+            --expected-version "${GITHUB_REF_NAME#v}" \
             --manifest-out "dist/release/runtime-manifests/glibc234-ubuntu22.txt"
 
       - name: Validate glibc234 tarball runtime (Ubuntu 24.04)
@@ -125,6 +126,7 @@ jobs:
             --skip-image-build \
             --base-image "ubuntu:24.04" \
             --tarball "dist/release/STAR-suite-${GITHUB_REF_NAME}-linux-amd64-glibc234.tar.gz" \
+            --expected-version "${GITHUB_REF_NAME#v}" \
             --manifest-out "dist/release/runtime-manifests/glibc234-ubuntu24.txt"
 
       - name: Validate glibc239 tarball runtime (Ubuntu 24.04)
@@ -134,6 +136,7 @@ jobs:
             --skip-image-build \
             --base-image "ubuntu:24.04" \
             --tarball "dist/release/STAR-suite-${GITHUB_REF_NAME}-linux-amd64-glibc239.tar.gz" \
+            --expected-version "${GITHUB_REF_NAME#v}" \
             --manifest-out "dist/release/runtime-manifests/glibc239-ubuntu24.txt"
 
       - name: Smoke test glibc239 tarball (Ubuntu 24.04)
@@ -143,7 +146,8 @@ jobs:
             --docker-image "star-suite-runtime-check:ubuntu24" \
             --skip-image-build \
             --base-image "ubuntu:24.04" \
-            --tarball "dist/release/STAR-suite-${GITHUB_REF_NAME}-linux-amd64-glibc239.tar.gz"
+            --tarball "dist/release/STAR-suite-${GITHUB_REF_NAME}-linux-amd64-glibc239.tar.gz" \
+            --expected-version "${GITHUB_REF_NAME#v}"
 
       - name: Validate installer bundle (Ubuntu 22.04)
         run: |
@@ -153,6 +157,7 @@ jobs:
             --base-image "ubuntu:22.04" \
             --bundle "dist/release/STAR-suite-${GITHUB_REF_NAME}-linux-amd64-installer.tar.gz" \
             --expected-label "glibc234" \
+            --expected-version "${GITHUB_REF_NAME#v}" \
             --manifest-out "dist/release/runtime-manifests/installer-ubuntu22.txt"
 
       - name: Validate installer bundle (Ubuntu 24.04)
@@ -163,6 +168,7 @@ jobs:
             --base-image "ubuntu:24.04" \
             --bundle "dist/release/STAR-suite-${GITHUB_REF_NAME}-linux-amd64-installer.tar.gz" \
             --expected-label "glibc239" \
+            --expected-version "${GITHUB_REF_NAME#v}" \
             --manifest-out "dist/release/runtime-manifests/installer-ubuntu24.txt"
 
       - name: Smoke test installer bundle (Ubuntu 24.04)
@@ -173,7 +179,8 @@ jobs:
             --skip-image-build \
             --base-image "ubuntu:24.04" \
             --bundle "dist/release/STAR-suite-${GITHUB_REF_NAME}-linux-amd64-installer.tar.gz" \
-            --expected-label "glibc239"
+            --expected-label "glibc239" \
+            --expected-version "${GITHUB_REF_NAME#v}"
 
       - name: Build Debian binary package
         run: |

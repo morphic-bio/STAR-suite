@@ -195,6 +195,19 @@ Ship discoverable, installable Ubuntu binaries for STAR Suite with low-friction 
   `STAR --version` reports `1.3.0`. Upstream provenance and genome index
   compatibility remain `2.7.11b` and `2.7.4a`.
 
+## Hotfix Release Prep (2026-06-20)
+
+- Candidate tag: `v1.4.1`
+- Release notes: `docs/RELEASE_NOTES_v1.4.1.md`
+- Packaging metadata: `debian/changelog` entry `1.4.1-1`
+- Scope added since `v1.3.1`: Flex/Solo dependency tracking now covers
+  VPATH-built top-level Flex sources so incremental builds do not reuse stale
+  objects after shared header/layout changes. The tiny public Flex smoke wrapper
+  now validates both no-BAM and unsorted-BAM output modes.
+- Version note: release artifacts use tag `v1.4.1`, Debian packages use STAR
+  Suite `1.4.1`, and `STAR --version` reports `1.4.1`. Upstream provenance and
+  genome index compatibility remain `2.7.11b` and `2.7.4a`.
+
 ## Hotfix Release Prep (2026-05-29)
 
 - Candidate tag: `v1.0.3`

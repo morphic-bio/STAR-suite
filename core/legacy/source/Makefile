@@ -236,7 +236,11 @@ ocm-multi-unit-tests : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS) $
 ocm-multi-unit-tests : Depend.list parametersDefault.xxd $(OBJECTS_NO_MAIN) libflex libtrim libem libprocess_features $(LIBSCRNA_LIB) $(OCM_UNIT_TEST_SRC)
 	$(CXX) -o ocm_multi_unit_tests $(CXXFLAGS) $(OCM_UNIT_TEST_SRC) $(OBJECTS_NO_MAIN) $(LIBFLEX_LIB) $(LIBTRIM_LIB) $(LIBEM_LIB) $(PROCESS_FEATURES_LIB) $(LIBSCRNA_LIB) $(LDFLAGS)
 
-SOURCES := $(SRC_CPP_ROOT) $(wildcard input/*.cpp) $(FLEX_SRC_DIR)/ReadAlign_resolveAmbiguousCBs.cpp $(wildcard *.c) $(wildcard flex/*.cpp)
+# Dependency scanning must include VPATH-built Flex sources. Without these
+# entries, header/layout changes can leave stale Flex/Solo objects linked into
+# STAR after an incremental build.
+FLEX_DEP_CPP := $(filter-out $(addprefix $(FLEX_SRC_DIR)/,$(notdir $(SRC_CPP_ROOT))),$(wildcard $(FLEX_SRC_DIR)/*.cpp))
+SOURCES := $(SRC_CPP_ROOT) $(wildcard input/*.cpp) $(FLEX_DEP_CPP) $(wildcard *.c) $(wildcard flex/*.cpp)
 
 %.o : %.c
 	$(CXX) -c $(CPPFLAGS) $(CFLAGS) $<
