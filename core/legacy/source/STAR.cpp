@@ -70,6 +70,7 @@
 #include <cerrno>
 #include <cstring>
 #include <cctype>
+#include <stdexcept>
 
 #include "twoPassRunPass1.h"
 
@@ -143,6 +144,40 @@ bool pathIsSameOrUnderDir(const std::string& path, const std::string& dir) {
         return false;
     }
     return path[dir.size()] == '/';
+}
+
+void writeTranscriptVBEqDump(const std::string& path, const ECTable& ecTable, const Transcriptome& tr) {
+    std::ofstream out(path.c_str());
+    if (!out.is_open()) {
+        throw std::runtime_error("could not create TranscriptVB EC dump: " + path);
+    }
+
+    out << tr.nTr << "\n";
+    out << ecTable.ecs.size() << "\n";
+    for (uint i = 0; i < tr.nTr; ++i) {
+        out << tr.trID[i] << "\n";
+    }
+
+    out << std::setprecision(10);
+    for (const EC& ec : ecTable.ecs) {
+        const size_t nTx = ec.transcript_ids.size();
+        out << nTx;
+        for (uint32_t tid : ec.transcript_ids) {
+            out << "\t" << tid;
+        }
+
+        if (ec.weights.size() == nTx) {
+            for (double weight : ec.weights) {
+                out << "\t" << weight;
+            }
+        } else {
+            const double uniformWeight = nTx > 0 ? 1.0 / static_cast<double>(nTx) : 0.0;
+            for (size_t i = 0; i < nTx; ++i) {
+                out << "\t" << uniformWeight;
+            }
+        }
+        out << "\t" << ec.count << "\n";
+    }
 }
 
 bool applyPfMultiGexInputFiltering(Parameters& P) {
@@ -1800,22 +1835,8 @@ int main(int argInN, char *argIn[])
         perFileMappingDone = true;
     }
 
-    // prepare chunks and spawn mapping threads (skip if per-file already handled mapping)
-    if (!perFileMappingDone) {
-        if (RAchunk == nullptr) {
-            RAchunk = new ReadAlignChunk*[P.runThreadN];
-            for (int ii = 0; ii < P.runThreadN; ii++) {
-                RAchunk[ii] = nullptr;
-            }
-        }
-        for (int ii = 0; ii < P.runThreadN; ii++) {
-            RAchunk[ii] = new ReadAlignChunk(P, genomeMain, transcriptomeMain, ii, 
-                                             libem_transcriptome.get());  // Pass shared transcriptome
-        }
-    }
-
     // === LIBRARY FORMAT DETECTION (single-threaded) ===
-    if (P.quant.transcriptVB.yes && P.quant.transcriptVB.libType == "A") {
+    if (!perFileMappingDone && P.quant.transcriptVB.yes && P.quant.transcriptVB.libType == "A") {
         P.inOut->logMain << "Starting library format auto-detection "
                          << "(first " << P.quant.transcriptVB.autoDetectWindow 
                          << " reads)...\n" << flush;
@@ -1827,20 +1848,51 @@ int main(int argInN, char *argIn[])
         // Set detection mode BEFORE processing
         P.quant.transcriptVB.inDetectionMode = true;
         
-        // Temporarily set read limit to detection window
+        // Temporarily set read limit to detection window and suppress all
+        // output side effects from the detector chunk. The detector pass only
+        // votes on library format; the main pass below replays the reads from
+        // the beginning with the detected format applied.
         uint64_t originalLimit = P.readMapNumber;
+        int originalRunThreadN = P.runThreadN;
+        bool originalOutSAMbool = P.outSAMbool;
+        bool originalOutBAMunsorted = P.outBAMunsorted;
+        bool originalOutBAMcoord = P.outBAMcoord;
+        bool originalOutSJyes = P.outSJ.yes;
+        bool originalTrSAMBamYes = P.quant.trSAM.bamYes;
+        string originalOutReadsUnmapped = P.outReadsUnmapped;
+        bool originalEmitYReadNames = P.emitYReadNamesyes;
+        bool originalEmitYNoYFastq = P.emitYNoYFastqyes;
+
+        P.runThreadN = 1;
         P.readMapNumber = P.quant.transcriptVB.autoDetectWindow;
+        P.outSAMbool = false;
+        P.outBAMunsorted = false;
+        P.outBAMcoord = false;
+        P.outSJ.yes = false;
+        P.quant.trSAM.bamYes = false;
+        P.outReadsUnmapped = "None";
+        P.emitYReadNamesyes = false;
+        P.emitYNoYFastqyes = false;
+
+        ReadAlignChunk *RAdetect = new ReadAlignChunk(P, genomeMain, transcriptomeMain, 0,
+                                                       libem_transcriptome.get());
+        RAdetect->processChunks();
+        delete RAdetect;
         
-        // Process first N reads using RAchunk[0] single-threaded
-        // Voting happens INSIDE addReadAlignments() when inDetectionMode=true
-        // NOTE: If total reads <= autoDetectWindow, RAchunk[0] will process all reads here
-        // and then mapThreadsSpawn() will run again on RAchunk[0] with no remaining reads.
-        // This is fine for datasets larger than autoDetectWindow, but avoid very small
-        // read counts with auto-detect enabled to prevent potential duplicate output.
-        RAchunk[0]->processChunks();
-        
-        // Restore original limit
+        uint64_t detectionReadsProcessed = P.iReadAll;
+
+        // Restore original mapping/output settings before finalizing and
+        // rewinding for the real mapping pass.
         P.readMapNumber = originalLimit;
+        P.runThreadN = originalRunThreadN;
+        P.outSAMbool = originalOutSAMbool;
+        P.outBAMunsorted = originalOutBAMunsorted;
+        P.outBAMcoord = originalOutBAMcoord;
+        P.outSJ.yes = originalOutSJyes;
+        P.quant.trSAM.bamYes = originalTrSAMBamYes;
+        P.outReadsUnmapped = originalOutReadsUnmapped;
+        P.emitYReadNamesyes = originalEmitYReadNames;
+        P.emitYNoYFastqyes = originalEmitYNoYFastq;
         
         // Finalize detection - HARD FAILURE if ambiguous (exits before returning)
         LibraryFormat detected = P.quant.transcriptVB.libFormatDetector->finalizeOrFail(
@@ -1854,17 +1906,46 @@ int main(int argInN, char *argIn[])
         // formatName() is defined in LibFormatDetection.h (see Section 9)
         P.inOut->logMain << "Detected library format: " << formatName(detected)
                          << " (formatID=" << static_cast<int>(detected.typeId()) << ")"
-                         << " from " << P.iReadAll << " reads\n" << flush;
+                         << " from " << detectionReadsProcessed << " reads\n" << flush;
         
         // Clean up detector (no longer needed)
         delete P.quant.transcriptVB.libFormatDetector;
         P.quant.transcriptVB.libFormatDetector = nullptr;
+
+        P.inOut->logMain << "TranscriptVB auto-detection: rewinding input files for main mapping pass\n"
+                         << flush;
+        P.closeReadsFiles();
+        P.iReadAll = 0;
+        g_threadChunks.chunkInN = 0;
+        g_threadChunks.chunkOutN = 0;
+        P.readFilesIndex = 0;
+        g_bamRecordIndex.store(0);
+        P.openReadsFiles();
+        g_statsAll.resetN();
+        time(&g_statsAll.timeStartMap);
+        g_statsAll.timeLastReport = g_statsAll.timeStartMap;
         
         // Reset global counters after detection completes
         // This ensures pre-burn-in gating starts fresh for the main mapping pass (matches Salmon's behavior)
         extern std::atomic<uint64_t> global_processed_fragments;
         global_processed_fragments.store(0, std::memory_order_relaxed);
         Parameters::global_fld_obs_count.store(0, std::memory_order_relaxed);
+    }
+
+    // prepare chunks and spawn mapping threads (skip if per-file already handled mapping).
+    // TranscriptVB chunks must be constructed after auto-detection so their
+    // per-thread quantizers inherit the detected library format.
+    if (!perFileMappingDone) {
+        if (RAchunk == nullptr) {
+            RAchunk = new ReadAlignChunk*[P.runThreadN];
+            for (int ii = 0; ii < P.runThreadN; ii++) {
+                RAchunk[ii] = nullptr;
+            }
+        }
+        for (int ii = 0; ii < P.runThreadN; ii++) {
+            RAchunk[ii] = new ReadAlignChunk(P, genomeMain, transcriptomeMain, ii,
+                                             libem_transcriptome.get());  // Pass shared transcriptome
+        }
     }
 
     const bool bridgeReplaySkipMapping = solo_bridge_hash_snapshot::replaySkipReadsEnabled(P);
@@ -2120,6 +2201,18 @@ int main(int argInN, char *argIn[])
         *P.inOut->logStdOut << "Merged " << mergedEC.getECTable().n_ecs << " equivalence classes from " << P.runThreadN << " threads\n"
                           << flush;
         P.inOut->logMain << "Merged " << mergedEC.getECTable().n_ecs << " equivalence classes from " << P.runThreadN << " threads\n";
+
+        if (!isUnsetToken(P.quant.transcriptVB.dumpEqFile)) {
+            try {
+                writeTranscriptVBEqDump(P.quant.transcriptVB.dumpEqFile, mergedEC.getECTable(), *transcriptomeMain);
+            } catch (const std::exception& e) {
+                ostringstream errOut;
+                errOut << "EXITING because of fatal OUTPUT ERROR: " << e.what() << "\n";
+                exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
+            }
+            P.inOut->logMain << "TranscriptVB rich EC dump written to: "
+                             << P.quant.transcriptVB.dumpEqFile << "\n";
+        }
         
         // Log drop statistics (per trace plan Step 3)
         P.inOut->logMain << "EC building drop statistics:\n"
@@ -2137,7 +2230,8 @@ int main(int argInN, char *argIn[])
         // Compute effective lengths using FLD (if available) or fallback to mean fragment length
         const FLDAccumulator& observedFLD = mergedEC.getObservedFLD();
         double meanFragLen = 200.0;  // Default fallback
-        bool use_fld = observedFLD.isValid();
+        bool use_eff_len_correction = (P.quant.transcriptVB.effectiveLengthCorrectionInt != 0);
+        bool use_fld = use_eff_len_correction && observedFLD.isValid();
         
         if (use_fld) {
             meanFragLen = observedFLD.getMean();
@@ -2180,7 +2274,12 @@ int main(int argInN, char *argIn[])
         
         // Compute effective lengths
         std::vector<double> eff_lengths;
-        if (use_fld && !fld_pmf.empty()) {
+        if (!use_eff_len_correction) {
+            eff_lengths.resize(transcriptomeMain->nTr);
+            for (uint i = 0; i < transcriptomeMain->nTr; ++i) {
+                eff_lengths[i] = static_cast<double>(transcriptomeMain->trLen[i]);
+            }
+        } else if (use_fld && !fld_pmf.empty()) {
             // Use EffectiveLengthCalculator via wrapper (avoids Transcriptome conflict)
             eff_lengths = computeEffectiveLengthsFromPMFWrapper(fld_pmf, raw_lengths_int);
         } else {

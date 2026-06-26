@@ -137,6 +137,12 @@ private:
     
     // Convert STAR Transcript to RawAlignment for EC building
     RawAlignment transcriptToRawAlignment(Transcript* tr, uint32_t transcript_id, uint32_t read1_len, uint32_t read2_len);
+
+    // Build the order-sensitive rich EC key. Salmon appends range-factorization
+    // bins to the key but keeps the optimizer transcript/weight arrays real-only.
+    std::vector<uint32_t> buildECSignatureIds(const std::vector<uint32_t>& transcript_ids,
+                                              const std::vector<double>& weights,
+                                              const ECBuilderParams& params) const;
     
     // Write trace line for a read
     void writeTraceLine(const char* qname, const ReadMapping& mapping, const ECBuilderParams& params, 

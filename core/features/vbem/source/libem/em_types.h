@@ -30,6 +30,7 @@ struct TranscriptState {
 // Array of Structures (AoS) for equivalence classes
 struct EC {
     std::vector<uint32_t> transcript_ids;  // indices into TranscriptState (order preserved from file)
+    std::vector<uint32_t> signature_ids;   // EC key; may include range-factorization bins
     std::vector<double> weights;           // per-transcript combinedWeights (auxs) from Salmon
                                            // Empty if file was generated without --dumpEqWeights
     double count;                          // observed fragment count
@@ -66,7 +67,7 @@ struct EMParams {
     
     // VB-specific parameters (Salmon-style initialization)
     uint32_t min_iters = 100;         // Minimum iterations before checking convergence (VB only)
-    double num_required_fragments = 5e6; // For VB init: fracObserved = min(1, totalWeight/numRequired)
+    double num_required_fragments = 5e7; // Salmon default numRequiredFrags for VB init
     double alpha_check_cutoff = 1e-2; // Only check convergence for transcripts with alpha > cutoff
 };
 

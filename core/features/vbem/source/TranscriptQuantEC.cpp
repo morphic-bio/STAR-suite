@@ -93,6 +93,8 @@ RawAlignment TranscriptQuantEC::transcriptToRawAlignment(Transcript* tr, uint32_
     }
     
     aln.is_forward = read1_fwd;
+    aln.read_len = read1_len;
+    aln.mate_read_len = read2_len;
     
     if (tr->readNmates == 2) {
         // Find mate boundary using canonSJ == -3
@@ -125,14 +127,11 @@ RawAlignment TranscriptQuantEC::transcriptToRawAlignment(Transcript* tr, uint32_
             // Only skip compat gating for orphans or missing mates
             aln.mate_fields_set = true;
             
-            // Compute fragment length using Salmon's pedantic definition (ReadPair::fragLengthPedantic)
-            // Only for proper pairs and opposite orientation (inward/outward)
-            // Formula: rightmost mate 3' end - leftmost mate 5' start + 1
-            // For same-orientation mates: set fragment_len = -1 (invalid, skip FLD/logFragProb)
+            // Compute fragment length using Salmon's pedantic definition
+            // (ReadPair::fragLengthPedantic): clamp transcript positions and use
+            // abs(p1 - p2), without an inclusive +1 span.
             int32_t fragLen = -1;
             if (read1_fwd != read2_fwd && read1_len > 0 && read2_len > 0) {
-                // Opposite strands: compute pedantic fragment length
-                // Get transcript length from cached lengths (for clamping)
                 int32_t transcript_len = 0;
                 if (!cached_transcript_lengths_.empty() && transcript_id < cached_transcript_lengths_.size()) {
                     transcript_len = cached_transcript_lengths_[transcript_id];
@@ -149,42 +148,23 @@ RawAlignment TranscriptQuantEC::transcriptToRawAlignment(Transcript* tr, uint32_
                 // Get positions (transcriptomic coordinates)
                 int32_t pos1 = aln.pos;  // Read1 leftmost aligned coordinate
                 int32_t pos2 = aln.mate_pos;  // Read2 leftmost aligned coordinate
-                
-                // Determine 5' start and 3' end for each mate
-                // Forward mate: 5' start = pos, 3' end = pos + len - 1
-                // Reverse mate: 5' start = pos + len - 1, 3' end = pos
-                int32_t read1_5prime, read1_3prime, read2_5prime, read2_3prime;
-                if (read1_fwd) {
-                    read1_5prime = pos1;
-                    read1_3prime = pos1 + static_cast<int32_t>(read1_len) - 1;
-                } else {
-                    read1_5prime = pos1 + static_cast<int32_t>(read1_len) - 1;
-                    read1_3prime = pos1;
-                }
-                
-                if (read2_fwd) {
-                    read2_5prime = pos2;
-                    read2_3prime = pos2 + static_cast<int32_t>(read2_len) - 1;
-                } else {
-                    read2_5prime = pos2 + static_cast<int32_t>(read2_len) - 1;
-                    read2_3prime = pos2;
-                }
-                
-                // Find leftmost 5' start and rightmost 3' end
-                int32_t leftmost_5prime = std::min(read1_5prime, read2_5prime);
-                int32_t rightmost_3prime = std::max(read1_3prime, read2_3prime);
-                
-                // Clamp to transcript length if needed
+
+                int32_t p1 = read1_fwd ? pos1 : pos2;
+                int32_t p2 = read1_fwd
+                    ? pos2 + static_cast<int32_t>(read2_len)
+                    : pos1 + static_cast<int32_t>(read1_len);
+
                 if (transcript_len > 0) {
-                    leftmost_5prime = std::max(0, std::min(leftmost_5prime, transcript_len - 1));
-                    rightmost_3prime = std::max(0, std::min(rightmost_3prime, transcript_len - 1));
+                    p1 = std::max(0, std::min(p1, transcript_len));
+                    p2 = std::max(0, std::min(p2, transcript_len));
                 }
+
+                fragLen = std::abs(p1 - p2);
                 
-                // Pedantic fragment length: rightmost 3' end - leftmost 5' start + 1
-                fragLen = rightmost_3prime - leftmost_5prime + 1;
-                
-                // Validate fragment length (must be positive and within reasonable bounds)
-                if (fragLen <= 0 || fragLen > FLDAccumulator::MAX_FRAG_LEN) {
+                // Salmon keeps the true pedantic fragment span here. The FLD
+                // histogram clamps long fragments internally, but start-position
+                // probability still needs the unclamped length.
+                if (fragLen <= 0) {
                     fragLen = -1;  // Invalid
                 }
             } else {
@@ -247,7 +227,8 @@ ECBuilderParams TranscriptQuantEC::getParams() const {
     
     // Wire FLD into params if observations exist
     // Prefer O(1) log-space accumulator over PMF to avoid recomputation
-    bool has_fld = observedFLD_.isValid();
+    bool use_fld_in_aux = (P_.quant.transcriptVB.fragLengthDistInt != 0);
+    bool has_fld = use_fld_in_aux && observedFLD_.isValid();
     if (has_fld) {
         // Prefer accumulator for O(1) logFragProb computation
         params.fld_accumulator = &observedFLD_;
@@ -273,12 +254,13 @@ ECBuilderParams TranscriptQuantEC::getParams() const {
         params.use_frag_len_dist = false;
     }
     
-    // Wire transcript lengths and start position probability
+    // Wire transcript lengths and start position probability.
+    // Salmon applies the paired fragment start-position validity check even
+    // before an observed FLD is available; FLD only controls logFragProb.
     bool has_transcript_lengths = !cached_transcript_lengths_.empty();
     if (has_transcript_lengths) {
         params.transcript_lengths = &cached_transcript_lengths_;
-        // Enable start position probability when FLD + fragment lengths + transcript lengths are available
-        params.use_start_pos_prob = has_fld;  // Only if FLD is also enabled
+        params.use_start_pos_prob = true;
     } else {
         params.transcript_lengths = nullptr;
         params.use_start_pos_prob = false;
@@ -330,6 +312,23 @@ ECBuilderParams TranscriptQuantEC::getParams() const {
     return params;
 }
 
+std::vector<uint32_t> TranscriptQuantEC::buildECSignatureIds(
+    const std::vector<uint32_t>& transcript_ids,
+    const std::vector<double>& weights,
+    const ECBuilderParams& params) const {
+    std::vector<uint32_t> signature_ids = transcript_ids;
+    std::vector<double> signature_weights = weights;
+
+    if (params.use_rank_eq_classes && signature_ids.size() > 1) {
+        applyRankEqClasses(signature_ids, signature_weights);
+    }
+    if (params.use_range_factorization) {
+        applyRangeFactorization(signature_ids, signature_weights, params.range_factorization_bins);
+    }
+
+    return signature_ids;
+}
+
 void TranscriptQuantEC::addReadAlignments(Transcript* trMult, uint nTr, const std::vector<double>& auxProbs, const char* qname,
                                           const uint8_t* packed_read1, const uint8_t* packed_read1_rc, uint32_t read1_len,
                                           const uint8_t* packed_read2, const uint8_t* packed_read2_rc, uint32_t read2_len) {
@@ -347,9 +346,6 @@ void TranscriptQuantEC::addReadAlignments(Transcript* trMult, uint nTr, const st
     if (P_.quant.transcriptVB.inDetectionMode && 
         P_.quant.transcriptVB.libFormatDetector != nullptr) {
         
-        // Prefer primary alignments, but do not require them for detection.
-        // primaryFlag is only set when TranscriptomeSAM output is enabled.
-        Transcript* vote_tr = nullptr;
         for (uint i = 0; i < nTr; ++i) {
             Transcript* tr = &trMult[i];
             if (tr->readNmates != 2) {
@@ -366,16 +362,7 @@ void TranscriptQuantEC::addReadAlignments(Transcript* trMult, uint nTr, const st
             if (!proper) {
                 continue;
             }
-            if (tr->primaryFlag) {
-                vote_tr = tr;
-                break;  // Use first primary proper pair if present
-            }
-            if (vote_tr == nullptr) {
-                vote_tr = tr;  // Fallback to first proper pair
-            }
-        }
-        if (vote_tr != nullptr) {
-            P_.quant.transcriptVB.libFormatDetector->vote(vote_tr);
+            P_.quant.transcriptVB.libFormatDetector->vote(tr, read1_len, read2_len);
         }
     }
     
@@ -681,7 +668,7 @@ void TranscriptQuantEC::addReadAlignments(Transcript* trMult, uint nTr, const st
             int32_t frag_len = (i < mapping.frag_lens.size()) ? mapping.frag_lens[i] : -1;
             const auto& aln = filtered_alignments[aln_idx];
             bool is_paired = (aln.mate_status == MateStatus::PAIRED_END_PAIRED);
-            if (is_paired && frag_len > 0 && frag_len <= static_cast<int32_t>(FLDAccumulator::MAX_FRAG_LEN)) {
+            if (is_paired && frag_len > 0) {
                 // Apply forgetting mass as weight (LOG space - Salmon style)
                 // Salmon: fragLengthDist.addVal(fragLength, logForgettingMass);
                 observedFLD_.add(frag_len, log_forgetting_mass);
@@ -770,10 +757,12 @@ void TranscriptQuantEC::addReadAlignments(Transcript* trMult, uint nTr, const st
         sorted_weights.push_back(linear_weights[idx]);
     }
     
-    // Create EC signature (sorted transcript IDs only - matches Salmon)
-    // NOTE: Salmon keys ECs by transcript IDs only, weights are accumulated separately
+    // Create EC signature. Salmon keys rich ECs by transcript IDs plus optional
+    // range-factorization bins, while the optimizer still sees only real
+    // transcript IDs and weights.
+    std::vector<uint32_t> signature_ids = buildECSignatureIds(sorted_ids, sorted_weights, params);
     ECSignature sig;
-    sig.transcript_ids = sorted_ids;
+    sig.transcript_ids = signature_ids;
     
     // Find or create EC
     auto it = ec_signature_map_.find(sig);
@@ -792,6 +781,7 @@ void TranscriptQuantEC::addReadAlignments(Transcript* trMult, uint nTr, const st
         // New EC: create entry
         EC ec;
         ec.transcript_ids = sorted_ids;
+        ec.signature_ids = signature_ids;
         ec.weights = sorted_weights;
         ec.count = 1.0;
         
@@ -829,9 +819,10 @@ void TranscriptQuantEC::addReadAlignmentsSimple(const std::vector<uint32_t>& tra
         }
     }
     
-    // Create EC signature (sorted transcript IDs only - matches Salmon)
+    ECBuilderParams params = getParams();
+    std::vector<uint32_t> signature_ids = buildECSignatureIds(sorted_ids, sorted_weights, params);
     ECSignature sig;
-    sig.transcript_ids = sorted_ids;
+    sig.transcript_ids = signature_ids;
     
     // Find or create EC
     auto it = ec_signature_map_.find(sig);
@@ -850,6 +841,7 @@ void TranscriptQuantEC::addReadAlignmentsSimple(const std::vector<uint32_t>& tra
         // New EC: create entry
         EC ec;
         ec.transcript_ids = sorted_ids;
+        ec.signature_ids = signature_ids;
         ec.weights = sorted_weights;
         ec.count = 1.0;
         
@@ -908,8 +900,25 @@ void TranscriptQuantEC::setTranscriptLengths(const std::vector<int32_t>& lengths
 }
 
 void TranscriptQuantEC::finalize() {
-    // Normalize observed GC if needed
-    // (Will be normalized later when computing bias ratios)
+    for (EC& ec : ecTable_.ecs) {
+        if (ec.weights.empty()) {
+            continue;
+        }
+
+        double sum = 0.0;
+        for (double w : ec.weights) {
+            if (std::isfinite(w) && w > 0.0) {
+                sum += w;
+            }
+        }
+
+        if (sum > 0.0) {
+            const double inv_sum = 1.0 / sum;
+            for (double& w : ec.weights) {
+                w = (std::isfinite(w) && w > 0.0) ? w * inv_sum : 0.0;
+            }
+        }
+    }
 }
 
 void TranscriptQuantEC::writeTraceLine(const char* qname, const ReadMapping& mapping, 
@@ -1223,9 +1232,16 @@ void TranscriptQuantEC::merge(const TranscriptQuantEC& other) {
             }
         }
         
-        // Create signature (transcript IDs only - matches Salmon)
+        std::vector<uint32_t> signature_ids;
+        if (!other_ec.signature_ids.empty()) {
+            signature_ids = other_ec.signature_ids;
+        } else {
+            ECBuilderParams params = getParams();
+            signature_ids = buildECSignatureIds(sorted_ids, sorted_weights, params);
+        }
+
         ECSignature sig;
-        sig.transcript_ids = sorted_ids;
+        sig.transcript_ids = signature_ids;
         
         // Find or create EC
         auto it = ec_signature_map_.find(sig);
@@ -1244,6 +1260,7 @@ void TranscriptQuantEC::merge(const TranscriptQuantEC& other) {
             // New EC: add entry
             EC ec;
             ec.transcript_ids = sorted_ids;
+            ec.signature_ids = signature_ids;
             ec.weights = sorted_weights;
             ec.count = other_ec.count;
             size_t ec_idx = ecTable_.ecs.size();

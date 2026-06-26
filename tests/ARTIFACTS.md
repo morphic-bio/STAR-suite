@@ -177,6 +177,15 @@ update this file with its output location.
   parity, and staged SE/PE FASTQ-vs-CBQ divergence reports; reproduced by
   `scripts/run_slam_100k_se_pe_smoke.sh`, `tests/run_slam_parity_smoke.sh`, and
   `tests/run_slam_cbq_divergence_harness.sh`)
+- `tests/transcriptvb_chr22_parity_output_*/` (TranscriptVB chr22 same-BAM
+  Salmon parity smoke outputs from `tests/run_transcriptvb_chr22_parity_smoke.sh`;
+  contains STAR auto-detect TranscriptVB output, Salmon `-p 1` same-BAM output,
+  logs, and `summary.tsv`)
+- `benchmarks/nfcore_rnaseq_compare/fixtures/chr22/` (small cached public chr22
+  PE fixture used by the TranscriptVB Salmon-parity smoke)
+- `benchmarks/nfcore_rnaseq_compare/runs/chr22_20260626_003522/` (retained
+  local 2026-06-26 TranscriptVB parity artifact with diagnostic intermediates and
+  final comparison reports; do not commit generated BAMs or quant outputs)
 - `/mnt/pikachu/SLAM-Seq-PE-results/prod_full_20260511T103908Z/` (active
   2026-05 SLAM paired-end full-panel production root; protected local dataset,
   Y/noY BAM/FASTQ derivatives are uploaded by Globus and cleaned locally, do

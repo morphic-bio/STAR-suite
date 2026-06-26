@@ -485,7 +485,10 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "quantVBAutoDetectWindow", &quant.transcriptVB.autoDetectWindow));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "quantVBTrace", &quant.transcriptVB.traceFile));
     parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "quantVBTraceLimit", &quant.transcriptVB.traceLimit));
+    parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "quantVBDumpEq", &quant.transcriptVB.dumpEqFile));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "quantVBErrorModel", &quant.transcriptVB.errorModelMode));
+    parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "quantVBFragLengthDist", &quant.transcriptVB.fragLengthDistInt));
+    parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "quantVBEffectiveLengthCorrection", &quant.transcriptVB.effectiveLengthCorrectionInt));
     parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "slamQuantMode", &quant.slam.modeInt));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "slamSnpBed", &quant.slam.snpBed));
     parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "slamSnpDetect", &quant.slam.snpDetectInt));
@@ -3103,6 +3106,21 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
             exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
         }
         quant.transcriptVB.errorModelMode = errorModelModeLower;
+
+        if (quant.transcriptVB.fragLengthDistInt != 0 && quant.transcriptVB.fragLengthDistInt != 1) {
+            ostringstream errOut;
+            errOut << "EXITING because of FATAL PARAMETER ERROR: "
+                   << "--quantVBFragLengthDist must be 0 or 1\n"
+                   << "Got: " << quant.transcriptVB.fragLengthDistInt << "\n";
+            exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+        }
+        if (quant.transcriptVB.effectiveLengthCorrectionInt != 0 && quant.transcriptVB.effectiveLengthCorrectionInt != 1) {
+            ostringstream errOut;
+            errOut << "EXITING because of FATAL PARAMETER ERROR: "
+                   << "--quantVBEffectiveLengthCorrection must be 0 or 1\n"
+                   << "Got: " << quant.transcriptVB.effectiveLengthCorrectionInt << "\n";
+            exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+        }
 
         // Treat "None" and "-" as unset trace output
         if (quant.transcriptVB.traceFile == "-" || quant.transcriptVB.traceFile == "None") {

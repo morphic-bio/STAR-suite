@@ -483,8 +483,11 @@ class Parameters {
                 int autoDetectWindow = 1000;
                 string traceFile;          // Empty = disabled
                 int traceLimit = 0;        // 0 = unlimited (trace all reads); >0 = limit to N reads
+                string dumpEqFile = "-";   // Optional Salmon-shaped rich EC dump
                 int preBurninFrags = 5000; // Pre-burn-in fragment count threshold (Salmon default: 5000)
                 int miniBatchSize = 1000;  // Mini-batch size for processed reads counter (Salmon default: 1000)
+                int fragLengthDistInt = 1;  // If 0, do not use learned FLD in EC aux probabilities
+                int effectiveLengthCorrectionInt = 1;  // If 0, use raw transcript lengths in VB/EM
                 
                 // Error model mode: auto|cigar|as|off (default: auto)
                 string errorModelMode = "auto";  // auto=use CIGAR if available else AS, cigar=CIGAR only, as=AS only, off=disabled
