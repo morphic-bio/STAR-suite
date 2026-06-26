@@ -217,11 +217,14 @@ void ReadAlignChunk::mapChunk() {//map one chunk. Input reads stream has to be s
         rename(chunkOutBAMfileName.c_str(),name2.str().c_str());//marks files as completedly written
     };
 
-    //add stats, write progress if needed
-    if (P.runThreadN>1) pthread_mutex_lock(&g_threadChunks.mutexStats);
-    g_statsAll.addStats(RA->statsRA);
-    g_statsAll.progressReport(P.inOut->logProgress);
-    if (P.runThreadN>1) pthread_mutex_unlock(&g_threadChunks.mutexStats);
+    // Detection passes are intentionally side-effect-free for run-level stats.
+    if (!P.quant.slam.autoTrimDetectionPass && !P.quant.transcriptVB.inDetectionMode) {
+        //add stats, write progress if needed
+        if (P.runThreadN>1) pthread_mutex_lock(&g_threadChunks.mutexStats);
+        g_statsAll.addStats(RA->statsRA);
+        g_statsAll.progressReport(P.inOut->logProgress);
+        if (P.runThreadN>1) pthread_mutex_unlock(&g_threadChunks.mutexStats);
+    }
 };
 
 void ReadAlignChunk::mapCbqChunk() {//map one owned CBQ chunk through STAR read buffers

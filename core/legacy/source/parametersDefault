@@ -1167,12 +1167,21 @@ quantVBTraceLimit                     0
         1 ... output quant.genes.sf with gene-level TPM and counts (default)
         Gene-level metrics are aggregated from transcript results using TPM-weighted averaging.
 
+quantVBDumpEq                         -
+    string: Optional path for a Salmon-shaped TranscriptVB rich equivalence-class dump (default: disabled)
+
 quantVBErrorModel                     auto
     string: Error model mode for TranscriptVB
             auto ... use CIGAR if available, otherwise AS
             cigar ... use CIGAR only
             as   ... use AS only
             off  ... disable error model
+
+quantVBFragLengthDist                 1
+    int: 0/1 - use learned fragment length distribution in TranscriptVB EC weights
+
+quantVBEffectiveLengthCorrection      1
+    int: 0/1 - use effective-length correction in TranscriptVB quantification
 
 slamQuantMode                         0
     int: 0/1 - enable STAR-Slam quantification

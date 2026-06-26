@@ -1228,8 +1228,10 @@ void ReadAlignChunk::processChunks() {//read-map-write chunks
         }
     }
 
-    // Skip output operations during auto-trim detection pass (detection-only mode)
-    if (P.outFilterBySJoutStage!=1 && RA->iRead>0 && !P.quant.slam.autoTrimDetectionPass) {//not the first stage of the 2-stage mapping, and not detection-only
+    // Skip output operations during detection-only passes.
+    if (P.outFilterBySJoutStage!=1 && RA->iRead>0 &&
+        !P.quant.slam.autoTrimDetectionPass &&
+        !P.quant.transcriptVB.inDetectionMode) {//not the first stage of the 2-stage mapping, and not detection-only
         if (P.outBAMunsorted && chunkOutBAMunsorted!=NULL) chunkOutBAMunsorted->unsortedFlush();
         if (P.outBAMcoord) chunkOutBAMcoord->coordFlush();
         if (chunkOutBAMquant!=NULL) chunkOutBAMquant->unsortedFlush();

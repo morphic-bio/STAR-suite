@@ -7,6 +7,7 @@
 #include <fstream>
 #include <cstdlib>
 #include <limits>
+#include <unordered_map>
 
 // A standalone, high-precision implementation of Digamma (Psi)
 // Logic: Uses the recurrence relation psi(x) = psi(x+1) - 1/x to shift 
@@ -73,48 +74,211 @@ std::vector<double> compute_unique_counts(const ECTable& ecs) {
     return unique_counts;
 }
 
-// Compute projected counts from ALL ECs (Salmon-style VB initialization)
-// This distributes multi-mapper counts using EC weights to break symmetry
-std::vector<double> compute_projected_counts(const ECTable& ecs, const std::vector<double>& eff_lengths) {
-    std::vector<double> projected_counts(ecs.n_transcripts, 0.0);
-    
-    for (const EC& ec : ecs.ecs) {
-        if (ec.count <= 0) continue;
-        
-        size_t groupSize = ec.transcript_ids.size();
-        
-        if (groupSize == 1) {
-            // Single-transcript EC: full count
-            projected_counts[ec.transcript_ids[0]] += ec.count;
+namespace {
+
+struct UnionFind {
+    explicit UnionFind(size_t n) : parent(n), rank(n, 0) {
+        for (size_t i = 0; i < n; ++i) {
+            parent[i] = i;
+        }
+    }
+
+    size_t find(size_t x) {
+        while (parent[x] != x) {
+            parent[x] = parent[parent[x]];
+            x = parent[x];
+        }
+        return x;
+    }
+
+    void unite(size_t a, size_t b) {
+        size_t ra = find(a);
+        size_t rb = find(b);
+        if (ra == rb) {
+            return;
+        }
+        if (rank[ra] < rank[rb]) {
+            parent[ra] = rb;
+        } else if (rank[ra] > rank[rb]) {
+            parent[rb] = ra;
         } else {
-            // Multi-transcript EC: distribute by weights
-            // Salmon's combinedWeights = alignmentWeight * probStartPos where probStartPos = 1/effLen
-            // So we need to multiply EC weights by 1/effLen
-            double total_weight = 0.0;
-            std::vector<double> weights(groupSize);
-            
-            for (size_t i = 0; i < groupSize; ++i) {
-                uint32_t tid = ec.transcript_ids[i];
-                double effLen_factor = (eff_lengths[tid] > 0) ? 1.0 / eff_lengths[tid] : 0.0;
-                if (ec.has_weights() && i < ec.weights.size()) {
-                    // EC weights are alignment likelihoods, multiply by 1/effLen
-                    weights[i] = ec.weights[i] * effLen_factor;
-                } else {
-                    // No weights, use 1/effLen only
-                    weights[i] = effLen_factor;
-                }
-                total_weight += weights[i];
+            parent[rb] = ra;
+            ++rank[ra];
+        }
+    }
+
+    std::vector<size_t> parent;
+    std::vector<uint8_t> rank;
+};
+
+std::vector<uint32_t> distinct_transcript_ids(const EC& ec) {
+    std::vector<uint32_t> ids = ec.transcript_ids;
+    std::sort(ids.begin(), ids.end());
+    ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
+    return ids;
+}
+
+void project_cluster_to_polytope(
+    const std::vector<uint32_t>& members,
+    double cluster_count,
+    const std::vector<double>& unique_counts,
+    const std::vector<double>& total_counts,
+    std::vector<double>& projected_counts
+) {
+    if (members.empty() || cluster_count <= 0.0) {
+        return;
+    }
+
+    std::vector<bool> bound(members.size(), false);
+    for (size_t round = 0; round <= 5000; ++round) {
+        double unbound_counts = 0.0;
+        double bound_counts = 0.0;
+
+        for (size_t i = 0; i < members.size(); ++i) {
+            const uint32_t tid = members[i];
+            if (projected_counts[tid] > total_counts[tid]) {
+                projected_counts[tid] = total_counts[tid];
+                bound[i] = true;
+            } else if (projected_counts[tid] < unique_counts[tid]) {
+                projected_counts[tid] = unique_counts[tid];
+                bound[i] = true;
             }
-            
-            if (total_weight > 0) {
-                for (size_t i = 0; i < groupSize; ++i) {
-                    uint32_t tid = ec.transcript_ids[i];
-                    projected_counts[tid] += ec.count * (weights[i] / total_weight);
+
+            if (bound[i]) {
+                bound_counts += projected_counts[tid];
+            } else {
+                unbound_counts += projected_counts[tid];
+            }
+        }
+
+        const double total = unbound_counts + bound_counts;
+        if (std::abs(total - cluster_count) <= 1e-8 * std::max(1.0, cluster_count)) {
+            return;
+        }
+
+        if (unbound_counts == 0.0) {
+            std::fill(bound.begin(), bound.end(), false);
+            unbound_counts = bound_counts;
+            bound_counts = 0.0;
+        }
+
+        if (unbound_counts == 0.0) {
+            return;
+        }
+
+        const double normalizer = (cluster_count - bound_counts) / unbound_counts;
+        for (size_t i = 0; i < members.size(); ++i) {
+            if (!bound[i]) {
+                projected_counts[members[i]] *= normalizer;
+            }
+        }
+    }
+}
+
+} // namespace
+
+// Compute projected counts from ALL ECs for Salmon-style VB initialization.
+// Salmon derives these from online transcript masses, then projects each
+// transcript cluster into [uniqueCount, totalCount] bounds.  Reconstruct the
+// same cluster-level initialization from the finalized EC table: EC weights
+// approximate the online mass split, while distinct transcript IDs reproduce
+// Salmon's per-fragment total/unique-count side effects.
+std::vector<double> compute_projected_counts(const ECTable& ecs, const std::vector<double>& eff_lengths) {
+    (void)eff_lengths;
+    std::vector<double> projected_counts(ecs.n_transcripts, 0.0);
+    std::vector<double> unique_counts(ecs.n_transcripts, 0.0);
+    std::vector<double> total_counts(ecs.n_transcripts, 0.0);
+    std::vector<double> transcript_mass(ecs.n_transcripts, 0.0);
+    UnionFind clusters(ecs.n_transcripts);
+
+    std::vector<std::vector<uint32_t>> ec_distinct_ids;
+    ec_distinct_ids.reserve(ecs.ecs.size());
+
+    for (const EC& ec : ecs.ecs) {
+        std::vector<uint32_t> ids = distinct_transcript_ids(ec);
+        ec_distinct_ids.push_back(ids);
+        if (ec.count <= 0.0 || ids.empty()) {
+            continue;
+        }
+
+        for (uint32_t tid : ids) {
+            if (tid < total_counts.size()) {
+                total_counts[tid] += ec.count;
+            }
+        }
+
+        if (ids.size() == 1) {
+            unique_counts[ids[0]] += ec.count;
+        } else {
+            for (size_t i = 1; i < ids.size(); ++i) {
+                clusters.unite(ids[0], ids[i]);
+            }
+        }
+
+        if (ec.has_weights() && ec.weights.size() == ec.transcript_ids.size()) {
+            for (size_t i = 0; i < ec.transcript_ids.size(); ++i) {
+                const uint32_t tid = ec.transcript_ids[i];
+                if (tid < transcript_mass.size() && std::isfinite(ec.weights[i]) && ec.weights[i] > 0.0) {
+                    transcript_mass[tid] += ec.count * ec.weights[i];
+                }
+            }
+        } else {
+            const double share = ec.count / static_cast<double>(ids.size());
+            for (uint32_t tid : ids) {
+                if (tid < transcript_mass.size()) {
+                    transcript_mass[tid] += share;
                 }
             }
         }
     }
-    
+
+    std::unordered_map<size_t, std::vector<uint32_t>> cluster_members;
+    cluster_members.reserve(ecs.n_transcripts);
+    for (uint32_t tid = 0; tid < ecs.n_transcripts; ++tid) {
+        cluster_members[clusters.find(tid)].push_back(tid);
+    }
+
+    std::unordered_map<size_t, double> cluster_counts;
+    cluster_counts.reserve(cluster_members.size());
+    for (size_t ec_idx = 0; ec_idx < ecs.ecs.size(); ++ec_idx) {
+        const EC& ec = ecs.ecs[ec_idx];
+        const std::vector<uint32_t>& ids = ec_distinct_ids[ec_idx];
+        if (ec.count <= 0.0 || ids.empty()) {
+            continue;
+        }
+        cluster_counts[clusters.find(ids[0])] += ec.count;
+    }
+
+    for (const auto& kv : cluster_members) {
+        const size_t rep = kv.first;
+        const std::vector<uint32_t>& members = kv.second;
+        const double cluster_count = cluster_counts[rep];
+        if (cluster_count <= 0.0) {
+            continue;
+        }
+
+        double cluster_mass = 0.0;
+        for (uint32_t tid : members) {
+            cluster_mass += transcript_mass[tid];
+        }
+
+        if (cluster_mass > 0.0) {
+            const double scale = cluster_count / cluster_mass;
+            for (uint32_t tid : members) {
+                projected_counts[tid] = transcript_mass[tid] * scale;
+            }
+        } else {
+            const double share = cluster_count / static_cast<double>(members.size());
+            for (uint32_t tid : members) {
+                projected_counts[tid] = share;
+            }
+        }
+
+        if (members.size() > 1) {
+            project_cluster_to_polytope(members, cluster_count, unique_counts, total_counts, projected_counts);
+        }
+    }
+
     return projected_counts;
 }
 

@@ -23,6 +23,9 @@ This test suite provides:
 # Validate archived bad PE artifacts fail and fixed artifacts pass
 ../run_pe_bulk_regression_replay.sh
 
+# Run same-BAM chr22 Salmon parity smoke
+../run_transcriptvb_chr22_parity_smoke.sh
+
 # Run public human male bulk PE smoke (after preparing fixture)
 ../run_public_bulk_pe_smoke.sh
 
@@ -78,6 +81,32 @@ Validates TranscriptVB against Salmon using the same input alignments.
 - Optional gene map file for gene-level parity (use `make_gene_map_from_gtf.sh`)
 
 **Runtime**: ~5 minutes
+
+---
+
+### `../run_transcriptvb_chr22_parity_smoke.sh`
+
+Runs the cached chr22 real-read fixture through STAR TranscriptVB auto-detect,
+then runs Salmon on the exact STAR transcriptome BAM with fixed `ISR` and
+`-p 1`. Salmon is pinned to one quantification thread for this smoke because its
+alignment-mode online fragment-length distribution is thread-order sensitive on
+the small chr22 fixture. STAR defaults to 32 threads to match the retained chr22
+parity artifact; this is a semantic parity smoke, not a thread-determinism test.
+
+**Checks**:
+- detected library format is `ISR`
+- `NumReads` Pearson is at least `0.99998`
+- TPM Pearson is at least `0.99995`
+- total assigned reads match within `0.05`
+- half-L1 read-equivalent movement is at most `20`
+- at most `10` transcripts differ by more than one read-equivalent
+
+**Usage**:
+```bash
+../run_transcriptvb_chr22_parity_smoke.sh
+```
+
+**Runtime**: ~1-2 minutes with the cached fixture/reference.
 
 ---
 

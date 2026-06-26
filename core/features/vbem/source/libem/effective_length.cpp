@@ -214,38 +214,44 @@ std::vector<double> EffectiveLengthCalculator::computeEffectiveLengthsFromPMF(
 {
     std::vector<double> eff_lengths;
     eff_lengths.reserve(raw_lengths.size());
-    
-    for (int32_t raw_len : raw_lengths) {
-        if (fld_pmf.empty()) {
+
+    if (fld_pmf.empty()) {
+        for (int32_t raw_len : raw_lengths) {
             eff_lengths.push_back(static_cast<double>(raw_len));
-            continue;
         }
-        
-        // Compute effective length using FLD PMF (Salmon formula)
-        // effLen = sum_{fl} PMF[fl] * max(0, L - fl + 1)
-        // where (L - fl + 1) is the number of valid start positions for fragment length fl
-        double effLen = 0.0;
-        int32_t refLen = raw_len;
-        
-        // Iterate over fragment lengths (within quantile bounds if set, otherwise all)
-        int32_t fl_low = (fld_low_ > 0) ? fld_low_ : 1;  // Start at 1 (min fragment length)
-        int32_t fl_high = (fld_high_ > 0 && fld_high_ < static_cast<int32_t>(fld_pmf.size())) 
-                        ? fld_high_ 
-                        : static_cast<int32_t>(fld_pmf.size() - 1);
-        
-        for (int32_t fl = fl_low; fl <= fl_high && fl < static_cast<int32_t>(fld_pmf.size()); ++fl) {
-            // Number of valid start positions for this fragment length
-            int32_t numStartPositions = refLen - fl + 1;
-            if (numStartPositions > 0) {
-                effLen += fld_pmf[fl] * static_cast<double>(numStartPositions);
-            }
+        return eff_lengths;
+    }
+
+    // Match Salmon's alignment-mode effective length correction:
+    // build cumulative E[fragment length | fragment length <= transcript length],
+    // then subtract that correction factor from each transcript's raw length.
+    std::vector<double> correction_factors(fld_pmf.size(), 0.0);
+    std::vector<double> cumulative_weighted_lengths(fld_pmf.size(), 0.0);
+    std::vector<double> cumulative_masses(fld_pmf.size(), 0.0);
+
+    cumulative_masses[0] = fld_pmf[0];
+    for (size_t i = 1; i < fld_pmf.size(); ++i) {
+        const double mass = fld_pmf[i];
+        cumulative_weighted_lengths[i] =
+            (mass * static_cast<double>(i)) + cumulative_weighted_lengths[i - 1];
+        cumulative_masses[i] = mass + cumulative_masses[i - 1];
+        if (cumulative_masses[i] > 0.0) {
+            correction_factors[i] = cumulative_weighted_lengths[i] / cumulative_masses[i];
         }
-        
-        // Clamp to valid range
-        if (effLen < 1.0) effLen = 1.0;
-        if (effLen > raw_len) effLen = static_cast<double>(raw_len);
-        
-        eff_lengths.push_back(effLen);
+    }
+
+    for (int32_t raw_len : raw_lengths) {
+        const double orig_len = static_cast<double>(raw_len);
+        const size_t correction_idx =
+            (static_cast<size_t>(raw_len) >= fld_pmf.size())
+                ? fld_pmf.size() - 1
+                : static_cast<size_t>(raw_len);
+
+        double eff_len = orig_len - correction_factors[correction_idx];
+        if (eff_len < 1.0) {
+            eff_len = orig_len;
+        }
+        eff_lengths.push_back(eff_len);
     }
     
     return eff_lengths;

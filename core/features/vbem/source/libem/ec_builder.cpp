@@ -78,8 +78,8 @@ static LibraryFormat computeObservedFormat(const RawAlignment& aln) {
     
     bool end1Fwd = aln.is_forward;
     bool end2Fwd = aln.mate_is_forward;
-    int32_t end1Start = (aln.five_prime_pos >= 0) ? aln.five_prime_pos : aln.pos;
-    int32_t end2Start = (aln.mate_five_prime_pos >= 0) ? aln.mate_five_prime_pos : aln.mate_pos;
+    int32_t end1Start = aln.pos;
+    int32_t end2Start = aln.mate_pos;
     
     // If reads come from opposite strands
     if (end1Fwd != end2Fwd) {
@@ -288,9 +288,8 @@ ReadMapping computeAuxProbs(
         // Track if this alignment should count toward FLD observations
         // Increment FLD counter when: valid fragment length, compatible, not orphaned, not missing fields
         // Note: unknown_obs_fmt and missing_mate_fields are already computed above
-        bool should_count_fld = !is_orphan && 
-                                aln.fragment_len >= 0 && 
-                                aln.fragment_len <= FLDAccumulator::MAX_FRAG_LEN &&
+        bool should_count_fld = !is_orphan &&
+                                aln.fragment_len > 0 &&
                                 is_compat &&
                                 !missing_mate_fields &&
                                 !unknown_obs_fmt;
@@ -431,11 +430,17 @@ ReadMapping computeAuxProbs(
         //    In initial round, all transcripts should have prior mass, so this always passes.
         //    We don't track transcript mass, so we skip this check.
         //    TODO: If we add transcript mass tracking, add: if (transcriptLogCount == LOG_0) continue;
-        
-        // 2. startPosProb != LOG_0 (start position probability)
-        //    With --noLengthCorrection: startPosProb = -logRefLength = -1.0 (not LOG_0)
-        //    So this check always passes. We skip it since we don't use length correction.
-        //    TODO: If we add length correction, add: if (startPosProb == LOG_0) continue;
+        //
+        // 2. startPosProb != LOG_0 (start position probability). Salmon drops
+        //    paired alignments whose fragment cannot fit on the transcript
+        //    before adding them to the EC.
+        if (start_pos_prob == LOG_0) {
+            if (enable_trace) {
+                trace.dropped = true;
+                mapping.trace_info.push_back(trace);
+            }
+            continue;
+        }
         
         mapping.transcript_ids.push_back(aln.transcript_id);
         mapping.aux_probs.push_back(aux_prob);
