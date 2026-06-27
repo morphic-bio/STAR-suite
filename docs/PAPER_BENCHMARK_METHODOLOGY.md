@@ -221,6 +221,11 @@ It did not emit integrated TranscriptomeSAM and did not run integrated Salmon
 QC, matching the normal STAR-suite production arm. Run root:
 `/storage/JAX_PE/results/pparg_prod_benchmark_no_y_20260627_172349/`.
 
+The matched external no-Y control was then completed in the same run root:
+decompress `1:18.01`, trimvalidate `6:53.71`, STAR TranscriptomeSAM `6:56.55`,
+and Salmon `1:01.34`, for an external total of `16:09.61`. The production
+STAR-suite arm is therefore `1.81x` faster for this PPARG no-Y wrapper run.
+
 An earlier PPARG no-Y sanity rerun before the production-mode wrapper correction
 measured STAR-suite integrated trim+align+TranscriptVB plus TranscriptomeSAM
 emission at `7:18.06`; Salmon QC on the integrated transcriptome BAM added

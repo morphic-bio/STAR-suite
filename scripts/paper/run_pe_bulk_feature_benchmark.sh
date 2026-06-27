@@ -149,7 +149,8 @@ extract_time_metric() {
         echo "NA"
         return
     fi
-    grep -F "${pattern}" "${log_file}" | head -n1 | sed -E 's/^.*:[[:space:]]*//'
+    grep -F "${pattern}" "${log_file}" | head -n1 \
+        | sed -E 's/^.*\):[[:space:]]*//; t; s/^.*:[[:space:]]*//'
 }
 
 write_cmd_script() {
