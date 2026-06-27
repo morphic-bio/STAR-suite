@@ -87,6 +87,9 @@ Modes:
 Note:
   Salmon auto libtype detection (-l A) mis-detects the current PE benchmark sample as ISR.
   This script therefore defaults Salmon QC to explicit IU for reproducible comparison.
+  STAR-suite internal TranscriptVB is the production quantifier. Salmon is a
+  post-STAR QC/comparator on the completed transcriptome BAM, not a streaming
+  contract in this wrapper.
 EOF
 }
 
@@ -502,6 +505,7 @@ run_stage() {
             --outBAMsortMethod samtools
             --keepBAM yes
             --quantMode TranscriptomeSAM TranscriptVB
+            --transcriptomeFasta "${TRANSCRIPTOME}"
             --quantVBgcBias 1
             --outFileNamePrefix "${integrated_dir}/"
         )

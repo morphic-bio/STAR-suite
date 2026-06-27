@@ -190,6 +190,15 @@ update this file with its output location.
   same-BAM-order Salmon parity diagnostics; contains STAR TranscriptVB output,
   Salmon same-transcriptome-BAM output, trace TSVs, GC/effective-length dumps,
   and run logs; do not commit generated BAMs or quant outputs)
+- `/storage/JAX_PE/results/pparg_vb_parity_full_mt_20260627_070754/`
+  (full PPARG no-Y internal TranscriptVB plus Salmon QC parity sanity rerun;
+  contains `parity_summary_normal_mt.tsv`, `parity_counts_normal_mt.tsv`,
+  `top_diffs_normal_mt.tsv`, STAR/Salmon logs, and generated BAM/quant outputs;
+  do not commit generated BAMs or quant outputs)
+- `/storage/JAX_PE/results/pparg_serial_full_mt_20260627_073956/`
+  (full PPARG lean serial comparator using Trim Galore, upstream STAR, and
+  Salmon; useful for timing context only, not an apples-to-apples replacement for
+  the paper wrapper benchmark)
 - `/mnt/pikachu/SLAM-Seq-PE-results/prod_full_20260511T103908Z/` (active
   2026-05 SLAM paired-end full-panel production root; protected local dataset,
   Y/noY BAM/FASTQ derivatives are uploaded by Globus and cleaned locally, do
