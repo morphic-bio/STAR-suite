@@ -86,15 +86,61 @@ std::vector<double> GCFragModel::computeBiasRatio(
 {
     std::vector<double> bias(GC_BINS, 1.0);
     double minRatio = 1.0 / maxRatio;
-    
-    // Ensure both models are normalized
-    const_cast<GCFragModel*>(this)->normalize();
-    const_cast<GCFragModel*>(&expected)->normalize();
-    
+
+    auto toLinearCounts = [](const std::array<double, GC_BINS>& counts) {
+        std::array<double, GC_BINS> linear{};
+        bool in_log_space = false;
+        for (int i = 0; i < GC_BINS; ++i) {
+            if (!std::isfinite(counts[i]) || counts[i] < -100.0) {
+                in_log_space = true;
+                break;
+            }
+        }
+
+        for (int i = 0; i < GC_BINS; ++i) {
+            if (in_log_space) {
+                linear[i] = std::isfinite(counts[i]) ? std::exp(counts[i]) : 0.0;
+            } else {
+                linear[i] = counts[i];
+            }
+            if (!std::isfinite(linear[i]) || linear[i] < 0.0) {
+                linear[i] = 0.0;
+            }
+        }
+        return linear;
+    };
+
+    auto normalizeCounts = [](const std::array<double, GC_BINS>& counts,
+                              double prior) {
+        std::array<double, GC_BINS> probs{};
+        double total = 0.0;
+        for (int i = 0; i < GC_BINS; ++i) {
+            total += counts[i] + prior;
+        }
+        if (total <= 0.0) {
+            probs.fill(1.0 / static_cast<double>(GC_BINS));
+            return probs;
+        }
+        for (int i = 0; i < GC_BINS; ++i) {
+            probs[i] = (counts[i] + prior) / total;
+        }
+        return probs;
+    };
+
+    // Salmon's GCFragModel::normalize() uses a 0.1 pseudocount per bin.
+    // The expected sidecar is already normalized from transcriptome-scale
+    // counts, so do not re-apply a pseudocount that would flatten it.
+    const std::array<double, GC_BINS> obsCounts = toLinearCounts(counts_);
+    const std::array<double, GC_BINS> expCounts = toLinearCounts(expected.counts_);
+    const std::array<double, GC_BINS> obsProb = normalizeCounts(obsCounts, 0.1);
+    const std::array<double, GC_BINS> expProb =
+        expected.normalized_ ? normalizeCounts(expCounts, 0.0)
+                             : normalizeCounts(expCounts, 0.1);
+
     for (int i = 0; i < GC_BINS; ++i) {
-        double obs = counts_[i];
-        double exp = expected.counts_[i];
-        
+        double obs = obsProb[i];
+        double exp = expProb[i];
+
         if (exp > 0.0) {
             double ratio = obs / exp;
             if (ratio > maxRatio) ratio = maxRatio;
@@ -181,4 +227,3 @@ bool GCFragModel::loadFromFile(const std::string& path) {
     normalized_ = true;  // Assume loaded file is already normalized
     return true;
 }
-

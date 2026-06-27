@@ -72,12 +72,46 @@ to a different transcript after multimapper allocation. In the representative
 auto-detect smoke, only seven transcripts differ by more than one read-equivalent,
 with a maximum single-transcript delta of `3.819`.
 
+### BAM-Order Diagnostic
+
+A 2026-06-27 PPARG 20K diagnostic removed read-order variability by using STAR
+Suite's emitted transcriptome BAM as the single read-order source for both
+TranscriptVB and Salmon. Salmon alignment mode normally keeps at least two quant
+workers even when invoked with `-p 1`; for this diagnostic only, a local Salmon
+build was patched so `SALMON_FORCE_SINGLE_QUANT_THREAD=1` sets
+`numQuantThreads = 1`.
+
+Artifact:
+
+```bash
+tests/pparg_vb_trace_20k_bamorder_gatefix_20260627/
+```
+
+STAR and Salmon consumed the same `12,725` read groups in the same order, with
+zero qname mismatches and zero transcript-ID mismatches in the trace. The
+remaining count differences are fractional multimapper allocation noise:
+
+| Comparison | NumReads Pearson | NumReads Spearman | TPM Pearson | TPM Spearman | total NumReads | sum abs NumReads diff | max transcript delta |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| STAR TranscriptVB vs Salmon, same BAM order, GC bias on | `0.999999932` | `1.000000000` | `0.999998487` | `0.999999999` | `12724.996` vs `12725.000` | `2.476` | `0.220` |
+
+Filtering to expressed transcripts does not change the conclusion: for
+`NumReads` with combined count `>=10`, Pearson is `0.999999933` and Spearman is
+`0.999880544`. The largest raw error-model likelihood differences are constant
+offsets across all alignments for a read, so they cancel during posterior
+normalization and do not materially move quantification.
+
 ### Salmon Thread-Order Caveat
 
 Salmon's alignment-mode online fragment-length distribution is thread-order
 sensitive on this small chr22 fixture. Salmon `-p 1` and Salmon `-p 32` disagree
 materially here (`NumReads` Pearson about `0.9957`) and show the same large outlier
 pattern that initially looked like a STAR Suite gap.
+
+Also note that Salmon alignment-mode `-p 1` may still run with two quant workers
+internally, so `-p 1` is not a strict guarantee of BAM-order consumption. Use a
+same-BAM-order diagnostic, like the PPARG run above, when isolating TranscriptVB
+arithmetic from worker-scheduling order.
 
 The cause is ordering, not a different BAM. Salmon updates its alignment-mode FLD
 online while consuming alignment records; with multiple worker threads, early
@@ -107,7 +141,13 @@ tests/run_transcriptvb_chr22_parity_smoke.sh
 
 It reuses the cached chr22 fixture/reference, runs STAR TranscriptVB auto-detect
 with 32 STAR threads by default, runs Salmon on the exact STAR transcriptome BAM
-with `-p 1`, and gates on the correlation/read-movement thresholds above.
+with `-p 1`, records Salmon's reported internal `numQuantThreads`, and gates on
+strict thresholds only when Salmon is truly single-worker. Stock Salmon may report
+`numQuantThreads = 2` even with `-p 1`; in that case the wrapper uses relaxed
+order-sensitive thresholds and should be interpreted as a regression smoke, not
+as the strict arithmetic parity proof. A 2026-06-27 public-Salmon pass reported
+NumReads Pearson `0.999972439970`, TPM Pearson `0.999972747888`, and half-L1
+`26.129` with `numQuantThreads = 2`.
 
 ## Point it at your own data / tools
 

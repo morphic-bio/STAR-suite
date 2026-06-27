@@ -13,12 +13,12 @@ BASE_RUN="${TRANSCRIPTVB_CHR22_BASE_RUN:-${BENCH_DIR}/runs/chr22_20260626_003522
 FIXTURE_DIR="${TRANSCRIPTVB_CHR22_FIXTURE_DIR:-${BENCH_DIR}/fixtures/chr22}"
 OUTDIR="${TRANSCRIPTVB_CHR22_OUTDIR:-${SCRIPT_DIR}/transcriptvb_chr22_parity_output_$(date +%Y%m%d_%H%M%S)}"
 
-MIN_NUMREADS_PEARSON="${TRANSCRIPTVB_CHR22_MIN_NUMREADS_PEARSON:-0.99998}"
-MIN_TPM_PEARSON="${TRANSCRIPTVB_CHR22_MIN_TPM_PEARSON:-0.99995}"
-MAX_TOTAL_DELTA="${TRANSCRIPTVB_CHR22_MAX_TOTAL_DELTA:-0.05}"
-MAX_HALF_L1="${TRANSCRIPTVB_CHR22_MAX_HALF_L1:-20}"
-MAX_GT1_TX="${TRANSCRIPTVB_CHR22_MAX_GT1_TX:-10}"
-MAX_MAX_TX_DELTA="${TRANSCRIPTVB_CHR22_MAX_TX_DELTA:-5}"
+MIN_NUMREADS_PEARSON="${TRANSCRIPTVB_CHR22_MIN_NUMREADS_PEARSON:-}"
+MIN_TPM_PEARSON="${TRANSCRIPTVB_CHR22_MIN_TPM_PEARSON:-}"
+MAX_TOTAL_DELTA="${TRANSCRIPTVB_CHR22_MAX_TOTAL_DELTA:-}"
+MAX_HALF_L1="${TRANSCRIPTVB_CHR22_MAX_HALF_L1:-}"
+MAX_GT1_TX="${TRANSCRIPTVB_CHR22_MAX_GT1_TX:-}"
+MAX_MAX_TX_DELTA="${TRANSCRIPTVB_CHR22_MAX_TX_DELTA:-}"
 EXPECTED_FORMAT="${TRANSCRIPTVB_CHR22_EXPECTED_FORMAT:-ISR}"
 
 R1="${FIXTURE_DIR}/SRR4422207_chr22_1.fastq.gz"
@@ -63,6 +63,7 @@ echo
     --quantMode TranscriptomeSAM TranscriptVB \
     --quantVBLibType A \
     --quantVBErrorModel off \
+    --transcriptomeFasta "${TRANSCRIPTOME}" \
     --outFileNamePrefix "${STAR_OUT}/" \
     --outTmpDir "${STAR_OUT}/_tmp" \
     > "${STAR_OUT}/run.stdout.log" \
@@ -83,6 +84,36 @@ fi
     -o "${SALMON_OUT}" \
     > "${SALMON_OUT}/salmon.stdout.log" \
     2> "${SALMON_OUT}/salmon.stderr.log"
+
+SALMON_QUANT_THREADS="$(
+    grep -h -m1 "numQuantThreads =" \
+        "${SALMON_OUT}/salmon.stderr.log" \
+        "${SALMON_OUT}/logs/salmon_quant.log" 2>/dev/null \
+        | sed -E 's/.*numQuantThreads = ([0-9]+).*/\1/' \
+        | head -n1 || true
+)"
+SALMON_QUANT_THREADS="${SALMON_QUANT_THREADS:-unknown}"
+
+if [[ "${SALMON_QUANT_THREADS}" == "1" ]]; then
+    MIN_NUMREADS_PEARSON="${MIN_NUMREADS_PEARSON:-0.99998}"
+    MIN_TPM_PEARSON="${MIN_TPM_PEARSON:-0.99995}"
+    MAX_HALF_L1="${MAX_HALF_L1:-20}"
+    MAX_GT1_TX="${MAX_GT1_TX:-10}"
+    MAX_MAX_TX_DELTA="${MAX_MAX_TX_DELTA:-5}"
+else
+    # Salmon alignment mode can report numQuantThreads=2 even with -p 1.  That
+    # is an order-sensitive comparator, so keep the smoke as a regression guard
+    # without pretending it is a strict BAM-order arithmetic test.
+    MIN_NUMREADS_PEARSON="${MIN_NUMREADS_PEARSON:-0.99990}"
+    MIN_TPM_PEARSON="${MIN_TPM_PEARSON:-0.99990}"
+    MAX_HALF_L1="${MAX_HALF_L1:-50}"
+    MAX_GT1_TX="${MAX_GT1_TX:-25}"
+    MAX_MAX_TX_DELTA="${MAX_MAX_TX_DELTA:-10}"
+fi
+MAX_TOTAL_DELTA="${MAX_TOTAL_DELTA:-0.05}"
+
+echo "Salmon internal quant threads: ${SALMON_QUANT_THREADS}"
+echo "Thresholds: NumReads Pearson >= ${MIN_NUMREADS_PEARSON}; TPM Pearson >= ${MIN_TPM_PEARSON}; half-L1 <= ${MAX_HALF_L1}; >1-read tx <= ${MAX_GT1_TX}; max tx delta <= ${MAX_MAX_TX_DELTA}"
 
 python3 - <<PY
 import csv
@@ -128,6 +159,7 @@ abs_delta_sum = float(abs_delta.sum())
 half_l1 = 0.5 * (abs_delta_sum + abs(total_delta))
 
 metrics = {
+    "salmon_internal_quant_threads": "${SALMON_QUANT_THREADS}",
     "numreads_pearson": pearson(star_num, salmon_num),
     "numreads_spearman": spearman(star_num, salmon_num),
     "tpm_pearson": pearson(star_tpm, salmon_tpm),

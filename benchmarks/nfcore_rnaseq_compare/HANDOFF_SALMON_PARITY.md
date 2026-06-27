@@ -1,5 +1,44 @@
 # Handoff: nf-core parity harness + tightening TranscriptVB toward Salmon
 
+## 2026-06-27 Update: Same-BAM-Order TranscriptVB Parity
+
+The old handoff below is historical. The current parity diagnosis is no longer
+"do not read Salmon" or only the auto-detect detection-window issue. After
+matching Salmon's dynamic GC/effective-length path and fixing CIGAR/bin handling,
+the remaining large apparent gap was dominated by read-order/worker-order
+effects in Salmon alignment mode.
+
+Important detail: Salmon alignment-mode `-p 1` can still run with
+`numQuantThreads = 2`, so it is not a strict same-order comparator. For the
+2026-06-27 PPARG 20K diagnostic, a local Salmon build was instrumented and
+patched so `SALMON_FORCE_SINGLE_QUANT_THREAD=1` forces `numQuantThreads = 1`.
+Salmon was then run on STAR Suite's emitted `Aligned.toTranscriptome.out.bam`,
+making BAM order the read order for both sides.
+
+Retained local artifact:
+
+```bash
+tests/pparg_vb_trace_20k_bamorder_gatefix_20260627/
+```
+
+Observed result:
+
+| Metric | Value |
+|---|---:|
+| retained read groups traced by STAR / Salmon | `12,725` / `12,725` |
+| qname mismatches / transcript-ID mismatches | `0` / `0` |
+| total NumReads STAR / Salmon | `12724.996` / `12725.000` |
+| NumReads Pearson / Spearman, all transcripts | `0.999999932` / `1.000000000` |
+| NumReads Pearson / Spearman, combined count `>=10` | `0.999999933` / `0.999880544` |
+| TPM Pearson / Spearman, all transcripts | `0.999998487` / `0.999999999` |
+| nonzero transcripts | `5,003` |
+| sum absolute NumReads difference | `2.476` |
+| maximum single-transcript NumReads difference | `0.220` |
+
+The largest raw error-model likelihood differences remaining in the trace are
+constant offsets across all alignments for the affected read group. Those offsets
+cancel in posterior normalization and do not materially affect quantification.
+
 **Date:** 2026-06-25. **Audience:** an agent tasked with closing the small remaining
 gap between STAR Suite's integrated quant (TranscriptVB) and Salmon, by reading
 Salmon's source. **Status:** the comparison harness is built and validated; the gap is

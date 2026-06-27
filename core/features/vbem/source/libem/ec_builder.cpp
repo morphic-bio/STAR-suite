@@ -113,11 +113,6 @@ static LibraryFormat computeObservedFormat(const RawAlignment& aln) {
 
 // Main compatibility check function (matching Salmon's isCompatible)
 bool isCompatible(const RawAlignment& aln, const LibraryFormat& expected_format, bool isForward) {
-    // For unstranded libraries, all alignments are compatible
-    if (expected_format.strandedness == ReadStrandedness::U) {
-        return true;
-    }
-    
     // For paired-end paired reads, compute observed format from both mates and check compatibility
     if (aln.mate_status == MateStatus::PAIRED_END_PAIRED) {
         // If mate fields are missing for paired-end alignments, treat as incompatible.

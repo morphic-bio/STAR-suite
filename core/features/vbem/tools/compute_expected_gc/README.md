@@ -54,4 +54,14 @@ make
 
 ## Integration with STAR
 
-This tool is automatically called during STAR genome generation if a GTF file is provided. The output `expected_gc.tsv` is stored in the genome directory and used during quantification for GC bias correction.
+The normal STAR-suite core build materializes this helper:
+
+```bash
+make -C core/legacy/source STAR
+```
+
+STAR `genomeGenerate` automatically calls it when a GTF or transcriptome FASTA
+is available. The output `expected_gc.tsv` is stored in the genome directory and
+reused by `alignReads` for TranscriptVB GC-bias correction. If a nonempty
+`expected_gc.tsv` already exists in the genome directory, genome generation
+reuses it instead of recomputing it.

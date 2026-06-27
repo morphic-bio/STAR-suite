@@ -432,9 +432,21 @@ EMResult run_vb(const ECTable& ecs, TranscriptState& state, const EMParams& para
     // Thread-local storage for expected_counts: flat layout [num_threads * n_transcripts] for cache friendliness
     // Each thread writes to its own buffer, then we reduce deterministically
     std::vector<double> expected_counts_tls(num_threads * state.n, 0.0);
+    bool effective_lengths_updated = false;
     
     // VB iterations
     for (uint32_t iter = 0; iter < params.max_iters; ++iter) {
+        if (!effective_lengths_updated && params.effective_length_update &&
+            iter > params.effective_length_update_target_iter) {
+            params.effective_length_update(iter, state, alpha);
+            effective_lengths_updated = true;
+            if (!params.per_transcript_prior) {
+                for (size_t i = 0; i < state.n; ++i) {
+                    priorAlphas[i] = params.vb_prior * state.eff_lengths[i];
+                }
+            }
+        }
+
         // Compute logNorm = digamma(sum of all alphas + priors) ONCE before E-step (Salmon's approach)
         // Salmon adds priors only for digamma calculation, not stored in alpha
         double alphaSum = 0.0;
