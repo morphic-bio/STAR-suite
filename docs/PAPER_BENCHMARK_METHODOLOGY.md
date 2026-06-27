@@ -169,20 +169,24 @@ Salmon).
 ### Quantification contract
 
 - The production STAR-suite arm is internal TranscriptVB, enabled with
-  `--quantMode TranscriptomeSAM TranscriptVB --quantVBgcBias 1`.
+  `--quantMode TranscriptVB --quantVBgcBias 1`.
 - The integrated recipe must pass the same transcriptome FASTA used by Salmon via
   `--transcriptomeFasta`, so GC-bias and effective-length calculation use the
   pinned reference sidecar/input.
-- External Salmon is a QC/comparator step, not part of the STAR-suite production
-  timing. The wrapper deliberately runs Salmon after STAR has completed
-  `Aligned.toTranscriptome.out.bam`; it is not a FIFO/streaming Salmon contract.
+- External Salmon is part of the external stepwise production baseline, because
+  that arm needs a separate quantifier after STAR emits `Aligned.toTranscriptome.out.bam`.
+- Integrated TranscriptomeSAM emission and integrated Salmon QC are opt-in
+  parity artifacts enabled with `--parity-qc`. They are not part of the
+  STAR-suite production timing.
 - Internal TranscriptVB collects transcript evidence during the STAR run, then
   merges/finalizes ECs, GC/effective-length state, and VB/EM convergence after
   alignment EOF. Do not describe this as external Salmon running concurrently.
 - Headline speedups must be measured with this wrapper and the same output mode
-  on both arms. Lean sanity checks using direct Trim Galore or unsorted BAM are
-  valid diagnostics, but their ratios are not apples-to-apples with the paper
-  benchmark.
+  on both arms. The integrated total is the timed STAR-suite production command;
+  the external total is decompress + trimvalidate + STAR TranscriptomeSAM +
+  optional remove_y_reads + Salmon. Lean sanity checks using direct Trim Galore
+  or unsorted BAM are valid diagnostics, but their ratios are not
+  apples-to-apples with the paper benchmark.
 
 ### Modes
 
@@ -191,26 +195,42 @@ Salmon).
   trimmed FASTQs.
 - `--no-yremove`: Y-chromosome removal disabled on both arms. Useful for
   datasets/analyses where Y-removal is not relevant.
+- `--integrated-only`: Run only the STAR-suite production arm. Use this for
+  STAR-suite timing refreshes when the external control does not need to be
+  rerun. In default mode this is equivalent to `--skip-external --skip-compare`
+  and does not enable parity artifacts.
 
 ### Parity comparison
 
-Transcript and gene-level Pearson/Spearman correlations are computed by
-`tests/transcriptvb/compare_salmon_star.py`. The benchmark produces a
-`comparison_metrics.tsv` with three comparisons per stage:
+When `--parity-qc` is enabled, transcript and gene-level Pearson/Spearman
+correlations are computed by `tests/transcriptvb/compare_salmon_star.py`. The
+benchmark produces a `comparison_metrics.tsv` with three comparisons per stage:
 1. Integrated TranscriptVB vs Integrated Salmon (internal consistency)
 2. Integrated Salmon vs External Salmon (pipeline effect on same tool)
 3. Integrated TranscriptVB vs External Salmon (the headline comparison)
 
-### 2026-06-27 PPARG sanity rerun
+Do not run parity-QC mode for headline wall-time claims. It deliberately emits
+and rereads an integrated transcriptome BAM that normal STAR-suite production
+does not require.
 
-A full PPARG no-Y rerun on `/storage` with the current internal TranscriptVB
-implementation measured STAR-suite integrated trim+align+TranscriptVB at
-`7:18.06`; Salmon QC on the integrated transcriptome BAM added `1:00.08`.
+### 2026-06-27 PPARG timing reruns
+
+The corrected production-mode STAR-suite-only PPARG no-Y rerun on `/storage`
+measured integrated trim+align+sorted BAM+internal TranscriptVB at `8:54.52`.
+It did not emit integrated TranscriptomeSAM and did not run integrated Salmon
+QC, matching the normal STAR-suite production arm. Run root:
+`/storage/JAX_PE/results/pparg_prod_benchmark_no_y_20260627_172349/`.
+
+An earlier PPARG no-Y sanity rerun before the production-mode wrapper correction
+measured STAR-suite integrated trim+align+TranscriptVB plus TranscriptomeSAM
+emission at `7:18.06`; Salmon QC on the integrated transcriptome BAM added
+`1:00.08`.
 A lean serial comparator using Trim Galore, upstream STAR, unsorted transcriptome
 BAM, and Salmon took `9:50.17`, giving `1.35x` for that diagnostic setup. This
 run confirmed high current Salmon parity (NumReads Pearson `0.999979` on all
 transcripts; `0.999980` at sum>=1000) but should not replace the archived paper
-speedup because its serial comparator is lighter than the paper wrapper.
+speedup because its serial comparator is lighter than the paper wrapper and that
+earlier integrated arm was still parity-artifact enabled.
 
 ## Paper Scripts
 

@@ -199,6 +199,11 @@ update this file with its output location.
   (full PPARG lean serial comparator using Trim Galore, upstream STAR, and
   Salmon; useful for timing context only, not an apples-to-apples replacement for
   the paper wrapper benchmark)
+- `/storage/JAX_PE/results/pparg_prod_benchmark_no_y_20260627_172349/`
+  (full PPARG no-Y production-mode STAR-suite-only timing run; integrated arm
+  completed with sorted BAM plus internal TranscriptVB in `8:54.52`, no
+  integrated transcriptome BAM or Salmon QC; partial external-control directory
+  was removed after the user confirmed it did not need to be rerun)
 - `/mnt/pikachu/SLAM-Seq-PE-results/prod_full_20260511T103908Z/` (active
   2026-05 SLAM paired-end full-panel production root; protected local dataset,
   Y/noY BAM/FASTQ derivatives are uploaded by Globus and cleaned locally, do

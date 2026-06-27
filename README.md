@@ -98,16 +98,17 @@ archived benchmark artifacts live in
 [comparisons/paper_benchmarks_20260318/README.md](comparisons/paper_benchmarks_20260318/README.md),
 and detailed Velocyto bridge results live in
 [docs/VELOCYTO_BENCHMARKS.md](docs/VELOCYTO_BENCHMARKS.md).
-For bulk RNA-seq, use the checked paper wrapper for headline speedups: the
-production STAR-suite arm uses internal TranscriptVB, while external Salmon is a
-post-STAR QC/comparator on the completed transcriptome BAM. Ad-hoc serial
-chains with different trimming or BAM-output modes are useful sanity checks but
-are not replacements for the wrapper ratios.
+For bulk RNA-seq, use the checked paper wrapper for headline speedups. The
+production STAR-suite arm uses internal TranscriptVB only; integrated
+TranscriptomeSAM emission and integrated Salmon QC are opt-in parity artifacts
+via `--parity-qc` and are excluded from production timing. Ad-hoc serial chains
+with different trimming or BAM-output modes are useful sanity checks but are not
+replacements for the wrapper ratios.
 
 | Workflow | Dataset / surface | Baseline | STAR-suite result | Key parity / note |
 |---|---|---|---|---|
-| Bulk RNA-seq | JAX PE 6.5M | External stepwise wrapper (trimvalidate + STAR + Salmon) | **37 s** without Y-removal, **61 s** with Y-removal; **2.4x / 2.1x** faster | Transcript Pearson **0.995**, gene Pearson **0.997** vs Salmon |
-| Bulk RNA-seq | PPARG PE 35.1M | External stepwise wrapper (trimvalidate + STAR + Salmon) | **9m 35s** without Y-removal, **11m 58s** with Y-removal; **1.7x / 2.1x** faster | Same integrated trim + align + TranscriptVB path |
+| Bulk RNA-seq | JAX PE 6.5M | External stepwise wrapper (trimvalidate + STAR + Salmon) | Corrected production-mode wrapper in `scripts/paper/run_pe_bulk_feature_benchmark.sh`; archived parity-QC mode was **37 s** without Y-removal, **61 s** with Y-removal | Transcript Pearson **0.995**, gene Pearson **0.997** vs Salmon in parity-QC mode |
+| Bulk RNA-seq | PPARG PE 35.1M | External stepwise wrapper (trimvalidate + STAR + Salmon) | Production-mode STAR-suite-only no-Y rerun: **8m 55s** for integrated trim + align + sorted BAM + internal TranscriptVB, with no integrated transcriptome BAM or Salmon QC; archived parity-QC mode was **9m 35s** without Y-removal, **11m 58s** with Y-removal | Same integrated trim + align + TranscriptVB production path; parity artifacts opt-in via `--parity-qc` |
 | scRNA-seq Solo | UCSF `EBs2_2` GEX-only | Historical CellGENI-style STARsolo (`7a7fb08`) | **13.75 min** optimized `zcat` vs **22.1 min** historical rerun; **1.60x** faster | Fresh historical rerun reproduced **13,847** cells, Jaccard **0.9891**, gene Pearson **0.964305** vs CR9; current `zcat` surface calls **13,723** cells with gene Pearson **0.994885** |
 | scRNA-seq Solo | MSK 30polyKO GEX-only | Historical CellGENI-style STARsolo (`7a7fb08`) | **19.40 min** archived modern wall vs **28.6 min** historical rerun; **1.47x** faster | Fresh historical rerun reproduced **32,304** cells, Jaccard **0.9975**, gene Pearson **0.954925** vs CR9; guarded current surface calls **33,092** cells with Jaccard **0.974**, gene Pearson **0.994554** |
 | Perturb-seq | A375 1k CRISPR 5' GemX | Cell Ranger 9 | **4.0 min**; **3.8x** faster | Jaccard **0.976**, gene Pearson **0.975**, CRISPR match **100%** |
