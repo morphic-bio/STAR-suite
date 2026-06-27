@@ -264,10 +264,13 @@ keep both arms on the wrapper's matched output mode. Use `--integrated-only`
 when refreshing only the STAR-suite production timing and the external control
 does not need to be rerun.
 
-A corrected full PPARG no-Y STAR-suite-only production run on `/storage`
-measured integrated trim+align+sorted BAM+internal TranscriptVB at `8:54.52`.
-It did not emit integrated TranscriptomeSAM or run integrated Salmon QC. Run
-root: `/storage/JAX_PE/results/pparg_prod_benchmark_no_y_20260627_172349/`.
+A corrected full PPARG no-Y production run on `/storage` measured integrated
+trim+align+sorted BAM+internal TranscriptVB at `8:54.52`; the matched external
+control completed in `16:09.61` (decompress `1:18.01`, trimvalidate `6:53.71`,
+STAR TranscriptomeSAM `6:56.55`, Salmon `1:01.34`). This is `1.81x` faster for
+the production-mode no-Y wrapper run. The integrated arm did not emit
+TranscriptomeSAM or run integrated Salmon QC. Run root:
+`/storage/JAX_PE/results/pparg_prod_benchmark_no_y_20260627_172349/`.
 
 An earlier PPARG no-Y sanity rerun with a lean unsorted-BAM serial comparator
 measured STAR-suite integrated at `7:18.06`, Salmon QC at `1:00.08`, and the
