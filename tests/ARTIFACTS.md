@@ -186,6 +186,10 @@ update this file with its output location.
 - `benchmarks/nfcore_rnaseq_compare/runs/chr22_20260626_003522/` (retained
   local 2026-06-26 TranscriptVB parity artifact with diagnostic intermediates and
   final comparison reports; do not commit generated BAMs or quant outputs)
+- `tests/pparg_vb_trace_20k_bamorder_*_20260627/` (TranscriptVB PPARG 20K
+  same-BAM-order Salmon parity diagnostics; contains STAR TranscriptVB output,
+  Salmon same-transcriptome-BAM output, trace TSVs, GC/effective-length dumps,
+  and run logs; do not commit generated BAMs or quant outputs)
 - `/mnt/pikachu/SLAM-Seq-PE-results/prod_full_20260511T103908Z/` (active
   2026-05 SLAM paired-end full-panel production root; protected local dataset,
   Y/noY BAM/FASTQ derivatives are uploaded by Globus and cleaned locally, do
@@ -876,3 +880,19 @@ All three runs used **`USE_READFILES_ZCAT=0`** (no external `zcat`), **`--outSAM
   - `/mnt/pikachu/JAX_scRNAseq02_processed/ocm_composite_smoke_50m_*`
 - Status: untracked; do not commit staged FASTQs, STAR outputs, Cell Ranger
   pipestances, materialized MEX outputs, or parity reports.
+
+## TranscriptVB GC Effective Length Smoke
+
+- Harness: `tests/test_transcriptvb_gc_effective_length.sh`
+- Output root: `/tmp/star_suite_transcriptvb_gc_effective_length_*`
+- Contents: generated two-transcript FASTA, tiny C++ test program, compiled
+  helper binary, and `test.log`.
+- Status: untracked.
+
+## GenomeGenerate Expected GC Smoke
+
+- Harness: `tests/test_genome_generate_expected_gc.sh`
+- Output root: `/tmp/star_suite_genome_expected_gc_*`
+- Contents: synthetic genome/GTF, generated STAR index, `transcriptome.fa`,
+  `expected_gc.tsv`, and first/second genomeGenerate logs.
+- Status: untracked.

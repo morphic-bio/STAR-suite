@@ -33,10 +33,12 @@ LIBEM_DIR := $(VBEM_SRC_DIR)/libem
 FLEXFILTER_DIR := $(FLEX_DIR)/tools/flexfilter
 REMOVE_Y_READS_DIR := $(YREMOVE_FASTQ_DIR)/tools/remove_y_reads
 TRIMVALIDATE_DIR := $(VBEM_DIR)/tools/trimvalidate
+COMPUTE_EXPECTED_GC_DIR := $(VBEM_DIR)/tools/compute_expected_gc
 
 LIBFLEX_LIB := $(LIBFLEX_DIR)/libflex.a
 LIBTRIM_LIB := $(LIBTRIM_DIR)/libtrim.a
 LIBEM_LIB := $(LIBEM_DIR)/libem.a
+COMPUTE_EXPECTED_GC_BIN := $(COMPUTE_EXPECTED_GC_DIR)/compute_expected_gc
 PROCESS_FEATURES_DIR := $(ROOT_DIR)/core/features/process_features
 PROCESS_FEATURES_LIB := $(PROCESS_FEATURES_DIR)/libprocess_features.a
 LIBSCRNA_DIR := $(ROOT_DIR)/core/features/libscrna
@@ -558,6 +560,7 @@ clean:
 	$(MAKE) -C $(LIBFLEX_DIR) clean
 	$(MAKE) -C $(LIBTRIM_DIR) clean
 	$(MAKE) -C $(LIBEM_DIR) clean
+	$(MAKE) -C $(COMPUTE_EXPECTED_GC_DIR) clean
 	$(MAKE) -C $(LIBSCRNA_DIR) clean
 
 .PHONY: CLEAN
@@ -629,6 +632,12 @@ libtrim:
 libem:
 	$(MAKE) -C $(LIBEM_DIR) libem.a
 
+# Ensure the genomeGenerate expected-GC helper is available for TranscriptVB
+# GC-bias index sidecars.
+.PHONY: compute_expected_gc
+compute_expected_gc:
+	$(MAKE) -C $(COMPUTE_EXPECTED_GC_DIR) compute_expected_gc
+
 # Ensure libscrna is available from clean source exports (e.g. Debian packaging)
 .PHONY: libscrna
 libscrna:
@@ -647,12 +656,12 @@ $(CHROMAP_LIB): FORCE
 
 STAR$(SFX) : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
 STAR$(SFX) : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS) $(GLIB_LIBS_SHARED)
-STAR$(SFX) : Depend.list parametersDefault.xxd $(OBJECTS) libflex libtrim libem libprocess_features $(LIBSCRNA_LIB) $(CHROMAP_STAR_DEPS)
+STAR$(SFX) : Depend.list parametersDefault.xxd $(OBJECTS) libflex libtrim libem compute_expected_gc libprocess_features $(LIBSCRNA_LIB) $(CHROMAP_STAR_DEPS)
 	$(CXX) -o STAR$(SFX) $(CXXFLAGS) $(OBJECTS) $(LIBFLEX_LIB) $(LIBTRIM_LIB) $(LIBEM_LIB) $(PROCESS_FEATURES_LIB) $(LIBSCRNA_LIB) $(LDFLAGS) $(CHROMAP_LINK_LINE)
 
 STARstatic$(SFX) : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
 STARstatic$(SFX) : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_static) $(LDFLAGS) $(GLIB_LIBS_STATIC)
-STARstatic$(SFX) : Depend.list parametersDefault.xxd $(OBJECTS) libflex libtrim libem libprocess_features $(LIBSCRNA_LIB) $(CHROMAP_STAR_DEPS)
+STARstatic$(SFX) : Depend.list parametersDefault.xxd $(OBJECTS) libflex libtrim libem compute_expected_gc libprocess_features $(LIBSCRNA_LIB) $(CHROMAP_STAR_DEPS)
 	$(CXX) -o STAR$(SFX) $(filter-out -fopenmp,$(CXXFLAGS)) $(OBJECTS) $(LIBFLEX_LIB) $(LIBTRIM_LIB) $(LIBEM_LIB) $(PROCESS_FEATURES_LIB) $(LIBSCRNA_LIB) $(LDFLAGS) $(CHROMAP_LINK_LINE)
 
 STARlong$(SFX) : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) -D'COMPILE_FOR_LONG_READS' $(CXXFLAGS)
@@ -674,7 +683,7 @@ POSIXSHARED : $(CHROMAP_UNSUPPORTED_TARGET) Depend.list parametersDefault.xxd $(
 
 gdb : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_gdb) $(CXXFLAGS)
 gdb : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_gdb) $(LDFLAGS) $(shell pkg-config --libs glib-2.0 2>/dev/null || echo "")
-gdb : Depend.list parametersDefault.xxd $(OBJECTS) libflex libtrim libem libprocess_features $(LIBSCRNA_LIB) $(CHROMAP_STAR_DEPS)
+gdb : Depend.list parametersDefault.xxd $(OBJECTS) libflex libtrim libem compute_expected_gc libprocess_features $(LIBSCRNA_LIB) $(CHROMAP_STAR_DEPS)
 	$(CXX) -o STAR $(CXXFLAGS) $(OBJECTS) $(LIBFLEX_LIB) $(LIBTRIM_LIB) $(LIBEM_LIB) $(PROCESS_FEATURES_LIB) $(LIBSCRNA_LIB) $(LDFLAGS) $(CHROMAP_LINK_LINE)
 
 gdb-long : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_gdb) -D'COMPILE_FOR_LONG_READS' $(CXXFLAGS)

@@ -178,6 +178,7 @@ EMResult run_em(const ECTable& ecs, TranscriptState& state, const EMParams& para
     for (size_t i = 0; i < state.n; ++i) {
         prev_expected_counts[i] = projectedCounts[i] * fracObserved + uniformPrior * (1.0 - fracObserved);
     }
+    bool effective_lengths_updated = false;
     
     // Compute initial log-likelihood (for logging only, not used for convergence)
     double initial_ll = compute_log_likelihood(ecs, state.abundances.data(), state.eff_lengths.data());
@@ -185,6 +186,12 @@ EMResult run_em(const ECTable& ecs, TranscriptState& state, const EMParams& para
     
     // EM iterations
     for (uint32_t iter = 0; iter < params.max_iters; ++iter) {
+        if (!effective_lengths_updated && params.effective_length_update &&
+            iter > params.effective_length_update_target_iter) {
+            params.effective_length_update(iter, state, prev_expected_counts);
+            effective_lengths_updated = true;
+        }
+
         // E-step: compute expected counts using alpha * aux (Salmon's exact approach)
         // Clear thread-local buffers (reuse per iteration to avoid reallocation)
         std::fill(expected_counts_tls.begin(), expected_counts_tls.end(), 0.0);

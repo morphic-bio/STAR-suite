@@ -52,7 +52,7 @@ public:
     // Add GC observation from a properly-paired fragment
     // frag_start, frag_end: fragment boundaries in transcript coordinates
     // gc_pct: GC percentage (0-100)
-    // weight: alignment probability weight (log-space)
+    // weight: normalized alignment probability in linear space
     void addGCObservation(int32_t frag_start, int32_t frag_end, int32_t gc_pct, double weight);
     
     // Add FLD observation from a properly-paired fragment
@@ -123,6 +123,7 @@ private:
     int trace_limit_;
     int traced_count_;
     std::ofstream trace_out_;
+    std::unique_ptr<std::ofstream> error_trace_out_;
     Parameters& P_;  // Reference to Parameters for accessing detection state
     libem::AlignmentModel* alignment_model_;  // Error model (optional, null if not available)
     const libem::Transcriptome* transcriptome_;  // Transcript sequences cache (optional, null if not available)

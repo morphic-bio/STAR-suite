@@ -21,7 +21,7 @@
 #define MAX_SEQ_LEN 10000000
 #define MAX_FRAG_LEN 2000
 #define GC_BINS 101
-#define MAX_TRANSCRIPTS 100000
+#define MAX_TRANSCRIPTS 500000
 #define MAX_EXONS_PER_TX 1000
 
 // Fragment length distribution (default: normal-like, mean=200, sd=80)
@@ -181,7 +181,8 @@ int parse_transcriptome_fasta(const char* filename) {
             if (current_seq && current_len > 0 && current_id) {
                 if (num_transcripts >= MAX_TRANSCRIPTS) {
                     fprintf(stderr, "Error: Too many transcripts (max %d)\n", MAX_TRANSCRIPTS);
-                    break;
+                    fclose(f);
+                    return 0;
                 }
                 transcripts[num_transcripts].id = strdup(current_id);
                 transcripts[num_transcripts].seq = current_seq;
@@ -233,14 +234,19 @@ int parse_transcriptome_fasta(const char* filename) {
     
     // Save last transcript
     if (current_seq && current_len > 0 && current_id) {
-        if (num_transcripts < MAX_TRANSCRIPTS) {
-            transcripts[num_transcripts].id = strdup(current_id);
-            transcripts[num_transcripts].seq = current_seq;
-            transcripts[num_transcripts].len = current_len;
-            transcripts[num_transcripts].exons = NULL;
-            transcripts[num_transcripts].num_exons = 0;
-            num_transcripts++;
+        if (num_transcripts >= MAX_TRANSCRIPTS) {
+            fprintf(stderr, "Error: Too many transcripts (max %d)\n", MAX_TRANSCRIPTS);
+            free(current_seq);
+            free(current_id);
+            fclose(f);
+            return 0;
         }
+        transcripts[num_transcripts].id = strdup(current_id);
+        transcripts[num_transcripts].seq = current_seq;
+        transcripts[num_transcripts].len = current_len;
+        transcripts[num_transcripts].exons = NULL;
+        transcripts[num_transcripts].num_exons = 0;
+        num_transcripts++;
     } else {
         free(current_seq);
         free(current_id);
@@ -381,6 +387,7 @@ int parse_gtf(const char* filename) {
     int* exon_counts = calloc(MAX_TRANSCRIPTS, sizeof(int));
     char** transcript_ids = calloc(MAX_TRANSCRIPTS, sizeof(char*));
     int num_unique_tx = 0;
+    int too_many_transcripts = 0;
     
     while (fgets(line, sizeof(line), f)) {
         line_num++;
@@ -411,8 +418,10 @@ int parse_gtf(const char* filename) {
         
         if (tx_idx == -1) {
             if (num_unique_tx >= MAX_TRANSCRIPTS) {
+                fprintf(stderr, "Error: Too many transcripts (max %d)\n", MAX_TRANSCRIPTS);
                 free(tx_id);
-                continue;
+                too_many_transcripts = 1;
+                break;
             }
             tx_idx = num_unique_tx;
             transcript_ids[tx_idx] = strdup(tx_id);
@@ -421,6 +430,16 @@ int parse_gtf(const char* filename) {
         
         exon_counts[tx_idx]++;
         free(tx_id);
+    }
+
+    if (too_many_transcripts) {
+        for (int i = 0; i < num_unique_tx; i++) {
+            free(transcript_ids[i]);
+        }
+        free(exon_counts);
+        free(transcript_ids);
+        fclose(f);
+        return 0;
     }
     
     // Allocate exon arrays

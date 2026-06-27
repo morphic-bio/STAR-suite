@@ -80,7 +80,7 @@ ReadAlign::ReadAlign (Parameters& Pin, Genome &genomeIn, Transcriptome *TrIn, in
         // Create AlignmentModel per thread if error model is enabled
         std::unique_ptr<libem::AlignmentModel> alignment_model;
         if (P.quant.transcriptVB.errorModelMode != "off" && libemTr != nullptr) {
-            alignment_model.reset(new libem::AlignmentModel(0.001, 4));  // alpha=0.001, readBins=4
+            alignment_model.reset(new libem::AlignmentModel(1.0, 6));  // Salmon defaults: alpha=1.0, readBins=6
         }
         
         quantEC = new TranscriptQuantEC(chunkTr->nTr, iChunk, 

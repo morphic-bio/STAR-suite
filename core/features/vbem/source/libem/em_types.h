@@ -5,6 +5,7 @@
 #include <string>
 #include <cstdint>
 #include <cstddef>
+#include <functional>
 
 // Structure of Arrays (SoA) for transcript state - cache/SIMD friendly
 struct TranscriptState {
@@ -69,6 +70,12 @@ struct EMParams {
     uint32_t min_iters = 100;         // Minimum iterations before checking convergence (VB only)
     double num_required_fragments = 5e7; // Salmon default numRequiredFrags for VB init
     double alpha_check_cutoff = 1e-2; // Only check convergence for transcripts with alpha > cutoff
+
+    // Optional Salmon-style bias correction hook. Salmon recomputes
+    // GC/sequence/position-bias effective lengths after the early abundance
+    // estimates exist, then continues optimization with updated lengths.
+    std::function<bool(uint32_t, TranscriptState&, const std::vector<double>&)> effective_length_update;
+    uint32_t effective_length_update_target_iter = 10;
 };
 
 // EM algorithm results

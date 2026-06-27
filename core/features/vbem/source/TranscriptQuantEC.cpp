@@ -11,6 +11,7 @@
 #include <limits>
 #include <random>
 #include <atomic>
+#include <cstdlib>
 
 // Global atomic counter for processed read groups (matches Salmon's processedReads)
 // Used for pre-burn-in gating: aux params are enabled when this count >= numPreBurninFrags (5000)
@@ -38,6 +39,29 @@ TranscriptQuantEC::TranscriptQuantEC(uint num_transcripts, int threadId, const s
                        << "logCompat=...;expFmt=...;obsFmt=...;isCompat=...;mateStatus=...;mateFields=...;"
                        << "fwd=...;mateFwd=...;pos=...;matePos=...;primary=...;dropped=...;orphan=...;auxProb=...;"
                        << "fragLen=...;useAuxParams=...;globalFragCount=...;batchReads=...;batchStartCount=...;inDetectionMode=...;\n";
+        }
+    }
+
+    const char* errorTraceFile = std::getenv("STAR_ERROR_MODEL_TRACE");
+    if (alignment_model_ != nullptr && errorTraceFile != nullptr && errorTraceFile[0] != '\0') {
+        std::string fname = std::string(errorTraceFile) + "." + std::to_string(threadId_) + ".tsv";
+        error_trace_out_.reset(new std::ofstream(fname));
+        if (error_trace_out_->is_open()) {
+            int level = 1;
+            const char* levelStr = std::getenv("STAR_ERROR_MODEL_TRACE_LEVEL");
+            if (levelStr == nullptr || levelStr[0] == '\0') {
+                levelStr = std::getenv("SALMON_TRACE_LEVEL");
+            }
+            if (levelStr != nullptr && levelStr[0] != '\0') {
+                level = std::atoi(levelStr);
+                if (level < 0 || level > 3) {
+                    level = 1;
+                }
+            }
+            alignment_model_->setTraceOutput(error_trace_out_.get(),
+                                             static_cast<libem::ErrorModelTraceLevel>(level));
+        } else {
+            error_trace_out_.reset();
         }
     }
 }
@@ -388,6 +412,20 @@ void TranscriptQuantEC::addReadAlignments(Transcript* trMult, uint nTr, const st
     
     const bool use_error_model = error_model_available;
     const bool use_model = use_error_model && alignment_model_->useModel();
+    const char* error_trace_filter_env = std::getenv("STAR_ERROR_MODEL_TRACE_QNAME");
+    const std::string error_trace_filter =
+        (error_trace_filter_env != nullptr) ? std::string(error_trace_filter_env) : std::string();
+    auto set_error_trace_context = [&](uint32_t transcript_id) -> bool {
+        if (alignment_model_ == nullptr || !error_trace_out_ || !error_trace_out_->is_open() ||
+            qname == nullptr) {
+            return false;
+        }
+        if (!error_trace_filter.empty() && error_trace_filter != qname) {
+            return false;
+        }
+        alignment_model_->setTraceContext(qname, transcript_id);
+        return true;
+    };
     
     struct ErrModelData {
         const libem::TranscriptSequence* ref = nullptr;
@@ -457,19 +495,27 @@ void TranscriptQuantEC::addReadAlignments(Transcript* trMult, uint nTr, const st
                 }
                 if (err.paired && !err.cigar2.empty() &&
                     current_packed_read2_ != nullptr && current_read2_len_ > 0) {
+                    bool traced_error_model = set_error_trace_context(transcript_id);
                     aln.err_like = alignment_model_->logLikelihoodPaired(
                         err.cigar1.data(), static_cast<uint32_t>(err.cigar1.size()),
                         read1_seq, static_cast<int32_t>(current_read1_len_),
                         err.cigar2.data(), static_cast<uint32_t>(err.cigar2.size()),
                         read2_seq, static_cast<int32_t>(current_read2_len_),
                         err.ref, err.pos1, err.pos2);
+                    if (traced_error_model) {
+                        alignment_model_->clearTraceContext();
+                    }
                 } else {
                     bool is_left = (aln.mate_status == MateStatus::PAIRED_END_LEFT ||
                                     aln.mate_status == MateStatus::SINGLE_END);
+                    bool traced_error_model = set_error_trace_context(transcript_id);
                     aln.err_like = alignment_model_->logLikelihood(
                         err.cigar1.data(), static_cast<uint32_t>(err.cigar1.size()),
                         read1_seq, static_cast<int32_t>(current_read1_len_),
                         err.ref, err.pos1, is_left);
+                    if (traced_error_model) {
+                        alignment_model_->clearTraceContext();
+                    }
                 }
                 aln.has_err_like = true;
             } else {
@@ -573,10 +619,15 @@ void TranscriptQuantEC::addReadAlignments(Transcript* trMult, uint nTr, const st
         }
     }
     
-    // Set burn-in tracking in params using persisted batch start count
+    // Set burn-in tracking from the persisted BAM-order mini-batch start count.
+    // The aux gate follows the read-group order that feeds the EC builder; do
+    // not add a worker-scheduling lag when the comparator consumes the emitted
+    // transcriptome BAM in that same order.
+    uint64_t aux_gate_count = batch_start_count_;
+
     // This matches Salmon's behavior: gates on processed read groups per mini-batch
     // useAuxParams stays constant for the whole batch (matches Salmon)
-    params.num_processed_fragments = batch_start_count_;
+    params.num_processed_fragments = aux_gate_count;
     
     // Store batch info in params for trace instrumentation (before incrementing)
     params.batch_reads = local_batch_reads_;
@@ -586,6 +637,39 @@ void TranscriptQuantEC::addReadAlignments(Transcript* trMult, uint nTr, const st
     bool do_trace = trace_out_.is_open() && qname != nullptr &&
                     (trace_limit_ == 0 || traced_count_ < trace_limit_);
     ReadMapping mapping = computeAuxProbs(filtered_alignments, params, do_trace);
+
+    if (P_.quant.transcriptVB.gcBias &&
+        !P_.quant.transcriptVB.inDetectionMode &&
+        transcriptome_ != nullptr &&
+        mapping.log_prob_denom != LOG_0) {
+        for (size_t i = 0; i < mapping.alignment_indices.size(); ++i) {
+            size_t aln_idx = mapping.alignment_indices[i];
+            if (aln_idx >= filtered_alignments.size() || i >= mapping.log_probs.size()) {
+                continue;
+            }
+            const RawAlignment& aln = filtered_alignments[aln_idx];
+            if (aln.mate_status != MateStatus::PAIRED_END_PAIRED ||
+                !aln.mate_fields_set ||
+                aln.read_len == 0 ||
+                aln.mate_read_len == 0) {
+                continue;
+            }
+
+            const libem::TranscriptSequence* txp = transcriptome_->getTranscript(aln.transcript_id);
+            if (txp == nullptr) {
+                continue;
+            }
+
+            int32_t start = std::min(aln.pos, aln.mate_pos);
+            int32_t stop = std::max(aln.pos + static_cast<int32_t>(aln.read_len),
+                                    aln.mate_pos + static_cast<int32_t>(aln.mate_read_len));
+            if (start >= 0 && stop < static_cast<int32_t>(txp->length())) {
+                int32_t gcPct = txp->gcFrac(start, stop);
+                double weight = std::exp(mapping.log_probs[i] - mapping.log_prob_denom);
+                observedGC_.incLinear(gcPct, weight);
+            }
+        }
+    }
     
     // AFTER computeAuxProbs: increment batch counter and flush if needed
     if (!P_.quant.transcriptVB.inDetectionMode) {
@@ -642,7 +726,11 @@ void TranscriptQuantEC::addReadAlignments(Transcript* trMult, uint nTr, const st
             log_forgetting_mass = cached_log_forgetting_mass_;
         }
         
-        std::uniform_real_distribution<double> uni(0.0, 1.0);
+        static const bool deterministic_error_model =
+            (std::getenv("SALMON_DETERMINISTIC_EM") != nullptr ||
+             std::getenv("STAR_VB_DETERMINISTIC_EM") != nullptr);
+        std::uniform_real_distribution<double> uni(
+            0.0, 1.0 + std::numeric_limits<double>::min());
         
         for (size_t i = 0; i < mapping.alignment_indices.size(); ++i) {
             size_t aln_idx = mapping.alignment_indices[i];
@@ -657,9 +745,9 @@ void TranscriptQuantEC::addReadAlignments(Transcript* trMult, uint nTr, const st
             
             // Stochastic acceptance: r < exp(normalized_logProb)
             // Since logProb is normalized, exp(normalized_logProb) is a valid probability [0,1]
-            double r = uni(rng_);
+            double r = deterministic_error_model ? 0.0 : uni(rng_);
             double acceptance_prob = std::exp(normalized_log_prob);
-            if (r >= acceptance_prob) {
+            if (!deterministic_error_model && r >= acceptance_prob) {
                 continue;  // Reject this update
             }
             
@@ -720,6 +808,8 @@ void TranscriptQuantEC::addReadAlignments(Transcript* trMult, uint nTr, const st
     dropped_incompat_ += mapping.num_dropped_incompat;
     dropped_missing_mate_fields_ += mapping.num_dropped_missing_mate_fields;
     dropped_unknown_obs_fmt_ += mapping.num_dropped_unknown_obs_fmt;
+
+    if (mapping.transcript_ids.empty()) return;
     
     // Set detection mode flag in trace info (for debugging)
     if (do_trace) {
@@ -729,8 +819,6 @@ void TranscriptQuantEC::addReadAlignments(Transcript* trMult, uint nTr, const st
         writeTraceLine(qname, mapping, params, current_read_alignments_);
         traced_count_++;
     }
-    
-    if (mapping.transcript_ids.empty()) return;
     
     // mapping.aux_probs is already normalized to linear weights by computeAuxProbs
     // (see ec_builder.cpp line 465: mapping.aux_probs[i] = normalized_weight)
@@ -853,7 +941,7 @@ void TranscriptQuantEC::addReadAlignmentsSimple(const std::vector<uint32_t>& tra
 }
 
 void TranscriptQuantEC::addGCObservation(int32_t frag_start, int32_t frag_end, int32_t gc_pct, double weight) {
-    observedGC_.inc(gc_pct, weight);
+    observedGC_.incLinear(gc_pct, weight);
 }
 
 void TranscriptQuantEC::addFLDObservation(int32_t frag_len, double weight, double log_prob) {

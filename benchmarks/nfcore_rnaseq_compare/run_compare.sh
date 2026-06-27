@@ -216,6 +216,7 @@ timed "B.starsuite_integrated" "${SUITE}/time.log" \
   --trimCutadapt Yes \
   --outSAMtype BAM SortedByCoordinate --outBAMsortMethod samtools \
   --quantMode TranscriptomeSAM TranscriptVB --quantVBLibType A \
+  --transcriptomeFasta "${TRANSCRIPTOME}" \
   --outFileNamePrefix "${SUITE}/" --outTmpDir "${SUITE}/_tmp"
 
 # =============================================================================

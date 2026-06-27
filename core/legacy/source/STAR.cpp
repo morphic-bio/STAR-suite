@@ -180,6 +180,54 @@ void writeTranscriptVBEqDump(const std::string& path, const ECTable& ecTable, co
     }
 }
 
+void writeTranscriptVBDoubleVectorDump(const std::string& path,
+                                       const std::string& valueName,
+                                       const std::vector<double>& values) {
+    std::ofstream out(path.c_str());
+    if (!out.is_open()) {
+        return;
+    }
+
+    out << "index\t" << valueName << "\n";
+    out << std::setprecision(17);
+    for (size_t i = 0; i < values.size(); ++i) {
+        out << i << "\t" << values[i] << "\n";
+    }
+}
+
+void writeTranscriptVBGCModelDump(const std::string& path,
+                                  const GCFragModel& gcModel,
+                                  double total) {
+    std::ofstream out(path.c_str());
+    if (!out.is_open()) {
+        return;
+    }
+
+    const auto& counts = gcModel.getCounts();
+    out << "bin\tvalue\tnormalized\n";
+    out << std::setprecision(17);
+    for (int i = 0; i < GCFragModel::GC_BINS; ++i) {
+        const double norm = (total > 0.0) ? counts[i] / total : 0.0;
+        out << i << "\t" << counts[i] << "\t" << norm << "\n";
+    }
+}
+
+void writeTranscriptVBEffLenDump(const std::string& path,
+                                 const Transcriptome& tr,
+                                 const std::vector<double>& effLengths) {
+    std::ofstream out(path.c_str());
+    if (!out.is_open()) {
+        return;
+    }
+
+    out << "Name\tLength\tEffectiveLength\n";
+    out << std::setprecision(17);
+    const uint n = std::min<uint>(tr.nTr, static_cast<uint>(effLengths.size()));
+    for (uint i = 0; i < n; ++i) {
+        out << tr.trID[i] << "\t" << tr.trLen[i] << "\t" << effLengths[i] << "\n";
+    }
+}
+
 bool applyPfMultiGexInputFiltering(Parameters& P) {
     if (P.runMode != "alignReads") {
         return false;
@@ -906,8 +954,9 @@ int main(int argInN, char *argIn[])
             P.quant.slam.errorRateFromBlank = false;
         }
         
-        // Load transcript sequences for error model if enabled
-        if (P.quant.transcriptVB.yes && P.quant.transcriptVB.errorModelMode != "off") {
+        // Load transcript sequences for TranscriptVB features that need sequence context.
+        if (P.quant.transcriptVB.yes &&
+            (P.quant.transcriptVB.errorModelMode != "off" || P.quant.transcriptVB.gcBias)) {
             // Determine FASTA path: P.pGe.transcriptomeFasta else transcriptome.fa
             std::string fasta_path;
             if (!P.pGe.transcriptomeFasta.empty() && P.pGe.transcriptomeFasta != "-") {
@@ -919,9 +968,8 @@ int main(int argInN, char *argIn[])
             
             libem_transcriptome.reset(new libem::Transcriptome());
             if (!libem_transcriptome->loadFromFasta(fasta_path)) {
-                // Failed to load - disable error model
                 P.inOut->logMain << "WARNING: Failed to load transcript sequences from " << fasta_path 
-                                 << ". Error model will be disabled.\n";
+                                 << ". TranscriptVB sequence-context models will be disabled.\n";
                 libem_transcriptome.reset();
             } else {
                 // Reorder by STAR transcript names to match BAM header order
@@ -931,10 +979,12 @@ int main(int argInN, char *argIn[])
                 }
                 if (!libem_transcriptome->reorderByNames(star_names)) {
                     P.inOut->logMain << "WARNING: Failed to reorder transcript sequences to match STAR order. "
-                                     << "Error model may use incorrect sequences.\n";
+                                     << "TranscriptVB sequence-context models will be disabled.\n";
+                    libem_transcriptome.reset();
+                } else {
+                    P.inOut->logMain << "Loaded " << libem_transcriptome->size()
+                                     << " transcript sequences for TranscriptVB sequence-context models\n";
                 }
-                P.inOut->logMain << "Loaded " << libem_transcriptome->size() 
-                                 << " transcript sequences for error model\n";
             }
         }
     }
@@ -2245,18 +2295,22 @@ int main(int argInN, char *argIn[])
                            << ", fragments=" << observedFLD.getTotalFragments() << "\n";
         }
         
+        double observedGCTotal = 0.0;
         // Log GC observations if GC bias is enabled
         if (P.quant.transcriptVB.gcBias) {
             const GCFragModel& observedGC = mergedEC.getObservedGC();
             const auto& gcCounts = observedGC.getCounts();
-            double totalObs = 0.0;
             for (int i = 0; i < 101; i++) {
-                totalObs += gcCounts[i];
+                observedGCTotal += gcCounts[i];
             }
-            if (totalObs > 100) {
-                *P.inOut->logStdOut << "GC bias: collected " << static_cast<uint64_t>(totalObs) << " fragment observations\n"
+            if (!P.quant.transcriptVB.traceFile.empty()) {
+                writeTranscriptVBGCModelDump(P.quant.transcriptVB.traceFile + ".gc_observed.tsv",
+                                             observedGC, observedGCTotal);
+            }
+            if (observedGCTotal > 100) {
+                *P.inOut->logStdOut << "GC bias: collected " << static_cast<uint64_t>(observedGCTotal) << " fragment observations\n"
                                   << flush;
-                P.inOut->logMain << "GC bias: collected " << static_cast<uint64_t>(totalObs) << " fragment observations\n";
+                P.inOut->logMain << "GC bias: collected " << static_cast<uint64_t>(observedGCTotal) << " fragment observations\n";
             }
         }
         
@@ -2264,6 +2318,10 @@ int main(int argInN, char *argIn[])
         std::vector<double> fld_pmf;
         if (use_fld) {
             fld_pmf = observedFLD.getPMF();
+        }
+        if (!P.quant.transcriptVB.traceFile.empty() && !fld_pmf.empty()) {
+            writeTranscriptVBDoubleVectorDump(P.quant.transcriptVB.traceFile + ".fld_pmf.tsv",
+                                             "probability", fld_pmf);
         }
         
         // Build raw_lengths_int vector
@@ -2293,21 +2351,44 @@ int main(int argInN, char *argIn[])
                 eff_lengths[i] = effLen;
             }
         }
-        
+
+        bool use_dynamic_gc_bias = false;
+        std::vector<double> observed_gc_counts_101;
+        if (P.quant.transcriptVB.gcBias) {
+            if (observedGCTotal <= 100.0) {
+                P.inOut->logMain << "WARNING: GC bias requested but too few observed GC fragments were collected; "
+                                 << "using FLD-only effective lengths.\n";
+            } else if (!use_fld || fld_pmf.empty()) {
+                P.inOut->logMain << "WARNING: GC bias requested but no valid fragment length distribution is available; "
+                                 << "using FLD-only effective lengths.\n";
+            } else if (libem_transcriptome == nullptr ||
+                       libem_transcriptome->size() < transcriptomeMain->nTr) {
+                P.inOut->logMain << "WARNING: GC bias requested but transcript sequences are unavailable; "
+                                 << "using FLD-only effective lengths.\n";
+            } else {
+                const GCFragModel& observedGC = mergedEC.getObservedGC();
+                const auto& gcCounts = observedGC.getCounts();
+                observed_gc_counts_101.assign(gcCounts.begin(), gcCounts.end());
+                use_dynamic_gc_bias = true;
+                *P.inOut->logStdOut << "GC bias: will update effective lengths dynamically during VB/EM\n"
+                                  << flush;
+                P.inOut->logMain << "GC bias: will update effective lengths dynamically during VB/EM\n";
+            }
+            if (!use_dynamic_gc_bias) {
+                *P.inOut->logStdOut << "GC bias: not applied; using FLD-only effective lengths\n" << flush;
+            }
+        }
+        if (!P.quant.transcriptVB.traceFile.empty()) {
+            writeTranscriptVBEffLenDump(P.quant.transcriptVB.traceFile + ".effective_lengths.initial.tsv",
+                                        *transcriptomeMain, eff_lengths);
+        }
+
         // Populate transcript state
         for (uint i = 0; i < transcriptomeMain->nTr; ++i) {
             state.names[i] = transcriptomeMain->trID[i];
             double rawLen = static_cast<double>(transcriptomeMain->trLen[i]);
             state.lengths[i] = rawLen;
             state.eff_lengths[i] = eff_lengths[i];
-        }
-        
-        // Note: GC-corrected effective lengths would require transcript sequences
-        // For now, FLD-based effective lengths are computed above
-        if (P.quant.transcriptVB.gcBias) {
-            *P.inOut->logStdOut << "GC bias: GC correction requires transcript sequences (not yet implemented)\n"
-                              << flush;
-            P.inOut->logMain << "GC bias: GC correction requires transcript sequences (not yet implemented)\n";
         }
         
         // 4. Run VB/EM quantification
@@ -2318,6 +2399,71 @@ int main(int argInN, char *argIn[])
         // Do NOT override for VB - let VB use same defaults as EM for Salmon parity
         // Thread count: use OMP default unless explicitly set (we'll pass --runThreadN externally for parity tests)
         params.threads = 0;  // 0 = use OMP default (multi-thread capable)
+
+        libem::Transcriptome* libem_txome_for_dynamic_gc = libem_transcriptome.get();
+        if (use_dynamic_gc_bias) {
+            params.effective_length_update =
+                [&, libem_txome_for_dynamic_gc](uint32_t iter,
+                                                TranscriptState& callback_state,
+                                                const std::vector<double>& alpha_counts) -> bool {
+                    DynamicGCEffectiveLengthResult gcResult =
+                        computeDynamicGCBiasedEffectiveLengthsWrapper(
+                            *libem_txome_for_dynamic_gc,
+                            fld_pmf,
+                            raw_lengths_int,
+                            alpha_counts,
+                            callback_state.eff_lengths,
+                            observed_gc_counts_101);
+                    if (!gcResult.applied) {
+                        P.inOut->logMain << "WARNING: GC bias dynamic effective-length update at iteration "
+                                         << iter << " could not be applied; keeping FLD-only lengths.\n";
+                        return false;
+                    }
+
+                    callback_state.eff_lengths.swap(gcResult.effective_lengths);
+
+                    if (!P.quant.transcriptVB.traceFile.empty()) {
+                        writeTranscriptVBDoubleVectorDump(P.quant.transcriptVB.traceFile + ".gc_observed_25.tsv",
+                                                         "probability", gcResult.observed_gc);
+                        writeTranscriptVBDoubleVectorDump(P.quant.transcriptVB.traceFile + ".gc_expected.tsv",
+                                                         "probability", gcResult.expected_gc);
+                        writeTranscriptVBDoubleVectorDump(P.quant.transcriptVB.traceFile + ".gc_bias.tsv",
+                                                         "bias", gcResult.gc_bias);
+                        writeTranscriptVBEffLenDump(P.quant.transcriptVB.traceFile + ".effective_lengths.tsv",
+                                                    *transcriptomeMain, callback_state.eff_lengths);
+                    }
+
+                    double gcBiasMin = gcResult.gc_bias.empty() ? 1.0 : gcResult.gc_bias[0];
+                    double gcBiasMax = gcResult.gc_bias.empty() ? 1.0 : gcResult.gc_bias[0];
+                    int gcBiasMinBin = 0;
+                    int gcBiasMaxBin = 0;
+                    for (size_t ib = 1; ib < gcResult.gc_bias.size(); ++ib) {
+                        if (gcResult.gc_bias[ib] < gcBiasMin) {
+                            gcBiasMin = gcResult.gc_bias[ib];
+                            gcBiasMinBin = static_cast<int>(ib);
+                        }
+                        if (gcResult.gc_bias[ib] > gcBiasMax) {
+                            gcBiasMax = gcResult.gc_bias[ib];
+                            gcBiasMaxBin = static_cast<int>(ib);
+                        }
+                    }
+                    *P.inOut->logStdOut << "GC bias: dynamic update at iteration " << iter
+                                      << " using " << gcResult.background_transcripts
+                                      << " background transcripts; ratio range "
+                                      << gcBiasMin << " (bin " << gcBiasMinBin << ") to "
+                                      << gcBiasMax << " (bin " << gcBiasMaxBin << ")\n"
+                                      << flush;
+                    P.inOut->logMain << "GC bias: dynamic update at iteration " << iter
+                                     << " using " << gcResult.background_transcripts
+                                     << " background transcripts; ratio range "
+                                     << gcBiasMin << " (bin " << gcBiasMinBin << ") to "
+                                     << gcBiasMax << " (bin " << gcBiasMaxBin << ")\n";
+                    return true;
+                };
+        } else if (!P.quant.transcriptVB.traceFile.empty()) {
+            writeTranscriptVBEffLenDump(P.quant.transcriptVB.traceFile + ".effective_lengths.tsv",
+                                        *transcriptomeMain, eff_lengths);
+        }
         
         EMResult result;
         if (params.use_vb) {
