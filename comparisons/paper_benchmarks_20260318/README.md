@@ -203,6 +203,13 @@ Benchmark script: `scripts/paper/run_pe_bulk_feature_benchmark.sh`
 Dataset: JAX PE (21033-09-01-13-01\_S1\_L007), full sample on `/storage`, 32 threads.
 STAR index: `/storage/autoindex_110_44/bulk_index`
 
+Important: the archived March 2026 tables below were collected in parity-QC
+mode. The integrated arm emitted `Aligned.toTranscriptome.out.bam` and ran
+integrated Salmon QC, so the archived "Total" values include a parity artifact
+that normal STAR-suite production does not require. Current production-mode
+benchmarking uses internal TranscriptVB only on the integrated arm; use
+`--parity-qc` only when Salmon parity artifacts are intentionally needed.
+
 ### With Y-removal (2026-03-10)
 
 | Step | Integrated | External |
@@ -245,18 +252,28 @@ Artifacts: `/tmp/pe_bulk_feature_benchmark_no_yremove_20260318_144657/`
 ### Rerun Recipe Notes (2026-06-27)
 
 The paper recipe now treats STAR-suite internal TranscriptVB as the production
-quantifier. External Salmon remains a QC/comparator and is run after STAR writes
-the completed `Aligned.toTranscriptome.out.bam`; this wrapper does not use a
-FIFO/streaming Salmon contract. The integrated arm passes
-`--transcriptomeFasta` alongside `--quantVBgcBias 1` so the GC-bias and
-effective-length model use the same transcriptome FASTA as Salmon.
+quantifier. The integrated arm does not emit TranscriptomeSAM or run integrated
+Salmon QC by default. Those parity artifacts are enabled only with
+`--parity-qc`; this wrapper does not use a FIFO/streaming Salmon contract. The
+integrated arm passes `--transcriptomeFasta` alongside `--quantVBgcBias 1` so
+the GC-bias and effective-length model use the same transcriptome FASTA as
+Salmon.
 
 For headline speedups, use `scripts/paper/run_pe_bulk_feature_benchmark.sh` and
-keep both arms on the wrapper's matched output mode. A full PPARG no-Y sanity
-rerun on `/storage` with a lean unsorted-BAM serial comparator measured
-STAR-suite integrated at `7:18.06`, Salmon QC at `1:00.08`, and the lean serial
-chain at `9:50.17` (`1.35x`). That diagnostic confirms the current parity path
-but is not an apples-to-apples replacement for the archived paper ratio.
+keep both arms on the wrapper's matched output mode. Use `--integrated-only`
+when refreshing only the STAR-suite production timing and the external control
+does not need to be rerun.
+
+A corrected full PPARG no-Y STAR-suite-only production run on `/storage`
+measured integrated trim+align+sorted BAM+internal TranscriptVB at `8:54.52`.
+It did not emit integrated TranscriptomeSAM or run integrated Salmon QC. Run
+root: `/storage/JAX_PE/results/pparg_prod_benchmark_no_y_20260627_172349/`.
+
+An earlier PPARG no-Y sanity rerun with a lean unsorted-BAM serial comparator
+measured STAR-suite integrated at `7:18.06`, Salmon QC at `1:00.08`, and the
+lean serial chain at `9:50.17` (`1.35x`). That diagnostic confirms the current
+parity path but is not an apples-to-apples replacement for the production
+benchmark because the integrated arm still emitted the parity transcriptome BAM.
 
 ## File Inventory
 
