@@ -242,6 +242,22 @@ is a cold-cache measurement and is more representative for single-invocation use
 
 Artifacts: `/tmp/pe_bulk_feature_benchmark_no_yremove_20260318_144657/`
 
+### Rerun Recipe Notes (2026-06-27)
+
+The paper recipe now treats STAR-suite internal TranscriptVB as the production
+quantifier. External Salmon remains a QC/comparator and is run after STAR writes
+the completed `Aligned.toTranscriptome.out.bam`; this wrapper does not use a
+FIFO/streaming Salmon contract. The integrated arm passes
+`--transcriptomeFasta` alongside `--quantVBgcBias 1` so the GC-bias and
+effective-length model use the same transcriptome FASTA as Salmon.
+
+For headline speedups, use `scripts/paper/run_pe_bulk_feature_benchmark.sh` and
+keep both arms on the wrapper's matched output mode. A full PPARG no-Y sanity
+rerun on `/storage` with a lean unsorted-BAM serial comparator measured
+STAR-suite integrated at `7:18.06`, Salmon QC at `1:00.08`, and the lean serial
+chain at `9:50.17` (`1.35x`). That diagnostic confirms the current parity path
+but is not an apples-to-apples replacement for the archived paper ratio.
+
 ## File Inventory
 
 ```

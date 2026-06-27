@@ -162,9 +162,27 @@ needs to be validated as producing equivalent parity when rescue is enabled.
 ## PE Bulk Benchmark
 
 The PE bulk benchmark (`scripts/paper/run_pe_bulk_feature_benchmark.sh`) compares
-integrated STAR-suite (trimming + alignment + Y-removal + TranscriptVB, single
-pass) against an external stepwise pipeline (trimvalidate + STAR + remove_y_reads
-+ Salmon).
+integrated STAR-suite (trimming + alignment + Y-removal + internal TranscriptVB)
+against an external stepwise pipeline (trimvalidate + STAR + remove_y_reads +
+Salmon).
+
+### Quantification contract
+
+- The production STAR-suite arm is internal TranscriptVB, enabled with
+  `--quantMode TranscriptomeSAM TranscriptVB --quantVBgcBias 1`.
+- The integrated recipe must pass the same transcriptome FASTA used by Salmon via
+  `--transcriptomeFasta`, so GC-bias and effective-length calculation use the
+  pinned reference sidecar/input.
+- External Salmon is a QC/comparator step, not part of the STAR-suite production
+  timing. The wrapper deliberately runs Salmon after STAR has completed
+  `Aligned.toTranscriptome.out.bam`; it is not a FIFO/streaming Salmon contract.
+- Internal TranscriptVB collects transcript evidence during the STAR run, then
+  merges/finalizes ECs, GC/effective-length state, and VB/EM convergence after
+  alignment EOF. Do not describe this as external Salmon running concurrently.
+- Headline speedups must be measured with this wrapper and the same output mode
+  on both arms. Lean sanity checks using direct Trim Galore or unsorted BAM are
+  valid diagnostics, but their ratios are not apples-to-apples with the paper
+  benchmark.
 
 ### Modes
 
@@ -182,6 +200,17 @@ Transcript and gene-level Pearson/Spearman correlations are computed by
 1. Integrated TranscriptVB vs Integrated Salmon (internal consistency)
 2. Integrated Salmon vs External Salmon (pipeline effect on same tool)
 3. Integrated TranscriptVB vs External Salmon (the headline comparison)
+
+### 2026-06-27 PPARG sanity rerun
+
+A full PPARG no-Y rerun on `/storage` with the current internal TranscriptVB
+implementation measured STAR-suite integrated trim+align+TranscriptVB at
+`7:18.06`; Salmon QC on the integrated transcriptome BAM added `1:00.08`.
+A lean serial comparator using Trim Galore, upstream STAR, unsorted transcriptome
+BAM, and Salmon took `9:50.17`, giving `1.35x` for that diagnostic setup. This
+run confirmed high current Salmon parity (NumReads Pearson `0.999979` on all
+transcripts; `0.999980` at sum>=1000) but should not replace the archived paper
+speedup because its serial comparator is lighter than the paper wrapper.
 
 ## Paper Scripts
 
