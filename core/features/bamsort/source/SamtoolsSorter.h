@@ -12,8 +12,9 @@
 #include <cstring>
 #include <utility>
 
-// Simplified coordinate sorting: legacy-style coordinate order (tid<<32|pos, unmapped→INT32_MAX) then readId
-// No QNAME tie-break, no SortKey storage - recompute coord from bamData in comparator
+// Simplified coordinate sorting: samtools-style coordinate order
+// (tid<<32|pos, unmapped last), reverse-strand bit, then input order.
+// No QNAME tie-break, no SortKey storage - recompute keys from bamData in comparator.
 
 // Structure to hold BAM record data with minimal metadata
 struct BAMRecord {
@@ -21,15 +22,18 @@ struct BAMRecord {
     uint32_t size;
     bool hasY;
     uint32_t readId;  // readId extracted from iRead >> 32
+    uint64_t inputOrder;  // insertion order, used to match samtools coordinate tie-breaks
     
-    BAMRecord() : data(nullptr), size(0), hasY(false), readId(0) {}
+    BAMRecord() : data(nullptr), size(0), hasY(false), readId(0), inputOrder(0) {}
     
     // Move constructor
     BAMRecord(BAMRecord&& other) noexcept 
-        : data(other.data), size(other.size), hasY(other.hasY), readId(other.readId) {
+        : data(other.data), size(other.size), hasY(other.hasY), readId(other.readId),
+          inputOrder(other.inputOrder) {
         other.data = nullptr;
         other.size = 0;
         other.readId = 0;
+        other.inputOrder = 0;
     }
     
     // Move assignment
@@ -40,9 +44,11 @@ struct BAMRecord {
             size = other.size;
             hasY = other.hasY;
             readId = other.readId;
+            inputOrder = other.inputOrder;
             other.data = nullptr;
             other.size = 0;
             other.readId = 0;
+            other.inputOrder = 0;
         }
         return *this;
     }
@@ -69,9 +75,15 @@ namespace SamtoolsSorterHelpers {
         
         return (tid64 << 32) | pos64;
     }
+
+    inline uint32_t computeReverseKey(const char* bamData) {
+        const uint32_t* bam32 = reinterpret_cast<const uint32_t*>(bamData);
+        uint32_t flag = bam32[4] >> 16;
+        return (flag & 0x10) ? 1u : 0u;
+    }
 }
 
-// Comparator for sorting BAM records: coord (tid<<32|pos) then readId
+// Comparator for sorting BAM records: coord (tid<<32|pos), strand, then input order.
 struct BAMRecordComparator {
     bool operator()(const BAMRecord& a, const BAMRecord& b) const {
         // Compute coord keys from raw BAM buffers
@@ -82,8 +94,13 @@ struct BAMRecordComparator {
             return coordA < coordB;
         }
         
-        // Tie-break by readId
-        return a.readId < b.readId;
+        uint32_t revA = SamtoolsSorterHelpers::computeReverseKey(a.data);
+        uint32_t revB = SamtoolsSorterHelpers::computeReverseKey(b.data);
+        if (revA != revB) {
+            return revA < revB;
+        }
+
+        return a.inputOrder < b.inputOrder;
     }
 };
 
@@ -122,6 +139,7 @@ private:
     pthread_mutex_t bufferMutex_;
     std::vector<BAMRecord> records_;
     uint64_t currentRAM_;
+    uint64_t nextInputOrder_;
     
     // Spill files for when memory limit is exceeded
     std::vector<string> spillFiles_;
@@ -134,21 +152,25 @@ private:
     bool finalized_;
     BAMRecord returnedRecord_;  // Spill record buffer returned to caller (valid until next call)
     
-    // Min-heap for k-way merge: coord (tid<<32|pos) then readId
+    // Min-heap for k-way merge: coord (tid<<32|pos), strand, then input order.
     // source_id: -1 = in-memory records, >=0 = spill file index
     struct HeapEntry {
         uint64_t coordKey;  // tid<<32|pos (computed from bamPtr)
-        uint32_t readId;    // readId for tie-breaking
+        uint32_t reverseKey; // strand tie-break used by samtools coordinate sort
+        uint32_t readId;    // readId preserved for downstream tag injection
+        uint64_t inputOrder; // original insertion order for final tie-break
         int sourceId;       // -1 = in-memory, >=0 spill file index
         size_t recordIdx;   // index into records_ when sourceId == -1
         const char* bamPtr; // pointer to current BAM record (for recomputing coord)
         BAMRecord record;   // Owned copy of BAM record (for spill files, ensures data persists after readNext)
         
-        HeapEntry() : coordKey(0), readId(0), sourceId(0), recordIdx(0), bamPtr(nullptr) {}
+        HeapEntry() : coordKey(0), reverseKey(0), readId(0), inputOrder(0),
+                      sourceId(0), recordIdx(0), bamPtr(nullptr) {}
         
         // Move constructor
         HeapEntry(HeapEntry&& other) noexcept
-            : coordKey(other.coordKey), readId(other.readId), sourceId(other.sourceId),
+            : coordKey(other.coordKey), reverseKey(other.reverseKey), readId(other.readId),
+              inputOrder(other.inputOrder), sourceId(other.sourceId),
               recordIdx(other.recordIdx), bamPtr(other.bamPtr), record(std::move(other.record)) {
             other.bamPtr = nullptr;
         }
@@ -157,7 +179,9 @@ private:
         HeapEntry& operator=(HeapEntry&& other) noexcept {
             if (this != &other) {
                 coordKey = other.coordKey;
+                reverseKey = other.reverseKey;
                 readId = other.readId;
+                inputOrder = other.inputOrder;
                 sourceId = other.sourceId;
                 recordIdx = other.recordIdx;
                 bamPtr = other.bamPtr;
@@ -169,12 +193,14 @@ private:
         
         // Copy constructor (needed for heap operations)
         HeapEntry(const HeapEntry& other) 
-            : coordKey(other.coordKey), readId(other.readId), sourceId(other.sourceId),
+            : coordKey(other.coordKey), reverseKey(other.reverseKey), readId(other.readId),
+              inputOrder(other.inputOrder), sourceId(other.sourceId),
               recordIdx(other.recordIdx), bamPtr(other.bamPtr) {
             // Deep copy record data (only if it exists - in-memory records have nullptr)
             record.size = other.record.size;
             record.hasY = other.record.hasY;
             record.readId = other.record.readId;
+            record.inputOrder = other.record.inputOrder;
             if (other.record.data != nullptr && other.record.size > 0) {
                 record.data = new char[other.record.size];
                 memcpy(record.data, other.record.data, other.record.size);
@@ -187,7 +213,9 @@ private:
         HeapEntry& operator=(const HeapEntry& other) {
             if (this != &other) {
                 coordKey = other.coordKey;
+                reverseKey = other.reverseKey;
                 readId = other.readId;
+                inputOrder = other.inputOrder;
                 sourceId = other.sourceId;
                 recordIdx = other.recordIdx;
                 bamPtr = other.bamPtr;
@@ -196,6 +224,7 @@ private:
                 record.size = other.record.size;
                 record.hasY = other.record.hasY;
                 record.readId = other.record.readId;
+                record.inputOrder = other.record.inputOrder;
                 if (other.record.data != nullptr && other.record.size > 0) {
                     record.data = new char[other.record.size];
                     memcpy(record.data, other.record.data, other.record.size);
@@ -207,14 +236,16 @@ private:
         }
     };
     
-    // Comparator for min-heap: coord then readId
+    // Comparator for min-heap: coord, strand, then input order.
     struct HeapLess {
         bool operator()(const HeapEntry& a, const HeapEntry& b) const {
             if (a.coordKey != b.coordKey) {
                 return a.coordKey > b.coordKey;  // min-heap: smaller coord has higher priority
             }
-            // Tie-break by readId
-            return a.readId > b.readId;  // min-heap: smaller readId has higher priority
+            if (a.reverseKey != b.reverseKey) {
+                return a.reverseKey > b.reverseKey;
+            }
+            return a.inputOrder > b.inputOrder;
         }
     };
     

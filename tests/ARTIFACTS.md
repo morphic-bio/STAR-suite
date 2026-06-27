@@ -181,6 +181,10 @@ update this file with its output location.
   Salmon parity smoke outputs from `tests/run_transcriptvb_chr22_parity_smoke.sh`;
   contains STAR auto-detect TranscriptVB output, Salmon `-p 1` same-BAM output,
   logs, and `summary.tsv`)
+- `tests/bamsort_samtools_byte_parity_output_*/` (synthetic SE/PE BAM-sort
+  parity outputs from `tests/run_bamsort_samtools_byte_parity.sh`; contains tiny
+  generated reference/FASTQs, STAR unsorted+sorted BAMs, samtools-sorted
+  comparator BAMs, logs, and `summary.tsv`; do not commit generated BAMs)
 - `benchmarks/nfcore_rnaseq_compare/fixtures/chr22/` (small cached public chr22
   PE fixture used by the TranscriptVB Salmon-parity smoke)
 - `benchmarks/nfcore_rnaseq_compare/runs/chr22_20260626_003522/` (retained
