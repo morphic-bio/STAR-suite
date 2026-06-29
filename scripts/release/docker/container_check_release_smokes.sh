@@ -6,7 +6,7 @@ MODE=""
 TARBALL=""
 BUNDLE=""
 EXPECTED_LABEL=""
-EXPECTED_VERSION="1.4.1"
+EXPECTED_VERSION="1.4.2"
 REPO_ROOT=""
 PROFILE="core"
 
@@ -17,7 +17,7 @@ Usage:
   $0 --mode bundle --bundle <path> --expected-label <label> --repo-root <path> [options]
 
 Options:
-  --expected-version VER   STAR-suite version to check (default: 1.4.1)
+  --expected-version VER   STAR-suite version to check (default: 1.4.2)
   --profile PROFILE        Smoke profile to run (default: core)
 
 Profiles:

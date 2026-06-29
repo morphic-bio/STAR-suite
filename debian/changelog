@@ -1,3 +1,16 @@
+star-suite (1.4.2-1) unstable; urgency=medium
+
+  * Patch release for TranscriptVB Salmon parity and GC/effective-length
+    sidecar integration on STAR-generated indexes.
+  * Align the STAR-suite samtools-style BAM sorter tie-break with samtools
+    coordinate sorting and add SE/PE decompressed byte-parity regression
+    coverage.
+  * Clarify the PE bulk production benchmark contract and record matched PPARG
+    no-Y wrapper timings.
+  * Report STAR Suite 1.4.2 from STAR --version.
+
+ -- STAR-suite Maintainers <maintainers@biodepot.example>  Mon, 29 Jun 2026 02:18:04 +0000
+
 star-suite (1.4.1-1) unstable; urgency=medium
 
   * Hotfix Flex/Solo dependency tracking so VPATH-built Flex source objects are
