@@ -1096,6 +1096,7 @@ void ReadAlign::writeFastxRecord(uint imate, bool isY)
         ++name;
     }
     const string& extra = readNameExtra[imate];
+    const uint readLen = readLength[imate];
 
     if (P.emitYNoYFastqCompression == "gz") {
         gzFile stream = isY ? chunkOutYFastqGz[imate] : chunkOutNoYFastqGz[imate];
@@ -1107,10 +1108,16 @@ void ReadAlign::writeFastxRecord(uint imate, bool isY)
         } else {
             gzprintf(stream, "%c%s\n", headerPrefix, name);
         }
-        gzprintf(stream, "%s\n", Read0[imate]);
+        if (readLen > 0) {
+            gzwrite(stream, Read0[imate], readLen);
+        }
+        gzputc(stream, '\n');
         if (readFileType == 2) { // fastq
             gzprintf(stream, "+\n");
-            gzprintf(stream, "%s\n", Qual0[imate]);
+            if (readLen > 0) {
+                gzwrite(stream, Qual0[imate], readLen);
+            }
+            gzputc(stream, '\n');
         }
         gzflush(stream, Z_SYNC_FLUSH);
     } else {
@@ -1124,10 +1131,12 @@ void ReadAlign::writeFastxRecord(uint imate, bool isY)
         } else {
             stream << headerPrefix << name << "\n";
         }
-        stream << Read0[imate] << "\n";
+        stream.write(Read0[imate], readLen);
+        stream << "\n";
         if (readFileType == 2) { // fastq
             stream << "+\n";
-            stream << Qual0[imate] << "\n";
+            stream.write(Qual0[imate], readLen);
+            stream << "\n";
         }
         stream.flush();
     }
