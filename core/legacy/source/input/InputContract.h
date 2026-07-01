@@ -22,6 +22,7 @@ enum class InputStatus {
 };
 
 struct InputMateRecord {
+    std::string read_name_extra;
     std::string sequence;
     std::string quality;
     uint32_t original_length = 0;

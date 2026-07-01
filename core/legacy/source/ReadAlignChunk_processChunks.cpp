@@ -49,6 +49,33 @@ uint64 decimalDigitCount(uint64 value) {
     return digits;
 }
 
+string fastqHeaderExtraFromCurrentLine(ifstream& streamIn) {
+    string extra;
+    getline(streamIn, extra);
+
+    const size_t firstNonSpace = extra.find_first_not_of(" \t");
+    if (firstNonSpace == string::npos) {
+        extra.clear();
+    } else if (firstNonSpace > 0) {
+        extra.erase(0, firstNonSpace);
+    }
+
+    while (!extra.empty() && static_cast<unsigned char>(extra.back()) < 33) {
+        extra.pop_back();
+    }
+    return extra;
+}
+
+char illuminaFilterFlagFromHeaderExtra(const string& extra) {
+    string field2;
+    istringstream extraStream(extra);
+    extraStream >> field2;
+    if (field2.length() >= 4 && field2[1] == ':' && field2[2] == 'Y' && field2[3] == ':') {
+        return 'Y';
+    }
+    return 'N';
+}
+
 string fastxHeaderLine(const Parameters& P,
                        const star::input::InputRecord& record,
                        const star::input::InputMateRecord& mate,
@@ -61,6 +88,9 @@ string fastxHeaderLine(const Parameters& P,
         header = string(1, headerPrefix) + record.read_name;
     }
     header += ' ' + to_string(ordinal) + ' ' + record.read_filter + ' ' + to_string(record.lane_index);
+    if (!mate.read_name_extra.empty()) {
+        header += ' ' + mate.read_name_extra;
+    }
     return header;
 }
 
@@ -956,28 +986,28 @@ void ReadAlignChunk::processChunks() {//read-map-write chunks
                         string readID;
                         P.inOut->readIn[0] >> readID;
                         removeStringEndControl(readID);
+                        vector<string> readNameExtras(P.readNends);
+                        readNameExtras[0] = fastqHeaderExtraFromCurrentLine(P.inOut->readIn[0]);
                         if (P.outSAMreadIDnumber) {
                             readID="@"+to_string(P.iReadAll);
                         };
-                        //read the second field of the read name line
-                        char passFilterIllumina='N';
-                        if (P.inOut->readIn[0].peek()!='\n') {//2nd field exists
-                            string field2;
-                            P.inOut->readIn[0] >> field2;
-                            if (field2.length()>=3 && field2[1]==':' && field2[2]=='Y' && field2[3]==':' )
-                                passFilterIllumina='Y';
-                        };
-                        
-                        //add extra information to readID line
-                        readID += ' '+ to_string(P.iReadAll)+' '+passFilterIllumina+' '+to_string(P.readFilesIndex);
+                        char passFilterIllumina = illuminaFilterFlagFromHeaderExtra(readNameExtras[0]);
 
-                        //ignore the rest of the read name for both mates
-                        for (uint imate=0; imate<P.readNends; imate++)
-                            P.inOut->readIn[imate].ignore(DEF_readNameSeqLengthMax,'\n');
+                        for (uint imate=1; imate<P.readNends; imate++) {
+                            string mateReadID;
+                            P.inOut->readIn[imate] >> mateReadID;
+                            readNameExtras[imate] = fastqHeaderExtraFromCurrentLine(P.inOut->readIn[imate]);
+                        }
 
-                        //copy the same readID to both mates
+                        // Copy the same core read ID to both mates, but preserve each mate's
+                        // original FASTQ header suffix for FASTQ re-emission.
                         for (uint imate=0; imate<P.readNends; imate++) {
-                            chunkInSizeBytesTotal[imate] += 1 + readID.copy(chunkIn[imate] + chunkInSizeBytesTotal[imate], readID.size(),0);
+                            string mateReadID = readID + ' ' + to_string(P.iReadAll) + ' ' +
+                                                passFilterIllumina + ' ' + to_string(P.readFilesIndex);
+                            if (!readNameExtras[imate].empty()) {
+                                mateReadID += ' ' + readNameExtras[imate];
+                            }
+                            chunkInSizeBytesTotal[imate] += 1 + mateReadID.copy(chunkIn[imate] + chunkInSizeBytesTotal[imate], mateReadID.size(),0);
                             chunkIn[imate][chunkInSizeBytesTotal[imate]-1]='\n';
                         };
                     };

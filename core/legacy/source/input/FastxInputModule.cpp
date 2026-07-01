@@ -342,6 +342,7 @@ InputStatus parse_one_mate(
     parsed.read_name = canonical_read_name(raw_name, read_name_separator_chars);
     parsed.read_name_extra = extra;
     parsed.read_filter = parse_read_filter(record_type, extra);
+    parsed.mate.read_name_extra = extra;
     parsed.mate.sequence = sequence;
     parsed.mate.quality = quality;
     parsed.mate.original_length = static_cast<uint32_t>(sequence.size());

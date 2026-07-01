@@ -209,6 +209,13 @@ update this file with its output location.
   transcriptome BAM or Salmon QC; matched external control completed in
   `16:09.61`, split as decompress `1:18.01`, trimvalidate `6:53.71`, STAR
   TranscriptomeSAM `6:56.55`, and Salmon `1:01.34`)
+- `/storage/JAX_PE/results/pparg_yfastq_header_fix_100k_20260701/`
+  (PPARG 100K paired-end downsample used to validate byte-equivalent
+  decompressed Y/no-Y FASTQ output between integrated STAR-suite and the
+  external Trim Galore + awk/samtools/gzip path; contains failed intermediate
+  attempts and the passing `thread1_length_limited_fix/` and
+  `thread32_length_limited_fix/` runs; do not commit generated BAMs, FASTQs, or
+  quant outputs)
 - `/mnt/pikachu/SLAM-Seq-PE-results/prod_full_20260511T103908Z/` (active
   2026-05 SLAM paired-end full-panel production root; protected local dataset,
   Y/noY BAM/FASTQ derivatives are uploaded by Globus and cleaned locally, do

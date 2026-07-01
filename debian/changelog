@@ -1,3 +1,15 @@
+star-suite (1.4.3-1) unstable; urgency=medium
+
+  * Patch release for byte-identical Y/no-Y FASTQ emission after integrated
+    Cutadapt-compatible trimming.
+  * Preserve Illumina FASTQ header suffix fields through both legacy and
+    FastxInputModule read paths so re-emitted FASTQs match historical outputs.
+  * Emit Y/no-Y FASTQ sequence and quality payloads by trimmed read length
+    rather than by stale null-terminated buffers.
+  * Report STAR Suite 1.4.3 from STAR --version.
+
+ -- STAR-suite Maintainers <maintainers@biodepot.example>  Wed, 01 Jul 2026 02:13:23 +0000
+
 star-suite (1.4.2-1) unstable; urgency=medium
 
   * Patch release for TranscriptVB Salmon parity and GC/effective-length
