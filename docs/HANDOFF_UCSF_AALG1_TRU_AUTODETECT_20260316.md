@@ -1,5 +1,65 @@
 # Handoff: UCSF `AALG1` TRU Autodetect Debug (2026-03-16)
 
+## Resolution / Status Update (2026-07-03)
+
+**Verified status: PARTIAL / SUPERSEDED, not confirmed as a poly-G-driven
+AALG1 autodetect bug.**
+
+Current evidence from code, commits, and tracked benchmark artifacts supports
+the following:
+
+- `AALG1` is a UCSF dataset label, not an A375 benchmark label. The corrected
+  UCSF organization treats `AALG1` as the TRU GEX arm and `AALG2` as the NXT
+  guide arm. See `docs/HANDOFF_UCSF_FASTQ_MISLABEL_INVESTIGATION_20260316.md`.
+- The old failing `iPSC2_1_AALG1` auto run is superseded by the corrected UCSF
+  organization and by current benchmark/production commands that explicitly use
+  a TRU Solo whitelist for GEX and a two-column NXT whitelist for guide
+  assignment.
+- `--clip3pPolyG` is implemented and wired into the current STAR clipping path
+  by commit `fce35365f73eedeae931897bd3e466d10fee4179`:
+  `Parameters.cpp` registers the parameter, `ParametersClip_initialize.cpp`
+  resolves `yes|no|auto`, and `ClipCR4::polyTail3p()` trims poly-A and,
+  when enabled, poly-G 3' tails. This plausibly fixes the UCSF LINC00486
+  gene-count artifact documented in
+  `docs/HANDOFF_UCSF_FULL_GENE_PEARSON_ANOMALY_20260220.md`.
+- I did **not** find code evidence that poly-G trimming directly changes the
+  16 bp barcode namespace decision. The NXT/TRU autodetect path samples raw
+  barcode strings and compares raw versus translated whitelist hits in
+  `core/features/process_features/src/assignBarcodes.c`, then composes the
+  namespace decision in `core/legacy/source/PfMultiProcess.cpp`.
+- The STAR-side mixed-chemistry fixes that are relevant to current UCSF
+  processing are separate namespace/autodetect fixes:
+  - `8c402fc` (`2026-02-25`): NXT/TRU chemistry autodetection and per-library
+    override infrastructure.
+  - `f692f45` (`2026-03-03`): source-namespace-aware normalization and shallow
+    bootstrap OrdMag behavior.
+  - `6452600` (`2026-03-17`): NXT-whitelist autodetect inversion and filtered
+    barcode normalization fixes.
+- Tracked benchmark evidence that the corrected UCSF surface is healthy is in
+  commit `207581e84355adce437fe536d4a2e7a18f2ecf67`
+  (`comparisons/paper_benchmarks_20260318/ucsf_ebs2_2/`). The recorded command
+  uses AALG1 GEX FASTQs, `--soloCBwhitelist ...3M-february-2018_TRU.txt`,
+  `--crChemistry auto`, `--crWhitelist ...translation/3M-february-2018_NXT.txt`,
+  and `--clip3pPolyG yes`. The tracked parity report records STAR/CR cells
+  `13,721 / 13,760`, barcode Jaccard `0.976`, gene Pearson `0.995`, and
+  CRISPR set-equivalent calls `98.9%`.
+
+What remains unconfirmed:
+
+- I did not find a tracked rerun of the original `iPSC2_1_AALG1` auto command
+  proving that the exact old failure now resolves to TRU without the corrected
+  UCSF organization and current command surface.
+- I did not find a dedicated automated regression test for "AALG1 auto chooses
+  TRU." Current protection is the corrected UCSF benchmark/script surface plus
+  mixed NXT/TRU autodetect and namespace smokes.
+
+Release-note check:
+
+- `docs/RELEASE_NOTES_*` do not currently call out the AALG1/AALG2 UCSF
+  organization correction, `--clip3pPolyG`, or the NXT/TRU autodetect fixes by
+  name. `v1.0.0` is the natural release-note bucket because these fixes landed
+  before the first production release.
+
 ## Problem
 
 UCSF `AALG1` samples showed a severe STAR vs Cell Ranger cell-calling mismatch

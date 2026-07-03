@@ -1,5 +1,59 @@
 # MSK EmptyDrops Ambient Rescue Isolation (2026-04-02)
 
+## Resolution / Status Update (2026-07-03)
+
+**Verified status: RESOLVED for the stale "identified but not integrated"
+claim.**
+
+The guarded ambient policy from this investigation was integrated into the
+production `libscrna` EmptyDrops path.
+
+Landed code evidence:
+
+- Commit `90ed49076bdf5cb5301c740f1a1770ed3e7b354e`
+  (`2026-04-02`, "EmptyDrops: guarded ambient minimum, debug audit, and custom
+  ambient CLI") changed `core/features/libscrna/src/OrdMagStage.cpp`.
+- Both `SimpleEmptyDropsStage::runCRSimpleFilterBootstrap()` and
+  `SimpleEmptyDropsStage::runCRSimpleFilter()` now compute a guarded
+  `minAmbientCells` target: for `nCB >= 1000`, use
+  `min(nCB/10, max(5000, nCB/50))`; for smaller inputs, use up to `100` cells.
+  If the legacy rank window `[indMin, indMax)` is large enough, it is
+  preserved; otherwise the fallback uses the bottom guarded pool.
+- This is in the production path, not only the standalone tool:
+  `core/legacy/source/SoloFeature_emptyDrops_libscrna.cpp` builds the
+  `scrna_ed_config` and calls `scrna_emptydrops_run()`;
+  `core/features/libscrna/src/scrna_api.cpp` calls `SimpleEmptyDropsStage` and
+  builds the ambient profile from `simpleResult.ambientIndices`.
+- Commit `f692f45ad41fbb035b7efc0b0795441b2bcb6d53` (`2026-03-03`) separately
+  enabled bootstrap OrdMag behavior on shallow data by making the `indMin`
+  skip gate apply only when bootstrap is disabled. This supports low-count /
+  shallow inputs, while the ambient guard determines which ambient pool is used
+  when MC rescue proceeds.
+
+Validation / guard evidence:
+
+- The MSK ambient-swap and guarded-policy experiments below are registered in
+  `tests/ARTIFACTS.md` under `/tmp/msk_libscrna_ambientswap_*` and
+  `/tmp/msk_ambient_policy_*`.
+- The fresh guarded MSK full perturb rerun is tracked in
+  `comparisons/msk_30polyko_full_benchmark_20260306/post_permits_20260403/`
+  with run root
+  `/storage/MSK-perturb-comparison/paper_bench_emptydrops_guarded_redo_20260403_214718`.
+  The tracked parity report records STAR/CR cells `33,095 / 32,256`, barcode
+  Jaccard `0.9742`, Gene Expression per-feature Pearson `0.994554`, and CRISPR
+  set-equivalent calls `98.04%`.
+- Automated tests cover related pieces (`tests/test_ordmag_bootstrap.cpp` for
+  bootstrap OrdMag and `tests/emptydrops/test_simple_ed_threshold.cpp` for
+  SimpleED thresholding), but there is no small unit test that directly asserts
+  the guarded ambient-window selection. The strongest guard for this exact
+  behavior is the tracked MSK benchmark/artifact set above.
+
+Release-note check:
+
+- `docs/RELEASE_NOTES_*` do not currently mention the guarded ambient fix by
+  name. `v1.0.0` is the natural release-note bucket because the fix landed
+  before the first production release.
+
 ## Question
 
 Why does the legacy / CellGENI-style MSK cell list have a much higher CR9
