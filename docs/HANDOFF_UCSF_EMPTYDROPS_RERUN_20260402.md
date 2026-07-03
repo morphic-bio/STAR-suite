@@ -1,5 +1,28 @@
 # Handoff: Apply Fixed EmptyDrops Routine to UCSF Production Set (2026-04-02)
 
+## Resolution / Status Update (2026-07-03)
+
+This document is historical. The guarded ambient fix is no longer "in
+progress" or pending on `feature-emptyDrops`.
+
+Verified current state:
+
+- Commit `90ed49076bdf5cb5301c740f1a1770ed3e7b354e` merged the guarded ambient
+  minimum into `core/features/libscrna/src/OrdMagStage.cpp` and added the
+  `scrna_simpleed` custom-ambient CLI/debug tooling.
+- The integrated STAR path uses the same guarded ambient selection through
+  `SoloFeature_emptyDrops_libscrna.cpp` -> `scrna_emptydrops_run()` ->
+  `SimpleEmptyDropsStage`.
+- The relevant MSK validation is tracked in
+  `comparisons/msk_30polyko_full_benchmark_20260306/post_permits_20260403/`.
+  The post-guarded rerun reports STAR/CR cells `33,095 / 32,256`, barcode
+  Jaccard `0.9742`, Gene Expression per-feature Pearson `0.994554`, and CRISPR
+  set-equivalent calls `98.04%`.
+- No dedicated unit test directly asserts the guarded ambient-window choice;
+  related coverage exists for bootstrap OrdMag and SimpleED thresholding, and
+  the exact behavior is guarded by the tracked MSK benchmark/artifact set in
+  `tests/ARTIFACTS.md`.
+
 ## Status
 
 In progress on `feature-emptyDrops`. The guarded ambient fix is now in
