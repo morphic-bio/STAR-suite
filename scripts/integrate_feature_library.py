@@ -106,6 +106,27 @@ def load_feature_matrix(matrix_dir: Path) -> ad.AnnData:
     return adata
 
 
+def paired_barcode_index(matrix_dir: Path, barcodes: pd.Series) -> pd.Index | None:
+    """Map assignment-namespace barcodes to the selected output namespace."""
+    barcodes_txt = first_existing(matrix_dir, ["barcodes.txt", "barcodes.csv"])
+    barcodes_tsv = first_existing(matrix_dir, ["barcodes.tsv", "barcodes.tsv.gz"])
+    if barcodes_txt is None or barcodes_tsv is None:
+        return None
+
+    assignment = read_table(barcodes_txt).iloc[:, 0].map(canonical_barcode).astype(str)
+    output = read_table(barcodes_tsv).iloc[:, 0].map(canonical_barcode).astype(str)
+    if len(assignment) != len(output) or len(assignment) == 0:
+        return None
+    if assignment.duplicated().any() or output.duplicated().any():
+        return None
+
+    barcode_map = pd.Series(output.to_numpy(), index=assignment.to_numpy())
+    mapped = barcodes.map(canonical_barcode).astype(str).map(barcode_map)
+    if mapped.notna().sum() == 0:
+        return None
+    return pd.Index(mapped.fillna("").to_numpy(), dtype=str, name="barcode")
+
+
 def annotate_feature_barcodes(adata: ad.AnnData, matrix_dir: Path):
     feature_per_cell = matrix_dir / "feature_per_cell.csv"
     if not feature_per_cell.exists():
@@ -118,16 +139,24 @@ def annotate_feature_barcodes(adata: ad.AnnData, matrix_dir: Path):
     df["barcode"] = df["barcode"].astype(str)
     direct_index = pd.Index(df["barcode"].map(canonical_barcode), dtype=str, name="barcode")
     translated_index = pd.Index(df["barcode"].map(translate_nxt_middle_two_bases), dtype=str, name="barcode")
+    paired_index = paired_barcode_index(matrix_dir, df["barcode"])
     target_index = pd.Index(adata.obs_names.map(canonical_barcode), dtype=str, name="barcode")
 
-    direct_overlap = int(direct_index.isin(target_index).sum())
-    translated_overlap = int(translated_index.isin(target_index).sum())
-    if translated_overlap > direct_overlap:
-        df.index = translated_index
-        df["barcode_namespace_transform"] = "translated"
-    else:
-        df.index = direct_index
-        df["barcode_namespace_transform"] = "direct"
+    candidates = [
+        ("direct", direct_index, int(direct_index.isin(target_index).sum())),
+        ("translated", translated_index, int(translated_index.isin(target_index).sum())),
+    ]
+    if paired_index is not None:
+        candidates.append(
+            (
+                "paired_barcodes_txt_to_tsv",
+                paired_index,
+                int(paired_index.isin(target_index).sum()),
+            )
+        )
+    transform, index, _overlap = max(candidates, key=lambda item: item[2])
+    df.index = index
+    df["barcode_namespace_transform"] = transform
 
     adata.obs["barcode_feature_namespace"] = df["barcode_namespace_transform"].iloc[0]
 
@@ -155,8 +184,10 @@ def annotate_feature_barcodes(adata: ad.AnnData, matrix_dir: Path):
                 top_names.append("")
                 continue
             index = int(value)
-            if 0 <= index < len(feature_names):
-                top_names.append(feature_names[index])
+            # process_features reserves 0 for ties/no unambiguous top feature;
+            # positive ids are one-based MEX feature row ids.
+            if 1 <= index <= len(feature_names):
+                top_names.append(feature_names[index - 1])
             else:
                 top_names.append("")
         adata.obs["top_feature_name"] = top_names
