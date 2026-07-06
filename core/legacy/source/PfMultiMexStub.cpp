@@ -319,6 +319,91 @@ bool copyBarcodesTsv(const string& barcodesTxt, const string& barcodesTsv, bool 
     return true;
 }
 
+static bool remapFeaturePerCellCsv(const string& featurePerCellCsv,
+                                   const string& whitelistPath,
+                                   bool force) {
+    struct stat st;
+    if (stat(featurePerCellCsv.c_str(), &st) != 0) {
+        return false;
+    }
+
+    std::unordered_map<string, string> outputMap;
+    bool useOutputMap = parseWhitelistOutputMap(whitelistPath, outputMap);
+    if (!useOutputMap) {
+        return false;
+    }
+
+    std::unordered_set<string> outputValues;
+    outputValues.reserve(outputMap.size());
+    for (const auto& item : outputMap) {
+        outputValues.insert(item.second);
+    }
+
+    ifstream in(featurePerCellCsv.c_str());
+    if (!in.is_open()) {
+        return false;
+    }
+
+    vector<string> lines;
+    lines.reserve(1024);
+    string line;
+    size_t assignmentHits = 0;
+    size_t outputHits = 0;
+    while (getline(in, line)) {
+        if (!lines.empty() || line.rfind("barcode,", 0) != 0) {
+            string barcode = line.substr(0, line.find(','));
+            trimInPlace(barcode);
+            std::transform(barcode.begin(), barcode.end(), barcode.begin(), ::toupper);
+            if (outputMap.find(barcode) != outputMap.end()) {
+                assignmentHits++;
+            }
+            if (outputValues.find(barcode) != outputValues.end()) {
+                outputHits++;
+            }
+        }
+        lines.push_back(line);
+    }
+    in.close();
+
+    if (assignmentHits == 0 || outputHits >= assignmentHits) {
+        return false;
+    }
+    if (!force && outputHits > 0) {
+        return false;
+    }
+
+    const string tmpPath = featurePerCellCsv + ".tmp";
+    ofstream out(tmpPath.c_str());
+    if (!out.is_open()) {
+        return false;
+    }
+
+    for (const auto& row : lines) {
+        if (row.rfind("barcode,", 0) == 0 || row.empty()) {
+            out << row << "\n";
+            continue;
+        }
+        size_t commaPos = row.find(',');
+        string barcode = commaPos == string::npos ? row : row.substr(0, commaPos);
+        string suffix = commaPos == string::npos ? "" : row.substr(commaPos);
+        trimInPlace(barcode);
+        std::transform(barcode.begin(), barcode.end(), barcode.begin(), ::toupper);
+        auto it = outputMap.find(barcode);
+        if (it != outputMap.end()) {
+            out << it->second << suffix << "\n";
+        } else {
+            out << barcode << suffix << "\n";
+        }
+    }
+    out.close();
+
+    if (std::rename(tmpPath.c_str(), featurePerCellCsv.c_str()) != 0) {
+        std::remove(tmpPath.c_str());
+        return false;
+    }
+    return true;
+}
+
 int processAssignOutput(const string& assignOutDir, const string& featureCsvPath,
                        const string& defaultFeatureType, bool force,
                        const string& whitelistPath,
@@ -365,6 +450,9 @@ int processAssignOutput(const string& assignOutDir, const string& featureCsvPath
                 wroteAny = true;
             }
             if (copyBarcodesTsv(barcodesTxt, barcodesTsv, force, whitelistPath)) {
+                wroteAny = true;
+            }
+            if (remapFeaturePerCellCsv(outDir + "/feature_per_cell.csv", whitelistPath, force)) {
                 wroteAny = true;
             }
         } catch (const exception& e) {

@@ -26,10 +26,11 @@ def main() -> None:
             library / "matrix.mtx",
             """%%MatrixMarket matrix coordinate integer general
 %
-2 3 3
+2 3 4
 1 1 7
 2 2 3
 1 3 2
+2 3 2
 """,
         )
         write_text(library / "features.tsv", "guideA\tguideA\tCRISPR Guide Capture\nguideB\tguideB\tCRISPR Guide Capture\n")
@@ -39,9 +40,9 @@ def main() -> None:
             "\n".join(
                 [
                     "barcode,num_features,top_feature_index,total_deduped_umi",
-                    "cell1,1,0,7",
-                    "cell2,1,1,3",
-                    "cell3,1,0,2",
+                    "cell1,1,1,7",
+                    "cell2,1,2,3",
+                    "cell3,2,0,4",
                     "",
                 ]
             ),
@@ -115,6 +116,12 @@ def main() -> None:
         assert annotated.obs.loc["cell2-1", "guide_fdr_num_umis"] == 9
         assert annotated.obs.loc["cell2-1", "guide_fdr_min_called_umi"] == 3
         assert annotated.obs.loc["cell3-1", "guide_fdr_call_status"] == "none"
+
+        feature_h5ad = work / "feature_libraries" / "lib1" / "raw_feature_library.h5ad"
+        feature_adata = ad.read_h5ad(feature_h5ad)
+        assert feature_adata.obs.loc["cell1", "top_feature_name"] == "guideA"
+        assert feature_adata.obs.loc["cell2", "top_feature_name"] == "guideB"
+        assert feature_adata.obs.loc["cell3", "top_feature_name"] == ""
 
         atac = work / "atac"
         write_text(
