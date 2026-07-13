@@ -36,6 +36,10 @@ scripts:
     description: "Build AnnData h5ad from STAR-native GeneFull + Velocyto MEX matrices."
     language: "python"
   - role: "helper"
+    path: "scripts/run_star_cell_doublets.R"
+    description: "Run scDblFinder and emit non-empty and doublet barcode sets."
+    language: "r"
+  - role: "helper"
     path: "scripts/compute_adaptive_qc_threshold.py"
     description: "Compute adaptive n_genes upper-bound thresholds from STAR-called singlets."
     language: "python"
@@ -56,6 +60,10 @@ scripts:
     description: "Write filtered h5ad views from the downstream QC and singlet masks."
     language: "python"
   - role: "helper"
+    path: "scripts/slurm/combine_ucsf_filters.py"
+    description: "Combine STAR cell calls, doublets, and baseline QC without image-specific helper paths."
+    language: "python"
+  - role: "helper"
     path: "scripts/add_cellbender_layer_from_h5.py"
     description: "Inject CellBender denoised counts as a layer into existing h5ads."
     language: "python"
@@ -66,6 +74,34 @@ scripts:
   - role: "helper"
     path: "scripts/integrate_feature_library.py"
     description: "Integrate CRISPR/guide feature barcode library into final h5ads."
+    language: "python"
+  - role: "helper"
+    path: "scripts/lib/star_trim_qc.sh"
+    description: "Trim-QC helper sourced by the UCSF batch runner."
+    language: "bash"
+  - role: "helper"
+    path: "scripts/ucsf_parity/render_star_inputs_from_cr_config.py"
+    description: "Render STAR input directories from Cell Ranger config.csv."
+    language: "python"
+  - role: "helper"
+    path: "scripts/prepare_velocyto_mex.py"
+    description: "Legacy velocyto MEX packaging fallback used when enabled."
+    language: "python"
+  - role: "slurm_stage"
+    path: "scripts/slurm/run_ucsf_downstream_prepare_stage.sh"
+    description: "Build raw-backed AnnData and QC views before GPU denoising."
+    language: "bash"
+  - role: "slurm_stage"
+    path: "scripts/slurm/run_ucsf_cellbender_stage.sh"
+    description: "Run CellBender as an isolated GPU stage."
+    language: "bash"
+  - role: "slurm_stage"
+    path: "scripts/slurm/run_ucsf_downstream_finalize_stage.sh"
+    description: "Integrate CellBender and CRISPR feature artifacts into final AnnData outputs."
+    language: "bash"
+  - role: "slurm_gather"
+    path: "scripts/slurm/gather_ucsf_tutorial.py"
+    description: "Validate per-sample completion manifests and assemble a tutorial set."
     language: "python"
 
 caveats:
@@ -94,6 +130,79 @@ stages:
   - name: "globus_transfer"
     title: "Globus Transfer"
     description: "Optional data transfer via Globus."
+
+execution:
+  decomposition_id: "ucsf_star_suite_per_sample_cellbender/v1"
+  scatter:
+    parameter: "samples"
+    item_name: "sample"
+    strategy: "per_value"
+  stages:
+    - name: "star_alignment"
+      title: "Per-sample STAR alignment"
+      entry_script: "scripts/paper/run_ucsf_corrected_production_workflow.sh"
+      foreach: "sample"
+      needs: []
+      resource_class: "star_cpu_highmem"
+      image: "biodepot/morphic-ucsf-star-suite:0.1.0"
+      inputs:
+        - {name: "sample_input", kind: "directory", path: "{dataset_root}/{sample}"}
+        - {name: "genome", kind: "directory", path: "{genome_dir}"}
+      outputs:
+        - {name: "star_batch_root", kind: "directory", path: "{run_root}/samples/{sample}/star_batch"}
+        - {name: "star_sample_root", kind: "directory", path: "{run_root}/samples/{sample}/star_batch/samples/{sample}"}
+        - {name: "star_complete", kind: "file", path: "{run_root}/samples/{sample}/star_batch/samples/{sample}/RUN_COMPLETE.ok"}
+    - name: "downstream_prepare"
+      title: "Per-sample post-MEX preparation"
+      entry_script: "scripts/slurm/run_ucsf_downstream_prepare_stage.sh"
+      foreach: "sample"
+      needs: ["star_alignment"]
+      resource_class: "downstream_cpu"
+      image: "biodepot/scrna-matrices:latest"
+      inputs:
+        - {name: "star_run", kind: "directory", path: "{run_root}/samples/{sample}/star_batch/samples/{sample}/run"}
+      outputs:
+        - {name: "prep_dir", kind: "directory", path: "{run_root}/samples/{sample}/prepare"}
+        - {name: "cellbender_input", kind: "file", path: "{run_root}/samples/{sample}/prepare/unfiltered_counts.h5ad"}
+    - name: "cellbender"
+      title: "Per-sample CellBender"
+      entry_script: "scripts/slurm/run_ucsf_cellbender_stage.sh"
+      foreach: "sample"
+      needs: ["downstream_prepare"]
+      resource_class: "cellbender_gpu"
+      image: "biodepot/cellbender:0.3.2"
+      inputs:
+        - {name: "unfiltered_counts", kind: "file", path: "{run_root}/samples/{sample}/prepare/unfiltered_counts.h5ad"}
+      outputs:
+        - {name: "cellbender_h5", kind: "file", path: "{run_root}/samples/{sample}/cellbender/cellbender_counts.h5"}
+        - {name: "cellbender_complete", kind: "file", path: "{run_root}/samples/{sample}/cellbender/CELLBENDER_COMPLETE.json"}
+    - name: "downstream_finalize"
+      title: "Per-sample downstream finalization"
+      entry_script: "scripts/slurm/run_ucsf_downstream_finalize_stage.sh"
+      foreach: "sample"
+      needs: ["downstream_prepare", "cellbender"]
+      resource_class: "downstream_cpu"
+      image: "biodepot/cellbender:0.3.2"
+      inputs:
+        - {name: "prep_dir", kind: "directory", path: "{run_root}/samples/{sample}/prepare"}
+        - {name: "cellbender_h5", kind: "file", path: "{run_root}/samples/{sample}/cellbender/cellbender_counts.h5"}
+      outputs:
+        - {name: "final_counts", kind: "file", path: "{run_root}/samples/{sample}/final/final_counts.h5ad"}
+        - {name: "finalize_manifest", kind: "file", path: "{run_root}/samples/{sample}/final/FINALIZE_COMPLETE.json"}
+    - name: "gather"
+      title: "UCSF tutorial-set gather"
+      entry_script: "scripts/slurm/gather_ucsf_tutorial.py"
+      needs: ["downstream_finalize"]
+      resource_class: "gather_small"
+      image: "biodepot/scrna-matrices:latest"
+      inputs:
+        - {name: "sample_manifests", kind: "file", path: "{run_root}/samples/{sample}/final/FINALIZE_COMPLETE.json"}
+      outputs:
+        - {name: "tutorial_manifest", kind: "file", path: "{run_root}/tutorial/tutorial-set.json"}
+        - {name: "sample_table", kind: "file", path: "{run_root}/tutorial/samples.tsv"}
+  gather:
+    stage: "gather"
+    requires_all: true
 
 parameter_groups:
   - name: "selection"

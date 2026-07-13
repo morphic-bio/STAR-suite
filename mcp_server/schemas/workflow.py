@@ -158,6 +158,56 @@ class WorkflowStage(BaseModel):
     )
 
 
+class WorkflowArtifactDef(BaseModel):
+    """Artifact boundary exposed by an executable workflow stage."""
+
+    name: str = Field(description="Stable artifact identifier")
+    kind: str = Field(description="Artifact kind, such as file or directory")
+    path: str = Field(description="Path template relative to the composed run")
+    required: bool = Field(default=True, description="Whether completion requires this artifact")
+
+
+class WorkflowExecutionStage(BaseModel):
+    """One compositor-visible stage in a decomposable workflow."""
+
+    name: str = Field(description="Stable stage identifier")
+    title: str = Field(description="Human-readable stage title")
+    entry_script: str = Field(description="Stage entry script relative to the repository root")
+    foreach: Optional[str] = Field(
+        default=None,
+        description="Scatter item name when this stage is instantiated once per item",
+    )
+    needs: list[str] = Field(default_factory=list, description="Upstream stage identifiers")
+    resource_class: str = Field(description="Portable resource class, not a site queue name")
+    image: str = Field(description="Default OCI image reference for this stage")
+    inputs: list[WorkflowArtifactDef] = Field(default_factory=list)
+    outputs: list[WorkflowArtifactDef] = Field(default_factory=list)
+
+
+class WorkflowScatterDef(BaseModel):
+    """Candidate scatter variable published by the workflow owner."""
+
+    parameter: str = Field(description="Workflow parameter containing scatter values")
+    item_name: str = Field(description="Name assigned to one scatter value")
+    strategy: str = Field(default="per_value", pattern="^per_value$")
+
+
+class WorkflowGatherDef(BaseModel):
+    """Run-level gather contract for a decomposed workflow."""
+
+    stage: str = Field(description="Stage identifier implementing the gather")
+    requires_all: bool = Field(default=True)
+
+
+class WorkflowExecutionDef(BaseModel):
+    """Optional compositor contract for scatter/gather materialization."""
+
+    decomposition_id: str = Field(description="Versioned decomposition identifier")
+    scatter: WorkflowScatterDef
+    stages: list[WorkflowExecutionStage] = Field(default_factory=list)
+    gather: WorkflowGatherDef
+
+
 class WorkflowRenderingRule(BaseModel):
     """Rules for how parameters are rendered to CLI flags."""
 
@@ -204,6 +254,10 @@ class WorkflowSchema(BaseModel):
     parameters: list[WorkflowParameterDef] = Field(default_factory=list)
     constraints: list[WorkflowConstraint] = Field(default_factory=list)
     rendering: WorkflowRenderingRule = Field(default_factory=WorkflowRenderingRule)
+    execution: Optional[WorkflowExecutionDef] = Field(
+        default=None,
+        description="Compositor-visible stage and scatter/gather contract",
+    )
 
     def get_parameter(self, name: str) -> Optional[WorkflowParameterDef]:
         """Get a parameter definition by name."""
