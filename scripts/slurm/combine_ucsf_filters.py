@@ -31,6 +31,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--input-file", required=True, type=Path)
     parser.add_argument("--non-empty-barcodes", required=True, type=Path)
     parser.add_argument("--doublet-barcodes", required=True, type=Path)
+    parser.add_argument("--doublet-scores", required=True, type=Path)
     parser.add_argument("--output-dir", required=True, type=Path)
     parser.add_argument("--mito-genes", type=Path)
     parser.add_argument("--min-genes", type=int, default=200)
@@ -52,16 +53,49 @@ def main() -> int:
 
     import anndata as ad
     import numpy as np
+    import pandas as pd
     from scipy import sparse
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
     adata = ad.read_h5ad(args.input_file)
     non_empty = _read_lines(args.non_empty_barcodes)
     doublets = _read_lines(args.doublet_barcodes)
+    if not args.doublet_scores.is_file():
+        raise SystemExit(f"missing doublet score file: {args.doublet_scores}")
+    doublet_scores = pd.read_csv(
+        args.doublet_scores,
+        sep="\t",
+        dtype={"Barcode": "string", "Classification": "string"},
+    )
+    required_score_columns = {"Barcode", "Classification", "Score"}
+    if not required_score_columns.issubset(doublet_scores.columns):
+        missing = sorted(required_score_columns - set(doublet_scores.columns))
+        raise SystemExit(f"doublet score file is missing columns: {', '.join(missing)}")
+    if doublet_scores["Barcode"].duplicated().any():
+        raise SystemExit("doublet score file contains duplicate barcodes")
+    doublet_scores["Score"] = pd.to_numeric(doublet_scores["Score"], errors="coerce")
+    score_barcodes = set(doublet_scores["Barcode"].astype(str))
+    obs_barcode_set = set(adata.obs_names.astype(str))
+    unknown_non_empty = non_empty - obs_barcode_set
+    if unknown_non_empty:
+        raise SystemExit("non-empty barcode file contains barcodes absent from the AnnData")
+    if not doublets.issubset(non_empty):
+        raise SystemExit("doublet barcode file is not a subset of the non-empty barcode file")
+    if score_barcodes != non_empty:
+        raise SystemExit("doublet score file must cover exactly the non-empty barcode set")
+    score_doublets = set(
+        doublet_scores.loc[doublet_scores["Classification"] == "doublet", "Barcode"].astype(str)
+    )
+    if score_doublets != doublets:
+        raise SystemExit("doublet score classifications do not match the doublet barcode file")
+    if not np.isfinite(doublet_scores["Score"].to_numpy(dtype=float)).all():
+        raise SystemExit("doublet score file contains non-finite scores")
+    score_by_barcode = doublet_scores.set_index("Barcode")["Score"]
     obs_names = adata.obs_names.astype(str)
 
     adata.obs["non_empty"] = np.isin(obs_names, list(non_empty))
     adata.obs["doublet"] = np.isin(obs_names, list(doublets))
+    adata.obs["doublet_scores"] = obs_names.map(score_by_barcode)
     if sparse.issparse(adata.X):
         n_genes = np.asarray(adata.X.getnnz(axis=1)).ravel()
         total_counts = np.asarray(adata.X.sum(axis=1)).ravel()

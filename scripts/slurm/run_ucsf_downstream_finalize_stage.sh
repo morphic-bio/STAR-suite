@@ -54,6 +54,12 @@ for name in counts.h5ad unfiltered_counts.h5ad filtered_counts.h5ad default_sing
   [[ -s "${PREP_DIR}/${name}" ]] || { echo "ERROR: missing prepare artifact ${PREP_DIR}/${name}" >&2; exit 1; }
   cp -f "${PREP_DIR}/${name}" "${OUTPUT_DIR}/${name}"
 done
+for name in adaptive_qc_threshold.json non_empty_barcodes.txt filtered_barcodes_with_scores.txt; do
+  [[ -s "${PREP_DIR}/${name}" ]] || { echo "ERROR: missing prepare artifact ${PREP_DIR}/${name}" >&2; exit 1; }
+  cp -f "${PREP_DIR}/${name}" "${OUTPUT_DIR}/${name}"
+done
+[[ -f "${PREP_DIR}/doublet_barcodes.txt" ]] || { echo "ERROR: missing prepare artifact ${PREP_DIR}/doublet_barcodes.txt" >&2; exit 1; }
+cp -f "${PREP_DIR}/doublet_barcodes.txt" "${OUTPUT_DIR}/doublet_barcodes.txt"
 
 for name in counts.h5ad unfiltered_counts.h5ad; do
   python3 "${ADD_LAYER}" \
@@ -103,15 +109,20 @@ import anndata as ad
 output_dir, run_dir, cellbender_h5 = map(Path, sys.argv[1:4])
 layer_name = sys.argv[4]
 artifacts = {}
+allow_empty = {"doublet_barcodes.txt"}
 for name in (
     "counts.h5ad",
     "unfiltered_counts.h5ad",
     "filtered_counts.h5ad",
     "default_singlet_filtered_counts.h5ad",
     "final_counts.h5ad",
+    "adaptive_qc_threshold.json",
+    "non_empty_barcodes.txt",
+    "doublet_barcodes.txt",
+    "filtered_barcodes_with_scores.txt",
 ):
     path = output_dir / name
-    if not path.is_file() or path.stat().st_size == 0:
+    if not path.is_file() or (path.stat().st_size == 0 and name not in allow_empty):
         raise SystemExit(f"missing finalized artifact: {path}")
     artifacts[name] = {"path": str(path), "bytes": path.stat().st_size}
 
