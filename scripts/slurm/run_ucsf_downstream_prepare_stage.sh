@@ -89,15 +89,6 @@ ADAPTIVE_QC_JSON="${OUTPUT_DIR}/adaptive_qc_threshold.json"
 
 python3 "${BUILD_COUNTS}" --run-dir "${RUN_DIR}" --output-h5ad "${COUNTS_H5AD}"
 Rscript "${DOUBLET_SCRIPT}" "${COUNTS_H5AD}"
-python3 "${COMBINE_FILTERS}" \
-  --input-file "${COUNTS_H5AD}" \
-  --non-empty-barcodes "${OUTPUT_DIR}/non_empty_barcodes.txt" \
-  --doublet-barcodes "${OUTPUT_DIR}/doublet_barcodes.txt" \
-  --output-dir "${OUTPUT_DIR}" \
-  --min-genes "${MIN_GENES}" \
-  --max-genes "${MAX_GENES}" \
-  --mt-pct-cutoff "${MT_PCT_CUTOFF}"
-
 python3 "${COMPUTE_ADAPTIVE_QC}" \
   --counts-h5ad "${COUNTS_H5AD}" \
   --non-empty-barcodes "${OUTPUT_DIR}/non_empty_barcodes.txt" \
@@ -105,6 +96,25 @@ python3 "${COMPUTE_ADAPTIVE_QC}" \
   --min-genes "${MIN_GENES}" \
   --n-mad "${N_MAD}" \
   --output-json "${ADAPTIVE_QC_JSON}" >/dev/null
+
+EFFECTIVE_MAX_GENES="$(python3 - "${ADAPTIVE_QC_JSON}" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as handle:
+    print(json.load(handle)["effective_max_genes"])
+PY
+)"
+
+python3 "${COMBINE_FILTERS}" \
+  --input-file "${COUNTS_H5AD}" \
+  --non-empty-barcodes "${OUTPUT_DIR}/non_empty_barcodes.txt" \
+  --doublet-barcodes "${OUTPUT_DIR}/doublet_barcodes.txt" \
+  --doublet-scores "${OUTPUT_DIR}/filtered_barcodes_with_scores.txt" \
+  --output-dir "${OUTPUT_DIR}" \
+  --min-genes "${MIN_GENES}" \
+  --max-genes "${EFFECTIVE_MAX_GENES}" \
+  --mt-pct-cutoff "${MT_PCT_CUTOFF}"
 
 python3 "${APPLY_ADAPTIVE_MT}" \
   --input-h5ad "${UNFILTERED_H5AD}" \
@@ -133,15 +143,19 @@ import anndata as ad
 output_dir = Path(sys.argv[1])
 run_dir = Path(sys.argv[2])
 artifacts = {}
+allow_empty = {"doublet_barcodes.txt"}
 for name in (
     "counts.h5ad",
     "unfiltered_counts.h5ad",
     "filtered_counts.h5ad",
     "default_singlet_filtered_counts.h5ad",
     "adaptive_qc_threshold.json",
+    "non_empty_barcodes.txt",
+    "doublet_barcodes.txt",
+    "filtered_barcodes_with_scores.txt",
 ):
     path = output_dir / name
-    if not path.is_file() or path.stat().st_size == 0:
+    if not path.is_file() or (path.stat().st_size == 0 and name not in allow_empty):
         raise SystemExit(f"missing prepare artifact: {path}")
     artifacts[name] = {"path": str(path), "bytes": path.stat().st_size}
 

@@ -15,6 +15,10 @@ if (length(args) != 1) {
 
 h5ad_file <- args[1]
 output_dir <- dirname(h5ad_file)
+scdblfinder_seed <- suppressWarnings(as.integer(Sys.getenv("SCDBLFINDER_SEED", "1")))
+if (is.na(scdblfinder_seed)) {
+  stop("SCDBLFINDER_SEED must be an integer")
+}
 
 ad <- read_h5ad(h5ad_file)
 obs <- py_to_r(ad$obs)
@@ -49,23 +53,12 @@ star_counts <- counts[, star_mask, drop = FALSE]
 sce <- SingleCellExperiment(list(counts = star_counts))
 barcode_order <- colnames(sce)
 
-doublet_info <- rep("singlet", ncol(sce))
-doublet_scores <- rep(NA_real_, ncol(sce))
-names(doublet_info) <- barcode_order
-names(doublet_scores) <- barcode_order
-
-result <- tryCatch(
-  {
-    sce <- scDblFinder(sce)
-    list(
-      class = stats::setNames(as.character(sce$scDblFinder.class), colnames(sce)),
-      score = stats::setNames(as.numeric(sce$scDblFinder.score), colnames(sce))
-    )
-  },
-  error = function(err) {
-    message("WARNING: scDblFinder failed, marking all STAR cells as singlets: ", err$message)
-    list(class = doublet_info, score = doublet_scores)
-  }
+set.seed(scdblfinder_seed)
+message("scDblFinder seed: ", scdblfinder_seed)
+sce <- scDblFinder(sce)
+result <- list(
+  class = stats::setNames(as.character(sce$scDblFinder.class), colnames(sce)),
+  score = stats::setNames(as.numeric(sce$scDblFinder.score), colnames(sce))
 )
 
 doublet_results <- data.frame(
