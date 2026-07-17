@@ -63,6 +63,8 @@ Depend.list
 /core/features/vbem/source/libtrim/libtrim.a
 /flex/source/libflex/libflex.a
 /flex/tools/flexfilter/run_flexfilter_mex
+/flex/tools/molecule_first_resolver/molecule_first_resolver
+/flex/tools/molecule_first_resolver/test_molecule_first_resolver
 /slam/tools/slam_requant/slam_requant
 /slam/tools/pileup_snp/pileup_snp
 /core/features/vbem/tools/compute_expected_gc/compute_expected_gc
