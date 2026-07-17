@@ -2,6 +2,8 @@
 set -euo pipefail
 
 resolver="${MOLECULE_FIRST_RESOLVER:-/usr/local/bin/molecule_first_resolver}"
+ledger="${MOLECULE_FIRST_BAM_LEDGER:-$(dirname "${resolver}")/molecule_first_bam_ledger}"
+materializer="${MOLECULE_FIRST_MATERIALIZER:-$(dirname "${resolver}")/molecule_first_materialize}"
 fixture="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/molecule_first/candidate_reads.tsv"
 tmp="$(mktemp -d)"
 trap 'rm -rf "${tmp}"' EXIT
@@ -10,6 +12,13 @@ if [[ ! -x "${resolver}" ]]; then
   echo "ERROR: molecule-first resolver is not executable: ${resolver}" >&2
   exit 2
 fi
+for tool in "${ledger}" "${materializer}"; do
+  if [[ ! -x "${tool}" ]]; then
+    echo "ERROR: molecule-first companion is not executable: ${tool}" >&2
+    exit 2
+  fi
+  [[ "$("${tool}" --version)" == "$("${resolver}" --version)" ]]
+done
 
 "${resolver}" --input "${fixture}" --out-dir "${tmp}/out"
 
@@ -35,6 +44,18 @@ awk -F '\t' '
   }
   END { if (!found) exit 1 }
 ' "${tmp}/out/summary.tsv"
+
+"${materializer}" --resolved-dir "${tmp}/out" --out-dir "${tmp}/mex" \
+  --assay scrna --umi-mode 1mm_cr
+grep -q '^%%MatrixMarket matrix coordinate real general$' \
+  "${tmp}/mex/soft_expected/raw/matrix.mtx"
+
+"${ledger}" \
+  --input "$(dirname "${fixture}")/raw_tag_fixture.sam" \
+  --whitelist "$(dirname "${fixture}")/raw_tag_whitelist.txt" \
+  --output "${tmp}/bam_candidates.tsv" --summary "${tmp}/bam_summary.tsv" \
+  --assay visium
+grep -q $'^corrected_tags_used\tfalse$' "${tmp}/bam_summary.tsv"
 
 mkdir "${tmp}/nonempty"
 touch "${tmp}/nonempty/existing"

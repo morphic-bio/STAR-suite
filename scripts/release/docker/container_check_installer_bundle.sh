@@ -94,10 +94,12 @@ if [[ "$version_output" != "$EXPECTED_VERSION" ]]; then
   echo "ERROR: expected STAR-suite version $EXPECTED_VERSION, got $version_output" >&2
   exit 1
 fi
-if [[ ! -x "$prefix/bin/molecule_first_resolver" ]] || [[ "$($prefix/bin/molecule_first_resolver --version)" != "$EXPECTED_VERSION" ]]; then
-  echo "ERROR: installed molecule-first resolver missing or version-mismatched" >&2
-  exit 1
-fi
+for tool in molecule_first_resolver molecule_first_bam_ledger molecule_first_materialize; do
+  if [[ ! -x "$prefix/bin/$tool" ]] || [[ "$($prefix/bin/$tool --version)" != "$EXPECTED_VERSION" ]]; then
+    echo "ERROR: installed $tool missing or version-mismatched" >&2
+    exit 1
+  fi
+done
 
 manifest="Bundle: $(basename "$BUNDLE")
 Container glibc: $(detect_glibc)
