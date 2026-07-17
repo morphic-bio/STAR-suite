@@ -173,11 +173,56 @@ and invariant checks.
 | Existing four 100K normalized-ledger conformance | `20260717_star_suite_molecule_first_integration_v1` | passed in v1.5.0 |
 | Docker Hub authentication | release run `29564366223`, `Login to Docker Hub` | passed |
 | ARM64 container build | release run `29564366223` | failed before this tranche: x86-only `-mavx2` |
-| Architecture unit/build tests | pending | pending |
-| Spatial production-adapter tests | pending | pending |
-| Single-cell production-adapter tests | pending | pending |
+| Architecture flag test | `tests/run_simd_arch_flags_test.sh` | passed: x86-64 selects `-mavx2`; AArch64 selects the portable SIMDe path |
+| Clean ARM64 container build | `docker buildx build --platform linux/arm64 --target suite-base .` | passed after repository-wide removal of stale host objects and archives |
+| Clean AMD64 container build | `docker buildx build --platform linux/amd64 --target suite-base .` | passed |
+| Production adapter synthetic test | `tests/run_molecule_first_production_adapter_test.sh` | passed |
+| Existing reference conformance after adapter changes | `tests/run_molecule_first_reference_conformance.sh` | passed |
+| Installed native resolver smoke | `tests/run_molecule_first_native_smoke.sh` | passed with all three installed executables |
+| Default-off standard STARsolo fixture | existing standard smoke harness | passed |
+| Default-off Flex fixture | frozen Flex 100K smoke, resolver both disabled and enabled explicitly | passed; both runs reached `ALL DONE` |
 | Four-assay fixture regression | pending | pending |
 | Frozen paper bundle validation | pending | pending |
+
+The container rebuilds exposed two additional portability hazards after the
+compiler flag was corrected: a stale host-built `opal.o`, followed by a stale
+host-built `libprocess_features.a`. The Docker context now excludes object and
+archive files, and the image build cleans all nested build surfaces before
+compiling. This makes the platform claim a property of the actual target
+build, rather than of whichever objects happened to be present in the source
+tree.
+
+## Production commands
+
+The tracked adapters are deliberately explicit rather than automatic:
+
+```bash
+molecule_first_bam_ledger \
+  --input-bam Aligned.sortedByCoord.out.bam \
+  --whitelist 3M-february-2018.txt \
+  --output-ledger read_candidates.tsv \
+  --output-summary ledger_summary.tsv
+
+molecule_first_resolver \
+  --ledger read_candidates.tsv \
+  --output-dir resolved
+
+molecule_first_materialize \
+  --resolver-dir resolved \
+  --output-dir matrices
+
+scripts/run_molecule_first_cell_calling.sh \
+  --star STAR \
+  --policy-root matrices \
+  --out-root calls \
+  --policy hard
+```
+
+Flex ledger generation additionally requires `--sample-id` and must be run on
+one already-demultiplexed sample at a time. Visium HD normalization and the
+manifest/provenance wrapper live in `visium-hd-processing`; they produce the
+same normalized ledger and invoke these native executables without changing
+the resolver.
 
 ## Recovery after interruption
 
