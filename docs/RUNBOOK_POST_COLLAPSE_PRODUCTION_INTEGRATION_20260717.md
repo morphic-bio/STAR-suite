@@ -182,7 +182,7 @@ and invariant checks.
 | Default-off standard STARsolo fixture | existing standard smoke harness | passed |
 | Default-off Flex fixture | frozen Flex 100K smoke, resolver both disabled and enabled explicitly | passed; both runs reached `ALL DONE` |
 | Five-assay fixture regression | `20260717_postcollapse_production_integration_v2` | passed from committed native sources |
-| Frozen paper bundle validation | pending | pending |
+| Frozen paper bundle validation | `visium-hd-processing-paper/paper_results/postcollapse_production_v1` | passed with exact clean repository commits and regenerated SHA-256 seal |
 
 The container rebuilds exposed two additional portability hazards after the
 compiler flag was corrected: a stale host-built `opal.o`, followed by a stale
