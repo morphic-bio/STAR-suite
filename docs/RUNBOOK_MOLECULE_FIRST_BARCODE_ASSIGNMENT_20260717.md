@@ -281,7 +281,7 @@ with claims until their exit status and artifact paths are recorded.
 | Four 100K conformance smokes | `tests/molecule_first/run_100k_conformance.py`; reports under `20260717_star_suite_molecule_first_integration_v1` | passed; all integer residuals zero |
 | Default-off STAR regressions | STARsolo, Flex on/off, Flex config, and 100K bridge determinism; v1.4.4 tree/hash comparisons | passed; CB/UB fixture test explicitly unavailable |
 | Committed package snapshot | Ubuntu 22.04 release-build and runtime-check containers; installed native smoke | passed |
-| Integration PR CI | pending | pending |
+| Integration PR CI | GitHub Actions run `29563199754`; PR #5 merge `b03930adff707f97c009d4d6116a677ff38168dc` | passed |
 | v1.5.0 release workflow | pending | pending |
 
 ## Recovery after interruption
