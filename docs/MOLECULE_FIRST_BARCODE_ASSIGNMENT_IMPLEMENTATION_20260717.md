@@ -135,8 +135,11 @@ Flex regressions cover the available CB/UB paths.
 - v1.4.4 PR Tier A: GitHub Actions run `29560701174`, passed.
 - v1.4.4 artifact publication: GitHub Actions run `29561096150`, passed.
 - v1.4.4 release: `https://github.com/morphic-bio/STAR-suite/releases/tag/v1.4.4`.
-- Integration Tier A, package artifacts, and v1.5.0 release workflow are
-  recorded here after the feature and release PRs complete.
+- Integration Tier A: GitHub Actions run `29563199754`, passed.
+- Integration PR #5 merged as
+  `b03930adff707f97c009d4d6116a677ff38168dc`.
+- v1.5.0 package artifacts and release workflow are recorded here after the
+  release PR completes.
 
 The committed feature snapshot was also built with
 `star-suite-release-build:ubuntu22` and validated with

@@ -2,9 +2,9 @@
 
 STAR Suite updates the original STAR aligner by integrating four modules — STAR-perturb, STAR-Flex, STAR-SLAM, and TranscriptVB — to provide complete internal C/C++ pipelines for bulk RNA-seq, scRNA-seq, Perturb-seq, 10x Flex, and SLAM-seq. The integration results in **substantial speedups** (**1.7–2.4x for bulk RNA-seq**, **1.47–1.60x for scRNA-seq GEX-only Solo vs CellGENI-style STARsolo**, **3.7–6.2x for Perturb-seq**, **2.5–28.8x for Flex**) and a simplified toolchain that can be **installed through pre-compiled binaries** for researchers and agents. **No new external dependencies** are required; the suite is built entirely with the existing STAR toolchain and vendored components. **This is a drop-in replacement for the STAR aligner.**
 
-Current production release: **STAR Suite v1.4.4**. The suite release tag and
-packaging version are `v1.4.4` / `1.4.4-1`; `STAR --version` reports
-`1.4.4`.
+Current production release: **STAR Suite v1.5.0**. The suite release tag and
+packaging version are `v1.5.0` / `1.5.0-1`; `STAR --version` reports
+`1.5.0`.
 Use `STAR --upstream-version` for the underlying upstream STAR base
 (`2.7.11b`) and `STAR --genome-compat-version` for the genome index
 compatibility string (`2.7.4a`).
@@ -31,6 +31,12 @@ Agent quickstart: see `AGENTS.md` for repo-specific guardrails, tests, and recen
 - **Samtools-style BAM Sorting** (`--outBAMsortMethod samtools`): Spill-to-disk sort to reduce peak RAM pressure. Works with all modes including Flex.
 - **Y/NoY Separation** (`--emitNoYBAM yes`, `--emitYNoYFastq yes`): Split BAM and FASTQ outputs by chrY alignment. Works with bulk, single-cell, and Flex.
 - **EmptyDrops_CR Integration**: CR-compatible EmptyDrops path (including libscrna-backed behavior in scRNA/perturb flows).
+- **Molecule-first Barcode Assignment**: The opt-in
+  `molecule_first_resolver` preserves finite read candidates through
+  deterministic read-clique formation and candidate-specific UMI collapse,
+  then emits strict, soft expected-count, hard, and gated-hard products before
+  cell or spatial-bin calling. Existing STARsolo and Flex decoding remains the
+  default compatibility path.
 - **Solo Features**: `sF` BAM tag for feature type, `--soloCBtype String` for arbitrary barcode strings, `--soloCellReadStats Standard` for improved cell filtering.
 - **CR-compat GEX** (`--soloCrGexFeature auto|gene|genefull`): Controls which GEX source is merged in CR-compat mode.
 - **Native Velocyto MEX Packaging**: Current production binaries write raw and
