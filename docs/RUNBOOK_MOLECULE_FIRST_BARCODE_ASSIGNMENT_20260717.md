@@ -282,7 +282,7 @@ with claims until their exit status and artifact paths are recorded.
 | Default-off STAR regressions | STARsolo, Flex on/off, Flex config, and 100K bridge determinism; v1.4.4 tree/hash comparisons | passed; CB/UB fixture test explicitly unavailable |
 | Committed package snapshot | Ubuntu 22.04 release-build and runtime-check containers; installed native smoke | passed |
 | Integration PR CI | GitHub Actions run `29563199754`; PR #5 merge `b03930adff707f97c009d4d6116a677ff38168dc` | passed |
-| v1.5.0 release workflow | pending | pending |
+| v1.5.0 release workflow | GitHub Actions run `29564366223`; tag/merge `fac38ca6485b3b3308792e114f88b6c943e7541b` | passed; release published |
 
 ## Recovery after interruption
 
