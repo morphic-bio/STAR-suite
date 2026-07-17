@@ -60,6 +60,7 @@ tools-clean:
 	$(MAKE) -C $(SLAM_DIR)/tools/slam_requant clean
 	$(MAKE) -C $(SLAM_DIR)/tools/pileup_snp clean
 	$(MAKE) -C $(FLEX_DIR)/tools/flexfilter clean
+	$(MAKE) -C $(FLEX_DIR)/tools/molecule_first_resolver clean
 	$(MAKE) -C $(YREMOVE_FASTQ_DIR)/tools/remove_y_reads clean
 	$(MAKE) -C $(FEATURE_BARCODES_DIR) clean
 	$(MAKE) -C $(PROCESS_FEATURES_DIR) clean

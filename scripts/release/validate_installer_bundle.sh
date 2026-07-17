@@ -111,8 +111,13 @@ fi
 "${install_cmd[@]}"
 
 installed_bin="${PREFIX_DIR}/bin/STAR"
+installed_resolver="${PREFIX_DIR}/bin/molecule_first_resolver"
 if [[ ! -x "${installed_bin}" ]]; then
   echo "ERROR: installed binary missing: ${installed_bin}" >&2
+  exit 1
+fi
+if [[ ! -x "${installed_resolver}" ]]; then
+  echo "ERROR: installed molecule-first resolver missing: ${installed_resolver}" >&2
   exit 1
 fi
 

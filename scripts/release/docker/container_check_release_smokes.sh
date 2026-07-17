@@ -76,9 +76,15 @@ case "${MODE}" in
 esac
 
 STAR_BIN="${prefix}/bin/STAR"
+MOLECULE_FIRST_BIN="${prefix}/bin/molecule_first_resolver"
 [[ -x "${STAR_BIN}" ]] || { echo "ERROR: installed STAR missing: ${STAR_BIN}" >&2; exit 1; }
+[[ -x "${MOLECULE_FIRST_BIN}" ]] || { echo "ERROR: installed molecule-first resolver missing: ${MOLECULE_FIRST_BIN}" >&2; exit 1; }
 [[ "$("${STAR_BIN}" --version)" == "${EXPECTED_VERSION}" ]] || {
   echo "ERROR: installed STAR-suite version mismatch" >&2
+  exit 1
+}
+[[ "$("${MOLECULE_FIRST_BIN}" --version)" == "${EXPECTED_VERSION}" ]] || {
+  echo "ERROR: installed molecule-first resolver version mismatch" >&2
   exit 1
 }
 

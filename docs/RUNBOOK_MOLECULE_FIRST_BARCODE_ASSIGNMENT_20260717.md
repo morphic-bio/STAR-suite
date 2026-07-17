@@ -276,10 +276,10 @@ with claims until their exit status and artifact paths are recorded.
 | v1.4.4 local build | clean legacy STAR build | passed before branch creation |
 | v1.4.4 focused regression | namespace plus workflow-contract tests | passed before tag |
 | v1.4.4 Tier A | GitHub Actions run `29560701174` | passed |
-| Native unit tests | pending | pending |
-| Python conformance | pending | pending |
-| Four 100K conformance smokes | pending | pending |
-| Default-off STAR regressions | pending | pending |
+| Native unit tests | `make -C flex/tools/molecule_first_resolver clean test`; ASan/UBSan build | passed |
+| Python conformance | `tests/run_molecule_first_reference_conformance.sh` | passed; tracked ledger exact within tolerance |
+| Four 100K conformance smokes | `tests/molecule_first/run_100k_conformance.py`; reports under `20260717_star_suite_molecule_first_integration_v1` | passed; all integer residuals zero |
+| Default-off STAR regressions | STARsolo, Flex on/off, Flex config, and 100K bridge determinism; v1.4.4 tree/hash comparisons | passed; CB/UB fixture test explicitly unavailable |
 | Integration PR CI | pending | pending |
 | v1.5.0 release workflow | pending | pending |
 

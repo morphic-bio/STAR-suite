@@ -4,6 +4,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SRC_BIN="${SCRIPT_DIR}/bin/STAR"
+MOLECULE_FIRST_SRC_BIN="${SCRIPT_DIR}/bin/molecule_first_resolver"
 METADATA_FILE="${SCRIPT_DIR}/release-metadata.env"
 
 PREFIX=""
@@ -76,6 +77,10 @@ if [[ ! -x "${SRC_BIN}" ]]; then
   echo "ERROR: bundled binary not found: ${SRC_BIN}" >&2
   exit 1
 fi
+if [[ ! -x "${MOLECULE_FIRST_SRC_BIN}" ]]; then
+  echo "ERROR: bundled binary not found: ${MOLECULE_FIRST_SRC_BIN}" >&2
+  exit 1
+fi
 
 if [[ -f "${METADATA_FILE}" ]]; then
   # shellcheck disable=SC1090
@@ -95,6 +100,7 @@ if [[ -z "${BINDIR}" ]]; then
 fi
 
 TARGET_PATH="${BINDIR}/${TARGET_NAME}"
+MOLECULE_FIRST_TARGET="${BINDIR}/molecule_first_resolver"
 
 if [[ "${PRINT_TARGET}" -eq 1 ]]; then
   printf '%s\n' "${TARGET_PATH}"
@@ -105,11 +111,14 @@ mkdir -p "${BINDIR}"
 
 if [[ -e "${TARGET_PATH}" && "${FORCE}" -ne 1 ]]; then
   if cmp -s "${SRC_BIN}" "${TARGET_PATH}"; then
-    echo "Binary already installed at ${TARGET_PATH}" 
-    warn_if_path_missing "${BINDIR}"
-    exit 0
+    echo "STAR binary already installed at ${TARGET_PATH}; verifying companion tools"
+  else
+    echo "ERROR: target already exists: ${TARGET_PATH} (use --force to overwrite)" >&2
+    exit 1
   fi
-  echo "ERROR: target already exists: ${TARGET_PATH} (use --force to overwrite)" >&2
+fi
+if [[ -e "${MOLECULE_FIRST_TARGET}" && "${FORCE}" -ne 1 ]] && ! cmp -s "${MOLECULE_FIRST_SRC_BIN}" "${MOLECULE_FIRST_TARGET}"; then
+  echo "ERROR: target already exists: ${MOLECULE_FIRST_TARGET} (use --force to overwrite)" >&2
   exit 1
 fi
 
@@ -117,6 +126,11 @@ tmp_target="${TARGET_PATH}.tmp.$$"
 cp "${SRC_BIN}" "${tmp_target}"
 chmod 0755 "${tmp_target}"
 mv -f "${tmp_target}" "${TARGET_PATH}"
+
+tmp_molecule_first="${MOLECULE_FIRST_TARGET}.tmp.$$"
+cp "${MOLECULE_FIRST_SRC_BIN}" "${tmp_molecule_first}"
+chmod 0755 "${tmp_molecule_first}"
+mv -f "${tmp_molecule_first}" "${MOLECULE_FIRST_TARGET}"
 
 if [[ -n "${COMPAT_LABEL:-}" ]]; then
   echo "Installed STAR-suite (${COMPAT_LABEL}) to ${TARGET_PATH}"
