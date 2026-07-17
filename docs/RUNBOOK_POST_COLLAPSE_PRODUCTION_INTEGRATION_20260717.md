@@ -158,7 +158,7 @@ and invariant checks.
 - `docker/Dockerfile`: target architecture propagation and build audit.
 - `flex/tools/molecule_first_resolver/`: raw-tag candidate-ledger adapter and
   shared policy materializer/runner.
-- `tests/molecule_first/`: synthetic BAM/ledger/MEX and four-assay integration
+- `tests/molecule_first/`: synthetic BAM/ledger/MEX and five-assay integration
   harnesses.
 - `visium-hd-processing`: Visium HD normalization and manifest-driven native
   execution adapter.
@@ -181,7 +181,7 @@ and invariant checks.
 | Installed native resolver smoke | `tests/run_molecule_first_native_smoke.sh` | passed with all three installed executables |
 | Default-off standard STARsolo fixture | existing standard smoke harness | passed |
 | Default-off Flex fixture | frozen Flex 100K smoke, resolver both disabled and enabled explicitly | passed; both runs reached `ALL DONE` |
-| Four-assay fixture regression | pending | pending |
+| Five-assay fixture regression | `20260717_postcollapse_production_integration_v2` | passed from committed native sources |
 | Frozen paper bundle validation | pending | pending |
 
 The container rebuilds exposed two additional portability hazards after the
@@ -198,18 +198,20 @@ The tracked adapters are deliberately explicit rather than automatic:
 
 ```bash
 molecule_first_bam_ledger \
-  --input-bam Aligned.sortedByCoord.out.bam \
+  --input Aligned.sortedByCoord.out.bam \
   --whitelist 3M-february-2018.txt \
-  --output-ledger read_candidates.tsv \
-  --output-summary ledger_summary.tsv
+  --output read_candidates.tsv \
+  --summary ledger_summary.tsv \
+  --assay scrna
 
 molecule_first_resolver \
-  --ledger read_candidates.tsv \
-  --output-dir resolved
+  --input read_candidates.tsv \
+  --out-dir resolved
 
 molecule_first_materialize \
-  --resolver-dir resolved \
-  --output-dir matrices
+  --resolved-dir resolved \
+  --out-dir matrices \
+  --assay scrna
 
 scripts/run_molecule_first_cell_calling.sh \
   --star STAR \
@@ -223,6 +225,33 @@ one already-demultiplexed sample at a time. Visium HD normalization and the
 manifest/provenance wrapper live in `visium-hd-processing`; they produce the
 same normalized ledger and invoke these native executables without changing
 the resolver.
+
+## Frozen fixture results
+
+The final native source at `adb70a3` regenerated every policy product in a
+fresh serialized run. Masses below are after candidate-specific 1MM UMI
+correction. Cell counts are produced only for integer policies and occur after
+materialization.
+
+| Assay | Candidate reads | Read cliques | Strict mass | Soft expected mass | Hard mass | Gated-hard mass | Strict / hard / gated cells |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| Chromium 3-prime 100K | 96,535 | 87,840 | 22,697 | 87,821.381676 | 87,822 | 26,584 | 1,101 / 1,143 / 1,125 |
+| Chromium Flex 100K | 90,869 | 88,727 | 46,257 | 88,717.369949 | 88,717 | 49,102 | 15,779 / 13,485 / 9,550 |
+| Classic Visium 100K | 72,031 | 68,754 | 68,512 | 68,512.000000 | 68,512 | 68,512 | not applicable |
+| Visium HD 3-prime 100K | 54,542 | 41,808 | 34,950 | 41,391.388982 | 41,375 | 37,493 | not applicable |
+| Visium HD Flex 100K | 89,872 | 78,494 | 65,864 | 78,024.419079 | 78,005 | 70,563 | not applicable |
+
+For both HD fixtures, every policy conserved its 2 um mass when aggregated to
+8 um and 16 um, and all four products shared fixed feature/barcode axes within
+each scale. The classic Visium BAM adapter inspected 118,754 records, retained
+74,065 eligible primary feature-bearing records, counted 66,101 exact reads
+before deduplication, emitted 72,031 supported candidate reads, and used no
+corrected barcode/UMI or called-cell field.
+
+An attempted cell-calling invocation using the host's older STAR 2.7.11a was
+rejected because it lacks the Suite-specific `soloEmptyDropsLegacy` parameter.
+The audited fixture uses the branch's STAR Suite 1.5.0 executable; the rejected
+directory is retained beside the fixture rather than being silently reused.
 
 ## Recovery after interruption
 
