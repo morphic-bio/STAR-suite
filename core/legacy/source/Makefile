@@ -590,6 +590,7 @@ ifneq ($(MAKECMDGOALS),clean)
 ifneq ($(MAKECMDGOALS),CLEAN)
 ifneq ($(MAKECMDGOALS),CLEAN)
 ifneq ($(MAKECMDGOALS),clean_solo)
+ifneq ($(MAKECMDGOALS),print-simd-config)
 ifneq ($(MAKECMDGOALS),STARforMac)
 ifneq ($(MAKECMDGOALS),STARforMacGDB)
 .PHONY: chromap-unsupported-target
@@ -609,6 +610,7 @@ Depend.list: $(SOURCES) parametersDefault.xxd htslib $(CHROMAP_DEP_STAMP)
 	test -f parametersDefault.xxd || xxd -i parametersDefault > parametersDefault.xxd
 	$(CXX) $(CXXFLAGS_common) -MM $(SOURCES) >> Depend.list
 include Depend.list
+endif
 endif
 endif
 endif
