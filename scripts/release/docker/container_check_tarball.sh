@@ -156,6 +156,12 @@ if [[ "$($resolver --version)" != "$EXPECTED_VERSION" ]]; then
   echo "ERROR: molecule-first resolver version mismatch" >&2
   exit 1
 fi
+for tool in molecule_first_bam_ledger molecule_first_materialize; do
+  if [[ ! -x "$prefix/bin/$tool" ]] || [[ "$($prefix/bin/$tool --version)" != "$EXPECTED_VERSION" ]]; then
+    echo "ERROR: molecule-first companion $tool missing or version-mismatched" >&2
+    exit 1
+  fi
+done
 
 container_glibc="$(detect_glibc)"
 max_glibc_symbol="$(grep -aoE 'GLIBC_[0-9]+\.[0-9]+' "$binary" | sort -Vu | tail -n1 || true)"

@@ -4,6 +4,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MANIFEST_FILE="${SCRIPT_DIR}/compat-manifest.tsv"
+MOLECULE_FIRST_TOOLS=(molecule_first_resolver molecule_first_bam_ledger molecule_first_materialize)
 
 PREFIX=""
 BINDIR=""
@@ -193,16 +194,17 @@ HOST_GLIBC="$(detect_glibc_version)"
 selection="$(select_variant "${HOST_GLIBC}")"
 IFS=$'\t' read -r selected_label selected_baseline selected_relpath selected_description <<< "${selection}"
 selected_bin="${SCRIPT_DIR}/${selected_relpath}"
-selected_molecule_first_bin="$(dirname "${selected_bin}")/molecule_first_resolver"
 
 if [[ ! -x "${selected_bin}" ]]; then
   echo "ERROR: selected bundled binary not found: ${selected_bin}" >&2
   exit 1
 fi
-if [[ ! -x "${selected_molecule_first_bin}" ]]; then
-  echo "ERROR: selected bundled binary not found: ${selected_molecule_first_bin}" >&2
-  exit 1
-fi
+for tool in "${MOLECULE_FIRST_TOOLS[@]}"; do
+  if [[ ! -x "$(dirname "${selected_bin}")/${tool}" ]]; then
+    echo "ERROR: selected bundled binary not found: $(dirname "${selected_bin}")/${tool}" >&2
+    exit 1
+  fi
+done
 
 if [[ "${PRINT_SELECTION}" -eq 1 ]]; then
   printf '%s\t%s\t%s\t%s\n' "${selected_label}" "${selected_baseline}" "${selected_relpath}" "${selected_description}"
@@ -211,7 +213,6 @@ fi
 
 mkdir -p "${BINDIR}"
 TARGET_PATH="${BINDIR}/${TARGET_NAME}"
-MOLECULE_FIRST_TARGET="${BINDIR}/molecule_first_resolver"
 
 if [[ -e "${TARGET_PATH}" && "${FORCE}" -ne 1 ]]; then
   if cmp -s "${selected_bin}" "${TARGET_PATH}"; then
@@ -221,20 +222,26 @@ if [[ -e "${TARGET_PATH}" && "${FORCE}" -ne 1 ]]; then
     exit 1
   fi
 fi
-if [[ -e "${MOLECULE_FIRST_TARGET}" && "${FORCE}" -ne 1 ]] && ! cmp -s "${selected_molecule_first_bin}" "${MOLECULE_FIRST_TARGET}"; then
-  echo "ERROR: target already exists: ${MOLECULE_FIRST_TARGET} (use --force to overwrite)" >&2
-  exit 1
-fi
+for tool in "${MOLECULE_FIRST_TOOLS[@]}"; do
+  target="${BINDIR}/${tool}"
+  if [[ -e "${target}" && "${FORCE}" -ne 1 ]] && ! cmp -s "$(dirname "${selected_bin}")/${tool}" "${target}"; then
+    echo "ERROR: target already exists: ${target} (use --force to overwrite)" >&2
+    exit 1
+  fi
+done
 
 tmp_target="${TARGET_PATH}.tmp.$$"
 cp "${selected_bin}" "${tmp_target}"
 chmod 0755 "${tmp_target}"
 mv -f "${tmp_target}" "${TARGET_PATH}"
 
-tmp_molecule_first="${MOLECULE_FIRST_TARGET}.tmp.$$"
-cp "${selected_molecule_first_bin}" "${tmp_molecule_first}"
-chmod 0755 "${tmp_molecule_first}"
-mv -f "${tmp_molecule_first}" "${MOLECULE_FIRST_TARGET}"
+for tool in "${MOLECULE_FIRST_TOOLS[@]}"; do
+  target="${BINDIR}/${tool}"
+  temporary="${target}.tmp.$$"
+  cp "$(dirname "${selected_bin}")/${tool}" "${temporary}"
+  chmod 0755 "${temporary}"
+  mv -f "${temporary}" "${target}"
+done
 
 echo "Installed STAR-suite to ${TARGET_PATH}"
 echo "Selected compatibility level: ${selected_label} (glibc ${selected_baseline}+)"

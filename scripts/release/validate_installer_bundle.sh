@@ -120,6 +120,12 @@ if [[ ! -x "${installed_resolver}" ]]; then
   echo "ERROR: installed molecule-first resolver missing: ${installed_resolver}" >&2
   exit 1
 fi
+for tool in molecule_first_bam_ledger molecule_first_materialize; do
+  if [[ ! -x "${PREFIX_DIR}/bin/${tool}" ]]; then
+    echo "ERROR: installed molecule-first companion missing: ${PREFIX_DIR}/bin/${tool}" >&2
+    exit 1
+  fi
+done
 
 actual_host_glibc="$(detect_actual_glibc)"
 echo "Selected label: ${selected_label}"

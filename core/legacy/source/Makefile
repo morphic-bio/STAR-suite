@@ -137,7 +137,12 @@ GIT_BRANCH_COMMIT_DIFF := -D'GIT_BRANCH_COMMIT_DIFF="$(GIT_BRANCH_COMMIT_DIFF)"'
 # Defaults, can be overridden by make arguments or environment
 CXXFLAGS ?= -pipe -Wall -Wextra
 CFLAGS ?= -pipe -Wall -Wextra -O3
+CXX_TARGET_MACHINE ?= $(shell $(CXX) -dumpmachine 2>/dev/null)
+ifneq ($(filter x86_64% amd64%,$(CXX_TARGET_MACHINE)),)
 CXXFLAGS_SIMD ?= -mavx2
+else
+CXXFLAGS_SIMD ?=
+endif
 
 # Unconditionally set essential flags and optimization options
 # Packed ReadInfo is the only supported path (legacy removed)
@@ -147,6 +152,11 @@ PROCESS_FEATURES_INC := $(ROOT_DIR)/core/features/process_features/include
 CXXFLAGS_common := -std=c++11 -fopenmp -I. $(STAR_HTSLIB_INC) -I$(FLEX_SRC_DIR) -I$(LIBFLEX_DIR) -I$(LIBSCRNA_INC) -I$(VBEM_SRC_DIR) -I$(LIBEM_DIR) -I$(SLAM_SRC_DIR) -I$(BAMSORT_SRC_DIR) -I$(PROCESS_FEATURES_INC) $(CHROMAP_CXXFLAGS) $(COMPTIMEPLACE) $(GIT_BRANCH_COMMIT_DIFF)
 CXXFLAGS_main := -O3 $(CXXFLAGS_common)
 CXXFLAGS_gdb := -O0 -g3 $(CXXFLAGS_common)
+
+.PHONY: print-simd-config
+print-simd-config:
+	@printf 'target_machine=%s\n' '$(CXX_TARGET_MACHINE)'
+	@printf 'simd_flags=%s\n' '$(CXXFLAGS_SIMD)'
 
 # AddressSanitizer flags (enabled with ASAN=1)
 ifdef ASAN
