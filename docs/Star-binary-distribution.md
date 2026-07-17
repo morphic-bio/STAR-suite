@@ -195,6 +195,18 @@ Ship discoverable, installable Ubuntu binaries for STAR Suite with low-friction 
   `STAR --version` reports `1.3.0`. Upstream provenance and genome index
   compatibility remain `2.7.11b` and `2.7.4a`.
 
+## Patch Release v1.4.4 (2026-07-17)
+
+- Release tag: `v1.4.4`
+- Release notes: `docs/RELEASE_NOTES_v1.4.4.md`
+- Packaging metadata: `debian/changelog` entry `1.4.4-1`
+- Scope added since `v1.4.3`: corrected feature-barcode namespace remapping in
+  integrated AnnData/MuData exports and deterministic UCSF per-sample Slurm
+  workflow contracts.
+- Version note: release artifacts use tag `v1.4.4`, Debian packages use STAR
+  Suite `1.4.4`, and `STAR --version` reports `1.4.4`. Upstream provenance and
+  genome index compatibility remain `2.7.11b` and `2.7.4a`.
+
 ## Patch Release v1.4.2 (2026-06-29)
 
 - Release tag: `v1.4.2`

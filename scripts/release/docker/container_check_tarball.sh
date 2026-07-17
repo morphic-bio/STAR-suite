@@ -3,7 +3,7 @@
 set -euo pipefail
 
 TARBALL=""
-EXPECTED_VERSION="1.4.3"
+EXPECTED_VERSION="1.4.4"
 MANIFEST_OUT=""
 
 usage() {
