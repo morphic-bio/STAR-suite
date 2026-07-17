@@ -34,6 +34,12 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Verify architecture-aware SIMD flags
+        run: tests/run_simd_arch_flags_test.sh
+
+      - name: Verify molecule-first production adapters
+        run: tests/run_molecule_first_production_adapter_test.sh
+
       - name: Build suite base image
         run: |
           chmod +x scripts/docker/*.sh
@@ -45,3 +51,14 @@ jobs:
           MAKE_JOBS=8 \
           TEST_IMAGE_TAG=biodepot/star-suite:ci-pr-tier-a-${{ github.sha }} \
             scripts/docker/run_smokes_tier_a.sh
+
+      - name: Build ARM64 suite base image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: suite-base
+          platforms: linux/arm64
+          push: false
+          build-args: |
+            MAKE_JOBS=8

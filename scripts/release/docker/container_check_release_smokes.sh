@@ -87,6 +87,13 @@ MOLECULE_FIRST_BIN="${prefix}/bin/molecule_first_resolver"
   echo "ERROR: installed molecule-first resolver version mismatch" >&2
   exit 1
 }
+for tool in molecule_first_bam_ledger molecule_first_materialize; do
+  [[ -x "${prefix}/bin/${tool}" ]] || { echo "ERROR: installed ${tool} missing" >&2; exit 1; }
+  [[ "$("${prefix}/bin/${tool}" --version)" == "${EXPECTED_VERSION}" ]] || {
+    echo "ERROR: installed ${tool} version mismatch" >&2
+    exit 1
+  }
+done
 
 cp -a "${REPO_ROOT}/." "${repo_copy}/"
 
