@@ -1,3 +1,17 @@
+star-suite (1.5.0-1) unstable; urgency=medium
+
+  * Add the native candidate-preserving read-to-clique-to-UMI reference
+    resolver as an opt-in pre-cell-calling stage.
+  * Emit strict, soft expected-count, hard, and gated-hard molecule products
+    with PCR-inclusive exact-read priors applied once per read clique.
+  * Ship and validate the resolver in Docker, Debian, static tarball, and
+    compatibility-bundle release artifacts.
+  * Add native, frozen-Python, four-assay 100K, default-off, determinism, and
+    package regression coverage.
+  * Report STAR Suite 1.5.0 from STAR and molecule_first_resolver --version.
+
+ -- STAR-suite Maintainers <maintainers@biodepot.example>  Fri, 17 Jul 2026 07:37:15 +0000
+
 star-suite (1.4.4-1) unstable; urgency=medium
 
   * Patch release for feature-barcode namespace remapping in integrated
