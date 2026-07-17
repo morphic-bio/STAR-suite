@@ -94,6 +94,10 @@ if [[ "$version_output" != "$EXPECTED_VERSION" ]]; then
   echo "ERROR: expected STAR-suite version $EXPECTED_VERSION, got $version_output" >&2
   exit 1
 fi
+if [[ ! -x "$prefix/bin/molecule_first_resolver" ]] || [[ "$($prefix/bin/molecule_first_resolver --version)" != "$EXPECTED_VERSION" ]]; then
+  echo "ERROR: installed molecule-first resolver missing or version-mismatched" >&2
+  exit 1
+fi
 
 manifest="Bundle: $(basename "$BUNDLE")
 Container glibc: $(detect_glibc)

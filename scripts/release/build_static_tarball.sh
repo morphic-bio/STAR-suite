@@ -210,17 +210,23 @@ fi
 
 echo "Building STAR-suite binary tarball (jobs=${MAKE_JOBS})..."
 make -j"${MAKE_JOBS}" core-static
+make -j"${MAKE_JOBS}" molecule-first-resolver
 
 if [[ ! -x core/legacy/source/STAR ]]; then
   echo "ERROR: expected binary missing: core/legacy/source/STAR" >&2
+  exit 1
+fi
+if [[ ! -x flex/tools/molecule_first_resolver/molecule_first_resolver ]]; then
+  echo "ERROR: expected binary missing: flex/tools/molecule_first_resolver/molecule_first_resolver" >&2
   exit 1
 fi
 
 STAGE_DIR="$(mktemp -d)"
 mkdir -p "${STAGE_DIR}/bin"
 cp core/legacy/source/STAR "${STAGE_DIR}/bin/STAR"
+cp flex/tools/molecule_first_resolver/molecule_first_resolver "${STAGE_DIR}/bin/molecule_first_resolver"
 cp scripts/release/install_binary_tarball.sh "${STAGE_DIR}/install.sh"
-chmod 0755 "${STAGE_DIR}/bin/STAR" "${STAGE_DIR}/install.sh"
+chmod 0755 "${STAGE_DIR}/bin/STAR" "${STAGE_DIR}/bin/molecule_first_resolver" "${STAGE_DIR}/install.sh"
 
 asset_name="${ASSET_PREFIX}-${VERSION}-linux-${arch}"
 if [[ -n "${COMPAT_LABEL}" ]]; then
@@ -255,6 +261,7 @@ Built at: $(date -u +"%Y-%m-%dT%H:%M:%SZ")
 Build environment: ${STAR_SUITE_BUILD_IMAGE:-native-host}
 ${compat_note}This tarball includes:
   - bin/STAR
+  - bin/molecule_first_resolver
   - install.sh for optional local installation
   - release-metadata.env for compatibility metadata
 
