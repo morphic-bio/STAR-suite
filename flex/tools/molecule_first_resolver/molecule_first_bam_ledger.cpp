@@ -49,11 +49,11 @@ struct Counters {
 
 void usage(std::ostream &out)
 {
-    out << "Usage: molecule_first_bam_ledger --input STAR.bam --whitelist barcodes.txt\\n"
-        << "       --output candidate_reads.tsv --summary summary.tsv\\n"
-        << "       --assay scrna|flex|visium [--sample-id ID] [--feature-tag GX]\\n\\n"
-        << "The input may be SAM, BAM, or CRAM. Only raw CR/CY/UR and the declared\\n"
-        << "feature tag are read; corrected CB/UB and cell calls are never used.\\n";
+    out << "Usage: molecule_first_bam_ledger --input STAR.bam --whitelist barcodes.txt\n"
+        << "       --output candidate_reads.tsv --summary summary.tsv\n"
+        << "       --assay scrna|flex|visium [--sample-id ID] [--feature-tag GX]\n\n"
+        << "The input may be SAM, BAM, or CRAM. Only raw CR/CY/UR and the declared\n"
+        << "feature tag are read; corrected CB/UB and cell calls are never used.\n";
 }
 
 Arguments parseArguments(int argc, char **argv)
