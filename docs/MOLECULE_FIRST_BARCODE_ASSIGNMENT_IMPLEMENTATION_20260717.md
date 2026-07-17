@@ -138,6 +138,14 @@ Flex regressions cover the available CB/UB paths.
 - Integration Tier A, package artifacts, and v1.5.0 release workflow are
   recorded here after the feature and release PRs complete.
 
+The committed feature snapshot was also built with
+`star-suite-release-build:ubuntu22` and validated with
+`star-suite-runtime-check:ubuntu22`. The installed STAR and resolver both
+reported `1.4.4`; the installed resolver passed its native smoke. The local
+validation tarball SHA-256 was
+`bcf4ca39a91dcfcf9f3ed4fbfe0e249d6532217208617252305a6fc88cbae87e`.
+Installer conflict preflight and idempotent reinstall behavior passed.
+
 The native-host `STARstatic` link is not used as a release verdict because
 this host's system HTSlib lacks `sam_hdr_destroy`; release artifacts are built
 and runtime-tested in the repository's pinned Ubuntu release containers.
