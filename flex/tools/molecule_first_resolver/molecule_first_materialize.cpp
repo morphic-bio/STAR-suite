@@ -51,10 +51,10 @@ struct Scale {
 
 void usage(std::ostream &out)
 {
-    out << "Usage: molecule_first_materialize --resolved-dir DIR --out-dir DIR\\n"
-        << "       --assay scrna|flex|visium|visium-hd [--umi-mode 1mm_cr|exact]\\n\\n"
-        << "Writes strict, soft_expected, hard, and gated_hard 10x-style MEX\\n"
-        << "products on identical feature/barcode axes. Soft matrices are real.\\n";
+    out << "Usage: molecule_first_materialize --resolved-dir DIR --out-dir DIR\n"
+        << "       --assay scrna|flex|visium|visium-hd [--umi-mode 1mm_cr|exact]\n\n"
+        << "Writes strict, soft_expected, hard, and gated_hard 10x-style MEX\n"
+        << "products on identical feature/barcode axes. Soft matrices are real.\n";
 }
 
 Arguments parseArguments(int argc, char **argv)
