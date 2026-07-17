@@ -138,8 +138,22 @@ Flex regressions cover the available CB/UB paths.
 - Integration Tier A: GitHub Actions run `29563199754`, passed.
 - Integration PR #5 merged as
   `b03930adff707f97c009d4d6116a677ff38168dc`.
-- v1.5.0 package artifacts and release workflow are recorded here after the
-  release PR completes.
+- Release PR #6 Tier A: GitHub Actions run `29563878968`, passed.
+- Release PR #6 merged as
+  `fac38ca6485b3b3308792e114f88b6c943e7541b`; annotated tag `v1.5.0` peels to
+  that exact merge.
+- v1.5.0 artifact publication: GitHub Actions run `29564366223`, passed.
+- Published release:
+  `https://github.com/morphic-bio/STAR-suite/releases/tag/v1.5.0`.
+
+Published primary artifact SHA-256 digests:
+
+| Artifact | SHA-256 |
+| --- | --- |
+| glibc 2.34 tarball | `f04c1f7609a6f395a9b304390e2432ee88978b8401ceed9e451fab96ce855c59` |
+| glibc 2.39 tarball | `fb7744fdd46070dda97be62f1ae4dfee5e6c6a55c466088c97a57867ea00737f` |
+| compatibility installer | `14128256ed39fefd9c3076aebc0b216a48a6039b720b9cb6b9c3a2ccc3e98bac` |
+| Debian binary package | `f0fbbaa425e1fe6b872f7b03f4fe67b5b5338aff3ebf2bcb1e2b017bab199630` |
 
 The committed feature snapshot was also built with
 `star-suite-release-build:ubuntu22` and validated with
