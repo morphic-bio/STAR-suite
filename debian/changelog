@@ -1,3 +1,14 @@
+star-suite (1.4.4-1) unstable; urgency=medium
+
+  * Patch release for feature-barcode namespace remapping in integrated
+    AnnData/MuData exports.
+  * Preserve source feature identities when top-feature indices are reported
+    in the process_features namespace.
+  * Add deterministic UCSF per-sample Slurm workflow contracts and tests.
+  * Report STAR Suite 1.4.4 from STAR --version.
+
+ -- STAR-suite Maintainers <maintainers@biodepot.example>  Fri, 17 Jul 2026 00:00:00 +0000
+
 star-suite (1.4.3-1) unstable; urgency=medium
 
   * Patch release for byte-identical Y/no-Y FASTQ emission after integrated
