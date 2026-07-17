@@ -92,6 +92,7 @@ COPY --from=builder /build/slam/tools/slam_requant/slam_requant /usr/local/bin/s
 COPY --from=builder /build/slam/tools/pileup_snp/pileup_snp /usr/local/bin/pileup_snp
 COPY --from=builder /build/flex/tools/flexfilter/run_flexfilter_mex /usr/local/bin/run_flexfilter_mex
 COPY --from=builder /build/flex/tools/flexfilter/run_flexfilter_mex /usr/local/bin/flexfilter
+COPY --from=builder /build/flex/tools/molecule_first_resolver/molecule_first_resolver /usr/local/bin/molecule_first_resolver
 COPY --from=builder /build/core/features/yremove_fastq/tools/remove_y_reads/remove_y_reads /usr/local/bin/remove_y_reads
 
 WORKDIR /workspace

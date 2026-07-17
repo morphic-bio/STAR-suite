@@ -193,9 +193,14 @@ HOST_GLIBC="$(detect_glibc_version)"
 selection="$(select_variant "${HOST_GLIBC}")"
 IFS=$'\t' read -r selected_label selected_baseline selected_relpath selected_description <<< "${selection}"
 selected_bin="${SCRIPT_DIR}/${selected_relpath}"
+selected_molecule_first_bin="$(dirname "${selected_bin}")/molecule_first_resolver"
 
 if [[ ! -x "${selected_bin}" ]]; then
   echo "ERROR: selected bundled binary not found: ${selected_bin}" >&2
+  exit 1
+fi
+if [[ ! -x "${selected_molecule_first_bin}" ]]; then
+  echo "ERROR: selected bundled binary not found: ${selected_molecule_first_bin}" >&2
   exit 1
 fi
 
@@ -206,15 +211,18 @@ fi
 
 mkdir -p "${BINDIR}"
 TARGET_PATH="${BINDIR}/${TARGET_NAME}"
+MOLECULE_FIRST_TARGET="${BINDIR}/molecule_first_resolver"
 
 if [[ -e "${TARGET_PATH}" && "${FORCE}" -ne 1 ]]; then
   if cmp -s "${selected_bin}" "${TARGET_PATH}"; then
-    echo "Binary already installed at ${TARGET_PATH}" 
-    echo "Selected compatibility level: ${selected_label} (glibc ${selected_baseline}+)"
-    warn_if_path_missing "${BINDIR}"
-    exit 0
+    echo "STAR binary already installed at ${TARGET_PATH}; verifying companion tools"
+  else
+    echo "ERROR: target already exists: ${TARGET_PATH} (use --force to overwrite)" >&2
+    exit 1
   fi
-  echo "ERROR: target already exists: ${TARGET_PATH} (use --force to overwrite)" >&2
+fi
+if [[ -e "${MOLECULE_FIRST_TARGET}" && "${FORCE}" -ne 1 ]] && ! cmp -s "${selected_molecule_first_bin}" "${MOLECULE_FIRST_TARGET}"; then
+  echo "ERROR: target already exists: ${MOLECULE_FIRST_TARGET} (use --force to overwrite)" >&2
   exit 1
 fi
 
@@ -222,6 +230,11 @@ tmp_target="${TARGET_PATH}.tmp.$$"
 cp "${selected_bin}" "${tmp_target}"
 chmod 0755 "${tmp_target}"
 mv -f "${tmp_target}" "${TARGET_PATH}"
+
+tmp_molecule_first="${MOLECULE_FIRST_TARGET}.tmp.$$"
+cp "${selected_molecule_first_bin}" "${tmp_molecule_first}"
+chmod 0755 "${tmp_molecule_first}"
+mv -f "${tmp_molecule_first}" "${MOLECULE_FIRST_TARGET}"
 
 echo "Installed STAR-suite to ${TARGET_PATH}"
 echo "Selected compatibility level: ${selected_label} (glibc ${selected_baseline}+)"

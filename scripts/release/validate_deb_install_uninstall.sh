@@ -77,7 +77,7 @@ apt-get update
 apt-get install -y --no-install-recommends ca-certificates
 apt-get install -y --no-install-recommends /work/star-suite.deb
 
-for bin in STAR star_feature_call run_flexfilter_mex flexfilter slam_requant pileup_snp remove_y_reads; do
+for bin in STAR star_feature_call run_flexfilter_mex flexfilter molecule_first_resolver slam_requant pileup_snp remove_y_reads; do
   command -v "${bin}" >/dev/null
 done
 
