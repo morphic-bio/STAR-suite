@@ -11,23 +11,25 @@ OUT_DIR="${CATATAC_TRIMODAL_SMOKE_OUT:-${REPO_ROOT}/tests/catatac_trimodal_downs
 MAX_READS="${CATATAC_TRIMODAL_MAX_READS:-100000}"
 THREADS="${CATATAC_TRIMODAL_THREADS:-16}"
 INLINE_ATAC_PEAK_MEX="${CATATAC_TRIMODAL_INLINE_ATAC_PEAK_MEX:-no}"
+MACS3_QVALUE="${CATATAC_TRIMODAL_MACS3_QVALUE:-}"
 REQUIRE_NO_STAR="${CATATAC_TRIMODAL_REQUIRE_NO_STAR:-1}"
 
-GENOME="/mnt/pikachu/autoindex_98_32/pe_index"
-GEX_R1="/mnt/pikachu/catatac_gse288996/fastq/GEX/SRR32265752_1.fastq.gz"
-GEX_R2="/mnt/pikachu/catatac_gse288996/fastq/GEX/SRR32265752_2.fastq.gz"
-ATAC_R1_SRC="/mnt/pikachu/catatac_gse288996/fastq/ATAC/SRR32265760_1.fastq.gz"
-ATAC_R2_SRC="/mnt/pikachu/catatac_gse288996/fastq/ATAC/SRR32265760_2.fastq.gz"
-ATAC_R3_SRC="/mnt/pikachu/catatac_gse288996/fastq/ATAC/SRR32265760_3.fastq.gz"
+GENOME="${CATATAC_TRIMODAL_GENOME_DIR:-/mnt/pikachu/autoindex_98_32/pe_index}"
+GEX_R1="${CATATAC_TRIMODAL_GEX_R1:-/mnt/pikachu/catatac_gse288996/fastq/GEX/SRR32265752_1.fastq.gz}"
+GEX_R2="${CATATAC_TRIMODAL_GEX_R2:-/mnt/pikachu/catatac_gse288996/fastq/GEX/SRR32265752_2.fastq.gz}"
+GEX_LIBRARY_DIR="${CATATAC_TRIMODAL_GEX_LIBRARY_DIR:-$(dirname "${GEX_R1}")}"
+ATAC_R1_SRC="${CATATAC_TRIMODAL_ATAC_R1:-/mnt/pikachu/catatac_gse288996/fastq/ATAC/SRR32265760_1.fastq.gz}"
+ATAC_R2_SRC="${CATATAC_TRIMODAL_ATAC_R2:-/mnt/pikachu/catatac_gse288996/fastq/ATAC/SRR32265760_2.fastq.gz}"
+ATAC_R3_SRC="${CATATAC_TRIMODAL_ATAC_R3:-/mnt/pikachu/catatac_gse288996/fastq/ATAC/SRR32265760_3.fastq.gz}"
 GUIDE_DIR="${CATATAC_TRIMODAL_GUIDE_DIR:-/mnt/pikachu/catatac_gse288996/guide_redump/fixture}"
 STAGED_ROOT="${CATATAC_TRIMODAL_STAGED_ROOT:-/mnt/pikachu/catatac_gse288996/full_bench/catatac_trimodal_staged}"
 STAGED_ATAC="${CATATAC_TRIMODAL_STAGED_ATAC:-${STAGED_ROOT}/atac_${MAX_READS}}"
-FEATURE_REF="${REPO_ROOT}/core/features/process_features/feature_lists/catatac_crispri_guide_capture.csv"
-GEX_WL="/mnt/pikachu/GEX_whitelist/737K-arc-v1.txt"
-ATAC_WL="/mnt/pikachu/atac-seq/benchmarks/pbmc_unsorted_3k_100k/chromap_index/737K-arc-v1_atac.txt"
-ATAC2GEX="/mnt/pikachu/atac-seq/benchmarks/pbmc_unsorted_3k_100k/chromap_index/atac2gex.tsv"
-CHROMAP_FASTA="/mnt/pikachu/refdata-cellranger-arc-GRCh38-2020-A-2.0.0/fasta/genome.fa"
-CHROMAP_IDX="/mnt/pikachu/catatac_gse288996/refs/GRCh38-arc.chromap.idx"
+FEATURE_REF="${CATATAC_TRIMODAL_FEATURE_REF:-${REPO_ROOT}/core/features/process_features/feature_lists/catatac_crispri_guide_capture.csv}"
+GEX_WL="${CATATAC_TRIMODAL_GEX_WHITELIST:-/mnt/pikachu/GEX_whitelist/737K-arc-v1.txt}"
+ATAC_WL="${CATATAC_TRIMODAL_ATAC_WHITELIST:-/mnt/pikachu/atac-seq/benchmarks/pbmc_unsorted_3k_100k/chromap_index/737K-arc-v1_atac.txt}"
+ATAC2GEX="${CATATAC_TRIMODAL_ATAC2GEX:-/mnt/pikachu/atac-seq/benchmarks/pbmc_unsorted_3k_100k/chromap_index/atac2gex.tsv}"
+CHROMAP_FASTA="${CATATAC_TRIMODAL_CHROMAP_FASTA:-/mnt/pikachu/refdata-cellranger-arc-GRCh38-2020-A-2.0.0/fasta/genome.fa}"
+CHROMAP_IDX="${CATATAC_TRIMODAL_CHROMAP_INDEX:-/mnt/pikachu/catatac_gse288996/refs/GRCh38-arc.chromap.idx}"
 LIBRARY_ID="${CATATAC_GUIDE_LIBRARY_ID:-catatac_guide_fixture}"
 CS1="CAAGTTGATAACGGACTAGCC"
 CS2="CAAGTTGTAAACGGACTAGCC"
@@ -82,7 +84,7 @@ if ! flock -n 9; then
   exit 1
 fi
 
-for path in "${STAR_BIN}" "${GENOME}/Genome" "${GEX_R1}" "${GEX_R2}" \
+for path in "${STAR_BIN}" "${GENOME}/Genome" "${GEX_R1}" "${GEX_R2}" "${GEX_LIBRARY_DIR}" \
   "${ATAC_R1_SRC}" "${ATAC_R2_SRC}" "${ATAC_R3_SRC}" "${GUIDE_R1}" "${GUIDE_R2}" "${GUIDE_R3}" \
   "${FEATURE_REF}" "${GEX_WL}" "${ATAC_WL}" "${ATAC2GEX}" "${CHROMAP_FASTA}" "${CHROMAP_IDX}"; do
   [[ -r "${path}" ]] || { echo "ERROR: missing ${path}" >&2; exit 1; }
@@ -163,7 +165,7 @@ ATAC_R3="${STAGED_ATAC}/ATAC_R3.fastq.gz"
 cat > "${PF_CONFIG}" <<EOF
 [libraries]
 fastqs,sample,library_type,feature_types,star_chemistry,star_library_id,star_feature_ref,star_whitelist,star_layout,star_barcode_read,star_barcode_format,star_umi_read,star_umi_start,star_umi_length,star_feature_read,star_capture_read,star_capture_sequences,star_capture_max_hamming,star_barcode_output_map,star_feature_search_mode,star_max_hamming
-/mnt/pikachu/catatac_gse288996/fastq/GEX,DMSO1,Gene Expression,Gene Expression,TRU,gex_dmso1,,,,
+${GEX_LIBRARY_DIR},DMSO1,Gene Expression,Gene Expression,TRU,gex_dmso1,,,,
 ${GUIDE_DIR},DMSO1,CRISPR Guide Capture,CRISPR Guide Capture,,${LIBRARY_ID},${FEATURE_REF},${ATAC_WL},catatac_guide,R2,bc:8:23:-,R1,0,12,R3,R1,${CS1}|${CS2},0,${ATAC2GEX},free,1
 EOF
 
@@ -172,11 +174,25 @@ trimodal_downsample_smoke
 max_reads=${MAX_READS}
 threads=${THREADS}
 inline_atac_peak_mex=${INLINE_ATAC_PEAK_MEX}
+macs3_qvalue=${MACS3_QVALUE}
+genome_dir=${GENOME}
+gex_library_dir=${GEX_LIBRARY_DIR}
+gex_r1=${GEX_R1}
+gex_r2=${GEX_R2}
+atac_r1_source=${ATAC_R1_SRC}
+atac_r2_source=${ATAC_R2_SRC}
+atac_r3_source=${ATAC_R3_SRC}
 guide_dir=${GUIDE_DIR}
 guide_r1=${GUIDE_R1}
 guide_r2=${GUIDE_R2}
 guide_r3=${GUIDE_R3}
 staged_atac=${STAGED_ATAC}
+feature_ref=${FEATURE_REF}
+gex_whitelist=${GEX_WL}
+atac_whitelist=${ATAC_WL}
+atac2gex=${ATAC2GEX}
+chromap_fasta=${CHROMAP_FASTA}
+chromap_index=${CHROMAP_IDX}
 star_binary=${STAR_BIN}
 EOF
 
@@ -186,6 +202,8 @@ echo "  MAX_READS=${MAX_READS}"
 echo "  THREADS=${THREADS}"
 echo "  INLINE_ATAC_PEAK_MEX=${INLINE_ATAC_PEAK_MEX}"
 echo "  GUIDE_DIR=${GUIDE_DIR}"
+echo "  GEX_R1=${GEX_R1}"
+echo "  ATAC_R1_SRC=${ATAC_R1_SRC}"
 
 rm -rf "${STAR_TMP}" "${CHROMAP_TMP}"
 mkdir -p "${STAR_RUN}" "${CHROMAP_TMP}"
@@ -263,6 +281,9 @@ if [[ "${INLINE_ATAC_PEAK_MEX}" == "yes" ]]; then
     --multiomeAtacPeakMetricsTsv "${STAR_RUN}/atac/atac_metrics.tsv"
     --multiomeAtacPeakThreads "${THREADS}"
   )
+  if [[ -n "${MACS3_QVALUE}" ]]; then
+    STAR_CMD+=(--chromapAtacMacs3FragQvalue "${MACS3_QVALUE}")
+  fi
 fi
 
 {
