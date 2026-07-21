@@ -722,7 +722,7 @@ void ParametersSolo::initialize(Parameters *pPin)
         // If neither new flag is set, flexFilterTotalExpected keeps its value (backwards compatibility)
         
         // Validate required parameters when enabled
-        if (runFlexFilter && flexFilterTotalExpected == 0) {
+        if (runFlexFilter && !skipProcessing && flexFilterTotalExpected == 0) {
             ostringstream errOut;
             errOut << "EXITING because of fatal input ERROR: FlexFilter requires expected cells count.\n";
             errOut << "       Use one of:\n";
