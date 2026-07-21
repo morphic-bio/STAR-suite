@@ -407,6 +407,7 @@ int ReadAlign::oneReadLoaded(const int readStatus0) {
         }
         hashScreenDumpWrite(Read0[0], readLengthOriginal[0], hashScreenSampleIdx, hashScreenDecision_);
         if (hashScreenDecision_.action == FlexHashScreenDecision::Keep) {
+            const bool noBarcode = (soloRead->readBar->cbMatch < 0);
             soloRead->readFlagReset();
             SoloReadFeature *geneFeat = soloRead->readFeat[P.pSolo.featureInd[SoloFeatureTypes::Gene]];
             bool handled = record_flex_hash_screen_keep(geneFeat, *soloRead->readBar, iReadAll,
@@ -414,6 +415,9 @@ int ReadAlign::oneReadLoaded(const int readStatus0) {
                                                         hashScreenDecision_.cacheClass);
             if (handled) {
                 statsRA.hashScreenKeep++;
+                if (noBarcode) {
+                    statsRA.hashScreenKeepNoBarcode++;
+                }
                 return 0;
             }
             statsRA.hashScreenPass++;
