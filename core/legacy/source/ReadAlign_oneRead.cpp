@@ -395,7 +395,16 @@ int ReadAlign::oneReadLoaded(const int readStatus0) {
         // happens later at complementSeqNumbers). The hash screen encodes
         // A/C/G/T characters; moving this call after convertNucleotidesToNumbers
         // would silently break classification.
-        hashScreenDecision_ = FlexHashScreenCache::instance().classifyRead(Read0[0], readLengthOriginal[0], hashScreenSampleIdx);
+        if (sampleDetReady_) {
+            hashScreenDecision_ = FlexHashScreenCache::instance().classifyRead(
+                Read0[0], readLengthOriginal[0], hashScreenSampleIdx);
+        } else {
+            // Single-sample/no-tag Flex libraries have no runtime sample index.
+            // Reuse the production sample-free H0/H1 classifier so exact H0
+            // records are not mistaken for cache misses and sent to alignment.
+            hashScreenDecision_ = FlexHashScreenCache::instance().classifyReadH0H1Offset0(
+                Read0[0], readLengthOriginal[0]);
+        }
         hashScreenDumpWrite(Read0[0], readLengthOriginal[0], hashScreenSampleIdx, hashScreenDecision_);
         if (hashScreenDecision_.action == FlexHashScreenDecision::Keep) {
             soloRead->readFlagReset();
