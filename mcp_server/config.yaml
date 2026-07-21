@@ -27,12 +27,17 @@ server:
   public_discovery: true  # Discovery tools don't require auth
 
 paths:
-  repo_root: "/mnt/pikachu/STAR-suite"
-  artifact_log_root: "/mnt/pikachu/STAR-suite/plans/artifacts"
+  repo_root: "/mnt/pikachu/STAR-suite-flex100k-reboot-20260721"
+  artifact_log_root: "/mnt/pikachu/STAR-suite-flex100k-reboot-20260721/plans/artifacts"
   temp_root: "/tmp"
 
 trusted_roots:
   - "/mnt/pikachu/STAR-suite"
+  - "/mnt/pikachu/STAR-suite-flex100k-reboot-20260721"
+  - "/mnt/pikachu/visium-hd-processing-flex100k-build-20260721"
+  - "/mnt/pikachu/visium-hd-processing-recipes-flex100k-reboot-20260721"
+  - "/mnt/pikachu/visium-hd-processing-provenance-flex100k-reboot-20260721"
+  - "/mnt/pikachu/star-spatial/runs"
   - "/mnt/pikachu/morphic-recipes"
   - "/mnt/pikachu/morphic-provenance"
   - "/mnt/pikachu/prod-12-28"
@@ -154,6 +159,14 @@ workflows:
     kind: shell_workflow
     schema_file: mcp_server/workflows/morphic_multiome.yaml
     visibility: public
+
+  - id: visium-hd-publication-validation
+    title: Visium HD publication validation
+    summary: Deterministic H1-GMHFWPH/D1 raw-FASTQ open primary with post-seal Space Ranger compatibility profiles.
+    entry_script: /mnt/pikachu/visium-hd-processing-recipes-flex100k-reboot-20260721/scripts/run_visium_hd_publication_validation.py
+    kind: shell_workflow
+    schema_file: /mnt/pikachu/visium-hd-processing-recipes-flex100k-reboot-20260721/mcp_server/workflows/visium_hd_publication_validation.yaml
+    visibility: private
 
   - id: "jax_scrnaseq02_ocm_composite_smoke"
     title: "JAX scRNAseq02 OCM Composite Smoke"
