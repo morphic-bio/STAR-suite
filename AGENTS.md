@@ -156,6 +156,20 @@ actionable; link to deeper docs rather than copying them.
 - Ensure Flex builds link `libscrna` and include `core/features/libscrna/include`.
 - Plan: `plans/refactor_flex_plan.md`.
 
+### Flex Hash-Cache Assay Context
+
+- Routine scRNA-seq Flex recipes should explicitly generate/use H0+H1
+  (`--hashCacheTiers H0,H1`). H2 recovered measurable additional reads in the
+  JAX benchmark, but did not provide a material final count benefit in that
+  scRNA-seq context and produced a much larger cache.
+- Do not generalize the scRNA-seq H2 result to spatial assays. Spatial recipes
+  may evaluate H2, but must validate count-level benefit, specificity, memory,
+  and runtime on representative spatial data before making it a default.
+- The fused production triage currently queries H0+H1 at offset 0; the full
+  classifier can consume H2 records. Generating an H2 cache alone does not make
+  the fused path use H2. An H2-enabled recipe must select an H2-aware runtime
+  path or add and validate H2 support in fused triage.
+
 ## CR-compat GEX Parity Notes
 
 - Use `GeneFull` for GEX parity (CR includes introns since v7).
