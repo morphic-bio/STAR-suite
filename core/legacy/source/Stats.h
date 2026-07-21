@@ -55,6 +55,7 @@ class Stats {
 
         // Flex hash screen counters
         uint64 hashScreenKeep;
+        uint64 hashScreenKeepNoBarcode;
         uint64 hashScreenDeny;
         uint64 hashScreenPass;
 

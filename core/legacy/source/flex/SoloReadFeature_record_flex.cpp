@@ -373,7 +373,17 @@ bool record_flex_hash_screen_keep(SoloReadFeature *soloReadFeat, SoloReadBarcode
         return false;
     }
     if (soloBar.cbMatch < 0) {
-        return false;
+        if (soloBar.pSolo.inlineHashMode) {
+            char extraBuf[96];
+            snprintf(extraBuf, sizeof(extraBuf), "cache_class=%u;gene=%u",
+                     static_cast<unsigned>(cacheClass), static_cast<unsigned>(geneIdx15));
+            logRejectReason(soloBar, iRead, soloReadFeat->featureType, 1, geneIdx15,
+                            "KEEP_SCREEN_NO_BARCODE", extraBuf, soloBar.pSolo);
+        }
+        // The probe decision is terminal even when this read cannot enter a
+        // barcode/UMI family. Keep it in a distinct accounting bin rather than
+        // sending an already-resolved probe read through alignment.
+        return true;
     }
 
     const uint8_t tagIdx = extractTagIdxForFlex(soloBar);
