@@ -278,6 +278,13 @@ workflows:
 # Allowlisted scripts with metadata
 scripts:
   # Workflow entry scripts (also registered under workflows: for structured params)
+  - name: "visium_hd_publication_validation"
+    path: "/mnt/pikachu/visium-hd-processing-recipes-flex100k-reboot-20260721/scripts/run_visium_hd_publication_validation.py"
+    module: "visium_hd_publication"
+    working_dir: "/mnt/pikachu/visium-hd-processing-recipes-flex100k-reboot-20260721"
+    timeout_seconds: 172800
+    description: "H1-GMHFWPH/D1 raw-FASTQ publication validation and post-seal compatibility workflow"
+
   - name: "ucsf_corrected_production"
     path: "scripts/paper/run_ucsf_corrected_production_workflow.sh"
     module: "workflow"
