@@ -55,11 +55,12 @@ metric() {
     awk -F '|' -v label="${label}" '$1 ~ label "[[:space:]]*$" {gsub(/[[:space:]]/, "", $2); print $2}' "${test_dir}/Log.final.out"
 }
 
-[[ "$(metric 'Number of input reads')" == "2" ]]
-[[ "$(metric 'Hash screen: KEEP')" == "1" ]]
+[[ "$(metric 'Number of input reads')" == "3" ]]
+[[ "$(metric 'Hash screen: KEEP')" == "2" ]]
+[[ "$(metric 'Hash screen: KEEP, no barcode')" == "1" ]]
 [[ "$(metric 'Hash screen: DENY')" == "0" ]]
 [[ "$(metric 'Hash screen: PASS')" == "1" ]]
 samtools quickcheck "${test_dir}/Aligned.out.bam"
 [[ "$(samtools view -c "${test_dir}/Aligned.out.bam")" == "1" ]]
 
-echo "PASS: no-sample H0 stays on hash path and cache miss reaches alignment BAM"
+echo "PASS: no-sample H0 and no-barcode H0 stay on hash path; only cache miss reaches alignment BAM"
