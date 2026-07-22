@@ -21,6 +21,9 @@
 // Forward declaration for library format detector
 class LibFormatDetector;
 class SlamSnpMask;
+namespace spatial_feature_sidecar {
+class Writer;
+}
 namespace star {
 namespace input {
 class CbqInputModule;
@@ -699,6 +702,11 @@ class Parameters {
 
         //solo
         ParametersSolo pSolo;
+        // Default-off annotation-only Visium HD GEX evidence stream. The writer
+        // is owned by STAR::main and shared read-only by mapping chunks.
+        string soloSpatialFeatureSidecar = "-";
+        bool soloSpatialFeatureSidecarEnabled = false;
+        spatial_feature_sidecar::Writer *spatialFeatureSidecarWriter = nullptr;
 
         // pf-multi config support (Cell Ranger-style CSV input)
         struct {

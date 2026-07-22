@@ -221,6 +221,7 @@ Files:
 ```text
 <prefix>.bin
 <prefix>.features.tsv
+<prefix>.read_name_digests.tsv
 <prefix>.summary.json
 ```
 
@@ -549,16 +550,16 @@ summaries may be proposed for version control after review.
 | Gate | Command or artifact | Status |
 |---|---|---|
 | STAR Suite feature branch | `feature/visium-hd-gex-sidecar-20260722` from `a996107` | complete |
-| Companion processing source | commit `7b581c8` | recorded; no output reused |
+| Companion processing source | branch `feature/visium-hd-gex-sidecar-20260722` from `7b581c8` | ordinal source change implemented; no output reused |
 | Frozen fixture checksum | `(cd "$FIXTURE" && sha256sum -c checksums.sha256)` | passed, 9/9 |
 | Fixture shape | four lanes x 25,000 pairs; R1 43 nt; R2 75 nt | verified from frozen summary |
 | Barcode contract | 11,222,500 coordinates; 596,300 ambiguous raw-28 keys | verified from contract summary |
 | Fresh output root | `/mnt/pikachu/star-spatial/gex_sidecar_tests/20260722_ovarian_100k_v1` | created empty |
-| Runbook committed before implementation | this document | pending commit |
-| Clean STAR build | command above | not run |
-| Sidecar unit tests | planned tranche 1 | not run |
-| Candidate join tests | planned tranche 2 | not run |
-| Shared MultiGeneUMI_CR tests | planned tranche 3 | not run |
+| Runbook committed before implementation | commit `68fb69e` | complete |
+| Clean STAR build | command above | passed after implementation; warnings only |
+| Sidecar unit tests | `make -C core/legacy/source test_SpatialFeatureSidecar` | passed before clean-build gate |
+| Candidate join tests | `test_spatial_feature_sidecar_join` including lane permutation/raw-UMI rejection | passed before clean-build gate |
+| Shared MultiGeneUMI_CR tests | core helper plus GEX resolver correction/tie/original-dominance cases | passed before clean-build gate |
 | Source-only 100K run | fresh output root | not run |
 | Space Ranger sanity check | comparator path/checksum to record after internal gates | not run |
 

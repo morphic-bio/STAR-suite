@@ -10,6 +10,7 @@
 #include "UmiCodec.h"
 #include "UMICorrector.h"
 #include "ErrorWarning.h"
+#include "MultiGeneUmiCr.h"
 #include <cstdio>
 #include <fstream>
 #include <vector>
@@ -670,28 +671,27 @@ void SoloFeature::collapseUMIperCB(uint32 iCB, vector<uint32> &umiArray, vector<
         
         vector<unordered_set<uintUMI>> geneUmiHash;
         geneUmiHash.resize(nGenes);
+        vector<multi_gene_umi_cr::GeneSupport> resolutionSupports;
         
         for (const auto &iu: umiGeneMapCount) {//loop over UMIs for all genes
-                       
-            uint32 maxu=0, maxg=-1;
+            resolutionSupports.clear();
+            resolutionSupports.reserve(iu.second.size());
+            const auto originalGroup = umiGeneMapCount0.find(iu.first);
             for (const auto &ig : iu.second) {
-                if (ig.second>maxu) {
-                    maxu=ig.second;
-                    maxg=ig.first;
-                } else if (ig.second==maxu) {
-                    maxg=-1;
-                };
+                multi_gene_umi_cr::GeneSupport support;
+                support.gene = ig.first;
+                support.correctedCount = ig.second;
+                if (originalGroup != umiGeneMapCount0.end()) {
+                    const auto originalGene = originalGroup->second.find(ig.first);
+                    if (originalGene != originalGroup->second.end()) {
+                        support.originalAtCorrectedCount = originalGene->second;
+                    }
+                }
+                resolutionSupports.push_back(support);
             };
-
-            if ( maxg+1==0 )
-                continue; //this umi is not counted for any gene, because two genes have the same read count for this UMI
-            
-            for (const auto &ig : umiGeneMapCount0[iu.first]) {//check that this umi/gene had also top count for uncorrected umis
-                if (ig.second>umiGeneMapCount0[iu.first][maxg]) {
-                    maxg=-1;
-                    break;
-                };
-            };
+            const multi_gene_umi_cr::Result resolution =
+                multi_gene_umi_cr::resolve(resolutionSupports);
+            const uint32 maxg = resolution.accepted ? resolution.gene : static_cast<uint32>(-1);
 
             if (shouldTraceCollapseBarcode(pSolo, indCB[iCB])) {
                 const int64_t chosenGene = (maxg + 1u == 0u) ? -1 : static_cast<int64_t>(gID[maxg]);

@@ -27,6 +27,7 @@ struct Arguments {
     std::string input;
     std::string outDir;
     bool inputFeatureSorted = false;
+    bool gexMultiGeneUmiCr = false;
     molecule_first::Config config;
 };
 
@@ -42,6 +43,7 @@ void usage(std::ostream &out)
         << "  --gate-min-posterior FLOAT   default 0.95\n"
         << "  --gate-min-margin FLOAT      default 0.90\n"
         << "  --input-feature-sorted       stream feature_id/read_id/candidate sorted input\n"
+        << "  --gex-multigene-umi-cr       reconcile genes after candidate-specific UMI correction\n"
         << "  --version\n";
 }
 
@@ -70,6 +72,10 @@ Arguments parseArguments(int argc, char **argv)
         }
         if (option == "--input-feature-sorted") {
             arguments.inputFeatureSorted = true;
+            continue;
+        }
+        if (option == "--gex-multigene-umi-cr") {
+            arguments.gexMultiGeneUmiCr = true;
             continue;
         }
         if (index + 1 >= argc) {
@@ -549,6 +555,10 @@ int main(int argc, char **argv)
 {
     try {
         const Arguments arguments = parseArguments(argc, argv);
+        if (arguments.gexMultiGeneUmiCr && arguments.inputFeatureSorted) {
+            throw std::invalid_argument(
+                "--gex-multigene-umi-cr requires the global input mode so genes can be reconciled");
+        }
         if (arguments.inputFeatureSorted) {
             return runFeatureSorted(arguments);
         }
@@ -593,15 +603,34 @@ int main(int argc, char **argv)
 
         std::map<std::string, std::uint64_t> productCounts;
         std::map<std::string, double> occupancyMass;
+        std::map<std::string, molecule_first::GexReconciliationStats> reconciliation;
         for (const std::string &umiMode : {std::string("1mm_cr"), std::string("exact")}) {
+            molecule_first::GexReconciliationStats strictStats, hardStats, gatedStats, softStats;
             const std::vector<molecule_first::Molecule> strict =
-                molecule_first::policyMolecules(cliques, umiMode, "strict", calls);
+                arguments.gexMultiGeneUmiCr
+                ? molecule_first::gexPolicyMolecules(
+                    cliques, umiMode, "strict", calls, &strictStats)
+                : molecule_first::policyMolecules(cliques, umiMode, "strict", calls);
             const std::vector<molecule_first::Molecule> hard =
-                molecule_first::policyMolecules(cliques, umiMode, "hard", calls);
+                arguments.gexMultiGeneUmiCr
+                ? molecule_first::gexPolicyMolecules(
+                    cliques, umiMode, "hard", calls, &hardStats)
+                : molecule_first::policyMolecules(cliques, umiMode, "hard", calls);
             const std::vector<molecule_first::Molecule> gated =
-                molecule_first::policyMolecules(cliques, umiMode, "gated_hard", calls);
+                arguments.gexMultiGeneUmiCr
+                ? molecule_first::gexPolicyMolecules(
+                    cliques, umiMode, "gated_hard", calls, &gatedStats)
+                : molecule_first::policyMolecules(cliques, umiMode, "gated_hard", calls);
             const std::vector<molecule_first::Occupancy> soft =
-                molecule_first::weightedOccupancies(cliques, umiMode);
+                arguments.gexMultiGeneUmiCr
+                ? molecule_first::gexWeightedOccupancies(cliques, umiMode, &softStats)
+                : molecule_first::weightedOccupancies(cliques, umiMode);
+            if (arguments.gexMultiGeneUmiCr) {
+                reconciliation[umiMode + ".strict"] = strictStats;
+                reconciliation[umiMode + ".hard"] = hardStats;
+                reconciliation[umiMode + ".gated_hard"] = gatedStats;
+                reconciliation[umiMode + ".soft_expected"] = softStats;
+            }
             writeMolecules(strictTable, strict);
             writeMolecules(hardTable, hard);
             writeMolecules(gatedTable, gated);
@@ -621,6 +650,11 @@ int main(int argc, char **argv)
         configTable.stream() << std::setprecision(17)
             << "schema\tstar_suite.molecule_first.v1\n"
             << "star_suite_version\t" << STAR_SUITE_VERSION << '\n'
+            << "gex_multigene_umi_cr\t" << (arguments.gexMultiGeneUmiCr ? 1 : 0) << '\n'
+            << "soft_expected_semantics\t"
+            << (arguments.gexMultiGeneUmiCr
+                ? "candidate_weighted_expected_occupancy_then_multigene_reconciliation"
+                : "candidate_weighted_expected_occupancy") << '\n'
             << "temperature\t" << arguments.config.temperature << '\n'
             << "prior_alpha\t" << arguments.config.priorAlpha << '\n'
             << "prior_beta\t" << arguments.config.priorBeta << '\n'
@@ -655,6 +689,22 @@ int main(int argc, char **argv)
             summaryTable.stream() << entry.first << ".soft_occupancy_mass\t" << entry.second << '\n';
             summaryTable.stream() << entry.first << ".deduplicated_mass\t"
                                   << posteriorMass - entry.second << '\n';
+        }
+        for (const auto &entry : reconciliation) {
+            summaryTable.stream()
+                << entry.first << ".multigene_groups\t" << entry.second.groups << '\n'
+                << entry.first << ".multigene_accepted\t" << entry.second.accepted << '\n'
+                << entry.first << ".multigene_corrected_count_ties\t"
+                << entry.second.correctedCountTies << '\n'
+                << entry.first << ".multigene_original_umi_dominance_rejected\t"
+                << entry.second.originalUmiDominanceRejected << '\n';
+            if (entry.first.find("soft_expected") != std::string::npos) {
+                summaryTable.stream()
+                    << entry.first << ".multigene_input_expected_mass\t"
+                    << entry.second.inputExpectedMass << '\n'
+                    << entry.first << ".multigene_output_expected_mass\t"
+                    << entry.second.outputExpectedMass << '\n';
+            }
         }
 
         cliqueTable.commit();
