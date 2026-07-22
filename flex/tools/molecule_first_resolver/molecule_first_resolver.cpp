@@ -437,7 +437,7 @@ void processFeatureChunk(
             const molecule_first::UmiCorrections corrections =
                 molecule_first::correctedUmis(cliques, umiMode);
             const std::vector<molecule_first::Occupancy> occupancies =
-                molecule_first::gexWeightedOccupancies(cliques, umiMode, nullptr);
+                molecule_first::weightedOccupancies(cliques, umiMode);
             // MultiGeneUMI_CR compares each winning corrected-UMI support with
             // evidence that originated at that same UMI.  Accumulate those
             // values once per clique/candidate.  Scanning every clique again
