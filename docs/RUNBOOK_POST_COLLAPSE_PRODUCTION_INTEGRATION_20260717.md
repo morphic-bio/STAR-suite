@@ -90,6 +90,13 @@ sample tags. The adapter requires STAR provenance in the BAM header and uses
 raw barcode (`CR`), raw barcode quality (`CY`), raw UMI (`UR`), and feature
 (`GX` by default) only.
 
+**Scoped exception:** these `GX` and `UR` fields are raw evidence for ledger
+construction only. `GX` is an alignment-level feature annotation and `UR` is
+intentionally uncorrected; neither represents final STAR Suite compatibility
+processing or final counts. Do not use this adapter tag surface for paper or
+Cell Ranger parity comparisons. Compare the materialized policy MEX products
+or the canonical `GeneFull`/CR-compatible outputs instead.
+
 Exact whitelist observations remain single-candidate controls. Non-exact
 observations retain every one-substitution whitelist candidate. The exact-read
 count for a candidate is counted before deduplication and therefore retains
