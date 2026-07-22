@@ -93,4 +93,6 @@ semantics.
 
 The frozen clean-room implementation and validation procedure is
 `docs/RUNBOOK_VISIUM_HD_GEX_FEATURE_SIDECAR_20260722.md`; its executable driver
-is `scripts/run_visium_hd_gex_sidecar_100k.py`.
+is `scripts/run_visium_hd_gex_sidecar_100k.py`. The producer fork/join schedule,
+thread-budget contract, and serial/concurrent parity procedure are documented in
+`docs/RUNBOOK_VISIUM_HD_GEX_CONCURRENT_PRODUCERS_20260722.md`.

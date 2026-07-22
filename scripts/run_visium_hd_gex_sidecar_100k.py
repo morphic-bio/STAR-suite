@@ -7,10 +7,14 @@ import argparse
 import hashlib
 import json
 import os
+import signal
 import shutil
 import subprocess
 import sys
+import time
+from dataclasses import dataclass
 from pathlib import Path
+from typing import BinaryIO
 
 
 SUITE_ROOT = Path(__file__).resolve().parents[1]
@@ -39,6 +43,49 @@ DEFAULT_OUTPUT = Path(
 PROHIBITED_RUN_TREE = Path("/mnt/pikachu/star-spatial/runs")
 
 
+def producer_thread_budgets(
+    total: int,
+    mode: str,
+    r1_threads: int | None,
+    star_threads: int | None,
+) -> tuple[int, int]:
+    if total < 1:
+        raise ValueError("total thread budget must be positive")
+    if mode not in {"serial", "concurrent"}:
+        raise ValueError(f"invalid producer mode: {mode}")
+    for label, value in (("R1", r1_threads), ("STAR", star_threads)):
+        if value is not None and value < 1:
+            raise ValueError(f"{label} thread budget must be positive")
+
+    if mode == "serial":
+        resolved_r1 = total if r1_threads is None else r1_threads
+        resolved_star = total if star_threads is None else star_threads
+        if resolved_r1 > total or resolved_star > total:
+            raise ValueError("a serial producer thread budget exceeds --threads")
+        return resolved_r1, resolved_star
+
+    if total < 2:
+        raise ValueError("concurrent producer mode requires --threads >= 2")
+    if r1_threads is None and star_threads is None:
+        resolved_r1 = total // 2
+        resolved_star = total - resolved_r1
+    elif r1_threads is None:
+        assert star_threads is not None
+        resolved_star = star_threads
+        resolved_r1 = total - resolved_star
+    elif star_threads is None:
+        resolved_r1 = r1_threads
+        resolved_star = total - resolved_r1
+    else:
+        resolved_r1 = r1_threads
+        resolved_star = star_threads
+    if resolved_r1 < 1 or resolved_star < 1:
+        raise ValueError("concurrent R1 and STAR producers each require at least one thread")
+    if resolved_r1 + resolved_star > total:
+        raise ValueError("concurrent R1 + STAR thread budgets exceed --threads")
+    return resolved_r1, resolved_star
+
+
 def arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--fixture", type=Path, default=DEFAULT_FIXTURE)
@@ -48,11 +95,32 @@ def arguments() -> argparse.Namespace:
     parser.add_argument("--bc1-oligos", type=Path, default=DEFAULT_BC1)
     parser.add_argument("--bc2-oligos", type=Path, default=DEFAULT_BC2)
     parser.add_argument("--out-dir", type=Path, default=DEFAULT_OUTPUT)
-    parser.add_argument("--threads", type=int, default=16)
+    parser.add_argument(
+        "--threads", type=int, default=16,
+        help="total build/downstream thread budget and concurrent producer cap",
+    )
+    parser.add_argument(
+        "--producer-mode", choices=("concurrent", "serial"), default="concurrent",
+        help="run R1 decode/H0 and STAR sidecar as concurrent branches or serial controls",
+    )
+    parser.add_argument(
+        "--r1-threads", type=int,
+        help="R1 decoder threads (default: half of --threads concurrently, all serially)",
+    )
+    parser.add_argument(
+        "--star-threads", type=int,
+        help="STAR threads (default: remaining --threads concurrently, all serially)",
+    )
     parser.add_argument("--sort-memory-mb", type=int, default=2048)
     result = parser.parse_args()
     if result.threads < 1 or result.sort_memory_mb < 1:
         parser.error("thread and sort-memory values must be positive")
+    try:
+        result.r1_threads, result.star_threads = producer_thread_budgets(
+            result.threads, result.producer_mode, result.r1_threads, result.star_threads
+        )
+    except ValueError as error:
+        parser.error(str(error))
     return result
 
 
@@ -86,6 +154,17 @@ def git_identity(root: Path) -> dict[str, object]:
     }
 
 
+@dataclass
+class RunningCommand:
+    label: str
+    process: subprocess.Popen[bytes]
+    stdout: BinaryIO
+    stderr: BinaryIO
+    record: dict[str, object]
+    started: float
+    finished: bool = False
+
+
 class Driver:
     def __init__(self, out_dir: Path) -> None:
         self.out_dir = out_dir
@@ -99,25 +178,138 @@ class Driver:
         )
         temporary.replace(self.out_dir / "commands.json")
 
-    def run(self, label: str, command: list[str], cwd: Path | None = None) -> None:
+    def start(
+        self, label: str, command: list[str], cwd: Path | None = None
+    ) -> RunningCommand:
         record = {
             "label": label,
             "argv": command,
             "cwd": None if cwd is None else str(cwd.resolve()),
+            "state": "running",
+            "started_unix_seconds": round(time.time(), 6),
         }
         self.commands.append(record)
         self.save_commands()
-        with (
-            (self.logs / f"{label}.stdout.log").open("wb") as stdout,
-            (self.logs / f"{label}.stderr.log").open("wb") as stderr,
-        ):
-            completed = subprocess.run(command, cwd=cwd, stdout=stdout, stderr=stderr)
-        record["exit_code"] = completed.returncode
-        self.save_commands()
-        if completed.returncode:
-            raise RuntimeError(
-                f"{label} failed with exit code {completed.returncode}; see {self.logs}"
+        stdout = (self.logs / f"{label}.stdout.log").open("wb")
+        stderr = (self.logs / f"{label}.stderr.log").open("wb")
+        try:
+            process = subprocess.Popen(
+                command,
+                cwd=cwd,
+                stdout=stdout,
+                stderr=stderr,
+                start_new_session=True,
             )
+        except BaseException as error:
+            stdout.close()
+            stderr.close()
+            record["state"] = "launch_failed"
+            record["launch_error"] = str(error)
+            self.save_commands()
+            raise
+        return RunningCommand(label, process, stdout, stderr, record, time.monotonic())
+
+    def _finish(self, running: RunningCommand, returncode: int) -> int:
+        if running.finished:
+            return int(running.record["exit_code"])
+        running.stdout.close()
+        running.stderr.close()
+        running.record["exit_code"] = returncode
+        running.record["finished_unix_seconds"] = round(time.time(), 6)
+        running.record["wall_seconds"] = round(time.monotonic() - running.started, 6)
+        if running.record.get("terminated_by_driver"):
+            running.record["state"] = "terminated"
+        else:
+            running.record["state"] = "complete" if returncode == 0 else "failed"
+        running.finished = True
+        self.save_commands()
+        return returncode
+
+    def poll(self, running: RunningCommand) -> int | None:
+        if running.finished:
+            return int(running.record["exit_code"])
+        returncode = running.process.poll()
+        if returncode is None:
+            return None
+        return self._finish(running, returncode)
+
+    def stop(self, running: RunningCommand) -> None:
+        if self.poll(running) is not None:
+            return
+        running.record["terminated_by_driver"] = True
+        try:
+            os.killpg(running.process.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        try:
+            returncode = running.process.wait(timeout=2.0)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(running.process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            returncode = running.process.wait()
+        self._finish(running, returncode)
+
+    def ensure_success(self, running: RunningCommand, returncode: int) -> None:
+        if returncode:
+            raise RuntimeError(
+                f"{running.label} failed with exit code {returncode}; see {self.logs}"
+            )
+
+    def run(self, label: str, command: list[str], cwd: Path | None = None) -> None:
+        running = self.start(label, command, cwd)
+        try:
+            while True:
+                returncode = self.poll(running)
+                if returncode is not None:
+                    self.ensure_success(running, returncode)
+                    return
+                time.sleep(0.05)
+        except BaseException:
+            self.stop(running)
+            raise
+
+
+def run_producer_stages(
+    driver: Driver,
+    mode: str,
+    decoder_command: list[str],
+    h0_command: list[str],
+    star_command: list[str],
+) -> float:
+    started = time.monotonic()
+    if mode == "serial":
+        driver.run("r1_decode", decoder_command)
+        driver.run("h0_prior", h0_command)
+        driver.run("star_sidecar", star_command)
+        return time.monotonic() - started
+    if mode != "concurrent":
+        raise ValueError(f"invalid producer mode: {mode}")
+
+    running: dict[str, RunningCommand] = {}
+    completed: set[str] = set()
+    try:
+        running["r1_decode"] = driver.start("r1_decode", decoder_command)
+        running["star_sidecar"] = driver.start("star_sidecar", star_command)
+        while completed != {"r1_decode", "h0_prior", "star_sidecar"}:
+            for label, command in list(running.items()):
+                if label in completed:
+                    continue
+                returncode = driver.poll(command)
+                if returncode is None:
+                    continue
+                driver.ensure_success(command, returncode)
+                completed.add(label)
+                if label == "r1_decode":
+                    running["h0_prior"] = driver.start("h0_prior", h0_command)
+            if completed != {"r1_decode", "h0_prior", "star_sidecar"}:
+                time.sleep(0.05)
+    except BaseException:
+        for command in running.values():
+            driver.stop(command)
+        raise
+    return time.monotonic() - started
 
 
 def require_sources(args: argparse.Namespace) -> tuple[list[Path], list[Path]]:
@@ -289,27 +481,23 @@ def main() -> int:
             "--out", str(decode_reads), "--candidate-preserving-out", str(candidate_path),
             "--oligo-mutation-stats-out", str(oligo_stats), "--direct-tiered-h2-decode",
             "--full-start-min", "8", "--full-start-max", "12", "--grid-rows", "3350",
-            "--grid-cols", "3350", "--threads", str(args.threads),
+            "--grid-cols", "3350", "--threads", str(args.r1_threads),
             "--progress-log-every-batches", "1",
         )
     )
-    driver.run("r1_decode", decoder_command)
 
     h0_prior = args.out_dir / "decoder/h0_read_prior.tsv"
     h0_summary = args.out_dir / "decoder/h0_read_prior_summary.json"
-    driver.run(
-        "h0_prior",
-        [
-            sys.executable,
-            str(args.companion_root / "scripts/build_hd_h0_read_prior_from_oligo_stats.py"),
-            "--oligo-stats", str(oligo_stats), "--out-tsv", str(h0_prior),
-            "--summary-json", str(h0_summary),
-        ],
-    )
+    h0_command = [
+        sys.executable,
+        str(args.companion_root / "scripts/build_hd_h0_read_prior_from_oligo_stats.py"),
+        "--oligo-stats", str(oligo_stats), "--out-tsv", str(h0_prior),
+        "--summary-json", str(h0_summary),
+    ]
 
     sidecar_prefix = args.out_dir / "star/gex_features"
     star_command = [
-        str(args.out_dir / "bin/STAR"), "--runThreadN", str(args.threads),
+        str(args.out_dir / "bin/STAR"), "--runThreadN", str(args.star_threads),
         "--genomeDir", str(args.genome_dir), "--readFilesIn",
         ",".join(map(str, r2)), ",".join(map(str, r1)), "--readFilesCommand", "zcat",
         "--outFileNamePrefix", str(args.out_dir / "star/") ,
@@ -324,7 +512,13 @@ def main() -> int:
     prohibited_tokens = {"GX", "GN", "UR", "UB", "CB", "CR", "SAM", "BAM"}
     if any(token in prohibited_tokens for token in star_command):
         raise AssertionError("rendered STAR command contains a prohibited tag or output token")
-    driver.run("star_sidecar", star_command)
+    producer_wall_seconds = run_producer_stages(
+        driver,
+        args.producer_mode,
+        decoder_command,
+        h0_command,
+        star_command,
+    )
 
     normalized = args.out_dir / "join/normalized_evidence.tsv"
     join_summary = args.out_dir / "join/summary.json"
@@ -416,6 +610,13 @@ def main() -> int:
         "status": "complete",
         "fixture": identity(args.fixture / "summary.json"),
         "source_provenance": source_provenance,
+        "producer_execution": {
+            "mode": args.producer_mode,
+            "total_thread_budget": args.threads,
+            "r1_threads": args.r1_threads,
+            "star_threads": args.star_threads,
+            "wall_seconds": round(producer_wall_seconds, 6),
+        },
         "counts": {
             "read_pairs": 100000,
             "sidecar_records": sidecar_summary["total_reads"],
@@ -427,6 +628,11 @@ def main() -> int:
         },
         "invariants": {
             "fixture_checksums_passed": True,
+            "producer_join_barrier_complete": True,
+            "concurrent_thread_budget_respected": (
+                args.producer_mode != "concurrent"
+                or args.r1_threads + args.star_threads <= args.threads
+            ),
             "lane_order_and_name_digests_match": True,
             "raw_umi_from_r1": True,
             "coordinate_contract_validated": True,
