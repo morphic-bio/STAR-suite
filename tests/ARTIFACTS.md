@@ -159,6 +159,7 @@ update this file with its output location.
 - `/tmp/star_suite_production_module_regression_*` (manifest-driven production-module regression wrapper logs, per-case stdout/stderr, and preflight/run summaries)
 - `/mnt/pikachu/star-spatial/gex_sidecar_tests/20260722_ovarian_100k_v1/` (preserved first source-only Visium HD ovarian 3-prime 100K attempt; all computational stages completed, but the wrapper correctly withheld its completion marker because the initial validator did not skip the materializer summary metadata preamble)
 - `/mnt/pikachu/star-spatial/gex_sidecar_tests/20260722_ovarian_100k_v2/` (authoritative completed source-only Visium HD ovarian 3-prime 100K run for the modern post-rescue GeneFull sidecar, raw-R1 candidate join, candidate-specific `MultiGeneUMI_CR`, and 2/8/16-micrometer policy matrices; no historical run artifact was copied into it)
+- `/mnt/pikachu/star-spatial/gex_sidecar_tests/20260722_ovarian_100k_v2_space_ranger_sanity/` (read-only descriptive comparison of the completed source-only 100K policy matrices against the published full ovarian Space Ranger 4.0.1 raw binned H5 artifacts; never consumed as resolution evidence or a tuning target)
 - `/tmp/ucsf_cr_config_1m_smoke_*` (real UCSF perturb CR-config fixture smoke outputs)
 - `/tmp/ucsf_batch_cr_multifeature_tiny_*` (synthetic UCSF perturb multifeature CR-config tiny smoke outputs)
 - `/tmp/flex_cr_config_smoke_*` (Flex CR-config smoke outputs)

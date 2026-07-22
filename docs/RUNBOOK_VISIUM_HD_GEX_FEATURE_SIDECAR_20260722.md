@@ -56,10 +56,11 @@ Permitted primary inputs are only:
 - committed source files from the two development worktrees at recorded
   commits.
 
-Hard prohibitions:
+Hard prohibitions for computational inputs:
 
 - Do not inspect, copy, link, or consume any existing file below
-  `/mnt/pikachu/star-spatial/runs/`.
+  `/mnt/pikachu/star-spatial/runs/`, except the published outputs of a matching
+  Space Ranger run used read-only after all internal gates pass.
 - Do not reuse any old STAR output, ordered SAM, BAM, GX/UR ledger, candidate
   shard, H0 prior, resolved directory, matrix, summary, or completion marker.
 - Do not use existing binaries under either development worktree. Rebuild from
@@ -69,12 +70,11 @@ Hard prohibitions:
 - Do not use Space Ranger assignments, corrected barcodes, corrected UMIs,
   molecule definitions, or cell/bin calls as computational evidence.
 
-The extant Space Ranger run is permitted only as a final, read-only sanity
-comparison after every source-only invariant passes. Its path and checksum
-must be recorded before use. It must not supply candidates, priors, genes,
-UMIs, filtering decisions, expected counts, or tuning targets. If its location
-is under the prohibited `/mnt/pikachu/star-spatial/runs/` tree, stop and obtain
-an explicit exception or an allowed copy before reading it.
+Space Ranger artifacts are explicitly exempt from the historical-run-tree
+prohibition, but only for a final, read-only sanity comparison after every
+source-only invariant passes. Their paths and checksums must be recorded
+before use. They must not supply candidates, priors, genes, UMIs, filtering
+decisions, expected counts, tuning targets, or any other computational input.
 
 ## Frozen source fixture
 
@@ -577,7 +577,7 @@ summaries may be proposed for version control after review.
 | Candidate join tests | `test_spatial_feature_sidecar_join` including lane permutation/raw-UMI rejection | passed |
 | Shared MultiGeneUMI_CR tests | core helper plus GEX resolver correction/tie/original-dominance cases | passed |
 | Source-only 100K run | authoritative `_v2` root | passed; all 14 child commands exited zero |
-| Space Ranger sanity check | comparator outside prohibited run tree | not run; no comparator was located outside that tree |
+| Space Ranger sanity check | published ovarian SR 4.0.1 raw binned H5 outputs | complete; descriptive only, 12 comparisons |
 
 ## Observed 100K accounting
 
@@ -602,6 +602,51 @@ For each policy, matrix mass is identical at 2, 8, and 16 micrometers. A
 second resolver invocation produced byte-identical strict, hard, and
 gated-hard molecule files. The sidecar binary SHA-256 is
 `92cfa8661128a217a5e409e5f214ae519033e2ef1421efb3355d22168e67ea0c`.
+
+## Space Ranger descriptive sanity comparison
+
+After every internal gate passed, the read-only comparator consumed only the
+published artifacts under:
+
+```text
+/mnt/pikachu/star-spatial/runs/20260721_human_ovarian_hd3prime_sr401_bam_v1/outs
+```
+
+The comparison used `metrics_summary.csv` and the 2-, 8-, and 16-micrometer
+`raw_feature_bc_matrix.h5` files. It did not read the older matched-audit,
+prior STAR outputs, Space Ranger BAM, molecule information, filtered matrices,
+or tissue calls. The source checksums are:
+
+```text
+cc81b5af2d3f0963cdbe94f5844db3ee37e518516ad4494f429618139194e707  metrics_summary.csv
+d1666b249f3e97da871e4663f9ed92bc59f6461e08eec3fd1ce128cd2940f1fd  square_002um/raw_feature_bc_matrix.h5
+edfb36f72d59c3cede0f7d66fa4108f11b5aefd1dc66bda370de6d9f885de157  square_008um/raw_feature_bc_matrix.h5
+d8acee1dbdcf76902fa5d74edde2ebc3a818e7eec142d9e547d394899750db38  square_016um/raw_feature_bc_matrix.h5
+```
+
+The full Space Ranger run contains 474,131,092 reads and 181,955,518 raw
+matrix UMIs. Against the 100K hard-policy product:
+
+- every one of the 10,389 observed feature IDs exists on the Space Ranger
+  feature axis;
+- gene-total raw Pearson is 0.927787, common-detected-gene Spearman is
+  0.788894, and 89 of the top 100 genes overlap;
+- 99.7936%, 99.9907%, and 99.9979% of occupied hard-policy bins are occupied
+  in Space Ranger at 2, 8, and 16 micrometers, respectively;
+- raw spatial-bin Pearson rises from 0.0667 at 2 micrometers to 0.2161 at 8
+  micrometers and 0.3866 at 16 micrometers.
+
+The low-resolution trend and near-total coordinate overlap are consistent
+with a very sparse 100K prefix compared with a 474-million-read full run. The
+comparison was not used to change a threshold, prior, policy, or implementation.
+The complete 12-row report is:
+
+```text
+/mnt/pikachu/star-spatial/gex_sidecar_tests/20260722_ovarian_100k_v2_space_ranger_sanity/summary.json
+```
+
+Its SHA-256 is
+`47d732b0500a42c8fc5905c1b9120160b6f002899232710a698f2845ff19a00e`.
 
 ## Commit plan
 
