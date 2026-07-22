@@ -2,18 +2,26 @@
 
 #include <cerrno>
 #include <cmath>
+#include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <deque>
 #include <dirent.h>
 #include <fstream>
+#include <functional>
+#include <future>
 #include <iomanip>
 #include <iostream>
 #include <map>
+#include <memory>
+#include <mutex>
 #include <set>
 #include <sstream>
 #include <stdexcept>
+#include <thread>
 #include <unordered_map>
+#include <vector>
 #include <sys/stat.h>
 #include <sys/types.h>
 
@@ -29,6 +37,7 @@ struct Arguments {
     bool inputFeatureSorted = false;
     bool gexMultiGeneUmiCr = false;
     bool gexProvisionalFeatureSorted = false;
+    std::size_t threads = 1;
     molecule_first::Config config;
 };
 
@@ -44,6 +53,7 @@ void usage(std::ostream &out)
         << "  --gate-min-posterior FLOAT   default 0.95\n"
         << "  --gate-min-margin FLOAT      default 0.90\n"
         << "  --input-feature-sorted       stream feature_id/read_id/candidate sorted input\n"
+        << "  --threads INTEGER            parallel feature workers; default 1\n"
         << "  --gex-multigene-umi-cr       reconcile genes after candidate-specific UMI correction\n"
         << "  --gex-provisional-feature-sorted\n"
         << "                               emit bounded per-gene supports for a later\n"
@@ -104,6 +114,13 @@ Arguments parseArguments(int argc, char **argv)
             arguments.config.gateMinPosterior = parseDouble(value, option);
         } else if (option == "--gate-min-margin") {
             arguments.config.gateMinMargin = parseDouble(value, option);
+        } else if (option == "--threads") {
+            std::size_t used = 0;
+            const unsigned long long parsed = std::stoull(value, &used);
+            if (used != value.size() || parsed == 0 || parsed > 256) {
+                throw std::invalid_argument("invalid worker count for --threads: " + value);
+            }
+            arguments.threads = static_cast<std::size_t>(parsed);
         } else {
             throw std::invalid_argument("unknown option: " + option);
         }
@@ -303,13 +320,14 @@ class AtomicTable {
     bool committed_ = false;
 };
 
-void writeMolecules(AtomicTable &table, const std::vector<molecule_first::Molecule> &molecules)
+void writeMolecules(std::ostream &output,
+                    const std::vector<molecule_first::Molecule> &molecules)
 {
     for (const molecule_first::Molecule &row : molecules) {
-        table.stream() << row.umiMode << '\t' << row.product << '\t' << row.moleculeId << '\t'
-                       << row.featureId << '\t' << row.correctedUmi << '\t' << row.candidate << '\t'
-                       << row.memberReadIds.size() << '\t' << join(row.memberReadIds, ';') << '\t'
-                       << join(row.readCliqueIds, ';') << '\n';
+        output << row.umiMode << '\t' << row.product << '\t' << row.moleculeId << '\t'
+               << row.featureId << '\t' << row.correctedUmi << '\t' << row.candidate << '\t'
+               << row.memberReadIds.size() << '\t' << join(row.memberReadIds, ';') << '\t'
+               << join(row.readCliqueIds, ';') << '\n';
     }
 }
 
@@ -324,17 +342,33 @@ struct StreamingSummary {
     std::map<std::string, double> occupancyMass;
 };
 
+void mergeSummary(StreamingSummary &destination, const StreamingSummary &source)
+{
+    destination.candidateRows += source.candidateRows;
+    destination.candidateReads += source.candidateReads;
+    destination.readCliques += source.readCliques;
+    destination.gatedAssigned += source.gatedAssigned;
+    destination.featureChunks += source.featureChunks;
+    destination.posteriorMass += source.posteriorMass;
+    for (const auto &entry : source.productCounts) {
+        destination.productCounts[entry.first] += entry.second;
+    }
+    for (const auto &entry : source.occupancyMass) {
+        destination.occupancyMass[entry.first] += entry.second;
+    }
+}
+
 void processFeatureChunk(
     const std::vector<molecule_first::CandidateRead> &reads,
     const molecule_first::PriorCounts &priorCounts,
     const Arguments &arguments,
-    AtomicTable &cliqueTable,
-    AtomicTable &auditTable,
-    AtomicTable &strictTable,
-    AtomicTable &hardTable,
-    AtomicTable &gatedTable,
-    AtomicTable &softTable,
-    AtomicTable *gexProvisionalTable,
+    std::ostream &cliqueOutput,
+    std::ostream &auditOutput,
+    std::ostream &strictOutput,
+    std::ostream &hardOutput,
+    std::ostream &gatedOutput,
+    std::ostream &softOutput,
+    std::ostream *gexProvisionalOutput,
     StreamingSummary &summary)
 {
     if (reads.empty()) {
@@ -351,7 +385,7 @@ void processFeatureChunk(
     for (const molecule_first::ReadClique &clique : cliques) {
         for (std::size_t index = 0; index < clique.candidates.size(); ++index) {
             summary.posteriorMass += clique.posterior[index];
-            cliqueTable.stream() << clique.cliqueId << '\t' << clique.featureId << '\t'
+            cliqueOutput << clique.cliqueId << '\t' << clique.featureId << '\t'
                 << clique.rawUmi << '\t' << clique.memberReadIds.size() << '\t'
                 << join(clique.memberReadIds, ';') << '\t' << clique.candidates[index] << '\t'
                 << clique.logLikelihoodSums[index] << '\t' << clique.logReadPriors[index] << '\t'
@@ -360,13 +394,13 @@ void processFeatureChunk(
     }
     for (const molecule_first::HardCall &call : calls) {
         summary.gatedAssigned += call.assigned ? 1 : 0;
-        auditTable.stream() << call.cliqueId << '\t' << (call.assigned ? "assigned" : "deferred")
+        auditOutput << call.cliqueId << '\t' << (call.assigned ? "assigned" : "deferred")
             << '\t' << call.candidate << '\t' << call.posterior << '\t' << call.margin
             << '\t' << call.reason << '\n';
     }
 
     for (const std::string &umiMode : {std::string("1mm_cr"), std::string("exact")}) {
-        if (gexProvisionalTable != nullptr) {
+        if (gexProvisionalOutput != nullptr) {
             std::map<std::string, const molecule_first::ReadClique *> cliqueById;
             for (const molecule_first::ReadClique &clique : cliques) {
                 cliqueById[clique.cliqueId] = &clique;
@@ -389,7 +423,7 @@ void processFeatureChunk(
                             originalAtCorrected += found->second->memberReadIds.size();
                         }
                     }
-                    gexProvisionalTable->stream()
+                    *gexProvisionalOutput
                         << row.umiMode << '\t' << row.product << '\t'
                         << row.candidate << '\t' << row.correctedUmi << '\t'
                         << row.featureId << '\t' << row.memberReadIds.size() << '\t'
@@ -432,7 +466,7 @@ void processFeatureChunk(
                     ? 1.0 : found->second;
                 const double originalExpected = 1.0 - absent;
                 summary.occupancyMass[umiMode] += row.expectedCount;
-                gexProvisionalTable->stream()
+                *gexProvisionalOutput
                     << row.umiMode << "\tsoft_expected\t" << row.candidate << '\t'
                     << row.correctedUmi << '\t' << row.featureId << "\t\t\t"
                     << row.expectedCount << '\t' << originalExpected << "\t\t\t\t"
@@ -448,21 +482,126 @@ void processFeatureChunk(
             molecule_first::policyMolecules(cliques, umiMode, "gated_hard", calls);
         const std::vector<molecule_first::Occupancy> soft =
             molecule_first::weightedOccupancies(cliques, umiMode);
-        writeMolecules(strictTable, strict);
-        writeMolecules(hardTable, hard);
-        writeMolecules(gatedTable, gated);
+        writeMolecules(strictOutput, strict);
+        writeMolecules(hardOutput, hard);
+        writeMolecules(gatedOutput, gated);
         summary.productCounts[umiMode + ".strict"] += strict.size();
         summary.productCounts[umiMode + ".hard"] += hard.size();
         summary.productCounts[umiMode + ".gated_hard"] += gated.size();
         summary.productCounts[umiMode + ".soft_rows"] += soft.size();
         for (const molecule_first::Occupancy &row : soft) {
             summary.occupancyMass[umiMode] += row.expectedCount;
-            softTable.stream() << row.umiMode << '\t' << row.featureId << '\t'
+            softOutput << row.umiMode << '\t' << row.featureId << '\t'
                 << row.correctedUmi << '\t' << row.candidate << '\t' << row.expectedCount
                 << '\t' << join(row.readCliqueIds, ';') << '\n';
         }
     }
 }
+
+struct FeatureResult {
+    std::string cliques;
+    std::string audit;
+    std::string strict;
+    std::string hard;
+    std::string gated;
+    std::string soft;
+    std::string gexProvisional;
+    StreamingSummary summary;
+};
+
+FeatureResult computeFeatureChunk(
+    const std::shared_ptr<std::vector<molecule_first::CandidateRead> > &reads,
+    const std::shared_ptr<molecule_first::PriorCounts> &priorCounts,
+    const Arguments &arguments)
+{
+    std::ostringstream cliques;
+    std::ostringstream audit;
+    std::ostringstream strict;
+    std::ostringstream hard;
+    std::ostringstream gated;
+    std::ostringstream soft;
+    std::ostringstream gexProvisional;
+    cliques << std::setprecision(17);
+    audit << std::setprecision(17);
+    soft << std::setprecision(17);
+    gexProvisional << std::setprecision(17);
+    FeatureResult result;
+    processFeatureChunk(
+        *reads, *priorCounts, arguments, cliques, audit, strict, hard, gated, soft,
+        arguments.gexProvisionalFeatureSorted ? &gexProvisional : nullptr,
+        result.summary);
+    result.cliques = cliques.str();
+    result.audit = audit.str();
+    result.strict = strict.str();
+    result.hard = hard.str();
+    result.gated = gated.str();
+    result.soft = soft.str();
+    result.gexProvisional = gexProvisional.str();
+    return result;
+}
+
+class FeatureThreadPool {
+  public:
+    explicit FeatureThreadPool(std::size_t workers)
+    {
+        for (std::size_t index = 0; index < workers; ++index) {
+            workers_.push_back(std::thread([this]() { workerLoop(); }));
+        }
+    }
+
+    ~FeatureThreadPool()
+    {
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            stopping_ = true;
+            tasks_.clear();
+        }
+        ready_.notify_all();
+        for (std::thread &worker : workers_) {
+            worker.join();
+        }
+    }
+
+    std::future<FeatureResult> submit(const std::function<FeatureResult()> &function)
+    {
+        const std::shared_ptr<std::packaged_task<FeatureResult()> > task(
+            new std::packaged_task<FeatureResult()>(function));
+        std::future<FeatureResult> future = task->get_future();
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (stopping_) {
+                throw std::runtime_error("cannot submit to a stopped feature thread pool");
+            }
+            tasks_.push_back([task]() { (*task)(); });
+        }
+        ready_.notify_one();
+        return future;
+    }
+
+  private:
+    void workerLoop()
+    {
+        for (;;) {
+            std::function<void()> task;
+            {
+                std::unique_lock<std::mutex> lock(mutex_);
+                ready_.wait(lock, [this]() { return stopping_ || !tasks_.empty(); });
+                if (stopping_ && tasks_.empty()) {
+                    return;
+                }
+                task = tasks_.front();
+                tasks_.pop_front();
+            }
+            task();
+        }
+    }
+
+    std::vector<std::thread> workers_;
+    std::deque<std::function<void()> > tasks_;
+    std::mutex mutex_;
+    std::condition_variable ready_;
+    bool stopping_ = false;
+};
 
 int runFeatureSorted(const Arguments &arguments)
 {
@@ -512,6 +651,27 @@ int runFeatureSorted(const Arguments &arguments)
     std::string currentFeature;
     std::string previousReadId;
     std::uint64_t lineNumber = 1;
+    std::unique_ptr<FeatureThreadPool> threadPool;
+    std::deque<std::future<FeatureResult> > pendingResults;
+    if (arguments.threads > 1) {
+        threadPool.reset(new FeatureThreadPool(arguments.threads));
+    }
+
+    auto writeFeatureResult = [&](const FeatureResult &result) {
+        cliqueTable.stream() << result.cliques;
+        auditTable.stream() << result.audit;
+        strictTable.stream() << result.strict;
+        hardTable.stream() << result.hard;
+        gatedTable.stream() << result.gated;
+        softTable.stream() << result.soft;
+        gexProvisionalTable.stream() << result.gexProvisional;
+        mergeSummary(summary, result.summary);
+    };
+    auto drainOneResult = [&]() {
+        FeatureResult result = pendingResults.front().get();
+        pendingResults.pop_front();
+        writeFeatureResult(result);
+    };
 
     auto flushRead = [&]() {
         if (!currentRead.readId.empty()) {
@@ -522,13 +682,33 @@ int runFeatureSorted(const Arguments &arguments)
     };
     auto flushFeature = [&]() {
         flushRead();
-        processFeatureChunk(
-            featureReads, featurePriorCounts, arguments,
-            cliqueTable, auditTable, strictTable, hardTable, gatedTable, softTable,
-            arguments.gexProvisionalFeatureSorted ? &gexProvisionalTable : nullptr,
-            summary);
-        featureReads.clear();
-        featurePriorCounts.clear();
+        if (featureReads.empty()) {
+            return;
+        }
+        if (threadPool.get() == nullptr) {
+            processFeatureChunk(
+                featureReads, featurePriorCounts, arguments,
+                cliqueTable.stream(), auditTable.stream(), strictTable.stream(),
+                hardTable.stream(), gatedTable.stream(), softTable.stream(),
+                arguments.gexProvisionalFeatureSorted
+                    ? &gexProvisionalTable.stream() : nullptr,
+                summary);
+            featureReads.clear();
+            featurePriorCounts.clear();
+        } else {
+            const std::shared_ptr<std::vector<molecule_first::CandidateRead> > reads(
+                new std::vector<molecule_first::CandidateRead>());
+            const std::shared_ptr<molecule_first::PriorCounts> priorCounts(
+                new molecule_first::PriorCounts());
+            reads->swap(featureReads);
+            priorCounts->swap(featurePriorCounts);
+            pendingResults.push_back(threadPool->submit(
+                std::bind(computeFeatureChunk, reads, priorCounts, std::cref(arguments))));
+            const std::size_t maxPending = arguments.threads * 4;
+            if (pendingResults.size() >= maxPending) {
+                drainOneResult();
+            }
+        }
         previousReadId.clear();
     };
 
@@ -590,6 +770,9 @@ int runFeatureSorted(const Arguments &arguments)
         ++summary.candidateRows;
     }
     flushFeature();
+    while (!pendingResults.empty()) {
+        drainOneResult();
+    }
     if (summary.candidateReads == 0) {
         throw std::runtime_error("input contains no candidate reads");
     }
@@ -600,6 +783,7 @@ int runFeatureSorted(const Arguments &arguments)
         << "star_suite_version\t" << STAR_SUITE_VERSION << '\n'
         << "execution_mode\tfeature_sorted_streaming\n"
         << "input_order\tfeature_id_read_id_candidate\n"
+        << "feature_threads\t" << arguments.threads << '\n'
         << "gex_reconciliation_stage\t"
         << (arguments.gexProvisionalFeatureSorted ? "provisional" : "disabled") << '\n'
         << "temperature\t" << arguments.config.temperature << '\n'
@@ -658,6 +842,10 @@ int main(int argc, char **argv)
         if (arguments.gexProvisionalFeatureSorted && arguments.gexMultiGeneUmiCr) {
             throw std::invalid_argument(
                 "provisional and in-memory GEX reconciliation modes are mutually exclusive");
+        }
+        if (arguments.threads > 1 && !arguments.inputFeatureSorted) {
+            throw std::invalid_argument(
+                "--threads greater than one requires --input-feature-sorted");
         }
         if (arguments.inputFeatureSorted) {
             return runFeatureSorted(arguments);
@@ -731,9 +919,9 @@ int main(int argc, char **argv)
                 reconciliation[umiMode + ".gated_hard"] = gatedStats;
                 reconciliation[umiMode + ".soft_expected"] = softStats;
             }
-            writeMolecules(strictTable, strict);
-            writeMolecules(hardTable, hard);
-            writeMolecules(gatedTable, gated);
+            writeMolecules(strictTable.stream(), strict);
+            writeMolecules(hardTable.stream(), hard);
+            writeMolecules(gatedTable.stream(), gated);
             productCounts[umiMode + ".strict"] = strict.size();
             productCounts[umiMode + ".hard"] = hard.size();
             productCounts[umiMode + ".gated_hard"] = gated.size();

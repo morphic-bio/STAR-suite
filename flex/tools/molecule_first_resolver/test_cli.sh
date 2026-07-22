@@ -29,6 +29,28 @@ done
 grep -q $'^execution_mode\tfeature_sorted_streaming$' \
   "$tmp/out-streaming/resolved_config.tsv"
 
+cat >"$tmp/parallel.tsv" <<'EOF'
+read_id	feature_id	raw_umi	candidate	log_sequence_likelihood	exact_read_count
+r1	geneA	AAAA	A	0	8
+r2	geneB	AAAT	B	0	7
+r3	geneC	AATT	C	0	6
+EOF
+"$resolver" --input "$tmp/parallel.tsv" --input-feature-sorted \
+  --out-dir "$tmp/out-serial-features"
+"$resolver" --input "$tmp/parallel.tsv" --input-feature-sorted --threads 3 \
+  --out-dir "$tmp/out-parallel-features"
+for table in read_cliques.tsv hard_call_audit.tsv strict_molecules.tsv \
+  hard_molecules.tsv gated_hard_molecules.tsv soft_expected_molecules.tsv; do
+  cmp "$tmp/out-serial-features/$table" "$tmp/out-parallel-features/$table"
+done
+grep -q $'^feature_threads\t3$' "$tmp/out-parallel-features/resolved_config.tsv"
+
+if "$resolver" --input "$tmp/parallel.tsv" --threads 2 \
+  --out-dir "$tmp/out-invalid-threads" 2>/dev/null; then
+  echo "parallel global input mode unexpectedly accepted" >&2
+  exit 1
+fi
+
 expected='gated_hard_molecules.tsv
 hard_call_audit.tsv
 hard_molecules.tsv
