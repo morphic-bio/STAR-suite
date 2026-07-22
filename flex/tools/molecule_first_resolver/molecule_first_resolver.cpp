@@ -28,6 +28,7 @@ struct Arguments {
     std::string outDir;
     bool inputFeatureSorted = false;
     bool gexMultiGeneUmiCr = false;
+    bool gexProvisionalFeatureSorted = false;
     molecule_first::Config config;
 };
 
@@ -44,6 +45,9 @@ void usage(std::ostream &out)
         << "  --gate-min-margin FLOAT      default 0.90\n"
         << "  --input-feature-sorted       stream feature_id/read_id/candidate sorted input\n"
         << "  --gex-multigene-umi-cr       reconcile genes after candidate-specific UMI correction\n"
+        << "  --gex-provisional-feature-sorted\n"
+        << "                               emit bounded per-gene supports for a later\n"
+        << "                               candidate/corrected-UMI reconciliation pass\n"
         << "  --version\n";
 }
 
@@ -76,6 +80,10 @@ Arguments parseArguments(int argc, char **argv)
         }
         if (option == "--gex-multigene-umi-cr") {
             arguments.gexMultiGeneUmiCr = true;
+            continue;
+        }
+        if (option == "--gex-provisional-feature-sorted") {
+            arguments.gexProvisionalFeatureSorted = true;
             continue;
         }
         if (index + 1 >= argc) {
@@ -326,6 +334,7 @@ void processFeatureChunk(
     AtomicTable &hardTable,
     AtomicTable &gatedTable,
     AtomicTable &softTable,
+    AtomicTable *gexProvisionalTable,
     StreamingSummary &summary)
 {
     if (reads.empty()) {
@@ -357,6 +366,71 @@ void processFeatureChunk(
     }
 
     for (const std::string &umiMode : {std::string("1mm_cr"), std::string("exact")}) {
+        if (gexProvisionalTable != nullptr) {
+            std::map<std::string, const molecule_first::ReadClique *> cliqueById;
+            for (const molecule_first::ReadClique &clique : cliques) {
+                cliqueById[clique.cliqueId] = &clique;
+            }
+            for (const std::string &product : {
+                    std::string("strict"), std::string("hard"),
+                    std::string("gated_hard")}) {
+                const std::vector<molecule_first::Molecule> molecules =
+                    molecule_first::gexPolicyMolecules(
+                        cliques, umiMode, product, calls, nullptr);
+                summary.productCounts[umiMode + "." + product] += molecules.size();
+                for (const molecule_first::Molecule &row : molecules) {
+                    std::uint64_t originalAtCorrected = 0;
+                    for (const std::string &cliqueId : row.readCliqueIds) {
+                        const auto found = cliqueById.find(cliqueId);
+                        if (found == cliqueById.end()) {
+                            throw std::logic_error("provisional molecule lost a read clique");
+                        }
+                        if (found->second->rawUmi == row.correctedUmi) {
+                            originalAtCorrected += found->second->memberReadIds.size();
+                        }
+                    }
+                    gexProvisionalTable->stream()
+                        << row.umiMode << '\t' << row.product << '\t'
+                        << row.candidate << '\t' << row.correctedUmi << '\t'
+                        << row.featureId << '\t' << row.memberReadIds.size() << '\t'
+                        << originalAtCorrected << "\t\t\t"
+                        << row.moleculeId << '\t' << row.memberReadIds.size() << '\t'
+                        << join(row.memberReadIds, ';') << '\t'
+                        << join(row.readCliqueIds, ';') << '\n';
+                }
+            }
+
+            const molecule_first::UmiCorrections corrections =
+                molecule_first::correctedUmis(cliques, umiMode);
+            const std::vector<molecule_first::Occupancy> occupancies =
+                molecule_first::gexWeightedOccupancies(cliques, umiMode, nullptr);
+            summary.productCounts[umiMode + ".soft_rows"] += occupancies.size();
+            for (const molecule_first::Occupancy &row : occupancies) {
+                double absent = 1.0;
+                for (const molecule_first::ReadClique &clique : cliques) {
+                    if (clique.featureId != row.featureId
+                        || clique.rawUmi != row.correctedUmi) {
+                        continue;
+                    }
+                    for (std::size_t index = 0; index < clique.candidates.size(); ++index) {
+                        if (clique.candidates[index] == row.candidate
+                            && corrections.at(std::make_tuple(
+                                clique.featureId, row.candidate, clique.rawUmi))
+                                == row.correctedUmi) {
+                            absent *= 1.0 - clique.posterior[index];
+                        }
+                    }
+                }
+                const double originalExpected = 1.0 - absent;
+                summary.occupancyMass[umiMode] += row.expectedCount;
+                gexProvisionalTable->stream()
+                    << row.umiMode << "\tsoft_expected\t" << row.candidate << '\t'
+                    << row.correctedUmi << '\t' << row.featureId << "\t\t\t"
+                    << row.expectedCount << '\t' << originalExpected << "\t\t\t\t"
+                    << join(row.readCliqueIds, ';') << '\n';
+            }
+            continue;
+        }
         const std::vector<molecule_first::Molecule> strict =
             molecule_first::policyMolecules(cliques, umiMode, "strict", calls);
         const std::vector<molecule_first::Molecule> hard =
@@ -411,9 +485,14 @@ int runFeatureSorted(const Arguments &arguments)
     AtomicTable gatedTable(arguments.outDir, "gated_hard_molecules.tsv", moleculeHeader);
     AtomicTable softTable(arguments.outDir, "soft_expected_molecules.tsv",
         "umi_mode\tfeature_id\tcorrected_umi\tcandidate\texpected_count\tread_clique_ids");
+    AtomicTable gexProvisionalTable(arguments.outDir, "gex_provisional_support.tsv",
+        "umi_mode\tproduct\tcandidate\tcorrected_umi\tfeature_id\tcorrected_count\t"
+        "original_at_corrected_count\texpected_count\toriginal_expected_count\t"
+        "molecule_id\tmember_read_count\tmember_read_ids\tread_clique_ids");
     cliqueTable.stream() << std::setprecision(17);
     auditTable.stream() << std::setprecision(17);
     softTable.stream() << std::setprecision(17);
+    gexProvisionalTable.stream() << std::setprecision(17);
 
     StreamingSummary summary;
     std::unordered_map<std::string, std::uint64_t> globalPriorCounts;
@@ -437,6 +516,7 @@ int runFeatureSorted(const Arguments &arguments)
         processFeatureChunk(
             featureReads, featurePriorCounts, arguments,
             cliqueTable, auditTable, strictTable, hardTable, gatedTable, softTable,
+            arguments.gexProvisionalFeatureSorted ? &gexProvisionalTable : nullptr,
             summary);
         featureReads.clear();
         featurePriorCounts.clear();
@@ -511,6 +591,8 @@ int runFeatureSorted(const Arguments &arguments)
         << "star_suite_version\t" << STAR_SUITE_VERSION << '\n'
         << "execution_mode\tfeature_sorted_streaming\n"
         << "input_order\tfeature_id_read_id_candidate\n"
+        << "gex_reconciliation_stage\t"
+        << (arguments.gexProvisionalFeatureSorted ? "provisional" : "disabled") << '\n'
         << "temperature\t" << arguments.config.temperature << '\n'
         << "prior_alpha\t" << arguments.config.priorAlpha << '\n'
         << "prior_beta\t" << arguments.config.priorBeta << '\n'
@@ -544,6 +626,7 @@ int runFeatureSorted(const Arguments &arguments)
     hardTable.commit();
     gatedTable.commit();
     softTable.commit();
+    gexProvisionalTable.commit();
     configTable.commit();
     summaryTable.commit();
     return 0;
@@ -558,6 +641,14 @@ int main(int argc, char **argv)
         if (arguments.gexMultiGeneUmiCr && arguments.inputFeatureSorted) {
             throw std::invalid_argument(
                 "--gex-multigene-umi-cr requires the global input mode so genes can be reconciled");
+        }
+        if (arguments.gexProvisionalFeatureSorted && !arguments.inputFeatureSorted) {
+            throw std::invalid_argument(
+                "--gex-provisional-feature-sorted requires --input-feature-sorted");
+        }
+        if (arguments.gexProvisionalFeatureSorted && arguments.gexMultiGeneUmiCr) {
+            throw std::invalid_argument(
+                "provisional and in-memory GEX reconciliation modes are mutually exclusive");
         }
         if (arguments.inputFeatureSorted) {
             return runFeatureSorted(arguments);
