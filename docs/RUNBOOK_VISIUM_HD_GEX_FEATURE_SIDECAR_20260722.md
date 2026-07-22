@@ -3,7 +3,8 @@
 Date: 2026-07-22  
 Branch: `feature/visium-hd-gex-sidecar-20260722`  
 Base commit: `a996107e271c013e39f9398151deda0017da35d6`  
-Companion processing source: `visium-hd-processing` commit `7b581c8`  
+Companion processing base: `visium-hd-processing` commit `7b581c8`
+Validated source commits: STAR Suite `6138683`; companion `f313e1f`
 Fixture: human ovarian Visium HD 3-prime, deterministic 100K paired-read prefix
 
 ## Objective
@@ -511,33 +512,45 @@ Do not run another benchmark concurrently. Use wrapper-written completion
 artifacts as authoritative; do not infer completion from `pgrep`, `Log.out`,
 or partial matrices.
 
-## Fresh output root
+## Fresh output roots
 
-Created empty on 2026-07-22:
+The first attempt used:
 
 ```text
 /mnt/pikachu/star-spatial/gex_sidecar_tests/20260722_ovarian_100k_v1
 ```
 
-This path is outside the prohibited historical run tree. Do not reuse it after
-a failed or partial integration run. Preserve the failed directory for audit
-and create a new versioned sibling such as `_v2` for the next attempt.
+It completed every computational stage, but the initial wrapper validator did
+not account for the materializer summary's key/value metadata preamble. It
+therefore correctly withheld `RUN_COMPLETE.json`. The directory is preserved
+unchanged for audit and was not reused.
 
-Planned layout:
+The authoritative clean rerun used:
 
 ```text
-source_manifest/
+/mnt/pikachu/star-spatial/gex_sidecar_tests/20260722_ovarian_100k_v2
+```
+
+Both paths are outside the prohibited historical run tree. No output from
+`_v1`, any older STAR/Solo run, or Space Ranger was used by `_v2`.
+
+Observed authoritative layout:
+
+```text
 bin/
+decoder/
 star/
-  GeneFull.read_evidence.bin
-  GeneFull.read_evidence.features.tsv
-  GeneFull.read_evidence.summary.json
-r1_candidates/
-joined_shards/
-resolved/
-policy_mex_1mm_cr/
+  gex_features.bin
+  gex_features.features.tsv
+  gex_features.read_name_digests.tsv
+  gex_features.summary.json
+join/
+resolver_a/
+resolver_b/
+materialized/
 logs/
 commands.json
+source_provenance.json
 RUN_COMPLETE.json
 ```
 
@@ -554,14 +567,41 @@ summaries may be proposed for version control after review.
 | Frozen fixture checksum | `(cd "$FIXTURE" && sha256sum -c checksums.sha256)` | passed, 9/9 |
 | Fixture shape | four lanes x 25,000 pairs; R1 43 nt; R2 75 nt | verified from frozen summary |
 | Barcode contract | 11,222,500 coordinates; 596,300 ambiguous raw-28 keys | verified from contract summary |
-| Fresh output root | `/mnt/pikachu/star-spatial/gex_sidecar_tests/20260722_ovarian_100k_v1` | created empty |
+| First output root | `.../20260722_ovarian_100k_v1` | preserved; validation-only failure, no completion marker |
+| Authoritative output root | `.../20260722_ovarian_100k_v2` | complete; `RUN_COMPLETE.json` SHA-256 `99f072c1...10d8` |
 | Runbook committed before implementation | commit `68fb69e` | complete |
+| STAR Suite implementation | commits `c337525`, `6138683` | clean source recorded by wrapper |
+| Companion ordinal decoder | commit `f313e1f` | clean source recorded by wrapper |
 | Clean STAR build | command above | passed after implementation; warnings only |
-| Sidecar unit tests | `make -C core/legacy/source test_SpatialFeatureSidecar` | passed before clean-build gate |
-| Candidate join tests | `test_spatial_feature_sidecar_join` including lane permutation/raw-UMI rejection | passed before clean-build gate |
-| Shared MultiGeneUMI_CR tests | core helper plus GEX resolver correction/tie/original-dominance cases | passed before clean-build gate |
-| Source-only 100K run | fresh output root | not run |
-| Space Ranger sanity check | comparator path/checksum to record after internal gates | not run |
+| Sidecar unit tests | `make -C core/legacy/source test_SpatialFeatureSidecar` | passed |
+| Candidate join tests | `test_spatial_feature_sidecar_join` including lane permutation/raw-UMI rejection | passed |
+| Shared MultiGeneUMI_CR tests | core helper plus GEX resolver correction/tie/original-dominance cases | passed |
+| Source-only 100K run | authoritative `_v2` root | passed; all 14 child commands exited zero |
+| Space Ranger sanity check | comparator outside prohibited run tree | not run; no comparator was located outside that tree |
+
+## Observed 100K accounting
+
+The authoritative wrapper completion marker reports:
+
+- 100,000 paired reads and 100,000 finalized 8-byte sidecar records;
+- four lane boundaries of exactly 25,000 reads, ordinals 0 through 99,999;
+- 89,156 reads with one or more spatial candidates and 111,744 candidate rows;
+- 85,888 reads with unique modern GeneFull evidence;
+- 3,036 reads rejected as multi-gene, 4,579 mapped reads with no gene, and
+  6,497 unmapped or filtered reads;
+- 78,393 normalized eligible reads and 98,196 normalized candidate rows;
+- 72,385 read cliques;
+- 58,817 strict, 72,338 hard, and 63,558 gated-hard 1MM-CR molecules;
+- soft expected mass 72,337.903007344867 after four equal-support GEX groups
+  were rejected;
+- one equal-support group rejected in the hard product and no
+  original-UMI-dominance rejections;
+- 10,389 observed features and all 12 requested policy/scale matrices.
+
+For each policy, matrix mass is identical at 2, 8, and 16 micrometers. A
+second resolver invocation produced byte-identical strict, hard, and
+gated-hard molecule files. The sidecar binary SHA-256 is
+`92cfa8661128a217a5e409e5f214ae519033e2ef1421efb3355d22168e67ea0c`.
 
 ## Commit plan
 
