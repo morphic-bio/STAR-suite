@@ -6,6 +6,7 @@
 namespace {
 constexpr char kMagic[8] = {'S','L','A','M','D','U','M','P'};
 constexpr char kWeightMagic[8] = {'S','L','A','M','W','G','T','1'};
+constexpr uint32_t kDumpVersionWithAllowedGenes = 2;
 constexpr uint32_t kWeightModeMask = 0x3;
 constexpr uint32_t kWeightFlagKeyed = 1u << 0;
 constexpr uint32_t kWeightFlagOrdered = 1u << 1;
@@ -107,8 +108,24 @@ bool readDumpHeader(std::ifstream& in, SlamDumpMetadata* meta, std::streampos* r
 
     meta->geneIds.clear();
     meta->geneNames.clear();
+    meta->allowedGenes.clear();
     meta->chrNames.clear();
     meta->chrStart.clear();
+
+    if (version >= kDumpVersionWithAllowedGenes) {
+        uint32_t nAllowed = 0;
+        if (!in.read(reinterpret_cast<char*>(&nAllowed), sizeof(nAllowed))) {
+            if (err) *err = "Failed to read allowed gene count";
+            return false;
+        }
+        meta->allowedGenes.resize(nAllowed);
+        if (nAllowed > 0 &&
+            !in.read(reinterpret_cast<char*>(meta->allowedGenes.data()), nAllowed * sizeof(uint8_t))) {
+            if (err) *err = "Failed to read allowed gene mask";
+            return false;
+        }
+    }
+
     meta->geneIds.reserve(nGenes);
     meta->geneNames.reserve(nGenes);
     for (uint32_t i = 0; i < nGenes; ++i) {
@@ -340,9 +357,13 @@ bool writeSlamDump(const std::string& path,
     // Header
     out.write(kMagic, sizeof(kMagic));
     uint32_t version = meta.version;
+    if (!meta.allowedGenes.empty() && version < kDumpVersionWithAllowedGenes) {
+        version = kDumpVersionWithAllowedGenes;
+    }
     uint32_t flags = meta.weightMode & kWeightModeMask;
     uint32_t nGenes = static_cast<uint32_t>(meta.geneIds.size());
     uint32_t nChrom = static_cast<uint32_t>(meta.chrNames.size());
+    uint32_t nAllowed = static_cast<uint32_t>(meta.allowedGenes.size());
     uint64_t nReads = 0;
     out.write(reinterpret_cast<const char*>(&version), sizeof(version));
     out.write(reinterpret_cast<const char*>(&flags), sizeof(flags));
@@ -353,6 +374,12 @@ bool writeSlamDump(const std::string& path,
     out.write(reinterpret_cast<const char*>(&nReads), sizeof(nReads));
     out.write(reinterpret_cast<const char*>(&meta.errorRate), sizeof(meta.errorRate));
     out.write(reinterpret_cast<const char*>(&meta.convRate), sizeof(meta.convRate));
+    if (version >= kDumpVersionWithAllowedGenes) {
+        out.write(reinterpret_cast<const char*>(&nAllowed), sizeof(nAllowed));
+        if (nAllowed > 0) {
+            out.write(reinterpret_cast<const char*>(meta.allowedGenes.data()), nAllowed * sizeof(uint8_t));
+        }
+    }
 
     // Gene metadata
     for (size_t i = 0; i < meta.geneIds.size(); ++i) {
@@ -429,8 +456,22 @@ bool readSlamDump(const std::string& path,
 
     meta->geneIds.clear();
     meta->geneNames.clear();
+    meta->allowedGenes.clear();
     meta->chrNames.clear();
     meta->chrStart.clear();
+    if (version >= kDumpVersionWithAllowedGenes) {
+        uint32_t nAllowed = 0;
+        if (!in.read(reinterpret_cast<char*>(&nAllowed), sizeof(nAllowed))) {
+            if (err) *err = "Failed to read allowed gene count";
+            return false;
+        }
+        meta->allowedGenes.resize(nAllowed);
+        if (nAllowed > 0 &&
+            !in.read(reinterpret_cast<char*>(meta->allowedGenes.data()), nAllowed * sizeof(uint8_t))) {
+            if (err) *err = "Failed to read allowed gene mask";
+            return false;
+        }
+    }
     meta->geneIds.reserve(nGenes);
     meta->geneNames.reserve(nGenes);
     for (uint32_t i = 0; i < nGenes; ++i) {
@@ -614,9 +655,13 @@ bool mergeSlamDumpParts(const std::string& path,
     }
 
     uint32_t version = meta.version;
+    if (!meta.allowedGenes.empty() && version < kDumpVersionWithAllowedGenes) {
+        version = kDumpVersionWithAllowedGenes;
+    }
     uint32_t flags = meta.weightMode & kWeightModeMask;
     uint32_t nGenes = static_cast<uint32_t>(meta.geneIds.size());
     uint32_t nChrom = static_cast<uint32_t>(meta.chrNames.size());
+    uint32_t nAllowed = static_cast<uint32_t>(meta.allowedGenes.size());
     uint64_t nReads = 0;
     for (const auto& part : parts) {
         nReads += part.nReads;
@@ -630,6 +675,12 @@ bool mergeSlamDumpParts(const std::string& path,
     out.write(reinterpret_cast<const char*>(&nReads), sizeof(nReads));
     out.write(reinterpret_cast<const char*>(&meta.errorRate), sizeof(meta.errorRate));
     out.write(reinterpret_cast<const char*>(&meta.convRate), sizeof(meta.convRate));
+    if (version >= kDumpVersionWithAllowedGenes) {
+        out.write(reinterpret_cast<const char*>(&nAllowed), sizeof(nAllowed));
+        if (nAllowed > 0) {
+            out.write(reinterpret_cast<const char*>(meta.allowedGenes.data()), nAllowed * sizeof(uint8_t));
+        }
+    }
 
     for (size_t i = 0; i < meta.geneIds.size(); ++i) {
         writeString(out, meta.geneIds[i]);

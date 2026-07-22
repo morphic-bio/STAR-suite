@@ -11,6 +11,13 @@ struct ReadInfoRecord;
 
 typedef void (*SinkFinalizeFn)(SoloFeature&);
 
+/** Compact row stored in CountingSink buckets (no readId/status; counting-only). */
+struct CountingSinkRow {
+    uint32_t featureId;
+    uint32_t umi;
+    uint32_t readRef; // readIndex, or low bits of readId when readIndex absent
+};
+
 class ISoloReadInfoSink {
 public:
     virtual ~ISoloReadInfoSink() = default;
@@ -26,8 +33,11 @@ public:
 
 class CountingSink : public ISoloReadInfoSink {
 public:
-    std::vector<std::vector<ReadInfoRecord>> perWL; // buffered per-WL CB records
-    std::unordered_map<uint32_t, uint32_t> readToCb; // per-run conflict guard
+    // Observed whitelist CB buckets only (not perWL[cbWLsize]).
+    std::unordered_map<uint32_t, std::vector<CountingSinkRow>> buckets;
+    std::unordered_map<uint32_t, uint32_t> readToCb; // optional conflict guard (debug)
+    uint64_t totalRecords = 0;
+
     void onRecord(SoloFeature &feature, const ReadInfoRecord &rec) override;
     void finalize(SoloFeature &feature) override;
 };

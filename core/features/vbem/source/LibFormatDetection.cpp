@@ -10,7 +10,7 @@ LibFormatDetector::LibFormatDetector(int window_size)
     : window_size_(window_size), total_votes_(0) {
 }
 
-void LibFormatDetector::vote(const Transcript* tr) {
+void LibFormatDetector::vote(const Transcript* tr, uint32_t read1_len, uint32_t read2_len) {
     // Check if this is a proper PE pair first
     if (tr->readNmates != 2) return;
     
@@ -31,7 +31,7 @@ void LibFormatDetector::vote(const Transcript* tr) {
         return;
     }
     
-    LibraryFormat fmt = observeFormatFromTranscript(tr);
+    LibraryFormat fmt = observeFormatFromTranscript(tr, read1_len, read2_len);
     uint8_t fmt_id = fmt.typeId();
     format_votes_[fmt_id]++;
     total_votes_++;
@@ -70,7 +70,8 @@ LibraryFormat LibFormatDetector::finalizeOrFail(std::ostream& logStream) {
     const int same_unstranded = voteCount(LibraryFormat(ReadType::PAIRED_END, ReadOrientation::SAME, ReadStrandedness::U));
     const int same_total = same_forward + same_reverse + same_unstranded;
 
-    // Find winner and check for ambiguity
+    // Find exact-format winner for diagnostics. The selected auto type below
+    // follows Salmon's aggregate orientation/strandedness thresholds.
     uint8_t winner_id = 0;
     int max_votes = 0, second_votes = 0;
     
@@ -84,19 +85,42 @@ LibraryFormat LibFormatDetector::finalizeOrFail(std::ostream& logStream) {
         }
     }
     
-    LibraryFormat detected_fmt = LibraryFormat::formatFromID(winner_id);
-    if (inward_total >= outward_total && inward_total >= same_total && inward_total > 0) {
-        const int inward_stranded_max = std::max(inward_forward, inward_reverse);
-        const double inward_stranded_frac =
-            static_cast<double>(inward_stranded_max) / static_cast<double>(inward_total);
-        if (inward_stranded_frac < 0.85) {
-            detected_fmt = LibraryFormat::IU();
+    LibraryFormat detected_fmt = LibraryFormat::IU();
+    const int orientation_total = inward_total + outward_total + same_total;
+    const int stranded_forward =
+        inward_forward + outward_forward +
+        voteCount(LibraryFormat(ReadType::PAIRED_END, ReadOrientation::SAME, ReadStrandedness::S));
+    const int stranded_reverse =
+        inward_reverse + outward_reverse +
+        voteCount(LibraryFormat(ReadType::PAIRED_END, ReadOrientation::SAME, ReadStrandedness::A));
+    const int stranded_total = stranded_forward + stranded_reverse;
+
+    ReadOrientation detected_orientation = ReadOrientation::TOWARD;
+    bool detected_same = false;
+    if (orientation_total > 0) {
+        if (inward_total >= outward_total && inward_total >= same_total) {
+            detected_orientation = ReadOrientation::TOWARD;
+        } else if (outward_total >= inward_total && outward_total >= same_total) {
+            detected_orientation = ReadOrientation::AWAY;
         } else {
-            detected_fmt = inward_forward >= inward_reverse
-                ? LibraryFormat::ISF()
-                : LibraryFormat::ISR();
+            detected_orientation = ReadOrientation::SAME;
+            detected_same = true;
         }
     }
+
+    ReadStrandedness detected_strand = ReadStrandedness::U;
+    if (stranded_total > 0) {
+        const double ratio_fw =
+            static_cast<double>(stranded_forward) / static_cast<double>(stranded_total);
+        if (ratio_fw < 0.3) {
+            detected_strand = detected_same ? ReadStrandedness::A : ReadStrandedness::AS;
+        } else if (ratio_fw < 0.7) {
+            detected_strand = ReadStrandedness::U;
+        } else {
+            detected_strand = detected_same ? ReadStrandedness::S : ReadStrandedness::SA;
+        }
+    }
+    detected_fmt = LibraryFormat(ReadType::PAIRED_END, detected_orientation, detected_strand);
 
     // formatName() is defined in the same module (LibFormatDetection.cpp)
     int unknown_votes = 0;
@@ -115,16 +139,6 @@ LibraryFormat LibFormatDetector::finalizeOrFail(std::ostream& logStream) {
     const double winner_frac = static_cast<double>(max_votes) / static_cast<double>(total_votes_);
     const double unknown_frac = static_cast<double>(unknown_votes) / static_cast<double>(total_votes_);
     LibraryFormat winner_fmt = LibraryFormat::formatFromID(winner_id);
-    if (second_votes > 0 &&
-        (double)second_votes / max_votes > 0.9 &&
-        !(detected_fmt == LibraryFormat::IU())) {
-        logStream << "\n"
-            << "EXITING because of FATAL ERROR: Library format auto-detection ambiguous.\n"
-            << "Top format: " << max_votes << " votes, "
-            << "second: " << second_votes << " votes (within 10%).\n"
-            << "SOLUTION: Specify library type explicitly with --quantVBLibType\n\n";
-        exit(1);  // EXIT BEFORE RETURNING
-    }
     if (winner_frac < 0.85) {
         logStream << "WARNING: Auto-detect winner is weak (" << max_votes << "/"
                   << total_votes_ << " = " << winner_frac << ").\n";
@@ -143,19 +157,20 @@ LibraryFormat LibFormatDetector::finalizeOrFail(std::ostream& logStream) {
     if (!(detected_fmt == winner_fmt)) {
         logStream << "Auto-detect collapsed exact-format votes to "
                   << formatName(detected_fmt)
-                  << " based on inward orientation dominance (ISF="
-                  << inward_forward << ", ISR=" << inward_reverse << ").\n";
+                  << " using Salmon aggregate orientation/strandedness thresholds.\n";
     }
 
     return detected_fmt;
 }
 
-LibraryFormat LibFormatDetector::observeFormatFromTranscript(const Transcript* tr) {
+LibraryFormat LibFormatDetector::observeFormatFromTranscript(const Transcript* tr,
+                                                             uint32_t read1_len,
+                                                             uint32_t read2_len) {
     TranscriptPairGeometry geometry;
     if (!deriveTranscriptPairGeometry(tr, geometry)) {
         return LibraryFormat::IU();
     }
-    return observeFormatFromGeometry(geometry);
+    return observeFormatFromGeometry(geometry, read1_len, read2_len);
 }
 
 std::string formatName(const LibraryFormat& fmt) {
@@ -225,13 +240,10 @@ bool deriveTranscriptPairGeometry(const Transcript* tr, TranscriptPairGeometry& 
     geometry.read2_right = right[1];
     geometry.read1_leftmost = geometry.read1_left <= geometry.read2_left;
 
-    if (geometry.read1_leftmost) {
-        geometry.read1_forward = (tr->Str == 0);
-        geometry.read2_forward = !geometry.read1_forward;
-    } else {
-        geometry.read2_forward = (tr->Str == 0);
-        geometry.read1_forward = !geometry.read2_forward;
-    }
+    // Match STAR's transcriptome BAM emission: alignBAM marks a segment as
+    // forward when its internal mate label equals tr->Str.
+    geometry.read1_forward = (0 == tr->Str);
+    geometry.read2_forward = (1 == tr->Str);
 
     geometry.read1_fiveprime = geometry.read1_forward
         ? geometry.read1_left
@@ -243,15 +255,16 @@ bool deriveTranscriptPairGeometry(const Transcript* tr, TranscriptPairGeometry& 
     return true;
 }
 
-LibraryFormat observeFormatFromGeometry(const TranscriptPairGeometry& geometry) {
+LibraryFormat observeFormatFromGeometry(const TranscriptPairGeometry& geometry,
+                                        uint32_t read1_len,
+                                        uint32_t read2_len) {
     if (!geometry.valid) {
         return LibraryFormat::IU();
     }
-    return hitType(
-        geometry.read1_fiveprime,
-        geometry.read1_forward,
-        geometry.read2_fiveprime,
-        geometry.read2_forward);
+    (void)read1_len;
+    (void)read2_len;
+    return hitType(geometry.read1_left, geometry.read1_forward,
+                   geometry.read2_left, geometry.read2_forward);
 }
 
 // Determine library format from paired-end read positions and orientations
@@ -287,6 +300,33 @@ LibraryFormat hitType(int32_t end1Start, bool end1Fwd, int32_t end2Start, bool e
     return LibraryFormat::IU();
 }
 
+LibraryFormat hitType(int32_t end1Start, bool end1Fwd, uint32_t len1,
+                      int32_t end2Start, bool end2Fwd, uint32_t len2,
+                      bool canDovetail) {
+    if (end1Fwd != end2Fwd) {
+        if (end1Fwd) {
+            int32_t stretch = canDovetail ? static_cast<int32_t>(len2) : 0;
+            if (end1Start <= end2Start + stretch) {
+                return LibraryFormat(ReadType::PAIRED_END, ReadOrientation::TOWARD, ReadStrandedness::SA);
+            }
+            return LibraryFormat(ReadType::PAIRED_END, ReadOrientation::AWAY, ReadStrandedness::SA);
+        }
+        if (end2Fwd) {
+            int32_t stretch = canDovetail ? static_cast<int32_t>(len1) : 0;
+            if (end2Start <= end1Start + stretch) {
+                return LibraryFormat(ReadType::PAIRED_END, ReadOrientation::TOWARD, ReadStrandedness::AS);
+            }
+            return LibraryFormat(ReadType::PAIRED_END, ReadOrientation::AWAY, ReadStrandedness::AS);
+        }
+    } else {
+        if (end1Fwd) {
+            return LibraryFormat(ReadType::PAIRED_END, ReadOrientation::SAME, ReadStrandedness::S);
+        }
+        return LibraryFormat(ReadType::PAIRED_END, ReadOrientation::SAME, ReadStrandedness::A);
+    }
+    return LibraryFormat::IU();
+}
+
 LibraryFormat parseLibFormat(const std::string& s) {
     std::string upper = s;
     for (auto& c : upper) c = std::toupper(c);
@@ -294,6 +334,12 @@ LibraryFormat parseLibFormat(const std::string& s) {
     if (upper == "IU") return LibraryFormat::IU();
     if (upper == "ISF") return LibraryFormat::ISF();
     if (upper == "ISR") return LibraryFormat::ISR();
+    if (upper == "OU") return LibraryFormat(ReadType::PAIRED_END, ReadOrientation::AWAY, ReadStrandedness::U);
+    if (upper == "OSF") return LibraryFormat(ReadType::PAIRED_END, ReadOrientation::AWAY, ReadStrandedness::SA);
+    if (upper == "OSR") return LibraryFormat(ReadType::PAIRED_END, ReadOrientation::AWAY, ReadStrandedness::AS);
+    if (upper == "MU") return LibraryFormat(ReadType::PAIRED_END, ReadOrientation::SAME, ReadStrandedness::U);
+    if (upper == "MSF") return LibraryFormat(ReadType::PAIRED_END, ReadOrientation::SAME, ReadStrandedness::S);
+    if (upper == "MSR") return LibraryFormat(ReadType::PAIRED_END, ReadOrientation::SAME, ReadStrandedness::A);
     if (upper == "U") return LibraryFormat::U();
     
     // "A" should use auto-detect path, not parseLibFormat

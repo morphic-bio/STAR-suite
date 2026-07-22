@@ -20,6 +20,8 @@
 #include <stdint.h>
 #include <stddef.h>
 
+#include "pf_split_read.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -27,6 +29,33 @@ extern "C" {
 /* Opaque handles */
 typedef struct pf_config pf_config;
 typedef struct pf_context pf_context;
+typedef struct pf_record_stream pf_record_stream;
+typedef struct pf_direct_range_job pf_direct_range_job;
+
+typedef struct {
+    const char *data;
+    size_t length;
+} pf_sequence_view;
+
+/* In-memory read record for non-FASTQ input providers. */
+typedef struct {
+    const char *barcode_sequence;
+    const char *barcode_quality;
+    const char *feature_sequence;
+    const char *feature_quality;
+    const char *feature_sequence2;
+    const char *feature_quality2;
+} pf_read_record;
+
+/* Borrowed-span read record for native non-FASTQ providers. */
+typedef struct {
+    pf_sequence_view barcode_sequence;
+    pf_sequence_view barcode_quality;
+    pf_sequence_view feature_sequence;
+    pf_sequence_view feature_quality;
+    pf_sequence_view feature_sequence2;
+    pf_sequence_view feature_quality2;
+} pf_read_record_view;
 
 /* Optional permit hook API for external schedulers */
 typedef uint64_t (*pf_permit_acquire_fn)(void *hook_ctx);
@@ -134,6 +163,7 @@ void pf_config_set_max_barcode_n(pf_config *config, int max_n);
 void pf_config_set_threads(pf_config *config, int threads);
 void pf_config_set_search_threads(pf_config *config, int threads);
 void pf_config_set_consumer_threads(pf_config *config, int threads);
+void pf_config_set_read_buffer_lines(pf_config *config, int lines);
 void pf_config_set_permit_hooks(
     pf_config *config,
     pf_permit_acquire_fn acquire_cb,
@@ -156,6 +186,14 @@ void pf_config_set_feature_mode_bootstrap_reads(pf_config *config, int n_reads);
 void pf_config_set_use_hot_hash(pf_config *config, int enable);
 void pf_config_set_skip_heatmaps(pf_config *config, int enable);
 
+void pf_config_set_split_read_layout(pf_config *config, const pf_split_read_layout *layout);
+void pf_config_set_split_read_fastq_patterns(pf_config *config,
+                                             const char *r1_pattern,
+                                             const char *r2_pattern,
+                                             const char *r3_pattern);
+void pf_config_clear_split_read_layout(pf_config *config);
+const pf_split_read_layout *pf_config_get_split_read_layout(const pf_config *config);
+
 /* Prehash memory budget (0 = auto-detect from system memory) */
 void pf_config_set_prehash_memory_budget(pf_config *config, unsigned long long budget);
 
@@ -171,6 +209,18 @@ void pf_config_set_autodetect_chemistry_reads(pf_config *config, int n_reads);
 void pf_config_set_autodetect_chemistry_min_hits(pf_config *config, int min_hits);
 void pf_config_set_probe_only(pf_config *config, int enabled);
 void pf_config_set_skip_qc_outputs(pf_config *config, int enabled);
+
+/* ADT / protein MEX output (assignBarcodes --output-mode adt_mex) */
+void pf_config_set_adt_mex_output(pf_config *config, int enable);
+
+/* Hash / HTO / CMO demux (adt_mex extension) */
+void pf_config_set_hash_demux_mode(pf_config *config, int mode);
+void pf_config_set_hash_feature_selector(pf_config *config, const char *selector);
+void pf_config_set_hash_demux_method(pf_config *config, const char *method);
+void pf_config_set_library_feature_type(pf_config *config, const char *feature_type);
+void pf_config_set_hash_min_total(pf_config *config, int min_total);
+void pf_config_set_hash_min_top(pf_config *config, int min_top);
+void pf_config_set_hash_min_ratio(pf_config *config, double min_ratio);
 
 /**
  * Allow union (mixed NXT+TRU) whitelists and filtered barcode sets.
@@ -279,6 +329,12 @@ pf_error pf_process_fastq_dir(pf_context *ctx,
                                const char *output_dir,
                                pf_stats *stats_out);
 
+pf_error pf_process_split_fastq_dir(pf_context *ctx,
+                                    const char *fastq_dir,
+                                    const char *output_dir,
+                                    pf_stats *stats_out,
+                                    pf_split_read_metrics *metrics_out);
+
 /**
  * Process explicit FASTQ file lists.
  * @param ctx Context handle.
@@ -297,6 +353,100 @@ pf_error pf_process_fastqs(pf_context *ctx,
                             const char *output_dir,
                             const char *sample_name,
                             pf_stats *stats_out);
+
+/**
+ * Process in-memory barcode + feature records.
+ * This is the adapter surface for native non-FASTQ readers. Records are
+ * expected to provide barcode_sequence as CB+UMI and feature_sequence as the
+ * feature/protospacer read. feature_sequence2 is optional for dual-orientation
+ * feature libraries. All strings must be NUL-terminated for this initial API.
+ *
+ * @param ctx Context handle.
+ * @param records Array of input records.
+ * @param n_records Number of records in the array.
+ * @param output_dir Directory to write output files.
+ * @param sample_name Sample name for output subdirectory.
+ * @param stats_out Optional pointer to receive processing statistics.
+ * @return PF_OK on success, error code otherwise.
+ */
+pf_error pf_process_records(pf_context *ctx,
+                            const pf_read_record *records,
+                            size_t n_records,
+                            const char *output_dir,
+                            const char *sample_name,
+                            pf_stats *stats_out);
+
+/**
+ * Begin streaming in-memory barcode + feature records for one sample.
+ * The returned stream owns process_features sample state until
+ * pf_process_records_end() or pf_process_records_abort() is called.
+ */
+pf_error pf_process_records_begin(pf_context *ctx,
+                                  const char *output_dir,
+                                  const char *sample_name,
+                                  pf_record_stream **stream_out);
+
+/**
+ * Process a batch of NUL-terminated in-memory records through an open stream.
+ */
+pf_error pf_process_record_batch(pf_record_stream *stream,
+                                 const pf_read_record *records,
+                                 size_t n_records);
+
+/**
+ * Process a batch of borrowed-span records through an open stream.
+ * Required sequence spans must have non-NULL data. Missing quality spans are
+ * represented by data == NULL and are replaced with default qualities.
+ */
+pf_error pf_process_record_views(pf_record_stream *stream,
+                                 const pf_read_record_view *records,
+                                 size_t n_records);
+
+/**
+ * Begin direct worker-owned processing for externally range-partitioned input.
+ * Each caller thread must use a stable worker_id in [0, nworkers).
+ */
+pf_error pf_direct_range_begin(pf_context *ctx,
+                               const char *output_dir,
+                               const char *sample_name,
+                               int nworkers,
+                               int nreaders,
+                               pf_direct_range_job **job_out);
+
+/**
+ * Process borrowed-span records on one direct worker. Calls are thread-safe
+ * only when different threads use different worker_id values.
+ */
+pf_error pf_direct_range_process_record_views(pf_direct_range_job *job,
+                                              int worker_id,
+                                              const pf_read_record_view *records,
+                                              size_t n_records);
+
+/**
+ * Finish direct worker processing, merge worker-local counts, write outputs,
+ * destroy job state, and release the process_features runtime lock.
+ */
+pf_error pf_direct_range_end(pf_direct_range_job *job,
+                             pf_stats *stats_out);
+
+/**
+ * Abort direct worker processing without final outputs and release the
+ * process_features runtime lock.
+ */
+void pf_direct_range_abort(pf_direct_range_job *job);
+
+/**
+ * Finish a streaming in-memory sample, write outputs, destroy stream state,
+ * and release the process_features runtime lock.
+ */
+pf_error pf_process_records_end(pf_record_stream *stream,
+                                pf_stats *stats_out);
+
+/**
+ * Abort a streaming in-memory sample without writing final outputs and release
+ * the process_features runtime lock.
+ */
+void pf_process_records_abort(pf_record_stream *stream);
 
 /* ============================================================================
  * Output API

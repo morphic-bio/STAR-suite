@@ -90,6 +90,13 @@ int ReadAlign::oneRead() {//process one read: load, map, write
         return -1;
     };    
     
+    return oneReadLoaded(readStatus[0]);
+
+};
+
+int ReadAlign::oneReadLoaded(const int readStatus0) {
+    hasYAlignment_ = false;
+
     // Increment read counters BEFORE trimming (so dropped reads are counted)
     statsRA.readN++;
     statsRA.readBases += readLength[0] + (P.readNmates == 2 ? readLength[1] : 0);
@@ -337,7 +344,7 @@ int ReadAlign::oneRead() {//process one read: load, map, write
 
     } else {//1 mate
 
-        if (readStatus[0]==-1) {//finished with the stream
+        if (readStatus0==-1) {//finished with the stream
             return -1;
         };
 
@@ -347,7 +354,7 @@ int ReadAlign::oneRead() {//process one read: load, map, write
 
     };
       
-    readFileType=readStatus[0];
+    readFileType=readStatus0;
 
     hashScreenDecision_ = FlexHashScreenDecision();
     if (P.pSolo.hashScreenEnabled && soloRead != nullptr && soloRead->readBar != nullptr &&
@@ -452,6 +459,11 @@ int ReadAlign::oneRead() {//process one read: load, map, write
     return 0;
 
 };
+
+int ReadAlign::oneReadFromCbqView(const star::input::CbqReadView& view) {
+    const int readStatus = loadCbqReadView(view);
+    return oneReadLoaded(readStatus);
+}
 
 int ReadAlign::oneReadFromPacket(EnrichedPacket &pkt) {
     // Copy read data from packet into ReadAlign buffers

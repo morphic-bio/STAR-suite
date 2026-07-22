@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <condition_variable>
+#include <list>
 #include <mutex>
 #include <vector>
 
@@ -16,7 +17,8 @@ class ThreadControl {
 public:
     enum class PermitDomain : uint8_t {
         MAP = 0,
-        FEATURE = 1
+        FEATURE = 1,
+        ATAC = 2
     };
 
     struct PermitHookContext {
@@ -88,11 +90,37 @@ public:
         double cpuIdleEma;
         PermitDomainSnapshot mapDomain;
         PermitDomainSnapshot featureDomain;
+        PermitDomainSnapshot atacDomain;
     };
 
     void mapPermitConfigure(bool enabled, int totalThreads, int configuredPermits, bool telemetryEnabled, bool variableThreads);
     void mapPermitConfigureCpuAware(bool enabled, int sampleIntervalMs, double emaAlpha);
     void mapPermitConfigureRetunePlan(const std::vector<int> &permitSequence, int retuneEveryAcquires);
+    // Per-domain borrowable floors (Step 5a in
+    // multiomic-atac-scrna plans/2026-04-27-atac-permits-controller-followups.md
+    // v6). Each domain reserves at LEAST `floor` concurrent permits whenever
+    // it has waiters; surplus permits are fully shared. floors must be
+    // length mapPermitDomainCount, indexed by permitDomainIndex(domain).
+    // Pass all-zero floors (or skip configuring) to disable the floor-aware
+    // path and fall through to the legacy global-cv behavior.
+    void mapPermitConfigureDomainFloors(const std::vector<int> &floorsByDomainIndex);
+    // FIFO waiter-queue admission. When enabled, acquire takes a ticket
+    // if the pool is saturated OR the queue is non-empty; release grants
+    // the next permit to a queued waiter under the lock, eliminating the
+    // notify_one() wakeup-bypass race where fresh arrivals can win
+    // permits over already-queued waiters. New arrivals cannot fast-path
+    // past queued waiters.
+    //
+    // Composition with floors: when no floor is active the helper picks
+    // the queue head (strict FIFO across domains). When floors are active
+    // the helper instead scans the queue and grants the first waiter
+    // whose domain can be admitted (its in-use is below its floor, or no
+    // other domain has under-floor waiters). This preserves per-domain
+    // FIFO ordering while letting a tail waiter on an under-floor domain
+    // bypass an at-floor head.
+    //
+    // Disabled by default; opt-in via --dynamicThreadFifoWaiters 1.
+    void mapPermitConfigureFifoWaiters(bool enabled);
     void mapPermitSetTargetPermits(int targetPermits);
     bool mapPermitEnabled() const;
     bool mapPermitCpuMaybeSample();
@@ -109,7 +137,7 @@ public:
     };
 
 private:
-    static constexpr size_t mapPermitDomainCount = 2;
+    static constexpr size_t mapPermitDomainCount = 3;
     bool mapPermitEnabledFlag = false;
     bool mapPermitTelemetryEnabledFlag = false;
     bool mapPermitVariableThreadsEnabledFlag = false;
@@ -135,6 +163,35 @@ private:
     int mapPermitAvailable = 0;
     mutable std::mutex mapPermitMutex;
     std::condition_variable mapPermitCv;
+    // Per-domain borrowable-floor state. Active iff any element of
+    // mapPermitDomainFloor is > 0 (mapPermitFloorsActive). The floor-aware
+    // acquire/release path uses one CV per domain so release can wake the
+    // specific domain whose floor is unmet, eliminating the notify_one()
+    // wakeup-fairness pathology under contention.
+    bool mapPermitFloorsActive = false;
+    int mapPermitDomainFloor[mapPermitDomainCount]{};
+    int mapPermitDomainInUse[mapPermitDomainCount]{};
+    int mapPermitDomainWaiters[mapPermitDomainCount]{};
+    std::condition_variable mapPermitDomainCv[mapPermitDomainCount];
+
+    // FIFO waiter queue. When mapPermitFifoEnabled is true, acquire and
+    // release route through the queue under mapPermitMutex, eliminating
+    // the notify_one() wakeup-bypass race. Strict FIFO across domains
+    // when no floor is active; per-domain FIFO with floor-aware grant
+    // selection when any domain floor is set (see grantFifoWaitersLocked).
+    bool mapPermitFifoEnabled = false;
+    struct PermitWaiter {
+      std::condition_variable cv;
+      bool granted = false;
+      PermitDomain domain = PermitDomain::MAP;
+    };
+    std::list<PermitWaiter*> mapPermitWaitQueue;
+
+    // Drain the FIFO waiter queue while permits are available. Caller must
+    // hold mapPermitMutex. Each granted waiter is popped, marked granted=true,
+    // and appended to `toWake`; mapPermitAvailable is decremented per grant.
+    // Caller notifies the collected waiters' CVs after releasing the mutex.
+    void grantFifoWaitersLocked(std::vector<PermitWaiter*> &toWake);
 
     std::atomic<uint64_t> mapPermitAcquireCalls{0};
     std::atomic<uint64_t> mapPermitAcquireOrdinal{0};

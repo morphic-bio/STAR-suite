@@ -5,4 +5,6 @@ ThreadControl g_threadChunks;
 std::atomic<uint64_t> g_bamRecordIndex{0};
 SamtoolsSorter* g_samtoolsSorter = nullptr;
 SamtoolsSorter* g_unsortedTagBuffer = nullptr;  // For unsorted BAM CB/UB tag injection (noSort mode)
-
+const std::vector<std::string>* g_bamHeaderChrNames = nullptr;
+const std::vector<uint>* g_bamHeaderChrLengths = nullptr;
+star::input::CbqYNoYOrderedWriter* g_cbqYNoYWriter = nullptr;

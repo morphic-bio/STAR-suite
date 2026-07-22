@@ -20,86 +20,148 @@ bool SlamVarianceAnalyzer::recordRead() {
 }
 
 void SlamVarianceAnalyzer::recordPosition(uint32_t readPos, uint8_t qual, bool isT, bool isTc) {
+    if (separateMateHistograms_) {
+        return;
+    }
     // Gate on readsAnalyzed_ <= maxReads_ (allow Nth read's positions)
     if (maxReads_ > 0 && readsAnalyzed_ > maxReads_) {
         return; // Stop collecting positions
     }
-    
-    auto& stats = positionStats_[readPos];
+
+    auto& stats = positionCombined_[readPos];
     stats.readCount++;
-    
-    // Record quality statistics
+
     double q = static_cast<double>(qual);
     stats.qualSum += q;
     stats.qualCount++;
     stats.qualSumSq += q * q;
-    
-    // Record T→C statistics
+
     if (isT) {
         stats.tCount++;
         if (isTc) {
             stats.tcCount++;
         }
-        // Track per-T-base T→C indicator (0 or 1) for variance calculation
         double tcRate = isTc ? 1.0 : 0.0;
         stats.tcRateSum += tcRate;
-        stats.tcRateSumSq += tcRate * tcRate;  // For variance: sum of squares
+        stats.tcRateSumSq += tcRate * tcRate;
+        stats.tcRateCount++;
+    }
+}
+
+void SlamVarianceAnalyzer::recordPositionMate(uint32_t mateLocalPos, uint8_t mateIndex, uint8_t qual,
+                                            bool isT, bool isTc) {
+    if (!separateMateHistograms_) {
+        return;
+    }
+    if (mateIndex > 1) {
+        mateIndex = 1;
+    }
+    if (maxReads_ > 0 && readsAnalyzed_ > maxReads_) {
+        return;
+    }
+    auto& stats = positionMate_[mateIndex][mateLocalPos];
+    stats.readCount++;
+
+    double q = static_cast<double>(qual);
+    stats.qualSum += q;
+    stats.qualCount++;
+    stats.qualSumSq += q * q;
+
+    if (isT) {
+        stats.tCount++;
+        if (isTc) {
+            stats.tcCount++;
+        }
+        double tcRate = isTc ? 1.0 : 0.0;
+        stats.tcRateSum += tcRate;
+        stats.tcRateSumSq += tcRate * tcRate;
         stats.tcRateCount++;
     }
 }
 
 void SlamVarianceAnalyzer::reset() {
-    positionStats_.clear();
+    positionCombined_.clear();
+    positionMate_[0].clear();
+    positionMate_[1].clear();
     readsAnalyzed_ = 0;
 }
 
 void SlamVarianceAnalyzer::merge(const SlamVarianceAnalyzer& other) {
-    // Merge read count (sum across threads, but cap at maxReads_)
-    readsAnalyzed_ = std::min(readsAnalyzed_ + other.readsAnalyzed_, 
+    readsAnalyzed_ = std::min(readsAnalyzed_ + other.readsAnalyzed_,
                               static_cast<uint64_t>(maxReads_ > 0 ? maxReads_ : UINT64_MAX));
-    
-    // Merge position stats
-    for (const auto& kv : other.positionStats_) {
-        auto& stats = positionStats_[kv.first];
-        const auto& otherStats = kv.second;
-        
-        stats.readCount += otherStats.readCount;
-        stats.tCount += otherStats.tCount;
-        stats.tcCount += otherStats.tcCount;
-        stats.qualSum += otherStats.qualSum;
-        stats.qualCount += otherStats.qualCount;
-        stats.qualSumSq += otherStats.qualSumSq;
-        stats.tcRateSum += otherStats.tcRateSum;
-        stats.tcRateSumSq += otherStats.tcRateSumSq;
-        stats.tcRateCount += otherStats.tcRateCount;
+
+    auto mergeMap = [](std::unordered_map<uint32_t, SlamPositionVarianceStats>& dst,
+                       const std::unordered_map<uint32_t, SlamPositionVarianceStats>& src) {
+        for (const auto& kv : src) {
+            auto& stats = dst[kv.first];
+            const auto& otherStats = kv.second;
+            stats.readCount += otherStats.readCount;
+            stats.tCount += otherStats.tCount;
+            stats.tcCount += otherStats.tcCount;
+            stats.qualSum += otherStats.qualSum;
+            stats.qualCount += otherStats.qualCount;
+            stats.qualSumSq += otherStats.qualSumSq;
+            stats.tcRateSum += otherStats.tcRateSum;
+            stats.tcRateSumSq += otherStats.tcRateSumSq;
+            stats.tcRateCount += otherStats.tcRateCount;
+        }
+    };
+
+    mergeMap(positionCombined_, other.positionCombined_);
+    mergeMap(positionMate_[0], other.positionMate_[0]);
+    mergeMap(positionMate_[1], other.positionMate_[1]);
+}
+
+static void accumulateTcInMap(const std::unordered_map<uint32_t, SlamPositionVarianceStats>& posMap,
+                               int trim5p, int trim3p, uint32_t readLength,
+                               uint64_t& t_total, uint64_t& tc_total) {
+    for (const auto& kv : posMap) {
+        uint32_t pos = kv.first;
+        const auto& stats = kv.second;
+
+        if (trim5p > 0 && static_cast<int>(pos) < trim5p) {
+            continue;
+        }
+        if (trim3p > 0 && readLength > 0 && static_cast<int>(pos) >= static_cast<int>(readLength) - trim3p) {
+            continue;
+        }
+        t_total += stats.tCount;
+        tc_total += stats.tcCount;
     }
+}
+
+const std::unordered_map<uint32_t, SlamPositionVarianceStats>& SlamVarianceAnalyzer::getStats(size_t mateIndex) const {
+    mateIndex = (mateIndex < 2 ? mateIndex : 0);
+    return positionMate_[mateIndex];
 }
 
 std::tuple<uint64_t, uint64_t, double> SlamVarianceAnalyzer::computeGlobalTcErrorRate(int trim5p, int trim3p, uint32_t readLength) const {
     uint64_t t_total = 0;
     uint64_t tc_total = 0;
-    
-    for (const auto& kv : positionStats_) {
-        uint32_t pos = kv.first;
-        const auto& stats = kv.second;
-        
-        // Apply trim window if provided
-        if (trim5p > 0 && static_cast<int>(pos) < trim5p) {
-            continue;  // Before trim5p window
-        }
-        if (trim3p > 0 && readLength > 0 && static_cast<int>(pos) >= static_cast<int>(readLength) - trim3p) {
-            continue;  // After trim3p window
-        }
-        
-        t_total += stats.tCount;
-        tc_total += stats.tcCount;
-    }
-    
+    accumulateTcInMap(positionCombined_, trim5p, trim3p, readLength, t_total, tc_total);
+
     double p_est = 0.0;
     if (t_total > 0) {
         p_est = static_cast<double>(tc_total) / static_cast<double>(t_total);
     }
-    
+    return std::make_tuple(t_total, tc_total, p_est);
+}
+
+std::tuple<uint64_t, uint64_t, double> SlamVarianceAnalyzer::computeGlobalTcErrorRatePerMate(
+    const int trim5p[2],
+    const int trim3p[2],
+    uint32_t mateLen0,
+    uint32_t mateLen1) const {
+    uint64_t t_total = 0;
+    uint64_t tc_total = 0;
+    accumulateTcInMap(positionMate_[0], trim5p[0], trim3p[0], mateLen0, t_total, tc_total);
+    if (mateLen1 > 0) {
+        accumulateTcInMap(positionMate_[1], trim5p[1], trim3p[1], mateLen1, t_total, tc_total);
+    }
+    double p_est = 0.0;
+    if (t_total > 0) {
+        p_est = static_cast<double>(tc_total) / static_cast<double>(t_total);
+    }
     return std::make_tuple(t_total, tc_total, p_est);
 }
 
@@ -386,52 +448,44 @@ SlamVarianceAnalyzer::segmentedRegression(const std::vector<double>& y, uint32_t
     return {bestB1, bestB2, bestB2, bestSSE, bestSeg1, bestSeg2, bestSeg3, {}, 3};
 }
 
-SlamVarianceTrimResult SlamVarianceAnalyzer::computeTrim(uint32_t readLength) {
-    SlamVarianceTrimResult result;
-    result.readsAnalyzed = readsAnalyzed_;
-    
+bool SlamVarianceAnalyzer::fillTrimSlice(uint32_t readLength,
+                                         const std::unordered_map<uint32_t, SlamPositionVarianceStats>& posMap,
+                                         SlamVarianceMateSlice& slice,
+                                         std::string& mode) const {
+    slice = SlamVarianceMateSlice{};
+
     if (readsAnalyzed_ < minReads_) {
-        result.mode = "auto_fallback";
-        result.success = false;
-        return result;
+        mode = "auto_fallback";
+        return false;
+    }
+    if (posMap.empty()) {
+        mode = "auto_fallback";
+        return false;
     }
     
-    if (positionStats_.empty()) {
-        result.mode = "auto_fallback";
-        result.success = false;
-        return result;
-    }
-    
-    // Build stdev curve from position statistics
     std::vector<double> stdevCurve(readLength, std::nan(""));
     uint32_t maxPos = 0;
-    
-    for (const auto& kv : positionStats_) {
+
+    for (const auto& kv : posMap) {
         uint32_t pos = kv.first;
         if (pos >= readLength) {
             continue;
         }
-        const auto& stats = kv.second;
-        
-        // Use T→C rate stdev as the signal
-        double tcStddev = stats.stddevTcRate();
+        double tcStddev = kv.second.stddevTcRate();
         stdevCurve[pos] = tcStddev;
-        
+
         if (pos > maxPos) {
             maxPos = pos;
         }
     }
-    
+
     if (maxPos == 0) {
-        result.mode = "auto_fallback";
-        result.success = false;
-        return result;
+        mode = "auto_fallback";
+        return false;
     }
-    
-    // Truncate to actual read length observed
+
     stdevCurve.resize(maxPos + 1);
-    
-    // Identify first/last non-zero on the UNSMOOTHED curve (ignore soft-trim zeros).
+
     auto isZeroLike = [](double v) {
         return std::isnan(v) || v == 0.0;
     };
@@ -444,47 +498,40 @@ SlamVarianceTrimResult SlamVarianceAnalyzer::computeTrim(uint32_t readLength) {
         --lastNonZero;
     }
     if (firstNonZero >= lastNonZero) {
-        result.mode = "auto_fallback";
-        result.success = false;
-        return result;
+        mode = "auto_fallback";
+        return false;
     }
 
-    // Build a reduced vector for fitting: only points within [firstNonZero, lastNonZero).
     std::vector<double> stdevTrimmed(stdevCurve.begin() + firstNonZero, stdevCurve.begin() + lastNonZero);
 
-    // Do not smooth or count zero points: set zeros to NaN before smoothing.
-    for (double &v : stdevTrimmed) {
+    for (double& v : stdevTrimmed) {
         if (isZeroLike(v)) {
             v = std::nan("");
         }
     }
 
-    // Smooth with median window (NaNs ignored), within the trimmed window only.
     std::vector<double> smoothedRaw = smoothMedian(stdevTrimmed, smoothWindow_);
 
-    // For QC output, embed a filled smoothed curve back into full-length vector.
     std::vector<double> smoothedOutFull(stdevCurve.size(), 0.0);
     std::vector<double> smoothedFilled = smoothedRaw;
     interpolateMissing(smoothedFilled);
     for (size_t i = 0; i < smoothedFilled.size(); ++i) {
         smoothedOutFull[firstNonZero + i] = smoothedFilled[i];
     }
-    result.smoothedCurve = smoothedOutFull;
+    slice.smoothedCurve = smoothedOutFull;
 
-    // For fitting, use the trimmed smoothed curve with NaNs intact.
     std::vector<double> fitCurve = smoothedRaw;
 
-    // Split interval in two halves and fit each half with 1- vs 2-segment model (BIC).
     auto fitHalf = [&](size_t start, size_t end) {
         struct HalfFit {
             uint32_t breakpoint = 0;
-            SegmentFit seg1;
-            SegmentFit seg2;
+            SegmentFit seg1{};
+            SegmentFit seg2{};
             uint32_t segments = 1;
             double sse = 0.0;
             double nValid = 0.0;
         };
-        HalfFit out;
+        HalfFit out{};
         if (end < start) {
             out.sse = std::numeric_limits<double>::max();
             return out;
@@ -524,11 +571,10 @@ SlamVarianceTrimResult SlamVarianceAnalyzer::computeTrim(uint32_t readLength) {
                    static_cast<double>(kParams) * std::log(static_cast<double>(nPoints));
         };
 
-        // 1-segment fit
-        SegmentFit seg1 = fitSegment(prefixN, prefixX, prefixXX, prefixY, prefixXY, prefixYY, fitCurve, 0, n - 1);
+        SegmentFit seg1 =
+            fitSegment(prefixN, prefixX, prefixXX, prefixY, prefixXY, prefixYY, fitCurve, 0, n - 1);
         double sse1 = seg1.sse;
 
-        // 2-segment fit
         double bestSSE2 = std::numeric_limits<double>::max();
         uint32_t bestB = 0;
         SegmentFit bestSeg1, bestSeg2;
@@ -536,8 +582,10 @@ SlamVarianceTrimResult SlamVarianceAnalyzer::computeTrim(uint32_t readLength) {
             uint32_t bMin = minSegLen_;
             uint32_t bMax = n - minSegLen_ - 1;
             for (uint32_t b = bMin; b <= bMax; ++b) {
-                SegmentFit s1 = fitSegment(prefixN, prefixX, prefixXX, prefixY, prefixXY, prefixYY, fitCurve, 0, b - 1);
-                SegmentFit s2 = fitSegment(prefixN, prefixX, prefixXX, prefixY, prefixXY, prefixYY, fitCurve, b, n - 1);
+                SegmentFit s1 =
+                    fitSegment(prefixN, prefixX, prefixXX, prefixY, prefixXY, prefixYY, fitCurve, 0, b - 1);
+                SegmentFit s2 =
+                    fitSegment(prefixN, prefixX, prefixXX, prefixY, prefixXY, prefixYY, fitCurve, b, n - 1);
                 double total = s1.sse + s2.sse;
                 if (total < bestSSE2) {
                     bestSSE2 = total;
@@ -569,58 +617,92 @@ SlamVarianceTrimResult SlamVarianceAnalyzer::computeTrim(uint32_t readLength) {
 
     size_t fitN = fitCurve.size();
     if (fitN < static_cast<size_t>(minSegLen_ * 2 + 1)) {
-        result.mode = "auto_fallback";
-        result.success = false;
-        return result;
+        mode = "auto_fallback";
+        return false;
     }
     size_t mid = fitN / 2;
     if (mid == 0 || mid >= fitN - 1) {
-        result.mode = "auto_fallback";
-        result.success = false;
-        return result;
+        mode = "auto_fallback";
+        return false;
     }
 
     auto leftFit = fitHalf(0, mid - 1);
     auto rightFit = fitHalf(mid, fitN - 1);
 
-    // Map breakpoints back to full read coordinates.
     uint32_t b1 = leftFit.breakpoint;
-    uint32_t b2 = static_cast<uint32_t>(mid);
     uint32_t b3 = rightFit.breakpoint;
     double sse = leftFit.sse + rightFit.sse;
     SegmentFit seg1 = leftFit.seg1;
     SegmentFit seg2 = leftFit.seg2;
     SegmentFit seg3 = rightFit.seg1;
     SegmentFit seg4 = rightFit.seg2;
-    uint32_t nSegments = (leftFit.segments == 2 ? 2u : 1u) + (rightFit.segments == 2 ? 2u : 1u);
     if (leftFit.nValid < 2.0 || rightFit.nValid < 2.0) {
-        result.mode = "auto_fallback";
-        result.success = false;
-        return result;
+        mode = "auto_fallback";
+        return false;
     }
-    
-    // Set trim values
-    // b1 = first position of middle segment (trim5p = b1)
-    // b2 = last position of middle segment (trim3p = readLen - 1 - b2)
+
     uint32_t n = static_cast<uint32_t>(stdevCurve.size());
     uint32_t b1Full = static_cast<uint32_t>(firstNonZero + b1);
-    uint32_t b2Full = static_cast<uint32_t>(firstNonZero + b2);
+    uint32_t b2Full = static_cast<uint32_t>(firstNonZero + mid);
     uint32_t b3Full = static_cast<uint32_t>(firstNonZero + b3);
-    result.trim5p = std::min(b1Full, maxTrim_);
-    result.trim3p = std::min(n - 1 - b3Full, maxTrim_);
-    
-    // Store breakpoints for backward compatibility and QC
-    result.kneeBin5p = b1Full;
-    result.kneeBinMid = b2Full;
-    result.kneeBin3p = b3Full;
-    result.totalSSE = sse;
-    result.seg1 = seg1;
-    result.seg2 = seg2;
-    result.seg3 = seg3;
-    result.seg4 = seg4;
-    
-    result.mode = "auto_segmented_halves_bic2";
-    result.success = true;
-    
-    return result;
+    slice.trim5p = static_cast<int>(std::min(b1Full, maxTrim_));
+    slice.trim3p = static_cast<int>(std::min(n - 1 - b3Full, maxTrim_));
+    slice.kneeBin5p = b1Full;
+    slice.kneeBinMid = b2Full;
+    slice.kneeBin3p = b3Full;
+    slice.totalSSE = sse;
+    slice.seg1 = seg1;
+    slice.seg2 = seg2;
+    slice.seg3 = seg3;
+    slice.seg4 = seg4;
+
+    mode = "auto_segmented_halves_bic2";
+    slice.success = true;
+
+    return true;
+}
+
+SlamVarianceTrimResult SlamVarianceAnalyzer::computeTrimCombined(uint32_t readLength) {
+    SlamVarianceTrimResult out{};
+    out.readsAnalyzed = readsAnalyzed_;
+    std::string md;
+    if (!fillTrimSlice(readLength, positionCombined_, out.mates[0], md)) {
+        out.mode = md;
+        out.success = false;
+        return out;
+    }
+    out.mode = md;
+    out.success = true;
+    out.syncLegacyFromMate0();
+    return out;
+}
+
+SlamVarianceTrimResult SlamVarianceAnalyzer::computeTrimPerMate(uint32_t mateLen0, uint32_t mateLen1) {
+    SlamVarianceTrimResult out{};
+    out.readsAnalyzed = readsAnalyzed_;
+
+    std::string mode0, mode1;
+    bool ok0 = fillTrimSlice(mateLen0, positionMate_[0], out.mates[0], mode0);
+    bool ok1 = true;
+    if (mateLen1 > 0) {
+        ok1 = fillTrimSlice(mateLen1, positionMate_[1], out.mates[1], mode1);
+    }
+
+    out.success = ok0 && ok1 && readsAnalyzed_ >= minReads_;
+    out.mode = ok0 ? mode0 : "auto_fallback";
+    if (mateLen1 > 0) {
+        out.mode += std::string(";") + (ok1 ? mode1 : "auto_fallback");
+    }
+    if (out.success) {
+        out.syncLegacyFromMate0();
+    }
+    return out;
+}
+
+SlamVarianceTrimResult SlamVarianceAnalyzer::computeTrimUnified(uint32_t concatLen, uint32_t mateLen0,
+                                                               uint32_t mateLen1, bool separateMates) {
+    if (!separateMates || mateLen1 == 0) {
+        return computeTrimCombined(concatLen);
+    }
+    return computeTrimPerMate(mateLen0, mateLen1);
 }

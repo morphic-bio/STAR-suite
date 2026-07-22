@@ -4,6 +4,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MANIFEST_FILE="${SCRIPT_DIR}/compat-manifest.tsv"
+MOLECULE_FIRST_TOOLS=(molecule_first_resolver molecule_first_bam_ledger molecule_first_materialize)
 
 PREFIX=""
 BINDIR=""
@@ -198,6 +199,12 @@ if [[ ! -x "${selected_bin}" ]]; then
   echo "ERROR: selected bundled binary not found: ${selected_bin}" >&2
   exit 1
 fi
+for tool in "${MOLECULE_FIRST_TOOLS[@]}"; do
+  if [[ ! -x "$(dirname "${selected_bin}")/${tool}" ]]; then
+    echo "ERROR: selected bundled binary not found: $(dirname "${selected_bin}")/${tool}" >&2
+    exit 1
+  fi
+done
 
 if [[ "${PRINT_SELECTION}" -eq 1 ]]; then
   printf '%s\t%s\t%s\t%s\n' "${selected_label}" "${selected_baseline}" "${selected_relpath}" "${selected_description}"
@@ -209,19 +216,32 @@ TARGET_PATH="${BINDIR}/${TARGET_NAME}"
 
 if [[ -e "${TARGET_PATH}" && "${FORCE}" -ne 1 ]]; then
   if cmp -s "${selected_bin}" "${TARGET_PATH}"; then
-    echo "Binary already installed at ${TARGET_PATH}" 
-    echo "Selected compatibility level: ${selected_label} (glibc ${selected_baseline}+)"
-    warn_if_path_missing "${BINDIR}"
-    exit 0
+    echo "STAR binary already installed at ${TARGET_PATH}; verifying companion tools"
+  else
+    echo "ERROR: target already exists: ${TARGET_PATH} (use --force to overwrite)" >&2
+    exit 1
   fi
-  echo "ERROR: target already exists: ${TARGET_PATH} (use --force to overwrite)" >&2
-  exit 1
 fi
+for tool in "${MOLECULE_FIRST_TOOLS[@]}"; do
+  target="${BINDIR}/${tool}"
+  if [[ -e "${target}" && "${FORCE}" -ne 1 ]] && ! cmp -s "$(dirname "${selected_bin}")/${tool}" "${target}"; then
+    echo "ERROR: target already exists: ${target} (use --force to overwrite)" >&2
+    exit 1
+  fi
+done
 
 tmp_target="${TARGET_PATH}.tmp.$$"
 cp "${selected_bin}" "${tmp_target}"
 chmod 0755 "${tmp_target}"
 mv -f "${tmp_target}" "${TARGET_PATH}"
+
+for tool in "${MOLECULE_FIRST_TOOLS[@]}"; do
+  target="${BINDIR}/${tool}"
+  temporary="${target}.tmp.$$"
+  cp "$(dirname "${selected_bin}")/${tool}" "${temporary}"
+  chmod 0755 "${temporary}"
+  mv -f "${temporary}" "${target}"
+done
 
 echo "Installed STAR-suite to ${TARGET_PATH}"
 echo "Selected compatibility level: ${selected_label} (glibc ${selected_baseline}+)"

@@ -7,8 +7,9 @@
 #           WT-Day-8 (BC007), PAX6-PTC-D9-Day8 (BC008)
 #
 # Runs parity analysis (barcode Jaccard, per-barcode UMI Pearson/Spearman,
-# per-gene UMI Pearson/Spearman) for each tag, then writes a combined
-# summary TSV suitable for inclusion in the paper.
+# per-gene UMI Pearson/Spearman) for each tag, then writes:
+#   1. a per-comparison combined TSV
+#   2. a de-duplicated STAR-side summary TSV for total cells/UMIs
 #
 # Usage:
 #   bash scripts/paper/run_flex_parity.sh                      # defaults
@@ -62,6 +63,8 @@ echo "Output dir:      ${OUTDIR}"
 echo ""
 
 COMBINED_TSV="${OUTDIR}/flex_parity_combined.tsv"
+UNIQUE_SUMMARY_TSV="${OUTDIR}/flex_parity_star_unique_summary.tsv"
+UNIQUE_TOTALS_TXT="${OUTDIR}/flex_parity_star_unique_totals.txt"
 HEADER_WRITTEN=false
 
 # ── Per-tag parity: STAR vs CR9 ────────────────────────────────────
@@ -124,6 +127,79 @@ for tag in ${TAGS}; do
     fi
 done
 
+if [[ -f "${COMBINED_TSV}" ]]; then
+    python3 - "${COMBINED_TSV}" "${UNIQUE_SUMMARY_TSV}" "${UNIQUE_TOTALS_TXT}" <<'PY'
+import csv
+import math
+import sys
+from pathlib import Path
+
+combined = Path(sys.argv[1])
+summary_tsv = Path(sys.argv[2])
+totals_txt = Path(sys.argv[3])
+
+with combined.open() as fh:
+    rows = list(csv.DictReader(fh, delimiter="\t"))
+
+ge_rows = [r for r in rows if r.get("feature_type") == "Gene_Expression"]
+if not ge_rows:
+    raise SystemExit(f"ERROR: no Gene_Expression rows found in {combined}")
+
+by_star = {}
+for row in ge_rows:
+    label = row["comparison_label"]
+    if "_vs_" not in label:
+        raise SystemExit(f"ERROR: cannot parse comparison label: {label}")
+    star_tag, comparator = label.split("_vs_", 1)
+    rec = by_star.setdefault(star_tag, {
+        "star_tag": star_tag,
+        "star_cells": row["star_cells"],
+        "star_total_umis": row["star_total_umis"],
+        "preferred_comparator": comparator,
+        "preferred_cr_cells": row["cr_cells"],
+        "preferred_cr_total_umis": row["cr_total_umis"],
+    })
+    if rec["star_cells"] != row["star_cells"] or rec["star_total_umis"] != row["star_total_umis"]:
+        raise SystemExit(
+            f"ERROR: inconsistent STAR totals for {star_tag}: "
+            f"{rec['star_cells']}/{rec['star_total_umis']} vs {row['star_cells']}/{row['star_total_umis']}"
+        )
+    if comparator == "CR9":
+        rec["preferred_comparator"] = comparator
+        rec["preferred_cr_cells"] = row["cr_cells"]
+        rec["preferred_cr_total_umis"] = row["cr_total_umis"]
+
+records = [by_star[k] for k in sorted(by_star)]
+with summary_tsv.open("w", newline="") as fh:
+    writer = csv.writer(fh, delimiter="\t")
+    writer.writerow([
+        "star_tag",
+        "preferred_comparator",
+        "star_cells",
+        "star_total_umis",
+        "preferred_cr_cells",
+        "preferred_cr_total_umis",
+    ])
+    for rec in records:
+        writer.writerow([
+            rec["star_tag"],
+            rec["preferred_comparator"],
+            rec["star_cells"],
+            rec["star_total_umis"],
+            rec["preferred_cr_cells"],
+            rec["preferred_cr_total_umis"],
+        ])
+
+star_cells_total = sum(int(rec["star_cells"]) for rec in records)
+star_umis_total = sum(int(rec["star_total_umis"]) for rec in records)
+with totals_txt.open("w") as fh:
+    fh.write(f"unique_star_tags\t{len(records)}\n")
+    fh.write(f"unique_star_cells_total\t{star_cells_total}\n")
+    fh.write(f"unique_star_total_umis\t{star_umis_total}\n")
+    fh.write("note\tTotals are de-duplicated across CR7/CR9 comparator rows and should not be computed by summing flex_parity_combined.tsv directly.\n")
+PY
+fi
+
 # ── Summary ─────────────────────────────────────────────────────────
 echo "================================================================="
 echo "  Combined parity summary: ${COMBINED_TSV}"
@@ -132,4 +208,18 @@ if [[ -f "${COMBINED_TSV}" ]]; then
     column -t -s$'\t' "${COMBINED_TSV}"
 fi
 echo ""
+if [[ -f "${UNIQUE_SUMMARY_TSV}" ]]; then
+    echo "================================================================="
+    echo "  De-duplicated STAR summary: ${UNIQUE_SUMMARY_TSV}"
+    echo "================================================================="
+    column -t -s$'\t' "${UNIQUE_SUMMARY_TSV}"
+    echo ""
+fi
+if [[ -f "${UNIQUE_TOTALS_TXT}" ]]; then
+    echo "================================================================="
+    echo "  De-duplicated STAR totals: ${UNIQUE_TOTALS_TXT}"
+    echo "================================================================="
+    cat "${UNIQUE_TOTALS_TXT}"
+    echo ""
+fi
 echo "Per-tag logs and TSVs saved to: ${OUTDIR}/"

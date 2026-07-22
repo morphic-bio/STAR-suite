@@ -1,9 +1,14 @@
 #include "SoloFeature.h"
 #include "serviceFuns.cpp"
+#include "OrdMagStage.h"
 #include "scrna_api.h"
 
+#include <algorithm>
 #include <cstring>
+#include <fstream>
+#include <sys/stat.h>
 #include <unordered_map>
+#include <unordered_set>
 
 void SoloFeature::emptyDrops_libscrna()
 {
@@ -170,6 +175,122 @@ void SoloFeature::emptyDrops_libscrna()
     string edOutDir = outputPrefixFiltered + "EmptyDrops";
     if (scrna_emptydrops_write_outputs(&result, edOutDir.c_str()) != 0) {
         P.inOut->logMain << "emptyDrops_CR (libscrna) WARNING: failed to write outputs to " << edOutDir << "\n";
+    }
+
+    // Emit branch-only audit files so libscrna can be compared against legacy on the same ranked cells.
+    {
+        vector<pair<uint32_t, uint32_t>> umiIdx;
+        umiIdx.reserve(nCB);
+        for (uint32_t i = 0; i < nCB; i++) {
+            umiIdx.push_back({nUMIperCB[i], i});
+        }
+        stable_sort(umiIdx.begin(), umiIdx.end(), [](const pair<uint32_t, uint32_t>& a, const pair<uint32_t, uint32_t>& b) {
+            return a.first > b.first;
+        });
+
+        vector<uint32_t> retainIndices;
+        vector<uint32_t> retainUMI;
+        retainIndices.reserve(nCB);
+        retainUMI.reserve(nCB);
+        vector<uint32_t> origToRetainRank(nCB, (uint32_t)-1);
+        for (uint32_t rank = 0; rank < nCB; rank++) {
+            retainIndices.push_back(umiIdx[rank].second);
+            retainUMI.push_back(umiIdx[rank].first);
+            origToRetainRank[umiIdx[rank].second] = rank;
+        }
+
+        SimpleEmptyDropsParams simpleParams;
+        simpleParams.nExpectedCells = config->n_expected_cells;
+        simpleParams.maxPercentile = config->max_percentile;
+        simpleParams.maxMinRatio = config->max_min_ratio;
+        simpleParams.umiMin = config->umi_min;
+        simpleParams.umiMinFracMedian = config->umi_min_frac_median;
+        simpleParams.candMaxN = config->cand_max_n;
+        simpleParams.indMin = config->ind_min;
+        simpleParams.indMax = config->ind_max;
+
+        SimpleEmptyDropsResult simpleResult;
+        if (config->use_bootstrap) {
+            simpleParams.useBootstrap = true;
+            simpleParams.nExpectedCells = 0;
+            simpleParams.maxExpectedCells = min(config->ind_min / 2, (uint32_t)262144);
+            if (simpleParams.maxExpectedCells < 1000) {
+                simpleParams.maxExpectedCells = 90000;
+            }
+            simpleResult = SimpleEmptyDropsStage::runCRSimpleFilterBootstrap(retainUMI, retainIndices.size(), simpleParams);
+        } else {
+            simpleResult = SimpleEmptyDropsStage::runCRSimpleFilter(retainUMI, retainIndices.size(), simpleParams);
+        }
+
+        unordered_set<uint32_t> ambientOrigIndices;
+        ambientOrigIndices.reserve(simpleResult.ambientIndices.size() * 2);
+        for (uint32_t retainIdx : simpleResult.ambientIndices) {
+            if (retainIdx < retainIndices.size()) {
+                ambientOrigIndices.insert(retainIndices[retainIdx]);
+            }
+        }
+
+        mkdir(edOutDir.c_str(), P.runDirPerm);
+
+        ofstream summaryOut(edOutDir + "/backend_debug_summary.json");
+        if (summaryOut.is_open()) {
+            summaryOut << "{\n";
+            summaryOut << "  \"backend\": \"libscrna\",\n";
+            summaryOut << "  \"n_total_cells\": " << nCB << ",\n";
+            summaryOut << "  \"n_retain_cells\": " << retainIndices.size() << ",\n";
+            summaryOut << "  \"n_simple_cells\": " << result.n_simple_cells << ",\n";
+            summaryOut << "  \"n_candidates_total\": " << result.n_candidates << ",\n";
+            summaryOut << "  \"n_tail_candidates\": " << result.n_tail_cells << ",\n";
+            summaryOut << "  \"n_ambient_cells\": " << simpleResult.ambientIndices.size() << ",\n";
+            summaryOut << "  \"ambient_start_rank\": " << simpleResult.ambientRange.first << ",\n";
+            summaryOut << "  \"ambient_end_rank_exclusive\": " << simpleResult.ambientRange.second << ",\n";
+            summaryOut << "  \"retain_threshold\": " << result.retain_threshold << ",\n";
+            summaryOut << "  \"min_umi\": " << result.min_umi << ",\n";
+            summaryOut << "  \"n_ed_passers\": " << result.n_ed_passers << ",\n";
+            summaryOut << "  \"use_fdr_gate\": " << (config->use_fdr_gate ? 1 : 0) << ",\n";
+            summaryOut << "  \"apply_bh_correction\": " << (config->apply_bh_correction ? 1 : 0) << ",\n";
+            summaryOut << "  \"use_bootstrap\": " << (config->use_bootstrap ? 1 : 0) << "\n";
+            summaryOut << "}\n";
+        }
+
+        ofstream candidateOut(edOutDir + "/backend_debug_candidates.tsv");
+        if (candidateOut.is_open()) {
+            candidateOut << "backend\trank_desc\tbarcode\tcell_index\tumi_count\tis_simple_cell\tis_tail_candidate\tis_ambient_cell\tp_value\tp_adjusted\tpasses_raw_p\tpasses_fdr\tobs_log_prob\n";
+            for (size_t i = 0; i < result.n_candidates; i++) {
+                const scrna_ed_candidate &cand = result.candidates[i];
+                uint32_t retainRank = cand.cell_index < origToRetainRank.size() ? origToRetainRank[cand.cell_index] : (uint32_t)-1;
+                bool isAmbient = ambientOrigIndices.count(cand.cell_index) > 0;
+                candidateOut << "libscrna\t"
+                             << (retainRank == (uint32_t)-1 ? string("") : to_string(retainRank)) << '\t'
+                             << (cand.barcode ? cand.barcode : "") << '\t'
+                             << cand.cell_index << '\t'
+                             << cand.umi_count << '\t'
+                             << cand.is_simple_cell << '\t'
+                             << (cand.is_simple_cell ? 0 : 1) << '\t'
+                             << (isAmbient ? 1 : 0) << '\t'
+                             << cand.p_value << '\t'
+                             << cand.p_adjusted << '\t'
+                             << cand.passes_raw_p << '\t'
+                             << cand.passes_fdr << '\t'
+                             << cand.obs_log_prob << '\n';
+            }
+        }
+
+        ofstream ambientOut(edOutDir + "/backend_debug_ambient.tsv");
+        if (ambientOut.is_open()) {
+            ambientOut << "backend\trank_desc\tbarcode\tcell_index\tumi_count\n";
+            for (uint32_t retainIdx : simpleResult.ambientIndices) {
+                if (retainIdx >= retainIndices.size()) {
+                    continue;
+                }
+                uint32_t origIdx = retainIndices[retainIdx];
+                ambientOut << "libscrna\t"
+                           << retainIdx << '\t'
+                           << barcodes[origIdx] << '\t'
+                           << origIdx << '\t'
+                           << nUMIperCB[origIdx] << '\n';
+            }
+        }
     }
 
     scrna_ed_result_free(&result);

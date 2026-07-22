@@ -28,6 +28,11 @@ class SlamCompat;
 namespace libem {
 class Transcriptome;
 }
+namespace star {
+namespace input {
+struct CbqReadView;
+} // namespace input
+} // namespace star
 
 #include <time.h>
 #include <random>
@@ -37,11 +42,16 @@ class Transcriptome;
 #include <vector>
 
 class ReadAlign {
+    friend class ReadAlignChunk;
+
     public:
         ReadAlign (Parameters& Pin, Genome &genomeIn, Transcriptome *TrIn, int iChunk,
                    const libem::Transcriptome* libemTr = nullptr);//allocate arrays
         ~ReadAlign();
         int oneRead();
+        int oneReadLoaded(int readStatus0);
+        int loadCbqReadView(const star::input::CbqReadView& view);
+        int oneReadFromCbqView(const star::input::CbqReadView& view);
 
         /** Pipeline mode: load from EnrichedPacket, restore CB/UMI, run H1+alignment. */
         int oneReadFromPacket(struct EnrichedPacket &pkt);
@@ -138,6 +148,9 @@ class ReadAlign {
             std::unordered_map<uint32_t, uint32_t> umiCounts; // UMI24 -> count
             std::string cbSeq;                           // Original CB sequence
             std::string cbQual;                          // CB quality scores (for Bayesian resolution)
+            std::vector<double> cbLogLikMatch;           // Per-position sum log P(obs|candidate match)
+            std::vector<double> cbLogLikMismatch;        // Per-position sum log P(obs|candidate mismatch)
+            uint32_t cbEvidenceReads = 0;                // Number of reads folded into the aggregate evidence
             
             AmbiguousEntry() {}
         };
@@ -233,6 +246,7 @@ class ReadAlign {
         bool hasYAlignment_;  // true if any alignment for this read touches Y-chromosome
         bool crMultiMapRescued_;  // true if multimapper was transcriptomically rescued
         bool crMultiMapRescuedIntronic_;  // true if rescue winner was intronic fallback
+        bool genomicMultimapBeforeRescue_; // NH>1 state before CR-compatible rescue
     private:
 
         uint mapMarker; //alignment marker (typically, if there is something wrong)

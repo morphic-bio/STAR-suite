@@ -4,13 +4,59 @@
 #include "TimeFunctions.h"
 #include "SequenceFuns.h"
 #include "ErrorWarning.h"
+#include "SoloFeature_bridgeHashSnapshot.h"
 #include "systemFunctions.h"
+#include "SoloMemoryProfile.h"
+#include <chrono>
+#include <cstdlib>
+#include <sstream>
+
+namespace {
+double soloElapsedSeconds(const std::chrono::steady_clock::time_point &start)
+{
+    return std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+}
+
+bool nonFlexHashBridgeEnabled()
+{
+    return std::getenv("STAR_SOLO_NONFLEX_HASH_BRIDGE") != nullptr;
+}
+
+bool soloPhaseDebugEnabled()
+{
+    return std::getenv("STAR_SOLO_PHASE_DEBUG") != nullptr;
+}
+
+bool useDirectInlineHashOutput(const SoloFeature& feat)
+{
+    if (!feat.pSolo.inlineHashMode) {
+        return false;
+    }
+    if (feat.pSolo.flexMode) {
+        return true;
+    }
+    if (!nonFlexHashBridgeEnabled()) {
+        return true;
+    }
+    switch (feat.featureType) {
+        case SoloFeatureTypes::Gene:
+        case SoloFeatureTypes::GeneFull:
+        case SoloFeatureTypes::GeneFull_Ex50pAS:
+        case SoloFeatureTypes::GeneFull_ExonOverIntron:
+        case SoloFeatureTypes::Velocyto:
+            return false;
+        default:
+            return true;
+    }
+}
+}
 
 void SoloFeature::processRecords()
 {
     if (pSolo.type==0)
         return;
 
+    const auto processStart = std::chrono::steady_clock::now();
     time_t rawTime;
     time(&rawTime);
     P.inOut->logMain << timeMonthDayTime(rawTime) << " ... Starting Solo post-map for " <<SoloFeatureTypes::Names[featureType] <<endl;
@@ -40,7 +86,29 @@ void SoloFeature::processRecords()
         P.inOut->logMain <<"Read splice junctions for Solo SJ feature: "<< P.sjAll[0].size() <<endl;
     };
 
+    if (soloPhaseDebugEnabled()) {
+        time(&rawTime);
+        P.inOut->logMain << timeMonthDayTime(rawTime)
+                         << " ... Solo debug: " << SoloFeatureTypes::Names[featureType]
+                         << " entering sumThreads" << endl;
+    }
     SoloFeature::sumThreads();
+    {
+        std::ostringstream extra;
+        extra << "nReadsInput=" << nReadsInput << " nReadsMapped=" << nReadsMapped;
+        soloMemoryProfileCheckpoint(P.inOut->logMain,
+                                    std::string("sumThreads_done:") + SoloFeatureTypes::Names[featureType],
+                                    extra.str());
+    }
+    if (soloPhaseDebugEnabled()) {
+        time(&rawTime);
+        P.inOut->logMain << timeMonthDayTime(rawTime)
+                         << " ... Solo debug: " << SoloFeatureTypes::Names[featureType]
+                         << " finished sumThreads"
+                         << " nCB=" << nCB
+                         << " nReadsMapped=" << nReadsMapped
+                         << endl;
+    }
     
     // Early exit for skipProcessing mode: populate readInfo but skip counting/matrices
     if (pSolo.skipProcessing) {
@@ -60,6 +128,11 @@ void SoloFeature::processRecords()
         time(&rawTime);
         P.inOut->logMain << timeMonthDayTime(rawTime) << " ... Solo: skipping counting and matrix output for " 
                          << SoloFeatureTypes::Names[featureType] << " (soloSkipProcessing=yes)" <<endl;
+        if (soloPhaseDebugEnabled()) {
+            P.inOut->logMain << "Solo debug: " << SoloFeatureTypes::Names[featureType]
+                             << " leaving processRecords via skipProcessing" << endl;
+        }
+        P.inOut->logMain << "Solo timing: processRecords " << soloElapsedSeconds(processStart) << " s" << endl;
         return;
     }
     
@@ -76,12 +149,46 @@ void SoloFeature::processRecords()
             countCBgeneUMI();
         };
     };
+    {
+        std::ostringstream extra;
+        extra << "nCB=" << nCB << " nReadsMapped=" << nReadsMapped;
+        soloMemoryProfileCheckpoint(P.inOut->logMain,
+                                    std::string("count_phase_done:") + SoloFeatureTypes::Names[featureType],
+                                    extra.str());
+    }
+    if (soloPhaseDebugEnabled()) {
+        time(&rawTime);
+        P.inOut->logMain << timeMonthDayTime(rawTime)
+                         << " ... Solo debug: " << SoloFeatureTypes::Names[featureType]
+                         << " finished count phase"
+                         << " nCB=" << nCB
+                         << " nReadsMapped=" << nReadsMapped
+                         << endl;
+    }
+
+    if (solo_bridge_hash_snapshot::stopAfterCountEnabled(P)) {
+        time(&rawTime);
+        P.inOut->logMain << timeMonthDayTime(rawTime)
+                         << " ... inline-hash snapshot replay: stopping after countCBgeneUMI (skipping raw output/cell filtering)"
+                         << endl;
+        if (soloPhaseDebugEnabled()) {
+            P.inOut->logMain << "Solo debug: " << SoloFeatureTypes::Names[featureType]
+                             << " leaving processRecords via stopAfterCount" << endl;
+        }
+        P.inOut->logMain << "Solo timing: processRecords " << soloElapsedSeconds(processStart) << " s" << endl;
+        return;
+    }
     
     // Inline hash path already wrote MEX directly; skip legacy matrix output to avoid
     // touching uninitialized Solo dense matrices.
-    if (pSolo.inlineHashMode) {
+    if (useDirectInlineHashOutput(*this)) {
         time(&rawTime);
         P.inOut->logMain << timeMonthDayTime(rawTime) << " ... Solo: inline-hash mode completed (skipping legacy output)" <<endl;
+        if (soloPhaseDebugEnabled()) {
+            P.inOut->logMain << "Solo debug: " << SoloFeatureTypes::Names[featureType]
+                             << " leaving processRecords via direct inline-hash output" << endl;
+        }
+        P.inOut->logMain << "Solo timing: processRecords " << soloElapsedSeconds(processStart) << " s" << endl;
         return;
     }
     
@@ -106,7 +213,9 @@ void SoloFeature::processRecords()
     
     time(&rawTime);
     P.inOut->logMain << timeMonthDayTime(rawTime) << " ... Solo: cell filtering" <<endl;    
+    const auto cellFilterStart = std::chrono::steady_clock::now();
     cellFiltering();
+    P.inOut->logMain << "Solo timing: cellFiltering " << soloElapsedSeconds(cellFilterStart) << " s" << endl;
     
     //summary stats output
     statsOutput();
@@ -123,4 +232,9 @@ void SoloFeature::processRecords()
 
     P.inOut->logMain << "RAM after completing solo:\n"
                      <<  linuxProcMemory() << flush;   
+    if (soloPhaseDebugEnabled()) {
+        P.inOut->logMain << "Solo debug: " << SoloFeatureTypes::Names[featureType]
+                         << " leaving processRecords after legacy output" << endl;
+    }
+    P.inOut->logMain << "Solo timing: processRecords " << soloElapsedSeconds(processStart) << " s" << endl;
 };

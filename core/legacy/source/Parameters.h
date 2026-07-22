@@ -21,6 +21,17 @@
 // Forward declaration for library format detector
 class LibFormatDetector;
 class SlamSnpMask;
+namespace spatial_feature_sidecar {
+class Writer;
+}
+namespace star {
+namespace input {
+class CbqInputModule;
+struct CbqReadBatchView;
+class FastxInputModule;
+struct InputRecord;
+} // namespace input
+} // namespace star
 
 class Parameters {
 
@@ -43,6 +54,34 @@ class Parameters {
         int dynamicThreadInterface = 0; // 0: off, 1: constant map permits + telemetry hooks
         int dynamicThreadConstMapPermits = 0; // <=0 means use runThreadN
         int dynamicThreadTelemetry = 0; // 0: off, 1: on
+        int dynamicThreadTelemetryIntervalSec = 10; // periodic mapPermitSnapshot emit (sec) when chromapAtacEnabled+dynamicThreadTelemetry; 0 disables periodic sampler (end-of-run summary still emits)
+        // Per-domain borrowable permit floors (Step 5a). Each domain reserves
+        // at LEAST `floor` concurrent permits whenever it has waiters; surplus
+        // permits are fully shared. 0 disables that domain's floor. Setting
+        // any floor > 0 activates the floor-aware acquire/release path with
+        // per-domain CVs (eliminates the notify_one wakeup-fairness pathology).
+        int dynamicThreadMapFloor = 0;
+        int dynamicThreadAtacFloor = 0;
+        int dynamicThreadFeatureFloor = 0;
+        // ATAC drain-time controller (Step 6). When 1, the chromap-side
+        // sampler thread also runs a rate-balance controller that adjusts
+        // per-domain floors based on observed work-unit drain rates. Goal:
+        // keep MAP and ATAC drain rates in rough balance so both finish
+        // their mapping phase at roughly the same time. Requires
+        // dynamicThreadInterface=1 + chromapAtacEnable=1 + at least one
+        // floor > 0. 0 disables (default; the existing static-floor path
+        // remains active).
+        int dynamicThreadAtacController = 0;
+        // FIFO waiter-queue admission. When 1, ThreadControl routes acquires
+        // through a queue under the permit mutex: queued waiters are served
+        // in arrival order, and new arrivals cannot fast-path past existing
+        // waiters — eliminating the notify_one wakeup-bypass race.
+        // Composes with floors and the drain-time controller: with no floor
+        // active the queue is strict FIFO across domains; with floors active
+        // the helper preserves per-domain FIFO ordering and lets a tail
+        // waiter on an under-floor domain bypass an at-floor head.
+        // 0 disables (default; legacy path).
+        int dynamicThreadFifoWaiters = 0;
         int variableThreads = 0; // 0: fixed map permits, 1: allow runtime map permit retuning
         int variableThreadsRetuneEveryAcquires = 0; // <=0 disables auto-retune sequence
         vector<int> variableThreadsPermitSequence; // sequence of permit targets applied at retune cadence
@@ -107,6 +146,32 @@ class Parameters {
         string readFilesCommandString; //actual command string
         int readFilesIndex;
         pid_t readFilesCommandPID[MAX_N_MATES];
+        std::shared_ptr<star::input::FastxInputModule> fastxInputModule;
+        std::shared_ptr<star::input::InputRecord> fastxInputPendingRecord;
+        bool fastxInputActive = false;
+        bool fastxInputPendingRecordValid = false;
+        bool fastxInputExhausted = false;
+        int fastxInputLastLoggedLane = -1;
+        std::shared_ptr<star::input::CbqInputModule> cbqInputModule;
+        std::shared_ptr<star::input::CbqReadBatchView> cbqInputPendingBatch;
+        uint32 cbqInputPendingBatchOffset = 0;
+        bool cbqInputActive = false;
+        bool cbqInputExhausted = false;
+        int cbqInputLastLoggedLane = -1;
+        string readFilesCbqRangeMode = "auto"; // auto|off|range: indexed CBQ logical range readers
+        struct CbqRangeTask {
+            uint32 laneIndex = 0;
+            uint64 firstRecord = 0;  // zero-based lane-local record offset
+            uint64 recordCount = 0;
+            uint64 globalFirst = 0;  // zero-based logical offset across concatenated lanes
+            uint64 taskOrdinal = 0;
+        };
+        vector<CbqRangeTask> cbqRangeTasks;
+        bool cbqRangeActive = false;
+        string cbqRangeFallbackReason;
+        uint64 cbqRangeTotalRecords = 0;
+        std::shared_ptr<std::atomic<uint32_t>> cbqRangeNextTask = std::make_shared<std::atomic<uint32_t>>(0);
+        std::shared_ptr<std::atomic<uint32_t>> cbqRangeNextChunk = std::make_shared<std::atomic<uint32_t>>(0);
 
         uint readMapNumber;
         uint iReadAll;
@@ -243,12 +308,21 @@ class Parameters {
         string YReadNamesOutput; // user-specified override path for Y-read names list
         string outYReadNamesFile; // derived output path for Y-read names list
         
-        //Y-chromosome FASTQ emission
+        //Y-chromosome read sidecar emission
+        string emitYNoY;  // raw CLI: yes|no - emit Y/noY read sidecars in emitYNoYFormat
+        bool emitYNoYyes; // resolved: true if generic sidecar switch is enabled
+        string emitYNoYFormat; // raw CLI: fastq|cbq - sidecar output format
         string emitYNoYFastq;  // raw CLI: yes|no - emit Y/noY FASTQ files
         bool emitYNoYFastqyes; // resolved: true if enabled
         string emitYNoYFastqCompression;  // raw CLI: gz|none - compression for FASTQ output
         string YFastqOutputPrefix, noYFastqOutputPrefix;  // user-specified output prefixes
         string outYFastqFile[MAX_N_MATES], outNoYFastqFile[MAX_N_MATES];  // derived output paths per mate
+        string emitYNoYCbq;  // raw CLI: yes|no - compatibility alias for emitYNoYFormat=cbq
+        bool emitYNoYCbqyes; // resolved: true if enabled
+        int emitYNoYCbqCompressionLevel; // zstd compression level for emitted CBQ files
+        uint64 emitYNoYCbqBlockSize; // virtual block size for emitted CBQ files
+        string YCbqOutput, noYCbqOutput; // user-specified output paths
+        string outYCbqFile, outNoYCbqFile; // derived output paths
         uint32 yFastqEmitReadCount() const {
             const bool singleCellOrFlex = (pSolo.type != ParametersSolo::SoloTypes::None) || pSolo.flexMode;
             if (singleCellOrFlex && readNends > readNmates) {
@@ -412,8 +486,11 @@ class Parameters {
                 int autoDetectWindow = 1000;
                 string traceFile;          // Empty = disabled
                 int traceLimit = 0;        // 0 = unlimited (trace all reads); >0 = limit to N reads
+                string dumpEqFile = "-";   // Optional Salmon-shaped rich EC dump
                 int preBurninFrags = 5000; // Pre-burn-in fragment count threshold (Salmon default: 5000)
                 int miniBatchSize = 1000;  // Mini-batch size for processed reads counter (Salmon default: 1000)
+                int fragLengthDistInt = 1;  // If 0, do not use learned FLD in EC aux probabilities
+                int effectiveLengthCorrectionInt = 1;  // If 0, use raw transcript lengths in VB/EM
                 
                 // Error model mode: auto|cigar|as|off (default: auto)
                 string errorModelMode = "auto";  // auto=use CIGAR if available else AS, cigar=CIGAR only, as=AS only, off=disabled
@@ -464,8 +541,10 @@ class Parameters {
                 bool compatLenientOverlap = false;// 50% overlap + SJ concordance
                 bool compatOverlapWeight = false; // Divide weight by gene count
                 bool compatIgnoreOverlap = false; // Skip PE overlap positions
-                int compatTrim5p = 0;             // 5' trim guard
-                int compatTrim3p = 0;             // 3' trim guard
+                // Per-mate compat trims. Index [1] uses -1 as sentinel = inherit mate0 after CLI parse.
+                int compatTrim5p[2] = {0, -1};       // 5' trim guard (per mate)
+                int compatTrim3p[2] = {0, -1};       // 3' trim guard (per mate)
+                int minCallableLength = 30;           // Minimum post-trim consensus positions per read; 0 disables
 
                 // VB over-dispersed solver (beta-binomial mixture)
                 int vbOverdispInt = 0;            // --slamVbOverdisp (0/1)
@@ -488,11 +567,17 @@ class Parameters {
                 string slamQcReport = "";          // Prefix for comprehensive QC report (JSON + HTML, empty=disabled)
                 int grandSlamOut = 1;              // --slamGrandSlamOut (0/1, default: 1)
                 string grandSlamOutFile = "";      // Optional override for GRAND-SLAM TSV output
-                int autoTrim5p = 0;               // Auto-computed 5' trim (0=not computed)
-                int autoTrim3p = 0;                // Auto-computed 3' trim (0=not computed)
-                bool autoTrimComputed = false;    // Whether auto-trim has been computed
+                int cbOut = 0;                     // --slamCbOut (0/1, default: 0)
+                string cbOutFile = "";             // --slamCbOutFile (default: <prefix>SlamQuant.cB.tsv when enabled)
+                string cbFormat = "star";          // --slamCbFormat (star|ezbakr)
+                int autoTrim5p[2] = {0, 0};               // Auto-computed 5' trim
+                int autoTrim3p[2] = {0, 0};                // Auto-computed 3' trim
+                bool autoTrimComputed[2] = {false, false}; // Mate has auto-trim loaded
+                string slamAutoTrimPerMate = "Auto"; // Auto|Yes|No — Auto: per-mate when PE (readNends>=2)
+                bool autoTrimPerMate = true;     // derived
                 uint32_t autoTrimFileIndex = 0;    // File index where auto-trim was computed
-                std::vector<double> varianceStddevTcRate; // Variance curve from detection pass (optional)
+                std::vector<double> varianceStddevTcRate;            // Mate-local stdev curve (mate1 / concat) from detection
+                std::vector<double> varianceStddevTcRateMate2;     // Mate2-local stdev when separateMateHistograms PE
                 
                 // Global SNP error rate estimation (from auto-trim detection pass)
                 double snpErrEst = 0.0;           // Estimated T→C error rate (p_err)
@@ -617,6 +702,11 @@ class Parameters {
 
         //solo
         ParametersSolo pSolo;
+        // Default-off annotation-only Visium HD GEX evidence stream. The writer
+        // is owned by STAR::main and shared read-only by mapping chunks.
+        string soloSpatialFeatureSidecar = "-";
+        bool soloSpatialFeatureSidecarEnabled = false;
+        spatial_feature_sidecar::Writer *spatialFeatureSidecarWriter = nullptr;
 
         // pf-multi config support (Cell Ranger-style CSV input)
         struct {
@@ -629,6 +719,10 @@ class Parameters {
             vector<string> crFastqMap;     // Map config FASTQ paths to actual paths (key=value pairs)
             string crMexUseGexBarcodes;    // DEPRECATED: CR-compat MEX now always uses GEX barcodes (ignored, kept for backward compatibility)
             int crMinUmi;                   // Minimum UMI threshold for CRISPR feature calling (default: 3)
+            string crGuideCaller;           // auto|gmm|ambient-fdr|both|none (default: auto)
+            double crGuideFdr;              // Ambient-FDR guide calling threshold (default: 0.01)
+            int crGuideFdrMinUmi;           // Ambient-FDR minimum UMI floor for calls (default: 1)
+            string crGuideFdrEmitQvalues;   // sparse|none (default: sparse)
             int crAssignMaxHamming;         // Optional: pass --maxHammingDistance to assignBarcodes (default: unset)
             int crAssignFeatureOffset;      // Optional: pass --feature_constant_offset to assignBarcodes (default: unset)
             int crAssignLimitSearch;        // Optional: pass --limit_search to assignBarcodes; -2 means unset
@@ -638,12 +732,93 @@ class Parameters {
             int crAssignBarcodeN;           // Optional: pass --barcode_n to assignBarcodes (default: unset)
             int crAssignConsumerThreads;    // Optional: pass --consumer_threads_per_set (default: unset)
             int crAssignSearchThreads;      // Optional: pass --search_threads (default: unset)
+            int crAssignReadBufferLines;    // Optional: PF reader queue lines (default: unset)
+            string crAssignCbqMode;         // auto|stream|range for CBQ feature assignment
             double crAssignMinPosterior;    // Optional: pass --min_posterior (default: unset)
             int crAssignLegacyCbRescue;     // Optional: pass legacy order-dependent pending CB rescue mode
             int crAssignSkipQcOutputs;      // Skip feature histograms/heatmaps in assignBarcodes outputs
             string crAssignFilteredBarcodes;// Optional filtered barcode file for assignBarcodes
             int crAssignAllowUnionWhitelist; // Accept mixed NXT+TRU filtered barcode sets
+            string ocmMultiEnable;           // no|yes|auto - OCM per-sample MEX materialization
+            string ocmMultiConfig;           // Cell Ranger multi config with [samples]
+            string ocmMultiBarcodeMode;      // posthoc|flex - when flex, use CB16+OCM_TAG8 before CB correction
+            string ocmMultiBamSplit;         // no|yes|auto - write OCM per-sample BAMs during tagged BAM replay
+            string ocmMultiOutputCompat;     // cellranger (default) - output layout compat mode
         } pfMulti;
+
+        // In-process Chromap ATAC (STAR libchromap contract); off unless chromapAtacEnable=1
+        struct {
+            int enabled = 0;
+            string referenceFasta;
+            string chromapIndex;
+            string inputFormat = "fastq";
+            string read1Csv;
+            string read2Csv;
+            string barcodeCsv;
+            string readPairCbqCsv;
+            string barcodeCbqCsv;
+            string readFormat;
+            string barcodeWhitelist;
+            string barcodeTranslate;
+            // If 1, the barcode translate table is read in natural
+            // <from_bc>\t<to_bc> order (col1 = source / hash key). Default 0
+            // preserves the historical Chromap convention where col2 is the
+            // hash key.
+            int barcodeTranslateFromFirst = 0;
+            string outputFragments;
+            string secondaryFragments;
+            string outputFormat = "BED";
+            string summary;
+            string tempDir;
+            int threads = 1;
+            int htsThreads = 0;
+            int sortBam = 0;
+            int writeIndex = 0;
+            uint64 sortBamRam = 8ULL * 1024 * 1024 * 1024;
+            int emitNoYBam = 0;
+            int emitYBam = 0;
+            string noYOutput;
+            string YOutput;
+            int lowMem = 0;
+            uint64 lowMemRam = 0;
+            int callMacs3FragPeaks = 0;
+            string macs3FragPeaksOutput;
+            string macs3FragSummitsOutput;
+            string macs3FragKeepIntermediates;
+            double macs3FragPvalue = 1e-5;
+            double macs3FragQvalue = 0.0;
+            int macs3FragMinLength = 200;
+            int macs3FragMaxGap = 30;
+            int macs3FragUint8Counts = 1;
+            int macs3FragLowMem = 0;
+            // Optional per-barcode ATAC evidence-from-peaks output (single-
+            // process equivalent of the standalone scrna_build_atac_evidence
+            // _from_peaks tool). When set to a real path, after concurrent
+            // chromap ATAC + MACS3 FRAG peaks finish, STAR's orchestration
+            // calls libscrna::atac::RunAtacEvidenceFromPeaks on the
+            // just-produced binary sidecar + atac_peaks.narrowPeak and writes
+            // the per-barcode evidence TSV here. Empty / "-" disables. No
+            // effect when the FRAG narrowPeak isn't produced.
+            string evidenceFromPeaksOutput;
+            string tn5ShiftMode = "classical";
+            string startMode = "postMapping";
+        } chromapAtac;
+
+        // Phase-2 Multiome ATAC peak/MEX materialization from the Chromap AEV1
+        // sidecar. This is off by default for Phase B parity validation.
+        struct {
+            string inlineMode = "no";
+            string barcodeTranslate;
+            string barcodeTranslateFromFirst = "yes";
+            string metricsTsv;
+            string mexOutDir;
+            string narrowPeak;
+            string summits;
+            string peakCallMode = "frag";
+            string macsProfile;
+            int threads = 0;       // 0 inherits runThreadN
+            uint64 maxBarcodes = 0;
+        } multiomeAtacPeakMex;
 
         // Default module flag groups - apply predefined parameter bundles
         struct {

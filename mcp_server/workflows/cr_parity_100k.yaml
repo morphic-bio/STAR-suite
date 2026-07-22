@@ -1,0 +1,83 @@
+# CellRanger Parity 100K Workflow Schema
+# Parsed from tests/run_cr_parity_100k.sh
+# Env-var-driven; parameters are mapped to CR_PARITY_* env vars at render time.
+
+id: "cr_parity_100k"
+title: "CellRanger Parity 100K"
+summary: "Run STAR-suite and CellRanger on downsampled A375 data and compare MEX outputs."
+kind: "shell_workflow"
+entry_script: "tests/run_cr_parity_100k.sh"
+supported_modes:
+  - "local"
+caveats:
+  - "Parameters are passed as CR_PARITY_* environment variables, not CLI flags."
+  - "Requires A375 dataset with downsampled GEX FASTQs at the specified tier."
+  - "Orchestrates run_cr_multi_smoke.sh, run_a375_cr_like_gex.sh, and compare_a375_star_mex.py."
+default_output_layout: "/tmp/cr_parity_100k/"
+
+stages:
+  - name: "cellranger"
+    title: "CellRanger Run"
+    description: "Run CellRanger multi on downsampled A375 GEX."
+  - name: "star"
+    title: "STAR GeneFull Run"
+    description: "Run STAR-suite in CR-like mode on same data."
+  - name: "comparison"
+    title: "MEX Comparison"
+    description: "Compare filtered MEX outputs and report concordance."
+
+parameter_groups:
+  - name: "performance"
+    title: "Performance"
+    parameters: ["tier", "threads"]
+  - name: "paths"
+    title: "Paths"
+    parameters: ["genome_dir", "gex_dir", "out_root"]
+
+parameters:
+  - name: "tier"
+    cli_flag: "--tier"
+    type: "int"
+    required: false
+    default: 100000
+    description: "Downsample tier (read count)."
+    env_var: "CR_PARITY_TIER"
+    skip_when_default: true
+
+  - name: "threads"
+    cli_flag: "--threads"
+    type: "int"
+    required: false
+    default: 4
+    description: "Thread count."
+    env_var: "CR_PARITY_THREADS"
+    skip_when_default: true
+
+  - name: "genome_dir"
+    cli_flag: "--genome-dir"
+    type: "directory"
+    required: false
+    default: "/storage/A375-CR-9.01/refdata-gex-GRCh38-2024-A/star_2.7.11b"
+    description: "Genome directory for both STAR and CellRanger."
+    env_var: "CR_PARITY_GENOME_DIR"
+    skip_when_default: true
+
+  - name: "gex_dir"
+    cli_flag: "--gex-dir"
+    type: "directory"
+    required: false
+    description: "GEX FASTQ directory. Defaults to A375 downsampled at the specified tier."
+    env_var: "CR_PARITY_GEX_DIR"
+
+  - name: "out_root"
+    cli_flag: "--out-root"
+    type: "directory"
+    required: false
+    default: "/tmp/cr_parity_100k"
+    description: "Output root for both runs and comparison."
+    env_var: "CR_PARITY_OUT_ROOT"
+    is_output_root: true
+
+rendering:
+  flag_order: ["tier", "threads", "genome_dir", "gex_dir", "out_root"]
+  omit_absent_optionals: true

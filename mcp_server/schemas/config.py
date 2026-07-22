@@ -96,6 +96,59 @@ class BinaryConfig(BaseModel):
     paths: list[str] = Field(description="Paths to search for the binary")
 
 
+class WorkflowConfig(BaseModel):
+    """Configuration entry for a structured workflow."""
+
+    id: str = Field(description="Unique workflow identifier")
+    title: str = Field(description="Human-readable title")
+    summary: str = Field(default="", description="One-line summary")
+    entry_script: str = Field(description="Entry script path (relative to repo root)")
+    kind: str = Field(default="shell_workflow", description="Workflow kind")
+    schema_file: str = Field(description="Path to workflow schema YAML (relative to repo root)")
+    visibility: str = Field(
+        default="public",
+        pattern="^(public|private)$",
+        description="public = visible without auth; private = requires valid auth_token",
+    )
+
+
+# Site-specific paths that fill the ${...} placeholders in DEFAULT_AGENT_PROTOCOL.
+# These are morphic's values, mirrored from the canonical
+# morphic-recipes/docs/authoring/localization.example.yaml. Other sites override
+# via `locations:` in config.yaml (the protocol text itself stays unchanged).
+DEFAULT_LOCATIONS = {
+    "PROVENANCE_ROOT": "/mnt/pikachu/morphic-provenance",
+    "RECIPES_ROOT": "/mnt/pikachu/morphic-recipes",
+}
+
+# Lab-agnostic protocol TEMPLATE. ${PROVENANCE_ROOT}/${RECIPES_ROOT} are filled at
+# load time from `locations` (see MCPConfig.rendered_agent_protocol). Canonical
+# copy: morphic-recipes/docs/authoring/agent_protocol.txt.
+DEFAULT_AGENT_PROTOCOL = (
+    "PROVENANCE-FIRST EXECUTION. Recipes and workflows are STARTING POINTS, not "
+    "turnkey commands. Resource/scale parameters (thread counts, memory, "
+    "--*-low-mem flags, start mode) MUST come from a known-good run, never invented. "
+    "Before running at non-trivial scale: (1) consult your provenance record "
+    "(${PROVENANCE_ROOT}) runs/<project>/<run_id>/{run.json,commands/} "
+    "for the exact parameters that actually worked; (2) reproduce them, adapting only "
+    "what the new input/machine requires and noting the deviation; (3) if none exists "
+    "at your scale, start from the closest run, scale conservatively, and record a new "
+    "run. Recipes live in your recipe repo (${RECIPES_ROOT}); this "
+    "server exposes suite workflows only — cross-reference recipes + provenance before "
+    "executing. Inventing thread/memory params and running blind is a known OOM "
+    "failure mode. "
+    "COMPOSE-UP EXECUTION. A recipe often emits a SUPERSET of outputs; do not run the "
+    "maximal set blindly. (1) Start from the MINIMAL functional core (the tested floor); "
+    "(2) ADD only the output layers your target workflow actually consumes — check the "
+    "recipe's COMPOSITION block for what is optional, how to add/drop it, and which "
+    "provenance run is the parameter oracle for each layer; (3) preview with --dry-run "
+    "(hand to a human if useful) before the real run. Emitting layers the target never "
+    "uses wastes compute and distorts benchmark comparisons against tools that emitted "
+    "less (e.g. RNA-velocity / extra BAMs vs Cell Ranger ARC --no-bam). Step back and "
+    "match outputs to the task instead of running a recipe verbatim."
+)
+
+
 class MCPConfig(BaseModel):
     """Root configuration model."""
 
@@ -108,6 +161,21 @@ class MCPConfig(BaseModel):
     scripts: list[ScriptConfig] = Field(default_factory=list)
     test_suites: list[TestSuiteConfig] = Field(default_factory=list)
     required_binaries: list[BinaryConfig] = Field(default_factory=list)
+    workflows: list[WorkflowConfig] = Field(default_factory=list)
+    agent_protocol: str = Field(
+        default=DEFAULT_AGENT_PROTOCOL,
+        description="Provenance-first + compose-up protocol TEMPLATE surfaced to agents on workflow discovery.",
+    )
+    locations: dict[str, str] = Field(
+        default_factory=lambda: dict(DEFAULT_LOCATIONS),
+        description="Site-specific paths that fill the ${...} placeholders in agent_protocol.",
+    )
+
+    @property
+    def rendered_agent_protocol(self) -> str:
+        """agent_protocol with ${PROVENANCE_ROOT}/${RECIPES_ROOT} filled from locations."""
+        from string import Template
+        return Template(self.agent_protocol).safe_substitute(self.locations)
 
     def get_script(self, name: str) -> Optional[ScriptConfig]:
         """Get a script by name."""
@@ -128,4 +196,11 @@ class MCPConfig(BaseModel):
         for dataset in self.datasets:
             if dataset.id == dataset_id:
                 return dataset
+        return None
+
+    def get_workflow(self, workflow_id: str) -> Optional["WorkflowConfig"]:
+        """Get a workflow config by ID."""
+        for wf in self.workflows:
+            if wf.id == workflow_id:
+                return wf
         return None

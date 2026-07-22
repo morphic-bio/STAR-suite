@@ -59,6 +59,12 @@ private:
     
     // Build CDF from FLD
     void buildCDF();
+
+    double computeGCBiasedEffectiveLength(
+        const libem::TranscriptSequence& txp,
+        int32_t raw_length,
+        double fld_effective_length
+    ) const;
 };
 
 #endif // EFFECTIVE_LENGTH_H

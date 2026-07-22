@@ -123,6 +123,8 @@ static uint8_t charToSamEncode(char c) {
 TranscriptSequence::TranscriptSequence(const std::string& seq) : length_(seq.size()) {
     // Pack 2 bases per byte (4-bit each)
     sequence_.resize((length_ + 1) / 2);
+    gc_count_.resize(length_, 0);
+    uint32_t gc_total = 0;
     for (size_t i = 0; i < length_; ++i) {
         uint8_t base = charToSamEncode(seq[i]);
         size_t byte = i >> 1;
@@ -133,6 +135,10 @@ TranscriptSequence::TranscriptSequence(const std::string& seq) : length_(seq.siz
             // Upper nibble
             sequence_[byte] = (base << 4);
         }
+        if (base == 2 || base == 4) {
+            ++gc_total;
+        }
+        gc_count_[i] = gc_total;
     }
 }
 
@@ -154,15 +160,10 @@ int32_t TranscriptSequence::gcFrac(int32_t start, int32_t end) const {
         return 0;
     }
     
-    int gc_count = 0;
     int total_bases = end - start + 1;
-    
-    for (int32_t i = start; i <= end; ++i) {
-        uint8_t base = baseAt(static_cast<size_t>(i));
-        // SAM 4-bit encoding: C=2, G=4
-        if (base == 2 || base == 4) {
-            gc_count++;
-        }
+    uint32_t gc_count = gc_count_[static_cast<size_t>(end)];
+    if (start > 0) {
+        gc_count -= gc_count_[static_cast<size_t>(start - 1)];
     }
     
     return static_cast<int32_t>(std::lrint(100.0 * gc_count / total_bases));
@@ -438,7 +439,8 @@ AlnModelProb AlignmentModel::computeLogLikelihood(
             bgLogLike += transitionProbs[readPosBin](0, 0);
             
             // Trace transition if enabled
-            if (traceStream_ && traceLevel_ >= ErrorModelTraceLevel::TRANSITION) {
+            if (traceStream_ && !currentQname_.empty() &&
+                traceLevel_ >= ErrorModelTraceLevel::TRANSITION) {
                 traceTransition(currentQname_, currentTid_, static_cast<uint32_t>(readIdx), readPosBin, prevStateIdx, curStateIdx, tp);
             }
             
@@ -476,7 +478,8 @@ double AlignmentModel::logLikelihood(
     auto result = computeLogLikelihood(cigar, cigarLen, readSeq, readLen, ref, refPos, transitionProbs, 0);
     
     // Trace alignment if enabled
-    if (traceStream_ && traceLevel_ >= ErrorModelTraceLevel::ALIGNMENT) {
+    if (traceStream_ && !currentQname_.empty() &&
+        traceLevel_ >= ErrorModelTraceLevel::ALIGNMENT) {
         uint32_t bin = 0;  // Use first bin for trace (could compute average)
         if (readLen > 0) {
             double invLen = static_cast<double>(readBins_) / readLen;
@@ -540,8 +543,9 @@ double AlignmentModel::logLikelihoodPairedAndUpdate(
         return LOG_1;
     }
     
-    // Determine which read is left/right based on position
-    bool read1IsLeft = (refPos1 <= refPos2);
+    // Match Salmon's paired-end error model: ties assign read2 to the left
+    // matrix because Salmon uses a strict transcript-position comparison.
+    bool read1IsLeft = (refPos1 < refPos2);
     
     // Update model if we're still in the update phase
     if (canUpdate_) {
@@ -594,8 +598,8 @@ double AlignmentModel::logLikelihoodPaired(
     double logLike = LOG_1;
     double bg = LOG_1;
     
-    // Determine which read is left/right based on position
-    bool read1IsLeft = (refPos1 <= refPos2);
+    // Match Salmon's paired-end error model tie handling.
+    bool read1IsLeft = (refPos1 < refPos2);
     
     if (cigar1 && cigarLen1 > 0) {
         auto& probs = read1IsLeft ? transitionProbsLeft_ : transitionProbsRight_;
@@ -738,7 +742,8 @@ void AlignmentModel::clearTraceContext() {
 }
 
 void AlignmentModel::traceRead(const std::string& qname, size_t numAlns, double errLikeSum, bool modelUsed, bool modelUpdated) {
-    if (traceStream_ && traceLevel_ >= ErrorModelTraceLevel::READ) {
+    if (traceStream_ && !qname.empty() &&
+        traceLevel_ >= ErrorModelTraceLevel::READ) {
         *traceStream_ << "READ " << qname 
                       << " numAlns=" << numAlns
                       << " errLikeSum=" << errLikeSum
@@ -750,7 +755,8 @@ void AlignmentModel::traceRead(const std::string& qname, size_t numAlns, double 
 }
 
 void AlignmentModel::traceAlignment(const std::string& qname, uint32_t tid, double fg, double bg, double errLike, uint32_t bin) {
-    if (traceStream_ && traceLevel_ >= ErrorModelTraceLevel::ALIGNMENT) {
+    if (traceStream_ && !qname.empty() &&
+        traceLevel_ >= ErrorModelTraceLevel::ALIGNMENT) {
         *traceStream_ << "ALN " << qname
                       << " tid=" << tid
                       << " fg=" << fg
@@ -763,7 +769,8 @@ void AlignmentModel::traceAlignment(const std::string& qname, uint32_t tid, doub
 }
 
 void AlignmentModel::traceTransition(const std::string& qname, uint32_t tid, uint32_t readPos, uint32_t bin, uint32_t prevState, uint32_t curState, double logProb) {
-    if (traceStream_ && traceLevel_ >= ErrorModelTraceLevel::TRANSITION) {
+    if (traceStream_ && !qname.empty() &&
+        traceLevel_ >= ErrorModelTraceLevel::TRANSITION) {
         *traceStream_ << "TRANS " << qname
                       << " tid=" << tid
                       << " readPos=" << readPos

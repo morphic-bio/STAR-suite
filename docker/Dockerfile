@@ -10,8 +10,11 @@
 FROM ubuntu:24.04 AS builder
 
 ARG MAKE_JOBS=16
+ARG STAR_WITH_CHROMAP=0
+ARG TARGETARCH
 ENV DEBIAN_FRONTEND=noninteractive
 ENV MAKE_JOBS=$MAKE_JOBS
+ENV STAR_WITH_CHROMAP=$STAR_WITH_CHROMAP
 
 # Build dependencies
 # - core/legacy uses vendored htslib
@@ -41,16 +44,38 @@ WORKDIR /build
 # Copy source (layer ordering: deps before source for cache)
 COPY . .
 
-# Remove host-generated artifacts that may contain host paths (Depend.list, etc.)
-RUN rm -f core/legacy/source/Depend.list core/legacy/source/*.o core/legacy/source/htslib/*.a 2>/dev/null || true
+# Remove every host-generated core artifact before an architecture-specific
+# build.  In particular, opal/opal.o must not survive an x86 -> ARM64 context
+# transition even if an older BuildKit source layer predates .dockerignore.
+RUN make clean \
+    && find . -type f \( -name '*.o' -o -name '*.a' \) -delete
 
-# Validate Makefile targets in order
-RUN make -j"${MAKE_JOBS}" core \
-    && make -j"${MAKE_JOBS}" flex \
-    && make -j"${MAKE_JOBS}" slam \
+# BuildKit supplies TARGETARCH for multi-platform builds. STAR's OPAL source
+# uses SIMDe, so x86-64 may request AVX2 while ARM64 must let SIMDe select its
+# native/emulated backend without an x86-only compiler flag.
+RUN resolved_targetarch="${TARGETARCH:-$(dpkg --print-architecture)}" \
+    && simd_config="$(make -s -C core/legacy/source print-simd-config)" \
+    && printf '%s\n' "$simd_config" \
+    && case "$resolved_targetarch" in \
+         amd64) printf '%s\n' "$simd_config" | grep -qx 'simd_flags=-mavx2' ;; \
+         arm64) printf '%s\n' "$simd_config" | grep -qx 'simd_flags=' ;; \
+         *) echo "unsupported Docker target architecture: $resolved_targetarch" >&2; exit 1 ;; \
+       esac
+
+# Validate Makefile targets in order. This single-repo Docker context does not
+# include the sibling Chromap-suite checkout, so it uses the explicit portable
+# compatibility build unless STAR_WITH_CHROMAP=1 is provided with Chromap-suite
+# available in the image.
+RUN make -j"${MAKE_JOBS}" core WITH_CHROMAP="${STAR_WITH_CHROMAP}" \
+    && make -j"${MAKE_JOBS}" flex WITH_CHROMAP="${STAR_WITH_CHROMAP}" \
+    && make -j"${MAKE_JOBS}" slam WITH_CHROMAP="${STAR_WITH_CHROMAP}" \
     && make -j"${MAKE_JOBS}" feature-barcodes-tools \
-    && make default \
-    && make all
+    && make default WITH_CHROMAP="${STAR_WITH_CHROMAP}" \
+    && make all WITH_CHROMAP="${STAR_WITH_CHROMAP}"
+
+# The spatial bridge and conventional Solo collapse paths share this resolver.
+# Gate both adapters against their pre-refactor rules on every CI image build.
+RUN make -C core/legacy/source test_MultiGeneUmiCr
 
 # Pre-build SLAM SNP EM test helper so Tier A can run without a compiler.
 RUN g++ -std=c++11 -O2 \
@@ -87,6 +112,9 @@ COPY --from=builder /build/slam/tools/slam_requant/slam_requant /usr/local/bin/s
 COPY --from=builder /build/slam/tools/pileup_snp/pileup_snp /usr/local/bin/pileup_snp
 COPY --from=builder /build/flex/tools/flexfilter/run_flexfilter_mex /usr/local/bin/run_flexfilter_mex
 COPY --from=builder /build/flex/tools/flexfilter/run_flexfilter_mex /usr/local/bin/flexfilter
+COPY --from=builder /build/flex/tools/molecule_first_resolver/molecule_first_resolver /usr/local/bin/molecule_first_resolver
+COPY --from=builder /build/flex/tools/molecule_first_resolver/molecule_first_bam_ledger /usr/local/bin/molecule_first_bam_ledger
+COPY --from=builder /build/flex/tools/molecule_first_resolver/molecule_first_materialize /usr/local/bin/molecule_first_materialize
 COPY --from=builder /build/core/features/yremove_fastq/tools/remove_y_reads/remove_y_reads /usr/local/bin/remove_y_reads
 
 WORKDIR /workspace
@@ -101,12 +129,17 @@ FROM suite-base AS test-tier-a
 
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    git-lfs \
+    python3 \
+    python3-pandas \
     samtools \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /build/tests /build/tests
 COPY --from=builder /build/scripts /build/scripts
+COPY --from=builder /build/flex/scripts /build/flex/scripts
 WORKDIR /build
 
 # -----------------------------------------------------------------------------
@@ -118,10 +151,12 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
     samtools \
     python3 \
+    python3-pandas \
     bc \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /build/tests /build/tests
 COPY --from=builder /build/scripts /build/scripts
+COPY --from=builder /build/flex/scripts /build/flex/scripts
 WORKDIR /build

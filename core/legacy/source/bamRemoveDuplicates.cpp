@@ -1,7 +1,11 @@
 #include <unordered_map>
 #include "bamRemoveDuplicates.h"
 #include <iostream>
+#if defined(WITH_CHROMAP) && WITH_CHROMAP
+#include <htslib/sam.h>
+#else
 #include "htslib/htslib/sam.h"
+#endif
 #include "IncludeDefine.h"
 #include SAMTOOLS_BGZF_H
 #include "ErrorWarning.h"

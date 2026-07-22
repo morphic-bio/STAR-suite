@@ -55,7 +55,7 @@ Ship discoverable, installable Ubuntu binaries for STAR Suite with low-friction 
 - Phase 5 (CI/CD Automation): **implemented (initial)**
   - Completed:
     - `.github/workflows/ci-pr.yml`
-    - `.github/workflows/ci-dev.yml`
+    - `.github/workflows/ci-dev-release.yml`
     - `.github/workflows/ci-master.yml`
     - `.github/workflows/release.yml`
   - Pending:
@@ -122,6 +122,158 @@ Ship discoverable, installable Ubuntu binaries for STAR Suite with low-friction 
   - clean `ubuntu:24.04` container install from the published installer bundle selected `glibc239` and `STAR --version` returned `2.7.11b`
 - This confirms the published release assets, checksums, and installer selection behavior match the intended compatibility model outside the repo build environment
 
+## Production Release Prep (2026-05-22)
+
+- Candidate tag: `v1.0.0`
+- Release notes: `docs/RELEASE_NOTES_v1.0.0.md`
+- Packaging metadata: `debian/changelog` entry `1.0.0-1`
+- Scope added since `v0.94.0`: native OCM composite-barcode production mode,
+  native per-sample OCM MEX/Velocyto materialization, updated JAX OCM and MSK
+  40KO production recipes, adaptive MT downstream packaging, and the current
+  multiome post-MEX handoff docs.
+- Version note: release artifacts and Debian packages use STAR Suite `1.0.0`;
+  `STAR --version` reports `1.0.0`. Upstream provenance is reported by
+  `STAR --upstream-version` (`2.7.11b`), and genome index compatibility is
+  reported by `STAR --genome-compat-version` (`2.7.4a`).
+- Local caveat: rebuild release binaries only from an idle production checkout
+  or from CI so no running wrapper observes a partially rebuilt
+  `core/legacy/source/STAR`.
+
+## Hotfix Release Prep (2026-05-28)
+
+- Candidate tag: `v1.0.1`
+- Release notes: `docs/RELEASE_NOTES_v1.0.1.md`
+- Packaging metadata: `debian/changelog` entry `1.0.1-1`
+- Scope added since `v1.0.0`: deterministic `process_features`
+  feature-bootstrap handling for CR-compatible dynamic multi-consumer runs and
+  corrected single-thread feature-match position reporting for
+  `--crAssignSearchThreads 1`.
+- Version note: release artifacts and Debian packages use STAR Suite `1.0.1`;
+  `STAR --version` reports `1.0.1`. Upstream provenance and genome index
+  compatibility remain `2.7.11b` and `2.7.4a`.
+
+## Feature Release Prep (2026-05-29)
+
+- Candidate tag: `v1.1.0`
+- Release notes: `docs/RELEASE_NOTES_v1.1.0.md`
+- Packaging metadata: `debian/changelog` entry `1.1.0-1`
+- Scope added since `v1.0.3`: native CBQ/BINSEQ input support through the
+  shared C++ reader, STAR read-buffer adapter, ordered FASTQ/FASTQ.gz-to-CBQ
+  encoder, STAR mapper/STARsolo/OCM/Flex/SLAM/process_features smoke coverage,
+  and PE-SLAM CBQ divergence testing.
+- Version note: release artifacts and Debian packages use STAR Suite `1.1.0`;
+  `STAR --version` reports `1.1.0`. Upstream provenance and genome index
+  compatibility remain `2.7.11b` and `2.7.4a`.
+
+## Minor Feature-Label Refresh (2026-06-01)
+
+- Candidate tag: `v1.3.0b`
+- Release notes: `docs/RELEASE_NOTES_v1.3.0b.md`
+- Packaging metadata: `debian/changelog` entry `1.3.0b-1`
+- Scope added since `v1.3.0`: explicit STAR-Flex Fixed RNA CBQ MCP recipe,
+  CBQ-native multiome recipe inputs for GEX plus libchromap ATAC, OCM CBQ
+  Y/noY recipe metadata, and recipe defaults that avoid FLEX `zcat` unless
+  explicitly requested.
+- Version note: release artifacts and Debian packages use STAR Suite
+  `1.3.0b`; `STAR --version` reports `1.3.0b`. Upstream provenance and genome
+  index compatibility remain `2.7.11b` and `2.7.4a`.
+- Hosted static tarballs and Debian packages are built through the portable
+  no-Chromap target so GitHub release artifacts do not depend on a sibling
+  Chromap-suite checkout; local production multiome builds still use the
+  Chromap-enabled `make core` default.
+
+## Feature Release Prep (2026-06-01)
+
+- Candidate tag: `v1.3.0`
+- Release notes: `docs/RELEASE_NOTES_v1.3.0.md`
+- Packaging metadata: `debian/changelog` entry `1.3.0-1`
+- Scope added since `v1.1.0`: parallel CBQ integration across STAR core and
+  Flex, native process_features CBQ range-reader coverage, native libchromap
+  multiome ATAC CBQ input, and PBMC multiome GEX+ATAC CBQ benchmark
+  documentation with ATAC Y/noY BAM validation.
+- Version note: release artifacts and Debian packages use STAR Suite `1.3.0`;
+  `STAR --version` reports `1.3.0`. Upstream provenance and genome index
+  compatibility remain `2.7.11b` and `2.7.4a`.
+
+## Feature Release v1.5.0 (2026-07-17)
+
+- Release tag: `v1.5.0`
+- Release notes: `docs/RELEASE_NOTES_v1.5.0.md`
+- Packaging metadata: `debian/changelog` entry `1.5.0-1`
+- Scope added since `v1.4.4`: opt-in native molecule-first barcode assignment,
+  deterministic candidate-preserving read cliques, candidate-specific UMI
+  collapse, strict/soft/hard/gated-hard products, and reference plus four-assay
+  100K conformance coverage.
+- Binary tarballs and compatibility bundles include both `STAR` and
+  `molecule_first_resolver`; Debian and Docker installations expose the same
+  companion executable.
+- Version note: release artifacts use tag `v1.5.0`, Debian packages use STAR
+  Suite `1.5.0`, and both executables report `1.5.0`. Upstream provenance and
+  genome index compatibility remain `2.7.11b` and `2.7.4a`.
+
+## Patch Release v1.4.4 (2026-07-17)
+
+- Release tag: `v1.4.4`
+- Release notes: `docs/RELEASE_NOTES_v1.4.4.md`
+- Packaging metadata: `debian/changelog` entry `1.4.4-1`
+- Scope added since `v1.4.3`: corrected feature-barcode namespace remapping in
+  integrated AnnData/MuData exports and deterministic UCSF per-sample Slurm
+  workflow contracts.
+- Version note: release artifacts use tag `v1.4.4`, Debian packages use STAR
+  Suite `1.4.4`, and `STAR --version` reports `1.4.4`. Upstream provenance and
+  genome index compatibility remain `2.7.11b` and `2.7.4a`.
+
+## Patch Release v1.4.2 (2026-06-29)
+
+- Release tag: `v1.4.2`
+- Release notes: `docs/RELEASE_NOTES_v1.4.2.md`
+- Packaging metadata: `debian/changelog` entry `1.4.2-1`
+- Scope added since `v1.4.1`: TranscriptVB Salmon parity improvements,
+  STAR-generated transcriptome GC/effective-length sidecar integration, OpenMP
+  linkage for the GC-bias helper, PE bulk benchmark production-mode
+  documentation, and SE/PE decompressed byte-parity regression coverage for the
+  samtools-style BAM sorter.
+- Version note: release artifacts use tag `v1.4.2`, Debian packages use STAR
+  Suite `1.4.2`, and `STAR --version` reports `1.4.2`. Upstream provenance and
+  genome index compatibility remain `2.7.11b` and `2.7.4a`.
+
+## Hotfix Release Prep (2026-06-20)
+
+- Candidate tag: `v1.4.1`
+- Release notes: `docs/RELEASE_NOTES_v1.4.1.md`
+- Packaging metadata: `debian/changelog` entry `1.4.1-1`
+- Scope added since `v1.3.1`: Flex/Solo dependency tracking now covers
+  VPATH-built top-level Flex sources so incremental builds do not reuse stale
+  objects after shared header/layout changes. The tiny public Flex smoke wrapper
+  now validates both no-BAM and unsorted-BAM output modes.
+- Version note: release artifacts use tag `v1.4.1`, Debian packages use STAR
+  Suite `1.4.1`, and `STAR --version` reports `1.4.1`. Upstream provenance and
+  genome index compatibility remain `2.7.11b` and `2.7.4a`.
+
+## Hotfix Release Prep (2026-05-29)
+
+- Candidate tag: `v1.0.3`
+- Release notes: `docs/RELEASE_NOTES_v1.0.3.md`
+- Packaging metadata: `debian/changelog` entry `1.0.3-1`
+- Scope added since `v1.0.2`: non-Flex Solo bridge determinism is hardened by
+  canonicalizing worker-local bridge hashes before collapse, aggregating
+  ambiguous cell-barcode evidence deterministically, and using the resolved
+  bridge result for read-accounting statistics.
+- Version note: release artifacts and Debian packages use STAR Suite `1.0.3`;
+  `STAR --version` reports `1.0.3`. Upstream provenance and genome index
+  compatibility remain `2.7.11b` and `2.7.4a`.
+
+- Candidate tag: `v1.0.2`
+- Release notes: `docs/RELEASE_NOTES_v1.0.2.md`
+- Packaging metadata: `debian/changelog` entry `1.0.2-1`
+- Scope added since `v1.0.1`: exact duplicate UMI rows are combined before
+  1MM_CR correction on the non-Flex Solo direct inline-hash bridge collapse
+  path. This prevents duplicate exact UMIs split across worker-local bridge
+  hashes from entering the CR correction routine as independent observations.
+- Version note: release artifacts and Debian packages use STAR Suite `1.0.2`;
+  `STAR --version` reports `1.0.2`. Upstream provenance and genome index
+  compatibility remain `2.7.11b` and `2.7.4a`.
+
 ## Distribution Strategy
 
 Use two channels in parallel:
@@ -162,6 +314,8 @@ Notes:
 - The installer bundle is the preferred non-`.deb` installation path.
 - Direct compatibility tarballs are for manual installs and HPC/container edge cases.
 - `v0.*` tags are prereleases for testing. They publish release artifacts and a versioned container tag, but do not move `latest`.
+- `v1.0.0` is the first production release and may move the `latest` container
+  tag when release CI succeeds.
 - Native `build_static_tarball.sh` runs still inherit the host toolchain/glibc baseline.
 - The CI/release path publishes multiple tarballs because Linux may reject a binary built for a newer runtime environment before STAR Suite starts.
 - The installer bundle checks the host environment and selects the highest compatible bundled binary automatically.
@@ -243,9 +397,10 @@ For technical users:
 1. Add `ci-pr.yml`:
    - Trigger: `pull_request`
    - Run fast checks only (`amd64` build + Tier A smoke), no publish.
-2. Add `ci-dev.yml`:
-   - Trigger: push to `dev`
-   - Run integration checks and optional publish to `dev-<sha>`.
+2. Add `ci-dev-release.yml`:
+   - Trigger: push to `dev-release` and `dev-release-*`
+   - Run integration checks and optional publish to `dev-release-<sha>` /
+     `dev-release-latest`.
 3. Add `ci-master.yml`:
    - Trigger: push to `master`
    - Build/push multi-arch runtime images (`amd64`, `arm64`).

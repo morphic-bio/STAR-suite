@@ -8,6 +8,8 @@
 #include <iostream>
 #include <unordered_map>
 #include <algorithm>
+#include <array>
+#include <cctype>
 
 struct Args {
     std::string dumpPath;
@@ -22,15 +24,19 @@ struct Args {
     std::string qcReportPrefix;
     std::string dumpOut;
     std::string dumpWeightsOut;
-    int trim5p = 0;
-    int trim3p = 0;
+    std::string cbOutFile;
+    std::string cbFormat = "star";
+    std::array<int, 2> trim5pMate{{0, 0}};
+    std::array<int, 2> trim3pMate{{0, 0}};
     double errorRate = -1.0;
     double convRate = -1.0;
+    int cbOut = 0;
     uint32_t autoTrimMaxReads = 100000;
     uint32_t autoTrimMinReads = 1000;
     uint32_t autoTrimSmoothWindow = 5;
     uint32_t autoTrimSegMinLen = 3;
     uint32_t autoTrimMaxTrim = 15;
+    uint32_t minCallableLength = 30;
 };
 
 static bool parseArgs(int argc, char** argv, Args* args) {
@@ -46,8 +52,16 @@ static bool parseArgs(int argc, char** argv, Args* args) {
         if (a == "--dump") args->dumpPath = next("--dump");
         else if (a == "--out") args->outPrefix = next("--out");
         else if (a == "--slamSnpMaskIn") args->maskPath = next("--slamSnpMaskIn");
-        else if (a == "--trim5p") args->trim5p = std::stoi(next("--trim5p"));
-        else if (a == "--trim3p") args->trim3p = std::stoi(next("--trim3p"));
+        else if (a == "--trim5p") {
+            int v = std::stoi(next("--trim5p"));
+            args->trim5pMate[0] = v;
+            args->trim5pMate[1] = v;
+        }
+        else if (a == "--trim3p") {
+            int v = std::stoi(next("--trim3p"));
+            args->trim3pMate[0] = v;
+            args->trim3pMate[1] = v;
+        }
         else if (a == "--autoTrim") args->autoTrimMode = next("--autoTrim");
         else if (a == "--trimScope") args->trimScope = next("--trimScope");
         else if (a == "--strandness") args->strandness = next("--strandness");
@@ -57,6 +71,9 @@ static bool parseArgs(int argc, char** argv, Args* args) {
         else if (a == "--slamQcReport") args->qcReportPrefix = next("--slamQcReport");
         else if (a == "--dumpOut") args->dumpOut = next("--dumpOut");
         else if (a == "--dumpWeightsOut") args->dumpWeightsOut = next("--dumpWeightsOut");
+        else if (a == "--slamCbOut") args->cbOut = std::stoi(next("--slamCbOut"));
+        else if (a == "--slamCbOutFile") args->cbOutFile = next("--slamCbOutFile");
+        else if (a == "--slamCbFormat") args->cbFormat = next("--slamCbFormat");
         else if (a == "--errorRate") args->errorRate = std::stod(next("--errorRate"));
         else if (a == "--convRate") args->convRate = std::stod(next("--convRate"));
         else if (a == "--autoTrimDetectionReads") args->autoTrimMaxReads = static_cast<uint32_t>(std::stoul(next("--autoTrimDetectionReads")));
@@ -64,6 +81,9 @@ static bool parseArgs(int argc, char** argv, Args* args) {
         else if (a == "--autoTrimSmoothWindow") args->autoTrimSmoothWindow = static_cast<uint32_t>(std::stoul(next("--autoTrimSmoothWindow")));
         else if (a == "--autoTrimSegMinLen") args->autoTrimSegMinLen = static_cast<uint32_t>(std::stoul(next("--autoTrimSegMinLen")));
         else if (a == "--autoTrimMaxTrim") args->autoTrimMaxTrim = static_cast<uint32_t>(std::stoul(next("--autoTrimMaxTrim")));
+        else if (a == "--slamMinCallableLength" || a == "--minCallableLength") {
+            args->minCallableLength = static_cast<uint32_t>(std::stoul(next(a.c_str())));
+        }
         else {
             std::cerr << "Unknown arg: " << a << "\n";
             return false;
@@ -72,7 +92,22 @@ static bool parseArgs(int argc, char** argv, Args* args) {
     if (args->dumpPath.empty() || args->outPrefix.empty()) {
         std::cerr << "Usage: --dump <path> --out <prefix> [--slamSnpMaskIn <bed.gz>] [--trim5p N --trim3p N] "
                      "[--slamWeightMode dump|alignments|uniform] [--slamWeightFile <path>] [--slamWeightMatch auto|order|key] "
-                     "[--dumpOut <path>] [--dumpWeightsOut <path>]\n";
+                     "[--dumpOut <path>] [--dumpWeightsOut <path>] "
+                     "[--slamCbOut 0|1] [--slamCbOutFile <path>] [--slamCbFormat star|ezbakr] "
+                     "[--slamMinCallableLength N]\n";
+        return false;
+    }
+    if (args->cbOut != 0 && args->cbOut != 1) {
+        std::cerr << "--slamCbOut must be 0 or 1\n";
+        return false;
+    }
+    if (args->cbFormat.empty() || args->cbFormat == "-") {
+        args->cbFormat = "star";
+    }
+    std::transform(args->cbFormat.begin(), args->cbFormat.end(), args->cbFormat.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    if (args->cbFormat != "star" && args->cbFormat != "ezbakr") {
+        std::cerr << "--slamCbFormat must be star or ezbakr\n";
         return false;
     }
     return true;
@@ -149,11 +184,25 @@ static SlamVarianceTrimResult computeTrimForReads(const std::vector<SlamBuffered
                                                   uint32_t minReads,
                                                   uint32_t smoothWindow,
                                                   uint32_t minSegLen,
-                                                  uint32_t maxTrim,
-                                                  uint32_t readLength) {
+                                                  uint32_t maxTrim) {
+    uint32_t mateLen0_max = 0;
+    uint32_t mateLen1_max = 0;
+    for (const auto& r : reads) {
+        mateLen0_max = std::max(mateLen0_max, r.readLength0);
+        mateLen1_max = std::max(mateLen1_max, r.readLength1);
+    }
+    if (mateLen0_max == 0 && mateLen1_max == 0) {
+        mateLen0_max = 100;
+    }
+    const uint32_t concatLen = mateLen0_max + mateLen1_max;
+
     SlamVarianceAnalyzer analyzer(maxReads, minReads, smoothWindow, minSegLen, maxTrim);
+    const bool sep = mateLen1_max > 0;
+    analyzer.setSeparateMateHistograms(sep);
+
     for (const auto& r : reads) {
         if (!analyzer.recordRead()) break;
+        const uint32_t split = r.readLength0;
         for (const auto& p : r.positions) {
             bool isT = false;
             bool isTc = false;
@@ -164,10 +213,20 @@ static SlamVarianceTrimResult computeTrimForReads(const std::vector<SlamBuffered
                 isT = (p.refBase == 0);
                 isTc = (p.refBase == 0 && p.readBase == 2);
             }
-            analyzer.recordPosition(p.readPos, p.qual, isT, isTc);
+            if (sep) {
+                const uint32_t mateIndex = p.secondMate ? 1u : 0u;
+                uint32_t mateLocalPos = p.readPos;
+                if (mateIndex != 0u) {
+                    mateLocalPos = (p.readPos >= split) ? (p.readPos - split) : 0u;
+                }
+                analyzer.recordPositionMate(mateLocalPos, static_cast<uint8_t>(mateIndex),
+                                            p.qual, isT, isTc);
+            } else {
+                analyzer.recordPosition(p.readPos, p.qual, isT, isTc);
+            }
         }
     }
-    return analyzer.computeTrim(readLength);
+    return analyzer.computeTrimUnified(concatLen, mateLen0_max, mateLen1_max, sep);
 }
 
 int main(int argc, char** argv) {
@@ -211,13 +270,6 @@ int main(int argc, char** argv) {
         }
         maskPtr = &mask;
     }
-
-    // Determine read length (for trim computation)
-    uint32_t readLength = 0;
-    for (const auto& r : reads) {
-        readLength = std::max(readLength, static_cast<uint32_t>(r.readLength0 + r.readLength1));
-    }
-    if (readLength == 0) readLength = 100;
 
     if (!args.weightFile.empty()) {
         SlamWeightMetadata wmeta;
@@ -294,8 +346,7 @@ int main(int argc, char** argv) {
                                                            args.autoTrimMinReads,
                                                            args.autoTrimSmoothWindow,
                                                            args.autoTrimSegMinLen,
-                                                           args.autoTrimMaxTrim,
-                                                           readLength);
+                                                           args.autoTrimMaxTrim);
                 if (!perFileTrim[kv.first].success) {
                     std::cerr << "ERROR: --autoTrim variance requested but insufficient stdev data to compute trims "
                               << "for file_index=" << kv.first
@@ -310,22 +361,24 @@ int main(int argc, char** argv) {
                                              args.autoTrimMinReads,
                                              args.autoTrimSmoothWindow,
                                              args.autoTrimSegMinLen,
-                                             args.autoTrimMaxTrim,
-                                             readLength);
+                                             args.autoTrimMaxTrim);
             if (!globalTrim.success) {
                 std::cerr << "ERROR: --autoTrim variance requested but insufficient stdev data to compute trims "
                           << "(reads_analyzed=" << globalTrim.readsAnalyzed
                           << " min_reads=" << args.autoTrimMinReads << ")\n";
                 return 1;
             }
-            args.trim5p = globalTrim.trim5p;
-            args.trim3p = globalTrim.trim3p;
+            args.trim5pMate[0] = globalTrim.mates[0].trim5p;
+            args.trim5pMate[1] = globalTrim.mates[1].trim5p;
+            args.trim3pMate[0] = globalTrim.mates[0].trim3p;
+            args.trim3pMate[1] = globalTrim.mates[1].trim3p;
         }
     }
 
     auto runPartition = [&](const std::vector<SlamBufferedRead>& partReads,
-                            int trim5p, int trim3p) {
-        SlamQuant q(meta.geneIds.size(), false);
+                            const std::array<int, 2>& trim5pVals,
+                            const std::array<int, 2>& trim3pVals) {
+        SlamQuant q(meta.geneIds.size(), meta.allowedGenes, false);
         q.enableReadBuffer(static_cast<uint64_t>(partReads.size()));
         for (const auto& r : partReads) {
             SlamBufferedRead adjusted(r);
@@ -340,37 +393,49 @@ int main(int argc, char** argv) {
             q.bufferRead(std::move(adjusted));
         }
         SlamCompatConfig cfg;
-        cfg.trim5p = trim5p;
-        cfg.trim3p = trim3p;
+        cfg.trim5p = trim5pVals;
+        cfg.trim3p = trim3pVals;
         SlamCompat compat(cfg, {}, {});
-        q.replayBufferedReads(&compat, maskPtr, strandnessToInt(args.strandness));
+        q.replayBufferedReads(&compat, maskPtr, strandnessToInt(args.strandness),
+                              args.minCallableLength);
         return q;
     };
 
-    SlamQuant merged(meta.geneIds.size(), false);
+    SlamQuant merged(meta.geneIds.size(), meta.allowedGenes, false);
     if (args.trimScope == "per-file") {
         std::unordered_map<uint32_t, std::vector<SlamBufferedRead>> byFile;
         for (const auto& r : reads) {
             byFile[r.fileIndex].push_back(r);
         }
         for (const auto& kv : byFile) {
-            int t5 = args.trim5p;
-            int t3 = args.trim3p;
+            std::array<int, 2> t5 = args.trim5pMate;
+            std::array<int, 2> t3 = args.trim3pMate;
             auto it = perFileTrim.find(kv.first);
             if (it != perFileTrim.end() && it->second.success) {
-                t5 = it->second.trim5p;
-                t3 = it->second.trim3p;
+                t5[0] = it->second.mates[0].trim5p;
+                t5[1] = it->second.mates[1].trim5p;
+                t3[0] = it->second.mates[0].trim3p;
+                t3[1] = it->second.mates[1].trim3p;
             }
-            SlamQuant q = runPartition(kv.second, t5, t3);
-            merged.merge(q);
+            SlamQuant qPart = runPartition(kv.second, t5, t3);
+            merged.merge(qPart);
         }
     } else {
-        SlamQuant q = runPartition(reads, args.trim5p, args.trim3p);
+        SlamQuant q = runPartition(reads, args.trim5pMate, args.trim3pMate);
         merged.merge(q);
     }
 
     std::string outBase = args.outPrefix;
     writeSlamOut(outBase + "SlamQuant.out", meta.geneIds, meta.geneNames, merged, errorRate, convRate);
+    if (args.cbOut != 0) {
+        std::string cbPath = (args.cbOutFile.empty() || args.cbOutFile == "-")
+                             ? (outBase + "SlamQuant.cB.tsv")
+                             : args.cbOutFile;
+        if (!merged.writeCountBinomial(meta.geneIds, meta.geneNames, cbPath, outBase, args.cbFormat)) {
+            std::cerr << "Failed to write count-binomial output: " << cbPath << "\n";
+            return 1;
+        }
+    }
     merged.writeDiagnostics(outBase + "SlamQuant.out.diagnostics");
     merged.writeTransitions(outBase + "SlamQuant.out.transitions.tsv");
     merged.writeMismatches(outBase + "SlamQuant.out.mismatches.tsv", outBase);
@@ -414,7 +479,17 @@ int main(int argc, char** argv) {
         if (args.autoTrimMode == "variance" && globalTrim.success) {
             trimPtr = &globalTrim;
         }
-        writeSlamQcComprehensiveJson(merged, jsonPath, args.trim5p, args.trim3p, trimPtr);
+        uint32_t qcML0 = 0;
+        uint32_t qcML1 = 0;
+        for (const auto& r : reads) {
+            qcML0 = std::max(qcML0, r.readLength0);
+            qcML1 = std::max(qcML1, r.readLength1);
+        }
+        if (qcML0 == 0 && qcML1 == 0) {
+            qcML0 = 100;
+        }
+        writeSlamQcComprehensiveJson(merged, jsonPath, args.trim5pMate[0], args.trim3pMate[0], args.trim5pMate[1],
+                                    args.trim3pMate[1], trimPtr, nullptr, nullptr, qcML0, qcML1);
         writeSlamQcComprehensiveHtml(jsonPath, htmlPath);
     }
 

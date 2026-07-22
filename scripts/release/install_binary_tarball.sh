@@ -4,6 +4,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SRC_BIN="${SCRIPT_DIR}/bin/STAR"
+MOLECULE_FIRST_TOOLS=(molecule_first_resolver molecule_first_bam_ledger molecule_first_materialize)
 METADATA_FILE="${SCRIPT_DIR}/release-metadata.env"
 
 PREFIX=""
@@ -76,6 +77,12 @@ if [[ ! -x "${SRC_BIN}" ]]; then
   echo "ERROR: bundled binary not found: ${SRC_BIN}" >&2
   exit 1
 fi
+for tool in "${MOLECULE_FIRST_TOOLS[@]}"; do
+  if [[ ! -x "${SCRIPT_DIR}/bin/${tool}" ]]; then
+    echo "ERROR: bundled binary not found: ${SCRIPT_DIR}/bin/${tool}" >&2
+    exit 1
+  fi
+done
 
 if [[ -f "${METADATA_FILE}" ]]; then
   # shellcheck disable=SC1090
@@ -105,18 +112,32 @@ mkdir -p "${BINDIR}"
 
 if [[ -e "${TARGET_PATH}" && "${FORCE}" -ne 1 ]]; then
   if cmp -s "${SRC_BIN}" "${TARGET_PATH}"; then
-    echo "Binary already installed at ${TARGET_PATH}" 
-    warn_if_path_missing "${BINDIR}"
-    exit 0
+    echo "STAR binary already installed at ${TARGET_PATH}; verifying companion tools"
+  else
+    echo "ERROR: target already exists: ${TARGET_PATH} (use --force to overwrite)" >&2
+    exit 1
   fi
-  echo "ERROR: target already exists: ${TARGET_PATH} (use --force to overwrite)" >&2
-  exit 1
 fi
+for tool in "${MOLECULE_FIRST_TOOLS[@]}"; do
+  target="${BINDIR}/${tool}"
+  if [[ -e "${target}" && "${FORCE}" -ne 1 ]] && ! cmp -s "${SCRIPT_DIR}/bin/${tool}" "${target}"; then
+    echo "ERROR: target already exists: ${target} (use --force to overwrite)" >&2
+    exit 1
+  fi
+done
 
 tmp_target="${TARGET_PATH}.tmp.$$"
 cp "${SRC_BIN}" "${tmp_target}"
 chmod 0755 "${tmp_target}"
 mv -f "${tmp_target}" "${TARGET_PATH}"
+
+for tool in "${MOLECULE_FIRST_TOOLS[@]}"; do
+  target="${BINDIR}/${tool}"
+  temporary="${target}.tmp.$$"
+  cp "${SCRIPT_DIR}/bin/${tool}" "${temporary}"
+  chmod 0755 "${temporary}"
+  mv -f "${temporary}" "${target}"
+done
 
 if [[ -n "${COMPAT_LABEL:-}" ]]; then
   echo "Installed STAR-suite (${COMPAT_LABEL}) to ${TARGET_PATH}"

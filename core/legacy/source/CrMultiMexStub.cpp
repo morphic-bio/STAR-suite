@@ -9,6 +9,8 @@
 #include <sys/stat.h>
 #include <stdexcept>
 #include <dirent.h>
+#include <unordered_set>
+#include <cstdio>
 using std::cerr;
 using std::endl;
 
@@ -65,9 +67,12 @@ vector<FeatureRow> loadFeatureCsv(const string& csvPath) {
         throw runtime_error("Feature CSV header must include 'name' or 'id'");
     }
     
-    // Read data rows
+    // Read data rows (first-definition-wins on duplicate feature names; matches io.c)
     string line;
+    std::unordered_set<string> seenNames;
+    int lineNumber = 1;
     while (getline(file, line)) {
+        ++lineNumber;
         if (line.empty()) continue;
         
         vector<string> fields;
@@ -121,9 +126,19 @@ vector<FeatureRow> loadFeatureCsv(const string& csvPath) {
             row.name = row.id;
         }
         
-        if (!row.id.empty() || !row.name.empty()) {
-            result.push_back(row);
+        const string dedupeKey = !row.name.empty() ? row.name : row.id;
+        if (dedupeKey.empty()) {
+            continue;
         }
+        if (seenNames.count(dedupeKey)) {
+            fprintf(stderr,
+                    "Warning: duplicate feature name '%s' in %s at line %d; "
+                    "ignoring later definition and keeping the first\n",
+                    dedupeKey.c_str(), csvPath.c_str(), lineNumber);
+            continue;
+        }
+        seenNames.insert(dedupeKey);
+        result.push_back(row);
     }
     
     if (result.empty()) {

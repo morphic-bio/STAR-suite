@@ -1,0 +1,67 @@
+======================================================================
+Parity Metrics: MSK_30polyKO_ES_gRNA
+======================================================================
+CR MEX:   /storage/MSK-perturb-comparison/cr_paper_bench_ES_20260430_054814/cr_gex_grna/cr9_gex_grna/outs/per_sample_outs/cr9_gex_grna/count/sample_filtered_feature_bc_matrix
+STAR MEX: /storage/MSK-perturb-comparison/paper_bench_ES_20260430_054814/outs/filtered_feature_bc_matrix
+
+--- all ---
+  CR cells:       32670
+  STAR cells:     33226
+  CR features:    38636
+  STAR features:  284615
+  CR total UMIs:  276,021,992
+  STAR total UMIs:290,463,730
+
+  Barcode Jaccard:           0.9822
+  Common barcodes:           32652
+  Per-barcode Pearson:       0.999480
+  Per-barcode Spearman:      0.999398
+
+  Common features:           34285
+  Per-feature Pearson:       0.994336
+  Per-feature Spearman:      0.989549
+
+--- Gene Expression ---
+  CR cells:       32670
+  STAR cells:     33226
+  CR features:    38606
+  STAR features:  38606
+  CR total UMIs:  262,879,291
+  STAR total UMIs:266,073,993
+
+  Barcode Jaccard:           0.9822
+  Common barcodes:           32652
+  Per-barcode Pearson:       0.999928
+  Per-barcode Spearman:      0.999930
+
+  Common features:           34256
+  Per-feature Pearson:       0.993724
+  Per-feature Spearman:      0.989523
+
+--- CRISPR Guide Capture ---
+  CR cells:       32670
+  STAR cells:     33226
+  CR features:    29
+  STAR features:  30
+  CR total UMIs:  13,142,701
+  STAR total UMIs:13,801,179
+
+  Barcode Jaccard:           0.9838
+  Common barcodes:           32486
+  Per-barcode Pearson:       0.994940
+  Per-barcode Spearman:      0.969633
+
+  Common features:           29
+  Per-feature Pearson:       0.999927
+  Per-feature Spearman:      0.999507
+
+--- CRISPR Call Concordance ---
+  CR cells with calls:       26185
+  STAR cells with calls:     33226
+  Common cells:              26172
+  Exact call match:          25560 / 26172
+  Exact match %:             97.66
+  UMI Pearson:               0.999434
+  UMI Spearman:              0.997803
+
+TSV written to /mnt/pikachu/STAR-suite/comparisons/msk_30polyko_full_benchmark_ES_20260430/parity_grna.tsv

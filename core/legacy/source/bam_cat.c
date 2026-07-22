@@ -52,8 +52,13 @@ THE SOFTWARE.
 #include <stdlib.h>
 #include <unistd.h>
 
+#if defined(WITH_CHROMAP) && WITH_CHROMAP
+#include <htslib/bgzf.h>
+#include <htslib/sam.h>
+#else
 #include "htslib/htslib/bgzf.h"
 #include "htslib/htslib/sam.h"
+#endif
 #include <cstring>
 
 #define BUF_SIZE 0x10000
@@ -138,6 +143,4 @@ int bam_cat(int nfn, char * const *fn, const bam_hdr_t *h, const char* outbam)
     bgzf_close(fp);
     return 0;
 }
-
-
 

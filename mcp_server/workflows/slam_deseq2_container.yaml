@@ -1,0 +1,104 @@
+# Private recipe: build the pinned SLAM DESeq2 analysis image.
+id: slam_deseq2_container
+title: SLAM DESeq2 Container
+summary: Build and verify the pinned DESeq2/tximport container used for SLAM differential expression.
+kind: shell_workflow
+entry_script: scripts/docker/build_slam_deseq2_image.sh
+supported_modes: [local]
+caveats:
+  - Builds a Docker image and may use network, CPU, and disk IO.
+  - Do not launch while active production or benchmark jobs are sharing the host.
+  - Rendered parameters are environment overrides consumed by the build script.
+default_output_layout: Local Docker image tag plus docker image inspect metadata.
+
+scripts:
+  - role: entry
+    path: scripts/docker/build_slam_deseq2_image.sh
+    description: Build and run the pinned SLAM DESeq2 image.
+    language: bash
+  - role: dockerfile
+    path: docker/slam-deseq2/Dockerfile
+    description: Bioconductor/DESeq2/tximport image definition with version assertions.
+    language: dockerfile
+  - role: verifier
+    path: docker/slam-deseq2/check_deseq2_versions.R
+    description: Runtime version check for R, Bioconductor, DESeq2, and tximport.
+    language: R
+
+stages:
+  - name: build
+    title: Docker Build
+    script: scripts/docker/build_slam_deseq2_image.sh
+    description: Builds the image using pinned Bioconductor, DESeq2, and tximport versions.
+  - name: verify
+    title: Version Verification
+    script: docker/slam-deseq2/check_deseq2_versions.R
+    description: Runs the image and verifies package versions.
+
+parameter_groups:
+  - name: image
+    title: Image
+    parameters: [image_tag, bioconductor_image]
+  - name: versions
+    title: Pinned Versions
+    parameters: [bioconductor_version, deseq2_version, tximport_version]
+
+parameters:
+  - name: image_tag
+    cli_flag: --image-tag
+    type: string
+    required: false
+    default: star-suite/slam-deseq2:bioc3.23-deseq2-1.52.0-tximport-1.40.0
+    description: Docker image tag to build.
+    category: image
+    source: environment
+    env_var: IMAGE_TAG
+
+  - name: bioconductor_image
+    cli_flag: --bioconductor-image
+    type: string
+    required: false
+    default: bioconductor/bioconductor_docker:RELEASE_3_23-r-4.6.0
+    description: Base Bioconductor Docker image.
+    category: image
+    source: environment
+    env_var: BIOCONDUCTOR_IMAGE
+
+  - name: bioconductor_version
+    cli_flag: --bioconductor-version
+    type: string
+    required: false
+    default: "3.23"
+    description: Expected Bioconductor release.
+    category: versions
+    source: environment
+    env_var: BIOCONDUCTOR_VERSION
+
+  - name: deseq2_version
+    cli_flag: --deseq2-version
+    type: string
+    required: false
+    default: "1.52.0"
+    description: Expected DESeq2 version.
+    category: versions
+    source: environment
+    env_var: DESEQ2_VERSION
+
+  - name: tximport_version
+    cli_flag: --tximport-version
+    type: string
+    required: false
+    default: "1.40.0"
+    description: Expected tximport version.
+    category: versions
+    source: environment
+    env_var: TXIMPORT_VERSION
+
+rendering:
+  omit_absent_optionals: true
+  flag_order:
+    - image_tag
+    - bioconductor_image
+    - bioconductor_version
+    - deseq2_version
+    - tximport_version

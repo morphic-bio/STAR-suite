@@ -77,7 +77,6 @@ run_star() {
       --soloKeysCompat cr \
       --outSAMtype None \
       --soloSampleSearchNearby no \
-      --readFilesCommand zcat \
       --readFilesIn "${READS_R2}" "${READS_R1}" \
       --outFileNamePrefix "${out_dir}/" \
       "$@" \

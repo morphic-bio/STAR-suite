@@ -1,0 +1,53 @@
+# Genome Generate Validation Workflow Schema
+# Parsed from tests/run_genome_generate_validation.sh
+
+id: "genome_generate_validation"
+title: "Genome Generate Validation"
+summary: "Tier-A self-contained test: generates synthetic genome+GTF and validates STAR genomeGenerate correctness."
+kind: "shell_workflow"
+entry_script: "tests/run_genome_generate_validation.sh"
+supported_modes:
+  - "local"
+  - "container-safe"
+caveats:
+  - "Fully self-contained — generates synthetic chr1 (500bp) + chrY (300bp) and 2-gene GTF inline."
+  - "No external fixtures or datasets required."
+default_output_layout: "/tmp/genome_generate_validation_<timestamp>/"
+
+stages:
+  - name: "generate"
+    title: "Generate Synthetic Data"
+    description: "Create synthetic multi-chromosome reference and minimal GTF."
+  - name: "index"
+    title: "Genome Generate"
+    description: "Run STAR genomeGenerate on synthetic reference."
+  - name: "validate"
+    title: "Validate Index"
+    description: "Verify index integrity and expected output files."
+
+parameter_groups:
+  - name: "performance"
+    title: "Performance"
+    parameters: ["threads"]
+  - name: "output"
+    title: "Output"
+    parameters: ["outdir"]
+
+parameters:
+  - name: "threads"
+    cli_flag: "--threads"
+    type: "int"
+    required: false
+    default: 2
+    description: "STAR thread count."
+
+  - name: "outdir"
+    cli_flag: "--outdir"
+    type: "directory"
+    required: false
+    description: "Output directory. Auto-generated under /tmp if not set."
+    is_output_root: true
+
+rendering:
+  flag_order: ["threads", "outdir"]
+  omit_absent_optionals: true

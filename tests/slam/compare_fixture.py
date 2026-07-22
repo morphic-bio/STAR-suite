@@ -185,6 +185,8 @@ def main():
                         help="Max absolute NTR difference (MAP vs NTR)")
     parser.add_argument("--corr-min", type=float, default=0.999,
                         help="Minimum Pearson correlation for NTR")
+    parser.add_argument("--correlation-only", action="store_true",
+                        help="Do not fail on exact count/coverage/NTR deltas; gate only correlation metrics")
     parser.add_argument("--max-report", type=int, default=10,
                         help="Max mismatches to print")
     args = parser.parse_args()
@@ -308,30 +310,42 @@ def main():
     corr = correlation_results[0]["ntr_pearson"] if correlation_results else float("nan")
 
     ok = True
+    if args.correlation_only:
+        print("INFO: correlation-only mode; exact count, coverage, and per-gene NTR deltas are not pass/fail gates.")
+
     if read_deltas:
         if ref_missing_conv_cov:
             print(f"WARNING: ReadCount mismatches: {len(read_deltas)} (reference format lacks Conversions/Coverage)")
+        elif args.correlation_only:
+            print(f"INFO: ReadCount mismatches ignored: {len(read_deltas)}")
         else:
             ok = False
             print(f"FAIL: ReadCount mismatches: {len(read_deltas)}")
-        for delta, gene, r, t in read_deltas[:args.max_report]:
-            print(f"  {gene}\tref={r}\ttest={t}\tdelta={delta}")
+        if not args.correlation_only:
+            for delta, gene, r, t in read_deltas[:args.max_report]:
+                print(f"  {gene}\tref={r}\ttest={t}\tdelta={delta}")
     if conv_deltas:
         if ref_missing_conv_cov:
             print(f"WARNING: Conversions mismatches: {len(conv_deltas)} (reference format lacks Conversions/Coverage)")
+        elif args.correlation_only:
+            print(f"INFO: Conversions mismatches ignored: {len(conv_deltas)}")
         else:
             ok = False
             print(f"FAIL: Conversions mismatches: {len(conv_deltas)}")
-        for delta, gene, r, t in conv_deltas[:args.max_report]:
-            print(f"  {gene}\tref={r}\ttest={t}\tdelta={delta}")
+        if not args.correlation_only:
+            for delta, gene, r, t in conv_deltas[:args.max_report]:
+                print(f"  {gene}\tref={r}\ttest={t}\tdelta={delta}")
     if cov_deltas:
         if ref_missing_conv_cov:
             print(f"WARNING: Coverage mismatches: {len(cov_deltas)} (reference format lacks Conversions/Coverage)")
+        elif args.correlation_only:
+            print(f"INFO: Coverage mismatches ignored: {len(cov_deltas)}")
         else:
             ok = False
             print(f"FAIL: Coverage mismatches: {len(cov_deltas)}")
-        for delta, gene, r, t in cov_deltas[:args.max_report]:
-            print(f"  {gene}\tref={r}\ttest={t}\tdelta={delta}")
+        if not args.correlation_only:
+            for delta, gene, r, t in cov_deltas[:args.max_report]:
+                print(f"  {gene}\tref={r}\ttest={t}\tdelta={delta}")
 
     if math.isnan(corr) or corr < args.corr_min:
         if ref_missing_conv_cov:
@@ -342,11 +356,14 @@ def main():
     if ntr_bad:
         if ref_missing_conv_cov:
             print(f"WARNING: NTR abs diff > {args.ntr_abs_max}: {len(ntr_bad)}")
+        elif args.correlation_only:
+            print(f"INFO: NTR abs diff > {args.ntr_abs_max} ignored: {len(ntr_bad)}")
         else:
             ok = False
             print(f"FAIL: NTR abs diff > {args.ntr_abs_max}: {len(ntr_bad)}")
-        for delta, gene, r, t in ntr_bad[:args.max_report]:
-            print(f"  {gene}\tref={r}\ttest={t}\tdelta={delta}")
+        if not args.correlation_only:
+            for delta, gene, r, t in ntr_bad[:args.max_report]:
+                print(f"  {gene}\tref={r}\ttest={t}\tdelta={delta}")
 
     # Print correlation table
     if correlation_results:

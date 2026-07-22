@@ -3,10 +3,13 @@
 #include "SoloCommon.h"
 #include "SoloReadFeature.h"
 #include <algorithm>
+#include <cstdlib>
 #include <vector>
 #include <unordered_set>
 
 void SoloFeature::materializeRGUFromHash() {
+    // Note: non-Flex STAR_SOLO_NONFLEX_HASH_BRIDGE path no longer calls this from
+    // countCBgeneUMI (direct collapse: core/SoloFeature_collapseUMI_fromBridgeHash.cpp).
     if (!readFeatSum || !readFeatSum->inlineHash_) {
         return;
     }
@@ -20,7 +23,7 @@ void SoloFeature::materializeRGUFromHash() {
     // Build temporary vector of entries for sorting
     struct HashEntry {
         uint32_t cbIdx;
-        uint16_t geneIdx;
+        uint32_t geneIdx;
         uint32_t umi24;
         uint32_t count;
     };
@@ -28,6 +31,9 @@ void SoloFeature::materializeRGUFromHash() {
     entries.reserve(hashSize);
     
     // Extract all entries from hash
+    bool nonFlexHashBridge = pSolo.inlineHashMode
+        && !pSolo.flexMode
+        && std::getenv("STAR_SOLO_NONFLEX_HASH_BRIDGE") != nullptr;
     for (khiter_t iter = kh_begin(readFeatSum->inlineHash_); iter != kh_end(readFeatSum->inlineHash_); ++iter) {
         if (!kh_exist(readFeatSum->inlineHash_, iter)) continue;
         
@@ -35,7 +41,15 @@ void SoloFeature::materializeRGUFromHash() {
         uint32_t count = kh_val(readFeatSum->inlineHash_, iter);
         
         HashEntry entry;
-        unpackCgAggKey(key, &entry.cbIdx, &entry.umi24, &entry.geneIdx, nullptr);
+        uint16_t compactGeneIdx = 0;
+        if (nonFlexHashBridge) {
+            uint16_t gene16 = 0;
+            unpackBridgeWlUmiGeneKey(key, &entry.cbIdx, &entry.umi24, &gene16);
+            entry.geneIdx = static_cast<uint32_t>(gene16);
+        } else {
+            unpackCgAggKey(key, &entry.cbIdx, &entry.umi24, &compactGeneIdx, nullptr);
+            entry.geneIdx = compactGeneIdx;
+        }
         entry.count = count;
         
         // CRITICAL: Expand by count (each count represents one read)
@@ -89,6 +103,7 @@ void SoloFeature::materializeRGUFromHash() {
     uint32_t currentICB = 0;
     uint32_t cbStartOffset = 0;
     
+    uint32_t syntheticReadId = 0;
     for (size_t i = 0; i < entries.size(); i++) {
         const auto &entry = entries[i];
         
@@ -108,10 +123,9 @@ void SoloFeature::materializeRGUFromHash() {
         rGeneUMI[rguOffset + rguG] = entry.geneIdx;
         rGeneUMI[rguOffset + rguU] = entry.umi24;
         if (rguStride == 3) {
-            // WARNING: readId set to 0 in hash mode (not available)
-            // Comparators that rely on readId (e.g., funCompare_uint32_1_2_0) may misbehave
-            // TODO: Either modify collapse to use stride=2 (no readId) or drive collapse directly from hash
-            rGeneUMI[rguOffset + rguR] = 0;
+            // The bridge does not preserve original read ids, but legacy collapse
+            // only requires stable unique ids within this materialized record set.
+            rGeneUMI[rguOffset + rguR] = syntheticReadId++;
         }
         rguOffset += rguStride;
     }

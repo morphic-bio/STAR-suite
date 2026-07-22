@@ -2,6 +2,7 @@
 #include "Solo.h"
 #include "PfMultiConfig.h"
 #include "PfMultiAssign.h"
+#include "PfMultiTableImport.h"
 #include "PfMultiMexStub.h"
 #include "PfMultiMerge.h"
 #include "ErrorWarning.h"
@@ -57,6 +58,19 @@ struct PfPreparedFeatureLibrary {
     bool explicitChem = false;    // true when star_chemistry column provided NXT/TRU
     bool usedFilteredRef = false;
     int starMaxHamming = -1;    // Per-library max Hamming override (-1 = use global)
+    bool useSplitReadLayout = false;
+    bool adtMexOutput = false;
+    bool tableBacked = false;
+    string starHashDemux;
+    string starHashFeatureSelector;
+    string starHashDemuxMethod;
+    int starHashMinTotal = -1;
+    int starHashMinTop = -1;
+    double starHashMinRatio = -1.0;
+    string starInputFormat;
+    pf_split_read_layout splitReadLayout = {};
+    string starBarcodeOutputMap;
+    string starFeatureSearchMode;
     AnchoredReadEstimate featureEstimate;
 };
 
@@ -144,6 +158,7 @@ struct PfMultiFeatureRun {
     string assignOut;
     string featureRefPath;
     string whitelistPath;
+    string barcodeOutputMapPath;
     string effectiveChem;
     string effectiveReadNamespace;
     string assignmentWhitelistNamespace;
@@ -159,6 +174,20 @@ struct PfMultiFeatureRun {
     string resolvedFastq;
     string resolvedChemRequest;
     bool explicitChem = false;
+    bool adtMexOutput = false;
+    bool tableBacked = false;
+    string starInputFormat;
+    string hashFeatureSelector;
+    string hashDemuxMethod;
+    int hashDemuxMode = -1;
+    int hashMinTotal = 3;
+    int hashMinTop = 3;
+    double hashMinRatio = 2.0;
+    int nHashFeatures = 0;
+    int nHashSinglet = 0;
+    int nHashDoublet = 0;
+    int nHashNegative = 0;
+    PfMultiTableImport::TableImportStats tableImportStats;
     int returnCode = 0;
 };
 
@@ -247,6 +276,39 @@ static string lowerCopy(string input) {
 static bool isUnsetToken(const string& input) {
     string token = lowerCopy(trimCopy(input));
     return token.empty() || token == "-" || token == "none";
+}
+
+static int parseHashDemuxModeToken(const string& token) {
+    const string mode = lowerCopy(trimCopy(token));
+    if (mode.empty() || mode == "auto") return -1;
+    if (mode == "yes" || mode == "1" || mode == "true") return 1;
+    if (mode == "no" || mode == "0" || mode == "false") return 0;
+    return -1;
+}
+
+static void applyPreparedHashDemuxOptions(const PfPreparedFeatureLibrary& preparedLib,
+                                          PfMultiAssign::AssignOptions& runAssignOpts) {
+    runAssignOpts.libraryFeatureType = preparedLib.libraryType;
+    if (!preparedLib.starHashDemux.empty()) {
+        if (!PfMultiFeatureSpecs::isValidStarHashDemuxValue(preparedLib.starHashDemux)) {
+            throw runtime_error("Invalid star_hash_demux value '" + preparedLib.starHashDemux
+                + "'; must be auto, yes, no, or empty");
+        }
+        runAssignOpts.hashDemuxMode = parseHashDemuxModeToken(preparedLib.starHashDemux);
+    }
+    runAssignOpts.hashFeatureSelector = preparedLib.starHashFeatureSelector;
+    if (!preparedLib.starHashDemuxMethod.empty()) {
+        runAssignOpts.hashDemuxMethod = preparedLib.starHashDemuxMethod;
+    }
+    if (preparedLib.starHashMinTotal >= 0) {
+        runAssignOpts.hashMinTotal = preparedLib.starHashMinTotal;
+    }
+    if (preparedLib.starHashMinTop >= 0) {
+        runAssignOpts.hashMinTop = preparedLib.starHashMinTop;
+    }
+    if (preparedLib.starHashMinRatio >= 0.0) {
+        runAssignOpts.hashMinRatio = preparedLib.starHashMinRatio;
+    }
 }
 
 static string basenameOf(const string& path);
@@ -931,9 +993,53 @@ static string findAssignOutputDir(const string& baseDir) {
 
 static bool hasMexFiles(const string& dirPath) {
     struct stat st;
-    string features = dirPath + "/features.tsv";
-    string featuresGz = dirPath + "/features.tsv.gz";
-    return (stat(features.c_str(), &st) == 0) || (stat(featuresGz.c_str(), &st) == 0);
+    auto exists = [&](const string& basename) {
+        const string plain = dirPath + "/" + basename;
+        const string gz = plain + ".gz";
+        return stat(plain.c_str(), &st) == 0 || stat(gz.c_str(), &st) == 0;
+    };
+
+    if (exists("features.tsv") && exists("barcodes.tsv") && exists("matrix.mtx")) {
+        return true;
+    }
+
+    // Native assignBarcodes output has text axes until processAssignOutput()
+    // materializes the 10x-compatible features.tsv/barcodes.tsv stubs.
+    return exists("features.txt") && exists("barcodes.txt") && exists("matrix.mtx");
+}
+
+struct PfAssignMexSource {
+    string mexDir;
+    string featureTypeOverride;
+};
+
+static vector<PfAssignMexSource> resolveAssignMexSources(const string& assignOut) {
+    vector<PfAssignMexSource> sources;
+    const string hashDir = assignOut + "/hash";
+    const string proteinDir = assignOut + "/protein";
+    const bool hasHash = hasMexFiles(hashDir);
+    const bool hasProtein = hasMexFiles(proteinDir);
+    if (hasHash) {
+        sources.push_back({hashDir, "Multiplexing Capture"});
+    }
+    if (hasProtein) {
+        sources.push_back({proteinDir, ""});
+    }
+    if (sources.empty() && hasMexFiles(assignOut)) {
+        sources.push_back({assignOut, ""});
+    }
+    return sources;
+}
+
+static string resolveAssignStubFeatureRef(const PfAssignMexSource& source,
+                                          const string& /*assignOut*/,
+                                          const string& defaultFeatureRef) {
+    const string subdirRef = source.mexDir + "/feature_reference.csv";
+    struct stat st;
+    if (stat(subdirRef.c_str(), &st) == 0 && S_ISREG(st.st_mode)) {
+        return subdirRef;
+    }
+    return defaultFeatureRef;
 }
 
 static bool filterFeatureRefCsv(const string& inputPath, const string& featureType,
@@ -1396,13 +1502,35 @@ static PfMultiPreparedContext buildPfMultiPreparedContext(const PfMultiPreloadIn
             PfPreparedFeatureLibrary prepared;
             prepared.libraryType = spec.libraryType;
             prepared.featureRefType = spec.featureRefType;
-            prepared.resolvedFastq =
-                PfMultiConfig::resolveFastqDir(lib.fastqs, input.crFastqRoot, fastqMap);
+            prepared.adtMexOutput =
+                PfMultiFeatureSpecs::shouldEmitAdtMexOutput(
+                    spec.featureRefType, spec.libraryType);
+            prepared.starHashDemux = lib.starHashDemux;
+            prepared.starHashFeatureSelector = lib.starHashFeatureSelector;
+            prepared.starHashDemuxMethod = lib.starHashDemuxMethod;
+            prepared.starHashMinTotal = lib.starHashMinTotal;
+            prepared.starHashMinTop = lib.starHashMinTop;
+            prepared.starHashMinRatio = lib.starHashMinRatio;
+            prepared.tableBacked = lib.isTableBacked();
+            prepared.starInputFormat = lib.starInputFormat.empty() ? "fastq" : lib.starInputFormat;
+            if (prepared.tableBacked) {
+                prepared.resolvedFastq = lib.fastqs;
+                prepLog << "  table-backed library: input_table=" << prepared.resolvedFastq << "\n";
+            } else {
+                prepared.resolvedFastq =
+                    PfMultiConfig::resolveFastqDir(lib.fastqs, input.crFastqRoot, fastqMap);
+            }
             prepared.sampleName = lib.sample.empty()
                 ? basenameOf(prepared.resolvedFastq)
                 : lib.sample;
             prepared.libraryId = lib.starLibraryId;
             prepared.starMaxHamming = lib.starMaxHamming;
+            prepared.useSplitReadLayout = lib.hasSplitReadLayout();
+            if (prepared.useSplitReadLayout) {
+                prepared.splitReadLayout = PfMultiConfig::buildSplitReadLayout(lib);
+                prepared.starBarcodeOutputMap = lib.starBarcodeOutputMap;
+                prepared.starFeatureSearchMode = lib.starFeatureSearchMode;
+            }
             prepared.assignOut =
                 assignBase + "/" + sanitizeDirName(prepared.libraryId);
 
@@ -1451,6 +1579,8 @@ static PfMultiPreparedContext buildPfMultiPreparedContext(const PfMultiPreloadIn
                     << ", star_max_hamming=" << (prepared.starMaxHamming >= 0 ? std::to_string(prepared.starMaxHamming) : "(global)")
                     << ", whitelist=" << prepared.whitelistPath
                     << ", featureRef=" << prepared.featureRefPath
+                    << ", adt_mex_output=" << (prepared.adtMexOutput ? "yes" : "no")
+                    << ", star_input_format=" << prepared.starInputFormat
                     << "\n";
 
             if (!prepared.usedFilteredRef && lib.starFeatureRef.empty()) {
@@ -1464,11 +1594,22 @@ static PfMultiPreparedContext buildPfMultiPreparedContext(const PfMultiPreloadIn
 
             vector<string> allFastqs = listFastqFilesInDirectory(prepared.resolvedFastq);
             vector<string> featurePrimaryFastqs = filterFastqFilesByMarker(allFastqs, "_R1_");
+            if (prepared.tableBacked) {
+                bool lineOk = false;
+                const uint64_t tableLines = countNewlinesInPlainFile(prepared.resolvedFastq, &lineOk);
+                prepared.featureEstimate.valid = lineOk;
+                prepared.featureEstimate.estimatedReads = lineOk ? std::max<uint64_t>(1, tableLines) : 1;
+                prepared.featureEstimate.fileCount = 1;
+                prepared.featureEstimate.totalBytes = fileSizeBytes(prepared.resolvedFastq);
+                prepLog << "  table row estimate=" << prepared.featureEstimate.estimatedReads
+                        << ", bytes=" << prepared.featureEstimate.totalBytes << "\n";
+            } else {
             if (featurePrimaryFastqs.empty()) {
                 featurePrimaryFastqs.swap(allFastqs);
             }
             prepared.featureEstimate =
                 estimateReadsAnchored(featurePrimaryFastqs, "feature", prepLog);
+            }
 
             context.featureLibraries.push_back(std::move(prepared));
         }
@@ -1482,18 +1623,275 @@ static PfMultiPreparedContext buildPfMultiPreparedContext(const PfMultiPreloadIn
     return context;
 }
 
+static int writeCrisprOnlyMex(const PfMultiMerge::MexData& crisprData,
+                              const string& tempMexDir,
+                              ostream& logStream) {
+    string mkdirCmd = "mkdir -p \"" + tempMexDir + "\"";
+    if (system(mkdirCmd.c_str()) != 0) {
+        logStream << "ERROR: Failed to create temp directory: " << tempMexDir << "\n";
+        return -1;
+    }
+
+    vector<MexWriter::Feature> features;
+    for (size_t i = 0; i < crisprData.features.size(); ++i) {
+        string name = (i < crisprData.featureNames.size()) ? crisprData.featureNames[i] : crisprData.features[i];
+        string type = (i < crisprData.featureTypes.size()) ? crisprData.featureTypes[i] : "CRISPR Guide Capture";
+        features.emplace_back(crisprData.features[i], name, type);
+    }
+
+    string mexPrefix = tempMexDir + "/";
+    int ret = MexWriter::writeMex(mexPrefix, crisprData.barcodes, features, crisprData.triplets, -1);
+    if (ret != 0) {
+        logStream << "ERROR: Failed to write temporary CRISPR MEX: " << tempMexDir << "\n";
+        return -1;
+    }
+    return 0;
+}
+
+static bool pathExists(const string& path) {
+    struct stat st;
+    return stat(path.c_str(), &st) == 0;
+}
+
+static string resolveOptionalEmptyDropsResultsPath(const string& gexFilteredDir) {
+    const vector<string> candidates = {
+        gexFilteredDir + "/EmptyDrops/EmptyDrops/emptydrops_results.tsv",
+        gexFilteredDir + "/EmptyDrops/EmptyDrops/emptydrops_results.tsv.gz",
+        gexFilteredDir + "/EmptyDrops/emptydrops_results.tsv",
+        gexFilteredDir + "/EmptyDrops/emptydrops_results.tsv.gz"
+    };
+    for (const auto& path : candidates) {
+        if (pathExists(path)) {
+            return path;
+        }
+    }
+    return "";
+}
+
+static vector<string> splitTabFields(const string& line) {
+    vector<string> fields;
+    string field;
+    std::istringstream ss(line);
+    while (std::getline(ss, field, '\t')) {
+        fields.push_back(field);
+    }
+    if (!line.empty() && line.back() == '\t') {
+        fields.push_back("");
+    }
+    return fields;
+}
+
+static string stripCrisprBarcodeSuffix(const string& barcode) {
+    size_t dashPos = barcode.find_last_of('-');
+    if (dashPos != string::npos && dashPos < barcode.size() - 1) {
+        bool digits = true;
+        for (size_t i = dashPos + 1; i < barcode.size(); ++i) {
+            if (!std::isdigit(static_cast<unsigned char>(barcode[i]))) {
+                digits = false;
+                break;
+            }
+        }
+        if (digits) {
+            return barcode.substr(0, dashPos);
+        }
+    }
+    return barcode;
+}
+
+static string crisprBarcodeRawKey(const string& barcode) {
+    return upperCopy(stripCrisprBarcodeSuffix(trimCopy(barcode)));
+}
+
+struct FinalGuideCellBarcodeSet {
+    string sourcePath;
+    std::unordered_set<string> rawKeys;
+    std::unordered_set<string> truKeys;
+    uint64_t rows = 0;
+    uint64_t simpleRows = 0;
+    uint64_t invalidRows = 0;
+};
+
+static bool isSimpleCellValue(const string& value) {
+    const string token = lowerCopy(trimCopy(value));
+    return token == "1" || token == "true" || token == "yes";
+}
+
+static bool loadFinalGuideCellBarcodesFromEmptyDrops(const string& emptyDropsResultsPath,
+                                                     const string& emptyDropsBarcodeChem,
+                                                     FinalGuideCellBarcodeSet& out,
+                                                     string& error) {
+    out = FinalGuideCellBarcodeSet();
+    out.sourcePath = emptyDropsResultsPath;
+    if (emptyDropsResultsPath.empty()) {
+        error = "EmptyDrops results path is empty";
+        return false;
+    }
+
+    vector<string> lines;
+    try {
+        lines = PfMultiMerge::readLines(emptyDropsResultsPath);
+    } catch (const exception& e) {
+        error = e.what();
+        return false;
+    }
+    if (lines.empty()) {
+        error = "EmptyDrops results file is empty";
+        return false;
+    }
+
+    const vector<string> header = splitTabFields(lines.front());
+    int barcodeCol = -1;
+    int simpleCol = -1;
+    for (size_t i = 0; i < header.size(); ++i) {
+        const string name = lowerCopy(trimCopy(header[i]));
+        if (name == "barcode") {
+            barcodeCol = static_cast<int>(i);
+        } else if (name == "is_simple_cell") {
+            simpleCol = static_cast<int>(i);
+        }
+    }
+    if (barcodeCol < 0 || simpleCol < 0) {
+        error = "EmptyDrops results must contain barcode and is_simple_cell columns";
+        return false;
+    }
+
+    out.rawKeys.reserve(lines.size());
+    out.truKeys.reserve(lines.size());
+    for (size_t lineIdx = 1; lineIdx < lines.size(); ++lineIdx) {
+        const vector<string> fields = splitTabFields(lines[lineIdx]);
+        out.rows++;
+        if (barcodeCol >= static_cast<int>(fields.size()) ||
+            simpleCol >= static_cast<int>(fields.size())) {
+            out.invalidRows++;
+            continue;
+        }
+        if (!isSimpleCellValue(fields[simpleCol])) {
+            continue;
+        }
+        const string rawKey = crisprBarcodeRawKey(fields[barcodeCol]);
+        if (rawKey.empty()) {
+            out.invalidRows++;
+            continue;
+        }
+        out.simpleRows++;
+        out.rawKeys.insert(rawKey);
+        out.truKeys.insert(normalizeBarcodeToTru(rawKey, emptyDropsBarcodeChem));
+    }
+
+    if (out.rawKeys.empty() && out.truKeys.empty()) {
+        error = "EmptyDrops results contained no is_simple_cell == 1 barcodes";
+        return false;
+    }
+    return true;
+}
+
+static bool finalGuideCellSetContains(const FinalGuideCellBarcodeSet& finalCells,
+                                      const string& barcode,
+                                      const string& mexBarcodeChem) {
+    const string rawKey = crisprBarcodeRawKey(barcode);
+    if (finalCells.rawKeys.find(rawKey) != finalCells.rawKeys.end()) {
+        return true;
+    }
+    const string truKey = normalizeBarcodeToTru(rawKey, mexBarcodeChem);
+    return finalCells.truKeys.find(truKey) != finalCells.truKeys.end();
+}
+
+static PfMultiMerge::MexData subsetCrisprMexToFinalCells(const PfMultiMerge::MexData& crisprData,
+                                                         const FinalGuideCellBarcodeSet& finalCells,
+                                                         const string& mexBarcodeChem) {
+    PfMultiMerge::MexData subset;
+    subset.features = crisprData.features;
+    subset.featureNames = crisprData.featureNames;
+    subset.featureTypes = crisprData.featureTypes;
+
+    vector<uint32_t> oldToNew(crisprData.barcodes.size(), std::numeric_limits<uint32_t>::max());
+    subset.barcodes.reserve(std::min(crisprData.barcodes.size(), finalCells.rawKeys.size()));
+    for (size_t i = 0; i < crisprData.barcodes.size(); ++i) {
+        if (finalGuideCellSetContains(finalCells, crisprData.barcodes[i], mexBarcodeChem)) {
+            oldToNew[i] = static_cast<uint32_t>(subset.barcodes.size());
+            subset.barcodes.push_back(crisprData.barcodes[i]);
+        }
+    }
+
+    subset.triplets.reserve(crisprData.triplets.size());
+    for (const auto& t : crisprData.triplets) {
+        if (t.cell_idx >= oldToNew.size()) {
+            continue;
+        }
+        const uint32_t newCell = oldToNew[t.cell_idx];
+        if (newCell == std::numeric_limits<uint32_t>::max()) {
+            continue;
+        }
+        MexWriter::Triplet newT;
+        newT.cell_idx = newCell;
+        newT.gene_idx = t.gene_idx;
+        newT.count = t.count;
+        subset.triplets.push_back(newT);
+    }
+    return subset;
+}
+
 /**
- * Run CRISPR feature calling on filtered MEX with CRISPR Guide Capture features.
- * 
+ * Run CRISPR feature calling on CRISPR Guide Capture features.
+ *
+ * @param rawMexDir Directory containing raw_feature_bc_matrix
  * @param filteredMexDir Directory containing filtered_feature_bc_matrix
  * @param outputDir Output directory for crispr_analysis/
+ * @param emptyDropsResultsPath EmptyDrops results whose is_simple_cell==1 rows
+ *        define the guide-calling/q-value universe. If unavailable, falls back
+ *        to filteredMexDir for non-EmptyDrops workflows.
+ * @param emptyDropsBarcodeChem Barcode namespace of EmptyDrops results
+ * @param mexBarcodeChem Barcode namespace of raw/filtered output MEX files
  * @param minUmi Minimum UMI threshold for GMM calling
+ * @param guideCaller auto|gmm|ambient-fdr|both|none
+ * @param guideFdr Ambient-FDR default threshold
+ * @param guideFdrMinUmi Ambient-FDR minimum observed UMI floor
+ * @param guideFdrEmitQvalues sparse|none
  * @param logStream Log output stream
  * @return 0 on success, -1 on failure
  */
-static int runCrisprFeatureCalling(const string& filteredMexDir, const string& outputDir,
-                                    int minUmi, ostream& logStream) {
+static int runCrisprFeatureCalling(const string& rawMexDir,
+                                    const string& filteredMexDir,
+                                    const string& outputDir,
+                                    const string& emptyDropsResultsPath,
+                                    const string& emptyDropsBarcodeChem,
+                                    const string& mexBarcodeChem,
+                                    int minUmi,
+                                    const string& guideCaller,
+                                    double guideFdr,
+                                    int guideFdrMinUmi,
+                                    const string& guideFdrEmitQvalues,
+                                    ostream& logStream) {
     logStream << timeMonthDayTime() << " ..... starting CRISPR feature calling\n";
+
+    const string caller = lowerCopy(trimCopy(guideCaller.empty() ? "auto" : guideCaller));
+    const bool runGmm = (caller == "auto" || caller == "gmm" || caller == "both");
+    const bool runAmbient = (caller == "auto" || caller == "ambient-fdr" || caller == "both");
+    if (caller == "none") {
+        logStream << "  Calling mode: none; skipping CRISPR guide calling\n";
+        return 0;
+    }
+    if (!runGmm && !runAmbient) {
+        logStream << "ERROR: Invalid crGuideCaller '" << guideCaller
+                  << "' (expected auto|gmm|ambient-fdr|both|none)\n";
+        return -1;
+    }
+    const string emitMode = lowerCopy(trimCopy(guideFdrEmitQvalues.empty() ? "sparse" : guideFdrEmitQvalues));
+    if (runAmbient) {
+        if (emitMode != "sparse" && emitMode != "none") {
+            logStream << "ERROR: Invalid crGuideFdrEmitQvalues '" << guideFdrEmitQvalues
+                      << "' (expected sparse|none)\n";
+            return -1;
+        }
+        if (!(guideFdr > 0.0 && guideFdr <= 1.0)) {
+            logStream << "ERROR: Invalid crGuideFdr " << guideFdr << " (expected 0 < FDR <= 1)\n";
+            return -1;
+        }
+        if (guideFdrMinUmi < 1) {
+            logStream << "ERROR: Invalid crGuideFdrMinUmi " << guideFdrMinUmi << " (expected >= 1)\n";
+            return -1;
+        }
+    }
     
     // Step 1: Read the filtered MEX
     PfMultiMerge::MexData mexData;
@@ -1513,75 +1911,172 @@ static int runCrisprFeatureCalling(const string& filteredMexDir, const string& o
     }
     
     logStream << "  CRISPR features found: " << crisprData.features.size() << "\n";
-    logStream << "  Barcodes: " << crisprData.barcodes.size() << "\n";
-    logStream << "  Non-zero entries: " << crisprData.triplets.size() << "\n";
-    
-    // Step 3: Write CRISPR-only MEX to temporary directory
-    string tempMexDir = outputDir + "/.crispr_mex_tmp";
-    string mkdirCmd = "mkdir -p \"" + tempMexDir + "\"";
-    if (system(mkdirCmd.c_str()) != 0) {
-        logStream << "ERROR: Failed to create temp directory: " << tempMexDir << "\n";
-        return -1;
+    logStream << "  Candidate filtered barcodes: " << crisprData.barcodes.size() << "\n";
+    logStream << "  Candidate non-zero entries: " << crisprData.triplets.size() << "\n";
+
+    bool usingFinalCells = false;
+    FinalGuideCellBarcodeSet finalCells;
+    if (!emptyDropsResultsPath.empty()) {
+        string loadError;
+        if (loadFinalGuideCellBarcodesFromEmptyDrops(emptyDropsResultsPath,
+                                                     emptyDropsBarcodeChem,
+                                                     finalCells,
+                                                     loadError)) {
+            PfMultiMerge::MexData finalCrisprData =
+                subsetCrisprMexToFinalCells(crisprData, finalCells, mexBarcodeChem);
+            if (finalCrisprData.barcodes.empty()) {
+                logStream << "ERROR: EmptyDrops simple-cell set matched zero CRISPR MEX barcodes: "
+                          << emptyDropsResultsPath << "\n";
+                return -1;
+            }
+            usingFinalCells = true;
+            logStream << "  Guide cell universe: EmptyDrops simple-cell knee\n";
+            logStream << "  EmptyDrops results: " << emptyDropsResultsPath << "\n";
+            logStream << "  EmptyDrops rows: " << finalCells.rows
+                      << ", simple rows: " << finalCells.simpleRows
+                      << ", unique simple barcodes: " << finalCells.rawKeys.size()
+                      << ", invalid rows: " << finalCells.invalidRows << "\n";
+            logStream << "  Final guide-call barcodes: " << finalCrisprData.barcodes.size() << "\n";
+            logStream << "  Permissive filtered barcodes moved to ambient pool: "
+                      << (crisprData.barcodes.size() - finalCrisprData.barcodes.size()) << "\n";
+            logStream << "  Final guide non-zero entries: " << finalCrisprData.triplets.size() << "\n";
+            crisprData = std::move(finalCrisprData);
+        } else {
+            logStream << "WARNING: Failed to load EmptyDrops simple-cell guide universe from "
+                      << emptyDropsResultsPath << ": " << loadError
+                      << "; falling back to filtered_feature_bc_matrix barcodes\n";
+        }
+    } else {
+        logStream << "WARNING: EmptyDrops simple-cell results not found; falling back to "
+                  << "filtered_feature_bc_matrix barcodes for CRISPR guide calling\n";
+    }
+    if (!usingFinalCells) {
+        logStream << "  Guide cell universe: filtered_feature_bc_matrix barcodes\n";
+        logStream << "  Final guide-call barcodes: " << crisprData.barcodes.size() << "\n";
+        logStream << "  Final guide non-zero entries: " << crisprData.triplets.size() << "\n";
     }
     
-    // Convert MexData to MexWriter format
-    vector<MexWriter::Feature> features;
-    for (size_t i = 0; i < crisprData.features.size(); ++i) {
-        string name = (i < crisprData.featureNames.size()) ? crisprData.featureNames[i] : crisprData.features[i];
-        string type = (i < crisprData.featureTypes.size()) ? crisprData.featureTypes[i] : "CRISPR Guide Capture";
-        features.emplace_back(crisprData.features[i], name, type);
-    }
-    
-    // Write MEX (uncompressed for call_features compatibility)
-    string mexPrefix = tempMexDir + "/";
-    int ret = MexWriter::writeMex(mexPrefix, crisprData.barcodes, features, crisprData.triplets, -1);
+    string filteredTempMexDir = outputDir + "/.crispr_filtered_mex_tmp";
+    int ret = writeCrisprOnlyMex(crisprData, filteredTempMexDir, logStream);
     if (ret != 0) {
-        logStream << "ERROR: Failed to write temporary CRISPR MEX\n";
         return -1;
     }
     
-    // Step 4: Run GMM feature calling with min_umi=10 (CR-compatible default)
     string crisprAnalysisDir = outputDir + "/crispr_analysis";
-    mkdirCmd = "mkdir -p \"" + crisprAnalysisDir + "\"";
+    string mkdirCmd = "mkdir -p \"" + crisprAnalysisDir + "\"";
     if (system(mkdirCmd.c_str()) != 0) {
         logStream << "ERROR: Failed to create crispr_analysis directory\n";
-        string rmCmd = "rm -rf \"" + tempMexDir + "\"";
+        string rmCmd = "rm -rf \"" + filteredTempMexDir + "\"";
         system(rmCmd.c_str());
         return -1;
     }
-    
-    cf_gmm_config *gmm_cfg = cf_gmm_config_create();
-    if (!gmm_cfg) {
-        logStream << "ERROR: Failed to create GMM config\n";
-        return -1;
+
+    int callersRequested = 0;
+    int callersSucceeded = 0;
+
+    if (runGmm) {
+        callersRequested++;
+        cf_gmm_config *gmm_cfg = cf_gmm_config_create();
+        if (!gmm_cfg) {
+            logStream << "ERROR: Failed to create GMM config\n";
+        } else {
+            gmm_cfg->min_umi_threshold = minUmi;
+
+            logStream << "  Calling mode: GMM (CR9-compatible)\n";
+            logStream << "  min_umi: " << gmm_cfg->min_umi_threshold << "\n";
+            logStream << "  Output: " << crisprAnalysisDir << "\n";
+
+            ret = cf_process_mex_dir_gmm(filteredTempMexDir.c_str(), crisprAnalysisDir.c_str(), gmm_cfg);
+            cf_gmm_config_destroy(gmm_cfg);
+
+            if (ret != 0) {
+                logStream << "ERROR: CRISPR GMM feature calling failed\n";
+            } else {
+                callersSucceeded++;
+            }
+        }
     }
-    gmm_cfg->min_umi_threshold = minUmi;
-    
-    logStream << "  Calling mode: GMM (CR9-compatible)\n";
-    logStream << "  min_umi: " << gmm_cfg->min_umi_threshold << "\n";
-    logStream << "  Output: " << crisprAnalysisDir << "\n";
-    
-    ret = cf_process_mex_dir_gmm(tempMexDir.c_str(), crisprAnalysisDir.c_str(), gmm_cfg);
-    cf_gmm_config_destroy(gmm_cfg);
-    
-    if (ret != 0) {
-        logStream << "ERROR: CRISPR feature calling failed\n";
-        // Cleanup temp dir
-        string rmCmd = "rm -rf \"" + tempMexDir + "\"";
-        system(rmCmd.c_str());
-        return -1;
+
+    if (runAmbient) {
+        callersRequested++;
+        string rawTempMexDir = outputDir + "/.crispr_raw_mex_tmp";
+        PfMultiMerge::MexData rawMexData;
+        try {
+            rawMexData = PfMultiMerge::readMex(rawMexDir);
+        } catch (const exception& e) {
+            logStream << "ERROR: Failed to read raw MEX for ambient-FDR guide calling: " << e.what() << "\n";
+            rawMexData.features.clear();
+        }
+
+        if (!rawMexData.features.empty()) {
+            PfMultiMerge::MexData rawCrisprData = PfMultiMerge::filterByFeatureType(rawMexData, "CRISPR Guide Capture");
+            if (rawCrisprData.features.empty()) {
+                logStream << "WARNING: No raw CRISPR Guide Capture features found for ambient-FDR guide calling\n";
+            } else if (writeCrisprOnlyMex(rawCrisprData, rawTempMexDir, logStream) != 0) {
+                logStream << "ERROR: Failed to prepare raw CRISPR MEX for ambient-FDR guide calling\n";
+            } else {
+                cf_ambient_fdr_config *ambient_cfg = cf_ambient_fdr_config_create();
+                if (!ambient_cfg) {
+                    logStream << "ERROR: Failed to create ambient-FDR config\n";
+                } else {
+                    ambient_cfg->fdr_threshold = guideFdr;
+                    ambient_cfg->min_umi = guideFdrMinUmi;
+                    ambient_cfg->emit_sparse_qvalues = (emitMode == "sparse") ? 1 : 0;
+
+                    string ambientDir = crisprAnalysisDir + "/ambient_fdr";
+                    logStream << "  Calling mode: ambient-FDR\n";
+                    logStream << "  guide_fdr: " << ambient_cfg->fdr_threshold << "\n";
+                    logStream << "  guide_fdr_min_umi: " << ambient_cfg->min_umi << "\n";
+                    logStream << "  guide_fdr_emit_qvalues: " << emitMode << "\n";
+                    logStream << "  Output: " << ambientDir << "\n";
+
+                    ret = cf_process_mex_dir_ambient_fdr(rawTempMexDir.c_str(),
+                                                         filteredTempMexDir.c_str(),
+                                                         ambientDir.c_str(),
+                                                         ambient_cfg);
+                    cf_ambient_fdr_config_destroy(ambient_cfg);
+                    if (ret != 0) {
+                        logStream << "ERROR: ambient-FDR guide calling failed\n";
+                    } else {
+                        callersSucceeded++;
+                    }
+                }
+            }
+        }
+
+        string rmRawCmd = "rm -rf \"" + rawTempMexDir + "\"";
+        system(rmRawCmd.c_str());
     }
-    
-    // Step 5: Cleanup temporary MEX directory
-    string rmCmd = "rm -rf \"" + tempMexDir + "\"";
+
+    string rmCmd = "rm -rf \"" + filteredTempMexDir + "\"";
     system(rmCmd.c_str());
-    
+
+    if (callersSucceeded == 0) {
+        logStream << "ERROR: All requested CRISPR guide callers failed\n";
+        return -1;
+    }
+
+    if (callersSucceeded < callersRequested) {
+        logStream << "WARNING: One CRISPR guide caller failed; continuing with successful outputs\n";
+    }
+
     logStream << timeMonthDayTime() << " ..... finished CRISPR feature calling\n";
+    logStream << "  Output: " << crisprAnalysisDir << "\n";
     logStream << "  Output files:\n";
-    logStream << "    " << crisprAnalysisDir << "/protospacer_calls_per_cell.csv\n";
-    logStream << "    " << crisprAnalysisDir << "/protospacer_calls_summary.csv\n";
-    logStream << "    " << crisprAnalysisDir << "/protospacer_umi_thresholds.csv\n";
-    logStream << "    " << crisprAnalysisDir << "/protospacer_umi_thresholds.json\n";
+    if (runGmm) {
+        logStream << "    " << crisprAnalysisDir << "/protospacer_calls_per_cell.csv\n";
+        logStream << "    " << crisprAnalysisDir << "/protospacer_calls_summary.csv\n";
+        logStream << "    " << crisprAnalysisDir << "/protospacer_umi_thresholds.csv\n";
+        logStream << "    " << crisprAnalysisDir << "/protospacer_umi_thresholds.json\n";
+    }
+    if (runAmbient) {
+        logStream << "    " << crisprAnalysisDir << "/ambient_fdr/guide_fdr_calls_per_cell.csv\n";
+        logStream << "    " << crisprAnalysisDir << "/ambient_fdr/guide_fdr_summary.json\n";
+        logStream << "    " << crisprAnalysisDir << "/ambient_fdr/guide_ambient_rates.tsv\n";
+        if (emitMode == "sparse") {
+            logStream << "    " << crisprAnalysisDir << "/ambient_fdr/guide_qvalues.mtx\n";
+        }
+    }
     
     return 0;
 }
@@ -1644,16 +2139,13 @@ static string stripBarcodeSuffix(const string& barcode) {
     return barcode;
 }
 
-static void writeDeferredFilteredAssignOutput(const string& assignOut,
-                                              const vector<string>& filteredGexBarcodes,
-                                              const string& featureBarcodeNamespace,
-                                              const string& whitelistPath,
-                                              ofstream& logStream) {
-    if (filteredGexBarcodes.empty()) {
-        return;
-    }
-
-    PfMultiMerge::MexData rawData = PfMultiMerge::readMex(assignOut);
+static void writeDeferredFilteredAssignOutputForMexDir(const string& mexDir,
+                                                       const string& assignOut,
+                                                       const vector<string>& filteredGexBarcodes,
+                                                       const string& featureBarcodeNamespace,
+                                                       const string& whitelistPath,
+                                                       ofstream& logStream) {
+    PfMultiMerge::MexData rawData = PfMultiMerge::readMex(mexDir);
     vector<string> nativeBarcodes;
     {
         const string nativeBarcodePath = assignOut + "/barcodes.txt";
@@ -1697,13 +2189,13 @@ static void writeDeferredFilteredAssignOutput(const string& assignOut,
         }
     }
 
-    const string filteredDir = assignOut + "/filtered";
+    const string filteredDir = mexDir + "/filtered";
     const string resetCmd = "rm -rf \"" + filteredDir + "\" && mkdir -p \"" + filteredDir + "\"";
     if (system(resetCmd.c_str()) != 0) {
         throw runtime_error("Failed to reset deferred filtered assign output dir: " + filteredDir);
     }
     if (subsetBarcodes.empty()) {
-        logStream << "WARNING: deferred filtered assign output for " << assignOut
+        logStream << "WARNING: deferred filtered assign output for " << mexDir
                   << " matched zero GEX barcodes\n";
         return;
     }
@@ -1737,7 +2229,7 @@ static void writeDeferredFilteredAssignOutput(const string& assignOut,
         features.emplace_back(rawData.features[i], name, type);
     }
     if (MexWriter::writeMex(filteredDir + "/", subsetBarcodes, features, subsetTriplets, -1) != 0) {
-        throw runtime_error("Failed to write deferred filtered MEX for assign output: " + assignOut);
+        throw runtime_error("Failed to write deferred filtered MEX for assign output: " + mexDir);
     }
 
     {
@@ -1826,9 +2318,30 @@ static void writeDeferredFilteredAssignOutput(const string& assignOut,
         }
     }
 
-    logStream << "NOTICE: wrote deferred filtered assign output for " << assignOut
+    logStream << "NOTICE: wrote deferred filtered assign output for " << mexDir
               << " (barcodes=" << subsetBarcodes.size()
               << ", deduped_counts=" << dedupedCount << ")\n";
+}
+
+static void writeDeferredFilteredAssignOutput(const string& assignOut,
+                                              const vector<string>& filteredGexBarcodes,
+                                              const string& featureBarcodeNamespace,
+                                              const string& whitelistPath,
+                                              ofstream& logStream) {
+    if (filteredGexBarcodes.empty()) {
+        return;
+    }
+
+    const vector<PfAssignMexSource> sources = resolveAssignMexSources(assignOut);
+    if (sources.empty()) {
+        logStream << "WARNING: deferred filtered assign output skipped for " << assignOut
+                  << " (no assign MEX sources found)\n";
+        return;
+    }
+    for (const auto& source : sources) {
+        writeDeferredFilteredAssignOutputForMexDir(source.mexDir, assignOut, filteredGexBarcodes,
+                                                   featureBarcodeNamespace, whitelistPath, logStream);
+    }
 }
 
 std::shared_ptr<PfMultiPreloadHandle> startPfMultiConfigPreload(const Parameters& P) {
@@ -1893,6 +2406,14 @@ std::shared_ptr<PfMultiAssignPhaseResult> runPfMultiAssignPhase(
         assignOpts.barcodeN = P.pfMulti.crAssignBarcodeN;
         assignOpts.consumerThreadsPerSet = P.pfMulti.crAssignConsumerThreads;
         assignOpts.searchThreads = P.pfMulti.crAssignSearchThreads;
+        assignOpts.readBufferLines = P.pfMulti.crAssignReadBufferLines;
+        assignOpts.cbqMode = lowerCopy(P.pfMulti.crAssignCbqMode);
+        if (assignOpts.cbqMode != "auto" &&
+            assignOpts.cbqMode != "stream" &&
+            assignOpts.cbqMode != "range") {
+            throw runtime_error("Invalid crAssignCbqMode '" + P.pfMulti.crAssignCbqMode +
+                                "'; expected auto, stream, or range");
+        }
         assignOpts.minPosterior = P.pfMulti.crAssignMinPosterior;
         assignOpts.maxReads = (P.readMapNumber > 0) ? static_cast<long long>(P.readMapNumber) : -1;
         assignOpts.legacyCbRescue = (P.pfMulti.crAssignLegacyCbRescue != 0);
@@ -1900,7 +2421,8 @@ std::shared_ptr<PfMultiAssignPhaseResult> runPfMultiAssignPhase(
         assignOpts.allowUnionWhitelist = (P.pfMulti.crAssignAllowUnionWhitelist != 0);
         assignOpts.useFeatureAnchorSearch = true;
         assignOpts.requireFeatureAnchorMatch = true;
-        assignOpts.featureModeBootstrapReads = 100000;
+        assignOpts.featureModeBootstrapReads =
+            (assignOpts.featureConstantOffset >= 0) ? 0 : 100000;
         assignOpts.skipHeatmaps = true;
         if (const char* env = std::getenv("STAR_PF_USE_FEATURE_ANCHOR_SEARCH")) {
             assignOpts.useFeatureAnchorSearch = (std::atoi(env) != 0);
@@ -2032,22 +2554,60 @@ std::shared_ptr<PfMultiAssignPhaseResult> runPfMultiAssignPhase(
                 pfConsumerBudgetThreads = std::max(pfConsumerThreadsForRun, pfConsumerBudgetThreads);
             }
             PfMultiAssign::AssignOptions runAssignOpts = assignOpts;
+            runAssignOpts.adtMexOutput = preparedLib.adtMexOutput;
+            applyPreparedHashDemuxOptions(preparedLib, runAssignOpts);
+            const bool tableBacked = preparedLib.tableBacked;
+            if (tableBacked) {
+                P.inOut->logMain << "NOTICE: table-backed feature library_id=" << preparedLib.libraryId
+                                 << " table=" << resolvedFastq << "\n";
+            }
+            if (preparedLib.adtMexOutput && !tableBacked) {
+                P.inOut->logMain << "NOTICE: feature MEX library_id=" << preparedLib.libraryId
+                                 << " will emit assignBarcodes adt_mex output (protein and/or hash)\n";
+            }
             if (preparedLib.starMaxHamming >= 0) {
                 runAssignOpts.maxHammingDistance = preparedLib.starMaxHamming;
             }
+            runAssignOpts.sampleName = sampleName;
             runAssignOpts.consumerThreadsPerSet = pfConsumerThreadsForRun;
             runAssignOpts.filteredBarcodesPath.clear();
+
+            const bool splitReadLayout = preparedLib.useSplitReadLayout;
+            if (splitReadLayout) {
+                runAssignOpts.useSplitReadLayout = true;
+                runAssignOpts.splitReadLayout = preparedLib.splitReadLayout;
+                runAssignOpts.autodetectChemistry = false;
+                runAssignOpts.translateNxt = false;
+                const string searchMode = lowerCopy(
+                    preparedLib.starFeatureSearchMode.empty()
+                        ? "free"
+                        : preparedLib.starFeatureSearchMode);
+                if (searchMode == "free") {
+                    runAssignOpts.useFeatureAnchorSearch = false;
+                    runAssignOpts.requireFeatureAnchorMatch = false;
+                    runAssignOpts.featureModeBootstrapReads = 0;
+                    runAssignOpts.limitSearch = -1;
+                }
+                P.inOut->logMain << "NOTICE: split-read guide layout enabled for library_id="
+                                 << preparedLib.libraryId
+                                 << " feature_search_mode=" << searchMode << "\n";
+            }
 
             // --- Phase 1: Probe original whitelist to determine read namespace ---
             PfMultiAssign::WhitelistNormalizationResult wlInfo =
                 PfMultiAssign::normalizeWhitelistForAssign(whitelist, assignOut);
             string originalWhitelistNamespace = upperCopy(wlInfo.assignmentNamespace);
-            if (!isKnownNamespace(originalWhitelistNamespace) && isKnownNamespace(effectiveChem)) {
+            if (splitReadLayout) {
+                originalWhitelistNamespace = "ATAC";
+            } else if (!isKnownNamespace(originalWhitelistNamespace) && isKnownNamespace(effectiveChem)) {
                 originalWhitelistNamespace = effectiveChem;
             }
-            const bool originalNamespaceKnown = isKnownNamespace(originalWhitelistNamespace);
+            const bool originalNamespaceKnown =
+                splitReadLayout || isKnownNamespace(originalWhitelistNamespace);
 
-            const bool useAutodetect = !preparedLib.explicitChem
+            const bool useAutodetect = !tableBacked
+                                      && !splitReadLayout
+                                      && !preparedLib.explicitChem
                                       && (preparedLib.resolvedChemRequest == "auto");
             string effectiveReadNamespace = upperCopy(preparedLib.effectiveChem);
             string detectedMatchMode = "UNKNOWN";
@@ -2056,6 +2616,12 @@ std::shared_ptr<PfMultiAssignPhaseResult> runPfMultiAssignPhase(
                                  << " star_chemistry=" << preparedLib.resolvedChemRequest
                                  << " → effectiveChem=" << preparedLib.effectiveChem
                                  << " (auto-detect skipped)\n";
+            }
+            if (tableBacked) {
+                effectiveReadNamespace = upperCopy(preparedLib.effectiveChem);
+                detectedMatchMode = "TABLE_INPUT";
+                P.inOut->logMain << "NOTICE: table import library_id=" << preparedLib.libraryId
+                                 << " effectiveReadNamespace=" << effectiveReadNamespace << "\n";
             }
             if (useAutodetect) {
                 PfMultiAssign::AssignOptions detectOpts = runAssignOpts;
@@ -2102,7 +2668,7 @@ std::shared_ptr<PfMultiAssignPhaseResult> runPfMultiAssignPhase(
                     P.inOut->logMain << "WARNING: failed to clean auto-detect probe dir: "
                                      << detectOut << "\n";
                 }
-            } else if (!useAutodetect && !preparedLib.explicitChem) {
+            } else if (!splitReadLayout && !useAutodetect && !preparedLib.explicitChem) {
                 if (originalNamespaceKnown && isKnownNamespace(effectiveReadNamespace)) {
                     // Both known, no probe needed.
                 } else {
@@ -2114,12 +2680,17 @@ std::shared_ptr<PfMultiAssignPhaseResult> runPfMultiAssignPhase(
                     throw runtime_error(oss.str());
                 }
             }
+            if (splitReadLayout) {
+                effectiveReadNamespace = "ATAC";
+                detectedMatchMode = "RAW_MATCH";
+            }
             runAssignOpts.autodetectChemistry = false;
 
             // --- Phase 2: Normalize whitelist to match read namespace ---
             // After probe, effectiveReadNamespace is determined. Translate
             // whitelist so assignBarcodes matches in read namespace directly.
-            if (isKnownNamespace(effectiveReadNamespace) && originalNamespaceKnown &&
+            if (!splitReadLayout &&
+                isKnownNamespace(effectiveReadNamespace) && originalNamespaceKnown &&
                 effectiveReadNamespace != originalWhitelistNamespace) {
                 PfMultiAssign::WhitelistNormalizationResult nsWlInfo =
                     PfMultiAssign::normalizeWhitelistToNamespace(
@@ -2536,8 +3107,23 @@ std::shared_ptr<PfMultiAssignPhaseResult> runPfMultiAssignPhase(
             }
 
             PfMultiAssign::AssignResult assignResult;
+            PfMultiTableImport::TableImportResult tableResult;
             try {
-                assignResult = PfMultiAssign::runAssignBarcodes(wlInfo.normalizedPath, refPath, resolvedFastq, assignOut, runAssignOpts);
+                if (tableBacked) {
+                    PfMultiTableImport::TableImportOptions tableOpts;
+                    tableOpts.enableStarDynamicPermitHooks = runAssignOpts.enableStarDynamicPermitHooks;
+                    tableOpts.filteredBarcodesPath = runAssignOpts.filteredBarcodesPath;
+                    tableOpts.featureTypeLabel = featureRefType;
+                    tableOpts.sampleName = sampleName;
+                    tableOpts.assignmentWhitelistNamespace = assignmentWhitelistNamespace;
+                    tableResult = PfMultiTableImport::runTableFeatureImport(
+                        wlInfo.normalizedPath, refPath, resolvedFastq, assignOut, tableOpts);
+                    assignResult.returnCode = tableResult.returnCode;
+                    assignResult.inputFormat = "table";
+                } else {
+                    assignResult = PfMultiAssign::runAssignBarcodes(
+                        wlInfo.normalizedPath, refPath, resolvedFastq, assignOut, runAssignOpts);
+                }
             } catch (...) {
                 stopPfController.store(true, std::memory_order_relaxed);
                 if (pfControllerThread.joinable()) {
@@ -2646,7 +3232,30 @@ std::shared_ptr<PfMultiAssignPhaseResult> runPfMultiAssignPhase(
                     + ", libraryId=" + preparedLib.libraryId
                     + ", sample=" + sampleName
                     + ", featureRef=" + refPath
-                    + ", fastq=" + resolvedFastq);
+                    + ", input=" + resolvedFastq
+                    + ", input_format=" + assignResult.inputFormat);
+            }
+            if (tableBacked) {
+                P.inOut->logMain << "NOTICE: table feature import completed for library_id="
+                                 << preparedLib.libraryId
+                                 << " rows_read=" << tableResult.stats.rowsRead
+                                 << " rows_retained=" << tableResult.stats.rowsRetained
+                                 << " rejected_barcode=" << tableResult.stats.rowsRejectedBarcode
+                                 << " rejected_feature=" << tableResult.stats.rowsRejectedFeature
+                                 << " rejected_count=" << tableResult.stats.rowsRejectedCount
+                                 << " duplicate_pairs_collapsed="
+                                 << tableResult.stats.duplicatePairsCollapsed << "\n";
+            } else {
+            P.inOut->logMain << "NOTICE: assignBarcodes completed for library_id="
+                             << preparedLib.libraryId
+                             << " input_format=" << assignResult.inputFormat
+                             << " cbq_mode_requested=" << assignResult.cbqModeRequested
+                             << " cbq_mode_effective=" << assignResult.cbqModeEffective;
+            if (!assignResult.cbqModeFallbackReason.empty()) {
+                P.inOut->logMain << " cbq_mode_fallback_reason="
+                                 << assignResult.cbqModeFallbackReason;
+            }
+            P.inOut->logMain << "\n";
             }
 
             appendAssignNormalizationStats(assignOut, nsCtx, wlInfo);
@@ -2656,13 +3265,25 @@ std::shared_ptr<PfMultiAssignPhaseResult> runPfMultiAssignPhase(
             run.assignOut = assignOut;
             run.featureRefPath = refPath;
             run.whitelistPath = wlInfo.normalizedPath;
+            run.barcodeOutputMapPath =
+                !preparedLib.starBarcodeOutputMap.empty()
+                    ? preparedLib.starBarcodeOutputMap
+                    : ((wlInfo.hasTwoColumnSource && assignmentWhitelistNamespace == "NXT")
+                        ? wlInfo.sourcePath
+                        : "");
             run.effectiveChem = effectiveReadNamespace;
             run.effectiveReadNamespace = nsCtx.effectiveReadNamespace;
             run.assignmentWhitelistNamespace = nsCtx.assignmentWhitelistNamespace;
             run.translateNxtForAssign = false;
             // Whitelist is now in read namespace; translateNxt is false so
             // assignBarcodes outputs barcodes in the assignment/read namespace.
-            run.featureMexOutputNamespace = nsCtx.assignmentWhitelistNamespace;
+            // A two-column 10x translation whitelist maps NXT assignment
+            // barcodes to TRU MEX barcodes at stub generation. Keep the MEX
+            // namespace aligned with the barcode TSV that downstream merge reads.
+            run.featureMexOutputNamespace =
+                !run.barcodeOutputMapPath.empty()
+                    ? (splitReadLayout ? "GEX" : "TRU")
+                    : nsCtx.assignmentWhitelistNamespace;
             run.outputNamespace = nsCtx.outputNamespace;
             run.namespaceConfident = nsCtx.isNamespaceConfident;
             run.detectedMatchMode = detectedMatchMode;
@@ -2673,6 +3294,20 @@ std::shared_ptr<PfMultiAssignPhaseResult> runPfMultiAssignPhase(
             run.resolvedFastq = resolvedFastq;
             run.resolvedChemRequest = preparedLib.resolvedChemRequest;
             run.explicitChem = preparedLib.explicitChem;
+            run.adtMexOutput = preparedLib.adtMexOutput;
+            run.tableBacked = tableBacked;
+            run.starInputFormat = preparedLib.starInputFormat;
+            run.hashFeatureSelector = runAssignOpts.hashFeatureSelector;
+            run.hashDemuxMethod = runAssignOpts.hashDemuxMethod.empty()
+                ? string("ratio")
+                : runAssignOpts.hashDemuxMethod;
+            run.hashDemuxMode = runAssignOpts.hashDemuxMode;
+            run.hashMinTotal = runAssignOpts.hashMinTotal;
+            run.hashMinTop = runAssignOpts.hashMinTop;
+            run.hashMinRatio = runAssignOpts.hashMinRatio;
+            if (tableBacked) {
+                run.tableImportStats = tableResult.stats;
+            }
             run.returnCode = assignResult.returnCode;
             featureRuns.push_back(run);
         }
@@ -2687,6 +3322,23 @@ std::shared_ptr<PfMultiAssignPhaseResult> runPfMultiAssignPhase(
         for (auto& run : featureRuns) {
             string realOut = findAssignOutputDir(run.assignOut);
             run.assignOut = realOut;
+            const string summaryPath = run.assignOut + "/hash_demux_summary.json";
+            std::ifstream summaryIn(summaryPath.c_str());
+            if (summaryIn.is_open()) {
+                string content((std::istreambuf_iterator<char>(summaryIn)),
+                               std::istreambuf_iterator<char>());
+                auto parseIntField = [&](const string& key, int& out) {
+                    const string needle = "\"" + key + "\": ";
+                    size_t pos = content.find(needle);
+                    if (pos == string::npos) return;
+                    pos += needle.size();
+                    out = std::atoi(content.c_str() + pos);
+                };
+                parseIntField("n_hash_features", run.nHashFeatures);
+                parseIntField("n_singlet", run.nHashSinglet);
+                parseIntField("n_doublet", run.nHashDoublet);
+                parseIntField("n_negative", run.nHashNegative);
+            }
             for (const char* suffix : {"pf_library_provenance.tsv", "pf_library_provenance.tsv.tmp"}) {
                 string path = run.assignOut + "/" + suffix;
                 if (remove(path.c_str()) != 0 && errno != ENOENT) {
@@ -2697,13 +3349,30 @@ std::shared_ptr<PfMultiAssignPhaseResult> runPfMultiAssignPhase(
         }
 
         for (auto& run : featureRuns) {
-            int stubRet = PfMultiMexStub::processAssignOutput(
-                run.assignOut, run.featureRefPath, run.featureType,
-                true, run.whitelistPath, run.featureType);
-            if (stubRet != 0) {
-                throw runtime_error("Failed to generate MEX stub for library: type="
+            const vector<PfAssignMexSource> mexSources = resolveAssignMexSources(run.assignOut);
+            if (mexSources.empty()) {
+                throw runtime_error("No assign MEX outputs found for library: type="
                     + run.featureType + ", library_id=" + run.libraryId
                     + ", assign_out=" + run.assignOut);
+            }
+            const string whitelistPath = run.barcodeOutputMapPath.empty()
+                ? run.whitelistPath : run.barcodeOutputMapPath;
+            for (const auto& source : mexSources) {
+                const bool splitSource = (source.mexDir != run.assignOut);
+                const string featureRefPath = resolveAssignStubFeatureRef(
+                    source, run.assignOut, run.featureRefPath);
+                const string typeOverride = source.featureTypeOverride.empty()
+                    ? run.featureType : source.featureTypeOverride;
+                int stubRet = PfMultiMexStub::processAssignOutput(
+                    source.mexDir, featureRefPath, run.featureType,
+                    !splitSource,
+                    whitelistPath,
+                    typeOverride);
+                if (stubRet != 0) {
+                    throw runtime_error("Failed to generate MEX stub for library: type="
+                        + run.featureType + ", library_id=" + run.libraryId
+                        + ", assign_out=" + source.mexDir);
+                }
             }
             // With the namespace refactor, the whitelist is pre-normalized to
             // the read namespace before assignment. barcodes.txt is already in
@@ -2717,18 +3386,32 @@ std::shared_ptr<PfMultiAssignPhaseResult> runPfMultiAssignPhase(
         // Read feature MEX to validate before writing provenance (fail-fast on read errors)
         vector<PfMultiFeatureMexEntry> featureMexEntries;
         for (const auto& run : featureRuns) {
-            try {
-                PfMultiFeatureMexEntry entry;
-                entry.data = PfMultiMerge::readMex(run.assignOut);
-                entry.effectiveChem = run.effectiveChem;
-                entry.featureMexOutputNamespace = run.featureMexOutputNamespace;
-                entry.featureType = run.featureType;
-                entry.libraryId = run.libraryId;
-                featureMexEntries.push_back(std::move(entry));
-            } catch (const exception& e) {
-                throw runtime_error("Failed to read feature MEX for library: type="
+            const vector<PfAssignMexSource> mexSources = resolveAssignMexSources(run.assignOut);
+            if (mexSources.empty()) {
+                throw runtime_error("No assign MEX outputs found for library: type="
                     + run.featureType + ", library_id=" + run.libraryId
-                    + ", assign_out=" + run.assignOut + ": " + e.what());
+                    + ", assign_out=" + run.assignOut);
+            }
+            for (const auto& source : mexSources) {
+                try {
+                    PfMultiFeatureMexEntry entry;
+                    entry.data = PfMultiMerge::readMex(source.mexDir);
+                    if (!source.featureTypeOverride.empty()) {
+                        for (auto& featureType : entry.data.featureTypes) {
+                            featureType = source.featureTypeOverride;
+                        }
+                    }
+                    entry.effectiveChem = run.effectiveChem;
+                    entry.featureMexOutputNamespace = run.featureMexOutputNamespace;
+                    entry.featureType = source.featureTypeOverride.empty()
+                        ? run.featureType : source.featureTypeOverride;
+                    entry.libraryId = run.libraryId;
+                    featureMexEntries.push_back(std::move(entry));
+                } catch (const exception& e) {
+                    throw runtime_error("Failed to read feature MEX for library: type="
+                        + run.featureType + ", library_id=" + run.libraryId
+                        + ", assign_out=" + source.mexDir + ": " + e.what());
+                }
             }
         }
 
@@ -2752,9 +3435,24 @@ std::shared_ptr<PfMultiAssignPhaseResult> runPfMultiAssignPhase(
                 manifest << "library_id\t" << run.libraryId << "\n";
                 manifest << "sample\t" << run.sampleName << "\n";
                 manifest << "feature_type\t" << run.featureType << "\n";
+                manifest << "adt_mex_output\t" << (run.adtMexOutput ? "yes" : "no") << "\n";
+                manifest << "hash_demux_enabled\t"
+                         << ((run.hashDemuxMode != 0 && run.nHashFeatures > 0) ? "yes" : "no") << "\n";
+                manifest << "hash_demux_method\t" << run.hashDemuxMethod << "\n";
+                manifest << "hash_feature_selector\t" << run.hashFeatureSelector << "\n";
+                manifest << "hash_min_total\t" << run.hashMinTotal << "\n";
+                manifest << "hash_min_top\t" << run.hashMinTop << "\n";
+                manifest << "hash_min_ratio\t" << run.hashMinRatio << "\n";
+                manifest << "n_hash_features\t" << run.nHashFeatures << "\n";
+                manifest << "n_hash_singlet\t" << run.nHashSinglet << "\n";
+                manifest << "n_hash_doublet\t" << run.nHashDoublet << "\n";
+                manifest << "n_hash_negative\t" << run.nHashNegative << "\n";
+                manifest << "star_input_format\t"
+                         << (run.starInputFormat.empty() ? "fastq" : run.starInputFormat) << "\n";
                 manifest << "fastq_dir\t" << run.resolvedFastq << "\n";
                 manifest << "feature_ref\t" << run.featureRefPath << "\n";
                 manifest << "whitelist\t" << run.whitelistPath << "\n";
+                manifest << "barcode_output_map\t" << run.barcodeOutputMapPath << "\n";
                 manifest << "chemistry_request\t" << run.resolvedChemRequest << "\n";
                 manifest << "chemistry_explicit\t" << (run.explicitChem ? "yes" : "no") << "\n";
                 manifest << "effective_chemistry\t" << run.effectiveChem << "\n";
@@ -2774,6 +3472,31 @@ std::shared_ptr<PfMultiAssignPhaseResult> runPfMultiAssignPhase(
                 manifest << "barcode_norm_unmatched\t" << run.normalizationStats.unmatched << "\n";
                 manifest << "barcode_norm_dedup_dropped\t" << run.normalizationStats.dedupDropped << "\n";
                 manifest << "barcode_norm_output_count\t" << run.normalizationStats.outputCount << "\n";
+                if (run.tableBacked) {
+                    manifest << "table_input_path\t" << run.tableImportStats.inputPath << "\n";
+                    manifest << "table_delimiter\t"
+                             << (run.tableImportStats.delimiter == "\t" ? "tab" : "comma") << "\n";
+                    manifest << "table_rows_read\t" << run.tableImportStats.rowsRead << "\n";
+                    manifest << "table_rows_retained\t" << run.tableImportStats.rowsRetained << "\n";
+                    manifest << "table_rows_rejected_barcode\t"
+                             << run.tableImportStats.rowsRejectedBarcode << "\n";
+                    manifest << "table_rows_rejected_feature\t"
+                             << run.tableImportStats.rowsRejectedFeature << "\n";
+                    manifest << "table_rows_rejected_count\t"
+                             << run.tableImportStats.rowsRejectedCount << "\n";
+                    manifest << "table_duplicate_pairs_collapsed\t"
+                             << run.tableImportStats.duplicatePairsCollapsed << "\n";
+                    manifest << "table_rows_suffix_normalized\t"
+                             << run.tableImportStats.rowsSuffixNormalized << "\n";
+                manifest << "table_permit_chunks_processed\t"
+                             << run.tableImportStats.permitChunksProcessed << "\n";
+                    manifest << "table_feature_permit_acquires\t"
+                             << run.tableImportStats.featurePermitAcquires << "\n";
+                    manifest << "barcode_namespace_input\t"
+                             << run.tableImportStats.barcodeNamespaceInput << "\n";
+                    manifest << "barcode_namespace_output\t"
+                             << run.tableImportStats.barcodeNamespaceOutput << "\n";
+                }
                 manifest << "return_code\t" << run.returnCode << "\n";
                 manifest << "status\tOK\n";
                 manifest << "assign_output_dir\t" << run.assignOut << "\n";
@@ -3088,7 +3811,8 @@ int finalizePfMultiConfig(Parameters& P,
             for (const auto& run : featureRuns) {
                 writeDeferredFilteredAssignOutput(
                     run.assignOut, filteredGexBarcodes, run.featureMexOutputNamespace,
-                    run.whitelistPath, P.inOut->logMain);
+                    run.barcodeOutputMapPath.empty() ? run.whitelistPath : run.barcodeOutputMapPath,
+                    P.inOut->logMain);
             }
         }
 
@@ -3127,7 +3851,19 @@ int finalizePfMultiConfig(Parameters& P,
         }
         if (hasCrisprFeatures) {
             string outsDir = outPrefix + "/outs";
-            ret = runCrisprFeatureCalling(filteredOutDir, outsDir, P.pfMulti.crMinUmi, P.inOut->logMain);
+            const string emptyDropsResultsPath = resolveOptionalEmptyDropsResultsPath(filteredOut);
+            ret = runCrisprFeatureCalling(rawOutDir,
+                                          filteredOutDir,
+                                          outsDir,
+                                          emptyDropsResultsPath,
+                                          gexNormalizationChem,
+                                          outputChem,
+                                          P.pfMulti.crMinUmi,
+                                          P.pfMulti.crGuideCaller,
+                                          P.pfMulti.crGuideFdr,
+                                          P.pfMulti.crGuideFdrMinUmi,
+                                          P.pfMulti.crGuideFdrEmitQvalues,
+                                          P.inOut->logMain);
             if (ret != 0) {
                 P.inOut->logMain << "WARNING: CRISPR feature calling failed, continuing without crispr_analysis/\n";
             }

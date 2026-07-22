@@ -4,10 +4,31 @@ This file tracks active top-level work only. Completed items and stale historica
 
 ## Priority 0: Paper-Critical Validation
 
-- No active paper-critical blockers at present.
+- Merge the current Velocyto/BAM `packedReadInfo` lifetime fix set to `master` before the UCSF production run.
+  - This is the production-critical fix for the `v0.90.1` Velocyto + BAM regression.
+  - Keep the conservative lifetime guard in place for production; defer any tighter early-free optimization until it has dedicated regression coverage.
+- After the UCSF production run, cut a prerelease that includes the `v0.90.1` Velocyto/BAM fix.
+  - Treat the next tag as a prerelease only; do not treat it as a stable/public release yet.
+  - The prerelease goal is to ensure the packaged binary path works with the production fix, not to declare final release readiness.
 
 ## Priority 1: Correctness / Parity
 
+- Add production-scale Solo direct-bridge repeatability regression coverage.
+  - The required invariant is exact raw GeneFull MEX identity for repeated
+    runs with the same FASTQ input, same binary, and same production
+    non-Flex inline-hash bridge flags.
+  - Include a large enough A375-style perturb fixture to expose
+    worker-local UMI collapse and scheduling sensitivity; tiny smoke fixtures
+    are not sufficient for this bug class.
+  - Compare raw and filtered MEX exactly, and record `STAR_INPUT_CHUNK_TRACE`
+    or equivalent chunk ownership metadata when available so input chunking can
+    be separated from downstream reduction nondeterminism.
+- Create a small set of acceptable smoke-test artifacts that are safe to ship with the repo or easy to fetch from public sources.
+  - Cover the main regression surfaces now exercised only with restricted host-local datasets.
+  - Prefer tiny public or explicitly allowable fixtures over protected internal UCSF/Y-sensitive artifacts.
+  - Include at least one fixture that can validate shared read-level lifetime dependencies such as Velocyto plus BAM CB/UB tagging.
+- Do not make a stable/public release until acceptable/public regression coverage exists for the production-critical paths.
+  - In particular, replace or supplement the current host-local UCSF-only Velocyto/BAM smoke with allowable/public fixtures before treating the next release as stable.
 - Establish FLEX parity versus Cell Ranger 9.0 on a representative dataset.
   - This is not an immediate blocker, but it is the highest-value follow-up because other major comparisons were made against CR 9.0.
   - Include runtime comparison and inspect whether targeted acceleration in FLEX feature processing is worthwhile.
@@ -18,11 +39,48 @@ This file tracks active top-level work only. Completed items and stale historica
     - mixed-chemistry merge (`NXT + TRU` feature libraries with TRU GEX)
     - 2-column mapping edge cases and chemistry precedence
     - any remaining multi-library validation gaps beyond the new filtered-cell smoke
+- Tighten `packedReadInfo` lifetime after the conservative Velocyto/BAM-tagging fix.
+  - Current safe behavior keeps `packedReadInfo` alive when downstream Velocyto or BAM CB/UB tagging may still consume it.
+  - Follow up with a targeted post-consumer release point after `soloMain.processAndOutput()` / BAM finalization so peak RAM can drop earlier without reintroducing the regression.
+- Add regression coverage for unsorted BAM CB/UB tag-injection spilling.
+  - `g_unsortedTagBuffer` must always use a bounded disk-spill buffer when CB/UB tags are requested.
+  - `--limitBAMsortRAM=0` must not mean "keep all unsorted tag-injection records in RAM", and unsorted-only runs must use a valid temp directory for spill files.
+- Add regression coverage for the JAX/multiome production wrapper manifest loop.
+  - Background remote post-MEX workers must redirect stdin from `/dev/null`.
+  - SSH or child processes must not be able to consume the `while read` manifest stream and silently skip later samples.
 - Implement data-driven `--clip3pPolyG auto`.
 
 ## Priority 2: Performance / Architecture
 
-- No active top-level performance / architecture items at present.
+- Extend Y-removal/Y-noY emission beyond FASTQ once additional input modules
+  land.
+  - Current `--emitYNoYFastq yes` behavior is deliberately gated to FASTQ
+    paths (`.fastq`, `.fq`, `.fastq.gz`, `.fq.gz`) while Fastx is the only
+    production input module.
+  - BINSEQ or other future input formats need explicit Y-removal support and
+    smoke coverage before the gate is relaxed.
+- Reduce the process_features decoded-record interface surface after the
+  production PF CBQ input gate lands.
+  - CBQ is the immediate driver, but this is a general PF input architecture
+    cleanup. The shared CBQ reader keeps STAR-facing sequence packed; the PF
+    adapter still materializes bounded in-memory ASCII sequence/quality lines
+    because that matches the existing PF consumer path.
+  - Hide newline synthesis, default-quality handling, and record-shape
+    conversion behind a smaller decoded-record adapter. A narrower surface
+    makes all non-FASTQ producers more robust and lets PF change its internal
+    sequence representation without spreading compatibility work across every
+    input module.
+- Optimize JAX OCM GeneFull and Velocyto materialization using the staged plan in [docs/RUNBOOK_SCRNA_OCM_MATERIALIZATION_OPTIMIZATION_20260520.md](/mnt/pikachu/STAR-suite/docs/RUNBOOK_SCRNA_OCM_MATERIALIZATION_OPTIMIZATION_20260520.md).
+  - Production should materialize `GeneFull` + Velocyto once, share OCM maps and per-sample cell calls, and skip `Gene` unless a Cell Ranger comparator run explicitly requests it.
+  - Replace repeated count/write MatrixMarket scans with a streaming router that writes raw and filtered outputs from the same pass.
+- Optimize the non-Flex scRNA / GEX internal gzip path using the staged harness approach in [docs/RUNBOOK_GZIP_PIPELINE_ITERATION_20260326.md](/mnt/pikachu/STAR-suite/docs/RUNBOOK_GZIP_PIPELINE_ITERATION_20260326.md).
+  - Treat this as a medium-priority follow-up, not an immediate blocker: the current `zcat` workaround is acceptable for published benchmarks, but it is now clear that an optimized internal gzip path can beat `zcat` on at least one real surface (`--flexNoAlign 1` full-sample Flex).
+  - Use the runbook sequence as written: Flex first, then a separate GEX harness.
+  - Keep the benchmark question narrow:
+    - baseline = external `zcat`
+    - target = current internal gzip
+    - candidate optimizations = buffered reads, delimiter scanning, and small batched handoff
+  - Reuse queue telemetry / occupancy as the primary signal, and only promote a new internal path if it matches or beats the current benchmark-default `zcat` surface on the corresponding workload.
 
 ## Priority 3: Dataset / Fixture Coverage
 
@@ -33,6 +91,14 @@ This file tracks active top-level work only. Completed items and stale historica
   - FLEX probes
   - antibody capture
 
+## MCP / STAR Launchpad (future)
+
+- **User-defined STAR workflows in Launchpad** (not started): today recipes are repo-registered YAML + `config.yaml`. Parameter values can be round-tripped via client-side JSON **Load/Save parameters** only (no custom schema editor yet).
+  - **Basic / high value**: templates (clone existing `star_*` schemas) and/or **paste STAR one-liner → draft YAML** + download; user commits YAML + config entry and restarts or `reload_config`. Loopback-only API acceptable.
+  - **Medium**: heuristic parser for common `--flag value` pairs; document limits for multi-operand flags (`--readFilesIn`, `--outSAMtype`) and `operand_group`.
+  - **Full customization**: **editor screen** to add/delete/reorder parameter rows (name, `cli_flag`, type, defaults, optional `operand_group`, `flag_order`). Validate with existing `validate_draft_workflow_schema` / `WorkflowSchema`.
+  - **Persist on server** (optional, higher risk): write under a fixed repo subdir + `reload_config`, loopback-only and path-sanitized; otherwise prefer download + manual commit.
+
 ## Notes
 
 - The multisample PE bulk batch-vs-sequential equivalence work is closed for now. The current smoke/regression coverage is sufficient to catch regressions, and a broader benchmark can be revisited later if needed for formal test expansion.
@@ -42,6 +108,7 @@ This file tracks active top-level work only. Completed items and stale historica
 - QC graphics consolidation is deferred rather than complete. The remaining work is mainly `process_features` heatmap consolidation/optimization, and it should be revisited the next time new graphical output work is active.
 - Feature-offset detection already has a preflight phase. Any deeper read-level consistency check should wait until there is a broader formal preflight framework to put it in.
 - `--readFilesCommand` remains for flexibility and legacy support, but active development should assume the direct internal gzip path. If an external command path with a newer feature diverges, that is a low-priority compatibility issue rather than a current roadmap item.
+- Gray-zone ambiguous-read / EM bookkeeping for EmptyDrops admission is demoted to a low-priority reminder. In principle some ambiguity signal could be recovered from BAM or a dedicated sidecar, but carrying the extra read-level state for a small number of borderline cells is not justified right now: the engineering cost is high, most of the affected barcodes are expected to be removed by downstream QC anyway, and the current UCSF evidence does not justify the complexity. Revisit only if a future dataset shows a materially larger cell-calling gain that survives downstream filtering.
 - CB/UB coupling is no longer an active behavior-change task. For FLEX, treat CB/UB coupling as the intended semantics and only revisit the stats/reporting consequences if they become confusing in practice.
 - Legacy FLEX `ZG/ZX` handling is demoted to dead-code cleanup rather than an active feature item. It came from the older BAM/sidecar workaround path and should only be revisited when there is time to simplify or replace it directly.
 - Perturb dynamic permit scheduling is treated as complete for now. The scheduler landed, Phase 5 validation was completed, and the later PF consumer-cap removal produced the expected large throughput improvement. Keep the smoke/benchmark coverage, and only revisit if new workloads show another clear scheduling bottleneck.

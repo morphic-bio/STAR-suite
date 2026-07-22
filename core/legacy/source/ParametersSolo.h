@@ -11,6 +11,9 @@
 #include "SoloBarcode.h"
 #include "SoloFeatureTypes.h"
 
+#include "htslib/khash.h"
+KHASH_MAP_INIT_INT(cbH0, uint32_t)
+
 class Parameters;
 class ParametersSolo;
 
@@ -110,7 +113,8 @@ public:
     uint64 cbWLsize;
     bool cbWLyes;
     vector<string> soloCBwhitelist;
-    vector <uint64> cbWL;    
+    vector <uint64> cbWL;
+    khash_t(cbH0) *cbWLhash = nullptr;  // packed-CB(uint32) → WL index; built once after cbWL
     vector<string> cbWLstr;
     // Output barcode strings for MEX/barcodes.tsv.
     // For 2-column translation whitelists (e.g. NXT), cbWLstr[i] holds column 1

@@ -367,7 +367,16 @@ OrdMagResult SimpleEmptyDropsStage::runCRSimpleFilterBootstrap(
     uint32 scaledIndMin = min(params.indMin, nCB);
     // STAR EmptyDrops_CR treats indMax as exclusive
     uint32 scaledIndMax = min(params.indMax, nCB);
-    uint32 minAmbientCells = (nCB >= 1000) ? (nCB / 10) : min((uint32)100, nCB);
+    uint32 minAmbientCells = 0;
+    if (nCB >= 1000) {
+        // Guarded minimum: at least 2% or 5000 cells, but never more than 10%.
+        uint32 minFrac = nCB / 50;  // 2%
+        uint32 minAbs = 5000;
+        uint32 minCandidate = max(minAbs, minFrac);
+        minAmbientCells = min(nCB / 10, minCandidate);  // cap at 10%
+    } else {
+        minAmbientCells = min((uint32)100, nCB);
+    }
     uint32 ambientWindowSize = (scaledIndMax > scaledIndMin) ? (scaledIndMax - scaledIndMin) : 0;
     
     if (scaledIndMax <= scaledIndMin || ambientWindowSize < minAmbientCells) {
@@ -508,7 +517,16 @@ OrdMagResult SimpleEmptyDropsStage::runCRSimpleFilter(
     // Extract ambient indices
     uint32 scaledIndMin = min(params.indMin, nCB);
     uint32 scaledIndMax = min(params.indMax, nCB);
-    uint32 minAmbientCells = (nCB >= 1000) ? (nCB / 10) : min((uint32)100, nCB);
+    uint32 minAmbientCells = 0;
+    if (nCB >= 1000) {
+        // Guarded minimum: at least 2% or 5000 cells, but never more than 10%.
+        uint32 minFrac = nCB / 50;  // 2%
+        uint32 minAbs = 5000;
+        uint32 minCandidate = max(minAbs, minFrac);
+        minAmbientCells = min(nCB / 10, minCandidate);  // cap at 10%
+    } else {
+        minAmbientCells = min((uint32)100, nCB);
+    }
     uint32 ambientWindowSize = (scaledIndMax >= scaledIndMin) ? (scaledIndMax - scaledIndMin) : 0;
     
     if (scaledIndMax <= scaledIndMin || ambientWindowSize < minAmbientCells) {

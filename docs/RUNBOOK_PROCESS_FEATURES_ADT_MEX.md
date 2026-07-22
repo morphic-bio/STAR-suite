@@ -1,0 +1,150 @@
+# process_features ADT / Protein MEX Output
+
+STAR-suite owns raw ADT (antibody-derived tag) quantification for Multiomics Suite.
+This path reuses the existing `assignBarcodes` / `process_features` feature-matching
+engine and emits a standard 10x-style protein MEX directory.
+
+## Scope
+
+- Input: feature-barcode FASTQs + antibody feature reference CSV
+- Output: deduplicated protein MEX (`barcodes.tsv.gz`, `features.tsv.gz`, `matrix.mtx.gz`)
+- Not in scope: CLR normalization, denoising, or Multiomics orchestration
+
+Multiomics Suite consumes the output as `protein.mex_dir` in a four-factor manifest.
+Normalization (`protein.normalization = clr`) is applied downstream in Multiomics Suite.
+
+## Read layout (10x feature barcode)
+
+| Read | Content |
+|------|---------|
+| R1 (`_R1_`) | cell barcode + UMI |
+| R2 (`_R2_`) | antibody tag sequence |
+
+Defaults match standard 10x Feature Barcode libraries: 16 bp CB + 12 bp UMI on R1,
+feature tag on R2 at offset 0 unless a `pattern` column overrides offset detection.
+
+Matching uses the same Hamming-tolerant `process_features` search as CRISPR/ADT
+libraries in CR-multi mode.
+
+## Feature reference CSV
+
+Required columns:
+
+| Column | Description |
+|--------|-------------|
+| `id` | Feature ID (MEX row 1) |
+| `name` | Display name (MEX row 2) |
+| `sequence` | Antibody tag sequence |
+| `feature_type` | Should be `Antibody Capture` for protein/ADT |
+
+Optional columns (`target_gene`, `clone`, `vendor`, `isotype_control`, …) are
+preserved in the copied snapshot `feature_reference.csv` written beside the MEX.
+
+## Command
+
+```bash
+core/features/process_features/assignBarcodes \
+  --whitelist /path/to/gex_whitelist.txt \
+  --featurelist /path/to/protein_feature_ref.csv \
+  --directory /path/to/protein_out \
+  --output-mode adt_mex \
+  --skip_empty_drops \
+  /path/to/adt_fastq_dir \
+  -b 16 -u 12
+```
+
+`--adt-mex` is an alias for `--output-mode adt_mex`.
+
+ADT mode defaults:
+
+- Skips EmptyDrops (barcodes stay in the GEX whitelist namespace)
+- Skips histogram/heatmap QC artifacts
+- Writes gzipped 10x MEX plus provenance files
+
+Use `--filtered_barcodes` with `--source_namespace` / `--target_namespace` when
+restricting to a GEX-called cell set while preserving barcode namespace parity.
+ADT MEX (`barcodes.tsv.gz`, `matrix.mtx.gz`) is built from the filtered barcode
+set when a filter is supplied; unfiltered artifacts remain under the sample
+directory for debugging.
+
+## Output contract
+
+Directory (one sample subdirectory per input FASTQ folder) contains:
+
+| File | Description |
+|------|-------------|
+| `barcodes.tsv.gz` | Cell barcodes (GEX namespace) |
+| `features.tsv.gz` | `id`, `name`, `Antibody Capture` (always normalized for MEX) |
+| `matrix.mtx.gz` | Feature × barcode UMI counts (deduplicated) |
+| `feature_reference.csv` | Snapshot of input feature ref |
+| `protein_quant_summary.json` | Mode, ref fingerprint, layout, counts |
+| `protein_quant_command.txt` | Command provenance |
+
+Legacy assignBarcodes artifacts (`barcodes.txt`, `matrix.mtx`, `stats.txt`, …)
+are still written for debugging.
+
+## Multiomics Suite manifest fields
+
+| Manifest field | Source |
+|----------------|--------|
+| `protein.mex_dir` | Output sample directory with gz MEX |
+| `protein.feature_ref` | `feature_reference.csv` in that directory |
+| `protein.normalization` | Set to `clr` in Multiomics Suite (not computed here) |
+
+## Test
+
+```bash
+core/features/process_features/tests/test_adt_mex.sh
+core/features/process_features/tests/test_hash_demux_mex.sh
+```
+
+## Hash / HTO / CMO demux (adt_mex extension)
+
+When hash-like rows are present in the feature reference, `adt_mex` can also emit:
+
+| path | description |
+|------|-------------|
+| `hash/` | hash-only gz MEX (`Multiplexing Capture`) |
+| `protein/` | optional protein-only gz MEX for mixed ADT+HTO refs |
+| `hash_demux_assignments.tsv` | per-barcode ratio classifier output |
+| `singlet_barcodes.tsv` / `doublet_barcodes.tsv` / `negative_barcodes.tsv` | classification lists |
+| `hash_demux_summary.json` / `hash_demux_command.txt` | provenance |
+
+CLI flags: `--hash-demux`, `--hash-feature-selector`, `--hash-demux-method`,
+`--hash-min-total`, `--hash-min-top`, `--hash-min-ratio`. pf-multi exposes the
+same controls via `star_hash_*` columns. Full contract:
+`docs/RUNBOOK_NATIVE_HTO_CMO_FEATURE_DEMUX_20260615.md`.
+
+## Master integration
+
+**process_features ADT MEX** — merged to `master` on 2026-06-13 from
+`feature/process-features-adt-mex` (commits `3f6f02a`–`bd41418`). Standalone
+`assignBarcodes --output-mode adt_mex` is on `master`.
+
+**pf-multi feature library arm** — merged to `master` on 2026-06-14 from
+`feature/multi-feature-adt-protein-arm` (commits `c143009`–`c316486`). pf-multi
+routes `Antibody Capture` / `ADT` / `Protein` libraries through
+`PfMultiAssign::runAssignBarcodes` with `adtMexOutput` (no separate orchestration).
+
+## pf-multi feature library arm
+
+ADT/protein quantification is **not** a separate orchestration layer. In pf-multi
+configs it is another `assignBarcodes` library arm, matching gRNA/LARRY:
+
+| `feature_types` value | Routed `featureRefType` | pf-multi assign mode |
+|-----------------------|-------------------------|----------------------|
+| `Antibody Capture` | Antibody Capture | ADT MEX (`output_mode=adt_mex`) |
+| `ADT` | Antibody Capture | ADT MEX |
+| `Protein` | Antibody Capture | ADT MEX |
+| `Multiplexing Capture` / `HTO` / `CMO` | Multiplexing Capture | ADT MEX + `hash/` outputs |
+
+Output layout: `cr_assign/<feature_types>/<star_library_id>/<sample>/` with
+gzipped MEX plus `feature_reference.csv`, `protein_quant_summary.json`, and
+`protein_quant_command.txt`. Multiomics Suite reads `protein.mex_dir` from that
+sample directory.
+
+Synthetic multi-library smoke test:
+
+```bash
+bash tests/multi_feature/test_adt_protein_multifeature_arm.sh
+```

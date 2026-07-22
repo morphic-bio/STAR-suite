@@ -31,6 +31,7 @@ struct SamtoolsSorter::SpillFileReader {
         uint32_t size;
         uint8_t hasYFlag;
         uint32_t readId;
+        uint64_t inputOrder;
         
         stream.read(reinterpret_cast<char*>(&size), sizeof(uint32_t));
         if (stream.eof()) {
@@ -49,10 +50,17 @@ struct SamtoolsSorter::SpillFileReader {
             hasRecord = false;
             return false;
         }
+
+        stream.read(reinterpret_cast<char*>(&inputOrder), sizeof(uint64_t));
+        if (!stream.good()) {
+            hasRecord = false;
+            return false;
+        }
         
         currentRecord.size = size;
         currentRecord.hasY = (hasYFlag != 0);
         currentRecord.readId = readId;
+        currentRecord.inputOrder = inputOrder;
         if (currentRecord.data) delete[] currentRecord.data;
         currentRecord.data = new char[size];
         stream.read(currentRecord.data, size);
@@ -73,7 +81,7 @@ struct SamtoolsSorter::SpillFileReader {
 
 SamtoolsSorter::SamtoolsSorter(uint64_t maxRAM, int nThreads, const string& tmpDir, Parameters& P, bool noSort)
     : maxRAM_(maxRAM), nThreads_(nThreads), tmpDir_(tmpDir), P_(P), noSort_(noSort),
-      currentRAM_(0), spillFileCounter_(0), finalized_(false),
+      currentRAM_(0), nextInputOrder_(0), spillFileCounter_(0), finalized_(false),
       fifoRecordIdx_(0), fifoSpillFileIdx_(0)
 {
     records_.reserve(100000); // Pre-allocate space
@@ -102,6 +110,7 @@ void SamtoolsSorter::addRecord(const char* bamData, uint32_t bamSize, uint32_t r
     bool needSpill = false;
     {
         pthread_mutex_lock(&bufferMutex_);
+        record.inputOrder = nextInputOrder_++;
         records_.push_back(std::move(record));
         // Estimate RAM usage: record data + overhead
         currentRAM_ += bamSize + sizeof(BAMRecord) + 64; // 64 bytes overhead per record
@@ -159,13 +168,14 @@ void SamtoolsSorter::sortAndSpill() {
     }
     
     // Write records to spill file with minimal metadata
-    // Format: [bamSize:uint32][hasY:uint8][readId:uint32][bamData:bytes]
+    // Format: [bamSize:uint32][hasY:uint8][readId:uint32][inputOrder:uint64][bamData:bytes]
     for (auto& record : recordsToSpill) {
         uint32_t size = record.size;
         uint8_t hasYFlag = record.hasY ? 1 : 0;
         spillStream.write(reinterpret_cast<const char*>(&size), sizeof(uint32_t));
         spillStream.write(reinterpret_cast<const char*>(&hasYFlag), sizeof(uint8_t));
         spillStream.write(reinterpret_cast<const char*>(&record.readId), sizeof(uint32_t));
+        spillStream.write(reinterpret_cast<const char*>(&record.inputOrder), sizeof(uint64_t));
         spillStream.write(record.data, record.size);
     }
     
@@ -218,6 +228,7 @@ void SamtoolsSorter::clearReturnedRecord() {
         returnedRecord_.size = 0;
         returnedRecord_.hasY = false;
         returnedRecord_.readId = 0;
+        returnedRecord_.inputOrder = 0;
     }
 }
 
@@ -228,7 +239,9 @@ void SamtoolsSorter::initializeKWayMerge() {
     if (!records_.empty()) {
         HeapEntry entry;
         entry.coordKey = SamtoolsSorterHelpers::computeCoordKey(records_[0].data);
+        entry.reverseKey = SamtoolsSorterHelpers::computeReverseKey(records_[0].data);
         entry.readId = records_[0].readId;
+        entry.inputOrder = records_[0].inputOrder;
         entry.sourceId = -1;  // -1 indicates in-memory source
         entry.recordIdx = 0;   // First record in sorted vector
         entry.bamPtr = records_[0].data;  // Pointer to BAM buffer for recomputing coord
@@ -237,6 +250,7 @@ void SamtoolsSorter::initializeKWayMerge() {
         entry.record.size = 0;
         entry.record.hasY = false;
         entry.record.readId = 0;
+        entry.record.inputOrder = 0;
         mergeHeap_.push_back(std::move(entry));
     }
     
@@ -246,7 +260,9 @@ void SamtoolsSorter::initializeKWayMerge() {
         if (reader->readNext()) {
             HeapEntry entry;
             entry.coordKey = SamtoolsSorterHelpers::computeCoordKey(reader->currentRecord.data);
+            entry.reverseKey = SamtoolsSorterHelpers::computeReverseKey(reader->currentRecord.data);
             entry.readId = reader->currentRecord.readId;
+            entry.inputOrder = reader->currentRecord.inputOrder;
             entry.sourceId = reader->sourceId;
             entry.recordIdx = 0;  // Unused for spill files
             entry.bamPtr = reader->currentRecord.data;  // Pointer to BAM buffer for recomputing coord
@@ -254,6 +270,7 @@ void SamtoolsSorter::initializeKWayMerge() {
             entry.record.size = reader->currentRecord.size;
             entry.record.hasY = reader->currentRecord.hasY;
             entry.record.readId = reader->currentRecord.readId;
+            entry.record.inputOrder = reader->currentRecord.inputOrder;
             entry.record.data = new char[reader->currentRecord.size];
             memcpy(entry.record.data, reader->currentRecord.data, reader->currentRecord.size);
             mergeHeap_.push_back(std::move(entry));
@@ -263,7 +280,7 @@ void SamtoolsSorter::initializeKWayMerge() {
         }
     }
     
-    // Build min-heap using explicit comparator: coord then readId
+    // Build min-heap using explicit comparator: coord, strand, then input order.
     std::make_heap(mergeHeap_.begin(), mergeHeap_.end(), heapLess_);
 }
 
@@ -286,6 +303,7 @@ bool SamtoolsSorter::nextRecord(const char** bamData, uint32_t* bamSize, uint32_
                 returnedRecord_.size = reader->currentRecord.size;
                 returnedRecord_.hasY = reader->currentRecord.hasY;
                 returnedRecord_.readId = reader->currentRecord.readId;
+                returnedRecord_.inputOrder = reader->currentRecord.inputOrder;
                 returnedRecord_.data = new char[returnedRecord_.size];
                 memcpy(returnedRecord_.data, reader->currentRecord.data, returnedRecord_.size);
                 
@@ -317,9 +335,9 @@ bool SamtoolsSorter::nextRecord(const char** bamData, uint32_t* bamSize, uint32_
         return false;
     }
     
-    // K-way merge using min-heap: coord (tid<<32|pos) then readId
+    // K-way merge using min-heap: coord (tid<<32|pos), strand, then input order.
     while (!mergeHeap_.empty()) {
-        // Get smallest entry from heap (coord then readId)
+        // Get smallest entry from heap (coord, strand, then input order)
         std::pop_heap(mergeHeap_.begin(), mergeHeap_.end(), heapLess_);
         HeapEntry top = std::move(mergeHeap_.back());  // Move instead of copy to avoid double-free
         mergeHeap_.pop_back();
@@ -351,7 +369,9 @@ bool SamtoolsSorter::nextRecord(const char** bamData, uint32_t* bamSize, uint32_
             if (nextIdx < records_.size()) {
                 HeapEntry nextEntry;
                 nextEntry.coordKey = SamtoolsSorterHelpers::computeCoordKey(records_[nextIdx].data);
+                nextEntry.reverseKey = SamtoolsSorterHelpers::computeReverseKey(records_[nextIdx].data);
                 nextEntry.readId = records_[nextIdx].readId;
+                nextEntry.inputOrder = records_[nextIdx].inputOrder;
                 nextEntry.sourceId = -1;
                 nextEntry.recordIdx = nextIdx;
                 nextEntry.bamPtr = records_[nextIdx].data;
@@ -360,6 +380,7 @@ bool SamtoolsSorter::nextRecord(const char** bamData, uint32_t* bamSize, uint32_
                 nextEntry.record.size = 0;
                 nextEntry.record.hasY = false;
                 nextEntry.record.readId = 0;
+                nextEntry.record.inputOrder = 0;
                 mergeHeap_.push_back(std::move(nextEntry));
                 std::push_heap(mergeHeap_.begin(), mergeHeap_.end(), heapLess_);
             }
@@ -370,7 +391,9 @@ bool SamtoolsSorter::nextRecord(const char** bamData, uint32_t* bamSize, uint32_
                 // Push next record from this source
                 HeapEntry nextEntry;
                 nextEntry.coordKey = SamtoolsSorterHelpers::computeCoordKey(reader->currentRecord.data);
+                nextEntry.reverseKey = SamtoolsSorterHelpers::computeReverseKey(reader->currentRecord.data);
                 nextEntry.readId = reader->currentRecord.readId;
+                nextEntry.inputOrder = reader->currentRecord.inputOrder;
                 nextEntry.sourceId = reader->sourceId;
                 nextEntry.recordIdx = 0;  // Unused for spill files
                 nextEntry.bamPtr = reader->currentRecord.data;
@@ -378,6 +401,7 @@ bool SamtoolsSorter::nextRecord(const char** bamData, uint32_t* bamSize, uint32_
                 nextEntry.record.size = reader->currentRecord.size;
                 nextEntry.record.hasY = reader->currentRecord.hasY;
                 nextEntry.record.readId = reader->currentRecord.readId;
+                nextEntry.record.inputOrder = reader->currentRecord.inputOrder;
                 nextEntry.record.data = new char[reader->currentRecord.size];
                 memcpy(nextEntry.record.data, reader->currentRecord.data, reader->currentRecord.size);
                 mergeHeap_.push_back(std::move(nextEntry));

@@ -8,7 +8,8 @@
 #include "Transcriptome.h"
 #include "BAMoutput.h"
 #include "Quantifications.h"
-#include <memory>
+#include "input/CbqStarAdapter.h"
+#include "input/CbqYNoYWriter.h"
 
 // Forward declaration
 namespace libem {
@@ -28,6 +29,9 @@ public:
 
     char **chunkIn; //space for the chunk of input reads
     array<uint64, MAX_N_MATES> chunkInSizeBytesTotal;    
+
+    star::input::CbqStarChunk cbqStarChunk;
+    uint64 cbqChunkReadN;
     
     char *chunkOutBAM, *chunkOutBAM1;//space for the chunk of output SAM
     OutSJ *chunkOutSJ, *chunkOutSJ1;
@@ -52,15 +56,19 @@ public:
     ~ReadAlignChunk();  // Destructor to clean up owned resources
     void processChunks();
     void mapChunk();
+    void mapCbqChunk();
     void chunkFstreamOpen(string filePrefix, int iChunk, fstream &fstreamOut);
     void chunkFstreamCat (fstream &chunkOut, ofstream &allOut, bool mutexFlag, pthread_mutex_t &mutexVal);
     void chunkFilesCat(ostream *allOut, string filePrefix, uint &iC);
     void reopenYNoYFastqOutputsForReuse();
-    
-    // Reinitialize SlamCompat with new trim values (for mid-run auto-trim)
+
+    void reinitSlamCompat(int trim5p_m1, int trim3p_m1, int trim5p_m2, int trim3p_m2);
     void reinitSlamCompat(int trim5p, int trim3p);
 
     Genome &mapGen;
 private:
+    string cbqYNoYHeaderPayload(uint32 imate) const;
+    bool makeCbqYNoYRecordFromCurrentRead(bool isY, star::input::CbqYNoYRecord* record, string* error);
+    void submitCbqYNoYChunkOrDie(uint64 chunkId, const vector<star::input::CbqYNoYRecord>& records);
 };
 #endif

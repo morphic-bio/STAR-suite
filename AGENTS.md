@@ -7,6 +7,9 @@ actionable; link to deeper docs rather than copying them.
 
 - STAR-suite reorganizes STAR into modules while keeping `core/legacy` as the
   single source of truth for the STAR core.
+- **Note on naming**: `core/legacy/` is the *current* canonical STAR core tree.
+  “legacy” refers to the upstream STAR directory layout we preserve for
+  compatibility and maintainability; it does not mean deprecated or “vanilla-only”.
 - Changes should preserve STAR CLI compatibility unless explicitly planned.
 - Large data and test outputs stay untracked; document their locations in
   `tests/ARTIFACTS.md`.
@@ -35,7 +38,10 @@ actionable; link to deeper docs rather than copying them.
 
 ## Build and Smoke Tests
 
-- Core build: `make core` (binary: `core/legacy/source/STAR`).
+- Core build: `make core` (binary: `core/legacy/source/STAR`) builds the
+  Chromap-enabled multiome-capable STAR by default. Use `make core-portable` or
+  `make core WITH_CHROMAP=0` only for explicit no-Chromap compatibility builds
+  (see `docs/LIBCHROMAP_CONTRACT.md`).
 - Flex tools: `make flex` or `make flex-tools`.
 - Feature tools: `make feature-barcodes-tools`.
 - CB/UB regression: `tests/run_cbub_regression_test.sh`.
@@ -48,6 +54,15 @@ actionable; link to deeper docs rather than copying them.
   machine or from the same checkout.
 - Serialize benchmarking runs to avoid memory pressure, disk contention, and
   misleading performance results.
+- **Benchmark outdirs:** use a **fresh** output directory for each timed run so
+  completion artifacts are not confused with an earlier attempt.
+- **Completion signals (wrapper-driven runs):** treat **wrapper-written**
+  completion artifacts as authoritative when present (for example
+  `BENCHMARK_SUMMARY.txt` written only after the wrapped binary exits). If no
+  wrapper summary exists, use `Log.final.out` together with a successful wrapper
+  exit status or another explicit finished marker—**not** ambiguous partial logs.
+- **Do not** infer “still running” from `Log.out`, `Log.progress.out`, or
+  `pgrep` alone; those are weak or misleading signals for long Solo jobs.
 
 ## Build Hygiene
 
@@ -59,6 +74,8 @@ actionable; link to deeper docs rather than copying them.
   binary.
 - Clean rebuild command:
   `make -C core/legacy/source clean && make -C core/legacy/source -j8 STAR`.
+  This now builds the Chromap-enabled multiome binary by default; pass
+  `WITH_CHROMAP=0` only when intentionally testing the portable stub build.
 - This applies after switching branches/commits, cherry-picking, reverting
   files, or any operation that changes source without rebuilding all objects.
 - This is especially important for Flex/Solo debugging; stale objects can
@@ -119,6 +136,19 @@ actionable; link to deeper docs rather than copying them.
 - Full reference command: `docs/feature_barcodes.md` § "Optimized Benchmark
   Parameters".
 
+### CellBender CUDA Policy (CRITICAL)
+
+- **NEVER** run CellBender without CUDA for production or handoff workflows.
+- Any command that enables CellBender must also enable GPU mode:
+  `--cellbender-gpu` for STAR-suite wrappers, which must propagate to
+  Docker `--gpus all` and CellBender `--cuda`.
+- Before launching remote downstream/CellBender jobs, verify the rendered
+  command contains `--cellbender-gpu`. If it does not, stop and fix the launch
+  command rather than accepting the CPU default.
+- After launch, confirm `nvidia-smi` shows the CellBender process using GPU
+  memory/utilization. Treat `cellbender remove-background --cpu-threads ...`
+  without `--cuda` as a mislaunch.
+
 ## Flex Integration Notes
 
 - Flex now uses `libscrna` for EmptyDrops/OrdMag/Occupancy (no duplicate
@@ -126,11 +156,48 @@ actionable; link to deeper docs rather than copying them.
 - Ensure Flex builds link `libscrna` and include `core/features/libscrna/include`.
 - Plan: `plans/refactor_flex_plan.md`.
 
+### Flex Hash-Cache Assay Context
+
+- Routine scRNA-seq Flex recipes should explicitly generate/use H0+H1
+  (`--hashCacheTiers H0,H1`). H2 recovered measurable additional reads in the
+  JAX benchmark, but did not provide a material final count benefit in that
+  scRNA-seq context and produced a much larger cache.
+- Do not generalize the scRNA-seq H2 result to spatial assays. Spatial recipes
+  may evaluate H2, but must validate count-level benefit, specificity, memory,
+  and runtime on representative spatial data before making it a default.
+- The fused production triage currently queries H0+H1 at offset 0; the full
+  classifier can consume H2 records. Generating an H2 cache alone does not make
+  the fused path use H2. An H2-enabled recipe must select an H2-aware runtime
+  path or add and validate H2 support in fused triage.
+
 ## CR-compat GEX Parity Notes
 
 - Use `GeneFull` for GEX parity (CR includes introns since v7).
 - `--soloCrGexFeature` controls which GEX MEX is merged in CR-compat mode.
 - CB/UB tags are independent (CB can be present without UB and vice versa).
+- OCM scRNA-seq support belongs on the STAR-suite CR-compatible GEX path, not
+  a vanilla STARsolo-only path. Use `--soloCellFilter EmptyDrops_CR`,
+  `GeneFull`, the standard CR-compatible multimapper/UMI/barcode flags, and the
+  dataset-specific OCM whitelist/demultiplexing. Do not use
+  `--soloCellFilter CellRanger2.2` or standalone `--runMode soloCellFiltering`
+  for OCM unless a user explicitly asks for a comparison run. Runbook:
+  `docs/RUNBOOK_SCRNA_OCM_CR_COMPAT.md`.
+
+### BAM Tag Policy for Comparisons (CRITICAL)
+
+- Treat the final `GeneFull`/CR-compatible MEX matrices and cell calls as the
+  authoritative parity surfaces, not BAM tags.
+- `GX`/`GN` are alignment-level compatibility annotations. They do not encode
+  final UMI-collapsed `GeneFull`, Velocyto, multimap-rescue, or CR-compatible
+  counting policy.
+- `UR` is the raw, intentionally uncorrected UMI. `UB` is the corrected UMI.
+  Neither `GX` nor `UR` is a proxy for final counts.
+- Canonical comparison recipes default to `--outSAMtype None` and must not request
+  `GX`/`UR`. Optional diagnostic BAM modes must also omit them unless the test
+  explicitly targets raw-tag compatibility.
+- The molecule-first BAM ledger is a scoped exception: it consumes `GX` and
+  `UR` as raw adapter evidence before resolution. Never compare its input tags
+  as though they were final STAR Suite or Cell Ranger outputs.
 
 ### Poly-G Trimming
 
@@ -153,30 +220,97 @@ actionable; link to deeper docs rather than copying them.
 An MCP server is available for automated agent workflows:
 
 ```bash
-cd mcp_server && pip install -r requirements.txt
+pip install -r mcp_server/requirements.txt
 export MCP_AUTH_TOKEN="your-token"
-python -m mcp_server.app
+python3 -m mcp_server.app --transport http --host 0.0.0.0 --port 8765
 ```
 
-**Available tools**:
-- `list_datasets`, `list_test_suites`, `find_docs`, `find_tests` (discovery)
-- `preflight(script, ...)` - validate before running
-- `run_script(script, ...)` - execute allowlisted scripts
-- `collect_outputs(run_id)` - retrieve results
-- `reload_config()` - hot-reload config
+Convenience wrapper for humans (start/stop Launchpad + MCP on one port):
 
-**Key features**:
+```bash
+bash scripts/launchpad_server.sh up
+bash scripts/launchpad_server.sh down
+```
+
+### Discovery tools (no auth required when `public_discovery: true`)
+
+| Tool | Purpose |
+|------|---------|
+| `list_datasets` | Enumerate configured datasets with paths and metadata |
+| `list_test_suites` | List test suites, scripts, and runnability status |
+| `find_docs` | Search documentation by keyword |
+| `find_tests` | Search test scripts by keyword |
+| `list_workflows` | List all registered workflows with summaries |
+| `describe_workflow` | Full workflow details: stages, parameter groups, caveats |
+| `get_workflow_scripts` | Scripts composing a workflow: entry + helpers (provenance detail requires auth) |
+| `get_workflow_parameter_schema` | Machine-readable parameter definitions with types, defaults, constraints |
+| `scaffold_workflow_schema` | Parse a shell script and generate a draft workflow schema YAML |
+| `validate_draft_workflow_schema` | Validate a draft schema against the WorkflowSchema model |
+
+**Workflow visibility**: Each workflow in `config.yaml` can set `visibility: public`
+(default) or `visibility: private`. Private workflows are omitted from
+`list_workflows` and return "unknown workflow" from `describe_workflow` /
+`get_workflow_scripts` / `get_workflow_parameter_schema` unless the caller
+provides a valid `auth_token`. This is content-level filtering — the same tool
+returns different results based on auth status.
+
+**Discovery detail levels**: `get_workflow_scripts` applies response redaction
+based on auth status:
+- **Public / unauthenticated**: returns safe structural information only —
+  `workflow_id`, `title`, `entry_script`, per-script `role`, relative `path`,
+  `description`, `language`, `exists`, and `workflow_schema` in provenance.
+  Host-specific fields (`absolute_path`, `repo_root`, `git_commit`,
+  `git_remote`) are omitted.
+- **Authenticated / trusted-local**: returns full detail including
+  `absolute_path` on each script and full provenance (`repo_root`,
+  `git_commit`, `git_remote`). This level is intended for same-host agents
+  and trusted local tooling.
+
+### Authenticated tools (require `auth_token`)
+
+| Tool | Purpose |
+|------|---------|
+| `validate_workflow_parameters` | Validate parameter values (types, paths, constraints) |
+| `render_workflow_command` | Render a validated parameter set into a shell command (`argv` + env) |
+| `preflight` | Pre-run checks (disk space, binaries, script permissions) |
+| `run_script` | Execute an allowlisted script with timeout and logging |
+| `collect_outputs` | Retrieve run status, logs, and output file inventory |
+| `reload_config` | Hot-reload config and workflow schemas |
+
+### Workflow parameter pipeline
+
+The recommended agent workflow for running scripts:
+
+1. `list_workflows` / `describe_workflow` — discover available workflows
+2. `get_workflow_scripts` — get entry + helper scripts with provenance (for encoders)
+3. `get_workflow_parameter_schema` — get parameter types, defaults, constraints
+4. `validate_workflow_parameters` — validate user-supplied parameters
+5. `render_workflow_command` — get the exact `argv` and env overrides
+6. `preflight` — verify disk space, binaries, permissions
+7. `run_script` — execute; get `run_id` for tracking
+8. `collect_outputs` — retrieve results when done
+
+### Schema authoring (propose-only)
+
+To add new workflows, agents can use `scaffold_workflow_schema` to parse an
+existing shell script and generate a draft YAML, then `validate_draft_workflow_schema`
+to check it. The draft must be committed to the repo and loaded via `reload_config`
+to become active — these tools never modify the running config.
+
+### Key features
+
 - All paths validated against trusted roots
 - Job queue (1 concurrent, 10 queued)
 - Timeout handling with process group cleanup
 - Logs stored in `plans/artifacts/mcp_runs_YYYYMMDD/`
 
 Documentation: `mcp_server/README.md`  
-Configuration: `mcp_server/config.yaml`
+Configuration: `mcp_server/config.yaml`  
+Workflow schemas: `mcp_server/workflows/`
 
 ### MCP Usage for New Agents
 
-- Prefer MCP tools for discovery/preflight/run rather than ad‑hoc shell scripts.
+- Prefer MCP tools for discovery/preflight/run rather than ad-hoc shell scripts.
 - Endpoints differ by client:
   - **Codex** (streamable-HTTP): `POST /`
   - **Cursor** (SSE): `GET /sse` + `POST /messages`
@@ -190,15 +324,29 @@ Configuration: `mcp_server/config.yaml`
 - `docs/CRISPR_FEATURE_CALLING_IMPLEMENTATION_SUMMARY.md`
 - `docs/HEATMAP_REFACTOR_SUMMARY.md`
 - `docs/Github-actions.md`
+- `docs/CBQ_FORMAT_AND_IMPLEMENTATION.md`
 - `docs/Star-binary-distribution.md`
 - `docs/feature_barcodes.md`
+- `docs/RUNBOOK_REPOSITORY_SPLIT_RECIPES_PROVENANCE.md`
 - `docs/todos`
 - `tests/ARTIFACTS.md`
 - `mcp_server/README.md`
 
+## Commits
+
+- Never add `Co-Authored-By` trailers to commit messages. All commits are
+  authored by the human developer.
+- The default branch is `master`. Push to `master`, not `main`.
+
 ## Branching and Merges
 
-- Feature branches merge into `perturb`, then merge into `master`.
+- Feature branches merge into `perturb` for active integration when needed.
+- Release-candidate work merges into `dev-release` or a version-scoped
+  `dev-release-vX.Y.Z` branch for advanced-user testing.
+- Stable production releases merge from the accepted dev-release candidate into
+  `master` with `git merge --no-ff`, then tag `vX.Y.Z` from `master`.
+- Immutable prerelease tags use `vX.Y.Z-rcN` and should be cut from
+  `dev-release` or `dev-release-vX.Y.Z`.
 - Do not squash-merge branches that touch shared core files; preserve the DAG
   with `git merge --no-ff` so later integrations keep a usable merge base.
 - Keep large binaries and datasets untracked; update `.gitignore` if needed.
@@ -234,12 +382,15 @@ code when two branches modify the same file. Follow these rules:
 
 - Do not publish images or release artifacts on every push.
 - Pull requests: run fast checks only (build sanity + Tier A smoke); no publish.
-- Push to `dev`: run integration checks and optionally publish `dev-<sha>` images.
+- Push to `dev-release` or `dev-release-*`: run integration checks and
+  optionally publish `dev-release-<sha>` / `dev-release-latest` images for
+  advanced users.
 - Push to `master`: run required checks and publish multi-arch images (`amd64`,
   `arm64`) to stable tags (`latest`, `master-<sha>`).
 - Tags `v*`: run release pipeline (multi-arch publish + GitHub Release artifacts
-  + source package upload for PPA build).
-- CI path filters are enabled for `ci-pr.yml`, `ci-dev.yml`, and
+  + source package upload for PPA build). `vX.Y.Z-rcN` tags are prereleases and
+  do not move Docker `latest`.
+- CI path filters are enabled for `ci-pr.yml`, `ci-dev-release.yml`, and
   `ci-master.yml`; these workflows run only when build/test/release infra paths
   change (see exact globs in `docs/Github-actions.md`).
 - `release.yml` remains tag-triggered on `v*` and is intentionally not path-scoped.

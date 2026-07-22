@@ -13,8 +13,14 @@ SRCS := src/EmptyDropsCRSampler.cpp \
         src/OccupancyGuard.cpp \
         src/scrna_api.cpp
 
+# C++ source files (.cc) — separate list so we can keep the .cpp/.cc split
+# explicit. AtacEvidenceFromPeaks is consumed both by the standalone CLI in
+# tools/ and by STAR's chromap orchestration (so it has to live inside
+# libscrna.a, not just in the tool).
+CC_SRCS := src/AtacEvidenceFromPeaks.cc
+
 # Object files
-OBJS := $(SRCS:.cpp=.o)
+OBJS := $(SRCS:.cpp=.o) $(CC_SRCS:.cc=.o)
 
 # Output library
 TARGET := libscrna.a
@@ -39,13 +45,43 @@ lib: $(TARGET)
 TOOLS_DIR := tools
 BIN_DIR := bin
 SIMPLEED_TOOL := $(BIN_DIR)/scrna_simpleed
+ARC_TABLE_TOOL := $(BIN_DIR)/scrna_arc_barcode_table
+MULTIOME_COMPARE_TOOL := $(BIN_DIR)/scrna_compare_multiome_calls
+MULTIOME_COMBINE_TOOL := $(BIN_DIR)/scrna_multiome_combine
+GEX_EVIDENCE_TOOL := $(BIN_DIR)/scrna_build_gex_evidence
+ATAC_EVIDENCE_TOOL := $(BIN_DIR)/scrna_build_atac_evidence
 
-tools: lib $(SIMPLEED_TOOL)
+tools: lib $(SIMPLEED_TOOL) $(ARC_TABLE_TOOL) $(MULTIOME_COMPARE_TOOL) $(MULTIOME_COMBINE_TOOL) $(GEX_EVIDENCE_TOOL) $(ATAC_EVIDENCE_TOOL)
 
 $(SIMPLEED_TOOL): $(TOOLS_DIR)/scrna_simpleed.cpp $(TARGET)
 	@mkdir -p $(BIN_DIR)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -o $@ $< $(TARGET)
 	@echo "Built $(SIMPLEED_TOOL)"
+
+$(ARC_TABLE_TOOL): $(TOOLS_DIR)/scrna_arc_barcode_table.cpp
+	@mkdir -p $(BIN_DIR)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -o $@ $<
+	@echo "Built $(ARC_TABLE_TOOL)"
+
+$(MULTIOME_COMPARE_TOOL): $(TOOLS_DIR)/scrna_compare_multiome_calls.cpp
+	@mkdir -p $(BIN_DIR)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -o $@ $<
+	@echo "Built $(MULTIOME_COMPARE_TOOL)"
+
+$(MULTIOME_COMBINE_TOOL): $(TOOLS_DIR)/scrna_multiome_combine.cpp
+	@mkdir -p $(BIN_DIR)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -o $@ $<
+	@echo "Built $(MULTIOME_COMBINE_TOOL)"
+
+$(GEX_EVIDENCE_TOOL): $(TOOLS_DIR)/scrna_build_gex_evidence.cpp
+	@mkdir -p $(BIN_DIR)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -o $@ $<
+	@echo "Built $(GEX_EVIDENCE_TOOL)"
+
+$(ATAC_EVIDENCE_TOOL): $(TOOLS_DIR)/scrna_build_atac_evidence.cpp
+	@mkdir -p $(BIN_DIR)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -o $@ $<
+	@echo "Built $(ATAC_EVIDENCE_TOOL)"
 
 $(TARGET): $(OBJS)
 	$(AR) rcs $@ $^
@@ -54,10 +90,13 @@ $(TARGET): $(OBJS)
 src/%.o: src/%.cpp
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
+src/%.o: src/%.cc
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
 clean:
 	rm -f $(OBJS) $(TARGET)
 	rm -f tests/*.o tests/test_*
-	rm -f $(SIMPLEED_TOOL)
+	rm -f $(SIMPLEED_TOOL) $(ARC_TABLE_TOOL) $(MULTIOME_COMPARE_TOOL) $(MULTIOME_COMBINE_TOOL) $(GEX_EVIDENCE_TOOL) $(ATAC_EVIDENCE_TOOL)
 
 # Dependency on headers
 src/EmptyDropsCRSampler.o: include/EmptyDropsCRSampler.h include/scrna_types.h include/pcg_random.hpp

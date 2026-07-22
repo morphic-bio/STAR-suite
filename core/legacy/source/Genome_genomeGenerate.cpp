@@ -27,11 +27,76 @@
 #include <fstream>
 #include <cstdlib>
 #include <sys/stat.h>
+#include <unistd.h>
+#include <limits.h>
 #include <dirent.h>
+#include <vector>
 
 
 char* globalG;
 uint globalL;
+
+namespace {
+
+bool fileNonempty(const string& path) {
+    struct stat st;
+    return stat(path.c_str(), &st) == 0 && st.st_size > 0;
+}
+
+bool executableFile(const string& path) {
+    return access(path.c_str(), X_OK) == 0;
+}
+
+string shellQuote(const string& path) {
+    string quoted = "'";
+    for (char c : path) {
+        if (c == '\'') {
+            quoted += "'\\''";
+        } else {
+            quoted += c;
+        }
+    }
+    quoted += "'";
+    return quoted;
+}
+
+string dirnameOf(const string& path) {
+    size_t slash = path.find_last_of('/');
+    if (slash == string::npos) {
+        return ".";
+    }
+    if (slash == 0) {
+        return "/";
+    }
+    return path.substr(0, slash);
+}
+
+string joinPath(const string& dir, const string& rel) {
+    if (dir.empty() || dir == ".") {
+        return rel;
+    }
+    if (dir.back() == '/') {
+        return dir + rel;
+    }
+    return dir + "/" + rel;
+}
+
+string executableDir() {
+    char exePath[PATH_MAX + 1];
+    ssize_t len = readlink("/proc/self/exe", exePath, PATH_MAX);
+    if (len <= 0) {
+        return ".";
+    }
+    exePath[len] = '\0';
+    return dirnameOf(exePath);
+}
+
+bool commandInPath(const string& name) {
+    string cmd = "command -v " + shellQuote(name) + " > /dev/null 2>&1";
+    return system(cmd.c_str()) == 0;
+}
+
+}
 
 
 inline int funCompareSuffixes ( const void *a, const void *b){
@@ -804,60 +869,77 @@ void Genome::genomeGenerate() {
 
     SApass1.deallocateArray();
 
-    // Compute expected GC distribution for GC bias correction
+    // Compute expected GC distribution for TranscriptVB GC-bias correction.
+    // This is an index sidecar: once present and nonempty, alignReads reuses it.
     if (P.pGe.sjdbGTFfile != "-" || P.pGe.transcriptomeFasta != "-") {
-        time(&rawTime);
-        P.inOut->logMain    << timeMonthDayTime(rawTime) << " ... computing expected GC distribution ...\n" <<flush;
-        *P.inOut->logStdOut << timeMonthDayTime(rawTime) << " ... computing expected GC distribution ...\n" <<flush;
-        
-        string compute_gc_cmd;
-        // Try to find compute_expected_gc in common locations
-        string tool_paths[] = {
-            "compute_expected_gc",  // In PATH
-            "../tools/compute_expected_gc/compute_expected_gc",  // Relative to STAR binary
-            "../../tools/compute_expected_gc/compute_expected_gc",  // From build directory
-            P.pGe.gDir + "/../tools/compute_expected_gc/compute_expected_gc"  // Relative to genome dir
-        };
-        string tool_path;
-        bool tool_found = false;
-        
-        // Check which tool path exists
-        for (int i = 0; i < 4; i++) {
-            string test_cmd = "which " + tool_paths[i] + " > /dev/null 2>&1";
-            if (i > 0) {
-                test_cmd = "test -x " + tool_paths[i] + " > /dev/null 2>&1";
-            }
-            if (system(test_cmd.c_str()) == 0) {
-                tool_path = tool_paths[i];
-                tool_found = true;
-                break;
-            }
-        }
-        
-        if (!tool_found) {
-            P.inOut->logMain << "WARNING: compute_expected_gc tool not found. Skipping expected GC computation.\n" <<flush;
-            P.inOut->logMain << "         GC bias correction will not be available. Install compute_expected_gc to enable.\n" <<flush;
+        string output_file = P.pGe.gDir + "expected_gc.tsv";
+        if (fileNonempty(output_file)) {
+            *P.inOut->logStdOut << "Expected GC distribution already exists; reusing: "
+                                << output_file << "\n" << flush;
+            P.inOut->logMain << "Expected GC distribution already exists; reusing: "
+                             << output_file << "\n" << flush;
         } else {
-            string output_file = P.pGe.gDir + "/expected_gc.tsv";
-            
-            if (P.pGe.transcriptomeFasta != "-") {
-                // Use provided transcriptome FASTA
-                compute_gc_cmd = tool_path + " --transcriptome " + P.pGe.transcriptomeFasta 
-                               + " --output " + output_file + " 2>&1";
-            } else if (P.pGe.sjdbGTFfile != "-" && P.pGe.gFastaFiles.size() > 0) {
-                // Extract from genome + GTF
-                string genome_file = P.pGe.gFastaFiles[0];
-                compute_gc_cmd = tool_path + " --genome " + genome_file 
-                               + " --gtf " + P.pGe.sjdbGTFfile 
-                               + " --output " + output_file + " 2>&1";
+            time(&rawTime);
+            P.inOut->logMain    << timeMonthDayTime(rawTime) << " ... computing expected GC distribution ...\n" <<flush;
+            *P.inOut->logStdOut << timeMonthDayTime(rawTime) << " ... computing expected GC distribution ...\n" <<flush;
+
+            string tool_path;
+            if (commandInPath("compute_expected_gc")) {
+                tool_path = "compute_expected_gc";
+            } else {
+                string exe_dir = executableDir();
+                vector<string> tool_paths = {
+                    joinPath(exe_dir, "../../features/vbem/tools/compute_expected_gc/compute_expected_gc"),
+                    joinPath(exe_dir, "../../../core/features/vbem/tools/compute_expected_gc/compute_expected_gc"),
+                    "core/features/vbem/tools/compute_expected_gc/compute_expected_gc",
+                    "../core/features/vbem/tools/compute_expected_gc/compute_expected_gc",
+                    "../../core/features/vbem/tools/compute_expected_gc/compute_expected_gc"
+                };
+
+                for (const string& candidate : tool_paths) {
+                    if (executableFile(candidate)) {
+                        tool_path = candidate;
+                        break;
+                    }
+                }
             }
-            
-            if (!compute_gc_cmd.empty()) {
-                int ret = system(compute_gc_cmd.c_str());
-                if (ret != 0) {
-                    P.inOut->logMain << "WARNING: compute_expected_gc failed (exit code " << ret << "). GC bias correction may not be available.\n" <<flush;
-                } else {
-                    P.inOut->logMain << "Successfully computed expected GC distribution: " << output_file << "\n" <<flush;
+
+            if (tool_path.empty()) {
+                P.inOut->logMain << "WARNING: compute_expected_gc tool not found. Skipping expected GC computation.\n" <<flush;
+                P.inOut->logMain << "         GC bias correction will not be available. Build STAR-suite with make core or build "
+                                 << "core/features/vbem/tools/compute_expected_gc.\n" <<flush;
+            } else {
+                string transcriptome_file;
+                if (P.pGe.transcriptomeFasta != "-" && !P.pGe.transcriptomeFasta.empty()) {
+                    transcriptome_file = P.pGe.transcriptomeFasta;
+                } else if (fileNonempty(P.pGe.transcriptomeGen.transcriptomeFastaPath)) {
+                    transcriptome_file = P.pGe.transcriptomeGen.transcriptomeFastaPath;
+                } else if (fileNonempty(P.pGe.gDir + "transcriptome.fa")) {
+                    transcriptome_file = P.pGe.gDir + "transcriptome.fa";
+                }
+
+                string compute_gc_cmd;
+                if (!transcriptome_file.empty()) {
+                    compute_gc_cmd = shellQuote(tool_path) + " --transcriptome " + shellQuote(transcriptome_file)
+                                   + " --output " + shellQuote(output_file) + " 2>&1";
+                } else if (P.pGe.sjdbGTFfile != "-" && P.pGe.gFastaFiles.size() > 0) {
+                    string genome_file = P.pGe.gFastaFiles[0];
+                    compute_gc_cmd = shellQuote(tool_path) + " --genome " + shellQuote(genome_file)
+                                   + " --gtf " + shellQuote(P.pGe.sjdbGTFfile)
+                                   + " --output " + shellQuote(output_file) + " 2>&1";
+                }
+
+                if (!compute_gc_cmd.empty()) {
+                    int ret = system(compute_gc_cmd.c_str());
+                    if (ret != 0 || !fileNonempty(output_file)) {
+                        P.inOut->logMain << "WARNING: compute_expected_gc failed (exit code " << ret
+                                         << "). GC bias correction may not be available.\n" <<flush;
+                    } else {
+                        *P.inOut->logStdOut << "Successfully computed expected GC distribution: "
+                                            << output_file << "\n" << flush;
+                        P.inOut->logMain << "Successfully computed expected GC distribution: "
+                                         << output_file << "\n" <<flush;
+                    }
                 }
             }
         }

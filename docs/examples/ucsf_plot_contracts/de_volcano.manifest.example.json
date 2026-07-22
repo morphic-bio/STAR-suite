@@ -1,0 +1,112 @@
+{
+  "schema_version": "morphic-plotly-shiny-v1",
+  "viewer": "plotly_shiny",
+  "plot_id": "ucsf_pax6_ebs_pooled_de_volcano",
+  "plot_kind": "de_volcano",
+  "title": "UCSF CRISPRi pooled EBs: PAX6 vs NTC volcano",
+  "subtitle": "Gene-level differential expression summary",
+  "datasets": [
+    {
+      "dataset_id": "genes",
+      "format": "parquet",
+      "s3_key": "plotly/ucsf/de/pax6_ebs_pooled_genes.parquet",
+      "grain": "gene",
+      "required_columns": [
+        "gene_id",
+        "symbol",
+        "log2fc",
+        "padj",
+        "pvalue",
+        "base_mean",
+        "is_target_gene",
+        "condition_id"
+      ]
+    }
+  ],
+  "encodings": {
+    "x": {
+      "dataset_id": "genes",
+      "field": "log2fc",
+      "type": "quantitative"
+    },
+    "y": {
+      "dataset_id": "genes",
+      "field": "neg_log10_padj",
+      "type": "quantitative"
+    },
+    "color": {
+      "dataset_id": "genes",
+      "field": "significance_class",
+      "type": "categorical"
+    },
+    "label": {
+      "dataset_id": "genes",
+      "field": "symbol",
+      "type": "text"
+    },
+    "hover": [
+      "gene_id",
+      "symbol",
+      "log2fc",
+      "padj",
+      "pvalue",
+      "base_mean",
+      "is_target_gene"
+    ]
+  },
+  "controls": {
+    "filters": [
+      "condition_id"
+    ],
+    "threshold_overlays": [
+      "padj_lte",
+      "abs_log2fc_gte"
+    ],
+    "label_mode": [
+      "target_only",
+      "top_hits",
+      "none"
+    ]
+  },
+  "defaults": {
+    "condition_id": "PAX6",
+    "padj_lte": 0.05,
+    "abs_log2fc_gte": 0.5,
+    "label_mode": "top_hits"
+  },
+  "thresholds": {
+    "padj_lte": 0.05,
+    "abs_log2fc_gte": 0.5
+  },
+  "plotly_defaults": {
+    "trace_type": "scattergl",
+    "layout": {
+      "template": "plotly_white"
+    },
+    "config": {
+      "responsive": true,
+      "displaylogo": false
+    }
+  },
+  "analysis_context": {
+    "plot_kind": "de",
+    "lineage_label": "Embryoid body",
+    "pool_label": "pooled_EBs",
+    "comparison_label": "PAX6 vs NTC",
+    "target_gene_symbols": [
+      "PAX6"
+    ]
+  },
+  "downloads": [
+    {
+      "label": "DE results TSV",
+      "format": "tsv.gz",
+      "s3_key": "tsv/ucsf/de/pax6_ebs_pooled.tsv.gz"
+    }
+  ],
+  "provenance": {
+    "pipeline": "differential_expression",
+    "pipeline_version": "v1",
+    "generated_at": "2026-04-17T00:00:00Z"
+  }
+}

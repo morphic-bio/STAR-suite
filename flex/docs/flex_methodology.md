@@ -126,6 +126,18 @@ Flex samples use a probe panel that maps to a subset of genes. The `GeneResolver
 
 The `--soloProbeList` defines the gene set; indices are 1-based probe list positions.
 
+### Clarification: Genomic-Only Does Not Mean Probe-Less
+
+BAM-visible genomic alignments are not, by themselves, evidence that a read was
+counted. The Flex counting path only keeps a genomic alignment if its annotated
+genomic gene maps back to an entry in `--soloProbeList`; otherwise that
+alignment is skipped before gene resolution. In logs and debug counters,
+`genomic-only` means no probe pseudo-chromosome alignment was available or won,
+but the genomic evidence still resolved to a probe-list gene. Do not infer from
+BAM records or these counters that Flex, or a Cell Ranger comparator, accepted
+probe-less genomic assignments without checking the counted molecule or matrix
+output.
+
 ## FlexFilter Cell Calling
 
 FlexFilter runs per-sample cell calling with two algorithms:
@@ -259,4 +271,3 @@ This strict threshold matches Cell Ranger's approach: prefer dropping ambiguous 
 
 1. **BAM tag injection**: Not supported in inline flex path (use standard Solo for tagged BAMs)
 2. **Memory usage**: In-memory hash scales with unique CB/UMI/gene combinations
-

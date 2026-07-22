@@ -1,5 +1,33 @@
 # Handoff: NXT Auto-detect Fix + Feature Assignment Regression (2026-03-16)
 
+## Verification Update (2026-07-03)
+
+The NXT/TRU fixes described here are verified as real STAR-side fixes, but they
+should not be conflated with the UCSF `AALG1` naming/data-organization issue.
+`AALG1` is the UCSF TRU GEX arm and `AALG2` is the UCSF NXT guide arm after the
+corrected organization; it is not an A375 issue.
+
+Relevant landed commits:
+
+- `8c402fc` (`2026-02-25`): introduced NXT/TRU chemistry autodetection and
+  per-library override infrastructure.
+- `f692f45` (`2026-03-03`): fixed source-namespace-aware filtered-barcode
+  normalization and related NXT/TRU namespace parity bugs.
+- `6452600` (`2026-03-17`): fixed NXT-whitelist autodetect inversion and
+  restored async feature assignment overlap.
+
+Current benchmark evidence is tracked under
+`comparisons/paper_benchmarks_20260318/ucsf_ebs2_2/` from commit `207581e`.
+That run uses corrected UCSF AALG1 GEX + AALG2 guide inputs, TRU Solo
+whitelist, two-column NXT guide whitelist, `--crChemistry auto`, and
+`--clip3pPolyG yes`; it reports STAR/CR cells `13,721 / 13,760`, barcode
+Jaccard `0.976`, gene Pearson `0.995`, and CRISPR set-equivalent calls `98.9%`.
+
+No tracked evidence was found that poly-G trimming itself controls the NXT/TRU
+barcode namespace decision. Poly-G trimming is implemented and validated for
+the UCSF gene-count artifact, but the autodetect logic samples 16 bp barcode
+strings and compares raw versus translated whitelist hits.
+
 ## Update After Review
 
 The headline "feature assignment reads the full FASTQ data 10x" conclusion does

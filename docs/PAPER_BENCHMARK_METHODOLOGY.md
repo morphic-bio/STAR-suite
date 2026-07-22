@@ -87,6 +87,25 @@ Dataset-specific values are noted.
 | `--crMinUmi` | `10` | `3` | `2` |
 | `--crAssignFeatureOffset` | `0` | `-1` | `0` |
 
+### BAM tags are not parity outputs
+
+The canonical paper recipes deliberately omit `--outSAMattributes` and use
+`--outSAMtype None` unless a dataset-specific diagnostic requires a BAM. An
+optional BAM mode does not change the comparison surface and must not add
+`GX`/`UR` unless the experiment explicitly tests raw-tag compatibility.
+
+| Surface | Meaning | Use for count parity? |
+|---|---|---|
+| `GX`/`GN` | Alignment-level gene compatibility annotation | No; it is not final UMI-collapsed `GeneFull`, Velocyto, multimap-rescue, or CR-compatible policy |
+| `UR` | Raw, uncorrected UMI sequence | No; it is intentionally not updated after correction |
+| `UB` | Corrected UMI, when BAM tag injection is requested | No; it can support BAM diagnostics, but the matrix remains authoritative |
+| `GeneFull`/CR-compatible MEX and cell calls | Final counting and calling products | Yes |
+
+Adding `GX` or `UR` to an otherwise canonical benchmark changes BAM generation
+work without improving the count comparison. It therefore invalidates a
+controlled performance comparison unless BAM-tag generation is itself the
+declared test variable.
+
 ### Why `--soloCrMultimapRescue yes` matters
 
 CellRanger 9 uses a multimap rescue algorithm that reassigns multi-mapped reads
@@ -162,9 +181,31 @@ needs to be validated as producing equivalent parity when rescue is enabled.
 ## PE Bulk Benchmark
 
 The PE bulk benchmark (`scripts/paper/run_pe_bulk_feature_benchmark.sh`) compares
-integrated STAR-suite (trimming + alignment + Y-removal + TranscriptVB, single
-pass) against an external stepwise pipeline (trimvalidate + STAR + remove_y_reads
-+ Salmon).
+integrated STAR-suite (trimming + alignment + Y-removal + internal TranscriptVB)
+against an external stepwise pipeline (trimvalidate + STAR + remove_y_reads +
+Salmon).
+
+### Quantification contract
+
+- The production STAR-suite arm is internal TranscriptVB, enabled with
+  `--quantMode TranscriptVB --quantVBgcBias 1`.
+- The integrated recipe must pass the same transcriptome FASTA used by Salmon via
+  `--transcriptomeFasta`, so GC-bias and effective-length calculation use the
+  pinned reference sidecar/input.
+- External Salmon is part of the external stepwise production baseline, because
+  that arm needs a separate quantifier after STAR emits `Aligned.toTranscriptome.out.bam`.
+- Integrated TranscriptomeSAM emission and integrated Salmon QC are opt-in
+  parity artifacts enabled with `--parity-qc`. They are not part of the
+  STAR-suite production timing.
+- Internal TranscriptVB collects transcript evidence during the STAR run, then
+  merges/finalizes ECs, GC/effective-length state, and VB/EM convergence after
+  alignment EOF. Do not describe this as external Salmon running concurrently.
+- Headline speedups must be measured with this wrapper and the same output mode
+  on both arms. The integrated total is the timed STAR-suite production command;
+  the external total is decompress + trimvalidate + STAR TranscriptomeSAM +
+  optional remove_y_reads + Salmon. Lean sanity checks using direct Trim Galore
+  or unsorted BAM are valid diagnostics, but their ratios are not
+  apples-to-apples with the paper benchmark.
 
 ### Modes
 
@@ -173,15 +214,47 @@ pass) against an external stepwise pipeline (trimvalidate + STAR + remove_y_read
   trimmed FASTQs.
 - `--no-yremove`: Y-chromosome removal disabled on both arms. Useful for
   datasets/analyses where Y-removal is not relevant.
+- `--integrated-only`: Run only the STAR-suite production arm. Use this for
+  STAR-suite timing refreshes when the external control does not need to be
+  rerun. In default mode this is equivalent to `--skip-external --skip-compare`
+  and does not enable parity artifacts.
 
 ### Parity comparison
 
-Transcript and gene-level Pearson/Spearman correlations are computed by
-`tests/transcriptvb/compare_salmon_star.py`. The benchmark produces a
-`comparison_metrics.tsv` with three comparisons per stage:
+When `--parity-qc` is enabled, transcript and gene-level Pearson/Spearman
+correlations are computed by `tests/transcriptvb/compare_salmon_star.py`. The
+benchmark produces a `comparison_metrics.tsv` with three comparisons per stage:
 1. Integrated TranscriptVB vs Integrated Salmon (internal consistency)
 2. Integrated Salmon vs External Salmon (pipeline effect on same tool)
 3. Integrated TranscriptVB vs External Salmon (the headline comparison)
+
+Do not run parity-QC mode for headline wall-time claims. It deliberately emits
+and rereads an integrated transcriptome BAM that normal STAR-suite production
+does not require.
+
+### 2026-06-27 PPARG timing reruns
+
+The corrected production-mode STAR-suite-only PPARG no-Y rerun on `/storage`
+measured integrated trim+align+sorted BAM+internal TranscriptVB at `8:54.52`.
+It did not emit integrated TranscriptomeSAM and did not run integrated Salmon
+QC, matching the normal STAR-suite production arm. Run root:
+`/storage/JAX_PE/results/pparg_prod_benchmark_no_y_20260627_172349/`.
+
+The matched external no-Y control was then completed in the same run root:
+decompress `1:18.01`, trimvalidate `6:53.71`, STAR TranscriptomeSAM `6:56.55`,
+and Salmon `1:01.34`, for an external total of `16:09.61`. The production
+STAR-suite arm is therefore `1.81x` faster for this PPARG no-Y wrapper run.
+
+An earlier PPARG no-Y sanity rerun before the production-mode wrapper correction
+measured STAR-suite integrated trim+align+TranscriptVB plus TranscriptomeSAM
+emission at `7:18.06`; Salmon QC on the integrated transcriptome BAM added
+`1:00.08`.
+A lean serial comparator using Trim Galore, upstream STAR, unsorted transcriptome
+BAM, and Salmon took `9:50.17`, giving `1.35x` for that diagnostic setup. This
+run confirmed high current Salmon parity (NumReads Pearson `0.999979` on all
+transcripts; `0.999980` at sum>=1000) but should not replace the archived paper
+speedup because its serial comparator is lighter than the paper wrapper and that
+earlier integrated arm was still parity-artifact enabled.
 
 ## Paper Scripts
 

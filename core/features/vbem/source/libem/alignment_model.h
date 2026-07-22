@@ -86,6 +86,7 @@ public:
     
 private:
     std::vector<uint8_t> sequence_;  // Packed 4-bit encoding
+    std::vector<uint32_t> gc_count_; // Inclusive prefix count of C/G bases
     size_t length_;
 };
 
@@ -143,7 +144,7 @@ enum class ErrorModelTraceLevel {
 // Computes log-likelihood of alignment given CIGAR string and reference
 class AlignmentModel {
 public:
-    AlignmentModel(double alpha = 0.001, uint32_t readBins = 4);
+    AlignmentModel(double alpha = 1.0, uint32_t readBins = 6);
     
     // Compute log-likelihood AND update model if still in burn-in
     // This is the main method to use during processing

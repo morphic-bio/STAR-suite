@@ -12,7 +12,17 @@
 # 7. Verify output matches existing fixture
 #
 # Usage:
-#   bash regenerate_slam_fixture.sh [--verify-only] [--skip-download]
+#   bash regenerate_slam_fixture.sh [options]
+#
+# Options:
+#   --verify-only       Only checksum/compare existing outputs (no regeneration)
+#   --skip-download     Do not download SRA; use existing FASTQ
+#   --pe-clone          Build synthetic PE FASTQs by cloning the SE fixture to R1/R2 (then exit)
+#   --dry-run           Print planned steps and exit 0
+#   --run-gates         After verify/regenerate, run Phase 2 gates:
+#                         tests/run_slam_fixture_pe_parity.sh (if present)
+#                         (requires local STAR + fixtures; may SKIP)
+#   -h, --help          This message
 #
 # Requirements:
 #   - sra-tools (fastq-dump)
@@ -26,11 +36,21 @@ set -euo pipefail
 # Parse arguments
 VERIFY_ONLY=0
 SKIP_DOWNLOAD=0
+DRY_RUN=0
+RUN_GATES=0
+PE_CLONE=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --verify-only) VERIFY_ONLY=1; shift ;;
         --skip-download) SKIP_DOWNLOAD=1; shift ;;
-        *) echo "Unknown option: $1"; exit 1 ;;
+        --pe-clone) PE_CLONE=1; shift ;;
+        --dry-run) DRY_RUN=1; shift ;;
+        --run-gates) RUN_GATES=1; shift ;;
+        -h|--help)
+            sed -n '1,40p' "$0"
+            exit 0
+            ;;
+        *) echo "Unknown option: $1 (try --help)"; exit 1 ;;
     esac
 done
 
@@ -50,6 +70,9 @@ GEDI_GENOME="homo_sapiens_110_44"
 
 # Fixture files
 RAW_FASTQ="$FIXTURE_ROOT/raw/slam_100000_reads_SRR32576116.fastq.gz"
+# Synthetic PE: mate-2 sequences cloned from the SE fixture (Phase 2 / runbook)
+PE_CLONE_R1="$FIXTURE_ROOT/raw/slam_pe_cloned_SRR32576116_R1_001.fastq.gz"
+PE_CLONE_R2="$FIXTURE_ROOT/raw/slam_pe_cloned_SRR32576116_R2_001.fastq.gz"
 SNPS_BED="$FIXTURE_ROOT/ref/snps.bed"
 REF_TSV="$FIXTURE_ROOT/expected/fixture_ref_human.tsv.gz"
 CHECKSUM_FILE="$FIXTURE_ROOT/meta/checksums.sha256"
@@ -61,6 +84,78 @@ READ_COUNT=100000
 # Output prefixes
 STAR_PREFIX="$WORK_DIR/fixture_human_"
 GEDI_PREFIX="$WORK_DIR/fixture_ref_human"
+
+if [[ $PE_CLONE -eq 1 ]]; then
+    if [[ $DRY_RUN -eq 1 ]]; then
+        echo "DRY-RUN: --pe-clone would write:"
+        echo "  $PE_CLONE_R1"
+        echo "  $PE_CLONE_R2"
+        echo "from SE source: $RAW_FASTQ"
+        exit 0
+    fi
+    if [[ ! -f "$RAW_FASTQ" ]]; then
+        echo "ERROR: SE fixture FASTQ not found (required for --pe-clone): $RAW_FASTQ"
+        exit 1
+    fi
+    mkdir -p "$(dirname "$PE_CLONE_R1")"
+    python3 - "$RAW_FASTQ" "$PE_CLONE_R1" "$PE_CLONE_R2" <<'PY'
+import gzip
+import sys
+
+from typing import Tuple
+
+def paired_headers(line: str) -> Tuple[str, str]:
+    s = line.rstrip("\n\r")
+    if not s.startswith("@"):
+        return s + "\n", s + "\n"
+    rid = s[1:].split()[0]
+    if "/" in rid:
+        base, suf = rid.rsplit("/", 1)
+        if suf in ("1", "2"):
+            r1 = "@" + base + "/1\n"
+            r2 = "@" + base + "/2\n"
+        else:
+            r1 = "@" + rid + "/1\n"
+            r2 = "@" + rid + "/2\n"
+    else:
+        r1 = "@" + rid + "/1\n"
+        r2 = "@" + rid + "/2\n"
+    return r1, r2
+
+src, out1, out2 = sys.argv[1:4]
+with gzip.open(src, "rt") as inf, gzip.open(out1, "wt") as o1, gzip.open(out2, "wt") as o2:
+    while True:
+        h = inf.readline()
+        if not h:
+            break
+        seq = inf.readline()
+        pl = inf.readline()
+        qual = inf.readline()
+        if not qual:
+            break
+        h1, h2 = paired_headers(h)
+        o1.write(h1)
+        o1.write(seq)
+        o1.write(pl)
+        o1.write(qual)
+        o2.write(h2)
+        o2.write(seq)
+        o2.write(pl)
+        o2.write(qual)
+PY
+    echo "Wrote PE clone fixture:"
+    echo "  $PE_CLONE_R1"
+    echo "  $PE_CLONE_R2"
+    exit 0
+fi
+
+if [[ $DRY_RUN -eq 1 ]]; then
+    echo "DRY-RUN: fixture regeneration plan (no side effects)"
+    echo "  --verify-only=$VERIFY_ONLY --skip-download=$SKIP_DOWNLOAD"
+    echo "  STAR_BIN=$STAR_BIN WORK_DIR=$WORK_DIR"
+    echo "  SRA_ACCESSION=$SRA_ACCESSION READ_COUNT=$READ_COUNT"
+    exit 0
+fi
 
 echo "========================================================================"
 echo "SLAM Fixture Regeneration"
@@ -422,5 +517,15 @@ echo "  cp $NEW_REF_TSV $REF_TSV"
 echo ""
 echo "To verify parity with STAR-Slam:"
 echo "  bash $SCRIPT_DIR/run_slam_fixture_parity.sh"
+echo "  bash $SCRIPT_DIR/run_slam_fixture_pe_parity.sh   # SE + optional PE gate"
 echo ""
+echo "Compare two SlamQuant.out summaries (runbook):"
+echo "  python3 $PROJECT_ROOT/scripts/compare_slam_summary.py ref.SlamQuant.out new.SlamQuant.out --max-abs-delta 0"
+echo "Compare two slam QC JSON summaries:"
+echo "  python3 $PROJECT_ROOT/scripts/compare_slam_summary.py --a a.json --b b.json"
+echo ""
+if [[ $RUN_GATES -eq 1 ]]; then
+    echo "---- Running Phase 2 gates (run_slam_fixture_pe_parity.sh) ----"
+    bash "$SCRIPT_DIR/run_slam_fixture_pe_parity.sh"
+fi
 echo "========================================================================"

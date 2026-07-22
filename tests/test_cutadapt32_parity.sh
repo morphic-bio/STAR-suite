@@ -12,7 +12,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-TRIMVALIDATE="$PROJECT_ROOT/tools/trimvalidate/trimvalidate"
+TRIMVALIDATE="${TRIMVALIDATE_BIN:-$PROJECT_ROOT/core/features/vbem/tools/trimvalidate/trimvalidate}"
 FIXTURES_FILE="$PROJECT_ROOT/tests/fixtures/cutadapt32_adapter_fixtures.json"
 
 if [ ! -x "$TRIMVALIDATE" ]; then

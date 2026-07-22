@@ -99,8 +99,10 @@ void test_compatShouldCountPos() {
     // Test with no trimming
     {
         SlamCompatConfig cfg;
-        cfg.trim5p = 0;
-        cfg.trim3p = 0;
+        cfg.trim5p[0] = 0;
+        cfg.trim5p[1] = 0;
+        cfg.trim3p[0] = 0;
+        cfg.trim3p[1] = 0;
         std::vector<std::vector<uint32_t>> g2t;
         std::vector<std::vector<std::pair<uint64_t, uint64_t>>> introns;
         SlamCompat compat(cfg, std::move(g2t), std::move(introns));
@@ -113,8 +115,10 @@ void test_compatShouldCountPos() {
     // Test with 5' trimming only
     {
         SlamCompatConfig cfg;
-        cfg.trim5p = 5;
-        cfg.trim3p = 0;
+        cfg.trim5p[0] = 5;
+        cfg.trim5p[1] = 5;
+        cfg.trim3p[0] = 0;
+        cfg.trim3p[1] = 0;
         std::vector<std::vector<uint32_t>> g2t;
         std::vector<std::vector<std::pair<uint64_t, uint64_t>>> introns;
         SlamCompat compat(cfg, std::move(g2t), std::move(introns));
@@ -129,8 +133,10 @@ void test_compatShouldCountPos() {
     // Test with 3' trimming only
     {
         SlamCompatConfig cfg;
-        cfg.trim5p = 0;
-        cfg.trim3p = 5;
+        cfg.trim5p[0] = 0;
+        cfg.trim5p[1] = 0;
+        cfg.trim3p[0] = 5;
+        cfg.trim3p[1] = 5;
         std::vector<std::vector<uint32_t>> g2t;
         std::vector<std::vector<std::pair<uint64_t, uint64_t>>> introns;
         SlamCompat compat(cfg, std::move(g2t), std::move(introns));
@@ -145,8 +151,10 @@ void test_compatShouldCountPos() {
     // Test with both 5' and 3' trimming
     {
         SlamCompatConfig cfg;
-        cfg.trim5p = 10;
-        cfg.trim3p = 10;
+        cfg.trim5p[0] = 10;
+        cfg.trim5p[1] = 10;
+        cfg.trim3p[0] = 10;
+        cfg.trim3p[1] = 10;
         std::vector<std::vector<uint32_t>> g2t;
         std::vector<std::vector<std::pair<uint64_t, uint64_t>>> introns;
         SlamCompat compat(cfg, std::move(g2t), std::move(introns));
@@ -163,8 +171,10 @@ void test_compatShouldCountPos() {
     // Test underflow guard (trim >= mateLen)
     {
         SlamCompatConfig cfg;
-        cfg.trim5p = 60;
-        cfg.trim3p = 60;
+        cfg.trim5p[0] = 60;
+        cfg.trim5p[1] = 60;
+        cfg.trim3p[0] = 60;
+        cfg.trim3p[1] = 60;
         std::vector<std::vector<uint32_t>> g2t;
         std::vector<std::vector<std::pair<uint64_t, uint64_t>>> introns;
         SlamCompat compat(cfg, std::move(g2t), std::move(introns));
@@ -175,22 +185,43 @@ void test_compatShouldCountPos() {
         check(!compat.compatShouldCountPos(99, 100), "trim>=len: pos=99 skipped");
     }
     
-    // Test mate-2 style coordinates (after conversion from concatenated)
+    // Mate 1 index: trims use cfg.trim5p[1] / cfg.trim3p[1]
     {
         SlamCompatConfig cfg;
-        cfg.trim5p = 3;
-        cfg.trim3p = 3;
+        cfg.trim5p[0] = 0;
+        cfg.trim5p[1] = 3;
+        cfg.trim3p[0] = 0;
+        cfg.trim3p[1] = 3;
         std::vector<std::vector<uint32_t>> g2t;
         std::vector<std::vector<std::pair<uint64_t, uint64_t>>> introns;
         SlamCompat compat(cfg, std::move(g2t), std::move(introns));
-        
-        // Simulate mate-2 with length 75
+
         uint32_t mate2Len = 75;
-        check(!compat.compatShouldCountPos(0, mate2Len), "mate2: pos=0 skipped");
-        check(!compat.compatShouldCountPos(2, mate2Len), "mate2: pos=2 skipped");
-        check(compat.compatShouldCountPos(3, mate2Len), "mate2: pos=3 allowed");
-        check(compat.compatShouldCountPos(71, mate2Len), "mate2: pos=71 allowed");
-        check(!compat.compatShouldCountPos(72, mate2Len), "mate2: pos=72 skipped");
+        check(compat.compatShouldCountPos(0, 100), "mate0 no trim: pos=0 ok");
+        check(!compat.compatShouldCountPos(0, mate2Len, 1), "mate1 trim5p=3: pos=0 skipped");
+        check(!compat.compatShouldCountPos(2, mate2Len, 1), "mate1 trim5p=3: pos=2 skipped");
+        check(compat.compatShouldCountPos(3, mate2Len, 1), "mate1 trim5p=3: pos=3 ok");
+        check(compat.compatShouldCountPos(71, mate2Len, 1), "mate1 trim both ends: pos=71 ok");
+        check(!compat.compatShouldCountPos(72, mate2Len, 1), "mate1 trim3p=3: pos=72 skipped");
+    }
+
+    // Symmetric trims: mate index 1 uses same thresholds as mate 0
+    {
+        SlamCompatConfig cfg;
+        cfg.trim5p[0] = 3;
+        cfg.trim5p[1] = 3;
+        cfg.trim3p[0] = 3;
+        cfg.trim3p[1] = 3;
+        std::vector<std::vector<uint32_t>> g2t;
+        std::vector<std::vector<std::pair<uint64_t, uint64_t>>> introns;
+        SlamCompat compat(cfg, std::move(g2t), std::move(introns));
+
+        uint32_t mate2Len = 75;
+        check(!compat.compatShouldCountPos(0, mate2Len, 1), "mate2 equiv: pos=0 skipped");
+        check(!compat.compatShouldCountPos(2, mate2Len, 1), "mate2 equiv: pos=2 skipped");
+        check(compat.compatShouldCountPos(3, mate2Len, 1), "mate2 equiv: pos=3 ok");
+        check(compat.compatShouldCountPos(71, mate2Len, 1), "mate2 equiv: pos=71 ok");
+        check(!compat.compatShouldCountPos(72, mate2Len, 1), "mate2 equiv: pos=72 skipped");
     }
 }
 

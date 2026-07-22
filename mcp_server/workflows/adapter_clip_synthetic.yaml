@@ -1,0 +1,56 @@
+# Adapter Clip Synthetic Test Workflow Schema
+# Parsed from tests/run_adapter_clip_synthetic_test.sh
+
+id: "adapter_clip_synthetic"
+title: "Adapter Clip Synthetic Test"
+summary: "Tier-A self-contained test: generates synthetic reads with known adapter contamination and validates STAR adapter clipping."
+kind: "shell_workflow"
+entry_script: "tests/run_adapter_clip_synthetic_test.sh"
+supported_modes:
+  - "local"
+  - "container-safe"
+caveats:
+  - "Fully self-contained — generates all reference data and FASTQs inline."
+  - "No external fixtures or datasets required."
+default_output_layout: "/tmp/adapter_clip_synthetic_<timestamp>/"
+
+stages:
+  - name: "generate"
+    title: "Generate Synthetic Data"
+    description: "Create synthetic 50Kbp reference, GTF, and paired-end FASTQ with adapter contamination."
+  - name: "index"
+    title: "Genome Generate"
+    description: "Build STAR genome index from synthetic reference."
+  - name: "align"
+    title: "STAR Alignment"
+    description: "Align reads with adapter clipping enabled."
+  - name: "validate"
+    title: "Validate"
+    description: "Check that adapter-contaminated reads are correctly trimmed."
+
+parameter_groups:
+  - name: "performance"
+    title: "Performance"
+    parameters: ["threads"]
+  - name: "output"
+    title: "Output"
+    parameters: ["outdir"]
+
+parameters:
+  - name: "threads"
+    cli_flag: "--threads"
+    type: "int"
+    required: false
+    default: 2
+    description: "STAR thread count."
+
+  - name: "outdir"
+    cli_flag: "--outdir"
+    type: "directory"
+    required: false
+    description: "Output directory. Auto-generated under /tmp if not set."
+    is_output_root: true
+
+rendering:
+  flag_order: ["threads", "outdir"]
+  omit_absent_optionals: true

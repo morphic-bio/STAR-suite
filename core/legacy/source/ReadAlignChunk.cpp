@@ -81,6 +81,7 @@ ReadAlignChunk::ReadAlignChunk(Parameters& Pin, Genome &genomeIn, Transcriptome 
     chunkOutBAMquant = nullptr;
     chunkQuants = nullptr;
     chunkOutBAMstream = nullptr;
+    cbqChunkReadN = 0;
 
     if ( P.quant.yes ) {//allocate transcriptome structures
         chunkTr=new Transcriptome(*TrIn);
@@ -181,32 +182,46 @@ ReadAlignChunk::ReadAlignChunk(Parameters& Pin, Genome &genomeIn, Transcriptome 
         // and main mapping pass uses computed trims from the start
         // Always enabled during detection pass when SLAM is active
         if (P.quant.slam.autoTrimDetectionPass) {
-            slamQuant->enableVarianceAnalysis(
-                P.quant.slam.autoTrimMaxReads, 
-                P.quant.slam.autoTrimMinReads,
-                P.quant.slam.autoTrimSmoothWindow,
-                P.quant.slam.autoTrimSegMinLen,
-                P.quant.slam.autoTrimMaxTrim);
+            const bool slamPeVariance =
+                (P.readNends >= 2) && P.quant.slam.autoTrimPerMate;
+            slamQuant->enableVarianceAnalysis(P.quant.slam.autoTrimMaxReads,
+                                                P.quant.slam.autoTrimMinReads,
+                                                P.quant.slam.autoTrimSmoothWindow,
+                                                P.quant.slam.autoTrimSegMinLen,
+                                                P.quant.slam.autoTrimMaxTrim,
+                                                slamPeVariance);
         }
-        
-        // Create SlamCompat if any compat mode is enabled or auto-trim is active
+
+        auto anyAutoComputed = [] (const Parameters& p) -> bool {
+            return p.quant.slam.autoTrimComputed[0] || p.quant.slam.autoTrimComputed[1];
+        };
+        auto anyManualTrimNonZero = [] (const Parameters& p) -> bool {
+            return p.quant.slam.compatTrim5p[0] != 0 || p.quant.slam.compatTrim5p[1] != 0 ||
+                   p.quant.slam.compatTrim3p[0] != 0 || p.quant.slam.compatTrim3p[1] != 0;
+        };
+
         bool needsCompat = P.quant.slam.compatIntronic || P.quant.slam.compatLenientOverlap ||
             P.quant.slam.compatOverlapWeight || P.quant.slam.compatIgnoreOverlap ||
-            P.quant.slam.compatTrim5p != 0 || P.quant.slam.compatTrim3p != 0 ||
-            (P.quant.slam.autoTrimMode == "variance" && P.quant.slam.autoTrimComputed);
+            anyManualTrimNonZero(P) ||
+            (P.quant.slam.autoTrimMode == "variance" && anyAutoComputed(P));
         if (needsCompat) {
             SlamCompatConfig cfg;
             cfg.intronic = P.quant.slam.compatIntronic;
             cfg.lenientOverlap = P.quant.slam.compatLenientOverlap;
             cfg.overlapWeight = P.quant.slam.compatOverlapWeight;
             cfg.ignoreOverlap = P.quant.slam.compatIgnoreOverlap;
-            // Use auto-trim values if computed, otherwise use manual trims
-            if (P.quant.slam.autoTrimComputed) {
-                cfg.trim5p = P.quant.slam.autoTrim5p;
-                cfg.trim3p = P.quant.slam.autoTrim3p;
-            } else {
-                cfg.trim5p = P.quant.slam.compatTrim5p;
-                cfg.trim3p = P.quant.slam.compatTrim3p;
+            for (unsigned mate = 0; mate < 2; mate++) {
+                if (P.quant.slam.autoTrimComputed[mate]) {
+                    cfg.trim5p[mate] = P.quant.slam.autoTrim5p[mate];
+                    cfg.trim3p[mate] = P.quant.slam.autoTrim3p[mate];
+                } else {
+                    cfg.trim5p[mate] = P.quant.slam.compatTrim5p[mate];
+                    cfg.trim3p[mate] = P.quant.slam.compatTrim3p[mate];
+                }
+            }
+            if (!P.quant.slam.autoTrimPerMate) {
+                cfg.trim5p[1] = cfg.trim5p[0];
+                cfg.trim3p[1] = cfg.trim3p[0];
             }
             slamCompat = new SlamCompat(*chunkTr, cfg);
         }
@@ -406,22 +421,26 @@ ReadAlignChunk::~ReadAlignChunk() {
     slamQuant = nullptr;
 };
 
-void ReadAlignChunk::reinitSlamCompat(int trim5p, int trim3p) {
+void ReadAlignChunk::reinitSlamCompat(int trim5p_m1, int trim3p_m1, int trim5p_m2, int trim3p_m2) {
     if (slamCompat != nullptr) {
-        // Update existing SlamCompat with new trim values
-        slamCompat->updateTrims(trim5p, trim3p);
+        slamCompat->updateTrims(trim5p_m1, trim3p_m1, trim5p_m2, trim3p_m2);
     } else if (P.quant.slam.yes && chunkTr != nullptr) {
-        // Create SlamCompat if it doesn't exist yet (trims were computed but no other compat features)
         SlamCompatConfig cfg;
         cfg.intronic = P.quant.slam.compatIntronic;
         cfg.lenientOverlap = P.quant.slam.compatLenientOverlap;
         cfg.overlapWeight = P.quant.slam.compatOverlapWeight;
         cfg.ignoreOverlap = P.quant.slam.compatIgnoreOverlap;
-        cfg.trim5p = trim5p;
-        cfg.trim3p = trim3p;
+        cfg.trim5p[0] = trim5p_m1;
+        cfg.trim3p[0] = trim3p_m1;
+        cfg.trim5p[1] = trim5p_m2;
+        cfg.trim3p[1] = trim3p_m2;
         slamCompat = new SlamCompat(*chunkTr, cfg);
         RA->slamCompat = slamCompat;
     }
+}
+
+void ReadAlignChunk::reinitSlamCompat(int trim5p, int trim3p) {
+    reinitSlamCompat(trim5p, trim3p, trim5p, trim3p);
 }
 
 void ReadAlignChunk::reopenYNoYFastqOutputsForReuse() {

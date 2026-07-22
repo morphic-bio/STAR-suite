@@ -1,0 +1,7 @@
+node_modules/
+out/
+.vscode-test/
+# Don't ignore distributable .vsix in dist/: it is served to users so they can
+# install the bridge without building from source.
+/*.vsix
+!dist/*.vsix

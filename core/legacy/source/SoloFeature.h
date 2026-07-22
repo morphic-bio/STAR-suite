@@ -24,8 +24,10 @@
 
 // Forward declaration
 class ProbeListIndex;
+class CountingSink;
 
 class SoloFeature {
+    friend class CountingSink;
 private:
     Parameters &P;
     ReadAlignChunk **RAchunk;    
@@ -112,6 +114,13 @@ public:
     void countSmartSeq();
     void countCBgeneUMI();
     void countVelocyto();
+    void countVelocytoStreamThreads();
+    void countVelocytoSortedReplay();
+    void countVelocytoSortedReplayCBuckets(); // Stage 2: CB-first bucketed deterministic merge (env-gated)
+    void countVelocytoFinalizeFromCuMaps(vector<unordered_map<uintUMI, vector<trTypeStruct>>> &cuTrTypes);
+    void countVelocytoFinalizeInit();
+    void countVelocytoFinalizeOneCb(uint32 iCB, unordered_map<uintUMI, vector<trTypeStruct>> &cuMap);
+    void countVelocytoFinalizeFinish();
     void quantTranscript();
     void prepareReadInfoOnly(); //minimal processing to populate readInfo without counting (for skipProcessing mode)
     
@@ -119,6 +128,13 @@ public:
     void collapseUMI_CR(uint32 iCB, uint32 *umiArray);
     void collapseUMIall(bool minimalMode=false);
     void collapseUMIall_fromHash(); // Direct hash consumption (no materialization)
+    void collapseUMIall_fromBridgeHash(); // Non-Flex bridge: collapse without rGeneUMI materialization
+
+    // Experimental inline-hash replay harnesses (env-gated callers): snapshot at pre-collapse boundary.
+    void bridgeHashSnapshotWrite(const char *path);
+    void bridgeHashSnapshotLoad(const char *path);
+    void flexHashSnapshotWrite(const char *path);
+    void flexHashSnapshotLoad(const char *path);
     void collapseUMIperCB(uint32 iCB, vector<uint32> &umiArray, vector<uint32> &gID,  vector<uint32> &gReadS, bool minimalMode);
     void materializeRGUFromHash(); // Materialize rGeneUMI/rCBp/rCBn from inlineHash_ (DEPRECATED)
     
@@ -126,10 +142,6 @@ public:
         SampleMatrixData matrixData;
         std::vector<MexWriter::Triplet> triplets;
     };
-
-    // Build matrix bundle from inline hash dedup counts
-    InlineMatrixBundle buildInlineMatrixFromHash(
-        const std::unordered_map<uint64_t, std::vector<std::pair<uint32_t, uint32_t>>>& cbTagGeneCounts);
 
     // Write MEX directly from inline-hash dedup data (no Solo, no replayer)
     void writeMexFromInlineHashDedup(
@@ -193,8 +205,14 @@ public:
     // UMI correction: run clique correction for all groups and apply corrections
     void runCliqueCorrection();
     
-    // Ambiguous CB resolution: stub - not wired in flex path
-    void resolveAmbiguousCBs() {}
+    // Ambiguous CB resolution for the experimental non-Flex bridge.
+    void resolveAmbiguousCBs();
+    // Shared Cell Ranger-style ambiguous-CB reinsertion into inline hash.
+    void resolvePendingAmbiguousToHash(bool useBridgeCompactMapping);
+    // Non-Flex bridge: resolve a single thread-local ambiguous-CB sidecar into its own hash.
+    void resolvePendingAmbiguousForReadFeat(SoloReadFeature &targetFeat, bool useBridgeCompactMapping);
+    // Non-Flex bridge: finalize deferred per-read accounting for one thread using global CB evidence.
+    void finalizeDeferredBridgeAccountingForReadFeat(SoloReadFeature &targetFeat);
     
     // Apply flat correction hash back to inline hash (re-key entries with corrected UB)
     void applyCliqueCorrectionsToHash();

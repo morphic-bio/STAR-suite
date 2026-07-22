@@ -80,7 +80,7 @@ ReadAlign::ReadAlign (Parameters& Pin, Genome &genomeIn, Transcriptome *TrIn, in
         // Create AlignmentModel per thread if error model is enabled
         std::unique_ptr<libem::AlignmentModel> alignment_model;
         if (P.quant.transcriptVB.errorModelMode != "off" && libemTr != nullptr) {
-            alignment_model.reset(new libem::AlignmentModel(0.001, 4));  // alpha=0.001, readBins=4
+            alignment_model.reset(new libem::AlignmentModel(1.0, 6));  // Salmon defaults: alpha=1.0, readBins=6
         }
         
         quantEC = new TranscriptQuantEC(chunkTr->nTr, iChunk, 
@@ -408,6 +408,7 @@ void ReadAlign::resetN () {//reset resets the counters to 0 for a new read
     hasYAlignment_ = false;       // Reset Y-alignment flag for new read
     crMultiMapRescued_ = false;   // Reset CR multimapper rescue flag for new read
     crMultiMapRescuedIntronic_ = false; // Reset intronic fallback marker
+    genomicMultimapBeforeRescue_ = false;
 
     for (uint ii=0; ii<P.readNmates; ii++) {//not readNends: this is alignment
         maxScoreMate[ii]=0;

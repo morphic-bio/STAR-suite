@@ -26,8 +26,11 @@
 #include "bamSortByCoordinate.h"
 #include "SamtoolsSorter.h"
 #include "Transcriptome.h"
+#include "SpatialFeatureSidecar.h"
+#include "CountingSinkStress.h"
 #include "signalFromBAM.h"
 #include "mapThreadsSpawn.h"
+#include "input/CbqYNoYWriter.h"
 #include "SjdbClass.h"
 #include "sjdbInsertJunctions.h"
 #include "Variation.h"
@@ -52,10 +55,14 @@
 #include "SnpMaskBuild.h"
 #include "PfMultiProcess.h"
 #include "PfMultiConfig.h"
+#include "VelocytoMexWriter.h"
+#include "OcmMultiMaterialize.h"
+#include "star_chromap_orchestration.h"
 // Note: effective_length.h not included due to Transcriptome class name conflict
 // Use wrapper function instead
 #include "effective_length_wrapper.h"
 #include "InlineCBCorrection.h"
+#include "SoloFeature_bridgeHashSnapshot.h"
 #include "alignment_model.h"  // For Transcriptome and AlignmentModel
 #include <memory>
 #include <unordered_map>
@@ -64,10 +71,15 @@
 #include <cerrno>
 #include <cstring>
 #include <cctype>
+#include <stdexcept>
 
 #include "twoPassRunPass1.h"
 
+#if defined(WITH_CHROMAP) && WITH_CHROMAP
+#include <htslib/sam.h>
+#else
 #include "htslib/htslib/sam.h"
+#endif
 
 namespace {
 
@@ -102,6 +114,15 @@ bool isUnsetToken(const std::string& input) {
     return t.empty() || t == "-" || t == "none";
 }
 
+bool flexNoGenomeCountOnlyRequested(const Parameters& P) {
+    return P.runMode == "alignReads" &&
+           P.pSolo.flexMode &&
+           P.pSolo.flexNoAlign != 0 &&
+           P.pSolo.flexPipelineStr != "no" &&
+           !P.outSAMtype.empty() &&
+           P.outSAMtype[0] == "None";
+}
+
 std::string normalizePathNoTrailingSlash(const std::string& input) {
     std::string out = trimCopy(input);
     while (!out.empty() && out.back() == '/') {
@@ -124,6 +145,88 @@ bool pathIsSameOrUnderDir(const std::string& path, const std::string& dir) {
         return false;
     }
     return path[dir.size()] == '/';
+}
+
+void writeTranscriptVBEqDump(const std::string& path, const ECTable& ecTable, const Transcriptome& tr) {
+    std::ofstream out(path.c_str());
+    if (!out.is_open()) {
+        throw std::runtime_error("could not create TranscriptVB EC dump: " + path);
+    }
+
+    out << tr.nTr << "\n";
+    out << ecTable.ecs.size() << "\n";
+    for (uint i = 0; i < tr.nTr; ++i) {
+        out << tr.trID[i] << "\n";
+    }
+
+    out << std::setprecision(10);
+    for (const EC& ec : ecTable.ecs) {
+        const size_t nTx = ec.transcript_ids.size();
+        out << nTx;
+        for (uint32_t tid : ec.transcript_ids) {
+            out << "\t" << tid;
+        }
+
+        if (ec.weights.size() == nTx) {
+            for (double weight : ec.weights) {
+                out << "\t" << weight;
+            }
+        } else {
+            const double uniformWeight = nTx > 0 ? 1.0 / static_cast<double>(nTx) : 0.0;
+            for (size_t i = 0; i < nTx; ++i) {
+                out << "\t" << uniformWeight;
+            }
+        }
+        out << "\t" << ec.count << "\n";
+    }
+}
+
+void writeTranscriptVBDoubleVectorDump(const std::string& path,
+                                       const std::string& valueName,
+                                       const std::vector<double>& values) {
+    std::ofstream out(path.c_str());
+    if (!out.is_open()) {
+        return;
+    }
+
+    out << "index\t" << valueName << "\n";
+    out << std::setprecision(17);
+    for (size_t i = 0; i < values.size(); ++i) {
+        out << i << "\t" << values[i] << "\n";
+    }
+}
+
+void writeTranscriptVBGCModelDump(const std::string& path,
+                                  const GCFragModel& gcModel,
+                                  double total) {
+    std::ofstream out(path.c_str());
+    if (!out.is_open()) {
+        return;
+    }
+
+    const auto& counts = gcModel.getCounts();
+    out << "bin\tvalue\tnormalized\n";
+    out << std::setprecision(17);
+    for (int i = 0; i < GCFragModel::GC_BINS; ++i) {
+        const double norm = (total > 0.0) ? counts[i] / total : 0.0;
+        out << i << "\t" << counts[i] << "\t" << norm << "\n";
+    }
+}
+
+void writeTranscriptVBEffLenDump(const std::string& path,
+                                 const Transcriptome& tr,
+                                 const std::vector<double>& effLengths) {
+    std::ofstream out(path.c_str());
+    if (!out.is_open()) {
+        return;
+    }
+
+    out << "Name\tLength\tEffectiveLength\n";
+    out << std::setprecision(17);
+    const uint n = std::min<uint>(tr.nTr, static_cast<uint>(effLengths.size()));
+    for (uint i = 0; i < n; ++i) {
+        out << tr.trID[i] << "\t" << tr.trLen[i] << "\t" << effLengths[i] << "\n";
+    }
 }
 
 bool applyPfMultiGexInputFiltering(Parameters& P) {
@@ -356,7 +459,9 @@ void usage(int usageType)
 {
     cout << "Usage: STAR  [options]... --genomeDir /path/to/genome/index/   --readFilesIn R1.fq R2.fq\n";
     cout << "Spliced Transcripts Alignment to a Reference (c) Alexander Dobin, 2009-2022\n\n";
-    cout << "STAR version=" << STAR_VERSION << "\n";
+    cout << "STAR-suite version=" << STAR_SUITE_VERSION << "\n";
+    cout << "STAR upstream version=" << STAR_UPSTREAM_VERSION << "\n";
+    cout << "STAR genome compatibility version=" << STAR_GENOME_COMPAT_VERSION << "\n";
     cout << "STAR compilation time,server,dir=" << COMPILATION_TIME_PLACE << "\n";
     cout << "For more details see:\n";
     cout << "<https://github.com/alexdobin/STAR>\n";
@@ -412,12 +517,16 @@ int main(int argInN, char *argIn[])
     }
 
     *(P.inOut->logStdOut) << "\t" << P.commandLine << '\n';
-    *(P.inOut->logStdOut) << "\tSTAR version: " << STAR_VERSION << "   compiled: " << COMPILATION_TIME_PLACE << '\n';
+    *(P.inOut->logStdOut) << "\tSTAR-suite version: " << STAR_SUITE_VERSION
+                          << "   STAR upstream: " << STAR_UPSTREAM_VERSION
+                          << "   genome compatibility: " << P.versionGenome
+                          << "   compiled: " << COMPILATION_TIME_PLACE << '\n';
     *(P.inOut->logStdOut) << timeMonthDayTime(g_statsAll.timeStart) << " ..... started STAR run\n"
                           << flush;
 
     // runMode
-    if (P.runMode == "alignReads" || P.runMode == "soloCellFiltering" || P.runMode == "hashCacheGenerate")
+    if (P.runMode == "alignReads" || P.runMode == "soloCellFiltering" || P.runMode == "hashCacheGenerate"
+        || P.runMode == "countingSinkStress")
     {
         // continue
     }
@@ -466,6 +575,7 @@ int main(int argInN, char *argIn[])
 
     // transcriptome placeholder (loaded only if P.quant.yes)
     Transcriptome *transcriptomeMain = nullptr;
+    std::unique_ptr<spatial_feature_sidecar::Writer> spatialFeatureWriter;
     std::vector<double> vbGenePosterior;
     bool vbGenePosteriorReady = false;
 
@@ -473,6 +583,40 @@ int main(int argInN, char *argIn[])
     if (P.runMode == "soloCellFiltering") {
         Transcriptome transcriptomeCellFilter(P);
         Solo soloCellFilter(P, transcriptomeCellFilter);
+    }
+
+    if (P.runMode == "countingSinkStress") {
+        runCountingSinkStress(P);
+        P.cleanupParInfoForExit();
+        exit(0);
+    }
+
+    std::string flexNoGenomeReason;
+    if (flexNoGenomeCountOnlyActivationGuard(P, &flexNoGenomeReason)) {
+        P.inOut->logMain << "Flex count-only no-genome: active\n" << flush;
+        runFlexNoGenomeCountOnly(P);
+
+        g_statsAll.progressReport(P.inOut->logProgress);
+        P.inOut->logProgress << "ALL DONE!\n" << flush;
+        P.inOut->logFinal.open((P.outFileNamePrefix + "Log.final.out").c_str());
+        g_statsAll.reportFinal(P.inOut->logFinal);
+        *P.inOut->logStdOut << timeMonthDayTime(g_statsAll.timeFinish) << " ..... finished successfully\n"
+                            << flush;
+
+        P.inOut->logMain << "ALL DONE!\n" << flush;
+        if (P.outTmpKeep == "None") {
+            sysRemoveDir(P.outFileTmp);
+        }
+
+        P.closeReadsFiles();
+        P.cleanupParInfoForExit();
+        delete P.inOut;
+        return 0;
+    }
+    if (flexNoGenomeCountOnlyRequested(P)) {
+        P.inOut->logMain << "Flex count-only no-genome: not active ("
+                         << (flexNoGenomeReason.empty() ? "strict predicate rejected command" : flexNoGenomeReason)
+                         << ")\n" << flush;
     }
 
     ////////////////////////////////////////////////////////////////////////
@@ -527,6 +671,50 @@ int main(int argInN, char *argIn[])
     if (P.quant.yes)
     { // load transcriptome
         transcriptomeMain = new Transcriptome(P);
+
+        if (P.soloSpatialFeatureSidecarEnabled) {
+            spatial_feature_sidecar::WriterConfig sidecarConfig;
+            sidecarConfig.prefix = P.soloSpatialFeatureSidecar;
+            sidecarConfig.starSuiteVersion = STAR_SUITE_VERSION;
+            sidecarConfig.sourceRevision = GIT_BRANCH_COMMIT_DIFF;
+            sidecarConfig.featureType = "GeneFull";
+            sidecarConfig.strand = P.pSolo.strand;
+            sidecarConfig.crMultimapRescue = P.pSolo.crMultimapRescue;
+            sidecarConfig.crIntronicFallback = P.pSolo.crMultimapRescueIntronic;
+            sidecarConfig.policy = "GeneFull;MultiGeneUMI_CR;1MM_CR;Unique;Forward;CellFilter=None;SAM=None";
+            std::ostringstream inputManifest;
+            inputManifest << "schema\tstar_suite.spatial_feature_inputs.v1\n";
+            for (std::size_t end = 0; end < P.readFilesNames.size(); ++end) {
+                for (std::size_t lane = 0; lane < P.readFilesNames[end].size(); ++lane) {
+                    const std::string &path = P.readFilesNames[end][lane];
+                    struct stat info;
+                    if (::stat(path.c_str(), &info) != 0) {
+                        ostringstream errOut;
+                        errOut << "EXITING because the spatial feature input manifest cannot stat "
+                               << path << ": " << strerror(errno) << "\n";
+                        exitWithError(errOut.str(), std::cerr, P.inOut->logMain,
+                                      EXIT_CODE_INPUT_FILES, P);
+                    }
+                    inputManifest << "end=" << end << "\tlane=" << lane << "\tpath=" << path
+                                  << "\tbytes=" << static_cast<unsigned long long>(info.st_size)
+                                  << "\tmtime=" << static_cast<long long>(info.st_mtime) << '\n';
+                }
+            }
+            sidecarConfig.inputManifest = inputManifest.str();
+            spatialFeatureWriter.reset(new spatial_feature_sidecar::Writer());
+            std::string sidecarError;
+            const std::vector<std::string> &geneIds = transcriptomeMain->geIDCanonical.empty()
+                ? transcriptomeMain->geID : transcriptomeMain->geIDCanonical;
+            if (!spatialFeatureWriter->open(sidecarConfig, geneIds,
+                                            transcriptomeMain->geName, sidecarError)) {
+                exitWithError("EXITING because the spatial feature sidecar could not be opened: "
+                                  + sidecarError + "\n",
+                              std::cerr, P.inOut->logMain, EXIT_CODE_FILE_OPEN, P);
+            }
+            P.spatialFeatureSidecarWriter = spatialFeatureWriter.get();
+            P.inOut->logMain << "Spatial GeneFull sidecar output prefix: "
+                             << P.soloSpatialFeatureSidecar << "\n" << flush;
+        }
 
         // SNP mask build pre-pass (if requested)
         bool hasMaskIn = !P.quant.slamSnpMask.maskIn.empty() && P.quant.slamSnpMask.maskIn != "-" && P.quant.slamSnpMask.maskIn != "None";
@@ -812,8 +1000,9 @@ int main(int argInN, char *argIn[])
             P.quant.slam.errorRateFromBlank = false;
         }
         
-        // Load transcript sequences for error model if enabled
-        if (P.quant.transcriptVB.yes && P.quant.transcriptVB.errorModelMode != "off") {
+        // Load transcript sequences for TranscriptVB features that need sequence context.
+        if (P.quant.transcriptVB.yes &&
+            (P.quant.transcriptVB.errorModelMode != "off" || P.quant.transcriptVB.gcBias)) {
             // Determine FASTA path: P.pGe.transcriptomeFasta else transcriptome.fa
             std::string fasta_path;
             if (!P.pGe.transcriptomeFasta.empty() && P.pGe.transcriptomeFasta != "-") {
@@ -825,9 +1014,8 @@ int main(int argInN, char *argIn[])
             
             libem_transcriptome.reset(new libem::Transcriptome());
             if (!libem_transcriptome->loadFromFasta(fasta_path)) {
-                // Failed to load - disable error model
                 P.inOut->logMain << "WARNING: Failed to load transcript sequences from " << fasta_path 
-                                 << ". Error model will be disabled.\n";
+                                 << ". TranscriptVB sequence-context models will be disabled.\n";
                 libem_transcriptome.reset();
             } else {
                 // Reorder by STAR transcript names to match BAM header order
@@ -837,10 +1025,12 @@ int main(int argInN, char *argIn[])
                 }
                 if (!libem_transcriptome->reorderByNames(star_names)) {
                     P.inOut->logMain << "WARNING: Failed to reorder transcript sequences to match STAR order. "
-                                     << "Error model may use incorrect sequences.\n";
+                                     << "TranscriptVB sequence-context models will be disabled.\n";
+                    libem_transcriptome.reset();
+                } else {
+                    P.inOut->logMain << "Loaded " << libem_transcriptome->size()
+                                     << " transcript sequences for TranscriptVB sequence-context models\n";
                 }
-                P.inOut->logMain << "Loaded " << libem_transcriptome->size() 
-                                 << " transcript sequences for error model\n";
             }
         }
     }
@@ -852,16 +1042,37 @@ int main(int argInN, char *argIn[])
     std::vector<std::string> batchFastqsR1;
     std::vector<std::string> batchFastqsR2;
     bool batchPaired = (P.readNends > 1);
+    bool batchSplitMateLists = false;
     bool batchModeActive = P.batchMode;
     bool batchErrorRateFromBlank = (batchModeActive && P.quant.slam.yes && P.quant.slam.errorRateFromBlank);
+    std::vector<std::string> batchOutSAMattrRG;
+    std::vector<std::string> batchOutSAMattrRGlineSplit;
+
+    if (!preflightStarChromapAtacIfEnabled(P, batchModeActive)) {
+        ostringstream errOut;
+        errOut << "EXITING because of fatal ERROR: invalid Chromap ATAC integration configuration\n"
+               << "SOLUTION: fix --chromapAtac* inputs, disable --chromapAtacEnable, or rebuild with WITH_CHROMAP=1.\n";
+        exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
+    }
+
+    StarChromapAtacAsyncRun chromapAtacAsyncRun;
+    if (!startStarChromapAtacIfEnabled(P, batchModeActive, chromapAtacAsyncRun)) {
+        ostringstream errOut;
+        errOut << "EXITING because of fatal ERROR: could not start Chromap ATAC integration\n"
+               << "SOLUTION: check --chromapAtac* inputs and --chromapAtacStartMode.\n";
+        exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_RUNTIME, P);
+    }
     
     if (batchModeActive) {
         P.batchPaired = batchPaired;
         P.batchResumeHasList = false;
+        batchSplitMateLists = batchPaired && P.readFilesNames.size() > 1;
+        batchOutSAMattrRG = P.outSAMattrRG;
+        batchOutSAMattrRGlineSplit = P.outSAMattrRGlineSplit;
         if (P.readFilesNames.size() > 0) {
             batchFastqsR1 = P.readFilesNames[0];
         }
-        if (batchPaired && P.readFilesNames.size() > 1) {
+        if (batchSplitMateLists) {
             batchFastqsR2 = P.readFilesNames[1];
         }
         
@@ -882,8 +1093,8 @@ int main(int argInN, char *argIn[])
         }
         for (size_t i = 0; i < batchFastqsR1.size(); ++i) {
             P.inOut->logMain << "  [" << i << "] " << extractSampleNameFromFastq(batchFastqsR1[i]) 
-                             << " (R1=" << batchFastqsR1[i];
-            if (batchPaired && i < batchFastqsR2.size()) {
+                             << (P.readFilesTypeN == 20 ? " (CBQ=" : " (R1=") << batchFastqsR1[i];
+            if (batchSplitMateLists && i < batchFastqsR2.size()) {
                 P.inOut->logMain << ", R2=" << batchFastqsR2[i];
             }
             P.inOut->logMain << ")\n";
@@ -959,11 +1170,28 @@ int main(int argInN, char *argIn[])
             // Set readFilesNames to single file for this sample (per mate)
             P.readFilesNames[0].clear();
             P.readFilesNames[0].push_back(samplePath);
-            if (batchPaired) {
+            if (batchSplitMateLists) {
                 P.readFilesNames[1].clear();
                 P.readFilesNames[1].push_back(batchFastqsR2[batchSampleIdx]);
+            } else if (batchPaired && P.readFilesTypeN == 20) {
+                // Paired CBQ stores both mates in one external source, so batch
+                // mode iterates one CBQ list rather than two split mate lists.
+                P.readFilesNames.resize(1);
             }
             P.readFilesN = 1;
+
+            if (batchOutSAMattrRG.size() == batchFastqsR1.size()) {
+                P.outSAMattrRG.clear();
+                P.outSAMattrRG.push_back(batchOutSAMattrRG[batchSampleIdx]);
+            } else {
+                P.outSAMattrRG = batchOutSAMattrRG;
+            }
+            if (batchOutSAMattrRGlineSplit.size() == batchFastqsR1.size()) {
+                P.outSAMattrRGlineSplit.clear();
+                P.outSAMattrRGlineSplit.push_back(batchOutSAMattrRGlineSplit[batchSampleIdx]);
+            } else {
+                P.outSAMattrRGlineSplit = batchOutSAMattrRGlineSplit;
+            }
             
             // Close any open read files from previous sample
             P.closeReadsFiles();
@@ -984,7 +1212,7 @@ int main(int argInN, char *argIn[])
                 P.batchResumeFastqListR1 = joinStrings(resumeR1, ",");
                 P.batchResumeHasList = true;
             }
-            if (batchPaired && !batchFastqsR2.empty()) {
+            if (batchSplitMateLists && !batchFastqsR2.empty()) {
                 std::vector<std::string> resumeR2;
                 resumeR2.push_back(batchFastqsR2[0]);
                 int startIdx = (batchSampleIdx == 0 ? 1 : batchSampleIdx);
@@ -1018,6 +1246,8 @@ int main(int argInN, char *argIn[])
 
     // SAM headers
     samHeaders(P, *genomeMain.genomeOut.g, transcriptomeMain);
+    g_bamHeaderChrNames = &genomeMain.genomeOut.g->chrNameAll;
+    g_bamHeaderChrLengths = &genomeMain.genomeOut.g->chrLengthAll;
 
     // initialize chimeric parameters here - note that chimeric parameters require samHeader
     P.pCh.initialize(&P);
@@ -1033,12 +1263,28 @@ int main(int argInN, char *argIn[])
     // Initialize unsorted tag buffer for unsorted BAM CB/UB tag injection
     // Uses SamtoolsSorter in noSort mode - buffers records to disk, then streams with tag injection
     if (P.outBAMunsorted && P.pSolo.samAttrYes && !P.pSolo.skipProcessing) {
-        g_unsortedTagBuffer = new SamtoolsSorter(P.limitBAMsortRAM,
+        uint64_t unsortedTagBufferRAM = P.limitBAMsortRAM;
+        if (unsortedTagBufferRAM == 0) {
+            unsortedTagBufferRAM = 4000000000ULL;
+            P.inOut->logMain
+                << "WARNING: --limitBAMsortRAM=0 with unsorted BAM CB/UB tag injection; "
+                << "using 4000000000 bytes for the disk-spill buffer.\n";
+        }
+
+        string unsortedTagTmpDir = P.outBAMsortTmpDir;
+        if (unsortedTagTmpDir.empty()) {
+            unsortedTagTmpDir = P.outFileTmp + "/BAMunsorted";
+            mkdir(unsortedTagTmpDir.c_str(), P.runDirPerm);
+        }
+
+        g_unsortedTagBuffer = new SamtoolsSorter(unsortedTagBufferRAM,
                                                   P.outBAMsortingThreadNactual,
-                                                  P.outBAMsortTmpDir,
+                                                  unsortedTagTmpDir,
                                                   P,
                                                   true);  // noSort = true
-        P.inOut->logMain << "NOTE: Using buffered mode for unsorted BAM CB/UB tag injection.\n";
+        P.inOut->logMain << "NOTE: Using buffered mode for unsorted BAM CB/UB tag injection"
+                          << " (spill RAM cap=" << unsortedTagBufferRAM
+                          << ", tmpDir=" << unsortedTagTmpDir << ").\n";
     }
 
     // this does not seem to work at the moment
@@ -1048,7 +1294,8 @@ int main(int argInN, char *argIn[])
     // Always run detection pass when SLAM is enabled to collect variance stats and compute error rate
     // Trims are only computed/applied if --autoTrim variance is set
     volatile bool runSlamDetectionPass = true;  // keep main mapping flow independent of SLAM detection
-    bool doSlamDetectionPass = (P.quant.slam.yes && P.quant.slam.trimScope == "first" && !P.quant.slam.autoTrimComputed);
+    bool doSlamDetectionPass =
+        (P.quant.slam.yes && P.quant.slam.trimScope == "first" && !P.quant.slam.autoTrimComputed[0]);
     
     if (runSlamDetectionPass) {
         if (doSlamDetectionPass) {
@@ -1119,29 +1366,32 @@ int main(int argInN, char *argIn[])
         // Compute global error rate and trims from variance stats
         if (RAdetect->slamQuant != nullptr && RAdetect->slamQuant->varianceAnalysisEnabled()) {
             // Estimate read length from processed reads
-            uint32_t readLength = 100;
+            uint32_t mateLen0 = 100;
+            uint32_t mateLen1 = 0;
             if (RAdetect->RA != nullptr && RAdetect->RA->readLength[0] > 0) {
-                readLength = static_cast<uint32_t>(RAdetect->RA->readLength[0] + RAdetect->RA->readLength[1]);
+                mateLen0 = static_cast<uint32_t>(RAdetect->RA->readLength[0]);
+                mateLen1 = static_cast<uint32_t>(RAdetect->RA->readLength[1]);
             }
-            
+            const uint32_t readLengthConcat = mateLen0 + mateLen1;
+
             const SlamVarianceAnalyzer* analyzer = RAdetect->slamQuant->varianceAnalyzer();
-            
+
             // Compute global T→C error rate (always, even if trimming disabled)
             uint64_t t_total = 0, tc_total = 0;
             double p_est = 0.0;
-            // Initialize trim windows from manual trims (will be updated if auto-trim succeeds)
-            int trim5p_for_err = P.quant.slam.compatTrim5p;
-            int trim3p_for_err = P.quant.slam.compatTrim3p;
-            
+            int trim5p_for_err[2] = {P.quant.slam.compatTrim5p[0], P.quant.slam.compatTrim5p[1]};
+            int trim3p_for_err[2] = {P.quant.slam.compatTrim3p[0], P.quant.slam.compatTrim3p[1]};
+
             if (analyzer != nullptr) {
                 // Compute trims only if auto-trim mode is explicitly enabled
                 SlamVarianceTrimResult trimResult;
                 bool trimComputed = false;
-                
-                if (P.quant.slam.autoTrimMode == "variance") {
-                    trimResult = RAdetect->slamQuant->computeVarianceTrim(readLength);
 
-                    if (!trimResult.success || trimResult.readsAnalyzed < static_cast<uint64_t>(P.quant.slam.autoTrimMinReads)) {
+                if (P.quant.slam.autoTrimMode == "variance") {
+                    trimResult = RAdetect->slamQuant->computeVarianceTrim(readLengthConcat, mateLen0, mateLen1);
+
+                    if (!trimResult.success ||
+                        trimResult.readsAnalyzed < static_cast<uint64_t>(P.quant.slam.autoTrimMinReads)) {
                         ostringstream errOut;
                         errOut << "EXITING because of FATAL ERROR: --autoTrim variance requested but insufficient stdev data to compute trims.\n"
                                << "DETAILS: reads_analyzed=" << trimResult.readsAnalyzed
@@ -1152,23 +1402,37 @@ int main(int argInN, char *argIn[])
                         exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_RUNTIME, P);
                     }
 
-                    P.quant.slam.autoTrim5p = trimResult.trim5p;
-                    P.quant.slam.autoTrim3p = trimResult.trim3p;
-                    P.quant.slam.autoTrimComputed = true;
+                    P.quant.slam.autoTrim5p[0] = trimResult.mates[0].trim5p;
+                    P.quant.slam.autoTrim3p[0] = trimResult.mates[0].trim3p;
+                    if (mateLen1 > 0 && P.quant.slam.autoTrimPerMate) {
+                        P.quant.slam.autoTrim5p[1] = trimResult.mates[1].trim5p;
+                        P.quant.slam.autoTrim3p[1] = trimResult.mates[1].trim3p;
+                    } else {
+                        P.quant.slam.autoTrim5p[1] = P.quant.slam.autoTrim5p[0];
+                        P.quant.slam.autoTrim3p[1] = P.quant.slam.autoTrim3p[0];
+                    }
+
+                    P.quant.slam.compatTrim5p[0] = P.quant.slam.autoTrim5p[0];
+                    P.quant.slam.compatTrim5p[1] = P.quant.slam.autoTrim5p[1];
+                    P.quant.slam.compatTrim3p[0] = P.quant.slam.autoTrim3p[0];
+                    P.quant.slam.compatTrim3p[1] = P.quant.slam.autoTrim3p[1];
+
+                    P.quant.slam.autoTrimComputed[0] = true;
+                    P.quant.slam.autoTrimComputed[1] = (mateLen1 > 0 && P.quant.slam.autoTrimPerMate);
+
+                    trim5p_for_err[0] = P.quant.slam.compatTrim5p[0];
+                    trim5p_for_err[1] = P.quant.slam.compatTrim5p[1];
+                    trim3p_for_err[0] = P.quant.slam.compatTrim3p[0];
+                    trim3p_for_err[1] = P.quant.slam.compatTrim3p[1];
+                    trimComputed = true;
                     P.quant.slam.autoTrimFileIndex = 0;
 
-                    // Update manual trim settings so SlamCompat uses them
-                    P.quant.slam.compatTrim5p = trimResult.trim5p;
-                    P.quant.slam.compatTrim3p = trimResult.trim3p;
-
-                    trim5p_for_err = trimResult.trim5p;
-                    trim3p_for_err = trimResult.trim3p;
-                    trimComputed = true;
-
                     P.inOut->logMain << "SLAM auto-trim (segmented regression) computed:\n"
-                                     << "    trim5p=" << trimResult.trim5p
-                                     << " trim3p=" << trimResult.trim3p
-                                     << " mode=" << trimResult.mode << "\n"
+                                     << "    trim5p_m1=" << trimResult.mates[0].trim5p
+                                     << " trim3p_m1=" << trimResult.mates[0].trim3p
+                                     << " trim5p_m2=" << trimResult.mates[1].trim5p
+                                     << " trim3p_m2=" << trimResult.mates[1].trim3p << " mode=" << trimResult.mode
+                                     << "\n"
                                      << "    breakpoints: b1=" << trimResult.kneeBin5p
                                      << " b2=" << trimResult.kneeBin3p
                                      << " total_sse=" << trimResult.totalSSE << "\n"
@@ -1182,10 +1446,14 @@ int main(int argInN, char *argIn[])
                                      << "    trim_source=" << trimSourcePath
                                      << (usingTrimSource ? " (--trimSource)" : " (first input)") << "\n";
                 }
-                
-                // Compute error rate: use trimmed window if trims were computed, otherwise full window
-                std::tie(t_total, tc_total, p_est) = analyzer->computeGlobalTcErrorRate(
-                    trim5p_for_err, trim3p_for_err, readLength);
+
+                if (analyzer->separateMateHistograms() && mateLen1 > 0) {
+                    std::tie(t_total, tc_total, p_est) = analyzer->computeGlobalTcErrorRatePerMate(
+                        trim5p_for_err, trim3p_for_err, mateLen0, mateLen1);
+                } else {
+                    std::tie(t_total, tc_total, p_est) = analyzer->computeGlobalTcErrorRate(
+                        trim5p_for_err[0], trim3p_for_err[0], readLengthConcat);
+                }
                 P.quant.slam.snpErrEst = p_est;
                 
                 // Apply fallback threshold
@@ -1231,7 +1499,9 @@ int main(int argInN, char *argIn[])
                 
                 // Cache variance curve for comprehensive QC (detection pass)
                 if (analyzer != nullptr) {
-                    const auto& vstats = analyzer->getStats();
+                    P.quant.slam.varianceStddevTcRateMate2.clear();
+                    const auto& vstats =
+                        analyzer->separateMateHistograms() ? analyzer->getStats(0) : analyzer->getStats();
                     uint32_t maxPos = 0;
                     for (const auto& kv : vstats) {
                         if (kv.first > maxPos) {
@@ -1242,8 +1512,23 @@ int main(int argInN, char *argIn[])
                     for (const auto& kv : vstats) {
                         P.quant.slam.varianceStddevTcRate[kv.first] = kv.second.stddevTcRate();
                     }
+                    if (analyzer->separateMateHistograms()) {
+                        const auto& v2 = analyzer->getStats(1);
+                        uint32_t maxP2 = 0;
+                        for (const auto& kv : v2) {
+                            if (kv.first > maxP2) {
+                                maxP2 = kv.first;
+                            }
+                        }
+                        P.quant.slam.varianceStddevTcRateMate2.assign(maxP2 + 1,
+                                                                      std::numeric_limits<double>::quiet_NaN());
+                        for (const auto& kv : v2) {
+                            P.quant.slam.varianceStddevTcRateMate2[kv.first] = kv.second.stddevTcRate();
+                        }
+                    }
                 } else {
                     P.quant.slam.varianceStddevTcRate.clear();
+                    P.quant.slam.varianceStddevTcRateMate2.clear();
                 }
 
                 // Write QC outputs (always write if analyzer exists, even when trim detection fails)
@@ -1254,12 +1539,14 @@ int main(int argInN, char *argIn[])
                     }
                     // For stats-only mode or failed trim detection, pass null trimResult
                     const SlamVarianceTrimResult* trimResultPtr = trimComputed ? &trimResult : nullptr;
-                    int trim5p_val = trimComputed ? trimResult.trim5p : trim5p_for_err;
-                    int trim3p_val = trimComputed ? trimResult.trim3p : trim3p_for_err;
+                    int trim5p_m1 = trimComputed ? trimResult.mates[0].trim5p : trim5p_for_err[0];
+                    int trim3p_m1 = trimComputed ? trimResult.mates[0].trim3p : trim3p_for_err[0];
+                    int trim5p_m2 = trimComputed ? trimResult.mates[1].trim5p : trim5p_for_err[1];
+                    int trim3p_m2 = trimComputed ? trimResult.mates[1].trim3p : trim3p_for_err[1];
                     uint64_t readsAnalyzed_val = trimComputed ? trimResult.readsAnalyzed : analyzer->readsAnalyzed();
-                    bool writeResult = writeSlamQcJson(*analyzer, qcJsonPath, 
+                    bool writeResult = writeSlamQcJson(*analyzer, qcJsonPath,
                                         P.quant.slam.autoTrimFileIndex, P.quant.slam.trimScope,
-                                        trim5p_val, trim3p_val, readsAnalyzed_val, trimResultPtr,
+                                        trim5p_m1, trim3p_m1, trim5p_m2, trim3p_m2, readsAnalyzed_val, trimResultPtr,
                                         trimSourcePath,
                                         P.quant.slam.snpErrEst, P.quant.slam.snpErrUsed, P.quant.slam.snpErrFallbackReason);
                     if (writeResult) {
@@ -1275,7 +1562,8 @@ int main(int argInN, char *argIn[])
                     }
                 }
             }
-        
+        }
+
         // Clean up detection RAchunk
         delete RAdetect;
         
@@ -1310,10 +1598,11 @@ int main(int argInN, char *argIn[])
         g_statsAll.timeLastReport = g_statsAll.timeStartMap;
         
         const bool usingBlankForQuant = (P.batchMode && P.quant.slam.batchBlankProcessed && !P.quant.slam.errorRateFromBlank);
-        if (P.quant.slam.autoTrimComputed) {
+        if (P.quant.slam.autoTrimComputed[0]) {
             P.inOut->logMain << timeMonthDayTime() << " ..... finished SLAM stats collection (trims computed)\n" << flush;
             *P.inOut->logStdOut << timeMonthDayTime() << " ..... finished SLAM stats collection (QC), "
-                               << "trim5p=" << P.quant.slam.autoTrim5p << " trim3p=" << P.quant.slam.autoTrim3p
+                               << "trim5p_m1=" << P.quant.slam.autoTrim5p[0] << " trim3p_m1=" << P.quant.slam.autoTrim3p[0]
+                               << " trim5p_m2=" << P.quant.slam.autoTrim5p[1] << " trim3p_m2=" << P.quant.slam.autoTrim3p[1]
                                << " snp_err_used(QC-only)=" << std::fixed << std::setprecision(6) << P.quant.slam.snpErrUsed;
             if (usingBlankForQuant) {
                 *P.inOut->logStdOut << " ; slamErrorRate(used)=" << std::fixed << std::setprecision(6)
@@ -1396,7 +1685,8 @@ int main(int argInN, char *argIn[])
             
             P.quant.slam.skipToFileIndex = fileIdx;  // Skip to target file
             P.quant.slam.autoTrimDetectionPass = true;
-            P.quant.slam.autoTrimComputed = false;  // Reset for this file
+            P.quant.slam.autoTrimComputed[0] = false;   // Reset for this file
+            P.quant.slam.autoTrimComputed[1] = false;
             P.runThreadN = 1;  // Single-threaded for detection
             P.readMapNumber = static_cast<uint64_t>(P.quant.slam.autoTrimDetectionReads);
             
@@ -1411,63 +1701,87 @@ int main(int argInN, char *argIn[])
             
             // Compute trims and global error rate from variance stats
             if (RAdetect->slamQuant != nullptr && RAdetect->slamQuant->varianceAnalysisEnabled()) {
-                uint32_t readLength = 100;
+                uint32_t mateLen0 = 100;
+                uint32_t mateLen1 = 0;
                 if (RAdetect->RA != nullptr && RAdetect->RA->readLength[0] > 0) {
-                    readLength = static_cast<uint32_t>(RAdetect->RA->readLength[0] + RAdetect->RA->readLength[1]);
+                    mateLen0 = static_cast<uint32_t>(RAdetect->RA->readLength[0]);
+                    mateLen1 = static_cast<uint32_t>(RAdetect->RA->readLength[1]);
                 }
-                
+                const uint32_t readLengthConcat = mateLen0 + mateLen1;
+
                 const SlamVarianceAnalyzer* analyzer = RAdetect->slamQuant->varianceAnalyzer();
+
                 uint64_t t_total = 0, tc_total = 0;
                 double p_est = 0.0;
-                // Initialize trim windows from manual trims (will be updated if auto-trim succeeds)
-                int trim5p_for_err = P.quant.slam.compatTrim5p;
-                int trim3p_for_err = P.quant.slam.compatTrim3p;
-            
-            // Compute trims first (if auto-trim enabled, not stats-only)
-            SlamVarianceTrimResult trimResult;
-            bool trimComputed = false;
-            
-            if (P.quant.slam.autoTrimMode == "variance") {
-                trimResult = RAdetect->slamQuant->computeVarianceTrim(readLength);
+                int trim5p_for_err[2] = {P.quant.slam.compatTrim5p[0], P.quant.slam.compatTrim5p[1]};
+                int trim3p_for_err[2] = {P.quant.slam.compatTrim3p[0], P.quant.slam.compatTrim3p[1]};
 
-                if (!trimResult.success || trimResult.readsAnalyzed < static_cast<uint64_t>(P.quant.slam.autoTrimMinReads)) {
-                    ostringstream errOut;
-                    errOut << "EXITING because of FATAL ERROR: --autoTrim variance requested but insufficient stdev data to compute trims.\n"
-                           << "DETAILS: file_index=" << fileIdx
-                           << " reads_analyzed=" << trimResult.readsAnalyzed
-                           << " min_reads=" << P.quant.slam.autoTrimMinReads << "\n"
-                           << "SOLUTION: increase --autoTrimDetectionReads/--autoTrimMinReads, "
-                           << "or ensure the detection pass collects T->C stdev data.\n";
-                    exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_RUNTIME, P);
-                }
+                SlamVarianceTrimResult trimResult;
+                bool trimComputed = false;
 
-                P.quant.slam.autoTrim5p = trimResult.trim5p;
-                P.quant.slam.autoTrim3p = trimResult.trim3p;
-                P.quant.slam.autoTrimComputed = true;
-                P.quant.slam.autoTrimFileIndex = fileIdx;
-                P.quant.slam.compatTrim5p = trimResult.trim5p;
-                P.quant.slam.compatTrim3p = trimResult.trim3p;
-
-                trim5p_for_err = trimResult.trim5p;
-                trim3p_for_err = trimResult.trim3p;
-                trimComputed = true;
-
-                P.inOut->logMain << "SLAM auto-trim (file " << fileIdx << ", segmented regression):\n"
-                                 << "    trim5p=" << trimResult.trim5p
-                                 << " trim3p=" << trimResult.trim3p
-                                 << " mode=" << trimResult.mode << "\n"
-                                 << "    breakpoints: b1=" << trimResult.kneeBin5p
-                                 << " b2=" << trimResult.kneeBin3p
-                                 << " total_sse=" << trimResult.totalSSE << "\n"
-                                 << "    reads_analyzed=" << trimResult.readsAnalyzed << "\n";
-            }
-                
-                // Compute error rate: use trimmed window if trims were computed, otherwise full window
                 if (analyzer != nullptr) {
-                    std::tie(t_total, tc_total, p_est) = analyzer->computeGlobalTcErrorRate(
-                        trim5p_for_err, trim3p_for_err, readLength);
+                    if (P.quant.slam.autoTrimMode == "variance") {
+                        trimResult = RAdetect->slamQuant->computeVarianceTrim(readLengthConcat, mateLen0, mateLen1);
+
+                        if (!trimResult.success ||
+                            trimResult.readsAnalyzed < static_cast<uint64_t>(P.quant.slam.autoTrimMinReads)) {
+                            ostringstream errOut;
+                            errOut << "EXITING because of FATAL ERROR: --autoTrim variance requested but insufficient stdev data to compute trims.\n"
+                                   << "DETAILS: file_index=" << fileIdx
+                                   << " reads_analyzed=" << trimResult.readsAnalyzed
+                                   << " min_reads=" << P.quant.slam.autoTrimMinReads << "\n"
+                                   << "SOLUTION: increase --autoTrimDetectionReads/--autoTrimMinReads, "
+                                   << "or ensure the detection pass collects T->C stdev data.\n";
+                            exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_RUNTIME, P);
+                        }
+
+                        P.quant.slam.autoTrim5p[0] = trimResult.mates[0].trim5p;
+                        P.quant.slam.autoTrim3p[0] = trimResult.mates[0].trim3p;
+                        if (mateLen1 > 0 && P.quant.slam.autoTrimPerMate) {
+                            P.quant.slam.autoTrim5p[1] = trimResult.mates[1].trim5p;
+                            P.quant.slam.autoTrim3p[1] = trimResult.mates[1].trim3p;
+                        } else {
+                            P.quant.slam.autoTrim5p[1] = P.quant.slam.autoTrim5p[0];
+                            P.quant.slam.autoTrim3p[1] = P.quant.slam.autoTrim3p[0];
+                        }
+
+                        P.quant.slam.compatTrim5p[0] = P.quant.slam.autoTrim5p[0];
+                        P.quant.slam.compatTrim5p[1] = P.quant.slam.autoTrim5p[1];
+                        P.quant.slam.compatTrim3p[0] = P.quant.slam.autoTrim3p[0];
+                        P.quant.slam.compatTrim3p[1] = P.quant.slam.autoTrim3p[1];
+
+                        P.quant.slam.autoTrimComputed[0] = true;
+                        P.quant.slam.autoTrimComputed[1] = (mateLen1 > 0 && P.quant.slam.autoTrimPerMate);
+
+                        trim5p_for_err[0] = P.quant.slam.compatTrim5p[0];
+                        trim5p_for_err[1] = P.quant.slam.compatTrim5p[1];
+                        trim3p_for_err[0] = P.quant.slam.compatTrim3p[0];
+                        trim3p_for_err[1] = P.quant.slam.compatTrim3p[1];
+                        trimComputed = true;
+                        P.quant.slam.autoTrimFileIndex = fileIdx;
+
+                        P.inOut->logMain << "SLAM auto-trim (file " << fileIdx << ", segmented regression):\n"
+                                         << "    trim5p_m1=" << trimResult.mates[0].trim5p
+                                         << " trim3p_m1=" << trimResult.mates[0].trim3p
+                                         << " trim5p_m2=" << trimResult.mates[1].trim5p
+                                         << " trim3p_m2=" << trimResult.mates[1].trim3p
+                                         << " mode=" << trimResult.mode << "\n"
+                                         << "    breakpoints: b1=" << trimResult.kneeBin5p
+                                         << " b2=" << trimResult.kneeBin3p
+                                         << " total_sse=" << trimResult.totalSSE << "\n"
+                                         << "    reads_analyzed=" << trimResult.readsAnalyzed
+                                         << " detection_reads_processed=" << detectionReadsProcessed << "\n";
+                    }
+
+                    if (analyzer->separateMateHistograms() && mateLen1 > 0) {
+                        std::tie(t_total, tc_total, p_est) = analyzer->computeGlobalTcErrorRatePerMate(
+                            trim5p_for_err, trim3p_for_err, mateLen0, mateLen1);
+                    } else {
+                        std::tie(t_total, tc_total, p_est) = analyzer->computeGlobalTcErrorRate(
+                            trim5p_for_err[0], trim3p_for_err[0], readLengthConcat);
+                    }
                     P.quant.slam.snpErrEst = p_est;
-                    
+
                     // Apply fallback threshold
                     if (p_est >= P.quant.slam.snpErrMinThreshold) {
                         P.quant.slam.snpErrUsed = p_est;
@@ -1476,7 +1790,7 @@ int main(int argInN, char *argIn[])
                         P.quant.slam.snpErrUsed = P.quant.slam.snpErrMinThreshold;
                         P.quant.slam.snpErrFallbackReason = "p_est < threshold";
                     }
-                    
+
                     P.inOut->logMain << "SLAM global T→C error rate (file " << fileIdx;
                     if (trimComputed) {
                         P.inOut->logMain << ", trimmed window";
@@ -1489,54 +1803,66 @@ int main(int argInN, char *argIn[])
                         P.inOut->logMain << " (fallback: " << P.quant.slam.snpErrFallbackReason << ")";
                     }
                     P.inOut->logMain << "\n";
-                    
+
                     // Cache variance curve for comprehensive QC (per-file detection pass)
-                    if (analyzer != nullptr) {
-                        const auto& vstats = analyzer->getStats();
-                        uint32_t maxPos = 0;
-                        for (const auto& kv : vstats) {
-                            if (kv.first > maxPos) {
-                                maxPos = kv.first;
+                    P.quant.slam.varianceStddevTcRateMate2.clear();
+                    const auto& vstats =
+                        analyzer->separateMateHistograms() ? analyzer->getStats(0) : analyzer->getStats();
+                    uint32_t maxPos = 0;
+                    for (const auto& kv : vstats) {
+                        if (kv.first > maxPos) {
+                            maxPos = kv.first;
+                        }
+                    }
+                    P.quant.slam.varianceStddevTcRate.assign(maxPos + 1, std::numeric_limits<double>::quiet_NaN());
+                    for (const auto& kv : vstats) {
+                        P.quant.slam.varianceStddevTcRate[kv.first] = kv.second.stddevTcRate();
+                    }
+                    if (analyzer->separateMateHistograms()) {
+                        const auto& v2 = analyzer->getStats(1);
+                        uint32_t maxP2 = 0;
+                        for (const auto& kv : v2) {
+                            if (kv.first > maxP2) {
+                                maxP2 = kv.first;
                             }
                         }
-                        P.quant.slam.varianceStddevTcRate.assign(maxPos + 1, std::numeric_limits<double>::quiet_NaN());
-                        for (const auto& kv : vstats) {
-                            P.quant.slam.varianceStddevTcRate[kv.first] = kv.second.stddevTcRate();
+                        P.quant.slam.varianceStddevTcRateMate2.assign(maxP2 + 1,
+                                                                      std::numeric_limits<double>::quiet_NaN());
+                        for (const auto& kv : v2) {
+                            P.quant.slam.varianceStddevTcRateMate2[kv.first] = kv.second.stddevTcRate();
                         }
-                    } else {
-                        P.quant.slam.varianceStddevTcRate.clear();
                     }
 
                     // Write per-file QC outputs (always write if analyzer exists)
-                    if (analyzer != nullptr) {
-                        std::string qcJsonPath = P.quant.slam.slamQcJson;
-                        if (qcJsonPath.empty() || qcJsonPath == "-") {
-                            qcJsonPath = P.outFileNamePrefix + "slam_qc_file" + std::to_string(fileIdx) + ".json";
-                        } else if (P.quant.slam.totalFileCount > 1) {
-                            // Append file index to user-specified path
-                            size_t dotPos = qcJsonPath.rfind('.');
-                            if (dotPos != std::string::npos) {
-                                qcJsonPath = qcJsonPath.substr(0, dotPos) + "_file" + std::to_string(fileIdx) + qcJsonPath.substr(dotPos);
-                            }
+                    std::string qcJsonPath = P.quant.slam.slamQcJson;
+                    if (qcJsonPath.empty() || qcJsonPath == "-") {
+                        qcJsonPath = P.outFileNamePrefix + "slam_qc_file" + std::to_string(fileIdx) + ".json";
+                    } else if (P.quant.slam.totalFileCount > 1) {
+                        // Append file index to user-specified path
+                        size_t dotPos = qcJsonPath.rfind('.');
+                        if (dotPos != std::string::npos) {
+                            qcJsonPath = qcJsonPath.substr(0, dotPos) + "_file" + std::to_string(fileIdx) + qcJsonPath.substr(dotPos);
                         }
-                        // For per-file mode, each file is its own trim source
-                        std::string perFileTrimSource = P.readFilesNames[0].size() > static_cast<size_t>(fileIdx) ? 
-                            P.readFilesNames[0][fileIdx] : "";
-                        // For stats-only mode or failed trim detection, pass null trimResult
-                        const SlamVarianceTrimResult* trimResultPtr = trimComputed ? &trimResult : nullptr;
-                        int trim5p_val = trimComputed ? trimResult.trim5p : trim5p_for_err;
-                        int trim3p_val = trimComputed ? trimResult.trim3p : trim3p_for_err;
-                        uint64_t readsAnalyzed_val = trimComputed ? trimResult.readsAnalyzed : analyzer->readsAnalyzed();
-                        if (writeSlamQcJson(*analyzer, qcJsonPath, fileIdx, P.quant.slam.trimScope,
-                                            trim5p_val, trim3p_val, readsAnalyzed_val, trimResultPtr,
-                                            perFileTrimSource,
-                                            P.quant.slam.snpErrEst, P.quant.slam.snpErrUsed, P.quant.slam.snpErrFallbackReason)) {
-                            P.inOut->logMain << "SLAM QC JSON written to: " << qcJsonPath << "\n";
-                        }
+                    }
+                    // For per-file mode, each file is its own trim source
+                    std::string perFileTrimSource = P.readFilesNames[0].size() > static_cast<size_t>(fileIdx)
+                                                        ? P.readFilesNames[0][fileIdx]
+                                                        : "";
+                    const SlamVarianceTrimResult* trimResultPtr = trimComputed ? &trimResult : nullptr;
+                    int trim5p_m1 = trimComputed ? trimResult.mates[0].trim5p : trim5p_for_err[0];
+                    int trim3p_m1 = trimComputed ? trimResult.mates[0].trim3p : trim3p_for_err[0];
+                    int trim5p_m2 = trimComputed ? trimResult.mates[1].trim5p : trim5p_for_err[1];
+                    int trim3p_m2 = trimComputed ? trimResult.mates[1].trim3p : trim3p_for_err[1];
+                    uint64_t readsAnalyzed_val = trimComputed ? trimResult.readsAnalyzed : analyzer->readsAnalyzed();
+                    if (writeSlamQcJson(*analyzer, qcJsonPath, fileIdx, P.quant.slam.trimScope,
+                                        trim5p_m1, trim3p_m1, trim5p_m2, trim3p_m2, readsAnalyzed_val, trimResultPtr,
+                                        perFileTrimSource,
+                                        P.quant.slam.snpErrEst, P.quant.slam.snpErrUsed,
+                                        P.quant.slam.snpErrFallbackReason)) {
+                        P.inOut->logMain << "SLAM QC JSON written to: " << qcJsonPath << "\n";
                     }
                 }
             }
-            
             delete RAdetect;
             P.quant.slam.autoTrimDetectionPass = false;
             
@@ -1552,9 +1878,11 @@ int main(int argInN, char *argIn[])
             }
             
             // --- PHASE 2: Rewind to start of this file and map ---
-            P.inOut->logMain << timeMonthDayTime() << " ..... mapping phase for file " << fileIdx 
-                             << " with trim5p=" << P.quant.slam.compatTrim5p 
-                             << " trim3p=" << P.quant.slam.compatTrim3p << "\n";
+            P.inOut->logMain << timeMonthDayTime() << " ..... mapping phase for file " << fileIdx
+                             << " with trim5p_m1=" << P.quant.slam.compatTrim5p[0]
+                             << " trim3p_m1=" << P.quant.slam.compatTrim3p[0]
+                             << " trim5p_m2=" << P.quant.slam.compatTrim5p[1]
+                             << " trim3p_m2=" << P.quant.slam.compatTrim3p[1] << "\n";
             
             // Rewind to start of files and skip to target file
             P.closeReadsFiles();
@@ -1573,7 +1901,8 @@ int main(int argInN, char *argIn[])
             // Reinitialize SlamCompat for all threads with new trims
             for (int ii = 0; ii < P.runThreadN; ii++) {
                 if (RAchunk[ii] != nullptr) {
-                    RAchunk[ii]->reinitSlamCompat(P.quant.slam.compatTrim5p, P.quant.slam.compatTrim3p);
+                    RAchunk[ii]->reinitSlamCompat(P.quant.slam.compatTrim5p[0], P.quant.slam.compatTrim3p[0],
+                                                  P.quant.slam.compatTrim5p[1], P.quant.slam.compatTrim3p[1]);
                 }
             }
             
@@ -1602,22 +1931,8 @@ int main(int argInN, char *argIn[])
         perFileMappingDone = true;
     }
 
-    // prepare chunks and spawn mapping threads (skip if per-file already handled mapping)
-    if (!perFileMappingDone) {
-        if (RAchunk == nullptr) {
-            RAchunk = new ReadAlignChunk*[P.runThreadN];
-            for (int ii = 0; ii < P.runThreadN; ii++) {
-                RAchunk[ii] = nullptr;
-            }
-        }
-        for (int ii = 0; ii < P.runThreadN; ii++) {
-            RAchunk[ii] = new ReadAlignChunk(P, genomeMain, transcriptomeMain, ii, 
-                                             libem_transcriptome.get());  // Pass shared transcriptome
-        }
-    }
-
     // === LIBRARY FORMAT DETECTION (single-threaded) ===
-    if (P.quant.transcriptVB.yes && P.quant.transcriptVB.libType == "A") {
+    if (!perFileMappingDone && P.quant.transcriptVB.yes && P.quant.transcriptVB.libType == "A") {
         P.inOut->logMain << "Starting library format auto-detection "
                          << "(first " << P.quant.transcriptVB.autoDetectWindow 
                          << " reads)...\n" << flush;
@@ -1629,20 +1944,51 @@ int main(int argInN, char *argIn[])
         // Set detection mode BEFORE processing
         P.quant.transcriptVB.inDetectionMode = true;
         
-        // Temporarily set read limit to detection window
+        // Temporarily set read limit to detection window and suppress all
+        // output side effects from the detector chunk. The detector pass only
+        // votes on library format; the main pass below replays the reads from
+        // the beginning with the detected format applied.
         uint64_t originalLimit = P.readMapNumber;
+        int originalRunThreadN = P.runThreadN;
+        bool originalOutSAMbool = P.outSAMbool;
+        bool originalOutBAMunsorted = P.outBAMunsorted;
+        bool originalOutBAMcoord = P.outBAMcoord;
+        bool originalOutSJyes = P.outSJ.yes;
+        bool originalTrSAMBamYes = P.quant.trSAM.bamYes;
+        string originalOutReadsUnmapped = P.outReadsUnmapped;
+        bool originalEmitYReadNames = P.emitYReadNamesyes;
+        bool originalEmitYNoYFastq = P.emitYNoYFastqyes;
+
+        P.runThreadN = 1;
         P.readMapNumber = P.quant.transcriptVB.autoDetectWindow;
+        P.outSAMbool = false;
+        P.outBAMunsorted = false;
+        P.outBAMcoord = false;
+        P.outSJ.yes = false;
+        P.quant.trSAM.bamYes = false;
+        P.outReadsUnmapped = "None";
+        P.emitYReadNamesyes = false;
+        P.emitYNoYFastqyes = false;
+
+        ReadAlignChunk *RAdetect = new ReadAlignChunk(P, genomeMain, transcriptomeMain, 0,
+                                                       libem_transcriptome.get());
+        RAdetect->processChunks();
+        delete RAdetect;
         
-        // Process first N reads using RAchunk[0] single-threaded
-        // Voting happens INSIDE addReadAlignments() when inDetectionMode=true
-        // NOTE: If total reads <= autoDetectWindow, RAchunk[0] will process all reads here
-        // and then mapThreadsSpawn() will run again on RAchunk[0] with no remaining reads.
-        // This is fine for datasets larger than autoDetectWindow, but avoid very small
-        // read counts with auto-detect enabled to prevent potential duplicate output.
-        RAchunk[0]->processChunks();
-        
-        // Restore original limit
+        uint64_t detectionReadsProcessed = P.iReadAll;
+
+        // Restore original mapping/output settings before finalizing and
+        // rewinding for the real mapping pass.
         P.readMapNumber = originalLimit;
+        P.runThreadN = originalRunThreadN;
+        P.outSAMbool = originalOutSAMbool;
+        P.outBAMunsorted = originalOutBAMunsorted;
+        P.outBAMcoord = originalOutBAMcoord;
+        P.outSJ.yes = originalOutSJyes;
+        P.quant.trSAM.bamYes = originalTrSAMBamYes;
+        P.outReadsUnmapped = originalOutReadsUnmapped;
+        P.emitYReadNamesyes = originalEmitYReadNames;
+        P.emitYNoYFastqyes = originalEmitYNoYFastq;
         
         // Finalize detection - HARD FAILURE if ambiguous (exits before returning)
         LibraryFormat detected = P.quant.transcriptVB.libFormatDetector->finalizeOrFail(
@@ -1656,11 +2002,24 @@ int main(int argInN, char *argIn[])
         // formatName() is defined in LibFormatDetection.h (see Section 9)
         P.inOut->logMain << "Detected library format: " << formatName(detected)
                          << " (formatID=" << static_cast<int>(detected.typeId()) << ")"
-                         << " from " << P.iReadAll << " reads\n" << flush;
+                         << " from " << detectionReadsProcessed << " reads\n" << flush;
         
         // Clean up detector (no longer needed)
         delete P.quant.transcriptVB.libFormatDetector;
         P.quant.transcriptVB.libFormatDetector = nullptr;
+
+        P.inOut->logMain << "TranscriptVB auto-detection: rewinding input files for main mapping pass\n"
+                         << flush;
+        P.closeReadsFiles();
+        P.iReadAll = 0;
+        g_threadChunks.chunkInN = 0;
+        g_threadChunks.chunkOutN = 0;
+        P.readFilesIndex = 0;
+        g_bamRecordIndex.store(0);
+        P.openReadsFiles();
+        g_statsAll.resetN();
+        time(&g_statsAll.timeStartMap);
+        g_statsAll.timeLastReport = g_statsAll.timeStartMap;
         
         // Reset global counters after detection completes
         // This ensures pre-burn-in gating starts fresh for the main mapping pass (matches Salmon's behavior)
@@ -1669,10 +2028,48 @@ int main(int argInN, char *argIn[])
         Parameters::global_fld_obs_count.store(0, std::memory_order_relaxed);
     }
 
-    if (P.runRestart.type != 1 && !perFileMappingDone)
-        mapThreadsSpawn(P, RAchunk);
+    // prepare chunks and spawn mapping threads (skip if per-file already handled mapping).
+    // TranscriptVB chunks must be constructed after auto-detection so their
+    // per-thread quantizers inherit the detected library format.
+    if (!perFileMappingDone) {
+        if (RAchunk == nullptr) {
+            RAchunk = new ReadAlignChunk*[P.runThreadN];
+            for (int ii = 0; ii < P.runThreadN; ii++) {
+                RAchunk[ii] = nullptr;
+            }
+        }
+        for (int ii = 0; ii < P.runThreadN; ii++) {
+            RAchunk[ii] = new ReadAlignChunk(P, genomeMain, transcriptomeMain, ii,
+                                             libem_transcriptome.get());  // Pass shared transcriptome
+        }
+    }
 
-    if (P.outFilterBySJoutStage == 1 && !perFileMappingDone)
+    const bool bridgeReplaySkipMapping = solo_bridge_hash_snapshot::replaySkipReadsEnabled(P);
+    bool cbqYNoYWriterOpened = false;
+
+    if (bridgeReplaySkipMapping) {
+        P.inOut->logMain << timeMonthDayTime() << " ..... inline-hash snapshot replay: skipping entire mapping phase\n" << flush;
+        *P.inOut->logStdOut << timeMonthDayTime() << " ..... inline-hash snapshot replay: skipping entire mapping phase\n" << flush;
+        P.closeReadsFiles();
+    } else if (P.runRestart.type != 1 && !perFileMappingDone) {
+        if (P.emitYNoYCbqyes) {
+            std::string cbqWriterError;
+            if (!star::input::openGlobalCbqYNoYWriter(P, &cbqWriterError)) {
+                ostringstream errOut;
+                errOut << "EXITING because of fatal OUTPUT ERROR: could not create Y/noY CBQ output files\n";
+                if (!cbqWriterError.empty()) {
+                    errOut << cbqWriterError << "\n";
+                }
+                exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
+            }
+            cbqYNoYWriterOpened = true;
+            P.inOut->logMain << "Y/noY CBQ output: Y=" << P.outYCbqFile
+                             << " noY=" << P.outNoYCbqFile << "\n" << flush;
+        }
+        mapThreadsSpawn(P, RAchunk);
+    }
+
+    if (!bridgeReplaySkipMapping && P.outFilterBySJoutStage == 1 && !perFileMappingDone)
     { // completed stage 1, go to stage 2
         P.inOut->logMain << "Completed stage 1 mapping of outFilterBySJout mapping\n"
                          << flush;
@@ -1690,6 +2087,31 @@ int main(int argInN, char *argIn[])
 
         mapThreadsSpawn(P, RAchunk);
     };
+
+    if (cbqYNoYWriterOpened) {
+        std::string cbqWriterError;
+        if (!star::input::finishGlobalCbqYNoYWriter(&cbqWriterError)) {
+            ostringstream errOut;
+            errOut << "EXITING because of fatal OUTPUT ERROR: could not finalize Y/noY CBQ output files\n";
+            if (!cbqWriterError.empty()) {
+                errOut << cbqWriterError << "\n";
+            }
+            exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
+        }
+    }
+
+    if (spatialFeatureWriter) {
+        std::string sidecarError;
+        if (!spatialFeatureWriter->finalize(P.iReadAll, sidecarError)) {
+            exitWithError("EXITING because the spatial feature sidecar could not be finalized: "
+                              + sidecarError + "\n",
+                          std::cerr, P.inOut->logMain, EXIT_CODE_FILE_WRITE, P);
+        }
+        P.spatialFeatureSidecarWriter = nullptr;
+        P.inOut->logMain << timeMonthDayTime()
+                         << " ..... finalized spatial GeneFull sidecar (reads="
+                         << P.iReadAll << ")\n" << flush;
+    }
 
     // close some BAM files
     if (P.inOut->outBAMfileUnsorted != NULL)
@@ -1742,6 +2164,16 @@ int main(int argInN, char *argIn[])
         P.inOut->logMain << timeMonthDayTime() << " ..... skipping Solo processing (inline replayer already produced MEX)" << endl;
     }
 
+    // Package Velocyto layer outputs into the downstream outs/ MEX contract.
+    if (VelocytoMexWriter::runVelocytoMexMaterialize(P) != 0) {
+        return 1;
+    }
+
+    // OCM per-sample MEX materialization (pool-level GeneFull -> outs/multi + per_sample_outs).
+    if (runOcmMultiMaterialize(P) != 0) {
+        return 1;
+    }
+
     // Finish pf-multi merge/filtering once Solo outputs are available.
     if (!isUnsetToken(P.pfMulti.pfMultiConfig)) {
         if (processPfMultiConfig(P, &soloMain, pfMultiPreload, pfAssignHandle) != 0) {
@@ -1756,9 +2188,9 @@ int main(int argInN, char *argIn[])
     // TranscriptVB segfault on PPARG because transcript quant merges chunk-local EC state
     // after mapping. Audit all downstream RAchunk consumers before broadening this guard.
     // TranscriptVB, SLAM, and trim QC all merge chunk-local state after mapping completes.
-    if (RAchunk != nullptr && !P.outSAMbool && !P.quant.geCount.yes
-        && !P.quant.transcriptVB.yes && !P.quant.slam.yes && !P.trimQcEnabled
-        && !P.emitYReadNamesyes && !P.emitYNoYFastqyes && !batchModeActive) {
+    if (RAchunk != nullptr && !P.outSAMbool && !P.outBAMcoord && !P.quant.geCount.yes
+	        && !P.quant.transcriptVB.yes && !P.quant.slam.yes && !P.trimQcEnabled
+	        && !P.emitYReadNamesyes && !P.emitYNoYFastqyes && !P.emitYNoYCbqyes && !batchModeActive) {
         for (int ichunk = 0; ichunk < P.runThreadN; ++ichunk) {
             delete RAchunk[ichunk];
             RAchunk[ichunk] = nullptr;
@@ -1854,6 +2286,7 @@ int main(int argInN, char *argIn[])
     
     // Finalize unsorted BAM with CB/UB tag injection (if buffered mode was used)
     bamUnsortedWithTags(P, *genomeMain.genomeOut.g, soloMain);
+    closeDirectOcmBamRouter(P);
     
     // Transcript quantification (TranscriptVB mode)
     // TODO: Debug - check if transcriptomeMain is valid
@@ -1877,6 +2310,18 @@ int main(int argInN, char *argIn[])
         *P.inOut->logStdOut << "Merged " << mergedEC.getECTable().n_ecs << " equivalence classes from " << P.runThreadN << " threads\n"
                           << flush;
         P.inOut->logMain << "Merged " << mergedEC.getECTable().n_ecs << " equivalence classes from " << P.runThreadN << " threads\n";
+
+        if (!isUnsetToken(P.quant.transcriptVB.dumpEqFile)) {
+            try {
+                writeTranscriptVBEqDump(P.quant.transcriptVB.dumpEqFile, mergedEC.getECTable(), *transcriptomeMain);
+            } catch (const std::exception& e) {
+                ostringstream errOut;
+                errOut << "EXITING because of fatal OUTPUT ERROR: " << e.what() << "\n";
+                exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
+            }
+            P.inOut->logMain << "TranscriptVB rich EC dump written to: "
+                             << P.quant.transcriptVB.dumpEqFile << "\n";
+        }
         
         // Log drop statistics (per trace plan Step 3)
         P.inOut->logMain << "EC building drop statistics:\n"
@@ -1894,7 +2339,8 @@ int main(int argInN, char *argIn[])
         // Compute effective lengths using FLD (if available) or fallback to mean fragment length
         const FLDAccumulator& observedFLD = mergedEC.getObservedFLD();
         double meanFragLen = 200.0;  // Default fallback
-        bool use_fld = observedFLD.isValid();
+        bool use_eff_len_correction = (P.quant.transcriptVB.effectiveLengthCorrectionInt != 0);
+        bool use_fld = use_eff_len_correction && observedFLD.isValid();
         
         if (use_fld) {
             meanFragLen = observedFLD.getMean();
@@ -1908,18 +2354,22 @@ int main(int argInN, char *argIn[])
                            << ", fragments=" << observedFLD.getTotalFragments() << "\n";
         }
         
+        double observedGCTotal = 0.0;
         // Log GC observations if GC bias is enabled
         if (P.quant.transcriptVB.gcBias) {
             const GCFragModel& observedGC = mergedEC.getObservedGC();
             const auto& gcCounts = observedGC.getCounts();
-            double totalObs = 0.0;
             for (int i = 0; i < 101; i++) {
-                totalObs += gcCounts[i];
+                observedGCTotal += gcCounts[i];
             }
-            if (totalObs > 100) {
-                *P.inOut->logStdOut << "GC bias: collected " << static_cast<uint64_t>(totalObs) << " fragment observations\n"
+            if (!P.quant.transcriptVB.traceFile.empty()) {
+                writeTranscriptVBGCModelDump(P.quant.transcriptVB.traceFile + ".gc_observed.tsv",
+                                             observedGC, observedGCTotal);
+            }
+            if (observedGCTotal > 100) {
+                *P.inOut->logStdOut << "GC bias: collected " << static_cast<uint64_t>(observedGCTotal) << " fragment observations\n"
                                   << flush;
-                P.inOut->logMain << "GC bias: collected " << static_cast<uint64_t>(totalObs) << " fragment observations\n";
+                P.inOut->logMain << "GC bias: collected " << static_cast<uint64_t>(observedGCTotal) << " fragment observations\n";
             }
         }
         
@@ -1927,6 +2377,10 @@ int main(int argInN, char *argIn[])
         std::vector<double> fld_pmf;
         if (use_fld) {
             fld_pmf = observedFLD.getPMF();
+        }
+        if (!P.quant.transcriptVB.traceFile.empty() && !fld_pmf.empty()) {
+            writeTranscriptVBDoubleVectorDump(P.quant.transcriptVB.traceFile + ".fld_pmf.tsv",
+                                             "probability", fld_pmf);
         }
         
         // Build raw_lengths_int vector
@@ -1937,7 +2391,12 @@ int main(int argInN, char *argIn[])
         
         // Compute effective lengths
         std::vector<double> eff_lengths;
-        if (use_fld && !fld_pmf.empty()) {
+        if (!use_eff_len_correction) {
+            eff_lengths.resize(transcriptomeMain->nTr);
+            for (uint i = 0; i < transcriptomeMain->nTr; ++i) {
+                eff_lengths[i] = static_cast<double>(transcriptomeMain->trLen[i]);
+            }
+        } else if (use_fld && !fld_pmf.empty()) {
             // Use EffectiveLengthCalculator via wrapper (avoids Transcriptome conflict)
             eff_lengths = computeEffectiveLengthsFromPMFWrapper(fld_pmf, raw_lengths_int);
         } else {
@@ -1951,21 +2410,44 @@ int main(int argInN, char *argIn[])
                 eff_lengths[i] = effLen;
             }
         }
-        
+
+        bool use_dynamic_gc_bias = false;
+        std::vector<double> observed_gc_counts_101;
+        if (P.quant.transcriptVB.gcBias) {
+            if (observedGCTotal <= 100.0) {
+                P.inOut->logMain << "WARNING: GC bias requested but too few observed GC fragments were collected; "
+                                 << "using FLD-only effective lengths.\n";
+            } else if (!use_fld || fld_pmf.empty()) {
+                P.inOut->logMain << "WARNING: GC bias requested but no valid fragment length distribution is available; "
+                                 << "using FLD-only effective lengths.\n";
+            } else if (libem_transcriptome == nullptr ||
+                       libem_transcriptome->size() < transcriptomeMain->nTr) {
+                P.inOut->logMain << "WARNING: GC bias requested but transcript sequences are unavailable; "
+                                 << "using FLD-only effective lengths.\n";
+            } else {
+                const GCFragModel& observedGC = mergedEC.getObservedGC();
+                const auto& gcCounts = observedGC.getCounts();
+                observed_gc_counts_101.assign(gcCounts.begin(), gcCounts.end());
+                use_dynamic_gc_bias = true;
+                *P.inOut->logStdOut << "GC bias: will update effective lengths dynamically during VB/EM\n"
+                                  << flush;
+                P.inOut->logMain << "GC bias: will update effective lengths dynamically during VB/EM\n";
+            }
+            if (!use_dynamic_gc_bias) {
+                *P.inOut->logStdOut << "GC bias: not applied; using FLD-only effective lengths\n" << flush;
+            }
+        }
+        if (!P.quant.transcriptVB.traceFile.empty()) {
+            writeTranscriptVBEffLenDump(P.quant.transcriptVB.traceFile + ".effective_lengths.initial.tsv",
+                                        *transcriptomeMain, eff_lengths);
+        }
+
         // Populate transcript state
         for (uint i = 0; i < transcriptomeMain->nTr; ++i) {
             state.names[i] = transcriptomeMain->trID[i];
             double rawLen = static_cast<double>(transcriptomeMain->trLen[i]);
             state.lengths[i] = rawLen;
             state.eff_lengths[i] = eff_lengths[i];
-        }
-        
-        // Note: GC-corrected effective lengths would require transcript sequences
-        // For now, FLD-based effective lengths are computed above
-        if (P.quant.transcriptVB.gcBias) {
-            *P.inOut->logStdOut << "GC bias: GC correction requires transcript sequences (not yet implemented)\n"
-                              << flush;
-            P.inOut->logMain << "GC bias: GC correction requires transcript sequences (not yet implemented)\n";
         }
         
         // 4. Run VB/EM quantification
@@ -1976,6 +2458,71 @@ int main(int argInN, char *argIn[])
         // Do NOT override for VB - let VB use same defaults as EM for Salmon parity
         // Thread count: use OMP default unless explicitly set (we'll pass --runThreadN externally for parity tests)
         params.threads = 0;  // 0 = use OMP default (multi-thread capable)
+
+        libem::Transcriptome* libem_txome_for_dynamic_gc = libem_transcriptome.get();
+        if (use_dynamic_gc_bias) {
+            params.effective_length_update =
+                [&, libem_txome_for_dynamic_gc](uint32_t iter,
+                                                TranscriptState& callback_state,
+                                                const std::vector<double>& alpha_counts) -> bool {
+                    DynamicGCEffectiveLengthResult gcResult =
+                        computeDynamicGCBiasedEffectiveLengthsWrapper(
+                            *libem_txome_for_dynamic_gc,
+                            fld_pmf,
+                            raw_lengths_int,
+                            alpha_counts,
+                            callback_state.eff_lengths,
+                            observed_gc_counts_101);
+                    if (!gcResult.applied) {
+                        P.inOut->logMain << "WARNING: GC bias dynamic effective-length update at iteration "
+                                         << iter << " could not be applied; keeping FLD-only lengths.\n";
+                        return false;
+                    }
+
+                    callback_state.eff_lengths.swap(gcResult.effective_lengths);
+
+                    if (!P.quant.transcriptVB.traceFile.empty()) {
+                        writeTranscriptVBDoubleVectorDump(P.quant.transcriptVB.traceFile + ".gc_observed_25.tsv",
+                                                         "probability", gcResult.observed_gc);
+                        writeTranscriptVBDoubleVectorDump(P.quant.transcriptVB.traceFile + ".gc_expected.tsv",
+                                                         "probability", gcResult.expected_gc);
+                        writeTranscriptVBDoubleVectorDump(P.quant.transcriptVB.traceFile + ".gc_bias.tsv",
+                                                         "bias", gcResult.gc_bias);
+                        writeTranscriptVBEffLenDump(P.quant.transcriptVB.traceFile + ".effective_lengths.tsv",
+                                                    *transcriptomeMain, callback_state.eff_lengths);
+                    }
+
+                    double gcBiasMin = gcResult.gc_bias.empty() ? 1.0 : gcResult.gc_bias[0];
+                    double gcBiasMax = gcResult.gc_bias.empty() ? 1.0 : gcResult.gc_bias[0];
+                    int gcBiasMinBin = 0;
+                    int gcBiasMaxBin = 0;
+                    for (size_t ib = 1; ib < gcResult.gc_bias.size(); ++ib) {
+                        if (gcResult.gc_bias[ib] < gcBiasMin) {
+                            gcBiasMin = gcResult.gc_bias[ib];
+                            gcBiasMinBin = static_cast<int>(ib);
+                        }
+                        if (gcResult.gc_bias[ib] > gcBiasMax) {
+                            gcBiasMax = gcResult.gc_bias[ib];
+                            gcBiasMaxBin = static_cast<int>(ib);
+                        }
+                    }
+                    *P.inOut->logStdOut << "GC bias: dynamic update at iteration " << iter
+                                      << " using " << gcResult.background_transcripts
+                                      << " background transcripts; ratio range "
+                                      << gcBiasMin << " (bin " << gcBiasMinBin << ") to "
+                                      << gcBiasMax << " (bin " << gcBiasMaxBin << ")\n"
+                                      << flush;
+                    P.inOut->logMain << "GC bias: dynamic update at iteration " << iter
+                                     << " using " << gcResult.background_transcripts
+                                     << " background transcripts; ratio range "
+                                     << gcBiasMin << " (bin " << gcBiasMinBin << ") to "
+                                     << gcBiasMax << " (bin " << gcBiasMaxBin << ")\n";
+                    return true;
+                };
+        } else if (!P.quant.transcriptVB.traceFile.empty()) {
+            writeTranscriptVBEffLenDump(P.quant.transcriptVB.traceFile + ".effective_lengths.tsv",
+                                        *transcriptomeMain, eff_lengths);
+        }
         
         EMResult result;
         if (params.use_vb) {
@@ -2096,6 +2643,22 @@ int main(int argInN, char *argIn[])
                                       P.quant.slam.vbOverdisp, P.quant.slam.vbOverdispPhi,
                                       P.quant.slam.vbOverdispPriorAlpha, P.quant.slam.vbOverdispPriorBeta);
         }
+        if (P.quant.slam.cbOut != 0) {
+            std::string cbOut = P.quant.slam.cbOutFile.empty()
+                                ? (P.outFileNamePrefix + "SlamQuant.cB.tsv")
+                                : P.quant.slam.cbOutFile;
+            std::string sampleLabel = P.outFileNamePrefixAutoSample.empty()
+                                      ? P.outFileNamePrefix
+                                      : P.outFileNamePrefixAutoSample;
+            if (!mergedSlam.writeCountBinomial(*transcriptomeMain, cbOut, sampleLabel,
+                                               P.quant.slam.cbFormat)) {
+                P.inOut->logMain << "ERROR: Failed to write SLAM count-binomial output: "
+                                 << cbOut << "\n";
+            } else {
+                P.inOut->logMain << "SLAM count-binomial output written to: "
+                                 << cbOut << "\n";
+            }
+        }
 
         const bool wantDump = !P.quant.slam.dumpBinary.empty() && P.quant.slam.dumpBinary != "-" &&
                               P.quant.slam.dumpBinary != "None";
@@ -2108,6 +2671,13 @@ int main(int argInN, char *argIn[])
             meta.weightMode = P.quant.slam.weightMode;
             meta.geneIds = transcriptomeMain->geID;
             meta.geneNames = transcriptomeMain->geName;
+            for (int ichunk = 0; ichunk < P.runThreadN; ++ichunk) {
+                if (RAchunk[ichunk] != nullptr && RAchunk[ichunk]->slamQuant != nullptr &&
+                    !RAchunk[ichunk]->slamQuant->allowedGenes().empty()) {
+                    meta.allowedGenes = RAchunk[ichunk]->slamQuant->allowedGenes();
+                    break;
+                }
+            }
             if (genomeMain.genomeOut.g != nullptr) {
                 meta.chrNames = genomeMain.genomeOut.g->chrName;
                 meta.chrStart.clear();
@@ -2270,19 +2840,22 @@ int main(int argInN, char *argIn[])
                          << diagFile << "\n";
         
         // Log auto-trim summary
-        if (P.quant.slam.autoTrimComputed) {
-            P.inOut->logMain << "SLAM auto-trim applied: trim5p=" << P.quant.slam.autoTrim5p
-                             << " trim3p=" << P.quant.slam.autoTrim3p
+        if (P.quant.slam.autoTrimComputed[0]) {
+            P.inOut->logMain << "SLAM auto-trim applied: trim5p_m1=" << P.quant.slam.autoTrim5p[0]
+                             << " trim3p_m1=" << P.quant.slam.autoTrim3p[0]
+                             << " trim5p_m2=" << P.quant.slam.autoTrim5p[1]
+                             << " trim3p_m2=" << P.quant.slam.autoTrim3p[1]
                              << " scope=" << P.quant.slam.trimScope
                              << " file_index=" << P.quant.slam.autoTrimFileIndex
                              << " mode=rewind\n";
         }
-        
+
         // Log compat mode summary if enabled
         if (P.quant.slam.compatIntronic || P.quant.slam.compatLenientOverlap ||
             P.quant.slam.compatOverlapWeight || P.quant.slam.compatIgnoreOverlap ||
-            P.quant.slam.compatTrim5p != 0 || P.quant.slam.compatTrim3p != 0 ||
-            P.quant.slam.autoTrimComputed) {
+            P.quant.slam.compatTrim5p[0] != 0 || P.quant.slam.compatTrim5p[1] != 0 ||
+            P.quant.slam.compatTrim3p[0] != 0 || P.quant.slam.compatTrim3p[1] != 0 ||
+            P.quant.slam.autoTrimComputed[0] || P.quant.slam.autoTrimComputed[1]) {
             P.inOut->logMain << "SLAM compat(" << P.quant.slam.compatModeStr << "): "
                              << "alignsIntronic=" << mergedSlam.diagnostics().compatAlignsReclassifiedIntronic
                              << " alignsLenient=" << mergedSlam.diagnostics().compatAlignsLenientAccepted
@@ -2306,27 +2879,44 @@ int main(int argInN, char *argIn[])
         if (!P.quant.slam.slamQcReport.empty()) {
             std::string qcJsonPath = P.quant.slam.slamQcReport + ".slam_qc.json";
             std::string qcHtmlPath = P.quant.slam.slamQcReport + ".slam_qc.html";
-            
+            uint32_t mateLen0_qc = 100;
+            uint32_t mateLen1_qc = 0;
+            for (int ichunk = 0; ichunk < P.runThreadN; ++ichunk) {
+                if (RAchunk[ichunk] != nullptr && RAchunk[ichunk]->RA != nullptr &&
+                    RAchunk[ichunk]->RA->readLength[0] > 0) {
+                    mateLen0_qc = static_cast<uint32_t>(RAchunk[ichunk]->RA->readLength[0]);
+                    mateLen1_qc = static_cast<uint32_t>(RAchunk[ichunk]->RA->readLength[1]);
+                    break;
+                }
+            }
+            const uint32_t readLengthConcat_qc = mateLen0_qc + mateLen1_qc;
+
             // Get trim result if available (recompute from merged SlamQuant if variance analysis enabled)
             SlamVarianceTrimResult* trimResultPtr = nullptr;
             SlamVarianceTrimResult trimResult;
-            if (mergedSlam.varianceAnalysisEnabled() && P.quant.slam.autoTrimComputed) {
-                // Use default read length (100) - trim result is optional for QC report
-                uint32_t readLength = 100;
-                trimResult = mergedSlam.computeVarianceTrim(readLength);
+            if (mergedSlam.varianceAnalysisEnabled() && P.quant.slam.autoTrimComputed[0]) {
+                trimResult = mergedSlam.computeVarianceTrim(readLengthConcat_qc, mateLen0_qc, mateLen1_qc);
                 if (trimResult.success) {
                     trimResultPtr = &trimResult;
                 }
             }
-            
-            int trim5p = P.quant.slam.autoTrimComputed ? P.quant.slam.autoTrim5p : 0;
-            int trim3p = P.quant.slam.autoTrimComputed ? P.quant.slam.autoTrim3p : 0;
-            
-            const std::vector<double>* varianceCurve = nullptr;
+
+            int trim5p_m1 = P.quant.slam.autoTrimComputed[0] ? P.quant.slam.autoTrim5p[0] : P.quant.slam.compatTrim5p[0];
+            int trim3p_m1 = P.quant.slam.autoTrimComputed[0] ? P.quant.slam.autoTrim3p[0] : P.quant.slam.compatTrim3p[0];
+            int trim5p_m2 = P.quant.slam.autoTrimComputed[1] ? P.quant.slam.autoTrim5p[1] : P.quant.slam.compatTrim5p[1];
+            int trim3p_m2 = P.quant.slam.autoTrimComputed[1] ? P.quant.slam.autoTrim3p[1] : P.quant.slam.compatTrim3p[1];
+
+            const std::vector<double>* varianceCurve0 = nullptr;
+            const std::vector<double>* varianceCurve1 = nullptr;
             if (!P.quant.slam.varianceStddevTcRate.empty()) {
-                varianceCurve = &P.quant.slam.varianceStddevTcRate;
+                varianceCurve0 = &P.quant.slam.varianceStddevTcRate;
             }
-            if (writeSlamQcComprehensiveJson(mergedSlam, qcJsonPath, trim5p, trim3p, trimResultPtr, varianceCurve)) {
+            if (!P.quant.slam.varianceStddevTcRateMate2.empty()) {
+                varianceCurve1 = &P.quant.slam.varianceStddevTcRateMate2;
+            }
+            if (writeSlamQcComprehensiveJson(mergedSlam, qcJsonPath, trim5p_m1, trim3p_m1, trim5p_m2, trim3p_m2,
+                                            trimResultPtr, varianceCurve0, varianceCurve1, mateLen0_qc,
+                                            mateLen1_qc)) {
                 P.inOut->logMain << "SLAM comprehensive QC JSON written to: " << qcJsonPath << "\n";
                 
                 if (writeSlamQcComprehensiveHtml(qcJsonPath, qcHtmlPath)) {
@@ -2461,8 +3051,6 @@ int main(int argInN, char *argIn[])
 
     ++batchSampleIdx;  // Explicit increment
 
-    }  // closes if(runSlamDetectionPass)
-
     } // =========================================================================
       // END OF WHILE LOOP - closes the batch loop 
       // =========================================================================
@@ -2470,10 +3058,12 @@ int main(int argInN, char *argIn[])
     // Restore original file list if batch mode was active
     if (batchModeActive && !batchFastqsR1.empty()) {
         P.readFilesNames[0] = batchFastqsR1;
-        if (batchPaired && !batchFastqsR2.empty()) {
+        if (batchSplitMateLists && !batchFastqsR2.empty()) {
             P.readFilesNames[1] = batchFastqsR2;
         }
         P.readFilesN = batchFastqsR1.size();
+        P.outSAMattrRG = batchOutSAMattrRG;
+        P.outSAMattrRGlineSplit = batchOutSAMattrRGlineSplit;
     }
 
     // Free genome memory after batch loop completes (was deferred during batch processing)
@@ -2517,6 +3107,13 @@ int main(int argInN, char *argIn[])
                          << flush;
         string wigOutFileNamePrefix = P.outFileNamePrefix + "Signal";
         signalFromBAM(P.outBAMfileCoordName, wigOutFileNamePrefix, P);
+    }
+
+    if (!runStarChromapAtacIfEnabled(P, batchModeActive, chromapAtacAsyncRun)) {
+        ostringstream errOut;
+        errOut << "EXITING because of fatal ERROR: Chromap ATAC integration failed\n"
+               << "SOLUTION: check --chromapAtac* inputs and Chromap logs above.\n";
+        exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_RUNTIME, P);
     }
 
     if (!batchModeActive) {

@@ -40,7 +40,7 @@ struct SlamBufferedRead {
     // SNP detection data (if enabled)
     std::vector<uint32_t> mismatchGenomicPositions;  // For SNP buffering
     uint16_t nT;                // T count (for EM)
-    uint8_t k;                  // Conversion count (for EM)
+    uint16_t k;                 // Conversion count (for EM)
 };
 
 // Buffer for storing reads during auto-trim variance collection

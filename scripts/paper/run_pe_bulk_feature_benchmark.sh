@@ -30,6 +30,7 @@ SKIP_COPY=0
 SKIP_INTEGRATED=0
 SKIP_EXTERNAL=0
 SKIP_COMPARE=0
+PARITY_QC=0
 
 usage() {
     cat <<'EOF'
@@ -60,15 +61,19 @@ Optional:
   --force-copy                   Re-copy into --pikachu-fastq-dir even if files already exist.
   --skip-integrated              Skip integrated STAR-suite arm.
   --skip-external                Skip external stepwise arm.
+  --integrated-only              Run only the STAR-suite production arm
+                                  (implies --skip-external --skip-compare).
   --skip-compare                 Skip quant/Y-split comparison stage.
+  --parity-qc                    Also emit integrated TranscriptomeSAM and run
+                                  Salmon QC/comparison. Excluded from the
+                                  production benchmark by default.
   --dry-run                      Print resolved commands only.
   -h, --help                     Show this help.
 
 Modes:
   --yremove (default):
     Integrated arm:
-      raw FASTQ -> STAR (trimCutadapt + emitNoYBAM + emitYNoYFastq + TranscriptomeSAM + TranscriptVB)
-                -> Salmon alignment-mode QC on integrated transcriptome BAM
+      raw FASTQ -> STAR (trimCutadapt + emitNoYBAM + emitYNoYFastq + TranscriptVB)
 
     External arm:
       raw FASTQ -> trimvalidate -> STAR (TranscriptomeSAM + emitNoYBAM)
@@ -77,8 +82,7 @@ Modes:
 
   --no-yremove:
     Integrated arm:
-      raw FASTQ -> STAR (trimCutadapt + TranscriptomeSAM + TranscriptVB)
-                -> Salmon alignment-mode QC on integrated transcriptome BAM
+      raw FASTQ -> STAR (trimCutadapt + TranscriptVB)
 
     External arm:
       raw FASTQ -> trimvalidate -> STAR (TranscriptomeSAM)
@@ -87,6 +91,9 @@ Modes:
 Note:
   Salmon auto libtype detection (-l A) mis-detects the current PE benchmark sample as ISR.
   This script therefore defaults Salmon QC to explicit IU for reproducible comparison.
+  STAR-suite internal TranscriptVB is the production quantifier. Integrated
+  TranscriptomeSAM and integrated Salmon QC are disabled by default; use
+  --parity-qc when parity artifacts are required.
 EOF
 }
 
@@ -142,7 +149,8 @@ extract_time_metric() {
         echo "NA"
         return
     fi
-    grep -F "${pattern}" "${log_file}" | head -n1 | sed -E 's/^.*:[[:space:]]*//'
+    grep -F "${pattern}" "${log_file}" | head -n1 \
+        | sed -E 's/^.*\):[[:space:]]*//; t; s/^.*:[[:space:]]*//'
 }
 
 write_cmd_script() {
@@ -321,7 +329,9 @@ while [[ $# -gt 0 ]]; do
         --force-copy) FORCE_COPY=1; shift ;;
         --skip-integrated) SKIP_INTEGRATED=1; shift ;;
         --skip-external) SKIP_EXTERNAL=1; shift ;;
+        --integrated-only) SKIP_EXTERNAL=1; SKIP_COMPARE=1; shift ;;
         --skip-compare) SKIP_COMPARE=1; shift ;;
+        --parity-qc) PARITY_QC=1; shift ;;
         --dry-run) DRY_RUN=1; shift ;;
         -h|--help) usage; exit 0 ;;
         *) die "Unknown argument: $1" ;;
@@ -397,6 +407,7 @@ RUN_MANIFEST="${OUT_ROOT}/RUN_MANIFEST.txt"
     echo "skip_integrated=${SKIP_INTEGRATED}"
     echo "skip_external=${SKIP_EXTERNAL}"
     echo "skip_compare=${SKIP_COMPARE}"
+    echo "parity_qc=${PARITY_QC}"
 } > "${RUN_MANIFEST}"
 
 run_stage() {
@@ -471,6 +482,7 @@ run_stage() {
         echo "comparison_dir=${comparison_dir}"
         echo "salmon_libtype=${SALMON_LIBTYPE}"
         echo "yremove=${YREMOVE}"
+        echo "parity_qc=${PARITY_QC}"
     } > "${stage_manifest}"
 
     local integrated_quant="${integrated_dir}/quant.sf"
@@ -487,6 +499,10 @@ run_stage() {
     local external_salmon_dir="${external_dir}/salmon_qc"
 
     if [[ "${SKIP_INTEGRATED}" -eq 0 ]]; then
+        local integrated_quant_modes=(TranscriptVB)
+        if [[ "${PARITY_QC}" -eq 1 ]]; then
+            integrated_quant_modes=(TranscriptomeSAM TranscriptVB)
+        fi
         local integrated_cmd=(
             "${STAR_BIN}"
             --runMode alignReads
@@ -501,7 +517,8 @@ run_stage() {
             --outSAMtype BAM SortedByCoordinate
             --outBAMsortMethod samtools
             --keepBAM yes
-            --quantMode TranscriptomeSAM TranscriptVB
+            --quantMode "${integrated_quant_modes[@]}"
+            --transcriptomeFasta "${TRANSCRIPTOME}"
             --quantVBgcBias 1
             --outFileNamePrefix "${integrated_dir}/"
         )
@@ -517,27 +534,33 @@ run_stage() {
         run_timed_cmd "${integrated_dir}/star.time_v.log" "${integrated_dir}/star.log" "${integrated_cmd[@]}"
         if [[ "${DRY_RUN}" -eq 0 ]]; then
             require_file "${integrated_quant}"
-            require_file "${integrated_transcriptome_bam}"
+            if [[ "${PARITY_QC}" -eq 1 ]]; then
+                require_file "${integrated_transcriptome_bam}"
+            fi
             if [[ "${YREMOVE}" -eq 1 ]]; then
                 require_file "${integrated_dir}/Aligned.sortedByCoord.out_Y.bam"
             fi
         fi
 
-        local integrated_salmon_cmd=(
-            "${SALMON_BIN}" quant
-            -t "${TRANSCRIPTOME}"
-            -l "${SALMON_LIBTYPE}"
-            -a "${integrated_transcriptome_bam}"
-            -g "${TX2GENE}"
-            --gcBias
-            -p "${THREADS}"
-            -o "${integrated_salmon_dir}"
-        )
-        write_cmd_script "${integrated_dir}/run_integrated_salmon_qc.sh" "${integrated_salmon_cmd[@]}"
-        log "Stage ${stage_name}: Salmon QC on integrated transcriptome BAM"
-        run_timed_cmd "${integrated_dir}/salmon.time_v.log" "${integrated_dir}/salmon.log" "${integrated_salmon_cmd[@]}"
-        if [[ "${DRY_RUN}" -eq 0 ]]; then
-            require_file "${integrated_salmon_dir}/quant.sf"
+        if [[ "${PARITY_QC}" -eq 1 ]]; then
+            local integrated_salmon_cmd=(
+                "${SALMON_BIN}" quant
+                -t "${TRANSCRIPTOME}"
+                -l "${SALMON_LIBTYPE}"
+                -a "${integrated_transcriptome_bam}"
+                -g "${TX2GENE}"
+                --gcBias
+                -p "${THREADS}"
+                -o "${integrated_salmon_dir}"
+            )
+            write_cmd_script "${integrated_dir}/run_integrated_salmon_qc.sh" "${integrated_salmon_cmd[@]}"
+            log "Stage ${stage_name}: Salmon QC on integrated transcriptome BAM"
+            run_timed_cmd "${integrated_dir}/salmon.time_v.log" "${integrated_dir}/salmon.log" "${integrated_salmon_cmd[@]}"
+            if [[ "${DRY_RUN}" -eq 0 ]]; then
+                require_file "${integrated_salmon_dir}/quant.sf"
+            fi
+        else
+            log "Stage ${stage_name}: integrated Salmon QC disabled (production benchmark mode)"
         fi
     else
         log "Stage ${stage_name}: skipping integrated arm"
@@ -637,7 +660,7 @@ run_stage() {
         log "Stage ${stage_name}: skipping external arm"
     fi
 
-    if [[ "${SKIP_COMPARE}" -eq 0 && "${DRY_RUN}" -eq 0 ]]; then
+    if [[ "${SKIP_COMPARE}" -eq 0 && "${PARITY_QC}" -eq 1 && "${DRY_RUN}" -eq 0 ]]; then
         log "Stage ${stage_name}: collecting comparison metrics"
         append_quant_compare_row "${stage_name}" "integrated_transcriptvb_vs_integrated_salmon" \
             "${integrated_salmon_dir}/quant.sf" "${integrated_quant}" "${stage_compare_tsv}"
@@ -654,8 +677,10 @@ run_stage() {
             append_quant_compare_row "${stage_name}" "integrated_gene_transcriptvb_vs_external_gene_salmon" \
                 "${external_salmon_dir}/quant.genes.sf" "${integrated_gene_quant}" "${stage_compare_tsv}"
         fi
-    elif [[ "${SKIP_COMPARE}" -eq 0 ]]; then
+    elif [[ "${SKIP_COMPARE}" -eq 0 && "${PARITY_QC}" -eq 1 ]]; then
         log "Stage ${stage_name}: DRY_RUN active, skipping comparison execution"
+    elif [[ "${SKIP_COMPARE}" -eq 0 ]]; then
+        log "Stage ${stage_name}: skipping comparison stage (production benchmark mode; use --parity-qc for Salmon comparison)"
     else
         log "Stage ${stage_name}: skipping comparison stage"
     fi
@@ -689,7 +714,11 @@ run_stage() {
     local external_salmon_wall="NA"
     copy_wall="$(extract_time_metric "${copy_time_log}" "Elapsed (wall clock) time")"
     integrated_star_wall="$(extract_time_metric "${integrated_dir}/star.time_v.log" "Elapsed (wall clock) time")"
-    integrated_salmon_wall="$(extract_time_metric "${integrated_dir}/salmon.time_v.log" "Elapsed (wall clock) time")"
+    if [[ "${PARITY_QC}" -eq 1 ]]; then
+        integrated_salmon_wall="$(extract_time_metric "${integrated_dir}/salmon.time_v.log" "Elapsed (wall clock) time")"
+    else
+        integrated_salmon_wall="(disabled)"
+    fi
     external_decompress_wall="$(extract_time_metric "${external_dir}/decompress.time_v.log" "Elapsed (wall clock) time")"
     external_trim_wall="$(extract_time_metric "${external_dir}/trimvalidate.time_v.log" "Elapsed (wall clock) time")"
     external_star_wall="$(extract_time_metric "${external_dir}/star.time_v.log" "Elapsed (wall clock) time")"
@@ -706,6 +735,7 @@ run_stage() {
         echo "=============================================================="
         echo "Stage:                  ${stage_name}"
         echo "Y-removal:              ${YREMOVE}"
+        echo "Parity QC:              ${PARITY_QC}"
         echo "Sample:                 ${sample_name}"
         echo "FASTQ dir:              ${stage_fastq_dir}"
         echo "STAR index:             ${STAR_INDEX}"
@@ -716,8 +746,8 @@ run_stage() {
         echo
         echo "Timings:"
         echo "  Copy to pikachu:      ${copy_wall}"
-        echo "  Integrated STAR:      ${integrated_star_wall}"
-        echo "  Integrated Salmon:    ${integrated_salmon_wall}"
+        echo "  Integrated STAR:      ${integrated_star_wall} (production total)"
+        echo "  Integrated Salmon QC: ${integrated_salmon_wall}"
         echo "  External decompress:  ${external_decompress_wall}"
         echo "  External trimvalidate:${external_trim_wall}"
         echo "  External STAR:        ${external_star_wall}"
@@ -727,24 +757,33 @@ run_stage() {
         echo "Integrated outputs:"
         echo "  quant.sf:             ${integrated_quant}"
         echo "  quant.genes.sf:       ${integrated_gene_quant}"
-        echo "  transcriptome BAM:    ${integrated_transcriptome_bam}"
-        echo "  Salmon QC dir:        ${integrated_salmon_dir}"
+        if [[ "${PARITY_QC}" -eq 1 ]]; then
+            echo "  transcriptome BAM:    ${integrated_transcriptome_bam}"
+            echo "  Salmon QC dir:        ${integrated_salmon_dir}"
+        else
+            echo "  transcriptome BAM:    NA (production mode)"
+            echo "  Salmon QC dir:        NA (production mode)"
+        fi
         echo "  Integrated Y R1:      ${integrated_y_r1:-NA}"
         echo "  Integrated Y R2:      ${integrated_y_r2:-NA}"
         echo "  Integrated noY R1:    ${integrated_noy_r1:-NA}"
         echo "  Integrated noY R2:    ${integrated_noy_r2:-NA}"
         echo
         echo "External outputs:"
-        echo "  raw R1 (plain):       ${external_raw_r1}"
-        echo "  raw R2 (plain):       ${external_raw_r2}"
-        echo "  trimmed R1:           ${external_trim_r1}"
-        echo "  trimmed R2:           ${external_trim_r2}"
-        echo "  transcriptome BAM:    ${external_transcriptome_bam}"
-        echo "  Salmon QC dir:        ${external_salmon_dir}"
-        echo "  External Y R1:        ${external_y_r1:-NA}"
-        echo "  External Y R2:        ${external_y_r2:-NA}"
-        echo "  External noY R1:      ${external_noy_r1:-NA}"
-        echo "  External noY R2:      ${external_noy_r2:-NA}"
+        if [[ "${SKIP_EXTERNAL}" -eq 1 ]]; then
+            echo "  NA (skipped)"
+        else
+            echo "  raw R1 (plain):       ${external_raw_r1}"
+            echo "  raw R2 (plain):       ${external_raw_r2}"
+            echo "  trimmed R1:           ${external_trim_r1}"
+            echo "  trimmed R2:           ${external_trim_r2}"
+            echo "  transcriptome BAM:    ${external_transcriptome_bam}"
+            echo "  Salmon QC dir:        ${external_salmon_dir}"
+            echo "  External Y R1:        ${external_y_r1:-NA}"
+            echo "  External Y R2:        ${external_y_r2:-NA}"
+            echo "  External noY R1:      ${external_noy_r1:-NA}"
+            echo "  External noY R2:      ${external_noy_r2:-NA}"
+        fi
         echo
         if [[ "${DRY_RUN}" -eq 0 && "${YREMOVE}" -eq 1 ]]; then
             echo "FASTQ counts (Y-split):"

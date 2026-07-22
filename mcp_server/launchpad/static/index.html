@@ -1,0 +1,955 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>STAR Launchpad</title>
+  <link rel="stylesheet" href="./style.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.3/dist/cdn.min.js"></script>
+</head>
+<body>
+  <div class="app" x-data="launchpadApp()"
+       x-init="init(); $watch('params', () => ensureFocusVisible(), { deep: true }); $watch('slScript', () => slInvalidateScriptLaneDerivedState())"
+       @keydown.window="handleGlobalKey($event)">
+    <header class="header">
+      <h1>STAR Launchpad</h1>
+      <p class="tagline">Generate validated STAR-suite commands from workflow recipes</p>
+      <button type="button" class="linklike" @click="showAbout = true">About</button>
+      <template x-if="bridgeUiEnabled() && bridgeEditors.length > 1">
+        <span class="bridge-header">
+          <label class="field-inline bridge-picker">
+            <span>Active editor</span>
+            <select
+              @change="bridgeConnect($event.target.value)"
+              x-model="bridgeSelectedId">
+              <template x-for="ed in bridgeEditors" :key="ed.id">
+                <option :value="ed.id" x-text="(ed.label || 'Editor') + ' · ' + (ed.host || '127.0.0.1') + ':' + ed.port"></option>
+              </template>
+            </select>
+          </label>
+        </span>
+      </template>
+      <template x-if="bridgeUiEnabled()">
+        <button
+          type="button"
+          class="linklike"
+          @click="showEditors = true"
+          :title="bridgeConnection?.status === 'connected'
+                  ? 'Connected to ' + (bridgeConnection.app || 'editor')
+                  : (bridgeEditors.length ? 'Paired editors' : 'No editors paired yet')">
+          <span x-show="bridgeConnection?.status === 'connected'" class="bridge-dot bridge-dot-ok">●</span>
+          <span x-show="!bridgeConnection || bridgeConnection?.status !== 'connected'" class="bridge-dot bridge-dot-off">○</span>
+          Editors<span x-show="bridgeEditors.length" x-text="' (' + bridgeEditors.length + ')'"></span>
+        </button>
+      </template>
+      <button
+        type="button"
+        class="linklike danger"
+        @click="confirmQuit()"
+        :disabled="loading || !launchSupported"
+        :title="launchSupported ? 'Stop the STAR Server (Launchpad + MCP) on this host' : 'Only available when Launchpad is opened via localhost on the server host'"
+      >Quit server</button>
+    </header>
+
+    <div class="bridge-banner" x-show="bridgeNotice && bridgeUiEnabled()" x-cloak>
+      <span x-text="bridgeNotice"></span>
+      <button type="button" class="linklike" @click="bridgeNotice = ''">dismiss</button>
+    </div>
+
+    <nav class="launchpad-tabs" aria-label="Launchpad mode">
+      <button
+        type="button"
+        class="tab"
+        :class="{ 'tab-active': activeTab === 'workflows' }"
+        @click="activeTab = 'workflows'"
+      >STAR workflows</button>
+      <button
+        type="button"
+        class="tab"
+        :class="{ 'tab-active': activeTab === 'script' }"
+        @click="activeTab = 'script'"
+      >Script Lane</button>
+      <button
+        type="button"
+        class="tab"
+        :class="{ 'tab-active': activeTab === 'composition' }"
+        @click="activeTab = 'composition'; compOnTabActivated()"
+      >Composition</button>
+    </nav>
+
+    <div x-show="activeTab === 'workflows'">
+    <div class="toolbar recipe-toolbar">
+      <label class="field-inline">
+        <span>Recipe</span>
+        <select x-model="workflowId" @change="loadWorkflow()">
+          <template x-for="w in workflows" :key="w.id">
+            <option :value="w.id" x-text="w.title + ' (' + w.id + ')'"></option>
+          </template>
+        </select>
+      </label>
+      <label class="field-inline recipe-filter">
+        <input
+          type="checkbox"
+          x-model="includeTestWorkflows"
+          @change="onIncludeTestWorkflowsChange()"
+        />
+        <span title="Show UCSF, E2E test workflows, and other recipes outside the default public set (loopback sees private entries)">Include test &amp; other recipes</span>
+      </label>
+    </div>
+
+    <div class="toolbar param-io-bar" x-show="schema">
+      <span class="param-io-title">Parameters file</span>
+      <span class="param-io-hint">JSON on your computer (client-side only)</span>
+      <input
+        type="file"
+        class="sr-only"
+        accept=".json,application/json"
+        x-ref="paramImportFile"
+        @change="loadParametersFromFile($event)"
+      />
+      <button
+        type="button"
+        class="btn secondary"
+        @click="$refs.paramImportFile.click()"
+        :disabled="loading"
+        title="Choose a JSON file to fill the form"
+      >
+        Load parameters
+      </button>
+      <button
+        type="button"
+        class="btn secondary"
+        @click="saveParametersToFile()"
+        :disabled="loading"
+        title="Download current field values as JSON"
+      >
+        Save parameters
+      </button>
+    </div>
+
+    <div class="toolbar validation-toolbar" x-show="schema">
+      <label class="field-inline validation-toggle">
+        <input
+          type="checkbox"
+          x-model="checkPaths"
+          :disabled="loading || !serverPathCheckSupported"
+        />
+        <span
+          :title="serverPathCheckSupported ? 'Validate file and directory existence on the server host before generating a command.' : 'Server-host path checks are only available when Launchpad is opened from the same machine as the server.'"
+        >Check paths on server host during Validate / Generate</span>
+      </label>
+      <p class="validation-toolbar-hint">
+        <span x-show="serverPathCheckSupported">
+          Off by default for planning. <strong>Run in shell</strong> always validates server-host paths before launch.
+        </span>
+        <span x-show="!serverPathCheckSupported">
+          Remote browsers stay in planning mode: schema and type checks only, no server-host path checks.
+        </span>
+      </p>
+    </div>
+
+    <div class="main-grid" x-show="schema">
+      <section class="panel form-panel">
+        <h2>Parameters</h2>
+        <p class="gate-banner" x-show="gateIsActive('star_only') && paramByName('star_only')">
+          <strong>Alignment-only mode</strong> (<code>--star-only</code>): downstream-related fields are hidden. Turn it off to edit downstream QC and CellBender options.
+        </p>
+        <template x-for="group in displayGroups" :key="group.name">
+          <fieldset class="param-group" x-show="!groupHidden(group)">
+            <legend x-text="group.title"></legend>
+            <template x-for="pname in group.parameters" :key="pname">
+              <div class="field" :class="{ 'skip-default': paramByName(pname)?.skip_when_default }"
+                   x-show="paramRowVisible(pname)">
+                <label
+                    :title="paramTooltip(pname)"
+                    :class="{ 'has-param-tip': paramHasRichTip(pname) }">
+                  <span class="label-text" @click="focusParam = pname">
+                    <code x-text="paramByName(pname)?.cli_flag || pname"></code>
+                    <span class="req" x-show="paramByName(pname)?.required">*</span>
+                  </span>
+                  <input type="checkbox" x-show="paramByName(pname)?.type === 'bool'"
+                         x-model="params[pname]" @focus="focusParam = pname">
+                  <select x-show="paramByName(pname)?.type === 'enum'" x-model="params[pname]"
+                          @focus="focusParam = pname">
+                    <template x-for="c in (paramByName(pname)?.choices || [])" :key="c">
+                      <option :value="c" x-text="c"></option>
+                    </template>
+                  </select>
+                  <input type="number" step="any" x-show="paramByName(pname)?.type === 'int'"
+                         x-model="params[pname]" @focus="focusParam = pname">
+                  <input type="number" step="any" x-show="paramByName(pname)?.type === 'float'"
+                         x-model="params[pname]" @focus="focusParam = pname">
+                  <span class="path-input-group"
+                        x-show="['string','file','directory','string_list'].includes(paramByName(pname)?.type)">
+                    <input type="text" class="path-text-input"
+                           x-model="params[pname]" @focus="focusParam = pname"
+                           :placeholder="(paramByName(pname)?.description || '').slice(0, 96)">
+                    <button type="button"
+                            class="icon-btn browse-icon"
+                            x-show="paramSupportsServerBrowse(paramByName(pname))"
+                            @click.prevent.stop="openFilePicker(pname)"
+                            :disabled="loading || !browseSupported"
+                            :title="trustedLocal ? 'Browse filesystem for ' + (paramByName(pname)?.type === 'directory' ? 'a directory' : (paramByName(pname)?.type === 'string_list' ? 'files or directories' : 'a file')) : 'Browse server filesystem for ' + (paramByName(pname)?.type === 'directory' ? 'a directory' : (paramByName(pname)?.type === 'string_list' ? 'files or directories' : 'a file'))"
+                            aria-label="Browse">
+                      <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M1.75 2h4.086a1.75 1.75 0 0 1 1.237.513l.914.914a.25.25 0 0 0 .177.073h6.086c.966 0 1.75.784 1.75 1.75v7A1.75 1.75 0 0 1 14.25 14H1.75A1.75 1.75 0 0 1 0 12.25v-8.5C0 2.784.784 2 1.75 2zM1.5 3.75v8.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7a.25.25 0 0 0-.25-.25H8.164a1.75 1.75 0 0 1-1.237-.513l-.914-.914a.25.25 0 0 0-.177-.073H1.75a.25.25 0 0 0-.25.25z"/></svg>
+                    </button>
+                    <button type="button"
+                            class="icon-btn upload-icon"
+                            x-show="paramSupportsLocalUpload(paramByName(pname))"
+                            :class="{ 'is-busy': uploadBusy && uploadTargetParam === pname }"
+                            :disabled="loading || uploadBusy || !uploadSupported"
+                            @click.prevent.stop="document.getElementById('lp-upload-' + pname)?.click()"
+                            title="Upload a file from your computer; the server path will be filled in for you."
+                            aria-label="Upload local file">
+                      <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M7.25 10.25a.75.75 0 0 0 1.5 0V4.56l2.22 2.22a.75.75 0 1 0 1.06-1.06L8.53 2.22a.75.75 0 0 0-1.06 0L3.97 5.72a.75.75 0 0 0 1.06 1.06l2.22-2.22v5.69zM2.75 12a.75.75 0 0 0 0 1.5h10.5a.75.75 0 0 0 0-1.5H2.75z"/></svg>
+                    </button>
+                  </span>
+                </label>
+                <template x-if="paramSupportsLocalUpload(paramByName(pname))">
+                  <input type="file"
+                         :id="'lp-upload-' + pname"
+                         class="sr-only"
+                         :disabled="loading || uploadBusy || !uploadSupported"
+                         @change="handleLocalUpload(pname, $event)">
+                </template>
+              </div>
+            </template>
+          </fieldset>
+        </template>
+
+        <div class="actions">
+          <button type="button" class="btn secondary" @click="doValidate()" :disabled="loading">Validate</button>
+          <button type="button" class="btn primary" @click="doRender()" :disabled="loading">Generate command</button>
+        </div>
+      </section>
+
+      <aside class="panel help-panel">
+        <h2>Help</h2>
+        <div class="help-section" x-show="selectedParam() && paramVisibleInForm(focusParam)">
+          <h3>Selected parameter</h3>
+          <p class="help-name">
+            <strong x-text="selectedParam()?.label || selectedParam()?.name"></strong>
+            <span class="help-code"><code x-text="selectedParam()?.cli_flag"></code></span>
+          </p>
+          <p class="help-desc" x-text="selectedParam()?.description"></p>
+          <p
+            class="help-detail"
+            x-show="selectedParam()?.help && selectedParam()?.help !== selectedParam()?.description"
+            x-text="selectedParam()?.help"
+          ></p>
+          <ul class="help-meta-list">
+            <li>
+              Type: <code x-text="selectedParam()?.type"></code>
+              <span x-show="selectedParam()?.required">, required</span>
+              <span x-show="!selectedParam()?.required">, optional</span>
+            </li>
+            <li x-show="selectedParam()?.default !== null && selectedParam()?.default !== undefined">
+              Default: <code x-text="formatMetaValue(selectedParam()?.default)"></code>
+            </li>
+            <li x-show="selectedParam()?.example !== null && selectedParam()?.example !== undefined && selectedParam()?.example !== ''">
+              Example: <code x-text="formatMetaValue(selectedParam()?.example)"></code>
+            </li>
+            <li x-show="selectedParam()?.choices?.length">
+              Choices: <code x-text="formatMetaValue(selectedParam()?.choices)"></code>
+            </li>
+            <li x-show="paramRangeText(selectedParam())">
+              Range: <code x-text="paramRangeText(selectedParam())"></code>
+            </li>
+            <li x-show="selectedParam()?.aliases?.length">
+              Aliases: <code x-text="paramAliasesText(selectedParam())"></code>
+            </li>
+            <li x-show="selectedParam()?.env_var">
+              Env: <code x-text="selectedParam()?.env_var"></code>
+            </li>
+            <li x-show="selectedParam()?.path_must_exist">
+              Must exist when server-host path checks are enabled.
+            </li>
+            <li x-show="selectedParam()?.must_be_executable">
+              Must be executable.
+            </li>
+            <li x-show="selectedParam()?.skip_when_default">
+              Omitted from the rendered command when left at its schema default.
+            </li>
+            <li x-show="selectedParam()?.advanced">
+              Marked advanced in the schema.
+            </li>
+            <li x-show="selectedParam()?.stage || selectedParam()?.category">
+              <span x-show="selectedParam()?.category">Category: <code x-text="selectedParam()?.category"></code></span>
+              <span x-show="selectedParam()?.stage"> | Stage: <code x-text="selectedParam()?.stage"></code></span>
+            </li>
+          </ul>
+        </div>
+        <div class="help-section" x-show="validationModeMessage()">
+          <h3>Validation mode</h3>
+          <p class="help-detail" x-text="validationModeMessage()"></p>
+          <p class="help-meta" x-show="launchSupported">
+            <strong>Run in shell</strong> always re-validates with server-host path checks before starting the command.
+          </p>
+        </div>
+        <div class="help-section" x-show="constraintsForFocus().length">
+          <h3>Related constraints</h3>
+          <ul class="constraint-list">
+            <template x-for="c in constraintsForFocus()" :key="c.kind + (c.params || []).join(',')">
+              <li>
+                <span class="constraint-kind" x-text="c.kind"></span>
+                <span x-text="c.message || ('Involves: ' + (c.params || []).join(', '))"></span>
+              </li>
+            </template>
+          </ul>
+        </div>
+        <div class="help-section" x-show="describe?.caveats?.length">
+          <h3>Caveats</h3>
+          <ul>
+            <template x-for="c in (describe?.caveats || [])" :key="c">
+              <li x-text="c"></li>
+            </template>
+          </ul>
+        </div>
+        <div class="help-section" x-show="visibleStages().length">
+          <h3>Stages</h3>
+          <p class="help-hint" x-show="(describe?.stages || []).length > visibleStages().length">
+            Some stages are hidden while a gate (e.g. <code>--star-only</code>) is enabled.
+          </p>
+          <template x-for="s in visibleStages()" :key="s.name">
+            <details class="stage">
+              <summary><span x-text="s.title"></span>
+                <span class="gated" x-show="s.gated_by" x-text="'(gated by ' + s.gated_by + ')'"></span>
+              </summary>
+              <p x-text="s.description"></p>
+            </details>
+          </template>
+        </div>
+      </aside>
+    </div>
+
+    <section class="panel output-panel" x-show="schema">
+      <h2>Output</h2>
+      <p class="err" x-show="httpError" x-text="httpError"></p>
+      <p class="ok" x-show="notice" x-text="notice"></p>
+
+      <div x-show="validateResult">
+        <h3>Validation</h3>
+        <p :class="validateResult?.valid ? 'ok' : 'err'" x-text="validateResult?.valid ? 'Valid' : 'Invalid'"></p>
+        <p class="validation-mode" :class="lastValidationCheckPaths ? 'ok' : 'warn'" x-show="validationModeMessage()" x-text="validationModeMessage()"></p>
+        <ul class="messages" x-show="validateResult?.field_errors?.length">
+          <template x-for="fe in (validateResult?.field_errors || [])" :key="fe.field + ':' + fe.kind + ':' + fe.message">
+            <li :class="fe.kind === 'warning' ? 'warn' : 'err'">
+              <code x-text="fe.field || '(workflow)'"></code>
+              <span> — </span>
+              <span x-text="fe.message"></span>
+            </li>
+          </template>
+        </ul>
+        <ul class="messages" x-show="validateResult?.errors?.length">
+          <template x-for="e in (validateResult?.errors || [])" :key="e">
+            <li class="err" x-text="e"></li>
+          </template>
+        </ul>
+        <ul class="messages" x-show="validateResult?.warnings?.length">
+          <template x-for="w in (validateResult?.warnings || [])" :key="w">
+            <li class="warn" x-text="w"></li>
+          </template>
+        </ul>
+        <details class="json-detail" x-show="validateResult?.normalized_params && Object.keys(validateResult.normalized_params).length">
+          <summary>Normalized parameters</summary>
+          <pre class="json-block" x-text="normalizedParamsText()"></pre>
+        </details>
+      </div>
+
+      <div x-show="renderResult">
+        <h3>Command</h3>
+        <pre class="cmd-block" id="cmd-block" x-text="renderBlock()"></pre>
+        <div class="btn-row">
+          <button type="button" class="btn secondary" @click="copyCmd()">Copy</button>
+          <button
+            type="button"
+            class="btn primary"
+            @click="doLaunch()"
+            :disabled="loading || !launchSupported"
+            :title="launchSupported ? 'Start this command on the machine running the MCP server (detached)' : 'Only available when Launchpad is opened via localhost (same host as the server)'"
+          >Run in shell</button>
+        </div>
+        <p class="launch-hint" x-show="renderResult && !launchSupported">
+          Run in shell is disabled: open Launchpad at <code>127.0.0.1</code> or <code>localhost</code> on the server host, or use <strong>Copy</strong> and paste into your terminal.
+        </p>
+        <div class="launch-result ok" x-show="launchResult?.ok">
+          <p x-text="launchResult?.message || ''"></p>
+          <p x-show="launchResult?.pid != null"><code>pid</code> <span x-text="launchResult?.pid"></span></p>
+        </div>
+      </div>
+
+      <div class="bridge-panel" x-show="bridgeEditors.length && bridgeUiEnabled()" x-cloak>
+        <h3>Ask editor AI</h3>
+        <p class="help-meta">
+          Send current form values to the paired editor's chat and stream the reply here.
+          <span x-show="bridgeLastEvent" class="bridge-last-event">
+            Last editor event: <code x-text="bridgeEventLabel()"></code>
+          </span>
+        </p>
+        <label class="field block">
+          <span class="label-text">Chat context (optional) — one message appended before the form summary.</span>
+          <textarea class="script-textarea" rows="3"
+                    x-model="bridgeChatInput"
+                    placeholder="e.g. prioritize memory safety over speed, or use bulk PE defaults"
+                    :disabled="bridgeActiveId"></textarea>
+        </label>
+        <div class="btn-row">
+          <button type="button" class="btn secondary"
+                  @click="bridgeSubmit('refine')"
+                  :disabled="!bridgeConnected() || !!bridgeActiveId">Refine</button>
+          <button type="button" class="btn secondary"
+                  @click="bridgeSubmit('research')"
+                  :disabled="!bridgeConnected() || !!bridgeActiveId">Research</button>
+          <button type="button" class="btn"
+                  @click="bridgeCancelActive()"
+                  x-show="bridgeActiveId"
+                  :disabled="!bridgeActiveId">Cancel</button>
+          <button type="button" class="btn"
+                  @click="bridgeClearOutput()"
+                  x-show="Object.keys(bridgeStreams || {}).length"
+                  :disabled="!!bridgeActiveId">Clear</button>
+          <span class="help-meta bridge-status" x-show="bridgeConnection"
+                x-text="bridgeStatusLabel()"></span>
+        </div>
+        <p class="err bridge-err" x-show="!bridgeConnected()">
+          Not connected. Pair or select an editor in the <strong>Editors</strong> menu.
+        </p>
+        <div class="bridge-streams" x-show="bridgeStreamEntries().length">
+          <template x-for="s in bridgeStreamEntries()" :key="s.id">
+            <details class="stage" :open="s.id === bridgeActiveId">
+              <summary>
+                <code x-text="s.id.slice(0, 8)"></code>
+                <span x-show="s.id === bridgeActiveId"> · streaming…</span>
+              </summary>
+              <pre class="cmd-block" x-text="s.text"></pre>
+            </details>
+          </template>
+        </div>
+      </div>
+
+      <div x-show="schema?.required_files?.length">
+        <h3>Required paths (must exist when validating with path checks)</h3>
+        <ul class="checklist">
+          <template x-for="r in (schema?.required_files || [])" :key="r.name">
+            <li><code x-text="r.cli_flag"></code> — <span x-text="r.name"></span></li>
+          </template>
+        </ul>
+      </div>
+    </section>
+
+    </div>
+
+    <section class="script-lane" x-show="activeTab === 'script'" x-cloak>
+      <p class="script-lane-intro">
+        Deterministic <strong>annotated Bash</strong> to Workflow IR, optional simple-local viability,
+        and optional local execution. Canonical logic lives in <code>bwb-nextflow-utils</code>;
+        this tab does not use <strong>Run in shell</strong> or the STAR recipe renderer.
+        Editing the script clears the cached IR until you <strong>Translate</strong> again.
+      </p>
+      <p class="err" x-show="activeTab === 'script' && httpError" x-text="httpError"></p>
+      <p class="warn banner" x-show="activeTab === 'script' && !scriptLaneUtilsReady">
+        Script Lane backend is unavailable (no <code>bwb-nextflow-utils</code> checkout found).
+        Set <code>BWB_NEXTFLOW_UTILS_ROOT</code> to the repo root and restart the server, or place
+        <code>bwb-nextflow-utils</code> beside STAR-suite.
+      </p>
+      <p class="warn banner" x-show="activeTab === 'script' && slTemporalFallbackBanner()">
+        <strong>Temporal fallback:</strong> this script or IR is not eligible for the simple-local lane.
+        Keep the IR below and use the existing bundle / Temporal path with the same document.
+      </p>
+
+      <label class="field block">
+        <span class="label-text">Annotated Bash script</span>
+        <textarea class="script-textarea" rows="14" x-model="slScript" :disabled="loading"></textarea>
+      </label>
+
+      <label class="field block">
+        <span class="label-text">input_values (JSON object, optional for viability structure-only)</span>
+        <textarea class="script-textarea" rows="5" x-model="slInputJson" :disabled="loading"
+          placeholder='{"genome": "/path/on/server"}'></textarea>
+      </label>
+      <p class="hint" x-show="!scriptLaneViabilityInputsSupported">
+        With <code>input_values</code> set, viability checks paths on the <strong>server host</strong> and
+        requires localhost Launchpad (same as recipe path checks).
+      </p>
+
+      <label class="field block">
+        <span class="label-text">workdir (server host path, required for Execute locally)</span>
+        <input type="text" class="text-wide" x-model="slWorkdir" :disabled="loading"
+          placeholder="/tmp/my_script_lane_run" />
+      </label>
+
+      <div class="actions script-lane-actions">
+        <button type="button" class="btn secondary" @click="slTranslate()" :disabled="loading || !scriptLaneUtilsReady">
+          Translate
+        </button>
+        <button type="button" class="btn secondary" @click="slViability()" :disabled="loading || !scriptLaneUtilsReady || !slIr">
+          Check local viability
+        </button>
+        <button type="button" class="btn primary" @click="slExecute()" :disabled="loading || !scriptLaneExecuteSupported || !slIr">
+          Execute locally
+        </button>
+        <button type="button" class="btn secondary" @click="slCopyIr()" :disabled="!slIr">Copy IR JSON</button>
+        <button type="button" class="btn secondary" @click="slDownloadIr()" :disabled="!slIr">Download IR JSON</button>
+      </div>
+
+      <div class="panel script-lane-out" x-show="slTranslateResult">
+        <h2>Translate</h2>
+        <p :class="slTranslateResult?.ok ? 'ok' : 'err'" x-text="slTranslateResult?.ok ? 'Accepted' : 'Refused'"></p>
+        <div x-show="slTranslateResult && !slTranslateResult.ok">
+            <p><code x-text="slTranslateResult?.failure_category || ''"></code></p>
+            <ul class="messages">
+              <template x-for="reason in (slTranslateResult?.reasons || [])" :key="reason">
+                <li class="err" x-text="reason"></li>
+              </template>
+            </ul>
+            <p x-show="slTranslateResult?.fallback_to_temporal"><strong>fallback_to_temporal:</strong> true</p>
+        </div>
+        <details class="json-detail" x-show="slTranslateResult?.ok && slIr">
+          <summary>IR (canonical)</summary>
+          <pre class="json-block" x-text="slIrJsonText()"></pre>
+        </details>
+      </div>
+
+      <div class="panel script-lane-out" x-show="slViabilityResult">
+        <h2>Viability</h2>
+        <p :class="slViabilityResult?.ok ? 'ok' : 'err'" x-text="slViabilityResult?.ok ? 'OK for simple local' : 'Not viable locally'"></p>
+        <ul class="messages" x-show="slViabilityResult?.reasons?.length">
+          <template x-for="reason in (slViabilityResult?.reasons || [])" :key="reason">
+            <li :class="slViabilityResult?.ok ? 'warn' : 'err'" x-text="reason"></li>
+          </template>
+        </ul>
+        <p x-show="slViabilityResult?.fallback_to_temporal"><strong>fallback_to_temporal:</strong> true</p>
+      </div>
+
+      <div class="panel script-lane-out" x-show="slExecuteResult">
+        <h2>Execute</h2>
+        <p :class="slExecuteResult?.ok ? 'ok' : 'err'" x-text="slExecuteResult?.ok ? 'Finished' : 'Failed or refused'"></p>
+        <p class="help-meta" x-show="slExecuteResult?.workdir">workdir: <code x-text="slExecuteResult?.workdir"></code></p>
+        <ul class="messages" x-show="slExecuteResult?.reasons?.length">
+          <template x-for="reason in (slExecuteResult?.reasons || [])" :key="reason">
+            <li class="err" x-text="reason"></li>
+          </template>
+        </ul>
+        <p x-show="slExecuteResult?.fallback_to_temporal && !slExecuteResult?.ok">
+          <strong>fallback_to_temporal:</strong> true (IR above is still valid for Temporal)
+        </p>
+        <template x-for="st in (slExecuteResult?.steps || [])" :key="st.node_id + ':' + st.returncode">
+          <details class="stage">
+            <summary>Step <code x-text="st.node_id"></code> (exit <span x-text="st.returncode"></span>)</summary>
+            <p class="help-meta">argv</p>
+            <pre class="json-block" x-text="JSON.stringify(st.argv || [], null, 2)"></pre>
+            <p class="help-meta">stdout (tail)</p>
+            <pre class="json-block" x-text="st.stdout_tail || ''"></pre>
+            <p class="help-meta">stderr (tail)</p>
+            <pre class="json-block" x-text="st.stderr_tail || ''"></pre>
+          </details>
+        </template>
+      </div>
+    </section>
+
+    <section class="composition-lane" x-show="activeTab === 'composition'" x-cloak>
+      <p class="script-lane-intro">
+        Profile-driven <strong>composition</strong>: discover curated constructor profiles, fill
+        backend-reported recipe inputs, and synthesize execution-recipe drafts and review artifacts.
+        Canonical semantics live in <code>bwb-nextflow-utils</code>; this tab does not run composed
+        workflows (no live execution here).
+      </p>
+      <p class="err" x-show="activeTab === 'composition' && compError" x-text="compError"></p>
+      <p class="warn banner" x-show="activeTab === 'composition' && !compositionUtilsReady">
+        Composition backend is unavailable (no <code>bwb-nextflow-utils</code> checkout found).
+        Set <code>BWB_NEXTFLOW_UTILS_ROOT</code> to the repo root and restart the server, or place
+        <code>bwb-nextflow-utils</code> beside STAR-suite.
+      </p>
+
+      <div class="toolbar recipe-toolbar" x-show="compositionUtilsReady">
+        <label class="field-inline">
+          <span>Profile</span>
+          <select
+            x-model="compProfileId"
+            @change="compOnProfileSelected()"
+            :disabled="loading">
+            <template x-for="p in compProfiles" :key="p.profile_id">
+              <option :value="p.profile_id" x-text="p.title + ' (' + p.profile_id + ')'"></option>
+            </template>
+          </select>
+        </label>
+        <button type="button" class="btn secondary" @click="compLoadProfiles()" :disabled="loading">
+          Reload profiles
+        </button>
+      </div>
+
+      <div class="composition-detail" x-show="compositionUtilsReady && compDescribe">
+        <h2>Profile</h2>
+        <p class="help-meta" x-text="compDescribe?.description || ''"></p>
+        <ul class="help-meta-list">
+          <li><strong>Archetype</strong>: <code x-text="compDescribe?.archetype_id || ''"></code></li>
+          <li><strong>Default recipe id</strong>: <code x-text="compDescribe?.default_recipe_id || ''"></code></li>
+          <li>
+            <strong>helper_ids_by_role</strong>:
+            <code x-text="JSON.stringify(compDescribe?.helper_ids_by_role || {}, null, 0)"></code>
+          </li>
+        </ul>
+        <template x-if="compDescribe?.notes?.length">
+          <div>
+            <h3>Notes</h3>
+            <ul>
+              <template x-for="n in (compDescribe?.notes || [])" :key="n">
+                <li x-text="n"></li>
+              </template>
+            </ul>
+          </div>
+        </template>
+      </div>
+
+      <div class="composition-inputs" x-show="compositionUtilsReady && compRecipeInputs">
+        <h2>Required inputs</h2>
+        <p class="help-meta">
+          Field types come from the backend (<code>kind</code>). Required fields are pre-filled only
+          when the backend marks them required (using schema defaults only for <em>required</em>
+          rows). Optional and defaulted recipe inputs stay out of the draft until you set them in
+          the optional section—defaults are not auto-injected.
+        </p>
+        <template x-for="key in compRequiredInputKeys()" :key="'req-' + key">
+          <div class="field">
+            <label>
+              <span class="label-text">
+                <code x-text="key"></code>
+                <span class="req">*</span>
+                <span class="help-meta" x-text="'(' + compDisplayKind(compRecipeInputs?.recipe_inputs?.[key]) + ')'"></span>
+              </span>
+              <template x-if="compDisplayKind(compRecipeInputs?.recipe_inputs?.[key]).toLowerCase() === 'boolean'">
+                <input type="checkbox" x-model="compInputValues[key]" :disabled="loading">
+              </template>
+              <template x-if="['integer', 'number'].includes(compDisplayKind(compRecipeInputs?.recipe_inputs?.[key]).toLowerCase())">
+                <input type="number" step="any" x-model="compInputValues[key]" :disabled="loading">
+              </template>
+              <template x-if="!['boolean', 'integer', 'number'].includes(compDisplayKind(compRecipeInputs?.recipe_inputs?.[key]).toLowerCase())">
+                <span class="path-input-group">
+                  <input type="text" class="path-text-input"
+                         x-model="compInputValues[key]"
+                         :disabled="loading"
+                         :placeholder="(compRecipeInputs?.recipe_inputs?.[key]?.description || '').slice(0, 96)">
+                  <button type="button"
+                          class="icon-btn browse-icon"
+                          x-show="compKindUsesPathPicker(compDisplayKind(compRecipeInputs?.recipe_inputs?.[key]))"
+                          @click.prevent.stop="compOpenPathPicker(key, compDisplayKind(compRecipeInputs?.recipe_inputs?.[key]))"
+                          :disabled="loading || !browseSupported"
+                          aria-label="Browse">
+                    <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M1.75 2h4.086a1.75 1.75 0 0 1 1.237.513l.914.914a.25.25 0 0 0 .177.073h6.086c.966 0 1.75.784 1.75 1.75v7A1.75 1.75 0 0 1 14.25 14H1.75A1.75 1.75 0 0 1 0 12.25v-8.5C0 2.784.784 2 1.75 2zM1.5 3.75v8.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7a.25.25 0 0 0-.25-.25H8.164a1.75 1.75 0 0 1-1.237-.513l-.914-.914a.25.25 0 0 0-.177-.073H1.75a.25.25 0 0 0-.25.25z"/></svg>
+                  </button>
+                </span>
+              </template>
+            </label>
+            <p class="help-meta" x-show="compRecipeInputs?.recipe_inputs?.[key]?.description"
+               x-text="compRecipeInputs?.recipe_inputs?.[key]?.description"></p>
+          </div>
+        </template>
+
+        <details class="stage" x-show="compOptionalInputKeys().length">
+          <summary>Optional / defaulted inputs (<span x-text="compOptionalInputKeys().length"></span>)</summary>
+          <template x-for="key in compOptionalInputKeys()" :key="'opt-' + key">
+            <div class="field">
+              <label>
+                <span class="label-text">
+                  <code x-text="key"></code>
+                  <span class="help-meta" x-text="'(' + compDisplayKind(compRecipeInputs?.recipe_inputs?.[key]) + ')'"></span>
+                </span>
+                <template x-if="compDisplayKind(compRecipeInputs?.recipe_inputs?.[key]).toLowerCase() === 'boolean'">
+                  <input type="checkbox" x-model="compInputValues[key]" :disabled="loading">
+                </template>
+                <template x-if="['integer', 'number'].includes(compDisplayKind(compRecipeInputs?.recipe_inputs?.[key]).toLowerCase())">
+                  <input type="number" step="any" x-model="compInputValues[key]" :disabled="loading">
+                </template>
+                <template x-if="!['boolean', 'integer', 'number'].includes(compDisplayKind(compRecipeInputs?.recipe_inputs?.[key]).toLowerCase())">
+                  <span class="path-input-group">
+                    <input type="text" class="path-text-input"
+                           x-model="compInputValues[key]"
+                           :disabled="loading"
+                           :placeholder="(compRecipeInputs?.recipe_inputs?.[key]?.description || '').slice(0, 96)">
+                    <button type="button"
+                            class="icon-btn browse-icon"
+                            x-show="compKindUsesPathPicker(compDisplayKind(compRecipeInputs?.recipe_inputs?.[key]))"
+                            @click.prevent.stop="compOpenPathPicker(key, compDisplayKind(compRecipeInputs?.recipe_inputs?.[key]))"
+                            :disabled="loading || !browseSupported"
+                            aria-label="Browse">
+                      <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M1.75 2h4.086a1.75 1.75 0 0 1 1.237.513l.914.914a.25.25 0 0 0 .177.073h6.086c.966 0 1.75.784 1.75 1.75v7A1.75 1.75 0 0 1 14.25 14H1.75A1.75 1.75 0 0 1 0 12.25v-8.5C0 2.784.784 2 1.75 2zM1.5 3.75v8.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7a.25.25 0 0 0-.25-.25H8.164a1.75 1.75 0 0 1-1.237-.513l-.914-.914a.25.25 0 0 0-.177-.073H1.75a.25.25 0 0 0-.25.25z"/></svg>
+                    </button>
+                  </span>
+                </template>
+              </label>
+              <p class="help-meta" x-show="compRecipeInputs?.recipe_inputs?.[key]?.description"
+                 x-text="compRecipeInputs?.recipe_inputs?.[key]?.description"></p>
+            </div>
+          </template>
+        </details>
+
+        <details class="stage">
+          <summary>Advanced: override <code>workflow_ir_by_id</code> / <code>component_binding</code> JSON</summary>
+          <p class="help-meta">
+            Bulk STAR profiles default to STAR-suite composition IR + mkindex/align binding from
+            the server. Leave empty to use those defaults. Invalid JSON is rejected on
+            <strong>Reload recipe inputs</strong>, <strong>Build draft</strong>, and
+            <strong>Generate artifacts</strong> (no silent fallback).
+          </p>
+          <label class="field block">
+            <span class="label-text">workflow_ir_by_id (JSON object)</span>
+            <textarea class="script-textarea" rows="4" x-model="compOverrideIrText" :disabled="loading"
+              placeholder="{}"></textarea>
+          </label>
+          <label class="field block">
+            <span class="label-text">component_binding (JSON object)</span>
+            <textarea class="script-textarea" rows="3" x-model="compOverrideBindingText" :disabled="loading"
+              placeholder="{}"></textarea>
+          </label>
+          <button type="button" class="btn secondary" @click="compLoadProfileDetail()" :disabled="loading">
+            Reload recipe inputs with overrides
+          </button>
+        </details>
+
+        <div class="actions composition-actions">
+          <button type="button" class="btn secondary" @click="compBuildDraft()" :disabled="loading || !compProfileId">
+            Build draft
+          </button>
+          <button type="button" class="btn primary" @click="compBuildArtifacts()" :disabled="loading || !compProfileId">
+            Generate artifacts
+          </button>
+        </div>
+      </div>
+
+      <div class="panel script-lane-out" x-show="compDraftResult?.recipe_draft">
+        <h2>Draft</h2>
+        <p class="help-meta">
+          Profile <code x-text="compDraftResult?.profile_id || ''"></code> ·
+          archetype <code x-text="compDraftResult?.archetype_id || ''"></code>
+        </p>
+        <pre class="json-block" x-text="JSON.stringify(compDraftResult?.recipe_draft || {}, null, 2)"></pre>
+      </div>
+
+      <div class="panel script-lane-out" x-show="compArtifactsResult">
+        <h2>Artifacts</h2>
+        <p :class="compArtifactsResult?.validation?.ok ? 'ok' : 'err'"
+           x-text="compArtifactsResult?.validation?.ok ? 'Validation OK' : 'Validation failed'"></p>
+        <ul class="messages" x-show="compArtifactsResult?.validation?.errors?.length">
+          <template x-for="err in (compArtifactsResult?.validation?.errors || [])" :key="err.message || err.code">
+            <li class="err" x-text="err.message || JSON.stringify(err)"></li>
+          </template>
+        </ul>
+        <details class="json-detail" x-show="compArtifactsResult?.normalized_recipe">
+          <summary>Normalized recipe</summary>
+          <pre class="json-block" x-text="JSON.stringify(compArtifactsResult?.normalized_recipe || {}, null, 2)"></pre>
+        </details>
+        <details class="json-detail" x-show="compArtifactsResult?.preview">
+          <summary>Preview</summary>
+          <pre class="json-block" x-text="JSON.stringify(compArtifactsResult?.preview || {}, null, 2)"></pre>
+        </details>
+        <details class="json-detail" x-show="compScriptText()">
+          <summary>Generated script</summary>
+          <pre class="cmd-block" x-text="compScriptText()"></pre>
+        </details>
+        <details class="json-detail" x-show="compManifestSummary()">
+          <summary>Manifest summary</summary>
+          <pre class="json-block" x-text="compManifestSummary()"></pre>
+        </details>
+      </div>
+    </section>
+
+    <div class="modal" x-show="showEditors" x-cloak @click.self="showEditors = false">
+      <div class="modal-inner editors-modal">
+        <h2>Paired editors</h2>
+        <p class="help-meta">
+          Phase 1: pairing + auth only. The editor runs a loopback WebSocket server;
+          this Launchpad connects with the token from the pair URL. LM integration
+          ships in phase 2.
+        </p>
+        <p x-show="!bridgeEditors.length" class="help-meta">
+          No editors paired yet. Install the <code>star-launchpad-bridge</code>
+          extension in VS Code / Cursor, then run
+          <code>STAR Launchpad Bridge: Open pairing page</code>.
+        </p>
+        <div class="bridge-install" x-show="!bridgeEditors.length && bridgeExtension.available" x-cloak>
+          <h3>Install the bridge extension</h3>
+          <ol class="bridge-install-steps">
+            <li>
+              <a class="btn primary" :href="bridgeExtension.url" :download="bridgeExtension.filename">
+                Download .vsix
+              </a>
+              <span class="help-meta" x-show="bridgeExtension.size"
+                    x-text="'(' + (bridgeExtension.size / 1024).toFixed(0) + ' KB)'"></span>
+            </li>
+            <li>
+              In VS Code / Cursor: <strong>Extensions</strong> → <strong>⋯</strong> menu →
+              <strong>Install from VSIX</strong>, then pick the file you just downloaded.
+            </li>
+            <li>
+              Or from a terminal:
+              <pre class="cmd-block bridge-install-cmd" x-text="bridgeExtension.command"></pre>
+            </li>
+            <li>
+              The extension will show a notification — click <strong>Pair now</strong> and
+              this page will register the editor automatically.
+            </li>
+          </ol>
+        </div>
+        <ul class="editor-list" x-show="bridgeEditors.length">
+          <template x-for="ed in bridgeEditors" :key="ed.id">
+            <li class="editor-row"
+                :class="{ 'editor-row-active': bridgeSelectedId === ed.id }">
+              <div class="editor-row-main">
+                <strong x-text="ed.label || 'Editor'"></strong>
+                <span class="help-meta" x-text="
+                  (ed.host ? ed.host : '127.0.0.1') + ':' + ed.port +
+                  (ed.workspace ? ' · ' + ed.workspace : '')"></span>
+              </div>
+              <div class="editor-row-actions">
+                <button type="button" class="btn btn-mini secondary"
+                        x-show="bridgeSelectedId !== ed.id"
+                        @click="bridgeConnect(ed.id)">Connect</button>
+                <button type="button" class="btn btn-mini secondary"
+                        x-show="bridgeSelectedId === ed.id"
+                        @click="bridgeDisconnect()">Disconnect</button>
+                <button type="button" class="btn btn-mini"
+                        @click="bridgeRemove(ed.id)">Remove</button>
+              </div>
+            </li>
+          </template>
+        </ul>
+        <p class="help-meta" x-show="bridgeConnection">
+          Status: <span x-text="bridgeStatusLabel()"></span>
+        </p>
+        <p class="help-meta" x-show="bridgeLastEvent">
+          Last editor event:
+          <code x-text="bridgeEventLabel()"></code>
+        </p>
+        <div class="btn-row">
+          <button type="button" class="btn primary" @click="showEditors = false">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal file-picker-modal" x-show="showFilePicker" x-cloak @click.self="closeFilePicker()">
+      <div class="modal-inner file-picker-inner">
+        <header class="file-picker-header">
+          <h2>
+            <span x-show="trustedLocal">Browse filesystem</span>
+            <span x-show="!trustedLocal">Browse server filesystem</span>
+          </h2>
+          <p class="file-picker-target">
+            Picking <code x-text="fpMode"></code> for
+            <code x-text="compPickField || fpTargetParam || ''"></code>
+            <span x-show="fpMode === 'string_list'" class="help-meta">(multi-select)</span>
+          </p>
+        </header>
+
+        <div class="file-picker-path">
+          <button type="button" class="btn btn-mini secondary"
+                  @click="fpNavigate('')" :disabled="fpLoading">Roots</button>
+          <button type="button" class="btn btn-mini secondary"
+                  x-show="fpParent" @click="fpNavigate(fpParent)"
+                  :disabled="fpLoading" title="Up one directory">Up</button>
+          <code class="file-picker-cwd" x-text="fpPath || 'Trusted roots'"></code>
+        </div>
+
+        <p class="err" x-show="fpError" x-text="fpError"></p>
+        <p class="warn" x-show="fpTruncated">
+          Directory truncated — only the first entries are shown.
+        </p>
+
+        <div class="file-picker-body">
+          <ul class="file-picker-list" x-show="!fpLoading">
+            <template x-for="entry in fpEntries" :key="entry.name">
+              <li class="file-picker-entry"
+                  :class="{
+                    'is-dir': entry.kind === 'dir',
+                    'is-file': entry.kind === 'file',
+                    'is-other': entry.kind === 'other',
+                    'is-selected': fpSelectedPath(entry),
+                    'is-disabled': !_entrySelectable(entry) && entry.kind !== 'dir'
+                  }"
+                  @click="_entrySelectable(entry) ? fpToggleSelect(entry) : (entry.kind === 'dir' ? fpActivate(entry) : null)"
+                  @dblclick="fpActivate(entry)">
+                <span class="file-picker-icon" x-text="entry.kind === 'dir' ? '📁' : (entry.kind === 'file' ? '📄' : '•')"></span>
+                <span class="file-picker-name" x-text="entry.name"></span>
+                <span class="file-picker-size" x-text="formatFileSize(entry.size)"></span>
+              </li>
+            </template>
+            <li class="file-picker-empty" x-show="!fpEntries.length">(empty)</li>
+          </ul>
+          <p class="file-picker-loading" x-show="fpLoading">Loading…</p>
+        </div>
+
+        <div class="file-picker-selection" x-show="fpSelected.length">
+          <strong>Selected:</strong>
+          <ul>
+            <template x-for="s in fpSelected" :key="s.path">
+              <li><code x-text="s.path"></code></li>
+            </template>
+          </ul>
+        </div>
+
+        <footer class="file-picker-footer">
+          <button type="button" class="btn secondary"
+                  x-show="fpMode === 'directory' && fpPath"
+                  @click="fpPickCurrentDirectory()"
+                  :disabled="fpLoading">Use this directory</button>
+          <span class="flex-spacer"></span>
+          <button type="button" class="btn secondary" @click="closeFilePicker()">Cancel</button>
+          <button type="button" class="btn primary"
+                  @click="fpApply()"
+                  :disabled="fpLoading || !fpSelected.length">Use selection</button>
+        </footer>
+      </div>
+    </div>
+
+    <div class="modal" x-show="showAbout" x-cloak @click.self="showAbout = false">
+      <div class="modal-inner">
+        <h2>About STAR Launchpad</h2>
+        <p>
+          STAR Launchpad is a browser helper that talks to the same workflow definitions as
+          <strong>STAR MCP</strong>. Use <strong>Copy</strong> to paste the command into your
+          terminal, or <strong>Run in shell</strong> (localhost only) to start the same command
+          on the <em>server host</em> in the background.
+        </p>
+        <p>
+          <strong>Load parameters</strong> / <strong>Save parameters</strong> read or write a
+          JSON file via the browser file picker (client-side only). Format:
+          <code>{ &quot;workflow_id&quot;: &quot;…&quot;, &quot;params&quot;: { … } }</code>
+          or a flat object of parameter names to values.
+        </p>
+        <p>
+          <strong>Quit server</strong> stops the STAR Server (Launchpad + MCP) running on this host.
+          Shortcut: <code>Ctrl</code>+<code>Shift</code>+<code>Q</code>. Localhost only (for safety).
+        </p>
+        <p>
+          <strong>Validate</strong> and <strong>Generate command</strong> default to schema and type
+          checks only. Enable <strong>Check paths on server host</strong> when you want Launchpad to
+          verify file and directory existence on the machine running STAR Server. <strong>Run in shell</strong>
+          always does that stricter server-host validation before launch.
+        </p>
+        <p>
+          By default the recipe list shows <strong>core STAR CLI</strong> workflows plus curated
+          cross-repo workflows such as <code>morphic_multiome</code>. Enable
+          <strong>Include test &amp; other recipes</strong> for UCSF production, E2E tests,
+          and the rest (private entries appear on localhost).
+        </p>
+        <p>
+          <strong>STAR Server</strong> hosts STAR MCP (for agents) and this UI on one port.
+        </p>
+        <p>
+          <strong>Script Lane</strong> (second tab) translates annotated Bash to Workflow IR via
+          <code>bwb-nextflow-utils</code>, checks simple-local viability, and can execute locally on the
+          server host when Launchpad is opened over localhost. It never uses <strong>Run in shell</strong>.
+        </p>
+        <p>
+          <strong>Composition</strong> (third tab) lists curated constructor profiles from
+          <code>bwb-nextflow-utils</code>, shows backend-computed recipe inputs (<code>kind</code>-driven
+          fields), and builds execution-recipe drafts plus review artifacts (normalized recipe, preview,
+          script, manifest). It does not run composed workflows; execution stays out of band.
+        </p>
+        <button type="button" class="btn primary" @click="showAbout = false">Close</button>
+      </div>
+    </div>
+  </div>
+  <script src="./bridge.js?v=br3"></script>
+  <script src="./app.js?v=lp20"></script>
+</body>
+</html>

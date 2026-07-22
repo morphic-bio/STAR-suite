@@ -38,6 +38,7 @@ Log.out
 ## Build artifacts
 *.o
 Depend.list
+.depend.with_chromap_*
 /source/*.d
 /source/Depend.list
 /source/STAR
@@ -49,12 +50,21 @@ Depend.list
 /core/legacy/source/STARlong
 /core/legacy/source/compat_unit_tests
 /core/legacy/source/trim_qc_fastq
+/core/legacy/source/fastx_input_harness
+/core/legacy/source/binseq_probe_harness
+/core/legacy/source/cbq_reader_harness
+/core/legacy/source/cbq_ordered_encoder
+/core/legacy/source/cbq_star_adapter_harness
+/core/legacy/source/cbq_pf_adapter_harness
+/core/legacy/source/cbq_chromap_adapter_harness
 /core/legacy/source/Aligned.out.sam
 /core/legacy/source/Log.progress.out
 /core/features/vbem/source/libem/libem.a
 /core/features/vbem/source/libtrim/libtrim.a
 /flex/source/libflex/libflex.a
 /flex/tools/flexfilter/run_flexfilter_mex
+/flex/tools/molecule_first_resolver/molecule_first_resolver
+/flex/tools/molecule_first_resolver/test_molecule_first_resolver
 /slam/tools/slam_requant/slam_requant
 /slam/tools/pileup_snp/pileup_snp
 /core/features/vbem/tools/compute_expected_gc/compute_expected_gc
@@ -67,6 +77,8 @@ Depend.list
 /core/features/vbem/tools/tximport_compat/libtximport/test_tximport
 /core/features/vbem/tools/trimvalidate/trimvalidate
 /core/features/yremove_fastq/tools/remove_y_reads/remove_y_reads
+/core/features/libchromap_contract/libstar_chromap_contract.a
+/core/features/libchromap_contract/star_libchromap_contract_runner
 /core/features/feature_barcodes/assignBarcodes
 /core/features/feature_barcodes/demux_bam
 /core/features/feature_barcodes/demux_fastq
@@ -101,6 +113,9 @@ Depend.list
 /test/test_*
 !/test/test_*.c
 !/test/test_*.cpp
+/core/legacy/test/test_*
+!/core/legacy/test/test_*.c
+!/core/legacy/test/test_*.cpp
 
 ## Test outputs / temp
 /test_*/
@@ -122,6 +137,11 @@ Depend.list
 /tests/solo_smoke
 /tests/ychrom_test
 /tests/-/
+/core/legacy/source/ocm_multi_unit_tests
+/tests/fixtures/ocm_multi_*/run/outs/
+/tests/fixtures/ocm_multi_*/samples/
+/tests/fixtures/ocm_multi_*/run/velocyto_writer_test.log
+/tests/fixtures/ocm_multi_*/config_bad_sample_id.csv
 /tmp/samtools_sorter_test_*
 /comparison_results
 /comparison_results_filtered
@@ -135,7 +155,11 @@ __pycache__/
 ## Local smoke-test run artifacts
 /tests/flex_smoke/baseline_*/
 /tests/flex_smoke/current_*/
+/tests/remote_cellbender_100k_smoke_*/
+/tests/ucsf_velocyto_*/
 core/features/process_features/tests/fixtures/assignbarcodes_baseline/actual/
+core/features/process_features/tests/test_catatac_split_read
+core/features/process_features/tests/test_feature_duplicate_names
 /tools/cr_multi/__pycache__/
 
 ## Clique replay tool binaries

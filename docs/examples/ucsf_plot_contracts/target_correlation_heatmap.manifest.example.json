@@ -1,0 +1,198 @@
+{
+  "schema_version": "morphic-plotly-shiny-v1",
+  "viewer": "plotly_shiny",
+  "plot_id": "ucsf_target_correlation_heatmap_pooled_ebs",
+  "plot_kind": "target_correlation_heatmap",
+  "title": "UCSF CRISPRi pooled EBs: target \u00d7 target signature correlation",
+  "subtitle": "Spearman on pseudobulk log2FC vectors across top highly variable genes; hierarchical clustering",
+  "datasets": [
+    {
+      "dataset_id": "target_pairs",
+      "format": "parquet",
+      "s3_key": "plotly/ucsf/correlation/pooled_ebs_target_pairs.parquet",
+      "grain": "target_pair",
+      "required_columns": [
+        "target_a",
+        "target_b",
+        "spearman",
+        "pearson",
+        "n_shared_genes",
+        "module_id_a",
+        "module_id_b"
+      ]
+    },
+    {
+      "dataset_id": "pair_gene_lists",
+      "format": "parquet",
+      "s3_key": "plotly/ucsf/correlation/pooled_ebs_pair_gene_lists.parquet",
+      "grain": "target_pair_gene",
+      "partition_by": [
+        "target_a",
+        "target_b"
+      ],
+      "required_columns": [
+        "target_a",
+        "target_b",
+        "gene_id",
+        "symbol",
+        "log2fc_a",
+        "log2fc_b",
+        "shared_rank"
+      ],
+      "loading": "on_demand"
+    },
+    {
+      "dataset_id": "target_order",
+      "format": "parquet",
+      "s3_key": "plotly/ucsf/correlation/pooled_ebs_target_order.parquet",
+      "grain": "target",
+      "required_columns": [
+        "target",
+        "hclust_order",
+        "module_id",
+        "module_label"
+      ]
+    }
+  ],
+  "encodings": {
+    "x": {
+      "dataset_id": "target_pairs",
+      "field": "target_a",
+      "type": "categorical",
+      "order_field": "hclust_order",
+      "order_source_dataset_id": "target_order"
+    },
+    "y": {
+      "dataset_id": "target_pairs",
+      "field": "target_b",
+      "type": "categorical",
+      "order_field": "hclust_order",
+      "order_source_dataset_id": "target_order"
+    },
+    "color": {
+      "dataset_id": "target_pairs",
+      "field": "spearman",
+      "type": "quantitative",
+      "colorscale": "RdBu",
+      "domain": [-1, 1],
+      "midpoint": 0
+    },
+    "row_annotations": [
+      {
+        "source_dataset_id": "target_order",
+        "field": "module_id",
+        "type": "categorical",
+        "placement": "left"
+      }
+    ],
+    "column_annotations": [
+      {
+        "source_dataset_id": "target_order",
+        "field": "module_id",
+        "type": "categorical",
+        "placement": "top"
+      }
+    ],
+    "hover": [
+      "target_a",
+      "target_b",
+      "spearman",
+      "pearson",
+      "n_shared_genes",
+      "module_id_a",
+      "module_id_b"
+    ]
+  },
+  "controls": {
+    "correlation_metric": [
+      "spearman",
+      "pearson"
+    ],
+    "ordering": [
+      "hclust",
+      "alphabetical",
+      "module"
+    ],
+    "filters": [
+      "module_id",
+      "min_n_shared_genes"
+    ],
+    "threshold_overlays": [
+      "abs_correlation_gte"
+    ],
+    "pin_targets": true,
+    "reorder_interactive": true
+  },
+  "defaults": {
+    "correlation_metric": "spearman",
+    "ordering": "hclust",
+    "min_n_shared_genes": 50,
+    "abs_correlation_gte": 0.3
+  },
+  "drilldowns": [
+    {
+      "trigger": "cell_click",
+      "action": "reveal_pair_gene_list",
+      "dataset_id": "pair_gene_lists",
+      "keys": ["target_a", "target_b"],
+      "view": {
+        "kind": "scatter",
+        "x_field": "log2fc_a",
+        "y_field": "log2fc_b",
+        "label_field": "symbol",
+        "reference_lines": ["x=0", "y=0", "y=x"]
+      },
+      "table_fields": [
+        "symbol",
+        "log2fc_a",
+        "log2fc_b",
+        "shared_rank"
+      ]
+    }
+  ],
+  "plotly_defaults": {
+    "trace_type": "heatmap",
+    "layout": {
+      "template": "plotly_white"
+    },
+    "config": {
+      "responsive": true,
+      "displaylogo": false
+    }
+  },
+  "summary": {
+    "n_targets": 48,
+    "n_target_pairs": 1128,
+    "n_modules": 6,
+    "correlation_basis": "pseudobulk log2FC across top 2000 HVGs, Mixscape-perturbed vs NTC per target"
+  },
+  "analysis_context": {
+    "plot_kind": "target_correlation",
+    "study_assay": "Perturb-seq",
+    "lineage_label": "Embryoid body",
+    "pool_label": "pooled_EBs",
+    "comparison_label": "per-target pseudobulk log2FC vs NTC",
+    "de_method": "pseudobulk_deseq2",
+    "mixscape_filter": "perturbed_only"
+  },
+  "downloads": [
+    {
+      "label": "Target \u00d7 target correlation matrix TSV",
+      "format": "tsv.gz",
+      "s3_key": "tsv/ucsf/correlation/pooled_ebs_target_correlation.tsv.gz"
+    },
+    {
+      "label": "Module assignment TSV",
+      "format": "tsv.gz",
+      "s3_key": "tsv/ucsf/correlation/pooled_ebs_target_modules.tsv.gz"
+    }
+  ],
+  "provenance": {
+    "pipeline": "target_correlation",
+    "pipeline_version": "v1",
+    "generated_at": "2026-04-17T00:00:00Z",
+    "input_sources": [
+      "plotly/ucsf/de/pooled_ebs_pseudobulk_per_target.parquet"
+    ]
+  }
+}

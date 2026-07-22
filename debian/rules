@@ -8,10 +8,12 @@ NUM_JOBS ?= $(shell nproc)
 	dh $@
 
 override_dh_auto_build:
-	$(MAKE) -j$(NUM_JOBS) core
+	$(MAKE) -j$(NUM_JOBS) core-portable
 	$(MAKE) -j$(NUM_JOBS) star-feature-call
-	$(MAKE) -j$(NUM_JOBS) flex-tools
-	$(MAKE) -j$(NUM_JOBS) slam-tools
+	$(MAKE) -j$(NUM_JOBS) -C flex/tools/flexfilter
+	$(MAKE) -j$(NUM_JOBS) -C flex/tools/molecule_first_resolver
+	$(MAKE) -j$(NUM_JOBS) -C slam/tools/slam_requant
+	$(MAKE) -j$(NUM_JOBS) -C slam/tools/pileup_snp
 	$(MAKE) -j$(NUM_JOBS) yremove-tools
 
 override_dh_auto_install:
@@ -20,6 +22,9 @@ override_dh_auto_install:
 	install -D -m 0755 slam/tools/slam_requant/slam_requant debian/star-suite/usr/bin/slam_requant
 	install -D -m 0755 slam/tools/pileup_snp/pileup_snp debian/star-suite/usr/bin/pileup_snp
 	install -D -m 0755 flex/tools/flexfilter/run_flexfilter_mex debian/star-suite/usr/bin/run_flexfilter_mex
+	install -D -m 0755 flex/tools/molecule_first_resolver/molecule_first_resolver debian/star-suite/usr/bin/molecule_first_resolver
+	install -D -m 0755 flex/tools/molecule_first_resolver/molecule_first_bam_ledger debian/star-suite/usr/bin/molecule_first_bam_ledger
+	install -D -m 0755 flex/tools/molecule_first_resolver/molecule_first_materialize debian/star-suite/usr/bin/molecule_first_materialize
 	install -D -m 0755 core/features/yremove_fastq/tools/remove_y_reads/remove_y_reads debian/star-suite/usr/bin/remove_y_reads
 	ln -sf run_flexfilter_mex debian/star-suite/usr/bin/flexfilter
 

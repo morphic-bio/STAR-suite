@@ -7,13 +7,17 @@
 #include <cstdint>
 #include <vector>
 
-// Write QC JSON output with per-position variance stats and segmented regression info
-bool writeSlamQcJson(const SlamVarianceAnalyzer& analyzer, 
+// Write QC JSON output with per-position variance stats and segmented regression info.
+// trim5p_mate1/trim3p_mate1 and trim5p_mate2/trim3p_mate2 are the applied compat trims
+// (QC/audit). For backward compatibility, trim5p/trim3p in JSON duplicate mate 1.
+bool writeSlamQcJson(const SlamVarianceAnalyzer& analyzer,
                      const std::string& outputPath,
                      uint32_t fileIndex,
                      const std::string& trimScope,
-                     int trim5p,
-                     int trim3p,
+                     int trim5p_mate1,
+                     int trim3p_mate1,
+                     int trim5p_mate2,
+                     int trim3p_mate2,
                      uint64_t readsAnalyzed,
                      const SlamVarianceTrimResult* trimResult = nullptr,
                      const std::string& trimSource = "",
@@ -25,10 +29,15 @@ bool writeSlamQcJson(const SlamVarianceAnalyzer& analyzer,
 // Extracts data from SlamQuant positionTransitions_ and varianceAnalyzer
 bool writeSlamQcComprehensiveJson(const SlamQuant& slamQuant,
                                  const std::string& outputPath,
-                                 int trim5p,
-                                 int trim3p,
+                                 int trim5p_mate1,
+                                 int trim3p_mate1,
+                                 int trim5p_mate2,
+                                 int trim3p_mate2,
                                  const SlamVarianceTrimResult* trimResult = nullptr,
-                                 const std::vector<double>* varianceStddevTcRate = nullptr);
+                                 const std::vector<double>* varianceStddevTcRate = nullptr,
+                                 const std::vector<double>* varianceStddevTcRateMate2 = nullptr,
+                                 uint32_t mateLen0 = 0,
+                                 uint32_t mateLen1 = 0);
 
 // Write QC HTML report using Plotly CDN (4-panel comprehensive report)
 bool writeSlamQcComprehensiveHtml(const std::string& jsonPath,

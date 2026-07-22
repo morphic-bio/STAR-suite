@@ -1,0 +1,3 @@
+id,name,read,pattern,sequence,feature_type,target_gene_id,target_gene_name
+Lineage_1,Lineage_1,R2,AAGCAGTGGTATCAACGCAG(BC),ACGTACGTACGTACGTACGT,Custom,lineage_1,Lineage_1
+Lineage_2,Lineage_2,R2,AAGCAGTGGTATCAACGCAG(BC),TGCATGCATGCATGCATGCA,Custom,lineage_2,Lineage_2

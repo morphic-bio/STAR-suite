@@ -1,0 +1,233 @@
+# Public recipe: one STAR invocation for genome index generation (see README / STAR manual).
+id: star_genome_generate
+title: STAR genome index (genomeGenerate)
+summary: Single STAR --runMode genomeGenerate command; build index before alignReads workflows.
+kind: star_cli
+entry_script: core/legacy/source/STAR
+supported_modes: [local]
+caveats:
+  - Build the binary first (make -C core/legacy/source STAR).
+  - genomeDir is the output directory; it is created by STAR (need not exist beforehand).
+default_output_layout: genomeDir contains the generated index files.
+
+scripts:
+  - role: entry
+    path: core/legacy/source/STAR
+    description: STAR binary
+    language: native
+
+parameter_groups:
+  - name: core
+    title: Index generation
+    description: Core parameters for building a STAR genome index from a reference FASTA.
+    parameters: [run_mode, genome_dir, genome_fasta, run_thread_n]
+  - name: annotation
+    title: Annotation and splice junctions
+    description: Optional annotation inputs and splice-junction settings for building an annotation-aware genome index.
+    parameters:
+      [
+        sjdb_gtf_file,
+        sjdb_overhang,
+        sjdb_gtf_chr_prefix,
+        sjdb_gtf_feature_exon,
+        sjdb_gtf_tag_exon_parent_transcript,
+        sjdb_gtf_tag_exon_parent_gene,
+      ]
+
+parameters:
+  - name: run_mode
+    cli_flag: --runMode
+    type: string
+    required: true
+    default: genomeGenerate
+    label: Run mode
+    description: STAR run mode (keep genomeGenerate).
+    help: >-
+      Must be genomeGenerate for index building. Other modes (alignReads)
+      are used in separate workflow schemas.
+    widget_hint: readonly
+    aliases: [runMode]
+    advanced: false
+    display_order: 0
+    category: core
+
+  - name: genome_dir
+    cli_flag: --genomeDir
+    type: directory
+    required: true
+    path_must_exist: false
+    label: Genome directory
+    description: Output directory for the STAR index (created by STAR).
+    help: >-
+      STAR writes index files into this directory. It does not need to exist
+      beforehand; STAR creates it. Use an absolute path.
+    example: /tmp/star-demo-index
+    widget_hint: path
+    aliases: [genomeDir]
+    display_order: 1
+    category: core
+
+  - name: genome_fasta
+    cli_flag: --genomeFastaFiles
+    type: file
+    required: true
+    path_must_exist: true
+    label: Reference FASTA
+    description: Reference FASTA (single file; use additional genomeGenerate runs for multiple inputs if needed).
+    help: >-
+      Primary genome assembly FASTA. Typically a .fa or .fasta file.
+      Multi-file input is possible with space-separated paths in the STAR CLI,
+      but this schema supports a single file for simplicity.
+    example: /data/refs/GRCh38.primary_assembly.genome.fa
+    widget_hint: path
+    aliases: [genomeFastaFiles]
+    display_order: 2
+    category: core
+
+  - name: run_thread_n
+    cli_flag: --runThreadN
+    type: int
+    required: true
+    default: 8
+    skip_when_default: true
+    label: Threads
+    description: Thread count for index build.
+    help: >-
+      Number of threads STAR uses for genome generation. Higher values
+      speed up indexing but increase memory pressure.
+    example: "8"
+    widget_hint: number
+    aliases: [runThreadN]
+    advanced: true
+    display_order: 3
+    min_value: 1
+    max_value: 128
+    category: core
+
+  - name: sjdb_gtf_file
+    cli_flag: --sjdbGTFfile
+    type: file
+    required: false
+    path_must_exist: true
+    label: Annotation GTF
+    description: Optional GTF annotation file used to add annotated splice junctions to the genome index.
+    help: >-
+      Strongly recommended when annotations are available. STAR extracts
+      splice junctions from this file during genomeGenerate and uses them
+      to improve downstream alignment accuracy.
+    example: /data/refs/gencode.v44.annotation.gtf
+    widget_hint: path
+    aliases: [sjdbGTFfile]
+    advanced: false
+    display_order: 4
+    category: annotation
+
+  - name: sjdb_overhang
+    cli_flag: --sjdbOverhang
+    type: int
+    required: false
+    default: 100
+    skip_when_default: true
+    label: Junction overhang
+    description: Length of donor/acceptor sequence around annotated junctions.
+    help: >-
+      Default is 100, matching STAR's built-in behavior. Override this only
+      when you know your read length and want read_length - 1 instead.
+    widget_hint: number
+    aliases: [sjdbOverhang]
+    advanced: false
+    display_order: 5
+    min_value: 1
+    max_value: 1000000
+    category: annotation
+
+  - name: sjdb_gtf_chr_prefix
+    cli_flag: --sjdbGTFchrPrefix
+    type: string
+    required: false
+    label: GTF chromosome prefix
+    description: Optional chromosome-name prefix to apply while reading the annotation file.
+    help: >-
+      Use this when FASTA chromosome names and GTF chromosome names differ by
+      a fixed prefix, for example ENSEMBL annotations against UCSC-style
+      chromosome names that include "chr".
+    example: chr
+    aliases: [sjdbGTFchrPrefix]
+    advanced: true
+    display_order: 6
+    category: annotation
+
+  - name: sjdb_gtf_feature_exon
+    cli_flag: --sjdbGTFfeatureExon
+    type: string
+    required: false
+    default: exon
+    skip_when_default: true
+    label: Exon feature name
+    description: Feature type in the annotation file that STAR should treat as exons.
+    help: >-
+      Leave this at the default for standard GTF files. Override it for
+      nonstandard annotations where exon records use a different feature name.
+    example: exon
+    aliases: [sjdbGTFfeatureExon]
+    advanced: true
+    display_order: 7
+    category: annotation
+
+  - name: sjdb_gtf_tag_exon_parent_transcript
+    cli_flag: --sjdbGTFtagExonParentTranscript
+    type: string
+    required: false
+    default: transcript_id
+    skip_when_default: true
+    label: Transcript parent tag
+    description: GTF/GFF attribute name used to resolve the parent transcript for each exon.
+    help: >-
+      The default works for standard GTF. For GFF3 annotations, Parent is the
+      common value.
+    example: transcript_id
+    aliases: [sjdbGTFtagExonParentTranscript]
+    advanced: true
+    display_order: 8
+    category: annotation
+
+  - name: sjdb_gtf_tag_exon_parent_gene
+    cli_flag: --sjdbGTFtagExonParentGene
+    type: string
+    required: false
+    default: gene_id
+    skip_when_default: true
+    label: Gene parent tag
+    description: GTF/GFF attribute name used to resolve the parent gene for each exon.
+    help: >-
+      The default works for standard GTF. Override only when your annotation
+      uses a different attribute for gene identifiers.
+    example: gene_id
+    aliases: [sjdbGTFtagExonParentGene]
+    advanced: true
+    display_order: 9
+    category: annotation
+
+constraints:
+  - kind: positive
+    params: [run_thread_n]
+    message: run_thread_n must be positive.
+  - kind: positive
+    params: [sjdb_overhang]
+    message: sjdb_overhang must be positive.
+
+rendering:
+  omit_absent_optionals: true
+  flag_order:
+    [
+      run_mode,
+      genome_dir,
+      genome_fasta,
+      run_thread_n,
+      sjdb_gtf_file,
+      sjdb_overhang,
+      sjdb_gtf_chr_prefix,
+      sjdb_gtf_feature_exon,
+      sjdb_gtf_tag_exon_parent_transcript,
+      sjdb_gtf_tag_exon_parent_gene,
+    ]

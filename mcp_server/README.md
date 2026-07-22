@@ -3,6 +3,16 @@
 A Model Context Protocol (MCP) server for agents working with the STAR-suite repository.
 Provides discovery, preflight validation, and script execution capabilities.
 
+**Terminology**
+
+| Term | Meaning |
+|------|---------|
+| **STAR-suite** | This repository and its tooling. |
+| **STAR Server** | The Python process (`python -m mcp_server.app`): serves MCP over HTTP, SSE, and the browser UI on one port. |
+| **STAR MCP** | The agent-facing MCP tool surface (`POST /` streamable-HTTP, `GET /sse` + `POST /messages` SSE). |
+| **Shared core** | `mcp_server/tools/workflows.py` and workflow YAML under `mcp_server/workflows/` — validation, rendering, schemas (used by both STAR MCP and STAR Launchpad). |
+| **STAR Launchpad** | Static SPA at `/launchpad/` with JSON API under `/launchpad/api/`. **STAR workflows** tab: validates and renders recipe commands; **Load/Save parameters** uses a JSON file in the browser (client-side). **Run in shell** (loopback) starts the rendered argv on the **server host**. **Script Lane** tab: annotated Bash to Workflow IR, simple-local viability, and local execute via `bwb-nextflow-utils` (`POST /launchpad/api/script-lane/*`); separate from **Run in shell**. Discovery: set `BWB_NEXTFLOW_UTILS_ROOT` or place `bwb-nextflow-utils` beside this repo. The **Include test & other recipes** checkbox (off by default) limits the recipe list to **`star_*`** workflows; turn it on for UCSF production, SLAM PE smoke/production, E2E tests, and private entries on localhost. See `plans/star_launchpad_v1_runbook.md`. |
+
 ## Quick Start
 
 ### Installation
@@ -22,6 +32,29 @@ export MCP_AUTH_TOKEN="your-secret-token"
 
 # Run server
 python -m mcp_server.app
+```
+
+Open `http://<host>:<port>/launchpad/` in a browser for **STAR Launchpad** (recipe builder). Remote browsers typically see **public** workflows only; on **loopback**, authenticated discovery can list **private** workflows too. The UI defaults to **`star_*`** recipes only; enable **Include test & other recipes** to show the full list, including the private SLAM PE recipes. MCP clients continue to use `POST /` (streamable-HTTP) or `GET /sse` + `POST /messages` (SSE).
+
+#### Launchpad quick start / stop (recommended)
+
+Start in the background (writes a pidfile + log under `plans/artifacts/`):
+
+```bash
+bash scripts/launchpad_server.sh up
+```
+
+Stop it:
+
+```bash
+bash scripts/launchpad_server.sh down
+```
+
+Show status / tail logs:
+
+```bash
+bash scripts/launchpad_server.sh status
+bash scripts/launchpad_server.sh logs
 ```
 
 **stdio mode** (for local development):
@@ -82,6 +115,82 @@ Environment variables in config use `${VAR_NAME}` syntax.
 **Targets**: `core` (STAR binary), `flex`, `slam`, `feature-tools`
 
 **IMPORTANT**: Always use `ensure_fresh_build()` or `build_star(clean=True)` before running test suites to prevent stale binary issues that can cause segfaults.
+
+### Workflow Tools
+
+| Tool | Description |
+|------|-------------|
+| `list_workflows(auth_token?)` | List supported workflow templates |
+| `describe_workflow(workflow_id, auth_token?)` | Full workflow metadata with stages and parameter groups |
+| `get_workflow_scripts(workflow_id, auth_token?)` | Scripts composing a workflow with provenance (for script-backed encoders) |
+| `get_workflow_parameter_schema(workflow_id, auth_token?)` | Machine-readable parameter schema with types, defaults, and constraints |
+| `validate_workflow_parameters(workflow_id, params, check_paths?, auth_token?)` | Validate structured params without executing |
+| `render_workflow_command(workflow_id, params, auth_token?)` | Render params into argv array and shell preview |
+
+**Workflow vs Script tools**: Workflows provide structured parameter contracts for agent consumption. Scripts provide raw allowlisted execution. They are complementary:
+
+Current public workflows:
+
+| Workflow ID | Purpose | Default render |
+|-------------|---------|----------------|
+| `star_genome_generate` | Build a STAR genome index. | `--runMode genomeGenerate` with caller-supplied FASTA and output genomeDir. |
+| `star_bulk_pe_batch` | FASTQ paired-end batch alignment. | `--batchMode 1` with two comma-separated mate lists. |
+| `star_binseq_pe_batch` | Paired CBQ/BINSEQ alignment or batch processing. | `--readFilesType Binseq PE --batchMode 1` with one comma-separated CBQ list or a CBQ manifest. |
+| `star_scrna_solo_droplet` | Droplet STARsolo command. | Caller-supplied FASTQs, genomeDir, and whitelist. |
+| `star_flex_fixed_rna` | STAR-Flex Fixed RNA command. | Caller-supplied Fixed RNA inputs and whitelist layout. |
+| `star_flex_fixed_rna_cbq` | STAR-Flex Fixed RNA command with CBQ input. | `--readFilesType Binseq PE --flex yes` with paired CBQ files in Flex mate order. |
+| `star_perturb_cr_compat` | Perturb-seq CR-compatible STAR command. | CR-compatible threading defaults and feature config inputs. |
+| `morphic_multiome` | Cross-repo Morphic 10x Multiome recipe from `/mnt/pikachu/morphic-recipes`. | Minimal compose-up floor (`--profile matrices-peaks --dry-run`) with low-memory Chromap and optional `chromap_macs3_frag_qvalue` for MACS3 q-value peak selection. |
+
+Current local/private SLAM workflows:
+
+| Workflow ID | Purpose | Default render |
+|-------------|---------|----------------|
+| `slam_pe_100k_smoke` | Reproduce the 100K R1-only vs R1/R2 smoke with fixed noSU-derived trims. | Runs the two-sample ARID1A smoke unless `dry_run` is set. |
+| `slam_pe_production` | Full PE panel runner with TranscriptVB tximport counts, GrandSLAM, cB, Y/noY outputs, and Globus cleanup. | `--pilot --dry-run` for safety. |
+| `slam_deseq2_container` | Build and verify the pinned R/Bioconductor/DESeq2/tximport container. | Docker build with pinned versions via environment overrides. |
+
+Do not launch the SLAM production or DESeq2 container workflows while another
+STAR-SLAM production/benchmark run is active on the same host.
+
+```python
+# Agent workflow: discover -> inspect scripts -> validate -> render -> (optionally execute)
+wf = client.call_tool("list_workflows", {})
+schema = client.call_tool("get_workflow_parameter_schema", {
+    "workflow_id": "ucsf_star_suite_production"
+})
+
+# Get scripts composing the workflow (entry + helpers + provenance)
+scripts = client.call_tool("get_workflow_scripts", {
+    "workflow_id": "ucsf_star_suite_production"
+})
+# scripts["scripts"] lists each script with role, path, description, language, exists
+# Public callers: absolute_path is null; provenance has only workflow_schema
+# Authenticated callers: absolute_path populated; provenance adds repo_root,
+#   git_commit, git_remote
+
+# Validate with path checks (default) or skip path checks for dry planning
+val = client.call_tool("validate_workflow_parameters", {
+    "workflow_id": "ucsf_star_suite_production",
+    "params": {
+        "all_samples": True,
+        "threads": 16,
+        "dry_run": True,
+        "dataset_root": "/mnt/pikachu/ucsf-perturb-seq-corrected",
+        "genome_dir": "/storage/autoindex_110_44/bulk_index",
+    },
+    "check_paths": True,  # set False to skip file/dir existence checks
+})
+
+# Render normalized params into argv + shell preview
+cmd = client.call_tool("render_workflow_command", {
+    "workflow_id": "ucsf_star_suite_production",
+    "params": val["normalized_params"]
+})
+# cmd["argv"] is the canonical argv array
+# cmd["shell_preview"] is a shell-safe joined string
+# cmd["env_overrides"] contains e.g. {"DOWNSAMPLE_SEED": "1"}
+```
 
 ### Execution (Phase 3)
 
@@ -250,12 +359,16 @@ mcp_server/
 │   ├── discovery.py    # list_datasets, list_test_suites, find_docs, find_tests
 │   ├── preflight.py    # preflight validation
 │   ├── executor.py     # run_script, collect_outputs
+│   ├── workflows.py    # workflow discovery, validation, rendering
 │   ├── reload.py       # reload_config
 │   └── utils.py        # Path validation, run ID generation
 ├── schemas/
-│   ├── config.py       # Config models
+│   ├── config.py       # Config models (incl. WorkflowConfig)
+│   ├── workflow.py     # Workflow schema models (WorkflowSchema, params, constraints)
 │   ├── run_config.py   # Run request models
 │   └── responses.py    # Response models
+├── workflows/
+│   └── ucsf_star_suite_production.yaml  # UCSF workflow parameter + script schema
 └── tests/
     ├── conftest.py
     ├── test_config.py
@@ -263,7 +376,13 @@ mcp_server/
     ├── test_preflight.py
     ├── test_executor.py
     ├── test_auth.py
-    └── test_utils.py
+    ├── test_utils.py
+    ├── test_workflow_config.py
+    ├── test_workflow_discovery.py
+    ├── test_workflow_validation.py
+    ├── test_workflow_render.py
+    ├── test_workflow_integration.py
+    └── test_ucsf_workflow_e2e.py
 ```
 
 ## Implementation Status
@@ -273,6 +392,7 @@ mcp_server/
 - [x] **Phase 3**: Script execution (queue, timeout, logs, true concurrency)
 - [x] **Phase 4**: Stabilization + Docs (107 tests, AGENTS.md updated)
 - [x] **Phase 5**: Containerization (Dockerfile, docker-compose.yml)
+- [x] **Phase 6**: Workflow parameter service (structured schemas, validation, rendering)
 
 ## Docker Deployment
 

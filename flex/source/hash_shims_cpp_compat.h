@@ -118,6 +118,33 @@ static inline void unpackCgAggKey(uint64_t key, uint32_t *cbIdx, uint32_t *umi24
     if (tagIdx) *tagIdx = (uint8_t)(key & 0x1F);
 }
 
+// Bridge-only packed key for non-Flex Solo inline hash.
+// Key format: [CB24][UMI24][GENE16] MSB→LSB
+// CB: 24 bits (bridge-local compact CB index)
+// UMI: 24 bits (packed UMI12)
+// Gene: 16 bits (bridge-local compact gene index)
+static inline uint64_t packBridgeCgAggKey(uint32_t cbIdx, uint32_t umi24, uint16_t geneIdx) {
+    return ((uint64_t)(cbIdx & 0xFFFFFF) << 40) |
+           ((uint64_t)(umi24 & 0xFFFFFF) << 16) |
+           ((uint64_t)geneIdx);
+}
+
+static inline void unpackBridgeCgAggKey(uint64_t key, uint32_t *cbIdx, uint32_t *umi24, uint16_t *geneIdx) {
+    if (cbIdx) *cbIdx = (uint32_t)((key >> 40) & 0xFFFFFF);
+    if (umi24) *umi24 = (uint32_t)((key >> 16) & 0xFFFFFF);
+    if (geneIdx) *geneIdx = (uint16_t)(key & 0xFFFF);
+}
+
+// Non-Flex Solo direct bridge (v10): global whitelist CB index + UMI24 + full gene id (16b).
+// Same 64-bit layout as packBridgeCgAggKey (legacy bridge used compact CB/gene; here wlCb is WL index).
+static inline uint64_t packBridgeWlUmiGeneKey(uint32_t wlCb, uint32_t umi24, uint16_t geneFull) {
+    return packBridgeCgAggKey(wlCb, umi24, geneFull);
+}
+
+static inline void unpackBridgeWlUmiGeneKey(uint64_t key, uint32_t *wlCb, uint32_t *umi24, uint16_t *geneFull) {
+    unpackBridgeCgAggKey(key, wlCb, umi24, geneFull);
+}
+
 // Pack/unpack functions for readid_cbumi hash value
 // Value format: [cbIdx:32][umi24:24][status:8] MSB→LSB
 static inline uint64_t packReadIdCbUmi(uint32_t cbIdx, uint32_t umi24, uint8_t status) {

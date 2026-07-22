@@ -1,7 +1,9 @@
 #include <cmath>
 #include "SoloReadFeature.h"
+#include "SoloBinarySpool.h"
 #include "SoloCommon.h"
 #include "SoloFeature.h"
+#include "ErrorWarning.h"
 #include "soloInputFeatureUMI.h"
 #include "serviceFuns.cpp"
 
@@ -11,8 +13,26 @@ void SoloReadFeature::inputRecords(uint32 **cbP, uint32 cbPstride, vector<uint32
                                    vector<uint32> &nReadPerCBunique1, vector<uint32> &nReadPerCBmulti1,
                                    const std::function<void(uint64, uint32, uint32, uint8)> &recordSink)
 {   
-    streamReads->flush();
-    streamReads->seekg(0,std::ios::beg);
+    if (streamReads != nullptr) {
+        streamReads->flush();
+    }
+    if (binarySpoolInMemory) {
+        if (!SoloBinarySpool::seekToRecords(binarySpoolBuffer, binarySpoolReadPos, featureType, readIndexYes)) {
+            ostringstream errOut;
+            errOut << "EXITING because of fatal ERROR: could not validate experimental in-memory binary Solo spool header in inputRecords\n"
+                   << "featureType=" << featureType << " readIndexYes=" << readIndexYes << "\n";
+            exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_INPUT_FILES, P);
+        }
+    } else if (binarySpool) {
+        if (!SoloBinarySpool::seekToRecords(*streamReads, featureType, readIndexYes)) {
+            ostringstream errOut;
+            errOut << "EXITING because of fatal ERROR: could not validate experimental binary Solo spool header in inputRecords\n"
+                   << "featureType=" << featureType << " readIndexYes=" << readIndexYes << "\n";
+            exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_INPUT_FILES, P);
+        }
+    } else {
+        streamReads->seekg(0,std::ios::beg);
+    }
 
     uint32 feature;
     uint64 umi, iread, prevIread=(uint64)-1;
@@ -20,8 +40,32 @@ void SoloReadFeature::inputRecords(uint32 **cbP, uint32 cbPstride, vector<uint32
     int64 cb;
     vector<uint32> trIdDist;
 
-    while (soloInputFeatureUMI(streamReads, featureType, readIndexYes, P.sjAll, iread, cbmatch, feature, umi, trIdDist, readFlagCounts)) {
-        if (feature == (uint32)(-1) && !readIndexYes) { streamReads->ignore((uint32)-1, '\n'); continue; };
+    auto readNextRecord = [&]() -> bool {
+        if (binarySpoolInMemory) {
+            return soloInputFeatureUMI(binarySpoolBuffer, binarySpoolReadPos, featureType, readIndexYes, binarySpool, P.sjAll, iread, cbmatch, feature, umi, trIdDist, readFlagCounts);
+        }
+        return soloInputFeatureUMI(streamReads, featureType, readIndexYes, binarySpool, P.sjAll, iread, cbmatch, feature, umi, trIdDist, readFlagCounts);
+    };
+
+    while (readNextRecord()) {
+        if (feature == (uint32)(-1) && !readIndexYes) {
+            if (binarySpoolInMemory) {
+                if (!SoloBinarySpool::skipCbPayload(binarySpoolBuffer, binarySpoolReadPos, cbmatch)) {
+                    ostringstream errOut;
+                    errOut << "EXITING because of fatal ERROR: truncated in-memory binary Solo spool while skipping no-feature payload in inputRecords\n";
+                    exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_INPUT_FILES, P);
+                }
+            } else if (binarySpool) {
+                if (!SoloBinarySpool::skipCbPayload(*streamReads, cbmatch)) {
+                    ostringstream errOut;
+                    errOut << "EXITING because of fatal ERROR: truncated binary Solo spool while skipping no-feature payload in inputRecords\n";
+                    exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_INPUT_FILES, P);
+                }
+            } else {
+                streamReads->ignore((uint32)-1, '\n');
+            }
+            continue;
+        };
 
         bool readIsCounted = false;
         bool featGood = ( feature != (uint32)(-1) );
@@ -29,7 +73,21 @@ void SoloReadFeature::inputRecords(uint32 **cbP, uint32 cbPstride, vector<uint32
         bool noTooManyWLmatches = false;
 
         if (cbmatch<=1) {
-            *streamReads >> cb;
+            if (binarySpoolInMemory) {
+                if (!SoloBinarySpool::readResolvedCb(binarySpoolBuffer, binarySpoolReadPos, cb)) {
+                    ostringstream errOut;
+                    errOut << "EXITING because of fatal ERROR: truncated in-memory binary Solo spool while reading resolved CB in inputRecords\n";
+                    exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_INPUT_FILES, P);
+                }
+            } else if (binarySpool) {
+                if (!SoloBinarySpool::readResolvedCb(*streamReads, cb)) {
+                    ostringstream errOut;
+                    errOut << "EXITING because of fatal ERROR: truncated binary Solo spool while reading resolved CB in inputRecords\n";
+                    exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_INPUT_FILES, P);
+                }
+            } else {
+                *streamReads >> cb;
+            }
             if ( pSolo.CBmatchWL.oneExact && cbmatch==1 && cbReadCountTotal[cb]==0 ) {
                 noMMtoWLwithoutExact = true;
             } else {
@@ -54,7 +112,22 @@ void SoloReadFeature::inputRecords(uint32 **cbP, uint32 cbPstride, vector<uint32
             float ptot=0.0, pmax=0.0, pin;
             #endif
             for (uint32 ii=0; ii<(uint32)cbmatch; ii++) {
-                uint32 cbin; char qin; *streamReads >> cbin >> qin;
+                uint32 cbin; char qin;
+                if (binarySpoolInMemory) {
+                    if (!SoloBinarySpool::readAmbiguousCandidate(binarySpoolBuffer, binarySpoolReadPos, cbin, qin)) {
+                        ostringstream errOut;
+                        errOut << "EXITING because of fatal ERROR: truncated in-memory binary Solo spool while reading ambiguous CB in inputRecords\n";
+                        exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_INPUT_FILES, P);
+                    }
+                } else if (binarySpool) {
+                    if (!SoloBinarySpool::readAmbiguousCandidate(*streamReads, cbin, qin)) {
+                        ostringstream errOut;
+                        errOut << "EXITING because of fatal ERROR: truncated binary Solo spool while reading ambiguous CB in inputRecords\n";
+                        exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_INPUT_FILES, P);
+                    }
+                } else {
+                    *streamReads >> cbin >> qin;
+                }
                 if (cbReadCountTotal[cbin]>0) {
                     qin -= pSolo.QSbase; qin = qin < pSolo.QSmax ? qin : pSolo.QSmax;
                     pin=cbReadCountTotal[cbin]*std::pow(10.0,-qin/10.0);
@@ -97,4 +170,3 @@ void SoloReadFeature::inputRecords(uint32 **cbP, uint32 cbPstride, vector<uint32
         };
     };
 };
-

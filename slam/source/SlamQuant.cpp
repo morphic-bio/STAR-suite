@@ -5,10 +5,17 @@
 
 #include "Genome.h"
 #include "Transcriptome.h"
+#if defined(WITH_CHROMAP) && WITH_CHROMAP
+#include <htslib/bgzf.h>
+#include <htslib/kstring.h>
+#include <htslib/tbx.h>
+#include <htslib/vcf.h>
+#else
 #include "htslib/htslib/bgzf.h"
 #include "htslib/htslib/kstring.h"
 #include "htslib/htslib/tbx.h"
 #include "htslib/htslib/vcf.h"
+#endif
 
 #include <fstream>
 #include <sstream>
@@ -18,9 +25,12 @@
 #include <tuple>
 #include <algorithm>
 #include <cmath>
+#include <cctype>
 #include <cstdio>
+#include <iomanip>
 #include <memory>
 #include <cstdlib>
+#include <zlib.h>
 
 namespace {
 constexpr uint32_t kSnpMinCoverage = 10;
@@ -46,6 +56,53 @@ const char* debugDropReasonName(SlamDebugDropReason reason) {
             return "UNKNOWN";
     }
 }
+
+struct SlamBufferedConsensusObservation {
+    const SlamBufferedPosition* pos = nullptr;
+    bool trimPass = true;
+};
+
+bool chooseBufferedConsensusObservation(const std::vector<SlamBufferedConsensusObservation>& observations,
+                                        size_t begin, size_t end, bool requireTrimPass,
+                                        const SlamBufferedPosition*& chosen) {
+    if (begin >= end) {
+        return false;
+    }
+
+    int agreedBase = -1;
+    for (size_t i = begin; i < end; ++i) {
+        if (observations[i].pos == nullptr) {
+            continue;
+        }
+        int base = static_cast<int>(observations[i].pos->readBase);
+        if (agreedBase < 0) {
+            agreedBase = base;
+        } else if (agreedBase != base) {
+            return false;
+        }
+    }
+
+    const SlamBufferedPosition* best = nullptr;
+    for (size_t i = begin; i < end; ++i) {
+        const SlamBufferedConsensusObservation& obs = observations[i];
+        if (obs.pos == nullptr) {
+            continue;
+        }
+        if (requireTrimPass && !obs.trimPass) {
+            continue;
+        }
+        if (best == nullptr || obs.pos->qual > best->qual ||
+            (obs.pos->qual == best->qual && best->secondMate && !obs.pos->secondMate)) {
+            best = obs.pos;
+        }
+    }
+
+    if (best == nullptr) {
+        return false;
+    }
+    chosen = best;
+    return true;
+}
 }
 
 SlamQuant::SlamQuant(uint32_t nGenes, bool snpDetect, double snpMismatchFrac, bool snpObsAnyMismatch)
@@ -62,10 +119,13 @@ SlamQuant::SlamQuant(uint32_t nGenes, std::vector<uint8_t> allowedGenes, bool sn
       allowedGenes_(std::move(allowedGenes)) {}
 
 void SlamQuant::enableVarianceAnalysis(uint32_t maxReads, uint32_t minReads,
-                                       uint32_t smoothWindow, uint32_t minSegLen, uint32_t maxTrim) {
+                                       uint32_t smoothWindow, uint32_t minSegLen, uint32_t maxTrim,
+                                       bool separateMateHistograms) {
     varianceMaxReads_ = maxReads;
     varianceMinReads_ = minReads;
+    varianceSeparateMates_ = separateMateHistograms;
     varianceAnalyzer_.reset(new SlamVarianceAnalyzer(maxReads, minReads, smoothWindow, minSegLen, maxTrim));
+    varianceAnalyzer_->setSeparateMateHistograms(separateMateHistograms);
 }
 
 uint32_t SlamQuant::getVarianceMaxReads() const {
@@ -89,20 +149,41 @@ bool SlamQuant::recordVarianceRead() {
     return false;
 }
 
-void SlamQuant::recordVariancePosition(uint32_t readPos, uint8_t qual, bool isT, bool isTc) {
-    if (varianceAnalyzer_) {
-        varianceAnalyzer_->recordPosition(readPos, qual, isT, isTc);
+void SlamQuant::recordVariancePosition(uint32_t mateLocalPos, uint8_t mateIndex,
+                                       uint8_t qual, bool isT, bool isTc) {
+    if (!varianceAnalyzer_) {
+        return;
+    }
+    if (varianceSeparateMates_) {
+        varianceAnalyzer_->recordPositionMate(mateLocalPos, mateIndex, qual, isT, isTc);
+    } else {
+        varianceAnalyzer_->recordPosition(mateLocalPos, qual, isT, isTc);
     }
 }
 
-SlamVarianceTrimResult SlamQuant::computeVarianceTrim(uint32_t readLength) {
+void SlamQuant::recordVariancePosition(uint32_t readPos, uint8_t qual, bool isT, bool isTc) {
+    recordVariancePosition(readPos, 0, qual, isT, isTc);
+}
+
+SlamVarianceTrimResult SlamQuant::computeVarianceTrim(uint32_t concatenatedLen) {
     if (!varianceAnalyzer_) {
         SlamVarianceTrimResult result;
         result.success = false;
         result.mode = "disabled";
         return result;
     }
-    return varianceAnalyzer_->computeTrim(readLength);
+    return varianceAnalyzer_->computeTrimUnified(concatenatedLen, concatenatedLen, 0, varianceSeparateMates_);
+}
+
+SlamVarianceTrimResult SlamQuant::computeVarianceTrim(uint32_t concatenatedLen, uint32_t mateLen0,
+                                                      uint32_t mateLen1) {
+    if (!varianceAnalyzer_) {
+        SlamVarianceTrimResult result;
+        result.success = false;
+        result.mode = "disabled";
+        return result;
+    }
+    return varianceAnalyzer_->computeTrimUnified(concatenatedLen, mateLen0, mateLen1, varianceSeparateMates_);
 }
 
 void SlamQuant::initDebug(const Transcriptome& tr,
@@ -194,7 +275,7 @@ void SlamQuant::debugCountDrop(uint32_t geneId, SlamDebugDropReason reason) {
 }
 
 void SlamQuant::debugAddAssignment(uint32_t geneId, double weight, bool intronic,
-                                   bool oppositeStrand, uint16_t nT, uint8_t k) {
+                                   bool oppositeStrand, uint16_t nT, uint16_t tc) {
     if (!debugGeneEnabled(geneId)) {
         return;
     }
@@ -206,7 +287,7 @@ void SlamQuant::debugAddAssignment(uint32_t geneId, double weight, bool intronic
     } else {
         stats.exonicWeight += weight;
         stats.coverage += static_cast<double>(nT) * weight;
-        stats.conversions += static_cast<double>(k) * weight;
+        stats.conversions += static_cast<double>(tc) * weight;
     }
     if (oppositeStrand) {
         stats.antisenseWeight += weight;
@@ -315,20 +396,18 @@ const char* slamMismatchCategoryName(SlamMismatchCategory cat) {
     }
 }
 
-void SlamQuant::addRead(uint32_t geneId, uint16_t nT, uint8_t k, double weight) {
+void SlamQuant::addRead(uint32_t geneId, uint16_t nT, uint16_t tc, double weight) {
     if (geneId >= geneStats_.size() || weight <= 0.0) {
         return;
     }
     if (!allowedGenes_.empty() && geneId < allowedGenes_.size() && allowedGenes_[geneId] == 0) {
         return;
     }
-    if (nT > 511) nT = 511;
-    if (k > 255) k = 255;
-    uint16_t key = static_cast<uint16_t>((nT << 8) | k);
+    MismatchHistogramKey key = slamPackMismatchKey(nT, tc);
     SlamGeneStats& stats = geneStats_[geneId];
     stats.histogram[key] += weight;
     stats.readCount += weight;
-    stats.conversions += weight * static_cast<double>(k);
+    stats.conversions += weight * static_cast<double>(tc);
     stats.coverage += weight * static_cast<double>(nT);
 }
 
@@ -544,8 +623,7 @@ void SlamQuant::finalizeSnpMask(SlamSnpBufferStats* outStats) {
             }
         }
         totalMismatchesKept += validK;
-        uint8_t k8 = static_cast<uint8_t>(validK > 255 ? 255 : validK);
-        addRead(geneId, nT, k8, snpReadWeights_[readIdx]);
+        addRead(geneId, nT, validK, snpReadWeights_[readIdx]);
         ++readIdx;
     }
     if (outStats) {
@@ -618,12 +696,14 @@ void SlamQuant::merge(const SlamQuant& other) {
         uint32_t maxReads = other.varianceAnalyzer_->readsAnalyzed() > 0 ? 
             static_cast<uint32_t>(other.varianceAnalyzer_->readsAnalyzed()) : 100000;
         varianceAnalyzer_.reset(new SlamVarianceAnalyzer(maxReads, 1000, 5, 3, 15));
+        varianceAnalyzer_->setSeparateMateHistograms(other.varianceSeparateMates_);
         varianceAnalyzer_->merge(*other.varianceAnalyzer_);
     }
     
     // Merge diagnostics
     diag_.readsDroppedSnpMask += other.diag_.readsDroppedSnpMask;
     diag_.readsDroppedStrandness += other.diag_.readsDroppedStrandness;
+    diag_.readsDroppedCallableLength += other.diag_.readsDroppedCallableLength;
     diag_.readsZeroGenes += other.diag_.readsZeroGenes;
     diag_.readsProcessed += other.diag_.readsProcessed;
     diag_.readsNAlignWithGeneZero += other.diag_.readsNAlignWithGeneZero;
@@ -635,6 +715,9 @@ void SlamQuant::merge(const SlamQuant& other) {
     diag_.readsSumWeightLessThanOne += other.diag_.readsSumWeightLessThanOne;
     for (const auto& kv : other.diag_.nTrDistribution) {
         diag_.nTrDistribution[kv.first] += kv.second;
+    }
+    for (const auto& kv : other.diag_.callableLengthDistribution) {
+        diag_.callableLengthDistribution[kv.first] += kv.second;
     }
     for (const auto& kv : other.diag_.geneSetSizeDistribution) {
         diag_.geneSetSizeDistribution[kv.first] += kv.second;
@@ -811,6 +894,69 @@ static std::string cleanSlamLabel(const std::string& rawLabel) {
     return base;
 }
 
+static bool slamEndsWith(const std::string& s, const std::string& suffix) {
+    return s.size() >= suffix.size() &&
+           s.compare(s.size() - suffix.size(), suffix.size(), suffix) == 0;
+}
+
+static std::string normalizeSlamCbFormat(const std::string& format) {
+    std::string out = format.empty() ? "star" : format;
+    for (char& c : out) {
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    }
+    return out;
+}
+
+class SlamTextOutput {
+public:
+    ~SlamTextOutput() {
+        close();
+    }
+
+    bool open(const std::string& path) {
+        gzip_ = slamEndsWith(path, ".gz");
+        if (gzip_) {
+            gz_ = gzopen(path.c_str(), "wb");
+            return gz_ != nullptr;
+        }
+        out_.open(path.c_str());
+        return out_.good();
+    }
+
+    bool write(const std::string& text) {
+        if (gzip_) {
+            if (gz_ == nullptr) {
+                return false;
+            }
+            const int written = gzwrite(gz_, text.data(), static_cast<unsigned int>(text.size()));
+            return written == static_cast<int>(text.size());
+        }
+        out_ << text;
+        return out_.good();
+    }
+
+    bool close() {
+        if (gzip_) {
+            if (gz_ == nullptr) {
+                return true;
+            }
+            const int rc = gzclose(gz_);
+            gz_ = nullptr;
+            return rc == Z_OK;
+        }
+        if (out_.is_open()) {
+            out_.close();
+            return !out_.fail();
+        }
+        return true;
+    }
+
+private:
+    std::ofstream out_;
+    gzFile gz_ = nullptr;
+    bool gzip_ = false;
+};
+
 void SlamQuant::writeGrandSlam(const Transcriptome& tr, const std::string& outFile,
                                const std::string& outFileNamePrefix,
                                double errorRate, double convRate,
@@ -876,6 +1022,70 @@ void SlamQuant::writeGrandSlam(const Transcriptome& tr, const std::string& outFi
     }
 }
 
+bool SlamQuant::writeCountBinomial(const Transcriptome& tr, const std::string& outFile,
+                                   const std::string& sampleLabel,
+                                   const std::string& format) const {
+    return writeCountBinomial(tr.geID, tr.geName, outFile, sampleLabel, format);
+}
+
+bool SlamQuant::writeCountBinomial(const std::vector<std::string>& geneIds,
+                                   const std::vector<std::string>& geneNames,
+                                   const std::string& outFile,
+                                   const std::string& sampleLabel,
+                                   const std::string& format) const {
+    const std::string fmt = normalizeSlamCbFormat(format);
+    if (fmt != "star" && fmt != "ezbakr") {
+        return false;
+    }
+
+    SlamTextOutput out;
+    if (!out.open(outFile)) {
+        return false;
+    }
+
+    if (fmt == "ezbakr") {
+        if (!out.write("sample\trname\tsj\tGF\tXF\tnT\tTC\tn\n")) {
+            return false;
+        }
+    } else {
+        if (!out.write("sample\tfeature_id\tfeature_name\tnT\tTC\tn\n")) {
+            return false;
+        }
+    }
+
+    const std::string sample = cleanSlamLabel(sampleLabel);
+    for (size_t i = 0; i < geneStats_.size(); ++i) {
+        const SlamGeneStats& stats = geneStats_[i];
+        if (stats.histogram.empty()) {
+            continue;
+        }
+        const std::string fallbackId = std::string("GENE_") + std::to_string(i);
+        const std::string& geneId = (i < geneIds.size() && !geneIds[i].empty()) ? geneIds[i] : fallbackId;
+        const std::string& geneName = (i < geneNames.size() && !geneNames[i].empty()) ? geneNames[i] : geneId;
+
+        for (const auto& kv : stats.histogram) {
+            if (kv.second <= 0.0) {
+                continue;
+            }
+            std::ostringstream line;
+            line << std::setprecision(15);
+            const uint16_t nT = slamKeyNT(kv.first);
+            const uint16_t tc = slamKeyTC(kv.first);
+            if (fmt == "ezbakr") {
+                line << sample << "\t.\t.\t" << geneId << "\t.\t"
+                     << nT << "\t" << tc << "\t" << kv.second << "\n";
+            } else {
+                line << sample << "\t" << geneId << "\t" << geneName << "\t"
+                     << nT << "\t" << tc << "\t" << kv.second << "\n";
+            }
+            if (!out.write(line.str())) {
+                return false;
+            }
+        }
+    }
+    return out.close();
+}
+
 void SlamQuant::writeDiagnostics(const std::string& diagFile) const {
     std::ofstream out(diagFile.c_str());
     if (!out.good()) {
@@ -885,12 +1095,17 @@ void SlamQuant::writeDiagnostics(const std::string& diagFile) const {
     out << "readsProcessed\t" << diag_.readsProcessed << "\n";
     out << "readsDroppedSnpMask\t" << diag_.readsDroppedSnpMask << "\n";
     out << "readsDroppedStrandness\t" << diag_.readsDroppedStrandness << "\n";
+    out << "readsDroppedCallableLength\t" << diag_.readsDroppedCallableLength << "\n";
     out << "readsZeroGenes\t" << diag_.readsZeroGenes << "\n";
     out << "readsNAlignWithGeneZero\t" << diag_.readsNAlignWithGeneZero << "\n";
     out << "readsSumWeightLessThanOne\t" << diag_.readsSumWeightLessThanOne << "\n";
     out << "\nnTrDistribution:\n";
     for (const auto& kv : diag_.nTrDistribution) {
         out << "nTr_" << kv.first << "\t" << kv.second << "\n";
+    }
+    out << "\ncallableLengthDistribution:\n";
+    for (const auto& kv : diag_.callableLengthDistribution) {
+        out << "callableLength_" << kv.first << "\t" << kv.second << "\n";
     }
     out << "\ngeneSetSizeDistribution:\n";
     for (const auto& kv : diag_.geneSetSizeDistribution) {
@@ -1787,7 +2002,8 @@ void SlamQuant::closeDumpWriter() {
 // Replay buffered reads with trim applied
 // This is the core replay logic - processes buffered reads through the same
 // counting paths but with trim filtering applied
-uint64_t SlamQuant::replayBufferedReads(SlamCompat* compat, const SlamSnpMask* snpMask, int strandness) {
+uint64_t SlamQuant::replayBufferedReads(SlamCompat* compat, const SlamSnpMask* snpMask,
+                                        int strandness, uint32_t minCallableLength) {
     if (!readBuffer_ || readBuffer_->size() == 0) {
         return 0;
     }
@@ -1836,8 +2052,10 @@ uint64_t SlamQuant::replayBufferedReads(SlamCompat* compat, const SlamSnpMask* s
         std::vector<uint32_t> mismatchPositions;
         bool snpDetect = snpDetectEnabled_ && !read.isIntronic;
         
+        std::vector<SlamBufferedConsensusObservation> observations;
+        observations.reserve(read.positions.size());
         for (const SlamBufferedPosition& pos : read.positions) {
-            // Apply trim filtering via SlamCompat
+            bool trimPass = true;
             if (compat) {
                 // Convert readPos to mate-local coordinates
                 uint32_t mateLocalPos;
@@ -1850,30 +2068,95 @@ uint64_t SlamQuant::replayBufferedReads(SlamCompat* compat, const SlamSnpMask* s
                     mateLen = read.readLength0;
                 }
                 
-                // Check overlap skip (if enabled)
                 if (compat->cfg().ignoreOverlap && pos.overlap) {
-                    diag_.compatPositionsSkippedOverlap++;
-                    continue;
-                }
-                
-                // Check trim guards
-                if (!compat->compatShouldCountPos(mateLocalPos, mateLen)) {
-                    diag_.compatPositionsSkippedTrim++;
-                    continue;
+                    trimPass = false;
+                } else if (!compat->compatShouldCountPos(mateLocalPos, mateLen,
+                                                        pos.secondMate ? 1u : 0u)) {
+                    trimPass = false;
                 }
             }
-            
-            // Record transition base (same logic as ReadAlign_slamQuant)
-            bool skipMismatch = pos.overlap && pos.secondMate;
-            if (!skipMismatch) {
-                addTransitionBase(category, pos.readPos, pos.secondMate, pos.overlap, 
-                                  read.oppositeStrand, pos.refBase, pos.readBase, read.weight);
-                if (!read.oppositeStrand) {
-                    addTransitionBase(senseCategory, pos.readPos, pos.secondMate, pos.overlap,
-                                      false, pos.refBase, pos.readBase, read.weight);
-                }
+
+            SlamBufferedConsensusObservation obs;
+            obs.pos = &pos;
+            obs.trimPass = trimPass;
+            observations.push_back(obs);
+        }
+
+        std::sort(observations.begin(), observations.end(),
+                  [](const SlamBufferedConsensusObservation& a,
+                     const SlamBufferedConsensusObservation& b) {
+                      const SlamBufferedPosition* ap = a.pos;
+                      const SlamBufferedPosition* bp = b.pos;
+                      if (ap == nullptr || bp == nullptr) {
+                          return bp != nullptr;
+                      }
+                      if (ap->genomicPos != bp->genomicPos) {
+                          return ap->genomicPos < bp->genomicPos;
+                      }
+                      if (ap->secondMate != bp->secondMate) {
+                          return !ap->secondMate;
+                      }
+                      return ap->qual > bp->qual;
+                  });
+
+        std::vector<const SlamBufferedPosition*> callablePositions;
+        callablePositions.reserve(observations.size());
+
+        for (size_t begin = 0; begin < observations.size();) {
+            size_t end = begin + 1;
+            while (end < observations.size() &&
+                   observations[end].pos != nullptr &&
+                   observations[begin].pos != nullptr &&
+                   observations[end].pos->genomicPos == observations[begin].pos->genomicPos) {
+                ++end;
             }
-            
+
+            const SlamBufferedPosition* chosen = nullptr;
+            if (!chooseBufferedConsensusObservation(observations, begin, end, true, chosen)) {
+                if (compat) {
+                    bool anyTrimmed = false;
+                    bool anyOverlapSkipped = false;
+                    for (size_t i = begin; i < end; ++i) {
+                        if (!observations[i].trimPass && observations[i].pos != nullptr) {
+                            anyTrimmed = true;
+                            anyOverlapSkipped = anyOverlapSkipped ||
+                                (compat->cfg().ignoreOverlap && observations[i].pos->overlap);
+                        }
+                    }
+                    if (anyOverlapSkipped) {
+                        diag_.compatPositionsSkippedOverlap++;
+                    } else if (anyTrimmed) {
+                        diag_.compatPositionsSkippedTrim++;
+                    }
+                }
+                begin = end;
+                continue;
+            }
+
+            const SlamBufferedPosition& pos = *chosen;
+            callablePositions.push_back(&pos);
+            begin = end;
+        }
+
+        const size_t callableLength = callablePositions.size();
+        diag_.callableLengthDistribution[callableLength]++;
+        if (minCallableLength > 0 && callableLength < static_cast<size_t>(minCallableLength)) {
+            diag_.readsDroppedCallableLength++;
+            continue;
+        }
+
+        for (const SlamBufferedPosition* posPtr : callablePositions) {
+            if (posPtr == nullptr) {
+                continue;
+            }
+            const SlamBufferedPosition& pos = *posPtr;
+            addTransitionBase(category, pos.readPos, pos.secondMate, pos.overlap,
+                              read.oppositeStrand, pos.refBase, pos.readBase, read.weight);
+            if (!read.oppositeStrand) {
+                addTransitionBase(senseCategory, pos.readPos, pos.secondMate, pos.overlap,
+                                  false, pos.refBase, pos.readBase, read.weight);
+            }
+
             // Count T bases and conversions (for EM histogram)
             if (!read.isIntronic) {
                 bool isT = false;
@@ -1900,15 +2183,13 @@ uint64_t SlamQuant::replayBufferedReads(SlamCompat* compat, const SlamSnpMask* s
         
         // Add to gene counts (same logic as ReadAlign_slamQuant)
         if (!read.isIntronic) {
-            uint8_t k8 = static_cast<uint8_t>(k > 255 ? 255 : k);
-            
             if (snpDetect && !mismatchPositions.empty()) {
                 for (uint32_t geneId : read.geneIds) {
                     bufferSnpRead(geneId, nT, mismatchPositions, read.weight);
                 }
             } else {
                 for (uint32_t geneId : read.geneIds) {
-                    addRead(geneId, nT, k8, read.weight);
+                    addRead(geneId, nT, k, read.weight);
                 }
             }
         }

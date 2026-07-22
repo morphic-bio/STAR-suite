@@ -1,0 +1,3 @@
+id,name,read,pattern,sequence,feature_type,target_gene_id,target_gene_name
+Guide_A,Guide_A,R2,TTCCAGCTTAGCTCTTAAAC(BC),GGGTGGTGCCCATCCTGGTC,CRISPR Guide Capture,target_1,Guide_A
+Guide_B,Guide_B,R2,TTCCAGCTTAGCTCTTAAAC(BC),TATTTCCTGGTTCGCCGGCC,CRISPR Guide Capture,target_2,Guide_B
