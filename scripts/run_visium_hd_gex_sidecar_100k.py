@@ -175,10 +175,21 @@ def validate_output_root(path: Path) -> None:
         path.mkdir(parents=True)
 
 
-def parse_tsv(path: Path) -> list[dict[str, str]]:
+def parse_tsv(
+    path: Path, expected_header: list[str] | None = None
+) -> list[dict[str, str]]:
     lines = path.read_text(encoding="utf-8").splitlines()
     if not lines:
         raise ValueError(f"empty TSV: {path}")
+    if expected_header is not None:
+        matching = [
+            index
+            for index, line in enumerate(lines)
+            if line.split("\t") == expected_header
+        ]
+        if len(matching) != 1:
+            raise ValueError(f"expected exactly one table header in TSV: {path}")
+        lines = lines[matching[0] :]
     header = lines[0].split("\t")
     rows = []
     for line in lines[1:]:
@@ -378,7 +389,13 @@ def main() -> int:
     resolver_config = {row["key"]: row["value"] for row in resolver_config_rows}
     if resolver_config.get("gex_multigene_umi_cr") != "1":
         raise RuntimeError("GEX MultiGeneUMI_CR resolver gate failed")
-    matrices = parse_tsv(args.out_dir / "materialized/summary.tsv")
+    matrices = parse_tsv(
+        args.out_dir / "materialized/summary.tsv",
+        [
+            "product", "scale", "features", "barcodes", "nnz", "mass",
+            "matrix_field",
+        ],
+    )
     if len(matrices) != 12:
         raise RuntimeError("materializer did not produce four policies at three scales")
     expected_products = {"strict", "soft_expected", "hard", "gated_hard"}
