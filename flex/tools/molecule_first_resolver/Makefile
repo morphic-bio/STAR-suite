@@ -13,9 +13,10 @@ RESOLVER_SRC := $(FLEX_SRC)/solo/MoleculeFirstResolver.cpp
 MULTIGENE_SRC := $(CORE_SRC)/MultiGeneUmiCr.cpp
 SIDECAR_SRC := $(CORE_SRC)/SpatialFeatureSidecar.cpp
 TARGETS := molecule_first_resolver molecule_first_bam_ledger molecule_first_materialize \
-	spatial_feature_sidecar_dump spatial_feature_sidecar_join
+	molecule_first_gex_reconcile spatial_feature_sidecar_dump spatial_feature_sidecar_join
 TEST_TARGET := test_molecule_first_resolver
 SIDECAR_JOIN_TEST := test_spatial_feature_sidecar_join
+GEX_RECONCILE_CLI_TEST := test_gex_reconcile_cli.sh
 
 .DEFAULT_GOAL := all
 
@@ -30,6 +31,9 @@ molecule_first_bam_ledger: molecule_first_bam_ledger.cpp $(HTSLIB)
 
 molecule_first_materialize: molecule_first_materialize.cpp
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -o $@ molecule_first_materialize.cpp
+
+molecule_first_gex_reconcile: molecule_first_gex_reconcile.cpp $(MULTIGENE_SRC)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -o $@ molecule_first_gex_reconcile.cpp $(MULTIGENE_SRC)
 
 spatial_feature_sidecar_dump: spatial_feature_sidecar_dump.cpp $(SIDECAR_SRC) $(CORE_SRC)/SpatialFeatureSidecar.h
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -o $@ spatial_feature_sidecar_dump.cpp $(SIDECAR_SRC) -lcrypto
@@ -50,6 +54,7 @@ test: $(TEST_TARGET) $(SIDECAR_JOIN_TEST) $(TARGETS)
 	./$(TEST_TARGET)
 	./$(SIDECAR_JOIN_TEST) ./spatial_feature_sidecar_join
 	./test_cli.sh ./molecule_first_resolver
+	./$(GEX_RECONCILE_CLI_TEST) ./molecule_first_gex_reconcile
 
 clean:
 	rm -f $(TARGETS) $(TEST_TARGET) $(SIDECAR_JOIN_TEST)
