@@ -623,6 +623,7 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloCrGexFeature", &pSolo.crGexFeatureStr));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloCrMultimapRescue", &pSolo.crMultimapRescueStr));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloCrMultimapRescueIntronic", &pSolo.crMultimapRescueIntronicStr));
+    parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloSpatialFeatureSidecar", &soloSpatialFeatureSidecar));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloProbeList", &pSolo.probeListPath));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloRemoveDeprecated", &pSolo.removeDeprecatedStr));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloSampleWhitelist", &pSolo.sampleWhitelistPath));
@@ -3200,6 +3201,68 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
     
     //solo
     pSolo.initialize(this);
+
+    soloSpatialFeatureSidecarEnabled = !soloSpatialFeatureSidecar.empty()
+        && soloSpatialFeatureSidecar != "-" && soloSpatialFeatureSidecar != "None";
+    if (soloSpatialFeatureSidecarEnabled) {
+        const auto exactly = [](const vector<string> &values, const string &expected) {
+            return values.size() == 1 && values[0] == expected;
+        };
+        auto rejectSpatialSidecar = [&](const string &reason) {
+            ostringstream errOut;
+            errOut << "EXITING because of fatal PARAMETERS error: --soloSpatialFeatureSidecar "
+                   << reason << "\n"
+                   << "SOLUTION: use the modern annotation-only Visium HD GEX sidecar recipe.\n";
+            exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+        };
+
+        if (runMode != "alignReads") rejectSpatialSidecar("requires --runMode alignReads");
+        if (pSolo.typeStr != "None") rejectSpatialSidecar("requires --soloType None");
+        if (!exactly(pSolo.featureIn, "GeneFull")) rejectSpatialSidecar("requires exactly --soloFeatures GeneFull");
+        if (pSolo.strandStr != "Forward") rejectSpatialSidecar("requires --soloStrand Forward");
+        if (!pSolo.crMultimapRescue) rejectSpatialSidecar("requires --soloCrMultimapRescue yes");
+        if (pSolo.crGexFeature != ParametersSolo::CrGexGeneFull)
+            rejectSpatialSidecar("requires --soloCrGexFeature GeneFull");
+        if (!exactly(pSolo.umiDedup.typesIn, "1MM_CR"))
+            rejectSpatialSidecar("requires exactly --soloUMIdedup 1MM_CR");
+        if (!exactly(pSolo.umiFiltering.type, "MultiGeneUMI_CR"))
+            rejectSpatialSidecar("requires exactly --soloUMIfiltering MultiGeneUMI_CR");
+        if (!exactly(pSolo.multiMap.typesIn, "Unique"))
+            rejectSpatialSidecar("requires exactly --soloMultiMappers Unique");
+        if (!exactly(pSolo.cellFilter.type, "None"))
+            rejectSpatialSidecar("requires --soloCellFilter None");
+        if (!exactly(outSAMtype, "None")) rejectSpatialSidecar("requires --outSAMtype None");
+        if (outSAMattrPresent.GX || outSAMattrPresent.GN || outSAMattrPresent.UR
+            || outSAMattrPresent.UB || outSAMattrPresent.CB || outSAMattrPresent.CR) {
+            rejectSpatialSidecar("does not permit GX/GN/UR/UB/CB/CR SAM attributes");
+        }
+        if (twoPass.mode != "None" || runRestart.type != 0)
+            rejectSpatialSidecar("does not support two-pass or restart mapping");
+        if (outFilterType != "Normal")
+            rejectSpatialSidecar("requires --outFilterType Normal");
+        if (readFilesTypeN == 10 || readNends != 2)
+            rejectSpatialSidecar("requires two FASTQ ends ordered as R2 then raw R1");
+        if (batchModeRequested || quant.slam.yes || quant.transcriptVB.yes)
+            rejectSpatialSidecar("does not support batch, SLAM, or transcript-VB replay modes");
+
+        // This is a narrow annotation-only mode: R2 is the sole mapped end and
+        // raw R1 remains available to the independent spatial decoder. No Solo
+        // barcode object, whitelist, correction, or collapse is enabled.
+        readNmates = 1;
+        pSolo.barcodeRead = 1;
+        pSolo.strand = 0;
+        pSolo.featureYes.fill(false);
+        pSolo.featureYes[SoloFeatureTypes::GeneFull] = true;
+        pSolo.featureInd.fill(-1);
+        pSolo.featureInd[SoloFeatureTypes::GeneFull] = 0;
+        pSolo.features.clear();
+        pSolo.features.push_back(SoloFeatureTypes::GeneFull);
+        pSolo.nFeatures = 1;
+        quant.geneFull.yes = true;
+        quant.yes = true;
+        inOut->logMain << "Spatial GeneFull sidecar: annotation-only mode enabled; mapping R2 and "
+                       << "excluding raw R1 from alignment/barcode correction\n";
+    }
 
     if (runMode == "hashCacheGenerate") {
         if (pSolo.hashCacheOutput.empty() || pSolo.hashCacheOutput == "-") {

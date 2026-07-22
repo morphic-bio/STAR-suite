@@ -19,6 +19,7 @@
 #include "TimeFunctions.h"
 #include "ErrorWarning.h"
 #include "IncludeDefine.h"
+#include "MultiGeneUmiCr.h"
 #include <algorithm>
 #include <chrono>
 #include <cstdlib>
@@ -649,6 +650,7 @@ void SoloFeature::collapseUMIall_fromBridgeHash()
         std::vector<MgRow> mgBuf;
         std::vector<std::pair<uint32_t, uint32_t>> aggGene;
         std::vector<std::pair<uint32_t, uint32_t>> origAtCu;
+        std::vector<multi_gene_umi_cr::GeneSupport> resolutionSupports;
         vector<uint32> geneCounts;
         std::unordered_map<uintUMI, uintUMI> emptyUmiCorr;
         std::vector<uint32_t> geneStamp;
@@ -899,22 +901,6 @@ void SoloFeature::collapseUMIall_fromBridgeHash()
                     ts.aggGene.push_back({g0, s});
                 }
 
-                uint32_t maxu = 0;
-                uint32_t maxg = static_cast<uint32_t>(-1);
-                for (const auto &pr : ts.aggGene) {
-                    if (pr.second > maxu) {
-                        maxu = pr.second;
-                        maxg = pr.first;
-                    } else if (pr.second == maxu) {
-                        maxg = static_cast<uint32_t>(-1);
-                    }
-                }
-
-                if (maxg + 1u == 0u) {
-                    p = q;
-                    continue;
-                }
-
                 ts.origAtCu.clear();
                 for (size_t i = p; i < q; ++i) {
                     if (ts.mgBuf[i].orig == cu)
@@ -938,20 +924,27 @@ void SoloFeature::collapseUMIall_fromBridgeHash()
                     ts.origAtCu.resize(o);
                 }
 
-                uint32_t baseOrig = 0;
-                for (const auto &pr : ts.origAtCu) {
-                    if (pr.first == maxg) {
-                        baseOrig = pr.second;
-                        break;
+                ts.resolutionSupports.clear();
+                ts.resolutionSupports.reserve(ts.aggGene.size());
+                size_t originalIndex = 0;
+                for (const auto &pr : ts.aggGene) {
+                    while (originalIndex < ts.origAtCu.size()
+                           && ts.origAtCu[originalIndex].first < pr.first) {
+                        ++originalIndex;
                     }
+                    multi_gene_umi_cr::GeneSupport support;
+                    support.gene = pr.first;
+                    support.correctedCount = pr.second;
+                    support.originalAtCorrectedCount =
+                        originalIndex < ts.origAtCu.size()
+                            && ts.origAtCu[originalIndex].first == pr.first
+                        ? ts.origAtCu[originalIndex].second : 0;
+                    ts.resolutionSupports.push_back(support);
                 }
-
-                for (const auto &pr : ts.origAtCu) {
-                    if (pr.second > baseOrig) {
-                        maxg = static_cast<uint32_t>(-1);
-                        break;
-                    }
-                }
+                const multi_gene_umi_cr::Result resolution =
+                    multi_gene_umi_cr::resolve(ts.resolutionSupports);
+                const uint32_t maxg = resolution.accepted
+                    ? resolution.gene : static_cast<uint32_t>(-1);
 
                 if (shouldTraceCollapseBarcode(pSolo, indCB[iCB])) {
                     const int64_t chosenGene = (maxg + 1u == 0u) ? -1 : static_cast<int64_t>(ts.gID[maxg]);

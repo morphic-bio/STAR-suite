@@ -71,6 +71,15 @@ struct Molecule {
     std::vector<std::string> readCliqueIds;
 };
 
+struct GexReconciliationStats {
+    std::uint64_t groups = 0;
+    std::uint64_t accepted = 0;
+    std::uint64_t correctedCountTies = 0;
+    std::uint64_t originalUmiDominanceRejected = 0;
+    double inputExpectedMass = 0.0;
+    double outputExpectedMass = 0.0;
+};
+
 using PriorCounts = std::map<std::string, std::uint64_t>;
 using UmiCorrections = std::map<std::tuple<std::string, std::string, std::string>, std::string>;
 
@@ -91,6 +100,18 @@ std::vector<Molecule> policyMolecules(const std::vector<ReadClique> &cliques,
                                       const std::string &umiMode,
                                       const std::string &product,
                                       const std::vector<HardCall> &hardCalls);
+
+// GEX-only variants. Candidate-specific UMI correction occurs first, followed
+// by the same MultiGeneUMI_CR helper used by standard Solo collapse. These are
+// opt-in so the existing Flex resolver behavior is unchanged.
+std::vector<Molecule> gexPolicyMolecules(
+    const std::vector<ReadClique> &cliques, const std::string &umiMode,
+    const std::string &product, const std::vector<HardCall> &hardCalls,
+    GexReconciliationStats *stats = nullptr);
+
+std::vector<Occupancy> gexWeightedOccupancies(
+    const std::vector<ReadClique> &cliques, const std::string &umiMode,
+    GexReconciliationStats *stats = nullptr);
 
 std::pair<std::string, double> topCandidate(const ReadClique &clique);
 
