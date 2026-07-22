@@ -414,13 +414,18 @@ test_SoloReadInfoBaseline: Depend.list parametersDefault.xxd $(filter-out STAR.o
 	../test/solo_readinfo_baseline
 
 .PHONY: test
-test: test_packed_readinfo test_SoloHDMoleculeWriter test_SoloReadInfoBaseline test_SoloReadInfoLoader test_SoloReadInfoParity test_MinimalSink test_CbCorrector test_CbBayesianResolver test_CbBayesianResolverPhase2 test_inline_hash_record_capture test_inline_hash_resolver test_inline_hash_clique test_inline_hash_parity test_gene_resolver
+test: test_packed_readinfo test_SoloHDMoleculeWriter test_complex_barcode_whitelist_lookup test_SoloReadInfoBaseline test_SoloReadInfoLoader test_SoloReadInfoParity test_MinimalSink test_CbCorrector test_CbBayesianResolver test_CbBayesianResolverPhase2 test_inline_hash_record_capture test_inline_hash_resolver test_inline_hash_clique test_inline_hash_parity test_gene_resolver
 
 .PHONY: test_SoloHDMoleculeWriter
 test_SoloHDMoleculeWriter: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
 test_SoloHDMoleculeWriter: SoloHDMoleculeWriter.o
 	$(CXX) $(CXXFLAGS) -I./ ../test/test_solo_hd_molecule_writer.cpp SoloHDMoleculeWriter.o $(LDFLAGS_shared) -o ../test/test_solo_hd_molecule_writer
 	../test/test_solo_hd_molecule_writer
+
+.PHONY: test_complex_barcode_whitelist_lookup
+test_complex_barcode_whitelist_lookup:
+	$(CXX) $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS) -I./ ../test/test_complex_barcode_whitelist_lookup.cpp $(LDFLAGS_shared) -o ../test/test_complex_barcode_whitelist_lookup
+	../test/test_complex_barcode_whitelist_lookup
 
 .PHONY: test_MinimalSink
 test_MinimalSink: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
