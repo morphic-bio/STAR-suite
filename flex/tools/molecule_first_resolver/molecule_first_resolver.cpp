@@ -13,6 +13,7 @@
 #include <set>
 #include <sstream>
 #include <stdexcept>
+#include <unordered_map>
 #include <sys/stat.h>
 #include <sys/types.h>
 
@@ -25,6 +26,7 @@ namespace {
 struct Arguments {
     std::string input;
     std::string outDir;
+    bool inputFeatureSorted = false;
     molecule_first::Config config;
 };
 
@@ -39,6 +41,7 @@ void usage(std::ostream &out)
         << "  --prior-beta FLOAT           default 1\n"
         << "  --gate-min-posterior FLOAT   default 0.95\n"
         << "  --gate-min-margin FLOAT      default 0.90\n"
+        << "  --input-feature-sorted       stream feature_id/read_id/candidate sorted input\n"
         << "  --version\n";
 }
 
@@ -64,6 +67,10 @@ Arguments parseArguments(int argc, char **argv)
         if (option == "--version") {
             std::cout << STAR_SUITE_VERSION << '\n';
             std::exit(0);
+        }
+        if (option == "--input-feature-sorted") {
+            arguments.inputFeatureSorted = true;
+            continue;
         }
         if (index + 1 >= argc) {
             throw std::invalid_argument("missing value for " + option);
@@ -292,12 +299,259 @@ void writeMolecules(AtomicTable &table, const std::vector<molecule_first::Molecu
     }
 }
 
+struct StreamingSummary {
+    std::uint64_t candidateRows = 0;
+    std::uint64_t candidateReads = 0;
+    std::uint64_t readCliques = 0;
+    std::uint64_t gatedAssigned = 0;
+    std::uint64_t featureChunks = 0;
+    double posteriorMass = 0.0;
+    std::map<std::string, std::uint64_t> productCounts;
+    std::map<std::string, double> occupancyMass;
+};
+
+void processFeatureChunk(
+    const std::vector<molecule_first::CandidateRead> &reads,
+    const molecule_first::PriorCounts &priorCounts,
+    const Arguments &arguments,
+    AtomicTable &cliqueTable,
+    AtomicTable &auditTable,
+    AtomicTable &strictTable,
+    AtomicTable &hardTable,
+    AtomicTable &gatedTable,
+    AtomicTable &softTable,
+    StreamingSummary &summary)
+{
+    if (reads.empty()) {
+        return;
+    }
+    const std::vector<molecule_first::ReadClique> cliques =
+        molecule_first::buildReadCliques(reads, priorCounts, arguments.config);
+    const std::vector<molecule_first::HardCall> calls =
+        molecule_first::gatedHardCalls(cliques, arguments.config);
+
+    summary.candidateReads += reads.size();
+    summary.readCliques += cliques.size();
+    ++summary.featureChunks;
+    for (const molecule_first::ReadClique &clique : cliques) {
+        for (std::size_t index = 0; index < clique.candidates.size(); ++index) {
+            summary.posteriorMass += clique.posterior[index];
+            cliqueTable.stream() << clique.cliqueId << '\t' << clique.featureId << '\t'
+                << clique.rawUmi << '\t' << clique.memberReadIds.size() << '\t'
+                << join(clique.memberReadIds, ';') << '\t' << clique.candidates[index] << '\t'
+                << clique.logLikelihoodSums[index] << '\t' << clique.logReadPriors[index] << '\t'
+                << clique.logEvidence[index] << '\t' << clique.posterior[index] << '\n';
+        }
+    }
+    for (const molecule_first::HardCall &call : calls) {
+        summary.gatedAssigned += call.assigned ? 1 : 0;
+        auditTable.stream() << call.cliqueId << '\t' << (call.assigned ? "assigned" : "deferred")
+            << '\t' << call.candidate << '\t' << call.posterior << '\t' << call.margin
+            << '\t' << call.reason << '\n';
+    }
+
+    for (const std::string &umiMode : {std::string("1mm_cr"), std::string("exact")}) {
+        const std::vector<molecule_first::Molecule> strict =
+            molecule_first::policyMolecules(cliques, umiMode, "strict", calls);
+        const std::vector<molecule_first::Molecule> hard =
+            molecule_first::policyMolecules(cliques, umiMode, "hard", calls);
+        const std::vector<molecule_first::Molecule> gated =
+            molecule_first::policyMolecules(cliques, umiMode, "gated_hard", calls);
+        const std::vector<molecule_first::Occupancy> soft =
+            molecule_first::weightedOccupancies(cliques, umiMode);
+        writeMolecules(strictTable, strict);
+        writeMolecules(hardTable, hard);
+        writeMolecules(gatedTable, gated);
+        summary.productCounts[umiMode + ".strict"] += strict.size();
+        summary.productCounts[umiMode + ".hard"] += hard.size();
+        summary.productCounts[umiMode + ".gated_hard"] += gated.size();
+        summary.productCounts[umiMode + ".soft_rows"] += soft.size();
+        for (const molecule_first::Occupancy &row : soft) {
+            summary.occupancyMass[umiMode] += row.expectedCount;
+            softTable.stream() << row.umiMode << '\t' << row.featureId << '\t'
+                << row.correctedUmi << '\t' << row.candidate << '\t' << row.expectedCount
+                << '\t' << join(row.readCliqueIds, ';') << '\n';
+        }
+    }
+}
+
+int runFeatureSorted(const Arguments &arguments)
+{
+    std::ifstream input(arguments.input.c_str());
+    if (!input) {
+        throw std::runtime_error("cannot open input: " + arguments.input);
+    }
+    std::string line;
+    if (!std::getline(input, line)) {
+        throw std::runtime_error("input is empty: " + arguments.input);
+    }
+    const std::vector<std::string> expected = {
+        "read_id", "feature_id", "raw_umi", "candidate",
+        "log_sequence_likelihood", "exact_read_count"
+    };
+    if (splitTabs(line) != expected) {
+        throw std::runtime_error("input header does not match the molecule-first v1 schema");
+    }
+
+    prepareOutputDirectory(arguments.outDir);
+    AtomicTable cliqueTable(arguments.outDir, "read_cliques.tsv",
+        "clique_id\tfeature_id\traw_umi\tmember_read_count\tmember_read_ids\tcandidate\tlog_sequence_likelihood_sum\tlog_exact_read_prior\tlog_evidence\tposterior");
+    AtomicTable auditTable(arguments.outDir, "hard_call_audit.tsv",
+        "clique_id\tstatus\tcandidate\tposterior\tmargin\treason");
+    const std::string moleculeHeader =
+        "umi_mode\tproduct\tmolecule_id\tfeature_id\tcorrected_umi\tcandidate\tmember_read_count\tmember_read_ids\tread_clique_ids";
+    AtomicTable strictTable(arguments.outDir, "strict_molecules.tsv", moleculeHeader);
+    AtomicTable hardTable(arguments.outDir, "hard_molecules.tsv", moleculeHeader);
+    AtomicTable gatedTable(arguments.outDir, "gated_hard_molecules.tsv", moleculeHeader);
+    AtomicTable softTable(arguments.outDir, "soft_expected_molecules.tsv",
+        "umi_mode\tfeature_id\tcorrected_umi\tcandidate\texpected_count\tread_clique_ids");
+    cliqueTable.stream() << std::setprecision(17);
+    auditTable.stream() << std::setprecision(17);
+    softTable.stream() << std::setprecision(17);
+
+    StreamingSummary summary;
+    std::unordered_map<std::string, std::uint64_t> globalPriorCounts;
+    std::vector<molecule_first::CandidateRead> featureReads;
+    molecule_first::PriorCounts featurePriorCounts;
+    molecule_first::CandidateRead currentRead;
+    std::set<std::string> currentCandidates;
+    std::string currentFeature;
+    std::string previousReadId;
+    std::uint64_t lineNumber = 1;
+
+    auto flushRead = [&]() {
+        if (!currentRead.readId.empty()) {
+            featureReads.push_back(currentRead);
+            currentRead = molecule_first::CandidateRead();
+            currentCandidates.clear();
+        }
+    };
+    auto flushFeature = [&]() {
+        flushRead();
+        processFeatureChunk(
+            featureReads, featurePriorCounts, arguments,
+            cliqueTable, auditTable, strictTable, hardTable, gatedTable, softTable,
+            summary);
+        featureReads.clear();
+        featurePriorCounts.clear();
+        previousReadId.clear();
+    };
+
+    while (std::getline(input, line)) {
+        ++lineNumber;
+        if (line.empty()) {
+            continue;
+        }
+        const std::vector<std::string> fields = splitTabs(line);
+        if (fields.size() != expected.size()) {
+            throw std::runtime_error("wrong field count at input line " + std::to_string(lineNumber));
+        }
+        for (std::size_t index = 0; index < 4; ++index) {
+            if (fields[index].empty()) {
+                throw std::runtime_error("empty required value at input line " + std::to_string(lineNumber));
+            }
+        }
+        if (!currentFeature.empty() && fields[1] != currentFeature) {
+            if (fields[1] < currentFeature) {
+                throw std::runtime_error("feature-sorted input is out of order at line "
+                                         + std::to_string(lineNumber));
+            }
+            flushFeature();
+            currentFeature = fields[1];
+        } else if (currentFeature.empty()) {
+            currentFeature = fields[1];
+        }
+        if (!currentRead.readId.empty() && fields[0] != currentRead.readId) {
+            if (fields[0] < previousReadId) {
+                throw std::runtime_error("read-sorted input is out of order at line "
+                                         + std::to_string(lineNumber));
+            }
+            flushRead();
+        }
+        if (currentRead.readId.empty()) {
+            currentRead.readId = fields[0];
+            currentRead.featureId = fields[1];
+            currentRead.rawUmi = fields[2];
+            previousReadId = fields[0];
+        } else if (currentRead.featureId != fields[1] || currentRead.rawUmi != fields[2]) {
+            throw std::runtime_error("inconsistent feature/UMI for read " + fields[0]);
+        }
+        if (!currentCandidates.insert(fields[3]).second) {
+            throw std::runtime_error("duplicate read/candidate row at input line "
+                                     + std::to_string(lineNumber));
+        }
+        const double likelihood = parseDouble(fields[4], "log_sequence_likelihood");
+        const std::uint64_t count = parseCount(fields[5]);
+        const auto globalPrior = globalPriorCounts.find(fields[3]);
+        if (globalPrior != globalPriorCounts.end() && globalPrior->second != count) {
+            throw std::runtime_error("inconsistent exact_read_count for candidate " + fields[3]);
+        }
+        globalPriorCounts[fields[3]] = count;
+        featurePriorCounts[fields[3]] = count;
+        molecule_first::CandidateScore score;
+        score.candidate = fields[3];
+        score.logLikelihood = likelihood;
+        currentRead.scores.push_back(score);
+        ++summary.candidateRows;
+    }
+    flushFeature();
+    if (summary.candidateReads == 0) {
+        throw std::runtime_error("input contains no candidate reads");
+    }
+
+    AtomicTable configTable(arguments.outDir, "resolved_config.tsv", "key\tvalue");
+    configTable.stream() << std::setprecision(17)
+        << "schema\tstar_suite.molecule_first.v1\n"
+        << "star_suite_version\t" << STAR_SUITE_VERSION << '\n'
+        << "execution_mode\tfeature_sorted_streaming\n"
+        << "input_order\tfeature_id_read_id_candidate\n"
+        << "temperature\t" << arguments.config.temperature << '\n'
+        << "prior_alpha\t" << arguments.config.priorAlpha << '\n'
+        << "prior_beta\t" << arguments.config.priorBeta << '\n'
+        << "prior_units\traw_exact_reads_including_pcr_amplification\n"
+        << "prior_application\tonce_per_read_clique\n"
+        << "spatial_lambda\t0\n"
+        << "gate_min_posterior\t" << arguments.config.gateMinPosterior << '\n'
+        << "gate_min_margin\t" << arguments.config.gateMinMargin << '\n';
+
+    AtomicTable summaryTable(arguments.outDir, "summary.tsv", "metric\tvalue");
+    summaryTable.stream() << std::setprecision(17)
+        << "candidate_rows\t" << summary.candidateRows << '\n'
+        << "candidate_reads\t" << summary.candidateReads << '\n'
+        << "feature_chunks\t" << summary.featureChunks << '\n'
+        << "read_cliques\t" << summary.readCliques << '\n'
+        << "posterior_mass\t" << summary.posteriorMass << '\n'
+        << "gated_assigned_cliques\t" << summary.gatedAssigned << '\n'
+        << "gated_deferred_cliques\t" << summary.readCliques - summary.gatedAssigned << '\n';
+    for (const auto &entry : summary.productCounts) {
+        summaryTable.stream() << entry.first << "_count\t" << entry.second << '\n';
+    }
+    for (const auto &entry : summary.occupancyMass) {
+        summaryTable.stream() << entry.first << ".soft_occupancy_mass\t" << entry.second << '\n';
+        summaryTable.stream() << entry.first << ".deduplicated_mass\t"
+                              << summary.posteriorMass - entry.second << '\n';
+    }
+
+    cliqueTable.commit();
+    auditTable.commit();
+    strictTable.commit();
+    hardTable.commit();
+    gatedTable.commit();
+    softTable.commit();
+    configTable.commit();
+    summaryTable.commit();
+    return 0;
+}
+
 } // namespace
 
 int main(int argc, char **argv)
 {
     try {
         const Arguments arguments = parseArguments(argc, argv);
+        if (arguments.inputFeatureSorted) {
+            return runFeatureSorted(arguments);
+        }
         const LoadedInput input = loadInput(arguments.input);
         prepareOutputDirectory(arguments.outDir);
 
