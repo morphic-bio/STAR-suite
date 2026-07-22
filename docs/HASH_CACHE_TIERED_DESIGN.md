@@ -56,9 +56,32 @@ probe sequences.
   neighboring probes.
 - **Sample index**: `sampleIdx=0` (global).
 
-## Runtime Lookup (Two-Tier)
+## Recipe Policy and Assay Context
 
-At alignment time, each read's 50bp probe window is looked up in two stages:
+For routine scRNA-seq Flex processing, recipes should explicitly request
+`--hashCacheTiers H0,H1`. In the JAX scRNA-seq benchmark, H2 recovered
+measurable read-level signal (about 604 additional KEEP reads per 100K reads),
+but did not produce a material final count-level benefit. The full H0+H1+H2
+cache contained about 489 million records and occupied 11.7 GB, so H2 was not
+adopted for routine scRNA-seq production.
+
+This is an assay-context result, not a general conclusion about H2. Spatial
+assays may have a different coverage, sparsity, and signal-to-noise tradeoff.
+Spatial recipe generation should preserve H2 as an explicit experimental
+option and evaluate final count recovery and specificity on representative
+data before selecting a default.
+
+The runtime path also matters. The full `classifyRead()` implementation can
+consume H2 KEEP records, but the fused production triage calls
+`classifyReadH0H1Offset0()` and sends misses to alignment. Therefore, generating
+an H2 cache does not by itself enable H2 in the fused path; an H2 experiment
+must use an H2-aware runtime path or first add and validate H2 lookup in fused
+triage.
+
+## Runtime Lookup (Full Classifier)
+
+In the full classifier, each read's 50bp probe window is looked up in two
+stages:
 
 ```
 1.  H0 cache lookup (exact match, sample-aware)

@@ -1,0 +1,97 @@
+{
+  "schema": "biodepot.workflow-ir/v0",
+  "metadata": {
+    "id": "star_genome_generate",
+    "name": "STAR Genome Index (genomeGenerate)",
+    "source_language": "star-suite",
+    "source_path": "mcp_server/launchpad/composition_ir/star_genome_generate.json",
+    "description": "STAR-suite–owned Workflow IR for Launchpad bulk composition (mkindex role). Maintained next to mcp_server/workflows/star_genome_generate.yaml; update both when the STAR CLI contract for genomeGenerate changes."
+  },
+  "workflow": {
+    "inputs": {
+      "genome_fasta": {
+        "type": "file",
+        "required": true,
+        "description": "Reference genome FASTA consumed by STAR --runMode genomeGenerate."
+      },
+      "gtf": {
+        "type": "file",
+        "required": true,
+        "description": "Gene annotation GTF used for --sjdbGTFfile."
+      },
+      "sjdb_overhang": {
+        "type": "int",
+        "required": false,
+        "default": 100,
+        "description": "--sjdbOverhang; read length minus 1 is a safe default."
+      }
+    },
+    "outputs": {
+      "genome_index": {
+        "type": "directory",
+        "description": "STAR genome directory produced by --runMode genomeGenerate; consumed downstream by star_bulk_pe_batch."
+      }
+    },
+    "nodes": [
+      {
+        "id": "star_genome_generate",
+        "name": "star_genome_generate",
+        "kind": "module",
+        "module_ref": "star.genome_generate",
+        "inputs": {
+          "genome_fasta": {
+            "type": "file",
+            "required": true
+          },
+          "gtf": {
+            "type": "file",
+            "required": true
+          },
+          "sjdb_overhang": {
+            "type": "int",
+            "required": false,
+            "default": 100
+          }
+        },
+        "outputs": {
+          "genome_index": {
+            "type": "directory"
+          }
+        }
+      }
+    ],
+    "edges": [],
+    "subworkflows": [],
+    "conditions": []
+  },
+  "annotations": {
+    "star_suite": {
+      "workflow_id": "star_genome_generate",
+      "run_mode": "genomeGenerate",
+      "notes": [
+        "Authoritative for STAR Launchpad Composition bulk defaults (not bwb-nextflow-utils fixtures).",
+        "Mirrors the parameter set surfaced by the STAR-suite MCP catalog for star_genome_generate.",
+        "Container image is injected by the scheduler at recipe-run time; no container is pinned here."
+      ]
+    }
+  },
+  "execution_hints": {
+    "nodes": {
+      "star_genome_generate": {
+        "iterate": {
+          "inputs": [],
+          "mode": "none"
+        },
+        "gather": {
+          "outputs": [
+            "genome_index"
+          ],
+          "mode": "single"
+        }
+      }
+    }
+  },
+  "optional_specs": {
+    "interactive": null
+  }
+}

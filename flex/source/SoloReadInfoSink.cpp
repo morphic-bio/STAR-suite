@@ -1,11 +1,14 @@
 #include "SoloReadInfoSink.h"
 #include "SoloFeature.h"
 #include "SoloReadInfoLoader.h"
-#include <unordered_set>
+#include "SoloMemoryProfile.h"
+#include <algorithm>
+#include <cstdlib>
 #include <sstream>
+#include <unordered_set>
+#include <vector>
 
 #ifdef DEBUG_CB_UB_PARITY
-// Optional tracing of specific readIds via STAR_DEBUG_TRACE_READS=1,2,3
 static std::unordered_set<uint32_t> buildTraceReadSetSink() {
     std::unordered_set<uint32_t> out;
     const char* env = std::getenv("STAR_DEBUG_TRACE_READS");
@@ -18,7 +21,6 @@ static std::unordered_set<uint32_t> buildTraceReadSetSink() {
         try {
             out.insert(static_cast<uint32_t>(std::stoul(tok)));
         } catch (...) {
-            // ignore malformed entries
         }
     }
     return out;
@@ -26,18 +28,34 @@ static std::unordered_set<uint32_t> buildTraceReadSetSink() {
 static const std::unordered_set<uint32_t> g_traceReads = buildTraceReadSetSink();
 #endif
 
+namespace {
+
+bool countingSinkReadToCbEnabled()
+{
+    static int cached = -1;
+    if (cached < 0) {
+        const char *env = std::getenv("STAR_DEBUG_COUNTING_SINK_READ_TO_CB");
+        cached = (env != nullptr && env[0] != '\0' && env[0] != '0') ? 1 : 0;
+    }
+    return cached > 0;
+}
+
+uint64_t bucketCapacityBytes(const std::unordered_map<uint32_t, std::vector<CountingSinkRow>> &buckets)
+{
+    uint64_t cap = 0;
+    for (const auto &kv : buckets) {
+        cap += kv.second.capacity() * sizeof(CountingSinkRow);
+    }
+    return cap;
+}
+
+} // namespace
+
 void MinimalSink::onRecord(SoloFeature &feature, const ReadInfoRecord &rec) {
-    // CB and UB are independent: preserve CB data even when UMI is invalid (status==2)
-    // status==0: no CB match - write sentinel
-    // status==1: both CB and UMI valid - write both
-    // status==2: CB valid, UMI invalid - write CB with status==2
     if (rec.status == 0 || rec.featureId == (uint32_t)-1) {
-        // No CB match or no feature - write sentinel
         feature.recordReadInfo((uint32_t)rec.readId, 0, 0, 0);
         return;
     }
-    
-    // Pass original values (status==1 or status==2); recordReadInfo will translate per-backend
     feature.recordReadInfo((uint32_t)rec.readId, rec.cbIdx, rec.umi, rec.status);
 }
 
@@ -46,14 +64,11 @@ void MinimalSink::finalize(SoloFeature &feature) {
 }
 
 void CountingSink::onRecord(SoloFeature &feature, const ReadInfoRecord &rec) {
-    // Buffer counted records per WL CB for later materialization into rGeneUMI.
-    // Only accept good CB/UMI and valid featureId.
     if (rec.status != 1) return;
     if (rec.featureId == (uint32_t)-1) return;
-    // Guard: if no whitelist, skip safely
-    if (feature.pSolo.cbWLsize==0) return;
-    if (perWL.empty()) perWL.assign(feature.pSolo.cbWLsize, {});
+    if (feature.pSolo.cbWLsize == 0) return;
     if (rec.cbIdx >= feature.pSolo.cbWLsize) return;
+
 #ifdef DEBUG_CB_UB_PARITY
     if (!g_traceReads.empty()) {
         uint32_t rid = (rec.readIndex != (uint32_t)-1) ? rec.readIndex : (uint32_t)rec.readId;
@@ -63,9 +78,8 @@ void CountingSink::onRecord(SoloFeature &feature, const ReadInfoRecord &rec) {
         }
     }
 #endif
-    // Only guard on real readIndex values. Synthetic readIds are generated per thread
-    // for features that do not carry readIndex, so they are not globally unique.
-    if (rec.readIndex != (uint32_t)-1) {
+
+    if (countingSinkReadToCbEnabled() && rec.readIndex != (uint32_t)-1) {
         auto it = readToCb.find(rec.readIndex);
         if (it == readToCb.end()) {
             readToCb.emplace(rec.readIndex, rec.cbIdx);
@@ -75,87 +89,127 @@ void CountingSink::onRecord(SoloFeature &feature, const ReadInfoRecord &rec) {
             std::exit(1);
         }
     }
-    perWL[rec.cbIdx].push_back(rec);
+
+    const uint32_t readRef = (rec.readIndex != (uint32_t)-1)
+                                 ? rec.readIndex
+                                 : static_cast<uint32_t>(rec.readId);
+    CountingSinkRow row{rec.featureId, rec.umi, readRef};
+    auto &bucket = buckets[rec.cbIdx];
+    bucket.push_back(row);
+    totalRecords++;
 }
 
 void CountingSink::finalize(SoloFeature &feature) {
-    // Materialize buffered triplets into rGeneUMI/rCBp and run collapseUMIall().
-    if (perWL.empty()) return;
-    // Reset state for this finalize run
+    if (buckets.empty() || totalRecords == 0) {
+        soloMemoryProfileCheckpoint(feature.P.inOut->logMain,
+                                  "CountingSink::finalize_skipped_empty_buffer");
+        buckets.clear();
+        readToCb.clear();
+        totalRecords = 0;
+        return;
+    }
+
     feature.indCB.clear();
-    feature.indCBwl.assign(feature.pSolo.cbWLsize, (uint32) -1);
+    feature.indCBwl.assign(feature.pSolo.cbWLsize, (uint32)-1);
     feature.nCB = 0;
     feature.setRGUStride(feature.pSolo.readIndexYes[feature.featureType] ? 3u : 2u);
 
-    // Build detected CB list in WL order for determinism
-    std::vector<uint32_t> cbWLtoICB(perWL.size(), (uint32_t)-1);
-    for (uint32_t wl=0; wl<perWL.size(); ++wl) {
-        if (!perWL[wl].empty()) {
-            cbWLtoICB[wl] = feature.nCB;
-            feature.indCB.push_back(wl);
-            if (wl < feature.indCBwl.size()) feature.indCBwl[wl] = feature.nCB;
-            feature.nCB++;
+    std::vector<uint32_t> activeWL;
+    activeWL.reserve(buckets.size());
+    for (const auto &kv : buckets) {
+        if (!kv.second.empty()) {
+            activeWL.push_back(kv.first);
         }
     }
-    if (feature.nCB==0) return;
+    std::sort(activeWL.begin(), activeWL.end());
 
-    // Compute per-detected-CB counts and total
-    std::vector<uint32_t> counts(feature.nCB, 0);
-    uint64_t totalRecs = 0;
-    for (uint32_t wl=0; wl<perWL.size(); ++wl) {
-        uint32_t icb = cbWLtoICB[wl];
-        if (icb==(uint32_t)-1) continue;
-        counts[icb] = (uint32_t)perWL[wl].size();
-        totalRecs += perWL[wl].size();
+    std::vector<uint32_t> cbWLtoICB(feature.pSolo.cbWLsize, (uint32_t)-1);
+    for (uint32_t wl : activeWL) {
+        cbWLtoICB[wl] = feature.nCB;
+        feature.indCB.push_back(wl);
+        if (wl < feature.indCBwl.size()) {
+            feature.indCBwl[wl] = feature.nCB;
+        }
+        feature.nCB++;
     }
-    #ifdef DEBUG_CB_UB_PARITY
+    if (feature.nCB == 0) {
+        buckets.clear();
+        readToCb.clear();
+        totalRecords = 0;
+        return;
+    }
+
+    std::vector<uint32_t> counts(feature.nCB, 0);
+    const uint64_t totalRecs = totalRecords;
+    for (uint32_t wl : activeWL) {
+        const uint32_t icb = cbWLtoICB[wl];
+        counts[icb] = static_cast<uint32_t>(buckets[wl].size());
+    }
+
+#ifdef DEBUG_CB_UB_PARITY
     if (feature.parityEnabled) {
         feature.dbgBufferedRecords = totalRecs;
         feature.dbgBufferedCBs = feature.nCB;
     }
-    #endif
+#endif
 
-    // Allocate rGeneUMI and rCBp
+    {
+        std::ostringstream extra;
+        extra << "counting_sink_buffered_records=" << totalRecs
+              << " counting_sink_bucket_cbs=" << buckets.size()
+              << " counting_sink_bucket_capacity_bytes=" << bucketCapacityBytes(buckets)
+              << " counting_sink_readToCb=" << readToCb.size()
+              << " counting_sink_detected_cbs=" << feature.nCB
+              << " counting_sink_row_bytes=" << sizeof(CountingSinkRow)
+              << " rGeneUMI_triplets_est=" << totalRecs
+              << " rGeneUMI_bytes_est=" << (totalRecs * feature.getRGUStride() * sizeof(uint32_t));
+        soloMemoryProfileCheckpoint(feature.P.inOut->logMain,
+                                  "CountingSink::finalize_before_rGeneUMI",
+                                  extra.str());
+    }
+
     feature.rGeneUMI = new uint32[feature.getRGUStride() * totalRecs]();
     feature.rCBp = new uint32*[feature.nCB + 1];
     feature.rCBp[0] = feature.rGeneUMI;
-    for (uint32_t i=0; i<feature.nCB; ++i) {
-        feature.rCBp[i+1] = feature.rCBp[i] + feature.getRGUStride() * counts[i];
+    for (uint32_t i = 0; i < feature.nCB; ++i) {
+        feature.rCBp[i + 1] = feature.rCBp[i] + feature.getRGUStride() * counts[i];
     }
 
-    // Fill triplets per CB in WL order
-    for (uint32_t wl=0; wl<perWL.size(); ++wl) {
-        uint32_t icb = cbWLtoICB[wl];
-        if (icb==(uint32_t)-1) continue;
+    const uint32_t stride = feature.getRGUStride();
+    for (uint32_t wl : activeWL) {
+        const uint32_t icb = cbWLtoICB[wl];
         uint32_t *blockStart = feature.rCBp[icb];
         uint32_t *dst = blockStart;
-        for (const auto &r : perWL[wl]) {
-#ifdef DEBUG_CB_UB_PARITY
-            if (!g_traceReads.empty()) {
-                uint32_t rid = (r.readIndex != (uint32_t)-1) ? r.readIndex : (uint32_t)r.readId;
-                if (g_traceReads.count(rid)) {
-                    fprintf(stderr, "[TRACE bucket] read=%u wlIdx=%u icb=%u feature=%u status=%u dst_offset=%td\n",
-                            rid, wl, icb, r.featureId, r.status, dst - blockStart);
-                }
-            }
-#endif
+        auto &bucket = buckets[wl];
+        for (const auto &r : bucket) {
             dst[0] = r.featureId;
             dst[1] = r.umi;
-            if (feature.getRGUStride()==3) dst[2] = (r.readIndex != (uint32_t)-1) ? r.readIndex : (uint32_t)r.readId;
-            dst += feature.getRGUStride();
+            if (stride == 3) {
+                dst[2] = r.readRef;
+            }
+            dst += stride;
         }
-        // Ensure rCBp[icb] points to the start of the block (already set)
         feature.rCBp[icb] = blockStart;
+        std::vector<CountingSinkRow>().swap(bucket);
+    }
+    buckets.clear();
+    readToCb.clear();
+    totalRecords = 0;
+
+    if (feature.rCBn) {
+        delete[] feature.rCBn;
+        feature.rCBn = nullptr;
+    }
+    feature.rCBn = new uint32[feature.nCB];
+    for (uint32_t iCB = 0; iCB < feature.nCB; ++iCB) {
+        feature.rCBn[iCB] = counts[iCB];
     }
 
-    // Prepare per-CB read counts for caller
-    if (feature.rCBn) { delete[] feature.rCBn; feature.rCBn = nullptr; }
-    feature.rCBn = new uint32[feature.nCB];
-    for (uint32_t iCB=0; iCB<feature.nCB; ++iCB) feature.rCBn[iCB] = counts[iCB];
-
-    // Clear buffers for reuse and free memory
-    for (auto &v : perWL) { std::vector<ReadInfoRecord>().swap(v); }
-    perWL.clear();
-    perWL.shrink_to_fit();
-    readToCb.clear();
+    std::ostringstream extraDone;
+    extraDone << "rGeneUMI_triplets=" << totalRecs
+              << " rGeneUMI_bytes=" << (totalRecs * stride * sizeof(uint32_t))
+              << " rCBp_slots=" << (feature.nCB + 1);
+    soloMemoryProfileCheckpoint(feature.P.inOut->logMain,
+                              "CountingSink::finalize_after_fill",
+                              extraDone.str());
 }

@@ -1,0 +1,139 @@
+# UCSF Production 100K Smoke Workflow Schema
+# Parsed from tests/run_ucsf_corrected_production_100k_smoke.sh
+# Env-var-driven; parameters are mapped to UCSF_100K_SMOKE_* env vars at render time.
+
+id: "ucsf_production_100k_smoke"
+title: "UCSF Production 100K Smoke"
+summary: "Downsampled perturb-seq production workflow smoke test (100K reads, single sample)."
+kind: "shell_workflow"
+entry_script: "tests/run_ucsf_corrected_production_100k_smoke.sh"
+supported_modes:
+  - "local"
+caveats:
+  - "Parameters are passed as UCSF_100K_SMOKE_* environment variables, not CLI flags."
+  - "Requires corrected dataset at dataset_root with GEX/ and guides/ subdirectories."
+  - "Calls the full production workflow internally."
+default_output_layout: "tests/ucsf_corrected_production_100k_output_<timestamp>/"
+
+stages:
+  - name: "fixture_staging"
+    title: "Fixture Staging"
+    description: "Stage downsampled FASTQs from dataset into temp fixture directory."
+  - name: "production_workflow"
+    title: "Production Workflow"
+    description: "Run full UCSF corrected production workflow on downsampled data."
+  - name: "validation"
+    title: "Output Validation"
+    description: "Verify expected outputs and sample structure."
+
+parameter_groups:
+  - name: "sample"
+    title: "Sample Selection"
+    parameters: ["sample", "dataset_root"]
+  - name: "inputs"
+    title: "Input Paths"
+    parameters: ["feature_ref", "genome_dir", "solo_cb_whitelist", "star_bin"]
+  - name: "performance"
+    title: "Performance"
+    parameters: ["threads", "reads"]
+  - name: "output"
+    title: "Output"
+    parameters: ["out_root", "reuse_out_root"]
+
+parameters:
+  - name: "sample"
+    cli_flag: "--sample"
+    type: "string"
+    required: false
+    default: "EBs2_2"
+    description: "Sample name to process."
+    env_var: "UCSF_100K_SMOKE_SAMPLE"
+    skip_when_default: true
+
+  - name: "dataset_root"
+    cli_flag: "--dataset-root"
+    type: "directory"
+    required: false
+    default: "/mnt/pikachu/ucsf-perturb-seq-corrected"
+    description: "Root of corrected UCSF dataset."
+    env_var: "UCSF_100K_SMOKE_DATASET_ROOT"
+    skip_when_default: true
+
+  - name: "feature_ref"
+    cli_flag: "--feature-ref"
+    type: "file"
+    required: false
+    default: "/mnt/pikachu/ucsf-perturb-seq/cellranger_feature_ref_hCRISPRa_v2_like_AALG2_pattern.csv"
+    description: "Feature reference CSV for guide library."
+    env_var: "UCSF_100K_SMOKE_FEATURE_REF"
+    skip_when_default: true
+
+  - name: "genome_dir"
+    cli_flag: "--genome-dir"
+    type: "directory"
+    required: false
+    default: "/storage/autoindex_110_44/bulk_index"
+    description: "STAR genome index directory."
+    env_var: "UCSF_100K_SMOKE_GENOME_DIR"
+    skip_when_default: true
+
+  - name: "solo_cb_whitelist"
+    cli_flag: "--solo-whitelist"
+    type: "file"
+    required: false
+    description: "Solo barcode whitelist file."
+    env_var: "UCSF_100K_SMOKE_SOLO_WHITELIST"
+
+  - name: "star_bin"
+    cli_flag: "--star-bin"
+    type: "file"
+    required: false
+    description: "STAR binary path (defaults to repo release build)."
+    env_var: "UCSF_100K_SMOKE_STAR_BIN"
+
+  - name: "threads"
+    cli_flag: "--threads"
+    type: "int"
+    required: false
+    default: 24
+    description: "Thread count for STAR alignment."
+    env_var: "UCSF_100K_SMOKE_THREADS"
+    skip_when_default: true
+
+  - name: "reads"
+    cli_flag: "--reads"
+    type: "int"
+    required: false
+    default: 100000
+    description: "Number of reads to downsample per library."
+    env_var: "UCSF_100K_SMOKE_READS"
+    skip_when_default: true
+
+  - name: "out_root"
+    cli_flag: "--out-root"
+    type: "directory"
+    required: false
+    description: "Output root directory. Auto-timestamped if not set."
+    env_var: "UCSF_100K_SMOKE_OUT_ROOT"
+    is_output_root: true
+
+  - name: "reuse_out_root"
+    cli_flag: "--reuse-out-root"
+    type: "bool"
+    default: false
+    description: "Reuse existing output root instead of deleting and recreating."
+    env_var: "UCSF_100K_SMOKE_REUSE_OUT_ROOT"
+
+rendering:
+  flag_order:
+    - "sample"
+    - "dataset_root"
+    - "feature_ref"
+    - "genome_dir"
+    - "solo_cb_whitelist"
+    - "star_bin"
+    - "threads"
+    - "reads"
+    - "out_root"
+    - "reuse_out_root"
+  omit_absent_optionals: true

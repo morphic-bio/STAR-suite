@@ -74,7 +74,6 @@ echo ""
   --soloStrand Unstranded \
   --chimSegmentMin 1000000 \
   --outSAMtype BAM Unsorted \
-  --readFilesCommand zcat \
   --readFilesIn \
     "$FLEX_FASTQ_R2" \
     "$FLEX_FASTQ_R1" \

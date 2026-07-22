@@ -204,7 +204,7 @@ for g in sorted(deprecated_only):
     print(g)
 PYEOF
     )
-    DEPRECATED_COUNT=$(echo "$DEPRECATED_GENE_IDS" | grep -c . || echo "0")
+    DEPRECATED_COUNT=$(printf '%s\n' "$DEPRECATED_GENE_IDS" | awk 'NF {n++} END {print n+0}')
     log "  Found $DEPRECATED_COUNT deprecated-only gene IDs to strip from GTF"
 
     log "  Filtering base genome GTF (removing deprecated-only gene annotations)..."

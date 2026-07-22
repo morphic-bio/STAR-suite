@@ -1,0 +1,902 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>UCSF MorPhiC Card Mockup</title>
+  <style>
+    :root {
+      --bg: #eef6f6;
+      --panel: rgba(255, 255, 255, 0.78);
+      --card: #ffffff;
+      --ink: #15343b;
+      --muted: #5f7980;
+      --line: #d8e6e8;
+      --brand: #04989e;
+      --brand-soft: #d9f2f3;
+      --accent: #0b6d8c;
+      --warn: #b15c00;
+      --shadow: 0 22px 54px rgba(14, 54, 63, 0.12);
+      --radius: 20px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: Inter, "Helvetica Neue", Helvetica, Arial, sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at top left, rgba(4, 152, 158, 0.18), transparent 30%),
+        radial-gradient(circle at top right, rgba(11, 109, 140, 0.14), transparent 28%),
+        linear-gradient(180deg, #f6fbfb 0%, var(--bg) 100%);
+    }
+
+    .page {
+      width: min(1380px, calc(100vw - 40px));
+      margin: 24px auto 48px;
+    }
+
+    .hero,
+    .inspector,
+    .principles {
+      backdrop-filter: blur(16px);
+      background: var(--panel);
+      border: 1px solid rgba(255, 255, 255, 0.65);
+      box-shadow: var(--shadow);
+      border-radius: 28px;
+    }
+
+    .hero {
+      padding: 28px 30px;
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 12px;
+      border-radius: 999px;
+      color: var(--accent);
+      background: rgba(4, 152, 158, 0.09);
+      border: 1px solid rgba(4, 152, 158, 0.15);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 14px 0 10px;
+      font-size: clamp(30px, 4vw, 52px);
+      line-height: 1.02;
+      letter-spacing: -0.04em;
+    }
+
+    .lede {
+      max-width: 940px;
+      margin: 0;
+      color: var(--muted);
+      font-size: 18px;
+      line-height: 1.45;
+    }
+
+    .hero-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 18px;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 9px 12px;
+      border-radius: 999px;
+      background: #ffffff;
+      border: 1px solid var(--line);
+      color: var(--ink);
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .principles {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 16px;
+      padding: 18px;
+      margin-top: 20px;
+    }
+
+    .principle {
+      padding: 16px;
+      border-radius: 18px;
+      background: rgba(255, 255, 255, 0.9);
+      border: 1px solid var(--line);
+    }
+
+    .principle h2 {
+      margin: 0 0 8px;
+      font-size: 14px;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+    }
+
+    .principle p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.45;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+      gap: 26px;
+      margin-top: 28px;
+    }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+      cursor: pointer;
+    }
+
+    .card:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 28px 64px rgba(14, 54, 63, 0.15);
+    }
+
+    .card.active {
+      border-color: rgba(4, 152, 158, 0.38);
+      box-shadow: 0 26px 62px rgba(4, 152, 158, 0.18);
+    }
+
+    .card-head {
+      padding: 18px 18px 12px;
+      display: flex;
+      gap: 16px;
+      justify-content: space-between;
+      align-items: flex-start;
+    }
+
+    .card-title {
+      margin: 0 0 10px;
+      font-size: 20px;
+      line-height: 1.15;
+      letter-spacing: -0.02em;
+    }
+
+    .chip-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      padding: 6px 9px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      border: 1px solid transparent;
+    }
+
+    .chip.kind {
+      background: rgba(4, 152, 158, 0.11);
+      color: var(--brand);
+      border-color: rgba(4, 152, 158, 0.14);
+    }
+
+    .chip.role {
+      background: rgba(11, 109, 140, 0.10);
+      color: var(--accent);
+      border-color: rgba(11, 109, 140, 0.14);
+    }
+
+    .chip.dataset {
+      background: rgba(177, 92, 0, 0.08);
+      color: var(--warn);
+      border-color: rgba(177, 92, 0, 0.13);
+    }
+
+    .actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      min-width: 150px;
+    }
+
+    .action {
+      appearance: none;
+      border: 1px solid var(--line);
+      background: #ffffff;
+      color: var(--ink);
+      font-size: 12px;
+      font-weight: 700;
+      padding: 9px 11px;
+      border-radius: 999px;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+
+    .action.primary {
+      background: var(--brand);
+      border-color: var(--brand);
+      color: #ffffff;
+    }
+
+    .action:hover {
+      border-color: rgba(4, 152, 158, 0.4);
+    }
+
+    .preview {
+      margin: 0 18px 16px;
+      border-radius: 18px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      background:
+        linear-gradient(180deg, #ffffff 0%, #f7fbfc 100%);
+      aspect-ratio: 3 / 2;
+    }
+
+    .preview svg {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+
+    .card-body {
+      padding: 0 18px 18px;
+    }
+
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+
+    .stat {
+      padding: 12px 12px 10px;
+      border-radius: 16px;
+      border: 1px solid var(--line);
+      background: #fbfdfd;
+    }
+
+    .stat .label {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--muted);
+    }
+
+    .stat .value {
+      display: block;
+      margin-top: 6px;
+      font-size: 20px;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+    }
+
+    .meta-list {
+      display: grid;
+      gap: 10px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.4;
+    }
+
+    .meta-row {
+      display: grid;
+      grid-template-columns: 112px 1fr;
+      gap: 10px;
+      padding-top: 10px;
+      border-top: 1px dashed var(--line);
+    }
+
+    .meta-key {
+      font-weight: 700;
+      color: var(--ink);
+    }
+
+    .path {
+      display: inline-block;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      font-size: 12px;
+      padding: 5px 7px;
+      border-radius: 10px;
+      background: #f4f8f9;
+      border: 1px solid var(--line);
+      color: #325059;
+      word-break: break-all;
+    }
+
+    .inspector {
+      margin-top: 28px;
+      padding: 24px;
+    }
+
+    .inspector-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: flex-end;
+      flex-wrap: wrap;
+      margin-bottom: 20px;
+    }
+
+    .inspector-head h2 {
+      margin: 0;
+      font-size: 26px;
+      letter-spacing: -0.03em;
+    }
+
+    .inspector-head p {
+      margin: 6px 0 0;
+      color: var(--muted);
+    }
+
+    .inspector-grid {
+      display: grid;
+      grid-template-columns: 1.1fr 0.9fr;
+      gap: 18px;
+    }
+
+    .panel {
+      background: #ffffff;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 16px;
+    }
+
+    .panel h3 {
+      margin: 0 0 14px;
+      font-size: 16px;
+      letter-spacing: -0.01em;
+    }
+
+    .stack {
+      display: grid;
+      gap: 10px;
+    }
+
+    .tag-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .tag {
+      display: inline-flex;
+      padding: 7px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: #f7fbfb;
+      color: var(--ink);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    pre {
+      margin: 0;
+      padding: 14px;
+      border-radius: 16px;
+      background: #0f1e25;
+      color: #d7f4f4;
+      font-size: 12px;
+      line-height: 1.45;
+      overflow: auto;
+      max-height: 560px;
+    }
+
+    .note {
+      margin-top: 16px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    @media (max-width: 980px) {
+      .inspector-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 720px) {
+      .page {
+        width: min(100vw - 20px, 1380px);
+        margin: 10px auto 28px;
+      }
+
+      .hero {
+        padding: 22px 18px;
+      }
+
+      .card-head {
+        flex-direction: column;
+      }
+
+      .actions {
+        justify-content: flex-start;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <section class="hero">
+      <div class="eyebrow">UCSF Perturb-seq Mockup</div>
+      <h1>MorPhiC-style cards with Shiny contract underneath</h1>
+      <p class="lede">
+        This page is a local mockup for the first three dynamic UCSF outputs:
+        a UMAP embedding card, a target-knockdown QC card, and a DE volcano
+        card. The cards stay static-first, but each one advertises a concrete
+        Plotly/Shiny manifest.
+      </p>
+      <div class="hero-meta">
+        <span class="pill">Gene: PAX6 / HGNC:8620</span>
+        <span class="pill">Study: UCSF_CRISPRi_PerturbSeq</span>
+        <span class="pill">Schema: morphic-plotly-shiny-v1</span>
+      </div>
+    </section>
+
+    <section class="principles">
+      <article class="principle">
+        <h2>Static First</h2>
+        <p>Each card still works as a MorPhiC-style static result with title, image, and download affordances.</p>
+      </article>
+      <article class="principle">
+        <h2>Manifest Driven</h2>
+        <p>The dynamic layer is expressed as a viewer manifest with data grains, controls, and defaults.</p>
+      </article>
+      <article class="principle">
+        <h2>Contract Forcing</h2>
+        <p>The three cards intentionally cover cell-level, aggregate QC, and gene-level DE payloads.</p>
+      </article>
+      <article class="principle">
+        <h2>Shiny Ready</h2>
+        <p>The metadata is structured so a Shiny app can build controls without guessing from plot traces.</p>
+      </article>
+    </section>
+
+    <section class="grid" id="cardGrid"></section>
+
+    <section class="inspector">
+      <div class="inspector-head">
+        <div>
+          <h2 id="inspectorTitle">Selected contract</h2>
+          <p id="inspectorSubtitle">Click any card to inspect the manifest shape and data grain.</p>
+        </div>
+        <div class="tag-list" id="inspectorBadges"></div>
+      </div>
+      <div class="inspector-grid">
+        <div class="panel">
+          <h3>Viewer Contract</h3>
+          <div class="stack" id="contractStack"></div>
+        </div>
+        <div class="panel">
+          <h3>Manifest JSON</h3>
+          <pre id="manifestPreview"></pre>
+        </div>
+      </div>
+      <p class="note">
+        The buttons in the cards are layout mockups. The JSON files in this
+        directory are real example manifests; the static image and TSV paths are
+        illustrative contract fields, not live outputs.
+      </p>
+    </section>
+  </main>
+
+  <script>
+    const specs = [
+      {
+        id: "umap_scatter",
+        resultType: "EMBEDDING",
+        role: "leiden_clusters",
+        datasetChip: "EBs2_2",
+        manifestFile: "umap_scatter.manifest.example.json",
+        card: {
+          title: "UCSF CRISPRi EBs2_2: UMAP colored by Leiden",
+          summary: {
+            primaryLabel: "Cells",
+            primaryValue: "10,897",
+            secondaryLabel: "Clusters",
+            secondaryValue: "14"
+          },
+          studyLabel: "UCSF_CRISPRi_PerturbSeq",
+          analysisContext: "Embryoid body · filtered cells · per-sample embedding",
+          imagePath: "png/ucsf/ebs2_2_leiden_umap.png",
+          downloadPath: "tsv/ucsf/ebs2_2/leiden_cluster_counts.tsv.gz",
+          manifestPath: "plotly/ucsf/ebs2_2_leiden_umap.manifest.json"
+        },
+        manifest: {
+          schema_version: "morphic-plotly-shiny-v1",
+          viewer: "plotly_shiny",
+          plot_id: "ucsf_ebs2_2_umap_leiden",
+          plot_kind: "umap_scatter",
+          title: "UCSF CRISPRi EBs2_2: UMAP colored by Leiden",
+          subtitle: "Filtered cells; per-sample Scanpy embedding",
+          datasets: [
+            {
+              dataset_id: "cells",
+              format: "parquet",
+              s3_key: "plotly/ucsf/ebs2_2/cells.parquet",
+              grain: "cell",
+              required_columns: [
+                "cell_id", "sample_label", "lineage_label", "umap_1", "umap_2",
+                "leiden", "feature_call_category", "best_feature", "n_genes",
+                "total_counts", "mt_pct"
+              ]
+            }
+          ],
+          encodings: {
+            x: { dataset_id: "cells", field: "umap_1", type: "quantitative" },
+            y: { dataset_id: "cells", field: "umap_2", type: "quantitative" },
+            color: { dataset_id: "cells", field: "leiden", type: "categorical" },
+            hover: ["cell_id", "sample_label", "best_feature", "feature_call_category", "n_genes", "mt_pct"]
+          },
+          controls: {
+            color_by: ["leiden", "sample_label", "feature_call_category", "n_genes", "mt_pct"],
+            filters: ["sample_label", "feature_call_category", "leiden"]
+          },
+          defaults: {
+            color_by: "leiden",
+            point_size: 4,
+            opacity: 0.8
+          }
+        }
+      },
+      {
+        id: "target_qc_dotplot",
+        resultType: "PERTURB_QC",
+        role: "knockdown_qc",
+        datasetChip: "target-sample",
+        manifestFile: "target_qc_dotplot.manifest.example.json",
+        card: {
+          title: "UCSF CRISPRi: target knockdown QC by sample",
+          summary: {
+            primaryLabel: "Targets",
+            primaryValue: "1,264",
+            secondaryLabel: "FDR Cutoff",
+            secondaryValue: "0.05"
+          },
+          studyLabel: "UCSF_CRISPRi_PerturbSeq",
+          analysisContext: "Target-guide vs NTC · evaluable targets highlighted",
+          imagePath: "png/ucsf/qc/knockdown_dotplot.png",
+          downloadPath: "tsv/ucsf/qc/power_ranked_summary.tsv.gz",
+          manifestPath: "plotly/ucsf/qc/target_sample_summary.manifest.json"
+        },
+        manifest: {
+          schema_version: "morphic-plotly-shiny-v1",
+          viewer: "plotly_shiny",
+          plot_id: "ucsf_target_knockdown_qc_by_sample",
+          plot_kind: "target_qc_dotplot",
+          title: "UCSF CRISPRi: target knockdown QC by sample",
+          subtitle: "Dot size = perturbed cells; color = log2FC vs NTC",
+          datasets: [
+            {
+              dataset_id: "target_sample_summary",
+              format: "parquet",
+              s3_key: "plotly/ucsf/qc/target_sample_summary.parquet",
+              grain: "target_sample",
+              required_columns: [
+                "target_gene", "sample_label", "lineage_label", "n_target_cells",
+                "n_ntc_cells", "baseline_expression", "log2fc_vs_ntc", "fdr",
+                "is_evaluable", "non_evaluable_reason"
+              ]
+            }
+          ],
+          encodings: {
+            x: { dataset_id: "target_sample_summary", field: "sample_label", type: "categorical" },
+            y: { dataset_id: "target_sample_summary", field: "target_gene", type: "categorical" },
+            color: {
+              dataset_id: "target_sample_summary",
+              field: "log2fc_vs_ntc",
+              type: "quantitative",
+              colorscale: "RdBu",
+              midpoint: 0
+            },
+            size: { dataset_id: "target_sample_summary", field: "n_target_cells", type: "quantitative" }
+          },
+          controls: {
+            filters: ["lineage_label", "is_evaluable"],
+            threshold_overlays: ["min_target_cells", "max_fdr"]
+          },
+          defaults: {
+            lineage_label: "Embryoid body",
+            is_evaluable: true,
+            min_target_cells: 30,
+            max_fdr: 0.05
+          }
+        }
+      },
+      {
+        id: "de_volcano",
+        resultType: "DE",
+        role: "canonical_de",
+        datasetChip: "pooled_EBs",
+        manifestFile: "de_volcano.manifest.example.json",
+        card: {
+          title: "UCSF CRISPRi pooled EBs: PAX6 vs NTC volcano",
+          summary: {
+            primaryLabel: "Genes",
+            primaryValue: "23,665",
+            secondaryLabel: "abs(log2FC)",
+            secondaryValue: ">= 0.5"
+          },
+          studyLabel: "UCSF_CRISPRi_PerturbSeq",
+          analysisContext: "Gene-level DE summary · top hits labeled",
+          imagePath: "png/ucsf/de/pax6_ebs_pooled_volcano.png",
+          downloadPath: "tsv/ucsf/de/pax6_ebs_pooled.tsv.gz",
+          manifestPath: "plotly/ucsf/de/pax6_ebs_pooled.manifest.json"
+        },
+        manifest: {
+          schema_version: "morphic-plotly-shiny-v1",
+          viewer: "plotly_shiny",
+          plot_id: "ucsf_pax6_ebs_pooled_de_volcano",
+          plot_kind: "de_volcano",
+          title: "UCSF CRISPRi pooled EBs: PAX6 vs NTC volcano",
+          subtitle: "Gene-level differential expression summary",
+          datasets: [
+            {
+              dataset_id: "genes",
+              format: "parquet",
+              s3_key: "plotly/ucsf/de/pax6_ebs_pooled_genes.parquet",
+              grain: "gene",
+              required_columns: [
+                "gene_id", "symbol", "log2fc", "padj", "pvalue",
+                "base_mean", "is_target_gene", "condition_id"
+              ]
+            }
+          ],
+          encodings: {
+            x: { dataset_id: "genes", field: "log2fc", type: "quantitative" },
+            y: { dataset_id: "genes", field: "neg_log10_padj", type: "quantitative" },
+            color: { dataset_id: "genes", field: "significance_class", type: "categorical" },
+            label: { dataset_id: "genes", field: "symbol", type: "text" }
+          },
+          controls: {
+            filters: ["condition_id"],
+            threshold_overlays: ["padj_lte", "abs_log2fc_gte"],
+            label_mode: ["target_only", "top_hits", "none"]
+          },
+          defaults: {
+            condition_id: "PAX6",
+            padj_lte: 0.05,
+            abs_log2fc_gte: 0.5,
+            label_mode: "top_hits"
+          }
+        }
+      }
+    ];
+
+    function escapeHtml(value) {
+      return String(value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/\"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+
+    function makeUmapPreview() {
+      const palette = ["#04989e", "#0b6d8c", "#ef8354", "#f6ae2d", "#8f5bd6"];
+      const points = [];
+      const centers = [[80, 140], [165, 82], [205, 170], [285, 115], [118, 70]];
+      for (let c = 0; c < centers.length; c += 1) {
+        for (let i = 0; i < 22; i += 1) {
+          const angle = (i * 0.59) + c;
+          const radius = 12 + ((i % 6) * 3);
+          const x = centers[c][0] + Math.cos(angle) * radius;
+          const y = centers[c][1] + Math.sin(angle * 1.3) * (radius * 0.75);
+          points.push(`<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="4.4" fill="${palette[c]}" fill-opacity="0.82"/>`);
+        }
+      }
+      return `
+        <svg viewBox="0 0 360 240" aria-hidden="true">
+          <rect width="360" height="240" fill="#ffffff"/>
+          <line x1="36" y1="196" x2="324" y2="196" stroke="#cfe0e2" stroke-width="1.5"/>
+          <line x1="36" y1="196" x2="36" y2="34" stroke="#cfe0e2" stroke-width="1.5"/>
+          <text x="152" y="224" fill="#6c848b" font-size="11" font-family="Inter, sans-serif">UMAP 1</text>
+          <text x="16" y="116" fill="#6c848b" font-size="11" font-family="Inter, sans-serif" transform="rotate(-90 16 116)">UMAP 2</text>
+          ${points.join("")}
+          <g transform="translate(246, 24)">
+            <rect x="0" y="0" width="94" height="58" rx="10" fill="#f7fbfb" stroke="#d8e6e8"/>
+            <text x="12" y="18" fill="#15343b" font-size="11" font-weight="700" font-family="Inter, sans-serif">Color By</text>
+            <text x="12" y="36" fill="#5f7980" font-size="11" font-family="Inter, sans-serif">Leiden</text>
+            <text x="12" y="52" fill="#5f7980" font-size="11" font-family="Inter, sans-serif">sample_label</text>
+          </g>
+        </svg>`;
+    }
+
+    function makeQcPreview() {
+      const rows = ["PAX6", "SOX2", "EOMES", "CTNNB1", "SMAD4"];
+      const cols = ["EB1", "EB2", "EB3", "iPSC1", "iPSC2"];
+      const dots = [];
+      const colorMap = ["#2f7ed8", "#69a8e0", "#d7e6f5", "#f5d2cb", "#d9735f"];
+      const radii = [15, 11, 8, 13, 10, 12, 7, 5, 11, 8, 10, 13, 9, 6, 12, 9, 7, 5, 8, 11, 6, 8, 12, 10, 13];
+      let idx = 0;
+      for (let r = 0; r < rows.length; r += 1) {
+        for (let c = 0; c < cols.length; c += 1) {
+          const x = 78 + c * 53;
+          const y = 52 + r * 34;
+          const color = colorMap[(r + c) % colorMap.length];
+          dots.push(`<circle cx="${x}" cy="${y}" r="${radii[idx]}" fill="${color}" fill-opacity="0.92"/>`);
+          idx += 1;
+        }
+      }
+      return `
+        <svg viewBox="0 0 360 240" aria-hidden="true">
+          <rect width="360" height="240" fill="#ffffff"/>
+          ${rows.map((row, i) => `<text x="18" y="${56 + i * 34}" fill="#6c848b" font-size="10" font-family="Inter, sans-serif">${row}</text>`).join("")}
+          ${cols.map((col, i) => `<text x="${66 + i * 53}" y="20" fill="#6c848b" font-size="10" font-family="Inter, sans-serif">${col}</text>`).join("")}
+          ${dots.join("")}
+          <g transform="translate(236, 178)">
+            <rect x="0" y="0" width="106" height="44" rx="10" fill="#f7fbfb" stroke="#d8e6e8"/>
+            <text x="12" y="18" fill="#15343b" font-size="11" font-weight="700" font-family="Inter, sans-serif">Color</text>
+            <text x="12" y="33" fill="#5f7980" font-size="11" font-family="Inter, sans-serif">log2FC vs NTC</text>
+          </g>
+        </svg>`;
+    }
+
+    function makeVolcanoPreview() {
+      const points = [];
+      for (let i = 0; i < 42; i += 1) {
+        const x = 180 + Math.cos(i * 0.53) * (26 + (i * 2.7));
+        const y = 166 - Math.abs(Math.sin(i * 0.53)) * (36 + (i * 1.8));
+        const fill = x < 180 ? "#4c78a8" : "#d95f5f";
+        points.push(`<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3.9" fill="${fill}" fill-opacity="0.85"/>`);
+      }
+      return `
+        <svg viewBox="0 0 360 240" aria-hidden="true">
+          <rect width="360" height="240" fill="#ffffff"/>
+          <line x1="180" y1="28" x2="180" y2="196" stroke="#d7e6e8" stroke-width="1.5" stroke-dasharray="5 5"/>
+          <line x1="36" y1="128" x2="324" y2="128" stroke="#d7e6e8" stroke-width="1.5" stroke-dasharray="5 5"/>
+          <line x1="36" y1="196" x2="324" y2="196" stroke="#cfe0e2" stroke-width="1.5"/>
+          <line x1="36" y1="196" x2="36" y2="30" stroke="#cfe0e2" stroke-width="1.5"/>
+          <text x="150" y="224" fill="#6c848b" font-size="11" font-family="Inter, sans-serif">log2 fold change</text>
+          <text x="16" y="110" fill="#6c848b" font-size="11" font-family="Inter, sans-serif" transform="rotate(-90 16 110)">-log10 adjusted p</text>
+          ${points.join("")}
+          <text x="233" y="56" fill="#d95f5f" font-size="11" font-weight="700" font-family="Inter, sans-serif">PAX6</text>
+          <text x="265" y="88" fill="#d95f5f" font-size="11" font-weight="700" font-family="Inter, sans-serif">SOX2</text>
+          <text x="74" y="96" fill="#4c78a8" font-size="11" font-weight="700" font-family="Inter, sans-serif">NANOG</text>
+        </svg>`;
+    }
+
+    function previewFor(id) {
+      if (id === "umap_scatter") {
+        return makeUmapPreview();
+      }
+      if (id === "target_qc_dotplot") {
+        return makeQcPreview();
+      }
+      return makeVolcanoPreview();
+    }
+
+    function renderCards(selectedId) {
+      const root = document.getElementById("cardGrid");
+      root.innerHTML = specs.map((spec) => {
+        const isActive = spec.id === selectedId ? " active" : "";
+        return `
+          <article class="card${isActive}" data-card-id="${escapeHtml(spec.id)}">
+            <div class="card-head">
+              <div>
+                <h2 class="card-title">${escapeHtml(spec.card.title)}</h2>
+                <div class="chip-row">
+                  <span class="chip kind">${escapeHtml(spec.resultType)}</span>
+                  <span class="chip role">${escapeHtml(spec.role)}</span>
+                  <span class="chip dataset">${escapeHtml(spec.datasetChip)}</span>
+                </div>
+              </div>
+              <div class="actions">
+                <span class="action primary">Interactive</span>
+                <span class="action">TSV</span>
+              </div>
+            </div>
+            <div class="preview">${previewFor(spec.id)}</div>
+            <div class="card-body">
+              <div class="summary-grid">
+                <div class="stat">
+                  <span class="label">${escapeHtml(spec.card.summary.primaryLabel)}</span>
+                  <span class="value">${escapeHtml(spec.card.summary.primaryValue)}</span>
+                </div>
+                <div class="stat">
+                  <span class="label">${escapeHtml(spec.card.summary.secondaryLabel)}</span>
+                  <span class="value">${escapeHtml(spec.card.summary.secondaryValue)}</span>
+                </div>
+              </div>
+              <div class="meta-list">
+                <div class="meta-row">
+                  <div class="meta-key">Study</div>
+                  <div>${escapeHtml(spec.card.studyLabel)}</div>
+                </div>
+                <div class="meta-row">
+                  <div class="meta-key">Context</div>
+                  <div>${escapeHtml(spec.card.analysisContext)}</div>
+                </div>
+                <div class="meta-row">
+                  <div class="meta-key">Static</div>
+                  <div><span class="path">${escapeHtml(spec.card.imagePath)}</span></div>
+                </div>
+                <div class="meta-row">
+                  <div class="meta-key">Manifest</div>
+                  <div><span class="path">${escapeHtml(spec.card.manifestPath)}</span></div>
+                </div>
+              </div>
+            </div>
+          </article>`;
+      }).join("");
+
+      Array.from(document.querySelectorAll("[data-card-id]")).forEach((node) => {
+        node.addEventListener("click", () => {
+          const id = node.getAttribute("data-card-id");
+          renderCards(id);
+          renderInspector(id);
+        });
+      });
+    }
+
+    function renderInspector(selectedId) {
+      const spec = specs.find((item) => item.id === selectedId) || specs[0];
+      document.getElementById("inspectorTitle").textContent = spec.card.title;
+      document.getElementById("inspectorSubtitle").textContent = `${spec.resultType} / ${spec.role} / ${spec.manifest.plot_kind}`;
+
+      const badges = document.getElementById("inspectorBadges");
+      badges.innerHTML = `
+        <span class="tag">${escapeHtml(spec.manifest.schema_version)}</span>
+        <span class="tag">${escapeHtml(spec.manifest.viewer)}</span>
+        <span class="tag">${escapeHtml(spec.manifest.datasets[0].grain)} grain</span>
+      `;
+
+      const dataset = spec.manifest.datasets[0];
+      const controls = spec.manifest.controls || {};
+      const defaults = spec.manifest.defaults || {};
+      const requiredColumns = dataset.required_columns || [];
+
+      document.getElementById("contractStack").innerHTML = `
+        <div class="meta-row">
+          <div class="meta-key">Manifest file</div>
+          <div><span class="path">${escapeHtml(spec.manifestFile)}</span></div>
+        </div>
+        <div class="meta-row">
+          <div class="meta-key">Dataset</div>
+          <div>${escapeHtml(dataset.dataset_id)} · ${escapeHtml(dataset.format)} · ${escapeHtml(dataset.grain)}</div>
+        </div>
+        <div class="meta-row">
+          <div class="meta-key">Controls</div>
+          <div class="tag-list">${Object.keys(controls).map((key) => `<span class="tag">${escapeHtml(key)}</span>`).join("") || '<span class="tag">none</span>'}</div>
+        </div>
+        <div class="meta-row">
+          <div class="meta-key">Defaults</div>
+          <div class="tag-list">${Object.entries(defaults).map(([key, value]) => `<span class="tag">${escapeHtml(key)}=${escapeHtml(value)}</span>`).join("") || '<span class="tag">none</span>'}</div>
+        </div>
+        <div class="meta-row">
+          <div class="meta-key">Columns</div>
+          <div class="tag-list">${requiredColumns.map((column) => `<span class="tag">${escapeHtml(column)}</span>`).join("")}</div>
+        </div>
+        <div class="meta-row">
+          <div class="meta-key">Downloads</div>
+          <div><span class="path">${escapeHtml(spec.card.downloadPath)}</span></div>
+        </div>
+      `;
+
+      document.getElementById("manifestPreview").textContent = JSON.stringify(spec.manifest, null, 2);
+    }
+
+    renderCards(specs[0].id);
+    renderInspector(specs[0].id);
+  </script>
+</body>
+</html>

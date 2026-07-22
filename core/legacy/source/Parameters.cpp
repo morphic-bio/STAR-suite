@@ -61,6 +61,17 @@ string stripFastqExt(string name) {
     return name;
 }
 
+string stripCbqExt(string name) {
+    static const char* exts[] = {".cbq", ".CBQ"};
+    for (const auto* ext : exts) {
+        if (endsWith(name, ext)) {
+            name.erase(name.size() - strlen(ext));
+            break;
+        }
+    }
+    return name;
+}
+
 string stripReadToken(string name) {
     static const char* tokens[] = {"_R1_001", "_R2_001", "_R1", "_R2", ".R1", ".R2"};
     for (const auto* token : tokens) {
@@ -151,6 +162,12 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "dynamicThreadInterface", &dynamicThreadInterface));
     parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "dynamicThreadConstMapPermits", &dynamicThreadConstMapPermits));
     parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "dynamicThreadTelemetry", &dynamicThreadTelemetry));
+    parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "dynamicThreadTelemetryIntervalSec", &dynamicThreadTelemetryIntervalSec));
+    parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "dynamicThreadMapFloor", &dynamicThreadMapFloor));
+    parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "dynamicThreadAtacFloor", &dynamicThreadAtacFloor));
+    parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "dynamicThreadFeatureFloor", &dynamicThreadFeatureFloor));
+    parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "dynamicThreadAtacController", &dynamicThreadAtacController));
+    parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "dynamicThreadFifoWaiters", &dynamicThreadFifoWaiters));
     parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "variableThreads", &variableThreads));
     parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "variableThreadsRetuneEveryAcquires", &variableThreadsRetuneEveryAcquires));
     parArray.push_back(new ParameterInfoVector <int> (-1, -1, "variableThreadsPermitSequence", &variableThreadsPermitSequence));
@@ -228,6 +245,7 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar <uint32> (-1, -1, "readQualityScoreBase", &readQualityScoreBase));
     parArray.push_back(new ParameterInfoVector <string> (-1, -1, "readFilesManifest", &readFilesManifest));
     parArray.push_back(new ParameterInfoVector <string> (-1, -1, "readFilesSAMattrKeep", &readFiles.samAttrKeepIn));
+    parArray.push_back(new ParameterInfoScalar <string> (-1, -1, "readFilesCbqRangeMode", &readFilesCbqRangeMode));
 
     //parArray.push_back(new ParameterInfoScalar <string> (-1, -1, "readStrand", &pReads.strandString));
 
@@ -285,10 +303,17 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar <string>     (-1, -1, "noYOutput", &noYOutput));
     parArray.push_back(new ParameterInfoScalar <string>     (-1, -1, "YOutput", &YOutput));
     parArray.push_back(new ParameterInfoScalar <string>     (-1, -1, "YReadNamesOutput", &YReadNamesOutput));
+    parArray.push_back(new ParameterInfoScalar <string>     (-1, -1, "emitYNoY", &emitYNoY));
+    parArray.push_back(new ParameterInfoScalar <string>     (-1, -1, "emitYNoYFormat", &emitYNoYFormat));
     parArray.push_back(new ParameterInfoScalar <string>     (-1, -1, "emitYNoYFastq", &emitYNoYFastq));
     parArray.push_back(new ParameterInfoScalar <string>     (-1, -1, "emitYNoYFastqCompression", &emitYNoYFastqCompression));
     parArray.push_back(new ParameterInfoScalar <string>     (-1, -1, "YFastqOutputPrefix", &YFastqOutputPrefix));
     parArray.push_back(new ParameterInfoScalar <string>     (-1, -1, "noYFastqOutputPrefix", &noYFastqOutputPrefix));
+    parArray.push_back(new ParameterInfoScalar <string>     (-1, -1, "emitYNoYCbq", &emitYNoYCbq));
+    parArray.push_back(new ParameterInfoScalar <int>        (-1, -1, "emitYNoYCbqCompressionLevel", &emitYNoYCbqCompressionLevel));
+    parArray.push_back(new ParameterInfoScalar <uint64>     (-1, -1, "emitYNoYCbqBlockSize", &emitYNoYCbqBlockSize));
+    parArray.push_back(new ParameterInfoScalar <string>     (-1, -1, "YCbqOutput", &YCbqOutput));
+    parArray.push_back(new ParameterInfoScalar <string>     (-1, -1, "noYCbqOutput", &noYCbqOutput));
     parArray.push_back(new ParameterInfoVector <string>     (-1, -1, "outSAMfilter", &outSAMfilter.mode));
     parArray.push_back(new ParameterInfoScalar <uint>     (-1, -1, "outSAMmultNmax", &outSAMmultNmax));
     parArray.push_back(new ParameterInfoScalar <uint>     (-1, -1, "outSAMattrIHstart", &outSAMattrIHstart));
@@ -460,7 +485,10 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "quantVBAutoDetectWindow", &quant.transcriptVB.autoDetectWindow));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "quantVBTrace", &quant.transcriptVB.traceFile));
     parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "quantVBTraceLimit", &quant.transcriptVB.traceLimit));
+    parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "quantVBDumpEq", &quant.transcriptVB.dumpEqFile));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "quantVBErrorModel", &quant.transcriptVB.errorModelMode));
+    parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "quantVBFragLengthDist", &quant.transcriptVB.fragLengthDistInt));
+    parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "quantVBEffectiveLengthCorrection", &quant.transcriptVB.effectiveLengthCorrectionInt));
     parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "slamQuantMode", &quant.slam.modeInt));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "slamSnpBed", &quant.slam.snpBed));
     parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "slamSnpDetect", &quant.slam.snpDetectInt));
@@ -486,8 +514,13 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "slamCompatLenientOverlap", &quant.slam.compatLenientOverlapInt));
     parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "slamCompatOverlapWeight", &quant.slam.compatOverlapWeightInt));
     parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "slamCompatIgnoreOverlap", &quant.slam.compatIgnoreOverlapInt));
-    parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "slamCompatTrim5p", &quant.slam.compatTrim5p));
-    parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "slamCompatTrim3p", &quant.slam.compatTrim3p));
+    parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "slamCompatTrim5p", &quant.slam.compatTrim5p[0]));
+    parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "slamCompatTrim3p", &quant.slam.compatTrim3p[0]));
+    parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "slamCompatTrim5pMate1", &quant.slam.compatTrim5p[0]));
+    parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "slamCompatTrim3pMate1", &quant.slam.compatTrim3p[0]));
+    parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "slamCompatTrim5pMate2", &quant.slam.compatTrim5p[1]));
+    parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "slamCompatTrim3pMate2", &quant.slam.compatTrim3p[1]));
+    parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "slamMinCallableLength", &quant.slam.minCallableLength));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "autoTrim", &quant.slam.autoTrimMode));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "trimScope", &quant.slam.trimScope));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "trimSource", &quant.slam.trimSource));
@@ -498,11 +531,15 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "autoTrimMaxTrim", &quant.slam.autoTrimMaxTrim));
     parArray.push_back(new ParameterInfoScalar <uint64_t> (-1, -1, "autoTrimBufferReads", &quant.slam.autoTrimBufferReads));
     parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "autoTrimDetectionReads", &quant.slam.autoTrimDetectionReads));
+    parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "slamAutoTrimPerMate", &quant.slam.slamAutoTrimPerMate));
     parArray.push_back(new ParameterInfoScalar <double>  (-1, -1, "snpErrMinThreshold", &quant.slam.snpErrMinThreshold));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "slamQcJson", &quant.slam.slamQcJson));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "slamQcHtml", &quant.slam.slamQcHtml));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "slamQcReport", &quant.slam.slamQcReport));
     parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "slamGrandSlamOut", &quant.slam.grandSlamOut));
+    parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "slamCbOut", &quant.slam.cbOut));
+    parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "slamCbOutFile", &quant.slam.cbOutFile));
+    parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "slamCbFormat", &quant.slam.cbFormat));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "slamDumpBinary", &quant.slam.dumpBinary));
     parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "slamDumpStream", &quant.slam.dumpStreamInt));
     parArray.push_back(new ParameterInfoScalar <uint64_t> (-1, -1, "slamDumpMaxReads", &quant.slam.dumpMaxReads));
@@ -586,6 +623,7 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloCrGexFeature", &pSolo.crGexFeatureStr));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloCrMultimapRescue", &pSolo.crMultimapRescueStr));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloCrMultimapRescueIntronic", &pSolo.crMultimapRescueIntronicStr));
+    parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloSpatialFeatureSidecar", &soloSpatialFeatureSidecar));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloProbeList", &pSolo.probeListPath));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloRemoveDeprecated", &pSolo.removeDeprecatedStr));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloSampleWhitelist", &pSolo.sampleWhitelistPath));
@@ -678,6 +716,10 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoVector<string>(-1, -1, "crFastqMap", &pfMulti.crFastqMap));
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "crMexUseGexBarcodes", &pfMulti.crMexUseGexBarcodes));
     parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "crMinUmi", &pfMulti.crMinUmi));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "crGuideCaller", &pfMulti.crGuideCaller));
+    parArray.push_back(new ParameterInfoScalar<double>(-1, -1, "crGuideFdr", &pfMulti.crGuideFdr));
+    parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "crGuideFdrMinUmi", &pfMulti.crGuideFdrMinUmi));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "crGuideFdrEmitQvalues", &pfMulti.crGuideFdrEmitQvalues));
     parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "crAssignMaxHamming", &pfMulti.crAssignMaxHamming));
     parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "crAssignFeatureOffset", &pfMulti.crAssignFeatureOffset));
     parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "crAssignLimitSearch", &pfMulti.crAssignLimitSearch));
@@ -687,11 +729,71 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "crAssignBarcodeN", &pfMulti.crAssignBarcodeN));
     parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "crAssignConsumerThreads", &pfMulti.crAssignConsumerThreads));
     parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "crAssignSearchThreads", &pfMulti.crAssignSearchThreads));
+    parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "crAssignReadBufferLines", &pfMulti.crAssignReadBufferLines));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "crAssignCbqMode", &pfMulti.crAssignCbqMode));
     parArray.push_back(new ParameterInfoScalar<double>(-1, -1, "crAssignMinPosterior", &pfMulti.crAssignMinPosterior));
     parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "crAssignLegacyCbRescue", &pfMulti.crAssignLegacyCbRescue));
     parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "crAssignSkipQcOutputs", &pfMulti.crAssignSkipQcOutputs));
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "crAssignFilteredBarcodes", &pfMulti.crAssignFilteredBarcodes));
     parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "crAssignAllowUnionWhitelist", &pfMulti.crAssignAllowUnionWhitelist));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "ocmMultiEnable", &pfMulti.ocmMultiEnable));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "ocmMultiConfig", &pfMulti.ocmMultiConfig));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "ocmMultiBarcodeMode", &pfMulti.ocmMultiBarcodeMode));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "ocmMultiBamSplit", &pfMulti.ocmMultiBamSplit));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "ocmMultiOutputCompat", &pfMulti.ocmMultiOutputCompat));
+    parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "chromapAtacEnable", &chromapAtac.enabled));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacReferenceFasta", &chromapAtac.referenceFasta));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacIndex", &chromapAtac.chromapIndex));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacInputFormat", &chromapAtac.inputFormat));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacRead1", &chromapAtac.read1Csv));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacRead2", &chromapAtac.read2Csv));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacBarcode", &chromapAtac.barcodeCsv));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacReadPairCbq", &chromapAtac.readPairCbqCsv));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacBarcodeCbq", &chromapAtac.barcodeCbqCsv));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacReadFormat", &chromapAtac.readFormat));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacBarcodeWhitelist", &chromapAtac.barcodeWhitelist));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacBarcodeTranslate", &chromapAtac.barcodeTranslate));
+    parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "chromapAtacBarcodeTranslateFromFirst", &chromapAtac.barcodeTranslateFromFirst));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacOutputFragments", &chromapAtac.outputFragments));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacSecondaryFragments", &chromapAtac.secondaryFragments));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacOutputFormat", &chromapAtac.outputFormat));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacSummary", &chromapAtac.summary));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacTempDir", &chromapAtac.tempDir));
+    parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "chromapAtacThreads", &chromapAtac.threads));
+    parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "chromapAtacHtsThreads", &chromapAtac.htsThreads));
+    parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "chromapAtacSortBam", &chromapAtac.sortBam));
+    parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "chromapAtacWriteIndex", &chromapAtac.writeIndex));
+    parArray.push_back(new ParameterInfoScalar<uint64>(-1, -1, "chromapAtacSortBamRam", &chromapAtac.sortBamRam));
+    parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "chromapAtacEmitNoYBam", &chromapAtac.emitNoYBam));
+    parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "chromapAtacEmitYBam", &chromapAtac.emitYBam));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacNoYOutput", &chromapAtac.noYOutput));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacYOutput", &chromapAtac.YOutput));
+    parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "chromapAtacLowMem", &chromapAtac.lowMem));
+    parArray.push_back(new ParameterInfoScalar<uint64>(-1, -1, "chromapAtacLowMemRam", &chromapAtac.lowMemRam));
+    parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "chromapAtacCallMacs3FragPeaks", &chromapAtac.callMacs3FragPeaks));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacMacs3FragPeaksOutput", &chromapAtac.macs3FragPeaksOutput));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacMacs3FragSummitsOutput", &chromapAtac.macs3FragSummitsOutput));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacMacs3FragKeepIntermediates", &chromapAtac.macs3FragKeepIntermediates));
+    parArray.push_back(new ParameterInfoScalar<double>(-1, -1, "chromapAtacMacs3FragPvalue", &chromapAtac.macs3FragPvalue));
+    parArray.push_back(new ParameterInfoScalar<double>(-1, -1, "chromapAtacMacs3FragQvalue", &chromapAtac.macs3FragQvalue));
+    parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "chromapAtacMacs3FragMinLength", &chromapAtac.macs3FragMinLength));
+    parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "chromapAtacMacs3FragMaxGap", &chromapAtac.macs3FragMaxGap));
+    parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "chromapAtacMacs3FragUint8Counts", &chromapAtac.macs3FragUint8Counts));
+    parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "chromapAtacMacs3FragLowMem", &chromapAtac.macs3FragLowMem));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacEvidenceFromPeaksOutput", &chromapAtac.evidenceFromPeaksOutput));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacTn5ShiftMode", &chromapAtac.tn5ShiftMode));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "chromapAtacStartMode", &chromapAtac.startMode));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "multiomeAtacPeakMexInline", &multiomeAtacPeakMex.inlineMode));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "multiomeAtacPeakBarcodeTranslate", &multiomeAtacPeakMex.barcodeTranslate));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "multiomeAtacPeakBarcodeTranslateFromFirst", &multiomeAtacPeakMex.barcodeTranslateFromFirst));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "multiomeAtacPeakMetricsTsv", &multiomeAtacPeakMex.metricsTsv));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "multiomeAtacPeakMexOutDir", &multiomeAtacPeakMex.mexOutDir));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "multiomeAtacPeakNarrowPeak", &multiomeAtacPeakMex.narrowPeak));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "multiomeAtacPeakSummits", &multiomeAtacPeakMex.summits));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "multiomeAtacPeakCallMode", &multiomeAtacPeakMex.peakCallMode));
+    parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "multiomeAtacPeakMacsProfile", &multiomeAtacPeakMex.macsProfile));
+    parArray.push_back(new ParameterInfoScalar<int>(-1, -1, "multiomeAtacPeakThreads", &multiomeAtacPeakMex.threads));
+    parArray.push_back(new ParameterInfoScalar<uint64>(-1, -1, "multiomeAtacPeakMaxBarcodes", &multiomeAtacPeakMex.maxBarcodes));
 
     // Default module flag groups
     parArray.push_back(new ParameterInfoScalar<string>(-1, -1, "defaultBulk", &defaultGroups.bulk));
@@ -761,6 +863,22 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
             pfMulti.crMinUmi = 3;  // General default; parity scripts can override
             p->inputLevel = 0;
         }
+        if (p->nameString == "crGuideCaller" && p->inputLevel < 0) {
+            pfMulti.crGuideCaller = "auto";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "crGuideFdr" && p->inputLevel < 0) {
+            pfMulti.crGuideFdr = 0.01;
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "crGuideFdrMinUmi" && p->inputLevel < 0) {
+            pfMulti.crGuideFdrMinUmi = 1;
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "crGuideFdrEmitQvalues" && p->inputLevel < 0) {
+            pfMulti.crGuideFdrEmitQvalues = "sparse";
+            p->inputLevel = 0;
+        }
         if (p->nameString == "crAssignMaxHamming" && p->inputLevel < 0) {
             pfMulti.crAssignMaxHamming = -1;
             p->inputLevel = 0;
@@ -797,6 +915,14 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
             pfMulti.crAssignSearchThreads = -1;
             p->inputLevel = 0;
         }
+        if (p->nameString == "crAssignReadBufferLines" && p->inputLevel < 0) {
+            pfMulti.crAssignReadBufferLines = -1;
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "crAssignCbqMode" && p->inputLevel < 0) {
+            pfMulti.crAssignCbqMode = "auto";
+            p->inputLevel = 0;
+        }
         if (p->nameString == "crAssignMinPosterior" && p->inputLevel < 0) {
             pfMulti.crAssignMinPosterior = -1.0;
             p->inputLevel = 0;
@@ -815,6 +941,238 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
         }
         if (p->nameString == "crAssignAllowUnionWhitelist" && p->inputLevel < 0) {
             pfMulti.crAssignAllowUnionWhitelist = 0;
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "ocmMultiEnable" && p->inputLevel < 0) {
+            pfMulti.ocmMultiEnable = "no";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "ocmMultiConfig" && p->inputLevel < 0) {
+            pfMulti.ocmMultiConfig = "-";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "ocmMultiBarcodeMode" && p->inputLevel < 0) {
+            pfMulti.ocmMultiBarcodeMode = "posthoc";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "ocmMultiBamSplit" && p->inputLevel < 0) {
+            pfMulti.ocmMultiBamSplit = "no";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "ocmMultiOutputCompat" && p->inputLevel < 0) {
+            pfMulti.ocmMultiOutputCompat = "cellranger";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "chromapAtacEnable" && p->inputLevel < 0) {
+            chromapAtac.enabled = 0;
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "chromapAtacReferenceFasta" && p->inputLevel < 0) {
+            chromapAtac.referenceFasta = "-";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "chromapAtacIndex" && p->inputLevel < 0) {
+            chromapAtac.chromapIndex = "-";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "chromapAtacInputFormat" && p->inputLevel < 0) {
+            chromapAtac.inputFormat = "fastq";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "chromapAtacRead1" && p->inputLevel < 0) {
+            chromapAtac.read1Csv = "-";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "chromapAtacRead2" && p->inputLevel < 0) {
+            chromapAtac.read2Csv = "-";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "chromapAtacBarcode" && p->inputLevel < 0) {
+            chromapAtac.barcodeCsv = "-";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "chromapAtacReadPairCbq" && p->inputLevel < 0) {
+            chromapAtac.readPairCbqCsv = "-";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "chromapAtacBarcodeCbq" && p->inputLevel < 0) {
+            chromapAtac.barcodeCbqCsv = "-";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "chromapAtacReadFormat" && p->inputLevel < 0) {
+            chromapAtac.readFormat = "-";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "chromapAtacBarcodeWhitelist" && p->inputLevel < 0) {
+            chromapAtac.barcodeWhitelist = "-";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "chromapAtacBarcodeTranslate" && p->inputLevel < 0) {
+            chromapAtac.barcodeTranslate = "-";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "chromapAtacBarcodeTranslateFromFirst" && p->inputLevel < 0) {
+            chromapAtac.barcodeTranslateFromFirst = 0;
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "chromapAtacOutputFragments" && p->inputLevel < 0) {
+            chromapAtac.outputFragments = "-";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "chromapAtacSecondaryFragments" && p->inputLevel < 0) {
+            chromapAtac.secondaryFragments = "-";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "chromapAtacOutputFormat" && p->inputLevel < 0) {
+            chromapAtac.outputFormat = "BED";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "chromapAtacSummary" && p->inputLevel < 0) {
+            chromapAtac.summary = "-";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "chromapAtacTempDir" && p->inputLevel < 0) {
+            chromapAtac.tempDir = "-";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "chromapAtacThreads" && p->inputLevel < 0) {
+            chromapAtac.threads = 1;
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "chromapAtacHtsThreads" && p->inputLevel < 0) {
+            chromapAtac.htsThreads = 0;
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "chromapAtacSortBam" && p->inputLevel < 0) {
+            chromapAtac.sortBam = 0;
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "chromapAtacWriteIndex" && p->inputLevel < 0) {
+            chromapAtac.writeIndex = 0;
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "chromapAtacSortBamRam" && p->inputLevel < 0) {
+            chromapAtac.sortBamRam = 8ULL * 1024 * 1024 * 1024;
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "chromapAtacEmitNoYBam" && p->inputLevel < 0) {
+            chromapAtac.emitNoYBam = 0;
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "chromapAtacEmitYBam" && p->inputLevel < 0) {
+            chromapAtac.emitYBam = 0;
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "chromapAtacNoYOutput" && p->inputLevel < 0) {
+            chromapAtac.noYOutput = "-";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "chromapAtacYOutput" && p->inputLevel < 0) {
+            chromapAtac.YOutput = "-";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "chromapAtacLowMem" && p->inputLevel < 0) {
+            chromapAtac.lowMem = 0;
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "chromapAtacLowMemRam" && p->inputLevel < 0) {
+            chromapAtac.lowMemRam = 0;
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "chromapAtacCallMacs3FragPeaks" && p->inputLevel < 0) {
+            chromapAtac.callMacs3FragPeaks = 0;
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "chromapAtacMacs3FragPeaksOutput" && p->inputLevel < 0) {
+            chromapAtac.macs3FragPeaksOutput = "-";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "chromapAtacMacs3FragSummitsOutput" && p->inputLevel < 0) {
+            chromapAtac.macs3FragSummitsOutput = "-";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "chromapAtacMacs3FragKeepIntermediates" && p->inputLevel < 0) {
+            chromapAtac.macs3FragKeepIntermediates = "-";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "chromapAtacEvidenceFromPeaksOutput" && p->inputLevel < 0) {
+            chromapAtac.evidenceFromPeaksOutput = "-";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "chromapAtacMacs3FragPvalue" && p->inputLevel < 0) {
+            chromapAtac.macs3FragPvalue = 1e-5;
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "chromapAtacMacs3FragQvalue" && p->inputLevel < 0) {
+            chromapAtac.macs3FragQvalue = 0.0;
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "chromapAtacMacs3FragMinLength" && p->inputLevel < 0) {
+            chromapAtac.macs3FragMinLength = 200;
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "chromapAtacMacs3FragMaxGap" && p->inputLevel < 0) {
+            chromapAtac.macs3FragMaxGap = 30;
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "chromapAtacMacs3FragUint8Counts" && p->inputLevel < 0) {
+            chromapAtac.macs3FragUint8Counts = 1;
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "chromapAtacMacs3FragLowMem" && p->inputLevel < 0) {
+            chromapAtac.macs3FragLowMem = 0;
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "chromapAtacTn5ShiftMode" && p->inputLevel < 0) {
+            chromapAtac.tn5ShiftMode = "classical";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "chromapAtacStartMode" && p->inputLevel < 0) {
+            chromapAtac.startMode = "postMapping";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "multiomeAtacPeakMexInline" && p->inputLevel < 0) {
+            multiomeAtacPeakMex.inlineMode = "no";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "multiomeAtacPeakBarcodeTranslate" && p->inputLevel < 0) {
+            multiomeAtacPeakMex.barcodeTranslate = "-";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "multiomeAtacPeakBarcodeTranslateFromFirst" && p->inputLevel < 0) {
+            multiomeAtacPeakMex.barcodeTranslateFromFirst = "yes";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "multiomeAtacPeakMetricsTsv" && p->inputLevel < 0) {
+            multiomeAtacPeakMex.metricsTsv = "-";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "multiomeAtacPeakMexOutDir" && p->inputLevel < 0) {
+            multiomeAtacPeakMex.mexOutDir = "-";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "multiomeAtacPeakNarrowPeak" && p->inputLevel < 0) {
+            multiomeAtacPeakMex.narrowPeak = "-";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "multiomeAtacPeakSummits" && p->inputLevel < 0) {
+            multiomeAtacPeakMex.summits = "-";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "multiomeAtacPeakCallMode" && p->inputLevel < 0) {
+            multiomeAtacPeakMex.peakCallMode = "frag";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "multiomeAtacPeakMacsProfile" && p->inputLevel < 0) {
+            multiomeAtacPeakMex.macsProfile = "-";
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "multiomeAtacPeakThreads" && p->inputLevel < 0) {
+            multiomeAtacPeakMex.threads = 0;
+            p->inputLevel = 0;
+        }
+        if (p->nameString == "multiomeAtacPeakMaxBarcodes" && p->inputLevel < 0) {
+            multiomeAtacPeakMex.maxBarcodes = 0;
             p->inputLevel = 0;
         }
     }
@@ -836,8 +1194,24 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
         for (int iarg=1; iarg<argInN; iarg++) {
             string oneArg=string(argIn[iarg]);
 
-            if (oneArg=="--version") {//print version and exit
+            if (oneArg=="--version") {//print suite version and exit
                 std::cout << STAR_VERSION <<std::endl;
+                exit(0);
+            };
+            if (oneArg=="--suite-version") {
+                std::cout << STAR_SUITE_VERSION << std::endl;
+                exit(0);
+            };
+            if (oneArg=="--upstream-version") {
+                std::cout << STAR_UPSTREAM_VERSION << std::endl;
+                exit(0);
+            };
+            if (oneArg=="--genome-compat-version") {
+                std::cout << versionGenome << std::endl;
+                exit(0);
+            };
+            if (oneArg=="--accepted-genome-versions") {
+                std::cout << versionGenome << "," << STAR_LEGACY_GENOME_COMPAT_VERSION << std::endl;
                 exit(0);
             };
 
@@ -889,7 +1263,9 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
         exitWithError(errOut.str(),std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
     };
 
-    inOut->logMain << "STAR version=" << STAR_VERSION << "\n";
+    inOut->logMain << "STAR-suite version=" << STAR_SUITE_VERSION << "\n";
+    inOut->logMain << "STAR upstream version=" << STAR_UPSTREAM_VERSION << "\n";
+    inOut->logMain << "STAR genome compatibility version=" << versionGenome << "\n";
     inOut->logMain << "STAR compilation time,server,dir=" << COMPILATION_TIME_PLACE << "\n";
     inOut->logMain << "STAR git: " << GIT_BRANCH_COMMIT_DIFF << "\n";
     #ifdef COMPILE_FOR_LONG_READS
@@ -1205,7 +1581,9 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
     emitNoYBAMyes=false;
     emitYReadNamesyes=false;
     keepBAMyes=false;
+    emitYNoYyes=false;
     emitYNoYFastqyes=false;
+    emitYNoYCbqyes=false;
     if (runMode=="alignReads" && outSAMmode != "None") {//open SAM file and write header
         if (outSAMtype.at(0)=="BAM") {
             if (outSAMtype.size()<2) {
@@ -1419,7 +1797,31 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
         }
     }
     
-    // Parse Y-chromosome FASTQ emission parameters
+    // Parse Y-chromosome read sidecar emission parameters.
+    {
+        string t = emitYNoY; std::transform(t.begin(), t.end(), t.begin(), ::tolower);
+        if (t == "yes") emitYNoYyes = true;
+        else if (t == "no" || t.empty()) emitYNoYyes = false;
+        else {
+            ostringstream errOut;
+            errOut << "EXITING because of fatal PARAMETERS error: unrecognized option in --emitYNoY=" << emitYNoY << "\n";
+            errOut << "SOLUTION: use allowed option: yes OR no\n";
+            exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+        }
+    }
+    {
+        string t = emitYNoYFormat; std::transform(t.begin(), t.end(), t.begin(), ::tolower);
+        if (t.empty() || t == "fastq") {
+            emitYNoYFormat = "fastq";
+        } else if (t == "cbq") {
+            emitYNoYFormat = "cbq";
+        } else {
+            ostringstream errOut;
+            errOut << "EXITING because of fatal PARAMETERS error: unrecognized option in --emitYNoYFormat=" << emitYNoYFormat << "\n";
+            errOut << "SOLUTION: use allowed option: fastq OR cbq\n";
+            exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+        }
+    }
     {
         string t = emitYNoYFastq; std::transform(t.begin(), t.end(), t.begin(), ::tolower);
         if (t == "yes") emitYNoYFastqyes = true;
@@ -1441,6 +1843,49 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
             ostringstream errOut;
             errOut << "EXITING because of fatal PARAMETERS error: unrecognized option in --emitYNoYFastqCompression=" << emitYNoYFastqCompression << "\n";
             errOut << "SOLUTION: use allowed option: gz OR none\n";
+            exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+        }
+    }
+    {
+        string t = emitYNoYCbq; std::transform(t.begin(), t.end(), t.begin(), ::tolower);
+        if (t == "yes") emitYNoYCbqyes = true;
+        else if (t == "no" || t.empty()) emitYNoYCbqyes = false;
+        else {
+            ostringstream errOut;
+            errOut << "EXITING because of fatal PARAMETERS error: unrecognized option in --emitYNoYCbq=" << emitYNoYCbq << "\n";
+            errOut << "SOLUTION: use allowed option: yes OR no\n";
+            exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+        }
+    }
+    const bool emitYNoYGenericFastq = emitYNoYyes && emitYNoYFormat == "fastq";
+    const bool emitYNoYGenericCbq = emitYNoYyes && emitYNoYFormat == "cbq";
+    if ((emitYNoYGenericFastq && emitYNoYCbqyes) ||
+        (emitYNoYGenericCbq && emitYNoYFastqyes) ||
+        (emitYNoYFastqyes && emitYNoYCbqyes)) {
+        ostringstream errOut;
+        errOut << "EXITING because of fatal PARAMETERS error: conflicting Y/noY sidecar formats requested\n";
+        errOut << "SOLUTION: use one of --emitYNoY yes --emitYNoYFormat fastq, "
+               << "--emitYNoY yes --emitYNoYFormat cbq, --emitYNoYFastq yes, or --emitYNoYCbq yes\n";
+        exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+    }
+    if (emitYNoYGenericFastq) {
+        emitYNoYFastqyes = true;
+    }
+    if (emitYNoYGenericCbq) {
+        emitYNoYCbqyes = true;
+    }
+    if (emitYNoYFastqyes) {
+        emitYNoYyes = true;
+        emitYNoYFormat = "fastq";
+    }
+    if (emitYNoYCbqyes) {
+        emitYNoYyes = true;
+        emitYNoYFormat = "cbq";
+    }
+    if (emitYNoYCbqyes) {
+        if (emitYNoYCbqBlockSize == 0) {
+            ostringstream errOut;
+            errOut << "EXITING because of fatal PARAMETERS error: --emitYNoYCbqBlockSize must be positive\n";
             exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
         }
     }
@@ -1481,6 +1926,34 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
                <<dynamicThreadTelemetry<<"\n";
         exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
     }
+    if (dynamicThreadTelemetryIntervalSec < 0) {
+        ostringstream errOut;
+        errOut <<"EXITING: fatal input ERROR: --dynamicThreadTelemetryIntervalSec must be >=0, user-defined value="
+               <<dynamicThreadTelemetryIntervalSec<<"\n";
+        exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+    }
+    if (dynamicThreadMapFloor < 0 || dynamicThreadAtacFloor < 0 || dynamicThreadFeatureFloor < 0) {
+        ostringstream errOut;
+        errOut <<"EXITING: fatal input ERROR: per-domain floors (--dynamicThread{Map,Atac,Feature}Floor) must be >=0\n";
+        exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+    }
+    if (dynamicThreadAtacController != 0 && dynamicThreadAtacController != 1) {
+        ostringstream errOut;
+        errOut <<"EXITING: fatal input ERROR: --dynamicThreadAtacController must be 0 or 1, user-defined value="
+               <<dynamicThreadAtacController<<"\n";
+        exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+    }
+    if (dynamicThreadFifoWaiters != 0 && dynamicThreadFifoWaiters != 1) {
+        ostringstream errOut;
+        errOut <<"EXITING: fatal input ERROR: --dynamicThreadFifoWaiters must be 0 or 1, user-defined value="
+               <<dynamicThreadFifoWaiters<<"\n";
+        exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+    }
+    // FIFO + floors/controller are now composable (Step 8f): the FIFO
+    // helper updates mapPermitDomainInUse/Waiters under the lock and picks
+    // the first admittable queued waiter when floors are active, so the
+    // ATAC drain-time controller can shift floors and the queue grant logic
+    // routes new permits to the under-floor domain.
     if (dynamicThreadConstMapPermits < 0) {
         ostringstream errOut;
         errOut <<"EXITING: fatal input ERROR: --dynamicThreadConstMapPermits must be >=0, user-defined value="
@@ -1779,6 +2252,20 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
         };
     };
 
+    if (emitYNoYCbqyes) {
+        if (runMode != "alignReads") {
+            ostringstream errOut;
+            errOut << "EXITING because of fatal PARAMETERS error: --emitYNoYFormat cbq can only be used with --runMode alignReads\n";
+            exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+        }
+        if (twoPass.yes) {
+            ostringstream errOut;
+            errOut << "EXITING because of fatal PARAMETERS error: --emitYNoYFormat cbq does not support --twopassMode.\n";
+            errOut << "SOLUTION: disable two-pass mapping for ordered CBQ Y/noY emission.\n";
+            exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+        }
+    }
+
     // openReadFiles depends on twoPass for reading SAM header
     if (runMode=="alignReads" && pGe.gLoad!="Remove" && pGe.gLoad!="LoadAndExit") {//open reads files to check if they are present
         openReadsFiles();
@@ -1850,6 +2337,26 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
     quant.trSAM.indel=false;
     quant.trSAM.softClip=false;
     quant.trSAM.singleEnd=false; 
+    auto configureQuantTranscriptomeOutput = [&]() {
+        if (quant.trSAM.output=="BanSingleEnd_BanIndels_ExtendSoftclip") {
+            quant.trSAM.indel=false;
+            quant.trSAM.softClip=false;
+            quant.trSAM.singleEnd=false;
+        } else if (quant.trSAM.output=="BanSingleEnd") {
+            quant.trSAM.indel=true;
+            quant.trSAM.softClip=true;
+            quant.trSAM.singleEnd=false;
+        } else if (quant.trSAM.output=="BanSingleEnd_ExtendSoftclip") {
+            quant.trSAM.indel=true;
+            quant.trSAM.softClip=false;
+            quant.trSAM.singleEnd=false;
+        } else {
+            ostringstream errOut;
+            errOut << "EXITING because of fatal INPUT error: unrecognized option in --quantTranscriptomeSAMoutput=" << quant.trSAM.output << "\n";
+            errOut << "SOLUTION: use one of the allowed values of --quantTranscriptomeSAMoutput : BanSingleEnd_BanIndels_ExtendSoftclip, BanSingleEnd, or BanSingleEnd_ExtendSoftclip.\n";
+            exitWithError(errOut.str(),std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+        };
+    };
     if (quant.mode.at(0) != "-") {
         quant.yes=true;
         for (uint32 ii=0; ii<quant.mode.size(); ii++) {
@@ -1867,19 +2374,6 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
                     };
                     inOut->outQuantBAMfile=bgzf_open(outQuantBAMfileName.c_str(),("w"+to_string((long long) quant.trSAM.bamCompression)).c_str());
                 };
-                if (quant.trSAM.output=="BanSingleEnd_BanIndels_ExtendSoftclip") {
-                    quant.trSAM.indel=false;
-                    quant.trSAM.softClip=false;
-                    quant.trSAM.singleEnd=false;
-                } else if (quant.trSAM.output=="BanSingleEnd") {
-                    quant.trSAM.indel=true;
-                    quant.trSAM.softClip=true;
-                    quant.trSAM.singleEnd=false;
-                } else if (quant.trSAM.output=="BanSingleEnd_ExtendSoftclip") {
-                    quant.trSAM.indel=true;
-                    quant.trSAM.softClip=false;
-                    quant.trSAM.singleEnd=false;
-                };
             } else if  (quant.mode.at(ii)=="GeneCounts") {
                 quant.geCount.yes=true;
                 quant.geCount.outFile=outFileNamePrefix + "ReadsPerGene.out.tab";
@@ -1893,6 +2387,9 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
                 exitWithError(errOut.str(),std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
             };
         };
+        if (quant.trSAM.yes || quant.transcriptVB.yes) {
+            configureQuantTranscriptomeOutput();
+        };
     };
     //these may be set in STARsolo or in SAM attributes
     quant.geneFull.yes=false;
@@ -1905,6 +2402,30 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
         quant.slam.errorRateFromBlank = (quant.slam.errorRateFromBlankInt != 0);
         if (quant.slam.outFile.empty() || quant.slam.outFile == "-") {
             quant.slam.outFile = outFileNamePrefix + "SlamQuant.out";
+        }
+        if (quant.slam.cbOut != 0 && quant.slam.cbOut != 1) {
+            ostringstream errOut;
+            errOut << "EXITING because of FATAL PARAMETER ERROR: "
+                   << "--slamCbOut must be 0 or 1\n";
+            exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+        }
+        string cbFormatLower = quant.slam.cbFormat;
+        if (cbFormatLower.empty() || cbFormatLower == "-") {
+            cbFormatLower = "star";
+        }
+        for (auto& c : cbFormatLower) {
+            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        }
+        if (cbFormatLower != "star" && cbFormatLower != "ezbakr") {
+            ostringstream errOut;
+            errOut << "EXITING because of FATAL PARAMETER ERROR: "
+                   << "--slamCbFormat must be star or ezbakr\n"
+                   << "Got: " << quant.slam.cbFormat << "\n";
+            exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+        }
+        quant.slam.cbFormat = cbFormatLower;
+        if (quant.slam.cbOut != 0 && (quant.slam.cbOutFile.empty() || quant.slam.cbOutFile == "-")) {
+            quant.slam.cbOutFile = outFileNamePrefix + "SlamQuant.cB.tsv";
         }
         if (quant.slam.errorRate <= 0.0 || quant.slam.errorRate >= 1.0) {
             ostringstream errOut;
@@ -2086,6 +2607,40 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
                    << "--slamCompatMode must be none or gedi\n"
                    << "Got: " << quant.slam.compatModeStr << "\n";
             exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+        }
+
+        // Mate2 defaults to mate1 unless explicitly set (sentinel -1 before resolve)
+        if (quant.slam.compatTrim5p[1] < 0) {
+            quant.slam.compatTrim5p[1] = quant.slam.compatTrim5p[0];
+        }
+        if (quant.slam.compatTrim3p[1] < 0) {
+            quant.slam.compatTrim3p[1] = quant.slam.compatTrim3p[0];
+        }
+        if (quant.slam.minCallableLength < 0) {
+            ostringstream errOut;
+            errOut << "EXITING because of FATAL PARAMETER ERROR: "
+                   << "--slamMinCallableLength must be >= 0\n"
+                   << "Got: " << quant.slam.minCallableLength << "\n";
+            exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+        }
+        {
+            string atm = quant.slam.slamAutoTrimPerMate;
+            for (auto& c : atm) {
+                c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            }
+            if (atm.empty() || atm == "auto" || atm == "-") {
+                quant.slam.autoTrimPerMate = (readNends >= 2);
+            } else if (atm == "yes" || atm == "true" || atm == "1") {
+                quant.slam.autoTrimPerMate = true;
+            } else if (atm == "no" || atm == "false" || atm == "0") {
+                quant.slam.autoTrimPerMate = false;
+            } else {
+                ostringstream errOut;
+                errOut << "EXITING because of FATAL PARAMETER ERROR: "
+                       << "--slamAutoTrimPerMate must be Auto, Yes, or No\n"
+                       << "Got: " << quant.slam.slamAutoTrimPerMate << "\n";
+                exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+            }
         }
         
         // Apply SNP mask defaults and compatibility mode (--slamSnpMaskCompat gedi)
@@ -2395,8 +2950,9 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
         if (quant.slam.batchTotalCount < 1) {
             ostringstream errOut;
             errOut << "EXITING because of FATAL PARAMETER ERROR: "
-                   << "--batchMode requires at least one FASTQ in --readFilesIn\n"
-                   << "SOLUTION: use comma-separated files: --readFilesIn file1.fq,file2.fq,file3.fq\n";
+                   << "--batchMode requires at least one input source in --readFilesIn\n"
+                   << "SOLUTION: use comma-separated files, e.g. --readFilesIn file1.fq,file2.fq,file3.fq "
+                   << "or --readFilesType Binseq PE --readFilesIn file1.cbq,file2.cbq\n";
             exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
         }
 
@@ -2424,7 +2980,7 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
                    << "SOLUTION: use 1 or 2 mates in --readFilesIn.\n";
             exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
         }
-        if (readNends > 1) {
+        if (readNends > 1 && readFilesTypeN != 20) {
             if (readFilesNames.size() < 2) {
                 ostringstream errOut;
                 errOut << "EXITING because of FATAL PARAMETER ERROR: "
@@ -2532,6 +3088,12 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
             inOut->logMain << "NOTE: --quantVBLibType=A not supported for single-end reads; "
                            << "using --quantVBLibType=U (unstranded SE).\n";
         }
+        if (emitYNoYCbqyes && quant.transcriptVB.libType == "A") {
+            ostringstream errOut;
+            errOut << "EXITING because of fatal PARAMETERS error: --emitYNoYFormat cbq does not support TranscriptVB automatic library detection.\n";
+            errOut << "SOLUTION: set --quantVBLibType explicitly or disable CBQ Y/noY emission.\n";
+            exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+        }
         
         // Normalize errorModelMode to lowercase
         string errorModelModeLower = quant.transcriptVB.errorModelMode;
@@ -2545,6 +3107,21 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
             exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
         }
         quant.transcriptVB.errorModelMode = errorModelModeLower;
+
+        if (quant.transcriptVB.fragLengthDistInt != 0 && quant.transcriptVB.fragLengthDistInt != 1) {
+            ostringstream errOut;
+            errOut << "EXITING because of FATAL PARAMETER ERROR: "
+                   << "--quantVBFragLengthDist must be 0 or 1\n"
+                   << "Got: " << quant.transcriptVB.fragLengthDistInt << "\n";
+            exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+        }
+        if (quant.transcriptVB.effectiveLengthCorrectionInt != 0 && quant.transcriptVB.effectiveLengthCorrectionInt != 1) {
+            ostringstream errOut;
+            errOut << "EXITING because of FATAL PARAMETER ERROR: "
+                   << "--quantVBEffectiveLengthCorrection must be 0 or 1\n"
+                   << "Got: " << quant.transcriptVB.effectiveLengthCorrectionInt << "\n";
+            exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+        }
 
         // Treat "None" and "-" as unset trace output
         if (quant.transcriptVB.traceFile == "-" || quant.transcriptVB.traceFile == "None") {
@@ -2593,6 +3170,10 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
             if (quant.slam.grandSlamOut != 0 && quant.slam.grandSlamOutFile.empty()) {
                 quant.slam.grandSlamOutFile = countsDir + outFileNamePrefixAutoSample + ".SlamQuant.grandslam.tsv";
             }
+            if (quant.slam.cbOut != 0 &&
+                (quant.slam.cbOutFile.empty() || quant.slam.cbOutFile == outFileNamePrefix + "SlamQuant.cB.tsv")) {
+                quant.slam.cbOutFile = countsDir + outFileNamePrefixAutoSample + ".SlamQuant.cB.tsv";
+            }
             if (quant.slam.slamQcJson.empty() || quant.slam.slamQcJson == "-") {
                 quant.slam.slamQcJson = qcDir + outFileNamePrefixAutoSample + ".slam_qc.json";
             }
@@ -2620,6 +3201,68 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
     
     //solo
     pSolo.initialize(this);
+
+    soloSpatialFeatureSidecarEnabled = !soloSpatialFeatureSidecar.empty()
+        && soloSpatialFeatureSidecar != "-" && soloSpatialFeatureSidecar != "None";
+    if (soloSpatialFeatureSidecarEnabled) {
+        const auto exactly = [](const vector<string> &values, const string &expected) {
+            return values.size() == 1 && values[0] == expected;
+        };
+        auto rejectSpatialSidecar = [&](const string &reason) {
+            ostringstream errOut;
+            errOut << "EXITING because of fatal PARAMETERS error: --soloSpatialFeatureSidecar "
+                   << reason << "\n"
+                   << "SOLUTION: use the modern annotation-only Visium HD GEX sidecar recipe.\n";
+            exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+        };
+
+        if (runMode != "alignReads") rejectSpatialSidecar("requires --runMode alignReads");
+        if (pSolo.typeStr != "None") rejectSpatialSidecar("requires --soloType None");
+        if (!exactly(pSolo.featureIn, "GeneFull")) rejectSpatialSidecar("requires exactly --soloFeatures GeneFull");
+        if (pSolo.strandStr != "Forward") rejectSpatialSidecar("requires --soloStrand Forward");
+        if (!pSolo.crMultimapRescue) rejectSpatialSidecar("requires --soloCrMultimapRescue yes");
+        if (pSolo.crGexFeature != ParametersSolo::CrGexGeneFull)
+            rejectSpatialSidecar("requires --soloCrGexFeature GeneFull");
+        if (!exactly(pSolo.umiDedup.typesIn, "1MM_CR"))
+            rejectSpatialSidecar("requires exactly --soloUMIdedup 1MM_CR");
+        if (!exactly(pSolo.umiFiltering.type, "MultiGeneUMI_CR"))
+            rejectSpatialSidecar("requires exactly --soloUMIfiltering MultiGeneUMI_CR");
+        if (!exactly(pSolo.multiMap.typesIn, "Unique"))
+            rejectSpatialSidecar("requires exactly --soloMultiMappers Unique");
+        if (!exactly(pSolo.cellFilter.type, "None"))
+            rejectSpatialSidecar("requires --soloCellFilter None");
+        if (!exactly(outSAMtype, "None")) rejectSpatialSidecar("requires --outSAMtype None");
+        if (outSAMattrPresent.GX || outSAMattrPresent.GN || outSAMattrPresent.UR
+            || outSAMattrPresent.UB || outSAMattrPresent.CB || outSAMattrPresent.CR) {
+            rejectSpatialSidecar("does not permit GX/GN/UR/UB/CB/CR SAM attributes");
+        }
+        if (twoPass.mode != "None" || runRestart.type != 0)
+            rejectSpatialSidecar("does not support two-pass or restart mapping");
+        if (outFilterType != "Normal")
+            rejectSpatialSidecar("requires --outFilterType Normal");
+        if (readFilesTypeN == 10 || readNends != 2)
+            rejectSpatialSidecar("requires two FASTQ ends ordered as R2 then raw R1");
+        if (batchModeRequested || quant.slam.yes || quant.transcriptVB.yes)
+            rejectSpatialSidecar("does not support batch, SLAM, or transcript-VB replay modes");
+
+        // This is a narrow annotation-only mode: R2 is the sole mapped end and
+        // raw R1 remains available to the independent spatial decoder. No Solo
+        // barcode object, whitelist, correction, or collapse is enabled.
+        readNmates = 1;
+        pSolo.barcodeRead = 1;
+        pSolo.strand = 0;
+        pSolo.featureYes.fill(false);
+        pSolo.featureYes[SoloFeatureTypes::GeneFull] = true;
+        pSolo.featureInd.fill(-1);
+        pSolo.featureInd[SoloFeatureTypes::GeneFull] = 0;
+        pSolo.features.clear();
+        pSolo.features.push_back(SoloFeatureTypes::GeneFull);
+        pSolo.nFeatures = 1;
+        quant.geneFull.yes = true;
+        quant.yes = true;
+        inOut->logMain << "Spatial GeneFull sidecar: annotation-only mode enabled; mapping R2 and "
+                       << "excluding raw R1 from alignment/barcode correction\n";
+    }
 
     if (runMode == "hashCacheGenerate") {
         if (pSolo.hashCacheOutput.empty() || pSolo.hashCacheOutput == "-") {
@@ -2723,7 +3366,45 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
                 outNoYFastqFile[imate] = outFileNamePrefix + "noY_reads.mate" + to_string(imate + 1) + ext;
             }
         }
+        }
     }
+
+    // Derive Y/noY CBQ output paths. CBQ sidecars are one paired/single-end
+    // stream per Y class, preserving input mate order inside each CBQ record.
+    if (emitYNoYCbqyes) {
+        const uint32 yFastqEmitCount = yFastqEmitReadCount();
+        if (yFastqEmitCount != 1 && yFastqEmitCount != 2) {
+            ostringstream errOut;
+            errOut << "EXITING because of fatal PARAMETERS error: --emitYNoYFormat cbq supports one or two emitted read ends, got "
+                   << yFastqEmitCount << "\n";
+            exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+        }
+        const bool hasYOutput = !YCbqOutput.empty() && YCbqOutput != "-";
+        const bool hasNoYOutput = !noYCbqOutput.empty() && noYCbqOutput != "-";
+        string outputDir = outputDirFromPrefix(outFileNamePrefix);
+        if (outFileNamePrefixAuto) {
+            outputDir = outFileNamePrefixAutoRoot + "y_separated/" + outFileNamePrefixAutoSample + "/";
+            createDirectory(outputDir, runDirPerm, "--emitYNoYCbq y_separated", *this);
+        } else {
+            if (outputDir.empty()) {
+                outputDir = "y_separated/";
+            } else {
+                outputDir += "y_separated/";
+            }
+            createDirectory(outputDir, runDirPerm, "--emitYNoYCbq y_separated", *this);
+        }
+
+        string base = "reads";
+        if (!readFilesNames.empty() && !readFilesNames[0].empty()) {
+            base = stripReadToken(stripCbqExt(stripFastqExt(pathBasename(readFilesNames[0][0]))));
+        }
+        if (readFilesN > 1 && (!hasYOutput || !hasNoYOutput)) {
+            warningMessage(" emitYNoYFormat cbq: multiple input files detected; combined output CBQ names are derived from the first input file",
+                           std::cerr, inOut->logMain, *this);
+        }
+
+        outYCbqFile = hasYOutput ? YCbqOutput : outputDir + base + "_Y.cbq";
+        outNoYCbqFile = hasNoYOutput ? noYCbqOutput : outputDir + base + "_noY.cbq";
     }
 
     // Open Y/noY FASTQ output files (uncompressed only)
@@ -3051,6 +3732,13 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
                << "SOLUTION: use --outFilterType Normal or disable --batchMode\n";
         exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
     }
+    if (emitYNoYCbqyes && outFilterBySJoutStage != 0) {
+        ostringstream errOut;
+        errOut << "EXITING because of FATAL PARAMETER ERROR: "
+               << "--emitYNoYFormat cbq does not support --outFilterType BySJout.\n"
+               << "SOLUTION: use --outFilterType Normal for ordered CBQ Y/noY emission.\n";
+        exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+    }
     
     ////////////////////////////////////////////////
     inOut->logMain << "Finished loading and checking parameters\n" <<flush;
@@ -3181,6 +3869,7 @@ void Parameters::applyDefaultGroups() {
         setStringIfDefault("soloCrGexFeature", "GeneFull");
         setStringIfDefault("soloCrMultimapRescue", "yes");
         setIntIfDefault("crMinUmi", 10);
+        setStringIfDefault("crGuideCaller", "auto");
         // Note: soloKeysCompat cr requires soloProbeList, so we don't set it by default
         setStringIfDefault("soloCBmatchWLtype", "1MM_multi_Nbase_pseudocounts");
         setStringIfDefault("soloUMIdedup", "1MM_CR");
@@ -3265,6 +3954,7 @@ void Parameters::applyDefaultGroups() {
         setStringIfDefault("soloCrGexFeature", "GeneFull");
         setStringIfDefault("soloCrMultimapRescue", "yes");
         setIntIfDefault("crMinUmi", 10);
+        setStringIfDefault("crGuideCaller", "auto");
     }
     
     inOut->logMain << "\n";

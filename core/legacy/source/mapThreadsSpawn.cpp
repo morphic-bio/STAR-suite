@@ -2,12 +2,23 @@
 #include "FlexPipeline.h"
 #include "FlexHashScreen.h"
 #include "SoloReadFeature.h"
+#include "SoloReadBarcode.h"
+#include "SoloFeature.h"
 #include "SoloFeatureTypes.h"
+#include "Transcriptome.h"
 #include "ThreadControl.h"
 #include "GlobalVariables.h"
 #include "ErrorWarning.h"
+#include "InlineCBCorrection.h"
+#include "TimeFunctions.h"
+#include "streamFuns.h"
+#include "systemFunctions.h"
 #include <algorithm>
+#include <cctype>
+#include <cstdlib>
+#include <fstream>
 #include <sstream>
+#include <unordered_map>
 #include <zlib.h>
 
 namespace {
@@ -25,37 +36,197 @@ std::string serializeRetuneTrace(const std::vector<int> &traceTargets) {
     }
     return traceStream.str();
 }
+
+std::string lowerCopy(std::string value) {
+    std::transform(value.begin(), value.end(), value.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return value;
 }
 
-static bool flexPipelineActivationGuard(Parameters &P) {
+bool unsetToken(const std::string &value) {
+    std::string v = lowerCopy(value);
+    return v.empty() || v == "-" || v == "none" || v == "no";
+}
+
+bool readableFile(const std::string &path) {
+    if (path.empty() || path == "-") {
+        return false;
+    }
+    std::ifstream in(path.c_str(), std::ios::binary);
+    return in.good();
+}
+}
+
+bool flexPipelineActivationGuard(Parameters &P, std::string *reason, bool logMessages) {
     const auto &ps = P.pSolo;
+    auto reject = [&](const std::string &message) {
+        if (reason != nullptr) {
+            *reason = message;
+        }
+        if (logMessages) {
+            P.inOut->logMain << "Flex pipeline: not active (" << message << ")\n" << std::flush;
+        }
+        return false;
+    };
     if (ps.flexPipelineStr == "no") {
-        P.inOut->logMain << "Flex pipeline: disabled by --flexPipeline no\n" << std::flush;
+        if (reason != nullptr) {
+            *reason = "disabled by --flexPipeline no";
+        }
+        if (logMessages) {
+            P.inOut->logMain << "Flex pipeline: disabled by --flexPipeline no\n" << std::flush;
+        }
         return false;
     }
     if (!ps.flexMode) {
-        P.inOut->logMain << "Flex pipeline: not active (flexMode=false)\n" << std::flush;
-        return false;
-    }
-    if (!ps.hashScreenEnabled) {
-        P.inOut->logMain << "Flex pipeline: not active (hash screen not enabled)\n" << std::flush;
-        return false;
-    }
-    if (P.outSAMtype.at(0) != "None") {
-        P.inOut->logMain << "Flex pipeline: not active (outSAMtype is not None)\n" << std::flush;
-        return false;
+        return reject("flexMode=false");
     }
     int nLanes = static_cast<int>(P.readFilesN);
     int nTriage = ps.flexPipelineNTriage;
     int nSolo = ps.flexPipelineNSolo;
     bool fullyFused = (nTriage == 0 && nSolo == 0);
+    if (P.readFilesTypeN == 20 && P.outSAMtype.at(0) != "None") {
+        return reject("CBQ/Binseq input uses the standard STAR CBQ adapter path");
+    }
+    if (!ps.hashScreenEnabled) {
+        return reject("hash screen not enabled");
+    }
+    if (P.outSAMtype.at(0) != "None") {
+        return reject("outSAMtype is not None");
+    }
+    if (P.readFilesTypeN == 20 && !fullyFused) {
+        return reject("CBQ/Binseq input currently requires fully-fused mode: --flexPipelineNTriage 0 --flexPipelineNSolo 0");
+    }
     int minThreads = fullyFused ? 1 : (nLanes + nTriage + nSolo + 1);
     if (P.runThreadN < minThreads) {
-        P.inOut->logMain << "Flex pipeline: not active (runThreadN=" << P.runThreadN
-                         << " < minimum " << minThreads << " for " << nLanes << " lanes + "
-                         << nTriage << " triage + "
-                         << nSolo << " solo + 1 worker)\n" << std::flush;
+        std::ostringstream msg;
+        msg << "runThreadN=" << P.runThreadN
+            << " < minimum " << minThreads << " for " << nLanes << " lanes + "
+            << nTriage << " triage + "
+            << nSolo << " solo + 1 worker";
+        return reject(msg.str());
+    }
+    if (reason != nullptr) {
+        reason->clear();
+    }
+    return true;
+}
+
+bool flexNoGenomeCountOnlyActivationGuard(Parameters &P, std::string *reason) {
+    auto reject = [&](const std::string &message) {
+        if (reason != nullptr) {
+            *reason = message;
+        }
         return false;
+    };
+
+    if (std::getenv("STAR_DISABLE_FLEX_NO_GENOME") != nullptr) {
+        return reject("disabled by STAR_DISABLE_FLEX_NO_GENOME");
+    }
+
+    std::string baseReason;
+    if (!flexPipelineActivationGuard(P, &baseReason, false)) {
+        if (baseReason == "hash screen not enabled") {
+            return reject("prebuilt Flex hash cache is missing or unreadable");
+        }
+        return reject(baseReason.empty() ? "Flex pipeline guard rejected command" : baseReason);
+    }
+
+    const auto &ps = P.pSolo;
+    if (P.runMode != "alignReads") {
+        return reject("runMode is not alignReads");
+    }
+    if (ps.flexNoAlign == 0) {
+        return reject("--flexNoAlign is not enabled");
+    }
+    if (ps.flexPipelineNTriage != 0 || ps.flexPipelineNSolo != 0) {
+        return reject("requires fully fused mode: --flexPipelineNTriage 0 --flexPipelineNSolo 0");
+    }
+    if (P.readFilesN == 0) {
+        return reject("no input read files");
+    }
+    if (P.runThreadN < 1) {
+        return reject("runThreadN < 1");
+    }
+    if (!(P.readFilesTypeN == 1 || (P.readFilesTypeN == 20 && P.cbqInputActive))) {
+        return reject("only FASTQ and CBQ fused inputs are supported");
+    }
+    if (P.readFilesTypeN == 1) {
+        if (P.readFilesNames.size() < 2 ||
+            P.readFilesNames[0].size() < static_cast<size_t>(P.readFilesN) ||
+            P.readFilesNames[1].size() < static_cast<size_t>(P.readFilesN)) {
+            return reject("FASTQ Flex input requires two complete read-file mate lists");
+        }
+    }
+    if (P.readFilesTypeN == 20) {
+        if (!P.cbqInputActive) {
+            return reject("CBQ input is not active");
+        }
+        if (P.readFilesNames.empty() ||
+            P.readFilesNames[0].size() < static_cast<size_t>(P.readFilesN)) {
+            return reject("CBQ Flex input requires one complete read-file list");
+        }
+    }
+    if (P.outSAMtype.empty() || P.outSAMtype[0] != "None" || P.outSAMbool ||
+        P.outBAMcoord || P.outBAMunsorted || P.quant.trSAM.bamYes) {
+        return reject("SAM/BAM output is enabled");
+    }
+    if (P.outSAMunmapped.yes || P.outReadsUnmapped != "None") {
+        return reject("unmapped-read output is enabled");
+    }
+    if (P.outSJ.yes || P.outFilterBySJoutStage != 0 || P.outFilterType == "BySJout") {
+        return reject("splice-junction output/filtering is enabled");
+    }
+    if (P.twoPass.yes || P.sjdbInsert.yes) {
+        return reject("two-pass or run-time SJ insertion is enabled");
+    }
+    if (P.pGe.transform.outYes) {
+        return reject("genome transform output is enabled");
+    }
+    if (P.pCh.segmentMin > 0) {
+        return reject("chimeric detection/output is enabled");
+    }
+    if (P.outWigFlags.yes || P.emitNoYBAMyes || P.emitYReadNamesyes || P.emitYNoYFastqyes || P.emitYNoYCbqyes) {
+        return reject("genome-backed auxiliary output is enabled");
+    }
+    if (P.quant.geCount.yes || P.quant.trSAM.yes || P.quant.transcriptVB.yes || P.quant.slam.yes) {
+        return reject("genome/transcriptome quantification output is enabled");
+    }
+    if (P.quant.geneFull.yes || P.quant.geneFull_Ex50pAS.yes || P.quant.geneFull_ExonOverIntron.yes) {
+        return reject("GeneFull-style Solo feature requires genome-backed annotation");
+    }
+    if (P.var.yes || P.wasp.yes || P.trimQcEnabled) {
+        return reject("variant/WASP/trim-QC mode is enabled");
+    }
+    if (P.chromapAtac.enabled != 0 || !unsetToken(P.multiomeAtacPeakMex.inlineMode)) {
+        return reject("Chromap/multiome ATAC output is enabled");
+    }
+    if (!unsetToken(P.pfMulti.pfMultiConfig) || !unsetToken(P.pfMulti.ocmMultiEnable)) {
+        return reject("pf-multi/OCM post-processing is enabled");
+    }
+    if (P.batchMode || P.batchModeInt != 0 || P.quant.slam.batchMode) {
+        return reject("batch mode is enabled");
+    }
+    if (P.runRestart.type != 0) {
+        return reject("restart mode is enabled");
+    }
+    if (ps.nFeatures != 1 || !ps.featureYes[SoloFeatureTypes::Gene]) {
+        return reject("requires exactly --soloFeatures Gene");
+    }
+    if (ps.type == ParametersSolo::SoloTypes::None || ps.type == ParametersSolo::SoloTypes::CB_samTagOut) {
+        return reject("requires count-producing Solo CB/UMI mode");
+    }
+    if (ps.trackReadIdsForTags) {
+        return reject("BAM CB/UB tag replay state is enabled");
+    }
+    if (ps.hashScreenFile.empty() || !readableFile(ps.hashScreenFile)) {
+        return reject("prebuilt Flex hash cache is missing or unreadable");
+    }
+    if (ps.probeListPath.empty() || !readableFile(ps.probeListPath)) {
+        return reject("Flex probe list is missing or unreadable");
+    }
+
+    if (reason != nullptr) {
+        reason->clear();
     }
     return true;
 }
@@ -98,10 +269,26 @@ static void mapThreadsSpawnFlexPipeline(Parameters &P, ReadAlignChunk** RAchunk)
     if (fullyFused) {
         state.laneFiles.resize(nLanes);
         for (int lane = 0; lane < nLanes; ++lane) {
-            state.laneFiles[lane].r2path = P.readFilesNames[0][lane];
-            state.laneFiles[lane].r1path = P.readFilesNames[1][lane];
+            if (P.readFilesTypeN == 20 && P.cbqInputActive) {
+                state.laneFiles[lane].r2path = P.readFilesNames[0][lane];
+                state.laneFiles[lane].r1path.clear();
+            } else {
+                state.laneFiles[lane].r2path = P.readFilesNames[0][lane];
+                state.laneFiles[lane].r1path = P.readFilesNames[1][lane];
+            }
         }
         state.nFusedThreads = nFusedThreads;
+        if (P.readFilesTypeN == 20 && P.cbqInputActive) {
+            std::string cbqRangeReason;
+            if (flexPrepareCbqRangeTasks(&state, P, nFusedThreads, &cbqRangeReason)) {
+                P.inOut->logMain << "Flex CBQ range: active ("
+                                 << cbqRangeReason << ")\n" << std::flush;
+            } else {
+                P.inOut->logMain << "Flex CBQ range: not active ("
+                                 << cbqRangeReason
+                                 << "); using whole-lane CBQ readers\n" << std::flush;
+            }
+        }
     }
 
     // Per-thread SoloReadFeature + Stats for fully-fused mode
@@ -311,6 +498,219 @@ static void mapThreadsSpawnFlexPipeline(Parameters &P, ReadAlignChunk** RAchunk)
     P.inOut->logMain << std::flush;
 }
 
+void runFlexNoGenomeCountOnly(Parameters &P) {
+    P.closeReadsFiles();
+
+    g_statsAll.resetN();
+    time(&g_statsAll.timeStartMap);
+    *P.inOut->logStdOut << timeMonthDayTime(g_statsAll.timeStartMap) << " ..... started mapping\n"
+                        << std::flush;
+    g_statsAll.timeLastReport = g_statsAll.timeStartMap;
+    g_statsAll.progressReportHeader(P.inOut->logProgress);
+
+    P.inOut->logMain << "Flex count-only no-genome: hash cache " << P.pSolo.hashScreenFile << "\n"
+                     << std::flush;
+
+    if (P.pSolo.inlineCBCorrection && P.pSolo.cbWLyes && !P.pSolo.cbWLstr.empty()) {
+        InlineCBCorrection::initializeWhitelist(P.pSolo);
+        P.inOut->logMain << "[INLINE-CB-INIT] size=" << P.pSolo.cbWLstr.size()
+                         << " exact_map=" << InlineCBCorrection::exactMapSize()
+                         << " variant_map=" << InlineCBCorrection::variantMapSize()
+                         << " variant_collisions=" << InlineCBCorrection::variantCollisionSize()
+                         << " collision_max_fanout=" << InlineCBCorrection::variantCollisionMaxFanout()
+                         << "\n";
+    }
+
+    const int nLanes = static_cast<int>(P.readFilesN);
+    const int nFusedThreads = P.runThreadN;
+
+    P.inOut->logMain << "Flex pipeline: runThreadN=" << P.runThreadN
+                     << ", nLanes=" << nLanes
+                     << ", triage=0 (fully fused + lane steal + role switch)"
+                     << ", soloConsumers=0"
+                     << ", fusedThreads=" << nFusedThreads
+                     << ", dedicatedWorkers=0"
+                     << ", noAlign=ON (alignment skipped)"
+                     << ", noGenome=ON"
+                     << "\n" << std::flush;
+
+    FlexPipelineState state;
+    state.init(nLanes, 0, 0);
+    state.laneFiles.resize(nLanes);
+    for (int lane = 0; lane < nLanes; ++lane) {
+        if (P.readFilesTypeN == 20 && P.cbqInputActive) {
+            state.laneFiles[lane].r2path = P.readFilesNames[0][lane];
+            state.laneFiles[lane].r1path.clear();
+        } else {
+            state.laneFiles[lane].r2path = P.readFilesNames[0][lane];
+            state.laneFiles[lane].r1path = P.readFilesNames[1][lane];
+        }
+    }
+    state.nFusedThreads = nFusedThreads;
+    if (P.readFilesTypeN == 20 && P.cbqInputActive) {
+        std::string cbqRangeReason;
+        if (flexPrepareCbqRangeTasks(&state, P, nFusedThreads, &cbqRangeReason)) {
+            P.inOut->logMain << "Flex CBQ range: active ("
+                             << cbqRangeReason << ")\n" << std::flush;
+        } else {
+            P.inOut->logMain << "Flex CBQ range: not active ("
+                             << cbqRangeReason
+                             << "); using whole-lane CBQ readers\n" << std::flush;
+        }
+    }
+
+    std::vector<SoloReadFeature *> fusedFeats(nFusedThreads, nullptr);
+    std::vector<Stats> fusedStats(nFusedThreads);
+    std::vector<pthread_t> fusedThreads(nFusedThreads);
+    std::vector<FlexLaneReaderArgs> fusedArgs(nFusedThreads);
+
+    for (int i = 0; i < nFusedThreads; ++i) {
+        fusedFeats[i] = new SoloReadFeature(SoloFeatureTypes::Gene, P, -(200 + i));
+        fusedStats[i] = Stats();
+        fusedArgs[i].state = &state;
+        fusedArgs[i].P = &P;
+        fusedArgs[i].gzR2 = nullptr;
+        fusedArgs[i].gzR1 = nullptr;
+        fusedArgs[i].laneId = -1;
+        fusedArgs[i].readFeat = fusedFeats[i];
+        fusedArgs[i].stats = &fusedStats[i];
+        fusedArgs[i].RA = nullptr;
+        fusedArgs[i].threadId = i;
+        int threadStatus = pthread_create(&fusedThreads[i], nullptr, flexLaneReaderFullThread, &fusedArgs[i]);
+        if (threadStatus > 0) {
+            ostringstream errOut;
+            errOut << "EXITING because of FATAL ERROR: pthread error while creating Flex no-genome thread # "
+                   << i << ", error code: " << threadStatus;
+            exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_RUNTIME, P);
+        }
+    }
+    P.inOut->logMain << "  " << nFusedThreads << " fused no-genome threads started\n" << std::flush;
+
+    pthread_t reporterThread;
+    FlexStatsReporterArgs reporterArgs;
+    reporterArgs.state = &state;
+    reporterArgs.P = &P;
+    int reporterStatus = pthread_create(&reporterThread, nullptr, flexStatsReporterThread, &reporterArgs);
+    if (reporterStatus > 0) {
+        ostringstream errOut;
+        errOut << "EXITING because of FATAL ERROR: pthread error while creating Flex stats reporter, error code: "
+               << reporterStatus;
+        exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_RUNTIME, P);
+    }
+
+    for (int i = 0; i < nFusedThreads; ++i) {
+        pthread_join(fusedThreads[i], nullptr);
+    }
+    P.inOut->logMain << "  All fused no-genome threads joined\n" << std::flush;
+
+    state.pipelineDone.store(true, std::memory_order_relaxed);
+    pthread_join(reporterThread, nullptr);
+    P.inOut->logMain << "  Stats reporter joined\n" << std::flush;
+
+    for (int i = 0; i < nFusedThreads; ++i) {
+        g_statsAll.addStats(fusedStats[i]);
+    }
+    g_statsAll.readN = state.counters.readsTotal.load();
+
+    P.inOut->logMain << "Flex pipeline complete: total=" << state.counters.readsTotal.load()
+                     << ", triageKeep=" << state.counters.triageKeep.load()
+                     << ", triageDeny=" << state.counters.triageDeny.load()
+                     << ", triageMiss=" << state.counters.triageMiss.load() << "\n";
+    for (int i = 0; i < nLanes; ++i) {
+        P.inOut->logMain << "  Lane " << i << ": " << state.counters.perLaneReads[i] << " reads\n";
+    }
+    P.inOut->logMain << std::flush;
+
+    time(&g_statsAll.timeFinishMap);
+    *P.inOut->logStdOut << timeMonthDayTime(g_statsAll.timeFinishMap) << " ..... finished mapping\n"
+                        << std::flush;
+    P.inOut->logMain << timeMonthDayTime(g_statsAll.timeFinishMap) << " ..... finished mapping\n"
+                     << "RAM after mapping:\n"
+                     << linuxProcMemory() << std::flush;
+
+    SoloReadBarcode readBarSum(P);
+    {
+        ofstream *statsStream = &ofstrOpen(P.outFileNamePrefix + P.pSolo.outFileNames[0] + "Barcodes.stats",
+                                           ERROR_OUT, P);
+        readBarSum.statsOut(*statsStream);
+        statsStream->close();
+
+        if (P.pSolo.CBmatchWL.mm1_multi_pc) {
+            for (uint32 ii = 0; ii < P.pSolo.cbWLsize; ii++) {
+                readBarSum.cbReadCountExact[ii]++;
+            }
+        }
+    }
+
+    bool quantYesOriginal = P.quant.yes;
+    P.quant.yes = false;
+    Transcriptome transcriptomeNoGenome(P);
+    P.quant.yes = quantYesOriginal;
+
+    std::vector<SoloFeature *> soloFeatAll(P.pSolo.nFeatures, nullptr);
+    SoloFeature geneFeature(P, nullptr, transcriptomeNoGenome, SoloFeatureTypes::Gene,
+                            &readBarSum, soloFeatAll.data());
+    uint32 geneFeatureIndex = P.pSolo.featureInd[SoloFeatureTypes::Gene];
+    soloFeatAll[geneFeatureIndex] = &geneFeature;
+    for (int i = 0; i < nFusedThreads; ++i) {
+        geneFeature.readFeatAll[i] = fusedFeats[i];
+    }
+
+    *P.inOut->logStdOut << timeMonthDayTime() << " ..... started Solo counting\n" << std::flush;
+    P.inOut->logMain << timeMonthDayTime() << " ..... started Solo counting\n" << std::flush;
+    geneFeature.processRecords();
+    *P.inOut->logStdOut << timeMonthDayTime() << " ..... finished Solo counting\n" << std::flush;
+    P.inOut->logMain << timeMonthDayTime() << " ..... finished Solo counting\n" << std::flush;
+
+    if (P.pSolo.inlineCBCorrection) {
+        std::unordered_map<uint64_t, InlineCBCorrection::MergedAmbigEntry> mergedAmbig;
+        InlineCBCorrection::mergeAmbiguousShards(mergedAmbig);
+        size_t mergedUnique = mergedAmbig.size();
+        uint64_t mergedTotal = 0;
+        size_t mergedMaxParents = 0;
+        for (const auto &kv : mergedAmbig) {
+            mergedTotal += kv.second.count;
+            if (kv.second.parents.size() > mergedMaxParents) {
+                mergedMaxParents = kv.second.parents.size();
+            }
+        }
+
+        static const bool disableAmbigResolve =
+            (std::getenv("STAR_DISABLE_AMBIG_CB_RESOLVE") != nullptr);
+        InlineCBCorrection::AmbigResolveStats ambigStats;
+        std::vector<uint32_t> resolvedIdx;
+        if (!disableAmbigResolve) {
+            ambigStats = InlineCBCorrection::resolveAmbiguousMerged(mergedAmbig, P.pSolo, resolvedIdx);
+        }
+
+        P.inOut->logMain << "[INLINE-CB] exact=" << getInlineCbExactCount()
+                         << " corrected=" << getInlineCbCorrectedCount()
+                         << " n_rescued=" << getInlineCbNRescuedCount()
+                         << " with_N=" << getInlineCbWithNCount()
+                         << " rejected=" << getInlineCbRejectedCount()
+                         << " parent_evidence=" << InlineCBCorrection::parentEvidenceTotal()
+                         << " ambig_captured=" << InlineCBCorrection::ambigCapturedTotal()
+                         << " ambig_unique=" << InlineCBCorrection::ambigUniqueVariants()
+                         << " ambig_max_parents=" << InlineCBCorrection::ambigMaxParents()
+                         << " ambig_inline_resolved=" << InlineCBCorrection::getResolvedAmbigCount()
+                         << " ambig_merged_unique=" << mergedUnique
+                         << " ambig_merged_total=" << mergedTotal
+                         << " ambig_merged_max_parents=" << mergedMaxParents
+                         << " ambig_resolved=" << ambigStats.resolved
+                         << " ambig_ambiguous=" << ambigStats.ambiguous
+                         << " ambig_unresolved=" << ambigStats.unresolved
+                         << "\n";
+        InlineCBCorrection::clearWhitelist();
+        InlineCBCorrection::clearAmbiguous();
+    }
+
+    for (int i = 0; i < nFusedThreads; ++i) {
+        delete fusedFeats[i];
+        fusedFeats[i] = nullptr;
+        geneFeature.readFeatAll[i] = nullptr;
+    }
+}
+
 void mapThreadsSpawn (Parameters &P, ReadAlignChunk** RAchunk) {
     // Check activation guard for Flex pipeline mode
     if (flexPipelineActivationGuard(P)) {
@@ -321,16 +721,39 @@ void mapThreadsSpawn (Parameters &P, ReadAlignChunk** RAchunk) {
     const bool interfaceEnabled = (P.dynamicThreadInterface == 1);
     const bool telemetryEnabled = (P.dynamicThreadTelemetry == 1);
     const bool variableThreadsEnabled = (P.variableThreads == 1);
-    const int configuredPermits = (P.dynamicThreadConstMapPermits > 0)
-        ? std::min(P.dynamicThreadConstMapPermits, P.runThreadN)
+    // Permit-pool budget. With chromapAtac concurrent the pool spans STAR's
+    // GEX MAP/FEATURE workers AND chromap's ATAC workers, so the budget is
+    // runThreadN + chromapAtac.threads (a separate thread budget than runThreadN
+    // alone). When chromapAtac is off, pool stays at runThreadN. The user can
+    // override via --dynamicThreadConstMapPermits, which is now honored as-is
+    // (no clamp to runThreadN); pass 0 for the auto-sized default.
+    const int permitTotalThreads = (P.chromapAtac.enabled == 1)
+        ? (P.runThreadN + std::max(0, P.chromapAtac.threads))
         : P.runThreadN;
-    g_threadChunks.mapPermitConfigure(interfaceEnabled, P.runThreadN, configuredPermits, telemetryEnabled, variableThreadsEnabled);
+    const int configuredPermits = (P.dynamicThreadConstMapPermits > 0)
+        ? P.dynamicThreadConstMapPermits
+        : permitTotalThreads;
+    g_threadChunks.mapPermitConfigure(interfaceEnabled, permitTotalThreads, configuredPermits, telemetryEnabled, variableThreadsEnabled);
     g_threadChunks.mapPermitConfigureCpuAware(
         interfaceEnabled && P.dynamicThreadPfControllerCpuAware == 1,
         P.dynamicThreadPfControllerCpuSampleMs,
         P.dynamicThreadPfControllerCpuEmaAlpha
     );
     g_threadChunks.mapPermitConfigureRetunePlan(P.variableThreadsPermitSequence, P.variableThreadsRetuneEveryAcquires);
+
+    // Per-domain borrowable floors (Step 5a). Index order must match
+    // ThreadControl::permitDomainIndex(): MAP=0, FEATURE=1, ATAC=2.
+    {
+        std::vector<int> domainFloors(3, 0);
+        domainFloors[0] = std::max(0, P.dynamicThreadMapFloor);
+        domainFloors[1] = std::max(0, P.dynamicThreadFeatureFloor);
+        domainFloors[2] = std::max(0, P.dynamicThreadAtacFloor);
+        g_threadChunks.mapPermitConfigureDomainFloors(domainFloors);
+    }
+    // FIFO waiter queue (Step 7). When enabled, ThreadControl serves
+    // queued waiters in strict arrival order; new arrivals cannot
+    // fast-path past existing waiters.
+    g_threadChunks.mapPermitConfigureFifoWaiters(P.dynamicThreadFifoWaiters == 1);
 
     if (interfaceEnabled) {
         pthread_mutex_lock(&g_threadChunks.mutexLogMain);

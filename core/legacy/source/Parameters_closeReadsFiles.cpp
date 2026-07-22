@@ -1,5 +1,7 @@
 #include "Parameters.h"
 #include "ErrorWarning.h"
+#include "input/CbqInputModule.h"
+#include "input/FastxInputModule.h"
 #include <fstream>
 #include <sys/stat.h>
 #include <cerrno>
@@ -7,6 +9,22 @@
 #include <sys/wait.h>
 
 void Parameters::closeReadsFiles() {
+    if (fastxInputActive && fastxInputModule) {
+        fastxInputModule->close();
+        fastxInputPendingRecordValid = false;
+        fastxInputExhausted = false;
+        fastxInputPendingRecord.reset();
+        fastxInputLastLoggedLane = -1;
+    }
+
+    if (cbqInputActive && cbqInputModule) {
+        cbqInputModule->close();
+        cbqInputExhausted = false;
+        cbqInputLastLoggedLane = -1;
+        cbqInputPendingBatch.reset();
+        cbqInputPendingBatchOffset = 0;
+    }
+
     // Close all potential read streams (not just readFilesIn.size()).
     for (uint imate=0; imate<MAX_N_MATES; imate++) {
         if (inOut->readIn[imate].is_open()) {

@@ -66,6 +66,9 @@ void ReadAlign::resolveAmbiguousCBs() {
 
         bool badSeq = entry.cbSeq.empty() || entry.cbQual.empty() ||
                       (entry.cbSeq.size() != entry.cbQual.size());
+        bool badEvidence = entry.cbEvidenceReads > 0 &&
+                           (entry.cbLogLikMatch.size() != entry.cbSeq.size() ||
+                            entry.cbLogLikMismatch.size() != entry.cbSeq.size());
         bool badCandidates = false;
         uint32_t minIdx = UINT32_MAX;
         uint32_t maxIdx = 0;
@@ -80,7 +83,7 @@ void ReadAlign::resolveAmbiguousCBs() {
 
         if (g_debugAmbigResolve) {
             uint64_t entryNo = g_debugAmbigResolveCount.fetch_add(1);
-            if ((entryNo < kMaxDebugEntries) || badSeq || badCandidates || badUmi) {
+            if ((entryNo < kMaxDebugEntries) || badSeq || badCandidates || badUmi || badEvidence) {
                 if (P.inOut && P.inOut->logMain.good()) {
                     P.inOut->logMain << "[AMBIG-CB-DEBUG] entry=" << entryNo
                                      << " key=0x" << std::hex << key << std::dec
@@ -92,9 +95,11 @@ void ReadAlign::resolveAmbiguousCBs() {
                                      << " minIdx=" << (entry.candidateIdx.empty() ? 0 : minIdx)
                                      << " maxIdx=" << maxIdx
                                      << " umiCounts=" << entry.umiCounts.size()
+                                     << " evidenceReads=" << entry.cbEvidenceReads
                                      << " badSeq=" << badSeq
                                      << " badCandidates=" << badCandidates
                                      << " badUmi=" << badUmi
+                                     << " badEvidence=" << badEvidence
                                      << endl;
                 }
             }
@@ -106,7 +111,11 @@ void ReadAlign::resolveAmbiguousCBs() {
         }
         
         // Build context and candidates for resolver
-        CBContext context(entry.cbSeq, entry.cbQual);
+        CBContext context(entry.cbSeq,
+                          entry.cbQual,
+                          entry.cbLogLikMatch,
+                          entry.cbLogLikMismatch,
+                          entry.cbEvidenceReads);
         
         std::vector<Candidate> candidates;
         candidates.reserve(entry.candidateIdx.size());

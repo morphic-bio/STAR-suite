@@ -13,9 +13,14 @@ Options:
   --min-cells N             Minimum filtered cells before fallback (default: 10)
   --force                   Force fallback run regardless of existing output
   --mode simple|full         Backend mode for libscrna (default: simple)
+  --umi-min N               Minimum UMI threshold override
   --sim-n N                 Monte Carlo simulations for full ED
   --ed-retain-count N       Limit retained cells for ED (0 = all)
+  --lower-testing-bound N   EmptyDrops lower testing bound override
+  --ambient-umi-max N       Ambient profile max UMI override
+  --use-bootstrap           Enable CR9-style bootstrap recovered-cells estimation
   --use-fdr-gate            Use FDR gate instead of raw p-value (default)
+  --apply-bh-correction     Apply BH correction before the FDR gate
   --use-raw-pvalue          Use raw p-value gate
   --fdr X                   FDR threshold
   --raw-pvalue X            Raw p-value threshold
@@ -32,9 +37,14 @@ FORCE=0
 SIMPLEED_BIN=""
 OUT_DIR=""
 MODE="simple"
+UMI_MIN=""
 SIM_N=""
 ED_RETAIN=""
+LOWER_TESTING_BOUND=""
+AMBIENT_UMI_MAX=""
+USE_BOOTSTRAP=0
 USE_FDR=1
+APPLY_BH=0
 FDR=""
 RAW_PVALUE=""
 INCLUDE_ZERO=0
@@ -46,9 +56,14 @@ while [[ $# -gt 0 ]]; do
     --min-cells) MIN_CELLS="$2"; shift 2;;
     --force) FORCE=1; shift 1;;
     --mode) MODE="$2"; shift 2;;
+    --umi-min) UMI_MIN="$2"; shift 2;;
     --sim-n) SIM_N="$2"; shift 2;;
     --ed-retain-count) ED_RETAIN="$2"; shift 2;;
+    --lower-testing-bound) LOWER_TESTING_BOUND="$2"; shift 2;;
+    --ambient-umi-max) AMBIENT_UMI_MAX="$2"; shift 2;;
+    --use-bootstrap) USE_BOOTSTRAP=1; shift 1;;
     --use-fdr-gate) USE_FDR=1; shift 1;;
+    --apply-bh-correction) APPLY_BH=1; shift 1;;
     --use-raw-pvalue) USE_FDR=0; shift 1;;
     --fdr) FDR="$2"; shift 2;;
     --raw-pvalue) RAW_PVALUE="$2"; shift 2;;
@@ -132,11 +147,23 @@ mkdir -p "$(dirname "${FILTERED_BARCODES}")"
 
 echo "Running SimpleED fallback..." >&2
 args=(--matrix "${matrix_path}" --barcodes "${barcodes_path}" --out "${FILTERED_BARCODES}" --mode "${MODE}")
+if [[ -n "${UMI_MIN}" ]]; then
+  args+=(--umi-min "${UMI_MIN}")
+fi
 if [[ -n "${SIM_N}" ]]; then
   args+=(--sim-n "${SIM_N}")
 fi
 if [[ -n "${ED_RETAIN}" ]]; then
   args+=(--ed-retain-count "${ED_RETAIN}")
+fi
+if [[ -n "${LOWER_TESTING_BOUND}" ]]; then
+  args+=(--lower-testing-bound "${LOWER_TESTING_BOUND}")
+fi
+if [[ -n "${AMBIENT_UMI_MAX}" ]]; then
+  args+=(--ambient-umi-max "${AMBIENT_UMI_MAX}")
+fi
+if [[ "${USE_BOOTSTRAP}" -eq 1 ]]; then
+  args+=(--use-bootstrap)
 fi
 if [[ -n "${FDR}" ]]; then
   args+=(--fdr "${FDR}")
@@ -146,6 +173,9 @@ if [[ -n "${RAW_PVALUE}" ]]; then
 fi
 if [[ "${USE_FDR}" -eq 1 ]]; then
   args+=(--use-fdr-gate)
+fi
+if [[ "${APPLY_BH}" -eq 1 ]]; then
+  args+=(--apply-bh-correction)
 fi
 if [[ "${INCLUDE_ZERO}" -eq 1 ]]; then
   args+=(--include-zero-umis)

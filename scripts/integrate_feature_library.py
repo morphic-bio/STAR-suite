@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+from __future__ import annotations
+
 import argparse
 import json
 import re
@@ -106,6 +108,27 @@ def load_feature_matrix(matrix_dir: Path) -> ad.AnnData:
     return adata
 
 
+def paired_barcode_index(matrix_dir: Path, barcodes: pd.Series) -> pd.Index | None:
+    """Map assignment-namespace barcodes to the selected output namespace."""
+    barcodes_txt = first_existing(matrix_dir, ["barcodes.txt", "barcodes.csv"])
+    barcodes_tsv = first_existing(matrix_dir, ["barcodes.tsv", "barcodes.tsv.gz"])
+    if barcodes_txt is None or barcodes_tsv is None:
+        return None
+
+    assignment = read_table(barcodes_txt).iloc[:, 0].map(canonical_barcode).astype(str)
+    output = read_table(barcodes_tsv).iloc[:, 0].map(canonical_barcode).astype(str)
+    if len(assignment) != len(output) or len(assignment) == 0:
+        return None
+    if assignment.duplicated().any() or output.duplicated().any():
+        return None
+
+    barcode_map = pd.Series(output.to_numpy(), index=assignment.to_numpy())
+    mapped = barcodes.map(canonical_barcode).astype(str).map(barcode_map)
+    if mapped.notna().sum() == 0:
+        return None
+    return pd.Index(mapped.fillna("").to_numpy(), dtype=str, name="barcode")
+
+
 def annotate_feature_barcodes(adata: ad.AnnData, matrix_dir: Path):
     feature_per_cell = matrix_dir / "feature_per_cell.csv"
     if not feature_per_cell.exists():
@@ -118,16 +141,26 @@ def annotate_feature_barcodes(adata: ad.AnnData, matrix_dir: Path):
     df["barcode"] = df["barcode"].astype(str)
     direct_index = pd.Index(df["barcode"].map(canonical_barcode), dtype=str, name="barcode")
     translated_index = pd.Index(df["barcode"].map(translate_nxt_middle_two_bases), dtype=str, name="barcode")
+    paired_index = paired_barcode_index(matrix_dir, df["barcode"])
     target_index = pd.Index(adata.obs_names.map(canonical_barcode), dtype=str, name="barcode")
 
-    direct_overlap = int(direct_index.isin(target_index).sum())
-    translated_overlap = int(translated_index.isin(target_index).sum())
-    if translated_overlap > direct_overlap:
-        df.index = translated_index
-        df["barcode_namespace_transform"] = "translated"
-    else:
-        df.index = direct_index
-        df["barcode_namespace_transform"] = "direct"
+    candidates = [
+        ("direct", direct_index, int(direct_index.isin(target_index).sum())),
+        ("translated", translated_index, int(translated_index.isin(target_index).sum())),
+    ]
+    if paired_index is not None:
+        candidates.append(
+            (
+                "paired_barcodes_txt_to_tsv",
+                paired_index,
+                int(paired_index.isin(target_index).sum()),
+            )
+        )
+    transform, index, _overlap = max(candidates, key=lambda item: item[2])
+    df.index = index
+    df["barcode_namespace_transform"] = transform
+
+    adata.obs["barcode_feature_namespace"] = df["barcode_namespace_transform"].iloc[0]
 
     for source_col, target_col in [
         ("num_features", "num_features"),
@@ -153,8 +186,10 @@ def annotate_feature_barcodes(adata: ad.AnnData, matrix_dir: Path):
                 top_names.append("")
                 continue
             index = int(value)
-            if 0 <= index < len(feature_names):
-                top_names.append(feature_names[index])
+            # process_features reserves 0 for ties/no unambiguous top feature;
+            # positive ids are one-based MEX feature row ids.
+            if 1 <= index <= len(feature_names):
+                top_names.append(feature_names[index - 1])
             else:
                 top_names.append("")
         adata.obs["top_feature_name"] = top_names
@@ -230,12 +265,70 @@ def build_feature_obs_table(adata: ad.AnnData) -> pd.DataFrame:
 
     obs["barcode_raw"] = obs.index.astype(str)
     obs["barcode_canonical"] = obs.index.map(canonical_barcode)
-    if obs["barcode_canonical"].duplicated().any():
-        dupes = obs.loc[obs["barcode_canonical"].duplicated(), "barcode_canonical"].tolist()[:5]
-        raise ValueError(f"Feature library produced duplicate canonical barcodes: {dupes}")
-
-    obs = obs.set_index("barcode_canonical", drop=False)
+    obs["barcode_translated"] = obs["barcode_raw"].map(translate_nxt_middle_two_bases)
     return obs
+
+
+def load_calls_csv(path: Path) -> pd.DataFrame:
+    calls = pd.read_csv(path)
+    barcode_col = "cell_barcode" if "cell_barcode" in calls.columns else "barcode"
+    if barcode_col not in calls.columns:
+        raise ValueError(f"{path} must contain cell_barcode or barcode")
+
+    calls = calls.copy()
+    calls["barcode_raw"] = calls[barcode_col].astype(str)
+    calls["barcode_canonical"] = calls["barcode_raw"].map(canonical_barcode)
+    calls["barcode_translated"] = calls["barcode_raw"].map(translate_nxt_middle_two_bases)
+    return calls
+
+
+def calls_csv_is_ambient_fdr(calls: pd.DataFrame) -> bool:
+    ambient_columns = {"min_qvalue", "default_fdr", "call_status", "caller"}
+    if not ambient_columns.intersection(calls.columns):
+        return False
+    if "caller" not in calls.columns:
+        return True
+    callers = calls["caller"].dropna().astype(str).str.lower().unique()
+    return len(callers) == 0 or any("ambient" in caller and "fdr" in caller for caller in callers)
+
+
+def map_calls_to_counts(
+    counts_path: Path,
+    counts_index: pd.Index,
+    calls: pd.DataFrame,
+) -> tuple[pd.DataFrame, str]:
+    direct_index = pd.Index(calls["barcode_canonical"].astype(str), dtype=str, name="barcode")
+    translated_index = pd.Index(calls["barcode_translated"].astype(str), dtype=str, name="barcode")
+    direct_overlap = int(direct_index.isin(counts_index).sum())
+    translated_overlap = int(translated_index.isin(counts_index).sum())
+    if translated_overlap > direct_overlap:
+        barcode_key = "barcode_translated"
+        barcode_transform = "translated"
+    else:
+        barcode_key = "barcode_canonical"
+        barcode_transform = "direct"
+
+    if calls[barcode_key].duplicated().any():
+        dupes = calls.loc[calls[barcode_key].duplicated(), barcode_key].astype(str).tolist()[:5]
+        raise ValueError(
+            f"{counts_path} produced duplicate call barcodes after {barcode_transform} mapping: {dupes}"
+        )
+
+    mapped = calls.set_index(barcode_key, drop=False).reindex(counts_index)
+    return mapped, barcode_transform
+
+
+def numeric_call_column(mapped: pd.DataFrame, column: str, default, dtype):
+    if column not in mapped.columns:
+        return pd.Series(default, index=mapped.index).astype(dtype)
+    return pd.to_numeric(mapped[column], errors="coerce").fillna(default).astype(dtype)
+
+
+def string_call_column(mapped: pd.DataFrame, column: str, default: str) -> pd.Series:
+    if column not in mapped.columns:
+        return pd.Series(default, index=mapped.index, dtype="string")
+    series = mapped[column].astype("string").fillna(default)
+    return series.replace({"None": "", "nan": "", "<NA>": ""})
 
 
 def build_feature_outputs(library_dir: Path, feature_output_dir: Path, provenance: dict) -> dict:
@@ -269,11 +362,27 @@ def integrate_calls(
 ):
     counts_adata = ad.read_h5ad(counts_path)
     counts_canonical = counts_adata.obs_names.map(canonical_barcode)
-    if counts_canonical.duplicated().any():
+    counts_index = pd.Index(counts_canonical, dtype=str, name="barcode")
+    if counts_index.duplicated().any():
         dupes = counts_canonical[counts_canonical.duplicated()].tolist()[:5]
         raise ValueError(f"{counts_path} produced duplicate canonical barcodes: {dupes}")
 
-    mapped = feature_obs.reindex(counts_canonical)
+    direct_index = pd.Index(feature_obs["barcode_canonical"].astype(str), dtype=str, name="barcode")
+    translated_index = pd.Index(feature_obs["barcode_translated"].astype(str), dtype=str, name="barcode")
+    direct_overlap = int(direct_index.isin(counts_index).sum())
+    translated_overlap = int(translated_index.isin(counts_index).sum())
+    if translated_overlap > direct_overlap:
+        barcode_key = "barcode_translated"
+        barcode_transform = "translated"
+    else:
+        barcode_key = "barcode_canonical"
+        barcode_transform = "direct"
+
+    if feature_obs[barcode_key].duplicated().any():
+        dupes = feature_obs.loc[feature_obs[barcode_key].duplicated(), barcode_key].astype(str).tolist()[:5]
+        raise ValueError(f"{counts_path} produced duplicate feature barcodes after {barcode_transform} mapping: {dupes}")
+
+    mapped = feature_obs.set_index(barcode_key, drop=False).reindex(counts_index)
 
     num_features = mapped["num_features"].fillna(0).astype(int)
     num_umis = mapped["total_deduped_umi"].fillna(0).astype(int)
@@ -307,6 +416,7 @@ def integrate_calls(
         "sample": provenance.get("sample", ""),
         "feature_type": provenance.get("feature_type", ""),
         "call_source": call_source,
+        "barcode_transform": barcode_transform,
         "obs_columns": [
             f"{prefix}__is_featured",
             f"{prefix}__feature_call",
@@ -324,12 +434,102 @@ def integrate_calls(
     counts_adata.write(counts_path)
 
 
+def integrate_ambient_fdr_calls(
+    counts_path: Path,
+    prefix: str,
+    provenance: dict,
+    generic_aliases: bool,
+    calls: pd.DataFrame,
+    calls_csv: Path,
+):
+    counts_adata = ad.read_h5ad(counts_path)
+    counts_canonical = counts_adata.obs_names.map(canonical_barcode)
+    counts_index = pd.Index(counts_canonical, dtype=str, name="barcode")
+    if counts_index.duplicated().any():
+        dupes = counts_canonical[counts_canonical.duplicated()].tolist()[:5]
+        raise ValueError(f"{counts_path} produced duplicate canonical barcodes: {dupes}")
+
+    mapped, barcode_transform = map_calls_to_counts(counts_path, counts_index, calls)
+
+    num_features = numeric_call_column(mapped, "num_features", 0, "int64")
+    num_umis = numeric_call_column(mapped, "num_umis", 0, "int64")
+    min_called_umi = numeric_call_column(mapped, "min_called_umi", 0, "int64")
+    max_called_umi = numeric_call_column(mapped, "max_called_umi", 0, "int64")
+    min_qvalue = numeric_call_column(mapped, "min_qvalue", 1.0, "float64")
+    if "num_features_at_default_fdr" in mapped.columns:
+        num_features_at_default_fdr = numeric_call_column(mapped, "num_features_at_default_fdr", 0, "int64")
+    else:
+        num_features_at_default_fdr = num_features
+    default_fdr = numeric_call_column(mapped, "default_fdr", 0.01, "float64")
+    feature_call = string_call_column(mapped, "feature_call", "")
+    call_status = string_call_column(mapped, "call_status", "none")
+    caller = string_call_column(mapped, "caller", "ambient-fdr").replace({"": "ambient-fdr"})
+    is_called = (num_features > 0).astype(bool)
+
+    prefixed_columns = {
+        f"{prefix}__guide_fdr_num_features": num_features.to_numpy(),
+        f"{prefix}__guide_fdr_feature_call": pd.Categorical(feature_call.to_numpy()),
+        f"{prefix}__guide_fdr_num_umis": num_umis.to_numpy(),
+        f"{prefix}__guide_fdr_min_called_umi": min_called_umi.to_numpy(),
+        f"{prefix}__guide_fdr_max_called_umi": max_called_umi.to_numpy(),
+        f"{prefix}__guide_fdr_min_qvalue": min_qvalue.to_numpy(),
+        f"{prefix}__guide_fdr_num_features_at_default_fdr": num_features_at_default_fdr.to_numpy(),
+        f"{prefix}__guide_fdr_call_status": pd.Categorical(call_status.to_numpy()),
+        f"{prefix}__guide_fdr_default_fdr": default_fdr.to_numpy(),
+        f"{prefix}__guide_fdr_caller": pd.Categorical(caller.to_numpy()),
+        f"{prefix}__guide_fdr_is_called": is_called.to_numpy(),
+    }
+    for column, values in prefixed_columns.items():
+        counts_adata.obs[column] = values
+
+    generic_columns = {
+        "guide_fdr_num_features": num_features.to_numpy(),
+        "guide_fdr_feature_call": pd.Categorical(feature_call.to_numpy()),
+        "guide_fdr_num_umis": num_umis.to_numpy(),
+        "guide_fdr_min_called_umi": min_called_umi.to_numpy(),
+        "guide_fdr_max_called_umi": max_called_umi.to_numpy(),
+        "guide_fdr_min_qvalue": min_qvalue.to_numpy(),
+        "guide_fdr_num_features_at_default_fdr": num_features_at_default_fdr.to_numpy(),
+        "guide_fdr_call_status": pd.Categorical(call_status.to_numpy()),
+        "guide_fdr_default_fdr": default_fdr.to_numpy(),
+        "guide_fdr_caller": pd.Categorical(caller.to_numpy()),
+        "guide_fdr_is_called": is_called.to_numpy(),
+    }
+    if generic_aliases:
+        for column, values in generic_columns.items():
+            counts_adata.obs[column] = values
+
+    feature_libraries = dict(counts_adata.uns.get("feature_libraries", {}))
+    entry = dict(feature_libraries.get(prefix, {}))
+    entry.setdefault("library_id", provenance.get("library_id", ""))
+    entry.setdefault("sample", provenance.get("sample", ""))
+    entry.setdefault("feature_type", provenance.get("feature_type", ""))
+    entry["ambient_fdr_call_source"] = str(calls_csv)
+    entry["ambient_fdr_barcode_transform"] = barcode_transform
+    obs_columns = list(entry.get("obs_columns", []))
+    for column in prefixed_columns:
+        if column not in obs_columns:
+            obs_columns.append(column)
+    entry["obs_columns"] = obs_columns
+    entry["ambient_fdr_obs_columns"] = list(prefixed_columns.keys())
+    feature_libraries[prefix] = entry
+    counts_adata.uns["feature_libraries"] = feature_libraries
+    if generic_aliases:
+        counts_adata.uns["feature_library_generic_alias"] = prefix
+
+    counts_adata.write(counts_path)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Integrate one feature library into downstream h5ad outputs.")
     parser.add_argument("--library-dir", required=True, help="Feature library directory under run/cr_assign")
     parser.add_argument("--feature-output-root", required=True, help="Output root for per-library h5ad artifacts")
     parser.add_argument("--counts-h5ad", action="append", default=[], help="Counts h5ad to annotate; may be repeated")
     parser.add_argument("--calls-csv", help="Per-cell feature calls aligned to counts barcodes")
+    parser.add_argument(
+        "--ambient-fdr-calls-csv",
+        help="Ambient-FDR guide_fdr_calls_per_cell.csv to annotate into h5ad obs",
+    )
     parser.add_argument("--set-generic-aliases", action="store_true", help="Also set generic feature-call obs aliases")
     args = parser.parse_args()
 
@@ -364,6 +564,38 @@ def main():
                 feature_obs_source,
             )
 
+    ambient_fdr_calls_csv = Path(args.ambient_fdr_calls_csv).resolve() if args.ambient_fdr_calls_csv else None
+    calls_csv_path = Path(args.calls_csv).resolve() if args.calls_csv else None
+    calls_csv_integrated = ""
+    if ambient_fdr_calls_csv is None and calls_csv_path is not None:
+        candidate_calls = load_calls_csv(calls_csv_path)
+        if calls_csv_is_ambient_fdr(candidate_calls):
+            ambient_fdr_calls_csv = calls_csv_path
+            calls_csv = candidate_calls
+        else:
+            sibling = calls_csv_path.parent / "ambient_fdr" / "guide_fdr_calls_per_cell.csv"
+            if sibling.exists():
+                ambient_fdr_calls_csv = sibling
+                calls_csv = load_calls_csv(sibling)
+            else:
+                calls_csv = None
+    elif ambient_fdr_calls_csv is not None:
+        calls_csv = load_calls_csv(ambient_fdr_calls_csv)
+    else:
+        calls_csv = None
+
+    if ambient_fdr_calls_csv is not None and calls_csv is not None:
+        for counts_h5ad in args.counts_h5ad:
+            integrate_ambient_fdr_calls(
+                Path(counts_h5ad).resolve(),
+                prefix,
+                provenance,
+                args.set_generic_aliases,
+                calls_csv,
+                ambient_fdr_calls_csv,
+            )
+        calls_csv_integrated = str(ambient_fdr_calls_csv)
+
     manifest = {
         "library_id": library_id,
         "sample": sample,
@@ -371,7 +603,9 @@ def main():
         "source_dir": str(library_dir),
         "feature_outputs": feature_outputs,
         "calls_csv": str(Path(args.calls_csv).resolve()) if args.calls_csv else "",
+        "ambient_fdr_calls_csv": str(ambient_fdr_calls_csv) if ambient_fdr_calls_csv else "",
         "call_source": feature_obs_source,
+        "calls_csv_integrated": calls_csv_integrated,
         "counts_h5ads": [str(Path(path).resolve()) for path in args.counts_h5ad],
         "obs_prefix": prefix,
         "generic_aliases": bool(args.set_generic_aliases),

@@ -6,6 +6,7 @@
 #include "serviceFuns.cpp"
 #include "solo/CbCorrector.h"  // Include after ParametersSolo.h (which has IncludeDefine.h)
 #include "FlexHashScreen.h"
+#include "OcmMultiMaterialize.h"
 
 #include <stdlib.h>
 #include <algorithm>
@@ -16,11 +17,93 @@
 ParametersSolo::~ParametersSolo() {
 }
 
+static string lowerStringLocal(string s) {
+    transform(s.begin(), s.end(), s.begin(),
+              [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return s;
+}
+
+static bool ocmFlexBarcodeModeLocal(const Parameters& P) {
+    return lowerStringLocal(P.pfMulti.ocmMultiBarcodeMode) == "flex";
+}
+
 void ParametersSolo::initialize(Parameters *pPin)
 {
     pP=pPin;
 
+    {
+        const string ocmMode = lowerStringLocal(pP->pfMulti.ocmMultiBarcodeMode);
+        if (ocmMode != "posthoc" && ocmMode != "flex") {
+            ostringstream errOut;
+            errOut << "EXITING because of fatal PARAMETERS error: unrecognized option in --ocmMultiBarcodeMode="
+                   << pP->pfMulti.ocmMultiBarcodeMode << "\n";
+            errOut << "SOLUTION: use allowed option: posthoc OR flex\n";
+            exitWithError(errOut.str(), std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
+        }
+    }
+    {
+        const string ocmBamSplit = lowerStringLocal(pP->pfMulti.ocmMultiBamSplit);
+        if (ocmBamSplit != "no" && ocmBamSplit != "yes" && ocmBamSplit != "auto") {
+            ostringstream errOut;
+            errOut << "EXITING because of fatal PARAMETERS error: unrecognized option in --ocmMultiBamSplit="
+                   << pP->pfMulti.ocmMultiBamSplit << "\n";
+            errOut << "SOLUTION: use allowed option: no OR yes OR auto\n";
+            exitWithError(errOut.str(), std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
+        }
+    }
+
+    auto parseEmptyDropsLegacy = [&]() {
+        string mode = emptyDropsLegacyStr;
+        transform(mode.begin(), mode.end(), mode.begin(), ::tolower);
+        if (mode == "yes") {
+            emptyDropsLegacy = true;
+        } else if (mode == "no" || mode.empty()) {
+            emptyDropsLegacy = false;
+        } else {
+            ostringstream errOut;
+            errOut << "EXITING because of fatal PARAMETERS error: unrecognized option in --soloEmptyDropsLegacy=" << emptyDropsLegacyStr << "\n";
+            errOut << "SOLUTION: use allowed option: yes OR no\n";
+            exitWithError(errOut.str(), std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
+        }
+    };
+
+    auto parseEmptyDropsLegacyKnee = [&]() {
+        string mode = emptyDropsLegacyKneeStr;
+        transform(mode.begin(), mode.end(), mode.begin(), ::tolower);
+        if (mode == "yes") {
+            emptyDropsLegacyKnee = true;
+        } else if (mode == "no" || mode.empty()) {
+            emptyDropsLegacyKnee = false;
+        } else {
+            ostringstream errOut;
+            errOut << "EXITING because of fatal PARAMETERS error: unrecognized option in --soloEmptyDropsLegacyKnee=" << emptyDropsLegacyKneeStr << "\n";
+            errOut << "SOLUTION: use allowed option: yes OR no\n";
+            exitWithError(errOut.str(), std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
+        }
+    };
+
+    auto parseEmptyDropsMode = [&]() {
+        string mode = emptyDropsModeStr;
+        transform(mode.begin(), mode.end(), mode.begin(), ::tolower);
+        if (mode == "auto" || mode.empty()) {
+            emptyDropsMode = EmptyDropsAuto;
+        } else if (mode == "simple" || mode == "simpleed" || mode == "ordmag" || mode == "simple_only") {
+            emptyDropsMode = EmptyDropsSimpleOnly;
+        } else if (mode == "union" || mode == "ed_union") {
+            emptyDropsMode = EmptyDropsUnion;
+        } else {
+            ostringstream errOut;
+            errOut << "EXITING because of fatal PARAMETERS error: unrecognized option in --soloEmptyDropsMode=" << emptyDropsModeStr << "\n";
+            errOut << "SOLUTION: use allowed option: auto OR simple OR union\n";
+            exitWithError(errOut.str(), std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
+        }
+    };
+
     cellFiltering();
+    parseEmptyDropsLegacy();
+    parseEmptyDropsLegacyKnee();
+    parseEmptyDropsMode();
+
     if (pP->runMode=="soloCellFiltering") {//only filtering happens, do not need any other parameters
         yes=true;
         umiDedup.typesIn = {"NoDedup"}; //this does not affect the results - the dedup had been done when raw matrix was generated
@@ -86,59 +169,6 @@ void ParametersSolo::initialize(Parameters *pPin)
         exitWithError(errOut.str(),std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
     };
     
-    //////////////////////////////////////////////////////////////////////////////////////////////////////
-    ///////////////////////////////--soloEmptyDropsLegacy
-    {
-        string mode = emptyDropsLegacyStr;
-        transform(mode.begin(), mode.end(), mode.begin(), ::tolower);
-        if (mode == "yes") {
-            emptyDropsLegacy = true;
-        } else if (mode == "no" || mode.empty()) {
-            emptyDropsLegacy = false;
-        } else {
-            ostringstream errOut;
-            errOut << "EXITING because of fatal PARAMETERS error: unrecognized option in --soloEmptyDropsLegacy=" << emptyDropsLegacyStr << "\n";
-            errOut << "SOLUTION: use allowed option: yes OR no\n";
-            exitWithError(errOut.str(), std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
-        }
-    }
-    
-    //////////////////////////////////////////////////////////////////////////////////////////////////////
-    ///////////////////////////////--soloEmptyDropsLegacyKnee
-    {
-        string mode = emptyDropsLegacyKneeStr;
-        transform(mode.begin(), mode.end(), mode.begin(), ::tolower);
-        if (mode == "yes") {
-            emptyDropsLegacyKnee = true;
-        } else if (mode == "no" || mode.empty()) {
-            emptyDropsLegacyKnee = false;
-        } else {
-            ostringstream errOut;
-            errOut << "EXITING because of fatal PARAMETERS error: unrecognized option in --soloEmptyDropsLegacyKnee=" << emptyDropsLegacyKneeStr << "\n";
-            errOut << "SOLUTION: use allowed option: yes OR no\n";
-            exitWithError(errOut.str(), std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
-        }
-    }
-
-    //////////////////////////////////////////////////////////////////////////////////////////////////////
-    ///////////////////////////////--soloEmptyDropsMode
-    {
-        string mode = emptyDropsModeStr;
-        transform(mode.begin(), mode.end(), mode.begin(), ::tolower);
-        if (mode == "auto" || mode.empty()) {
-            emptyDropsMode = EmptyDropsAuto;
-        } else if (mode == "simple" || mode == "simpleed" || mode == "ordmag" || mode == "simple_only") {
-            emptyDropsMode = EmptyDropsSimpleOnly;
-        } else if (mode == "union" || mode == "ed_union") {
-            emptyDropsMode = EmptyDropsUnion;
-        } else {
-            ostringstream errOut;
-            errOut << "EXITING because of fatal PARAMETERS error: unrecognized option in --soloEmptyDropsMode=" << emptyDropsModeStr << "\n";
-            errOut << "SOLUTION: use allowed option: auto OR simple OR union\n";
-            exitWithError(errOut.str(), std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
-        }
-    }
-
     // Keep skipProcessing disabled when running in soloCellFiltering mode to avoid side effects
     if (pP->runMode == "soloCellFiltering") {
         skipProcessing = false;
@@ -963,6 +993,20 @@ void ParametersSolo::initialize(Parameters *pPin)
         errOut       += "SOLUTION: re-run without --soloFeatures Velocyto .";
         exitWithError(errOut, std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
     };
+
+    if ((pP->outSAMattrPresent.GX || pP->outSAMattrPresent.GN) &&
+        !featureYes[SoloFeatureTypes::Gene] &&
+        (featureYes[SoloFeatureTypes::GeneFull] ||
+         featureYes[SoloFeatureTypes::GeneFull_Ex50pAS] ||
+         featureYes[SoloFeatureTypes::GeneFull_ExonOverIntron] ||
+         featureYes[SoloFeatureTypes::Velocyto] ||
+         featureYes[SoloFeatureTypes::VelocytoSimple])) {
+        pP->inOut->logMain << "WARNING: GX/GN BAM tags were requested while --soloFeatures excludes Gene "
+                            << "and includes GeneFull and/or Velocyto.\n";
+        pP->inOut->logMain << "         GX/GN are alignment-level gene tags, not the final UMI-collapsed "
+                            << "GeneFull/Velocyto counting policy. For production GeneFull/Velocyto runs, "
+                            << "omit GX/GN; add Gene explicitly only if legacy Gene BAM tags are intended.\n";
+    };
     
     if (featureYes[SoloFeatureTypes::Gene]) {
         pP->quant.gene.yes = true;
@@ -1118,6 +1162,47 @@ void ParametersSolo::initialize(Parameters *pPin)
                 cbWLstrOut.push_back(entry.second);
             }
 
+            if (ocmFlexBarcodeModeLocal(*pP)) {
+                if (cbL != 16) {
+                    ostringstream errOut;
+                    errOut << "EXITING because of fatal PARAMETERS error: --ocmMultiBarcodeMode flex requires "
+                           << "--soloCBlen 16, observed --soloCBlen=" << cbL << "\n";
+                    exitWithError(errOut.str(), std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
+                }
+                if (!inlineCBCorrection) {
+                    ostringstream errOut;
+                    errOut << "EXITING because of fatal PARAMETERS error: --ocmMultiBarcodeMode flex requires "
+                           << "--soloInlineCBCorrection yes so the 24 bp CB16+OCM_TAG8 whitelist is matched "
+                           << "with the 64-bit inline corrector.\n";
+                    exitWithError(errOut.str(), std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
+                }
+                vector<uint64> cbWLflex;
+                vector<string> cbWLstrFlex;
+                vector<string> cbWLstrOutFlex;
+                cbWLflex.reserve(cbWL.size());
+                cbWLstrFlex.reserve(cbWLstr.size());
+                cbWLstrOutFlex.reserve(cbWLstrOut.size());
+                uint64_t droppedOcmUnknown = 0;
+                for (size_t ii = 0; ii < cbWLstr.size(); ++ii) {
+                    const string composite = OcmMultiMaterialize::appendFlexTag8(cbWLstr[ii]);
+                    if (composite.empty()) {
+                        ++droppedOcmUnknown;
+                        continue;
+                    }
+                    cbWLflex.push_back(cbWL[ii]);
+                    cbWLstrFlex.push_back(composite);
+                    cbWLstrOutFlex.push_back(composite);
+                }
+                cbWL.swap(cbWLflex);
+                cbWLstr.swap(cbWLstrFlex);
+                cbWLstrOut.swap(cbWLstrOutFlex);
+                pP->inOut->logMain
+                    << "OCM flex barcode mode: converted CB whitelist to CB16+OCM_TAG8 effective barcodes"
+                    << " retained=" << cbWLstr.size()
+                    << " dropped_unknown_overhang=" << droppedOcmUnknown
+                    << " tag_map=OB1:GTGTGTGT,OB2:CACACACA,OB3:TCTCTCTC,OB4:AGAGAGAG\n";
+            }
+
             if (sawTwoColumn) {
                 pP->inOut->logMain
                     << "NOTICE: Detected 2-column CB whitelist; column 1 is used for matching, column 2 is used for MEX barcode output mapping.\n";
@@ -1140,6 +1225,18 @@ void ParametersSolo::initialize(Parameters *pPin)
 
         cbWLsize=cbWL.size();
         pP->inOut->logMain << "Number of CBs in the whitelist = " << cbWLsize <<endl;
+
+        // Build H0 hash: packed-CB(uint32) → WL index for O(1) exact lookup
+        if (cbWLhash) kh_destroy(cbH0, cbWLhash);
+        cbWLhash = kh_init(cbH0);
+        kh_resize(cbH0, cbWLhash, cbWLsize * 2);
+        for (uint32 i = 0; i < cbWLsize; i++) {
+            int absent;
+            khiter_t k = kh_put(cbH0, cbWLhash, static_cast<uint32_t>(cbWL[i]), &absent);
+            kh_val(cbWLhash, k) = i;
+        }
+        pP->inOut->logMain << "Built cbWLhash: " << kh_size(cbWLhash) << " entries, "
+                           << kh_n_buckets(cbWLhash) << " buckets" << endl;
         
         // Initialize CbCorrector instance for inline CB correction
         if (cbWLyes && !cbWLstr.empty()) {
@@ -1270,13 +1367,13 @@ void ParametersSolo::initialize(Parameters *pPin)
             exitWithError(errOut.str(),std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
         };
         
-        // Enable readId tracking when BAM CB/UB tags are requested with inline hash mode
-        // This creates a parallel hash (readid_cbumi) to track readId -> (cbIdx, umi24, status)
-        // After inline-hash collapse, this allows packedReadInfo to be populated for tag injection
-        // Works for both sorted and unsorted BAM output
-        if ((pP->outBAMcoord || pP->outBAMunsorted) && inlineHashMode) {
+        // Enable per-read tag storage when BAM CB/UB tags are requested on the
+        // inline paths. Inline-hash uses a readId tracker first; inline CB
+        // correction without inline-hash records directly into PackedReadInfo
+        // during legacy collapse.
+        if ((pP->outBAMcoord || pP->outBAMunsorted) && (inlineHashMode || inlineCBCorrection)) {
             trackReadIdsForTags = true;
-            pP->inOut->logMain << "NOTE: Enabling parallel readId tracking for BAM CB/UB tag injection with Flex inline-hash mode.\n";
+            pP->inOut->logMain << "NOTE: Enabling per-read CB/UB tag storage for BAM tag injection on inline barcode-correction path.\n";
         };
     } else if ( pP->outSAMattrPresent.UB && type==SoloTypes::CB_samTagOut) {
         exitWithError("EXITING because of fatal PARAMETERS error: UB attribute (corrected UMI) in --outSAMattributes cannot be used with --soloType CB_samTagOut \n" \
@@ -1285,8 +1382,16 @@ void ParametersSolo::initialize(Parameters *pPin)
     
     ////////////////////////////////////////////////////////////////readInfoYes: which feature is used to fill readInfo. Only one feature is allowed
     readInfoYes.fill(false);
-    if (featureYes[SoloFeatureTypes::VelocytoSimple] || featureYes[SoloFeatureTypes::Velocyto]) {//turn readInfo on for Gene needed by VelocytoSimple
-        readInfoYes[SoloFeatureTypes::Gene]=true;
+    if (featureYes[SoloFeatureTypes::VelocytoSimple] || featureYes[SoloFeatureTypes::Velocyto]) {
+        if (featureYes[SoloFeatureTypes::Gene]) {
+            readInfoYes[SoloFeatureTypes::Gene]=true;
+        } else if (featureYes[SoloFeatureTypes::GeneFull]) {
+            readInfoYes[SoloFeatureTypes::GeneFull]=true;
+        } else if (featureYes[SoloFeatureTypes::GeneFull_Ex50pAS]) {
+            readInfoYes[SoloFeatureTypes::GeneFull_Ex50pAS]=true;
+        } else if (featureYes[SoloFeatureTypes::GeneFull_ExonOverIntron]) {
+            readInfoYes[SoloFeatureTypes::GeneFull_ExonOverIntron]=true;
+        }
     };
     samAttrFeature = featureFirst;
     if (samAttrYes){//pSolo.samAttrFeature=0 by default, so need to check samAttrYes

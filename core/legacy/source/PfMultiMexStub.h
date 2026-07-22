@@ -5,11 +5,13 @@
 
 /**
  * @file PfMultiMexStub.h
- * @brief Generate features.tsv and barcodes.tsv from assignBarcodes outputs
+ * @brief Generate release-facing MEX sidecars from assignBarcodes outputs
  * 
  * Ports logic from assignbarcodes_mex_stub.py to C++.
  * Reads feature_reference.csv and writes features.tsv/barcodes.tsv,
- * validating against features.txt when present.
+ * validating against features.txt when present. When a two-column whitelist
+ * defines an output barcode namespace, barcodes.tsv and feature_per_cell.csv
+ * are both remapped to that output namespace.
  */
 
 namespace PfMultiMexStub {

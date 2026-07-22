@@ -66,9 +66,11 @@ case "$MODE" in
     # Take first N reads = first 4*N lines
     LINES=$((READS * 4))
     if command -v pigz >/dev/null 2>&1; then
-      zcat "$IN" | head -n "$LINES" | pigz -p 8 > "$OUT"
+      # head closes early by design; tolerate the resulting SIGPIPE from zcat.
+      (zcat "$IN" || true) | head -n "$LINES" | pigz -p 8 > "$OUT"
     else
-      zcat "$IN" | head -n "$LINES" | gzip -c > "$OUT"
+      # head closes early by design; tolerate the resulting SIGPIPE from zcat.
+      (zcat "$IN" || true) | head -n "$LINES" | gzip -c > "$OUT"
     fi
     ;;
   *)

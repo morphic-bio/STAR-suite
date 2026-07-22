@@ -1,3 +1,154 @@
+star-suite (1.5.0-1) unstable; urgency=medium
+
+  * Add the native candidate-preserving read-to-clique-to-UMI reference
+    resolver as an opt-in pre-cell-calling stage.
+  * Emit strict, soft expected-count, hard, and gated-hard molecule products
+    with PCR-inclusive exact-read priors applied once per read clique.
+  * Ship and validate the resolver in Docker, Debian, static tarball, and
+    compatibility-bundle release artifacts.
+  * Add native, frozen-Python, four-assay 100K, default-off, determinism, and
+    package regression coverage.
+  * Report STAR Suite 1.5.0 from STAR and molecule_first_resolver --version.
+
+ -- STAR-suite Maintainers <maintainers@biodepot.example>  Fri, 17 Jul 2026 07:37:15 +0000
+
+star-suite (1.4.4-1) unstable; urgency=medium
+
+  * Patch release for feature-barcode namespace remapping in integrated
+    AnnData/MuData exports.
+  * Preserve source feature identities when top-feature indices are reported
+    in the process_features namespace.
+  * Add deterministic UCSF per-sample Slurm workflow contracts and tests.
+  * Report STAR Suite 1.4.4 from STAR --version.
+
+ -- STAR-suite Maintainers <maintainers@biodepot.example>  Fri, 17 Jul 2026 00:00:00 +0000
+
+star-suite (1.4.3-1) unstable; urgency=medium
+
+  * Patch release for byte-identical Y/no-Y FASTQ emission after integrated
+    Cutadapt-compatible trimming.
+  * Preserve Illumina FASTQ header suffix fields through both legacy and
+    FastxInputModule read paths so re-emitted FASTQs match historical outputs.
+  * Emit Y/no-Y FASTQ sequence and quality payloads by trimmed read length
+    rather than by stale null-terminated buffers.
+  * Report STAR Suite 1.4.3 from STAR --version.
+
+ -- STAR-suite Maintainers <maintainers@biodepot.example>  Wed, 01 Jul 2026 02:13:23 +0000
+
+star-suite (1.4.2-1) unstable; urgency=medium
+
+  * Patch release for TranscriptVB Salmon parity and GC/effective-length
+    sidecar integration on STAR-generated indexes.
+  * Align the STAR-suite samtools-style BAM sorter tie-break with samtools
+    coordinate sorting and add SE/PE decompressed byte-parity regression
+    coverage.
+  * Clarify the PE bulk production benchmark contract and record matched PPARG
+    no-Y wrapper timings.
+  * Report STAR Suite 1.4.2 from STAR --version.
+
+ -- STAR-suite Maintainers <maintainers@biodepot.example>  Mon, 29 Jun 2026 02:18:04 +0000
+
+star-suite (1.4.1-1) unstable; urgency=medium
+
+  * Hotfix Flex/Solo dependency tracking so VPATH-built Flex source objects are
+    regenerated after shared header/layout changes instead of reusing stale
+    objects in incremental builds.
+  * Add explicit no-BAM and BAM-output validation for the tiny public Flex
+    binary smoke wrapper.
+  * Report STAR Suite 1.4.1 from STAR --version.
+
+ -- STAR-suite Maintainers <maintainers@biodepot.example>  Sat, 20 Jun 2026 16:04:07 +0000
+
+star-suite (1.3.0b-1) unstable; urgency=medium
+
+  * Minor feature-label refresh on top of 1.3.0 for CBQ recipe exposure.
+  * Add explicit STAR-Flex Fixed RNA CBQ MCP recipe and document the CBQ-native
+    multiome recipe surface for GEX plus libchromap ATAC input.
+  * Report STAR Suite 1.3.0b from STAR --version.
+
+ -- STAR-suite Maintainers <maintainers@biodepot.example>  Mon, 01 Jun 2026 08:48:32 +0000
+
+star-suite (1.3.0-1) unstable; urgency=medium
+
+  * Feature release for parallel CBQ integration across STAR core, Flex,
+    process_features, and native libchromap multiome ATAC input.
+  * Add native multiome GEX+ATAC CBQ production benchmark documentation for the
+    PBMC 3k 10x Multiome fixture, including Y/noY ATAC BAM validation.
+  * Report STAR Suite 1.3.0 from STAR --version.
+
+ -- STAR-suite Maintainers <maintainers@biodepot.example>  Mon, 01 Jun 2026 06:20:00 +0000
+
+star-suite (1.1.0-1) unstable; urgency=medium
+
+  * Feature release for native CBQ/BINSEQ input support.
+  * Add the native C++ CBQ reader, STAR read-buffer adapter, process_features
+    adapter coverage, and an order-preserving FASTQ/FASTQ.gz-to-CBQ encoder.
+  * Wire CBQ input through STAR mapper, STARsolo, OCM, Flex, and SLAM smoke
+    coverage, including paired-end SLAM divergence checks.
+  * Register CBQ module, production-local, and network-backed regression cases
+    in the production module manifest.
+  * Report STAR Suite 1.1.0 from STAR --version.
+
+ -- STAR-suite Maintainers <maintainers@biodepot.example>  Fri, 29 May 2026 19:20:00 +0000
+
+star-suite (1.0.3-1) unstable; urgency=medium
+
+  * Hotfix non-Flex Solo bridge determinism by canonicalizing worker-local
+    bridge hash entries before collapse.
+  * Aggregate ambiguous cell-barcode evidence deterministically before
+    Bayesian resolution and use the resolved bridge result for read-accounting
+    statistics.
+  * Add an A375 repeat-run bridge determinism harness for production-scale
+    matrix and stats parity checks.
+  * Report STAR Suite 1.0.3 from STAR --version.
+
+ -- STAR-suite Maintainers <maintainers@biodepot.example>  Fri, 29 May 2026 09:00:00 +0000
+
+star-suite (1.0.2-1) unstable; urgency=medium
+
+  * Hotfix non-Flex Solo direct bridge UMI collapse to combine exact duplicate
+    UMI rows before 1MM_CR correction.
+  * Book production repeat-run Solo matrix determinism regression coverage for
+    the direct inline-hash bridge path.
+  * Report STAR Suite 1.0.2 from STAR --version.
+
+ -- STAR-suite Maintainers <maintainers@biodepot.example>  Fri, 29 May 2026 05:50:34 +0000
+
+star-suite (1.0.1-1) unstable; urgency=medium
+
+  * Hotfix process_features CR-compatible feature bootstrap determinism when
+    dynamic multi-consumer assignment is enabled.
+  * Fix single-thread feature matching to report the selected match position
+    for non-exact hits, preserving barcode correction parity with parallel
+    search.
+  * Report STAR Suite 1.0.1 from STAR --version.
+
+ -- STAR-suite Maintainers <maintainers@biodepot.example>  Thu, 28 May 2026 16:45:32 +0000
+
+star-suite (1.0.0-1) unstable; urgency=medium
+
+  * First production STAR Suite release.
+  * Document native OCM composite-barcode production mode and native OCM
+    per-sample MEX/Velocyto materialization.
+  * Add JAX scRNAseq02 OCM and MSK 40KO production runbooks and MCP recipes.
+  * Report STAR Suite 1.0.0 from STAR --version, with explicit upstream and
+    genome-compatibility version flags for provenance.
+
+ -- STAR-suite Maintainers <maintainers@biodepot.example>  Fri, 22 May 2026 05:30:00 +0000
+
+star-suite (0.94.0-1) unstable; urgency=medium
+
+  * Add SLAM paired-end smoke and production documentation, including
+    noSU-derived PE trim defaults, callable-length gating, cB output, and
+    TranscriptVB tximport count surfaces.
+  * Register private MCP/Launchpad recipes for SLAM PE smoke, SLAM PE
+    production, and the pinned SLAM DESeq2 container.
+  * Update publication benchmark metadata for the current SLAM PE runner.
+  * Include recent Launchpad and ATAC integration work in the next release
+    candidate metadata.
+
+ -- STAR-suite Maintainers <maintainers@biodepot.example>  Tue, 12 May 2026 01:04:00 +0000
+
 star-suite (0.50.3-1) unstable; urgency=medium
 
   * Add Dockerfile-defined release build environments for Ubuntu 22.04 and 24.04.

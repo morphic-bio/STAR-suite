@@ -71,7 +71,9 @@ fi
 {
     tail -n +2 "$INPUT_CSV"
     # Ensure there's a newline at the end if missing
-    [ -n "$(tail -c1 "$INPUT_CSV")" ] && echo
+    if [ -n "$(tail -c1 "$INPUT_CSV")" ]; then
+        echo
+    fi
 } | while IFS=',' read -r gene_id probe_seq probe_id included region; do
     # Skip if not included
     if [ "$included" != "TRUE" ]; then

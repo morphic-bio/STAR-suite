@@ -1,0 +1,336 @@
+# Public cross-repo recipe: canonical morphic-recipes multiome lane runner.
+id: morphic_multiome
+title: Morphic 10x Multiome (GEX + Chromap ATAC + MACS peaks)
+summary: Public Launchpad/MCP surface for the canonical morphic-recipes multiome recipe, with compose-up profiles and optional MACS3 q-value peak selection.
+kind: shell_workflow
+entry_script: /mnt/pikachu/morphic-recipes/scripts/run_star_multiome_lane_smoke.sh
+supported_modes: [local, dry-run-capable]
+caveats:
+  - This is a starting point. Consult morphic-provenance before non-trivial runs and reuse known-good thread/low-memory settings.
+  - "Default profile is matrices-peaks, the compose-up floor: GeneFull MEX, ATAC fragments/sidecar, MACS3 peaks, and ATAC peak MEX."
+  - "For FASTQ input provide gex_r1, gex_r2, atac_r1, atac_barcode, and atac_r2. For CBQ input provide gex_cbq, atac_read_pair_cbq, and atac_barcode_cbq."
+  - chromap_macs3_frag_qvalue defaults to 0, preserving p-value peak selection. Set a positive value in (0,1] to use libchromap/MACS3 q-value selection.
+default_output_layout: Output directory contains star_sample/run, ATAC sidecar/peaks/peak_mex, and LOCAL_MEX_READY.txt when stop_after_local_mex is true.
+
+scripts:
+  - role: entry
+    path: /mnt/pikachu/morphic-recipes/scripts/run_star_multiome_lane_smoke.sh
+    description: Canonical generic 10x multiome lane recipe.
+    language: bash
+  - role: minimal_wrapper
+    path: /mnt/pikachu/morphic-recipes/scripts/run_multiome_minimal.sh
+    description: Thin wrapper equivalent to --profile matrices-peaks.
+    language: bash
+
+stages:
+  - name: star_chromap
+    title: STAR GEX + Chromap ATAC
+    script: /mnt/pikachu/morphic-recipes/scripts/run_star_multiome_lane_smoke.sh
+    description: Runs STAR GeneFull and Chromap ATAC, producing a BAM/fragments sidecar boundary.
+  - name: peak_mex
+    title: MACS3 Peaks + ATAC Peak MEX
+    script: /mnt/pikachu/STAR-suite/core/features/libchromap_contract/star_multiome_atac_peak_mex
+    description: Calls MACS3-compatible FRAG peaks from the binary sidecar and materializes peak x cell MEX.
+  - name: downstream
+    title: Optional Remote Downstream
+    script: /mnt/pikachu/morphic-recipes/scripts/run_remote_multiome_post_mex_rsync.sh
+    description: Optional CellBender/MuData downstream for full profile runs.
+    gated_by: stop_after_local_mex
+
+parameter_groups:
+  - name: composition
+    title: Composition
+    parameters:
+      - profile
+      - stop_after_local_mex
+      - dry_run
+  - name: inputs
+    title: Input Paths
+    parameters:
+      - input_format
+      - gex_r1
+      - gex_r2
+      - gex_cbq
+      - atac_r1
+      - atac_barcode
+      - atac_r2
+      - atac_read_pair_cbq
+      - atac_barcode_cbq
+      - out_dir
+  - name: references
+    title: References
+    parameters:
+      - genome_dir
+      - gex_whitelist
+      - chromap_ref
+      - chromap_index
+      - atac_whitelist
+      - atac_to_gex
+  - name: performance
+    title: Performance
+    parameters:
+      - threads
+      - chromap_threads
+      - chromap_low_mem
+      - chromap_low_mem_ram
+      - chromap_macs3_frag_low_mem
+      - chromap_start_mode
+      - skip_build
+  - name: peak_calling
+    title: Peak Calling
+    parameters:
+      - chromap_macs3_frag_qvalue
+  - name: execution
+    title: Execution
+    parameters:
+      - force
+
+parameters:
+  - name: profile
+    cli_flag: --profile
+    type: enum
+    default: matrices-peaks
+    choices: [matrices-peaks, full]
+    description: Compose-up profile. matrices-peaks is the minimal GeneFull + ATAC fragments + MACS peaks floor.
+    category: composition
+
+  - name: stop_after_local_mex
+    cli_flag: --stop-after-local-mex
+    type: bool
+    default: true
+    description: Stop after local GeneFull/ATAC peak MEX outputs; required for matrices-peaks and safe for dry-run review.
+    category: composition
+
+  - name: dry_run
+    cli_flag: --dry-run
+    type: bool
+    default: true
+    description: Preview the resolved command and output layers without running.
+    category: composition
+
+  - name: input_format
+    cli_flag: --input-format
+    type: enum
+    default: fastq
+    choices: [fastq, cbq]
+    description: Input surface for both GEX and ATAC.
+    category: inputs
+
+  - name: gex_r1
+    cli_flag: --gex-r1
+    type: string
+    default: null
+    description: GEX R1 FASTQ CSV containing CB/UMI for FASTQ input.
+    category: inputs
+
+  - name: gex_r2
+    cli_flag: --gex-r2
+    type: string
+    default: null
+    description: GEX R2 FASTQ CSV containing cDNA for FASTQ input.
+    category: inputs
+
+  - name: gex_cbq
+    cli_flag: --gex-cbq
+    type: string
+    default: null
+    description: GEX paired CBQ CSV for CBQ input.
+    category: inputs
+
+  - name: atac_r1
+    cli_flag: --atac-r1
+    type: string
+    default: null
+    description: ATAC genomic read 1 FASTQ CSV for FASTQ input.
+    category: inputs
+
+  - name: atac_barcode
+    cli_flag: --atac-barcode
+    type: string
+    default: null
+    description: ATAC barcode/i5 FASTQ CSV for FASTQ input.
+    category: inputs
+
+  - name: atac_r2
+    cli_flag: --atac-r2
+    type: string
+    default: null
+    description: ATAC genomic read 2 FASTQ CSV for FASTQ input.
+    category: inputs
+
+  - name: atac_read_pair_cbq
+    cli_flag: --atac-read-pair-cbq
+    type: string
+    default: null
+    description: ATAC paired-read CBQ CSV for CBQ input.
+    category: inputs
+
+  - name: atac_barcode_cbq
+    cli_flag: --atac-barcode-cbq
+    type: string
+    default: null
+    description: ATAC barcode CBQ CSV for CBQ input.
+    category: inputs
+
+  - name: out_dir
+    cli_flag: --out-dir
+    type: directory
+    required: true
+    is_output_root: true
+    description: Fresh output directory.
+    category: inputs
+
+  - name: genome_dir
+    cli_flag: --genome-dir
+    type: directory
+    default: /storage/autoindex_110_44/bulk_index
+    path_must_exist: true
+    description: STAR GEX genomeDir.
+    category: references
+
+  - name: gex_whitelist
+    cli_flag: --gex-whitelist
+    type: file
+    default: /mnt/pikachu/atac-seq/10xMultiome/pbmc_unsorted_3k/open_source_full_20260424_015259/refs/737K-arc-v1_gex.txt
+    path_must_exist: true
+    description: ARC GEX whitelist.
+    category: references
+
+  - name: chromap_ref
+    cli_flag: --chromap-ref
+    type: file
+    default: /storage/autoindex_110_44/bulk_index/cellranger_ref/genome.fa
+    path_must_exist: true
+    description: Chromap reference FASTA.
+    category: references
+
+  - name: chromap_index
+    cli_flag: --chromap-index
+    type: file
+    default: /mnt/pikachu/atac-seq/benchmarks/pbmc_unsorted_3k_100k/chromap_index/genome.index
+    path_must_exist: true
+    description: Chromap index.
+    category: references
+
+  - name: atac_whitelist
+    cli_flag: --atac-whitelist
+    type: file
+    default: /mnt/pikachu/atac-seq/benchmarks/pbmc_unsorted_3k_100k/chromap_index/737K-arc-v1_atac.txt
+    path_must_exist: true
+    description: ARC ATAC whitelist.
+    category: references
+
+  - name: atac_to_gex
+    cli_flag: --atac-to-gex
+    type: file
+    default: /mnt/pikachu/atac-seq/benchmarks/pbmc_unsorted_3k_100k/chromap_index/atac2gex.tsv
+    path_must_exist: true
+    description: ATAC-to-GEX barcode translation table.
+    category: references
+
+  - name: threads
+    cli_flag: --threads
+    type: int
+    default: 16
+    description: STAR thread count. Use provenance for production values.
+    category: performance
+
+  - name: chromap_threads
+    cli_flag: --chromap-threads
+    type: int
+    default: 16
+    description: Chromap thread count. Use provenance for production values.
+    category: performance
+
+  - name: chromap_low_mem
+    cli_flag: --chromap-low-mem
+    type: bool
+    default: true
+    description: Enable Chromap low-memory spill mode.
+    category: performance
+
+  - name: chromap_low_mem_ram
+    cli_flag: --chromap-low-mem-ram
+    type: int
+    default: 0
+    description: Low-memory RAM threshold in bytes; 0 uses Chromap defaults.
+    category: performance
+
+  - name: chromap_macs3_frag_low_mem
+    cli_flag: --chromap-macs3-frag-low-mem
+    type: bool
+    default: true
+    description: Enable low-memory MACS3 fragment peak workspace.
+    category: performance
+
+  - name: chromap_start_mode
+    cli_flag: --chromap-start-mode
+    type: enum
+    default: concurrent
+    choices: [concurrent, postMapping]
+    description: STAR/Chromap scheduling mode.
+    category: performance
+
+  - name: skip_build
+    cli_flag: --skip-build
+    type: bool
+    default: true
+    description: Use the existing STAR-suite binaries instead of rebuilding.
+    category: performance
+
+  - name: chromap_macs3_frag_qvalue
+    cli_flag: --chromap-macs3-frag-qvalue
+    type: float
+    default: 0
+    skip_when_default: true
+    min_value: 0
+    max_value: 1
+    description: MACS3 FRAG q-value/FDR peak selection threshold. 0 disables q-value mode and preserves default p-value mode.
+    category: peak_calling
+
+  - name: force
+    cli_flag: --force
+    type: bool
+    default: false
+    description: Regenerate outputs.
+    category: execution
+
+constraints:
+  - kind: positive
+    params: [threads, chromap_threads]
+    message: Thread counts must be positive.
+  - kind: non_negative
+    params: [chromap_low_mem_ram, chromap_macs3_frag_qvalue]
+    message: Low-memory RAM and q-value threshold must be non-negative.
+
+rendering:
+  omit_absent_optionals: true
+  flag_order:
+    - profile
+    - input_format
+    - gex_r1
+    - gex_r2
+    - gex_cbq
+    - atac_r1
+    - atac_barcode
+    - atac_r2
+    - atac_read_pair_cbq
+    - atac_barcode_cbq
+    - out_dir
+    - genome_dir
+    - gex_whitelist
+    - chromap_ref
+    - chromap_index
+    - atac_whitelist
+    - atac_to_gex
+    - threads
+    - chromap_threads
+    - chromap_low_mem
+    - chromap_low_mem_ram
+    - chromap_macs3_frag_low_mem
+    - chromap_macs3_frag_qvalue
+    - chromap_start_mode
+    - skip_build
+    - stop_after_local_mex
+    - dry_run
+    - force

@@ -10,6 +10,7 @@
 #include "SoloReadBarcode.h"
 #include "hash_shims_cpp_compat.h"
 #include "ReadAlign.h"
+#include "solo/CbBayesianResolver.h"
 #include <unordered_set>
 #include <unordered_map>
 #include <sstream>
@@ -333,8 +334,15 @@ static void accumulateAmbiguousCBForFlex(SoloReadFeature *soloReadFeat, SoloRead
         }
         entry.cbSeq = soloBar.cbMatchString;
         entry.cbQual = soloBar.cbQual;
+        cb_bayesian::normalizeCbQual(entry.cbQual, entry.cbSeq);
         entry.umiCounts.reserve(32);
     }
+
+    cb_bayesian::accumulateCbQualityEvidence(entry.cbSeq,
+                                             soloBar.cbQual,
+                                             entry.cbLogLikMatch,
+                                             entry.cbLogLikMismatch,
+                                             entry.cbEvidenceReads);
 
     entry.umiCounts[umi24]++;
 
@@ -1043,8 +1051,15 @@ uint32 outputReadCB_flex(fstream *streamOut, const uint64 iRead, const int32 fea
             }
             entry.cbSeq = soloBar.cbMatchString;
             entry.cbQual = soloBar.cbQual;
+            cb_bayesian::normalizeCbQual(entry.cbQual, entry.cbSeq);
             entry.umiCounts.reserve(32);
         }
+
+        cb_bayesian::accumulateCbQualityEvidence(entry.cbSeq,
+                                                 soloBar.cbQual,
+                                                 entry.cbLogLikMatch,
+                                                 entry.cbLogLikMismatch,
+                                                 entry.cbEvidenceReads);
         
         // Accumulate UMI count (24-bit packed UMI -> count)
         entry.umiCounts[umi24]++;

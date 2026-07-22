@@ -1,0 +1,224 @@
+# Private recipe: SLAM paired-end 100K SE/PE smoke.
+id: slam_pe_100k_smoke
+title: SLAM PE 100K SE/PE Smoke
+summary: Reproducible 100K R1-only vs R1/R2 STAR-SLAM smoke with fixed noSU-derived trims.
+kind: shell_workflow
+entry_script: scripts/run_slam_100k_se_pe_smoke.sh
+supported_modes: [local, dry-run-capable]
+caveats:
+  - Requires the local NW SLAM-Seq paired-end FASTQs under /mnt/pikachu/SLAM-Seq.
+  - Do not run while a production STAR-SLAM or benchmark job is active on the same host.
+  - The treatment NTR Pearson gate is meaningful for labeled samples, not noSU/no4SU controls.
+default_output_layout: /tmp/slam_pe_100k_smoke_<timestamp>/
+
+scripts:
+  - role: entry
+    path: scripts/run_slam_100k_se_pe_smoke.sh
+    description: Downsample selected samples, run SE and PE STAR-SLAM, and compare count surfaces.
+    language: bash
+  - role: helper
+    path: scripts/compare_slam_summary.py
+    description: Compare SlamQuant.out surfaces and enforce smoke gates.
+    language: python
+
+stages:
+  - name: downsample
+    title: Downsample FASTQs
+    script: scripts/run_slam_100k_se_pe_smoke.sh
+    description: Writes matched 100K R1/R2 FASTQs for selected samples.
+  - name: se_star
+    title: R1-only STAR-SLAM
+    script: scripts/run_slam_100k_se_pe_smoke.sh
+    description: Runs STAR-SLAM with R1 only and SE trim windows.
+  - name: pe_star
+    title: Paired-end STAR-SLAM
+    script: scripts/run_slam_100k_se_pe_smoke.sh
+    description: Runs STAR-SLAM with R1/R2 and PE trim windows.
+  - name: compare
+    title: SE/PE Comparison
+    script: scripts/compare_slam_summary.py
+    description: Compares GrandSLAM, cB, and tximport-compatible surfaces.
+
+parameter_groups:
+  - name: selection
+    title: Sample Selection
+    parameters: [samples]
+  - name: inputs
+    title: Input Paths
+    parameters: [fastq_dir, star_bin, genome_dir, snp_mask]
+  - name: output
+    title: Output
+    parameters: [outdir]
+  - name: runtime
+    title: Runtime
+    parameters: [threads, reads, resume, compare_only, dry_run]
+  - name: gates
+    title: Smoke Gates
+    parameters: [min_read_count, min_ntr_pearson, max_abs_delta]
+  - name: slam
+    title: SLAM Parameters
+    parameters: [slam_min_callable, slam_cb_format]
+
+parameters:
+  - name: samples
+    cli_flag: --samples
+    type: string_list
+    required: false
+    default: [ARID1A-no4su_S50, ARID1A-6h-1_S43]
+    description: Comma-separated sample names to smoke test.
+    category: selection
+
+  - name: fastq_dir
+    cli_flag: --fastq-dir
+    type: directory
+    required: false
+    default: /mnt/pikachu/SLAM-Seq
+    description: Directory containing the delivered R1/R2 FASTQs.
+    path_must_exist: true
+    category: inputs
+
+  - name: star_bin
+    cli_flag: --star-bin
+    type: file
+    required: false
+    default: /mnt/pikachu/STAR-suite/core/legacy/source/STAR
+    description: STAR binary to use for the smoke.
+    path_must_exist: true
+    must_be_executable: true
+    category: inputs
+
+  - name: genome_dir
+    cli_flag: --genome-dir
+    type: directory
+    required: false
+    default: /storage/autoindex_110_44/bulk_index
+    description: STAR genomeDir used by the SLAM PE smoke.
+    path_must_exist: true
+    category: inputs
+
+  - name: snp_mask
+    cli_flag: --snp-mask
+    type: file
+    required: false
+    default: /mnt/pikachu/slam_blank_artifacts_20260201/mask/snps_from_vcf.bed.gz
+    description: SLAM SNP mask BED.GZ; pass '-' to disable outside path-checked validation.
+    path_must_exist: true
+    category: inputs
+
+  - name: outdir
+    cli_flag: --outdir
+    type: directory
+    required: false
+    default: null
+    description: Output root. Omit to use the script timestamped /tmp default.
+    is_output_root: true
+    category: output
+
+  - name: threads
+    cli_flag: --threads
+    type: int
+    required: false
+    default: 16
+    description: STAR threads per SE/PE run.
+    category: runtime
+
+  - name: reads
+    cli_flag: --reads
+    type: int
+    required: false
+    default: 100000
+    description: Reads to retain per sample and mate.
+    category: runtime
+
+  - name: resume
+    cli_flag: --resume
+    type: bool
+    required: false
+    default: false
+    description: Reuse existing downsampled FASTQs and completed run outputs.
+    category: runtime
+
+  - name: compare_only
+    cli_flag: --compare-only
+    type: bool
+    required: false
+    default: false
+    description: Recompute compare logs and metrics from an existing output root.
+    category: runtime
+
+  - name: dry_run
+    cli_flag: --dry-run
+    type: bool
+    required: false
+    default: false
+    description: Write commands and manifests without running STAR.
+    category: runtime
+
+  - name: min_read_count
+    cli_flag: --min-read-count
+    type: float
+    required: false
+    default: 100
+    description: Shared-gene ReadCount floor for NTR Pearson.
+    category: gates
+
+  - name: min_ntr_pearson
+    cli_flag: --min-ntr-pearson
+    type: float
+    required: false
+    default: 0.90
+    description: Treatment-sample NTR Pearson pass threshold.
+    category: gates
+
+  - name: max_abs_delta
+    cli_flag: --max-abs-delta
+    type: float
+    required: false
+    default: 1.0
+    description: Maximum allowed per-gene absolute NTR delta.
+    category: gates
+
+  - name: slam_min_callable
+    cli_flag: --slam-min-callable
+    type: int
+    required: false
+    default: 30
+    description: Minimum callable bases after SLAM trim/overlap consensus.
+    category: slam
+
+  - name: slam_cb_format
+    cli_flag: --slam-cb-format
+    type: enum
+    required: false
+    default: star
+    choices: [star, ezbakr]
+    description: Count-binomial output schema.
+    category: slam
+
+constraints:
+  - kind: positive
+    params: [threads, reads]
+    message: Runtime counts must be positive.
+  - kind: non_negative
+    params: [slam_min_callable]
+    message: Callable length can be 0 only to disable the gate.
+
+rendering:
+  omit_absent_optionals: true
+  flag_order:
+    - samples
+    - fastq_dir
+    - outdir
+    - star_bin
+    - genome_dir
+    - snp_mask
+    - threads
+    - reads
+    - min_read_count
+    - min_ntr_pearson
+    - max_abs_delta
+    - slam_min_callable
+    - slam_cb_format
+    - resume
+    - compare_only
+    - dry_run

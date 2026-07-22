@@ -7,7 +7,9 @@
 #include "SequenceFuns.h"
 #include "UmiCodec.h"
 #include "solo/CbCorrector.h"
+#include "solo/CbBayesianResolver.h"
 #include "TranscriptQuantEC.h"
+#include "SpatialFeatureSidecar.h"
 #include <atomic>
 #include <mutex>
 #include <cstring>
@@ -142,40 +144,6 @@ static bool isSenseForGene(const Transcript& aln, uint8_t geneStr, int32 strandT
     }
     const uint32_t readStr = (strandType == 0) ? static_cast<uint32_t>(aln.Str) : (1U - static_cast<uint32_t>(aln.Str));
     return readStr == static_cast<uint32_t>(geneStr - 1);
-}
-
-static bool alignmentHasSenseGeneOverlap(const Transcriptome& tr,
-                                         const Transcript& aln,
-                                         int32 strandType) {
-    for (uint32_t ib = 0; ib < aln.nExons; ++ib) {
-        if (aln.exons[ib][EX_L] == 0) {
-            continue;
-        }
-        const uint64_t bStart = aln.exons[ib][EX_G];
-        const uint64_t bEnd = bStart + aln.exons[ib][EX_L];
-        const int64_t gi0 = findLastStartLE(tr.geneFull.s, tr.nGe, bEnd - 1);
-        for (int64_t gi = gi0; gi >= 0; --gi) {
-            if (tr.geneFull.eMax[gi] < bStart) {
-                break;
-            }
-            if (tr.geneFull.e[gi] < bStart) {
-                continue;
-            }
-            const uint64_t gStart = tr.geneFull.s[gi];
-            const uint64_t gEnd = tr.geneFull.e[gi] + 1;
-            const uint64_t ov = (std::min(bEnd, gEnd) > std::max(bStart, gStart))
-                                    ? (std::min(bEnd, gEnd) - std::max(bStart, gStart))
-                                    : 0;
-            if (ov == 0) {
-                continue;
-            }
-            if (!isSenseForGene(aln, tr.geneFull.str[gi], strandType)) {
-                continue;
-            }
-            return true;
-        }
-    }
-    return false;
 }
 
 static uint64_t alignmentMappedLength(const Transcript& aln) {
@@ -382,70 +350,39 @@ void ReadAlign::outputAlignments() {
 
             crMultiMapRescued_ = false;
             crMultiMapRescuedIntronic_ = false;
+            genomicMultimapBeforeRescue_ = nTr > 1;
             if (P.pSolo.crMultimapRescue && nTr > 1) {
                 statsRA.crRescueTotal++;
                 const uint64_t nTrBefore = nTr;
 
-                uint64_t geneSenseCount = 0;
-                uint64_t geneSenseWinner = 0;
+                std::vector<CrRescueRegion> states;
+                states.reserve(static_cast<size_t>(nTr));
                 for (uint64_t ia = 0; ia < nTr; ++ia) {
                     if (trMult[ia] == nullptr) {
+                        states.push_back(CrRescueRegion::Intergenic);
                         continue;
                     }
-                    if (alignmentHasSenseGeneOverlap(*chunkTr, *trMult[ia], P.pSolo.strand)) {
-                        ++geneSenseCount;
-                        geneSenseWinner = ia;
-                    }
+                    states.push_back(classifyAlignmentCrRescue(*chunkTr, *trMult[ia], P.pSolo.strand));
                 }
 
-                CrRescueDecision decision;
-                if (geneSenseCount == 1) {
-                    CrRescueRegion winnerRegion = classifyAlignmentCrRescue(
-                        *chunkTr, *trMult[geneSenseWinner], P.pSolo.strand);
-                    if (winnerRegion == CrRescueRegion::Exonic) {
-                        decision.rescued = true;
-                        decision.intronicFallback = false;
-                        decision.winnerAlignIndex = geneSenseWinner;
-                        statsRA.crRescueGeneVsNonGene++;
-                    } else if (winnerRegion == CrRescueRegion::Intronic
-                               && P.pSolo.crMultimapRescueIntronic) {
-                        decision.rescued = true;
-                        decision.intronicFallback = true;
-                        decision.winnerAlignIndex = geneSenseWinner;
-                        statsRA.crRescueGeneVsNonGene++;
-                    } else if (winnerRegion == CrRescueRegion::Intergenic) {
-                        statsRA.crRescueFastPathRejected50pct++;
+                CrRescueDecision decision = evaluateCrRescueDecision(
+                    states, P.pSolo.crMultimapRescueIntronic);
+                if (decision.rescued) {
+                    if (decision.intronicFallback) {
+                        statsRA.crRescueIntronicFallback++;
                     } else {
-                        statsRA.crRescueFastPathIntronicFallbackOff++;
+                        statsRA.crRescueExonicWinner++;
                     }
                 } else {
-                    std::vector<CrRescueRegion> states;
-                    states.reserve(static_cast<size_t>(nTr));
-                    for (uint64_t ia = 0; ia < nTr; ++ia) {
-                        if (trMult[ia] == nullptr) {
-                            states.push_back(CrRescueRegion::Intergenic);
-                            continue;
-                        }
-                        states.push_back(classifyAlignmentCrRescue(*chunkTr, *trMult[ia], P.pSolo.strand));
-                    }
-                    decision = evaluateCrRescueDecision(states, P.pSolo.crMultimapRescueIntronic);
-                    if (decision.rescued) {
-                        if (decision.intronicFallback) {
-                            statsRA.crRescueIntronicFallback++;
-                        } else {
-                            statsRA.crRescueExonicWinner++;
-                        }
+                    if (decision.exonicCount > 1) {
+                        statsRA.crRescueMultiExonicNoRescue++;
+                    } else if (decision.intronicCount > 1) {
+                        statsRA.crRescueMultiIntronicNoRescue++;
+                    } else if (decision.exonicCount == 0 && decision.intronicCount == 1
+                               && !P.pSolo.crMultimapRescueIntronic) {
+                        statsRA.crRescueIntronicFallbackOffNoRescue++;
                     } else {
-                        if (decision.exonicCount > 1) {
-                            statsRA.crRescueMultiExonicNoRescue++;
-                        } else if (decision.intronicCount > 1) {
-                            statsRA.crRescueMultiIntronicNoRescue++;
-                        } else if (decision.exonicCount == 0 && decision.intronicCount == 1
-                                   && !P.pSolo.crMultimapRescueIntronic) {
-                            statsRA.crRescueIntronicFallbackOffNoRescue++;
-                        } else {
-                            statsRA.crRescueAllIntergenicNoRescue++;
-                        }
+                        statsRA.crRescueAllIntergenicNoRescue++;
                     }
                 }
 
@@ -609,7 +546,7 @@ void ReadAlign::outputAlignments() {
         // This matches the external stepwise path, which derives Y read names from
         // the emitted Y BAM rather than from filtered-out candidate alignments.
         hasYAlignment_ = false;
-        if (P.emitNoYBAMyes || P.emitYReadNamesyes || P.emitYNoYFastqyes) {
+        if (P.emitNoYBAMyes || P.emitYReadNamesyes || P.emitYNoYFastqyes || P.emitYNoYCbqyes) {
             // Use transformed genome alignments if available, otherwise use original.
             if (unmapType < 0) {
                 uint64 nTrCheck = nTr;
@@ -666,6 +603,55 @@ void ReadAlign::outputAlignments() {
             }
         }
 
+        // The spatial sidecar is deliberately emitted after the final modern
+        // GeneFull annotation/rescue state and before any barcode or UMI work.
+        // It is one fixed-width slot per 0-based global input ordinal.
+        if (P.spatialFeatureSidecarWriter != nullptr) {
+            spatial_feature_sidecar::Record sidecarRecord;
+            sidecarRecord.statusFlags = spatial_feature_sidecar::kRecordPresent;
+            const bool mapped = unmapType < 0;
+            sidecarRecord.statusFlags |= mapped ? spatial_feature_sidecar::kMapped
+                                                : spatial_feature_sidecar::kUnmappedOrFiltered;
+            const ReadAnnotFeature &geneFull =
+                readAnnot.annotFeatures[SoloFeatureTypes::GeneFull];
+            if (mapped && geneFull.fSet.size() == 1) {
+                sidecarRecord.geneIndex = *geneFull.fSet.begin();
+                sidecarRecord.statusFlags |= spatial_feature_sidecar::kUniqueGene;
+            } else if (mapped && geneFull.fSet.size() > 1) {
+                sidecarRecord.statusFlags |= spatial_feature_sidecar::kMultiGeneRejected;
+            } else {
+                sidecarRecord.statusFlags |= spatial_feature_sidecar::kNoGene;
+            }
+            if (mapped && genomicMultimapBeforeRescue_ && geneFull.fSet.size() == 1) {
+                sidecarRecord.statusFlags |=
+                    spatial_feature_sidecar::kSameGeneGenomicMultimapper;
+            }
+            if (crMultiMapRescued_) {
+                sidecarRecord.statusFlags |= crMultiMapRescuedIntronic_
+                    ? spatial_feature_sidecar::kCrIntronicFallback
+                    : spatial_feature_sidecar::kCrExonicRescue;
+            }
+            const std::uint16_t overlap = geneFull.ovType < 8
+                ? static_cast<std::uint16_t>(geneFull.ovType) : 0;
+            sidecarRecord.statusFlags |= static_cast<std::uint16_t>(
+                overlap << spatial_feature_sidecar::kOverlapShift);
+
+            if (iReadAll == 0) {
+                exitWithError("EXITING because spatial feature sidecar received STAR read ordinal zero\n",
+                              std::cerr, P.inOut->logMain, EXIT_CODE_INCONSISTENT_DATA, P);
+            }
+            const char *rawName = readNameMates[0] != nullptr ? readNameMates[0] : readName;
+            const std::string normalizedName = spatial_feature_sidecar::normalizeReadName(
+                rawName == nullptr ? std::string() : std::string(rawName));
+            std::string sidecarError;
+            if (!P.spatialFeatureSidecarWriter->write(
+                    iReadAll - 1, readFilesIndex, normalizedName, sidecarRecord, sidecarError)) {
+                exitWithError("EXITING because a spatial feature sidecar record could not be written: "
+                                  + sidecarError + "\n",
+                              std::cerr, P.inOut->logMain, EXIT_CODE_FILE_WRITE, P);
+            }
+        }
+
         //the operations below are both for mapped and unmapped reads
         soloRead->readBar->getCBandUMI(Read0, Qual0, readLengthOriginal, readNameExtra[0], readFilesIndex, readName);
         
@@ -680,9 +666,6 @@ void ReadAlign::outputAlignments() {
         
         // Use CbCorrector for inline CB correction if available
         SoloReadBarcode *readBar = soloRead->readBar;
-        static int debugCount = 0;
-        const int MAX_DEBUG_LOGS = 10;
-        
         if (P.pSolo.cbCorrector && !readBar->cbSeq.empty()) {
             CbMatch match = P.pSolo.cbCorrector->correct(readBar->cbSeq);
             // Extract UMI first (needed for ambiguous accumulation)
@@ -717,17 +700,14 @@ void ReadAlign::outputAlignments() {
                     entry.cbSeq = readBar->cbSeq; // Raw observed sequence (may contain Ns)
                     entry.cbQual = readBar->cbQual; // Phred quality scores (same length as cbSeq)
                     entry.umiCounts.reserve(32);
-                    
-                    // Validate quality scores match sequence length
-                    if (entry.cbQual.length() != entry.cbSeq.length()) {
-                        // Pad with default quality if needed (shouldn't happen, but be defensive)
-                        if (entry.cbQual.length() < entry.cbSeq.length()) {
-                            entry.cbQual.append(entry.cbSeq.length() - entry.cbQual.length(), 'H'); // Q39 default
-                        } else {
-                            entry.cbQual = entry.cbQual.substr(0, entry.cbSeq.length());
-                        }
-                    }
+                    cb_bayesian::normalizeCbQual(entry.cbQual, entry.cbSeq);
                 }
+
+                cb_bayesian::accumulateCbQualityEvidence(entry.cbSeq,
+                                                         readBar->cbQual,
+                                                         entry.cbLogLikMatch,
+                                                         entry.cbLogLikMismatch,
+                                                         entry.cbEvidenceReads);
                 
                 // Accumulate UMI count (24-bit packed UMI -> count)
                 entry.umiCounts[umi24]++;
@@ -772,25 +752,10 @@ void ReadAlign::outputAlignments() {
             } else {
                 // No match
                 extractedCbIdxPlus1_ = 0;
-                extractedCbSeq_.clear();
+                extractedCbSeq_ = readBar->cbSeq;
                 cbResolutionStats_.noMatch++;
             }
-            
-            // Debug logging for first few reads and specific failing CBs
-            if (debugCount++ < MAX_DEBUG_LOGS || readBar->cbSeq == "CNGTATTTCGGGCAGT") {
-                P.inOut->logMain << "CbCorrector::correct: cbSeq=" << readBar->cbSeq
-                                 << ", whitelistIdx=" << match.whitelistIdx
-                                 << ", hammingDist=" << (int)match.hammingDist
-                                 << ", ambiguous=" << match.ambiguous
-                                 << ", extractedCbIdxPlus1_=" << extractedCbIdxPlus1_ << endl;
-            }
         } else {
-            // Debug logging for why CbCorrector wasn't used
-            if (debugCount++ < MAX_DEBUG_LOGS) {
-                P.inOut->logMain << "CbCorrector NOT used: cbCorrector=" << (P.pSolo.cbCorrector ? "non-null" : "null")
-                                 << ", cbSeq.empty()=" << readBar->cbSeq.empty()
-                                 << ", cbSeq=" << (readBar->cbSeq.empty() ? "(empty)" : readBar->cbSeq) << endl;
-            }
             // Fallback to original SoloReadBarcode matching logic
             // cbMatch: 0=exact match, 1=one match with 1MM, -1=no match, -3=multiple matches (not allowed)
             if ((readBar->cbMatch == 0 || readBar->cbMatch == 1) && !readBar->cbMatchInd.empty()) {
@@ -821,16 +786,6 @@ void ReadAlign::outputAlignments() {
                 extractedUmiValid_ = (readBar->umiCheck >= 0);
             }
         }
-        
-        // Debug: log first few extractions
-        static int extractCount = 0;
-        if (extractCount++ < 5) {
-            P.inOut->logMain << "ReadAlign::outputAlignments: extractedCbIdxPlus1_=" << extractedCbIdxPlus1_
-                             << ", extractedUmi24_=0x" << std::hex << extractedUmi24_ << std::dec
-                             << ", cbMatch=" << readBar->cbMatch
-                             << ", umiSeq.length()=" << readBar->umiSeq.length() << std::endl;
-        }
-        
         const auto sampleDetectStart = std::chrono::steady_clock::now();
         detectSampleFromRawR2();
         const auto sampleDetectEnd = std::chrono::steady_clock::now();
@@ -887,92 +842,15 @@ void ReadAlign::outputAlignments() {
                                       packed_read1_rc.empty() ? nullptr : packed_read1_rc.data(), read1_len,
                                       packed_read2.empty() ? nullptr : packed_read2.data(),
                                       packed_read2_rc.empty() ? nullptr : packed_read2_rc.data(), read2_len);
-            
-            // Compute uniformWeight for GC bias collection
-            double uniformWeight = (nAlignT > 0) ? 1.0 / nAlignT : 1.0;
-            
-            // Collect GC observations from properly-paired transcriptomic alignments
-            if (P.quant.transcriptVB.gcBias && P.readNmates == 2) {
-                for (uint i = 0; i < nAlignT; i++) {
-                    Transcript &aT = alignTrAll[i];
-                    
-                    // Check if this is a properly-paired alignment (both mates present)
-                    // For PE, first exon has EX_iFrag=0, last exon has EX_iFrag=1
-                    if (aT.nExons < 2) continue;
-                    uint firstFrag = aT.exons[0][EX_iFrag];
-                    uint lastFrag = aT.exons[aT.nExons-1][EX_iFrag];
-                    if (firstFrag == lastFrag) continue;  // Both mates from same fragment = not properly paired
-                    
-                    // Get fragment boundaries in transcriptomic coordinates
-                    // Find the leftmost and rightmost positions
-                    uint64 fragStart = aT.exons[0][EX_G];
-                    uint64 fragEnd = fragStart;
-                    for (uint32 iex = 0; iex < aT.nExons; iex++) {
-                        uint64 exStart = aT.exons[iex][EX_G];
-                        uint64 exEnd = exStart + aT.exons[iex][EX_L];
-                        if (exStart < fragStart) fragStart = exStart;
-                        if (exEnd > fragEnd) fragEnd = exEnd;
-                    }
-                    
-                    uint64 fragLen = fragEnd - fragStart;
-                    // Only truncate very long fragments (Salmon doesn't drop small lengths)
-                    // Keep fragments >= 1 and <= MAX_FRAG_LEN (2000)
-                    if (fragLen == 0 || fragLen > FLDAccumulator::MAX_FRAG_LEN) continue;
-                    
-                    // Get transcript ID and compute GC from transcript sequence
-                    uint32_t trId = aT.Chr;
-                    if (trId >= chunkTr->nTr) continue;
-                    
-                    // Get genomic coordinates for this transcript
-                    uint64 trStart = chunkTr->trS[trId];
-                    uint64 trEnd = chunkTr->trE[trId];
-                    
-                    // Convert transcriptomic fragment coords to genomic
-                    // For single-exon transcripts, this is straightforward
-                    // For multi-exon, we'd need to map through exons (simplified here)
-                    uint64 genomicStart = trStart + fragStart;
-                    uint64 genomicEnd = trStart + fragEnd;
-                    
-                    // Safety check
-                    if (genomicEnd > trEnd + 1) continue;
-                    if (genomicEnd > mapGen.nGenome) continue;
-                    
-                    // Count GC bases in the fragment
-                    uint64 gcCount = 0;
-                    for (uint64 pos = genomicStart; pos < genomicEnd && pos < mapGen.nGenome; pos++) {
-                        char base = mapGen.G[pos];
-                        // In STAR encoding: 0=A, 1=C, 2=G, 3=T
-                        if (base == 1 || base == 2) {  // C or G
-                            gcCount++;
-                        }
-                    }
-                    
-                    // Compute GC percentage
-                    int32_t gcPct = static_cast<int32_t>((gcCount * 100) / fragLen);
-                    if (gcPct > 100) gcPct = 100;
-                    
-                    // Add GC observation with uniform weight
-                    quantEC->addGCObservation(static_cast<int32_t>(fragStart), 
-                                              static_cast<int32_t>(fragEnd), 
-                                              gcPct, 
-                                              uniformWeight);
-                    
-                    // FLD updates are now done in TranscriptQuantEC::addReadAlignments
-                    // using Salmon-style stochastic acceptance based on exp(aln->logProb)
-                    // (Removed uniform FLD updates for Salmon parity)
-                }
-            }
-            // Note: FLD collection without GC bias is also done in TranscriptQuantEC
         }
         
-        // Set detected sample token in SoloReadBarcode for tag extraction in inline hash capture
-        if ((P.pSolo.flexMode || P.pSolo.inlineHashMode) && soloRead && soloRead->readBar) {
+        // Flex-specific side effects stay off for standard non-Flex STARsolo.
+        if (P.pSolo.flexMode && soloRead && soloRead->readBar) {
             soloRead->readBar->detectedSampleToken = detectedSampleByte_;
         }
 
         // Populate optional MAPQ/CIGAR/score on transcripts for downstream consumers (Flex resolver)
-        // Gate Flex-only side effects so non-Flex STARsolo behaves like upstream
-        if ((P.pSolo.flexMode || P.pSolo.inlineHashMode) && unmapType < 0 && nTr > 0) {
+        if (P.pSolo.flexMode && unmapType < 0 && nTr > 0) {
             int mapqUnique = P.outSAMmapqUnique;
             for (uint64 i = 0; i < nTr; i++) {
                 if (trMult[i] == nullptr) continue;
@@ -989,7 +867,7 @@ void ReadAlign::outputAlignments() {
 
         // Store qname mapping for reject logging if enabled (Flex-only)
         // Forward declaration - function defined in flex/SoloReadFeature_record_flex.cpp
-        if (P.pSolo.flexMode || P.pSolo.inlineHashMode) {
+        if (P.pSolo.flexMode) {
             if (readName) {
                 storeQnameMapping(iReadAll, readName);
             }
@@ -1106,8 +984,18 @@ void ReadAlign::writeSAM(uint64 nTrOutSAM, Transcript **trOutSAM, Transcript *tr
         
         ////////////////////////////////////////////////////////////////////////////////////////////////////////////
         ////// write SAM/BAM 
-        auto nTrOutWrite=min(P.outSAMmultNmax,nTrOutSAM); //number of aligns to write to SAM/BAM files            
-        
+        auto nTrOutWrite=min(P.outSAMmultNmax,nTrOutSAM); //number of aligns to write to SAM/BAM files
+
+        // Union mate presence across transcripts that are actually written (outSAMmultNmax),
+        // not a higher-SAM candidate that is truncated and never emitted.
+        for (uint iTrAll = 0; iTrAll < nTrOutWrite; ++iTrAll) {
+            if (trOutSAM[iTrAll] == nullptr) {
+                continue;
+            }
+            mateMapped[trOutSAM[iTrAll]->exons[0][EX_iFrag]] = true;
+            mateMapped[trOutSAM[iTrAll]->exons[trOutSAM[iTrAll]->nExons-1][EX_iFrag]] = true;
+        }
+
         for (uint iTr=0;iTr<nTrOutWrite;iTr++) {//write transcripts
             //mateMapped1 = true if a mate is present in this transcript
             bool mateMapped1[2]={false,false};
@@ -1168,9 +1056,7 @@ void ReadAlign::writeSAM(uint64 nTrOutSAM, Transcript **trOutSAM, Transcript *tr
 
         /////////////////////////////////////////////////////////////////////////////////////////////
         //////// write unmapped ends
-        //TODO it's better to check all transcripts in the loop above for presence of both mates
-        mateMapped[trBestSAM->exons[0][EX_iFrag]] = true;
-        mateMapped[trBestSAM->exons[trBestSAM->nExons-1][EX_iFrag]] = true;
+        // mateMapped was accumulated over all transcripts in nTrOutSAM (see union loop above).
 
         if (P.readNmates>1 && !(mateMapped[0] && mateMapped[1]) ) {//not readNends: this is alignment
             unmapType=4;
@@ -1261,6 +1147,7 @@ void ReadAlign::writeFastxRecord(uint imate, bool isY)
         ++name;
     }
     const string& extra = readNameExtra[imate];
+    const uint readLen = readLength[imate];
 
     if (P.emitYNoYFastqCompression == "gz") {
         gzFile stream = isY ? chunkOutYFastqGz[imate] : chunkOutNoYFastqGz[imate];
@@ -1272,11 +1159,18 @@ void ReadAlign::writeFastxRecord(uint imate, bool isY)
         } else {
             gzprintf(stream, "%c%s\n", headerPrefix, name);
         }
-        gzprintf(stream, "%s\n", Read0[imate]);
+        if (readLen > 0) {
+            gzwrite(stream, Read0[imate], readLen);
+        }
+        gzputc(stream, '\n');
         if (readFileType == 2) { // fastq
             gzprintf(stream, "+\n");
-            gzprintf(stream, "%s\n", Qual0[imate]);
+            if (readLen > 0) {
+                gzwrite(stream, Qual0[imate], readLen);
+            }
+            gzputc(stream, '\n');
         }
+        gzflush(stream, Z_SYNC_FLUSH);
     } else {
         fstream &stream = isY ? chunkOutYFastqStream[imate] : chunkOutNoYFastqStream[imate];
         // Check if stream is open (not in bad state from gzip mode)
@@ -1288,11 +1182,14 @@ void ReadAlign::writeFastxRecord(uint imate, bool isY)
         } else {
             stream << headerPrefix << name << "\n";
         }
-        stream << Read0[imate] << "\n";
+        stream.write(Read0[imate], readLen);
+        stream << "\n";
         if (readFileType == 2) { // fastq
             stream << "+\n";
-            stream << Qual0[imate] << "\n";
+            stream.write(Qual0[imate], readLen);
+            stream << "\n";
         }
+        stream.flush();
     }
 }
 

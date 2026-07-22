@@ -567,6 +567,14 @@ def main():
         default="matrix.mtx",
         help="STAR filtered matrix basename (default: matrix.mtx)",
     )
+    parser.add_argument(
+        "--skip-feature-call-parity",
+        action="store_true",
+        help=(
+            "Omit protospacer_calls_per_cell.csv checks and feature-call parity "
+            "(for GEX-only STAR runs with no outs/crispr_analysis)."
+        ),
+    )
     args = parser.parse_args()
 
     repo_root = Path(__file__).resolve().parents[1]
@@ -587,8 +595,9 @@ def main():
         raise SystemExit(f"Missing CR MEX dirs under: {cr_run}")
     if not star_raw_gex.exists() or not star_filt_gex.exists():
         raise SystemExit(f"Missing STAR GeneFull MEX dirs under: {star_run}")
-    if not cr_calls_csv.exists() or not star_calls_csv.exists():
-        raise SystemExit("Missing protospacer_calls_per_cell.csv in CR or STAR run")
+    if not args.skip_feature_call_parity:
+        if not cr_calls_csv.exists() or not star_calls_csv.exists():
+            raise SystemExit("Missing protospacer_calls_per_cell.csv in CR or STAR run")
 
     cr_filtered_barcodes = (
         Path(args.cr_filtered_barcodes)
@@ -808,6 +817,9 @@ def main():
     ):
         print(line)
     print()
+
+    if args.skip_feature_call_parity:
+        return
 
     cr_calls = load_feature_calls(cr_calls_csv, strip_suffix)
     star_calls = load_feature_calls(star_calls_csv, strip_suffix)

@@ -42,10 +42,27 @@ from .tools.build import (
     needs_rebuild as _needs_rebuild,
     load_build_state as _load_build_state,
 )
+from .tools.workflows import (
+    list_workflows as _list_workflows,
+    describe_workflow as _describe_workflow,
+    get_workflow_scripts as _get_workflow_scripts,
+    get_workflow_parameter_schema as _get_workflow_parameter_schema,
+    validate_workflow_parameters as _validate_workflow_parameters,
+    render_workflow_command as _render_workflow_command,
+)
+from .tools.scaffold import (
+    scaffold_workflow_schema as _scaffold_workflow_schema,
+    validate_draft_workflow_schema as _validate_draft_workflow_schema,
+)
+from .launchpad.api import get_launchpad_routes
 
 
 # Create the MCP server
 mcp = FastMCP("star-suite")
+
+# Set to True when running in stdio transport (local to the host).
+# Stdio callers are implicitly trusted — they are pikachu-local processes.
+_trust_local: bool = False
 
 
 class AcceptHeaderMiddleware:
@@ -82,8 +99,11 @@ def build_http_app() -> Starlette:
     middleware = [Middleware(AcceptHeaderMiddleware)]
     middleware += stream_app.user_middleware + sse_app.user_middleware
 
+    # Launchpad API + static SPA under /launchpad/ (must precede generic /launchpad static catch-all)
+    launchpad = get_launchpad_routes()
+
     return Starlette(
-        routes=stream_app.routes + sse_app.routes,
+        routes=launchpad + stream_app.routes + sse_app.routes,
         middleware=middleware,
         lifespan=lifespan,
     )
@@ -99,6 +119,10 @@ def check_auth(token: Optional[str], is_discovery: bool = False) -> Optional[Err
     Returns:
         ErrorResponse if auth fails, None if auth passes.
     """
+    # Stdio transport is local to the host — implicitly trusted.
+    if _trust_local:
+        return None
+
     config = get_config()
     expected_token = config.server.auth_token
 
@@ -123,6 +147,26 @@ def check_auth(token: Optional[str], is_discovery: bool = False) -> Optional[Err
         )
 
     return None
+
+
+def is_authenticated(token: Optional[str]) -> bool:
+    """Return True if *token* is valid (or if auth is not configured)."""
+    if _trust_local:
+        return True
+    config = get_config()
+    expected_token = config.server.auth_token
+    if not expected_token:
+        return True
+    return bool(token and token == expected_token)
+
+
+def get_workflow_visibility(workflow_id: str) -> str:
+    """Return the visibility setting for a workflow ('public' or 'private')."""
+    config = get_config()
+    wf_cfg = config.get_workflow(workflow_id)
+    if wf_cfg is None:
+        return "public"
+    return wf_cfg.visibility
 
 
 # --- MCP Tools ---
@@ -542,6 +586,270 @@ def ensure_fresh_build(
         ).model_dump()
 
 
+# --- Workflow Tools ---
+
+
+@mcp.tool()
+def list_workflows(auth_token: Optional[str] = None) -> dict:
+    """List supported workflow templates.
+
+    Returns structured workflows with metadata, separate from the scripts allowlist.
+
+    Args:
+        auth_token: Authentication token (optional if public_discovery is enabled).
+
+    Returns:
+        ListWorkflowsResponse with workflow summaries.
+    """
+    auth_error = check_auth(auth_token, is_discovery=True)
+    if auth_error:
+        return auth_error.model_dump()
+
+    try:
+        result = _list_workflows(authenticated=is_authenticated(auth_token))
+        payload = result.model_dump()
+        payload["agent_protocol"] = get_config().rendered_agent_protocol
+        return payload
+    except Exception as e:
+        return ErrorResponse(
+            code="WORKFLOW_ERROR",
+            message=str(e),
+        ).model_dump()
+
+
+@mcp.tool()
+def describe_workflow(
+    workflow_id: str,
+    auth_token: Optional[str] = None,
+) -> dict:
+    """Return full workflow metadata including stages and parameter groups.
+
+    Args:
+        workflow_id: Workflow identifier (e.g. "ucsf_star_suite_production").
+        auth_token: Authentication token (optional if public_discovery is enabled).
+
+    Returns:
+        DescribeWorkflowResponse with stages, parameter groups, and caveats.
+    """
+    auth_error = check_auth(auth_token, is_discovery=True)
+    if auth_error:
+        return auth_error.model_dump()
+
+    try:
+        result = _describe_workflow(workflow_id, authenticated=is_authenticated(auth_token))
+        payload = result.model_dump()
+        payload["agent_protocol"] = get_config().rendered_agent_protocol
+        return payload
+    except Exception as e:
+        return ErrorResponse(
+            code="WORKFLOW_ERROR",
+            message=str(e),
+        ).model_dump()
+
+
+@mcp.tool()
+def get_workflow_scripts(
+    workflow_id: str,
+    auth_token: Optional[str] = None,
+) -> dict:
+    """Return the scripts composing a workflow with provenance metadata.
+
+    Provides entry script path, helper script paths, existence checks,
+    and repo provenance (git commit, remote). Intended for downstream
+    script-backed encoders that need to know which scripts a workflow uses.
+
+    Args:
+        workflow_id: Workflow identifier (e.g. "ucsf_star_suite_production").
+        auth_token: Authentication token (optional if public_discovery is enabled).
+
+    Returns:
+        GetWorkflowScriptsResponse with script details and provenance.
+    """
+    auth_error = check_auth(auth_token, is_discovery=True)
+    if auth_error:
+        return auth_error.model_dump()
+
+    try:
+        result = _get_workflow_scripts(
+            workflow_id, authenticated=is_authenticated(auth_token)
+        )
+        return result.model_dump()
+    except Exception as e:
+        return ErrorResponse(
+            code="WORKFLOW_ERROR",
+            message=str(e),
+        ).model_dump()
+
+
+@mcp.tool()
+def get_workflow_parameter_schema(
+    workflow_id: str,
+    auth_token: Optional[str] = None,
+) -> dict:
+    """Return the machine-readable parameter schema for a workflow.
+
+    Includes parameter definitions, ordered groups, constraints,
+    and mutual exclusion / dependency rules.
+
+    Args:
+        workflow_id: Workflow identifier.
+        auth_token: Authentication token (optional if public_discovery is enabled).
+
+    Returns:
+        WorkflowParameterSchemaResponse with parameters, groups, and constraints.
+    """
+    auth_error = check_auth(auth_token, is_discovery=True)
+    if auth_error:
+        return auth_error.model_dump()
+
+    try:
+        result = _get_workflow_parameter_schema(
+            workflow_id, authenticated=is_authenticated(auth_token)
+        )
+        return result.model_dump()
+    except Exception as e:
+        return ErrorResponse(
+            code="WORKFLOW_ERROR",
+            message=str(e),
+        ).model_dump()
+
+
+@mcp.tool()
+def validate_workflow_parameters(
+    workflow_id: str,
+    params: dict,
+    check_paths: bool = True,
+    auth_token: Optional[str] = None,
+) -> dict:
+    """Validate structured params for a workflow without executing anything.
+
+    Checks required params, types, enum values, path existence,
+    mutual exclusion, and dependency constraints.
+
+    Args:
+        workflow_id: Workflow identifier.
+        params: Parameter dict (e.g. {"samples": "EBs1_1,EBs1_2", "threads": 8}).
+        check_paths: Whether to verify file/directory existence (default true).
+        auth_token: Authentication token (required if server has auth configured).
+
+    Returns:
+        ValidateWorkflowResponse with valid flag, normalized params, warnings, errors.
+    """
+    auth_error = check_auth(auth_token)
+    if auth_error:
+        return auth_error.model_dump()
+
+    try:
+        result = _validate_workflow_parameters(workflow_id, params, check_paths=check_paths)
+        return result.model_dump()
+    except Exception as e:
+        return ErrorResponse(
+            code="WORKFLOW_VALIDATION_FAILED",
+            message=str(e),
+        ).model_dump()
+
+
+@mcp.tool()
+def render_workflow_command(
+    workflow_id: str,
+    params: dict,
+    auth_token: Optional[str] = None,
+) -> dict:
+    """Render validated params into the actual command invocation.
+
+    Does not execute anything. Returns the argv array, a shell preview,
+    environment overrides, and the output root if derivable.
+
+    Args:
+        workflow_id: Workflow identifier.
+        params: Parameter dict (should be validated first).
+        auth_token: Authentication token (required if server has auth configured).
+
+    Returns:
+        RenderWorkflowResponse with argv, shell_preview, env_overrides.
+    """
+    auth_error = check_auth(auth_token)
+    if auth_error:
+        return auth_error.model_dump()
+
+    try:
+        result = _render_workflow_command(workflow_id, params)
+        return result.model_dump()
+    except Exception as e:
+        return ErrorResponse(
+            code="WORKFLOW_RENDER_FAILED",
+            message=str(e),
+        ).model_dump()
+
+
+@mcp.tool()
+def scaffold_workflow_schema(
+    script_path: str,
+    auth_token: Optional[str] = None,
+) -> dict:
+    """Parse a shell script and propose a draft workflow schema YAML.
+
+    Best-effort extraction from while/case flag-parsing patterns.
+    Returns a draft YAML string that should be reviewed, refined,
+    and committed to the repo before it becomes active.
+
+    Does NOT modify the running server configuration.
+
+    Args:
+        script_path: Path to the shell script (absolute or relative to repo root).
+        auth_token: Authentication token (optional if public_discovery is enabled).
+
+    Returns:
+        ScaffoldWorkflowResponse with draft YAML, parameter count, and review notes.
+    """
+    auth_error = check_auth(auth_token, is_discovery=True)
+    if auth_error:
+        return auth_error.model_dump()
+
+    try:
+        result = _scaffold_workflow_schema(script_path)
+        return result.model_dump()
+    except Exception as e:
+        return ErrorResponse(
+            code="SCAFFOLD_FAILED",
+            message=str(e),
+        ).model_dump()
+
+
+@mcp.tool()
+def validate_draft_workflow_schema(
+    draft_yaml: str,
+    auth_token: Optional[str] = None,
+) -> dict:
+    """Validate a draft workflow schema YAML against the WorkflowSchema model.
+
+    Checks structural validity, semantic consistency (flag_order references,
+    constraint params, duplicate names), and flags TODO placeholders.
+
+    Does NOT load the schema into the running server configuration.
+
+    Args:
+        draft_yaml: YAML string to validate.
+        auth_token: Authentication token (optional if public_discovery is enabled).
+
+    Returns:
+        ValidateDraftWorkflowResponse with valid flag, errors, warnings,
+        and parameter count.
+    """
+    auth_error = check_auth(auth_token, is_discovery=True)
+    if auth_error:
+        return auth_error.model_dump()
+
+    try:
+        result = _validate_draft_workflow_schema(draft_yaml)
+        return result.model_dump()
+    except Exception as e:
+        return ErrorResponse(
+            code="VALIDATION_FAILED",
+            message=str(e),
+        ).model_dump()
+
+
 def main():
     """Main entry point for the MCP server."""
     parser = argparse.ArgumentParser(description="STAR-suite MCP Server")
@@ -587,7 +895,9 @@ def main():
     port = args.port or config.server.port
 
     # Run the server
+    global _trust_local
     if transport == "stdio":
+        _trust_local = True
         mcp.run(transport="stdio")
     else:
         # HTTP mode (serve both streamable-http at "/" and SSE at "/sse"/"/messages")

@@ -73,6 +73,9 @@ private:
         uint64_t packedVariant;
         std::string cbSeq;
         std::string cbQual;
+        std::vector<double> cbLogLikMatch;
+        std::vector<double> cbLogLikMismatch;
+        uint32_t evidenceReads = 0;
         std::vector<uint32_t> parents; // WL indices (1-based)
         uint32_t count;
     };
@@ -114,6 +117,9 @@ public:
     struct MergedAmbigEntry {
         std::string cbSeq;
         std::string cbQual;
+        std::vector<double> cbLogLikMatch;
+        std::vector<double> cbLogLikMismatch;
+        uint32_t evidenceReads = 0;
         std::vector<uint32_t> parents;
         uint32_t count;
     };

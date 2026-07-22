@@ -1,6 +1,7 @@
 #include "SoloReadInfoLoader.h"
 #include "SoloReadFeature.h"
 #include "SoloFeature.h"
+#include "SoloBinarySpool.h"
 #include "soloInputFeatureUMI.h"
 #include "SoloCommon.h"
 #include "ErrorWarning.h"
@@ -40,7 +41,7 @@ void SoloReadInfoLoader::load(SoloReadFeature &rf,
                               std::vector<uint32_t> &nReadPerCBmulti1) {
 
     // Guard against null streamReads (e.g., inline hash mode or improperly initialized SoloReadFeature)
-    if (rf.streamReads == nullptr) {
+    if (rf.streamReads == nullptr && !rf.binarySpoolInMemory) {
         std::ostringstream errOut;
         errOut << "EXITING because of fatal ERROR: SoloReadInfoLoader::load called with null streamReads\n"
                << "This typically happens when:\n"
@@ -51,8 +52,26 @@ void SoloReadInfoLoader::load(SoloReadFeature &rf,
         exitWithError(errOut.str(), std::cerr, rf.P.inOut->logMain, EXIT_CODE_INPUT_FILES, rf.P);
     }
 
-    rf.streamReads->flush();
-    rf.streamReads->seekg(0,std::ios::beg);
+    if (rf.streamReads != nullptr) {
+        rf.streamReads->flush();
+    }
+    if (rf.binarySpoolInMemory) {
+        if (!SoloBinarySpool::seekToRecords(rf.binarySpoolBuffer, rf.binarySpoolReadPos, rf.featureType, rf.readIndexYes)) {
+            std::ostringstream errOut;
+            errOut << "EXITING because of fatal ERROR: could not validate experimental in-memory binary Solo spool header\n"
+                   << "featureType=" << rf.featureType << " readIndexYes=" << rf.readIndexYes << "\n";
+            exitWithError(errOut.str(), std::cerr, rf.P.inOut->logMain, EXIT_CODE_INPUT_FILES, rf.P);
+        }
+    } else if (rf.binarySpool) {
+        if (!SoloBinarySpool::seekToRecords(*rf.streamReads, rf.featureType, rf.readIndexYes)) {
+            std::ostringstream errOut;
+            errOut << "EXITING because of fatal ERROR: could not validate experimental binary Solo spool header\n"
+                   << "featureType=" << rf.featureType << " readIndexYes=" << rf.readIndexYes << "\n";
+            exitWithError(errOut.str(), std::cerr, rf.P.inOut->logMain, EXIT_CODE_INPUT_FILES, rf.P);
+        }
+    } else {
+        rf.streamReads->seekg(0,std::ios::beg);
+    }
 
     uint32 feature;
     uint64 umi, iread=(uint64)-1, prevIread=(uint64)-1;
@@ -61,10 +80,31 @@ void SoloReadInfoLoader::load(SoloReadFeature &rf,
     int64 cb;
     std::vector<uint32> trIdDist;
 
-    while (soloInputFeatureUMI(rf.streamReads, rf.featureType, rf.readIndexYes, rf.P.sjAll, iread, cbmatch, feature, umi, trIdDist, readFlagCounts)) {
+    auto readNextRecord = [&]() -> bool {
+        if (rf.binarySpoolInMemory) {
+            return soloInputFeatureUMI(rf.binarySpoolBuffer, rf.binarySpoolReadPos, rf.featureType, rf.readIndexYes, rf.binarySpool, rf.P.sjAll, iread, cbmatch, feature, umi, trIdDist, readFlagCounts);
+        }
+        return soloInputFeatureUMI(rf.streamReads, rf.featureType, rf.readIndexYes, rf.binarySpool, rf.P.sjAll, iread, cbmatch, feature, umi, trIdDist, readFlagCounts);
+    };
+
+    while (readNextRecord()) {
         const uint64 currentReadId = rf.readIndexYes ? iread : syntheticReadId++;
         if (feature == (uint32)(-1) && !rf.readIndexYes) {
-            rf.streamReads->ignore((uint32)-1, '\n');
+            if (rf.binarySpoolInMemory) {
+                if (!SoloBinarySpool::skipCbPayload(rf.binarySpoolBuffer, rf.binarySpoolReadPos, cbmatch)) {
+                    std::ostringstream errOut;
+                    errOut << "EXITING because of fatal ERROR: truncated in-memory binary Solo spool while skipping no-feature payload\n";
+                    exitWithError(errOut.str(), std::cerr, rf.P.inOut->logMain, EXIT_CODE_INPUT_FILES, rf.P);
+                }
+            } else if (rf.binarySpool) {
+                if (!SoloBinarySpool::skipCbPayload(*rf.streamReads, cbmatch)) {
+                    std::ostringstream errOut;
+                    errOut << "EXITING because of fatal ERROR: truncated binary Solo spool while skipping no-feature payload\n";
+                    exitWithError(errOut.str(), std::cerr, rf.P.inOut->logMain, EXIT_CODE_INPUT_FILES, rf.P);
+                }
+            } else {
+                rf.streamReads->ignore((uint32)-1, '\n');
+            }
             continue;
         };
 
@@ -78,7 +118,21 @@ void SoloReadInfoLoader::load(SoloReadFeature &rf,
 #endif
 
         if (cbmatch<=1) {
-            *rf.streamReads >> cb;
+            if (rf.binarySpoolInMemory) {
+                if (!SoloBinarySpool::readResolvedCb(rf.binarySpoolBuffer, rf.binarySpoolReadPos, cb)) {
+                    std::ostringstream errOut;
+                    errOut << "EXITING because of fatal ERROR: truncated in-memory binary Solo spool while reading resolved CB payload\n";
+                    exitWithError(errOut.str(), std::cerr, rf.P.inOut->logMain, EXIT_CODE_INPUT_FILES, rf.P);
+                }
+            } else if (rf.binarySpool) {
+                if (!SoloBinarySpool::readResolvedCb(*rf.streamReads, cb)) {
+                    std::ostringstream errOut;
+                    errOut << "EXITING because of fatal ERROR: truncated binary Solo spool while reading resolved CB payload\n";
+                    exitWithError(errOut.str(), std::cerr, rf.P.inOut->logMain, EXIT_CODE_INPUT_FILES, rf.P);
+                }
+            } else {
+                *rf.streamReads >> cb;
+            }
             if ( rf.pSolo.CBmatchWL.oneExact && cbmatch==1 && cbReadCountTotal[cb]==0 ) {
                 noMMtoWLwithoutExact = true;
                 reason = "noMMtoWLwithoutExact";
@@ -143,7 +197,22 @@ void SoloReadInfoLoader::load(SoloReadFeature &rf,
             float ptot=0.0, pmax=0.0, pin;
             #endif
             for (uint32 ii=0; ii<(uint32)cbmatch; ii++) {
-                uint32 cbin; char qin; *rf.streamReads >> cbin >> qin;
+                uint32 cbin; char qin;
+                if (rf.binarySpoolInMemory) {
+                    if (!SoloBinarySpool::readAmbiguousCandidate(rf.binarySpoolBuffer, rf.binarySpoolReadPos, cbin, qin)) {
+                        std::ostringstream errOut;
+                        errOut << "EXITING because of fatal ERROR: truncated in-memory binary Solo spool while reading ambiguous CB payload\n";
+                        exitWithError(errOut.str(), std::cerr, rf.P.inOut->logMain, EXIT_CODE_INPUT_FILES, rf.P);
+                    }
+                } else if (rf.binarySpool) {
+                    if (!SoloBinarySpool::readAmbiguousCandidate(*rf.streamReads, cbin, qin)) {
+                        std::ostringstream errOut;
+                        errOut << "EXITING because of fatal ERROR: truncated binary Solo spool while reading ambiguous CB payload\n";
+                        exitWithError(errOut.str(), std::cerr, rf.P.inOut->logMain, EXIT_CODE_INPUT_FILES, rf.P);
+                    }
+                } else {
+                    *rf.streamReads >> cbin >> qin;
+                }
                 if (cbReadCountTotal[cbin]>0) {
                     qin -= rf.pSolo.QSbase; qin = qin < rf.pSolo.QSmax ? qin : rf.pSolo.QSmax;
                     pin=cbReadCountTotal[cbin]*std::pow(10.0,-qin/10.0);

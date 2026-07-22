@@ -18,9 +18,10 @@ int writeMex(const std::string& outputPrefix,
     }
     
     // Normalize barcodes if cb_len > 0 (truncate to cb_len characters)
-    std::vector<std::string> outputBarcodes;
+    std::vector<std::string> truncatedBarcodes;
+    const std::vector<std::string> *outputBarcodesPtr = &barcodes;
     if (cb_len > 0) {
-        outputBarcodes.reserve(barcodes.size());
+        truncatedBarcodes.reserve(barcodes.size());
         std::unordered_set<std::string> seen;
         seen.reserve(barcodes.size());
         
@@ -29,14 +30,11 @@ int writeMex(const std::string& outputPrefix,
             std::string truncated;
             
             if (static_cast<int>(bc.size()) <= cb_len) {
-                // Barcode shorter than or equal to cb_len: use as-is
                 truncated = bc;
             } else {
-                // Truncate to cb_len
                 truncated = bc.substr(0, static_cast<size_t>(cb_len));
             }
             
-            // Check for duplicates after truncation
             if (seen.find(truncated) != seen.end()) {
                 std::fprintf(stderr, "[MexWriter] ERROR: duplicate barcode after truncation to %d bp\n", cb_len);
                 std::fprintf(stderr, "  barcode[%zu] = '%s' -> '%s' (already exists)\n", 
@@ -49,12 +47,11 @@ int writeMex(const std::string& outputPrefix,
             }
             
             seen.insert(truncated);
-            outputBarcodes.push_back(truncated);
+            truncatedBarcodes.push_back(truncated);
         }
-    } else {
-        // No truncation: use original barcodes
-        outputBarcodes = barcodes;
+        outputBarcodesPtr = &truncatedBarcodes;
     }
+    const std::vector<std::string> &outputBarcodes = *outputBarcodesPtr;
     
     // Create output file paths
     bool dirMode = (!outputPrefix.empty() && outputPrefix.back() == '/');
@@ -81,6 +78,9 @@ int writeMex(const std::string& outputPrefix,
         return -1;
     }
     
+    static constexpr size_t WRITE_BUF_SIZE = 1 << 20; // 1 MiB
+    std::setvbuf(mtx_fp, nullptr, _IOFBF, WRITE_BUF_SIZE);
+
     uint32_t num_features = static_cast<uint32_t>(features.size());
     uint32_t num_barcodes = static_cast<uint32_t>(outputBarcodes.size());
     uint64_t num_nonzero = static_cast<uint64_t>(triplets.size());

@@ -17,6 +17,18 @@ export CR_GENOME_DIR="${CR_GENOME_DIR:-/storage/autoindex_110_44/bulk_index}"
 export CR_MULTI_GEX_OUTPREFIX="${CR_MULTI_GEX_OUTPREFIX:-/tmp/star_gex_smoke/}"
 export CR_MULTI_OUTPREFIX="${CR_MULTI_OUTPREFIX:-/tmp/star_multi_smoke_cpp/}"
 
+# A375 5' GEM-X downloadable fixture (scripts/download_a375_5prime_fixture.sh)
+export A375_5P_FIXTURE_ROOT="${A375_5P_FIXTURE_ROOT:-/tmp/a375_5prime_fixture}"
+export A375_5P_GEX_DIR="${A375_5P_GEX_DIR:-$A375_5P_FIXTURE_ROOT/fastqs/gex}"
+export A375_5P_CRISPR_DIR="${A375_5P_CRISPR_DIR:-$A375_5P_FIXTURE_ROOT/fastqs/crispr}"
+export A375_5P_FEATURE_REF="${A375_5P_FEATURE_REF:-$A375_5P_FIXTURE_ROOT/1k_CRISPR_5p_gemx_Multiplex_count_feature_reference.csv}"
+export A375_5P_DOWNSAMPLE_DIR="${A375_5P_DOWNSAMPLE_DIR:-$A375_5P_FIXTURE_ROOT/downsampled_100000}"
+
+# A375 3' v3 NextGEM downloadable fixture (scripts/download_a375_3prime_fixture.sh)
+export A375_3P_FIXTURE_ROOT="${A375_3P_FIXTURE_ROOT:-/tmp/a375_3prime_fixture}"
+export A375_3P_FEATURE_REF="${A375_3P_FEATURE_REF:-$A375_3P_FIXTURE_ROOT/SC3_v3_NextGem_DI_CRISPR_10K_feature_ref.csv}"
+export A375_3P_DOWNSAMPLE_DIR="${A375_3P_DOWNSAMPLE_DIR:-$A375_3P_FIXTURE_ROOT/downsampled_100000}"
+
 # UCSF 2M perturb fixtures (current canonical runs)
 export UCSF_2M_ROOT="${UCSF_2M_ROOT:-/storage/ucsf-2M}"
 export UCSF_2M_STAR_RUNS_ROOT="${UCSF_2M_STAR_RUNS_ROOT:-$UCSF_2M_ROOT/star_runs}"
@@ -30,6 +42,16 @@ export UCSF_100K_PFCONFIG="${UCSF_100K_PFCONFIG:-$UCSF_100K_PFCONFIG_ROOT/multi_
 export UCSF_100K_FEATURE_REF="${UCSF_100K_FEATURE_REF:-/mnt/pikachu/ucsf-perturb-seq/cellranger_feature_ref_hCRISPRa_v2_like_AALG2_pattern.csv}"
 export UCSF_100K_CB_WHITELIST="${UCSF_100K_CB_WHITELIST:-/home/lhhung/cellranger-9.0.1/lib/python/cellranger/barcodes/translation/3M-february-2018_NXT.txt}"
 export UCSF_100K_GENOME_DIR="${UCSF_100K_GENOME_DIR:-/storage/autoindex_110_44/bulk_index}"
+
+# UCSF full-sample perturb (canonical benchmark surface: corrected EBs2_2).
+# Velocyto / run_star_velocyto_canonical profile=2m uses UCSF_2M_*; set UCSF_2M_PFCONFIG locally (no default).
+# Legacy iPSC2 under /storage/ucsf-2M is not the default here — override UCSF_2M_GEX_DIR if you still use it.
+export UCSF_EBS2_2_ROOT="${UCSF_EBS2_2_ROOT:-/mnt/pikachu/ucsf-perturb-seq-corrected/EBs2_2}"
+export UCSF_2M_GEX_DIR="${UCSF_2M_GEX_DIR:-$UCSF_EBS2_2_ROOT/GEX}"
+export UCSF_2M_GUIDE_DIR="${UCSF_2M_GUIDE_DIR:-$UCSF_EBS2_2_ROOT/guides}"
+export UCSF_2M_FEATURE_REF="${UCSF_2M_FEATURE_REF:-$UCSF_100K_FEATURE_REF}"
+export UCSF_2M_CB_WHITELIST="${UCSF_2M_CB_WHITELIST:-$UCSF_100K_CB_WHITELIST}"
+# export UCSF_2M_PFCONFIG=/path/to/full_sample_multi_config.csv
 
 # UCSF full-sample perturb references
 export UCSF_FULL_ROOT="${UCSF_FULL_ROOT:-/storage/ucsf-full/bench_20260218_dynamic_first}"
@@ -53,7 +75,9 @@ export FLEX_INLINE_TMP_DIR="${FLEX_INLINE_TMP_DIR:-/tmp/flex_inline_test}"
 # SLAM fixture (external, not in repo)
 export SLAM_FIXTURE_ROOT="${SLAM_FIXTURE_ROOT:-/mnt/pikachu/STAR-Flex/test/tmp_slam_fixture}"
 export SLAM_FIXTURE_FASTQ="${SLAM_FIXTURE_FASTQ:-/mnt/pikachu/STAR-Flex/test/tmp_slam_fixture/SRR32576116.fastq.gz}"
-export SLAM_FIXTURE_REF_TSV="${SLAM_FIXTURE_REF_TSV:-/mnt/pikachu/STAR-Flex/test/tmp_slam_fixture/fixture_ref_human.tsv.gz}"
+export SLAM_FIXTURE_LEGACY_REF_TSV="${SLAM_FIXTURE_LEGACY_REF_TSV:-/mnt/pikachu/STAR-Flex/test/tmp_slam_fixture/fixture_ref_human.tsv.gz}"
+export SLAM_FIXTURE_NOSNP_REF_TSV="${SLAM_FIXTURE_NOSNP_REF_TSV:-/mnt/pikachu/STAR-Flex/test/tmp_slam_fixture/from_nosnp.tsv.gz}"
+export SLAM_FIXTURE_REF_TSV="${SLAM_FIXTURE_REF_TSV:-$SLAM_FIXTURE_NOSNP_REF_TSV}"
 export SLAM_FIXTURE_STAR_INDEX="${SLAM_FIXTURE_STAR_INDEX:-/mnt/pikachu/STAR-Flex/test/fixtures/slam/ref/STAR-index}"
 export SLAM_FIXTURE_SNPS_BED="${SLAM_FIXTURE_SNPS_BED:-/mnt/pikachu/STAR-Flex/test/tmp_slam_fixture/snps.bed}"
 

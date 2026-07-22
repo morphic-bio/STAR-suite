@@ -3,6 +3,8 @@
 
 #include "IncludeDefine.h"
 #include "PfMultiConfig.h"
+#include "pf_split_read.h"
+#include "ThreadControl.h"
 
 /**
  * @file PfMultiAssign.h
@@ -30,6 +32,7 @@ struct AssignOptions {
     int barcodeN = -1;
     int consumerThreadsPerSet = -1;
     int searchThreads = -1;
+    int readBufferLines = -1;
     double minPosterior = -1.0;
     long long maxReads = -1; // <=0 means unlimited
     bool legacyCbRescue = false;
@@ -49,11 +52,27 @@ struct AssignOptions {
     int featureModeBootstrapReads = 0;
     bool useHotHash = false;
     bool skipHeatmaps = false;
+    bool adtMexOutput = false; // emit 10x protein MEX sidecars (assignBarcodes --output-mode adt_mex)
+    int hashDemuxMode = -1;    // PF_HASH_DEMUX_AUTO
+    string hashFeatureSelector;
+    string hashDemuxMethod;
+    string libraryFeatureType;
+    int hashMinTotal = 3;
+    int hashMinTop = 3;
+    double hashMinRatio = 2.0;
+    string cbqMode = "auto"; // auto | stream | range
+    string sampleName;
+    bool useSplitReadLayout = false;
+    pf_split_read_layout splitReadLayout = {};
 };
 
 struct AssignResult {
     int returnCode = 0;
     string detectedMatchMode = "UNKNOWN";
+    string inputFormat = "fastq";
+    string cbqModeRequested = "auto";
+    string cbqModeEffective;
+    string cbqModeFallbackReason;
     WhitelistNormalizationResult whitelistNormalization;
 };
 
@@ -94,6 +113,19 @@ AssignResult runAssignBarcodes(const string& whitelist,
                      const string& featureRef, const string& fastqDir,
                      const string& assignOut,
                      const AssignOptions& options = AssignOptions());
+
+/** Block until the dynamic permit interface is active (mapThreadsSpawn configured). */
+void waitForFeaturePermitInterface(bool hooksEnabled);
+
+/** Feature-domain permit chunk helpers for table import and other non-pf_api workloads. */
+/** @return true when a FEATURE permit was acquired (hooks on and interface active). */
+bool acquireFeaturePermitChunk(bool enabled, uint64_t& waitNsOut);
+void releaseFeaturePermitChunk(bool enabled,
+                               uint64_t waitNs,
+                               uint64_t workUnits,
+                               uint64_t workBytes);
+bool featurePermitTelemetryEnabled(bool hooksEnabled);
+ThreadControl::MapPermitSnapshot featurePermitSnapshot();
 
 /**
  * @brief Process all feature libraries from config

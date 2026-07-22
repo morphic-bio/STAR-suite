@@ -3,12 +3,12 @@
 #include <cmath>
 #include <limits>
 
-double SlamSolver::log_binom_pmf(uint16_t n, uint8_t k, double p) const {
-    if (p <= 0.0 || p >= 1.0) {
+double SlamSolver::log_binom_pmf(uint16_t n, uint16_t tc, double p) const {
+    if (tc > n || p <= 0.0 || p >= 1.0) {
         return -std::numeric_limits<double>::infinity();
     }
     double nn = static_cast<double>(n);
-    double kk = static_cast<double>(k);
+    double kk = static_cast<double>(tc);
     double log_coeff = std::lgamma(nn + 1.0) - std::lgamma(kk + 1.0) - std::lgamma(nn - kk + 1.0);
     return log_coeff + kk * std::log(p) + (nn - kk) * std::log(1.0 - p);
 }
@@ -16,12 +16,12 @@ double SlamSolver::log_binom_pmf(uint16_t n, uint8_t k, double p) const {
 double SlamSolver::calc_log_likelihood(const MismatchHistogram& data, double pi) const {
     double ll = 0.0;
     for (const auto& entry : data) {
-        uint16_t n = entry.first >> 8;
-        uint8_t k = static_cast<uint8_t>(entry.first & 0xFFu);
+        uint16_t n = slamKeyNT(entry.first);
+        uint16_t tc = slamKeyTC(entry.first);
         double count = entry.second;
 
-        double log_old = std::log(1.0 - pi) + log_binom_pmf(n, k, p_error_rate_);
-        double log_new = std::log(pi) + log_binom_pmf(n, k, p_conversion_rate_);
+        double log_old = std::log(1.0 - pi) + log_binom_pmf(n, tc, p_error_rate_);
+        double log_new = std::log(pi) + log_binom_pmf(n, tc, p_conversion_rate_);
 
         double max_log = (log_old > log_new) ? log_old : log_new;
         double sum = std::exp(log_old - max_log) + std::exp(log_new - max_log);
@@ -53,12 +53,12 @@ SlamResult SlamSolver::solve(const MismatchHistogram& gene_data) const {
         double num = 0.0;
         double ll = 0.0;
         for (const auto& entry : gene_data) {
-            uint16_t n = entry.first >> 8;
-            uint8_t k = static_cast<uint8_t>(entry.first & 0xFFu);
+            uint16_t n = slamKeyNT(entry.first);
+            uint16_t tc = slamKeyTC(entry.first);
             double count = entry.second;
 
-            double log_old = std::log(1.0 - pi) + log_binom_pmf(n, k, p_error_rate_);
-            double log_new = std::log(pi) + log_binom_pmf(n, k, p_conversion_rate_);
+            double log_old = std::log(1.0 - pi) + log_binom_pmf(n, tc, p_error_rate_);
+            double log_new = std::log(pi) + log_binom_pmf(n, tc, p_conversion_rate_);
             double max_log = (log_old > log_new) ? log_old : log_new;
             double sum = std::exp(log_old - max_log) + std::exp(log_new - max_log);
             double gamma = std::exp(log_new - max_log) / sum;

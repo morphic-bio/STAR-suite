@@ -37,6 +37,19 @@ update this file with its output location.
 - `.codespaces-demo/` (Codespaces demo cache, downloaded public fixtures, tiny indices, and walkthrough runs)
 - `plans/artifacts/parms_tests_YYYYMMDD/` (logs + report)
 - `tests/*_output*/` (smoke/regression outputs)
+- `tests/catatac_guide_arm_smoke_output/` (CAT-ATAC trimodal guide-arm smoke: oracle vs native split-read MEX parity, `parity.json`, `split_read_metrics.tsv`, GEX `barcodes.tsv` stub check; default 50K captured reads via `CATATAC_GUIDE_MAX_READS`, set `200000` for 2M-fixture gate)
+- `tests/catatac_guide_arm_pf_multi_smoke_output/` (STAR pf-multi guide-arm smoke: `star_layout=catatac_guide` + `star_barcode_output_map`, native matrix parity, GEX `barcodes.tsv` checks, `pf_multi_verify.json`; default 1K reads via `CATATAC_GUIDE_MAX_READS`)
+- `tests/catatac_trimodal_downsample_smoke_output/` (CAT-ATAC trimodal STAR smoke: GEX Solo + Chromap ATAC + guide pf-multi in one invocation; default 100K via `CATATAC_TRIMODAL_MAX_READS`, optional inline ATAC peak MEX via `CATATAC_TRIMODAL_INLINE_ATAC_PEAK_MEX=yes`; `trimodal_verify.json`)
+- `/tmp/hiv_dogma_gse239916/star_four_arm_downsample/` (HIV DOGMA four-arm table-backed pf-multi smoke outputs; `hiv_state_counts.tsv` + `star_run_*/`; `tests/multi_feature/test_hiv_dogma_four_arm_table_smoke.sh`)
+- `/tmp/hiv_dogma_hto_demux_smoke_*` (native HTO demux assignBarcodes smoke; `tests/multi_feature/test_hiv_dogma_hto_demux_smoke.sh`)
+- `/tmp/table_gex_pf_multi_star_smoke_*/` (fast GEX + table Custom pf-multi STAR smoke; `tests/multi_feature/test_table_gex_pf_multi_star_smoke.sh`)
+- `/tmp/mixed_adt_hto_pf_multi_star_smoke_*/` (GEX + mixed ADT+HTO hash demux pf-multi merge smoke; `tests/multi_feature/test_mixed_adt_hto_pf_multi_star_smoke.sh`)
+- `/mnt/pikachu/catatac_gse288996/full_bench/catatac_trimodal_staged/` (persistent per-read-count ATAC triplet downsample cache for trimodal smokes, e.g. `atac_100000/`, `atac_2000000/`)
+- `/mnt/pikachu/catatac_gse288996/full_bench/catatac_trimodal_smoke_100k_20260614T023346Z/` (fresh 2026-06-14 CAT-ATAC trimodal 100K smoke output retained outside the repo checkout; wrapper passed and `trimodal_verify.json` records GEX, ATAC, guide, and merged-MEX checks)
+- `/mnt/pikachu/catatac_gse288996/full_bench/catatac_trimodal_smoke_100k_ambient_fdr_*/` (CAT-ATAC trimodal 100K smokes run from merged ambient-FDR builds; includes GEX, Chromap ATAC, guide pf-multi, CR-compatible GMM outputs, and `outs/crispr_analysis/ambient_fdr/` sparse q-value sidecars)
+- `/mnt/pikachu/catatac_gse288996/full_bench/catatac_trimodal_smoke_100k_knee_fdr_*/` (CAT-ATAC trimodal 100K smokes for EmptyDrops simple-cell guide-caller universe validation; includes GMM and ambient-FDR CRISPR outputs plus `trimodal_verify.json`)
+- `/mnt/pikachu/catatac_gse288996/full_bench/catatac_ambient_fdr_knee_validation_*/` (post hoc CAT-ATAC full-run guide-caller validation artifacts: CRISPR-only raw MEX, EmptyDrops-knee filtered MEX, ambient-FDR/GMM outputs, rescued-tail barcode list, and denominator/call-overlap summaries)
+- `tests/catatac_srr_naming_output/` (SRR32265756_{1,2,3}.fastq.gz symlink naming discovery smoke)
 - `tests/bulk_pe_multisample_equivalence_output_*/` (batch vs sequential bulk PE multisample equivalence smoke)
 - `tests/mixed_chemistry_filtered_smoke_output_*/` (downsampled MSK mixed-chemistry filtered-cell smoke)
 - `tests/mixed_chemistry_autodetect_smoke_output_*/` (downsampled MSK mixed-chemistry autodetect smoke)
@@ -44,12 +57,28 @@ update this file with its output location.
 - `tests/solo_yremove_smoke_output_*/` (vanilla Solo integrated Y-removal vs remove_y_reads smoke)
 - `tests/perturb_yremove_smoke_output_*/` (perturb integrated Y-removal vs remove_y_reads smoke)
 - `tests/perturb_velocyto_mex_smoke_output_*/` (UCSF 100K perturb smoke producing raw/filtered velocyto MEX surfaces)
+- `tests/ucsf_corrected_production_100k_output_*/` (corrected UCSF production 100K smoke: Y/noY BAM/FASTQ, packaged velocyto MEX, downstream h5ads, CellBender, and paper wrapper manifests)
+- `tests/multiome_mudata_smoke_output_*/` (PBMC 3K multiome MEX/MuData smoke outputs: split GEX/ATAC MEX, prototype h5ad/h5mu files, evidence/cell-call summaries)
+- `tests/jax_multiome_lane_smoke_*/` (JAX Multiome one-lane STAR/Chromap smoke outputs: `LOCAL_MEX_READY.txt`, Y/noY BAM/FASTQ, GeneFull/Velocyto MEX, Chromap sorted BAM + binary sidecar, sidecar-derived peaks/summits, native ATAC peak MEX/metrics, remote CellBender h5ads, `REMOTE_POST_MEX_READY.txt`, and `.h5mu` files)
+- `/mnt/pikachu/JAX_Multiome01_processed/star_multiome*/` (JAX_Multiome01 STAR/Chromap production roots: metadata-derived sample manifests, per-sample local STAR/Chromap MEX boundary outputs, remote post-MEX h5ads/CellBender/MuData, production logs, and Globus large-file transfer state. Generated BAM and Y/noY FASTQ derivatives may be removed locally after successful Globus transfer; raw input FASTQs under `/mnt/pikachu/JAX_Multiome01/raw` are preserved.)
+- `/mnt/pikachu/JAX_scRNAseq02_processed/ocm_oracle_smoke_*/` (JAX scRNAseq02 `25E32-L3` OCM oracle smoke roots: staged 2M read-pair FASTQ downsample, rendered existing-binary STAR command, GeneFull/Velocyto/Y-removal smoke outputs when run, native OCM multi MEX materialization under `outs/multi` and `outs/per_sample_outs`, and Cell Ranger multi layout validation reports. Raw source FASTQs under `/mnt/pikachu/JAX_scRNAseq02/raw` are preserved.)
+- `/mnt/pikachu/JAX_scRNAseq02_processed/ocm_cbq_100k_*/` (JAX scRNAseq02 OCM FASTQ-vs-CBQ 100K parity roots from `tests/run_cbq_ocm_composite_smoke.sh`; contains paired CBQ and FASTQ STAR runs, staged FASTQs/CBQs, native OCM MEX outputs, wrapper logs, and CBQ/Y-removal gate logs.)
+- `/tmp/star_suite_cbq_ocm_composite_smoke_*/` (local JAX scRNAseq02 OCM CBQ smoke roots from `tests/run_cbq_ocm_composite_smoke.sh`; contains 1K CBQ and optional FASTQ parity STAR runs, staged FASTQs/CBQs, native OCM MEX outputs, and CBQ/Y-removal gate logs.)
+- `/mnt/pikachu/JAX_scRNAseq02_processed/ocm_lowmem*_smoke_*/` (JAX OCM low-memory/aggressive-spill smoke roots, including 8192-bucket Velocyto range spill and optional binary GeneFull spool checks.)
+- `/mnt/pikachu/JAX_scRNAseq02_processed/ocm_prod_25E32-L3_*/` (full-depth first-sample JAX OCM production attempts; contains large BAM/FASTQ/MEX outputs and logs, not for commit.)
+- `/mnt/pikachu/JAX_scRNAseq02_processed/ocm_memprof_*` (Solo memory profile harness outputs: `STAR_SOLO_MEMORY_PROFILE=1`, `tests/run_solo_memory_profile_harness.sh --ladder` or `--downsample-read-pairs`; checkpoints in `logs/star.log`.)
+- `tests/ucsf_velocyto_100k_matrix_output_*/` (diagnostic 100K UCSF staged-input matrix varying `Gene`, BAM output, and Y-split emission to isolate zero-Velocyto conditions)
+- `tests/ucsf_velocyto_exact_100k_output_*/` (canonical STAR Velocyto parity: deterministic 1 vs N threads on 100K fixture)
+- `tests/ucsf_velocyto_exact_2m_output_*/` (same on full UCSF 2M when `UCSF_2M_PFCONFIG` is set)
+- `tests/ucsf_velocyto_hash_100k_output_*/` / `tests/ucsf_velocyto_hash_2m_output_*/` (Stage 2: `STAR_VELOCYTO_INTEGRATED_HASH=1` vs global sorted replay; env `UCSF_VELOCYTO_HASH_*_OUTDIR`)
   - may also contain downstream STAR-cell QC outputs such as `downstream_genefull_velocyto_100k_starcells/`
   - may also contain per-feature-library downstream outputs such as:
     - `downstream_genefull_velocyto_100k_starcells_featurelibs_v2/feature_libraries/*/raw_feature_library.h5ad`
     - `downstream_genefull_velocyto_100k_starcells_featurelibs_v2/feature_libraries/*/filtered_feature_library.h5ad`
 - `tests/trim_qc_replay_smoke_output/` (standalone alignment replay smoke for FastQC-like trim-QC JSON/HTML)
 - `tests/trim_qc_fastq_smoke_output/` (standalone FASTQ replay smoke for FastQC-like trim-QC JSON/HTML)
+- `/tmp/star_suite_cbq_ordered_encoder_smoke/` (ordered C++ FASTQ/FASTQ.gz to CBQ encoder smoke outputs and contract dumps)
+- `/tmp/star_suite_cbq_ynoy_smoke/` (ordered CBQ Y/noY emission smoke outputs, dumps, and synthetic genome)
 - `tests/sceptre_example_output_*` (SCEPTRE vignette runs)
 - `tests/sceptre_example_*_mex` (SCEPTRE vignette MEX exports)
 - `tests/nbem_sceptre_example_*` (NB-EM outputs on SCEPTRE vignette MEX)
@@ -77,15 +106,135 @@ update this file with its output location.
 - `tests/nbem_crispat_vignette_output_0_4_fallback_dom/` (NB-EM outputs with fallback dominance on crispat vignette subset)
 - `tests/baselines/flex_pre_modular_*/` (Flex modular integration baselines)
 - `tests/emptydrops_parity_output_*/` (EmptyDrops legacy vs libscrna parity outputs)
+- `tests/ucsf_gex_gray_em_harness_output_*/` (post hoc UCSF gray-zone admission evaluation using CellGenI/EM-like labels inside the current run tail window)
+- `tests/ucsf_gex_gray_em_heuristics_output_*/` (cheap heuristic analysis for UCSF gray-zone barcodes, comparing CellGenI-style admissions against CR-supported tail cells)
+- `tests/ucsf_gex_gray_threshold_cv_output_*/` (5-fold validation outputs for a simple gray-zone threshold rule using genes_detected, entropy, and top_gene_frac)
+- `tests/ucsf_gex_gray_postqc_filter_output_*/` (gray-zone-only post-EmptyDrops QC cleanup mirroring downstream `combineFilters.py` semantics: min/max genes detected plus mitochondrial fraction cutoff)
+- `/mnt/pikachu/guide_ambient_fdr_bench_*/` (ambient-FDR guide-caller call-only benchmark artifacts: guide-only MEX links, regenerated `calls/`, threshold/AUC/low-UMI summary TSVs, and run metadata)
+- `/storage/A375/guide_ambient_fdr_callonly_*/` (A375 call-only `star_feature_call --guide-caller both` CRISPR artifacts with GMM and ambient-FDR outputs)
+- `/storage/A375/test_cr_compat_ambient_fdr_*/` (A375 integrated CR-compatible STAR runs with `--crGuideCaller auto` or `both`, including combined MEX and `outs/crispr_analysis/ambient_fdr/`)
+- `/storage/A375/test_cr_compat_crispr_*/` (A375 integrated CR-compatible CRISPR regression outputs from `tests/test_cr_compat_crispr_calling.sh`, including combined MEX, sorted BAM, and root `outs/crispr_analysis/protospacer_*` compatibility files)
+- `tests/ucsf_velocyto_gexonly_exact_100k_output_*/` (GEX-only Velocyto exact/debug harness on a 100K downsampled corrected UCSF `EBs2_2/GEX` fixture; stream vs deterministic replay plus Gene/GeneFull parity)
+- `/storage/ucsf-velocyto-validation/` (GEX-only Velocyto baseline, parity, timing, and trace artifacts on corrected UCSF `EBs2_2/GEX`)
+  - small GEX-only frozen baseline:
+    - `/storage/ucsf-velocyto-validation/gexonly_baseline_100k_20260327_041314/`
+  - 10M GEX-only frozen baseline:
+    - `/storage/ucsf-velocyto-validation/gexonly_baseline_10m_20260327_050146/`
+  - 10M GEX-only parity + timing:
+    - `/storage/ucsf-velocyto-validation/gexonly_10m_parity_timing_20260327_051303/`
+  - 10M GEX-only Stage 2 hash validation:
+    - `/storage/ucsf-velocyto-validation/gexonly_10m_hash_stage2_20260327_055002/`
+  - full corrected `EBs2_2/GEX` stream vs hash at 32 threads:
+    - `/storage/ucsf-velocyto-validation/full_gex_velocyto_stream_vs_hash_t32_20260327_064213/`
+  - full corrected `EBs2_2/GEX` mixed `GeneFull` bridge + Velocyto hash run:
+    - `/storage/ucsf-velocyto-validation/full_gex_geneFull_bridge_velocyto_hash_t32_20260327_080206/`
+  - targeted `GeneFull` drift traces:
+    - `/storage/ucsf-velocyto-validation/geneFull_barcodewide_legacy_20260327_132834/`
+    - `/storage/ucsf-velocyto-validation/geneFull_barcodewide_bridge_20260327_133045/`
+- `/tmp/velocyto_bisect_runs/` (clean-build UCSF 100K Velocyto regression bisect and trace artifacts across upstream/current commits, including `velocyto_trace_{readinfo,count}.txt`)
+- `/tmp/ucsf_velocyto_cbub_smoke_*` (host-local UCSF 100K smoke for the shared `packedReadInfo` lifetime; validates non-zero Velocyto plus CB/UB tags in unsorted noY BAM; protected dataset, do not redistribute outputs)
+- `/tmp/ucsf_velocyto_cbub_stage_*` (host-local dry-run staging roots used by `tests/run_ucsf_velocyto_cbub_smoke.sh`; protected dataset, do not redistribute outputs)
 - `tests/flexfilter_parity_output_*/` (FlexFilter parity outputs vs production baseline)
 - `/tmp/*` (temporary scratch outputs)
+- `/tmp/star-scrna-sidecar-off-golden-*` (self-contained synthetic normal-scRNA index, FASTQs, and Solo outputs used to verify byte-identical sidecar-off GeneFull MEX parity)
+- `/mnt/pikachu/solo_bridge_determinism_*` (non-Flex Solo bridge determinism
+  harness outputs from `tests/run_solo_bridge_determinism_harness.sh`: paired
+  STAR runs, bridge-stage digest TSVs, optional per-CB digest TSVs, raw/filtered
+  GeneFull MEX outputs, logs, and comparison summaries)
+- `/tmp/star_suite_fastx_contract_star_smoke` (synthetic STAR Fastx input-contract smoke: tiny genome, FASTQ/FASTQ.gz/manifest runs, and Y/noY FASTQ gate logs)
+- `/tmp/star_suite_binseq_probe_smoke` (synthetic BINSEQ probe smoke: source FASTQ, CBQ generated by `bqtools`, `bqtools info`, decoded scratch, and normalized input-contract dumps)
+- `/tmp/star_suite_binseq_upstream_fixture_smoke` (network-fetched ARC BINSEQ fixture smoke: cloned `ArcInstitute/binseq` data files, `bqtools info --json`, and probe dumps from `data/subset.cbq`)
+- `/tmp/star_suite_cbq_cpp_reader_smoke` (synthetic native C++ CBQ reader smoke: source FASTQ, CBQ generated by `bqtools`, and normalized input-contract dumps for direct plus manifest reader paths)
+- `/tmp/star_suite_cbq_star_input_smoke` (synthetic STAR CBQ input smoke: tiny genome, paired/single-end source FASTQ, CBQ generated by `bqtools`, FASTQ-vs-CBQ direct/manifest/multisample/batch alignment outputs, level-0 CBQ alignment parity, SAM body parity dumps, and batch read-group checks)
+- `/tmp/star_suite_cbq_solo_e2e_smoke` (synthetic STARsolo CBQ E2E smoke: tiny genome/GTF, whitelist, FASTQ-vs-CBQ raw Gene MEX parity, level-0 CBQ parity, manifest CBQ parity, and forced indexed-CBQ range-mode parity)
+- `/tmp/star_suite_cbq_pf_adapter_smoke` (synthetic process_features CBQ adapter smoke: assignBarcodes baseline fixture, gzipped FASTQ reference run, CBQ in-memory record run, direct-PF CBQ range-counting run, direct indexed decode gates, and MEX/count parity outputs)
+- `/tmp/star_suite_cbq_pf_direct_pf_*` (process_features CBQ direct range-counting timing/parity roots: 100K and full-lane perturb CBQ runs, queue/direct outputs, canonical parity reports, and `/usr/bin/time -v` logs)
+- `/tmp/star_suite_cbq_chromap_adapter_smoke` (synthetic Chromap CBQ adapter smoke: paired-read and barcode CBQ inputs, materialized Chromap FASTQ contract files, payload parity dumps, and optional Chromap mapping output)
+- `/tmp/star_suite_libchromap_cbq_contract_smoke` (synthetic STAR libchromap CBQ contract smoke: generated ATAC FASTQ/CBQ inputs, Chromap index, FASTQ-vs-CBQ contract-runner fragments, and parity dumps)
+- `/tmp/star_suite_cbq_e2e_module_regression_*` (aggregate CBQ E2E/module regression wrapper logs for BINSEQ probe, native CBQ reader, STAR mapper, STARsolo, process_features, and Chromap adapter smokes)
+- `/tmp/star_suite_cbq_flex_tiny_public_smoke_*` (public 10x tiny FLEX FASTQ-vs-ordered-CBQ smoke: downloaded tiny fixtures, generated FLEX assets, filtered STAR index, encoded CBQ, FASTQ/CBQ STAR-Flex runs, and parity dumps)
+- `/tmp/star_suite_cbq_flex_100k_*` (host-local SC2300771 100K FLEX FASTQ-vs-CBQ runs: ordered lane CBQs, FASTQ and CBQ STAR-Flex outputs, count parity diffs, and order-normalized BAM-body parity dumps)
+- `/tmp/star_suite_cbq_flex_range_100k_*` (host-local SC2300771 800K FLEX no-genome FASTQ-vs-indexed-CBQ-range parity runs: ordered lane CBQs, count-only STAR-Flex outputs, range activation logs, and byte-level count-output parity)
+- `/tmp/star_flex_cbq_range_full_ssd_*` (host-local SC2300771 full-production FLEX no-genome indexed-CBQ-range benchmark outputs on SSD, including `BENCHMARK_TIME.txt`, STAR logs, raw Gene MEX, and filtered per-sample summaries)
+- `/mnt/pikachu/cbq_solo_ingestion_benchmark_*` (FASTQ-vs-native-CBQ STARsolo ingestion timing runs from `tests/run_cbq_solo_ingestion_benchmark.sh`; per-mode `BENCHMARK_SUMMARY.txt` files are the authoritative completion artifacts)
+- `/tmp/star_suite_production_module_regression_*` (manifest-driven production-module regression wrapper logs, per-case stdout/stderr, and preflight/run summaries)
+- `/mnt/pikachu/star-spatial/gex_sidecar_tests/20260722_ovarian_100k_v1/` (preserved first source-only Visium HD ovarian 3-prime 100K attempt; all computational stages completed, but the wrapper correctly withheld its completion marker because the initial validator did not skip the materializer summary metadata preamble)
+- `/mnt/pikachu/star-spatial/gex_sidecar_tests/20260722_ovarian_100k_v2/` (authoritative completed source-only Visium HD ovarian 3-prime 100K run for the modern post-rescue GeneFull sidecar, raw-R1 candidate join, candidate-specific `MultiGeneUMI_CR`, and 2/8/16-micrometer policy matrices; no historical run artifact was copied into it)
+- `/mnt/pikachu/star-spatial/gex_sidecar_tests/20260722_ovarian_100k_v2_space_ranger_sanity/` (read-only descriptive comparison of the completed source-only 100K policy matrices against the published full ovarian Space Ranger 4.0.1 raw binned H5 artifacts; never consumed as resolution evidence or a tuning target)
 - `/tmp/ucsf_cr_config_1m_smoke_*` (real UCSF perturb CR-config fixture smoke outputs)
 - `/tmp/ucsf_batch_cr_multifeature_tiny_*` (synthetic UCSF perturb multifeature CR-config tiny smoke outputs)
 - `/tmp/flex_cr_config_smoke_*` (Flex CR-config smoke outputs)
 - `/tmp/flex_cr_config_star_section_smoke_*` (Flex CR-config smoke outputs using `[star]` probe catalog/offset extensions)
+- `/tmp/flex_tiny_public_smoke_*` (public tiny Flex smoke outputs used by Docker/release Tier A validation)
+- `/tmp/msk_ed_instrumented_*` (MSK EmptyDrops backend-instrumentation reruns with per-barcode candidate and ambient debug tables)
+- `/tmp/msk_libscrna_ambientswap_*` (MSK libscrna tool-only ambient-swap experiments isolating legacy rank-window ambient vs current `SimpleED` ambient)
+- `/tmp/msk_ambient_policy_*` / `/tmp/msk_ambient_policy_recheck_*` (MSK tool-only ambient fallback policy sweeps: current `10%`, `2%`, and absolute-minimum guarded rank-window experiments)
+- `/tmp/msk_gex_multimap_*guarded*` (MSK GEX-only guarded EmptyDrops reruns used for bridge vs conventional, `Unique` vs `EM`, score-floor, and poly-G toggle audits)
+- `/storage/MSK-perturb-comparison/bench_cellgeni_msk_rerun_clean_20260403_225322/` (fresh `7a7fb08` CellGENI-style MSK GEX-only rerun; barcode-identical to archived `bench_cellgeni_msk_20260401_162259/` and used to reconfirm the `0.9975` CR9 Jaccard)
+- `/storage/MSK-perturb-comparison/paper_bench_emptydrops_guarded_*` (MSK full 3-library perturb reruns after the guarded ambient EmptyDrops fix, including the completeness rerun `paper_bench_emptydrops_guarded_redo_20260403_214718`)
+- `/tmp/msk_guarded*_compute_parity.tsv` (headline MSK parity summaries from fresh guarded reruns)
 - `/tmp/public_bulk_fixture_*` (public GEO bulk PE smoke fixtures downloaded via `scripts/download_public_bulk_fixture.sh`)
+- `/tmp/slam_pe_100k_smoke_*`, `/tmp/slam_min_callable_smoke_*`,
+  `/tmp/slam_parity_smoke_*`, and `/tmp/slam_cbq_divergence_harness_*`
+  (SLAM-seq paired-end 100K SE/PE smoke outputs, compare logs,
+  TranscriptVB/cB/GrandSLAM count surfaces, exact STAR-vs-dump-requant pre-NTR
+  parity, and staged SE/PE FASTQ-vs-CBQ divergence reports; reproduced by
+  `scripts/run_slam_100k_se_pe_smoke.sh`, `tests/run_slam_parity_smoke.sh`, and
+  `tests/run_slam_cbq_divergence_harness.sh`)
+- `tests/transcriptvb_chr22_parity_output_*/` (TranscriptVB chr22 same-BAM
+  Salmon parity smoke outputs from `tests/run_transcriptvb_chr22_parity_smoke.sh`;
+  contains STAR auto-detect TranscriptVB output, Salmon `-p 1` same-BAM output,
+  logs, and `summary.tsv`)
+- `tests/bamsort_samtools_byte_parity_output_*/` (synthetic SE/PE BAM-sort
+  parity outputs from `tests/run_bamsort_samtools_byte_parity.sh`; contains tiny
+  generated reference/FASTQs, STAR unsorted+sorted BAMs, samtools-sorted
+  comparator BAMs, logs, and `summary.tsv`; do not commit generated BAMs)
+- `benchmarks/nfcore_rnaseq_compare/fixtures/chr22/` (small cached public chr22
+  PE fixture used by the TranscriptVB Salmon-parity smoke)
+- `benchmarks/nfcore_rnaseq_compare/runs/chr22_20260626_003522/` (retained
+  local 2026-06-26 TranscriptVB parity artifact with diagnostic intermediates and
+  final comparison reports; do not commit generated BAMs or quant outputs)
+- `tests/pparg_vb_trace_20k_bamorder_*_20260627/` (TranscriptVB PPARG 20K
+  same-BAM-order Salmon parity diagnostics; contains STAR TranscriptVB output,
+  Salmon same-transcriptome-BAM output, trace TSVs, GC/effective-length dumps,
+  and run logs; do not commit generated BAMs or quant outputs)
+- `/storage/JAX_PE/results/pparg_vb_parity_full_mt_20260627_070754/`
+  (full PPARG no-Y internal TranscriptVB plus Salmon QC parity sanity rerun;
+  contains `parity_summary_normal_mt.tsv`, `parity_counts_normal_mt.tsv`,
+  `top_diffs_normal_mt.tsv`, STAR/Salmon logs, and generated BAM/quant outputs;
+  do not commit generated BAMs or quant outputs)
+- `/storage/JAX_PE/results/pparg_serial_full_mt_20260627_073956/`
+  (full PPARG lean serial comparator using Trim Galore, upstream STAR, and
+  Salmon; useful for timing context only, not an apples-to-apples replacement for
+  the paper wrapper benchmark)
+- `/storage/JAX_PE/results/pparg_prod_benchmark_no_y_20260627_172349/`
+  (full PPARG no-Y production-mode wrapper benchmark; integrated arm completed
+  with sorted BAM plus internal TranscriptVB in `8:54.52`, with no integrated
+  transcriptome BAM or Salmon QC; matched external control completed in
+  `16:09.61`, split as decompress `1:18.01`, trimvalidate `6:53.71`, STAR
+  TranscriptomeSAM `6:56.55`, and Salmon `1:01.34`)
+- `/storage/JAX_PE/results/pparg_yfastq_header_fix_100k_20260701/`
+  (PPARG 100K paired-end downsample used to validate byte-equivalent
+  decompressed Y/no-Y FASTQ output between integrated STAR-suite and the
+  external Trim Galore + awk/samtools/gzip path; contains failed intermediate
+  attempts and the passing `thread1_length_limited_fix/` and
+  `thread32_length_limited_fix/` runs; do not commit generated BAMs, FASTQs, or
+  quant outputs)
+- `/mnt/pikachu/SLAM-Seq-PE-results/prod_full_20260511T103908Z/` (active
+  2026-05 SLAM paired-end full-panel production root; protected local dataset,
+  Y/noY BAM/FASTQ derivatives are uploaded by Globus and cleaned locally, do
+  not redistribute outputs)
 - `/mnt/pikachu/ucsf-perturb-yremove*/samples/*/run/read_qc.trim_qc.{json,html}` (STAR read-level FastQC-like QC reports when UCSF perturb runners are launched with `--trim-qc`)
 - `/mnt/pikachu/ucsf-perturb-yremove_all_velocyto*/samples/*/qc/read_qc_r2.{json,html}` (standalone FASTQ replay QC reports on UCSF GEX R2 inputs, written into processed sample roots)
+- `/mnt/pikachu/ucsf-perturb-yremove_velocyto_cellbender_prod_globus_fixtruwl_20260330_225009/` (corrected UCSF production rerun with TRU Solo whitelist + NXT CR whitelist, remote CellBender watcher handoff, and 2026-03-31 adaptive downstream QC repair)
+  - STAR-only continuation log:
+    `/mnt/pikachu/ucsf-perturb-yremove_velocyto_cellbender_prod_globus_fixtruwl_20260330_225009/STAR_ONLY_RELAUNCH_FIX_20260331_072949.log`
+  - remote watcher log:
+    `/mnt/pikachu/ucsf-perturb-yremove_velocyto_cellbender_prod_globus_fixtruwl_20260330_225009/REMOTE_SCAN_RELAUNCH_FIX_20260331_072949.log`
+  - adaptive QC repair pilot:
+    `/mnt/pikachu/ucsf-perturb-yremove_velocyto_cellbender_prod_globus_fixtruwl_20260330_225009/samples/EBs1_1/downstream_genefull_velocyto_cellbender/adaptive_repair_20260331_085330.log`
+  - adaptive threshold artifact:
+    `/mnt/pikachu/ucsf-perturb-yremove_velocyto_cellbender_prod_globus_fixtruwl_20260330_225009/samples/EBs1_1/downstream_genefull_velocyto_cellbender/adaptive_qc_threshold.json`
 - `/storage/A375/` (external A375 datasets + smoke outputs; e.g. `star_gex_smoke/`, `star_multi_smoke_cpp/`, `fastqs/`, `outputs/`)
   - Downsampled MEX output: `/storage/A375/star_multi_smoke/assign/downsampled/`
   - NB-EM calls (A375 CRISPR-only MEX): `/storage/A375/nbem_a375_20260128_075248/`
@@ -113,6 +262,26 @@ update this file with its output location.
   - Call-only parity outputs:
     - `/storage/ucsf-2M/callonly_parity_masterclean_20260217_073728/`
     - `/storage/ucsf-2M/compat_gate_ucsf_callonly_20260218_014137/`
+- `/storage/100K/ucsf_solo_binary_spool_20260324/` (non-Flex Solo binary temp-spool experiment on pre-bridge base)
+  - Warm-cache legacy baseline on corrected UCSF `iPSC2_1/GEX` 2M fixture:
+    - `/storage/100K/ucsf_solo_binary_spool_20260324/iPSC2_1_GEX_2M_baseline_warm/`
+  - First legacy baseline run on same fixture:
+    - `/storage/100K/ucsf_solo_binary_spool_20260324/iPSC2_1_GEX_2M_baseline/`
+  - Experimental binary-spool run on same fixture:
+    - `/storage/100K/ucsf_solo_binary_spool_20260324/iPSC2_1_GEX_2M_binaryspool/`
+  - Experimental chunked in-memory binary-spool run on same fixture:
+    - `/storage/100K/ucsf_solo_binary_spool_20260324/iPSC2_1_GEX_2M_binaryspool_memory_chunked/`
+  - Hybrid RAM-first spill-cap validation:
+    - `/storage/100K/ucsf_solo_binary_spool_20260324/iPSC2_1_GEX_2M_binaryspool_memory_spill_v1/`
+      - `STAR_SOLO_BINARY_SPOOL_IN_MEMORY=1`
+      - `STAR_SOLO_BINARY_SPOOL_IN_MEMORY_LIMIT_MB=32`
+    - `/storage/100K/ucsf_solo_binary_spool_20260324/iPSC2_1_GEX_2M_binaryspool_memory_spill_1mb_v1/`
+      - forced-spill bug discovery run; exposed spill-boundary write bug
+    - `/storage/100K/ucsf_solo_binary_spool_20260324/iPSC2_1_GEX_2M_binaryspool_memory_spill_1mb_v3/`
+      - fixed forced-spill validation run; exact `Summary.csv` + raw MEX parity
+- `/storage/paper_bench_solo_binary_spool_20260324/` (full corrected UCSF binary-spool experiments)
+  - Full corrected UCSF `EBs2_2` chunked in-memory spool:
+    - `/storage/paper_bench_solo_binary_spool_20260324/ucsf_ebs2_2_chunkedmem/`
 - `/storage/ucsf-full/` (UCSF full-sample perturb runs)
   - Dynamic 32x32 benchmark run:
     - `/storage/ucsf-full/bench_20260218_dynamic_first/runs/star_full_dynamic_32x32_20260224_092512/`
@@ -125,13 +294,124 @@ update this file with its output location.
 - `/storage/flex_multilane_20K/SC2300771/` (multi-lane Flex smoke fixture: 8 lane pairs x 20K reads each = 160K PE reads total, seqtk seed=42, created by `tests/create_flex_multilane_20k_fixture.sh`)
 - `/storage/downsampled_100K/SC2300771/results/flex_h01_*` (Flex H0/H1 cache pilot artifacts, including synthetic cache builds, 100-probe parity runs, and full-probe cache/scan outputs)
 - `/storage/downsampled_100K/SC2300771/results/flex_hash_screen_internal_*` (internal Flex hash-screen 100K E2E runs, including the exact-parity full-16-whitelist run `flex_hash_screen_internal_full16_20260315_203745/`)
+- `/storage/100K/ucsf_solo_optimization_20260324/`
+  - Solo-only non-Flex UCSF GEX benchmark artifacts from
+    `tests/run_ucsf_solo_gex_100k_benchmark.sh`
+  - Current optimized benchmark root:
+    `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_100k_total/`
+  - 2M optimized benchmark root:
+    `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_total/`
+  - Matching baseline benchmark root:
+    `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_100k_total_baseline/`
+  - Matching 2M baseline benchmark root:
+    `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_total_baseline/`
+  - Same-binary 2M optimized guard run:
+    `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_samebin_opt/`
+  - Same-binary 2M legacy-guard run:
+    `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_samebin_legacy/`
+  - Same-binary 100k `soloMultiMappers=Unique` legacy control for experimental
+    non-Flex inline-hash bridge:
+    `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_100k_unique_legacy_v2/`
+  - Same-binary 100k experimental non-Flex inline-hash bridge run
+    (`STAR_SOLO_NONFLEX_HASH_BRIDGE=1`, `--soloInlineHashMode yes`):
+    `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_100k_unique_hashbridge_v4/`
+  - Refreshed same-binary 100k `soloMultiMappers=Unique` legacy control after
+    fixing stats aggregation and invalid-UMI rejection:
+    `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_100k_unique_legacy_v3/`
+  - Refreshed same-binary 100k experimental non-Flex inline-hash bridge run
+    after those two fixes:
+    `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_100k_unique_hashbridge_v6/`
+  - Legacy control used for problem-3 sidecar validation:
+    `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_100k_unique_legacy_v4/`
+  - Problem-3 sidecar validation run before CB key-space fix:
+    `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_100k_unique_hashbridge_v8/`
+  - Problem-3 sidecar validation run after CB key-space fix:
+    `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_100k_unique_hashbridge_v9/`
+  - Problem-4 ambiguous-CB bridge validation before raw-CB fix:
+    `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_100k_unique_hashbridge_v10/`
+  - Problem-4 ambiguous-CB bridge validation after raw-CB fix:
+    `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_100k_unique_hashbridge_v11/`
+  - Problem-4 follow-up validation after fixing 15-bit gene key aliasing in the
+    non-Flex bridge:
+    `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_100k_unique_hashbridge_v12/`
+  - Targeted trace run for the `73` bridge-only raw barcodes:
+    `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_100k_unique_hashbridge_trace73/`
+  - Matched 2M `soloMultiMappers=Unique` legacy control:
+    `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_legacy/`
+  - Matched 2M `soloMultiMappers=Unique` unified non-Flex bridge run:
+    `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_hashbridge/`
+  - Failed debug iterations while bringing up the experimental bridge:
+    - `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_100k_unique_hashbridge_v2/`
+    - `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_100k_unique_hashbridge_v3/`
+- `/storage/MSK-perturb-comparison/paper_artifacts/`
+  - MSK 30-KO 30-guide gRNA parity paper artifacts:
+    - `/storage/MSK-perturb-comparison/paper_artifacts/msk_grna_parity_30guide_20260306/`
+    - contents:
+      - `guide_counts/guide_stage_summary.tsv`
+      - `guide_counts/guide_per_feature_filtered.tsv`
+      - `guide_counts/guide_parity_summary.json`
+      - `call_concordance/call_concordance_summary.json`
+      - `call_concordance/call_pair_counts.tsv`
+      - `call_concordance/call_mismatch_rows.tsv`
+  - MSK residual GEX watchlist molecule provenance:
+    - `/storage/MSK-perturb-comparison/paper_artifacts/msk_cr_molecule_provenance_20260307/`
+    - contents:
+      - `cr_molecule_provenance_watchlist.json`
+      - `README.txt`
 
 ## Flex Full-Scale Benchmark Artifacts
 
 - `/storage/flex_lanesteal_full_20260323_204028/` — Flex lane-steal full 2.011B run: 32 threads, 8 lanes, mapping 24m35s + Solo 1m58s
+- `/storage/flex_fullalign_2024ref_20260325_020044/` — refreshed full aligned Flex benchmark on GRCh38-2024-A: wall 23m30s, mapping complete 20m55s, Solo counting 2m07s
+  - archived filtered per-sample MEX: `/storage/flex_fullalign_2024ref_20260325_020044/per_sample_filtered/`
+  - parity TSV/log bundle vs CR9/CR7: `/storage/flex_fullalign_2024ref_20260325_020044/flex_parity_cr9/`
+- `/storage/flex_fullalign_2024ref_emptydrops_clean_20260404_010557/` — fresh full aligned Flex benchmark after EmptyDrops changes and clean rebuild, but run with the full 16-tag allowlist by mistake: wall 23m49s, final cells 52,461
+  - filtered per-sample MEX: `/storage/flex_fullalign_2024ref_emptydrops_clean_20260404_010557/per_sample_filtered/`
+  - parity TSV/log bundle vs CR9/CR7: `/storage/flex_fullalign_2024ref_emptydrops_clean_20260404_010557/flex_parity_cr9/`
+  - CR9 means: barcode Jaccard `0.981379`, cell Pearson `0.999974`, gene Pearson `0.999929`
+- `/storage/flex_fullalign_2024ref_emptydrops_4tags_20260404_030310/` — canonical fresh full aligned Flex benchmark after EmptyDrops changes on the 4-tag README/CR9 parity surface (`BC004/BC006/BC007/BC008`): wall 23m22s, final cells 20,316
+  - filtered per-sample MEX: `/storage/flex_fullalign_2024ref_emptydrops_4tags_20260404_030310/per_sample_filtered/`
+  - parity TSV/log bundle vs CR9/CR7: `/storage/flex_fullalign_2024ref_emptydrops_4tags_20260404_030310/flex_parity_cr9/`
+  - CR9 means: barcode Jaccard `0.981379`, cell Pearson `0.999974`, gene Pearson `0.999929`
+- `/storage/flex_noalign_full_20260325_022459/` — refreshed no-align Flex benchmark on GRCh38-2024-A: wall 10m41s, mapping complete 8m34s, Solo counting 1m45s
+  - archived filtered per-sample MEX: `/storage/flex_noalign_full_20260325_022459/per_sample_filtered/`
+  - parity TSV/log bundle vs CR9/CR7: `/storage/flex_noalign_full_20260325_022459/flex_parity_cr9/`
+- `/storage/flex_noalign_full_emptydrops_clean_20260404_013103/` — fresh no-align Flex benchmark after EmptyDrops changes and clean rebuild, but run with the full 16-tag allowlist by mistake: wall 10m33s, final cells 52,461
+  - filtered per-sample MEX: `/storage/flex_noalign_full_emptydrops_clean_20260404_013103/per_sample_filtered/`
+  - parity TSV/log bundle vs CR9/CR7: `/storage/flex_noalign_full_emptydrops_clean_20260404_013103/flex_parity_cr9/`
+  - CR9 means: barcode Jaccard `0.981387`, cell Pearson `0.999974`, gene Pearson `0.999929`
+- `/storage/flex_noalign_2024ref_emptydrops_4tags_20260404_032741/` — canonical fresh no-align Flex benchmark after EmptyDrops changes on the 4-tag README/CR9 parity surface (`BC004/BC006/BC007/BC008`): wall 10m33s, final cells 20,316
+  - filtered per-sample MEX: `/storage/flex_noalign_2024ref_emptydrops_4tags_20260404_032741/per_sample_filtered/`
+  - parity TSV/log bundle vs CR9/CR7: `/storage/flex_noalign_2024ref_emptydrops_4tags_20260404_032741/flex_parity_cr9/`
+  - CR9 means: barcode Jaccard `0.981387`, cell Pearson `0.999974`, gene Pearson `0.999929`
+- `/tmp/star_flex_fastq_full_ssd_internalgzip_20260531T180321Z/` — current topline Flex count-only no-genome FASTQ.gz benchmark on SSD, using STAR internal gzip (no `--readFilesCommand zcat`): wall `10:17.97`, mapping complete `8:13`, max RSS `44,071,412 KB`, mapping speed `12,107.14M reads/hour`
+  - byte-identical count outputs vs whole-lane CBQ no-genome for `Solo.out/Gene`, `Solo.out/Barcodes.stats`, and `per_sample_filtered`
+- `/tmp/star_flex_cbq_range_full_ssd_20260531T111048Z/` — current topline Flex count-only no-genome CBQ benchmark on the full SC2300771 2.011B-read sample, using SSD-staged level-0 CBQs and indexed CBQ range readers: wall `7:22.46`, mapping complete `3:50`, Solo counting `3:12`, max RSS `47,982,080 KB`, mapping speed `17,156.56M reads/hour`
+  - range planner log: `39 ranges across 8 lanes and 2011130186 records`
+  - counters: `triageKeep=1681459858`, `triageDeny=16111757`, `triageMiss=313558571`
+  - old whole-lane CBQ no-genome comparison: `8:38.52`, `43,378,292 KB`, `14,538.29M reads/hour`
+- **FLEX no-align inline-hash snapshot harness (optimized collapse binary, 2026-03-26):** `tests/run_flex_snapshot_noalign_full.sh` on the full `/storage` Flex sample, internal gzip only. Logs show the khash accumulate + per-bucket gene sort path and `Collapse timing: accumulate=… bucket_build=… bucket_sort=…` (not the pre-optimization `extract/sort/group` lines). Snapshot **`/storage/flex_snapshot_noalign_opt_20260326/count_v1/flex_snapshot.bin`** (~**3.4 GiB**, **224,941,678** flex hash entries).
+  - Count-mode replay (`FLEX_SNAPSHOT_COMPARE=count`): **`/storage/flex_snapshot_noalign_opt_20260326/count_v1/`** — count-surface validation in `compare.log`; replay skips mapping and stops after `countCBgeneUMI`. Seed wall ~**10:49**, max RSS ~**84.8M kB**; replay wall ~**1:47**, max RSS ~**38.4M kB**.
+  - Full parity replay (`FLEX_SNAPSHOT_COMPARE=full`): **`/storage/flex_snapshot_noalign_opt_20260326/full_v1/`** — strict `diff` on `per_sample` (raw+filtered) and `Solo.out` OK; same snapshot size/entry count as count run. Seed/replay wall and RSS within a few seconds of the count run.
+  - Pre-optimization recorded reruns (still show `Collapse timing: extract=… sort=… group=…`): **`/storage/flex_snapshot_noalign_20260325_rerun_count_v1/`**, **`/storage/flex_snapshot_noalign_20260325_rerun_full_v1/`**.
+- **FLEX no-align snapshot harness (CSR collapse, 2026-03-26):** CB-first CSR design replaces the khash triplet accumulator. Logs show `Grouping hash entries by CB (CSR scatter + per-CB local dedup)...` and `Collapse timing: cb_count=… scatter=… sort=… scan=… total=…`. Collapse total **5.5 s** (was 22.4 s with khash accumulator, was 17.2 s with old extract/sort/group). Solo `collapseUMIall_fromHash` **55 s** (was 72 s). Replay wall **1:30** (was 1:47).
+  - Count mode: **`/storage/flex_snapshot_noalign_csr_20260326/count_v1/`** — seed wall **10:32**, replay **1:30**, RSS unchanged (~84.8M / 38.4M kB). Snapshot 224,941,678 entries, 3.6 GiB.
+  - Full parity: **`/storage/flex_snapshot_noalign_csr_20260326/full_v1/`** — `per_sample` + `Solo.out` strict diff OK. Same timings as count run.
+- **FLEX no-align snapshot harness (CSR direct-emit, 2026-03-26):** Eliminates the `unordered_map` regroup, `cbTagKeys` sort, and final `triplets` sort from `buildInlineMatrixFromHash`. The CSR scan now emits composite barcodes, triplets, and `SampleMatrixData` directly into `InlineMatrixBundle` during Phase 4. `buildInlineMatrixFromHash` removed as dead code. Collapse total **5.9 s** (unchanged from CSR v1). Solo `collapseUMIall_fromHash` **49.6 s** (was 52.6 s in CSR v1). Full parity validated.
+  - Full parity: **`/storage/flex_snapshot_noalign_csr_20260326/full_v2/`** — `per_sample` + `Solo.out` strict diff OK. 1,835,323 composite barcodes, 98,890,928 triplets, 18,129 genes.
+- **FLEX no-align snapshot harness (cleanup + fused counting, 2026-03-26):** Dead code removal (`buildInlineMatrixFromHash`), fused pre-dedup counting into Phase 1 CB counting (eliminates redundant 224M-entry hash scan), 1 MiB setvbuf for MexWriter, zero-copy barcode passthrough. Solo `collapseUMIall_fromHash` **47.6 s** (was 49.6 s). `processRecords` **50.2 s** (was 52.2 s). Full parity validated.
+  - Full parity: **`/storage/flex_snapshot_noalign_csr_20260326/full_v3/`** — `per_sample` + `Solo.out` strict diff OK.
 - `/mnt/pikachu/benchmark_cr9_flex_full/` — CellRanger 9.0.1 Flex reference: SC2300771 full 2.011B reads, 32 cores, 59 min, March 19 2026
 - `/home/lhhung/cellranger-multi/` — CellRanger 7.0.0 Flex reference: SC2300771 full, 32 cores, ~5 hr, Dec 2023
 - `comparisons/flex_parity_20260323_215847/` — Flex parity TSVs: STAR vs CR9 and CR7, generated by `scripts/paper/run_flex_parity.sh`
+- `/mnt/pikachu/compare_flex/figures_20260330_sc2300771_compare/` — local Flex Leiden/UMAP comparison bundle for SC2300771: independent pipeline runs, joint-pair UMAPs, gene correlations, and CR9-reference projections
+  - source projection outputs: `/mnt/pikachu/compare_flex/figures_20260330_sc2300771_compare/cr9_reference_projection_20260330/`
+  - tracked README figures copied to `docs/images/flex_parity/`
+- `tests/remote_ucsf_downstream_100k_smoke_*.log` — local orchestrator logs for `tests/run_remote_ucsf_downstream_100k_smoke.sh`
+  - per-run outputs are copied back under the sample root, e.g. `tests/ucsf_corrected_production_100k_output_20260329_171919/samples/EBs2_2/downstream_remote_100k_smoke_<timestamp>/`
+- `tests/remote_cellbender_100k_smoke_*.log` — local orchestrator logs for `tests/run_remote_cellbender_100k_smoke.sh`
+  - per-run copied-downstream smoke roots live under `tests/remote_cellbender_100k_smoke_<timestamp>/`
+  - expected outputs include `cellbender/cellbender_counts.h5` on success or `cellbender/CELLBENDER_FAILED.txt` on sparse 100K fallback, plus regenerated `final_counts.h5ad`
 
 ## Flex Modular Integration Baselines
 
@@ -399,11 +679,263 @@ These scripts validate that default bundles work with minimal explicit parameter
 - Full patched 30-thread H0/H1/H2 rerun:
   - `/tmp/h2_full_rerun_20260320/`
 - Status: untracked
-- `/storage/flex_lanesteal_full_20260323_204028/` (Flex lane-steal full 2.011B run: 32 threads, 8 lanes, mapping 24m35s + Solo 1m58s)
-- `/storage/flex_lanesteal_full_20260323_204028/` (Flex lane-steal full 2.011B run: 32 threads, 8 lanes, mapping 24m35s + Solo 1m58s)
-- `/mnt/pikachu/benchmark_cr9_flex_full/` (CellRanger 9.0.1 Flex reference: SC2300771 full 2.011B reads, 32 cores, 59 min, March 19 2026)
-- `/home/lhhung/cellranger-multi/` (CellRanger 7.0.0 Flex reference: SC2300771 full, 32 cores, ~5 hr, Dec 2023)
-- `comparisons/flex_parity_20260323_215847/` (Flex parity TSVs: STAR vs CR9 and CR7, generated by `scripts/paper/run_flex_parity.sh`)
-- `/mnt/pikachu/benchmark_cr9_flex_full/` (CellRanger 9.0.1 Flex reference: SC2300771 full 2.011B reads, 32 cores, 59 min, March 19 2026)
-- `/home/lhhung/cellranger-multi/` (CellRanger 7.0.0 Flex reference: SC2300771 full, 32 cores, ~5 hr, Dec 2023)
-- `comparisons/flex_parity_20260323_215847/` (Flex parity TSVs: STAR vs CR9 and CR7, generated by `scripts/paper/run_flex_parity.sh`)
+
+## Solo Full UCSF EBs2_2 Benchmark A/B (2026-03-24)
+
+- Full baseline on corrected `EBs2_2` README harness:
+  - `/storage/paper_bench_solo_full_20260324/ucsf_ebs2_2_standard_baseline/`
+- First full optimized non-Flex bridge attempt:
+  - `/storage/paper_bench_solo_full_20260324/ucsf_ebs2_2_standard_solohash_optimized/`
+  - failed with bridge packed-gene overflow at `>32768` genes
+- Second full optimized non-Flex bridge attempt after 16-bit/tagless bridge-key patch:
+  - `/storage/paper_bench_solo_full_20260324/ucsf_ebs2_2_standard_solohash_optimized_v2/`
+  - passed the packed-gene overflow, then was killed with exit `137` during Solo finalize
+- Third attempt (direct hash collapse, no `materializeRGUFromHash`; code 2026-03-24):
+  - `/storage/paper_bench_solo_full_20260324/ucsf_ebs2_2_standard_solohash_optimized_v3/`
+  - entered direct bridge collapse, then was killed with exit `137`
+- Fourth attempt after fix 5 (drain thread-local bridge hashes directly):
+  - `/storage/paper_bench_solo_full_20260324/ucsf_ebs2_2_standard_solohash_optimized_v4/`
+  - completed successfully; no OOM
+- Current-branch full baseline rerun:
+  - `/storage/paper_bench_solo_full_20260324/ucsf_ebs2_2_standard_baseline_mastermerge_v2/`
+  - completed successfully; `Summary.csv` matches the archived baseline
+- Notes:
+  - baseline completed in `19:46.33`, peak RSS `72504156 kB`
+  - optimized v2 reached peak RSS `127126724 kB` before kill (materialize + legacy collapse OOM)
+  - optimized v3 reached peak RSS `127682252 kB` before kill (direct bridge collapse OOM)
+  - optimized v4 completed in `22:38.81`, peak RSS `70575848 kB`
+  - baseline mastermerge v2 completed in `19:48.45`, peak RSS `68149756 kB`
+  - see `docs/HANDOFF_SOLO_OPTIMIZATION_20260324.md`
+
+## Solo 2M Direct Bridge Memory Validation (2026-03-24)
+
+- Fresh 2M resample on direct bridge path:
+  - `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_hashbridge_direct_v3/`
+- Exact same-FASTQ rerun on direct bridge path:
+  - `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_hashbridge_direct_samefastq_v1/`
+- Same-FASTQ rerun after memory fixes 1-4:
+  - `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_hashbridge_direct_samefastq_v2/`
+- Same-FASTQ rerun after deferred-accounting bug fix:
+  - `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_hashbridge_direct_samefastq_v3/`
+- Same-FASTQ rerun after fix 5 (thread-local bridge-hash drain):
+  - `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_hashbridge_direct_samefastq_v4/`
+- Post-spool-merge direct-hash `Unique` rerun on the bridge branch:
+  - `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_hashbridge_direct_postmerge_v1/`
+- Post-spool-merge direct-hash `Unique` after sumThreads ambiguous resolve + deferred finalize (v2 architecture):
+  - intended long-term path: `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_hashbridge_direct_postmerge_v2/`
+  - agent validation mirror (same FASTQs / command): `/tmp/iPSC2_1_GEX_2M_unique_hashbridge_direct_postmerge_v2/` (2026-03-24)
+- Post-spool-merge direct-hash `Unique` with **CB-sharded** bridge collapse (no global `recs`):
+  - intended path: `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_hashbridge_direct_postmerge_v3/`
+  - agent validation mirror: `/tmp/iPSC2_1_GEX_2M_unique_hashbridge_direct_postmerge_v3/` (2026-03-24)
+- Post-spool-merge direct-hash `Unique` with **CB-sharded grouped khashes** (no full `BridgeHashRec` staging layer):
+  - intended path: `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_hashbridge_direct_postmerge_v4/`
+  - agent validation mirror: `/tmp/iPSC2_1_GEX_2M_unique_hashbridge_direct_postmerge_v4/` (2026-03-24)
+- Post-spool-merge direct-hash `Unique` **v5** (grouped khash → flat per-shard `vector` + multi-pointer merge; no `unordered_map<wlCb, vector<...>>` rebuild):
+  - `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_hashbridge_direct_postmerge_v5/`
+  - agent mirror: `/tmp/iPSC2_1_GEX_2M_unique_hashbridge_direct_postmerge_v5/` (2026-03-24)
+- Post-spool-merge direct-hash `Unique` **v6** (scratch/parity investigation on MultiGene aggregation; collapse logic aligned with v5 — see `docs/HANDOFF_SOLO_OPTIMIZATION_20260324.md`, subsection "Direct bridge v6 scratch / parity notes"):
+  - `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_hashbridge_direct_postmerge_v6/`
+- Post-spool-merge direct-hash `Unique` **v7a** (khash retained + per-shard sorted `khiter_t` index; no full-shard `vector<ShardRow>` — see `docs/HANDOFF_SOLO_OPTIMIZATION_20260324.md`, subsection "Direct bridge v7a"):
+  - `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_hashbridge_direct_postmerge_v7a/`
+- Post-spool-merge direct-hash `Unique` **v8** (insert-time packed slots + `CB→slot ids`; global tuple merge; no shard khash / sorted `khiter_t` — see `docs/HANDOFF_SOLO_OPTIMIZATION_20260324.md`, subsection "Direct bridge v8"):
+  - `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_hashbridge_direct_postmerge_v8/`
+- Post-spool-merge direct-hash `Unique` **v9** (v8 minus unused insert-time CB slot list; `unordered_map` wl→slot ids for observed CBs only — see `docs/HANDOFF_SOLO_OPTIMIZATION_20260324.md`, subsection "Direct bridge v9"):
+  - `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_hashbridge_direct_postmerge_v9/`
+- Post-spool-merge direct-hash `Unique` **v10** (v9 + flat per-CB MultiGeneUMI_CR aggregates in `collapseOneBarcodeRows`; no nested umi→gene maps — see `docs/HANDOFF_SOLO_OPTIMIZATION_20260324.md`, subsection "Direct bridge v10"):
+  - `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_hashbridge_direct_postmerge_v10/`
+- Clean paired validation roots for the v9 vs v10 MultiGene hot-path question (same 2M FASTQs; clean rebuilds from the same commit; use these instead of the stored standalone v9/v10 roots for strict parity claims):
+  - v9 paired control:
+    `/storage/100K/ucsf_solo_optimization_20260324/validation_pair_20260324/iPSC2_1_GEX_2M_unique_hashbridge_direct_paired_v9/`
+  - v10 paired candidate:
+    `/storage/100K/ucsf_solo_optimization_20260324/validation_pair_20260324/iPSC2_1_GEX_2M_unique_hashbridge_direct_paired_v10/`
+- Same-binary ambiguity-fix determinism check after aggregated CB-quality evidence was introduced:
+  - `/tmp/iPSC2_1_GEX_2M_aggqual_check_run1/`
+  - `/tmp/iPSC2_1_GEX_2M_aggqual_check_run2/`
+- Post-spool-merge legacy `Unique` control on the same branch / same FASTQs:
+  - `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_legacy_postmerge_v1/`
+- Current-branch legacy control on the same FASTQs:
+  - `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_legacy_mastermerge_v1/`
+- Older pre-direct bridge 2M run for historical comparison:
+  - `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_2M_unique_hashbridge/`
+- Notes:
+  - same-FASTQ direct peak RSS: `40395468 kB`
+  - same-FASTQ direct after memory fixes 1-4 peak RSS: `40213304 kB`
+  - same-FASTQ direct after deferred-accounting bug fix peak RSS: `40213020 kB`
+  - same-FASTQ direct after fix 5 peak RSS: `40214224 kB`
+  - current-branch legacy peak RSS: `40193584 kB`
+  - older pre-direct bridge peak RSS: `44360304 kB`
+
+## Solo non-Flex bridge v10 tuple redesign (2026-03-25)
+
+- Implemented on clean base `735ed6e` in isolated worktree: exact hash uses global `(wlCb, umi24, gene16)` keys; ambiguous side uses `bridgeAmbigUmiGene_` aggregates; per-key aggregated ambiguous read accounting (gene U/M counts, readInfo counts, sample read-flag templates, `bridgeAmbigPinCandQuals_`); readInfo-only ambiguous CBs use `bridgeAmbigReadInfoOrphan_` (merged on first gene, pin-only epilogue at resolve — same lifecycle as legacy `bridgePinOrphans_`); no `bridgeAmbigPinFlat_` / per-read pin replay vectors; representative best `cbQual`; `CbBayesianResolver` skips the UMI term when the histogram is empty.
+- 2M UCSF GEX check (same FASTQs and STAR CLI as `validation_pair_20260324/iPSC2_1_GEX_2M_unique_hashbridge_direct_paired_v9`, `STAR_SOLO_NONFLEX_HASH_BRIDGE=1`, fresh `--outTmpDir`):
+  - `/tmp/v10_redesign_2m_parity3/` (local scratch; untracked)
+- Observed vs paired v9 control: `pending=20003` (match v9); `added_to_hash=12902` (match v9); `resolved=10398` vs v9 `10412` (−14); `Summary.csv` still differs slightly (e.g. 7225 vs 7226 cells, ~46 unique reads in cells) and raw/filtered matrices + filtered barcodes are not byte-identical — expect residual drift from key-level pin aggregation and from attributing ambiguous read counts to the Bayes-resolved CB when resolution succeeds (legacy per-read path used the pin winner only). `/usr/bin/time -v` max RSS ~38.3 GiB for this 2M run.
+
+## Full UCSF EBs2_2 GEX bridge tuple redesign (2026-03-25)
+
+- Corrected full-sample **EBs2_2** GEX lanes only in `readFilesIn`; same CLI family as `paper_bench_solo_full_20260324/ucsf_ebs2_2_standard_solohash_optimized_v4` (Solo + `pfMultiConfig` + CR-assign flags); `STAR_SOLO_NONFLEX_HASH_BRIDGE=1`, `--soloInlineHashMode yes`, 32 threads, worktree binary.
+- Artifact root: `/storage/100K/ucsf_solo_bridge_redesign_20260325/ucsf_ebs2_2_gexonly_bridge_redesign_v1/` (`RUN_COMMAND.sh`, `time.txt`, `BENCHMARK_SUMMARY.txt`).
+- `/usr/bin/time -v`: wall **20:07.92**, max RSS **70985716 kB**; mapping log **531 s** (10:19:27 → 10:28:18); `collapseUMIall_fromBridgeHash` **277.749 s**, `countCBgeneUMI` **279.954 s**, `processRecords` **505.697 s**.
+- Compare: direct bridge v4 wall **22:38.81** / RSS **70575848 kB** / mapping log **678 s**; baseline mastermerge v2 wall **19:48.45** / RSS **68149756 kB** (see `docs/HANDOFF_SOLO_OPTIMIZATION_20260324.md`).
+
+## Full UCSF EBs2_2 GEX bridge — CSR grouped collapse (2026-03-25)
+
+- Worktree binary; same CLI family as `ucsf_ebs2_2_gexonly_bridge_redesign_v1`; no global tuple sort; per-CB `(gene, umi)` sort; nested MultiGene maps still present before flat rewrite.
+- Artifact: `/storage/100K/ucsf_solo_bridge_redesign_20260325/ucsf_ebs2_2_gexonly_csr_groupedcollapse_20260325_v2/`
+- `collapseUMIall_fromBridgeHash` ~**208 s**, `processRecords` ~**439 s**, wall ~**19:07**, max RSS ~**70233136 kB**.
+
+## Full UCSF EBs2_2 GEX bridge — flat MultiGene collapse (2026-03-25)
+
+- Worktree `/tmp/star-suite-v10-redesign-20260325`; replaces nested `umiGeneMapCount` / `umiGeneMapCount0` / per-gene `umiCorrected` in `SoloFeature_collapseUMI_fromBridgeHash.cpp` with per-CB `MgRow` buffer + sort-by-corrected-UMI resolution; `countCellGeneUMI` sized with upper bound `totalHashSize * countMatStride`; fused `nReadPerCB` / `nCbGeneSeg` into main CB loop.
+- Artifact: `/storage/100K/ucsf_solo_bridge_redesign_20260325/ucsf_ebs2_2_gexonly_flat_multigene_20260325/`
+- `/usr/bin/time -v`: wall **16:22.00**, max RSS **70368812 kB**; `collapseUMIall_fromBridgeHash` **48.125 s**, `countCBgeneUMI` **50.112 s**, `processRecords` **277.645 s**; `Summary.csv` top lines align with CSR v2 within small threading/cell-call drift (e.g. **13721** vs **13724** estimated cells).
+
+## UCSF 2M — flat MultiGene bridge check (2026-03-25)
+
+- Fresh tmp root: `/tmp/v10_flat_mg_2m_20260325/` — wall **~93 s**, max RSS **~40197056 kB**; `collapseUMIall_fromBridgeHash` **~0.11 s**; `STAR_SOLO_NONFLEX_HASH_BRIDGE=1`, same FASTQ/CLI family as `iPSC2_1_GEX_2M_unique_hashbridge_direct_samefastq_v4`.
+
+## Non-Flex bridge hash snapshot harness (2026-03-25)
+
+- **Snapshot-out:** `STAR_SOLO_BRIDGE_HASH_SNAPSHOT_OUT=/abs/path.bin` on a normal direct-bridge run; written at entry to `collapseUMIall_fromBridgeHash()` (after resolve + clique correction). Log line: `STAR_SOLO_BRIDGE_HASH_SNAPSHOT_OUT wrote N bridge hash entries`.
+- **Replay:** `STAR_SOLO_BRIDGE_HASH_SNAPSHOT_IN` + **`STAR_SOLO_BRIDGE_HASH_SNAPSHOT_REPLAY_SKIP_READS=1`** (required); entire `mapThreadsSpawn()` is skipped (no FASTQ decompression, no read loading, no thread pool for mapping); `closeReadsFiles()` kills decompression processes immediately; loads hash + bridge read-accounting fields; runs the same collapse and downstream Solo output. Do not combine `_IN` and `_OUT` in one process.
+- **Format (v2):** magic `STARBG2\0`, `version=2`, `featureType`, `cbWLsize`, `runThreadN`, `statsReadN`, `totalHashEntries`, immediate/pin/flag metadata counts. Hash sections: `uint64 n` then `n` packed 16-byte `(uint64 key, uint32 val, uint32 pad)` rows written/read as bulk blocks; `kh_resize` pre-sizes hash on load. Remaining sections (immediate counts, pin vectors, flagCounts, stats, cbReadCount) also use bulk read/write. Little-endian; incompatible magic/version/dimension exits with error.
+- **Smoke (250k PE reads, 4 threads, worktree binary):** snapshot `/tmp/bg_snap_test.bin` (~42 MiB for 312 hash rows in this downsample); seed `/tmp/bg_snap_smoke_seed/`, replay `/tmp/bg_snap_smoke_replay/`. `collapseUMIall_fromBridgeHash` **~0.001 s** on replay vs **~0.095 s** seed; `processRecords` **~0.17 s** both; `Summary.csv` matches seed on GeneFull / saturation / cell lines; differs on mapping- and Q30-derived rows (expected when mapping is skipped).
+- **Full-sample EBs2_2 v1 seed/replay (done 2026-03-25):** same CLI family as `ucsf_ebs2_2_gexonly_flat_multigene_20260325`; snapshot **`…/ucsf_ebs2_2_flatmg_snapshot_v1.bin`** (~**4.9 GiB**, **323,956,844** hash rows, format `STARBG1`). Seed wall ~**17:05**, replay wall ~**13:37** (mapping overhead ~350 s, snapshot load ~28 s); **raw/filtered `matrix.mtx` byte-identical**.
+- **v2 format + mapping skip (done 2026-03-25):** format `STARBG2` — bulk I/O (block read/write per hash section), `kh_resize` pre-sizing, no sort-on-write. Replay short-circuit moved from `mapChunk()` to `STAR.cpp` (`mapThreadsSpawn()` skipped entirely; `closeReadsFiles()` called immediately). Snapshot **`/storage/100K/ucsf_solo_bridge_snapshot_20260325/ucsf_ebs2_2_flatmg_snapshot_v2.bin`** (~**4.9 GiB**, **323,954,266** hash rows). Seed: `…/ucsf_ebs2_2_flatmg_snapshot_seed_v1/` (wall **16:27**, RSS **70294 MB**). Replay: `…/ucsf_ebs2_2_flatmg_snapshot_replay_v1/` (wall **7:56**, RSS **48627 MB**; snapshot load **4.9 s**; collapse **71 s**). **raw/filtered `matrix.mtx` byte-identical**. Summary: GeneFull/cells/UMI/saturation all identical; Q30/genome mapping `-nan`/0 on replay (expected, mapping skipped entirely).
+- **v2 vs v1 replay improvement:** wall **7:56 vs 13:37** (−42%); snapshot load **4.9 s vs 28 s** (−83%); mapping overhead **0 s vs 350 s** (−100%); RSS **49 GB vs 68 GB** (−28%).
+- **Shell hygiene:** seed `RUN_COMMAND.sh` unsets `STAR_SOLO_BRIDGE_HASH_SNAPSHOT_IN` / `_REPLAY_SKIP_READS`; replay unsets `_OUT`.
+
+## Solo Binary Spool UCSF 2M Benchmarks (2026-03-24)
+
+- Corrected UCSF `iPSC2_1/GEX` 2M downsample, `--soloMultiMappers Rescue --soloCrMultimapRescue yes`
+- Binary spool worktree baseline runs:
+  - `/storage/100K/ucsf_solo_binary_spool_20260324/iPSC2_1_GEX_2M_baseline/`
+  - `/storage/100K/ucsf_solo_binary_spool_20260324/iPSC2_1_GEX_2M_baseline_warm/`
+- Binary spool on-disk run:
+  - `/storage/100K/ucsf_solo_binary_spool_20260324/iPSC2_1_GEX_2M_binaryspool/`
+- Experimental in-memory binary spool run:
+  - `/storage/100K/ucsf_solo_optimization_20260324/iPSC2_1_GEX_100k_total/`
+  - Note: current wrapper script ignored the custom output root and reused the above STAR output path.
+- Experimental chunked in-memory binary spool run:
+  - `/storage/100K/ucsf_solo_binary_spool_20260324/iPSC2_1_GEX_2M_binaryspool_memory_chunked/`
+- Hybrid RAM-first spill-cap validation:
+  - `/storage/100K/ucsf_solo_binary_spool_20260324/iPSC2_1_GEX_2M_binaryspool_memory_spill_v1/`
+    - `STAR_SOLO_BINARY_SPOOL_IN_MEMORY=1`
+    - `STAR_SOLO_BINARY_SPOOL_IN_MEMORY_LIMIT_MB=32`
+  - `/storage/100K/ucsf_solo_binary_spool_20260324/iPSC2_1_GEX_2M_binaryspool_memory_spill_1mb_v1/`
+    - forced-spill bug discovery run; exposed spill-boundary write bug
+  - `/storage/100K/ucsf_solo_binary_spool_20260324/iPSC2_1_GEX_2M_binaryspool_memory_spill_1mb_v3/`
+    - fixed forced-spill validation run; exact `Summary.csv` + raw MEX parity
+- Full corrected UCSF `EBs2_2` chunked in-memory spool benchmark:
+  - `/storage/paper_bench_solo_binary_spool_20260324/ucsf_ebs2_2_chunkedmem/`
+- Status: untracked
+
+## Solo overnight UCSF GEX-only no-BAM (`run_ucsf_gexonly_no_bam_benchmark.sh`) (2026-03-26)
+
+- Root: `/storage/solo_overnight_20260326/ucsf_gexonly_no_bam/`
+- **Completed — historical vanilla (`7a7fb08`):**
+  - `/storage/solo_overnight_20260326/ucsf_gexonly_no_bam/star_vanilla_7a7fb08_retry2/`
+  - Binary: `/tmp/star-7a7f-hist-retry/core/legacy/source/STAR` (commit `7a7fb08865edb8aa69285a3a0bc6e14c51feeb45`)
+  - `BENCHMARK_SUMMARY.txt`: 32 threads, **13872** filtered cells, wall **1435 s** (~23.9 min), `read_decompress=zcat`
+  - `/usr/bin/time -v`: max RSS **~66309 MiB** (~64.7 GiB), exit **0**; `nohup_time.log` shows mapping finished → Solo counting finished → `finished successfully`
+  - Do **not** rerun; wrapper + STAR completed successfully (see `AGENTS.md` **Benchmark Hygiene** for completion signals).
+- **Completed — CellGENI-style historical replay (`7a7fb08`, exact archived surface):**
+  - `/storage/solo_overnight_20260326/ucsf_gexonly_no_bam/star_cellgeni_historical_7a7fb08_rerun_20260403_232313/`
+  - Binary: `/tmp/star-cellgeni-7a7fb08-rerun/core/legacy/source/STAR` (commit `7a7fb08865edb8aa69285a3a0bc6e14c51feeb45`)
+  - `BENCHMARK_SUMMARY.txt`: 32 threads, **13847** filtered cells, wall **0:22:04.00**
+  - `PARITY_vs_CR9.txt`: fresh rerun parity against `/storage/cr9_ebs2_2_benchmark_20260318/cr9_ebs2_2/outs/per_sample_outs/cr9_ebs2_2/count/sample_filtered_feature_bc_matrix`
+  - Rerun filtered barcodes are **exactly identical** to archived `star_cellgeni_historical_7a7fb08_truwhitelist_genefullonly_20260326/` (`13847/13847` shared; Jaccard `1.0`)
+- **Completed — modern optimized** (repo `core/legacy/source/STAR`, `feature/flex-optimization-using-solo-20260325` build):
+  - `/storage/solo_overnight_20260326/ucsf_gexonly_no_bam/star_optimized_current_retry2/`
+  - `BENCHMARK_SUMMARY.txt`: 32 threads, **13728** filtered cells, wall **947 s** (~15.8 min), `read_decompress=native_gzip`
+  - `/usr/bin/time -v` (`nohup_time.log`): max RSS **~56220720 KiB** (~54.9 GiB), elapsed **~15:47**, exit **0**
+  - **CR9 GEX parity (Gene Expression only):** `GEX_PARITY_vs_CR9.txt` (from `scripts/run_ucsf_gexonly_gex_parity_vs_cr.sh`; `report_additional_parity_metrics.py --skip-feature-call-parity`, NXT translation `--translate both`, min 20 counts / 1% cells per gene). CR reference: `/storage/ucsf-full/bench_20260218_dynamic_first/cellranger_runs/cr_full_iPSC2_1_AALG2_crstar32_20260218_205804/`.
+  - **Parity headline (read the full report; cell lists differ):** This CR `outs/filtered_feature_bc_matrix/barcodes.tsv.gz` has **7325** barcodes (multi-library count). STAR GEX-only Solo filtered **13728** TRU barcodes. After NXT→TRU translation, **filtered** barcode Jaccard **~0.002** (40 shared); **`filtered_vs_filtered`** per-barcode / per-gene correlations in the report are **not** comparable to the perturb-seq README table (almost no shared filtered cells). More informative slice: **`raw_restricted_to_cr_filtered`** — **5574** common barcodes; per-gene (filtered genes **171**) Pearson **~0.395**, Spearman **~0.488** (still not the full-sample perturb parity surface).
+- Status: untracked
+
+## Solo overnight perturb no-BAM (serialized matrix, native `.gz`, 2026-03-26)
+
+All three runs used **`USE_READFILES_ZCAT=0`** (no external `zcat`), **`--outSAMtype None`** where applicable, repo `core/legacy/source/STAR`, 32 threads, executed **serially** on one host.
+
+### UCSF EBs2_2
+
+- Root: `/storage/solo_overnight_20260326/ucsf_perturb_no_bam/`
+- **Completed:** `ebs2_2_no_bam_nativegzip_20260326_075154/` (`run_ucsf_ebs2_2_benchmark.sh` `--no-yremove`)
+- `BENCHMARK_SUMMARY.txt`: **13,721** cells, wall **1252 s** (~20.9 min)
+- `nohup_time.log` (`/usr/bin/time -v`): elapsed **~20:52**, max RSS **~68296484 KiB** (~66.7 GiB), exit **0**
+
+### MSK 30polyKO (3-library)
+
+- Root: `/storage/solo_overnight_20260326/msk_perturb_no_bam/`
+- **Completed:** `msk30ko_no_bam_nativegzip_20260326_081323/` (`run_msk_30polyko_benchmark.sh` `--no-bam`)
+- `BENCHMARK_SUMMARY.txt`: **30,567** cells, wall **1713 s** (~28.6 min)
+- `nohup_time.log`: elapsed **~28:33**, max RSS **~81650380 KiB** (~79.7 GiB), exit **0**
+
+### A375 1k CRISPR 5' GemX
+
+- Root: `/storage/solo_overnight_20260326/a375_perturb_no_bam/`
+- **Completed:** `a375_no_bam_nativegzip_20260326_084220/` (`run_a375_benchmark.sh` with `A375_OUTDIR=…`)
+- `BENCHMARK_SUMMARY.txt`: **1,187** cells, wall **258 s** (~4.3 min)
+- `nohup_time.log`: elapsed **~4:18**, max RSS **~44214344 KiB** (~43.2 GiB), exit **0**
+
+### Script note
+
+- `run_ucsf_ebs2_2_benchmark.sh`, `run_msk_30polyko_benchmark.sh`, and `run_a375_benchmark.sh` honor **`USE_READFILES_ZCAT=0`** to omit `--readFilesCommand zcat` (default remains zcat for paper repro).
+- Status: untracked
+
+## Flex No-Align InlineCBCorrection Benchmark (2026-03-26)
+
+- Full SC2300771 sample, `--flexNoAlign 1`, 32 threads
+- Tests whether `InlineCBCorrection` H0/H1 hash speeds up mapping vs legacy `matchCBtoWL`
+- **Result: 20% mapping regression** (601s vs 501s). More reads captured (+22.5M) but per-read overhead too high.
+- v4 run (InlineCBCorrection on): `/storage/flex_snapshot_noalign_csr_20260326/full_v4_cbcorr/`
+- v3 run (legacy matchCBtoWL): `/storage/flex_snapshot_noalign_csr_20260326/full_v3/`
+- Details: `docs/HANDOFF_FLEX_NOALIGN_SNAPSHOT_HARNESS_20260325.md` § "InlineCBCorrection benchmark"
+- v5 run (lean H0 khash replacing binarySearchExact): `/storage/flex_snapshot_noalign_csr_20260326/full_v5_h0hash/`
+  - Bit-identical output. No wall-clock improvement — mapping is gzip-I/O-bound, not CB-lookup-bound.
+  - Details: `docs/HANDOFF_FLEX_NOALIGN_SNAPSHOT_HARNESS_20260325.md` § "Lean H0 khash"
+- Status: untracked
+
+## JAX scRNAseq02 OCM Composite-Barcode Smoke (2026-05-20)
+
+- Harness: `scripts/run_jax_scrnaseq02_ocm_composite_smoke.sh`
+- Adapter: `scripts/ocm_composite_adapter.py`
+- Runbook: `docs/RUNBOOK_SCRNA_OCM_COMPOSITE_BARCODE_METHOD_20260520.md`
+- Default STAR mode: native `--ocmMultiBarcodeMode flex`
+  (`CB16+OCM_TAG8` before correction/counting); adapter also supports the old
+  helper-only `CB17` fixtures.
+- External output roots:
+  - `/mnt/pikachu/JAX_scRNAseq02_processed/ocm_composite_smoke_100k_*`
+  - `/mnt/pikachu/JAX_scRNAseq02_processed/ocm_composite_smoke_50m_*`
+- Status: untracked; do not commit staged FASTQs, STAR outputs, Cell Ranger
+  pipestances, materialized MEX outputs, or parity reports.
+
+## TranscriptVB GC Effective Length Smoke
+
+- Harness: `tests/test_transcriptvb_gc_effective_length.sh`
+- Output root: `/tmp/star_suite_transcriptvb_gc_effective_length_*`
+- Contents: generated two-transcript FASTA, tiny C++ test program, compiled
+  helper binary, and `test.log`.
+- Status: untracked.
+
+## GenomeGenerate Expected GC Smoke
+
+- Harness: `tests/test_genome_generate_expected_gc.sh`
+- Output root: `/tmp/star_suite_genome_expected_gc_*`
+- Contents: synthetic genome/GTF, generated STAR index, `transcriptome.fa`,
+  `expected_gc.tsv`, and first/second genomeGenerate logs.
+- Status: untracked.
+
+## Molecule-first bounded materializer (2026-07-22)
+
+- Harness: `tests/run_molecule_first_materializer_bounded_test.sh`
+- Synthetic scratch: `/tmp/star_suite_molecule_first_materializer_bounded.*`
+- External 100K equivalence outputs:
+  `/mnt/pikachu/molecule_first_materializer_100k_{unsorted,streaming}_20260722_*`
+- Full-slide optimized outputs and timing records:
+  `/mnt/pikachu/molecule_first_materializer_fullslide_1mm_cr_20260722_*`
+- Contents: post-collapse strict, soft-expected, hard, and gated-hard MEX at
+  2, 8, and 16 um; private spill files exist only while the process is live.
+- Status: untracked; never commit external resolver TSVs, MEX matrices, spill
+  records, or timing logs.

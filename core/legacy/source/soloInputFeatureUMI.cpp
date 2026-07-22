@@ -1,10 +1,15 @@
 #include "soloInputFeatureUMI.h"
+#include "SoloBinarySpool.h"
 #include "SoloReadFeature.h"
 #include "binarySearch2.h"
 
-bool soloInputFeatureUMI(fstream *strIn, int32 featureType, bool readInfoYes, array<vector<uint64>,2> &sjAll, uint64 &iread, 
+bool soloInputFeatureUMI(fstream *strIn, int32 featureType, bool readInfoYes, bool binarySpool, array<vector<uint64>,2> &sjAll, uint64 &iread, 
                             int32 &cbmatch, uint32 &feature, uint64 &umi, vector<uint32> &featVecU32, SoloReadFlagClass &readFlagCounts)
 {
+    if (binarySpool) {
+        return SoloBinarySpool::readRecordHeader(*strIn, readInfoYes, umi, iread, readFlagCounts.flag, feature, cbmatch);
+    }
+
     if (!(*strIn >> umi)) //end of file
         return false;
 
@@ -41,4 +46,25 @@ bool soloInputFeatureUMI(fstream *strIn, int32 featureType, bool readInfoYes, ar
     *strIn >> cbmatch;
 
     return true;
+};
+
+bool soloInputFeatureUMI(const SoloBinarySpool::MemoryBuffer &buffer, size_t &offset, int32 featureType, bool readInfoYes, bool binarySpool, array<vector<uint64>,2> &sjAll, uint64 &iread,
+                            int32 &cbmatch, uint32 &feature, uint64 &umi, vector<uint32> &featVecU32, SoloReadFlagClass &readFlagCounts)
+{
+    if (binarySpool) {
+        return SoloBinarySpool::readRecordHeader(buffer, offset, readInfoYes, umi, iread, readFlagCounts.flag, feature, cbmatch);
+    }
+
+    (void)buffer;
+    (void)offset;
+    (void)featureType;
+    (void)readInfoYes;
+    (void)sjAll;
+    (void)iread;
+    (void)cbmatch;
+    (void)feature;
+    (void)umi;
+    (void)featVecU32;
+    (void)readFlagCounts;
+    return false;
 };

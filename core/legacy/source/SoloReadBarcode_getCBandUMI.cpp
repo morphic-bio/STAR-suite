@@ -5,7 +5,10 @@
 #include "GlobalVariables.h"
 #include "UmiCodec.h"
 #include "InlineCBCorrection.h"
+#include "OcmMultiMaterialize.h"
+#include "SoloBarcodeWhitelistLookup.h"
 #include <chrono>
+#include <cstdlib>
 #include <thread>
 #include "FlexDebugCounters.h"
 
@@ -54,14 +57,31 @@ void SoloReadBarcode::matchCBtoWL(string &cbSeq1, string &cbQual1, vector<uint64
         cbMatch1=-2;
         //stats.V[stats.nNinBarcode]++;
         return;
-    } else if (posN==-1) {//no Ns, count only for featureType==gene
-        int64 cbI=binarySearchExact<uint64>(cbB1,cbWL.data(),cbWL.size());
-        if (cbI>=0) {//exact match
+    };
+
+    khash_t(cbH0) *h = pSolo.cbWLhash;
+    // CB_UMI_Complex keeps a separate sorted whitelist for each barcode
+    // component and intentionally does not build the single-whitelist H0 hash.
+    // Keep the optimized hash lookup for simple barcodes, but use the component
+    // whitelist when the global hash is absent.  All exact and H1 probes must
+    // go through the same lookup; otherwise the first non-exact complex
+    // barcode dereferences a null hash.
+    const auto findWhitelistIndex = [&](uint64_t packed) -> int64 {
+        if (h != nullptr) {
+            khiter_t k = kh_get(cbH0, h, static_cast<uint32_t>(packed));
+            return k == kh_end(h) ? -1 : static_cast<int64>(kh_val(h, k));
+        }
+        return soloBarcodeFindSortedWhitelistIndex(packed, cbWL);
+    };
+
+    if (posN==-1) {//no Ns
+        int64 cbI=findWhitelistIndex(cbB1);
+        if (cbI>=0) {
             cbMatchInd1.push_back((uint64) cbI);
             cbMatchString1 = to_string(cbMatchInd1[0]);
             cbMatch1=0;
             return;
-        };
+        }
     };
     
     if (!pSolo.CBmatchWL.mm1) //only exact matches allowed
@@ -72,16 +92,15 @@ void SoloReadBarcode::matchCBtoWL(string &cbSeq1, string &cbQual1, vector<uint64
         uint32 posNshift=2*(cbSeq1.size()-1-posN);//shift bits for posN
         bool matched = false;
         for (uint32 jj=0; jj<4; jj++) {
-            uint64 cbB11=cbB1^(jj<<posNshift);
-            int64 cbI1=binarySearchExact<uint64>(cbB11,cbWL.data(),cbWL.size());
-            if (cbI1>=0) {//found match
+            uint64 cbB11=cbB1^(static_cast<uint64>(jj)<<posNshift);
+            int64 cbI1=findWhitelistIndex(cbB11);
+            if (cbI1>=0) {
                 if (!pSolo.CBmatchWL.mm1_multi_Nbase && matched) {
                     cbMatchInd1.clear();
                     cbMatch1=-3;
-                    break; //this is 2nd match, not allowed for N-bases
+                    break;
                 };
                 matched = true;
-                //output all
                 cbMatchInd1.push_back(cbI1);
                 ++cbMatch1;
                 cbMatchString1 += ' ' +to_string(cbI1) + ' ' + cbQual1[posN];
@@ -90,9 +109,9 @@ void SoloReadBarcode::matchCBtoWL(string &cbSeq1, string &cbQual1, vector<uint64
     } else {//look for 1MM; posN==-1, no Ns
         for (uint32 ii=0; ii<cbSeq1.size(); ii++) {
             for (uint32 jj=1; jj<4; jj++) {
-                int64 cbI1=binarySearchExact<uint64>(cbB1^(jj<<(ii*2)),cbWL.data(),cbWL.size());
-                if (cbI1>=0) {//found match
-                    //output all
+                uint64 cbVar=cbB1^(static_cast<uint64>(jj)<<(ii*2));
+                int64 cbI1=findWhitelistIndex(cbVar);
+                if (cbI1>=0) {
                     cbMatchInd1.push_back(cbI1);
                     ++cbMatch1;
                     cbMatchString1 += ' ' +to_string(cbI1) + ' ' + cbQual1.at(cbSeq1.size()-1-ii);
@@ -304,6 +323,21 @@ void SoloReadBarcode::getCBandUMI(char **readSeq, char **readQual, uint64 *readL
             cbQual=bQual.substr(pSolo.cbS-1,pSolo.cbL);
             umiQual=bQual.substr(pSolo.umiS-1,pSolo.umiL);
 
+            bool ocmFlexTagRejected = false;
+            if (OcmMultiMaterialize::isFlexBarcodeMode(P)) {
+                const string tag8 = OcmMultiMaterialize::tag8ForBarcode(cbSeq);
+                if (tag8.empty()) {
+                    cbMatch = -1;
+                    cbSeqCorrected = "-";
+                    cbMatchInd.clear();
+                    cbMatchString = "";
+                    ocmFlexTagRejected = true;
+                } else {
+                    cbSeq += tag8;
+                    cbQual.append(tag8.size(), 'I');
+                }
+            }
+
 
             for (uint64 ix=0; ix<cbQual.size(); ix++) {
                 qualHist[(uint8)cbQual[ix]]++;
@@ -313,7 +347,9 @@ void SoloReadBarcode::getCBandUMI(char **readSeq, char **readQual, uint64 *readL
             };               
             
             // Inline CB correction: use fast-path (with N-handling) if enabled, otherwise legacy matchCBtoWL
-            if (pSolo.inlineCBCorrection) {
+            if (ocmFlexTagRejected) {
+                // Unknown OCM overhangs are not part of the effective CB16+TAG8 whitelist.
+            } else if (pSolo.inlineCBCorrection) {
                 std::string correctedCB;
                 int correctionResult = -1;
                 bool nRescued = false;
@@ -455,19 +491,20 @@ void SoloReadBarcode::getCBandUMI(char **readSeq, char **readQual, uint64 *readL
             if (cbMatch==0)
                 cbReadCountExact[cbMatchInd[0]]++; //still need to count it as exact before return, even if UMI is not good
             #endif
-            // CB and UB are independent: don't reject read when UMI is invalid
-            // Keep CB data intact, just mark UMI as invalid via umiCheck
-            // For non-Flex (legacy Solo), preserve original behavior
-            if (!pSolo.inlineCBCorrection && !pSolo.inlineHashMode) {
-                // Legacy path: reject entire read (original behavior)
+            const bool nonFlexHashBridge = pSolo.inlineHashMode
+                && !pSolo.flexMode
+                && std::getenv("STAR_SOLO_NONFLEX_HASH_BRIDGE") != nullptr;
+
+            // CB and UB are independent for Flex, but the experimental non-Flex
+            // bridge must preserve legacy Solo's invalid-UMI rejection semantics.
+            if (!pSolo.inlineCBCorrection && (!pSolo.inlineHashMode || nonFlexHashBridge)) {
                 cbMatch=umiCheck;
                 cbMatchString="";
                 cbMatchInd.clear();
                 addStats(cbMatch);
                 return;
             }
-            // Flex path: keep CB, UMI is marked invalid via umiB/umiCheck
-            // Continue to addStats below
+            // Flex path: keep CB, UMI is marked invalid via umiB/umiCheck.
         };
 
     ///////////////////////////CB_samTagOut

@@ -5,16 +5,86 @@
 #include "SequenceFuns.h"
 #include "serviceFuns.cpp"
 #include <unordered_map>
+#include <unordered_set>
 #include "SoloCommon.h"
 #include "UmiCodec.h"
 #include "UMICorrector.h"
 #include "ErrorWarning.h"
+#include "MultiGeneUmiCr.h"
 #include <cstdio>
+#include <fstream>
 #include <vector>
 #include <algorithm>
+#include <chrono>
 
 static const bool g_debugCollapse = (std::getenv("STAR_DEBUG_COLLAPSE") != nullptr);
 static const bool g_debugCollapseForced = (std::getenv("STAR_DEBUG_COLLAPSE_FORCED") != nullptr);
+static const bool g_legacyCollapseSort = (std::getenv("STAR_SOLO_LEGACY_COLLAPSE_SORT") != nullptr);
+
+namespace {
+double soloElapsedSeconds(const std::chrono::steady_clock::time_point &start)
+{
+    return std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+}
+
+const std::unordered_set<std::string>& collapseTraceBarcodeSet()
+{
+    static std::unordered_set<std::string> barcodes;
+    static bool loaded = false;
+    if (loaded) {
+        return barcodes;
+    }
+    loaded = true;
+
+    const char *path = std::getenv("STAR_SOLO_DEBUG_BARCODE_FILE");
+    if (path == nullptr || path[0] == '\0') {
+        return barcodes;
+    }
+
+    std::ifstream in(path);
+    std::string line;
+    while (std::getline(in, line)) {
+        if (!line.empty()) {
+            barcodes.insert(line);
+        }
+    }
+    return barcodes;
+}
+
+bool shouldTraceCollapseBarcode(const ParametersSolo &pSolo, uint32_t wlIdx)
+{
+    if (wlIdx >= pSolo.cbWLstr.size()) {
+        return false;
+    }
+    const auto &debugSet = collapseTraceBarcodeSet();
+    if (debugSet.empty()) {
+        return false;
+    }
+    return debugSet.count(pSolo.cbWLstr[wlIdx]) != 0;
+}
+
+std::string formatLegacyGeneCountMap(const std::unordered_map<uint32, uint32> &counts,
+                                     const std::vector<uint32> &gID)
+{
+    std::vector<std::pair<uint32, uint32>> ordered;
+    ordered.reserve(counts.size());
+    for (const auto &kv : counts) {
+        const uint32 localIdx = kv.first;
+        const uint32 geneId = localIdx < gID.size() ? gID[localIdx] : localIdx;
+        ordered.push_back({geneId, kv.second});
+    }
+    std::sort(ordered.begin(), ordered.end());
+
+    std::ostringstream oss;
+    for (size_t i = 0; i < ordered.size(); ++i) {
+        if (i != 0) {
+            oss << ',';
+        }
+        oss << ordered[i].first << ':' << ordered[i].second;
+    }
+    return oss.str();
+}
+}
 
 #ifdef DEBUG_CB_UB_PARITY
 // Optional tracing of specific readIds via STAR_DEBUG_TRACE_READS=1,2,3
@@ -64,6 +134,11 @@ static inline bool dbgCheckReadAfterWrite(SoloFeature *self, uint32_t readId, ui
 
 void SoloFeature::collapseUMIall(bool minimalMode)
 {
+    const auto collapseStart = std::chrono::steady_clock::now();
+    P.inOut->logMain << "Solo optimization guard: collapseSort="
+                     << (g_legacyCollapseSort ? "legacy_std_sort" : "optimized_qsort")
+                     << endl;
+
     if (countMatStride == 0 || countMatStride > 1024) {
         // countMatStride may be unused in minimal/skip paths; enforce a sane non-zero stride
         countMatStride = 1;
@@ -201,6 +276,7 @@ void SoloFeature::collapseUMIall(bool minimalMode)
         }
     }
 #endif
+    P.inOut->logMain << "Solo timing: collapseUMIall " << soloElapsedSeconds(collapseStart) << " s" << endl;
 };
 
 void SoloFeature::collapseUMIperCB(uint32 iCB, vector<uint32> &umiArray, vector<uint32> &gID,  vector<uint32> &gReadS, bool minimalMode)
@@ -240,50 +316,56 @@ void SoloFeature::collapseUMIperCB(uint32 iCB, vector<uint32> &umiArray, vector<
         fflush(stderr);
     }
     
-    // Comment out qsort temporarily to test std::sort
-    // qsort(rGU,rN,rguStride*sizeof(uint32),funCompareNumbers<uint32>); //sort by gene index
-    
-    // Test with std::sort using struct view
-    struct Triplet {
-        uint32 g, u, r;
-        Triplet(uint32* base, uint32 stride) : g(base[0]), u(base[1]), r(stride == 3 ? base[2] : 0) {}
-        void writeBack(uint32* base, uint32 stride) const {
-            base[0] = g;
-            base[1] = u;
-            if (stride == 3) base[2] = r;
+    if (g_legacyCollapseSort) {
+        struct Triplet {
+            uint32 g, u, r;
+            Triplet(uint32* base, uint32 stride) : g(base[0]), u(base[1]), r(stride == 3 ? base[2] : 0) {}
+            void writeBack(uint32* base, uint32 stride) const {
+                base[0] = g;
+                base[1] = u;
+                if (stride == 3) base[2] = r;
+            }
+        };
+
+        if (g_debugCollapseForced) {
+            fprintf(stderr, "[COLLAPSE-FORCED] Converting to Triplet vector for std::sort\n");
+            fflush(stderr);
         }
-    };
-    
+
+        std::vector<Triplet> triplets;
+        triplets.reserve(rN);
+        for (uint32 i = 0; i < rN; i++) {
+            triplets.push_back(Triplet(rGU + i*rguStride, rguStride));
+        }
+
+        if (g_debugCollapseForced) {
+            fprintf(stderr, "[COLLAPSE-FORCED] Sorting %zu triplets with std::sort\n", triplets.size());
+            fflush(stderr);
+        }
+
+        std::sort(triplets.begin(), triplets.end(),
+                  [](const Triplet& a, const Triplet& b) { return a.g < b.g; });
+
+        if (g_debugCollapseForced) {
+            fprintf(stderr, "[COLLAPSE-FORCED] std::sort completed, writing back\n");
+            fflush(stderr);
+        }
+
+        for (uint32 i = 0; i < rN; i++) {
+            triplets[i].writeBack(rGU + i*rguStride, rguStride);
+        }
+
+        if (g_debugCollapseForced) {
+            fprintf(stderr, "[COLLAPSE-FORCED] std::sort writeback completed\n");
+            fflush(stderr);
+        }
+    } else {
+        qsort(rGU, rN, rguStride*sizeof(uint32), funCompareNumbers<uint32>); //sort by gene index in place
+    }
+
     if (g_debugCollapseForced) {
-        fprintf(stderr, "[COLLAPSE-FORCED] Converting to Triplet vector for std::sort\n");
-        fflush(stderr);
-    }
-    
-    std::vector<Triplet> triplets;
-    triplets.reserve(rN);
-    for (uint32 i = 0; i < rN; i++) {
-        triplets.push_back(Triplet(rGU + i*rguStride, rguStride));
-    }
-    
-    if (g_debugCollapseForced) {
-        fprintf(stderr, "[COLLAPSE-FORCED] Sorting %zu triplets with std::sort\n", triplets.size());
-        fflush(stderr);
-    }
-    
-    std::sort(triplets.begin(), triplets.end(), 
-              [](const Triplet& a, const Triplet& b) { return a.g < b.g; });
-    
-    if (g_debugCollapseForced) {
-        fprintf(stderr, "[COLLAPSE-FORCED] std::sort completed, writing back\n");
-        fflush(stderr);
-    }
-    
-    for (uint32 i = 0; i < rN; i++) {
-        triplets[i].writeBack(rGU + i*rguStride, rguStride);
-    }
-    
-    if (g_debugCollapseForced) {
-        fprintf(stderr, "[COLLAPSE-FORCED] std::sort writeback completed\n");
+        fprintf(stderr, "[COLLAPSE-FORCED] sort completed (%s)\n",
+                g_legacyCollapseSort ? "legacy_std_sort" : "optimized_qsort");
         fflush(stderr);
         
         fprintf(stderr, "[COLLAPSE-FORCED] After qsort, dumping same slice:\n");
@@ -589,28 +671,38 @@ void SoloFeature::collapseUMIperCB(uint32 iCB, vector<uint32> &umiArray, vector<
         
         vector<unordered_set<uintUMI>> geneUmiHash;
         geneUmiHash.resize(nGenes);
+        vector<multi_gene_umi_cr::GeneSupport> resolutionSupports;
         
         for (const auto &iu: umiGeneMapCount) {//loop over UMIs for all genes
-                       
-            uint32 maxu=0, maxg=-1;
+            resolutionSupports.clear();
+            resolutionSupports.reserve(iu.second.size());
+            const auto originalGroup = umiGeneMapCount0.find(iu.first);
             for (const auto &ig : iu.second) {
-                if (ig.second>maxu) {
-                    maxu=ig.second;
-                    maxg=ig.first;
-                } else if (ig.second==maxu) {
-                    maxg=-1;
-                };
+                multi_gene_umi_cr::GeneSupport support;
+                support.gene = ig.first;
+                support.correctedCount = ig.second;
+                if (originalGroup != umiGeneMapCount0.end()) {
+                    const auto originalGene = originalGroup->second.find(ig.first);
+                    if (originalGene != originalGroup->second.end()) {
+                        support.originalAtCorrectedCount = originalGene->second;
+                    }
+                }
+                resolutionSupports.push_back(support);
             };
+            const multi_gene_umi_cr::Result resolution =
+                multi_gene_umi_cr::resolve(resolutionSupports);
+            const uint32 maxg = resolution.accepted ? resolution.gene : static_cast<uint32>(-1);
 
-            if ( maxg+1==0 )
-                continue; //this umi is not counted for any gene, because two genes have the same read count for this UMI
-            
-            for (const auto &ig : umiGeneMapCount0[iu.first]) {//check that this umi/gene had also top count for uncorrected umis
-                if (ig.second>umiGeneMapCount0[iu.first][maxg]) {
-                    maxg=-1;
-                    break;
-                };
-            };
+            if (shouldTraceCollapseBarcode(pSolo, indCB[iCB])) {
+                const int64_t chosenGene = (maxg + 1u == 0u) ? -1 : static_cast<int64_t>(gID[maxg]);
+                P.inOut->logMain << "[GENEFULL-CR-TRACE] mode=legacy"
+                                 << " cb=" << pSolo.cbWLstr[indCB[iCB]]
+                                 << " corr=" << iu.first
+                                 << " corrected={" << formatLegacyGeneCountMap(iu.second, gID) << '}'
+                                 << " orig={" << formatLegacyGeneCountMap(umiGeneMapCount0[iu.first], gID) << '}'
+                                 << " chosen=" << chosenGene
+                                 << endl;
+            }
 
             if ( maxg+1!=0 ) {//this UMI is counted
                 geneCounts[maxg]++;

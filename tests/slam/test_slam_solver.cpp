@@ -36,8 +36,8 @@ int main() {
 
     // Low-conversion signal
     MismatchHistogram low;
-    low[(40 << 8) | 0] = 500;
-    low[(40 << 8) | 1] = 5;
+    low[slamPackMismatchKey(40, 0)] = 500;
+    low[slamPackMismatchKey(40, 1)] = 5;
 
     SlamResult low_res = solver.solve(low);
     failed += check(low_res.converged, "low: converged");
@@ -47,8 +47,8 @@ int main() {
 
     // Higher-conversion signal
     MismatchHistogram high;
-    high[(40 << 8) | 0] = 100;
-    high[(40 << 8) | 3] = 100;
+    high[slamPackMismatchKey(40, 0)] = 100;
+    high[slamPackMismatchKey(40, 3)] = 100;
 
     SlamResult high_res = solver.solve(high);
     failed += check(high_res.converged, "high: converged");

@@ -19,6 +19,7 @@ runMode                         alignReads
                                 inputAlignmentsFromBAM ... input alignments from BAM. Presently only works with --outWigType and --bamRemoveDuplicates options.
                                 liftOver               ... lift-over of GTF files (--sjdbGTFfile) between genome assemblies using chain file(s) from --genomeChainFiles.
                                 soloCellFiltering  </path/to/raw/count/dir/>   </path/to/output/prefix>    ... STARsolo cell filtering ("calling") without remapping, followed by the path to raw count directory and output (filtered) prefix
+                                countingSinkStress ... synthetic post-map replay into CountingSink (no mapping). Requires --genomeDir and --soloCBwhitelist. Scale via env STAR_COUNTING_SINK_STRESS_NRECORDS (default 50000000), STAR_COUNTING_SINK_STRESS_ACTIVE_CBS (default 20000). Optional STAR_COUNTING_SINK_STRESS_COLLAPSE=1 to run collapseUMIall after finalize.
 
 runThreadN                      1
     int: number of threads to run STAR
@@ -37,6 +38,59 @@ dynamicThreadTelemetry          0
     int: telemetry output for dynamic thread interface.
                                 0 ... disabled.
                                 1 ... emit map permit wait/work timing summary to Log.out.
+
+dynamicThreadTelemetryIntervalSec 10
+    int: periodic mapPermitSnapshot emit cadence (seconds) when chromapAtacEnable=1
+         and dynamicThreadInterface=1. Header line + tab-separated columns:
+         timeSec configured target available inUse waiters
+         mapAcquire mapWaitMaxMs mapWorkAvgMs
+         atacAcquire atacWaitMaxMs atacWorkAvgMs retunes
+         Each line is flushed so SIGTERM-kill captures buffered output.
+                                0 ... disable periodic sampler (end-of-run summary still emits)
+                                10 ... default; 30 recommended after tuning is done
+
+dynamicThreadMapFloor           0
+    int: borrowable per-domain floor for STAR GEX MAP permits.
+         When this domain has waiters, the permit pool reserves at least
+         N concurrent active permits for it; surplus permits are fully
+         shared with other domains. 0 disables the MAP floor.
+         Setting any of dynamicThread{Map,Atac,Feature}Floor > 0 activates
+         the floor-aware acquire/release path with per-domain CVs (eliminates
+         the notify_one wakeup-fairness pathology under contention).
+
+dynamicThreadAtacFloor          0
+    int: borrowable per-domain floor for chromap ATAC permits.
+         Same semantics as dynamicThreadMapFloor. 0 disables the ATAC floor.
+
+dynamicThreadFeatureFloor       0
+    int: borrowable per-domain floor for process_features FEATURE permits.
+         Same semantics as dynamicThreadMapFloor. 0 disables the FEATURE floor.
+
+dynamicThreadAtacController     0
+    int: enable the ATAC drain-time controller (Step 6).
+         When 1, the chromap-side sampler thread also runs a rate-balance
+         controller that adjusts MAP/ATAC floors based on observed
+         work-unit drain rates so both domains finish their mapping
+         phase at roughly the same time. Mirrors the pf eta/chunked
+         controller for FEATURE/MAP that has been the load-balancing
+         core of pf/STAR since the start.
+         Requires dynamicThreadInterface=1 + chromapAtacEnable=1 + at
+         least one of dynamicThread{Map,Atac}Floor > 0.
+                                0 ... disabled (default)
+                                1 ... enable rate-balance controller (~1 retune per sampler tick)
+
+dynamicThreadFifoWaiters        0
+    int: FIFO waiter-queue admission. When 1, ThreadControl routes acquires
+         through a queue under the permit mutex: queued waiters are served
+         in arrival order, and new arrivals cannot fast-path past existing
+         waiters even when a permit is momentarily available. Release and
+         retune grant permits to queued waiters under the lock, eliminating
+         the notify_one() wakeup-bypass race. With no floor active the
+         queue is strict FIFO across domains; with floors active the helper
+         preserves per-domain FIFO ordering and lets a tail waiter on an
+         under-floor domain bypass an at-floor head.
+                                0 ... disabled (default; legacy notify_one path)
+                                1 ... FIFO admission (composable with floors/controller)
 
 variableThreads                 0
     int: allow runtime updates to active mapping permits when dynamicThreadInterface=1.
@@ -343,6 +397,8 @@ inputBAMfile                -
 readFilesType               Fastx
     string: format of input read files
                             Fastx       ... FASTA or FASTQ
+                            Binseq SE   ... ARC BINSEQ CBQ single-end reads
+                            Binseq PE   ... ARC BINSEQ CBQ paired-end reads packed in one CBQ file per lane
                             SAM SE      ... SAM or BAM single-end reads; for BAM use --readFilesCommand samtools view
                             SAM PE      ... SAM or BAM paired-end reads; for BAM use --readFilesCommand samtools view
                             
@@ -373,6 +429,12 @@ readFilesLegacyZcat         No
     string: Yes/No - force legacy external zcat helper for .gz FASTQ when --readFilesCommand is '-'
                             No  ... default; auto-detect .gz FASTQ and use internal zlib streaming path
                             Yes ... disable internal gzip path and use legacy external zcat helper
+
+readFilesCbqRangeMode       auto
+    string: auto|off|range - indexed CBQ logical range readers for --readFilesType Binseq
+                            auto  ... enable only for supported order-independent CBQ runs with indexed inputs
+                            off   ... use the shared CBQ reader
+                            range ... require indexed range readers; unsupported configurations are fatal
 
 readMapNumber               -1
     int: number of reads to map from the beginning of the file
@@ -697,8 +759,16 @@ YReadNamesOutput        -
     string:                 override path for Y-read names list
                             Default: <outFileNamePrefix>Aligned.out_Y.names.txt
 
+emitYNoY               no
+    string:                 yes|no - emit Y/noY read sidecars in emitYNoYFormat
+
+emitYNoYFormat         fastq
+    string:                 fastq|cbq - sidecar output format for emitYNoY
+                            fastq: emit FASTQ sidecars
+                            cbq: emit ordered CBQ sidecars
+
 emitYNoYFastq          no
-    string:                 yes|no - emit Y/noY FASTQ files directly during alignment
+    string:                 yes|no - compatibility alias for --emitYNoY yes --emitYNoYFormat fastq
                             Emits separate FASTQ files for reads with/without Y-chromosome alignments
                             Works with both bulk PE and Flex/solo modes
 
@@ -718,6 +788,23 @@ noYFastqOutputPrefix    -
                             Default: derived from input FASTQ name (first file per mate)
                             Inserts _noY before the last _R1/_R2
                             If no _R1/_R2 token is found, falls back to <outFileNamePrefix>noY_reads.mateN
+
+emitYNoYCbq             no
+    string:                 yes|no - compatibility alias for --emitYNoY yes --emitYNoYFormat cbq
+                            Emits one paired/single-end CBQ per Y class while preserving source record order
+                            The CBQ writer is independent of input format and accepts FASTQ or Binseq reads
+
+emitYNoYCbqCompressionLevel 0
+    int:                    zstd compression level for Y/noY CBQ output
+
+emitYNoYCbqBlockSize    1048576
+    int:                    virtual block size for Y/noY CBQ output
+
+YCbqOutput              -
+    string:                 override path for Y CBQ output
+
+noYCbqOutput            -
+    string:                 override path for noY CBQ output
 
 ### BAM processing
 bamRemoveDuplicatesType  -
@@ -1080,12 +1167,21 @@ quantVBTraceLimit                     0
         1 ... output quant.genes.sf with gene-level TPM and counts (default)
         Gene-level metrics are aggregated from transcript results using TPM-weighted averaging.
 
+quantVBDumpEq                         -
+    string: Optional path for a Salmon-shaped TranscriptVB rich equivalence-class dump (default: disabled)
+
 quantVBErrorModel                     auto
     string: Error model mode for TranscriptVB
             auto ... use CIGAR if available, otherwise AS
             cigar ... use CIGAR only
             as   ... use AS only
             off  ... disable error model
+
+quantVBFragLengthDist                 1
+    int: 0/1 - use learned fragment length distribution in TranscriptVB EC weights
+
+quantVBEffectiveLengthCorrection      1
+    int: 0/1 - use effective-length correction in TranscriptVB quantification
 
 slamQuantMode                         0
     int: 0/1 - enable STAR-Slam quantification
@@ -1187,6 +1283,16 @@ slamGrandSlamOut                      1
     int: Enable GRAND-SLAM-style output table (0/1).
          Output path: <prefix>SlamQuant.grandslam.tsv (default on)
 
+slamCbOut                             0
+    int: Enable STAR-SLAM count-binomial output table (0/1).
+         Output path: <prefix>SlamQuant.cB.tsv when enabled
+
+slamCbOutFile                         -
+    string: Output file for count-binomial TSV. A .gz suffix writes gzip-compressed TSV.
+
+slamCbFormat                          star
+    string: Count-binomial output schema: star or ezbakr
+
 slamCompatMode                        none
     string: SLAM compatibility mode (none, gedi)
 
@@ -1203,10 +1309,28 @@ slamCompatIgnoreOverlap              -1
     int: -1/0/1 - Skip all PE overlap positions (-1=use mode default, 0=disable, 1=enable)
 
 slamCompatTrim5p                     0
-    int: Number of bases to trim from 5' end of each mate
+    int: Mate1 / R1: bases trimmed from 5' (see also slamCompatTrim5pMate1). For PE, mate2 defaults to the same value unless slamCompatTrim5pMate2 is set (use -1 sentinel = inherit mate1; default).
+
+slamCompatTrim5pMate1              0
+    int: Alias for mate1 5' trim (same storage as slamCompatTrim5p)
+
+slamCompatTrim5pMate2                -1
+    int: Mate2 / R2: 5' trim bases; -1 means inherit mate1 after parse
 
 slamCompatTrim3p                     0
-    int: Number of bases to trim from 3' end of each mate
+    int: Mate1 / R1: bases trimmed from 3'
+
+slamCompatTrim3pMate1                0
+    int: Alias for mate1 3' trim (same storage as slamCompatTrim3p)
+
+slamCompatTrim3pMate2                -1
+    int: Mate2 3' trim; -1 means inherit mate1 after parse
+
+slamMinCallableLength                30
+    int: Minimum post-trim, overlap-consensus callable positions required for a SLAM read to contribute to transition and nT/k counts. Use 0 to disable.
+
+slamAutoTrimPerMate                  Auto
+    string: Auto|Yes|No. Auto uses separate per-mate variance histograms for paired-end reads and a combined histogram for single-end reads; Yes forces per-mate mode, No forces one combined trim profile for both mates.
 
 autoTrim                             -
     string: Auto-trim mode: "variance" for variance-based trimming, "-" to disable.
@@ -1658,6 +1782,15 @@ soloCrMultimapRescueIntronic auto
                             yes         ... allow 0-exonic + single-intronic rescue
                             no          ... exonic-only rescue
 
+soloSpatialFeatureSidecar   -
+    string:                 default-off output prefix for a fixed-width, read-ordinal GeneFull evidence sidecar
+                            Requires the annotation-only Visium HD GEX policy: soloType None,
+                            soloFeatures GeneFull, soloCrGexFeature GeneFull, soloCrMultimapRescue yes,
+                            soloUMIdedup 1MM_CR, soloUMIfiltering MultiGeneUMI_CR,
+                            soloMultiMappers Unique, soloStrand Forward, soloCellFilter None,
+                            outSAMtype None, and FASTQ inputs ordered as R2 then raw R1.
+                            Emits .bin, .features.tsv, .read_name_digests.tsv, and .summary.json.
+
 soloProbeList               -
     string:                 path to probe_list.txt used to derive 1-based gene indices (15-bit cap)
                             If not provided, will auto-detect probe_gene_list.txt from genome index directory
@@ -1910,6 +2043,28 @@ soloFlexMinimalMemory         auto
 pfMultiConfig               -
     string:                 pf-multi config CSV (Cell Ranger-style input; enables pf-multi processing)
 
+ocmMultiEnable              no
+    string:                 no|yes|auto - materialize OCM per-sample MEX from pool-level GeneFull outputs
+                            yes requires --ocmMultiConfig or --pfMultiConfig with [samples]
+                            auto runs when [samples] with ocm_barcode_ids is present
+
+ocmMultiConfig              -
+    string:                 Cell Ranger multi config CSV with [samples] for OCM materialization
+
+ocmMultiBarcodeMode         posthoc
+    string:                 posthoc|flex
+                            posthoc     ... legacy path: correct CB16 first, then materialize OCM samples from MEX
+                            flex        ... native OCM effective barcode: append OCM TAG8 to CB16 before CB correction/counting
+
+ocmMultiBamSplit           no
+    string:                 no|yes|auto - write OCM per-sample BAMs during final tagged unsorted BAM replay
+                            yes         ... write outs/per_sample_outs/<sample>/count/sample_alignments.bam plus outs/multi/count/unassigned_alignments.bam
+                            auto        ... enable when OCM samples are present and unsorted BAM output is active
+                            no          ... write only the standard STAR BAM outputs
+
+ocmMultiOutputCompat        cellranger
+    string:                 Output layout compatibility mode (cellranger)
+
 crChemistry                auto
     string:                 chemistry mode for pf-multi compatibility behavior
                             auto        ... detect chemistry from inputs/whitelist hints (default)
@@ -1939,6 +2094,25 @@ crMexUseGexBarcodes        -
     string:                 DEPRECATED: CR-compat MEX now always writes both raw_feature_bc_matrix and filtered_feature_bc_matrix using GEX barcodes
                             This parameter is ignored and kept for backward compatibility only
 
+crGuideCaller              auto
+    string:                 guide caller for CRISPR Guide Capture features in pf-multi output
+                            auto        ... GMM compatibility calls plus ambient-FDR QC when raw guide MEX is available (default)
+                            gmm         ... Cell Ranger-compatible GMM caller only
+                            ambient-fdr ... ambient-background FDR caller only
+                            both        ... run GMM plus ambient-FDR secondary outputs
+                            none        ... skip guide calling
+
+crGuideFdr                 0.01
+    float:                  default FDR threshold for ambient-FDR guide calls
+
+crGuideFdrMinUmi           1
+    int:                    minimum observed guide UMI count for ambient-FDR calls
+
+crGuideFdrEmitQvalues      sparse
+    string:                 ambient-FDR q-value output mode
+                            sparse ... write sparse observed-entry q-values (default)
+                            none   ... skip q-value matrix output
+
 crAssignConsumerThreads    -1
     int:                    number of consumer (barcode-matching) threads per feature library in assignBarcodes.
                             -1 ... auto (default). When dynamicThreadInterface=1, auto-sized from runThreadN
@@ -1950,6 +2124,17 @@ crAssignSearchThreads      -1
                             -1 ... auto (default). Uses assignBarcodes internal default (4).
                             >0 ... explicit search thread count passed to assignBarcodes.
 
+crAssignReadBufferLines    -1
+    int:                    reader queue line slots for in-process assignBarcodes.
+                            -1 ... use process_features default.
+                            >0 ... explicit queue line count for FASTQ and CBQ record streams.
+
+crAssignCbqMode            auto
+    string:                 CBQ input strategy for pf-multi feature assignment.
+                            auto   ... use indexed direct range counting when supported, otherwise stream.
+                            stream ... force existing queue-backed CBQ streaming path.
+                            range  ... require indexed direct range counting; unsupported settings are fatal.
+
 crAssignLegacyCbRescue     0
     int:                    pending CB rescue mode for assignBarcodes.
                             0 ... default deterministic frozen-pass rescue (order-independent).
@@ -1959,6 +2144,198 @@ crAssignSkipQcOutputs      0
     int:                    skip feature histogram and heatmap outputs from assignBarcodes.
                             0 ... write full feature QC outputs (default).
                             1 ... skip feature histograms and heatmaps, keep core matrices/stats.
+
+chromapAtacEnable           0
+    int:                    run in-process Chromap ATAC after STAR mapping completes (non-batch only).
+                            0 ... disabled (default; STAR behavior unchanged).
+                            1 ... run star::multiome::runChromapAtac with fixed thread count (no dynamic permits).
+
+chromapAtacReferenceFasta   -
+    string:                 reference FASTA for Chromap (required when chromapAtacEnable=1).
+
+chromapAtacIndex            -
+    string:                 Chromap index path (required when chromapAtacEnable=1).
+
+chromapAtacInputFormat      fastq
+    string:                 ATAC input format for libchromap.
+                            fastq ... use chromapAtacRead1/chromapAtacRead2/chromapAtacBarcode (default).
+                            cbq   ... use chromapAtacReadPairCbq/chromapAtacBarcodeCbq.
+
+chromapAtacRead1            -
+    string:                 comma-separated ATAC read1 FASTQ paths (same order as read2/barcode lists).
+
+chromapAtacRead2            -
+    string:                 comma-separated ATAC read2 FASTQ paths.
+
+chromapAtacBarcode          -
+    string:                 comma-separated ATAC barcode FASTQ paths.
+
+chromapAtacReadPairCbq      -
+    string:                 comma-separated paired-read ATAC CBQ paths when chromapAtacInputFormat=cbq.
+
+chromapAtacBarcodeCbq       -
+    string:                 comma-separated barcode ATAC CBQ paths when chromapAtacInputFormat=cbq.
+
+chromapAtacReadFormat       -
+    string:                 optional Chromap read-format string applied to ATAC reads/barcodes, e.g. bc:8:23:- extracts 0-based barcode bases 8-23 and reverse-complements them.
+
+chromapAtacBarcodeWhitelist -
+    string:                 barcode whitelist file for Chromap.
+
+chromapAtacBarcodeTranslate -
+    string:                 optional barcode translation table (- or empty to omit).
+
+chromapAtacOutputFragments  -
+    string:                 Chromap primary output path (BED/TagAlign fragments file, or SAM/BAM/CRAM path per chromapAtacOutputFormat).
+
+chromapAtacSecondaryFragments -
+    string:                 optional scATAC binary sidecar path when chromapAtacOutputFormat is BAM or CRAM (dual output; must differ from chromapAtacOutputFragments). Chromap writes fixed-record fragments here plus PATH.chroms.tsv. Pass - to omit.
+
+chromapAtacOutputFormat     BED
+    string:                 Chromap output format: BED|fragments|TagAlign|SAM|BAM|CRAM|pairs.
+
+chromapAtacSummary          -
+    string:                 optional Chromap summary path (- to omit).
+
+chromapAtacTempDir          -
+    string:                 optional temp directory for Chromap (- to use Chromap default).
+
+chromapAtacThreads          1
+    int:                    thread count passed to the Chromap contract (fixed; not coordinated with STAR permits).
+
+chromapAtacHtsThreads       0
+    int:                    HTS compression threads for Chromap BAM/CRAM output (0 = Chromap default).
+
+chromapAtacSortBam          0
+    int:                    coordinate-sort Chromap BAM/CRAM output when 1.
+
+chromapAtacWriteIndex       0
+    int:                    write BAM/CRAM index when 1; requires chromapAtacSortBam=1.
+
+chromapAtacSortBamRam       8589934592
+    uint:                   RAM limit in bytes for Chromap BAM/CRAM sorting.
+
+chromapAtacEmitNoYBam       0
+    int:                    emit an additional Chromap SAM/BAM/CRAM stream excluding reads with Y-chromosome alignments when 1. Requires chromapAtacOutputFormat=SAM|BAM|CRAM.
+
+chromapAtacEmitYBam         0
+    int:                    emit an additional Chromap SAM/BAM/CRAM stream containing reads with Y-chromosome alignments when 1. Requires chromapAtacOutputFormat=SAM|BAM|CRAM.
+
+chromapAtacNoYOutput        -
+    string:                 optional explicit noY Chromap stream output path. If unset and chromapAtacEmitNoYBam=1, STAR derives it from chromapAtacOutputFragments using Chromap's .noY suffix convention.
+
+chromapAtacYOutput          -
+    string:                 optional explicit Y Chromap stream output path. If unset and chromapAtacEmitYBam=1, STAR derives it from chromapAtacOutputFragments using Chromap's .Y suffix convention.
+
+chromapAtacLowMem           0
+    int:                    enable Chromap mapping low-memory mode (overflow-spill to disk) when 1. Reduces peak RSS at the cost of disk I/O. Compatible with --atac-fragments dual output and BED-only output.
+
+chromapAtacLowMemRam        0
+    uint:                   RAM threshold in bytes for chromapAtacLowMem before spilling overflow files. 0 means use Chromap's defaults (1 GB / 512 MB).
+
+chromapAtacCallMacs3FragPeaks  0
+    int:                    run in-process MACS3-compatible FRAG peak calling after Chromap ATAC mapping when 1.
+
+chromapAtacMacs3FragPeaksOutput  -
+    string:                 narrowPeak output path, required when chromapAtacCallMacs3FragPeaks=1.
+
+chromapAtacMacs3FragSummitsOutput  -
+    string:                 summits BED output path, required when chromapAtacCallMacs3FragPeaks=1.
+
+chromapAtacMacs3FragKeepIntermediates  -
+    string:                 optional directory to keep intermediate MACS3 FRAG bedGraph-style outputs.
+
+chromapAtacMacs3FragPvalue  1e-5
+    double:                 MACS3 FRAG p-value threshold. Ignored when chromapAtacMacs3FragQvalue is set to a positive value.
+
+chromapAtacMacs3FragQvalue  0
+    double:                 MACS3 FRAG q-value/FDR threshold. 0 disables q-value mode; a value in (0,1] switches peak scoring/cutoff to q-value mode and is mutually exclusive with explicit chromapAtacMacs3FragPvalue.
+
+chromapAtacMacs3FragMinLength  200
+    int:                    minimum MACS3 FRAG peak length.
+
+chromapAtacMacs3FragMaxGap  30
+    int:                    maximum gap for MACS3 FRAG peak merging.
+
+chromapAtacMacs3FragUint8Counts  1
+    int:                    use MACS3 uint8 count semantics when 1.
+
+chromapAtacMacs3FragLowMem  0
+    int:                    use libMACS3 sweep-line workspace for in-process MACS3 FRAG peaks when 1. For production multiome, prefer the post-materialization sidecar boundary: write chromapAtacSecondaryFragments locally, then run native sidecar peak-MEX construction outside STAR.
+
+chromapAtacEvidenceFromPeaksOutput  -
+    string:                 optional path for per-barcode ATAC evidence-from-peaks
+                            TSV (columns: barcode, atac_peak_region_cutsites,
+                            atac_peak_region_fragments, atac_fragments,
+                            atac_peak_fraction). When set to a real path,
+                            after concurrent chromap ATAC and libMACS3 FRAG
+                            peaks finish, the libchromap contract runs
+                            libscrna::atac::RunAtacEvidenceFromBinary on the
+                            binary sidecar from chromapAtacSecondaryFragments
+                            plus atac_peaks.narrowPeak and writes the
+                            per-barcode evidence here. - / empty disables.
+
+chromapAtacTn5ShiftMode     classical
+    string:                 Tn5 shift mode for Chromap: classical|symmetric (default classical).
+
+chromapAtacStartMode        postMapping
+    string:                 Chromap launch mode when chromapAtacEnable=1.
+                            postMapping ... run Chromap after STAR mapping (compatibility default).
+                            concurrent  ... launch Chromap before STAR mapping and join before final success.
+
+multiomeAtacPeakMexInline   no
+    string:                 run ATAC peak/MEX materialization inside STAR after
+                            the Chromap AEV1 sidecar is fully written.
+                            no  ... disabled (Phase B default).
+                            yes ... call RunMultiomeAtacPeakMex before STAR exits.
+
+multiomeAtacPeakBarcodeTranslate -
+    string:                 optional ATAC-to-GEX barcode translation table for
+                            inline peak/MEX materialization. If unset, STAR
+                            reuses chromapAtacBarcodeTranslate when available.
+
+multiomeAtacPeakBarcodeTranslateFromFirst yes
+    string:                 yes/no. When yes, column 1 is source ATAC barcode
+                            and column 2 is destination GEX barcode.
+
+multiomeAtacPeakMetricsTsv  -
+    string:                 inline ATAC metrics TSV. Default when unset:
+                            <outFileNamePrefix>/atac/atac_metrics.tsv.
+
+multiomeAtacPeakMexOutDir   -
+    string:                 inline peak MEX output directory. Default when
+                            unset: <outFileNamePrefix>/atac/peak_mex.
+
+multiomeAtacPeakNarrowPeak  -
+    string:                 inline narrowPeak output. Default when unset:
+                            chromapAtacMacs3FragPeaksOutput if set, otherwise
+                            <outFileNamePrefix>/atac/atac_peaks.narrowPeak.
+
+multiomeAtacPeakSummits     -
+    string:                 inline summits BED output. Default when unset:
+                            chromapAtacMacs3FragSummitsOutput if set, otherwise
+                            <outFileNamePrefix>/atac/atac_summits.bed.
+
+multiomeAtacPeakCallMode    frag
+    string:                 inline peak caller for sidecar-derived peaks.
+                            frag ... use Chromap/MorPHiC MACS3 FRAG defaults.
+                            macs-bed ... project the AEV1 sidecar to MACS BED
+                            input and call peaks with a named MACS BED profile.
+
+multiomeAtacPeakMacsProfile -
+    string:                 optional MACS BED compatibility profile for
+                            multiomeAtacPeakCallMode=macs-bed. Currently
+                            supports signac-atac; when set it implies
+                            macs-bed unless multiomeAtacPeakCallMode is
+                            explicitly set to frag, which is invalid.
+
+multiomeAtacPeakThreads     0
+    int:                    peak/MEX materialization threads. 0 inherits
+                            runThreadN.
+
+multiomeAtacPeakMaxBarcodes 0
+    uint:                   keep only the top N ATAC barcodes by total
+                            fragments; 0 keeps all barcodes.
 
 ### Default Module Flag Groups
 ### These flags apply predefined parameter bundles for common workflows.
@@ -1986,6 +2363,7 @@ defaultCrCompat             No
                             Enables: soloType Droplet, soloFeatures Gene GeneFull,
                             soloCellFilter EmptyDrops_CR, soloCrMode CR,
                             soloCrGexFeature GeneFull, soloCrMultimapRescue yes, crMinUmi 3,
+                            crGuideCaller auto,
                             soloCBmatchWLtype 1MM_multi_Nbase_pseudocounts,
                             soloUMIdedup 1MM_CR, soloUMIfiltering MultiGeneUMI_CR,
                             soloMultiMappers Rescue, soloCbUbRequireTogether no
@@ -2016,7 +2394,7 @@ defaultVbem                 No
 defaultA375Parity           No
     string:                 yes/no - apply A375 GEX+feature parity defaults
                             Enables: soloCrMode CR, soloCrGexFeature GeneFull,
-                            soloCrMultimapRescue yes, crMinUmi 10
+                            soloCrMultimapRescue yes, crMinUmi 10, crGuideCaller auto
 
 #####UnderDevelopment_begin : not supported - do not use
 soloClusterCBfile           -

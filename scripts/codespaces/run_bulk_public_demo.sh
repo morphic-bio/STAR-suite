@@ -92,6 +92,10 @@ MANIFEST
 if [[ "${RUN}" == "1" && "${DRY_RUN}" == "0" ]]; then
   [[ -d "${GENOME_DIR}" ]] || die "Missing --genome-dir for --run: ${GENOME_DIR}"
   "${CMD[@]}"
+  log "Bulk demo completed."
+  log "Verify outputs with: bash ${REPO_ROOT}/scripts/codespaces/verify_bulk_public_demo_outputs.sh --outdir ${OUTDIR}"
 else
   log "Wrote ${OUTDIR}/RUN_COMMAND.sh"
+  log "To execute later: bash ${OUTDIR}/RUN_COMMAND.sh"
+  log "After the run, verify outputs with: bash ${REPO_ROOT}/scripts/codespaces/verify_bulk_public_demo_outputs.sh --outdir ${OUTDIR}"
 fi

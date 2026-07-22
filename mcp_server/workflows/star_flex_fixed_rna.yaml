@@ -1,0 +1,125 @@
+# Public recipe: STAR-Flex Fixed RNA Profiling (README Sample Commands).
+id: star_flex_fixed_rna
+title: STAR-Flex (Fixed RNA Profiling)
+summary: Single STAR alignReads with --flex yes, CB whitelist, optional sample whitelist; read order R2 then R1.
+kind: star_cli
+entry_script: core/legacy/source/STAR
+supported_modes: [local]
+caveats:
+  - Build the binary first (make -C core/legacy/source STAR).
+  - Use a genome index built for Flex when your pipeline requires it.
+  - README order is --readFilesIn reads_R2.fq.gz reads_R1.fq.gz (barcode-heavy mate first).
+default_output_layout: Outputs under out_file_name_prefix.
+
+scripts:
+  - role: entry
+    path: core/legacy/source/STAR
+    description: STAR binary
+    language: native
+
+parameter_groups:
+  - name: core
+    title: Flex alignment
+    parameters:
+      - run_mode
+      - genome_dir
+      - read_files_r2
+      - read_files_r1
+      - flex_enable
+      - solo_type
+      - solo_cb_whitelist
+      - solo_sample_whitelist
+      - out_file_name_prefix
+      - run_thread_n
+
+parameters:
+  - name: run_mode
+    cli_flag: --runMode
+    type: string
+    required: true
+    default: alignReads
+    description: STAR run mode.
+    category: core
+  - name: genome_dir
+    cli_flag: --genomeDir
+    type: directory
+    required: true
+    path_must_exist: true
+    description: STAR genome index directory.
+    category: core
+  - name: read_files_r2
+    cli_flag: --readFilesIn
+    type: string
+    required: true
+    operand_group: readfiles_flex
+    description: Typically R2 (barcode side) FASTQ path.
+    category: core
+  - name: read_files_r1
+    cli_flag: --readFilesIn
+    type: string
+    required: true
+    operand_group: readfiles_flex
+    description: Typically R1 (transcript side) FASTQ path.
+    category: core
+  - name: flex_enable
+    cli_flag: --flex
+    type: string
+    required: true
+    default: "yes"
+    description: Enable Flex mode (STAR expects yes).
+    category: core
+  - name: solo_type
+    cli_flag: --soloType
+    type: string
+    required: true
+    default: CB_UMI_Simple
+    description: Flex uses CB_UMI_Simple with whitelist files.
+    category: core
+  - name: solo_cb_whitelist
+    cli_flag: --soloCBwhitelist
+    type: file
+    required: true
+    path_must_exist: true
+    description: e.g. 737K-fixed-rna-profiling.txt for Fixed RNA Profiling.
+    category: core
+  - name: solo_sample_whitelist
+    cli_flag: --soloSampleWhitelist
+    type: file
+    required: false
+    path_must_exist: true
+    description: Optional sample/feature barcode whitelist TSV.
+    category: core
+  - name: out_file_name_prefix
+    cli_flag: --outFileNamePrefix
+    type: string
+    required: true
+    is_output_root: true
+    description: Output prefix.
+    category: core
+  - name: run_thread_n
+    cli_flag: --runThreadN
+    type: int
+    required: true
+    default: 16
+    skip_when_default: true
+    description: Thread count.
+    category: core
+
+constraints:
+  - kind: positive
+    params: [run_thread_n]
+    message: run_thread_n must be positive.
+
+rendering:
+  omit_absent_optionals: true
+  flag_order:
+    - run_mode
+    - genome_dir
+    - read_files_r2
+    - read_files_r1
+    - flex_enable
+    - solo_type
+    - solo_cb_whitelist
+    - solo_sample_whitelist
+    - out_file_name_prefix
+    - run_thread_n

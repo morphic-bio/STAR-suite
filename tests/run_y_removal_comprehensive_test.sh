@@ -4,7 +4,7 @@
 
 set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TOOL="$SCRIPT_DIR/../tools/remove_y_reads/remove_y_reads"
+TOOL="${REMOVE_Y_READS_BIN:-$SCRIPT_DIR/../core/features/yremove_fastq/tools/remove_y_reads/remove_y_reads}"
 REPORT_FILE="$SCRIPT_DIR/TEST_REPORT_REMOVE_Y_FASTQ.md"
 TEST_DIR="/tmp/y_removal_comprehensive_test_$$"
 

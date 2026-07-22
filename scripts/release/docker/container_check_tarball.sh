@@ -3,7 +3,7 @@
 set -euo pipefail
 
 TARBALL=""
-EXPECTED_VERSION="2.7.11b"
+EXPECTED_VERSION="1.5.0"
 MANIFEST_OUT=""
 
 usage() {
@@ -137,16 +137,31 @@ fi
 prefix="$workdir/prefix"
 "$installer" --prefix "$prefix" --force >/dev/null
 binary="$prefix/bin/STAR"
+resolver="$prefix/bin/molecule_first_resolver"
 if [[ ! -x "$binary" ]]; then
   echo "ERROR: installed STAR binary missing: $binary" >&2
+  exit 1
+fi
+if [[ ! -x "$resolver" ]]; then
+  echo "ERROR: installed molecule-first resolver missing: $resolver" >&2
   exit 1
 fi
 
 version_output="$($binary --version)"
 if [[ "$version_output" != "$EXPECTED_VERSION" ]]; then
-  echo "ERROR: expected STAR version $EXPECTED_VERSION, got $version_output" >&2
+  echo "ERROR: expected STAR-suite version $EXPECTED_VERSION, got $version_output" >&2
   exit 1
 fi
+if [[ "$($resolver --version)" != "$EXPECTED_VERSION" ]]; then
+  echo "ERROR: molecule-first resolver version mismatch" >&2
+  exit 1
+fi
+for tool in molecule_first_bam_ledger molecule_first_materialize; do
+  if [[ ! -x "$prefix/bin/$tool" ]] || [[ "$($prefix/bin/$tool --version)" != "$EXPECTED_VERSION" ]]; then
+    echo "ERROR: molecule-first companion $tool missing or version-mismatched" >&2
+    exit 1
+  fi
+done
 
 container_glibc="$(detect_glibc)"
 max_glibc_symbol="$(grep -aoE 'GLIBC_[0-9]+\.[0-9]+' "$binary" | sort -Vu | tail -n1 || true)"
@@ -191,7 +206,7 @@ Compatibility label: ${compat_label:-unknown}
 Documented glibc baseline: ${glibc_baseline:-unknown}
 Container glibc: ${container_glibc}
 Maximum referenced GLIBC symbol: ${max_glibc_symbol:-unknown}
-STAR version: ${version_output}
+STAR-suite version: ${version_output}
 Minimum runtime packages (Ubuntu/Debian package names): ${package_list:-unknown}
 Dynamic libraries:
 "

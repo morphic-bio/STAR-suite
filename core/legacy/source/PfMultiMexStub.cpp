@@ -10,6 +10,8 @@
 #include <stdexcept>
 #include <dirent.h>
 #include <unordered_map>
+#include <unordered_set>
+#include <cstdio>
 using std::cerr;
 using std::endl;
 
@@ -121,9 +123,12 @@ vector<FeatureRow> loadFeatureCsv(const string& csvPath) {
         throw runtime_error("Feature CSV header must include 'name' or 'id'");
     }
     
-    // Read data rows
+    // Read data rows (first-definition-wins on duplicate feature names; matches io.c)
     string line;
+    std::unordered_set<string> seenNames;
+    int lineNumber = 1;
     while (getline(file, line)) {
+        ++lineNumber;
         if (line.empty()) continue;
         
         vector<string> fields;
@@ -177,9 +182,19 @@ vector<FeatureRow> loadFeatureCsv(const string& csvPath) {
             row.name = row.id;
         }
         
-        if (!row.id.empty() || !row.name.empty()) {
-            result.push_back(row);
+        const string dedupeKey = !row.name.empty() ? row.name : row.id;
+        if (dedupeKey.empty()) {
+            continue;
         }
+        if (seenNames.count(dedupeKey)) {
+            fprintf(stderr,
+                    "Warning: duplicate feature name '%s' in %s at line %d; "
+                    "ignoring later definition and keeping the first\n",
+                    dedupeKey.c_str(), csvPath.c_str(), lineNumber);
+            continue;
+        }
+        seenNames.insert(dedupeKey);
+        result.push_back(row);
     }
     
     if (result.empty()) {
@@ -304,6 +319,91 @@ bool copyBarcodesTsv(const string& barcodesTxt, const string& barcodesTsv, bool 
     return true;
 }
 
+static bool remapFeaturePerCellCsv(const string& featurePerCellCsv,
+                                   const string& whitelistPath,
+                                   bool force) {
+    struct stat st;
+    if (stat(featurePerCellCsv.c_str(), &st) != 0) {
+        return false;
+    }
+
+    std::unordered_map<string, string> outputMap;
+    bool useOutputMap = parseWhitelistOutputMap(whitelistPath, outputMap);
+    if (!useOutputMap) {
+        return false;
+    }
+
+    std::unordered_set<string> outputValues;
+    outputValues.reserve(outputMap.size());
+    for (const auto& item : outputMap) {
+        outputValues.insert(item.second);
+    }
+
+    ifstream in(featurePerCellCsv.c_str());
+    if (!in.is_open()) {
+        return false;
+    }
+
+    vector<string> lines;
+    lines.reserve(1024);
+    string line;
+    size_t assignmentHits = 0;
+    size_t outputHits = 0;
+    while (getline(in, line)) {
+        if (!lines.empty() || line.rfind("barcode,", 0) != 0) {
+            string barcode = line.substr(0, line.find(','));
+            trimInPlace(barcode);
+            std::transform(barcode.begin(), barcode.end(), barcode.begin(), ::toupper);
+            if (outputMap.find(barcode) != outputMap.end()) {
+                assignmentHits++;
+            }
+            if (outputValues.find(barcode) != outputValues.end()) {
+                outputHits++;
+            }
+        }
+        lines.push_back(line);
+    }
+    in.close();
+
+    if (assignmentHits == 0 || outputHits >= assignmentHits) {
+        return false;
+    }
+    if (!force && outputHits > 0) {
+        return false;
+    }
+
+    const string tmpPath = featurePerCellCsv + ".tmp";
+    ofstream out(tmpPath.c_str());
+    if (!out.is_open()) {
+        return false;
+    }
+
+    for (const auto& row : lines) {
+        if (row.rfind("barcode,", 0) == 0 || row.empty()) {
+            out << row << "\n";
+            continue;
+        }
+        size_t commaPos = row.find(',');
+        string barcode = commaPos == string::npos ? row : row.substr(0, commaPos);
+        string suffix = commaPos == string::npos ? "" : row.substr(commaPos);
+        trimInPlace(barcode);
+        std::transform(barcode.begin(), barcode.end(), barcode.begin(), ::toupper);
+        auto it = outputMap.find(barcode);
+        if (it != outputMap.end()) {
+            out << it->second << suffix << "\n";
+        } else {
+            out << barcode << suffix << "\n";
+        }
+    }
+    out.close();
+
+    if (std::rename(tmpPath.c_str(), featurePerCellCsv.c_str()) != 0) {
+        std::remove(tmpPath.c_str());
+        return false;
+    }
+    return true;
+}
+
 int processAssignOutput(const string& assignOutDir, const string& featureCsvPath,
                        const string& defaultFeatureType, bool force,
                        const string& whitelistPath,
@@ -350,6 +450,9 @@ int processAssignOutput(const string& assignOutDir, const string& featureCsvPath
                 wroteAny = true;
             }
             if (copyBarcodesTsv(barcodesTxt, barcodesTsv, force, whitelistPath)) {
+                wroteAny = true;
+            }
+            if (remapFeaturePerCellCsv(outDir + "/feature_per_cell.csv", whitelistPath, force)) {
                 wroteAny = true;
             }
         } catch (const exception& e) {

@@ -74,13 +74,16 @@ void Genome::genomeLoad(){//allocate and load Genome
         errOut << "SOLUTION: please re-generate genome from scratch with the latest version of STAR\n";
         exitWithError(errOut.str(),std::cerr, P.inOut->logMain, EXIT_CODE_GENOME_FILES, P);
     } else if (P1.versionGenome == P.versionGenome
-               || P1.versionGenome == "2.7.1a") {
+               || P1.versionGenome == STAR_LEGACY_GENOME_COMPAT_VERSION) {
         P.inOut->logMain << "Genome version is compatible with current STAR"
                          << " (index=" << P1.versionGenome << ", running=" << P.versionGenome << ")\n";
     } else {
         ostringstream errOut;
-        errOut << "EXITING because of FATAL ERROR: Genome version: " << P1.versionGenome << " is INCOMPATIBLE with running STAR version: "<< STAR_VERSION <<"\n";
-        errOut << "SOLUTION: please re-generate genome from scratch with running version of STAR, or with version: " << P.versionGenome <<"\n";
+        errOut << "EXITING because of FATAL ERROR: Genome version: " << P1.versionGenome
+               << " is INCOMPATIBLE with running STAR-suite version: " << STAR_SUITE_VERSION
+               << " (genome compatibility version: " << P.versionGenome << ")\n";
+        errOut << "SOLUTION: please re-generate genome from scratch with a compatible genome version: "
+               << P.versionGenome << "\n";
         exitWithError(errOut.str(),std::cerr, P.inOut->logMain, EXIT_CODE_GENOME_FILES, P);
     };
 

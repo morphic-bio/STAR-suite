@@ -106,6 +106,12 @@ typedef struct feature_arrays {
     int common_length;
     char **feature_names;
     char *feature_names_storage;
+    char **feature_ids;
+    char *feature_ids_storage;
+    char **feature_types;
+    char *feature_types_storage;
+    char *source_csv_path;
+    char *source_csv_fingerprint;
     unsigned int *feature_lengths;
     unsigned char *feature_code_lengths;
     char **feature_sequences;
@@ -305,6 +311,19 @@ typedef struct sample_args {
     struct chem_detect_state *chem_detect;
     int probe_only;                  /* 1 = chemistry probe pass, suppress outputs */
     int skip_qc_outputs;             /* 1 = skip feature histograms/heatmaps */
+
+    /* ADT/protein MEX output mode */
+    int adt_mex_output;
+    const char *feature_ref_path;
+
+    /* Hash / HTO / CMO demux (adt_mex output mode extension) */
+    int hash_demux_mode;              /* PF_HASH_DEMUX_AUTO|NO|YES */
+    const char *hash_feature_selector;
+    const char *hash_demux_method;
+    const char *library_feature_type;
+    int hash_min_total;
+    int hash_min_top;
+    double hash_min_ratio;
 
     /* Error propagation */
     int *error_out;                  /* Set to non-zero if fatal error occurred */

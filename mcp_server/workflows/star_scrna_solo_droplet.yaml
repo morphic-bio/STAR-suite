@@ -1,0 +1,143 @@
+# Public recipe: STARsolo droplet scRNA-seq (10x-style; see core/legacy/RELEASEnotes.md STARsolo).
+id: star_scrna_solo_droplet
+title: STARsolo droplet scRNA-seq
+summary: Single STAR alignReads with --soloType Droplet, whitelist, and paired FASTQs (cDNA then CB/UMI).
+kind: star_cli
+entry_script: core/legacy/source/STAR
+supported_modes: [local]
+caveats:
+  - Build the binary first (make -C core/legacy/source STAR).
+  - Order is --readFilesIn cDNA_read barcode_read (first mate = cDNA, second = cell barcode + UMI).
+  - Index must match your STAR version (regenerate if upgrading from older STAR).
+default_output_layout: Solo outputs under out_file_name_prefix (e.g. Solo.out/).
+
+scripts:
+  - role: entry
+    path: core/legacy/source/STAR
+    description: STAR binary
+    language: native
+
+parameter_groups:
+  - name: core
+    title: STARsolo
+    parameters:
+      - run_mode
+      - genome_dir
+      - read_files_cdna
+      - read_files_cb_umi
+      - solo_type
+      - solo_cb_whitelist
+      - clip_adapter_type
+      - solo_cell_filter
+      - solo_features
+      - out_sam_type_none
+      - out_file_name_prefix
+      - run_thread_n
+
+parameters:
+  - name: run_mode
+    cli_flag: --runMode
+    type: string
+    required: true
+    default: alignReads
+    description: STAR run mode.
+    category: core
+  - name: genome_dir
+    cli_flag: --genomeDir
+    type: directory
+    required: true
+    path_must_exist: true
+    description: STAR genome index directory.
+    category: core
+  - name: read_files_cdna
+    cli_flag: --readFilesIn
+    type: string
+    required: true
+    operand_group: readfiles_solo
+    description: cDNA read FASTQ (first argument to --readFilesIn).
+    category: core
+  - name: read_files_cb_umi
+    cli_flag: --readFilesIn
+    type: string
+    required: true
+    operand_group: readfiles_solo
+    description: Cell barcode + UMI read FASTQ (second argument to --readFilesIn).
+    category: core
+  - name: solo_type
+    cli_flag: --soloType
+    type: string
+    required: true
+    default: Droplet
+    description: STARsolo library type (Droplet for typical 10x 3').
+    category: core
+  - name: solo_cb_whitelist
+    cli_flag: --soloCBwhitelist
+    type: file
+    required: true
+    path_must_exist: true
+    description: Cell barcode whitelist compatible with your chemistry.
+    category: core
+  - name: clip_adapter_type
+    cli_flag: --clipAdapterType
+    type: string
+    required: true
+    default: CellRanger4
+    description: Adapter/polyA clipping profile (CellRanger4 matches recent Cell Ranger).
+    category: core
+  - name: solo_cell_filter
+    cli_flag: --soloCellFilter
+    type: string
+    required: true
+    default: EmptyDrops_CR
+    description: Cell calling mode.
+    category: core
+  - name: solo_features
+    cli_flag: --soloFeatures
+    type: string
+    required: true
+    default: GeneFull
+    description: Gene model for counting (GeneFull aligns with recent Cell Ranger GEX).
+    category: core
+  - name: out_sam_type_none
+    cli_flag: --outSAMtype
+    type: string
+    required: true
+    default: None
+    description: Skip sorted BAM when quant-only (faster); set to BAM SortedByCoordinate if you need BAM.
+    category: core
+  - name: out_file_name_prefix
+    cli_flag: --outFileNamePrefix
+    type: string
+    required: true
+    is_output_root: true
+    description: Output prefix (directory path ending with / recommended).
+    category: core
+  - name: run_thread_n
+    cli_flag: --runThreadN
+    type: int
+    required: true
+    default: 16
+    skip_when_default: true
+    description: Thread count.
+    category: core
+
+constraints:
+  - kind: positive
+    params: [run_thread_n]
+    message: run_thread_n must be positive.
+
+rendering:
+  omit_absent_optionals: true
+  flag_order:
+    - run_mode
+    - genome_dir
+    - read_files_cdna
+    - read_files_cb_umi
+    - solo_type
+    - solo_cb_whitelist
+    - clip_adapter_type
+    - solo_cell_filter
+    - solo_features
+    - out_sam_type_none
+    - out_file_name_prefix
+    - run_thread_n

@@ -14,13 +14,68 @@ struct FeatureSpec {
 };
 
 // Keys are normalized: lowercase, alphanumeric only (matching normalizedFeatureType output)
+inline string normalizedFeatureRole(const string& value) {
+    string normalized;
+    normalized.reserve(value.size());
+    for (unsigned char c : value) {
+        if (std::isalnum(c)) {
+            normalized.push_back(static_cast<char>(std::tolower(c)));
+        }
+    }
+    return normalized;
+}
+
+inline bool isProteinAdtFeatureRole(const string& normalizedRole) {
+    return normalizedRole == "antibodycapture"
+        || normalizedRole == "adt"
+        || normalizedRole == "protein";
+}
+
+inline bool isHashLikeFeatureRole(const string& normalizedRole) {
+    return normalizedRole == "multiplexingcapture"
+        || normalizedRole == "hto"
+        || normalizedRole == "cmo"
+        || normalizedRole == "cellplexcmo";
+}
+
+inline bool isValidStarHashDemuxValue(const string& value) {
+    if (value.empty()) {
+        return true;
+    }
+    string mode;
+    mode.reserve(value.size());
+    for (unsigned char c : value) {
+        if (c == ' ' || c == '\t' || c == '\r' || c == '\n') {
+            continue;
+        }
+        mode.push_back(static_cast<char>(std::tolower(c)));
+    }
+    return mode == "auto" || mode == "-" || mode == "none"
+        || mode == "yes" || mode == "1" || mode == "true"
+        || mode == "no" || mode == "0" || mode == "false";
+}
+
+inline bool shouldEmitAdtMexOutput(const string& featureRefType,
+                                   const string& libraryType) {
+    const string refRole = normalizedFeatureRole(featureRefType);
+    const string libRole = normalizedFeatureRole(libraryType);
+    return isProteinAdtFeatureRole(refRole)
+        || isProteinAdtFeatureRole(libRole)
+        || isHashLikeFeatureRole(refRole)
+        || isHashLikeFeatureRole(libRole);
+}
+
 inline map<string, string> knownFeatureRefTypeMap() {
     return {
         {"crisprguidecapture", "CRISPR Guide Capture"},
         {"crisprguide", "CRISPR Guide Capture"},
         {"antibodycapture", "Antibody Capture"},
+        {"adt", "Antibody Capture"},
+        {"protein", "Antibody Capture"},
         {"cellplexcmo", "Multiplexing Capture"},
-        {"multiplexingcapture", "Multiplexing Capture"}
+        {"multiplexingcapture", "Multiplexing Capture"},
+        {"hto", "Multiplexing Capture"},
+        {"cmo", "Multiplexing Capture"}
     };
 }
 

@@ -75,6 +75,16 @@ static void print_usage(const char *prog){
     fprintf(stderr, "      --emptydrops_failure_fatal    Treat EmptyDrops failure as error\n\n");
     fprintf(stderr, "      --emptydrops_use_fdr          Use FDR gate for tail rescue (default: raw p-value)\n\n");
 
+    fprintf(stderr, "ADT/Protein Output:\n");
+    fprintf(stderr, "      --output-mode <adt_mex>       Emit 10x protein MEX (barcodes/features/matrix .tsv.gz)\n");
+    fprintf(stderr, "      --adt-mex                     Alias for --output-mode adt_mex\n");
+    fprintf(stderr, "      --hash-demux <yes|no|auto>    Hash demux from hash feature counts (default auto)\n");
+    fprintf(stderr, "      --hash-feature-selector SPEC  Select hash rows (feature_type:HTO, id_prefix:hashtag)\n");
+    fprintf(stderr, "      --hash-demux-method <ratio>   Hash demux classifier (default ratio)\n");
+    fprintf(stderr, "      --hash-min-total N            Min total hash UMIs (default 3)\n");
+    fprintf(stderr, "      --hash-min-top N              Min top hash UMI count (default 3)\n");
+    fprintf(stderr, "      --hash-min-ratio X            Singlet top/second ratio (default 2.0)\n\n");
+
     fprintf(stderr, "Namespace & Compatibility:\n");
     fprintf(stderr, "      --translate_NXT               Complement positions 8 and 9 of cell barcodes at output/filter stages\n");
     fprintf(stderr, "      --source_namespace <NXT|TRU>  Namespace of filtered barcode file (required with --filtered_barcodes)\n");
@@ -170,6 +180,9 @@ int main(int argc, char *argv[])
     int emptydrops_use_fdr = 0;
     int legacy_cb_rescue = 0;
     int skip_qc_outputs = 0;
+    int adt_mex_output_cli = 0;
+    int skip_emptydrops_user_set = 0;
+    int skip_qc_outputs_user_set = 0;
 
     static struct option long_options[] = {
         {"whitelist", required_argument, 0, 'w'},
@@ -238,6 +251,14 @@ int main(int argc, char *argv[])
         {"source-namespace", required_argument, 0, 37},
         {"target_namespace", required_argument, 0, 38},
         {"target-namespace", required_argument, 0, 38},
+        {"output-mode", required_argument, 0, 43},
+        {"adt-mex", no_argument, 0, 44},
+        {"hash-demux", required_argument, 0, 45},
+        {"hash-feature-selector", required_argument, 0, 46},
+        {"hash-demux-method", required_argument, 0, 47},
+        {"hash-min-total", required_argument, 0, 48},
+        {"hash-min-top", required_argument, 0, 49},
+        {"hash-min-ratio", required_argument, 0, 50},
         {"help", no_argument, 0, 'h'},
         {0, 0, 0, 0}
     };
@@ -251,6 +272,8 @@ int main(int argc, char *argv[])
             case 'w': strcpy(whitelist_filename, optarg); break;
             case 'b': barcode_length=atoi(optarg); barcode_code_length=(barcode_length+3)/4; break;
             case 'f':
+                strncpy(adt_feature_ref_path, optarg, sizeof(adt_feature_ref_path) - 1);
+                adt_feature_ref_path[sizeof(adt_feature_ref_path) - 1] = '\0';
                 features=read_features_file(optarg);
                 number_of_features=features->number_of_features;
                 maximum_feature_length=features->max_length;
@@ -343,9 +366,9 @@ int main(int argc, char *argv[])
             case 12: filtered_barcodes_filename = strdup(optarg); break;
             case 15: min_prediction = atoi(optarg); break;
             case 16: min_heatmap = atoi(optarg); break;
-            case 40: skip_qc_outputs = 1; break;
+            case 40: skip_qc_outputs = 1; skip_qc_outputs_user_set = 1; break;
             case 17: translate_NXT = 1; fprintf(stderr, "translate_NXT enabled: complementing positions 8 and 9 at output/filter time.\n"); break;
-            case 18: skip_emptydrops = 1; break;
+            case 18: skip_emptydrops = 1; skip_emptydrops_user_set = 1; break;
             case 19: emptydrops_expected_cells = atoi(optarg); break;
             case 20: emptydrops_failure_fatal = 1; break;
             case 21: emptydrops_use_fdr = 1; break;
@@ -363,6 +386,43 @@ int main(int argc, char *argv[])
                     fprintf(stderr, "ERROR: --target_namespace must be NXT or TRU (got '%s')\n", optarg);
                     return EXIT_FAILURE;
                 }
+                break;
+            case 43:
+                if (strcmp(optarg, "adt_mex") == 0) {
+                    adt_mex_output_cli = 1;
+                } else {
+                    fprintf(stderr, "ERROR: --output-mode must be 'adt_mex' (got '%s')\n", optarg);
+                    return 1;
+                }
+                break;
+            case 44:
+                adt_mex_output_cli = 1;
+                break;
+            case 45:
+                if (strcmp(optarg, "yes") == 0) hash_demux_mode = 1;
+                else if (strcmp(optarg, "no") == 0) hash_demux_mode = 0;
+                else if (strcmp(optarg, "auto") == 0) hash_demux_mode = -1;
+                else {
+                    fprintf(stderr, "ERROR: --hash-demux must be yes, no, or auto (got '%s')\n", optarg);
+                    return 1;
+                }
+                break;
+            case 46:
+                strncpy(hash_feature_selector, optarg, sizeof(hash_feature_selector) - 1);
+                hash_feature_selector[sizeof(hash_feature_selector) - 1] = '\0';
+                break;
+            case 47:
+                strncpy(hash_demux_method, optarg, sizeof(hash_demux_method) - 1);
+                hash_demux_method[sizeof(hash_demux_method) - 1] = '\0';
+                break;
+            case 48:
+                hash_min_total = atoi(optarg);
+                break;
+            case 49:
+                hash_min_top = atoi(optarg);
+                break;
+            case 50:
+                hash_min_ratio = atof(optarg);
                 break;
             case 'h': print_usage(argv[0]); return 0;
             default: print_usage(argv[0]); return 1;
@@ -404,6 +464,23 @@ int main(int argc, char *argv[])
     feature_limited_fallback_mode = feature_limited_fallback_mode_cli;
     if (feature_prehash_memory_budget == 0) {
         feature_prehash_memory_budget = prehash_detect_memory_budget();
+    }
+    if (adt_mex_output_cli) {
+        adt_mex_output = 1;
+        if (!skip_emptydrops_user_set) skip_emptydrops = 1;
+        if (!skip_qc_outputs_user_set) skip_qc_outputs = 1;
+        fprintf(stderr, "ADT protein MEX output enabled (feature_type=Antibody Capture)\n");
+    }
+    {
+        size_t cmd_pos = 0;
+        for (int i = 0; i < argc && cmd_pos + 1 < sizeof(adt_command_line); ++i) {
+            if (i > 0) adt_command_line[cmd_pos++] = ' ';
+            size_t arg_len = strlen(argv[i]);
+            if (cmd_pos + arg_len >= sizeof(adt_command_line)) break;
+            memcpy(adt_command_line + cmd_pos, argv[i], arg_len);
+            cmd_pos += arg_len;
+        }
+        adt_command_line[cmd_pos] = '\0';
     }
     fprintf(stderr, "Feature prehash policy: max_hamming=%d max_entries=%llu memory_budget=%lluGB\n",
             feature_prehash_max_hamming,
@@ -706,6 +783,15 @@ int main(int argc, char *argv[])
             args.expected_cells = emptydrops_expected_cells;
             args.emptydrops_use_fdr = emptydrops_use_fdr;
             args.skip_qc_outputs = skip_qc_outputs;
+            args.adt_mex_output = adt_mex_output;
+            args.feature_ref_path = adt_feature_ref_path[0] ? adt_feature_ref_path : NULL;
+            args.hash_demux_mode = hash_demux_mode;
+            args.hash_feature_selector = hash_feature_selector[0] ? hash_feature_selector : NULL;
+            args.hash_demux_method = hash_demux_method[0] ? hash_demux_method : NULL;
+            args.library_feature_type = library_feature_type_cli[0] ? library_feature_type_cli : NULL;
+            args.hash_min_total = hash_min_total;
+            args.hash_min_top = hash_min_top;
+            args.hash_min_ratio = hash_min_ratio;
             args.error_out = &child_error;
             struct chem_detect_state chem_detect_buf;
             if (autodetect_chemistry_cli) {

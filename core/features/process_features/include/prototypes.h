@@ -60,12 +60,22 @@ int simpleCorrectFeature(char *line, feature_arrays *features, int maxN, int max
 int checkAndCorrectFeature(char *line, feature_arrays *features,int maxHammingDistance, int nThreads, int *hamming_distance, char *matching_sequence, int maxN,char *ambiguous, uint16_t *match_position, statistics *stats);
 size_t barcode_code2number(unsigned char *code);
 int checkAndCorrectBarcode(char **lines, int maxN, uint32_t feature_index, uint16_t match_position, data_structures *hashes, memory_pool_collection *pools, statistics *stats, int barcode_constant_offset);
-void finalize_processing(feature_arrays *features, data_structures *hashes, char *directory, memory_pool_collection *pools, statistics *stats, uint16_t stringency, uint16_t min_counts, double min_posterior, int legacy_cb_rescue, khash_t(strptr)* filtered_barcodes_hash, int skip_emptydrops, int emptydrops_failure_fatal, int expected_cells, int emptydrops_use_fdr, int skip_qc_outputs, int *error_out);
+void finalize_processing(feature_arrays *features, data_structures *hashes, char *directory, memory_pool_collection *pools, statistics *stats, uint16_t stringency, uint16_t min_counts, double min_posterior, int legacy_cb_rescue, khash_t(strptr)* filtered_barcodes_hash, int skip_emptydrops, int emptydrops_failure_fatal, int expected_cells, int emptydrops_use_fdr, int skip_qc_outputs, int *error_out, sample_args *sample);
 void open_fastq_files(const char *barcode_fastq, const char *forward_fastq, const char *reverse_fastq, gzFile *barcode_fastqgz, gzFile *forward_fastqgz, gzFile *reverse_fastqgz);
 fastq_reader* allocate_fastq_reader( char **filenames, int nfiles, int filetype, size_t read_size, size_t read_buffer_lines);
 fastq_reader_set *  allocate_fastq_reader_set( char **barcode_filenames, char **forward_filenames, char **reverse_filenames, int nfiles, size_t read_size, size_t read_buffer_lines);
 void *read_fastqs_by_set(void *arg);
 void *consume_reads(void *arg);
+typedef struct pf_direct_consumer_state pf_direct_consumer_state;
+pf_direct_consumer_state *pf_direct_consumer_state_create(fastq_processor *processor_args, int nreaders);
+int pf_direct_consumer_process_record(pf_direct_consumer_state *state,
+                                      const char *barcode_sequence,
+                                      const char *barcode_quality,
+                                      const char *feature_sequence,
+                                      const char *feature_quality,
+                                      const char *feature_sequence2,
+                                      const char *feature_quality2);
+void pf_direct_consumer_state_destroy(pf_direct_consumer_state *state);
 void free_fastq_reader(fastq_reader *reader);
 void free_fastq_reader_set(fastq_reader_set *reader_set);
 void free_fastq_processor(fastq_processor *processor_args);
@@ -75,6 +85,7 @@ void merge_feature_umi_counts(uint64_t key, void *value, void *user_data);
 void merge_feature_sequences(const char *key, void *value, void *user_data);
 void merge_queues(Queue *dest_q, Queue *src_q);
 void merge_unmatched_barcodes(unmatched_barcodes_features_block_list *merged_list, unmatched_barcodes_features_block_list *thread_list, memory_pool_collection *merged_pool);
+void merge_process_feature_thread_data(data_structures *dst_hashes, memory_pool_collection *dst_pool, statistics *dst_stats, data_structures *src_hashes, memory_pool_collection *src_pool, statistics *src_stats);
 void process_files_in_sample(sample_args *args);
 void initialize_data_structures(data_structures *hashes);
 void destroy_data_structures(data_structures *hashes);

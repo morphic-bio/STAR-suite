@@ -74,11 +74,13 @@ struct SlamGeneStats {
 struct SlamDiagnostics {
     uint64_t readsDroppedSnpMask = 0;
     uint64_t readsDroppedStrandness = 0;
+    uint64_t readsDroppedCallableLength = 0;
     uint64_t readsZeroGenes = 0;
     uint64_t readsProcessed = 0;
     uint64_t readsNAlignWithGeneZero = 0;  // reads where nAlignWithGene == 0
     uint64_t readsSumWeightLessThanOne = 0;  // reads where sumWeight < 1.0
     std::map<size_t, uint64_t> nTrDistribution;  // nTr -> count
+    std::map<size_t, uint64_t> callableLengthDistribution;  // post-trim consensus callable positions -> count
     std::map<size_t, uint64_t> geneSetSizeDistribution;  // gene set size -> count
     std::map<size_t, uint64_t> nAlignWithGeneDistribution;  // nAlignWithGene -> count
     std::map<double, uint64_t> sumWeightDistribution;  // sumWeight bucket -> count (bucketed)
@@ -175,7 +177,7 @@ public:
     explicit SlamQuant(uint32_t nGenes, bool snpDetect = false, double snpMismatchFrac = -1.0, bool snpObsAnyMismatch = false);
     SlamQuant(uint32_t nGenes, std::vector<uint8_t> allowedGenes, bool snpDetect = false, double snpMismatchFrac = -1.0, bool snpObsAnyMismatch = false);
 
-    void addRead(uint32_t geneId, uint16_t nT, uint8_t k, double weight);
+    void addRead(uint32_t geneId, uint16_t nT, uint16_t tc, double weight);
     void addTransitionBase(SlamMismatchCategory category, uint32_t readPos, bool secondMate,
                            bool overlap, bool opposite, int genomicBase, int readBase, double weight);
     bool snpDetectEnabled() const { return snpDetectEnabled_; }
@@ -193,12 +195,17 @@ public:
     
     // Variance analysis for auto-trim
     bool recordVarianceRead(); // Returns false if max reads reached
+    void recordVariancePosition(uint32_t mateLocalPos, uint8_t mateIndex,
+                                uint8_t qual, bool isT, bool isTc);
     void recordVariancePosition(uint32_t readPos, uint8_t qual, bool isT, bool isTc);
-    SlamVarianceTrimResult computeVarianceTrim(uint32_t readLength);
+    SlamVarianceTrimResult computeVarianceTrim(uint32_t concatenatedLen);
+    SlamVarianceTrimResult computeVarianceTrim(uint32_t concatenatedLen, uint32_t mateLen0, uint32_t mateLen1);
+    bool varianceSeparateMates() const { return varianceSeparateMates_; }
     bool varianceAnalysisEnabled() const { return varianceAnalyzer_ != nullptr; }
     const SlamVarianceAnalyzer* varianceAnalyzer() const { return varianceAnalyzer_.get(); }
     void enableVarianceAnalysis(uint32_t maxReads, uint32_t minReads,
-                                uint32_t smoothWindow = 5, uint32_t minSegLen = 3, uint32_t maxTrim = 15);
+                                uint32_t smoothWindow = 5, uint32_t minSegLen = 3, uint32_t maxTrim = 15,
+                                bool separateMateHistograms = false);
     void resetVarianceAnalysis();
     uint32_t getVarianceMaxReads() const;
     uint32_t getVarianceMinReads() const;
@@ -216,7 +223,8 @@ public:
     
     // Replay buffered reads with trim applied
     // Returns number of reads replayed
-    uint64_t replayBufferedReads(SlamCompat* compat, const SlamSnpMask* snpMask, int strandness);
+    uint64_t replayBufferedReads(SlamCompat* compat, const SlamSnpMask* snpMask, int strandness,
+                                 uint32_t minCallableLength = 30);
 
     // Dump buffer/stream for external re-quantification
     void enableDumpBuffer(uint64_t maxReads);
@@ -242,6 +250,14 @@ public:
                         double errorRate, double convRate,
                         bool vbOverdisp, double vbPhi,
                         double vbPriorAlpha, double vbPriorBeta) const;
+    bool writeCountBinomial(const Transcriptome& tr, const std::string& outFile,
+                            const std::string& sampleLabel,
+                            const std::string& format) const;
+    bool writeCountBinomial(const std::vector<std::string>& geneIds,
+                            const std::vector<std::string>& geneNames,
+                            const std::string& outFile,
+                            const std::string& sampleLabel,
+                            const std::string& format) const;
     void writeDiagnostics(const std::string& diagFile) const;
     void writeTransitions(const std::string& outFile) const;
     void writeMismatches(const std::string& outFile, const std::string& condition) const;
@@ -263,7 +279,7 @@ public:
     bool debugReadMatch(const char* readName) const;
     void debugCountDrop(uint32_t geneId, SlamDebugDropReason reason);
     void debugAddAssignment(uint32_t geneId, double weight, bool intronic,
-                            bool oppositeStrand, uint16_t nT, uint8_t k);
+                            bool oppositeStrand, uint16_t nT, uint16_t tc);
     void debugLogRead(const SlamDebugReadRecord& record);
     void writeDebug(const Transcriptome& tr, double errorRate, double convRate,
                     bool vbOverdisp, double vbPhi,
@@ -276,6 +292,7 @@ public:
                              double weight, bool primaryFlag, int mapq);
 
     const std::vector<SlamGeneStats>& genes() const { return geneStats_; }
+    const std::vector<uint8_t>& allowedGenes() const { return allowedGenes_; }
     SlamDiagnostics& diagnostics() { return diag_; }
     const SlamDiagnostics& diagnostics() const { return diag_; }
 
@@ -328,6 +345,7 @@ private:
     std::unique_ptr<SlamVarianceAnalyzer> varianceAnalyzer_;
     uint32_t varianceMaxReads_ = 0;
     uint32_t varianceMinReads_ = 0;
+    bool varianceSeparateMates_ = false;
     
     // Read buffer for auto-trim replay
     std::unique_ptr<SlamReadBuffer> readBuffer_;

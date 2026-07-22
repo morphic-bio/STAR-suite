@@ -113,7 +113,6 @@ mkdir -p "${OUT_DIR}/synthetic/alignment"
   --soloKeysCompat cr \
   --outSAMtype BAM Unsorted \
   --outFileNamePrefix "${OUT_DIR}/synthetic/alignment/" \
-  --readFilesCommand zcat \
   --readFilesIn "${OUT_DIR}/synthetic/pilot_R2.fastq.gz" "${OUT_DIR}/synthetic/pilot_R1.fastq.gz"
 
 python3 "${SCRIPT_DIR}/flex_h01_pilot.py" build-cache-from-mex \
@@ -179,7 +178,6 @@ STAR_INLINE_TRACE_QNAME=1 \
   --soloKeysCompat cr \
   --outSAMtype BAM Unsorted \
   --soloSampleSearchNearby no \
-  --readFilesCommand zcat \
   --readFilesIn "${READS_R2}" "${READS_R1}" \
   --outFileNamePrefix "${OUT_DIR}/baseline/alignment/"
 

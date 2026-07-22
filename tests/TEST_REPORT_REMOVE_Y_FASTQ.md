@@ -1,18 +1,18 @@
 # remove_y_reads FASTQ Splitter Test Report
 
-Generated: Fri Dec 12 06:01:44 PM UTC 2025
+Generated: Sun Apr  5 08:36:43 AM UTC 2026
 
 ## Test Configuration
 
-- Tool: `/mnt/pikachu/STAR-Flex/tests/../tools/remove_y_reads/remove_y_reads`
-- Test Directory: `/tmp/y_removal_comprehensive_test_3019818`
+- Tool: `/mnt/pikachu/STAR-suite/tests/../core/features/yremove_fastq/tools/remove_y_reads/remove_y_reads`
+- Test Directory: `/tmp/y_removal_comprehensive_test_681787`
 
 
 ## Test Data
 
-- Y BAM: `/tmp/y_removal_comprehensive_test_3019818/y_reads.bam` (3 unique read names)
-- Test FASTQ 1: `/tmp/y_removal_comprehensive_test_3019818/test1.fastq.gz` (5 reads)
-- Test FASTQ 2: `/tmp/y_removal_comprehensive_test_3019818/test2.fastq.gz` (3 reads)
+- Y BAM: `/tmp/y_removal_comprehensive_test_681787/y_reads.bam` (3 unique read names)
+- Test FASTQ 1: `/tmp/y_removal_comprehensive_test_681787/test1.fastq.gz` (5 reads)
+- Test FASTQ 2: `/tmp/y_removal_comprehensive_test_681787/test2.fastq.gz` (3 reads)
 - Expected Y reads: read1, read3, read7
 - Expected noY reads: read2, read4, read5, read6, read8
 

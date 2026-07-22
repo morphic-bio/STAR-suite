@@ -131,6 +131,32 @@ This writes `features.tsv` and `barcodes.tsv` alongside the existing `matrix.mtx
 - Canonical implementation path: `core/features/process_features`.
 - `core/features/feature_barcodes` is retained only as a compatibility path.
 
+## ADT / Protein MEX (`--output-mode adt_mex`)
+
+For Multiomics Suite protein quantification, `assignBarcodes` can emit a gzipped
+10x MEX directory directly (`barcodes.tsv.gz`, `features.tsv.gz`, `matrix.mtx.gz`)
+with `Antibody Capture` feature rows and provenance sidecars. See
+`docs/RUNBOOK_PROCESS_FEATURES_ADT_MEX.md`.
+
+The same `adt_mex` mode also supports **HTO/CMO hash libraries** and mixed
+ADT+HTO references: hash rows emit under `hash/` (feature type
+`Multiplexing Capture`), optional protein-only rows under `protein/`, and native
+hash demux sidecars (`hash_demux_assignments.tsv`, singlet/doublet/negative lists,
+`hash_demux_summary.json`). See `docs/RUNBOOK_NATIVE_HTO_CMO_FEATURE_DEMUX_20260615.md`.
+
+In **pf-multi** configs, ADT/protein is another feature-library arm (same path as
+gRNA or LARRY): declare a non-GEX `feature_types` value such as `Antibody Capture`,
+`ADT`, or `Protein`, provide `star_feature_ref`, and the permits-based runner
+calls `assignBarcodes` with ADT MEX mode for that library only. Multiomics Suite
+consumes the resulting `protein.mex_dir`; STAR-suite does not orchestrate CLR or
+downstream packaging.
+
+HTO/CMO libraries use the same `adt_mex` assign path with `feature_types` such as
+`Multiplexing Capture`, `HTO`, or `CMO`. Optional pf-multi columns
+`star_hash_demux`, `star_hash_feature_selector`, `star_hash_demux_method`,
+`star_hash_min_total`, `star_hash_min_top`, and `star_hash_min_ratio` map to the
+matching `assignBarcodes` CLI flags.
+
 ---
 
 ## CRISPR Feature Calling (CR-Compat Mode)
@@ -171,6 +197,85 @@ CR-compat mode produces `outs/crispr_analysis/`:
 - `protospacer_umi_thresholds.csv` - GMM-derived UMI thresholds
 
 See `tests/crispr_feature_calling_comparison_report.md` for validation details.
+
+### Ambient-FDR Guide Calling and QC
+
+Perturb-seq runs default to `auto`: Cell Ranger-compatible GMM calls stay in
+the standard root `crispr_analysis/` files, and ambient-background FDR calls are
+written as QC/tuning sidecar outputs when raw guide MEX and the finalized
+EmptyDrops simple-cell knee are available.
+
+```bash
+STAR ... --pfMultiConfig config.csv
+STAR ... --pfMultiConfig config.csv --crGuideCaller gmm
+STAR ... --pfMultiConfig config.csv --crGuideCaller ambient-fdr --crGuideFdr 0.01
+```
+
+Parameters:
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--crGuideCaller` | `auto` | `auto`, `gmm`, `ambient-fdr`, `both`, or `none` |
+| `--crGuideFdr` | `0.01` | Default FDR threshold for ambient-FDR calls |
+| `--crGuideFdrMinUmi` | `1` | Minimum observed guide UMI count for ambient-FDR calls |
+| `--crGuideFdrEmitQvalues` | `sparse` | `sparse` writes observed-entry q-values; `none` skips the q-value matrix |
+
+`auto` preserves compatibility mode root outputs by running the
+Cell Ranger-compatible GMM caller, and also writes ambient-FDR QC outputs when
+raw guide MEX and the finalized cell set are available. Use `gmm` for strict
+GMM-only output, `both` for explicit GMM plus ambient-FDR, `ambient-fdr` for
+FDR-only outputs, and `none` to skip guide calling.
+
+Ambient-FDR estimates guide background from raw CRISPR guide UMIs in non-cell
+barcodes, then computes q-values only for the finalized called-cell universe.
+In integrated STAR runs that universe is the EmptyDrops simple-cell knee
+(`is_simple_cell == 1`), not rescued-tail candidates that may also appear in
+`outs/filtered_feature_bc_matrix`. It applies BH over the full called-cell by
+guide universe (`n_cells * n_guides`) while sorting only observed cell-guide
+p-values. Missing cell-guide entries are not materialized; they imply
+`qvalue = 1` and are non-calls.
+
+Ambient-FDR outputs are written under `outs/crispr_analysis/ambient_fdr/`:
+
+- `guide_fdr_calls_per_cell.csv`
+- `guide_fdr_summary.json`
+- `guide_fdr_threshold_sweep.tsv`
+- `guide_ambient_rates.tsv`
+- `guide_qvalues.mtx`
+- `guide_qvalues_barcodes.tsv`
+- `guide_qvalues_features.tsv`
+
+`guide_fdr_calls_per_cell.csv` includes the FDR call at the configured
+threshold plus count support for downstream QC:
+
+- `num_umis`: total UMIs across called guides in the cell
+- `min_called_umi`: minimum UMI count among called guides; 0 for no-call cells
+- `max_called_umi`: maximum UMI count among called guides; 0 for no-call cells
+- `min_qvalue`: best observed guide q-value in the cell
+- `call_status`: `none`, `singlet`, or `multiplet`
+
+The UMI floor is intentionally a call filter, not part of the q-value
+calculation. Downstream h5ad integration can annotate these fields with
+`scripts/integrate_feature_library.py --ambient-fdr-calls-csv`. If an existing
+compatibility workflow passes `--calls-csv protospacer_calls_per_cell.csv`, the
+script also auto-discovers the sibling
+`ambient_fdr/guide_fdr_calls_per_cell.csv` when present. The MuData builder
+propagates `guide_fdr_*` columns from RNA AnnData to top-level `mdata.obs`.
+This keeps manual tuning simple after inspecting QC plots, e.g. filtering on
+`guide_fdr_min_qvalue` and `guide_fdr_min_called_umi`.
+
+`star_feature_call --call-only` can run the same caller from existing MEX
+outputs by passing the desired called-cell MEX as `--mex-dir` and the raw MEX
+as `--raw-mex-dir`. For post hoc CAT-ATAC/Perturb-seq QC, use a knee-filtered
+MEX if you want the integrated STAR cell universe.
+
+```bash
+star_feature_call --call-only --compat-perturb \
+  --guide-caller both \
+  --mex-dir /path/to/outs/filtered_feature_bc_matrix \
+  --raw-mex-dir /path/to/outs/raw_feature_bc_matrix \
+  --output-dir /path/to/output
+```
 
 ---
 
@@ -250,6 +355,7 @@ fastqs,sample,library_type,feature_types,star_chemistry,star_feature_ref,star_li
 /path/to/mRNA,DE_30KO,Gene Expression,Gene Expression,TRU,,gex_de
 /path/to/PolyIII,DE_30KO,CRISPR Guide Capture,CRISPR Guide Capture,NXT,/path/to/ref_grna.csv,grna_de
 /path/to/LARRY,DE_30KO,Custom,Custom,TRU,/path/to/ref_larry.csv,larry_de
+/path/to/ADT,DE_30KO,Protein,Protein,TRU,/path/to/ref_protein.csv,adt_de
 
 [feature]
 ref,/path/to/ref_grna.csv
@@ -258,6 +364,10 @@ ref,/path/to/ref_grna.csv
 In this example:
 - The gRNA library uses its own `star_feature_ref` (no filtering needed).
 - The LARRY lineage library uses a separate reference CSV with LARRY barcodes.
+- The ADT/protein library is routed like any other feature library; pf-multi
+  enables `assignBarcodes --output-mode adt_mex` for `Antibody Capture`, `ADT`,
+  or `Protein` rows and writes protein MEX sidecars under
+  `cr_assign/<feature_types>/<star_library_id>/`.
 - The global `[feature] ref` is a fallback for libraries without `star_feature_ref`.
 
 ### Validation
@@ -386,6 +496,10 @@ counts**; use the dynamic interface so threads are auto-sized.
 
 - **No BAM for benchmarks**: Use `--outSAMtype None` unless BAM output is
   needed. Saves significant I/O and disk.
+- **No `GX`/`UR` for count parity**: Do not add these BAM attributes to the
+  benchmark command. `GX` is alignment-level rather than final `GeneFull` or
+  CR-compatible counting policy, and `UR` is intentionally the raw,
+  uncorrected UMI. Compare the final MEX matrices and cell calls instead.
 - **GeneFull only**: Skip `Gene` and `Velocyto` unless specifically required.
   Each adds a full pass over the read array.
 - **Poly-G trimming**: Always `--clip3pPolyG yes` for NovaSeq/NextSeq data

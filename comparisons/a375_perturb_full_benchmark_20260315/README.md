@@ -2,7 +2,7 @@
 
 **Date**: 2026-03-15  
 **Dataset**: 10x 1k CRISPR 5' GEM-X (A375), full FASTQs  
-**Host**: pikachu (32 threads, 128 GB RAM)
+**Host**: pikachu (i9-13900KF, 126 GB RAM, 32 threads)
 
 ## Summary
 

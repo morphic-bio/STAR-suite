@@ -1,0 +1,66 @@
+# SLAM Fixture End-to-End Workflow Schema
+# Parsed from tests/run_slam_end_to_end_fixture.sh
+
+id: "slam_end_to_end_fixture"
+title: "SLAM Fixture E2E"
+summary: "Fixture-based SLAM E2E using 100K downsampled reads — fast, self-contained."
+kind: "shell_workflow"
+entry_script: "tests/run_slam_end_to_end_fixture.sh"
+supported_modes:
+  - "local"
+caveats:
+  - "Uses bundled fixture data from test/fixtures/slam/."
+  - "Threads hardcoded at 4; not exposed as CLI flag."
+  - "Falls back to fixture reference comparison if GEDI is unavailable."
+default_output_layout: "<repo>/test/tmp_slam_fixture_e2e_<timestamp>/"
+
+stages:
+  - name: "alignment"
+    title: "STAR Alignment"
+    description: "Align fixture FASTQ with STAR."
+  - name: "snp_mask"
+    title: "SNP Mask"
+    description: "Apply fixture SNP mask."
+  - name: "quantification"
+    title: "Quantification"
+    description: "VB quantification on fixture data."
+  - name: "comparison"
+    title: "Reference Comparison"
+    description: "Compare against fixture reference or GEDI if available."
+
+parameter_groups:
+  - name: "paths"
+    title: "Paths"
+    parameters: ["work_dir"]
+  - name: "execution"
+    title: "Execution"
+    parameters: ["overwrite", "no_cleanup", "no_gedi"]
+
+parameters:
+  - name: "work_dir"
+    cli_flag: "--work-dir"
+    type: "directory"
+    required: false
+    description: "Working directory for outputs. Auto-timestamped if not set."
+
+  - name: "overwrite"
+    cli_flag: "--overwrite"
+    type: "bool"
+    default: false
+    description: "Rerun steps even if outputs already exist."
+
+  - name: "no_cleanup"
+    cli_flag: "--no-cleanup"
+    type: "bool"
+    default: false
+    description: "Keep intermediate files after completion."
+
+  - name: "no_gedi"
+    cli_flag: "--no-gedi"
+    type: "bool"
+    default: false
+    description: "Force fixture reference comparison even if GEDI is available."
+
+rendering:
+  flag_order: ["work_dir", "overwrite", "no_cleanup", "no_gedi"]
+  omit_absent_optionals: true

@@ -12,12 +12,18 @@
 #include "ProbeListIndex.h"
 #include "PackedReadInfo.h"
 #include "CbUbTagInjector.h"
+#include "BAMfunctions.h"
+#include "ErrorWarning.h"
+#include "OcmMultiConfig.h"
+#include "OcmMultiMaterialize.h"
 #include <cstring>
 #include <fstream>
 #include <functional>
 #include <sstream>
 #include <algorithm>
 #include <atomic>
+#include <map>
+#include <mutex>
 #include "FlexDebugCounters.h"
 
 // Debug flag for Task 2 staging verification
@@ -29,6 +35,224 @@ static std::atomic<int> g_debugSampleDetectionCount{0};
 // recordsWithoutSample and ambiguousCbCount now use thread-local FlexDebugCounters
 
 namespace {
+
+std::string lowerStringLocal(std::string s) {
+    std::transform(s.begin(), s.end(), s.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return s;
+}
+
+bool unsetTokenLocal(const std::string& value) {
+    return value.empty() || value == "-";
+}
+
+std::string resolveOcmConfigPathLocal(const Parameters& P) {
+    if (!unsetTokenLocal(P.pfMulti.ocmMultiConfig)) {
+        return P.pfMulti.ocmMultiConfig;
+    }
+    if (!unsetTokenLocal(P.pfMulti.pfMultiConfig)) {
+        return P.pfMulti.pfMultiConfig;
+    }
+    return std::string();
+}
+
+std::string resolveOcmProjectRootLocal(const std::string& outPrefix) {
+    std::string prefix = outPrefix;
+    if (!prefix.empty() && prefix.back() != '/') {
+        prefix.push_back('/');
+    }
+    const std::string runSuffix = "/run/";
+    size_t runPos = prefix.rfind(runSuffix);
+    if (runPos != std::string::npos) {
+        const std::string samplesToken = "/samples/";
+        size_t samplesPos = prefix.rfind(samplesToken, runPos);
+        if (samplesPos != std::string::npos) {
+            return prefix.substr(0, samplesPos + 1);
+        }
+        if (runPos == 0) {
+            return "./";
+        }
+        return prefix.substr(0, runPos + 1);
+    }
+    size_t lastSlash = prefix.find_last_of('/');
+    if (lastSlash == std::string::npos || lastSlash == 0) {
+        return "./";
+    }
+    return prefix.substr(0, lastSlash + 1);
+}
+
+struct DirectOcmBamSampleHandle {
+    std::string sampleId;
+    BGZF* bam = nullptr;
+    BGZF* bamY = nullptr;
+    BGZF* bamNoY = nullptr;
+    uint64_t records = 0;
+    uint64_t recordsY = 0;
+    uint64_t recordsNoY = 0;
+};
+
+struct DirectOcmBamRouter {
+    bool initialized = false;
+    bool enabled = false;
+    std::vector<DirectOcmBamSampleHandle> samples;
+    std::map<std::string, std::vector<size_t>> tagToSampleIndices;
+    BGZF* unassigned = nullptr;
+    uint64_t unassignedRecords = 0;
+    uint64_t assignedRecords = 0;
+};
+
+DirectOcmBamRouter g_directOcmBamRouter;
+std::mutex g_directOcmBamRouterMutex;
+
+BGZF* openDirectOcmBamFile(const std::string& path, Parameters& P) {
+    BGZF* bam = bgzf_open(path.c_str(), ("w" + to_string((long long)P.outBAMcompression)).c_str());
+    if (bam == nullptr) {
+        std::ostringstream errOut;
+        errOut << "EXITING because of fatal ERROR: could not open OCM BAM output: " << path << "\n";
+        errOut << "SOLUTION: check that the disk is not full and the output directory is writable";
+        exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
+    }
+    return bam;
+}
+
+void ensureDirectOcmBamRouterInitialized(Parameters& P) {
+    DirectOcmBamRouter& router = g_directOcmBamRouter;
+    if (router.initialized) {
+        return;
+    }
+    router.initialized = true;
+
+    const std::string mode = lowerStringLocal(P.pfMulti.ocmMultiBamSplit);
+    if (mode == "no" || mode.empty()) {
+        return;
+    }
+    if (!P.outBAMunsorted) {
+        if (mode == "yes") {
+            P.inOut->logMain << "WARNING: --ocmMultiBamSplit yes requires unsorted BAM output; skipping OCM BAM split.\n";
+        }
+        return;
+    }
+    if (g_unsortedTagBuffer != nullptr) {
+        return;
+    }
+
+    const std::string configPath = resolveOcmConfigPathLocal(P);
+    if (configPath.empty()) {
+        if (mode == "yes") {
+            P.inOut->logMain << "WARNING: --ocmMultiBamSplit yes requires --ocmMultiConfig or --pfMultiConfig; skipping OCM BAM split.\n";
+        }
+        return;
+    }
+    if (g_bamHeaderChrNames == nullptr || g_bamHeaderChrLengths == nullptr) {
+        exitWithError("EXITING because of fatal ERROR: direct OCM BAM split requested before BAM header references were initialized\n",
+                      std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
+    }
+
+    PfMultiConfig::Config config;
+    try {
+        config = OcmMultiConfig::parseAndValidate(configPath, P.inOut->logMain);
+    } catch (const std::exception& ex) {
+        if (mode == "auto") {
+            P.inOut->logMain << "WARNING: --ocmMultiBamSplit auto could not parse OCM config; skipping: "
+                             << ex.what() << "\n";
+            return;
+        }
+        exitWithError("EXITING because of fatal OCM BAM split config error: " + std::string(ex.what()) + "\n",
+                      std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
+    }
+    if (config.samples.empty()) {
+        if (mode == "yes") {
+            P.inOut->logMain << "WARNING: OCM BAM split requested but config has no [samples]; skipping.\n";
+        }
+        return;
+    }
+
+    const std::string projectRoot = resolveOcmProjectRootLocal(P.outFileNamePrefix);
+    const std::string multiCountDir = projectRoot + "outs/multi/count/";
+    createDirectory(multiCountDir, P.runDirPerm, "OCM multi BAM output", P);
+    router.unassigned = openDirectOcmBamFile(multiCountDir + "unassigned_alignments.bam", P);
+    outBAMwriteHeader(router.unassigned, P.samHeader, *g_bamHeaderChrNames, *g_bamHeaderChrLengths);
+
+    for (const auto& sample : config.samples) {
+        const std::string sampleCountDir = projectRoot + "outs/per_sample_outs/" + sample.sample_id + "/count/";
+        createDirectory(sampleCountDir, P.runDirPerm, "OCM per-sample BAM output", P);
+        DirectOcmBamSampleHandle handle;
+        handle.sampleId = sample.sample_id;
+        handle.bam = openDirectOcmBamFile(sampleCountDir + "sample_alignments.bam", P);
+        outBAMwriteHeader(handle.bam, P.samHeader, *g_bamHeaderChrNames, *g_bamHeaderChrLengths);
+        if (P.emitNoYBAMyes) {
+            handle.bamY = openDirectOcmBamFile(sampleCountDir + "sample_alignments_Y.bam", P);
+            outBAMwriteHeader(handle.bamY, P.samHeader, *g_bamHeaderChrNames, *g_bamHeaderChrLengths);
+            handle.bamNoY = openDirectOcmBamFile(sampleCountDir + "sample_alignments_noY.bam", P);
+            outBAMwriteHeader(handle.bamNoY, P.samHeader, *g_bamHeaderChrNames, *g_bamHeaderChrLengths);
+        }
+        const size_t index = router.samples.size();
+        router.samples.push_back(handle);
+        for (const auto& ocmId : sample.resolvedOcmIds()) {
+            router.tagToSampleIndices[ocmId].push_back(index);
+        }
+    }
+
+    router.enabled = true;
+    P.inOut->logMain << "OCM BAM split enabled during direct unsorted BAM streaming: "
+                     << router.samples.size() << " samples, projectRoot=" << projectRoot;
+    if (P.emitNoYBAMyes) {
+        P.inOut->logMain << " with per-sample Y/noY BAMs";
+    }
+    P.inOut->logMain << "\n";
+}
+
+std::string ocmIdForPendingMeta(const PendingSoloMeta& meta, const Parameters& P) {
+    std::string barcode;
+    if (meta.cbIdxPlus1 > 0) {
+        const size_t idx = static_cast<size_t>(meta.cbIdxPlus1 - 1);
+        if (idx < P.pSolo.cbWLstrOut.size()) {
+            barcode = P.pSolo.cbWLstrOut[idx];
+        } else if (idx < P.pSolo.cbWLstr.size()) {
+            barcode = P.pSolo.cbWLstr[idx];
+        }
+    }
+    if (barcode.empty() && !meta.cbSeq.empty()) {
+        barcode = meta.cbSeq;
+    }
+    return barcode.empty() ? std::string() : OcmMultiMaterialize::classifyBarcodeTag(barcode);
+}
+
+void routeDirectOcmBamRecord(const PendingSoloMeta& meta,
+                             const char* bamData,
+                             uint32_t bamSize,
+                             Parameters& P) {
+    DirectOcmBamRouter& router = g_directOcmBamRouter;
+    if (!router.enabled) {
+        return;
+    }
+    const std::string ocmId = ocmIdForPendingMeta(meta, P);
+    auto it = router.tagToSampleIndices.find(ocmId);
+    if (it == router.tagToSampleIndices.end() || it->second.empty()) {
+        if (router.unassigned != nullptr) {
+            bgzf_write(router.unassigned, bamData, bamSize);
+            ++router.unassignedRecords;
+        }
+        return;
+    }
+    for (size_t sampleIndex : it->second) {
+        if (sampleIndex >= router.samples.size() || router.samples[sampleIndex].bam == nullptr) {
+            continue;
+        }
+        bgzf_write(router.samples[sampleIndex].bam, bamData, bamSize);
+        ++router.samples[sampleIndex].records;
+        if (meta.hasY) {
+            if (router.samples[sampleIndex].bamY != nullptr) {
+                bgzf_write(router.samples[sampleIndex].bamY, bamData, bamSize);
+                ++router.samples[sampleIndex].recordsY;
+            }
+        } else if (router.samples[sampleIndex].bamNoY != nullptr) {
+            bgzf_write(router.samples[sampleIndex].bamNoY, bamData, bamSize);
+            ++router.samples[sampleIndex].recordsNoY;
+        }
+    }
+    ++router.assignedRecords;
+}
 
 std::string normalizeCbTag(const std::string &cbRaw) {
     size_t dash = cbRaw.find('-');
@@ -484,9 +708,15 @@ void BAMoutput::flushPendingToLedgerAndDisk() {
     
     // Note: SoloTagLedger append removed - ledger not used in inline flex path
     
+    {
+        std::lock_guard<std::mutex> directOcmLock(g_directOcmBamRouterMutex);
+        ensureDirectOcmBamRouterInitialized(P);
+    }
+    const bool routeOcmBam = g_directOcmBamRouter.enabled;
+
     // Write BAM buffer to BGZF stream(s)
-    if (P.emitNoYBAMyes && bgzfBAM_Y != nullptr && bgzfBAM_noY != nullptr) {
-        // Y-split mode: route records individually based on hasY flag
+    if ((P.emitNoYBAMyes && bgzfBAM_Y != nullptr && bgzfBAM_noY != nullptr) || routeOcmBam) {
+        // Y-split and/or OCM-split mode: route records individually.
         uint64_t offset = 0;
         size_t metaIdx = 0;
         while (offset < binBytes1 && metaIdx < pendingSoloMeta_.size()) {
@@ -494,17 +724,27 @@ void BAMoutput::flushPendingToLedgerAndDisk() {
             if (offset + 4 > binBytes1) break;
             uint32_t recSize = *((uint32_t*)(bamArray + offset));
             if (offset + recSize + 4 > binBytes1) break;  // Safety check
+            const uint32_t recordSize = recSize + 4;
+            const char* recordData = bamArray + offset;
             
-            // Route to appropriate handle based on hasY flag
-            BGZF *targetHandle = pendingSoloMeta_[metaIdx].hasY ? bgzfBAM_Y : bgzfBAM_noY;
-            bgzf_write(targetHandle, bamArray + offset, recSize + 4);
-            
-            // Also write to primary if not suppressed
-            if (!suppressPrimary_ && bgzfBAM != nullptr) {
-                bgzf_write(bgzfBAM, bamArray + offset, recSize + 4);
+            if (P.emitNoYBAMyes && bgzfBAM_Y != nullptr && bgzfBAM_noY != nullptr) {
+                // Route to appropriate handle based on hasY flag.
+                BGZF *targetHandle = pendingSoloMeta_[metaIdx].hasY ? bgzfBAM_Y : bgzfBAM_noY;
+                bgzf_write(targetHandle, recordData, recordSize);
+
+                // Also write to primary if not suppressed.
+                if (!suppressPrimary_ && bgzfBAM != nullptr) {
+                    bgzf_write(bgzfBAM, recordData, recordSize);
+                }
+            } else if (bgzfBAM != nullptr) {
+                bgzf_write(bgzfBAM, recordData, recordSize);
+            }
+
+            if (routeOcmBam) {
+                routeDirectOcmBamRecord(pendingSoloMeta_[metaIdx], recordData, recordSize, P);
             }
             
-            offset += recSize + 4;
+            offset += recordSize;
             metaIdx++;
         }
     } else {
@@ -532,6 +772,46 @@ void BAMoutput::flushPendingToLedgerAndDisk() {
     pendingAux_.clear();
     pendingSoloMeta_.clear(); // Task 2: Clear solo meta staging
     binBytes1 = 0;
+}
+
+void closeDirectOcmBamRouter(Parameters &P) {
+    std::lock_guard<std::mutex> directOcmLock(g_directOcmBamRouterMutex);
+    DirectOcmBamRouter& router = g_directOcmBamRouter;
+    if (!router.initialized) {
+        return;
+    }
+    if (router.enabled) {
+        P.inOut->logMain << "OCM BAM split completed: assigned_records=" << router.assignedRecords
+                         << " unassigned_records=" << router.unassignedRecords << "\n";
+        for (const auto& sample : router.samples) {
+            P.inOut->logMain << "  OCM BAM sample " << sample.sampleId
+                             << " records=" << sample.records;
+            if (sample.bamY != nullptr || sample.bamNoY != nullptr) {
+                P.inOut->logMain << " y_records=" << sample.recordsY
+                                 << " noY_records=" << sample.recordsNoY;
+            }
+            P.inOut->logMain << "\n";
+        }
+    }
+    for (auto& sample : router.samples) {
+        if (sample.bam != nullptr) {
+            bgzf_close(sample.bam);
+            sample.bam = nullptr;
+        }
+        if (sample.bamY != nullptr) {
+            bgzf_close(sample.bamY);
+            sample.bamY = nullptr;
+        }
+        if (sample.bamNoY != nullptr) {
+            bgzf_close(sample.bamNoY);
+            sample.bamNoY = nullptr;
+        }
+    }
+    if (router.unassigned != nullptr) {
+        bgzf_close(router.unassigned);
+        router.unassigned = nullptr;
+    }
+    router = DirectOcmBamRouter();
 }
 
 void BAMoutput::unsortedFlush () {//flush all alignments

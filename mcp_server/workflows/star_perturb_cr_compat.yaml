@@ -1,0 +1,124 @@
+# Public recipe: STAR-perturb integrated CR-compat (README Sample Commands + AGENTS.md threading hints).
+id: star_perturb_cr_compat
+title: STAR-perturb (CR-compat alignReads)
+summary: Single STAR alignReads with --pfMultiConfig and recommended CR-compat threading flags.
+kind: star_cli
+entry_script: core/legacy/source/STAR
+supported_modes: [local]
+caveats:
+  - Build the binary first (make -C core/legacy/source STAR).
+  - Prefer --crAssignConsumerThreads -1 (auto) on real runs; this recipe defaults to -1.
+  - Multi-library layout is defined by pfMultiConfig CSV (see feature_barcodes / perturb docs).
+default_output_layout: Outputs under out_file_name_prefix.
+
+scripts:
+  - role: entry
+    path: core/legacy/source/STAR
+    description: STAR binary
+    language: native
+
+parameter_groups:
+  - name: core
+    title: CR-compat alignment
+    parameters:
+      - run_mode
+      - run_thread_n
+      - genome_dir
+      - pf_multi_config
+      - dynamic_thread_interface
+      - dynamic_thread_const_map_permits
+      - cr_assign_consumer_threads
+      - cr_assign_search_threads
+      - default_cr_compat
+      - out_file_name_prefix
+
+parameters:
+  - name: run_mode
+    cli_flag: --runMode
+    type: string
+    required: true
+    default: alignReads
+    description: STAR run mode.
+    category: core
+  - name: run_thread_n
+    cli_flag: --runThreadN
+    type: int
+    required: true
+    default: 32
+    description: Primary thread count (match host).
+    category: core
+  - name: genome_dir
+    cli_flag: --genomeDir
+    type: directory
+    required: true
+    path_must_exist: true
+    description: STAR genome index directory.
+    category: core
+  - name: pf_multi_config
+    cli_flag: --pfMultiConfig
+    type: file
+    required: true
+    path_must_exist: true
+    description: process_features multi-sample CSV (libraries, FASTQs, chemistry, etc.).
+    category: core
+  - name: dynamic_thread_interface
+    cli_flag: --dynamicThreadInterface
+    type: int
+    required: true
+    default: 1
+    description: Enable dynamic threading for parallel phases (recommended on).
+    category: core
+  - name: dynamic_thread_const_map_permits
+    cli_flag: --dynamicThreadConstMapPermits
+    type: int
+    required: true
+    default: 32
+    description: Cap for const-map threads (often match run_thread_n).
+    category: core
+  - name: cr_assign_consumer_threads
+    cli_flag: --crAssignConsumerThreads
+    type: int
+    required: true
+    default: -1
+    description: Feature-assignment consumer threads (-1 = auto-size; recommended).
+    category: core
+  - name: cr_assign_search_threads
+    cli_flag: --crAssignSearchThreads
+    type: int
+    required: true
+    default: 1
+    description: Search threads per consumer (keep at 1 to avoid oversubscription).
+    category: core
+  - name: default_cr_compat
+    cli_flag: --defaultCrCompat
+    type: string
+    required: true
+    default: "yes"
+    description: Enable CR-compatible defaults for GEX + features.
+    category: core
+  - name: out_file_name_prefix
+    cli_flag: --outFileNamePrefix
+    type: string
+    required: true
+    is_output_root: true
+    description: Output prefix.
+    category: core
+
+constraints:
+  - kind: positive
+    params: [run_thread_n, dynamic_thread_interface, dynamic_thread_const_map_permits, cr_assign_search_threads]
+    message: Must be positive (use cr_assign_consumer_threads -1 for auto).
+
+rendering:
+  omit_absent_optionals: true
+  flag_order:
+    - run_mode
+    - run_thread_n
+    - genome_dir
+    - pf_multi_config
+    - dynamic_thread_interface
+    - dynamic_thread_const_map_permits
+    - cr_assign_consumer_threads
+    - cr_assign_search_threads
+    - default_cr_compat
+    - out_file_name_prefix

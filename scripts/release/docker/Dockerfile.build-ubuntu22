@@ -1,6 +1,7 @@
 FROM ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive \
+    TZ=Etc/UTC \
     STAR_SUITE_BUILD_CONTAINER_READY=1
 
 RUN apt-get update \

@@ -11,11 +11,10 @@
 
 #include <cmath>
 #include <iostream>
-#include <map>
 
 #include "slam_vb_overdisp.h"
 
-static double log_binom_pmf(uint16_t n, uint8_t k, double p) {
+static double log_binom_pmf(uint16_t n, uint16_t k, double p) {
     if (p <= 0.0 || p >= 1.0) return -1e30;
     double nn = static_cast<double>(n);
     double kk = static_cast<double>(k);
@@ -23,7 +22,7 @@ static double log_binom_pmf(uint16_t n, uint8_t k, double p) {
     return log_coeff + kk * std::log(p) + (nn - kk) * std::log(1.0 - p);
 }
 
-static double log_beta_binom_pmf(uint16_t n, uint8_t k, double p, double phi) {
+static double log_beta_binom_pmf(uint16_t n, uint16_t k, double p, double phi) {
     if (phi <= 0.0 || p <= 0.0 || p >= 1.0) return -1e30;
     double nn = static_cast<double>(n);
     double kk = static_cast<double>(k);
@@ -35,31 +34,29 @@ static double log_beta_binom_pmf(uint16_t n, uint8_t k, double p, double phi) {
     return log_coeff + log_beta_num - log_beta_den;
 }
 
-static std::map<uint16_t, double> make_hist(uint16_t n, double pi, double p_err, double p_conv, double total_reads) {
-    std::map<uint16_t, double> hist;
-    for (uint8_t k = 0; k <= n; ++k) {
+static MismatchHistogram make_hist(uint16_t n, double pi, double p_err, double p_conv, double total_reads) {
+    MismatchHistogram hist;
+    for (uint16_t k = 0; k <= n; ++k) {
         double p_old = std::exp(log_binom_pmf(n, k, p_err));
         double p_new = std::exp(log_binom_pmf(n, k, p_conv));
         double p_mix = (1.0 - pi) * p_old + pi * p_new;
         double count = total_reads * p_mix;
         if (count > 0.0) {
-            uint16_t key = static_cast<uint16_t>((n << 8) | k);
-            hist[key] = count;
+            hist[slamPackMismatchKey(n, k)] = count;
         }
     }
     return hist;
 }
 
-static std::map<uint16_t, double> make_hist_bb(uint16_t n, double pi, double p_err, double p_conv, double phi, double total_reads) {
-    std::map<uint16_t, double> hist;
-    for (uint8_t k = 0; k <= n; ++k) {
+static MismatchHistogram make_hist_bb(uint16_t n, double pi, double p_err, double p_conv, double phi, double total_reads) {
+    MismatchHistogram hist;
+    for (uint16_t k = 0; k <= n; ++k) {
         double p_old = std::exp(log_beta_binom_pmf(n, k, p_err, phi));
         double p_new = std::exp(log_beta_binom_pmf(n, k, p_conv, phi));
         double p_mix = (1.0 - pi) * p_old + pi * p_new;
         double count = total_reads * p_mix;
         if (count > 0.0) {
-            uint16_t key = static_cast<uint16_t>((n << 8) | k);
-            hist[key] = count;
+            hist[slamPackMismatchKey(n, k)] = count;
         }
     }
     return hist;
@@ -78,7 +75,7 @@ int main() {
     // Test 1: recover pi ~ 0.3 under low dispersion
     {
         double pi_true = 0.30;
-        std::map<uint16_t, double> hist = make_hist(n, pi_true, p_err, p_conv, total_reads);
+        MismatchHistogram hist = make_hist(n, pi_true, p_err, p_conv, total_reads);
         SlamVbOverdispSolver solver(p_err, p_conv, 1000.0, 1.0, 1.0);
         VbOverdispResult res = solver.solve(hist);
         if (!approx(res.ntr_map, pi_true, 0.05)) {
@@ -89,8 +86,8 @@ int main() {
 
     // Test 2: monotonicity (pi=0.6 > pi=0.3)
     {
-        std::map<uint16_t, double> hist_low = make_hist(n, 0.30, p_err, p_conv, total_reads);
-        std::map<uint16_t, double> hist_high = make_hist(n, 0.60, p_err, p_conv, total_reads);
+        MismatchHistogram hist_low = make_hist(n, 0.30, p_err, p_conv, total_reads);
+        MismatchHistogram hist_high = make_hist(n, 0.60, p_err, p_conv, total_reads);
         SlamVbOverdispSolver solver(p_err, p_conv, 1000.0, 1.0, 1.0);
         VbOverdispResult res_low = solver.solve(hist_low);
         VbOverdispResult res_high = solver.solve(hist_high);
@@ -104,7 +101,7 @@ int main() {
     {
         double pi_true = 0.30;
         double phi_true = 5.0;
-        std::map<uint16_t, double> hist = make_hist_bb(n, pi_true, p_err, p_conv, phi_true, total_reads);
+        MismatchHistogram hist = make_hist_bb(n, pi_true, p_err, p_conv, phi_true, total_reads);
         SlamVbOverdispSolver solver_match(p_err, p_conv, phi_true, 1.0, 1.0);
         SlamVbOverdispSolver solver_mismatch(p_err, p_conv, 1000.0, 1.0, 1.0);
         VbOverdispResult res_match = solver_match.solve(hist);
@@ -119,7 +116,7 @@ int main() {
 
     // Test 4: stronger prior lowers pi
     {
-        std::map<uint16_t, double> hist = make_hist(n, 0.30, p_err, p_conv, total_reads);
+        MismatchHistogram hist = make_hist(n, 0.30, p_err, p_conv, total_reads);
         SlamVbOverdispSolver solver_weak(p_err, p_conv, 1000.0, 1.0, 1.0);
         SlamVbOverdispSolver solver_strong(p_err, p_conv, 1000.0, 1.0, 99.0);
         VbOverdispResult res_weak = solver_weak.solve(hist);

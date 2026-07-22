@@ -1,0 +1,62 @@
+# Parameter Regression Test Suite Workflow Schema
+# Parsed from tests/run_parms_tests.sh
+
+id: "parms_regression"
+title: "Parameter Regression Suite"
+summary: "Comprehensive parameter regression test runner with standard and extended test sets."
+kind: "shell_workflow"
+entry_script: "tests/run_parms_tests.sh"
+supported_modes:
+  - "local"
+caveats:
+  - "Sources tests/setup_parms_tests.sh for binary paths and fixture locations."
+  - "Extended set requires additional fixtures (SLAM, Flex)."
+  - "ASAN mode uses sanitizer suppressions from tests/compat/lsan_suppressions.txt."
+  - "Produces report at plans/artifacts/parms_tests_<timestamp>/report.md."
+default_output_layout: "plans/artifacts/parms_tests_<timestamp>/"
+
+stages:
+  - name: "setup"
+    title: "Setup"
+    description: "Source environment, locate binaries, verify fixtures."
+  - name: "run"
+    title: "Run Tests"
+    description: "Execute selected test set with chosen build mode."
+  - name: "report"
+    title: "Report"
+    description: "Generate pass/fail summary report."
+
+parameter_groups:
+  - name: "selection"
+    title: "Test Selection"
+    parameters: ["set", "mode"]
+  - name: "execution"
+    title: "Execution"
+    parameters: ["keep_going"]
+
+parameters:
+  - name: "set"
+    cli_flag: "--set"
+    type: "enum"
+    required: false
+    default: "standard"
+    choices: ["standard", "extended"]
+    description: "Test set to run. Standard is core tests; extended adds SLAM, Flex, and feature-tool tests."
+
+  - name: "mode"
+    cli_flag: "--mode"
+    type: "enum"
+    required: false
+    default: "release"
+    choices: ["release", "asan"]
+    description: "Build mode. Release uses optimized binary; ASAN uses AddressSanitizer build."
+
+  - name: "keep_going"
+    cli_flag: "--keep-going"
+    type: "bool"
+    default: false
+    description: "Continue running tests after a failure instead of stopping at the first."
+
+rendering:
+  flag_order: ["set", "mode", "keep_going"]
+  omit_absent_optionals: true

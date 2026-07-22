@@ -84,7 +84,6 @@ COMMON_PARAMS=(
     --chimSegmentMin 1000000
     --soloKeysCompat cr
     --soloSampleSearchNearby no
-    --readFilesCommand zcat
     --readFilesIn "$R2_FILES" "$R1_FILES"
 )
 

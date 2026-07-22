@@ -8,7 +8,13 @@ from typing import Generator
 import pytest
 import yaml
 
-from mcp_server.config import load_config, _config, _config_path, _config_loaded_at
+from mcp_server.config import (
+    load_config,
+    _config,
+    _config_path,
+    _config_loaded_at,
+    _workflow_schemas,
+)
 import mcp_server.config as config_module
 
 
@@ -106,6 +112,7 @@ def loaded_config(sample_config_file: Path):
     config_module._config = None
     config_module._config_path = None
     config_module._config_loaded_at = None
+    config_module._workflow_schemas = {}
 
 
 @pytest.fixture

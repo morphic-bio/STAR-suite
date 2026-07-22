@@ -1,5 +1,7 @@
 #include "PfMultiMerge.h"
 #include "ErrorWarning.h"
+#include "Parameters.h"
+#include "streamFuns.h"
 #include "serviceFuns.cpp"
 #include <fstream>
 #include <sstream>
@@ -115,7 +117,101 @@ static bool writeGzLines(const string& path, const vector<string>& lines) {
     return gzclose(gz) == Z_OK;
 }
 
+static string stripBarcodeSuffix(const string& bc) {
+    size_t dashPos = bc.find_last_of('-');
+    if (dashPos != string::npos && dashPos < bc.size() - 1) {
+        bool allDigits = true;
+        for (size_t i = dashPos + 1; i < bc.size(); ++i) {
+            if (!std::isdigit(static_cast<unsigned char>(bc[i]))) {
+                allDigits = false;
+                break;
+            }
+        }
+        if (allDigits) {
+            return bc.substr(0, dashPos);
+        }
+    }
+    return bc;
+}
+
+static bool barcodeHasGemSuffix(const string& bc) {
+    if (bc.size() < 2) {
+        return false;
+    }
+    size_t dashPos = bc.find_last_of('-');
+    if (dashPos == string::npos || dashPos == bc.size() - 1) {
+        return false;
+    }
+    for (size_t i = dashPos + 1; i < bc.size(); ++i) {
+        if (!std::isdigit(static_cast<unsigned char>(bc[i]))) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static string applyGemWellSuffix(const string& bc, const string& gemWell, ostream& logStream) {
+    if (barcodeHasGemSuffix(bc)) {
+        const string existing = bc.substr(bc.find_last_of('-') + 1);
+        if (existing != gemWell) {
+            logStream << "WARNING: barcode " << bc << " suffix " << existing
+                      << " differs from gem_well=" << gemWell << ", keeping existing suffix\n";
+        }
+        return bc;
+    }
+    return bc + "-" + gemWell;
+}
+
 } // namespace
+
+CrBarcodeLayout buildCrBarcodeLayoutForColumns(const vector<string>& sourceBarcodes,
+                                                const vector<uint32_t>& colIndices,
+                                                const string& gemWell,
+                                                const string& inputChemistry,
+                                                const string& outputChemistry,
+                                                ostream& logStream) {
+    CrBarcodeLayout layout;
+    layout.sourceColToSorted.assign(sourceBarcodes.size(), UINT32_MAX);
+
+    vector<pair<string, uint32_t>> labeled;
+    labeled.reserve(colIndices.size());
+    for (uint32_t idx : colIndices) {
+        if (idx >= sourceBarcodes.size()) {
+            continue;
+        }
+        string bc = sourceBarcodes[idx];
+        if (needsNamespaceTranslation(inputChemistry, outputChemistry)) {
+            translateNxtMiddleTwoBasesInplace(bc);
+        }
+        bc = applyGemWellSuffix(bc, gemWell, logStream);
+        labeled.emplace_back(bc, idx);
+    }
+
+    std::sort(labeled.begin(), labeled.end(),
+              [](const pair<string, uint32_t>& a, const pair<string, uint32_t>& b) {
+                  return a.first < b.first;
+              });
+
+    std::unordered_map<string, size_t> dup;
+    dup.reserve(labeled.size() * 2);
+    for (const auto& entry : labeled) {
+        dup[entry.first]++;
+    }
+    for (const auto& kv : dup) {
+        if (kv.second > 1) {
+            ostringstream err;
+            err << "ERROR: duplicate barcodes after CR-compat formatting: " << kv.first;
+            throw runtime_error(err.str());
+        }
+    }
+
+    layout.sortedBarcodes.reserve(labeled.size());
+    for (size_t out = 0; out < labeled.size(); ++out) {
+        layout.sourceColToSorted[labeled[out].second] = static_cast<uint32_t>(out);
+        layout.sortedBarcodes.push_back(labeled[out].first);
+    }
+    return layout;
+}
 
 string resolveMexFile(const string& mexDir, const string& basename) {
     string plain = mexDir + "/" + basename;
@@ -209,6 +305,8 @@ MexData readMex(const string& mexDir) {
     
     string matrixPath = resolveMexFile(mexDir, "matrix.mtx");
     bool isGz = (matrixPath.length() > 3 && matrixPath.substr(matrixPath.length() - 3) == ".gz");
+    uint32_t matrixNrows = 0;
+    uint32_t matrixNcols = 0;
     
     if (isGz) {
         gzFile file = gzopen(matrixPath.c_str(), "rb");
@@ -220,7 +318,6 @@ MexData readMex(const string& mexDir) {
 
         string line;
         bool headerDone = false;
-        uint32_t nrows = 0, ncols = 0;
         uint64_t nnz = 0;
         
         while (gzGetLine(file, line)) {
@@ -232,7 +329,7 @@ MexData readMex(const string& mexDir) {
             
             if (!headerDone) {
                 istringstream ss(line);
-                ss >> nrows >> ncols >> nnz;
+                ss >> matrixNrows >> matrixNcols >> nnz;
                 headerDone = true;
                 continue;
             }
@@ -266,7 +363,6 @@ MexData readMex(const string& mexDir) {
         
         string line;
         bool headerDone = false;
-        uint32_t nrows = 0, ncols = 0;
         uint64_t nnz = 0;
         
         while (getline(file, line)) {
@@ -275,7 +371,7 @@ MexData readMex(const string& mexDir) {
             
             if (!headerDone) {
                 istringstream ss(line);
-                ss >> nrows >> ncols >> nnz;
+                ss >> matrixNrows >> matrixNcols >> nnz;
                 headerDone = true;
                 continue;
             }
@@ -298,6 +394,15 @@ MexData readMex(const string& mexDir) {
     if (data.features.size() != data.featureNames.size() || 
         data.features.size() != data.featureTypes.size()) {
         throw runtime_error("Features array size mismatch");
+    }
+
+    if (matrixNrows != data.features.size() || matrixNcols != data.barcodes.size()) {
+        ostringstream err;
+        err << "Matrix Market dimension mismatch in " << matrixPath
+            << ": header rows=" << matrixNrows << " cols=" << matrixNcols
+            << " but features.tsv has " << data.features.size()
+            << " rows and barcodes.tsv has " << data.barcodes.size() << " columns";
+        throw runtime_error(err.str());
     }
     
     return data;
@@ -877,6 +982,383 @@ int writeCombinedMex(const string& outputDir,
     logStream << "  Triplets retained: " << tripletsRetained << "\n";
     logStream << "  GEM well used: " << gemWell << "\n";
     
+    return 0;
+}
+
+MexAxes readMexAxes(const string& mexDir) {
+    MexAxes axes;
+    const string featuresPath = resolveMexFile(mexDir, "features.tsv");
+    const vector<string> featureLines = readLines(featuresPath);
+    for (const auto& line : featureLines) {
+        istringstream ss(line);
+        string id, name, type;
+        if (getline(ss, id, '\t')) {
+            axes.features.push_back(id);
+            if (getline(ss, name, '\t')) {
+                axes.featureNames.push_back(name);
+                if (getline(ss, type, '\t')) {
+                    axes.featureTypes.push_back(type);
+                } else {
+                    axes.featureTypes.push_back("Gene Expression");
+                }
+            } else {
+                axes.featureNames.push_back(id);
+                axes.featureTypes.push_back("Gene Expression");
+            }
+        }
+    }
+    axes.barcodes = readLines(resolveMexFile(mexDir, "barcodes.tsv"));
+    if (axes.features.size() != axes.featureNames.size() ||
+        axes.features.size() != axes.featureTypes.size()) {
+        throw runtime_error("readMexAxes: feature axis size mismatch in " + mexDir);
+    }
+    return axes;
+}
+
+vector<uint32_t> buildColumnRemap(const vector<uint32_t>& colIndices, size_t sourceColumnCount) {
+    vector<uint32_t> oldToNew(sourceColumnCount, UINT32_MAX);
+    uint32_t next = 0;
+    for (uint32_t oldIdx : colIndices) {
+        if (oldIdx < sourceColumnCount && oldToNew[oldIdx] == UINT32_MAX) {
+            oldToNew[oldIdx] = next++;
+        }
+    }
+    return oldToNew;
+}
+
+static uint64_t countSubsetMatrixNnz(const string& matrixPath, const vector<uint32_t>& oldToNew) {
+    const bool isGz =
+        (matrixPath.length() > 3 && matrixPath.substr(matrixPath.length() - 3) == ".gz");
+
+    if (isGz) {
+        gzFile file = gzopen(matrixPath.c_str(), "rb");
+        if (file == nullptr) {
+            throw runtime_error("countSubsetMatrixNnz: failed to open " + matrixPath);
+        }
+        string line;
+        uint64_t localNnz = 0;
+        bool headerDone = false;
+        while (gzGetLine(file, line)) {
+            if (line.empty()) {
+                continue;
+            }
+            if (line[0] == '%') {
+                continue;
+            }
+            if (!headerDone) {
+                headerDone = true;
+                continue;
+            }
+            istringstream ss(line);
+            uint32_t row = 0;
+            uint32_t col = 0;
+            double val = 0;
+            if (ss >> row >> col >> val) {
+                const uint32_t oldCol = col - 1;
+                if (oldCol < oldToNew.size() && oldToNew[oldCol] != UINT32_MAX) {
+                    localNnz++;
+                }
+            }
+        }
+        if (gzclose(file) != Z_OK) {
+            throw runtime_error("countSubsetMatrixNnz: gzclose failed for " + matrixPath);
+        }
+        return localNnz;
+    }
+
+    ifstream file(matrixPath.c_str());
+    if (!file.is_open()) {
+        throw runtime_error("countSubsetMatrixNnz: failed to open " + matrixPath);
+    }
+    string line;
+    uint64_t localNnz = 0;
+    bool headerDone = false;
+    while (getline(file, line)) {
+        while (!line.empty() && (line.back() == '\n' || line.back() == '\r')) {
+            line.pop_back();
+        }
+        if (line.empty()) {
+            continue;
+        }
+        if (line[0] == '%') {
+            continue;
+        }
+        if (!headerDone) {
+            headerDone = true;
+            continue;
+        }
+        istringstream ss(line);
+        uint32_t row = 0;
+        uint32_t col = 0;
+        double val = 0;
+        if (ss >> row >> col >> val) {
+            const uint32_t oldCol = col - 1;
+            if (oldCol < oldToNew.size() && oldToNew[oldCol] != UINT32_MAX) {
+                localNnz++;
+            }
+        }
+    }
+    return localNnz;
+}
+
+uint64_t streamMatrixColumnSubset(const string& inputMatrixPath,
+                                  const string& outputMatrixGzPath,
+                                  const vector<uint32_t>& oldToNew,
+                                  size_t nRows,
+                                  size_t nColsOut) {
+    const uint64_t nnz = countSubsetMatrixNnz(inputMatrixPath, oldToNew);
+    const bool isGz =
+        (inputMatrixPath.length() > 3 && inputMatrixPath.substr(inputMatrixPath.length() - 3) == ".gz");
+
+    gzFile outGz = gzopen(outputMatrixGzPath.c_str(), "wb");
+    if (outGz == nullptr) {
+        throw runtime_error("streamMatrixColumnSubset: failed to open output " + outputMatrixGzPath);
+    }
+    gzbuffer(outGz, 1 << 20);
+    gzsetparams(outGz, kGzLevel, Z_DEFAULT_STRATEGY);
+
+    ostringstream hdr;
+    hdr << "%%MatrixMarket matrix coordinate integer general\n%\n"
+        << nRows << " " << nColsOut << " " << nnz << "\n";
+    const string hdrStr = hdr.str();
+    if (gzwrite(outGz, hdrStr.data(), hdrStr.size()) <= 0) {
+        gzclose(outGz);
+        throw runtime_error("streamMatrixColumnSubset: failed to write header");
+    }
+
+    auto writeDataLine = [&](const string& line, bool& headerDone) {
+        if (line.empty() || line[0] == '%') {
+            return;
+        }
+        if (!headerDone) {
+            headerDone = true;
+            return;
+        }
+        istringstream ss(line);
+        uint32_t row = 0;
+        uint32_t col = 0;
+        double val = 0;
+        if (ss >> row >> col >> val) {
+            const uint32_t oldCol = col - 1;
+            if (oldCol < oldToNew.size() && oldToNew[oldCol] != UINT32_MAX) {
+                char buf[64];
+                const int n = snprintf(buf, sizeof(buf), "%u %u %u\n",
+                                       row,
+                                       oldToNew[oldCol] + 1,
+                                       static_cast<uint32_t>(val));
+                if (n <= 0 || gzwrite(outGz, buf, n) <= 0) {
+                    throw runtime_error("streamMatrixColumnSubset: write failed");
+                }
+            }
+        }
+    };
+
+    if (isGz) {
+        gzFile inGz = gzopen(inputMatrixPath.c_str(), "rb");
+        if (inGz == nullptr) {
+            gzclose(outGz);
+            throw runtime_error("streamMatrixColumnSubset: failed to open input " + inputMatrixPath);
+        }
+        string line;
+        bool headerDone = false;
+        try {
+            while (gzGetLine(inGz, line)) {
+                writeDataLine(line, headerDone);
+            }
+        } catch (...) {
+            gzclose(inGz);
+            gzclose(outGz);
+            throw;
+        }
+        if (gzclose(inGz) != Z_OK) {
+            gzclose(outGz);
+            throw runtime_error("streamMatrixColumnSubset: input gzclose failed");
+        }
+    } else {
+        ifstream inFile(inputMatrixPath.c_str());
+        if (!inFile.is_open()) {
+            gzclose(outGz);
+            throw runtime_error("streamMatrixColumnSubset: failed to open input " + inputMatrixPath);
+        }
+        string line;
+        bool headerDone = false;
+        while (getline(inFile, line)) {
+            while (!line.empty() && (line.back() == '\n' || line.back() == '\r')) {
+                line.pop_back();
+            }
+            writeDataLine(line, headerDone);
+        }
+    }
+
+    if (gzclose(outGz) != Z_OK) {
+        throw runtime_error("streamMatrixColumnSubset: output gzclose failed");
+    }
+    return nnz;
+}
+
+static vector<string> featureAxisLines(const MexAxes& axes) {
+    vector<string> lines;
+    lines.reserve(axes.features.size());
+    for (size_t i = 0; i < axes.features.size(); ++i) {
+        const string name = (i < axes.featureNames.size()) ? axes.featureNames[i] : axes.features[i];
+        const string type = (i < axes.featureTypes.size()) ? axes.featureTypes[i] : "Gene Expression";
+        lines.push_back(axes.features[i] + "\t" + name + "\t" + type);
+    }
+    return lines;
+}
+
+int writeColumnSubsetMexGz(const string& inputMexDir,
+                           const string& outputDir,
+                           const MexAxes& sourceAxes,
+                           const CrBarcodeLayout& layout,
+                           Parameters& P,
+                           ostream& logStream) {
+    (void)logStream;
+    createDirectory(outputDir + "/", P.runDirPerm, "MEX output", P);
+
+    const vector<string>& sortedBarcodes = layout.sortedBarcodes;
+    if (!writeGzLines(outputDir + "/features.tsv.gz", featureAxisLines(sourceAxes))) {
+        return -1;
+    }
+    if (!writeGzLines(outputDir + "/barcodes.tsv.gz", sortedBarcodes)) {
+        return -1;
+    }
+    if (sortedBarcodes.empty()) {
+        gzFile gz = gzopen((outputDir + "/matrix.mtx.gz").c_str(), "wb");
+        if (gz == nullptr) {
+            return -1;
+        }
+        gzbuffer(gz, 1 << 20);
+        gzsetparams(gz, kGzLevel, Z_DEFAULT_STRATEGY);
+        ostringstream hdr;
+        hdr << "%%MatrixMarket matrix coordinate integer general\n%\n"
+            << sourceAxes.features.size() << " 0 0\n";
+        const string hdrStr = hdr.str();
+        if (gzwrite(gz, hdrStr.data(), hdrStr.size()) <= 0 || gzclose(gz) != Z_OK) {
+            return -1;
+        }
+        return 0;
+    }
+
+    const string matrixIn = resolveMexFile(inputMexDir, "matrix.mtx");
+    try {
+        streamMatrixColumnSubset(matrixIn,
+                                 outputDir + "/matrix.mtx.gz",
+                                 layout.sourceColToSorted,
+                                 sourceAxes.features.size(),
+                                 sortedBarcodes.size());
+    } catch (const exception& ex) {
+        cerr << "writeColumnSubsetMexGz: " << ex.what() << endl;
+        return -1;
+    }
+    return 0;
+}
+
+int writeStreamedPoolMexGzCrCompat(const string& inputMexDir,
+                                   const string& outputDir,
+                                   const MexAxes& sourceAxes,
+                                   Parameters& P,
+                                   ostream& logStream,
+                                   const string& gemWell,
+                                   const vector<string>& gexBarcodeFilter,
+                                   const string& inputChemistry,
+                                   const string& outputChemistry) {
+    createDirectory(outputDir + "/", P.runDirPerm, "MEX output", P);
+
+    vector<uint32_t> colIndices;
+
+    if (!gexBarcodeFilter.empty()) {
+        std::unordered_set<string> gexSet;
+        gexSet.reserve(gexBarcodeFilter.size() * 2);
+        for (const auto& bc : gexBarcodeFilter) {
+            gexSet.insert(stripBarcodeSuffix(bc));
+        }
+        colIndices.reserve(gexSet.size());
+        for (size_t idx = 0; idx < sourceAxes.barcodes.size(); ++idx) {
+            if (gexSet.count(stripBarcodeSuffix(sourceAxes.barcodes[idx]))) {
+                colIndices.push_back(static_cast<uint32_t>(idx));
+            }
+        }
+        logStream << "CR-compat pool MEX: GEX barcode filter (" << colIndices.size()
+                  << " columns)\n";
+    } else {
+        colIndices.reserve(sourceAxes.barcodes.size());
+        for (size_t idx = 0; idx < sourceAxes.barcodes.size(); ++idx) {
+            colIndices.push_back(static_cast<uint32_t>(idx));
+        }
+        logStream << "CR-compat pool MEX: full raw barcode axis (" << colIndices.size()
+                  << " columns)\n";
+    }
+
+    if (colIndices.empty()) {
+        cerr << "ERROR: No columns for pool MEX output" << endl;
+        return -1;
+    }
+
+    const CrBarcodeLayout layout = buildCrBarcodeLayoutForColumns(sourceAxes.barcodes,
+                                                                  colIndices,
+                                                                  gemWell,
+                                                                  inputChemistry,
+                                                                  outputChemistry,
+                                                                  logStream);
+    return writeColumnSubsetMexGz(inputMexDir, outputDir, sourceAxes, layout, P, logStream);
+}
+
+static bool copyBinaryFile(const string& src, const string& dst) {
+    ifstream in(src.c_str(), ios::binary);
+    ofstream out(dst.c_str(), ios::binary);
+    if (!in.is_open() || !out.is_open()) {
+        return false;
+    }
+    out << in.rdbuf();
+    return in.good() || in.eof();
+}
+
+int copyMexGzDir(const string& inputMexDir, const string& outputDir, Parameters& P) {
+    createDirectory(outputDir + "/", P.runDirPerm, "MEX output", P);
+    const char* basenames[] = {"features.tsv", "barcodes.tsv", "matrix.mtx"};
+    for (const char* basename : basenames) {
+        const string src = resolveMexFile(inputMexDir, basename);
+        const string dst = outputDir + "/" + string(basename) + ".gz";
+        const bool srcGz = (src.length() > 3 && src.substr(src.length() - 3) == ".gz");
+        if (srcGz) {
+            if (!copyBinaryFile(src, dst)) {
+                cerr << "copyMexGzDir: failed to copy " << src << " -> " << dst << endl;
+                return -1;
+            }
+            continue;
+        }
+        if (string(basename).find(".tsv") != string::npos) {
+            if (!writeGzLines(dst, readLines(src))) {
+                return -1;
+            }
+            continue;
+        }
+        gzFile outGz = gzopen(dst.c_str(), "wb");
+        if (outGz == nullptr) {
+            return -1;
+        }
+        gzbuffer(outGz, 1 << 20);
+        gzsetparams(outGz, kGzLevel, Z_DEFAULT_STRATEGY);
+        ifstream inFile(src.c_str());
+        if (!inFile.is_open()) {
+            gzclose(outGz);
+            return -1;
+        }
+        string line;
+        while (getline(inFile, line)) {
+            if (!line.empty() && line.back() == '\r') {
+                line.pop_back();
+            }
+            if (gzwrite(outGz, line.data(), line.size()) <= 0 || gzwrite(outGz, "\n", 1) <= 0) {
+                gzclose(outGz);
+                return -1;
+            }
+        }
+        if (gzclose(outGz) != Z_OK) {
+            return -1;
+        }
+    }
     return 0;
 }
 

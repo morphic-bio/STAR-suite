@@ -8,7 +8,7 @@ WRAPPER="${REPO_ROOT}/scripts/run_scrna_downstream_gene_full_velocyto.sh"
 SAMPLES_ROOT=""
 OUTPUT_NAME="downstream_genefull_velocyto_cellbender"
 RUN_CELLBENDER="0"
-ADAPTIVE_FILTER="0"
+ADAPTIVE_FILTER="1"
 MIN_GENES=""
 MAX_GENES=""
 MT_PCT_CUTOFF=""
@@ -28,7 +28,7 @@ Options:
   --samples-root PATH       Root containing per-sample directories with run/
   --output-name NAME        Per-sample output dir name
                             (default: downstream_genefull_velocyto_cellbender)
-  --adaptive-filter         Enable adaptive filtering
+  --adaptive-filter         Enable adaptive n_genes and MT percentage filtering
   --run-cellbender          Enable CellBender
   --min-genes INT           Pass through to downstream wrapper
   --max-genes INT           Pass through to downstream wrapper

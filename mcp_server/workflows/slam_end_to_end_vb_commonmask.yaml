@@ -1,0 +1,84 @@
+# SLAM VB Common-Mask End-to-End Workflow Schema
+# Parsed from tests/run_slam_end_to_end_vb_commonmask.sh
+
+id: "slam_end_to_end_vb_commonmask"
+title: "SLAM VB Common-Mask E2E"
+summary: "VB-weighted SLAM vs GEDI with GEDI-derived common SNP mask."
+kind: "shell_workflow"
+entry_script: "tests/run_slam_end_to_end_vb_commonmask.sh"
+supported_modes:
+  - "local"
+caveats:
+  - "Requires GEDI installation with homo_sapiens_110_44.oml genome."
+  - "Common mask BED can be pre-computed or generated during the run."
+  - "Uses full-depth SLAM-Seq FASTQs from /storage."
+default_output_layout: "/storage/slam_e2e_vb_commonmask_<timestamp>/"
+
+stages:
+  - name: "alignment"
+    title: "STAR Alignment"
+    description: "Align WT and 6h reads with STAR."
+  - name: "snp_mask"
+    title: "SNP Mask Build"
+    description: "Build or apply GEDI-derived common SNP mask."
+  - name: "quantification"
+    title: "VB Quantification"
+    description: "slam_requant with VB weighting."
+  - name: "gedi_comparison"
+    title: "GEDI Comparison"
+    description: "GEDI GRAND-SLAM and correlation analysis."
+
+parameter_groups:
+  - name: "paths"
+    title: "Paths"
+    parameters: ["work_dir", "common_mask"]
+  - name: "performance"
+    title: "Performance"
+    parameters: ["threads", "dump_max"]
+  - name: "execution"
+    title: "Execution"
+    parameters: ["overwrite", "fail_fast"]
+
+parameters:
+  - name: "work_dir"
+    cli_flag: "--work-dir"
+    type: "directory"
+    required: false
+    default: "/storage/slam_e2e_vb_commonmask"
+    description: "Working directory for all outputs."
+
+  - name: "threads"
+    cli_flag: "--threads"
+    type: "int"
+    required: false
+    default: 8
+    description: "Thread count for STAR alignment."
+
+  - name: "dump_max"
+    cli_flag: "--dump-max"
+    type: "int"
+    required: false
+    default: 1000000
+    description: "Max reads to dump for debugging."
+
+  - name: "common_mask"
+    cli_flag: "--common-mask"
+    type: "file"
+    required: false
+    description: "Pre-computed GEDI-derived common SNP mask BED.gz."
+
+  - name: "overwrite"
+    cli_flag: "--overwrite"
+    type: "bool"
+    default: false
+    description: "Rerun steps even if outputs already exist."
+
+  - name: "fail_fast"
+    cli_flag: "--fail-fast"
+    type: "bool"
+    default: false
+    description: "Exit immediately on first failure."
+
+rendering:
+  flag_order: ["work_dir", "threads", "dump_max", "common_mask", "overwrite", "fail_fast"]
+  omit_absent_optionals: true

@@ -4,16 +4,21 @@
  */
 
 #include "../include/pf_api.h"
+#include "../include/hash_demux.h"
+#include "../include/pf_split_read.h"
 #include "../include/common.h"
 #include "../include/globals.h"
 #include "../include/prototypes.h"
 #include "../include/io.h"
 #include "../include/utils.h"
+
+#include <zlib.h>
 #include "../include/memory.h"
 
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <ctype.h>
 #include <sys/stat.h>
 #include <errno.h>
 #include <pthread.h>
@@ -42,6 +47,7 @@ struct pf_config {
     int max_threads;
     int search_threads;
     int consumer_threads;
+    int read_buffer_lines;
     pf_permit_acquire_fn permit_acquire_cb;
     pf_permit_release_fn permit_release_cb;
     void *permit_hook_ctx;
@@ -74,6 +80,16 @@ struct pf_config {
     int autodetect_chemistry_min_hits;  /* minimum total hits for decision (default 50) */
     int probe_only;                     /* 1=lightweight chemistry probe, no outputs */
     int skip_qc_outputs;                /* 1=skip feature histograms/heatmaps */
+    int adt_mex_output;                 /* 1=emit 10x protein MEX sidecars */
+
+    /* Hash / HTO / CMO demux (adt_mex extension) */
+    int hash_demux_mode;                /* PF_HASH_DEMUX_AUTO|NO|YES */
+    char hash_feature_selector[256];
+    char hash_demux_method[64];
+    char library_feature_type[128];
+    int hash_min_total;
+    int hash_min_top;
+    double hash_min_ratio;
 
     /* Union whitelist support (legacy compat) */
     int allow_union_whitelist;          /* 0=strict, 1=accept mixed NXT+TRU */
@@ -81,6 +97,8 @@ struct pf_config {
     /* Namespace normalization */
     pf_namespace_t source_namespace;    /* namespace of filtered barcode file (PF_NS_UNKNOWN = not set) */
     pf_namespace_t target_namespace;    /* namespace of assignment output (PF_NS_UNKNOWN = not set) */
+
+    pf_split_read_layout split_read_layout;
 };
 
 struct pf_context {
@@ -98,6 +116,52 @@ struct pf_context {
     unsigned long long chem_detect_ticket;
     int chem_detect_done;       /* 0=sampling, 1=decided */
     int detected_match_mode;    /* 0=unknown, 1=RAW_MATCH, 2=TRANSLATED_MATCH, 3=AMBIGUOUS */
+};
+
+struct pf_record_stream {
+    pf_context *ctx;
+    sample_args sample_args;
+    statistics *stats;
+    data_structures *hashes;
+    memory_pool_collection **pools;
+    fastq_reader_set *reader_sets[1];
+    fastq_processor *processors;
+    pthread_t *consumer_threads;
+    struct chem_detect_state chem_detect;
+    char sample_directory[FILENAME_LENGTH];
+    double start_time;
+    int nconsumers;
+    int nreaders;
+    int lines_per_block;
+    int queue_initialized;
+    int consumers_started;
+    int consumers_joined;
+    int processors_initialized;
+    int worker_state_initialized;
+    int chem_detect_enabled;
+    int failed;
+    int closed;
+};
+
+struct pf_direct_range_job {
+    pf_context *ctx;
+    sample_args sample_args;
+    statistics *stats;
+    data_structures *hashes;
+    memory_pool_collection **pools;
+    fastq_processor *processors;
+    pf_direct_consumer_state **consumer_states;
+    struct chem_detect_state chem_detect;
+    char sample_directory[FILENAME_LENGTH];
+    double start_time;
+    int nworkers;
+    int nreaders;
+    int worker_state_initialized;
+    int processors_initialized;
+    int consumer_states_initialized;
+    int chem_detect_enabled;
+    int failed;
+    int closed;
 };
 
 /* Global initialization flag */
@@ -233,6 +297,7 @@ pf_config* pf_config_create(void) {
     config->max_threads = 8;
     config->search_threads = 4;
     config->consumer_threads = 1;
+    config->read_buffer_lines = READ_BUFFER_LINES;
     config->permit_acquire_cb = NULL;
     config->permit_release_cb = NULL;
     config->permit_hook_ctx = NULL;
@@ -265,6 +330,14 @@ pf_config* pf_config_create(void) {
     config->autodetect_chemistry_min_hits = 50;
     config->probe_only = 0;
     config->skip_qc_outputs = 0;
+    config->adt_mex_output = 0;
+    config->hash_demux_mode = PF_HASH_DEMUX_AUTO;
+    config->hash_feature_selector[0] = '\0';
+    strncpy(config->hash_demux_method, PF_HASH_DEMUX_METHOD_RATIO, sizeof(config->hash_demux_method) - 1);
+    config->library_feature_type[0] = '\0';
+    config->hash_min_total = 3;
+    config->hash_min_top = 3;
+    config->hash_min_ratio = 2.0;
 
     /* Union whitelist: off by default (strict namespace) */
     config->allow_union_whitelist = 0;
@@ -287,6 +360,9 @@ pf_config* pf_config_clone(const pf_config *config) {
     pf_config *clone = malloc(sizeof(pf_config));
     if (!clone) return NULL;
     memcpy(clone, config, sizeof(pf_config));
+    if (clone->split_read_layout.enabled) {
+        pf_split_read_layout_prepare(&clone->split_read_layout);
+    }
     return clone;
 }
 
@@ -351,6 +427,10 @@ void pf_config_set_search_threads(pf_config *config, int threads) {
 
 void pf_config_set_consumer_threads(pf_config *config, int threads) {
     if (config) config->consumer_threads = threads;
+}
+
+void pf_config_set_read_buffer_lines(pf_config *config, int lines) {
+    if (config && lines > 0) config->read_buffer_lines = lines;
 }
 
 void pf_config_set_permit_hooks(
@@ -473,6 +553,67 @@ void pf_config_set_probe_only(pf_config *config, int enabled) {
 
 void pf_config_set_skip_qc_outputs(pf_config *config, int enabled) {
     if (config) config->skip_qc_outputs = enabled;
+}
+
+void pf_config_set_adt_mex_output(pf_config *config, int enable) {
+    if (config) config->adt_mex_output = (enable != 0);
+}
+
+void pf_config_set_hash_demux_mode(pf_config *config, int mode) {
+    if (config) config->hash_demux_mode = mode;
+}
+
+void pf_config_set_hash_feature_selector(pf_config *config, const char *selector) {
+    if (!config) return;
+    if (!selector) {
+        config->hash_feature_selector[0] = '\0';
+        return;
+    }
+    strncpy(config->hash_feature_selector, selector, sizeof(config->hash_feature_selector) - 1);
+    config->hash_feature_selector[sizeof(config->hash_feature_selector) - 1] = '\0';
+}
+
+void pf_config_set_hash_demux_method(pf_config *config, const char *method) {
+    if (!config) return;
+    if (!method || !method[0]) {
+        strncpy(config->hash_demux_method, PF_HASH_DEMUX_METHOD_RATIO, sizeof(config->hash_demux_method) - 1);
+        return;
+    }
+    strncpy(config->hash_demux_method, method, sizeof(config->hash_demux_method) - 1);
+    config->hash_demux_method[sizeof(config->hash_demux_method) - 1] = '\0';
+}
+
+void pf_config_set_library_feature_type(pf_config *config, const char *feature_type) {
+    if (!config) return;
+    if (!feature_type) {
+        config->library_feature_type[0] = '\0';
+        return;
+    }
+    strncpy(config->library_feature_type, feature_type, sizeof(config->library_feature_type) - 1);
+    config->library_feature_type[sizeof(config->library_feature_type) - 1] = '\0';
+}
+
+void pf_config_set_hash_min_total(pf_config *config, int min_total) {
+    if (config) config->hash_min_total = min_total;
+}
+
+void pf_config_set_hash_min_top(pf_config *config, int min_top) {
+    if (config) config->hash_min_top = min_top;
+}
+
+void pf_config_set_hash_min_ratio(pf_config *config, double min_ratio) {
+    if (config) config->hash_min_ratio = min_ratio;
+}
+
+static void pf_apply_hash_demux_config(sample_args *args, const pf_config *config) {
+    if (!args || !config) return;
+    args->hash_demux_mode = config->hash_demux_mode;
+    args->hash_feature_selector = config->hash_feature_selector[0] ? config->hash_feature_selector : NULL;
+    args->hash_demux_method = config->hash_demux_method[0] ? config->hash_demux_method : NULL;
+    args->library_feature_type = config->library_feature_type[0] ? config->library_feature_type : NULL;
+    args->hash_min_total = config->hash_min_total;
+    args->hash_min_top = config->hash_min_top;
+    args->hash_min_ratio = config->hash_min_ratio;
 }
 
 void pf_config_set_allow_union_whitelist(pf_config *config, int enable) {
@@ -884,6 +1025,626 @@ pf_error pf_load_filtered_barcodes(pf_context *ctx, const char *filtered_path) {
  * Processing Implementation
  * ============================================================================ */
 
+static pf_error pf_prepare_feature_offset_config(pf_context *ctx) {
+    if (ctx->config->use_feature_offset_array && ctx->config->feature_offset_explicit) {
+        snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                 "Cannot specify both use_feature_offset_array and explicit feature_offset");
+        return PF_ERR_OFFSET_CONFLICT;
+    }
+
+    if (!ctx->config->use_feature_offset_array && !ctx->config->feature_offset_explicit &&
+        ctx->features && feature_offsets && feature_offsets_count > 0) {
+        int offset_counts[256] = {0};
+        int max_offset_seen = -1;
+        int valid_offsets = 0;
+
+        for (int i = 0; i < feature_offsets_count; i++) {
+            int off = feature_offsets[i];
+            if (off >= 0 && off < 256) {
+                offset_counts[off]++;
+                valid_offsets++;
+                if (off > max_offset_seen) max_offset_seen = off;
+            }
+        }
+
+        if (valid_offsets > 0) {
+            int dominant_offset = 0;
+            int dominant_count = 0;
+            int second_count = 0;
+
+            for (int i = 0; i <= max_offset_seen; i++) {
+                if (offset_counts[i] > dominant_count) {
+                    second_count = dominant_count;
+                    dominant_count = offset_counts[i];
+                    dominant_offset = i;
+                } else if (offset_counts[i] > second_count) {
+                    second_count = offset_counts[i];
+                }
+            }
+
+            double heterogeneity_threshold = 0.05;
+            if (second_count > 0 &&
+                (double)second_count / (double)dominant_count > heterogeneity_threshold) {
+                if (ctx->config->strict_offset_check) {
+                    snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                             "Multiple feature offsets detected (strict mode). "
+                             "Dominant: %d (%d features), second: %d features. "
+                             "Use pf_config_set_feature_offset() or pf_config_set_use_feature_offset_array(1).",
+                             dominant_offset, dominant_count, second_count);
+                    return PF_ERR_MULTI_OFFSET_DETECTED;
+                }
+                fprintf(stderr, "\nWARNING: Multiple feature offsets detected in pattern column.\n");
+                fprintf(stderr, "         Dominant offset: %d (used by %d features)\n",
+                        dominant_offset, dominant_count);
+                fprintf(stderr, "         Other offsets detected:\n");
+                for (int i = 0; i <= max_offset_seen; i++) {
+                    if (i != dominant_offset && offset_counts[i] > 0) {
+                        double pct = 100.0 * offset_counts[i] / dominant_count;
+                        fprintf(stderr, "           offset %d: %d features (%.1f%%)\n",
+                                i, offset_counts[i], pct);
+                    }
+                }
+                fprintf(stderr, "\n         Proceeding with dominant offset %d.\n\n",
+                        dominant_offset);
+            }
+
+            ctx->config->feature_offset = dominant_offset;
+            fprintf(stderr, "[offset-detect] Auto-detected global offset: %d (from %d features with pattern)\n",
+                    dominant_offset, valid_offsets);
+        } else {
+            fprintf(stderr, "[offset-detect] No pattern offsets found, using default offset: 0\n");
+        }
+    }
+
+    return PF_OK;
+}
+
+static pf_error pf_create_directory_if_needed(pf_context *ctx, const char *path) {
+    struct stat st = {0};
+    if (stat(path, &st) == -1) {
+        if (mkdir(path, 0755) != 0) {
+            snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                     "Failed to create output directory: %.900s", path);
+            return PF_ERR_IO_ERROR;
+        }
+    }
+    return PF_OK;
+}
+
+static void pf_default_quality(char *dst, size_t sequence_len) {
+    if (sequence_len >= LINE_LENGTH - 1) {
+        sequence_len = LINE_LENGTH - 2;
+    }
+    memset(dst, 'I', sequence_len);
+    dst[sequence_len] = '\n';
+    dst[sequence_len + 1] = '\0';
+}
+
+static pf_sequence_view pf_view_from_cstr(const char *src) {
+    pf_sequence_view view;
+    view.data = src;
+    view.length = src ? strlen(src) : 0;
+    return view;
+}
+
+static size_t pf_trimmed_line_length(pf_sequence_view view) {
+    if (!view.data || view.length == 0) {
+        return 0;
+    }
+    return view.data[view.length - 1] == '\n' ? view.length - 1 : view.length;
+}
+
+static int pf_effective_read_buffer_lines(const pf_config *config,
+                                          int lines_per_block) {
+    int lines = (config && config->read_buffer_lines > 0)
+        ? config->read_buffer_lines
+        : READ_BUFFER_LINES;
+    const int minimum = lines_per_block * 2;
+    return lines < minimum ? minimum : lines;
+}
+
+static int pf_copy_record_view_line(pf_context *ctx,
+                                    char *dst,
+                                    pf_sequence_view view,
+                                    const char *field_name,
+                                    int required) {
+    if (!view.data) {
+        if (required || view.length > 0) {
+            snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                     "In-memory record is missing %s", field_name);
+            return 0;
+        }
+        dst[0] = '\0';
+        return 1;
+    }
+    const int has_newline = view.length > 0 && view.data[view.length - 1] == '\n';
+    if ((!has_newline && view.length >= LINE_LENGTH - 1) ||
+        (has_newline && view.length >= LINE_LENGTH)) {
+        snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                 "In-memory record %s length %zu exceeds LINE_LENGTH=%d "
+                 "after adding FASTQ-line newline",
+                 field_name, view.length, LINE_LENGTH);
+        return 0;
+    }
+    memcpy(dst, view.data, view.length);
+    if (has_newline) {
+        dst[view.length] = '\0';
+    } else {
+        dst[view.length] = '\n';
+        dst[view.length + 1] = '\0';
+    }
+    return 1;
+}
+
+static int pf_validate_record_view_field(pf_context *ctx,
+                                         pf_sequence_view view,
+                                         const char *field_name,
+                                         int required) {
+    if (!view.data) {
+        if (required || view.length > 0) {
+            snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                     "In-memory record is missing %s", field_name);
+            return 0;
+        }
+        return 1;
+    }
+    const int has_newline = view.length > 0 && view.data[view.length - 1] == '\n';
+    if ((!has_newline && view.length >= LINE_LENGTH - 1) ||
+        (has_newline && view.length >= LINE_LENGTH)) {
+        snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                 "In-memory record %s length %zu exceeds LINE_LENGTH=%d "
+                 "after adding FASTQ-line newline",
+                 field_name, view.length, LINE_LENGTH);
+        return 0;
+    }
+    return 1;
+}
+
+static fastq_reader *pf_allocate_decoded_reader(int filetype) {
+    fastq_reader *reader = (fastq_reader *)calloc(1, sizeof(fastq_reader));
+    if (reader) {
+        reader->filetype = filetype;
+    }
+    return reader;
+}
+
+static fastq_reader_set *pf_allocate_decoded_reader_set(pf_context *ctx,
+                                                        int nreaders,
+                                                        size_t read_size,
+                                                        size_t read_buffer_lines) {
+    if (nreaders != 2 && nreaders != 3) {
+        snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                 "Decoded process_features input supports 2 or 3 readers, got %d",
+                 nreaders);
+        return NULL;
+    }
+
+    fastq_reader_set *set = (fastq_reader_set *)calloc(1, sizeof(fastq_reader_set));
+    if (!set) {
+        snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                 "Failed to allocate decoded process_features reader set");
+        return NULL;
+    }
+
+    set->barcode_reader = pf_allocate_decoded_reader(1);
+    set->forward_reader = pf_allocate_decoded_reader(2);
+    set->reverse_reader = (nreaders == 3) ? pf_allocate_decoded_reader(3) : NULL;
+    set->read_buffer_lines = read_buffer_lines;
+    set->buffer_storage = (char *)malloc(read_buffer_lines * (read_size + 1));
+    set->buffer = (char **)malloc(read_buffer_lines * sizeof(char *));
+
+    if (!set->barcode_reader || !set->forward_reader ||
+        (nreaders == 3 && !set->reverse_reader) ||
+        !set->buffer_storage || !set->buffer) {
+        snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                 "Failed to allocate decoded process_features buffers");
+        free_fastq_reader(set->barcode_reader);
+        free_fastq_reader(set->forward_reader);
+        free_fastq_reader(set->reverse_reader);
+        free(set->buffer_storage);
+        free(set->buffer);
+        free(set);
+        return NULL;
+    }
+
+    for (size_t i = 0; i < read_buffer_lines; ++i) {
+        set->buffer[i] = set->buffer_storage + i * (read_size + 1);
+    }
+
+    pthread_mutex_init(&set->mutex, NULL);
+    pthread_cond_init(&set->can_produce, NULL);
+    pthread_cond_init(&set->can_consume, NULL);
+    return set;
+}
+
+static void pf_stream_signal_done(pf_record_stream *stream) {
+    if (!stream || !stream->queue_initialized || !stream->reader_sets[0]) {
+        return;
+    }
+    fastq_reader_set *set = stream->reader_sets[0];
+    pthread_mutex_lock(&set->mutex);
+    set->done = 1;
+    pthread_cond_broadcast(&set->can_consume);
+    pthread_cond_broadcast(&set->can_produce);
+    pthread_mutex_unlock(&set->mutex);
+}
+
+static void pf_stream_join_consumers(pf_record_stream *stream) {
+    if (!stream || stream->consumers_joined) {
+        return;
+    }
+    pf_stream_signal_done(stream);
+    for (int i = 0; i < stream->consumers_started; ++i) {
+        pthread_join(stream->consumer_threads[i], NULL);
+    }
+    stream->consumers_joined = 1;
+
+    if (stream->chem_detect_enabled) {
+        pf_context *ctx = stream->ctx;
+        ctx->chem_detect_raw_hits = stream->chem_detect.raw_hits;
+        ctx->chem_detect_nxt_hits = stream->chem_detect.nxt_hits;
+        ctx->chem_detect_ticket = stream->chem_detect.ticket;
+        ctx->chem_detect_done = stream->chem_detect.done;
+        ctx->detected_match_mode = stream->chem_detect.match_mode;
+    }
+}
+
+static void pf_stream_cleanup_runtime(pf_record_stream *stream) {
+    if (!stream) {
+        return;
+    }
+
+    if (stream->queue_initialized && !stream->consumers_joined) {
+        pf_stream_join_consumers(stream);
+    }
+
+    if (stream->reader_sets[0]) {
+        free_fastq_reader_set(stream->reader_sets[0]);
+        stream->reader_sets[0] = NULL;
+    }
+
+    if (stream->processors) {
+        for (int i = 0; i < stream->processors_initialized; ++i) {
+            pthread_mutex_destroy(&stream->processors[i].process_mutex);
+        }
+        free(stream->processors);
+        stream->processors = NULL;
+    }
+
+    free(stream->consumer_threads);
+    stream->consumer_threads = NULL;
+
+    if (stream->hashes) {
+        for (int i = 0; i < stream->worker_state_initialized; ++i) {
+            destroy_data_structures(&stream->hashes[i]);
+        }
+        free(stream->hashes);
+        stream->hashes = NULL;
+    }
+    if (stream->pools) {
+        for (int i = 0; i < stream->worker_state_initialized; ++i) {
+            if (stream->pools[i]) {
+                free_memory_pool_collection(stream->pools[i]);
+            }
+        }
+        free(stream->pools);
+        stream->pools = NULL;
+    }
+    free(stream->stats);
+    stream->stats = NULL;
+}
+
+static void pf_direct_range_cleanup_runtime(pf_direct_range_job *job) {
+    if (!job) {
+        return;
+    }
+
+    if (job->consumer_states) {
+        for (int i = 0; i < job->consumer_states_initialized; ++i) {
+            pf_direct_consumer_state_destroy(job->consumer_states[i]);
+            job->consumer_states[i] = NULL;
+        }
+        free(job->consumer_states);
+        job->consumer_states = NULL;
+    }
+
+    if (job->processors) {
+        for (int i = 0; i < job->processors_initialized; ++i) {
+            pthread_mutex_destroy(&job->processors[i].process_mutex);
+        }
+        free(job->processors);
+        job->processors = NULL;
+    }
+
+    if (job->hashes) {
+        for (int i = 0; i < job->worker_state_initialized; ++i) {
+            destroy_data_structures(&job->hashes[i]);
+        }
+        free(job->hashes);
+        job->hashes = NULL;
+    }
+    if (job->pools) {
+        for (int i = 0; i < job->worker_state_initialized; ++i) {
+            if (job->pools[i]) {
+                free_memory_pool_collection(job->pools[i]);
+                job->pools[i] = NULL;
+            }
+        }
+        free(job->pools);
+        job->pools = NULL;
+    }
+    free(job->stats);
+    job->stats = NULL;
+}
+
+static int pf_stream_initialize_queue(pf_record_stream *stream, int nreaders) {
+    if (stream->queue_initialized) {
+        if (stream->nreaders != nreaders) {
+            snprintf(stream->ctx->error_buf, PF_ERROR_BUF_SIZE,
+                     "Mixed decoded record layouts in one process_features stream");
+            return 0;
+        }
+        return 1;
+    }
+
+    pf_context *ctx = stream->ctx;
+    const int nconsumers = ctx->config->consumer_threads > 0
+        ? ctx->config->consumer_threads
+        : 1;
+    stream->nconsumers = nconsumers;
+    stream->nreaders = nreaders;
+    stream->lines_per_block = 2 * nreaders;
+
+    stream->reader_sets[0] = pf_allocate_decoded_reader_set(
+        ctx, nreaders, LINE_LENGTH,
+        (size_t)pf_effective_read_buffer_lines(ctx->config, stream->lines_per_block));
+    if (!stream->reader_sets[0]) {
+        return 0;
+    }
+    stream->reader_sets[0]->thread_id = 0;
+
+    stream->stats = (statistics *)calloc((size_t)nconsumers, sizeof(statistics));
+    stream->hashes = (data_structures *)calloc((size_t)nconsumers, sizeof(data_structures));
+    stream->pools = (memory_pool_collection **)calloc((size_t)nconsumers,
+                                                      sizeof(memory_pool_collection *));
+    stream->processors = (fastq_processor *)calloc((size_t)nconsumers,
+                                                   sizeof(fastq_processor));
+    stream->consumer_threads = (pthread_t *)calloc((size_t)nconsumers,
+                                                   sizeof(pthread_t));
+    if (!stream->stats || !stream->hashes || !stream->pools ||
+        !stream->processors || !stream->consumer_threads) {
+        snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                 "Failed to allocate decoded process_features consumer state");
+        pf_stream_cleanup_runtime(stream);
+        return 0;
+    }
+
+    for (int i = 0; i < nconsumers; ++i) {
+        initialize_statistics(&stream->stats[i]);
+        initialize_data_structures(&stream->hashes[i]);
+        stream->pools[i] = initialize_memory_pool_collection();
+    }
+    stream->worker_state_initialized = nconsumers;
+
+    memset(&stream->sample_args, 0, sizeof(stream->sample_args));
+    stream->sample_args.sample_index = 0;
+    stream->sample_args.directory = stream->sample_directory;
+    stream->sample_args.filtered_barcodes_name = NULL;
+    stream->sample_args.fastq_files = NULL;
+    stream->sample_args.features = ctx->features;
+    stream->sample_args.maxHammingDistance = ctx->config->max_hamming_distance;
+    stream->sample_args.nThreads = ctx->config->search_threads;
+    stream->sample_args.pools = stream->pools;
+    stream->sample_args.stats = stream->stats;
+    stream->sample_args.hashes = stream->hashes;
+    stream->sample_args.stringency = ctx->config->stringency;
+    stream->sample_args.min_counts = ctx->config->min_counts;
+    stream->sample_args.read_buffer_lines =
+        pf_effective_read_buffer_lines(ctx->config, stream->lines_per_block);
+    stream->sample_args.average_read_length = AVERAGE_READ_LENGTH;
+    stream->sample_args.barcode_constant_offset = ctx->config->barcode_offset;
+    stream->sample_args.feature_constant_offset = ctx->config->feature_offset;
+    stream->sample_args.min_posterior = ctx->config->min_posterior;
+    stream->sample_args.legacy_cb_rescue = ctx->config->legacy_cb_rescue;
+    stream->sample_args.consumer_threads_per_set = nconsumers;
+    stream->sample_args.permit_acquire_hook = ctx->config->permit_acquire_cb;
+    stream->sample_args.permit_release_hook = ctx->config->permit_release_cb;
+    stream->sample_args.permit_hook_ctx = ctx->config->permit_hook_ctx;
+    stream->sample_args.permit_hooks_enabled =
+        (ctx->config->permit_acquire_cb != NULL &&
+         ctx->config->permit_release_cb != NULL);
+    stream->sample_args.filtered_barcodes_hash = ctx->filtered_barcodes_hash;
+    stream->sample_args.min_prediction = 1;
+    stream->sample_args.min_heatmap = 0;
+    stream->sample_args.demux_nsamples = 1;
+    stream->sample_args.sample_barcodes = NULL;
+    stream->sample_args.sample_max_hamming = 1;
+    stream->sample_args.sample_max_N = 0;
+    stream->sample_args.sample_constant_offset = -1;
+    stream->sample_args.sample_offset_relative = 0;
+    stream->sample_args.skip_emptydrops = ctx->config->skip_emptydrops;
+    stream->sample_args.emptydrops_failure_fatal = ctx->config->emptydrops_failure_fatal;
+    stream->sample_args.expected_cells = ctx->config->expected_cells;
+    stream->sample_args.emptydrops_use_fdr = ctx->config->emptydrops_use_fdr;
+    stream->sample_args.probe_only = ctx->config->probe_only;
+    stream->sample_args.skip_qc_outputs = ctx->config->skip_qc_outputs;
+    stream->sample_args.adt_mex_output = ctx->config->adt_mex_output;
+    pf_apply_hash_demux_config(&stream->sample_args, ctx->config);
+
+    if (ctx->config->autodetect_chemistry) {
+        memset(&stream->chem_detect, 0, sizeof(stream->chem_detect));
+        stream->chem_detect.max_reads = ctx->config->autodetect_chemistry_reads;
+        stream->chem_detect.min_hits = ctx->config->autodetect_chemistry_min_hits;
+        stream->sample_args.chem_detect = &stream->chem_detect;
+        stream->reader_sets[0]->chem_detect = &stream->chem_detect;
+        stream->chem_detect_enabled = 1;
+    }
+
+    stream->reader_sets[0]->probe_only = ctx->config->probe_only;
+
+    for (int i = 0; i < nconsumers; ++i) {
+        stream->processors[i].sample_args = &stream->sample_args;
+        stream->processors[i].reader_sets = stream->reader_sets;
+        stream->processors[i].nsets = 1;
+        stream->processors[i].thread_id = i;
+        stream->processors[i].nreaders = nreaders;
+        pthread_mutex_init(&stream->processors[i].process_mutex, NULL);
+        stream->processors_initialized++;
+    }
+
+    stream->queue_initialized = 1;
+
+    for (int i = 0; i < nconsumers; ++i) {
+        if (pthread_create(&stream->consumer_threads[i], NULL,
+                           consume_reads, &stream->processors[i]) != 0) {
+            snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                     "Failed to create decoded process_features consumer thread");
+            pf_stream_join_consumers(stream);
+            pf_stream_cleanup_runtime(stream);
+            return 0;
+        }
+        stream->consumers_started++;
+    }
+
+    return 1;
+}
+
+static int pf_record_view_reader_count(pf_context *ctx,
+                                       const pf_read_record_view *record,
+                                       int *nreaders_out) {
+    const int has_feature2 =
+        (record->feature_sequence2.data || record->feature_sequence2.length > 0);
+
+    if (!pf_validate_record_view_field(ctx, record->barcode_sequence,
+                                       "barcode_sequence", 1) ||
+        !pf_validate_record_view_field(ctx, record->barcode_quality,
+                                       "barcode_quality", 0) ||
+        !pf_validate_record_view_field(ctx, record->feature_sequence,
+                                       "feature_sequence", 1) ||
+        !pf_validate_record_view_field(ctx, record->feature_quality,
+                                       "feature_quality", 0)) {
+        return 0;
+    }
+
+    if (has_feature2) {
+        if (!pf_validate_record_view_field(ctx, record->feature_sequence2,
+                                           "feature_sequence2", 1) ||
+            !pf_validate_record_view_field(ctx, record->feature_quality2,
+                                           "feature_quality2", 0)) {
+            return 0;
+        }
+        *nreaders_out = 3;
+    } else {
+        if (record->feature_quality2.data || record->feature_quality2.length > 0) {
+            snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                     "feature_quality2 was provided without feature_sequence2");
+            return 0;
+        }
+        *nreaders_out = 2;
+    }
+
+    const size_t barcode_len = pf_trimmed_line_length(record->barcode_sequence);
+    const size_t barcode_qual_len = pf_trimmed_line_length(record->barcode_quality);
+    if (record->barcode_quality.data && barcode_qual_len != barcode_len) {
+        snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                 "barcode_quality length %zu does not match barcode_sequence length %zu",
+                 barcode_qual_len, barcode_len);
+        return 0;
+    }
+
+    const size_t feature_len = pf_trimmed_line_length(record->feature_sequence);
+    const size_t feature_qual_len = pf_trimmed_line_length(record->feature_quality);
+    if (record->feature_quality.data && feature_qual_len != feature_len) {
+        snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                 "feature_quality length %zu does not match feature_sequence length %zu",
+                 feature_qual_len, feature_len);
+        return 0;
+    }
+
+    if (has_feature2) {
+        const size_t feature2_len = pf_trimmed_line_length(record->feature_sequence2);
+        const size_t feature2_qual_len = pf_trimmed_line_length(record->feature_quality2);
+        if (record->feature_quality2.data && feature2_qual_len != feature2_len) {
+            snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                     "feature_quality2 length %zu does not match feature_sequence2 length %zu",
+                     feature2_qual_len, feature2_len);
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
+static void pf_copy_quality_or_default(char *dst,
+                                       pf_sequence_view quality,
+                                       size_t sequence_len) {
+    if (quality.data || quality.length > 0) {
+        memcpy(dst, quality.data, quality.length);
+        if (quality.length > 0 && quality.data[quality.length - 1] == '\n') {
+            dst[quality.length] = '\0';
+        } else {
+            dst[quality.length] = '\n';
+            dst[quality.length + 1] = '\0';
+        }
+    } else {
+        pf_default_quality(dst, sequence_len);
+    }
+}
+
+static int pf_stream_push_record_view(pf_record_stream *stream,
+                                      const pf_read_record_view *record) {
+    pf_context *ctx = stream->ctx;
+    int nreaders = 0;
+    if (!pf_record_view_reader_count(ctx, record, &nreaders)) {
+        return 0;
+    }
+    if (!pf_stream_initialize_queue(stream, nreaders)) {
+        return 0;
+    }
+
+    if (stream->sample_args.probe_only &&
+        stream->sample_args.chem_detect &&
+        stream->sample_args.chem_detect->done) {
+        return 1;
+    }
+
+    fastq_reader_set *set = stream->reader_sets[0];
+    pthread_mutex_lock(&set->mutex);
+    while (set->filled >= set->read_buffer_lines - (size_t)stream->lines_per_block) {
+        pthread_cond_wait(&set->can_produce, &set->mutex);
+    }
+
+    const size_t p = set->produce_index;
+    pf_copy_record_view_line(ctx, set->buffer[p],
+                             record->barcode_sequence, "barcode_sequence", 1);
+    pf_copy_quality_or_default(set->buffer[(p + 1) % set->read_buffer_lines],
+                               record->barcode_quality,
+                               record->barcode_sequence.length);
+
+    pf_copy_record_view_line(ctx, set->buffer[(p + 2) % set->read_buffer_lines],
+                             record->feature_sequence, "feature_sequence", 1);
+    pf_copy_quality_or_default(set->buffer[(p + 3) % set->read_buffer_lines],
+                               record->feature_quality,
+                               record->feature_sequence.length);
+
+    if (nreaders == 3) {
+        pf_copy_record_view_line(ctx,
+                                 set->buffer[(p + 4) % set->read_buffer_lines],
+                                 record->feature_sequence2,
+                                 "feature_sequence2", 1);
+        pf_copy_quality_or_default(
+            set->buffer[(p + 5) % set->read_buffer_lines],
+            record->feature_quality2,
+            record->feature_sequence2.length);
+    }
+
+    set->produce_index = (p + (size_t)stream->lines_per_block) % set->read_buffer_lines;
+    set->filled += (size_t)stream->lines_per_block;
+    pthread_cond_signal(&set->can_consume);
+    pthread_mutex_unlock(&set->mutex);
+    return 1;
+}
+
 pf_error pf_process_fastq_dir(pf_context *ctx,
                                const char *fastq_dir,
                                const char *output_dir,
@@ -1066,7 +1827,7 @@ pf_error pf_process_fastq_dir(pf_context *ctx,
         args.min_counts = ctx->config->min_counts;
         args.barcode_constant_offset = ctx->config->barcode_offset;
         args.feature_constant_offset = ctx->config->feature_offset;
-        args.read_buffer_lines = READ_BUFFER_LINES;
+        args.read_buffer_lines = pf_effective_read_buffer_lines(ctx->config, 6);
         args.average_read_length = AVERAGE_READ_LENGTH;
         args.min_posterior = ctx->config->min_posterior;
         args.legacy_cb_rescue = ctx->config->legacy_cb_rescue;
@@ -1094,6 +1855,8 @@ pf_error pf_process_fastq_dir(pf_context *ctx,
         args.chem_detect = chem_detect_ptr;
         args.probe_only = ctx->config->probe_only;
         args.skip_qc_outputs = ctx->config->skip_qc_outputs;
+        args.adt_mex_output = ctx->config->adt_mex_output;
+        pf_apply_hash_demux_config(&args, ctx->config);
         args.error_out = &sample_error;
         
         /* Process the sample */
@@ -1329,7 +2092,7 @@ pf_error pf_process_fastqs(pf_context *ctx,
     args.min_counts = ctx->config->min_counts;
     args.barcode_constant_offset = ctx->config->barcode_offset;
     args.feature_constant_offset = ctx->config->feature_offset;
-    args.read_buffer_lines = READ_BUFFER_LINES;
+    args.read_buffer_lines = pf_effective_read_buffer_lines(ctx->config, 6);
     args.average_read_length = AVERAGE_READ_LENGTH;
     args.min_posterior = ctx->config->min_posterior;
     args.legacy_cb_rescue = ctx->config->legacy_cb_rescue;
@@ -1365,6 +2128,8 @@ pf_error pf_process_fastqs(pf_context *ctx,
     args.chem_detect = chem_detect_ptr2;
     args.probe_only = ctx->config->probe_only;
     args.skip_qc_outputs = ctx->config->skip_qc_outputs;
+    args.adt_mex_output = ctx->config->adt_mex_output;
+    pf_apply_hash_demux_config(&args, ctx->config);
     args.error_out = &sample_error;
     
     process_files_in_sample(&args);
@@ -1408,6 +2173,587 @@ pf_error pf_process_fastqs(pf_context *ctx,
 
     pthread_mutex_unlock(&g_pf_runtime_mutex);
     return PF_OK;
+}
+
+pf_error pf_process_records_begin(pf_context *ctx,
+                                  const char *output_dir,
+                                  const char *sample_name,
+                                  pf_record_stream **stream_out) {
+    if (stream_out) {
+        *stream_out = NULL;
+    }
+    if (!ctx || !output_dir || !stream_out) {
+        return PF_ERR_INVALID_ARG;
+    }
+    if (!ctx->initialized) return PF_ERR_NOT_INITIALIZED;
+
+    pthread_mutex_lock(&g_pf_runtime_mutex);
+    pf_apply_context_globals(ctx);
+
+    ctx->chem_detect_raw_hits = 0;
+    ctx->chem_detect_nxt_hits = 0;
+    ctx->chem_detect_ticket = 0;
+    ctx->chem_detect_done = 0;
+    ctx->detected_match_mode = 0;
+
+    if (!ctx->features) {
+        snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE, "Features not loaded");
+        pthread_mutex_unlock(&g_pf_runtime_mutex);
+        return PF_ERR_NOT_INITIALIZED;
+    }
+    if (!ctx->whitelist_hash) {
+        snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE, "Whitelist not loaded");
+        pthread_mutex_unlock(&g_pf_runtime_mutex);
+        return PF_ERR_NOT_INITIALIZED;
+    }
+
+    pf_error prep = pf_prepare_feature_offset_config(ctx);
+    if (prep != PF_OK) {
+        pthread_mutex_unlock(&g_pf_runtime_mutex);
+        return prep;
+    }
+
+    pf_error mkdir_err = pf_create_directory_if_needed(ctx, output_dir);
+    if (mkdir_err != PF_OK) {
+        pthread_mutex_unlock(&g_pf_runtime_mutex);
+        return mkdir_err;
+    }
+
+    const char *sname = sample_name ? sample_name : "sample";
+    pf_record_stream *stream = (pf_record_stream *)calloc(1, sizeof(pf_record_stream));
+    if (!stream) {
+        snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                 "Failed to allocate process_features record stream");
+        pthread_mutex_unlock(&g_pf_runtime_mutex);
+        return PF_ERR_OUT_OF_MEMORY;
+    }
+
+    stream->ctx = ctx;
+    snprintf(stream->sample_directory, sizeof(stream->sample_directory),
+             "%s/%s/", output_dir, sname);
+    mkdir_err = pf_create_directory_if_needed(ctx, stream->sample_directory);
+    if (mkdir_err != PF_OK) {
+        free(stream);
+        pthread_mutex_unlock(&g_pf_runtime_mutex);
+        return mkdir_err;
+    }
+
+    stream->start_time = get_time_in_seconds();
+    *stream_out = stream;
+    return PF_OK;
+}
+
+pf_error pf_process_record_views(pf_record_stream *stream,
+                                 const pf_read_record_view *records,
+                                 size_t n_records) {
+    if (!stream || (!records && n_records > 0) || stream->closed) {
+        return PF_ERR_INVALID_ARG;
+    }
+    if (stream->failed) {
+        return PF_ERR_INVALID_ARG;
+    }
+
+    for (size_t i = 0; i < n_records; ++i) {
+        if (!pf_stream_push_record_view(stream, &records[i])) {
+            stream->failed = 1;
+            return PF_ERR_INVALID_ARG;
+        }
+    }
+
+    return PF_OK;
+}
+
+pf_error pf_direct_range_begin(pf_context *ctx,
+                               const char *output_dir,
+                               const char *sample_name,
+                               int nworkers,
+                               int nreaders,
+                               pf_direct_range_job **job_out) {
+    if (job_out) {
+        *job_out = NULL;
+    }
+    if (!ctx || !output_dir || !job_out || nworkers <= 0) {
+        return PF_ERR_INVALID_ARG;
+    }
+    if (!ctx->initialized) return PF_ERR_NOT_INITIALIZED;
+    if (nreaders != 2) {
+        snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                 "Direct range PF currently supports nreaders=2 only, got %d",
+                 nreaders);
+        return PF_ERR_INVALID_ARG;
+    }
+    if (ctx->config->legacy_cb_rescue) {
+        snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                 "Direct range PF does not support legacy order-dependent CB rescue");
+        return PF_ERR_INVALID_ARG;
+    }
+    if (ctx->config->feature_mode_bootstrap_reads > 0) {
+        snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                 "Direct range PF requires explicit feature offsets; bootstrap offset mode is unsupported");
+        return PF_ERR_INVALID_ARG;
+    }
+
+    pthread_mutex_lock(&g_pf_runtime_mutex);
+    pf_apply_context_globals(ctx);
+
+    ctx->chem_detect_raw_hits = 0;
+    ctx->chem_detect_nxt_hits = 0;
+    ctx->chem_detect_ticket = 0;
+    ctx->chem_detect_done = 0;
+    ctx->detected_match_mode = 0;
+
+    if (!ctx->features) {
+        snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE, "Features not loaded");
+        pthread_mutex_unlock(&g_pf_runtime_mutex);
+        return PF_ERR_NOT_INITIALIZED;
+    }
+    if (!ctx->whitelist_hash) {
+        snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE, "Whitelist not loaded");
+        pthread_mutex_unlock(&g_pf_runtime_mutex);
+        return PF_ERR_NOT_INITIALIZED;
+    }
+
+    pf_error prep = pf_prepare_feature_offset_config(ctx);
+    if (prep != PF_OK) {
+        pthread_mutex_unlock(&g_pf_runtime_mutex);
+        return prep;
+    }
+
+    pf_error mkdir_err = pf_create_directory_if_needed(ctx, output_dir);
+    if (mkdir_err != PF_OK) {
+        pthread_mutex_unlock(&g_pf_runtime_mutex);
+        return mkdir_err;
+    }
+
+    pf_direct_range_job *job = (pf_direct_range_job *)calloc(1, sizeof(pf_direct_range_job));
+    if (!job) {
+        snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                 "Failed to allocate direct range process_features job");
+        pthread_mutex_unlock(&g_pf_runtime_mutex);
+        return PF_ERR_OUT_OF_MEMORY;
+    }
+
+    job->ctx = ctx;
+    job->nworkers = nworkers;
+    job->nreaders = nreaders;
+    const char *sname = sample_name ? sample_name : "sample";
+    snprintf(job->sample_directory, sizeof(job->sample_directory),
+             "%s/%s/", output_dir, sname);
+    mkdir_err = pf_create_directory_if_needed(ctx, job->sample_directory);
+    if (mkdir_err != PF_OK) {
+        pf_direct_range_cleanup_runtime(job);
+        free(job);
+        pthread_mutex_unlock(&g_pf_runtime_mutex);
+        return mkdir_err;
+    }
+
+    job->stats = (statistics *)calloc((size_t)nworkers, sizeof(statistics));
+    job->hashes = (data_structures *)calloc((size_t)nworkers, sizeof(data_structures));
+    job->pools = (memory_pool_collection **)calloc((size_t)nworkers,
+                                                   sizeof(memory_pool_collection *));
+    job->processors = (fastq_processor *)calloc((size_t)nworkers,
+                                                sizeof(fastq_processor));
+    job->consumer_states = (pf_direct_consumer_state **)calloc(
+        (size_t)nworkers, sizeof(pf_direct_consumer_state *));
+    if (!job->stats || !job->hashes || !job->pools ||
+        !job->processors || !job->consumer_states) {
+        snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                 "Failed to allocate direct range process_features worker state");
+        pf_direct_range_cleanup_runtime(job);
+        free(job);
+        pthread_mutex_unlock(&g_pf_runtime_mutex);
+        return PF_ERR_OUT_OF_MEMORY;
+    }
+
+    for (int i = 0; i < nworkers; ++i) {
+        initialize_statistics(&job->stats[i]);
+        initialize_data_structures(&job->hashes[i]);
+        job->pools[i] = initialize_memory_pool_collection();
+        if (!job->pools[i]) {
+            snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                     "Failed to allocate direct range process_features memory pools");
+            pf_direct_range_cleanup_runtime(job);
+            free(job);
+            pthread_mutex_unlock(&g_pf_runtime_mutex);
+            return PF_ERR_OUT_OF_MEMORY;
+        }
+        job->worker_state_initialized++;
+    }
+
+    memset(&job->sample_args, 0, sizeof(job->sample_args));
+    job->sample_args.sample_index = 0;
+    job->sample_args.directory = job->sample_directory;
+    job->sample_args.filtered_barcodes_name = NULL;
+    job->sample_args.fastq_files = NULL;
+    job->sample_args.features = ctx->features;
+    job->sample_args.maxHammingDistance = ctx->config->max_hamming_distance;
+    job->sample_args.nThreads = ctx->config->search_threads;
+    job->sample_args.pools = job->pools;
+    job->sample_args.stats = job->stats;
+    job->sample_args.hashes = job->hashes;
+    job->sample_args.stringency = ctx->config->stringency;
+    job->sample_args.min_counts = ctx->config->min_counts;
+    job->sample_args.read_buffer_lines =
+        pf_effective_read_buffer_lines(ctx->config, 2 * nreaders);
+    job->sample_args.average_read_length = AVERAGE_READ_LENGTH;
+    job->sample_args.barcode_constant_offset = ctx->config->barcode_offset;
+    job->sample_args.feature_constant_offset = ctx->config->feature_offset;
+    job->sample_args.min_posterior = ctx->config->min_posterior;
+    job->sample_args.legacy_cb_rescue = ctx->config->legacy_cb_rescue;
+    job->sample_args.consumer_threads_per_set = nworkers;
+    job->sample_args.permit_acquire_hook = ctx->config->permit_acquire_cb;
+    job->sample_args.permit_release_hook = ctx->config->permit_release_cb;
+    job->sample_args.permit_hook_ctx = ctx->config->permit_hook_ctx;
+    job->sample_args.permit_hooks_enabled =
+        (ctx->config->permit_acquire_cb != NULL &&
+         ctx->config->permit_release_cb != NULL);
+    job->sample_args.filtered_barcodes_hash = ctx->filtered_barcodes_hash;
+    job->sample_args.min_prediction = 1;
+    job->sample_args.min_heatmap = 0;
+    job->sample_args.demux_nsamples = 1;
+    job->sample_args.sample_barcodes = NULL;
+    job->sample_args.sample_max_hamming = 1;
+    job->sample_args.sample_max_N = 0;
+    job->sample_args.sample_constant_offset = -1;
+    job->sample_args.sample_offset_relative = 0;
+    job->sample_args.skip_emptydrops = ctx->config->skip_emptydrops;
+    job->sample_args.emptydrops_failure_fatal = ctx->config->emptydrops_failure_fatal;
+    job->sample_args.expected_cells = ctx->config->expected_cells;
+    job->sample_args.emptydrops_use_fdr = ctx->config->emptydrops_use_fdr;
+    job->sample_args.probe_only = ctx->config->probe_only;
+    job->sample_args.skip_qc_outputs = ctx->config->skip_qc_outputs;
+    job->sample_args.adt_mex_output = ctx->config->adt_mex_output;
+    pf_apply_hash_demux_config(&job->sample_args, ctx->config);
+
+    if (ctx->config->autodetect_chemistry) {
+        memset(&job->chem_detect, 0, sizeof(job->chem_detect));
+        job->chem_detect.max_reads = ctx->config->autodetect_chemistry_reads;
+        job->chem_detect.min_hits = ctx->config->autodetect_chemistry_min_hits;
+        job->sample_args.chem_detect = &job->chem_detect;
+        job->chem_detect_enabled = 1;
+    }
+
+    for (int i = 0; i < nworkers; ++i) {
+        job->processors[i].sample_args = &job->sample_args;
+        job->processors[i].reader_sets = NULL;
+        job->processors[i].nsets = 0;
+        job->processors[i].thread_id = i;
+        job->processors[i].nreaders = nreaders;
+        pthread_mutex_init(&job->processors[i].process_mutex, NULL);
+        job->processors_initialized++;
+
+        job->consumer_states[i] =
+            pf_direct_consumer_state_create(&job->processors[i], nreaders);
+        if (!job->consumer_states[i]) {
+            snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                     "Failed to initialize direct range process_features worker %d", i);
+            pf_direct_range_cleanup_runtime(job);
+            free(job);
+            pthread_mutex_unlock(&g_pf_runtime_mutex);
+            return PF_ERR_OUT_OF_MEMORY;
+        }
+        job->consumer_states_initialized++;
+    }
+
+    job->start_time = get_time_in_seconds();
+    *job_out = job;
+    return PF_OK;
+}
+
+pf_error pf_direct_range_process_record_views(pf_direct_range_job *job,
+                                              int worker_id,
+                                              const pf_read_record_view *records,
+                                              size_t n_records) {
+    if (!job || worker_id < 0 || worker_id >= job->nworkers ||
+        (!records && n_records > 0) || job->closed || job->failed) {
+        return PF_ERR_INVALID_ARG;
+    }
+
+    pf_context *ctx = job->ctx;
+    for (size_t i = 0; i < n_records; ++i) {
+        int nreaders = 0;
+        if (!pf_record_view_reader_count(ctx, &records[i], &nreaders)) {
+            job->failed = 1;
+            return PF_ERR_INVALID_ARG;
+        }
+        if (nreaders != job->nreaders) {
+            snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                     "Mixed direct range record layouts in one process_features job");
+            job->failed = 1;
+            return PF_ERR_INVALID_ARG;
+        }
+
+        char barcode_sequence[LINE_LENGTH];
+        char barcode_quality[LINE_LENGTH];
+        char feature_sequence[LINE_LENGTH];
+        char feature_quality[LINE_LENGTH];
+        char feature_sequence2[LINE_LENGTH];
+        char feature_quality2[LINE_LENGTH];
+        feature_sequence2[0] = '\0';
+        feature_quality2[0] = '\0';
+
+        if (!pf_copy_record_view_line(ctx, barcode_sequence,
+                                      records[i].barcode_sequence,
+                                      "barcode_sequence", 1)) {
+            job->failed = 1;
+            return PF_ERR_INVALID_ARG;
+        }
+        pf_copy_quality_or_default(barcode_quality,
+                                   records[i].barcode_quality,
+                                   records[i].barcode_sequence.length);
+        if (!pf_copy_record_view_line(ctx, feature_sequence,
+                                      records[i].feature_sequence,
+                                      "feature_sequence", 1)) {
+            job->failed = 1;
+            return PF_ERR_INVALID_ARG;
+        }
+        pf_copy_quality_or_default(feature_quality,
+                                   records[i].feature_quality,
+                                   records[i].feature_sequence.length);
+        if (job->nreaders == 3) {
+            if (!pf_copy_record_view_line(ctx, feature_sequence2,
+                                          records[i].feature_sequence2,
+                                          "feature_sequence2", 1)) {
+                job->failed = 1;
+                return PF_ERR_INVALID_ARG;
+            }
+            pf_copy_quality_or_default(feature_quality2,
+                                       records[i].feature_quality2,
+                                       records[i].feature_sequence2.length);
+        }
+
+        if (!pf_direct_consumer_process_record(job->consumer_states[worker_id],
+                                               barcode_sequence,
+                                               barcode_quality,
+                                               feature_sequence,
+                                               feature_quality,
+                                               feature_sequence2,
+                                               feature_quality2)) {
+            snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                     "Direct range process_features worker %d failed", worker_id);
+            job->failed = 1;
+            return PF_ERR_INVALID_ARG;
+        }
+    }
+
+    return PF_OK;
+}
+
+pf_error pf_direct_range_end(pf_direct_range_job *job,
+                             pf_stats *stats_out) {
+    if (!job || job->closed) {
+        return PF_ERR_INVALID_ARG;
+    }
+
+    pf_context *ctx = job->ctx;
+    pf_error result = job->failed ? PF_ERR_INVALID_ARG : PF_OK;
+    int sample_error = 0;
+    job->closed = 1;
+
+    if (job->consumer_states) {
+        for (int i = 0; i < job->consumer_states_initialized; ++i) {
+            pf_direct_consumer_state_destroy(job->consumer_states[i]);
+            job->consumer_states[i] = NULL;
+        }
+        job->consumer_states_initialized = 0;
+    }
+
+    if (job->chem_detect_enabled) {
+        ctx->chem_detect_raw_hits = job->chem_detect.raw_hits;
+        ctx->chem_detect_nxt_hits = job->chem_detect.nxt_hits;
+        ctx->chem_detect_ticket = job->chem_detect.ticket;
+        ctx->chem_detect_done = job->chem_detect.done;
+        ctx->detected_match_mode = job->chem_detect.match_mode;
+    }
+
+    if (result == PF_OK && job->nworkers > 1) {
+        for (int i = 1; i < job->nworkers; ++i) {
+            merge_process_feature_thread_data(&job->hashes[0],
+                                              job->pools[0],
+                                              &job->stats[0],
+                                              &job->hashes[i],
+                                              job->pools[i],
+                                              &job->stats[i]);
+        }
+    }
+
+    if (result == PF_OK && !ctx->config->probe_only) {
+        finalize_processing(ctx->features, &job->hashes[0],
+                            job->sample_directory, job->pools[0],
+                            &job->stats[0], ctx->config->stringency,
+                            ctx->config->min_counts, ctx->config->min_posterior,
+                            ctx->config->legacy_cb_rescue,
+                            ctx->filtered_barcodes_hash,
+                            ctx->config->skip_emptydrops,
+                            ctx->config->emptydrops_failure_fatal,
+                            ctx->config->expected_cells,
+                            ctx->config->emptydrops_use_fdr,
+                            ctx->config->skip_qc_outputs,
+                            &sample_error,
+                            &job->sample_args);
+        if (sample_error) {
+            snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                     "Sample processing failed");
+            result = PF_ERR_IO_ERROR;
+        }
+    }
+
+    double end_time = get_time_in_seconds();
+    if (stats_out) {
+        memset(stats_out, 0, sizeof(pf_stats));
+        if (job->stats) {
+            stats_out->total_reads = job->stats[0].number_of_reads;
+            stats_out->matched_reads = job->stats[0].valid;
+            stats_out->unmatched_reads = job->stats[0].total_unmatched_features;
+        }
+        stats_out->total_features = ctx->features->number_of_features;
+        stats_out->processing_time_sec = end_time - job->start_time;
+    }
+
+    pf_direct_range_cleanup_runtime(job);
+    free(job);
+    pthread_mutex_unlock(&g_pf_runtime_mutex);
+    return result;
+}
+
+void pf_direct_range_abort(pf_direct_range_job *job) {
+    if (!job || job->closed) {
+        return;
+    }
+    job->closed = 1;
+    pf_direct_range_cleanup_runtime(job);
+    free(job);
+    pthread_mutex_unlock(&g_pf_runtime_mutex);
+}
+
+pf_error pf_process_record_batch(pf_record_stream *stream,
+                                 const pf_read_record *records,
+                                 size_t n_records) {
+    if (!stream || (!records && n_records > 0)) {
+        return PF_ERR_INVALID_ARG;
+    }
+    for (size_t i = 0; i < n_records; ++i) {
+        pf_read_record_view view;
+        view.barcode_sequence = pf_view_from_cstr(records[i].barcode_sequence);
+        view.barcode_quality = pf_view_from_cstr(records[i].barcode_quality);
+        view.feature_sequence = pf_view_from_cstr(records[i].feature_sequence);
+        view.feature_quality = pf_view_from_cstr(records[i].feature_quality);
+        view.feature_sequence2 = pf_view_from_cstr(records[i].feature_sequence2);
+        view.feature_quality2 = pf_view_from_cstr(records[i].feature_quality2);
+        pf_error err = pf_process_record_views(stream, &view, 1);
+        if (err != PF_OK) {
+            return err;
+        }
+    }
+    return PF_OK;
+}
+
+pf_error pf_process_records_end(pf_record_stream *stream,
+                                pf_stats *stats_out) {
+    if (!stream || stream->closed) {
+        return PF_ERR_INVALID_ARG;
+    }
+    pf_context *ctx = stream->ctx;
+    int sample_error = 0;
+    pf_error result = PF_OK;
+
+    stream->closed = 1;
+
+    if (stream->failed) {
+        result = PF_ERR_INVALID_ARG;
+    } else if (!stream->queue_initialized) {
+        if (!pf_stream_initialize_queue(stream, 2)) {
+            result = PF_ERR_OUT_OF_MEMORY;
+        }
+    }
+
+    if (result == PF_OK) {
+        pf_stream_join_consumers(stream);
+    }
+
+    if (result == PF_OK && stream->nconsumers > 1) {
+        for (int i = 1; i < stream->nconsumers; ++i) {
+            merge_process_feature_thread_data(&stream->hashes[0],
+                                              stream->pools[0],
+                                              &stream->stats[0],
+                                              &stream->hashes[i],
+                                              stream->pools[i],
+                                              &stream->stats[i]);
+        }
+    }
+
+    if (result == PF_OK && !ctx->config->probe_only) {
+        finalize_processing(ctx->features, &stream->hashes[0],
+                            stream->sample_directory, stream->pools[0],
+                            &stream->stats[0], ctx->config->stringency,
+                            ctx->config->min_counts, ctx->config->min_posterior,
+                            ctx->config->legacy_cb_rescue,
+                            ctx->filtered_barcodes_hash,
+                            ctx->config->skip_emptydrops,
+                            ctx->config->emptydrops_failure_fatal,
+                            ctx->config->expected_cells,
+                            ctx->config->emptydrops_use_fdr,
+                            ctx->config->skip_qc_outputs,
+                            &sample_error,
+                            &stream->sample_args);
+        if (sample_error) {
+            snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                     "Sample processing failed");
+            result = PF_ERR_IO_ERROR;
+        }
+    }
+
+    double end_time = get_time_in_seconds();
+    if (stats_out) {
+        memset(stats_out, 0, sizeof(pf_stats));
+        if (stream->stats) {
+            stats_out->total_reads = stream->stats[0].number_of_reads;
+            stats_out->matched_reads = stream->stats[0].valid;
+            stats_out->unmatched_reads = stream->stats[0].total_unmatched_features;
+        }
+        stats_out->total_features = ctx->features->number_of_features;
+        stats_out->processing_time_sec = end_time - stream->start_time;
+    }
+
+    pf_stream_cleanup_runtime(stream);
+    free(stream);
+    pthread_mutex_unlock(&g_pf_runtime_mutex);
+    return result;
+}
+
+void pf_process_records_abort(pf_record_stream *stream) {
+    if (!stream || stream->closed) {
+        return;
+    }
+    stream->closed = 1;
+    pf_stream_cleanup_runtime(stream);
+    free(stream);
+    pthread_mutex_unlock(&g_pf_runtime_mutex);
+}
+
+pf_error pf_process_records(pf_context *ctx,
+                            const pf_read_record *records,
+                            size_t n_records,
+                            const char *output_dir,
+                            const char *sample_name,
+                            pf_stats *stats_out) {
+    if (!ctx || !records || n_records == 0 || !output_dir) {
+        return PF_ERR_INVALID_ARG;
+    }
+
+    pf_record_stream *stream = NULL;
+    pf_error err = pf_process_records_begin(ctx, output_dir, sample_name, &stream);
+    if (err != PF_OK) {
+        return err;
+    }
+
+    err = pf_process_record_batch(stream, records, n_records);
+    if (err != PF_OK) {
+        pf_process_records_abort(stream);
+        return err;
+    }
+
+    return pf_process_records_end(stream, stats_out);
 }
 
 /* ============================================================================
@@ -1831,6 +3177,510 @@ cleanup:
     free(n_genes_per_cell);
     
     return (rc == 0) ? PF_OK : PF_ERR_IO_ERROR;
+}
+
+void pf_config_set_split_read_layout(pf_config *config, const pf_split_read_layout *layout) {
+    if (!config || !layout) {
+        return;
+    }
+    config->split_read_layout = *layout;
+    config->split_read_layout.enabled = 1;
+    pf_split_read_layout_prepare(&config->split_read_layout);
+}
+
+void pf_config_set_split_read_fastq_patterns(pf_config *config,
+                                             const char *r1_pattern,
+                                             const char *r2_pattern,
+                                             const char *r3_pattern) {
+    if (!config) {
+        return;
+    }
+    if (r1_pattern) {
+        strncpy(config->split_read_layout.fastq_r1_pattern, r1_pattern,
+                sizeof(config->split_read_layout.fastq_r1_pattern) - 1);
+        config->split_read_layout.fastq_r1_pattern[
+            sizeof(config->split_read_layout.fastq_r1_pattern) - 1] = '\0';
+    }
+    if (r2_pattern) {
+        strncpy(config->split_read_layout.fastq_r2_pattern, r2_pattern,
+                sizeof(config->split_read_layout.fastq_r2_pattern) - 1);
+        config->split_read_layout.fastq_r2_pattern[
+            sizeof(config->split_read_layout.fastq_r2_pattern) - 1] = '\0';
+    }
+    if (r3_pattern) {
+        strncpy(config->split_read_layout.fastq_r3_pattern, r3_pattern,
+                sizeof(config->split_read_layout.fastq_r3_pattern) - 1);
+        config->split_read_layout.fastq_r3_pattern[
+            sizeof(config->split_read_layout.fastq_r3_pattern) - 1] = '\0';
+    }
+}
+
+void pf_config_clear_split_read_layout(pf_config *config) {
+    if (!config) {
+        return;
+    }
+    memset(&config->split_read_layout, 0, sizeof(config->split_read_layout));
+}
+
+const pf_split_read_layout *pf_config_get_split_read_layout(const pf_config *config) {
+    if (!config || !config->split_read_layout.enabled) {
+        return NULL;
+    }
+    return &config->split_read_layout;
+}
+
+static void pf_trim_fastq_line(char *s) {
+    if (!s) {
+        return;
+    }
+    size_t len = strlen(s);
+    while (len > 0 && (s[len - 1] == '\n' || s[len - 1] == '\r')) {
+        s[--len] = '\0';
+    }
+}
+
+static void pf_copy_truncated_for_log(const char *src, char *dst, size_t dst_cap) {
+    if (!dst || dst_cap == 0) {
+        return;
+    }
+    dst[0] = '\0';
+    if (!src) {
+        return;
+    }
+    const size_t src_len = strlen(src);
+    if (src_len < dst_cap) {
+        memcpy(dst, src, src_len + 1);
+        return;
+    }
+    if (dst_cap <= 4) {
+        memcpy(dst, src, dst_cap - 1);
+        dst[dst_cap - 1] = '\0';
+        return;
+    }
+    memcpy(dst, src, dst_cap - 4);
+    memcpy(dst + dst_cap - 4, "...", 4);
+}
+
+static void pf_copy_bounded_cstr(const char *src, char *dst, size_t dst_cap) {
+    if (!dst || dst_cap == 0) {
+        return;
+    }
+    if (!src) {
+        dst[0] = '\0';
+        return;
+    }
+    size_t len = strnlen(src, dst_cap - 1);
+    memcpy(dst, src, len);
+    dst[len] = '\0';
+}
+
+static int pf_read_fastq_record_gz(gzFile fp, char *header, char *seq, char *plus, char *qual) {
+    if (!gzgets(fp, header, LINE_LENGTH)) {
+        return 0;
+    }
+    if (!gzgets(fp, seq, LINE_LENGTH) ||
+        !gzgets(fp, plus, LINE_LENGTH) ||
+        !gzgets(fp, qual, LINE_LENGTH)) {
+        return -1;
+    }
+    pf_trim_fastq_line(header);
+    pf_trim_fastq_line(seq);
+    pf_trim_fastq_line(plus);
+    pf_trim_fastq_line(qual);
+    return 1;
+}
+
+static pf_sequence_view pf_view_from_buffer(const char *data, size_t length) {
+    pf_sequence_view view;
+    view.data = data;
+    view.length = length;
+    return view;
+}
+
+#define PF_SPLIT_BATCH_SIZE 256
+
+typedef struct {
+    const char *r1;
+    const char *r2;
+    const char *r3;
+} pf_split_read_pattern_triplet;
+
+static const pf_split_read_pattern_triplet k_pf_split_read_default_patterns[] = {
+    {"_R1", "_R2", "_R3"},
+    {"_R1_", "_R2_", "_R3_"},
+    {"_1.fastq", "_2.fastq", "_3.fastq"},
+    {"_1.fq", "_2.fq", "_3.fq"},
+    {NULL, NULL, NULL}
+};
+
+static void pf_free_file_list(char **files, int n_files) {
+    if (!files) {
+        return;
+    }
+    for (int i = 0; i < n_files; ++i) {
+        free(files[i]);
+    }
+    free(files);
+}
+
+static int pf_discover_split_read_triplets(const char *fastq_dir,
+                                           const pf_split_read_layout *layout,
+                                           char ***r1_files_out,
+                                           char ***r2_files_out,
+                                           char ***r3_files_out,
+                                           int *n_triplets_out) {
+    if (!fastq_dir || !layout || !r1_files_out || !r2_files_out || !r3_files_out ||
+        !n_triplets_out) {
+        return 0;
+    }
+    *r1_files_out = NULL;
+    *r2_files_out = NULL;
+    *r3_files_out = NULL;
+    *n_triplets_out = 0;
+
+    if (layout->fastq_r1_pattern[0] && layout->fastq_r2_pattern[0] &&
+        layout->fastq_r3_pattern[0]) {
+        int n_r1 = 0;
+        int n_r2 = 0;
+        int n_r3 = 0;
+        char **r1 = find_files_with_pattern(fastq_dir, layout->fastq_r1_pattern, &n_r1);
+        char **r2 = find_files_with_pattern(fastq_dir, layout->fastq_r2_pattern, &n_r2);
+        char **r3 = find_files_with_pattern(fastq_dir, layout->fastq_r3_pattern, &n_r3);
+        if (r1 && r2 && r3 && n_r1 > 0 && n_r1 == n_r2 && n_r2 == n_r3) {
+            *r1_files_out = r1;
+            *r2_files_out = r2;
+            *r3_files_out = r3;
+            *n_triplets_out = n_r1;
+            return 1;
+        }
+        pf_free_file_list(r1, n_r1);
+        pf_free_file_list(r2, n_r2);
+        pf_free_file_list(r3, n_r3);
+        return 0;
+    }
+
+    for (int i = 0; k_pf_split_read_default_patterns[i].r1 != NULL; ++i) {
+        int n_r1 = 0;
+        int n_r2 = 0;
+        int n_r3 = 0;
+        const pf_split_read_pattern_triplet *pat = &k_pf_split_read_default_patterns[i];
+        char **r1 = find_files_with_pattern(fastq_dir, pat->r1, &n_r1);
+        char **r2 = find_files_with_pattern(fastq_dir, pat->r2, &n_r2);
+        char **r3 = find_files_with_pattern(fastq_dir, pat->r3, &n_r3);
+        if (r1 && r2 && r3 && n_r1 > 0 && n_r1 == n_r2 && n_r2 == n_r3) {
+            *r1_files_out = r1;
+            *r2_files_out = r2;
+            *r3_files_out = r3;
+            *n_triplets_out = n_r1;
+            return 1;
+        }
+        pf_free_file_list(r1, n_r1);
+        pf_free_file_list(r2, n_r2);
+        pf_free_file_list(r3, n_r3);
+    }
+    return 0;
+}
+
+static void pf_fastq_read_key(const char *header, char *key_out, size_t key_cap) {
+    if (!key_out || key_cap == 0) {
+        return;
+    }
+    key_out[0] = '\0';
+    if (!header || header[0] != '@') {
+        return;
+    }
+    const char *start = header + 1;
+    const char *end = start;
+    while (*end && !isspace((unsigned char)*end) && *end != '/') {
+        ++end;
+    }
+    size_t len = (size_t)(end - start);
+    if (len >= key_cap) {
+        len = key_cap - 1;
+    }
+    memcpy(key_out, start, len);
+    key_out[len] = '\0';
+}
+
+static int pf_split_headers_compatible(const char *h0, const char *h1, const char *h2) {
+    char key0[LINE_LENGTH];
+    char key1[LINE_LENGTH];
+    char key2[LINE_LENGTH];
+    pf_fastq_read_key(h0, key0, sizeof(key0));
+    pf_fastq_read_key(h1, key1, sizeof(key1));
+    pf_fastq_read_key(h2, key2, sizeof(key2));
+    if (key0[0] == '\0' || key1[0] == '\0' || key2[0] == '\0') {
+        return 0;
+    }
+    return strcmp(key0, key1) == 0 && strcmp(key0, key2) == 0;
+}
+
+static pf_error pf_process_split_read_triplet_files(
+    pf_context *ctx,
+    pf_record_stream *stream,
+    const pf_split_read_layout *layout,
+    const char *r1_path,
+    const char *r2_path,
+    const char *r3_path,
+    long long max_reads,
+    unsigned long long *emitted_inout,
+    pf_split_read_metrics *metrics,
+    pf_read_record_view *batch,
+    char synth_seq[][LINE_LENGTH],
+    char synth_qual[][LINE_LENGTH],
+    char feature_seq_buf[][LINE_LENGTH],
+    char feature_qual_buf[][LINE_LENGTH],
+    size_t *batch_count_inout) {
+    gzFile readers[3] = {
+        gzopen(r1_path, "rb"),
+        gzopen(r2_path, "rb"),
+        gzopen(r3_path, "rb")
+    };
+    if (!readers[0] || !readers[1] || !readers[2]) {
+        snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                 "Failed to open split-read FASTQ triplet: %s | %s | %s",
+                 r1_path, r2_path, r3_path);
+        for (int i = 0; i < 3; ++i) {
+            if (readers[i]) {
+                gzclose(readers[i]);
+            }
+        }
+        return PF_ERR_IO_ERROR;
+    }
+
+    pf_error err = PF_OK;
+    while (err == PF_OK) {
+        if (max_reads > 0 && (long long)*emitted_inout >= max_reads) {
+            break;
+        }
+
+        char headers[3][LINE_LENGTH];
+        char seqs[3][LINE_LENGTH];
+        char pluses[3][LINE_LENGTH];
+        char quals[3][LINE_LENGTH];
+        const char *seq_ptrs[3] = {NULL, NULL, NULL};
+        const char *qual_ptrs[3] = {NULL, NULL, NULL};
+
+        int rc[3] = {0, 0, 0};
+        int eof_count = 0;
+        for (int i = 0; i < 3; ++i) {
+            rc[i] = pf_read_fastq_record_gz(readers[i], headers[i], seqs[i],
+                                            pluses[i], quals[i]);
+            if (rc[i] == 0) {
+                ++eof_count;
+            } else if (rc[i] < 0) {
+                err = PF_ERR_IO_ERROR;
+                snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                         "Truncated FASTQ while reading split-read triplet from %s",
+                         i == 0 ? r1_path : (i == 1 ? r2_path : r3_path));
+                break;
+            } else {
+                seq_ptrs[i] = seqs[i];
+                qual_ptrs[i] = quals[i];
+            }
+        }
+        if (err != PF_OK) {
+            break;
+        }
+        if (eof_count > 0) {
+            if (eof_count != 3) {
+                err = PF_ERR_IO_ERROR;
+                snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                         "Uneven EOF across split-read FASTQs (%s, %s, %s)",
+                         r1_path, r2_path, r3_path);
+            }
+            break;
+        }
+        if (!pf_split_headers_compatible(headers[0], headers[1], headers[2])) {
+            err = PF_ERR_PARSE_ERROR;
+            char key0[160];
+            char key1[160];
+            char key2[160];
+            char path0[96];
+            char path1[96];
+            char path2[96];
+            pf_fastq_read_key(headers[0], key0, sizeof(key0));
+            pf_fastq_read_key(headers[1], key1, sizeof(key1));
+            pf_fastq_read_key(headers[2], key2, sizeof(key2));
+            pf_copy_truncated_for_log(r1_path, path0, sizeof(path0));
+            pf_copy_truncated_for_log(r2_path, path1, sizeof(path1));
+            pf_copy_truncated_for_log(r3_path, path2, sizeof(path2));
+            snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                     "Split-read FASTQ headers do not match: R1=%s (%s), R2=%s (%s), R3=%s (%s)",
+                     key0, path0, key1, path1, key2, path2);
+            break;
+        }
+
+        char synth_one[LINE_LENGTH];
+        char synth_qual_one[LINE_LENGTH];
+        const char *feature_seq = NULL;
+        const char *feature_qual = NULL;
+        int synth_rc = pf_split_read_synthesize_record(
+            layout, seq_ptrs, qual_ptrs,
+            synth_one, sizeof(synth_one),
+            synth_qual_one, sizeof(synth_qual_one),
+            &feature_seq, &feature_qual,
+            metrics);
+        if (synth_rc < 0) {
+            err = PF_ERR_PARSE_ERROR;
+            snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                     "Failed to synthesize split-read barcode record");
+            break;
+        }
+        if (synth_rc == 0) {
+            continue;
+        }
+
+        size_t batch_count = *batch_count_inout;
+        pf_copy_bounded_cstr(synth_one, synth_seq[batch_count], LINE_LENGTH);
+        pf_copy_bounded_cstr(synth_qual_one, synth_qual[batch_count], LINE_LENGTH);
+        pf_copy_bounded_cstr(feature_seq, feature_seq_buf[batch_count], LINE_LENGTH);
+        if (feature_qual) {
+            pf_copy_bounded_cstr(feature_qual, feature_qual_buf[batch_count], LINE_LENGTH);
+        } else {
+            feature_qual_buf[batch_count][0] = '\0';
+        }
+
+        batch[batch_count].barcode_sequence =
+            pf_view_from_buffer(synth_seq[batch_count], strlen(synth_seq[batch_count]));
+        batch[batch_count].barcode_quality =
+            pf_view_from_buffer(synth_qual[batch_count], strlen(synth_qual[batch_count]));
+        batch[batch_count].feature_sequence =
+            pf_view_from_buffer(feature_seq_buf[batch_count],
+                                strlen(feature_seq_buf[batch_count]));
+        batch[batch_count].feature_quality =
+            pf_view_from_buffer(feature_qual_buf[batch_count],
+                                strlen(feature_qual_buf[batch_count]));
+        batch[batch_count].feature_sequence2.data = NULL;
+        batch[batch_count].feature_sequence2.length = 0;
+        batch[batch_count].feature_quality2.data = NULL;
+        batch[batch_count].feature_quality2.length = 0;
+        batch_count++;
+        (*emitted_inout)++;
+
+        if (batch_count == PF_SPLIT_BATCH_SIZE) {
+            err = pf_process_record_views(stream, batch, batch_count);
+            batch_count = 0;
+        }
+        *batch_count_inout = batch_count;
+    }
+
+    for (int i = 0; i < 3; ++i) {
+        if (readers[i]) {
+            gzclose(readers[i]);
+        }
+    }
+    return err;
+}
+
+pf_error pf_process_split_fastq_dir(pf_context *ctx,
+                                    const char *fastq_dir,
+                                    const char *output_dir,
+                                    pf_stats *stats_out,
+                                    pf_split_read_metrics *metrics_out) {
+    if (!ctx || !fastq_dir || !output_dir) {
+        return PF_ERR_INVALID_ARG;
+    }
+    pf_split_read_layout *layout = &ctx->config->split_read_layout;
+    if (!layout->enabled) {
+        snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                 "Split-read layout is not configured");
+        return PF_ERR_INVALID_ARG;
+    }
+    if (pf_split_read_layout_prepare_ex(layout, ctx->error_buf, PF_ERROR_BUF_SIZE) != 0) {
+        return PF_ERR_INVALID_ARG;
+    }
+    if (!ctx->initialized) {
+        return PF_ERR_NOT_INITIALIZED;
+    }
+
+    pf_split_read_metrics metrics;
+    memset(&metrics, 0, sizeof(metrics));
+
+    if (!ctx->features || !ctx->whitelist_hash) {
+        snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                 "Features and whitelist must be loaded before split-read processing");
+        return PF_ERR_NOT_INITIALIZED;
+    }
+
+    if (!pf_is_directory(fastq_dir)) {
+        snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                 "FASTQ directory not found: %s", fastq_dir);
+        return PF_ERR_FILE_NOT_FOUND;
+    }
+
+    char **r1_files = NULL;
+    char **r2_files = NULL;
+    char **r3_files = NULL;
+    int n_triplets = 0;
+    if (!pf_discover_split_read_triplets(fastq_dir, layout,
+                                         &r1_files, &r2_files, &r3_files,
+                                         &n_triplets)) {
+        snprintf(ctx->error_buf, PF_ERROR_BUF_SIZE,
+                 "Split-read directory must contain synchronized read-1/2/3 FASTQs "
+                 "(patterns: _R1/_R2/_R3, _1.fastq/_2.fastq/_3.fastq, or custom): %s",
+                 fastq_dir);
+        return PF_ERR_FILE_NOT_FOUND;
+    }
+
+    pf_record_stream *stream = NULL;
+    pf_error err = pf_process_records_begin(ctx, output_dir, "sample", &stream);
+    if (err != PF_OK || !stream) {
+        pf_free_file_list(r1_files, n_triplets);
+        pf_free_file_list(r2_files, n_triplets);
+        pf_free_file_list(r3_files, n_triplets);
+        return err;
+    }
+
+    pf_read_record_view batch[PF_SPLIT_BATCH_SIZE];
+    char synth_seq[PF_SPLIT_BATCH_SIZE][LINE_LENGTH];
+    char synth_qual[PF_SPLIT_BATCH_SIZE][LINE_LENGTH];
+    char feature_seq_buf[PF_SPLIT_BATCH_SIZE][LINE_LENGTH];
+    char feature_qual_buf[PF_SPLIT_BATCH_SIZE][LINE_LENGTH];
+    size_t batch_count = 0;
+    unsigned long long emitted = 0;
+    const long long max_reads = ctx->config->max_reads;
+
+    for (int triplet_idx = 0; triplet_idx < n_triplets && err == PF_OK; ++triplet_idx) {
+        if (max_reads > 0 && (long long)emitted >= max_reads) {
+            break;
+        }
+        err = pf_process_split_read_triplet_files(
+            ctx, stream, layout,
+            r1_files[triplet_idx], r2_files[triplet_idx], r3_files[triplet_idx],
+            max_reads, &emitted, &metrics,
+            batch, synth_seq, synth_qual, feature_seq_buf, feature_qual_buf,
+            &batch_count);
+    }
+
+    if (err == PF_OK && batch_count > 0) {
+        err = pf_process_record_views(stream, batch, batch_count);
+        batch_count = 0;
+    }
+
+    pf_free_file_list(r1_files, n_triplets);
+    pf_free_file_list(r2_files, n_triplets);
+    pf_free_file_list(r3_files, n_triplets);
+
+    if (err == PF_OK) {
+        pf_stats local_stats;
+        err = pf_process_records_end(stream, &local_stats);
+        stream = NULL;
+        if (err == PF_OK && stats_out) {
+            *stats_out = local_stats;
+        }
+        if (err == PF_OK) {
+            pf_write_split_read_metrics(output_dir, &metrics);
+        }
+        if (err == PF_OK && metrics_out) {
+            *metrics_out = metrics;
+        }
+    }
+    if (err != PF_OK && stream) {
+        pf_process_records_abort(stream);
+    }
+
+    return err;
 }
 
 /* ============================================================================

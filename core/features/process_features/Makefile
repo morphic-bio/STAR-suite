@@ -23,7 +23,7 @@ DEFINES :=
 # Note: heatmap.c now uses Plotly (HTML+JSON), no external dependencies
 # pf_counts.c and mex_writer.c provide modular counts/output stages
 # nbem.c provides NB-EM feature calling (SCEPTRE-style)
-CORE_SRCS = assignBarcodes.c queue.c globals.c utils.c memory.c io.c barcode_match.c pf_api.c call_features.c gmm.c nbem.c mex_10x.c plot_histogram.c pf_counts.c mex_writer.c emptydrops_bridge.c barcode_filter.c heatmap.c
+CORE_SRCS = assignBarcodes.c queue.c globals.c utils.c memory.c io.c barcode_match.c pf_api.c pf_split_read.c call_features.c gmm.c nbem.c mex_10x.c adt_mex.c hash_demux.c plot_histogram.c pf_counts.c mex_writer.c emptydrops_bridge.c barcode_filter.c heatmap.c
 
 # CLI-specific sources
 MAIN_SRCS = main.c
@@ -75,12 +75,14 @@ TEST_PF_API_ISOLATION_TARGET=tests/test_pf_api_context_isolation
 TEST_PREHASH_AMBIGUITY_TARGET=tests/test_prehash_ambiguity
 TEST_UNION_WHITELIST_TARGET=tests/test_union_whitelist
 TEST_PREHASH_MEMORY_TARGET=tests/test_prehash_memory_safety
+TEST_CATATAC_SPLIT_TARGET=tests/test_catatac_split_read
+TEST_FEATURE_DUPLICATES_TARGET=tests/test_feature_duplicate_names
 
-.PHONY: all clean lib tools test
+.PHONY: all clean lib tools test test-adt-mex
 
 all: lib tools
 
-test: $(TEST_API_TARGET) $(TEST_PF_COUNTS_TARGET) $(TEST_MEX_WRITER_TARGET) $(TEST_MEX_PARITY_TARGET) $(TEST_BARCODE_FILTER_TARGET) $(TEST_OFFSET_DETECTION_TARGET) $(TEST_ANCHOR_PATTERN_TARGET) $(TEST_FILTERED_NAMESPACE_TARGET) $(TEST_PF_API_ISOLATION_TARGET) $(TEST_PREHASH_AMBIGUITY_TARGET) $(TEST_UNION_WHITELIST_TARGET) $(TEST_PREHASH_MEMORY_TARGET) test-regression
+test: $(TEST_API_TARGET) $(TEST_PF_COUNTS_TARGET) $(TEST_MEX_WRITER_TARGET) $(TEST_MEX_PARITY_TARGET) $(TEST_BARCODE_FILTER_TARGET) $(TEST_OFFSET_DETECTION_TARGET) $(TEST_ANCHOR_PATTERN_TARGET) $(TEST_FILTERED_NAMESPACE_TARGET) $(TEST_PF_API_ISOLATION_TARGET) $(TEST_PREHASH_AMBIGUITY_TARGET) $(TEST_UNION_WHITELIST_TARGET) $(TEST_PREHASH_MEMORY_TARGET) $(TEST_FEATURE_DUPLICATES_TARGET) test-regression
 
 lib: $(LIB_TARGET)
 
@@ -115,6 +117,13 @@ plot_histogram.o: plot_histogram.c
 
 $(TEST_API_TARGET): tests/test_pf_api.c $(LIB_TARGET) $(LIBSCRNA)
 	$(CXX) $(CFLAGS) -o $@ $< $(LIB_TARGET) $(LIBSCRNA) $(LDFLAGS)
+
+$(TEST_CATATAC_SPLIT_TARGET): tests/test_catatac_split_read.c $(LIB_TARGET) $(LIBSCRNA)
+	$(CXX) $(CFLAGS) -o $@ $< $(LIB_TARGET) $(LIBSCRNA) $(LDFLAGS)
+
+$(TEST_FEATURE_DUPLICATES_TARGET): tests/test_feature_duplicate_names.c $(LIB_TARGET) $(LIBSCRNA)
+	$(CC) $(CFLAGS) -c tests/test_feature_duplicate_names.c -o tests/test_feature_duplicate_names.o
+	$(CXX) -o $@ tests/test_feature_duplicate_names.o $(LIB_TARGET) $(LIBSCRNA) $(LDFLAGS)
 
 # Note: test_pf_counts.c is pure C, compile with gcc then link with g++ for libscrna
 $(TEST_PF_COUNTS_TARGET): tests/test_pf_counts.c $(LIB_TARGET) $(LIBSCRNA)
@@ -177,5 +186,13 @@ test-regression: $(TARGET)
 	@echo "Running assignBarcodes regression test..."
 	@./tests/test_assignbarcodes_regression.sh
 
+test-adt-mex: $(TARGET)
+	@chmod +x tests/test_adt_mex.sh
+	@./tests/test_adt_mex.sh
+
+test-hash-demux-mex: $(TARGET)
+	@chmod +x tests/test_hash_demux_mex.sh
+	@./tests/test_hash_demux_mex.sh
+
 clean:
-	rm -f *.o $(TARGET) $(DEMUX_TARGET) $(DEMUX_BAM_TARGET) $(CALL_FEATURES_TARGET) $(LIB_TARGET) $(TEST_API_TARGET) $(TEST_PF_COUNTS_TARGET) $(TEST_MEX_WRITER_TARGET) $(TEST_MEX_PARITY_TARGET) $(TEST_BARCODE_FILTER_TARGET) $(TEST_OFFSET_DETECTION_TARGET) $(TEST_ANCHOR_PATTERN_TARGET) $(TEST_FILTERED_NAMESPACE_TARGET) $(TEST_PF_API_ISOLATION_TARGET) $(TEST_PREHASH_AMBIGUITY_TARGET) $(TEST_UNION_WHITELIST_TARGET) $(TEST_PREHASH_MEMORY_TARGET) tests/*.o
+	rm -f *.o $(TARGET) $(DEMUX_TARGET) $(DEMUX_BAM_TARGET) $(CALL_FEATURES_TARGET) $(LIB_TARGET) $(TEST_API_TARGET) $(TEST_PF_COUNTS_TARGET) $(TEST_MEX_WRITER_TARGET) $(TEST_MEX_PARITY_TARGET) $(TEST_BARCODE_FILTER_TARGET) $(TEST_OFFSET_DETECTION_TARGET) $(TEST_ANCHOR_PATTERN_TARGET) $(TEST_FILTERED_NAMESPACE_TARGET) $(TEST_PF_API_ISOLATION_TARGET) $(TEST_PREHASH_AMBIGUITY_TARGET) $(TEST_UNION_WHITELIST_TARGET) $(TEST_PREHASH_MEMORY_TARGET) $(TEST_CATATAC_SPLIT_TARGET) $(TEST_FEATURE_DUPLICATES_TARGET) tests/*.o

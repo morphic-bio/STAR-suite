@@ -26,7 +26,7 @@ public:
     LibFormatDetector(int window_size);
     
     // Vote on library format from a Transcript alignment
-    void vote(const Transcript* tr);
+    void vote(const Transcript* tr, uint32_t read1_len = 0, uint32_t read2_len = 0);
     
     // Finalize detection and return the detected format
     // Exits with error if detection fails or is ambiguous
@@ -41,7 +41,7 @@ private:
     std::map<uint8_t, int> format_votes_;  // Map from format ID to vote count
     
     // Determine library format from a Transcript object
-    LibraryFormat observeFormatFromTranscript(const Transcript* tr);
+    LibraryFormat observeFormatFromTranscript(const Transcript* tr, uint32_t read1_len, uint32_t read2_len);
 };
 
 // Helper functions
@@ -54,10 +54,15 @@ std::string formatName(const LibraryFormat& fmt);
 bool deriveTranscriptPairGeometry(const Transcript* tr, TranscriptPairGeometry& geometry);
 
 // Determine LibraryFormat from extracted mate geometry.
-LibraryFormat observeFormatFromGeometry(const TranscriptPairGeometry& geometry);
+LibraryFormat observeFormatFromGeometry(const TranscriptPairGeometry& geometry,
+                                        uint32_t read1_len = 0,
+                                        uint32_t read2_len = 0);
 
 // Determine LibraryFormat from mate positions and orientations (ported from Salmon)
 LibraryFormat hitType(int32_t pos1, bool fwd1, int32_t pos2, bool fwd2);
+LibraryFormat hitType(int32_t pos1, bool fwd1, uint32_t len1,
+                      int32_t pos2, bool fwd2, uint32_t len2,
+                      bool canDovetail);
 
 // Parse user-specified library format string
 // Case-insensitive; exits for unrecognized input (validation should catch first)

@@ -101,6 +101,7 @@ std::string extractSampleNameFromFastq(const std::string& path) {
     // Remove common suffixes in order
     std::vector<std::string> suffixes = {
         ".fastq.gz", ".fq.gz", ".fastq", ".fq",
+        ".cbq", ".vbq", ".bq",
         "_R1_001", "_R2_001", "_R1", "_R2",
         "_1", "_2"
     };
@@ -162,14 +163,18 @@ void Parameters::resetForBatchSample(int sampleIndex, const std::string& sampleN
     
     if (quant.slam.yes) {
         // Reset SLAM-specific state
-        quant.slam.autoTrimComputed = false;
-        quant.slam.autoTrim5p = 0;
-        quant.slam.autoTrim3p = 0;
+        quant.slam.autoTrimComputed[0] = false;
+        quant.slam.autoTrimComputed[1] = false;
+        quant.slam.autoTrim5p[0] = 0;
+        quant.slam.autoTrim5p[1] = 0;
+        quant.slam.autoTrim3p[0] = 0;
+        quant.slam.autoTrim3p[1] = 0;
         quant.slam.autoTrimFileIndex = 0;
         quant.slam.autoTrimReplayDone = false;
         quant.slam.autoTrimDetectionPass = false;
         quant.slam.currentFileIndex = 0;
         quant.slam.varianceStddevTcRate.clear();
+        quant.slam.varianceStddevTcRateMate2.clear();
         quant.slam.snpErrEst = 0.0;
         quant.slam.snpErrFallbackReason.clear();
 
@@ -283,12 +288,28 @@ void Parameters::reconfigureOutputPathsForSample(const std::string& sampleName) 
     if (outBAMcoord) {
         outBAMfileCoordName = newPrefix + "Aligned.sortedByCoord.out.bam";
     }
+    if (outSAMbool && outStd != "SAM") {
+        if (inOut->outSAMfile.is_open()) {
+            inOut->outSAMfile.close();
+        }
+        inOut->outSAMfile.open((newPrefix + "Aligned.out.sam").c_str());
+        if (!inOut->outSAMfile.good()) {
+            std::ostringstream errOut;
+            errOut << "EXITING: cannot create SAM output file "
+                   << newPrefix << "Aligned.out.sam\n";
+            exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_RUNTIME, *this);
+        }
+        inOut->outSAM = &inOut->outSAMfile;
+    }
     
     // Update SLAM output paths
     if (quant.slam.yes) {
         quant.slam.outFile = countsDir + sampleName + ".SlamQuant.out";
         if (quant.slam.grandSlamOut) {
             quant.slam.grandSlamOutFile = countsDir + sampleName + ".SlamQuant.grandslam.tsv";
+        }
+        if (quant.slam.cbOut) {
+            quant.slam.cbOutFile = countsDir + sampleName + ".SlamQuant.cB.tsv";
         }
         quant.slam.slamQcJson = qcDir + sampleName + ".slam_qc.json";
         quant.slam.slamQcHtml = qcDir + sampleName + ".slam_qc.html";

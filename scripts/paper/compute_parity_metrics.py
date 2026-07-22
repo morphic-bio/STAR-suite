@@ -419,7 +419,8 @@ def main():
         tsv_path = Path(args.tsv_out)
         with open(tsv_path, "w") as fh:
             cols = [
-                "label", "feature_type",
+                "comparison_label", "feature_type",
+                "cr_source", "star_source",
                 "barcode_jaccard", "common_barcodes",
                 "bc_pearson", "bc_spearman",
                 "common_features", "feat_pearson", "feat_spearman",
@@ -431,6 +432,7 @@ def main():
             for tag, r in results.items():
                 row = [
                     args.label, tag,
+                    str(cr_mex), str(star_mex),
                     fmt(r["barcode_jaccard"], 6), str(r["common_barcodes"]),
                     fmt(r["bc_pearson"]), fmt(r["bc_spearman"]),
                     str(r["common_features"]), fmt(r["feat_pearson"]), fmt(r["feat_spearman"]),
