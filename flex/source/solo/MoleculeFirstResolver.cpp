@@ -124,6 +124,19 @@ bool hammingOne(const std::string &left, const std::string &right)
     return mismatches == 1;
 }
 
+bool nearlyEqual(double left, double right)
+{
+    const double absoluteTolerance = 1e-12;
+    const double relativeTolerance = 1e-10;
+    return std::fabs(left - right) <= absoluteTolerance
+        + relativeTolerance * std::max(std::fabs(left), std::fabs(right));
+}
+
+bool greaterEqualWithinTolerance(double left, double right)
+{
+    return left > right || nearlyEqual(left, right);
+}
+
 } // namespace
 
 std::vector<ReadClique> buildReadCliques(const std::vector<CandidateRead> &inputReads,
@@ -270,7 +283,7 @@ UmiCorrections correctedUmis(const std::vector<ReadClique> &cliques,
         std::sort(ordered.begin(), ordered.end(), [&](const std::string &left, const std::string &right) {
             const double leftSupport = group.second.at(left);
             const double rightSupport = group.second.at(right);
-            return leftSupport != rightSupport ? leftSupport > rightSupport : left < right;
+            return !nearlyEqual(leftSupport, rightSupport) ? leftSupport > rightSupport : left < right;
         });
 
         std::map<std::string, std::string> roots;
@@ -282,7 +295,8 @@ UmiCorrections correctedUmis(const std::vector<ReadClique> &cliques,
                 for (std::size_t parentIndex = 0; parentIndex < index; ++parentIndex) {
                     const std::string &parent = ordered[parentIndex];
                     if (hammingOne(umi, parent)
-                        && group.second.at(parent) >= 2.0 * group.second.at(umi) - 1.0) {
+                        && greaterEqualWithinTolerance(
+                            group.second.at(parent), 2.0 * group.second.at(umi) - 1.0)) {
                         eligible.push_back(parent);
                     }
                 }
@@ -291,7 +305,7 @@ UmiCorrections correctedUmis(const std::vector<ReadClique> &cliques,
                                                                    const std::string &right) {
                         const double leftSupport = group.second.at(left);
                         const double rightSupport = group.second.at(right);
-                        return leftSupport != rightSupport ? leftSupport > rightSupport : left < right;
+                        return !nearlyEqual(leftSupport, rightSupport) ? leftSupport > rightSupport : left < right;
                     });
                     root = roots.at(eligible.front());
                 }
@@ -345,8 +359,9 @@ std::pair<std::string, double> topCandidate(const ReadClique &clique)
     }
     std::size_t best = 0;
     for (std::size_t index = 1; index < clique.candidates.size(); ++index) {
-        if (clique.posterior[index] > clique.posterior[best]
-            || (clique.posterior[index] == clique.posterior[best]
+        if ((!nearlyEqual(clique.posterior[index], clique.posterior[best])
+             && clique.posterior[index] > clique.posterior[best])
+            || (nearlyEqual(clique.posterior[index], clique.posterior[best])
                 && clique.candidates[index] < clique.candidates[best])) {
             best = index;
         }
@@ -370,7 +385,7 @@ std::vector<HardCall> gatedHardCalls(const std::vector<ReadClique> &cliques,
         HardCall call;
         call.cliqueId = clique.cliqueId;
         call.posterior = top.second;
-        call.margin = top.second - second;
+        call.margin = nearlyEqual(top.second, second) ? 0.0 : top.second - second;
         call.assigned = call.posterior >= config.gateMinPosterior
             && call.margin >= config.gateMinMargin;
         call.candidate = call.assigned ? top.first : "";
