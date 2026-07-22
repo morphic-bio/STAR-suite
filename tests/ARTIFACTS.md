@@ -157,6 +157,7 @@ update this file with its output location.
 - `/tmp/star_flex_cbq_range_full_ssd_*` (host-local SC2300771 full-production FLEX no-genome indexed-CBQ-range benchmark outputs on SSD, including `BENCHMARK_TIME.txt`, STAR logs, raw Gene MEX, and filtered per-sample summaries)
 - `/mnt/pikachu/cbq_solo_ingestion_benchmark_*` (FASTQ-vs-native-CBQ STARsolo ingestion timing runs from `tests/run_cbq_solo_ingestion_benchmark.sh`; per-mode `BENCHMARK_SUMMARY.txt` files are the authoritative completion artifacts)
 - `/tmp/star_suite_production_module_regression_*` (manifest-driven production-module regression wrapper logs, per-case stdout/stderr, and preflight/run summaries)
+- `/mnt/pikachu/star-spatial/gex_sidecar_tests/20260722_ovarian_100k_v1/` (fresh source-only Visium HD ovarian 3-prime 100K development root for the modern post-rescue GeneFull evidence sidecar, raw-R1 candidate join, candidate-specific `MultiGeneUMI_CR`, and 2/8/16-micrometer policy matrices; no historical run artifact may be copied into it)
 - `/tmp/ucsf_cr_config_1m_smoke_*` (real UCSF perturb CR-config fixture smoke outputs)
 - `/tmp/ucsf_batch_cr_multifeature_tiny_*` (synthetic UCSF perturb multifeature CR-config tiny smoke outputs)
 - `/tmp/flex_cr_config_smoke_*` (Flex CR-config smoke outputs)
