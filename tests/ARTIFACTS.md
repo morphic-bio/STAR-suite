@@ -922,3 +922,16 @@ All three runs used **`USE_READFILES_ZCAT=0`** (no external `zcat`), **`--outSAM
 - Contents: synthetic genome/GTF, generated STAR index, `transcriptome.fa`,
   `expected_gc.tsv`, and first/second genomeGenerate logs.
 - Status: untracked.
+
+## Molecule-first bounded materializer (2026-07-22)
+
+- Harness: `tests/run_molecule_first_materializer_bounded_test.sh`
+- Synthetic scratch: `/tmp/star_suite_molecule_first_materializer_bounded.*`
+- External 100K equivalence outputs:
+  `/mnt/pikachu/molecule_first_materializer_100k_{unsorted,streaming}_20260722_*`
+- Full-slide optimized outputs and timing records:
+  `/mnt/pikachu/molecule_first_materializer_fullslide_1mm_cr_20260722_*`
+- Contents: post-collapse strict, soft-expected, hard, and gated-hard MEX at
+  2, 8, and 16 um; private spill files exist only while the process is live.
+- Status: untracked; never commit external resolver TSVs, MEX matrices, spill
+  records, or timing logs.
