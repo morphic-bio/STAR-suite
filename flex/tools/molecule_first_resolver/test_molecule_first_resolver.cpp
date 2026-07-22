@@ -117,6 +117,30 @@ int main()
     assert(hard.size() == 1 && hard[0].candidate == "A");
     assert(gated.empty());
 
+    molecule_first::ReadClique nearTie;
+    nearTie.cliqueId = "near_tie";
+    nearTie.featureId = "gene";
+    nearTie.rawUmi = "AAAA";
+    nearTie.memberReadIds = {"near_tie_read"};
+    nearTie.candidates = {"A", "B"};
+    nearTie.posterior = {0.5, 0.5 + 5e-15};
+    assert(molecule_first::topCandidate(nearTie).first == "A");
+
+    molecule_first::ReadClique lexicalRoot;
+    lexicalRoot.cliqueId = "lexical_root";
+    lexicalRoot.featureId = "gene";
+    lexicalRoot.rawUmi = "AAAA";
+    lexicalRoot.candidates = {"A"};
+    lexicalRoot.posterior = {0.5};
+    molecule_first::ReadClique numericalRoot = lexicalRoot;
+    numericalRoot.cliqueId = "numerical_root";
+    numericalRoot.rawUmi = "TAAA";
+    numericalRoot.posterior = {0.5 + 5e-15};
+    const auto nearTieCorrections = molecule_first::correctedUmis(
+        {lexicalRoot, numericalRoot}, "1mm_cr");
+    assert(nearTieCorrections.at(std::make_tuple("gene", "A", "AAAA")) == "AAAA");
+    assert(nearTieCorrections.at(std::make_tuple("gene", "A", "TAAA")) == "AAAA");
+
     for (const auto &clique : pcrCliques) {
         for (const std::string &candidate : clique.candidates) {
             assert(candidate == "A" || candidate == "B");
