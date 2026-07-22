@@ -404,23 +404,32 @@ void processFeatureChunk(
                 molecule_first::correctedUmis(cliques, umiMode);
             const std::vector<molecule_first::Occupancy> occupancies =
                 molecule_first::gexWeightedOccupancies(cliques, umiMode, nullptr);
-            summary.productCounts[umiMode + ".soft_rows"] += occupancies.size();
-            for (const molecule_first::Occupancy &row : occupancies) {
-                double absent = 1.0;
-                for (const molecule_first::ReadClique &clique : cliques) {
-                    if (clique.featureId != row.featureId
-                        || clique.rawUmi != row.correctedUmi) {
+            // MultiGeneUMI_CR compares each winning corrected-UMI support with
+            // evidence that originated at that same UMI.  Accumulate those
+            // values once per clique/candidate.  Scanning every clique again
+            // for every occupancy is quadratic for highly expressed genes.
+            std::map<std::pair<std::string, std::string>, double> originalAbsent;
+            for (const molecule_first::ReadClique &clique : cliques) {
+                for (std::size_t index = 0; index < clique.candidates.size(); ++index) {
+                    const std::string &candidate = clique.candidates[index];
+                    if (corrections.at(std::make_tuple(
+                            clique.featureId, candidate, clique.rawUmi))
+                        != clique.rawUmi) {
                         continue;
                     }
-                    for (std::size_t index = 0; index < clique.candidates.size(); ++index) {
-                        if (clique.candidates[index] == row.candidate
-                            && corrections.at(std::make_tuple(
-                                clique.featureId, row.candidate, clique.rawUmi))
-                                == row.correctedUmi) {
-                            absent *= 1.0 - clique.posterior[index];
-                        }
-                    }
+                    const std::pair<std::string, std::string> supportKey(
+                        candidate, clique.rawUmi);
+                    const auto inserted = originalAbsent.insert(
+                        std::make_pair(supportKey, 1.0));
+                    inserted.first->second *= 1.0 - clique.posterior[index];
                 }
+            }
+            summary.productCounts[umiMode + ".soft_rows"] += occupancies.size();
+            for (const molecule_first::Occupancy &row : occupancies) {
+                const auto found = originalAbsent.find(std::make_pair(
+                    row.candidate, row.correctedUmi));
+                const double absent = found == originalAbsent.end()
+                    ? 1.0 : found->second;
                 const double originalExpected = 1.0 - absent;
                 summary.occupancyMass[umiMode] += row.expectedCount;
                 gexProvisionalTable->stream()
