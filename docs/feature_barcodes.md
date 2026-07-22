@@ -496,6 +496,10 @@ counts**; use the dynamic interface so threads are auto-sized.
 
 - **No BAM for benchmarks**: Use `--outSAMtype None` unless BAM output is
   needed. Saves significant I/O and disk.
+- **No `GX`/`UR` for count parity**: Do not add these BAM attributes to the
+  benchmark command. `GX` is alignment-level rather than final `GeneFull` or
+  CR-compatible counting policy, and `UR` is intentionally the raw,
+  uncorrected UMI. Compare the final MEX matrices and cell calls instead.
 - **GeneFull only**: Skip `Gene` and `Velocyto` unless specifically required.
   Each adds a full pass over the read array.
 - **Poly-G trimming**: Always `--clip3pPolyG yes` for NovaSeq/NextSeq data

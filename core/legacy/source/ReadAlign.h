@@ -246,6 +246,7 @@ class ReadAlign {
         bool hasYAlignment_;  // true if any alignment for this read touches Y-chromosome
         bool crMultiMapRescued_;  // true if multimapper was transcriptomically rescued
         bool crMultiMapRescuedIntronic_;  // true if rescue winner was intronic fallback
+        bool genomicMultimapBeforeRescue_; // NH>1 state before CR-compatible rescue
     private:
 
         uint mapMarker; //alignment marker (typically, if there is something wrong)

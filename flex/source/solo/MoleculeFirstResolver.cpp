@@ -1,4 +1,5 @@
 #include "solo/MoleculeFirstResolver.h"
+#include "MultiGeneUmiCr.h"
 
 #include <algorithm>
 #include <cmath>
@@ -122,6 +123,19 @@ bool hammingOne(const std::string &left, const std::string &right)
         }
     }
     return mismatches == 1;
+}
+
+bool nearlyEqual(double left, double right)
+{
+    const double absoluteTolerance = 1e-12;
+    const double relativeTolerance = 1e-10;
+    return std::fabs(left - right) <= absoluteTolerance
+        + relativeTolerance * std::max(std::fabs(left), std::fabs(right));
+}
+
+bool greaterEqualWithinTolerance(double left, double right)
+{
+    return left > right || nearlyEqual(left, right);
 }
 
 } // namespace
@@ -270,7 +284,7 @@ UmiCorrections correctedUmis(const std::vector<ReadClique> &cliques,
         std::sort(ordered.begin(), ordered.end(), [&](const std::string &left, const std::string &right) {
             const double leftSupport = group.second.at(left);
             const double rightSupport = group.second.at(right);
-            return leftSupport != rightSupport ? leftSupport > rightSupport : left < right;
+            return !nearlyEqual(leftSupport, rightSupport) ? leftSupport > rightSupport : left < right;
         });
 
         std::map<std::string, std::string> roots;
@@ -282,7 +296,8 @@ UmiCorrections correctedUmis(const std::vector<ReadClique> &cliques,
                 for (std::size_t parentIndex = 0; parentIndex < index; ++parentIndex) {
                     const std::string &parent = ordered[parentIndex];
                     if (hammingOne(umi, parent)
-                        && group.second.at(parent) >= 2.0 * group.second.at(umi) - 1.0) {
+                        && greaterEqualWithinTolerance(
+                            group.second.at(parent), 2.0 * group.second.at(umi) - 1.0)) {
                         eligible.push_back(parent);
                     }
                 }
@@ -291,7 +306,7 @@ UmiCorrections correctedUmis(const std::vector<ReadClique> &cliques,
                                                                    const std::string &right) {
                         const double leftSupport = group.second.at(left);
                         const double rightSupport = group.second.at(right);
-                        return leftSupport != rightSupport ? leftSupport > rightSupport : left < right;
+                        return !nearlyEqual(leftSupport, rightSupport) ? leftSupport > rightSupport : left < right;
                     });
                     root = roots.at(eligible.front());
                 }
@@ -345,8 +360,9 @@ std::pair<std::string, double> topCandidate(const ReadClique &clique)
     }
     std::size_t best = 0;
     for (std::size_t index = 1; index < clique.candidates.size(); ++index) {
-        if (clique.posterior[index] > clique.posterior[best]
-            || (clique.posterior[index] == clique.posterior[best]
+        if ((!nearlyEqual(clique.posterior[index], clique.posterior[best])
+             && clique.posterior[index] > clique.posterior[best])
+            || (nearlyEqual(clique.posterior[index], clique.posterior[best])
                 && clique.candidates[index] < clique.candidates[best])) {
             best = index;
         }
@@ -370,7 +386,7 @@ std::vector<HardCall> gatedHardCalls(const std::vector<ReadClique> &cliques,
         HardCall call;
         call.cliqueId = clique.cliqueId;
         call.posterior = top.second;
-        call.margin = top.second - second;
+        call.margin = nearlyEqual(top.second, second) ? 0.0 : top.second - second;
         call.assigned = call.posterior >= config.gateMinPosterior
             && call.margin >= config.gateMinMargin;
         call.candidate = call.assigned ? top.first : "";
@@ -442,6 +458,247 @@ std::vector<Molecule> policyMolecules(const std::vector<ReadClique> &cliques,
         molecule.moleculeId = stableId("mol", idParts);
         output.push_back(molecule);
     }
+    return output;
+}
+
+namespace {
+
+struct AssignedClique {
+    const ReadClique *clique = nullptr;
+    std::string candidate;
+};
+
+std::vector<AssignedClique> assignedCliques(
+    const std::vector<ReadClique> &cliques, const std::string &product,
+    const std::vector<HardCall> &hardCalls)
+{
+    if (product != "strict" && product != "hard" && product != "gated_hard") {
+        throw std::invalid_argument("unknown molecule product: " + product);
+    }
+    std::map<std::string, HardCall> calls;
+    for (const HardCall &call : hardCalls) calls[call.cliqueId] = call;
+    std::vector<AssignedClique> result;
+    for (const ReadClique &clique : cliques) {
+        AssignedClique assigned;
+        assigned.clique = &clique;
+        if (product == "strict") {
+            if (clique.candidates.size() != 1) continue;
+            assigned.candidate = clique.candidates.front();
+        } else if (product == "hard") {
+            assigned.candidate = topCandidate(clique).first;
+        } else {
+            const auto call = calls.find(clique.cliqueId);
+            if (call == calls.end() || !call->second.assigned) continue;
+            assigned.candidate = call->second.candidate;
+        }
+        result.push_back(assigned);
+    }
+    return result;
+}
+
+UmiCorrections integerCorrections(const std::vector<AssignedClique> &assignments,
+                                  const std::string &umiMode)
+{
+    if (umiMode != "exact" && umiMode != "1mm_cr") {
+        throw std::invalid_argument("UMI mode must be exact or 1mm_cr");
+    }
+    std::map<GroupKey, std::map<std::string, std::uint64_t> > support;
+    for (const AssignedClique &assigned : assignments) {
+        support[GroupKey(assigned.clique->featureId, assigned.candidate)]
+               [assigned.clique->rawUmi] += assigned.clique->memberReadIds.size();
+    }
+    UmiCorrections result;
+    for (const auto &group : support) {
+        std::vector<std::string> ordered;
+        for (const auto &entry : group.second) ordered.push_back(entry.first);
+        std::sort(ordered.begin(), ordered.end(), [&](const std::string &left,
+                                                       const std::string &right) {
+            const std::uint64_t leftCount = group.second.at(left);
+            const std::uint64_t rightCount = group.second.at(right);
+            return leftCount != rightCount ? leftCount > rightCount : left < right;
+        });
+        std::map<std::string, std::string> roots;
+        for (std::size_t index = 0; index < ordered.size(); ++index) {
+            const std::string &umi = ordered[index];
+            std::string root = umi;
+            if (umiMode == "1mm_cr") {
+                std::vector<std::string> eligible;
+                for (std::size_t parentIndex = 0; parentIndex < index; ++parentIndex) {
+                    const std::string &parent = ordered[parentIndex];
+                    const std::uint64_t childCount = group.second.at(umi);
+                    const std::uint64_t parentCount = group.second.at(parent);
+                    const bool directionalSupport = childCount == 0
+                        || childCount <= parentCount / 2 + parentCount % 2;
+                    if (hammingOne(umi, parent) && directionalSupport) {
+                        eligible.push_back(parent);
+                    }
+                }
+                if (!eligible.empty()) {
+                    std::sort(eligible.begin(), eligible.end(), [&](const std::string &left,
+                                                                    const std::string &right) {
+                        const std::uint64_t leftCount = group.second.at(left);
+                        const std::uint64_t rightCount = group.second.at(right);
+                        return leftCount != rightCount ? leftCount > rightCount : left < right;
+                    });
+                    root = roots.at(eligible.front());
+                }
+            }
+            roots[umi] = root;
+            result[CorrectionKey(group.first.first, group.first.second, umi)] = root;
+        }
+    }
+    return result;
+}
+
+void countRejection(const multi_gene_umi_cr::Result &resolution,
+                    GexReconciliationStats &stats)
+{
+    if (resolution.reason == "corrected_count_tie") ++stats.correctedCountTies;
+    else if (resolution.reason == "original_umi_dominance") {
+        ++stats.originalUmiDominanceRejected;
+    }
+}
+
+} // namespace
+
+std::vector<Molecule> gexPolicyMolecules(
+    const std::vector<ReadClique> &cliques, const std::string &umiMode,
+    const std::string &product, const std::vector<HardCall> &hardCalls,
+    GexReconciliationStats *statsOut)
+{
+    GexReconciliationStats stats;
+    const std::vector<AssignedClique> assignments =
+        assignedCliques(cliques, product, hardCalls);
+    const UmiCorrections corrections = integerCorrections(assignments, umiMode);
+    using CandidateUmi = std::pair<std::string, std::string>;
+    using GeneCliques = std::map<std::string, std::vector<const ReadClique *> >;
+    std::map<CandidateUmi, GeneCliques> groups;
+    for (const AssignedClique &assigned : assignments) {
+        const std::string corrected = corrections.at(CorrectionKey(
+            assigned.clique->featureId, assigned.candidate, assigned.clique->rawUmi));
+        groups[CandidateUmi(assigned.candidate, corrected)][assigned.clique->featureId]
+            .push_back(assigned.clique);
+    }
+    std::vector<Molecule> output;
+    for (const auto &group : groups) {
+        ++stats.groups;
+        std::vector<std::string> genes;
+        std::vector<multi_gene_umi_cr::GeneSupport> supports;
+        for (const auto &gene : group.second) {
+            multi_gene_umi_cr::GeneSupport support;
+            support.gene = static_cast<std::uint32_t>(genes.size());
+            genes.push_back(gene.first);
+            for (const ReadClique *clique : gene.second) {
+                const std::uint64_t reads = clique->memberReadIds.size();
+                support.correctedCount += reads;
+                if (clique->rawUmi == group.first.second) {
+                    support.originalAtCorrectedCount += reads;
+                }
+            }
+            supports.push_back(support);
+        }
+        const multi_gene_umi_cr::Result resolution = multi_gene_umi_cr::resolve(supports);
+        if (!resolution.accepted) {
+            countRejection(resolution, stats);
+            continue;
+        }
+        ++stats.accepted;
+        const std::string &winner = genes.at(resolution.gene);
+        Molecule molecule;
+        molecule.umiMode = umiMode;
+        molecule.product = product;
+        molecule.featureId = winner;
+        molecule.correctedUmi = group.first.second;
+        molecule.candidate = group.first.first;
+        std::set<std::string> members;
+        for (const ReadClique *clique : group.second.at(winner)) {
+            members.insert(clique->memberReadIds.begin(), clique->memberReadIds.end());
+            molecule.readCliqueIds.push_back(clique->cliqueId);
+        }
+        molecule.memberReadIds.assign(members.begin(), members.end());
+        std::sort(molecule.readCliqueIds.begin(), molecule.readCliqueIds.end());
+        std::vector<std::string> idParts = {umiMode, product, molecule.featureId,
+                                            molecule.correctedUmi, molecule.candidate};
+        idParts.insert(idParts.end(), molecule.memberReadIds.begin(), molecule.memberReadIds.end());
+        molecule.moleculeId = stableId("mol", idParts);
+        output.push_back(molecule);
+    }
+    std::sort(output.begin(), output.end(), [](const Molecule &left, const Molecule &right) {
+        return std::tie(left.featureId, left.correctedUmi, left.candidate, left.moleculeId)
+            < std::tie(right.featureId, right.correctedUmi, right.candidate, right.moleculeId);
+    });
+    if (statsOut != nullptr) *statsOut = stats;
+    return output;
+}
+
+std::vector<Occupancy> gexWeightedOccupancies(
+    const std::vector<ReadClique> &cliques, const std::string &umiMode,
+    GexReconciliationStats *statsOut)
+{
+    GexReconciliationStats stats;
+    const UmiCorrections corrections = correctedUmis(cliques, umiMode);
+    const std::vector<Occupancy> provisional = weightedOccupancies(cliques, umiMode);
+    using CandidateUmi = std::pair<std::string, std::string>;
+    std::map<CandidateUmi, std::vector<Occupancy> > groups;
+    for (const Occupancy &row : provisional) {
+        groups[CandidateUmi(row.candidate, row.correctedUmi)].push_back(row);
+        stats.inputExpectedMass += row.expectedCount;
+    }
+    std::vector<Occupancy> output;
+    for (const auto &group : groups) {
+        ++stats.groups;
+        std::vector<double> original(group.second.size(), 0.0);
+        for (std::size_t gene = 0; gene < group.second.size(); ++gene) {
+            double absent = 1.0;
+            for (const ReadClique &clique : cliques) {
+                if (clique.featureId != group.second[gene].featureId
+                    || clique.rawUmi != group.first.second) continue;
+                for (std::size_t candidate = 0; candidate < clique.candidates.size(); ++candidate) {
+                    if (clique.candidates[candidate] == group.first.first
+                        && corrections.at(CorrectionKey(clique.featureId,
+                                                        group.first.first,
+                                                        clique.rawUmi)) == group.first.second) {
+                        absent *= 1.0 - clique.posterior[candidate];
+                    }
+                }
+            }
+            original[gene] = 1.0 - absent;
+        }
+        std::size_t winner = 0;
+        bool tied = false;
+        for (std::size_t gene = 1; gene < group.second.size(); ++gene) {
+            const double value = group.second[gene].expectedCount;
+            const double best = group.second[winner].expectedCount;
+            if (!nearlyEqual(value, best) && value > best) {
+                winner = gene;
+                tied = false;
+            } else if (nearlyEqual(value, best)) {
+                tied = true;
+            }
+        }
+        if (tied) {
+            ++stats.correctedCountTies;
+            continue;
+        }
+        bool originalDominance = false;
+        for (double value : original) {
+            if (!nearlyEqual(value, original[winner]) && value > original[winner]) {
+                originalDominance = true;
+            }
+        }
+        if (originalDominance) {
+            ++stats.originalUmiDominanceRejected;
+            continue;
+        }
+        ++stats.accepted;
+        output.push_back(group.second[winner]);
+        stats.outputExpectedMass += group.second[winner].expectedCount;
+    }
+    std::sort(output.begin(), output.end(), [](const Occupancy &left, const Occupancy &right) {
+        return std::tie(left.featureId, left.correctedUmi, left.candidate)
+            < std::tie(right.featureId, right.correctedUmi, right.candidate);
+    });
+    if (statsOut != nullptr) *statsOut = stats;
     return output;
 }
 

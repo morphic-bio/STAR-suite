@@ -9,6 +9,7 @@
 #include "solo/CbCorrector.h"
 #include "solo/CbBayesianResolver.h"
 #include "TranscriptQuantEC.h"
+#include "SpatialFeatureSidecar.h"
 #include <atomic>
 #include <mutex>
 #include <cstring>
@@ -349,6 +350,7 @@ void ReadAlign::outputAlignments() {
 
             crMultiMapRescued_ = false;
             crMultiMapRescuedIntronic_ = false;
+            genomicMultimapBeforeRescue_ = nTr > 1;
             if (P.pSolo.crMultimapRescue && nTr > 1) {
                 statsRA.crRescueTotal++;
                 const uint64_t nTrBefore = nTr;
@@ -598,6 +600,55 @@ void ReadAlign::outputAlignments() {
                         writeFastxRecord(im, false); // Write both mates to noY FASTQ
                     }
                 }
+            }
+        }
+
+        // The spatial sidecar is deliberately emitted after the final modern
+        // GeneFull annotation/rescue state and before any barcode or UMI work.
+        // It is one fixed-width slot per 0-based global input ordinal.
+        if (P.spatialFeatureSidecarWriter != nullptr) {
+            spatial_feature_sidecar::Record sidecarRecord;
+            sidecarRecord.statusFlags = spatial_feature_sidecar::kRecordPresent;
+            const bool mapped = unmapType < 0;
+            sidecarRecord.statusFlags |= mapped ? spatial_feature_sidecar::kMapped
+                                                : spatial_feature_sidecar::kUnmappedOrFiltered;
+            const ReadAnnotFeature &geneFull =
+                readAnnot.annotFeatures[SoloFeatureTypes::GeneFull];
+            if (mapped && geneFull.fSet.size() == 1) {
+                sidecarRecord.geneIndex = *geneFull.fSet.begin();
+                sidecarRecord.statusFlags |= spatial_feature_sidecar::kUniqueGene;
+            } else if (mapped && geneFull.fSet.size() > 1) {
+                sidecarRecord.statusFlags |= spatial_feature_sidecar::kMultiGeneRejected;
+            } else {
+                sidecarRecord.statusFlags |= spatial_feature_sidecar::kNoGene;
+            }
+            if (mapped && genomicMultimapBeforeRescue_ && geneFull.fSet.size() == 1) {
+                sidecarRecord.statusFlags |=
+                    spatial_feature_sidecar::kSameGeneGenomicMultimapper;
+            }
+            if (crMultiMapRescued_) {
+                sidecarRecord.statusFlags |= crMultiMapRescuedIntronic_
+                    ? spatial_feature_sidecar::kCrIntronicFallback
+                    : spatial_feature_sidecar::kCrExonicRescue;
+            }
+            const std::uint16_t overlap = geneFull.ovType < 8
+                ? static_cast<std::uint16_t>(geneFull.ovType) : 0;
+            sidecarRecord.statusFlags |= static_cast<std::uint16_t>(
+                overlap << spatial_feature_sidecar::kOverlapShift);
+
+            if (iReadAll == 0) {
+                exitWithError("EXITING because spatial feature sidecar received STAR read ordinal zero\n",
+                              std::cerr, P.inOut->logMain, EXIT_CODE_INCONSISTENT_DATA, P);
+            }
+            const char *rawName = readNameMates[0] != nullptr ? readNameMates[0] : readName;
+            const std::string normalizedName = spatial_feature_sidecar::normalizeReadName(
+                rawName == nullptr ? std::string() : std::string(rawName));
+            std::string sidecarError;
+            if (!P.spatialFeatureSidecarWriter->write(
+                    iReadAll - 1, readFilesIndex, normalizedName, sidecarRecord, sidecarError)) {
+                exitWithError("EXITING because a spatial feature sidecar record could not be written: "
+                                  + sidecarError + "\n",
+                              std::cerr, P.inOut->logMain, EXIT_CODE_FILE_WRITE, P);
             }
         }
 

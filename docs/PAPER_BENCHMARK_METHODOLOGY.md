@@ -87,6 +87,25 @@ Dataset-specific values are noted.
 | `--crMinUmi` | `10` | `3` | `2` |
 | `--crAssignFeatureOffset` | `0` | `-1` | `0` |
 
+### BAM tags are not parity outputs
+
+The canonical paper recipes deliberately omit `--outSAMattributes` and use
+`--outSAMtype None` unless a dataset-specific diagnostic requires a BAM. An
+optional BAM mode does not change the comparison surface and must not add
+`GX`/`UR` unless the experiment explicitly tests raw-tag compatibility.
+
+| Surface | Meaning | Use for count parity? |
+|---|---|---|
+| `GX`/`GN` | Alignment-level gene compatibility annotation | No; it is not final UMI-collapsed `GeneFull`, Velocyto, multimap-rescue, or CR-compatible policy |
+| `UR` | Raw, uncorrected UMI sequence | No; it is intentionally not updated after correction |
+| `UB` | Corrected UMI, when BAM tag injection is requested | No; it can support BAM diagnostics, but the matrix remains authoritative |
+| `GeneFull`/CR-compatible MEX and cell calls | Final counting and calling products | Yes |
+
+Adding `GX` or `UR` to an otherwise canonical benchmark changes BAM generation
+work without improving the count comparison. It therefore invalidates a
+controlled performance comparison unless BAM-tag generation is itself the
+declared test variable.
+
 ### Why `--soloCrMultimapRescue yes` matters
 
 CellRanger 9 uses a multimap rescue algorithm that reassigns multi-mapped reads
