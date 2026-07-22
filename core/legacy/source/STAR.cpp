@@ -26,6 +26,7 @@
 #include "bamSortByCoordinate.h"
 #include "SamtoolsSorter.h"
 #include "Transcriptome.h"
+#include "SpatialFeatureSidecar.h"
 #include "CountingSinkStress.h"
 #include "signalFromBAM.h"
 #include "mapThreadsSpawn.h"
@@ -574,6 +575,7 @@ int main(int argInN, char *argIn[])
 
     // transcriptome placeholder (loaded only if P.quant.yes)
     Transcriptome *transcriptomeMain = nullptr;
+    std::unique_ptr<spatial_feature_sidecar::Writer> spatialFeatureWriter;
     std::vector<double> vbGenePosterior;
     bool vbGenePosteriorReady = false;
 
@@ -669,6 +671,50 @@ int main(int argInN, char *argIn[])
     if (P.quant.yes)
     { // load transcriptome
         transcriptomeMain = new Transcriptome(P);
+
+        if (P.soloSpatialFeatureSidecarEnabled) {
+            spatial_feature_sidecar::WriterConfig sidecarConfig;
+            sidecarConfig.prefix = P.soloSpatialFeatureSidecar;
+            sidecarConfig.starSuiteVersion = STAR_SUITE_VERSION;
+            sidecarConfig.sourceRevision = GIT_BRANCH_COMMIT_DIFF;
+            sidecarConfig.featureType = "GeneFull";
+            sidecarConfig.strand = P.pSolo.strand;
+            sidecarConfig.crMultimapRescue = P.pSolo.crMultimapRescue;
+            sidecarConfig.crIntronicFallback = P.pSolo.crMultimapRescueIntronic;
+            sidecarConfig.policy = "GeneFull;MultiGeneUMI_CR;1MM_CR;Unique;Forward;CellFilter=None;SAM=None";
+            std::ostringstream inputManifest;
+            inputManifest << "schema\tstar_suite.spatial_feature_inputs.v1\n";
+            for (std::size_t end = 0; end < P.readFilesNames.size(); ++end) {
+                for (std::size_t lane = 0; lane < P.readFilesNames[end].size(); ++lane) {
+                    const std::string &path = P.readFilesNames[end][lane];
+                    struct stat info;
+                    if (::stat(path.c_str(), &info) != 0) {
+                        ostringstream errOut;
+                        errOut << "EXITING because the spatial feature input manifest cannot stat "
+                               << path << ": " << strerror(errno) << "\n";
+                        exitWithError(errOut.str(), std::cerr, P.inOut->logMain,
+                                      EXIT_CODE_INPUT_FILES, P);
+                    }
+                    inputManifest << "end=" << end << "\tlane=" << lane << "\tpath=" << path
+                                  << "\tbytes=" << static_cast<unsigned long long>(info.st_size)
+                                  << "\tmtime=" << static_cast<long long>(info.st_mtime) << '\n';
+                }
+            }
+            sidecarConfig.inputManifest = inputManifest.str();
+            spatialFeatureWriter.reset(new spatial_feature_sidecar::Writer());
+            std::string sidecarError;
+            const std::vector<std::string> &geneIds = transcriptomeMain->geIDCanonical.empty()
+                ? transcriptomeMain->geID : transcriptomeMain->geIDCanonical;
+            if (!spatialFeatureWriter->open(sidecarConfig, geneIds,
+                                            transcriptomeMain->geName, sidecarError)) {
+                exitWithError("EXITING because the spatial feature sidecar could not be opened: "
+                                  + sidecarError + "\n",
+                              std::cerr, P.inOut->logMain, EXIT_CODE_FILE_OPEN, P);
+            }
+            P.spatialFeatureSidecarWriter = spatialFeatureWriter.get();
+            P.inOut->logMain << "Spatial GeneFull sidecar output prefix: "
+                             << P.soloSpatialFeatureSidecar << "\n" << flush;
+        }
 
         // SNP mask build pre-pass (if requested)
         bool hasMaskIn = !P.quant.slamSnpMask.maskIn.empty() && P.quant.slamSnpMask.maskIn != "-" && P.quant.slamSnpMask.maskIn != "None";
@@ -2052,6 +2098,19 @@ int main(int argInN, char *argIn[])
             }
             exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
         }
+    }
+
+    if (spatialFeatureWriter) {
+        std::string sidecarError;
+        if (!spatialFeatureWriter->finalize(P.iReadAll, sidecarError)) {
+            exitWithError("EXITING because the spatial feature sidecar could not be finalized: "
+                              + sidecarError + "\n",
+                          std::cerr, P.inOut->logMain, EXIT_CODE_FILE_WRITE, P);
+        }
+        P.spatialFeatureSidecarWriter = nullptr;
+        P.inOut->logMain << timeMonthDayTime()
+                         << " ..... finalized spatial GeneFull sidecar (reads="
+                         << P.iReadAll << ")\n" << flush;
     }
 
     // close some BAM files

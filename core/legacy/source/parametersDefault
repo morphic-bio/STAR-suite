@@ -1782,6 +1782,15 @@ soloCrMultimapRescueIntronic auto
                             yes         ... allow 0-exonic + single-intronic rescue
                             no          ... exonic-only rescue
 
+soloSpatialFeatureSidecar   -
+    string:                 default-off output prefix for a fixed-width, read-ordinal GeneFull evidence sidecar
+                            Requires the annotation-only Visium HD GEX policy: soloType None,
+                            soloFeatures GeneFull, soloCrGexFeature GeneFull, soloCrMultimapRescue yes,
+                            soloUMIdedup 1MM_CR, soloUMIfiltering MultiGeneUMI_CR,
+                            soloMultiMappers Unique, soloStrand Forward, soloCellFilter None,
+                            outSAMtype None, and FASTQ inputs ordered as R2 then raw R1.
+                            Emits .bin, .features.tsv, .read_name_digests.tsv, and .summary.json.
+
 soloProbeList               -
     string:                 path to probe_list.txt used to derive 1-based gene indices (15-bit cap)
                             If not provided, will auto-detect probe_gene_list.txt from genome index directory

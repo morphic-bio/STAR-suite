@@ -44,6 +44,21 @@ void expectInvalid(const std::function<void()> &operation)
     assert(threw);
 }
 
+molecule_first::ReadClique clique(const std::string &id, const std::string &gene,
+                                  const std::string &umi, std::size_t readCount)
+{
+    molecule_first::ReadClique result;
+    result.cliqueId = id;
+    result.featureId = gene;
+    result.rawUmi = umi;
+    result.candidates = {"A"};
+    result.posterior = {1.0};
+    for (std::size_t index = 0; index < readCount; ++index) {
+        result.memberReadIds.push_back(id + "_" + std::to_string(index));
+    }
+    return result;
+}
+
 } // namespace
 
 int main()
@@ -117,6 +132,30 @@ int main()
     assert(hard.size() == 1 && hard[0].candidate == "A");
     assert(gated.empty());
 
+    molecule_first::ReadClique nearTie;
+    nearTie.cliqueId = "near_tie";
+    nearTie.featureId = "gene";
+    nearTie.rawUmi = "AAAA";
+    nearTie.memberReadIds = {"near_tie_read"};
+    nearTie.candidates = {"A", "B"};
+    nearTie.posterior = {0.5, 0.5 + 5e-15};
+    assert(molecule_first::topCandidate(nearTie).first == "A");
+
+    molecule_first::ReadClique lexicalRoot;
+    lexicalRoot.cliqueId = "lexical_root";
+    lexicalRoot.featureId = "gene";
+    lexicalRoot.rawUmi = "AAAA";
+    lexicalRoot.candidates = {"A"};
+    lexicalRoot.posterior = {0.5};
+    molecule_first::ReadClique numericalRoot = lexicalRoot;
+    numericalRoot.cliqueId = "numerical_root";
+    numericalRoot.rawUmi = "TAAA";
+    numericalRoot.posterior = {0.5 + 5e-15};
+    const auto nearTieCorrections = molecule_first::correctedUmis(
+        {lexicalRoot, numericalRoot}, "1mm_cr");
+    assert(nearTieCorrections.at(std::make_tuple("gene", "A", "AAAA")) == "AAAA");
+    assert(nearTieCorrections.at(std::make_tuple("gene", "A", "TAAA")) == "AAAA");
+
     for (const auto &clique : pcrCliques) {
         for (const std::string &candidate : clique.candidates) {
             assert(candidate == "A" || candidate == "B");
@@ -132,6 +171,51 @@ int main()
     expectInvalid([&]() {
         molecule_first::buildReadCliques(pcr, pcrPriors, invalidConfig);
     });
+
+    // Candidate-specific 1MM_CR happens before the shared cross-gene rule.
+    const std::vector<molecule_first::ReadClique> correctionFirst = {
+        clique("g1_root", "G1", "AAAAA", 3),
+        clique("g1_child", "G1", "AAAAT", 1),
+        clique("g2_root", "G2", "AAAAA", 3),
+    };
+    molecule_first::GexReconciliationStats gexStats;
+    const auto gexCorrected = molecule_first::gexPolicyMolecules(
+        correctionFirst, "1mm_cr", "strict", {}, &gexStats);
+    assert(gexCorrected.size() == 1);
+    assert(gexCorrected[0].featureId == "G1");
+    assert(gexCorrected[0].correctedUmi == "AAAAA");
+    assert(gexStats.groups == 1 && gexStats.accepted == 1);
+
+    const std::vector<molecule_first::ReadClique> equalSupport = {
+        clique("tie1", "G1", "AAAAA", 2), clique("tie2", "G2", "AAAAA", 2),
+    };
+    assert(molecule_first::gexPolicyMolecules(
+        equalSupport, "exact", "strict", {}, &gexStats).empty());
+    assert(gexStats.correctedCountTies == 1);
+
+    const std::vector<molecule_first::ReadClique> originalDominance = {
+        clique("dom1_root", "G1", "AAAAA", 3),
+        clique("dom1_child", "G1", "AAAAT", 2),
+        clique("dom2_root", "G2", "AAAAA", 4),
+    };
+    assert(molecule_first::gexPolicyMolecules(
+        originalDominance, "1mm_cr", "strict", {}, &gexStats).empty());
+    assert(gexStats.originalUmiDominanceRejected == 1);
+
+    molecule_first::ReadClique softG1 = clique("soft1", "G1", "CCCCC", 1);
+    softG1.candidates = {"A", "B"};
+    softG1.posterior = {0.8, 0.2};
+    molecule_first::ReadClique softG2 = clique("soft2", "G2", "CCCCC", 1);
+    softG2.candidates = {"A", "B"};
+    softG2.posterior = {0.6, 0.4};
+    const auto softGex = molecule_first::gexWeightedOccupancies(
+        {softG1, softG2}, "exact", &gexStats);
+    assert(softGex.size() == 2);
+    assert(near(gexStats.inputExpectedMass, 2.0));
+    assert(near(gexStats.outputExpectedMass, 1.2));
+    for (const auto &row : softGex) {
+        assert(row.expectedCount >= 0.0 && row.expectedCount <= 1.0);
+    }
 
     std::cout << "molecule-first native unit tests passed\n";
     return 0;

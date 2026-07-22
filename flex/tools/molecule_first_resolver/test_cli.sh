@@ -14,6 +14,21 @@ EOF
 
 "$resolver" --input "$tmp/input.tsv" --out-dir "$tmp/out"
 
+{
+  head -n 1 "$tmp/input.tsv"
+  tail -n +2 "$tmp/input.tsv" | LC_ALL=C sort -t $'\t' -k2,2 -k1,1 -k4,4
+} >"$tmp/input.feature-sorted.tsv"
+"$resolver" --input "$tmp/input.feature-sorted.tsv" --input-feature-sorted \
+  --out-dir "$tmp/out-streaming"
+for table in read_cliques.tsv hard_call_audit.tsv strict_molecules.tsv \
+  hard_molecules.tsv gated_hard_molecules.tsv soft_expected_molecules.tsv; do
+  diff -u \
+    <(tail -n +2 "$tmp/out/$table" | LC_ALL=C sort) \
+    <(tail -n +2 "$tmp/out-streaming/$table" | LC_ALL=C sort)
+done
+grep -q $'^execution_mode\tfeature_sorted_streaming$' \
+  "$tmp/out-streaming/resolved_config.tsv"
+
 expected='gated_hard_molecules.tsv
 hard_call_audit.tsv
 hard_molecules.tsv
@@ -50,6 +65,17 @@ r1	gene	AAAA	A	nan	8
 EOF
 if "$resolver" --input "$tmp/nonfinite.tsv" --out-dir "$tmp/nonfinite-out" 2>/dev/null; then
   echo "non-finite likelihood unexpectedly accepted" >&2
+  exit 1
+fi
+
+cat >"$tmp/out-of-order.tsv" <<'EOF'
+read_id	feature_id	raw_umi	candidate	log_sequence_likelihood	exact_read_count
+r1	geneB	AAAA	A	0	8
+r2	geneA	AAAT	A	0	8
+EOF
+if "$resolver" --input "$tmp/out-of-order.tsv" --input-feature-sorted \
+  --out-dir "$tmp/out-of-order-out" 2>/dev/null; then
+  echo "out-of-order feature streaming input unexpectedly accepted" >&2
   exit 1
 fi
 

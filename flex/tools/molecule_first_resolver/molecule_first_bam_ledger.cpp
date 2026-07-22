@@ -53,7 +53,9 @@ void usage(std::ostream &out)
         << "       --output candidate_reads.tsv --summary summary.tsv\n"
         << "       --assay scrna|flex|visium [--sample-id ID] [--feature-tag GX]\n\n"
         << "The input may be SAM, BAM, or CRAM. Only raw CR/CY/UR and the declared\n"
-        << "feature tag are read; corrected CB/UB and cell calls are never used.\n";
+        << "feature tag are read; corrected CB/UB and cell calls are never used.\n"
+        << "GX/UR are raw adapter evidence here: GX is alignment-level and UR is\n"
+        << "uncorrected. Use final GeneFull/CR-compatible matrices for parity.\n";
 }
 
 Arguments parseArguments(int argc, char **argv)

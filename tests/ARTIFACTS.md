@@ -136,6 +136,7 @@ update this file with its output location.
 - `/tmp/ucsf_velocyto_cbub_stage_*` (host-local dry-run staging roots used by `tests/run_ucsf_velocyto_cbub_smoke.sh`; protected dataset, do not redistribute outputs)
 - `tests/flexfilter_parity_output_*/` (FlexFilter parity outputs vs production baseline)
 - `/tmp/*` (temporary scratch outputs)
+- `/tmp/star-scrna-sidecar-off-golden-*` (self-contained synthetic normal-scRNA index, FASTQs, and Solo outputs used to verify byte-identical sidecar-off GeneFull MEX parity)
 - `/mnt/pikachu/solo_bridge_determinism_*` (non-Flex Solo bridge determinism
   harness outputs from `tests/run_solo_bridge_determinism_harness.sh`: paired
   STAR runs, bridge-stage digest TSVs, optional per-CB digest TSVs, raw/filtered
@@ -157,6 +158,9 @@ update this file with its output location.
 - `/tmp/star_flex_cbq_range_full_ssd_*` (host-local SC2300771 full-production FLEX no-genome indexed-CBQ-range benchmark outputs on SSD, including `BENCHMARK_TIME.txt`, STAR logs, raw Gene MEX, and filtered per-sample summaries)
 - `/mnt/pikachu/cbq_solo_ingestion_benchmark_*` (FASTQ-vs-native-CBQ STARsolo ingestion timing runs from `tests/run_cbq_solo_ingestion_benchmark.sh`; per-mode `BENCHMARK_SUMMARY.txt` files are the authoritative completion artifacts)
 - `/tmp/star_suite_production_module_regression_*` (manifest-driven production-module regression wrapper logs, per-case stdout/stderr, and preflight/run summaries)
+- `/mnt/pikachu/star-spatial/gex_sidecar_tests/20260722_ovarian_100k_v1/` (preserved first source-only Visium HD ovarian 3-prime 100K attempt; all computational stages completed, but the wrapper correctly withheld its completion marker because the initial validator did not skip the materializer summary metadata preamble)
+- `/mnt/pikachu/star-spatial/gex_sidecar_tests/20260722_ovarian_100k_v2/` (authoritative completed source-only Visium HD ovarian 3-prime 100K run for the modern post-rescue GeneFull sidecar, raw-R1 candidate join, candidate-specific `MultiGeneUMI_CR`, and 2/8/16-micrometer policy matrices; no historical run artifact was copied into it)
+- `/mnt/pikachu/star-spatial/gex_sidecar_tests/20260722_ovarian_100k_v2_space_ranger_sanity/` (read-only descriptive comparison of the completed source-only 100K policy matrices against the published full ovarian Space Ranger 4.0.1 raw binned H5 artifacts; never consumed as resolution evidence or a tuning target)
 - `/tmp/ucsf_cr_config_1m_smoke_*` (real UCSF perturb CR-config fixture smoke outputs)
 - `/tmp/ucsf_batch_cr_multifeature_tiny_*` (synthetic UCSF perturb multifeature CR-config tiny smoke outputs)
 - `/tmp/flex_cr_config_smoke_*` (Flex CR-config smoke outputs)
@@ -922,3 +926,16 @@ All three runs used **`USE_READFILES_ZCAT=0`** (no external `zcat`), **`--outSAM
 - Contents: synthetic genome/GTF, generated STAR index, `transcriptome.fa`,
   `expected_gc.tsv`, and first/second genomeGenerate logs.
 - Status: untracked.
+
+## Molecule-first bounded materializer (2026-07-22)
+
+- Harness: `tests/run_molecule_first_materializer_bounded_test.sh`
+- Synthetic scratch: `/tmp/star_suite_molecule_first_materializer_bounded.*`
+- External 100K equivalence outputs:
+  `/mnt/pikachu/molecule_first_materializer_100k_{unsorted,streaming}_20260722_*`
+- Full-slide optimized outputs and timing records:
+  `/mnt/pikachu/molecule_first_materializer_fullslide_1mm_cr_20260722_*`
+- Contents: post-collapse strict, soft-expected, hard, and gated-hard MEX at
+  2, 8, and 16 um; private spill files exist only while the process is live.
+- Status: untracked; never commit external resolver TSVs, MEX matrices, spill
+  records, or timing logs.
