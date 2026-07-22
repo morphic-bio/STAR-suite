@@ -8,6 +8,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -25,6 +26,10 @@ def python_command(source: str, *arguments: Path) -> list[str]:
 
 
 class ProducerThreadBudgetTest(unittest.TestCase):
+    def test_serial_is_the_validated_default(self) -> None:
+        with mock.patch.object(sys, "argv", [str(WRAPPER)]):
+            self.assertEqual(MODULE.arguments().producer_mode, "serial")
+
     def test_concurrent_defaults_split_total_budget(self) -> None:
         self.assertEqual(MODULE.producer_thread_budgets(16, "concurrent", None, None), (8, 8))
         self.assertEqual(MODULE.producer_thread_budgets(16, "concurrent", 6, None), (6, 10))
