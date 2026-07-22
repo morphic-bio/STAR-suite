@@ -100,7 +100,7 @@ def arguments() -> argparse.Namespace:
         help="total build/downstream thread budget and concurrent producer cap",
     )
     parser.add_argument(
-        "--producer-mode", choices=("concurrent", "serial"), default="concurrent",
+        "--producer-mode", choices=("concurrent", "serial"), default="serial",
         help="run R1 decode/H0 and STAR sidecar as concurrent branches or serial controls",
     )
     parser.add_argument(

@@ -73,7 +73,9 @@ time, and the successful join barrier.
 `--threads` is the total concurrent producer cap and remains the build/downstream
 thread setting.
 
-- `--producer-mode concurrent` is the default.
+- `--producer-mode serial` remains the default until representative full-slide
+  validation demonstrates a concurrent wall-time benefit.
+- `--producer-mode concurrent` explicitly enables the fork/join scheduler.
 - With no overrides, `--threads 16` assigns 8 R1 threads and 8 STAR threads.
 - `--r1-threads` and `--star-threads` may override that split, but their sum may
   not exceed `--threads` in concurrent mode.
@@ -150,7 +152,7 @@ Compare SHA-256 and byte size for all scheduling-independent products:
 - `star/gex_features.features.tsv`
 - `star/gex_features.read_name_digests.tsv`
 - `join/normalized_evidence.tsv`
-- `resolver_a/{strict,hard,gated_hard}_molecules.tsv`
+- `resolver_a/{strict,soft_expected,hard,gated_hard}_molecules.tsv`
 - every `materialized/*/*/{matrix.mtx,barcodes.tsv,features.tsv}`
 
 Do not require equality for logs, `commands.json`, summaries containing elapsed
@@ -171,4 +173,46 @@ time/mode, or source paths.
 
 ## Validation result
 
-Pending implementation and fresh source-only 100K serial/concurrent runs.
+Validated implementation commit: `1c352de`.
+
+Fresh source-only output roots:
+
+```text
+/mnt/pikachu/star-spatial/gex_sidecar_tests/20260722_ovarian_100k_serial_concurrency_control_v1
+/mnt/pikachu/star-spatial/gex_sidecar_tests/20260722_ovarian_100k_concurrent_v1
+/mnt/pikachu/star-spatial/gex_sidecar_tests/20260722_ovarian_100k_concurrent_star_weighted_v1
+```
+
+All three runs completed with the same accounting:
+
+| Metric | Count |
+|---|---:|
+| paired reads / sidecar records | 100,000 |
+| candidate reads / rows | 89,156 / 111,744 |
+| emitted reads / rows | 78,393 / 98,196 |
+| materialized matrices | 12 |
+
+Forty-six scheduling-independent products were compared by byte size and
+SHA-256: candidate and H0 tables, sidecar binary/dictionary/digests, normalized
+evidence, four resolver molecule products, and all 36 materialized MEX axis and
+matrix files. Every product was byte-identical across serial, 8+8 concurrent,
+and 4+12 concurrent runs.
+
+Producer timing:
+
+| Mode | R1 threads | STAR threads | R1 (s) | STAR (s) | Actual overlap (s) | Producer wall (s) | Versus serial |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| serial | 16 | 16 | 10.422 | 7.568 | 0 | 18.175 | baseline |
+| concurrent | 8 | 8 | 11.482 | 17.455 | 11.482 | 18.490 | +1.7% |
+| concurrent, STAR-weighted | 4 | 12 | 11.130 | 17.901 | 11.130 | 19.676 | +8.3% |
+
+The fork/join schedule therefore works and preserves every tested output, but
+the 100K fixture does not benefit from overlap. Concurrent FASTQ/index activity
+increased STAR genome-load/mapping time enough to erase the saved serial R1
+interval. The whole-wrapper wall times were 2:31.00, 2:39.50, and 2:52.93;
+clean-build variability is included in those totals, so the producer interval
+is the relevant scheduling comparison.
+
+Conclusion: ship the explicit concurrent scheduler and its CI protection, keep
+serial as the default for this validated 100K workflow, and require a fresh
+full-slide serial/concurrent comparison before changing the production default.
