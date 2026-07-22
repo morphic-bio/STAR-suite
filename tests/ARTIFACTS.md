@@ -136,6 +136,7 @@ update this file with its output location.
 - `/tmp/ucsf_velocyto_cbub_stage_*` (host-local dry-run staging roots used by `tests/run_ucsf_velocyto_cbub_smoke.sh`; protected dataset, do not redistribute outputs)
 - `tests/flexfilter_parity_output_*/` (FlexFilter parity outputs vs production baseline)
 - `/tmp/*` (temporary scratch outputs)
+- `/tmp/star-scrna-sidecar-off-golden-*` (self-contained synthetic normal-scRNA index, FASTQs, and Solo outputs used to verify byte-identical sidecar-off GeneFull MEX parity)
 - `/mnt/pikachu/solo_bridge_determinism_*` (non-Flex Solo bridge determinism
   harness outputs from `tests/run_solo_bridge_determinism_harness.sh`: paired
   STAR runs, bridge-stage digest TSVs, optional per-CB digest TSVs, raw/filtered

@@ -73,6 +73,10 @@ RUN make -j"${MAKE_JOBS}" core WITH_CHROMAP="${STAR_WITH_CHROMAP}" \
     && make default WITH_CHROMAP="${STAR_WITH_CHROMAP}" \
     && make all WITH_CHROMAP="${STAR_WITH_CHROMAP}"
 
+# The spatial bridge and conventional Solo collapse paths share this resolver.
+# Gate both adapters against their pre-refactor rules on every CI image build.
+RUN make -C core/legacy/source test_MultiGeneUmiCr
+
 # Pre-build SLAM SNP EM test helper so Tier A can run without a compiler.
 RUN g++ -std=c++11 -O2 \
     -I/build/slam/source -I/build/slam/source/libem \
