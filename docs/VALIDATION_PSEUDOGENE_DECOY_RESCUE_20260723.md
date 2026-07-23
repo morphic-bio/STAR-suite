@@ -185,3 +185,26 @@ Repository-level test limitations, unrelated to this change:
 
 No test failure implicated the new rescue policy, sidecar record validation,
 normal scRNA output, or the real pseudogene-decoy replay.
+
+## Master integration validation
+
+The feature branch was merged without conflict onto fetched master
+`2fc05770d1b0528abf3709da66199b708ca17afb` in a separate clean worktree.
+The tested merge commit is
+`3dfec3c4cd3f184d94791d0d64eb3cf4aaa63c3f`.
+
+From that merge commit:
+
+- A clean release build passed. Its binary SHA-256 is
+  `9263645ef24dd002fd8f6f1ce135a91ad43a75ffe23affb033d552755eee939b`,
+  and its embedded source identity has an empty `diff files` field.
+- The policy, sidecar, and 20,000-case `MultiGeneUMI_CR` parity tests passed.
+- The normal sidecar-off scRNA golden test passed.
+- The real decoy replay at
+  `/mnt/pikachu/star-spatial/runs/20260723_pseudogene_decoy_validation/decoy_merge_v1`
+  reproduced 100 MECOM, 13 RPL22, and 87 unassigned records with the same
+  3 best-score-NA and 84 conflicting-gene diagnostics.
+- The checked-in dump of all 200 fixed-width records was byte-identical as
+  text to the implementation-commit replay. The merge sidecar binary differs
+  only in declared build/source provenance and has SHA-256
+  `a6cbbf879c4a2d68b56978bd9036421dc362bcc3e09f19e98cc99c84db11d4fb`.
