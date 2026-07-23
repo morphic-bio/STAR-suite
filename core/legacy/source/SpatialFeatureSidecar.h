@@ -22,6 +22,10 @@ static const std::uint16_t kCrExonicRescue = 1u << 7;
 static const std::uint16_t kCrIntronicFallback = 1u << 8;
 static const std::uint16_t kOverlapShift = 9;
 static const std::uint16_t kOverlapMask = 7u << kOverlapShift;
+static const std::uint16_t kAlignmentEvidenceRejected = 1u << 12;
+static const std::uint16_t kBestScoreNaDecoy = 1u << 13;
+static const std::uint16_t kConflictingBestGenes = 1u << 14;
+static const std::uint16_t kMultiGeneBestAlignment = 1u << 15;
 
 static const std::uint16_t kSchemaVersion = 1;
 static const std::uint16_t kHeaderBytes = 1024;
