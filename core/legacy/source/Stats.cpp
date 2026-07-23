@@ -15,6 +15,8 @@ void Stats::resetN() {//zero all counters
     crRescueExonicWinner = 0; crRescueIntronicFallback = 0;
     crRescueMultiExonicNoRescue = 0; crRescueMultiIntronicNoRescue = 0;
     crRescueIntronicFallbackOffNoRescue = 0; crRescueAllIntergenicNoRescue = 0;
+    crRescueNaBestTieNoRescue = 0; crRescueConflictingBestGenesNoRescue = 0;
+    crRescueMultiGeneBestAlignmentNoRescue = 0;
     crGeneFullExonicOverIntronicFiltered = 0; crGeneFullResolvedToUniqueAfterFilter = 0;
     crGeneFullStillMultiExonic = 0; crGeneFullCrossAlignMultiGene = 0;
     hashScreenKeep = 0; hashScreenDeny = 0; hashScreenPass = 0;
@@ -52,6 +54,9 @@ void Stats::addStats(Stats &S) {//add S to Stats
     crRescueMultiIntronicNoRescue += S.crRescueMultiIntronicNoRescue;
     crRescueIntronicFallbackOffNoRescue += S.crRescueIntronicFallbackOffNoRescue;
     crRescueAllIntergenicNoRescue += S.crRescueAllIntergenicNoRescue;
+    crRescueNaBestTieNoRescue += S.crRescueNaBestTieNoRescue;
+    crRescueConflictingBestGenesNoRescue += S.crRescueConflictingBestGenesNoRescue;
+    crRescueMultiGeneBestAlignmentNoRescue += S.crRescueMultiGeneBestAlignmentNoRescue;
     crGeneFullExonicOverIntronicFiltered += S.crGeneFullExonicOverIntronicFiltered;
     crGeneFullResolvedToUniqueAfterFilter += S.crGeneFullResolvedToUniqueAfterFilter;
     crGeneFullStillMultiExonic += S.crGeneFullStillMultiExonic;
@@ -256,7 +261,10 @@ void Stats::reportFinal(ofstream &streamOut) {
                   <<setw(w1)<< "No rescue: multiple exonic loci |\t" << crRescueMultiExonicNoRescue << "\n" \
                   <<setw(w1)<< "No rescue: multiple intronic loci |\t" << crRescueMultiIntronicNoRescue << "\n" \
                   <<setw(w1)<< "No rescue: 1 intronic, fallback off |\t" << crRescueIntronicFallbackOffNoRescue << "\n" \
-                  <<setw(w1)<< "No rescue: all intergenic |\t" << crRescueAllIntergenicNoRescue << "\n";
+                  <<setw(w1)<< "No rescue: all NA/intergenic |\t" << crRescueAllIntergenicNoRescue << "\n" \
+                  <<setw(w1)<< "No rescue: best-score NA decoy tie |\t" << crRescueNaBestTieNoRescue << "\n" \
+                  <<setw(w1)<< "No rescue: conflicting best-score genes |\t" << crRescueConflictingBestGenesNoRescue << "\n" \
+                  <<setw(w1)<< "No rescue: best alignment overlaps multiple genes |\t" << crRescueMultiGeneBestAlignmentNoRescue << "\n";
     }
 
     if (pipelineChunksProcessed > 0) {

@@ -409,6 +409,8 @@ void ReadAlign::resetN () {//reset resets the counters to 0 for a new read
     crMultiMapRescued_ = false;   // Reset CR multimapper rescue flag for new read
     crMultiMapRescuedIntronic_ = false; // Reset intronic fallback marker
     genomicMultimapBeforeRescue_ = false;
+    crMultimapEvidenceRejected_ = false;
+    crMultimapEvidenceFailure_ = 0;
 
     for (uint ii=0; ii<P.readNmates; ii++) {//not readNends: this is alignment
         maxScoreMate[ii]=0;
