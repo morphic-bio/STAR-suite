@@ -681,7 +681,8 @@ int main(int argInN, char *argIn[])
             sidecarConfig.strand = P.pSolo.strand;
             sidecarConfig.crMultimapRescue = P.pSolo.crMultimapRescue;
             sidecarConfig.crIntronicFallback = P.pSolo.crMultimapRescueIntronic;
-            sidecarConfig.policy = "GeneFull;MultiGeneUMI_CR;1MM_CR;Unique;Forward;CellFilter=None;SAM=None";
+            sidecarConfig.policy = "GeneFull;MultiGeneUMI_CR;1MM_CR;Unique;Forward;CellFilter=None;SAM=None;CrRescueEvidence="
+                + P.pSolo.crMultimapRescueEvidenceStr;
             std::ostringstream inputManifest;
             inputManifest << "schema\tstar_suite.spatial_feature_inputs.v1\n";
             for (std::size_t end = 0; end < P.readFilesNames.size(); ++end) {
