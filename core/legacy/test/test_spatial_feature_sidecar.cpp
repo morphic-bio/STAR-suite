@@ -51,7 +51,7 @@ sfs::WriterConfig config(const std::string &prefix)
 
 std::vector<sfs::Record> records()
 {
-    std::vector<sfs::Record> result(7);
+    std::vector<sfs::Record> result(8);
     result[0].geneIndex = 0;
     result[0].statusFlags = sfs::kRecordPresent | sfs::kMapped | sfs::kUniqueGene;
     result[1].statusFlags = sfs::kRecordPresent | sfs::kMapped | sfs::kNoGene;
@@ -68,6 +68,8 @@ std::vector<sfs::Record> records()
     result[6].geneIndex = 0;
     result[6].statusFlags = sfs::kRecordPresent | sfs::kMapped | sfs::kUniqueGene
         | sfs::kCrIntronicFallback | (2u << sfs::kOverlapShift);
+    result[7].statusFlags = sfs::kRecordPresent | sfs::kMapped | sfs::kNoGene
+        | sfs::kAlignmentEvidenceRejected | sfs::kBestScoreNaDecoy;
     return result;
 }
 
@@ -112,6 +114,12 @@ int main()
     sfs::Record missing;
     missing.geneIndex = 0;
     assert(!sfs::validateRecord(missing, 2, error));
+    sfs::Record invalidRejectedUnique = geneZero;
+    invalidRejectedUnique.statusFlags |= sfs::kAlignmentEvidenceRejected;
+    assert(!sfs::validateRecord(invalidRejectedUnique, 2, error));
+    sfs::Record invalidOrphanReason = records()[1];
+    invalidOrphanReason.statusFlags |= sfs::kBestScoreNaDecoy;
+    assert(!sfs::validateRecord(invalidOrphanReason, 2, error));
 
     char directoryTemplate[] = "/tmp/star-spatial-sidecar-test-XXXXXX";
     const char *directory = ::mkdtemp(directoryTemplate);

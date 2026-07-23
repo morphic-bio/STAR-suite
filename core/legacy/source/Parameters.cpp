@@ -623,6 +623,7 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloCrGexFeature", &pSolo.crGexFeatureStr));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloCrMultimapRescue", &pSolo.crMultimapRescueStr));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloCrMultimapRescueIntronic", &pSolo.crMultimapRescueIntronicStr));
+    parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloCrMultimapRescueEvidence", &pSolo.crMultimapRescueEvidenceStr));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloSpatialFeatureSidecar", &soloSpatialFeatureSidecar));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloProbeList", &pSolo.probeListPath));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloRemoveDeprecated", &pSolo.removeDeprecatedStr));

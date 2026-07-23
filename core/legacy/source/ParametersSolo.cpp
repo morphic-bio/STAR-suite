@@ -133,7 +133,7 @@ void ParametersSolo::initialize(Parameters *pPin)
             exitWithError(errOut.str(), std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
         }
     }
-    
+
     //////////////////////////////////////////////////////////////////////////////////////////////////////
     /////////////////////////////// Tag-table export (always enabled; legacy flag removed)
     writeTagTableEnabled = true;
@@ -281,6 +281,24 @@ void ParametersSolo::initialize(Parameters *pPin)
         }
         if (!crMultimapRescue) {
             crMultimapRescueIntronic = false;
+        }
+    }
+
+    //////////////////////////////////////////////////////////////////////////////////////////////////////
+    ///////////////////////////////--soloCrMultimapRescueEvidence
+    {
+        string mode = crMultimapRescueEvidenceStr;
+        transform(mode.begin(), mode.end(), mode.begin(), ::tolower);
+        if (mode == "compatibility" || mode.empty()) {
+            crMultimapRescueEvidenceMode = CrMultimapRescueEvidenceCompatibility;
+        } else if (mode == "decoy") {
+            crMultimapRescueEvidenceMode = CrMultimapRescueEvidenceDecoy;
+        } else {
+            ostringstream errOut;
+            errOut << "EXITING because of fatal PARAMETERS error: unrecognized option in --soloCrMultimapRescueEvidence="
+                   << crMultimapRescueEvidenceStr << "\n";
+            errOut << "SOLUTION: use allowed option: compatibility OR decoy\n";
+            exitWithError(errOut.str(), std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
         }
     }
     

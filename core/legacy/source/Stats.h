@@ -46,6 +46,9 @@ class Stats {
         uint64 crRescueMultiIntronicNoRescue;
         uint64 crRescueIntronicFallbackOffNoRescue;  // 1 intronic, 0 exonic, fallback disabled
         uint64 crRescueAllIntergenicNoRescue;
+        uint64 crRescueNaBestTieNoRescue;
+        uint64 crRescueConflictingBestGenesNoRescue;
+        uint64 crRescueMultiGeneBestAlignmentNoRescue;
 
         // CR-compat GeneFull exonic-over-intronic filter (gated on counter > 0 in reportFinal)
         uint64 crGeneFullExonicOverIntronicFiltered;  // alignments where intronic-only genes were dropped
