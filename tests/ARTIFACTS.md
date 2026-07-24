@@ -168,6 +168,17 @@ update this file with its output location.
 - `/mnt/pikachu/star-spatial/gex_fused_tests/20260724_ovarian_100k_contracts_v1/` (fresh source-only serial contracts oracle for fused paired-read validation; authoritative completion marker: `RUN_COMPLETE.json`)
 - `/mnt/pikachu/star-spatial/gex_fused_tests/20260724_ovarian_100k_fused_v1/` (fresh source-only fused STAR-owned paired-input run; decoder consumed only the raw-R1 FIFO, the join reopened no FASTQ, and all 49 scheduling-independent parity files matched the contracts oracle exactly)
 - `/mnt/pikachu/star-spatial/gex_fused_tests/20260724_ovarian_100k_fused_v1_space_ranger_sanity.json` (read-only 12-row descriptive comparison of the fused policy matrices with published ovarian Space Ranger 4.0.1 raw binned matrices; never used as resolution evidence)
+- `/mnt/pikachu/star-spatial/gex_in_memory_tests/20260724_ovarian_100k_integrated_v3/` (preserved launch-preflight failure: the wrapper incorrectly pre-created STAR's requested temporary directory; no genome or FASTQ processing occurred)
+- `/mnt/pikachu/star-spatial/gex_in_memory_tests/20260724_ovarian_100k_integrated_v4/` (completed clean-build, pre-N-policy integrated 100K baseline; exact scalar parity with the accepted annotated bridge oracle)
+- `/mnt/pikachu/star-spatial/gex_in_memory_tests/20260724_ovarian_100k_integrated_cxx11_n_1t_1740/` (completed one-thread C++11/N-policy integrated 100K run with wrapper completion summary)
+- `/mnt/pikachu/star-spatial/gex_in_memory_tests/20260724_ovarian_100k_integrated_n_v5/` (completed 16-thread C++11/N-policy integrated 100K run; all 36 policy MEX files are byte-identical to the one-thread run)
+- `/mnt/pikachu/star-spatial/gex_in_memory_tests/20260724_ovarian_100k_integrated_n_spill_v6/` (completed forced-spill C++11/N-policy integrated 100K run; 92 overflow runs and byte-identical policy MEX outputs versus all-memory)
+- `/mnt/pikachu/star-spatial/gex_in_memory_tests/20260724_ovarian_100k_integrated_accept_{allmem_1802,spill_1804,sidecar_1806,1t_retry2_1816}/` (final source-only acceptance roots: all-memory, forced compact spill, diagnostic-sidecar coexistence, and one-thread determinism; all 36 policy MEX components are byte-identical)
+- `/mnt/pikachu/star-spatial/gex_in_memory_tests/20260724_ovarian_100k_integrated_accept_{1t_1808,1t_retry_1812}/` (non-computational failed launches caused respectively by a concurrent clean rebuild and a concurrent partial runner edit; no STAR input was opened and neither root is resumable)
+- `/mnt/pikachu/star-spatial/gex_in_memory_tests/20260724_ovarian_100k_n_decoder_debug_v1/` (optional source-only decoder audit used to compare N-bearing raw barcode candidate retention with the retained matched Space Ranger 100K BAM; never used as resolution input)
+- `/mnt/pikachu/star-spatial/gex_in_memory_tests/20260724_merge_gate_1820/` (serialized pre-merge audit logs and outputs: focused spatial tests, source-only 100K reruns, CRISPR regression diagnosis/fix, exact Flex 800K classifier replay, bounded Flex 100K integration, persistent-oracle CBQ suite, production contracts, CB/UB, SLAM, GEX, and Flex CR-config smokes; exploratory failed reproductions remain diagnostic and are not acceptance results)
+- `/mnt/pikachu/star-spatial/10x/visium_hd_3prime_human_ovarian_ff_min_depth/downsample_2m_scaling_v1/` (balanced scaling-only fixture: first 500,000 source read pairs from each of four lanes, exactly 2,000,000 pairs total; paired IDs, 43/75-nt lengths, gzip integrity, checksums, and summary verified; not an oracle)
+- `/mnt/pikachu/star-spatial/gex_in_memory_scaling/20260724_ovarian_2m_clean_d90c92fc/` (serialized 1/8/16/32-thread all-memory scaling matrix using one clean binary; every accepted point has wrapper and integrated completion markers; `failed_threads_4_concurrent_rebuild_1810` is a pre-exec exit-127 diagnostic excluded from results)
 - `/tmp/ucsf_cr_config_1m_smoke_*` (real UCSF perturb CR-config fixture smoke outputs)
 - `/tmp/ucsf_batch_cr_multifeature_tiny_*` (synthetic UCSF perturb multifeature CR-config tiny smoke outputs)
 - `/tmp/flex_cr_config_smoke_*` (Flex CR-config smoke outputs)
@@ -641,6 +652,18 @@ These scripts validate that default bundles work with minimal explicit parameter
   - `/storage/downsampled_100K/SC2300771/results/flex_hash_screen_internal_exactonly_20260315_194025/`
     - `hash_on/` exact-only keep (`0,+1,-1` offset scan) + internal deny
     - `legacy/` aborted after startup because the prior legacy control was reused
+- Status: untracked
+
+## Flex Hash-Screen Replay Regression (2026-07-24)
+
+- Harness: `tests/run_flex_hash_screen_replay_regression.sh`
+- Inputs (checksum-pinned by the harness):
+  - `/storage/downsampled_100K/SC2300771/results/flex_h01_full_cache_20260315_153914/reclassified/sequence_cache.bin`
+  - `/storage/downsampled_100K/SC2300771/results/flex_hash_screen_dump_20260320_005618/hash_screen_dump_v2.bin`
+- Default output: `/tmp/star_suite_flex_hash_screen_replay/`
+- The retained 800K-read decision surface replaces the missing, derived
+  `sequence_cache_bc004_full16.bin` as the exact classifier regression. The
+  100K MEX comparison remains a separate downstream integration test.
 - Status: untracked
 
 ## Flex Internal Hash-Screen 2M E2E (2026-03-18)
