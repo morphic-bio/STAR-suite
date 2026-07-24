@@ -78,7 +78,9 @@ export SLAM_FIXTURE_FASTQ="${SLAM_FIXTURE_FASTQ:-/mnt/pikachu/STAR-Flex/test/tmp
 export SLAM_FIXTURE_LEGACY_REF_TSV="${SLAM_FIXTURE_LEGACY_REF_TSV:-/mnt/pikachu/STAR-Flex/test/tmp_slam_fixture/fixture_ref_human.tsv.gz}"
 export SLAM_FIXTURE_NOSNP_REF_TSV="${SLAM_FIXTURE_NOSNP_REF_TSV:-/mnt/pikachu/STAR-Flex/test/tmp_slam_fixture/from_nosnp.tsv.gz}"
 export SLAM_FIXTURE_REF_TSV="${SLAM_FIXTURE_REF_TSV:-$SLAM_FIXTURE_NOSNP_REF_TSV}"
-export SLAM_FIXTURE_STAR_INDEX="${SLAM_FIXTURE_STAR_INDEX:-/mnt/pikachu/STAR-Flex/test/fixtures/slam/ref/STAR-index}"
+# This recovered January index matches the immutable fixture manifest. The
+# runner still verifies it before every alignment; the path alone is not trust.
+export SLAM_FIXTURE_STAR_INDEX="${SLAM_FIXTURE_STAR_INDEX:-/mnt/pikachu/autoindex_110_44/pe_index}"
 export SLAM_FIXTURE_SNPS_BED="${SLAM_FIXTURE_SNPS_BED:-/mnt/pikachu/STAR-Flex/test/tmp_slam_fixture/snps.bed}"
 
 # Export generic SLAM variables used by fixture scripts

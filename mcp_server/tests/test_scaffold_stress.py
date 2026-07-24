@@ -119,7 +119,7 @@ class TestScaffoldSmokeScripts:
         ("tests/run_binary_test_matrix.sh", 3),
         ("tests/run_genome_generate_validation.sh", 2),
         ("tests/run_slam_end_to_end.sh", 2),
-        ("tests/run_slam_end_to_end_fixture.sh", 3),
+        ("tests/run_slam_parity_smoke.sh", 10),
         ("tests/run_slam_end_to_end_vb_commonmask.sh", 4),
         ("tests/run_a375_mex_comparison.sh", 2),
         ("tests/run_default_groups_smoke.sh", 2),
