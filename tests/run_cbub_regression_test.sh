@@ -13,6 +13,7 @@ REPO_DIR="${SCRIPT_DIR}/.."
 STAR_BIN="${STAR_BIN:-${REPO_DIR}/core/legacy/source/STAR}"
 GOLD_DIR="${SCRIPT_DIR}/gold_standard"
 CBUB_TMP_BASE="${CBUB_TMP_BASE:-/tmp/cbub_regress_tmp}"
+mkdir -p "${CBUB_TMP_BASE}"
 
 # Colors for output
 RED='\033[0;31m'
@@ -141,7 +142,7 @@ run_star() {
       --readFilesCommand zcat \
       --readFilesIn $READS_R2 $READS_R1 \
       --outFileNamePrefix "$OUT_DIR/" \
-      > /dev/null 2>&1
+      > "${OUT_DIR}/stdout.log" 2> "${OUT_DIR}/stderr.log"
 }
 
 check_tags() {
@@ -221,9 +222,14 @@ compare_mex() {
 echo ""
 echo "--- Test 1: Sorted BAM CB/UB Tag Injection ---"
 SORTED_OUT="${SCRIPT_DIR}/cbub_regress_sorted"
-run_star "$SORTED_OUT" "SortedByCoordinate"
-check_tags "${SORTED_OUT}/Aligned.sortedByCoord.out.bam" "Sorted BAM tags"
-compare_mex "$SORTED_OUT" "Sorted"
+if run_star "$SORTED_OUT" "SortedByCoordinate"; then
+    check_tags "${SORTED_OUT}/Aligned.sortedByCoord.out.bam" "Sorted BAM tags"
+    compare_mex "$SORTED_OUT" "Sorted"
+else
+    echo -e "${RED}FAIL${NC}: Sorted STAR run"
+    tail -n 20 "${SORTED_OUT}/stderr.log" || true
+    FAIL_COUNT=$((FAIL_COUNT + 1))
+fi
 SORTED_SUMMARY="${SORTED_OUT}/per_sample/flexfilter_summary.tsv"
 
 # ============================================
@@ -232,9 +238,14 @@ SORTED_SUMMARY="${SORTED_OUT}/per_sample/flexfilter_summary.tsv"
 echo ""
 echo "--- Test 2: Unsorted BAM CB/UB Tag Injection (automatic) ---"
 UNSORTED_OUT="${SCRIPT_DIR}/cbub_regress_unsorted"
-run_star "$UNSORTED_OUT" "Unsorted"
-check_tags "${UNSORTED_OUT}/Aligned.out.bam" "Unsorted BAM tags"
-compare_mex "$UNSORTED_OUT" "Unsorted"
+if run_star "$UNSORTED_OUT" "Unsorted"; then
+    check_tags "${UNSORTED_OUT}/Aligned.out.bam" "Unsorted BAM tags"
+    compare_mex "$UNSORTED_OUT" "Unsorted"
+else
+    echo -e "${RED}FAIL${NC}: Unsorted STAR run"
+    tail -n 20 "${UNSORTED_OUT}/stderr.log" || true
+    FAIL_COUNT=$((FAIL_COUNT + 1))
+fi
 UNSORTED_SUMMARY="${UNSORTED_OUT}/per_sample/flexfilter_summary.tsv"
 
 # ============================================
