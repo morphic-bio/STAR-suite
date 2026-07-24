@@ -1803,6 +1803,44 @@ soloSpatialR1FastqTap       -
                             STAR writes the second input end (raw R1) once, in global input order, while mapping only R2.
                             The path must already exist and be a FIFO with an active reader.
 
+soloSpatialGexIntegrated    no
+    string:                 default-off in-process Visium HD 3-prime GEX molecule resolution (yes|no)
+                            Reads paired FASTQs once, maps R2, decodes raw R1 on mapping workers,
+                            and materializes strict/soft_expected/hard/gated_hard matrices without a sidecar join.
+
+soloSpatialBarcodeContract  -
+    string:                 directory containing the complete row-major Visium HD barcode coordinate contract
+
+soloSpatialBc1Oligos        -
+    string:                 BC1 full-oligo list for integrated Visium HD R1 decoding
+
+soloSpatialBc2Oligos        -
+    string:                 BC2 full-oligo list for integrated Visium HD R1 decoding
+
+soloSpatialAssignmentProducts all
+    string:                 comma-separated integrated products: strict,soft_expected,hard,gated_hard or all
+
+soloSpatialBinSizes         2,8,16
+    string:                 comma-separated Visium HD bin sizes selected from 2,8,16
+
+soloSpatialExpectedReads    0
+    int:                    required positive read-capacity declaration for integrated mode
+
+soloSpatialExpectedCandidates 0
+    int:                    required positive candidate-row capacity declaration for integrated mode
+
+soloSpatialMemoryFraction   0.80
+    float:                  fraction of available host/cgroup memory permitted for the spatial pipeline, in (0,1]
+
+soloSpatialOverflowPolicy   Fail
+    string:                 Fail|Spill when the declared in-memory spatial budget cannot be maintained
+                            Spill uses lazy compact binary read/candidate runs below outTmpDir; it never uses the diagnostic sidecar bridge.
+                            This implementation still requires all post-accumulation phases to fit the configured memory budget.
+
+soloSpatialSpillHighWaterCandidates 0
+    int:                    advanced per-worker candidate high-water override for Spill; 0 derives it from the checked memory budget
+                            Nonzero is useful for deterministic forced-spill validation and is rejected with overflow policy Fail.
+
 soloProbeList               -
     string:                 path to probe_list.txt used to derive 1-based gene indices (15-bit cap)
                             If not provided, will auto-detect probe_gene_list.txt from genome index directory

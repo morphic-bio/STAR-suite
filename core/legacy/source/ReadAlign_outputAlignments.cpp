@@ -10,6 +10,7 @@
 #include "solo/CbBayesianResolver.h"
 #include "TranscriptQuantEC.h"
 #include "SpatialFeatureSidecar.h"
+#include "SpatialGex.h"
 #include "CrMultimapRescuePolicy.h"
 #include <atomic>
 #include <mutex>
@@ -623,6 +624,30 @@ void ReadAlign::outputAlignments() {
                     } else {
                         writeFastxRecord(im, false); // Write both mates to noY FASTQ
                     }
+                }
+            }
+        }
+
+        // Integrated spatial evidence is captured from the same post-rescue
+        // GeneFull state as the diagnostic sidecar, while the decoded raw R1
+        // remains in the gated pipeline's mapping-thread state.
+        if (P.spatialGexPipeline != nullptr) {
+            if (iReadAll == 0) {
+                exitWithError("EXITING because integrated spatial GEX lost paired-read state\n",
+                              std::cerr, P.inOut->logMain,
+                              EXIT_CODE_INCONSISTENT_DATA, P);
+            }
+            const bool mapped = unmapType < 0;
+            const ReadAnnotFeature &geneFull =
+                readAnnot.annotFeatures[SoloFeatureTypes::GeneFull];
+            if (mapped && geneFull.fSet.size() == 1) {
+                std::string spatialError;
+                if (!P.spatialGexPipeline->appendCurrentThread(
+                        *geneFull.fSet.begin(), iReadAll - 1, spatialError)) {
+                    exitWithError("EXITING because integrated spatial evidence append failed: "
+                                      + spatialError + "\n",
+                                  std::cerr, P.inOut->logMain,
+                                  EXIT_CODE_INCONSISTENT_DATA, P);
                 }
             }
         }
