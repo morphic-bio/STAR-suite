@@ -360,13 +360,14 @@ void ReadAlign::outputAlignments() {
 
                 const cr_multimap_rescue::EvidenceMode evidenceMode =
                     P.pSolo.crMultimapRescueEvidenceMode
-                            == ParametersSolo::CrMultimapRescueEvidenceDecoy
-                        ? cr_multimap_rescue::EvidenceMode::Decoy
+                            == ParametersSolo::CrMultimapRescueEvidenceAnnotatedBest
+                        ? cr_multimap_rescue::EvidenceMode::AnnotatedBest
                         : cr_multimap_rescue::EvidenceMode::Compatibility;
-                CrRescueDecision decision = cr_multimap_rescue::evaluate(
+                const CrRescueDecision decision = cr_multimap_rescue::evaluate(
                     evidence, P.pSolo.crMultimapRescueIntronic, evidenceMode);
-                if (evidenceMode == cr_multimap_rescue::EvidenceMode::Decoy
-                    && !decision.rescued) {
+                if (evidenceMode == cr_multimap_rescue::EvidenceMode::AnnotatedBest
+                    && !decision.rescued
+                    && cr_multimap_rescue::failureVetoesFeature(decision.failure)) {
                     crMultimapEvidenceRejected_ = true;
                     crMultimapEvidenceFailure_ = static_cast<uint8_t>(decision.failure);
                 }
@@ -449,10 +450,10 @@ void ReadAlign::outputAlignments() {
             
             ReadAlign::alignedAnnotation();
 
-            // Decoy-mode failure is a feature-eligibility veto, not an
+            // Annotated-best failure is a feature-eligibility veto, not an
             // annotation deletion. Keep per-alignment annotation for audit,
-            // but prevent the later feature union from silently dropping NA
-            // and re-promoting the remaining gene to a unique call.
+            // but prevent the later feature union from re-promoting one member
+            // of an equal-score conflicting-gene set to a unique call.
             if (crMultimapEvidenceRejected_) {
                 for (uint32 featureType : {
                         SoloFeatureTypes::Gene,

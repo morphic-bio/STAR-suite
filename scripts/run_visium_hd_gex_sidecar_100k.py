@@ -114,6 +114,15 @@ def arguments() -> argparse.Namespace:
         help="materialize every policy (parity default) or one downstream assignment policy",
     )
     parser.add_argument(
+        "--cr-evidence-mode",
+        choices=("compatibility", "annotated"),
+        default="compatibility",
+        help=(
+            "CR multimapper gene-evidence policy: the established exon-first "
+            "compatibility policy or score-first retained-GTF evidence"
+        ),
+    )
+    parser.add_argument(
         "--r1-threads", type=int,
         help="R1 decoder threads (default: half of --threads concurrently, all serially)",
     )
@@ -521,6 +530,7 @@ def main() -> int:
         "--clipAdapterType", "CellRanger4", "--outFilterScoreMin", "30",
         "--soloType", "None", "--soloFeatures", "GeneFull",
         "--soloCrGexFeature", "GeneFull", "--soloCrMultimapRescue", "yes",
+        "--soloCrMultimapRescueEvidence", args.cr_evidence_mode,
         "--soloCrMultimapRescueIntronic", "auto", "--soloUMIdedup", "1MM_CR",
         "--soloUMIfiltering", "MultiGeneUMI_CR", "--soloMultiMappers", "Unique",
         "--soloStrand", "Forward", "--soloCellFilter", "None", "--outSAMtype", "None",
@@ -639,6 +649,7 @@ def main() -> int:
         "schema": "star_suite.visium_hd_gex_sidecar_100k.v1",
         "status": "complete",
         "evidence_mode": args.evidence_mode,
+        "cr_evidence_mode": args.cr_evidence_mode,
         "assignment_policy": args.assignment_policy,
         "fixture": identity(args.fixture / "summary.json"),
         "source_provenance": source_provenance,

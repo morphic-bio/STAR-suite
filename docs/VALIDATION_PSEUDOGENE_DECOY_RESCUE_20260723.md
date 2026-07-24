@@ -1,5 +1,13 @@
 # Pseudogene-decoy rescue validation, 2026-07-23
 
+> **Withdrawn 2026-07-24.** The `decoy` policy described below treated every
+> annotation-free genomic alignment as `NA` evidence. Full-slide validation
+> showed that this was much broader than the motivating pseudogene case. The
+> option has been removed. The replacement `annotated` policy ignores
+> annotation-free alignments, ranks retained GeneFull evidence by STAR score,
+> and resolves equal-best different-gene evidence conservatively. See
+> `VALIDATION_ANNOTATED_SCORE_RESCUE_20260724.md`.
+
 ## Outcome
 
 STAR can now keep an unannotated or non-countable locus as `NA` alignment
