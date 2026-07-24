@@ -27,6 +27,9 @@ class Writer;
 namespace spatial_r1_fastq_tap {
 class Writer;
 }
+namespace spatial_gex {
+class Pipeline;
+}
 namespace star {
 namespace input {
 class CbqInputModule;
@@ -716,6 +719,24 @@ class Parameters {
         string soloSpatialR1FastqTap = "-";
         bool soloSpatialR1FastqTapEnabled = false;
         spatial_r1_fastq_tap::Writer *spatialR1FastqTapWriter = nullptr;
+        // Default-off in-process Visium HD GEX molecule path. The legacy
+        // feature sidecar/tap remain independent diagnostic interfaces.
+        string soloSpatialGexIntegrated = "no";
+        bool soloSpatialGexIntegratedEnabled = false;
+        string soloSpatialBarcodeContract = "-";
+        string soloSpatialBc1Oligos = "-";
+        string soloSpatialBc2Oligos = "-";
+        string soloSpatialAssignmentProducts = "all";
+        string soloSpatialBinSizes = "2,8,16";
+        uint64 soloSpatialExpectedReads = 0;
+        uint64 soloSpatialExpectedCandidates = 0;
+        double soloSpatialMemoryFraction = 0.80;
+        string soloSpatialOverflowPolicy = "Fail";
+        uint64 soloSpatialSpillHighWaterCandidates = 0;
+        uint8 soloSpatialAssignmentProductMask = 0;
+        uint8 soloSpatialBinSizeMask = 0;
+        bool soloSpatialOverflowSpill = false;
+        spatial_gex::Pipeline *spatialGexPipeline = nullptr;
 
         // pf-multi config support (Cell Ranger-style CSV input)
         struct {

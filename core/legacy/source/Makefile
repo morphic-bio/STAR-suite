@@ -175,7 +175,7 @@ OBJECTS = systemFunctions.o SoloMemoryProfile.o CountingSinkStress.o funPrimaryA
 	SoloFeature_loadRawMatrix.o SoloFeature_emptyDrops_CR.o SoloFeature_emptyDrops_libscrna.o soloInputFeatureUMI.o SoloFeature_countSmartSeq.o SoloFeature_redistributeReadsByCB.o \
 	SoloFeature_quantTranscript.o SoloFeature_sumThreads.o SoloFeature_countVelocyto.o SoloFeature_countVelocytoBridge.o SoloFeature_countCBgeneUMI.o \
 	SoloFeature_collapseUMI_Graph.o SoloFeature_collapseUMIall.o SoloFeature_collapseUMI_fromHash.o SoloFeature_collapseUMI_fromBridgeHash.o SoloFeature_bridgeHashSnapshot.o SoloFeature_umiCorrection.o SoloFeature_materializeFromHash.o SoloFeature_metricsOutput.o SoloFeature_writeMexFromInlineHashDedup.o SoloFeature_flexfilter.o SoloFeature_addBAMtags.o SoloFeature_writeTagTable.o \
-	SoloHDMoleculeWriter.o SpatialFeatureSidecar.o SpatialR1FastqTap.o MultiGeneUmiCr.o CrMultimapRescuePolicy.o \
+	SoloHDMoleculeWriter.o SpatialFeatureSidecar.o SpatialR1FastqTap.o SpatialGex.o SpatialGexSpill.o SpatialGexPipeline.o SpatialR1Decoder.o MultiGeneUmiCr.o CrMultimapRescuePolicy.o \
 	MexWriter.o MexWriterUtil.o \
 	UMICorrector.o \
 	ParametersClip_initialize.o ClipMate_clip.o ClipCR4.o opal/opal.o ClipMate_clipChunk.o ClipMate_initialize.o \
@@ -414,7 +414,7 @@ test_SoloReadInfoBaseline: Depend.list parametersDefault.xxd $(filter-out STAR.o
 	../test/solo_readinfo_baseline
 
 .PHONY: test
-test: test_packed_readinfo test_SoloHDMoleculeWriter test_SpatialFeatureSidecar test_SpatialR1FastqTap test_MultiGeneUmiCr test_CrMultimapRescuePolicy test_complex_barcode_whitelist_lookup test_SoloReadInfoBaseline test_SoloReadInfoLoader test_SoloReadInfoParity test_MinimalSink test_CbCorrector test_CbBayesianResolver test_CbBayesianResolverPhase2 test_inline_hash_record_capture test_inline_hash_resolver test_inline_hash_clique test_inline_hash_parity test_gene_resolver
+test: test_packed_readinfo test_SoloHDMoleculeWriter test_SpatialFeatureSidecar test_SpatialR1FastqTap test_SpatialGex test_SpatialGexSpill test_MultiGeneUmiCr test_CrMultimapRescuePolicy test_complex_barcode_whitelist_lookup test_SoloReadInfoBaseline test_SoloReadInfoLoader test_SoloReadInfoParity test_MinimalSink test_CbCorrector test_CbBayesianResolver test_CbBayesianResolverPhase2 test_inline_hash_record_capture test_inline_hash_resolver test_inline_hash_clique test_inline_hash_parity test_gene_resolver
 
 .PHONY: test_CrMultimapRescuePolicy
 test_CrMultimapRescuePolicy: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
@@ -439,6 +439,18 @@ test_SpatialR1FastqTap: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS
 test_SpatialR1FastqTap: SpatialR1FastqTap.o
 	$(CXX) $(CXXFLAGS) -I./ ../test/test_spatial_r1_fastq_tap.cpp SpatialR1FastqTap.o $(LDFLAGS_shared) -o ../test/test_spatial_r1_fastq_tap
 	../test/test_spatial_r1_fastq_tap
+
+.PHONY: test_SpatialGex
+test_SpatialGex: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
+test_SpatialGex: SpatialGex.o SpatialR1Decoder.o
+	$(CXX) $(CXXFLAGS) -I./ ../test/test_spatial_gex.cpp SpatialGex.o SpatialR1Decoder.o -o ../test/test_spatial_gex
+	../test/test_spatial_gex
+
+.PHONY: test_SpatialGexSpill
+test_SpatialGexSpill: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
+test_SpatialGexSpill: SpatialGexSpill.o
+	$(CXX) $(CXXFLAGS) -I./ ../test/test_spatial_gex_spill.cpp SpatialGexSpill.o -o ../test/test_spatial_gex_spill
+	../test/test_spatial_gex_spill
 
 .PHONY: test_MultiGeneUmiCr
 test_MultiGeneUmiCr: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)

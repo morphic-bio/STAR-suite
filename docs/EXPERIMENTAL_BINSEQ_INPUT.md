@@ -170,7 +170,23 @@ adapters, but it is not considered the production STAR CBQ integration surface.
 
 ## Required Tool
 
-Install or provide `bqtools`, then set `BQTOOLS` if it is not on `PATH`:
+STAR Suite reads CBQ natively; `bqtools` is used only as an independent
+encoder/decoder oracle in fixture and contract tests. Provision the pinned
+v0.5.6 oracle with a digest-pinned Rust container:
+
+```bash
+scripts/provision_bqtools_oracle.sh
+```
+
+The default installation is `${HOME}/.local/bin/bqtools`, which is persistent
+across reboots and is normally already on `PATH`. Override
+`BQTOOLS_INSTALL_ROOT` when a different persistent prefix is required. Do not
+install the test oracle under `/tmp`: the original May 2026 validation used
+`/tmp/star_suite_bqtools/bin/bqtools`, so the external-oracle gates became
+unrunnable when that disposable directory was cleared even though all native
+C++ CBQ harnesses remained available.
+
+For an existing installation, set `BQTOOLS` if it is not on `PATH`:
 
 ```bash
 export BQTOOLS=/path/to/bqtools
