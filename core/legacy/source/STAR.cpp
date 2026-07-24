@@ -28,6 +28,7 @@
 #include "Transcriptome.h"
 #include "SpatialFeatureSidecar.h"
 #include "SpatialR1FastqTap.h"
+#include "SpatialGex.h"
 #include "CountingSinkStress.h"
 #include "signalFromBAM.h"
 #include "mapThreadsSpawn.h"
@@ -578,6 +579,7 @@ int main(int argInN, char *argIn[])
     Transcriptome *transcriptomeMain = nullptr;
     std::unique_ptr<spatial_feature_sidecar::Writer> spatialFeatureWriter;
     std::unique_ptr<spatial_r1_fastq_tap::Writer> spatialR1FastqTapWriter;
+    std::unique_ptr<spatial_gex::Pipeline> spatialGexPipeline;
     std::vector<double> vbGenePosterior;
     bool vbGenePosteriorReady = false;
 
@@ -673,6 +675,41 @@ int main(int argInN, char *argIn[])
     if (P.quant.yes)
     { // load transcriptome
         transcriptomeMain = new Transcriptome(P);
+
+        if (P.soloSpatialGexIntegratedEnabled) {
+            spatial_gex::PipelineConfig spatialConfig;
+            spatialConfig.barcodeContractDirectory = P.soloSpatialBarcodeContract;
+            spatialConfig.bc1OligosPath = P.soloSpatialBc1Oligos;
+            spatialConfig.bc2OligosPath = P.soloSpatialBc2Oligos;
+            spatialConfig.outputDirectory = P.outFileNamePrefix + "SpatialGex.out";
+            spatialConfig.temporaryDirectory = P.outFileTmp;
+            spatialConfig.starSuiteVersion = STAR_SUITE_VERSION;
+            spatialConfig.sourceRevision = GIT_BRANCH_COMMIT_DIFF;
+            spatialConfig.expectedReads = P.soloSpatialExpectedReads;
+            spatialConfig.expectedCandidates = P.soloSpatialExpectedCandidates;
+            spatialConfig.threads = static_cast<std::uint32_t>(P.runThreadN);
+            spatialConfig.products = P.soloSpatialAssignmentProductMask;
+            spatialConfig.scales = P.soloSpatialBinSizeMask;
+            spatialConfig.memoryFraction = P.soloSpatialMemoryFraction;
+            spatialConfig.overflowPolicy = P.soloSpatialOverflowSpill
+                ? spatial_gex::OverflowPolicy::Spill : spatial_gex::OverflowPolicy::Fail;
+            spatialConfig.spillHighWaterCandidatesPerThread =
+                P.soloSpatialSpillHighWaterCandidates;
+            std::string spatialError;
+            spatialGexPipeline = spatial_gex::Pipeline::create(spatialConfig, spatialError);
+            if (!spatialGexPipeline) {
+                exitWithError("EXITING because integrated spatial GEX initialization failed: "
+                                  + spatialError + "\n",
+                              std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
+            }
+            P.spatialGexPipeline = spatialGexPipeline.get();
+            P.inOut->logMain << "Integrated spatial GEX output: "
+                             << spatialConfig.outputDirectory << "\n"
+                             << "Integrated spatial GEX estimated peak bytes: "
+                             << spatialGexPipeline->memoryModel().peakBytes
+                             << "; budget bytes: "
+                             << spatialGexPipeline->memoryBudgetBytes() << "\n" << flush;
+        }
 
         if (P.soloSpatialFeatureSidecarEnabled) {
             spatial_feature_sidecar::WriterConfig sidecarConfig;
@@ -2145,6 +2182,23 @@ int main(int argInN, char *argIn[])
         P.inOut->logMain << timeMonthDayTime()
                          << " ..... finalized spatial GeneFull sidecar (reads="
                          << P.iReadAll << ")\n" << flush;
+    }
+
+    if (spatialGexPipeline) {
+        const std::vector<std::string> &geneIds = transcriptomeMain->geIDCanonical.empty()
+            ? transcriptomeMain->geID : transcriptomeMain->geIDCanonical;
+        std::string spatialError;
+        if (!spatialGexPipeline->finalize(geneIds, spatialError)) {
+            exitWithError("EXITING because integrated spatial GEX finalization failed: "
+                              + spatialError + "\n",
+                          std::cerr, P.inOut->logMain, EXIT_CODE_INCONSISTENT_DATA, P);
+        }
+        const spatial_gex::PipelineSummary &summary = spatialGexPipeline->summary();
+        P.spatialGexPipeline = nullptr;
+        P.inOut->logMain << timeMonthDayTime()
+                         << " ..... finalized integrated spatial GEX (joined_reads="
+                         << summary.joinedReads << ", cliques=" << summary.readCliques
+                         << ", hard_molecules=" << summary.hardMolecules << ")\n" << flush;
     }
 
     // close some BAM files
