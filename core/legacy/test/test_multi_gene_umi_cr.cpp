@@ -147,6 +147,18 @@ int main()
     result = mg::resolve({{3, 10, 3}, {8, 9, 3}});
     assert(result.accepted && result.gene == 3);
 
+    // Legacy Solo retains genes killed by its preliminary multi-gene filter as
+    // zero-corrected-count rows. They cannot win, but their original support
+    // still participates in the CR dominance veto.
+    result = mg::resolve({{3, 5, 2}, {8, 0, 1}});
+    assert(result.accepted && result.gene == 3);
+
+    result = mg::resolve({{3, 5, 2}, {8, 0, 6}});
+    assert(!result.accepted && result.reason == "original_umi_dominance");
+
+    result = mg::resolve({{3, 0, 2}, {8, 0, 1}});
+    assert(!result.accepted && result.reason == "corrected_count_tie");
+
     bool threw = false;
     try { mg::resolve({{1, 1, 1}, {1, 2, 1}}); }
     catch (const std::invalid_argument &) { threw = true; }

@@ -310,10 +310,11 @@ Goal: validate real BINSEQ data against the contract before STAR integration.
 
 Tasks:
 
-- Install or build `bqtools` in a disposable tool location for fixture work:
+- Install the pinned `bqtools` oracle in a persistent user prefix for fixture
+  work (production CBQ input remains native C++):
 
 ```bash
-cargo install bqtools
+scripts/provision_bqtools_oracle.sh
 ```
 
 - Create synthetic CBQ fixtures from existing tiny FASTQ fixtures:

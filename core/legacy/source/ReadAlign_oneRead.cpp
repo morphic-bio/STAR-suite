@@ -8,6 +8,7 @@
 #include "SoloReadFeature_record_shared.h"
 #include "FlexPipeline.h"
 #include "FlexHashScreen.h"
+#include "SpatialGex.h"
 #include "libtrim/trim.h"
 #include <cstdlib>
 #include <atomic>
@@ -88,7 +89,28 @@ int ReadAlign::oneRead() {//process one read: load, map, write
 
     if (readStatus[0]==-1) {//finished with the stream
         return -1;
-    };    
+    };
+
+    // Integrated spatial mode is restricted to the ordinary paired FASTQ
+    // reader. Keep its per-read payload in the gated Pipeline so default and
+    // Flex packet paths retain the original ReadAlign object layout and work.
+    if (P.spatialGexPipeline != nullptr) {
+        if (P.readNends != 2 || Read0 == nullptr || Qual0 == nullptr
+            || readLengthOriginal[1] == 0) {
+            exitWithError("EXITING because integrated spatial GEX did not receive paired raw R1\n",
+                          std::cerr, P.inOut->logMain,
+                          EXIT_CODE_INCONSISTENT_DATA, P);
+        }
+        std::string spatialError;
+        if (!P.spatialGexPipeline->decodeCurrentThread(
+                Read0[1], readLengthOriginal[1], Qual0[1],
+                readLengthOriginal[1], spatialError)) {
+            exitWithError("EXITING because integrated spatial R1 decoding failed: "
+                              + spatialError + "\n",
+                          std::cerr, P.inOut->logMain,
+                          EXIT_CODE_INCONSISTENT_DATA, P);
+        }
+    }
     
     return oneReadLoaded(readStatus[0]);
 

@@ -1,5 +1,13 @@
 # Spatial GeneFull feature sidecar
 
+> **Diagnostic compatibility path; scheduled for retirement.** New Visium HD
+> GEX production recipes must use `--soloSpatialGexIntegrated yes`. The
+> sidecar remains available only for bounded parity/debug audits. It is not an
+> overflow format: integrated mode can spill its read/candidate accumulator as
+> compact, versioned binary runs below `outTmpDir` when
+> `--soloSpatialOverflowPolicy Spill` is selected. Later phases must still pass
+> the checked in-memory budget; they never fall back to this sidecar.
+
 `--soloSpatialFeatureSidecar PREFIX` is a default-off, annotation-only output
 for molecule-first Visium HD 3-prime GEX. It records modern post-rescue
 GeneFull evidence by global input-read ordinal before any spatial barcode or
