@@ -53,6 +53,11 @@ struct Decision {
 // custom indexes. Missing/NA biotypes are non-countable evidence.
 bool biotypeIsCountable(const std::string& biotype);
 
+// Only contradictory retained-gene evidence, or an explicitly disabled
+// intronic fallback, may veto later feature aggregation. The absence of
+// annotated rescue evidence is not an NA veto.
+bool failureVetoesFeature(Failure failure);
+
 // Compatibility preserves the historical exon-first CR rescue. AnnotatedBest
 // ignores alignments without retained GTF evidence, first retains only the
 // best-score annotated alignments, and then requires every tied alignment to

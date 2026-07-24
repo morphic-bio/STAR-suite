@@ -157,6 +157,15 @@ int testAnnotatedBestMode() {
     failed += check(!noAnnotatedEvidence.rescued
                         && noAnnotatedEvidence.failure == Failure::NoCountableBest,
                     "annotation-free alignments do not invent a gene");
+    failed += check(!cr_multimap_rescue::failureVetoesFeature(
+                         noAnnotatedEvidence.failure),
+                    "absence of annotated evidence is not a feature veto");
+    failed += check(cr_multimap_rescue::failureVetoesFeature(
+                         equalScoreConflict.failure),
+                    "equal-best different-gene evidence vetoes feature uniqueness");
+    failed += check(cr_multimap_rescue::failureVetoesFeature(
+                         bestMultiGene.failure),
+                    "a best-alignment multi-gene conflict vetoes feature uniqueness");
     return failed;
 }
 
