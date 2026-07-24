@@ -1,42 +1,46 @@
-# Runbook: in-memory Visium HD GEX `1MM_CR` resolution in STAR
+# Runbook: in-memory Visium HD GEX 1MM-CR inside STAR
 
 Date: 2026-07-24
 
 Branch: `feature/visium-hd-gex-in-memory-1mm-cr-20260724`
 
 Base: STAR Suite `master` at `d956a898108e8db99be4ce0ee09da0ed982e875c`
+plus handoff commit `7bfd1df`.
 
-Design handoff:
-`docs/HANDOFF_VISIUM_HD_GEX_IN_MEMORY_STAR_1MM_CR_20260724.md`
+Status: implementation and validation in progress. Do not merge before the
+100K parity and performance review.
 
 ## Objective
 
-Implement the production Visium HD 3-prime GEX molecule path inside one STAR
-invocation. STAR reads each paired FASTQ record once, maps only R2, decodes raw
-R1 on the mapping worker, combines the spatial candidates with the modern
-post-rescue GeneFull result, and retains compact evidence through molecule
-resolution and matrix materialization.
-
-The production graph is:
+Implement the complete production Visium HD 3-prime GEX molecule path inside
+one STAR invocation:
 
 ```text
-paired FASTQ input
-  -> raw R1 H0-H2 candidate decode + raw 9-nt UMI
-  -> R2 alignment + annotated CR-compatible GeneFull rescue
-  -> compact combined evidence
-  -> read cliques + frozen spatial posterior
-  -> candidate-specific 1MM_CR
-  -> GEX-only MultiGeneUMI_CR
-  -> strict / soft_expected / hard / gated_hard
-  -> 2 / 8 / 16 micrometer matrices
+paired FASTQ input, read once
+  raw R1 -> all best-envelope spatial candidates + raw 9-nt UMI + H0 counts
+  R2     -> alignment -> annotated score-first CR rescue -> GeneFull evidence
+                               |
+                    combined compact read evidence
+                               |
+              clique/posterior spatial resolution
+                               |
+                  candidate-specific 1MM_CR
+                               |
+                   GEX-only MultiGeneUMI_CR
+                               |
+       strict / soft_expected / hard / gated_hard
+                               |
+                       2 / 8 / 16 um MEX
 ```
 
-No normal production stage requires a BAM, GeneFull sidecar, FIFO, read-name
-join, TSV evidence ledger, standalone resolver, or standalone materializer.
+The normal execution graph is in memory. It must not require the historical
+GeneFull feature sidecar, raw-R1 FIFO, ordinal join, normalized evidence TSV,
+feature shard, external text sort, standalone resolver, or standalone
+materializer.
 
-## Scope
+## Scientific scope
 
-This implementation supports exactly:
+This tranche implements only:
 
 ```text
 --soloUMIdedup 1MM_CR
@@ -44,18 +48,22 @@ This implementation supports exactly:
 --soloMultiMappers Unique
 ```
 
-It produces the four assignment products `strict`, `soft_expected`, `hard`,
-and `gated_hard` at 2, 8, and 16 micrometers. Exact-UMI sensitivity is not
-computed or stored.
+It produces all four policies from the same candidate universe:
 
-The existing `--soloSpatialFeatureSidecar` and
-`--soloSpatialR1FastqTap` interfaces remain temporary diagnostic oracles. They
-are not part of the integrated execution graph and are intended for eventual
-retirement.
+- `strict`;
+- `soft_expected`;
+- `hard`;
+- `gated_hard`.
 
-## Integrated mode contract
+Each product is materialized at 2, 8, and 16 micrometers. Exact-UMI products
+are deliberately absent. Xenium comparisons remain downstream work.
 
-Working option names are:
+Do not change the frozen R1 decoder, posterior, GeneFull rescue, UMI
+correction, or assignment policies to resolve a parity discrepancy.
+
+## Mode and isolation contract
+
+Working options:
 
 ```text
 --soloSpatialGexIntegrated yes|no
@@ -70,257 +78,271 @@ Working option names are:
 --soloSpatialOverflowPolicy Fail|Spill
 ```
 
-The mode defaults to `no`. With it absent, STAR allocates no decoder index,
-spatial accumulator, overflow buffer, or matrix state and does not enter any
-spatial branch.
+The option is explicit and default-off. Supporting options use the same
+`soloSpatial` namespace and provide:
 
-Enabled mode fails closed unless all of the following hold:
+- the complete row-major barcode/coordinate contract;
+- BC1 and BC2 full oligos;
+- requested products and scales;
+- declared maximum read and candidate capacities;
+- the allowed fraction of available host/cgroup memory;
+- overflow policy `Fail` or `Spill`.
 
-- paired FASTQ input is ordered R2 then raw R1;
-- only R2 is mapped;
-- `GeneFull` is the sole Solo feature and CR GEX feature;
-- CR-compatible genomic multimapper rescue is enabled;
-- annotated score-first retained-GTF rescue evidence is selected;
-- `--soloMultiMappers Unique` is selected;
-- UMI policy is exactly `1MM_CR` plus `MultiGeneUMI_CR`;
-- no cell filtering precedes raw spatial matrix materialization;
-- two-pass, restart, batch, SLAM, and transcript-VB replay modes are disabled;
-- `GX`, `GN`, `UR`, `UB`, `CB`, and `CR` are not requested as computational
-  evidence.
+The enabled mode fails closed unless the command uses:
 
-`--outSAMtype None` is the production default. A diagnostic BAM without the
-forbidden compatibility tags may be allowed only after BAM-on/off matrix
-identity is covered by tests.
+- paired FASTQ input ordered as R2 then raw R1;
+- R2-only mapping;
+- `GeneFull` for `soloFeatures` and `soloCrGexFeature`;
+- CR-compatible genomic multimapper rescue with annotated score-first retained-GTF evidence;
+- `--soloMultiMappers Unique`;
+- exactly `--soloUMIdedup 1MM_CR`;
+- exactly `--soloUMIfiltering MultiGeneUMI_CR`;
+- no cell filtering before spatial matrix materialization;
+- no two-pass, restart, batch, SLAM, or transcript-VB replay mode.
 
-## Read-lifetime integration
+Production examples use `--outSAMtype None`. Optional BAM output may be tested
+separately, but `GX`, `GN`, `UR`, `UB`, `CB`, and `CR` are never accepted as
+integrated-mode computational evidence.
 
-STAR's FASTQ input retains both physical ends in `Read0` and `Qual0` even when
-`readNmates=1` excludes raw R1 from alignment. Decode raw R1 at the beginning
-of the mapping worker's `ReadAlign::oneReadLoaded()` lifetime, before any
-operation can modify its sequence or qualities. Do not decode in the input
-callback, because that callback runs under STAR's input mutex and would
-serialize decoder CPU.
+With the option absent, no decoder index, candidate pool, spatial accumulator,
+memory reservation, overflow file, or matrix writer is created. Existing
+scRNA-seq, Solo, Flex, perturb-seq, SLAM, and paired-end behavior must remain
+unchanged.
 
-Keep the decoded result on the same `ReadAlign` object. In
-`ReadAlign::outputAlignments()`, after annotated CR rescue and modern GeneFull
-annotation, append the combined result to that worker's accumulator. No
-ordinal join is necessary because R1 and R2 remain in the same read object.
+## Paired-read ownership
 
-The optional legacy feature sidecar may be written from the same GeneFull hook.
-It must not affect the integrated accumulator or any final result.
+STAR's FASTQ loader retains both physical ends because `readNends == 2`, while
+the sidecar-compatible spatial recipe sets `readNmates == 1` so only R2 is
+mapped. `ReadAlign::oneRead()` therefore loads raw R1 into `Read0[1]` and
+`Qual0[1]` even though alignment consumes only `Read0[0]`.
 
-## Decoder contract
+Decode R1 at the beginning of the `ReadAlign::oneReadLoaded()` lifetime,
+before any operation can mutate the raw sequence or qualities. This runs on
+mapping workers, outside the serialized FASTQ input mutex. Retain the compact
+decode result on that `ReadAlign` object until `outputAlignments()` completes
+the modern GeneFull and CR-rescue decision. Append combined evidence once to
+the owning worker's spatial accumulator.
 
-Factor the accepted direct tiered H0-H2 decoder from companion commit
-`5e9af58f9b86e9d3b95f8612a4a77e40f9a3ed86` into a C++11 STAR module.
+Do not decode inside `fastxAppendRecord()`: that callback executes while STAR
+owns the input lock and would serialize the decoder.
 
-Use one immutable shared oligo/index object and one scratch object per mapping
-worker. For each read retain:
+## Decoder integration
 
-- raw 9-nt UMI packed in two bits per base;
+Factor the accepted direct-tiered H0-H2 primitives from
+`visium-hd-processing` commit
+`5e9af58f9b86e9d3b95f8612a4a77e40f9a3ed86` into a C++11-compatible STAR
+module. The module has:
+
+- one immutable run-level oligo/index object;
+- one scratch object per mapping worker;
+- a packed 9-nt raw UMI;
 - every coordinate in the best edit-distance envelope;
-- BC1 and BC2 edit distances and observed lengths;
-- full-barcode start and minimum tier;
-- the accepted Phred-derived alignment log likelihood;
-- compact audit flags needed for parity counters.
+- exact tier, edit, observed-length, frame/start, and Phred likelihood fields;
+- exact-H0 BC1 and BC2 counters accumulated per worker.
 
-The barcode contract is a complete row-major universe. Represent candidates by
-the compact coordinate index, not a string or hash-map key. Validate the
-contract and oligo dimensions before mapping.
+The barcode contract is validated as a complete row-major universe. The hot
+coordinate key is its compact integer index, not a barcode sequence or
+row/column string.
 
-Accumulate PCR-inclusive exact-H0 counts for both oligo axes while decoding.
-Freeze the merged run-level counts after input closes. Candidate prior support
-is computed as:
+The run-level H0 arrays are merged deterministically after input closes. The
+posterior uses the frozen coordinate prior:
 
 ```text
 (bc1_h0[col] + 1) * (bc2_h0[row] + 1) - 1
 ```
 
-with checked overflow. Do not reread R1 or emit/reload an H0 table.
+FASTQs are not reopened and an H0 TSV is not emitted in production.
 
-## Compact storage
+## Compact storage contract
 
-Use contiguous thread-local pools with fixed-width records. The logical
-minimum is:
+Representative logical records are:
 
 ```cpp
 struct SpatialReadEvidence {
-    uint32_t geneIndex;
+    uint32_t gene;
     uint32_t rawUmi;
     uint32_t candidateBegin;
     uint16_t candidateCount;
     uint16_t flags;
+    uint64_t sourceOrdinal;
 };
 
 struct SpatialCandidateEvidence {
-    uint32_t coordinateIndex;
+    uint32_t coordinate;
     uint32_t auditBits;
     double logSequenceLikelihood;
 };
 ```
 
-The exact ABI may change only if size assertions and memory-model tests are
-updated. Do not store read names, feature strings, coordinate strings, member
-lists, or an STL node per read/candidate. A compact source ordinal may be kept
-where needed for canonical clique ordering and audit hashes.
+The exact packing may change after `static_assert` and capacity tests, but the
+numeric likelihood representation must remain exact. Production storage must
+not contain read-name strings, coordinate strings, semicolon member lists, an
+STL node per read, or a hash map per candidate. Source ordinal is retained
+only where canonical scheduling or audit accounting requires it.
 
-## Memory model
+Thread-local append pools are finalized into contiguous arrays with checked
+count and prefix-sum arithmetic. Every capacity multiplication uses overflow-
+checked 64-bit or wider arithmetic.
 
-Integrated mode requires declared upper bounds for reads and candidate rows.
-Use checked arithmetic to calculate the peak of every phase, including:
+## Memory preflight and ownership
 
-1. decoder indices, per-thread scratch, read evidence, and candidate pool;
-2. grouping indices plus read and candidate evidence;
-3. clique support plus candidate-specific UMI correction state;
-4. corrected support plus flat cross-gene reconciliation state;
-5. final molecule and matrix-entry state.
+The enabled command declares maximum reads and candidate rows. Preflight
+computes the worst live peak for every logical phase:
 
-Compare the maximum phase estimate with the minimum applicable host and cgroup
-memory limit multiplied by `--soloSpatialMemoryFraction`. Log the complete
-model before reading the first FASTQ record. Runtime counters must fail before
-exceeding their declared capacities.
+1. decoder/read/candidate accumulation;
+2. clique grouping and policy support;
+3. candidate-specific UMI correction;
+4. cross-gene reconciliation;
+5. final molecule and matrix aggregation.
 
-Full-slide planning uses the observed upper bounds:
+The limit is the smaller of physical RAM and the active cgroup memory limit,
+multiplied by the configured safe fraction after reserving the STAR genome and
+runtime allowance. If `Fail` is selected and the model does not fit, STAR
+exits before reading FASTQs.
 
-```text
-474,131,092 paired reads
-529,580,381 candidate rows
-386,530,812 unique-gene reads
-351,886,421 joined gene-plus-coordinate reads
-```
+Buffers are released or reused in this order:
+
+1. decoder scratch after the input pass;
+2. read/candidate evidence after clique support is complete;
+3. raw support after UMI correction;
+4. provisional gene support after `MultiGeneUMI_CR`;
+5. final molecule entries after matrices and summaries commit.
+
+The full-slide sizing gate uses at least these observed bounds:
+
+- 474,131,092 paired reads;
+- 386,530,812 unique-gene reads;
+- 422,945,305 candidate-bearing reads;
+- 529,580,381 candidate rows;
+- 351,886,421 joined gene-plus-coordinate reads.
 
 ## Lazy overflow spool
 
-The overflow mechanism is a bounded-memory safety path, not the legacy feature
-sidecar.
+The historical GeneFull sidecar is not the overflow mechanism. It lacks raw
+R1 candidates and cannot resume molecule processing.
 
-`--soloSpatialOverflowPolicy Fail` stops before exceeding the configured
-budget. `Spill` permits lazy compact binary overflow under STAR's temporary
-directory. No overflow file is created unless a stage reaches its high-water
-mark.
+Integrated mode instead supports:
 
-Overflow requirements:
+```text
+--soloSpatialOverflowPolicy Fail|Spill
+--soloSpatialMemoryFraction FLOAT
+```
 
-- use fixed-width or length-delimited binary records with magic, schema,
-  source revision, contract digests, record counts, and checksums;
-- write immutable sorted runs through temporary names and commit them
-  atomically;
-- sort by the canonical key for the current stage;
-- merge in-memory and spilled runs with deterministic k-way grouping;
-- support read evidence, clique support, corrected support, and final matrix
-  entries without converting to text;
-- reject truncated, corrupt, wrong-schema, wrong-reference, or incomplete
-  runs;
-- remove committed overflow runs after final matrices and summaries are
-  atomically committed;
-- report triggered stages, records, bytes, merge time, and peak live memory.
+`Fail` remains the default until forced-spill parity and full-scale review are
+complete. With `Spill`, each flat accumulator has a deterministic high-water
+mark. On reaching it, STAR:
 
-Spill partitioning must not affect scientific output. A forced-spill run with a
-small test budget must produce the same declared molecule and matrix hashes as
-the all-memory run.
+1. sorts the completed segment by that stage's canonical numeric key;
+2. writes a compact, versioned binary run below `outTmpDir`;
+3. records schema, key, element size/count, source revision, checksums, and a
+   completion marker;
+4. releases the segment memory;
+5. later performs a deterministic k-way merge over memory and completed runs.
 
-During initial validation `Fail` remains the default. `Spill` may become the
-production default only after forced-spill parity and a reviewed full-slide
-benchmark.
+The generic run mechanism may be used at these boundaries:
 
-## In-memory molecule phases
+- combined read evidence keyed by `(gene, raw UMI, source ordinal)`;
+- candidate/policy support keyed by `(gene, coordinate, raw UMI)`;
+- provisional cross-gene support keyed by
+  `(coordinate, corrected UMI, policy, gene)`;
+- final matrix entries keyed by `(policy, scale, coordinate, gene)`.
+
+It never writes TSV, read names, BAM tags, feature strings, or legacy Solo
+spool records. A partial, corrupt, wrong-version, wrong-key, or wrong-source
+run is fatal. Completed temporary runs are deleted only after final matrices
+and summaries commit atomically. The run summary reports spill stages, run
+counts, bytes, merge time, and peak/live memory.
+
+No automatic transition to the old sidecar/FIFO/standalone graph is permitted.
+
+## Molecule phases
 
 ### A. Read cliques and posterior
 
-Merge worker pools with deterministic counts and prefix sums. Group by
-`(gene, raw UMI)` and schedule that pair—not an entire gene—as the parallel
-unit. Sort reads and candidates by canonical numeric keys before intersection
-or floating-point accumulation.
+Group by `(gene, raw UMI)` using deterministic histogram/prefix-sum or radix
+partitioning. The parallel work unit is one such group, never an entire gene.
+Within each group, reproduce the accepted global-intersection clique rule and
+frozen posterior. Sort reads and candidates by canonical numeric keys before
+intersection or floating-point accumulation.
 
-Reproduce the accepted global-intersection clique rule. Pairwise chained
-overlap must not manufacture a clique. Apply sequence likelihood and the
-frozen H0 prior exactly once per read clique.
+Populate one flat support table keyed by `(gene, coordinate, raw UMI)` with
+the four policy values held together.
 
-Write candidate support directly to a flat table keyed by
-`(gene, coordinate, raw UMI)`. Keep all four policy values together.
+### B. Candidate-specific 1MM_CR
 
-### B. Candidate-specific `1MM_CR`
+Group support by `(gene, coordinate)`. Use bounded UMI arrays and the same
+`umiArrayCorrect_CR` policy kernel used by ordinary Solo. Correction never
+crosses coordinates and is never performed independently per read.
 
-Group support by `(gene, coordinate)`. Reuse STAR's existing CR UMI correction
-kernel. Do not correct per read, across coordinates, or before spatial
-posterior resolution. Preserve the accepted soft expected correction and
-occupancy semantics separately from integer count products.
+Integer policy support follows STAR count and directional-dominance rules.
+Soft support preserves the accepted weighted correction and occupancy
+contract exactly, including its declared numeric tolerance.
 
-### C. GEX-only `MultiGeneUMI_CR`
+### C. GEX-only MultiGeneUMI_CR
 
-Group corrected provisional support by `(coordinate, corrected UMI, policy)`.
-Use `multi_gene_umi_cr::resolve` and the direct bridge's flat `MgRow` approach.
-Preserve corrected-count ties, original-at-corrected-UMI dominance, and all
-rejection counters.
+Group corrected provisional support by
+`(coordinate, corrected UMI, policy)`. Call
+`multi_gene_umi_cr::resolve` using the direct bridge's flat `MgRow` pattern.
+Preserve corrected-count ties, original-at-corrected-UMI dominance, rejection
+rules, and GEX Unique-read semantics.
 
 ### D. Direct materialization
 
-Feed final numeric molecules directly into a reusable matrix writer. Traverse
-the final array once and aggregate 2-micrometer coordinates to 8 and 16
-micrometers by integer transforms. Preserve the accepted feature and barcode
-axis ordering.
+Factor the numeric axis, aggregation, atomic output, and summary logic from
+the optimized molecule-first materializer into a library interface. Consume
+final numeric molecules directly. Build all selected policies and 2/8/16
+micrometer parents in one traversal. Preserve accepted feature ordering,
+decimal coordinate ordering, MEX headers, numeric precision, and mass
+conservation.
 
-Write only final MEX products, axes, summaries, logs, and explicitly requested
-diagnostics. Do not write ordinary evidence, clique, support, reconciliation,
-or exact-UMI artifacts.
+## Legacy sidecar retirement
+
+`--soloSpatialFeatureSidecar` and `--soloSpatialR1FastqTap` remain unchanged
+only as temporary diagnostic oracles. They are not enabled by integrated mode,
+not used for overflow, and absent from production recipes. Documentation must
+label them diagnostic and scheduled for retirement.
+
+An explicitly requested feature sidecar may coexist with integrated mode for
+the 100K gene-evidence audit. Sidecar on/off must produce identical integrated
+molecule and matrix hashes. The primary accepted integrated run has the
+sidecar disabled and creates no FIFO, digest, join, or evidence artifact.
 
 ## Implementation sequence and commits
 
-1. Runbook and design review.
-2. CLI, compact structures, memory model, and default-off tests.
-3. In-process decoder and exact decoder-parity tests.
-4. Combined read-lifetime accumulator and accounting tests.
-5. Clique/posterior plus shared `1MM_CR` kernel.
-6. Flat `MultiGeneUMI_CR`, materialization, and forced-spill support.
-7. Regression, determinism, and 100K validation report.
+Keep changes reviewable:
 
-Keep shared-core commits narrow and preserve history with a non-squash merge
-only after user review.
+1. runbook, CLI contract, compact records, checked memory arithmetic, and
+   fixture-free isolation tests;
+2. C++11 decoder library and exact synthetic/companion parity tests;
+3. `ReadAlign` decode lifetime and thread-local combined accumulator;
+4. deterministic clique/posterior and candidate-specific `1MM_CR`;
+5. flat `MultiGeneUMI_CR` and direct matrix materialization;
+6. lazy overflow runs and forced-spill parity tests;
+7. source-only 100K validation and performance report.
 
-## Frozen 100K gate
+Do not merge shared core changes until the user reviews step 7. Preserve the
+DAG with `git merge --no-ff` if integration is later approved.
 
-Use only the declared fixture sources:
+## Fixture-free tests
 
-```text
-/mnt/pikachu/star-spatial/10x/visium_hd_3prime_human_ovarian_ff_min_depth/downsample_100k_v1
-/mnt/pikachu/star-spatial/references/refdata-gex-GRCh38-2024-A_STAR-2.7.11a/star
-/storage/star-spatial/runs/cleanroom_hd_mouse_brain/slide_oligos/bc1_full_oligos.txt
-/storage/star-spatial/runs/cleanroom_hd_mouse_brain/slide_oligos/bc2_full_oligos.txt
-/storage/star-spatial/runs/cleanroom_hd_mouse_brain/barcode_contract/
-```
+Add focused tests for:
 
-Create a fresh output root. Never use a previous candidate, sidecar, joined
-evidence, clique, support, resolver, or matrix as computational input. The
-accepted annotated bridge may be read only as a parity oracle after the
-integrated output is complete.
+- integrated mode absent: zero spatial allocations and unchanged normal CLI;
+- invalid mixed recipes rejected before input opens;
+- checked arithmetic overflow and host/cgroup memory limits;
+- decoder candidate, audit, UMI, likelihood, and H0 behavior;
+- coordinate contract completeness and row-major mapping;
+- global intersection versus invalid chained pairwise overlap;
+- posterior/prior applied once per clique;
+- candidate-specific correction and no cross-coordinate correction;
+- `MultiGeneUMI_CR` ties and original-UMI dominance;
+- deterministic soft accumulation;
+- hierarchy and policy mass conservation;
+- empty, one-run, multi-run, truncated, corrupt, and wrong-schema spill cases;
+- byte-identical all-memory and forced-spill results;
+- sidecar on/off and optional BAM on/off integrated parity.
 
-Accepted counts are:
-
-| Quantity | Value |
-|---|---:|
-| Paired reads | 100,000 |
-| Unique-gene reads | 81,012 |
-| Joined eligible reads | 73,892 |
-| Read cliques | 68,212 |
-| Strict `1MM_CR` molecules | 55,437 |
-| Soft `1MM_CR` mass | 68,171.458563 |
-| Hard `1MM_CR` molecules | 68,172 |
-| Gated-hard `1MM_CR` molecules | 59,895 |
-
-Required 100K executions are:
-
-1. all-memory, sidecar off;
-2. all-memory, optional diagnostic sidecar on;
-3. forced-spill with a deliberately small spatial memory budget;
-4. one-thread and multithread determinism runs.
-
-All four products and all 2/8/16 matrices must match the accepted molecule
-sets and axes. Sidecar on/off and all-memory/forced-spill must have identical
-declared hashes.
-
-## Regression gates
-
-At minimum run after a mandatory clean rebuild:
+Retain at least these existing gates:
 
 ```text
 make -C core/legacy/source clean
@@ -333,19 +355,86 @@ tests/run_scrna_sidecar_off_golden.sh
 tests/run_molecule_first_native_smoke.sh
 ```
 
-Add focused tests for decoder parity, complete accounting, global clique
-intersection, candidate-specific UMI correction, cross-gene ties/dominance,
-soft conservation, hierarchy conservation, corrupt overflow rejection,
-forced-spill identity, worker utilization, and default-off isolation.
+Run the relevant standard Solo, direct bridge, Flex, SLAM, and binary test
+matrix gates before accepting the branch.
 
-## Stop conditions
+## Frozen 100K validation
 
-Stop on any candidate, likelihood, H0, GeneFull, clique, posterior, UMI,
-cross-gene, policy-mass, scale, thread-count, sidecar-on/off, spill/no-spill,
-or default-off mismatch. Diagnose the smallest fixture. Do not change the
-scientific policy to make an integration mismatch disappear.
+Primary inputs are the frozen ovarian fixture, declared GRCh38 index, full
+oligos, and barcode contract listed in the handoff. Do not use earlier STAR,
+decoder, sidecar, resolver, or matrix artifacts as computational input.
 
-Do not launch the 474-million-read full slide and do not merge to `master`
-until the user reviews the complete 100K parity, timing, memory, and overflow
-report.
+Run in fresh output roots:
 
+1. integrated all-memory, sidecar off;
+2. integrated forced-spill with a deliberately small spatial budget;
+3. integrated diagnostic sidecar on;
+4. one-thread and configured multithread determinism runs as required.
+
+Compare with the accepted annotated bridge oracle only after the new source-
+only run finishes. Required accepted values are:
+
+| Quantity | Accepted value |
+|---|---:|
+| Paired reads | 100,000 |
+| Unique-gene reads | 81,012 |
+| Joined eligible reads | 73,892 |
+| Read cliques | 68,212 |
+| Strict 1MM-CR molecules | 55,437 |
+| Soft 1MM-CR mass | 68,171.458563 |
+| Hard 1MM-CR molecules | 68,172 |
+| Gated-hard 1MM-CR molecules | 59,895 |
+
+All four final molecule sets and all 12 matrices must match the accepted
+annotated policy. One-thread, multithread, all-memory, forced-spill, and
+sidecar-enabled runs must have identical declared hashes. Report per-stage
+wall/CPU time, peak RSS, live-byte high-water marks, spill bytes, and merge
+time.
+
+## Full-slide gate
+
+Do not launch the 474,131,092-read full slide until the user reviews the 100K
+result. If approved, use a fresh output root and serialize the benchmark. The
+run must pass the preflight model, complete without text evidence artifacts,
+keep post-read workers utilized, and report mapping, post-read, spill, total
+wall time, and peak RSS separately.
+
+The performance objective remains greater than 90% elimination of rejected
+bridge intermediate bytes and at least 4x faster post-mapping processing. A
+spill run is an emergency capacity path, not permission to recreate the text
+bridge.
+
+## Mandatory stop conditions
+
+Stop on any:
+
+- paired-read, ordinal, lane, or raw-UMI mismatch;
+- decoder candidate, audit, likelihood, or H0 mismatch;
+- coordinate outside the complete contract;
+- GeneFull feature-axis, strand, or rescue mismatch;
+- clique, posterior, `1MM_CR`, or `MultiGeneUMI_CR` mismatch;
+- raw, policy, or hierarchy mass non-conservation;
+- thread, memory/spill, sidecar, or BAM nondeterminism;
+- default-off regression;
+- checked memory-model failure;
+- incomplete or corrupt overflow run.
+
+Diagnose the smallest fixture. Do not relax the policy, tolerance, or oracle to
+make an integration mismatch disappear.
+
+## Review deliverables
+
+Report:
+
+- source commits and clean-built STAR SHA-256;
+- final CLI and checked memory formula;
+- decoder/collapse/materializer factoring map;
+- unit, regression, isolation, spill, and determinism results;
+- 100K molecule, matrix, and summary hashes;
+- per-stage timing and peak/live memory;
+- spill trigger, bytes, runs, and merge time;
+- confirmation that exact-UMI and text bridge outputs are absent;
+- unresolved correctness or performance caveats.
+
+Do not commit binaries or generated outputs. Record new artifact roots in
+`tests/ARTIFACTS.md`.
