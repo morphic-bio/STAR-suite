@@ -291,13 +291,13 @@ void ParametersSolo::initialize(Parameters *pPin)
         transform(mode.begin(), mode.end(), mode.begin(), ::tolower);
         if (mode == "compatibility" || mode.empty()) {
             crMultimapRescueEvidenceMode = CrMultimapRescueEvidenceCompatibility;
-        } else if (mode == "decoy") {
-            crMultimapRescueEvidenceMode = CrMultimapRescueEvidenceDecoy;
+        } else if (mode == "annotated") {
+            crMultimapRescueEvidenceMode = CrMultimapRescueEvidenceAnnotatedBest;
         } else {
             ostringstream errOut;
             errOut << "EXITING because of fatal PARAMETERS error: unrecognized option in --soloCrMultimapRescueEvidence="
                    << crMultimapRescueEvidenceStr << "\n";
-            errOut << "SOLUTION: use allowed option: compatibility OR decoy\n";
+            errOut << "SOLUTION: use allowed option: compatibility OR annotated\n";
             exitWithError(errOut.str(), std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
         }
     }

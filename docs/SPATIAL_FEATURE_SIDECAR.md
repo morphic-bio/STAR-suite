@@ -20,7 +20,7 @@ The option currently fails closed unless the command uses:
 --soloFeatures GeneFull
 --soloCrGexFeature GeneFull
 --soloCrMultimapRescue yes
---soloCrMultimapRescueEvidence compatibility|decoy
+--soloCrMultimapRescueEvidence compatibility|annotated
 --soloUMIdedup 1MM_CR
 --soloUMIfiltering MultiGeneUMI_CR
 --soloMultiMappers Unique
@@ -34,14 +34,13 @@ sidecar hook runs once after CR genomic-multimapper rescue and modern GeneFull
 annotation, but before Solo barcode/UMI parsing.
 
 `compatibility` preserves the vendor-oriented exon-first rescue contract.
-`decoy` is the alignment-aware STAR policy: only best-score alignments enter
-the feature-uniqueness decision; each tied alignment must support the same
-single countable gene. An alignment with no countable GTF annotation carries
-explicit `NA` evidence. It participates in score ties and uniqueness but can
-never be emitted as a gene. Thus an equal-score annotated/NA pair remains
-unassigned, while a lower-score NA alignment does not erase a better annotated
-alignment. The selected exonic or intronic alignment is only a representative
-after gene uniqueness has been established.
+`annotated` is the alignment-aware STAR policy: alignments without a retained
+GTF gene are ignored, only the highest-STAR-score annotated alignments enter
+the feature-uniqueness decision, and every tied alignment must support the
+same single countable gene. A higher-scoring intronic GeneFull alignment can
+therefore win over a lower-scoring paralogous exon, and vice versa. Equal-score
+different-gene evidence remains unresolved. Exonic/intronic status selects a
+representative only after gene uniqueness has been established.
 
 ## Output contract
 
@@ -88,11 +87,12 @@ input, and an active FIFO reader; it is absent by default.
 
 Status flags distinguish mapped/unmapped, unique/no-gene/multi-gene outcomes,
 same-gene genomic multimappers, exonic versus intronic-fallback CR rescue, and
-the GeneFull overlap class. Decoy-mode rejection is explicit, with separate
-reason flags for a best-score NA tie, conflicting best-score genes, and a
-best alignment that itself overlaps multiple countable genes. Rescue
-provenance is orthogonal to gene eligibility. Zero-filled slots are invalid
-and gene index zero is a valid gene.
+the GeneFull overlap class. Annotated-mode rejection is explicit for
+conflicting best-score genes and a best alignment that itself overlaps
+multiple countable genes. Rescue provenance is orthogonal to gene eligibility.
+Zero-filled slots are invalid and gene index zero is a valid gene. The legacy
+best-score-NA status bit remains reserved in schema v1 but is not emitted by
+the annotated policy.
 
 ## Spatial adapter and GEX reconciliation
 

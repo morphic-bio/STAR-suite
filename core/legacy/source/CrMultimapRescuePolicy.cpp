@@ -75,8 +75,8 @@ static Decision evaluateCompatibility(const std::vector<AlignmentEvidence>& evid
     return decision;
 }
 
-static Decision evaluateDecoy(const std::vector<AlignmentEvidence>& evidence,
-                              bool allowIntronicFallback) {
+static Decision evaluateAnnotatedBest(const std::vector<AlignmentEvidence>& evidence,
+                                      bool allowIntronicFallback) {
     Decision decision;
     if (evidence.empty()) {
         decision.failure = Failure::NoCountableBest;
@@ -85,18 +85,24 @@ static Decision evaluateDecoy(const std::vector<AlignmentEvidence>& evidence,
 
     std::int64_t bestScore = std::numeric_limits<std::int64_t>::min();
     for (const AlignmentEvidence& item : evidence) {
-        bestScore = std::max(bestScore, item.score);
+        if (item.annotation != Annotation::NA && !item.genes.empty()) {
+            bestScore = std::max(bestScore, item.score);
+        }
+    }
+    if (bestScore == std::numeric_limits<std::int64_t>::min()) {
+        decision.failure = Failure::NoCountableBest;
+        return decision;
     }
 
     std::uint32_t commonGene = UINT32_MAX;
     std::uint64_t exonicWinner = evidence.size();
     std::uint64_t intronicWinner = evidence.size();
-    bool hasNaBest = false;
     bool hasMultiGeneBest = false;
     bool hasConflictingBestGenes = false;
     for (std::uint64_t index = 0; index < evidence.size(); ++index) {
         const AlignmentEvidence& item = evidence[index];
-        if (item.score != bestScore) {
+        if (item.score != bestScore || item.annotation == Annotation::NA
+            || item.genes.empty()) {
             continue;
         }
         if (item.annotation == Annotation::Exonic) {
@@ -105,13 +111,9 @@ static Decision evaluateDecoy(const std::vector<AlignmentEvidence>& evidence,
         } else if (item.annotation == Annotation::Intronic) {
             ++decision.intronicCount;
             if (intronicWinner == evidence.size()) intronicWinner = index;
-        } else {
-            ++decision.naCount;
         }
 
-        if (item.annotation == Annotation::NA || item.genes.empty()) {
-            hasNaBest = true;
-        } else if (item.genes.size() != 1) {
+        if (item.genes.size() != 1) {
             hasMultiGeneBest = true;
         } else if (commonGene == UINT32_MAX) {
             commonGene = item.genes.front();
@@ -120,14 +122,9 @@ static Decision evaluateDecoy(const std::vector<AlignmentEvidence>& evidence,
         }
     }
 
-    // Diagnose the same best-score evidence set identically regardless of
-    // STAR's retained-alignment ordering. NA has highest precedence because
-    // it is the explicit decoy veto; per-alignment and cross-alignment gene
-    // ambiguity follow.
-    if (hasNaBest) {
-        decision.failure = Failure::NaBestTie;
-        return decision;
-    }
+    // Diagnose the same best-score annotated evidence set identically
+    // regardless of STAR's retained-alignment ordering. Annotation-free
+    // alignments are deliberately absent from this decision.
     if (hasMultiGeneBest) {
         decision.failure = Failure::MultiGeneBestAlignment;
         return decision;
@@ -162,8 +159,8 @@ static Decision evaluateDecoy(const std::vector<AlignmentEvidence>& evidence,
 Decision evaluate(const std::vector<AlignmentEvidence>& evidence,
                   bool allowIntronicFallback,
                   EvidenceMode mode) {
-    return mode == EvidenceMode::Decoy
-        ? evaluateDecoy(evidence, allowIntronicFallback)
+    return mode == EvidenceMode::AnnotatedBest
+        ? evaluateAnnotatedBest(evidence, allowIntronicFallback)
         : evaluateCompatibility(evidence, allowIntronicFallback);
 }
 
