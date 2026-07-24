@@ -137,6 +137,7 @@ update this file with its output location.
 - `tests/flexfilter_parity_output_*/` (FlexFilter parity outputs vs production baseline)
 - `/tmp/*` (temporary scratch outputs)
 - `/tmp/star-scrna-sidecar-off-golden-*` (self-contained synthetic normal-scRNA index, FASTQs, and Solo outputs used to verify byte-identical sidecar-off GeneFull MEX parity)
+- `/tmp/star-spatial-r1-tap-guard.*` (ephemeral logs for the default-off fused R1 tap CLI guard)
 - `/mnt/pikachu/solo_bridge_determinism_*` (non-Flex Solo bridge determinism
   harness outputs from `tests/run_solo_bridge_determinism_harness.sh`: paired
   STAR runs, bridge-stage digest TSVs, optional per-CB digest TSVs, raw/filtered
@@ -164,6 +165,9 @@ update this file with its output location.
 - `/mnt/pikachu/star-spatial/gex_sidecar_tests/20260722_ovarian_100k_serial_concurrency_control_v1/` (fresh source-only serial producer control for the Visium HD GEX fork/join scheduler; authoritative completion marker: `RUN_COMPLETE.json`)
 - `/mnt/pikachu/star-spatial/gex_sidecar_tests/20260722_ovarian_100k_concurrent_v1/` (fresh source-only 8+8-thread concurrent R1/STAR producer validation; byte-identical scheduling-independent outputs versus the serial control)
 - `/mnt/pikachu/star-spatial/gex_sidecar_tests/20260722_ovarian_100k_concurrent_star_weighted_v1/` (fresh source-only 4+12-thread producer-allocation check; byte-identical outputs and no 100K timing benefit)
+- `/mnt/pikachu/star-spatial/gex_fused_tests/20260724_ovarian_100k_contracts_v1/` (fresh source-only serial contracts oracle for fused paired-read validation; authoritative completion marker: `RUN_COMPLETE.json`)
+- `/mnt/pikachu/star-spatial/gex_fused_tests/20260724_ovarian_100k_fused_v1/` (fresh source-only fused STAR-owned paired-input run; decoder consumed only the raw-R1 FIFO, the join reopened no FASTQ, and all 49 scheduling-independent parity files matched the contracts oracle exactly)
+- `/mnt/pikachu/star-spatial/gex_fused_tests/20260724_ovarian_100k_fused_v1_space_ranger_sanity.json` (read-only 12-row descriptive comparison of the fused policy matrices with published ovarian Space Ranger 4.0.1 raw binned matrices; never used as resolution evidence)
 - `/tmp/ucsf_cr_config_1m_smoke_*` (real UCSF perturb CR-config fixture smoke outputs)
 - `/tmp/ucsf_batch_cr_multifeature_tiny_*` (synthetic UCSF perturb multifeature CR-config tiny smoke outputs)
 - `/tmp/flex_cr_config_smoke_*` (Flex CR-config smoke outputs)
@@ -184,6 +188,10 @@ update this file with its output location.
   parity, and staged SE/PE FASTQ-vs-CBQ divergence reports; reproduced by
   `scripts/run_slam_100k_se_pe_smoke.sh`, `tests/run_slam_parity_smoke.sh`, and
   `tests/run_slam_cbq_divergence_harness.sh`)
+- `/mnt/pikachu/star-suite-test-runs/slam-pinned-parity-*` (fresh full
+  manifest-verified SLAM fixture runs using the recovered January index;
+  contains the recorded command, manifest log, STAR output, QC, and all
+  dump-requant comparison reports)
 - `tests/transcriptvb_chr22_parity_output_*/` (TranscriptVB chr22 same-BAM
   Salmon parity smoke outputs from `tests/run_transcriptvb_chr22_parity_smoke.sh`;
   contains STAR auto-detect TranscriptVB output, Salmon `-p 1` same-BAM output,

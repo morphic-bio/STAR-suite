@@ -27,6 +27,7 @@
 #include "SamtoolsSorter.h"
 #include "Transcriptome.h"
 #include "SpatialFeatureSidecar.h"
+#include "SpatialR1FastqTap.h"
 #include "CountingSinkStress.h"
 #include "signalFromBAM.h"
 #include "mapThreadsSpawn.h"
@@ -576,6 +577,7 @@ int main(int argInN, char *argIn[])
     // transcriptome placeholder (loaded only if P.quant.yes)
     Transcriptome *transcriptomeMain = nullptr;
     std::unique_ptr<spatial_feature_sidecar::Writer> spatialFeatureWriter;
+    std::unique_ptr<spatial_r1_fastq_tap::Writer> spatialR1FastqTapWriter;
     std::vector<double> vbGenePosterior;
     bool vbGenePosteriorReady = false;
 
@@ -715,6 +717,19 @@ int main(int argInN, char *argIn[])
             P.spatialFeatureSidecarWriter = spatialFeatureWriter.get();
             P.inOut->logMain << "Spatial GeneFull sidecar output prefix: "
                              << P.soloSpatialFeatureSidecar << "\n" << flush;
+
+            if (P.soloSpatialR1FastqTapEnabled) {
+                spatialR1FastqTapWriter.reset(new spatial_r1_fastq_tap::Writer());
+                std::string tapError;
+                if (!spatialR1FastqTapWriter->open(P.soloSpatialR1FastqTap, true, tapError)) {
+                    exitWithError("EXITING because the fused raw-R1 FASTQ tap could not be opened: "
+                                      + tapError + "\n",
+                                  std::cerr, P.inOut->logMain, EXIT_CODE_FILE_OPEN, P);
+                }
+                P.spatialR1FastqTapWriter = spatialR1FastqTapWriter.get();
+                P.inOut->logMain << "Fused raw-R1 FASTQ tap: "
+                                 << P.soloSpatialR1FastqTap << "\n" << flush;
+            }
         }
 
         // SNP mask build pre-pass (if requested)
@@ -2099,6 +2114,24 @@ int main(int argInN, char *argIn[])
             }
             exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
         }
+    }
+
+    if (spatialR1FastqTapWriter) {
+        const std::uint64_t tappedReads = spatialR1FastqTapWriter->recordsWritten();
+        std::string tapError;
+        if (!spatialR1FastqTapWriter->close(tapError)) {
+            exitWithError("EXITING because the fused raw-R1 FASTQ tap could not be finalized: "
+                              + tapError + "\n",
+                          std::cerr, P.inOut->logMain, EXIT_CODE_FILE_WRITE, P);
+        }
+        P.spatialR1FastqTapWriter = nullptr;
+        if (tappedReads != P.iReadAll) {
+            exitWithError("EXITING because the fused raw-R1 FASTQ tap read count differs from STAR input\n",
+                          std::cerr, P.inOut->logMain, EXIT_CODE_INCONSISTENT_DATA, P);
+        }
+        P.inOut->logMain << timeMonthDayTime()
+                         << " ..... finalized fused raw-R1 FASTQ tap (reads="
+                         << tappedReads << ")\n" << flush;
     }
 
     if (spatialFeatureWriter) {

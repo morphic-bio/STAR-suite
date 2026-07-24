@@ -9,6 +9,39 @@ This document summarizes the work done to locate, recreate, and verify the SLAM 
 
 ---
 
+## Canonical Regression Contract (2026-07-24)
+
+Use `tests/run_slam_parity_smoke.sh` for fixture regression testing. It is the
+single maintained implementation and performs three gates:
+
+1. `tests/slam/fixture_manifest.json` verifies decompressed FASTQ/reference
+   content, order-independent SNP BED content, and the exact historical STAR
+   index structure before alignment starts.
+2. The same manifest verifies the effective STAR command contains
+   `--clip3pAdapterSeq AGATCGGAAGAG` and `--clip3pAdapterMMp 0.1`, and rejects
+   the old fixed-trim/auto-trim options.
+3. The runner checks GRAND-SLAM reference correlation and exact dump-requant
+   replay parity. The manifest also prevents callers from relaxing those
+   thresholds while fixture verification is enabled.
+
+`tests/run_slam_end_to_end_fixture.sh` is now only a deprecated compatibility
+shim that delegates to the canonical runner. Do not add fixture logic there.
+The binary matrix and workflow registry call the canonical runner directly.
+
+The manifest intentionally rejects the host-local uppercase `ref/STAR-index`:
+it is not the index recorded by the January passing run. The exact January
+index was recovered at `/mnt/pikachu/autoindex_110_44/pe_index` and is the
+host-local default. Every run still verifies it; do not update the manifest
+from a failed or merely convenient local index.
+
+The canonical reference-correlation floor is `0.99`, matching the documented
+`>0.99` fixture target and the validated `0.998865` baseline. The old wrapper's
+implicit `0.999` default was not attainable by that recorded baseline. Exact
+STAR-versus-dump-requant parity remains gated at `0.999999` with maximum
+absolute delta `1e-6`; none of these floors can be lowered under the manifest.
+
+---
+
 ## Deliverables
 
 | File | Path | Description |
@@ -16,7 +49,8 @@ This document summarizes the work done to locate, recreate, and verify the SLAM 
 | Regeneration Script | `tests/regenerate_slam_fixture.sh` | Full pipeline to rebuild fixture |
 | Regeneration Notes | `test/fixtures/slam/meta/REGENERATION_NOTES.md` | Detailed documentation |
 | Updated source.txt | `test/fixtures/slam/meta/source.txt` | Added STAR/GEDI parameters |
-| Fixed Parity Test | `tests/run_slam_fixture_parity.sh` | Corrected alignment parameters |
+| Canonical Parity Test | `tests/run_slam_parity_smoke.sh` | Pinned fixture, reference, command, and dump-requant gates |
+| Fixture Manifest | `tests/slam/fixture_manifest.json` | Immutable external artifact and alignment contract |
 
 ---
 
