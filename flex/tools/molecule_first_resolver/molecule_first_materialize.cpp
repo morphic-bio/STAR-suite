@@ -47,6 +47,7 @@ struct Arguments {
     std::string umiMode = "1mm_cr";
     std::string tmpDir;
     std::uint64_t sortMemoryMb = 1024;
+    std::set<std::string> selectedProducts;
 };
 
 struct ProductSpec {
@@ -85,10 +86,23 @@ const std::vector<ProductSpec> &products()
     return values;
 }
 
+std::vector<const ProductSpec *> selectedProducts(const Arguments &arguments)
+{
+    std::vector<const ProductSpec *> selected;
+    for (const ProductSpec &product : products()) {
+        if (arguments.selectedProducts.empty()
+            || arguments.selectedProducts.find(product.name) != arguments.selectedProducts.end()) {
+            selected.push_back(&product);
+        }
+    }
+    return selected;
+}
+
 void usage(std::ostream &out)
 {
     out << "Usage: molecule_first_materialize --resolved-dir DIR --out-dir DIR\n"
         << "       --assay scrna|flex|visium|visium-hd [--umi-mode 1mm_cr|exact]\n"
+        << "       [--products all|strict,soft_expected,hard,gated_hard]\n"
         << "       [--sort-memory-mb INT] [--tmp-dir DIR]\n\n"
         << "Writes strict, soft_expected, hard, and gated_hard 10x-style MEX\n"
         << "products on identical feature/barcode axes. Soft matrices are real.\n"
@@ -129,6 +143,21 @@ Arguments parseArguments(int argc, char **argv)
         else if (option == "--assay") arguments.assay = value;
         else if (option == "--umi-mode") arguments.umiMode = value;
         else if (option == "--tmp-dir") arguments.tmpDir = value;
+        else if (option == "--products") {
+            if (value != "all") {
+                std::size_t begin = 0;
+                for (;;) {
+                    const std::size_t end = value.find(',', begin);
+                    const std::string name = value.substr(
+                        begin, end == std::string::npos ? end : end - begin);
+                    if (name.empty() || !arguments.selectedProducts.insert(name).second) {
+                        throw std::invalid_argument("invalid or duplicate product in --products: " + name);
+                    }
+                    if (end == std::string::npos) break;
+                    begin = end + 1;
+                }
+            }
+        }
         else if (option == "--sort-memory-mb") {
             arguments.sortMemoryMb = parsePositiveInteger(value, option);
         } else throw std::invalid_argument("unknown option: " + option);
@@ -140,6 +169,14 @@ Arguments parseArguments(int argc, char **argv)
     if (assays.find(arguments.assay) == assays.end()) throw std::invalid_argument("unsupported --assay");
     if (arguments.umiMode != "1mm_cr" && arguments.umiMode != "exact") {
         throw std::invalid_argument("--umi-mode must be 1mm_cr or exact");
+    }
+    const std::set<std::string> validProducts = {
+        "strict", "soft_expected", "hard", "gated_hard"
+    };
+    for (const std::string &name : arguments.selectedProducts) {
+        if (validProducts.find(name) == validProducts.end()) {
+            throw std::invalid_argument("unsupported --products entry: " + name);
+        }
     }
     const std::uint64_t maxMb = std::numeric_limits<std::size_t>::max() / (1024ULL * 1024ULL);
     if (arguments.sortMemoryMb > maxMb) throw std::invalid_argument("--sort-memory-mb is too large");
@@ -690,22 +727,24 @@ void writeHdBarcodeAxis(const std::string &path, const CoordinateAxis &axis)
     output.commit();
 }
 
-void prepareHdAxisFiles(const std::string &outDir, const HdAxes &axes)
+void prepareHdAxisFiles(const std::string &outDir, const HdAxes &axes,
+                        const std::vector<const ProductSpec *> &selected)
 {
     const CoordinateAxis *scaleAxes[] = {&axes.fine, &axes.eight, &axes.sixteen};
-    for (const ProductSpec &product : products()) {
+    for (const ProductSpec *product : selected) {
         for (const CoordinateAxis *axis : scaleAxes) {
-            makeDirectories(outDir + "/" + product.name + "/" + axis->name());
+            makeDirectories(outDir + "/" + product->name + "/" + axis->name());
         }
     }
 
-    const std::string canonicalFeatures = outDir + "/strict/square_002um/features.tsv";
+    const std::string canonicalRoot = outDir + "/" + selected.front()->name;
+    const std::string canonicalFeatures = canonicalRoot + "/square_002um/features.tsv";
     writeFeatureAxis(canonicalFeatures, axes.features);
     for (const CoordinateAxis *axis : scaleAxes) {
-        const std::string canonicalBarcode = outDir + "/strict/" + axis->name() + "/barcodes.tsv";
+        const std::string canonicalBarcode = canonicalRoot + "/" + axis->name() + "/barcodes.tsv";
         writeHdBarcodeAxis(canonicalBarcode, *axis);
-        for (const ProductSpec &product : products()) {
-            const std::string directory = outDir + "/" + product.name + "/" + axis->name();
+        for (const ProductSpec *product : selected) {
+            const std::string directory = outDir + "/" + product->name + "/" + axis->name();
             const std::string featurePath = directory + "/features.tsv";
             const std::string barcodePath = directory + "/barcodes.tsv";
             if (featurePath != canonicalFeatures) atomicLinkOrCopy(canonicalFeatures, featurePath);
@@ -1094,19 +1133,23 @@ void loadSoft(const std::string &path, const std::string &umiMode, Counts &count
 }
 
 void prepareGenericAxisFiles(const std::string &outDir, const std::vector<std::string> &features,
-                             const std::vector<std::string> &candidates)
+                             const std::vector<std::string> &candidates,
+                             const std::vector<const ProductSpec *> &selected)
 {
-    for (const ProductSpec &product : products()) makeDirectories(outDir + "/" + product.name + "/raw");
-    const std::string canonicalFeatures = outDir + "/strict/raw/features.tsv";
-    const std::string canonicalBarcodes = outDir + "/strict/raw/barcodes.tsv";
+    for (const ProductSpec *product : selected) {
+        makeDirectories(outDir + "/" + product->name + "/raw");
+    }
+    const std::string canonicalRoot = outDir + "/" + selected.front()->name + "/raw";
+    const std::string canonicalFeatures = canonicalRoot + "/features.tsv";
+    const std::string canonicalBarcodes = canonicalRoot + "/barcodes.tsv";
     writeFeatureAxis(canonicalFeatures, features);
     {
         AtomicOutput output(canonicalBarcodes);
         for (const std::string &candidate : candidates) output.stream() << mexBarcode(candidate) << '\n';
         output.commit();
     }
-    for (const ProductSpec &product : products()) {
-        const std::string directory = outDir + "/" + product.name + "/raw";
+    for (const ProductSpec *product : selected) {
+        const std::string directory = outDir + "/" + product->name + "/raw";
         if (directory + "/features.tsv" != canonicalFeatures) {
             atomicLinkOrCopy(canonicalFeatures, directory + "/features.tsv");
         }
@@ -1184,22 +1227,23 @@ std::ostringstream summaryHeader(const Arguments &arguments)
 void runHd(const Arguments &arguments)
 {
     HdAxes axes = loadHdAxes(arguments.resolvedDir + "/read_cliques.tsv");
-    prepareHdAxisFiles(arguments.outDir, axes);
+    const std::vector<const ProductSpec *> selected = selectedProducts(arguments);
+    prepareHdAxisFiles(arguments.outDir, axes, selected);
     const std::string temporaryRoot = arguments.tmpDir.empty() ? arguments.outDir : arguments.tmpDir;
     PrivateTempDirectory temporary(temporaryRoot);
     const bool featureSorted = resolvedIsFeatureSorted(arguments.resolvedDir);
     std::ostringstream summary = summaryHeader(arguments);
-    for (const ProductSpec &product : products()) {
+    for (const ProductSpec *product : selected) {
         const std::vector<MexSummary> results = materializeHdProduct(
-            arguments, axes, product, featureSorted, temporary.path());
-        appendSummaryRow(summary, product, "square_002um", results[0]);
-        appendSummaryRow(summary, product, "square_008um", results[1]);
-        appendSummaryRow(summary, product, "square_016um", results[2]);
+            arguments, axes, *product, featureSorted, temporary.path());
+        appendSummaryRow(summary, *product, "square_002um", results[0]);
+        appendSummaryRow(summary, *product, "square_008um", results[1]);
+        appendSummaryRow(summary, *product, "square_016um", results[2]);
         const double minimum = std::min(results[0].mass, std::min(results[1].mass, results[2].mass));
         const double maximum = std::max(results[0].mass, std::max(results[1].mass, results[2].mass));
         const double tolerance = 1e-9 * std::max(1.0, maximum);
         if (maximum - minimum > tolerance) {
-            throw std::runtime_error("Visium HD scale aggregation did not conserve mass for " + product.name);
+            throw std::runtime_error("Visium HD scale aggregation did not conserve mass for " + product->name);
         }
     }
     atomicText(arguments.outDir + "/summary.tsv", summary.str());
@@ -1211,20 +1255,21 @@ void runGeneric(const Arguments &arguments)
     loadUniverse(arguments.resolvedDir + "/read_cliques.tsv", featureUniverse, candidateUniverse);
     const std::vector<std::string> features(featureUniverse.begin(), featureUniverse.end());
     const std::vector<std::string> candidates(candidateUniverse.begin(), candidateUniverse.end());
-    prepareGenericAxisFiles(arguments.outDir, features, candidates);
+    const std::vector<const ProductSpec *> selected = selectedProducts(arguments);
+    prepareGenericAxisFiles(arguments.outDir, features, candidates, selected);
     std::ostringstream summary = summaryHeader(arguments);
-    for (const ProductSpec &product : products()) {
+    for (const ProductSpec *product : selected) {
         Counts counts;
-        if (product.expected) {
-            loadSoft(arguments.resolvedDir + "/" + product.fileName, arguments.umiMode, counts);
+        if (product->expected) {
+            loadSoft(arguments.resolvedDir + "/" + product->fileName, arguments.umiMode, counts);
         } else {
-            loadMolecules(arguments.resolvedDir + "/" + product.fileName,
-                          arguments.umiMode, product.name, counts);
+            loadMolecules(arguments.resolvedDir + "/" + product->fileName,
+                          arguments.umiMode, product->name, counts);
         }
         const MexSummary result = writeGenericMatrix(
-            arguments.outDir + "/" + product.name + "/raw/matrix.mtx",
-            featureUniverse, candidateUniverse, counts, product.expected);
-        appendSummaryRow(summary, product, "raw", result);
+            arguments.outDir + "/" + product->name + "/raw/matrix.mtx",
+            featureUniverse, candidateUniverse, counts, product->expected);
+        appendSummaryRow(summary, *product, "raw", result);
     }
     atomicText(arguments.outDir + "/summary.tsv", summary.str());
 }

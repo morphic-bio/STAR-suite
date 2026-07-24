@@ -52,6 +52,7 @@ failed=0
 
 run_test "run_solo_smoke" "tests/run_solo_smoke.sh" || failed=1
 run_test "run_scrna_sidecar_off_golden" "tests/run_scrna_sidecar_off_golden.sh" || failed=1
+run_test "run_spatial_r1_tap_guard" "tests/run_spatial_r1_tap_guard.sh" || failed=1
 run_test "test_visium_hd_gex_sidecar_concurrency" "python3 tests/test_visium_hd_gex_sidecar_concurrency.py" || failed=1
 run_test "test_snp_mask_build_smoke" "tests/slam/test_snp_mask_build_smoke.sh" || failed=1
 run_test "run_flex_tiny_public_smoke" "tests/run_flex_tiny_public_smoke.sh" || failed=1

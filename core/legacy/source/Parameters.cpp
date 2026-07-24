@@ -625,6 +625,7 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloCrMultimapRescueIntronic", &pSolo.crMultimapRescueIntronicStr));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloCrMultimapRescueEvidence", &pSolo.crMultimapRescueEvidenceStr));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloSpatialFeatureSidecar", &soloSpatialFeatureSidecar));
+    parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloSpatialR1FastqTap", &soloSpatialR1FastqTap));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloProbeList", &pSolo.probeListPath));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloRemoveDeprecated", &pSolo.removeDeprecatedStr));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloSampleWhitelist", &pSolo.sampleWhitelistPath));
@@ -2194,6 +2195,18 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
         exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
     };
 
+    // Reject the fused-only tap before opening any read inputs. The complete
+    // sidecar recipe is validated after Solo initialization below.
+    soloSpatialFeatureSidecarEnabled = !soloSpatialFeatureSidecar.empty()
+        && soloSpatialFeatureSidecar != "-" && soloSpatialFeatureSidecar != "None";
+    soloSpatialR1FastqTapEnabled = !soloSpatialR1FastqTap.empty()
+        && soloSpatialR1FastqTap != "-" && soloSpatialR1FastqTap != "None";
+    if (soloSpatialR1FastqTapEnabled && !soloSpatialFeatureSidecarEnabled) {
+        exitWithError("EXITING because of fatal PARAMETERS error: --soloSpatialR1FastqTap requires --soloSpatialFeatureSidecar\n"
+                      "SOLUTION: enable the explicit fused Visium HD GEX recipe or remove the tap option.\n",
+                      std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+    }
+
     //read parameters
     if (runMode == "hashCacheGenerate") {
         if (readFilesIn.empty() || (readFilesIn.size() == 1 && readFilesIn[0] == "-")) {
@@ -3205,6 +3218,8 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
 
     soloSpatialFeatureSidecarEnabled = !soloSpatialFeatureSidecar.empty()
         && soloSpatialFeatureSidecar != "-" && soloSpatialFeatureSidecar != "None";
+    soloSpatialR1FastqTapEnabled = !soloSpatialR1FastqTap.empty()
+        && soloSpatialR1FastqTap != "-" && soloSpatialR1FastqTap != "None";
     if (soloSpatialFeatureSidecarEnabled) {
         const auto exactly = [](const vector<string> &values, const string &expected) {
             return values.size() == 1 && values[0] == expected;
@@ -3243,6 +3258,8 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
             rejectSpatialSidecar("requires --outFilterType Normal");
         if (readFilesTypeN == 10 || readNends != 2)
             rejectSpatialSidecar("requires two FASTQ ends ordered as R2 then raw R1");
+        if (soloSpatialR1FastqTapEnabled && (readFilesTypeN != 1 || !fastxInputActive))
+            rejectSpatialSidecar("requires Fastx input for --soloSpatialR1FastqTap");
         if (batchModeRequested || quant.slam.yes || quant.transcriptVB.yes)
             rejectSpatialSidecar("does not support batch, SLAM, or transcript-VB replay modes");
 
