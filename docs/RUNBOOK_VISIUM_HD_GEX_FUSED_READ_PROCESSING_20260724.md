@@ -221,3 +221,6 @@ declared warm/cold index-cache policy.
 4. Treat only wrapper-written `RUN_COMPLETE.json` as completion.
 5. Do not infer completion from STAR progress logs or process names.
 6. Resume with fixture-free tests before launching either fresh 100K run.
+
+The completed 100K results are recorded in
+`docs/VALIDATION_VISIUM_HD_GEX_FUSED_READ_PROCESSING_20260724.md`.
