@@ -28,7 +28,24 @@ def python_command(source: str, *arguments: Path) -> list[str]:
 class ProducerThreadBudgetTest(unittest.TestCase):
     def test_serial_is_the_validated_default(self) -> None:
         with mock.patch.object(sys, "argv", [str(WRAPPER)]):
-            self.assertEqual(MODULE.arguments().producer_mode, "serial")
+            arguments = MODULE.arguments()
+            self.assertEqual(arguments.producer_mode, "serial")
+            self.assertEqual(arguments.evidence_mode, "contracts")
+            self.assertEqual(arguments.assignment_policy, "all")
+
+    def test_fused_mode_requires_concurrent_producers(self) -> None:
+        with mock.patch.object(
+            sys, "argv", [str(WRAPPER), "--evidence-mode", "fused"]
+        ), self.assertRaises(SystemExit):
+            MODULE.arguments()
+        with mock.patch.object(
+            sys,
+            "argv",
+            [str(WRAPPER), "--evidence-mode", "fused", "--producer-mode", "concurrent"],
+        ):
+            arguments = MODULE.arguments()
+            self.assertEqual(arguments.evidence_mode, "fused")
+            self.assertEqual((arguments.r1_threads, arguments.star_threads), (8, 8))
 
     def test_concurrent_defaults_split_total_budget(self) -> None:
         self.assertEqual(MODULE.producer_thread_budgets(16, "concurrent", None, None), (8, 8))
