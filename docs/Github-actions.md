@@ -73,6 +73,7 @@ Tag policy:
   - public-data-only or synthetic surfaces
   - current Docker set: `tests/run_solo_smoke.sh`,
     `tests/run_scrna_sidecar_off_golden.sh`,
+    `tests/test_visium_hd_gex_sidecar_concurrency.py`,
     `tests/slam/test_snp_mask_build_smoke.sh`,
     `tests/run_flex_tiny_public_smoke.sh`, and
     `tests/run_molecule_first_native_smoke.sh`
@@ -83,6 +84,9 @@ Tag policy:
   - the scRNA golden gate omits `--soloSpatialFeatureSidecar` and requires the
     raw GeneFull MEX files to remain byte-identical to feature-branch base
     commit `a996107e271c013e39f9398151deda0017da35d6`
+  - the Visium HD producer-scheduler gate proves R1/STAR overlap, the R1-to-H0
+    dependency, serial fallback ordering, bounded concurrent thread allocation,
+    and sibling process-group termination on failure
   - should run on PRs and all protected branch pipelines
 - Tier B:
   - fixture-backed tests (for example `/storage` data)
