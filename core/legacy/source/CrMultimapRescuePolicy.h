@@ -18,7 +18,7 @@ enum class Annotation : std::uint8_t {
 
 enum class EvidenceMode : std::uint8_t {
     Compatibility = 0,
-    Decoy = 1
+    AnnotatedBest = 1
 };
 
 enum class Failure : std::uint8_t {
@@ -53,10 +53,16 @@ struct Decision {
 // custom indexes. Missing/NA biotypes are non-countable evidence.
 bool biotypeIsCountable(const std::string& biotype);
 
-// Compatibility preserves the historical exon-first CR rescue. Decoy mode
-// first retains only best-score alignments, then requires every tied alignment
-// to support exactly the same single countable gene. NA participates in that
-// uniqueness test but is never a possible winner.
+// Only contradictory retained-gene evidence, or an explicitly disabled
+// intronic fallback, may veto later feature aggregation. The absence of
+// annotated rescue evidence is not an NA veto.
+bool failureVetoesFeature(Failure failure);
+
+// Compatibility preserves the historical exon-first CR rescue. AnnotatedBest
+// ignores alignments without retained GTF evidence, first retains only the
+// best-score annotated alignments, and then requires every tied alignment to
+// support exactly the same single countable gene. Exonic/intronic status is
+// used only to choose a representative after gene uniqueness is established.
 Decision evaluate(const std::vector<AlignmentEvidence>& evidence,
                   bool allowIntronicFallback,
                   EvidenceMode mode);

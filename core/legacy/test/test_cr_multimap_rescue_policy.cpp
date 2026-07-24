@@ -74,91 +74,106 @@ int testCompatibilityMode() {
     return failed;
 }
 
-int testDecoyMode() {
+int testAnnotatedBestMode() {
     int failed = 0;
 
-    const auto naTie = cr_multimap_rescue::evaluate({
+    const auto ignoredNa = cr_multimap_rescue::evaluate({
         evidence(Annotation::Exonic, 50, {11}),
-        evidence(Annotation::NA, 50, {})}, true, EvidenceMode::Decoy);
-    failed += check(!naTie.rescued && naTie.failure == Failure::NaBestTie,
-                    "equal-score NA alignment vetoes false feature uniqueness");
+        evidence(Annotation::NA, 60, {})}, true, EvidenceMode::AnnotatedBest);
+    failed += check(ignoredNa.rescued && ignoredNa.geneIndex == 11
+                        && ignoredNa.winnerAlignIndex == 0,
+                    "annotation-free alignment does not veto retained GTF evidence");
 
-    const auto naTieReordered = cr_multimap_rescue::evaluate({
-        evidence(Annotation::NA, 50, {}),
-        evidence(Annotation::Exonic, 50, {11})}, true, EvidenceMode::Decoy);
-    failed += check(!naTieReordered.rescued
-                        && naTieReordered.failure == Failure::NaBestTie,
-                    "NA veto reason is independent of best-alignment order");
+    const auto ignoredNaReordered = cr_multimap_rescue::evaluate({
+        evidence(Annotation::NA, 60, {}),
+        evidence(Annotation::Exonic, 50, {11})}, true, EvidenceMode::AnnotatedBest);
+    failed += check(ignoredNaReordered.rescued && ignoredNaReordered.geneIndex == 11
+                        && ignoredNaReordered.winnerAlignIndex == 1,
+                    "ignored annotation-free alignment is order independent");
 
-    const auto lowerNa = cr_multimap_rescue::evaluate({
-        evidence(Annotation::Exonic, 50, {11}),
-        evidence(Annotation::NA, 49, {})}, true, EvidenceMode::Decoy);
-    failed += check(lowerNa.rescued && lowerNa.geneIndex == 11
-                        && lowerNa.winnerAlignIndex == 0,
-                    "lower-score NA remains evidence but does not erase best annotated winner");
-
-    const auto higherNa = cr_multimap_rescue::evaluate({
+    const auto mecomScoresHigher = cr_multimap_rescue::evaluate({
         evidence(Annotation::Exonic, 49, {11}),
-        evidence(Annotation::NA, 50, {})}, true, EvidenceMode::Decoy);
-    failed += check(!higherNa.rescued && higherNa.failure == Failure::NaBestTie,
-                    "higher-score NA prevents lower-score annotated rescue");
+        evidence(Annotation::Intronic, 50, {22})}, true, EvidenceMode::AnnotatedBest);
+    failed += check(mecomScoresHigher.rescued && mecomScoresHigher.intronicFallback
+                        && mecomScoresHigher.geneIndex == 22
+                        && mecomScoresHigher.winnerAlignIndex == 1,
+                    "higher-score intronic MECOM evidence wins over RPL22 exon");
 
-    const auto rpl22Mecom = cr_multimap_rescue::evaluate({
-        evidence(Annotation::Exonic, 50, {11}),
-        evidence(Annotation::Intronic, 50, {22})}, true, EvidenceMode::Decoy);
-    failed += check(!rpl22Mecom.rescued
-                        && rpl22Mecom.failure == Failure::ConflictingBestGenes,
-                    "equal-score RPL22-exonic/MECOM-intronic evidence remains ambiguous");
-
-    const auto mecomRpl22 = cr_multimap_rescue::evaluate({
+    const auto mecomScoresHigherReordered = cr_multimap_rescue::evaluate({
         evidence(Annotation::Intronic, 50, {22}),
-        evidence(Annotation::Exonic, 50, {11})}, true, EvidenceMode::Decoy);
-    failed += check(!mecomRpl22.rescued
-                        && mecomRpl22.failure == Failure::ConflictingBestGenes,
-                    "conflicting-gene reason is independent of best-alignment order");
+        evidence(Annotation::Exonic, 49, {11})}, true, EvidenceMode::AnnotatedBest);
+    failed += check(mecomScoresHigherReordered.rescued
+                        && mecomScoresHigherReordered.intronicFallback
+                        && mecomScoresHigherReordered.geneIndex == 22
+                        && mecomScoresHigherReordered.winnerAlignIndex == 0,
+                    "higher-score MECOM result is order independent");
 
-    const auto naAndMultiGene = cr_multimap_rescue::evaluate({
+    const auto rpl22ScoresHigher = cr_multimap_rescue::evaluate({
+        evidence(Annotation::Exonic, 50, {11}),
+        evidence(Annotation::Intronic, 49, {22})}, true, EvidenceMode::AnnotatedBest);
+    failed += check(rpl22ScoresHigher.rescued && !rpl22ScoresHigher.intronicFallback
+                        && rpl22ScoresHigher.geneIndex == 11
+                        && rpl22ScoresHigher.winnerAlignIndex == 0,
+                    "higher-score RPL22 exon wins over intronic MECOM evidence");
+
+    const auto equalScoreConflict = cr_multimap_rescue::evaluate({
+        evidence(Annotation::Exonic, 50, {11}),
+        evidence(Annotation::Intronic, 50, {22})}, true, EvidenceMode::AnnotatedBest);
+    failed += check(!equalScoreConflict.rescued
+                        && equalScoreConflict.failure == Failure::ConflictingBestGenes,
+                    "equal-score RPL22/MECOM evidence remains ambiguous");
+
+    const auto equalScoreConflictReordered = cr_multimap_rescue::evaluate({
+        evidence(Annotation::Intronic, 50, {22}),
+        evidence(Annotation::Exonic, 50, {11})}, true, EvidenceMode::AnnotatedBest);
+    failed += check(!equalScoreConflictReordered.rescued
+                        && equalScoreConflictReordered.failure == Failure::ConflictingBestGenes,
+                    "equal-score conflict is order independent");
+
+    const auto bestMultiGene = cr_multimap_rescue::evaluate({
         evidence(Annotation::Exonic, 50, {11, 22}),
-        evidence(Annotation::NA, 50, {})}, true, EvidenceMode::Decoy);
-    failed += check(!naAndMultiGene.rescued
-                        && naAndMultiGene.failure == Failure::NaBestTie,
-                    "NA veto has deterministic precedence over other best-score ambiguity");
+        evidence(Annotation::Exonic, 49, {11})}, true, EvidenceMode::AnnotatedBest);
+    failed += check(!bestMultiGene.rescued
+                        && bestMultiGene.failure == Failure::MultiGeneBestAlignment,
+                    "best annotated alignment with multiple genes is rejected");
 
     const auto sameGene = cr_multimap_rescue::evaluate({
         evidence(Annotation::Intronic, 50, {11}),
-        evidence(Annotation::Exonic, 50, {11})}, true, EvidenceMode::Decoy);
+        evidence(Annotation::Exonic, 50, {11})}, true, EvidenceMode::AnnotatedBest);
     failed += check(sameGene.rescued && !sameGene.intronicFallback
                         && sameGene.geneIndex == 11 && sameGene.winnerAlignIndex == 1,
-                    "same-gene tied alignments are feature-unique and prefer exonic representative");
-
-    const auto perAlignmentMultiGene = cr_multimap_rescue::evaluate({
-        evidence(Annotation::Exonic, 50, {11, 22}),
-        evidence(Annotation::Exonic, 49, {11})}, true, EvidenceMode::Decoy);
-    failed += check(!perAlignmentMultiGene.rescued
-                        && perAlignmentMultiGene.failure == Failure::MultiGeneBestAlignment,
-                    "multi-gene best alignment is not rescued");
+                    "same-gene best-score tie prefers an exonic representative");
 
     const auto intronicDisabled = cr_multimap_rescue::evaluate({
         evidence(Annotation::Intronic, 50, {11}),
-        evidence(Annotation::Intronic, 50, {11})}, false, EvidenceMode::Decoy);
+        evidence(Annotation::Intronic, 50, {11})}, false, EvidenceMode::AnnotatedBest);
     failed += check(!intronicDisabled.rescued
                         && intronicDisabled.failure == Failure::IntronicFallbackOff,
-                    "decoy mode respects disabled intronic fallback");
+                    "annotated-best mode respects disabled intronic fallback");
 
-    const auto reordered = cr_multimap_rescue::evaluate({
-        evidence(Annotation::Exonic, 49, {11}),
-        evidence(Annotation::NA, 48, {}),
-        evidence(Annotation::Exonic, 50, {11})}, true, EvidenceMode::Decoy);
-    failed += check(reordered.rescued && reordered.winnerAlignIndex == 2
-                        && reordered.geneIndex == 11,
-                    "score tiebreak is independent of retained alignment order");
+    const auto noAnnotatedEvidence = cr_multimap_rescue::evaluate({
+        evidence(Annotation::NA, 60, {}),
+        evidence(Annotation::NA, 50, {})}, true, EvidenceMode::AnnotatedBest);
+    failed += check(!noAnnotatedEvidence.rescued
+                        && noAnnotatedEvidence.failure == Failure::NoCountableBest,
+                    "annotation-free alignments do not invent a gene");
+    failed += check(!cr_multimap_rescue::failureVetoesFeature(
+                         noAnnotatedEvidence.failure),
+                    "absence of annotated evidence is not a feature veto");
+    failed += check(cr_multimap_rescue::failureVetoesFeature(
+                         equalScoreConflict.failure),
+                    "equal-best different-gene evidence vetoes feature uniqueness");
+    failed += check(cr_multimap_rescue::failureVetoesFeature(
+                         bestMultiGene.failure),
+                    "a best-alignment multi-gene conflict vetoes feature uniqueness");
     return failed;
 }
 
 } // namespace
 
 int main() {
-    const int failed = testBiotypes() + testCompatibilityMode() + testDecoyMode();
+    const int failed = testBiotypes() + testCompatibilityMode()
+        + testAnnotatedBestMode();
     if (failed == 0) {
         std::cout << "PASS: CR multimap rescue policy\n";
         return 0;
