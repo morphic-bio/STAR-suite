@@ -29,6 +29,12 @@ bool biotypeIsCountable(const std::string& biotype) {
     return normalized.find("pseudogene") == std::string::npos;
 }
 
+bool failureVetoesFeature(Failure failure) {
+    return failure == Failure::ConflictingBestGenes
+        || failure == Failure::MultiGeneBestAlignment
+        || failure == Failure::IntronicFallbackOff;
+}
+
 static Decision evaluateCompatibility(const std::vector<AlignmentEvidence>& evidence,
                                       bool allowIntronicFallback) {
     Decision decision;

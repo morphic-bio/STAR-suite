@@ -366,7 +366,8 @@ void ReadAlign::outputAlignments() {
                 const CrRescueDecision decision = cr_multimap_rescue::evaluate(
                     evidence, P.pSolo.crMultimapRescueIntronic, evidenceMode);
                 if (evidenceMode == cr_multimap_rescue::EvidenceMode::AnnotatedBest
-                    && !decision.rescued) {
+                    && !decision.rescued
+                    && cr_multimap_rescue::failureVetoesFeature(decision.failure)) {
                     crMultimapEvidenceRejected_ = true;
                     crMultimapEvidenceFailure_ = static_cast<uint8_t>(decision.failure);
                 }
