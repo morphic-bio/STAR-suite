@@ -29,26 +29,27 @@ set -euo pipefail
 #   4. Flex tiny public smoke           (run_flex_tiny_public_binary_smoke.sh)
 #   5. PE bulk public smoke             (run_public_bulk_pe_smoke.sh)
 #   6. SLAM SNP-mask build smoke        (slam/test_snp_mask_build_smoke.sh)
-#   7. GEX BAM sorted smoke             (run_gex_binary_smoke.sh --write-bam sorted)
-#   8. GEX BAM unsorted smoke           (run_gex_binary_smoke.sh --write-bam unsorted)
-#   9. genomeGenerate validation        (run_genome_generate_validation.sh)
-#  10. Y-removal unit tests             (unit_test_y_split.sh)
-#  11. Y-removal comprehensive          (run_y_removal_comprehensive_test.sh)
-#  12. TRU/NXT chemistry autodetect     (autodetect_nxt_tru/test_autodetect.sh)
-#  13. TRU/NXT config column parsing    (autodetect_nxt_tru/test_star_chemistry_column.sh)
-#  14. Trim QC FASTQ smoke              (run_trim_qc_fastq_smoke.sh)
-#  15. Adapter clip synthetic           (run_adapter_clip_synthetic_test.sh)
-#  16. Cutadapt 3.2 parity              (test_cutadapt32_parity.sh)
+#   7. SLAM fixture-contract unit       (slam/test_fixture_manifest.py)
+#   8. GEX BAM sorted smoke             (run_gex_binary_smoke.sh --write-bam sorted)
+#   9. GEX BAM unsorted smoke           (run_gex_binary_smoke.sh --write-bam unsorted)
+#  10. genomeGenerate validation        (run_genome_generate_validation.sh)
+#  11. Y-removal unit tests             (unit_test_y_split.sh)
+#  12. Y-removal comprehensive          (run_y_removal_comprehensive_test.sh)
+#  13. TRU/NXT chemistry autodetect     (autodetect_nxt_tru/test_autodetect.sh)
+#  14. TRU/NXT config column parsing    (autodetect_nxt_tru/test_star_chemistry_column.sh)
+#  15. Trim QC FASTQ smoke              (run_trim_qc_fastq_smoke.sh)
+#  16. Adapter clip synthetic           (run_adapter_clip_synthetic_test.sh)
+#  17. Cutadapt 3.2 parity              (test_cutadapt32_parity.sh)
 #
 # Tier B (artifact-backed, extended parity):
-#  17. Sorted BAM CB/UB non-Flex        (run_sorted_bam_cbub_nonflex_test.sh)
-#  18. Unsorted BAM CB/UB               (run_unsorted_bam_cbub_test.sh)
-#  19. Solo Y-removal smoke             (run_solo_yremove_smoke.sh)
-#  20. Flex CR-config smoke             (run_flex_cr_config_smoke.sh)
-#  21. SLAM end-to-end fixture          (run_slam_end_to_end_fixture.sh)
-#  22. TranscriptVB quick test          (transcriptvb/quick_test.sh)
-#  23. TranscriptVB edge cases          (transcriptvb/edge_case_tests.sh)
-#  24. Salmon parity                    (transcriptvb/salmon_parity_test.sh)
+#  18. Sorted BAM CB/UB non-Flex        (run_sorted_bam_cbub_nonflex_test.sh)
+#  19. Unsorted BAM CB/UB               (run_unsorted_bam_cbub_test.sh)
+#  20. Solo Y-removal smoke             (run_solo_yremove_smoke.sh)
+#  21. Flex CR-config smoke             (run_flex_cr_config_smoke.sh)
+#  22. SLAM pinned fixture parity       (run_slam_parity_smoke.sh)
+#  23. TranscriptVB quick test          (transcriptvb/quick_test.sh)
+#  24. TranscriptVB edge cases          (transcriptvb/edge_case_tests.sh)
+#  25. Salmon parity                    (transcriptvb/salmon_parity_test.sh)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -214,7 +215,12 @@ run_tier_a() {
   run_test "slam-snp-mask-build" \
     bash "${SCRIPT_DIR}/slam/test_snp_mask_build_smoke.sh"
 
-  # 7. GEX BAM sorted smoke
+  # 7. The release gate exercises the immutable fixture/command checker with
+  #    synthetic files; the artifact-backed fixture itself remains Tier B.
+  run_test "slam-fixture-contract" \
+    python3 "${SCRIPT_DIR}/slam/test_fixture_manifest.py"
+
+  # 8. GEX BAM sorted smoke
   run_test "gex-binary-smoke-bam-sorted" \
     bash "${SCRIPT_DIR}/run_gex_binary_smoke.sh" \
       --threads "${THREADS}" \
@@ -222,7 +228,7 @@ run_tier_a() {
       --write-bam sorted \
       --outdir "${OUTDIR}/gex_bam_sorted"
 
-  # 8. GEX BAM unsorted smoke
+  # 9. GEX BAM unsorted smoke
   run_test "gex-binary-smoke-bam-unsorted" \
     bash "${SCRIPT_DIR}/run_gex_binary_smoke.sh" \
       --threads "${THREADS}" \
@@ -230,17 +236,17 @@ run_tier_a() {
       --write-bam unsorted \
       --outdir "${OUTDIR}/gex_bam_unsorted"
 
-  # 9. genomeGenerate validation
+  # 10. genomeGenerate validation
   run_test "genome-generate-validation" \
     bash "${SCRIPT_DIR}/run_genome_generate_validation.sh" \
       --threads "${THREADS}" \
       --outdir "${OUTDIR}/genome_generate"
 
-  # 10. Y-removal unit tests
+  # 11. Y-removal unit tests
   run_test "y-removal-unit" \
     bash "${SCRIPT_DIR}/unit_test_y_split.sh"
 
-  # 11. Y-removal comprehensive
+  # 12. Y-removal comprehensive
   local remove_y_bin="${REPO_ROOT}/core/features/yremove_fastq/tools/remove_y_reads/remove_y_reads"
   if [[ -x "${remove_y_bin}" ]]; then
     run_test "y-removal-comprehensive" \
@@ -249,7 +255,7 @@ run_tier_a() {
     skip_test "y-removal-comprehensive" "remove_y_reads binary not built"
   fi
 
-  # 12. TRU/NXT chemistry autodetect
+  # 13. TRU/NXT chemistry autodetect
   local assign_bin="${REPO_ROOT}/core/features/process_features/assignBarcodes"
   if [[ -x "${assign_bin}" ]]; then
     run_test "tru-nxt-autodetect" \
@@ -258,7 +264,7 @@ run_tier_a() {
     skip_test "tru-nxt-autodetect" "assignBarcodes binary not built"
   fi
 
-  # 13. TRU/NXT config column parsing
+  # 14. TRU/NXT config column parsing
   if command -v g++ >/dev/null 2>&1 && [[ -f "${REPO_ROOT}/core/legacy/source/PfMultiConfig.o" ]]; then
     run_test "tru-nxt-config-parsing" \
       bash "${SCRIPT_DIR}/autodetect_nxt_tru/test_star_chemistry_column.sh"
@@ -266,17 +272,17 @@ run_tier_a() {
     skip_test "tru-nxt-config-parsing" "g++ or PfMultiConfig.o not available"
   fi
 
-  # 14. Trim QC FASTQ smoke
+  # 15. Trim QC FASTQ smoke
   run_test "trim-qc-fastq" \
     bash "${SCRIPT_DIR}/run_trim_qc_fastq_smoke.sh"
 
-  # 15. Adapter clip synthetic
+  # 16. Adapter clip synthetic
   run_test "adapter-clip-synthetic" \
     bash "${SCRIPT_DIR}/run_adapter_clip_synthetic_test.sh" \
       --threads "${THREADS}" \
       --outdir "${OUTDIR}/adapter_clip"
 
-  # 16. Cutadapt 3.2 parity
+  # 17. Cutadapt 3.2 parity
   local trimvalidate_bin="${REPO_ROOT}/core/features/vbem/tools/trimvalidate/trimvalidate"
   if [[ -x "${trimvalidate_bin}" ]] && [[ -f "${SCRIPT_DIR}/fixtures/cutadapt32_adapter_fixtures.json" ]]; then
     run_test "cutadapt-parity" \
@@ -296,7 +302,6 @@ run_tier_b() {
     "unsorted-bam-cbub:run_unsorted_bam_cbub_test.sh"
     "solo-yremove:run_solo_yremove_smoke.sh"
     "flex-cr-config:run_flex_cr_config_smoke.sh"
-    "slam-e2e-fixture:run_slam_end_to_end_fixture.sh"
   )
 
   for entry in "${scripts[@]}"; do
@@ -309,6 +314,11 @@ run_tier_b() {
       skip_test "${name}" "${script} not found"
     fi
   done
+
+  run_test "slam-pinned-fixture-parity" \
+    bash "${SCRIPT_DIR}/run_slam_parity_smoke.sh" \
+      --threads "${THREADS}" \
+      --outdir "${OUTDIR}/slam_pinned_fixture_parity"
 
   # TranscriptVB / Salmon (need pre-built genome index + test reads)
   local vb_genome="${VB_GENOME_DIR:-/tmp/star_vb_test/star_new_index}"

@@ -188,6 +188,10 @@ update this file with its output location.
   parity, and staged SE/PE FASTQ-vs-CBQ divergence reports; reproduced by
   `scripts/run_slam_100k_se_pe_smoke.sh`, `tests/run_slam_parity_smoke.sh`, and
   `tests/run_slam_cbq_divergence_harness.sh`)
+- `/mnt/pikachu/star-suite-test-runs/slam-pinned-parity-*` (fresh full
+  manifest-verified SLAM fixture runs using the recovered January index;
+  contains the recorded command, manifest log, STAR output, QC, and all
+  dump-requant comparison reports)
 - `tests/transcriptvb_chr22_parity_output_*/` (TranscriptVB chr22 same-BAM
   Salmon parity smoke outputs from `tests/run_transcriptvb_chr22_parity_smoke.sh`;
   contains STAR auto-detect TranscriptVB output, Salmon `-p 1` same-BAM output,

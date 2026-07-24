@@ -81,7 +81,7 @@ That is not yet a real workflow-parity matrix.
 | scRNA GEX | new installed-binary wrapper around [run_default_bundle_scrna_fixture.sh](/mnt/pikachu/STAR-suite/tests/run_default_bundle_scrna_fixture.sh) or [run_solo_smoke.sh](/mnt/pikachu/STAR-suite/tests/run_solo_smoke.sh) | repo fixture | needs new no-BAM variant | possible | possible | no | no | no | gap |
 | Perturb | [run_a375_public_smoke.sh](/mnt/pikachu/STAR-suite/tests/run_a375_public_smoke.sh) | public download | yes for 5' | yes | no | no | chemistry-specific | no | reusable now |
 | FLEX | new no-BAM variant of [run_flex_tiny_public_smoke.sh](/mnt/pikachu/STAR-suite/tests/run_flex_tiny_public_smoke.sh) | public download | needs change | possible | possible | maybe | no | no | gap |
-| SLAM | new installed-binary wrapper around [run_slam_end_to_end_fixture.sh](/mnt/pikachu/STAR-suite/tests/run_slam_end_to_end_fixture.sh) plus current [test_snp_mask_build_smoke.sh](/mnt/pikachu/STAR-suite/tests/slam/test_snp_mask_build_smoke.sh) | existing artifact today | needs new no-BAM path | current script uses sorted BAM | no | no | fixed trims currently | no | gap |
+| SLAM | [run_slam_parity_smoke.sh](/mnt/pikachu/STAR-suite/tests/run_slam_parity_smoke.sh) plus current [test_snp_mask_build_smoke.sh](/mnt/pikachu/STAR-suite/tests/slam/test_snp_mask_build_smoke.sh) | manifest-pinned artifact | yes | no | no | no | pinned adapter clipping | dump-requant | implemented |
 
 ## Workflow Notes
 
@@ -202,20 +202,21 @@ Current state:
 
 - [test_snp_mask_build_smoke.sh](/mnt/pikachu/STAR-suite/tests/slam/test_snp_mask_build_smoke.sh)
   is already in the release smoke lane, but it is only a build/smoke test.
-- [run_slam_end_to_end_fixture.sh](/mnt/pikachu/STAR-suite/tests/run_slam_end_to_end_fixture.sh)
-  is the real workflow test, but it is artifact-backed and currently BAM-based.
+- [run_slam_parity_smoke.sh](/mnt/pikachu/STAR-suite/tests/run_slam_parity_smoke.sh)
+  is the canonical artifact-backed workflow test. It is no-BAM, verifies its
+  external fixture/index manifest, and exercises exact dump-requant replay.
 
 Current problem:
 
 - no public-download, container-stable SLAM E2E fixture exists in the current
   repo workflow
-- the existing E2E script expects sorted BAM outputs and GEDI comparison assets
+- the full fixture remains host-dependent because the pinned STAR index is large
 
 Plan:
 
 - Keep `test_snp_mask_build_smoke.sh` in Tier A immediately.
-- Treat [run_slam_end_to_end_fixture.sh](/mnt/pikachu/STAR-suite/tests/run_slam_end_to_end_fixture.sh)
-  as Tier B until a portable downloaded fixture exists.
+- Keep [run_slam_parity_smoke.sh](/mnt/pikachu/STAR-suite/tests/run_slam_parity_smoke.sh)
+  in Tier B until a portable downloaded fixture exists.
 - Later, add a smaller binary-friendly SLAM smoke that validates:
   - `SlamQuant.out`
   - non-empty mutation profile
@@ -304,7 +305,7 @@ Initial Tier A target set:
 ### Tier B: extended binary parity / artifact-backed
 
 - [run_flex_cr_config_smoke.sh](/mnt/pikachu/STAR-suite/tests/run_flex_cr_config_smoke.sh)
-- [run_slam_end_to_end_fixture.sh](/mnt/pikachu/STAR-suite/tests/run_slam_end_to_end_fixture.sh)
+- [run_slam_parity_smoke.sh](/mnt/pikachu/STAR-suite/tests/run_slam_parity_smoke.sh)
 - [run_sorted_bam_cbub_nonflex_test.sh](/mnt/pikachu/STAR-suite/tests/run_sorted_bam_cbub_nonflex_test.sh)
 - [run_unsorted_bam_cbub_test.sh](/mnt/pikachu/STAR-suite/tests/run_unsorted_bam_cbub_test.sh)
 - [run_solo_yremove_smoke.sh](/mnt/pikachu/STAR-suite/tests/run_solo_yremove_smoke.sh)

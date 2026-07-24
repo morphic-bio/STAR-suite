@@ -30,6 +30,7 @@ FASTQ="${FASTQ:-${SLAM_FIXTURE_FASTQ:-${ROOT_DIR}/test/fixtures/slam/raw/slam_10
 STAR_INDEX="${STAR_INDEX:-${SLAM_FIXTURE_STAR_INDEX:-${ROOT_DIR}/test/fixtures/slam/ref/star_index}}"
 SNPS_BED="${SNPS_BED:-${SLAM_FIXTURE_SNPS_BED:-${ROOT_DIR}/test/fixtures/slam/ref/snps.bed}}"
 REF_TSV="${REF_TSV:-${SLAM_FIXTURE_NOSNP_REF_TSV:-${SLAM_FIXTURE_REF_TSV:-${ROOT_DIR}/test/fixtures/slam/expected/from_nosnp.tsv.gz}}}"
+FIXTURE_MANIFEST="${FIXTURE_MANIFEST:-${SLAM_FIXTURE_MANIFEST:-${SCRIPT_DIR}/slam/fixture_manifest.json}}"
 
 THREADS="${THREADS:-4}"
 REF_CORR_MIN="${REF_CORR_MIN:-0.99}"
@@ -39,6 +40,7 @@ ALIGN_MIN_PEARSON="${ALIGN_MIN_PEARSON:-0.98}"
 AUTO_BUILD_REQUANT="${AUTO_BUILD_REQUANT:-1}"
 RUN_REFERENCE="${RUN_REFERENCE:-1}"
 RUN_REQUANT="${RUN_REQUANT:-1}"
+VERIFY_FIXTURE="${VERIFY_FIXTURE:-1}"
 COMPARE_ONLY=0
 
 usage() {
@@ -55,6 +57,7 @@ Options:
   --genome-dir DIR         STAR genomeDir (default: ${STAR_INDEX})
   --snp-bed PATH           SNP mask BED (default: ${SNPS_BED})
   --reference PATH         noSNP GRAND-SLAM reference TSV.GZ (default: ${REF_TSV})
+  --fixture-manifest PATH  Pinned fixture contract (default: ${FIXTURE_MANIFEST})
   --threads N              STAR threads (default: ${THREADS})
   --ref-corr-min X         Minimum STAR-vs-GRAND-SLAM NTR Pearson (default: ${REF_CORR_MIN})
   --exact-min-pearson X    Minimum exact replay Pearson (default: ${EXACT_MIN_PEARSON})
@@ -62,6 +65,7 @@ Options:
   --align-min-pearson X    Minimum recomputed-alignment replay Pearson (default: ${ALIGN_MIN_PEARSON})
   --no-reference           Skip GRAND-SLAM reference correlation gate
   --no-requant             Skip slam_requant replay gates
+  --no-fixture-manifest    Explicitly disable fixture/command verification
   --compare-only           Reuse existing STAR/requant outputs in --outdir
 EOF
 }
@@ -93,6 +97,7 @@ while [[ $# -gt 0 ]]; do
     --genome-dir) STAR_INDEX="$2"; shift 2 ;;
     --snp-bed) SNPS_BED="$2"; shift 2 ;;
     --reference) REF_TSV="$2"; shift 2 ;;
+    --fixture-manifest) FIXTURE_MANIFEST="$2"; shift 2 ;;
     --threads) THREADS="$2"; shift 2 ;;
     --ref-corr-min) REF_CORR_MIN="$2"; shift 2 ;;
     --exact-min-pearson) EXACT_MIN_PEARSON="$2"; shift 2 ;;
@@ -100,6 +105,7 @@ while [[ $# -gt 0 ]]; do
     --align-min-pearson) ALIGN_MIN_PEARSON="$2"; shift 2 ;;
     --no-reference) RUN_REFERENCE=0; shift ;;
     --no-requant) RUN_REQUANT=0; shift ;;
+    --no-fixture-manifest) VERIFY_FIXTURE=0; shift ;;
     --compare-only) COMPARE_ONLY=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) die "Unknown argument: $1" ;;
@@ -109,6 +115,10 @@ done
 [[ "${THREADS}" =~ ^[0-9]+$ && "${THREADS}" -gt 0 ]] || die "--threads must be a positive integer"
 [[ -f "${SCRIPT_DIR}/slam/compare_fixture.py" ]] || die "Missing compare_fixture.py"
 [[ -f "${SCRIPT_DIR}/slam/compare_star_outputs.py" ]] || die "Missing compare_star_outputs.py"
+if [[ "${VERIFY_FIXTURE}" == "1" ]]; then
+  [[ -f "${FIXTURE_MANIFEST}" ]] || die "Missing SLAM fixture manifest: ${FIXTURE_MANIFEST}"
+  [[ -f "${SCRIPT_DIR}/slam/verify_fixture_manifest.py" ]] || die "Missing SLAM fixture verifier"
+fi
 
 if [[ "${COMPARE_ONLY}" == "0" ]]; then
   [[ -x "${STAR_BIN}" ]] || skip "STAR binary not found: ${STAR_BIN}"
@@ -148,25 +158,53 @@ write_command() {
   chmod +x "${path}"
 }
 
-if [[ "${COMPARE_ONLY}" == "0" ]]; then
-  cmd=(
-    "${STAR_BIN}"
-    --runThreadN "${THREADS}"
-    --genomeDir "${STAR_INDEX}"
-    --readFilesIn "${FASTQ}"
-    --readFilesCommand zcat
-    --outFileNamePrefix "${SLAM_PREFIX}"
-    --outSAMtype None
-    --clip3pAdapterSeq AGATCGGAAGAG
-    --clip3pAdapterMMp 0.1
-    --slamQuantMode 1
-    --slamSnpMaskIn "${SNPS_BED}"
-    --slamGrandSlamOut 1
-    --slamDumpBinary "${DUMP_PATH}"
-    --slamDumpWeights "${WEIGHT_PATH}"
-  )
-  write_command "${OUT_BASE}/RUN_STAR_SLAM.sh" "${cmd[@]}"
+cmd=(
+  "${STAR_BIN}"
+  --runThreadN "${THREADS}"
+  --genomeDir "${STAR_INDEX}"
+  --readFilesIn "${FASTQ}"
+  --readFilesCommand zcat
+  --outFileNamePrefix "${SLAM_PREFIX}"
+  --outSAMtype None
+  --clip3pAdapterSeq AGATCGGAAGAG
+  --clip3pAdapterMMp 0.1
+  --slamQuantMode 1
+  --slamSnpMaskIn "${SNPS_BED}"
+  --slamGrandSlamOut 1
+  --slamQcReport "${OUT_BASE}/star_slam"
+  --slamDumpBinary "${DUMP_PATH}"
+  --slamDumpWeights "${WEIGHT_PATH}"
+)
 
+if [[ "${COMPARE_ONLY}" == "0" ]]; then
+  write_command "${OUT_BASE}/RUN_STAR_SLAM.sh" "${cmd[@]}"
+fi
+
+if [[ "${VERIFY_FIXTURE}" == "1" ]]; then
+  verify_cmd=(
+    python3 "${SCRIPT_DIR}/slam/verify_fixture_manifest.py"
+    --manifest "${FIXTURE_MANIFEST}"
+    --fastq "${FASTQ}"
+    --snp-bed "${SNPS_BED}"
+    --reference "${REF_TSV}"
+    --genome-dir "${STAR_INDEX}"
+    --ref-corr-min "${REF_CORR_MIN}"
+    --exact-min-pearson "${EXACT_MIN_PEARSON}"
+    --exact-max-abs-delta "${EXACT_MAX_ABS_DELTA}"
+    --align-min-pearson "${ALIGN_MIN_PEARSON}"
+  )
+  if [[ "${COMPARE_ONLY}" == "1" ]]; then
+    [[ -s "${OUT_BASE}/RUN_STAR_SLAM.sh" ]] || die "Missing recorded STAR command for --compare-only"
+    verify_cmd+=(--command-file "${OUT_BASE}/RUN_STAR_SLAM.sh")
+  else
+    verify_cmd+=(-- "${cmd[@]}")
+  fi
+  "${verify_cmd[@]}" 2>&1 | tee "${OUT_BASE}/logs/fixture_manifest.log"
+else
+  log "WARNING: fixture manifest verification explicitly disabled"
+fi
+
+if [[ "${COMPARE_ONLY}" == "0" ]]; then
   log "Running STAR-SLAM fixture parity source"
   /usr/bin/time -v -o "${OUT_BASE}/logs/star_slam.time.log" \
     "${cmd[@]}" \
@@ -243,6 +281,8 @@ fi
   printf 'genome_dir=%s\n' "${STAR_INDEX}"
   printf 'snp_bed=%s\n' "${SNPS_BED}"
   printf 'reference=%s\n' "${REF_TSV}"
+  printf 'fixture_manifest=%s\n' "${FIXTURE_MANIFEST}"
+  printf 'fixture_verified=%s\n' "${VERIFY_FIXTURE}"
   printf 'ref_corr_min=%s\n' "${REF_CORR_MIN}"
   printf 'exact_min_pearson=%s\n' "${EXACT_MIN_PEARSON}"
   printf 'exact_max_abs_delta=%s\n' "${EXACT_MAX_ABS_DELTA}"
