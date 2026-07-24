@@ -31,7 +31,15 @@ class ProducerThreadBudgetTest(unittest.TestCase):
             arguments = MODULE.arguments()
             self.assertEqual(arguments.producer_mode, "serial")
             self.assertEqual(arguments.evidence_mode, "contracts")
+            self.assertEqual(arguments.cr_evidence_mode, "compatibility")
             self.assertEqual(arguments.assignment_policy, "all")
+
+    def test_annotated_cr_evidence_mode_is_selectable(self) -> None:
+        with mock.patch.object(
+            sys, "argv", [str(WRAPPER), "--cr-evidence-mode", "annotated"]
+        ):
+            arguments = MODULE.arguments()
+            self.assertEqual(arguments.cr_evidence_mode, "annotated")
 
     def test_fused_mode_requires_concurrent_producers(self) -> None:
         with mock.patch.object(
