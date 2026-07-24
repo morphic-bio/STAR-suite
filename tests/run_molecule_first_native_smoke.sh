@@ -50,6 +50,12 @@ awk -F '\t' '
 grep -q '^%%MatrixMarket matrix coordinate real general$' \
   "${tmp}/mex/soft_expected/raw/matrix.mtx"
 
+"${materializer}" --resolved-dir "${tmp}/out" --out-dir "${tmp}/soft_only" \
+  --assay scrna --umi-mode 1mm_cr --products soft_expected
+[[ -f "${tmp}/soft_only/soft_expected/raw/matrix.mtx" ]]
+[[ ! -e "${tmp}/soft_only/strict" ]]
+[[ "$(grep -c '^soft_expected' "${tmp}/soft_only/summary.tsv")" -eq 1 ]]
+
 "${ledger}" \
   --input "$(dirname "${fixture}")/raw_tag_fixture.sam" \
   --whitelist "$(dirname "${fixture}")/raw_tag_whitelist.txt" \

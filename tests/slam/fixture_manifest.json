@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "fixture": "SRR32576116-100k-noSNP",
+  "provenance": "STAR-SLAM fixture regenerated and validated 2026-01-15; index fields come from the passing STAR Log.out",
+  "alignment_contract": {
+    "required_options": {
+      "--clip3pAdapterSeq": "AGATCGGAAGAG",
+      "--clip3pAdapterMMp": "0.1",
+      "--outSAMtype": "None",
+      "--readFilesCommand": "zcat",
+      "--slamGrandSlamOut": "1",
+      "--slamQuantMode": "1"
+    },
+    "required_flags": [
+      "--slamQcReport",
+      "--slamDumpBinary",
+      "--slamDumpWeights",
+      "--slamSnpMaskIn"
+    ],
+    "forbidden_options": [
+      "--alignEndsType",
+      "--autoTrim",
+      "--slamCompatTrim3p",
+      "--slamCompatTrim5p"
+    ],
+    "forbidden_option_values": {
+      "--slamQcReport": [
+        "-"
+      ]
+    }
+  },
+  "parity_contract": {
+    "align_min_pearson": 0.98,
+    "exact_max_abs_delta": 0.000001,
+    "exact_min_pearson": 0.999999,
+    "ref_corr_min": 0.99
+  },
+  "artifacts": {
+    "fastq": {
+      "hash_mode": "gzip_content",
+      "sha256": "e542057951ab27dc252dc70e7ff489df10615ed197237d88c4ca17d54ed823a3",
+      "fastq_records": 100000
+    },
+    "snp_bed": {
+      "hash_mode": "sorted_lines",
+      "sha256": "6a3e9717d30280c14f68826d9e93eb3f4b6915c39766b3e3e8516d96a1856c0a",
+      "line_count": 1253
+    },
+    "reference": {
+      "hash_mode": "gzip_content",
+      "sha256": "ebabac3cac4aab7a04a70f70b7d151eb66843ae1bfe9181d07d271e943bdd115"
+    }
+  },
+  "index": {
+    "files": {
+      "Genome": {
+        "size": 3138387968
+      },
+      "SA": {
+        "size": 24326178982
+      },
+      "SAindex": {
+        "size": 1565873619
+      },
+      "geneInfo.tab": {
+        "sha256": "518ceef7dd76aa4c3903760580ba95eaa3ee3aefaeccf37e8c315db7d2e9c355"
+      }
+    },
+    "parameters": {
+      "genomeChrBinNbits": "18",
+      "genomeSAindexNbases": "14",
+      "genomeSAsparseD": "1",
+      "sjdbOverhang": "100",
+      "versionGenome": "2.7.4a"
+    }
+  }
+}

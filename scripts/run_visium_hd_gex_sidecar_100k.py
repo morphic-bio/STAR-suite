@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the frozen 100K Visium HD 3-prime GEX sidecar clean-room workflow."""
+"""Run contracts or fused-input 100K Visium HD 3-prime GEX clean-room workflows."""
 
 from __future__ import annotations
 
@@ -104,6 +104,16 @@ def arguments() -> argparse.Namespace:
         help="run R1 decode/H0 and STAR sidecar as concurrent branches or serial controls",
     )
     parser.add_argument(
+        "--evidence-mode", choices=("contracts", "fused"), default="contracts",
+        help="independent FASTQ producers plus rescan, or one STAR-owned paired-read stream",
+    )
+    parser.add_argument(
+        "--assignment-policy",
+        choices=("all", "strict", "soft_expected", "hard", "gated_hard"),
+        default="all",
+        help="materialize every policy (parity default) or one downstream assignment policy",
+    )
+    parser.add_argument(
         "--r1-threads", type=int,
         help="R1 decoder threads (default: half of --threads concurrently, all serially)",
     )
@@ -121,6 +131,8 @@ def arguments() -> argparse.Namespace:
         )
     except ValueError as error:
         parser.error(str(error))
+    if result.evidence_mode == "fused" and result.producer_mode != "concurrent":
+        parser.error("--evidence-mode fused requires --producer-mode concurrent")
     return result
 
 
@@ -472,9 +484,14 @@ def main() -> int:
     candidate_path = args.out_dir / "decoder/raw_r1_candidates.tsv"
     oligo_stats = args.out_dir / "decoder/oligo_mutation_stats.tsv"
     decode_reads = args.out_dir / "decoder/decode_reads.tsv"
+    r1_tap = args.out_dir / "decoder/raw_r1.fastq.fifo"
     decoder_command = [str(args.out_dir / "bin/hd_r1_anchored_decode")]
-    for path in r1:
-        decoder_command.extend(("--r1-fastq", str(path)))
+    if args.evidence_mode == "fused":
+        os.mkfifo(r1_tap, 0o600)
+        decoder_command.extend(("--r1-fastq", str(r1_tap)))
+    else:
+        for path in r1:
+            decoder_command.extend(("--r1-fastq", str(path)))
     decoder_command.extend(
         (
             "--bc1-oligos", str(args.bc1_oligos), "--bc2-oligos", str(args.bc2_oligos),
@@ -509,16 +526,22 @@ def main() -> int:
         "--soloStrand", "Forward", "--soloCellFilter", "None", "--outSAMtype", "None",
         "--soloSpatialFeatureSidecar", str(sidecar_prefix),
     ]
+    if args.evidence_mode == "fused":
+        star_command.extend(("--soloSpatialR1FastqTap", str(r1_tap)))
     prohibited_tokens = {"GX", "GN", "UR", "UB", "CB", "CR", "SAM", "BAM"}
     if any(token in prohibited_tokens for token in star_command):
         raise AssertionError("rendered STAR command contains a prohibited tag or output token")
-    producer_wall_seconds = run_producer_stages(
-        driver,
-        args.producer_mode,
-        decoder_command,
-        h0_command,
-        star_command,
-    )
+    try:
+        producer_wall_seconds = run_producer_stages(
+            driver,
+            args.producer_mode,
+            decoder_command,
+            h0_command,
+            star_command,
+        )
+    finally:
+        if args.evidence_mode == "fused" and r1_tap.exists():
+            r1_tap.unlink()
 
     normalized = args.out_dir / "join/normalized_evidence.tsv"
     join_summary = args.out_dir / "join/summary.json"
@@ -532,10 +555,13 @@ def main() -> int:
         "--expected-reads", "100000", "--r1-length", "43", "--r2-length", "75",
         "--output", str(normalized), "--summary", str(join_summary),
     ]
-    for path in r1:
-        join_command.extend(("--r1-fastq", str(path)))
-    for path in r2:
-        join_command.extend(("--r2-fastq", str(path)))
+    if args.evidence_mode == "fused":
+        join_command.extend(("--decode-reads", str(decode_reads)))
+    else:
+        for path in r1:
+            join_command.extend(("--r1-fastq", str(path)))
+        for path in r2:
+            join_command.extend(("--r2-fastq", str(path)))
     driver.run("sidecar_join", join_command)
 
     resolver_command = [
@@ -566,6 +592,7 @@ def main() -> int:
             "--out-dir", str(args.out_dir / "materialized"), "--assay", "visium-hd",
             "--umi-mode", "1mm_cr", "--sort-memory-mb", str(args.sort_memory_mb),
             "--tmp-dir", str(args.out_dir / "materialized"),
+            "--products", args.assignment_policy,
         ],
     )
 
@@ -590,9 +617,12 @@ def main() -> int:
             "matrix_field",
         ],
     )
-    if len(matrices) != 12:
-        raise RuntimeError("materializer did not produce four policies at three scales")
-    expected_products = {"strict", "soft_expected", "hard", "gated_hard"}
+    expected_products = (
+        {"strict", "soft_expected", "hard", "gated_hard"}
+        if args.assignment_policy == "all" else {args.assignment_policy}
+    )
+    if len(matrices) != len(expected_products) * 3:
+        raise RuntimeError("materializer policy/scale row count is incomplete")
     expected_scales = {"square_002um", "square_008um", "square_016um"}
     if {row["product"] for row in matrices} != expected_products or {
         row["scale"] for row in matrices
@@ -608,6 +638,8 @@ def main() -> int:
     completion = {
         "schema": "star_suite.visium_hd_gex_sidecar_100k.v1",
         "status": "complete",
+        "evidence_mode": args.evidence_mode,
+        "assignment_policy": args.assignment_policy,
         "fixture": identity(args.fixture / "summary.json"),
         "source_provenance": source_provenance,
         "producer_execution": {
@@ -634,6 +666,8 @@ def main() -> int:
                 or args.r1_threads + args.star_threads <= args.threads
             ),
             "lane_order_and_name_digests_match": True,
+            "single_star_input_stream": args.evidence_mode == "fused",
+            "join_reopened_fastqs": args.evidence_mode != "fused",
             "raw_umi_from_r1": True,
             "coordinate_contract_validated": True,
             "gex_multigene_umi_cr_enabled": True,

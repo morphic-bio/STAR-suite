@@ -104,9 +104,9 @@ src/EmptyDropsMultinomial.o: include/EmptyDropsMultinomial.h include/EmptyDropsC
 src/OrdMagStage.o: include/OrdMagStage.h include/scrna_types.h include/pcg_random.hpp
 src/OccupancyGuard.o: include/OccupancyGuard.h include/scrna_types.h include/pcg_random.hpp
 
-# Test targets (tests are in ../../tests/emptydrops/)
-# Run: make -C ../../tests/emptydrops test
+# Test targets (tests are in ../../../tests/emptydrops/)
+# Run: make -C ../../../tests/emptydrops test
 test: lib
 	@echo "Tests moved to tests/emptydrops/"
-	@echo "Run: make -C ../../tests/emptydrops test"
-	$(MAKE) -C ../../tests/emptydrops test
+	@echo "Run: make -C ../../../tests/emptydrops test"
+	$(MAKE) -C ../../../tests/emptydrops test

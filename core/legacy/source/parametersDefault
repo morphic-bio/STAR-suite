@@ -1797,6 +1797,12 @@ soloSpatialFeatureSidecar   -
                             outSAMtype None, and FASTQ inputs ordered as R2 then raw R1.
                             Emits .bin, .features.tsv, .read_name_digests.tsv, and .summary.json.
 
+soloSpatialR1FastqTap       -
+    string:                 default-off FIFO receiving raw R1 FASTQ records from STAR's canonical paired reader
+                            Requires soloSpatialFeatureSidecar and its complete fail-closed Visium HD GEX recipe.
+                            STAR writes the second input end (raw R1) once, in global input order, while mapping only R2.
+                            The path must already exist and be a FIFO with an active reader.
+
 soloProbeList               -
     string:                 path to probe_list.txt used to derive 1-based gene indices (15-bit cap)
                             If not provided, will auto-detect probe_gene_list.txt from genome index directory

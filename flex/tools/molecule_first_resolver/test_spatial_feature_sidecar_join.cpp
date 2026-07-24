@@ -75,6 +75,24 @@ int run(const std::string &binary, const std::string &directory,
     return status == -1 ? -1 : WEXITSTATUS(status);
 }
 
+int runFused(const std::string &binary, const std::string &directory,
+             const std::string &candidate, const std::string &decoded,
+             const std::string &output, const std::string &summary)
+{
+    const std::string command = binary
+        + " --sidecar " + directory + "/sidecar.bin"
+        + " --features " + directory + "/sidecar.features.tsv"
+        + " --read-name-digests " + directory + "/sidecar.read_name_digests.tsv"
+        + " --candidates " + candidate
+        + " --h0-prior " + directory + "/h0.tsv"
+        + " --barcode-contract " + directory + "/barcode_coords.tsv"
+        + " --decode-reads " + decoded
+        + " --expected-reads 4 --output " + output
+        + " --summary " + summary + " >/dev/null 2>&1";
+    const int status = std::system(command.c_str());
+    return status == -1 ? -1 : WEXITSTATUS(status);
+}
+
 } // namespace
 
 int main(int argc, char **argv)
@@ -149,6 +167,37 @@ int main(int argc, char **argv)
            != std::string::npos);
     assert(normalized.find("\t11\n") != std::string::npos);
     assert(readText(summary).find("\"candidate_less_reads\": 2") != std::string::npos);
+
+    const std::string decodeHeader =
+        "read_id\tuniverse_unique_assigned\trow2\tcol2\tfull_start\n";
+    const std::string decoded = directory + "/decode_reads.tsv";
+    writeText(decoded, decodeHeader
+        + "read0\tTrue\t0\t0\t9\n"
+          "read1\tFalse\t\t\t\n"
+          "read2\tTrue\t1\t0\t9\n"
+          "read3\tFalse\t\t\t\n");
+    const std::string fusedOutput = directory + "/fused_normalized.tsv";
+    const std::string fusedSummary = directory + "/fused_join.json";
+    assert(runFused(argv[1], directory, candidates, decoded,
+                    fusedOutput, fusedSummary) == 0);
+    assert(readText(fusedOutput) == normalized);
+    assert(readText(fusedSummary).find("\"input_mode\": \"fused_r1_tap\"")
+           != std::string::npos);
+    assert(readText(fusedSummary).find("\"single_star_input_stream\": true")
+           != std::string::npos);
+
+    const std::string reordered = directory + "/decode_reordered.tsv";
+    writeText(reordered, decodeHeader
+        + "read1\tFalse\t\t\t\nread0\tTrue\t0\t0\t9\n"
+          "read2\tTrue\t1\t0\t9\nread3\tFalse\t\t\t\n");
+    assert(runFused(argv[1], directory, candidates, reordered,
+                    directory + "/reordered.tsv", directory + "/reordered.json") != 0);
+    const std::string shortDecode = directory + "/decode_short.tsv";
+    writeText(shortDecode, decodeHeader
+        + "read0\tTrue\t0\t0\t9\nread1\tFalse\t\t\t\n"
+          "read2\tTrue\t1\t0\t9\n");
+    assert(runFused(argv[1], directory, candidates, shortDecode,
+                    directory + "/short.tsv", directory + "/short.json") != 0);
 
     assert(run(argv[1], directory, candidates, directory + "/permuted.tsv",
                directory + "/permuted.json", true) != 0);

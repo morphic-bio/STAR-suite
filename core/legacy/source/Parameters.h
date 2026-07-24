@@ -24,6 +24,9 @@ class SlamSnpMask;
 namespace spatial_feature_sidecar {
 class Writer;
 }
+namespace spatial_r1_fastq_tap {
+class Writer;
+}
 namespace star {
 namespace input {
 class CbqInputModule;
@@ -707,6 +710,12 @@ class Parameters {
         string soloSpatialFeatureSidecar = "-";
         bool soloSpatialFeatureSidecarEnabled = false;
         spatial_feature_sidecar::Writer *spatialFeatureSidecarWriter = nullptr;
+        // Default-off fused input tap. STAR owns paired FASTQ ingestion and
+        // forwards the already-paired raw R1 record to the external optimized
+        // decoder without reopening the source FASTQ.
+        string soloSpatialR1FastqTap = "-";
+        bool soloSpatialR1FastqTapEnabled = false;
+        spatial_r1_fastq_tap::Writer *spatialR1FastqTapWriter = nullptr;
 
         // pf-multi config support (Cell Ranger-style CSV input)
         struct {
