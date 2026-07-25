@@ -456,6 +456,29 @@ std::vector<MatrixEntry> aggregateMatrixEntries(std::vector<MatrixEntry> values)
     return result;
 }
 
+std::vector<MatrixEntry> aggregateScaledMatrixEntries(
+    std::vector<MatrixEntry> values)
+{
+    // matrixAtScale receives fine entries in canonical (fine column, feature)
+    // order. Preserve that order within equal coarse keys so floating-point
+    // addition is independent of whether the complete matrix or one
+    // parent-coordinate shard is being materialized.
+    std::stable_sort(values.begin(), values.end(), [](const MatrixEntry &left,
+                                                      const MatrixEntry &right) {
+        return left.key < right.key;
+    });
+    std::vector<MatrixEntry> result;
+    result.reserve(values.size());
+    for (const MatrixEntry &value : values) {
+        if (!result.empty() && result.back().key == value.key) {
+            result.back().value += value.value;
+        } else {
+            result.push_back(value);
+        }
+    }
+    return result;
+}
+
 std::uint64_t readUnsignedFile(const char *path)
 {
     std::ifstream input(path);
@@ -1554,7 +1577,7 @@ std::vector<MatrixEntry> matrixAtScale(
         value.value = entry.value;
         coarse.push_back(value);
     }
-    return aggregateMatrixEntries(std::move(coarse));
+    return aggregateScaledMatrixEntries(std::move(coarse));
 }
 
 double writeMatrix(const std::string &path, const std::vector<MatrixEntry> &entries,
