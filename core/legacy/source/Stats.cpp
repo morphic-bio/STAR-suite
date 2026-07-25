@@ -19,7 +19,7 @@ void Stats::resetN() {//zero all counters
     crRescueMultiGeneBestAlignmentNoRescue = 0;
     crGeneFullExonicOverIntronicFiltered = 0; crGeneFullResolvedToUniqueAfterFilter = 0;
     crGeneFullStillMultiExonic = 0; crGeneFullCrossAlignMultiGene = 0;
-    hashScreenKeep = 0; hashScreenDeny = 0; hashScreenPass = 0;
+    hashScreenKeep = 0; hashScreenKeepNoBarcode = 0; hashScreenDeny = 0; hashScreenPass = 0;
     sampleDetectPreAlignCalls = 0; sampleDetectPreAlignNs = 0;
     sampleDetectOutputCalls = 0; sampleDetectOutputNs = 0;
     alignCoreCalls = 0; alignCoreNs = 0;
@@ -61,7 +61,9 @@ void Stats::addStats(Stats &S) {//add S to Stats
     crGeneFullResolvedToUniqueAfterFilter += S.crGeneFullResolvedToUniqueAfterFilter;
     crGeneFullStillMultiExonic += S.crGeneFullStillMultiExonic;
     crGeneFullCrossAlignMultiGene += S.crGeneFullCrossAlignMultiGene;
-    hashScreenKeep += S.hashScreenKeep; hashScreenDeny += S.hashScreenDeny; hashScreenPass += S.hashScreenPass;
+    hashScreenKeep += S.hashScreenKeep;
+    hashScreenKeepNoBarcode += S.hashScreenKeepNoBarcode;
+    hashScreenDeny += S.hashScreenDeny; hashScreenPass += S.hashScreenPass;
     sampleDetectPreAlignCalls += S.sampleDetectPreAlignCalls;
     sampleDetectPreAlignNs += S.sampleDetectPreAlignNs;
     sampleDetectOutputCalls += S.sampleDetectOutputCalls;
@@ -187,6 +189,7 @@ void Stats::reportFinal(ofstream &streamOut) {
                   <<setw(w1)<< "                        FLEX HASH SCREEN |\n" \
                   <<setw(w1)<< "              Hash screen: reads evaluated |\t" << hashScreenTotal << "\n" \
                   <<setw(w1)<< "                     Hash screen: KEEP |\t" << hashScreenKeep << "\n" \
+                  <<setw(w1)<< "          Hash screen: KEEP, no barcode |\t" << hashScreenKeepNoBarcode << "\n" \
                   <<setw(w1)<< "                   Hash screen: KEEP % |\t" << (hashScreenTotal>0 ? double(hashScreenKeep)/double(hashScreenTotal)*100 : 0) << '%' << "\n" \
                   <<setw(w1)<< "                     Hash screen: DENY |\t" << hashScreenDeny << "\n" \
                   <<setw(w1)<< "                   Hash screen: DENY % |\t" << (hashScreenTotal>0 ? double(hashScreenDeny)/double(hashScreenTotal)*100 : 0) << '%' << "\n" \

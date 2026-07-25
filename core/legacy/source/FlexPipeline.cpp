@@ -409,6 +409,7 @@ static uint64_t processOneLane(
                 record_flex_hash_screen_keep(readFeat, localBar, iReadAll,
                                              decision.geneIdx15, decision.cacheClass);
                 stats->hashScreenKeep++;
+                if (localBar.cbMatch < 0) stats->hashScreenKeepNoBarcode++;
                 st->counters.triageKeep.fetch_add(1);
             } else {
                 record_flex_hash_screen_deny(readFeat, localBar, iReadAll, "NEG_PROBE_AMBIG");
@@ -572,6 +573,7 @@ static uint64_t processCbqModuleRecords(
                     record_flex_hash_screen_keep(readFeat, localBar, iReadAll,
                                                  decision.geneIdx15, decision.cacheClass);
                     stats->hashScreenKeep++;
+                    if (localBar.cbMatch < 0) stats->hashScreenKeepNoBarcode++;
                     st->counters.triageKeep.fetch_add(1);
                 } else {
                     record_flex_hash_screen_deny(readFeat, localBar, iReadAll, "NEG_PROBE_AMBIG");
@@ -990,6 +992,7 @@ void *flexSoloConsumerThread(void *arg) {
             record_flex_hash_screen_keep(readFeat, localBar, dp.iReadAll,
                                          dp.geneIdx15, dp.cacheClass);
             stats->hashScreenKeep++;
+            if (localBar.cbMatch < 0) stats->hashScreenKeepNoBarcode++;
         } else {
             record_flex_hash_screen_deny(readFeat, localBar, dp.iReadAll, dp.denyReason);
             stats->hashScreenDeny++;
