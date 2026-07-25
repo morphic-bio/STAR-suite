@@ -65,6 +65,24 @@ Do not change these policies to obtain a smaller memory footprint:
 - Cell calling remains downstream of integer post-collapse matrices; soft
   expected matrices are never cell-called.
 
+### Experimental compatibility-policy rider
+
+The integrated implementation accepts either supported GeneFull rescue
+evidence policy. Production remains `annotated` unless an analysis explicitly
+declares an experimental override. To isolate the bounded-spool implementation
+from the evidence-policy change in the frozen ovarian comparison, run both the
+all-memory and forced-spool 100K acceptance paths with:
+
+```text
+SPATIAL_CR_RESCUE_EVIDENCE=compatibility
+```
+
+The compatibility override retains the order-invariant rescue implementation
+and its regression tests; it selects the established deterministic exon-first
+policy rather than the stricter annotated score-first ambiguity policy. Record
+the evidence mode in provenance and never compare an annotated run to a
+compatibility run as though spooling were the only changed variable.
+
 ## Streaming design
 
 ```text
