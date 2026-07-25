@@ -195,6 +195,52 @@ Ship discoverable, installable Ubuntu binaries for STAR Suite with low-friction 
   `STAR --version` reports `1.3.0`. Upstream provenance and genome index
   compatibility remain `2.7.11b` and `2.7.4a`.
 
+## Feature Release v1.6.0 (2026-07-25)
+
+- Release tag: `v1.6.0`
+- Release notes: `docs/RELEASE_NOTES_v1.6.0.md`
+- Packaging metadata: `debian/changelog` entry `1.6.0-1`
+- Scope added since `v1.5.0`: integrated molecule-first Visium HD 3-prime GEX,
+  direct N-aware spatial decoding, modern GeneFull/CR-compatible gene
+  evidence, bounded downstream spooling, and atomic 2/8/16 micrometer policy
+  MEX materialization.
+- Flex alignment integration now handles inline skip-processing without legacy
+  replay, sends no-sample hash misses to alignment, bypasses expected-cell
+  validation only when processing is disabled, and accounts for hash keeps
+  without barcode assignments.
+- Version note: release artifacts use tag `v1.6.0`, Debian packages use STAR
+  Suite `1.6.0`, and STAR plus molecule-first companion tools report `1.6.0`.
+  Upstream provenance and genome-index compatibility remain `2.7.11b` and
+  `2.7.4a`.
+
+## Feature Release v1.5.0 (2026-07-17)
+
+- Release tag: `v1.5.0`
+- Release notes: `docs/RELEASE_NOTES_v1.5.0.md`
+- Packaging metadata: `debian/changelog` entry `1.5.0-1`
+- Scope added since `v1.4.4`: opt-in native molecule-first barcode assignment,
+  deterministic candidate-preserving read cliques, candidate-specific UMI
+  collapse, strict/soft/hard/gated-hard products, and reference plus four-assay
+  100K conformance coverage.
+- Binary tarballs and compatibility bundles include both `STAR` and
+  `molecule_first_resolver`; Debian and Docker installations expose the same
+  companion executable.
+- Version note: release artifacts use tag `v1.5.0`, Debian packages use STAR
+  Suite `1.5.0`, and both executables report `1.5.0`. Upstream provenance and
+  genome index compatibility remain `2.7.11b` and `2.7.4a`.
+
+## Patch Release v1.4.4 (2026-07-17)
+
+- Release tag: `v1.4.4`
+- Release notes: `docs/RELEASE_NOTES_v1.4.4.md`
+- Packaging metadata: `debian/changelog` entry `1.4.4-1`
+- Scope added since `v1.4.3`: corrected feature-barcode namespace remapping in
+  integrated AnnData/MuData exports and deterministic UCSF per-sample Slurm
+  workflow contracts.
+- Version note: release artifacts use tag `v1.4.4`, Debian packages use STAR
+  Suite `1.4.4`, and `STAR --version` reports `1.4.4`. Upstream provenance and
+  genome index compatibility remain `2.7.11b` and `2.7.4a`.
+
 ## Patch Release v1.4.2 (2026-06-29)
 
 - Release tag: `v1.4.2`

@@ -1,0 +1,18 @@
+{
+  "base_commit": "a996107e271c013e39f9398151deda0017da35d6",
+  "files": {
+    "Solo.out/GeneFull/raw/barcodes.tsv": {
+      "bytes": 17,
+      "sha256": "3c75c74167fa09085df6ab4a7a1b5e45189a8f1149860533ca62f5d81780c49b"
+    },
+    "Solo.out/GeneFull/raw/features.tsv": {
+      "bytes": 120,
+      "sha256": "d8a2a55a90c85ec314fc0ae1e811ba06b654e4380983884793df6275f6e05d37"
+    },
+    "Solo.out/GeneFull/raw/matrix.mtx": {
+      "bytes": 69,
+      "sha256": "db1a91348875daec84882d00394250648bfb452825e13d7ae479fa5aa402098d"
+    }
+  },
+  "schema": "star_suite.scrna_sidecar_off_golden.v1"
+}

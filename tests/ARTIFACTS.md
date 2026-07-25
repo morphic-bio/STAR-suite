@@ -136,6 +136,8 @@ update this file with its output location.
 - `/tmp/ucsf_velocyto_cbub_stage_*` (host-local dry-run staging roots used by `tests/run_ucsf_velocyto_cbub_smoke.sh`; protected dataset, do not redistribute outputs)
 - `tests/flexfilter_parity_output_*/` (FlexFilter parity outputs vs production baseline)
 - `/tmp/*` (temporary scratch outputs)
+- `/tmp/star-scrna-sidecar-off-golden-*` (self-contained synthetic normal-scRNA index, FASTQs, and Solo outputs used to verify byte-identical sidecar-off GeneFull MEX parity)
+- `/tmp/star-spatial-r1-tap-guard.*` (ephemeral logs for the default-off fused R1 tap CLI guard)
 - `/mnt/pikachu/solo_bridge_determinism_*` (non-Flex Solo bridge determinism
   harness outputs from `tests/run_solo_bridge_determinism_harness.sh`: paired
   STAR runs, bridge-stage digest TSVs, optional per-CB digest TSVs, raw/filtered
@@ -157,6 +159,26 @@ update this file with its output location.
 - `/tmp/star_flex_cbq_range_full_ssd_*` (host-local SC2300771 full-production FLEX no-genome indexed-CBQ-range benchmark outputs on SSD, including `BENCHMARK_TIME.txt`, STAR logs, raw Gene MEX, and filtered per-sample summaries)
 - `/mnt/pikachu/cbq_solo_ingestion_benchmark_*` (FASTQ-vs-native-CBQ STARsolo ingestion timing runs from `tests/run_cbq_solo_ingestion_benchmark.sh`; per-mode `BENCHMARK_SUMMARY.txt` files are the authoritative completion artifacts)
 - `/tmp/star_suite_production_module_regression_*` (manifest-driven production-module regression wrapper logs, per-case stdout/stderr, and preflight/run summaries)
+- `/mnt/pikachu/star-spatial/gex_sidecar_tests/20260722_ovarian_100k_v1/` (preserved first source-only Visium HD ovarian 3-prime 100K attempt; all computational stages completed, but the wrapper correctly withheld its completion marker because the initial validator did not skip the materializer summary metadata preamble)
+- `/mnt/pikachu/star-spatial/gex_sidecar_tests/20260722_ovarian_100k_v2/` (authoritative completed source-only Visium HD ovarian 3-prime 100K run for the modern post-rescue GeneFull sidecar, raw-R1 candidate join, candidate-specific `MultiGeneUMI_CR`, and 2/8/16-micrometer policy matrices; no historical run artifact was copied into it)
+- `/mnt/pikachu/star-spatial/gex_sidecar_tests/20260722_ovarian_100k_v2_space_ranger_sanity/` (read-only descriptive comparison of the completed source-only 100K policy matrices against the published full ovarian Space Ranger 4.0.1 raw binned H5 artifacts; never consumed as resolution evidence or a tuning target)
+- `/mnt/pikachu/star-spatial/gex_sidecar_tests/20260722_ovarian_100k_serial_concurrency_control_v1/` (fresh source-only serial producer control for the Visium HD GEX fork/join scheduler; authoritative completion marker: `RUN_COMPLETE.json`)
+- `/mnt/pikachu/star-spatial/gex_sidecar_tests/20260722_ovarian_100k_concurrent_v1/` (fresh source-only 8+8-thread concurrent R1/STAR producer validation; byte-identical scheduling-independent outputs versus the serial control)
+- `/mnt/pikachu/star-spatial/gex_sidecar_tests/20260722_ovarian_100k_concurrent_star_weighted_v1/` (fresh source-only 4+12-thread producer-allocation check; byte-identical outputs and no 100K timing benefit)
+- `/mnt/pikachu/star-spatial/gex_fused_tests/20260724_ovarian_100k_contracts_v1/` (fresh source-only serial contracts oracle for fused paired-read validation; authoritative completion marker: `RUN_COMPLETE.json`)
+- `/mnt/pikachu/star-spatial/gex_fused_tests/20260724_ovarian_100k_fused_v1/` (fresh source-only fused STAR-owned paired-input run; decoder consumed only the raw-R1 FIFO, the join reopened no FASTQ, and all 49 scheduling-independent parity files matched the contracts oracle exactly)
+- `/mnt/pikachu/star-spatial/gex_fused_tests/20260724_ovarian_100k_fused_v1_space_ranger_sanity.json` (read-only 12-row descriptive comparison of the fused policy matrices with published ovarian Space Ranger 4.0.1 raw binned matrices; never used as resolution evidence)
+- `/mnt/pikachu/star-spatial/gex_in_memory_tests/20260724_ovarian_100k_integrated_v3/` (preserved launch-preflight failure: the wrapper incorrectly pre-created STAR's requested temporary directory; no genome or FASTQ processing occurred)
+- `/mnt/pikachu/star-spatial/gex_in_memory_tests/20260724_ovarian_100k_integrated_v4/` (completed clean-build, pre-N-policy integrated 100K baseline; exact scalar parity with the accepted annotated bridge oracle)
+- `/mnt/pikachu/star-spatial/gex_in_memory_tests/20260724_ovarian_100k_integrated_cxx11_n_1t_1740/` (completed one-thread C++11/N-policy integrated 100K run with wrapper completion summary)
+- `/mnt/pikachu/star-spatial/gex_in_memory_tests/20260724_ovarian_100k_integrated_n_v5/` (completed 16-thread C++11/N-policy integrated 100K run; all 36 policy MEX files are byte-identical to the one-thread run)
+- `/mnt/pikachu/star-spatial/gex_in_memory_tests/20260724_ovarian_100k_integrated_n_spill_v6/` (completed forced-spill C++11/N-policy integrated 100K run; 92 overflow runs and byte-identical policy MEX outputs versus all-memory)
+- `/mnt/pikachu/star-spatial/gex_in_memory_tests/20260724_ovarian_100k_integrated_accept_{allmem_1802,spill_1804,sidecar_1806,1t_retry2_1816}/` (final source-only acceptance roots: all-memory, forced compact spill, diagnostic-sidecar coexistence, and one-thread determinism; all 36 policy MEX components are byte-identical)
+- `/mnt/pikachu/star-spatial/gex_in_memory_tests/20260724_ovarian_100k_integrated_accept_{1t_1808,1t_retry_1812}/` (non-computational failed launches caused respectively by a concurrent clean rebuild and a concurrent partial runner edit; no STAR input was opened and neither root is resumable)
+- `/mnt/pikachu/star-spatial/gex_in_memory_tests/20260724_ovarian_100k_n_decoder_debug_v1/` (optional source-only decoder audit used to compare N-bearing raw barcode candidate retention with the retained matched Space Ranger 100K BAM; never used as resolution input)
+- `/mnt/pikachu/star-spatial/gex_in_memory_tests/20260724_merge_gate_1820/` (serialized pre-merge audit logs and outputs: focused spatial tests, source-only 100K reruns, CRISPR regression diagnosis/fix, exact Flex 800K classifier replay, bounded Flex 100K integration, persistent-oracle CBQ suite, production contracts, CB/UB, SLAM, GEX, and Flex CR-config smokes; exploratory failed reproductions remain diagnostic and are not acceptance results)
+- `/mnt/pikachu/star-spatial/10x/visium_hd_3prime_human_ovarian_ff_min_depth/downsample_2m_scaling_v1/` (balanced scaling-only fixture: first 500,000 source read pairs from each of four lanes, exactly 2,000,000 pairs total; paired IDs, 43/75-nt lengths, gzip integrity, checksums, and summary verified; not an oracle)
+- `/mnt/pikachu/star-spatial/gex_in_memory_scaling/20260724_ovarian_2m_clean_d90c92fc/` (serialized 1/8/16/32-thread all-memory scaling matrix using one clean binary; every accepted point has wrapper and integrated completion markers; `failed_threads_4_concurrent_rebuild_1810` is a pre-exec exit-127 diagnostic excluded from results)
 - `/tmp/ucsf_cr_config_1m_smoke_*` (real UCSF perturb CR-config fixture smoke outputs)
 - `/tmp/ucsf_batch_cr_multifeature_tiny_*` (synthetic UCSF perturb multifeature CR-config tiny smoke outputs)
 - `/tmp/flex_cr_config_smoke_*` (Flex CR-config smoke outputs)
@@ -177,6 +199,10 @@ update this file with its output location.
   parity, and staged SE/PE FASTQ-vs-CBQ divergence reports; reproduced by
   `scripts/run_slam_100k_se_pe_smoke.sh`, `tests/run_slam_parity_smoke.sh`, and
   `tests/run_slam_cbq_divergence_harness.sh`)
+- `/mnt/pikachu/star-suite-test-runs/slam-pinned-parity-*` (fresh full
+  manifest-verified SLAM fixture runs using the recovered January index;
+  contains the recorded command, manifest log, STAR output, QC, and all
+  dump-requant comparison reports)
 - `tests/transcriptvb_chr22_parity_output_*/` (TranscriptVB chr22 same-BAM
   Salmon parity smoke outputs from `tests/run_transcriptvb_chr22_parity_smoke.sh`;
   contains STAR auto-detect TranscriptVB output, Salmon `-p 1` same-BAM output,
@@ -628,6 +654,18 @@ These scripts validate that default bundles work with minimal explicit parameter
     - `legacy/` aborted after startup because the prior legacy control was reused
 - Status: untracked
 
+## Flex Hash-Screen Replay Regression (2026-07-24)
+
+- Harness: `tests/run_flex_hash_screen_replay_regression.sh`
+- Inputs (checksum-pinned by the harness):
+  - `/storage/downsampled_100K/SC2300771/results/flex_h01_full_cache_20260315_153914/reclassified/sequence_cache.bin`
+  - `/storage/downsampled_100K/SC2300771/results/flex_hash_screen_dump_20260320_005618/hash_screen_dump_v2.bin`
+- Default output: `/tmp/star_suite_flex_hash_screen_replay/`
+- The retained 800K-read decision surface replaces the missing, derived
+  `sequence_cache_bc004_full16.bin` as the exact classifier regression. The
+  100K MEX comparison remains a separate downstream integration test.
+- Status: untracked
+
 ## Flex Internal Hash-Screen 2M E2E (2026-03-18)
 
 - Harness: `tests/run_flex_hash_screen_internal_2M.sh`
@@ -922,3 +960,30 @@ All three runs used **`USE_READFILES_ZCAT=0`** (no external `zcat`), **`--outSAM
 - Contents: synthetic genome/GTF, generated STAR index, `transcriptome.fa`,
   `expected_gc.tsv`, and first/second genomeGenerate logs.
 - Status: untracked.
+
+## Molecule-first bounded materializer (2026-07-22)
+
+- Harness: `tests/run_molecule_first_materializer_bounded_test.sh`
+- Synthetic scratch: `/tmp/star_suite_molecule_first_materializer_bounded.*`
+- External 100K equivalence outputs:
+  `/mnt/pikachu/molecule_first_materializer_100k_{unsorted,streaming}_20260722_*`
+- Full-slide optimized outputs and timing records:
+  `/mnt/pikachu/molecule_first_materializer_fullslide_1mm_cr_20260722_*`
+- Contents: post-collapse strict, soft-expected, hard, and gated-hard MEX at
+  2, 8, and 16 um; private spill files exist only while the process is live.
+- Status: untracked; never commit external resolver TSVs, MEX matrices, spill
+  records, or timing logs.
+
+## Integrated Visium HD GEX downstream spool (2026-07-25)
+
+- Runbook: `docs/RUNBOOK_VISIUM_HD_GEX_DOWNSTREAM_SPOOL_20260725.md`
+- Fresh 100K acceptance roots:
+  - `/mnt/pikachu/star-spatial/gex_in_memory_tests/20260725_ovarian_100k_downstream_spool_fail_v1/`
+  - `/mnt/pikachu/star-spatial/gex_in_memory_tests/20260725_ovarian_100k_downstream_spool_spill_v3/`
+  - `/mnt/pikachu/star-spatial/gex_in_memory_tests/20260725_ovarian_100k_downstream_spool_1t_manyrun_v1/`
+  - `/mnt/pikachu/star-spatial/gex_in_memory_tests/20260725_ovarian_100k_downstream_spool_sidecar_v1/`
+- Contents: integrated strict, soft-expected, hard, and gated-hard MEX at 2,
+  8, and 16 um; run summaries and STAR logs. Private downstream spools and
+  `.partial` MEX roots are removed only on successful commit.
+- Status: untracked; never commit MEX output, binary spool records, sidecars,
+  FASTQs, timing logs, or reference data.

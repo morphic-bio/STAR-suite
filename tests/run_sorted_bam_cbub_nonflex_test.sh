@@ -95,7 +95,9 @@ echo ""
 # Show sample of reads with CB/UB tags
 echo "Sample reads with CB/UB tags (first 5):"
 echo "----------------------------------------"
-samtools view "$BAM_FILE" | grep "CB:Z:" | head -5 | cut -f1,12-20
+# head intentionally closes the sample pipeline early; tolerate the resulting
+# SIGPIPE from samtools/grep under pipefail because validation used full counts.
+samtools view "$BAM_FILE" | grep "CB:Z:" | head -5 | cut -f1,12-20 || true
 echo ""
 
 # Determine pass/fail

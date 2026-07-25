@@ -137,7 +137,12 @@ GIT_BRANCH_COMMIT_DIFF := -D'GIT_BRANCH_COMMIT_DIFF="$(GIT_BRANCH_COMMIT_DIFF)"'
 # Defaults, can be overridden by make arguments or environment
 CXXFLAGS ?= -pipe -Wall -Wextra
 CFLAGS ?= -pipe -Wall -Wextra -O3
+CXX_TARGET_MACHINE ?= $(shell $(CXX) -dumpmachine 2>/dev/null)
+ifneq ($(filter x86_64% amd64%,$(CXX_TARGET_MACHINE)),)
 CXXFLAGS_SIMD ?= -mavx2
+else
+CXXFLAGS_SIMD ?=
+endif
 
 # Unconditionally set essential flags and optimization options
 # Packed ReadInfo is the only supported path (legacy removed)
@@ -147,6 +152,11 @@ PROCESS_FEATURES_INC := $(ROOT_DIR)/core/features/process_features/include
 CXXFLAGS_common := -std=c++11 -fopenmp -I. $(STAR_HTSLIB_INC) -I$(FLEX_SRC_DIR) -I$(LIBFLEX_DIR) -I$(LIBSCRNA_INC) -I$(VBEM_SRC_DIR) -I$(LIBEM_DIR) -I$(SLAM_SRC_DIR) -I$(BAMSORT_SRC_DIR) -I$(PROCESS_FEATURES_INC) $(CHROMAP_CXXFLAGS) $(COMPTIMEPLACE) $(GIT_BRANCH_COMMIT_DIFF)
 CXXFLAGS_main := -O3 $(CXXFLAGS_common)
 CXXFLAGS_gdb := -O0 -g3 $(CXXFLAGS_common)
+
+.PHONY: print-simd-config
+print-simd-config:
+	@printf 'target_machine=%s\n' '$(CXX_TARGET_MACHINE)'
+	@printf 'simd_flags=%s\n' '$(CXXFLAGS_SIMD)'
 
 # AddressSanitizer flags (enabled with ASAN=1)
 ifdef ASAN
@@ -165,7 +175,7 @@ OBJECTS = systemFunctions.o SoloMemoryProfile.o CountingSinkStress.o funPrimaryA
 	SoloFeature_loadRawMatrix.o SoloFeature_emptyDrops_CR.o SoloFeature_emptyDrops_libscrna.o soloInputFeatureUMI.o SoloFeature_countSmartSeq.o SoloFeature_redistributeReadsByCB.o \
 	SoloFeature_quantTranscript.o SoloFeature_sumThreads.o SoloFeature_countVelocyto.o SoloFeature_countVelocytoBridge.o SoloFeature_countCBgeneUMI.o \
 	SoloFeature_collapseUMI_Graph.o SoloFeature_collapseUMIall.o SoloFeature_collapseUMI_fromHash.o SoloFeature_collapseUMI_fromBridgeHash.o SoloFeature_bridgeHashSnapshot.o SoloFeature_umiCorrection.o SoloFeature_materializeFromHash.o SoloFeature_metricsOutput.o SoloFeature_writeMexFromInlineHashDedup.o SoloFeature_flexfilter.o SoloFeature_addBAMtags.o SoloFeature_writeTagTable.o \
-	SoloHDMoleculeWriter.o \
+	SoloHDMoleculeWriter.o SpatialFeatureSidecar.o SpatialR1FastqTap.o SpatialGex.o SpatialGexSpill.o SpatialGexDownstreamSpool.o SpatialGexPipeline.o SpatialR1Decoder.o MultiGeneUmiCr.o CrMultimapRescuePolicy.o \
 	MexWriter.o MexWriterUtil.o \
 	UMICorrector.o \
 	ParametersClip_initialize.o ClipMate_clip.o ClipCR4.o opal/opal.o ClipMate_clipChunk.o ClipMate_initialize.o \
@@ -404,13 +414,60 @@ test_SoloReadInfoBaseline: Depend.list parametersDefault.xxd $(filter-out STAR.o
 	../test/solo_readinfo_baseline
 
 .PHONY: test
-test: test_packed_readinfo test_SoloHDMoleculeWriter test_SoloReadInfoBaseline test_SoloReadInfoLoader test_SoloReadInfoParity test_MinimalSink test_CbCorrector test_CbBayesianResolver test_CbBayesianResolverPhase2 test_inline_hash_record_capture test_inline_hash_resolver test_inline_hash_clique test_inline_hash_parity test_gene_resolver
+test: test_packed_readinfo test_SoloHDMoleculeWriter test_SpatialFeatureSidecar test_SpatialR1FastqTap test_SpatialGex test_SpatialGexSpill test_SpatialGexDownstreamSpool test_MultiGeneUmiCr test_CrMultimapRescuePolicy test_complex_barcode_whitelist_lookup test_SoloReadInfoBaseline test_SoloReadInfoLoader test_SoloReadInfoParity test_MinimalSink test_CbCorrector test_CbBayesianResolver test_CbBayesianResolverPhase2 test_inline_hash_record_capture test_inline_hash_resolver test_inline_hash_clique test_inline_hash_parity test_gene_resolver
+
+.PHONY: test_CrMultimapRescuePolicy
+test_CrMultimapRescuePolicy: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
+test_CrMultimapRescuePolicy: CrMultimapRescuePolicy.o
+	$(CXX) $(CXXFLAGS) -I./ ../test/test_cr_multimap_rescue_policy.cpp CrMultimapRescuePolicy.o -o ../test/test_cr_multimap_rescue_policy
+	../test/test_cr_multimap_rescue_policy
 
 .PHONY: test_SoloHDMoleculeWriter
 test_SoloHDMoleculeWriter: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
 test_SoloHDMoleculeWriter: SoloHDMoleculeWriter.o
 	$(CXX) $(CXXFLAGS) -I./ ../test/test_solo_hd_molecule_writer.cpp SoloHDMoleculeWriter.o $(LDFLAGS_shared) -o ../test/test_solo_hd_molecule_writer
 	../test/test_solo_hd_molecule_writer
+
+.PHONY: test_SpatialFeatureSidecar
+test_SpatialFeatureSidecar: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
+test_SpatialFeatureSidecar: SpatialFeatureSidecar.o
+	$(CXX) $(CXXFLAGS) -I./ ../test/test_spatial_feature_sidecar.cpp SpatialFeatureSidecar.o $(LDFLAGS_shared) -o ../test/test_spatial_feature_sidecar
+	../test/test_spatial_feature_sidecar
+
+.PHONY: test_SpatialR1FastqTap
+test_SpatialR1FastqTap: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
+test_SpatialR1FastqTap: SpatialR1FastqTap.o
+	$(CXX) $(CXXFLAGS) -I./ ../test/test_spatial_r1_fastq_tap.cpp SpatialR1FastqTap.o $(LDFLAGS_shared) -o ../test/test_spatial_r1_fastq_tap
+	../test/test_spatial_r1_fastq_tap
+
+.PHONY: test_SpatialGex
+test_SpatialGex: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
+test_SpatialGex: SpatialGex.o SpatialR1Decoder.o
+	$(CXX) $(CXXFLAGS) -I./ ../test/test_spatial_gex.cpp SpatialGex.o SpatialR1Decoder.o -o ../test/test_spatial_gex
+	../test/test_spatial_gex
+
+.PHONY: test_SpatialGexSpill
+test_SpatialGexSpill: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
+test_SpatialGexSpill: SpatialGexSpill.o
+	$(CXX) $(CXXFLAGS) -I./ ../test/test_spatial_gex_spill.cpp SpatialGexSpill.o -o ../test/test_spatial_gex_spill
+	../test/test_spatial_gex_spill
+
+.PHONY: test_SpatialGexDownstreamSpool
+test_SpatialGexDownstreamSpool: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
+test_SpatialGexDownstreamSpool: SpatialGexDownstreamSpool.o
+	$(CXX) $(CXXFLAGS) -I./ ../test/test_spatial_gex_downstream_spool.cpp SpatialGexDownstreamSpool.o -o ../test/test_spatial_gex_downstream_spool
+	../test/test_spatial_gex_downstream_spool
+
+.PHONY: test_MultiGeneUmiCr
+test_MultiGeneUmiCr: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
+test_MultiGeneUmiCr: MultiGeneUmiCr.o
+	$(CXX) $(CXXFLAGS) -I./ ../test/test_multi_gene_umi_cr.cpp MultiGeneUmiCr.o -o ../test/test_multi_gene_umi_cr
+	../test/test_multi_gene_umi_cr
+
+.PHONY: test_complex_barcode_whitelist_lookup
+test_complex_barcode_whitelist_lookup:
+	$(CXX) $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS) -I./ ../test/test_complex_barcode_whitelist_lookup.cpp $(LDFLAGS_shared) -o ../test/test_complex_barcode_whitelist_lookup
+	../test/test_complex_barcode_whitelist_lookup
 
 .PHONY: test_MinimalSink
 test_MinimalSink: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
@@ -580,6 +637,7 @@ ifneq ($(MAKECMDGOALS),clean)
 ifneq ($(MAKECMDGOALS),CLEAN)
 ifneq ($(MAKECMDGOALS),CLEAN)
 ifneq ($(MAKECMDGOALS),clean_solo)
+ifneq ($(MAKECMDGOALS),print-simd-config)
 ifneq ($(MAKECMDGOALS),STARforMac)
 ifneq ($(MAKECMDGOALS),STARforMacGDB)
 .PHONY: chromap-unsupported-target
@@ -599,6 +657,7 @@ Depend.list: $(SOURCES) parametersDefault.xxd htslib $(CHROMAP_DEP_STAMP)
 	test -f parametersDefault.xxd || xxd -i parametersDefault > parametersDefault.xxd
 	$(CXX) $(CXXFLAGS_common) -MM $(SOURCES) >> Depend.list
 include Depend.list
+endif
 endif
 endif
 endif

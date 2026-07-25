@@ -21,6 +21,15 @@
 // Forward declaration for library format detector
 class LibFormatDetector;
 class SlamSnpMask;
+namespace spatial_feature_sidecar {
+class Writer;
+}
+namespace spatial_r1_fastq_tap {
+class Writer;
+}
+namespace spatial_gex {
+class Pipeline;
+}
 namespace star {
 namespace input {
 class CbqInputModule;
@@ -699,6 +708,35 @@ class Parameters {
 
         //solo
         ParametersSolo pSolo;
+        // Default-off annotation-only Visium HD GEX evidence stream. The writer
+        // is owned by STAR::main and shared read-only by mapping chunks.
+        string soloSpatialFeatureSidecar = "-";
+        bool soloSpatialFeatureSidecarEnabled = false;
+        spatial_feature_sidecar::Writer *spatialFeatureSidecarWriter = nullptr;
+        // Default-off fused input tap. STAR owns paired FASTQ ingestion and
+        // forwards the already-paired raw R1 record to the external optimized
+        // decoder without reopening the source FASTQ.
+        string soloSpatialR1FastqTap = "-";
+        bool soloSpatialR1FastqTapEnabled = false;
+        spatial_r1_fastq_tap::Writer *spatialR1FastqTapWriter = nullptr;
+        // Default-off in-process Visium HD GEX molecule path. The legacy
+        // feature sidecar/tap remain independent diagnostic interfaces.
+        string soloSpatialGexIntegrated = "no";
+        bool soloSpatialGexIntegratedEnabled = false;
+        string soloSpatialBarcodeContract = "-";
+        string soloSpatialBc1Oligos = "-";
+        string soloSpatialBc2Oligos = "-";
+        string soloSpatialAssignmentProducts = "all";
+        string soloSpatialBinSizes = "2,8,16";
+        uint64 soloSpatialExpectedReads = 0;
+        uint64 soloSpatialExpectedCandidates = 0;
+        double soloSpatialMemoryFraction = 0.80;
+        string soloSpatialOverflowPolicy = "Fail";
+        uint64 soloSpatialSpillHighWaterCandidates = 0;
+        uint8 soloSpatialAssignmentProductMask = 0;
+        uint8 soloSpatialBinSizeMask = 0;
+        bool soloSpatialOverflowSpill = false;
+        spatial_gex::Pipeline *spatialGexPipeline = nullptr;
 
         // pf-multi config support (Cell Ranger-style CSV input)
         struct {

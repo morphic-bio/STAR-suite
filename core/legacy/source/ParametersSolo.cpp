@@ -133,7 +133,7 @@ void ParametersSolo::initialize(Parameters *pPin)
             exitWithError(errOut.str(), std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
         }
     }
-    
+
     //////////////////////////////////////////////////////////////////////////////////////////////////////
     /////////////////////////////// Tag-table export (always enabled; legacy flag removed)
     writeTagTableEnabled = true;
@@ -281,6 +281,24 @@ void ParametersSolo::initialize(Parameters *pPin)
         }
         if (!crMultimapRescue) {
             crMultimapRescueIntronic = false;
+        }
+    }
+
+    //////////////////////////////////////////////////////////////////////////////////////////////////////
+    ///////////////////////////////--soloCrMultimapRescueEvidence
+    {
+        string mode = crMultimapRescueEvidenceStr;
+        transform(mode.begin(), mode.end(), mode.begin(), ::tolower);
+        if (mode == "compatibility" || mode.empty()) {
+            crMultimapRescueEvidenceMode = CrMultimapRescueEvidenceCompatibility;
+        } else if (mode == "annotated") {
+            crMultimapRescueEvidenceMode = CrMultimapRescueEvidenceAnnotatedBest;
+        } else {
+            ostringstream errOut;
+            errOut << "EXITING because of fatal PARAMETERS error: unrecognized option in --soloCrMultimapRescueEvidence="
+                   << crMultimapRescueEvidenceStr << "\n";
+            errOut << "SOLUTION: use allowed option: compatibility OR annotated\n";
+            exitWithError(errOut.str(), std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
         }
     }
     
@@ -704,7 +722,7 @@ void ParametersSolo::initialize(Parameters *pPin)
         // If neither new flag is set, flexFilterTotalExpected keeps its value (backwards compatibility)
         
         // Validate required parameters when enabled
-        if (runFlexFilter && flexFilterTotalExpected == 0) {
+        if (runFlexFilter && !skipProcessing && flexFilterTotalExpected == 0) {
             ostringstream errOut;
             errOut << "EXITING because of fatal input ERROR: FlexFilter requires expected cells count.\n";
             errOut << "       Use one of:\n";

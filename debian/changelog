@@ -1,3 +1,44 @@
+star-suite (1.6.0-1) unstable; urgency=medium
+
+  * Add integrated, molecule-first Visium HD 3-prime GEX processing after
+    modern GeneFull and CR-compatible multimap rescue.
+  * Add bounded accumulation and downstream matrix spooling with atomic MEX
+    commit for smaller-memory hosts.
+  * Route spatial barcodes containing N through bounded DP correction while
+    retaining invalid-N UMI accounting.
+  * Support explicit annotated or compatibility rescue evidence and stable
+    coarse-bin soft aggregation.
+  * Fix Flex inline skip-processing replay, hash-miss alignment fallback,
+    expected-cell validation, and barcode-free hash-keep accounting.
+  * Report STAR Suite 1.6.0 from STAR and molecule-first companion tools.
+
+ -- STAR-suite Maintainers <maintainers@biodepot.example>  Sat, 25 Jul 2026 16:45:00 +0000
+
+star-suite (1.5.0-1) unstable; urgency=medium
+
+  * Add the native candidate-preserving read-to-clique-to-UMI reference
+    resolver as an opt-in pre-cell-calling stage.
+  * Emit strict, soft expected-count, hard, and gated-hard molecule products
+    with PCR-inclusive exact-read priors applied once per read clique.
+  * Ship and validate the resolver in Docker, Debian, static tarball, and
+    compatibility-bundle release artifacts.
+  * Add native, frozen-Python, four-assay 100K, default-off, determinism, and
+    package regression coverage.
+  * Report STAR Suite 1.5.0 from STAR and molecule_first_resolver --version.
+
+ -- STAR-suite Maintainers <maintainers@biodepot.example>  Fri, 17 Jul 2026 07:37:15 +0000
+
+star-suite (1.4.4-1) unstable; urgency=medium
+
+  * Patch release for feature-barcode namespace remapping in integrated
+    AnnData/MuData exports.
+  * Preserve source feature identities when top-feature indices are reported
+    in the process_features namespace.
+  * Add deterministic UCSF per-sample Slurm workflow contracts and tests.
+  * Report STAR Suite 1.4.4 from STAR --version.
+
+ -- STAR-suite Maintainers <maintainers@biodepot.example>  Fri, 17 Jul 2026 00:00:00 +0000
+
 star-suite (1.4.3-1) unstable; urgency=medium
 
   * Patch release for byte-identical Y/no-Y FASTQ emission after integrated

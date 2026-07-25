@@ -9,11 +9,15 @@
 #include "solo/CbCorrector.h"
 #include "solo/CbBayesianResolver.h"
 #include "TranscriptQuantEC.h"
+#include "SpatialFeatureSidecar.h"
+#include "SpatialGex.h"
+#include "CrMultimapRescuePolicy.h"
 #include <atomic>
 #include <mutex>
 #include <cstring>
 #include <cstdlib>
 #include <unordered_map>
+#include <set>
 #include <limits>
 #include <fstream>
 #include <chrono>
@@ -93,15 +97,9 @@ static void logAmbigReadName(const Parameters &P, const char* rawName) {
     writeNormalizedQname(g_ambigReadNamesStream, rawName);
 }
 
-enum class CrRescueRegion : uint8_t { Intergenic = 0, Intronic = 1, Exonic = 2 };
-
-struct CrRescueDecision {
-    bool rescued = false;
-    bool intronicFallback = false;
-    uint64_t winnerAlignIndex = 0;
-    uint64_t exonicCount = 0;
-    uint64_t intronicCount = 0;
-};
+using CrRescueAnnotation = cr_multimap_rescue::Annotation;
+using CrRescueEvidence = cr_multimap_rescue::AlignmentEvidence;
+using CrRescueDecision = cr_multimap_rescue::Decision;
 
 static int64_t findLastStartLE(const uint* starts, uint64_t n, uint64_t key) {
     if (starts == nullptr || n == 0) {
@@ -206,21 +204,24 @@ static uint64_t overlapBlocksWithTranscriptExons(const Transcript& aln,
     return overlap;
 }
 
-static CrRescueRegion classifyAlignmentCrRescue(const Transcriptome& tr,
-                                                const Transcript& aln,
-                                                int32 strandType) {
+static CrRescueEvidence classifyAlignmentCrRescue(const Transcriptome& tr,
+                                                  const Transcript& aln,
+                                                  int32 strandType) {
+    CrRescueEvidence evidence;
+    evidence.score = static_cast<std::int64_t>(aln.maxScore);
     const uint64_t mappedLen = alignmentMappedLength(aln);
     if (mappedLen == 0) {
-        return CrRescueRegion::Intergenic;
+        return evidence;
     }
 
     uint64_t aStart = 0, aEnd = 0;
     alignmentBounds(aln, aStart, aEnd);
     if (aStart == std::numeric_limits<uint64_t>::max()) {
-        return CrRescueRegion::Intergenic;
+        return evidence;
     }
 
-    bool hasSenseExonic = false;
+    bool hasNonCountableSenseExonic = false;
+    std::set<uint32_t> exonicGenes;
     const int64_t trIdx0 = findLastStartLE(tr.trS, tr.nTr, aStart);
     for (int64_t trIdx = trIdx0; trIdx >= 0; --trIdx) {
         if (tr.trEmax[trIdx] < aEnd) {
@@ -236,12 +237,24 @@ static CrRescueRegion classifyAlignmentCrRescue(const Transcriptome& tr,
         const uint32_t* exSE = tr.exSE + 2 * tr.trExI[trIdx];
         const uint64_t exonOverlap = overlapBlocksWithTranscriptExons(aln, tr.trS[trIdx], exN, exSE);
         if (2 * exonOverlap >= mappedLen) {
-            hasSenseExonic = true;
-            break;
+            const uint32_t geneIndex = tr.trGene[trIdx];
+            if (geneIndex < tr.geBiotype.size()
+                && cr_multimap_rescue::biotypeIsCountable(tr.geBiotype[geneIndex])) {
+                exonicGenes.insert(geneIndex);
+            } else {
+                hasNonCountableSenseExonic = true;
+            }
         }
     }
-    if (hasSenseExonic) {
-        return CrRescueRegion::Exonic;
+    if (!exonicGenes.empty()) {
+        evidence.annotation = CrRescueAnnotation::Exonic;
+        evidence.genes.assign(exonicGenes.begin(), exonicGenes.end());
+        return evidence;
+    }
+    // An exon with an excluded or missing biotype is explicitly NA. Do not
+    // relabel it as an intron of a host gene at the same genomic location.
+    if (hasNonCountableSenseExonic) {
+        return evidence;
     }
 
     std::unordered_map<uint32_t, uint64_t> senseGeneOverlap;
@@ -275,43 +288,21 @@ static CrRescueRegion classifyAlignmentCrRescue(const Transcriptome& tr,
         }
     }
 
-    uint64_t maxSenseGeneOverlap = 0;
+    std::set<uint32_t> intronicGenes;
     for (const auto& kv : senseGeneOverlap) {
-        maxSenseGeneOverlap = std::max(maxSenseGeneOverlap, kv.second);
-    }
-    if (2 * maxSenseGeneOverlap > mappedLen) {
-        return CrRescueRegion::Intronic;
-    }
-    return CrRescueRegion::Intergenic;
-}
-
-static CrRescueDecision evaluateCrRescueDecision(const std::vector<CrRescueRegion>& states,
-                                                 bool allowIntronicFallback) {
-    CrRescueDecision d;
-    for (uint64_t ia = 0; ia < states.size(); ++ia) {
-        if (states[ia] == CrRescueRegion::Exonic) {
-            ++d.exonicCount;
-            d.winnerAlignIndex = ia;
-        } else if (states[ia] == CrRescueRegion::Intronic) {
-            ++d.intronicCount;
-            d.winnerAlignIndex = ia;
+        const uint32_t geneIndex = kv.first;
+        if (2 * kv.second > mappedLen && geneIndex < tr.geBiotype.size()
+            && cr_multimap_rescue::biotypeIsCountable(tr.geBiotype[geneIndex])) {
+            intronicGenes.insert(geneIndex);
         }
     }
-    if (d.exonicCount == 1) {
-        d.rescued = true;
-        d.intronicFallback = false;
-        return d;
+    if (!intronicGenes.empty()) {
+        evidence.annotation = CrRescueAnnotation::Intronic;
+        evidence.genes.assign(intronicGenes.begin(), intronicGenes.end());
     }
-    if (allowIntronicFallback && d.exonicCount == 0 && d.intronicCount == 1) {
-        d.rescued = true;
-        d.intronicFallback = true;
-        return d;
-    }
-    d.rescued = false;
-    d.intronicFallback = false;
-    d.winnerAlignIndex = 0;
-    return d;
+    return evidence;
 }
+
 }
 
 void ReadAlign::detectSampleFromRawR2() {
@@ -349,22 +340,38 @@ void ReadAlign::outputAlignments() {
 
             crMultiMapRescued_ = false;
             crMultiMapRescuedIntronic_ = false;
+            crMultimapEvidenceRejected_ = false;
+            crMultimapEvidenceFailure_ = 0;
+            genomicMultimapBeforeRescue_ = nTr > 1;
             if (P.pSolo.crMultimapRescue && nTr > 1) {
                 statsRA.crRescueTotal++;
                 const uint64_t nTrBefore = nTr;
 
-                std::vector<CrRescueRegion> states;
-                states.reserve(static_cast<size_t>(nTr));
+                std::vector<CrRescueEvidence> evidence;
+                evidence.reserve(static_cast<size_t>(nTr));
                 for (uint64_t ia = 0; ia < nTr; ++ia) {
                     if (trMult[ia] == nullptr) {
-                        states.push_back(CrRescueRegion::Intergenic);
+                        CrRescueEvidence missing;
+                        missing.score = std::numeric_limits<std::int64_t>::min();
+                        evidence.push_back(missing);
                         continue;
                     }
-                    states.push_back(classifyAlignmentCrRescue(*chunkTr, *trMult[ia], P.pSolo.strand));
+                    evidence.push_back(classifyAlignmentCrRescue(*chunkTr, *trMult[ia], P.pSolo.strand));
                 }
 
-                CrRescueDecision decision = evaluateCrRescueDecision(
-                    states, P.pSolo.crMultimapRescueIntronic);
+                const cr_multimap_rescue::EvidenceMode evidenceMode =
+                    P.pSolo.crMultimapRescueEvidenceMode
+                            == ParametersSolo::CrMultimapRescueEvidenceAnnotatedBest
+                        ? cr_multimap_rescue::EvidenceMode::AnnotatedBest
+                        : cr_multimap_rescue::EvidenceMode::Compatibility;
+                const CrRescueDecision decision = cr_multimap_rescue::evaluate(
+                    evidence, P.pSolo.crMultimapRescueIntronic, evidenceMode);
+                if (evidenceMode == cr_multimap_rescue::EvidenceMode::AnnotatedBest
+                    && !decision.rescued
+                    && cr_multimap_rescue::failureVetoesFeature(decision.failure)) {
+                    crMultimapEvidenceRejected_ = true;
+                    crMultimapEvidenceFailure_ = static_cast<uint8_t>(decision.failure);
+                }
                 if (decision.rescued) {
                     if (decision.intronicFallback) {
                         statsRA.crRescueIntronicFallback++;
@@ -372,7 +379,13 @@ void ReadAlign::outputAlignments() {
                         statsRA.crRescueExonicWinner++;
                     }
                 } else {
-                    if (decision.exonicCount > 1) {
+                    if (decision.failure == cr_multimap_rescue::Failure::NaBestTie) {
+                        statsRA.crRescueNaBestTieNoRescue++;
+                    } else if (decision.failure == cr_multimap_rescue::Failure::ConflictingBestGenes) {
+                        statsRA.crRescueConflictingBestGenesNoRescue++;
+                    } else if (decision.failure == cr_multimap_rescue::Failure::MultiGeneBestAlignment) {
+                        statsRA.crRescueMultiGeneBestAlignmentNoRescue++;
+                    } else if (decision.exonicCount > 1) {
                         statsRA.crRescueMultiExonicNoRescue++;
                     } else if (decision.intronicCount > 1) {
                         statsRA.crRescueMultiIntronicNoRescue++;
@@ -437,6 +450,20 @@ void ReadAlign::outputAlignments() {
             };            
             
             ReadAlign::alignedAnnotation();
+
+            // Annotated-best failure is a feature-eligibility veto, not an
+            // annotation deletion. Keep per-alignment annotation for audit,
+            // but prevent the later feature union from re-promoting one member
+            // of an equal-score conflicting-gene set to a unique call.
+            if (crMultimapEvidenceRejected_) {
+                for (uint32 featureType : {
+                        SoloFeatureTypes::Gene,
+                        SoloFeatureTypes::GeneFull,
+                        SoloFeatureTypes::GeneFull_Ex50pAS,
+                        SoloFeatureTypes::GeneFull_ExonOverIntron}) {
+                    readAnnot.annotFeatures[featureType].fSet.clear();
+                }
+            }
             
             if (P.quant.slam.yes && slamQuant != nullptr) {
                 auto &annFeat = readAnnot.annotFeatures[SoloFeatureTypes::Gene];
@@ -598,6 +625,91 @@ void ReadAlign::outputAlignments() {
                         writeFastxRecord(im, false); // Write both mates to noY FASTQ
                     }
                 }
+            }
+        }
+
+        // Integrated spatial evidence is captured from the same post-rescue
+        // GeneFull state as the diagnostic sidecar, while the decoded raw R1
+        // remains in the gated pipeline's mapping-thread state.
+        if (P.spatialGexPipeline != nullptr) {
+            if (iReadAll == 0) {
+                exitWithError("EXITING because integrated spatial GEX lost paired-read state\n",
+                              std::cerr, P.inOut->logMain,
+                              EXIT_CODE_INCONSISTENT_DATA, P);
+            }
+            const bool mapped = unmapType < 0;
+            const ReadAnnotFeature &geneFull =
+                readAnnot.annotFeatures[SoloFeatureTypes::GeneFull];
+            if (mapped && geneFull.fSet.size() == 1) {
+                std::string spatialError;
+                if (!P.spatialGexPipeline->appendCurrentThread(
+                        *geneFull.fSet.begin(), iReadAll - 1, spatialError)) {
+                    exitWithError("EXITING because integrated spatial evidence append failed: "
+                                      + spatialError + "\n",
+                                  std::cerr, P.inOut->logMain,
+                                  EXIT_CODE_INCONSISTENT_DATA, P);
+                }
+            }
+        }
+
+        // The spatial sidecar is deliberately emitted after the final modern
+        // GeneFull annotation/rescue state and before any barcode or UMI work.
+        // It is one fixed-width slot per 0-based global input ordinal.
+        if (P.spatialFeatureSidecarWriter != nullptr) {
+            spatial_feature_sidecar::Record sidecarRecord;
+            sidecarRecord.statusFlags = spatial_feature_sidecar::kRecordPresent;
+            const bool mapped = unmapType < 0;
+            sidecarRecord.statusFlags |= mapped ? spatial_feature_sidecar::kMapped
+                                                : spatial_feature_sidecar::kUnmappedOrFiltered;
+            const ReadAnnotFeature &geneFull =
+                readAnnot.annotFeatures[SoloFeatureTypes::GeneFull];
+            if (mapped && geneFull.fSet.size() == 1) {
+                sidecarRecord.geneIndex = *geneFull.fSet.begin();
+                sidecarRecord.statusFlags |= spatial_feature_sidecar::kUniqueGene;
+            } else if (mapped && geneFull.fSet.size() > 1) {
+                sidecarRecord.statusFlags |= spatial_feature_sidecar::kMultiGeneRejected;
+            } else {
+                sidecarRecord.statusFlags |= spatial_feature_sidecar::kNoGene;
+            }
+            if (mapped && genomicMultimapBeforeRescue_ && geneFull.fSet.size() == 1) {
+                sidecarRecord.statusFlags |=
+                    spatial_feature_sidecar::kSameGeneGenomicMultimapper;
+            }
+            if (crMultiMapRescued_) {
+                sidecarRecord.statusFlags |= crMultiMapRescuedIntronic_
+                    ? spatial_feature_sidecar::kCrIntronicFallback
+                    : spatial_feature_sidecar::kCrExonicRescue;
+            }
+            if (crMultimapEvidenceRejected_) {
+                sidecarRecord.statusFlags |= spatial_feature_sidecar::kAlignmentEvidenceRejected;
+                const cr_multimap_rescue::Failure failure =
+                    static_cast<cr_multimap_rescue::Failure>(crMultimapEvidenceFailure_);
+                if (failure == cr_multimap_rescue::Failure::NaBestTie) {
+                    sidecarRecord.statusFlags |= spatial_feature_sidecar::kBestScoreNaDecoy;
+                } else if (failure == cr_multimap_rescue::Failure::ConflictingBestGenes) {
+                    sidecarRecord.statusFlags |= spatial_feature_sidecar::kConflictingBestGenes;
+                } else if (failure == cr_multimap_rescue::Failure::MultiGeneBestAlignment) {
+                    sidecarRecord.statusFlags |= spatial_feature_sidecar::kMultiGeneBestAlignment;
+                }
+            }
+            const std::uint16_t overlap = geneFull.ovType < 8
+                ? static_cast<std::uint16_t>(geneFull.ovType) : 0;
+            sidecarRecord.statusFlags |= static_cast<std::uint16_t>(
+                overlap << spatial_feature_sidecar::kOverlapShift);
+
+            if (iReadAll == 0) {
+                exitWithError("EXITING because spatial feature sidecar received STAR read ordinal zero\n",
+                              std::cerr, P.inOut->logMain, EXIT_CODE_INCONSISTENT_DATA, P);
+            }
+            const char *rawName = readNameMates[0] != nullptr ? readNameMates[0] : readName;
+            const std::string normalizedName = spatial_feature_sidecar::normalizeReadName(
+                rawName == nullptr ? std::string() : std::string(rawName));
+            std::string sidecarError;
+            if (!P.spatialFeatureSidecarWriter->write(
+                    iReadAll - 1, readFilesIndex, normalizedName, sidecarRecord, sidecarError)) {
+                exitWithError("EXITING because a spatial feature sidecar record could not be written: "
+                                  + sidecarError + "\n",
+                              std::cerr, P.inOut->logMain, EXIT_CODE_FILE_WRITE, P);
             }
         }
 

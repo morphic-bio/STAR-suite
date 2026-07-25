@@ -6,6 +6,7 @@
 #include "UmiCodec.h"
 #include "InlineCBCorrection.h"
 #include "OcmMultiMaterialize.h"
+#include "SoloBarcodeWhitelistLookup.h"
 #include <chrono>
 #include <cstdlib>
 #include <thread>
@@ -59,24 +60,27 @@ void SoloReadBarcode::matchCBtoWL(string &cbSeq1, string &cbQual1, vector<uint64
     };
 
     khash_t(cbH0) *h = pSolo.cbWLhash;
+    // CB_UMI_Complex keeps a separate sorted whitelist for each barcode
+    // component and intentionally does not build the single-whitelist H0 hash.
+    // Keep the optimized hash lookup for simple barcodes, but use the component
+    // whitelist when the global hash is absent.  All exact and H1 probes must
+    // go through the same lookup; otherwise the first non-exact complex
+    // barcode dereferences a null hash.
+    const auto findWhitelistIndex = [&](uint64_t packed) -> int64 {
+        if (h != nullptr) {
+            khiter_t k = kh_get(cbH0, h, static_cast<uint32_t>(packed));
+            return k == kh_end(h) ? -1 : static_cast<int64>(kh_val(h, k));
+        }
+        return soloBarcodeFindSortedWhitelistIndex(packed, cbWL);
+    };
 
     if (posN==-1) {//no Ns
-        if (h) {
-            khiter_t k = kh_get(cbH0, h, static_cast<uint32_t>(cbB1));
-            if (k != kh_end(h)) {
-                cbMatchInd1.push_back(kh_val(h, k));
-                cbMatchString1 = to_string(cbMatchInd1[0]);
-                cbMatch1=0;
-                return;
-            }
-        } else {
-            int64 cbI=binarySearchExact<uint64>(cbB1,cbWL.data(),cbWL.size());
-            if (cbI>=0) {
-                cbMatchInd1.push_back((uint64) cbI);
-                cbMatchString1 = to_string(cbMatchInd1[0]);
-                cbMatch1=0;
-                return;
-            }
+        int64 cbI=findWhitelistIndex(cbB1);
+        if (cbI>=0) {
+            cbMatchInd1.push_back((uint64) cbI);
+            cbMatchString1 = to_string(cbMatchInd1[0]);
+            cbMatch1=0;
+            return;
         }
     };
     
@@ -88,10 +92,9 @@ void SoloReadBarcode::matchCBtoWL(string &cbSeq1, string &cbQual1, vector<uint64
         uint32 posNshift=2*(cbSeq1.size()-1-posN);//shift bits for posN
         bool matched = false;
         for (uint32 jj=0; jj<4; jj++) {
-            uint32_t cbB11=static_cast<uint32_t>(cbB1^(jj<<posNshift));
-            khiter_t k = kh_get(cbH0, h, cbB11);
-            if (k != kh_end(h)) {
-                int64 cbI1 = kh_val(h, k);
+            uint64 cbB11=cbB1^(static_cast<uint64>(jj)<<posNshift);
+            int64 cbI1=findWhitelistIndex(cbB11);
+            if (cbI1>=0) {
                 if (!pSolo.CBmatchWL.mm1_multi_Nbase && matched) {
                     cbMatchInd1.clear();
                     cbMatch1=-3;
@@ -106,10 +109,9 @@ void SoloReadBarcode::matchCBtoWL(string &cbSeq1, string &cbQual1, vector<uint64
     } else {//look for 1MM; posN==-1, no Ns
         for (uint32 ii=0; ii<cbSeq1.size(); ii++) {
             for (uint32 jj=1; jj<4; jj++) {
-                uint32_t cbVar=static_cast<uint32_t>(cbB1^(jj<<(ii*2)));
-                khiter_t k = kh_get(cbH0, h, cbVar);
-                if (k != kh_end(h)) {
-                    int64 cbI1 = kh_val(h, k);
+                uint64 cbVar=cbB1^(static_cast<uint64>(jj)<<(ii*2));
+                int64 cbI1=findWhitelistIndex(cbVar);
+                if (cbI1>=0) {
                     cbMatchInd1.push_back(cbI1);
                     ++cbMatch1;
                     cbMatchString1 += ' ' +to_string(cbI1) + ' ' + cbQual1.at(cbSeq1.size()-1-ii);

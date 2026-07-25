@@ -260,6 +260,11 @@ public:
         CrMultimapRescueIntronicYes=2
     } crMultimapRescueIntronicMode = CrMultimapRescueIntronicAuto;
     bool crMultimapRescueIntronic = false;
+    string crMultimapRescueEvidenceStr = "compatibility"; // compatibility|annotated
+    enum CrMultimapRescueEvidenceMode : int32 {
+        CrMultimapRescueEvidenceCompatibility=0,
+        CrMultimapRescueEvidenceAnnotatedBest=1
+    } crMultimapRescueEvidenceMode = CrMultimapRescueEvidenceCompatibility;
 
     // Probe list and sample detection resources
     string probeListPath;             // path to probe_list.txt

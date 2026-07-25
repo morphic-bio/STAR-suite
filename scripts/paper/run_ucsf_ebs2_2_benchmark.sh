@@ -110,6 +110,8 @@ EOF
 
 # ── Build STAR command ───────────────────────────────────────────────
 # Default: --readFilesCommand zcat (paper repro / current benchmark default).
+# PARITY_BAM_TAG_POLICY: GX is alignment-level and UR is raw. This recipe uses
+# final GeneFull/CR-compatible MEX outputs for parity and deliberately omits them.
 export STAR_SOLO_NONFLEX_HASH_BRIDGE=1
 CMD=(
   "${STAR_BIN}"

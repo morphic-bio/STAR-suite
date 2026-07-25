@@ -183,6 +183,22 @@ actionable; link to deeper docs rather than copying them.
   for OCM unless a user explicitly asks for a comparison run. Runbook:
   `docs/RUNBOOK_SCRNA_OCM_CR_COMPAT.md`.
 
+### BAM Tag Policy for Comparisons (CRITICAL)
+
+- Treat the final `GeneFull`/CR-compatible MEX matrices and cell calls as the
+  authoritative parity surfaces, not BAM tags.
+- `GX`/`GN` are alignment-level compatibility annotations. They do not encode
+  final UMI-collapsed `GeneFull`, Velocyto, multimap-rescue, or CR-compatible
+  counting policy.
+- `UR` is the raw, intentionally uncorrected UMI. `UB` is the corrected UMI.
+  Neither `GX` nor `UR` is a proxy for final counts.
+- Canonical comparison recipes default to `--outSAMtype None` and must not request
+  `GX`/`UR`. Optional diagnostic BAM modes must also omit them unless the test
+  explicitly targets raw-tag compatibility.
+- The molecule-first BAM ledger is a scoped exception: it consumes `GX` and
+  `UR` as raw adapter evidence before resolution. Never compare its input tags
+  as though they were final STAR Suite or Cell Ranger outputs.
+
 ### Poly-G Trimming
 
 - `--clip3pPolyG yes|no|auto` (default `auto`) trims NovaSeq/NextSeq poly-G

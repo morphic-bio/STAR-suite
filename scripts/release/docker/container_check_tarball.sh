@@ -3,7 +3,7 @@
 set -euo pipefail
 
 TARBALL=""
-EXPECTED_VERSION="1.4.3"
+EXPECTED_VERSION="1.6.0"
 MANIFEST_OUT=""
 
 usage() {
@@ -137,8 +137,13 @@ fi
 prefix="$workdir/prefix"
 "$installer" --prefix "$prefix" --force >/dev/null
 binary="$prefix/bin/STAR"
+resolver="$prefix/bin/molecule_first_resolver"
 if [[ ! -x "$binary" ]]; then
   echo "ERROR: installed STAR binary missing: $binary" >&2
+  exit 1
+fi
+if [[ ! -x "$resolver" ]]; then
+  echo "ERROR: installed molecule-first resolver missing: $resolver" >&2
   exit 1
 fi
 
@@ -147,6 +152,16 @@ if [[ "$version_output" != "$EXPECTED_VERSION" ]]; then
   echo "ERROR: expected STAR-suite version $EXPECTED_VERSION, got $version_output" >&2
   exit 1
 fi
+if [[ "$($resolver --version)" != "$EXPECTED_VERSION" ]]; then
+  echo "ERROR: molecule-first resolver version mismatch" >&2
+  exit 1
+fi
+for tool in molecule_first_bam_ledger molecule_first_materialize; do
+  if [[ ! -x "$prefix/bin/$tool" ]] || [[ "$($prefix/bin/$tool --version)" != "$EXPECTED_VERSION" ]]; then
+    echo "ERROR: molecule-first companion $tool missing or version-mismatched" >&2
+    exit 1
+  fi
+done
 
 container_glibc="$(detect_glibc)"
 max_glibc_symbol="$(grep -aoE 'GLIBC_[0-9]+\.[0-9]+' "$binary" | sort -Vu | tail -n1 || true)"
