@@ -275,6 +275,11 @@ The full-slide sizing gate uses at least these observed bounds:
 
 ## Lazy overflow spool
 
+> **Updated 2026-07-25:** the accumulation-only boundary described below is
+> retained as implementation history. Production `Spill` now covers the full
+> downstream correction, reconciliation, and materialization path. See
+> `docs/RUNBOOK_VISIUM_HD_GEX_DOWNSTREAM_SPOOL_20260725.md`.
+
 The historical GeneFull sidecar is not the overflow mechanism. It lacks raw
 R1 candidates and cannot resume molecule processing.
 
@@ -296,13 +301,10 @@ high-water mark; on reaching it, STAR:
 4. releases the segment memory;
 5. later performs a deterministic k-way merge over memory and completed runs.
 
-The binary schema/key/layout checks are intentionally suitable for additional
-compact run types, but candidate/policy support, provisional cross-gene
-support, and final matrix entries are not spill-enabled in this tranche. Spill
-therefore passes preflight only when every post-accumulation phase fits the
-configured budget. This fail-closed boundary prevents the old sidecar from
-becoming an implicit fallback and prevents a read-evidence spill from masking
-an unsafe later workspace.
+The original implementation stopped at this boundary. The 2026-07-25
+extension adds versioned coordinate-contribution and matrix-entry runs, with
+bounded per-shard correction and reconciliation. The diagnostic sidecar is
+still never an implicit overflow fallback.
 
 It never writes TSV, read names, BAM tags, feature strings, or legacy Solo
 spool records. A partial, corrupt, wrong-version, wrong-key, or wrong-source

@@ -157,6 +157,7 @@ bool estimateMemory(const Capacity &capacity, MemoryModel &model, std::string &e
     std::uint64_t corrected = 0, finalMolecules = 0, matrixEntries = 0;
     std::uint64_t correctionCandidates = 0, correctionReads = 0;
     std::uint64_t threadScratch = 0, h0Counts = 0;
+    std::uint64_t downstreamReadDisk = 0, downstreamCandidateDisk = 0;
     if (!bytesFor(capacity.reads, sizeof(ReadEvidence), reads, "read evidence", error)
         || !bytesFor(capacity.candidates, sizeof(CandidateEvidence), candidates,
                      "candidate evidence", error)
@@ -182,10 +183,18 @@ bool estimateMemory(const Capacity &capacity, MemoryModel &model, std::string &e
         || !bytesFor(capacity.threads, 8ULL * 1024ULL * 1024ULL, threadScratch,
                      "decoder thread scratch", error)
         || !bytesFor(capacity.threads, 6518ULL * sizeof(std::uint64_t), h0Counts,
-                     "thread-local H0 counts", error)) {
+                     "thread-local H0 counts", error)
+        // Includes read runs, contribution runs, matrix runs, temporary
+        // MatrixMarket bodies, and committed uncompressed matrices. This is a
+        // deliberately conservative all-products/all-scales admission bound.
+        || !bytesFor(capacity.reads, 256ULL, downstreamReadDisk,
+                     "downstream spool read disk", error)
+        || !bytesFor(capacity.candidates, 64ULL, downstreamCandidateDisk,
+                     "downstream spool candidate disk", error)) {
         return false;
     }
     const std::uint64_t fixedDecoder = 64ULL * 1024ULL * 1024ULL;
+    const std::uint64_t downstreamWorkspace = 8ULL * 1024ULL * 1024ULL * 1024ULL;
     if (!sumBytes({fixedDecoder, threadScratch, h0Counts},
                   model.accumulationFixedBytes, "fixed accumulation state", error)
         || !sumBytes({model.accumulationFixedBytes, reads, candidates},
@@ -197,7 +206,14 @@ bool estimateMemory(const Capacity &capacity, MemoryModel &model, std::string &e
         || !sumBytes({corrected, finalMolecules, readOrder},
                      model.reconciliationBytes, "reconciliation phase", error)
         || !sumBytes({finalMolecules, matrixEntries},
-                     model.materializationBytes, "materialization phase", error)) {
+                     model.materializationBytes, "materialization phase", error)
+        || !sumBytes({model.accumulationFixedBytes, downstreamWorkspace},
+                     model.downstreamSpoolBytes,
+                     "bounded downstream spool workspace", error)
+        || !sumBytes({downstreamReadDisk, downstreamCandidateDisk,
+                      1ULL * 1024ULL * 1024ULL * 1024ULL},
+                     model.downstreamSpoolDiskBytes,
+                     "bounded downstream spool disk", error)) {
         return false;
     }
     model.peakBytes = std::max({model.accumulationBytes, model.cliqueBytes,
@@ -234,14 +250,10 @@ bool memoryFits(const MemoryModel &model, std::uint64_t availableBytes,
 bool spillBudgetFits(const MemoryModel &model, std::uint64_t budgetBytes,
                      std::string &error)
 {
-    const std::uint64_t downstreamPeak = std::max(
-        std::max(model.cliqueBytes, model.correctionBytes),
-        std::max(model.reconciliationBytes, model.materializationBytes));
-    if (downstreamPeak > budgetBytes) {
+    if (model.downstreamSpoolBytes > budgetBytes) {
         std::ostringstream message;
-        message << "integrated spatial spill can reduce read/candidate "
-                << "accumulation only; post-accumulation estimate "
-                << downstreamPeak << " exceeds configured budget "
+        message << "integrated spatial downstream spool estimate "
+                << model.downstreamSpoolBytes << " exceeds configured budget "
                 << budgetBytes;
         error = message.str();
         return false;

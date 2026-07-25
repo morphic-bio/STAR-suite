@@ -97,6 +97,11 @@ struct MemoryModel {
     std::uint64_t correctionBytes = 0;
     std::uint64_t reconciliationBytes = 0;
     std::uint64_t materializationBytes = 0;
+    // End-to-end Spill uses a fixed downstream workspace and coordinate
+    // partitions instead of the slide-sized phase estimates above.
+    std::uint64_t downstreamSpoolBytes = 0;
+    // Conservative simultaneous temporary-run and uncompressed-MEX capacity.
+    std::uint64_t downstreamSpoolDiskBytes = 0;
     std::uint64_t peakBytes = 0;
 };
 
@@ -107,9 +112,9 @@ bool parseOverflowPolicy(const std::string &value, OverflowPolicy &policy,
 bool estimateMemory(const Capacity &capacity, MemoryModel &model, std::string &error);
 bool memoryFits(const MemoryModel &model, std::uint64_t availableBytes,
                 double fraction, std::uint64_t &budgetBytes, std::string &error);
-// The current compact spill boundary covers read/candidate accumulation. This
-// guard prevents Spill from promising a budget that a later in-memory phase
-// cannot satisfy.
+// Spill uses the compact accumulation runs plus a bounded downstream
+// coordinate-partition workspace. This guard checks the fixed end-to-end
+// resident requirement rather than the all-memory downstream phase peaks.
 bool spillBudgetFits(const MemoryModel &model, std::uint64_t budgetBytes,
                      std::string &error);
 
@@ -137,6 +142,10 @@ struct PipelineConfig {
     // advanced deterministic test/tuning override and is valid only with
     // OverflowPolicy::Spill.
     std::uint64_t spillHighWaterCandidatesPerThread = 0;
+    // Internal downstream partitioning knobs. STAR production defaults are
+    // conservative; tests may use smaller values to force boundary cases.
+    std::uint32_t downstreamSpoolShards = 256;
+    std::uint64_t downstreamSpoolBufferBytes = 64 * 1024;
 };
 
 struct PipelineSummary {
@@ -165,6 +174,14 @@ struct PipelineSummary {
     double spillMergeSeconds = 0.0;
     std::uint64_t peakResidentReads = 0;
     std::uint64_t peakResidentCandidates = 0;
+    std::uint64_t downstreamContributionRecords = 0;
+    std::uint64_t downstreamContributionRuns = 0;
+    std::uint64_t downstreamContributionBytes = 0;
+    std::uint64_t downstreamLargestShardRecords = 0;
+    std::uint64_t downstreamMatrixRuns = 0;
+    std::uint64_t downstreamMatrixBytes = 0;
+    double downstreamResolveSeconds = 0.0;
+    double downstreamMaterializeSeconds = 0.0;
 };
 
 // Run-owned, default-off spatial state. One instance is shared by all mapping

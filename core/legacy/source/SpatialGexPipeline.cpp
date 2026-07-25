@@ -1,5 +1,6 @@
 #include "SpatialGex.h"
 #include "SpatialGexSpill.h"
+#include "SpatialGexDownstreamSpool.h"
 #include "MultiGeneUmiCr.h"
 
 #include <algorithm>
@@ -20,6 +21,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <sys/stat.h>
+#include <sys/statvfs.h>
 #include <sys/types.h>
 #include <tuple>
 #include <unistd.h>
@@ -32,6 +34,17 @@ const std::uint32_t kGridRows = 3350;
 const std::uint32_t kGridColumns = 3350;
 const double kGateMinimumPosterior = 0.95;
 const double kGateMinimumMargin = 0.90;
+const std::uint8_t kProductBits[4] = {
+    ProductStrict, ProductSoftExpected, ProductHard, ProductGatedHard
+};
+const char *const kProductNames[4] = {
+    "strict", "soft_expected", "hard", "gated_hard"
+};
+const std::uint8_t kScaleBits[3] = {Scale2um, Scale8um, Scale16um};
+// The downstream memory model reserves 8 GiB. This deliberately conservative
+// allowance covers the resident contribution vector plus the largest
+// correction/reconciliation working set derived from it.
+const std::uint64_t kDownstreamWorkingBytesPerContribution = 1024;
 std::atomic<std::uint64_t> gPipelineGeneration(1);
 
 bool nearlyEqual(double left, double right)
@@ -350,14 +363,55 @@ struct MatrixEntry {
     double value = 0.0;
 };
 
-bool assignmentLess(const Assignment &left, const Assignment &right)
-{
-    return std::tie(left.gene, left.coordinate, left.rawUmi)
-        < std::tie(right.gene, right.coordinate, right.rawUmi);
-}
+class CliqueSink {
+  public:
+    virtual ~CliqueSink() {}
+    virtual void reserve(std::uint64_t cliques, std::uint64_t candidates) = 0;
+    virtual void append(std::uint32_t gene, std::uint32_t rawUmi,
+                        std::uint32_t memberCount,
+                        const std::vector<CliqueCandidate> &candidates) = 0;
+    virtual std::uint64_t cliqueCount() const = 0;
+};
 
-bool integerRawLess(const IntegerRawSupport &left,
-                    const IntegerRawSupport &right)
+class InMemoryCliqueSink : public CliqueSink {
+  public:
+    InMemoryCliqueSink(std::vector<Clique> &cliques,
+                       std::vector<CliqueCandidate> &candidates)
+        : cliques_(cliques), candidates_(candidates) {}
+
+    void reserve(std::uint64_t cliques, std::uint64_t candidates) override
+    {
+        cliques_.reserve(static_cast<std::size_t>(cliques));
+        candidates_.reserve(static_cast<std::size_t>(candidates));
+    }
+
+    void append(std::uint32_t gene, std::uint32_t rawUmi,
+                std::uint32_t memberCount,
+                const std::vector<CliqueCandidate> &values) override
+    {
+        if (values.empty() || values.size() > std::numeric_limits<std::uint16_t>::max()
+            || candidates_.size() > std::numeric_limits<std::uint32_t>::max()
+            || memberCount == 0) {
+            throw std::runtime_error("invalid in-memory spatial clique");
+        }
+        Clique clique;
+        clique.gene = gene;
+        clique.rawUmi = rawUmi;
+        clique.candidateBegin = static_cast<std::uint32_t>(candidates_.size());
+        clique.candidateCount = static_cast<std::uint16_t>(values.size());
+        clique.memberCount = memberCount;
+        candidates_.insert(candidates_.end(), values.begin(), values.end());
+        cliques_.push_back(clique);
+    }
+
+    std::uint64_t cliqueCount() const override { return cliques_.size(); }
+
+  private:
+    std::vector<Clique> &cliques_;
+    std::vector<CliqueCandidate> &candidates_;
+};
+
+bool assignmentLess(const Assignment &left, const Assignment &right)
 {
     return std::tie(left.gene, left.coordinate, left.rawUmi)
         < std::tie(right.gene, right.coordinate, right.rawUmi);
@@ -588,8 +642,8 @@ double candidateLikelihood(const Bundle &read, std::uint32_t coordinate)
 
 void appendCliquesForGroup(
     const std::vector<Bundle> &reads, std::size_t begin, std::size_t end,
-    const spatial_r1_decoder::ExactH0Counts &h0, std::vector<Clique> &cliques,
-    std::vector<CliqueCandidate> &candidates, std::vector<std::uint64_t> &coordinateBits,
+    const spatial_r1_decoder::ExactH0Counts &h0, CliqueSink &sink,
+    std::vector<std::uint64_t> &coordinateBits,
     std::vector<std::uint8_t> &featureUsed)
 {
     struct Partition {
@@ -637,12 +691,6 @@ void appendCliquesForGroup(
             || partition.members.size() > std::numeric_limits<std::uint32_t>::max()) {
             throw std::runtime_error("invalid spatial read clique cardinality");
         }
-        Clique clique;
-        clique.gene = reads[begin].gene;
-        clique.rawUmi = reads[begin].rawUmi;
-        clique.candidateBegin = static_cast<std::uint32_t>(candidates.size());
-        clique.candidateCount = static_cast<std::uint16_t>(partition.candidates.size());
-        clique.memberCount = static_cast<std::uint32_t>(partition.members.size());
         std::vector<double> evidence;
         evidence.reserve(partition.candidates.size());
         for (std::uint32_t coordinate : partition.candidates) {
@@ -672,23 +720,26 @@ void appendCliquesForGroup(
         if (!std::isfinite(total) || total <= 0.0) {
             throw std::runtime_error("spatial posterior normalization failed");
         }
+        std::vector<CliqueCandidate> cliqueCandidates;
+        cliqueCandidates.reserve(partition.candidates.size());
         for (std::size_t index = 0; index < partition.candidates.size(); ++index) {
             CliqueCandidate candidate;
             candidate.coordinate = partition.candidates[index];
             candidate.posterior = evidence[index] / total;
-            candidates.push_back(candidate);
+            cliqueCandidates.push_back(candidate);
             coordinateBits[candidate.coordinate / 64] |=
                 1ULL << (candidate.coordinate % 64);
         }
-        featureUsed[clique.gene] = 1;
-        cliques.push_back(clique);
+        featureUsed[reads[begin].gene] = 1;
+        sink.append(reads[begin].gene, reads[begin].rawUmi,
+                    static_cast<std::uint32_t>(partition.members.size()),
+                    cliqueCandidates);
     }
 }
 
 void appendCompleteGroup(const std::vector<Bundle> &group,
                          const spatial_r1_decoder::ExactH0Counts &h0,
-                         std::vector<Clique> &cliques,
-                         std::vector<CliqueCandidate> &candidates,
+                         CliqueSink &sink,
                          std::vector<std::uint64_t> &coordinateBits,
                          std::vector<std::uint8_t> &featureUsed)
 {
@@ -696,14 +747,13 @@ void appendCompleteGroup(const std::vector<Bundle> &group,
     if (group.front().gene >= featureUsed.size()) {
         throw std::runtime_error("spatial GeneFull index lies outside transcriptome axis");
     }
-    appendCliquesForGroup(group, 0, group.size(), h0, cliques, candidates,
+    appendCliquesForGroup(group, 0, group.size(), h0, sink,
                           coordinateBits, featureUsed);
 }
 
 void buildCliquesMemory(Pipeline::Impl &impl,
                         const spatial_r1_decoder::ExactH0Counts &h0,
-                        std::vector<Clique> &cliques,
-                        std::vector<CliqueCandidate> &candidates,
+                        CliqueSink &sink,
                         std::vector<std::uint64_t> &coordinateBits,
                         std::vector<std::uint8_t> &featureUsed)
 {
@@ -741,8 +791,7 @@ void buildCliquesMemory(Pipeline::Impl &impl,
         return std::tie(left.thread, left.index) < std::tie(right.thread, right.index);
     });
 
-    cliques.reserve(order.size());
-    candidates.reserve(static_cast<std::size_t>(impl.summary.candidateRows));
+    sink.reserve(order.size(), impl.summary.candidateRows);
     std::size_t begin = 0;
     while (begin < order.size()) {
         const ReadEvidence &first = readAt(order[begin]);
@@ -759,17 +808,16 @@ void buildCliquesMemory(Pipeline::Impl &impl,
             group.push_back(bundleFromMemory(impl.threads[reference.thread],
                                              readAt(reference)));
         }
-        appendCompleteGroup(group, h0, cliques, candidates,
+        appendCompleteGroup(group, h0, sink,
                             coordinateBits, featureUsed);
         begin = end;
     }
-    impl.summary.readCliques = cliques.size();
+    impl.summary.readCliques = sink.cliqueCount();
 }
 
 void buildCliquesSpill(Pipeline::Impl &impl,
                        const spatial_r1_decoder::ExactH0Counts &h0,
-                       std::vector<Clique> &cliques,
-                       std::vector<CliqueCandidate> &candidates,
+                       CliqueSink &sink,
                        std::vector<std::uint64_t> &coordinateBits,
                        std::vector<std::uint8_t> &featureUsed)
 {
@@ -819,8 +867,7 @@ void buildCliquesSpill(Pipeline::Impl &impl,
             queue.push(node);
         }
     }
-    cliques.reserve(static_cast<std::size_t>(impl.summary.joinedReads));
-    candidates.reserve(static_cast<std::size_t>(impl.summary.candidateRows));
+    sink.reserve(impl.summary.joinedReads, impl.summary.candidateRows);
     while (!queue.empty()) {
         const ReadEvidence first = cursors[queue.top().cursor].read;
         std::vector<Bundle> group;
@@ -842,10 +889,10 @@ void buildCliquesSpill(Pipeline::Impl &impl,
             if (!state.active && !error.empty()) throw std::runtime_error(error);
             if (state.active) queue.push(node);
         }
-        appendCompleteGroup(group, h0, cliques, candidates,
+        appendCompleteGroup(group, h0, sink,
                             coordinateBits, featureUsed);
     }
-    impl.summary.readCliques = cliques.size();
+    impl.summary.readCliques = sink.cliqueCount();
 }
 
 std::uint32_t topCandidate(const Clique &clique,
@@ -877,6 +924,87 @@ std::uint32_t topCandidate(const Clique &clique,
     }
     return candidates[best].coordinate;
 }
+
+class SpoolCliqueSink : public CliqueSink {
+  public:
+    SpoolCliqueSink(const std::string &directory,
+                    const std::string &sourceRevision,
+                    std::uint32_t shards, std::size_t bufferBytes)
+    {
+        std::string error;
+        writer_ = downstream_spool::ContributionWriter::create(
+            directory, sourceRevision, kGridColumns, shards, bufferBytes, error);
+        if (!writer_) throw std::runtime_error(error);
+    }
+
+    void reserve(std::uint64_t, std::uint64_t) override {}
+
+    void append(std::uint32_t gene, std::uint32_t rawUmi,
+                std::uint32_t memberCount,
+                const std::vector<CliqueCandidate> &values) override
+    {
+        if (values.empty() || values.size() > std::numeric_limits<std::uint16_t>::max()
+            || cliques_ > std::numeric_limits<std::uint32_t>::max()) {
+            throw std::runtime_error("invalid spooled spatial clique");
+        }
+        std::size_t best = 0;
+        for (std::size_t index = 1; index < values.size(); ++index) {
+            if ((!nearlyEqual(values[index].posterior, values[best].posterior)
+                 && values[index].posterior > values[best].posterior)
+                || (nearlyEqual(values[index].posterior, values[best].posterior)
+                    && coordinateLess(values[index].coordinate,
+                                      values[best].coordinate))) {
+                best = index;
+            }
+        }
+        double second = 0.0;
+        for (std::size_t index = 0; index < values.size(); ++index) {
+            if (index != best && values[index].posterior > second) {
+                second = values[index].posterior;
+            }
+        }
+        const double margin = nearlyEqual(values[best].posterior, second)
+            ? 0.0 : values[best].posterior - second;
+        const bool gated = values[best].posterior >= kGateMinimumPosterior
+            && margin >= kGateMinimumMargin;
+
+        for (std::size_t index = 0; index < values.size(); ++index) {
+            downstream_spool::Contribution record = {};
+            record.posterior = values[index].posterior;
+            record.gene = gene;
+            record.coordinate = values[index].coordinate;
+            record.rawUmi = rawUmi;
+            record.memberCount = memberCount;
+            record.cliqueOrdinal = static_cast<std::uint32_t>(cliques_);
+            record.candidateOrdinal = static_cast<std::uint16_t>(index);
+            if (values.size() == 1) {
+                record.flags |= downstream_spool::ContributionStrict;
+            }
+            if (index == best) {
+                record.flags |= downstream_spool::ContributionHard;
+                if (gated) record.flags |= downstream_spool::ContributionGatedHard;
+            }
+            std::string error;
+            if (!writer_->append(record, error)) throw std::runtime_error(error);
+        }
+        ++cliques_;
+    }
+
+    std::uint64_t cliqueCount() const override { return cliques_; }
+
+    void finish(std::vector<downstream_spool::Run> &runs,
+                std::uint64_t &records, std::uint64_t &bytes)
+    {
+        std::string error;
+        if (!writer_->finish(runs, error)) throw std::runtime_error(error);
+        records = writer_->records();
+        bytes = writer_->bytes();
+    }
+
+  private:
+    std::unique_ptr<downstream_spool::ContributionWriter> writer_;
+    std::uint64_t cliques_ = 0;
+};
 
 std::vector<Assignment> integerAssignments(
     const std::vector<Clique> &cliques,
@@ -957,11 +1085,9 @@ std::vector<IntegerRawSupport> collapseIntegerSupport(
     return raw;
 }
 
-std::vector<FinalMolecule> resolveInteger(
-    const std::vector<Clique> &cliques,
-    const std::vector<CliqueCandidate> &candidates, std::uint32_t policy)
+std::vector<FinalMolecule> resolveSortedIntegerAssignments(
+    const std::vector<Assignment> &assignments, std::uint32_t policy)
 {
-    const std::vector<Assignment> assignments = integerAssignments(cliques, candidates, policy);
     const std::vector<IntegerRawSupport> raw = collapseIntegerSupport(assignments);
     std::vector<IntegerProvisional> provisional;
     provisional.reserve(raw.size());
@@ -1019,6 +1145,15 @@ std::vector<FinalMolecule> resolveInteger(
         begin = end;
     }
     return result;
+}
+
+std::vector<FinalMolecule> resolveInteger(
+    const std::vector<Clique> &cliques,
+    const std::vector<CliqueCandidate> &candidates, std::uint32_t policy)
+{
+    const std::vector<Assignment> assignments =
+        integerAssignments(cliques, candidates, policy);
+    return resolveSortedIntegerAssignments(assignments, policy);
 }
 
 std::vector<SoftRawSupport> buildSoftRawSupport(
@@ -1170,6 +1305,175 @@ std::vector<FinalMolecule> resolveSoft(
         }
         begin = end;
     }
+    return result;
+}
+
+std::vector<FinalMolecule> resolveSoftContributions(
+    const std::vector<downstream_spool::Contribution> &contributions)
+{
+    std::vector<SoftRawSupport> raw;
+    raw.reserve(contributions.size());
+    for (const downstream_spool::Contribution &contribution : contributions) {
+        SoftRawSupport value;
+        value.gene = contribution.gene;
+        value.coordinate = contribution.coordinate;
+        value.rawUmi = contribution.rawUmi;
+        value.correctedUmi = contribution.rawUmi;
+        value.support = contribution.posterior;
+        raw.push_back(value);
+    }
+    std::sort(raw.begin(), raw.end(), softRawLess);
+    std::vector<SoftRawSupport> aggregated;
+    aggregated.reserve(raw.size());
+    for (const SoftRawSupport &value : raw) {
+        if (!aggregated.empty() && aggregated.back().gene == value.gene
+            && aggregated.back().coordinate == value.coordinate
+            && aggregated.back().rawUmi == value.rawUmi) {
+            aggregated.back().support += value.support;
+        } else {
+            aggregated.push_back(value);
+        }
+    }
+    std::size_t begin = 0;
+    while (begin < aggregated.size()) {
+        std::size_t end = begin + 1;
+        while (end < aggregated.size() && aggregated[end].gene == aggregated[begin].gene
+               && aggregated[end].coordinate == aggregated[begin].coordinate) ++end;
+        std::vector<std::size_t> order;
+        order.reserve(end - begin);
+        for (std::size_t index = begin; index < end; ++index) order.push_back(index);
+        std::sort(order.begin(), order.end(), [&](std::size_t left, std::size_t right) {
+            if (!nearlyEqual(aggregated[left].support, aggregated[right].support)) {
+                return aggregated[left].support > aggregated[right].support;
+            }
+            return aggregated[left].rawUmi < aggregated[right].rawUmi;
+        });
+        for (std::size_t oi = 0; oi < order.size(); ++oi) {
+            SoftRawSupport &child = aggregated[order[oi]];
+            for (std::size_t pi = 0; pi < oi; ++pi) {
+                const SoftRawSupport &parent = aggregated[order[pi]];
+                const bool directional = parent.support > 2.0 * child.support - 1.0
+                    || nearlyEqual(parent.support, 2.0 * child.support - 1.0);
+                if (directional && hammingOneUmi(child.rawUmi, parent.rawUmi)) {
+                    child.correctedUmi = parent.correctedUmi;
+                    break;
+                }
+            }
+        }
+        begin = end;
+    }
+    std::sort(aggregated.begin(), aggregated.end(), softRawLess);
+
+    std::map<std::tuple<std::uint32_t, std::uint32_t, std::uint32_t>,
+             SoftProvisional> values;
+    for (const downstream_spool::Contribution &contribution : contributions) {
+        const SoftRawSupport &support = findSoftSupport(
+            aggregated, contribution.gene, contribution.coordinate,
+            contribution.rawUmi);
+        const std::tuple<std::uint32_t, std::uint32_t, std::uint32_t> key(
+            contribution.coordinate, support.correctedUmi, contribution.gene);
+        SoftProvisional &value = values[key];
+        value.coordinate = contribution.coordinate;
+        value.correctedUmi = support.correctedUmi;
+        value.gene = contribution.gene;
+        value.absent *= 1.0 - contribution.posterior;
+        if (contribution.rawUmi == support.correctedUmi) {
+            value.originalAbsent *= 1.0 - contribution.posterior;
+        }
+    }
+    std::vector<SoftProvisional> provisional;
+    provisional.reserve(values.size());
+    for (const std::pair<const std::tuple<std::uint32_t, std::uint32_t, std::uint32_t>,
+                         SoftProvisional> &entry : values) {
+        provisional.push_back(entry.second);
+    }
+    std::vector<FinalMolecule> result;
+    begin = 0;
+    while (begin < provisional.size()) {
+        std::size_t end = begin + 1;
+        while (end < provisional.size()
+               && provisional[end].coordinate == provisional[begin].coordinate
+               && provisional[end].correctedUmi == provisional[begin].correctedUmi) ++end;
+        std::size_t winner = begin;
+        bool tied = false;
+        for (std::size_t index = begin + 1; index < end; ++index) {
+            const double value = 1.0 - provisional[index].absent;
+            const double best = 1.0 - provisional[winner].absent;
+            if (!nearlyEqual(value, best) && value > best) {
+                winner = index;
+                tied = false;
+            } else if (nearlyEqual(value, best)) {
+                tied = true;
+            }
+        }
+        if (!tied) {
+            const double winnerOriginal = 1.0 - provisional[winner].originalAbsent;
+            bool originalDominance = false;
+            for (std::size_t index = begin; index < end; ++index) {
+                const double original = 1.0 - provisional[index].originalAbsent;
+                if (!nearlyEqual(original, winnerOriginal) && original > winnerOriginal) {
+                    originalDominance = true;
+                    break;
+                }
+            }
+            if (!originalDominance) {
+                FinalMolecule molecule;
+                molecule.geneIndex = provisional[winner].gene;
+                molecule.coordinateIndex = provisional[winner].coordinate;
+                molecule.correctedUmi = provisional[winner].correctedUmi;
+                molecule.policy = ProductSoftExpected;
+                molecule.weight = 1.0 - provisional[winner].absent;
+                result.push_back(molecule);
+            }
+        }
+        begin = end;
+    }
+    return result;
+}
+
+std::vector<FinalMolecule> resolveContributionShard(
+    const std::vector<downstream_spool::Contribution> &contributions,
+    std::uint8_t products)
+{
+    std::vector<FinalMolecule> result;
+    struct IntegerPolicy {
+        std::uint8_t product;
+        std::uint8_t flag;
+    };
+    const IntegerPolicy policies[] = {
+        {ProductStrict, downstream_spool::ContributionStrict},
+        {ProductHard, downstream_spool::ContributionHard},
+        {ProductGatedHard, downstream_spool::ContributionGatedHard}
+    };
+    for (const IntegerPolicy &policy : policies) {
+        if ((products & policy.product) == 0) continue;
+        std::vector<Assignment> assignments;
+        assignments.reserve(contributions.size());
+        for (const downstream_spool::Contribution &contribution : contributions) {
+            if ((contribution.flags & policy.flag) == 0) continue;
+            Assignment assignment;
+            assignment.gene = contribution.gene;
+            assignment.coordinate = contribution.coordinate;
+            assignment.rawUmi = contribution.rawUmi;
+            assignment.count = contribution.memberCount;
+            assignments.push_back(assignment);
+        }
+        std::sort(assignments.begin(), assignments.end(), assignmentLess);
+        std::vector<FinalMolecule> values =
+            resolveSortedIntegerAssignments(assignments, policy.product);
+        result.insert(result.end(), values.begin(), values.end());
+    }
+    if ((products & ProductSoftExpected) != 0) {
+        std::vector<FinalMolecule> values = resolveSoftContributions(contributions);
+        result.insert(result.end(), values.begin(), values.end());
+    }
+    std::sort(result.begin(), result.end(), [](const FinalMolecule &left,
+                                               const FinalMolecule &right) {
+        return std::tie(left.policy, left.coordinateIndex, left.correctedUmi,
+                        left.geneIndex)
+            < std::tie(right.policy, right.coordinateIndex, right.correctedUmi,
+                       right.geneIndex);
+    });
     return result;
 }
 
@@ -1443,6 +1747,383 @@ void materialize(Pipeline::Impl &impl, const std::vector<std::string> &geneIds,
     }
 }
 
+class SpoolMaterializer {
+  public:
+    SpoolMaterializer(Pipeline::Impl &impl,
+                      const std::vector<std::string> &geneIds,
+                      const std::vector<std::uint8_t> &featureUsed,
+                      const std::vector<std::uint64_t> &coordinateBits,
+                      const std::string &spoolRoot)
+        : impl_(impl), spoolRoot_(spoolRoot),
+          outputRoot_(impl.config.outputDirectory + ".partial")
+    {
+        std::vector<std::pair<std::string, std::uint32_t> > featurePairs;
+        for (std::size_t gene = 0; gene < featureUsed.size(); ++gene) {
+            if (featureUsed[gene]) {
+                featurePairs.push_back(std::make_pair(
+                    geneIds[gene], static_cast<std::uint32_t>(gene)));
+            }
+        }
+        std::sort(featurePairs.begin(), featurePairs.end());
+        featureIndex_.assign(geneIds.size(), 0);
+        features_.reserve(featurePairs.size());
+        for (std::size_t index = 0; index < featurePairs.size(); ++index) {
+            if (index > 0 && featurePairs[index - 1].first == featurePairs[index].first) {
+                throw std::runtime_error("duplicate canonical gene ID in spatial feature axis");
+            }
+            features_.push_back(featurePairs[index].first);
+            featureIndex_[featurePairs[index].second] =
+                static_cast<std::uint32_t>(index + 1);
+        }
+
+        std::vector<std::uint32_t> fineCoordinates;
+        for (std::size_t word = 0; word < coordinateBits.size(); ++word) {
+            std::uint64_t bits = coordinateBits[word];
+            while (bits != 0) {
+                const unsigned offset = static_cast<unsigned>(__builtin_ctzll(bits));
+                fineCoordinates.push_back(
+                    static_cast<std::uint32_t>(word * 64 + offset));
+                bits &= bits - 1;
+            }
+        }
+        std::sort(fineCoordinates.begin(), fineCoordinates.end(), coordinateLess);
+        if (features_.empty() || fineCoordinates.empty()) {
+            throw std::runtime_error("integrated spatial read-clique universe is empty");
+        }
+        axes_[0] = buildAxis(fineCoordinates, 1, "square_002um");
+        axes_[1] = buildAxis(fineCoordinates, 4, "square_008um");
+        axes_[2] = buildAxis(fineCoordinates, 8, "square_016um");
+        fineIndex_.assign(static_cast<std::size_t>(kGridRows) * kGridColumns, 0);
+        for (std::size_t index = 0; index < axes_[0].coordinates.size(); ++index) {
+            fineIndex_[axes_[0].coordinates[index]] =
+                static_cast<std::uint32_t>(index + 1);
+        }
+        makeDirectories(spoolRoot_);
+        for (std::size_t product = 0; product < 4; ++product) {
+            if ((impl_.config.products & kProductBits[product]) == 0) continue;
+            for (std::size_t scale = 0; scale < 3; ++scale) {
+                if ((impl_.config.scales & kScaleBits[scale]) == 0) continue;
+                makeDirectories(runDirectory(product, scale));
+            }
+        }
+        prepareOutputAxes();
+    }
+
+    void writeShard(std::uint32_t shard,
+                    const std::vector<FinalMolecule> &molecules)
+    {
+        for (std::size_t product = 0; product < 4; ++product) {
+            if ((impl_.config.products & kProductBits[product]) == 0) continue;
+            std::vector<MatrixEntry> fineEntries;
+            for (const FinalMolecule &molecule : molecules) {
+                if (molecule.policy != kProductBits[product]) continue;
+                if (molecule.geneIndex >= featureIndex_.size()
+                    || molecule.coordinateIndex >= fineIndex_.size()
+                    || featureIndex_[molecule.geneIndex] == 0
+                    || fineIndex_[molecule.coordinateIndex] == 0) {
+                    throw std::runtime_error(
+                        "spooled final molecule lies outside spatial matrix axes");
+                }
+                MatrixEntry entry;
+                entry.key = matrixKey(fineIndex_[molecule.coordinateIndex],
+                                      featureIndex_[molecule.geneIndex]);
+                entry.value = molecule.weight;
+                fineEntries.push_back(entry);
+            }
+            fineEntries = aggregateMatrixEntries(std::move(fineEntries));
+            for (std::size_t scale = 0; scale < 3; ++scale) {
+                if ((impl_.config.scales & kScaleBits[scale]) == 0) continue;
+                const std::vector<MatrixEntry> scaled = scale == 0
+                    ? fineEntries : matrixAtScale(fineEntries, axes_[0], axes_[scale]);
+                if (scaled.empty()) continue;
+                std::vector<downstream_spool::MatrixRecord> records;
+                records.reserve(scaled.size());
+                for (const MatrixEntry &entry : scaled) {
+                    downstream_spool::MatrixRecord record;
+                    record.key = entry.key;
+                    record.value = entry.value;
+                    records.push_back(record);
+                }
+                downstream_spool::Run run;
+                std::string error;
+                if (!downstream_spool::writeMatrixRun(
+                        runDirectory(product, scale), impl_.config.sourceRevision,
+                        shard, impl_.config.downstreamSpoolShards, 0,
+                        records, run, error)) {
+                    throw std::runtime_error(error);
+                }
+                runs_[product][scale].push_back(run);
+                ++impl_.summary.downstreamMatrixRuns;
+                impl_.summary.downstreamMatrixBytes += run.bytes;
+            }
+        }
+    }
+
+    void commit()
+    {
+        std::ostringstream summary;
+        summary << "schema\tstar_suite.molecule_first.policy_mex.v1\n"
+                << "star_suite_version\t" << impl_.config.starSuiteVersion << '\n'
+                << "assay\tvisium-hd\n"
+                << "umi_mode\t1mm_cr\n"
+                // The canonical feature/coordinate axes still come from the
+                // compact in-memory used-bitsets populated by read cliques.
+                // Keep the accepted summary contract independent of whether
+                // molecule resolution itself is streamed.
+                << "axes_source\tin_memory_read_cliques\n"
+                << "cell_calling_order\tafter_postcollapse_integer_matrix_only\n"
+                << "soft_cell_calling_allowed\tfalse\n"
+                << "product\tscale\tfeatures\tbarcodes\tnnz\tmass\tmatrix_field\n";
+        for (std::size_t product = 0; product < 4; ++product) {
+            if ((impl_.config.products & kProductBits[product]) == 0) continue;
+            double referenceMass = -1.0;
+            for (std::size_t scale = 0; scale < 3; ++scale) {
+                if ((impl_.config.scales & kScaleBits[scale]) == 0) continue;
+                const MatrixResult result = mergeMatrix(
+                    product, scale, kProductBits[product] == ProductSoftExpected);
+                if (referenceMass < 0.0) referenceMass = result.mass;
+                const double tolerance = 1e-9
+                    * std::max(1.0, std::max(referenceMass, result.mass));
+                if (std::fabs(referenceMass - result.mass) > tolerance) {
+                    throw std::runtime_error(
+                        "spooled spatial scale aggregation did not conserve mass");
+                }
+                summary << kProductNames[product] << '\t' << axes_[scale].name << '\t'
+                        << features_.size() << '\t' << axes_[scale].coordinates.size()
+                        << '\t' << result.nnz << '\t' << std::setprecision(17)
+                        << result.mass << '\t'
+                        << (kProductBits[product] == ProductSoftExpected
+                                ? "real" : "integer") << '\n';
+            }
+        }
+        AtomicOutput output(outputRoot_ + "/summary.tsv");
+        output.stream() << summary.str();
+        output.commit();
+        const std::string &finalRoot = impl_.config.outputDirectory;
+        struct stat finalInfo;
+        if (::stat(finalRoot.c_str(), &finalInfo) == 0) {
+            if (!S_ISDIR(finalInfo.st_mode) || !directoryEmpty(finalRoot)
+                || ::rmdir(finalRoot.c_str()) != 0) {
+                throw std::runtime_error(
+                    "spatial final output directory is not empty: " + finalRoot);
+            }
+        } else if (errno != ENOENT) {
+            throw std::runtime_error("cannot inspect spatial final output directory: "
+                                     + finalRoot);
+        }
+        if (std::rename(outputRoot_.c_str(), finalRoot.c_str()) != 0) {
+            throw std::runtime_error("cannot commit spatial output directory "
+                                     + finalRoot + ": " + std::strerror(errno));
+        }
+        cleanupRunDirectories();
+    }
+
+  private:
+    struct MatrixResult {
+        std::uint64_t nnz = 0;
+        double mass = 0.0;
+    };
+
+    std::string runDirectory(std::size_t product, std::size_t scale) const
+    {
+        std::ostringstream path;
+        path << spoolRoot_ << "/matrix.p" << product << ".s" << scale;
+        return path.str();
+    }
+
+    void prepareOutputAxes()
+    {
+        const std::string &finalRoot = impl_.config.outputDirectory;
+        struct stat info;
+        if (::stat(finalRoot.c_str(), &info) == 0) {
+            if (!S_ISDIR(info.st_mode) || !directoryEmpty(finalRoot)) {
+                throw std::runtime_error(
+                    "spatial output directory must be empty: " + finalRoot);
+            }
+        } else if (errno != ENOENT) {
+            throw std::runtime_error("cannot inspect spatial output directory: "
+                                     + finalRoot);
+        }
+        if (::stat(outputRoot_.c_str(), &info) == 0) {
+            throw std::runtime_error("spatial partial output already exists: "
+                                     + outputRoot_);
+        } else if (errno != ENOENT) {
+            throw std::runtime_error("cannot inspect spatial partial output: "
+                                     + outputRoot_);
+        }
+        makeDirectories(outputRoot_);
+        const std::string &root = outputRoot_;
+        std::vector<std::size_t> selectedProducts;
+        for (std::size_t product = 0; product < 4; ++product) {
+            if ((impl_.config.products & kProductBits[product]) != 0) {
+                selectedProducts.push_back(product);
+                for (std::size_t scale = 0; scale < 3; ++scale) {
+                    if ((impl_.config.scales & kScaleBits[scale]) != 0) {
+                        makeDirectories(root + "/" + kProductNames[product]
+                                        + "/" + axes_[scale].name);
+                    }
+                }
+            }
+        }
+        if (selectedProducts.empty()) throw std::runtime_error("no spatial products selected");
+        std::size_t canonicalScale = 0;
+        while (canonicalScale < 3
+               && (impl_.config.scales & kScaleBits[canonicalScale]) == 0) {
+            ++canonicalScale;
+        }
+        const std::string canonicalDirectory = root + "/"
+            + kProductNames[selectedProducts.front()] + "/" + axes_[canonicalScale].name;
+        const std::string canonicalFeatures = canonicalDirectory + "/features.tsv";
+        writeFeatureAxis(canonicalFeatures, features_);
+        for (std::size_t scale = 0; scale < 3; ++scale) {
+            if ((impl_.config.scales & kScaleBits[scale]) == 0) continue;
+            const std::string canonicalBarcodes = root + "/"
+                + kProductNames[selectedProducts.front()] + "/" + axes_[scale].name
+                + "/barcodes.tsv";
+            writeBarcodeAxis(canonicalBarcodes, axes_[scale]);
+            for (std::size_t product : selectedProducts) {
+                const std::string directory = root + "/" + kProductNames[product]
+                    + "/" + axes_[scale].name;
+                if (directory + "/features.tsv" != canonicalFeatures) {
+                    atomicLinkOrCopy(canonicalFeatures, directory + "/features.tsv");
+                }
+                if (directory + "/barcodes.tsv" != canonicalBarcodes) {
+                    atomicLinkOrCopy(canonicalBarcodes, directory + "/barcodes.tsv");
+                }
+            }
+        }
+    }
+
+    MatrixResult mergeMatrix(std::size_t product, std::size_t scale, bool real)
+    {
+        struct CursorState {
+            std::unique_ptr<downstream_spool::MatrixCursor> cursor;
+            downstream_spool::MatrixRecord record = {};
+            bool active = false;
+        };
+        std::vector<CursorState> cursors;
+        cursors.reserve(runs_[product][scale].size());
+        for (const downstream_spool::Run &run : runs_[product][scale]) {
+            std::string error;
+            CursorState state;
+            state.cursor = downstream_spool::MatrixCursor::open(
+                run, impl_.config.sourceRevision, error);
+            if (!state.cursor) throw std::runtime_error(error);
+            state.active = state.cursor->next(state.record, error);
+            if (!state.active && !error.empty()) throw std::runtime_error(error);
+            cursors.push_back(std::move(state));
+        }
+        struct Later {
+            const std::vector<CursorState> *cursors;
+            bool operator()(std::size_t left, std::size_t right) const
+            {
+                const downstream_spool::MatrixRecord &a = (*cursors)[left].record;
+                const downstream_spool::MatrixRecord &b = (*cursors)[right].record;
+                if (a.key != b.key) return a.key > b.key;
+                return left > right;
+            }
+        };
+        Later later;
+        later.cursors = &cursors;
+        std::priority_queue<std::size_t, std::vector<std::size_t>, Later> queue(later);
+        for (std::size_t index = 0; index < cursors.size(); ++index) {
+            if (cursors[index].active) queue.push(index);
+        }
+
+        std::ostringstream bodyName;
+        bodyName << spoolRoot_ << "/body.p" << product << ".s" << scale << ".tmp";
+        const std::string bodyPath = bodyName.str();
+        std::ofstream body(bodyPath.c_str(), std::ios::binary | std::ios::trunc);
+        if (!body) throw std::runtime_error("cannot create spooled matrix body");
+        body << std::setprecision(17);
+        MatrixResult result;
+        while (!queue.empty()) {
+            const std::uint64_t key = cursors[queue.top()].record.key;
+            double value = 0.0;
+            do {
+                const std::size_t index = queue.top();
+                queue.pop();
+                value += cursors[index].record.value;
+                std::string error;
+                cursors[index].active = cursors[index].cursor->next(
+                    cursors[index].record, error);
+                if (!cursors[index].active && !error.empty()) {
+                    throw std::runtime_error(error);
+                }
+                if (cursors[index].active) queue.push(index);
+            } while (!queue.empty() && cursors[queue.top()].record.key == key);
+            body << keyFeature(key) << ' ' << keyColumn(key) << ' ';
+            if (real) {
+                body << value;
+            } else {
+                const long long rounded = std::llround(value);
+                if (rounded < 0 || !nearlyEqual(value, static_cast<double>(rounded))) {
+                    throw std::runtime_error(
+                        "integer spooled spatial matrix contains a non-integer value");
+                }
+                body << static_cast<std::uint64_t>(rounded);
+            }
+            body << '\n';
+            ++result.nnz;
+            result.mass += value;
+        }
+        body.flush();
+        if (!body) throw std::runtime_error("cannot write spooled matrix body");
+        body.close();
+
+        const std::string matrixPath = outputRoot_ + "/"
+            + kProductNames[product] + "/" + axes_[scale].name + "/matrix.mtx";
+        AtomicOutput output(matrixPath);
+        output.stream() << "%%MatrixMarket matrix coordinate "
+                        << (real ? "real" : "integer") << " general\n"
+                        << "% STAR Suite molecule-first post-collapse policy matrix\n"
+                        << features_.size() << ' ' << axes_[scale].coordinates.size()
+                        << ' ' << result.nnz << '\n';
+        std::ifstream bodyInput(bodyPath.c_str(), std::ios::binary);
+        if (!bodyInput) throw std::runtime_error("cannot reopen spooled matrix body");
+        output.stream() << bodyInput.rdbuf();
+        if (!bodyInput.eof() && bodyInput.fail()) {
+            throw std::runtime_error("cannot read spooled matrix body");
+        }
+        output.commit();
+        if (std::remove(bodyPath.c_str()) != 0) {
+            throw std::runtime_error("cannot remove committed spooled matrix body");
+        }
+        return result;
+    }
+
+    void cleanupRunDirectories()
+    {
+        for (std::size_t product = 0; product < 4; ++product) {
+            if ((impl_.config.products & kProductBits[product]) == 0) continue;
+            for (std::size_t scale = 0; scale < 3; ++scale) {
+                if ((impl_.config.scales & kScaleBits[scale]) == 0) continue;
+                for (const downstream_spool::Run &run : runs_[product][scale]) {
+                    if (std::remove(run.path.c_str()) != 0 && errno != ENOENT) {
+                        throw std::runtime_error(
+                            "cannot remove committed matrix run " + run.path);
+                    }
+                }
+                runs_[product][scale].clear();
+                const std::string directory = runDirectory(product, scale);
+                if (::rmdir(directory.c_str()) != 0 && errno != ENOENT) {
+                    throw std::runtime_error("cannot remove matrix run directory "
+                                             + directory);
+                }
+            }
+        }
+    }
+
+    Pipeline::Impl &impl_;
+    std::string spoolRoot_;
+    std::string outputRoot_;
+    std::vector<std::string> features_;
+    std::vector<std::uint32_t> featureIndex_;
+    std::vector<std::uint32_t> fineIndex_;
+    Axis axes_[3];
+    std::vector<downstream_spool::Run> runs_[4][3];
+};
+
 } // namespace
 
 std::unique_ptr<Pipeline> Pipeline::create(const PipelineConfig &config,
@@ -1454,6 +2135,11 @@ std::unique_ptr<Pipeline> Pipeline::create(const PipelineConfig &config,
             throw std::invalid_argument(
                 "integrated spatial GEX requires positive thread/read/candidate capacities");
         }
+        if (config.expectedReads > std::numeric_limits<std::uint32_t>::max()
+            || config.expectedCandidates > std::numeric_limits<std::uint32_t>::max()) {
+            throw std::invalid_argument(
+                "integrated spatial compact capacities must fit uint32");
+        }
         if (config.barcodeContractDirectory.empty() || config.bc1OligosPath.empty()
             || config.bc2OligosPath.empty() || config.outputDirectory.empty()) {
             throw std::invalid_argument("integrated spatial GEX input/output paths are required");
@@ -1461,6 +2147,14 @@ std::unique_ptr<Pipeline> Pipeline::create(const PipelineConfig &config,
         if (config.overflowPolicy == OverflowPolicy::Spill
             && config.temporaryDirectory.empty()) {
             throw std::invalid_argument("integrated spatial spill requires a temporary directory");
+        }
+        if (config.downstreamSpoolShards == 0
+            || config.downstreamSpoolShards > 4096
+            || config.downstreamSpoolBufferBytes == 0
+            || config.downstreamSpoolBufferBytes
+                > std::numeric_limits<std::size_t>::max()) {
+            throw std::invalid_argument(
+                "invalid integrated spatial downstream spool configuration");
         }
         if (config.overflowPolicy != OverflowPolicy::Spill
             && config.spillHighWaterCandidatesPerThread != 0) {
@@ -1492,6 +2186,29 @@ std::unique_ptr<Pipeline> Pipeline::create(const PipelineConfig &config,
         }
         if (config.overflowPolicy == OverflowPolicy::Spill) {
             if (!spillBudgetFits(impl->memory, impl->budgetBytes, error)) {
+                return std::unique_ptr<Pipeline>();
+            }
+            struct statvfs disk;
+            if (::statvfs(config.temporaryDirectory.c_str(), &disk) != 0
+                || disk.f_frsize == 0
+                || static_cast<std::uint64_t>(disk.f_bavail)
+                    > std::numeric_limits<std::uint64_t>::max()
+                        / static_cast<std::uint64_t>(disk.f_frsize)) {
+                error = "cannot determine integrated spatial spill disk capacity: "
+                    + config.temporaryDirectory;
+                return std::unique_ptr<Pipeline>();
+            }
+            const std::uint64_t diskAvailable =
+                static_cast<std::uint64_t>(disk.f_bavail)
+                * static_cast<std::uint64_t>(disk.f_frsize);
+            if (impl->memory.downstreamSpoolDiskBytes > diskAvailable) {
+                std::ostringstream message;
+                message << "integrated spatial downstream spool requires "
+                        << impl->memory.downstreamSpoolDiskBytes
+                        << " temporary/output bytes but filesystem has "
+                        << diskAvailable << " available at "
+                        << config.temporaryDirectory;
+                error = message.str();
                 return std::unique_ptr<Pipeline>();
             }
         }
@@ -1762,16 +2479,44 @@ bool Pipeline::finalize(const std::vector<std::string> &geneIds,
             || impl_->summary.candidateRows > impl_->config.expectedCandidates) {
             throw std::runtime_error("integrated spatial evidence exceeded declared capacity");
         }
-        std::vector<Clique> cliques;
-        std::vector<CliqueCandidate> cliqueCandidates;
         std::vector<std::uint64_t> coordinateBits(
             (static_cast<std::size_t>(kGridRows) * kGridColumns + 63) / 64, 0);
         std::vector<std::uint8_t> featureUsed(geneIds.size(), 0);
+        std::vector<Clique> cliques;
+        std::vector<CliqueCandidate> cliqueCandidates;
+        std::vector<downstream_spool::Run> contributionRuns;
+        std::string downstreamRoot;
+        std::string contributionDirectory;
         const std::chrono::steady_clock::time_point mergeBegin =
             std::chrono::steady_clock::now();
         if (impl_->config.overflowPolicy == OverflowPolicy::Spill) {
-            buildCliquesSpill(*impl_, h0, cliques, cliqueCandidates,
+            downstreamRoot = impl_->config.temporaryDirectory
+                + "/spatial_gex_downstream";
+            contributionDirectory = downstreamRoot + "/contributions";
+            struct stat downstreamInfo;
+            if (::stat(downstreamRoot.c_str(), &downstreamInfo) == 0) {
+                if (!S_ISDIR(downstreamInfo.st_mode)
+                    || !directoryEmpty(downstreamRoot)) {
+                    throw std::runtime_error(
+                        "spatial downstream spool directory must be empty: "
+                        + downstreamRoot);
+                }
+            } else if (errno != ENOENT) {
+                throw std::runtime_error("cannot inspect spatial downstream spool: "
+                                         + downstreamRoot);
+            }
+            makeDirectories(contributionDirectory);
+            SpoolCliqueSink sink(contributionDirectory,
+                                 impl_->config.sourceRevision,
+                                 impl_->config.downstreamSpoolShards,
+                                 static_cast<std::size_t>(
+                                     impl_->config.downstreamSpoolBufferBytes));
+            buildCliquesSpill(*impl_, h0, sink,
                               coordinateBits, featureUsed);
+            sink.finish(contributionRuns,
+                        impl_->summary.downstreamContributionRecords,
+                        impl_->summary.downstreamContributionBytes);
+            impl_->summary.downstreamContributionRuns = contributionRuns.size();
             impl_->summary.spillMergeSeconds = std::chrono::duration<double>(
                 std::chrono::steady_clock::now() - mergeBegin).count();
             impl_->summary.spillRuns = 0;
@@ -1787,7 +2532,8 @@ bool Pipeline::finalize(const std::vector<std::string> &geneIds,
                 }
             }
         } else {
-            buildCliquesMemory(*impl_, h0, cliques, cliqueCandidates,
+            InMemoryCliqueSink sink(cliques, cliqueCandidates);
+            buildCliquesMemory(*impl_, h0, sink,
                                coordinateBits, featureUsed);
         }
         for (Impl::ThreadState &thread : impl_->threads) {
@@ -1797,35 +2543,135 @@ bool Pipeline::finalize(const std::vector<std::string> &geneIds,
             thread.h0.bc2.clear();
         }
 
-        std::vector<FinalMolecule> molecules;
-        if ((impl_->config.products & ProductStrict) != 0) {
-            std::vector<FinalMolecule> values = resolveInteger(
-                cliques, cliqueCandidates, ProductStrict);
-            impl_->summary.strictMolecules = values.size();
-            molecules.insert(molecules.end(), values.begin(), values.end());
-        }
-        if ((impl_->config.products & ProductSoftExpected) != 0) {
-            std::vector<FinalMolecule> values = resolveSoft(cliques, cliqueCandidates);
-            for (const FinalMolecule &value : values) {
-                impl_->summary.softExpectedMass += value.weight;
+        if (impl_->config.overflowPolicy == OverflowPolicy::Spill) {
+            if (impl_->memory.downstreamSpoolBytes
+                <= impl_->memory.accumulationFixedBytes) {
+                throw std::runtime_error("invalid downstream spool workspace estimate");
             }
-            molecules.insert(molecules.end(), values.begin(), values.end());
+            const std::uint64_t workspace = impl_->memory.downstreamSpoolBytes
+                - impl_->memory.accumulationFixedBytes;
+            const std::uint64_t maximumShardRecords = workspace
+                / kDownstreamWorkingBytesPerContribution;
+            if (maximumShardRecords == 0) {
+                throw std::runtime_error("downstream spool workspace is empty");
+            }
+            const std::chrono::steady_clock::time_point materializeBegin =
+                std::chrono::steady_clock::now();
+            SpoolMaterializer materializer(*impl_, geneIds, featureUsed,
+                                            coordinateBits, downstreamRoot);
+            double resolveSeconds = 0.0;
+            for (const downstream_spool::Run &run : contributionRuns) {
+                impl_->summary.downstreamLargestShardRecords = std::max(
+                    impl_->summary.downstreamLargestShardRecords, run.records);
+                if (run.records > maximumShardRecords
+                    || run.records > std::numeric_limits<std::size_t>::max()) {
+                    std::ostringstream message;
+                    message << "spatial downstream shard " << run.shard << " has "
+                            << run.records << " contribution records; bounded workspace "
+                            << "permits " << maximumShardRecords
+                            << ". Increase downstream shard count.";
+                    throw std::runtime_error(message.str());
+                }
+                const std::chrono::steady_clock::time_point resolveBegin =
+                    std::chrono::steady_clock::now();
+                std::string cursorError;
+                std::unique_ptr<downstream_spool::ContributionCursor> cursor =
+                    downstream_spool::ContributionCursor::open(
+                        run, impl_->config.sourceRevision, cursorError);
+                if (!cursor) throw std::runtime_error(cursorError);
+                std::vector<downstream_spool::Contribution> contributions;
+                contributions.reserve(static_cast<std::size_t>(run.records));
+                downstream_spool::Contribution contribution = {};
+                while (cursor->next(contribution, cursorError)) {
+                    if (contribution.coordinate
+                            >= static_cast<std::uint64_t>(kGridRows) * kGridColumns
+                        || downstream_spool::shardForCoordinate(
+                               contribution.coordinate, kGridColumns,
+                               impl_->config.downstreamSpoolShards) != run.shard) {
+                        throw std::runtime_error(
+                            "spatial downstream contribution has wrong coordinate shard");
+                    }
+                    contributions.push_back(contribution);
+                }
+                if (!cursorError.empty()) throw std::runtime_error(cursorError);
+                if (contributions.size() != run.records) {
+                    throw std::runtime_error(
+                        "spatial downstream contribution count changed while reading");
+                }
+                std::vector<FinalMolecule> molecules = resolveContributionShard(
+                    contributions, impl_->config.products);
+                resolveSeconds += std::chrono::duration<double>(
+                    std::chrono::steady_clock::now() - resolveBegin).count();
+                for (const FinalMolecule &molecule : molecules) {
+                    if (molecule.policy == ProductStrict) {
+                        ++impl_->summary.strictMolecules;
+                    } else if (molecule.policy == ProductSoftExpected) {
+                        impl_->summary.softExpectedMass += molecule.weight;
+                    } else if (molecule.policy == ProductHard) {
+                        ++impl_->summary.hardMolecules;
+                    } else if (molecule.policy == ProductGatedHard) {
+                        ++impl_->summary.gatedHardMolecules;
+                    } else {
+                        throw std::runtime_error(
+                            "spatial downstream resolver returned an unknown product");
+                    }
+                }
+                materializer.writeShard(run.shard, molecules);
+            }
+            impl_->summary.downstreamResolveSeconds = resolveSeconds;
+            materializer.commit();
+            impl_->summary.downstreamMaterializeSeconds =
+                std::chrono::duration<double>(
+                    std::chrono::steady_clock::now() - materializeBegin).count()
+                - resolveSeconds;
+            for (const downstream_spool::Run &run : contributionRuns) {
+                if (std::remove(run.path.c_str()) != 0 && errno != ENOENT) {
+                    throw std::runtime_error(
+                        "cannot remove committed contribution run " + run.path
+                        + ": " + std::strerror(errno));
+                }
+            }
+            if (::rmdir(contributionDirectory.c_str()) != 0) {
+                throw std::runtime_error(
+                    "cannot remove downstream contribution directory "
+                    + contributionDirectory + ": " + std::strerror(errno));
+            }
+            if (::rmdir(downstreamRoot.c_str()) != 0) {
+                throw std::runtime_error("cannot remove downstream spool directory "
+                                         + downstreamRoot + ": "
+                                         + std::strerror(errno));
+            }
+        } else {
+            std::vector<FinalMolecule> molecules;
+            if ((impl_->config.products & ProductStrict) != 0) {
+                std::vector<FinalMolecule> values = resolveInteger(
+                    cliques, cliqueCandidates, ProductStrict);
+                impl_->summary.strictMolecules = values.size();
+                molecules.insert(molecules.end(), values.begin(), values.end());
+            }
+            if ((impl_->config.products & ProductSoftExpected) != 0) {
+                std::vector<FinalMolecule> values = resolveSoft(cliques, cliqueCandidates);
+                for (const FinalMolecule &value : values) {
+                    impl_->summary.softExpectedMass += value.weight;
+                }
+                molecules.insert(molecules.end(), values.begin(), values.end());
+            }
+            if ((impl_->config.products & ProductHard) != 0) {
+                std::vector<FinalMolecule> values = resolveInteger(
+                    cliques, cliqueCandidates, ProductHard);
+                impl_->summary.hardMolecules = values.size();
+                molecules.insert(molecules.end(), values.begin(), values.end());
+            }
+            if ((impl_->config.products & ProductGatedHard) != 0) {
+                std::vector<FinalMolecule> values = resolveInteger(
+                    cliques, cliqueCandidates, ProductGatedHard);
+                impl_->summary.gatedHardMolecules = values.size();
+                molecules.insert(molecules.end(), values.begin(), values.end());
+            }
+            std::vector<Clique>().swap(cliques);
+            std::vector<CliqueCandidate>().swap(cliqueCandidates);
+            materialize(*impl_, geneIds, featureUsed, coordinateBits, molecules);
         }
-        if ((impl_->config.products & ProductHard) != 0) {
-            std::vector<FinalMolecule> values = resolveInteger(
-                cliques, cliqueCandidates, ProductHard);
-            impl_->summary.hardMolecules = values.size();
-            molecules.insert(molecules.end(), values.begin(), values.end());
-        }
-        if ((impl_->config.products & ProductGatedHard) != 0) {
-            std::vector<FinalMolecule> values = resolveInteger(
-                cliques, cliqueCandidates, ProductGatedHard);
-            impl_->summary.gatedHardMolecules = values.size();
-            molecules.insert(molecules.end(), values.begin(), values.end());
-        }
-        std::vector<Clique>().swap(cliques);
-        std::vector<CliqueCandidate>().swap(cliqueCandidates);
-        materialize(*impl_, geneIds, featureUsed, coordinateBits, molecules);
 
         std::ostringstream runSummary;
         runSummary << "schema\tstar_suite.spatial_gex_integrated.v1\n"
@@ -1856,6 +2702,10 @@ bool Pipeline::finalize(const std::vector<std::string> &geneIds,
                    << "hard_molecules\t" << impl_->summary.hardMolecules << '\n'
                    << "gated_hard_molecules\t" << impl_->summary.gatedHardMolecules << '\n'
                    << "estimated_peak_bytes\t" << impl_->memory.peakBytes << '\n'
+                   << "estimated_downstream_spool_bytes\t"
+                   << impl_->memory.downstreamSpoolBytes << '\n'
+                   << "estimated_downstream_spool_disk_bytes\t"
+                   << impl_->memory.downstreamSpoolDiskBytes << '\n'
                    << "memory_budget_bytes\t" << impl_->budgetBytes << '\n'
                    << "overflow_policy\t"
                    << (impl_->config.overflowPolicy == OverflowPolicy::Spill ? "Spill" : "Fail")
@@ -1866,6 +2716,22 @@ bool Pipeline::finalize(const std::vector<std::string> &geneIds,
                    << impl_->summary.spillHighWaterCandidatesPerThread << '\n'
                    << "spill_merge_seconds\t" << std::setprecision(17)
                    << impl_->summary.spillMergeSeconds << '\n'
+                   << "downstream_contribution_records\t"
+                   << impl_->summary.downstreamContributionRecords << '\n'
+                   << "downstream_contribution_runs\t"
+                   << impl_->summary.downstreamContributionRuns << '\n'
+                   << "downstream_contribution_bytes\t"
+                   << impl_->summary.downstreamContributionBytes << '\n'
+                   << "downstream_largest_shard_records\t"
+                   << impl_->summary.downstreamLargestShardRecords << '\n'
+                   << "downstream_matrix_runs\t"
+                   << impl_->summary.downstreamMatrixRuns << '\n'
+                   << "downstream_matrix_bytes\t"
+                   << impl_->summary.downstreamMatrixBytes << '\n'
+                   << "downstream_resolve_seconds\t" << std::setprecision(17)
+                   << impl_->summary.downstreamResolveSeconds << '\n'
+                   << "downstream_materialize_seconds\t" << std::setprecision(17)
+                   << impl_->summary.downstreamMaterializeSeconds << '\n'
                    << "peak_resident_reads\t" << impl_->summary.peakResidentReads << '\n'
                    << "peak_resident_candidates\t"
                    << impl_->summary.peakResidentCandidates << '\n';
