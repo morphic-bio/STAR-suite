@@ -1,3 +1,20 @@
+star-suite (1.6.0-1) unstable; urgency=medium
+
+  * Add opt-in integrated Visium HD 3-prime GEX processing with fused spatial
+    barcode decoding, post-alignment GeneFull evidence, and molecule-first
+    strict, soft, hard, and gated-hard spatial matrices.
+  * Add bounded downstream spooling for clique resolution, candidate-specific
+    UMI correction, multigene reconciliation, and multi-scale materialization.
+  * Add deterministic annotated rescue, explicit experimental compatibility
+    evidence, N-containing spatial-barcode fallback, and full-slide guards.
+  * Fix Flex inline skip-processing validation, replay suppression,
+    alignment fallback, and hash-kept read accounting.
+  * Add default-off scRNA, spatial parity, Flex fallback, SLAM provenance,
+    CB/UB, and CR-compatible CRISPR release gates.
+  * Report STAR Suite 1.6.0 from STAR and molecule_first_resolver --version.
+
+ -- STAR-suite Maintainers <maintainers@biodepot.example>  Sat, 25 Jul 2026 17:51:51 +0000
+
 star-suite (1.5.0-1) unstable; urgency=medium
 
   * Add the native candidate-preserving read-to-clique-to-UMI reference

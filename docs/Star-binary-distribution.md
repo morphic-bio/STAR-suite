@@ -195,6 +195,22 @@ Ship discoverable, installable Ubuntu binaries for STAR Suite with low-friction 
   `STAR --version` reports `1.3.0`. Upstream provenance and genome index
   compatibility remain `2.7.11b` and `2.7.4a`.
 
+## Feature Release v1.6.0 (2026-07-25)
+
+- Release tag: `v1.6.0`
+- Release notes: `docs/RELEASE_NOTES_v1.6.0.md`
+- Packaging metadata: `debian/changelog` entry `1.6.0-1`
+- Scope added since `v1.5.0`: opt-in integrated Visium HD 3-prime GEX,
+  concurrent/fused spatial and gene-evidence processing, deterministic
+  annotated rescue, bounded downstream spooling, multi-scale spatial MEX
+  materialization, and Flex inline skip/fallback fixes.
+- The normal bulk, STARsolo, CR-compatible scRNA, and Flex surfaces remain
+  default-off for integrated spatial GEX and retain byte-level isolation gates.
+- Version note: release artifacts use tag `v1.6.0`, Debian packages use STAR
+  Suite `1.6.0`, and both `STAR` and `molecule_first_resolver` report `1.6.0`.
+  Upstream provenance and genome index compatibility remain `2.7.11b` and
+  `2.7.4a`.
+
 ## Feature Release v1.5.0 (2026-07-17)
 
 - Release tag: `v1.5.0`
