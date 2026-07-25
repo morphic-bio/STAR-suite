@@ -108,7 +108,10 @@ void Solo::processAndOutput()
     // Early exit for skipProcessing mode with minimal readInfo preparation
     if (pSolo.skipProcessing) {
         // If tag table export is enabled, we need minimal readInfo population
-        if (pSolo.writeTagTableEnabled) {
+        // Inline hash mode records decisions during mapping and does not create
+        // the legacy per-thread Solo streams consumed by processRecords().
+        // With processing disabled there is therefore nothing to replay here.
+        if (pSolo.writeTagTableEnabled && !pSolo.inlineHashMode) {
             // Process only the samAttrFeature to populate readInfo without full counting
             uint32 attrFeatureIdx = pSolo.featureInd[pSolo.samAttrFeature];
             if (attrFeatureIdx < pSolo.nFeatures) {
@@ -119,6 +122,9 @@ void Solo::processAndOutput()
                 // The feature processing code should handle skipProcessing internally
                 soloFeat[attrFeatureIdx]->processRecords();
             }
+        } else if (pSolo.inlineHashMode) {
+            P.inOut->logMain << "NOTE: --soloSkipProcessing=yes with inline hash mode; "
+                             << "skipping legacy readInfo stream replay.\n";
         }
         
         *P.inOut->logStdOut << timeMonthDayTime() << " ..... skipping Solo counting (soloSkipProcessing=yes)\n" <<flush;

@@ -1785,8 +1785,8 @@ soloCrMultimapRescueIntronic auto
 soloCrMultimapRescueEvidence compatibility
     string:                 evidence policy for CR-style genomic multimapper rescue
                             compatibility ... CR-compatible exon-first behavior (default)
-                            decoy         ... alignment-aware feature uniqueness: all best-score alignments
-                                            participate; NA/non-countable annotations prevent false uniqueness
+                            annotated     ... score-first retained-GTF evidence; equal-best different-gene
+                                            or per-alignment multigene evidence remains unresolved
 
 soloSpatialFeatureSidecar   -
     string:                 default-off output prefix for a fixed-width, read-ordinal GeneFull evidence sidecar

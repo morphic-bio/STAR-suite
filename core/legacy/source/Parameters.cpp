@@ -3297,10 +3297,6 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
             rejectSpatialRecipe("does not support batch, SLAM, or transcript-VB replay modes");
 
         if (soloSpatialGexIntegratedEnabled) {
-            if (pSolo.crMultimapRescueEvidenceMode !=
-                ParametersSolo::CrMultimapRescueEvidenceAnnotatedBest) {
-                rejectSpatialRecipe("requires --soloCrMultimapRescueEvidence annotated");
-            }
             if (soloSpatialBarcodeContract.empty() || soloSpatialBarcodeContract == "-")
                 rejectSpatialRecipe("requires --soloSpatialBarcodeContract DIR");
             if (soloSpatialBc1Oligos.empty() || soloSpatialBc1Oligos == "-")

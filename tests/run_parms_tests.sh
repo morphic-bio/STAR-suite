@@ -332,8 +332,8 @@ export STAR_BIN
 # Define test sets
 declare -a STANDARD_TESTS=(
     # 1) Input parsing + guardrails
-    "${SCRIPT_DIR}/test_readFilesIn_max_mates.sh"
     "${SCRIPT_DIR}/run_solo_smoke.sh"
+    "${SCRIPT_DIR}/test_readFilesIn_max_mates.sh"
     
     # 2) CR compatibility + CR multi
     "${SCRIPT_DIR}/run_cr_compat_integration_smoke.sh"
@@ -355,7 +355,7 @@ declare -a STANDARD_TESTS=(
     # 5) SLAM + transcriptVB + tximport
     "${SCRIPT_DIR}/run_slam_unit_tests.sh"
     "${SCRIPT_DIR}/run_slam_compat_test.sh"
-    "${SCRIPT_DIR}/run_slam_fixture_parity.sh"
+    "${SCRIPT_DIR}/run_slam_parity_smoke.sh"
     "${SCRIPT_DIR}/transcriptvb/quick_test.sh"
     "${SCRIPT_DIR}/tximport/tximport_parity_test.sh"
 )
