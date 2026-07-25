@@ -973,3 +973,17 @@ All three runs used **`USE_READFILES_ZCAT=0`** (no external `zcat`), **`--outSAM
   2, 8, and 16 um; private spill files exist only while the process is live.
 - Status: untracked; never commit external resolver TSVs, MEX matrices, spill
   records, or timing logs.
+
+## Integrated Visium HD GEX downstream spool (2026-07-25)
+
+- Runbook: `docs/RUNBOOK_VISIUM_HD_GEX_DOWNSTREAM_SPOOL_20260725.md`
+- Fresh 100K acceptance roots:
+  - `/mnt/pikachu/star-spatial/gex_in_memory_tests/20260725_ovarian_100k_downstream_spool_fail_v1/`
+  - `/mnt/pikachu/star-spatial/gex_in_memory_tests/20260725_ovarian_100k_downstream_spool_spill_v3/`
+  - `/mnt/pikachu/star-spatial/gex_in_memory_tests/20260725_ovarian_100k_downstream_spool_1t_manyrun_v1/`
+  - `/mnt/pikachu/star-spatial/gex_in_memory_tests/20260725_ovarian_100k_downstream_spool_sidecar_v1/`
+- Contents: integrated strict, soft-expected, hard, and gated-hard MEX at 2,
+  8, and 16 um; run summaries and STAR logs. Private downstream spools and
+  `.partial` MEX roots are removed only on successful commit.
+- Status: untracked; never commit MEX output, binary spool records, sidecars,
+  FASTQs, timing logs, or reference data.
