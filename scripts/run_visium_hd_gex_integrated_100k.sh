@@ -21,11 +21,20 @@ bc2_oligos=${VISIUM_HD_BC2_OLIGOS:-/storage/star-spatial/runs/cleanroom_hd_mouse
 barcode_contract=${VISIUM_HD_BARCODE_CONTRACT:-/storage/star-spatial/runs/cleanroom_hd_mouse_brain/barcode_contract}
 threads=${STAR_THREADS:-16}
 overflow_policy=${SPATIAL_OVERFLOW_POLICY:-Fail}
+rescue_evidence=${SPATIAL_CR_RESCUE_EVIDENCE:-annotated}
 memory_fraction=${SPATIAL_MEMORY_FRACTION:-0.8}
 spill_high_water=${SPATIAL_SPILL_HIGH_WATER_CANDIDATES:-0}
 diagnostic_sidecar=${SPATIAL_DIAGNOSTIC_SIDECAR_PREFIX:-}
 expected_reads=${SPATIAL_EXPECTED_READS:-100000}
 expected_candidates=${SPATIAL_EXPECTED_CANDIDATES:-111744}
+
+case "$rescue_evidence" in
+    compatibility|annotated) ;;
+    *)
+        echo "error: SPATIAL_CR_RESCUE_EVIDENCE must be compatibility or annotated" >&2
+        exit 2
+        ;;
+esac
 
 for path in "$star_binary" "$fixture/checksums.sha256" "$genome_dir/Genome" \
     "$genome_dir/SA" "$genome_dir/SAindex" "$genome_dir/geneInfo.tab" \
@@ -101,7 +110,7 @@ setsid /usr/bin/time -v "$star_binary" \
     --soloFeatures GeneFull \
     --soloCrGexFeature GeneFull \
     --soloCrMultimapRescue yes \
-    --soloCrMultimapRescueEvidence annotated \
+    --soloCrMultimapRescueEvidence "$rescue_evidence" \
     --soloCrMultimapRescueIntronic auto \
     --soloUMIdedup 1MM_CR \
     --soloUMIfiltering MultiGeneUMI_CR \
