@@ -2,56 +2,85 @@
 
 Date: 2026-07-25
 
-`v1.6.0` adds an opt-in integrated Visium HD 3-prime GEX path and fixes four
-Flex alignment edge cases found during full-slide Visium validation. Release
-artifacts use `v1.6.0`, Debian packages use `1.6.0-1`, and `STAR --version`
-plus the molecule-first companion tools report `1.6.0`. The upstream STAR base
-remains `2.7.11b`; genome-index compatibility remains `2.7.4a`.
+`v1.6.0` promotes the opt-in integrated Visium HD 3-prime GEX pipeline and
+its bounded molecule-first materializer. It also fixes Flex-as-aligner paths
+that skip Solo processing or fall back from the feature hash to alignment.
+The release artifact version is `v1.6.0`, Debian packages use `1.6.0-1`, and
+both `STAR --version` and `molecule_first_resolver --version` report `1.6.0`.
+The upstream STAR base remains `2.7.11b`; genome-index compatibility remains
+`2.7.4a`.
 
 ## Integrated Visium HD GEX
 
-- `--soloSpatialGexIntegrated yes` joins direct R1 spatial candidates to gene
-  evidence after modern GeneFull and CR-compatible multimap resolution, before
-  barcode correction and UMI collapse.
-- Spatial barcode windows containing N use the bounded edit-distance fallback
-  and normal uniqueness/ambiguity rules. UMIs containing N remain invalid and
-  are retained in accounting without creating molecules.
-- Strict, soft expected-count, hard, and gated-hard products are materialized
-  atomically at 2, 8, and 16 micrometer resolutions.
-- Bounded accumulation and downstream contribution/matrix spools preserve the
-  accepted MEX bytes while avoiding the prior full-slide in-memory boundary.
-- Annotated rescue remains the modern default. Explicit compatibility evidence
-  is available for controlled comparisons; legacy GX/UR-derived gene policy is
-  not used as a substitute for the integrated modern path.
-- Diagnostic feature sidecars are optional and are intended as an overflow or
-  debugging aid rather than the production data path.
+- Enable the new path explicitly with `--soloSpatialGexIntegrated yes` and a
+  spatial barcode/coordinate contract. It is off by default.
+- Decode R1 spatial coordinate candidates while STAR maps R2, then join those
+  candidates to post-alignment GeneFull evidence before barcode correction and
+  UMI collapse.
+- Resolve read cliques and candidate-specific UMIs before materializing
+  strict, soft expected-count, hard, and gated-hard spatial products at 2, 8,
+  and 16 micrometer scales.
+- Route spatial barcodes containing `N` through the bounded alignment/DP
+  fallback under the ordinary uniqueness rules. UMIs containing non-ACGT
+  bases remain invalid for molecule creation and are retained in accounting.
+- Keep the feature sidecar optional for diagnostics or overflow handling; it
+  is not the production interchange requirement.
 
-## Flex alignment fixes
+## Memory-bounded full-slide processing
 
-- Skip expected-cell validation only when Flex processing is explicitly
-  disabled.
+- Spill candidate accumulation when configured, then use a bounded downstream
+  spool for clique formation, coordinate-local correction, multigene
+  reconciliation, and matrix materialization.
+- Preserve exact in-memory/spooled parity with versioned binary records,
+  deterministic ordering, integrity checks, and fail-closed admission gates.
+- Stabilize floating-point reduction order for coarse soft matrices so thread,
+  spill, and materialization choices do not change released products.
+
+## Gene evidence and compatibility policy
+
+- Make annotated CR-compatible rescue deterministic and score-first while
+  retaining unannotated alignments as decoy evidence rather than silently
+  promoting them.
+- Keep `annotated` as the normal evidence policy. The `compatibility` evidence
+  mode is explicit and experimental; it is not implied by GX/UR tags and does
+  not change ordinary STARsolo defaults.
+- Preserve the accepted deterministic annotation/MECOM rescue behavior already
+  present on the stable line.
+
+## Flex fixes
+
+- Do not require expected-cell settings when `--soloSkipProcessing yes`.
 - Avoid legacy Solo replay in inline skip-processing mode.
-- Route no-sample hash-cache misses to alignment instead of dropping them.
-- Account for hash-kept reads that do not receive a barcode assignment.
+- Route true no-sample hash-cache misses to alignment while keeping valid H0
+  hash hits, including reads without a barcode assignment, on the hash path.
+- Account hash-kept reads even when no barcode assignment exists.
 
-These behaviors remain gated behind their existing Flex/spatial options. The
-normal scRNA-seq and STARsolo paths are unchanged by default.
+## Isolation and validation
 
-## Validation
+- Integrated spatial GEX is gated by its explicit enable flag and contract;
+  sidecar and spill settings are inert on ordinary scRNA runs.
+- Normal scRNA sidecar-off outputs reproduced their tracked byte-level golden
+  files. Solo, GEX, CR multi, Flex, CB/UB, Y/no-Y, SLAM, TranscriptVB, and
+  tximport regression rails passed or cleanly reported unavailable optional
+  dependencies.
+- Core spatial, spill, downstream-spool, CR multimap, 20,000-case UMI parity,
+  molecule-first resolver/materializer, N-barcode, and concurrency tests
+  passed.
+- The fresh human CRC 100K gate reproduced 109,852 candidate rows, 79,644
+  cliques, 66,845 strict molecules, 79,144 hard molecules, and 71,262
+  gated-hard molecules, with exact accepted ledgers, resolver artifacts, and
+  policy matrices.
+- The fresh ovarian 100K compatibility/spool gate reproduced 58,395 strict,
+  71,830 hard, and 63,105 gated-hard molecules; all 36 MEX components were
+  byte-identical to the accepted compatibility oracle.
+- The retained full 212.6-million-read CRC validation reproduced the open
+  candidate surface and all eight resolver artifacts byte-for-byte while
+  reducing materialization to 10 minutes 49 seconds.
+- The CR-compatible CRISPR fixture passed with 1,043 single-feature cells and
+  35 multi-feature cells; pinned SLAM parity passed after manifest/index
+  verification.
 
-- Clean Chromap-enabled STAR build and embedded-parameter regeneration.
-- Focused spatial GEX, spill, sidecar, R1 decoder, multigene UMI, and CR rescue
-  units; molecule-first native, frozen-reference, bounded-materializer, and
-  production-adapter tests.
-- Flex skip-processing parameter/inline tests, hash-to-alignment fallback,
-  barcode-free keep bookkeeping, and checksum-pinned 800K decision replay.
-- Standard Solo, CR-compatible GEX/CRISPR, Flex, Y/no-Y, SLAM, TranscriptVB,
-  and normal-scRNA sidecar-off regression coverage.
-- CRC Flex 100K deterministic gate: accepted open candidate surface, all eight
-  resolver artifacts, and policy matrices reproduced exactly.
-- Ovarian GEX 100K annotated and compatibility spill gates reproduced their
-  accepted 36-component MEX and policy-summary hashes exactly.
-
-Implementation and acceptance details are recorded in
-`docs/RUNBOOK_VISIUM_HD_GEX_DOWNSTREAM_SPOOL_20260725.md` and
-`docs/RUNBOOK_VISIUM_HD_GEX_IN_MEMORY_1MM_CR_20260724.md`.
+Implementation, safety contracts, commands, and artifact provenance are in
+`docs/RUNBOOK_VISIUM_HD_GEX_IN_MEMORY_1MM_CR_20260724.md`,
+`docs/RUNBOOK_VISIUM_HD_GEX_DOWNSTREAM_SPOOL_20260725.md`, and the associated
+validation records under `docs/`.

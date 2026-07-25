@@ -421,7 +421,11 @@ bool FastxInputModule::configure(const InputSourcePlan& plan, std::string* error
     if (plan.mate_files.size() > MAX_N_MATES) {
         std::ostringstream msg;
         msg << "Fastx input has " << plan.mate_files.size()
-            << " read mates, which exceeds MAX_N_MATES=" << MAX_N_MATES;
+            << " read mates, which exceeds MAX_N_MATES=" << MAX_N_MATES << "\n"
+            << "--readFilesIn expects 1-3 read mates (R1/R2/optional barcode read). "
+            << "Multiple lanes must be comma-separated per mate, e.g. "
+            << "--readFilesIn R2_L1.fastq,R2_L2.fastq R1_L1.fastq,R1_L2.fastq.\n"
+            << "Do not include index reads (I1/I2) in --readFilesIn.";
         return set_error(error, msg.str());
     }
 
