@@ -3346,8 +3346,11 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
                 }
                 rejectSpatialRecipe(spatialError);
             }
-            inOut->logMain << "Spatial GEX integrated memory estimate: peak="
-                           << memoryModel.peakBytes << " bytes for reads="
+            inOut->logMain << "Spatial GEX integrated memory estimate: all_memory_peak="
+                           << memoryModel.peakBytes << " bounded_spool="
+                           << memoryModel.downstreamSpoolBytes << " spool_disk="
+                           << memoryModel.downstreamSpoolDiskBytes
+                           << " bytes for reads="
                            << capacity.reads << " candidates=" << capacity.candidates
                            << " threads=" << capacity.threads << " overflow="
                            << (soloSpatialOverflowSpill ? "Spill" : "Fail") << '\n';

@@ -1834,8 +1834,9 @@ soloSpatialMemoryFraction   0.80
 
 soloSpatialOverflowPolicy   Fail
     string:                 Fail|Spill when the declared in-memory spatial budget cannot be maintained
-                            Spill uses lazy compact binary read/candidate runs below outTmpDir; it never uses the diagnostic sidecar bridge.
-                            This implementation still requires all post-accumulation phases to fit the configured memory budget.
+                            Spill uses compact binary read/candidate, coordinate-contribution, and matrix-entry runs below outTmpDir.
+                            UMI correction and MultiGeneUMI_CR reconciliation are bounded by deterministic coordinate shards.
+                            It never uses the diagnostic sidecar bridge or legacy Solo replay records.
 
 soloSpatialSpillHighWaterCandidates 0
     int:                    advanced per-worker candidate high-water override for Spill; 0 derives it from the checked memory budget

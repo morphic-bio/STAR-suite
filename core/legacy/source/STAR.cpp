@@ -705,8 +705,19 @@ int main(int argInN, char *argIn[])
             P.spatialGexPipeline = spatialGexPipeline.get();
             P.inOut->logMain << "Integrated spatial GEX output: "
                              << spatialConfig.outputDirectory << "\n"
-                             << "Integrated spatial GEX estimated peak bytes: "
+                             << "Integrated spatial GEX all-memory peak bytes: "
                              << spatialGexPipeline->memoryModel().peakBytes
+                             << "; bounded downstream spool bytes: "
+                             << spatialGexPipeline->memoryModel().downstreamSpoolBytes
+                             << "; bounded spool disk bytes: "
+                             << spatialGexPipeline->memoryModel()
+                                    .downstreamSpoolDiskBytes
+                             << "; selected estimate bytes: "
+                             << (spatialConfig.overflowPolicy
+                                     == spatial_gex::OverflowPolicy::Spill
+                                     ? spatialGexPipeline->memoryModel()
+                                           .downstreamSpoolBytes
+                                     : spatialGexPipeline->memoryModel().peakBytes)
                              << "; budget bytes: "
                              << spatialGexPipeline->memoryBudgetBytes() << "\n" << flush;
         }

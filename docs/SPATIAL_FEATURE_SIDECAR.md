@@ -3,10 +3,11 @@
 > **Diagnostic compatibility path; scheduled for retirement.** New Visium HD
 > GEX production recipes must use `--soloSpatialGexIntegrated yes`. The
 > sidecar remains available only for bounded parity/debug audits. It is not an
-> overflow format: integrated mode can spill its read/candidate accumulator as
-> compact, versioned binary runs below `outTmpDir` when
-> `--soloSpatialOverflowPolicy Spill` is selected. Later phases must still pass
-> the checked in-memory budget; they never fall back to this sidecar.
+> overflow format: integrated mode uses compact, versioned internal binary
+> runs below `outTmpDir` when `--soloSpatialOverflowPolicy Spill` is selected.
+> That path covers read evidence, coordinate-local correction and
+> reconciliation, and streaming MEX materialization. It never falls back to
+> this sidecar.
 
 `--soloSpatialFeatureSidecar PREFIX` is a default-off, annotation-only output
 for molecule-first Visium HD 3-prime GEX. It records modern post-rescue
