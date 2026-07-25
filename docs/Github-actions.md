@@ -72,8 +72,27 @@ Tag policy:
   - self-contained smoke tests
   - public-data-only or synthetic surfaces
   - current Docker set: `tests/run_solo_smoke.sh`,
+    `tests/run_scrna_sidecar_off_golden.sh`,
+    `tests/run_spatial_r1_tap_guard.sh`,
+    `tests/test_visium_hd_gex_sidecar_concurrency.py`,
     `tests/slam/test_snp_mask_build_smoke.sh`,
-    `tests/run_flex_tiny_public_smoke.sh`
+    `tests/run_flex_tiny_public_smoke.sh`, and
+    `tests/run_molecule_first_native_smoke.sh`
+  - Docker image construction also runs
+    `make -C core/legacy/source test_MultiGeneUmiCr`, a deterministic
+    20,000-case comparison of the shared resolver with both pre-refactor
+    conventional-Solo and bridge rules
+  - the scRNA golden gate omits `--soloSpatialFeatureSidecar` and requires the
+    raw GeneFull MEX files to remain byte-identical to feature-branch base
+    commit `a996107e271c013e39f9398151deda0017da35d6`
+  - the Visium HD producer-scheduler gate proves R1/STAR overlap, the R1-to-H0
+    dependency, serial fallback ordering, bounded concurrent thread allocation,
+    sibling process-group termination on failure, and that fused evidence mode
+    cannot be selected with the historical serial schedule
+  - the fused R1 tap is unit-tested as an ordered FIFO writer and its CLI guard
+    rejects tap-only invocations before STAR opens ordinary read input
+  - the molecule-first native smoke proves `--products` can select the real-valued
+    soft policy without materializing an integer-policy directory
   - should run on PRs and all protected branch pipelines
 - Tier B:
   - fixture-backed tests (for example `/storage` data)

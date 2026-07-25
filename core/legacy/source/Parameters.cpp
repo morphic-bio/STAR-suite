@@ -1,5 +1,6 @@
 #include "IncludeDefine.h"
 #include "Parameters.h"
+#include "SpatialGex.h"
 #include "ErrorWarning.h"
 #include "SequenceFuns.h"
 #include "OutSJ.h"
@@ -623,6 +624,20 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloCrGexFeature", &pSolo.crGexFeatureStr));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloCrMultimapRescue", &pSolo.crMultimapRescueStr));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloCrMultimapRescueIntronic", &pSolo.crMultimapRescueIntronicStr));
+    parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloCrMultimapRescueEvidence", &pSolo.crMultimapRescueEvidenceStr));
+    parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloSpatialFeatureSidecar", &soloSpatialFeatureSidecar));
+    parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloSpatialR1FastqTap", &soloSpatialR1FastqTap));
+    parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloSpatialGexIntegrated", &soloSpatialGexIntegrated));
+    parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloSpatialBarcodeContract", &soloSpatialBarcodeContract));
+    parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloSpatialBc1Oligos", &soloSpatialBc1Oligos));
+    parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloSpatialBc2Oligos", &soloSpatialBc2Oligos));
+    parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloSpatialAssignmentProducts", &soloSpatialAssignmentProducts));
+    parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloSpatialBinSizes", &soloSpatialBinSizes));
+    parArray.push_back(new ParameterInfoScalar <uint64>   (-1, -1, "soloSpatialExpectedReads", &soloSpatialExpectedReads));
+    parArray.push_back(new ParameterInfoScalar <uint64>   (-1, -1, "soloSpatialExpectedCandidates", &soloSpatialExpectedCandidates));
+    parArray.push_back(new ParameterInfoScalar <double>   (-1, -1, "soloSpatialMemoryFraction", &soloSpatialMemoryFraction));
+    parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloSpatialOverflowPolicy", &soloSpatialOverflowPolicy));
+    parArray.push_back(new ParameterInfoScalar <uint64>   (-1, -1, "soloSpatialSpillHighWaterCandidates", &soloSpatialSpillHighWaterCandidates));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloProbeList", &pSolo.probeListPath));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloRemoveDeprecated", &pSolo.removeDeprecatedStr));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloSampleWhitelist", &pSolo.sampleWhitelistPath));
@@ -2192,6 +2207,37 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
         exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
     };
 
+    // Reject invalid spatial-mode combinations before opening any read inputs.
+    // The complete scientific recipe is validated after Solo initialization.
+    soloSpatialFeatureSidecarEnabled = !soloSpatialFeatureSidecar.empty()
+        && soloSpatialFeatureSidecar != "-" && soloSpatialFeatureSidecar != "None";
+    soloSpatialR1FastqTapEnabled = !soloSpatialR1FastqTap.empty()
+        && soloSpatialR1FastqTap != "-" && soloSpatialR1FastqTap != "None";
+    {
+        string mode = soloSpatialGexIntegrated;
+        transform(mode.begin(), mode.end(), mode.begin(), [](unsigned char value) {
+            return static_cast<char>(tolower(value));
+        });
+        if (mode == "yes") {
+            soloSpatialGexIntegratedEnabled = true;
+        } else if (mode == "no") {
+            soloSpatialGexIntegratedEnabled = false;
+        } else {
+            exitWithError("EXITING because of fatal PARAMETERS error: --soloSpatialGexIntegrated accepts only yes or no\n",
+                          std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+        }
+    }
+    if (soloSpatialR1FastqTapEnabled && !soloSpatialFeatureSidecarEnabled) {
+        exitWithError("EXITING because of fatal PARAMETERS error: --soloSpatialR1FastqTap requires --soloSpatialFeatureSidecar\n"
+                      "SOLUTION: enable the explicit fused Visium HD GEX recipe or remove the tap option.\n",
+                      std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+    }
+    if (soloSpatialGexIntegratedEnabled && soloSpatialR1FastqTapEnabled) {
+        exitWithError("EXITING because of fatal PARAMETERS error: --soloSpatialR1FastqTap is not part of integrated spatial GEX mode\n"
+                      "SOLUTION: remove the FIFO tap; optionally retain --soloSpatialFeatureSidecar as a debug oracle.\n",
+                      std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+    }
+
     //read parameters
     if (runMode == "hashCacheGenerate") {
         if (readFilesIn.empty() || (readFilesIn.size() == 1 && readFilesIn[0] == "-")) {
@@ -3200,6 +3246,132 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
     
     //solo
     pSolo.initialize(this);
+
+    soloSpatialFeatureSidecarEnabled = !soloSpatialFeatureSidecar.empty()
+        && soloSpatialFeatureSidecar != "-" && soloSpatialFeatureSidecar != "None";
+    soloSpatialR1FastqTapEnabled = !soloSpatialR1FastqTap.empty()
+        && soloSpatialR1FastqTap != "-" && soloSpatialR1FastqTap != "None";
+    if (soloSpatialFeatureSidecarEnabled || soloSpatialGexIntegratedEnabled) {
+        const auto exactly = [](const vector<string> &values, const string &expected) {
+            return values.size() == 1 && values[0] == expected;
+        };
+        const string spatialOption = soloSpatialGexIntegratedEnabled
+            ? "--soloSpatialGexIntegrated yes" : "--soloSpatialFeatureSidecar";
+        auto rejectSpatialRecipe = [&](const string &reason) {
+            ostringstream errOut;
+            errOut << "EXITING because of fatal PARAMETERS error: " << spatialOption << ' '
+                   << reason << "\n"
+                   << "SOLUTION: use the fail-closed modern Visium HD GEX GeneFull recipe.\n";
+            exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+        };
+
+        if (runMode != "alignReads") rejectSpatialRecipe("requires --runMode alignReads");
+        if (pSolo.typeStr != "None") rejectSpatialRecipe("requires --soloType None");
+        if (!exactly(pSolo.featureIn, "GeneFull")) rejectSpatialRecipe("requires exactly --soloFeatures GeneFull");
+        if (pSolo.strandStr != "Forward") rejectSpatialRecipe("requires --soloStrand Forward");
+        if (!pSolo.crMultimapRescue) rejectSpatialRecipe("requires --soloCrMultimapRescue yes");
+        if (pSolo.crGexFeature != ParametersSolo::CrGexGeneFull)
+            rejectSpatialRecipe("requires --soloCrGexFeature GeneFull");
+        if (!exactly(pSolo.umiDedup.typesIn, "1MM_CR"))
+            rejectSpatialRecipe("requires exactly --soloUMIdedup 1MM_CR");
+        if (!exactly(pSolo.umiFiltering.type, "MultiGeneUMI_CR"))
+            rejectSpatialRecipe("requires exactly --soloUMIfiltering MultiGeneUMI_CR");
+        if (!exactly(pSolo.multiMap.typesIn, "Unique"))
+            rejectSpatialRecipe("requires exactly --soloMultiMappers Unique");
+        if (!exactly(pSolo.cellFilter.type, "None"))
+            rejectSpatialRecipe("requires --soloCellFilter None");
+        if (!exactly(outSAMtype, "None")) rejectSpatialRecipe("requires --outSAMtype None");
+        if (outSAMattrPresent.GX || outSAMattrPresent.GN || outSAMattrPresent.UR
+            || outSAMattrPresent.UB || outSAMattrPresent.CB || outSAMattrPresent.CR) {
+            rejectSpatialRecipe("does not permit GX/GN/UR/UB/CB/CR SAM attributes");
+        }
+        if (twoPass.mode != "None" || runRestart.type != 0)
+            rejectSpatialRecipe("does not support two-pass or restart mapping");
+        if (outFilterType != "Normal")
+            rejectSpatialRecipe("requires --outFilterType Normal");
+        if (readFilesTypeN == 10 || readNends != 2)
+            rejectSpatialRecipe("requires two FASTQ ends ordered as R2 then raw R1");
+        if (soloSpatialR1FastqTapEnabled && (readFilesTypeN != 1 || !fastxInputActive))
+            rejectSpatialRecipe("requires Fastx input for --soloSpatialR1FastqTap");
+        if (batchModeRequested || quant.slam.yes || quant.transcriptVB.yes)
+            rejectSpatialRecipe("does not support batch, SLAM, or transcript-VB replay modes");
+
+        if (soloSpatialGexIntegratedEnabled) {
+            if (soloSpatialBarcodeContract.empty() || soloSpatialBarcodeContract == "-")
+                rejectSpatialRecipe("requires --soloSpatialBarcodeContract DIR");
+            if (soloSpatialBc1Oligos.empty() || soloSpatialBc1Oligos == "-")
+                rejectSpatialRecipe("requires --soloSpatialBc1Oligos FILE");
+            if (soloSpatialBc2Oligos.empty() || soloSpatialBc2Oligos == "-")
+                rejectSpatialRecipe("requires --soloSpatialBc2Oligos FILE");
+            if (soloSpatialExpectedReads == 0 || soloSpatialExpectedCandidates == 0)
+                rejectSpatialRecipe("requires positive expected read and candidate capacities");
+            if (soloSpatialExpectedReads > numeric_limits<uint32_t>::max() ||
+                soloSpatialExpectedCandidates > numeric_limits<uint32_t>::max()) {
+                rejectSpatialRecipe("compact read and candidate capacities must fit uint32");
+            }
+
+            string spatialError;
+            spatial_gex::OverflowPolicy overflowPolicy = spatial_gex::OverflowPolicy::Fail;
+            if (!spatial_gex::parseProducts(soloSpatialAssignmentProducts,
+                                            soloSpatialAssignmentProductMask,
+                                            spatialError) ||
+                !spatial_gex::parseScales(soloSpatialBinSizes,
+                                          soloSpatialBinSizeMask,
+                                          spatialError) ||
+                !spatial_gex::parseOverflowPolicy(soloSpatialOverflowPolicy,
+                                                  overflowPolicy,
+                                                  spatialError)) {
+                rejectSpatialRecipe(spatialError);
+            }
+            soloSpatialOverflowSpill = overflowPolicy == spatial_gex::OverflowPolicy::Spill;
+            if (soloSpatialSpillHighWaterCandidates != 0 && !soloSpatialOverflowSpill) {
+                rejectSpatialRecipe(
+                    "requires --soloSpatialOverflowPolicy Spill when "
+                    "--soloSpatialSpillHighWaterCandidates is nonzero");
+            }
+            spatial_gex::Capacity capacity;
+            capacity.reads = soloSpatialExpectedReads;
+            capacity.candidates = soloSpatialExpectedCandidates;
+            capacity.threads = static_cast<uint32_t>(runThreadN);
+            spatial_gex::MemoryModel memoryModel;
+            if (!spatial_gex::estimateMemory(capacity, memoryModel, spatialError) ||
+                !isfinite(soloSpatialMemoryFraction) || soloSpatialMemoryFraction <= 0.0 ||
+                soloSpatialMemoryFraction > 1.0) {
+                if (spatialError.empty()) {
+                    spatialError = "spatial GEX memory fraction must be finite in (0,1]";
+                }
+                rejectSpatialRecipe(spatialError);
+            }
+            inOut->logMain << "Spatial GEX integrated memory estimate: all_memory_peak="
+                           << memoryModel.peakBytes << " bounded_spool="
+                           << memoryModel.downstreamSpoolBytes << " spool_disk="
+                           << memoryModel.downstreamSpoolDiskBytes
+                           << " bytes for reads="
+                           << capacity.reads << " candidates=" << capacity.candidates
+                           << " threads=" << capacity.threads << " overflow="
+                           << (soloSpatialOverflowSpill ? "Spill" : "Fail") << '\n';
+        }
+
+        // This is a narrow annotation-only mode: R2 is the sole mapped end and
+        // raw R1 remains available to the independent spatial decoder. No Solo
+        // barcode object, whitelist, correction, or collapse is enabled.
+        readNmates = 1;
+        pSolo.barcodeRead = 1;
+        pSolo.strand = 0;
+        pSolo.featureYes.fill(false);
+        pSolo.featureYes[SoloFeatureTypes::GeneFull] = true;
+        pSolo.featureInd.fill(-1);
+        pSolo.featureInd[SoloFeatureTypes::GeneFull] = 0;
+        pSolo.features.clear();
+        pSolo.features.push_back(SoloFeatureTypes::GeneFull);
+        pSolo.nFeatures = 1;
+        quant.geneFull.yes = true;
+        quant.yes = true;
+        inOut->logMain << "Spatial GeneFull "
+                       << (soloSpatialGexIntegratedEnabled ? "integrated" : "sidecar")
+                       << ": annotation-only mapping enabled; mapping R2 and excluding raw R1 "
+                       << "from alignment/barcode correction\n";
+    }
 
     if (runMode == "hashCacheGenerate") {
         if (pSolo.hashCacheOutput.empty() || pSolo.hashCacheOutput == "-") {

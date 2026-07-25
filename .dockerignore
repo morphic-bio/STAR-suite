@@ -8,6 +8,8 @@
 # Build artifacts (builder compiles from source)
 *.o
 *.a
+**/*.o
+**/*.a
 Depend.list
 **/STAR
 **/STARlong

@@ -214,9 +214,9 @@ workflows:
     visibility: "private"
 
   - id: "slam_end_to_end_fixture"
-    title: "SLAM Fixture E2E"
-    summary: "Fixture-based SLAM E2E using 100K downsampled reads."
-    entry_script: "tests/run_slam_end_to_end_fixture.sh"
+    title: "SLAM Pinned Fixture Parity"
+    summary: "Manifest-verified SLAM parity and dump-requant replay on the 100K fixture."
+    entry_script: "tests/run_slam_parity_smoke.sh"
     schema_file: "mcp_server/workflows/slam_end_to_end_fixture.yaml"
     visibility: "private"
 
@@ -370,9 +370,9 @@ scripts:
       - "/storage/autoindex_110_44"
 
   - name: "slam_e2e_fixture"
-    path: "tests/run_slam_end_to_end_fixture.sh"
+    path: "tests/run_slam_parity_smoke.sh"
     module: "slam"
-    description: "SLAM fixture-based E2E (100K reads, fast)"
+    description: "Manifest-verified SLAM fixture parity and dump-requant replay"
 
   - name: "slam_pe_100k_smoke"
     path: "scripts/run_slam_100k_se_pe_smoke.sh"

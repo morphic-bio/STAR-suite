@@ -6,7 +6,7 @@ MODE=""
 TARBALL=""
 BUNDLE=""
 EXPECTED_LABEL=""
-EXPECTED_VERSION="1.4.3"
+EXPECTED_VERSION="1.6.0"
 REPO_ROOT=""
 PROFILE="core"
 
@@ -17,7 +17,7 @@ Usage:
   $0 --mode bundle --bundle <path> --expected-label <label> --repo-root <path> [options]
 
 Options:
-  --expected-version VER   STAR-suite version to check (default: 1.4.3)
+  --expected-version VER   STAR-suite version to check (default: 1.6.0)
   --profile PROFILE        Smoke profile to run (default: core)
 
 Profiles:
@@ -76,11 +76,24 @@ case "${MODE}" in
 esac
 
 STAR_BIN="${prefix}/bin/STAR"
+MOLECULE_FIRST_BIN="${prefix}/bin/molecule_first_resolver"
 [[ -x "${STAR_BIN}" ]] || { echo "ERROR: installed STAR missing: ${STAR_BIN}" >&2; exit 1; }
+[[ -x "${MOLECULE_FIRST_BIN}" ]] || { echo "ERROR: installed molecule-first resolver missing: ${MOLECULE_FIRST_BIN}" >&2; exit 1; }
 [[ "$("${STAR_BIN}" --version)" == "${EXPECTED_VERSION}" ]] || {
   echo "ERROR: installed STAR-suite version mismatch" >&2
   exit 1
 }
+[[ "$("${MOLECULE_FIRST_BIN}" --version)" == "${EXPECTED_VERSION}" ]] || {
+  echo "ERROR: installed molecule-first resolver version mismatch" >&2
+  exit 1
+}
+for tool in molecule_first_bam_ledger molecule_first_materialize; do
+  [[ -x "${prefix}/bin/${tool}" ]] || { echo "ERROR: installed ${tool} missing" >&2; exit 1; }
+  [[ "$("${prefix}/bin/${tool}" --version)" == "${EXPECTED_VERSION}" ]] || {
+    echo "ERROR: installed ${tool} version mismatch" >&2
+    exit 1
+  }
+done
 
 cp -a "${REPO_ROOT}/." "${repo_copy}/"
 

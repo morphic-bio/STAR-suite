@@ -95,8 +95,10 @@ static int test_normal_budget_builds_prehash(void) {
 
     /* Hamming d=1 lookup via prehash should work */
     char query_d1[] = "ACGTACGC"; /* 1 mismatch from ACGTACGT */
-    khint_t k = kh_get(stru32, features->feature_hamming_le1_hash, query_d1);
-    TEST_ASSERT(k != kh_end(features->feature_hamming_le1_hash), "d1 prehash finds 1-mismatch variant");
+    uint32_t payload = seq_hash_get_64(
+        &features->feature_hamming_le1_hash,
+        seq_encode_64_fixed(query_d1, 8));
+    TEST_ASSERT(payload != 0, "d1 prehash finds 1-mismatch variant");
 
     free_feature_arrays(features);
     feature_code_hash.h64 = NULL;

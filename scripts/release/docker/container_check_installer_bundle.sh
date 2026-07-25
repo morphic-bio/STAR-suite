@@ -4,7 +4,7 @@ set -euo pipefail
 
 BUNDLE=""
 EXPECTED_LABEL=""
-EXPECTED_VERSION="1.4.3"
+EXPECTED_VERSION="1.6.0"
 MANIFEST_OUT=""
 
 usage() {
@@ -94,6 +94,12 @@ if [[ "$version_output" != "$EXPECTED_VERSION" ]]; then
   echo "ERROR: expected STAR-suite version $EXPECTED_VERSION, got $version_output" >&2
   exit 1
 fi
+for tool in molecule_first_resolver molecule_first_bam_ledger molecule_first_materialize; do
+  if [[ ! -x "$prefix/bin/$tool" ]] || [[ "$($prefix/bin/$tool --version)" != "$EXPECTED_VERSION" ]]; then
+    echo "ERROR: installed $tool missing or version-mismatched" >&2
+    exit 1
+  fi
+done
 
 manifest="Bundle: $(basename "$BUNDLE")
 Container glibc: $(detect_glibc)

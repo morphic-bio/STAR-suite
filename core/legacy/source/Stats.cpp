@@ -15,9 +15,11 @@ void Stats::resetN() {//zero all counters
     crRescueExonicWinner = 0; crRescueIntronicFallback = 0;
     crRescueMultiExonicNoRescue = 0; crRescueMultiIntronicNoRescue = 0;
     crRescueIntronicFallbackOffNoRescue = 0; crRescueAllIntergenicNoRescue = 0;
+    crRescueNaBestTieNoRescue = 0; crRescueConflictingBestGenesNoRescue = 0;
+    crRescueMultiGeneBestAlignmentNoRescue = 0;
     crGeneFullExonicOverIntronicFiltered = 0; crGeneFullResolvedToUniqueAfterFilter = 0;
     crGeneFullStillMultiExonic = 0; crGeneFullCrossAlignMultiGene = 0;
-    hashScreenKeep = 0; hashScreenDeny = 0; hashScreenPass = 0;
+    hashScreenKeep = 0; hashScreenKeepNoBarcode = 0; hashScreenDeny = 0; hashScreenPass = 0;
     sampleDetectPreAlignCalls = 0; sampleDetectPreAlignNs = 0;
     sampleDetectOutputCalls = 0; sampleDetectOutputNs = 0;
     alignCoreCalls = 0; alignCoreNs = 0;
@@ -52,11 +54,16 @@ void Stats::addStats(Stats &S) {//add S to Stats
     crRescueMultiIntronicNoRescue += S.crRescueMultiIntronicNoRescue;
     crRescueIntronicFallbackOffNoRescue += S.crRescueIntronicFallbackOffNoRescue;
     crRescueAllIntergenicNoRescue += S.crRescueAllIntergenicNoRescue;
+    crRescueNaBestTieNoRescue += S.crRescueNaBestTieNoRescue;
+    crRescueConflictingBestGenesNoRescue += S.crRescueConflictingBestGenesNoRescue;
+    crRescueMultiGeneBestAlignmentNoRescue += S.crRescueMultiGeneBestAlignmentNoRescue;
     crGeneFullExonicOverIntronicFiltered += S.crGeneFullExonicOverIntronicFiltered;
     crGeneFullResolvedToUniqueAfterFilter += S.crGeneFullResolvedToUniqueAfterFilter;
     crGeneFullStillMultiExonic += S.crGeneFullStillMultiExonic;
     crGeneFullCrossAlignMultiGene += S.crGeneFullCrossAlignMultiGene;
-    hashScreenKeep += S.hashScreenKeep; hashScreenDeny += S.hashScreenDeny; hashScreenPass += S.hashScreenPass;
+    hashScreenKeep += S.hashScreenKeep;
+    hashScreenKeepNoBarcode += S.hashScreenKeepNoBarcode;
+    hashScreenDeny += S.hashScreenDeny; hashScreenPass += S.hashScreenPass;
     sampleDetectPreAlignCalls += S.sampleDetectPreAlignCalls;
     sampleDetectPreAlignNs += S.sampleDetectPreAlignNs;
     sampleDetectOutputCalls += S.sampleDetectOutputCalls;
@@ -182,6 +189,7 @@ void Stats::reportFinal(ofstream &streamOut) {
                   <<setw(w1)<< "                        FLEX HASH SCREEN |\n" \
                   <<setw(w1)<< "              Hash screen: reads evaluated |\t" << hashScreenTotal << "\n" \
                   <<setw(w1)<< "                     Hash screen: KEEP |\t" << hashScreenKeep << "\n" \
+                  <<setw(w1)<< "          Hash screen: KEEP, no barcode |\t" << hashScreenKeepNoBarcode << "\n" \
                   <<setw(w1)<< "                   Hash screen: KEEP % |\t" << (hashScreenTotal>0 ? double(hashScreenKeep)/double(hashScreenTotal)*100 : 0) << '%' << "\n" \
                   <<setw(w1)<< "                     Hash screen: DENY |\t" << hashScreenDeny << "\n" \
                   <<setw(w1)<< "                   Hash screen: DENY % |\t" << (hashScreenTotal>0 ? double(hashScreenDeny)/double(hashScreenTotal)*100 : 0) << '%' << "\n" \
@@ -256,7 +264,10 @@ void Stats::reportFinal(ofstream &streamOut) {
                   <<setw(w1)<< "No rescue: multiple exonic loci |\t" << crRescueMultiExonicNoRescue << "\n" \
                   <<setw(w1)<< "No rescue: multiple intronic loci |\t" << crRescueMultiIntronicNoRescue << "\n" \
                   <<setw(w1)<< "No rescue: 1 intronic, fallback off |\t" << crRescueIntronicFallbackOffNoRescue << "\n" \
-                  <<setw(w1)<< "No rescue: all intergenic |\t" << crRescueAllIntergenicNoRescue << "\n";
+                  <<setw(w1)<< "No rescue: all NA/intergenic |\t" << crRescueAllIntergenicNoRescue << "\n" \
+                  <<setw(w1)<< "No rescue: best-score NA decoy tie |\t" << crRescueNaBestTieNoRescue << "\n" \
+                  <<setw(w1)<< "No rescue: conflicting best-score genes |\t" << crRescueConflictingBestGenesNoRescue << "\n" \
+                  <<setw(w1)<< "No rescue: best alignment overlaps multiple genes |\t" << crRescueMultiGeneBestAlignmentNoRescue << "\n";
     }
 
     if (pipelineChunksProcessed > 0) {

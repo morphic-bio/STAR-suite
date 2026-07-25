@@ -1,0 +1,6 @@
+read_id	feature_id	raw_umi	candidate	log_sequence_likelihood	exact_read_count
+h001	geneA	U001	s_002um_0_1	0	4
+h002	geneA	U002	s_002um_1000_1	0	3
+h003	geneA	U003	s_002um_10_1	-0.1	2
+h003	geneA	U003	s_002um_10_10	-1.1	2
+h004	geneB	U004	s_002um_1_1	0	5

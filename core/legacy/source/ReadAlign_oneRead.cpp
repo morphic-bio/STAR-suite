@@ -8,6 +8,7 @@
 #include "SoloReadFeature_record_shared.h"
 #include "FlexPipeline.h"
 #include "FlexHashScreen.h"
+#include "SpatialGex.h"
 #include "libtrim/trim.h"
 #include <cstdlib>
 #include <atomic>
@@ -88,7 +89,28 @@ int ReadAlign::oneRead() {//process one read: load, map, write
 
     if (readStatus[0]==-1) {//finished with the stream
         return -1;
-    };    
+    };
+
+    // Integrated spatial mode is restricted to the ordinary paired FASTQ
+    // reader. Keep its per-read payload in the gated Pipeline so default and
+    // Flex packet paths retain the original ReadAlign object layout and work.
+    if (P.spatialGexPipeline != nullptr) {
+        if (P.readNends != 2 || Read0 == nullptr || Qual0 == nullptr
+            || readLengthOriginal[1] == 0) {
+            exitWithError("EXITING because integrated spatial GEX did not receive paired raw R1\n",
+                          std::cerr, P.inOut->logMain,
+                          EXIT_CODE_INCONSISTENT_DATA, P);
+        }
+        std::string spatialError;
+        if (!P.spatialGexPipeline->decodeCurrentThread(
+                Read0[1], readLengthOriginal[1], Qual0[1],
+                readLengthOriginal[1], spatialError)) {
+            exitWithError("EXITING because integrated spatial R1 decoding failed: "
+                              + spatialError + "\n",
+                          std::cerr, P.inOut->logMain,
+                          EXIT_CODE_INCONSISTENT_DATA, P);
+        }
+    }
     
     return oneReadLoaded(readStatus[0]);
 
@@ -373,9 +395,19 @@ int ReadAlign::oneReadLoaded(const int readStatus0) {
         // happens later at complementSeqNumbers). The hash screen encodes
         // A/C/G/T characters; moving this call after convertNucleotidesToNumbers
         // would silently break classification.
-        hashScreenDecision_ = FlexHashScreenCache::instance().classifyRead(Read0[0], readLengthOriginal[0], hashScreenSampleIdx);
+        if (sampleDetReady_) {
+            hashScreenDecision_ = FlexHashScreenCache::instance().classifyRead(
+                Read0[0], readLengthOriginal[0], hashScreenSampleIdx);
+        } else {
+            // Single-sample/no-tag Flex libraries have no runtime sample index.
+            // Reuse the production sample-free H0/H1 classifier so exact H0
+            // records are not mistaken for cache misses and sent to alignment.
+            hashScreenDecision_ = FlexHashScreenCache::instance().classifyReadH0H1Offset0(
+                Read0[0], readLengthOriginal[0]);
+        }
         hashScreenDumpWrite(Read0[0], readLengthOriginal[0], hashScreenSampleIdx, hashScreenDecision_);
         if (hashScreenDecision_.action == FlexHashScreenDecision::Keep) {
+            const bool noBarcode = (soloRead->readBar->cbMatch < 0);
             soloRead->readFlagReset();
             SoloReadFeature *geneFeat = soloRead->readFeat[P.pSolo.featureInd[SoloFeatureTypes::Gene]];
             bool handled = record_flex_hash_screen_keep(geneFeat, *soloRead->readBar, iReadAll,
@@ -383,6 +415,9 @@ int ReadAlign::oneReadLoaded(const int readStatus0) {
                                                         hashScreenDecision_.cacheClass);
             if (handled) {
                 statsRA.hashScreenKeep++;
+                if (noBarcode) {
+                    statsRA.hashScreenKeepNoBarcode++;
+                }
                 return 0;
             }
             statsRA.hashScreenPass++;

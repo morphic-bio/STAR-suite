@@ -62,6 +62,10 @@ Total wall time: ~4 min 8s. Logs: `/tmp/binary_test_matrix_20260405_083237_67753
 
 ## Tier B Results
 
+> Historical result from 2026-04-05. As of 2026-07-24, Tier B uses
+> `slam-pinned-fixture-parity` / `tests/run_slam_parity_smoke.sh`. The former
+> `slam-e2e-fixture` implementation is a deprecated delegating shim.
+
 | # | Test | Result | Notes |
 |---|------|--------|-------|
 | 1 | `sorted-bam-cbub-nonflex` | FAIL | Hardcoded `/storage/` paths |
@@ -84,7 +88,7 @@ are not yet portable.
 | Perturb-seq | perturb-a375-5prime | — |
 | Flex pipeline | flex-tiny-public-binary | flex-cr-config |
 | PE bulk workflow | pe-bulk-public | — |
-| SLAM | slam-snp-mask-build | slam-e2e-fixture |
+| SLAM | slam-snp-mask-build, slam-fixture-contract | slam-pinned-fixture-parity |
 | genomeGenerate | genome-generate-validation | — |
 | BAM SortedByCoordinate | gex-binary-smoke-bam-sorted | sorted-bam-cbub-nonflex |
 | BAM Unsorted | gex-binary-smoke-bam-unsorted | unsorted-bam-cbub |
