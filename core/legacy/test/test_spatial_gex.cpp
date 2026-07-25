@@ -182,6 +182,10 @@ int main()
     assert(spatial_gex::estimateMemory(small, smallModel, error));
     assert(smallModel.accumulationFixedBytes > 0);
     assert(smallModel.accumulationBytes > smallModel.accumulationFixedBytes);
+    assert(smallModel.downstreamSpoolBytes > smallModel.accumulationFixedBytes);
+    assert(smallModel.downstreamSpoolDiskBytes
+           == small.reads * 256ULL + small.candidates * 64ULL
+               + 1ULL * 1024ULL * 1024ULL * 1024ULL);
     assert(smallModel.peakBytes >= smallModel.accumulationBytes);
     assert(smallModel.peakBytes >= smallModel.cliqueBytes);
 
@@ -193,6 +197,7 @@ int main()
     assert(spatial_gex::estimateMemory(large, largeModel, error));
     assert(largeModel.peakBytes > smallModel.peakBytes);
     assert(largeModel.peakBytes == largeModel.correctionBytes);
+    assert(largeModel.downstreamSpoolDiskBytes > smallModel.downstreamSpoolDiskBytes);
 
     std::uint64_t budget = 0;
     assert(spatial_gex::memoryFits(smallModel, smallModel.peakBytes * 2, 0.75,
@@ -203,12 +208,28 @@ int main()
                                     budget, error));
 
     error.clear();
-    assert(spatial_gex::spillBudgetFits(smallModel, smallModel.peakBytes, error));
+    assert(spatial_gex::spillBudgetFits(
+        smallModel, smallModel.downstreamSpoolBytes, error));
+    error.clear();
+    assert(!spatial_gex::spillBudgetFits(
+        smallModel, smallModel.downstreamSpoolBytes - 1, error));
+    assert(error.find("downstream spool estimate") != std::string::npos);
     error.clear();
     assert(!spatial_gex::spillBudgetFits(
         smallModel, smallModel.accumulationFixedBytes, error));
-    assert(error.find("post-accumulation estimate") != std::string::npos
+    assert(error.find("downstream spool estimate") != std::string::npos
            || error.find("fixed accumulation state") != std::string::npos);
+
+    // The 100K-sized in-memory estimate and the full-slide in-memory estimate
+    // differ substantially, while Spill retains the same checked downstream
+    // workspace. This is the CI guard for the small-host full-slide use case.
+    assert(largeModel.downstreamSpoolBytes == smallModel.downstreamSpoolBytes
+           + (large.threads - small.threads) * 8ULL * 1024ULL * 1024ULL
+           + (large.threads - small.threads) * 6518ULL * sizeof(std::uint64_t));
+    const std::uint64_t observedHostBudget = UINT64_C(89941436006);
+    error.clear();
+    assert(largeModel.peakBytes > observedHostBudget);
+    assert(spatial_gex::spillBudgetFits(largeModel, observedHostBudget, error));
 
     spatial_gex::Capacity overflowCapacity;
     overflowCapacity.reads = std::numeric_limits<std::uint64_t>::max();
