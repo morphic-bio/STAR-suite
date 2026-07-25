@@ -14,6 +14,9 @@ STAR_FLEX="$(cd "$SCRIPT_DIR/../.." && pwd)"
 TXIMPORT_DIR="${TXIMPORT_DIR:-$STAR_FLEX/core/features/vbem/tools/tximport_compat}"
 CLI="${CLI:-$TXIMPORT_DIR/tximport_compat}"
 
+log() { echo "[$(date '+%H:%M:%S')] $*"; }
+error_exit() { echo "[ERROR] $*" >&2; exit 1; }
+
 # Skip cleanly if CLI doesn't exist
 if [ ! -f "$CLI" ]; then
     log "SKIP: tximport_compat CLI not found at $CLI"
@@ -36,9 +39,6 @@ done
 # Create report directory
 mkdir -p "$REPORT_DIR"
 cd "$REPORT_DIR"
-
-log() { echo "[$(date '+%H:%M:%S')] $*"; }
-error_exit() { echo "[ERROR] $*" >&2; exit 1; }
 
 # Skip if R/tximport is not available.
 if ! command -v Rscript >/dev/null 2>&1; then

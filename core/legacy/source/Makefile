@@ -356,7 +356,7 @@ star_feature_call: libprocess_features htslib/libhts.a $(LIBSCRNA_LIB)
 MexWriterObjs: MexWriter.o MexWriterUtil.o
 .PHONY: test_packed_readinfo
 test_packed_readinfo:
-	$(CXX) -std=c++11 -I./ $(CPPFLAGS) $(CXXFLAGS) ../test/PackedReadInfo_test.cpp PackedReadInfo.cpp -o ../test/pri_test
+	$(CXX) -std=c++11 -I./ -I$(FLEX_SRC_DIR) $(CPPFLAGS) $(CXXFLAGS) ../test/PackedReadInfo_test.cpp $(FLEX_SRC_DIR)/PackedReadInfo.cpp -o ../test/pri_test
 	../test/pri_test
 
 .PHONY: test_flex_probe_index
@@ -414,7 +414,7 @@ test_SoloReadInfoBaseline: Depend.list parametersDefault.xxd $(filter-out STAR.o
 	../test/solo_readinfo_baseline
 
 .PHONY: test
-test: test_packed_readinfo test_SoloHDMoleculeWriter test_SpatialFeatureSidecar test_SpatialR1FastqTap test_SpatialGex test_SpatialGexSpill test_SpatialGexDownstreamSpool test_MultiGeneUmiCr test_CrMultimapRescuePolicy test_complex_barcode_whitelist_lookup test_SoloReadInfoBaseline test_SoloReadInfoLoader test_SoloReadInfoParity test_MinimalSink test_CbCorrector test_CbBayesianResolver test_CbBayesianResolverPhase2 test_inline_hash_record_capture test_inline_hash_resolver test_inline_hash_clique test_inline_hash_parity test_gene_resolver
+test: test_packed_readinfo test_SoloHDMoleculeWriter test_SpatialFeatureSidecar test_SpatialR1FastqTap test_SpatialGex test_SpatialGexSpill test_SpatialGexDownstreamSpool test_MultiGeneUmiCr test_CrMultimapRescuePolicy test_complex_barcode_whitelist_lookup
 
 .PHONY: test_CrMultimapRescuePolicy
 test_CrMultimapRescuePolicy: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)

@@ -37,11 +37,13 @@ Agent quickstart: see `AGENTS.md` for repo-specific guardrails, tests, and recen
   then emits strict, soft expected-count, hard, and gated-hard products before
   cell or spatial-bin calling. Existing STARsolo and Flex decoding remains the
   default compatibility path.
-- **Integrated Visium HD GEX**: The opt-in `--soloSpatialGexIntegrated yes`
-  path combines modern GeneFull/CR-compatible gene resolution with direct R1
-  spatial decoding and molecule-first 2, 8, and 16 micrometer MEX
-  materialization. Bounded downstream spooling keeps the same scientific
-  outputs on smaller-memory hosts, and diagnostic sidecars remain optional.
+- **Integrated Visium HD 3' GEX** (`--soloSpatialGexIntegrated yes`): Fuses R1
+  spatial decoding with post-alignment GeneFull evidence, retains ambiguous
+  coordinate candidates through molecule-first resolution, and writes 2, 8,
+  and 16 micrometer strict/soft/hard/gated-hard matrices. Bounded downstream
+  spooling supports complete slides on smaller-memory hosts. The feature is
+  opt-in; ordinary bulk, STARsolo, CR-compatible scRNA, and Flex runs keep
+  their existing paths and defaults.
 - **Solo Features**: `sF` BAM tag for feature type, `--soloCBtype String` for arbitrary barcode strings, `--soloCellReadStats Standard` for improved cell filtering.
 - **CR-compat GEX** (`--soloCrGexFeature auto|gene|genefull`): Controls which GEX source is merged in CR-compat mode.
 - **Native Velocyto MEX Packaging**: Current production binaries write raw and
