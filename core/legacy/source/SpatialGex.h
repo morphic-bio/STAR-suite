@@ -123,6 +123,17 @@ bool spillBudgetFits(const MemoryModel &model, std::uint64_t budgetBytes,
 // obtained.
 std::uint64_t availableMemoryBytes();
 
+// Describes the feature decision paired with the current raw-R1 spatial
+// decode. Flex cache hits and alignment fallbacks are kept distinct for
+// deterministic accounting; GEX uses the final post-rescue annotation.
+enum class FeatureEvidenceClass : std::uint8_t {
+    Gex = 0,
+    FlexH0 = 1,
+    FlexH1 = 2,
+    FlexHashDeny = 3,
+    FlexAlignment = 4
+};
+
 struct PipelineConfig {
     std::string barcodeContractDirectory;
     std::string bc1OligosPath;
@@ -131,6 +142,11 @@ struct PipelineConfig {
     std::string temporaryDirectory;
     std::string starSuiteVersion;
     std::string sourceRevision;
+    std::string featureAxisPath;
+    std::string featureAxisSha256;
+    std::string featureCachePath;
+    std::string featureCacheSha256;
+    std::uint32_t featureCount = 0;
     std::uint64_t expectedReads = 0;
     std::uint64_t expectedCandidates = 0;
     std::uint32_t threads = 1;
@@ -146,6 +162,10 @@ struct PipelineConfig {
     // conservative; tests may use smaller values to force boundary cases.
     std::uint32_t downstreamSpoolShards = 256;
     std::uint64_t downstreamSpoolBufferBytes = 64 * 1024;
+    // Native Flex requires exactly one terminal feature decision for every
+    // decoded R1. This catches early returns and thread-local state drift.
+    bool requirePairedCompletion = false;
+    bool flexFeatureMode = false;
 };
 
 struct PipelineSummary {
@@ -182,6 +202,18 @@ struct PipelineSummary {
     std::uint64_t downstreamMatrixBytes = 0;
     double downstreamResolveSeconds = 0.0;
     double downstreamMaterializeSeconds = 0.0;
+    std::uint64_t featureAssignedReads = 0;
+    std::uint64_t featureUnassignedReads = 0;
+    std::uint64_t featureAssignedReadsWithCandidates = 0;
+    std::uint64_t featureAssignedReadsWithoutCandidates = 0;
+    std::uint64_t featureUnassignedReadsWithCandidates = 0;
+    std::uint64_t featureUnassignedReadsWithoutCandidates = 0;
+    std::uint64_t flexHashH0Reads = 0;
+    std::uint64_t flexHashH1Reads = 0;
+    std::uint64_t flexHashDenyReads = 0;
+    std::uint64_t flexAlignmentMissReads = 0;
+    std::uint64_t flexAlignmentResolvedReads = 0;
+    std::uint64_t flexAlignmentUnresolvedReads = 0;
 };
 
 // Run-owned, default-off spatial state. One instance is shared by all mapping
@@ -212,7 +244,12 @@ class Pipeline {
     // ReadAlign when integrated mode is disabled.
     bool decodeCurrentThread(const char *sequence, std::size_t sequenceLength,
                              const char *quality, std::size_t qualityLength,
+                             std::uint64_t sourceOrdinal,
                              std::string &error);
+    bool completeCurrentThread(FeatureEvidenceClass source, bool assigned,
+                               std::uint32_t geneIndex,
+                               std::uint64_t sourceOrdinal,
+                               std::string &error);
     bool appendCurrentThread(std::uint32_t geneIndex,
                              std::uint64_t sourceOrdinal,
                              std::string &error);

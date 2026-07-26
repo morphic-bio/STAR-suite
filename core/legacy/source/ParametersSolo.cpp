@@ -511,8 +511,17 @@ void ParametersSolo::initialize(Parameters *pPin)
                 return nullptr;
             };
             
-            // Enable FlexFilter pipeline (if not explicitly disabled)
-            if (runFlexFilterStr.empty() || runFlexFilterStr == "no") {
+            // Enable FlexFilter only when the option was not supplied. The
+            // string default is "no", so checking the value alone cannot
+            // distinguish the default from an explicit
+            // --soloRunFlexFilter no (required by native spatial Flex).
+            ParameterInfoBase *runFlexFilterParam =
+                findParam("soloRunFlexFilter");
+            const bool runFlexFilterExplicit =
+                runFlexFilterParam != nullptr
+                && runFlexFilterParam->inputLevel > 0;
+            if (!runFlexFilterExplicit
+                && (runFlexFilterStr.empty() || runFlexFilterStr == "no")) {
                 runFlexFilterStr = "yes";
             }
             
@@ -536,8 +545,13 @@ void ParametersSolo::initialize(Parameters *pPin)
                 soloFlexMinimalMemoryStr = "yes";
             }
             
-            // Set MAPQ mode to genomic (if not explicitly set)
-            if (mapqModeStr.empty() || mapqModeStr == "off") {
+            // Set MAPQ mode to genomic only when the CLI/parameter files did
+            // not explicitly request "off".
+            ParameterInfoBase *mapqModeParam = findParam("soloMapqMode");
+            const bool mapqModeExplicit =
+                mapqModeParam != nullptr && mapqModeParam->inputLevel > 0;
+            if (!mapqModeExplicit
+                && (mapqModeStr.empty() || mapqModeStr == "off")) {
                 mapqModeStr = "genomic";
             }
             

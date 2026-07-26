@@ -3,6 +3,7 @@
 
 #include <string>
 #include <unordered_map>
+#include <vector>
 #include <cstdint>
 
 class ProbeListIndex {
@@ -22,13 +23,17 @@ public:
     }
 
     inline bool empty() const { return geneIdToIndex_.empty(); }
+    inline std::size_t size() const { return orderedGeneIds_.size(); }
+    inline const std::vector<std::string> &orderedGeneIds() const {
+        return orderedGeneIds_;
+    }
 
 private:
     std::unordered_map<std::string, uint32_t> geneIdToIndex_;
+    std::vector<std::string> orderedGeneIds_;
     
     // Helper: Check if string contains substring (case-insensitive)
     static bool containsIgnoreCase(const std::string& haystack, const std::string& needle);
 };
 
 #endif
-
