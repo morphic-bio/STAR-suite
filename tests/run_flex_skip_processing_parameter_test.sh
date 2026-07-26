@@ -35,6 +35,14 @@ skip_rc=$?
     --outFileNamePrefix "${test_dir}/process/" \
     >"${test_dir}/process.stdout" 2>"${test_dir}/process.stderr"
 process_rc=$?
+
+"${star_bin}" "${common_args[@]}" \
+    --soloSkipProcessing yes \
+    --soloRunFlexFilter no \
+    --soloMapqMode off \
+    --outFileNamePrefix "${test_dir}/explicit/" \
+    >"${test_dir}/explicit.stdout" 2>"${test_dir}/explicit.stderr"
+explicit_rc=$?
 set -e
 
 if [[ ${skip_rc} -eq 0 ]]; then
@@ -61,4 +69,22 @@ if ! grep -Fq "FlexFilter requires expected cells count" "${test_dir}/process.st
     exit 1
 fi
 
-echo "PASS: skip-processing bypasses the expected-cell requirement; active processing retains it"
+if [[ ${explicit_rc} -eq 0 ]]; then
+    echo "FAIL: explicit-override fixture unexpectedly completed with a nonexistent genome" >&2
+    exit 1
+fi
+if ! grep -Fq "could not open genome file" "${test_dir}/explicit.stderr"; then
+    echo "FAIL: explicit-override invocation did not advance beyond Solo validation" >&2
+    sed -n '1,80p' "${test_dir}/explicit.stderr" >&2
+    exit 1
+fi
+if ! grep -Fq "soloRunFlexFilter=no" "${test_dir}/explicit/Log.out"; then
+    echo "FAIL: explicit --soloRunFlexFilter no was overridden" >&2
+    exit 1
+fi
+if ! grep -Fq "soloMapqMode=off (enum=0)" "${test_dir}/explicit/Log.out"; then
+    echo "FAIL: explicit --soloMapqMode off was overridden" >&2
+    exit 1
+fi
+
+echo "PASS: skip-processing bypasses the expected-cell requirement; active processing retains it; explicit Flex policy overrides are preserved"

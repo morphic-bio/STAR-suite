@@ -96,15 +96,15 @@ int ReadAlign::oneRead() {//process one read: load, map, write
     // Flex packet paths retain the original ReadAlign object layout and work.
     if (P.spatialGexPipeline != nullptr) {
         if (P.readNends != 2 || Read0 == nullptr || Qual0 == nullptr
-            || readLengthOriginal[1] == 0) {
-            exitWithError("EXITING because integrated spatial GEX did not receive paired raw R1\n",
+            || readLengthOriginal[1] == 0 || iReadAll == 0) {
+            exitWithError("EXITING because integrated spatial mode did not receive paired raw R1 state\n",
                           std::cerr, P.inOut->logMain,
                           EXIT_CODE_INCONSISTENT_DATA, P);
         }
         std::string spatialError;
         if (!P.spatialGexPipeline->decodeCurrentThread(
                 Read0[1], readLengthOriginal[1], Qual0[1],
-                readLengthOriginal[1], spatialError)) {
+                readLengthOriginal[1], iReadAll - 1, spatialError)) {
             exitWithError("EXITING because integrated spatial R1 decoding failed: "
                               + spatialError + "\n",
                           std::cerr, P.inOut->logMain,
@@ -122,6 +122,29 @@ int ReadAlign::oneReadLoaded(const int readStatus0) {
     // Increment read counters BEFORE trimming (so dropped reads are counted)
     statsRA.readN++;
     statsRA.readBases += readLength[0] + (P.readNmates == 2 ? readLength[1] : 0);
+
+    const auto completeSpatialWithoutFeature = [&]() {
+        if (P.spatialGexPipeline == nullptr) return;
+        if (iReadAll == 0) {
+            exitWithError(
+                "EXITING because integrated spatial mode lost a filtered read ordinal\n",
+                std::cerr, P.inOut->logMain,
+                EXIT_CODE_INCONSISTENT_DATA, P);
+        }
+        std::string spatialError;
+        const spatial_gex::FeatureEvidenceClass source =
+            P.soloSpatialFlexIntegratedEnabled
+                ? spatial_gex::FeatureEvidenceClass::FlexAlignment
+                : spatial_gex::FeatureEvidenceClass::Gex;
+        if (!P.spatialGexPipeline->completeCurrentThread(
+                source, false, 0, iReadAll - 1, spatialError)) {
+            exitWithError(
+                "EXITING because integrated spatial filtered-read completion failed: "
+                    + spatialError + "\n",
+                std::cerr, P.inOut->logMain,
+                EXIT_CODE_INCONSISTENT_DATA, P);
+        }
+    };
     
     // Quality encoding debug check (BEFORE trimming) - guarded by STAR_TRIM_DEBUG_N env var
     int64_t debugMax = g_trimDebugMax.load();
@@ -283,6 +306,7 @@ int ReadAlign::oneReadLoaded(const int readStatus0) {
             }
             
             // Skip mapping for this pair (readN already incremented above)
+            completeSpatialWithoutFeature();
             return 0;
         }
         
@@ -327,6 +351,7 @@ int ReadAlign::oneReadLoaded(const int readStatus0) {
             // Handle dropped reads
             if (result.dropped) {
                 readFilter = 'Y';
+                completeSpatialWithoutFeature();
                 return 0;
             }
             
@@ -382,31 +407,70 @@ int ReadAlign::oneReadLoaded(const int readStatus0) {
     if (P.pSolo.hashScreenEnabled && soloRead != nullptr && soloRead->readBar != nullptr &&
         soloRead->readFeat != nullptr && P.pSolo.featureYes[SoloFeatureTypes::Gene] &&
         P.readNmates > 0) {
-        soloRead->readBar->getCBandUMI(Read0, Qual0, readLengthOriginal, readNameExtra[0], readFilesIndex, readName);
-        const auto sampleDetectStart = std::chrono::steady_clock::now();
-        detectSampleFromRawR2();
-        const auto sampleDetectEnd = std::chrono::steady_clock::now();
-        statsRA.sampleDetectPreAlignCalls++;
-        statsRA.sampleDetectPreAlignNs += static_cast<uint64>(
-            std::chrono::duration_cast<std::chrono::nanoseconds>(sampleDetectEnd - sampleDetectStart).count());
-        soloRead->readBar->detectedSampleToken = detectedSampleByte_;
-        const uint16_t hashScreenSampleIdx = SampleDetector::sampleIndexForToken(detectedSampleByte_);
+        const bool spatialFlex = P.soloSpatialFlexIntegratedEnabled;
+        uint16_t hashScreenSampleIdx = 0;
         // Read0[0] is still ASCII-encoded at this point (numeric conversion
         // happens later at complementSeqNumbers). The hash screen encodes
         // A/C/G/T characters; moving this call after convertNucleotidesToNumbers
         // would silently break classification.
-        if (sampleDetReady_) {
-            hashScreenDecision_ = FlexHashScreenCache::instance().classifyRead(
-                Read0[0], readLengthOriginal[0], hashScreenSampleIdx);
+        if (spatialFlex) {
+            hashScreenDecision_ =
+                FlexHashScreenCache::instance().classifyReadH0H1Offset0(
+                    Read0[0], readLengthOriginal[0]);
         } else {
-            // Single-sample/no-tag Flex libraries have no runtime sample index.
-            // Reuse the production sample-free H0/H1 classifier so exact H0
-            // records are not mistaken for cache misses and sent to alignment.
-            hashScreenDecision_ = FlexHashScreenCache::instance().classifyReadH0H1Offset0(
-                Read0[0], readLengthOriginal[0]);
+            soloRead->readBar->getCBandUMI(
+                Read0, Qual0, readLengthOriginal, readNameExtra[0],
+                readFilesIndex, readName);
+            const auto sampleDetectStart = std::chrono::steady_clock::now();
+            detectSampleFromRawR2();
+            const auto sampleDetectEnd = std::chrono::steady_clock::now();
+            statsRA.sampleDetectPreAlignCalls++;
+            statsRA.sampleDetectPreAlignNs += static_cast<uint64>(
+                std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    sampleDetectEnd - sampleDetectStart).count());
+            soloRead->readBar->detectedSampleToken = detectedSampleByte_;
+            hashScreenSampleIdx =
+                SampleDetector::sampleIndexForToken(detectedSampleByte_);
+            if (sampleDetReady_) {
+                hashScreenDecision_ = FlexHashScreenCache::instance().classifyRead(
+                    Read0[0], readLengthOriginal[0], hashScreenSampleIdx);
+            } else {
+                // Single-sample/no-tag Flex libraries have no runtime sample
+                // index. Reuse the sample-free H0/H1 classifier.
+                hashScreenDecision_ =
+                    FlexHashScreenCache::instance().classifyReadH0H1Offset0(
+                        Read0[0], readLengthOriginal[0]);
+            }
         }
         hashScreenDumpWrite(Read0[0], readLengthOriginal[0], hashScreenSampleIdx, hashScreenDecision_);
         if (hashScreenDecision_.action == FlexHashScreenDecision::Keep) {
+            if (spatialFlex) {
+                if (iReadAll == 0 || hashScreenDecision_.geneIdx15 == 0
+                    || (hashScreenDecision_.cacheClass != 0
+                        && hashScreenDecision_.cacheClass != 1)) {
+                    exitWithError(
+                        "EXITING because native spatial Flex received an invalid "
+                        "H0/H1 cache keep decision\n",
+                        std::cerr, P.inOut->logMain,
+                        EXIT_CODE_INCONSISTENT_DATA, P);
+                }
+                std::string spatialError;
+                const spatial_gex::FeatureEvidenceClass source =
+                    hashScreenDecision_.cacheClass == 0
+                        ? spatial_gex::FeatureEvidenceClass::FlexH0
+                        : spatial_gex::FeatureEvidenceClass::FlexH1;
+                if (!P.spatialGexPipeline->completeCurrentThread(
+                        source, true, hashScreenDecision_.geneIdx15 - 1,
+                        iReadAll - 1, spatialError)) {
+                    exitWithError(
+                        "EXITING because native spatial Flex cache evidence "
+                        "completion failed: " + spatialError + "\n",
+                        std::cerr, P.inOut->logMain,
+                        EXIT_CODE_INCONSISTENT_DATA, P);
+                }
+                ++statsRA.hashScreenKeep;
+                return 0;
+            }
             const bool noBarcode = (soloRead->readBar->cbMatch < 0);
             soloRead->readFlagReset();
             SoloReadFeature *geneFeat = soloRead->readFeat[P.pSolo.featureInd[SoloFeatureTypes::Gene]];
@@ -423,6 +487,26 @@ int ReadAlign::oneReadLoaded(const int readStatus0) {
             statsRA.hashScreenPass++;
         } else if (hashScreenDecision_.action == FlexHashScreenDecision::Deny) {
             statsRA.hashScreenDeny++;
+            if (spatialFlex) {
+                if (iReadAll == 0) {
+                    exitWithError(
+                        "EXITING because native spatial Flex lost the hash-deny "
+                        "read ordinal\n",
+                        std::cerr, P.inOut->logMain,
+                        EXIT_CODE_INCONSISTENT_DATA, P);
+                }
+                std::string spatialError;
+                if (!P.spatialGexPipeline->completeCurrentThread(
+                        spatial_gex::FeatureEvidenceClass::FlexHashDeny,
+                        false, 0, iReadAll - 1, spatialError)) {
+                    exitWithError(
+                        "EXITING because native spatial Flex hash-deny completion "
+                        "failed: " + spatialError + "\n",
+                        std::cerr, P.inOut->logMain,
+                        EXIT_CODE_INCONSISTENT_DATA, P);
+                }
+                return 0;
+            }
             soloRead->readFlagReset();
             SoloReadFeature *geneFeat = soloRead->readFeat[P.pSolo.featureInd[SoloFeatureTypes::Gene]];
             record_flex_hash_screen_deny(geneFeat, *soloRead->readBar, iReadAll, "NEG_PROBE_AMBIG");
@@ -471,6 +555,7 @@ int ReadAlign::oneReadLoaded(const int readStatus0) {
     };
 
     if (P.pCh.out.bam && chimRecord) {//chimeric alignment was recorded in main BAM files, and it contains the representative portion, so non-chimeric aligmnent is not output
+        completeSpatialWithoutFeature();
         return 0;
     };
 
@@ -478,6 +563,7 @@ int ReadAlign::oneReadLoaded(const int readStatus0) {
 
     #ifdef OFF_BEFORE_OUTPUT
         #warning OFF_BEFORE_OUTPUT
+        completeSpatialWithoutFeature();
         return 0;
     #endif
 

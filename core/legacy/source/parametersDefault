@@ -1808,6 +1808,13 @@ soloSpatialGexIntegrated    no
                             Reads paired FASTQs once, maps R2, decodes raw R1 on mapping workers,
                             and materializes strict/soft_expected/hard/gated_hard matrices without a sidecar join.
 
+soloSpatialFlexIntegrated   no
+    string:                 default-off in-process Visium HD Flex molecule resolution (yes|no)
+                            Couples the normal Flex H0/H1 plus alignment-fallback feature path to raw-R1
+                            spatial candidate families and the delayed candidate-specific UMI materializer.
+                            Requires the fail-closed Flex/Visium recipe documented in
+                            docs/RUNBOOK_VISIUM_HD_NATIVE_FLEX_SPATIAL_FAMILIES_20260726.md.
+
 soloSpatialBarcodeContract  -
     string:                 directory containing the complete row-major Visium HD barcode coordinate contract
 

@@ -987,3 +987,20 @@ All three runs used **`USE_READFILES_ZCAT=0`** (no external `zcat`), **`--outSAM
   `.partial` MEX roots are removed only on successful commit.
 - Status: untracked; never commit MEX output, binary spool records, sidecars,
   FASTQs, timing logs, or reference data.
+
+## Native Visium HD Flex spatial families (2026-07-26)
+
+- Runbook:
+  `docs/RUNBOOK_VISIUM_HD_NATIVE_FLEX_SPATIAL_FAMILIES_20260726.md`
+- Fresh CRC 100K acceptance roots:
+  - `/mnt/pikachu/star-spatial/native_flex_tests/20260726_crc_100k_native_spatial_flex_release_1t_memory_v1/`
+  - `/mnt/pikachu/star-spatial/native_flex_tests/20260726_crc_100k_native_spatial_flex_release_32t_memory_v1/`
+  - `/mnt/pikachu/star-spatial/native_flex_tests/20260726_crc_100k_native_spatial_flex_release_32t_forced_spill_v1/`
+  - `/mnt/pikachu/star-spatial/native_flex_tests/20260726_crc_100k_native_spatial_flex_release_32t_memory_repeat_v1/`
+- Ordinary integrated-GEX isolation regression:
+  `/mnt/pikachu/star-spatial/gex_in_memory_tests/20260726_ovarian_100k_integrated_native_flex_regression_v1/`
+- Contents: native Flex spatial-family summaries; strict, soft-expected, hard,
+  and gated-hard 2/8/16-micrometer MEX; STAR logs; and deterministic/spill
+  comparisons.
+- Status: untracked; never commit MEX output, binary spool records, FASTQs,
+  timing logs, or reference data.

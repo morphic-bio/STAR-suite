@@ -723,6 +723,11 @@ class Parameters {
         // feature sidecar/tap remain independent diagnostic interfaces.
         string soloSpatialGexIntegrated = "no";
         bool soloSpatialGexIntegratedEnabled = false;
+        // Default-off Visium HD Flex entrypoint. It reuses the normal Flex
+        // feature resolver but substitutes spatial candidate families for the
+        // ordinary single-cell barcode lookup.
+        string soloSpatialFlexIntegrated = "no";
+        bool soloSpatialFlexIntegratedEnabled = false;
         string soloSpatialBarcodeContract = "-";
         string soloSpatialBc1Oligos = "-";
         string soloSpatialBc2Oligos = "-";

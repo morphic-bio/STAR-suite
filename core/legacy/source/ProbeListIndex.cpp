@@ -14,6 +14,7 @@ bool ProbeListIndex::containsIgnoreCase(const std::string& haystack, const std::
 
 bool ProbeListIndex::load(const std::string &path, bool removeDeprecated, uint32_t *deprecatedCount) {
     geneIdToIndex_.clear();
+    orderedGeneIds_.clear();
     if (deprecatedCount) *deprecatedCount = 0;
     
     if (path.empty() || path == "-") return true; // treat empty as not provided
@@ -40,10 +41,10 @@ bool ProbeListIndex::load(const std::string &path, bool removeDeprecated, uint32
         lineNo++;
         // 1-based index stored; guard against overflow but defer to geneIndex15()
         geneIdToIndex_[geneId] = lineNo;
+        orderedGeneIds_.push_back(geneId);
     }
     
     if (deprecatedCount) *deprecatedCount = deprecatedRemoved;
     return true;
 }
-
 
