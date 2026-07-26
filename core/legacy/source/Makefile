@@ -414,7 +414,13 @@ test_SoloReadInfoBaseline: Depend.list parametersDefault.xxd $(filter-out STAR.o
 	../test/solo_readinfo_baseline
 
 .PHONY: test
-test: test_packed_readinfo test_SoloHDMoleculeWriter test_SpatialFeatureSidecar test_SpatialR1FastqTap test_SpatialGex test_SpatialGexSpill test_SpatialGexDownstreamSpool test_MultiGeneUmiCr test_CrMultimapRescuePolicy test_complex_barcode_whitelist_lookup
+test: test_packed_readinfo test_ProbeListIndex test_SoloHDMoleculeWriter test_SpatialFeatureSidecar test_SpatialR1FastqTap test_SpatialGex test_SpatialGexSpill test_SpatialGexDownstreamSpool test_MultiGeneUmiCr test_CrMultimapRescuePolicy test_complex_barcode_whitelist_lookup
+
+.PHONY: test_ProbeListIndex
+test_ProbeListIndex: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
+test_ProbeListIndex: ProbeListIndex.o
+	$(CXX) $(CXXFLAGS) -I./ ../test/test_probe_list_index.cpp ProbeListIndex.o -o ../test/test_probe_list_index
+	../test/test_probe_list_index
 
 .PHONY: test_CrMultimapRescuePolicy
 test_CrMultimapRescuePolicy: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
