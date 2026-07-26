@@ -2,13 +2,25 @@
 
 Date: 2026-07-26
 
-Status: implemented and release-validated on the feature branch; pending local
-v1.6.0 release integration
+Status: implemented, release-validated, and integrated locally into the private
+v1.6.0 release candidate
 
 Branch: `feature/visium-hd-native-flex-spatial-families-20260726`
 
 Base: STAR Suite v1.6.0
 `ddc75a47de372504cd0ae1f887a6b7eee73f3803`
+
+Feature commit:
+`c60b48358fde02054d119efe5e4bb074b65e8919`
+
+Private release integration branch:
+`private-master-integrated-v1.6.0`
+
+Private release merge:
+`171dd8826ffa9e3f2a8ab9d5fe731d24237eae4d`
+
+The existing private `v1.6.0` tag predates this feature and was deliberately
+not rewritten. No branch or tag from this integration was pushed.
 
 Governing production handoff:
 
