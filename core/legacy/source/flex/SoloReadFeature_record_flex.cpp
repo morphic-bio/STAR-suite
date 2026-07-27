@@ -313,8 +313,14 @@ static uint8_t extractTagIdxForFlex(const SoloReadBarcode &soloBar) {
     return tagIdx;
 }
 
+static bool sampleTaggingEnabledForFlex(const SoloReadBarcode &soloBar) {
+    const std::string &whitelist = soloBar.pSolo.sampleWhitelistPath;
+    return ((!whitelist.empty() && whitelist != "-") ||
+            soloBar.pSolo.sampleRequireMatch);
+}
+
 static bool dropUnmatchedTagForFlex(const SoloReadBarcode &soloBar, uint8_t tagIdx) {
-    return ((!soloBar.pSolo.sampleWhitelistPath.empty()) || soloBar.pSolo.sampleRequireMatch) && (tagIdx == 0);
+    return sampleTaggingEnabledForFlex(soloBar) && (tagIdx == 0);
 }
 
 static void accumulateAmbiguousCBForFlex(SoloReadFeature *soloReadFeat, SoloReadBarcode &soloBar, uint16_t geneIdx, uint8_t tagIdx) {
@@ -452,6 +458,24 @@ void record_flex(SoloReadFeature *soloReadFeat, SoloReadBarcode &soloBar, uint n
     if (soloReadFeat->pSolo.type==0)
         return;
 
+    ReadSoloFeatures reFe;
+    reFe.alignOut=alignOut;
+    reFe.indAnnotTr = 0;
+
+    // Feature evidence is independent of barcode eligibility. Resolve the
+    // ordinary inline-Flex alignment fallback before CB/sample rejection so
+    // the same R2 decision can feed the later CB/UMI family stage.
+    const bool resolveGeneBeforeBarcode =
+        soloReadFeat->pSolo.flexMode
+        && soloReadFeat->pSolo.inlineHashMode
+        && soloReadFeat->featureType == SoloFeatureTypes::Gene;
+    FlexGeneInlineResolveResult preResolvedGene{};
+    if (resolveGeneBeforeBarcode) {
+        preResolvedGene = flexResolveGeneIdx15_inlineResolver(
+            soloReadFeat, soloBar, reFe, readAnnot,
+            soloReadFeat->featureType, iRead);
+    }
+
     if (soloReadFeat->pSolo.readStatsYes[soloReadFeat->featureType]) {//readFlag
 
         if (nTr==1) {
@@ -483,7 +507,8 @@ void record_flex(SoloReadFeature *soloReadFeat, SoloReadBarcode &soloBar, uint n
         };
 
         if (soloBar.cbMatch<0 && soloReadFeat->pSolo.cbWLyes) {//no CB match in the WL
-            if (readAnnot.annotFeatures[soloReadFeat->featureType].fSet.size()==1) {
+            if ((resolveGeneBeforeBarcode && preResolvedGene.geneIdx15 != 0)
+                || readAnnot.annotFeatures[soloReadFeat->featureType].fSet.size()==1) {
                 soloReadFeat->readFlag.setBit(soloReadFeat->readFlag.featureU);
             } else if (readAnnot.annotFeatures[soloReadFeat->featureType].fSet.size()>1){
                 soloReadFeat->readFlag.setBit(soloReadFeat->readFlag.featureM);
@@ -501,10 +526,42 @@ void record_flex(SoloReadFeature *soloReadFeat, SoloReadBarcode &soloBar, uint n
         return;
     }
 
-       
-    ReadSoloFeatures reFe;
-    reFe.alignOut=alignOut;
-    reFe.indAnnotTr = 0;    
+    if (resolveGeneBeforeBarcode) {
+        uint32 nFeat = 0;
+        if (preResolvedGene.geneIdx15 == 0) {
+            if (nTr == 0) {
+                soloReadFeat->stats.V[soloReadFeat->stats.noUnmapped]++;
+            } else {
+                soloReadFeat->stats.V[soloReadFeat->stats.noNoFeature]++;
+            }
+            if (soloReadFeat->readInfoYes
+                || soloReadFeat->pSolo.readStatsYes[soloReadFeat->featureType]) {
+                outputReadCB_flex(
+                    soloReadFeat->streamReads, iRead, (uint32)-1, soloBar,
+                    reFe, readAnnot, soloReadFeat->readFlag, soloReadFeat);
+            }
+            return;
+        }
+
+        soloReadFeat->readFlag.setBit(soloReadFeat->readFlag.featureU);
+        const uint64 outputRead =
+            soloReadFeat->readIndexYes ? iRead : (uint64)-1;
+        nFeat = outputReadCB_flex(
+            soloReadFeat->streamReads, outputRead,
+            soloReadFeat->featureType, soloBar, reFe, readAnnot,
+            soloReadFeat->readFlag, soloReadFeat, &preResolvedGene);
+        if (nFeat == 0) {
+            return;
+        }
+        if (soloReadFeat->pSolo.cbWLyes) {
+            for (auto &cbi : soloBar.cbMatchInd) {
+                soloReadFeat->cbReadCount[cbi] += nFeat;
+            }
+        } else if (!soloBar.cbMatchInd.empty()) {
+            soloReadFeat->cbReadCountMap[soloBar.cbMatchInd[0]] += nFeat;
+        }
+        return;
+    }
 
     uint32 nFeat=0; //number of features in this read (could be >1 for SJs)
     if (nTr==0) {//unmapped
@@ -1002,7 +1059,8 @@ FlexGeneInlineResolveResult flexResolveGeneIdx15_inlineResolver(
 
 uint32 outputReadCB_flex(fstream *streamOut, const uint64 iRead, const int32 featureType, SoloReadBarcode &soloBar, 
                          const ReadSoloFeatures &reFe, const ReadAnnotations &readAnnot, const SoloReadFlagClass &readFlag,
-                         SoloReadFeature *soloReadFeat)
+                         SoloReadFeature *soloReadFeat,
+                         const FlexGeneInlineResolveResult *preResolved)
 {   
     /*format of the temp output file
      * UMI [iRead] type feature* cbMatchString
@@ -1033,8 +1091,7 @@ uint32 outputReadCB_flex(fstream *streamOut, const uint64 iRead, const int32 fea
     // Compute tag once per read. If sample tagging is enabled (whitelist provided or require-match set)
     // and no tag was detected, drop the read to avoid propagating tagIdx=0 into the hash/MEX.
     const uint8_t tagIdx = extractTagIdx();
-    const bool dropUnmatchedTag = ( (!soloBar.pSolo.sampleWhitelistPath.empty()) || soloBar.pSolo.sampleRequireMatch ) && (tagIdx == 0);
-    if (dropUnmatchedTag) {
+    if (dropUnmatchedTagForFlex(soloBar, tagIdx)) {
         if (soloBar.pSolo.inlineHashMode) {
             logRejectReason(soloBar, iRead, featureType, 0, 0, "UNMATCHED_TAG", "", soloBar.pSolo);
         }
@@ -1134,8 +1191,10 @@ uint32 outputReadCB_flex(fstream *streamOut, const uint64 iRead, const int32 fea
         case SoloFeatureTypes::GeneFull_ExonOverIntron : {
             const bool isAmbiguous = (soloBar.cbMatchInd.size() > 1) || (soloBar.cbMatch > 1);
 
-            FlexGeneInlineResolveResult res = flexResolveGeneIdx15_inlineResolver(
-                soloReadFeat, soloBar, reFe, readAnnot, featureType, iRead);
+            const FlexGeneInlineResolveResult res = preResolved != nullptr
+                ? *preResolved
+                : flexResolveGeneIdx15_inlineResolver(
+                    soloReadFeat, soloBar, reFe, readAnnot, featureType, iRead);
             if (res.geneIdx15 == 0) {
                 break;
             }

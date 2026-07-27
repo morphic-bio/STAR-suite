@@ -28,10 +28,20 @@ uint32 outputReadCB_base(fstream *streamOut, const uint64 iRead, const int32 fea
                          const ReadSoloFeatures &reFe, const ReadAnnotations &readAnnot, const SoloReadFlagClass &readFlag,
                          SoloReadFeature *soloReadFeat = nullptr);
 
+// Same probe/genomic candidate build + resolveGeneFromCandidates as outputReadCB_flex (Gene*).
+// Used by hash-cache synthetic validation and by ordinary/native spatial Flex to avoid drift.
+struct FlexGeneInlineResolveResult {
+    uint16_t geneIdx15 = 0;
+    /** Meaningful only when geneIdx15 != 0; matches winning candidate isGenomic. */
+    bool winningIsGenomic = false;
+    bool hasWinningCandidate = false;
+};
+
 // Flex implementation function declarations  
 uint32 outputReadCB_flex(fstream *streamOut, const uint64 iRead, const int32 featureType, SoloReadBarcode &soloBar, 
                          const ReadSoloFeatures &reFe, const ReadAnnotations &readAnnot, const SoloReadFlagClass &readFlag,
-                         SoloReadFeature *soloReadFeat = nullptr);
+                         SoloReadFeature *soloReadFeat = nullptr,
+                         const FlexGeneInlineResolveResult *preResolved = nullptr);
 
 // Base record implementation (upstream-compatible)
 void record_base(SoloReadFeature *soloReadFeat, SoloReadBarcode &soloBar, uint nTr, Transcript **alignOut, uint64 iRead, ReadAnnotations &readAnnot);
@@ -43,14 +53,6 @@ void record_flex(SoloReadFeature *soloReadFeat, SoloReadBarcode &soloBar, uint n
 bool record_flex_hash_screen_keep(SoloReadFeature *soloReadFeat, SoloReadBarcode &soloBar, uint64 iRead, uint16_t geneIdx15, uint8_t cacheClass);
 void record_flex_hash_screen_deny(SoloReadFeature *soloReadFeat, SoloReadBarcode &soloBar, uint64 iRead, const char *reason);
 
-// Same probe/genomic candidate build + resolveGeneFromCandidates as outputReadCB_flex (Gene*).
-// Used by hash-cache synthetic validation and by outputReadCB_flex to avoid drift.
-struct FlexGeneInlineResolveResult {
-    uint16_t geneIdx15 = 0;
-    /** Meaningful only when geneIdx15 != 0; matches winning candidate isGenomic. */
-    bool winningIsGenomic = false;
-    bool hasWinningCandidate = false;
-};
 FlexGeneInlineResolveResult flexResolveGeneIdx15_inlineResolver(
     SoloReadFeature *soloReadFeat,
     SoloReadBarcode &soloBar,

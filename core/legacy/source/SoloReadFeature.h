@@ -18,6 +18,7 @@
 class SoloFeature;
 class ProbeListIndex;
 class ReadSoloFeatures;
+struct FlexGeneInlineResolveResult;
 
 class SoloReadFeature {
 public:
@@ -132,7 +133,8 @@ private:
                                     SoloReadFeature *soloReadFeat);
     friend uint32 outputReadCB_flex(fstream *streamOut, const uint64 iRead, const int32 featureType, SoloReadBarcode &soloBar,
                                     const ReadSoloFeatures &reFe, const ReadAnnotations &readAnnot, const SoloReadFlagClass &readFlag,
-                                    SoloReadFeature *soloReadFeat);
+                                    SoloReadFeature *soloReadFeat,
+                                    const FlexGeneInlineResolveResult *preResolved);
     friend bool record_flex_hash_screen_keep(SoloReadFeature *soloReadFeat, SoloReadBarcode &soloBar, uint64 iRead, uint16_t geneIdx15, uint8_t cacheClass);
     friend void record_flex_hash_screen_deny(SoloReadFeature *soloReadFeat, SoloReadBarcode &soloBar, uint64 iRead, const char *reason);
     friend const ProbeListIndex* getGlobalProbeIndex(const SoloReadFeature* rf);
