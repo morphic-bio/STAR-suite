@@ -176,7 +176,7 @@ OBJECTS = systemFunctions.o SoloMemoryProfile.o CountingSinkStress.o funPrimaryA
 	SoloFeature_quantTranscript.o SoloFeature_sumThreads.o SoloFeature_countVelocyto.o SoloFeature_countVelocytoBridge.o SoloFeature_countCBgeneUMI.o \
 	SoloFeature_collapseUMI_Graph.o SoloFeature_collapseUMIall.o SoloFeature_collapseUMI_fromHash.o SoloFeature_collapseUMI_fromBridgeHash.o SoloFeature_bridgeHashSnapshot.o SoloFeature_umiCorrection.o SoloFeature_materializeFromHash.o SoloFeature_metricsOutput.o SoloFeature_writeMexFromInlineHashDedup.o SoloFeature_flexfilter.o SoloFeature_addBAMtags.o SoloFeature_writeTagTable.o \
 	SoloHDMoleculeWriter.o SpatialFeatureSidecar.o SpatialR1FastqTap.o SpatialGex.o SpatialGexSpill.o SpatialGexDownstreamSpool.o SpatialGexPipeline.o SpatialR1Decoder.o MultiGeneUmiCr.o CrMultimapRescuePolicy.o \
-	MexWriter.o MexWriterUtil.o \
+	MexWriter.o MexWriterUtil.o FlexGdna.o \
 	UMICorrector.o \
 	ParametersClip_initialize.o ClipMate_clip.o ClipCR4.o opal/opal.o ClipMate_clipChunk.o ClipMate_initialize.o \
 	Transcriptome_classifyAlign.o Transcriptome_geneFullAlignOverlap_ExonOverIntron.o Transcriptome_alignExonOverlap.cpp \
@@ -414,7 +414,13 @@ test_SoloReadInfoBaseline: Depend.list parametersDefault.xxd $(filter-out STAR.o
 	../test/solo_readinfo_baseline
 
 .PHONY: test
-test: test_packed_readinfo test_ProbeListIndex test_SoloHDMoleculeWriter test_SpatialFeatureSidecar test_SpatialR1FastqTap test_SpatialGex test_SpatialGexSpill test_SpatialGexDownstreamSpool test_MultiGeneUmiCr test_CrMultimapRescuePolicy test_complex_barcode_whitelist_lookup
+test: test_packed_readinfo test_FlexGdna test_ProbeListIndex test_SoloHDMoleculeWriter test_SpatialFeatureSidecar test_SpatialR1FastqTap test_SpatialGex test_SpatialGexSpill test_SpatialGexDownstreamSpool test_MultiGeneUmiCr test_CrMultimapRescuePolicy test_complex_barcode_whitelist_lookup
+
+.PHONY: test_FlexGdna
+test_FlexGdna: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
+test_FlexGdna: FlexGdna.o FlexHashScreen.o
+	$(CXX) $(CXXFLAGS) -I./ -I$(FLEX_SRC_DIR) ../test/test_flex_gdna.cpp FlexGdna.o FlexHashScreen.o -o ../test/test_flex_gdna
+	../test/test_flex_gdna
 
 .PHONY: test_ProbeListIndex
 test_ProbeListIndex: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)

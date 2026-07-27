@@ -6,6 +6,7 @@
 #include "serviceFuns.cpp"
 #include "solo/CbCorrector.h"  // Include after ParametersSolo.h (which has IncludeDefine.h)
 #include "FlexHashScreen.h"
+#include "FlexGdna.h"
 #include "OcmMultiMaterialize.h"
 
 #include <stdlib.h>
@@ -607,6 +608,76 @@ void ParametersSolo::initialize(Parameters *pPin)
         }
     }
 
+    //////////////////////////////////////////////////////////////////////////////////////////////////////
+    /////////////////////////////// Flex gDNA diagnostic metadata (strictly Flex-gated)
+    {
+        const string gdnaMode = lowerStringLocal(flexGdnaModeStr);
+        if (gdnaMode == "no") {
+            flexGdnaMode = FlexGdnaOff;
+        } else if (gdnaMode == "auto" || gdnaMode.empty()) {
+            flexGdnaMode = FlexGdnaAuto;
+        } else if (gdnaMode == "yes") {
+            flexGdnaMode = FlexGdnaRequired;
+        } else {
+            ostringstream errOut;
+            errOut << "EXITING because of fatal PARAMETERS error: unrecognized option in --soloFlexGdna="
+                   << flexGdnaModeStr << "\n";
+            errOut << "SOLUTION: use allowed option: auto OR yes OR no\n";
+            exitWithError(errOut.str(), std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
+        }
+
+        flexGdnaReady = false;
+        FlexGdnaProbeMetadata::instance().reset();
+        const bool flexFilterEnabled =
+            lowerStringLocal(runFlexFilterStr) != "no";
+        if (flexMode && flexGdnaMode == FlexGdnaRequired
+            && !flexFilterEnabled) {
+            ostringstream errOut;
+            errOut
+                << "EXITING because --soloFlexGdna yes requires final FlexFilter "
+                   "cell calls, but --soloRunFlexFilter no was selected.\n";
+            errOut
+                << "SOLUTION: enable --soloRunFlexFilter or select "
+                   "--soloFlexGdna auto/no.\n";
+            exitWithError(errOut.str(), std::cerr, pP->inOut->logMain,
+                          EXIT_CODE_PARAMETER, *pP);
+        } else if (flexMode && flexGdnaMode == FlexGdnaAuto
+                   && !flexFilterEnabled) {
+            pP->inOut->logMain
+                << "Flex gDNA diagnostic: unavailable in auto mode "
+                   "(FlexFilter is disabled)\n";
+        } else if (flexMode && flexGdnaMode != FlexGdnaOff) {
+            const string discovered = FlexGdnaProbeMetadata::discoverProbeCsv(
+                flexGdnaProbeSetPath, probeListPath, pP->pGe.gDir);
+            string gdnaError;
+            if (!discovered.empty()) {
+                flexGdnaReady = FlexGdnaProbeMetadata::instance().load(
+                    discovered, probeListPath, &gdnaError);
+            } else {
+                gdnaError = "filtered probe CSV was not found";
+            }
+
+            if (flexGdnaReady) {
+                pP->inOut->logMain
+                    << "Flex gDNA diagnostic: probe metadata loaded from "
+                    << FlexGdnaProbeMetadata::instance().probeCsvPath()
+                    << " (probes=" << FlexGdnaProbeMetadata::instance().totalProbes()
+                    << ", control_genes=" << FlexGdnaProbeMetadata::instance().controlGeneCount()
+                    << ")\n";
+            } else if (flexGdnaMode == FlexGdnaRequired) {
+                ostringstream errOut;
+                errOut << "EXITING because --soloFlexGdna yes requires complete probe-region metadata: "
+                       << gdnaError << "\n";
+                errOut << "SOLUTION: provide --soloFlexGdnaProbeSet <filtered_probe_set.csv> or use "
+                          "--soloFlexGdna auto/no.\n";
+                exitWithError(errOut.str(), std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
+            } else {
+                pP->inOut->logMain
+                    << "Flex gDNA diagnostic: unavailable in auto mode (" << gdnaError << ")\n";
+            }
+        }
+    }
+
     // Flex pipeline parameter validation
     if (flexPipelineStr != "yes" && flexPipelineStr != "no" && flexPipelineStr != "auto") {
         ostringstream errOut;
@@ -671,7 +742,29 @@ void ParametersSolo::initialize(Parameters *pPin)
                 bool loaded = FlexHashScreenCache::instance().ensureLoaded(*this, &loadError);
                 if (loaded) {
                     pP->inOut->logMain << "H0/H1 hash screen: enabled with cache " << hashScreenFile
-                                       << " (" << FlexHashScreenCache::instance().recordCount() << " records)\n";
+                                       << " (" << FlexHashScreenCache::instance().recordCount()
+                                       << " records, format v"
+                                       << FlexHashScreenCache::instance().cacheVersion() << ")\n";
+                    if (flexGdnaMode != FlexGdnaOff
+                        && !FlexHashScreenCache::instance().hasRegionMetadata()) {
+                        if (flexGdnaMode == FlexGdnaRequired) {
+                            ostringstream errOut;
+                            errOut
+                                << "EXITING because --soloFlexGdna yes requires a v3 H0/H1 cache "
+                                   "with probe-region metadata, but the active cache is format v"
+                                << FlexHashScreenCache::instance().cacheVersion() << ": "
+                                << hashScreenFile << "\n";
+                            errOut
+                                << "SOLUTION: regenerate the cache with this STAR version, use "
+                                   "--no-hash-screen yes, or select --soloFlexGdna auto/no.\n";
+                            exitWithError(errOut.str(), std::cerr, pP->inOut->logMain,
+                                          EXIT_CODE_PARAMETER, *pP);
+                        }
+                        pP->inOut->logMain
+                            << "Flex gDNA diagnostic: active H0/H1 cache lacks probe-region "
+                               "metadata; mapping remains enabled but the diagnostic will be "
+                               "reported unavailable\n";
+                    }
                 } else {
                     hashScreenEnabled = false;
                     pP->inOut->logMain << "H0/H1 hash screen: disabled (" << loadError << "): " << hashScreenFile << "\n";

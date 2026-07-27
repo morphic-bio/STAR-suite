@@ -342,6 +342,7 @@ declare -a STANDARD_TESTS=(
     
     # 3) Flex pipelines
     "${SCRIPT_DIR}/flex_smoke/run_flex_smoke.sh"
+    "${SCRIPT_DIR}/run_flex_gdna_test.sh"
     "${SCRIPT_DIR}/run_flex_inline_test.sh"
     "${SCRIPT_DIR}/run_flex_cbub_validation_test.sh"
     

@@ -141,6 +141,9 @@ public:
     struct InlineMatrixBundle {
         SampleMatrixData matrixData;
         std::vector<MexWriter::Triplet> triplets;
+        // Parallel to matrixData.barcodes. Encodes the original corrected
+        // barcode index and Flex sample tag as (cbIdx << 8) | tag.
+        std::vector<uint64_t> cbTagKeys;
     };
 
     // Write MEX directly from inline-hash dedup data (no Solo, no replayer)

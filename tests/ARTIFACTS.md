@@ -1004,3 +1004,14 @@ All three runs used **`USE_READFILES_ZCAT=0`** (no external `zcat`), **`--outSAM
   comparisons.
 - Status: untracked; never commit MEX output, binary spool records, FASTQs,
   timing logs, or reference data.
+
+## Flex gDNA diagnostic 100K acceptance (2026-07-27)
+
+- Runbook: `docs/RUNBOOK_FLEX_GDNA_DIAGNOSTIC_20260727.md`
+- Fresh authorized fixture root:
+  `/storage/downsampled_100K/SC2300771/results/flex_gdna_100k_20260727_v1/`
+- Contents: v3 H0/H1 cache with probe-region metadata; one completed STAR Flex
+  run; per-sample and library gDNA diagnostics; MEX outputs; timing, memory,
+  binary/cache hashes, and logs.
+- Status: untracked. The fixture was executed once; do not rerun it without new
+  authorization and do not commit FASTQs, cache binaries, MEX files, or logs.
