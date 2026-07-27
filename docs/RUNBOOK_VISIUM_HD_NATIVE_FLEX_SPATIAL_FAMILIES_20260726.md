@@ -116,9 +116,9 @@ The implementation remained inside the audited boundary:
 - Run summaries identify the native Flex schema, feature-axis and cache hashes,
   route counters, feature/spatial cross-tabs, barcode-`N` fallback outcomes,
   and invalid-UMI accounting.
-- Explicit `--soloRunFlexFilter no` and `--soloMapqMode off` values are no
-  longer overwritten by the Flex omnibus defaults. Omitted values retain
-  ordinary Flex production defaults.
+- Explicit `--soloRunFlexFilter no` is no longer overwritten by the Flex
+  omnibus defaults. `--soloMapqMode off` is the shared ordinary/native spatial
+  Flex default; a MAPQ filter must be requested explicitly.
 
 No BAM, GX/UR bridge, per-read text ledger, external resolver, or external
 materializer participates in the native route.
@@ -265,6 +265,37 @@ the new spatial call site must both call it.
 
 Do not call ordinary `SoloRead::record()` for the native spatial product. That
 call performs the single-CB insertion that this mode replaces.
+
+The parity oracle for this boundary is the terminal output of
+`flexResolveGeneIdx15_inlineResolver()` on each hash-miss read. Do not compare
+against BAM `GX` or `UR`: those are alignment/legacy-replay fields, not the
+modern Flex resolver result. Run ordinary inline Flex and native spatial Flex
+with identical reads, index, cache, and alignment/resolver parameters, set
+`STAR_INLINE_REJECT_LOG` to a fresh file for each arm, and compare the traces
+with:
+
+```bash
+tests/compare_flex_resolver_traces.sh \
+  spatial_resolver_trace.tsv ordinary_resolver_trace.tsv
+```
+
+Ordinary inline Flex and native spatial Flex must both emit exactly one
+terminal resolver row for every hash miss. The read IDs and their `isProbe`,
+gene, terminal status, and candidate summary must match exactly. Both routes
+resolve R2 independently of whether R1 later produces an eligible single-cell
+or spatial molecule.
+
+Ordinary inline Flex follows the same ordering for alignment fallbacks:
+resolve the R2 feature first, then apply CB/sample eligibility and feed the
+assigned gene plus raw UMI into the existing deferred family correction.
+Reading R1 still enumerates bounded whitelist candidates, but candidate
+selection and UMI correction must not suppress or alter the terminal feature
+decision.
+
+For no-sample Flex, the parameter sentinel
+`--soloSampleWhitelist -` means sample tagging is disabled. It must not be
+treated as an enabled whitelist and must not produce `UNMATCHED_TAG` drops.
+The no-sample alignment-fallback smoke test guards this contract.
 
 ### 5. Probe feature axis
 
@@ -580,14 +611,15 @@ force. Any difference must be traced to one of:
 
 ### Completed CRC 100K result
 
-The accepted native configuration explicitly uses the ordinary Flex production
-policy:
+The accepted native configuration uses the shared liberal Flex policy:
 
 ```text
---soloMapqMode genomic
+--soloMapqMode off
 ```
 
-Fresh output roots:
+The initial concurrency/spill validation used the stricter
+`--soloMapqMode genomic` policy. It remains valid engineering evidence for
+thread, repeat, and spool determinism:
 
 ```text
 /mnt/pikachu/star-spatial/native_flex_tests/
@@ -597,9 +629,9 @@ Fresh output roots:
   20260726_crc_100k_native_spatial_flex_release_32t_memory_repeat_v1
 ```
 
-Accepted 32-thread all-memory accounting:
+Initial 32-thread all-memory accounting:
 
-| Quantity | Native value |
+| Quantity | Genomic-MAPQ value |
 | --- | ---: |
 | Input pairs | 100,000 |
 | R1 pairs with spatial candidates | 94,266 |
@@ -649,14 +681,46 @@ contribution runs, and 3,072 matrix runs. Its diagnostic soft-mass accumulator
 differed from all-memory by `2.0e-13`, while every emitted soft and integer MEX
 component remained byte-identical.
 
-The difference from the archived 4,130 alignment assignments is intentional
-and localized. The archive accepted the single primary BAM `GX` annotation
-after mapping; it did not run the current shared Flex probe/genomic resolver.
-The native H0/H1/deny/miss surface matches the archive exactly. A controlled
-`--soloMapqMode off` trace raised alignment resolution to 3,875, demonstrating
-that most of the gap is the ordinary Flex genomic MAPQ policy; the remaining
-255 reads are current probe/genomic conflict and rescue decisions. Forcing
-4,130 would reintroduce the retired alignment-tag compatibility semantics.
+The final shared MAPQ-off parity run is:
+
+```text
+/mnt/pikachu/star-spatial/native_flex_tests/
+  20260727_crc_100k_flex_resolver_callsite_parity_mapq_off_v1
+```
+
+Its spatial arm produced:
+
+| Quantity | MAPQ-off value |
+| --- | ---: |
+| Input pairs | 100,000 |
+| R1 pairs with spatial candidates | 94,266 |
+| H0 | 90,832 |
+| H1 | 1,843 |
+| Hash deny | 966 |
+| Hash miss | 6,359 |
+| Alignment resolved | 3,875 |
+| Alignment unresolved | 2,484 |
+| Feature assigned | 96,550 |
+| Joined candidate rows | 109,222 |
+| Joined reads | 90,777 |
+| Read cliques | 79,163 |
+| Strict molecules | 66,451 |
+| Soft expected mass | 78,694.814067542946 |
+| Hard molecules | 78,675 |
+| Gated-hard molecules | 70,869 |
+
+The ordinary and spatial arms each emitted 6,359 terminal resolver rows:
+3,875 `KEEP_HASH` and 2,484 `RESOLVER_DROP`. Their per-read gene,
+probe/genomic indicator, terminal status, and candidate summary had zero
+mismatches. Ordinary Flex retained complete feature-resolution coverage even
+though 4,342 of those reads were subsequently ineligible for a barcode family.
+
+The archived 4,130 alignment assignments came from accepting a single primary
+BAM `GX` annotation; that archive did not run the current shared Flex
+probe/genomic resolver. Under `--soloMapqMode off`, the modern resolver assigns
+3,875 of the CRC 100K hash misses. The remaining 255 reads are current
+probe/genomic conflict and rescue decisions. Forcing 4,130 would reintroduce
+the retired alignment-tag compatibility semantics.
 
 ### Acceptance
 
@@ -694,6 +758,8 @@ The following release gates passed:
 - Solo smoke;
 - full standard parameter/regression suite: 18/18 passed, including GEX,
   CR-multi tiers, Flex inline, Y-chromosome, SLAM parity, and quick tests.
+- CRC 100K ordinary/native-spatial MAPQ-off resolver parity: 6,359/6,359
+  terminal rows covered with zero per-read decision mismatches.
 
 The CB/UB full fixture script reported an explicit skip because
 `/storage/SC2300771_filtered_2M/sample_whitelist.tsv` is absent.
