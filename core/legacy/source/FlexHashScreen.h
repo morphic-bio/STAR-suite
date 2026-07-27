@@ -6,6 +6,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include "FlexGdna.h"
+
 class ParametersSolo;
 
 struct FlexHashScreenDecision {
@@ -21,6 +23,7 @@ struct FlexHashScreenDecision {
     uint8_t cacheClass = 0;
     uint8_t negativeCode = 0;
     int8_t offset = 0;
+    FlexGdnaRegion probeRegion = FlexGdnaUnknown;
 };
 
 class FlexHashScreenCache {
@@ -32,6 +35,7 @@ public:
         uint8_t cacheClass = 0;
         uint8_t negativeCode = 0;
         uint16_t sampleIdx = 0;
+        FlexGdnaRegion probeRegion = FlexGdnaUnknown;
     };
 
     static FlexHashScreenCache& instance();
@@ -44,11 +48,14 @@ public:
     size_t recordCount() const { return records_.size(); }
     size_t h0RecordCount() const { return h0Records_.size(); }
     size_t h1DenyRecordCount() const { return h1DenyRecords_.size(); }
+    uint16_t cacheVersion() const { return cacheVersion_; }
+    bool hasRegionMetadata() const { return regionMetadataComplete_; }
 
     /** Pack 50bp ACGT window into (seqLo, seqHi); same encoding as classifyRead. */
     static bool encodeProbeWindow(const char* readSeq, uint32_t offset, uint64_t& seqLo, uint64_t& seqHi);
-    /** Write FH01SEQ1 v2 cache (sorted by seqHi, seqLo, sampleIdx). */
-    static bool writeHashCacheFile(const std::string& path, std::vector<Record>& records, std::string* errorOut);
+    /** Write FH01SEQ1 v2/v3 cache (sorted by seqHi, seqLo, sampleIdx). */
+    static bool writeHashCacheFile(const std::string& path, std::vector<Record>& records,
+                                   std::string* errorOut, bool regionMetadataComplete = false);
 
 private:
     FlexHashScreenCache() = default;
@@ -78,6 +85,8 @@ private:
 
     bool initialized_ = false;
     bool enabled_ = false;
+    bool regionMetadataComplete_ = false;
+    uint16_t cacheVersion_ = 0;
     std::string loadedPath_;
     std::vector<Record> records_;
     std::vector<Record> h0Records_;

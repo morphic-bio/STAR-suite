@@ -1,10 +1,12 @@
 # STAR Suite v1.6.0 Release Notes
 
-Date: 2026-07-25
+Date: 2026-07-27
 
 `v1.6.0` promotes the opt-in integrated Visium HD 3-prime GEX pipeline and
 its bounded molecule-first materializer. It also fixes Flex-as-aligner paths
-that skip Solo processing or fall back from the feature hash to alignment.
+that skip Solo processing or fall back from the feature hash to alignment,
+adds native Visium HD Flex spatial families, and adds the Flex gDNA
+diagnostic.
 The release artifact version is `v1.6.0`, Debian packages use `1.6.0-1`, and
 both `STAR --version` and `molecule_first_resolver --version` report `1.6.0`.
 The upstream STAR base remains `2.7.11b`; genome-index compatibility remains
@@ -61,6 +63,22 @@ The upstream STAR base remains `2.7.11b`; genome-index compatibility remains
   hash hits, including reads without a barcode assignment, on the hash path.
 - Account hash-kept reads even when no barcode assignment exists.
 
+## Flex gDNA diagnostic
+
+- Compute the 10x-style Flex gDNA estimate from final filtered
+  barcode/gene/UMI families, after barcode and UMI correction, without
+  requiring BAM output.
+- Carry spliced/unspliced probe-region evidence through H0/H1 cache keeps,
+  alignment fallback, ambiguous-barcode resolution, and UMI re-keying without
+  changing the molecule key or allocating per-read sidecars.
+- Add FH01SEQ1 cache format v3, preserving the 24-byte record size while
+  retaining probe-region metadata. STAR and the replay/pilot utilities remain
+  compatible with v1/v2 caches; older caches continue mapping but report the
+  diagnostic unavailable.
+- Emit per-sample Cell Ranger-compatible JSON metrics and a library/per-sample
+  audit TSV. `--soloFlexGdna auto|yes|no` controls reporting and is strictly
+  inert unless `--flex yes`.
+
 ## Isolation and validation
 
 - Integrated spatial GEX is gated by its explicit enable flag and contract;
@@ -88,8 +106,15 @@ The upstream STAR base remains `2.7.11b`; genome-index compatibility remains
 - The CR-compatible CRISPR fixture passed with 1,043 single-feature cells and
   35 multi-feature cells; pinned SLAM parity passed after manifest/index
   verification.
+- The Flex gDNA 100K gate completed in 44.79 seconds. Its accepted model
+  evidence, evaluated with the corrected gene-assigned-molecule denominator,
+  closely reproduced the Cell Ranger sanity values: 3.06095% library gDNA
+  versus 3.08%, and 7.33737% for BC007 versus 7.32%. The standard 19-test
+  release suite and the focused Flex hash/fallback, skip-processing,
+  bookkeeping, resolver, and materializer gates passed.
 
 Implementation, safety contracts, commands, and artifact provenance are in
 `docs/RUNBOOK_VISIUM_HD_GEX_IN_MEMORY_1MM_CR_20260724.md`,
-`docs/RUNBOOK_VISIUM_HD_GEX_DOWNSTREAM_SPOOL_20260725.md`, and the associated
-validation records under `docs/`.
+`docs/RUNBOOK_VISIUM_HD_GEX_DOWNSTREAM_SPOOL_20260725.md`,
+`docs/RUNBOOK_VISIUM_HD_NATIVE_FLEX_SPATIAL_FAMILIES_20260726.md`, and
+`docs/RUNBOOK_FLEX_GDNA_DIAGNOSTIC_20260727.md`.

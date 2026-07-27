@@ -323,7 +323,9 @@ static bool dropUnmatchedTagForFlex(const SoloReadBarcode &soloBar, uint8_t tagI
     return sampleTaggingEnabledForFlex(soloBar) && (tagIdx == 0);
 }
 
-static void accumulateAmbiguousCBForFlex(SoloReadFeature *soloReadFeat, SoloReadBarcode &soloBar, uint16_t geneIdx, uint8_t tagIdx) {
+static void accumulateAmbiguousCBForFlex(SoloReadFeature *soloReadFeat, SoloReadBarcode &soloBar,
+                                         uint16_t geneIdx, uint8_t tagIdx,
+                                         FlexGdnaRegion probeRegion) {
     bool isAmbiguous = (soloBar.cbMatchInd.size() > 1) || (soloBar.cbMatch > 1);
     if (!soloReadFeat || !soloReadFeat->inlineHash_ || !isAmbiguous || soloBar.cbMatchString.empty() || soloBar.cbMatchInd.empty()) {
         return;
@@ -357,6 +359,7 @@ static void accumulateAmbiguousCBForFlex(SoloReadFeature *soloReadFeat, SoloRead
     obs.tagIdx = tagIdx;
     obs.umi24 = umi24;
     obs.count = 1;
+    obs.probeRegion = probeRegion;
     entry.observations.push_back(obs);
 }
 
@@ -373,7 +376,9 @@ static void trackReadIdForTagsFlex(SoloReadFeature *soloReadFeat, SoloReadBarcod
     kh_val(soloReadFeat->readIdTracker_, iter) = val;
 }
 
-bool record_flex_hash_screen_keep(SoloReadFeature *soloReadFeat, SoloReadBarcode &soloBar, uint64 iRead, uint16_t geneIdx15, uint8_t cacheClass)
+bool record_flex_hash_screen_keep(SoloReadFeature *soloReadFeat, SoloReadBarcode &soloBar, uint64 iRead,
+                                  uint16_t geneIdx15, uint8_t cacheClass,
+                                  FlexGdnaRegion probeRegion)
 {
     if (soloReadFeat == nullptr || soloReadFeat->featureType != SoloFeatureTypes::Gene) {
         return false;
@@ -407,7 +412,7 @@ bool record_flex_hash_screen_keep(SoloReadFeature *soloReadFeat, SoloReadBarcode
             snprintf(extraBuf, sizeof(extraBuf), "cache_class=%u", static_cast<unsigned>(cacheClass));
             logRejectReason(soloBar, iRead, soloReadFeat->featureType, 1, geneIdx15, "KEEP_SCREEN", extraBuf, soloBar.pSolo);
         }
-        accumulateAmbiguousCBForFlex(soloReadFeat, soloBar, geneIdx15, tagIdx);
+        accumulateAmbiguousCBForFlex(soloReadFeat, soloBar, geneIdx15, tagIdx, probeRegion);
     } else if (soloReadFeat->inlineHash_ != nullptr && !soloBar.cbMatchInd.empty()) {
         uint32_t cbIdx = soloBar.cbMatchInd[0];
         uint32_t umi24 = soloBar.umiB & 0xFFFFFF;
@@ -415,9 +420,10 @@ bool record_flex_hash_screen_keep(SoloReadFeature *soloReadFeat, SoloReadBarcode
         int absent;
         khiter_t iter = kh_put(cg_agg, soloReadFeat->inlineHash_, key, &absent);
         if (absent) {
-            kh_val(soloReadFeat->inlineHash_, iter) = 1;
+            kh_val(soloReadFeat->inlineHash_, iter) = flexGdnaPackValue(1, probeRegion);
         } else {
-            kh_val(soloReadFeat->inlineHash_, iter)++;
+            kh_val(soloReadFeat->inlineHash_, iter) =
+                flexGdnaIncrementValue(kh_val(soloReadFeat->inlineHash_, iter), 1, probeRegion);
         }
         trackReadIdForTagsFlex(soloReadFeat, soloBar, iRead, cbIdx, umi24);
         if (soloBar.pSolo.inlineHashMode) {
@@ -799,6 +805,7 @@ FlexGeneInlineResolveResult flexResolveGeneIdx15_inlineResolver(
         if (isProbeChr) {
             cv.isGenomic = false;
             cv.probeCigarOk = isCanonicalProbeCigar(tr->cigarString);
+            cv.probeRegion = FlexGdnaProbeMetadata::instance().regionForProbeId(chrName);
             FLEX_COUNT_INC(probeAlignCount);
 
             if (soloBar.pSolo.nmMax >= 0 && cv.nm >= 0) {
@@ -1002,14 +1009,52 @@ FlexGeneInlineResolveResult flexResolveGeneIdx15_inlineResolver(
         return out;
     }
 
-    bool resolvedGenomic = false;
+    auto candidateScore = [](const CandidateView& candidate) -> int {
+        if (candidate.asScore != 0)
+            return candidate.asScore;
+        return candidate.nm >= 0 ? -candidate.nm : 0;
+    };
+    auto candidateHasGene = [resolvedGeneIdx](const CandidateView& candidate) {
+        return candidate.geneIdx15 == resolvedGeneIdx
+            || std::find(candidate.zgGeneIdx15.begin(), candidate.zgGeneIdx15.end(),
+                         resolvedGeneIdx) != candidate.zgGeneIdx15.end();
+    };
+
+    bool resolvedGenomic = true;
     const CandidateView* winningCandidate = nullptr;
-    for (const auto &cv : candidates) {
-        if (cv.geneIdx15 == resolvedGeneIdx ||
-            std::find(cv.zgGeneIdx15.begin(), cv.zgGeneIdx15.end(), resolvedGeneIdx) != cv.zgGeneIdx15.end()) {
-            resolvedGenomic = cv.isGenomic;
+    for (const CandidateView& cv : candidates) {
+        if (cv.isGenomic || !cv.probeCigarOk || !candidateHasGene(cv))
+            continue;
+        if (winningCandidate == nullptr || candidateScore(cv) > candidateScore(*winningCandidate))
             winningCandidate = &cv;
-            break;
+    }
+    if (winningCandidate != nullptr) {
+        resolvedGenomic = false;
+    } else {
+        for (const CandidateView& cv : candidates) {
+            if (!cv.isGenomic || !candidateHasGene(cv))
+                continue;
+            if (winningCandidate == nullptr || candidateScore(cv) > candidateScore(*winningCandidate))
+                winningCandidate = &cv;
+        }
+    }
+
+    FlexGdnaRegion resolvedProbeRegion = FlexGdnaUnknown;
+    if (!resolvedGenomic) {
+        bool haveBestProbe = false;
+        int bestProbeScore = 0;
+        for (const CandidateView& cv : candidates) {
+            if (cv.isGenomic || !cv.probeCigarOk || !candidateHasGene(cv))
+                continue;
+            const int score = candidateScore(cv);
+            if (!haveBestProbe || score > bestProbeScore) {
+                haveBestProbe = true;
+                bestProbeScore = score;
+                resolvedProbeRegion = cv.probeRegion;
+            } else if (score == bestProbeScore) {
+                resolvedProbeRegion =
+                    flexGdnaMergeRegion(resolvedProbeRegion, cv.probeRegion);
+            }
         }
     }
     if (resolvedGenomic) {
@@ -1053,6 +1098,7 @@ FlexGeneInlineResolveResult flexResolveGeneIdx15_inlineResolver(
     out.geneIdx15 = resolvedGeneIdx;
     out.hasWinningCandidate = (winningCandidate != nullptr);
     out.winningIsGenomic = resolvedGenomic;
+    out.probeRegion = resolvedProbeRegion;
     return out;
 }
 
@@ -1100,7 +1146,8 @@ uint32 outputReadCB_flex(fstream *streamOut, const uint64 iRead, const int32 fea
     
     // Helper lambda to handle ambiguous CB accumulation with gene/tag info
     // Ambiguous CB: multiple whitelist candidates (cbMatchInd.size() > 1) or cbMatch > 1 (multiple matches)
-    auto accumulateAmbiguousCB = [&](uint16_t geneIdx, uint8_t tagIdx) {
+    auto accumulateAmbiguousCB = [&](uint16_t geneIdx, uint8_t tagIdx,
+                                     FlexGdnaRegion probeRegion) {
         bool isAmbiguous = (soloBar.cbMatchInd.size() > 1) || (soloBar.cbMatch > 1);
         if (!soloReadFeat || !soloReadFeat->inlineHash_ || !isAmbiguous || soloBar.cbMatchString.empty() || soloBar.cbMatchInd.empty()) {
             return;
@@ -1137,6 +1184,7 @@ uint32 outputReadCB_flex(fstream *streamOut, const uint64 iRead, const int32 fea
         obs.tagIdx = tagIdx;
         obs.umi24 = umi24;
         obs.count = 1;
+        obs.probeRegion = probeRegion;
         entry.observations.push_back(obs);
     };
     
@@ -1164,7 +1212,7 @@ uint32 outputReadCB_flex(fstream *streamOut, const uint64 iRead, const int32 fea
             const uint16_t geneIdx = 0; // No feature
             const bool isAmbiguous = (soloBar.cbMatchInd.size() > 1) || (soloBar.cbMatch > 1);
             if (isAmbiguous && !soloBar.cbMatchInd.empty()) {
-                accumulateAmbiguousCB(geneIdx, tagIdx);
+                accumulateAmbiguousCB(geneIdx, tagIdx, FlexGdnaUnknown);
             } else if (soloReadFeat && soloReadFeat->inlineHash_ != nullptr && soloBar.cbMatch >= 0 && soloBar.cbMatch <= 1 && !soloBar.cbMatchInd.empty()) {
                 uint32_t cbIdx = soloBar.cbMatchInd[0];
                 uint32_t umi24 = soloBar.umiB & 0xFFFFFF;
@@ -1172,9 +1220,12 @@ uint32 outputReadCB_flex(fstream *streamOut, const uint64 iRead, const int32 fea
                 int absent;
                 khiter_t iter = kh_put(cg_agg, soloReadFeat->inlineHash_, key, &absent);
                 if (absent) {
-                    kh_val(soloReadFeat->inlineHash_, iter) = 1;
+                    kh_val(soloReadFeat->inlineHash_, iter) =
+                        flexGdnaPackValue(1, FlexGdnaUnknown);
                 } else {
-                    kh_val(soloReadFeat->inlineHash_, iter)++;
+                    kh_val(soloReadFeat->inlineHash_, iter) =
+                        flexGdnaIncrementValue(kh_val(soloReadFeat->inlineHash_, iter), 1,
+                                               FlexGdnaUnknown);
                 }
                 // Track readId for sorted BAM CB/UB tag injection
                 trackReadIdForTags(cbIdx, umi24);
@@ -1212,7 +1263,7 @@ uint32 outputReadCB_flex(fstream *streamOut, const uint64 iRead, const int32 fea
                                        ambigIsProbe, 
                                        resolvedGeneIdx, "AMBIG_CB", extraBuf, soloBar.pSolo);
                     }
-                    accumulateAmbiguousCB(resolvedGeneIdx, tagIdx);
+                    accumulateAmbiguousCB(resolvedGeneIdx, tagIdx, res.probeRegion);
                 } else {
                     uint32_t cbIdx = soloBar.cbMatchInd[0];
                     uint32_t umi24 = soloBar.umiB & 0xFFFFFF;
@@ -1220,9 +1271,12 @@ uint32 outputReadCB_flex(fstream *streamOut, const uint64 iRead, const int32 fea
                     int absent;
                     khiter_t iter = kh_put(cg_agg, soloReadFeat->inlineHash_, key, &absent);
                     if (absent) {
-                        kh_val(soloReadFeat->inlineHash_, iter) = 1;
+                        kh_val(soloReadFeat->inlineHash_, iter) =
+                            flexGdnaPackValue(1, res.probeRegion);
                     } else {
-                        kh_val(soloReadFeat->inlineHash_, iter)++;
+                        kh_val(soloReadFeat->inlineHash_, iter) =
+                            flexGdnaIncrementValue(kh_val(soloReadFeat->inlineHash_, iter), 1,
+                                                   res.probeRegion);
                     }
                     // Track readId for sorted BAM CB/UB tag injection
                     trackReadIdForTags(cbIdx, umi24);
@@ -1249,7 +1303,7 @@ uint32 outputReadCB_flex(fstream *streamOut, const uint64 iRead, const int32 fea
                 uint16_t geneIdx = sj[0]; // Use first SJ coordinate as gene identifier
                 // Check for ambiguous CB (multiple candidates) vs non-ambiguous (single candidate)
                 if (isAmbiguous && !soloBar.cbMatchInd.empty()) {
-                    accumulateAmbiguousCB(geneIdx, tagIdx);
+                    accumulateAmbiguousCB(geneIdx, tagIdx, FlexGdnaUnknown);
                 } else if (soloReadFeat && soloReadFeat->inlineHash_ != nullptr && soloBar.cbMatch >= 0 && soloBar.cbMatch <= 1 && !soloBar.cbMatchInd.empty()) {
                     uint32_t cbIdx = soloBar.cbMatchInd[0];
                     uint32_t umi24 = soloBar.umiB & 0xFFFFFF;
@@ -1257,9 +1311,12 @@ uint32 outputReadCB_flex(fstream *streamOut, const uint64 iRead, const int32 fea
                     int absent;
                     khiter_t iter = kh_put(cg_agg, soloReadFeat->inlineHash_, key, &absent);
                     if (absent) {
-                        kh_val(soloReadFeat->inlineHash_, iter) = 1;
+                        kh_val(soloReadFeat->inlineHash_, iter) =
+                            flexGdnaPackValue(1, FlexGdnaUnknown);
                     } else {
-                        kh_val(soloReadFeat->inlineHash_, iter)++;
+                        kh_val(soloReadFeat->inlineHash_, iter) =
+                            flexGdnaIncrementValue(kh_val(soloReadFeat->inlineHash_, iter), 1,
+                                                   FlexGdnaUnknown);
                     }
                     // Track readId for sorted BAM CB/UB tag injection
                     trackReadIdForTags(cbIdx, umi24);
@@ -1283,7 +1340,7 @@ uint32 outputReadCB_flex(fstream *streamOut, const uint64 iRead, const int32 fea
                 // Check for ambiguous CB (multiple candidates) vs non-ambiguous (single candidate)
                 const bool isAmbiguous = (soloBar.cbMatchInd.size() > 1) || (soloBar.cbMatch > 1);
                 if (isAmbiguous && !soloBar.cbMatchInd.empty()) {
-                    accumulateAmbiguousCB(geneIdx, tagIdx);
+                    accumulateAmbiguousCB(geneIdx, tagIdx, FlexGdnaUnknown);
                 } else if (soloReadFeat && soloReadFeat->inlineHash_ != nullptr && soloBar.cbMatch >= 0 && soloBar.cbMatch <= 1 && !soloBar.cbMatchInd.empty()) {
                     uint32_t cbIdx = soloBar.cbMatchInd[0];
                     uint32_t umi24 = soloBar.umiB & 0xFFFFFF;
@@ -1291,9 +1348,12 @@ uint32 outputReadCB_flex(fstream *streamOut, const uint64 iRead, const int32 fea
                     int absent;
                     khiter_t iter = kh_put(cg_agg, soloReadFeat->inlineHash_, key, &absent);
                     if (absent) {
-                        kh_val(soloReadFeat->inlineHash_, iter) = 1;
+                        kh_val(soloReadFeat->inlineHash_, iter) =
+                            flexGdnaPackValue(1, FlexGdnaUnknown);
                     } else {
-                        kh_val(soloReadFeat->inlineHash_, iter)++;
+                        kh_val(soloReadFeat->inlineHash_, iter) =
+                            flexGdnaIncrementValue(kh_val(soloReadFeat->inlineHash_, iter), 1,
+                                                   FlexGdnaUnknown);
                     }
                     // Track readId for sorted BAM CB/UB tag injection
                     trackReadIdForTags(cbIdx, umi24);

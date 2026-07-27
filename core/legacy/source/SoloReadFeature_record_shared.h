@@ -5,6 +5,7 @@
 #include "SoloReadBarcode.h"
 #include "ReadAnnotations.h"
 #include "SoloReadFeatureStats.h"
+#include "FlexGdna.h"
 
 // Forward declarations
 class Transcript;
@@ -35,6 +36,7 @@ struct FlexGeneInlineResolveResult {
     /** Meaningful only when geneIdx15 != 0; matches winning candidate isGenomic. */
     bool winningIsGenomic = false;
     bool hasWinningCandidate = false;
+    FlexGdnaRegion probeRegion = FlexGdnaUnknown;
 };
 
 // Flex implementation function declarations  
@@ -50,7 +52,9 @@ void record_base(SoloReadFeature *soloReadFeat, SoloReadBarcode &soloBar, uint n
 void record_flex(SoloReadFeature *soloReadFeat, SoloReadBarcode &soloBar, uint nTr, Transcript **alignOut, uint64 iRead, ReadAnnotations &readAnnot);
 
 // Internal Flex hash-screen fast path helpers.
-bool record_flex_hash_screen_keep(SoloReadFeature *soloReadFeat, SoloReadBarcode &soloBar, uint64 iRead, uint16_t geneIdx15, uint8_t cacheClass);
+bool record_flex_hash_screen_keep(SoloReadFeature *soloReadFeat, SoloReadBarcode &soloBar, uint64 iRead,
+                                  uint16_t geneIdx15, uint8_t cacheClass,
+                                  FlexGdnaRegion probeRegion = FlexGdnaUnknown);
 void record_flex_hash_screen_deny(SoloReadFeature *soloReadFeat, SoloReadBarcode &soloBar, uint64 iRead, const char *reason);
 
 FlexGeneInlineResolveResult flexResolveGeneIdx15_inlineResolver(

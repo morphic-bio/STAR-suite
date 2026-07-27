@@ -476,7 +476,8 @@ int ReadAlign::oneReadLoaded(const int readStatus0) {
             SoloReadFeature *geneFeat = soloRead->readFeat[P.pSolo.featureInd[SoloFeatureTypes::Gene]];
             bool handled = record_flex_hash_screen_keep(geneFeat, *soloRead->readBar, iReadAll,
                                                         hashScreenDecision_.geneIdx15,
-                                                        hashScreenDecision_.cacheClass);
+                                                        hashScreenDecision_.cacheClass,
+                                                        hashScreenDecision_.probeRegion);
             if (handled) {
                 statsRA.hashScreenKeep++;
                 if (noBarcode) {

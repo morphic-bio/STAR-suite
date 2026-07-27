@@ -13,6 +13,7 @@
 #include "ReadAlign.h"
 #include "hash_shims_cpp_compat.h"
 #include "SoloBinarySpool.h"
+#include "FlexGdna.h"
 #include <functional>
 
 class SoloFeature;
@@ -60,6 +61,7 @@ public:
             uint8_t tagIdx;
             uint32_t umi24;
             uint32_t count;
+            FlexGdnaRegion probeRegion = FlexGdnaUnknown;
         };
         std::vector<AmbiguousObservation> observations; // Flex: per-read observations (unchanged)
         // Non-Flex direct bridge: aggregate (umi24,gene16) -> read counts (no per-read observation vector)
@@ -135,7 +137,9 @@ private:
                                     const ReadSoloFeatures &reFe, const ReadAnnotations &readAnnot, const SoloReadFlagClass &readFlag,
                                     SoloReadFeature *soloReadFeat,
                                     const FlexGeneInlineResolveResult *preResolved);
-    friend bool record_flex_hash_screen_keep(SoloReadFeature *soloReadFeat, SoloReadBarcode &soloBar, uint64 iRead, uint16_t geneIdx15, uint8_t cacheClass);
+    friend bool record_flex_hash_screen_keep(SoloReadFeature *soloReadFeat, SoloReadBarcode &soloBar, uint64 iRead,
+                                             uint16_t geneIdx15, uint8_t cacheClass,
+                                             FlexGdnaRegion probeRegion);
     friend void record_flex_hash_screen_deny(SoloReadFeature *soloReadFeat, SoloReadBarcode &soloBar, uint64 iRead, const char *reason);
     friend const ProbeListIndex* getGlobalProbeIndex(const SoloReadFeature* rf);
     const int32 featureType;

@@ -1854,6 +1854,20 @@ soloProbeList               -
                             If not provided, will auto-detect probe_gene_list.txt from genome index directory
                             REQUIRED when Flex mode is enabled (--flex yes or --soloRunFlexFilter yes)
                             Probe sets are not downloaded - must be user-supplied via --flexGeneProbeSet during index build
+
+soloFlexGdna                auto
+    string:                 Flex probe-region gDNA diagnostic mode.
+                            auto ... compute after final Flex cell/UMI filtering when complete probe/cache metadata are available;
+                                     otherwise emit an explicit skipped status
+                            yes  ... require complete metadata and fail if the diagnostic cannot be computed
+                            no   ... disable the diagnostic and do not load probe-region metadata
+                            This option is inert unless --flex yes and does not change molecule matrices.
+
+soloFlexGdnaProbeSet        auto
+    string:                 filtered probe CSV containing gene_id, probe_id, included, and region.
+                            auto searches next to --soloProbeList and under
+                            <genomeDir>/flex_probe_artifacts/filtered_probe_set.csv.
+
 soloRemoveDeprecated        -
     string:                 Yes|No|auto (default auto, inherits from --removeDeprecated)
                             Yes         ... remove deprecated entries from --soloProbeList at load time
@@ -1958,7 +1972,8 @@ soloHashScreenFile          -
                             flex_h01_sequence_cache.bin next to the probe list.
 
 hashCacheOutput             -
-    string:                 output path for FH01SEQ1 v2 binary (required for --runMode hashCacheGenerate)
+    string:                 output path for FH01SEQ1 v2/v3 binary (required for --runMode hashCacheGenerate).
+                            v3 is emitted when complete probe-region metadata are available; otherwise v2.
 
 hashCacheTiers              H0,H1,H2
     string:                 comma-separated subset: H0, H1, H2 (default: all)
@@ -1971,7 +1986,7 @@ flex                         no
                             yes         ... enable full Flex pipeline with production defaults:
                                             soloRunFlexFilter=yes, soloInlineCBCorrection=yes,
                                             soloInlineHashMode=yes, soloFlexMinimalMemory=yes (unless explicitly overridden),
-                                            soloMapqMode=genomic, soloMMrateMax=0.1,
+                                            soloMapqMode=off, soloMMrateMax=0.1,
                                             soloBarcodesObservedOnly=yes, soloUMICorrection=clique
                             no          ... use individual flag settings (default, inline hash mode disabled)
                             NOTE: Flex mode requires a probe list. Provide --soloProbeList <path> OR

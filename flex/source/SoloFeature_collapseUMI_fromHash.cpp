@@ -11,6 +11,7 @@
 #include "ErrorWarning.h"
 #include "MexWriter.h"
 #include "SampleDetector.h"
+#include "FlexGdna.h"
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -136,7 +137,7 @@ void SoloFeature::collapseUMIall_fromHash()
         uint32_t cbIdx = static_cast<uint32_t>((kh_key(hash, iter) >> 44) & 0xFFFFF);
         if (cbIdx < wlSize)
             ++cbCounts[cbIdx];
-        totalCountsPre += kh_val(hash, iter);
+        totalCountsPre += flexGdnaValueCount(kh_val(hash, iter));
     }
     P.inOut->logMain << "[INLINE-HASH] pre_dedup entries=" << hashSize
                      << " total_counts=" << totalCountsPre << endl;
@@ -236,8 +237,10 @@ void SoloFeature::collapseUMIall_fromHash()
     InlineMatrixBundle inlineMatrix;
     std::vector<MexWriter::Triplet> &triplets = inlineMatrix.triplets;
     std::vector<std::string> &compositeBarcodes = inlineMatrix.matrixData.barcodes;
+    std::vector<uint64_t> &compositeCbTagKeys = inlineMatrix.cbTagKeys;
     triplets.reserve(totalEntries / 2);
     compositeBarcodes.reserve(nCB * 4);
+    compositeCbTagKeys.reserve(nCB * 4);
 
     uint64_t prevCbTag = UINT64_MAX;
     uint32_t cellIdx = 0;
@@ -277,6 +280,7 @@ void SoloFeature::collapseUMIall_fromHash()
                 if (cbIdx < pSolo.cbWLstr.size() &&
                     tag < gCanonicalTags.size() && !gCanonicalTags[tag].empty()) {
                     compositeBarcodes.push_back(pSolo.cbWLstr[cbIdx] + gCanonicalTags[tag]);
+                    compositeCbTagKeys.push_back(cbTagKey);
                     cellIdx = static_cast<uint32_t>(compositeBarcodes.size() - 1);
                     cellUMIs.push_back(0);
                     cellGenes.push_back(0);
