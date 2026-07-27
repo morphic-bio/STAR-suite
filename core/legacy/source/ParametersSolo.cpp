@@ -545,18 +545,8 @@ void ParametersSolo::initialize(Parameters *pPin)
                 soloFlexMinimalMemoryStr = "yes";
             }
             
-            // Set MAPQ mode to genomic only when the CLI/parameter files did
-            // not explicitly request "off".
-            ParameterInfoBase *mapqModeParam = findParam("soloMapqMode");
-            const bool mapqModeExplicit =
-                mapqModeParam != nullptr && mapqModeParam->inputLevel > 0;
-            if (!mapqModeExplicit
-                && (mapqModeStr.empty() || mapqModeStr == "off")) {
-                mapqModeStr = "genomic";
-            }
-            
             // Set MAPQ threshold to 255 (if at default)
-            // Note: 255 is already the default, so this is a no-op but explicit
+            // This threshold is inert while the default soloMapqMode is off.
             if (mapqThreshold == 255) {
                 mapqThreshold = 255;
             }

@@ -47,8 +47,14 @@ The upstream STAR base remains `2.7.11b`; genome-index compatibility remains
 - Preserve the accepted deterministic annotation/MECOM rescue behavior already
   present on the stable line.
 
-## Flex fixes
+## Flex behavior and fixes
 
+- Use the liberal `--soloMapqMode off` policy by default in ordinary and
+  spatial Flex. MAPQ filtering remains available as an explicit request.
+- Resolve hash-miss R2 feature evidence before CB/sample eligibility, then feed
+  the chosen gene and raw UMI into the existing deferred family correction.
+  This keeps feature assignment independent of whether R1 later forms an
+  eligible single-cell or spatial family.
 - Do not require expected-cell settings when `--soloSkipProcessing yes`.
 - Avoid legacy Solo replay in inline skip-processing mode.
 - Route true no-sample hash-cache misses to alignment while keeping valid H0
@@ -70,6 +76,9 @@ The upstream STAR base remains `2.7.11b`; genome-index compatibility remains
   cliques, 66,845 strict molecules, 79,144 hard molecules, and 71,262
   gated-hard molecules, with exact accepted ledgers, resolver artifacts, and
   policy matrices.
+- The final MAPQ-off CRC 100K gate assigned 3,875 of 6,359 hash misses. Its
+  ordinary and native-spatial arms covered all 6,359 reads with byte-equivalent
+  terminal resolver fields and zero per-read decision mismatches.
 - The fresh ovarian 100K compatibility/spool gate reproduced 58,395 strict,
   71,830 hard, and 63,105 gated-hard molecules; all 36 MEX components were
   byte-identical to the accepted compatibility oracle.

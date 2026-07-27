@@ -58,6 +58,10 @@ if ! grep -Fq "could not open genome file" "${test_dir}/skip.stderr"; then
     sed -n '1,80p' "${test_dir}/skip.stderr" >&2
     exit 1
 fi
+if ! grep -Fq "soloMapqMode=off (enum=0)" "${test_dir}/skip/Log.out"; then
+    echo "FAIL: ordinary Flex did not retain the default MAPQ-off resolver policy" >&2
+    exit 1
+fi
 
 if [[ ${process_rc} -eq 0 ]]; then
     echo "FAIL: processing fixture unexpectedly completed without expected cells" >&2
@@ -87,4 +91,4 @@ if ! grep -Fq "soloMapqMode=off (enum=0)" "${test_dir}/explicit/Log.out"; then
     exit 1
 fi
 
-echo "PASS: skip-processing bypasses the expected-cell requirement; active processing retains it; explicit Flex policy overrides are preserved"
+echo "PASS: skip-processing bypasses the expected-cell requirement; active processing retains it; ordinary Flex defaults to MAPQ-off and explicit policy overrides are preserved"

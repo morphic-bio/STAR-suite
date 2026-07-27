@@ -26,7 +26,7 @@ command -v samtools >/dev/null 2>&1 || {
     exit 2
 }
 
-"${star_bin}" \
+STAR_INLINE_REJECT_LOG="${test_dir}/inline_trace.tsv" "${star_bin}" \
     --runThreadN 1 \
     --genomeDir "${genome_dir}" \
     --readFilesIn "${script_dir}/fixtures/flex_hash_fallback_r2.fastq" "${script_dir}/fixtures/flex_hash_fallback_r1.fastq" \
@@ -62,5 +62,15 @@ metric() {
 [[ "$(metric 'Hash screen: PASS')" == "1" ]]
 samtools quickcheck "${test_dir}/Aligned.out.bam"
 [[ "$(samtools view -c "${test_dir}/Aligned.out.bam")" == "1" ]]
+if [[ "$(awk -F '\t' 'NR > 1 && ($9 == "KEEP_HASH" || $9 == "RESOLVER_DROP") { n++ } END { print n+0 }' \
+    "${test_dir}/inline_trace.tsv")" != "1" ]]; then
+    echo "FAIL: the cache miss did not reach exactly one terminal feature-resolver decision" >&2
+    exit 1
+fi
+if awk -F '\t' 'NR > 1 && $9 == "UNMATCHED_TAG" { found=1 } END { exit !found }' \
+    "${test_dir}/inline_trace.tsv"; then
+    echo "FAIL: disabled sample whitelist sentinel was treated as sample tagging" >&2
+    exit 1
+fi
 
-echo "PASS: no-sample H0 and no-barcode H0 stay on hash path; only cache miss reaches alignment BAM"
+echo "PASS: no-sample H0 and no-barcode H0 stay on hash path; only the cache miss reaches alignment and resolves feature evidence before barcode eligibility"
