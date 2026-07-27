@@ -10,6 +10,7 @@ namespace {
 
 const char kCacheMagic[] = {'F', 'H', '0', '1', 'S', 'E', 'Q', '1'};
 const uint16_t kCacheVersionSampleAware = 2;
+const uint16_t kCacheVersionProbeRegion = 3;
 const uint16_t kCacheKmerLength = 50;
 const uint16_t kCacheRecordSize = 24;
 const int8_t kRelativeProbeOffsets[] = {0, 1, -1};
@@ -61,6 +62,8 @@ bool FlexHashScreenCache::ensureLoaded(const ParametersSolo& pSolo, std::string*
     enabled_ = false;
     loadedPath_.clear();
     records_.clear();
+    cacheVersion_ = 0;
+    regionMetadataComplete_ = false;
 
     if (!pSolo.hashScreenEnabled || pSolo.hashScreenFile.empty()) {
         return false;
@@ -97,7 +100,8 @@ bool FlexHashScreenCache::loadFile(const std::string& path, std::string* errorOu
         }
         return false;
     }
-    if ((header.version != 1 && header.version != kCacheVersionSampleAware) ||
+    if ((header.version != 1 && header.version != kCacheVersionSampleAware
+         && header.version != kCacheVersionProbeRegion) ||
         header.kmerLength != kCacheKmerLength || header.recordSize != kCacheRecordSize) {
         if (errorOut != nullptr) {
             *errorOut = "cache format mismatch";
@@ -119,13 +123,18 @@ bool FlexHashScreenCache::loadFile(const std::string& path, std::string* errorOu
         Record rec;
         rec.seqLo = raw.seqLo;
         rec.seqHi = raw.seqHi;
-        rec.resolvedGeneIdx15 = raw.resolvedGeneIdx15;
+        rec.resolvedGeneIdx15 = raw.resolvedGeneIdx15 & 0x7FFFu;
+        rec.probeRegion = header.version >= kCacheVersionProbeRegion
+            ? static_cast<FlexGdnaRegion>((raw.resolvedGeneIdx15 >> 30) & 0x3u)
+            : FlexGdnaUnknown;
         rec.cacheClass = raw.cacheClass;
         rec.negativeCode = raw.negativeCode;
         rec.sampleIdx = (header.version >= kCacheVersionSampleAware) ? raw.reserved : 0;
         records_[i] = rec;
     }
 
+    cacheVersion_ = header.version;
+    regionMetadataComplete_ = header.version >= kCacheVersionProbeRegion;
     std::sort(records_.begin(), records_.end(), recordLess);
     buildTieredVectors();
     return true;
@@ -199,6 +208,7 @@ FlexHashScreenDecision FlexHashScreenCache::classifyHits(const Record* const* hi
     uint16_t nonExactGene = 0;
     uint16_t nonExactSample = 0;
     uint8_t nonExactClass = 0;
+    FlexGdnaRegion nonExactRegion = FlexGdnaUnknown;
     int8_t nonExactOffset = 0;
     bool sawGeneConflict = false;
     int8_t geneConflictOffset = 0;
@@ -227,6 +237,7 @@ FlexHashScreenDecision FlexHashScreenCache::classifyHits(const Record* const* hi
             out.action = FlexHashScreenDecision::Keep;
             out.geneIdx15 = static_cast<uint16_t>(rec->resolvedGeneIdx15);
             out.cacheClass = rec->cacheClass;
+            out.probeRegion = rec->probeRegion;
             out.offset = relativeOffsets[idx];
             return out;
         }
@@ -248,10 +259,13 @@ FlexHashScreenDecision FlexHashScreenCache::classifyHits(const Record* const* hi
                 nonExactGene = geneIdx15;
                 nonExactSample = sampleKey;
                 nonExactClass = rec->cacheClass;
+                nonExactRegion = rec->probeRegion;
                 nonExactOffset = relativeOffsets[idx];
             } else if (nonExactGene != geneIdx15 || nonExactSample != sampleKey) {
                 sawGeneConflict = true;
                 geneConflictOffset = relativeOffsets[idx];
+            } else {
+                nonExactRegion = flexGdnaMergeRegion(nonExactRegion, rec->probeRegion);
             }
         }
     }
@@ -274,6 +288,7 @@ FlexHashScreenDecision FlexHashScreenCache::classifyHits(const Record* const* hi
         out.action = FlexHashScreenDecision::Keep;
         out.geneIdx15 = nonExactGene;
         out.cacheClass = nonExactClass;
+        out.probeRegion = nonExactRegion;
         out.offset = nonExactOffset;
         return out;
     }
@@ -397,12 +412,14 @@ FlexHashScreenDecision FlexHashScreenCache::classifyReadH0Offset0(const char* re
         out.action = FlexHashScreenDecision::Deny;
         out.geneIdx15 = 0;
         out.cacheClass = rec.cacheClass;
+        out.probeRegion = rec.probeRegion;
         out.negativeCode = rec.negativeCode;
         out.offset = 0;
     } else {
         out.action = FlexHashScreenDecision::Keep;
         out.geneIdx15 = static_cast<uint16_t>(rec.resolvedGeneIdx15);
         out.cacheClass = rec.cacheClass;
+        out.probeRegion = rec.probeRegion;
         out.negativeCode = 0;
         out.offset = 0;
     }
@@ -447,10 +464,12 @@ FlexHashScreenDecision FlexHashScreenCache::classifyReadH0H1Offset0(const char* 
             out.action = FlexHashScreenDecision::Deny;
             out.geneIdx15 = 0;
             out.cacheClass = rec.cacheClass;
+            out.probeRegion = rec.probeRegion;
             out.negativeCode = rec.negativeCode;
         } else {
             out.action = FlexHashScreenDecision::Keep;
             out.geneIdx15 = static_cast<uint16_t>(rec.resolvedGeneIdx15);
+            out.probeRegion = rec.probeRegion;
             out.cacheClass = rec.cacheClass;
         }
         out.offset = 0;
@@ -469,6 +488,7 @@ FlexHashScreenDecision FlexHashScreenCache::classifyReadH0H1Offset0(const char* 
         } else if (rec.resolvedGeneIdx15 > 0) {
             out.action = FlexHashScreenDecision::Keep;
             out.geneIdx15 = static_cast<uint16_t>(rec.resolvedGeneIdx15);
+            out.probeRegion = rec.probeRegion;
         } else {
             out.action = FlexHashScreenDecision::Pass;
         }
@@ -575,7 +595,8 @@ bool FlexHashScreenCache::encodeProbeWindow(const char* readSeq, uint32_t offset
     return true;
 }
 
-bool FlexHashScreenCache::writeHashCacheFile(const std::string& path, std::vector<Record>& records, std::string* errorOut) {
+bool FlexHashScreenCache::writeHashCacheFile(const std::string& path, std::vector<Record>& records,
+                                             std::string* errorOut, bool regionMetadataComplete) {
     std::sort(records.begin(), records.end(), recordLess);
     std::ofstream out(path.c_str(), std::ios::binary);
     if (!out.good()) {
@@ -586,7 +607,7 @@ bool FlexHashScreenCache::writeHashCacheFile(const std::string& path, std::vecto
     }
     CacheHeaderRaw header {};
     std::memcpy(header.magic, kCacheMagic, 8);
-    header.version = kCacheVersionSampleAware;
+    header.version = regionMetadataComplete ? kCacheVersionProbeRegion : kCacheVersionSampleAware;
     header.kmerLength = kCacheKmerLength;
     header.recordSize = kCacheRecordSize;
     header.recordCount = static_cast<uint64_t>(records.size());
@@ -601,7 +622,11 @@ bool FlexHashScreenCache::writeHashCacheFile(const std::string& path, std::vecto
         CacheRecordRaw raw {};
         raw.seqLo = rec.seqLo;
         raw.seqHi = rec.seqHi;
-        raw.resolvedGeneIdx15 = rec.resolvedGeneIdx15;
+        raw.resolvedGeneIdx15 = rec.resolvedGeneIdx15 & 0x7FFFu;
+        if (regionMetadataComplete) {
+            raw.resolvedGeneIdx15 |=
+                (static_cast<uint32_t>(rec.probeRegion) & 0x3u) << 30;
+        }
         raw.cacheClass = rec.cacheClass;
         raw.negativeCode = rec.negativeCode;
         raw.reserved = rec.sampleIdx;

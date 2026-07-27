@@ -11,6 +11,7 @@
 #include "TranscriptQuantEC.h"
 #include "SpatialFeatureSidecar.h"
 #include "SpatialGex.h"
+#include "SoloReadFeature_record_shared.h"
 #include "CrMultimapRescuePolicy.h"
 #include <atomic>
 #include <mutex>
@@ -631,7 +632,8 @@ void ReadAlign::outputAlignments() {
         // Integrated spatial evidence is captured from the same post-rescue
         // GeneFull state as the diagnostic sidecar, while the decoded raw R1
         // remains in the gated pipeline's mapping-thread state.
-        if (P.spatialGexPipeline != nullptr) {
+        if (P.spatialGexPipeline != nullptr
+            && P.soloSpatialGexIntegratedEnabled) {
             if (iReadAll == 0) {
                 exitWithError("EXITING because integrated spatial GEX lost paired-read state\n",
                               std::cerr, P.inOut->logMain,
@@ -640,15 +642,16 @@ void ReadAlign::outputAlignments() {
             const bool mapped = unmapType < 0;
             const ReadAnnotFeature &geneFull =
                 readAnnot.annotFeatures[SoloFeatureTypes::GeneFull];
-            if (mapped && geneFull.fSet.size() == 1) {
-                std::string spatialError;
-                if (!P.spatialGexPipeline->appendCurrentThread(
-                        *geneFull.fSet.begin(), iReadAll - 1, spatialError)) {
-                    exitWithError("EXITING because integrated spatial evidence append failed: "
-                                      + spatialError + "\n",
-                                  std::cerr, P.inOut->logMain,
-                                  EXIT_CODE_INCONSISTENT_DATA, P);
-                }
+            const bool assigned = mapped && geneFull.fSet.size() == 1;
+            std::string spatialError;
+            if (!P.spatialGexPipeline->completeCurrentThread(
+                    spatial_gex::FeatureEvidenceClass::Gex, assigned,
+                    assigned ? *geneFull.fSet.begin() : 0,
+                    iReadAll - 1, spatialError)) {
+                exitWithError("EXITING because integrated spatial evidence completion failed: "
+                                  + spatialError + "\n",
+                              std::cerr, P.inOut->logMain,
+                              EXIT_CODE_INCONSISTENT_DATA, P);
             }
         }
 
@@ -713,13 +716,20 @@ void ReadAlign::outputAlignments() {
             }
         }
 
-        //the operations below are both for mapped and unmapped reads
-        soloRead->readBar->getCBandUMI(Read0, Qual0, readLengthOriginal, readNameExtra[0], readFilesIndex, readName);
-        
+        const bool spatialFlex = P.soloSpatialFlexIntegratedEnabled;
         // Extract CB/UMI/Sample metadata from Solo structures (upstream detection)
         // This avoids re-parsing BAM tags and ensures we use the original FASTQ data
         extractedCbIdxPlus1_ = 0;
         extractedUmi24_ = 0;
+        extractedUmiValid_ = false;
+        extractedCbSeq_.clear();
+
+        // Native spatial Flex owns raw-R1 barcode and UMI interpretation in
+        // spatial_gex::Pipeline. Do not invoke the ordinary single-CB parser or
+        // its early correction/collapse path.
+        if (!spatialFlex) {
+        //the operations below are both for mapped and unmapped reads
+        soloRead->readBar->getCBandUMI(Read0, Qual0, readLengthOriginal, readNameExtra[0], readFilesIndex, readName);
         
         // Store CB sequence for Phase 2 resolution (will be looked up in BAMoutput if needed)
         // Note: For ambiguous CBs, the sequence is stored in pendingAmbiguous_ and will be
@@ -827,7 +837,6 @@ void ReadAlign::outputAlignments() {
         
         // Extract UMI (24-bit packed) from SoloReadBarcode (if not already extracted above)
         // Also determine UMI validity based on extraction success and umiCheck status
-        extractedUmiValid_ = false;  // Default: invalid
         if (readBar) {  // Guard against null readBar
             if (extractedUmi24_ == 0) {
                 if (readBar->urValid && readBar->urPacked != UINT32_MAX) {
@@ -853,6 +862,7 @@ void ReadAlign::outputAlignments() {
         statsRA.sampleDetectOutputCalls++;
         statsRA.sampleDetectOutputNs += static_cast<uint64>(
             std::chrono::duration_cast<std::chrono::nanoseconds>(sampleDetectEnd - sampleDetectStart).count());
+        }
 
         //transcripts: need to be run after CB/UMI are obtained to output CR/UR tags
         uint nAlignT = 0;
@@ -906,7 +916,7 @@ void ReadAlign::outputAlignments() {
         }
         
         // Flex-specific side effects stay off for standard non-Flex STARsolo.
-        if (P.pSolo.flexMode && soloRead && soloRead->readBar) {
+        if (P.pSolo.flexMode && !spatialFlex && soloRead && soloRead->readBar) {
             soloRead->readBar->detectedSampleToken = detectedSampleByte_;
         }
 
@@ -928,13 +938,43 @@ void ReadAlign::outputAlignments() {
 
         // Store qname mapping for reject logging if enabled (Flex-only)
         // Forward declaration - function defined in flex/SoloReadFeature_record_flex.cpp
-        if (P.pSolo.flexMode) {
+        if (P.pSolo.flexMode && !spatialFlex) {
             if (readName) {
                 storeQnameMapping(iReadAll, readName);
             }
         }
         
-        if (!hashCacheSynthProbe_) {
+        if (spatialFlex) {
+            if (iReadAll == 0 || P.spatialGexPipeline == nullptr
+                || soloRead->readBar == nullptr) {
+                exitWithError(
+                    "EXITING because native spatial Flex lost its coupled "
+                    "alignment-fallback state\n",
+                    std::cerr, P.inOut->logMain,
+                    EXIT_CODE_INCONSISTENT_DATA, P);
+            }
+            SoloReadFeature *geneFeat =
+                soloRead->readFeat[P.pSolo.featureInd[SoloFeatureTypes::Gene]];
+            ReadSoloFeatures resolvedFeatures{};
+            resolvedFeatures.alignOut = trMult;
+            resolvedFeatures.indAnnotTr = 0;
+            const FlexGeneInlineResolveResult resolved =
+                flexResolveGeneIdx15_inlineResolver(
+                    geneFeat, *soloRead->readBar, resolvedFeatures, readAnnot,
+                    SoloFeatureTypes::Gene, iReadAll);
+            const bool assigned = resolved.geneIdx15 != 0;
+            std::string spatialError;
+            if (!P.spatialGexPipeline->completeCurrentThread(
+                    spatial_gex::FeatureEvidenceClass::FlexAlignment,
+                    assigned, assigned ? resolved.geneIdx15 - 1 : 0,
+                    iReadAll - 1, spatialError)) {
+                exitWithError(
+                    "EXITING because native spatial Flex alignment evidence "
+                    "completion failed: " + spatialError + "\n",
+                    std::cerr, P.inOut->logMain,
+                    EXIT_CODE_INCONSISTENT_DATA, P);
+            }
+        } else if (!hashCacheSynthProbe_) {
             soloRead->record((unmapType<0 ? nTr : 0), trMult, iReadAll, readAnnot); //need to supply nTr=0 for unmapped reads
         }
 

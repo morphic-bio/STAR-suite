@@ -11,6 +11,7 @@ from collections import defaultdict
 # Must match core/legacy/source/FlexHashScreen.cpp
 CACHE_MAGIC = b"FH01SEQ1"
 CACHE_VERSION_SAMPLE_AWARE = 2
+CACHE_VERSION_PROBE_REGION = 3
 CACHE_KMER_LENGTH = 50
 CACHE_RECORD_SIZE = 24
 NEG_PROBE_AMBIG = 1
@@ -245,7 +246,7 @@ def decode_window_50(seq_lo, seq_hi):
 
 
 def load_binary_hash_cache(path):
-    """Read FH01SEQ1 cache; return list of dicts with seq_lo, seq_hi, sequence, gene_idx15, cache_class, negative_code, sample_idx."""
+    """Read FH01SEQ1 v1-v3 cache rows, including v3 probe-region metadata."""
     with open(path, "rb") as handle:
         header = handle.read(24)
         if len(header) != 24:
@@ -253,15 +254,25 @@ def load_binary_hash_cache(path):
         magic, version, kmer_len, rec_size, nrec = struct.unpack("<8sHHIQ", header)
         if magic != CACHE_MAGIC:
             raise SystemExit(f"bad magic in {path}")
-        if version not in (1, CACHE_VERSION_SAMPLE_AWARE) or kmer_len != CACHE_KMER_LENGTH or rec_size != CACHE_RECORD_SIZE:
+        if version not in (
+            1,
+            CACHE_VERSION_SAMPLE_AWARE,
+            CACHE_VERSION_PROBE_REGION,
+        ) or kmer_len != CACHE_KMER_LENGTH or rec_size != CACHE_RECORD_SIZE:
             raise SystemExit(f"unsupported cache format version={version} kmer={kmer_len} rec={rec_size}")
         out = []
         for _ in range(int(nrec)):
             raw = handle.read(24)
             if len(raw) != 24:
                 raise SystemExit(f"truncated cache body: {path}")
-            seq_lo, seq_hi, gene15, cclass, negcode, res = struct.unpack("<QQIBBH", raw)
+            seq_lo, seq_hi, encoded_gene, cclass, negcode, res = struct.unpack("<QQIBBH", raw)
             sample_idx = res if version >= CACHE_VERSION_SAMPLE_AWARE else 0
+            gene15 = encoded_gene & 0x7FFF
+            probe_region = (
+                (encoded_gene >> 30) & 0x3
+                if version >= CACHE_VERSION_PROBE_REGION
+                else 0
+            )
             seq = decode_window_50(seq_lo, seq_hi)
             out.append(
                 {
@@ -272,6 +283,7 @@ def load_binary_hash_cache(path):
                     "cache_class": cclass,
                     "negative_code": negcode,
                     "sample_idx": sample_idx,
+                    "probe_region": probe_region,
                 }
             )
         return out

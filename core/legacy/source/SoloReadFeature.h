@@ -13,11 +13,13 @@
 #include "ReadAlign.h"
 #include "hash_shims_cpp_compat.h"
 #include "SoloBinarySpool.h"
+#include "FlexGdna.h"
 #include <functional>
 
 class SoloFeature;
 class ProbeListIndex;
 class ReadSoloFeatures;
+struct FlexGeneInlineResolveResult;
 
 class SoloReadFeature {
 public:
@@ -59,6 +61,7 @@ public:
             uint8_t tagIdx;
             uint32_t umi24;
             uint32_t count;
+            FlexGdnaRegion probeRegion = FlexGdnaUnknown;
         };
         std::vector<AmbiguousObservation> observations; // Flex: per-read observations (unchanged)
         // Non-Flex direct bridge: aggregate (umi24,gene16) -> read counts (no per-read observation vector)
@@ -132,8 +135,11 @@ private:
                                     SoloReadFeature *soloReadFeat);
     friend uint32 outputReadCB_flex(fstream *streamOut, const uint64 iRead, const int32 featureType, SoloReadBarcode &soloBar,
                                     const ReadSoloFeatures &reFe, const ReadAnnotations &readAnnot, const SoloReadFlagClass &readFlag,
-                                    SoloReadFeature *soloReadFeat);
-    friend bool record_flex_hash_screen_keep(SoloReadFeature *soloReadFeat, SoloReadBarcode &soloBar, uint64 iRead, uint16_t geneIdx15, uint8_t cacheClass);
+                                    SoloReadFeature *soloReadFeat,
+                                    const FlexGeneInlineResolveResult *preResolved);
+    friend bool record_flex_hash_screen_keep(SoloReadFeature *soloReadFeat, SoloReadBarcode &soloBar, uint64 iRead,
+                                             uint16_t geneIdx15, uint8_t cacheClass,
+                                             FlexGdnaRegion probeRegion);
     friend void record_flex_hash_screen_deny(SoloReadFeature *soloReadFeat, SoloReadBarcode &soloBar, uint64 iRead, const char *reason);
     friend const ProbeListIndex* getGlobalProbeIndex(const SoloReadFeature* rf);
     const int32 featureType;

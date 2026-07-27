@@ -108,6 +108,7 @@ struct CacheRecordRaw {
 
 static const char     kCacheMagic[] = {'F','H','0','1','S','E','Q','1'};
 static const uint16_t kCacheVersionSampleAware = 2;
+static const uint16_t kCacheVersionProbeRegion = 3;
 static const uint16_t kCacheRecordSize = 24;
 
 inline bool loadCacheRecords(const char* path, std::vector<Record>& out,
@@ -130,7 +131,8 @@ inline bool loadCacheRecords(const char* path, std::vector<Record>& out,
         std::fclose(f);
         return false;
     }
-    if ((header.version != 1 && header.version != kCacheVersionSampleAware) ||
+    if ((header.version != 1 && header.version != kCacheVersionSampleAware &&
+         header.version != kCacheVersionProbeRegion) ||
         header.kmerLength != kCacheKmerLength || header.recordSize != kCacheRecordSize) {
         if (errorOut) *errorOut = "cache format mismatch";
         std::fclose(f);
@@ -149,7 +151,10 @@ inline bool loadCacheRecords(const char* path, std::vector<Record>& out,
         Record& rec = out[i];
         rec.seqLo            = raw.seqLo;
         rec.seqHi            = raw.seqHi;
-        rec.resolvedGeneIdx15 = raw.resolvedGeneIdx15;
+        // v3 stores the two-bit probe region in bits 30-31. The standalone
+        // replay tools classify genes only, so discard the metadata while
+        // preserving v1/v2 decision parity.
+        rec.resolvedGeneIdx15 = raw.resolvedGeneIdx15 & 0x7FFFu;
         rec.cacheClass       = raw.cacheClass;
         rec.negativeCode     = raw.negativeCode;
         rec.sampleIdx        = (header.version >= kCacheVersionSampleAware) ? raw.reserved : 0;

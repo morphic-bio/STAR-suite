@@ -38,7 +38,9 @@ void SoloFeature::materializeRGUFromHash() {
         if (!kh_exist(readFeatSum->inlineHash_, iter)) continue;
         
         uint64_t key = kh_key(readFeatSum->inlineHash_, iter);
-        uint32_t count = kh_val(readFeatSum->inlineHash_, iter);
+        uint32_t count = pSolo.flexMode
+            ? flexGdnaValueCount(kh_val(readFeatSum->inlineHash_, iter))
+            : kh_val(readFeatSum->inlineHash_, iter);
         
         HashEntry entry;
         uint16_t compactGeneIdx = 0;
