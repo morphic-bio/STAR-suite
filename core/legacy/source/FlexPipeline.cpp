@@ -190,6 +190,7 @@ void *flexLaneReaderRouterThread(void *arg) {
                 dp.verdict = DecisionPacket::KEEP;
                 dp.geneIdx15 = decision.geneIdx15;
                 dp.cacheClass = decision.cacheClass;
+                dp.probeRegion = decision.probeRegion;
                 dp.denyReason = nullptr;
                 st->counters.triageKeep.fetch_add(1);
             } else {
@@ -407,8 +408,10 @@ static uint64_t processOneLane(
 
             if (decision.action == FlexHashScreenDecision::Keep) {
                 record_flex_hash_screen_keep(readFeat, localBar, iReadAll,
-                                             decision.geneIdx15, decision.cacheClass);
+                                             decision.geneIdx15, decision.cacheClass,
+                                             decision.probeRegion);
                 stats->hashScreenKeep++;
+                if (localBar.cbMatch < 0) stats->hashScreenKeepNoBarcode++;
                 st->counters.triageKeep.fetch_add(1);
             } else {
                 record_flex_hash_screen_deny(readFeat, localBar, iReadAll, "NEG_PROBE_AMBIG");
@@ -570,8 +573,10 @@ static uint64_t processCbqModuleRecords(
 
                 if (decision.action == FlexHashScreenDecision::Keep) {
                     record_flex_hash_screen_keep(readFeat, localBar, iReadAll,
-                                                 decision.geneIdx15, decision.cacheClass);
+                                                 decision.geneIdx15, decision.cacheClass,
+                                                 decision.probeRegion);
                     stats->hashScreenKeep++;
+                    if (localBar.cbMatch < 0) stats->hashScreenKeepNoBarcode++;
                     st->counters.triageKeep.fetch_add(1);
                 } else {
                     record_flex_hash_screen_deny(readFeat, localBar, iReadAll, "NEG_PROBE_AMBIG");
@@ -879,6 +884,7 @@ void *flexTriageThread(void *arg) {
                 dp.verdict = DecisionPacket::KEEP;
                 dp.geneIdx15 = decision.geneIdx15;
                 dp.cacheClass = decision.cacheClass;
+                dp.probeRegion = decision.probeRegion;
                 dp.denyReason = nullptr;
                 st->counters.triageKeep.fetch_add(1);
             } else {
@@ -988,8 +994,9 @@ void *flexSoloConsumerThread(void *arg) {
 
         if (dp.verdict == DecisionPacket::KEEP) {
             record_flex_hash_screen_keep(readFeat, localBar, dp.iReadAll,
-                                         dp.geneIdx15, dp.cacheClass);
+                                         dp.geneIdx15, dp.cacheClass, dp.probeRegion);
             stats->hashScreenKeep++;
+            if (localBar.cbMatch < 0) stats->hashScreenKeepNoBarcode++;
         } else {
             record_flex_hash_screen_deny(readFeat, localBar, dp.iReadAll, dp.denyReason);
             stats->hashScreenDeny++;

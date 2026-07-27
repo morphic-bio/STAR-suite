@@ -456,6 +456,29 @@ std::vector<MatrixEntry> aggregateMatrixEntries(std::vector<MatrixEntry> values)
     return result;
 }
 
+std::vector<MatrixEntry> aggregateScaledMatrixEntries(
+    std::vector<MatrixEntry> values)
+{
+    // matrixAtScale receives fine entries in canonical (fine column, feature)
+    // order. Preserve that order within equal coarse keys so floating-point
+    // addition is independent of whether the complete matrix or one
+    // parent-coordinate shard is being materialized.
+    std::stable_sort(values.begin(), values.end(), [](const MatrixEntry &left,
+                                                      const MatrixEntry &right) {
+        return left.key < right.key;
+    });
+    std::vector<MatrixEntry> result;
+    result.reserve(values.size());
+    for (const MatrixEntry &value : values) {
+        if (!result.empty() && result.back().key == value.key) {
+            result.back().value += value.value;
+        } else {
+            result.push_back(value);
+        }
+    }
+    return result;
+}
+
 std::uint64_t readUnsignedFile(const char *path)
 {
     std::ifstream input(path);
@@ -509,6 +532,7 @@ struct Pipeline::Impl {
         spatial_r1_decoder::ExactH0Counts h0;
         spatial_r1_decoder::Result currentDecoded;
         bool currentDecodedReady = false;
+        std::uint64_t currentSourceOrdinal = 0;
         std::vector<spill::Run> spillRuns;
         std::uint64_t nextSpillRun = 0;
         std::uint64_t decoded = 0;
@@ -522,6 +546,18 @@ struct Pipeline::Impl {
         std::uint64_t barcodeUnsupportedReads = 0;
         std::uint64_t umiReadsWithN = 0;
         std::uint64_t umiReadsWithInvalidBase = 0;
+        std::uint64_t featureAssignedReads = 0;
+        std::uint64_t featureUnassignedReads = 0;
+        std::uint64_t featureAssignedReadsWithCandidates = 0;
+        std::uint64_t featureAssignedReadsWithoutCandidates = 0;
+        std::uint64_t featureUnassignedReadsWithCandidates = 0;
+        std::uint64_t featureUnassignedReadsWithoutCandidates = 0;
+        std::uint64_t flexHashH0Reads = 0;
+        std::uint64_t flexHashH1Reads = 0;
+        std::uint64_t flexHashDenyReads = 0;
+        std::uint64_t flexAlignmentMissReads = 0;
+        std::uint64_t flexAlignmentResolvedReads = 0;
+        std::uint64_t flexAlignmentUnresolvedReads = 0;
     };
 
     PipelineConfig config;
@@ -1554,7 +1590,7 @@ std::vector<MatrixEntry> matrixAtScale(
         value.value = entry.value;
         coarse.push_back(value);
     }
-    return aggregateMatrixEntries(std::move(coarse));
+    return aggregateScaledMatrixEntries(std::move(coarse));
 }
 
 double writeMatrix(const std::string &path, const std::vector<MatrixEntry> &entries,
@@ -2300,34 +2336,107 @@ bool Pipeline::decodeCurrentThread(const char *sequence,
                                    std::size_t sequenceLength,
                                    const char *quality,
                                    std::size_t qualityLength,
-                                   std::string &error)
-{
-    std::uint32_t threadIndex = 0;
-    if (!currentThreadIndex(threadIndex, error)) return false;
-    Impl::ThreadState &thread = impl_->threads[threadIndex];
-    thread.currentDecodedReady = false;
-    if (!decode(threadIndex, sequence, sequenceLength, quality, qualityLength,
-                thread.currentDecoded, error)) return false;
-    thread.currentDecodedReady = true;
-    return true;
-}
-
-bool Pipeline::appendCurrentThread(std::uint32_t geneIndex,
                                    std::uint64_t sourceOrdinal,
                                    std::string &error)
 {
     std::uint32_t threadIndex = 0;
     if (!currentThreadIndex(threadIndex, error)) return false;
     Impl::ThreadState &thread = impl_->threads[threadIndex];
-    if (!thread.currentDecodedReady) {
-        error = "integrated spatial GEX lost current-thread decoded R1 state";
+    if (thread.currentDecodedReady) {
+        error = "integrated spatial pipeline received a new R1 before the prior "
+                "feature decision was completed";
         return false;
     }
-    ++thread.uniqueGeneReads;
-    const bool appended = append(threadIndex, geneIndex, sourceOrdinal,
-                                 thread.currentDecoded, error);
+    if (sourceOrdinal > std::numeric_limits<std::uint32_t>::max()) {
+        error = "integrated spatial source ordinal exceeds compact uint32 range";
+        return false;
+    }
+    if (!decode(threadIndex, sequence, sequenceLength, quality, qualityLength,
+                thread.currentDecoded, error)) return false;
+    thread.currentSourceOrdinal = sourceOrdinal;
+    thread.currentDecodedReady = true;
+    return true;
+}
+
+bool Pipeline::completeCurrentThread(FeatureEvidenceClass source,
+                                     bool assigned,
+                                     std::uint32_t geneIndex,
+                                     std::uint64_t sourceOrdinal,
+                                     std::string &error)
+{
+    std::uint32_t threadIndex = 0;
+    if (!currentThreadIndex(threadIndex, error)) return false;
+    Impl::ThreadState &thread = impl_->threads[threadIndex];
+    if (!thread.currentDecodedReady) {
+        error = "integrated spatial pipeline lost current-thread decoded R1 state";
+        return false;
+    }
+    if (thread.currentSourceOrdinal != sourceOrdinal) {
+        error = "integrated spatial feature decision does not match the current "
+                "raw-R1 source ordinal";
+        return false;
+    }
+    if ((source == FeatureEvidenceClass::FlexH0
+         || source == FeatureEvidenceClass::FlexH1) && !assigned) {
+        error = "integrated spatial Flex cache hit was completed without a feature";
+        return false;
+    }
+    if (source == FeatureEvidenceClass::FlexHashDeny && assigned) {
+        error = "integrated spatial Flex hash deny was completed with a feature";
+        return false;
+    }
+    if (assigned && impl_->config.featureCount != 0
+        && geneIndex >= impl_->config.featureCount) {
+        error = "integrated spatial feature index is outside the declared axis";
+        return false;
+    }
+
+    if (assigned) {
+        ++thread.featureAssignedReads;
+        ++thread.uniqueGeneReads;
+        if (thread.currentDecoded.candidates.empty()) {
+            ++thread.featureAssignedReadsWithoutCandidates;
+        } else {
+            ++thread.featureAssignedReadsWithCandidates;
+        }
+    } else {
+        ++thread.featureUnassignedReads;
+        if (thread.currentDecoded.candidates.empty()) {
+            ++thread.featureUnassignedReadsWithoutCandidates;
+        } else {
+            ++thread.featureUnassignedReadsWithCandidates;
+        }
+    }
+    if (source == FeatureEvidenceClass::FlexH0) {
+        ++thread.flexHashH0Reads;
+    } else if (source == FeatureEvidenceClass::FlexH1) {
+        ++thread.flexHashH1Reads;
+    } else if (source == FeatureEvidenceClass::FlexHashDeny) {
+        ++thread.flexHashDenyReads;
+    } else if (source == FeatureEvidenceClass::FlexAlignment) {
+        ++thread.flexAlignmentMissReads;
+        if (assigned) {
+            ++thread.flexAlignmentResolvedReads;
+        } else {
+            ++thread.flexAlignmentUnresolvedReads;
+        }
+    }
+
+    bool completed = true;
+    if (assigned) {
+        completed = append(threadIndex, geneIndex, sourceOrdinal,
+                           thread.currentDecoded, error);
+    }
     thread.currentDecodedReady = false;
-    return appended;
+    return completed;
+}
+
+bool Pipeline::appendCurrentThread(std::uint32_t geneIndex,
+                                   std::uint64_t sourceOrdinal,
+                                   std::string &error)
+{
+    return completeCurrentThread(FeatureEvidenceClass::Gex, true, geneIndex,
+                                 sourceOrdinal, error);
 }
 
 bool Pipeline::decode(std::uint32_t threadIndex, const char *sequence,
@@ -2454,6 +2563,11 @@ bool Pipeline::finalize(const std::vector<std::string> &geneIds,
         spatial_r1_decoder::ExactH0Counts h0;
         h0.reset(kGridColumns, kGridRows);
         for (const Impl::ThreadState &thread : impl_->threads) {
+            if (thread.currentDecodedReady) {
+                throw std::runtime_error(
+                    "integrated spatial finalization found an R1 without a terminal "
+                    "feature decision");
+            }
             h0.add(thread.h0);
             impl_->summary.readsDecoded += thread.decoded;
             impl_->summary.readsWithCandidates += thread.candidateReads;
@@ -2466,6 +2580,31 @@ bool Pipeline::finalize(const std::vector<std::string> &geneIds,
             impl_->summary.barcodeUnsupportedReads += thread.barcodeUnsupportedReads;
             impl_->summary.umiReadsWithN += thread.umiReadsWithN;
             impl_->summary.umiReadsWithInvalidBase += thread.umiReadsWithInvalidBase;
+            impl_->summary.featureAssignedReads += thread.featureAssignedReads;
+            impl_->summary.featureUnassignedReads += thread.featureUnassignedReads;
+            impl_->summary.featureAssignedReadsWithCandidates +=
+                thread.featureAssignedReadsWithCandidates;
+            impl_->summary.featureAssignedReadsWithoutCandidates +=
+                thread.featureAssignedReadsWithoutCandidates;
+            impl_->summary.featureUnassignedReadsWithCandidates +=
+                thread.featureUnassignedReadsWithCandidates;
+            impl_->summary.featureUnassignedReadsWithoutCandidates +=
+                thread.featureUnassignedReadsWithoutCandidates;
+            impl_->summary.flexHashH0Reads += thread.flexHashH0Reads;
+            impl_->summary.flexHashH1Reads += thread.flexHashH1Reads;
+            impl_->summary.flexHashDenyReads += thread.flexHashDenyReads;
+            impl_->summary.flexAlignmentMissReads += thread.flexAlignmentMissReads;
+            impl_->summary.flexAlignmentResolvedReads +=
+                thread.flexAlignmentResolvedReads;
+            impl_->summary.flexAlignmentUnresolvedReads +=
+                thread.flexAlignmentUnresolvedReads;
+        }
+        if (impl_->config.requirePairedCompletion
+            && impl_->summary.featureAssignedReads
+                    + impl_->summary.featureUnassignedReads
+                != impl_->summary.readsDecoded) {
+            throw std::runtime_error(
+                "integrated spatial feature decisions do not cover every decoded R1");
         }
         impl_->summary.joinedReads = impl_->totalJoinedReads.load(std::memory_order_relaxed);
         impl_->summary.candidateRows = impl_->totalCandidateRows.load(std::memory_order_relaxed);
@@ -2673,8 +2812,11 @@ bool Pipeline::finalize(const std::vector<std::string> &geneIds,
             materialize(*impl_, geneIds, featureUsed, coordinateBits, molecules);
         }
 
+        const char *schema = impl_->config.flexFeatureMode
+            ? "star_suite.spatial_flex_integrated.v1"
+            : "star_suite.spatial_gex_integrated.v1";
         std::ostringstream runSummary;
-        runSummary << "schema\tstar_suite.spatial_gex_integrated.v1\n"
+        runSummary << "schema\t" << schema << '\n'
                    << "source_revision\t" << impl_->config.sourceRevision << '\n'
                    << "reads_decoded\t" << impl_->summary.readsDecoded << '\n'
                    << "reads_with_candidates\t" << impl_->summary.readsWithCandidates << '\n'
@@ -2735,6 +2877,38 @@ bool Pipeline::finalize(const std::vector<std::string> &geneIds,
                    << "peak_resident_reads\t" << impl_->summary.peakResidentReads << '\n'
                    << "peak_resident_candidates\t"
                    << impl_->summary.peakResidentCandidates << '\n';
+        if (impl_->config.flexFeatureMode) {
+            runSummary
+                << "feature_axis_path\t" << impl_->config.featureAxisPath << '\n'
+                << "feature_axis_sha256\t"
+                << impl_->config.featureAxisSha256 << '\n'
+                << "feature_cache_path\t" << impl_->config.featureCachePath << '\n'
+                << "feature_cache_sha256\t"
+                << impl_->config.featureCacheSha256 << '\n'
+                << "feature_count\t" << impl_->config.featureCount << '\n'
+                << "feature_assigned_reads\t"
+                << impl_->summary.featureAssignedReads << '\n'
+                << "feature_unassigned_reads\t"
+                << impl_->summary.featureUnassignedReads << '\n'
+                << "feature_assigned_reads_with_spatial_candidates\t"
+                << impl_->summary.featureAssignedReadsWithCandidates << '\n'
+                << "feature_assigned_reads_without_spatial_candidates\t"
+                << impl_->summary.featureAssignedReadsWithoutCandidates << '\n'
+                << "feature_unassigned_reads_with_spatial_candidates\t"
+                << impl_->summary.featureUnassignedReadsWithCandidates << '\n'
+                << "feature_unassigned_reads_without_spatial_candidates\t"
+                << impl_->summary.featureUnassignedReadsWithoutCandidates << '\n'
+                << "feature_hash_h0\t" << impl_->summary.flexHashH0Reads << '\n'
+                << "feature_hash_h1\t" << impl_->summary.flexHashH1Reads << '\n'
+                << "feature_hash_deny\t"
+                << impl_->summary.flexHashDenyReads << '\n'
+                << "feature_hash_miss\t"
+                << impl_->summary.flexAlignmentMissReads << '\n'
+                << "feature_alignment_resolved\t"
+                << impl_->summary.flexAlignmentResolvedReads << '\n'
+                << "feature_alignment_unresolved\t"
+                << impl_->summary.flexAlignmentUnresolvedReads << '\n';
+        }
         {
             AtomicOutput output(impl_->config.outputDirectory + "/run_summary.tsv");
             output.stream() << runSummary.str();
@@ -2745,7 +2919,7 @@ bool Pipeline::finalize(const std::vector<std::string> &geneIds,
         }
         {
             AtomicOutput output(impl_->config.outputDirectory + "/RUN_COMPLETE");
-            output.stream() << "star_suite.spatial_gex_integrated.v1\n";
+            output.stream() << schema << '\n';
             output.commit();
         }
         return true;

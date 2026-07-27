@@ -628,6 +628,7 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloSpatialFeatureSidecar", &soloSpatialFeatureSidecar));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloSpatialR1FastqTap", &soloSpatialR1FastqTap));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloSpatialGexIntegrated", &soloSpatialGexIntegrated));
+    parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloSpatialFlexIntegrated", &soloSpatialFlexIntegrated));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloSpatialBarcodeContract", &soloSpatialBarcodeContract));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloSpatialBc1Oligos", &soloSpatialBc1Oligos));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloSpatialBc2Oligos", &soloSpatialBc2Oligos));
@@ -640,6 +641,8 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar <uint64>   (-1, -1, "soloSpatialSpillHighWaterCandidates", &soloSpatialSpillHighWaterCandidates));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloProbeList", &pSolo.probeListPath));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloRemoveDeprecated", &pSolo.removeDeprecatedStr));
+    parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloFlexGdna", &pSolo.flexGdnaModeStr));
+    parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloFlexGdnaProbeSet", &pSolo.flexGdnaProbeSetPath));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloSampleWhitelist", &pSolo.sampleWhitelistPath));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloSampleProbes", &pSolo.sampleProbesPath));
     parArray.push_back(new ParameterInfoScalar <uint32>   (-1, -1, "soloSampleProbeOffset", &pSolo.sampleProbeOffset));
@@ -2213,27 +2216,41 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
         && soloSpatialFeatureSidecar != "-" && soloSpatialFeatureSidecar != "None";
     soloSpatialR1FastqTapEnabled = !soloSpatialR1FastqTap.empty()
         && soloSpatialR1FastqTap != "-" && soloSpatialR1FastqTap != "None";
-    {
-        string mode = soloSpatialGexIntegrated;
+    const auto parseSpatialIntegratedMode = [&](const string &value,
+                                                 const char *option) {
+        string mode = value;
         transform(mode.begin(), mode.end(), mode.begin(), [](unsigned char value) {
             return static_cast<char>(tolower(value));
         });
         if (mode == "yes") {
-            soloSpatialGexIntegratedEnabled = true;
+            return true;
         } else if (mode == "no") {
-            soloSpatialGexIntegratedEnabled = false;
+            return false;
         } else {
-            exitWithError("EXITING because of fatal PARAMETERS error: --soloSpatialGexIntegrated accepts only yes or no\n",
+            exitWithError(string("EXITING because of fatal PARAMETERS error: ")
+                              + option + " accepts only yes or no\n",
                           std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
         }
+        return false;
+    };
+    soloSpatialGexIntegratedEnabled = parseSpatialIntegratedMode(
+        soloSpatialGexIntegrated, "--soloSpatialGexIntegrated");
+    soloSpatialFlexIntegratedEnabled = parseSpatialIntegratedMode(
+        soloSpatialFlexIntegrated, "--soloSpatialFlexIntegrated");
+    if (soloSpatialGexIntegratedEnabled && soloSpatialFlexIntegratedEnabled) {
+        exitWithError(
+            "EXITING because of fatal PARAMETERS error: "
+            "--soloSpatialGexIntegrated and --soloSpatialFlexIntegrated are mutually exclusive\n",
+            std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
     }
     if (soloSpatialR1FastqTapEnabled && !soloSpatialFeatureSidecarEnabled) {
         exitWithError("EXITING because of fatal PARAMETERS error: --soloSpatialR1FastqTap requires --soloSpatialFeatureSidecar\n"
                       "SOLUTION: enable the explicit fused Visium HD GEX recipe or remove the tap option.\n",
                       std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
     }
-    if (soloSpatialGexIntegratedEnabled && soloSpatialR1FastqTapEnabled) {
-        exitWithError("EXITING because of fatal PARAMETERS error: --soloSpatialR1FastqTap is not part of integrated spatial GEX mode\n"
+    if ((soloSpatialGexIntegratedEnabled || soloSpatialFlexIntegratedEnabled)
+        && soloSpatialR1FastqTapEnabled) {
+        exitWithError("EXITING because of fatal PARAMETERS error: --soloSpatialR1FastqTap is not part of integrated spatial mode\n"
                       "SOLUTION: remove the FIFO tap; optionally retain --soloSpatialFeatureSidecar as a debug oracle.\n",
                       std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
     }
@@ -3251,33 +3268,73 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
         && soloSpatialFeatureSidecar != "-" && soloSpatialFeatureSidecar != "None";
     soloSpatialR1FastqTapEnabled = !soloSpatialR1FastqTap.empty()
         && soloSpatialR1FastqTap != "-" && soloSpatialR1FastqTap != "None";
-    if (soloSpatialFeatureSidecarEnabled || soloSpatialGexIntegratedEnabled) {
+    const bool soloSpatialIntegratedEnabled =
+        soloSpatialGexIntegratedEnabled || soloSpatialFlexIntegratedEnabled;
+    if (soloSpatialFeatureSidecarEnabled || soloSpatialIntegratedEnabled) {
         const auto exactly = [](const vector<string> &values, const string &expected) {
             return values.size() == 1 && values[0] == expected;
         };
-        const string spatialOption = soloSpatialGexIntegratedEnabled
-            ? "--soloSpatialGexIntegrated yes" : "--soloSpatialFeatureSidecar";
+        const string spatialOption = soloSpatialFlexIntegratedEnabled
+            ? "--soloSpatialFlexIntegrated yes"
+            : (soloSpatialGexIntegratedEnabled
+                ? "--soloSpatialGexIntegrated yes" : "--soloSpatialFeatureSidecar");
         auto rejectSpatialRecipe = [&](const string &reason) {
             ostringstream errOut;
             errOut << "EXITING because of fatal PARAMETERS error: " << spatialOption << ' '
                    << reason << "\n"
-                   << "SOLUTION: use the fail-closed modern Visium HD GEX GeneFull recipe.\n";
+                   << "SOLUTION: use the documented fail-closed Visium HD "
+                   << (soloSpatialFlexIntegratedEnabled ? "Flex" : "GEX GeneFull")
+                   << " recipe.\n";
             exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
         };
 
         if (runMode != "alignReads") rejectSpatialRecipe("requires --runMode alignReads");
-        if (pSolo.typeStr != "None") rejectSpatialRecipe("requires --soloType None");
-        if (!exactly(pSolo.featureIn, "GeneFull")) rejectSpatialRecipe("requires exactly --soloFeatures GeneFull");
-        if (pSolo.strandStr != "Forward") rejectSpatialRecipe("requires --soloStrand Forward");
-        if (!pSolo.crMultimapRescue) rejectSpatialRecipe("requires --soloCrMultimapRescue yes");
-        if (pSolo.crGexFeature != ParametersSolo::CrGexGeneFull)
-            rejectSpatialRecipe("requires --soloCrGexFeature GeneFull");
+        if (soloSpatialFlexIntegratedEnabled) {
+            if (soloSpatialFeatureSidecarEnabled)
+                rejectSpatialRecipe("does not permit the GeneFull diagnostic sidecar");
+            if (!pSolo.flexMode) rejectSpatialRecipe("requires --flex yes");
+            if (pSolo.flexPipelineStr != "no")
+                rejectSpatialRecipe("requires --flexPipeline no");
+            if (pSolo.typeStr != "CB_UMI_Complex")
+                rejectSpatialRecipe("requires --soloType CB_UMI_Complex");
+            if (!exactly(pSolo.featureIn, "Gene"))
+                rejectSpatialRecipe("requires exactly --soloFeatures Gene");
+            if (pSolo.strandStr != "Unstranded")
+                rejectSpatialRecipe("requires --soloStrand Unstranded");
+            if (!pSolo.inlineHashMode || !pSolo.hashScreenEnabled)
+                rejectSpatialRecipe("requires the enabled inline H0/H1 hash screen");
+            if (!pSolo.skipProcessing)
+                rejectSpatialRecipe("requires --soloSkipProcessing yes");
+            if (pSolo.runFlexFilter)
+                rejectSpatialRecipe("requires --soloRunFlexFilter no");
+            if (pSolo.probeListPath.empty() || pSolo.probeListPath == "-")
+                rejectSpatialRecipe("requires --soloProbeList FILE");
+            if ((!pSolo.sampleWhitelistPath.empty()
+                 && pSolo.sampleWhitelistPath != "-")
+                || (!pSolo.sampleProbesPath.empty()
+                    && pSolo.sampleProbesPath != "-")
+                || pSolo.sampleRequireMatch) {
+                rejectSpatialRecipe("does not support sample tags in the first native spatial mode");
+            }
+            if (!exactly(pSolo.multiMap.typesIn, "Rescue"))
+                rejectSpatialRecipe("requires exactly --soloMultiMappers Rescue");
+        } else {
+            if (pSolo.typeStr != "None") rejectSpatialRecipe("requires --soloType None");
+            if (!exactly(pSolo.featureIn, "GeneFull"))
+                rejectSpatialRecipe("requires exactly --soloFeatures GeneFull");
+            if (pSolo.strandStr != "Forward")
+                rejectSpatialRecipe("requires --soloStrand Forward");
+            if (!pSolo.crMultimapRescue)
+                rejectSpatialRecipe("requires --soloCrMultimapRescue yes");
+            if (pSolo.crGexFeature != ParametersSolo::CrGexGeneFull)
+                rejectSpatialRecipe("requires --soloCrGexFeature GeneFull");
+            if (!exactly(pSolo.multiMap.typesIn, "Unique"))
+                rejectSpatialRecipe("requires exactly --soloMultiMappers Unique");
+        }
         if (!exactly(pSolo.umiDedup.typesIn, "1MM_CR"))
             rejectSpatialRecipe("requires exactly --soloUMIdedup 1MM_CR");
         if (!exactly(pSolo.umiFiltering.type, "MultiGeneUMI_CR"))
             rejectSpatialRecipe("requires exactly --soloUMIfiltering MultiGeneUMI_CR");
-        if (!exactly(pSolo.multiMap.typesIn, "Unique"))
-            rejectSpatialRecipe("requires exactly --soloMultiMappers Unique");
         if (!exactly(pSolo.cellFilter.type, "None"))
             rejectSpatialRecipe("requires --soloCellFilter None");
         if (!exactly(outSAMtype, "None")) rejectSpatialRecipe("requires --outSAMtype None");
@@ -3296,11 +3353,7 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
         if (batchModeRequested || quant.slam.yes || quant.transcriptVB.yes)
             rejectSpatialRecipe("does not support batch, SLAM, or transcript-VB replay modes");
 
-        if (soloSpatialGexIntegratedEnabled) {
-            if (pSolo.crMultimapRescueEvidenceMode !=
-                ParametersSolo::CrMultimapRescueEvidenceAnnotatedBest) {
-                rejectSpatialRecipe("requires --soloCrMultimapRescueEvidence annotated");
-            }
+        if (soloSpatialIntegratedEnabled) {
             if (soloSpatialBarcodeContract.empty() || soloSpatialBarcodeContract == "-")
                 rejectSpatialRecipe("requires --soloSpatialBarcodeContract DIR");
             if (soloSpatialBc1Oligos.empty() || soloSpatialBc1Oligos == "-")
@@ -3346,7 +3399,9 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
                 }
                 rejectSpatialRecipe(spatialError);
             }
-            inOut->logMain << "Spatial GEX integrated memory estimate: all_memory_peak="
+            inOut->logMain << "Spatial "
+                           << (soloSpatialFlexIntegratedEnabled ? "Flex" : "GEX")
+                           << " integrated memory estimate: all_memory_peak="
                            << memoryModel.peakBytes << " bounded_spool="
                            << memoryModel.downstreamSpoolBytes << " spool_disk="
                            << memoryModel.downstreamSpoolDiskBytes
@@ -3356,25 +3411,37 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
                            << (soloSpatialOverflowSpill ? "Spill" : "Fail") << '\n';
         }
 
-        // This is a narrow annotation-only mode: R2 is the sole mapped end and
-        // raw R1 remains available to the independent spatial decoder. No Solo
-        // barcode object, whitelist, correction, or collapse is enabled.
-        readNmates = 1;
-        pSolo.barcodeRead = 1;
-        pSolo.strand = 0;
-        pSolo.featureYes.fill(false);
-        pSolo.featureYes[SoloFeatureTypes::GeneFull] = true;
-        pSolo.featureInd.fill(-1);
-        pSolo.featureInd[SoloFeatureTypes::GeneFull] = 0;
-        pSolo.features.clear();
-        pSolo.features.push_back(SoloFeatureTypes::GeneFull);
-        pSolo.nFeatures = 1;
-        quant.geneFull.yes = true;
-        quant.yes = true;
-        inOut->logMain << "Spatial GeneFull "
-                       << (soloSpatialGexIntegratedEnabled ? "integrated" : "sidecar")
-                       << ": annotation-only mapping enabled; mapping R2 and excluding raw R1 "
-                       << "from alignment/barcode correction\n";
+        if (soloSpatialFlexIntegratedEnabled) {
+            // Keep the normal Flex Gene annotation/resolver objects, but the
+            // mapping hot path bypasses their single-CB insertion. Raw R1 is
+            // decoded into spatial candidate families by the integrated
+            // pipeline instead.
+            quant.yes = true;
+            inOut->logMain
+                << "Spatial Flex integrated: coupled R2 feature evidence and raw-R1 "
+                << "candidate families enabled; ordinary Flex barcode insertion disabled\n";
+        } else {
+            // This is a narrow annotation-only mode: R2 is the sole mapped end
+            // and raw R1 remains available to the independent spatial decoder.
+            // No Solo barcode object, whitelist, correction, or collapse is
+            // enabled.
+            readNmates = 1;
+            pSolo.barcodeRead = 1;
+            pSolo.strand = 0;
+            pSolo.featureYes.fill(false);
+            pSolo.featureYes[SoloFeatureTypes::GeneFull] = true;
+            pSolo.featureInd.fill(-1);
+            pSolo.featureInd[SoloFeatureTypes::GeneFull] = 0;
+            pSolo.features.clear();
+            pSolo.features.push_back(SoloFeatureTypes::GeneFull);
+            pSolo.nFeatures = 1;
+            quant.geneFull.yes = true;
+            quant.yes = true;
+            inOut->logMain << "Spatial GeneFull "
+                           << (soloSpatialGexIntegratedEnabled ? "integrated" : "sidecar")
+                           << ": annotation-only mapping enabled; mapping R2 and excluding raw R1 "
+                           << "from alignment/barcode correction\n";
+        }
     }
 
     if (runMode == "hashCacheGenerate") {

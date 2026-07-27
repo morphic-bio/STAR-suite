@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 #include <zlib.h>
+#include "FlexGdna.h"
 
 static constexpr uint32_t kFlexPipeNameMax = 512;
 static constexpr uint32_t kFlexPipeSeqMax = DEF_readSeqLengthMax + 1;
@@ -42,6 +43,7 @@ struct DecisionPacket {
     Verdict  verdict;
     uint16_t geneIdx15;
     uint8_t  cacheClass;
+    FlexGdnaRegion probeRegion;
     const char *denyReason;
     bool     eof;
 
@@ -56,7 +58,8 @@ struct DecisionPacket {
     uint32_t sampleTagLen;
 
     DecisionPacket() : iReadAll(0), readFilesIndex(0),
-                       verdict(DENY), geneIdx15(0), cacheClass(0), denyReason(nullptr), eof(false),
+                       verdict(DENY), geneIdx15(0), cacheClass(0), probeRegion(FlexGdnaUnknown),
+                       denyReason(nullptr), eof(false),
                        barcodeLen(0), sampleTagLen(0) {
         barcodeSeq[0] = '\0'; barcodeQual[0] = '\0';
         readName[0] = '\0';

@@ -4,13 +4,41 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 STAR_BIN="${ROOT_DIR}/core/legacy/source/STAR"
 SUPPRESSIONS="${ROOT_DIR}/tests/compat/lsan_suppressions.txt"
+SOURCE_DIR="${ROOT_DIR}/core/legacy/source"
+SAVED_STAR="$(mktemp /tmp/star-cr-compat-release.XXXXXX)"
+HAD_STAR=0
+
+restore_release_tree() {
+  make -C "${SOURCE_DIR}" clean >/dev/null 2>&1 || true
+  if [[ "${HAD_STAR}" -eq 1 ]]; then
+    cp -pf "${SAVED_STAR}" "${STAR_BIN}"
+    [[ -x "${STAR_BIN}" ]] || {
+      echo "ERROR: failed to restore executable release STAR after ASAN smoke" >&2
+      return 1
+    }
+  fi
+  make -C "${SOURCE_DIR}" parametersDefault.xxd >/dev/null 2>&1 || {
+    echo "ERROR: failed to regenerate parametersDefault.xxd after ASAN smoke" >&2
+    return 1
+  }
+  rm -f "${SAVED_STAR}"
+}
+trap restore_release_tree EXIT
 
 IDX_DIR="${ROOT_DIR}/tests/solo_smoke/ref/star_index"
 R1="${ROOT_DIR}/tests/solo_smoke/fastq/R1.fastq"
 R2="${ROOT_DIR}/tests/solo_smoke/fastq/R2.fastq"
 WL="${ROOT_DIR}/tests/solo_smoke/whitelist.txt"
 
-make -C "${ROOT_DIR}/core/legacy/source" -j ASAN=1 STAR
+if [[ -x "${STAR_BIN}" ]]; then
+  cp -pf "${STAR_BIN}" "${SAVED_STAR}"
+  HAD_STAR=1
+fi
+
+# The ASAN smoke must not leave sanitizer objects or replace the release STAR
+# used by later tests and packaging.
+make -C "${SOURCE_DIR}" clean >/dev/null
+make -C "${SOURCE_DIR}" -j ASAN=1 STAR
 
 run_one() {
   local stub="${1}"

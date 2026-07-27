@@ -1,5 +1,6 @@
 #include "FlexHashCacheGenerate.h"
 #include "FlexHashScreen.h"
+#include "FlexGdna.h"
 #include "Genome.h"
 #include "Parameters.h"
 #include "ProbeListIndex.h"
@@ -30,6 +31,7 @@ struct GenomeProbeRow {
     char seq[51];
     uint16_t geneIdx15 = 0;
     uint32_t chrIdx = 0;
+    FlexGdnaRegion probeRegion = FlexGdnaUnknown;
 };
 
 struct SeqPairHash {
@@ -54,6 +56,7 @@ struct DedupBucket {
     bool conflict = false;
     uint16_t gene = 0;
     uint8_t cacheClass = 0;
+    FlexGdnaRegion probeRegion = FlexGdnaUnknown;
 };
 
 static inline khint_t dedupKeyHashFn(DedupKey key) {
@@ -137,6 +140,7 @@ static std::vector<GenomeProbeRow> extractGenomeProbes(const Genome& g, const Pr
             continue;
         }
         row.chrIdx = i;
+        row.probeRegion = FlexGdnaProbeMetadata::instance().regionForProbeId(nm);
         out.push_back(row);
     }
     log << "[HASH-CACHE-GEN] extracted " << out.size() << " probe pseudo-chromosomes (ENSG, 50bp, probe-list hit)\n";
@@ -174,7 +178,7 @@ static void buildR1FromParams(char* buf, uint32_t len, const ParametersSolo& ps,
 
 // verdict: 1=KEEP, 0=DENY, -1=DEAD (skip, don't store)
 static void appendVariantRecord(std::vector<FlexHashScreenCache::Record>& out, const char* var50, uint16_t gene15,
-                                uint8_t cacheClass, int verdict) {
+                                uint8_t cacheClass, FlexGdnaRegion probeRegion, int verdict) {
     if (verdict < 0)
         return; // DEAD: unmapped variant, no value in caching
     FlexHashScreenCache::Record r;
@@ -185,6 +189,7 @@ static void appendVariantRecord(std::vector<FlexHashScreenCache::Record>& out, c
     if (verdict > 0) {
         r.resolvedGeneIdx15 = gene15;
         r.cacheClass = cacheClass;
+        r.probeRegion = probeRegion;
         r.negativeCode = 0;
     } else {
         r.resolvedGeneIdx15 = 0;
@@ -213,11 +218,13 @@ static void mergeDedupRecord(khash_t(flexdedup)* buckets, const FlexHashScreenCa
         b.hasKeep = true;
         b.gene = static_cast<uint16_t>(rec.resolvedGeneIdx15);
         b.cacheClass = rec.cacheClass;
+        b.probeRegion = rec.probeRegion;
     } else {
         if (b.gene != static_cast<uint16_t>(rec.resolvedGeneIdx15)) {
             b.conflict = true;
         }
         b.cacheClass = std::min<uint8_t>(b.cacheClass, rec.cacheClass);
+        b.probeRegion = flexGdnaMergeRegion(b.probeRegion, rec.probeRegion);
     }
 }
 
@@ -241,6 +248,7 @@ static std::vector<FlexHashScreenCache::Record> finalizeFromBuckets(khash_t(flex
         } else {
             r.resolvedGeneIdx15 = b.gene;
             r.cacheClass = b.cacheClass;
+            r.probeRegion = b.probeRegion;
             r.negativeCode = 0;
             // H0: sampleKey is hash-screen index per sample; H1/H2 use sampleKey==0 (global fallback in findRecord).
             r.sampleIdx = key.sampleKey;
@@ -264,6 +272,24 @@ void runFlexHashCacheGenerate(Parameters& P, Genome& genome, Transcriptome* tran
     if (!probeIdx.load(P.pSolo.probeListPath, P.pSolo.removeDeprecated, &deprecatedCount)) {
         exitWithError("EXITING: hashCacheGenerate could not load --soloProbeList\n", std::cerr, P.inOut->logMain,
                       EXIT_CODE_PARAMETER, P);
+    }
+
+    FlexGdnaProbeMetadata& gdnaMetadata = FlexGdnaProbeMetadata::instance();
+    if (!gdnaMetadata.ready()) {
+        const std::string probeCsv = FlexGdnaProbeMetadata::discoverProbeCsv(
+            P.pSolo.flexGdnaProbeSetPath, P.pSolo.probeListPath, P.pGe.gDir);
+        std::string gdnaError;
+        if (!probeCsv.empty()) {
+            P.pSolo.flexGdnaReady =
+                gdnaMetadata.load(probeCsv, P.pSolo.probeListPath, &gdnaError);
+        }
+        if (!P.pSolo.flexGdnaReady) {
+            P.inOut->logMain
+                << "[HASH-CACHE-GEN] probe-region metadata unavailable; writing backward-compatible v2 cache"
+                << (gdnaError.empty() ? "" : ": " + gdnaError) << "\n";
+        }
+    } else {
+        P.pSolo.flexGdnaReady = true;
     }
 
     std::vector<GenomeProbeRow> probes = extractGenomeProbes(genome, probeIdx, P.inOut->logMain);
@@ -379,6 +405,7 @@ void runFlexHashCacheGenerate(Parameters& P, Genome& genome, Transcriptome* tran
                     if (FlexHashScreenCache::encodeProbeWindow(var, 0, h0.seqLo, h0.seqHi)) {
                         h0.resolvedGeneIdx15 = pr.geneIdx15;
                         h0.cacheClass = 0;
+                        h0.probeRegion = pr.probeRegion;
                         h0.negativeCode = 0;
                         h0.sampleIdx = rowS;
                         local.push_back(h0);
@@ -398,7 +425,7 @@ void runFlexHashCacheGenerate(Parameters& P, Genome& genome, Transcriptome* tran
                         fillR2Layout(r2, var, tag8.c_str(), tagOff);
                         const int verdict =
                             RA->flexHashCacheValidateSyntheticPair(r2, 90, r1buf.data(), P.pSolo.cbumiL, pr.geneIdx15);
-                        appendVariantRecord(local, var, pr.geneIdx15, 1, verdict);
+                        appendVariantRecord(local, var, pr.geneIdx15, 1, pr.probeRegion, verdict);
                         var[pos] = refb;
                     }
                 }
@@ -496,6 +523,7 @@ void runFlexHashCacheGenerate(Parameters& P, Genome& genome, Transcriptome* tran
                                     rec.seqHi = sHi;
                                     rec.resolvedGeneIdx15 = pr.geneIdx15;
                                     rec.cacheClass = 3;
+                                    rec.probeRegion = pr.probeRegion;
                                     rec.negativeCode = 0;
                                     rec.sampleIdx = 0;
                                     tmpOut.write(reinterpret_cast<const char*>(&rec), sizeof(rec));
@@ -549,7 +577,8 @@ void runFlexHashCacheGenerate(Parameters& P, Genome& genome, Transcriptome* tran
     kh_destroy(flexdedup, buckets);
 
     std::string err;
-    if (!FlexHashScreenCache::writeHashCacheFile(P.pSolo.hashCacheOutput, finalRecs, &err)) {
+    if (!FlexHashScreenCache::writeHashCacheFile(
+            P.pSolo.hashCacheOutput, finalRecs, &err, P.pSolo.flexGdnaReady)) {
         ostringstream e;
         e << "EXITING: hash cache write failed: " << err << "\n";
         exitWithError(e.str(), std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);

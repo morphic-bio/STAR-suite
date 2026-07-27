@@ -987,3 +987,31 @@ All three runs used **`USE_READFILES_ZCAT=0`** (no external `zcat`), **`--outSAM
   `.partial` MEX roots are removed only on successful commit.
 - Status: untracked; never commit MEX output, binary spool records, sidecars,
   FASTQs, timing logs, or reference data.
+
+## Native Visium HD Flex spatial families (2026-07-26)
+
+- Runbook:
+  `docs/RUNBOOK_VISIUM_HD_NATIVE_FLEX_SPATIAL_FAMILIES_20260726.md`
+- Fresh CRC 100K acceptance roots:
+  - `/mnt/pikachu/star-spatial/native_flex_tests/20260726_crc_100k_native_spatial_flex_release_1t_memory_v1/`
+  - `/mnt/pikachu/star-spatial/native_flex_tests/20260726_crc_100k_native_spatial_flex_release_32t_memory_v1/`
+  - `/mnt/pikachu/star-spatial/native_flex_tests/20260726_crc_100k_native_spatial_flex_release_32t_forced_spill_v1/`
+  - `/mnt/pikachu/star-spatial/native_flex_tests/20260726_crc_100k_native_spatial_flex_release_32t_memory_repeat_v1/`
+- Ordinary integrated-GEX isolation regression:
+  `/mnt/pikachu/star-spatial/gex_in_memory_tests/20260726_ovarian_100k_integrated_native_flex_regression_v1/`
+- Contents: native Flex spatial-family summaries; strict, soft-expected, hard,
+  and gated-hard 2/8/16-micrometer MEX; STAR logs; and deterministic/spill
+  comparisons.
+- Status: untracked; never commit MEX output, binary spool records, FASTQs,
+  timing logs, or reference data.
+
+## Flex gDNA diagnostic 100K acceptance (2026-07-27)
+
+- Runbook: `docs/RUNBOOK_FLEX_GDNA_DIAGNOSTIC_20260727.md`
+- Fresh authorized fixture root:
+  `/storage/downsampled_100K/SC2300771/results/flex_gdna_100k_20260727_v1/`
+- Contents: v3 H0/H1 cache with probe-region metadata; one completed STAR Flex
+  run; per-sample and library gDNA diagnostics; MEX outputs; timing, memory,
+  binary/cache hashes, and logs.
+- Status: untracked. The fixture was executed once; do not rerun it without new
+  authorization and do not commit FASTQs, cache binaries, MEX files, or logs.

@@ -270,6 +270,14 @@ public:
     string probeListPath;             // path to probe_list.txt
     string removeDeprecatedStr;      // --removeDeprecated Yes/No (remove deprecated entries from probe lists)
     bool removeDeprecated;           // Converted from removeDeprecatedStr
+    string flexGdnaModeStr = "auto";  // auto|yes|no; diagnostic only, Flex-gated
+    enum FlexGdnaMode : int32 {
+        FlexGdnaOff = 0,
+        FlexGdnaAuto = 1,
+        FlexGdnaRequired = 2
+    } flexGdnaMode = FlexGdnaAuto;
+    string flexGdnaProbeSetPath = "auto"; // filtered probe CSV; auto-discovers from index/probe list
+    bool flexGdnaReady = false;       // region metadata loaded for this process
     string sampleWhitelistPath;       // path to sample whitelist TSV
     string sampleProbesPath;          // path to sample probes file
     uint32 sampleProbeOffset = 68;    // default offset
