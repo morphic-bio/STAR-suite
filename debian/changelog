@@ -1,3 +1,19 @@
+star-suite (1.6.1-1) unstable; urgency=medium
+
+  * Replace the v1.6.0 release artifacts with builds that embed the exact full
+    source commit in STAR, spatial spill records, sidecars, and run summaries.
+  * Fail integrated spatial preflight before FASTQ mapping when a binary lacks
+    an immutable 40-character source revision.
+  * Validate source identity across static tarballs, compatibility bundles,
+    Debian/source packages, and Docker images.
+  * Publish the complete curated Visium HD GEX, native Flex, Flex gDNA, and
+    molecule-first release notes instead of incomplete automatic PR notes.
+  * Retain the final v1.6.0 scientific source tree without counting-policy or
+    matrix-policy changes.
+  * Report STAR Suite 1.6.1 from STAR and molecule_first_resolver --version.
+
+ -- STAR-suite Maintainers <maintainers@biodepot.example>  Tue, 28 Jul 2026 21:00:00 +0000
+
 star-suite (1.6.0-1) unstable; urgency=medium
 
   * Add opt-in integrated Visium HD 3-prime GEX processing with fused spatial

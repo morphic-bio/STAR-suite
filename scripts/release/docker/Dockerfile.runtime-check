@@ -7,11 +7,13 @@ ENV DEBIAN_FRONTEND=noninteractive \
 COPY scripts/release/docker/container_check_tarball.sh /usr/local/bin/container_check_tarball.sh
 COPY scripts/release/docker/container_check_installer_bundle.sh /usr/local/bin/container_check_installer_bundle.sh
 COPY scripts/release/docker/container_check_release_smokes.sh /usr/local/bin/container_check_release_smokes.sh
+COPY scripts/release/check_spatial_release_binary.sh /usr/local/bin/check_spatial_release_binary.sh
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     tzdata \
     ca-certificates \
     curl \
+    binutils \
     git \
     git-lfs \
     python3 \
@@ -19,7 +21,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     samtools \
     salmon \
     && rm -rf /var/lib/apt/lists/* \
-    && chmod 0755 /usr/local/bin/container_check_tarball.sh /usr/local/bin/container_check_installer_bundle.sh /usr/local/bin/container_check_release_smokes.sh
+    && chmod 0755 /usr/local/bin/container_check_tarball.sh /usr/local/bin/container_check_installer_bundle.sh /usr/local/bin/container_check_release_smokes.sh /usr/local/bin/check_spatial_release_binary.sh
 
 WORKDIR /work
 ENTRYPOINT ["/bin/bash"]

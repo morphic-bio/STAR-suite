@@ -464,6 +464,7 @@ void usage(int usageType)
     cout << "STAR-suite version=" << STAR_SUITE_VERSION << "\n";
     cout << "STAR upstream version=" << STAR_UPSTREAM_VERSION << "\n";
     cout << "STAR genome compatibility version=" << STAR_GENOME_COMPAT_VERSION << "\n";
+    cout << "STAR-suite source revision=" << STAR_SUITE_SOURCE_REVISION << "\n";
     cout << "STAR compilation time,server,dir=" << COMPILATION_TIME_PLACE << "\n";
     cout << "For more details see:\n";
     cout << "<https://github.com/alexdobin/STAR>\n";
@@ -708,7 +709,7 @@ int main(int argInN, char *argIn[])
                 + (spatialFlex ? "SpatialFlex.out" : "SpatialGex.out");
             spatialConfig.temporaryDirectory = P.outFileTmp;
             spatialConfig.starSuiteVersion = STAR_SUITE_VERSION;
-            spatialConfig.sourceRevision = GIT_BRANCH_COMMIT_DIFF;
+            spatialConfig.sourceRevision = STAR_SUITE_SOURCE_REVISION;
             if (spatialFlex) {
                 std::string digestError;
                 spatialConfig.featureAxisPath = P.pSolo.probeListPath;
@@ -788,7 +789,7 @@ int main(int argInN, char *argIn[])
             spatial_feature_sidecar::WriterConfig sidecarConfig;
             sidecarConfig.prefix = P.soloSpatialFeatureSidecar;
             sidecarConfig.starSuiteVersion = STAR_SUITE_VERSION;
-            sidecarConfig.sourceRevision = GIT_BRANCH_COMMIT_DIFF;
+            sidecarConfig.sourceRevision = STAR_SUITE_SOURCE_REVISION;
             sidecarConfig.featureType = "GeneFull";
             sidecarConfig.strand = P.pSolo.strand;
             sidecarConfig.crMultimapRescue = P.pSolo.crMultimapRescue;

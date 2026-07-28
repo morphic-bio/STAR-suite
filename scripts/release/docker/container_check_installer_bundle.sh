@@ -4,12 +4,13 @@ set -euo pipefail
 
 BUNDLE=""
 EXPECTED_LABEL=""
-EXPECTED_VERSION="1.6.0"
+EXPECTED_VERSION="1.6.1"
+EXPECTED_COMMIT=""
 MANIFEST_OUT=""
 
 usage() {
   cat <<USAGE
-Usage: $0 --bundle <path> --expected-label <label> [--expected-version <version>] [--manifest-out <path>]
+Usage: $0 --bundle <path> --expected-label <label> [--expected-version <version>] [--expected-commit <sha>] [--manifest-out <path>]
 USAGE
 }
 
@@ -47,6 +48,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --expected-version)
       EXPECTED_VERSION="$2"
+      shift 2
+      ;;
+    --expected-commit)
+      EXPECTED_COMMIT="$2"
       shift 2
       ;;
     --manifest-out)
@@ -94,6 +99,29 @@ if [[ "$version_output" != "$EXPECTED_VERSION" ]]; then
   echo "ERROR: expected STAR-suite version $EXPECTED_VERSION, got $version_output" >&2
   exit 1
 fi
+source_revision="$($prefix/bin/STAR --source-revision)"
+if [[ ! "$source_revision" =~ ^[0-9a-f]{40}$ ]]; then
+  echo "ERROR: invalid STAR-suite source revision: $source_revision" >&2
+  exit 1
+fi
+variant_metadata="$workdir/unpack/variants/${selected_label}/release-metadata.env"
+if [[ ! -f "$variant_metadata" ]]; then
+  echo "ERROR: selected installer variant lacks release metadata" >&2
+  exit 1
+fi
+unset COMMIT_SHA
+# shellcheck disable=SC1090
+source "$variant_metadata"
+metadata_commit="${COMMIT_SHA:-}"
+if [[ ! "$metadata_commit" =~ ^[0-9a-f]{40}$ \
+    || "$source_revision" != "$metadata_commit" ]]; then
+  echo "ERROR: selected installer binary source revision does not match metadata" >&2
+  exit 1
+fi
+if [[ -n "$EXPECTED_COMMIT" && "$source_revision" != "${EXPECTED_COMMIT,,}" ]]; then
+  echo "ERROR: binary source revision $source_revision does not match ${EXPECTED_COMMIT,,}" >&2
+  exit 1
+fi
 for tool in molecule_first_resolver molecule_first_bam_ledger molecule_first_materialize; do
   if [[ ! -x "$prefix/bin/$tool" ]] || [[ "$($prefix/bin/$tool --version)" != "$EXPECTED_VERSION" ]]; then
     echo "ERROR: installed $tool missing or version-mismatched" >&2
@@ -107,6 +135,7 @@ Selected label: ${selected_label}
 Selected baseline: ${selected_baseline}
 Selected description: ${selected_description}
 STAR-suite version: ${version_output}
+STAR-suite source revision: ${source_revision}
 "
 
 printf '%s' "$manifest"

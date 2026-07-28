@@ -125,12 +125,38 @@ BUILD_PLACE ?= $(HOSTNAME):$(shell pwd)
 COMPTIMEPLACE := -D'COMPILATION_TIME_PLACE="$(BUILD_DATE) $(BUILD_PLACE)"'
 
 
+STAR_SUITE_SOURCE_REVISION_VALUE := $(strip $(STAR_SUITE_COMMIT_SHA))
+ifneq ($(STAR_SUITE_SOURCE_REVISION_VALUE),)
+    STAR_SUITE_COMMIT_SHA_VALID := $(shell printf '%s\n' '$(STAR_SUITE_SOURCE_REVISION_VALUE)' | grep -Eq '^[[:xdigit:]]{40}$$' && printf '%s' yes)
+    ifneq ($(STAR_SUITE_COMMIT_SHA_VALID),yes)
+        $(error STAR_SUITE_COMMIT_SHA must be an exact 40-character hexadecimal commit SHA)
+    endif
+endif
+ifeq ($(STAR_SUITE_SOURCE_REVISION_VALUE),)
+    STAR_SUITE_SOURCE_REVISION_VALUE := $(strip $(shell git rev-parse HEAD 2>/dev/null))
+    ifneq ($(STAR_SUITE_SOURCE_REVISION_VALUE),)
+        GIT_TRACKED_DIRTY := $(shell git diff-index --quiet HEAD -- 2>/dev/null || printf '%s' -dirty)
+        STAR_SUITE_SOURCE_REVISION_VALUE := $(STAR_SUITE_SOURCE_REVISION_VALUE)$(GIT_TRACKED_DIRTY)
+    endif
+endif
+ifeq ($(STAR_SUITE_SOURCE_REVISION_VALUE),)
+    STAR_SUITE_SOURCE_REVISION_VALUE := unversioned-source
+endif
+STAR_SUITE_SOURCE_REVISION := -D'STAR_SUITE_SOURCE_REVISION="$(STAR_SUITE_SOURCE_REVISION_VALUE)"'
+
 GIT_CHECK := $(shell git status 1> /dev/null 2> /dev/null && echo 0)
+ifneq ($(strip $(STAR_SUITE_COMMIT_SHA)),)
+    GIT_BRANCH_COMMIT_DIFF := release commit $(STAR_SUITE_COMMIT_SHA)
+else
 ifeq ($(GIT_CHECK),0)
 	GIT_DIFF := $(shell git diff --name-only | tr '\n' ' ')
     GIT_BRANCH_COMMIT_DIFF := $(shell git status | head -n 1) ; \
                                                     $(shell git log | head -n 1) ; \
                                                     diff files: $(GIT_DIFF)
+endif
+endif
+ifeq ($(strip $(GIT_BRANCH_COMMIT_DIFF)),)
+    GIT_BRANCH_COMMIT_DIFF := source revision $(STAR_SUITE_SOURCE_REVISION_VALUE)
 endif
 GIT_BRANCH_COMMIT_DIFF := -D'GIT_BRANCH_COMMIT_DIFF="$(GIT_BRANCH_COMMIT_DIFF)"'
 
@@ -149,7 +175,7 @@ endif
 # Include flex (klib/libflex), vbem (libtrim/libem), slam, and process_features headers
 # Include current directory for IncludeDefine.h and other source headers
 PROCESS_FEATURES_INC := $(ROOT_DIR)/core/features/process_features/include
-CXXFLAGS_common := -std=c++11 -fopenmp -I. $(STAR_HTSLIB_INC) -I$(FLEX_SRC_DIR) -I$(LIBFLEX_DIR) -I$(LIBSCRNA_INC) -I$(VBEM_SRC_DIR) -I$(LIBEM_DIR) -I$(SLAM_SRC_DIR) -I$(BAMSORT_SRC_DIR) -I$(PROCESS_FEATURES_INC) $(CHROMAP_CXXFLAGS) $(COMPTIMEPLACE) $(GIT_BRANCH_COMMIT_DIFF)
+CXXFLAGS_common := -std=c++11 -fopenmp -I. $(STAR_HTSLIB_INC) -I$(FLEX_SRC_DIR) -I$(LIBFLEX_DIR) -I$(LIBSCRNA_INC) -I$(VBEM_SRC_DIR) -I$(LIBEM_DIR) -I$(SLAM_SRC_DIR) -I$(BAMSORT_SRC_DIR) -I$(PROCESS_FEATURES_INC) $(CHROMAP_CXXFLAGS) $(COMPTIMEPLACE) $(GIT_BRANCH_COMMIT_DIFF) $(STAR_SUITE_SOURCE_REVISION)
 CXXFLAGS_main := -O3 $(CXXFLAGS_common)
 CXXFLAGS_gdb := -O0 -g3 $(CXXFLAGS_common)
 
