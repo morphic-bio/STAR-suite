@@ -62,3 +62,4 @@ jobs:
           push: false
           build-args: |
             MAKE_JOBS=8
+            STAR_SUITE_COMMIT_SHA=${{ github.sha }}

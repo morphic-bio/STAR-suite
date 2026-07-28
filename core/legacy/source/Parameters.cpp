@@ -1219,6 +1219,10 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
                 std::cout << STAR_SUITE_VERSION << std::endl;
                 exit(0);
             };
+            if (oneArg=="--source-revision") {
+                std::cout << STAR_SUITE_SOURCE_REVISION << std::endl;
+                exit(0);
+            };
             if (oneArg=="--upstream-version") {
                 std::cout << STAR_UPSTREAM_VERSION << std::endl;
                 exit(0);
@@ -1283,6 +1287,7 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
     inOut->logMain << "STAR-suite version=" << STAR_SUITE_VERSION << "\n";
     inOut->logMain << "STAR upstream version=" << STAR_UPSTREAM_VERSION << "\n";
     inOut->logMain << "STAR genome compatibility version=" << versionGenome << "\n";
+    inOut->logMain << "STAR-suite source revision=" << STAR_SUITE_SOURCE_REVISION << "\n";
     inOut->logMain << "STAR compilation time,server,dir=" << COMPILATION_TIME_PLACE << "\n";
     inOut->logMain << "STAR git: " << GIT_BRANCH_COMMIT_DIFF << "\n";
     #ifdef COMPILE_FOR_LONG_READS
@@ -2253,6 +2258,21 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
         exitWithError("EXITING because of fatal PARAMETERS error: --soloSpatialR1FastqTap is not part of integrated spatial mode\n"
                       "SOLUTION: remove the FIFO tap; optionally retain --soloSpatialFeatureSidecar as a debug oracle.\n",
                       std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+    }
+    if (soloSpatialFeatureSidecarEnabled || soloSpatialGexIntegratedEnabled
+        || soloSpatialFlexIntegratedEnabled) {
+        const string sourceRevision = STAR_SUITE_SOURCE_REVISION;
+        const bool exactRevision = sourceRevision.size() == 40
+            && all_of(sourceRevision.begin(), sourceRevision.end(), [](unsigned char value) {
+                return isxdigit(value) != 0;
+            });
+        if (!exactRevision) {
+            exitWithError(
+                "EXITING because this STAR Suite binary lacks an exact immutable source revision\n"
+                "SOLUTION: use a validated release artifact or rebuild with "
+                "STAR_SUITE_COMMIT_SHA set to the full 40-character commit SHA.\n",
+                std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+        }
     }
 
     //read parameters

@@ -91,6 +91,7 @@ jobs:
           push: true
           build-args: |
             MAKE_JOBS=8
+            STAR_SUITE_COMMIT_SHA=${{ github.sha }}
           tags: |
             biodepot/star-suite:latest
             biodepot/star-suite:master-${{ github.sha }}
