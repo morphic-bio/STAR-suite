@@ -122,6 +122,12 @@ if [[ -n "$EXPECTED_COMMIT" && "$source_revision" != "${EXPECTED_COMMIT,,}" ]]; 
   echo "ERROR: binary source revision $source_revision does not match ${EXPECTED_COMMIT,,}" >&2
   exit 1
 fi
+if [[ -n "$EXPECTED_COMMIT" ]]; then
+  /usr/local/bin/check_spatial_release_binary.sh \
+    --binary "$prefix/bin/STAR" \
+    --expected-version "$EXPECTED_VERSION" \
+    --expected-commit "$EXPECTED_COMMIT"
+fi
 for tool in molecule_first_resolver molecule_first_bam_ledger molecule_first_materialize; do
   if [[ ! -x "$prefix/bin/$tool" ]] || [[ "$($prefix/bin/$tool --version)" != "$EXPECTED_VERSION" ]]; then
     echo "ERROR: installed $tool missing or version-mismatched" >&2

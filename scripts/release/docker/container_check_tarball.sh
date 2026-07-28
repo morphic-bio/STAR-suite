@@ -175,6 +175,12 @@ if [[ -n "$EXPECTED_COMMIT" && "$source_revision" != "${EXPECTED_COMMIT,,}" ]]; 
   echo "ERROR: binary source revision $source_revision does not match ${EXPECTED_COMMIT,,}" >&2
   exit 1
 fi
+if [[ -n "$EXPECTED_COMMIT" ]]; then
+  /usr/local/bin/check_spatial_release_binary.sh \
+    --binary "$binary" \
+    --expected-version "$EXPECTED_VERSION" \
+    --expected-commit "$EXPECTED_COMMIT"
+fi
 if [[ "$($resolver --version)" != "$EXPECTED_VERSION" ]]; then
   echo "ERROR: molecule-first resolver version mismatch" >&2
   exit 1
