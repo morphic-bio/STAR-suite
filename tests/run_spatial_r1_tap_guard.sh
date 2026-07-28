@@ -45,7 +45,7 @@ status=$?
 set -e
 
 [[ ${status} -ne 0 ]]
-grep -q -- '--soloSpatialR1FastqTap is not part of integrated spatial GEX mode' \
+grep -q -- '--soloSpatialR1FastqTap is not part of integrated spatial mode' \
   "${work}/integrated-tap.stdout.log" "${work}/integrated-tap.stderr.log"
 if grep -q 'could not open Fastx input module' \
     "${work}/integrated-tap.stdout.log" "${work}/integrated-tap.stderr.log"; then
