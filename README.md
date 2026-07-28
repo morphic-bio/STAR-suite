@@ -2,12 +2,13 @@
 
 STAR Suite updates the original STAR aligner by integrating four modules — STAR-perturb, STAR-Flex, STAR-SLAM, and TranscriptVB — to provide complete internal C/C++ pipelines for bulk RNA-seq, scRNA-seq, Perturb-seq, 10x Flex, and SLAM-seq. The integration results in **substantial speedups** (**1.7–2.4x for bulk RNA-seq**, **1.47–1.60x for scRNA-seq GEX-only Solo vs CellGENI-style STARsolo**, **3.7–6.2x for Perturb-seq**, **2.5–28.8x for Flex**) and a simplified toolchain that can be **installed through pre-compiled binaries** for researchers and agents. **No new external dependencies** are required; the suite is built entirely with the existing STAR toolchain and vendored components. **This is a drop-in replacement for the STAR aligner.**
 
-Current production release: **STAR Suite v1.6.0**. The suite release tag and
-packaging version are `v1.6.0` / `1.6.0-1`; `STAR --version` reports
-`1.6.0`.
+Current production release: **STAR Suite v1.6.1**. The suite release tag and
+packaging version are `v1.6.1` / `1.6.1-1`; `STAR --version` reports
+`1.6.1`.
 Use `STAR --upstream-version` for the underlying upstream STAR base
 (`2.7.11b`) and `STAR --genome-compat-version` for the genome index
-compatibility string (`2.7.4a`).
+compatibility string (`2.7.4a`). Use `STAR --source-revision` to report the
+exact full commit embedded in an official binary.
 
 Advanced-user previews live on `dev-release` or version-scoped
 `dev-release-vX.Y.Z` branches. Immutable prerelease tags use `vX.Y.Z-rcN`;
@@ -44,6 +45,15 @@ Agent quickstart: see `AGENTS.md` for repo-specific guardrails, tests, and recen
   spooling supports complete slides on smaller-memory hosts. The feature is
   opt-in; ordinary bulk, STARsolo, CR-compatible scRNA, and Flex runs keep
   their existing paths and defaults.
+- **Native Visium HD Flex** (`--soloSpatialFlexIntegrated yes`): Resolves H0/H1
+  probe hits and alignment fallback directly into retained spatial candidate
+  families, then emits the same four policies and three spatial scales through
+  the bounded spill/materialization engine. It does not require a BAM, GX/UR
+  bridge, or external resolver/materializer.
+- **Flex gDNA QC** (`--soloFlexGdna auto|yes|no`): Computes the 10x-style gDNA
+  diagnostic from final filtered barcode/gene/UMI families and writes
+  per-sample JSON plus an audit TSV. The diagnostic is matrix-inert and inert
+  outside Flex.
 - **Solo Features**: `sF` BAM tag for feature type, `--soloCBtype String` for arbitrary barcode strings, `--soloCellReadStats Standard` for improved cell filtering.
 - **CR-compat GEX** (`--soloCrGexFeature auto|gene|genefull`): Controls which GEX source is merged in CR-compat mode.
 - **Native Velocyto MEX Packaging**: Current production binaries write raw and

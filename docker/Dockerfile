@@ -11,10 +11,12 @@ FROM ubuntu:24.04 AS builder
 
 ARG MAKE_JOBS=16
 ARG STAR_WITH_CHROMAP=0
+ARG STAR_SUITE_COMMIT_SHA
 ARG TARGETARCH
 ENV DEBIAN_FRONTEND=noninteractive
 ENV MAKE_JOBS=$MAKE_JOBS
 ENV STAR_WITH_CHROMAP=$STAR_WITH_CHROMAP
+ENV STAR_SUITE_COMMIT_SHA=$STAR_SUITE_COMMIT_SHA
 
 # Build dependencies
 # - core/legacy uses vendored htslib
@@ -71,7 +73,8 @@ RUN make -j"${MAKE_JOBS}" core WITH_CHROMAP="${STAR_WITH_CHROMAP}" \
     && make -j"${MAKE_JOBS}" slam WITH_CHROMAP="${STAR_WITH_CHROMAP}" \
     && make -j"${MAKE_JOBS}" feature-barcodes-tools \
     && make default WITH_CHROMAP="${STAR_WITH_CHROMAP}" \
-    && make all WITH_CHROMAP="${STAR_WITH_CHROMAP}"
+    && make all WITH_CHROMAP="${STAR_WITH_CHROMAP}" \
+    && test "$(core/legacy/source/STAR --source-revision)" = "${STAR_SUITE_COMMIT_SHA}"
 
 # The spatial bridge and conventional Solo collapse paths share this resolver.
 # Gate both adapters against their pre-refactor rules on every CI image build.

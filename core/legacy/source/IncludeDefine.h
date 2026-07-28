@@ -27,6 +27,10 @@
 
 #include "VERSION"
 
+#ifndef STAR_SUITE_SOURCE_REVISION
+#define STAR_SUITE_SOURCE_REVISION "unversioned-source"
+#endif
+
 #define ERROR_OUT string ( __FILE__ ) +":"+ to_string ( (uint) __LINE__ ) +":"+ string ( __FUNCTION__ )
 
 //external libs

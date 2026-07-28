@@ -83,6 +83,7 @@ MANIFEST_PATH="${STAGE_DIR}/compat-manifest.tsv"
 
 bundle_version=""
 bundle_arch=""
+bundle_commit=""
 
 for tarball in "${TARBALLS[@]}"; do
   tarball="$(realpath "${tarball}")"
@@ -109,6 +110,10 @@ for tarball in "${TARBALLS[@]}"; do
     echo "ERROR: tarball missing compatibility metadata: ${tarball}" >&2
     exit 1
   fi
+  if [[ ! "${COMMIT_SHA:-}" =~ ^[0-9a-fA-F]{40}$ ]]; then
+    echo "ERROR: tarball has invalid commit metadata: ${tarball}" >&2
+    exit 1
+  fi
 
   if [[ "${VERSION}" != "${REQUESTED_VERSION}" ]]; then
     echo "ERROR: tarball version ${VERSION} does not match requested bundle version ${REQUESTED_VERSION}" >&2
@@ -118,6 +123,7 @@ for tarball in "${TARBALLS[@]}"; do
   if [[ -z "${bundle_version}" ]]; then
     bundle_version="${VERSION}"
     bundle_arch="${ARCH}"
+    bundle_commit="${COMMIT_SHA,,}"
   else
     if [[ "${VERSION}" != "${bundle_version}" ]]; then
       echo "ERROR: mixed versions in installer bundle: ${bundle_version} vs ${VERSION}" >&2
@@ -125,6 +131,10 @@ for tarball in "${TARBALLS[@]}"; do
     fi
     if [[ "${ARCH}" != "${bundle_arch}" ]]; then
       echo "ERROR: mixed architectures in installer bundle: ${bundle_arch} vs ${ARCH}" >&2
+      exit 1
+    fi
+    if [[ "${COMMIT_SHA,,}" != "${bundle_commit}" ]]; then
+      echo "ERROR: mixed commits in installer bundle: ${bundle_commit} vs ${COMMIT_SHA,,}" >&2
       exit 1
     fi
   fi
@@ -164,6 +174,7 @@ cat > "${STAGE_DIR}/README.txt" <<README
 STAR-suite compatibility installer bundle
 Version: ${bundle_version}
 Architecture: ${bundle_arch}
+Commit: ${bundle_commit}
 
 This bundle contains multiple STAR-suite binaries built for different Linux compatibility levels.
 Use ./install.sh to auto-select the best bundled binary for this machine.
