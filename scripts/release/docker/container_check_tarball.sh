@@ -3,12 +3,13 @@
 set -euo pipefail
 
 TARBALL=""
-EXPECTED_VERSION="1.6.0"
+EXPECTED_VERSION="1.6.1"
+EXPECTED_COMMIT=""
 MANIFEST_OUT=""
 
 usage() {
   cat <<USAGE
-Usage: $0 --tarball <path> [--expected-version <version>] [--manifest-out <path>]
+Usage: $0 --tarball <path> [--expected-version <version>] [--expected-commit <sha>] [--manifest-out <path>]
 USAGE
 }
 
@@ -84,6 +85,10 @@ while [[ $# -gt 0 ]]; do
       EXPECTED_VERSION="$2"
       shift 2
       ;;
+    --expected-commit)
+      EXPECTED_COMMIT="$2"
+      shift 2
+      ;;
     --manifest-out)
       MANIFEST_OUT="$2"
       shift 2
@@ -152,6 +157,24 @@ if [[ "$version_output" != "$EXPECTED_VERSION" ]]; then
   echo "ERROR: expected STAR-suite version $EXPECTED_VERSION, got $version_output" >&2
   exit 1
 fi
+source_revision="$($binary --source-revision)"
+if [[ ! "$source_revision" =~ ^[0-9a-f]{40}$ ]]; then
+  echo "ERROR: invalid STAR-suite source revision: $source_revision" >&2
+  exit 1
+fi
+metadata_commit="${COMMIT_SHA:-}"
+if [[ ! "$metadata_commit" =~ ^[0-9a-f]{40}$ ]]; then
+  echo "ERROR: tarball metadata has invalid commit SHA: $metadata_commit" >&2
+  exit 1
+fi
+if [[ "$source_revision" != "${metadata_commit,,}" ]]; then
+  echo "ERROR: binary source revision does not match tarball metadata" >&2
+  exit 1
+fi
+if [[ -n "$EXPECTED_COMMIT" && "$source_revision" != "${EXPECTED_COMMIT,,}" ]]; then
+  echo "ERROR: binary source revision $source_revision does not match ${EXPECTED_COMMIT,,}" >&2
+  exit 1
+fi
 if [[ "$($resolver --version)" != "$EXPECTED_VERSION" ]]; then
   echo "ERROR: molecule-first resolver version mismatch" >&2
   exit 1
@@ -207,6 +230,7 @@ Documented glibc baseline: ${glibc_baseline:-unknown}
 Container glibc: ${container_glibc}
 Maximum referenced GLIBC symbol: ${max_glibc_symbol:-unknown}
 STAR-suite version: ${version_output}
+STAR-suite source revision: ${source_revision}
 Minimum runtime packages (Ubuntu/Debian package names): ${package_list:-unknown}
 Dynamic libraries:
 "

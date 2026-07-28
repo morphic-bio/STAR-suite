@@ -195,7 +195,27 @@ Ship discoverable, installable Ubuntu binaries for STAR Suite with low-friction 
   `STAR --version` reports `1.3.0`. Upstream provenance and genome index
   compatibility remain `2.7.11b` and `2.7.4a`.
 
-## Feature Release v1.6.0 (2026-07-25)
+## Patch Release v1.6.1 (2026-07-28)
+
+- Release tag: `v1.6.1`
+- Release notes: `docs/RELEASE_NOTES_v1.6.1.md`
+- Packaging metadata: `debian/changelog` entry `1.6.1-1`
+- Scope: immutable replacement artifacts for v1.6.0. The final v1.6.0
+  scientific tree is retained; the patch supplies exact full-commit source
+  identity to Git-free tarball, installer, Debian/source-package, and Docker
+  builds so integrated GEX and native Flex spill can finalize safely.
+- `STAR --source-revision`, release metadata, spatial sidecars, spill records,
+  and run summaries carry the same 40-character release commit. Release checks
+  reject missing, short, sentinel, or mismatched identities.
+- The GitHub release body is sourced from the curated release-note document so
+  direct and private-folded changes are not hidden behind an incomplete list of
+  pull requests.
+- Version note: release artifacts use tag `v1.6.1`, Debian packages use STAR
+  Suite `1.6.1`, and both `STAR` and `molecule_first_resolver` report `1.6.1`.
+  Upstream provenance and genome index compatibility remain `2.7.11b` and
+  `2.7.4a`.
+
+## Feature Release v1.6.0 (2026-07-27)
 
 - Release tag: `v1.6.0`
 - Release notes: `docs/RELEASE_NOTES_v1.6.0.md`

@@ -3,6 +3,8 @@
 export DH_VERBOSE = 1
 export DEB_BUILD_MAINT_OPTIONS = hardening=+all optimize=-lto
 NUM_JOBS ?= $(shell nproc)
+STAR_SUITE_COMMIT_SHA ?= $(shell if test -f debian/source-revision; then cat debian/source-revision; else git rev-parse HEAD 2>/dev/null; fi)
+export STAR_SUITE_COMMIT_SHA
 
 %:
 	dh $@

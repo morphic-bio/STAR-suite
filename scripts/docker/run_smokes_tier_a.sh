@@ -9,6 +9,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 BASE_IMAGE_TAG="${IMAGE_TAG:-biodepot/star-suite:latest}"
 TEST_IMAGE_TAG="${TEST_IMAGE_TAG:-biodepot/star-suite:test-tier-a}"
 MAKE_JOBS="${MAKE_JOBS:-16}"
+STAR_SUITE_COMMIT_SHA="${STAR_SUITE_COMMIT_SHA:-$(git -C "${REPO_ROOT}" rev-parse HEAD)}"
 
 cd "$REPO_ROOT"
 
@@ -20,6 +21,7 @@ if ! docker image inspect "$TEST_IMAGE_TAG" &>/dev/null; then
         -f docker/Dockerfile \
         -t "$TEST_IMAGE_TAG" \
         --build-arg MAKE_JOBS="$MAKE_JOBS" \
+        --build-arg STAR_SUITE_COMMIT_SHA="$STAR_SUITE_COMMIT_SHA" \
         .
 fi
 

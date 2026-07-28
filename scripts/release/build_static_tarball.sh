@@ -101,13 +101,23 @@ if [[ -z "${VERSION}" ]]; then
 fi
 
 resolve_commit_sha() {
-  if git -C "${REPO_ROOT}" rev-parse --short HEAD >/dev/null 2>&1; then
-    git -C "${REPO_ROOT}" rev-parse --short HEAD
+  if git -C "${REPO_ROOT}" rev-parse HEAD >/dev/null 2>&1; then
+    git -C "${REPO_ROOT}" rev-parse HEAD
   elif [[ -n "${STAR_SUITE_COMMIT_SHA:-}" ]]; then
     printf '%s\n' "${STAR_SUITE_COMMIT_SHA}"
   else
-    printf 'unknown\n'
+    return 1
   fi
+}
+
+require_commit_sha() {
+  local commit_sha
+  if ! commit_sha="$(resolve_commit_sha)" \
+      || [[ ! "${commit_sha}" =~ ^[0-9a-fA-F]{40}$ ]]; then
+    echo "ERROR: release builds require an exact 40-character source commit SHA" >&2
+    exit 1
+  fi
+  printf '%s\n' "${commit_sha,,}"
 }
 
 run_container_build() {
@@ -127,7 +137,7 @@ run_container_build() {
   mkdir -p "${OUT_DIR}"
   out_dir_abs="$(cd "${OUT_DIR}" && pwd)"
 
-  commit_sha="$(resolve_commit_sha)"
+  commit_sha="$(require_commit_sha)"
   image_name="${DOCKER_IMAGE}"
   compat_arg=""
   glibc_arg=""
@@ -202,6 +212,8 @@ esac
 cd "${REPO_ROOT}"
 mkdir -p "${OUT_DIR}"
 OUT_DIR="$(cd "${OUT_DIR}" && pwd)"
+commit_sha="$(require_commit_sha)"
+export STAR_SUITE_COMMIT_SHA="${commit_sha}"
 
 if [[ ! -x scripts/release/install_binary_tarball.sh ]]; then
   echo "ERROR: missing installer script source: scripts/release/install_binary_tarball.sh" >&2
@@ -243,7 +255,7 @@ VERSION=${VERSION}
 ARCH=${arch}
 COMPAT_LABEL=${COMPAT_LABEL}
 GLIBC_BASELINE=${GLIBC_BASELINE}
-COMMIT_SHA=$(resolve_commit_sha)
+COMMIT_SHA=${commit_sha}
 BUILD_ENVIRONMENT=${STAR_SUITE_BUILD_IMAGE:-native-host}
 ASSET_NAME=${asset_name}
 METADATA
@@ -260,7 +272,7 @@ cat > "${STAGE_DIR}/README.txt" <<README
 STAR-suite binary release artifact
 Version: ${VERSION}
 Architecture: ${arch}
-Commit: $(resolve_commit_sha)
+Commit: ${commit_sha}
 Built at: $(date -u +"%Y-%m-%dT%H:%M:%SZ")
 Build environment: ${STAR_SUITE_BUILD_IMAGE:-native-host}
 ${compat_note}This tarball includes:

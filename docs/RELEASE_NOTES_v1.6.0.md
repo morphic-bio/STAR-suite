@@ -40,14 +40,13 @@ The upstream STAR base remains `2.7.11b`; genome-index compatibility remains
 
 ## Gene evidence and compatibility policy
 
-- Make annotated CR-compatible rescue deterministic and score-first while
-  retaining unannotated alignments as decoy evidence rather than silently
-  promoting them.
-- Keep `annotated` as the normal evidence policy. The `compatibility` evidence
-  mode is explicit and experimental; it is not implied by GX/UR tags and does
-  not change ordinary STARsolo defaults.
-- Preserve the accepted deterministic annotation/MECOM rescue behavior already
-  present on the stable line.
+- Keep `compatibility` as the shipped/default CR-compatible exon-first rescue
+  policy when CR multimap rescue is enabled.
+- Retain `annotated` as an explicit deterministic, score-first retained-GTF
+  alternative. Under that policy, unannotated equal-best alignments remain
+  decoy evidence instead of silently promoting an annotated alternative.
+- Leave ordinary STARsolo behavior unchanged unless CR multimap rescue is
+  explicitly enabled; GX/UR tags do not encode final rescue policy.
 
 ## Flex behavior and fixes
 
@@ -100,9 +99,11 @@ The upstream STAR base remains `2.7.11b`; genome-index compatibility remains
 - The fresh ovarian 100K compatibility/spool gate reproduced 58,395 strict,
   71,830 hard, and 63,105 gated-hard molecules; all 36 MEX components were
   byte-identical to the accepted compatibility oracle.
-- The retained full 212.6-million-read CRC validation reproduced the open
-  candidate surface and all eight resolver artifacts byte-for-byte while
-  reducing materialization to 10 minutes 49 seconds.
+- A Git-aware pre-release source-candidate run on the retained full
+  212.6-million-read CRC input reproduced the open candidate surface and all
+  eight resolver artifacts byte-for-byte while reducing materialization to 10
+  minutes 49 seconds. This was not a forced-spill validation of the later
+  Git-free public v1.6.0 artifact.
 - The CR-compatible CRISPR fixture passed with 1,043 single-feature cells and
   35 multi-feature cells; pinned SLAM parity passed after manifest/index
   verification.
