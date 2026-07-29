@@ -156,6 +156,39 @@ actionable; link to deeper docs rather than copying them.
 - Ensure Flex builds link `libscrna` and include `core/features/libscrna/include`.
 - Plan: `plans/refactor_flex_plan.md`.
 
+### Repeat execution authorization (CRITICAL)
+
+- Authorization to run a dataset, slide, arm, or full-scale job permits one
+  successful execution for that exact run definition.
+- An identical run has the same dataset/read subset, slide or area, reference,
+  arm, input format, and effective parameters, even when its output directory
+  or run identifier differs.
+- A failed, crashed, cancelled, or preflight-rejected attempt may be relaunched
+  to obtain the one authorized successful output. Record every incomplete
+  attempt and every correction in provenance.
+- Once an identical run succeeds, do not repeat, confirm, replicate, rerun, or
+  retry it without explicit user authorization for that exact duplicate.
+- A runbook, handoff, acceptance criterion, test matrix, or prior agent note is
+  never authorization for a duplicate successful execution. If one requests a
+  repeat, pause and ask the user explicitly.
+
+### Native spatial Flex pipeline policy (CRITICAL)
+
+- Production `--soloSpatialFlexIntegrated yes` runs use the Flex
+  producer/consumer system. Leave `--flexPipeline` at `auto`, or explicitly use
+  the documented fused reader/router topology.
+- `--flexPipeline no` is retained only as a diagnostic compatibility mode. An
+  agent must not add it to a production recipe, benchmark, provenance command,
+  or relaunch unless the user explicitly authorizes disabling the pipeline for
+  that exact run.
+- The earlier native-spatial guard that required `--flexPipeline no` was a
+  debugging restriction, not a user-requested scientific or production policy.
+  Do not restore that guard.
+- Pipeline cache-hit consumers and alignment-miss workers must both feed the
+  same integrated raw-R1 spatial accumulator. A change is incomplete unless a
+  FASTQ pipeline run is checked against the diagnostic compatibility path for
+  count/MEX parity.
+
 ### Flex Hash-Cache Assay Context
 
 - Routine scRNA-seq Flex recipes should explicitly generate/use H0+H1
