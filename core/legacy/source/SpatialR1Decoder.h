@@ -22,6 +22,7 @@ struct Result {
     bool decoderAssigned = false;
     bool barcodeHadN = false;
     bool barcodeDpChecked = false;
+    bool barcodeNHashChecked = false;
     bool barcodeHadUnsupportedBase = false;
     std::uint8_t barcodeNCount = 0;
     std::uint8_t bc1Edit = 0;
@@ -45,9 +46,8 @@ struct Config {
     std::uint32_t gridColumns = 3350;
     int fullStartMin = 8;
     int fullStartMax = 12;
-    // Production preserves recoverable spatial barcodes containing N by
-    // evaluating them against the oligo targets. Disable only to quantify the
-    // speed and molecule yield of rejecting those reads immediately.
+    // The compatibility path target-scans oligos for barcode windows with N.
+    // False uses the N-aware hash candidate path instead.
     bool nonAcgtDpFallback = true;
 };
 

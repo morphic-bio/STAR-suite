@@ -1826,8 +1826,8 @@ soloSpatialBc2Oligos        -
 
 soloSpatialBarcodeNdpFallback yes
     string:                 yes|no; production default yes target-scans spatial barcode windows containing N
-                            no is a diagnostic benchmark mode that rejects those reads before the expensive DP target scan
-                            and quantifies the resulting read/molecule loss in the integrated run summary
+                            no uses the N-aware hash candidate path and disables the full oligo-axis DP target scan
+                            Both paths report separate recovered/ambiguous/unassigned accounting in the run summary.
 
 soloSpatialAssignmentProducts hard
     string:                 comma-separated integrated products: strict,soft_expected,hard,gated_hard or all
