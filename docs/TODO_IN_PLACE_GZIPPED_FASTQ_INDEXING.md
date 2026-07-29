@@ -1,4 +1,4 @@
-# TODO: In-place sharding of gzipped FASTQ files for increased performance
+# TODO: In-place indexing of gzipped FASTQ files for increased performance
 
 Status: deferred until after the preprint benchmarks. The preprint production
 path remains the current direct FASTQ input. Do not substitute a new input
@@ -6,7 +6,7 @@ implementation in a benchmark unless the operator explicitly requests it.
 
 ## Headline and contribution
 
-The headlining method is in-place sharding of gzipped FASTQ files for increased
+The headlining method is in-place indexing of gzipped FASTQ files for increased
 performance.
 
 An ordinary unindexed `fastq.gz` is a serial input bottleneck for otherwise
@@ -14,11 +14,11 @@ parallel bioinformatics programs.
 
 The goal is to expose one existing FASTQ as multiple independent, exact
 FASTQ-record producers during its first use, without requiring a preparatory
-indexing, conversion, or recompression pass. Paired inputs must be synchronized
-by record identity, not by assuming that equal compressed offsets represent
-equal record positions.
+external index, conversion, or recompression pass. Paired inputs must be
+synchronized by record identity, not by assuming that equal compressed offsets
+represent equal record positions.
 
-This FASTQ sharding method is the contribution. It must be usable by arbitrary
+This FASTQ indexing method is the contribution. It must be usable by arbitrary
 callers and must not depend on STAR, Flex, spatial assays, or CBQ. Optional
 outputs such as CBQ are downstream conveniences, not part of the novelty
 claim.
@@ -32,7 +32,7 @@ Relevant existing machinery includes:
 - existing callback-based FASTQ readers provide practical adapter surfaces for
   other bioinformatics programs.
 
-## General sharding-library direction
+## General indexed-shard library direction
 
 Do not make this optimization specific to Flex or to STAR alignment. Build a
 FASTQ-aware input library beneath those consumers. Its primary contract is a
@@ -76,7 +76,7 @@ The ordered pipe can accelerate decompression, but necessarily serializes
 record delivery again. The multi-stream and callable forms preserve the full
 parallel parsing and delivery benefit.
 
-## Index-free paired-anchor discovery
+## In-place paired-anchor indexing
 
 For ordinary paired `fastq.gz`, choose approximate fractional compressed
 offsets independently in R1 and R2; equal compressed offsets are not expected
@@ -109,9 +109,10 @@ This design builds on, and must cite rather than claim, generic speculative
 gzip recovery in `pugz` and `rapidgzip`. The closest semantic comparison is
 `mim`, which creates a small FASTQ-aware auxiliary index and supports
 paired-file synchronization. The proposed distinction to evaluate is
-index-free, on-demand paired synchronization that directly supplies independent
-record producers to an application. Do not make a novelty claim until a
-complete literature audit is recorded.
+on-demand semantic indexing inside existing ordinary gzip FASTQ files, with
+paired synchronization and direct independent record producers for an
+application. No prebuilt or separately materialized index is required. Do not
+make a novelty claim until a complete literature audit is recorded.
 
 Primary comparison starting points:
 
@@ -141,7 +142,7 @@ interval without an intermediate FASTQ materialization.
 The library should allow optional sinks to observe the same decoded records.
 CBQ is a convenient existing durable sink: it avoids inventing another format
 and lets later runs bypass gzip recovery and FASTQ parsing. It is an afterthought
-to the sharding method and must not be required or presented as its purpose.
+to the indexing method and must not be required or presented as its purpose.
 
 If requested, encode independent CBQ blocks asynchronously while the application
 processes the first pass. Completed blocks may be produced out of order, but
@@ -159,9 +160,9 @@ writer architecture rather than invent another durable format.
 
 ## Work order
 
-1. Prototype the generalized shard planner/reader on plain paired FASTQ, then
-   on ordinary gzip through the `rapidgzip` C++ library. Keep it independent
-   of STAR mapping and CBQ encoding.
+1. Prototype the generalized in-place index and shard reader on plain paired
+   FASTQ, then on ordinary gzip through the `rapidgzip` C++ library. Keep it
+   independent of STAR mapping and CBQ encoding.
 2. Expose independent record handles, an ordered compatibility stream, a
    multi-stream process surface, a C++ API, and a small C ABI. Validate adapter
    use with at least one consumer outside STAR Suite.
@@ -201,7 +202,7 @@ writer architecture rather than invent another durable format.
   corruption, dropped mates, duplicate identifiers, and reordering fail
   closed.
 - Plain FASTQ, ordinary gzip at several compressor/level combinations, BGZF,
-  indexed and index-free rapidgzip paths, and single-/paired-end inputs are
+  pre-indexed and on-demand rapidgzip paths, and single-/paired-end inputs are
   covered. Benchmark against `zcat`, `pigz`, rapidgzip alone, `pugz`, and
   `mim` where licensing and supported inputs permit.
 - The same library demonstrates correct integration with multiple independent
@@ -224,10 +225,10 @@ evaluate it as a separate bioinformatics software/application paper. STAR
 Suite should be one demanding real-world consumer, not a required host. Report
 anchor-discovery overhead, false-anchor rejection, shard-count scaling,
 first-pass time, CPU, memory, I/O, and failure behavior. Frame the contribution
-around FASTQ-aware, index-free paired synchronization and independent producer
+around FASTQ-aware in-place paired indexing and independent producer
 streams/handles—not around speculative DEFLATE recovery itself. The title and
-abstract should lead with in-place sharding of gzipped FASTQ files for increased
-performance. "In-place" distinguishes the method from approaches
+abstract should lead with in-place indexing of gzipped FASTQ files for
+increased performance. "In-place" distinguishes the method from approaches
 that first create new files or convert the input into a serial stream. Present
 optional CBQ output only as a convenient demonstration that the one unavoidable
 gzip pass can also leave an existing durable indexed representation.
