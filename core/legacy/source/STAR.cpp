@@ -755,8 +755,6 @@ int main(int argInN, char *argIn[])
                 P.soloSpatialSpillHighWaterCandidates;
             spatialConfig.requirePairedCompletion = spatialFlex;
             spatialConfig.flexFeatureMode = spatialFlex;
-            spatialConfig.barcodeNdpFallback =
-                P.soloSpatialBarcodeNdpFallbackEnabled;
             std::string spatialError;
             spatialGexPipeline = spatial_gex::Pipeline::create(spatialConfig, spatialError);
             if (!spatialGexPipeline) {

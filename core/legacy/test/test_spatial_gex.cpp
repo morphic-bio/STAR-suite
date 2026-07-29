@@ -2,7 +2,6 @@
 #include "SpatialR1Decoder.h"
 
 #include <cassert>
-#include <cmath>
 #include <cstdio>
 #include <cstdint>
 #include <cstdlib>
@@ -40,27 +39,6 @@ spatial_r1_decoder::Result decode(
     return result;
 }
 
-void assertDecodeEquivalent(
-    const spatial_r1_decoder::Result &targetScan,
-    const spatial_r1_decoder::Result &hash)
-{
-    assert(targetScan.rawUmi == hash.rawUmi);
-    assert(targetScan.rawUmiValid == hash.rawUmiValid);
-    assert(targetScan.decoderAssigned == hash.decoderAssigned);
-    assert(targetScan.barcodeHadN == hash.barcodeHadN);
-    assert(targetScan.barcodeNCount == hash.barcodeNCount);
-    assert(targetScan.bc1Edit == hash.bc1Edit);
-    assert(targetScan.bc2Edit == hash.bc2Edit);
-    assert(targetScan.candidates.size() == hash.candidates.size());
-    for (std::size_t i = 0; i < targetScan.candidates.size(); ++i) {
-        assert(targetScan.candidates[i].coordinateIndex ==
-               hash.candidates[i].coordinateIndex);
-        assert(targetScan.candidates[i].auditBits == hash.candidates[i].auditBits);
-        assert(std::fabs(targetScan.candidates[i].logSequenceLikelihood -
-                         hash.candidates[i].logSequenceLikelihood) < 1e-12);
-    }
-}
-
 void testDecoderAmbiguousBases()
 {
     char directoryTemplate[] = "/tmp/star_spatial_gex_decoder_XXXXXX";
@@ -84,7 +62,6 @@ void testDecoderAmbiguousBases()
     config.gridColumns = 1;
     config.fullStartMin = 9;
     config.fullStartMax = 9;
-    config.nonAcgtDpFallback = true;
     spatial_r1_decoder::Decoder decoder(config);
 
     const std::string umi = "ACGTACGTA";
@@ -93,7 +70,7 @@ void testDecoderAmbiguousBases()
     assert(exact.rawUmiValid);
     assert(!exact.rawUmiHadN);
     assert(!exact.barcodeHadN);
-    assert(!exact.barcodeDpChecked);
+    assert(!exact.barcodeNHashChecked);
     assert(exact.decoderAssigned);
     assert(exact.candidates.size() == 1);
 
@@ -102,7 +79,7 @@ void testDecoderAmbiguousBases()
     const spatial_r1_decoder::Result oneN = decode(decoder, bc1N);
     assert(oneN.rawUmiValid);
     assert(oneN.barcodeHadN && oneN.barcodeNCount == 1);
-    assert(oneN.barcodeDpChecked);
+    assert(oneN.barcodeNHashChecked);
     assert(oneN.decoderAssigned);
     assert(oneN.candidates.size() == 1);
     assert(oneN.bc1Edit == 1 && oneN.bc2Edit == 0);
@@ -113,7 +90,7 @@ void testDecoderAmbiguousBases()
     const spatial_r1_decoder::Result twoN = decode(decoder, bothN);
     assert(twoN.rawUmiValid);
     assert(twoN.barcodeHadN && twoN.barcodeNCount == 2);
-    assert(twoN.barcodeDpChecked);
+    assert(twoN.barcodeNHashChecked);
     assert(twoN.decoderAssigned);
     assert(twoN.candidates.size() == 1);
     assert(twoN.bc1Edit == 1 && twoN.bc2Edit == 1);
@@ -121,7 +98,7 @@ void testDecoderAmbiguousBases()
     std::string noMatch = exactSequence;
     noMatch.replace(9, bc1.size() + bc2.size(), bc1.size() + bc2.size(), 'N');
     const spatial_r1_decoder::Result unmatched = decode(decoder, noMatch);
-    assert(unmatched.barcodeHadN && unmatched.barcodeDpChecked);
+    assert(unmatched.barcodeHadN && unmatched.barcodeNHashChecked);
     assert(!unmatched.decoderAssigned);
     assert(unmatched.candidates.empty());
 
@@ -137,7 +114,7 @@ void testDecoderAmbiguousBases()
     unsupported[12] = 'X';
     const spatial_r1_decoder::Result invalidBarcode = decode(decoder, unsupported);
     assert(invalidBarcode.barcodeHadUnsupportedBase);
-    assert(!invalidBarcode.barcodeDpChecked);
+    assert(!invalidBarcode.barcodeNHashChecked);
     assert(!invalidBarcode.decoderAssigned);
     assert(invalidBarcode.candidates.empty());
 
@@ -148,69 +125,39 @@ void testDecoderAmbiguousBases()
     ambiguousConfig.gridColumns = 2;
     ambiguousConfig.fullStartMin = 9;
     ambiguousConfig.fullStartMax = 9;
-    ambiguousConfig.nonAcgtDpFallback = true;
     spatial_r1_decoder::Decoder ambiguousDecoder(ambiguousConfig);
     const spatial_r1_decoder::Result ambiguous = decode(ambiguousDecoder, bc1N);
-    assert(ambiguous.barcodeHadN && ambiguous.barcodeDpChecked);
+    assert(ambiguous.barcodeHadN && ambiguous.barcodeNHashChecked);
     assert(!ambiguous.decoderAssigned);
     assert(ambiguous.candidates.size() == 2);
     assert(ambiguous.candidates[0].coordinateIndex == 0);
     assert(ambiguous.candidates[1].coordinateIndex == 1);
 
-    spatial_r1_decoder::Config noFallbackConfig = config;
-    noFallbackConfig.nonAcgtDpFallback = false;
-    spatial_r1_decoder::Decoder noFallbackDecoder(noFallbackConfig);
-    const spatial_r1_decoder::Result hashOneN = decode(noFallbackDecoder, bc1N);
-    assert(hashOneN.barcodeHadN && hashOneN.barcodeNCount == 1);
-    assert(!hashOneN.barcodeDpChecked);
-    assert(hashOneN.barcodeNHashChecked);
-    assert(hashOneN.decoderAssigned);
-    assert(hashOneN.candidates.size() == 1);
-    assert(hashOneN.bc1Edit == 1 && hashOneN.bc2Edit == 0);
-    const spatial_r1_decoder::Result hashTwoN = decode(noFallbackDecoder, bothN);
-    assert(hashTwoN.barcodeNHashChecked);
-    assert(hashTwoN.decoderAssigned);
-    assert(hashTwoN.candidates.size() == 1);
-    assert(hashTwoN.bc1Edit == 1 && hashTwoN.bc2Edit == 1);
-    const spatial_r1_decoder::Result hashUnmatched =
-        decode(noFallbackDecoder, noMatch);
-    assert(hashUnmatched.barcodeNHashChecked);
-    assert(!hashUnmatched.decoderAssigned);
-    assert(hashUnmatched.candidates.empty());
-    const spatial_r1_decoder::Result retainedExact =
-        decode(noFallbackDecoder, exactSequence);
+    const spatial_r1_decoder::Result retainedExact = decode(decoder, exactSequence);
     assert(retainedExact.decoderAssigned);
     assert(retainedExact.candidates.size() == 1);
 
-    ambiguousConfig.nonAcgtDpFallback = false;
-    spatial_r1_decoder::Decoder ambiguousHashDecoder(ambiguousConfig);
-    const spatial_r1_decoder::Result hashAmbiguous =
-        decode(ambiguousHashDecoder, bc1N);
-    assert(hashAmbiguous.barcodeNHashChecked);
-    assert(!hashAmbiguous.decoderAssigned);
-    assert(hashAmbiguous.candidates.size() == 2);
-    assert(hashAmbiguous.candidates[0].coordinateIndex == 0);
-    assert(hashAmbiguous.candidates[1].coordinateIndex == 1);
-
-    std::vector<std::string> paritySequences;
+    std::vector<std::string> nHashSequences;
     for (std::size_t position = 9; position < 9 + bc1.size() + bc2.size(); ++position) {
         std::string value = exactSequence;
         value[position] = 'N';
-        paritySequences.push_back(value);
+        nHashSequences.push_back(value);
     }
     for (std::size_t position = 10; position < 9 + bc1.size() + bc2.size(); position += 5) {
         std::string value = exactSequence;
         value[position] = 'N';
         value.erase(position + 2, 1);
-        paritySequences.push_back(value);
+        nHashSequences.push_back(value);
         value = exactSequence;
         value[position] = 'N';
         value.insert(position + 2, 1, 'A');
-        paritySequences.push_back(value);
+        nHashSequences.push_back(value);
     }
-    for (const std::string &value : paritySequences) {
-        assertDecodeEquivalent(decode(decoder, value),
-                               decode(noFallbackDecoder, value));
+    for (const std::string &value : nHashSequences) {
+        const spatial_r1_decoder::Result result = decode(decoder, value);
+        assert(result.barcodeNHashChecked);
+        assert(result.decoderAssigned);
+        assert(result.candidates.size() == 1);
     }
 
     assert(std::remove(bc1Path.c_str()) == 0);
@@ -244,7 +191,6 @@ int main()
 
     const spatial_gex::PipelineConfig defaultPipelineConfig;
     assert(defaultPipelineConfig.products == spatial_gex::ProductHard);
-    assert(!defaultPipelineConfig.barcodeNdpFallback);
 
     std::uint8_t scales = 0;
     assert(spatial_gex::parseScales("2,8,16", scales, error));

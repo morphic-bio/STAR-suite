@@ -168,9 +168,6 @@ struct PipelineConfig {
     // decoded R1. This catches early returns and thread-local state drift.
     bool requirePairedCompletion = false;
     bool flexFeatureMode = false;
-    // Production uses the N-aware hash candidate path. True explicitly enables
-    // the retained exhaustive target-scan oracle for diagnostics.
-    bool barcodeNdpFallback = false;
 };
 
 struct PipelineSummary {
@@ -182,9 +179,6 @@ struct PipelineSummary {
     std::uint64_t exactH0Reads = 0;
     std::uint64_t barcodeReadsWithN = 0;
     std::uint64_t barcodeNBases = 0;
-    std::uint64_t barcodeDpRecoveredReads = 0;
-    std::uint64_t barcodeDpAmbiguousReads = 0;
-    std::uint64_t barcodeDpUnassignedReads = 0;
     std::uint64_t barcodeNHashRecoveredReads = 0;
     std::uint64_t barcodeNHashAmbiguousReads = 0;
     std::uint64_t barcodeNHashUnassignedReads = 0;
