@@ -31,6 +31,12 @@ denies decode and complete raw R1 in the spatial accumulator on cache-consumer
 threads; true cache misses decode raw R1 on the alignment worker and complete
 it with the existing Flex alignment resolver.
 
+For multi-lane FASTQ, the ordinal is packed as lane-major `(lane, local read)`
+rather than allocated by a cross-lane race. Numeric sorting therefore matches
+STAR's original lane-concatenated input order without a preliminary full FASTQ
+scan. This is required because spatial clique partitioning intentionally uses
+the original input order as its final deterministic tie break.
+
 `--flexPipeline no` is retained only to diagnose compatibility with historical
 artifacts. It must not be added to a production recipe, benchmark, or relaunch
 without explicit user authorization for that exact run.

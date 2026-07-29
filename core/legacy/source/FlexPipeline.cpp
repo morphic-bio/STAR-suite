@@ -59,6 +59,49 @@ bool failSpatialFlexPipeline(Parameters &P, const std::string &detail) {
     return false;
 }
 
+bool spatialLaneMajorOrdinal(Parameters &P,
+                             int laneId,
+                             uint64_t laneLocalOrdinal,
+                             int laneCount,
+                             uint64_t &sourceOrdinal) {
+    if (laneId < 0 || laneCount <= 0 || laneId >= laneCount) {
+        return failSpatialFlexPipeline(P, "invalid lane-major source-ordinal inputs");
+    }
+    uint32_t laneBits = 0;
+    while ((uint64_t(1) << laneBits) < static_cast<uint64_t>(laneCount)) {
+        ++laneBits;
+    }
+    if (laneBits >= 32) {
+        return failSpatialFlexPipeline(P, "too many lanes for compact source ordinals");
+    }
+    const uint32_t localBits = 32 - laneBits;
+    const uint64_t localLimit = uint64_t(1) << localBits;
+    if (laneLocalOrdinal >= localLimit) {
+        std::ostringstream detail;
+        detail << "lane " << laneId << " exceeds the " << localLimit
+               << "-read compact lane-major ordinal capacity";
+        return failSpatialFlexPipeline(P, detail.str());
+    }
+    sourceOrdinal = (static_cast<uint64_t>(laneId) << localBits)
+        | laneLocalOrdinal;
+    return true;
+}
+
+uint64_t nextPipelineSourceOrdinal(Parameters &P,
+                                   FlexPipelineState *state,
+                                   int laneId,
+                                   uint64_t laneLocalOrdinal) {
+    if (!P.soloSpatialFlexIntegratedEnabled) {
+        return state->iReadAllGlobal.fetch_add(1);
+    }
+    uint64_t sourceOrdinal = 0;
+    if (!spatialLaneMajorOrdinal(
+            P, laneId, laneLocalOrdinal, state->nLanes, sourceOrdinal)) {
+        return 0;
+    }
+    return sourceOrdinal;
+}
+
 bool completeSpatialFlexCachedRead(Parameters &P,
                                    const char *barcodeSequence,
                                    uint32_t barcodeLength,
@@ -112,6 +155,7 @@ void *flexLaneReaderThread(void *arg) {
     gzFile gzR1 = ctx->gzR1;
 
     char lineBuf[kFlexPipeSeqMax + 256];
+    uint64_t laneLocalOrdinal = 0;
 
     while (true) {
         ReadPacket pkt;
@@ -154,7 +198,8 @@ void *flexLaneReaderThread(void *arg) {
         if (!gzReadLine(gzR1, lineBuf, sizeof(lineBuf))) break;
         if (!gzReadLine(gzR1, pkt.qual[1], kFlexPipeSeqMax)) break;
 
-        pkt.iReadAll = st->iReadAllGlobal.fetch_add(1);
+        pkt.iReadAll = nextPipelineSourceOrdinal(
+            *ctx->P, st, laneId, laneLocalOrdinal++);
 
         st->counters.perLaneReads[laneId]++;
         st->readerQ.push(std::move(pkt));
@@ -186,6 +231,7 @@ void *flexLaneReaderRouterThread(void *arg) {
     char seq0[kFlexPipeSeqMax], seq1[kFlexPipeSeqMax];
     char qual0[kFlexPipeSeqMax], qual1[kFlexPipeSeqMax];
     char name[kFlexPipeNameMax];
+    uint64_t laneLocalOrdinal = 0;
 
     while (true) {
         // R2: @name, seq, +, qual
@@ -212,7 +258,8 @@ void *flexLaneReaderRouterThread(void *arg) {
         if (!gzReadLine(gzR1, lineBuf, sizeof(lineBuf))) break;
         if (!gzReadLine(gzR1, qual1, kFlexPipeSeqMax)) break;
 
-        uint64_t iReadAll = st->iReadAllGlobal.fetch_add(1);
+        uint64_t iReadAll = nextPipelineSourceOrdinal(
+            P, st, laneId, laneLocalOrdinal++);
         st->counters.perLaneReads[laneId]++;
 
         FlexHashScreenDecision decision = P.soloSpatialFlexIntegratedEnabled
@@ -415,7 +462,8 @@ static uint64_t processOneLane(
         if (!gzReadLine(gzR1, lineBuf, sizeof(lineBuf))) break;
         if (!gzReadLine(gzR1, qual1, kFlexPipeSeqMax)) break;
 
-        uint64_t iReadAll = st->iReadAllGlobal.fetch_add(1);
+        uint64_t iReadAll = nextPipelineSourceOrdinal(
+            P, st, laneId, nReads);
         st->counters.perLaneReads[laneId]++;
         nReads++;
 
@@ -596,7 +644,7 @@ static uint64_t processCbqModuleRecords(
             const uint64_t localOrdinal = nReads;
             uint64_t iReadAll = deterministicReadIds
                 ? globalFirst + localOrdinal
-                : st->iReadAllGlobal.fetch_add(1);
+                : nextPipelineSourceOrdinal(P, st, laneId, localOrdinal);
             st->counters.perLaneReads[laneId]++;
             nReads++;
 

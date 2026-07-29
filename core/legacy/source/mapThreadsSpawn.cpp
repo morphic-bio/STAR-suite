@@ -261,6 +261,17 @@ static void mapThreadsSpawnFlexPipeline(Parameters &P, ReadAlignChunk** RAchunk)
                      << ", dedicatedWorkers=" << nWorkers
                      << (noAlign ? ", noAlign=ON (alignment skipped)" : "")
                      << "\n" << std::flush;
+    if (P.soloSpatialFlexIntegratedEnabled && P.readFilesTypeN == 1) {
+        std::uint32_t laneBits = 0;
+        while ((std::uint64_t(1) << laneBits)
+               < static_cast<std::uint64_t>(nLanes)) {
+            ++laneBits;
+        }
+        P.inOut->logMain
+            << "Spatial Flex FASTQ source ordinals: deterministic lane-major "
+            << "packing with laneBits=" << laneBits
+            << " localBits=" << (32 - laneBits) << "\n" << std::flush;
+    }
 
     FlexPipelineState state;
     state.init(nLanes, actualNSolo, actualNTriage);
