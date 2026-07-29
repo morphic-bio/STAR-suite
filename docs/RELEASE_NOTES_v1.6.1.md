@@ -82,6 +82,11 @@ The upstream STAR base remains `2.7.11b`; genome-index compatibility remains
 - Use `--flexPipeline auto` in production. FASTQ inputs select fused per-lane
   reader/routers with separate spatial cache-hit consumers and alignment-miss
   workers; indexed CBQ inputs select fully fused range readers.
+- In fully fused indexed-CBQ mode, reserve half of the requested threads for
+  immediate alignment-queue draining and cap work-stealing input tasks at
+  8,192 records. This prevents both an all-producer queue deadlock and
+  serialization behind fallback-heavy spatial-barcode imaging tiles while
+  retaining deterministic global read ordinals.
 - Retain `--flexPipeline no` only as an explicitly authorized diagnostic
   compatibility mode. The earlier native-spatial requirement for this setting
   was a temporary debugging restriction and was not a production policy.
