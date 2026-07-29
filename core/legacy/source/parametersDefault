@@ -1824,11 +1824,6 @@ soloSpatialBc1Oligos        -
 soloSpatialBc2Oligos        -
     string:                 BC2 full-oligo list for integrated Visium HD R1 decoding
 
-soloSpatialBarcodeNdpFallback no
-    string:                 no uses the production N-aware hash candidate path for spatial barcode windows containing N
-                            yes explicitly enables the legacy full oligo-axis DP target scan as a diagnostic oracle
-                            Both paths report separate recovered/ambiguous/unassigned accounting in the run summary.
-
 soloSpatialAssignmentProducts hard
     string:                 comma-separated integrated products: strict,soft_expected,hard,gated_hard or all
                             hard is the production default; all explicitly enables the diagnostic four-policy surface

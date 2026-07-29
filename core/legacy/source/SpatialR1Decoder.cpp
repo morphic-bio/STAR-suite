@@ -2532,7 +2532,6 @@ struct Config {
     std::vector<uint64_t> bc1_frozen_exposure;
     std::vector<uint64_t> bc2_frozen_exposure;
     bool direct_best_non_acgt_dp_fallback = false;
-    bool integrated_non_acgt_dp_fallback = true;
     DirectBestResolutionMode direct_best_resolution = DirectBestResolutionMode::StrictBoundary;
     bool overlap_dp_length_guard = true;
     int overlap_dp_bc1_min_obs_len = 13;
@@ -4999,38 +4998,6 @@ Decoded decode_record_direct_tiered_fixed(const std::string& seq, Config& cfg,
     return out;
 }
 
-HitSpan tiered_target_scan_span(
-    const std::string& seq, int start, int observed_len,
-    const std::vector<std::string>& targets, int max_distance,
-    std::map<std::pair<int, int>, std::vector<PackedHit> >& cache) {
-    const std::pair<int, int> key(start, observed_len);
-    std::map<std::pair<int, int>, std::vector<PackedHit> >::iterator found =
-        cache.find(key);
-    if (found == cache.end()) {
-        std::vector<PackedHit> hits;
-        if (start >= 0 && observed_len > 0
-            && start + observed_len <= static_cast<int>(seq.size())) {
-            for (size_t index = 0; index < targets.size(); ++index) {
-                const std::string& target = targets[index];
-                if (std::abs(observed_len - static_cast<int>(target.size()))
-                    > max_distance) {
-                    continue;
-                }
-                const int distance = edit_distance_bounded(
-                    seq.data() + start, observed_len, target.data(),
-                    static_cast<int>(target.size()), max_distance);
-                if (distance <= max_distance) {
-                    hits.push_back(PackedHit(static_cast<uint16_t>(index),
-                                             static_cast<uint8_t>(distance), 0));
-                }
-            }
-        }
-        found = cache.insert(std::make_pair(key, hits)).first;
-    }
-    return HitSpan(found->second.empty() ? nullptr : found->second.data(),
-                   static_cast<uint16_t>(found->second.size()), true);
-}
-
 void expand_n_query_variants(
     std::string& query,
     std::size_t position,
@@ -5114,12 +5081,9 @@ Decoded decode_record_direct_tiered_h2(const std::string& seq, Config& cfg,
         ? (window_classification->n_count != 0 ||
            window_classification->unsupported)
         : direct_best_decode_window_has_non_acgt(seq, cfg);
-    const bool target_scan = non_acgt_window &&
-        cfg.integrated_non_acgt_dp_fallback;
-    const bool n_hash = non_acgt_window && !target_scan;
+    const bool n_hash = non_acgt_window;
     std::map<std::pair<int, int>, std::vector<PackedHit> > bc1_target_cache;
     std::map<std::pair<int, int>, std::vector<PackedHit> > bc2_target_cache;
-    if (target_scan) out.non_acgt_dp_checked = true;
     if (n_hash) out.non_acgt_hash_checked = true;
 
     auto note_oracle_candidate = [&](int tier, int row2, int col2, int full_start,
@@ -5174,16 +5138,12 @@ Decoded decode_record_direct_tiered_h2(const std::string& seq, Config& cfg,
             if (full_start < 0 || full_start >= slen) continue;
             for (int bc1_obs_len : bc1_query_lengths) {
                 if (full_start + bc1_obs_len > slen) continue;
-                HitSpan bc1_hits = target_scan
-                    ? tiered_target_scan_span(
+                HitSpan bc1_hits = n_hash
+                    ? tiered_n_hash_span(
                           seq, full_start, bc1_obs_len, cfg.bc1_oligos, 2,
-                          bc1_target_cache)
-                    : (n_hash
-                        ? tiered_n_hash_span(
-                              seq, full_start, bc1_obs_len, cfg.bc1_oligos, 2,
-                              cfg.bc1_tiered_h2_lookup, bc1_target_cache)
-                        : cfg.bc1_tiered_h2_lookup.lookup_span(
-                              seq.data() + full_start, bc1_obs_len));
+                          cfg.bc1_tiered_h2_lookup, bc1_target_cache)
+                    : cfg.bc1_tiered_h2_lookup.lookup_span(
+                          seq.data() + full_start, bc1_obs_len);
                 if (!bc1_hits.found || bc1_hits.count == 0) continue;
                 const int bc2_start = full_start + bc1_obs_len;
                 if (bc2_start < 0 || bc2_start >= slen) continue;
@@ -5195,16 +5155,12 @@ Decoded decode_record_direct_tiered_h2(const std::string& seq, Config& cfg,
                     if (needed_bc2_edit < 0 || needed_bc2_edit > 2) continue;
                     for (int bc2_obs_len : bc2_query_lengths) {
                         if (bc2_start + bc2_obs_len > slen) continue;
-                        HitSpan bc2_hits = target_scan
-                            ? tiered_target_scan_span(
+                        HitSpan bc2_hits = n_hash
+                            ? tiered_n_hash_span(
                                   seq, bc2_start, bc2_obs_len, cfg.bc2_oligos, 2,
-                                  bc2_target_cache)
-                            : (n_hash
-                                ? tiered_n_hash_span(
-                                      seq, bc2_start, bc2_obs_len, cfg.bc2_oligos, 2,
-                                      cfg.bc2_tiered_h2_lookup, bc2_target_cache)
-                                : cfg.bc2_tiered_h2_lookup.lookup_span(
-                                      seq.data() + bc2_start, bc2_obs_len));
+                                  cfg.bc2_tiered_h2_lookup, bc2_target_cache)
+                            : cfg.bc2_tiered_h2_lookup.lookup_span(
+                                  seq.data() + bc2_start, bc2_obs_len);
                         if (!bc2_hits.found || bc2_hits.count == 0) continue;
                         for (uint16_t j = 0; j < bc2_hits.count; ++j) {
                             const PackedHit& c2 = bc2_hits.data[j];
@@ -7324,7 +7280,6 @@ struct Decoder::Impl {
         config.grid_cols = static_cast<int>(input.gridColumns);
         config.full_start_min = input.fullStartMin;
         config.full_start_max = input.fullStartMax;
-        config.integrated_non_acgt_dp_fallback = input.nonAcgtDpFallback;
         config.direct_tiered_h2_decode = true;
 
         config.bc1_len.resize(config.bc1_oligos.size());
@@ -7455,7 +7410,6 @@ bool Decoder::decode(const char *sequence, std::size_t sequenceLength,
     InternalDecoded decoded = decode_record_direct_tiered_h2(
         sequenceString, impl_->config, impl_->bc1QueryLengths,
         impl_->bc2QueryLengths, nullptr, &barcodeClassification);
-    result.barcodeDpChecked = decoded.non_acgt_dp_checked;
     result.barcodeNHashChecked = decoded.non_acgt_hash_checked;
     result.decoderAssigned = decoded.assigned;
     if (decoded.bc1_edit >= 0) result.bc1Edit = static_cast<std::uint8_t>(decoded.bc1_edit);

@@ -540,9 +540,6 @@ struct Pipeline::Impl {
         std::uint64_t uniqueGeneReads = 0;
         std::uint64_t barcodeReadsWithN = 0;
         std::uint64_t barcodeNBases = 0;
-        std::uint64_t barcodeDpRecoveredReads = 0;
-        std::uint64_t barcodeDpAmbiguousReads = 0;
-        std::uint64_t barcodeDpUnassignedReads = 0;
         std::uint64_t barcodeNHashRecoveredReads = 0;
         std::uint64_t barcodeNHashAmbiguousReads = 0;
         std::uint64_t barcodeNHashUnassignedReads = 0;
@@ -2382,7 +2379,6 @@ std::unique_ptr<Pipeline> Pipeline::create(const PipelineConfig &config,
         decoderConfig.gridColumns = kGridColumns;
         decoderConfig.fullStartMin = 8;
         decoderConfig.fullStartMax = 12;
-        decoderConfig.nonAcgtDpFallback = config.barcodeNdpFallback;
         impl->decoder.reset(new spatial_r1_decoder::Decoder(decoderConfig));
         if (impl->decoder->bc1Count() != kGridColumns
             || impl->decoder->bc2Count() != kGridRows) {
@@ -2583,15 +2579,6 @@ bool Pipeline::decode(std::uint32_t threadIndex, const char *sequence,
             ++thread.barcodeReadsWithN;
             thread.barcodeNBases += result.barcodeNCount;
         }
-        if (result.barcodeDpChecked) {
-            if (result.decoderAssigned) {
-                ++thread.barcodeDpRecoveredReads;
-            } else if (!result.candidates.empty()) {
-                ++thread.barcodeDpAmbiguousReads;
-            } else {
-                ++thread.barcodeDpUnassignedReads;
-            }
-        }
         if (result.barcodeNHashChecked) {
             if (result.decoderAssigned) {
                 ++thread.barcodeNHashRecoveredReads;
@@ -2708,9 +2695,6 @@ bool Pipeline::finalize(const std::vector<std::string> &geneIds,
             impl_->summary.uniqueGeneReads += thread.uniqueGeneReads;
             impl_->summary.barcodeReadsWithN += thread.barcodeReadsWithN;
             impl_->summary.barcodeNBases += thread.barcodeNBases;
-            impl_->summary.barcodeDpRecoveredReads += thread.barcodeDpRecoveredReads;
-            impl_->summary.barcodeDpAmbiguousReads += thread.barcodeDpAmbiguousReads;
-            impl_->summary.barcodeDpUnassignedReads += thread.barcodeDpUnassignedReads;
             impl_->summary.barcodeNHashRecoveredReads +=
                 thread.barcodeNHashRecoveredReads;
             impl_->summary.barcodeNHashAmbiguousReads +=
@@ -2998,8 +2982,7 @@ bool Pipeline::finalize(const std::vector<std::string> &geneIds,
         std::ostringstream runSummary;
         runSummary << "schema\t" << schema << '\n'
                    << "source_revision\t" << impl_->config.sourceRevision << '\n'
-                   << "barcode_n_dp_fallback_enabled\t"
-                   << (impl_->config.barcodeNdpFallback ? "yes" : "no") << '\n'
+                   << "barcode_n_resolution\tn_aware_hash\n"
                    << "reads_decoded\t" << impl_->summary.readsDecoded << '\n'
                    << "reads_with_candidates\t" << impl_->summary.readsWithCandidates << '\n'
                    << "unique_gene_reads\t" << impl_->summary.uniqueGeneReads << '\n'
@@ -3008,12 +2991,6 @@ bool Pipeline::finalize(const std::vector<std::string> &geneIds,
                    << "exact_h0_reads\t" << impl_->summary.exactH0Reads << '\n'
                    << "barcode_reads_with_n\t" << impl_->summary.barcodeReadsWithN << '\n'
                    << "barcode_n_bases\t" << impl_->summary.barcodeNBases << '\n'
-                   << "barcode_dp_recovered_reads\t"
-                   << impl_->summary.barcodeDpRecoveredReads << '\n'
-                   << "barcode_dp_ambiguous_reads\t"
-                   << impl_->summary.barcodeDpAmbiguousReads << '\n'
-                   << "barcode_dp_unassigned_reads\t"
-                   << impl_->summary.barcodeDpUnassignedReads << '\n'
                    << "barcode_n_hash_recovered_reads\t"
                    << impl_->summary.barcodeNHashRecoveredReads << '\n'
                    << "barcode_n_hash_ambiguous_reads\t"
