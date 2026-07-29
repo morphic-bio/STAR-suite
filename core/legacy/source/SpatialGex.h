@@ -199,6 +199,9 @@ struct PipelineSummary {
     std::uint64_t downstreamContributionRecords = 0;
     std::uint64_t downstreamContributionRuns = 0;
     std::uint64_t downstreamContributionBytes = 0;
+    std::uint64_t hardAssignmentChunks = 0;
+    std::uint64_t hardAssignmentOverflowCliques = 0;
+    std::uint64_t hardAssignmentMaxMemberCount = 0;
     std::uint64_t downstreamLargestShardRecords = 0;
     std::uint64_t downstreamMatrixRuns = 0;
     std::uint64_t downstreamMatrixBytes = 0;

@@ -31,6 +31,21 @@ struct Contribution {
     std::uint8_t reserved;
 };
 
+// Production hard-only assignment after the posterior winner has been chosen.
+// The packed sort key is gene[16], coordinate[24], raw UMI[18], and count[6].
+// Counts above 63 are represented by multiple records and recombined exactly.
+struct HardAssignment {
+    std::uint64_t packed;
+};
+
+bool packHardAssignment(std::uint32_t gene, std::uint32_t coordinate,
+                        std::uint32_t rawUmi, std::uint32_t count,
+                        HardAssignment &record, std::string &error);
+std::uint32_t hardAssignmentGene(const HardAssignment &record);
+std::uint32_t hardAssignmentCoordinate(const HardAssignment &record);
+std::uint32_t hardAssignmentRawUmi(const HardAssignment &record);
+std::uint32_t hardAssignmentCount(const HardAssignment &record);
+
 struct MatrixRecord {
     std::uint64_t key;
     double value;
@@ -38,12 +53,15 @@ struct MatrixRecord {
 
 static_assert(sizeof(Contribution) == 32,
               "spatial downstream contribution size changed");
+static_assert(sizeof(HardAssignment) == 8,
+              "spatial downstream hard-assignment size changed");
 static_assert(sizeof(MatrixRecord) == 16,
               "spatial downstream matrix record size changed");
 
 enum class RecordKind : std::uint32_t {
     Contribution = 1,
-    Matrix = 2
+    Matrix = 2,
+    HardAssignment = 3
 };
 
 struct Run {
@@ -95,6 +113,43 @@ class ContributionCursor {
   private:
     struct Impl;
     explicit ContributionCursor(std::unique_ptr<Impl> impl);
+    std::unique_ptr<Impl> impl_;
+};
+
+class HardAssignmentWriter {
+  public:
+    static std::unique_ptr<HardAssignmentWriter> create(
+        const std::string &directory, const std::string &sourceRevision,
+        std::uint32_t gridColumns, std::uint32_t shards,
+        std::size_t bufferBytes, std::string &error);
+    ~HardAssignmentWriter();
+    HardAssignmentWriter(const HardAssignmentWriter &) = delete;
+    HardAssignmentWriter &operator=(const HardAssignmentWriter &) = delete;
+
+    bool append(const HardAssignment &record, std::string &error);
+    bool finish(std::vector<Run> &runs, std::string &error);
+    std::uint64_t records() const;
+    std::uint64_t bytes() const;
+
+  private:
+    struct Impl;
+    explicit HardAssignmentWriter(std::unique_ptr<Impl> impl);
+    std::unique_ptr<Impl> impl_;
+};
+
+class HardAssignmentCursor {
+  public:
+    static std::unique_ptr<HardAssignmentCursor> open(
+        const Run &run, const std::string &sourceRevision, std::string &error);
+    ~HardAssignmentCursor();
+    HardAssignmentCursor(const HardAssignmentCursor &) = delete;
+    HardAssignmentCursor &operator=(const HardAssignmentCursor &) = delete;
+
+    bool next(HardAssignment &record, std::string &error);
+
+  private:
+    struct Impl;
+    explicit HardAssignmentCursor(std::unique_ptr<Impl> impl);
     std::unique_ptr<Impl> impl_;
 };
 
