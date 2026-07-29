@@ -3313,8 +3313,14 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
             if (soloSpatialFeatureSidecarEnabled)
                 rejectSpatialRecipe("does not permit the GeneFull diagnostic sidecar");
             if (!pSolo.flexMode) rejectSpatialRecipe("requires --flex yes");
-            if (pSolo.flexNoAlign != 0)
-                rejectSpatialRecipe("requires --flexNoAlign 0");
+            if (pSolo.flexNoAlign != 0 && pSolo.flexNoAlign != 1)
+                rejectSpatialRecipe("accepts only --flexNoAlign 0 or 1");
+            if (pSolo.flexNoAlign == 1) {
+                inOut->logMain
+                    << "WARNING: Spatial Flex integrated experimental no-align mode "
+                    << "will retain H0/H1 cache hits and record hash misses as "
+                    << "terminal unassigned feature decisions\n";
+            }
             if (pSolo.flexPipelineStr == "auto") {
                 pSolo.flexPipelineStr = "yes";
                 pSolo.flexPipelineNTriage = 0;

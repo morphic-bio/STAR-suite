@@ -558,6 +558,7 @@ struct Pipeline::Impl {
         std::uint64_t flexAlignmentMissReads = 0;
         std::uint64_t flexAlignmentResolvedReads = 0;
         std::uint64_t flexAlignmentUnresolvedReads = 0;
+        std::uint64_t flexNoAlignSkippedReads = 0;
     };
 
     PipelineConfig config;
@@ -2506,6 +2507,10 @@ bool Pipeline::completeCurrentThread(FeatureEvidenceClass source,
         error = "integrated spatial Flex hash deny was completed with a feature";
         return false;
     }
+    if (source == FeatureEvidenceClass::FlexHashMissSkipped && assigned) {
+        error = "integrated spatial Flex skipped hash miss was completed with a feature";
+        return false;
+    }
     if (assigned && impl_->config.featureCount != 0
         && geneIndex >= impl_->config.featureCount) {
         error = "integrated spatial feature index is outside the declared axis";
@@ -2541,6 +2546,9 @@ bool Pipeline::completeCurrentThread(FeatureEvidenceClass source,
         } else {
             ++thread.flexAlignmentUnresolvedReads;
         }
+    } else if (source == FeatureEvidenceClass::FlexHashMissSkipped) {
+        ++thread.flexAlignmentMissReads;
+        ++thread.flexNoAlignSkippedReads;
     }
 
     bool completed = true;
@@ -2722,6 +2730,8 @@ bool Pipeline::finalize(const std::vector<std::string> &geneIds,
                 thread.flexAlignmentResolvedReads;
             impl_->summary.flexAlignmentUnresolvedReads +=
                 thread.flexAlignmentUnresolvedReads;
+            impl_->summary.flexNoAlignSkippedReads +=
+                thread.flexNoAlignSkippedReads;
         }
         if (impl_->config.requirePairedCompletion
             && impl_->summary.featureAssignedReads
@@ -3078,7 +3088,9 @@ bool Pipeline::finalize(const std::vector<std::string> &geneIds,
                 << "feature_alignment_resolved\t"
                 << impl_->summary.flexAlignmentResolvedReads << '\n'
                 << "feature_alignment_unresolved\t"
-                << impl_->summary.flexAlignmentUnresolvedReads << '\n';
+                << impl_->summary.flexAlignmentUnresolvedReads << '\n'
+                << "feature_noalign_skipped\t"
+                << impl_->summary.flexNoAlignSkippedReads << '\n';
         }
         {
             AtomicOutput output(impl_->config.outputDirectory + "/run_summary.tsv");
