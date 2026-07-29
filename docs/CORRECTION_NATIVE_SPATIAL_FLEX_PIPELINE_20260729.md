@@ -45,6 +45,17 @@ workers can block on a full alignment-miss queue before any reaches the
 role-switch phase. Per-lane counters are atomic because indexed ranges from one
 lane are processed concurrently.
 
+Indexed CBQ planning deliberately creates up to 64 work-stealing ranges per
+producer, with a minimum range size of 8,192 records. A first full-slide CBQ
+attempt used only one balanced range per producer. Near the end of CRC lane
+L008, one range entered a spatial-barcode fallback-heavy imaging tile while all
+other producers had exhausted their ranges; throughput fell to about 139 reads
+per second and the alignment queue was empty. The incomplete attempt is
+preserved as rejected at
+`/storage/star-spatial-ssd-benchmark-20260729/optimization/crc_hard_packed_cbq_v1`.
+Oversubscribed ranges retain the same deterministic global source ordinals and
+let idle producers claim work beyond a locally expensive tile.
+
 `--flexPipeline no` is retained only to diagnose compatibility with historical
 artifacts. It must not be added to a production recipe, benchmark, or relaunch
 without explicit user authorization for that exact run.

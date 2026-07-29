@@ -845,14 +845,23 @@ bool flexPrepareCbqRangeTasks(FlexPipelineState *state, Parameters &P,
         return false;
     }
 
-    const uint64_t chunkSize =
-        (totalRecords + static_cast<uint64_t>(nWorkers) - 1U) /
-        static_cast<uint64_t>(nWorkers);
-    for (int worker = 0; worker < nWorkers; ++worker) {
-        const uint64_t globalFirst = static_cast<uint64_t>(worker) * chunkSize;
-        if (globalFirst >= totalRecords) {
-            break;
-        }
+    // Keep substantially more work units than producer threads.  Spatial
+    // barcode fallback cost is highly non-uniform (for example, a low-quality
+    // imaging tile can require the full edit-distance scan for many adjacent
+    // reads).  One range per producer strands the other producers behind such
+    // a region.  Moderate oversubscription preserves indexed-CBQ locality while
+    // letting the atomic range cursor distribute later work around stragglers.
+    static const uint64_t kRangesPerProducer = 64;
+    static const uint64_t kMinimumRecordsPerRange = 8192;
+    const uint64_t targetRangeCount = std::min<uint64_t>(
+        totalRecords,
+        static_cast<uint64_t>(nWorkers) * kRangesPerProducer);
+    const uint64_t balancedChunkSize =
+        (totalRecords + targetRangeCount - 1U) / targetRangeCount;
+    const uint64_t chunkSize = std::max<uint64_t>(
+        kMinimumRecordsPerRange, balancedChunkSize);
+    for (uint64_t globalFirst = 0; globalFirst < totalRecords;
+         globalFirst += chunkSize) {
         const uint64_t globalEnd = std::min(totalRecords, globalFirst + chunkSize);
         uint64_t laneGlobalFirst = 0;
         for (int lane = 0; lane < state->nLanes; ++lane) {
