@@ -111,10 +111,12 @@ int main()
     assert(directoryValue != NULL);
     const std::string root(directoryValue);
     const std::string contributionsDirectory = root + "/contributions";
+    const std::string hardDirectory = root + "/hard";
     const std::string corruptDirectory = root + "/corrupt";
     const std::string truncatedDirectory = root + "/truncated";
     const std::string matrixDirectory = root + "/matrix";
     makeDirectory(contributionsDirectory);
+    makeDirectory(hardDirectory);
     makeDirectory(corruptDirectory);
     makeDirectory(truncatedDirectory);
     makeDirectory(matrixDirectory);
@@ -180,6 +182,66 @@ int main()
     assert(recordsRead == input.size());
     error.clear();
     assert(!ContributionCursor::open(runs.front(), "wrong-revision", error));
+    assert(!error.empty());
+
+    std::vector<HardAssignment> hardInput(3);
+    error.clear();
+    assert(packHardAssignment(18084, parent, 262143, 63,
+                              hardInput[0], error));
+    assert(error.empty());
+    assert(packHardAssignment(18084, parent, 262143, 7,
+                              hardInput[1], error));
+    assert(packHardAssignment(9, otherCoordinate, 3, 1,
+                              hardInput[2], error));
+    assert(hardAssignmentGene(hardInput[0]) == 18084);
+    assert(hardAssignmentCoordinate(hardInput[0]) == parent);
+    assert(hardAssignmentRawUmi(hardInput[0]) == 262143);
+    assert(hardAssignmentCount(hardInput[0]) == 63);
+    HardAssignment rejected = {};
+    error.clear();
+    assert(!packHardAssignment(65536, parent, 3, 1, rejected, error));
+    error.clear();
+    assert(!packHardAssignment(1, 1u << 24, 3, 1, rejected, error));
+    error.clear();
+    assert(!packHardAssignment(1, parent, 1u << 18, 1, rejected, error));
+    error.clear();
+    assert(!packHardAssignment(1, parent, 3, 64, rejected, error));
+
+    error.clear();
+    std::unique_ptr<HardAssignmentWriter> hardWriter =
+        HardAssignmentWriter::create(
+            hardDirectory, revision, kColumns, shards, 4096, error);
+    assert(hardWriter && error.empty());
+    std::vector<std::vector<HardAssignment> > hardExpected(shards);
+    for (const HardAssignment &assignment : hardInput) {
+        assert(hardWriter->append(assignment, error));
+        hardExpected[shardForCoordinate(
+            hardAssignmentCoordinate(assignment), kColumns, shards)]
+            .push_back(assignment);
+    }
+    std::vector<Run> hardRuns;
+    assert(hardWriter->finish(hardRuns, error));
+    assert(hardWriter->records() == hardInput.size());
+    assert(hardWriter->bytes() > hardInput.size() * sizeof(HardAssignment));
+    std::uint64_t hardRecordsRead = 0;
+    for (const Run &run : hardRuns) {
+        assert(run.kind == RecordKind::HardAssignment && run.shards == shards);
+        std::unique_ptr<HardAssignmentCursor> hardCursor =
+            HardAssignmentCursor::open(run, revision, error);
+        assert(hardCursor && error.empty());
+        HardAssignment assignment = {};
+        std::size_t index = 0;
+        while (hardCursor->next(assignment, error)) {
+            assert(index < hardExpected[run.shard].size());
+            assert(assignment.packed == hardExpected[run.shard][index++].packed);
+            ++hardRecordsRead;
+        }
+        assert(error.empty() && index == hardExpected[run.shard].size());
+    }
+    assert(hardRecordsRead == hardInput.size());
+    error.clear();
+    assert(!HardAssignmentCursor::open(hardRuns.front(),
+                                       "wrong-revision", error));
     assert(!error.empty());
 
     std::vector<Run> layoutRuns;
@@ -294,11 +356,13 @@ int main()
     assert(!error.empty());
 
     for (const Run &run : runs) removeRun(run);
+    for (const Run &run : hardRuns) removeRun(run);
     for (const Run &run : layoutRuns) removeRun(run);
     removeRun(corruptRuns.front());
     removeRun(truncatedRuns.front());
     removeRun(matrixRun);
     assert(::rmdir(contributionsDirectory.c_str()) == 0);
+    assert(::rmdir(hardDirectory.c_str()) == 0);
     assert(::rmdir(corruptDirectory.c_str()) == 0);
     assert(::rmdir(truncatedDirectory.c_str()) == 0);
     assert(::rmdir(matrixDirectory.c_str()) == 0);

@@ -20,9 +20,17 @@ const std::uint64_t kMagic = UINT64_C(0x3150574e44475353); // "SSGDNWP1"
 const std::uint32_t kSchema = 1;
 const std::uint32_t kContributionKey = 1;
 const std::uint32_t kMatrixKey = 2;
+const std::uint32_t kHardAssignmentKey = 3;
 const std::uint64_t kComplete = UINT64_C(0x4554454c504d4f43); // "COMPLETE"
 const std::uint64_t kFnvOffset = UINT64_C(1469598103934665603);
 const std::uint64_t kFnvPrime = UINT64_C(1099511628211);
+const std::uint32_t kHardCountBits = 6;
+const std::uint32_t kHardUmiBits = 18;
+const std::uint32_t kHardCoordinateBits = 24;
+const std::uint64_t kHardCountMask = (UINT64_C(1) << kHardCountBits) - 1;
+const std::uint64_t kHardUmiMask = (UINT64_C(1) << kHardUmiBits) - 1;
+const std::uint64_t kHardCoordinateMask =
+    (UINT64_C(1) << kHardCoordinateBits) - 1;
 
 #pragma pack(push, 1)
 struct Header {
@@ -69,15 +77,25 @@ std::uint64_t sourceHash(const std::string &sourceRevision)
 
 std::uint32_t recordKey(RecordKind kind)
 {
-    return kind == RecordKind::Contribution ? kContributionKey : kMatrixKey;
+    if (kind == RecordKind::Contribution) return kContributionKey;
+    if (kind == RecordKind::Matrix) return kMatrixKey;
+    if (kind == RecordKind::HardAssignment) return kHardAssignmentKey;
+    throw std::invalid_argument("unknown downstream spool record kind");
+}
+
+const char *recordLabel(RecordKind kind)
+{
+    if (kind == RecordKind::Contribution) return "contribution";
+    if (kind == RecordKind::Matrix) return "matrix";
+    if (kind == RecordKind::HardAssignment) return "hard_assignment";
+    throw std::invalid_argument("unknown downstream spool record kind");
 }
 
 std::string runName(const std::string &directory, RecordKind kind,
                     std::uint32_t shard, std::uint64_t runIndex)
 {
     std::ostringstream name;
-    name << directory << '/'
-         << (kind == RecordKind::Contribution ? "contribution" : "matrix")
+    name << directory << '/' << recordLabel(kind)
          << ".s" << std::setw(4) << std::setfill('0') << shard
          << ".r" << std::setw(8) << runIndex << ".bin";
     return name.str();
@@ -103,6 +121,14 @@ void validateRecord<Contribution>(const Contribution &record)
         || record.posterior > 1.0 || record.memberCount == 0
         || (record.flags & ~known) != 0 || record.reserved != 0) {
         throw std::runtime_error("invalid spatial downstream contribution record");
+    }
+}
+
+template <>
+void validateRecord<HardAssignment>(const HardAssignment &record)
+{
+    if ((record.packed & kHardCountMask) == 0) {
+        throw std::runtime_error("invalid spatial downstream hard-assignment record");
     }
 }
 
@@ -299,6 +325,44 @@ class CursorState {
 
 } // namespace
 
+bool packHardAssignment(std::uint32_t gene, std::uint32_t coordinate,
+                        std::uint32_t rawUmi, std::uint32_t count,
+                        HardAssignment &record, std::string &error)
+{
+    if (gene > std::numeric_limits<std::uint16_t>::max()
+        || coordinate > kHardCoordinateMask || rawUmi > kHardUmiMask
+        || count == 0 || count > kHardCountMask) {
+        error = "spatial hard assignment exceeds packed 64-bit field range";
+        return false;
+    }
+    record.packed = (static_cast<std::uint64_t>(gene) << 48)
+        | (static_cast<std::uint64_t>(coordinate) << 24)
+        | (static_cast<std::uint64_t>(rawUmi) << 6)
+        | count;
+    return true;
+}
+
+std::uint32_t hardAssignmentGene(const HardAssignment &record)
+{
+    return static_cast<std::uint32_t>(record.packed >> 48);
+}
+
+std::uint32_t hardAssignmentCoordinate(const HardAssignment &record)
+{
+    return static_cast<std::uint32_t>(
+        (record.packed >> 24) & kHardCoordinateMask);
+}
+
+std::uint32_t hardAssignmentRawUmi(const HardAssignment &record)
+{
+    return static_cast<std::uint32_t>((record.packed >> 6) & kHardUmiMask);
+}
+
+std::uint32_t hardAssignmentCount(const HardAssignment &record)
+{
+    return static_cast<std::uint32_t>(record.packed & kHardCountMask);
+}
+
 std::uint32_t shardForCoordinate(std::uint32_t coordinate,
                                  std::uint32_t gridColumns,
                                  std::uint32_t shards)
@@ -439,6 +503,152 @@ ContributionCursor::ContributionCursor(std::unique_ptr<Impl> impl)
 ContributionCursor::~ContributionCursor() {}
 
 bool ContributionCursor::next(Contribution &record, std::string &error)
+{
+    try {
+        return impl_->state.next(record);
+    } catch (const std::exception &exception) {
+        error = exception.what();
+        return false;
+    }
+}
+
+struct HardAssignmentWriter::Impl {
+    std::string directory;
+    std::string sourceRevision;
+    std::uint32_t gridColumns = 0;
+    std::uint32_t shards = 0;
+    std::size_t bufferBytes = 0;
+    std::vector<std::unique_ptr<OpenRun<HardAssignment> > > writers;
+    std::uint64_t totalRecords = 0;
+    std::uint64_t totalBytes = 0;
+    bool finished = false;
+};
+
+std::unique_ptr<HardAssignmentWriter> HardAssignmentWriter::create(
+    const std::string &directory, const std::string &sourceRevision,
+    std::uint32_t gridColumns, std::uint32_t shards,
+    std::size_t bufferBytes, std::string &error)
+{
+    try {
+        if (!directoryExists(directory) || sourceRevision.empty()
+            || gridColumns == 0 || shards == 0 || shards > 4096
+            || bufferBytes == 0) {
+            throw std::invalid_argument(
+                "invalid downstream hard-assignment writer configuration");
+        }
+        std::unique_ptr<Impl> impl(new Impl());
+        impl->directory = directory;
+        impl->sourceRevision = sourceRevision;
+        impl->gridColumns = gridColumns;
+        impl->shards = shards;
+        impl->bufferBytes = bufferBytes;
+        impl->writers.resize(shards);
+        return std::unique_ptr<HardAssignmentWriter>(
+            new HardAssignmentWriter(std::move(impl)));
+    } catch (const std::exception &exception) {
+        error = exception.what();
+        return std::unique_ptr<HardAssignmentWriter>();
+    }
+}
+
+HardAssignmentWriter::HardAssignmentWriter(std::unique_ptr<Impl> impl)
+    : impl_(std::move(impl))
+{
+}
+
+HardAssignmentWriter::~HardAssignmentWriter() {}
+
+bool HardAssignmentWriter::append(const HardAssignment &record,
+                                  std::string &error)
+{
+    try {
+        if (impl_->finished) {
+            throw std::runtime_error("hard-assignment writer already finished");
+        }
+        const std::uint32_t shard = shardForCoordinate(
+            hardAssignmentCoordinate(record), impl_->gridColumns,
+            impl_->shards);
+        if (!impl_->writers[shard]) {
+            impl_->writers[shard].reset(new OpenRun<HardAssignment>(
+                impl_->directory, impl_->sourceRevision,
+                RecordKind::HardAssignment, shard, impl_->shards, 0,
+                impl_->bufferBytes));
+        }
+        impl_->writers[shard]->append(record);
+        ++impl_->totalRecords;
+        return true;
+    } catch (const std::exception &exception) {
+        error = exception.what();
+        return false;
+    }
+}
+
+bool HardAssignmentWriter::finish(std::vector<Run> &runs, std::string &error)
+{
+    try {
+        if (impl_->finished) {
+            throw std::runtime_error("hard-assignment writer finished twice");
+        }
+        impl_->finished = true;
+        runs.clear();
+        runs.reserve(impl_->shards);
+        std::uint64_t records = 0;
+        for (std::uint32_t shard = 0; shard < impl_->shards; ++shard) {
+            if (!impl_->writers[shard]) continue;
+            Run run = impl_->writers[shard]->finish();
+            records += run.records;
+            impl_->totalBytes += run.bytes;
+            runs.push_back(run);
+            impl_->writers[shard].reset();
+        }
+        if (records != impl_->totalRecords) {
+            throw std::runtime_error(
+                "downstream hard-assignment row conservation failure");
+        }
+        return true;
+    } catch (const std::exception &exception) {
+        error = exception.what();
+        return false;
+    }
+}
+
+std::uint64_t HardAssignmentWriter::records() const
+{
+    return impl_->totalRecords;
+}
+
+std::uint64_t HardAssignmentWriter::bytes() const
+{
+    return impl_->totalBytes;
+}
+
+struct HardAssignmentCursor::Impl {
+    explicit Impl(const Run &run, const std::string &sourceRevision)
+        : state(run, sourceRevision, RecordKind::HardAssignment) {}
+    CursorState<HardAssignment> state;
+};
+
+std::unique_ptr<HardAssignmentCursor> HardAssignmentCursor::open(
+    const Run &run, const std::string &sourceRevision, std::string &error)
+{
+    try {
+        return std::unique_ptr<HardAssignmentCursor>(
+            new HardAssignmentCursor(std::unique_ptr<Impl>(
+                new Impl(run, sourceRevision))));
+    } catch (const std::exception &exception) {
+        error = exception.what();
+        return std::unique_ptr<HardAssignmentCursor>();
+    }
+}
+
+HardAssignmentCursor::HardAssignmentCursor(std::unique_ptr<Impl> impl)
+    : impl_(std::move(impl))
+{
+}
+
+HardAssignmentCursor::~HardAssignmentCursor() {}
+
+bool HardAssignmentCursor::next(HardAssignment &record, std::string &error)
 {
     try {
         return impl_->state.next(record);

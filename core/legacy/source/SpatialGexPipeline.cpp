@@ -967,12 +967,20 @@ class SpoolCliqueSink : public CliqueSink {
                     const std::string &sourceRevision,
                     std::uint32_t shards, std::size_t bufferBytes,
                     std::uint8_t products)
-        : products_(products)
+        : products_(products), hardOnly_(products == ProductHard)
     {
         std::string error;
-        writer_ = downstream_spool::ContributionWriter::create(
-            directory, sourceRevision, kGridColumns, shards, bufferBytes, error);
-        if (!writer_) throw std::runtime_error(error);
+        if (hardOnly_) {
+            hardWriter_ = downstream_spool::HardAssignmentWriter::create(
+                directory, sourceRevision, kGridColumns, shards,
+                bufferBytes, error);
+            if (!hardWriter_) throw std::runtime_error(error);
+        } else {
+            writer_ = downstream_spool::ContributionWriter::create(
+                directory, sourceRevision, kGridColumns, shards,
+                bufferBytes, error);
+            if (!writer_) throw std::runtime_error(error);
+        }
     }
 
     void reserve(std::uint64_t, std::uint64_t) override {}
@@ -982,7 +990,8 @@ class SpoolCliqueSink : public CliqueSink {
                 const std::vector<CliqueCandidate> &values) override
     {
         if (values.empty() || values.size() > std::numeric_limits<std::uint16_t>::max()
-            || cliques_ > std::numeric_limits<std::uint32_t>::max()) {
+            || cliques_ > std::numeric_limits<std::uint32_t>::max()
+            || memberCount == 0) {
             throw std::runtime_error("invalid spooled spatial clique");
         }
         std::size_t best = 0;
@@ -994,6 +1003,27 @@ class SpoolCliqueSink : public CliqueSink {
                                       values[best].coordinate))) {
                 best = index;
             }
+        }
+        if (hardOnly_) {
+            hardMaxMemberCount_ = std::max<std::uint64_t>(
+                hardMaxMemberCount_, memberCount);
+            if (memberCount > 63) ++hardOverflowCliques_;
+            std::uint32_t remaining = memberCount;
+            while (remaining != 0) {
+                const std::uint32_t count = std::min<std::uint32_t>(remaining, 63);
+                downstream_spool::HardAssignment record = {};
+                std::string error;
+                if (!downstream_spool::packHardAssignment(
+                        gene, values[best].coordinate, rawUmi, count,
+                        record, error)
+                    || !hardWriter_->append(record, error)) {
+                    throw std::runtime_error(error);
+                }
+                remaining -= count;
+                ++hardChunks_;
+            }
+            ++cliques_;
+            return;
         }
         double second = 0.0;
         for (std::size_t index = 0; index < values.size(); ++index) {
@@ -1045,20 +1075,38 @@ class SpoolCliqueSink : public CliqueSink {
     }
 
     std::uint64_t cliqueCount() const override { return cliques_; }
+    std::uint64_t hardChunks() const { return hardChunks_; }
+    std::uint64_t hardOverflowCliques() const { return hardOverflowCliques_; }
+    std::uint64_t hardMaxMemberCount() const { return hardMaxMemberCount_; }
 
     void finish(std::vector<downstream_spool::Run> &runs,
                 std::uint64_t &records, std::uint64_t &bytes)
     {
         std::string error;
-        if (!writer_->finish(runs, error)) throw std::runtime_error(error);
-        records = writer_->records();
-        bytes = writer_->bytes();
+        if (hardOnly_) {
+            if (!hardWriter_->finish(runs, error)) {
+                throw std::runtime_error(error);
+            }
+            records = hardWriter_->records();
+            bytes = hardWriter_->bytes();
+        } else {
+            if (!writer_->finish(runs, error)) {
+                throw std::runtime_error(error);
+            }
+            records = writer_->records();
+            bytes = writer_->bytes();
+        }
     }
 
   private:
     std::unique_ptr<downstream_spool::ContributionWriter> writer_;
+    std::unique_ptr<downstream_spool::HardAssignmentWriter> hardWriter_;
     std::uint8_t products_ = 0;
+    bool hardOnly_ = false;
     std::uint64_t cliques_ = 0;
+    std::uint64_t hardChunks_ = 0;
+    std::uint64_t hardOverflowCliques_ = 0;
+    std::uint64_t hardMaxMemberCount_ = 0;
 };
 
 std::vector<Assignment> integerAssignments(
@@ -1091,27 +1139,8 @@ std::vector<Assignment> integerAssignments(
     return result;
 }
 
-std::vector<IntegerRawSupport> collapseIntegerSupport(
-    const std::vector<Assignment> &assignments)
+void correctIntegerRawSupport(std::vector<IntegerRawSupport> &raw)
 {
-    std::vector<IntegerRawSupport> raw;
-    raw.reserve(assignments.size());
-    for (const Assignment &assignment : assignments) {
-        if (!raw.empty() && raw.back().gene == assignment.gene
-            && raw.back().coordinate == assignment.coordinate
-            && raw.back().rawUmi == assignment.rawUmi) {
-            raw.back().count += assignment.count;
-        } else {
-            IntegerRawSupport support;
-            support.gene = assignment.gene;
-            support.coordinate = assignment.coordinate;
-            support.rawUmi = assignment.rawUmi;
-            support.correctedUmi = assignment.rawUmi;
-            support.count = assignment.count;
-            raw.push_back(support);
-        }
-    }
-
     std::size_t begin = 0;
     while (begin < raw.size()) {
         std::size_t end = begin + 1;
@@ -1137,13 +1166,73 @@ std::vector<IntegerRawSupport> collapseIntegerSupport(
         }
         begin = end;
     }
+}
+
+std::vector<IntegerRawSupport> collapseIntegerSupport(
+    const std::vector<Assignment> &assignments)
+{
+    std::vector<IntegerRawSupport> raw;
+    raw.reserve(assignments.size());
+    for (const Assignment &assignment : assignments) {
+        if (!raw.empty() && raw.back().gene == assignment.gene
+            && raw.back().coordinate == assignment.coordinate
+            && raw.back().rawUmi == assignment.rawUmi) {
+            raw.back().count += assignment.count;
+        } else {
+            IntegerRawSupport support;
+            support.gene = assignment.gene;
+            support.coordinate = assignment.coordinate;
+            support.rawUmi = assignment.rawUmi;
+            support.correctedUmi = assignment.rawUmi;
+            support.count = assignment.count;
+            raw.push_back(support);
+        }
+    }
+    correctIntegerRawSupport(raw);
     return raw;
 }
 
-std::vector<FinalMolecule> resolveSortedIntegerAssignments(
-    const std::vector<Assignment> &assignments, std::uint32_t policy)
+std::vector<IntegerRawSupport> collapsePackedHardSupport(
+    std::vector<downstream_spool::HardAssignment> assignments)
 {
-    const std::vector<IntegerRawSupport> raw = collapseIntegerSupport(assignments);
+    std::sort(assignments.begin(), assignments.end(),
+              [](const downstream_spool::HardAssignment &left,
+                 const downstream_spool::HardAssignment &right) {
+        return left.packed < right.packed;
+    });
+    std::vector<IntegerRawSupport> raw;
+    raw.reserve(assignments.size());
+    for (const downstream_spool::HardAssignment &assignment : assignments) {
+        const std::uint32_t gene =
+            downstream_spool::hardAssignmentGene(assignment);
+        const std::uint32_t coordinate =
+            downstream_spool::hardAssignmentCoordinate(assignment);
+        const std::uint32_t rawUmi =
+            downstream_spool::hardAssignmentRawUmi(assignment);
+        const std::uint32_t count =
+            downstream_spool::hardAssignmentCount(assignment);
+        if (!raw.empty() && raw.back().gene == gene
+            && raw.back().coordinate == coordinate
+            && raw.back().rawUmi == rawUmi) {
+            raw.back().count += count;
+        } else {
+            IntegerRawSupport support;
+            support.gene = gene;
+            support.coordinate = coordinate;
+            support.rawUmi = rawUmi;
+            support.correctedUmi = rawUmi;
+            support.count = count;
+            raw.push_back(support);
+        }
+    }
+    std::vector<downstream_spool::HardAssignment>().swap(assignments);
+    correctIntegerRawSupport(raw);
+    return raw;
+}
+
+std::vector<FinalMolecule> resolveIntegerRawSupport(
+    const std::vector<IntegerRawSupport> &raw, std::uint32_t policy)
+{
     std::vector<IntegerProvisional> provisional;
     provisional.reserve(raw.size());
     for (const IntegerRawSupport &support : raw) {
@@ -1200,6 +1289,19 @@ std::vector<FinalMolecule> resolveSortedIntegerAssignments(
         begin = end;
     }
     return result;
+}
+
+std::vector<FinalMolecule> resolveSortedIntegerAssignments(
+    const std::vector<Assignment> &assignments, std::uint32_t policy)
+{
+    return resolveIntegerRawSupport(collapseIntegerSupport(assignments), policy);
+}
+
+std::vector<FinalMolecule> resolvePackedHardAssignments(
+    std::vector<downstream_spool::HardAssignment> assignments)
+{
+    return resolveIntegerRawSupport(
+        collapsePackedHardSupport(std::move(assignments)), ProductHard);
 }
 
 std::vector<FinalMolecule> resolveInteger(
@@ -2675,6 +2777,11 @@ bool Pipeline::finalize(const std::vector<std::string> &geneIds,
             sink.finish(contributionRuns,
                         impl_->summary.downstreamContributionRecords,
                         impl_->summary.downstreamContributionBytes);
+            impl_->summary.hardAssignmentChunks = sink.hardChunks();
+            impl_->summary.hardAssignmentOverflowCliques =
+                sink.hardOverflowCliques();
+            impl_->summary.hardAssignmentMaxMemberCount =
+                sink.hardMaxMemberCount();
             impl_->summary.downstreamContributionRuns = contributionRuns.size();
             impl_->summary.spillMergeSeconds = std::chrono::duration<double>(
                 std::chrono::steady_clock::now() - mergeBegin).count();
@@ -2734,31 +2841,65 @@ bool Pipeline::finalize(const std::vector<std::string> &geneIds,
                 const std::chrono::steady_clock::time_point resolveBegin =
                     std::chrono::steady_clock::now();
                 std::string cursorError;
-                std::unique_ptr<downstream_spool::ContributionCursor> cursor =
-                    downstream_spool::ContributionCursor::open(
-                        run, impl_->config.sourceRevision, cursorError);
-                if (!cursor) throw std::runtime_error(cursorError);
-                std::vector<downstream_spool::Contribution> contributions;
-                contributions.reserve(static_cast<std::size_t>(run.records));
-                downstream_spool::Contribution contribution = {};
-                while (cursor->next(contribution, cursorError)) {
-                    if (contribution.coordinate
-                            >= static_cast<std::uint64_t>(kGridRows) * kGridColumns
-                        || downstream_spool::shardForCoordinate(
-                               contribution.coordinate, kGridColumns,
-                               impl_->config.downstreamSpoolShards) != run.shard) {
-                        throw std::runtime_error(
-                            "spatial downstream contribution has wrong coordinate shard");
+                std::vector<FinalMolecule> molecules;
+                if (impl_->config.products == ProductHard) {
+                    std::unique_ptr<downstream_spool::HardAssignmentCursor> cursor =
+                        downstream_spool::HardAssignmentCursor::open(
+                            run, impl_->config.sourceRevision, cursorError);
+                    if (!cursor) throw std::runtime_error(cursorError);
+                    std::vector<downstream_spool::HardAssignment> assignments;
+                    assignments.reserve(static_cast<std::size_t>(run.records));
+                    downstream_spool::HardAssignment assignment = {};
+                    while (cursor->next(assignment, cursorError)) {
+                        const std::uint32_t coordinate =
+                            downstream_spool::hardAssignmentCoordinate(assignment);
+                        if (coordinate
+                                >= static_cast<std::uint64_t>(kGridRows) * kGridColumns
+                            || downstream_spool::shardForCoordinate(
+                                   coordinate, kGridColumns,
+                                   impl_->config.downstreamSpoolShards) != run.shard) {
+                            throw std::runtime_error(
+                                "spatial downstream hard assignment has wrong "
+                                "coordinate shard");
+                        }
+                        assignments.push_back(assignment);
                     }
-                    contributions.push_back(contribution);
+                    if (!cursorError.empty()) throw std::runtime_error(cursorError);
+                    if (assignments.size() != run.records) {
+                        throw std::runtime_error(
+                            "spatial downstream hard-assignment count changed while "
+                            "reading");
+                    }
+                    molecules = resolvePackedHardAssignments(std::move(assignments));
+                } else {
+                    std::unique_ptr<downstream_spool::ContributionCursor> cursor =
+                        downstream_spool::ContributionCursor::open(
+                            run, impl_->config.sourceRevision, cursorError);
+                    if (!cursor) throw std::runtime_error(cursorError);
+                    std::vector<downstream_spool::Contribution> contributions;
+                    contributions.reserve(static_cast<std::size_t>(run.records));
+                    downstream_spool::Contribution contribution = {};
+                    while (cursor->next(contribution, cursorError)) {
+                        if (contribution.coordinate
+                                >= static_cast<std::uint64_t>(kGridRows) * kGridColumns
+                            || downstream_spool::shardForCoordinate(
+                                   contribution.coordinate, kGridColumns,
+                                   impl_->config.downstreamSpoolShards) != run.shard) {
+                            throw std::runtime_error(
+                                "spatial downstream contribution has wrong "
+                                "coordinate shard");
+                        }
+                        contributions.push_back(contribution);
+                    }
+                    if (!cursorError.empty()) throw std::runtime_error(cursorError);
+                    if (contributions.size() != run.records) {
+                        throw std::runtime_error(
+                            "spatial downstream contribution count changed while "
+                            "reading");
+                    }
+                    molecules = resolveContributionShard(
+                        contributions, impl_->config.products);
                 }
-                if (!cursorError.empty()) throw std::runtime_error(cursorError);
-                if (contributions.size() != run.records) {
-                    throw std::runtime_error(
-                        "spatial downstream contribution count changed while reading");
-                }
-                std::vector<FinalMolecule> molecules = resolveContributionShard(
-                    contributions, impl_->config.products);
                 resolveSeconds += std::chrono::duration<double>(
                     std::chrono::steady_clock::now() - resolveBegin).count();
                 for (const FinalMolecule &molecule : molecules) {
@@ -2884,6 +3025,12 @@ bool Pipeline::finalize(const std::vector<std::string> &geneIds,
                    << impl_->summary.downstreamContributionRuns << '\n'
                    << "downstream_contribution_bytes\t"
                    << impl_->summary.downstreamContributionBytes << '\n'
+                   << "hard_assignment_chunks\t"
+                   << impl_->summary.hardAssignmentChunks << '\n'
+                   << "hard_assignment_overflow_cliques\t"
+                   << impl_->summary.hardAssignmentOverflowCliques << '\n'
+                   << "hard_assignment_max_member_count\t"
+                   << impl_->summary.hardAssignmentMaxMemberCount << '\n'
                    << "downstream_largest_shard_records\t"
                    << impl_->summary.downstreamLargestShardRecords << '\n'
                    << "downstream_matrix_runs\t"
