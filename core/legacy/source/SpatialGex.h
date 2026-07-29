@@ -168,9 +168,9 @@ struct PipelineConfig {
     // decoded R1. This catches early returns and thread-local state drift.
     bool requirePairedCompletion = false;
     bool flexFeatureMode = false;
-    // Compatibility default target-scans barcode windows with N. False uses
-    // the N-aware hash candidate path and keeps the target scan out of the run.
-    bool barcodeNdpFallback = true;
+    // Production uses the N-aware hash candidate path. True explicitly enables
+    // the retained exhaustive target-scan oracle for diagnostics.
+    bool barcodeNdpFallback = false;
 };
 
 struct PipelineSummary {

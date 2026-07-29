@@ -48,7 +48,7 @@ struct Config {
     int fullStartMax = 12;
     // The compatibility path target-scans oligos for barcode windows with N.
     // False uses the N-aware hash candidate path instead.
-    bool nonAcgtDpFallback = true;
+    bool nonAcgtDpFallback = false;
 };
 
 class Decoder {

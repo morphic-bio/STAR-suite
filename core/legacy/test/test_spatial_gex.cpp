@@ -84,6 +84,7 @@ void testDecoderAmbiguousBases()
     config.gridColumns = 1;
     config.fullStartMin = 9;
     config.fullStartMax = 9;
+    config.nonAcgtDpFallback = true;
     spatial_r1_decoder::Decoder decoder(config);
 
     const std::string umi = "ACGTACGTA";
@@ -147,6 +148,7 @@ void testDecoderAmbiguousBases()
     ambiguousConfig.gridColumns = 2;
     ambiguousConfig.fullStartMin = 9;
     ambiguousConfig.fullStartMax = 9;
+    ambiguousConfig.nonAcgtDpFallback = true;
     spatial_r1_decoder::Decoder ambiguousDecoder(ambiguousConfig);
     const spatial_r1_decoder::Result ambiguous = decode(ambiguousDecoder, bc1N);
     assert(ambiguous.barcodeHadN && ambiguous.barcodeDpChecked);
@@ -242,6 +244,7 @@ int main()
 
     const spatial_gex::PipelineConfig defaultPipelineConfig;
     assert(defaultPipelineConfig.products == spatial_gex::ProductHard);
+    assert(!defaultPipelineConfig.barcodeNdpFallback);
 
     std::uint8_t scales = 0;
     assert(spatial_gex::parseScales("2,8,16", scales, error));
