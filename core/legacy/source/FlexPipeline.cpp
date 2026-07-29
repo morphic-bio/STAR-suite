@@ -145,6 +145,30 @@ bool completeSpatialFlexCachedRead(Parameters &P,
     return true;
 }
 
+bool completeSpatialFlexSkippedMiss(Parameters &P,
+                                    const char *barcodeSequence,
+                                    uint32_t barcodeLength,
+                                    const char *barcodeQuality,
+                                    uint64_t sourceOrdinal) {
+    if (!P.soloSpatialFlexIntegratedEnabled) return true;
+    if (P.spatialGexPipeline == nullptr) {
+        return failSpatialFlexPipeline(P, "integrated spatial accumulator is unavailable");
+    }
+
+    std::string error;
+    if (!P.spatialGexPipeline->decodeCurrentThread(
+            barcodeSequence, barcodeLength, barcodeQuality, barcodeLength,
+            sourceOrdinal, error)) {
+        return failSpatialFlexPipeline(P, "raw-R1 decoding failed: " + error);
+    }
+    if (!P.spatialGexPipeline->completeCurrentThread(
+            spatial_gex::FeatureEvidenceClass::FlexHashMissSkipped,
+            false, 0, sourceOrdinal, error)) {
+        return failSpatialFlexPipeline(P, "skipped hash-miss completion failed: " + error);
+    }
+    return true;
+}
+
 } // namespace
 
 void *flexLaneReaderThread(void *arg) {
@@ -559,6 +583,10 @@ static uint64_t processOneLane(
                 ep.detectedSampleToken = 0xFF;
                 ep.hashScreenSampleIdx = 0;
                 st->alignQ.push(std::move(ep));
+            } else if (P.soloSpatialFlexIntegratedEnabled &&
+                       !completeSpatialFlexSkippedMiss(
+                           P, seq1, readLen1, qual1, iReadAll)) {
+                return nReads;
             }
         }
 
@@ -740,6 +768,10 @@ static uint64_t processCbqModuleRecords(
                     ep.detectedSampleToken = 0xFF;
                     ep.hashScreenSampleIdx = 0;
                     st->alignQ.push(std::move(ep));
+                } else if (P.soloSpatialFlexIntegratedEnabled &&
+                           !completeSpatialFlexSkippedMiss(
+                               P, seq1, readLen1, qual1, iReadAll)) {
+                    return nReads;
                 }
             }
 

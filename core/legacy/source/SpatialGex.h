@@ -131,7 +131,8 @@ enum class FeatureEvidenceClass : std::uint8_t {
     FlexH0 = 1,
     FlexH1 = 2,
     FlexHashDeny = 3,
-    FlexAlignment = 4
+    FlexAlignment = 4,
+    FlexHashMissSkipped = 5
 };
 
 struct PipelineConfig {
@@ -219,6 +220,7 @@ struct PipelineSummary {
     std::uint64_t flexAlignmentMissReads = 0;
     std::uint64_t flexAlignmentResolvedReads = 0;
     std::uint64_t flexAlignmentUnresolvedReads = 0;
+    std::uint64_t flexNoAlignSkippedReads = 0;
 };
 
 // Run-owned, default-off spatial state. One instance is shared by all mapping
