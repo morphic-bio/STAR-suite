@@ -15,6 +15,7 @@ void Parameters::closeReadsFiles() {
         fastxInputExhausted = false;
         fastxInputPendingRecord.reset();
         fastxInputLastLoggedLane = -1;
+        fastxProducerPoolActive = false;
     }
 
     if (cbqInputActive && cbqInputModule) {

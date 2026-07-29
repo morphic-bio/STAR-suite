@@ -59,10 +59,10 @@ run_star_case() {
     mkdir -p "$out_dir"
 
     "$STAR_BIN" \
-        --runThreadN 1 \
+        --runThreadN 2 \
         --genomeDir "$OUT_ROOT/genome" \
         --outFileNamePrefix "$out_dir/" \
-        --outSAMtype None \
+        --outSAMtype SAM \
         "$@" \
         > "$out_dir/stdout" 2> "$out_dir/stderr"
 
@@ -88,8 +88,34 @@ run_star_case gzip_command 1 \
 run_star_case comma_lanes 2 \
     --readFilesIn "$OUT_ROOT/reads/lane1.fastq,$OUT_ROOT/reads/lane2.fastq"
 
+run_star_case comma_lanes_pool 2 \
+    --readFilesFastxProducerConsumer on \
+    --readFilesFastxProducerThreads 2 \
+    --readFilesIn "$OUT_ROOT/reads/lane1.fastq,$OUT_ROOT/reads/lane2.fastq"
+
+run_star_case gzip_internal_pool 1 \
+    --readFilesFastxProducerConsumer on \
+    --readFilesIn "$OUT_ROOT/reads/lane1.fastq.gz"
+
 run_star_case manifest 1 \
     --readFilesManifest "$OUT_ROOT/reads/manifest.tsv"
+
+grep -F "FASTX input module=FastxProducerPool producers=2" \
+    "$OUT_ROOT/runs/comma_lanes_pool/Log.out" >/dev/null
+grep -F "FASTX input module=FastxProducerPool producers=1" \
+    "$OUT_ROOT/runs/gzip_internal_pool/Log.out" >/dev/null
+
+# Exclude timestamps/rates and compare the actual alignment-count accounting.
+awk -F'|' '/Number of input reads|Uniquely mapped reads number|Number of reads mapped to multiple loci|Number of reads unmapped/ {
+    gsub(/[ \t]/, "", $2); print $1 "|" $2
+}' "$OUT_ROOT/runs/comma_lanes/Log.final.out" > "$OUT_ROOT/runs/comma_lanes/counts.txt"
+awk -F'|' '/Number of input reads|Uniquely mapped reads number|Number of reads mapped to multiple loci|Number of reads unmapped/ {
+    gsub(/[ \t]/, "", $2); print $1 "|" $2
+}' "$OUT_ROOT/runs/comma_lanes_pool/Log.final.out" > "$OUT_ROOT/runs/comma_lanes_pool/counts.txt"
+diff -u "$OUT_ROOT/runs/comma_lanes/counts.txt" "$OUT_ROOT/runs/comma_lanes_pool/counts.txt"
+grep -v '^@' "$OUT_ROOT/runs/comma_lanes/Aligned.out.sam" > "$OUT_ROOT/runs/comma_lanes/alignments.sam"
+grep -v '^@' "$OUT_ROOT/runs/comma_lanes_pool/Aligned.out.sam" > "$OUT_ROOT/runs/comma_lanes_pool/alignments.sam"
+diff -u "$OUT_ROOT/runs/comma_lanes/alignments.sam" "$OUT_ROOT/runs/comma_lanes_pool/alignments.sam"
 
 gate_dir="$OUT_ROOT/runs/y_gate_fasta"
 mkdir -p "$gate_dir"
