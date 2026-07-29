@@ -632,6 +632,7 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloSpatialBarcodeContract", &soloSpatialBarcodeContract));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloSpatialBc1Oligos", &soloSpatialBc1Oligos));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloSpatialBc2Oligos", &soloSpatialBc2Oligos));
+    parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloSpatialBarcodeNdpFallback", &soloSpatialBarcodeNdpFallback));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloSpatialAssignmentProducts", &soloSpatialAssignmentProducts));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloSpatialBinSizes", &soloSpatialBinSizes));
     parArray.push_back(new ParameterInfoScalar <uint64>   (-1, -1, "soloSpatialExpectedReads", &soloSpatialExpectedReads));
@@ -2242,6 +2243,8 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
         soloSpatialGexIntegrated, "--soloSpatialGexIntegrated");
     soloSpatialFlexIntegratedEnabled = parseSpatialIntegratedMode(
         soloSpatialFlexIntegrated, "--soloSpatialFlexIntegrated");
+    soloSpatialBarcodeNdpFallbackEnabled = parseSpatialIntegratedMode(
+        soloSpatialBarcodeNdpFallback, "--soloSpatialBarcodeNdpFallback");
     if (soloSpatialGexIntegratedEnabled && soloSpatialFlexIntegratedEnabled) {
         exitWithError(
             "EXITING because of fatal PARAMETERS error: "

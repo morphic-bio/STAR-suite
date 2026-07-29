@@ -1824,6 +1824,11 @@ soloSpatialBc1Oligos        -
 soloSpatialBc2Oligos        -
     string:                 BC2 full-oligo list for integrated Visium HD R1 decoding
 
+soloSpatialBarcodeNdpFallback yes
+    string:                 yes|no; production default yes target-scans spatial barcode windows containing N
+                            no is a diagnostic benchmark mode that rejects those reads before the expensive DP target scan
+                            and quantifies the resulting read/molecule loss in the integrated run summary
+
 soloSpatialAssignmentProducts hard
     string:                 comma-separated integrated products: strict,soft_expected,hard,gated_hard or all
                             hard is the production default; all explicitly enables the diagnostic four-policy surface

@@ -45,6 +45,10 @@ struct Config {
     std::uint32_t gridColumns = 3350;
     int fullStartMin = 8;
     int fullStartMax = 12;
+    // Production preserves recoverable spatial barcodes containing N by
+    // evaluating them against the oligo targets. Disable only to quantify the
+    // speed and molecule yield of rejecting those reads immediately.
+    bool nonAcgtDpFallback = true;
 };
 
 class Decoder {

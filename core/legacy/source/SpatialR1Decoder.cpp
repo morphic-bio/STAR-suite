@@ -2532,6 +2532,7 @@ struct Config {
     std::vector<uint64_t> bc1_frozen_exposure;
     std::vector<uint64_t> bc2_frozen_exposure;
     bool direct_best_non_acgt_dp_fallback = false;
+    bool integrated_non_acgt_dp_fallback = true;
     DirectBestResolutionMode direct_best_resolution = DirectBestResolutionMode::StrictBoundary;
     bool overlap_dp_length_guard = true;
     int overlap_dp_bc1_min_obs_len = 13;
@@ -7240,6 +7241,7 @@ struct Decoder::Impl {
         config.grid_cols = static_cast<int>(input.gridColumns);
         config.full_start_min = input.fullStartMin;
         config.full_start_max = input.fullStartMax;
+        config.integrated_non_acgt_dp_fallback = input.nonAcgtDpFallback;
         config.direct_tiered_h2_decode = true;
 
         config.bc1_len.resize(config.bc1_oligos.size());
@@ -7367,6 +7369,10 @@ bool Decoder::decode(const char *sequence, std::size_t sequenceLength,
         static_cast<std::uint8_t>(barcodeClassification.n_count);
     result.barcodeHadUnsupportedBase = barcodeClassification.unsupported;
     if (barcodeClassification.unsupported) return true;
+    if (barcodeClassification.n_count != 0 &&
+        !impl_->config.integrated_non_acgt_dp_fallback) {
+        return true;
+    }
     InternalDecoded decoded = decode_record_direct_tiered_h2(
         sequenceString, impl_->config, impl_->bc1QueryLengths,
         impl_->bc2QueryLengths, nullptr, &barcodeClassification);

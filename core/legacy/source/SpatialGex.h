@@ -168,6 +168,9 @@ struct PipelineConfig {
     // decoded R1. This catches early returns and thread-local state drift.
     bool requirePairedCompletion = false;
     bool flexFeatureMode = false;
+    // Diagnostic-only switch. Production target-scans barcode windows with N;
+    // false rejects them before that expensive fallback.
+    bool barcodeNdpFallback = true;
 };
 
 struct PipelineSummary {

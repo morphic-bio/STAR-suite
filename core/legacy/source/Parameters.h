@@ -731,6 +731,8 @@ class Parameters {
         string soloSpatialBarcodeContract = "-";
         string soloSpatialBc1Oligos = "-";
         string soloSpatialBc2Oligos = "-";
+        string soloSpatialBarcodeNdpFallback = "yes";
+        bool soloSpatialBarcodeNdpFallbackEnabled = true;
         // Production emits the deterministic post-UMI hard assignment only.
         // Use --soloSpatialAssignmentProducts all explicitly for the diagnostic
         // four-policy comparison surface.
