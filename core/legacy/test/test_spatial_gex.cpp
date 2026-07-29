@@ -2,6 +2,7 @@
 #include "SpatialR1Decoder.h"
 
 #include <cassert>
+#include <cmath>
 #include <cstdio>
 #include <cstdint>
 #include <cstdlib>
@@ -37,6 +38,27 @@ spatial_r1_decoder::Result decode(
                           quality.size(), result, &h0, error));
     assert(error.empty());
     return result;
+}
+
+void assertDecodeEquivalent(
+    const spatial_r1_decoder::Result &targetScan,
+    const spatial_r1_decoder::Result &hash)
+{
+    assert(targetScan.rawUmi == hash.rawUmi);
+    assert(targetScan.rawUmiValid == hash.rawUmiValid);
+    assert(targetScan.decoderAssigned == hash.decoderAssigned);
+    assert(targetScan.barcodeHadN == hash.barcodeHadN);
+    assert(targetScan.barcodeNCount == hash.barcodeNCount);
+    assert(targetScan.bc1Edit == hash.bc1Edit);
+    assert(targetScan.bc2Edit == hash.bc2Edit);
+    assert(targetScan.candidates.size() == hash.candidates.size());
+    for (std::size_t i = 0; i < targetScan.candidates.size(); ++i) {
+        assert(targetScan.candidates[i].coordinateIndex ==
+               hash.candidates[i].coordinateIndex);
+        assert(targetScan.candidates[i].auditBits == hash.candidates[i].auditBits);
+        assert(std::fabs(targetScan.candidates[i].logSequenceLikelihood -
+                         hash.candidates[i].logSequenceLikelihood) < 1e-12);
+    }
 }
 
 void testDecoderAmbiguousBases()
@@ -136,15 +158,58 @@ void testDecoderAmbiguousBases()
     spatial_r1_decoder::Config noFallbackConfig = config;
     noFallbackConfig.nonAcgtDpFallback = false;
     spatial_r1_decoder::Decoder noFallbackDecoder(noFallbackConfig);
-    const spatial_r1_decoder::Result rejectedN = decode(noFallbackDecoder, bc1N);
-    assert(rejectedN.barcodeHadN && rejectedN.barcodeNCount == 1);
-    assert(!rejectedN.barcodeDpChecked);
-    assert(!rejectedN.decoderAssigned);
-    assert(rejectedN.candidates.empty());
+    const spatial_r1_decoder::Result hashOneN = decode(noFallbackDecoder, bc1N);
+    assert(hashOneN.barcodeHadN && hashOneN.barcodeNCount == 1);
+    assert(!hashOneN.barcodeDpChecked);
+    assert(hashOneN.barcodeNHashChecked);
+    assert(hashOneN.decoderAssigned);
+    assert(hashOneN.candidates.size() == 1);
+    assert(hashOneN.bc1Edit == 1 && hashOneN.bc2Edit == 0);
+    const spatial_r1_decoder::Result hashTwoN = decode(noFallbackDecoder, bothN);
+    assert(hashTwoN.barcodeNHashChecked);
+    assert(hashTwoN.decoderAssigned);
+    assert(hashTwoN.candidates.size() == 1);
+    assert(hashTwoN.bc1Edit == 1 && hashTwoN.bc2Edit == 1);
+    const spatial_r1_decoder::Result hashUnmatched =
+        decode(noFallbackDecoder, noMatch);
+    assert(hashUnmatched.barcodeNHashChecked);
+    assert(!hashUnmatched.decoderAssigned);
+    assert(hashUnmatched.candidates.empty());
     const spatial_r1_decoder::Result retainedExact =
         decode(noFallbackDecoder, exactSequence);
     assert(retainedExact.decoderAssigned);
     assert(retainedExact.candidates.size() == 1);
+
+    ambiguousConfig.nonAcgtDpFallback = false;
+    spatial_r1_decoder::Decoder ambiguousHashDecoder(ambiguousConfig);
+    const spatial_r1_decoder::Result hashAmbiguous =
+        decode(ambiguousHashDecoder, bc1N);
+    assert(hashAmbiguous.barcodeNHashChecked);
+    assert(!hashAmbiguous.decoderAssigned);
+    assert(hashAmbiguous.candidates.size() == 2);
+    assert(hashAmbiguous.candidates[0].coordinateIndex == 0);
+    assert(hashAmbiguous.candidates[1].coordinateIndex == 1);
+
+    std::vector<std::string> paritySequences;
+    for (std::size_t position = 9; position < 9 + bc1.size() + bc2.size(); ++position) {
+        std::string value = exactSequence;
+        value[position] = 'N';
+        paritySequences.push_back(value);
+    }
+    for (std::size_t position = 10; position < 9 + bc1.size() + bc2.size(); position += 5) {
+        std::string value = exactSequence;
+        value[position] = 'N';
+        value.erase(position + 2, 1);
+        paritySequences.push_back(value);
+        value = exactSequence;
+        value[position] = 'N';
+        value.insert(position + 2, 1, 'A');
+        paritySequences.push_back(value);
+    }
+    for (const std::string &value : paritySequences) {
+        assertDecodeEquivalent(decode(decoder, value),
+                               decode(noFallbackDecoder, value));
+    }
 
     assert(std::remove(bc1Path.c_str()) == 0);
     assert(std::remove(bc2Path.c_str()) == 0);

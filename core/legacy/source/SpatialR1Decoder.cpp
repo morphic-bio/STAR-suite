@@ -2963,6 +2963,7 @@ struct Decoded {
     bool assigned = false;
     bool sequestered_non_acgt = false;
     bool non_acgt_dp_checked = false;
+    bool non_acgt_hash_checked = false;
     uint32_t non_acgt_null_queries = 0;
     int row2 = 0;
     int col2 = 0;
@@ -5030,6 +5031,76 @@ HitSpan tiered_target_scan_span(
                    static_cast<uint16_t>(found->second.size()), true);
 }
 
+void expand_n_query_variants(
+    std::string& query,
+    std::size_t position,
+    const PackedAnswerCache& lookup,
+    std::vector<std::uint16_t>& candidate_indices
+) {
+    const std::size_t next_n = query.find('N', position);
+    if (next_n == std::string::npos) {
+        const HitSpan hits = lookup.lookup_span(
+            query.data(), static_cast<int>(query.size()));
+        if (hits.found) {
+            for (std::uint16_t index = 0; index < hits.count; ++index) {
+                candidate_indices.push_back(hits.data[index].idx);
+            }
+        }
+        return;
+    }
+    static const char bases[] = {'A', 'C', 'G', 'T'};
+    for (const char base : bases) {
+        query[next_n] = base;
+        expand_n_query_variants(query, next_n + 1, lookup, candidate_indices);
+    }
+    query[next_n] = 'N';
+}
+
+HitSpan tiered_n_hash_span(
+    const std::string& seq, int start, int observed_len,
+    const std::vector<std::string>& targets, int max_distance,
+    const PackedAnswerCache& lookup,
+    std::map<std::pair<int, int>, std::vector<PackedHit> >& cache) {
+    if (start < 0 || observed_len <= 0 ||
+        start + observed_len > static_cast<int>(seq.size())) {
+        return HitSpan(nullptr, 0, true);
+    }
+    const std::size_t n_count = static_cast<std::size_t>(std::count(
+        seq.begin() + start, seq.begin() + start + observed_len, 'N'));
+    if (n_count == 0) {
+        return lookup.lookup_span(seq.data() + start, observed_len);
+    }
+    const std::pair<int, int> key(start, observed_len);
+    std::map<std::pair<int, int>, std::vector<PackedHit> >::iterator found =
+        cache.find(key);
+    if (found == cache.end()) {
+        std::vector<PackedHit> hits;
+        if (n_count <= static_cast<std::size_t>(max_distance)) {
+            std::string query = seq.substr(static_cast<std::size_t>(start),
+                                           static_cast<std::size_t>(observed_len));
+            std::vector<std::uint16_t> candidate_indices;
+            expand_n_query_variants(query, 0, lookup, candidate_indices);
+            std::sort(candidate_indices.begin(), candidate_indices.end());
+            candidate_indices.erase(
+                std::unique(candidate_indices.begin(), candidate_indices.end()),
+                candidate_indices.end());
+            for (const std::uint16_t index : candidate_indices) {
+                const std::string& target = targets[index];
+                const int distance = edit_distance_bounded(
+                    seq.data() + start, observed_len, target.data(),
+                    static_cast<int>(target.size()), max_distance);
+                if (distance <= max_distance) {
+                    hits.push_back(PackedHit(
+                        index, static_cast<std::uint8_t>(distance), 0));
+                }
+            }
+        }
+        found = cache.insert(std::make_pair(key, hits)).first;
+    }
+    return HitSpan(found->second.empty() ? nullptr : found->second.data(),
+                   static_cast<std::uint16_t>(found->second.size()), true);
+}
+
 Decoded decode_record_direct_tiered_h2(const std::string& seq, Config& cfg,
                                        const std::vector<int>& bc1_query_lengths,
                                        const std::vector<int>& bc2_query_lengths,
@@ -5039,13 +5110,17 @@ Decoded decode_record_direct_tiered_h2(const std::string& seq, Config& cfg,
     const int slen = static_cast<int>(seq.size());
     Decoded out;
     const bool audit_oracle = oracle && oracle->resolved;
-    const bool target_scan = window_classification != nullptr
+    const bool non_acgt_window = window_classification != nullptr
         ? (window_classification->n_count != 0 ||
            window_classification->unsupported)
         : direct_best_decode_window_has_non_acgt(seq, cfg);
+    const bool target_scan = non_acgt_window &&
+        cfg.integrated_non_acgt_dp_fallback;
+    const bool n_hash = non_acgt_window && !target_scan;
     std::map<std::pair<int, int>, std::vector<PackedHit> > bc1_target_cache;
     std::map<std::pair<int, int>, std::vector<PackedHit> > bc2_target_cache;
     if (target_scan) out.non_acgt_dp_checked = true;
+    if (n_hash) out.non_acgt_hash_checked = true;
 
     auto note_oracle_candidate = [&](int tier, int row2, int col2, int full_start,
                                      int bc1_edit, int bc2_edit,
@@ -5103,8 +5178,12 @@ Decoded decode_record_direct_tiered_h2(const std::string& seq, Config& cfg,
                     ? tiered_target_scan_span(
                           seq, full_start, bc1_obs_len, cfg.bc1_oligos, 2,
                           bc1_target_cache)
-                    : cfg.bc1_tiered_h2_lookup.lookup_span(
-                          seq.data() + full_start, bc1_obs_len);
+                    : (n_hash
+                        ? tiered_n_hash_span(
+                              seq, full_start, bc1_obs_len, cfg.bc1_oligos, 2,
+                              cfg.bc1_tiered_h2_lookup, bc1_target_cache)
+                        : cfg.bc1_tiered_h2_lookup.lookup_span(
+                              seq.data() + full_start, bc1_obs_len));
                 if (!bc1_hits.found || bc1_hits.count == 0) continue;
                 const int bc2_start = full_start + bc1_obs_len;
                 if (bc2_start < 0 || bc2_start >= slen) continue;
@@ -5120,8 +5199,12 @@ Decoded decode_record_direct_tiered_h2(const std::string& seq, Config& cfg,
                             ? tiered_target_scan_span(
                                   seq, bc2_start, bc2_obs_len, cfg.bc2_oligos, 2,
                                   bc2_target_cache)
-                            : cfg.bc2_tiered_h2_lookup.lookup_span(
-                                  seq.data() + bc2_start, bc2_obs_len);
+                            : (n_hash
+                                ? tiered_n_hash_span(
+                                      seq, bc2_start, bc2_obs_len, cfg.bc2_oligos, 2,
+                                      cfg.bc2_tiered_h2_lookup, bc2_target_cache)
+                                : cfg.bc2_tiered_h2_lookup.lookup_span(
+                                      seq.data() + bc2_start, bc2_obs_len));
                         if (!bc2_hits.found || bc2_hits.count == 0) continue;
                         for (uint16_t j = 0; j < bc2_hits.count; ++j) {
                             const PackedHit& c2 = bc2_hits.data[j];
@@ -7369,14 +7452,11 @@ bool Decoder::decode(const char *sequence, std::size_t sequenceLength,
         static_cast<std::uint8_t>(barcodeClassification.n_count);
     result.barcodeHadUnsupportedBase = barcodeClassification.unsupported;
     if (barcodeClassification.unsupported) return true;
-    if (barcodeClassification.n_count != 0 &&
-        !impl_->config.integrated_non_acgt_dp_fallback) {
-        return true;
-    }
     InternalDecoded decoded = decode_record_direct_tiered_h2(
         sequenceString, impl_->config, impl_->bc1QueryLengths,
         impl_->bc2QueryLengths, nullptr, &barcodeClassification);
     result.barcodeDpChecked = decoded.non_acgt_dp_checked;
+    result.barcodeNHashChecked = decoded.non_acgt_hash_checked;
     result.decoderAssigned = decoded.assigned;
     if (decoded.bc1_edit >= 0) result.bc1Edit = static_cast<std::uint8_t>(decoded.bc1_edit);
     if (decoded.bc2_edit >= 0) result.bc2Edit = static_cast<std::uint8_t>(decoded.bc2_edit);

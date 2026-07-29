@@ -168,8 +168,8 @@ struct PipelineConfig {
     // decoded R1. This catches early returns and thread-local state drift.
     bool requirePairedCompletion = false;
     bool flexFeatureMode = false;
-    // Diagnostic-only switch. Production target-scans barcode windows with N;
-    // false rejects them before that expensive fallback.
+    // Compatibility default target-scans barcode windows with N. False uses
+    // the N-aware hash candidate path and keeps the target scan out of the run.
     bool barcodeNdpFallback = true;
 };
 
@@ -185,6 +185,9 @@ struct PipelineSummary {
     std::uint64_t barcodeDpRecoveredReads = 0;
     std::uint64_t barcodeDpAmbiguousReads = 0;
     std::uint64_t barcodeDpUnassignedReads = 0;
+    std::uint64_t barcodeNHashRecoveredReads = 0;
+    std::uint64_t barcodeNHashAmbiguousReads = 0;
+    std::uint64_t barcodeNHashUnassignedReads = 0;
     std::uint64_t barcodeUnsupportedReads = 0;
     std::uint64_t umiReadsWithN = 0;
     std::uint64_t umiReadsWithInvalidBase = 0;

@@ -543,6 +543,9 @@ struct Pipeline::Impl {
         std::uint64_t barcodeDpRecoveredReads = 0;
         std::uint64_t barcodeDpAmbiguousReads = 0;
         std::uint64_t barcodeDpUnassignedReads = 0;
+        std::uint64_t barcodeNHashRecoveredReads = 0;
+        std::uint64_t barcodeNHashAmbiguousReads = 0;
+        std::uint64_t barcodeNHashUnassignedReads = 0;
         std::uint64_t barcodeUnsupportedReads = 0;
         std::uint64_t umiReadsWithN = 0;
         std::uint64_t umiReadsWithInvalidBase = 0;
@@ -2589,6 +2592,15 @@ bool Pipeline::decode(std::uint32_t threadIndex, const char *sequence,
                 ++thread.barcodeDpUnassignedReads;
             }
         }
+        if (result.barcodeNHashChecked) {
+            if (result.decoderAssigned) {
+                ++thread.barcodeNHashRecoveredReads;
+            } else if (!result.candidates.empty()) {
+                ++thread.barcodeNHashAmbiguousReads;
+            } else {
+                ++thread.barcodeNHashUnassignedReads;
+            }
+        }
         if (result.barcodeHadUnsupportedBase) ++thread.barcodeUnsupportedReads;
         if (result.rawUmiHadN) ++thread.umiReadsWithN;
         if (!result.rawUmiValid) ++thread.umiReadsWithInvalidBase;
@@ -2699,6 +2711,12 @@ bool Pipeline::finalize(const std::vector<std::string> &geneIds,
             impl_->summary.barcodeDpRecoveredReads += thread.barcodeDpRecoveredReads;
             impl_->summary.barcodeDpAmbiguousReads += thread.barcodeDpAmbiguousReads;
             impl_->summary.barcodeDpUnassignedReads += thread.barcodeDpUnassignedReads;
+            impl_->summary.barcodeNHashRecoveredReads +=
+                thread.barcodeNHashRecoveredReads;
+            impl_->summary.barcodeNHashAmbiguousReads +=
+                thread.barcodeNHashAmbiguousReads;
+            impl_->summary.barcodeNHashUnassignedReads +=
+                thread.barcodeNHashUnassignedReads;
             impl_->summary.barcodeUnsupportedReads += thread.barcodeUnsupportedReads;
             impl_->summary.umiReadsWithN += thread.umiReadsWithN;
             impl_->summary.umiReadsWithInvalidBase += thread.umiReadsWithInvalidBase;
@@ -2996,6 +3014,12 @@ bool Pipeline::finalize(const std::vector<std::string> &geneIds,
                    << impl_->summary.barcodeDpAmbiguousReads << '\n'
                    << "barcode_dp_unassigned_reads\t"
                    << impl_->summary.barcodeDpUnassignedReads << '\n'
+                   << "barcode_n_hash_recovered_reads\t"
+                   << impl_->summary.barcodeNHashRecoveredReads << '\n'
+                   << "barcode_n_hash_ambiguous_reads\t"
+                   << impl_->summary.barcodeNHashAmbiguousReads << '\n'
+                   << "barcode_n_hash_unassigned_reads\t"
+                   << impl_->summary.barcodeNHashUnassignedReads << '\n'
                    << "barcode_unsupported_reads\t"
                    << impl_->summary.barcodeUnsupportedReads << '\n'
                    << "umi_reads_with_n\t" << impl_->summary.umiReadsWithN << '\n'
