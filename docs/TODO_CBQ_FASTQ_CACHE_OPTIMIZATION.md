@@ -1,7 +1,7 @@
-# Moved: in-place FASTQ indexing
+# Moved: in-place FASTQ indexing and processing
 
 The indexing method is not a CBQ optimization. Its design and work plan now
-live in `TODO_IN_PLACE_GZIPPED_FASTQ_INDEXING.md`.
+live in `TODO_IN_PLACE_GZIPPED_FASTQ_INDEXING_PROCESSING.md`.
 
 CBQ remains an optional downstream sink that can retain the already-decoded
 records in an existing indexed binary format. It is not the headlining method

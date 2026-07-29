@@ -1,4 +1,4 @@
-# TODO: In-place indexing of gzipped FASTQ files for increased performance
+# TODO: In-place indexing and processing of gzipped FASTQ files for increased performance
 
 Status: deferred until after the preprint benchmarks. The preprint production
 path remains the current direct FASTQ input. Do not substitute a new input
@@ -6,8 +6,8 @@ implementation in a benchmark unless the operator explicitly requests it.
 
 ## Headline and contribution
 
-The headlining method is in-place indexing of gzipped FASTQ files for increased
-performance.
+The headlining method is in-place indexing and processing of gzipped FASTQ files
+for increased performance.
 
 An ordinary unindexed `fastq.gz` is a serial input bottleneck for otherwise
 parallel bioinformatics programs.
@@ -18,10 +18,15 @@ external index, conversion, or recompression pass. Paired inputs must be
 synchronized by record identity, not by assuming that equal compressed offsets
 represent equal record positions.
 
-This FASTQ indexing method is the contribution. It must be usable by arbitrary
-callers and must not depend on STAR, Flex, spatial assays, or CBQ. Optional
-outputs such as CBQ are downstream conveniences, not part of the novelty
-claim.
+This FASTQ indexing-and-processing method is the contribution. It must be
+usable by arbitrary callers and must not depend on STAR, Flex, spatial assays,
+or CBQ. Optional outputs such as CBQ are downstream conveniences, not part of
+the novelty claim.
+
+The in-place index is an active navigation and processing plan, not merely a
+sidecar artifact analogous to producing an index file and stopping. Callers can
+seek to validated FASTQ record intervals and process them immediately through
+independent shard handles or streams.
 
 Relevant existing machinery includes:
 
@@ -227,11 +232,13 @@ anchor-discovery overhead, false-anchor rejection, shard-count scaling,
 first-pass time, CPU, memory, I/O, and failure behavior. Frame the contribution
 around FASTQ-aware in-place paired indexing and independent producer
 streams/handles—not around speculative DEFLATE recovery itself. The title and
-abstract should lead with in-place indexing of gzipped FASTQ files for
-increased performance. "In-place" distinguishes the method from approaches
-that first create new files or convert the input into a serial stream. Present
-optional CBQ output only as a convenient demonstration that the one unavoidable
-gzip pass can also leave an existing durable indexed representation.
+abstract should lead with in-place indexing and processing of gzipped FASTQ
+files for increased performance. "In-place" distinguishes the method from
+approaches that first create new files or convert the input into a serial
+stream; "processing" makes clear that the index is immediately navigable and
+actionable. Present optional CBQ output only as a convenient demonstration that
+the one unavoidable gzip pass can also leave an existing durable indexed
+representation.
 
 ## CBQ afterthought: cancelled conversion baseline
 
