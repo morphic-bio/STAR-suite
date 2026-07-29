@@ -1824,8 +1824,9 @@ soloSpatialBc1Oligos        -
 soloSpatialBc2Oligos        -
     string:                 BC2 full-oligo list for integrated Visium HD R1 decoding
 
-soloSpatialAssignmentProducts all
+soloSpatialAssignmentProducts hard
     string:                 comma-separated integrated products: strict,soft_expected,hard,gated_hard or all
+                            hard is the production default; all explicitly enables the diagnostic four-policy surface
 
 soloSpatialBinSizes         2,8,16
     string:                 comma-separated Visium HD bin sizes selected from 2,8,16

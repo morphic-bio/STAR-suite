@@ -965,7 +965,9 @@ class SpoolCliqueSink : public CliqueSink {
   public:
     SpoolCliqueSink(const std::string &directory,
                     const std::string &sourceRevision,
-                    std::uint32_t shards, std::size_t bufferBytes)
+                    std::uint32_t shards, std::size_t bufferBytes,
+                    std::uint8_t products)
+        : products_(products)
     {
         std::string error;
         writer_ = downstream_spool::ContributionWriter::create(
@@ -1004,6 +1006,8 @@ class SpoolCliqueSink : public CliqueSink {
         const bool gated = values[best].posterior >= kGateMinimumPosterior
             && margin >= kGateMinimumMargin;
 
+        const bool retainAllCandidates =
+            (products_ & ProductSoftExpected) != 0;
         for (std::size_t index = 0; index < values.size(); ++index) {
             downstream_spool::Contribution record = {};
             record.posterior = values[index].posterior;
@@ -1020,6 +1024,20 @@ class SpoolCliqueSink : public CliqueSink {
                 record.flags |= downstream_spool::ContributionHard;
                 if (gated) record.flags |= downstream_spool::ContributionGatedHard;
             }
+            // Soft expected counts require the complete posterior candidate
+            // field. Integer policies require only records selected by their
+            // policy flags. Keeping this product-aware avoids carrying losing
+            // candidates through the production hard-only spool while leaving
+            // the explicit diagnostic `all` path byte-for-byte unchanged.
+            const bool selectedInteger =
+                (((products_ & ProductStrict) != 0)
+                     && ((record.flags & downstream_spool::ContributionStrict) != 0))
+                || (((products_ & ProductHard) != 0)
+                     && ((record.flags & downstream_spool::ContributionHard) != 0))
+                || (((products_ & ProductGatedHard) != 0)
+                     && ((record.flags
+                          & downstream_spool::ContributionGatedHard) != 0));
+            if (!retainAllCandidates && !selectedInteger) continue;
             std::string error;
             if (!writer_->append(record, error)) throw std::runtime_error(error);
         }
@@ -1039,6 +1057,7 @@ class SpoolCliqueSink : public CliqueSink {
 
   private:
     std::unique_ptr<downstream_spool::ContributionWriter> writer_;
+    std::uint8_t products_ = 0;
     std::uint64_t cliques_ = 0;
 };
 
@@ -2649,7 +2668,8 @@ bool Pipeline::finalize(const std::vector<std::string> &geneIds,
                                  impl_->config.sourceRevision,
                                  impl_->config.downstreamSpoolShards,
                                  static_cast<std::size_t>(
-                                     impl_->config.downstreamSpoolBufferBytes));
+                                     impl_->config.downstreamSpoolBufferBytes),
+                                 impl_->config.products);
             buildCliquesSpill(*impl_, h0, sink,
                               coordinateBits, featureUsed);
             sink.finish(contributionRuns,
