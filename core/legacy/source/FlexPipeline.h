@@ -137,9 +137,13 @@ struct FlexPipelineCounters {
     std::atomic<uint64_t> triageKeep{0};
     std::atomic<uint64_t> triageDeny{0};
     std::atomic<uint64_t> triageMiss{0};
-    uint64_t perLaneReads[64];
+    std::atomic<uint64_t> perLaneReads[64];
 
-    FlexPipelineCounters() { std::memset(perLaneReads, 0, sizeof(perLaneReads)); }
+    FlexPipelineCounters() {
+        for (size_t lane = 0; lane < 64; ++lane) {
+            perLaneReads[lane].store(0, std::memory_order_relaxed);
+        }
+    }
 };
 
 struct LaneFiles {
@@ -173,6 +177,9 @@ struct FlexPipelineState {
     std::vector<LaneFiles> laneFiles;
     // Track how many fused threads are still active (reading or aligning)
     int nFusedThreads = 0;
+    // Keep a bounded producer set whenever alignment misses must be drained.
+    // The remaining fused threads enter the alignment role immediately.
+    int nFusedProducerThreads = 0;
     std::vector<FlexCbqRangeTask> cbqRangeTasks;
     std::atomic<int> nextCbqRangeIdx{0};
 

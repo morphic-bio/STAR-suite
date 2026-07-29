@@ -919,42 +919,51 @@ void *flexLaneReaderFullThread(void *arg) {
 
     const bool useCbqRangeTasks = (P.readFilesTypeN == 20 && P.cbqInputActive &&
                                    !st->cbqRangeTasks.empty());
-    if (useCbqRangeTasks) {
-        FlexCbqRangeTask task;
-        while (st->claimNextCbqRange(&task)) {
-            ensureSampleDetector();
-            const std::string &cbqPath =
-                st->laneFiles[static_cast<size_t>(task.laneId)].r2path;
-            processOneCbqRange(st, P, task, cbqPath, readFeat, stats,
-                               samplePreFilter, sampleDet, sampleDetReady,
-                               localBar, noAlign);
-        }
-    } else {
-        // Phase 1: Lane work-stealing loop — claim and process lanes until none remain
-        int lane;
-        while ((lane = st->claimNextLane()) >= 0) {
-            // Lazy-init SampleDetector on first lane claim (threads that never
-            // claim a lane skip the file I/O entirely)
-            ensureSampleDetector();
+    // Without a producer budget, every fully-fused worker can block while
+    // pushing an alignment miss into a full queue, leaving no worker to enter
+    // the advertised role-switch phase. Reserve workers for immediate queue
+    // draining whenever alignment is enabled. Producers continue claiming
+    // ranges/lanes until all input work is exhausted.
+    const bool produceInput = noAlign
+        || ctx->threadId < st->nFusedProducerThreads;
+    if (produceInput) {
+        if (useCbqRangeTasks) {
+            FlexCbqRangeTask task;
+            while (st->claimNextCbqRange(&task)) {
+                ensureSampleDetector();
+                const std::string &cbqPath =
+                    st->laneFiles[static_cast<size_t>(task.laneId)].r2path;
+                processOneCbqRange(st, P, task, cbqPath, readFeat, stats,
+                                   samplePreFilter, sampleDet, sampleDetReady,
+                                   localBar, noAlign);
+            }
+        } else {
+            // Phase 1: Lane work-stealing loop — claim and process lanes until none remain
+            int lane;
+            while ((lane = st->claimNextLane()) >= 0) {
+                // Lazy-init SampleDetector on first lane claim (threads that never
+                // claim a lane skip the file I/O entirely)
+                ensureSampleDetector();
 
-            const std::string &r2path = st->laneFiles[lane].r2path;
-            if (P.readFilesTypeN == 20 && P.cbqInputActive) {
-                processOneCbqLane(st, P, lane, r2path, readFeat, stats,
-                                  samplePreFilter, sampleDet, sampleDetReady, localBar, noAlign);
-            } else {
-                const std::string &r1path = st->laneFiles[lane].r1path;
-                gzFile gzR2 = gzopen(r2path.c_str(), "rb");
-                gzFile gzR1 = gzopen(r1path.c_str(), "rb");
-                if (!gzR2 || !gzR1) {
-                    if (gzR2) gzclose(gzR2);
-                    if (gzR1) gzclose(gzR1);
-                    continue;
+                const std::string &r2path = st->laneFiles[lane].r2path;
+                if (P.readFilesTypeN == 20 && P.cbqInputActive) {
+                    processOneCbqLane(st, P, lane, r2path, readFeat, stats,
+                                      samplePreFilter, sampleDet, sampleDetReady, localBar, noAlign);
+                } else {
+                    const std::string &r1path = st->laneFiles[lane].r1path;
+                    gzFile gzR2 = gzopen(r2path.c_str(), "rb");
+                    gzFile gzR1 = gzopen(r1path.c_str(), "rb");
+                    if (!gzR2 || !gzR1) {
+                        if (gzR2) gzclose(gzR2);
+                        if (gzR1) gzclose(gzR1);
+                        continue;
+                    }
+                    gzbuffer(gzR2, kGzBufSize);
+                    gzbuffer(gzR1, kGzBufSize);
+
+                    processOneLane(st, P, lane, gzR2, gzR1, readFeat, stats,
+                                   samplePreFilter, sampleDet, sampleDetReady, localBar, noAlign);
                 }
-                gzbuffer(gzR2, kGzBufSize);
-                gzbuffer(gzR1, kGzBufSize);
-
-                processOneLane(st, P, lane, gzR2, gzR1, readFeat, stats,
-                               samplePreFilter, sampleDet, sampleDetReady, localBar, noAlign);
             }
         }
     }

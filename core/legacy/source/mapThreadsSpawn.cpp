@@ -251,6 +251,9 @@ static void mapThreadsSpawnFlexPipeline(Parameters &P, ReadAlignChunk** RAchunk)
     const int nFusedThreads = fullyFused ? P.runThreadN : 0;
 
     const bool noAlign = (P.pSolo.flexNoAlign != 0);
+    const int nFusedProducerThreads = fullyFused
+        ? (noAlign ? nFusedThreads : std::max(1, nFusedThreads / 2))
+        : 0;
     P.inOut->logMain << "Flex pipeline: runThreadN=" << P.runThreadN
                      << ", nLanes=" << nLanes
                      << ", triage=" << actualNTriage
@@ -272,6 +275,13 @@ static void mapThreadsSpawnFlexPipeline(Parameters &P, ReadAlignChunk** RAchunk)
             << "packing with laneBits=" << laneBits
             << " localBits=" << (32 - laneBits) << "\n" << std::flush;
     }
+    if (fullyFused) {
+        P.inOut->logMain
+            << "Flex fused role allocation: inputProducers="
+            << nFusedProducerThreads
+            << " immediateAlignmentWorkers="
+            << (nFusedThreads - nFusedProducerThreads) << "\n" << std::flush;
+    }
 
     FlexPipelineState state;
     state.init(nLanes, actualNSolo, actualNTriage);
@@ -289,9 +299,11 @@ static void mapThreadsSpawnFlexPipeline(Parameters &P, ReadAlignChunk** RAchunk)
             }
         }
         state.nFusedThreads = nFusedThreads;
+        state.nFusedProducerThreads = nFusedProducerThreads;
         if (P.readFilesTypeN == 20 && P.cbqInputActive) {
             std::string cbqRangeReason;
-            if (flexPrepareCbqRangeTasks(&state, P, nFusedThreads, &cbqRangeReason)) {
+            if (flexPrepareCbqRangeTasks(
+                    &state, P, nFusedProducerThreads, &cbqRangeReason)) {
                 P.inOut->logMain << "Flex CBQ range: active ("
                                  << cbqRangeReason << ")\n" << std::flush;
             } else {
@@ -365,7 +377,8 @@ static void mapThreadsSpawnFlexPipeline(Parameters &P, ReadAlignChunk** RAchunk)
                          << ", triageDeny=" << state.counters.triageDeny.load()
                          << ", triageMiss=" << state.counters.triageMiss.load() << "\n";
         for (int i = 0; i < nLanes; ++i) {
-            P.inOut->logMain << "  Lane " << i << ": " << state.counters.perLaneReads[i] << " reads\n";
+            P.inOut->logMain << "  Lane " << i << ": "
+                             << state.counters.perLaneReads[i].load() << " reads\n";
         }
         P.inOut->logMain << std::flush;
         return;
@@ -504,7 +517,8 @@ static void mapThreadsSpawnFlexPipeline(Parameters &P, ReadAlignChunk** RAchunk)
                      << ", triageDeny=" << state.counters.triageDeny.load()
                      << ", triageMiss=" << state.counters.triageMiss.load() << "\n";
     for (int i = 0; i < nLanes; ++i) {
-        P.inOut->logMain << "  Lane " << i << ": " << state.counters.perLaneReads[i] << " reads\n";
+        P.inOut->logMain << "  Lane " << i << ": "
+                         << state.counters.perLaneReads[i].load() << " reads\n";
     }
     P.inOut->logMain << std::flush;
 }
@@ -558,6 +572,7 @@ void runFlexNoGenomeCountOnly(Parameters &P) {
         }
     }
     state.nFusedThreads = nFusedThreads;
+    state.nFusedProducerThreads = nFusedThreads;
     if (P.readFilesTypeN == 20 && P.cbqInputActive) {
         std::string cbqRangeReason;
         if (flexPrepareCbqRangeTasks(&state, P, nFusedThreads, &cbqRangeReason)) {
@@ -628,7 +643,8 @@ void runFlexNoGenomeCountOnly(Parameters &P) {
                      << ", triageDeny=" << state.counters.triageDeny.load()
                      << ", triageMiss=" << state.counters.triageMiss.load() << "\n";
     for (int i = 0; i < nLanes; ++i) {
-        P.inOut->logMain << "  Lane " << i << ": " << state.counters.perLaneReads[i] << " reads\n";
+        P.inOut->logMain << "  Lane " << i << ": "
+                         << state.counters.perLaneReads[i].load() << " reads\n";
     }
     P.inOut->logMain << std::flush;
 

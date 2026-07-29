@@ -37,6 +37,14 @@ STAR's original lane-concatenated input order without a preliminary full FASTQ
 scan. This is required because spatial clique partitioning intentionally uses
 the original input order as its final deterministic tie break.
 
+Fully fused input with alignment enabled reserves half of the worker threads
+for immediate alignment-queue draining. The other half claim CBQ ranges (or
+whole lanes) until input is exhausted and then switch to alignment. This
+producer budget is mandatory: if every worker claims an input range, all
+workers can block on a full alignment-miss queue before any reaches the
+role-switch phase. Per-lane counters are atomic because indexed ranges from one
+lane are processed concurrently.
+
 `--flexPipeline no` is retained only to diagnose compatibility with historical
 artifacts. It must not be added to a production recipe, benchmark, or relaunch
 without explicit user authorization for that exact run.
