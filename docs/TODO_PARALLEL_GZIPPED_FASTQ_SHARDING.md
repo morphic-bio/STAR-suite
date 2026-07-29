@@ -1,4 +1,4 @@
-# TODO: Parallel sharding of gzipped FASTQ files for increased performance
+# TODO: In-place parallel sharding of gzipped FASTQ files for increased performance
 
 Status: deferred until after the preprint benchmarks. The preprint production
 path remains the current direct FASTQ input. Do not substitute a new input
@@ -6,8 +6,8 @@ implementation in a benchmark unless the operator explicitly requests it.
 
 ## Headline and contribution
 
-The headlining method is parallel sharding of gzipped FASTQ files for increased
-performance.
+The headlining method is in-place parallel sharding of gzipped FASTQ files for
+increased performance.
 
 An ordinary unindexed `fastq.gz` is a serial input bottleneck for otherwise
 parallel bioinformatics programs.
@@ -225,10 +225,11 @@ anchor-discovery overhead, false-anchor rejection, shard-count scaling,
 first-pass time, CPU, memory, I/O, and failure behavior. Frame the contribution
 around FASTQ-aware, index-free paired synchronization and independent producer
 streams/handles—not around speculative DEFLATE recovery itself. The title and
-abstract should lead with parallel sharding of gzipped FASTQ files for
-increased performance. Present optional CBQ output only as a convenient
-demonstration that the one unavoidable gzip pass can also leave an existing
-durable indexed representation.
+abstract should lead with in-place parallel sharding of gzipped FASTQ files for
+increased performance. "In-place" distinguishes the method from approaches
+that first create new files or convert the input into a serial stream. Present
+optional CBQ output only as a convenient demonstration that the one unavoidable
+gzip pass can also leave an existing durable indexed representation.
 
 ## CBQ afterthought: cancelled conversion baseline
 

@@ -1,4 +1,4 @@
-# Moved: parallel FASTQ sharding
+# Moved: in-place parallel FASTQ sharding
 
 The sharding method is not a CBQ optimization. Its design and work plan now
 live in `TODO_PARALLEL_GZIPPED_FASTQ_SHARDING.md`.
