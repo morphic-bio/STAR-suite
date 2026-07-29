@@ -242,7 +242,7 @@ OBJECTS = systemFunctions.o SoloMemoryProfile.o CountingSinkStress.o funPrimaryA
 	Transcriptome.o Transcriptome_quantAlign.o Transcriptome_geneFullAlignOverlap.o \
 	ReadAlign_quantTranscriptome.o Quantifications.o Transcriptome_geneCountsAddAlign.o \
 	sjdbLoadFromFiles.o sjdbLoadFromStream.o sjdbPrepare.o sjdbBuildIndex.o sjdbInsertJunctions.o mapThreadsSpawn.o \
-	FastxInputModule.o CbqInputModule.o \
+	FastxInputModule.o FastxProducerPool.o CbqInputModule.o \
 	Parameters_readFilesInit.o Parameters_openReadsFiles.cpp Parameters_closeReadsFiles.cpp Parameters_batchReset.cpp Parameters_readSAMheader.o \
 	bam_cat.o serviceFuns.o GlobalVariables.cpp \
 	BAMoutput.o BAMfunctions.o ReadAlign_alignBAM.o BAMbinSortByCoordinate.o signalFromBAM.o bamRemoveDuplicates.o BAMbinSortUnmapped.o \
@@ -314,9 +314,9 @@ trim_qc_fastq : htslib/libhts.a TrimQc.o TrimQcOutput.o Stats.o TimeFunctions.o 
 # Standalone input-contract harness for FASTX module parity/smoke tests.
 .PHONY: fastx-input-harness
 fastx-input-harness : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
-fastx-input-harness : LDFLAGS := $(LDFLAGSextra) -lz -lcrypto
-fastx-input-harness : FastxInputModule.o input/fastx_input_harness.cpp
-	$(CXX) -o fastx_input_harness $(CXXFLAGS) input/fastx_input_harness.cpp FastxInputModule.o $(LDFLAGS)
+fastx-input-harness : LDFLAGS := $(LDFLAGSextra) -pthread -lz -lcrypto
+fastx-input-harness : FastxInputModule.o FastxProducerPool.o input/fastx_input_harness.cpp
+	$(CXX) -o fastx_input_harness $(CXXFLAGS) input/fastx_input_harness.cpp FastxInputModule.o FastxProducerPool.o $(LDFLAGS)
 
 # Standalone BINSEQ probe harness. This is not production STAR integration; it
 # decodes CBQ through bqtools and validates the result through the input contract.
@@ -617,6 +617,9 @@ flex/%.o: flex/%.cpp
 	$(CXX) -c $(CPPFLAGS) $(CXXFLAGS) $(CXXFLAGS_common) $< -o $@
 
 FastxInputModule.o: input/FastxInputModule.cpp input/FastxInputModule.h input/InputContract.h
+	$(CXX) -c $(CPPFLAGS) $(CXXFLAGS) $(CXXFLAGS_common) $< -o $@
+
+FastxProducerPool.o: input/FastxProducerPool.cpp input/FastxProducerPool.h input/FastxInputModule.h input/InputContract.h
 	$(CXX) -c $(CPPFLAGS) $(CXXFLAGS) $(CXXFLAGS_common) $< -o $@
 
 BinseqInputProbeModule.o: input/BinseqInputProbeModule.cpp input/BinseqInputProbeModule.h input/FastxInputModule.h input/InputContract.h

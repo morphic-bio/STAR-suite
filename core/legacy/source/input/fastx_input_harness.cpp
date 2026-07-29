@@ -1,10 +1,12 @@
 #include "input/FastxInputModule.h"
+#include "input/FastxProducerPool.h"
 
 #include <algorithm>
 #include <cctype>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <memory>
 #include <openssl/sha.h>
 #include <sstream>
 #include <stdexcept>
@@ -12,6 +14,8 @@
 #include <vector>
 
 using star::input::FastxInputModule;
+using star::input::FastxProducerPool;
+using star::input::InputModule;
 using star::input::InputRecord;
 using star::input::InputSourcePlan;
 using star::input::InputStatus;
@@ -98,6 +102,8 @@ struct HarnessOptions {
     std::vector<char> read_name_separator_chars{' '};
     bool legacy_zcat = false;
     bool dump_fastq = false;
+    bool producer_pool = false;
+    uint64_t max_records = 0;
 };
 
 void usage(std::ostream& out) {
@@ -108,6 +114,8 @@ void usage(std::ostream& out) {
         << "  --readFilesPrefix PREFIX\n"
         << "  --readNameSeparator space|none|CHAR[,CHAR...]\n"
         << "  --readFilesLegacyZcat Yes|No\n"
+        << "  --producer-pool\n"
+        << "  --max-records N\n"
         << "  --dump-fastq\n";
 }
 
@@ -175,6 +183,13 @@ HarnessOptions parse_args(int argc, char* argv[]) {
             }
         } else if (arg == "--dump-fastq") {
             opts.dump_fastq = true;
+        } else if (arg == "--producer-pool") {
+            opts.producer_pool = true;
+        } else if (arg == "--max-records") {
+            if (++ii >= argc) {
+                throw std::runtime_error("--max-records requires a value");
+            }
+            opts.max_records = static_cast<uint64_t>(std::stoull(argv[ii]));
         } else {
             throw std::runtime_error("unknown option: " + arg);
         }
@@ -299,21 +314,28 @@ void emit_fastq(const InputRecord& record, std::ostream& out) {
 
 int run(const HarnessOptions& opts) {
     InputSourcePlan plan = build_plan(opts);
-    FastxInputModule module;
+    std::unique_ptr<InputModule> module;
+    if (opts.producer_pool) {
+        // Small batches exercise queue rollover in synthetic smoke tests.
+        module.reset(new FastxProducerPool(0, 1, 2));
+    } else {
+        module.reset(new FastxInputModule());
+    }
     std::string error;
-    if (!module.configure(plan, &error)) {
+    if (!module->configure(plan, &error)) {
         std::cerr << "configure failed: " << error << "\n";
         return 2;
     }
-    if (!module.open(&error)) {
+    if (!module->open(&error)) {
         std::cerr << "open failed: " << error << "\n";
         return 2;
     }
 
     InputRecord record;
+    uint64_t emitted_records = 0;
     while (true) {
         error.clear();
-        const InputStatus status = module.next_record(&record, &error);
+        const InputStatus status = module->next_record(&record, &error);
         if (status == InputStatus::End) {
             break;
         }
@@ -326,8 +348,12 @@ int run(const HarnessOptions& opts) {
         } else {
             emit_tsv(record, std::cout);
         }
+        ++emitted_records;
+        if (opts.max_records != 0 && emitted_records >= opts.max_records) {
+            break;
+        }
     }
-    module.close();
+    module->close();
     return 0;
 }
 

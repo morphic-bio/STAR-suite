@@ -65,6 +65,21 @@ gzip -c "${OUT_DIR}/inputs/lane1_R3.fastq" > "${OUT_DIR}/inputs/lane1_R3.fastq.g
 gzip -c "${OUT_DIR}/inputs/lane2_R1.fastq" > "${OUT_DIR}/inputs/lane2_R1.fastq.gz"
 gzip -c "${OUT_DIR}/inputs/lane2_R2.fastq" > "${OUT_DIR}/inputs/lane2_R2.fastq.gz"
 
+cat > "${OUT_DIR}/inputs/truncated_R2.fastq" <<'FASTQ'
+@readA/2 2:N:0:ACGT
+TGCATG
++
+FASTQ
+
+# Enough records to fill both bounded lane queues when the consumer exits
+# after its first record. This exercises cancellation of blocked producers.
+: > "${OUT_DIR}/inputs/busy_R1.fastq"
+: > "${OUT_DIR}/inputs/busy_R2.fastq"
+for ((ii = 0; ii < 20; ++ii)); do
+  printf '@busy%03d/1 1:N:0:ACGT\nACGTAC\n+\nIIIIII\n' "$ii" >> "${OUT_DIR}/inputs/busy_R1.fastq"
+  printf '@busy%03d/2 2:N:0:ACGT\nTGCATG\n+\nIIIIII\n' "$ii" >> "${OUT_DIR}/inputs/busy_R2.fastq"
+done
+
 cat > "${OUT_DIR}/manifest.tsv" <<EOF_MANIFEST
 ${OUT_DIR}/inputs/lane1_R1.fastq.gz	${OUT_DIR}/inputs/lane1_R2.fastq.gz	ID:lane1
 ${OUT_DIR}/inputs/lane2_R1.fastq.gz	${OUT_DIR}/inputs/lane2_R2.fastq.gz	ID:lane2
@@ -88,6 +103,16 @@ EOF_MANIFEST
                 "${OUT_DIR}/inputs/lane1_R2.fastq,${OUT_DIR}/inputs/lane2_R2.fastq" \
   > "${OUT_DIR}/dumps/comma_lanes_pair.tsv"
 
+"${BIN}" --producer-pool --readNameSeparator / \
+  --readFilesIn "${OUT_DIR}/inputs/lane1_R1.fastq,${OUT_DIR}/inputs/lane2_R1.fastq" \
+                "${OUT_DIR}/inputs/lane1_R2.fastq,${OUT_DIR}/inputs/lane2_R2.fastq" \
+  > "${OUT_DIR}/dumps/comma_lanes_pair_pool.tsv"
+
+"${BIN}" --producer-pool --readNameSeparator / \
+  --readFilesIn "${OUT_DIR}/inputs/lane1_R1.fastq.gz,${OUT_DIR}/inputs/lane2_R1.fastq.gz" \
+                "${OUT_DIR}/inputs/lane1_R2.fastq.gz,${OUT_DIR}/inputs/lane2_R2.fastq.gz" \
+  > "${OUT_DIR}/dumps/comma_lanes_gzip_pool.tsv"
+
 "${BIN}" --readNameSeparator / \
   --readFilesManifest "${OUT_DIR}/manifest.tsv" \
   > "${OUT_DIR}/dumps/manifest_gzip_pair.tsv"
@@ -109,6 +134,24 @@ EOF_MANIFEST
 diff -u "${OUT_DIR}/dumps/plain_pair.tsv" "${OUT_DIR}/dumps/gzip_internal_pair.tsv"
 diff -u "${OUT_DIR}/dumps/plain_pair.tsv" "${OUT_DIR}/dumps/gzip_zcat_pair.tsv"
 diff -u "${OUT_DIR}/dumps/comma_lanes_pair.tsv" "${OUT_DIR}/dumps/manifest_gzip_pair.tsv"
+diff -u "${OUT_DIR}/dumps/comma_lanes_pair.tsv" "${OUT_DIR}/dumps/comma_lanes_pair_pool.tsv"
+diff -u "${OUT_DIR}/dumps/comma_lanes_pair.tsv" "${OUT_DIR}/dumps/comma_lanes_gzip_pool.tsv"
+
+# Closing a partially consumed pool must wake and join producers even when
+# later-lane queues are full.
+timeout 10 "${BIN}" --producer-pool --max-records 1 --readNameSeparator / \
+  --readFilesIn "${OUT_DIR}/inputs/busy_R1.fastq,${OUT_DIR}/inputs/busy_R1.fastq" \
+                "${OUT_DIR}/inputs/busy_R2.fastq,${OUT_DIR}/inputs/busy_R2.fastq" \
+  > "${OUT_DIR}/dumps/pool_early_close.tsv"
+
+# A producer-side parse error must propagate to the consumer without a hang.
+if timeout 10 "${BIN}" --producer-pool --readNameSeparator / \
+  --readFilesIn "${OUT_DIR}/inputs/lane1_R1.fastq" "${OUT_DIR}/inputs/truncated_R2.fastq" \
+  > "${OUT_DIR}/dumps/pool_truncated.tsv" 2> "${OUT_DIR}/dumps/pool_truncated.err"; then
+  echo "ERROR: truncated producer input unexpectedly succeeded" >&2
+  exit 1
+fi
+grep -F "FASTQ record is missing quality line" "${OUT_DIR}/dumps/pool_truncated.err" >/dev/null
 
 python3 - "${OUT_DIR}/dumps" <<'PY'
 import pathlib

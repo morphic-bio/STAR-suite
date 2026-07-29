@@ -2,6 +2,7 @@
 #include "ErrorWarning.h"
 #include "input/CbqInputModule.h"
 #include "input/FastxInputModule.h"
+#include "input/FastxProducerPool.h"
 #include <fstream>
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -33,6 +34,13 @@ bool isFastqPathLocal(const string& value) {
            endsWithCaseInsensitiveLocal(value, ".fq") ||
            endsWithCaseInsensitiveLocal(value, ".fastq.gz") ||
            endsWithCaseInsensitiveLocal(value, ".fq.gz");
+}
+
+string lowerAsciiLocal(string value) {
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    return value;
 }
 
 bool writeAll(int fd, const char* data, size_t size) {
@@ -334,8 +342,28 @@ void Parameters::openReadsFiles()
                 readFilesPrefixFinal,
                 readFilesUseInternalGzip);
 
+        const string producerConsumerMode = lowerAsciiLocal(readFilesFastxProducerConsumer);
+        if (producerConsumerMode != "auto" && producerConsumerMode != "off" &&
+            producerConsumerMode != "on") {
+            ostringstream errOut;
+            errOut << "EXITING because of fatal input ERROR: --readFilesFastxProducerConsumer must be auto, off, or on\n";
+            errOut << "Received: " << readFilesFastxProducerConsumer << "\n";
+            exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+        }
+
+        // The ordered producer pool is production-default for integrated GEX,
+        // where gzip parsing under the shared chunk mutex is a measured input
+        // bottleneck.  Explicit `on` exposes the same general input service to
+        // other STAR pipelines while their broader regression audit proceeds.
+        fastxProducerPoolActive = producerConsumerMode == "on" ||
+            (producerConsumerMode == "auto" && soloSpatialGexIntegratedEnabled);
+
         string inputContractError;
-        fastxInputModule.reset(new star::input::FastxInputModule());
+        if (fastxProducerPoolActive) {
+            fastxInputModule.reset(new star::input::FastxProducerPool(readFilesFastxProducerThreads));
+        } else {
+            fastxInputModule.reset(new star::input::FastxInputModule());
+        }
         if (!fastxInputModule->configure(fastxInputPlan, &inputContractError)) {
             ostringstream errOut;
             errOut << "EXITING because of fatal input ERROR: invalid Fastx input source plan at open\n";
@@ -353,6 +381,17 @@ void Parameters::openReadsFiles()
         fastxInputExhausted = false;
         fastxInputPendingRecord.reset();
         fastxInputLastLoggedLane = -1;
+        inOut->logMain << "NOTE: FASTX input module=" << fastxInputModule->name();
+        if (fastxProducerPoolActive) {
+            const star::input::FastxProducerPool* pool =
+                dynamic_cast<const star::input::FastxProducerPool*>(fastxInputModule.get());
+            if (pool != nullptr) {
+                inOut->logMain << " producers=" << pool->producer_count()
+                               << " records_per_batch=" << pool->records_per_batch()
+                               << " queued_batches_per_lane=" << pool->queued_batches_per_lane();
+            }
+        }
+        inOut->logMain << "\n" << flush;
         return;
     }
 

@@ -342,6 +342,7 @@ void Parameters::readFilesInit()
                 readFilesPrefixFinal,
                 readFilesUseInternalGzip);
         fastxInputActive = false;
+        fastxProducerPoolActive = false;
         fastxInputPendingRecordValid = false;
         fastxInputExhausted = false;
         fastxInputLastLoggedLane = -1;

@@ -1,8 +1,11 @@
 # TODO: In-place indexing and processing of gzipped FASTQ files for increased performance
 
-Status: deferred until after the preprint benchmarks. The preprint production
-path remains the current direct FASTQ input. Do not substitute a new input
-implementation in a benchmark unless the operator explicitly requests it.
+Status: the ordered lane-level producer/consumer foundation is implemented in
+`input/FastxProducerPool.{h,cpp}` and documented in
+`docs/FASTX_PRODUCER_CONSUMER_ARCHITECTURE_20260729.md`. The speculative
+in-place gzip-sharding method remains deferred until after the preprint
+benchmarks. Do not substitute that unimplemented sharder in a benchmark unless
+the operator explicitly requests it.
 
 ## Headline and contribution
 
@@ -170,7 +173,10 @@ writer architecture rather than invent another durable format.
    independent of STAR mapping and CBQ encoding.
 2. Expose independent record handles, an ordered compatibility stream, a
    multi-stream process surface, a C++ API, and a small C ABI. Validate adapter
-   use with at least one consumer outside STAR Suite.
+   use with `bwa-mem2` as the primary consumer outside STAR Suite: feed
+   disjoint synchronized paired-FASTQ shard intervals, merge output by the
+   deterministic source key where necessary, and verify alignment identity
+   against ordinary FASTQ input before measuring end-to-end scaling.
 3. Benchmark the input engine alone before integrating it into an aligner.
    Measure anchor discovery, decompression, FASTQ parsing, mate validation,
    delivery throughput, thread scaling, CPU, memory, and I/O.
@@ -211,8 +217,8 @@ writer architecture rather than invent another durable format.
   covered. Benchmark against `zcat`, `pigz`, rapidgzip alone, `pugz`, and
   `mim` where licensing and supported inputs permit.
 - The same library demonstrates correct integration with multiple independent
-  bioinformatics consumers; STAR Suite is the demanding end-to-end example,
-  not the only usable host.
+  bioinformatics consumers. `bwa-mem2` is the primary external demonstration;
+  STAR Suite is the demanding end-to-end example, not the only usable host.
 - Optional standalone and fused CBQ modes reproduce the same ordered CBQ
   records and the same STAR results as direct FASTQ.
 - Run the authorized full-slide benchmark only after the 100K gates pass.

@@ -109,7 +109,7 @@ private:
 
 class GzipLineReader : public LineReader {
 public:
-    GzipLineReader() : file_(nullptr) {}
+    GzipLineReader() : file_(nullptr), buffer_(64 * 1024) {}
 
     ~GzipLineReader() override {
         close();
@@ -120,35 +120,53 @@ public:
         if (file_ == nullptr) {
             return set_error(error, "could not open gzip FASTX file: " + source);
         }
+        // zlib otherwise uses a small default input buffer.  FASTQ is read in
+        // long sequential runs, so a 1 MiB inflate buffer substantially cuts
+        // refill overhead without changing stream semantics.
+        gzbuffer(file_, 1024 * 1024);
         source_ = source;
         return true;
     }
 
     bool getline(std::string& line, std::string* error) override {
         line.clear();
-        int c = 0;
-        while ((c = gzgetc(file_)) != -1) {
-            if (c == '\n') {
+        for (;;) {
+            char* result = gzgets(file_, buffer_.data(), static_cast<int>(buffer_.size()));
+            if (result == nullptr) {
+                if (!line.empty()) {
+                    if (!line.empty() && line.back() == '\r') {
+                        line.pop_back();
+                    }
+                    return true;
+                }
+                if (!gzeof(file_)) {
+                    int zerr = Z_OK;
+                    const char* zmsg = gzerror(file_, &zerr);
+                    if (zerr != Z_OK && zerr != Z_STREAM_END) {
+                        return set_error(error, "error reading gzip FASTX file " + source_ + ": " +
+                                              (zmsg != nullptr ? std::string(zmsg) : std::string("unknown zlib error")));
+                    }
+                }
+                return false;
+            }
+
+            const size_t length = std::strlen(buffer_.data());
+            line.append(buffer_.data(), length);
+            if (!line.empty() && line.back() == '\n') {
+                line.pop_back();
+                if (!line.empty() && line.back() == '\r') {
+                    line.pop_back();
+                }
                 return true;
             }
-            if (c != '\r') {
-                line.push_back(static_cast<char>(c));
+
+            if (gzeof(file_)) {
+                if (!line.empty() && line.back() == '\r') {
+                    line.pop_back();
+                }
+                return !line.empty();
             }
         }
-
-        if (!line.empty()) {
-            return true;
-        }
-
-        if (!gzeof(file_)) {
-            int zerr = Z_OK;
-            const char* zmsg = gzerror(file_, &zerr);
-            if (zerr != Z_OK && zerr != Z_STREAM_END) {
-                return set_error(error, "error reading gzip FASTX file " + source_ + ": " +
-                                      (zmsg != nullptr ? std::string(zmsg) : std::string("unknown zlib error")));
-            }
-        }
-        return false;
     }
 
     void close() override {
@@ -161,6 +179,7 @@ public:
 private:
     gzFile file_;
     std::string source_;
+    std::vector<char> buffer_;
 };
 
 class CommandLineReader : public LineReader {

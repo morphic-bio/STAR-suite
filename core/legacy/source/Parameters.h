@@ -34,7 +34,7 @@ namespace star {
 namespace input {
 class CbqInputModule;
 struct CbqReadBatchView;
-class FastxInputModule;
+class InputModule;
 struct InputRecord;
 } // namespace input
 } // namespace star
@@ -148,13 +148,16 @@ class Parameters {
         string readFilesLegacyZcatStr = "No"; // Yes/No: force legacy external zcat path for .gz FASTQ
         bool readFilesLegacyZcat = false;     // parsed bool from readFilesLegacyZcatStr
         bool readFilesUseInternalGzip = false; // derived at readFilesInit(): auto internal gzip stream path
+        string readFilesFastxProducerConsumer = "auto"; // auto|off|on: concurrent lane FASTX producers
+        uint32 readFilesFastxProducerThreads = 0; // 0=auto (up to four, bounded by lane count)
                
         string readFilesCommandString; //actual command string
         int readFilesIndex;
         pid_t readFilesCommandPID[MAX_N_MATES];
-        std::shared_ptr<star::input::FastxInputModule> fastxInputModule;
+        std::shared_ptr<star::input::InputModule> fastxInputModule;
         std::shared_ptr<star::input::InputRecord> fastxInputPendingRecord;
         bool fastxInputActive = false;
+        bool fastxProducerPoolActive = false;
         bool fastxInputPendingRecordValid = false;
         bool fastxInputExhausted = false;
         int fastxInputLastLoggedLane = -1;

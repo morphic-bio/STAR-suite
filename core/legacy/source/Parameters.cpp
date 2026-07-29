@@ -239,6 +239,8 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar <string> (-1, -1, "readFilesPrefix", &readFilesPrefix));
     parArray.push_back(new ParameterInfoVector <string> (-1, -1, "readFilesCommand", &readFilesCommand));
     parArray.push_back(new ParameterInfoScalar <string> (-1, -1, "readFilesLegacyZcat", &readFilesLegacyZcatStr));
+    parArray.push_back(new ParameterInfoScalar <string> (-1, -1, "readFilesFastxProducerConsumer", &readFilesFastxProducerConsumer));
+    parArray.push_back(new ParameterInfoScalar <uint32> (-1, -1, "readFilesFastxProducerThreads", &readFilesFastxProducerThreads));
 
     parArray.push_back(new ParameterInfoScalar <string> (-1, -1, "readMatesLengthsIn", &readMatesLengthsIn));
     parArray.push_back(new ParameterInfoScalar <uint> (-1, -1, "readMapNumber", &readMapNumber));

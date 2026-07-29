@@ -430,6 +430,17 @@ readFilesLegacyZcat         No
                             No  ... default; auto-detect .gz FASTQ and use internal zlib streaming path
                             Yes ... disable internal gzip path and use legacy external zcat helper
 
+readFilesFastxProducerConsumer auto
+    string: auto|off|on - bounded producer/consumer input for FASTA/FASTQ sources
+                            auto ... enable for integrated spatial GEX; retain the shared reader elsewhere
+                            off  ... always use the shared sequential FASTX reader (diagnostic compatibility)
+                            on   ... enable concurrent per-lane producers for any FASTX mapping run
+
+readFilesFastxProducerThreads 0
+    int: FASTX producer threads when producer/consumer input is enabled
+                            0 ... auto: min(4, number of input lanes)
+                            >0 ... requested threads, bounded by the number of lanes
+
 readFilesCbqRangeMode       auto
     string: auto|off|range - indexed CBQ logical range readers for --readFilesType Binseq
                             auto  ... enable only for supported order-independent CBQ runs with indexed inputs
