@@ -77,3 +77,35 @@ authorized full slide:
 Do not perform an independent repeat of any successful definition unless the
 user explicitly authorizes that duplicate. Failed or cancelled attempts may be
 relaunched and must remain in provenance.
+
+## Accepted validation results
+
+The final implementation is source revision
+`5e8f3619eb50d5fb8f8ce3a2497ad0b714770524`; its STAR binary SHA-256 is
+`ab8e8c6a5080da3674d687d09cb175c6063555d5f72508a2b94ef0739343f387`.
+
+- The SPATCH ovarian Flex 100K CBQ correctness gate completed at
+  `/storage/star-spatial-ssd-benchmark-20260729/optimization/spatch_100k_hard_packed_cbq_v4`.
+  It decoded 100,000 reads, produced 89,675 read cliques and 89,623 hard
+  molecules, and its complete hard MEX is byte-identical to the accepted
+  comparator. STAR wall time was 2:30.44, dominated by private reference
+  loading.
+- The full CRC CBQ execution completed at
+  `/storage/star-spatial-ssd-benchmark-20260729/optimization/crc_hard_packed_cbq_v3`.
+  It decoded 212,554,625 reads with exact lane totals, produced 79,236,462 read
+  cliques and 77,819,072 hard molecules, and its complete hard MEX is
+  byte-identical to the accepted FASTQ output. STAR wall time was 13:01.85 and
+  maximum RSS was 48,089,616 kB.
+- The comparable accepted native FASTQ production run at
+  `/storage/star-spatial-ssd-benchmark-20260729/optimization/crc_hard_packed_fastq_pipeline_v2`
+  took 16:57.60. Reusable CBQ input therefore reduced STAR wall time by 235.75
+  seconds, or 23.17% (1.302x speedup).
+- The three immutable level-0 CBQs total 9,789,019,419 logical bytes. Their
+  encoders ran in parallel; the slowest lane took 2:47.68. Including that
+  one-time conversion gives 15:49.53 for encode plus STAR, still 6.69% below
+  direct FASTQ wall time. Subsequent analyses reuse the CBQs and pay only the
+  13:01.85 STAR stage.
+
+These successful definitions are closed to repeats without explicit user
+authorization. The earlier incomplete attempts and their rejection reasons
+remain in their run roots.
