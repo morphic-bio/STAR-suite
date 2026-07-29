@@ -133,6 +133,19 @@ void testDecoderAmbiguousBases()
     assert(ambiguous.candidates[0].coordinateIndex == 0);
     assert(ambiguous.candidates[1].coordinateIndex == 1);
 
+    spatial_r1_decoder::Config noFallbackConfig = config;
+    noFallbackConfig.nonAcgtDpFallback = false;
+    spatial_r1_decoder::Decoder noFallbackDecoder(noFallbackConfig);
+    const spatial_r1_decoder::Result rejectedN = decode(noFallbackDecoder, bc1N);
+    assert(rejectedN.barcodeHadN && rejectedN.barcodeNCount == 1);
+    assert(!rejectedN.barcodeDpChecked);
+    assert(!rejectedN.decoderAssigned);
+    assert(rejectedN.candidates.empty());
+    const spatial_r1_decoder::Result retainedExact =
+        decode(noFallbackDecoder, exactSequence);
+    assert(retainedExact.decoderAssigned);
+    assert(retainedExact.candidates.size() == 1);
+
     assert(std::remove(bc1Path.c_str()) == 0);
     assert(std::remove(bc2Path.c_str()) == 0);
     assert(std::remove(ambiguousBc1Path.c_str()) == 0);

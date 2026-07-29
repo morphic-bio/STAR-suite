@@ -2379,6 +2379,7 @@ std::unique_ptr<Pipeline> Pipeline::create(const PipelineConfig &config,
         decoderConfig.gridColumns = kGridColumns;
         decoderConfig.fullStartMin = 8;
         decoderConfig.fullStartMax = 12;
+        decoderConfig.nonAcgtDpFallback = config.barcodeNdpFallback;
         impl->decoder.reset(new spatial_r1_decoder::Decoder(decoderConfig));
         if (impl->decoder->bc1Count() != kGridColumns
             || impl->decoder->bc2Count() != kGridRows) {
@@ -2979,6 +2980,8 @@ bool Pipeline::finalize(const std::vector<std::string> &geneIds,
         std::ostringstream runSummary;
         runSummary << "schema\t" << schema << '\n'
                    << "source_revision\t" << impl_->config.sourceRevision << '\n'
+                   << "barcode_n_dp_fallback_enabled\t"
+                   << (impl_->config.barcodeNdpFallback ? "yes" : "no") << '\n'
                    << "reads_decoded\t" << impl_->summary.readsDecoded << '\n'
                    << "reads_with_candidates\t" << impl_->summary.readsWithCandidates << '\n'
                    << "unique_gene_reads\t" << impl_->summary.uniqueGeneReads << '\n'
