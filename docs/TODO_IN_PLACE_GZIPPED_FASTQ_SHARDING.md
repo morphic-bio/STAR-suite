@@ -1,4 +1,4 @@
-# TODO: In-place parallel sharding of gzipped FASTQ files for increased performance
+# TODO: In-place sharding of gzipped FASTQ files for increased performance
 
 Status: deferred until after the preprint benchmarks. The preprint production
 path remains the current direct FASTQ input. Do not substitute a new input
@@ -6,8 +6,8 @@ implementation in a benchmark unless the operator explicitly requests it.
 
 ## Headline and contribution
 
-The headlining method is in-place parallel sharding of gzipped FASTQ files for
-increased performance.
+The headlining method is in-place sharding of gzipped FASTQ files for increased
+performance.
 
 An ordinary unindexed `fastq.gz` is a serial input bottleneck for otherwise
 parallel bioinformatics programs.
@@ -99,8 +99,9 @@ because mate compression ratios differ. At each probe:
    from the validated restart state. Assert mate identity for every emitted
    pair and attach the deterministic source-order key.
 
-Discover anchors independently and in parallel. Once adjacent anchors are
-known, processing a shard must not rescan either file from its beginning.
+Discover anchors independently; discovery may be serial or parallel. Once
+adjacent anchors are known, processing a shard must not rescan either file from
+its beginning.
 Persisting the discovered anchors is optional. Correct and efficient first-pass
 operation must not require any durable output.
 
@@ -225,8 +226,8 @@ anchor-discovery overhead, false-anchor rejection, shard-count scaling,
 first-pass time, CPU, memory, I/O, and failure behavior. Frame the contribution
 around FASTQ-aware, index-free paired synchronization and independent producer
 streams/handles—not around speculative DEFLATE recovery itself. The title and
-abstract should lead with in-place parallel sharding of gzipped FASTQ files for
-increased performance. "In-place" distinguishes the method from approaches
+abstract should lead with in-place sharding of gzipped FASTQ files for increased
+performance. "In-place" distinguishes the method from approaches
 that first create new files or convert the input into a serial stream. Present
 optional CBQ output only as a convenient demonstration that the one unavoidable
 gzip pass can also leave an existing durable indexed representation.

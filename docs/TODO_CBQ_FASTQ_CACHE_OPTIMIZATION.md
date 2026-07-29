@@ -1,7 +1,7 @@
-# Moved: in-place parallel FASTQ sharding
+# Moved: in-place FASTQ sharding
 
 The sharding method is not a CBQ optimization. Its design and work plan now
-live in `TODO_PARALLEL_GZIPPED_FASTQ_SHARDING.md`.
+live in `TODO_IN_PLACE_GZIPPED_FASTQ_SHARDING.md`.
 
 CBQ remains an optional downstream sink that can retain the already-decoded
 records in an existing indexed binary format. It is not the headlining method
