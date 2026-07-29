@@ -594,7 +594,13 @@ int ReadAlign::oneReadFromPacket(EnrichedPacket &pkt) {
     readNameMates[0][0] = '\0';
     readNameMates[1][0] = '\0';
 
-    iReadAll = pkt.iReadAll;
+    const uint64_t pipelineSourceOrdinal = pkt.iReadAll;
+    // The fused pipeline uses a zero-based logical ordinal. The ordinary
+    // ReadAlign/output path uses one-based iReadAll and subtracts one when it
+    // completes integrated spatial evidence.
+    iReadAll = P.soloSpatialFlexIntegratedEnabled
+        ? pipelineSourceOrdinal + 1
+        : pipelineSourceOrdinal;
     readFilesIndex = pkt.readFilesIndex;
     readFilter = pkt.readFilter;
 
@@ -612,6 +618,25 @@ int ReadAlign::oneReadFromPacket(EnrichedPacket &pkt) {
     Qual0[1][pkt.readLen[1]] = '\0';
     readLength[1] = pkt.readLen[1];
     readLengthOriginal[1] = pkt.readLen[1];
+
+    if (P.soloSpatialFlexIntegratedEnabled) {
+        if (P.spatialGexPipeline == nullptr) {
+            exitWithError(
+                "EXITING because native spatial Flex pipeline lost its accumulator\n",
+                std::cerr, P.inOut->logMain,
+                EXIT_CODE_INCONSISTENT_DATA, P);
+        }
+        std::string spatialError;
+        if (!P.spatialGexPipeline->decodeCurrentThread(
+                Read0[1], readLengthOriginal[1], Qual0[1],
+                readLengthOriginal[1], pipelineSourceOrdinal, spatialError)) {
+            exitWithError(
+                "EXITING because native spatial Flex pipeline raw-R1 decoding failed: "
+                    + spatialError + "\n",
+                std::cerr, P.inOut->logMain,
+                EXIT_CODE_INCONSISTENT_DATA, P);
+        }
+    }
 
     statsRA.readN++;
     statsRA.readBases += readLength[0] + readLength[1];

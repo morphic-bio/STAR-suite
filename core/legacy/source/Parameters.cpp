@@ -3313,8 +3313,38 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
             if (soloSpatialFeatureSidecarEnabled)
                 rejectSpatialRecipe("does not permit the GeneFull diagnostic sidecar");
             if (!pSolo.flexMode) rejectSpatialRecipe("requires --flex yes");
-            if (pSolo.flexPipelineStr != "no")
-                rejectSpatialRecipe("requires --flexPipeline no");
+            if (pSolo.flexNoAlign != 0)
+                rejectSpatialRecipe("requires --flexNoAlign 0");
+            if (pSolo.flexPipelineStr == "auto") {
+                pSolo.flexPipelineStr = "yes";
+                pSolo.flexPipelineNTriage = 0;
+                if (readFilesTypeN == 20) {
+                    // Indexed CBQ ranges are already independently readable.
+                    // Let every worker claim a range and then drain alignment
+                    // misses instead of reserving dedicated cache consumers.
+                    pSolo.flexPipelineNSolo = 0;
+                    inOut->logMain
+                        << "Spatial Flex integrated: --flexPipeline auto selected "
+                        << "fully fused indexed-CBQ production mode\n";
+                } else {
+                    // FASTQ Flex is dominated by cache-hit R1 decoding, while
+                    // only hash misses require genomic alignment. Use per-lane
+                    // reader/routers, a balanced pool of spatial cache-hit
+                    // consumers, and the remaining threads as alignment workers.
+                    const int availableAfterReaders = std::max(
+                        2, runThreadN - static_cast<int>(readFilesN));
+                    pSolo.flexPipelineNSolo = std::max(
+                        1, std::min(16, availableAfterReaders / 2));
+                    inOut->logMain
+                        << "Spatial Flex integrated: --flexPipeline auto selected "
+                        << "fused FASTQ reader/router production mode (triage=0, "
+                        << "soloConsumers=" << pSolo.flexPipelineNSolo << ")\n";
+                }
+            } else if (pSolo.flexPipelineStr == "no") {
+                inOut->logMain
+                    << "WARNING: Spatial Flex integrated is using --flexPipeline no; "
+                    << "this is a diagnostic compatibility mode, not the production default.\n";
+            }
             if (pSolo.typeStr != "CB_UMI_Complex")
                 rejectSpatialRecipe("requires --soloType CB_UMI_Complex");
             if (!exactly(pSolo.featureIn, "Gene"))
@@ -3367,7 +3397,9 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
         if (outFilterType != "Normal")
             rejectSpatialRecipe("requires --outFilterType Normal");
         if (readFilesTypeN == 10 || readNends != 2)
-            rejectSpatialRecipe("requires two FASTQ ends ordered as R2 then raw R1");
+            rejectSpatialRecipe(
+                "requires paired FASTQ ends ordered as R2 then raw R1, or one "
+                "paired CBQ input with segments in that order");
         if (soloSpatialR1FastqTapEnabled && (readFilesTypeN != 1 || !fastxInputActive))
             rejectSpatialRecipe("requires Fastx input for --soloSpatialR1FastqTap");
         if (batchModeRequested || quant.slam.yes || quant.transcriptVB.yes)

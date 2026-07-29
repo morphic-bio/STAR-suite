@@ -8,7 +8,9 @@
 #include "SequenceFuns.h"
 #include "Parameters.h"
 #include "ReadAlign.h"
+#include "SpatialGex.h"
 #include "Stats.h"
+#include "ErrorWarning.h"
 #include "input/CbqInputModule.h"
 
 #include <algorithm>
@@ -47,6 +49,57 @@ bool copyCbqSpanToBuffer(star::input::CbqByteSpan span, char *dest, size_t capac
 void copyCbqReadName(star::input::CbqByteSpan span, char *dest, size_t capacity) {
     size_t ignored = 0;
     copyCbqSpanToBuffer(span, dest, capacity, &ignored);
+}
+
+bool failSpatialFlexPipeline(Parameters &P, const std::string &detail) {
+    exitWithError("EXITING because native spatial Flex pipeline processing failed: "
+                      + detail + "\n",
+                  std::cerr, P.inOut->logMain,
+                  EXIT_CODE_INCONSISTENT_DATA, P);
+    return false;
+}
+
+bool completeSpatialFlexCachedRead(Parameters &P,
+                                   const char *barcodeSequence,
+                                   uint32_t barcodeLength,
+                                   const char *barcodeQuality,
+                                   uint64_t sourceOrdinal,
+                                   const FlexHashScreenDecision &decision) {
+    if (!P.soloSpatialFlexIntegratedEnabled) return true;
+    if (P.spatialGexPipeline == nullptr) {
+        return failSpatialFlexPipeline(P, "integrated spatial accumulator is unavailable");
+    }
+
+    std::string error;
+    if (!P.spatialGexPipeline->decodeCurrentThread(
+            barcodeSequence, barcodeLength, barcodeQuality, barcodeLength,
+            sourceOrdinal, error)) {
+        return failSpatialFlexPipeline(P, "raw-R1 decoding failed: " + error);
+    }
+
+    spatial_gex::FeatureEvidenceClass source =
+        spatial_gex::FeatureEvidenceClass::FlexHashDeny;
+    bool assigned = false;
+    uint32_t geneIndex = 0;
+    if (decision.action == FlexHashScreenDecision::Keep) {
+        if (decision.geneIdx15 == 0
+            || (decision.cacheClass != 0 && decision.cacheClass != 1)) {
+            return failSpatialFlexPipeline(P, "invalid H0/H1 cache keep decision");
+        }
+        source = decision.cacheClass == 0
+            ? spatial_gex::FeatureEvidenceClass::FlexH0
+            : spatial_gex::FeatureEvidenceClass::FlexH1;
+        assigned = true;
+        geneIndex = decision.geneIdx15 - 1;
+    } else if (decision.action != FlexHashScreenDecision::Deny) {
+        return failSpatialFlexPipeline(P, "non-terminal cache decision reached cached-read completion");
+    }
+
+    if (!P.spatialGexPipeline->completeCurrentThread(
+            source, assigned, geneIndex, sourceOrdinal, error)) {
+        return failSpatialFlexPipeline(P, "feature completion failed: " + error);
+    }
+    return true;
 }
 
 } // namespace
@@ -162,7 +215,9 @@ void *flexLaneReaderRouterThread(void *arg) {
         uint64_t iReadAll = st->iReadAllGlobal.fetch_add(1);
         st->counters.perLaneReads[laneId]++;
 
-        FlexHashScreenDecision decision = cache.classifyReadH0Offset0(seq0, readLen0);
+        FlexHashScreenDecision decision = P.soloSpatialFlexIntegratedEnabled
+            ? cache.classifyReadH0H1Offset0(seq0, readLen0)
+            : cache.classifyReadH0Offset0(seq0, readLen0);
 
         if (decision.action == FlexHashScreenDecision::Keep ||
             decision.action == FlexHashScreenDecision::Deny) {
@@ -388,6 +443,22 @@ static uint64_t processOneLane(
         if (decision.action == FlexHashScreenDecision::Keep ||
             decision.action == FlexHashScreenDecision::Deny) {
 
+            if (P.soloSpatialFlexIntegratedEnabled) {
+                if (!completeSpatialFlexCachedRead(
+                        P, seq1, readLen1, qual1, iReadAll, decision)) {
+                    return nReads;
+                }
+                if (decision.action == FlexHashScreenDecision::Keep) {
+                    stats->hashScreenKeep++;
+                    st->counters.triageKeep.fetch_add(1);
+                } else {
+                    stats->hashScreenDeny++;
+                    st->counters.triageDeny.fetch_add(1);
+                }
+                st->counters.readsTotal.fetch_add(1);
+                continue;
+            }
+
             char *readSeqPtrs[2]  = { dummySeq, seq1 };
             char *readQualPtrs[2] = { dummyQual, qual1 };
             uint64 readLens[2]    = { 0, readLen1 };
@@ -552,6 +623,22 @@ static uint64_t processCbqModuleRecords(
 
             if (decision.action == FlexHashScreenDecision::Keep ||
                 decision.action == FlexHashScreenDecision::Deny) {
+
+                if (P.soloSpatialFlexIntegratedEnabled) {
+                    if (!completeSpatialFlexCachedRead(
+                            P, seq1, readLen1, qual1, iReadAll, decision)) {
+                        return nReads;
+                    }
+                    if (decision.action == FlexHashScreenDecision::Keep) {
+                        stats->hashScreenKeep++;
+                        st->counters.triageKeep.fetch_add(1);
+                    } else {
+                        stats->hashScreenDeny++;
+                        st->counters.triageDeny.fetch_add(1);
+                    }
+                    st->counters.readsTotal.fetch_add(1);
+                    continue;
+                }
 
                 char *readSeqPtrs[2]  = { dummySeq, seq1 };
                 char *readQualPtrs[2] = { dummyQual, qual1 };
@@ -853,8 +940,9 @@ void *flexTriageThread(void *arg) {
     ReadPacket rpkt;
     while (st->readerQ.pop(rpkt)) {
 
-        FlexHashScreenDecision decision = cache.classifyReadH0Offset0(
-            rpkt.seq[0], rpkt.readLen[0]);
+        FlexHashScreenDecision decision = P.soloSpatialFlexIntegratedEnabled
+            ? cache.classifyReadH0H1Offset0(rpkt.seq[0], rpkt.readLen[0])
+            : cache.classifyReadH0Offset0(rpkt.seq[0], rpkt.readLen[0]);
 
         if (decision.action == FlexHashScreenDecision::Keep ||
             decision.action == FlexHashScreenDecision::Deny) {
@@ -971,6 +1059,27 @@ void *flexSoloConsumerThread(void *arg) {
 
     DecisionPacket dp;
     while (st->soloQ[consumerId]->pop(dp)) {
+
+        if (P.soloSpatialFlexIntegratedEnabled) {
+            FlexHashScreenDecision decision;
+            decision.action = dp.verdict == DecisionPacket::KEEP
+                ? FlexHashScreenDecision::Keep
+                : FlexHashScreenDecision::Deny;
+            decision.geneIdx15 = dp.geneIdx15;
+            decision.cacheClass = dp.cacheClass;
+            decision.probeRegion = dp.probeRegion;
+            if (!completeSpatialFlexCachedRead(
+                    P, dp.barcodeSeq, dp.barcodeLen, dp.barcodeQual,
+                    dp.iReadAll, decision)) {
+                break;
+            }
+            if (dp.verdict == DecisionPacket::KEEP) {
+                stats->hashScreenKeep++;
+            } else {
+                stats->hashScreenDeny++;
+            }
+            continue;
+        }
 
         // Deferred CB/UMI extraction from raw R1 carried in packet
         char *readSeqPtrs[2]  = { dummySeq, dp.barcodeSeq };

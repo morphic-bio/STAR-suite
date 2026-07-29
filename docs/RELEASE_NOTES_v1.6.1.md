@@ -10,10 +10,13 @@ revision consumed by spatial spill finalization. Consequently, the official
 `v1.6.0` artifacts could pass all-memory 100K checks but could not finalize a
 full-slide spill run.
 
-This patch changes provenance, packaging, and release validation only. It does
-not change counting, assignment, UMI, or matrix policy relative to the final
-`v1.6.0` tree. The old `v1.6.0` assets remain immutable and should not be used
-for integrated spatial runs that can spill.
+The initial patch changed provenance, packaging, and release validation. The
+final candidate also restores the native spatial Flex producer/consumer path
+as the production default and reduces hard-only materialization bookkeeping.
+Those execution changes retain the accepted hard-count and hard-MEX policy;
+FASTQ and indexed-CBQ parity gates are required before release. The old
+`v1.6.0` assets remain immutable and should not be used for integrated spatial
+runs that can spill.
 
 The release artifact version is `v1.6.1`, Debian packages use `1.6.1-1`, and
 both `STAR --version` and `molecule_first_resolver --version` report `1.6.1`.
@@ -76,6 +79,12 @@ The upstream STAR base remains `2.7.11b`; genome-index compatibility remains
 
 - Enable the native path with `--soloSpatialFlexIntegrated yes`; products are
   written under `SpatialFlex.out`.
+- Use `--flexPipeline auto` in production. FASTQ inputs select fused per-lane
+  reader/routers with separate spatial cache-hit consumers and alignment-miss
+  workers; indexed CBQ inputs select fully fused range readers.
+- Retain `--flexPipeline no` only as an explicitly authorized diagnostic
+  compatibility mode. The earlier native-spatial requirement for this setting
+  was a temporary debugging restriction and was not a production policy.
 - Resolve direct H0/H1 probe hits and alignment fallback into retained spatial
   candidate families, then delay candidate-specific UMI correction until
   molecule resolution.

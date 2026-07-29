@@ -96,12 +96,17 @@ user-facing output directory will be `SpatialFlex.out`.
 
 ## Implementation record
 
-The implementation remained inside the audited boundary:
+The implementation remained inside the audited boundary. The production
+input topology was corrected on 2026-07-29 after audit found that the original
+debugging guard had disabled the existing Flex producer/consumer system
+without user authorization:
 
 - `--soloSpatialFlexIntegrated yes` is default-off and mutually exclusive with
   integrated spatial GEX.
-- The ordinary paired reader decodes raw R1 into a candidate family and uses
-  the same global source ordinal for the terminal R2 feature decision.
+- FASTQ production runs use fused per-lane reader/routers, spatial cache-hit
+  consumers, and alignment-miss workers. Indexed CBQ production runs use the
+  fully fused range-reader topology. Both paths decode raw R1 into a candidate
+  family and use the same source ordinal for the terminal R2 decision.
 - H0 and H1 cache keeps append the zero-based probe feature directly; denies
   consume the pair as feature-unassigned; misses continue to alignment.
 - Alignment misses invoke `flexResolveGeneIdx15_inlineResolver()`, the same
@@ -178,12 +183,11 @@ The mode must be mutually exclusive with:
 --soloSpatialGexIntegrated yes
 ```
 
-The first implementation is intentionally limited to the validated ordinary
-paired reader:
+The production configuration is:
 
 ```text
 --flex yes
---flexPipeline no
+--flexPipeline auto
 --soloInlineHashMode yes
 --soloSkipProcessing yes
 --soloRunFlexFilter no
@@ -191,16 +195,22 @@ paired reader:
 --outSAMtype None
 ```
 
-The fused Flex packet pipeline is not required by the frozen CRC method.
-Supporting it later requires carrying the spatial candidate family through its
-reader/triage/alignment queues and will be a separate extension.
+For FASTQ, `auto` selects the fused reader/router topology and divides the
+remaining threads between spatial cache-hit consumers and alignment-miss
+workers. For indexed CBQ, `auto` selects fully fused range readers. Cache-hit
+and alignment-miss paths both feed the same coupled raw-R1 spatial
+accumulator. `--flexPipeline no` remains available only as a diagnostic
+compatibility mode and must not appear in a production recipe or benchmark
+unless the user explicitly authorizes disabling the producer/consumer path.
 
 The mode must fail before reading FASTQs unless all of the following are true:
 
 - `--runMode alignReads`;
-- two paired FASTQ ends ordered as R2 then raw R1;
+- paired FASTQ ends ordered as R2 then raw R1, or one paired indexed CBQ whose
+  segments use that order;
 - `--flex yes`;
-- `--flexPipeline no`;
+- `--flexPipeline auto` for production, or an explicitly authorized diagnostic
+  `--flexPipeline no` comparison;
 - a readable H0/H1 cache;
 - a readable probe gene list;
 - no sample whitelist or sample-tag requirement;
@@ -486,7 +496,8 @@ L007: 33,333
 L008: 33,333
 ```
 
-Use only R2 and raw R1 FASTQs. Recheck
+Use only R2 and raw R1 FASTQs, or a content-verified paired CBQ encoded in that
+segment order. Recheck
 `fastq_checksums.md5` before the first run.
 
 Reference and feature inputs:
@@ -532,12 +543,15 @@ scales: 2,8,16
 
 ### Execution matrix
 
-Use a fresh output directory for every case:
+Use a fresh output directory for every authorized case:
 
 1. one thread, all memory;
 2. production thread count, all memory;
 3. production thread count, forced spill;
-4. independent repeat of the accepted production configuration.
+
+Do not add a fourth independent repeat. A successful configuration may be
+repeated only after the user explicitly authorizes that exact duplicate; an
+old runbook or acceptance template cannot supply that authorization.
 
 Before each run, render the complete argv and run:
 
@@ -731,10 +745,12 @@ Require:
 - no BAM or external bridge in the primary ancestry;
 - identical feature axis and declared input hashes;
 - identical clique/member-set digest across thread and spill modes;
-- byte-identical integer MEX components across thread, spill, and repeat runs;
+- byte-identical integer MEX components across the distinct authorized thread
+  and spill definitions;
 - byte-identical soft MEX components under the existing deterministic
   reduction contract;
-- identical declared scientific hashes in the independent repeat;
+- identical declared scientific hashes wherever distinct authorized runs are
+  compared;
 - an explanation for every material difference from the archived diagnostic
   surface.
 
