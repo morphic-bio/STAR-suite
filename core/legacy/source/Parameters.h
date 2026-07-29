@@ -731,7 +731,10 @@ class Parameters {
         string soloSpatialBarcodeContract = "-";
         string soloSpatialBc1Oligos = "-";
         string soloSpatialBc2Oligos = "-";
-        string soloSpatialAssignmentProducts = "all";
+        // Production emits the deterministic post-UMI hard assignment only.
+        // Use --soloSpatialAssignmentProducts all explicitly for the diagnostic
+        // four-policy comparison surface.
+        string soloSpatialAssignmentProducts = "hard";
         string soloSpatialBinSizes = "2,8,16";
         uint64 soloSpatialExpectedReads = 0;
         uint64 soloSpatialExpectedCandidates = 0;

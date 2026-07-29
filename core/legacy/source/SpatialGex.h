@@ -150,7 +150,9 @@ struct PipelineConfig {
     std::uint64_t expectedReads = 0;
     std::uint64_t expectedCandidates = 0;
     std::uint32_t threads = 1;
-    std::uint8_t products = ProductAll;
+    // Hard is the production policy. ProductAll remains available explicitly
+    // for diagnostic policy comparisons.
+    std::uint8_t products = ProductHard;
     std::uint8_t scales = ScaleAll;
     double memoryFraction = 0.80;
     OverflowPolicy overflowPolicy = OverflowPolicy::Fail;

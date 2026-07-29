@@ -157,8 +157,13 @@ int main()
     assert(spatial_gex::parseProducts("strict,soft_expected,hard,gated_hard",
                                       products, error));
     assert(products == spatial_gex::ProductAll);
+    assert(spatial_gex::parseProducts("hard", products, error));
+    assert(products == spatial_gex::ProductHard);
     assert(!spatial_gex::parseProducts("strict,strict", products, error));
     assert(!spatial_gex::parseProducts("exact", products, error));
+
+    const spatial_gex::PipelineConfig defaultPipelineConfig;
+    assert(defaultPipelineConfig.products == spatial_gex::ProductHard);
 
     std::uint8_t scales = 0;
     assert(spatial_gex::parseScales("2,8,16", scales, error));
