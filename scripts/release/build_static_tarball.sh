@@ -223,7 +223,7 @@ fi
 echo "Building STAR-suite binary tarball (jobs=${MAKE_JOBS})..."
 make -j"${MAKE_JOBS}" core-static
 make -j"${MAKE_JOBS}" molecule-first-resolver
-make -j"${MAKE_JOBS}" vbem-transcriptvb-finalize trim-qc-tools
+make -j"${MAKE_JOBS}" release-companion-tools
 
 if [[ ! -x core/legacy/source/STAR ]]; then
   echo "ERROR: expected binary missing: core/legacy/source/STAR" >&2
