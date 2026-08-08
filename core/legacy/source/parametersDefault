@@ -24,6 +24,15 @@ runMode                         alignReads
 runThreadN                      1
     int: number of threads to run STAR
 
+genomeLoadThreads           1
+    int: number of threads used to read the Genome/SA/SAindex files into memory.
+                          1     ... single sequential reader (default, historical behavior)
+                          >1    ... parallel positional reads of disjoint byte ranges.
+                                    The loaded bytes are identical; only read concurrency changes.
+                                    Useful on parallel filesystems and NVMe, where a single
+                                    sequential stream cannot keep enough requests in flight.
+
+
 dynamicThreadInterface          0
     int: dynamic thread interface mode.
                                 0 ... off (default behavior).
