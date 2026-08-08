@@ -37,7 +37,7 @@ vbem-transcriptvb-finalize: trim-qc-tools
 # separate top-level make. Keeping all legacy-source companion executables in
 # one submake prevents parallel dependency/configuration races in that tree.
 release-companion-tools:
-	$(MAKE) -C $(LEGACY_SRC_DIR) transcriptvb-finalize trim_qc_fastq trim_qc_merge WITH_CHROMAP=0
+	$(MAKE) -C $(LEGACY_SRC_DIR) release-transcriptvb-finalize release-trim-qc-fastq release-trim-qc-merge WITH_CHROMAP=0
 
 yremove-tools:
 	$(MAKE) -C $(YREMOVE_FASTQ_DIR)/tools/remove_y_reads
