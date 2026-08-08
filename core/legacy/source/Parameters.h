@@ -495,6 +495,17 @@ class Parameters {
                 string traceFile;          // Empty = disabled
                 int traceLimit = 0;        // 0 = unlimited (trace all reads); >0 = limit to N reads
                 string dumpEqFile = "-";   // Optional Salmon-shaped rich EC dump
+                string sidecarOut = "-";   // Optional unfinalized binary evidence sidecar
+                vector<string> sidecarIn;  // Shard sidecars loaded for one global VB/EM finalization
+                int sidecarRoundTripInt = 0; // Reload sidecar before VB/EM (experimental gate)
+                bool sidecarRoundTrip = false;
+                int sidecarOnlyInt = 0;     // Write raw shard evidence and skip per-shard VB/EM
+                bool sidecarOnly = false;
+                string sidecarSampleId = "-";
+                string sidecarInputId = "-"; // Stable identity shared by shard workers and finalizer
+                uint32 sidecarShardOrdinal = 0;
+                uint32 sidecarShardCount = 1;
+                uint64 sidecarFirstPair = 0;
                 int preBurninFrags = 5000; // Pre-burn-in fragment count threshold (Salmon default: 5000)
                 int miniBatchSize = 1000;  // Mini-batch size for processed reads counter (Salmon default: 1000)
                 int fragLengthDistInt = 1;  // If 0, do not use learned FLD in EC aux probabilities

@@ -291,6 +291,45 @@ void FLDAccumulator::reset() {
     std::fill(cachedPMF_.begin(), cachedPMF_.end(), LOG_0_FLD);
 }
 
+FLDAccumulator::State FLDAccumulator::snapshot() const {
+    State state;
+    state.histogram = hist_;
+    state.total_mass = totMass_;
+    state.weighted_sum = sum_;
+    state.minimum = static_cast<std::uint64_t>(min_);
+    return state;
+}
+
+bool FLDAccumulator::restore(const State& state, std::string& error) {
+    if (state.histogram.size() != static_cast<std::size_t>(MAX_FRAG_LEN + 1)) {
+        error = "FLD histogram length does not match the sidecar schema";
+        return false;
+    }
+    if (state.minimum > static_cast<std::uint64_t>(MAX_FRAG_LEN)) {
+        error = "FLD minimum is outside the supported range";
+        return false;
+    }
+    if (std::isnan(state.total_mass) || std::isnan(state.weighted_sum)) {
+        error = "FLD aggregate contains NaN state";
+        return false;
+    }
+    for (double value : state.histogram) {
+        if (std::isnan(value)) {
+            error = "FLD histogram contains NaN";
+            return false;
+        }
+    }
+
+    hist_ = state.histogram;
+    totMass_ = state.total_mass;
+    sum_ = state.weighted_sum;
+    min_ = static_cast<std::size_t>(state.minimum);
+    haveCachedCMF_ = false;
+    std::fill(cachedCMF_.begin(), cachedCMF_.end(), LOG_0_FLD);
+    std::fill(cachedPMF_.begin(), cachedPMF_.end(), LOG_0_FLD);
+    return true;
+}
+
 void FLDAccumulator::dumpPMF(std::vector<double>& pmfOut, size_t& minV, size_t& maxV) const {
     minV = minVal();
     maxV = maxVal();
@@ -312,4 +351,3 @@ std::string FLDAccumulator::toString() const {
     ss << '\n';
     return ss.str();
 }
-
