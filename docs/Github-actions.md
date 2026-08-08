@@ -38,6 +38,10 @@ Branch and tag policy:
 
 Tag policy:
 
+- Release-candidate tags retain the RC suffix in artifact and image names, but
+  validate the embedded base product version (for example, `v1.7.0-rc2`
+  contains a binary reporting `1.7.0`) and use the base release-notes file.
+
 - Tags matching `v0.*` are treated as prereleases.
 - Tags containing `-alpha`, `-beta`, `-rc`, or `-dev` are treated as prereleases.
 - Prerelease tags publish versioned container images and GitHub prereleases, but do not move Docker `latest`.

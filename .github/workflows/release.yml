@@ -33,6 +33,12 @@ jobs:
         run: |
           chmod +x scripts/release/*.sh scripts/release/docker/*.sh
 
+      - name: Resolve STAR Suite binary version
+        run: |
+          suite_version="${GITHUB_REF_NAME#v}"
+          suite_version="${suite_version%%-*}"
+          echo "STAR_SUITE_EXPECTED_VERSION=${suite_version}" >> "${GITHUB_ENV}"
+
       - name: Install packaging dependencies
         run: |
           sudo apt-get update
@@ -116,7 +122,7 @@ jobs:
             --skip-image-build \
             --base-image "ubuntu:22.04" \
             --tarball "dist/release/STAR-suite-${GITHUB_REF_NAME}-linux-amd64-glibc234.tar.gz" \
-            --expected-version "${GITHUB_REF_NAME#v}" \
+            --expected-version "${STAR_SUITE_EXPECTED_VERSION}" \
             --expected-commit "${GITHUB_SHA}" \
             --manifest-out "dist/release/runtime-manifests/glibc234-ubuntu22.txt"
 
@@ -127,7 +133,7 @@ jobs:
             --skip-image-build \
             --base-image "ubuntu:24.04" \
             --tarball "dist/release/STAR-suite-${GITHUB_REF_NAME}-linux-amd64-glibc234.tar.gz" \
-            --expected-version "${GITHUB_REF_NAME#v}" \
+            --expected-version "${STAR_SUITE_EXPECTED_VERSION}" \
             --expected-commit "${GITHUB_SHA}" \
             --manifest-out "dist/release/runtime-manifests/glibc234-ubuntu24.txt"
 
@@ -138,7 +144,7 @@ jobs:
             --skip-image-build \
             --base-image "ubuntu:24.04" \
             --tarball "dist/release/STAR-suite-${GITHUB_REF_NAME}-linux-amd64-glibc239.tar.gz" \
-            --expected-version "${GITHUB_REF_NAME#v}" \
+            --expected-version "${STAR_SUITE_EXPECTED_VERSION}" \
             --expected-commit "${GITHUB_SHA}" \
             --manifest-out "dist/release/runtime-manifests/glibc239-ubuntu24.txt"
 
@@ -150,7 +156,7 @@ jobs:
             --skip-image-build \
             --base-image "ubuntu:24.04" \
             --tarball "dist/release/STAR-suite-${GITHUB_REF_NAME}-linux-amd64-glibc239.tar.gz" \
-            --expected-version "${GITHUB_REF_NAME#v}" \
+            --expected-version "${STAR_SUITE_EXPECTED_VERSION}" \
             --expected-commit "${GITHUB_SHA}"
 
       - name: Validate installer bundle (Ubuntu 22.04)
@@ -161,7 +167,7 @@ jobs:
             --base-image "ubuntu:22.04" \
             --bundle "dist/release/STAR-suite-${GITHUB_REF_NAME}-linux-amd64-installer.tar.gz" \
             --expected-label "glibc234" \
-            --expected-version "${GITHUB_REF_NAME#v}" \
+            --expected-version "${STAR_SUITE_EXPECTED_VERSION}" \
             --expected-commit "${GITHUB_SHA}" \
             --manifest-out "dist/release/runtime-manifests/installer-ubuntu22.txt"
 
@@ -173,7 +179,7 @@ jobs:
             --base-image "ubuntu:24.04" \
             --bundle "dist/release/STAR-suite-${GITHUB_REF_NAME}-linux-amd64-installer.tar.gz" \
             --expected-label "glibc239" \
-            --expected-version "${GITHUB_REF_NAME#v}" \
+            --expected-version "${STAR_SUITE_EXPECTED_VERSION}" \
             --expected-commit "${GITHUB_SHA}" \
             --manifest-out "dist/release/runtime-manifests/installer-ubuntu24.txt"
 
@@ -186,7 +192,7 @@ jobs:
             --base-image "ubuntu:24.04" \
             --bundle "dist/release/STAR-suite-${GITHUB_REF_NAME}-linux-amd64-installer.tar.gz" \
             --expected-label "glibc239" \
-            --expected-version "${GITHUB_REF_NAME#v}" \
+            --expected-version "${STAR_SUITE_EXPECTED_VERSION}" \
             --expected-commit "${GITHUB_SHA}"
 
       - name: Build Debian binary package
@@ -296,6 +302,14 @@ jobs:
       - name: Checkout release notes
         uses: actions/checkout@v4
 
+      - name: Resolve release notes path
+        id: release-notes
+        run: |
+          release_tag="${GITHUB_REF_NAME%%-*}"
+          notes_path="docs/RELEASE_NOTES_${release_tag}.md"
+          test -f "${notes_path}"
+          echo "path=${notes_path}" >> "${GITHUB_OUTPUT}"
+
       - name: Download release artifacts
         uses: actions/download-artifact@v4
         with:
@@ -330,6 +344,6 @@ jobs:
         with:
           files: |
             dist/release/**/*
-          body_path: docs/RELEASE_NOTES_${{ github.ref_name }}.md
+          body_path: ${{ steps.release-notes.outputs.path }}
           draft: false
           prerelease: ${{ steps.prerelease.outputs.is_prerelease == 'true' }}
