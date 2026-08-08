@@ -214,6 +214,7 @@ class Parameters {
         string trimQcHtml;
         uint64 trimQcMaxReads = 0;
         bool trimQcEnabled = false;
+        string trimQcShardOut;
 
         //align parameters
         uint alignSJoverhangMin,alignSJDBoverhangMin,alignSplicedMateMapLmin; //min SJ donor/acceptor length

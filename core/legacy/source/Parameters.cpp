@@ -378,6 +378,7 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar <string> (-1, -1, "trimQcJson", &trimQcJson));
     parArray.push_back(new ParameterInfoScalar <string> (-1, -1, "trimQcHtml", &trimQcHtml));
     parArray.push_back(new ParameterInfoScalar <uint64> (-1, -1, "trimQcMaxReads", &trimQcMaxReads));
+    parArray.push_back(new ParameterInfoScalar <string> (-1, -1, "trimQcShardOut", &trimQcShardOut));
 
     //binning, anchors, windows
     parArray.push_back(new ParameterInfoScalar <uint>   (-1, -1, "winBinNbits", &winBinNbits));
@@ -3696,7 +3697,8 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
 
         trimQcEnabled = (!trimQcReport.empty() && trimQcReport != "-") ||
                         (!trimQcJson.empty() && trimQcJson != "-") ||
-                        (!trimQcHtml.empty() && trimQcHtml != "-");
+                        (!trimQcHtml.empty() && trimQcHtml != "-") ||
+                        (!trimQcShardOut.empty() && trimQcShardOut != "-");
 
     //alignEnds
     alignEndsType.ext[0][0]=false;

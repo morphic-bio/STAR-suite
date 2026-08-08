@@ -44,6 +44,7 @@
 #include "TranscriptQuantEC.h"
 #include "LibFormatDetection.h"
 #include "TrimQcOutput.h"
+#include "TrimQcShard.h"
 #include "vb_engine.h"
 #include "em_engine.h"
 #include "ec_loader.h"
@@ -3140,6 +3141,27 @@ int main(int argInN, char *argIn[])
             }
 
             std::string stageLabel = (P.trimCutadapt == "Yes") ? "trimmed" : "raw";
+            // A sharded run wants the accumulator itself, not a rendered
+            // report: the reads are in memory exactly once, here, and the
+            // gather can merge these dumps without revisiting a read or a BAM.
+            if (!P.trimQcShardOut.empty() && P.trimQcShardOut != "-") {
+                TrimQcShardCounters shardCounters;
+                shardCounters.reads_processed       = g_statsAll.trimReadsProcessed;
+                shardCounters.reads_trimmed         = g_statsAll.trimReadsTrimmed;
+                shardCounters.reads_too_short       = g_statsAll.trimReadsTooShort;
+                shardCounters.bases_quality_trimmed = g_statsAll.trimBasesQualityTrimmed;
+                shardCounters.bases_adapter_trimmed = g_statsAll.trimBasesAdapterTrimmed;
+                shardCounters.pairs_processed       = g_statsAll.trimPairsProcessed;
+                shardCounters.pairs_dropped         = g_statsAll.trimPairsDropped;
+                shardCounters.pairs_kept            = g_statsAll.trimPairsKept;
+                std::string shardErr;
+                if (writeTrimQcShard(mergedTrimQc, shardCounters, P.trimQcShardOut, &shardErr)) {
+                    P.inOut->logMain << "Trim QC shard dump written to: " << P.trimQcShardOut << "\n";
+                } else {
+                    P.inOut->logMain << "WARNING: Failed to write trim QC shard dump: "
+                                     << shardErr << "\n";
+                }
+            }
             if (wantJson) {
                 if (writeTrimQcJson(mergedTrimQc, g_statsAll, qcJsonPath, stageLabel)) {
                     P.inOut->logMain << "Trim QC JSON written to: " << qcJsonPath << "\n";

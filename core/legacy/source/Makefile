@@ -219,7 +219,7 @@ OBJECTS = systemFunctions.o SoloMemoryProfile.o CountingSinkStress.o funPrimaryA
 	SpliceGraph_findSuperTr.o sjAlignSplit.o \
 	GTF.o GTF_transcriptGeneSJ.o GTF_superTranscript.o SuperTranscriptome.o TranscriptomeFasta.o \
 	ReadAlign_outputAlignments.o ReadAlign_resolveAmbiguousCBs.o ReadAlign_slamQuant.o \
-		ReadAlign.o STAR.o TranscriptQuantEC.o LibFormatDetection.o TranscriptQuantOutput.o SlamQuant.o SlamSolver.o slam_vb_overdisp.o SlamCompat.o SlamVarianceAnalysis.o SlamReadBuffer.o SlamDump.o SlamQcOutput.o TrimQc.o TrimQcOutput.o SnpMaskBuild.o \
+		ReadAlign.o STAR.o TranscriptQuantEC.o LibFormatDetection.o TranscriptQuantOutput.o SlamQuant.o SlamSolver.o slam_vb_overdisp.o SlamCompat.o SlamVarianceAnalysis.o SlamReadBuffer.o SlamDump.o SlamQcOutput.o TrimQc.o TrimQcOutput.o TrimQcShard.o SnpMaskBuild.o \
 	SharedMemory.o PackedArray.o SuffixArrayFuns.o Parameters.o Parameters_samAttributes.o InOutStreams.o SequenceFuns.o Genome.o ParametersGenome.o Stats.o \
 	Transcript.o Transcript_alignScore.o Transcript_generateCigarP.o Chain.o \
 	Transcript_variationAdjust.o Variation.o ReadAlign_waspMap.o \
@@ -298,6 +298,12 @@ remove_y_reads: htslib/libhts.a
 	$(MAKE) -C $(REMOVE_Y_READS_DIR)
 
 # Standalone alignment replay tool for FastQC-like trim-QC output.
+.PHONY: trim_qc_merge
+trim_qc_merge : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
+trim_qc_merge : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS)
+trim_qc_merge : htslib/libhts.a TrimQc.o TrimQcOutput.o TrimQcShard.o Stats.o TimeFunctions.o trim_qc_merge.cpp
+	$(CXX) -o trim_qc_merge $(CXXFLAGS) trim_qc_merge.cpp TrimQc.o TrimQcOutput.o TrimQcShard.o Stats.o TimeFunctions.o $(LDFLAGS)
+
 .PHONY: trim_qc_replay
 trim_qc_replay : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
 trim_qc_replay : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS)
@@ -308,8 +314,8 @@ trim_qc_replay : htslib/libhts.a TrimQc.o TrimQcOutput.o Stats.o TimeFunctions.o
 .PHONY: trim_qc_fastq
 trim_qc_fastq : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
 trim_qc_fastq : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS)
-trim_qc_fastq : htslib/libhts.a TrimQc.o TrimQcOutput.o Stats.o TimeFunctions.o trim_qc_fastq.cpp
-	$(CXX) -o trim_qc_fastq $(CXXFLAGS) trim_qc_fastq.cpp TrimQc.o TrimQcOutput.o Stats.o TimeFunctions.o $(LDFLAGS)
+trim_qc_fastq : htslib/libhts.a TrimQc.o TrimQcOutput.o TrimQcShard.o Stats.o TimeFunctions.o trim_qc_fastq.cpp
+	$(CXX) -o trim_qc_fastq $(CXXFLAGS) trim_qc_fastq.cpp TrimQc.o TrimQcOutput.o TrimQcShard.o Stats.o TimeFunctions.o $(LDFLAGS)
 
 # Standalone input-contract harness for FASTX module parity/smoke tests.
 .PHONY: fastx-input-harness
