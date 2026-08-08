@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# STAR's trim QC must actually record reads.
+# STAR's trim QC must actually record reads, and per-shard dumps must merge
+# back to what a single run produces.
 #
 # This exists because --trimQcReport silently emitted a well-formed report with
 # "total_reads": 0 -- the collector was constructed and merged across chunk
@@ -13,7 +14,9 @@ src="$root/core/legacy/source"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
-[ -x "$src/STAR" ] || make -C "$src" STAR WITH_CHROMAP=0 >/dev/null
+for tool in STAR trim_qc_merge; do
+    [ -x "$src/$tool" ] || make -C "$src" "$tool" WITH_CHROMAP=0 >/dev/null
+done
 
 READS=2000
 python3 - "$work" "$READS" <<'PY'
@@ -64,4 +67,32 @@ for m in d["mates"]:
     if p0["base_counts"]["N"] != 0 or sum(p0["base_counts"].values()) != n:
         print("FAIL: base counts at position 1 do not sum to %s" % n); sys.exit(1)
 print("PASS: STAR recorded %s reads with correct lengths, quality and composition" % d["total_reads"])
+PY
+
+# Split, run per shard, merge, and require the same histograms.
+head -$(( READS * 2 )) "$work/r1.fastq" > "$work/a_r1.fastq"
+head -$(( READS * 2 )) "$work/r2.fastq" > "$work/a_r2.fastq"
+tail -$(( READS * 2 )) "$work/r1.fastq" > "$work/b_r1.fastq"
+tail -$(( READS * 2 )) "$work/r2.fastq" > "$work/b_r2.fastq"
+for s in a b; do
+    mkdir -p "$work/$s"
+    "$src/STAR" --runMode alignReads --genomeDir "$work/genome" \
+        --readFilesIn "$work/${s}_r1.fastq" "$work/${s}_r2.fastq" \
+        --outSAMtype None --runThreadN 2 \
+        --trimQcShardOut "$work/$s.trimqc" \
+        --outFileNamePrefix "$work/$s/" >/dev/null 2>&1
+done
+"$src/trim_qc_merge" --out-prefix "$work/merged" --stage raw \
+    "$work/a.trimqc" "$work/b.trimqc" >/dev/null
+
+python3 - "$work/full/qc.trim_qc.json" "$work/merged.trim_qc.json" <<'PY'
+import json, sys
+full = json.load(open(sys.argv[1])); mrg = json.load(open(sys.argv[2]))
+if full["total_reads"] != mrg["total_reads"]:
+    print("FAIL: merged total_reads %s vs full %s" % (mrg["total_reads"], full["total_reads"])); sys.exit(1)
+for a, b in zip(full["mates"], mrg["mates"]):
+    for field in ("reads", "length_hist", "gc_hist", "positions"):
+        if a[field] != b[field]:
+            print("FAIL: mate %s differs in %s" % (a["mate"], field)); sys.exit(1)
+print("PASS: two STAR shards merge to the single-run histograms exactly")
 PY
