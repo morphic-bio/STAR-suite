@@ -198,38 +198,63 @@ for tool in transcriptvb_finalize trim_qc_fastq trim_qc_merge; do
   fi
 done
 
-container_glibc="$(detect_glibc)"
-max_glibc_symbol="$(grep -aoE 'GLIBC_[0-9]+\.[0-9]+' "$binary" | sort -Vu | tail -n1 || true)"
-ldd_output="$({ ldd "$binary"; } 2>&1)"
-
 declare -A unique_packages=()
 declare -a lib_rows=()
-while IFS= read -r raw_line; do
-  line="$(trim "$raw_line")"
-  [[ -z "$line" ]] && continue
-  [[ "$line" == linux-vdso.so.* ]] && continue
-  if [[ "$line" == *'=> not found'* ]]; then
-    echo "ERROR: unresolved runtime dependency: $line" >&2
+declare -a runtime_executables=(
+  "$binary"
+  "$resolver"
+  "$prefix/bin/molecule_first_bam_ledger"
+  "$prefix/bin/molecule_first_materialize"
+  "$prefix/bin/transcriptvb_finalize"
+  "$prefix/bin/trim_qc_fastq"
+  "$prefix/bin/trim_qc_merge"
+)
+glibc_symbols=""
+for executable in "${runtime_executables[@]}"; do
+  executable_name="$(basename "$executable")"
+  executable_symbols="$(grep -aoE 'GLIBC_[0-9]+\.[0-9]+' "$executable" || true)"
+  if [[ -n "$executable_symbols" ]]; then
+    glibc_symbols+="$executable_symbols"$'\n'
+  fi
+
+  if ! ldd_output="$({ ldd "$executable"; } 2>&1)"; then
+    if [[ "$ldd_output" == *"not a dynamic executable"* || "$ldd_output" == *"statically linked"* ]]; then
+      continue
+    fi
+    echo "ERROR: could not inspect runtime dependencies for $executable_name: $ldd_output" >&2
     exit 1
   fi
 
-  soname=""
-  path=""
-  if [[ "$line" == *'=>'* ]]; then
-    soname="${line%% => *}"
-    rest="${line#*=> }"
-    path="${rest%% *}"
-  else
-    path="${line%% *}"
-    soname="$(basename "$path")"
-  fi
+  while IFS= read -r raw_line; do
+    line="$(trim "$raw_line")"
+    [[ -z "$line" ]] && continue
+    [[ "$line" == linux-vdso.so.* ]] && continue
+    if [[ "$line" == *'=> not found'* ]]; then
+      echo "ERROR: unresolved runtime dependency for $executable_name: $line" >&2
+      exit 1
+    fi
 
-  package="$(runtime_package_for "$path")"
-  if [[ -n "$package" ]]; then
-    unique_packages["$package"]=1
-  fi
-  lib_rows+=("$soname|$path|${package:-unknown}")
-done <<< "$ldd_output"
+    soname=""
+    path=""
+    if [[ "$line" == *'=>'* ]]; then
+      soname="${line%% => *}"
+      rest="${line#*=> }"
+      path="${rest%% *}"
+    else
+      path="${line%% *}"
+      soname="$(basename "$path")"
+    fi
+
+    package="$(runtime_package_for "$path")"
+    if [[ -n "$package" ]]; then
+      unique_packages["$package"]=1
+    fi
+    lib_rows+=("$executable_name|$soname|$path|${package:-unknown}")
+  done <<< "$ldd_output"
+done
+
+container_glibc="$(detect_glibc)"
+max_glibc_symbol="$(printf '%s' "$glibc_symbols" | sort -Vu | tail -n1 || true)"
 
 package_list=""
 if [[ "${#unique_packages[@]}" -gt 0 ]]; then
@@ -244,11 +269,11 @@ Maximum referenced GLIBC symbol: ${max_glibc_symbol:-unknown}
 STAR-suite version: ${version_output}
 STAR-suite source revision: ${source_revision}
 Minimum runtime packages (Ubuntu/Debian package names): ${package_list:-unknown}
-Dynamic libraries:
+Dynamic libraries by packaged executable:
 "
 for row in "${lib_rows[@]}"; do
-  IFS='|' read -r soname path package <<< "$row"
-  manifest+="  - ${soname} => ${path}"
+  IFS='|' read -r executable_name soname path package <<< "$row"
+  manifest+="  - ${executable_name}: ${soname} => ${path}"
   if [[ -n "$package" ]]; then
     manifest+=" [${package}]"
   fi

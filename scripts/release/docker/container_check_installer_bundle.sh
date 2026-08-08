@@ -134,9 +134,22 @@ for tool in molecule_first_resolver molecule_first_bam_ledger molecule_first_mat
     exit 1
   fi
 done
-for tool in transcriptvb_finalize trim_qc_fastq trim_qc_merge; do
+for tool in molecule_first_resolver molecule_first_bam_ledger molecule_first_materialize \
+            transcriptvb_finalize trim_qc_fastq trim_qc_merge; do
   if [[ ! -x "$prefix/bin/$tool" ]]; then
     echo "ERROR: installed release companion $tool missing" >&2
+    exit 1
+  fi
+  if ! ldd_output="$(ldd "$prefix/bin/$tool" 2>&1)"; then
+    if [[ "$ldd_output" == *"not a dynamic executable"* || "$ldd_output" == *"statically linked"* ]]; then
+      continue
+    fi
+    echo "ERROR: could not inspect runtime dependencies for $tool: $ldd_output" >&2
+    exit 1
+  fi
+  if [[ "$ldd_output" == *'=> not found'* ]]; then
+    echo "ERROR: unresolved runtime dependency for $tool:" >&2
+    printf '%s\n' "$ldd_output" >&2
     exit 1
   fi
 done

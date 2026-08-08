@@ -373,7 +373,7 @@ Notes:
 - The CI/release path publishes multiple tarballs because Linux may reject a binary built for a newer runtime environment before STAR Suite starts.
 - The installer bundle checks the host environment and selects the highest compatible bundled binary automatically.
 - Release artifacts now include runtime-manifest text files captured from clean Ubuntu 22.04 and 24.04 containers.
-- Those manifests record the resolved runtime libraries and Ubuntu/Debian package names seen by the validator.
+- Those manifests record the resolved runtime libraries and Ubuntu/Debian package names seen for STAR and each packaged release companion.
 
 ## OS Compatibility Note
 
@@ -386,19 +386,29 @@ For non-technical users:
 For technical users:
 
 - The tarballs are only partially static.
+- STAR and the packaged `transcriptvb_finalize`, `trim_qc_fastq`, and
+  `trim_qc_merge` companions embed the compiler's C++, GCC, and OpenMP
+  runtimes. They do not require `libstdc++.so.6`, `libgcc_s.so.1`, or
+  `libgomp.so.1` from the target host.
 - Current validated runtime SONAMEs are:
   - `libc.so.6`
   - `libm.so.6`
   - `libz.so.1`
   - `libcrypto.so.3`
+  - `libstdc++.so.6` (molecule-first companion tools)
+  - `libgcc_s.so.1` (molecule-first companion tools)
 - On Ubuntu 22.04 the validated package set is:
   - `libc6`
   - `zlib1g`
   - `libssl3`
+  - `libstdc++6`
+  - `libgcc-s1`
 - On Ubuntu 24.04 the validated package set is:
   - `libc6`
   - `zlib1g`
   - `libssl3t64`
+  - `libstdc++6`
+  - `libgcc-s1`
 - The `glibc239` asset label tracks the Ubuntu 24.04 build environment.
 - The March 10, 2026 runtime manifest showed that this build currently references `GLIBC_2.38`, so the label is conservative.
 - The exact resolved package names are recorded in the release `runtime-manifests/` artifacts for each container baseline.
