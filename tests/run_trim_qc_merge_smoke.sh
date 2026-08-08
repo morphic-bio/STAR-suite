@@ -8,12 +8,13 @@ set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root="$(cd "$here/.." && pwd)"
 src="$root/core/legacy/source"
+TRIM_QC_FASTQ_BIN="${TRIM_QC_FASTQ_BIN:-$src/trim_qc_fastq}"
+TRIM_QC_MERGE_BIN="${TRIM_QC_MERGE_BIN:-$src/trim_qc_merge}"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
-for tool in trim_qc_fastq trim_qc_merge; do
-    [ -x "$src/$tool" ] || make -C "$src" "$tool" WITH_CHROMAP=0 >/dev/null
-done
+[ -x "$TRIM_QC_FASTQ_BIN" ] || make -C "$src" trim_qc_fastq WITH_CHROMAP=0 >/dev/null
+[ -x "$TRIM_QC_MERGE_BIN" ] || make -C "$src" trim_qc_merge WITH_CHROMAP=0 >/dev/null
 
 python3 - "$work" <<'PY'
 import random, os, sys
@@ -34,12 +35,12 @@ open(os.path.join(d, "all.fastq"), "w").write(''.join(allr))
 PY
 
 for i in 0 1 2 3; do
-    "$src/trim_qc_fastq" --input "$work/shard$i.fastq" --report "$work/s$i" \
+    "$TRIM_QC_FASTQ_BIN" --input "$work/shard$i.fastq" --report "$work/s$i" \
         --shard-out "$work/s$i.trimqc" >/dev/null
 done
 
-"$src/trim_qc_merge" --out-prefix "$work/merged" --stage fastq_replay "$work"/s*.trimqc >/dev/null
-"$src/trim_qc_fastq" --input "$work/all.fastq" --report "$work/ref" >/dev/null
+"$TRIM_QC_MERGE_BIN" --out-prefix "$work/merged" --stage fastq_replay "$work"/s*.trimqc >/dev/null
+"$TRIM_QC_FASTQ_BIN" --input "$work/all.fastq" --report "$work/ref" >/dev/null
 
 if ! cmp -s "$work/merged.trim_qc.json" "$work/ref.trim_qc.json"; then
     echo "FAIL: merged shard QC differs from a single pass" >&2
@@ -48,7 +49,7 @@ if ! cmp -s "$work/merged.trim_qc.json" "$work/ref.trim_qc.json"; then
 fi
 
 # Merge is a sum, so shard order must not matter.
-"$src/trim_qc_merge" --out-prefix "$work/rev" --stage fastq_replay \
+"$TRIM_QC_MERGE_BIN" --out-prefix "$work/rev" --stage fastq_replay \
     "$work/s3.trimqc" "$work/s1.trimqc" "$work/s0.trimqc" "$work/s2.trimqc" >/dev/null
 if ! cmp -s "$work/rev.trim_qc.json" "$work/ref.trim_qc.json"; then
     echo "FAIL: merge is order-dependent" >&2

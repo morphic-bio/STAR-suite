@@ -3,7 +3,7 @@
 set -euo pipefail
 
 TARBALL=""
-EXPECTED_VERSION="1.6.1"
+EXPECTED_VERSION="1.7.0"
 EXPECTED_COMMIT=""
 MANIFEST_OUT=""
 
@@ -188,6 +188,12 @@ fi
 for tool in molecule_first_bam_ledger molecule_first_materialize; do
   if [[ ! -x "$prefix/bin/$tool" ]] || [[ "$($prefix/bin/$tool --version)" != "$EXPECTED_VERSION" ]]; then
     echo "ERROR: molecule-first companion $tool missing or version-mismatched" >&2
+    exit 1
+  fi
+done
+for tool in transcriptvb_finalize trim_qc_fastq trim_qc_merge; do
+  if [[ ! -x "$prefix/bin/$tool" ]]; then
+    echo "ERROR: release companion $tool missing" >&2
     exit 1
   fi
 done

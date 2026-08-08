@@ -82,7 +82,7 @@ apt-get update
 apt-get install -y --no-install-recommends ca-certificates
 apt-get install -y --no-install-recommends /work/star-suite.deb
 
-for bin in STAR star_feature_call run_flexfilter_mex flexfilter molecule_first_resolver molecule_first_bam_ledger molecule_first_materialize slam_requant pileup_snp remove_y_reads; do
+for bin in STAR star_feature_call run_flexfilter_mex flexfilter molecule_first_resolver molecule_first_bam_ledger molecule_first_materialize transcriptvb_finalize trim_qc_fastq trim_qc_merge slam_requant pileup_snp remove_y_reads; do
   command -v "${bin}" >/dev/null
 done
 

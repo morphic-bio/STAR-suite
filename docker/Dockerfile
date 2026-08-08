@@ -119,6 +119,9 @@ COPY --from=builder /build/flex/tools/flexfilter/run_flexfilter_mex /usr/local/b
 COPY --from=builder /build/flex/tools/molecule_first_resolver/molecule_first_resolver /usr/local/bin/molecule_first_resolver
 COPY --from=builder /build/flex/tools/molecule_first_resolver/molecule_first_bam_ledger /usr/local/bin/molecule_first_bam_ledger
 COPY --from=builder /build/flex/tools/molecule_first_resolver/molecule_first_materialize /usr/local/bin/molecule_first_materialize
+COPY --from=builder /build/core/legacy/source/transcriptvb_finalize /usr/local/bin/transcriptvb_finalize
+COPY --from=builder /build/core/legacy/source/trim_qc_fastq /usr/local/bin/trim_qc_fastq
+COPY --from=builder /build/core/legacy/source/trim_qc_merge /usr/local/bin/trim_qc_merge
 COPY --from=builder /build/core/features/yremove_fastq/tools/remove_y_reads/remove_y_reads /usr/local/bin/remove_y_reads
 
 WORKDIR /workspace
