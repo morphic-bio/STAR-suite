@@ -160,6 +160,7 @@ Parameters::Parameters() {//initalize parameters info
     //run
     parArray.push_back(new ParameterInfoVector <string> (-1, -1, "runMode", &runModeIn));
     parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "runThreadN", &runThreadN));
+    parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "genomeLoadThreads", &genomeLoadThreads));
     parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "dynamicThreadInterface", &dynamicThreadInterface));
     parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "dynamicThreadConstMapPermits", &dynamicThreadConstMapPermits));
     parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "dynamicThreadTelemetry", &dynamicThreadTelemetry));
