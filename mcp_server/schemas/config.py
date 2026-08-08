@@ -1,9 +1,9 @@
 """Pydantic models for MCP server configuration."""
 
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class ServerConfig(BaseModel):
@@ -110,6 +110,157 @@ class WorkflowConfig(BaseModel):
         pattern="^(public|private)$",
         description="public = visible without auth; private = requires valid auth_token",
     )
+    logical_id: Optional[str] = Field(
+        default=None,
+        min_length=1,
+        description=(
+            "Source-independent recipe identity used to group alternatives; "
+            "defaults to id"
+        ),
+    )
+    version: str = Field(
+        default="0",
+        min_length=1,
+        description="PEP 440 recipe version used by prefer_newest resolution",
+    )
+    applications: list[str] = Field(
+        default_factory=list,
+        description="Compatible application ids; empty means all applications",
+    )
+    extends: Optional[str] = Field(
+        default=None,
+        description=(
+            "Fully qualified parent workflow id. The child remains a complete, "
+            "authoritative schema; this field records validated lineage."
+        ),
+    )
+    replaces: list[str] = Field(
+        default_factory=list,
+        description="Fully qualified workflow ids superseded by this recipe",
+    )
+    image: Optional[str] = Field(
+        default=None,
+        description="Optional pinned container image for portable execution bundles",
+    )
+
+    @model_validator(mode="after")
+    def validate_recipe_metadata(self) -> "WorkflowConfig":
+        if len(set(self.applications)) != len(self.applications):
+            raise ValueError(f"workflow '{self.id}' has duplicate application ids")
+        if any(not application.strip() for application in self.applications):
+            raise ValueError(f"workflow '{self.id}' has an empty application id")
+        if len(set(self.replaces)) != len(self.replaces):
+            raise ValueError(f"workflow '{self.id}' has duplicate replaces entries")
+        if self.id in self.replaces:
+            raise ValueError(f"workflow '{self.id}' cannot replace itself")
+        if self.extends == self.id:
+            raise ValueError(f"workflow '{self.id}' cannot extend itself")
+        return self
+
+
+RecipeResolutionPolicy = Literal["keep_separate", "prompt", "prefer_newest"]
+
+
+class RecipeResolutionConfig(BaseModel):
+    """How logical recipe identities are reconciled for each application."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    default_policy: RecipeResolutionPolicy = Field(
+        default="keep_separate",
+        description="Policy used when an application has no explicit override",
+    )
+    applications: dict[str, RecipeResolutionPolicy] = Field(
+        default_factory=dict,
+        description="Application-specific policy overrides",
+    )
+
+    @model_validator(mode="after")
+    def validate_application_ids(self) -> "RecipeResolutionConfig":
+        if any(not application.strip() for application in self.applications):
+            raise ValueError("recipe resolution application ids must be non-empty")
+        return self
+
+    def policy_for(self, application: Optional[str]) -> RecipeResolutionPolicy:
+        """Return the configured policy for an application context."""
+        if application is not None and application in self.applications:
+            return self.applications[application]
+        return self.default_policy
+
+
+class RecipeCatalogSourceConfig(BaseModel):
+    """One local recipe catalog manifest in discovery order."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    manifest: Path = Field(
+        description="Path to catalog.yaml; relative paths use the MCP config directory"
+    )
+    trust: Literal["trusted", "untrusted"] = Field(
+        default="untrusted",
+        description="Trust assigned by the local execution-context owner",
+    )
+
+
+class RecipeCatalogManifest(BaseModel):
+    """Validated contents of a local recipe catalog manifest."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    schema_id: str = Field(
+        alias="schema",
+        pattern=r"^biodepot\.recipe_catalog/v1$",
+        description="Recipe catalog schema identifier",
+    )
+    id: str = Field(
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]*$",
+        description="Stable catalog identifier",
+    )
+    namespace: str = Field(
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]*$",
+        description="Namespace prefix for workflows owned by this catalog",
+    )
+    version: str = Field(min_length=1, description="Catalog format/content version")
+    workflows: list[WorkflowConfig] = Field(default_factory=list)
+
+
+class ProvenanceRepositoryConfig(BaseModel):
+    """A local provenance repository available to the execution context."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]*$",
+        description="Stable provenance repository identifier",
+    )
+    root: Path = Field(description="Repository root; relative to the MCP config directory")
+
+
+class ProvenanceHierarchyConfig(BaseModel):
+    """Ordered provenance search roots plus one optional write destination."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    search: list[ProvenanceRepositoryConfig] = Field(default_factory=list)
+    write: Optional[ProvenanceRepositoryConfig] = None
+
+    @model_validator(mode="after")
+    def validate_repository_ids(self) -> "ProvenanceHierarchyConfig":
+        seen: dict[str, Path] = {}
+        for repository in self.search:
+            if repository.id in seen:
+                raise ValueError(
+                    f"duplicate provenance search repository id: {repository.id}"
+                )
+            seen[repository.id] = repository.root
+
+        if self.write is not None and self.write.id in seen:
+            if seen[self.write.id] != self.write.root:
+                raise ValueError(
+                    "provenance write repository duplicates a search id with a "
+                    f"different root: {self.write.id}"
+                )
+        return self
 
 
 # Site-specific paths that fill the ${...} placeholders in DEFAULT_AGENT_PROTOCOL.
@@ -162,6 +313,18 @@ class MCPConfig(BaseModel):
     test_suites: list[TestSuiteConfig] = Field(default_factory=list)
     required_binaries: list[BinaryConfig] = Field(default_factory=list)
     workflows: list[WorkflowConfig] = Field(default_factory=list)
+    recipe_catalogs: list[RecipeCatalogSourceConfig] = Field(
+        default_factory=list,
+        description="External local recipe catalogs, in discovery order",
+    )
+    recipe_resolution: RecipeResolutionConfig = Field(
+        default_factory=RecipeResolutionConfig,
+        description="Default and per-application source reconciliation policies",
+    )
+    provenance: ProvenanceHierarchyConfig = Field(
+        default_factory=ProvenanceHierarchyConfig,
+        description="Ordered provenance search roots and one optional write root",
+    )
     agent_protocol: str = Field(
         default=DEFAULT_AGENT_PROTOCOL,
         description="Provenance-first + compose-up protocol TEMPLATE surfaced to agents on workflow discovery.",
