@@ -367,6 +367,20 @@ int ReadAlign::oneReadLoaded(const int readStatus0) {
                 qualHist[im][(uint8)Qual0[im][ix]]++;
             };
         };
+        //FastQC-like trim QC. Collected here because this is the last point at
+        //which the mates are still separate and already clipped: a few lines
+        //below, mate 2 is reverse-complemented into Read1[0] and the per-mate
+        //view is gone. Sharing outFilterBySJoutStage!=2 with qualHist above is
+        //what keeps a two-pass run from counting every read twice.
+        //Read1[im] is clipped numeric sequence (0..readLength), while Qual0[im]
+        //stays in original coordinates, so the left clip is passed as the
+        //quality offset rather than applied to the pointer.
+        if (trimQc.enabled()) {
+            for (uint32 im=0; im<P.readNmates; im++) {
+                trimQc.addRead(Read1[im], Qual0[im], (uint32_t) readLength[im],
+                               im, (uint32_t) clipMates[im][0].clippedN);
+            };
+        };
     };
     
     if (P.readNmates==2) {//combine two mates together
