@@ -44,6 +44,7 @@ public:
     
     // Get raw counts (for debugging)
     const std::array<double, GC_BINS>& getCounts() const { return counts_; }
+    bool restoreCounts(const std::array<double, GC_BINS>& counts, std::string& error);
     
 private:
     std::array<double, GC_BINS> counts_;
@@ -58,4 +59,3 @@ private:
 };
 
 #endif // GC_BIAS_H
-
