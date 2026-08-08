@@ -1,7 +1,8 @@
 # Repository Split Runbook: Core, Recipes, Provenance
 
 Date: 2026-05-22
-Status: Phase 1 cutover implemented locally and pushed to the split repos.
+Status: Phase 1 MorPhiC cutover and the public official catalog/provenance split
+are implemented. STAR Suite 1.7.0 vendors pinned read-only snapshots.
 
 ## Goal
 
@@ -10,14 +11,18 @@ run provenance into repositories with lifecycles that match operational use.
 During the transition, duplication is allowed, but every duplicated script or
 document must have an explicit canonical owner and a drift policy.
 
-The target end state:
+The repository topology:
 
 1. `STAR-suite`: core STAR/Flex/Solo processing, compiled tools, core tests,
    release packaging, and generic workflow machinery.
-2. `morphic-recipes`: dataset and project recipes, launch
+2. `STAR-suite-recipes`: reusable non-core workflows, open orchestration
+   helpers, and portable storage/site/executor profiles.
+3. `STAR-suite-provenance`: selective public release, paper, parity, and HPC
+   evidence with disclosure validation.
+4. `morphic-recipes`: dataset and project recipes, launch
    wrappers, downstream h5ad/QC/CellBender/celltyping/Globus helpers, and
    workflow schemas for production runs.
-3. `morphic-provenance`: immutable run records, manifests,
+5. `morphic-provenance`: immutable project run records, manifests,
    checksums, rendered commands, environment pins, and handoff provenance.
 
 The boundaries below are the source of truth.
@@ -36,6 +41,8 @@ GitHub remotes:
 ```text
 git@github.com:morphic-bio/morphic-recipes.git
 git@github.com:morphic-bio/morphic-provenance.git
+git@github.com:morphic-bio/STAR-suite-recipes.git
+git@github.com:morphic-bio/STAR-suite-provenance.git
 ```
 
 Initial commits:

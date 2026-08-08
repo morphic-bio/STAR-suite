@@ -2,11 +2,10 @@
 
 Date: 2026-08-08
 
-Status: catalog discovery, reconciliation, locking, and portable bundle
-infrastructure implemented on `feature/recipe-catalog-stack`. Creation and
-migration of the official, site, and project recipe/provenance repositories is
-the next project. This work is intentionally isolated from the failed v1.7.0
-release branch.
+Status: catalog discovery, reconciliation, locking, portable bundles, public
+repository creation, recipe migration, and release snapshot integration are
+implemented for STAR Suite 1.7.0. Site and project catalogs remain independent
+extensions.
 
 ## Purpose
 
@@ -61,6 +60,11 @@ Official releases should contain a validated, pinned snapshot under
 `share/star-suite/catalogs/official/`. The external repository remains
 canonical, while the snapshot preserves offline integration.
 
+Canonical public repository:
+`https://github.com/morphic-bio/STAR-suite-recipes`. STAR Suite 1.7.0 pins the
+exact repository revision and catalog digest in
+`share/star-suite/SNAPSHOTS.json`.
+
 ### Site and project catalogs
 
 Site catalogs provide scheduler, filesystem, container, and institutional
@@ -79,6 +83,11 @@ settings are supplied separately as an execution/site profile.
 Provenance repositories contain immutable records of executions. A context may
 search several repositories for prior evidence but must select exactly one
 writable destination for a new run.
+
+Compact public release, paper, and HPC evidence is published at
+`https://github.com/morphic-bio/STAR-suite-provenance`. STAR Suite vendors a
+read-only pinned snapshot under `share/star-suite/evidence/official/`; project
+run registries remain separate and are never merged into it.
 
 ## Catalog Stack
 
@@ -414,16 +423,18 @@ an existing target.
 
 ### Phase 5: Recipe migration
 
-Deferred by design until this catalog mechanism is merged. This is the next
-project: create the repositories, author the generic recipes, validate them,
-and then migrate eligible helpers.
+Implemented for 1.7.0.
 
-- Create the canonical official recipe repository.
-- Move generic operational workflows and their helpers.
-- Retain built-in core capability and test catalogs.
-- Add release-time vendoring of a pinned official catalog snapshot.
-- Retire forwarding entries only after Workbench and scheduler consumers have
-  migrated.
+- Created the public `STAR-suite-recipes` repository with retained import and
+  feature branch history.
+- Moved reusable SLAM, multiome, downstream, QC, and MuData operational recipes
+  with their open helpers.
+- Added generic partition-manifest scatter/gather, Lustre, Bridges-2, and
+  Temporal/Slurm profiles without publishing a partition-provider
+  implementation.
+- Kept MorPhiC-specific UCSF, JAX, and MSK wrappers in `morphic-recipes`.
+- Retained built-in compatibility workflows for the 1.7 transition.
+- Added a pinned official catalog and evidence snapshot to release artifacts.
 
 ### Phase 6: Remote catalog sources
 
@@ -476,3 +487,8 @@ catalogs without editing STAR Suite; Workbench resolves the same catalog stack;
 Temporal executes only a locked resolved bundle; and every completed run points
 unambiguously to its suite, recipe, catalog, helper, profile, and provenance
 identities.
+
+The 1.7.0 implementation satisfies the local/offline catalog, hierarchy,
+locking, bundle, and snapshot portions of this definition. Remote Git and OCI
+acquisition remain Phase 6 work; production execution continues to consume a
+locally installed immutable snapshot or checkout.

@@ -1,0 +1,27 @@
+schema: biodepot.executor_profile/v1
+id: temporal-slurm
+version: "1.0.0"
+summary: Execute an already resolved STAR Suite bundle through Temporal and Slurm.
+discovery: disabled
+requires_resolved_recipe_lock: true
+requires_partition_manifest_lock: true
+retry:
+  reuse_recipe_lock: true
+  reuse_partition_ordinal: true
+  mutable_catalog_fetch: forbidden
+slurm:
+  launcher: srun
+  cpu_bind: cores
+  cpus_per_task_from_resource_lock: true
+environment:
+  OMP_PROC_BIND: close
+  OMP_PLACES: cores
+terminal_evidence:
+  per_partition_required: true
+  gather_requires_all: true
+  provenance_finalize_after_gather: true
+cancellation:
+  stop_new_submissions: true
+  preserve_completed_evidence: true
+  preserve_failed_logs: true
+

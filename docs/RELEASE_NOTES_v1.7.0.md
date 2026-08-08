@@ -64,11 +64,31 @@ genome-index compatibility remains `2.7.4a`. Official binaries embed the exact
 - Skip that padding write unless junctions were actually inserted. Real
   nonzero-junction insertion retains the established padding behavior.
 
+## Public recipe and provenance catalogs
+
+- Add the public `STAR-suite-recipes` repository as the canonical home for
+  reusable non-core workflows, open helpers, and Lustre, Bridges-2, and
+  Temporal/Slurm execution profiles.
+- Add a provider-neutral partition-manifest contract and a safe-by-default
+  partitioned bulk paired-end alignment recipe. Partition creation remains an
+  independent site or project responsibility.
+- Keep MorPhiC-specific UCSF, JAX, and MSK production wrappers in
+  `morphic-recipes`, while migrating reusable multiome, downstream, QC, MuData,
+  and SLAM operational recipes to the official catalog.
+- Add the public `STAR-suite-provenance` repository for selective normalized
+  paper, parity, HPC, and release evidence. Project run registries and delivery
+  manifests remain separate.
+- Vendor exact read-only recipe and evidence snapshots under
+  `share/star-suite/`, with source revisions and digests recorded in
+  `SNAPSHOTS.json` for offline discovery.
+
 ## Release artifact coverage
 
 - Ship `transcriptvb_finalize`, `trim_qc_fastq`, and `trim_qc_merge` in both
   Linux compatibility tarballs, the automatic installer bundle, Debian
   packages, and the multi-architecture Docker image.
+- Ship the pinned official recipe catalog and public provenance evidence in
+  source, Debian, Docker, compatibility tarball, and installer-bundle layouts.
 - Validate companion-tool inventory during tarball, installer, and Debian
   install/uninstall checks.
 - Run installed-binary synthetic gates for zero-junction GTF generation,

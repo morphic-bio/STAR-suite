@@ -1,0 +1,380 @@
+# Public official recipe: reusable multiome lane runner.
+id: starsuite.official/multiome
+title: STAR Suite 10x Multiome (GEX + Chromap ATAC + MACS peaks)
+summary: Reusable multiome engine with compose-up profiles and optional MACS3 q-value peak selection.
+kind: shell_workflow
+entry_script: scripts/run_star_multiome_lane_smoke.sh
+supported_modes: [local, dry-run-capable]
+caveats:
+  - This is a starting point. Select a locked provenance record before non-trivial runs and reuse validated thread and low-memory settings.
+  - "Default profile is matrices-peaks, the compose-up floor: GeneFull MEX, ATAC fragments/sidecar, MACS3 peaks, and ATAC peak MEX."
+  - "For FASTQ input provide gex_r1, gex_r2, atac_r1, atac_barcode, and atac_r2. For CBQ input provide gex_cbq, atac_read_pair_cbq, and atac_barcode_cbq."
+  - chromap_macs3_frag_qvalue defaults to 0, preserving p-value peak selection. Set a positive value in (0,1] to use libchromap/MACS3 q-value selection.
+default_output_layout: Output directory contains star_sample/run, ATAC sidecar/peaks/peak_mex, and LOCAL_MEX_READY.txt when stop_after_local_mex is true.
+
+scripts:
+  - role: entry
+    path: scripts/run_star_multiome_lane_smoke.sh
+    description: Canonical generic 10x multiome lane recipe.
+    language: bash
+  - role: minimal_wrapper
+    path: scripts/run_multiome_minimal.sh
+    description: Thin wrapper equivalent to --profile matrices-peaks.
+    language: bash
+  - role: barcode_normalizer
+    path: scripts/normalize_multiome_atac_barcode_fastq.py
+    description: Legacy ATAC barcode FASTQ normalization fallback.
+    language: python
+  - role: genefull_packager
+    path: scripts/package_star_genefull_mex.py
+    description: Package STAR GeneFull matrices into a 10x-compatible layout.
+    language: python
+  - role: velocyto_packager
+    path: scripts/prepare_velocyto_mex.py
+    description: Prepare Velocyto matrices for downstream consumption.
+    language: python
+  - role: atac_mex_fallback
+    path: scripts/build_atac_peak_matrix_from_fragments.py
+    description: Python ATAC peak-MEX fallback.
+    language: python
+  - role: local_downstream
+    path: scripts/run_scrna_downstream_gene_full_velocyto.sh
+    description: Optional local GeneFull and Velocyto downstream workflow.
+    language: bash
+  - role: remote_downstream
+    path: scripts/run_remote_multiome_post_mex_rsync.sh
+    description: Optional explicitly configured SSH/rsync downstream executor.
+    language: bash
+  - role: mudata_builder
+    path: scripts/build_multiome_mudata.py
+    description: Assemble RNA and ATAC outputs into MuData.
+    language: python
+  - {role: downstream_h5ad, path: scripts/build_gene_full_velocyto_h5ad.py, language: python}
+  - {role: downstream_doublets, path: scripts/run_star_cell_doublets.R, language: R}
+  - {role: downstream_feature_integration, path: scripts/integrate_feature_library.py, language: python}
+  - {role: downstream_postprocess, path: scripts/postprocess_downstream_filters.py, language: python}
+  - {role: downstream_threshold, path: scripts/compute_adaptive_qc_threshold.py, language: python}
+  - {role: downstream_mt, path: scripts/scrna_mt_adaptive.py, language: python}
+  - {role: downstream_filter, path: scripts/apply_adaptive_mt_filter.py, language: python}
+  - {role: downstream_qc, path: scripts/generate_qc_histogram_mt_adaptive.py, language: python}
+  - {role: downstream_propagate, path: scripts/propagate_anndata_layer.py, language: python}
+  - {role: downstream_cellbender, path: scripts/add_cellbender_layer_from_h5.py, language: python}
+
+stages:
+  - name: star_chromap
+    title: STAR GEX + Chromap ATAC
+    script: scripts/run_star_multiome_lane_smoke.sh
+    description: Runs STAR GeneFull and Chromap ATAC, producing a BAM/fragments sidecar boundary.
+  - name: peak_mex
+    title: MACS3 Peaks + ATAC Peak MEX
+    script: scripts/run_star_multiome_lane_smoke.sh
+    description: Calls MACS3-compatible FRAG peaks from the binary sidecar and materializes peak x cell MEX.
+  - name: downstream
+    title: Optional Remote Downstream
+    script: scripts/run_remote_multiome_post_mex_rsync.sh
+    description: Optional CellBender/MuData downstream for full profile runs.
+    gated_by: stop_after_local_mex
+
+parameter_groups:
+  - name: composition
+    title: Composition
+    parameters:
+      - profile
+      - stop_after_local_mex
+      - dry_run
+  - name: inputs
+    title: Input Paths
+    parameters:
+      - input_format
+      - gex_r1
+      - gex_r2
+      - gex_cbq
+      - atac_r1
+      - atac_barcode
+      - atac_r2
+      - atac_read_pair_cbq
+      - atac_barcode_cbq
+      - out_dir
+  - name: references
+    title: References
+    parameters:
+      - genome_dir
+      - gex_whitelist
+      - chromap_ref
+      - chromap_index
+      - atac_whitelist
+      - atac_to_gex
+  - name: performance
+    title: Performance
+    parameters:
+      - threads
+      - chromap_threads
+      - chromap_low_mem
+      - chromap_low_mem_ram
+      - chromap_macs3_frag_low_mem
+      - chromap_start_mode
+      - skip_build
+  - name: peak_calling
+    title: Peak Calling
+    parameters:
+      - chromap_macs3_frag_qvalue
+  - name: execution
+    title: Execution
+    parameters:
+      - force
+
+parameters:
+  - name: profile
+    cli_flag: --profile
+    type: enum
+    default: matrices-peaks
+    choices: [matrices-peaks, full]
+    description: Compose-up profile. matrices-peaks is the minimal GeneFull + ATAC fragments + MACS peaks floor.
+    category: composition
+
+  - name: stop_after_local_mex
+    cli_flag: --stop-after-local-mex
+    type: bool
+    default: true
+    description: Stop after local GeneFull/ATAC peak MEX outputs; required for matrices-peaks and safe for dry-run review.
+    category: composition
+
+  - name: dry_run
+    cli_flag: --dry-run
+    type: bool
+    default: true
+    description: Preview the resolved command and output layers without running.
+    category: composition
+
+  - name: input_format
+    cli_flag: --input-format
+    type: enum
+    default: fastq
+    choices: [fastq, cbq]
+    description: Input surface for both GEX and ATAC.
+    category: inputs
+
+  - name: gex_r1
+    cli_flag: --gex-r1
+    type: string
+    default: null
+    description: GEX R1 FASTQ CSV containing CB/UMI for FASTQ input.
+    category: inputs
+
+  - name: gex_r2
+    cli_flag: --gex-r2
+    type: string
+    default: null
+    description: GEX R2 FASTQ CSV containing cDNA for FASTQ input.
+    category: inputs
+
+  - name: gex_cbq
+    cli_flag: --gex-cbq
+    type: string
+    default: null
+    description: GEX paired CBQ CSV for CBQ input.
+    category: inputs
+
+  - name: atac_r1
+    cli_flag: --atac-r1
+    type: string
+    default: null
+    description: ATAC genomic read 1 FASTQ CSV for FASTQ input.
+    category: inputs
+
+  - name: atac_barcode
+    cli_flag: --atac-barcode
+    type: string
+    default: null
+    description: ATAC barcode/i5 FASTQ CSV for FASTQ input.
+    category: inputs
+
+  - name: atac_r2
+    cli_flag: --atac-r2
+    type: string
+    default: null
+    description: ATAC genomic read 2 FASTQ CSV for FASTQ input.
+    category: inputs
+
+  - name: atac_read_pair_cbq
+    cli_flag: --atac-read-pair-cbq
+    type: string
+    default: null
+    description: ATAC paired-read CBQ CSV for CBQ input.
+    category: inputs
+
+  - name: atac_barcode_cbq
+    cli_flag: --atac-barcode-cbq
+    type: string
+    default: null
+    description: ATAC barcode CBQ CSV for CBQ input.
+    category: inputs
+
+  - name: out_dir
+    cli_flag: --out-dir
+    type: directory
+    required: true
+    is_output_root: true
+    description: Fresh output directory.
+    category: inputs
+
+  - name: genome_dir
+    cli_flag: --genome-dir
+    type: directory
+    required: true
+    default: null
+    path_must_exist: true
+    description: STAR GEX genomeDir.
+    category: references
+
+  - name: gex_whitelist
+    cli_flag: --gex-whitelist
+    type: file
+    required: true
+    default: null
+    path_must_exist: true
+    description: ARC GEX whitelist.
+    category: references
+
+  - name: chromap_ref
+    cli_flag: --chromap-ref
+    type: file
+    required: true
+    default: null
+    path_must_exist: true
+    description: Chromap reference FASTA.
+    category: references
+
+  - name: chromap_index
+    cli_flag: --chromap-index
+    type: file
+    required: true
+    default: null
+    path_must_exist: true
+    description: Chromap index.
+    category: references
+
+  - name: atac_whitelist
+    cli_flag: --atac-whitelist
+    type: file
+    required: true
+    default: null
+    path_must_exist: true
+    description: ARC ATAC whitelist.
+    category: references
+
+  - name: atac_to_gex
+    cli_flag: --atac-to-gex
+    type: file
+    required: true
+    default: null
+    path_must_exist: true
+    description: ATAC-to-GEX barcode translation table.
+    category: references
+
+  - name: threads
+    cli_flag: --threads
+    type: int
+    default: 16
+    description: STAR thread count. Use provenance for production values.
+    category: performance
+
+  - name: chromap_threads
+    cli_flag: --chromap-threads
+    type: int
+    default: 16
+    description: Chromap thread count. Use provenance for production values.
+    category: performance
+
+  - name: chromap_low_mem
+    cli_flag: --chromap-low-mem
+    type: bool
+    default: true
+    description: Enable Chromap low-memory spill mode.
+    category: performance
+
+  - name: chromap_low_mem_ram
+    cli_flag: --chromap-low-mem-ram
+    type: int
+    default: 0
+    description: Low-memory RAM threshold in bytes; 0 uses Chromap defaults.
+    category: performance
+
+  - name: chromap_macs3_frag_low_mem
+    cli_flag: --chromap-macs3-frag-low-mem
+    type: bool
+    default: true
+    description: Enable low-memory MACS3 fragment peak workspace.
+    category: performance
+
+  - name: chromap_start_mode
+    cli_flag: --chromap-start-mode
+    type: enum
+    default: concurrent
+    choices: [concurrent, postMapping]
+    description: STAR/Chromap scheduling mode.
+    category: performance
+
+  - name: skip_build
+    cli_flag: --skip-build
+    type: bool
+    default: true
+    description: Use the existing STAR-suite binaries instead of rebuilding.
+    category: performance
+
+  - name: chromap_macs3_frag_qvalue
+    cli_flag: --chromap-macs3-frag-qvalue
+    type: float
+    default: 0
+    skip_when_default: true
+    min_value: 0
+    max_value: 1
+    description: MACS3 FRAG q-value/FDR peak selection threshold. 0 disables q-value mode and preserves default p-value mode.
+    category: peak_calling
+
+  - name: force
+    cli_flag: --force
+    type: bool
+    default: false
+    description: Regenerate outputs.
+    category: execution
+
+constraints:
+  - kind: positive
+    params: [threads, chromap_threads]
+    message: Thread counts must be positive.
+  - kind: non_negative
+    params: [chromap_low_mem_ram, chromap_macs3_frag_qvalue]
+    message: Low-memory RAM and q-value threshold must be non-negative.
+
+rendering:
+  omit_absent_optionals: true
+  flag_order:
+    - profile
+    - input_format
+    - gex_r1
+    - gex_r2
+    - gex_cbq
+    - atac_r1
+    - atac_barcode
+    - atac_r2
+    - atac_read_pair_cbq
+    - atac_barcode_cbq
+    - out_dir
+    - genome_dir
+    - gex_whitelist
+    - chromap_ref
+    - chromap_index
+    - atac_whitelist
+    - atac_to_gex
+    - threads
+    - chromap_threads
+    - chromap_low_mem
+    - chromap_low_mem_ram
+    - chromap_macs3_frag_low_mem
+    - chromap_macs3_frag_qvalue
+    - chromap_start_mode
+    - skip_build
+    - stop_after_local_mex
+    - dry_run
+    - force

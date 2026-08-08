@@ -197,6 +197,20 @@ for tool in transcriptvb_finalize trim_qc_fastq trim_qc_merge; do
     exit 1
   fi
 done
+for data_file in \
+  share/star-suite/SNAPSHOTS.json \
+  share/star-suite/catalogs/official/catalog.yaml \
+  share/star-suite/evidence/official/schema/record-v1.schema.json
+do
+  if [[ ! -f "$prefix/$data_file" ]]; then
+    echo "ERROR: installed official release data missing: $data_file" >&2
+    exit 1
+  fi
+  if ! cmp -s "$workdir/unpack/$data_file" "$prefix/$data_file"; then
+    echo "ERROR: installed official release data differs: $data_file" >&2
+    exit 1
+  fi
+done
 
 container_glibc="$(detect_glibc)"
 max_glibc_symbol="$(grep -aoE 'GLIBC_[0-9]+\.[0-9]+' "$binary" | sort -Vu | tail -n1 || true)"
