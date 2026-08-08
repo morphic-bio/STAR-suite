@@ -7,7 +7,7 @@ co-Is, and analysts covering the current STAR-suite release status for:
 
 - MSK 30KO Perturb-seq
 - NW SLAM-seq paired-end production
-- NW ATAC-seq Chromap-suite/libMACS3 production
+- NW ATAC-seq Chromap-suite/RapidMACS production
 
 The recommended deck is 8 slides. For a 6-slide version, merge slides 3/4 and
 5/6.
@@ -22,7 +22,7 @@ Program-officer / PI message:
   usable by downstream analysts, not just producing primary files.
 - Each dataset has a different maturity profile: MSK is single-cell
   h5ad/QC-focused, SLAM has completed expression DESeq2, and ATAC has a new
-  faster Chromap-suite/libMACS3 peak-calling path.
+  faster Chromap-suite/RapidMACS peak-calling path.
 
 Co-I / analyst detail:
 
@@ -186,10 +186,10 @@ Co-I / analyst detail:
 Program-officer / PI message:
 
 - The NW ATAC-seq set was processed with Chromap-suite and the integrated
-  libMACS3 FRAG peak-calling path.
+  RapidMACS (`librapidmacs`) FRAG peak-calling path.
 - This replaces the older external MACS2/MACS3 BAMPE callpeak workflow for this
   delivery.
-- The new libMACS3 library path was approximately 8x to 11x faster in
+- The new librapidmacs library path was approximately 8x to 11x faster in
   validation for the peak-calling stage.
 
 Co-I / analyst detail:
@@ -263,7 +263,7 @@ Use this if time is tight:
 3. MSK cell typing/QC details.
 4. SLAM-seq PE status plus method changes.
 5. SLAM-seq DESeq2 and release details.
-6. ATAC-seq status, libMACS3 update, release details.
+6. ATAC-seq status, RapidMACS update, release details.
 
 ## Suggested Closing Slide Or Speaker Close
 
