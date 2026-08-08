@@ -323,7 +323,7 @@ Preferred post-MEX boundary:
 - the remote GPU server receives only post-MEX inputs, runs RNA downstream
   h5ad/CellBender and MuData assembly, then rsyncs downstream h5ad and `.h5mu`
   outputs back;
-- STAR, Chromap, libchromap, libMACS3, and the native sidecar reader stay on
+- STAR, Chromap, libchromap, librapidmacs, and the native sidecar reader stay on
   the local STAR/Chromap host. This is the preferred boundary for production
   now, but the downstream side may evolve as the MuData schema matures.
 

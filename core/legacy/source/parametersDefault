@@ -2379,14 +2379,14 @@ chromapAtacMacs3FragUint8Counts  1
     int:                    use MACS3 uint8 count semantics when 1.
 
 chromapAtacMacs3FragLowMem  0
-    int:                    use libMACS3 sweep-line workspace for in-process MACS3 FRAG peaks when 1. For production multiome, prefer the post-materialization sidecar boundary: write chromapAtacSecondaryFragments locally, then run native sidecar peak-MEX construction outside STAR.
+    int:                    use the librapidmacs sweep-line workspace for in-process MACS3 FRAG peaks when 1. For production multiome, prefer the post-materialization sidecar boundary: write chromapAtacSecondaryFragments locally, then run native sidecar peak-MEX construction outside STAR.
 
 chromapAtacEvidenceFromPeaksOutput  -
     string:                 optional path for per-barcode ATAC evidence-from-peaks
                             TSV (columns: barcode, atac_peak_region_cutsites,
                             atac_peak_region_fragments, atac_fragments,
                             atac_peak_fraction). When set to a real path,
-                            after concurrent chromap ATAC and libMACS3 FRAG
+                            after concurrent chromap ATAC and librapidmacs FRAG
                             peaks finish, the libchromap contract runs
                             libscrna::atac::RunAtacEvidenceFromBinary on the
                             binary sidecar from chromapAtacSecondaryFragments
