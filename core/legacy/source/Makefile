@@ -303,6 +303,17 @@ transcriptvb-finalize : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS)
 transcriptvb-finalize : TranscriptVBSidecar.o libem $(TRANSCRIPTVB_FINALIZE_SRC)
 	$(CXX) -o transcriptvb_finalize $(CXXFLAGS) $(TRANSCRIPTVB_FINALIZE_SRC) TranscriptVBSidecar.o $(LIBEM_LIB) $(LDFLAGS)
 
+# Release tarballs must not require the build image's OpenMP/C++ runtimes.
+# STARstatic already embeds those runtimes; use the same link policy for the
+# standalone finalizer shipped beside it.  Filtering -fopenmp from the final
+# driver invocation prevents GCC from appending a second, dynamic -lgomp after
+# the explicitly linked static libgomp archive.
+.PHONY: release-transcriptvb-finalize
+release-transcriptvb-finalize : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
+release-transcriptvb-finalize : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_static) $(LDFLAGS)
+release-transcriptvb-finalize : TranscriptVBSidecar.o libem $(TRANSCRIPTVB_FINALIZE_SRC)
+	$(CXX) -o transcriptvb_finalize $(filter-out -fopenmp,$(CXXFLAGS)) $(TRANSCRIPTVB_FINALIZE_SRC) TranscriptVBSidecar.o $(LIBEM_LIB) $(LDFLAGS)
+
 
 # Dependency scanning must include VPATH-built Flex sources. Without these
 # entries, header/layout changes can leave stale Flex/Solo objects linked into
@@ -334,6 +345,12 @@ trim_qc_merge : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS)
 trim_qc_merge : htslib/libhts.a TrimQc.o TrimQcOutput.o TrimQcShard.o Stats.o TimeFunctions.o trim_qc_merge.cpp
 	$(CXX) -o trim_qc_merge $(CXXFLAGS) trim_qc_merge.cpp TrimQc.o TrimQcOutput.o TrimQcShard.o Stats.o TimeFunctions.o $(LDFLAGS)
 
+.PHONY: release-trim-qc-merge
+release-trim-qc-merge : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
+release-trim-qc-merge : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_static) $(LDFLAGS)
+release-trim-qc-merge : htslib/libhts.a TrimQc.o TrimQcOutput.o TrimQcShard.o Stats.o TimeFunctions.o trim_qc_merge.cpp
+	$(CXX) -o trim_qc_merge $(filter-out -fopenmp,$(CXXFLAGS)) trim_qc_merge.cpp TrimQc.o TrimQcOutput.o TrimQcShard.o Stats.o TimeFunctions.o $(LDFLAGS)
+
 .PHONY: trim_qc_replay
 trim_qc_replay : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
 trim_qc_replay : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS)
@@ -346,6 +363,12 @@ trim_qc_fastq : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
 trim_qc_fastq : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS)
 trim_qc_fastq : htslib/libhts.a TrimQc.o TrimQcOutput.o TrimQcShard.o Stats.o TimeFunctions.o trim_qc_fastq.cpp
 	$(CXX) -o trim_qc_fastq $(CXXFLAGS) trim_qc_fastq.cpp TrimQc.o TrimQcOutput.o TrimQcShard.o Stats.o TimeFunctions.o $(LDFLAGS)
+
+.PHONY: release-trim-qc-fastq
+release-trim-qc-fastq : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
+release-trim-qc-fastq : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_static) $(LDFLAGS)
+release-trim-qc-fastq : htslib/libhts.a TrimQc.o TrimQcOutput.o TrimQcShard.o Stats.o TimeFunctions.o trim_qc_fastq.cpp
+	$(CXX) -o trim_qc_fastq $(filter-out -fopenmp,$(CXXFLAGS)) trim_qc_fastq.cpp TrimQc.o TrimQcOutput.o TrimQcShard.o Stats.o TimeFunctions.o $(LDFLAGS)
 
 # Standalone input-contract harness for FASTX module parity/smoke tests.
 .PHONY: fastx-input-harness

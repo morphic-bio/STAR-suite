@@ -69,8 +69,12 @@ genome-index compatibility remains `2.7.4a`. Official binaries embed the exact
 - Ship `transcriptvb_finalize`, `trim_qc_fastq`, and `trim_qc_merge` in both
   Linux compatibility tarballs, the automatic installer bundle, Debian
   packages, and the multi-architecture Docker image.
-- Validate companion-tool inventory during tarball, installer, and Debian
-  install/uninstall checks.
+- Link the compatibility-tarball companion tools with the same embedded C++,
+  GCC, and OpenMP runtimes as the portable STAR binary, so the standalone
+  TranscriptVB finalizer does not require a host `libgomp.so.1`.
+- Validate companion-tool inventory and every packaged executable's dynamic
+  library resolution during tarball, installer, and Debian install/uninstall
+  checks.
 - Run installed-binary synthetic gates for zero-junction GTF generation,
   adapter trimming, TranscriptVB scatter/gather parity, standalone trim-QC
   merging, and STAR in-process versus sharded trim-QC identity.
