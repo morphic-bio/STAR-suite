@@ -180,6 +180,19 @@ void GCFragModel::combineCounts(const GCFragModel& other) {
     normalized_ = false;
 }
 
+bool GCFragModel::restoreCounts(
+    const std::array<double, GC_BINS>& counts, std::string& error) {
+    for (double value : counts) {
+        if (!std::isfinite(value) || value < 0.0) {
+            error = "GC observation array contains a non-finite or negative value";
+            return false;
+        }
+    }
+    counts_ = counts;
+    normalized_ = false;
+    return true;
+}
+
 void GCFragModel::reset() {
     counts_.fill(0.0);
     normalized_ = false;

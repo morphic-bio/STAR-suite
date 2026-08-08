@@ -1,4 +1,5 @@
 #include "vb_engine.h"
+#include <functional>
 #include "em_engine.h"
 #include <cmath>
 #include <algorithm>
@@ -310,34 +311,21 @@ double compute_elbo(const ECTable& ecs, const double* abundances, const double* 
     return ll + prior_term;
 }
 
-EMResult run_vb(const ECTable& ecs, TranscriptState& state, const EMParams& params) {
-    EMResult result;
-    result.counts.resize(state.n);
-    result.tpm.resize(state.n);
-    
-    // Set number of threads
-    int num_threads = params.threads;
-    if (num_threads == 0) {
-        num_threads = omp_get_max_threads();
-    }
-    omp_set_num_threads(num_threads);
-    
-    // Initialize priorAlphas based on mode (per-transcript vs per-nucleotide)
-    std::vector<double> priorAlphas(state.n, params.vb_prior);
-    if (!params.per_transcript_prior) {
-        for (size_t i = 0; i < state.n; ++i) {
-            priorAlphas[i] = params.vb_prior * state.eff_lengths[i];
-        }
-    }
-    
-    // Salmon-style VB initialization using projected counts
-    // This distributes multi-mapper counts using EC weights to break symmetry
+std::vector<double> compute_initial_alpha(const ECTable& ecs,
+                                          const TranscriptState& state,
+                                          const EMParams& params) {
+    if (params.initial_alpha.size() == state.n) return params.initial_alpha;
+
     std::vector<double> projectedCounts = compute_projected_counts(ecs, state.eff_lengths);
     
     // Compute total weight (sum of projected counts)
     // Salmon uses ALL transcripts for numActive, not just those with projected counts > 0
     double totalWeight = 0.0;
-    size_t numActive = state.n;  // Use all transcripts like Salmon
+    // Use all transcripts like Salmon. Under non-zero-support gating the array
+    // is compacted, so the caller supplies the original count to keep the
+    // initialization identical to the ungated run.
+    size_t numActive = params.num_active_override > 0 ? params.num_active_override
+                                                      : state.n;
     for (size_t i = 0; i < state.n; ++i) {
         totalWeight += projectedCounts[i];
     }
@@ -360,6 +348,32 @@ EMResult run_vb(const ECTable& ecs, TranscriptState& state, const EMParams& para
     for (size_t i = 0; i < state.n; ++i) {
         alpha[i] = projectedCounts[i] * fracObserved + uniformPrior * (1.0 - fracObserved);
     }
+    return alpha;
+}
+
+EMResult run_vb(const ECTable& ecs, TranscriptState& state, const EMParams& params) {
+    EMResult result;
+    result.counts.resize(state.n);
+    result.tpm.resize(state.n);
+    
+    // Set number of threads
+    int num_threads = params.threads;
+    if (num_threads == 0) {
+        num_threads = omp_get_max_threads();
+    }
+    omp_set_num_threads(num_threads);
+    
+    // Initialize priorAlphas based on mode (per-transcript vs per-nucleotide)
+    std::vector<double> priorAlphas(state.n, params.vb_prior);
+    if (!params.per_transcript_prior) {
+        for (size_t i = 0; i < state.n; ++i) {
+            priorAlphas[i] = params.vb_prior * state.eff_lengths[i];
+        }
+    }
+    
+    // Salmon-style VB initialization using projected counts
+    // This distributes multi-mapper counts using EC weights to break symmetry
+    std::vector<double> alpha = compute_initial_alpha(ecs, state, params);
     
     // Initialize abundances from alpha (normalized for E-step)
     double total_alpha = 0.0;
@@ -431,7 +445,88 @@ EMResult run_vb(const ECTable& ecs, TranscriptState& state, const EMParams& para
     
     // Thread-local storage for expected_counts: flat layout [num_threads * n_transcripts] for cache friendliness
     // Each thread writes to its own buffer, then we reduce deterministically
-    std::vector<double> expected_counts_tls(num_threads * state.n, 0.0);
+    std::vector<double> expected_counts_tls(
+        params.component_partition ? 0 : (size_t)num_threads * state.n, 0.0);
+
+    // Transcripts appearing in no equivalence class receive nothing from the
+    // E-step, so their expected count is identically zero every iteration.
+    // Zeroing and reducing only the supported ones is exact, and it keeps the
+    // full transcript space intact for initialization, the convergence check
+    // and the effective-length callback -- which matters because the GC
+    // background selection admits any transcript with alpha >= 1e-8, including
+    // unsupported ones carrying only the uniform prior. Compacting the space
+    // caller-side excludes those and shifts the GC bias; gating here does not.
+    std::vector<uint32_t> supported_idx;
+    std::vector<char> sup_flags(state.n, 0);
+    {
+        std::vector<char>& sup = sup_flags;
+        for (const EC& ec : ecs.ecs)
+            for (uint32_t tid : ec.transcript_ids)
+                if (tid < state.n) sup[tid] = 1;
+        supported_idx.reserve(state.n);
+        for (size_t i = 0; i < state.n; ++i)
+            if (sup[i]) supported_idx.push_back(static_cast<uint32_t>(i));
+    }
+    const bool gate_supported = supported_idx.size() < state.n;
+
+    // Connected components of the EC-transcript graph.
+    //
+    // Two ECs interact only if they share a transcript, so each component is an
+    // independent VB sub-problem. The global convergence check nevertheless
+    // iterates every component until the slowest transcript in the whole
+    // dataset settles, so components that converged long ago keep being
+    // recomputed. Tracking convergence per component lets each stop on time.
+    //
+    // Safe because the E-step normalises within each EC (see `denom`), so the
+    // global logNorm term cancels and freezing one component cannot perturb
+    // another. And min_iters (100) exceeds effective_length_update_target_iter
+    // (10), so nothing freezes before the effective-length callback has run.
+    std::vector<uint32_t> comp_of_tx(state.n, UINT32_MAX);
+    std::vector<uint32_t> comp_of_ec(ecs.ecs.size(), UINT32_MAX);
+    uint32_t n_components = 0;
+    {
+        std::vector<size_t> par(state.n);
+        for (size_t i = 0; i < state.n; ++i) par[i] = i;
+        std::function<size_t(size_t)> fnd =
+            [&](size_t x){ while (par[x] != x) { par[x] = par[par[x]]; x = par[x]; } return x; };
+        for (const EC& ec : ecs.ecs)
+            for (size_t k = 1; k < ec.transcript_ids.size(); ++k) {
+                size_t a = fnd(ec.transcript_ids[0]), b = fnd(ec.transcript_ids[k]);
+                if (a != b) par[a] = b;
+            }
+        std::unordered_map<size_t, uint32_t> root_id;
+        for (size_t i = 0; i < state.n; ++i) {
+            if (!sup_flags[i]) continue;
+            const size_t r = fnd(i);
+            auto it = root_id.find(r);
+            if (it == root_id.end()) it = root_id.emplace(r, n_components++).first;
+            comp_of_tx[i] = it->second;
+        }
+        for (size_t e = 0; e < ecs.ecs.size(); ++e)
+            if (!ecs.ecs[e].transcript_ids.empty())
+                comp_of_ec[e] = comp_of_tx[ecs.ecs[e].transcript_ids[0]];
+    }
+    const bool pcc = params.per_component_convergence;
+    const bool component_partition = params.component_partition && n_components > 0;
+    // EC list per component, and a descending-size order so the largest
+    // components start first and do not become the tail of the schedule.
+    std::vector<std::vector<size_t>> comp_ec_list;
+    std::vector<uint32_t> comp_order;
+    if (component_partition) {
+        comp_ec_list.resize(n_components);
+        for (size_t e = 0; e < ecs.ecs.size(); ++e)
+            if (comp_of_ec[e] != UINT32_MAX) comp_ec_list[comp_of_ec[e]].push_back(e);
+        comp_order.resize(n_components);
+        for (uint32_t c = 0; c < n_components; ++c) comp_order[c] = c;
+        std::sort(comp_order.begin(), comp_order.end(), [&](uint32_t a, uint32_t b){
+            return comp_ec_list[a].size() > comp_ec_list[b].size();
+        });
+    }
+    std::vector<char> comp_converged(n_components ? n_components : 1, 0);
+    auto tx_frozen = [&](size_t i){
+        const uint32_t c = comp_of_tx[i];
+        return c != UINT32_MAX && comp_converged[c] != 0;
+    };
     bool effective_lengths_updated = false;
     
     // VB iterations
@@ -469,18 +564,35 @@ EMResult run_vb(const ECTable& ecs, TranscriptState& state, const EMParams& para
         
         // E-step: compute expected counts using expTheta * aux (Salmon's exact approach)
         // Clear thread-local buffers (reuse per iteration to avoid reallocation)
-        std::fill(expected_counts_tls.begin(), expected_counts_tls.end(), 0.0);
-        std::memset(expected_counts.data(), 0, state.n * sizeof(double));
+        if (component_partition) {
+            // no per-thread buffer in use
+        } else if (gate_supported) {
+            #pragma omp parallel for num_threads(num_threads) schedule(static)
+            for (size_t k = 0; k < supported_idx.size(); ++k) {
+                const size_t i = supported_idx[k];
+                for (int t = 0; t < num_threads; ++t)
+                    expected_counts_tls[t * state.n + i] = 0.0;
+            }
+        } else {
+            std::fill(expected_counts_tls.begin(), expected_counts_tls.end(), 0.0);
+        }
+        // Zero only what will be recomputed: a converged component's
+        // expected_counts must persist so its alpha stays at its fixed point.
+        if (pcc && n_components > 0) {
+            for (size_t i = 0; i < state.n; ++i)
+                if (!tx_frozen(i)) expected_counts[i] = 0.0;
+        } else {
+            std::memset(expected_counts.data(), 0, state.n * sizeof(double));
+        }
         
         // Check if we need to log EC details for debug transcripts
         bool log_ec_details = params.debug_trace && !params.debug_file.empty() && !debug_indices.empty();
         
         // Parallel EC loop: each thread writes to its own TLS buffer (no atomics)
-        #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
-        for (size_t ec_idx = 0; ec_idx < ecs.ecs.size(); ++ec_idx) {
-            int thread_id = omp_get_thread_num();
-            double* thread_counts = expected_counts_tls.data() + thread_id * state.n;
-            const EC& ec = ecs.ecs[ec_idx];
+        // Per-EC contribution, shared by both dispatch paths below. `out` is the
+        // accumulator this EC writes into.
+        auto process_ec = [&](size_t ec_idx, double* out) {
+                                    const EC& ec = ecs.ecs[ec_idx];
             size_t groupSize = ec.transcript_ids.size();
             
             // Check if this EC contains any debug transcripts
@@ -501,7 +613,7 @@ EMResult run_vb(const ECTable& ecs, TranscriptState& state, const EMParams& para
             // Single-transcript fast path (Salmon behavior: full count, no expTheta guard)
             if (groupSize == 1) {
                 uint32_t tid = ec.transcript_ids[0];
-                thread_counts[tid] += ec.count;  // No atomic - each thread has its own buffer
+                out[tid] += ec.count;  // No atomic - each thread has its own buffer
                 
                 // Log single-transcript EC if it's a debug transcript
                 if (log_ec_details && ec_contains_debug) {
@@ -512,7 +624,7 @@ EMResult run_vb(const ECTable& ecs, TranscriptState& state, const EMParams& para
                         debug_stream.flush();
                     }
                 }
-                continue;
+                return;
             }
             
             // Multi-transcript: compute denominator using expTheta * aux
@@ -533,7 +645,7 @@ EMResult run_vb(const ECTable& ecs, TranscriptState& state, const EMParams& para
             
             // Skip EC if denom too small (minEQClassWeight guard)
             if (denom <= minEQClassWeight) {
-                continue;
+                return;
             }
             
             // Distribute counts proportionally
@@ -547,7 +659,7 @@ EMResult run_vb(const ECTable& ecs, TranscriptState& state, const EMParams& para
                         ? ec.weights[i] * effLen_factor
                         : effLen_factor;
                     double contribution = expTheta[tid] * aux * invDenom;
-                    thread_counts[tid] += contribution;  // No atomic - each thread has its own buffer
+                    out[tid] += contribution;  // No atomic - each thread has its own buffer
                     
                     // Log per-transcript contribution if this is a debug transcript
                     if (log_ec_details && ec_contains_debug) {
@@ -570,17 +682,54 @@ EMResult run_vb(const ECTable& ecs, TranscriptState& state, const EMParams& para
                     }
                 }
             }
+        };
+
+        if (component_partition) {
+            // Components share no transcripts, so a thread owning a component is
+            // the only writer to those transcripts: accumulate straight into
+            // expected_counts, with no per-thread buffer and no reduction pass.
+            #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+            for (size_t ci = 0; ci < comp_order.size(); ++ci) {
+                const uint32_t c = comp_order[ci];
+                if (pcc && comp_converged[c]) continue;
+                for (size_t e : comp_ec_list[c]) process_ec(e, expected_counts.data());
+            }
+        } else {
+            #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+            for (size_t ec_idx = 0; ec_idx < ecs.ecs.size(); ++ec_idx) {
+                if (pcc) {
+                    const uint32_t ec_comp = comp_of_ec[ec_idx];
+                    if (ec_comp != UINT32_MAX && comp_converged[ec_comp]) continue;
+                }
+                const int thread_id = omp_get_thread_num();
+                process_ec(ec_idx, expected_counts_tls.data() + thread_id * state.n);
+            }
         }
         
         // Deterministic reduction: sum across thread-local buffers into expected_counts
         // Use fixed thread order (0..num_threads-1) for determinism
-        #pragma omp parallel for num_threads(num_threads) schedule(static)
-        for (size_t i = 0; i < state.n; ++i) {
-            double sum = 0.0;
-            for (int t = 0; t < num_threads; ++t) {
-                sum += expected_counts_tls[t * state.n + i];
+        if (component_partition) {
+            // expected_counts was written directly; nothing to reduce
+        } else if (gate_supported) {
+            #pragma omp parallel for num_threads(num_threads) schedule(static)
+            for (size_t k = 0; k < supported_idx.size(); ++k) {
+                const size_t i = supported_idx[k];
+                if (pcc && tx_frozen(i)) continue;
+                double sum = 0.0;
+                for (int t = 0; t < num_threads; ++t) {
+                    sum += expected_counts_tls[t * state.n + i];
+                }
+                expected_counts[i] = sum;
             }
-            expected_counts[i] = sum;
+        } else {
+            #pragma omp parallel for num_threads(num_threads) schedule(static)
+            for (size_t i = 0; i < state.n; ++i) {
+                double sum = 0.0;
+                for (int t = 0; t < num_threads; ++t) {
+                    sum += expected_counts_tls[t * state.n + i];
+                }
+                expected_counts[i] = sum;
+            }
         }
         
         // VB M-step: update alpha = new expected counts (NO prior added!)
@@ -627,10 +776,12 @@ EMResult run_vb(const ECTable& ecs, TranscriptState& state, const EMParams& para
         double maxRelDiff = 0.0;
         
         if (iter + 1 >= params.min_iters) {
-            converged = true;
             double alphaCheckCutoff = params.alpha_check_cutoff;
-            
+            // Per component: converged when no transcript of that component
+            // above the cutoff still moves by more than the tolerance.
+            std::vector<char> comp_ok(comp_converged.size(), 1);
             for (size_t i = 0; i < state.n; ++i) {
+                if (pcc && tx_frozen(i)) continue;
                 // Salmon checks alpha + prior (called alphaPrime in their code)
                 double alphaPrime = alpha[i];  // In Salmon, this is the expected count
                 // Only check transcripts with alpha above cutoff (Salmon's alphaCheckCutoff)
@@ -638,9 +789,20 @@ EMResult run_vb(const ECTable& ecs, TranscriptState& state, const EMParams& para
                     double relDiff = std::abs(alphaPrime - prev_alpha[i]) / alphaPrime;
                     maxRelDiff = std::max(maxRelDiff, relDiff);
                     if (relDiff > params.tolerance) {
-                        converged = false;
+                        const uint32_t c = comp_of_tx[i];
+                        if (c != UINT32_MAX) comp_ok[c] = 0;
                     }
                 }
+            }
+            converged = true;
+            if (pcc) {
+                for (size_t c = 0; c < comp_converged.size(); ++c) {
+                    if (!comp_converged[c] && comp_ok[c]) comp_converged[c] = 1;
+                    if (!comp_converged[c]) converged = false;
+                }
+            } else {
+                for (size_t c = 0; c < comp_converged.size(); ++c)
+                    if (!comp_ok[c]) { converged = false; break; }
             }
         }
         
