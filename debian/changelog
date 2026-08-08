@@ -10,6 +10,8 @@ star-suite (1.7.0-1) unstable; urgency=medium
     builds while retaining portable release artifacts.
   * Fix genomeGenerate heap corruption when a supplied single-exon GTF
     contains no splice junctions.
+  * Ship the pinned public recipe catalog and selective provenance evidence in
+    source, Debian, Docker, binary tarball, and compatibility-bundle releases.
   * Report STAR Suite 1.7.0 from STAR --version.
 
  -- STAR-suite Maintainers <maintainers@biodepot.example>  Sat, 08 Aug 2026 08:30:00 +0000

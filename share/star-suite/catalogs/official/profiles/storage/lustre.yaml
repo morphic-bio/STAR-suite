@@ -1,0 +1,26 @@
+schema: biodepot.storage_profile/v1
+id: lustre
+version: "1.0.0"
+summary: Portable defaults for STAR Suite scatter/gather on Lustre filesystems.
+principles:
+  - keep partition ordinals and completion evidence in one compact manifest tree
+  - stage high-churn temporary files on node-local storage when available
+  - create one output directory per partition to avoid shared-name contention
+  - gather only after every locked partition has terminal success evidence
+  - copy final artifacts atomically and record checksums before cleanup
+metadata_policy:
+  avoid_shared_append_logs: true
+  avoid_many_tiny_files: true
+  per_partition_log_bundle: true
+striping:
+  policy: site-selected
+  guidance:
+    small_metadata: single stripe
+    large_sequential_bam: validate a moderate stripe count at the site
+    temporary_partition_output: prefer node-local storage
+  command_template: "lfs setstripe -c <site-selected-count> <new-output-path>"
+cleanup:
+  require_gather_success: true
+  require_final_checksum: true
+  preserve_failed_partition_logs: true
+

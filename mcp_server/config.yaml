@@ -42,7 +42,9 @@ paths:
 #     trust: trusted
 #   - manifest: /etc/star-suite/recipes/catalog.yaml
 #     trust: trusted
-recipe_catalogs: []
+recipe_catalogs:
+  - manifest: ../share/star-suite/catalogs/official/catalog.yaml
+    trust: trusted
 
 # A logical recipe may be supplied by several catalogs. Fully qualified source
 # identities are always preserved. keep_separate (the safe default) requires a
@@ -71,7 +73,9 @@ recipe_resolution:
 #     id: project
 #     root: .star-suite/provenance
 provenance:
-  search: []
+  search:
+    - id: official-evidence
+      root: ../share/star-suite/evidence/official
 
 trusted_roots:
   - "/mnt/pikachu/STAR-suite"
