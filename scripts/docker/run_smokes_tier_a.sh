@@ -32,6 +32,9 @@ echo ""
 
 # STAR_BIN for tests that use source-relative paths; runtime has STAR in /usr/local/bin
 export STAR_BIN="/usr/local/bin/STAR"
+export TRANSCRIPTVB_FINALIZE_BIN="/usr/local/bin/transcriptvb_finalize"
+export TRIM_QC_FASTQ_BIN="/usr/local/bin/trim_qc_fastq"
+export TRIM_QC_MERGE_BIN="/usr/local/bin/trim_qc_merge"
 
 run_test() {
     local name="$1"
@@ -39,6 +42,9 @@ run_test() {
     echo "=== $name ==="
     if docker run --rm \
         -e STAR_BIN="$STAR_BIN" \
+        -e TRANSCRIPTVB_FINALIZE_BIN="$TRANSCRIPTVB_FINALIZE_BIN" \
+        -e TRIM_QC_FASTQ_BIN="$TRIM_QC_FASTQ_BIN" \
+        -e TRIM_QC_MERGE_BIN="$TRIM_QC_MERGE_BIN" \
         -w /build \
         "$TEST_IMAGE_TAG" \
         bash -c "cd /build && $script"; then
@@ -59,6 +65,10 @@ run_test "test_visium_hd_gex_sidecar_concurrency" "python3 tests/test_visium_hd_
 run_test "test_snp_mask_build_smoke" "tests/slam/test_snp_mask_build_smoke.sh" || failed=1
 run_test "run_flex_tiny_public_smoke" "tests/run_flex_tiny_public_smoke.sh" || failed=1
 run_test "run_molecule_first_native_smoke" "tests/run_molecule_first_native_smoke.sh" || failed=1
+run_test "run_adapter_clip_synthetic_test" "tests/run_adapter_clip_synthetic_test.sh" || failed=1
+run_test "run_transcriptvb_scatter_gather_smoke" "tests/run_transcriptvb_scatter_gather_smoke.sh" || failed=1
+run_test "run_trim_qc_merge_smoke" "tests/run_trim_qc_merge_smoke.sh" || failed=1
+run_test "run_star_trim_qc_smoke" "tests/run_star_trim_qc_smoke.sh" || failed=1
 
 echo ""
 if [ $failed -eq 0 ]; then

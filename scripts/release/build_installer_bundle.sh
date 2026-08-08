@@ -142,12 +142,12 @@ for tarball in "${TARBALLS[@]}"; do
   variant_dir="${STAGE_DIR}/variants/${COMPAT_LABEL}"
   mkdir -p "${variant_dir}/bin"
   cp "${extract_subdir}/bin/STAR" "${variant_dir}/bin/STAR"
-  for tool in molecule_first_resolver molecule_first_bam_ledger molecule_first_materialize; do
+  for tool in molecule_first_resolver molecule_first_bam_ledger molecule_first_materialize transcriptvb_finalize trim_qc_fastq trim_qc_merge; do
     cp "${extract_subdir}/bin/${tool}" "${variant_dir}/bin/${tool}"
   done
   cp "${extract_subdir}/README.txt" "${variant_dir}/README.txt"
   cp "${metadata_file}" "${variant_dir}/release-metadata.env"
-  chmod 0755 "${variant_dir}/bin/STAR" "${variant_dir}/bin/molecule_first_"*
+  chmod 0755 "${variant_dir}/bin/"*
 
   printf '%s\t%s\t%s\t%s\n' \
     "${COMPAT_LABEL}" \

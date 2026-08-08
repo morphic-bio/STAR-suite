@@ -223,6 +223,7 @@ fi
 echo "Building STAR-suite binary tarball (jobs=${MAKE_JOBS})..."
 make -j"${MAKE_JOBS}" core-static
 make -j"${MAKE_JOBS}" molecule-first-resolver
+make -j"${MAKE_JOBS}" vbem-transcriptvb-finalize trim-qc-tools
 
 if [[ ! -x core/legacy/source/STAR ]]; then
   echo "ERROR: expected binary missing: core/legacy/source/STAR" >&2
@@ -234,6 +235,12 @@ for tool in molecule_first_resolver molecule_first_bam_ledger molecule_first_mat
     exit 1
   fi
 done
+for tool in transcriptvb_finalize trim_qc_fastq trim_qc_merge; do
+  if [[ ! -x "core/legacy/source/${tool}" ]]; then
+    echo "ERROR: expected binary missing: core/legacy/source/${tool}" >&2
+    exit 1
+  fi
+done
 
 STAGE_DIR="$(mktemp -d)"
 mkdir -p "${STAGE_DIR}/bin"
@@ -241,8 +248,11 @@ cp core/legacy/source/STAR "${STAGE_DIR}/bin/STAR"
 for tool in molecule_first_resolver molecule_first_bam_ledger molecule_first_materialize; do
   cp "flex/tools/molecule_first_resolver/${tool}" "${STAGE_DIR}/bin/${tool}"
 done
+for tool in transcriptvb_finalize trim_qc_fastq trim_qc_merge; do
+  cp "core/legacy/source/${tool}" "${STAGE_DIR}/bin/${tool}"
+done
 cp scripts/release/install_binary_tarball.sh "${STAGE_DIR}/install.sh"
-chmod 0755 "${STAGE_DIR}/bin/STAR" "${STAGE_DIR}/bin/molecule_first_"* "${STAGE_DIR}/install.sh"
+chmod 0755 "${STAGE_DIR}/bin/"* "${STAGE_DIR}/install.sh"
 
 asset_name="${ASSET_PREFIX}-${VERSION}-linux-${arch}"
 if [[ -n "${COMPAT_LABEL}" ]]; then
@@ -280,6 +290,9 @@ ${compat_note}This tarball includes:
   - bin/molecule_first_resolver
   - bin/molecule_first_bam_ledger
   - bin/molecule_first_materialize
+  - bin/transcriptvb_finalize
+  - bin/trim_qc_fastq
+  - bin/trim_qc_merge
   - install.sh for optional local installation
   - release-metadata.env for compatibility metadata
 

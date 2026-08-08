@@ -1,3 +1,19 @@
+star-suite (1.7.0-1) unstable; urgency=medium
+
+  * Add packaged TranscriptVB scatter/gather evidence finalization without
+    loading the genome index.
+  * Add additive per-shard trim-QC dumps and standalone FASTQ collection and
+    deterministic shard merging.
+  * Add parallel genome-index loading and an opt-in parallel TranscriptVB GC
+    background pass.
+  * Adopt the RapidMACS/librapidmacs naming contract for integrated Chromap
+    builds while retaining portable release artifacts.
+  * Fix genomeGenerate heap corruption when a supplied single-exon GTF
+    contains no splice junctions.
+  * Report STAR Suite 1.7.0 from STAR --version.
+
+ -- STAR-suite Maintainers <maintainers@biodepot.example>  Sat, 08 Aug 2026 08:30:00 +0000
+
 star-suite (1.6.1-1) unstable; urgency=medium
 
   * Replace the v1.6.0 release artifacts with builds that embed the exact full

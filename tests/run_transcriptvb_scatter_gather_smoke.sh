@@ -10,11 +10,13 @@ set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root="$(cd "$here/.." && pwd)"
 src="$root/core/legacy/source"
+STAR_BIN="${STAR_BIN:-$src/STAR}"
+TRANSCRIPTVB_FINALIZE_BIN="${TRANSCRIPTVB_FINALIZE_BIN:-$src/transcriptvb_finalize}"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
-[ -x "$src/STAR" ] || make -C "$src" STAR WITH_CHROMAP=0 >/dev/null
-[ -x "$src/transcriptvb_finalize" ] || make -C "$src" transcriptvb-finalize WITH_CHROMAP=0 >/dev/null
+[ -x "$STAR_BIN" ] || make -C "$src" STAR WITH_CHROMAP=0 >/dev/null
+[ -x "$TRANSCRIPTVB_FINALIZE_BIN" ] || make -C "$src" transcriptvb-finalize WITH_CHROMAP=0 >/dev/null
 
 python3 - "$work" <<'PY'
 import random, sys, os
@@ -41,7 +43,7 @@ open(os.path.join(d, "r2.fq"), "w").write(''.join(r2))
 PY
 
 mkdir -p "$work/g"
-"$src/STAR" --runMode genomeGenerate --genomeDir "$work/g" --genomeFastaFiles "$work/ref.fa" \
+"$STAR_BIN" --runMode genomeGenerate --genomeDir "$work/g" --genomeFastaFiles "$work/ref.fa" \
     --sjdbGTFfile "$work/genes.gtf" --genomeSAindexNbases 8 --runThreadN 4 \
     --outFileNamePrefix "$work/gg_" >/dev/null 2>&1
 
@@ -49,7 +51,7 @@ common=(--genomeDir "$work/g" --outSAMtype None --runThreadN 4 --quantMode Trans
         --quantVBLibType IU --transcriptomeFasta "$work/txome.fa")
 
 mkdir -p "$work/inproc"
-"$src/STAR" --runMode alignReads "${common[@]}" --readFilesIn "$work/r1.fq" "$work/r2.fq" \
+"$STAR_BIN" --runMode alignReads "${common[@]}" --readFilesIn "$work/r1.fq" "$work/r2.fq" \
     --outFileNamePrefix "$work/inproc/" >/dev/null 2>&1
 
 head -8000 "$work/r1.fq" > "$work/a1.fq"; head -8000 "$work/r2.fq" > "$work/a2.fq"
@@ -57,7 +59,7 @@ tail -8000 "$work/r1.fq" > "$work/b1.fq"; tail -8000 "$work/r2.fq" > "$work/b2.f
 for i in 0 1; do
     mkdir -p "$work/s$i"
     if [ "$i" = 0 ]; then R1="$work/a1.fq"; R2="$work/a2.fq"; else R1="$work/b1.fq"; R2="$work/b2.fq"; fi
-    "$src/STAR" --runMode alignReads "${common[@]}" --readFilesIn "$R1" "$R2" \
+    "$STAR_BIN" --runMode alignReads "${common[@]}" --readFilesIn "$R1" "$R2" \
         --outFileNamePrefix "$work/s$i/" \
         --quantVBSidecarOut "$work/s$i/evidence.stvb" --quantVBSidecarOnly 1 \
         --quantVBSidecarSampleId smoke --quantVBSidecarInputId smoke-input \
@@ -68,7 +70,7 @@ done
 # --no-gc matches the in-process default; the dynamic GC correction is opt-in
 # there, and comparing a corrected gather against an uncorrected run is not a
 # like-for-like test.
-"$src/transcriptvb_finalize" --genome-dir "$work/g" --transcriptome "$work/txome.fa" \
+"$TRANSCRIPTVB_FINALIZE_BIN" --genome-dir "$work/g" --transcriptome "$work/txome.fa" \
     --out-prefix "$work/gathered_" --no-gc --threads 4 \
     "$work/s0/evidence.stvb" "$work/s1/evidence.stvb" >/dev/null 2>&1
 
