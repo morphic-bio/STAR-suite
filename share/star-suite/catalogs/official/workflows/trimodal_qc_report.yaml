@@ -1,0 +1,18 @@
+id: starsuite.official/trimodal-qc-report
+title: Trimodal MuData QC report
+summary: Render unified RNA, ATAC, and guide QC from a MuData object.
+kind: shell_workflow
+entry_script: scripts/generate_trimodal_qc.py
+supported_modes: [local]
+default_output_layout: <output-prefix>.html, .json, and optionally .png
+scripts:
+  - {role: entry, path: scripts/generate_trimodal_qc.py, language: python}
+stages:
+  - {name: report, title: Render QC report, script: scripts/generate_trimodal_qc.py}
+parameters:
+  - {name: mudata, cli_flag: --mudata, type: file, required: true, path_must_exist: true, category: inputs}
+  - {name: output_prefix, cli_flag: --output-prefix, type: string, required: true, category: output}
+  - {name: no_png, cli_flag: --no-png, type: bool, required: false, default: false, category: output}
+rendering:
+  flag_order: [mudata, output_prefix, no_png]
+

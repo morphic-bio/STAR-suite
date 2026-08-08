@@ -84,6 +84,7 @@ MANIFEST_PATH="${STAGE_DIR}/compat-manifest.tsv"
 bundle_version=""
 bundle_arch=""
 bundle_commit=""
+bundle_share_initialized=0
 
 for tarball in "${TARBALLS[@]}"; do
   tarball="$(realpath "${tarball}")"
@@ -99,6 +100,12 @@ for tarball in "${TARBALLS[@]}"; do
   metadata_file="${extract_subdir}/release-metadata.env"
   if [[ ! -f "${metadata_file}" ]]; then
     echo "ERROR: tarball missing release metadata: ${tarball}" >&2
+    exit 1
+  fi
+  if [[ ! -f "${extract_subdir}/share/star-suite/SNAPSHOTS.json" \
+      || ! -f "${extract_subdir}/share/star-suite/catalogs/official/catalog.yaml" \
+      || ! -f "${extract_subdir}/share/star-suite/evidence/official/schema/record-v1.schema.json" ]]; then
+    echo "ERROR: tarball missing official recipe/provenance snapshots: ${tarball}" >&2
     exit 1
   fi
 
@@ -124,6 +131,9 @@ for tarball in "${TARBALLS[@]}"; do
     bundle_version="${VERSION}"
     bundle_arch="${ARCH}"
     bundle_commit="${COMMIT_SHA,,}"
+    mkdir -p "${STAGE_DIR}/share"
+    cp -a "${extract_subdir}/share/star-suite" "${STAGE_DIR}/share/star-suite"
+    bundle_share_initialized=1
   else
     if [[ "${VERSION}" != "${bundle_version}" ]]; then
       echo "ERROR: mixed versions in installer bundle: ${bundle_version} vs ${VERSION}" >&2
@@ -135,6 +145,10 @@ for tarball in "${TARBALLS[@]}"; do
     fi
     if [[ "${COMMIT_SHA,,}" != "${bundle_commit}" ]]; then
       echo "ERROR: mixed commits in installer bundle: ${bundle_commit} vs ${COMMIT_SHA,,}" >&2
+      exit 1
+    fi
+    if ! diff -qr "${extract_subdir}/share/star-suite" "${STAGE_DIR}/share/star-suite" >/dev/null; then
+      echo "ERROR: mixed official recipe/provenance snapshots in installer bundle" >&2
       exit 1
     fi
   fi
@@ -161,6 +175,10 @@ if [[ -z "${bundle_arch}" ]]; then
   echo "ERROR: installer bundle assembly produced no variants" >&2
   exit 1
 fi
+if [[ "${bundle_share_initialized}" -ne 1 ]]; then
+  echo "ERROR: installer bundle assembly produced no official snapshots" >&2
+  exit 1
+fi
 
 sort -t $'\t' -k2,2V "${MANIFEST_PATH}" -o "${MANIFEST_PATH}"
 
@@ -178,6 +196,7 @@ Commit: ${bundle_commit}
 
 This bundle contains multiple STAR-suite binaries built for different Linux compatibility levels.
 Use ./install.sh to auto-select the best bundled binary for this machine.
+It also contains the pinned official recipe catalog and public provenance evidence.
 
 Recommended install order:
   1. Use the .deb package on Ubuntu/Debian when possible.

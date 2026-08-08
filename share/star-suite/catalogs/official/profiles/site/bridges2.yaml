@@ -1,0 +1,35 @@
+schema: biodepot.site_profile/v1
+id: bridges2
+version: "2026-08-08"
+summary: Portable STAR Suite resource mapping for PSC Bridges-2.
+documentation: https://www.psc.edu/resources/bridges-2/user-guide/
+scheduler: slurm
+production_compute_nodes_required: true
+resources:
+  rm:
+    cores_per_node: 128
+    typical_memory_gb: 256
+    local_nvme_tb: 3.84
+    allocation: full-node
+  rm-shared:
+    max_cores_per_job: 64
+    allocation: core-hour
+  rm-512:
+    cores_per_node: 128
+    memory_gb: 512
+    allocation: full-node
+placement:
+  launch: srun
+  cpu_bind: cores
+  omp_proc_bind: close
+  omp_places: cores
+site_checks:
+  - confirm partitions, limits, and charging policy against the current PSC guide
+  - request full nodes for formal benchmark measurements
+  - reserve node-local NVMe for high-churn temporary state when appropriate
+  - copy final results and evidence to durable project storage before cleanup
+private_values:
+  account: required-at-submit
+  allocation: required-at-submit
+  login_host: deliberately-not-defined
+

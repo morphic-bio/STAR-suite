@@ -9,6 +9,7 @@ COMPANION_TOOLS=(
   transcriptvb_finalize trim_qc_fastq trim_qc_merge
 )
 METADATA_FILE="${SCRIPT_DIR}/release-metadata.env"
+SRC_SHARE="${SCRIPT_DIR}/share/star-suite"
 
 PREFIX=""
 BINDIR=""
@@ -86,6 +87,12 @@ for tool in "${COMPANION_TOOLS[@]}"; do
     exit 1
   fi
 done
+if [[ ! -f "${SRC_SHARE}/SNAPSHOTS.json" \
+    || ! -f "${SRC_SHARE}/catalogs/official/catalog.yaml" \
+    || ! -f "${SRC_SHARE}/evidence/official/schema/record-v1.schema.json" ]]; then
+  echo "ERROR: bundled official recipe/provenance snapshots are incomplete" >&2
+  exit 1
+fi
 
 if [[ -f "${METADATA_FILE}" ]]; then
   # shellcheck disable=SC1090
@@ -129,6 +136,17 @@ for tool in "${COMPANION_TOOLS[@]}"; do
   fi
 done
 
+SHAREDIR="${PREFIX}/share/star-suite"
+if [[ -d "${SHAREDIR}" && "${FORCE}" -ne 1 ]]; then
+  if ! diff -qr "${SRC_SHARE}" "${SHAREDIR}" >/dev/null; then
+    echo "ERROR: installed STAR Suite data differs at ${SHAREDIR} (use --force to update)" >&2
+    exit 1
+  fi
+else
+  mkdir -p "${SHAREDIR}"
+  cp -a "${SRC_SHARE}/." "${SHAREDIR}/"
+fi
+
 tmp_target="${TARGET_PATH}.tmp.$$"
 cp "${SRC_BIN}" "${tmp_target}"
 chmod 0755 "${tmp_target}"
@@ -151,3 +169,5 @@ if [[ -n "${GLIBC_BASELINE:-}" ]]; then
   echo "Binary compatibility baseline: glibc ${GLIBC_BASELINE}+"
 fi
 warn_if_path_missing "${BINDIR}"
+echo "Official recipes: ${SHAREDIR}/catalogs/official/catalog.yaml"
+echo "Official evidence: ${SHAREDIR}/evidence/official"

@@ -1,0 +1,22 @@
+{
+  "schema": "biodepot.partition_manifest/v1",
+  "dataset_id": "fixture-pe",
+  "partition_set_id": "fixture-pe-v1",
+  "partitions": [
+    {
+      "id": "part-000000",
+      "ordinal": 0,
+      "mate1": "fixture/part-000000_R1.fastq.gz",
+      "mate2": "fixture/part-000000_R2.fastq.gz",
+      "logical_range": {"unit": "read_pairs", "start": 0, "end": 100}
+    },
+    {
+      "id": "part-000001",
+      "ordinal": 1,
+      "mate1": "fixture/part-000001_R1.fastq.gz",
+      "mate2": "fixture/part-000001_R2.fastq.gz",
+      "logical_range": {"unit": "read_pairs", "start": 100, "end": 200}
+    }
+  ]
+}
+

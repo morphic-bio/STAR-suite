@@ -242,6 +242,14 @@ for tool in transcriptvb_finalize trim_qc_fastq trim_qc_merge; do
   fi
 done
 
+if [[ ! -f share/star-suite/SNAPSHOTS.json \
+    || ! -f share/star-suite/catalogs/official/catalog.yaml \
+    || ! -f share/star-suite/evidence/official/schema/record-v1.schema.json ]]; then
+  echo "ERROR: pinned official recipe/provenance snapshots are incomplete" >&2
+  exit 1
+fi
+python3 scripts/release/validate_official_snapshots.py
+
 STAGE_DIR="$(mktemp -d)"
 mkdir -p "${STAGE_DIR}/bin"
 cp core/legacy/source/STAR "${STAGE_DIR}/bin/STAR"
@@ -252,6 +260,8 @@ for tool in transcriptvb_finalize trim_qc_fastq trim_qc_merge; do
   cp "core/legacy/source/${tool}" "${STAGE_DIR}/bin/${tool}"
 done
 cp scripts/release/install_binary_tarball.sh "${STAGE_DIR}/install.sh"
+mkdir -p "${STAGE_DIR}/share"
+cp -a share/star-suite "${STAGE_DIR}/share/star-suite"
 chmod 0755 "${STAGE_DIR}/bin/"* "${STAGE_DIR}/install.sh"
 
 asset_name="${ASSET_PREFIX}-${VERSION}-linux-${arch}"
@@ -293,6 +303,9 @@ ${compat_note}This tarball includes:
   - bin/transcriptvb_finalize
   - bin/trim_qc_fastq
   - bin/trim_qc_merge
+  - share/star-suite/catalogs/official (pinned public recipe catalog)
+  - share/star-suite/evidence/official (pinned public provenance evidence)
+  - share/star-suite/SNAPSHOTS.json (source revisions and digests)
   - install.sh for optional local installation
   - release-metadata.env for compatibility metadata
 

@@ -1,0 +1,67 @@
+{
+  "schema": "starsuite.provenance_record/v1",
+  "record_id": "paper-2026-perturbseq-full-depth",
+  "recorded_utc": "2026-08-08T00:00:00Z",
+  "kind": "benchmark",
+  "status": "complete",
+  "software": [
+    {
+      "repository": "https://github.com/morphic-bio/STAR-suite",
+      "revision": "c12ad552c846eeb16412058a06573cb6c4dc6164",
+      "version": "1.7.0-candidate"
+    }
+  ],
+  "environment": {
+    "hardware_class": "Intel Core i9-13900KF workstation",
+    "memory_gb": 126,
+    "logical_cpu_count": 32,
+    "requested_threads": 32
+  },
+  "method": "Observed full-depth STAR Suite callpeak-equivalent production workflows were compared with matched Cell Ranger result surfaces. Elapsed time is wall-clock time for one completed run per dataset; parity statistics compare called-cell and feature-count outputs from the archived result set.",
+  "evidence": [
+    {
+      "dataset": "A375",
+      "input_reads": 47000000,
+      "elapsed_seconds": 241.0,
+      "called_cells": 1187,
+      "cell_call_jaccard": 0.976,
+      "gene_count_pearson": 0.975,
+      "cell_count_pearson": 0.9995,
+      "crispr_assignment_match_fraction": 1.0,
+      "crispr_umi_pearson": 1.0
+    },
+    {
+      "dataset": "UCSF",
+      "input_reads": 445000000,
+      "elapsed_seconds": 1141.0,
+      "called_cells": 13721,
+      "cell_call_jaccard": 0.976,
+      "gene_count_pearson": 0.995,
+      "cell_count_pearson": 1.0,
+      "crispr_assignment_match_fraction": 0.989,
+      "crispr_umi_pearson": 0.999
+    },
+    {
+      "dataset": "MSK",
+      "input_reads": 669000000,
+      "elapsed_seconds": 1656.0,
+      "called_cells": 30567,
+      "cell_call_jaccard": 0.942,
+      "gene_count_pearson": 0.994,
+      "cell_count_pearson": 1.0,
+      "crispr_assignment_match_fraction": 0.994,
+      "crispr_umi_pearson": 1.0
+    }
+  ],
+  "limitations": [
+    "Each timing is one completed observed run rather than a replicated distribution.",
+    "The record reports archived aggregate metrics and does not publish raw datasets or collaborator manifests.",
+    "Wall-clock values are hardware, storage, cache, and output-profile dependent; independent sites should rerun the locked recipe on their own infrastructure."
+  ],
+  "artifacts": [
+    {
+      "logical_uri": "git://STAR-suite/comparisons/paper_benchmarks_20260318"
+    }
+  ]
+}
+

@@ -1,0 +1,125 @@
+schema: biodepot.recipe_catalog/v1
+id: starsuite-official
+namespace: starsuite.official
+version: "1.7.0"
+workflows:
+  - id: starsuite.official/slam-pe-100k-smoke
+    logical_id: slam_pe_100k_smoke
+    version: "1.7.0"
+    title: SLAM PE 100K SE/PE Smoke
+    summary: Compare matched R1-only and paired-end STAR-SLAM count surfaces.
+    kind: shell_workflow
+    entry_script: scripts/run_slam_100k_se_pe_smoke.sh
+    schema_file: workflows/slam_pe_100k_smoke.yaml
+    visibility: public
+    applications: [cli, workbench, temporal]
+
+  - id: starsuite.official/slam-pe-production
+    logical_id: slam_pe_production
+    version: "1.7.0"
+    title: SLAM PE Production Panel
+    summary: Run STAR-SLAM per sample with optional explicitly configured transfer.
+    kind: shell_workflow
+    entry_script: scripts/run_slam_prod_set.sh
+    schema_file: workflows/slam_pe_production.yaml
+    visibility: public
+    applications: [cli, workbench, temporal]
+
+  - id: starsuite.official/slam-deseq2-container
+    logical_id: slam_deseq2_container
+    version: "1.7.0"
+    title: SLAM DESeq2 Container
+    summary: Build and verify the pinned DESeq2/tximport analysis image.
+    kind: shell_workflow
+    entry_script: scripts/docker/build_slam_deseq2_image.sh
+    schema_file: workflows/slam_deseq2_container.yaml
+    visibility: public
+    applications: [cli, workbench]
+
+  - id: starsuite.official/multiome
+    logical_id: multiome
+    version: "1.7.0"
+    title: STAR Suite 10x Multiome
+    summary: Run STAR GEX, Chromap ATAC, MACS peaks, and peak MEX with compose-up profiles.
+    kind: shell_workflow
+    entry_script: scripts/run_star_multiome_lane_smoke.sh
+    schema_file: workflows/multiome.yaml
+    visibility: public
+    applications: [cli, workbench, temporal]
+
+  - id: starsuite.official/scrna-downstream
+    logical_id: scrna-downstream
+    version: "1.7.0"
+    title: GeneFull and Velocyto scRNA downstream
+    summary: Build analysis-ready AnnData, QC, doublet, and optional CellBender surfaces.
+    kind: shell_workflow
+    entry_script: scripts/run_scrna_downstream_gene_full_velocyto.sh
+    schema_file: workflows/scrna_downstream.yaml
+    visibility: public
+    applications: [cli, workbench, temporal]
+
+  - id: starsuite.official/catatac-trimodal-e2e-smoke
+    logical_id: catatac-trimodal-e2e-smoke
+    version: "1.7.0"
+    title: CAT-ATAC trimodal downsample smoke
+    summary: Compatibility recipe for public RNA, ATAC, and guide fixture validation.
+    kind: shell_workflow
+    entry_script: scripts/run_catatac_trimodal_downsample_smoke.sh
+    schema_file: workflows/catatac_trimodal_e2e_smoke.yaml
+    visibility: public
+    applications: [cli, workbench]
+
+  - id: starsuite.official/dogma-hiv-four-arm-e2e-smoke
+    logical_id: dogma-hiv-four-arm-e2e-smoke
+    version: "1.7.0"
+    title: DOGMA-HIV four-arm downsample smoke
+    summary: Compatibility recipe for public RNA, ATAC, ADT, and state fixture validation.
+    kind: shell_workflow
+    entry_script: scripts/run_hiv_dogma_four_arm_downsample_smoke.sh
+    schema_file: workflows/dogma_hiv_four_arm_e2e_smoke.yaml
+    visibility: public
+    applications: [cli, workbench]
+
+  - id: starsuite.official/trimodal-qc-report
+    logical_id: trimodal-qc-report
+    version: "1.7.0"
+    title: Trimodal MuData QC report
+    summary: Render unified RNA, ATAC, and guide QC from MuData.
+    kind: shell_workflow
+    entry_script: scripts/generate_trimodal_qc.py
+    schema_file: workflows/trimodal_qc_report.yaml
+    visibility: public
+    applications: [cli, workbench]
+
+  - id: starsuite.official/four-factor-qc-report
+    logical_id: four-factor-qc-report
+    version: "1.7.0"
+    title: Four-factor MuData QC report
+    summary: Render RNA, ATAC, protein, and identity-aware QC from MuData.
+    kind: shell_workflow
+    entry_script: scripts/generate_four_factor_qc.py
+    schema_file: workflows/four_factor_qc_report.yaml
+    visibility: public
+    applications: [cli, workbench]
+
+  - id: starsuite.official/multiome-mudata-builder
+    logical_id: multiome-mudata-builder
+    version: "1.7.0"
+    title: Multiome MuData builder
+    summary: Assemble RNA and ATAC plus optional feature-barcode modalities into MuData.
+    kind: shell_workflow
+    entry_script: scripts/build_multiome_mudata.py
+    schema_file: workflows/multiome_mudata_builder.yaml
+    visibility: public
+    applications: [cli, workbench, temporal]
+
+  - id: starsuite.official/partitioned-bulk-pe-alignment
+    logical_id: partitioned-bulk-pe-alignment
+    version: "1.7.0"
+    title: Partitioned bulk paired-end alignment
+    summary: Validate a provider-neutral partition manifest, align partitions, and gather BAMs.
+    kind: shell_workflow
+    entry_script: scripts/run_partitioned_bulk_pe_alignment.sh
+    schema_file: workflows/partitioned_bulk_pe_alignment.yaml
+    visibility: public
+    applications: [cli, workbench, temporal]

@@ -32,6 +32,8 @@ override_dh_auto_install:
 	install -D -m 0755 core/legacy/source/trim_qc_fastq debian/star-suite/usr/bin/trim_qc_fastq
 	install -D -m 0755 core/legacy/source/trim_qc_merge debian/star-suite/usr/bin/trim_qc_merge
 	install -D -m 0755 core/features/yremove_fastq/tools/remove_y_reads/remove_y_reads debian/star-suite/usr/bin/remove_y_reads
+	mkdir -p debian/star-suite/usr/share
+	cp -a share/star-suite debian/star-suite/usr/share/star-suite
 	ln -sf run_flexfilter_mex debian/star-suite/usr/bin/flexfilter
 
 override_dh_auto_test:
