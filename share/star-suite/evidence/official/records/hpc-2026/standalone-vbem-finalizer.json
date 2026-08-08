@@ -1,0 +1,48 @@
+{
+  "schema": "starsuite.provenance_record/v1",
+  "record_id": "hpc-2026-standalone-vbem-finalizer",
+  "recorded_utc": "2026-08-08T00:00:00Z",
+  "kind": "hpc-validation",
+  "status": "complete",
+  "software": [
+    {
+      "repository": "https://github.com/morphic-bio/STAR-suite",
+      "revision": "c12ad552c846eeb16412058a06573cb6c4dc6164",
+      "version": "1.7.0-candidate"
+    }
+  ],
+  "environment": {
+    "site_class": "PSC Bridges-2 Regular Memory compute node",
+    "cpu_class": "AMD EPYC 7742",
+    "cores_per_node": 128,
+    "scheduler": "Slurm"
+  },
+  "method": "The standalone TranscriptVB finalizer was measured on a Bridges-2 Regular Memory compute node and compared with the prior in-process memory envelope. A separate placement check compared an unbound launch with a core-bound srun launch. Count parity was checked against the archived NumReads surface.",
+  "evidence": [
+    {
+      "comparison": "standalone-versus-in-process-peak-memory",
+      "standalone_peak_rss_gb": 1.9,
+      "in_process_peak_rss_gb": 35.37,
+      "memory_reduction_fold": 18.0,
+      "numreads_parity": "byte-identical"
+    },
+    {
+      "comparison": "cpu-placement",
+      "unbound_elapsed_seconds": 258.49,
+      "core_bound_elapsed_seconds": 188.9,
+      "bound_speedup_percent": 27.0,
+      "binding": "srun cpu-bind cores with OMP_PROC_BIND close and OMP_PLACES cores"
+    }
+  ],
+  "limitations": [
+    "The memory comparison describes the observed finalizer workloads and is not a bound for every dataset.",
+    "The standalone and in-process wall-clock observations were not controlled tightly enough for a precise cross-mode speed claim.",
+    "Queue, placement, filesystem, cache, and output conditions must be recorded for independent replication."
+  ],
+  "artifacts": [
+    {
+      "logical_uri": "git://STAR-suite/docs/STANDALONE_VBEM_FINALIZER_20260807.md"
+    }
+  ]
+}
+

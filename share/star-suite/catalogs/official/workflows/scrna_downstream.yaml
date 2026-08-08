@@ -1,0 +1,42 @@
+id: starsuite.official/scrna-downstream
+title: GeneFull and Velocyto scRNA downstream
+summary: Build analysis-ready AnnData, adaptive QC, doublet calls, and optional CellBender layers from STAR outputs.
+kind: shell_workflow
+entry_script: scripts/run_scrna_downstream_gene_full_velocyto.sh
+supported_modes: [local]
+caveats:
+  - Container images are runtime inputs and should be pinned by digest in production locks.
+  - CellBender GPU execution is optional and requires an explicitly selected compatible host.
+default_output_layout: <run-dir>/downstream_genefull_velocyto/
+scripts:
+  - {role: entry, path: scripts/run_scrna_downstream_gene_full_velocyto.sh, language: bash}
+  - {role: h5ad_builder, path: scripts/build_gene_full_velocyto_h5ad.py, language: python}
+  - {role: doublets, path: scripts/run_star_cell_doublets.R, language: R}
+  - {role: feature_integration, path: scripts/integrate_feature_library.py, language: python}
+  - {role: postprocess, path: scripts/postprocess_downstream_filters.py, language: python}
+  - {role: adaptive_threshold, path: scripts/compute_adaptive_qc_threshold.py, language: python}
+  - {role: adaptive_mt, path: scripts/scrna_mt_adaptive.py, language: python}
+  - {role: adaptive_filter, path: scripts/apply_adaptive_mt_filter.py, language: python}
+  - {role: qc_histogram, path: scripts/generate_qc_histogram_mt_adaptive.py, language: python}
+  - {role: layer_propagation, path: scripts/propagate_anndata_layer.py, language: python}
+  - {role: cellbender_layer, path: scripts/add_cellbender_layer_from_h5.py, language: python}
+stages:
+  - name: downstream
+    title: Build and filter AnnData
+    script: scripts/run_scrna_downstream_gene_full_velocyto.sh
+parameter_groups:
+  - {name: inputs, title: Inputs, parameters: [run_dir]}
+  - {name: output, title: Output, parameters: [output_dir]}
+  - {name: qc, title: QC, parameters: [adaptive_filter, min_genes, max_genes, mt_pct_cutoff]}
+parameters:
+  - {name: run_dir, cli_flag: --run-dir, type: directory, required: true, path_must_exist: true, category: inputs}
+  - {name: output_dir, cli_flag: --output-dir, type: directory, required: false, default: null, is_output_root: true, category: output}
+  - {name: adaptive_filter, cli_flag: --adaptive-filter, type: bool, required: false, default: true, category: qc}
+  - {name: min_genes, cli_flag: --min-genes, type: int, required: false, default: 200, category: qc}
+  - {name: max_genes, cli_flag: --max-genes, type: int, required: false, default: 2500, category: qc}
+  - {name: mt_pct_cutoff, cli_flag: --mt-pct-cutoff, type: float, required: false, default: 5.0, category: qc}
+constraints:
+  - {kind: positive, params: [min_genes, max_genes], message: Gene-count thresholds must be positive.}
+rendering:
+  flag_order: [run_dir, output_dir, adaptive_filter, min_genes, max_genes, mt_pct_cutoff]
+

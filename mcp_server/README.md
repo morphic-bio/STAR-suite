@@ -78,12 +78,13 @@ Edit `config.yaml` to customize:
 Environment variables in config use `${VAR_NAME}` syntax.
 
 Existing top-level `workflows:` remain the backward-compatible built-in
-catalog. External catalogs are additive and resolve schemas, entry points, and
-helpers relative to the directory containing their manifest:
+catalog. STAR Suite loads its pinned public catalog and evidence snapshot by
+default; additional site and project catalogs are additive and resolve schemas,
+entry points, and helpers relative to the directory containing their manifest:
 
 ```yaml
 recipe_catalogs:
-  - manifest: /opt/star-suite/share/star-suite/catalogs/official/catalog.yaml
+  - manifest: ../share/star-suite/catalogs/official/catalog.yaml
     trust: trusted
   - manifest: /etc/star-suite/recipes/catalog.yaml
     trust: trusted
@@ -97,6 +98,8 @@ recipe_resolution:
 
 provenance:
   search:
+    - id: official-evidence
+      root: ../share/star-suite/evidence/official
     - id: site
       root: /shared/star-suite-provenance
     - id: project

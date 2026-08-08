@@ -123,6 +123,7 @@ COPY --from=builder /build/core/legacy/source/transcriptvb_finalize /usr/local/b
 COPY --from=builder /build/core/legacy/source/trim_qc_fastq /usr/local/bin/trim_qc_fastq
 COPY --from=builder /build/core/legacy/source/trim_qc_merge /usr/local/bin/trim_qc_merge
 COPY --from=builder /build/core/features/yremove_fastq/tools/remove_y_reads/remove_y_reads /usr/local/bin/remove_y_reads
+COPY --from=builder /build/share/star-suite /usr/local/share/star-suite
 
 WORKDIR /workspace
 

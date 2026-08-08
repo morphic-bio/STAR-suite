@@ -1,0 +1,37 @@
+{
+  "schema": "starsuite.provenance_record/v1",
+  "record_id": "paper-2026-bulk-pe-integrated-output",
+  "recorded_utc": "2026-08-08T00:00:00Z",
+  "kind": "benchmark",
+  "status": "complete",
+  "software": [
+    {
+      "repository": "https://github.com/morphic-bio/STAR-suite",
+      "revision": "c12ad552c846eeb16412058a06573cb6c4dc6164",
+      "version": "1.7.0-candidate"
+    }
+  ],
+  "environment": {
+    "comparison_class": "matched corrected full PPARG production workflow"
+  },
+  "method": "A corrected full paired-end bulk production workflow with integrated output processing was compared against the matched external-tool route on the same archived input and requested output surface. The reported comparison uses the current defensible full workflow rather than earlier warm-cache pilot figures.",
+  "evidence": [
+    {
+      "comparison": "integrated-versus-external",
+      "integrated_elapsed_seconds": 534.52,
+      "external_elapsed_seconds": 969.61,
+      "speedup": 1.81
+    }
+  ],
+  "limitations": [
+    "The evidence is one observed matched production comparison, not a replicated benchmark distribution.",
+    "Earlier 2.1-fold and 2.4-fold warm-cache pilot observations are intentionally excluded from the headline result.",
+    "Performance depends on storage state, reference layout, tool versions, and requested output composition."
+  ],
+  "artifacts": [
+    {
+      "logical_uri": "git://STAR-suite/comparisons/paper_benchmarks_20260318"
+    }
+  ]
+}
+
