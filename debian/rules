@@ -14,6 +14,7 @@ override_dh_auto_build:
 	$(MAKE) -j$(NUM_JOBS) star-feature-call
 	$(MAKE) -j$(NUM_JOBS) -C flex/tools/flexfilter
 	$(MAKE) -j$(NUM_JOBS) -C flex/tools/molecule_first_resolver
+	$(MAKE) -j$(NUM_JOBS) release-companion-tools
 	$(MAKE) -j$(NUM_JOBS) -C slam/tools/slam_requant
 	$(MAKE) -j$(NUM_JOBS) -C slam/tools/pileup_snp
 	$(MAKE) -j$(NUM_JOBS) yremove-tools
@@ -27,6 +28,9 @@ override_dh_auto_install:
 	install -D -m 0755 flex/tools/molecule_first_resolver/molecule_first_resolver debian/star-suite/usr/bin/molecule_first_resolver
 	install -D -m 0755 flex/tools/molecule_first_resolver/molecule_first_bam_ledger debian/star-suite/usr/bin/molecule_first_bam_ledger
 	install -D -m 0755 flex/tools/molecule_first_resolver/molecule_first_materialize debian/star-suite/usr/bin/molecule_first_materialize
+	install -D -m 0755 core/legacy/source/transcriptvb_finalize debian/star-suite/usr/bin/transcriptvb_finalize
+	install -D -m 0755 core/legacy/source/trim_qc_fastq debian/star-suite/usr/bin/trim_qc_fastq
+	install -D -m 0755 core/legacy/source/trim_qc_merge debian/star-suite/usr/bin/trim_qc_merge
 	install -D -m 0755 core/features/yremove_fastq/tools/remove_y_reads/remove_y_reads debian/star-suite/usr/bin/remove_y_reads
 	ln -sf run_flexfilter_mex debian/star-suite/usr/bin/flexfilter
 

@@ -11,12 +11,13 @@ set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root="$(cd "$here/.." && pwd)"
 src="$root/core/legacy/source"
+STAR_BIN="${STAR_BIN:-$src/STAR}"
+TRIM_QC_MERGE_BIN="${TRIM_QC_MERGE_BIN:-$src/trim_qc_merge}"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
-for tool in STAR trim_qc_merge; do
-    [ -x "$src/$tool" ] || make -C "$src" "$tool" WITH_CHROMAP=0 >/dev/null
-done
+[ -x "$STAR_BIN" ] || make -C "$src" STAR WITH_CHROMAP=0 >/dev/null
+[ -x "$TRIM_QC_MERGE_BIN" ] || make -C "$src" trim_qc_merge WITH_CHROMAP=0 >/dev/null
 
 READS=2000
 python3 - "$work" "$READS" <<'PY'
@@ -41,12 +42,12 @@ open(os.path.join(d, "r2.fastq"), "w").write(''.join(r2))
 PY
 
 mkdir -p "$work/genome"
-"$src/STAR" --runMode genomeGenerate --genomeDir "$work/genome" \
+"$STAR_BIN" --runMode genomeGenerate --genomeDir "$work/genome" \
     --genomeFastaFiles "$work/ref.fa" --genomeSAindexNbases 8 --runThreadN 4 \
     --outFileNamePrefix "$work/gg_" >/dev/null 2>&1
 
 mkdir -p "$work/full"
-"$src/STAR" --runMode alignReads --genomeDir "$work/genome" \
+"$STAR_BIN" --runMode alignReads --genomeDir "$work/genome" \
     --readFilesIn "$work/r1.fastq" "$work/r2.fastq" \
     --outSAMtype None --runThreadN 4 \
     --trimQcReport "$work/full/qc" --outFileNamePrefix "$work/full/" >/dev/null 2>&1
@@ -76,13 +77,13 @@ tail -$(( READS * 2 )) "$work/r1.fastq" > "$work/b_r1.fastq"
 tail -$(( READS * 2 )) "$work/r2.fastq" > "$work/b_r2.fastq"
 for s in a b; do
     mkdir -p "$work/$s"
-    "$src/STAR" --runMode alignReads --genomeDir "$work/genome" \
+    "$STAR_BIN" --runMode alignReads --genomeDir "$work/genome" \
         --readFilesIn "$work/${s}_r1.fastq" "$work/${s}_r2.fastq" \
         --outSAMtype None --runThreadN 2 \
         --trimQcShardOut "$work/$s.trimqc" \
         --outFileNamePrefix "$work/$s/" >/dev/null 2>&1
 done
-"$src/trim_qc_merge" --out-prefix "$work/merged" --stage raw \
+"$TRIM_QC_MERGE_BIN" --out-prefix "$work/merged" --stage raw \
     "$work/a.trimqc" "$work/b.trimqc" >/dev/null
 
 python3 - "$work/full/qc.trim_qc.json" "$work/merged.trim_qc.json" <<'PY'

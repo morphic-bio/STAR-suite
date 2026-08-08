@@ -195,6 +195,23 @@ Ship discoverable, installable Ubuntu binaries for STAR Suite with low-friction 
   `STAR --version` reports `1.3.0`. Upstream provenance and genome index
   compatibility remain `2.7.11b` and `2.7.4a`.
 
+## Feature Release v1.7.0 (2026-08-08)
+
+- Release tag: `v1.7.0`
+- Release notes: `docs/RELEASE_NOTES_v1.7.0.md`
+- Packaging metadata: `debian/changelog` entry `1.7.0-1`
+- Scope added since v1.6.1: TranscriptVB scatter/gather evidence and the
+  standalone finalizer, additive sharded trim QC and its standalone FASTQ and
+  merge tools, parallel genome loading, optional parallel GC-background work,
+  RapidMACS/librapidmacs naming for integrated Chromap builds, and the
+  zero-junction GTF suffix-array memory-safety fix.
+- Release tarballs, installer variants, Debian packages, and Docker images now
+  include `transcriptvb_finalize`, `trim_qc_fastq`, and `trim_qc_merge` and run
+  installed-artifact workflow smokes for those tools.
+- Version note: release artifacts use tag `v1.7.0`, Debian packages use STAR
+  Suite `1.7.0`, and `STAR --version` reports `1.7.0`. Upstream provenance and
+  genome-index compatibility remain `2.7.11b` and `2.7.4a`.
+
 ## Patch Release v1.6.1 (2026-07-28)
 
 - Release tag: `v1.6.1`
