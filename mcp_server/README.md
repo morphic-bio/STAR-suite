@@ -72,8 +72,55 @@ Edit `config.yaml` to customize:
 - **Datasets**: data directories to expose
 - **Scripts**: allowlisted test/build scripts
 - **Test suites**: grouped tests by module
+- **Recipe catalogs**: ordered external `catalog.yaml` manifests
+- **Provenance**: ordered read roots and one optional write destination
 
 Environment variables in config use `${VAR_NAME}` syntax.
+
+Existing top-level `workflows:` remain the backward-compatible built-in
+catalog. External catalogs are additive and resolve schemas, entry points, and
+helpers relative to the directory containing their manifest:
+
+```yaml
+recipe_catalogs:
+  - manifest: /opt/star-suite/share/star-suite/catalogs/official/catalog.yaml
+    trust: trusted
+  - manifest: /etc/star-suite/recipes/catalog.yaml
+    trust: trusted
+
+recipe_resolution:
+  default_policy: keep_separate
+  applications:
+    cli: keep_separate
+    workbench: prompt
+#   unattended-builder: prefer_newest
+
+provenance:
+  search:
+    - id: site
+      root: /shared/star-suite-provenance
+    - id: project
+      root: .star-suite/provenance
+  write:
+    id: project
+    root: .star-suite/provenance
+```
+
+Catalog workflow IDs are namespace-qualified and may not silently shadow an
+earlier workflow. Recipes that implement the same intent declare a shared
+`logical_id`, a PEP 440 `version`, and optional compatible `applications`.
+`keep_separate` leaves every source visible, `prompt` returns
+`selection_required` with candidates, and `prefer_newest` selects the highest
+version (equal versions use later catalog order). A user can always select the
+unambiguous `catalog-id::workflow-id` source reference. Public discovery
+returns catalog identity but redacts catalog roots and Git metadata. See
+`docs/RUNBOOK_RECIPE_CATALOG_PROVENANCE_HIERARCHY.md` for the contract and
+migration plan.
+
+Trust is assigned by the local catalog-stack configuration, never by the
+catalog itself. External sources default to `untrusted`; the built-in catalog
+is trusted. Trust is displayed and locked so Workbench or an execution policy
+can require confirmation without hiding the candidate.
 
 ## Available Tools
 
@@ -120,12 +167,46 @@ Environment variables in config use `${VAR_NAME}` syntax.
 
 | Tool | Description |
 |------|-------------|
+| `list_recipe_catalogs(auth_token?)` | List catalog sources in discovery order; host paths and Git metadata require authentication |
+| `describe_recipe_catalog(catalog_id, auth_token?)` | Describe a catalog and its visible source-specific recipes |
+| `list_provenance_repositories(auth_token?)` | List provenance search order and write selection; roots require authentication |
+| `list_recipe_candidates(logical_id?, application?, auth_token?)` | Group compatible candidates by logical recipe identity |
+| `list_recipe_conflicts(application?, auth_token?)` | List logical identities with more than one compatible source |
+| `resolve_recipe(reference, application?, policy?, selected_workflow_id?, auth_token?)` | Apply `keep_separate`, `prompt`, or `prefer_newest` without executing |
+| `build_recipe_lock(reference, params, application?, policy?, selected_workflow_id?, check_paths?, auth_token?)` | Validate, render, and hash a selected recipe and all declared helpers |
 | `list_workflows(auth_token?)` | List supported workflow templates |
 | `describe_workflow(workflow_id, auth_token?)` | Full workflow metadata with stages and parameter groups |
 | `get_workflow_scripts(workflow_id, auth_token?)` | Scripts composing a workflow with provenance (for script-backed encoders) |
 | `get_workflow_parameter_schema(workflow_id, auth_token?)` | Machine-readable parameter schema with types, defaults, and constraints |
 | `validate_workflow_parameters(workflow_id, params, check_paths?, auth_token?)` | Validate structured params without executing |
 | `render_workflow_command(workflow_id, params, auth_token?)` | Render params into argv array and shell preview |
+
+### Recipe CLI and scheduler handoff
+
+The same catalog stack is available without starting the server:
+
+```bash
+python3 -m mcp_server.recipe_cli --config mcp_server/config.yaml catalog list
+python3 -m mcp_server.recipe_cli --config mcp_server/config.yaml provenance list
+python3 -m mcp_server.recipe_cli --config mcp_server/config.yaml \
+  recipe conflicts --application workbench
+python3 -m mcp_server.recipe_cli --config mcp_server/config.yaml \
+  recipe resolve bulk-rna --application workbench --select site::example.site/bulk-rna
+python3 -m mcp_server.recipe_cli --config mcp_server/config.yaml \
+  recipe lock site::example.site/bulk-rna --params-file params.json \
+  --output recipe.lock.json
+python3 -m mcp_server.recipe_cli --config mcp_server/config.yaml \
+  recipe bundle site::example.site/bulk-rna --params-file params.json \
+  --run-id run-001 --output-dir run-001.bundle
+```
+
+A bundle contains `recipe.lock.json` with STAR Suite/catalog revisions and
+hashed catalog scripts, a planned provenance record, and
+`manifests/resolved_workflow_v1.json`. Workbench may ask
+the user when resolution returns `selection_required`, then records that
+selection in the lock. Temporal receives only the locked
+`biodepot.resolved_workflow/v1` packet plus a separately selected site/executor
+profile; it never discovers catalogs or upgrades a recipe during a retry.
 
 **Workflow vs Script tools**: Workflows provide structured parameter contracts for agent consumption. Scripts provide raw allowlisted execution. They are complementary:
 
@@ -165,9 +246,10 @@ scripts = client.call_tool("get_workflow_scripts", {
     "workflow_id": "ucsf_star_suite_production"
 })
 # scripts["scripts"] lists each script with role, path, description, language, exists
-# Public callers: absolute_path is null; provenance has only workflow_schema
-# Authenticated callers: absolute_path populated; provenance adds repo_root,
-#   git_commit, git_remote
+# Public callers: absolute_path is null; provenance contains safe schema and
+#   catalog identity only.
+# Authenticated callers: absolute_path is populated; provenance adds
+#   catalog_root/repo_root, git_commit, and git_remote for the owning catalog.
 
 # Validate with path checks (default) or skip path checks for dry planning
 val = client.call_tool("validate_workflow_parameters", {
@@ -214,10 +296,13 @@ Authentication is enforced per-tool via the `auth_token` parameter.
 
 **Discovery tools are public by default** (`public_discovery: true` in config):
 - `list_datasets`, `list_test_suites`, `find_docs`, `find_tests` work without auth
+- recipe catalog/candidate/conflict resolution and provenance hierarchy
+  discovery work without auth, but redact roots and Git metadata
 - Set `public_discovery: false` to require auth for all tools
 
 **Sensitive tools always require auth** (when `auth_token` is configured):
-- `reload_config`, `preflight`, `run_script`, `collect_outputs`
+- `reload_config`, `preflight`, `run_script`, `collect_outputs`, workflow
+  validation/rendering, and `build_recipe_lock`
 
 **To enable auth**:
 1. Set `MCP_AUTH_TOKEN` environment variable

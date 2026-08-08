@@ -6,7 +6,13 @@ import shlex
 from pathlib import Path
 from typing import Any, Optional
 
-from ..config import get_config, get_workflow_schema, get_workflow_schemas
+from ..config import (
+    get_workflow_config,
+    get_workflow_origin,
+    get_workflow_root,
+    get_workflow_schema,
+    get_workflow_schemas,
+)
 from ..schemas.config import WorkflowConfig
 from ..schemas.responses import (
     ConstraintInfo,
@@ -25,13 +31,12 @@ from ..schemas.responses import (
     WorkflowStageInfo,
 )
 from ..schemas.workflow import WorkflowParameterDef, WorkflowSchema
-from .utils import is_path_allowed, validate_path
+from .utils import is_path_allowed
 
 
 def _get_workflow_config(workflow_id: str) -> Optional[WorkflowConfig]:
     """Look up the WorkflowConfig entry for *workflow_id*."""
-    config = get_config()
-    return config.get_workflow(workflow_id)
+    return get_workflow_config(workflow_id)
 
 
 def _is_visible(workflow_id: str, authenticated: bool) -> bool:
@@ -51,6 +56,7 @@ def list_workflows(authenticated: bool = False) -> ListWorkflowsResponse:
     for schema in schemas.values():
         if not _is_visible(schema.id, authenticated):
             continue
+        origin = get_workflow_origin(schema.id)
         items.append(
             WorkflowInfo(
                 id=schema.id,
@@ -59,6 +65,8 @@ def list_workflows(authenticated: bool = False) -> ListWorkflowsResponse:
                 kind=schema.kind,
                 entry_script=schema.entry_script,
                 supported_modes=schema.supported_modes,
+                catalog_id=origin.catalog.id if origin else None,
+                catalog_namespace=origin.catalog.namespace if origin else None,
             )
         )
     return ListWorkflowsResponse(workflows=items)
@@ -94,6 +102,7 @@ def describe_workflow(
         )
         for g in schema.parameter_groups
     ]
+    origin = get_workflow_origin(workflow_id)
 
     return DescribeWorkflowResponse(
         id=schema.id,
@@ -106,6 +115,8 @@ def describe_workflow(
         default_output_layout=schema.default_output_layout,
         stages=stages,
         parameter_groups=groups,
+        catalog_id=origin.catalog.id if origin else None,
+        catalog_namespace=origin.catalog.namespace if origin else None,
     )
 
 
@@ -131,10 +142,13 @@ def get_workflow_scripts(
     if schema is None or not _is_visible(workflow_id, authenticated):
         raise ValueError(f"Unknown workflow: {workflow_id}")
 
-    config = get_config()
-    repo_root = Path(config.paths.repo_root)
+    origin = get_workflow_origin(workflow_id)
+    if origin is None:
+        raise ValueError(f"Unknown workflow: {workflow_id}")
+    repo_root = origin.catalog.root
 
     scripts: list[WorkflowScriptDetail] = []
+    seen_paths: set[str] = set()
     for s in schema.scripts:
         abs_path = Path(s.path)
         if not abs_path.is_absolute():
@@ -149,6 +163,46 @@ def get_workflow_scripts(
             exists=abs_path.exists(),
         )
         scripts.append(detail)
+        seen_paths.add(s.path)
+
+    additional_scripts = [
+        (
+            f"stage:{stage.name}",
+            stage.script,
+            stage.description or stage.title,
+            "bash",
+        )
+        for stage in schema.stages
+        if stage.script is not None and stage.script not in seen_paths
+    ]
+    if schema.execution is not None:
+        additional_scripts.extend(
+            (
+                f"execution_stage:{stage.name}",
+                stage.entry_script,
+                stage.title,
+                "bash",
+            )
+            for stage in schema.execution.stages
+            if stage.entry_script not in seen_paths
+        )
+    for role, path, description, language in additional_scripts:
+        if path in seen_paths:
+            continue
+        seen_paths.add(path)
+        abs_path = Path(path)
+        if not abs_path.is_absolute():
+            abs_path = repo_root / path
+        scripts.append(
+            WorkflowScriptDetail(
+                role=role,
+                path=path,
+                absolute_path=str(abs_path) if authenticated else None,
+                description=description,
+                language=language,
+                exists=abs_path.exists(),
+            )
+        )
 
     # If no scripts section in the schema, at minimum return the entry script
     if not scripts:
@@ -167,12 +221,21 @@ def get_workflow_scripts(
     # Build provenance — public callers get only the schema file reference;
     # authenticated callers additionally get repo_root, git_commit, git_remote.
     provenance: dict[str, Any] = {
-        "workflow_schema": _get_workflow_config(workflow_id).schema_file
-        if _get_workflow_config(workflow_id)
-        else None,
+        "workflow_schema": origin.schema_file,
+        "catalog_id": origin.catalog.id,
+        "catalog_namespace": origin.catalog.namespace,
+        "catalog_version": origin.catalog.version,
+        "catalog_trust": origin.catalog.trust,
     }
+    if origin.catalog.manifest_path is not None:
+        provenance["catalog_manifest"] = str(
+            origin.catalog.manifest_path.relative_to(origin.catalog.root)
+        )
 
     if authenticated:
+        provenance["catalog_root"] = str(repo_root)
+        # Compatibility field retained for existing clients. For external
+        # workflows it now correctly means the owning catalog repository root.
         provenance["repo_root"] = str(repo_root)
 
         # Best-effort git info (authenticated only)
@@ -594,8 +657,9 @@ def validate_workflow_parameters(
 
     # Path validation (file/directory params with path_must_exist)
     if check_paths:
-        config = get_config()
-        repo_root = Path(config.paths.repo_root)
+        repo_root = get_workflow_root(workflow_id)
+        if repo_root is None:
+            raise ValueError(f"Unknown workflow: {workflow_id}")
         for p_def in schema.parameters:
             if p_def.name not in normalized:
                 continue
@@ -656,8 +720,9 @@ def render_workflow_command(
     if schema is None:
         raise ValueError(f"Unknown workflow: {workflow_id}")
 
-    config = get_config()
-    repo_root = Path(config.paths.repo_root)
+    repo_root = get_workflow_root(workflow_id)
+    if repo_root is None:
+        raise ValueError(f"Unknown workflow: {workflow_id}")
 
     # Resolve entry script path
     entry_script = schema.entry_script

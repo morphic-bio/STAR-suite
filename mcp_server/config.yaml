@@ -31,6 +31,48 @@ paths:
   artifact_log_root: "/mnt/pikachu/STAR-suite/plans/artifacts"
   temp_root: "/tmp"
 
+# Optional external recipe catalogs, loaded in declared discovery order. Each
+# manifest uses schema biodepot.recipe_catalog/v1. Relative manifest and
+# provenance paths resolve from this config file's directory. Duplicate catalog
+# ids, namespaces, and workflow ids fail closed; external workflow paths must
+# stay within their catalog root.
+#
+# recipe_catalogs:
+#   - manifest: /opt/star-suite/share/star-suite/catalogs/official/catalog.yaml
+#     trust: trusted
+#   - manifest: /etc/star-suite/recipes/catalog.yaml
+#     trust: trusted
+recipe_catalogs: []
+
+# A logical recipe may be supplied by several catalogs. Fully qualified source
+# identities are always preserved. keep_separate (the safe default) requires a
+# source-specific id, prompt returns structured candidates for an interactive
+# client, and prefer_newest selects the highest PEP 440 recipe version (ties use
+# later catalog order). Temporal consumes a resolved lock and does not apply a
+# discovery policy itself.
+recipe_resolution:
+  default_policy: keep_separate
+  applications:
+    cli: keep_separate
+    workbench: prompt
+#   unattended-builder: prefer_newest
+
+# Provenance repositories are independent of recipe catalogs. Search roots are
+# read in order; a context has at most one explicit write destination. Reusing a
+# search id for write is allowed only when it names the same root.
+#
+# provenance:
+#   search:
+#     - id: site
+#       root: /shared/star-suite-provenance
+#     - id: project
+#       root: .star-suite/provenance
+#   write:
+#     id: project
+#     root: .star-suite/provenance
+provenance:
+  search: []
+
 trusted_roots:
   - "/mnt/pikachu/STAR-suite"
   - "/mnt/pikachu/morphic-recipes"
