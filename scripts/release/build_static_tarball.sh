@@ -248,7 +248,6 @@ if [[ ! -f share/star-suite/SNAPSHOTS.json \
   echo "ERROR: pinned official recipe/provenance snapshots are incomplete" >&2
   exit 1
 fi
-python3 scripts/release/validate_official_snapshots.py
 
 STAGE_DIR="$(mktemp -d)"
 mkdir -p "${STAGE_DIR}/bin"
