@@ -57,6 +57,7 @@ class Parameters {
         string runMode;
         vector<string> runModeIn;
         int runThreadN;
+        int genomeLoadThreads;
         int dynamicThreadInterface = 0; // 0: off, 1: constant map permits + telemetry hooks
         int dynamicThreadConstMapPermits = 0; // <=0 means use runThreadN
         int dynamicThreadTelemetry = 0; // 0: off, 1: on
@@ -213,6 +214,7 @@ class Parameters {
         string trimQcHtml;
         uint64 trimQcMaxReads = 0;
         bool trimQcEnabled = false;
+        string trimQcShardOut;
 
         //align parameters
         uint alignSJoverhangMin,alignSJDBoverhangMin,alignSplicedMateMapLmin; //min SJ donor/acceptor length

@@ -172,3 +172,5 @@ flex/tools/clique_replay/test_fanout
 
 ## Machine-local agent notes (not committed)
 AGENTS_local.md
+/core/legacy/source/trim_qc_merge
+/core/legacy/source/trim_qc_replay
