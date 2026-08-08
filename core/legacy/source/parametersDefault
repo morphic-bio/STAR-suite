@@ -1150,6 +1150,35 @@ quantTranscriptomeBAMcompression    1
                              0  ... no compression
                             10  ... maximum compression
 
+
+quantVBSidecarOut                     -
+    string: Optional path for a versioned, unfinalized TranscriptVB binary evidence sidecar
+
+quantVBSidecarIn                      -
+    string(s): Complete ordered shard-sidecar set to validate, merge, and quantify globally
+
+quantVBSidecarRoundTrip               0
+    int: 0/1 - reload and validate quantVBSidecarOut before final VB/EM (experimental correctness gate)
+
+quantVBSidecarOnly                    0
+    int: 0/1 - write quantVBSidecarOut and skip per-shard VB/EM/output quantification
+
+quantVBSidecarSampleId                -
+    string: Stable sample/run identifier stored in the TranscriptVB sidecar header
+
+quantVBSidecarInputId                 -
+    string: Stable paired-input identity shared by FIFO-backed shard workers and the global finalizer
+
+quantVBSidecarShardOrdinal            0
+    int: Zero-based logical shard ordinal stored in the TranscriptVB sidecar header
+
+quantVBSidecarShardCount              1
+    int: Total logical shard count stored in the TranscriptVB sidecar header
+
+quantVBSidecarFirstPair               0
+    int: Zero-based first global read-pair ordinal represented by the sidecar
+
+
 quantVBgcBias                        0
     int: 0/1 - enable GC bias correction for transcript quantification (TranscriptVB mode)
 

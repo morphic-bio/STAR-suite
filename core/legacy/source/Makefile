@@ -219,7 +219,7 @@ OBJECTS = systemFunctions.o SoloMemoryProfile.o CountingSinkStress.o funPrimaryA
 	SpliceGraph_findSuperTr.o sjAlignSplit.o \
 	GTF.o GTF_transcriptGeneSJ.o GTF_superTranscript.o SuperTranscriptome.o TranscriptomeFasta.o \
 	ReadAlign_outputAlignments.o ReadAlign_resolveAmbiguousCBs.o ReadAlign_slamQuant.o \
-		ReadAlign.o STAR.o TranscriptQuantEC.o LibFormatDetection.o TranscriptQuantOutput.o SlamQuant.o SlamSolver.o slam_vb_overdisp.o SlamCompat.o SlamVarianceAnalysis.o SlamReadBuffer.o SlamDump.o SlamQcOutput.o TrimQc.o TrimQcOutput.o TrimQcShard.o SnpMaskBuild.o \
+		ReadAlign.o STAR.o TranscriptQuantEC.o TranscriptVBSidecar.o LibFormatDetection.o TranscriptQuantOutput.o SlamQuant.o SlamSolver.o slam_vb_overdisp.o SlamCompat.o SlamVarianceAnalysis.o SlamReadBuffer.o SlamDump.o SlamQcOutput.o TrimQc.o TrimQcOutput.o TrimQcShard.o SnpMaskBuild.o \
 	SharedMemory.o PackedArray.o SuffixArrayFuns.o Parameters.o Parameters_samAttributes.o InOutStreams.o SequenceFuns.o Genome.o ParametersGenome.o Stats.o \
 	Transcript.o Transcript_alignScore.o Transcript_generateCigarP.o Chain.o \
 	Transcript_variationAdjust.o Variation.o ReadAlign_waspMap.o \
@@ -273,6 +273,36 @@ ocm-multi-unit-tests : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
 ocm-multi-unit-tests : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS) $(shell pkg-config --libs glib-2.0 2>/dev/null || echo "")
 ocm-multi-unit-tests : Depend.list parametersDefault.xxd $(OBJECTS_NO_MAIN) libflex libtrim libem libprocess_features $(LIBSCRNA_LIB) $(OCM_UNIT_TEST_SRC)
 	$(CXX) -o ocm_multi_unit_tests $(CXXFLAGS) $(OCM_UNIT_TEST_SRC) $(OBJECTS_NO_MAIN) $(LIBFLEX_LIB) $(LIBTRIM_LIB) $(LIBEM_LIB) $(PROCESS_FEATURES_LIB) $(LIBSCRNA_LIB) $(LDFLAGS)
+
+# Standalone sidecar gather parity harness. Links only the sidecar reader and
+# libem: no Genome, no suffix array, no STAR index. Demonstrates the gather half
+# of the finalizer running without the index the in-STAR finalizer loads and
+# frees. See docs/STANDALONE_VBEM_FINALIZER_20260807.md.
+SIDECAR_GATHER_PARITY_SRC := $(ROOT_DIR)/tests/transcriptvb/sidecar_gather_parity.cpp
+.PHONY: sidecar-gather-parity
+sidecar-gather-parity : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
+sidecar-gather-parity : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS)
+sidecar-gather-parity : TranscriptVBSidecar.o libem $(SIDECAR_GATHER_PARITY_SRC)
+	$(CXX) -o sidecar_gather_parity $(CXXFLAGS) $(SIDECAR_GATHER_PARITY_SRC) TranscriptVBSidecar.o $(LIBEM_LIB) $(LDFLAGS)
+
+# Sparse-gate parity: proves restricting VB/EM to transcripts with non-zero EC
+# support is exact, by running dense and gated VB over the same merged evidence.
+SPARSE_GATE_PARITY_SRC := $(ROOT_DIR)/tests/transcriptvb/sparse_gate_parity.cpp
+.PHONY: sparse-gate-parity
+sparse-gate-parity : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
+sparse-gate-parity : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS)
+sparse-gate-parity : TranscriptVBSidecar.o libem $(SPARSE_GATE_PARITY_SRC)
+	$(CXX) -o sparse_gate_parity $(CXXFLAGS) $(SPARSE_GATE_PARITY_SRC) TranscriptVBSidecar.o $(LIBEM_LIB) $(LDFLAGS)
+
+# Standalone TranscriptVB shard finalizer: gathers sidecars and writes quant.sf
+# without loading the STAR genome index. Links only the sidecar reader and libem.
+TRANSCRIPTVB_FINALIZE_SRC := $(ROOT_DIR)/core/features/vbem/tools/transcriptvb_finalize/transcriptvb_finalize.cpp
+.PHONY: transcriptvb-finalize
+transcriptvb-finalize : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
+transcriptvb-finalize : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS)
+transcriptvb-finalize : TranscriptVBSidecar.o libem $(TRANSCRIPTVB_FINALIZE_SRC)
+	$(CXX) -o transcriptvb_finalize $(CXXFLAGS) $(TRANSCRIPTVB_FINALIZE_SRC) TranscriptVBSidecar.o $(LIBEM_LIB) $(LDFLAGS)
+
 
 # Dependency scanning must include VPATH-built Flex sources. Without these
 # entries, header/layout changes can leave stale Flex/Solo objects linked into

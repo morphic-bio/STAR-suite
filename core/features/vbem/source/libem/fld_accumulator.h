@@ -28,6 +28,16 @@ public:
     // Binomial kernel parameters (Salmon: AlignmentLibrary.hpp)
     static constexpr size_t KERNEL_N = 4;         // Number of trials
     static constexpr double KERNEL_P = 0.5;       // Success probability
+
+    // Exact, unnormalized state used by the TranscriptVB evidence sidecar.
+    // Keeping log-space histogram values avoids a lossy PMF round trip and
+    // preserves the same merge behavior as an in-memory accumulator.
+    struct State {
+        std::vector<double> histogram;
+        double total_mass = LOG_0_FLD;
+        double weighted_sum = LOG_0_FLD;
+        std::uint64_t minimum = MAX_FRAG_LEN;
+    };
     
     FLDAccumulator();
     
@@ -79,6 +89,9 @@ public:
     
     // Reset to initial state (with Gaussian prior)
     void reset();
+
+    State snapshot() const;
+    bool restore(const State& state, std::string& error);
     
     // Dump PMF for debugging
     void dumpPMF(std::vector<double>& pmfOut, size_t& minV, size_t& maxV) const;

@@ -489,6 +489,15 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "quantVBTrace", &quant.transcriptVB.traceFile));
     parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "quantVBTraceLimit", &quant.transcriptVB.traceLimit));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "quantVBDumpEq", &quant.transcriptVB.dumpEqFile));
+    parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "quantVBSidecarOut", &quant.transcriptVB.sidecarOut));
+    parArray.push_back(new ParameterInfoVector <string>   (-1, -1, "quantVBSidecarIn", &quant.transcriptVB.sidecarIn));
+    parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "quantVBSidecarRoundTrip", &quant.transcriptVB.sidecarRoundTripInt));
+    parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "quantVBSidecarOnly", &quant.transcriptVB.sidecarOnlyInt));
+    parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "quantVBSidecarSampleId", &quant.transcriptVB.sidecarSampleId));
+    parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "quantVBSidecarInputId", &quant.transcriptVB.sidecarInputId));
+    parArray.push_back(new ParameterInfoScalar <uint32>   (-1, -1, "quantVBSidecarShardOrdinal", &quant.transcriptVB.sidecarShardOrdinal));
+    parArray.push_back(new ParameterInfoScalar <uint32>   (-1, -1, "quantVBSidecarShardCount", &quant.transcriptVB.sidecarShardCount));
+    parArray.push_back(new ParameterInfoScalar <uint64>   (-1, -1, "quantVBSidecarFirstPair", &quant.transcriptVB.sidecarFirstPair));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "quantVBErrorModel", &quant.transcriptVB.errorModelMode));
     parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "quantVBFragLengthDist", &quant.transcriptVB.fragLengthDistInt));
     parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "quantVBEffectiveLengthCorrection", &quant.transcriptVB.effectiveLengthCorrectionInt));
@@ -3124,6 +3133,72 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
         // quantVBem flag: if set to 1, use EM (vb=false), otherwise use VB (vb=true, default)
         quant.transcriptVB.vb = (quant.transcriptVB.quantVBemInt == 0);
         quant.transcriptVB.geneOutput = (quant.transcriptVB.geneOutputInt != 0);
+        if (quant.transcriptVB.sidecarRoundTripInt != 0 &&
+            quant.transcriptVB.sidecarRoundTripInt != 1) {
+            ostringstream errOut;
+            errOut << "EXITING because of FATAL PARAMETER ERROR: "
+                   << "--quantVBSidecarRoundTrip must be 0 or 1\n";
+            exitWithError(errOut.str(), std::cerr, inOut->logMain,
+                          EXIT_CODE_PARAMETER, *this);
+        }
+        quant.transcriptVB.sidecarRoundTrip =
+            (quant.transcriptVB.sidecarRoundTripInt != 0);
+        if (quant.transcriptVB.sidecarOnlyInt != 0 &&
+            quant.transcriptVB.sidecarOnlyInt != 1) {
+            ostringstream errOut;
+            errOut << "EXITING because of FATAL PARAMETER ERROR: "
+                   << "--quantVBSidecarOnly must be 0 or 1\n";
+            exitWithError(errOut.str(), std::cerr, inOut->logMain,
+                          EXIT_CODE_PARAMETER, *this);
+        }
+        quant.transcriptVB.sidecarOnly =
+            (quant.transcriptVB.sidecarOnlyInt != 0);
+        if (quant.transcriptVB.sidecarOut == "None") {
+            quant.transcriptVB.sidecarOut = "-";
+        }
+        quant.transcriptVB.sidecarIn.erase(
+            std::remove_if(quant.transcriptVB.sidecarIn.begin(),
+                           quant.transcriptVB.sidecarIn.end(),
+                           [](const string& value) {
+                               return value.empty() || value == "-" || value == "None";
+                           }),
+            quant.transcriptVB.sidecarIn.end());
+        if (quant.transcriptVB.sidecarSampleId == "None" ||
+            quant.transcriptVB.sidecarSampleId == "-") {
+            quant.transcriptVB.sidecarSampleId = outFileNamePrefix;
+        }
+        if (quant.transcriptVB.sidecarRoundTrip &&
+            quant.transcriptVB.sidecarOut == "-") {
+            ostringstream errOut;
+            errOut << "EXITING because of FATAL PARAMETER ERROR: "
+                   << "--quantVBSidecarRoundTrip 1 requires --quantVBSidecarOut PATH\n";
+            exitWithError(errOut.str(), std::cerr, inOut->logMain,
+                          EXIT_CODE_PARAMETER, *this);
+        }
+        if (quant.transcriptVB.sidecarOnly &&
+            quant.transcriptVB.sidecarOut == "-") {
+            ostringstream errOut;
+            errOut << "EXITING because of FATAL PARAMETER ERROR: "
+                   << "--quantVBSidecarOnly 1 requires --quantVBSidecarOut PATH\n";
+            exitWithError(errOut.str(), std::cerr, inOut->logMain,
+                          EXIT_CODE_PARAMETER, *this);
+        }
+        if (quant.transcriptVB.sidecarOnly &&
+            !quant.transcriptVB.sidecarIn.empty()) {
+            ostringstream errOut;
+            errOut << "EXITING because of FATAL PARAMETER ERROR: "
+                   << "--quantVBSidecarOnly cannot be combined with --quantVBSidecarIn\n";
+            exitWithError(errOut.str(), std::cerr, inOut->logMain,
+                          EXIT_CODE_PARAMETER, *this);
+        }
+        if (quant.transcriptVB.sidecarShardCount == 0 ||
+            quant.transcriptVB.sidecarShardOrdinal >= quant.transcriptVB.sidecarShardCount) {
+            ostringstream errOut;
+            errOut << "EXITING because of FATAL PARAMETER ERROR: invalid "
+                   << "--quantVBSidecarShardOrdinal/--quantVBSidecarShardCount\n";
+            exitWithError(errOut.str(), std::cerr, inOut->logMain,
+                          EXIT_CODE_PARAMETER, *this);
+        }
         if (quant.transcriptVB.outFile.empty()) {
             quant.transcriptVB.outFile = outFileNamePrefix + "quant.sf";
         }
