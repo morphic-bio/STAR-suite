@@ -24,6 +24,15 @@ runMode                         alignReads
 runThreadN                      1
     int: number of threads to run STAR
 
+genomeLoadThreads           1
+    int: number of threads used to read the Genome/SA/SAindex files into memory.
+                          1     ... single sequential reader (default, historical behavior)
+                          >1    ... parallel positional reads of disjoint byte ranges.
+                                    The loaded bytes are identical; only read concurrency changes.
+                                    Useful on parallel filesystems and NVMe, where a single
+                                    sequential stream cannot keep enough requests in flight.
+
+
 dynamicThreadInterface          0
     int: dynamic thread interface mode.
                                 0 ... off (default behavior).
@@ -530,6 +539,13 @@ trimQcMaxReads                  0
     uint64: maximum number of reads to collect QC for (0 = no limit)
 
 ### Limits
+
+trimQcShardOut                  -
+    string:                 path for a per-shard binary trim-QC dump
+                            Written in addition to the JSON/HTML report. Lets a
+                            sharded run merge QC at gather with trim_qc_merge
+                            instead of re-reading reads or a BAM.
+
 limitGenomeGenerateRAM               31000000000
     int>0: maximum available RAM (bytes) for genome generation
 

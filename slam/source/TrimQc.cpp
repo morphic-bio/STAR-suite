@@ -103,6 +103,15 @@ void TrimQcCollector::addRead(const char* seqNum, const char* qual, uint32_t len
     ++totalReads_;
 }
 
+void TrimQcCollector::restoreFromShard(uint32_t qualBase, uint64_t totalReads,
+                                       const std::vector<TrimQcMateStats>& mates) {
+    enabled_ = true;
+    maxReads_ = 0;          // the cap applied during collection, not on replay
+    totalReads_ = totalReads;
+    qualityBase_ = qualBase;
+    mates_ = mates;
+}
+
 void TrimQcCollector::merge(const TrimQcCollector& other) {
     if (!other.enabled_) {
         return;
