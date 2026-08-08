@@ -77,7 +77,11 @@ Tag policy:
     `tests/test_visium_hd_gex_sidecar_concurrency.py`,
     `tests/slam/test_snp_mask_build_smoke.sh`,
     `tests/run_flex_tiny_public_smoke.sh`, and
-    `tests/run_molecule_first_native_smoke.sh`
+    `tests/run_molecule_first_native_smoke.sh`,
+    `tests/run_adapter_clip_synthetic_test.sh`,
+    `tests/run_transcriptvb_scatter_gather_smoke.sh`,
+    `tests/run_trim_qc_merge_smoke.sh`, and
+    `tests/run_star_trim_qc_smoke.sh`
   - Docker image construction also runs
     `make -C core/legacy/source test_MultiGeneUmiCr`, a deterministic
     20,000-case comparison of the shared resolver with both pre-refactor

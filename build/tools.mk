@@ -1,5 +1,5 @@
 .PHONY: tools tools-clean vbem-tools yremove-tools feature-barcodes-tools process-features-tools process-features-lib star-feature-call star-libchromap-contract
-.PHONY: vbem-compute-expected-gc vbem-sample-fld vbem-compute-gc-bias vbem-em-quant
+.PHONY: vbem-compute-expected-gc vbem-sample-fld vbem-compute-gc-bias vbem-em-quant vbem-transcriptvb-finalize release-companion-tools
 .PHONY: vbem-ec-filter-test vbem-tximport-compat vbem-trimvalidate
 
 # Default tool composition is selected in top-level Makefile.
@@ -7,7 +7,7 @@
 # as a compatibility alias that points to the same binaries.
 tools: flex-tools slam-tools vbem-tools yremove-tools process-features-tools star-feature-call
 
-vbem-tools: vbem-compute-expected-gc vbem-sample-fld vbem-compute-gc-bias vbem-em-quant vbem-ec-filter-test vbem-tximport-compat vbem-trimvalidate
+vbem-tools: vbem-compute-expected-gc vbem-sample-fld vbem-compute-gc-bias vbem-em-quant vbem-ec-filter-test vbem-tximport-compat vbem-trimvalidate vbem-transcriptvb-finalize
 
 vbem-compute-expected-gc:
 	$(MAKE) -C $(VBEM_DIR)/tools/compute_expected_gc
@@ -29,6 +29,15 @@ vbem-tximport-compat:
 
 vbem-trimvalidate:
 	$(MAKE) -C $(VBEM_DIR)/tools/trimvalidate
+
+vbem-transcriptvb-finalize: trim-qc-tools
+	$(MAKE) -C $(LEGACY_SRC_DIR) transcriptvb-finalize
+
+# Packaging builds the portable STAR binary first, then calls this target in a
+# separate top-level make. Keeping all legacy-source companion executables in
+# one submake prevents parallel dependency/configuration races in that tree.
+release-companion-tools:
+	$(MAKE) -C $(LEGACY_SRC_DIR) transcriptvb-finalize trim_qc_fastq trim_qc_merge WITH_CHROMAP=0
 
 yremove-tools:
 	$(MAKE) -C $(YREMOVE_FASTQ_DIR)/tools/remove_y_reads

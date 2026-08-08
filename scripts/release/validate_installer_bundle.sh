@@ -126,6 +126,12 @@ for tool in molecule_first_bam_ledger molecule_first_materialize; do
     exit 1
   fi
 done
+for tool in transcriptvb_finalize trim_qc_fastq trim_qc_merge; do
+  if [[ ! -x "${PREFIX_DIR}/bin/${tool}" ]]; then
+    echo "ERROR: installed release companion missing: ${PREFIX_DIR}/bin/${tool}" >&2
+    exit 1
+  fi
+done
 
 actual_host_glibc="$(detect_actual_glibc)"
 echo "Selected label: ${selected_label}"

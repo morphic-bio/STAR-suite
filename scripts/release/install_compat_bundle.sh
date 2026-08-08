@@ -4,7 +4,10 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MANIFEST_FILE="${SCRIPT_DIR}/compat-manifest.tsv"
-MOLECULE_FIRST_TOOLS=(molecule_first_resolver molecule_first_bam_ledger molecule_first_materialize)
+COMPANION_TOOLS=(
+  molecule_first_resolver molecule_first_bam_ledger molecule_first_materialize
+  transcriptvb_finalize trim_qc_fastq trim_qc_merge
+)
 
 PREFIX=""
 BINDIR=""
@@ -199,7 +202,7 @@ if [[ ! -x "${selected_bin}" ]]; then
   echo "ERROR: selected bundled binary not found: ${selected_bin}" >&2
   exit 1
 fi
-for tool in "${MOLECULE_FIRST_TOOLS[@]}"; do
+for tool in "${COMPANION_TOOLS[@]}"; do
   if [[ ! -x "$(dirname "${selected_bin}")/${tool}" ]]; then
     echo "ERROR: selected bundled binary not found: $(dirname "${selected_bin}")/${tool}" >&2
     exit 1
@@ -222,7 +225,7 @@ if [[ -e "${TARGET_PATH}" && "${FORCE}" -ne 1 ]]; then
     exit 1
   fi
 fi
-for tool in "${MOLECULE_FIRST_TOOLS[@]}"; do
+for tool in "${COMPANION_TOOLS[@]}"; do
   target="${BINDIR}/${tool}"
   if [[ -e "${target}" && "${FORCE}" -ne 1 ]] && ! cmp -s "$(dirname "${selected_bin}")/${tool}" "${target}"; then
     echo "ERROR: target already exists: ${target} (use --force to overwrite)" >&2
@@ -235,7 +238,7 @@ cp "${selected_bin}" "${tmp_target}"
 chmod 0755 "${tmp_target}"
 mv -f "${tmp_target}" "${TARGET_PATH}"
 
-for tool in "${MOLECULE_FIRST_TOOLS[@]}"; do
+for tool in "${COMPANION_TOOLS[@]}"; do
   target="${BINDIR}/${tool}"
   temporary="${target}.tmp.$$"
   cp "$(dirname "${selected_bin}")/${tool}" "${temporary}"
