@@ -53,6 +53,7 @@ help:
 	@echo "  make star-libchromap-contract Build STAR-owned libchromap contract runner"
 	@echo "  make vbem-transcriptvb-finalize Build standalone TranscriptVB gather/finalizer"
 	@echo "  make trim-qc-tools    Build standalone trim-QC collector and shard merger"
+	@echo "  make release-companion-tools Build portable release companion executables"
 	@echo "  make                 Default build (core + common tools)"
 	@echo "  make default         Same as make"
 	@echo "  make default EXCLUDE=\"slam-tools\""

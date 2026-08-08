@@ -10,5 +10,5 @@ slam-requant: core
 pileup-snp: core
 	$(MAKE) -C $(SLAM_DIR)/tools/pileup_snp
 
-trim-qc-tools:
-	$(MAKE) -C $(LEGACY_SRC_DIR) trim_qc_fastq trim_qc_merge WITH_CHROMAP=0
+trim-qc-tools: core
+	$(MAKE) -C $(LEGACY_SRC_DIR) trim_qc_fastq trim_qc_merge
