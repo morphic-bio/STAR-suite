@@ -12,6 +12,8 @@ on:
       - "docker/**"
       - "scripts/docker/**"
       - "scripts/release/**"
+      - "share/star-suite/**"
+      - "mcp_server/**"
       - "core/**"
       - "flex/**"
       - "slam/**"
@@ -48,6 +50,9 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+
+      - name: Verify official recipe and provenance snapshots
+        run: python3 scripts/release/validate_official_snapshots.py
 
       - name: Build suite base image
         run: |

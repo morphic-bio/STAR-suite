@@ -39,6 +39,9 @@ jobs:
           suite_version="${suite_version%%-*}"
           echo "STAR_SUITE_EXPECTED_VERSION=${suite_version}" >> "${GITHUB_ENV}"
 
+      - name: Verify official recipe and provenance snapshots
+        run: python3 scripts/release/validate_official_snapshots.py
+
       - name: Install packaging dependencies
         run: |
           sudo apt-get update
