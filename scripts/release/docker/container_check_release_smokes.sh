@@ -6,7 +6,7 @@ MODE=""
 TARBALL=""
 BUNDLE=""
 EXPECTED_LABEL=""
-EXPECTED_VERSION="1.7.0"
+EXPECTED_VERSION="1.7.1"
 EXPECTED_COMMIT=""
 REPO_ROOT=""
 PROFILE="core"
@@ -18,7 +18,7 @@ Usage:
   $0 --mode bundle --bundle <path> --expected-label <label> --repo-root <path> [options]
 
 Options:
-  --expected-version VER   STAR-suite version to check (default: 1.7.0)
+  --expected-version VER   STAR-suite version to check (default: 1.7.1)
   --expected-commit SHA    exact 40-character release commit to check
   --profile PROFILE        Smoke profile to run (default: core)
 
