@@ -195,6 +195,17 @@ Ship discoverable, installable Ubuntu binaries for STAR Suite with low-friction 
   `STAR --version` reports `1.3.0`. Upstream provenance and genome index
   compatibility remain `2.7.11b` and `2.7.4a`.
 
+## Patch Release v1.7.1 (2026-08-09)
+
+- Release tag: `v1.7.1`
+- Release notes: `docs/RELEASE_NOTES_v1.7.1.md`
+- Packaging metadata: `debian/changelog` entry `1.7.1-1`
+- Scope: restore ordinary STARsolo Fastx thread scaling and remove an unused,
+  multi-gigabyte barcode-correction precompute from plain STARsolo startup.
+- Version note: release artifacts use tag `v1.7.1`, Debian packages use STAR
+  Suite `1.7.1`, and `STAR --version` reports `1.7.1`. Upstream provenance and
+  genome-index compatibility remain `2.7.11b` and `2.7.4a`.
+
 ## Feature Release v1.7.0 (2026-08-08)
 
 - Release tag: `v1.7.0`

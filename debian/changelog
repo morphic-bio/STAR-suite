@@ -1,3 +1,18 @@
+star-suite (1.7.1-1) unstable; urgency=medium
+
+  * Restore STAR's direct chunk reader for ordinary Fastx input so STARsolo
+    mapping can scale with --runThreadN instead of parsing records under the
+    global input mutex.
+  * Avoid constructing the expanded one-mismatch barcode corrector for plain
+    STARsolo runs that use the established whitelist-matching path.
+  * Preserve output parity across thread counts and with upstream STAR in
+    upstream-compatible mode while reducing startup time and peak memory.
+  * Retain Fastx contract validation, manifest input, internal gzip, explicit
+    decompression-command, multi-lane, single-end, and Y/no-Y behavior.
+  * Report STAR Suite 1.7.1 from STAR --version.
+
+ -- STAR-suite Maintainers <maintainers@biodepot.example>  Sun, 09 Aug 2026 15:28:52 +0000
+
 star-suite (1.7.0-1) unstable; urgency=medium
 
   * Add packaged TranscriptVB scatter/gather evidence finalization without
