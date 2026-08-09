@@ -1238,8 +1238,13 @@ void ParametersSolo::initialize(Parameters *pPin)
         pP->inOut->logMain << "Built cbWLhash: " << kh_size(cbWLhash) << " entries, "
                            << kh_n_buckets(cbWLhash) << " buckets" << endl;
         
-        // Initialize CbCorrector instance for inline CB correction
-        if (cbWLyes && !cbWLstr.empty()) {
+        // The CbCorrector precomputes every one-mismatch barcode variant.  It
+        // is required by the inline correction/hash paths, but standard
+        // STARsolo uses matchCBtoWL() and does not consume this structure.
+        // Building it unconditionally for the 10x 3M whitelist costs several
+        // GB and serial startup time without affecting the legacy matrix.
+        const bool needCbCorrector = inlineCBCorrection || inlineHashMode;
+        if (needCbCorrector && cbWLyes && !cbWLstr.empty()) {
             cbCorrector = std::make_shared<CbCorrector>(cbWLstr, /*maxHamming=*/1);
             pP->inOut->logMain << "Initialized CbCorrector with " << cbWLsize << " CBs" << endl;
             // Debug: verify initialization
@@ -1249,7 +1254,9 @@ void ParametersSolo::initialize(Parameters *pPin)
                 pP->inOut->logMain << "ERROR: CbCorrector initialization failed (nullptr)" << endl;
             }
         } else {
-            pP->inOut->logMain << "CbCorrector NOT initialized: cbWLyes=" << cbWLyes << ", cbWLstr.empty()=" << cbWLstr.empty() << endl;
+            cbCorrector.reset();
+            pP->inOut->logMain << "CbCorrector not required: inlineCBCorrection="
+                               << inlineCBCorrection << ", inlineHashMode=" << inlineHashMode << endl;
         }
         
         // Legacy precompute path (currently unused by the in-flight resolver):
