@@ -4,8 +4,11 @@
 
 This note records the diagnosis, implementation, and local validation for the
 plain-GEX STARsolo scaling regression reported against STAR Suite v1.3.0b.
-The fix is implemented on `fix/solo-fastx-scaling-20260809`, based on
-`60eab145837903b2979daaeed15ac142cc814025`.
+The fix was implemented on `fix/solo-fastx-scaling-20260809`, based on
+`60eab145837903b2979daaeed15ac142cc814025`, and released from the current
+line as `v1.7.1`. The same two source changes are backported to the exact
+paper-era `v1.4.3` tree as `v1.4.3b`; none of the reported paper benchmarks
+used the affected ordinary Fastx STARsolo path.
 
 The regression is not an inherent limitation of legacy STARsolo. Two STAR
 Suite integrations were active in ordinary Fastx runs even though the legacy
