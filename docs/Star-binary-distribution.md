@@ -195,6 +195,19 @@ Ship discoverable, installable Ubuntu binaries for STAR Suite with low-friction 
   `STAR --version` reports `1.3.0`. Upstream provenance and genome index
   compatibility remain `2.7.11b` and `2.7.4a`.
 
+## Paper Maintenance Release v1.4.3b (2026-08-09)
+
+- Release tag: `v1.4.3b`
+- Release notes: `docs/RELEASE_NOTES_v1.4.3b.md`
+- Packaging metadata: `debian/changelog` entry `1.4.3b-1`
+- Scope: the exact paper-era `v1.4.3` source line plus the scoped ordinary
+  Fastx STARsolo thread-scaling and unused-corrector fix. The paper benchmark
+  paths did not exercise this code and their reported results remain attributed
+  to `v1.4.3`.
+- Version note: release artifacts use tag `v1.4.3b`, Debian packages use STAR
+  Suite `1.4.3b`, and `STAR --version` reports `1.4.3b`. Upstream provenance
+  and genome-index compatibility remain `2.7.11b` and `2.7.4a`.
+
 ## Patch Release v1.4.2 (2026-06-29)
 
 - Release tag: `v1.4.2`

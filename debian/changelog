@@ -1,3 +1,17 @@
+star-suite (1.4.3b-1) unstable; urgency=medium
+
+  * Backport the ordinary Fastx STARsolo scaling fix to the paper-era v1.4.3
+    source line for reviewer-facing drop-in testing.
+  * Restore STAR's direct chunk reader so FASTQ parsing does not serialize
+    mapping under the global input mutex.
+  * Avoid constructing the unused expanded one-mismatch barcode corrector in
+    plain STARsolo runs, reducing startup time and peak memory.
+  * Preserve byte-identical raw and filtered matrices. The paper benchmarks
+    did not use the affected plain-STARsolo path and are not restated.
+  * Report STAR Suite 1.4.3b from STAR --version.
+
+ -- STAR-suite Maintainers <maintainers@biodepot.example>  Sun, 09 Aug 2026 17:20:00 +0000
+
 star-suite (1.4.3-1) unstable; urgency=medium
 
   * Patch release for byte-identical Y/no-Y FASTQ emission after integrated
