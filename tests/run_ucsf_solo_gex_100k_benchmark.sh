@@ -21,12 +21,19 @@ SOLO_UMI_FILTERING="${UCSF_GEX_SOLO_UMI_FILTERING:-MultiGeneUMI_CR}"
 SOLO_UMI_DEDUP="${UCSF_GEX_SOLO_UMI_DEDUP:-1MM_CR}"
 SOLO_MULTI_MAPPERS="${UCSF_GEX_SOLO_MULTI_MAPPERS:-Rescue}"
 SOLO_CELL_FILTER="${UCSF_GEX_SOLO_CELL_FILTER:-EmptyDrops_CR}"
+SOLO_STRAND="${UCSF_GEX_SOLO_STRAND:-Unstranded}"
+SOLO_CBUB_REQUIRE_TOGETHER="${UCSF_GEX_SOLO_CBUB_REQUIRE_TOGETHER:-no}"
 SOLO_INLINE_HASH_MODE="${UCSF_GEX_SOLO_INLINE_HASH_MODE:-}"
 EXTRA_STAR_ARGS=()
+COMPAT_STAR_ARGS=()
 
 if [[ -n "${EXTRA_STAR_ARGS_STR}" ]]; then
   # shellcheck disable=SC2206
   EXTRA_STAR_ARGS=( ${EXTRA_STAR_ARGS_STR} )
+fi
+
+if [[ "${SOLO_CBUB_REQUIRE_TOGETHER}" != "-" ]]; then
+  COMPAT_STAR_ARGS+=(--soloCbUbRequireTogether "${SOLO_CBUB_REQUIRE_TOGETHER}")
 fi
 
 if [[ "${OUTPREFIX}" != */ ]]; then
@@ -107,9 +114,9 @@ mkdir -p "${OUTPREFIX}"
     --soloUMIfiltering "${SOLO_UMI_FILTERING}" \
     --soloUMIdedup "${SOLO_UMI_DEDUP}" \
     --soloMultiMappers "${SOLO_MULTI_MAPPERS}" \
-    --soloCbUbRequireTogether no \
+    "${COMPAT_STAR_ARGS[@]}" \
     --soloCellFilter "${SOLO_CELL_FILTER}" \
-    --soloStrand Unstranded \
+    --soloStrand "${SOLO_STRAND}" \
     --soloFeatures GeneFull \
     ${SOLO_INLINE_HASH_MODE:+--soloInlineHashMode "${SOLO_INLINE_HASH_MODE}"} \
     "${EXTRA_STAR_ARGS[@]}"

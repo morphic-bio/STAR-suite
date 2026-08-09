@@ -265,6 +265,12 @@ void Parameters::readFilesInit()
     } else if (readFilesTypeN == 1 && allFastqGz && readFilesLegacyZcat) {
         // Compatibility override: keep legacy FIFO + external zcat behavior.
         readFilesCommandString = "zcat   ";
+    } else if (readFilesTypeN == 1 && readFilesManifest[0] != "-") {
+        // Manifest inputs live in readFilesNames rather than readFilesIn.
+        // Route even a single manifest lane through the established FIFO
+        // helper so the direct STAR chunk reader sees the resolved filenames
+        // and FILE markers (needed for read-group/lane accounting).
+        readFilesCommandString = "cat   ";
     } else if (readFilesN > 1 && readFilesTypeN != 20) {
         readFilesCommandString = "cat   "; // concatenate multiple plain-text files
     }
@@ -334,6 +340,13 @@ void Parameters::readFilesInit()
             }
         }
 
+        // Keep the generic Fastx contract validated, but do not put its
+        // record-at-a-time adapter on STAR's ordinary FASTQ hot path.  The
+        // adapter performs parsing, allocation, and chunk reformatting while
+        // mutexInRead is held, which serializes STARsolo input and prevents
+        // mapping throughput from scaling with --runThreadN.  The direct STAR
+        // chunk reader below preserves the established CLI behavior and is
+        // also used by the internal-gzip FIFO helper.
         star::input::InputSourcePlan fastxInputPlan =
             star::input::make_fastx_input_source_plan(
                 readFilesNames,
@@ -346,15 +359,16 @@ void Parameters::readFilesInit()
         fastxInputExhausted = false;
         fastxInputLastLoggedLane = -1;
         fastxInputPendingRecord.reset();
-        fastxInputModule.reset(new star::input::FastxInputModule());
+        fastxInputModule.reset();
+        star::input::FastxInputModule fastxInputValidator;
         string inputContractError;
-        if (!fastxInputModule->configure(fastxInputPlan, &inputContractError)) {
+        if (!fastxInputValidator.configure(fastxInputPlan, &inputContractError)) {
             ostringstream errOut;
             errOut << "EXITING because of FATAL INPUT ERROR: invalid Fastx input source plan\n";
             errOut << inputContractError << "\n";
             exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
         };
-        fastxInputActive = true;
+        inOut->logMain << "Fastx input path: direct STAR chunk reader\n";
     } else if (readFilesTypeN==20) {
         vector<string> cbqReadGroups;
         if (!readFilesNames.empty() && outSAMattrRG.size() == readFilesNames.front().size()) {

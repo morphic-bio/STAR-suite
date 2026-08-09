@@ -96,5 +96,13 @@ samtools view -H "$OUT_DIR/Aligned.sortedByCoord.out.bam" | grep "SO:coordinate"
   exit 1
 }
 
-echo "OK: Solo smoke test passed"
+# Plain STARsolo must not build the Flex-only one-mismatch barcode corrector.
+# With a production 3M whitelist that precompute costs several GB and tens of
+# seconds without contributing to the legacy matrix path.
+grep -F "CbCorrector not required: inlineCBCorrection=0, inlineHashMode=0" \
+  "$OUT_DIR/Log.out" >/dev/null || {
+  echo "FAIL: plain STARsolo unexpectedly enabled the inline barcode corrector"
+  exit 1
+}
 
+echo "OK: Solo smoke test passed"
