@@ -78,8 +78,13 @@ class Parameters {
         // dynamicThreadInterface=1 + chromapAtacEnable=1 + at least one
         // floor > 0. 0 disables (default; the existing static-floor path
         // remains active).
-        int dynamicThreadAtacController = 0;
-        // FIFO waiter-queue admission. When 1, ThreadControl routes acquires
+       int dynamicThreadAtacController = 0;
+        // Optional total-work estimates for capacity-limited mode-2 ETA
+        // balancing. Zero leaves that domain's ETA unavailable; saturation
+        // probing and borrowable floors still operate normally.
+        uint64 dynamicThreadMapWorkEstimate = 0;
+        uint64 dynamicThreadAtacWorkEstimate = 0;
+       // FIFO waiter-queue admission. When 1, ThreadControl routes acquires
         // through a queue under the permit mutex: queued waiters are served
         // in arrival order, and new arrivals cannot fast-path past existing
         // waiters — eliminating the notify_one wakeup-bypass race.

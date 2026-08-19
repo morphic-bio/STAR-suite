@@ -76,17 +76,25 @@ dynamicThreadFeatureFloor       0
          Same semantics as dynamicThreadMapFloor. 0 disables the FEATURE floor.
 
 dynamicThreadAtacController     0
-    int: enable the ATAC drain-time controller (Step 6).
-         When 1, the chromap-side sampler thread also runs a rate-balance
-         controller that adjusts MAP/ATAC floors based on observed
-         work-unit drain rates so both domains finish their mapping
-         phase at roughly the same time. Mirrors the pf eta/chunked
-         controller for FEATURE/MAP that has been the load-balancing
-         core of pf/STAR since the start.
-         Requires dynamicThreadInterface=1 + chromapAtacEnable=1 + at
-         least one of dynamicThread{Map,Atac}Floor > 0.
+    int: select the combined MAP/ATAC permit controller.
                                 0 ... disabled (default)
-                                1 ... enable rate-balance controller (~1 retune per sampler tick)
+                                1 ... legacy raw-rate minimum-floor controller
+                                      (requires an initial MAP or ATAC floor)
+                                2 ... saturation-aware controller: probe sustained
+                                      ATAC occupancy first, then MAP with the
+                                      remaining capacity; retain observed demands
+                                      as borrowable floors and use remaining-work
+                                      ETA only when both demands cannot fit.
+                                      Requires dynamicThreadTelemetry=1 and a
+                                      positive telemetry interval.
+
+dynamicThreadMapWorkEstimate    0
+    int: optional estimated total MAP work units for mode-2 ETA balancing.
+         0 leaves MAP ETA unavailable; saturation probing still applies.
+
+dynamicThreadAtacWorkEstimate   0
+    int: optional estimated total ATAC work units for mode-2 ETA balancing.
+         0 leaves ATAC ETA unavailable; saturation probing still applies.
 
 dynamicThreadFifoWaiters        0
     int: FIFO waiter-queue admission. When 1, ThreadControl routes acquires
