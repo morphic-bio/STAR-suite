@@ -26,6 +26,17 @@ public:
     };
 
     struct PermitDomainSnapshot {
+        int floor;
+        int inUse;
+        int currentWaiters;
+        uint64_t maxInUse;
+        uint64_t maxWaiters;
+        uint64_t blockedAcquireCalls;
+        uint64_t fastAcquireCalls;
+        uint64_t queuedGrantCalls;
+        uint64_t releaseCalls;
+        uint64_t inUsePermitNs;
+        uint64_t waiterNs;
         uint64_t acquireCalls;
         uint64_t waitNsTotal;
         uint64_t waitNsMax;
@@ -60,12 +71,15 @@ public:
         bool variableThreadsEnabled;
         bool cpuAwareEnabled;
         bool cpuInitialized;
+        bool floorsActive;
+        bool fifoEnabled;
         int retuneEveryAcquires;
         int sequenceLength;
         int targetPermits;
         int configuredPermits;
         int availablePermits;
         int inUsePermits;
+        uint64_t fifoQueueDepth;
         int cpuSampleIntervalMs;
         std::vector<int> retuneTraceTargets;
         uint64_t retuneTraceDropped;
@@ -83,6 +97,11 @@ public:
         uint64_t workBytesTotal;
         uint64_t workNsTotal;
         uint64_t workNsMax;
+        uint64_t telemetryElapsedNs;
+        uint64_t availablePermitNs;
+        uint64_t contendedIdlePermitNs;
+        uint64_t noAdmissibleGrantEvents;
+        uint64_t floorChangeCalls;
         uint64_t cpuSampleCount;
         uint64_t cpuLastSampleAgoNs;
         double cpuBusyInstant;
@@ -192,6 +211,11 @@ private:
     // and appended to `toWake`; mapPermitAvailable is decremented per grant.
     // Caller notifies the collected waiters' CVs after releasing the mutex.
     void grantFifoWaitersLocked(std::vector<PermitWaiter*> &toWake);
+    // Exact time integrals for pool/domain occupancy. Call immediately before
+    // changing available, in-use, or waiter state while mapPermitMutex is held.
+    // This is deliberately part of the existing permit critical section so
+    // diagnostics cannot observe mutually inconsistent domain totals.
+    void mapPermitAccountStateLocked(uint64_t nowNs) const;
 
     std::atomic<uint64_t> mapPermitAcquireCalls{0};
     std::atomic<uint64_t> mapPermitAcquireOrdinal{0};
@@ -216,6 +240,20 @@ private:
     std::atomic<uint64_t> mapPermitWorkBytesTotalByDomain[mapPermitDomainCount]{};
     std::atomic<uint64_t> mapPermitWorkNsTotalByDomain[mapPermitDomainCount]{};
     std::atomic<uint64_t> mapPermitWorkNsMaxByDomain[mapPermitDomainCount]{};
+    mutable uint64_t mapPermitTelemetryStartNs = 0;
+    mutable uint64_t mapPermitTelemetryLastStateNs = 0;
+    mutable uint64_t mapPermitAvailablePermitNs = 0;
+    mutable uint64_t mapPermitContendedIdlePermitNs = 0;
+    mutable uint64_t mapPermitDomainInUsePermitNs[mapPermitDomainCount]{};
+    mutable uint64_t mapPermitDomainWaiterNs[mapPermitDomainCount]{};
+    uint64_t mapPermitDomainMaxInUse[mapPermitDomainCount]{};
+    uint64_t mapPermitDomainMaxWaiters[mapPermitDomainCount]{};
+    uint64_t mapPermitDomainBlockedAcquireCalls[mapPermitDomainCount]{};
+    uint64_t mapPermitDomainFastAcquireCalls[mapPermitDomainCount]{};
+    uint64_t mapPermitDomainQueuedGrantCalls[mapPermitDomainCount]{};
+    uint64_t mapPermitDomainReleaseCalls[mapPermitDomainCount]{};
+    uint64_t mapPermitNoAdmissibleGrantEvents = 0;
+    uint64_t mapPermitFloorChangeCalls = 0;
 };
 
 #endif

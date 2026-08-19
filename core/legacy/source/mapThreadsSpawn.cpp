@@ -743,11 +743,23 @@ void mapThreadsSpawn (Parameters &P, ReadAlignChunk** RAchunk) {
 
     // Per-domain borrowable floors (Step 5a). Index order must match
     // ThreadControl::permitDomainIndex(): MAP=0, FEATURE=1, ATAC=2.
+    int configuredMapFloor = std::max(0, P.dynamicThreadMapFloor);
+    const int configuredFeatureFloor = std::max(0, P.dynamicThreadFeatureFloor);
+    int configuredAtacFloor = std::max(0, P.dynamicThreadAtacFloor);
+    if (interfaceEnabled && P.chromapAtac.enabled == 1 &&
+        P.dynamicThreadAtacController == 2) {
+        // Saturation discovery starts by protecting all but one of the
+        // MAP/ATAC budget for the larger ATAC arm. The sampler records its
+        // sustained occupancy, then turns the unused capacity over to MAP.
+        const int probeBudget = std::max(2, configuredPermits - configuredFeatureFloor);
+        configuredMapFloor = 1;
+        configuredAtacFloor = probeBudget - 1;
+    }
     {
         std::vector<int> domainFloors(3, 0);
-        domainFloors[0] = std::max(0, P.dynamicThreadMapFloor);
-        domainFloors[1] = std::max(0, P.dynamicThreadFeatureFloor);
-        domainFloors[2] = std::max(0, P.dynamicThreadAtacFloor);
+        domainFloors[0] = configuredMapFloor;
+        domainFloors[1] = configuredFeatureFloor;
+        domainFloors[2] = configuredAtacFloor;
         g_threadChunks.mapPermitConfigureDomainFloors(domainFloors);
     }
     // FIFO waiter queue (Step 7). When enabled, ThreadControl serves
@@ -765,7 +777,14 @@ void mapThreadsSpawn (Parameters &P, ReadAlignChunk** RAchunk) {
                          << ", cpuSampleMs=" << P.dynamicThreadPfControllerCpuSampleMs
                          << ", cpuEmaAlpha=" << P.dynamicThreadPfControllerCpuEmaAlpha
                          << ", retuneEveryAcquires=" << P.variableThreadsRetuneEveryAcquires
-                         << ", retuneSequenceLength=" << P.variableThreadsPermitSequence.size() << ")\n" << flush;
+                         << ", retuneSequenceLength=" << P.variableThreadsPermitSequence.size()
+                         << ", floors(map/feature/atac)="
+                         << configuredMapFloor << "/"
+                         << configuredFeatureFloor << "/"
+                         << configuredAtacFloor
+                         << ", atacController=" << P.dynamicThreadAtacController
+                         << ", fifo=" << ((P.dynamicThreadFifoWaiters == 1) ? "on" : "off")
+                         << ")\n" << flush;
         pthread_mutex_unlock(&g_threadChunks.mutexLogMain);
     }
 
@@ -804,6 +823,15 @@ void mapThreadsSpawn (Parameters &P, ReadAlignChunk** RAchunk) {
         const double lastReleaseAgoMs = snapshot.lastReleaseAgoNs / 1.0e6;
         const double avgWaitMs = snapshot.acquireCalls > 0 ? waitMsTotal / static_cast<double>(snapshot.acquireCalls) : 0.0;
         const double avgWorkMs = snapshot.acquireCalls > 0 ? workMsTotal / static_cast<double>(snapshot.acquireCalls) : 0.0;
+        const double elapsedNs = static_cast<double>(snapshot.telemetryElapsedNs);
+        const double mapOccupancy = elapsedNs > 0.0
+            ? snapshot.mapDomain.inUsePermitNs / elapsedNs : 0.0;
+        const double featureOccupancy = elapsedNs > 0.0
+            ? snapshot.featureDomain.inUsePermitNs / elapsedNs : 0.0;
+        const double atacOccupancy = elapsedNs > 0.0
+            ? snapshot.atacDomain.inUsePermitNs / elapsedNs : 0.0;
+        const double idlePermitAverage = elapsedNs > 0.0
+            ? snapshot.availablePermitNs / elapsedNs : 0.0;
 
         pthread_mutex_lock(&g_threadChunks.mutexLogMain);
         P.inOut->logMain << "Dynamic thread telemetry: acquires=" << snapshot.acquireCalls
@@ -830,6 +858,42 @@ void mapThreadsSpawn (Parameters &P, ReadAlignChunk** RAchunk) {
                          << ", workBytes=" << snapshot.workBytesTotal
                          << ", waitMs(total/avg/max)=" << waitMsTotal << "/" << avgWaitMs << "/" << waitMsMax
                          << ", workMs(total/avg/max)=" << workMsTotal << "/" << avgWorkMs << "/" << workMsMax
+                         << ", floorsActive=" << (snapshot.floorsActive ? "yes" : "no")
+                         << ", fifo=" << (snapshot.fifoEnabled ? "on" : "off")
+                         << ", fifoDepth=" << snapshot.fifoQueueDepth
+                         << ", occupancyAvg(map/feature/atac/idle)="
+                         << mapOccupancy << "/" << featureOccupancy << "/"
+                         << atacOccupancy << "/" << idlePermitAverage
+                         << ", contendedIdlePermitMs="
+                         << (snapshot.contendedIdlePermitNs / 1.0e6)
+                         << ", noAdmissibleGrants="
+                         << snapshot.noAdmissibleGrantEvents
+                         << ", floorChanges=" << snapshot.floorChangeCalls
+                         << ", domainWork(mapUnits,mapBytes,atacUnits,atacBytes)="
+                         << snapshot.mapDomain.workUnitsTotal << ","
+                         << snapshot.mapDomain.workBytesTotal << ","
+                         << snapshot.atacDomain.workUnitsTotal << ","
+                         << snapshot.atacDomain.workBytesTotal
+                         << ", mapState(floor,inUse,maxInUse,waiters,maxWaiters,blocked,fast,queued,releases)="
+                         << snapshot.mapDomain.floor << ","
+                         << snapshot.mapDomain.inUse << ","
+                         << snapshot.mapDomain.maxInUse << ","
+                         << snapshot.mapDomain.currentWaiters << ","
+                         << snapshot.mapDomain.maxWaiters << ","
+                         << snapshot.mapDomain.blockedAcquireCalls << ","
+                         << snapshot.mapDomain.fastAcquireCalls << ","
+                         << snapshot.mapDomain.queuedGrantCalls << ","
+                         << snapshot.mapDomain.releaseCalls
+                         << ", atacState(floor,inUse,maxInUse,waiters,maxWaiters,blocked,fast,queued,releases)="
+                         << snapshot.atacDomain.floor << ","
+                         << snapshot.atacDomain.inUse << ","
+                         << snapshot.atacDomain.maxInUse << ","
+                         << snapshot.atacDomain.currentWaiters << ","
+                         << snapshot.atacDomain.maxWaiters << ","
+                         << snapshot.atacDomain.blockedAcquireCalls << ","
+                         << snapshot.atacDomain.fastAcquireCalls << ","
+                         << snapshot.atacDomain.queuedGrantCalls << ","
+                         << snapshot.atacDomain.releaseCalls
                          << "\n" << flush;
         pthread_mutex_unlock(&g_threadChunks.mutexLogMain);
     }

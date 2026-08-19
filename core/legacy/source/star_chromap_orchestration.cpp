@@ -7,6 +7,7 @@
 #include "GlobalVariables.h"
 #include "IncludeDefine.h"
 #include "Parameters.h"
+#include "SaturationPermitController.h"
 #include "ThreadControl.h"
 #include "TimeFunctions.h"
 #include "multiome_atac_peak_mex.h"
@@ -22,6 +23,8 @@
 #include <cstdio>
 #include <exception>
 #include <iomanip>
+#include <limits>
+#include <memory>
 #include <mutex>
 #include <sstream>
 #include <thread>
@@ -852,7 +855,17 @@ struct StarChromapAtacAsyncRun::Impl {
              "\tavailable\tinUse\twaiters"
              "\tmapAcquire\tmapWaitMaxMs\tmapWorkAvgMs"
              "\tatacAcquire\tatacWaitMaxMs\tatacWorkAvgMs"
-             "\tretunes\n";
+             "\tfloorsActive\tfifoEnabled\tfifoDepth"
+             "\tmapFloor\tmapInUse\tmapWaiters\tmapMaxInUse"
+             "\tmapBlocked\tmapFast\tmapQueued\tmapWorkUnits"
+             "\tmapOccupancyAvg\tmapOccupancyInterval"
+             "\tmapUnitsPerPermitSec"
+             "\tatacFloor\tatacInUse\tatacWaiters\tatacMaxInUse"
+             "\tatacBlocked\tatacFast\tatacQueued\tatacWorkUnits"
+             "\tatacOccupancyAvg\tatacOccupancyInterval"
+             "\tatacUnitsPerPermitSec\tidlePermitAvg"
+             "\tcontendedIdlePermitMs\tnoAdmissibleGrants"
+             "\ttargetRetunes\tfloorChanges\n";
       P_for_sampler_->inOut->logMain.flush();
       pthread_mutex_unlock(&g_threadChunks.mutexLogMain);
     }
@@ -862,33 +875,75 @@ struct StarChromapAtacAsyncRun::Impl {
                           static_cast<double>(calls))
                        : 0.0;
     };
+    auto occupancyAvg = [](uint64_t permitNs, uint64_t elapsedNs) -> double {
+      return elapsedNs > 0
+                 ? static_cast<double>(permitNs) /
+                       static_cast<double>(elapsedNs)
+                 : 0.0;
+    };
 
-    // ATAC drain-time controller state (Step 6). Activated when
-    // P.dynamicThreadAtacController == 1 AND at least one of MAP/ATAC
-    // floor is set initially. The controller observes per-domain
-    // workUnitsTotal deltas, smooths them via EWMA, and adjusts the
-    // MAP/ATAC floors so both domains finish their mapping phase at
-    // roughly the same rate. Mirrors the pf eta/chunked load-balancing
-    // mechanism that has been the load-balancing core of pf/STAR since
-    // the start.
-    const bool controllerEnabled =
+    // Controller mode 1 is the historical raw-rate policy. Mode 2 is the
+    // saturation-aware policy: learn sustained occupancy (ATAC first, then
+    // MAP) and consult remaining-work ETA only if both demands cannot fit.
+    const bool legacyControllerEnabled =
         (P_for_sampler_->dynamicThreadAtacController == 1) &&
         (P_for_sampler_->dynamicThreadInterface == 1) &&
         (P_for_sampler_->chromapAtac.enabled == 1) &&
         (P_for_sampler_->dynamicThreadMapFloor > 0 ||
          P_for_sampler_->dynamicThreadAtacFloor > 0);
+    const bool saturationControllerEnabled =
+        (P_for_sampler_->dynamicThreadAtacController == 2) &&
+        (P_for_sampler_->dynamicThreadInterface == 1) &&
+        (P_for_sampler_->chromapAtac.enabled == 1);
+    const bool controllerEnabled =
+        legacyControllerEnabled || saturationControllerEnabled;
     int curMapFloor = P_for_sampler_->dynamicThreadMapFloor;
     int curAtacFloor = P_for_sampler_->dynamicThreadAtacFloor;
     const int curFeatureFloor = P_for_sampler_->dynamicThreadFeatureFloor;
+    uint64_t prevTelemetryElapsedNs = 0;
     uint64_t prevMapDone = 0;
     uint64_t prevAtacDone = 0;
-    auto prevTick = std::chrono::steady_clock::now();
+    uint64_t prevMapPermitNs = 0;
+    uint64_t prevAtacPermitNs = 0;
     double mapRateEwma = 0.0;
     double atacRateEwma = 0.0;
+    uint64_t mapEstimateTotal = 0;
+    uint64_t atacEstimateTotal = 0;
     constexpr double kEwmaAlpha = 0.30;
     constexpr double kRateGapThreshold = 0.20; // 20% imbalance triggers a retune
     bool primed = false; // first tick: just sample baseline, don't retune
-    if (controllerEnabled) {
+    std::unique_ptr<star::multiome::SaturationPermitController>
+        saturationController;
+    if (saturationControllerEnabled) {
+      // mapThreadsSpawn installs the same initial probe floors after permit
+      // configuration. Wait for that configuration so the policy's budget is
+      // the actual shared pool, not the constructor's pre-start defaults.
+      while (!g_threadChunks.mapPermitEnabled() && !samplerStop_.load()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+      }
+      if (samplerStop_.load()) {
+        return;
+      }
+      const auto initialSnapshot = g_threadChunks.mapPermitSnapshot();
+      saturationController.reset(new star::multiome::SaturationPermitController(
+          initialSnapshot.configuredPermits, curFeatureFloor));
+      const auto initial = saturationController->initialDecision();
+      curMapFloor = initial.mapFloor;
+      curAtacFloor = initial.atacFloor;
+      pthread_mutex_lock(&g_threadChunks.mutexLogMain);
+      P_for_sampler_->inOut->logMain
+          << "[ATAC saturation controller] enabled"
+          << "\tphase="
+          << star::multiome::SaturationPermitController::phaseName(initial.phase)
+          << "\tprobeWindows=2"
+          << "\tmapFloor=" << curMapFloor
+          << "\tatacFloor=" << curAtacFloor
+          << "\tfeatureFloor=" << curFeatureFloor
+          << "\tintervalSec=" << intervalSec
+          << "\tpolicy=sustained-occupancy/eta-only-when-limited\n";
+      P_for_sampler_->inOut->logMain.flush();
+      pthread_mutex_unlock(&g_threadChunks.mutexLogMain);
+    } else if (legacyControllerEnabled) {
       pthread_mutex_lock(&g_threadChunks.mutexLogMain);
       P_for_sampler_->inOut->logMain
           << "[ATAC drain-time controller] enabled: mapFloor=" << curMapFloor
@@ -896,7 +951,13 @@ struct StarChromapAtacAsyncRun::Impl {
           << " featureFloor=" << curFeatureFloor
           << " intervalSec=" << intervalSec
           << " ewmaAlpha=" << kEwmaAlpha
-          << " gapThreshold=" << kRateGapThreshold << "\n";
+          << " gapThreshold=" << kRateGapThreshold
+          << " policy=raw-unit-rate/minimum-floors"
+          << " estimateSignal=shadow-only\n"
+          << "[ATAC drain-time controller] WARNING: MAP/ATAC floors are "
+             "minimum reservations, not a conserved target split; raw MAP "
+             "reads/s and ATAC pairs/s are not completion ETAs, and the "
+             "live remaining-work estimates do not drive this policy\n";
       P_for_sampler_->inOut->logMain.flush();
       pthread_mutex_unlock(&g_threadChunks.mutexLogMain);
     }
@@ -916,6 +977,38 @@ struct StarChromapAtacAsyncRun::Impl {
       const double timeSec = std::chrono::duration<double>(
                                  now - samplerStartTime_)
                                  .count();
+      const uint64_t intervalElapsedNs =
+          snap.telemetryElapsedNs >= prevTelemetryElapsedNs
+              ? snap.telemetryElapsedNs - prevTelemetryElapsedNs
+              : 0;
+      const uint64_t mapDelta =
+          snap.mapDomain.workUnitsTotal >= prevMapDone
+              ? snap.mapDomain.workUnitsTotal - prevMapDone
+              : 0;
+      const uint64_t atacDelta =
+          snap.atacDomain.workUnitsTotal >= prevAtacDone
+              ? snap.atacDomain.workUnitsTotal - prevAtacDone
+              : 0;
+      const uint64_t mapPermitDeltaNs =
+          snap.mapDomain.inUsePermitNs >= prevMapPermitNs
+              ? snap.mapDomain.inUsePermitNs - prevMapPermitNs
+              : 0;
+      const uint64_t atacPermitDeltaNs =
+          snap.atacDomain.inUsePermitNs >= prevAtacPermitNs
+              ? snap.atacDomain.inUsePermitNs - prevAtacPermitNs
+              : 0;
+      const double mapOccupancyInterval =
+          occupancyAvg(mapPermitDeltaNs, intervalElapsedNs);
+      const double atacOccupancyInterval =
+          occupancyAvg(atacPermitDeltaNs, intervalElapsedNs);
+      const double mapUnitsPerPermitSec = mapPermitDeltaNs > 0
+          ? static_cast<double>(mapDelta) * 1.0e9 /
+                static_cast<double>(mapPermitDeltaNs)
+          : 0.0;
+      const double atacUnitsPerPermitSec = atacPermitDeltaNs > 0
+          ? static_cast<double>(atacDelta) * 1.0e9 /
+                static_cast<double>(atacPermitDeltaNs)
+          : 0.0;
 
       std::ostringstream line;
       line << "[ATAC permit telemetry]"
@@ -934,7 +1027,39 @@ struct StarChromapAtacAsyncRun::Impl {
            << "\t" << (snap.atacDomain.waitNsMax / 1.0e6)
            << "\t" << avgMs(snap.atacDomain.workNsTotal,
                             snap.atacDomain.acquireCalls)
+           << "\t" << (snap.floorsActive ? 1 : 0)
+           << "\t" << (snap.fifoEnabled ? 1 : 0)
+           << "\t" << snap.fifoQueueDepth
+           << "\t" << snap.mapDomain.floor
+           << "\t" << snap.mapDomain.inUse
+           << "\t" << snap.mapDomain.currentWaiters
+           << "\t" << snap.mapDomain.maxInUse
+           << "\t" << snap.mapDomain.blockedAcquireCalls
+           << "\t" << snap.mapDomain.fastAcquireCalls
+           << "\t" << snap.mapDomain.queuedGrantCalls
+           << "\t" << snap.mapDomain.workUnitsTotal
+           << "\t" << occupancyAvg(snap.mapDomain.inUsePermitNs,
+                                    snap.telemetryElapsedNs)
+           << "\t" << mapOccupancyInterval
+           << "\t" << mapUnitsPerPermitSec
+           << "\t" << snap.atacDomain.floor
+           << "\t" << snap.atacDomain.inUse
+           << "\t" << snap.atacDomain.currentWaiters
+           << "\t" << snap.atacDomain.maxInUse
+           << "\t" << snap.atacDomain.blockedAcquireCalls
+           << "\t" << snap.atacDomain.fastAcquireCalls
+           << "\t" << snap.atacDomain.queuedGrantCalls
+           << "\t" << snap.atacDomain.workUnitsTotal
+           << "\t" << occupancyAvg(snap.atacDomain.inUsePermitNs,
+                                    snap.telemetryElapsedNs)
+           << "\t" << atacOccupancyInterval
+           << "\t" << atacUnitsPerPermitSec
+           << "\t" << occupancyAvg(snap.availablePermitNs,
+                                    snap.telemetryElapsedNs)
+           << "\t" << (snap.contendedIdlePermitNs / 1.0e6)
+           << "\t" << snap.noAdmissibleGrantEvents
            << "\t" << snap.retuneCalls
+           << "\t" << snap.floorChangeCalls
            << "\n";
 
       pthread_mutex_lock(&g_threadChunks.mutexLogMain);
@@ -942,28 +1067,19 @@ struct StarChromapAtacAsyncRun::Impl {
       P_for_sampler_->inOut->logMain.flush();
       pthread_mutex_unlock(&g_threadChunks.mutexLogMain);
 
+      prevTelemetryElapsedNs = snap.telemetryElapsedNs;
+      prevMapDone = snap.mapDomain.workUnitsTotal;
+      prevAtacDone = snap.atacDomain.workUnitsTotal;
+      prevMapPermitNs = snap.mapDomain.inUsePermitNs;
+      prevAtacPermitNs = snap.atacDomain.inUsePermitNs;
+
       // ATAC drain-time controller: rate-balance retune of MAP/ATAC floors.
       if (controllerEnabled) {
-        const uint64_t mapDone = snap.mapDomain.workUnitsTotal;
-        const uint64_t atacDone = snap.atacDomain.workUnitsTotal;
-        const double dt = std::chrono::duration<double>(now - prevTick).count();
-        prevTick = now;
-
-        // Raw deltas this tick; used both for the EWMA update and for the
-        // per-tick idle guards below. Computing these before the EWMA
-        // smoothing means the smoothed rate can stay nonzero from prior
-        // history while we still see "this domain did literally no work
-        // this tick" — and refuse to grow its floor in that case.
-        const uint64_t mapDelta =
-            (mapDone >= prevMapDone) ? (mapDone - prevMapDone) : 0;
-        const uint64_t atacDelta =
-            (atacDone >= prevAtacDone) ? (atacDone - prevAtacDone) : 0;
+        const double dt = static_cast<double>(intervalElapsedNs) / 1.0e9;
         const double mapInst = (dt > 0)
             ? static_cast<double>(mapDelta) / dt : 0.0;
         const double atacInst = (dt > 0)
             ? static_cast<double>(atacDelta) / dt : 0.0;
-        prevMapDone = mapDone;
-        prevAtacDone = atacDone;
 
         if (!primed) {
           // Seed the EWMA from the first interval rather than skipping
@@ -977,6 +1093,156 @@ struct StarChromapAtacAsyncRun::Impl {
         } else {
           mapRateEwma = kEwmaAlpha * mapInst + (1.0 - kEwmaAlpha) * mapRateEwma;
           atacRateEwma = kEwmaAlpha * atacInst + (1.0 - kEwmaAlpha) * atacRateEwma;
+        }
+
+        // Public composition boundary: callers may provide stable total-work
+        // estimates without depending on a particular input transport.
+        // Zero keeps ETA unavailable for that domain.
+        const uint64_t mapLiveEstimate =
+            P_for_sampler_->dynamicThreadMapWorkEstimate;
+        const uint64_t atacLiveEstimate =
+            P_for_sampler_->dynamicThreadAtacWorkEstimate;
+        auto updateEstimate = [](uint64_t previous, uint64_t live,
+                                 uint64_t done) -> uint64_t {
+          if (previous == 0 && live == 0) {
+            return 0;
+          }
+          uint64_t estimate = std::max(previous, live);
+          while (estimate < done) {
+            const uint64_t bump = std::max<uint64_t>(1, estimate / 10);
+            if (estimate > std::numeric_limits<uint64_t>::max() - bump) {
+              return done;
+            }
+            estimate += bump;
+          }
+          return estimate;
+        };
+        mapEstimateTotal = updateEstimate(
+            mapEstimateTotal, mapLiveEstimate,
+            snap.mapDomain.workUnitsTotal);
+        atacEstimateTotal = updateEstimate(
+            atacEstimateTotal, atacLiveEstimate,
+            snap.atacDomain.workUnitsTotal);
+        const uint64_t mapRemaining =
+            mapEstimateTotal > snap.mapDomain.workUnitsTotal
+                ? mapEstimateTotal - snap.mapDomain.workUnitsTotal
+                : 0;
+        const uint64_t atacRemaining =
+            atacEstimateTotal > snap.atacDomain.workUnitsTotal
+                ? atacEstimateTotal - snap.atacDomain.workUnitsTotal
+                : 0;
+        const double mapCompletionPct = mapEstimateTotal > 0
+            ? 100.0 * static_cast<double>(snap.mapDomain.workUnitsTotal) /
+                  static_cast<double>(mapEstimateTotal)
+            : 0.0;
+        const double atacCompletionPct = atacEstimateTotal > 0
+            ? 100.0 * static_cast<double>(snap.atacDomain.workUnitsTotal) /
+                  static_cast<double>(atacEstimateTotal)
+            : 0.0;
+        const double mapEtaSec = mapEstimateTotal == 0
+            ? std::numeric_limits<double>::infinity()
+            : (mapRemaining == 0
+                   ? 0.0
+                   : (mapRateEwma > 0.0
+                          ? static_cast<double>(mapRemaining) / mapRateEwma
+                          : std::numeric_limits<double>::infinity()));
+        const double atacEtaSec = atacEstimateTotal == 0
+            ? std::numeric_limits<double>::infinity()
+            : (atacRemaining == 0
+                   ? 0.0
+                   : (atacRateEwma > 0.0
+                          ? static_cast<double>(atacRemaining) / atacRateEwma
+                          : std::numeric_limits<double>::infinity()));
+
+        const int floorSum = curMapFloor + curFeatureFloor + curAtacFloor;
+        const int uncontrolledSurplus =
+            std::max(0, snap.configuredPermits - floorSum);
+        std::ostringstream observation;
+        observation
+            << (saturationControllerEnabled
+                    ? "[ATAC saturation controller] observation"
+                    : "[ATAC drain-time controller] observation")
+            << "\ttimeSec=" << std::fixed << std::setprecision(1) << timeSec
+            << "\tmapFloor=" << curMapFloor
+            << "\tatacFloor=" << curAtacFloor
+            << "\tfloorSum=" << floorSum
+            << "\tuncontrolledSurplus=" << uncontrolledSurplus
+            << "\tmapUnitsDelta=" << mapDelta
+            << "\tatacUnitsDelta=" << atacDelta
+            << "\tmapOccupancy=" << std::setprecision(3)
+            << mapOccupancyInterval
+            << "\tatacOccupancy=" << atacOccupancyInterval
+            << "\tmapUnitsPerPermitSec=" << mapUnitsPerPermitSec
+            << "\tatacUnitsPerPermitSec=" << atacUnitsPerPermitSec
+            << "\tmapRawRateEwma=" << mapRateEwma
+            << "\tatacRawRateEwma=" << atacRateEwma
+            << "\tmapEstimate=" << mapEstimateTotal
+            << "\tmapDone=" << snap.mapDomain.workUnitsTotal
+            << "\tmapRemaining=" << mapRemaining
+            << "\tmapCompletionPct=" << mapCompletionPct
+            << "\tmapEtaSec=" << mapEtaSec
+            << "\tatacEstimate=" << atacEstimateTotal
+            << "\tatacDone=" << snap.atacDomain.workUnitsTotal
+            << "\tatacRemaining=" << atacRemaining
+            << "\tatacCompletionPct=" << atacCompletionPct
+            << "\tatacEtaSec=" << atacEtaSec
+            << "\n";
+        pthread_mutex_lock(&g_threadChunks.mutexLogMain);
+        P_for_sampler_->inOut->logMain << observation.str();
+        P_for_sampler_->inOut->logMain.flush();
+        pthread_mutex_unlock(&g_threadChunks.mutexLogMain);
+
+        if (saturationControllerEnabled) {
+          star::multiome::SaturationPermitController::Observation satObs;
+          satObs.mapOccupancy = mapOccupancyInterval;
+          satObs.atacOccupancy = atacOccupancyInterval;
+          satObs.mapUnitsDelta = mapDelta;
+          satObs.atacUnitsDelta = atacDelta;
+          satObs.mapInUse = snap.mapDomain.inUse;
+          satObs.atacInUse = snap.atacDomain.inUse;
+          satObs.mapWaiters = snap.mapDomain.currentWaiters;
+          satObs.atacWaiters = snap.atacDomain.currentWaiters;
+          satObs.mapEtaSec = mapEtaSec;
+          satObs.atacEtaSec = atacEtaSec;
+          const auto decision = saturationController->observe(satObs);
+
+          if (decision.floorsChanged) {
+            std::vector<int> floors(3, 0);
+            floors[0] = decision.mapFloor;
+            floors[1] = curFeatureFloor;
+            floors[2] = decision.atacFloor;
+            g_threadChunks.mapPermitConfigureDomainFloors(floors);
+            curMapFloor = decision.mapFloor;
+            curAtacFloor = decision.atacFloor;
+          }
+
+          std::ostringstream satLine;
+          satLine
+              << "[ATAC saturation controller] decision"
+              << "\ttimeSec=" << std::fixed << std::setprecision(1) << timeSec
+              << "\tphase="
+              << star::multiome::SaturationPermitController::phaseName(
+                     decision.phase)
+              << "\treason="
+              << star::multiome::SaturationPermitController::reasonName(
+                     decision.reason)
+              << "\tchanged=" << (decision.floorsChanged ? 1 : 0)
+              << "\tmapFloor=" << decision.mapFloor
+              << "\tatacFloor=" << decision.atacFloor
+              << "\tmapSaturation=" << decision.mapSaturation
+              << "\tatacSaturation=" << decision.atacSaturation
+              << "\tmapSaturationKnown="
+              << (decision.mapSaturationKnown ? 1 : 0)
+              << "\tatacSaturationKnown="
+              << (decision.atacSaturationKnown ? 1 : 0)
+              << "\tcapacityLimited="
+              << (decision.capacityLimited ? 1 : 0)
+              << "\n";
+          pthread_mutex_lock(&g_threadChunks.mutexLogMain);
+          P_for_sampler_->inOut->logMain << satLine.str();
+          P_for_sampler_->inOut->logMain.flush();
+          pthread_mutex_unlock(&g_threadChunks.mutexLogMain);
+          continue;
         }
 
         // Skip retune when either domain is idle (no work this tick AND
@@ -1044,6 +1310,8 @@ struct StarChromapAtacAsyncRun::Impl {
 
         if (direction != nullptr &&
             (newMap != curMapFloor || newAtac != curAtacFloor)) {
+          const int oldMapFloor = curMapFloor;
+          const int oldAtacFloor = curAtacFloor;
           std::vector<int> floors(3, 0);
           floors[0] = newMap;          // MAP
           floors[1] = curFeatureFloor; // FEATURE (unchanged)
@@ -1060,8 +1328,16 @@ struct StarChromapAtacAsyncRun::Impl {
                   << "\tatacRate=" << atacRateEwma
                   << "\tratio=" << std::setprecision(3) << ratio
                   << "\tdirection=" << direction
+                  << "\toldMapFloor=" << oldMapFloor
+                  << "\toldAtacFloor=" << oldAtacFloor
                   << "\tnewMapFloor=" << newMap
                   << "\tnewAtacFloor=" << newAtac
+                  << "\tnewFloorSum="
+                  << (newMap + curFeatureFloor + newAtac)
+                  << "\tnewUncontrolledSurplus="
+                  << std::max(
+                         0, snap.configuredPermits -
+                                (newMap + curFeatureFloor + newAtac))
                   << "\n";
           pthread_mutex_lock(&g_threadChunks.mutexLogMain);
           P_for_sampler_->inOut->logMain << ctrLine.str();

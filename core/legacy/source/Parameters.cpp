@@ -168,8 +168,10 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "dynamicThreadMapFloor", &dynamicThreadMapFloor));
     parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "dynamicThreadAtacFloor", &dynamicThreadAtacFloor));
     parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "dynamicThreadFeatureFloor", &dynamicThreadFeatureFloor));
-    parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "dynamicThreadAtacController", &dynamicThreadAtacController));
-    parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "dynamicThreadFifoWaiters", &dynamicThreadFifoWaiters));
+   parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "dynamicThreadAtacController", &dynamicThreadAtacController));
+    parArray.push_back(new ParameterInfoScalar <uint64> (-1, -1, "dynamicThreadMapWorkEstimate", &dynamicThreadMapWorkEstimate));
+    parArray.push_back(new ParameterInfoScalar <uint64> (-1, -1, "dynamicThreadAtacWorkEstimate", &dynamicThreadAtacWorkEstimate));
+   parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "dynamicThreadFifoWaiters", &dynamicThreadFifoWaiters));
     parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "variableThreads", &variableThreads));
     parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "variableThreadsRetuneEveryAcquires", &variableThreadsRetuneEveryAcquires));
     parArray.push_back(new ParameterInfoVector <int> (-1, -1, "variableThreadsPermitSequence", &variableThreadsPermitSequence));
@@ -1970,10 +1972,17 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
         errOut <<"EXITING: fatal input ERROR: per-domain floors (--dynamicThread{Map,Atac,Feature}Floor) must be >=0\n";
         exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
     }
-    if (dynamicThreadAtacController != 0 && dynamicThreadAtacController != 1) {
+    if (dynamicThreadAtacController < 0 || dynamicThreadAtacController > 2) {
         ostringstream errOut;
-        errOut <<"EXITING: fatal input ERROR: --dynamicThreadAtacController must be 0 or 1, user-defined value="
+        errOut <<"EXITING: fatal input ERROR: --dynamicThreadAtacController must be 0, 1, or 2, user-defined value="
                <<dynamicThreadAtacController<<"\n";
+        exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+    }
+    if (dynamicThreadAtacController == 2 &&
+        (dynamicThreadTelemetry != 1 || dynamicThreadTelemetryIntervalSec <= 0)) {
+        ostringstream errOut;
+        errOut <<"EXITING: fatal input ERROR: --dynamicThreadAtacController 2 requires "
+               <<"--dynamicThreadTelemetry 1 and --dynamicThreadTelemetryIntervalSec > 0\n";
         exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
     }
     if (dynamicThreadFifoWaiters != 0 && dynamicThreadFifoWaiters != 1) {
