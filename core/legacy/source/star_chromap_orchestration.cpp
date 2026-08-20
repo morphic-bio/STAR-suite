@@ -800,6 +800,11 @@ struct StarChromapAtacAsyncRun::Impl {
         worker([this]() {
           try {
             result = star::multiome::runChromapAtac(cfg);
+            if (result.status == star::multiome::ChromapContractStatus::OK &&
+                cfg.permit_hooks.acquire != nullptr) {
+              g_threadChunks.mapPermitMarkDomainComplete(
+                  ThreadControl::PermitDomain::ATAC);
+            }
           } catch (...) {
             exception = std::current_exception();
           }
@@ -854,12 +859,17 @@ struct StarChromapAtacAsyncRun::Impl {
              "\ttimeSec\tconfigured\ttarget"
              "\tavailable\tinUse\twaiters"
              "\tmapAcquire\tmapWaitMaxMs\tmapWorkAvgMs"
+             "\tfeatureAcquire\tfeatureWaitMaxMs\tfeatureWorkAvgMs"
              "\tatacAcquire\tatacWaitMaxMs\tatacWorkAvgMs"
              "\tfloorsActive\tfifoEnabled\tfifoDepth"
              "\tmapFloor\tmapInUse\tmapWaiters\tmapMaxInUse"
              "\tmapBlocked\tmapFast\tmapQueued\tmapWorkUnits"
              "\tmapOccupancyAvg\tmapOccupancyInterval"
              "\tmapUnitsPerPermitSec"
+             "\tfeatureFloor\tfeatureInUse\tfeatureWaiters\tfeatureMaxInUse"
+             "\tfeatureBlocked\tfeatureFast\tfeatureQueued\tfeatureWorkUnits"
+             "\tfeatureOccupancyAvg\tfeatureOccupancyInterval"
+             "\tfeatureUnitsPerPermitSec"
              "\tatacFloor\tatacInUse\tatacWaiters\tatacMaxInUse"
              "\tatacBlocked\tatacFast\tatacQueued\tatacWorkUnits"
              "\tatacOccupancyAvg\tatacOccupancyInterval"
@@ -883,8 +893,9 @@ struct StarChromapAtacAsyncRun::Impl {
     };
 
     // Controller mode 1 is the historical raw-rate policy. Mode 2 is the
-    // saturation-aware policy: learn sustained occupancy (ATAC first, then
-    // MAP) and consult remaining-work ETA only if both demands cannot fit.
+    // saturation-aware policy: learn sustained occupancy in descending
+    // estimated-work order and consult remaining-work ETA only if all active
+    // demands cannot fit.
     const bool legacyControllerEnabled =
         (P_for_sampler_->dynamicThreadAtacController == 1) &&
         (P_for_sampler_->dynamicThreadInterface == 1) &&
@@ -899,15 +910,22 @@ struct StarChromapAtacAsyncRun::Impl {
         legacyControllerEnabled || saturationControllerEnabled;
     int curMapFloor = P_for_sampler_->dynamicThreadMapFloor;
     int curAtacFloor = P_for_sampler_->dynamicThreadAtacFloor;
-    const int curFeatureFloor = P_for_sampler_->dynamicThreadFeatureFloor;
+    int curFeatureFloor = P_for_sampler_->dynamicThreadFeatureFloor;
+    const bool featureSaturationActive =
+        saturationControllerEnabled &&
+        P_for_sampler_->dynamicThreadFeatureWorkEstimate > 0;
     uint64_t prevTelemetryElapsedNs = 0;
     uint64_t prevMapDone = 0;
+    uint64_t prevFeatureDone = 0;
     uint64_t prevAtacDone = 0;
     uint64_t prevMapPermitNs = 0;
+    uint64_t prevFeaturePermitNs = 0;
     uint64_t prevAtacPermitNs = 0;
     double mapRateEwma = 0.0;
+    double featureRateEwma = 0.0;
     double atacRateEwma = 0.0;
     uint64_t mapEstimateTotal = 0;
+    uint64_t featureEstimateTotal = 0;
     uint64_t atacEstimateTotal = 0;
     constexpr double kEwmaAlpha = 0.30;
     constexpr double kRateGapThreshold = 0.20; // 20% imbalance triggers a retune
@@ -925,20 +943,35 @@ struct StarChromapAtacAsyncRun::Impl {
         return;
       }
       const auto initialSnapshot = g_threadChunks.mapPermitSnapshot();
-      saturationController.reset(new star::multiome::SaturationPermitController(
-          initialSnapshot.configuredPermits, curFeatureFloor));
+      star::multiome::SaturationPermitController::Config controllerConfig;
+      controllerConfig.configuredPermits = initialSnapshot.configuredPermits;
+      controllerConfig.fixedFeatureFloor = curFeatureFloor;
+      controllerConfig.featureActive = featureSaturationActive;
+      controllerConfig.workEstimates.map =
+          P_for_sampler_->dynamicThreadMapWorkEstimate;
+      controllerConfig.workEstimates.feature =
+          P_for_sampler_->dynamicThreadFeatureWorkEstimate;
+      controllerConfig.workEstimates.atac =
+          P_for_sampler_->dynamicThreadAtacWorkEstimate;
+      saturationController.reset(
+          new star::multiome::SaturationPermitController(controllerConfig));
       const auto initial = saturationController->initialDecision();
       curMapFloor = initial.mapFloor;
+      curFeatureFloor = initial.featureFloor;
       curAtacFloor = initial.atacFloor;
       pthread_mutex_lock(&g_threadChunks.mutexLogMain);
       P_for_sampler_->inOut->logMain
           << "[ATAC saturation controller] enabled"
           << "\tphase="
           << star::multiome::SaturationPermitController::phaseName(initial.phase)
+          << "\tprobeDomain="
+          << star::multiome::SaturationPermitController::domainName(
+                 initial.probeDomain)
           << "\tprobeWindows=2"
           << "\tmapFloor=" << curMapFloor
           << "\tatacFloor=" << curAtacFloor
           << "\tfeatureFloor=" << curFeatureFloor
+          << "\tfeatureActive=" << (featureSaturationActive ? 1 : 0)
           << "\tintervalSec=" << intervalSec
           << "\tpolicy=sustained-occupancy/eta-only-when-limited\n";
       P_for_sampler_->inOut->logMain.flush();
@@ -985,6 +1018,10 @@ struct StarChromapAtacAsyncRun::Impl {
           snap.mapDomain.workUnitsTotal >= prevMapDone
               ? snap.mapDomain.workUnitsTotal - prevMapDone
               : 0;
+      const uint64_t featureDelta =
+          snap.featureDomain.workUnitsTotal >= prevFeatureDone
+              ? snap.featureDomain.workUnitsTotal - prevFeatureDone
+              : 0;
       const uint64_t atacDelta =
           snap.atacDomain.workUnitsTotal >= prevAtacDone
               ? snap.atacDomain.workUnitsTotal - prevAtacDone
@@ -993,17 +1030,27 @@ struct StarChromapAtacAsyncRun::Impl {
           snap.mapDomain.inUsePermitNs >= prevMapPermitNs
               ? snap.mapDomain.inUsePermitNs - prevMapPermitNs
               : 0;
+      const uint64_t featurePermitDeltaNs =
+          snap.featureDomain.inUsePermitNs >= prevFeaturePermitNs
+              ? snap.featureDomain.inUsePermitNs - prevFeaturePermitNs
+              : 0;
       const uint64_t atacPermitDeltaNs =
           snap.atacDomain.inUsePermitNs >= prevAtacPermitNs
               ? snap.atacDomain.inUsePermitNs - prevAtacPermitNs
               : 0;
       const double mapOccupancyInterval =
           occupancyAvg(mapPermitDeltaNs, intervalElapsedNs);
+      const double featureOccupancyInterval =
+          occupancyAvg(featurePermitDeltaNs, intervalElapsedNs);
       const double atacOccupancyInterval =
           occupancyAvg(atacPermitDeltaNs, intervalElapsedNs);
       const double mapUnitsPerPermitSec = mapPermitDeltaNs > 0
           ? static_cast<double>(mapDelta) * 1.0e9 /
                 static_cast<double>(mapPermitDeltaNs)
+          : 0.0;
+      const double featureUnitsPerPermitSec = featurePermitDeltaNs > 0
+          ? static_cast<double>(featureDelta) * 1.0e9 /
+                static_cast<double>(featurePermitDeltaNs)
           : 0.0;
       const double atacUnitsPerPermitSec = atacPermitDeltaNs > 0
           ? static_cast<double>(atacDelta) * 1.0e9 /
@@ -1023,6 +1070,10 @@ struct StarChromapAtacAsyncRun::Impl {
            << (snap.mapDomain.waitNsMax / 1.0e6)
            << "\t" << avgMs(snap.mapDomain.workNsTotal,
                             snap.mapDomain.acquireCalls)
+           << "\t" << snap.featureDomain.acquireCalls
+           << "\t" << (snap.featureDomain.waitNsMax / 1.0e6)
+           << "\t" << avgMs(snap.featureDomain.workNsTotal,
+                            snap.featureDomain.acquireCalls)
            << "\t" << snap.atacDomain.acquireCalls
            << "\t" << (snap.atacDomain.waitNsMax / 1.0e6)
            << "\t" << avgMs(snap.atacDomain.workNsTotal,
@@ -1042,6 +1093,18 @@ struct StarChromapAtacAsyncRun::Impl {
                                     snap.telemetryElapsedNs)
            << "\t" << mapOccupancyInterval
            << "\t" << mapUnitsPerPermitSec
+           << "\t" << snap.featureDomain.floor
+           << "\t" << snap.featureDomain.inUse
+           << "\t" << snap.featureDomain.currentWaiters
+           << "\t" << snap.featureDomain.maxInUse
+           << "\t" << snap.featureDomain.blockedAcquireCalls
+           << "\t" << snap.featureDomain.fastAcquireCalls
+           << "\t" << snap.featureDomain.queuedGrantCalls
+           << "\t" << snap.featureDomain.workUnitsTotal
+           << "\t" << occupancyAvg(snap.featureDomain.inUsePermitNs,
+                                    snap.telemetryElapsedNs)
+           << "\t" << featureOccupancyInterval
+           << "\t" << featureUnitsPerPermitSec
            << "\t" << snap.atacDomain.floor
            << "\t" << snap.atacDomain.inUse
            << "\t" << snap.atacDomain.currentWaiters
@@ -1069,8 +1132,10 @@ struct StarChromapAtacAsyncRun::Impl {
 
       prevTelemetryElapsedNs = snap.telemetryElapsedNs;
       prevMapDone = snap.mapDomain.workUnitsTotal;
+      prevFeatureDone = snap.featureDomain.workUnitsTotal;
       prevAtacDone = snap.atacDomain.workUnitsTotal;
       prevMapPermitNs = snap.mapDomain.inUsePermitNs;
+      prevFeaturePermitNs = snap.featureDomain.inUsePermitNs;
       prevAtacPermitNs = snap.atacDomain.inUsePermitNs;
 
       // ATAC drain-time controller: rate-balance retune of MAP/ATAC floors.
@@ -1078,6 +1143,8 @@ struct StarChromapAtacAsyncRun::Impl {
         const double dt = static_cast<double>(intervalElapsedNs) / 1.0e9;
         const double mapInst = (dt > 0)
             ? static_cast<double>(mapDelta) / dt : 0.0;
+        const double featureInst = (dt > 0)
+            ? static_cast<double>(featureDelta) / dt : 0.0;
         const double atacInst = (dt > 0)
             ? static_cast<double>(atacDelta) / dt : 0.0;
 
@@ -1086,12 +1153,15 @@ struct StarChromapAtacAsyncRun::Impl {
           // entirely — at high ratios we already know the right direction
           // and a 10s primer-skip costs us a full step of correction.
           mapRateEwma = mapInst;
+          featureRateEwma = featureInst;
           atacRateEwma = atacInst;
           primed = true;
           // Fall through and possibly retune on this same tick when the
           // imbalance is already large.
         } else {
           mapRateEwma = kEwmaAlpha * mapInst + (1.0 - kEwmaAlpha) * mapRateEwma;
+          featureRateEwma = kEwmaAlpha * featureInst +
+              (1.0 - kEwmaAlpha) * featureRateEwma;
           atacRateEwma = kEwmaAlpha * atacInst + (1.0 - kEwmaAlpha) * atacRateEwma;
         }
 
@@ -1100,6 +1170,8 @@ struct StarChromapAtacAsyncRun::Impl {
         // Zero keeps ETA unavailable for that domain.
         const uint64_t mapLiveEstimate =
             P_for_sampler_->dynamicThreadMapWorkEstimate;
+        const uint64_t featureLiveEstimate =
+            P_for_sampler_->dynamicThreadFeatureWorkEstimate;
         const uint64_t atacLiveEstimate =
             P_for_sampler_->dynamicThreadAtacWorkEstimate;
         auto updateEstimate = [](uint64_t previous, uint64_t live,
@@ -1120,12 +1192,19 @@ struct StarChromapAtacAsyncRun::Impl {
         mapEstimateTotal = updateEstimate(
             mapEstimateTotal, mapLiveEstimate,
             snap.mapDomain.workUnitsTotal);
+        featureEstimateTotal = updateEstimate(
+            featureEstimateTotal, featureLiveEstimate,
+            snap.featureDomain.workUnitsTotal);
         atacEstimateTotal = updateEstimate(
             atacEstimateTotal, atacLiveEstimate,
             snap.atacDomain.workUnitsTotal);
         const uint64_t mapRemaining =
             mapEstimateTotal > snap.mapDomain.workUnitsTotal
                 ? mapEstimateTotal - snap.mapDomain.workUnitsTotal
+                : 0;
+        const uint64_t featureRemaining =
+            featureEstimateTotal > snap.featureDomain.workUnitsTotal
+                ? featureEstimateTotal - snap.featureDomain.workUnitsTotal
                 : 0;
         const uint64_t atacRemaining =
             atacEstimateTotal > snap.atacDomain.workUnitsTotal
@@ -1134,6 +1213,10 @@ struct StarChromapAtacAsyncRun::Impl {
         const double mapCompletionPct = mapEstimateTotal > 0
             ? 100.0 * static_cast<double>(snap.mapDomain.workUnitsTotal) /
                   static_cast<double>(mapEstimateTotal)
+            : 0.0;
+        const double featureCompletionPct = featureEstimateTotal > 0
+            ? 100.0 * static_cast<double>(snap.featureDomain.workUnitsTotal) /
+                  static_cast<double>(featureEstimateTotal)
             : 0.0;
         const double atacCompletionPct = atacEstimateTotal > 0
             ? 100.0 * static_cast<double>(snap.atacDomain.workUnitsTotal) /
@@ -1145,6 +1228,14 @@ struct StarChromapAtacAsyncRun::Impl {
                    ? 0.0
                    : (mapRateEwma > 0.0
                           ? static_cast<double>(mapRemaining) / mapRateEwma
+                          : std::numeric_limits<double>::infinity()));
+        const double featureEtaSec = featureEstimateTotal == 0
+            ? std::numeric_limits<double>::infinity()
+            : (featureRemaining == 0
+                   ? 0.0
+                   : (featureRateEwma > 0.0
+                          ? static_cast<double>(featureRemaining) /
+                                featureRateEwma
                           : std::numeric_limits<double>::infinity()));
         const double atacEtaSec = atacEstimateTotal == 0
             ? std::numeric_limits<double>::infinity()
@@ -1164,28 +1255,48 @@ struct StarChromapAtacAsyncRun::Impl {
                     : "[ATAC drain-time controller] observation")
             << "\ttimeSec=" << std::fixed << std::setprecision(1) << timeSec
             << "\tmapFloor=" << curMapFloor
+            << "\tfeatureFloor=" << curFeatureFloor
             << "\tatacFloor=" << curAtacFloor
             << "\tfloorSum=" << floorSum
             << "\tuncontrolledSurplus=" << uncontrolledSurplus
             << "\tmapUnitsDelta=" << mapDelta
+            << "\tfeatureUnitsDelta=" << featureDelta
             << "\tatacUnitsDelta=" << atacDelta
             << "\tmapOccupancy=" << std::setprecision(3)
             << mapOccupancyInterval
+            << "\tfeatureOccupancy=" << featureOccupancyInterval
             << "\tatacOccupancy=" << atacOccupancyInterval
             << "\tmapUnitsPerPermitSec=" << mapUnitsPerPermitSec
+            << "\tfeatureUnitsPerPermitSec=" << featureUnitsPerPermitSec
             << "\tatacUnitsPerPermitSec=" << atacUnitsPerPermitSec
             << "\tmapRawRateEwma=" << mapRateEwma
+            << "\tfeatureRawRateEwma=" << featureRateEwma
             << "\tatacRawRateEwma=" << atacRateEwma
             << "\tmapEstimate=" << mapEstimateTotal
             << "\tmapDone=" << snap.mapDomain.workUnitsTotal
             << "\tmapRemaining=" << mapRemaining
             << "\tmapCompletionPct=" << mapCompletionPct
             << "\tmapEtaSec=" << mapEtaSec
+            << "\tmapEstimateComplete="
+            << (mapEstimateTotal > 0 && mapRemaining == 0 ? 1 : 0)
+            << "\tmapDurableComplete=" << (snap.mapDomain.complete ? 1 : 0)
+            << "\tfeatureEstimate=" << featureEstimateTotal
+            << "\tfeatureDone=" << snap.featureDomain.workUnitsTotal
+            << "\tfeatureRemaining=" << featureRemaining
+            << "\tfeatureCompletionPct=" << featureCompletionPct
+            << "\tfeatureEtaSec=" << featureEtaSec
+            << "\tfeatureEstimateComplete="
+            << (featureEstimateTotal > 0 && featureRemaining == 0 ? 1 : 0)
+            << "\tfeatureDurableComplete="
+            << (snap.featureDomain.complete ? 1 : 0)
             << "\tatacEstimate=" << atacEstimateTotal
             << "\tatacDone=" << snap.atacDomain.workUnitsTotal
             << "\tatacRemaining=" << atacRemaining
             << "\tatacCompletionPct=" << atacCompletionPct
             << "\tatacEtaSec=" << atacEtaSec
+            << "\tatacEstimateComplete="
+            << (atacEstimateTotal > 0 && atacRemaining == 0 ? 1 : 0)
+            << "\tatacDurableComplete=" << (snap.atacDomain.complete ? 1 : 0)
             << "\n";
         pthread_mutex_lock(&g_threadChunks.mutexLogMain);
         P_for_sampler_->inOut->logMain << observation.str();
@@ -1195,24 +1306,39 @@ struct StarChromapAtacAsyncRun::Impl {
         if (saturationControllerEnabled) {
           star::multiome::SaturationPermitController::Observation satObs;
           satObs.mapOccupancy = mapOccupancyInterval;
+          satObs.featureOccupancy = featureOccupancyInterval;
           satObs.atacOccupancy = atacOccupancyInterval;
           satObs.mapUnitsDelta = mapDelta;
+          satObs.featureUnitsDelta = featureDelta;
           satObs.atacUnitsDelta = atacDelta;
           satObs.mapInUse = snap.mapDomain.inUse;
+          satObs.featureInUse = snap.featureDomain.inUse;
           satObs.atacInUse = snap.atacDomain.inUse;
           satObs.mapWaiters = snap.mapDomain.currentWaiters;
+          satObs.featureWaiters = snap.featureDomain.currentWaiters;
           satObs.atacWaiters = snap.atacDomain.currentWaiters;
           satObs.mapEtaSec = mapEtaSec;
+          satObs.featureEtaSec = featureEtaSec;
           satObs.atacEtaSec = atacEtaSec;
+          satObs.mapEstimateComplete =
+              snap.mapDomain.complete ||
+              (mapEstimateTotal > 0 && mapRemaining == 0);
+          satObs.featureEstimateComplete =
+              snap.featureDomain.complete ||
+              (featureEstimateTotal > 0 && featureRemaining == 0);
+          satObs.atacEstimateComplete =
+              snap.atacDomain.complete ||
+              (atacEstimateTotal > 0 && atacRemaining == 0);
           const auto decision = saturationController->observe(satObs);
 
           if (decision.floorsChanged) {
             std::vector<int> floors(3, 0);
             floors[0] = decision.mapFloor;
-            floors[1] = curFeatureFloor;
+            floors[1] = decision.featureFloor;
             floors[2] = decision.atacFloor;
             g_threadChunks.mapPermitConfigureDomainFloors(floors);
             curMapFloor = decision.mapFloor;
+            curFeatureFloor = decision.featureFloor;
             curAtacFloor = decision.atacFloor;
           }
 
@@ -1223,16 +1349,23 @@ struct StarChromapAtacAsyncRun::Impl {
               << "\tphase="
               << star::multiome::SaturationPermitController::phaseName(
                      decision.phase)
+              << "\tprobeDomain="
+              << star::multiome::SaturationPermitController::domainName(
+                     decision.probeDomain)
               << "\treason="
               << star::multiome::SaturationPermitController::reasonName(
                      decision.reason)
               << "\tchanged=" << (decision.floorsChanged ? 1 : 0)
               << "\tmapFloor=" << decision.mapFloor
+              << "\tfeatureFloor=" << decision.featureFloor
               << "\tatacFloor=" << decision.atacFloor
               << "\tmapSaturation=" << decision.mapSaturation
+              << "\tfeatureSaturation=" << decision.featureSaturation
               << "\tatacSaturation=" << decision.atacSaturation
               << "\tmapSaturationKnown="
               << (decision.mapSaturationKnown ? 1 : 0)
+              << "\tfeatureSaturationKnown="
+              << (decision.featureSaturationKnown ? 1 : 0)
               << "\tatacSaturationKnown="
               << (decision.atacSaturationKnown ? 1 : 0)
               << "\tcapacityLimited="

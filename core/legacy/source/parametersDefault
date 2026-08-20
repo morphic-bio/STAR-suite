@@ -76,21 +76,28 @@ dynamicThreadFeatureFloor       0
          Same semantics as dynamicThreadMapFloor. 0 disables the FEATURE floor.
 
 dynamicThreadAtacController     0
-    int: select the combined MAP/ATAC permit controller.
+    int: select the combined MAP/FEATURE/ATAC permit controller.
                                 0 ... disabled (default)
                                 1 ... legacy raw-rate minimum-floor controller
                                       (requires an initial MAP or ATAC floor)
                                 2 ... saturation-aware controller: probe sustained
-                                      ATAC occupancy first, then MAP with the
-                                      remaining capacity; retain observed demands
-                                      as borrowable floors and use remaining-work
-                                      ETA only when both demands cannot fit.
+                                      occupancy in descending estimated-work order
+                                      (ATAC then MAP when estimates are absent),
+                                      retain observed demands as borrowable floors,
+                                      and use remaining-work ETA only when all
+                                      demands cannot fit.
                                       Requires dynamicThreadTelemetry=1 and a
                                       positive telemetry interval.
 
 dynamicThreadMapWorkEstimate    0
     int: optional estimated total MAP work units for mode-2 ETA balancing.
          0 leaves MAP ETA unavailable; saturation probing still applies.
+
+dynamicThreadFeatureWorkEstimate 0
+    int: optional estimated total FEATURE/ADT work units for mode-2 probe order
+         and ETA balancing. A positive value activates three-domain learning;
+         0 keeps FEATURE outside mode-2 learning (an explicit FEATURE floor,
+         if any, remains a fixed borrowable reservation).
 
 dynamicThreadAtacWorkEstimate   0
     int: optional estimated total ATAC work units for mode-2 ETA balancing.

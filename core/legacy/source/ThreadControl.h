@@ -26,6 +26,7 @@ public:
     };
 
     struct PermitDomainSnapshot {
+        bool complete;
         int floor;
         int inUse;
         int currentWaiters;
@@ -140,6 +141,9 @@ public:
     //
     // Disabled by default; opt-in via --dynamicThreadFifoWaiters 1.
     void mapPermitConfigureFifoWaiters(bool enabled);
+    // Publish durable application completion and release this domain's
+    // borrowable floor. A transient zero-work interval must not call this.
+    void mapPermitMarkDomainComplete(PermitDomain domain);
     void mapPermitSetTargetPermits(int targetPermits);
     bool mapPermitEnabled() const;
     bool mapPermitCpuMaybeSample();
@@ -191,6 +195,7 @@ private:
     int mapPermitDomainFloor[mapPermitDomainCount]{};
     int mapPermitDomainInUse[mapPermitDomainCount]{};
     int mapPermitDomainWaiters[mapPermitDomainCount]{};
+    bool mapPermitDomainComplete[mapPermitDomainCount]{};
     std::condition_variable mapPermitDomainCv[mapPermitDomainCount];
 
     // FIFO waiter queue. When mapPermitFifoEnabled is true, acquire and

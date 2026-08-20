@@ -10,6 +10,7 @@
 #include "GlobalVariables.h"
 #include "ErrorWarning.h"
 #include "InlineCBCorrection.h"
+#include "SaturationPermitController.h"
 #include "TimeFunctions.h"
 #include "streamFuns.h"
 #include "systemFunctions.h"
@@ -744,16 +745,30 @@ void mapThreadsSpawn (Parameters &P, ReadAlignChunk** RAchunk) {
     // Per-domain borrowable floors (Step 5a). Index order must match
     // ThreadControl::permitDomainIndex(): MAP=0, FEATURE=1, ATAC=2.
     int configuredMapFloor = std::max(0, P.dynamicThreadMapFloor);
-    const int configuredFeatureFloor = std::max(0, P.dynamicThreadFeatureFloor);
+    int configuredFeatureFloor = std::max(0, P.dynamicThreadFeatureFloor);
     int configuredAtacFloor = std::max(0, P.dynamicThreadAtacFloor);
     if (interfaceEnabled && P.chromapAtac.enabled == 1 &&
         P.dynamicThreadAtacController == 2) {
-        // Saturation discovery starts by protecting all but one of the
-        // MAP/ATAC budget for the larger ATAC arm. The sampler records its
-        // sustained occupancy, then turns the unused capacity over to MAP.
-        const int probeBudget = std::max(2, configuredPermits - configuredFeatureFloor);
-        configuredMapFloor = 1;
-        configuredAtacFloor = probeBudget - 1;
+        const bool featureActive = P.dynamicThreadFeatureWorkEstimate > 0;
+        if (featureActive && configuredPermits < 3) {
+            ostringstream errOut;
+            errOut << "EXITING because of FATAL ERROR: three-domain saturation "
+                   << "control requires at least 3 configured permits, got "
+                   << configuredPermits;
+            exitWithError(errOut.str(), std::cerr, P.inOut->logMain, 1, P);
+        }
+        star::multiome::SaturationPermitController::Config controllerConfig;
+        controllerConfig.configuredPermits = configuredPermits;
+        controllerConfig.fixedFeatureFloor = configuredFeatureFloor;
+        controllerConfig.featureActive = featureActive;
+        controllerConfig.workEstimates.map = P.dynamicThreadMapWorkEstimate;
+        controllerConfig.workEstimates.feature = P.dynamicThreadFeatureWorkEstimate;
+        controllerConfig.workEstimates.atac = P.dynamicThreadAtacWorkEstimate;
+        const star::multiome::SaturationPermitController controller(controllerConfig);
+        const auto initial = controller.initialDecision();
+        configuredMapFloor = initial.mapFloor;
+        configuredFeatureFloor = initial.featureFloor;
+        configuredAtacFloor = initial.atacFloor;
     }
     {
         std::vector<int> domainFloors(3, 0);
@@ -813,6 +828,11 @@ void mapThreadsSpawn (Parameters &P, ReadAlignChunk** RAchunk) {
         P.inOut->logMain << "Joined thread # " <<ithread <<"\n"<<flush;
         pthread_mutex_unlock(&g_threadChunks.mutexLogMain);
     };
+
+    if (interfaceEnabled) {
+        g_threadChunks.mapPermitMarkDomainComplete(
+            ThreadControl::PermitDomain::MAP);
+    }
 
     if (interfaceEnabled && telemetryEnabled) {
         ThreadControl::MapPermitSnapshot snapshot = g_threadChunks.mapPermitSnapshot();

@@ -168,10 +168,11 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "dynamicThreadMapFloor", &dynamicThreadMapFloor));
     parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "dynamicThreadAtacFloor", &dynamicThreadAtacFloor));
     parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "dynamicThreadFeatureFloor", &dynamicThreadFeatureFloor));
-   parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "dynamicThreadAtacController", &dynamicThreadAtacController));
+    parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "dynamicThreadAtacController", &dynamicThreadAtacController));
     parArray.push_back(new ParameterInfoScalar <uint64> (-1, -1, "dynamicThreadMapWorkEstimate", &dynamicThreadMapWorkEstimate));
+    parArray.push_back(new ParameterInfoScalar <uint64> (-1, -1, "dynamicThreadFeatureWorkEstimate", &dynamicThreadFeatureWorkEstimate));
     parArray.push_back(new ParameterInfoScalar <uint64> (-1, -1, "dynamicThreadAtacWorkEstimate", &dynamicThreadAtacWorkEstimate));
-   parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "dynamicThreadFifoWaiters", &dynamicThreadFifoWaiters));
+    parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "dynamicThreadFifoWaiters", &dynamicThreadFifoWaiters));
     parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "variableThreads", &variableThreads));
     parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "variableThreadsRetuneEveryAcquires", &variableThreadsRetuneEveryAcquires));
     parArray.push_back(new ParameterInfoVector <int> (-1, -1, "variableThreadsPermitSequence", &variableThreadsPermitSequence));
@@ -2133,6 +2134,17 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
     }
 
     const bool pfControllerEnabled = (dynamicThreadPfControllerMode != "off");
+    const bool pfControllerAppliesUpdates =
+        dynamicThreadPfControllerMode == "active" ||
+        dynamicThreadPfControllerMode == "eta" ||
+        dynamicThreadPfControllerMode == "chunked";
+    if (dynamicThreadAtacController == 2 && pfControllerAppliesUpdates) {
+        ostringstream errOut;
+        errOut <<"EXITING: fatal input ERROR: saturation controller mode 2 owns "
+               <<"the shared MAP/FEATURE/ATAC allocation and cannot be combined "
+               <<"with an applying --dynamicThreadPfControllerMode\n";
+        exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+    }
     if (pfControllerEnabled && dynamicThreadInterface != 1) {
         ostringstream errOut;
         errOut <<"EXITING: fatal input ERROR: --dynamicThreadPfControllerMode requires --dynamicThreadInterface=1\n";

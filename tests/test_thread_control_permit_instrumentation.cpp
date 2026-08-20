@@ -10,6 +10,23 @@
 #include <vector>
 
 int main() {
+    // Durable completion is explicit permit state, not a guess based on a
+    // zero-work window. It releases the completed domain's floor immediately
+    // and prevents a later controller update from reinstalling that floor.
+    {
+        ThreadControl completion;
+        completion.mapPermitConfigure(true, 8, 8, true, false);
+        completion.mapPermitConfigureDomainFloors({3, 2, 3});
+        completion.mapPermitMarkDomainComplete(
+            ThreadControl::PermitDomain::FEATURE);
+        ThreadControl::MapPermitSnapshot snap = completion.mapPermitSnapshot();
+        assert(snap.featureDomain.complete);
+        assert(snap.featureDomain.floor == 0);
+        completion.mapPermitConfigureDomainFloors({4, 2, 4});
+        snap = completion.mapPermitSnapshot();
+        assert(snap.featureDomain.floor == 0);
+    }
+
     // Saturation-aware policy: observe the larger ATAC arm first, preserve
     // its sustained demand, then probe MAP with the remainder. When both
     // observed demands fit, ETA noise must not move the learned floors.
@@ -106,6 +123,157 @@ int main() {
         assert(helpAtac.atacFloor == 31);
     }
 
+    // Three-domain learning probes the estimated largest arm
+    // first, reserves one permit for every other live arm, and keeps all
+    // learned demands as borrowable floors when they fit.
+    {
+        using Controller = star::multiome::SaturationPermitController;
+        Controller::Config config;
+        config.configuredPermits = 32;
+        config.featureActive = true;
+        config.probeWindows = 2;
+        config.workEstimates.atac = 300000;
+        config.workEstimates.map = 200000;
+        config.workEstimates.feature = 100000;
+        Controller controller(config);
+
+        Controller::Decision initial = controller.initialDecision();
+        assert(initial.phase == Controller::Phase::PROBE_ATAC);
+        assert(initial.probeDomain == Controller::Domain::ATAC);
+        assert(initial.mapFloor == 1);
+        assert(initial.featureFloor == 1);
+        assert(initial.atacFloor == 30);
+
+        Controller::Observation probe{};
+        probe.atacUnitsDelta = 1000;
+        probe.atacOccupancy = 10.4;
+        controller.observe(probe);
+        probe.atacOccupancy = 10.8;
+        Controller::Decision atacLearned = controller.observe(probe);
+        assert(atacLearned.phase == Controller::Phase::PROBE_MAP);
+        assert(atacLearned.atacSaturation == 11);
+        assert(atacLearned.mapFloor == 20);
+        assert(atacLearned.featureFloor == 1);
+
+        // MAP cannot be sampled while non-preemptive ATAC leases from the
+        // preceding probe still exceed ATAC's learned floor.
+        probe = Controller::Observation{};
+        probe.mapUnitsDelta = 1000;
+        probe.mapOccupancy = 1.0;
+        probe.mapInUse = 1;
+        probe.mapWaiters = 10;
+        probe.atacInUse = 30;
+        assert(!controller.observe(probe).floorsChanged);
+
+        probe.mapOccupancy = 16.1;
+        probe.mapInUse = 17;
+        probe.atacInUse = 11;
+        controller.observe(probe);
+        probe.mapOccupancy = 16.6;
+        Controller::Decision mapLearned = controller.observe(probe);
+        assert(mapLearned.phase == Controller::Phase::PROBE_FEATURE);
+        assert(mapLearned.mapSaturation == 17);
+        assert(mapLearned.featureFloor == 4);
+
+        probe = Controller::Observation{};
+        probe.featureUnitsDelta = 1000;
+        probe.featureOccupancy = 1.2;
+        controller.observe(probe);
+        probe.featureOccupancy = 1.8;
+        Controller::Decision allLearned = controller.observe(probe);
+        assert(allLearned.phase == Controller::Phase::STEADY);
+        assert(allLearned.featureSaturation == 2);
+        assert(allLearned.mapFloor == 17);
+        assert(allLearned.featureFloor == 2);
+        assert(allLearned.atacFloor == 11);
+        assert(!allLearned.capacityLimited);
+
+        probe.mapUnitsDelta = 1000;
+        probe.featureUnitsDelta = 0;  // transient provider gap
+        probe.atacUnitsDelta = 1000;
+        probe.mapEtaSec = 1000.0;
+        probe.featureEtaSec = 5000.0;
+        probe.atacEtaSec = 10.0;
+        assert(!controller.observe(probe).floorsChanged);
+
+        // Estimate exhaustion alone is not completion. Require two quiescent
+        // samples so a decode/load gap cannot remove a live arm.
+        probe = Controller::Observation{};
+        probe.featureEstimateComplete = true;
+        assert(!controller.observe(probe).floorsChanged);
+        Controller::Decision featureComplete = controller.observe(probe);
+        assert(featureComplete.floorsChanged);
+        assert(featureComplete.reason == Controller::Reason::FEATURE_COMPLETE);
+        assert(featureComplete.featureFloor == 0);
+        assert(featureComplete.mapFloor == 17);
+        assert(featureComplete.atacFloor == 11);
+    }
+
+    // Probe order is data-driven when estimates are supplied. If all three
+    // probes consume their available capacity, ETA can transfer one
+    // reservation to the latest arm without exceeding the pool.
+    {
+        using Controller = star::multiome::SaturationPermitController;
+        Controller::Config config;
+        config.configuredPermits = 32;
+        config.featureActive = true;
+        config.probeWindows = 1;
+        config.workEstimates.feature = 300;
+        config.workEstimates.atac = 200;
+        config.workEstimates.map = 100;
+        Controller controller(config);
+        assert(controller.initialDecision().phase ==
+               Controller::Phase::PROBE_FEATURE);
+
+        Controller::Observation probe{};
+        probe.featureUnitsDelta = 1;
+        probe.featureOccupancy = 30.0;
+        Controller::Decision featureLimited = controller.observe(probe);
+        assert(!featureLimited.featureSaturationKnown);
+        assert(featureLimited.phase == Controller::Phase::PROBE_ATAC);
+
+        probe = Controller::Observation{};
+        probe.atacUnitsDelta = 1;
+        probe.atacOccupancy = 1.0;
+        Controller::Decision atacLimited = controller.observe(probe);
+        assert(atacLimited.phase == Controller::Phase::PROBE_MAP);
+
+        probe = Controller::Observation{};
+        probe.mapUnitsDelta = 1;
+        probe.mapOccupancy = 1.0;
+        Controller::Decision limited = controller.observe(probe);
+        assert(limited.phase == Controller::Phase::STEADY);
+        assert(limited.capacityLimited);
+        assert(limited.featureFloor == 30);
+        assert(limited.atacFloor == 1);
+        assert(limited.mapFloor == 1);
+
+        probe.featureUnitsDelta = 1;
+        probe.atacUnitsDelta = 1;
+        probe.mapUnitsDelta = 1;
+        probe.featureEtaSec = 50.0;
+        probe.atacEtaSec = 100.0;
+        probe.mapEtaSec = 300.0;
+        Controller::Decision helpMap = controller.observe(probe);
+        assert(helpMap.floorsChanged);
+        assert(helpMap.reason == Controller::Reason::MAP_ETA_LATE);
+        assert(helpMap.featureFloor == 29);
+        assert(helpMap.atacFloor == 1);
+        assert(helpMap.mapFloor == 2);
+
+        // The earliest ETA domain may already be at its one-permit minimum.
+        // The next eligible early domain must still be able to donate.
+        probe.featureEtaSec = 300.0;
+        probe.atacEtaSec = 10.0;  // cannot donate: floor is already one
+        probe.mapEtaSec = 1000.0;
+        Controller::Decision alternateDonor = controller.observe(probe);
+        assert(alternateDonor.floorsChanged);
+        assert(alternateDonor.reason == Controller::Reason::MAP_ETA_LATE);
+        assert(alternateDonor.featureFloor == 28);
+        assert(alternateDonor.atacFloor == 1);
+        assert(alternateDonor.mapFloor == 3);
+    }
+
     // Occupancy accounting is independent of floors/FIFO. The diagnostic
     // must still report who owns a permit when the legacy admission path is
     // active, otherwise a comparison run could hide the very imbalance being
@@ -151,6 +319,32 @@ int main() {
         }
         shared.mapPermitConfigureDomainFloors(std::vector<int>{0, 0, 6});
         assert(shared.mapPermitSnapshot().floorChangeCalls == 2);
+    }
+
+    // Three-domain floors remain borrowable. A completed FEATURE/ATAC arm
+    // with no waiters cannot strand its learned reservation.
+    {
+        ThreadControl shared;
+        shared.mapPermitConfigure(true, 32, 32, true, false);
+        shared.mapPermitConfigureDomainFloors(std::vector<int>{17, 2, 11});
+        shared.mapPermitConfigureFifoWaiters(true);
+        std::vector<uint64_t> waits;
+        for (int i = 0; i < 32; ++i) {
+            waits.push_back(shared.mapPermitAcquireForDomain(
+                ThreadControl::PermitDomain::MAP));
+        }
+        ThreadControl::MapPermitSnapshot borrowed = shared.mapPermitSnapshot();
+        assert(borrowed.mapDomain.inUse == 32);
+        assert(borrowed.featureDomain.inUse == 0);
+        assert(borrowed.atacDomain.inUse == 0);
+        for (uint64_t waitNs : waits) {
+            shared.mapPermitReleaseForDomain(
+                ThreadControl::PermitDomain::MAP, waitNs, 1, 64, 1000);
+        }
+        const ThreadControl::MapPermitSnapshot done = shared.mapPermitSnapshot();
+        assert(done.availablePermits == 32);
+        assert(done.inUsePermits == 0);
+        assert(done.currentWaiters == 0);
     }
 
     ThreadControl permits;
