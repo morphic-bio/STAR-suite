@@ -150,6 +150,7 @@ void ThreadControl::mapPermitConfigure(
         mapPermitDomainFloor[domain] = 0;
         mapPermitDomainInUse[domain] = 0;
         mapPermitDomainWaiters[domain] = 0;
+        mapPermitDomainComplete[domain] = false;
         mapPermitAcquireCallsByDomain[domain].store(0, std::memory_order_relaxed);
         mapPermitWaitNsTotalByDomain[domain].store(0, std::memory_order_relaxed);
         mapPermitWaitNsMaxByDomain[domain].store(0, std::memory_order_relaxed);
@@ -313,51 +314,99 @@ void ThreadControl::mapPermitConfigureRetunePlan(const std::vector<int> &permitS
 }
 
 void ThreadControl::mapPermitConfigureDomainFloors(const std::vector<int> &floorsByDomainIndex) {
-    std::lock_guard<std::mutex> lock(mapPermitMutex);
-    int oldFloors[mapPermitDomainCount]{};
-    for (size_t i = 0; i < mapPermitDomainCount; ++i) {
-        oldFloors[i] = mapPermitDomainFloor[i];
-    }
-    const bool oldFloorsActive = mapPermitFloorsActive;
-    bool anyFloor = false;
-    int sumFloors = 0;
-    for (size_t i = 0; i < mapPermitDomainCount; ++i) {
-        const int requested = (i < floorsByDomainIndex.size()) ? floorsByDomainIndex[i] : 0;
-        const int normalized = std::max(0, std::min(requested, mapPermitConfigured));
-        mapPermitDomainFloor[i] = normalized;
-        if (normalized > 0) {
-            anyFloor = true;
-        }
-        sumFloors += normalized;
-    }
-    // Sanity-clip: combined floors must not exceed the pool itself; if they
-    // do, scale them down proportionally so each is at most a fair share.
-    if (sumFloors > mapPermitConfigured && mapPermitConfigured > 0) {
-        const double scale =
-            static_cast<double>(mapPermitConfigured) / static_cast<double>(sumFloors);
+    std::vector<PermitWaiter*> toWake;
+    {
+        std::lock_guard<std::mutex> lock(mapPermitMutex);
+        mapPermitAccountStateLocked(steadyNowNs());
+        int oldFloors[mapPermitDomainCount]{};
         for (size_t i = 0; i < mapPermitDomainCount; ++i) {
-            mapPermitDomainFloor[i] =
-                std::max(0, static_cast<int>(mapPermitDomainFloor[i] * scale));
+            oldFloors[i] = mapPermitDomainFloor[i];
         }
-        // Recompute anyFloor in case scaling drove a floor to 0.
-        anyFloor = false;
+        const bool oldFloorsActive = mapPermitFloorsActive;
+        bool anyFloor = false;
+        int sumFloors = 0;
         for (size_t i = 0; i < mapPermitDomainCount; ++i) {
-            if (mapPermitDomainFloor[i] > 0) { anyFloor = true; break; }
+            const int requested = (i < floorsByDomainIndex.size()) ? floorsByDomainIndex[i] : 0;
+            const int normalized = mapPermitDomainComplete[i]
+                ? 0
+                : std::max(0, std::min(requested, mapPermitConfigured));
+            mapPermitDomainFloor[i] = normalized;
+            if (normalized > 0) {
+                anyFloor = true;
+            }
+            sumFloors += normalized;
+        }
+        // Sanity-clip: combined floors must not exceed the pool itself; if they
+        // do, scale them down proportionally so each is at most a fair share.
+        if (sumFloors > mapPermitConfigured && mapPermitConfigured > 0) {
+            const double scale =
+                static_cast<double>(mapPermitConfigured) / static_cast<double>(sumFloors);
+            for (size_t i = 0; i < mapPermitDomainCount; ++i) {
+                mapPermitDomainFloor[i] =
+                    std::max(0, static_cast<int>(mapPermitDomainFloor[i] * scale));
+            }
+            // Recompute anyFloor in case scaling drove a floor to 0.
+            anyFloor = false;
+            for (size_t i = 0; i < mapPermitDomainCount; ++i) {
+                if (mapPermitDomainFloor[i] > 0) { anyFloor = true; break; }
+            }
+        }
+        mapPermitFloorsActive = mapPermitEnabledFlag && anyFloor;
+        bool changed = oldFloorsActive != mapPermitFloorsActive;
+        for (size_t i = 0; i < mapPermitDomainCount; ++i) {
+            changed = changed || oldFloors[i] != mapPermitDomainFloor[i];
+        }
+        if (changed) {
+            ++mapPermitFloorChangeCalls;
+            if (mapPermitFifoEnabled) {
+                grantFifoWaitersLocked(toWake);
+            }
         }
     }
-    mapPermitFloorsActive = mapPermitEnabledFlag && anyFloor;
-    bool changed = oldFloorsActive != mapPermitFloorsActive;
-    for (size_t i = 0; i < mapPermitDomainCount; ++i) {
-        changed = changed || oldFloors[i] != mapPermitDomainFloor[i];
+    for (PermitWaiter *waiter : toWake) {
+        waiter->cv.notify_one();
     }
-    if (changed) {
-        ++mapPermitFloorChangeCalls;
+    mapPermitCv.notify_all();
+    for (size_t i = 0; i < mapPermitDomainCount; ++i) {
+        mapPermitDomainCv[i].notify_all();
     }
 }
 
 void ThreadControl::mapPermitConfigureFifoWaiters(bool enabled) {
     std::lock_guard<std::mutex> lock(mapPermitMutex);
     mapPermitFifoEnabled = enabled && mapPermitEnabledFlag;
+}
+
+void ThreadControl::mapPermitMarkDomainComplete(PermitDomain domain) {
+    std::vector<PermitWaiter*> toWake;
+    {
+        std::lock_guard<std::mutex> lock(mapPermitMutex);
+        mapPermitAccountStateLocked(steadyNowNs());
+        const size_t index = permitDomainIndex(domain);
+        if (mapPermitDomainComplete[index]) {
+            return;
+        }
+        mapPermitDomainComplete[index] = true;
+        if (mapPermitDomainFloor[index] != 0) {
+            mapPermitDomainFloor[index] = 0;
+            ++mapPermitFloorChangeCalls;
+        }
+        mapPermitFloorsActive = false;
+        for (size_t i = 0; i < mapPermitDomainCount; ++i) {
+            mapPermitFloorsActive = mapPermitFloorsActive ||
+                mapPermitDomainFloor[i] > 0;
+        }
+        if (mapPermitFifoEnabled) {
+            grantFifoWaitersLocked(toWake);
+        }
+    }
+    for (PermitWaiter *waiter : toWake) {
+        waiter->cv.notify_one();
+    }
+    mapPermitCv.notify_all();
+    for (size_t i = 0; i < mapPermitDomainCount; ++i) {
+        mapPermitDomainCv[i].notify_all();
+    }
 }
 
 void ThreadControl::grantFifoWaitersLocked(std::vector<PermitWaiter*> &toWake) {
@@ -888,6 +937,7 @@ ThreadControl::MapPermitSnapshot ThreadControl::mapPermitSnapshot() const {
         PermitDomainSnapshot *domainSnapshots[mapPermitDomainCount] = {
             &snapshot.mapDomain, &snapshot.featureDomain, &snapshot.atacDomain};
         for (size_t domain = 0; domain < mapPermitDomainCount; ++domain) {
+            domainSnapshots[domain]->complete = mapPermitDomainComplete[domain];
             domainSnapshots[domain]->floor = mapPermitDomainFloor[domain];
             domainSnapshots[domain]->inUse = mapPermitDomainInUse[domain];
             domainSnapshots[domain]->currentWaiters =

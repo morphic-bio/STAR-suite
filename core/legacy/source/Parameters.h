@@ -70,21 +70,20 @@ class Parameters {
         int dynamicThreadMapFloor = 0;
         int dynamicThreadAtacFloor = 0;
         int dynamicThreadFeatureFloor = 0;
-        // ATAC drain-time controller (Step 6). When 1, the chromap-side
-        // sampler thread also runs a rate-balance controller that adjusts
-        // per-domain floors based on observed work-unit drain rates. Goal:
-        // keep MAP and ATAC drain rates in rough balance so both finish
-        // their mapping phase at roughly the same time. Requires
-        // dynamicThreadInterface=1 + chromapAtacEnable=1 + at least one
-        // floor > 0. 0 disables (default; the existing static-floor path
-        // remains active).
-       int dynamicThreadAtacController = 0;
+        // Multiome permit controller. 1 retains the legacy raw-rate MAP/ATAC
+        // controller. 2 learns sustained occupancy for every live domain,
+        // retains those values as borrowable floors when they fit, and
+        // consults remaining-work ETA only when the probes are capacity-limited.
+        // Mode 2 requires permit telemetry and a positive sampler interval.
+        int dynamicThreadAtacController = 0;
         // Optional total-work estimates for capacity-limited mode-2 ETA
-        // balancing. Zero leaves that domain's ETA unavailable; saturation
-        // probing and borrowable floors still operate normally.
+        // balancing and descending-work probe order. Zero lets an active input
+        // provider supply the estimate where one is available. A positive
+        // FEATURE estimate activates three-domain MAP/FEATURE/ATAC learning.
         uint64 dynamicThreadMapWorkEstimate = 0;
+        uint64 dynamicThreadFeatureWorkEstimate = 0;
         uint64 dynamicThreadAtacWorkEstimate = 0;
-       // FIFO waiter-queue admission. When 1, ThreadControl routes acquires
+        // FIFO waiter-queue admission. When 1, ThreadControl routes acquires
         // through a queue under the permit mutex: queued waiters are served
         // in arrival order, and new arrivals cannot fast-path past existing
         // waiters — eliminating the notify_one wakeup-bypass race.

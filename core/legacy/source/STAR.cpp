@@ -3525,6 +3525,44 @@ int main(int argInN, char *argIn[])
         exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_RUNTIME, P);
     }
 
+    // This is the first point at which mapping, asynchronous feature
+    // assignment, and concurrent ATAC have all joined.  Earlier summaries are
+    // useful interval diagnostics but cannot establish the permit exit
+    // invariant for a multi-arm worker.
+    if (P.dynamicThreadInterface == 1) {
+        const ThreadControl::MapPermitSnapshot permitFinal =
+            g_threadChunks.mapPermitSnapshot();
+        P.inOut->logMain
+            << "Dynamic thread final invariant: available="
+            << permitFinal.availablePermits
+            << " configured=" << permitFinal.configuredPermits
+            << " target=" << permitFinal.targetPermits
+            << " inUse=" << permitFinal.inUsePermits
+            << " waiters=" << permitFinal.currentWaiters
+            << " mapInUse=" << permitFinal.mapDomain.inUse
+            << " featureInUse=" << permitFinal.featureDomain.inUse
+            << " atacInUse=" << permitFinal.atacDomain.inUse
+            << " atacRetainedLease=" << permitFinal.atacDomain.inUse
+            << "\n" << flush;
+        const bool fixedPoolIncomplete =
+            P.dynamicThreadAtacController == 2 &&
+            permitFinal.availablePermits != permitFinal.configuredPermits;
+        if (permitFinal.inUsePermits != 0 ||
+            permitFinal.currentWaiters != 0 ||
+            permitFinal.mapDomain.inUse != 0 ||
+            permitFinal.featureDomain.inUse != 0 ||
+            permitFinal.atacDomain.inUse != 0 ||
+            fixedPoolIncomplete) {
+            ostringstream errOut;
+            errOut << "EXITING because of fatal ERROR: dynamic permit exit "
+                   << "invariant failed after all application arms joined\n"
+                   << "SOLUTION: identify the MAP, FEATURE, or ATAC lease that "
+                   << "was not released; do not accept this worker output.\n";
+            exitWithError(errOut.str(), std::cerr, P.inOut->logMain,
+                          EXIT_CODE_RUNTIME, P);
+        }
+    }
+
     if (!batchModeActive) {
         g_statsAll.writeLines(P.inOut->outChimJunction, P.pCh.outJunctionFormat, "#", STAR_VERSION + string("   ") + P.commandLine);
 
