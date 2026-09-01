@@ -1,0 +1,9 @@
+test	enabling_phase	description
+T1	1	BGZF detection and EOF classification
+T2	1	Index offsets, record ordinals, and sidecar lifecycle
+T3	2	Exact record equality at 1, 3, and 8 workers
+T4	3	Flex gzip-path versus BGZF output equivalence
+T5	2	Missing EOF and mid-block truncation errors
+T6	3	Mixed BGZF and plain-gzip Flex lanes
+T7-off	0	Existing gzip and CBQ regressions with range mode disabled when available
+T7-auto	3	Existing gzip and CBQ regressions with auto mode
