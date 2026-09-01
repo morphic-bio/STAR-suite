@@ -170,6 +170,9 @@ class Parameters {
         bool cbqInputExhausted = false;
         int cbqInputLastLoggedLane = -1;
         string readFilesCbqRangeMode = "auto"; // auto|off|range: indexed CBQ logical range readers
+        string readFilesBgzfMode = "auto"; // auto|off|range: BGZF ranges for fused Flex FASTQ
+        int bgzfReaderThreads = 0; // 0 derives reader count from runThreadN
+        int bgzfCrcCheck = 1; // verify CRC32 while inflating BGZF members
         struct CbqRangeTask {
             uint32 laneIndex = 0;
             uint64 firstRecord = 0;  // zero-based lane-local record offset

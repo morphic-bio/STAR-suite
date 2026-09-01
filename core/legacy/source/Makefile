@@ -224,7 +224,7 @@ OBJECTS = systemFunctions.o SoloMemoryProfile.o CountingSinkStress.o funPrimaryA
 	Transcript.o Transcript_alignScore.o Transcript_generateCigarP.o Chain.o \
 	Transcript_variationAdjust.o Variation.o ReadAlign_waspMap.o \
 	ReadAlign_storeAligns.o ReadAlign_stitchPieces.o ReadAlign_multMapSelect.o ReadAlign_mapOneRead.o readLoad.o \
-	ReadAlign_loadCbqReadView.o CbqStarAdapter.o CbqWriter.o CbqYNoYWriter.o \
+	ReadAlign_loadCbqReadView.o CbqStarAdapter.o BgzfStarAdapter.o CbqWriter.o CbqYNoYWriter.o \
 	ReadAlignChunk.o ReadAlignChunk_processChunks.o ReadAlignChunk_mapChunk.o \
 	OutSJ.o outputSJ.o blocksOverlap.o ThreadControl.o sysRemoveDir.o \
 	ReadAlign_maxMappableLength2strands.o binarySearch2.o\
@@ -695,6 +695,9 @@ BgzfIndex.o: input/BgzfIndex.cpp input/BgzfIndex.h
 	$(CXX) -c $(CPPFLAGS) $(CXXFLAGS) $(CXXFLAGS_common) $< -o $@
 
 BgzfRangeReader.o: input/BgzfRangeReader.cpp input/BgzfRangeReader.h input/BgzfIndex.h
+	$(CXX) -c $(CPPFLAGS) $(CXXFLAGS) $(CXXFLAGS_common) $< -o $@
+
+BgzfStarAdapter.o: input/BgzfStarAdapter.cpp input/BgzfStarAdapter.h input/BgzfRangeReader.h input/BgzfIndex.h input/InputContract.h
 	$(CXX) -c $(CPPFLAGS) $(CXXFLAGS) $(CXXFLAGS_common) $< -o $@
 
 CbqStarAdapter.o: input/CbqStarAdapter.cpp input/CbqStarAdapter.h input/CbqInputModule.h input/InputContract.h

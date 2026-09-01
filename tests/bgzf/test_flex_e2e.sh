@@ -66,6 +66,32 @@ PY
 }
 for layout in plain blocked mixed mixed_control; do make_config "${layout}"; done
 
+# The BGZF adapter is intentionally wired only into the fully-fused Flex
+# consumers. Build a tiny H0/H1 cache and make every comparison run exercise
+# that path rather than the standard align-everything path.
+fused_inputs="${WORKDIR}/fused_inputs"
+mkdir -p "${fused_inputs}" "${WORKDIR}/hash_cache_run"
+python3 "${ROOT_DIR}/scripts/flex_compat/render_flex_inputs_from_cr_config.py" \
+    --config "${WORKDIR}/plain.config.csv" \
+    --sample-whitelist-out "${fused_inputs}/sample_whitelist.tsv" \
+    --sample-probes-out "${fused_inputs}/sample_probes.tsv" \
+    --probe-list-out "${fused_inputs}/probe_list.txt" \
+    --probe-catalog "${WORKDIR}/assets_base/sample_probe_catalog.tsv" \
+    --emit-env > "${fused_inputs}/inputs.env"
+"${STAR_BIN}" --runMode hashCacheGenerate --runThreadN "${THREADS}" \
+    --genomeDir "${WORKDIR}/star_index" \
+    --soloType CB_UMI_Simple --soloCBstart 1 --soloCBlen 16 \
+    --soloUMIstart 17 --soloUMIlen 10 --soloBarcodeReadLength 0 \
+    --soloCBwhitelist "${WORKDIR}/assets_base/whitelist.txt" \
+    --flex yes --soloFlexExpectedCellsPerTag 3000 --soloFeatures Gene \
+    --soloProbeList "${fused_inputs}/probe_list.txt" \
+    --soloSampleWhitelist "${fused_inputs}/sample_whitelist.tsv" \
+    --soloSampleProbes "${fused_inputs}/sample_probes.tsv" \
+    --soloSampleProbeOffset 68 \
+    --hashCacheOutput "${fused_inputs}/hash_cache.bin" \
+    --hashCacheTiers H0,H1 --outSAMtype None \
+    --outFileNamePrefix "${WORKDIR}/hash_cache_run/"
+
 run_layout() {
     local layout="$1"
     local mode="$2"
@@ -78,7 +104,9 @@ from pathlib import Path
 wrapper, star, mode = sys.argv[1:]
 Path(wrapper).write_text(
     "#!/usr/bin/env bash\nexec " + shlex.quote(star) +
-    " --readFilesBgzfMode " + shlex.quote(mode) + " \"$@\"\n",
+    " --readFilesBgzfMode " + shlex.quote(mode) +
+    " --soloHashScreenFile " + shlex.quote(str(Path(wrapper).parent / "fused_inputs/hash_cache.bin")) +
+    " --flexPipeline yes --flexPipelineNTriage 0 --flexPipelineNSolo 0 --flexNoAlign 1 \"$@\"\n",
     encoding="utf-8")
 os.chmod(wrapper, 0o755)
 PY

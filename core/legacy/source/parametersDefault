@@ -460,6 +460,19 @@ readFilesCbqRangeMode       auto
                             off   ... use the shared CBQ reader
                             range ... require indexed range readers; unsupported configurations are fatal
 
+readFilesBgzfMode           auto
+    string: auto|off|range - BGZF parallel range readers for gzipped FASTX input (Flex)
+                            auto  ... sniff each mate header; use range readers for supported
+                                      order-independent fused Flex lanes, otherwise use zlib
+                            off   ... always use the existing zlib stream
+                            range ... require BGZF range readers; non-BGZF or unsupported input is fatal
+
+bgzfReaderThreads           0
+    int: >=0: reader/inflate worker threads. 0 ... derive from --runThreadN
+
+bgzfCrcCheck                1
+    int: 0/1 - verify per-block CRC32 during range-reader inflate
+
 readMapNumber               -1
     int: number of reads to map from the beginning of the file
                             -1: map all reads
