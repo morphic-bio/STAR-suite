@@ -135,39 +135,21 @@ fi
 
 if enabled T2; then
     [[ -x "${HARNESS}" ]] || die "T2 requires ${HARNESS}"
-    rm -f "${OUT_ROOT}/inputs/blocked.fastq.gz.bgzi"
-    "${HARNESS}" --mode index --input "${OUT_ROOT}/inputs/blocked.fastq.gz" --threads 3 \
-        > "${OUT_ROOT}/results/index_first.json"
-    "${HARNESS}" --mode index --input "${OUT_ROOT}/inputs/blocked.fastq.gz" --threads 3 \
-        > "${OUT_ROOT}/results/index_second.json"
-    python3 - "${OUT_ROOT}/inputs/blocked.fastq.gz" <<'PY'
-import os
-import sys
-path = sys.argv[1]
-st = os.stat(path)
-os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns + 1_000_000_000))
-PY
-    "${HARNESS}" --mode index --input "${OUT_ROOT}/inputs/blocked.fastq.gz" --threads 3 \
-        > "${OUT_ROOT}/results/index_invalidated.json"
+    "${HARNESS}" --mode blocks --input "${OUT_ROOT}/inputs/blocked.fastq.gz" \
+        > "${OUT_ROOT}/results/blocks.json"
     python3 - "${OUT_ROOT}/results/reference.json" \
-        "${OUT_ROOT}/results/index_first.json" \
-        "${OUT_ROOT}/results/index_second.json" \
-        "${OUT_ROOT}/results/index_invalidated.json" <<'PY'
+        "${OUT_ROOT}/results/blocks.json" <<'PY'
 import json
 import sys
-ref, first, second, invalidated = [json.load(open(path, encoding="utf-8")) for path in sys.argv[1:]]
-fields = ("compressed_offset", "compressed_size", "isize", "first_record_ordinal",
-          "records_starting", "first_record_offset")
-assert first["record_count"] == ref["record_count"]
-assert len(first["blocks"]) == len(ref["blocks"])
-for observed, expected in zip(first["blocks"], ref["blocks"]):
+ref, observed_blocks = [json.load(open(path, encoding="utf-8")) for path in sys.argv[1:]]
+fields = ("compressed_offset", "compressed_size", "isize")
+assert len(observed_blocks["blocks"]) == len(ref["blocks"])
+for observed, expected in zip(observed_blocks["blocks"], ref["blocks"]):
     assert {k: observed[k] for k in fields} == {k: expected[k] for k in fields}
-assert first["cache_status"] == "rebuilt"
-assert second["cache_status"] == "loaded"
-assert invalidated["cache_status"] == "rebuilt"
 PY
-    [[ -f "${OUT_ROOT}/inputs/blocked.fastq.gz.bgzi" ]] || die "T2 sidecar was not written"
-    pass "T2 index and sidecar lifecycle"
+    [[ ! -e "${OUT_ROOT}/inputs/blocked.fastq.gz.bgzi" ]] \
+        || die "T2 runtime unexpectedly wrote a BGZF sidecar"
+    pass "T2 inline BC/BSIZE traversal without a sidecar"
 fi
 
 if enabled T3; then

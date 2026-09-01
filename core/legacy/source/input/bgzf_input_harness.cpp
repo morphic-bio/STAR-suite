@@ -1,15 +1,15 @@
-#include "input/BgzfIndex.h"
+#include "input/BgzfBlockReader.h"
 #include "input/BgzfRangeReader.h"
 
-#include <algorithm>
-#include <atomic>
 #include <cstdlib>
+#include <fcntl.h>
 #include <iomanip>
 #include <iostream>
-#include <mutex>
+#include <limits>
 #include <stdexcept>
 #include <string>
-#include <thread>
+#include <sys/stat.h>
+#include <unistd.h>
 #include <vector>
 
 namespace {
@@ -40,10 +40,6 @@ Options parse_args(int argc, char* argv[]) {
                 throw std::runtime_error("--crc-check must be 0 or 1");
             }
             options.crcCheck = value == "1";
-        } else if (arg == "--workers" || arg == "--crc-check") {
-            if (index + 1 >= argc) {
-                throw std::runtime_error(arg + " requires a value");
-            }
         } else {
             throw std::runtime_error("unknown or incomplete option: " + arg);
         }
@@ -77,105 +73,70 @@ uint64_t record_checksum(const star::input::BgzfFastqRecord& record) {
     return fnv1a_update(value, record.quality);
 }
 
-uint64_t partition_start(uint64_t total, uint32_t part, uint32_t parts) {
-    const uint64_t quotient = total / parts;
-    const uint64_t remainder = total % parts;
-    return quotient * part + std::min<uint64_t>(part, remainder);
+bool scan_blocks(const std::string& path,
+                 std::vector<star::input::BgzfBlock>* blocks,
+                 std::string* error) {
+    struct stat info;
+    if (::stat(path.c_str(), &info) != 0 || info.st_size < 0) {
+        *error = "could not stat BGZF input";
+        return false;
+    }
+    const uint64_t file_size = static_cast<uint64_t>(info.st_size);
+    const int input_fd = ::open(path.c_str(), O_RDONLY);
+    if (input_fd < 0) {
+        *error = "could not open BGZF input";
+        return false;
+    }
+    uint64_t offset = 0;
+    while (offset < file_size) {
+        star::input::BgzfBlock block;
+        bool is_eof = false;
+        if (!star::input::read_bgzf_block_header_fd(
+                input_fd, offset, file_size, &block, &is_eof, error)) {
+            ::close(input_fd);
+            return false;
+        }
+        if (is_eof) {
+            offset = file_size;
+            break;
+        }
+        blocks->push_back(block);
+        offset += block.compressedSize;
+    }
+    ::close(input_fd);
+    return true;
+}
+
+void print_blocks(const std::vector<star::input::BgzfBlock>& blocks) {
+    std::cout << "{\"blocks\":[";
+    for (size_t index = 0; index < blocks.size(); ++index) {
+        if (index != 0) {
+            std::cout << ',';
+        }
+        std::cout << "{\"compressed_offset\":" << blocks[index].compressedOffset
+                  << ",\"compressed_size\":" << blocks[index].compressedSize
+                  << ",\"isize\":" << blocks[index].isize << '}';
+    }
+    std::cout << "]}\n";
 }
 
 bool scan_records(const Options& options,
                   uint64_t* record_count,
                   uint64_t* checksum,
                   std::string* error) {
-    star::input::BgzfIndex index;
-    if (!index.open(options.input, options.workers, error)) {
+    star::input::BgzfRangeReader reader;
+    if (!reader.open(options.input, 0, std::numeric_limits<uint64_t>::max(),
+                     options.workers, options.crcCheck, error)) {
         return false;
     }
-    *record_count = index.record_count();
+    *record_count = 0;
     *checksum = 0;
-    if (index.record_count() == 0) {
-        return true;
+    star::input::BgzfFastqRecord record;
+    while (reader.next(&record, error)) {
+        *checksum += record_checksum(record);
+        ++*record_count;
     }
-    const uint32_t workers = static_cast<uint32_t>(
-        std::min<uint64_t>(options.workers, index.record_count()));
-    std::vector<uint64_t> counts(workers, 0);
-    std::vector<uint64_t> checksums(workers, 0);
-    std::vector<std::thread> threads;
-    std::atomic<bool> failed(false);
-    std::mutex error_mutex;
-    std::string worker_error;
-    threads.reserve(workers);
-    for (uint32_t worker = 0; worker < workers; ++worker) {
-        threads.emplace_back([&, worker]() {
-            const uint64_t begin = partition_start(index.record_count(), worker, workers);
-            const uint64_t end = partition_start(index.record_count(), worker + 1, workers);
-            star::input::BgzfRangeReader reader;
-            std::string local_error;
-            if (!reader.open(&index, begin, end - begin, options.crcCheck, &local_error)) {
-                failed.store(true);
-            } else {
-                star::input::BgzfFastqRecord record;
-                while (!failed.load() && reader.next(&record, &local_error)) {
-                    checksums[worker] += record_checksum(record);
-                    ++counts[worker];
-                }
-                if (local_error.empty() && counts[worker] != end - begin) {
-                    local_error = "BGZF range reader returned an incomplete record range";
-                }
-                if (!local_error.empty()) {
-                    failed.store(true);
-                }
-            }
-            if (!local_error.empty()) {
-                std::lock_guard<std::mutex> lock(error_mutex);
-                if (worker_error.empty()) {
-                    worker_error = local_error;
-                }
-            }
-        });
-    }
-    for (size_t worker = 0; worker < threads.size(); ++worker) {
-        threads[worker].join();
-    }
-    if (failed.load()) {
-        *error = worker_error.empty() ? "BGZF record worker failed" : worker_error;
-        return false;
-    }
-    uint64_t observed_count = 0;
-    for (uint32_t worker = 0; worker < workers; ++worker) {
-        observed_count += counts[worker];
-        *checksum += checksums[worker];
-    }
-    if (observed_count != index.record_count()) {
-        *error = "BGZF record workers did not cover the complete input";
-        return false;
-    }
-    return true;
-}
-
-void print_index(const star::input::BgzfIndex& index) {
-    std::cout << "{\"blocks\":[";
-    const std::vector<star::input::BgzfBlock>& blocks = index.blocks();
-    for (size_t block_index = 0; block_index < blocks.size(); ++block_index) {
-        if (block_index != 0) {
-            std::cout << ',';
-        }
-        const star::input::BgzfBlock& block = blocks[block_index];
-        std::cout << "{\"compressed_offset\":" << block.compressedOffset
-                  << ",\"compressed_size\":" << block.compressedSize
-                  << ",\"first_record_offset\":";
-        if (block.hasFirstRecordOffset) {
-            std::cout << block.firstRecordOffset;
-        } else {
-            std::cout << "null";
-        }
-        std::cout << ",\"first_record_ordinal\":" << block.firstRecordOrdinal
-                  << ",\"isize\":" << block.isize
-                  << ",\"records_starting\":" << block.recordsStarting << '}';
-    }
-    std::cout << "],\"cache_status\":\""
-              << star::input::bgzf_cache_status_name(index.cache_status())
-              << "\",\"record_count\":" << index.record_count() << "}\n";
+    return error->empty();
 }
 
 } // namespace
@@ -186,7 +147,7 @@ int main(int argc, char* argv[]) {
         std::string error;
         if (options.mode == "detect") {
             star::input::BgzfDetection detection;
-            if (!star::input::BgzfIndex::detect(options.input, &detection, &error)) {
+            if (!star::input::detect_bgzf(options.input, &detection, &error)) {
                 std::cerr << "ERROR: " << error << '\n';
                 return 1;
             }
@@ -195,13 +156,13 @@ int main(int argc, char* argv[]) {
                       << "}\n";
             return 0;
         }
-        if (options.mode == "index") {
-            star::input::BgzfIndex index;
-            if (!index.open(options.input, options.threads, &error)) {
+        if (options.mode == "blocks") {
+            std::vector<star::input::BgzfBlock> blocks;
+            if (!scan_blocks(options.input, &blocks, &error)) {
                 std::cerr << "ERROR: " << error << '\n';
                 return 1;
             }
-            print_index(index);
+            print_blocks(blocks);
             return 0;
         }
         if (options.mode == "records") {

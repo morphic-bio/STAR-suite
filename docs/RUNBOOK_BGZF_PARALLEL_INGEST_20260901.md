@@ -14,10 +14,11 @@ Related docs:
 ## Goal
 
 Parallel ingestion of BGZF-compressed FASTQ for the Flex pipeline, mirroring the
-CBQ indexed range-reader design:
+CBQ range-worker claim/complete design while fetching block boundaries lazily
+from each BGZF member:
 
 ```text
-BGZF block index -> per-worker block ranges -> raw-inflate + record parse -> fused Flex consumers
+inline BC/BSIZE -> in-memory work claims -> raw-inflate -> ordered FASTQ pairing -> fused Flex consumers
 ```
 
 Illumina/BCL-Convert-delivered `fastq.gz` files are BGZF (blocked gzip: many
@@ -54,8 +55,8 @@ Reference wall-clocks, JAX SC2300771 no-align, 32 threads (Supp Table S5 basis):
    Flex output), so the fast path is simply the Flex behavior. Bulk/scRNA wiring
    is a non-goal here (those paths carry the byte-exact legacy guarantee and get
    their own runbook + legacy mode later).
-4. No new external dependencies. No new file formats required at input; the
-   optional index sidecar (below) is a cache, never a requirement.
+4. No new external dependencies or sidecars. BGZF's inline `BC/BSIZE` metadata
+   is the only block-boundary source; the scheduler cache is memory-only.
 
 ## Detection
 
@@ -73,40 +74,35 @@ deflate stream, or trailer remains a hard truncation error.
 
 ## Design
 
-### 1. `input/BgzfIndex`
+### 1. `input/BgzfBlockReader` and work planning
 
-- Block scan by header hops: read the 18-byte header at offset, jump
-  `BSIZE+1`, repeat. Produces `vector<{compressedOffset, compressedSize, isize}>`
-  (`ISIZE` from the member trailer if wanted; may be deferred).
-- **Record-count pass (required for mate pairing):** one parallel
-  decompress-and-count pass over blocks records `recordsEndingPerBlock` (or
-  cumulative record ordinals at block boundaries). Decompress-only throughput
-  makes this cheap, and it is amortized by the sidecar.
-- Optional sidecar cache `<file>.bgzi`: block offsets + record ordinals.
-  Auto-written on first index build, auto-read (and validated against file
-  size/mtime) on reuse. A cache only — absence or mismatch triggers a rebuild,
-  never an error.
+- There is no pre-scan and no external index. An inflate worker reads the
+  18-byte header at the current compressed frontier, obtains `BSIZE+1` from
+  `BC`, and extends its contiguous work claim to a bounded target size.
+- The scheduler caches only the claimed member descriptors in memory and marks
+  each work unit claimed, completed, and consumed. Completed work is keyed by
+  claim sequence so out-of-order inflation has bounded memory use.
+- Work sizing aims to keep multiple claims available per inflate worker while
+  bounding ready data: 64 KiB to 1 MiB compressed per claim, derived from file
+  size and worker count, capped at 64 members per claim, with at most two claims
+  per worker (minimum four) outstanding per mate stream.
 
 ### 2. `input/BgzfRangeReader`
 
-- A worker owns a contiguous block range. Raw-inflate each member (skip the
+- Workers raw-inflate every member in their claimed compressed range (skip the
   header, `inflate` the deflate stream, optional CRC32 verify behind a flag,
   default on).
-- **Record boundaries are exact, not heuristic:** with per-block record
-  ordinals from the index, each worker's range is defined in *record* space
-  (records k..m), and the worker knows which block its first record starts in
-  and at what decompressed offset (stored during the count pass, or derived by
-  parsing forward from the block in which record k begins). A record spanning
-  past the range's last block is completed by inflating into the following
-  block(s) — bounded overlap, deterministic ownership: a worker owns exactly
-  the records that begin in its range.
+- Completed claims are assembled by claim sequence into the original byte
+  stream before FASTQ parsing. Record boundaries are therefore exact even when
+  a line or record spans members; no `@` scan is used to find boundaries.
 
 ### 3. Mate pairing (R1/R2)
 
-R1 and R2 are separate files with equal record counts. Sharding is by **record
-ordinal**: worker w owns records [k_w, k_{w+1}) in *both* files, using each
-file's own index to locate the containing blocks. The record-count pass makes
-this exact. A mismatch in total record counts between mates is a hard error.
+R1 and R2 are separate ordered streams whose BGZF block layouts can differ.
+Each mate is inflated in parallel and reassembled independently in file order;
+the adapter parses one record from each ordered stream and pairs them by the
+ordinal assigned during parsing. One mate ending before the other is a hard
+record-count mismatch. This preserves exact pairing without a count pass.
 
 ### 4. Wiring
 
@@ -164,9 +160,9 @@ Cell Ranger fixture used by `tests/run_dynamic_threads_tiny_fixture.sh`.
 
 - **T1 detection unit tests:** BGZF, plain gzip, gzip+other-FEXTRA, empty file,
   bare EOF marker, missing EOF marker.
-- **T2 index correctness:** block count and offsets equal an independent
-  reference scanner (small python checker committed under `tests/`); sidecar
-  write/read/invalidation (touch file → rebuild).
+- **T2 inline block traversal:** block count and offsets obtained from
+  `BC/BSIZE` equal an independent reference scanner (small python checker
+  committed under `tests/`); assert that no `.bgzi` sidecar is written.
 - **T3 record equality:** records parsed via BgzfRangeReader over N workers ==
   `zcat` reference: same count, same order-insensitive 64-bit checksum of
   (name, seq, qual) triples; run at 1, 3, 8 workers.
@@ -182,8 +178,8 @@ Cell Ranger fixture used by `tests/run_dynamic_threads_tiny_fixture.sh`.
 - **T7 regression:** existing gzip/CBQ test suites pass unchanged with the
   module compiled in and `readFilesBgzfMode off` as well as `auto`.
 
-## Phase 1 — `BgzfIndex` (+ sidecar, + record-count pass)
-## Phase 2 — `BgzfRangeReader` (inflate, CRC, exact record ranges)
+## Phase 1 — `BgzfBlockReader` (inline `BC/BSIZE` work discovery)
+## Phase 2 — `BgzfRangeReader` (inflate, CRC, ordered stream assembly)
 ## Phase 3 — `BgzfStarAdapter` wiring, flags, docs in parametersDefault
 ## Phase 4 — benchmarks
 

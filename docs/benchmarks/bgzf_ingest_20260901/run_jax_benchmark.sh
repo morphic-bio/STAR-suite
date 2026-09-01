@@ -43,15 +43,6 @@ reads_r2_csv="$(join_comma "${reads_r2[@]}")"
 reads_r1_csv="$(join_comma "${reads_r1[@]}")"
 cbq_csv="$(join_comma "${cbq_files[@]}")"
 
-if [[ "${MODE}" == bgzf ]]; then
-    for input in "${reads_r1[@]}" "${reads_r2[@]}"; do
-        [[ -s "${input}.bgzi" ]] || {
-            echo "ERROR: missing amortized BGZF sidecar ${input}.bgzi; run prepare_jax_bgzi.sh first" >&2
-            exit 1
-        }
-    done
-fi
-
 mkdir -p "${RUN_DIR}" "${LOG_DIR}"
 {
     date -u '+date_utc=%Y-%m-%dT%H:%M:%SZ'

@@ -11,7 +11,7 @@
 #include <vector>
 #include <zlib.h>
 #include "FlexGdna.h"
-#include "input/BgzfIndex.h"
+#include "input/BgzfStarAdapter.h"
 
 static constexpr uint32_t kFlexPipeNameMax = 512;
 static constexpr uint32_t kFlexPipeSeqMax = DEF_readSeqLengthMax + 1;
@@ -162,15 +162,11 @@ struct FlexCbqRangeTask {
 
 struct FlexBgzfLane {
     bool range = false;
-    std::shared_ptr<star::input::BgzfIndex> mate0Index;
-    std::shared_ptr<star::input::BgzfIndex> mate1Index;
-    uint64_t recordCount = 0;
+    std::shared_ptr<star::input::BgzfStarAdapter> adapter;
 };
 
 struct FlexBgzfRangeTask {
     int laneId = 0;
-    uint64_t firstRecord = 0;
-    uint64_t recordCount = 0;
 };
 
 struct FlexPipelineState {

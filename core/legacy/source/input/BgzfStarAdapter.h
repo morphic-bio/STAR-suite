@@ -5,6 +5,7 @@
 #include "input/InputContract.h"
 
 #include <cstdint>
+#include <mutex>
 #include <string>
 
 namespace star {
@@ -12,8 +13,8 @@ namespace input {
 
 struct BgzfStarAdapterOptions {
     uint32_t lane_index = 0;
-    uint64_t first_record = 0;
-    uint64_t record_count = 0;
+    uint32_t mate0_reader_threads = 0;
+    uint32_t mate1_reader_threads = 0;
     bool crc_check = true;
 };
 
@@ -26,26 +27,27 @@ struct BgzfStarRecord {
     char read_filter = 'Y';
 };
 
-// Pairs two independently indexed BGZF mates by source record ordinal and
-// exposes one record-at-a-time producer semantics like the other STAR input
-// adapters. The indexes remain owned by the caller and must outlive the adapter.
+// Pairs two ordered BGZF streams by source ordinal. Member inflation is
+// parallel inside each stream; the short parse/pair section is serialized so
+// multiple fused Flex consumers can safely share one lane adapter.
 class BgzfStarAdapter {
 public:
-    bool open(const BgzfIndex* mate0_index,
-              const BgzfIndex* mate1_index,
+    bool open(const std::string& mate0_path,
+              const std::string& mate1_path,
               const BgzfStarAdapterOptions& options,
               std::string* error);
 
     InputStatus next_record(BgzfStarRecord* record, std::string* error);
 
     uint64_t records_read() const;
-    uint64_t record_count() const;
 
 private:
     BgzfRangeReader readers_[2];
     BgzfStarAdapterOptions options_;
+    mutable std::mutex nextMutex_;
     uint64_t recordsRead_ = 0;
     bool open_ = false;
+    bool ended_ = false;
 };
 
 } // namespace input
