@@ -135,6 +135,23 @@ bgzfCrcCheck                1
   readers). Accounting them under the FEATURE domain is future work, noted in
   the code with a TODO, not attempted here.
 
+## Verification gates (expected-red TDD)
+
+Phase 0 commits T1–T7 before any implementation, so they are EXPECTED RED at
+Phase 0. Encode expectations explicitly: each test declares its enabling phase
+in a manifest (`tests/bgzf/PHASES.tsv`); tests for phases not yet implemented
+report SKIP (with the pending phase named), never silent failure. The gate rule
+is then:
+
+- At every phase: all pre-existing suites (Flex smoke, gzip/CBQ regression,
+  T7-with-mode-off) must be GREEN. These never depend on new code.
+- After Phase 1: T1, T2 green. After Phase 2: + T3, T5. After Phase 3: + T4,
+  T6, and full T7 (mode auto). A test that has gone green must never go red
+  again ("no backsliding").
+- "Do not proceed past a red gate" means: an UNEXPECTED failure — a red test
+  whose enabling phase is complete, or any pre-existing suite — blocks
+  progress. Expected-phase SKIPs do not.
+
 ## Phase 0 — fixtures and gold tests (write these first)
 
 Fixture prep: `tools/make_bgzf_fixture.sh` — re-blocks an existing gzip fixture
