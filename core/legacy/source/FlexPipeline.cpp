@@ -10,6 +10,7 @@
 #include "ReadAlign.h"
 #include "Stats.h"
 #include "input/CbqInputModule.h"
+#include "input/BgzfStarAdapter.h"
 
 #include <algorithm>
 #include <cstring>
@@ -452,6 +453,181 @@ static uint64_t processOneLane(
     return nReads;
 }
 
+static uint64_t processOneBgzfRange(
+    FlexPipelineState *st, Parameters &P,
+    const FlexBgzfRangeTask &task,
+    SoloReadFeature *readFeat, Stats *stats,
+    const std::unordered_set<uint32_t> &samplePreFilter,
+    SampleDetector *sampleDet, bool sampleDetReady,
+    SoloReadBarcode &localBar, bool noAlign)
+{
+    const FlexBgzfLane &lanePlan = st->bgzfLanes[static_cast<size_t>(task.laneId)];
+    star::input::BgzfStarAdapter adapter;
+    star::input::BgzfStarAdapterOptions options;
+    options.lane_index = static_cast<uint32_t>(task.laneId);
+    options.first_record = task.firstRecord;
+    options.record_count = task.recordCount;
+    options.crc_check = P.bgzfCrcCheck == 1;
+    std::string inputError;
+    if (!adapter.open(lanePlan.mate0Index.get(), lanePlan.mate1Index.get(),
+                      options, &inputError)) {
+        std::ostringstream message;
+        message << "Flex BGZF range could not open lane " << task.laneId
+                << " first=" << task.firstRecord << " count=" << task.recordCount
+                << ": " << inputError;
+        st->failInput(message.str());
+        return 0;
+    }
+
+    auto &cache = FlexHashScreenCache::instance();
+    const uint32_t sampleTagOffset = P.pSolo.sampleProbeOffset;
+    const bool hasSamplePreFilter = !samplePreFilter.empty();
+
+    uint8_t packedScratch[4];
+    char dummySeq[4] = {'\0'};
+    char dummyQual[4] = {'\0'};
+    char seq0[kFlexPipeSeqMax], seq1[kFlexPipeSeqMax];
+    char qual0[kFlexPipeSeqMax], qual1[kFlexPipeSeqMax];
+    char name[kFlexPipeNameMax];
+
+    uint64_t nReads = 0;
+    star::input::BgzfStarRecord record;
+    while (!st->inputFailed.load(std::memory_order_relaxed)) {
+        const star::input::InputStatus status = adapter.next_record(&record, &inputError);
+        if (status == star::input::InputStatus::End) {
+            break;
+        }
+        if (status == star::input::InputStatus::Error) {
+            std::ostringstream message;
+            message << "Flex BGZF range failed in lane " << task.laneId
+                    << " first=" << task.firstRecord << " count=" << task.recordCount
+                    << ": " << inputError;
+            st->failInput(message.str());
+            break;
+        }
+        const size_t readLen0Size = record.mates[0].sequence.size();
+        const size_t readLen1Size = record.mates[1].sequence.size();
+        if (readLen0Size >= sizeof(seq0) || readLen1Size >= sizeof(seq1) ||
+            record.mates[0].quality.size() >= sizeof(qual0) ||
+            record.mates[1].quality.size() >= sizeof(qual1)) {
+            std::ostringstream message;
+            message << "Flex BGZF record " << record.read_ordinal
+                    << " in lane " << task.laneId
+                    << " exceeds STAR's maximum read length";
+            st->failInput(message.str());
+            break;
+        }
+        std::memcpy(seq0, record.mates[0].sequence.data(), readLen0Size);
+        std::memcpy(seq1, record.mates[1].sequence.data(), readLen1Size);
+        std::memcpy(qual0, record.mates[0].quality.data(), readLen0Size);
+        std::memcpy(qual1, record.mates[1].quality.data(), readLen1Size);
+        seq0[readLen0Size] = '\0';
+        seq1[readLen1Size] = '\0';
+        qual0[readLen0Size] = '\0';
+        qual1[readLen1Size] = '\0';
+        const uint32_t readLen0 = static_cast<uint32_t>(readLen0Size);
+        const uint32_t readLen1 = static_cast<uint32_t>(readLen1Size);
+        const size_t nameLength = std::min(record.read_name.size(),
+                                           static_cast<size_t>(kFlexPipeNameMax - 1));
+        std::memset(name, 0, sizeof(name));
+        if (nameLength != 0) {
+            std::memcpy(name, record.read_name.data(), nameLength);
+        }
+
+        const uint64_t iReadAll = st->iReadAllGlobal.fetch_add(1);
+        st->counters.perLaneReads[static_cast<size_t>(task.laneId)].fetch_add(
+            1, std::memory_order_relaxed);
+        ++nReads;
+
+        bool sampleOK = true;
+        if (hasSamplePreFilter && sampleTagOffset + 8 <= readLen0) {
+            uint32_t tagCode = 0;
+            bool encodable = true;
+            for (int index = 0; index < 8; ++index) {
+                const uint8_t nib =
+                    g_asciiToNib[static_cast<uint8_t>(seq0[sampleTagOffset + index])];
+                if (nib == 0) {
+                    encodable = false;
+                    break;
+                }
+                tagCode = (tagCode << 4) | nib;
+            }
+            if (!encodable || samplePreFilter.find(tagCode) == samplePreFilter.end()) {
+                sampleOK = false;
+            }
+        }
+
+        FlexHashScreenDecision decision;
+        if (sampleOK) {
+            decision = cache.classifyReadH0H1Offset0(seq0, readLen0);
+        } else {
+            decision.action = FlexHashScreenDecision::Pass;
+        }
+
+        if (decision.action == FlexHashScreenDecision::Keep ||
+            decision.action == FlexHashScreenDecision::Deny) {
+            char *readSeqPtrs[2] = {dummySeq, seq1};
+            char *readQualPtrs[2] = {dummyQual, qual1};
+            uint64 readLens[2] = {0, readLen1};
+            std::string readNameExtra;
+            localBar.getCBandUMI(readSeqPtrs, readQualPtrs, readLens, readNameExtra,
+                                 static_cast<uint32_t>(task.laneId), name);
+
+            uint8_t detectedSampleToken = 0xFF;
+            if (sampleDetReady && sampleTagOffset + 8 <= readLen0) {
+                nuclPackBAM(seq0 + sampleTagOffset,
+                            reinterpret_cast<char *>(packedScratch), 8);
+                const uint32_t detIdx = sampleDet->detectSampleFromPackedTag(packedScratch);
+                if (detIdx > 0) {
+                    detectedSampleToken = static_cast<uint8_t>(detIdx & 0x1Fu);
+                }
+            }
+            localBar.detectedSampleToken = detectedSampleToken;
+
+            if (decision.action == FlexHashScreenDecision::Keep) {
+                record_flex_hash_screen_keep(readFeat, localBar, iReadAll,
+                                             decision.geneIdx15, decision.cacheClass,
+                                             decision.probeRegion);
+                stats->hashScreenKeep++;
+                if (localBar.cbMatch < 0) {
+                    stats->hashScreenKeepNoBarcode++;
+                }
+                st->counters.triageKeep.fetch_add(1);
+            } else {
+                record_flex_hash_screen_deny(readFeat, localBar, iReadAll,
+                                             "NEG_PROBE_AMBIG");
+                stats->hashScreenDeny++;
+                st->counters.triageDeny.fetch_add(1);
+            }
+        } else {
+            st->counters.triageMiss.fetch_add(1);
+            if (!noAlign) {
+                EnrichedPacket packet;
+                std::memcpy(packet.name, name, kFlexPipeNameMax);
+                std::memcpy(packet.seq[0], seq0, readLen0 + 1);
+                std::memcpy(packet.seq[1], seq1, readLen1 + 1);
+                std::memcpy(packet.qual[0], qual0, readLen0 + 1);
+                std::memcpy(packet.qual[1], qual1, readLen1 + 1);
+                packet.readLen[0] = readLen0;
+                packet.readLen[1] = readLen1;
+                packet.iReadAll = iReadAll;
+                packet.laneId = static_cast<uint8_t>(task.laneId);
+                packet.readFilesIndex = static_cast<uint32_t>(task.laneId);
+                packet.readFilter = record.read_filter;
+                packet.eof = false;
+                packet.cbMatch = -1;
+                packet.cbMatchIndN = 0;
+                packet.umiB = 0;
+                packet.detectedSampleToken = 0xFF;
+                packet.hashScreenSampleIdx = 0;
+                st->alignQ.push(std::move(packet));
+            }
+        }
+        st->counters.readsTotal.fetch_add(1);
+    }
+    return nReads;
+}
+
 static uint64_t processCbqModuleRecords(
     FlexPipelineState *st, Parameters &P, int laneId,
     const std::string &cbqPath,
@@ -749,6 +925,198 @@ bool flexPrepareCbqRangeTasks(FlexPipelineState *state, Parameters &P,
     return !state->cbqRangeTasks.empty();
 }
 
+bool flexPrepareBgzfRangeTasks(FlexPipelineState *state, Parameters &P,
+                               int nWorkers, std::string *reason,
+                               bool *fatalError) {
+    if (fatalError != nullptr) {
+        *fatalError = false;
+    }
+    if (state == nullptr || nWorkers <= 0) {
+        if (reason != nullptr) {
+            *reason = "invalid BGZF range task planner inputs";
+        }
+        if (fatalError != nullptr) {
+            *fatalError = true;
+        }
+        return false;
+    }
+    state->bgzfLanes.assign(static_cast<size_t>(state->nLanes), FlexBgzfLane());
+    state->bgzfRangeTasks.clear();
+    state->nextBgzfRangeIdx.store(0, std::memory_order_relaxed);
+    state->bgzfReaderWorkers = 0;
+    state->bgzfRangeActive = false;
+
+    const std::string mode = P.readFilesBgzfMode;
+    if (mode == "off") {
+        if (reason != nullptr) {
+            *reason = "disabled by --readFilesBgzfMode off";
+        }
+        return false;
+    }
+    if (mode != "auto" && mode != "range") {
+        if (reason != nullptr) {
+            *reason = "unrecognized --readFilesBgzfMode=" + mode;
+        }
+        if (fatalError != nullptr) {
+            *fatalError = true;
+        }
+        return false;
+    }
+    if (P.readFilesTypeN != 1 || P.readFilesNames.size() < 2) {
+        if (reason != nullptr) {
+            *reason = "BGZF range mode requires paired FASTQ input";
+        }
+        if (fatalError != nullptr) {
+            *fatalError = mode == "range";
+        }
+        return false;
+    }
+
+    const int configuredWorkers = P.bgzfReaderThreads == 0
+        ? nWorkers : std::min(nWorkers, P.bgzfReaderThreads);
+    const uint32_t indexThreads = static_cast<uint32_t>(std::max(1, configuredWorkers));
+    uint64_t totalRecords = 0;
+    int rangeLanes = 0;
+    for (int lane = 0; lane < state->nLanes; ++lane) {
+        if (P.readFilesNames[0].size() <= static_cast<size_t>(lane) ||
+            P.readFilesNames[1].size() <= static_cast<size_t>(lane)) {
+            if (reason != nullptr) {
+                *reason = "FASTQ mate list is incomplete at lane " + std::to_string(lane);
+            }
+            if (fatalError != nullptr) {
+                *fatalError = true;
+            }
+            return false;
+        }
+        const std::string &mate0Path = P.readFilesNames[0][static_cast<size_t>(lane)];
+        const std::string &mate1Path = P.readFilesNames[1][static_cast<size_t>(lane)];
+        star::input::BgzfDetection detections[2];
+        std::string inputError;
+        if (!star::input::BgzfIndex::detect(mate0Path, &detections[0], &inputError) ||
+            !star::input::BgzfIndex::detect(mate1Path, &detections[1], &inputError)) {
+            if (reason != nullptr) {
+                *reason = "lane " + std::to_string(lane) + ": " + inputError;
+            }
+            if (fatalError != nullptr) {
+                *fatalError = true;
+            }
+            return false;
+        }
+        for (int mate = 0; mate < 2; ++mate) {
+            if (detections[mate].isBgzf && !detections[mate].hasEofMarker) {
+                if (reason != nullptr) {
+                    *reason = "lane " + std::to_string(lane) + " mate " +
+                              std::to_string(mate) +
+                              " is detected BGZF but is missing the EOF marker";
+                }
+                if (fatalError != nullptr) {
+                    *fatalError = true;
+                }
+                return false;
+            }
+        }
+        const bool pairedBgzf = detections[0].isBgzf && detections[1].isBgzf;
+        if (!pairedBgzf) {
+            if (mode == "range") {
+                if (reason != nullptr) {
+                    *reason = "lane " + std::to_string(lane) +
+                              " has a non-BGZF mate";
+                }
+                if (fatalError != nullptr) {
+                    *fatalError = true;
+                }
+                return false;
+            }
+            continue;
+        }
+
+        FlexBgzfLane &lanePlan = state->bgzfLanes[static_cast<size_t>(lane)];
+        lanePlan.mate0Index.reset(new star::input::BgzfIndex());
+        lanePlan.mate1Index.reset(new star::input::BgzfIndex());
+        if (!lanePlan.mate0Index->open(mate0Path, indexThreads, &inputError) ||
+            !lanePlan.mate1Index->open(mate1Path, indexThreads, &inputError)) {
+            if (reason != nullptr) {
+                *reason = "lane " + std::to_string(lane) + ": " + inputError;
+            }
+            if (fatalError != nullptr) {
+                *fatalError = true;
+            }
+            return false;
+        }
+        if (lanePlan.mate0Index->record_count() != lanePlan.mate1Index->record_count()) {
+            if (reason != nullptr) {
+                std::ostringstream out;
+                out << "lane " << lane << " mate record-count mismatch: "
+                    << lanePlan.mate0Index->record_count() << " versus "
+                    << lanePlan.mate1Index->record_count();
+                *reason = out.str();
+            }
+            if (fatalError != nullptr) {
+                *fatalError = true;
+            }
+            return false;
+        }
+        lanePlan.range = true;
+        lanePlan.recordCount = lanePlan.mate0Index->record_count();
+        totalRecords += lanePlan.recordCount;
+        ++rangeLanes;
+    }
+
+    if (rangeLanes == 0) {
+        if (reason != nullptr) {
+            *reason = "no lane has two BGZF mates";
+        }
+        return false;
+    }
+
+    if (totalRecords != 0) {
+        state->bgzfReaderWorkers = static_cast<int>(std::min<uint64_t>(
+            static_cast<uint64_t>(configuredWorkers), totalRecords));
+        const uint64_t chunkSize =
+            (totalRecords + static_cast<uint64_t>(state->bgzfReaderWorkers) - 1U) /
+            static_cast<uint64_t>(state->bgzfReaderWorkers);
+        for (int worker = 0; worker < state->bgzfReaderWorkers; ++worker) {
+            const uint64_t globalFirst = static_cast<uint64_t>(worker) * chunkSize;
+            if (globalFirst >= totalRecords) {
+                break;
+            }
+            const uint64_t globalEnd = std::min(totalRecords, globalFirst + chunkSize);
+            uint64_t laneGlobalFirst = 0;
+            for (int lane = 0; lane < state->nLanes; ++lane) {
+                const FlexBgzfLane &lanePlan = state->bgzfLanes[static_cast<size_t>(lane)];
+                if (!lanePlan.range) {
+                    continue;
+                }
+                const uint64_t laneGlobalEnd = laneGlobalFirst + lanePlan.recordCount;
+                if (lanePlan.recordCount > 0 && globalFirst < laneGlobalEnd &&
+                    globalEnd > laneGlobalFirst) {
+                    const uint64_t overlapFirst = std::max(globalFirst, laneGlobalFirst);
+                    const uint64_t overlapEnd = std::min(globalEnd, laneGlobalEnd);
+                    FlexBgzfRangeTask task;
+                    task.laneId = lane;
+                    task.firstRecord = overlapFirst - laneGlobalFirst;
+                    task.recordCount = overlapEnd - overlapFirst;
+                    state->bgzfRangeTasks.push_back(task);
+                }
+                laneGlobalFirst = laneGlobalEnd;
+                if (laneGlobalFirst >= globalEnd) {
+                    break;
+                }
+            }
+        }
+    }
+
+    state->bgzfRangeActive = true;
+    if (reason != nullptr) {
+        std::ostringstream out;
+        out << state->bgzfRangeTasks.size() << " ranges across "
+            << rangeLanes << " BGZF lanes and " << totalRecords
+            << " records using " << state->bgzfReaderWorkers << " readers";
+        *reason = out.str();
+    }
+    return true;
+}
+
 void *flexLaneReaderFullThread(void *arg) {
     FlexLaneReaderArgs *ctx = static_cast<FlexLaneReaderArgs *>(arg);
     FlexPipelineState *st = ctx->state;
@@ -786,7 +1154,8 @@ void *flexLaneReaderFullThread(void *arg) {
                                    !st->cbqRangeTasks.empty());
     if (useCbqRangeTasks) {
         FlexCbqRangeTask task;
-        while (st->claimNextCbqRange(&task)) {
+        while (!st->inputFailed.load(std::memory_order_relaxed) &&
+               st->claimNextCbqRange(&task)) {
             ensureSampleDetector();
             const std::string &cbqPath =
                 st->laneFiles[static_cast<size_t>(task.laneId)].r2path;
@@ -795,9 +1164,26 @@ void *flexLaneReaderFullThread(void *arg) {
                                localBar, noAlign);
         }
     } else {
+        // BGZF readers intentionally remain outside permit domains in v1,
+        // matching CBQ. TODO: account them under FEATURE in a later scheduler pass.
+        if (st->bgzfRangeActive && ctx->threadId < st->bgzfReaderWorkers) {
+            FlexBgzfRangeTask task;
+            while (!st->inputFailed.load(std::memory_order_relaxed) &&
+                   st->claimNextBgzfRange(&task)) {
+                ensureSampleDetector();
+                processOneBgzfRange(st, P, task, readFeat, stats,
+                                    samplePreFilter, sampleDet, sampleDetReady,
+                                    localBar, noAlign);
+            }
+        }
+
         // Phase 1: Lane work-stealing loop — claim and process lanes until none remain
         int lane;
-        while ((lane = st->claimNextLane()) >= 0) {
+        while (!st->inputFailed.load(std::memory_order_relaxed) &&
+               (lane = st->claimNextLane()) >= 0) {
+            if (st->laneUsesBgzfRange(lane)) {
+                continue;
+            }
             // Lazy-init SampleDetector on first lane claim (threads that never
             // claim a lane skip the file I/O entirely)
             ensureSampleDetector();
