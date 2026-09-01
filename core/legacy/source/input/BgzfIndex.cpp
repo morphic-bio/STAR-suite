@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <fcntl.h>
 #include <limits>
 #include <mutex>
 #include <sstream>
@@ -88,6 +89,36 @@ bool read_exact(std::ifstream& input,
     }
     input.read(static_cast<char*>(destination), static_cast<std::streamsize>(size));
     return input.good() || static_cast<size_t>(input.gcount()) == size;
+}
+
+bool read_exact_fd(int input_fd,
+                   uint64_t offset,
+                   void* destination,
+                   size_t size,
+                   std::string* error) {
+    unsigned char* output = static_cast<unsigned char*>(destination);
+    size_t completed = 0;
+    while (completed < size) {
+        if (offset + completed > static_cast<uint64_t>(std::numeric_limits<off_t>::max())) {
+            return set_error(error, "BGZF member offset exceeds platform file limits");
+        }
+        const ssize_t count = ::pread(input_fd,
+                                      output + completed,
+                                      size - completed,
+                                      static_cast<off_t>(offset + completed));
+        if (count < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            return set_error(error, std::string("could not read BGZF member: ") +
+                                    std::strerror(errno));
+        }
+        if (count == 0) {
+            return set_error(error, "unexpected end of BGZF member");
+        }
+        completed += static_cast<size_t>(count);
+    }
+    return true;
 }
 
 struct FileIdentity {
@@ -227,12 +258,12 @@ struct CountResult {
     bool endsWithNewline = false;
 };
 
-bool count_block(const std::string& path,
+bool count_block(int input_fd,
                  const BgzfBlock& block,
                  CountResult* result,
                  std::string* error) {
     std::vector<unsigned char> inflated;
-    if (!inflate_bgzf_block(path, block, true, &inflated, error)) {
+    if (!inflate_bgzf_block_fd(input_fd, block, true, &inflated, error)) {
         return false;
     }
     result->nonempty = !inflated.empty();
@@ -268,13 +299,23 @@ bool count_records(const std::string& path,
         workers.reserve(nthreads);
         for (uint32_t thread = 0; thread < nthreads; ++thread) {
             workers.emplace_back([&]() {
+                const int input_fd = ::open(path.c_str(), O_RDONLY);
+                if (input_fd < 0) {
+                    failed.store(true);
+                    std::lock_guard<std::mutex> lock(error_mutex);
+                    if (worker_error.empty()) {
+                        worker_error = "could not open BGZF input " + path + ": " +
+                                       std::strerror(errno);
+                    }
+                    return;
+                }
                 while (!failed.load()) {
                     const size_t index = next.fetch_add(1);
                     if (index >= blocks->size()) {
                         break;
                     }
                     std::string local_error;
-                    if (!count_block(path, (*blocks)[index], &counts[index], &local_error)) {
+                    if (!count_block(input_fd, (*blocks)[index], &counts[index], &local_error)) {
                         failed.store(true);
                         std::lock_guard<std::mutex> lock(error_mutex);
                         if (worker_error.empty()) {
@@ -283,6 +324,7 @@ bool count_records(const std::string& path,
                         break;
                     }
                 }
+                ::close(input_fd);
             });
         }
         for (size_t thread = 0; thread < workers.size(); ++thread) {
@@ -540,14 +582,34 @@ bool inflate_bgzf_block(const std::string& path,
     if (output == nullptr) {
         return set_error(error, "BGZF inflate output is null");
     }
-    std::ifstream input(path.c_str(), std::ios::binary);
-    if (!input.good()) {
-        return set_error(error, "could not open BGZF input " + path);
+    const int input_fd = ::open(path.c_str(), O_RDONLY);
+    if (input_fd < 0) {
+        return set_error(error, "could not open BGZF input " + path + ": " +
+                                std::strerror(errno));
+    }
+    const bool result = inflate_bgzf_block_fd(input_fd, block, check_crc, output, error);
+    ::close(input_fd);
+    return result;
+}
+
+bool inflate_bgzf_block_fd(int input_fd,
+                           const BgzfBlock& block,
+                           bool check_crc,
+                           std::vector<unsigned char>* output,
+                           std::string* error) {
+    if (output == nullptr) {
+        return set_error(error, "BGZF inflate output is null");
+    }
+    if (input_fd < 0) {
+        return set_error(error, "BGZF inflate input descriptor is invalid");
     }
     std::vector<unsigned char> member(block.compressedSize);
-    if (!read_exact(input, block.compressedOffset, member.data(), member.size())) {
+    std::string read_error;
+    if (!read_exact_fd(input_fd, block.compressedOffset, member.data(), member.size(),
+                       &read_error)) {
         std::ostringstream message;
-        message << "could not read BGZF member at block offset " << block.compressedOffset;
+        message << "could not read BGZF member at block offset " << block.compressedOffset
+                << ": " << read_error;
         return set_error(error, message.str());
     }
     if (member.size() < 26) {
@@ -629,16 +691,13 @@ bool BgzfIndex::open(const std::string& path,
     if (!detection.isBgzf) {
         return set_error(error, "input is not BGZF: " + path);
     }
-    if (!detection.hasEofMarker) {
-        return set_error(error, "detected BGZF input is missing the required EOF marker: " + path);
-    }
-
     path_ = path;
     fileSize_ = identity.size;
     mtimeSeconds_ = identity.mtimeSeconds;
     mtimeNanoseconds_ = identity.mtimeNanoseconds;
     const std::string sidecar = path + ".bgzi";
-    if (load_sidecar(sidecar, identity, &blocks_, &recordCount_)) {
+    if (detection.hasEofMarker &&
+        load_sidecar(sidecar, identity, &blocks_, &recordCount_)) {
         cacheStatus_ = BgzfCacheStatus::Loaded;
         return true;
     }
