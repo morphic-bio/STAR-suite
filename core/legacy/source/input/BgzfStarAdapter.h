@@ -4,6 +4,7 @@
 #include "input/BgzfRangeReader.h"
 #include "input/InputContract.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <mutex>
 #include <string>
@@ -28,8 +29,9 @@ struct BgzfStarRecord {
 };
 
 // Pairs two ordered BGZF streams by source ordinal. Member inflation is
-// parallel inside each stream; the short parse/pair section is serialized so
-// multiple fused Flex consumers can safely share one lane adapter.
+// parallel inside each stream; ordered parse/pair work is claimed in batches
+// so multiple fused Flex consumers can safely share one lane adapter without
+// a mutex handoff for every record.
 class BgzfStarAdapter {
 public:
     bool open(const std::string& mate0_path,
@@ -38,10 +40,16 @@ public:
               std::string* error);
 
     InputStatus next_record(BgzfStarRecord* record, std::string* error);
+    InputStatus next_records(BgzfStarRecord* records,
+                             size_t capacity,
+                             size_t* records_returned,
+                             std::string* error);
 
     uint64_t records_read() const;
 
 private:
+    InputStatus next_record_locked(BgzfStarRecord* record, std::string* error);
+
     BgzfRangeReader readers_[2];
     BgzfStarAdapterOptions options_;
     mutable std::mutex nextMutex_;
