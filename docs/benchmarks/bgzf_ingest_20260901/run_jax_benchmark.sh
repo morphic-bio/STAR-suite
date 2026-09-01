@@ -81,7 +81,7 @@ common=(
     --soloStrand Unstranded
     --clipAdapterType CellRanger4
     --alignEndsType Local
-    --chimSegmentMin 1000000
+    --chimSegmentMin 0
     --soloKeysCompat cr
     --soloSampleSearchNearby no
     --soloHashScreenFile "${HASH_CACHE}"
@@ -111,6 +111,11 @@ printf '\n' >> "${LOG_PREFIX}.command.txt"
 sudo -n sh -c 'sync; echo 3 > /proc/sys/vm/drop_caches'
 /usr/bin/time -v -o "${LOG_PREFIX}.time.txt" "${cmd[@]}" \
     > "${LOG_PREFIX}.stdout.txt" 2> "${LOG_PREFIX}.stderr.txt"
+
+if ! grep -Fq 'Flex count-only no-genome: active' "${RUN_DIR}/Log.out"; then
+    echo "ERROR: cache-only/no-genome path did not activate; benchmark is invalid" >&2
+    exit 1
+fi
 
 for log in Log.out Log.final.out Log.progress.out SJ.out.tab; do
     [[ -f "${RUN_DIR}/${log}" ]] && cp "${RUN_DIR}/${log}" "${LOG_PREFIX}.${log}"
