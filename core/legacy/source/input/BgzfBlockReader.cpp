@@ -109,22 +109,23 @@ bool file_size(const std::string& path, uint64_t* size, std::string* error) {
     return true;
 }
 
-bool gzip_payload_offset(const std::vector<unsigned char>& member,
+bool gzip_payload_offset(const unsigned char* member,
+                         size_t member_size,
                          size_t* payload_offset,
                          std::string* error) {
-    if (member.size() < 18 || member[0] != 0x1f || member[1] != 0x8b ||
+    if (member == nullptr || member_size < 18 || member[0] != 0x1f || member[1] != 0x8b ||
         member[2] != 8) {
         return set_error(error, "invalid gzip header in BGZF member");
     }
     const unsigned char flags = member[3];
     size_t position = 10;
     if ((flags & 0x04U) != 0) {
-        if (position + 2 > member.size()) {
+        if (position + 2 > member_size) {
             return set_error(error, "truncated BGZF extra-field length");
         }
-        const uint16_t xlen = load_u16(member.data() + position);
+        const uint16_t xlen = load_u16(member + position);
         position += 2;
-        if (xlen > member.size() - position) {
+        if (xlen > member_size - position) {
             return set_error(error, "truncated BGZF extra field");
         }
         position += xlen;
@@ -134,21 +135,21 @@ bool gzip_payload_offset(const std::vector<unsigned char>& member,
         if ((flags & zero_terminated_flags[flag_index]) == 0) {
             continue;
         }
-        while (position < member.size() && member[position] != 0) {
+        while (position < member_size && member[position] != 0) {
             ++position;
         }
-        if (position == member.size()) {
+        if (position == member_size) {
             return set_error(error, "unterminated optional BGZF header field");
         }
         ++position;
     }
     if ((flags & 0x02U) != 0) {
-        if (position + 2 > member.size()) {
+        if (position + 2 > member_size) {
             return set_error(error, "truncated BGZF header CRC");
         }
         position += 2;
     }
-    if (position > member.size() - 8) {
+    if (position > member_size - 8) {
         return set_error(error, "BGZF header overlaps its trailer");
     }
     *payload_offset = position;
@@ -273,6 +274,174 @@ bool read_bgzf_block_header_fd(int input_fd,
     return true;
 }
 
+bool read_bgzf_work_fd(int input_fd,
+                       uint64_t compressed_offset,
+                       uint64_t range_end,
+                       uint64_t target_compressed_bytes,
+                       size_t max_blocks,
+                       std::vector<BgzfBlock>* blocks,
+                       std::vector<unsigned char>* compressed_bytes,
+                       bool* reached_end,
+                       std::string* error) {
+    if (input_fd < 0 || blocks == nullptr || compressed_bytes == nullptr ||
+        reached_end == nullptr || max_blocks == 0) {
+        return set_error(error, "invalid BGZF work-reader arguments");
+    }
+    blocks->clear();
+    compressed_bytes->clear();
+    *reached_end = false;
+    if (compressed_offset > range_end) {
+        return set_error(error, "BGZF work offset is beyond its range end");
+    }
+    if (compressed_offset == range_end) {
+        *reached_end = true;
+        return true;
+    }
+
+    const uint64_t remaining = range_end - compressed_offset;
+    const uint64_t target = std::max<uint64_t>(target_compressed_bytes, 1);
+    const uint64_t lookahead = 65536U;
+    const uint64_t wanted = target > std::numeric_limits<uint64_t>::max() - lookahead
+        ? remaining : target + lookahead;
+    const uint64_t request64 = std::min<uint64_t>(remaining, wanted);
+    if (request64 > static_cast<uint64_t>(std::numeric_limits<size_t>::max())) {
+        return set_error(error, "BGZF work claim exceeds platform memory limits");
+    }
+    compressed_bytes->resize(static_cast<size_t>(request64));
+    std::string read_error;
+    if (!read_exact_fd(input_fd, compressed_offset, compressed_bytes->data(),
+                       compressed_bytes->size(), &read_error)) {
+        std::ostringstream message;
+        message << "could not read BGZF work at block offset " << compressed_offset
+                << ": " << read_error;
+        return set_error(error, message.str());
+    }
+
+    size_t position = 0;
+    while (blocks->size() < max_blocks &&
+           (blocks->empty() || position < target)) {
+        const uint64_t block_offset = compressed_offset + position;
+        if (block_offset > range_end || range_end - block_offset < 18 ||
+            compressed_bytes->size() - position < 18) {
+            std::ostringstream message;
+            message << "truncated BGZF header at block offset " << block_offset;
+            return set_error(error, message.str());
+        }
+        const unsigned char* member = compressed_bytes->data() + position;
+        uint32_t compressed_size = 0;
+        if (!parse_bgzf_header18(member, &compressed_size)) {
+            std::ostringstream message;
+            message << "invalid BGZF header at block offset " << block_offset;
+            return set_error(error, message.str());
+        }
+        if (compressed_size < 26 || compressed_size > 65536) {
+            std::ostringstream message;
+            message << "invalid BGZF member size " << compressed_size
+                    << " at block offset " << block_offset;
+            return set_error(error, message.str());
+        }
+        if (compressed_size > range_end - block_offset) {
+            std::ostringstream message;
+            message << "truncated BGZF member at block offset " << block_offset
+                    << " (declared size " << compressed_size << ')';
+            return set_error(error, message.str());
+        }
+        if (compressed_size > compressed_bytes->size() - position) {
+            return set_error(error, "BGZF work lookahead did not cover a full member");
+        }
+        if (compressed_size == sizeof(kBgzfEof) &&
+            std::memcmp(member, kBgzfEof, sizeof(kBgzfEof)) == 0) {
+            if (block_offset + compressed_size != range_end) {
+                std::ostringstream message;
+                message << "BGZF EOF marker is not final at block offset "
+                        << block_offset;
+                return set_error(error, message.str());
+            }
+            *reached_end = true;
+            compressed_bytes->resize(position);
+            return true;
+        }
+
+        BgzfBlock block;
+        block.compressedOffset = block_offset;
+        block.compressedSize = compressed_size;
+        block.isize = load_u32(member + compressed_size - 4);
+        blocks->push_back(block);
+        position += compressed_size;
+        if (compressed_offset + position == range_end) {
+            *reached_end = true;
+            break;
+        }
+    }
+    compressed_bytes->resize(position);
+    return true;
+}
+
+bool inflate_bgzf_block_buffer(const unsigned char* member,
+                               size_t member_size,
+                               uint64_t compressed_offset,
+                               bool check_crc,
+                               unsigned char* output,
+                               size_t output_size,
+                               std::string* error) {
+    if (member == nullptr || (output == nullptr && output_size != 0)) {
+        return set_error(error, "invalid buffered BGZF inflate arguments");
+    }
+    if (member_size < 26) {
+        std::ostringstream message;
+        message << "invalid BGZF member at block offset " << compressed_offset;
+        return set_error(error, message.str());
+    }
+    size_t payload_offset = 0;
+    std::string header_error;
+    if (!gzip_payload_offset(member, member_size, &payload_offset, &header_error)) {
+        std::ostringstream message;
+        message << header_error << " at block offset " << compressed_offset;
+        return set_error(error, message.str());
+    }
+    const uint32_t expected_crc = load_u32(member + member_size - 8);
+    const uint32_t expected_isize = load_u32(member + member_size - 4);
+    if (output_size != expected_isize) {
+        std::ostringstream message;
+        message << "BGZF ISIZE mismatch at block offset " << compressed_offset;
+        return set_error(error, message.str());
+    }
+    const size_t deflate_size = member_size - payload_offset - 8;
+
+    unsigned char empty_output = 0;
+    z_stream stream;
+    std::memset(&stream, 0, sizeof(stream));
+    stream.next_in = const_cast<Bytef*>(member + payload_offset);
+    stream.avail_in = static_cast<uInt>(deflate_size);
+    stream.next_out = output_size == 0 ? &empty_output : output;
+    stream.avail_out = static_cast<uInt>(output_size == 0 ? 1 : output_size);
+    const int init_status = inflateInit2(&stream, -15);
+    if (init_status != Z_OK) {
+        return set_error(error, "zlib could not initialize raw BGZF inflate");
+    }
+    const int inflate_status = ::inflate(&stream, Z_FINISH);
+    inflateEnd(&stream);
+    if (inflate_status != Z_STREAM_END || stream.total_out != expected_isize ||
+        stream.total_in != deflate_size) {
+        std::ostringstream message;
+        message << "raw inflate failed at block offset " << compressed_offset
+                << " (zlib status " << inflate_status << ')';
+        return set_error(error, message.str());
+    }
+    if (check_crc) {
+        const Bytef* data = output_size == 0
+            ? reinterpret_cast<const Bytef*>("") : output;
+        const uint32_t observed_crc = static_cast<uint32_t>(
+            crc32(0L, data, static_cast<uInt>(output_size)));
+        if (observed_crc != expected_crc) {
+            std::ostringstream message;
+            message << "BGZF CRC mismatch at block offset " << compressed_offset;
+            return set_error(error, message.str());
+        }
+    }
+    return true;
+}
+
 bool inflate_bgzf_block_fd(int input_fd,
                            const BgzfBlock& block,
                            bool check_crc,
@@ -293,20 +462,6 @@ bool inflate_bgzf_block_fd(int input_fd,
                 << ": " << read_error;
         return set_error(error, message.str());
     }
-    if (member.size() < 26) {
-        std::ostringstream message;
-        message << "invalid BGZF member at block offset " << block.compressedOffset;
-        return set_error(error, message.str());
-    }
-    size_t payload_offset = 0;
-    std::string header_error;
-    if (!gzip_payload_offset(member, &payload_offset, &header_error)) {
-        std::ostringstream message;
-        message << header_error << " at block offset " << block.compressedOffset;
-        return set_error(error, message.str());
-    }
-    const size_t deflate_size = member.size() - payload_offset - 8;
-    const uint32_t expected_crc = load_u32(member.data() + member.size() - 8);
     const uint32_t expected_isize = load_u32(member.data() + member.size() - 4);
     if (expected_isize != block.isize) {
         std::ostringstream message;
@@ -314,40 +469,11 @@ bool inflate_bgzf_block_fd(int input_fd,
         return set_error(error, message.str());
     }
 
-    std::vector<unsigned char> inflated(std::max<size_t>(block.isize, 1));
-    z_stream stream;
-    std::memset(&stream, 0, sizeof(stream));
-    stream.next_in = member.data() + payload_offset;
-    stream.avail_in = static_cast<uInt>(deflate_size);
-    stream.next_out = inflated.data();
-    stream.avail_out = static_cast<uInt>(inflated.size());
-    const int init_status = inflateInit2(&stream, -15);
-    if (init_status != Z_OK) {
-        return set_error(error, "zlib could not initialize raw BGZF inflate");
-    }
-    const int inflate_status = ::inflate(&stream, Z_FINISH);
-    inflateEnd(&stream);
-    if (inflate_status != Z_STREAM_END || stream.total_out != block.isize ||
-        stream.total_in != deflate_size) {
-        std::ostringstream message;
-        message << "raw inflate failed at block offset " << block.compressedOffset
-                << " (zlib status " << inflate_status << ')';
-        return set_error(error, message.str());
-    }
-    inflated.resize(block.isize);
-    if (check_crc) {
-        const Bytef* data = inflated.empty()
-            ? reinterpret_cast<const Bytef*>("") : inflated.data();
-        const uint32_t observed_crc = static_cast<uint32_t>(
-            crc32(0L, data, static_cast<uInt>(inflated.size())));
-        if (observed_crc != expected_crc) {
-            std::ostringstream message;
-            message << "BGZF CRC mismatch at block offset " << block.compressedOffset;
-            return set_error(error, message.str());
-        }
-    }
-    output->swap(inflated);
-    return true;
+    output->resize(block.isize);
+    return inflate_bgzf_block_buffer(member.data(), member.size(),
+                                     block.compressedOffset, check_crc,
+                                     output->empty() ? nullptr : output->data(),
+                                     output->size(), error);
 }
 
 } // namespace input

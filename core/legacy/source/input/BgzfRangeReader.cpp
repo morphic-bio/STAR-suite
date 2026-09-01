@@ -137,7 +137,7 @@ bool BgzfRangeReader::open(const std::string& path,
 
 void BgzfRangeReader::worker_loop() {
     while (true) {
-        std::vector<BgzfBlock> blocks;
+        CompressedWork work;
         uint64_t sequence = 0;
         {
             std::unique_lock<std::mutex> lock(mutex_);
@@ -150,7 +150,7 @@ void BgzfRangeReader::worker_loop() {
             }
             std::string header_error;
             bool at_end = false;
-            if (!claim_work(&blocks, &sequence, &at_end, &header_error)) {
+            if (!claim_work(&work, &sequence, &at_end, &header_error)) {
                 fail_locked(header_error);
                 return;
             }
@@ -162,22 +162,11 @@ void BgzfRangeReader::worker_loop() {
         }
 
         InflatedBlock result;
-        result.compressedOffset = blocks.front().compressedOffset;
-        size_t output_bytes = 0;
-        for (size_t index = 0; index < blocks.size(); ++index) {
-            output_bytes += blocks[index].isize;
-        }
-        result.bytes.reserve(output_bytes);
-        for (size_t index = 0; index < blocks.size(); ++index) {
-            std::vector<unsigned char> inflated;
-            std::string inflate_error;
-            if (!inflate_bgzf_block_fd(inputFd_, blocks[index], checkCrc_, &inflated,
-                                       &inflate_error)) {
-                std::lock_guard<std::mutex> lock(mutex_);
-                fail_locked(inflate_error);
-                return;
-            }
-            result.bytes.insert(result.bytes.end(), inflated.begin(), inflated.end());
+        std::string inflate_error;
+        if (!inflate_work(work, &result, &inflate_error)) {
+            std::lock_guard<std::mutex> lock(mutex_);
+            fail_locked(inflate_error);
+            return;
         }
         {
             std::lock_guard<std::mutex> lock(mutex_);
@@ -190,35 +179,27 @@ void BgzfRangeReader::worker_loop() {
     }
 }
 
-bool BgzfRangeReader::claim_work(std::vector<BgzfBlock>* blocks,
+bool BgzfRangeReader::claim_work(CompressedWork* work,
                                  uint64_t* sequence,
                                  bool* at_end,
                                  std::string* error) {
-    blocks->clear();
+    work->compressedOffset = claimedOffset_;
+    work->blocks.clear();
+    work->bytes.clear();
     *at_end = false;
-    uint64_t compressed_bytes = 0;
-    while (claimedOffset_ < rangeEnd_ &&
-           blocks->size() < kMaxBlocksPerWork &&
-           (blocks->empty() || compressed_bytes < targetCompressedBytes_)) {
-        BgzfBlock block;
-        bool is_eof_marker = false;
-        if (!read_bgzf_block_header_fd(inputFd_, claimedOffset_, rangeEnd_, &block,
-                                       &is_eof_marker, error)) {
-            return false;
-        }
-        if (is_eof_marker) {
-            claimedOffset_ = rangeEnd_;
-            claimsFinished_ = true;
-            break;
-        }
-        claimedOffset_ += block.compressedSize;
-        compressed_bytes += block.compressedSize;
-        blocks->push_back(block);
+    bool reached_end = false;
+    if (!read_bgzf_work_fd(inputFd_, claimedOffset_, rangeEnd_,
+                           targetCompressedBytes_, kMaxBlocksPerWork,
+                           &work->blocks, &work->bytes, &reached_end, error)) {
+        return false;
     }
-    if (claimedOffset_ == rangeEnd_) {
+    if (reached_end) {
+        claimedOffset_ = rangeEnd_;
         claimsFinished_ = true;
+    } else {
+        claimedOffset_ += work->bytes.size();
     }
-    if (blocks->empty()) {
+    if (work->blocks.empty()) {
         *at_end = true;
         return true;
     }
@@ -226,32 +207,58 @@ bool BgzfRangeReader::claim_work(std::vector<BgzfBlock>* blocks,
     return true;
 }
 
+bool BgzfRangeReader::inflate_work(const CompressedWork& work,
+                                   InflatedBlock* result,
+                                   std::string* error) {
+    if (result == nullptr || work.blocks.empty()) {
+        return set_error(error, "invalid BGZF compressed work item");
+    }
+    result->compressedOffset = work.blocks.front().compressedOffset;
+    size_t output_bytes = 0;
+    for (size_t index = 0; index < work.blocks.size(); ++index) {
+        if (work.blocks[index].isize >
+            std::numeric_limits<size_t>::max() - output_bytes) {
+            return set_error(error, "BGZF work output exceeds platform memory limits");
+        }
+        output_bytes += work.blocks[index].isize;
+    }
+    result->bytes.resize(output_bytes);
+    size_t output_offset = 0;
+    for (size_t index = 0; index < work.blocks.size(); ++index) {
+        const BgzfBlock& block = work.blocks[index];
+        if (block.compressedOffset < work.compressedOffset) {
+            return set_error(error, "BGZF member precedes its claimed work range");
+        }
+        const uint64_t relative64 = block.compressedOffset - work.compressedOffset;
+        if (relative64 > work.bytes.size() ||
+            block.compressedSize > work.bytes.size() - static_cast<size_t>(relative64)) {
+            return set_error(error, "BGZF member exceeds its claimed work range");
+        }
+        unsigned char* destination = block.isize == 0
+            ? nullptr : result->bytes.data() + output_offset;
+        if (!inflate_bgzf_block_buffer(
+                work.bytes.data() + static_cast<size_t>(relative64),
+                block.compressedSize, block.compressedOffset, checkCrc_,
+                destination, block.isize, error)) {
+            return false;
+        }
+        output_offset += block.isize;
+    }
+    return true;
+}
+
 bool BgzfRangeReader::claim_and_inflate_sync(InflatedBlock* result,
                                               bool* at_end,
                                               std::string* error) {
-    std::vector<BgzfBlock> blocks;
+    CompressedWork work;
     uint64_t sequence = 0;
-    if (!claim_work(&blocks, &sequence, at_end, error)) {
+    if (!claim_work(&work, &sequence, at_end, error)) {
         return false;
     }
     if (*at_end) {
         return true;
     }
-    result->compressedOffset = blocks.front().compressedOffset;
-    result->bytes.clear();
-    size_t output_bytes = 0;
-    for (size_t index = 0; index < blocks.size(); ++index) {
-        output_bytes += blocks[index].isize;
-    }
-    result->bytes.reserve(output_bytes);
-    for (size_t index = 0; index < blocks.size(); ++index) {
-        std::vector<unsigned char> inflated;
-        if (!inflate_bgzf_block_fd(inputFd_, blocks[index], checkCrc_, &inflated, error)) {
-            return false;
-        }
-        result->bytes.insert(result->bytes.end(), inflated.begin(), inflated.end());
-    }
-    return true;
+    return inflate_work(work, result, error);
 }
 
 bool BgzfRangeReader::append_next_block(std::string* error) {
@@ -287,6 +294,12 @@ bool BgzfRangeReader::append_next_block(std::string* error) {
         spaceCv_.notify_all();
     }
 
+    if (cursor_ == buffer_.size()) {
+        buffer_ = std::move(block.bytes);
+        cursor_ = 0;
+        currentBlockOffset_ = block.compressedOffset;
+        return true;
+    }
     if (cursor_ != 0) {
         buffer_.erase(buffer_.begin(),
                       buffer_.begin() + static_cast<std::ptrdiff_t>(cursor_));
@@ -344,8 +357,7 @@ bool BgzfRangeReader::parse_record(BgzfFastqRecord* record, std::string* error) 
     if (record == nullptr) {
         return set_error(error, "BGZF FASTQ record destination is null");
     }
-    std::string header;
-    if (!read_line(&header, true, error)) {
+    if (!read_line(&record->name, true, error)) {
         return false;
     }
     if (!read_line(&record->sequence, false, error) ||
@@ -353,7 +365,7 @@ bool BgzfRangeReader::parse_record(BgzfFastqRecord* record, std::string* error) 
         !read_line(&record->quality, false, error)) {
         return false;
     }
-    if (header.empty() || header[0] != '@') {
+    if (record->name.empty() || record->name[0] != '@') {
         std::ostringstream message;
         message << "BGZF FASTQ record " << recordsRead_
                 << " does not start with @ (block offset " << currentBlockOffset_ << ')';
@@ -373,7 +385,7 @@ bool BgzfRangeReader::parse_record(BgzfFastqRecord* record, std::string* error) 
                 << currentBlockOffset_ << ')';
         return set_error(error, message.str());
     }
-    record->name.assign(header.data() + 1, header.size() - 1);
+    record->name.erase(0, 1);
     record->ordinal = recordsRead_;
     return true;
 }
