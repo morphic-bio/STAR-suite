@@ -1,5 +1,6 @@
 #include "input/BgzfStarAdapter.h"
 
+#include <limits>
 #include <sstream>
 
 namespace star {
@@ -33,35 +34,24 @@ void split_read_name(const std::string& raw,
 
 } // namespace
 
-bool BgzfStarAdapter::open(const BgzfIndex* mate0_index,
-                           const BgzfIndex* mate1_index,
+bool BgzfStarAdapter::open(const std::string& mate0_path,
+                           const std::string& mate1_path,
                            const BgzfStarAdapterOptions& options,
                            std::string* error) {
+    std::lock_guard<std::mutex> lock(nextMutex_);
     open_ = false;
+    ended_ = false;
     recordsRead_ = 0;
     if (error != nullptr) {
         error->clear();
     }
-    if (mate0_index == nullptr || mate1_index == nullptr) {
-        return set_error(error, "BGZF STAR adapter requires two mate indexes");
-    }
-    if (mate0_index->record_count() != mate1_index->record_count()) {
-        std::ostringstream message;
-        message << "BGZF mate record-count mismatch: mate 0 has "
-                << mate0_index->record_count() << " records but mate 1 has "
-                << mate1_index->record_count();
-        return set_error(error, message.str());
-    }
-    if (options.first_record > mate0_index->record_count() ||
-        options.record_count > mate0_index->record_count() - options.first_record) {
-        return set_error(error, "BGZF STAR adapter range exceeds the paired record count");
-    }
-    if (!readers_[0].open(mate0_index, options.first_record, options.record_count,
-                          options.crc_check, error)) {
+    const uint64_t physical_end = std::numeric_limits<uint64_t>::max();
+    if (!readers_[0].open(mate0_path, 0, physical_end,
+                          options.mate0_reader_threads, options.crc_check, error)) {
         return false;
     }
-    if (!readers_[1].open(mate1_index, options.first_record, options.record_count,
-                          options.crc_check, error)) {
+    if (!readers_[1].open(mate1_path, 0, physical_end,
+                          options.mate1_reader_threads, options.crc_check, error)) {
         return false;
     }
     options_ = options;
@@ -71,6 +61,7 @@ bool BgzfStarAdapter::open(const BgzfIndex* mate0_index,
 
 InputStatus BgzfStarAdapter::next_record(BgzfStarRecord* record,
                                          std::string* error) {
+    std::lock_guard<std::mutex> lock(nextMutex_);
     if (error != nullptr) {
         error->clear();
     }
@@ -78,51 +69,59 @@ InputStatus BgzfStarAdapter::next_record(BgzfStarRecord* record,
         set_error(error, "BGZF STAR adapter is not open");
         return InputStatus::Error;
     }
-    if (recordsRead_ >= options_.record_count) {
+    if (ended_) {
         return InputStatus::End;
     }
     if (record == nullptr) {
         set_error(error, "BGZF STAR adapter record destination is null");
         return InputStatus::Error;
     }
-    std::string mate_error;
-    if (!readers_[0].next(&record->mates[0], &mate_error)) {
-        set_error(error, mate_error.empty()
-            ? "BGZF mate 0 ended before its owned record range"
-            : "BGZF mate 0: " + mate_error);
+
+    std::string mate_error[2];
+    const bool have_mate0 = readers_[0].next(&record->mates[0], &mate_error[0]);
+    if (!have_mate0 && !mate_error[0].empty()) {
+        set_error(error, "BGZF mate 0: " + mate_error[0]);
         return InputStatus::Error;
     }
-    if (!readers_[1].next(&record->mates[1], &mate_error)) {
-        set_error(error, mate_error.empty()
-            ? "BGZF mate 1 ended before its owned record range"
-            : "BGZF mate 1: " + mate_error);
+    const bool have_mate1 = readers_[1].next(&record->mates[1], &mate_error[1]);
+    if (!have_mate1 && !mate_error[1].empty()) {
+        set_error(error, "BGZF mate 1: " + mate_error[1]);
         return InputStatus::Error;
     }
-    const uint64_t expected = options_.first_record + recordsRead_;
-    if (record->mates[0].ordinal != expected ||
-        record->mates[1].ordinal != expected) {
+    if (have_mate0 != have_mate1) {
         std::ostringstream message;
-        message << "BGZF mate ordinal mismatch at expected record " << expected
+        message << "BGZF mate record-count mismatch at record " << recordsRead_
+                << ": mate 0 " << (have_mate0 ? "has a record" : "ended")
+                << " while mate 1 " << (have_mate1 ? "has a record" : "ended");
+        set_error(error, message.str());
+        return InputStatus::Error;
+    }
+    if (!have_mate0) {
+        ended_ = true;
+        return InputStatus::End;
+    }
+    if (record->mates[0].ordinal != recordsRead_ ||
+        record->mates[1].ordinal != recordsRead_) {
+        std::ostringstream message;
+        message << "BGZF mate ordinal mismatch at expected record " << recordsRead_
                 << ": mate ordinals are " << record->mates[0].ordinal
                 << " and " << record->mates[1].ordinal;
         set_error(error, message.str());
         return InputStatus::Error;
     }
+
     split_read_name(record->mates[0].name,
                     &record->read_name, &record->read_name_extra);
     record->lane_index = options_.lane_index;
-    record->read_ordinal = expected;
+    record->read_ordinal = recordsRead_;
     record->read_filter = 'Y';
     ++recordsRead_;
     return InputStatus::Record;
 }
 
 uint64_t BgzfStarAdapter::records_read() const {
+    std::lock_guard<std::mutex> lock(nextMutex_);
     return recordsRead_;
-}
-
-uint64_t BgzfStarAdapter::record_count() const {
-    return options_.record_count;
 }
 
 } // namespace input
