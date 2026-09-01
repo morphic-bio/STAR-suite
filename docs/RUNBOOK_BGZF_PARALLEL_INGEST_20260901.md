@@ -65,9 +65,11 @@ payload `BSIZE` is the total member length minus one. Detection reads only the
 first 18 bytes. Files with FEXTRA but no `BC` subfield, or without FEXTRA, are
 plain gzip → existing path.
 
-The trailing 28-byte empty member is the BGZF EOF marker. Its absence on a
-detected-BGZF file is a hard error (truncation) — a robustness gain over plain
-gzip, which cannot detect truncation at all.
+The trailing 28-byte empty member is the canonical BGZF EOF marker, but it is
+not required for range ingest. The `BC` subfield and `BSIZE` hops are
+authoritative: an EOF-less file is accepted when the final member is complete
+and its declared end is the physical file end. A partial header, member,
+deflate stream, or trailer remains a hard truncation error.
 
 ## Design
 
@@ -173,8 +175,8 @@ Cell Ranger fixture used by `tests/run_dynamic_threads_tiny_fixture.sh`.
   Assert bit-identical if the fixture proves free of order-dependent ties;
   otherwise assert functional equality and record which variance class absorbs
   the difference.
-- **T5 truncation:** strip the EOF marker → hard error; truncate mid-block →
-  hard error with block offset in the message.
+- **T5 truncation:** strip only the optional EOF marker → records remain exact;
+  truncate mid-block → hard error with block offset in the message.
 - **T6 mixed lanes:** some lanes BGZF, some plain gzip, in one run → correct
   outputs, BGZF lanes on range readers, gzip lanes on the zlib path.
 - **T7 regression:** existing gzip/CBQ test suites pass unchanged with the

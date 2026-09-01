@@ -194,19 +194,23 @@ fi
 
 if enabled T5; then
     [[ -x "${HARNESS}" ]] || die "T5 requires ${HARNESS}"
-    if "${HARNESS}" --mode records --input "${OUT_ROOT}/inputs/missing_eof.fastq.gz" \
-        --workers 3 --crc-check 1 > /dev/null 2> "${OUT_ROOT}/results/missing_eof.stderr"; then
-        die "T5 missing-EOF input unexpectedly succeeded"
-    fi
-    grep -Ei "EOF marker|missing EOF" "${OUT_ROOT}/results/missing_eof.stderr" >/dev/null \
-        || die "T5 missing-EOF error did not identify the EOF marker"
+    "${HARNESS}" --mode records --input "${OUT_ROOT}/inputs/missing_eof.fastq.gz" \
+        --workers 3 --crc-check 1 > "${OUT_ROOT}/results/missing_eof_records.json"
+    python3 - "${OUT_ROOT}/results/reference.json" \
+        "${OUT_ROOT}/results/missing_eof_records.json" <<'PY'
+import json
+import sys
+reference, observed = [json.load(open(path, encoding="utf-8")) for path in sys.argv[1:]]
+assert observed["record_count"] == reference["record_count"]
+assert observed["checksum64"] == reference["checksum64"]
+PY
     if "${HARNESS}" --mode records --input "${OUT_ROOT}/inputs/mid_block.fastq.gz" \
         --workers 3 --crc-check 1 > /dev/null 2> "${OUT_ROOT}/results/mid_block.stderr"; then
         die "T5 mid-block truncation unexpectedly succeeded"
     fi
     grep -E "block offset [0-9]+" "${OUT_ROOT}/results/mid_block.stderr" >/dev/null \
         || die "T5 mid-block error did not include a block offset"
-    pass "T5 truncation errors"
+    pass "T5 optional EOF and partial-member truncation"
 fi
 
 if enabled T6; then
