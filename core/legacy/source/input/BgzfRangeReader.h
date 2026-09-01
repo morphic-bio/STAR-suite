@@ -23,9 +23,9 @@ struct BgzfFastqRecord {
     uint64_t ordinal = 0;
 };
 
-// Inflate workers claim one member at a time by reading BC/BSIZE at the
-// current compressed offset. Results are assembled in member order before
-// FASTQ parsing, so no block or record index is needed.
+// Inflate workers claim bounded contiguous work by reading every member's
+// BC/BSIZE at the current compressed frontier. Results are assembled in claim
+// order before FASTQ parsing, so no block or record index is needed.
 class BgzfRangeReader {
 public:
     BgzfRangeReader();
@@ -51,6 +51,12 @@ public:
     uint64_t range_end() const;
 
 private:
+    struct CompressedWork {
+        uint64_t compressedOffset = 0;
+        std::vector<BgzfBlock> blocks;
+        std::vector<unsigned char> bytes;
+    };
+
     struct InflatedBlock {
         uint64_t compressedOffset = 0;
         std::vector<unsigned char> bytes;
@@ -59,10 +65,13 @@ private:
     void worker_loop();
     void close_input();
     void fail_locked(const std::string& message);
-    bool claim_work(std::vector<BgzfBlock>* blocks,
+    bool claim_work(CompressedWork* work,
                     uint64_t* sequence,
                     bool* at_end,
                     std::string* error);
+    bool inflate_work(const CompressedWork& work,
+                      InflatedBlock* result,
+                      std::string* error);
     bool claim_and_inflate_sync(InflatedBlock* result, bool* at_end,
                                 std::string* error);
     bool append_next_block(std::string* error);
