@@ -65,6 +65,46 @@ InputStatus BgzfStarAdapter::next_record(BgzfStarRecord* record,
     if (error != nullptr) {
         error->clear();
     }
+    return next_record_locked(record, error);
+}
+
+InputStatus BgzfStarAdapter::next_records(BgzfStarRecord* records,
+                                          size_t capacity,
+                                          size_t* records_returned,
+                                          std::string* error) {
+    std::lock_guard<std::mutex> lock(nextMutex_);
+    if (error != nullptr) {
+        error->clear();
+    }
+    if (records_returned == nullptr) {
+        set_error(error, "BGZF STAR adapter batch count destination is null");
+        return InputStatus::Error;
+    }
+    *records_returned = 0;
+    if (records == nullptr || capacity == 0) {
+        set_error(error, "BGZF STAR adapter batch destination is empty");
+        return InputStatus::Error;
+    }
+    while (*records_returned < capacity) {
+        const InputStatus status =
+            next_record_locked(records + *records_returned, error);
+        if (status == InputStatus::Record) {
+            ++*records_returned;
+            continue;
+        }
+        if (status == InputStatus::End && *records_returned != 0) {
+            return InputStatus::Record;
+        }
+        if (status == InputStatus::Error) {
+            *records_returned = 0;
+        }
+        return status;
+    }
+    return InputStatus::Record;
+}
+
+InputStatus BgzfStarAdapter::next_record_locked(BgzfStarRecord* record,
+                                                std::string* error) {
     if (!open_) {
         set_error(error, "BGZF STAR adapter is not open");
         return InputStatus::Error;

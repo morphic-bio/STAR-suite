@@ -481,10 +481,13 @@ static uint64_t processOneBgzfRange(
     char name[kFlexPipeNameMax];
 
     uint64_t nReads = 0;
-    star::input::BgzfStarRecord record;
+    const size_t bgzfRecordBatchSize = 256;
+    std::vector<star::input::BgzfStarRecord> recordBatch(bgzfRecordBatchSize);
     while (!st->inputFailed.load(std::memory_order_relaxed)) {
+        size_t recordsReturned = 0;
         const star::input::InputStatus status =
-            lanePlan.adapter->next_record(&record, &inputError);
+            lanePlan.adapter->next_records(recordBatch.data(), recordBatch.size(),
+                                           &recordsReturned, &inputError);
         if (status == star::input::InputStatus::End) {
             break;
         }
@@ -495,6 +498,8 @@ static uint64_t processOneBgzfRange(
             st->failInput(message.str());
             break;
         }
+        for (size_t batchIndex = 0; batchIndex < recordsReturned; ++batchIndex) {
+        star::input::BgzfStarRecord &record = recordBatch[batchIndex];
         const size_t readLen0Size = record.mates[0].sequence.size();
         const size_t readLen1Size = record.mates[1].sequence.size();
         if (readLen0Size >= sizeof(seq0) || readLen1Size >= sizeof(seq1) ||
@@ -614,6 +619,7 @@ static uint64_t processOneBgzfRange(
             }
         }
         st->counters.readsTotal.fetch_add(1);
+        }
     }
     return nReads;
 }
