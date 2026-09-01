@@ -1002,19 +1002,6 @@ bool flexPrepareBgzfRangeTasks(FlexPipelineState *state, Parameters &P,
             }
             return false;
         }
-        for (int mate = 0; mate < 2; ++mate) {
-            if (detections[mate].isBgzf && !detections[mate].hasEofMarker) {
-                if (reason != nullptr) {
-                    *reason = "lane " + std::to_string(lane) + " mate " +
-                              std::to_string(mate) +
-                              " is detected BGZF but is missing the EOF marker";
-                }
-                if (fatalError != nullptr) {
-                    *fatalError = true;
-                }
-                return false;
-            }
-        }
         const bool pairedBgzf = detections[0].isBgzf && detections[1].isBgzf;
         if (!pairedBgzf) {
             if (mode == "range") {

@@ -247,7 +247,11 @@ bool scan_blocks(const std::string& path,
         blocks->push_back(block);
         offset += compressed_size;
     }
-    return set_error(error, "detected BGZF input is missing the required EOF marker");
+    // The canonical empty BGZF EOF member is optional. Reaching the physical
+    // end exactly through BC/BSIZE header hops proves that the final member is
+    // structurally complete; count_records() subsequently inflates it and
+    // validates its trailer/CRC.
+    return true;
 }
 
 struct CountResult {
@@ -473,7 +477,8 @@ bool validate_cached_blocks(const std::vector<BgzfBlock>& blocks,
         offset += block.compressedSize;
         records += block.recordsStarting;
     }
-    return records == record_count && offset + sizeof(kBgzfEof) == file_size;
+    return records == record_count &&
+           (offset == file_size || offset + sizeof(kBgzfEof) == file_size);
 }
 
 bool load_sidecar(const std::string& sidecar,
@@ -696,8 +701,7 @@ bool BgzfIndex::open(const std::string& path,
     mtimeSeconds_ = identity.mtimeSeconds;
     mtimeNanoseconds_ = identity.mtimeNanoseconds;
     const std::string sidecar = path + ".bgzi";
-    if (detection.hasEofMarker &&
-        load_sidecar(sidecar, identity, &blocks_, &recordCount_)) {
+    if (load_sidecar(sidecar, identity, &blocks_, &recordCount_)) {
         cacheStatus_ = BgzfCacheStatus::Loaded;
         return true;
     }
