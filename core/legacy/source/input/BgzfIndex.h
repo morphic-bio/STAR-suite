@@ -37,6 +37,12 @@ bool inflate_bgzf_block(const std::string& path,
                         std::vector<unsigned char>* output,
                         std::string* error);
 
+bool inflate_bgzf_block_fd(int input_fd,
+                           const BgzfBlock& block,
+                           bool check_crc,
+                           std::vector<unsigned char>* output,
+                           std::string* error);
+
 class BgzfIndex {
 public:
     static bool detect(const std::string& path,

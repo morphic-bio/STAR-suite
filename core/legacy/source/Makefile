@@ -242,7 +242,7 @@ OBJECTS = systemFunctions.o SoloMemoryProfile.o CountingSinkStress.o funPrimaryA
 	Transcriptome.o Transcriptome_quantAlign.o Transcriptome_geneFullAlignOverlap.o \
 	ReadAlign_quantTranscriptome.o Quantifications.o Transcriptome_geneCountsAddAlign.o \
 	sjdbLoadFromFiles.o sjdbLoadFromStream.o sjdbPrepare.o sjdbBuildIndex.o sjdbInsertJunctions.o mapThreadsSpawn.o \
-	FastxInputModule.o CbqInputModule.o BgzfIndex.o \
+	FastxInputModule.o CbqInputModule.o BgzfIndex.o BgzfRangeReader.o \
 	Parameters_readFilesInit.o Parameters_openReadsFiles.cpp Parameters_closeReadsFiles.cpp Parameters_batchReset.cpp Parameters_readSAMheader.o \
 	bam_cat.o serviceFuns.o GlobalVariables.cpp \
 	BAMoutput.o BAMfunctions.o ReadAlign_alignBAM.o BAMbinSortByCoordinate.o signalFromBAM.o bamRemoveDuplicates.o BAMbinSortUnmapped.o \
@@ -381,8 +381,8 @@ fastx-input-harness : FastxInputModule.o input/fastx_input_harness.cpp
 .PHONY: bgzf-input-harness
 bgzf-input-harness : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
 bgzf-input-harness : LDFLAGS := $(LDFLAGSextra) -lz -lpthread
-bgzf-input-harness : BgzfIndex.o input/bgzf_input_harness.cpp
-	$(CXX) -o bgzf_input_harness $(CXXFLAGS) input/bgzf_input_harness.cpp BgzfIndex.o $(LDFLAGS)
+bgzf-input-harness : BgzfIndex.o BgzfRangeReader.o input/bgzf_input_harness.cpp
+	$(CXX) -o bgzf_input_harness $(CXXFLAGS) input/bgzf_input_harness.cpp BgzfIndex.o BgzfRangeReader.o $(LDFLAGS)
 
 # Standalone BINSEQ probe harness. This is not production STAR integration; it
 # decodes CBQ through bqtools and validates the result through the input contract.
@@ -692,6 +692,9 @@ CbqInputModule.o: input/CbqInputModule.cpp input/CbqInputModule.h input/InputCon
 	$(CXX) -c $(CPPFLAGS) $(CXXFLAGS) $(CXXFLAGS_common) $< -o $@
 
 BgzfIndex.o: input/BgzfIndex.cpp input/BgzfIndex.h
+	$(CXX) -c $(CPPFLAGS) $(CXXFLAGS) $(CXXFLAGS_common) $< -o $@
+
+BgzfRangeReader.o: input/BgzfRangeReader.cpp input/BgzfRangeReader.h input/BgzfIndex.h
 	$(CXX) -c $(CPPFLAGS) $(CXXFLAGS) $(CXXFLAGS_common) $< -o $@
 
 CbqStarAdapter.o: input/CbqStarAdapter.cpp input/CbqStarAdapter.h input/CbqInputModule.h input/InputContract.h
