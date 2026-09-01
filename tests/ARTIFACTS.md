@@ -156,6 +156,7 @@ update this file with its output location.
 - `/tmp/star_suite_cbq_e2e_module_regression_*` (aggregate CBQ E2E/module regression wrapper logs for BINSEQ probe, native CBQ reader, STAR mapper, STARsolo, process_features, and Chromap adapter smokes)
 - `/tmp/star_suite_bgzf_ingest_tests` (BGZF ingest T1-T7 fixtures, reference-scanner JSON, harness output, truncation diagnostics, and T7 regression outputs)
 - `/tmp/star_suite_bgzf_flex_e2e` (public tiny Flex gzip-path, BGZF range-reader, and mixed-lane equivalence runs for T4/T6)
+- `/home/lhhung/STAR-suite-bgzf-ingest-benchmark-20260901` (full JAX SC2300771 gzip/BGZF/CBQ SSD benchmark output directories plus excluded diagnostic runs; committed timing and STAR logs are under `docs/benchmarks/bgzf_ingest_20260901/`)
 - `/tmp/star_suite_cbq_flex_tiny_public_smoke_*` (public 10x tiny FLEX FASTQ-vs-ordered-CBQ smoke: downloaded tiny fixtures, generated FLEX assets, filtered STAR index, encoded CBQ, FASTQ/CBQ STAR-Flex runs, and parity dumps)
 - `/tmp/star_suite_cbq_flex_100k_*` (host-local SC2300771 100K FLEX FASTQ-vs-CBQ runs: ordered lane CBQs, FASTQ and CBQ STAR-Flex outputs, count parity diffs, and order-normalized BAM-body parity dumps)
 - `/tmp/star_suite_cbq_flex_range_100k_*` (host-local SC2300771 800K FLEX no-genome FASTQ-vs-indexed-CBQ-range parity runs: ordered lane CBQs, count-only STAR-Flex outputs, range activation logs, and byte-level count-output parity)

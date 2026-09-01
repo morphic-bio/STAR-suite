@@ -1,0 +1,23 @@
+	Command being timed: "/mnt/pikachu/STAR-suite-bgzf-ingest-20260901/core/legacy/source/STAR --runThreadN 32 --genomeDir /storage/flex_filtered_reference_2024/star_index --soloType CB_UMI_Simple --soloCBstart 1 --soloUMIstart 17 --soloCBlen 16 --soloUMIlen 12 --soloBarcodeReadLength 0 --soloCBwhitelist /storage/scRNAseq_output/whitelists/737K-fixed-rna-profiling.txt --flex yes --soloFlexExpectedCellsPerTag 3000 --soloSampleWhitelist /mnt/pikachu/flex/tables/sample_whitelist_full_16.tsv --soloProbeList /storage/flex_filtered_reference_2024/star_index/flex_probe_artifacts/probe_list.txt --soloSampleProbes /mnt/pikachu/JAX_scRNAseq01_processed/probe-barcodes-fixed-rna-profiling-rna.txt --soloSampleProbeOffset 68 --soloFlexAllowedTags /mnt/pikachu/flex/tables/sample_whitelist_full_16.tsv --soloFlexOutputPrefix /home/lhhung/STAR-suite-bgzf-ingest-benchmark-20260901/jax_cbq_20260901T213904Z/per_sample --limitIObufferSize 50000000 50000000 --outSJtype None --outSAMtype None --outSAMattributes None --soloFeatures Gene --soloCellFilter None --soloMultiMappers Rescue --soloCBmatchWLtype 1MM_multi_Nbase_pseudocounts --soloUMIfiltering MultiGeneUMI_CR --soloUMIdedup 1MM_CR --soloStrand Unstranded --clipAdapterType CellRanger4 --alignEndsType Local --chimSegmentMin 0 --soloKeysCompat cr --soloSampleSearchNearby no --soloHashScreenFile /storage/downsampled_100K/SC2300771/results/flex_h01_2024_20260320_081246/h01_cache.bin --flexPipeline yes --flexPipelineNTriage 0 --flexPipelineNSolo 0 --flexNoAlign 1 --dynamicThreadInterface 1 --crAssignConsumerThreads -1 --crAssignSearchThreads 1 --outFileNamePrefix /home/lhhung/STAR-suite-bgzf-ingest-benchmark-20260901/jax_cbq_20260901T213904Z/ --readFilesType Binseq PE --readFilesCbqRangeMode range --readFilesIn /home/lhhung/bgzf_ingest_ssd_stage_20260901/jax_cbq/lane_000.cbq,/home/lhhung/bgzf_ingest_ssd_stage_20260901/jax_cbq/lane_001.cbq,/home/lhhung/bgzf_ingest_ssd_stage_20260901/jax_cbq/lane_002.cbq,/home/lhhung/bgzf_ingest_ssd_stage_20260901/jax_cbq/lane_003.cbq,/home/lhhung/bgzf_ingest_ssd_stage_20260901/jax_cbq/lane_004.cbq,/home/lhhung/bgzf_ingest_ssd_stage_20260901/jax_cbq/lane_005.cbq,/home/lhhung/bgzf_ingest_ssd_stage_20260901/jax_cbq/lane_006.cbq,/home/lhhung/bgzf_ingest_ssd_stage_20260901/jax_cbq/lane_007.cbq"
+	User time (seconds): 5677.44
+	System time (seconds): 1133.34
+	Percent of CPU this job got: 1500%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 7:33.91
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 48396764
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 13
+	Minor (reclaiming a frame) page faults: 19616699
+	Voluntary context switches: 53106672
+	Involuntary context switches: 3758049
+	Swaps: 0
+	File system inputs: 209372000
+	File system outputs: 4927080
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 0
