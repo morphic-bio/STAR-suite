@@ -195,6 +195,18 @@ Ship discoverable, installable Ubuntu binaries for STAR Suite with low-friction 
   `STAR --version` reports `1.3.0`. Upstream provenance and genome index
   compatibility remain `2.7.11b` and `2.7.4a`.
 
+## Feature Release v1.8.1 (2026-09-02)
+
+- Release tag: `v1.8.1`
+- Release notes: `docs/RELEASE_NOTES_v1.8.1.md`
+- Packaging metadata: `debian/changelog` entry `1.8.1-1`
+- Scope: streaming cell-barcode bucketing with a bucket-parallel Solo tail,
+  disk spill mode with a configurable memory budget for fused STAR-Flex runs,
+  bucket storage controls, and cloud 320K benchmark matrix tooling.
+- Version note: release artifacts use tag `v1.8.1`, Debian packages use STAR
+  Suite `1.8.1`, and `STAR --version` reports `1.8.1`. Upstream provenance and
+  genome-index compatibility remain `2.7.11b` and `2.7.4a`.
+
 ## Feature Release v1.8.0 (2026-09-02)
 
 - Release tag: `v1.8.0`
