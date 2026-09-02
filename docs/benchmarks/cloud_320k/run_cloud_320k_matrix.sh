@@ -35,7 +35,12 @@ if ! done_p setup; then
   if ! mountpoint -q $S; then sudo mkfs.xfs -f /dev/nvme1n1 && sudo mkdir -p $S && sudo mount /dev/nvme1n1 $S; fi
   sudo chown "$(id -u)" $S; mkdir -p $S/{fastqs,cbq,refs,tools,tmp} $R $D
   printf 'run\tstatus\twall\tmax_rss_kb\tcpu\tutc\n' > "$RESULTS"
-  curl -L -o $S/tools/STAR "https://github.com/morphic-bio/STAR-suite/releases/download/${RELEASE_TAG}/${BINARY_ASSET}"
+  curl -L -o $S/tools/release_asset "https://github.com/morphic-bio/STAR-suite/releases/download/${RELEASE_TAG}/${BINARY_ASSET}"
+  case "$BINARY_ASSET" in
+    *.tar.gz) mkdir -p $S/tools/release && tar -xzf $S/tools/release_asset -C $S/tools/release \
+                && cp "$(find $S/tools/release -type f -name STAR | head -1)" $S/tools/STAR ;;
+    *) cp $S/tools/release_asset $S/tools/STAR ;;
+  esac
   chmod +x $S/tools/STAR; $S/tools/STAR --version | tee $R/star_version.txt
   aws s3 sync "$STAGING_BUCKET/refs"  $S/refs  --only-show-errors
   aws s3 sync "$STAGING_BUCKET/tools" $S/tools --only-show-errors
