@@ -1,0 +1,9 @@
+test	enabling_phase	description
+B1	1	Packed-record round-trip, independent partition parity, and atomic claims with 1/8/32 producers
+B2	1	Spill segment round-trip byte equality with RAM segments
+B3	2	Bucket tail byte equality on the synthetic fixture and JAX 800k downsample
+B4	2	Determinism across 1/8/32 tail threads and 64/256/1024 buckets
+B5	3	Spill and auto-transition end-to-end equality with spill-from-start
+B6	3	Parallel-across-tag flexfilter byte equality with serial output
+B7-off	0	Existing gzip, BGZF, and CBQ regressions with bucketing disabled
+B7-auto	3	Existing gzip, BGZF, and CBQ regressions with Flex auto bucketing
