@@ -15,8 +15,9 @@ both input formats, identical hardware, fully public data — plus two bonus cla
    STAR-Flex hash-then-align-residual (the accuracy-maximal mode, timed); and
    Cell Ranger 9.0.1. All STAR runs in `--soloBucketMode ram` (256 GiB holds the
    ~190 GB working set) — a spill-free environment, as none of the lab rows can be.
-2. **Worked reproducibility example** for the paper/letter: fresh machine, released
-   binary via one command, data streamed from 10x's own storage
+2. **Worked reproducibility example** for the paper/letter: fresh machine, the
+   released Debian package installed with a single apt command, data streamed
+   from 10x's own storage
    (feeds `[[SYNC-CLOUD-TIME]]` = the STAR-Flex BGZF RAM run, and `[[SYNC-CLOUD-COST]]`).
 3. **Optional spill-cost run** (#8): one spill-mode repeat gives the same-hardware
    RAM-vs-spill ratio for the bounded-memory sentence.
@@ -26,7 +27,7 @@ both input formats, identical hardware, fully public data — plus two bonus cla
 | Item | Value |
 | --- | --- |
 | Instance | **r6id.8xlarge**, us-west-2 (32 vCPU = lab thread count, 256 GiB, 1.9 TB NVMe) |
-| AMI | Amazon Linux 2023 |
+| AMI | Ubuntu 24.04 LTS (matches the glibc239 assets and the release's own container checks; enables the one-command apt install) |
 | Price | ~$2.42/h on-demand |
 | Session | setup ~45 min + runs (~5 h) + Cell Ranger (~8–12 h) + CBQ encode (~70 min) ≈ **16–20 h ≈ $40–50** |
 | Transfer | 10x's tar pulls in-region, free and fast; lab staging is ~55 GB once |
@@ -59,12 +60,13 @@ aws s3 cp /mnt/pikachu/STAR-suite-bgzf-ingest-20260901/core/legacy/source/cbq_or
 
 ```bash
 sudo mkfs.xfs /dev/nvme1n1 && sudo mkdir /scratch && sudo mount /dev/nvme1n1 /scratch
-sudo chown ec2-user /scratch && mkdir -p /scratch/{fastqs,cbq,refs,tools,runs}
+sudo chown $USER /scratch && mkdir -p /scratch/{fastqs,cbq,refs,tools,runs}
+sudo apt-get update -qq && sudo apt-get install -y -qq awscli   # Ubuntu AMI ships without it
 
-# Released STAR binary — the drop-in demonstration starts here
-curl -L -o /scratch/tools/STAR \
-  https://github.com/morphic-bio/STAR-suite/releases/download/<RELEASE_TAG>/<PRECOMPILED_BINARY_ASSET>
-chmod +x /scratch/tools/STAR && /scratch/tools/STAR --version   # record
+# Released package — the drop-in demonstration starts here: ONE apt command
+curl -L -O https://github.com/morphic-bio/STAR-suite/releases/download/<RELEASE_TAG>/star-suite_<VERSION>-1_amd64.deb
+sudo apt-get install -y ./star-suite_<VERSION>-1_amd64.deb
+STAR --version   # record — installed system-wide by the released Debian package
 
 aws s3 sync s3://<staging-bucket>/refs  /scratch/refs
 aws s3 sync s3://<staging-bucket>/tools /scratch/tools && chmod +x /scratch/tools/{cyto,cbq_ordered_encoder}
