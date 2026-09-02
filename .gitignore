@@ -172,3 +172,8 @@ flex/tools/clique_replay/test_fanout
 
 ## Machine-local agent notes (not committed)
 AGENTS_local.md
+/core/legacy/source/trim_qc_merge
+/core/legacy/source/trim_qc_replay
+/core/legacy/source/transcriptvb_finalize
+/core/legacy/source/sidecar_gather_parity
+/core/legacy/source/sparse_gate_parity

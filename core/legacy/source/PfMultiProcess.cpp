@@ -3537,6 +3537,10 @@ std::shared_ptr<PfMultiAssignPhaseResult> runPfMultiAssignPhase(
         P.inOut->logMain << "\n";
         
         phase->featureMexEntries = std::move(featureMexEntries);
+        if (P.dynamicThreadInterface == 1) {
+            g_threadChunks.mapPermitMarkDomainComplete(
+                ThreadControl::PermitDomain::FEATURE);
+        }
         P.inOut->logMain << timeMonthDayTime() << " ..... finished pf-multi feature assignment\n";
         return phase;
     } catch (const exception& e) {

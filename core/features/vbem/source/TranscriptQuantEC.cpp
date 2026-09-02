@@ -3,6 +3,7 @@
 #include "ec_builder.h"
 #include "Parameters.h"
 #include "LibFormatDetection.h"
+#include "TranscriptVBSidecar.h"
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -1367,6 +1368,50 @@ void TranscriptQuantEC::merge(const TranscriptQuantEC& other) {
     
     // Merge processed fragment counts (for burn-in tracking)
     num_processed_fragments_ += other.num_processed_fragments_;
+}
+
+bool TranscriptQuantEC::importEvidence(
+    const transcript_vb_sidecar::Evidence& evidence, std::string& error) {
+    if (evidence.ec_table.n_transcripts != num_transcripts_) {
+        error = "TranscriptVB sidecar transcript count does not match the loaded index";
+        return false;
+    }
+    if (evidence.ec_table.n_ecs != evidence.ec_table.ecs.size()) {
+        error = "TranscriptVB sidecar EC count is internally inconsistent";
+        return false;
+    }
+
+    GCFragModel imported_gc;
+    if (!imported_gc.restoreCounts(evidence.gc_counts, error)) return false;
+    FLDAccumulator validated_fld;
+    if (!validated_fld.restore(evidence.fld_state, error)) return false;
+
+    ecTable_ = evidence.ec_table;
+    ec_signature_map_.clear();
+    ec_signature_map_.reserve(ecTable_.ecs.size());
+    for (std::size_t i = 0; i < ecTable_.ecs.size(); ++i) {
+        const EC& ec = ecTable_.ecs[i];
+        ECSignature signature;
+        signature.transcript_ids = ec.signature_ids.empty()
+            ? ec.transcript_ids : ec.signature_ids;
+        if (!ec_signature_map_.emplace(signature, i).second) {
+            error = "TranscriptVB sidecar contains duplicate EC signatures";
+            return false;
+        }
+    }
+
+    observedGC_.reset();
+    observedGC_.combineCounts(imported_gc);
+    if (!observedFLD_.restore(evidence.fld_state, error)) return false;
+    cached_fld_pmf_.clear();
+    fld_dirty_ = true;
+    num_processed_fragments_ = evidence.processed_fragments;
+    dropped_incompat_ = static_cast<std::size_t>(evidence.dropped_incompat);
+    dropped_missing_mate_fields_ =
+        static_cast<std::size_t>(evidence.dropped_missing_mate_fields);
+    dropped_unknown_obs_fmt_ =
+        static_cast<std::size_t>(evidence.dropped_unknown_obs_fmt);
+    return true;
 }
 
 std::vector<uint32_t> TranscriptQuantEC::parseCIGARString(const std::string& cigar_str) const {

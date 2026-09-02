@@ -1,13 +1,14 @@
 # STAR Suite
 
-STAR Suite updates the original STAR aligner by integrating four modules — STAR-perturb, STAR-Flex, STAR-SLAM, and TranscriptVB — to provide complete internal C/C++ pipelines for bulk RNA-seq, scRNA-seq, Perturb-seq, 10x Flex, and SLAM-seq. The integration results in **substantial speedups** (**1.7–2.4x for bulk RNA-seq**, **1.47–1.60x for scRNA-seq GEX-only Solo vs CellGENI-style STARsolo**, **3.7–6.2x for Perturb-seq**, **2.5–28.8x for Flex**) and a simplified toolchain that can be **installed through pre-compiled binaries** for researchers and agents. **No new external dependencies** are required; the suite is built entirely with the existing STAR toolchain and vendored components. **This is a drop-in replacement for the STAR aligner.**
+STAR Suite updates the original STAR aligner by integrating four modules — STAR-core (with integrated TranscriptVB quantification), STAR-perturb, STAR-Flex, and STAR-SLAM — to provide complete internal C/C++ pipelines for bulk RNA-seq, scRNA-seq, Perturb-seq, 10x Flex, and SLAM-seq. The integration results in **substantial speedups** (**1.7–2.4x for bulk RNA-seq**, **1.47–1.60x for scRNA-seq GEX-only Solo vs CellGENI-style STARsolo**, **3.7–6.2x for Perturb-seq**, **2.5–28.8x for Flex**) and a simplified toolchain that can be **installed through pre-compiled binaries** for researchers and agents. **No new external dependencies** are required; the suite is built entirely with the existing STAR toolchain and vendored components. **This is a drop-in replacement for the STAR aligner.**
 
-Current production release: **STAR Suite v1.5.0**. The suite release tag and
-packaging version are `v1.5.0` / `1.5.0-1`; `STAR --version` reports
-`1.5.0`.
+Current production release: **STAR Suite v1.7.1**. The suite release tag and
+packaging version are `v1.7.1` / `1.7.1-1`; `STAR --version` reports
+`1.7.1`.
 Use `STAR --upstream-version` for the underlying upstream STAR base
 (`2.7.11b`) and `STAR --genome-compat-version` for the genome index
-compatibility string (`2.7.4a`).
+compatibility string (`2.7.4a`). Use `STAR --source-revision` to report the
+exact full commit embedded in an official binary.
 
 Advanced-user previews live on `dev-release` or version-scoped
 `dev-release-vX.Y.Z` branches. Immutable prerelease tags use `vX.Y.Z-rcN`;
@@ -22,6 +23,16 @@ Agent quickstart: see `AGENTS.md` for repo-specific guardrails, tests, and recen
 - **Speedup**: Bulk RNA-seq **1.7–2.4x faster** than external stepwise pipelines; scRNA-seq GEX-only Solo **1.47–1.60x faster** than the CellGENI-style STARsolo parameter surface (UCSF 14K cells 1.60x, MSK 30K cells 1.47x on fresh `7a7fb08` reruns); Perturb-seq **3.7–6.2x faster** than Cell Ranger 9; Flex **2.5x faster** than Cell Ranger 9 full-count, **5.7x** in FASTQ no-genome count-only mode, and **8.0x** with indexed CBQ no-genome count-only input (~12.8–28.8x vs Cell Ranger 7 with BAM); PBMC multiome native GEX+ATAC CBQ is **1.10x faster** than the completed FASTQ.gz comparator — all with near-identical parity.
 - **Batch Mode** (`--batchMode 1`): Processes multiple FASTQs in one STAR invocation while reusing the loaded genome. Removes the need for `--genomeLoad` keep-in-memory workflows. Single-pass only (no `--twopassMode`); not supported with Solo (`--soloType`). Use `--outFileNamePrefixAuto 1` for per-sample subdirectories.
 - **TranscriptVB Quantification** (`--quantMode TranscriptVB`): Variational Bayes and EM quantification for transcript-level abundance, with parity-oriented behavior against Salmon alignment-mode. Gene-level summarization via `--quantVBgenesMode Tximport`.
+- **TranscriptVB Scatter/Gather** (`--quantVBSidecarOnly 1`): Writes compact,
+  mergeable per-shard evidence; the packaged `transcriptvb_finalize` executable
+  gathers shards into transcript- and gene-level abundance without loading the
+  genome index.
+- **Sharded Trim QC** (`--trimQcShardOut`): Records additive per-shard QC
+  counters during alignment. Packaged `trim_qc_merge` and `trim_qc_fastq`
+  executables merge distributed counters or collect the same report directly
+  from FASTQ without reconstructing BAM files.
+- **Parallel Reference I/O** (`--genomeLoadThreads`): Loads genome-index files
+  concurrently, while TranscriptVB can opt into a parallel GC-background pass.
 - **Transcriptome Output** (`--quantTranscriptomeSAMoutput`): Replaces the former `--quantTranscriptomeBan` with more explicit control (e.g., `BanSingleEnd_ExtendSoftclip`).
 - **Reference Automation** (`--autoIndex Yes`): Automated reference download/build with `--cellrangerStyleIndex Yes` formatting and `--genomeGenerateTranscriptome Yes` for transcript-level quant workflows.
 - **Native Gzip FASTQ Handling**: Automatic detection of `.gz` FASTQ inputs with internal zlib streaming — no `--readFilesCommand zcat` needed for correctness. FLEX FASTQ production recipes use this path by default; legacy external helper mode remains available via `--readFilesLegacyZcat Yes`.
@@ -37,6 +48,22 @@ Agent quickstart: see `AGENTS.md` for repo-specific guardrails, tests, and recen
   then emits strict, soft expected-count, hard, and gated-hard products before
   cell or spatial-bin calling. Existing STARsolo and Flex decoding remains the
   default compatibility path.
+- **Integrated Visium HD 3' GEX** (`--soloSpatialGexIntegrated yes`): Fuses R1
+  spatial decoding with post-alignment GeneFull evidence, retains ambiguous
+  coordinate candidates through molecule-first resolution, and writes 2, 8,
+  and 16 micrometer strict/soft/hard/gated-hard matrices. Bounded downstream
+  spooling supports complete slides on smaller-memory hosts. The feature is
+  opt-in; ordinary bulk, STARsolo, CR-compatible scRNA, and Flex runs keep
+  their existing paths and defaults.
+- **Native Visium HD Flex** (`--soloSpatialFlexIntegrated yes`): Resolves H0/H1
+  probe hits and alignment fallback directly into retained spatial candidate
+  families, then emits the same four policies and three spatial scales through
+  the bounded spill/materialization engine. It does not require a BAM, GX/UR
+  bridge, or external resolver/materializer.
+- **Flex gDNA QC** (`--soloFlexGdna auto|yes|no`): Computes the 10x-style gDNA
+  diagnostic from final filtered barcode/gene/UMI families and writes
+  per-sample JSON plus an audit TSV. The diagnostic is matrix-inert and inert
+  outside Flex.
 - **Solo Features**: `sF` BAM tag for feature type, `--soloCBtype String` for arbitrary barcode strings, `--soloCellReadStats Standard` for improved cell filtering.
 - **CR-compat GEX** (`--soloCrGexFeature auto|gene|genefull`): Controls which GEX source is merged in CR-compat mode.
 - **Native Velocyto MEX Packaging**: Current production binaries write raw and

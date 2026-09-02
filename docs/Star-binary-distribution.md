@@ -195,6 +195,70 @@ Ship discoverable, installable Ubuntu binaries for STAR Suite with low-friction 
   `STAR --version` reports `1.3.0`. Upstream provenance and genome index
   compatibility remain `2.7.11b` and `2.7.4a`.
 
+## Patch Release v1.7.1 (2026-08-09)
+
+- Release tag: `v1.7.1`
+- Release notes: `docs/RELEASE_NOTES_v1.7.1.md`
+- Packaging metadata: `debian/changelog` entry `1.7.1-1`
+- Scope: restore ordinary STARsolo Fastx thread scaling and remove an unused,
+  multi-gigabyte barcode-correction precompute from plain STARsolo startup.
+- Version note: release artifacts use tag `v1.7.1`, Debian packages use STAR
+  Suite `1.7.1`, and `STAR --version` reports `1.7.1`. Upstream provenance and
+  genome-index compatibility remain `2.7.11b` and `2.7.4a`.
+
+## Feature Release v1.7.0 (2026-08-08)
+
+- Release tag: `v1.7.0`
+- Release notes: `docs/RELEASE_NOTES_v1.7.0.md`
+- Packaging metadata: `debian/changelog` entry `1.7.0-1`
+- Scope added since v1.6.1: TranscriptVB scatter/gather evidence and the
+  standalone finalizer, additive sharded trim QC and its standalone FASTQ and
+  merge tools, parallel genome loading, optional parallel GC-background work,
+  RapidMACS/librapidmacs naming for integrated Chromap builds, and the
+  zero-junction GTF suffix-array memory-safety fix.
+- Release tarballs, installer variants, Debian packages, and Docker images now
+  include `transcriptvb_finalize`, `trim_qc_fastq`, and `trim_qc_merge` and run
+  installed-artifact workflow smokes for those tools.
+- Version note: release artifacts use tag `v1.7.0`, Debian packages use STAR
+  Suite `1.7.0`, and `STAR --version` reports `1.7.0`. Upstream provenance and
+  genome-index compatibility remain `2.7.11b` and `2.7.4a`.
+
+## Patch Release v1.6.1 (2026-07-28)
+
+- Release tag: `v1.6.1`
+- Release notes: `docs/RELEASE_NOTES_v1.6.1.md`
+- Packaging metadata: `debian/changelog` entry `1.6.1-1`
+- Scope: immutable replacement artifacts for v1.6.0. The final v1.6.0
+  scientific tree is retained; the patch supplies exact full-commit source
+  identity to Git-free tarball, installer, Debian/source-package, and Docker
+  builds so integrated GEX and native Flex spill can finalize safely.
+- `STAR --source-revision`, release metadata, spatial sidecars, spill records,
+  and run summaries carry the same 40-character release commit. Release checks
+  reject missing, short, sentinel, or mismatched identities.
+- The GitHub release body is sourced from the curated release-note document so
+  direct and private-folded changes are not hidden behind an incomplete list of
+  pull requests.
+- Version note: release artifacts use tag `v1.6.1`, Debian packages use STAR
+  Suite `1.6.1`, and both `STAR` and `molecule_first_resolver` report `1.6.1`.
+  Upstream provenance and genome index compatibility remain `2.7.11b` and
+  `2.7.4a`.
+
+## Feature Release v1.6.0 (2026-07-27)
+
+- Release tag: `v1.6.0`
+- Release notes: `docs/RELEASE_NOTES_v1.6.0.md`
+- Packaging metadata: `debian/changelog` entry `1.6.0-1`
+- Scope added since `v1.5.0`: opt-in integrated Visium HD 3-prime GEX,
+  concurrent/fused spatial and gene-evidence processing, deterministic
+  annotated rescue, bounded downstream spooling, multi-scale spatial MEX
+  materialization, and Flex inline skip/fallback fixes.
+- The normal bulk, STARsolo, CR-compatible scRNA, and Flex surfaces remain
+  default-off for integrated spatial GEX and retain byte-level isolation gates.
+- Version note: release artifacts use tag `v1.6.0`, Debian packages use STAR
+  Suite `1.6.0`, and both `STAR` and `molecule_first_resolver` report `1.6.0`.
+  Upstream provenance and genome index compatibility remain `2.7.11b` and
+  `2.7.4a`.
+
 ## Feature Release v1.5.0 (2026-07-17)
 
 - Release tag: `v1.5.0`
@@ -320,7 +384,7 @@ Notes:
 - The CI/release path publishes multiple tarballs because Linux may reject a binary built for a newer runtime environment before STAR Suite starts.
 - The installer bundle checks the host environment and selects the highest compatible bundled binary automatically.
 - Release artifacts now include runtime-manifest text files captured from clean Ubuntu 22.04 and 24.04 containers.
-- Those manifests record the resolved runtime libraries and Ubuntu/Debian package names seen by the validator.
+- Those manifests record the resolved runtime libraries and Ubuntu/Debian package names seen for STAR and each packaged release companion.
 
 ## OS Compatibility Note
 
@@ -333,19 +397,29 @@ For non-technical users:
 For technical users:
 
 - The tarballs are only partially static.
+- STAR and the packaged `transcriptvb_finalize`, `trim_qc_fastq`, and
+  `trim_qc_merge` companions embed the compiler's C++, GCC, and OpenMP
+  runtimes. They do not require `libstdc++.so.6`, `libgcc_s.so.1`, or
+  `libgomp.so.1` from the target host.
 - Current validated runtime SONAMEs are:
   - `libc.so.6`
   - `libm.so.6`
   - `libz.so.1`
   - `libcrypto.so.3`
+  - `libstdc++.so.6` (molecule-first companion tools)
+  - `libgcc_s.so.1` (molecule-first companion tools)
 - On Ubuntu 22.04 the validated package set is:
   - `libc6`
   - `zlib1g`
   - `libssl3`
+  - `libstdc++6`
+  - `libgcc-s1`
 - On Ubuntu 24.04 the validated package set is:
   - `libc6`
   - `zlib1g`
   - `libssl3t64`
+  - `libstdc++6`
+  - `libgcc-s1`
 - The `glibc239` asset label tracks the Ubuntu 24.04 build environment.
 - The March 10, 2026 runtime manifest showed that this build currently references `GLIBC_2.38`, so the label is conservative.
 - The exact resolved package names are recorded in the release `runtime-manifests/` artifacts for each container baseline.

@@ -10,6 +10,8 @@ on:
       - "docker/**"
       - "scripts/docker/**"
       - "scripts/release/**"
+      - "share/star-suite/**"
+      - "mcp_server/**"
       - "core/**"
       - "flex/**"
       - "slam/**"
@@ -40,6 +42,9 @@ jobs:
       - name: Verify molecule-first production adapters
         run: tests/run_molecule_first_production_adapter_test.sh
 
+      - name: Verify official recipe and provenance snapshots
+        run: python3 scripts/release/validate_official_snapshots.py
+
       - name: Build suite base image
         run: |
           chmod +x scripts/docker/*.sh
@@ -62,3 +67,4 @@ jobs:
           push: false
           build-args: |
             MAKE_JOBS=8
+            STAR_SUITE_COMMIT_SHA=${{ github.sha }}

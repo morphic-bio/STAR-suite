@@ -18,6 +18,10 @@
 #include <memory>
 #include <random>
 
+namespace transcript_vb_sidecar {
+struct Evidence;
+}
+
 // Wrapper class for building equivalence classes during STAR alignment
 // Maintains thread-local EC table and GC observations
 class TranscriptQuantEC {
@@ -67,6 +71,11 @@ public:
     
     // Merge EC table from another thread
     void merge(const TranscriptQuantEC& other);
+
+    // Replace the unfinalized accumulator state from a validated binary
+    // sidecar. This is deliberately before normalize/finalize and VB/EM.
+    bool importEvidence(const transcript_vb_sidecar::Evidence& evidence,
+                        std::string& error);
     
     // Get EC table (for quantification)
     const ECTable& getECTable() const { return ecTable_; }
@@ -86,6 +95,7 @@ public:
     size_t getDroppedIncompat() const { return dropped_incompat_; }
     size_t getDroppedMissingMateFields() const { return dropped_missing_mate_fields_; }
     size_t getDroppedUnknownObsFmt() const { return dropped_unknown_obs_fmt_; }
+    uint64_t getNumProcessedFragments() const { return num_processed_fragments_; }
     
 private:
     ECTable ecTable_;

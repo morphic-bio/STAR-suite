@@ -334,6 +334,17 @@ bool validateRecord(const Record &record, std::uint32_t featureCount,
         error = "record cannot be both exonic and intronic-fallback rescued";
         return false;
     }
+    if ((record.statusFlags & kAlignmentEvidenceRejected)
+        && (record.statusFlags & kUniqueGene)) {
+        error = "alignment-evidence rejection cannot carry a unique gene";
+        return false;
+    }
+    if ((record.statusFlags & (kBestScoreNaDecoy | kConflictingBestGenes
+                               | kMultiGeneBestAlignment))
+        && !(record.statusFlags & kAlignmentEvidenceRejected)) {
+        error = "alignment-evidence failure reason requires rejection flag";
+        return false;
+    }
     return true;
 }
 

@@ -63,9 +63,14 @@ void sjdbInsertJunctions(Parameters & P, Genome & mapGen, Genome & mapGen1, Sjdb
     time ( &rawtime );
     P.inOut->logMain     << timeMonthDayTime(rawtime) << " ..... finished inserting junctions into genome" <<endl;
 
-    //write an extra 0 at the end of the array, filling the last bytes that otherwise are not accessible, but will be written to disk
-    //this is - to avoid valgrind complaints. Note that SApass1 is allocated with plenty of space to spare.
-    mapGen.SA.writePacked(mapGen.nSA,0);
+    if (mapGen.sjdbN>0) {
+        //Write an extra 0 at the end of the rebuilt array, filling the last bytes
+        //that otherwise are not accessible, but will be written to disk. SApass1
+        //has insertion capacity to spare in this case. If the supplied annotation
+        //contains no junctions, sjdbBuildIndex returns without rebuilding the SA
+        //and record nSA is outside the original packed-array allocation.
+        mapGen.SA.writePacked(mapGen.nSA,0);
+    };
 
     if (P.pGe.sjdbInsertSave=="All")
     {//save and copy all genome files into sjdbInsert.outDir, except those created above

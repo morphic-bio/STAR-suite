@@ -10,6 +10,7 @@
 #include "GlobalVariables.h"
 #include "ErrorWarning.h"
 #include "InlineCBCorrection.h"
+#include "SaturationPermitController.h"
 #include "TimeFunctions.h"
 #include "streamFuns.h"
 #include "systemFunctions.h"
@@ -54,6 +55,23 @@ bool readableFile(const std::string &path) {
     }
     std::ifstream in(path.c_str(), std::ios::binary);
     return in.good();
+}
+
+[[noreturn]] void fatalBgzfRangeMode(Parameters &P, const std::string &reason) {
+    std::ostringstream errOut;
+    errOut << "EXITING because of fatal input ERROR: --readFilesBgzfMode range could not be activated.\n"
+           << reason << "\n"
+           << "SOLUTION: use paired BGZF FASTQ in a supported fully-fused Flex run, or set --readFilesBgzfMode auto/off.\n";
+    exitWithError(errOut.str(), std::cerr, P.inOut->logMain,
+                  EXIT_CODE_PARAMETER, P);
+}
+
+[[noreturn]] void fatalBgzfInput(Parameters &P, const std::string &reason) {
+    std::ostringstream errOut;
+    errOut << "EXITING because of fatal BGZF input ERROR:\n"
+           << reason << "\n";
+    exitWithError(errOut.str(), std::cerr, P.inOut->logMain,
+                  EXIT_CODE_INPUT_FILES, P);
 }
 }
 
@@ -250,6 +268,12 @@ static void mapThreadsSpawnFlexPipeline(Parameters &P, ReadAlignChunk** RAchunk)
     const int nWorkers = fullyFused ? 0 : (P.runThreadN - nLanes - actualNTriage - actualNSolo);
     const int nFusedThreads = fullyFused ? P.runThreadN : 0;
 
+    if (P.readFilesTypeN == 1 && !fullyFused &&
+        P.readFilesBgzfMode == "range") {
+        fatalBgzfRangeMode(P,
+            "BGZF range readers currently require --flexPipelineNTriage 0 --flexPipelineNSolo 0");
+    }
+
     const bool noAlign = (P.pSolo.flexNoAlign != 0);
     P.inOut->logMain << "Flex pipeline: runThreadN=" << P.runThreadN
                      << ", nLanes=" << nLanes
@@ -288,6 +312,28 @@ static void mapThreadsSpawnFlexPipeline(Parameters &P, ReadAlignChunk** RAchunk)
                                  << cbqRangeReason
                                  << "); using whole-lane CBQ readers\n" << std::flush;
             }
+        } else if (P.readFilesTypeN == 1 && P.readFilesBgzfMode != "off") {
+            std::string bgzfRangeReason;
+            bool fatalError = false;
+            if (flexPrepareBgzfRangeTasks(&state, P, nFusedThreads,
+                                          &bgzfRangeReason, &fatalError)) {
+                P.inOut->logMain << "BGZF parallel range readers: active ("
+                                 << bgzfRangeReason << ")\n";
+            } else if (fatalError) {
+                if (P.readFilesBgzfMode == "range") {
+                    fatalBgzfRangeMode(P, bgzfRangeReason);
+                }
+                fatalBgzfInput(P, bgzfRangeReason);
+            } else {
+                P.inOut->logMain << "BGZF parallel range readers: not active ("
+                                 << bgzfRangeReason << "); using zlib\n";
+            }
+            for (int lane = 0; lane < nLanes; ++lane) {
+                P.inOut->logMain << "BGZF input lane " << lane << ": "
+                                 << (state.laneUsesBgzfRange(lane) ? "range" : "zlib")
+                                 << "\n";
+            }
+            P.inOut->logMain << std::flush;
         }
     }
 
@@ -326,6 +372,11 @@ static void mapThreadsSpawnFlexPipeline(Parameters &P, ReadAlignChunk** RAchunk)
         // Join all fused threads (they self-transition from reader to aligner)
         for (int i = 0; i < nFusedThreads; ++i) pthread_join(fusedThreads[i], nullptr);
         P.inOut->logMain << "  All fused threads joined\n" << std::flush;
+
+        if (state.inputFailed.load(std::memory_order_relaxed)) {
+            fatalBgzfInput(P, state.inputError.empty()
+                ? "a fused input reader failed" : state.inputError);
+        }
 
         state.pipelineDone.store(true, std::memory_order_relaxed);
         pthread_join(reporterThread, nullptr);
@@ -557,6 +608,28 @@ void runFlexNoGenomeCountOnly(Parameters &P) {
                              << cbqRangeReason
                              << "); using whole-lane CBQ readers\n" << std::flush;
         }
+    } else if (P.readFilesTypeN == 1 && P.readFilesBgzfMode != "off") {
+        std::string bgzfRangeReason;
+        bool fatalError = false;
+        if (flexPrepareBgzfRangeTasks(&state, P, nFusedThreads,
+                                      &bgzfRangeReason, &fatalError)) {
+            P.inOut->logMain << "BGZF parallel range readers: active ("
+                             << bgzfRangeReason << ")\n";
+        } else if (fatalError) {
+            if (P.readFilesBgzfMode == "range") {
+                fatalBgzfRangeMode(P, bgzfRangeReason);
+            }
+            fatalBgzfInput(P, bgzfRangeReason);
+        } else {
+            P.inOut->logMain << "BGZF parallel range readers: not active ("
+                             << bgzfRangeReason << "); using zlib\n";
+        }
+        for (int lane = 0; lane < nLanes; ++lane) {
+            P.inOut->logMain << "BGZF input lane " << lane << ": "
+                             << (state.laneUsesBgzfRange(lane) ? "range" : "zlib")
+                             << "\n";
+        }
+        P.inOut->logMain << std::flush;
     }
 
     std::vector<SoloReadFeature *> fusedFeats(nFusedThreads, nullptr);
@@ -602,6 +675,11 @@ void runFlexNoGenomeCountOnly(Parameters &P) {
         pthread_join(fusedThreads[i], nullptr);
     }
     P.inOut->logMain << "  All fused no-genome threads joined\n" << std::flush;
+
+    if (state.inputFailed.load(std::memory_order_relaxed)) {
+        fatalBgzfInput(P, state.inputError.empty()
+            ? "a fused input reader failed" : state.inputError);
+    }
 
     state.pipelineDone.store(true, std::memory_order_relaxed);
     pthread_join(reporterThread, nullptr);
@@ -713,9 +791,17 @@ void runFlexNoGenomeCountOnly(Parameters &P) {
 
 void mapThreadsSpawn (Parameters &P, ReadAlignChunk** RAchunk) {
     // Check activation guard for Flex pipeline mode
-    if (flexPipelineActivationGuard(P)) {
+    std::string flexActivationReason;
+    const bool flexPipelineActive =
+        flexPipelineActivationGuard(P, &flexActivationReason, true);
+    if (flexPipelineActive) {
         mapThreadsSpawnFlexPipeline(P, RAchunk);
         return;
+    }
+    if (P.readFilesBgzfMode == "range") {
+        fatalBgzfRangeMode(P, flexActivationReason.empty()
+            ? "command is not a supported fused Flex run"
+            : flexActivationReason);
     }
 
     const bool interfaceEnabled = (P.dynamicThreadInterface == 1);
@@ -743,11 +829,37 @@ void mapThreadsSpawn (Parameters &P, ReadAlignChunk** RAchunk) {
 
     // Per-domain borrowable floors (Step 5a). Index order must match
     // ThreadControl::permitDomainIndex(): MAP=0, FEATURE=1, ATAC=2.
+    int configuredMapFloor = std::max(0, P.dynamicThreadMapFloor);
+    int configuredFeatureFloor = std::max(0, P.dynamicThreadFeatureFloor);
+    int configuredAtacFloor = std::max(0, P.dynamicThreadAtacFloor);
+    if (interfaceEnabled && P.chromapAtac.enabled == 1 &&
+        P.dynamicThreadAtacController == 2) {
+        const bool featureActive = P.dynamicThreadFeatureWorkEstimate > 0;
+        if (featureActive && configuredPermits < 3) {
+            ostringstream errOut;
+            errOut << "EXITING because of FATAL ERROR: three-domain saturation "
+                   << "control requires at least 3 configured permits, got "
+                   << configuredPermits;
+            exitWithError(errOut.str(), std::cerr, P.inOut->logMain, 1, P);
+        }
+        star::multiome::SaturationPermitController::Config controllerConfig;
+        controllerConfig.configuredPermits = configuredPermits;
+        controllerConfig.fixedFeatureFloor = configuredFeatureFloor;
+        controllerConfig.featureActive = featureActive;
+        controllerConfig.workEstimates.map = P.dynamicThreadMapWorkEstimate;
+        controllerConfig.workEstimates.feature = P.dynamicThreadFeatureWorkEstimate;
+        controllerConfig.workEstimates.atac = P.dynamicThreadAtacWorkEstimate;
+        const star::multiome::SaturationPermitController controller(controllerConfig);
+        const auto initial = controller.initialDecision();
+        configuredMapFloor = initial.mapFloor;
+        configuredFeatureFloor = initial.featureFloor;
+        configuredAtacFloor = initial.atacFloor;
+    }
     {
         std::vector<int> domainFloors(3, 0);
-        domainFloors[0] = std::max(0, P.dynamicThreadMapFloor);
-        domainFloors[1] = std::max(0, P.dynamicThreadFeatureFloor);
-        domainFloors[2] = std::max(0, P.dynamicThreadAtacFloor);
+        domainFloors[0] = configuredMapFloor;
+        domainFloors[1] = configuredFeatureFloor;
+        domainFloors[2] = configuredAtacFloor;
         g_threadChunks.mapPermitConfigureDomainFloors(domainFloors);
     }
     // FIFO waiter queue (Step 7). When enabled, ThreadControl serves
@@ -765,7 +877,14 @@ void mapThreadsSpawn (Parameters &P, ReadAlignChunk** RAchunk) {
                          << ", cpuSampleMs=" << P.dynamicThreadPfControllerCpuSampleMs
                          << ", cpuEmaAlpha=" << P.dynamicThreadPfControllerCpuEmaAlpha
                          << ", retuneEveryAcquires=" << P.variableThreadsRetuneEveryAcquires
-                         << ", retuneSequenceLength=" << P.variableThreadsPermitSequence.size() << ")\n" << flush;
+                         << ", retuneSequenceLength=" << P.variableThreadsPermitSequence.size()
+                         << ", floors(map/feature/atac)="
+                         << configuredMapFloor << "/"
+                         << configuredFeatureFloor << "/"
+                         << configuredAtacFloor
+                         << ", atacController=" << P.dynamicThreadAtacController
+                         << ", fifo=" << ((P.dynamicThreadFifoWaiters == 1) ? "on" : "off")
+                         << ")\n" << flush;
         pthread_mutex_unlock(&g_threadChunks.mutexLogMain);
     }
 
@@ -795,6 +914,11 @@ void mapThreadsSpawn (Parameters &P, ReadAlignChunk** RAchunk) {
         pthread_mutex_unlock(&g_threadChunks.mutexLogMain);
     };
 
+    if (interfaceEnabled) {
+        g_threadChunks.mapPermitMarkDomainComplete(
+            ThreadControl::PermitDomain::MAP);
+    }
+
     if (interfaceEnabled && telemetryEnabled) {
         ThreadControl::MapPermitSnapshot snapshot = g_threadChunks.mapPermitSnapshot();
         const double waitMsTotal = snapshot.waitNsTotal / 1.0e6;
@@ -804,6 +928,15 @@ void mapThreadsSpawn (Parameters &P, ReadAlignChunk** RAchunk) {
         const double lastReleaseAgoMs = snapshot.lastReleaseAgoNs / 1.0e6;
         const double avgWaitMs = snapshot.acquireCalls > 0 ? waitMsTotal / static_cast<double>(snapshot.acquireCalls) : 0.0;
         const double avgWorkMs = snapshot.acquireCalls > 0 ? workMsTotal / static_cast<double>(snapshot.acquireCalls) : 0.0;
+        const double elapsedNs = static_cast<double>(snapshot.telemetryElapsedNs);
+        const double mapOccupancy = elapsedNs > 0.0
+            ? snapshot.mapDomain.inUsePermitNs / elapsedNs : 0.0;
+        const double featureOccupancy = elapsedNs > 0.0
+            ? snapshot.featureDomain.inUsePermitNs / elapsedNs : 0.0;
+        const double atacOccupancy = elapsedNs > 0.0
+            ? snapshot.atacDomain.inUsePermitNs / elapsedNs : 0.0;
+        const double idlePermitAverage = elapsedNs > 0.0
+            ? snapshot.availablePermitNs / elapsedNs : 0.0;
 
         pthread_mutex_lock(&g_threadChunks.mutexLogMain);
         P.inOut->logMain << "Dynamic thread telemetry: acquires=" << snapshot.acquireCalls
@@ -830,6 +963,42 @@ void mapThreadsSpawn (Parameters &P, ReadAlignChunk** RAchunk) {
                          << ", workBytes=" << snapshot.workBytesTotal
                          << ", waitMs(total/avg/max)=" << waitMsTotal << "/" << avgWaitMs << "/" << waitMsMax
                          << ", workMs(total/avg/max)=" << workMsTotal << "/" << avgWorkMs << "/" << workMsMax
+                         << ", floorsActive=" << (snapshot.floorsActive ? "yes" : "no")
+                         << ", fifo=" << (snapshot.fifoEnabled ? "on" : "off")
+                         << ", fifoDepth=" << snapshot.fifoQueueDepth
+                         << ", occupancyAvg(map/feature/atac/idle)="
+                         << mapOccupancy << "/" << featureOccupancy << "/"
+                         << atacOccupancy << "/" << idlePermitAverage
+                         << ", contendedIdlePermitMs="
+                         << (snapshot.contendedIdlePermitNs / 1.0e6)
+                         << ", noAdmissibleGrants="
+                         << snapshot.noAdmissibleGrantEvents
+                         << ", floorChanges=" << snapshot.floorChangeCalls
+                         << ", domainWork(mapUnits,mapBytes,atacUnits,atacBytes)="
+                         << snapshot.mapDomain.workUnitsTotal << ","
+                         << snapshot.mapDomain.workBytesTotal << ","
+                         << snapshot.atacDomain.workUnitsTotal << ","
+                         << snapshot.atacDomain.workBytesTotal
+                         << ", mapState(floor,inUse,maxInUse,waiters,maxWaiters,blocked,fast,queued,releases)="
+                         << snapshot.mapDomain.floor << ","
+                         << snapshot.mapDomain.inUse << ","
+                         << snapshot.mapDomain.maxInUse << ","
+                         << snapshot.mapDomain.currentWaiters << ","
+                         << snapshot.mapDomain.maxWaiters << ","
+                         << snapshot.mapDomain.blockedAcquireCalls << ","
+                         << snapshot.mapDomain.fastAcquireCalls << ","
+                         << snapshot.mapDomain.queuedGrantCalls << ","
+                         << snapshot.mapDomain.releaseCalls
+                         << ", atacState(floor,inUse,maxInUse,waiters,maxWaiters,blocked,fast,queued,releases)="
+                         << snapshot.atacDomain.floor << ","
+                         << snapshot.atacDomain.inUse << ","
+                         << snapshot.atacDomain.maxInUse << ","
+                         << snapshot.atacDomain.currentWaiters << ","
+                         << snapshot.atacDomain.maxWaiters << ","
+                         << snapshot.atacDomain.blockedAcquireCalls << ","
+                         << snapshot.atacDomain.fastAcquireCalls << ","
+                         << snapshot.atacDomain.queuedGrantCalls << ","
+                         << snapshot.atacDomain.releaseCalls
                          << "\n" << flush;
         pthread_mutex_unlock(&g_threadChunks.mutexLogMain);
     }

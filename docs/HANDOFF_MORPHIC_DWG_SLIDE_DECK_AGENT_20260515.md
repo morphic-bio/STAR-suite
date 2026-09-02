@@ -10,7 +10,7 @@ data surfaces:
 
 - MSK 30KO Perturb-seq
 - NW SLAM-seq paired-end production
-- NW ATAC-seq Chromap-suite/libMACS3 production
+- NW ATAC-seq Chromap-suite/RapidMACS production
 
 Start from the slide outline here:
 
@@ -325,7 +325,7 @@ Known ATAC caveat:
 - Do not include copied provider `.rds` metadata as if it were embedded in the
   production h5ads.
 - Do not use older ATAC roots such as `/NW-ATAC-Seq-results/` as the new
-  libMACS3 release. Those reflect the older external MACS2/MACS3 layout.
+  RapidMACS release. Those reflect the older external MACS2/MACS3 layout.
 - Do not claim SLAM exploratory literature or marker summaries are part of the
   curated DESeq2-only handoff unless that is explicitly desired and labeled.
 - Do not treat ATAC `estfrip=0` as a QC failure or as a valid FRiP metric.
@@ -341,8 +341,8 @@ Use these if the deck needs concise text:
   count-binomial outputs, and completed DESeq2 from TranscriptVB expression
   using blocked, unblocked, and collapsed modes."
 - ATAC: "The ATAC run processed 200 complete sample outputs with Chromap-suite
-  and the new integrated libMACS3 FRAG peak-calling path, approximately 8x to
-  11x faster for peak calling in validation."
+  and the new integrated RapidMACS (`librapidmacs`) FRAG peak-calling path,
+  approximately 8x to 11x faster for peak calling in validation."
 
 ## If More Figures Are Needed
 

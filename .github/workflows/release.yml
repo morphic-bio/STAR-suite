@@ -33,6 +33,15 @@ jobs:
         run: |
           chmod +x scripts/release/*.sh scripts/release/docker/*.sh
 
+      - name: Resolve STAR Suite binary version
+        run: |
+          suite_version="${GITHUB_REF_NAME#v}"
+          suite_version="${suite_version%%-*}"
+          echo "STAR_SUITE_EXPECTED_VERSION=${suite_version}" >> "${GITHUB_ENV}"
+
+      - name: Verify official recipe and provenance snapshots
+        run: python3 scripts/release/validate_official_snapshots.py
+
       - name: Install packaging dependencies
         run: |
           sudo apt-get update
@@ -116,7 +125,8 @@ jobs:
             --skip-image-build \
             --base-image "ubuntu:22.04" \
             --tarball "dist/release/STAR-suite-${GITHUB_REF_NAME}-linux-amd64-glibc234.tar.gz" \
-            --expected-version "${GITHUB_REF_NAME#v}" \
+            --expected-version "${STAR_SUITE_EXPECTED_VERSION}" \
+            --expected-commit "${GITHUB_SHA}" \
             --manifest-out "dist/release/runtime-manifests/glibc234-ubuntu22.txt"
 
       - name: Validate glibc234 tarball runtime (Ubuntu 24.04)
@@ -126,7 +136,8 @@ jobs:
             --skip-image-build \
             --base-image "ubuntu:24.04" \
             --tarball "dist/release/STAR-suite-${GITHUB_REF_NAME}-linux-amd64-glibc234.tar.gz" \
-            --expected-version "${GITHUB_REF_NAME#v}" \
+            --expected-version "${STAR_SUITE_EXPECTED_VERSION}" \
+            --expected-commit "${GITHUB_SHA}" \
             --manifest-out "dist/release/runtime-manifests/glibc234-ubuntu24.txt"
 
       - name: Validate glibc239 tarball runtime (Ubuntu 24.04)
@@ -136,7 +147,8 @@ jobs:
             --skip-image-build \
             --base-image "ubuntu:24.04" \
             --tarball "dist/release/STAR-suite-${GITHUB_REF_NAME}-linux-amd64-glibc239.tar.gz" \
-            --expected-version "${GITHUB_REF_NAME#v}" \
+            --expected-version "${STAR_SUITE_EXPECTED_VERSION}" \
+            --expected-commit "${GITHUB_SHA}" \
             --manifest-out "dist/release/runtime-manifests/glibc239-ubuntu24.txt"
 
       - name: Smoke test glibc239 tarball (Ubuntu 24.04)
@@ -147,7 +159,8 @@ jobs:
             --skip-image-build \
             --base-image "ubuntu:24.04" \
             --tarball "dist/release/STAR-suite-${GITHUB_REF_NAME}-linux-amd64-glibc239.tar.gz" \
-            --expected-version "${GITHUB_REF_NAME#v}"
+            --expected-version "${STAR_SUITE_EXPECTED_VERSION}" \
+            --expected-commit "${GITHUB_SHA}"
 
       - name: Validate installer bundle (Ubuntu 22.04)
         run: |
@@ -157,7 +170,8 @@ jobs:
             --base-image "ubuntu:22.04" \
             --bundle "dist/release/STAR-suite-${GITHUB_REF_NAME}-linux-amd64-installer.tar.gz" \
             --expected-label "glibc234" \
-            --expected-version "${GITHUB_REF_NAME#v}" \
+            --expected-version "${STAR_SUITE_EXPECTED_VERSION}" \
+            --expected-commit "${GITHUB_SHA}" \
             --manifest-out "dist/release/runtime-manifests/installer-ubuntu22.txt"
 
       - name: Validate installer bundle (Ubuntu 24.04)
@@ -168,7 +182,8 @@ jobs:
             --base-image "ubuntu:24.04" \
             --bundle "dist/release/STAR-suite-${GITHUB_REF_NAME}-linux-amd64-installer.tar.gz" \
             --expected-label "glibc239" \
-            --expected-version "${GITHUB_REF_NAME#v}" \
+            --expected-version "${STAR_SUITE_EXPECTED_VERSION}" \
+            --expected-commit "${GITHUB_SHA}" \
             --manifest-out "dist/release/runtime-manifests/installer-ubuntu24.txt"
 
       - name: Smoke test installer bundle (Ubuntu 24.04)
@@ -180,7 +195,8 @@ jobs:
             --base-image "ubuntu:24.04" \
             --bundle "dist/release/STAR-suite-${GITHUB_REF_NAME}-linux-amd64-installer.tar.gz" \
             --expected-label "glibc239" \
-            --expected-version "${GITHUB_REF_NAME#v}"
+            --expected-version "${STAR_SUITE_EXPECTED_VERSION}" \
+            --expected-commit "${GITHUB_SHA}"
 
       - name: Build Debian binary package
         run: |
@@ -189,7 +205,8 @@ jobs:
 
       - name: Validate .deb install/uninstall (Ubuntu 24.04)
         run: |
-          scripts/release/validate_deb_install_uninstall.sh
+          scripts/release/validate_deb_install_uninstall.sh \
+            --expected-commit "${GITHUB_SHA}"
 
       - name: Build source package for PPA
         run: |
@@ -274,6 +291,7 @@ jobs:
           push: true
           build-args: |
             MAKE_JOBS=8
+            STAR_SUITE_COMMIT_SHA=${{ github.sha }}
           tags: ${{ steps.image-tags.outputs.tags }}
 
   publish-github-release:
@@ -284,6 +302,17 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
+      - name: Checkout release notes
+        uses: actions/checkout@v4
+
+      - name: Resolve release notes path
+        id: release-notes
+        run: |
+          release_tag="${GITHUB_REF_NAME%%-*}"
+          notes_path="docs/RELEASE_NOTES_${release_tag}.md"
+          test -f "${notes_path}"
+          echo "path=${notes_path}" >> "${GITHUB_OUTPUT}"
+
       - name: Download release artifacts
         uses: actions/download-artifact@v4
         with:
@@ -318,6 +347,6 @@ jobs:
         with:
           files: |
             dist/release/**/*
-          generate_release_notes: true
+          body_path: ${{ steps.release-notes.outputs.path }}
           draft: false
           prerelease: ${{ steps.prerelease.outputs.is_prerelease == 'true' }}

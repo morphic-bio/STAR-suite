@@ -1,3 +1,8 @@
+STAR-suite BGZF parallel FASTQ ingest --- 2026/09/01
+===================================================
+* Added on-demand `BC/BSIZE` BGZF range readers for supported fully-fused STAR-Flex runs, with memory-only work caching, ordered exact mate pairing, and support for structurally complete files without the optional canonical EOF member.
+* Added --readFilesBgzfMode, --bgzfReaderThreads, and --bgzfCrcCheck. Plain gzip and mode off retain the existing zlib input path.
+
 STAR 2.7.11b --- 2024/01/24 ::: Minor in one parameter.
 ===========================================
 * Replaced --quantTranscriptomeBan parameter with --quantTranscriptomeSAMoutput with more explicit naming of options. The default behavior is not affected.

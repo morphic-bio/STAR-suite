@@ -1,4 +1,6 @@
 #include "effective_length_wrapper.h"
+
+#include <omp.h>
 #include "effective_length.h"
 #include <algorithm>
 #include <cmath>
@@ -107,7 +109,8 @@ DynamicGCEffectiveLengthResult computeDynamicGCBiasedEffectiveLengthsWrapper(
     const std::vector<int32_t>& raw_lengths,
     const std::vector<double>& alpha_counts,
     const std::vector<double>& effective_lengths_in,
-    const std::vector<double>& observed_gc_101)
+    const std::vector<double>& observed_gc_101,
+    int background_threads)
 {
     DynamicGCEffectiveLengthResult result;
     result.effective_lengths = effective_lengths_in;
@@ -139,7 +142,21 @@ DynamicGCEffectiveLengthResult computeDynamicGCBiasedEffectiveLengthsWrapper(
     std::vector<double> expectedCounts(kSalmonFragGCBins, 0.0);
     const int32_t cdfMaxIdx = static_cast<int32_t>(cdf.size() - 1);
 
-    for (size_t txpIdx = 0; txpIdx < raw_lengths.size(); ++txpIdx) {
+    // This background pass is a pure reduction into 101 bins and dominates the
+    // cost of the whole correction -- it walks every fragment start of every
+    // transcript. Accumulate into per-thread bins and combine in fixed thread
+    // order: schedule(static) plus an ordered combine keeps the result
+    // reproducible for a given thread count, which a plain array reduction
+    // would not.
+    const int gcThreads = std::max(1, std::min(background_threads, omp_get_max_threads()));
+    std::vector<double> gcTLS(static_cast<size_t>(gcThreads) * kSalmonFragGCBins, 0.0);
+    std::vector<uint64_t> gcBg(static_cast<size_t>(gcThreads), 0);
+
+    #pragma omp parallel for schedule(static) num_threads(gcThreads)
+    for (ptrdiff_t txpIdxS = 0; txpIdxS < static_cast<ptrdiff_t>(raw_lengths.size()); ++txpIdxS) {
+        const size_t txpIdx = static_cast<size_t>(txpIdxS);
+        const int gcTid = omp_get_thread_num();
+        double* const gcAcc = &gcTLS[static_cast<size_t>(gcTid) * kSalmonFragGCBins];
         const libem::TranscriptSequence* txp =
             transcriptome.getTranscript(static_cast<uint32_t>(txpIdx));
         if (txp == nullptr) {
@@ -161,7 +178,7 @@ DynamicGCEffectiveLengthResult computeDynamicGCBiasedEffectiveLengthsWrapper(
             continue;
         }
 
-        ++result.background_transcripts;
+        ++gcBg[static_cast<size_t>(gcTid)];
         const double weight = alpha_counts[txpIdx] / effective_lengths_in[txpIdx];
         auto conditionalCDF = [&](int32_t x) -> double {
             if (x > cdfMaxArg) {
@@ -187,13 +204,19 @@ DynamicGCEffectiveLengthResult computeDynamicGCBiasedEffectiveLengthsWrapper(
                     prevFLMass = flMass;
                     if (flWeight > 0.0) {
                         const int32_t gcFrac = txp->gcFrac(fragStart, fragEnd);
-                        expectedCounts[salmonGCBin(gcFrac)] += weight * flWeight;
+                        gcAcc[salmonGCBin(gcFrac)] += weight * flWeight;
                     }
                 } else {
                     break;
                 }
             }
         }
+    }
+
+    for (int t = 0; t < gcThreads; ++t) {
+        const double* const acc = &gcTLS[static_cast<size_t>(t) * kSalmonFragGCBins];
+        for (size_t b = 0; b < kSalmonFragGCBins; ++b) expectedCounts[b] += acc[b];
+        result.background_transcripts += gcBg[static_cast<size_t>(t)];
     }
 
     result.expected_gc = normalizeWithPrior(expectedCounts);

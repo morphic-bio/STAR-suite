@@ -8,6 +8,7 @@
 #include "input/CbqInputModule.h"
 #include "input/FastxInputModule.h"
 #include "input/CbqStarAdapter.h"
+#include "SpatialR1FastqTap.h"
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -274,6 +275,18 @@ void fastxAppendLine(char* buffer, uint64& offset, const string& line) {
 }
 
 void fastxAppendRecord(ReadAlignChunk& chunk, const star::input::InputRecord& record) {
+    if (chunk.P.spatialR1FastqTapWriter != nullptr) {
+        if (record.mates.size() != 2 || !record.mates[1].has_quality) {
+            exitWithError("EXITING because the fused raw-R1 tap requires exactly two FASTQ ends with qualities\n",
+                          std::cerr, chunk.P.inOut->logMain, EXIT_CODE_INPUT_FILES, chunk.P);
+        }
+        string tapError;
+        if (!chunk.P.spatialR1FastqTapWriter->write(
+                record.read_name, record.mates[1].sequence, record.mates[1].quality, tapError)) {
+            exitWithError("EXITING because the fused raw-R1 FASTQ tap failed: " + tapError + "\n",
+                          std::cerr, chunk.P.inOut->logMain, EXIT_CODE_FILE_WRITE, chunk.P);
+        }
+    }
     for (uint imate = 0; imate < chunk.P.readNends; ++imate) {
         const star::input::InputMateRecord& mate = record.mates[imate];
         uint64& offset = chunk.chunkInSizeBytesTotal[imate];

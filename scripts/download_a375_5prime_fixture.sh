@@ -76,7 +76,9 @@ else
 
   log "Extracting FASTQs"
   mkdir -p "${FASTQ_ROOT}"
-  tar -xf "${FASTQS_TAR}" -C "${FASTQ_ROOT}" --strip-components=1
+  # Archive members are rooted at ./1k_CRISPR_5p_gemx_fastqs/. Strip both
+  # components so the fixture contract remains fastqs/{gex,crispr}.
+  tar -xf "${FASTQS_TAR}" -C "${FASTQ_ROOT}" --strip-components=2
   log "Extracted to ${FASTQ_ROOT}"
 fi
 

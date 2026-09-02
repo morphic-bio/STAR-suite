@@ -5,6 +5,7 @@ pyyaml>=6.0
 aiofiles>=23.0.0
 uvicorn>=0.24.0
 python-multipart>=0.0.7  # Launchpad file upload endpoint
+packaging>=23.0
 
 # Testing
 pytest>=7.0.0

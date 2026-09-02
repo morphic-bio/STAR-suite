@@ -83,6 +83,8 @@ MANIFEST_PATH="${STAGE_DIR}/compat-manifest.tsv"
 
 bundle_version=""
 bundle_arch=""
+bundle_commit=""
+bundle_share_initialized=0
 
 for tarball in "${TARBALLS[@]}"; do
   tarball="$(realpath "${tarball}")"
@@ -100,6 +102,12 @@ for tarball in "${TARBALLS[@]}"; do
     echo "ERROR: tarball missing release metadata: ${tarball}" >&2
     exit 1
   fi
+  if [[ ! -f "${extract_subdir}/share/star-suite/SNAPSHOTS.json" \
+      || ! -f "${extract_subdir}/share/star-suite/catalogs/official/catalog.yaml" \
+      || ! -f "${extract_subdir}/share/star-suite/evidence/official/schema/record-v1.schema.json" ]]; then
+    echo "ERROR: tarball missing official recipe/provenance snapshots: ${tarball}" >&2
+    exit 1
+  fi
 
   unset VERSION ARCH COMPAT_LABEL GLIBC_BASELINE BUILD_ENVIRONMENT ASSET_NAME COMMIT_SHA
   # shellcheck disable=SC1090
@@ -107,6 +115,10 @@ for tarball in "${TARBALLS[@]}"; do
 
   if [[ -z "${VERSION:-}" || -z "${ARCH:-}" || -z "${COMPAT_LABEL:-}" || -z "${GLIBC_BASELINE:-}" ]]; then
     echo "ERROR: tarball missing compatibility metadata: ${tarball}" >&2
+    exit 1
+  fi
+  if [[ ! "${COMMIT_SHA:-}" =~ ^[0-9a-fA-F]{40}$ ]]; then
+    echo "ERROR: tarball has invalid commit metadata: ${tarball}" >&2
     exit 1
   fi
 
@@ -118,6 +130,10 @@ for tarball in "${TARBALLS[@]}"; do
   if [[ -z "${bundle_version}" ]]; then
     bundle_version="${VERSION}"
     bundle_arch="${ARCH}"
+    bundle_commit="${COMMIT_SHA,,}"
+    mkdir -p "${STAGE_DIR}/share"
+    cp -a "${extract_subdir}/share/star-suite" "${STAGE_DIR}/share/star-suite"
+    bundle_share_initialized=1
   else
     if [[ "${VERSION}" != "${bundle_version}" ]]; then
       echo "ERROR: mixed versions in installer bundle: ${bundle_version} vs ${VERSION}" >&2
@@ -127,17 +143,25 @@ for tarball in "${TARBALLS[@]}"; do
       echo "ERROR: mixed architectures in installer bundle: ${bundle_arch} vs ${ARCH}" >&2
       exit 1
     fi
+    if [[ "${COMMIT_SHA,,}" != "${bundle_commit}" ]]; then
+      echo "ERROR: mixed commits in installer bundle: ${bundle_commit} vs ${COMMIT_SHA,,}" >&2
+      exit 1
+    fi
+    if ! diff -qr "${extract_subdir}/share/star-suite" "${STAGE_DIR}/share/star-suite" >/dev/null; then
+      echo "ERROR: mixed official recipe/provenance snapshots in installer bundle" >&2
+      exit 1
+    fi
   fi
 
   variant_dir="${STAGE_DIR}/variants/${COMPAT_LABEL}"
   mkdir -p "${variant_dir}/bin"
   cp "${extract_subdir}/bin/STAR" "${variant_dir}/bin/STAR"
-  for tool in molecule_first_resolver molecule_first_bam_ledger molecule_first_materialize; do
+  for tool in molecule_first_resolver molecule_first_bam_ledger molecule_first_materialize transcriptvb_finalize trim_qc_fastq trim_qc_merge; do
     cp "${extract_subdir}/bin/${tool}" "${variant_dir}/bin/${tool}"
   done
   cp "${extract_subdir}/README.txt" "${variant_dir}/README.txt"
   cp "${metadata_file}" "${variant_dir}/release-metadata.env"
-  chmod 0755 "${variant_dir}/bin/STAR" "${variant_dir}/bin/molecule_first_"*
+  chmod 0755 "${variant_dir}/bin/"*
 
   printf '%s\t%s\t%s\t%s\n' \
     "${COMPAT_LABEL}" \
@@ -149,6 +173,10 @@ done
 
 if [[ -z "${bundle_arch}" ]]; then
   echo "ERROR: installer bundle assembly produced no variants" >&2
+  exit 1
+fi
+if [[ "${bundle_share_initialized}" -ne 1 ]]; then
+  echo "ERROR: installer bundle assembly produced no official snapshots" >&2
   exit 1
 fi
 
@@ -164,9 +192,11 @@ cat > "${STAGE_DIR}/README.txt" <<README
 STAR-suite compatibility installer bundle
 Version: ${bundle_version}
 Architecture: ${bundle_arch}
+Commit: ${bundle_commit}
 
 This bundle contains multiple STAR-suite binaries built for different Linux compatibility levels.
 Use ./install.sh to auto-select the best bundled binary for this machine.
+It also contains the pinned official recipe catalog and public provenance evidence.
 
 Recommended install order:
   1. Use the .deb package on Ubuntu/Debian when possible.

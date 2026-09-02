@@ -59,6 +59,34 @@ struct EMParams {
     bool init_by_length = false;      // weight initial abundances by length
     int threads = 0;                  // 0 = OMP default
     double zero_threshold = 1e-8;     // Truncation threshold
+    // Logical transcript count for Salmon's uniformPrior. 0 means "use
+    // state.n". Set this when the transcript index space has been compacted to
+    // transcripts with non-zero EC support: Salmon derives uniformPrior from
+    // ALL transcripts, so the compacted run must still divide by the original
+    // count or it starts from a different point and converges elsewhere.
+    size_t num_active_override = 0;
+
+    // Pre-seeded alpha, sized to state.n. Set by a setup/sharding stage that
+    // computed the initialization over the GLOBAL EC table: a shard cannot
+    // derive Salmon's totalWeight or uniformPrior from its own slice, so it
+    // must be handed the global values rather than recomputing local ones.
+    std::vector<double> initial_alpha;
+
+    // Stop each connected component of the EC-transcript graph as soon as it
+    // meets `tolerance`, instead of iterating every component until the slowest
+    // one in the dataset converges. Faster, but NOT equivalent: the global rule
+    // drives most components well past their own tolerance, so enabling this
+    // yields a less-converged answer. Default off so existing callers, STAR
+    // included, keep their current output.
+    bool per_component_convergence = false;
+
+    // Parallelise the E-step over connected components rather than over
+    // equivalence classes. Exact: components share no transcripts, so a thread
+    // owning a component is the sole writer to those transcripts, which removes
+    // the num_threads x n_transcripts accumulation buffer and its reduction
+    // pass. Accumulation order changes, so results move within the engine's
+    // existing run-to-run floor.
+    bool component_partition = false;
     bool debug_trace = false;         // enable debug tracing for selected transcripts
     std::vector<std::string> debug_transcripts; // transcript IDs to trace
     std::string debug_file;           // output file for debug traces

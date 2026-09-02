@@ -24,6 +24,12 @@ class SlamSnpMask;
 namespace spatial_feature_sidecar {
 class Writer;
 }
+namespace spatial_r1_fastq_tap {
+class Writer;
+}
+namespace spatial_gex {
+class Pipeline;
+}
 namespace star {
 namespace input {
 class CbqInputModule;
@@ -51,6 +57,7 @@ class Parameters {
         string runMode;
         vector<string> runModeIn;
         int runThreadN;
+        int genomeLoadThreads;
         int dynamicThreadInterface = 0; // 0: off, 1: constant map permits + telemetry hooks
         int dynamicThreadConstMapPermits = 0; // <=0 means use runThreadN
         int dynamicThreadTelemetry = 0; // 0: off, 1: on
@@ -63,15 +70,19 @@ class Parameters {
         int dynamicThreadMapFloor = 0;
         int dynamicThreadAtacFloor = 0;
         int dynamicThreadFeatureFloor = 0;
-        // ATAC drain-time controller (Step 6). When 1, the chromap-side
-        // sampler thread also runs a rate-balance controller that adjusts
-        // per-domain floors based on observed work-unit drain rates. Goal:
-        // keep MAP and ATAC drain rates in rough balance so both finish
-        // their mapping phase at roughly the same time. Requires
-        // dynamicThreadInterface=1 + chromapAtacEnable=1 + at least one
-        // floor > 0. 0 disables (default; the existing static-floor path
-        // remains active).
+        // Multiome permit controller. 1 retains the legacy raw-rate MAP/ATAC
+        // controller. 2 learns sustained occupancy for every live domain,
+        // retains those values as borrowable floors when they fit, and
+        // consults remaining-work ETA only when the probes are capacity-limited.
+        // Mode 2 requires permit telemetry and a positive sampler interval.
         int dynamicThreadAtacController = 0;
+        // Optional total-work estimates for capacity-limited mode-2 ETA
+        // balancing and descending-work probe order. Zero lets an active input
+        // provider supply the estimate where one is available. A positive
+        // FEATURE estimate activates three-domain MAP/FEATURE/ATAC learning.
+        uint64 dynamicThreadMapWorkEstimate = 0;
+        uint64 dynamicThreadFeatureWorkEstimate = 0;
+        uint64 dynamicThreadAtacWorkEstimate = 0;
         // FIFO waiter-queue admission. When 1, ThreadControl routes acquires
         // through a queue under the permit mutex: queued waiters are served
         // in arrival order, and new arrivals cannot fast-path past existing
@@ -159,6 +170,9 @@ class Parameters {
         bool cbqInputExhausted = false;
         int cbqInputLastLoggedLane = -1;
         string readFilesCbqRangeMode = "auto"; // auto|off|range: indexed CBQ logical range readers
+        string readFilesBgzfMode = "auto"; // auto|off|range: BGZF ranges for fused Flex FASTQ
+        int bgzfReaderThreads = 0; // 0 derives reader count from runThreadN
+        int bgzfCrcCheck = 1; // verify CRC32 while inflating BGZF members
         struct CbqRangeTask {
             uint32 laneIndex = 0;
             uint64 firstRecord = 0;  // zero-based lane-local record offset
@@ -207,6 +221,7 @@ class Parameters {
         string trimQcHtml;
         uint64 trimQcMaxReads = 0;
         bool trimQcEnabled = false;
+        string trimQcShardOut;
 
         //align parameters
         uint alignSJoverhangMin,alignSJDBoverhangMin,alignSplicedMateMapLmin; //min SJ donor/acceptor length
@@ -487,6 +502,17 @@ class Parameters {
                 string traceFile;          // Empty = disabled
                 int traceLimit = 0;        // 0 = unlimited (trace all reads); >0 = limit to N reads
                 string dumpEqFile = "-";   // Optional Salmon-shaped rich EC dump
+                string sidecarOut = "-";   // Optional unfinalized binary evidence sidecar
+                vector<string> sidecarIn;  // Shard sidecars loaded for one global VB/EM finalization
+                int sidecarRoundTripInt = 0; // Reload sidecar before VB/EM (experimental gate)
+                bool sidecarRoundTrip = false;
+                int sidecarOnlyInt = 0;     // Write raw shard evidence and skip per-shard VB/EM
+                bool sidecarOnly = false;
+                string sidecarSampleId = "-";
+                string sidecarInputId = "-"; // Stable identity shared by shard workers and finalizer
+                uint32 sidecarShardOrdinal = 0;
+                uint32 sidecarShardCount = 1;
+                uint64 sidecarFirstPair = 0;
                 int preBurninFrags = 5000; // Pre-burn-in fragment count threshold (Salmon default: 5000)
                 int miniBatchSize = 1000;  // Mini-batch size for processed reads counter (Salmon default: 1000)
                 int fragLengthDistInt = 1;  // If 0, do not use learned FLD in EC aux probabilities
@@ -707,6 +733,35 @@ class Parameters {
         string soloSpatialFeatureSidecar = "-";
         bool soloSpatialFeatureSidecarEnabled = false;
         spatial_feature_sidecar::Writer *spatialFeatureSidecarWriter = nullptr;
+        // Default-off fused input tap. STAR owns paired FASTQ ingestion and
+        // forwards the already-paired raw R1 record to the external optimized
+        // decoder without reopening the source FASTQ.
+        string soloSpatialR1FastqTap = "-";
+        bool soloSpatialR1FastqTapEnabled = false;
+        spatial_r1_fastq_tap::Writer *spatialR1FastqTapWriter = nullptr;
+        // Default-off in-process Visium HD GEX molecule path. The legacy
+        // feature sidecar/tap remain independent diagnostic interfaces.
+        string soloSpatialGexIntegrated = "no";
+        bool soloSpatialGexIntegratedEnabled = false;
+        // Default-off Visium HD Flex entrypoint. It reuses the normal Flex
+        // feature resolver but substitutes spatial candidate families for the
+        // ordinary single-cell barcode lookup.
+        string soloSpatialFlexIntegrated = "no";
+        bool soloSpatialFlexIntegratedEnabled = false;
+        string soloSpatialBarcodeContract = "-";
+        string soloSpatialBc1Oligos = "-";
+        string soloSpatialBc2Oligos = "-";
+        string soloSpatialAssignmentProducts = "all";
+        string soloSpatialBinSizes = "2,8,16";
+        uint64 soloSpatialExpectedReads = 0;
+        uint64 soloSpatialExpectedCandidates = 0;
+        double soloSpatialMemoryFraction = 0.80;
+        string soloSpatialOverflowPolicy = "Fail";
+        uint64 soloSpatialSpillHighWaterCandidates = 0;
+        uint8 soloSpatialAssignmentProductMask = 0;
+        uint8 soloSpatialBinSizeMask = 0;
+        bool soloSpatialOverflowSpill = false;
+        spatial_gex::Pipeline *spatialGexPipeline = nullptr;
 
         // pf-multi config support (Cell Ranger-style CSV input)
         struct {

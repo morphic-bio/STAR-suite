@@ -7,10 +7,11 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 DEB_PATH=""
 DOCKER_IMAGE="ubuntu:24.04"
+EXPECTED_COMMIT=""
 
 usage() {
   cat <<EOF
-Usage: $0 [--deb <path>] [--image <docker-image>]
+Usage: $0 [--deb <path>] [--image <docker-image>] [--expected-commit <sha>]
 
 Validate install/uninstall of star-suite Debian package in a clean Ubuntu container.
 
@@ -28,6 +29,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --image)
       DOCKER_IMAGE="$2"
+      shift 2
+      ;;
+    --expected-commit)
+      EXPECTED_COMMIT="$2"
       shift 2
       ;;
     -h|--help)
@@ -77,11 +82,20 @@ apt-get update
 apt-get install -y --no-install-recommends ca-certificates
 apt-get install -y --no-install-recommends /work/star-suite.deb
 
-for bin in STAR star_feature_call run_flexfilter_mex flexfilter molecule_first_resolver molecule_first_bam_ledger molecule_first_materialize slam_requant pileup_snp remove_y_reads; do
+for bin in STAR star_feature_call run_flexfilter_mex flexfilter molecule_first_resolver molecule_first_bam_ledger molecule_first_materialize transcriptvb_finalize trim_qc_fastq trim_qc_merge slam_requant pileup_snp remove_y_reads; do
   command -v "${bin}" >/dev/null
 done
 
 STAR --version
+source_revision="$(STAR --source-revision)"
+if [[ ! "${source_revision}" =~ ^[0-9a-f]{40}$ ]]; then
+  echo "ERROR: installed Debian STAR has invalid source revision: ${source_revision}" >&2
+  exit 1
+fi
+if [[ -n "${EXPECTED_COMMIT:-}" && "${source_revision}" != "${EXPECTED_COMMIT,,}" ]]; then
+  echo "ERROR: installed Debian STAR source revision ${source_revision} does not match ${EXPECTED_COMMIT,,}" >&2
+  exit 1
+fi
 
 dpkg -s star-suite >/dev/null
 apt-get purge -y star-suite
@@ -108,6 +122,7 @@ echo "Validating package: ${DEB_PATH}"
 echo "Container image: ${DOCKER_IMAGE}"
 
 docker run --rm \
+  -e EXPECTED_COMMIT="${EXPECTED_COMMIT}" \
   -v "${TMPDIR}:/work:rw" \
   "${DOCKER_IMAGE}" \
   bash /work/validate.sh

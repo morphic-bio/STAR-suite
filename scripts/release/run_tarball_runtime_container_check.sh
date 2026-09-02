@@ -7,13 +7,15 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 DOCKER_IMAGE=""
 BASE_IMAGE="ubuntu:24.04"
 TARBALL=""
-EXPECTED_VERSION="1.5.0"
+EXPECTED_VERSION="1.7.1"
+EXPECTED_COMMIT=""
 MANIFEST_OUT=""
 BUILD_RUNTIME_IMAGE=1
 
 usage() {
   cat <<USAGE
 Usage: $0 --tarball <path> [--manifest-out <path>] [--expected-version <version>]
+          [--expected-commit <sha>]
           [--docker-image <tag>] [--base-image <image>] [--skip-image-build]
 USAGE
 }
@@ -30,6 +32,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --expected-version)
       EXPECTED_VERSION="$2"
+      shift 2
+      ;;
+    --expected-commit)
+      EXPECTED_COMMIT="$2"
       shift 2
       ;;
     --docker-image)
@@ -83,11 +89,18 @@ if [[ -n "$MANIFEST_OUT" ]]; then
   manifest_arg=(--manifest-out "/out/$(basename "$MANIFEST_OUT")")
 fi
 
+check_args=(
+  --tarball "/artifacts/$(basename "$TARBALL")"
+  --expected-version "$EXPECTED_VERSION"
+)
+if [[ -n "$EXPECTED_COMMIT" ]]; then
+  check_args+=(--expected-commit "$EXPECTED_COMMIT")
+fi
+check_args+=("${manifest_arg[@]}")
+
 docker run --rm \
   -v "${artifacts_dir}:/artifacts:ro" \
   -v "${output_dir}:/out" \
   "$DOCKER_IMAGE" \
   /usr/local/bin/container_check_tarball.sh \
-    --tarball "/artifacts/$(basename "$TARBALL")" \
-    --expected-version "$EXPECTED_VERSION" \
-    "${manifest_arg[@]}"
+    "${check_args[@]}"

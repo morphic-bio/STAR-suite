@@ -7,6 +7,7 @@
 #include <cassert>
 #include <cstdio>
 #include <cstring>
+#include <unistd.h>
 
 static int g_pass = 0, g_fail = 0;
 
@@ -445,6 +446,48 @@ static void test_h0_sample_match_immediate_keep() {
     ++g_pass;
 }
 
+// ── v3 compatibility: probe-region bits must not contaminate the gene ─────
+
+static void test_v3_cache_gene_mask() {
+    fprintf(stderr, "Test v3 cache loader: mask probe-region metadata from gene\n");
+    char path[128];
+    std::snprintf(path, sizeof(path), "/tmp/star_hash_screen_v3_%ld.bin",
+                  static_cast<long>(getpid()));
+
+    FILE* out = std::fopen(path, "wb");
+    CHECK(out != nullptr, "open v3 cache fixture");
+
+    CacheHeaderRaw header {};
+    std::memcpy(header.magic, kCacheMagic, 8);
+    header.version = kCacheVersionProbeRegion;
+    header.kmerLength = kCacheKmerLength;
+    header.recordSize = kCacheRecordSize;
+    header.recordCount = 1;
+
+    CacheRecordRaw raw {};
+    raw.seqLo = 11;
+    raw.seqHi = 22;
+    raw.resolvedGeneIdx15 = 77u | (2u << 30);
+    raw.cacheClass = 1;
+    raw.reserved = 9;
+
+    const bool wrote =
+        std::fwrite(&header, sizeof(header), 1, out) == 1
+        && std::fwrite(&raw, sizeof(raw), 1, out) == 1;
+    std::fclose(out);
+    CHECK(wrote, "write v3 cache fixture");
+
+    std::vector<Record> records;
+    std::string error;
+    const bool loaded = loadCacheRecords(path, records, &error);
+    unlink(path);
+    CHECK(loaded, "load v3 cache");
+    CHECK(records.size() == 1, "v3 record count");
+    CHECK(records[0].resolvedGeneIdx15 == 77, "v3 gene mask");
+    CHECK(records[0].sampleIdx == 9, "v3 sample index");
+    ++g_pass;
+}
+
 int main() {
     fprintf(stderr, "=== Hash Screen Unit Tests ===\n\n");
 
@@ -463,6 +506,7 @@ int main() {
     test_empty_cache();
     test_dead_weight_dropped();
     test_h0_sample_match_immediate_keep();
+    test_v3_cache_gene_mask();
 
     fprintf(stderr, "\n=== Results: %d passed, %d failed ===\n", g_pass, g_fail);
     return g_fail > 0 ? 1 : 0;

@@ -24,6 +24,15 @@ runMode                         alignReads
 runThreadN                      1
     int: number of threads to run STAR
 
+genomeLoadThreads           1
+    int: number of threads used to read the Genome/SA/SAindex files into memory.
+                          1     ... single sequential reader (default, historical behavior)
+                          >1    ... parallel positional reads of disjoint byte ranges.
+                                    The loaded bytes are identical; only read concurrency changes.
+                                    Useful on parallel filesystems and NVMe, where a single
+                                    sequential stream cannot keep enough requests in flight.
+
+
 dynamicThreadInterface          0
     int: dynamic thread interface mode.
                                 0 ... off (default behavior).
@@ -67,17 +76,32 @@ dynamicThreadFeatureFloor       0
          Same semantics as dynamicThreadMapFloor. 0 disables the FEATURE floor.
 
 dynamicThreadAtacController     0
-    int: enable the ATAC drain-time controller (Step 6).
-         When 1, the chromap-side sampler thread also runs a rate-balance
-         controller that adjusts MAP/ATAC floors based on observed
-         work-unit drain rates so both domains finish their mapping
-         phase at roughly the same time. Mirrors the pf eta/chunked
-         controller for FEATURE/MAP that has been the load-balancing
-         core of pf/STAR since the start.
-         Requires dynamicThreadInterface=1 + chromapAtacEnable=1 + at
-         least one of dynamicThread{Map,Atac}Floor > 0.
+    int: select the combined MAP/FEATURE/ATAC permit controller.
                                 0 ... disabled (default)
-                                1 ... enable rate-balance controller (~1 retune per sampler tick)
+                                1 ... legacy raw-rate minimum-floor controller
+                                      (requires an initial MAP or ATAC floor)
+                                2 ... saturation-aware controller: probe sustained
+                                      occupancy in descending estimated-work order
+                                      (ATAC then MAP when estimates are absent),
+                                      retain observed demands as borrowable floors,
+                                      and use remaining-work ETA only when all
+                                      demands cannot fit.
+                                      Requires dynamicThreadTelemetry=1 and a
+                                      positive telemetry interval.
+
+dynamicThreadMapWorkEstimate    0
+    int: optional estimated total MAP work units for mode-2 ETA balancing.
+         0 leaves MAP ETA unavailable; saturation probing still applies.
+
+dynamicThreadFeatureWorkEstimate 0
+    int: optional estimated total FEATURE/ADT work units for mode-2 probe order
+         and ETA balancing. A positive value activates three-domain learning;
+         0 keeps FEATURE outside mode-2 learning (an explicit FEATURE floor,
+         if any, remains a fixed borrowable reservation).
+
+dynamicThreadAtacWorkEstimate   0
+    int: optional estimated total ATAC work units for mode-2 ETA balancing.
+         0 leaves ATAC ETA unavailable; saturation probing still applies.
 
 dynamicThreadFifoWaiters        0
     int: FIFO waiter-queue admission. When 1, ThreadControl routes acquires
@@ -436,6 +460,20 @@ readFilesCbqRangeMode       auto
                             off   ... use the shared CBQ reader
                             range ... require indexed range readers; unsupported configurations are fatal
 
+readFilesBgzfMode           auto
+    string: auto|off|range - on-demand BGZF parallel readers for gzipped FASTX input (Flex)
+                            auto  ... sniff each mate header; use inline BC/BSIZE work claims for
+                                      supported order-independent fused Flex lanes, otherwise use zlib
+                            off   ... always use the existing zlib stream
+                            range ... require BGZF range readers; non-BGZF or unsupported input is fatal
+
+bgzfReaderThreads           0
+    int: >=0: reader/inflate worker threads. 0 ... derive from --runThreadN.
+              Workers cache claimed block metadata in memory; no sidecar is read or written.
+
+bgzfCrcCheck                1
+    int: 0/1 - verify per-block CRC32 during range-reader inflate
+
 readMapNumber               -1
     int: number of reads to map from the beginning of the file
                             -1: map all reads
@@ -530,6 +568,13 @@ trimQcMaxReads                  0
     uint64: maximum number of reads to collect QC for (0 = no limit)
 
 ### Limits
+
+trimQcShardOut                  -
+    string:                 path for a per-shard binary trim-QC dump
+                            Written in addition to the JSON/HTML report. Lets a
+                            sharded run merge QC at gather with trim_qc_merge
+                            instead of re-reading reads or a BAM.
+
 limitGenomeGenerateRAM               31000000000
     int>0: maximum available RAM (bytes) for genome generation
 
@@ -1133,6 +1178,35 @@ quantTranscriptomeBAMcompression    1
                             -1  ... default compression (6?)
                              0  ... no compression
                             10  ... maximum compression
+
+
+quantVBSidecarOut                     -
+    string: Optional path for a versioned, unfinalized TranscriptVB binary evidence sidecar
+
+quantVBSidecarIn                      -
+    string(s): Complete ordered shard-sidecar set to validate, merge, and quantify globally
+
+quantVBSidecarRoundTrip               0
+    int: 0/1 - reload and validate quantVBSidecarOut before final VB/EM (experimental correctness gate)
+
+quantVBSidecarOnly                    0
+    int: 0/1 - write quantVBSidecarOut and skip per-shard VB/EM/output quantification
+
+quantVBSidecarSampleId                -
+    string: Stable sample/run identifier stored in the TranscriptVB sidecar header
+
+quantVBSidecarInputId                 -
+    string: Stable paired-input identity shared by FIFO-backed shard workers and the global finalizer
+
+quantVBSidecarShardOrdinal            0
+    int: Zero-based logical shard ordinal stored in the TranscriptVB sidecar header
+
+quantVBSidecarShardCount              1
+    int: Total logical shard count stored in the TranscriptVB sidecar header
+
+quantVBSidecarFirstPair               0
+    int: Zero-based first global read-pair ordinal represented by the sidecar
+
 
 quantVBgcBias                        0
     int: 0/1 - enable GC bias correction for transcript quantification (TranscriptVB mode)
@@ -1782,6 +1856,12 @@ soloCrMultimapRescueIntronic auto
                             yes         ... allow 0-exonic + single-intronic rescue
                             no          ... exonic-only rescue
 
+soloCrMultimapRescueEvidence compatibility
+    string:                 evidence policy for CR-style genomic multimapper rescue
+                            compatibility ... CR-compatible exon-first behavior (default)
+                            annotated     ... score-first retained-GTF evidence; equal-best different-gene
+                                            or per-alignment multigene evidence remains unresolved
+
 soloSpatialFeatureSidecar   -
     string:                 default-off output prefix for a fixed-width, read-ordinal GeneFull evidence sidecar
                             Requires the annotation-only Visium HD GEX policy: soloType None,
@@ -1791,11 +1871,77 @@ soloSpatialFeatureSidecar   -
                             outSAMtype None, and FASTQ inputs ordered as R2 then raw R1.
                             Emits .bin, .features.tsv, .read_name_digests.tsv, and .summary.json.
 
+soloSpatialR1FastqTap       -
+    string:                 default-off FIFO receiving raw R1 FASTQ records from STAR's canonical paired reader
+                            Requires soloSpatialFeatureSidecar and its complete fail-closed Visium HD GEX recipe.
+                            STAR writes the second input end (raw R1) once, in global input order, while mapping only R2.
+                            The path must already exist and be a FIFO with an active reader.
+
+soloSpatialGexIntegrated    no
+    string:                 default-off in-process Visium HD 3-prime GEX molecule resolution (yes|no)
+                            Reads paired FASTQs once, maps R2, decodes raw R1 on mapping workers,
+                            and materializes strict/soft_expected/hard/gated_hard matrices without a sidecar join.
+
+soloSpatialFlexIntegrated   no
+    string:                 default-off in-process Visium HD Flex molecule resolution (yes|no)
+                            Couples the normal Flex H0/H1 plus alignment-fallback feature path to raw-R1
+                            spatial candidate families and the delayed candidate-specific UMI materializer.
+                            Requires the fail-closed Flex/Visium recipe documented in
+                            docs/RUNBOOK_VISIUM_HD_NATIVE_FLEX_SPATIAL_FAMILIES_20260726.md.
+
+soloSpatialBarcodeContract  -
+    string:                 directory containing the complete row-major Visium HD barcode coordinate contract
+
+soloSpatialBc1Oligos        -
+    string:                 BC1 full-oligo list for integrated Visium HD R1 decoding
+
+soloSpatialBc2Oligos        -
+    string:                 BC2 full-oligo list for integrated Visium HD R1 decoding
+
+soloSpatialAssignmentProducts all
+    string:                 comma-separated integrated products: strict,soft_expected,hard,gated_hard or all
+
+soloSpatialBinSizes         2,8,16
+    string:                 comma-separated Visium HD bin sizes selected from 2,8,16
+
+soloSpatialExpectedReads    0
+    int:                    required positive read-capacity declaration for integrated mode
+
+soloSpatialExpectedCandidates 0
+    int:                    required positive candidate-row capacity declaration for integrated mode
+
+soloSpatialMemoryFraction   0.80
+    float:                  fraction of available host/cgroup memory permitted for the spatial pipeline, in (0,1]
+
+soloSpatialOverflowPolicy   Fail
+    string:                 Fail|Spill when the declared in-memory spatial budget cannot be maintained
+                            Spill uses compact binary read/candidate, coordinate-contribution, and matrix-entry runs below outTmpDir.
+                            UMI correction and MultiGeneUMI_CR reconciliation are bounded by deterministic coordinate shards.
+                            It never uses the diagnostic sidecar bridge or legacy Solo replay records.
+
+soloSpatialSpillHighWaterCandidates 0
+    int:                    advanced per-worker candidate high-water override for Spill; 0 derives it from the checked memory budget
+                            Nonzero is useful for deterministic forced-spill validation and is rejected with overflow policy Fail.
+
 soloProbeList               -
     string:                 path to probe_list.txt used to derive 1-based gene indices (15-bit cap)
                             If not provided, will auto-detect probe_gene_list.txt from genome index directory
                             REQUIRED when Flex mode is enabled (--flex yes or --soloRunFlexFilter yes)
                             Probe sets are not downloaded - must be user-supplied via --flexGeneProbeSet during index build
+
+soloFlexGdna                auto
+    string:                 Flex probe-region gDNA diagnostic mode.
+                            auto ... compute after final Flex cell/UMI filtering when complete probe/cache metadata are available;
+                                     otherwise emit an explicit skipped status
+                            yes  ... require complete metadata and fail if the diagnostic cannot be computed
+                            no   ... disable the diagnostic and do not load probe-region metadata
+                            This option is inert unless --flex yes and does not change molecule matrices.
+
+soloFlexGdnaProbeSet        auto
+    string:                 filtered probe CSV containing gene_id, probe_id, included, and region.
+                            auto searches next to --soloProbeList and under
+                            <genomeDir>/flex_probe_artifacts/filtered_probe_set.csv.
+
 soloRemoveDeprecated        -
     string:                 Yes|No|auto (default auto, inherits from --removeDeprecated)
                             Yes         ... remove deprecated entries from --soloProbeList at load time
@@ -1900,7 +2046,8 @@ soloHashScreenFile          -
                             flex_h01_sequence_cache.bin next to the probe list.
 
 hashCacheOutput             -
-    string:                 output path for FH01SEQ1 v2 binary (required for --runMode hashCacheGenerate)
+    string:                 output path for FH01SEQ1 v2/v3 binary (required for --runMode hashCacheGenerate).
+                            v3 is emitted when complete probe-region metadata are available; otherwise v2.
 
 hashCacheTiers              H0,H1,H2
     string:                 comma-separated subset: H0, H1, H2 (default: all)
@@ -1913,7 +2060,7 @@ flex                         no
                             yes         ... enable full Flex pipeline with production defaults:
                                             soloRunFlexFilter=yes, soloInlineCBCorrection=yes,
                                             soloInlineHashMode=yes, soloFlexMinimalMemory=yes (unless explicitly overridden),
-                                            soloMapqMode=genomic, soloMMrateMax=0.1,
+                                            soloMapqMode=off, soloMMrateMax=0.1,
                                             soloBarcodesObservedOnly=yes, soloUMICorrection=clique
                             no          ... use individual flag settings (default, inline hash mode disabled)
                             NOTE: Flex mode requires a probe list. Provide --soloProbeList <path> OR
@@ -2261,14 +2408,14 @@ chromapAtacMacs3FragUint8Counts  1
     int:                    use MACS3 uint8 count semantics when 1.
 
 chromapAtacMacs3FragLowMem  0
-    int:                    use libMACS3 sweep-line workspace for in-process MACS3 FRAG peaks when 1. For production multiome, prefer the post-materialization sidecar boundary: write chromapAtacSecondaryFragments locally, then run native sidecar peak-MEX construction outside STAR.
+    int:                    use the librapidmacs sweep-line workspace for in-process MACS3 FRAG peaks when 1. For production multiome, prefer the post-materialization sidecar boundary: write chromapAtacSecondaryFragments locally, then run native sidecar peak-MEX construction outside STAR.
 
 chromapAtacEvidenceFromPeaksOutput  -
     string:                 optional path for per-barcode ATAC evidence-from-peaks
                             TSV (columns: barcode, atac_peak_region_cutsites,
                             atac_peak_region_fragments, atac_fragments,
                             atac_peak_fraction). When set to a real path,
-                            after concurrent chromap ATAC and libMACS3 FRAG
+                            after concurrent chromap ATAC and librapidmacs FRAG
                             peaks finish, the libchromap contract runs
                             libscrna::atac::RunAtacEvidenceFromBinary on the
                             binary sidecar from chromapAtacSecondaryFragments

@@ -4,12 +4,13 @@ set -euo pipefail
 
 BUNDLE=""
 EXPECTED_LABEL=""
-EXPECTED_VERSION="1.5.0"
+EXPECTED_VERSION="1.7.1"
+EXPECTED_COMMIT=""
 MANIFEST_OUT=""
 
 usage() {
   cat <<USAGE
-Usage: $0 --bundle <path> --expected-label <label> [--expected-version <version>] [--manifest-out <path>]
+Usage: $0 --bundle <path> --expected-label <label> [--expected-version <version>] [--expected-commit <sha>] [--manifest-out <path>]
 USAGE
 }
 
@@ -47,6 +48,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --expected-version)
       EXPECTED_VERSION="$2"
+      shift 2
+      ;;
+    --expected-commit)
+      EXPECTED_COMMIT="$2"
       shift 2
       ;;
     --manifest-out)
@@ -94,9 +99,71 @@ if [[ "$version_output" != "$EXPECTED_VERSION" ]]; then
   echo "ERROR: expected STAR-suite version $EXPECTED_VERSION, got $version_output" >&2
   exit 1
 fi
+source_revision="$($prefix/bin/STAR --source-revision)"
+if [[ ! "$source_revision" =~ ^[0-9a-f]{40}$ ]]; then
+  echo "ERROR: invalid STAR-suite source revision: $source_revision" >&2
+  exit 1
+fi
+variant_metadata="$workdir/unpack/variants/${selected_label}/release-metadata.env"
+if [[ ! -f "$variant_metadata" ]]; then
+  echo "ERROR: selected installer variant lacks release metadata" >&2
+  exit 1
+fi
+unset COMMIT_SHA
+# shellcheck disable=SC1090
+source "$variant_metadata"
+metadata_commit="${COMMIT_SHA:-}"
+if [[ ! "$metadata_commit" =~ ^[0-9a-f]{40}$ \
+    || "$source_revision" != "$metadata_commit" ]]; then
+  echo "ERROR: selected installer binary source revision does not match metadata" >&2
+  exit 1
+fi
+if [[ -n "$EXPECTED_COMMIT" && "$source_revision" != "${EXPECTED_COMMIT,,}" ]]; then
+  echo "ERROR: binary source revision $source_revision does not match ${EXPECTED_COMMIT,,}" >&2
+  exit 1
+fi
+if [[ -n "$EXPECTED_COMMIT" ]]; then
+  /usr/local/bin/check_spatial_release_binary.sh \
+    --binary "$prefix/bin/STAR" \
+    --expected-version "$EXPECTED_VERSION" \
+    --expected-commit "$EXPECTED_COMMIT"
+fi
 for tool in molecule_first_resolver molecule_first_bam_ledger molecule_first_materialize; do
   if [[ ! -x "$prefix/bin/$tool" ]] || [[ "$($prefix/bin/$tool --version)" != "$EXPECTED_VERSION" ]]; then
     echo "ERROR: installed $tool missing or version-mismatched" >&2
+    exit 1
+  fi
+done
+for tool in molecule_first_resolver molecule_first_bam_ledger molecule_first_materialize \
+            transcriptvb_finalize trim_qc_fastq trim_qc_merge; do
+  if [[ ! -x "$prefix/bin/$tool" ]]; then
+    echo "ERROR: installed release companion $tool missing" >&2
+    exit 1
+  fi
+  if ! ldd_output="$(ldd "$prefix/bin/$tool" 2>&1)"; then
+    if [[ "$ldd_output" == *"not a dynamic executable"* || "$ldd_output" == *"statically linked"* ]]; then
+      continue
+    fi
+    echo "ERROR: could not inspect runtime dependencies for $tool: $ldd_output" >&2
+    exit 1
+  fi
+  if [[ "$ldd_output" == *'=> not found'* ]]; then
+    echo "ERROR: unresolved runtime dependency for $tool:" >&2
+    printf '%s\n' "$ldd_output" >&2
+    exit 1
+  fi
+done
+for data_file in \
+  share/star-suite/SNAPSHOTS.json \
+  share/star-suite/catalogs/official/catalog.yaml \
+  share/star-suite/evidence/official/schema/record-v1.schema.json
+do
+  if [[ ! -f "$prefix/$data_file" ]]; then
+    echo "ERROR: installed official release data missing: $data_file" >&2
+    exit 1
+  fi
+  if ! cmp -s "$workdir/unpack/$data_file" "$prefix/$data_file"; then
+    echo "ERROR: installed official release data differs: $data_file" >&2
     exit 1
   fi
 done
@@ -107,6 +174,7 @@ Selected label: ${selected_label}
 Selected baseline: ${selected_baseline}
 Selected description: ${selected_description}
 STAR-suite version: ${version_output}
+STAR-suite source revision: ${source_revision}
 "
 
 printf '%s' "$manifest"

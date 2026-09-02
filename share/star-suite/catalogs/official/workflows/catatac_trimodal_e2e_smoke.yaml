@@ -1,0 +1,25 @@
+id: starsuite.official/catatac-trimodal-e2e-smoke
+title: CAT-ATAC trimodal downsample smoke
+summary: Run the public CAT-ATAC RNA, ATAC, and guide smoke through a selected STAR Suite checkout.
+kind: shell_workflow
+entry_script: scripts/run_catatac_trimodal_downsample_smoke.sh
+supported_modes: [local, dry-run-capable]
+caveats:
+  - This compatibility example calls the matching STAR Suite smoke harness and requires its fixture inputs.
+default_output_layout: <output-root>/<run-id>/
+scripts:
+  - {role: entry, path: scripts/run_catatac_trimodal_downsample_smoke.sh, language: bash}
+stages:
+  - {name: smoke, title: STAR Suite trimodal smoke, script: scripts/run_catatac_trimodal_downsample_smoke.sh}
+parameters:
+  - {name: star_suite_dir, cli_flag: --star-suite-dir, type: directory, required: true, path_must_exist: true, category: inputs}
+  - {name: output_root, cli_flag: --output-root, type: directory, required: true, is_output_root: true, category: output}
+  - {name: atac_to_gex, cli_flag: --atac-to-gex, type: file, required: true, path_must_exist: true, category: inputs}
+  - {name: threads, cli_flag: --threads, type: int, required: false, default: 8, category: runtime}
+  - {name: max_reads, cli_flag: --max-reads, type: int, required: false, default: 100000, category: runtime}
+  - {name: dry_run, cli_flag: --dry-run, type: bool, required: false, default: true, category: runtime}
+constraints:
+  - {kind: positive, params: [threads, max_reads], message: Threads and read count must be positive.}
+rendering:
+  flag_order: [star_suite_dir, output_root, atac_to_gex, threads, max_reads, dry_run]
+

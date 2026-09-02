@@ -6,7 +6,8 @@ MODE=""
 TARBALL=""
 BUNDLE=""
 EXPECTED_LABEL=""
-EXPECTED_VERSION="1.5.0"
+EXPECTED_VERSION="1.7.1"
+EXPECTED_COMMIT=""
 REPO_ROOT=""
 PROFILE="core"
 
@@ -17,7 +18,8 @@ Usage:
   $0 --mode bundle --bundle <path> --expected-label <label> --repo-root <path> [options]
 
 Options:
-  --expected-version VER   STAR-suite version to check (default: 1.5.0)
+  --expected-version VER   STAR-suite version to check (default: 1.7.1)
+  --expected-commit SHA    exact 40-character release commit to check
   --profile PROFILE        Smoke profile to run (default: core)
 
 Profiles:
@@ -34,6 +36,7 @@ while [[ $# -gt 0 ]]; do
     --bundle) BUNDLE="$2"; shift 2 ;;
     --expected-label) EXPECTED_LABEL="$2"; shift 2 ;;
     --expected-version) EXPECTED_VERSION="$2"; shift 2 ;;
+    --expected-commit) EXPECTED_COMMIT="$2"; shift 2 ;;
     --repo-root) REPO_ROOT="$2"; shift 2 ;;
     --profile) PROFILE="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
@@ -77,8 +80,14 @@ esac
 
 STAR_BIN="${prefix}/bin/STAR"
 MOLECULE_FIRST_BIN="${prefix}/bin/molecule_first_resolver"
+TRANSCRIPTVB_FINALIZE_BIN="${prefix}/bin/transcriptvb_finalize"
+TRIM_QC_FASTQ_BIN="${prefix}/bin/trim_qc_fastq"
+TRIM_QC_MERGE_BIN="${prefix}/bin/trim_qc_merge"
 [[ -x "${STAR_BIN}" ]] || { echo "ERROR: installed STAR missing: ${STAR_BIN}" >&2; exit 1; }
 [[ -x "${MOLECULE_FIRST_BIN}" ]] || { echo "ERROR: installed molecule-first resolver missing: ${MOLECULE_FIRST_BIN}" >&2; exit 1; }
+for tool in "${TRANSCRIPTVB_FINALIZE_BIN}" "${TRIM_QC_FASTQ_BIN}" "${TRIM_QC_MERGE_BIN}"; do
+  [[ -x "${tool}" ]] || { echo "ERROR: installed release companion missing: ${tool}" >&2; exit 1; }
+done
 [[ "$("${STAR_BIN}" --version)" == "${EXPECTED_VERSION}" ]] || {
   echo "ERROR: installed STAR-suite version mismatch" >&2
   exit 1
@@ -87,6 +96,21 @@ MOLECULE_FIRST_BIN="${prefix}/bin/molecule_first_resolver"
   echo "ERROR: installed molecule-first resolver version mismatch" >&2
   exit 1
 }
+source_revision="$("${STAR_BIN}" --source-revision)"
+[[ "${source_revision}" =~ ^[0-9a-f]{40}$ ]] || {
+  echo "ERROR: installed STAR has invalid source revision: ${source_revision}" >&2
+  exit 1
+}
+if [[ -n "${EXPECTED_COMMIT}" && "${source_revision}" != "${EXPECTED_COMMIT,,}" ]]; then
+  echo "ERROR: installed STAR source revision ${source_revision} does not match ${EXPECTED_COMMIT,,}" >&2
+  exit 1
+fi
+if [[ -n "${EXPECTED_COMMIT}" ]]; then
+  /usr/local/bin/check_spatial_release_binary.sh \
+    --binary "${STAR_BIN}" \
+    --expected-version "${EXPECTED_VERSION}" \
+    --expected-commit "${EXPECTED_COMMIT}"
+fi
 for tool in molecule_first_bam_ledger molecule_first_materialize; do
   [[ -x "${prefix}/bin/${tool}" ]] || { echo "ERROR: installed ${tool} missing" >&2; exit 1; }
   [[ "$("${prefix}/bin/${tool}" --version)" == "${EXPECTED_VERSION}" ]] || {
@@ -102,9 +126,14 @@ run_core() {
   (
     cd "${repo_copy}"
     export STAR_BIN
+    export TRANSCRIPTVB_FINALIZE_BIN TRIM_QC_FASTQ_BIN TRIM_QC_MERGE_BIN
     bash tests/run_solo_smoke.sh
     bash tests/slam/test_snp_mask_build_smoke.sh
     bash tests/run_flex_tiny_public_smoke.sh
+    bash tests/run_adapter_clip_synthetic_test.sh
+    bash tests/run_transcriptvb_scatter_gather_smoke.sh
+    bash tests/run_trim_qc_merge_smoke.sh
+    bash tests/run_star_trim_qc_smoke.sh
   )
   echo "PASS: core profile"
 }

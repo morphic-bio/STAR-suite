@@ -14,7 +14,7 @@ sidecar. The contract lives in:
 Orchestration (default compiled in + runtime opt-in):
 
 - **Build:** Default `make core` builds the Chromap-enabled multiome-capable
-  STAR binary and links `libchromap`, `libMACS3`, the STAR libchromap contract,
+  STAR binary and links `libchromap`, `librapidmacs`, the STAR libchromap contract,
   and system `libhts`. Use `make core-portable` or `make core WITH_CHROMAP=0`
   only for explicit no-Chromap compatibility builds. The stub
   (`star_chromap_orchestration_stub.cpp`) remains available for that portable
@@ -74,21 +74,25 @@ Orchestration (default compiled in + runtime opt-in):
   `multiomeAtacPeakMacsProfile signac-atac`, or use
   `star_multiome_atac_peak_mex --peak-call-mode macs-bed --macs-profile
   signac-atac`. This projects the AEV1 sidecar to MACS BED input before calling
-  libMACS3. It does not change Chromap/MorPHiC FRAG defaults.
+  RapidMACS (`librapidmacs`). It does not change Chromap/MorPHiC FRAG defaults.
 
-2026-06-18 component validation: STAR-suite `master` was rebuilt against
-Chromap-suite `5f09c90c090affa0705db60c2cde8583e415d0a3`, which vendors
-libMACS3 `0479d356695f3e09e8d019f6a1b8b18bd5b1c361`. That libMACS3 revision
-closes the DOGMA-HIV Signac/MACS3 BED-callpeak residual while keeping native
-FRAG output precision unchanged. Validation passed:
+2026-08-08 component validation: STAR Suite was rebuilt against Chromap Suite
+`a59a0b38e235944084b29c18d70c1d97e1ff964a`, which vendors RapidMACS
+`b1d3384541cafc9375580a09f36513407a93ab97`. That RapidMACS revision includes
+the final parity and optimization work while keeping native FRAG output
+precision unchanged. Validation passed:
 
 ```text
-make -C /mnt/pikachu/Chromap-suite libmacs3 chromap_callpeaks libchromap.a
+make -C /mnt/pikachu/Chromap-suite librapidmacs rapidmacs libchromap.a
 make -C /mnt/pikachu/STAR-suite star-libchromap-contract
+make -C /mnt/pikachu/STAR-suite/core/legacy/source clean
 make -C /mnt/pikachu/STAR-suite core
 bash tests/test_star_multiome_atac_peak_mex_signac_profile.sh
-bash tests/run_star_chromap_macs3_lowmem_smoke_100k.sh
 ```
+
+The 100K low-memory multiome smoke remains available as
+`tests/run_star_chromap_macs3_lowmem_smoke_100k.sh`; it was not repeated for
+this naming-only integration update.
 
 CLI / parameters file (all names also work in a parameters file):
 
@@ -124,7 +128,7 @@ CLI / parameters file (all names also work in a parameters file):
 | `chromapAtacYOutput` | Optional explicit Y stream path; `-` derives from `chromapAtacOutputFragments`. |
 | `chromapAtacLowMem` | `0` (default) off; `1` enables Chromap low-memory overflow-spill mode. Production JAX multiome uses `1`. |
 | `chromapAtacLowMemRam` | RAM threshold in bytes for low-memory spill; `0` uses Chromap defaults. |
-| `chromapAtacMacs3FragLowMem` | `1` uses the low-memory libMACS3 fragment workspace for in-process peak calling. Production keeps this enabled in wrappers but performs peak/MEX construction from the sidecar outside STAR. |
+| `chromapAtacMacs3FragLowMem` | `1` uses the low-memory librapidmacs fragment workspace for in-process peak calling. Production keeps this enabled in wrappers but performs peak/MEX construction from the sidecar outside STAR. |
 | `chromapAtacTn5ShiftMode` | `classical` or `symmetric`. |
 | `chromapAtacCallMacs3FragPeaks` | `0` (default) off; `1` run MACS3-compatible FRAG peak calling after Chromap ATAC mapping. |
 | `chromapAtacMacs3FragPeaksOutput` | narrowPeak output path, required when peak calling is enabled. |
@@ -157,6 +161,10 @@ With the default Chromap-enabled build, the legacy Makefile builds
 `libchromap.a` in `Chromap-suite` if needed. Override paths:
 
 - `CHROMAP_SUITE_DIR` — default `/mnt/pikachu/Chromap-suite`
+- `CHROMAP_RAPIDMACS_LIB` — default
+  `$(CHROMAP_SUITE_DIR)/third_party/rapidmacs/lib/librapidmacs.a`; the build
+  invokes Chromap Suite's `librapidmacs` target when the archive is absent or
+  stale.
 - `CHROMAP_SYS_HTS` — shared `libhts` passed **after** `libchromap.a` on the link
   line (path to `.so`, e.g. `/lib/x86_64-linux-gnu/libhts.so`). Required because
   Chromap may need a newer hts ABI than STAR’s vendored static archive. Override
@@ -288,7 +296,7 @@ star_multiome_atac_peak_mex \
 Use either `--macs3-frag-pvalue` or `--macs3-frag-qvalue` with
 `star_multiome_atac_peak_mex`; the flags are mutually exclusive. The STAR
 parameter equivalent is `--chromapAtacMacs3FragQvalue 0.05` for the in-process
-Chromap/libMACS3 path or inline peak/MEX path.
+Chromap/librapidmacs path or inline peak/MEX path.
 
 For Signac-style compatibility calls from the same sidecar, switch the peak
 caller while leaving the MEX construction path unchanged:

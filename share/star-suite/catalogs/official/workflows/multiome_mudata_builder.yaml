@@ -1,0 +1,23 @@
+id: starsuite.official/multiome-mudata-builder
+title: Multiome MuData builder
+summary: Assemble RNA and ATAC plus optional feature-barcode modalities into MuData.
+kind: shell_workflow
+entry_script: scripts/build_multiome_mudata.py
+supported_modes: [local]
+caveats:
+  - Supply exactly one of RNA AnnData or RNA MEX.
+default_output_layout: Caller-selected .h5mu file.
+scripts:
+  - {role: entry, path: scripts/build_multiome_mudata.py, language: python}
+stages:
+  - {name: build, title: Build MuData, script: scripts/build_multiome_mudata.py}
+parameters:
+  - {name: rna_h5ad, cli_flag: --rna-h5ad, type: file, required: false, default: null, path_must_exist: true, category: inputs}
+  - {name: rna_mex_dir, cli_flag: --rna-mex-dir, type: directory, required: false, default: null, path_must_exist: true, category: inputs}
+  - {name: atac_mex_dir, cli_flag: --atac-mex-dir, type: directory, required: true, path_must_exist: true, category: inputs}
+  - {name: output_h5mu, cli_flag: --output-h5mu, type: file, required: true, category: output}
+constraints:
+  - {kind: mutual_exclusion, params: [rna_h5ad, rna_mex_dir], message: RNA input surfaces are mutually exclusive.}
+  - {kind: at_least_one, params: [rna_h5ad, rna_mex_dir], message: Supply one RNA input surface.}
+rendering:
+  flag_order: [rna_h5ad, rna_mex_dir, atac_mex_dir, output_h5mu]

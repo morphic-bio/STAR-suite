@@ -101,13 +101,23 @@ if [[ -z "${VERSION}" ]]; then
 fi
 
 resolve_commit_sha() {
-  if git -C "${REPO_ROOT}" rev-parse --short HEAD >/dev/null 2>&1; then
-    git -C "${REPO_ROOT}" rev-parse --short HEAD
+  if git -C "${REPO_ROOT}" rev-parse HEAD >/dev/null 2>&1; then
+    git -C "${REPO_ROOT}" rev-parse HEAD
   elif [[ -n "${STAR_SUITE_COMMIT_SHA:-}" ]]; then
     printf '%s\n' "${STAR_SUITE_COMMIT_SHA}"
   else
-    printf 'unknown\n'
+    return 1
   fi
+}
+
+require_commit_sha() {
+  local commit_sha
+  if ! commit_sha="$(resolve_commit_sha)" \
+      || [[ ! "${commit_sha}" =~ ^[0-9a-fA-F]{40}$ ]]; then
+    echo "ERROR: release builds require an exact 40-character source commit SHA" >&2
+    exit 1
+  fi
+  printf '%s\n' "${commit_sha,,}"
 }
 
 run_container_build() {
@@ -127,7 +137,7 @@ run_container_build() {
   mkdir -p "${OUT_DIR}"
   out_dir_abs="$(cd "${OUT_DIR}" && pwd)"
 
-  commit_sha="$(resolve_commit_sha)"
+  commit_sha="$(require_commit_sha)"
   image_name="${DOCKER_IMAGE}"
   compat_arg=""
   glibc_arg=""
@@ -202,6 +212,8 @@ esac
 cd "${REPO_ROOT}"
 mkdir -p "${OUT_DIR}"
 OUT_DIR="$(cd "${OUT_DIR}" && pwd)"
+commit_sha="$(require_commit_sha)"
+export STAR_SUITE_COMMIT_SHA="${commit_sha}"
 
 if [[ ! -x scripts/release/install_binary_tarball.sh ]]; then
   echo "ERROR: missing installer script source: scripts/release/install_binary_tarball.sh" >&2
@@ -211,6 +223,7 @@ fi
 echo "Building STAR-suite binary tarball (jobs=${MAKE_JOBS})..."
 make -j"${MAKE_JOBS}" core-static
 make -j"${MAKE_JOBS}" molecule-first-resolver
+make -j"${MAKE_JOBS}" release-companion-tools
 
 if [[ ! -x core/legacy/source/STAR ]]; then
   echo "ERROR: expected binary missing: core/legacy/source/STAR" >&2
@@ -222,6 +235,19 @@ for tool in molecule_first_resolver molecule_first_bam_ledger molecule_first_mat
     exit 1
   fi
 done
+for tool in transcriptvb_finalize trim_qc_fastq trim_qc_merge; do
+  if [[ ! -x "core/legacy/source/${tool}" ]]; then
+    echo "ERROR: expected binary missing: core/legacy/source/${tool}" >&2
+    exit 1
+  fi
+done
+
+if [[ ! -f share/star-suite/SNAPSHOTS.json \
+    || ! -f share/star-suite/catalogs/official/catalog.yaml \
+    || ! -f share/star-suite/evidence/official/schema/record-v1.schema.json ]]; then
+  echo "ERROR: pinned official recipe/provenance snapshots are incomplete" >&2
+  exit 1
+fi
 
 STAGE_DIR="$(mktemp -d)"
 mkdir -p "${STAGE_DIR}/bin"
@@ -229,8 +255,13 @@ cp core/legacy/source/STAR "${STAGE_DIR}/bin/STAR"
 for tool in molecule_first_resolver molecule_first_bam_ledger molecule_first_materialize; do
   cp "flex/tools/molecule_first_resolver/${tool}" "${STAGE_DIR}/bin/${tool}"
 done
+for tool in transcriptvb_finalize trim_qc_fastq trim_qc_merge; do
+  cp "core/legacy/source/${tool}" "${STAGE_DIR}/bin/${tool}"
+done
 cp scripts/release/install_binary_tarball.sh "${STAGE_DIR}/install.sh"
-chmod 0755 "${STAGE_DIR}/bin/STAR" "${STAGE_DIR}/bin/molecule_first_"* "${STAGE_DIR}/install.sh"
+mkdir -p "${STAGE_DIR}/share"
+cp -a share/star-suite "${STAGE_DIR}/share/star-suite"
+chmod 0755 "${STAGE_DIR}/bin/"* "${STAGE_DIR}/install.sh"
 
 asset_name="${ASSET_PREFIX}-${VERSION}-linux-${arch}"
 if [[ -n "${COMPAT_LABEL}" ]]; then
@@ -243,7 +274,7 @@ VERSION=${VERSION}
 ARCH=${arch}
 COMPAT_LABEL=${COMPAT_LABEL}
 GLIBC_BASELINE=${GLIBC_BASELINE}
-COMMIT_SHA=$(resolve_commit_sha)
+COMMIT_SHA=${commit_sha}
 BUILD_ENVIRONMENT=${STAR_SUITE_BUILD_IMAGE:-native-host}
 ASSET_NAME=${asset_name}
 METADATA
@@ -260,7 +291,7 @@ cat > "${STAGE_DIR}/README.txt" <<README
 STAR-suite binary release artifact
 Version: ${VERSION}
 Architecture: ${arch}
-Commit: $(resolve_commit_sha)
+Commit: ${commit_sha}
 Built at: $(date -u +"%Y-%m-%dT%H:%M:%SZ")
 Build environment: ${STAR_SUITE_BUILD_IMAGE:-native-host}
 ${compat_note}This tarball includes:
@@ -268,6 +299,12 @@ ${compat_note}This tarball includes:
   - bin/molecule_first_resolver
   - bin/molecule_first_bam_ledger
   - bin/molecule_first_materialize
+  - bin/transcriptvb_finalize
+  - bin/trim_qc_fastq
+  - bin/trim_qc_merge
+  - share/star-suite/catalogs/official (pinned public recipe catalog)
+  - share/star-suite/evidence/official (pinned public provenance evidence)
+  - share/star-suite/SNAPSHOTS.json (source revisions and digests)
   - install.sh for optional local installation
   - release-metadata.env for compatibility metadata
 

@@ -1,0 +1,298 @@
+# Public recipe: SLAM paired-end production panel.
+id: starsuite.official/slam-pe-production
+title: SLAM PE Production Panel
+summary: Per-sample STAR-SLAM paired-end production runner with Y/noY outputs, tximport VB counts, cB, and Globus cleanup.
+kind: shell_workflow
+entry_script: scripts/run_slam_prod_set.sh
+supported_modes: [local, dry-run-capable]
+caveats:
+  - "Default rendering is intentionally safe: --pilot --dry-run."
+  - Do not run from the active production checkout or while a benchmark job is sharing the host.
+  - Full production writes large BAM/FASTQ side outputs; confirm output policy and disk space first.
+  - Original input FASTQs are not uploaded; only Y/noY BAM/FASTQ derivatives and per-sample result surfaces are transferred.
+default_output_layout: Caller-selected output root with one directory per sample.
+
+scripts:
+  - role: entry
+    path: scripts/run_slam_prod_set.sh
+    description: Runs one STAR-SLAM invocation per selected paired-end sample and submits background Globus transfers.
+    language: bash
+
+stages:
+  - name: select_samples
+    title: Select Samples
+    script: scripts/run_slam_prod_set.sh
+    description: Discovers R1/R2 sample pairs, applies sample/panel/pilot/limit filters, and writes manifests.
+  - name: star_slam
+    title: STAR-SLAM Per Sample
+    script: scripts/run_slam_prod_set.sh
+    description: Runs PE STAR-SLAM with TranscriptVB tximport counts, GrandSLAM output, cB output, and min-callable gating.
+  - name: globus
+    title: Globus Transfer and Cleanup
+    script: scripts/run_slam_prod_set.sh
+    description: Submits per-sample Globus transfers and removes transferred BAM/FASTQ side outputs when enabled.
+
+parameter_groups:
+  - name: selection
+    title: Sample Selection
+    parameters: [samples, panel, pilot, limit, se_only]
+  - name: inputs
+    title: Input Paths
+    parameters: [fastq_dir, star_bin, genome_dir, snp_mask]
+  - name: output
+    title: Output
+    parameters: [outdir]
+  - name: runtime
+    title: Runtime
+    parameters: [threads, out_sam_order, resume, dry_run]
+  - name: slam
+    title: SLAM Parameters
+    parameters: [slam_cb_format, slam_min_callable]
+  - name: transfer
+    title: Globus Transfer
+    parameters:
+      - globus_src_endpoint
+      - globus_dst_endpoint
+      - globus_dst_root
+      - globus_poll_seconds
+      - no_globus
+      - wait_for_globus
+      - no_wait_for_final_globus
+      - no_cleanup_after_globus
+
+parameters:
+  - name: samples
+    cli_flag: --samples
+    type: string_list
+    required: false
+    default: null
+    description: Comma-separated sample names. Leave empty when using pilot, panel, or full discovery.
+    category: selection
+
+  - name: panel
+    cli_flag: --panel
+    type: string
+    required: false
+    default: ""
+    description: Regex restricting discovered sample names.
+    category: selection
+
+  - name: pilot
+    cli_flag: --pilot
+    type: bool
+    required: false
+    default: true
+    description: Run only ARID1A-no4su_S50 and ARID1A-6h-1_S43.
+    category: selection
+
+  - name: limit
+    cli_flag: --limit
+    type: int
+    required: false
+    default: 0
+    description: Maximum selected samples to run; 0 means no limit.
+    category: selection
+
+  - name: se_only
+    cli_flag: --se-only
+    type: bool
+    required: false
+    default: false
+    description: Force R1-only mode even if R2 exists.
+    category: selection
+
+  - name: fastq_dir
+    cli_flag: --fastq-dir
+    type: directory
+    required: true
+    default: null
+    description: Directory containing delivered SLAM R1/R2 FASTQs.
+    path_must_exist: true
+    category: inputs
+
+  - name: star_bin
+    cli_flag: --star-bin
+    type: file
+    required: true
+    default: null
+    description: STAR binary to run.
+    path_must_exist: true
+    must_be_executable: true
+    category: inputs
+
+  - name: genome_dir
+    cli_flag: --genome-dir
+    type: directory
+    required: true
+    default: null
+    description: STAR genomeDir.
+    path_must_exist: true
+    category: inputs
+
+  - name: snp_mask
+    cli_flag: --snp-mask
+    type: file
+    required: false
+    default: "-"
+    description: SLAM SNP mask BED.GZ.
+    path_must_exist: true
+    category: inputs
+
+  - name: outdir
+    cli_flag: --outdir
+    type: directory
+    required: false
+    default: null
+    description: Production output root. Omit to use the script timestamped default.
+    is_output_root: true
+    category: output
+
+  - name: threads
+    cli_flag: --threads
+    type: int
+    required: false
+    default: 16
+    description: STAR threads per sample.
+    category: runtime
+
+  - name: out_sam_order
+    cli_flag: --out-sam-order
+    type: enum
+    required: false
+    default: SortedByCoordinate
+    choices: [SortedByCoordinate, Unsorted]
+    description: BAM order for --outSAMtype BAM MODE.
+    category: runtime
+
+  - name: resume
+    cli_flag: --resume
+    type: bool
+    required: false
+    default: false
+    description: Skip samples with an existing successful STAR final log.
+    category: runtime
+
+  - name: dry_run
+    cli_flag: --dry-run
+    type: bool
+    required: false
+    default: true
+    description: Write manifests and commands without running STAR or Globus.
+    category: runtime
+
+  - name: slam_cb_format
+    cli_flag: --slam-cb-format
+    type: enum
+    required: false
+    default: star
+    choices: [star, ezbakr]
+    description: Count-binomial output schema.
+    category: slam
+
+  - name: slam_min_callable
+    cli_flag: --slam-min-callable
+    type: int
+    required: false
+    default: 30
+    description: Minimum callable bases after SLAM trim/overlap consensus.
+    category: slam
+
+  - name: globus_src_endpoint
+    cli_flag: --globus-src-endpoint
+    type: string
+    required: false
+    default: ""
+    description: Source Globus collection ID for local outputs.
+    category: transfer
+
+  - name: globus_dst_endpoint
+    cli_flag: --globus-dst-endpoint
+    type: string
+    required: false
+    default: ""
+    description: Destination Globus collection ID.
+    category: transfer
+
+  - name: globus_dst_root
+    cli_flag: --globus-dst-root
+    type: string
+    required: false
+    default: ""
+    description: Destination root/subdirectory.
+    category: transfer
+
+  - name: globus_poll_seconds
+    cli_flag: --globus-poll-seconds
+    type: int
+    required: false
+    default: 30
+    description: Poll interval when waiting for Globus transfers.
+    category: transfer
+
+  - name: no_globus
+    cli_flag: --no-globus
+    type: bool
+    required: false
+    default: true
+    description: Do not submit Globus transfers.
+    category: transfer
+
+  - name: wait_for_globus
+    cli_flag: --wait-for-globus
+    type: bool
+    required: false
+    default: false
+    description: Wait for each submitted transfer before starting the next sample.
+    category: transfer
+
+  - name: no_wait_for_final_globus
+    cli_flag: --no-wait-for-final-globus
+    type: bool
+    required: false
+    default: false
+    description: Do not wait at the end for outstanding transfers.
+    category: transfer
+
+  - name: no_cleanup_after_globus
+    cli_flag: --no-cleanup-after-globus
+    type: bool
+    required: false
+    default: false
+    description: Keep local transferred BAM/FASTQ side outputs after successful Globus transfer.
+    category: transfer
+
+constraints:
+  - kind: positive
+    params: [threads, globus_poll_seconds]
+    message: Runtime counts must be positive.
+  - kind: non_negative
+    params: [limit, slam_min_callable]
+    message: Limit and callable length must be non-negative.
+
+rendering:
+  omit_absent_optionals: true
+  flag_order:
+    - samples
+    - panel
+    - pilot
+    - limit
+    - se_only
+    - fastq_dir
+    - outdir
+    - star_bin
+    - genome_dir
+    - snp_mask
+    - threads
+    - out_sam_order
+    - resume
+    - dry_run
+    - slam_cb_format
+    - slam_min_callable
+    - globus_src_endpoint
+    - globus_dst_endpoint
+    - globus_dst_root
+    - globus_poll_seconds
+    - no_globus
+    - wait_for_globus
+    - no_wait_for_final_globus
+    - no_cleanup_after_globus

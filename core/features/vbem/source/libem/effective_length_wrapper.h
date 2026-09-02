@@ -38,7 +38,13 @@ DynamicGCEffectiveLengthResult computeDynamicGCBiasedEffectiveLengthsWrapper(
     const std::vector<int32_t>& raw_lengths,
     const std::vector<double>& alpha_counts,
     const std::vector<double>& effective_lengths_in,
-    const std::vector<double>& observed_gc_101
+    const std::vector<double>& observed_gc_101,
+    // Threads for the GC background pass. Defaults to 1 because the serial
+    // summation order is what makes quant.sf byte-identical to an in-process
+    // STAR run; any parallel reduction shifts a handful of values by one unit
+    // in the last printed digit. Raise it where that trade is worth ~12x on
+    // this pass.
+    int background_threads = 1
 );
 
 #endif // EFFECTIVE_LENGTH_WRAPPER_H
