@@ -8,12 +8,14 @@
 #include "FlexHashScreen.h"
 #include "FlexGdna.h"
 #include "OcmMultiMaterialize.h"
+#include "CbBucketStore.h"
 
 #include <stdlib.h>
 #include <algorithm>
 #include <memory>
 #include <fstream>
 #include <cctype>
+#include <cerrno>
 
 ParametersSolo::~ParametersSolo() {
 }
@@ -1340,6 +1342,61 @@ void ParametersSolo::initialize(Parameters *pPin)
 
         cbWLsize=cbWL.size();
         pP->inOut->logMain << "Number of CBs in the whitelist = " << cbWLsize <<endl;
+
+        // Phase-2 activation is deliberately internal so the established
+        // default remains unchanged until spill/auto and their public flags
+        // are complete in Phase 3.
+        const char *bucketModeEnv = std::getenv("STAR_SOLO_BUCKET_MODE");
+        if (bucketModeEnv != nullptr && bucketModeEnv[0] != '\0'
+            && lowerStringLocal(bucketModeEnv) != "off") {
+            const string bucketMode = lowerStringLocal(bucketModeEnv);
+            if (bucketMode != "ram") {
+                ostringstream errOut;
+                errOut << "EXITING because STAR_SOLO_BUCKET_MODE=" << bucketModeEnv
+                       << " is not available in Phase 2; use ram or off.\n";
+                exitWithError(errOut.str(), std::cerr, pP->inOut->logMain,
+                              EXIT_CODE_PARAMETER, *pP);
+            }
+            const char *bucketCountEnv = std::getenv("STAR_SOLO_BUCKET_COUNT");
+            if (bucketCountEnv != nullptr && bucketCountEnv[0] != '\0') {
+                char *end = nullptr;
+                errno = 0;
+                const unsigned long parsed = std::strtoul(bucketCountEnv, &end, 10);
+                if (errno != 0 || end == bucketCountEnv || *end != '\0'
+                    || parsed == 0 || parsed > UINT32_MAX) {
+                    ostringstream errOut;
+                    errOut << "EXITING because STAR_SOLO_BUCKET_COUNT is invalid: "
+                           << bucketCountEnv << "\n";
+                    exitWithError(errOut.str(), std::cerr, pP->inOut->logMain,
+                                  EXIT_CODE_PARAMETER, *pP);
+                }
+                bucketCount = static_cast<uint32_t>(parsed);
+            }
+
+            const bool snapshotRequested =
+                std::getenv("STAR_SOLO_FLEX_HASH_SNAPSHOT_IN") != nullptr
+                || std::getenv("STAR_SOLO_FLEX_HASH_SNAPSHOT_OUT") != nullptr;
+            bucketStoreEnabled = flexMode && inlineHashMode && cbWLyes
+                && !snapshotRequested && featureYes[SoloFeatureTypes::Gene];
+            if (bucketStoreEnabled) {
+                star::solo::CbBucketStore::Config config;
+                config.mode = star::solo::CbBucketStore::Mode::Ram;
+                config.bucketCount = bucketCount;
+                config.whitelistSize = cbWLsize;
+                config.filePrefix = "solo_gene_bucket";
+                try {
+                    cbBucketStore = std::make_shared<star::solo::CbBucketStore>(config);
+                } catch (const std::exception &error) {
+                    ostringstream errOut;
+                    errOut << "EXITING because the CB bucket store could not be initialized: "
+                           << error.what() << "\n";
+                    exitWithError(errOut.str(), std::cerr, pP->inOut->logMain,
+                                  EXIT_CODE_PARAMETER, *pP);
+                }
+                pP->inOut->logMain << "Flex streaming CB buckets: active (ram, "
+                                   << bucketCount << " buckets)" << endl;
+            }
+        }
 
         // Build H0 hash: packed-CB(uint32) → WL index for O(1) exact lookup
         if (cbWLhash) kh_destroy(cbH0, cbWLhash);

@@ -41,9 +41,20 @@ SoloReadFeature::SoloReadFeature(int32 feTy, Parameters &Pin, int iChunk)
     const bool useInlineHashStorage =
         pSolo.inlineHashMode && (pSolo.flexMode || nonFlexHashBridge) && !keepLegacyVelocytoStream;
 
+    if (pSolo.bucketStoreEnabled && pSolo.flexMode && pSolo.inlineHashMode
+        && featureType == SoloFeatureTypes::Gene) {
+        bucketStore_ = pSolo.cbBucketStore;
+        bucketSegments_.resize(pSolo.bucketCount);
+        bucketWorkerIndex_ = iChunk >= 0
+            ? static_cast<uint32_t>(iChunk)
+            : static_cast<uint32_t>(-iChunk);
+    }
+
     if (useInlineHashStorage) {
-        // Initialize inline hash instead of opening temp stream file
-        inlineHash_ = kh_init(cg_agg);
+        // Bucket mode replaces the per-thread fused Gene hash. Other features
+        // and the off path keep the established hash storage unchanged.
+        if (!bucketStorageEnabled())
+            inlineHash_ = kh_init(cg_agg);
         streamReads = nullptr; // Do NOT open stream file in inline hash mode
         
         // Initialize parallel readId tracker for sorted BAM CB/UB tag injection
@@ -101,6 +112,71 @@ SoloReadFeature::~SoloReadFeature() {
     }
 }
 
+void SoloReadFeature::appendInlineObservation(uint64_t key, uint32_t value)
+{
+    if (bucketStore_) {
+        const uint32_t cb = static_cast<uint32_t>((key >> 44) & 0xFFFFFu);
+        uint32_t bucket = 0;
+        try {
+            bucket = bucketStore_->bucket_for_cb(cb);
+        } catch (const std::exception &error) {
+            ostringstream errOut;
+            errOut << "EXITING because a fused Flex record could not be bucketed: "
+                   << error.what() << "\n";
+            exitWithError(errOut.str(), std::cerr, P.inOut->logMain,
+                          EXIT_CODE_INCONSISTENT_DATA, P);
+        }
+        std::vector<star::solo::PackedCbRecord> &segment = bucketSegments_[bucket];
+        star::solo::PackedCbRecord record;
+        record.key = key;
+        record.value = value;
+        segment.push_back(record);
+        if (segment.size() >= 256) {
+            std::string error;
+            std::vector<star::solo::PackedCbRecord> sealed;
+            sealed.swap(segment);
+            if (!bucketStore_->append_segment(bucketWorkerIndex_, bucket,
+                                              std::move(sealed), &error)) {
+                exitWithError("EXITING because a CB bucket append failed: " + error + "\n",
+                              std::cerr, P.inOut->logMain,
+                              EXIT_CODE_INCONSISTENT_DATA, P);
+            }
+        }
+        return;
+    }
+
+    if (!inlineHash_)
+        return;
+    int absent;
+    const khiter_t iter = kh_put(cg_agg, inlineHash_, key, &absent);
+    if (absent) {
+        kh_val(inlineHash_, iter) = value;
+    } else {
+        kh_val(inlineHash_, iter) = pSolo.flexMode
+            ? flexGdnaMergeValue(kh_val(inlineHash_, iter), value)
+            : kh_val(inlineHash_, iter) + value;
+    }
+}
+
+void SoloReadFeature::flushBucketSegments()
+{
+    if (!bucketStore_)
+        return;
+    for (uint32_t bucket = 0; bucket < bucketSegments_.size(); ++bucket) {
+        if (bucketSegments_[bucket].empty())
+            continue;
+        std::vector<star::solo::PackedCbRecord> sealed;
+        sealed.swap(bucketSegments_[bucket]);
+        std::string error;
+        if (!bucketStore_->append_segment(bucketWorkerIndex_, bucket,
+                                          std::move(sealed), &error)) {
+            exitWithError("EXITING because a CB bucket append failed: " + error + "\n",
+                          std::cerr, P.inOut->logMain,
+                          EXIT_CODE_INCONSISTENT_DATA, P);
+        }
+    }
+}
+
 void SoloReadFeature::addCounts(const SoloReadFeature &rfIn)
 {
     if (pSolo.cbWLyes) {//WL
@@ -149,6 +225,7 @@ void SoloReadFeature::statsOut(ofstream &streamOut)
 
 void SoloReadFeature::mergeInlineHash(SoloReadFeature &other)
 {
+    other.flushBucketSegments();
     if (!inlineHash_ || !other.inlineHash_) {
         // Still merge non-hash sidecars below.
     } else {

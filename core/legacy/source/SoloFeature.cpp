@@ -321,7 +321,8 @@ void SoloFeature::resolvePendingAmbiguousToHash(bool useBridgeCompactMapping)
     static const bool g_disableAmbigResolve =
         (std::getenv("STAR_DISABLE_AMBIG_CB_RESOLVE") != nullptr);
 
-    if (!readFeatSum || !readFeatSum->inlineHash_) {
+    if (!readFeatSum
+        || (!readFeatSum->inlineHash_ && !readFeatSum->bucketStorageEnabled())) {
         return;
     }
 
@@ -477,16 +478,9 @@ void SoloFeature::resolvePendingAmbiguousToHash(bool useBridgeCompactMapping)
             for (const auto &obs : entry.observations) {
                 const uint64_t newKey = packCgAggKey(resolvedCbIdx, obs.umi24, static_cast<uint16_t>(obs.geneIdx),
                                                      obs.tagIdx);
-                int absent;
-                khiter_t iter = kh_put(cg_agg, hash, newKey, &absent);
                 const uint32_t encoded =
                     flexGdnaPackValue(obs.count, obs.probeRegion);
-                if (absent) {
-                    kh_val(hash, iter) = encoded;
-                } else {
-                    kh_val(hash, iter) =
-                        flexGdnaMergeValue(kh_val(hash, iter), encoded);
-                }
+                readFeatSum->appendInlineObservation(newKey, encoded);
                 addedToHash++;
             }
         }

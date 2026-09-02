@@ -128,6 +128,7 @@ public:
     void collapseUMI_CR(uint32 iCB, uint32 *umiArray);
     void collapseUMIall(bool minimalMode=false);
     void collapseUMIall_fromHash(); // Direct hash consumption (no materialization)
+    void collapseUMIall_fromBuckets(); // Fused Flex CB-bucket tail
     void collapseUMIall_fromBridgeHash(); // Non-Flex bridge: collapse without rGeneUMI materialization
 
     // Experimental inline-hash replay harnesses (env-gated callers): snapshot at pre-collapse boundary.
@@ -144,6 +145,10 @@ public:
         // Parallel to matrixData.barcodes. Encodes the original corrected
         // barcode index and Flex sample tag as (cbIdx << 8) | tag.
         std::vector<uint64_t> cbTagKeys;
+        // Corrected molecule identity/region metadata used by the gDNA
+        // diagnostic when the global inline hash is absent.
+        std::vector<uint64_t> gdnaMoleculeKeys;
+        std::vector<uint8_t> gdnaMoleculeRegions;
     };
 
     // Write MEX directly from inline-hash dedup data (no Solo, no replayer)
