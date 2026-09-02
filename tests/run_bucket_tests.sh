@@ -49,7 +49,19 @@ pass "Phase 0 deterministic multi-tag FASTQ and independent reference counter"
 
 if enabled B1; then
     [[ -x "${HARNESS}" ]] || die "B1 requires ${HARNESS}"
-    "${HARNESS}" --mode roundtrip --reference "${OUT_ROOT}/reference/reference_256.json"
+    "${HARNESS}" --mode roundtrip
+    "${HARNESS}" --mode partition --fixture "${OUT_ROOT}/fixture/truth.tsv" \
+        --bucket-count 256 --whitelist-size 16 \
+        > "${OUT_ROOT}/results/partition.json"
+    python3 - "${OUT_ROOT}/reference/reference_256.json" \
+        "${OUT_ROOT}/results/partition.json" <<'PY'
+import json
+import sys
+reference, observed = [json.load(open(path, encoding="utf-8")) for path in sys.argv[1:]]
+expected = [{"bucket": row["bucket"], "records": row["records"]}
+            for row in reference["buckets"]]
+assert observed["buckets"] == expected
+PY
     for producers in 1 8 32; do
         "${HARNESS}" --mode claims --producers "${producers}" \
             --records 8192 --bucket-count 256 \
