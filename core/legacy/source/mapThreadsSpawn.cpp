@@ -56,6 +56,23 @@ bool readableFile(const std::string &path) {
     std::ifstream in(path.c_str(), std::ios::binary);
     return in.good();
 }
+
+[[noreturn]] void fatalBgzfRangeMode(Parameters &P, const std::string &reason) {
+    std::ostringstream errOut;
+    errOut << "EXITING because of fatal input ERROR: --readFilesBgzfMode range could not be activated.\n"
+           << reason << "\n"
+           << "SOLUTION: use paired BGZF FASTQ in a supported fully-fused Flex run, or set --readFilesBgzfMode auto/off.\n";
+    exitWithError(errOut.str(), std::cerr, P.inOut->logMain,
+                  EXIT_CODE_PARAMETER, P);
+}
+
+[[noreturn]] void fatalBgzfInput(Parameters &P, const std::string &reason) {
+    std::ostringstream errOut;
+    errOut << "EXITING because of fatal BGZF input ERROR:\n"
+           << reason << "\n";
+    exitWithError(errOut.str(), std::cerr, P.inOut->logMain,
+                  EXIT_CODE_INPUT_FILES, P);
+}
 }
 
 bool flexPipelineActivationGuard(Parameters &P, std::string *reason, bool logMessages) {
@@ -251,6 +268,12 @@ static void mapThreadsSpawnFlexPipeline(Parameters &P, ReadAlignChunk** RAchunk)
     const int nWorkers = fullyFused ? 0 : (P.runThreadN - nLanes - actualNTriage - actualNSolo);
     const int nFusedThreads = fullyFused ? P.runThreadN : 0;
 
+    if (P.readFilesTypeN == 1 && !fullyFused &&
+        P.readFilesBgzfMode == "range") {
+        fatalBgzfRangeMode(P,
+            "BGZF range readers currently require --flexPipelineNTriage 0 --flexPipelineNSolo 0");
+    }
+
     const bool noAlign = (P.pSolo.flexNoAlign != 0);
     P.inOut->logMain << "Flex pipeline: runThreadN=" << P.runThreadN
                      << ", nLanes=" << nLanes
@@ -289,6 +312,28 @@ static void mapThreadsSpawnFlexPipeline(Parameters &P, ReadAlignChunk** RAchunk)
                                  << cbqRangeReason
                                  << "); using whole-lane CBQ readers\n" << std::flush;
             }
+        } else if (P.readFilesTypeN == 1 && P.readFilesBgzfMode != "off") {
+            std::string bgzfRangeReason;
+            bool fatalError = false;
+            if (flexPrepareBgzfRangeTasks(&state, P, nFusedThreads,
+                                          &bgzfRangeReason, &fatalError)) {
+                P.inOut->logMain << "BGZF parallel range readers: active ("
+                                 << bgzfRangeReason << ")\n";
+            } else if (fatalError) {
+                if (P.readFilesBgzfMode == "range") {
+                    fatalBgzfRangeMode(P, bgzfRangeReason);
+                }
+                fatalBgzfInput(P, bgzfRangeReason);
+            } else {
+                P.inOut->logMain << "BGZF parallel range readers: not active ("
+                                 << bgzfRangeReason << "); using zlib\n";
+            }
+            for (int lane = 0; lane < nLanes; ++lane) {
+                P.inOut->logMain << "BGZF input lane " << lane << ": "
+                                 << (state.laneUsesBgzfRange(lane) ? "range" : "zlib")
+                                 << "\n";
+            }
+            P.inOut->logMain << std::flush;
         }
     }
 
@@ -327,6 +372,11 @@ static void mapThreadsSpawnFlexPipeline(Parameters &P, ReadAlignChunk** RAchunk)
         // Join all fused threads (they self-transition from reader to aligner)
         for (int i = 0; i < nFusedThreads; ++i) pthread_join(fusedThreads[i], nullptr);
         P.inOut->logMain << "  All fused threads joined\n" << std::flush;
+
+        if (state.inputFailed.load(std::memory_order_relaxed)) {
+            fatalBgzfInput(P, state.inputError.empty()
+                ? "a fused input reader failed" : state.inputError);
+        }
 
         state.pipelineDone.store(true, std::memory_order_relaxed);
         pthread_join(reporterThread, nullptr);
@@ -558,6 +608,28 @@ void runFlexNoGenomeCountOnly(Parameters &P) {
                              << cbqRangeReason
                              << "); using whole-lane CBQ readers\n" << std::flush;
         }
+    } else if (P.readFilesTypeN == 1 && P.readFilesBgzfMode != "off") {
+        std::string bgzfRangeReason;
+        bool fatalError = false;
+        if (flexPrepareBgzfRangeTasks(&state, P, nFusedThreads,
+                                      &bgzfRangeReason, &fatalError)) {
+            P.inOut->logMain << "BGZF parallel range readers: active ("
+                             << bgzfRangeReason << ")\n";
+        } else if (fatalError) {
+            if (P.readFilesBgzfMode == "range") {
+                fatalBgzfRangeMode(P, bgzfRangeReason);
+            }
+            fatalBgzfInput(P, bgzfRangeReason);
+        } else {
+            P.inOut->logMain << "BGZF parallel range readers: not active ("
+                             << bgzfRangeReason << "); using zlib\n";
+        }
+        for (int lane = 0; lane < nLanes; ++lane) {
+            P.inOut->logMain << "BGZF input lane " << lane << ": "
+                             << (state.laneUsesBgzfRange(lane) ? "range" : "zlib")
+                             << "\n";
+        }
+        P.inOut->logMain << std::flush;
     }
 
     std::vector<SoloReadFeature *> fusedFeats(nFusedThreads, nullptr);
@@ -603,6 +675,11 @@ void runFlexNoGenomeCountOnly(Parameters &P) {
         pthread_join(fusedThreads[i], nullptr);
     }
     P.inOut->logMain << "  All fused no-genome threads joined\n" << std::flush;
+
+    if (state.inputFailed.load(std::memory_order_relaxed)) {
+        fatalBgzfInput(P, state.inputError.empty()
+            ? "a fused input reader failed" : state.inputError);
+    }
 
     state.pipelineDone.store(true, std::memory_order_relaxed);
     pthread_join(reporterThread, nullptr);
@@ -714,9 +791,17 @@ void runFlexNoGenomeCountOnly(Parameters &P) {
 
 void mapThreadsSpawn (Parameters &P, ReadAlignChunk** RAchunk) {
     // Check activation guard for Flex pipeline mode
-    if (flexPipelineActivationGuard(P)) {
+    std::string flexActivationReason;
+    const bool flexPipelineActive =
+        flexPipelineActivationGuard(P, &flexActivationReason, true);
+    if (flexPipelineActive) {
         mapThreadsSpawnFlexPipeline(P, RAchunk);
         return;
+    }
+    if (P.readFilesBgzfMode == "range") {
+        fatalBgzfRangeMode(P, flexActivationReason.empty()
+            ? "command is not a supported fused Flex run"
+            : flexActivationReason);
     }
 
     const bool interfaceEnabled = (P.dynamicThreadInterface == 1);

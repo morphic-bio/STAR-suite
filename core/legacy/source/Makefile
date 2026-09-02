@@ -224,7 +224,7 @@ OBJECTS = systemFunctions.o SoloMemoryProfile.o CountingSinkStress.o funPrimaryA
 	Transcript.o Transcript_alignScore.o Transcript_generateCigarP.o Chain.o \
 	Transcript_variationAdjust.o Variation.o ReadAlign_waspMap.o \
 	ReadAlign_storeAligns.o ReadAlign_stitchPieces.o ReadAlign_multMapSelect.o ReadAlign_mapOneRead.o readLoad.o \
-	ReadAlign_loadCbqReadView.o CbqStarAdapter.o CbqWriter.o CbqYNoYWriter.o \
+	ReadAlign_loadCbqReadView.o CbqStarAdapter.o BgzfStarAdapter.o CbqWriter.o CbqYNoYWriter.o \
 	ReadAlignChunk.o ReadAlignChunk_processChunks.o ReadAlignChunk_mapChunk.o \
 	OutSJ.o outputSJ.o blocksOverlap.o ThreadControl.o sysRemoveDir.o \
 	ReadAlign_maxMappableLength2strands.o binarySearch2.o\
@@ -242,7 +242,7 @@ OBJECTS = systemFunctions.o SoloMemoryProfile.o CountingSinkStress.o funPrimaryA
 	Transcriptome.o Transcriptome_quantAlign.o Transcriptome_geneFullAlignOverlap.o \
 	ReadAlign_quantTranscriptome.o Quantifications.o Transcriptome_geneCountsAddAlign.o \
 	sjdbLoadFromFiles.o sjdbLoadFromStream.o sjdbPrepare.o sjdbBuildIndex.o sjdbInsertJunctions.o mapThreadsSpawn.o \
-	FastxInputModule.o CbqInputModule.o \
+	FastxInputModule.o CbqInputModule.o BgzfBlockReader.o BgzfRangeReader.o \
 	Parameters_readFilesInit.o Parameters_openReadsFiles.cpp Parameters_closeReadsFiles.cpp Parameters_batchReset.cpp Parameters_readSAMheader.o \
 	bam_cat.o serviceFuns.o GlobalVariables.cpp \
 	BAMoutput.o BAMfunctions.o ReadAlign_alignBAM.o BAMbinSortByCoordinate.o signalFromBAM.o bamRemoveDuplicates.o BAMbinSortUnmapped.o \
@@ -376,6 +376,13 @@ fastx-input-harness : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
 fastx-input-harness : LDFLAGS := $(LDFLAGSextra) -lz -lcrypto
 fastx-input-harness : FastxInputModule.o input/fastx_input_harness.cpp
 	$(CXX) -o fastx_input_harness $(CXXFLAGS) input/fastx_input_harness.cpp FastxInputModule.o $(LDFLAGS)
+
+# Standalone BGZF block/range harness for the phased T1-T5 ingest gates.
+.PHONY: bgzf-input-harness
+bgzf-input-harness : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
+bgzf-input-harness : LDFLAGS := $(LDFLAGSextra) -lz -lpthread
+bgzf-input-harness : BgzfBlockReader.o BgzfRangeReader.o input/bgzf_input_harness.cpp
+	$(CXX) -o bgzf_input_harness $(CXXFLAGS) input/bgzf_input_harness.cpp BgzfBlockReader.o BgzfRangeReader.o $(LDFLAGS)
 
 # Standalone BINSEQ probe harness. This is not production STAR integration; it
 # decodes CBQ through bqtools and validates the result through the input contract.
@@ -684,6 +691,15 @@ BinseqInputProbeModule.o: input/BinseqInputProbeModule.cpp input/BinseqInputProb
 CbqInputModule.o: input/CbqInputModule.cpp input/CbqInputModule.h input/InputContract.h
 	$(CXX) -c $(CPPFLAGS) $(CXXFLAGS) $(CXXFLAGS_common) $< -o $@
 
+BgzfBlockReader.o: input/BgzfBlockReader.cpp input/BgzfBlockReader.h
+	$(CXX) -c $(CPPFLAGS) $(CXXFLAGS) $(CXXFLAGS_common) $< -o $@
+
+BgzfRangeReader.o: input/BgzfRangeReader.cpp input/BgzfRangeReader.h input/BgzfBlockReader.h
+	$(CXX) -c $(CPPFLAGS) $(CXXFLAGS) $(CXXFLAGS_common) $< -o $@
+
+BgzfStarAdapter.o: input/BgzfStarAdapter.cpp input/BgzfStarAdapter.h input/BgzfRangeReader.h input/BgzfBlockReader.h input/InputContract.h
+	$(CXX) -c $(CPPFLAGS) $(CXXFLAGS) $(CXXFLAGS_common) $< -o $@
+
 CbqStarAdapter.o: input/CbqStarAdapter.cpp input/CbqStarAdapter.h input/CbqInputModule.h input/InputContract.h
 	$(CXX) -c $(CPPFLAGS) $(CXXFLAGS) $(CXXFLAGS_common) $< -o $@
 
@@ -710,7 +726,7 @@ solo/CbBayesianResolver.o : $(FLEX_SRC_DIR)/solo/CbBayesianResolver.cpp $(FLEX_S
 
 .PHONY: clean
 clean:
-	'rm' -f *.o opal/opal.o solo/*.o flex/*.o STAR STARstatic STARlong star_feature_call transcriptvb_finalize trim_qc_fastq trim_qc_merge trim_qc_replay fastx_input_harness binseq_probe_harness cbq_reader_harness cbq_ordered_encoder cbq_star_adapter_harness cbq_pf_adapter_harness cbq_chromap_adapter_harness Depend.list parametersDefault.xxd star_chromap_orchestration.o star_chromap_orchestration_stub.o .depend.with_chromap_*
+	'rm' -f *.o opal/opal.o solo/*.o flex/*.o STAR STARstatic STARlong star_feature_call transcriptvb_finalize trim_qc_fastq trim_qc_merge trim_qc_replay fastx_input_harness bgzf_input_harness binseq_probe_harness cbq_reader_harness cbq_ordered_encoder cbq_star_adapter_harness cbq_pf_adapter_harness cbq_chromap_adapter_harness Depend.list parametersDefault.xxd star_chromap_orchestration.o star_chromap_orchestration_stub.o .depend.with_chromap_*
 	$(MAKE) -C $(LIBFLEX_DIR) clean
 	$(MAKE) -C $(LIBTRIM_DIR) clean
 	$(MAKE) -C $(LIBEM_DIR) clean
