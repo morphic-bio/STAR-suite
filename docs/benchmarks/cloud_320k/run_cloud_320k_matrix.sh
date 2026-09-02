@@ -5,7 +5,7 @@
 #
 # Usage (on the instance):
 #   export STAGING_BUCKET=s3://<your-staging-bucket>   # refs/tools staged per runbook
-#   export RELEASE_TAG=vX.Y.Z BINARY_ASSET=<released STAR binary asset name>
+#   export RELEASE_TAG=vX.Y.Z BINARY_ASSET=<released asset: the _amd64.deb installs\n#     via a single apt command (Ubuntu AMI); a -glibc*.tar.gz extracts instead>
 #   bash run_cloud_320k_matrix.sh            # add RUN_SPILL=1 for the optional spill run
 #                                            # add SKIP_CELLRANGER=1 to omit run 5
 # Resumable: each completed step drops a marker in /scratch/runs/.done/ and is
@@ -34,14 +34,18 @@ record() { # name status timefile
 if ! done_p setup; then
   if ! mountpoint -q $S; then sudo mkfs.xfs -f /dev/nvme1n1 && sudo mkdir -p $S && sudo mount /dev/nvme1n1 $S; fi
   sudo chown "$(id -u)" $S; mkdir -p $S/{fastqs,cbq,refs,tools,tmp} $R $D
+  command -v aws >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq awscli; }
   printf 'run\tstatus\twall\tmax_rss_kb\tcpu\tutc\n' > "$RESULTS"
-  curl -L -o $S/tools/release_asset "https://github.com/morphic-bio/STAR-suite/releases/download/${RELEASE_TAG}/${BINARY_ASSET}"
+  curl -L -o $S/tools/release_asset."${BINARY_ASSET##*.}" \
+    "https://github.com/morphic-bio/STAR-suite/releases/download/${RELEASE_TAG}/${BINARY_ASSET}"
   case "$BINARY_ASSET" in
-    *.tar.gz) mkdir -p $S/tools/release && tar -xzf $S/tools/release_asset -C $S/tools/release \
-                && cp "$(find $S/tools/release -type f -name STAR | head -1)" $S/tools/STAR ;;
-    *) cp $S/tools/release_asset $S/tools/STAR ;;
+    *.deb)    sudo apt-get install -y "$S/tools/release_asset.deb" \
+                && ln -sf "$(command -v STAR)" $S/tools/STAR ;;   # one command installs the suite
+    *.tar.gz) mkdir -p $S/tools/release && tar -xzf $S/tools/release_asset.gz -C $S/tools/release \
+                && cp "$(find $S/tools/release -type f -name STAR | head -1)" $S/tools/STAR && chmod +x $S/tools/STAR ;;
+    *) cp "$S/tools/release_asset.${BINARY_ASSET##*.}" $S/tools/STAR && chmod +x $S/tools/STAR ;;
   esac
-  chmod +x $S/tools/STAR; $S/tools/STAR --version | tee $R/star_version.txt
+  $S/tools/STAR --version | tee $R/star_version.txt
   aws s3 sync "$STAGING_BUCKET/refs"  $S/refs  --only-show-errors
   aws s3 sync "$STAGING_BUCKET/tools" $S/tools --only-show-errors
   chmod +x $S/tools/cyto $S/tools/cbq_ordered_encoder 2>/dev/null || true
