@@ -41,7 +41,10 @@ libscrna_rebuild:
 
 all: $(TARGET)
 
-$(TARGET): libflex_rebuild libscrna_rebuild $(OBJ) $(LIBFLEX) $(LIBSCRNA) $(HTSLIB)
+# The rebuild targets own the two archives. Listing the archive paths as
+# independent prerequisites lets parallel make test them while libflex_rebuild
+# is deleting/recreating libflex.a, which can produce a spurious no-rule error.
+$(TARGET): libflex_rebuild libscrna_rebuild $(OBJ) $(HTSLIB)
 	$(CXX) $(CXXFLAGS) -o $(TARGET) $(OBJ) $(LDFLAGS)
 
 %.o: %.cpp
