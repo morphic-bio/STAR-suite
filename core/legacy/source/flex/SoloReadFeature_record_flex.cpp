@@ -327,7 +327,9 @@ static void accumulateAmbiguousCBForFlex(SoloReadFeature *soloReadFeat, SoloRead
                                          uint16_t geneIdx, uint8_t tagIdx,
                                          FlexGdnaRegion probeRegion) {
     bool isAmbiguous = (soloBar.cbMatchInd.size() > 1) || (soloBar.cbMatch > 1);
-    if (!soloReadFeat || !soloReadFeat->inlineHash_ || !isAmbiguous || soloBar.cbMatchString.empty() || soloBar.cbMatchInd.empty()) {
+    if (!soloReadFeat
+        || (!soloReadFeat->inlineHash_ && !soloReadFeat->bucketStorageEnabled())
+        || !isAmbiguous || soloBar.cbMatchString.empty() || soloBar.cbMatchInd.empty()) {
         return;
     }
 
@@ -413,18 +415,13 @@ bool record_flex_hash_screen_keep(SoloReadFeature *soloReadFeat, SoloReadBarcode
             logRejectReason(soloBar, iRead, soloReadFeat->featureType, 1, geneIdx15, "KEEP_SCREEN", extraBuf, soloBar.pSolo);
         }
         accumulateAmbiguousCBForFlex(soloReadFeat, soloBar, geneIdx15, tagIdx, probeRegion);
-    } else if (soloReadFeat->inlineHash_ != nullptr && !soloBar.cbMatchInd.empty()) {
+    } else if ((soloReadFeat->inlineHash_ != nullptr || soloReadFeat->bucketStorageEnabled())
+               && !soloBar.cbMatchInd.empty()) {
         uint32_t cbIdx = soloBar.cbMatchInd[0];
         uint32_t umi24 = soloBar.umiB & 0xFFFFFF;
         uint64_t key = packCgAggKey(cbIdx, umi24, geneIdx15, tagIdx);
-        int absent;
-        khiter_t iter = kh_put(cg_agg, soloReadFeat->inlineHash_, key, &absent);
-        if (absent) {
-            kh_val(soloReadFeat->inlineHash_, iter) = flexGdnaPackValue(1, probeRegion);
-        } else {
-            kh_val(soloReadFeat->inlineHash_, iter) =
-                flexGdnaIncrementValue(kh_val(soloReadFeat->inlineHash_, iter), 1, probeRegion);
-        }
+        soloReadFeat->appendInlineObservation(
+            key, flexGdnaPackValue(1, probeRegion));
         trackReadIdForTagsFlex(soloReadFeat, soloBar, iRead, cbIdx, umi24);
         if (soloBar.pSolo.inlineHashMode) {
             char extraBuf[64];
@@ -1149,7 +1146,9 @@ uint32 outputReadCB_flex(fstream *streamOut, const uint64 iRead, const int32 fea
     auto accumulateAmbiguousCB = [&](uint16_t geneIdx, uint8_t tagIdx,
                                      FlexGdnaRegion probeRegion) {
         bool isAmbiguous = (soloBar.cbMatchInd.size() > 1) || (soloBar.cbMatch > 1);
-        if (!soloReadFeat || !soloReadFeat->inlineHash_ || !isAmbiguous || soloBar.cbMatchString.empty() || soloBar.cbMatchInd.empty()) {
+        if (!soloReadFeat
+            || (!soloReadFeat->inlineHash_ && !soloReadFeat->bucketStorageEnabled())
+            || !isAmbiguous || soloBar.cbMatchString.empty() || soloBar.cbMatchInd.empty()) {
             return;
         }
         // Ambiguous CB: accumulate for resolution with gene/tag/umi info
@@ -1213,20 +1212,15 @@ uint32 outputReadCB_flex(fstream *streamOut, const uint64 iRead, const int32 fea
             const bool isAmbiguous = (soloBar.cbMatchInd.size() > 1) || (soloBar.cbMatch > 1);
             if (isAmbiguous && !soloBar.cbMatchInd.empty()) {
                 accumulateAmbiguousCB(geneIdx, tagIdx, FlexGdnaUnknown);
-            } else if (soloReadFeat && soloReadFeat->inlineHash_ != nullptr && soloBar.cbMatch >= 0 && soloBar.cbMatch <= 1 && !soloBar.cbMatchInd.empty()) {
+            } else if (soloReadFeat
+                       && (soloReadFeat->inlineHash_ != nullptr || soloReadFeat->bucketStorageEnabled())
+                       && soloBar.cbMatch >= 0 && soloBar.cbMatch <= 1
+                       && !soloBar.cbMatchInd.empty()) {
                 uint32_t cbIdx = soloBar.cbMatchInd[0];
                 uint32_t umi24 = soloBar.umiB & 0xFFFFFF;
                 uint64_t key = packCgAggKey(cbIdx, umi24, geneIdx, tagIdx);
-                int absent;
-                khiter_t iter = kh_put(cg_agg, soloReadFeat->inlineHash_, key, &absent);
-                if (absent) {
-                    kh_val(soloReadFeat->inlineHash_, iter) =
-                        flexGdnaPackValue(1, FlexGdnaUnknown);
-                } else {
-                    kh_val(soloReadFeat->inlineHash_, iter) =
-                        flexGdnaIncrementValue(kh_val(soloReadFeat->inlineHash_, iter), 1,
-                                               FlexGdnaUnknown);
-                }
+                soloReadFeat->appendInlineObservation(
+                    key, flexGdnaPackValue(1, FlexGdnaUnknown));
                 // Track readId for sorted BAM CB/UB tag injection
                 trackReadIdForTags(cbIdx, umi24);
             }
@@ -1253,7 +1247,10 @@ uint32 outputReadCB_flex(fstream *streamOut, const uint64 iRead, const int32 fea
             const uint8_t ambigIsProbe = (!res.hasWinningCandidate || !res.winningIsGenomic) ? 1 : 0;
 
             // Insert exactly one quartet key with resolved gene (no per-gene fanout)
-            if (soloReadFeat && soloReadFeat->inlineHash_ != nullptr && soloBar.cbMatch >= 0 && soloBar.cbMatch <= 1 && !soloBar.cbMatchInd.empty()) {
+            if (soloReadFeat
+                && (soloReadFeat->inlineHash_ != nullptr || soloReadFeat->bucketStorageEnabled())
+                && soloBar.cbMatch >= 0 && soloBar.cbMatch <= 1
+                && !soloBar.cbMatchInd.empty()) {
                 if (isAmbiguous) {
                     // Log AMBIG_CB when accumulating (will be resolved later)
                     if (soloBar.pSolo.inlineHashMode) {
@@ -1268,16 +1265,8 @@ uint32 outputReadCB_flex(fstream *streamOut, const uint64 iRead, const int32 fea
                     uint32_t cbIdx = soloBar.cbMatchInd[0];
                     uint32_t umi24 = soloBar.umiB & 0xFFFFFF;
                     uint64_t key = packCgAggKey(cbIdx, umi24, resolvedGeneIdx, tagIdx);
-                    int absent;
-                    khiter_t iter = kh_put(cg_agg, soloReadFeat->inlineHash_, key, &absent);
-                    if (absent) {
-                        kh_val(soloReadFeat->inlineHash_, iter) =
-                            flexGdnaPackValue(1, res.probeRegion);
-                    } else {
-                        kh_val(soloReadFeat->inlineHash_, iter) =
-                            flexGdnaIncrementValue(kh_val(soloReadFeat->inlineHash_, iter), 1,
-                                                   res.probeRegion);
-                    }
+                    soloReadFeat->appendInlineObservation(
+                        key, flexGdnaPackValue(1, res.probeRegion));
                     // Track readId for sorted BAM CB/UB tag injection
                     trackReadIdForTags(cbIdx, umi24);
                 }
@@ -1304,20 +1293,15 @@ uint32 outputReadCB_flex(fstream *streamOut, const uint64 iRead, const int32 fea
                 // Check for ambiguous CB (multiple candidates) vs non-ambiguous (single candidate)
                 if (isAmbiguous && !soloBar.cbMatchInd.empty()) {
                     accumulateAmbiguousCB(geneIdx, tagIdx, FlexGdnaUnknown);
-                } else if (soloReadFeat && soloReadFeat->inlineHash_ != nullptr && soloBar.cbMatch >= 0 && soloBar.cbMatch <= 1 && !soloBar.cbMatchInd.empty()) {
+                } else if (soloReadFeat
+                           && (soloReadFeat->inlineHash_ != nullptr || soloReadFeat->bucketStorageEnabled())
+                           && soloBar.cbMatch >= 0 && soloBar.cbMatch <= 1
+                           && !soloBar.cbMatchInd.empty()) {
                     uint32_t cbIdx = soloBar.cbMatchInd[0];
                     uint32_t umi24 = soloBar.umiB & 0xFFFFFF;
                     uint64_t key = packCgAggKey(cbIdx, umi24, geneIdx, tagIdx);
-                    int absent;
-                    khiter_t iter = kh_put(cg_agg, soloReadFeat->inlineHash_, key, &absent);
-                    if (absent) {
-                        kh_val(soloReadFeat->inlineHash_, iter) =
-                            flexGdnaPackValue(1, FlexGdnaUnknown);
-                    } else {
-                        kh_val(soloReadFeat->inlineHash_, iter) =
-                            flexGdnaIncrementValue(kh_val(soloReadFeat->inlineHash_, iter), 1,
-                                                   FlexGdnaUnknown);
-                    }
+                    soloReadFeat->appendInlineObservation(
+                        key, flexGdnaPackValue(1, FlexGdnaUnknown));
                     // Track readId for sorted BAM CB/UB tag injection
                     trackReadIdForTags(cbIdx, umi24);
                 }
@@ -1341,20 +1325,15 @@ uint32 outputReadCB_flex(fstream *streamOut, const uint64 iRead, const int32 fea
                 const bool isAmbiguous = (soloBar.cbMatchInd.size() > 1) || (soloBar.cbMatch > 1);
                 if (isAmbiguous && !soloBar.cbMatchInd.empty()) {
                     accumulateAmbiguousCB(geneIdx, tagIdx, FlexGdnaUnknown);
-                } else if (soloReadFeat && soloReadFeat->inlineHash_ != nullptr && soloBar.cbMatch >= 0 && soloBar.cbMatch <= 1 && !soloBar.cbMatchInd.empty()) {
+                } else if (soloReadFeat
+                           && (soloReadFeat->inlineHash_ != nullptr || soloReadFeat->bucketStorageEnabled())
+                           && soloBar.cbMatch >= 0 && soloBar.cbMatch <= 1
+                           && !soloBar.cbMatchInd.empty()) {
                     uint32_t cbIdx = soloBar.cbMatchInd[0];
                     uint32_t umi24 = soloBar.umiB & 0xFFFFFF;
                     uint64_t key = packCgAggKey(cbIdx, umi24, geneIdx, tagIdx);
-                    int absent;
-                    khiter_t iter = kh_put(cg_agg, soloReadFeat->inlineHash_, key, &absent);
-                    if (absent) {
-                        kh_val(soloReadFeat->inlineHash_, iter) =
-                            flexGdnaPackValue(1, FlexGdnaUnknown);
-                    } else {
-                        kh_val(soloReadFeat->inlineHash_, iter) =
-                            flexGdnaIncrementValue(kh_val(soloReadFeat->inlineHash_, iter), 1,
-                                                   FlexGdnaUnknown);
-                    }
+                    soloReadFeat->appendInlineObservation(
+                        key, flexGdnaPackValue(1, FlexGdnaUnknown));
                     // Track readId for sorted BAM CB/UB tag injection
                     trackReadIdForTags(cbIdx, umi24);
                 }

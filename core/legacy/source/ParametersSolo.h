@@ -16,6 +16,7 @@ KHASH_MAP_INIT_INT(cbH0, uint32_t)
 
 class Parameters;
 class ParametersSolo;
+namespace star { namespace solo { class CbBucketStore; } }
 
 class UMIdedup {
 public:
@@ -328,6 +329,12 @@ public:
     // This ensures non-Flex runs use legacy STARsolo output (MEX format)
     string inlineHashModeStr = "";            // raw CLI value: yes|no|auto (default: auto - enabled for Flex, disabled otherwise)
     bool inlineHashMode = false;              // resolved value: true if enabled (gated behind Flex flag by default)
+
+    // Streaming CB buckets. Phase 2 is enabled only by the internal test
+    // environment; Phase 3 exposes the public parameters and auto policy.
+    bool bucketStoreEnabled = false;
+    uint32_t bucketCount = 256;
+    std::shared_ptr<star::solo::CbBucketStore> cbBucketStore;
 
     // H0/H1 hash screen fast path for Flex.
     // Default behavior: enabled when --flex yes and a cache file is discoverable.
