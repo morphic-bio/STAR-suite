@@ -14,6 +14,15 @@ LOG_DIR="${ROOT_DIR}/docs/benchmarks/bgzf_ingest_20260901"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 RUN_DIR="${ARTIFACT_ROOT}/scffpe320k_${MODE}_${STAMP}"
 LOG_PREFIX="${LOG_DIR}/scffpe320k_${MODE}_${STAMP}"
+SOLO_BUCKET_MODE="${SOLO_BUCKET_MODE:-auto}"
+SOLO_BUCKET_MEM_GB="${SOLO_BUCKET_MEM_GB:-32}"
+SOLO_BUCKET_COUNT="${SOLO_BUCKET_COUNT:-256}"
+SOLO_BUCKET_SPILL_DIR="${SOLO_BUCKET_SPILL_DIR:-${RUN_DIR}/bucket_spill}"
+
+case "${SOLO_BUCKET_MODE}" in
+    off|ram|spill|auto) ;;
+    *) echo "ERROR: SOLO_BUCKET_MODE must be off, ram, spill, or auto" >&2; exit 2 ;;
+esac
 
 GENOME_DIR="${GENOME_DIR:-/storage/flex_filtered_reference_2024/star_index}"
 CB_WHITELIST="${CB_WHITELIST:-/storage/scRNAseq_output/whitelists/737K-fixed-rna-profiling.txt}"
@@ -56,6 +65,9 @@ mkdir -p "${RUN_DIR}" "${LOG_DIR}"
     date -u '+date_utc=%Y-%m-%dT%H:%M:%SZ'
     printf 'mode=%s\nthreads=%s\nrun_dir=%s\ncommit=%s\n' \
         "${MODE}" "${THREADS}" "${RUN_DIR}" "$(git -C "${ROOT_DIR}" rev-parse HEAD)"
+    printf 'solo_bucket_mode=%s\nsolo_bucket_mem_gb=%s\nsolo_bucket_count=%s\nsolo_bucket_spill_dir=%s\n' \
+        "${SOLO_BUCKET_MODE}" "${SOLO_BUCKET_MEM_GB}" "${SOLO_BUCKET_COUNT}" \
+        "${SOLO_BUCKET_SPILL_DIR}"
     uptime
     ps -eo pid,comm,%cpu,%mem,etime,args --sort=-%cpu | sed -n '1,30p'
 } > "${LOG_PREFIX}.preflight.txt"
@@ -93,6 +105,10 @@ common=(
     --soloKeysCompat cr
     --soloSampleSearchNearby no
     --soloHashScreenFile "${HASH_CACHE}"
+    --soloBucketMode "${SOLO_BUCKET_MODE}"
+    --soloBucketMemGB "${SOLO_BUCKET_MEM_GB}"
+    --soloBucketCount "${SOLO_BUCKET_COUNT}"
+    --soloBucketSpillDir "${SOLO_BUCKET_SPILL_DIR}"
     --flexPipeline yes
     --flexPipelineNTriage 0
     --flexPipelineNSolo 0
