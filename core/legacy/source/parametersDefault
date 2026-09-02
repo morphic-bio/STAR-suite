@@ -2035,6 +2035,24 @@ soloInlineHashMode           auto
                             When disabled (default for non-Flex), STARsolo uses legacy path and produces standard MEX output
                             (matrix.mtx, barcodes.tsv, features.tsv). When enabled (default for Flex), uses inline-hash pipeline.
 
+soloBucketMode              auto
+    string:                 streaming cell-barcode bucket backend for the fused Flex inline-hash path
+                            off          ... retain the established per-worker hash and serial tail
+                            ram          ... keep sealed packed-record segments in memory
+                            spill        ... write sealed segments directly to per-bucket scratch files
+                            auto         ... begin in RAM and switch once soloBucketMemGB is crossed (default)
+                            This option is inert for classic STARsolo and non-Flex paths.
+
+soloBucketMemGB             32
+    double:                 packed-record RAM budget in GiB for soloBucketMode auto
+                            Crossing the budget causes a one-way transition to spill mode.
+
+soloBucketSpillDir          -
+    string:                 scratch directory for spill files; - uses STAR's outFileTmp directory
+
+soloBucketCount             256
+    uint32:                 number of disjoint cell-barcode buckets; must be a power of two
+
 no-hash-screen              no
     string:                 yes|no (default no)
                             yes          ... disable the Flex H0/H1 hash screen and force the legacy align-everything path

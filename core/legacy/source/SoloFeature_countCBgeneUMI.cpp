@@ -154,6 +154,8 @@ void SoloFeature::countCBgeneUMI()
     
     // Inline hash path: resolve/correct, then walk the hash directly (no materialization)
     if (pSolo.inlineHashMode) {
+        const bool bucketPath = readFeatSum != nullptr
+            && readFeatSum->bucketStorageEnabled();
         const char *bridgeSnapIn = std::getenv("STAR_SOLO_BRIDGE_HASH_SNAPSHOT_IN");
         if (bridgeSnapIn != nullptr && bridgeSnapIn[0] != '\0' && !nonFlexBridgePath) {
             exitWithError(
@@ -228,7 +230,7 @@ void SoloFeature::countCBgeneUMI()
             }
 
             // Run clique correction if enabled (operates on hash)
-            if (pSolo.umiCorrectionMode > 0) {
+            if (!bucketPath && pSolo.umiCorrectionMode > 0) {
                 if (soloPhaseDebugEnabled()) {
                     time(&rawTime);
                     P.inOut->logMain << timeMonthDayTime(rawTime)
@@ -311,7 +313,10 @@ void SoloFeature::countCBgeneUMI()
         
         // Direct hash consumption: no materialization/legacy collapse
         if (soloPhaseDebugEnabled()) {
-            P.inOut->logMain << "Solo debug: starting collapseUMIall_fromHash" << endl;
+            P.inOut->logMain << "Solo debug: starting "
+                             << (bucketPath ? "collapseUMIall_fromBuckets"
+                                            : "collapseUMIall_fromHash")
+                             << endl;
         }
         if (readFeatSum != nullptr && readFeatSum->inlineHash_ != nullptr) {
             std::ostringstream extra;
@@ -321,7 +326,10 @@ void SoloFeature::countCBgeneUMI()
             soloMemoryProfileCheckpoint(P.inOut->logMain, "collapseUMIall_fromHash_begin");
         }
         const auto hashCollapseStart = std::chrono::steady_clock::now();
-        collapseUMIall_fromHash();
+        if (bucketPath)
+            collapseUMIall_fromBuckets();
+        else
+            collapseUMIall_fromHash();
         if (soloPhaseDebugEnabled()) {
             time(&rawTime);
             P.inOut->logMain << timeMonthDayTime(rawTime)
@@ -329,7 +337,10 @@ void SoloFeature::countCBgeneUMI()
                              << " nCB=" << nCB
                              << endl;
         }
-        P.inOut->logMain << "Solo timing: collapseUMIall_fromHash " << soloElapsedSeconds(hashCollapseStart) << " s" << endl;
+        P.inOut->logMain << "Solo timing: "
+                         << (bucketPath ? "collapseUMIall_fromBuckets "
+                                        : "collapseUMIall_fromHash ")
+                         << soloElapsedSeconds(hashCollapseStart) << " s" << endl;
         
         // Populate packedReadInfo from readIdTracker_ for sorted BAM CB/UB tag injection
         if (pSolo.trackReadIdsForTags && readFeatSum && readFeatSum->readIdTracker_) {

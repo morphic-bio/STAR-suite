@@ -8,9 +8,8 @@
 #include <stdexcept>
 #include <unordered_set>
 #include <chrono>
-#include <thread>
-#include <atomic>
 #include <mutex>
+#include <omp.h>
 
 using namespace std;
 
@@ -581,38 +580,26 @@ int FlexFilter::runInternal(
         }
     };
     
-    // Step 3: Process each tag in parallel using std::thread
-    // Note: tagResults is pre-sized; each thread writes to a different index (thread-safe).
-    // Mutex protects shared debug output (debugLog, cerr).
-    
-    // Determine total available cores
-    unsigned int totalCores = std::thread::hardware_concurrency();
-    if (totalCores == 0) totalCores = 4;  // Fallback
-    // Respect OMP_NUM_THREADS for compatibility
-    const char* ompNumThreadsEnv = getenv("OMP_NUM_THREADS");
-    if (ompNumThreadsEnv) {
-        int envThreads = atoi(ompNumThreadsEnv);
-        if (envThreads > 0) totalCores = static_cast<unsigned int>(envThreads);
-    }
-    
-    // Thread allocation strategy:
-    // Process tags SEQUENTIALLY to maximize MC parallelism
-    // All cores go to EmptyDrops MC for each tag
+    // Keep tag processing and each tag's Monte Carlo/bootstrap work within one
+    // explicit thread budget. Each tag writes a pre-sized, disjoint result slot.
+    unsigned int totalCores = config.totalThreads > 0
+        ? config.totalThreads
+        : static_cast<unsigned int>(std::max(1, omp_get_max_threads()));
     unsigned int nTags = static_cast<unsigned int>(sampleTags.size());
-    unsigned int numThreads = 1;  // Sequential tag processing
-    unsigned int mcThreadsPerTag = totalCores;  // All cores for MC
+    unsigned int numThreads = std::max(1u, std::min(nTags, totalCores));
+    unsigned int mcThreadsPerTag = std::max(1u, totalCores / numThreads);
     
     // Set MC threads in EmptyDrops params
     config.emptydropsParams.mcThreads = mcThreadsPerTag;
+    config.emptydropsParams.seed = 1;
+    if (config.emptydropsParams.rawPvalueThreshold == 0.0)
+        config.emptydropsParams.rawPvalueThreshold = 0.05;
     
     cerr << "[FlexFilter] Processing " << nTags << " tags with " << numThreads << " tag threads" << endl;
     cerr << "[FlexFilter] EmptyDrops MC: " << mcThreadsPerTag << " threads per tag (total cores: " << totalCores << ")" << endl;
     
     // Mutex for thread-safe debug output
     mutex outputMutex;
-    
-    // Atomic counter for work distribution
-    atomic<size_t> nextTagIdx(0);
     
     // Thread-safe debug output lambda
     auto threadSafeDebugOut = [&](const string& msg) {
@@ -798,7 +785,8 @@ int FlexFilter::runInternal(
         
         // Step 6: Write ambient_compact.tsv diagnostic
         if (config.debugTagLog && !config.debugOutputDir.empty()) {
-            string ambCompactPath = config.debugOutputDir + "/ambient_compact.tsv";
+            string ambCompactPath = config.debugOutputDir + "/" + tag
+                                  + ".ambient_compact.tsv";
             ofstream ambCompactOut(ambCompactPath, ios::out | ios::trunc);
             if (ambCompactOut.is_open()) {
                 ambCompactOut.setf(ios::fixed);
@@ -875,12 +863,6 @@ int FlexFilter::runInternal(
             } else {
                 nExcluded++;
             }
-        }
-        
-        // Use seed=1 for reproducibility
-        config.emptydropsParams.seed = 1;
-        if (config.emptydropsParams.rawPvalueThreshold == 0.0) {
-            config.emptydropsParams.rawPvalueThreshold = 0.05;
         }
         
         // Populate summary stats (nSimpleCells will be updated later if fallback runs)
@@ -1010,13 +992,12 @@ int FlexFilter::runInternal(
                 cerr << "  [Simple EmptyDrops] Running as fallback: " << reasonStr << endl;
             }
             
-            // Run Simple EmptyDrops bootstrap with all available cores
-            // (tags are processed sequentially, so we can use all cores for bootstrap)
+            // Divide the shared thread budget between concurrently active tags.
             SimpleEmptyDropsParams simpleParams = config.simpleEmptyDropsParams;
             simpleParams.nExpectedCells = 0;  // Let bootstrap estimate
             simpleParams.useBootstrap = true;
             simpleParams.umiMin = lowerTestingBound;
-            simpleParams.maxThreads = 0;  // 0 = auto: use all available cores
+            simpleParams.maxThreads = mcThreadsPerTag;
             
             SimpleEmptyDropsResult simpleResult = SimpleEmptyDropsStage::runCRSimpleFilterBootstrap(
                 nUMIperCB_compact,
@@ -1136,22 +1117,10 @@ int FlexFilter::runInternal(
         outputs->tagResults[i] = std::move(tagResult);
     };  // End of processTag lambda
     
-    // Launch worker threads
-    vector<thread> workers;
-    for (unsigned int t = 0; t < numThreads; t++) {
-        workers.emplace_back([&]() {
-            for (;;) {
-                size_t tagIdx = nextTagIdx.fetch_add(1, memory_order_relaxed);
-                if (tagIdx >= sampleTags.size()) break;
-                processTag(tagIdx);
-            }
-        });
-    }
-    
-    // Wait for all threads to complete
-    for (auto& t : workers) {
-        t.join();
-    }
+    #pragma omp parallel for schedule(dynamic, 1) num_threads(numThreads)
+    for (long long tagIndex = 0;
+         tagIndex < static_cast<long long>(sampleTags.size()); ++tagIndex)
+        processTag(static_cast<size_t>(tagIndex));
     
     cerr << "[FlexFilter] All " << sampleTags.size() << " tags processed" << endl;
     
