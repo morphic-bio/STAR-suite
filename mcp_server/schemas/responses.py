@@ -188,6 +188,8 @@ class WorkflowInfo(BaseModel):
     kind: str
     entry_script: str
     supported_modes: list[str] = Field(default_factory=list)
+    catalog_id: Optional[str] = None
+    catalog_namespace: Optional[str] = None
 
 
 class ListWorkflowsResponse(BaseModel):
@@ -219,6 +221,8 @@ class DescribeWorkflowResponse(BaseModel):
     default_output_layout: str = ""
     stages: list[WorkflowStageInfo] = Field(default_factory=list)
     parameter_groups: list["ParameterGroupInfo"] = Field(default_factory=list)
+    catalog_id: Optional[str] = None
+    catalog_namespace: Optional[str] = None
 
 
 class ParameterInfo(BaseModel):

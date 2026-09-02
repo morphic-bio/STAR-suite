@@ -1,5 +1,6 @@
 #include "IncludeDefine.h"
 #include "Parameters.h"
+#include "SpatialGex.h"
 #include "ErrorWarning.h"
 #include "SequenceFuns.h"
 #include "OutSJ.h"
@@ -159,6 +160,7 @@ Parameters::Parameters() {//initalize parameters info
     //run
     parArray.push_back(new ParameterInfoVector <string> (-1, -1, "runMode", &runModeIn));
     parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "runThreadN", &runThreadN));
+    parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "genomeLoadThreads", &genomeLoadThreads));
     parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "dynamicThreadInterface", &dynamicThreadInterface));
     parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "dynamicThreadConstMapPermits", &dynamicThreadConstMapPermits));
     parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "dynamicThreadTelemetry", &dynamicThreadTelemetry));
@@ -167,6 +169,9 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "dynamicThreadAtacFloor", &dynamicThreadAtacFloor));
     parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "dynamicThreadFeatureFloor", &dynamicThreadFeatureFloor));
     parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "dynamicThreadAtacController", &dynamicThreadAtacController));
+    parArray.push_back(new ParameterInfoScalar <uint64> (-1, -1, "dynamicThreadMapWorkEstimate", &dynamicThreadMapWorkEstimate));
+    parArray.push_back(new ParameterInfoScalar <uint64> (-1, -1, "dynamicThreadFeatureWorkEstimate", &dynamicThreadFeatureWorkEstimate));
+    parArray.push_back(new ParameterInfoScalar <uint64> (-1, -1, "dynamicThreadAtacWorkEstimate", &dynamicThreadAtacWorkEstimate));
     parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "dynamicThreadFifoWaiters", &dynamicThreadFifoWaiters));
     parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "variableThreads", &variableThreads));
     parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "variableThreadsRetuneEveryAcquires", &variableThreadsRetuneEveryAcquires));
@@ -246,6 +251,9 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoVector <string> (-1, -1, "readFilesManifest", &readFilesManifest));
     parArray.push_back(new ParameterInfoVector <string> (-1, -1, "readFilesSAMattrKeep", &readFiles.samAttrKeepIn));
     parArray.push_back(new ParameterInfoScalar <string> (-1, -1, "readFilesCbqRangeMode", &readFilesCbqRangeMode));
+    parArray.push_back(new ParameterInfoScalar <string> (-1, -1, "readFilesBgzfMode", &readFilesBgzfMode));
+    parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "bgzfReaderThreads", &bgzfReaderThreads));
+    parArray.push_back(new ParameterInfoScalar <int> (-1, -1, "bgzfCrcCheck", &bgzfCrcCheck));
 
     //parArray.push_back(new ParameterInfoScalar <string> (-1, -1, "readStrand", &pReads.strandString));
 
@@ -376,6 +384,7 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar <string> (-1, -1, "trimQcJson", &trimQcJson));
     parArray.push_back(new ParameterInfoScalar <string> (-1, -1, "trimQcHtml", &trimQcHtml));
     parArray.push_back(new ParameterInfoScalar <uint64> (-1, -1, "trimQcMaxReads", &trimQcMaxReads));
+    parArray.push_back(new ParameterInfoScalar <string> (-1, -1, "trimQcShardOut", &trimQcShardOut));
 
     //binning, anchors, windows
     parArray.push_back(new ParameterInfoScalar <uint>   (-1, -1, "winBinNbits", &winBinNbits));
@@ -486,6 +495,15 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "quantVBTrace", &quant.transcriptVB.traceFile));
     parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "quantVBTraceLimit", &quant.transcriptVB.traceLimit));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "quantVBDumpEq", &quant.transcriptVB.dumpEqFile));
+    parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "quantVBSidecarOut", &quant.transcriptVB.sidecarOut));
+    parArray.push_back(new ParameterInfoVector <string>   (-1, -1, "quantVBSidecarIn", &quant.transcriptVB.sidecarIn));
+    parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "quantVBSidecarRoundTrip", &quant.transcriptVB.sidecarRoundTripInt));
+    parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "quantVBSidecarOnly", &quant.transcriptVB.sidecarOnlyInt));
+    parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "quantVBSidecarSampleId", &quant.transcriptVB.sidecarSampleId));
+    parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "quantVBSidecarInputId", &quant.transcriptVB.sidecarInputId));
+    parArray.push_back(new ParameterInfoScalar <uint32>   (-1, -1, "quantVBSidecarShardOrdinal", &quant.transcriptVB.sidecarShardOrdinal));
+    parArray.push_back(new ParameterInfoScalar <uint32>   (-1, -1, "quantVBSidecarShardCount", &quant.transcriptVB.sidecarShardCount));
+    parArray.push_back(new ParameterInfoScalar <uint64>   (-1, -1, "quantVBSidecarFirstPair", &quant.transcriptVB.sidecarFirstPair));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "quantVBErrorModel", &quant.transcriptVB.errorModelMode));
     parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "quantVBFragLengthDist", &quant.transcriptVB.fragLengthDistInt));
     parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "quantVBEffectiveLengthCorrection", &quant.transcriptVB.effectiveLengthCorrectionInt));
@@ -623,9 +641,25 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloCrGexFeature", &pSolo.crGexFeatureStr));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloCrMultimapRescue", &pSolo.crMultimapRescueStr));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloCrMultimapRescueIntronic", &pSolo.crMultimapRescueIntronicStr));
+    parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloCrMultimapRescueEvidence", &pSolo.crMultimapRescueEvidenceStr));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloSpatialFeatureSidecar", &soloSpatialFeatureSidecar));
+    parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloSpatialR1FastqTap", &soloSpatialR1FastqTap));
+    parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloSpatialGexIntegrated", &soloSpatialGexIntegrated));
+    parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloSpatialFlexIntegrated", &soloSpatialFlexIntegrated));
+    parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloSpatialBarcodeContract", &soloSpatialBarcodeContract));
+    parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloSpatialBc1Oligos", &soloSpatialBc1Oligos));
+    parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloSpatialBc2Oligos", &soloSpatialBc2Oligos));
+    parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloSpatialAssignmentProducts", &soloSpatialAssignmentProducts));
+    parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloSpatialBinSizes", &soloSpatialBinSizes));
+    parArray.push_back(new ParameterInfoScalar <uint64>   (-1, -1, "soloSpatialExpectedReads", &soloSpatialExpectedReads));
+    parArray.push_back(new ParameterInfoScalar <uint64>   (-1, -1, "soloSpatialExpectedCandidates", &soloSpatialExpectedCandidates));
+    parArray.push_back(new ParameterInfoScalar <double>   (-1, -1, "soloSpatialMemoryFraction", &soloSpatialMemoryFraction));
+    parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloSpatialOverflowPolicy", &soloSpatialOverflowPolicy));
+    parArray.push_back(new ParameterInfoScalar <uint64>   (-1, -1, "soloSpatialSpillHighWaterCandidates", &soloSpatialSpillHighWaterCandidates));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloProbeList", &pSolo.probeListPath));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloRemoveDeprecated", &pSolo.removeDeprecatedStr));
+    parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloFlexGdna", &pSolo.flexGdnaModeStr));
+    parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloFlexGdnaProbeSet", &pSolo.flexGdnaProbeSetPath));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloSampleWhitelist", &pSolo.sampleWhitelistPath));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloSampleProbes", &pSolo.sampleProbesPath));
     parArray.push_back(new ParameterInfoScalar <uint32>   (-1, -1, "soloSampleProbeOffset", &pSolo.sampleProbeOffset));
@@ -1202,6 +1236,10 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
                 std::cout << STAR_SUITE_VERSION << std::endl;
                 exit(0);
             };
+            if (oneArg=="--source-revision") {
+                std::cout << STAR_SUITE_SOURCE_REVISION << std::endl;
+                exit(0);
+            };
             if (oneArg=="--upstream-version") {
                 std::cout << STAR_UPSTREAM_VERSION << std::endl;
                 exit(0);
@@ -1266,6 +1304,7 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
     inOut->logMain << "STAR-suite version=" << STAR_SUITE_VERSION << "\n";
     inOut->logMain << "STAR upstream version=" << STAR_UPSTREAM_VERSION << "\n";
     inOut->logMain << "STAR genome compatibility version=" << versionGenome << "\n";
+    inOut->logMain << "STAR-suite source revision=" << STAR_SUITE_SOURCE_REVISION << "\n";
     inOut->logMain << "STAR compilation time,server,dir=" << COMPILATION_TIME_PLACE << "\n";
     inOut->logMain << "STAR git: " << GIT_BRANCH_COMMIT_DIFF << "\n";
     #ifdef COMPILE_FOR_LONG_READS
@@ -1914,6 +1953,29 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
         exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
     };
 
+    std::transform(readFilesBgzfMode.begin(), readFilesBgzfMode.end(),
+                   readFilesBgzfMode.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    if (readFilesBgzfMode != "auto" && readFilesBgzfMode != "off" &&
+        readFilesBgzfMode != "range") {
+        ostringstream errOut;
+        errOut << "EXITING: fatal input ERROR: --readFilesBgzfMode must be auto, off, or range, user-defined value="
+               << readFilesBgzfMode << "\n";
+        exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+    }
+    if (bgzfReaderThreads < 0) {
+        ostringstream errOut;
+        errOut << "EXITING: fatal input ERROR: --bgzfReaderThreads must be >=0, user-defined value="
+               << bgzfReaderThreads << "\n";
+        exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+    }
+    if (bgzfCrcCheck != 0 && bgzfCrcCheck != 1) {
+        ostringstream errOut;
+        errOut << "EXITING: fatal input ERROR: --bgzfCrcCheck must be 0 or 1, user-defined value="
+               << bgzfCrcCheck << "\n";
+        exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+    }
+
     if (dynamicThreadInterface != 0 && dynamicThreadInterface != 1) {
         ostringstream errOut;
         errOut <<"EXITING: fatal input ERROR: --dynamicThreadInterface must be 0 or 1, user-defined value="
@@ -1937,10 +1999,17 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
         errOut <<"EXITING: fatal input ERROR: per-domain floors (--dynamicThread{Map,Atac,Feature}Floor) must be >=0\n";
         exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
     }
-    if (dynamicThreadAtacController != 0 && dynamicThreadAtacController != 1) {
+    if (dynamicThreadAtacController < 0 || dynamicThreadAtacController > 2) {
         ostringstream errOut;
-        errOut <<"EXITING: fatal input ERROR: --dynamicThreadAtacController must be 0 or 1, user-defined value="
+        errOut <<"EXITING: fatal input ERROR: --dynamicThreadAtacController must be 0, 1, or 2, user-defined value="
                <<dynamicThreadAtacController<<"\n";
+        exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+    }
+    if (dynamicThreadAtacController == 2 &&
+        (dynamicThreadTelemetry != 1 || dynamicThreadTelemetryIntervalSec <= 0)) {
+        ostringstream errOut;
+        errOut <<"EXITING: fatal input ERROR: --dynamicThreadAtacController 2 requires "
+               <<"--dynamicThreadTelemetry 1 and --dynamicThreadTelemetryIntervalSec > 0\n";
         exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
     }
     if (dynamicThreadFifoWaiters != 0 && dynamicThreadFifoWaiters != 1) {
@@ -2091,6 +2160,17 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
     }
 
     const bool pfControllerEnabled = (dynamicThreadPfControllerMode != "off");
+    const bool pfControllerAppliesUpdates =
+        dynamicThreadPfControllerMode == "active" ||
+        dynamicThreadPfControllerMode == "eta" ||
+        dynamicThreadPfControllerMode == "chunked";
+    if (dynamicThreadAtacController == 2 && pfControllerAppliesUpdates) {
+        ostringstream errOut;
+        errOut <<"EXITING: fatal input ERROR: saturation controller mode 2 owns "
+               <<"the shared MAP/FEATURE/ATAC allocation and cannot be combined "
+               <<"with an applying --dynamicThreadPfControllerMode\n";
+        exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+    }
     if (pfControllerEnabled && dynamicThreadInterface != 1) {
         ostringstream errOut;
         errOut <<"EXITING: fatal input ERROR: --dynamicThreadPfControllerMode requires --dynamicThreadInterface=1\n";
@@ -2192,6 +2272,66 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
         errOut <<"SOLUTION: specify one of the allowed values: Old_2.4 or SortedByCoordinate or Random\n";
         exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
     };
+
+    // Reject invalid spatial-mode combinations before opening any read inputs.
+    // The complete scientific recipe is validated after Solo initialization.
+    soloSpatialFeatureSidecarEnabled = !soloSpatialFeatureSidecar.empty()
+        && soloSpatialFeatureSidecar != "-" && soloSpatialFeatureSidecar != "None";
+    soloSpatialR1FastqTapEnabled = !soloSpatialR1FastqTap.empty()
+        && soloSpatialR1FastqTap != "-" && soloSpatialR1FastqTap != "None";
+    const auto parseSpatialIntegratedMode = [&](const string &value,
+                                                 const char *option) {
+        string mode = value;
+        transform(mode.begin(), mode.end(), mode.begin(), [](unsigned char value) {
+            return static_cast<char>(tolower(value));
+        });
+        if (mode == "yes") {
+            return true;
+        } else if (mode == "no") {
+            return false;
+        } else {
+            exitWithError(string("EXITING because of fatal PARAMETERS error: ")
+                              + option + " accepts only yes or no\n",
+                          std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+        }
+        return false;
+    };
+    soloSpatialGexIntegratedEnabled = parseSpatialIntegratedMode(
+        soloSpatialGexIntegrated, "--soloSpatialGexIntegrated");
+    soloSpatialFlexIntegratedEnabled = parseSpatialIntegratedMode(
+        soloSpatialFlexIntegrated, "--soloSpatialFlexIntegrated");
+    if (soloSpatialGexIntegratedEnabled && soloSpatialFlexIntegratedEnabled) {
+        exitWithError(
+            "EXITING because of fatal PARAMETERS error: "
+            "--soloSpatialGexIntegrated and --soloSpatialFlexIntegrated are mutually exclusive\n",
+            std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+    }
+    if (soloSpatialR1FastqTapEnabled && !soloSpatialFeatureSidecarEnabled) {
+        exitWithError("EXITING because of fatal PARAMETERS error: --soloSpatialR1FastqTap requires --soloSpatialFeatureSidecar\n"
+                      "SOLUTION: enable the explicit fused Visium HD GEX recipe or remove the tap option.\n",
+                      std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+    }
+    if ((soloSpatialGexIntegratedEnabled || soloSpatialFlexIntegratedEnabled)
+        && soloSpatialR1FastqTapEnabled) {
+        exitWithError("EXITING because of fatal PARAMETERS error: --soloSpatialR1FastqTap is not part of integrated spatial mode\n"
+                      "SOLUTION: remove the FIFO tap; optionally retain --soloSpatialFeatureSidecar as a debug oracle.\n",
+                      std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+    }
+    if (soloSpatialFeatureSidecarEnabled || soloSpatialGexIntegratedEnabled
+        || soloSpatialFlexIntegratedEnabled) {
+        const string sourceRevision = STAR_SUITE_SOURCE_REVISION;
+        const bool exactRevision = sourceRevision.size() == 40
+            && all_of(sourceRevision.begin(), sourceRevision.end(), [](unsigned char value) {
+                return isxdigit(value) != 0;
+            });
+        if (!exactRevision) {
+            exitWithError(
+                "EXITING because this STAR Suite binary lacks an exact immutable source revision\n"
+                "SOLUTION: use a validated release artifact or rebuild with "
+                "STAR_SUITE_COMMIT_SHA set to the full 40-character commit SHA.\n",
+                std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
+        }
+    }
 
     //read parameters
     if (runMode == "hashCacheGenerate") {
@@ -3040,6 +3180,72 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
         // quantVBem flag: if set to 1, use EM (vb=false), otherwise use VB (vb=true, default)
         quant.transcriptVB.vb = (quant.transcriptVB.quantVBemInt == 0);
         quant.transcriptVB.geneOutput = (quant.transcriptVB.geneOutputInt != 0);
+        if (quant.transcriptVB.sidecarRoundTripInt != 0 &&
+            quant.transcriptVB.sidecarRoundTripInt != 1) {
+            ostringstream errOut;
+            errOut << "EXITING because of FATAL PARAMETER ERROR: "
+                   << "--quantVBSidecarRoundTrip must be 0 or 1\n";
+            exitWithError(errOut.str(), std::cerr, inOut->logMain,
+                          EXIT_CODE_PARAMETER, *this);
+        }
+        quant.transcriptVB.sidecarRoundTrip =
+            (quant.transcriptVB.sidecarRoundTripInt != 0);
+        if (quant.transcriptVB.sidecarOnlyInt != 0 &&
+            quant.transcriptVB.sidecarOnlyInt != 1) {
+            ostringstream errOut;
+            errOut << "EXITING because of FATAL PARAMETER ERROR: "
+                   << "--quantVBSidecarOnly must be 0 or 1\n";
+            exitWithError(errOut.str(), std::cerr, inOut->logMain,
+                          EXIT_CODE_PARAMETER, *this);
+        }
+        quant.transcriptVB.sidecarOnly =
+            (quant.transcriptVB.sidecarOnlyInt != 0);
+        if (quant.transcriptVB.sidecarOut == "None") {
+            quant.transcriptVB.sidecarOut = "-";
+        }
+        quant.transcriptVB.sidecarIn.erase(
+            std::remove_if(quant.transcriptVB.sidecarIn.begin(),
+                           quant.transcriptVB.sidecarIn.end(),
+                           [](const string& value) {
+                               return value.empty() || value == "-" || value == "None";
+                           }),
+            quant.transcriptVB.sidecarIn.end());
+        if (quant.transcriptVB.sidecarSampleId == "None" ||
+            quant.transcriptVB.sidecarSampleId == "-") {
+            quant.transcriptVB.sidecarSampleId = outFileNamePrefix;
+        }
+        if (quant.transcriptVB.sidecarRoundTrip &&
+            quant.transcriptVB.sidecarOut == "-") {
+            ostringstream errOut;
+            errOut << "EXITING because of FATAL PARAMETER ERROR: "
+                   << "--quantVBSidecarRoundTrip 1 requires --quantVBSidecarOut PATH\n";
+            exitWithError(errOut.str(), std::cerr, inOut->logMain,
+                          EXIT_CODE_PARAMETER, *this);
+        }
+        if (quant.transcriptVB.sidecarOnly &&
+            quant.transcriptVB.sidecarOut == "-") {
+            ostringstream errOut;
+            errOut << "EXITING because of FATAL PARAMETER ERROR: "
+                   << "--quantVBSidecarOnly 1 requires --quantVBSidecarOut PATH\n";
+            exitWithError(errOut.str(), std::cerr, inOut->logMain,
+                          EXIT_CODE_PARAMETER, *this);
+        }
+        if (quant.transcriptVB.sidecarOnly &&
+            !quant.transcriptVB.sidecarIn.empty()) {
+            ostringstream errOut;
+            errOut << "EXITING because of FATAL PARAMETER ERROR: "
+                   << "--quantVBSidecarOnly cannot be combined with --quantVBSidecarIn\n";
+            exitWithError(errOut.str(), std::cerr, inOut->logMain,
+                          EXIT_CODE_PARAMETER, *this);
+        }
+        if (quant.transcriptVB.sidecarShardCount == 0 ||
+            quant.transcriptVB.sidecarShardOrdinal >= quant.transcriptVB.sidecarShardCount) {
+            ostringstream errOut;
+            errOut << "EXITING because of FATAL PARAMETER ERROR: invalid "
+                   << "--quantVBSidecarShardOrdinal/--quantVBSidecarShardCount\n";
+            exitWithError(errOut.str(), std::cerr, inOut->logMain,
+                          EXIT_CODE_PARAMETER, *this);
+        }
         if (quant.transcriptVB.outFile.empty()) {
             quant.transcriptVB.outFile = outFileNamePrefix + "quant.sf";
         }
@@ -3204,64 +3410,182 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
 
     soloSpatialFeatureSidecarEnabled = !soloSpatialFeatureSidecar.empty()
         && soloSpatialFeatureSidecar != "-" && soloSpatialFeatureSidecar != "None";
-    if (soloSpatialFeatureSidecarEnabled) {
+    soloSpatialR1FastqTapEnabled = !soloSpatialR1FastqTap.empty()
+        && soloSpatialR1FastqTap != "-" && soloSpatialR1FastqTap != "None";
+    const bool soloSpatialIntegratedEnabled =
+        soloSpatialGexIntegratedEnabled || soloSpatialFlexIntegratedEnabled;
+    if (soloSpatialFeatureSidecarEnabled || soloSpatialIntegratedEnabled) {
         const auto exactly = [](const vector<string> &values, const string &expected) {
             return values.size() == 1 && values[0] == expected;
         };
-        auto rejectSpatialSidecar = [&](const string &reason) {
+        const string spatialOption = soloSpatialFlexIntegratedEnabled
+            ? "--soloSpatialFlexIntegrated yes"
+            : (soloSpatialGexIntegratedEnabled
+                ? "--soloSpatialGexIntegrated yes" : "--soloSpatialFeatureSidecar");
+        auto rejectSpatialRecipe = [&](const string &reason) {
             ostringstream errOut;
-            errOut << "EXITING because of fatal PARAMETERS error: --soloSpatialFeatureSidecar "
+            errOut << "EXITING because of fatal PARAMETERS error: " << spatialOption << ' '
                    << reason << "\n"
-                   << "SOLUTION: use the modern annotation-only Visium HD GEX sidecar recipe.\n";
+                   << "SOLUTION: use the documented fail-closed Visium HD "
+                   << (soloSpatialFlexIntegratedEnabled ? "Flex" : "GEX GeneFull")
+                   << " recipe.\n";
             exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
         };
 
-        if (runMode != "alignReads") rejectSpatialSidecar("requires --runMode alignReads");
-        if (pSolo.typeStr != "None") rejectSpatialSidecar("requires --soloType None");
-        if (!exactly(pSolo.featureIn, "GeneFull")) rejectSpatialSidecar("requires exactly --soloFeatures GeneFull");
-        if (pSolo.strandStr != "Forward") rejectSpatialSidecar("requires --soloStrand Forward");
-        if (!pSolo.crMultimapRescue) rejectSpatialSidecar("requires --soloCrMultimapRescue yes");
-        if (pSolo.crGexFeature != ParametersSolo::CrGexGeneFull)
-            rejectSpatialSidecar("requires --soloCrGexFeature GeneFull");
+        if (runMode != "alignReads") rejectSpatialRecipe("requires --runMode alignReads");
+        if (soloSpatialFlexIntegratedEnabled) {
+            if (soloSpatialFeatureSidecarEnabled)
+                rejectSpatialRecipe("does not permit the GeneFull diagnostic sidecar");
+            if (!pSolo.flexMode) rejectSpatialRecipe("requires --flex yes");
+            if (pSolo.flexPipelineStr != "no")
+                rejectSpatialRecipe("requires --flexPipeline no");
+            if (pSolo.typeStr != "CB_UMI_Complex")
+                rejectSpatialRecipe("requires --soloType CB_UMI_Complex");
+            if (!exactly(pSolo.featureIn, "Gene"))
+                rejectSpatialRecipe("requires exactly --soloFeatures Gene");
+            if (pSolo.strandStr != "Unstranded")
+                rejectSpatialRecipe("requires --soloStrand Unstranded");
+            if (!pSolo.inlineHashMode || !pSolo.hashScreenEnabled)
+                rejectSpatialRecipe("requires the enabled inline H0/H1 hash screen");
+            if (!pSolo.skipProcessing)
+                rejectSpatialRecipe("requires --soloSkipProcessing yes");
+            if (pSolo.runFlexFilter)
+                rejectSpatialRecipe("requires --soloRunFlexFilter no");
+            if (pSolo.probeListPath.empty() || pSolo.probeListPath == "-")
+                rejectSpatialRecipe("requires --soloProbeList FILE");
+            if ((!pSolo.sampleWhitelistPath.empty()
+                 && pSolo.sampleWhitelistPath != "-")
+                || (!pSolo.sampleProbesPath.empty()
+                    && pSolo.sampleProbesPath != "-")
+                || pSolo.sampleRequireMatch) {
+                rejectSpatialRecipe("does not support sample tags in the first native spatial mode");
+            }
+            if (!exactly(pSolo.multiMap.typesIn, "Rescue"))
+                rejectSpatialRecipe("requires exactly --soloMultiMappers Rescue");
+        } else {
+            if (pSolo.typeStr != "None") rejectSpatialRecipe("requires --soloType None");
+            if (!exactly(pSolo.featureIn, "GeneFull"))
+                rejectSpatialRecipe("requires exactly --soloFeatures GeneFull");
+            if (pSolo.strandStr != "Forward")
+                rejectSpatialRecipe("requires --soloStrand Forward");
+            if (!pSolo.crMultimapRescue)
+                rejectSpatialRecipe("requires --soloCrMultimapRescue yes");
+            if (pSolo.crGexFeature != ParametersSolo::CrGexGeneFull)
+                rejectSpatialRecipe("requires --soloCrGexFeature GeneFull");
+            if (!exactly(pSolo.multiMap.typesIn, "Unique"))
+                rejectSpatialRecipe("requires exactly --soloMultiMappers Unique");
+        }
         if (!exactly(pSolo.umiDedup.typesIn, "1MM_CR"))
-            rejectSpatialSidecar("requires exactly --soloUMIdedup 1MM_CR");
+            rejectSpatialRecipe("requires exactly --soloUMIdedup 1MM_CR");
         if (!exactly(pSolo.umiFiltering.type, "MultiGeneUMI_CR"))
-            rejectSpatialSidecar("requires exactly --soloUMIfiltering MultiGeneUMI_CR");
-        if (!exactly(pSolo.multiMap.typesIn, "Unique"))
-            rejectSpatialSidecar("requires exactly --soloMultiMappers Unique");
+            rejectSpatialRecipe("requires exactly --soloUMIfiltering MultiGeneUMI_CR");
         if (!exactly(pSolo.cellFilter.type, "None"))
-            rejectSpatialSidecar("requires --soloCellFilter None");
-        if (!exactly(outSAMtype, "None")) rejectSpatialSidecar("requires --outSAMtype None");
+            rejectSpatialRecipe("requires --soloCellFilter None");
+        if (!exactly(outSAMtype, "None")) rejectSpatialRecipe("requires --outSAMtype None");
         if (outSAMattrPresent.GX || outSAMattrPresent.GN || outSAMattrPresent.UR
             || outSAMattrPresent.UB || outSAMattrPresent.CB || outSAMattrPresent.CR) {
-            rejectSpatialSidecar("does not permit GX/GN/UR/UB/CB/CR SAM attributes");
+            rejectSpatialRecipe("does not permit GX/GN/UR/UB/CB/CR SAM attributes");
         }
         if (twoPass.mode != "None" || runRestart.type != 0)
-            rejectSpatialSidecar("does not support two-pass or restart mapping");
+            rejectSpatialRecipe("does not support two-pass or restart mapping");
         if (outFilterType != "Normal")
-            rejectSpatialSidecar("requires --outFilterType Normal");
+            rejectSpatialRecipe("requires --outFilterType Normal");
         if (readFilesTypeN == 10 || readNends != 2)
-            rejectSpatialSidecar("requires two FASTQ ends ordered as R2 then raw R1");
+            rejectSpatialRecipe("requires two FASTQ ends ordered as R2 then raw R1");
+        if (soloSpatialR1FastqTapEnabled && (readFilesTypeN != 1 || !fastxInputActive))
+            rejectSpatialRecipe("requires Fastx input for --soloSpatialR1FastqTap");
         if (batchModeRequested || quant.slam.yes || quant.transcriptVB.yes)
-            rejectSpatialSidecar("does not support batch, SLAM, or transcript-VB replay modes");
+            rejectSpatialRecipe("does not support batch, SLAM, or transcript-VB replay modes");
 
-        // This is a narrow annotation-only mode: R2 is the sole mapped end and
-        // raw R1 remains available to the independent spatial decoder. No Solo
-        // barcode object, whitelist, correction, or collapse is enabled.
-        readNmates = 1;
-        pSolo.barcodeRead = 1;
-        pSolo.strand = 0;
-        pSolo.featureYes.fill(false);
-        pSolo.featureYes[SoloFeatureTypes::GeneFull] = true;
-        pSolo.featureInd.fill(-1);
-        pSolo.featureInd[SoloFeatureTypes::GeneFull] = 0;
-        pSolo.features.clear();
-        pSolo.features.push_back(SoloFeatureTypes::GeneFull);
-        pSolo.nFeatures = 1;
-        quant.geneFull.yes = true;
-        quant.yes = true;
-        inOut->logMain << "Spatial GeneFull sidecar: annotation-only mode enabled; mapping R2 and "
-                       << "excluding raw R1 from alignment/barcode correction\n";
+        if (soloSpatialIntegratedEnabled) {
+            if (soloSpatialBarcodeContract.empty() || soloSpatialBarcodeContract == "-")
+                rejectSpatialRecipe("requires --soloSpatialBarcodeContract DIR");
+            if (soloSpatialBc1Oligos.empty() || soloSpatialBc1Oligos == "-")
+                rejectSpatialRecipe("requires --soloSpatialBc1Oligos FILE");
+            if (soloSpatialBc2Oligos.empty() || soloSpatialBc2Oligos == "-")
+                rejectSpatialRecipe("requires --soloSpatialBc2Oligos FILE");
+            if (soloSpatialExpectedReads == 0 || soloSpatialExpectedCandidates == 0)
+                rejectSpatialRecipe("requires positive expected read and candidate capacities");
+            if (soloSpatialExpectedReads > numeric_limits<uint32_t>::max() ||
+                soloSpatialExpectedCandidates > numeric_limits<uint32_t>::max()) {
+                rejectSpatialRecipe("compact read and candidate capacities must fit uint32");
+            }
+
+            string spatialError;
+            spatial_gex::OverflowPolicy overflowPolicy = spatial_gex::OverflowPolicy::Fail;
+            if (!spatial_gex::parseProducts(soloSpatialAssignmentProducts,
+                                            soloSpatialAssignmentProductMask,
+                                            spatialError) ||
+                !spatial_gex::parseScales(soloSpatialBinSizes,
+                                          soloSpatialBinSizeMask,
+                                          spatialError) ||
+                !spatial_gex::parseOverflowPolicy(soloSpatialOverflowPolicy,
+                                                  overflowPolicy,
+                                                  spatialError)) {
+                rejectSpatialRecipe(spatialError);
+            }
+            soloSpatialOverflowSpill = overflowPolicy == spatial_gex::OverflowPolicy::Spill;
+            if (soloSpatialSpillHighWaterCandidates != 0 && !soloSpatialOverflowSpill) {
+                rejectSpatialRecipe(
+                    "requires --soloSpatialOverflowPolicy Spill when "
+                    "--soloSpatialSpillHighWaterCandidates is nonzero");
+            }
+            spatial_gex::Capacity capacity;
+            capacity.reads = soloSpatialExpectedReads;
+            capacity.candidates = soloSpatialExpectedCandidates;
+            capacity.threads = static_cast<uint32_t>(runThreadN);
+            spatial_gex::MemoryModel memoryModel;
+            if (!spatial_gex::estimateMemory(capacity, memoryModel, spatialError) ||
+                !isfinite(soloSpatialMemoryFraction) || soloSpatialMemoryFraction <= 0.0 ||
+                soloSpatialMemoryFraction > 1.0) {
+                if (spatialError.empty()) {
+                    spatialError = "spatial GEX memory fraction must be finite in (0,1]";
+                }
+                rejectSpatialRecipe(spatialError);
+            }
+            inOut->logMain << "Spatial "
+                           << (soloSpatialFlexIntegratedEnabled ? "Flex" : "GEX")
+                           << " integrated memory estimate: all_memory_peak="
+                           << memoryModel.peakBytes << " bounded_spool="
+                           << memoryModel.downstreamSpoolBytes << " spool_disk="
+                           << memoryModel.downstreamSpoolDiskBytes
+                           << " bytes for reads="
+                           << capacity.reads << " candidates=" << capacity.candidates
+                           << " threads=" << capacity.threads << " overflow="
+                           << (soloSpatialOverflowSpill ? "Spill" : "Fail") << '\n';
+        }
+
+        if (soloSpatialFlexIntegratedEnabled) {
+            // Keep the normal Flex Gene annotation/resolver objects, but the
+            // mapping hot path bypasses their single-CB insertion. Raw R1 is
+            // decoded into spatial candidate families by the integrated
+            // pipeline instead.
+            quant.yes = true;
+            inOut->logMain
+                << "Spatial Flex integrated: coupled R2 feature evidence and raw-R1 "
+                << "candidate families enabled; ordinary Flex barcode insertion disabled\n";
+        } else {
+            // This is a narrow annotation-only mode: R2 is the sole mapped end
+            // and raw R1 remains available to the independent spatial decoder.
+            // No Solo barcode object, whitelist, correction, or collapse is
+            // enabled.
+            readNmates = 1;
+            pSolo.barcodeRead = 1;
+            pSolo.strand = 0;
+            pSolo.featureYes.fill(false);
+            pSolo.featureYes[SoloFeatureTypes::GeneFull] = true;
+            pSolo.featureInd.fill(-1);
+            pSolo.featureInd[SoloFeatureTypes::GeneFull] = 0;
+            pSolo.features.clear();
+            pSolo.features.push_back(SoloFeatureTypes::GeneFull);
+            pSolo.nFeatures = 1;
+            quant.geneFull.yes = true;
+            quant.yes = true;
+            inOut->logMain << "Spatial GeneFull "
+                           << (soloSpatialGexIntegratedEnabled ? "integrated" : "sidecar")
+                           << ": annotation-only mapping enabled; mapping R2 and excluding raw R1 "
+                           << "from alignment/barcode correction\n";
+        }
     }
 
     if (runMode == "hashCacheGenerate") {
@@ -3495,7 +3819,8 @@ void Parameters::inputParameters (int argInN, char* argIn[]) {//input parameters
 
         trimQcEnabled = (!trimQcReport.empty() && trimQcReport != "-") ||
                         (!trimQcJson.empty() && trimQcJson != "-") ||
-                        (!trimQcHtml.empty() && trimQcHtml != "-");
+                        (!trimQcHtml.empty() && trimQcHtml != "-") ||
+                        (!trimQcShardOut.empty() && trimQcShardOut != "-");
 
     //alignEnds
     alignEndsType.ext[0][0]=false;

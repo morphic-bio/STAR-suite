@@ -1,5 +1,9 @@
 #include "SoloFeature.h"
+#include "SoloReadFeature.h"
 #include "libflex/FlexFilter.h"
+#include "FlexGdna.h"
+#include "FlexHashScreen.h"
+#include "hash_shims_cpp_compat.h"
 #include "Parameters.h"
 #include "TimeFunctions.h"
 #include "ErrorWarning.h"
@@ -14,6 +18,7 @@
 #include <numeric>
 #include <iostream>
 #include <cstdio>
+#include <iomanip>
 
 namespace {
 
@@ -35,6 +40,97 @@ std::vector<MexWriter::Feature> makeMexFeatures(const std::vector<std::string>& 
         features.emplace_back(geneId, geneId, "Gene Expression");
     }
     return features;
+}
+
+std::string jsonEscape(const std::string& value) {
+    std::ostringstream out;
+    for (const unsigned char c : value) {
+        switch (c) {
+            case '"': out << "\\\""; break;
+            case '\\': out << "\\\\"; break;
+            case '\b': out << "\\b"; break;
+            case '\f': out << "\\f"; break;
+            case '\n': out << "\\n"; break;
+            case '\r': out << "\\r"; break;
+            case '\t': out << "\\t"; break;
+            default:
+                if (c < 0x20) {
+                    out << "\\u" << std::hex << std::setw(4) << std::setfill('0')
+                        << static_cast<unsigned int>(c) << std::dec;
+                } else {
+                    out << static_cast<char>(c);
+                }
+        }
+    }
+    return out.str();
+}
+
+void writeGdnaJson(const std::string& path,
+                   const std::string& scope,
+                   const FlexGdnaEstimate& estimate) {
+    std::ofstream out(path.c_str());
+    if (!out.is_open())
+        return;
+
+    out << std::setprecision(17)
+        << "{\n"
+        << "  \"scope\": \"" << jsonEscape(scope) << "\",\n"
+        << "  \"valid\": " << (estimate.valid ? "true" : "false") << ",\n"
+        << "  \"status\": \"" << jsonEscape(estimate.status) << "\",\n";
+    if (estimate.valid) {
+        out << "  \"estimated_gdna_content\": " << estimate.estimatedGdnaFraction << ",\n"
+            << "  \"estimated_gdna_unspliced_threshold\": " << estimate.threshold << ",\n"
+            << "  \"estimated_gdna_per_probe\": " << estimate.estimatedGdnaPerProbe << ",\n"
+            << "  \"model_constant\": " << estimate.modelConstant << ",\n"
+            << "  \"model_slope\": " << estimate.modelSlope << ",\n"
+            << "  \"model_critical_point\": " << estimate.modelCriticalPoint << ",\n"
+            << "  \"model_rss\": " << estimate.modelRss << ",\n";
+    } else {
+        out << "  \"estimated_gdna_content\": null,\n"
+            << "  \"estimated_gdna_unspliced_threshold\": null,\n"
+            << "  \"estimated_gdna_per_probe\": null,\n"
+            << "  \"model_constant\": null,\n"
+            << "  \"model_slope\": null,\n"
+            << "  \"model_critical_point\": null,\n"
+            << "  \"model_rss\": null,\n";
+    }
+    out << "  \"control_genes\": " << estimate.controlGenes << ",\n"
+        << "  \"gene_assigned_filtered_molecules\": "
+        << estimate.totalFilteredMolecules << ",\n"
+        << "  \"classified_filtered_molecules\": " << estimate.classifiedMolecules << ",\n"
+        << "  \"unknown_region_filtered_molecules\": " << estimate.unknownMolecules << ",\n"
+        << "  \"conflicting_region_filtered_molecules\": " << estimate.conflictingMolecules
+        << ",\n"
+        << "  \"gene_unassigned_filtered_molecules\": " << estimate.unassignedMolecules
+        << "\n}\n";
+}
+
+struct GdnaMoleculeBucket {
+    std::vector<FlexGdnaGeneMoleculeCounts> genes;
+    uint64_t classified = 0;
+    uint64_t unknown = 0;
+    uint64_t conflicting = 0;
+    uint64_t unassigned = 0;
+};
+
+void addGdnaMolecule(GdnaMoleculeBucket& bucket,
+                     uint16_t gene,
+    FlexGdnaRegion region) {
+    if (gene == 0 || gene >= bucket.genes.size()) {
+        ++bucket.unassigned;
+        return;
+    }
+    if (region == FlexGdnaSpliced) {
+        ++bucket.genes[gene].spliced;
+        ++bucket.classified;
+    } else if (region == FlexGdnaUnspliced) {
+        ++bucket.genes[gene].unspliced;
+        ++bucket.classified;
+    } else if (region == FlexGdnaConflicting) {
+        ++bucket.conflicting;
+    } else {
+        ++bucket.unknown;
+    }
 }
 
 } // namespace
@@ -409,5 +505,194 @@ void SoloFeature::runFlexFilterInline(
                     << totalFinal << '\t'
                     << totalUMIs << '\n';
         summaryFile.close();
+    }
+
+    // Cell Ranger's Flex gDNA diagnostic is defined on final molecule
+    // families in filtered cells. The aggregate hash is still live here, so
+    // scan it once and avoid requiring a BAM or materialized molecule table.
+    if (pSolo.flexMode
+        && pSolo.flexGdnaMode != ParametersSolo::FlexGdnaOff) {
+        const FlexGdnaProbeMetadata& metadata = FlexGdnaProbeMetadata::instance();
+        const size_t nGeneSlots = metadata.geneProbeCounts().size();
+        std::vector<GdnaMoleculeBucket> buckets(outputs.tagResults.size());
+        GdnaMoleculeBucket libraryBucket;
+        for (auto& bucket : buckets)
+            bucket.genes.resize(nGeneSlots);
+        libraryBucket.genes.resize(nGeneSlots);
+
+        bool identityComplete =
+            inlineMatrix.cbTagKeys.size() == inlineMatrix.matrixData.nCells;
+        std::vector<int32_t> sampleByCell(inlineMatrix.matrixData.nCells, -1);
+        for (size_t sample = 0; sample < outputs.tagResults.size(); ++sample) {
+            for (const std::string& barcode : outputs.tagResults[sample].passingBarcodes) {
+                const auto it = barcodeToIdx.find(barcode);
+                if (it == barcodeToIdx.end())
+                    continue;
+                int32_t& assignment = sampleByCell[it->second];
+                if (assignment >= 0 && assignment != static_cast<int32_t>(sample)) {
+                    assignment = -2;
+                    identityComplete = false;
+                } else if (assignment != -2) {
+                    assignment = static_cast<int32_t>(sample);
+                }
+            }
+        }
+
+        std::unordered_map<uint64_t, uint32_t> cellByCbTag;
+        if (identityComplete) {
+            cellByCbTag.reserve(inlineMatrix.cbTagKeys.size() * 2u);
+            for (uint32_t cell = 0; cell < inlineMatrix.cbTagKeys.size(); ++cell) {
+                if (!cellByCbTag.emplace(inlineMatrix.cbTagKeys[cell], cell).second) {
+                    identityComplete = false;
+                    break;
+                }
+            }
+        }
+
+        if (identityComplete && readFeatSum != nullptr && readFeatSum->inlineHash_ != nullptr) {
+            khash_t(cg_agg)* hash = readFeatSum->inlineHash_;
+            for (khiter_t iter = kh_begin(hash); iter != kh_end(hash); ++iter) {
+                if (!kh_exist(hash, iter))
+                    continue;
+                const uint64_t key = kh_key(hash, iter);
+                const uint32_t cb = static_cast<uint32_t>((key >> 44) & 0xFFFFFu);
+                const uint8_t tag = static_cast<uint8_t>(key & 0x1Fu);
+                const auto cellIt =
+                    cellByCbTag.find((static_cast<uint64_t>(cb) << 8) | tag);
+                if (cellIt == cellByCbTag.end())
+                    continue;
+                const int32_t sample = sampleByCell[cellIt->second];
+                if (sample < 0)
+                    continue;
+
+                const uint16_t gene =
+                    static_cast<uint16_t>((key >> 5) & 0x7FFFu);
+                const FlexGdnaRegion region =
+                    flexGdnaValueRegion(kh_val(hash, iter));
+                addGdnaMolecule(buckets[static_cast<size_t>(sample)], gene, region);
+                addGdnaMolecule(libraryBucket, gene, region);
+            }
+        } else {
+            identityComplete = false;
+        }
+
+        const bool cacheComplete =
+            !pSolo.hashScreenEnabled
+            || FlexHashScreenCache::instance().hasRegionMetadata();
+        const bool diagnosticComplete =
+            pSolo.flexGdnaReady && cacheComplete && identityComplete;
+        const char* unavailableStatus = !pSolo.flexGdnaReady
+            ? "probe_region_metadata_unavailable"
+            : (!cacheComplete ? "cache_region_metadata_unavailable"
+                              : "filtered_barcode_identity_unavailable");
+
+        std::vector<FlexGdnaEstimate> estimates;
+        estimates.reserve(buckets.size() + 1u);
+        for (const GdnaMoleculeBucket& bucket : buckets) {
+            FlexGdnaEstimate estimate = flexGdnaEstimate(
+                metadata, bucket.genes, bucket.classified,
+                bucket.unknown, bucket.conflicting, bucket.unassigned);
+            if (!diagnosticComplete) {
+                estimate.valid = false;
+                estimate.status = unavailableStatus;
+            }
+            estimates.push_back(estimate);
+        }
+        FlexGdnaEstimate libraryEstimate = flexGdnaEstimate(
+            metadata, libraryBucket.genes, libraryBucket.classified,
+            libraryBucket.unknown, libraryBucket.conflicting,
+            libraryBucket.unassigned);
+        if (!diagnosticComplete) {
+            libraryEstimate.valid = false;
+            libraryEstimate.status = unavailableStatus;
+        }
+
+        std::string gdnaSummaryPath = outputPrefix;
+        if (!gdnaSummaryPath.empty() && gdnaSummaryPath.back() != '/')
+            gdnaSummaryPath += '/';
+        gdnaSummaryPath += "flex_gdna_summary.tsv";
+        std::ofstream gdnaSummary(gdnaSummaryPath.c_str());
+        if (gdnaSummary.is_open()) {
+            gdnaSummary
+                << "scope\tstatus\testimated_gdna_content"
+                   "\testimated_gdna_percent\testimated_gdna_unspliced_threshold"
+                   "\testimated_gdna_per_probe\tgene_assigned_filtered_molecules"
+                   "\tclassified_filtered_molecules"
+                   "\tunknown_region_filtered_molecules"
+                   "\tconflicting_region_filtered_molecules"
+                   "\tgene_unassigned_filtered_molecules\tcontrol_genes"
+                   "\tmodel_constant\tmodel_slope\tmodel_critical_point\tmodel_rss\n";
+        }
+
+        auto writeSummaryRow = [&](const std::string& scope,
+                                   const FlexGdnaEstimate& estimate) {
+            if (!gdnaSummary.is_open())
+                return;
+            gdnaSummary << std::setprecision(17)
+                        << scope << '\t' << estimate.status << '\t';
+            if (estimate.valid) {
+                gdnaSummary
+                    << estimate.estimatedGdnaFraction << '\t'
+                    << estimate.estimatedGdnaFraction * 100.0 << '\t'
+                    << estimate.threshold << '\t'
+                    << estimate.estimatedGdnaPerProbe << '\t';
+            } else {
+                gdnaSummary << "NA\tNA\tNA\tNA\t";
+            }
+            gdnaSummary
+                << estimate.totalFilteredMolecules << '\t'
+                << estimate.classifiedMolecules << '\t'
+                << estimate.unknownMolecules << '\t'
+                << estimate.conflictingMolecules << '\t'
+                << estimate.unassignedMolecules << '\t'
+                << estimate.controlGenes << '\t';
+            if (estimate.valid) {
+                gdnaSummary
+                    << estimate.modelConstant << '\t'
+                    << estimate.modelSlope << '\t'
+                    << estimate.modelCriticalPoint << '\t'
+                    << estimate.modelRss;
+            } else {
+                gdnaSummary << "NA\tNA\tNA\tNA";
+            }
+            gdnaSummary << '\n';
+        };
+
+        for (size_t sample = 0; sample < outputs.tagResults.size(); ++sample) {
+            const std::string& label = outputs.tagResults[sample].sampleLabel;
+            writeSummaryRow(label, estimates[sample]);
+            std::string samplePrefix = outputPrefix;
+            if (!samplePrefix.empty() && samplePrefix.back() != '/')
+                samplePrefix += '/';
+            samplePrefix += label + "/Gene/filtered/";
+            createDirectory(samplePrefix, P.runDirPerm,
+                            "Flex gDNA per-sample metrics directory", P);
+            writeGdnaJson(samplePrefix + "gdna_metrics.json", label, estimates[sample]);
+        }
+        writeSummaryRow("library", libraryEstimate);
+        writeGdnaJson(outputPrefix + (outputPrefix.empty() || outputPrefix.back() == '/'
+                         ? "" : "/") + "flex_gdna_library.json",
+                      "library", libraryEstimate);
+
+        P.inOut->logMain
+            << "Flex gDNA diagnostic: " << libraryEstimate.status;
+        if (libraryEstimate.valid) {
+            P.inOut->logMain
+                << " (estimated_content=" << libraryEstimate.estimatedGdnaFraction
+                << ", threshold=" << libraryEstimate.threshold
+                << ", gene_assigned_molecules="
+                << libraryEstimate.totalFilteredMolecules
+                << ")";
+        }
+        P.inOut->logMain << "\n";
+
+        if (pSolo.flexGdnaMode == ParametersSolo::FlexGdnaRequired
+            && !libraryEstimate.valid) {
+            std::ostringstream errMsg;
+            errMsg << "ERROR: required Flex gDNA diagnostic failed: "
+                   << libraryEstimate.status;
+            exitWithError(errMsg.str(), std::cerr, P.inOut->logMain,
+                          EXIT_CODE_RUNTIME, P);
+        }
     }
 }

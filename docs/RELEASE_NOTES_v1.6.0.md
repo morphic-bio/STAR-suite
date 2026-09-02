@@ -1,0 +1,121 @@
+# STAR Suite v1.6.0 Release Notes
+
+Date: 2026-07-27
+
+`v1.6.0` promotes the opt-in integrated Visium HD 3-prime GEX pipeline and
+its bounded molecule-first materializer. It also fixes Flex-as-aligner paths
+that skip Solo processing or fall back from the feature hash to alignment,
+adds native Visium HD Flex spatial families, and adds the Flex gDNA
+diagnostic.
+The release artifact version is `v1.6.0`, Debian packages use `1.6.0-1`, and
+both `STAR --version` and `molecule_first_resolver --version` report `1.6.0`.
+The upstream STAR base remains `2.7.11b`; genome-index compatibility remains
+`2.7.4a`.
+
+## Integrated Visium HD GEX
+
+- Enable the new path explicitly with `--soloSpatialGexIntegrated yes` and a
+  spatial barcode/coordinate contract. It is off by default.
+- Decode R1 spatial coordinate candidates while STAR maps R2, then join those
+  candidates to post-alignment GeneFull evidence before barcode correction and
+  UMI collapse.
+- Resolve read cliques and candidate-specific UMIs before materializing
+  strict, soft expected-count, hard, and gated-hard spatial products at 2, 8,
+  and 16 micrometer scales.
+- Route spatial barcodes containing `N` through the bounded alignment/DP
+  fallback under the ordinary uniqueness rules. UMIs containing non-ACGT
+  bases remain invalid for molecule creation and are retained in accounting.
+- Keep the feature sidecar optional for diagnostics or overflow handling; it
+  is not the production interchange requirement.
+
+## Memory-bounded full-slide processing
+
+- Spill candidate accumulation when configured, then use a bounded downstream
+  spool for clique formation, coordinate-local correction, multigene
+  reconciliation, and matrix materialization.
+- Preserve exact in-memory/spooled parity with versioned binary records,
+  deterministic ordering, integrity checks, and fail-closed admission gates.
+- Stabilize floating-point reduction order for coarse soft matrices so thread,
+  spill, and materialization choices do not change released products.
+
+## Gene evidence and compatibility policy
+
+- Keep `compatibility` as the shipped/default CR-compatible exon-first rescue
+  policy when CR multimap rescue is enabled.
+- Retain `annotated` as an explicit deterministic, score-first retained-GTF
+  alternative. Under that policy, unannotated equal-best alignments remain
+  decoy evidence instead of silently promoting an annotated alternative.
+- Leave ordinary STARsolo behavior unchanged unless CR multimap rescue is
+  explicitly enabled; GX/UR tags do not encode final rescue policy.
+
+## Flex behavior and fixes
+
+- Use the liberal `--soloMapqMode off` policy by default in ordinary and
+  spatial Flex. MAPQ filtering remains available as an explicit request.
+- Resolve hash-miss R2 feature evidence before CB/sample eligibility, then feed
+  the chosen gene and raw UMI into the existing deferred family correction.
+  This keeps feature assignment independent of whether R1 later forms an
+  eligible single-cell or spatial family.
+- Do not require expected-cell settings when `--soloSkipProcessing yes`.
+- Avoid legacy Solo replay in inline skip-processing mode.
+- Route true no-sample hash-cache misses to alignment while keeping valid H0
+  hash hits, including reads without a barcode assignment, on the hash path.
+- Account hash-kept reads even when no barcode assignment exists.
+
+## Flex gDNA diagnostic
+
+- Compute the 10x-style Flex gDNA estimate from final filtered
+  barcode/gene/UMI families, after barcode and UMI correction, without
+  requiring BAM output.
+- Carry spliced/unspliced probe-region evidence through H0/H1 cache keeps,
+  alignment fallback, ambiguous-barcode resolution, and UMI re-keying without
+  changing the molecule key or allocating per-read sidecars.
+- Add FH01SEQ1 cache format v3, preserving the 24-byte record size while
+  retaining probe-region metadata. STAR and the replay/pilot utilities remain
+  compatible with v1/v2 caches; older caches continue mapping but report the
+  diagnostic unavailable.
+- Emit per-sample Cell Ranger-compatible JSON metrics and a library/per-sample
+  audit TSV. `--soloFlexGdna auto|yes|no` controls reporting and is strictly
+  inert unless `--flex yes`.
+
+## Isolation and validation
+
+- Integrated spatial GEX is gated by its explicit enable flag and contract;
+  sidecar and spill settings are inert on ordinary scRNA runs.
+- Normal scRNA sidecar-off outputs reproduced their tracked byte-level golden
+  files. Solo, GEX, CR multi, Flex, CB/UB, Y/no-Y, SLAM, TranscriptVB, and
+  tximport regression rails passed or cleanly reported unavailable optional
+  dependencies.
+- Core spatial, spill, downstream-spool, CR multimap, 20,000-case UMI parity,
+  molecule-first resolver/materializer, N-barcode, and concurrency tests
+  passed.
+- The fresh human CRC 100K gate reproduced 109,852 candidate rows, 79,644
+  cliques, 66,845 strict molecules, 79,144 hard molecules, and 71,262
+  gated-hard molecules, with exact accepted ledgers, resolver artifacts, and
+  policy matrices.
+- The final MAPQ-off CRC 100K gate assigned 3,875 of 6,359 hash misses. Its
+  ordinary and native-spatial arms covered all 6,359 reads with byte-equivalent
+  terminal resolver fields and zero per-read decision mismatches.
+- The fresh ovarian 100K compatibility/spool gate reproduced 58,395 strict,
+  71,830 hard, and 63,105 gated-hard molecules; all 36 MEX components were
+  byte-identical to the accepted compatibility oracle.
+- A Git-aware pre-release source-candidate run on the retained full
+  212.6-million-read CRC input reproduced the open candidate surface and all
+  eight resolver artifacts byte-for-byte while reducing materialization to 10
+  minutes 49 seconds. This was not a forced-spill validation of the later
+  Git-free public v1.6.0 artifact.
+- The CR-compatible CRISPR fixture passed with 1,043 single-feature cells and
+  35 multi-feature cells; pinned SLAM parity passed after manifest/index
+  verification.
+- The Flex gDNA 100K gate completed in 44.79 seconds. Its accepted model
+  evidence, evaluated with the corrected gene-assigned-molecule denominator,
+  closely reproduced the Cell Ranger sanity values: 3.06095% library gDNA
+  versus 3.08%, and 7.33737% for BC007 versus 7.32%. The standard 19-test
+  release suite and the focused Flex hash/fallback, skip-processing,
+  bookkeeping, resolver, and materializer gates passed.
+
+Implementation, safety contracts, commands, and artifact provenance are in
+`docs/RUNBOOK_VISIUM_HD_GEX_IN_MEMORY_1MM_CR_20260724.md`,
+`docs/RUNBOOK_VISIUM_HD_GEX_DOWNSTREAM_SPOOL_20260725.md`,
+`docs/RUNBOOK_VISIUM_HD_NATIVE_FLEX_SPATIAL_FAMILIES_20260726.md`, and
+`docs/RUNBOOK_FLEX_GDNA_DIAGNOSTIC_20260727.md`.

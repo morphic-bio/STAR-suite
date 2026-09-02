@@ -25,7 +25,9 @@ struct Result {
 };
 
 // Resolve one candidate/barcode + corrected-UMI group. The input must contain
-// one row per provisional gene after per-gene UMI correction.
+// one row per provisional gene after per-gene UMI correction. A row may have
+// zero corrected support: legacy Solo retains such rows so their original-UMI
+// support can veto another gene's corrected-count winner.
 Result resolve(const std::vector<GeneSupport> &supports);
 
 } // namespace multi_gene_umi_cr

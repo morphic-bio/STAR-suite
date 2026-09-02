@@ -16,10 +16,6 @@ Result resolve(const std::vector<GeneSupport> &supports)
         if (!genes.insert(support.gene).second) {
             throw std::invalid_argument("duplicate gene in MultiGeneUMI_CR support");
         }
-        if (support.correctedCount == 0
-            || support.originalAtCorrectedCount > support.correctedCount) {
-            throw std::invalid_argument("invalid MultiGeneUMI_CR count tuple");
-        }
         if (support.correctedCount > maximum) {
             maximum = support.correctedCount;
             winner = support.gene;

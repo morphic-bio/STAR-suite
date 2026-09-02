@@ -1,66 +1,147 @@
-# SLAM Fixture End-to-End Workflow Schema
-# Parsed from tests/run_slam_end_to_end_fixture.sh
+# Canonical pinned SLAM fixture parity workflow.
 
 id: "slam_end_to_end_fixture"
-title: "SLAM Fixture E2E"
-summary: "Fixture-based SLAM E2E using 100K downsampled reads — fast, self-contained."
+title: "SLAM Pinned Fixture Parity"
+summary: "Manifest-verified STAR-SLAM parity and dump-requant replay using the 100K fixture."
 kind: "shell_workflow"
-entry_script: "tests/run_slam_end_to_end_fixture.sh"
+entry_script: "tests/run_slam_parity_smoke.sh"
 supported_modes:
   - "local"
 caveats:
-  - "Uses bundled fixture data from test/fixtures/slam/."
-  - "Threads hardcoded at 4; not exposed as CLI flag."
-  - "Falls back to fixture reference comparison if GEDI is unavailable."
-default_output_layout: "<repo>/test/tmp_slam_fixture_e2e_<timestamp>/"
+  - "Requires the external 100K FASTQ, noSNP reference, SNP BED, and exact pinned STAR index."
+  - "The fixture manifest fails before alignment if an artifact, index, or required STAR option has drifted."
+  - "Loading the full index requires roughly 30 GB RAM and can dominate this small fixture's runtime."
+default_output_layout: "/tmp/slam_parity_smoke_<timestamp>/"
 
 stages:
+  - name: "fixture_preflight"
+    title: "Fixture Contract Preflight"
+    description: "Verify content fingerprints, index identity, and the effective STAR alignment contract."
   - name: "alignment"
-    title: "STAR Alignment"
-    description: "Align fixture FASTQ with STAR."
-  - name: "snp_mask"
-    title: "SNP Mask"
-    description: "Apply fixture SNP mask."
-  - name: "quantification"
-    title: "Quantification"
-    description: "VB quantification on fixture data."
-  - name: "comparison"
-    title: "Reference Comparison"
-    description: "Compare against fixture reference or GEDI if available."
+    title: "STAR-SLAM Alignment"
+    description: "Align with pinned adapter clipping and emit the quantification replay sidecars."
+  - name: "reference_parity"
+    title: "GRAND-SLAM Reference Parity"
+    description: "Gate NTR correlation against the pinned noSNP reference."
+  - name: "requant_parity"
+    title: "Dump-Requant Parity"
+    description: "Replay dump and weight sidecars and gate exact pre-NTR parity."
 
 parameter_groups:
   - name: "paths"
     title: "Paths"
-    parameters: ["work_dir"]
+    parameters: ["outdir", "star_bin", "requant_bin", "fastq", "genome_dir", "snp_bed", "reference", "fixture_manifest"]
+  - name: "thresholds"
+    title: "Parity Thresholds"
+    parameters: ["ref_corr_min", "exact_min_pearson", "exact_max_abs_delta", "align_min_pearson"]
   - name: "execution"
     title: "Execution"
-    parameters: ["overwrite", "no_cleanup", "no_gedi"]
+    parameters: ["threads", "no_reference", "no_requant", "no_fixture_manifest", "compare_only"]
 
 parameters:
-  - name: "work_dir"
-    cli_flag: "--work-dir"
+  - name: "outdir"
+    cli_flag: "--outdir"
     type: "directory"
     required: false
-    description: "Working directory for outputs. Auto-timestamped if not set."
+    description: "Fresh output root for STAR, comparisons, commands, and logs."
+    is_output_root: true
 
-  - name: "overwrite"
-    cli_flag: "--overwrite"
+  - name: "star_bin"
+    cli_flag: "--star-bin"
+    type: "file"
+    required: false
+    description: "STAR-suite binary."
+
+  - name: "requant_bin"
+    cli_flag: "--requant-bin"
+    type: "file"
+    required: false
+    description: "slam_requant binary."
+
+  - name: "fastq"
+    cli_flag: "--fastq"
+    type: "file"
+    required: false
+    description: "Pinned 100K SRR32576116 FASTQ."
+
+  - name: "genome_dir"
+    cli_flag: "--genome-dir"
+    type: "directory"
+    required: false
+    description: "Pinned STAR genome index."
+
+  - name: "snp_bed"
+    cli_flag: "--snp-bed"
+    type: "file"
+    required: false
+    description: "Pinned fixture SNP BED."
+
+  - name: "reference"
+    cli_flag: "--reference"
+    type: "file"
+    required: false
+    description: "Pinned noSNP GRAND-SLAM reference."
+
+  - name: "fixture_manifest"
+    cli_flag: "--fixture-manifest"
+    type: "file"
+    required: false
+    description: "Immutable fixture, index, and STAR-command contract."
+
+  - name: "threads"
+    cli_flag: "--threads"
+    type: "int"
+    default: 4
+    description: "STAR worker threads."
+
+  - name: "ref_corr_min"
+    cli_flag: "--ref-corr-min"
+    type: "float"
+    default: 0.99
+    description: "Minimum reference NTR Pearson correlation."
+
+  - name: "exact_min_pearson"
+    cli_flag: "--exact-min-pearson"
+    type: "float"
+    default: 0.999999
+    description: "Minimum exact dump/weight replay Pearson correlation."
+
+  - name: "exact_max_abs_delta"
+    cli_flag: "--exact-max-abs-delta"
+    type: "float"
+    default: 0.000001
+    description: "Maximum exact replay absolute delta."
+
+  - name: "align_min_pearson"
+    cli_flag: "--align-min-pearson"
+    type: "float"
+    default: 0.98
+    description: "Minimum recomputed-alignment replay Pearson correlation."
+
+  - name: "no_reference"
+    cli_flag: "--no-reference"
     type: "bool"
     default: false
-    description: "Rerun steps even if outputs already exist."
+    description: "Skip the GRAND-SLAM reference comparison."
 
-  - name: "no_cleanup"
-    cli_flag: "--no-cleanup"
+  - name: "no_requant"
+    cli_flag: "--no-requant"
     type: "bool"
     default: false
-    description: "Keep intermediate files after completion."
+    description: "Skip dump-requant replay checks."
 
-  - name: "no_gedi"
-    cli_flag: "--no-gedi"
+  - name: "no_fixture_manifest"
+    cli_flag: "--no-fixture-manifest"
     type: "bool"
     default: false
-    description: "Force fixture reference comparison even if GEDI is available."
+    description: "Explicitly disable pinned fixture verification for non-regression experiments."
+
+  - name: "compare_only"
+    cli_flag: "--compare-only"
+    type: "bool"
+    default: false
+    description: "Reuse outputs and the recorded STAR command already present in outdir."
 
 rendering:
-  flag_order: ["work_dir", "overwrite", "no_cleanup", "no_gedi"]
+  flag_order: ["outdir", "star_bin", "requant_bin", "fastq", "genome_dir", "snp_bed", "reference", "fixture_manifest", "threads", "ref_corr_min", "exact_min_pearson", "exact_max_abs_delta", "align_min_pearson", "no_reference", "no_requant", "no_fixture_manifest", "compare_only"]
   omit_absent_optionals: true

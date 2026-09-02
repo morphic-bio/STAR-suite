@@ -4,7 +4,11 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MANIFEST_FILE="${SCRIPT_DIR}/compat-manifest.tsv"
-MOLECULE_FIRST_TOOLS=(molecule_first_resolver molecule_first_bam_ledger molecule_first_materialize)
+COMPANION_TOOLS=(
+  molecule_first_resolver molecule_first_bam_ledger molecule_first_materialize
+  transcriptvb_finalize trim_qc_fastq trim_qc_merge
+)
+SRC_SHARE="${SCRIPT_DIR}/share/star-suite"
 
 PREFIX=""
 BINDIR=""
@@ -172,6 +176,12 @@ if [[ ! -f "${MANIFEST_FILE}" ]]; then
   echo "ERROR: compatibility manifest not found: ${MANIFEST_FILE}" >&2
   exit 1
 fi
+if [[ ! -f "${SRC_SHARE}/SNAPSHOTS.json" \
+    || ! -f "${SRC_SHARE}/catalogs/official/catalog.yaml" \
+    || ! -f "${SRC_SHARE}/evidence/official/schema/record-v1.schema.json" ]]; then
+  echo "ERROR: compatibility bundle lacks official recipe/provenance snapshots" >&2
+  exit 1
+fi
 
 if [[ "${LIST_ONLY}" -eq 1 ]]; then
   list_variants
@@ -199,7 +209,7 @@ if [[ ! -x "${selected_bin}" ]]; then
   echo "ERROR: selected bundled binary not found: ${selected_bin}" >&2
   exit 1
 fi
-for tool in "${MOLECULE_FIRST_TOOLS[@]}"; do
+for tool in "${COMPANION_TOOLS[@]}"; do
   if [[ ! -x "$(dirname "${selected_bin}")/${tool}" ]]; then
     echo "ERROR: selected bundled binary not found: $(dirname "${selected_bin}")/${tool}" >&2
     exit 1
@@ -222,7 +232,7 @@ if [[ -e "${TARGET_PATH}" && "${FORCE}" -ne 1 ]]; then
     exit 1
   fi
 fi
-for tool in "${MOLECULE_FIRST_TOOLS[@]}"; do
+for tool in "${COMPANION_TOOLS[@]}"; do
   target="${BINDIR}/${tool}"
   if [[ -e "${target}" && "${FORCE}" -ne 1 ]] && ! cmp -s "$(dirname "${selected_bin}")/${tool}" "${target}"; then
     echo "ERROR: target already exists: ${target} (use --force to overwrite)" >&2
@@ -230,12 +240,23 @@ for tool in "${MOLECULE_FIRST_TOOLS[@]}"; do
   fi
 done
 
+SHAREDIR="${PREFIX}/share/star-suite"
+if [[ -d "${SHAREDIR}" && "${FORCE}" -ne 1 ]]; then
+  if ! diff -qr "${SRC_SHARE}" "${SHAREDIR}" >/dev/null; then
+    echo "ERROR: installed STAR Suite data differs at ${SHAREDIR} (use --force to update)" >&2
+    exit 1
+  fi
+else
+  mkdir -p "${SHAREDIR}"
+  cp -a "${SRC_SHARE}/." "${SHAREDIR}/"
+fi
+
 tmp_target="${TARGET_PATH}.tmp.$$"
 cp "${selected_bin}" "${tmp_target}"
 chmod 0755 "${tmp_target}"
 mv -f "${tmp_target}" "${TARGET_PATH}"
 
-for tool in "${MOLECULE_FIRST_TOOLS[@]}"; do
+for tool in "${COMPANION_TOOLS[@]}"; do
   target="${BINDIR}/${tool}"
   temporary="${target}.tmp.$$"
   cp "$(dirname "${selected_bin}")/${tool}" "${temporary}"
@@ -247,3 +268,5 @@ echo "Installed STAR-suite to ${TARGET_PATH}"
 echo "Selected compatibility level: ${selected_label} (glibc ${selected_baseline}+)"
 echo "Host glibc detected: ${HOST_GLIBC}"
 warn_if_path_missing "${BINDIR}"
+echo "Official recipes: ${SHAREDIR}/catalogs/official/catalog.yaml"
+echo "Official evidence: ${SHAREDIR}/evidence/official"

@@ -11,6 +11,7 @@
 #include "Stats.h"
 #include "TrimQc.h"
 #include "TrimQcOutput.h"
+#include "TrimQcShard.h"
 #include "htslib/kseq.h"
 
 KSEQ_INIT(gzFile, gzread)
@@ -31,6 +32,7 @@ struct Config {
     uint32 mateCount = 1;
     uint32 mateIndex = 1;
     uint32 qualityBase = 33;
+    string shardOut;
 };
 
 void usage(const char* argv0) {
@@ -150,6 +152,8 @@ int main(int argc, char* argv[]) {
             cfg.mateIndex = static_cast<uint32>(strtoul(argv[++i], NULL, 10));
         } else if (arg == "--quality-base" && i + 1 < argc) {
             cfg.qualityBase = static_cast<uint32>(strtoul(argv[++i], NULL, 10));
+        } else if (arg == "--shard-out" && i + 1 < argc) {
+            cfg.shardOut = argv[++i];
         } else if (arg == "-h" || arg == "--help") {
             usage(argv[0]);
             return 0;
@@ -184,6 +188,24 @@ int main(int argc, char* argv[]) {
                 break;
             }
             processFastq(inputPath, cfg, qc, readsSeen);
+        }
+
+        // Same accumulator STAR dumps per shard, so this tool doubles as the
+        // genome-free regression surface for the merge path.
+        if (!cfg.shardOut.empty()) {
+            TrimQcShardCounters counters;
+            counters.reads_processed = stats.trimReadsProcessed;
+            counters.reads_trimmed = stats.trimReadsTrimmed;
+            counters.reads_too_short = stats.trimReadsTooShort;
+            counters.bases_quality_trimmed = stats.trimBasesQualityTrimmed;
+            counters.bases_adapter_trimmed = stats.trimBasesAdapterTrimmed;
+            counters.pairs_processed = stats.trimPairsProcessed;
+            counters.pairs_dropped = stats.trimPairsDropped;
+            counters.pairs_kept = stats.trimPairsKept;
+            string shardErr;
+            if (!writeTrimQcShard(qc, counters, cfg.shardOut, &shardErr)) {
+                throw runtime_error("failed to write trim QC shard dump: " + shardErr);
+            }
         }
 
         const string jsonPath = cfg.reportPrefix + ".trim_qc.json";

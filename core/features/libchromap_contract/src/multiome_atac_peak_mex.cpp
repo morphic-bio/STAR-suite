@@ -22,8 +22,8 @@
 #include <unordered_set>
 #include <vector>
 
-#include "libmacs3/macs3_bed_callpeak.h"
-#include "libmacs3/macs3_frag_peak_pipeline.h"
+#include "rapidmacs/macs3_bed_callpeak.h"
+#include "rapidmacs/macs3_frag_peak_pipeline.h"
 
 namespace star {
 namespace multiome {

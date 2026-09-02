@@ -1,0 +1,57 @@
+{
+  "schema": "starsuite.provenance_record/v1",
+  "record_id": "hpc-2026-lustre-component-parallel-finalizer",
+  "recorded_utc": "2026-08-08T00:00:00Z",
+  "kind": "hpc-validation",
+  "status": "complete",
+  "software": [
+    {
+      "repository": "https://github.com/morphic-bio/STAR-suite",
+      "revision": "c12ad552c846eeb16412058a06573cb6c4dc6164",
+      "version": "1.7.0-candidate"
+    }
+  ],
+  "environment": {
+    "storage_class": "Lustre parallel filesystem",
+    "execution_class": "component-parallel exact finalization"
+  },
+  "method": "Exact component-parallel finalization was compared with the exact EC baseline at 8, 16, 32, and 64 threads on the same Lustre-backed validation surface. The 32-thread result was also compared byte-for-byte against the baseline output.",
+  "evidence": [
+    {
+      "threads": 8,
+      "baseline_elapsed_seconds": 185.49,
+      "component_parallel_elapsed_seconds": 179.64,
+      "speedup_percent": 3.2
+    },
+    {
+      "threads": 16,
+      "baseline_elapsed_seconds": 174.9,
+      "component_parallel_elapsed_seconds": 168.85,
+      "speedup_percent": 3.5
+    },
+    {
+      "threads": 32,
+      "baseline_elapsed_seconds": 171.85,
+      "component_parallel_elapsed_seconds": 160.92,
+      "speedup_percent": 6.4,
+      "output_parity": "byte-identical"
+    },
+    {
+      "threads": 64,
+      "baseline_elapsed_seconds": 174.75,
+      "component_parallel_elapsed_seconds": 159.97,
+      "speedup_percent": 8.5
+    }
+  ],
+  "limitations": [
+    "These are observed timings on one validation surface, not a universal scaling curve.",
+    "Only the 32-thread result carries an explicit byte-identical output check in this compact record.",
+    "The record describes finalization over existing inputs and makes no claim about how any upstream partition set is created."
+  ],
+  "artifacts": [
+    {
+      "logical_uri": "git://STAR-suite/docs/STANDALONE_VBEM_FINALIZER_20260807.md"
+    }
+  ]
+}
+

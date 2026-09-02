@@ -3,6 +3,7 @@
 #include "UMICorrector.h"
 #include "ErrorWarning.h"
 #include "hash_shims_cpp_compat.h"
+#include "FlexGdna.h"
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -25,7 +26,7 @@ void SoloFeature::applyCliqueCorrectionsToHash() {
     struct HashUpdate {
         uint64_t oldKey;
         uint64_t newKey;
-        uint32_t count;
+        uint32_t value;
     };
     std::vector<HashUpdate> updates;
 
@@ -33,7 +34,7 @@ void SoloFeature::applyCliqueCorrectionsToHash() {
         if (!kh_exist(readFeatSum->inlineHash_, iter)) continue;
 
         uint64_t key = kh_key(readFeatSum->inlineHash_, iter);
-        uint32_t count = kh_val(readFeatSum->inlineHash_, iter);
+        uint32_t value = kh_val(readFeatSum->inlineHash_, iter);
 
         khiter_t corrIt = kh_get(cg_agg, umiCorrectionHash, key);
         if (corrIt == kh_end(umiCorrectionHash)) continue;
@@ -46,7 +47,7 @@ void SoloFeature::applyCliqueCorrectionsToHash() {
         unpackCgAggKey(key, &cbIdx, nullptr, &geneIdx, &tagIdx);
         uint64_t newKey = packCgAggKey(cbIdx, correctedUmi, geneIdx, tagIdx);
 
-        updates.push_back({key, newKey, count});
+        updates.push_back({key, newKey, value});
     }
 
     for (const auto &update : updates) {
@@ -58,9 +59,12 @@ void SoloFeature::applyCliqueCorrectionsToHash() {
         int absent;
         khiter_t new_iter = kh_put(cg_agg, readFeatSum->inlineHash_, update.newKey, &absent);
         if (absent) {
-            kh_val(readFeatSum->inlineHash_, new_iter) = update.count;
+            kh_val(readFeatSum->inlineHash_, new_iter) = update.value;
         } else {
-            kh_val(readFeatSum->inlineHash_, new_iter) += update.count;
+            kh_val(readFeatSum->inlineHash_, new_iter) = pSolo.flexMode
+                ? flexGdnaMergeValue(kh_val(readFeatSum->inlineHash_, new_iter),
+                                     update.value)
+                : kh_val(readFeatSum->inlineHash_, new_iter) + update.value;
         }
     }
 }
@@ -104,7 +108,9 @@ void SoloFeature::runCliqueCorrection() {
         if (!kh_exist(readFeatSum->inlineHash_, iter)) continue;
 
         uint64_t key = kh_key(readFeatSum->inlineHash_, iter);
-        uint32_t count = kh_val(readFeatSum->inlineHash_, iter);
+        uint32_t count = pSolo.flexMode
+            ? flexGdnaValueCount(kh_val(readFeatSum->inlineHash_, iter))
+            : kh_val(readFeatSum->inlineHash_, iter);
 
         uint32_t cbIdx, umi24;
         uint16_t geneIdx;

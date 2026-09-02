@@ -11,7 +11,7 @@ from starlette.applications import Starlette
 from starlette.middleware import Middleware
 import uvicorn
 
-from .config import get_config, load_config
+from .config import get_config, get_workflow_config, load_config
 from .schemas.responses import (
     CollectOutputsResponse,
     ErrorResponse,
@@ -49,6 +49,15 @@ from .tools.workflows import (
     get_workflow_parameter_schema as _get_workflow_parameter_schema,
     validate_workflow_parameters as _validate_workflow_parameters,
     render_workflow_command as _render_workflow_command,
+)
+from .tools.recipes import (
+    build_recipe_lock as _build_recipe_lock,
+    describe_recipe_catalog as _describe_recipe_catalog,
+    list_recipe_candidates as _list_recipe_candidates,
+    list_recipe_catalogs as _list_recipe_catalogs,
+    list_recipe_conflicts as _list_recipe_conflicts,
+    list_provenance_repositories as _list_provenance_repositories,
+    resolve_recipe as _resolve_recipe,
 )
 from .tools.scaffold import (
     scaffold_workflow_schema as _scaffold_workflow_schema,
@@ -162,8 +171,7 @@ def is_authenticated(token: Optional[str]) -> bool:
 
 def get_workflow_visibility(workflow_id: str) -> str:
     """Return the visibility setting for a workflow ('public' or 'private')."""
-    config = get_config()
-    wf_cfg = config.get_workflow(workflow_id)
+    wf_cfg = get_workflow_config(workflow_id)
     if wf_cfg is None:
         return "public"
     return wf_cfg.visibility
@@ -587,6 +595,150 @@ def ensure_fresh_build(
 
 
 # --- Workflow Tools ---
+
+
+@mcp.tool()
+def list_recipe_catalogs(auth_token: Optional[str] = None) -> dict:
+    """List configured recipe sources in deterministic discovery order."""
+    auth_error = check_auth(auth_token, is_discovery=True)
+    if auth_error:
+        return auth_error.model_dump()
+    try:
+        return _list_recipe_catalogs(
+            authenticated=is_authenticated(auth_token)
+        )
+    except Exception as e:
+        return ErrorResponse(code="RECIPE_ERROR", message=str(e)).model_dump()
+
+
+@mcp.tool()
+def describe_recipe_catalog(
+    catalog_id: str, auth_token: Optional[str] = None
+) -> dict:
+    """Describe one recipe source and its visible source-specific recipes."""
+    auth_error = check_auth(auth_token, is_discovery=True)
+    if auth_error:
+        return auth_error.model_dump()
+    try:
+        return _describe_recipe_catalog(
+            catalog_id, authenticated=is_authenticated(auth_token)
+        )
+    except Exception as e:
+        return ErrorResponse(code="RECIPE_ERROR", message=str(e)).model_dump()
+
+
+@mcp.tool()
+def list_provenance_repositories(auth_token: Optional[str] = None) -> dict:
+    """List ordered provenance search repositories and the write selection."""
+    auth_error = check_auth(auth_token, is_discovery=True)
+    if auth_error:
+        return auth_error.model_dump()
+    try:
+        return _list_provenance_repositories(
+            authenticated=is_authenticated(auth_token)
+        )
+    except Exception as e:
+        return ErrorResponse(code="RECIPE_ERROR", message=str(e)).model_dump()
+
+
+@mcp.tool()
+def list_recipe_candidates(
+    logical_id: Optional[str] = None,
+    application: Optional[str] = None,
+    auth_token: Optional[str] = None,
+) -> dict:
+    """Group compatible source-specific recipes by logical identity."""
+    auth_error = check_auth(auth_token, is_discovery=True)
+    if auth_error:
+        return auth_error.model_dump()
+    try:
+        return _list_recipe_candidates(
+            logical_id=logical_id,
+            application=application,
+            authenticated=is_authenticated(auth_token),
+        )
+    except Exception as e:
+        return ErrorResponse(code="RECIPE_ERROR", message=str(e)).model_dump()
+
+
+@mcp.tool()
+def list_recipe_conflicts(
+    application: Optional[str] = None,
+    auth_token: Optional[str] = None,
+) -> dict:
+    """List logical recipe identities supplied by more than one source."""
+    auth_error = check_auth(auth_token, is_discovery=True)
+    if auth_error:
+        return auth_error.model_dump()
+    try:
+        return _list_recipe_conflicts(
+            application=application,
+            authenticated=is_authenticated(auth_token),
+        )
+    except Exception as e:
+        return ErrorResponse(code="RECIPE_ERROR", message=str(e)).model_dump()
+
+
+@mcp.tool()
+def resolve_recipe(
+    reference: str,
+    application: Optional[str] = None,
+    policy: Optional[str] = None,
+    selected_workflow_id: Optional[str] = None,
+    auth_token: Optional[str] = None,
+) -> dict:
+    """Resolve one logical recipe without executing it.
+
+    A conflict returns candidates under ``keep_separate`` or ``prompt``. The
+    latter has status ``selection_required`` so an interactive client can ask
+    its user. ``prefer_newest`` selects the highest PEP 440 version, breaking
+    equal-version ties by later catalog order.
+    """
+    auth_error = check_auth(auth_token, is_discovery=True)
+    if auth_error:
+        return auth_error.model_dump()
+    try:
+        if policy not in (None, "keep_separate", "prompt", "prefer_newest"):
+            raise ValueError(f"Unknown recipe resolution policy: {policy}")
+        return _resolve_recipe(
+            reference,
+            application=application,
+            policy=policy,  # type: ignore[arg-type]
+            selected_workflow_id=selected_workflow_id,
+            authenticated=is_authenticated(auth_token),
+        )
+    except Exception as e:
+        return ErrorResponse(code="RECIPE_ERROR", message=str(e)).model_dump()
+
+
+@mcp.tool()
+def build_recipe_lock(
+    reference: str,
+    params: dict,
+    application: Optional[str] = None,
+    policy: Optional[str] = None,
+    selected_workflow_id: Optional[str] = None,
+    check_paths: bool = False,
+    auth_token: Optional[str] = None,
+) -> dict:
+    """Validate, render, and hash one resolved recipe without executing it."""
+    auth_error = check_auth(auth_token)
+    if auth_error:
+        return auth_error.model_dump()
+    try:
+        if policy not in (None, "keep_separate", "prompt", "prefer_newest"):
+            raise ValueError(f"Unknown recipe resolution policy: {policy}")
+        return _build_recipe_lock(
+            reference,
+            params,
+            application=application,
+            policy=policy,  # type: ignore[arg-type]
+            selected_workflow_id=selected_workflow_id,
+            authenticated=True,
+            check_paths=check_paths,
+        )
+    except Exception as e:
+        return ErrorResponse(code="RECIPE_LOCK_FAILED", message=str(e)).model_dump()
 
 
 @mcp.tool()

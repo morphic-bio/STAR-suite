@@ -73,6 +73,12 @@ run_star_case() {
         echo "See $out_dir/Log.final.out" >&2
         exit 1
     fi
+
+    if ! grep -F "Fastx input path: direct STAR chunk reader" "$out_dir/Log.out" >/dev/null; then
+        echo "ERROR: $name did not use the direct STAR Fastx input path" >&2
+        echo "See $out_dir/Log.out" >&2
+        exit 1
+    fi
 }
 
 run_star_case plain_fastq 1 \

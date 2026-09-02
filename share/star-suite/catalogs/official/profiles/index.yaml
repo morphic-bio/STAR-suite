@@ -1,0 +1,9 @@
+schema: biodepot.execution_profiles/v1
+version: "1.7.0"
+storage:
+  lustre: storage/lustre.yaml
+sites:
+  bridges2: site/bridges2.yaml
+executors:
+  temporal-slurm: executor/temporal-slurm.yaml
+

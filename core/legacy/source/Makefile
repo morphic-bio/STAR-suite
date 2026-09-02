@@ -56,7 +56,7 @@ LIBCHROMAP_CONTRACT_INC := $(LIBCHROMAP_CONTRACT_DIR)/include
 LIBCHROMAP_CONTRACT_LIB := $(LIBCHROMAP_CONTRACT_DIR)/libstar_chromap_contract.a
 CHROMAP_SUITE_DIR ?= /mnt/pikachu/Chromap-suite
 CHROMAP_LIB := $(CHROMAP_SUITE_DIR)/libchromap.a
-CHROMAP_LIBMACS3_LIB ?= $(CHROMAP_SUITE_DIR)/third_party/libMACS3/lib/libmacs3.a
+CHROMAP_RAPIDMACS_LIB ?= $(CHROMAP_SUITE_DIR)/third_party/rapidmacs/lib/librapidmacs.a
 CHROMAP_SYS_HTS ?= /lib/x86_64-linux-gnu/libhts.so
 CHROMAP_EXTRA_LIBS := -lbz2 -llzma -lcurl -ldeflate -lm
 CHROMAP_DEP_STAMP := .depend.with_chromap_$(WITH_CHROMAP)
@@ -64,8 +64,8 @@ CHROMAP_DEP_STAMP := .depend.with_chromap_$(WITH_CHROMAP)
 ifeq ($(WITH_CHROMAP),1)
 CHROMAP_CXXFLAGS := -I$(LIBCHROMAP_CONTRACT_INC) -DWITH_CHROMAP=1
 CHROMAP_ORCH_OBJ := star_chromap_orchestration.o
-CHROMAP_LINK_LINE := $(LIBCHROMAP_CONTRACT_LIB) $(CHROMAP_LIB) $(CHROMAP_LIBMACS3_LIB) $(LIBSCRNA_LIB) $(CHROMAP_SYS_HTS) $(CHROMAP_EXTRA_LIBS)
-CHROMAP_STAR_DEPS := $(LIBCHROMAP_CONTRACT_LIB) $(CHROMAP_LIB) $(CHROMAP_LIBMACS3_LIB)
+CHROMAP_LINK_LINE := $(LIBCHROMAP_CONTRACT_LIB) $(CHROMAP_LIB) $(CHROMAP_RAPIDMACS_LIB) $(LIBSCRNA_LIB) $(CHROMAP_SYS_HTS) $(CHROMAP_EXTRA_LIBS)
+CHROMAP_STAR_DEPS := $(LIBCHROMAP_CONTRACT_LIB) $(CHROMAP_LIB) $(CHROMAP_RAPIDMACS_LIB)
 STAR_HTSLIB_INC :=
 STAR_HTSLIB_LINK :=
 else
@@ -125,12 +125,38 @@ BUILD_PLACE ?= $(HOSTNAME):$(shell pwd)
 COMPTIMEPLACE := -D'COMPILATION_TIME_PLACE="$(BUILD_DATE) $(BUILD_PLACE)"'
 
 
+STAR_SUITE_SOURCE_REVISION_VALUE := $(strip $(STAR_SUITE_COMMIT_SHA))
+ifneq ($(STAR_SUITE_SOURCE_REVISION_VALUE),)
+    STAR_SUITE_COMMIT_SHA_VALID := $(shell printf '%s\n' '$(STAR_SUITE_SOURCE_REVISION_VALUE)' | grep -Eq '^[[:xdigit:]]{40}$$' && printf '%s' yes)
+    ifneq ($(STAR_SUITE_COMMIT_SHA_VALID),yes)
+        $(error STAR_SUITE_COMMIT_SHA must be an exact 40-character hexadecimal commit SHA)
+    endif
+endif
+ifeq ($(STAR_SUITE_SOURCE_REVISION_VALUE),)
+    STAR_SUITE_SOURCE_REVISION_VALUE := $(strip $(shell git rev-parse HEAD 2>/dev/null))
+    ifneq ($(STAR_SUITE_SOURCE_REVISION_VALUE),)
+        GIT_TRACKED_DIRTY := $(shell git diff-index --quiet HEAD -- 2>/dev/null || printf '%s' -dirty)
+        STAR_SUITE_SOURCE_REVISION_VALUE := $(STAR_SUITE_SOURCE_REVISION_VALUE)$(GIT_TRACKED_DIRTY)
+    endif
+endif
+ifeq ($(STAR_SUITE_SOURCE_REVISION_VALUE),)
+    STAR_SUITE_SOURCE_REVISION_VALUE := unversioned-source
+endif
+STAR_SUITE_SOURCE_REVISION := -D'STAR_SUITE_SOURCE_REVISION="$(STAR_SUITE_SOURCE_REVISION_VALUE)"'
+
 GIT_CHECK := $(shell git status 1> /dev/null 2> /dev/null && echo 0)
+ifneq ($(strip $(STAR_SUITE_COMMIT_SHA)),)
+    GIT_BRANCH_COMMIT_DIFF := release commit $(STAR_SUITE_COMMIT_SHA)
+else
 ifeq ($(GIT_CHECK),0)
 	GIT_DIFF := $(shell git diff --name-only | tr '\n' ' ')
     GIT_BRANCH_COMMIT_DIFF := $(shell git status | head -n 1) ; \
                                                     $(shell git log | head -n 1) ; \
                                                     diff files: $(GIT_DIFF)
+endif
+endif
+ifeq ($(strip $(GIT_BRANCH_COMMIT_DIFF)),)
+    GIT_BRANCH_COMMIT_DIFF := source revision $(STAR_SUITE_SOURCE_REVISION_VALUE)
 endif
 GIT_BRANCH_COMMIT_DIFF := -D'GIT_BRANCH_COMMIT_DIFF="$(GIT_BRANCH_COMMIT_DIFF)"'
 
@@ -149,7 +175,7 @@ endif
 # Include flex (klib/libflex), vbem (libtrim/libem), slam, and process_features headers
 # Include current directory for IncludeDefine.h and other source headers
 PROCESS_FEATURES_INC := $(ROOT_DIR)/core/features/process_features/include
-CXXFLAGS_common := -std=c++11 -fopenmp -I. $(STAR_HTSLIB_INC) -I$(FLEX_SRC_DIR) -I$(LIBFLEX_DIR) -I$(LIBSCRNA_INC) -I$(VBEM_SRC_DIR) -I$(LIBEM_DIR) -I$(SLAM_SRC_DIR) -I$(BAMSORT_SRC_DIR) -I$(PROCESS_FEATURES_INC) $(CHROMAP_CXXFLAGS) $(COMPTIMEPLACE) $(GIT_BRANCH_COMMIT_DIFF)
+CXXFLAGS_common := -std=c++11 -fopenmp -I. $(STAR_HTSLIB_INC) -I$(FLEX_SRC_DIR) -I$(LIBFLEX_DIR) -I$(LIBSCRNA_INC) -I$(VBEM_SRC_DIR) -I$(LIBEM_DIR) -I$(SLAM_SRC_DIR) -I$(BAMSORT_SRC_DIR) -I$(PROCESS_FEATURES_INC) $(CHROMAP_CXXFLAGS) $(COMPTIMEPLACE) $(GIT_BRANCH_COMMIT_DIFF) $(STAR_SUITE_SOURCE_REVISION)
 CXXFLAGS_main := -O3 $(CXXFLAGS_common)
 CXXFLAGS_gdb := -O0 -g3 $(CXXFLAGS_common)
 
@@ -175,8 +201,8 @@ OBJECTS = systemFunctions.o SoloMemoryProfile.o CountingSinkStress.o funPrimaryA
 	SoloFeature_loadRawMatrix.o SoloFeature_emptyDrops_CR.o SoloFeature_emptyDrops_libscrna.o soloInputFeatureUMI.o SoloFeature_countSmartSeq.o SoloFeature_redistributeReadsByCB.o \
 	SoloFeature_quantTranscript.o SoloFeature_sumThreads.o SoloFeature_countVelocyto.o SoloFeature_countVelocytoBridge.o SoloFeature_countCBgeneUMI.o \
 	SoloFeature_collapseUMI_Graph.o SoloFeature_collapseUMIall.o SoloFeature_collapseUMI_fromHash.o SoloFeature_collapseUMI_fromBridgeHash.o SoloFeature_bridgeHashSnapshot.o SoloFeature_umiCorrection.o SoloFeature_materializeFromHash.o SoloFeature_metricsOutput.o SoloFeature_writeMexFromInlineHashDedup.o SoloFeature_flexfilter.o SoloFeature_addBAMtags.o SoloFeature_writeTagTable.o \
-	SoloHDMoleculeWriter.o SpatialFeatureSidecar.o MultiGeneUmiCr.o \
-	MexWriter.o MexWriterUtil.o \
+	SoloHDMoleculeWriter.o SpatialFeatureSidecar.o SpatialR1FastqTap.o SpatialGex.o SpatialGexSpill.o SpatialGexDownstreamSpool.o SpatialGexPipeline.o SpatialR1Decoder.o MultiGeneUmiCr.o CrMultimapRescuePolicy.o \
+	MexWriter.o MexWriterUtil.o FlexGdna.o \
 	UMICorrector.o \
 	ParametersClip_initialize.o ClipMate_clip.o ClipCR4.o opal/opal.o ClipMate_clipChunk.o ClipMate_initialize.o \
 	Transcriptome_classifyAlign.o Transcriptome_geneFullAlignOverlap_ExonOverIntron.o Transcriptome_alignExonOverlap.cpp \
@@ -193,12 +219,12 @@ OBJECTS = systemFunctions.o SoloMemoryProfile.o CountingSinkStress.o funPrimaryA
 	SpliceGraph_findSuperTr.o sjAlignSplit.o \
 	GTF.o GTF_transcriptGeneSJ.o GTF_superTranscript.o SuperTranscriptome.o TranscriptomeFasta.o \
 	ReadAlign_outputAlignments.o ReadAlign_resolveAmbiguousCBs.o ReadAlign_slamQuant.o \
-		ReadAlign.o STAR.o TranscriptQuantEC.o LibFormatDetection.o TranscriptQuantOutput.o SlamQuant.o SlamSolver.o slam_vb_overdisp.o SlamCompat.o SlamVarianceAnalysis.o SlamReadBuffer.o SlamDump.o SlamQcOutput.o TrimQc.o TrimQcOutput.o SnpMaskBuild.o \
+		ReadAlign.o STAR.o TranscriptQuantEC.o TranscriptVBSidecar.o LibFormatDetection.o TranscriptQuantOutput.o SlamQuant.o SlamSolver.o slam_vb_overdisp.o SlamCompat.o SlamVarianceAnalysis.o SlamReadBuffer.o SlamDump.o SlamQcOutput.o TrimQc.o TrimQcOutput.o TrimQcShard.o SnpMaskBuild.o \
 	SharedMemory.o PackedArray.o SuffixArrayFuns.o Parameters.o Parameters_samAttributes.o InOutStreams.o SequenceFuns.o Genome.o ParametersGenome.o Stats.o \
 	Transcript.o Transcript_alignScore.o Transcript_generateCigarP.o Chain.o \
 	Transcript_variationAdjust.o Variation.o ReadAlign_waspMap.o \
 	ReadAlign_storeAligns.o ReadAlign_stitchPieces.o ReadAlign_multMapSelect.o ReadAlign_mapOneRead.o readLoad.o \
-	ReadAlign_loadCbqReadView.o CbqStarAdapter.o CbqWriter.o CbqYNoYWriter.o \
+	ReadAlign_loadCbqReadView.o CbqStarAdapter.o BgzfStarAdapter.o CbqWriter.o CbqYNoYWriter.o \
 	ReadAlignChunk.o ReadAlignChunk_processChunks.o ReadAlignChunk_mapChunk.o \
 	OutSJ.o outputSJ.o blocksOverlap.o ThreadControl.o sysRemoveDir.o \
 	ReadAlign_maxMappableLength2strands.o binarySearch2.o\
@@ -216,7 +242,7 @@ OBJECTS = systemFunctions.o SoloMemoryProfile.o CountingSinkStress.o funPrimaryA
 	Transcriptome.o Transcriptome_quantAlign.o Transcriptome_geneFullAlignOverlap.o \
 	ReadAlign_quantTranscriptome.o Quantifications.o Transcriptome_geneCountsAddAlign.o \
 	sjdbLoadFromFiles.o sjdbLoadFromStream.o sjdbPrepare.o sjdbBuildIndex.o sjdbInsertJunctions.o mapThreadsSpawn.o \
-	FastxInputModule.o CbqInputModule.o \
+	FastxInputModule.o CbqInputModule.o BgzfBlockReader.o BgzfRangeReader.o \
 	Parameters_readFilesInit.o Parameters_openReadsFiles.cpp Parameters_closeReadsFiles.cpp Parameters_batchReset.cpp Parameters_readSAMheader.o \
 	bam_cat.o serviceFuns.o GlobalVariables.cpp \
 	BAMoutput.o BAMfunctions.o ReadAlign_alignBAM.o BAMbinSortByCoordinate.o signalFromBAM.o bamRemoveDuplicates.o BAMbinSortUnmapped.o \
@@ -248,6 +274,47 @@ ocm-multi-unit-tests : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS) $
 ocm-multi-unit-tests : Depend.list parametersDefault.xxd $(OBJECTS_NO_MAIN) libflex libtrim libem libprocess_features $(LIBSCRNA_LIB) $(OCM_UNIT_TEST_SRC)
 	$(CXX) -o ocm_multi_unit_tests $(CXXFLAGS) $(OCM_UNIT_TEST_SRC) $(OBJECTS_NO_MAIN) $(LIBFLEX_LIB) $(LIBTRIM_LIB) $(LIBEM_LIB) $(PROCESS_FEATURES_LIB) $(LIBSCRNA_LIB) $(LDFLAGS)
 
+# Standalone sidecar gather parity harness. Links only the sidecar reader and
+# libem: no Genome, no suffix array, no STAR index. Demonstrates the gather half
+# of the finalizer running without the index the in-STAR finalizer loads and
+# frees. See docs/STANDALONE_VBEM_FINALIZER_20260807.md.
+SIDECAR_GATHER_PARITY_SRC := $(ROOT_DIR)/tests/transcriptvb/sidecar_gather_parity.cpp
+.PHONY: sidecar-gather-parity
+sidecar-gather-parity : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
+sidecar-gather-parity : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS)
+sidecar-gather-parity : TranscriptVBSidecar.o libem $(SIDECAR_GATHER_PARITY_SRC)
+	$(CXX) -o sidecar_gather_parity $(CXXFLAGS) $(SIDECAR_GATHER_PARITY_SRC) TranscriptVBSidecar.o $(LIBEM_LIB) $(LDFLAGS)
+
+# Sparse-gate parity: proves restricting VB/EM to transcripts with non-zero EC
+# support is exact, by running dense and gated VB over the same merged evidence.
+SPARSE_GATE_PARITY_SRC := $(ROOT_DIR)/tests/transcriptvb/sparse_gate_parity.cpp
+.PHONY: sparse-gate-parity
+sparse-gate-parity : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
+sparse-gate-parity : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS)
+sparse-gate-parity : TranscriptVBSidecar.o libem $(SPARSE_GATE_PARITY_SRC)
+	$(CXX) -o sparse_gate_parity $(CXXFLAGS) $(SPARSE_GATE_PARITY_SRC) TranscriptVBSidecar.o $(LIBEM_LIB) $(LDFLAGS)
+
+# Standalone TranscriptVB shard finalizer: gathers sidecars and writes quant.sf
+# without loading the STAR genome index. Links only the sidecar reader and libem.
+TRANSCRIPTVB_FINALIZE_SRC := $(ROOT_DIR)/core/features/vbem/tools/transcriptvb_finalize/transcriptvb_finalize.cpp
+.PHONY: transcriptvb-finalize
+transcriptvb-finalize : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
+transcriptvb-finalize : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS)
+transcriptvb-finalize : TranscriptVBSidecar.o libem $(TRANSCRIPTVB_FINALIZE_SRC)
+	$(CXX) -o transcriptvb_finalize $(CXXFLAGS) $(TRANSCRIPTVB_FINALIZE_SRC) TranscriptVBSidecar.o $(LIBEM_LIB) $(LDFLAGS)
+
+# Release tarballs must not require the build image's OpenMP/C++ runtimes.
+# STARstatic already embeds those runtimes; use the same link policy for the
+# standalone finalizer shipped beside it.  Filtering -fopenmp from the final
+# driver invocation prevents GCC from appending a second, dynamic -lgomp after
+# the explicitly linked static libgomp archive.
+.PHONY: release-transcriptvb-finalize
+release-transcriptvb-finalize : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
+release-transcriptvb-finalize : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_static) $(LDFLAGS)
+release-transcriptvb-finalize : TranscriptVBSidecar.o libem $(TRANSCRIPTVB_FINALIZE_SRC)
+	$(CXX) -o transcriptvb_finalize $(filter-out -fopenmp,$(CXXFLAGS)) $(TRANSCRIPTVB_FINALIZE_SRC) TranscriptVBSidecar.o $(LIBEM_LIB) $(LDFLAGS)
+
+
 # Dependency scanning must include VPATH-built Flex sources. Without these
 # entries, header/layout changes can leave stale Flex/Solo objects linked into
 # STAR after an incremental build.
@@ -272,6 +339,18 @@ remove_y_reads: htslib/libhts.a
 	$(MAKE) -C $(REMOVE_Y_READS_DIR)
 
 # Standalone alignment replay tool for FastQC-like trim-QC output.
+.PHONY: trim_qc_merge
+trim_qc_merge : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
+trim_qc_merge : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS)
+trim_qc_merge : htslib/libhts.a TrimQc.o TrimQcOutput.o TrimQcShard.o Stats.o TimeFunctions.o trim_qc_merge.cpp
+	$(CXX) -o trim_qc_merge $(CXXFLAGS) trim_qc_merge.cpp TrimQc.o TrimQcOutput.o TrimQcShard.o Stats.o TimeFunctions.o $(LDFLAGS)
+
+.PHONY: release-trim-qc-merge
+release-trim-qc-merge : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
+release-trim-qc-merge : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_static) $(LDFLAGS)
+release-trim-qc-merge : htslib/libhts.a TrimQc.o TrimQcOutput.o TrimQcShard.o Stats.o TimeFunctions.o trim_qc_merge.cpp
+	$(CXX) -o trim_qc_merge $(filter-out -fopenmp,$(CXXFLAGS)) trim_qc_merge.cpp TrimQc.o TrimQcOutput.o TrimQcShard.o Stats.o TimeFunctions.o $(LDFLAGS)
+
 .PHONY: trim_qc_replay
 trim_qc_replay : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
 trim_qc_replay : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS)
@@ -282,8 +361,14 @@ trim_qc_replay : htslib/libhts.a TrimQc.o TrimQcOutput.o Stats.o TimeFunctions.o
 .PHONY: trim_qc_fastq
 trim_qc_fastq : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
 trim_qc_fastq : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS)
-trim_qc_fastq : htslib/libhts.a TrimQc.o TrimQcOutput.o Stats.o TimeFunctions.o trim_qc_fastq.cpp
-	$(CXX) -o trim_qc_fastq $(CXXFLAGS) trim_qc_fastq.cpp TrimQc.o TrimQcOutput.o Stats.o TimeFunctions.o $(LDFLAGS)
+trim_qc_fastq : htslib/libhts.a TrimQc.o TrimQcOutput.o TrimQcShard.o Stats.o TimeFunctions.o trim_qc_fastq.cpp
+	$(CXX) -o trim_qc_fastq $(CXXFLAGS) trim_qc_fastq.cpp TrimQc.o TrimQcOutput.o TrimQcShard.o Stats.o TimeFunctions.o $(LDFLAGS)
+
+.PHONY: release-trim-qc-fastq
+release-trim-qc-fastq : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
+release-trim-qc-fastq : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_static) $(LDFLAGS)
+release-trim-qc-fastq : htslib/libhts.a TrimQc.o TrimQcOutput.o TrimQcShard.o Stats.o TimeFunctions.o trim_qc_fastq.cpp
+	$(CXX) -o trim_qc_fastq $(filter-out -fopenmp,$(CXXFLAGS)) trim_qc_fastq.cpp TrimQc.o TrimQcOutput.o TrimQcShard.o Stats.o TimeFunctions.o $(LDFLAGS)
 
 # Standalone input-contract harness for FASTX module parity/smoke tests.
 .PHONY: fastx-input-harness
@@ -291,6 +376,13 @@ fastx-input-harness : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
 fastx-input-harness : LDFLAGS := $(LDFLAGSextra) -lz -lcrypto
 fastx-input-harness : FastxInputModule.o input/fastx_input_harness.cpp
 	$(CXX) -o fastx_input_harness $(CXXFLAGS) input/fastx_input_harness.cpp FastxInputModule.o $(LDFLAGS)
+
+# Standalone BGZF block/range harness for the phased T1-T5 ingest gates.
+.PHONY: bgzf-input-harness
+bgzf-input-harness : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
+bgzf-input-harness : LDFLAGS := $(LDFLAGSextra) -lz -lpthread
+bgzf-input-harness : BgzfBlockReader.o BgzfRangeReader.o input/bgzf_input_harness.cpp
+	$(CXX) -o bgzf_input_harness $(CXXFLAGS) input/bgzf_input_harness.cpp BgzfBlockReader.o BgzfRangeReader.o $(LDFLAGS)
 
 # Standalone BINSEQ probe harness. This is not production STAR integration; it
 # decodes CBQ through bqtools and validates the result through the input contract.
@@ -356,7 +448,7 @@ star_feature_call: libprocess_features htslib/libhts.a $(LIBSCRNA_LIB)
 MexWriterObjs: MexWriter.o MexWriterUtil.o
 .PHONY: test_packed_readinfo
 test_packed_readinfo:
-	$(CXX) -std=c++11 -I./ $(CPPFLAGS) $(CXXFLAGS) ../test/PackedReadInfo_test.cpp PackedReadInfo.cpp -o ../test/pri_test
+	$(CXX) -std=c++11 -I./ -I$(FLEX_SRC_DIR) $(CPPFLAGS) $(CXXFLAGS) ../test/PackedReadInfo_test.cpp $(FLEX_SRC_DIR)/PackedReadInfo.cpp -o ../test/pri_test
 	../test/pri_test
 
 .PHONY: test_flex_probe_index
@@ -414,7 +506,25 @@ test_SoloReadInfoBaseline: Depend.list parametersDefault.xxd $(filter-out STAR.o
 	../test/solo_readinfo_baseline
 
 .PHONY: test
-test: test_packed_readinfo test_SoloHDMoleculeWriter test_SpatialFeatureSidecar test_MultiGeneUmiCr test_complex_barcode_whitelist_lookup test_SoloReadInfoBaseline test_SoloReadInfoLoader test_SoloReadInfoParity test_MinimalSink test_CbCorrector test_CbBayesianResolver test_CbBayesianResolverPhase2 test_inline_hash_record_capture test_inline_hash_resolver test_inline_hash_clique test_inline_hash_parity test_gene_resolver
+test: test_packed_readinfo test_FlexGdna test_ProbeListIndex test_SoloHDMoleculeWriter test_SpatialFeatureSidecar test_SpatialR1FastqTap test_SpatialGex test_SpatialGexSpill test_SpatialGexDownstreamSpool test_MultiGeneUmiCr test_CrMultimapRescuePolicy test_complex_barcode_whitelist_lookup
+
+.PHONY: test_FlexGdna
+test_FlexGdna: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
+test_FlexGdna: FlexGdna.o FlexHashScreen.o
+	$(CXX) $(CXXFLAGS) -I./ -I$(FLEX_SRC_DIR) ../test/test_flex_gdna.cpp FlexGdna.o FlexHashScreen.o -o ../test/test_flex_gdna
+	../test/test_flex_gdna
+
+.PHONY: test_ProbeListIndex
+test_ProbeListIndex: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
+test_ProbeListIndex: ProbeListIndex.o
+	$(CXX) $(CXXFLAGS) -I./ ../test/test_probe_list_index.cpp ProbeListIndex.o -o ../test/test_probe_list_index
+	../test/test_probe_list_index
+
+.PHONY: test_CrMultimapRescuePolicy
+test_CrMultimapRescuePolicy: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
+test_CrMultimapRescuePolicy: CrMultimapRescuePolicy.o
+	$(CXX) $(CXXFLAGS) -I./ ../test/test_cr_multimap_rescue_policy.cpp CrMultimapRescuePolicy.o -o ../test/test_cr_multimap_rescue_policy
+	../test/test_cr_multimap_rescue_policy
 
 .PHONY: test_SoloHDMoleculeWriter
 test_SoloHDMoleculeWriter: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
@@ -427,6 +537,30 @@ test_SpatialFeatureSidecar: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXF
 test_SpatialFeatureSidecar: SpatialFeatureSidecar.o
 	$(CXX) $(CXXFLAGS) -I./ ../test/test_spatial_feature_sidecar.cpp SpatialFeatureSidecar.o $(LDFLAGS_shared) -o ../test/test_spatial_feature_sidecar
 	../test/test_spatial_feature_sidecar
+
+.PHONY: test_SpatialR1FastqTap
+test_SpatialR1FastqTap: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
+test_SpatialR1FastqTap: SpatialR1FastqTap.o
+	$(CXX) $(CXXFLAGS) -I./ ../test/test_spatial_r1_fastq_tap.cpp SpatialR1FastqTap.o $(LDFLAGS_shared) -o ../test/test_spatial_r1_fastq_tap
+	../test/test_spatial_r1_fastq_tap
+
+.PHONY: test_SpatialGex
+test_SpatialGex: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
+test_SpatialGex: SpatialGex.o SpatialR1Decoder.o
+	$(CXX) $(CXXFLAGS) -I./ ../test/test_spatial_gex.cpp SpatialGex.o SpatialR1Decoder.o -o ../test/test_spatial_gex
+	../test/test_spatial_gex
+
+.PHONY: test_SpatialGexSpill
+test_SpatialGexSpill: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
+test_SpatialGexSpill: SpatialGexSpill.o
+	$(CXX) $(CXXFLAGS) -I./ ../test/test_spatial_gex_spill.cpp SpatialGexSpill.o -o ../test/test_spatial_gex_spill
+	../test/test_spatial_gex_spill
+
+.PHONY: test_SpatialGexDownstreamSpool
+test_SpatialGexDownstreamSpool: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
+test_SpatialGexDownstreamSpool: SpatialGexDownstreamSpool.o
+	$(CXX) $(CXXFLAGS) -I./ ../test/test_spatial_gex_downstream_spool.cpp SpatialGexDownstreamSpool.o -o ../test/test_spatial_gex_downstream_spool
+	../test/test_spatial_gex_downstream_spool
 
 .PHONY: test_MultiGeneUmiCr
 test_MultiGeneUmiCr: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
@@ -557,6 +691,15 @@ BinseqInputProbeModule.o: input/BinseqInputProbeModule.cpp input/BinseqInputProb
 CbqInputModule.o: input/CbqInputModule.cpp input/CbqInputModule.h input/InputContract.h
 	$(CXX) -c $(CPPFLAGS) $(CXXFLAGS) $(CXXFLAGS_common) $< -o $@
 
+BgzfBlockReader.o: input/BgzfBlockReader.cpp input/BgzfBlockReader.h
+	$(CXX) -c $(CPPFLAGS) $(CXXFLAGS) $(CXXFLAGS_common) $< -o $@
+
+BgzfRangeReader.o: input/BgzfRangeReader.cpp input/BgzfRangeReader.h input/BgzfBlockReader.h
+	$(CXX) -c $(CPPFLAGS) $(CXXFLAGS) $(CXXFLAGS_common) $< -o $@
+
+BgzfStarAdapter.o: input/BgzfStarAdapter.cpp input/BgzfStarAdapter.h input/BgzfRangeReader.h input/BgzfBlockReader.h input/InputContract.h
+	$(CXX) -c $(CPPFLAGS) $(CXXFLAGS) $(CXXFLAGS_common) $< -o $@
+
 CbqStarAdapter.o: input/CbqStarAdapter.cpp input/CbqStarAdapter.h input/CbqInputModule.h input/InputContract.h
 	$(CXX) -c $(CPPFLAGS) $(CXXFLAGS) $(CXXFLAGS_common) $< -o $@
 
@@ -583,7 +726,7 @@ solo/CbBayesianResolver.o : $(FLEX_SRC_DIR)/solo/CbBayesianResolver.cpp $(FLEX_S
 
 .PHONY: clean
 clean:
-	'rm' -f *.o opal/opal.o solo/*.o flex/*.o STAR STARstatic STARlong star_feature_call fastx_input_harness binseq_probe_harness cbq_reader_harness cbq_ordered_encoder cbq_star_adapter_harness cbq_pf_adapter_harness cbq_chromap_adapter_harness Depend.list parametersDefault.xxd star_chromap_orchestration.o star_chromap_orchestration_stub.o .depend.with_chromap_*
+	'rm' -f *.o opal/opal.o solo/*.o flex/*.o STAR STARstatic STARlong star_feature_call transcriptvb_finalize trim_qc_fastq trim_qc_merge trim_qc_replay fastx_input_harness bgzf_input_harness binseq_probe_harness cbq_reader_harness cbq_ordered_encoder cbq_star_adapter_harness cbq_pf_adapter_harness cbq_chromap_adapter_harness Depend.list parametersDefault.xxd star_chromap_orchestration.o star_chromap_orchestration_stub.o .depend.with_chromap_*
 	$(MAKE) -C $(LIBFLEX_DIR) clean
 	$(MAKE) -C $(LIBTRIM_DIR) clean
 	$(MAKE) -C $(LIBEM_DIR) clean
@@ -677,11 +820,14 @@ $(LIBSCRNA_LIB): libscrna
 $(LIBCHROMAP_CONTRACT_LIB): FORCE
 	$(MAKE) -C $(LIBCHROMAP_CONTRACT_DIR) \
 		CHROMAP_DIR=$(CHROMAP_SUITE_DIR) \
-		LIBMACS3_LIB=$(CHROMAP_LIBMACS3_LIB) \
+		RAPIDMACS_LIB=$(CHROMAP_RAPIDMACS_LIB) \
 		libstar_chromap_contract.a
 
 $(CHROMAP_LIB): FORCE
 	$(MAKE) -C $(CHROMAP_SUITE_DIR) libchromap.a
+
+$(CHROMAP_RAPIDMACS_LIB): FORCE
+	$(MAKE) -C $(CHROMAP_SUITE_DIR) librapidmacs
 
 STAR$(SFX) : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
 STAR$(SFX) : LDFLAGS := $(LDFLAGSextra) $(LDFLAGS_shared) $(LDFLAGS) $(GLIB_LIBS_SHARED)

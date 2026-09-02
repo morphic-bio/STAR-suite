@@ -11,10 +11,12 @@ FROM ubuntu:24.04 AS builder
 
 ARG MAKE_JOBS=16
 ARG STAR_WITH_CHROMAP=0
+ARG STAR_SUITE_COMMIT_SHA
 ARG TARGETARCH
 ENV DEBIAN_FRONTEND=noninteractive
 ENV MAKE_JOBS=$MAKE_JOBS
 ENV STAR_WITH_CHROMAP=$STAR_WITH_CHROMAP
+ENV STAR_SUITE_COMMIT_SHA=$STAR_SUITE_COMMIT_SHA
 
 # Build dependencies
 # - core/legacy uses vendored htslib
@@ -71,11 +73,13 @@ RUN make -j"${MAKE_JOBS}" core WITH_CHROMAP="${STAR_WITH_CHROMAP}" \
     && make -j"${MAKE_JOBS}" slam WITH_CHROMAP="${STAR_WITH_CHROMAP}" \
     && make -j"${MAKE_JOBS}" feature-barcodes-tools \
     && make default WITH_CHROMAP="${STAR_WITH_CHROMAP}" \
-    && make all WITH_CHROMAP="${STAR_WITH_CHROMAP}"
+    && make all WITH_CHROMAP="${STAR_WITH_CHROMAP}" \
+    && test "$(core/legacy/source/STAR --source-revision)" = "${STAR_SUITE_COMMIT_SHA}"
 
 # The spatial bridge and conventional Solo collapse paths share this resolver.
 # Gate both adapters against their pre-refactor rules on every CI image build.
-RUN make -C core/legacy/source test_MultiGeneUmiCr
+RUN make -C core/legacy/source test_MultiGeneUmiCr \
+    && make -C core/legacy/source test_SpatialR1FastqTap
 
 # Pre-build SLAM SNP EM test helper so Tier A can run without a compiler.
 RUN g++ -std=c++11 -O2 \
@@ -115,7 +119,11 @@ COPY --from=builder /build/flex/tools/flexfilter/run_flexfilter_mex /usr/local/b
 COPY --from=builder /build/flex/tools/molecule_first_resolver/molecule_first_resolver /usr/local/bin/molecule_first_resolver
 COPY --from=builder /build/flex/tools/molecule_first_resolver/molecule_first_bam_ledger /usr/local/bin/molecule_first_bam_ledger
 COPY --from=builder /build/flex/tools/molecule_first_resolver/molecule_first_materialize /usr/local/bin/molecule_first_materialize
+COPY --from=builder /build/core/legacy/source/transcriptvb_finalize /usr/local/bin/transcriptvb_finalize
+COPY --from=builder /build/core/legacy/source/trim_qc_fastq /usr/local/bin/trim_qc_fastq
+COPY --from=builder /build/core/legacy/source/trim_qc_merge /usr/local/bin/trim_qc_merge
 COPY --from=builder /build/core/features/yremove_fastq/tools/remove_y_reads/remove_y_reads /usr/local/bin/remove_y_reads
+COPY --from=builder /build/share/star-suite /usr/local/share/star-suite
 
 WORKDIR /workspace
 

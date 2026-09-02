@@ -479,10 +479,13 @@ void SoloFeature::resolvePendingAmbiguousToHash(bool useBridgeCompactMapping)
                                                      obs.tagIdx);
                 int absent;
                 khiter_t iter = kh_put(cg_agg, hash, newKey, &absent);
+                const uint32_t encoded =
+                    flexGdnaPackValue(obs.count, obs.probeRegion);
                 if (absent) {
-                    kh_val(hash, iter) = obs.count;
+                    kh_val(hash, iter) = encoded;
                 } else {
-                    kh_val(hash, iter) += obs.count;
+                    kh_val(hash, iter) =
+                        flexGdnaMergeValue(kh_val(hash, iter), encoded);
                 }
                 addedToHash++;
             }

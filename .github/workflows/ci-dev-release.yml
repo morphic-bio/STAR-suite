@@ -13,6 +13,8 @@ on:
       - "docker/**"
       - "scripts/docker/**"
       - "scripts/release/**"
+      - "share/star-suite/**"
+      - "mcp_server/**"
       - "core/**"
       - "flex/**"
       - "slam/**"
@@ -49,6 +51,9 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+
+      - name: Verify official recipe and provenance snapshots
+        run: python3 scripts/release/validate_official_snapshots.py
 
       - name: Build suite base image
         run: |
@@ -92,6 +97,7 @@ jobs:
           push: true
           build-args: |
             MAKE_JOBS=8
+            STAR_SUITE_COMMIT_SHA=${{ github.sha }}
           tags: |
             biodepot/star-suite:dev-release-${{ github.sha }}
             biodepot/star-suite:dev-release-latest

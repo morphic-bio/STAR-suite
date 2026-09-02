@@ -1,4 +1,11 @@
 #include "streamFuns.h"
+
+// Request size for the parallel loader. Large enough to keep per-request
+// overhead negligible, small enough to spread work evenly over the threads.
+#define pread_Chunk_Bytes (256ULL*1024ULL*1024ULL)
+
+#include <fcntl.h>
+#include <unistd.h>
 #include "ErrorWarning.h"
 #include <fstream>
 #include <sys/statvfs.h>
@@ -47,6 +54,42 @@ unsigned long long fstreamReadBig(std::ifstream &S, char* A, unsigned long long 
     S.read(A+C,N%fstream_Chunk_Max);
     C+=S.gcount();
     return C;
+};
+
+unsigned long long fstreamReadBigParallel(const std::string &path, std::ifstream &S,
+                                          char* A, unsigned long long N, int nThreads) {
+    if (nThreads<2 || N==0)
+        return fstreamReadBig(S,A,N);
+
+    const long long base=(long long) S.tellg();
+    if (base<0)
+        return fstreamReadBig(S,A,N);
+
+    const int fd=::open(path.c_str(), O_RDONLY);
+    if (fd<0)
+        return fstreamReadBig(S,A,N);
+
+    const long long nChunks=(long long)((N+pread_Chunk_Bytes-1)/pread_Chunk_Bytes);
+    unsigned long long total=0;
+    #pragma omp parallel for num_threads(nThreads) schedule(static) reduction(+:total)
+    for (long long ii=0; ii<nChunks; ii++) {
+        const unsigned long long off=(unsigned long long) ii*pread_Chunk_Bytes;
+        const unsigned long long len=(off+pread_Chunk_Bytes>N) ? (N-off) : pread_Chunk_Bytes;
+        unsigned long long done=0;
+        while (done<len) {//pread is allowed to return short
+            const ssize_t rd=::pread(fd, A+off+done, (size_t)(len-done), (off_t)(base+off+done));
+            if (rd<=0) break;
+            done+=(unsigned long long) rd;
+        };
+        total+=done;
+    };
+    ::close(fd);
+
+    //leave the stream where the serial path would have left it, so the
+    //caller's byte accounting and any later use stay consistent
+    S.clear();
+    S.seekg(base+(long long) total, std::ios::beg);
+    return total;
 };
 
 void fstreamWriteBig(std::ofstream &S, char* A, unsigned long long N, std::string fileName, std::string errorID, Parameters &P) {

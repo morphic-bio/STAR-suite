@@ -7,6 +7,15 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TOOL="${REMOVE_Y_READS_BIN:-$SCRIPT_DIR/../core/features/yremove_fastq/tools/remove_y_reads/remove_y_reads}"
 TEST_DIR="/tmp/remove_y_reads_test_$$"
 
+if [[ ! -x "$TOOL" ]]; then
+    make -C "$(dirname "$TOOL")" "$(basename "$TOOL")"
+fi
+
+if [[ ! -x "$TOOL" ]]; then
+    echo "ERROR: remove_y_reads build did not create $TOOL" >&2
+    exit 1
+fi
+
 mkdir -p "$TEST_DIR"
 trap "rm -rf $TEST_DIR" EXIT
 

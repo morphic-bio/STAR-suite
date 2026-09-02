@@ -1,0 +1,148 @@
+DEBUG: Computing tag allocations: 1835323 cells, 16 tags
+DEBUG: Tag allocations computed (UMI-weighted)
+[FlexFilter] Processing 16 tags with 1 tag threads
+[FlexFilter] EmptyDrops MC: 32 threads per tag (total cores: 32)
+[TIMING] tag=ACTTTAGG start
+[TIMING] tag=ACTTTAGG stage=filterMatrixToTag delta_ms=113 total_ms=113
+  [Simple EmptyDrops] Running as fallback: too few candidates (0 < 100); empty ambient profile; too few ED rescues (0 < 50)
+  [Simple EmptyDrops] Estimated recovered_cells: 878
+  [Simple EmptyDrops] Retain threshold: 1 UMI
+  [Simple EmptyDrops] Found 879 cells with UMI >= 1
+[TIMING] tag=ACTTTAGG stage=EmptyDrops delta_ms=17 total_ms=130
+[TIMING] tag=ACTTTAGG stage=OccupancyPostFilter delta_ms=0 total_ms=130
+[TIMING] tag=AACGGGAA start
+[TIMING] tag=AACGGGAA stage=filterMatrixToTag delta_ms=118 total_ms=118
+  [Simple EmptyDrops] Running as fallback: too few candidates (0 < 100); too few ED rescues (0 < 50)
+  [Simple EmptyDrops] Estimated recovered_cells: 3963
+  [Simple EmptyDrops] Retain threshold: 12 UMI
+  [Simple EmptyDrops] Found 4024 cells with UMI >= 12
+[TIMING] tag=AACGGGAA stage=EmptyDrops delta_ms=1147 total_ms=1266
+[TIMING] tag=AACGGGAA stage=OccupancyPostFilter delta_ms=0 total_ms=1266
+[TIMING] tag=AGTAGGCT start
+[TIMING] tag=AGTAGGCT stage=filterMatrixToTag delta_ms=111 total_ms=111
+  [Simple EmptyDrops] Running as fallback: too few candidates (0 < 100); too few ED rescues (0 < 50)
+  [Simple EmptyDrops] Estimated recovered_cells: 3234
+  [Simple EmptyDrops] Retain threshold: 1 UMI
+  [Simple EmptyDrops] Found 3345 cells with UMI >= 1
+[TIMING] tag=AGTAGGCT stage=EmptyDrops delta_ms=104 total_ms=216
+[TIMING] tag=AGTAGGCT stage=OccupancyPostFilter delta_ms=0 total_ms=216
+[TIMING] tag=ATGTTGAC start
+[TIMING] tag=ATGTTGAC stage=filterMatrixToTag delta_ms=462 total_ms=462
+[EmptyDrops] Ambient profile: 16146 nonzero genes
+[EmptyDrops] Using CR sampler (DropletUtils-style nested multinomial)
+[EmptyDrops] CR sampler using full compact ambient (17670 genes, sum=1)
+[TIMING] tag=ATGTTGAC stage=EmptyDrops delta_ms=4524 total_ms=4986
+[TIMING] tag=ATGTTGAC stage=OccupancyPostFilter delta_ms=0 total_ms=4987
+[TIMING] tag=ACAGACCT start
+[TIMING] tag=ACAGACCT stage=filterMatrixToTag delta_ms=112 total_ms=112
+  [Simple EmptyDrops] Running as fallback: too few candidates (0 < 100); too few ED rescues (0 < 50)
+  [Simple EmptyDrops] Estimated recovered_cells: 3384
+  [Simple EmptyDrops] Retain threshold: 1 UMI
+  [Simple EmptyDrops] Found 3381 cells with UMI >= 1
+[TIMING] tag=ACAGACCT stage=EmptyDrops delta_ms=101 total_ms=213
+[TIMING] tag=ACAGACCT stage=OccupancyPostFilter delta_ms=0 total_ms=214
+[TIMING] tag=ATCCCAAC start
+[TIMING] tag=ATCCCAAC stage=filterMatrixToTag delta_ms=520 total_ms=520
+[EmptyDrops] Ambient profile: 16406 nonzero genes
+[EmptyDrops] Using CR sampler (DropletUtils-style nested multinomial)
+[EmptyDrops] CR sampler using full compact ambient (17764 genes, sum=1)
+[TIMING] tag=ATCCCAAC stage=EmptyDrops delta_ms=6761 total_ms=7282
+[TIMING] tag=ATCCCAAC stage=OccupancyPostFilter delta_ms=1 total_ms=7283
+[TIMING] tag=AAGTAGAG start
+[TIMING] tag=AAGTAGAG stage=filterMatrixToTag delta_ms=697 total_ms=697
+[EmptyDrops] Ambient profile: 14795 nonzero genes
+[EmptyDrops] Using CR sampler (DropletUtils-style nested multinomial)
+[EmptyDrops] CR sampler using full compact ambient (17465 genes, sum=1)
+[TIMING] tag=AAGTAGAG stage=EmptyDrops delta_ms=5382 total_ms=6080
+[TIMING] tag=AAGTAGAG stage=OccupancyPostFilter delta_ms=1 total_ms=6081
+[TIMING] tag=AGCTGTGA start
+[TIMING] tag=AGCTGTGA stage=filterMatrixToTag delta_ms=669 total_ms=669
+[EmptyDrops] Ambient profile: 14928 nonzero genes
+[EmptyDrops] Using CR sampler (DropletUtils-style nested multinomial)
+[EmptyDrops] CR sampler using full compact ambient (17391 genes, sum=1)
+[TIMING] tag=AGCTGTGA stage=EmptyDrops delta_ms=4372 total_ms=5042
+[TIMING] tag=AGCTGTGA stage=OccupancyPostFilter delta_ms=1 total_ms=5043
+[TIMING] tag=ACAGTCTG start
+[TIMING] tag=ACAGTCTG stage=filterMatrixToTag delta_ms=112 total_ms=112
+  [Simple EmptyDrops] Running as fallback: too few candidates (0 < 100); too few ED rescues (0 < 50)
+  [Simple EmptyDrops] Estimated recovered_cells: 1318
+  [Simple EmptyDrops] Retain threshold: 1 UMI
+  [Simple EmptyDrops] Found 1318 cells with UMI >= 1
+[TIMING] tag=ACAGTCTG stage=EmptyDrops delta_ms=27 total_ms=139
+[TIMING] tag=ACAGTCTG stage=OccupancyPostFilter delta_ms=0 total_ms=140
+[TIMING] tag=AGTGAGTG start
+[TIMING] tag=AGTGAGTG stage=filterMatrixToTag delta_ms=111 total_ms=111
+  [Simple EmptyDrops] Running as fallback: too few candidates (0 < 100); too few ED rescues (0 < 50)
+  [Simple EmptyDrops] Estimated recovered_cells: 1109
+  [Simple EmptyDrops] Retain threshold: 1 UMI
+  [Simple EmptyDrops] Found 1111 cells with UMI >= 1
+[TIMING] tag=AGTGAGTG stage=EmptyDrops delta_ms=22 total_ms=133
+[TIMING] tag=AGTGAGTG stage=OccupancyPostFilter delta_ms=0 total_ms=133
+[TIMING] tag=AGAGGCAA start
+[TIMING] tag=AGAGGCAA stage=filterMatrixToTag delta_ms=112 total_ms=112
+  [Simple EmptyDrops] Running as fallback: too few candidates (0 < 100); too few ED rescues (0 < 50)
+  [Simple EmptyDrops] Estimated recovered_cells: 3947
+  [Simple EmptyDrops] Retain threshold: 1 UMI
+  [Simple EmptyDrops] Found 3951 cells with UMI >= 1
+[TIMING] tag=AGAGGCAA stage=EmptyDrops delta_ms=114 total_ms=226
+[TIMING] tag=AGAGGCAA stage=OccupancyPostFilter delta_ms=0 total_ms=227
+[TIMING] tag=ACTACTCA start
+[TIMING] tag=ACTACTCA stage=filterMatrixToTag delta_ms=111 total_ms=111
+  [Simple EmptyDrops] Running as fallback: too few candidates (0 < 100); empty ambient profile; too few ED rescues (0 < 50)
+  [Simple EmptyDrops] Estimated recovered_cells: 526
+  [Simple EmptyDrops] Retain threshold: 1 UMI
+  [Simple EmptyDrops] Found 526 cells with UMI >= 1
+[TIMING] tag=ACTACTCA stage=EmptyDrops delta_ms=9 total_ms=120
+[TIMING] tag=ACTACTCA stage=OccupancyPostFilter delta_ms=0 total_ms=120
+[TIMING] tag=ATACGTCA start
+[TIMING] tag=ATACGTCA stage=filterMatrixToTag delta_ms=113 total_ms=113
+  [Simple EmptyDrops] Running as fallback: too few candidates (0 < 100); too few ED rescues (0 < 50)
+  [Simple EmptyDrops] Estimated recovered_cells: 5549
+  [Simple EmptyDrops] Retain threshold: 1 UMI
+  [Simple EmptyDrops] Found 5536 cells with UMI >= 1
+[TIMING] tag=ATACGTCA stage=EmptyDrops delta_ms=272 total_ms=385
+[TIMING] tag=ATACGTCA stage=OccupancyPostFilter delta_ms=1 total_ms=386
+[TIMING] tag=ATCATGTG start
+[TIMING] tag=ATCATGTG stage=filterMatrixToTag delta_ms=111 total_ms=111
+  [Simple EmptyDrops] Running as fallback: too few candidates (0 < 100); too few ED rescues (0 < 50)
+  [Simple EmptyDrops] Estimated recovered_cells: 1978
+  [Simple EmptyDrops] Retain threshold: 1 UMI
+  [Simple EmptyDrops] Found 1982 cells with UMI >= 1
+[TIMING] tag=ATCATGTG stage=EmptyDrops delta_ms=40 total_ms=151
+[TIMING] tag=ATCATGTG stage=OccupancyPostFilter delta_ms=0 total_ms=152
+[TIMING] tag=AACGCCGA start
+[TIMING] tag=AACGCCGA stage=filterMatrixToTag delta_ms=112 total_ms=112
+  [Simple EmptyDrops] Running as fallback: too few candidates (0 < 100); too few ED rescues (0 < 50)
+  [Simple EmptyDrops] Estimated recovered_cells: 2464
+  [Simple EmptyDrops] Retain threshold: 1 UMI
+  [Simple EmptyDrops] Found 2466 cells with UMI >= 1
+[TIMING] tag=AACGCCGA stage=EmptyDrops delta_ms=54 total_ms=167
+[TIMING] tag=AACGCCGA stage=OccupancyPostFilter delta_ms=0 total_ms=167
+[TIMING] tag=ATTCGGTT start
+[TIMING] tag=ATTCGGTT stage=filterMatrixToTag delta_ms=111 total_ms=111
+  [Simple EmptyDrops] Running as fallback: too few candidates (0 < 100); too few ED rescues (0 < 50)
+  [Simple EmptyDrops] Estimated recovered_cells: 3646
+  [Simple EmptyDrops] Retain threshold: 1 UMI
+  [Simple EmptyDrops] Found 3639 cells with UMI >= 1
+[TIMING] tag=ATTCGGTT stage=EmptyDrops delta_ms=96 total_ms=208
+[TIMING] tag=ATTCGGTT stage=OccupancyPostFilter delta_ms=0 total_ms=208
+[FlexFilter] All 16 tags processed
+[FlexFilter] Running combined occupancy filter...
+[FlexFilter] Combined occupancy observed tags: 4 / 16
+[FlexFilter] Combined ED passers (observed tags): 20324
+[FlexFilter] Combined occupancy lambda: 0.291609 (GEMs: 17926, empty: 51770)
+[FlexFilter] Combined occupancy flagged 2 GEMs
+[FlexFilter] Tag AACGGGAA: removed 2 by occupancy, final: 4022
+[FlexFilter] Tag AGTAGGCT: removed 1 by occupancy, final: 3344
+[FlexFilter] Tag ATGTTGAC: removed 2 by occupancy, final: 4383
+[FlexFilter] Tag ACAGACCT: removed 1 by occupancy, final: 3380
+[FlexFilter] Tag ATCCCAAC: removed 2 by occupancy, final: 5284
+[FlexFilter] Tag AAGTAGAG: removed 2 by occupancy, final: 5383
+[FlexFilter] Tag AGCTGTGA: removed 2 by occupancy, final: 5266
+[FlexFilter] Tag ACAGTCTG: removed 1 by occupancy, final: 1317
+[FlexFilter] Tag AGAGGCAA: removed 1 by occupancy, final: 3950
+[FlexFilter] Tag ATACGTCA: removed 2 by occupancy, final: 5534
+[FlexFilter] Tag ATCATGTG: removed 1 by occupancy, final: 1981
+[FlexFilter] Tag AACGCCGA: removed 2 by occupancy, final: 2464
+[FlexFilter] Tag ATTCGGTT: removed 2 by occupancy, final: 3637
+[FlexFilter] Combined occupancy removed 21 cells total

@@ -1,0 +1,25 @@
+name: catalog
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: STAR-suite-recipes
+      - uses: actions/checkout@v4
+        with:
+          repository: morphic-bio/STAR-suite
+          path: STAR-suite
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install pydantic pyyaml packaging
+      - run: tests/run_catalog_tests.sh
+        working-directory: STAR-suite-recipes
+        env:
+          STAR_SUITE_ROOT: ${{ github.workspace }}/STAR-suite

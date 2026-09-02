@@ -34,6 +34,7 @@ struct Arguments {
     std::string barcodeContract;
     std::string output;
     std::string summary;
+    std::string decodeReads;
     std::vector<std::string> r1;
     std::vector<std::string> r2;
     std::uint64_t expectedReads = 0;
@@ -50,6 +51,7 @@ void usage(std::ostream &output)
         << "  --h0-prior FILE.tsv --barcode-contract barcode_coords.tsv\n"
         << "  --r1-fastq L001_R1.fastq.gz [--r1-fastq ...]\n"
         << "  --r2-fastq L001_R2.fastq.gz [--r2-fastq ...]\n"
+        << "  OR --decode-reads decode_reads.tsv (fused STAR R1-tap mode; no FASTQ rescan)\n"
         << "  --output normalized.tsv --summary summary.json\n"
         << "  [--expected-reads N] [--r1-length 43] [--r2-length 75]\n";
 }
@@ -82,6 +84,7 @@ Arguments parseArguments(int argc, char **argv)
         else if (option == "--barcode-contract") result.barcodeContract = value;
         else if (option == "--r1-fastq") result.r1.push_back(value);
         else if (option == "--r2-fastq") result.r2.push_back(value);
+        else if (option == "--decode-reads") result.decodeReads = value;
         else if (option == "--output") result.output = value;
         else if (option == "--summary") result.summary = value;
         else if (option == "--expected-reads") result.expectedReads = unsignedInteger(value, option);
@@ -91,9 +94,16 @@ Arguments parseArguments(int argc, char **argv)
     }
     if (result.sidecar.empty() || result.features.empty() || result.nameDigests.empty()
         || result.candidates.empty() || result.h0Prior.empty()
-        || result.barcodeContract.empty() || result.output.empty() || result.summary.empty()
-        || result.r1.empty() || result.r1.size() != result.r2.size()) {
-        throw std::invalid_argument("all inputs/outputs and paired R1/R2 lane lists are required");
+        || result.barcodeContract.empty() || result.output.empty() || result.summary.empty()) {
+        throw std::invalid_argument("all sidecar, candidate, prior, contract, and output paths are required");
+    }
+    const bool fastqMode = !result.r1.empty() || !result.r2.empty();
+    const bool fusedMode = !result.decodeReads.empty();
+    if (fastqMode == fusedMode) {
+        throw std::invalid_argument("choose exactly one input validation mode: paired FASTQs or --decode-reads");
+    }
+    if (fastqMode && (result.r1.empty() || result.r1.size() != result.r2.size())) {
+        throw std::invalid_argument("paired R1/R2 lane lists are required in FASTQ mode");
     }
     if (result.r1Length == 0 || result.r2Length == 0) {
         throw std::invalid_argument("FASTQ lengths must be positive");
@@ -402,6 +412,92 @@ class CandidateReader {
     std::uint64_t line_ = 1;
 };
 
+class DecodeReader {
+  public:
+    explicit DecodeReader(const std::string &path) : input_(path.c_str())
+    {
+        std::string header;
+        const std::string prefix =
+            "read_id\tuniverse_unique_assigned\trow2\tcol2\tfull_start";
+        if (!input_ || !std::getline(input_, header)
+            || (header != prefix && header.compare(0, prefix.size() + 1, prefix + "\t") != 0)) {
+            throw std::runtime_error("decode input does not match the complete raw-R1 schema");
+        }
+    }
+
+    bool next(std::string &readId)
+    {
+        std::string line;
+        while (std::getline(input_, line) && line.empty()) {}
+        if (!input_) return false;
+        const std::vector<std::string> fields = tabs(line);
+        if (fields.size() < 5 || fields[0].empty()) {
+            throw std::runtime_error("invalid decode row at line " + std::to_string(++line_));
+        }
+        readId = sfs::normalizeReadName(fields[0]);
+        if (readId.empty()) {
+            throw std::runtime_error("empty normalized decode read name at line "
+                                     + std::to_string(line_));
+        }
+        ++line_;
+        return true;
+    }
+
+  private:
+    std::ifstream input_;
+    std::uint64_t line_ = 1;
+};
+
+class DigestVerifier {
+  public:
+    explicit DigestVerifier(const std::vector<DigestRow> &expected) : expected_(expected) {}
+
+    void add(std::uint64_t ordinal, const std::string &readName)
+    {
+        if (block_ >= expected_.size()) {
+            throw std::runtime_error("decode/FASTQ stream contains more name-digest blocks than STAR");
+        }
+        const DigestRow &row = expected_[block_];
+        if (count_ == 0) {
+            if (row.first != ordinal || row.count == 0) {
+                throw std::runtime_error("STAR read-name digest blocks are incomplete or out of order");
+            }
+            SHA256_Init(&context_);
+        }
+        const std::uint64_t nameHash = fnv1a64(readName);
+        unsigned char nameBytes[8];
+        for (int byte = 0; byte < 8; ++byte) {
+            nameBytes[byte] = static_cast<unsigned char>(nameHash >> (8 * byte));
+        }
+        SHA256_Update(&context_, nameBytes, sizeof(nameBytes));
+        ++count_;
+        if (count_ == row.count) {
+            unsigned char digest[SHA256_DIGEST_LENGTH];
+            SHA256_Final(digest, &context_);
+            if (digestHex(digest) != row.sha) {
+                throw std::runtime_error("input stream and STAR blockwise read-name digests differ");
+            }
+            count_ = 0;
+            ++block_;
+        }
+    }
+
+    void finish() const
+    {
+        if (count_ != 0 || block_ != expected_.size()) {
+            throw std::runtime_error("input stream ended before STAR read-name digest blocks");
+        }
+    }
+
+    std::size_t blocks() const { return block_; }
+
+  private:
+    const std::vector<DigestRow> &expected_;
+    std::size_t block_ = 0;
+    std::uint64_t count_ = 0;
+    SHA256_CTX context_;
+};
+
 std::string jsonEscape(const std::string &value)
 {
     std::string output;
@@ -438,30 +534,88 @@ int main(int argc, char **argv)
                                "log_sequence_likelihood\texact_read_count\n"
                             << std::setprecision(17);
 
-        std::vector<DigestRow> observedDigests;
+        DigestVerifier digestVerifier(expectedDigests);
         std::uint64_t ordinal = 0;
         std::uint64_t candidateRows = 0, candidateReads = 0, candidateLess = 0;
         std::uint64_t eligibleReads = 0, emittedReads = 0, emittedRows = 0;
         std::uint64_t noGene = 0, multiGene = 0, unmapped = 0;
-        for (std::size_t lane = 0; lane < arguments.r1.size(); ++lane) {
+        auto processRead = [&](const std::string &readName, const std::string *rawR1) {
+            digestVerifier.add(ordinal, readName);
+            std::vector<Candidate> rows;
+            std::set<std::pair<std::uint32_t, std::uint32_t> > coordinates;
+            while (candidates.has() && candidates.current().ordinal == ordinal) {
+                const Candidate row = candidates.current();
+                if (row.readId != readName) {
+                    throw std::runtime_error("candidate/input-stream read-name mismatch");
+                }
+                if (rawR1 != nullptr && row.rawUmi != rawR1->substr(0, 9)) {
+                    throw std::runtime_error("candidate raw UMI does not match raw R1");
+                }
+                if (row.rawUmi.size() != 9) {
+                    throw std::runtime_error("candidate raw UMI is not 9 nt");
+                }
+                if (row.row >= prior.bc2.size() || row.column >= prior.bc1.size()
+                    || !coordinates.insert(std::make_pair(row.row, row.column)).second) {
+                    throw std::runtime_error("candidate is outside the contract or duplicated");
+                }
+                rows.push_back(row);
+                candidates.advance();
+            }
+            if (candidates.has() && candidates.current().ordinal < ordinal) {
+                throw std::runtime_error("candidate ordinals are not globally ordered");
+            }
+            if (rows.empty()) {
+                ++candidateLess;
+            } else {
+                ++candidateReads;
+                candidateRows += rows.size();
+                if (rows.front().declaredCount != rows.size()) {
+                    throw std::runtime_error("candidate_count does not equal the complete candidate set");
+                }
+                for (const Candidate &row : rows) {
+                    if (row.declaredCount != rows.size() || row.readId != rows.front().readId
+                        || row.rawUmi != rows.front().rawUmi) {
+                        throw std::runtime_error("inconsistent candidate group");
+                    }
+                }
+            }
+
+            sfs::Record feature;
+            if (!sidecar.read(ordinal, feature, error)) throw std::runtime_error(error);
+            if (feature.statusFlags & sfs::kUniqueGene) {
+                ++eligibleReads;
+                if (!rows.empty()) {
+                    ++emittedReads;
+                    for (const Candidate &row : rows) {
+                        const std::uint64_t left = prior.bc1[row.column];
+                        const std::uint64_t right = prior.bc2[row.row];
+                        if (left + 1 > std::numeric_limits<std::uint64_t>::max() / (right + 1)) {
+                            throw std::runtime_error("exact H0 prior multiplication overflow");
+                        }
+                        const std::uint64_t exact = (left + 1) * (right + 1) - 1;
+                        normalized.stream() << readName << '\t' << genes.at(feature.geneIndex)
+                            << '\t' << row.rawUmi << "\ts_002um_" << row.row << '_'
+                            << row.column << '\t' << row.likelihood << '\t' << exact << '\n';
+                        ++emittedRows;
+                    }
+                }
+            } else if (feature.statusFlags & sfs::kMultiGeneRejected) {
+                ++multiGene;
+            } else if (feature.statusFlags & sfs::kUnmappedOrFiltered) {
+                ++unmapped;
+            } else {
+                ++noGene;
+            }
+            ++ordinal;
+        };
+
+        if (!arguments.decodeReads.empty()) {
+            DecodeReader decoded(arguments.decodeReads);
+            std::string readName;
+            while (decoded.next(readName)) processRead(readName, nullptr);
+        } else for (std::size_t lane = 0; lane < arguments.r1.size(); ++lane) {
             FastqReader r1(arguments.r1[lane]);
             FastqReader r2(arguments.r2[lane]);
-            SHA256_CTX digestContext;
-            bool blockActive = false;
-            std::uint64_t blockFirst = ordinal, blockCount = 0;
-            auto finishBlock = [&]() {
-                if (!blockActive) return;
-                unsigned char digest[SHA256_DIGEST_LENGTH];
-                SHA256_Final(digest, &digestContext);
-                DigestRow row;
-                row.lane = static_cast<std::uint32_t>(lane);
-                row.first = blockFirst;
-                row.count = blockCount;
-                row.sha = digestHex(digest);
-                observedDigests.push_back(row);
-                blockActive = false;
-                blockCount = 0;
-            };
 
             std::string r1Name, r1Sequence, r1Quality, r2Name, r2Sequence, r2Quality;
             std::uint64_t laneReads = 0;
@@ -475,93 +629,20 @@ int main(int argc, char **argv)
                     || r2Sequence.size() != arguments.r2Length) {
                     throw std::runtime_error("FASTQ read length differs from the frozen fixture contract");
                 }
-                if (!blockActive) {
-                    SHA256_Init(&digestContext);
-                    blockFirst = ordinal;
-                    blockActive = true;
-                }
-                const std::uint64_t nameHash = fnv1a64(r1Name);
-                unsigned char nameBytes[8];
-                for (int byte = 0; byte < 8; ++byte) {
-                    nameBytes[byte] = static_cast<unsigned char>(nameHash >> (8 * byte));
-                }
-                SHA256_Update(&digestContext, nameBytes, sizeof(nameBytes));
-                if (++blockCount == sfs::kNameDigestBlockReads) finishBlock();
-
-                std::vector<Candidate> rows;
-                std::set<std::pair<std::uint32_t, std::uint32_t> > coordinates;
-                while (candidates.has() && candidates.current().ordinal == ordinal) {
-                    const Candidate row = candidates.current();
-                    if (row.readId != r1Name) throw std::runtime_error("candidate/FASTQ read-name mismatch");
-                    if (row.rawUmi != r1Sequence.substr(0, 9)) {
-                        throw std::runtime_error("candidate raw UMI does not match raw R1");
-                    }
-                    if (row.row >= prior.bc2.size() || row.column >= prior.bc1.size()
-                        || !coordinates.insert(std::make_pair(row.row, row.column)).second) {
-                        throw std::runtime_error("candidate is outside the contract or duplicated");
-                    }
-                    rows.push_back(row);
-                    candidates.advance();
-                }
-                if (candidates.has() && candidates.current().ordinal < ordinal) {
-                    throw std::runtime_error("candidate ordinals are not globally ordered");
-                }
-                if (rows.empty()) {
-                    ++candidateLess;
-                } else {
-                    ++candidateReads;
-                    candidateRows += rows.size();
-                    if (rows.front().declaredCount != rows.size()) {
-                        throw std::runtime_error("candidate_count does not equal the complete candidate set");
-                    }
-                    for (const Candidate &row : rows) {
-                        if (row.declaredCount != rows.size() || row.readId != rows.front().readId
-                            || row.rawUmi != rows.front().rawUmi) {
-                            throw std::runtime_error("inconsistent candidate group");
-                        }
-                    }
-                }
-
-                sfs::Record feature;
-                if (!sidecar.read(ordinal, feature, error)) throw std::runtime_error(error);
-                if (feature.statusFlags & sfs::kUniqueGene) {
-                    ++eligibleReads;
-                    if (!rows.empty()) {
-                        ++emittedReads;
-                        for (const Candidate &row : rows) {
-                            const std::uint64_t left = prior.bc1[row.column];
-                            const std::uint64_t right = prior.bc2[row.row];
-                            if (left + 1 > std::numeric_limits<std::uint64_t>::max() / (right + 1)) {
-                                throw std::runtime_error("exact H0 prior multiplication overflow");
-                            }
-                            const std::uint64_t exact = (left + 1) * (right + 1) - 1;
-                            normalized.stream() << r1Name << '\t' << genes.at(feature.geneIndex)
-                                << '\t' << row.rawUmi << "\ts_002um_" << row.row << '_'
-                                << row.column << '\t' << row.likelihood << '\t' << exact << '\n';
-                            ++emittedRows;
-                        }
-                    }
-                } else if (feature.statusFlags & sfs::kMultiGeneRejected) {
-                    ++multiGene;
-                } else if (feature.statusFlags & sfs::kUnmappedOrFiltered) {
-                    ++unmapped;
-                } else {
-                    ++noGene;
-                }
-                ++ordinal;
+                processRead(r1Name, &r1Sequence);
                 ++laneReads;
             }
-            finishBlock();
             if (laneReads == 0) throw std::runtime_error("empty FASTQ lane");
         }
-        if (candidates.has()) throw std::runtime_error("candidate ordinal exceeds FASTQ/sidecar count");
+        if (candidates.has()) throw std::runtime_error("candidate ordinal exceeds input stream/sidecar count");
         if (ordinal != sidecar.header().totalReads) {
-            throw std::runtime_error("FASTQ read count differs from sidecar total");
+            throw std::runtime_error("input stream read count differs from sidecar total");
         }
-        if (observedDigests != expectedDigests) {
-            throw std::runtime_error("raw FASTQ and STAR blockwise read-name digests differ");
-        }
+        digestVerifier.finish();
         normalized.commit();
+
+        std::set<std::uint32_t> digestLanes;
+        for (const DigestRow &row : expectedDigests) digestLanes.insert(row.lane);
 
         AtomicOutput summary(arguments.summary);
         summary.stream()
@@ -569,8 +650,11 @@ int main(int argc, char **argv)
             << "  \"schema\": \"star_suite.spatial_feature_sidecar_join.v1\",\n"
             << "  \"status\": \"complete\",\n"
             << "  \"sidecar\": \"" << jsonEscape(arguments.sidecar) << "\",\n"
+            << "  \"input_mode\": \""
+            << (arguments.decodeReads.empty() ? "paired_fastq_contract" : "fused_r1_tap")
+            << "\",\n"
             << "  \"total_reads\": " << ordinal << ",\n"
-            << "  \"lanes\": " << arguments.r1.size() << ",\n"
+            << "  \"lanes\": " << digestLanes.size() << ",\n"
             << "  \"candidate_reads\": " << candidateReads << ",\n"
             << "  \"candidate_less_reads\": " << candidateLess << ",\n"
             << "  \"candidate_rows\": " << candidateRows << ",\n"
@@ -580,13 +664,15 @@ int main(int argc, char **argv)
             << "  \"no_gene_reads\": " << noGene << ",\n"
             << "  \"multi_gene_rejected_reads\": " << multiGene << ",\n"
             << "  \"unmapped_or_filtered_reads\": " << unmapped << ",\n"
-            << "  \"name_digest_blocks\": " << observedDigests.size() << ",\n"
+            << "  \"name_digest_blocks\": " << digestVerifier.blocks() << ",\n"
             << "  \"contract_coordinates\": "
             << static_cast<std::uint64_t>(prior.bc1.size()) * prior.bc2.size() << ",\n"
             << "  \"invariants\": {\n"
             << "    \"raw_umi_from_r1\": true,\n"
             << "    \"ordinal_join\": true,\n"
             << "    \"name_digests_match\": true,\n"
+            << "    \"single_star_input_stream\": "
+            << (arguments.decodeReads.empty() ? "false" : "true") << ",\n"
             << "    \"complete_candidate_sets\": true,\n"
             << "    \"coordinate_contract_complete\": true\n"
             << "  }\n"

@@ -32,6 +32,11 @@ public:
                  uint32_t mate, uint32_t qualOffset);
     void merge(const TrimQcCollector& other);
 
+    // Rehydrate a collector from a serialized per-shard dump. Only the shard
+    // exchange uses this; normal collection goes through init()/addRead().
+    void restoreFromShard(uint32_t qualBase, uint64_t totalReads,
+                          const std::vector<TrimQcMateStats>& mates);
+
 private:
     bool enabled_ = false;
     uint64_t maxReads_ = 0;

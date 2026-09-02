@@ -6,6 +6,7 @@
 #include "serviceFuns.cpp"
 #include "solo/CbCorrector.h"  // Include after ParametersSolo.h (which has IncludeDefine.h)
 #include "FlexHashScreen.h"
+#include "FlexGdna.h"
 #include "OcmMultiMaterialize.h"
 
 #include <stdlib.h>
@@ -133,7 +134,7 @@ void ParametersSolo::initialize(Parameters *pPin)
             exitWithError(errOut.str(), std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
         }
     }
-    
+
     //////////////////////////////////////////////////////////////////////////////////////////////////////
     /////////////////////////////// Tag-table export (always enabled; legacy flag removed)
     writeTagTableEnabled = true;
@@ -281,6 +282,24 @@ void ParametersSolo::initialize(Parameters *pPin)
         }
         if (!crMultimapRescue) {
             crMultimapRescueIntronic = false;
+        }
+    }
+
+    //////////////////////////////////////////////////////////////////////////////////////////////////////
+    ///////////////////////////////--soloCrMultimapRescueEvidence
+    {
+        string mode = crMultimapRescueEvidenceStr;
+        transform(mode.begin(), mode.end(), mode.begin(), ::tolower);
+        if (mode == "compatibility" || mode.empty()) {
+            crMultimapRescueEvidenceMode = CrMultimapRescueEvidenceCompatibility;
+        } else if (mode == "annotated") {
+            crMultimapRescueEvidenceMode = CrMultimapRescueEvidenceAnnotatedBest;
+        } else {
+            ostringstream errOut;
+            errOut << "EXITING because of fatal PARAMETERS error: unrecognized option in --soloCrMultimapRescueEvidence="
+                   << crMultimapRescueEvidenceStr << "\n";
+            errOut << "SOLUTION: use allowed option: compatibility OR annotated\n";
+            exitWithError(errOut.str(), std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
         }
     }
     
@@ -493,8 +512,17 @@ void ParametersSolo::initialize(Parameters *pPin)
                 return nullptr;
             };
             
-            // Enable FlexFilter pipeline (if not explicitly disabled)
-            if (runFlexFilterStr.empty() || runFlexFilterStr == "no") {
+            // Enable FlexFilter only when the option was not supplied. The
+            // string default is "no", so checking the value alone cannot
+            // distinguish the default from an explicit
+            // --soloRunFlexFilter no (required by native spatial Flex).
+            ParameterInfoBase *runFlexFilterParam =
+                findParam("soloRunFlexFilter");
+            const bool runFlexFilterExplicit =
+                runFlexFilterParam != nullptr
+                && runFlexFilterParam->inputLevel > 0;
+            if (!runFlexFilterExplicit
+                && (runFlexFilterStr.empty() || runFlexFilterStr == "no")) {
                 runFlexFilterStr = "yes";
             }
             
@@ -518,13 +546,8 @@ void ParametersSolo::initialize(Parameters *pPin)
                 soloFlexMinimalMemoryStr = "yes";
             }
             
-            // Set MAPQ mode to genomic (if not explicitly set)
-            if (mapqModeStr.empty() || mapqModeStr == "off") {
-                mapqModeStr = "genomic";
-            }
-            
             // Set MAPQ threshold to 255 (if at default)
-            // Note: 255 is already the default, so this is a no-op but explicit
+            // This threshold is inert while the default soloMapqMode is off.
             if (mapqThreshold == 255) {
                 mapqThreshold = 255;
             }
@@ -582,6 +605,76 @@ void ParametersSolo::initialize(Parameters *pPin)
             errOut << "EXITING because of fatal PARAMETERS error: unrecognized option in --flex=" << flexModeStr << "\n";
             errOut << "SOLUTION: use allowed option: yes OR no\n";
             exitWithError(errOut.str(), std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
+        }
+    }
+
+    //////////////////////////////////////////////////////////////////////////////////////////////////////
+    /////////////////////////////// Flex gDNA diagnostic metadata (strictly Flex-gated)
+    {
+        const string gdnaMode = lowerStringLocal(flexGdnaModeStr);
+        if (gdnaMode == "no") {
+            flexGdnaMode = FlexGdnaOff;
+        } else if (gdnaMode == "auto" || gdnaMode.empty()) {
+            flexGdnaMode = FlexGdnaAuto;
+        } else if (gdnaMode == "yes") {
+            flexGdnaMode = FlexGdnaRequired;
+        } else {
+            ostringstream errOut;
+            errOut << "EXITING because of fatal PARAMETERS error: unrecognized option in --soloFlexGdna="
+                   << flexGdnaModeStr << "\n";
+            errOut << "SOLUTION: use allowed option: auto OR yes OR no\n";
+            exitWithError(errOut.str(), std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
+        }
+
+        flexGdnaReady = false;
+        FlexGdnaProbeMetadata::instance().reset();
+        const bool flexFilterEnabled =
+            lowerStringLocal(runFlexFilterStr) != "no";
+        if (flexMode && flexGdnaMode == FlexGdnaRequired
+            && !flexFilterEnabled) {
+            ostringstream errOut;
+            errOut
+                << "EXITING because --soloFlexGdna yes requires final FlexFilter "
+                   "cell calls, but --soloRunFlexFilter no was selected.\n";
+            errOut
+                << "SOLUTION: enable --soloRunFlexFilter or select "
+                   "--soloFlexGdna auto/no.\n";
+            exitWithError(errOut.str(), std::cerr, pP->inOut->logMain,
+                          EXIT_CODE_PARAMETER, *pP);
+        } else if (flexMode && flexGdnaMode == FlexGdnaAuto
+                   && !flexFilterEnabled) {
+            pP->inOut->logMain
+                << "Flex gDNA diagnostic: unavailable in auto mode "
+                   "(FlexFilter is disabled)\n";
+        } else if (flexMode && flexGdnaMode != FlexGdnaOff) {
+            const string discovered = FlexGdnaProbeMetadata::discoverProbeCsv(
+                flexGdnaProbeSetPath, probeListPath, pP->pGe.gDir);
+            string gdnaError;
+            if (!discovered.empty()) {
+                flexGdnaReady = FlexGdnaProbeMetadata::instance().load(
+                    discovered, probeListPath, &gdnaError);
+            } else {
+                gdnaError = "filtered probe CSV was not found";
+            }
+
+            if (flexGdnaReady) {
+                pP->inOut->logMain
+                    << "Flex gDNA diagnostic: probe metadata loaded from "
+                    << FlexGdnaProbeMetadata::instance().probeCsvPath()
+                    << " (probes=" << FlexGdnaProbeMetadata::instance().totalProbes()
+                    << ", control_genes=" << FlexGdnaProbeMetadata::instance().controlGeneCount()
+                    << ")\n";
+            } else if (flexGdnaMode == FlexGdnaRequired) {
+                ostringstream errOut;
+                errOut << "EXITING because --soloFlexGdna yes requires complete probe-region metadata: "
+                       << gdnaError << "\n";
+                errOut << "SOLUTION: provide --soloFlexGdnaProbeSet <filtered_probe_set.csv> or use "
+                          "--soloFlexGdna auto/no.\n";
+                exitWithError(errOut.str(), std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
+            } else {
+                pP->inOut->logMain
+                    << "Flex gDNA diagnostic: unavailable in auto mode (" << gdnaError << ")\n";
+            }
         }
     }
 
@@ -649,7 +742,29 @@ void ParametersSolo::initialize(Parameters *pPin)
                 bool loaded = FlexHashScreenCache::instance().ensureLoaded(*this, &loadError);
                 if (loaded) {
                     pP->inOut->logMain << "H0/H1 hash screen: enabled with cache " << hashScreenFile
-                                       << " (" << FlexHashScreenCache::instance().recordCount() << " records)\n";
+                                       << " (" << FlexHashScreenCache::instance().recordCount()
+                                       << " records, format v"
+                                       << FlexHashScreenCache::instance().cacheVersion() << ")\n";
+                    if (flexGdnaMode != FlexGdnaOff
+                        && !FlexHashScreenCache::instance().hasRegionMetadata()) {
+                        if (flexGdnaMode == FlexGdnaRequired) {
+                            ostringstream errOut;
+                            errOut
+                                << "EXITING because --soloFlexGdna yes requires a v3 H0/H1 cache "
+                                   "with probe-region metadata, but the active cache is format v"
+                                << FlexHashScreenCache::instance().cacheVersion() << ": "
+                                << hashScreenFile << "\n";
+                            errOut
+                                << "SOLUTION: regenerate the cache with this STAR version, use "
+                                   "--no-hash-screen yes, or select --soloFlexGdna auto/no.\n";
+                            exitWithError(errOut.str(), std::cerr, pP->inOut->logMain,
+                                          EXIT_CODE_PARAMETER, *pP);
+                        }
+                        pP->inOut->logMain
+                            << "Flex gDNA diagnostic: active H0/H1 cache lacks probe-region "
+                               "metadata; mapping remains enabled but the diagnostic will be "
+                               "reported unavailable\n";
+                    }
                 } else {
                     hashScreenEnabled = false;
                     pP->inOut->logMain << "H0/H1 hash screen: disabled (" << loadError << "): " << hashScreenFile << "\n";
@@ -704,7 +819,7 @@ void ParametersSolo::initialize(Parameters *pPin)
         // If neither new flag is set, flexFilterTotalExpected keeps its value (backwards compatibility)
         
         // Validate required parameters when enabled
-        if (runFlexFilter && flexFilterTotalExpected == 0) {
+        if (runFlexFilter && !skipProcessing && flexFilterTotalExpected == 0) {
             ostringstream errOut;
             errOut << "EXITING because of fatal input ERROR: FlexFilter requires expected cells count.\n";
             errOut << "       Use one of:\n";
@@ -1238,8 +1353,13 @@ void ParametersSolo::initialize(Parameters *pPin)
         pP->inOut->logMain << "Built cbWLhash: " << kh_size(cbWLhash) << " entries, "
                            << kh_n_buckets(cbWLhash) << " buckets" << endl;
         
-        // Initialize CbCorrector instance for inline CB correction
-        if (cbWLyes && !cbWLstr.empty()) {
+        // The CbCorrector precomputes every one-mismatch barcode variant.  It
+        // is required by the inline correction/hash paths, but standard
+        // STARsolo uses matchCBtoWL() and does not consume this structure.
+        // Building it unconditionally for the 10x 3M whitelist costs several
+        // GB and serial startup time without affecting the legacy matrix.
+        const bool needCbCorrector = inlineCBCorrection || inlineHashMode;
+        if (needCbCorrector && cbWLyes && !cbWLstr.empty()) {
             cbCorrector = std::make_shared<CbCorrector>(cbWLstr, /*maxHamming=*/1);
             pP->inOut->logMain << "Initialized CbCorrector with " << cbWLsize << " CBs" << endl;
             // Debug: verify initialization
@@ -1249,7 +1369,9 @@ void ParametersSolo::initialize(Parameters *pPin)
                 pP->inOut->logMain << "ERROR: CbCorrector initialization failed (nullptr)" << endl;
             }
         } else {
-            pP->inOut->logMain << "CbCorrector NOT initialized: cbWLyes=" << cbWLyes << ", cbWLstr.empty()=" << cbWLstr.empty() << endl;
+            cbCorrector.reset();
+            pP->inOut->logMain << "CbCorrector not required: inlineCBCorrection="
+                               << inlineCBCorrection << ", inlineHashMode=" << inlineHashMode << endl;
         }
         
         // Legacy precompute path (currently unused by the in-flight resolver):

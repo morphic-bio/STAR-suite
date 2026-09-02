@@ -94,6 +94,14 @@ log "Building STAR index..."
   > "${OUTDIR}/index.log" 2>&1 \
   || die "genomeGenerate failed"
 
+# This single-exon GTF deliberately has no splice junctions. Keep that edge
+# case explicit: it previously entered sjdb insertion and wrote past the packed
+# suffix-array allocation after index generation had otherwise completed.
+SJDB_N=$(awk 'NR == 1 {print $1}' "${INDEX_DIR}/sjdbInfo.txt")
+[[ "${SJDB_N}" == "0" ]] \
+  || die "synthetic single-exon GTF unexpectedly produced ${SJDB_N:-unknown} junctions"
+log "Confirmed zero-junction GTF genomeGenerate edge case"
+
 # ── Generate reads with and without adapter contamination ─────────────
 FASTQ_DIR="${OUTDIR}/fastq"
 mkdir -p "${FASTQ_DIR}"

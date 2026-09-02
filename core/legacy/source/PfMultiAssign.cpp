@@ -1123,6 +1123,11 @@ AssignResult runAssignBarcodes(const string& whitelist,
                      const AssignOptions& options) {
     vector<string> cbqPaths;
     const bool useCbqInput = resolveCbqSources(fastqDir, &cbqPaths);
+    // Feature assignment may be launched asynchronously during STAR
+    // initialization, before mapThreadsSpawn configures the shared permit
+    // pool. Without this barrier the whole FEATURE arm can finish through
+    // the disabled-hook fast path and never participate in balancing.
+    waitForFeaturePermitInterface(options.enableStarDynamicPermitHooks);
     const string cbqModeRequested = normalizeCbqMode(options.cbqMode);
     if (cbqModeRequested != "auto" &&
         cbqModeRequested != "stream" &&
@@ -1369,7 +1374,7 @@ void waitForFeaturePermitInterface(bool hooksEnabled) {
     while (!g_threadChunks.mapPermitEnabled()) {
         if (std::chrono::steady_clock::now() >= deadline) {
             throw std::runtime_error(
-                "table import: timed out waiting for dynamic FEATURE permit interface");
+                "feature assignment: timed out waiting for dynamic FEATURE permit interface");
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(kPollIntervalMs));
     }

@@ -164,7 +164,9 @@ void SoloReadFeature::mergeInlineHash(SoloReadFeature &other)
             if (absent) {
                 kh_val(inlineHash_, dest_iter) = count;
             } else {
-                kh_val(inlineHash_, dest_iter) += count;
+                kh_val(inlineHash_, dest_iter) = pSolo.flexMode
+                    ? flexGdnaMergeValue(kh_val(inlineHash_, dest_iter), count)
+                    : kh_val(inlineHash_, dest_iter) + count;
             }
         }
     }

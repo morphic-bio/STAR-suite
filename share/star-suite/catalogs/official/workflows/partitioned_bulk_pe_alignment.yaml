@@ -1,0 +1,38 @@
+id: starsuite.official/partitioned-bulk-pe-alignment
+title: Partitioned bulk paired-end alignment
+summary: Validate a provider-neutral partition manifest, align partitions, and gather BAMs after complete success.
+kind: shell_workflow
+entry_script: scripts/run_partitioned_bulk_pe_alignment.sh
+supported_modes: [local, dry-run-capable, slurm-compatible]
+caveats:
+  - This recipe consumes partitions and never creates them.
+  - Gathering is valid for coordinate-sorted alignment BAMs; assay-level count matrices require a purpose-built reduction contract.
+  - The default is a read-only plan. Execution requires the explicit execute flag.
+default_output_layout: <output-dir>/partitions/ plus Aligned.sortedByCoord.out.bam
+scripts:
+  - {role: entry, path: scripts/run_partitioned_bulk_pe_alignment.sh, language: bash}
+  - {role: manifest_validator, path: scripts/validate_partition_manifest.py, language: python}
+stages:
+  - {name: validate, title: Validate partition manifest, script: scripts/validate_partition_manifest.py}
+  - {name: scatter, title: Align declared partitions, script: scripts/run_partitioned_bulk_pe_alignment.sh}
+  - {name: gather, title: Gather coordinate-sorted BAMs, script: scripts/run_partitioned_bulk_pe_alignment.sh}
+parameter_groups:
+  - {name: inputs, title: Inputs, parameters: [partition_manifest, star_bin, genome_dir]}
+  - {name: output, title: Output, parameters: [output_dir, skip_gather]}
+  - {name: resources, title: Resources, parameters: [threads_per_partition, max_parallel, gather_threads]}
+  - {name: safety, title: Safety, parameters: [execute]}
+parameters:
+  - {name: partition_manifest, cli_flag: --partition-manifest, type: file, required: true, path_must_exist: true, category: inputs}
+  - {name: output_dir, cli_flag: --output-dir, type: directory, required: true, is_output_root: true, category: output}
+  - {name: star_bin, cli_flag: --star-bin, type: file, required: true, path_must_exist: true, must_be_executable: true, category: inputs}
+  - {name: genome_dir, cli_flag: --genome-dir, type: directory, required: true, path_must_exist: true, category: inputs}
+  - {name: threads_per_partition, cli_flag: --threads-per-partition, type: int, required: false, default: 8, category: resources}
+  - {name: max_parallel, cli_flag: --max-parallel, type: int, required: false, default: 1, category: resources}
+  - {name: gather_threads, cli_flag: --gather-threads, type: int, required: false, default: 8, category: resources}
+  - {name: skip_gather, cli_flag: --skip-gather, type: bool, required: false, default: false, category: output}
+  - {name: execute, cli_flag: --execute, type: bool, required: false, default: false, category: safety}
+constraints:
+  - {kind: positive, params: [threads_per_partition, max_parallel, gather_threads], message: Resource counts must be positive.}
+rendering:
+  flag_order: [partition_manifest, output_dir, star_bin, genome_dir, threads_per_partition, max_parallel, gather_threads, skip_gather, execute]
+

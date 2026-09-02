@@ -4,8 +4,12 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SRC_BIN="${SCRIPT_DIR}/bin/STAR"
-MOLECULE_FIRST_TOOLS=(molecule_first_resolver molecule_first_bam_ledger molecule_first_materialize)
+COMPANION_TOOLS=(
+  molecule_first_resolver molecule_first_bam_ledger molecule_first_materialize
+  transcriptvb_finalize trim_qc_fastq trim_qc_merge
+)
 METADATA_FILE="${SCRIPT_DIR}/release-metadata.env"
+SRC_SHARE="${SCRIPT_DIR}/share/star-suite"
 
 PREFIX=""
 BINDIR=""
@@ -77,12 +81,18 @@ if [[ ! -x "${SRC_BIN}" ]]; then
   echo "ERROR: bundled binary not found: ${SRC_BIN}" >&2
   exit 1
 fi
-for tool in "${MOLECULE_FIRST_TOOLS[@]}"; do
+for tool in "${COMPANION_TOOLS[@]}"; do
   if [[ ! -x "${SCRIPT_DIR}/bin/${tool}" ]]; then
     echo "ERROR: bundled binary not found: ${SCRIPT_DIR}/bin/${tool}" >&2
     exit 1
   fi
 done
+if [[ ! -f "${SRC_SHARE}/SNAPSHOTS.json" \
+    || ! -f "${SRC_SHARE}/catalogs/official/catalog.yaml" \
+    || ! -f "${SRC_SHARE}/evidence/official/schema/record-v1.schema.json" ]]; then
+  echo "ERROR: bundled official recipe/provenance snapshots are incomplete" >&2
+  exit 1
+fi
 
 if [[ -f "${METADATA_FILE}" ]]; then
   # shellcheck disable=SC1090
@@ -118,7 +128,7 @@ if [[ -e "${TARGET_PATH}" && "${FORCE}" -ne 1 ]]; then
     exit 1
   fi
 fi
-for tool in "${MOLECULE_FIRST_TOOLS[@]}"; do
+for tool in "${COMPANION_TOOLS[@]}"; do
   target="${BINDIR}/${tool}"
   if [[ -e "${target}" && "${FORCE}" -ne 1 ]] && ! cmp -s "${SCRIPT_DIR}/bin/${tool}" "${target}"; then
     echo "ERROR: target already exists: ${target} (use --force to overwrite)" >&2
@@ -126,12 +136,23 @@ for tool in "${MOLECULE_FIRST_TOOLS[@]}"; do
   fi
 done
 
+SHAREDIR="${PREFIX}/share/star-suite"
+if [[ -d "${SHAREDIR}" && "${FORCE}" -ne 1 ]]; then
+  if ! diff -qr "${SRC_SHARE}" "${SHAREDIR}" >/dev/null; then
+    echo "ERROR: installed STAR Suite data differs at ${SHAREDIR} (use --force to update)" >&2
+    exit 1
+  fi
+else
+  mkdir -p "${SHAREDIR}"
+  cp -a "${SRC_SHARE}/." "${SHAREDIR}/"
+fi
+
 tmp_target="${TARGET_PATH}.tmp.$$"
 cp "${SRC_BIN}" "${tmp_target}"
 chmod 0755 "${tmp_target}"
 mv -f "${tmp_target}" "${TARGET_PATH}"
 
-for tool in "${MOLECULE_FIRST_TOOLS[@]}"; do
+for tool in "${COMPANION_TOOLS[@]}"; do
   target="${BINDIR}/${tool}"
   temporary="${target}.tmp.$$"
   cp "${SCRIPT_DIR}/bin/${tool}" "${temporary}"
@@ -148,3 +169,5 @@ if [[ -n "${GLIBC_BASELINE:-}" ]]; then
   echo "Binary compatibility baseline: glibc ${GLIBC_BASELINE}+"
 fi
 warn_if_path_missing "${BINDIR}"
+echo "Official recipes: ${SHAREDIR}/catalogs/official/catalog.yaml"
+echo "Official evidence: ${SHAREDIR}/evidence/official"

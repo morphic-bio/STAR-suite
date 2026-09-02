@@ -27,6 +27,8 @@
 #include "SamtoolsSorter.h"
 #include "Transcriptome.h"
 #include "SpatialFeatureSidecar.h"
+#include "SpatialR1FastqTap.h"
+#include "SpatialGex.h"
 #include "CountingSinkStress.h"
 #include "signalFromBAM.h"
 #include "mapThreadsSpawn.h"
@@ -40,8 +42,10 @@
 #include "ProbeListIndex.h"
 #include "FlexHashCacheGenerate.h"
 #include "TranscriptQuantEC.h"
+#include "TranscriptVBSidecar.h"
 #include "LibFormatDetection.h"
 #include "TrimQcOutput.h"
+#include "TrimQcShard.h"
 #include "vb_engine.h"
 #include "em_engine.h"
 #include "ec_loader.h"
@@ -179,6 +183,86 @@ void writeTranscriptVBEqDump(const std::string& path, const ECTable& ecTable, co
         }
         out << "\t" << ec.count << "\n";
     }
+}
+
+std::string transcriptVBDictionaryDigest(const Transcriptome& tr) {
+    std::ostringstream serialized;
+    serialized << "star-suite-transcript-dictionary-v1\n" << tr.nTr << '\n' << tr.nGe << '\n';
+    for (uint32_t i = 0; i < tr.nTr; ++i) {
+        const std::string& transcript = tr.trID[i];
+        const uint32_t gene_index = tr.trGene == nullptr ? UINT32_MAX : tr.trGene[i];
+        serialized << transcript.size() << ':' << transcript << '\t'
+                   << tr.trLen[i] << '\t' << gene_index << '\n';
+    }
+    for (uint32_t i = 0; i < tr.nGe; ++i) {
+        const std::string& gene = tr.geID[i];
+        serialized << gene.size() << ':' << gene << '\n';
+    }
+    return transcript_vb_sidecar::sha256Hex(serialized.str());
+}
+
+std::string transcriptVBFileFingerprint(const std::string& path) {
+    if (path.empty() || path == "-") return "unset";
+    struct stat info;
+    std::ostringstream identity;
+    identity << path;
+    if (::stat(path.c_str(), &info) == 0) {
+        identity << "\nsize=" << static_cast<unsigned long long>(info.st_size)
+                 << "\nmtime=" << static_cast<long long>(info.st_mtime);
+    } else {
+        identity << "\nstat=unavailable";
+    }
+    return transcript_vb_sidecar::sha256Hex(identity.str());
+}
+
+std::string transcriptVBQuantParameterDigest(const Parameters& P) {
+    std::ostringstream values;
+    values << std::setprecision(17)
+           << "schema=star-suite-transcriptvb-quant-v1\n"
+           << "vb=" << P.quant.transcriptVB.vb << '\n'
+           << "prior=" << P.quant.transcriptVB.vbPrior << '\n'
+           << "gc_bias=" << P.quant.transcriptVB.gcBias << '\n'
+           << "gene_output=" << P.quant.transcriptVB.geneOutput << '\n'
+           << "genes_tximport=" << P.quant.transcriptVB.genesTximport << '\n'
+           << "lib_type=" << P.quant.transcriptVB.libType << '\n'
+           << "error_model=" << P.quant.transcriptVB.errorModelMode << '\n'
+           << "frag_length_dist=" << P.quant.transcriptVB.fragLengthDistInt << '\n'
+           << "effective_length=" << P.quant.transcriptVB.effectiveLengthCorrectionInt << '\n';
+    return transcript_vb_sidecar::sha256Hex(values.str());
+}
+
+std::string transcriptVBCalibrationDigest(const Parameters& P) {
+    std::ostringstream values;
+    values << "schema=star-suite-transcriptvb-calibration-v1\n"
+           << "library_format_id="
+           << static_cast<unsigned>(P.quant.transcriptVB.detectedLibFormatId) << '\n'
+           << "detection_complete=" << P.quant.transcriptVB.detectionComplete << '\n'
+           << "preburnin_fragments=" << P.quant.transcriptVB.preBurninFrags << '\n'
+           << "mini_batch_size=" << P.quant.transcriptVB.miniBatchSize << '\n'
+           << "error_model=" << P.quant.transcriptVB.errorModelMode << '\n';
+    return transcript_vb_sidecar::sha256Hex(values.str());
+}
+
+std::string transcriptVBInputManifestDigest(const Parameters& P) {
+    std::ostringstream values;
+    values << "schema=star-suite-transcriptvb-input-manifest-v1\n";
+    if (!isUnsetToken(P.quant.transcriptVB.sidecarInputId)) {
+        values << "stable_input_id=" << P.quant.transcriptVB.sidecarInputId << '\n';
+        return transcript_vb_sidecar::sha256Hex(values.str());
+    }
+    for (const std::string& path : P.readFilesIn) {
+        values << "input=" << path << '\n';
+        struct stat info;
+        if (::stat(path.c_str(), &info) == 0) {
+            values << "size=" << static_cast<unsigned long long>(info.st_size)
+                   << "\nmtime=" << static_cast<long long>(info.st_mtime) << '\n';
+        } else {
+            values << "stat=unavailable\n";
+        }
+    }
+    for (const std::string& command : P.readFilesCommand) values << "command=" << command << '\n';
+    for (const std::string& manifest : P.readFilesManifest) values << "manifest=" << manifest << '\n';
+    return transcript_vb_sidecar::sha256Hex(values.str());
 }
 
 void writeTranscriptVBDoubleVectorDump(const std::string& path,
@@ -462,6 +546,7 @@ void usage(int usageType)
     cout << "STAR-suite version=" << STAR_SUITE_VERSION << "\n";
     cout << "STAR upstream version=" << STAR_UPSTREAM_VERSION << "\n";
     cout << "STAR genome compatibility version=" << STAR_GENOME_COMPAT_VERSION << "\n";
+    cout << "STAR-suite source revision=" << STAR_SUITE_SOURCE_REVISION << "\n";
     cout << "STAR compilation time,server,dir=" << COMPILATION_TIME_PLACE << "\n";
     cout << "For more details see:\n";
     cout << "<https://github.com/alexdobin/STAR>\n";
@@ -576,6 +661,9 @@ int main(int argInN, char *argIn[])
     // transcriptome placeholder (loaded only if P.quant.yes)
     Transcriptome *transcriptomeMain = nullptr;
     std::unique_ptr<spatial_feature_sidecar::Writer> spatialFeatureWriter;
+    std::unique_ptr<spatial_r1_fastq_tap::Writer> spatialR1FastqTapWriter;
+    std::unique_ptr<spatial_gex::Pipeline> spatialGexPipeline;
+    std::vector<std::string> spatialFlexFeatureIds;
     std::vector<double> vbGenePosterior;
     bool vbGenePosteriorReady = false;
 
@@ -672,16 +760,124 @@ int main(int argInN, char *argIn[])
     { // load transcriptome
         transcriptomeMain = new Transcriptome(P);
 
+        if (P.soloSpatialGexIntegratedEnabled
+            || P.soloSpatialFlexIntegratedEnabled) {
+            const bool spatialFlex = P.soloSpatialFlexIntegratedEnabled;
+            if (spatialFlex) {
+                ProbeListIndex featureAxis;
+                uint32_t deprecatedCount = 0;
+                if (!featureAxis.load(P.pSolo.probeListPath,
+                                      P.pSolo.removeDeprecated,
+                                      &deprecatedCount)
+                    || featureAxis.empty()) {
+                    exitWithError(
+                        "EXITING because integrated spatial Flex could not load "
+                        "the probe feature axis: " + P.pSolo.probeListPath + "\n",
+                        std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
+                }
+                if (featureAxis.size() > 0x7FFFu) {
+                    exitWithError(
+                        "EXITING because integrated spatial Flex probe feature "
+                        "axis exceeds the 15-bit resolver limit\n",
+                        std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
+                }
+                spatialFlexFeatureIds = featureAxis.orderedGeneIds();
+            }
+            spatial_gex::PipelineConfig spatialConfig;
+            spatialConfig.barcodeContractDirectory = P.soloSpatialBarcodeContract;
+            spatialConfig.bc1OligosPath = P.soloSpatialBc1Oligos;
+            spatialConfig.bc2OligosPath = P.soloSpatialBc2Oligos;
+            spatialConfig.outputDirectory = P.outFileNamePrefix
+                + (spatialFlex ? "SpatialFlex.out" : "SpatialGex.out");
+            spatialConfig.temporaryDirectory = P.outFileTmp;
+            spatialConfig.starSuiteVersion = STAR_SUITE_VERSION;
+            spatialConfig.sourceRevision = STAR_SUITE_SOURCE_REVISION;
+            if (spatialFlex) {
+                std::string digestError;
+                spatialConfig.featureAxisPath = P.pSolo.probeListPath;
+                spatialConfig.featureAxisSha256 =
+                    spatial_feature_sidecar::sha256File(
+                        P.pSolo.probeListPath, digestError);
+                if (spatialConfig.featureAxisSha256.empty()) {
+                    exitWithError(
+                        "EXITING because integrated spatial Flex could not hash "
+                        "the probe feature axis: " + digestError + "\n",
+                        std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
+                }
+                spatialConfig.featureCachePath = P.pSolo.hashScreenFile;
+                spatialConfig.featureCacheSha256 =
+                    spatial_feature_sidecar::sha256File(
+                        P.pSolo.hashScreenFile, digestError);
+                if (spatialConfig.featureCacheSha256.empty()) {
+                    exitWithError(
+                        "EXITING because integrated spatial Flex could not hash "
+                        "the H0/H1 cache: " + digestError + "\n",
+                        std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
+                }
+                spatialConfig.featureCount =
+                    static_cast<std::uint32_t>(spatialFlexFeatureIds.size());
+                P.inOut->logMain
+                    << "Integrated spatial Flex feature axis: "
+                    << spatialConfig.featureAxisPath << " sha256="
+                    << spatialConfig.featureAxisSha256 << " features="
+                    << spatialConfig.featureCount << "\n"
+                    << "Integrated spatial Flex H0/H1 cache: "
+                    << spatialConfig.featureCachePath << " sha256="
+                    << spatialConfig.featureCacheSha256 << "\n";
+            }
+            spatialConfig.expectedReads = P.soloSpatialExpectedReads;
+            spatialConfig.expectedCandidates = P.soloSpatialExpectedCandidates;
+            spatialConfig.threads = static_cast<std::uint32_t>(P.runThreadN);
+            spatialConfig.products = P.soloSpatialAssignmentProductMask;
+            spatialConfig.scales = P.soloSpatialBinSizeMask;
+            spatialConfig.memoryFraction = P.soloSpatialMemoryFraction;
+            spatialConfig.overflowPolicy = P.soloSpatialOverflowSpill
+                ? spatial_gex::OverflowPolicy::Spill : spatial_gex::OverflowPolicy::Fail;
+            spatialConfig.spillHighWaterCandidatesPerThread =
+                P.soloSpatialSpillHighWaterCandidates;
+            spatialConfig.requirePairedCompletion = spatialFlex;
+            spatialConfig.flexFeatureMode = spatialFlex;
+            std::string spatialError;
+            spatialGexPipeline = spatial_gex::Pipeline::create(spatialConfig, spatialError);
+            if (!spatialGexPipeline) {
+                exitWithError("EXITING because integrated spatial "
+                                  + string(spatialFlex ? "Flex" : "GEX")
+                                  + " initialization failed: "
+                                  + spatialError + "\n",
+                              std::cerr, P.inOut->logMain, EXIT_CODE_PARAMETER, P);
+            }
+            P.spatialGexPipeline = spatialGexPipeline.get();
+            P.inOut->logMain << "Integrated spatial "
+                             << (spatialFlex ? "Flex" : "GEX") << " output: "
+                             << spatialConfig.outputDirectory << "\n"
+                             << "Integrated spatial all-memory peak bytes: "
+                             << spatialGexPipeline->memoryModel().peakBytes
+                             << "; bounded downstream spool bytes: "
+                             << spatialGexPipeline->memoryModel().downstreamSpoolBytes
+                             << "; bounded spool disk bytes: "
+                             << spatialGexPipeline->memoryModel()
+                                    .downstreamSpoolDiskBytes
+                             << "; selected estimate bytes: "
+                             << (spatialConfig.overflowPolicy
+                                     == spatial_gex::OverflowPolicy::Spill
+                                     ? spatialGexPipeline->memoryModel()
+                                           .downstreamSpoolBytes
+                                     : spatialGexPipeline->memoryModel().peakBytes)
+                             << "; budget bytes: "
+                             << spatialGexPipeline->memoryBudgetBytes() << "\n" << flush;
+        }
+
         if (P.soloSpatialFeatureSidecarEnabled) {
             spatial_feature_sidecar::WriterConfig sidecarConfig;
             sidecarConfig.prefix = P.soloSpatialFeatureSidecar;
             sidecarConfig.starSuiteVersion = STAR_SUITE_VERSION;
-            sidecarConfig.sourceRevision = GIT_BRANCH_COMMIT_DIFF;
+            sidecarConfig.sourceRevision = STAR_SUITE_SOURCE_REVISION;
             sidecarConfig.featureType = "GeneFull";
             sidecarConfig.strand = P.pSolo.strand;
             sidecarConfig.crMultimapRescue = P.pSolo.crMultimapRescue;
             sidecarConfig.crIntronicFallback = P.pSolo.crMultimapRescueIntronic;
-            sidecarConfig.policy = "GeneFull;MultiGeneUMI_CR;1MM_CR;Unique;Forward;CellFilter=None;SAM=None";
+            sidecarConfig.policy = "GeneFull;MultiGeneUMI_CR;1MM_CR;Unique;Forward;CellFilter=None;SAM=None;CrRescueEvidence="
+                + P.pSolo.crMultimapRescueEvidenceStr;
             std::ostringstream inputManifest;
             inputManifest << "schema\tstar_suite.spatial_feature_inputs.v1\n";
             for (std::size_t end = 0; end < P.readFilesNames.size(); ++end) {
@@ -714,6 +910,19 @@ int main(int argInN, char *argIn[])
             P.spatialFeatureSidecarWriter = spatialFeatureWriter.get();
             P.inOut->logMain << "Spatial GeneFull sidecar output prefix: "
                              << P.soloSpatialFeatureSidecar << "\n" << flush;
+
+            if (P.soloSpatialR1FastqTapEnabled) {
+                spatialR1FastqTapWriter.reset(new spatial_r1_fastq_tap::Writer());
+                std::string tapError;
+                if (!spatialR1FastqTapWriter->open(P.soloSpatialR1FastqTap, true, tapError)) {
+                    exitWithError("EXITING because the fused raw-R1 FASTQ tap could not be opened: "
+                                      + tapError + "\n",
+                                  std::cerr, P.inOut->logMain, EXIT_CODE_FILE_OPEN, P);
+                }
+                P.spatialR1FastqTapWriter = spatialR1FastqTapWriter.get();
+                P.inOut->logMain << "Fused raw-R1 FASTQ tap: "
+                                 << P.soloSpatialR1FastqTap << "\n" << flush;
+            }
         }
 
         // SNP mask build pre-pass (if requested)
@@ -2100,6 +2309,24 @@ int main(int argInN, char *argIn[])
         }
     }
 
+    if (spatialR1FastqTapWriter) {
+        const std::uint64_t tappedReads = spatialR1FastqTapWriter->recordsWritten();
+        std::string tapError;
+        if (!spatialR1FastqTapWriter->close(tapError)) {
+            exitWithError("EXITING because the fused raw-R1 FASTQ tap could not be finalized: "
+                              + tapError + "\n",
+                          std::cerr, P.inOut->logMain, EXIT_CODE_FILE_WRITE, P);
+        }
+        P.spatialR1FastqTapWriter = nullptr;
+        if (tappedReads != P.iReadAll) {
+            exitWithError("EXITING because the fused raw-R1 FASTQ tap read count differs from STAR input\n",
+                          std::cerr, P.inOut->logMain, EXIT_CODE_INCONSISTENT_DATA, P);
+        }
+        P.inOut->logMain << timeMonthDayTime()
+                         << " ..... finalized fused raw-R1 FASTQ tap (reads="
+                         << tappedReads << ")\n" << flush;
+    }
+
     if (spatialFeatureWriter) {
         std::string sidecarError;
         if (!spatialFeatureWriter->finalize(P.iReadAll, sidecarError)) {
@@ -2111,6 +2338,32 @@ int main(int argInN, char *argIn[])
         P.inOut->logMain << timeMonthDayTime()
                          << " ..... finalized spatial GeneFull sidecar (reads="
                          << P.iReadAll << ")\n" << flush;
+    }
+
+    if (spatialGexPipeline) {
+        const std::vector<std::string> &geneIds =
+            P.soloSpatialFlexIntegratedEnabled
+                ? spatialFlexFeatureIds
+                : (transcriptomeMain->geIDCanonical.empty()
+                    ? transcriptomeMain->geID
+                    : transcriptomeMain->geIDCanonical);
+        std::string spatialError;
+        if (!spatialGexPipeline->finalize(geneIds, spatialError)) {
+            exitWithError("EXITING because integrated spatial "
+                              + string(P.soloSpatialFlexIntegratedEnabled
+                                           ? "Flex" : "GEX")
+                              + " finalization failed: "
+                              + spatialError + "\n",
+                          std::cerr, P.inOut->logMain, EXIT_CODE_INCONSISTENT_DATA, P);
+        }
+        const spatial_gex::PipelineSummary &summary = spatialGexPipeline->summary();
+        P.spatialGexPipeline = nullptr;
+        P.inOut->logMain << timeMonthDayTime()
+                         << " ..... finalized integrated spatial "
+                         << (P.soloSpatialFlexIntegratedEnabled ? "Flex" : "GEX")
+                         << " (joined_reads="
+                         << summary.joinedReads << ", cliques=" << summary.readCliques
+                         << ", hard_molecules=" << summary.hardMolecules << ")\n" << flush;
     }
 
     // close some BAM files
@@ -2304,7 +2557,137 @@ int main(int argInN, char *argIn[])
                 mergedEC.merge(*RAchunk[ichunk]->RA->quantEC);
             }
         }
+
+        if (!P.quant.transcriptVB.sidecarIn.empty()) {
+            std::vector<transcript_vb_sidecar::Sidecar> shard_sidecars;
+            shard_sidecars.reserve(P.quant.transcriptVB.sidecarIn.size());
+            std::string sidecar_error;
+            for (const std::string& sidecar_path : P.quant.transcriptVB.sidecarIn) {
+                transcript_vb_sidecar::Sidecar shard;
+                if (!transcript_vb_sidecar::read(sidecar_path, shard, sidecar_error)) {
+                    ostringstream errOut;
+                    errOut << "EXITING because TranscriptVB could not read shard sidecar "
+                           << sidecar_path << ": " << sidecar_error << "\n";
+                    exitWithError(errOut.str(), std::cerr, P.inOut->logMain,
+                                  EXIT_CODE_PARAMETER, P);
+                }
+                shard_sidecars.push_back(std::move(shard));
+            }
+
+            transcript_vb_sidecar::Sidecar gathered;
+            if (!transcript_vb_sidecar::merge(shard_sidecars, gathered,
+                                              sidecar_error)) {
+                ostringstream errOut;
+                errOut << "EXITING because TranscriptVB could not gather shard sidecars: "
+                       << sidecar_error << "\n";
+                exitWithError(errOut.str(), std::cerr, P.inOut->logMain,
+                              EXIT_CODE_PARAMETER, P);
+            }
+
+            transcript_vb_sidecar::Metadata expected = gathered.metadata;
+            expected.source_revision = STAR_SUITE_SOURCE_REVISION;
+            expected.reference_id = P.pGe.gDir;
+            expected.transcript_dictionary_sha256 =
+                transcriptVBDictionaryDigest(*transcriptomeMain);
+            std::string transcriptome_fasta = P.pGe.transcriptomeFasta;
+            if (transcriptome_fasta.empty() || transcriptome_fasta == "-") {
+                transcriptome_fasta = P.pGe.gDir + "/transcriptome.fa";
+            }
+            expected.transcriptome_fasta_fingerprint =
+                transcriptVBFileFingerprint(transcriptome_fasta);
+            expected.quant_parameters_sha256 = transcriptVBQuantParameterDigest(P);
+            expected.calibration_sha256 = transcriptVBCalibrationDigest(P);
+            expected.sample_id = P.quant.transcriptVB.sidecarSampleId;
+            expected.input_manifest_sha256 = transcriptVBInputManifestDigest(P);
+            expected.transcript_count = transcriptomeMain->nTr;
+            expected.library_format_id = P.quant.transcriptVB.detectedLibFormatId;
+            if (!transcript_vb_sidecar::compatible(
+                    expected, gathered.metadata, sidecar_error) ||
+                !mergedEC.importEvidence(gathered.evidence, sidecar_error)) {
+                ostringstream errOut;
+                errOut << "EXITING because TranscriptVB rejected gathered shard evidence: "
+                       << sidecar_error << "\n";
+                exitWithError(errOut.str(), std::cerr, P.inOut->logMain,
+                              EXIT_CODE_PARAMETER, P);
+            }
+            P.iReadAll = gathered.metadata.pair_count;
+            P.inOut->logMain << "TranscriptVB gathered "
+                             << shard_sidecars.size() << " complete shard sidecars (pairs="
+                             << gathered.metadata.pair_count << ")\n";
+        }
+
+        if (!isUnsetToken(P.quant.transcriptVB.sidecarOut)) {
+            transcript_vb_sidecar::Sidecar sidecar;
+            sidecar.metadata.source_revision = STAR_SUITE_SOURCE_REVISION;
+            sidecar.metadata.reference_id = P.pGe.gDir;
+            sidecar.metadata.transcript_dictionary_sha256 =
+                transcriptVBDictionaryDigest(*transcriptomeMain);
+            std::string transcriptome_fasta = P.pGe.transcriptomeFasta;
+            if (transcriptome_fasta.empty() || transcriptome_fasta == "-") {
+                transcriptome_fasta = P.pGe.gDir + "/transcriptome.fa";
+            }
+            sidecar.metadata.transcriptome_fasta_fingerprint =
+                transcriptVBFileFingerprint(transcriptome_fasta);
+            sidecar.metadata.quant_parameters_sha256 =
+                transcriptVBQuantParameterDigest(P);
+            sidecar.metadata.calibration_sha256 =
+                transcriptVBCalibrationDigest(P);
+            sidecar.metadata.sample_id = P.quant.transcriptVB.sidecarSampleId;
+            sidecar.metadata.input_manifest_sha256 =
+                transcriptVBInputManifestDigest(P);
+            sidecar.metadata.transcript_count = transcriptomeMain->nTr;
+            sidecar.metadata.shard_ordinal =
+                P.quant.transcriptVB.sidecarShardOrdinal;
+            sidecar.metadata.shard_count =
+                P.quant.transcriptVB.sidecarShardCount;
+            sidecar.metadata.library_format_id =
+                P.quant.transcriptVB.detectedLibFormatId;
+            sidecar.metadata.first_pair =
+                P.quant.transcriptVB.sidecarFirstPair;
+            sidecar.metadata.pair_count = P.iReadAll;
+
+            sidecar.evidence.ec_table = mergedEC.getECTable();
+            sidecar.evidence.gc_counts = mergedEC.getObservedGC().getCounts();
+            sidecar.evidence.fld_state = mergedEC.getObservedFLD().snapshot();
+            sidecar.evidence.processed_fragments =
+                mergedEC.getNumProcessedFragments();
+            sidecar.evidence.dropped_incompat = mergedEC.getDroppedIncompat();
+            sidecar.evidence.dropped_missing_mate_fields =
+                mergedEC.getDroppedMissingMateFields();
+            sidecar.evidence.dropped_unknown_obs_fmt =
+                mergedEC.getDroppedUnknownObsFmt();
+
+            std::string sidecar_error;
+            if (!transcript_vb_sidecar::writeAtomic(
+                    P.quant.transcriptVB.sidecarOut, sidecar, sidecar_error)) {
+                ostringstream errOut;
+                errOut << "EXITING because TranscriptVB could not write its binary evidence sidecar: "
+                       << sidecar_error << "\n";
+                exitWithError(errOut.str(), std::cerr, P.inOut->logMain,
+                              EXIT_CODE_PARAMETER, P);
+            }
+            P.inOut->logMain << "TranscriptVB binary evidence sidecar written to: "
+                             << P.quant.transcriptVB.sidecarOut << "\n";
+
+            if (P.quant.transcriptVB.sidecarRoundTrip) {
+                transcript_vb_sidecar::Sidecar loaded;
+                if (!transcript_vb_sidecar::read(
+                        P.quant.transcriptVB.sidecarOut, loaded, sidecar_error) ||
+                    !transcript_vb_sidecar::compatible(
+                        sidecar.metadata, loaded.metadata, sidecar_error) ||
+                    !mergedEC.importEvidence(loaded.evidence, sidecar_error)) {
+                    ostringstream errOut;
+                    errOut << "EXITING because TranscriptVB could not reload its binary evidence sidecar: "
+                           << sidecar_error << "\n";
+                    exitWithError(errOut.str(), std::cerr, P.inOut->logMain,
+                                  EXIT_CODE_PARAMETER, P);
+                }
+                P.inOut->logMain
+                    << "TranscriptVB binary evidence sidecar passed integrity, metadata, and reload checks\n";
+            }
+        }
         
+        if (!P.quant.transcriptVB.sidecarOnly) {
         mergedEC.finalize();
         
         *P.inOut->logStdOut << "Merged " << mergedEC.getECTable().n_ecs << " equivalence classes from " << P.runThreadN << " threads\n"
@@ -2586,6 +2969,11 @@ int main(int argInN, char *argIn[])
             }
         }
         
+        } else {
+            P.inOut->logMain << "TranscriptVB sidecar-only worker completed; "
+                             << "per-shard VB/EM was intentionally skipped\n";
+        }
+
         *P.inOut->logStdOut << timeMonthDayTime() << " ..... finished transcript quantification\n"
                           << flush;
         P.inOut->logMain << timeMonthDayTime() << " ..... finished transcript quantification\n";
@@ -2969,6 +3357,27 @@ int main(int argInN, char *argIn[])
             }
 
             std::string stageLabel = (P.trimCutadapt == "Yes") ? "trimmed" : "raw";
+            // A sharded run wants the accumulator itself, not a rendered
+            // report: the reads are in memory exactly once, here, and the
+            // gather can merge these dumps without revisiting a read or a BAM.
+            if (!P.trimQcShardOut.empty() && P.trimQcShardOut != "-") {
+                TrimQcShardCounters shardCounters;
+                shardCounters.reads_processed       = g_statsAll.trimReadsProcessed;
+                shardCounters.reads_trimmed         = g_statsAll.trimReadsTrimmed;
+                shardCounters.reads_too_short       = g_statsAll.trimReadsTooShort;
+                shardCounters.bases_quality_trimmed = g_statsAll.trimBasesQualityTrimmed;
+                shardCounters.bases_adapter_trimmed = g_statsAll.trimBasesAdapterTrimmed;
+                shardCounters.pairs_processed       = g_statsAll.trimPairsProcessed;
+                shardCounters.pairs_dropped         = g_statsAll.trimPairsDropped;
+                shardCounters.pairs_kept            = g_statsAll.trimPairsKept;
+                std::string shardErr;
+                if (writeTrimQcShard(mergedTrimQc, shardCounters, P.trimQcShardOut, &shardErr)) {
+                    P.inOut->logMain << "Trim QC shard dump written to: " << P.trimQcShardOut << "\n";
+                } else {
+                    P.inOut->logMain << "WARNING: Failed to write trim QC shard dump: "
+                                     << shardErr << "\n";
+                }
+            }
             if (wantJson) {
                 if (writeTrimQcJson(mergedTrimQc, g_statsAll, qcJsonPath, stageLabel)) {
                     P.inOut->logMain << "Trim QC JSON written to: " << qcJsonPath << "\n";
@@ -3114,6 +3523,44 @@ int main(int argInN, char *argIn[])
         errOut << "EXITING because of fatal ERROR: Chromap ATAC integration failed\n"
                << "SOLUTION: check --chromapAtac* inputs and Chromap logs above.\n";
         exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_RUNTIME, P);
+    }
+
+    // This is the first point at which mapping, asynchronous feature
+    // assignment, and concurrent ATAC have all joined.  Earlier summaries are
+    // useful interval diagnostics but cannot establish the permit exit
+    // invariant for a multi-arm worker.
+    if (P.dynamicThreadInterface == 1) {
+        const ThreadControl::MapPermitSnapshot permitFinal =
+            g_threadChunks.mapPermitSnapshot();
+        P.inOut->logMain
+            << "Dynamic thread final invariant: available="
+            << permitFinal.availablePermits
+            << " configured=" << permitFinal.configuredPermits
+            << " target=" << permitFinal.targetPermits
+            << " inUse=" << permitFinal.inUsePermits
+            << " waiters=" << permitFinal.currentWaiters
+            << " mapInUse=" << permitFinal.mapDomain.inUse
+            << " featureInUse=" << permitFinal.featureDomain.inUse
+            << " atacInUse=" << permitFinal.atacDomain.inUse
+            << " atacRetainedLease=" << permitFinal.atacDomain.inUse
+            << "\n" << flush;
+        const bool fixedPoolIncomplete =
+            P.dynamicThreadAtacController == 2 &&
+            permitFinal.availablePermits != permitFinal.configuredPermits;
+        if (permitFinal.inUsePermits != 0 ||
+            permitFinal.currentWaiters != 0 ||
+            permitFinal.mapDomain.inUse != 0 ||
+            permitFinal.featureDomain.inUse != 0 ||
+            permitFinal.atacDomain.inUse != 0 ||
+            fixedPoolIncomplete) {
+            ostringstream errOut;
+            errOut << "EXITING because of fatal ERROR: dynamic permit exit "
+                   << "invariant failed after all application arms joined\n"
+                   << "SOLUTION: identify the MAP, FEATURE, or ATAC lease that "
+                   << "was not released; do not accept this worker output.\n";
+            exitWithError(errOut.str(), std::cerr, P.inOut->logMain,
+                          EXIT_CODE_RUNTIME, P);
+        }
     }
 
     if (!batchModeActive) {

@@ -267,8 +267,8 @@ Implementation status on `feature/binseq-input`:
   lanes, manifest lanes, single-end FASTQ, and a compact three-mate FASTQ
   case.
 - The smoke compares normalized dumps across plain/gzip/zcat and
-  comma-lane/manifest paths. Phase 3 now exercises the same module through
-  STAR's mapping chunk path.
+  comma-lane/manifest paths. The module is validated independently; ordinary
+  STAR FASTQ ingestion uses the direct chunk reader for performance.
 
 ### Phase 3: Re-implement FASTQ Behind The Contract
 
@@ -288,13 +288,22 @@ Exit criteria:
 - Core smoke tests pass.
 - A clean rebuild is performed before investigating any mismatch.
 
-Implementation status on `feature/binseq-input`:
+Implementation status:
 
-- `FastxInputModule` is now wired into STAR chunk ingestion for
-  `--readFilesType Fastx`, while preserving `readFilesNames`, `readFilesN`,
-  `readNends`, and read group compatibility fields for existing code paths.
-- The runtime path consumes module `InputRecord`s directly and handles EOF
-  without falling back to the legacy `istream` parser for Fastx input.
+- The first Phase 3 implementation wired `FastxInputModule::next_record()`
+  into ordinary STAR chunk ingestion. That implementation was removed from the
+  runtime hot path on 2026-08-09 after it was traced to the plain-GEX STARsolo
+  scaling regression reported in GitHub issue 3.
+- Record parsing, allocation, and reformatting occurred while STAR held
+  `mutexInRead`, making input throughput effectively serial. Ordinary
+  `--readFilesType Fastx` now uses STAR's direct chunk reader again, including
+  plain input, internal gzip, explicit `zcat`, comma-separated lanes, and
+  manifests.
+- `FastxInputModule` remains the contract oracle and is covered by its
+  standalone harness. Any future runtime integration must parse outside
+  `mutexInRead`, use bounded batches/reusable storage, and pass 16-to-64-thread
+  scaling and RSS comparisons against upstream STAR before becoming the
+  default.
 - `tests/run_fastx_contract_star_smoke.sh` covers plain FASTQ, internal gzip,
   explicit `zcat`, comma-separated lanes, manifest input, and the current
   Y/noY FASTQ gate.
@@ -310,10 +319,11 @@ Goal: validate real BINSEQ data against the contract before STAR integration.
 
 Tasks:
 
-- Install or build `bqtools` in a disposable tool location for fixture work:
+- Install the pinned `bqtools` oracle in a persistent user prefix for fixture
+  work (production CBQ input remains native C++):
 
 ```bash
-cargo install bqtools
+scripts/provision_bqtools_oracle.sh
 ```
 
 - Create synthetic CBQ fixtures from existing tiny FASTQ fixtures:

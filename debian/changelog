@@ -1,3 +1,69 @@
+star-suite (1.7.1-1) unstable; urgency=medium
+
+  * Restore STAR's direct chunk reader for ordinary Fastx input so STARsolo
+    mapping can scale with --runThreadN instead of parsing records under the
+    global input mutex.
+  * Avoid constructing the expanded one-mismatch barcode corrector for plain
+    STARsolo runs that use the established whitelist-matching path.
+  * Preserve output parity across thread counts and with upstream STAR in
+    upstream-compatible mode while reducing startup time and peak memory.
+  * Retain Fastx contract validation, manifest input, internal gzip, explicit
+    decompression-command, multi-lane, single-end, and Y/no-Y behavior.
+  * Report STAR Suite 1.7.1 from STAR --version.
+
+ -- STAR-suite Maintainers <maintainers@biodepot.example>  Sun, 09 Aug 2026 15:28:52 +0000
+
+star-suite (1.7.0-1) unstable; urgency=medium
+
+  * Add packaged TranscriptVB scatter/gather evidence finalization without
+    loading the genome index.
+  * Add additive per-shard trim-QC dumps and standalone FASTQ collection and
+    deterministic shard merging.
+  * Add parallel genome-index loading and an opt-in parallel TranscriptVB GC
+    background pass.
+  * Adopt the RapidMACS/librapidmacs naming contract for integrated Chromap
+    builds while retaining portable release artifacts.
+  * Fix genomeGenerate heap corruption when a supplied single-exon GTF
+    contains no splice junctions.
+  * Ship the pinned public recipe catalog and selective provenance evidence in
+    source, Debian, Docker, binary tarball, and compatibility-bundle releases.
+  * Report STAR Suite 1.7.0 from STAR --version.
+
+ -- STAR-suite Maintainers <maintainers@biodepot.example>  Sat, 08 Aug 2026 08:30:00 +0000
+
+star-suite (1.6.1-1) unstable; urgency=medium
+
+  * Replace the v1.6.0 release artifacts with builds that embed the exact full
+    source commit in STAR, spatial spill records, sidecars, and run summaries.
+  * Fail integrated spatial preflight before FASTQ mapping when a binary lacks
+    an immutable 40-character source revision.
+  * Validate source identity across static tarballs, compatibility bundles,
+    Debian/source packages, and Docker images.
+  * Publish the complete curated Visium HD GEX, native Flex, Flex gDNA, and
+    molecule-first release notes instead of incomplete automatic PR notes.
+  * Retain the final v1.6.0 scientific source tree without counting-policy or
+    matrix-policy changes.
+  * Report STAR Suite 1.6.1 from STAR and molecule_first_resolver --version.
+
+ -- STAR-suite Maintainers <maintainers@biodepot.example>  Tue, 28 Jul 2026 21:00:00 +0000
+
+star-suite (1.6.0-1) unstable; urgency=medium
+
+  * Add opt-in integrated Visium HD 3-prime GEX processing with fused spatial
+    barcode decoding, post-alignment GeneFull evidence, and molecule-first
+    strict, soft, hard, and gated-hard spatial matrices.
+  * Add bounded downstream spooling for clique resolution, candidate-specific
+    UMI correction, multigene reconciliation, and multi-scale materialization.
+  * Add deterministic annotated rescue, explicit experimental compatibility
+    evidence, N-containing spatial-barcode fallback, and full-slide guards.
+  * Fix Flex inline skip-processing validation, replay suppression,
+    alignment fallback, and hash-kept read accounting.
+  * Add default-off scRNA, spatial parity, Flex fallback, SLAM provenance,
+    CB/UB, and CR-compatible CRISPR release gates.
+  * Report STAR Suite 1.6.0 from STAR and molecule_first_resolver --version.
+
+ -- STAR-suite Maintainers <maintainers@biodepot.example>  Sat, 25 Jul 2026 17:51:51 +0000
+
 star-suite (1.5.0-1) unstable; urgency=medium
 
   * Add the native candidate-preserving read-to-clique-to-UMI reference

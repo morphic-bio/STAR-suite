@@ -317,7 +317,7 @@ void Genome::genomeLoad(){//allocate and load Genome
         P.inOut->logMain <<"Genome file size: "<<nGenome <<" bytes; state: good=" <<GenomeIn.good()\
                 <<" eof="<<GenomeIn.eof()<<" fail="<<GenomeIn.fail()<<" bad="<<GenomeIn.bad()<<"\n"<<flush;
         P.inOut->logMain <<"Loading Genome ... " << flush;
-        uint64 genomeReadBytesN=fstreamReadBig(GenomeIn,G,nGenome);
+        uint64 genomeReadBytesN=fstreamReadBigParallel(pGe.gDir+"/Genome",GenomeIn,G,nGenome,P.genomeLoadThreads);
         P.inOut->logMain <<"done! state: good=" <<GenomeIn.good()\
                          <<" eof="<<GenomeIn.eof()<<" fail="<<GenomeIn.fail()<<" bad="<<GenomeIn.bad()<<"; loaded "<<genomeReadBytesN<<" bytes\n" << flush;
         GenomeIn.close();
@@ -331,13 +331,13 @@ void Genome::genomeLoad(){//allocate and load Genome
         P.inOut->logMain <<"SA file size: "<<SA.lengthByte <<" bytes; state: good=" <<SAin.good()\
                 <<" eof="<<SAin.eof()<<" fail="<<SAin.fail()<<" bad="<<SAin.bad()<<"\n"<<flush;
         P.inOut->logMain <<"Loading SA ... " << flush;
-        genomeReadBytesN=fstreamReadBig(SAin,SA.charArray, SA.lengthByte);
+        genomeReadBytesN=fstreamReadBigParallel(pGe.gDir+"/SA",SAin,SA.charArray,SA.lengthByte,P.genomeLoadThreads);
         P.inOut->logMain <<"done! state: good=" <<SAin.good()\
                 <<" eof="<<SAin.eof()<<" fail="<<SAin.fail()<<" bad="<<SAin.bad()<<"; loaded "<<genomeReadBytesN<<" bytes\n" << flush;
         SAin.close();
 
         P.inOut->logMain <<"Loading SAindex ... " << flush;
-        SAiInBytes +=fstreamReadBig(SAiIn,SAi.charArray, SAi.lengthByte);
+        SAiInBytes +=fstreamReadBigParallel(pGe.gDir+"/SAindex",SAiIn,SAi.charArray,SAi.lengthByte,P.genomeLoadThreads);
         P.inOut->logMain <<"done: "<<SAiInBytes<<" bytes\n" << flush;
     };
 

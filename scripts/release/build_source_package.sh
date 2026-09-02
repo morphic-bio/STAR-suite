@@ -71,6 +71,8 @@ mkdir -p "${work_src}"
 
 echo "Preparing clean source snapshot from HEAD..."
 git archive --format=tar HEAD | tar -xf - -C "${work_src}"
+commit_sha="$(git rev-parse HEAD)"
+printf '%s\n' "${commit_sha}" > "${work_src}/debian/source-revision"
 
 # Source format "3.0 (quilt)" requires an orig tarball in the parent directory.
 orig_tar="${tmp_root}/${source_name}_${upstream_version}.orig.tar.gz"

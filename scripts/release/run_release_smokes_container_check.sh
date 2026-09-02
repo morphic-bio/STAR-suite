@@ -10,14 +10,15 @@ MODE=""
 TARBALL=""
 BUNDLE=""
 EXPECTED_LABEL=""
-EXPECTED_VERSION="1.5.0"
+EXPECTED_VERSION="1.7.1"
+EXPECTED_COMMIT=""
 BUILD_RUNTIME_IMAGE=1
 
 usage() {
   cat <<USAGE
 Usage:
-  $0 --mode tarball --tarball <path> [--docker-image <tag>] [--base-image <image>] [--expected-version <version>] [--skip-image-build]
-  $0 --mode bundle --bundle <path> --expected-label <label> [--docker-image <tag>] [--base-image <image>] [--expected-version <version>] [--skip-image-build]
+  $0 --mode tarball --tarball <path> [--docker-image <tag>] [--base-image <image>] [--expected-version <version>] [--expected-commit <sha>] [--skip-image-build]
+  $0 --mode bundle --bundle <path> --expected-label <label> [--docker-image <tag>] [--base-image <image>] [--expected-version <version>] [--expected-commit <sha>] [--skip-image-build]
 USAGE
 }
 
@@ -28,6 +29,7 @@ while [[ $# -gt 0 ]]; do
     --bundle) BUNDLE="$2"; shift 2 ;;
     --expected-label) EXPECTED_LABEL="$2"; shift 2 ;;
     --expected-version) EXPECTED_VERSION="$2"; shift 2 ;;
+    --expected-commit) EXPECTED_COMMIT="$2"; shift 2 ;;
     --docker-image) DOCKER_IMAGE="$2"; shift 2 ;;
     --base-image) BASE_IMAGE="$2"; shift 2 ;;
     --skip-image-build) BUILD_RUNTIME_IMAGE=0; shift ;;
@@ -53,6 +55,9 @@ fi
 
 artifacts_dir=""
 mode_args=(--mode "${MODE}" --expected-version "${EXPECTED_VERSION}" --repo-root /repo)
+if [[ -n "${EXPECTED_COMMIT}" ]]; then
+  mode_args+=(--expected-commit "${EXPECTED_COMMIT}")
+fi
 case "${MODE}" in
   tarball)
     [[ -f "${TARBALL}" ]] || { echo "ERROR: tarball not found: ${TARBALL}" >&2; exit 1; }
