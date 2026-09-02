@@ -1,0 +1,2 @@
+status=success
+run_dir=/home/lhhung/STAR-suite-bgzf-ingest-benchmark-20260901/scffpe320k_bgzf_20260902T173415Z
