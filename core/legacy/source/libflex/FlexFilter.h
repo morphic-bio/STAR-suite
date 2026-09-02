@@ -76,6 +76,7 @@ public:
         double occupancyPercentile = 0.999;
         uint32_t occupancySimulatedGems = 1000000; // Number of GEMs to simulate in MC occupancy filter
         uint32_t totalExpectedCells = 0;  // Total expected cells across all tags (0 = auto: 3000 * numTags)
+        uint32_t totalThreads = 0;        // Total tag + per-tag worker budget (0 = OpenMP default)
         OccupancyMode occupancyMode = OccupancyMode::MonteCarlo;
     // Tag allocation: use Winsorized UMI-weighted expected cells (default: true)
     // If false, allocate expected cells equally across tags

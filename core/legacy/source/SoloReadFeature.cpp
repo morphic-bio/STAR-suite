@@ -41,9 +41,20 @@ SoloReadFeature::SoloReadFeature(int32 feTy, Parameters &Pin, int iChunk)
     const bool useInlineHashStorage =
         pSolo.inlineHashMode && (pSolo.flexMode || nonFlexHashBridge) && !keepLegacyVelocytoStream;
 
+    if (pSolo.bucketStoreEnabled && pSolo.flexMode && pSolo.inlineHashMode
+        && featureType == SoloFeatureTypes::Gene) {
+        bucketStore_ = pSolo.cbBucketStore;
+        bucketSegments_.resize(pSolo.bucketCount);
+        bucketWorkerIndex_ = iChunk >= 0
+            ? static_cast<uint32_t>(iChunk)
+            : static_cast<uint32_t>(-iChunk);
+    }
+
     if (useInlineHashStorage) {
-        // Initialize inline hash instead of opening temp stream file
-        inlineHash_ = kh_init(cg_agg);
+        // Bucket mode replaces the per-thread fused Gene hash. Other features
+        // and the off path keep the established hash storage unchanged.
+        if (!bucketStorageEnabled())
+            inlineHash_ = kh_init(cg_agg);
         streamReads = nullptr; // Do NOT open stream file in inline hash mode
         
         // Initialize parallel readId tracker for sorted BAM CB/UB tag injection
@@ -101,6 +112,73 @@ SoloReadFeature::~SoloReadFeature() {
     }
 }
 
+void SoloReadFeature::appendInlineObservation(uint64_t key, uint32_t value)
+{
+    if (bucketStore_) {
+        const uint32_t cb = static_cast<uint32_t>((key >> 44) & 0xFFFFFu);
+        uint32_t bucket = 0;
+        try {
+            bucket = bucketStore_->bucket_for_cb(cb);
+        } catch (const std::exception &error) {
+            ostringstream errOut;
+            errOut << "EXITING because a fused Flex record could not be bucketed: "
+                   << error.what() << "\n";
+            exitWithError(errOut.str(), std::cerr, P.inOut->logMain,
+                          EXIT_CODE_INCONSISTENT_DATA, P);
+        }
+        std::vector<star::solo::PackedCbRecord> &segment = bucketSegments_[bucket];
+        star::solo::PackedCbRecord record;
+        record.key = key;
+        record.value = value;
+        segment.push_back(record);
+        // Large enough to amortize spill pwrite overhead while keeping bounded
+        // producer staging (4096 records is 64 KiB in the in-memory vector).
+        if (segment.size() >= 4096) {
+            std::string error;
+            std::vector<star::solo::PackedCbRecord> sealed;
+            sealed.swap(segment);
+            if (!bucketStore_->append_segment(bucketWorkerIndex_, bucket,
+                                              std::move(sealed), &error)) {
+                exitWithError("EXITING because a CB bucket append failed: " + error + "\n",
+                              std::cerr, P.inOut->logMain,
+                              EXIT_CODE_INCONSISTENT_DATA, P);
+            }
+        }
+        return;
+    }
+
+    if (!inlineHash_)
+        return;
+    int absent;
+    const khiter_t iter = kh_put(cg_agg, inlineHash_, key, &absent);
+    if (absent) {
+        kh_val(inlineHash_, iter) = value;
+    } else {
+        kh_val(inlineHash_, iter) = pSolo.flexMode
+            ? flexGdnaMergeValue(kh_val(inlineHash_, iter), value)
+            : kh_val(inlineHash_, iter) + value;
+    }
+}
+
+void SoloReadFeature::flushBucketSegments()
+{
+    if (!bucketStore_)
+        return;
+    for (uint32_t bucket = 0; bucket < bucketSegments_.size(); ++bucket) {
+        if (bucketSegments_[bucket].empty())
+            continue;
+        std::vector<star::solo::PackedCbRecord> sealed;
+        sealed.swap(bucketSegments_[bucket]);
+        std::string error;
+        if (!bucketStore_->append_segment(bucketWorkerIndex_, bucket,
+                                          std::move(sealed), &error)) {
+            exitWithError("EXITING because a CB bucket append failed: " + error + "\n",
+                          std::cerr, P.inOut->logMain,
+                          EXIT_CODE_INCONSISTENT_DATA, P);
+        }
+    }
+}
+
 void SoloReadFeature::addCounts(const SoloReadFeature &rfIn)
 {
     if (pSolo.cbWLyes) {//WL
@@ -149,6 +227,7 @@ void SoloReadFeature::statsOut(ofstream &streamOut)
 
 void SoloReadFeature::mergeInlineHash(SoloReadFeature &other)
 {
+    other.flushBucketSegments();
     if (!inlineHash_ || !other.inlineHash_) {
         // Still merge non-hash sidecars below.
     } else {
@@ -188,7 +267,8 @@ void SoloReadFeature::mergeInlineHash(SoloReadFeature &other)
         }
     }
     
-    mergePendingAmbiguous(other);
+    mergePendingAmbiguous(
+        other, bucketStorageEnabled() && other.bucketStorageEnabled());
 }
 
 namespace {
@@ -271,38 +351,45 @@ void bridgeMergePinCandQualsMax(std::vector<uint8_t> &dst,
 }
 } // namespace
 
-void SoloReadFeature::mergePendingAmbiguous(const SoloReadFeature &other)
+void SoloReadFeature::mergePendingAmbiguous(SoloReadFeature &other,
+                                            bool takeOwnership)
 {
     Parameters &P = other.P;
     const char qsBase = P.pSolo.QSbase;
     const uint32_t qsMax = P.pSolo.QSmax;
 
-    for (const auto &kv : other.pendingAmbiguous_) {
+    for (auto &kv : other.pendingAmbiguous_) {
         ReadAlign::AmbigKey key = kv.first;
-        const ExtendedAmbiguousEntry &otherEntry = kv.second;
+        ExtendedAmbiguousEntry &otherEntry = kv.second;
 
-        auto &entry = pendingAmbiguous_[key];
-        if (entry.candidateIdx.empty()) {
-            entry.candidateIdx = otherEntry.candidateIdx;
-            entry.cbSeq = otherEntry.cbSeq;
-            entry.cbQual = otherEntry.cbQual;
-            entry.umiCounts = otherEntry.umiCounts;
-            entry.observations = otherEntry.observations;
-            entry.bridgeAmbigUmiGene_ = otherEntry.bridgeAmbigUmiGene_;
-            entry.cbLogLikMatch = otherEntry.cbLogLikMatch;
-            entry.cbLogLikMismatch = otherEntry.cbLogLikMismatch;
-            entry.cbEvidenceReads = otherEntry.cbEvidenceReads;
-            entry.bridgeAmbigGeneFeatU_ = otherEntry.bridgeAmbigGeneFeatU_;
-            entry.bridgeAmbigGeneFeatM_ = otherEntry.bridgeAmbigGeneFeatM_;
-            entry.bridgeAmbigGeneHaveSampleU_ = otherEntry.bridgeAmbigGeneHaveSampleU_;
-            entry.bridgeAmbigGeneHaveSampleM_ = otherEntry.bridgeAmbigGeneHaveSampleM_;
-            entry.bridgeAmbigGeneSampleFlagU_ = otherEntry.bridgeAmbigGeneSampleFlagU_;
-            entry.bridgeAmbigGeneSampleFlagM_ = otherEntry.bridgeAmbigGeneSampleFlagM_;
-            entry.bridgeAmbigReadInfoN_ = otherEntry.bridgeAmbigReadInfoN_;
-            entry.bridgeAmbigReadInfoHaveSample_ = otherEntry.bridgeAmbigReadInfoHaveSample_;
-            entry.bridgeAmbigReadInfoSampleFlag_ = otherEntry.bridgeAmbigReadInfoSampleFlag_;
-            entry.bridgeAmbigPinCandQuals_ = otherEntry.bridgeAmbigPinCandQuals_;
+        auto found = pendingAmbiguous_.find(key);
+        if (found == pendingAmbiguous_.end()) {
+            if (takeOwnership) {
+                pendingAmbiguous_.emplace(key, std::move(otherEntry));
+            } else {
+                ExtendedAmbiguousEntry &entry = pendingAmbiguous_[key];
+                entry.candidateIdx = otherEntry.candidateIdx;
+                entry.cbSeq = otherEntry.cbSeq;
+                entry.cbQual = otherEntry.cbQual;
+                entry.umiCounts = otherEntry.umiCounts;
+                entry.observations = otherEntry.observations;
+                entry.bridgeAmbigUmiGene_ = otherEntry.bridgeAmbigUmiGene_;
+                entry.cbLogLikMatch = otherEntry.cbLogLikMatch;
+                entry.cbLogLikMismatch = otherEntry.cbLogLikMismatch;
+                entry.cbEvidenceReads = otherEntry.cbEvidenceReads;
+                entry.bridgeAmbigGeneFeatU_ = otherEntry.bridgeAmbigGeneFeatU_;
+                entry.bridgeAmbigGeneFeatM_ = otherEntry.bridgeAmbigGeneFeatM_;
+                entry.bridgeAmbigGeneHaveSampleU_ = otherEntry.bridgeAmbigGeneHaveSampleU_;
+                entry.bridgeAmbigGeneHaveSampleM_ = otherEntry.bridgeAmbigGeneHaveSampleM_;
+                entry.bridgeAmbigGeneSampleFlagU_ = otherEntry.bridgeAmbigGeneSampleFlagU_;
+                entry.bridgeAmbigGeneSampleFlagM_ = otherEntry.bridgeAmbigGeneSampleFlagM_;
+                entry.bridgeAmbigReadInfoN_ = otherEntry.bridgeAmbigReadInfoN_;
+                entry.bridgeAmbigReadInfoHaveSample_ = otherEntry.bridgeAmbigReadInfoHaveSample_;
+                entry.bridgeAmbigReadInfoSampleFlag_ = otherEntry.bridgeAmbigReadInfoSampleFlag_;
+                entry.bridgeAmbigPinCandQuals_ = otherEntry.bridgeAmbigPinCandQuals_;
+            }
         } else {
+            ExtendedAmbiguousEntry &entry = found->second;
             for (const auto &umiCount : otherEntry.umiCounts) {
                 entry.umiCounts[umiCount.first] += umiCount.second;
             }
@@ -362,9 +449,9 @@ void SoloReadFeature::mergePendingAmbiguous(const SoloReadFeature &other)
         }
     }
 
-    for (const auto &okv : other.bridgeAmbigReadInfoOrphan_) {
+    for (auto &okv : other.bridgeAmbigReadInfoOrphan_) {
         ReadAlign::AmbigKey okey = okv.first;
-        const SoloReadFeature::BridgeAmbigReadInfoOrphanEntry &oe = okv.second;
+        SoloReadFeature::BridgeAmbigReadInfoOrphanEntry &oe = okv.second;
 
         auto pit = pendingAmbiguous_.find(okey);
         if (pit != pendingAmbiguous_.end() && !pit->second.candidateIdx.empty()) {
@@ -394,10 +481,15 @@ void SoloReadFeature::mergePendingAmbiguous(const SoloReadFeature &other)
             continue;
         }
 
-        auto &dest = bridgeAmbigReadInfoOrphan_[okey];
-        if (dest.candidateIdx.empty()) {
-            dest = oe;
+        auto found = bridgeAmbigReadInfoOrphan_.find(okey);
+        if (found == bridgeAmbigReadInfoOrphan_.end()) {
+            if (takeOwnership) {
+                bridgeAmbigReadInfoOrphan_.emplace(okey, std::move(oe));
+            } else {
+                bridgeAmbigReadInfoOrphan_[okey] = oe;
+            }
         } else {
+            SoloReadFeature::BridgeAmbigReadInfoOrphanEntry &dest = found->second;
             dest.readInfoN_ += oe.readInfoN_;
             if (bridgeSampleFlagBetter(dest.haveSample_,
                                        dest.sampleFlag_,

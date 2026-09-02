@@ -1,0 +1,31 @@
+	/mnt/pikachu/STAR-suite-bgzf-ingest-20260901/core/legacy/source/STAR --runThreadN 32 --genomeDir /storage/flex_filtered_reference_2024/star_index --soloType CB_UMI_Simple --soloCBstart 1 --soloUMIstart 17 --soloCBlen 16 --soloUMIlen 12 --soloBarcodeReadLength 0 --soloCBwhitelist /storage/scRNAseq_output/whitelists/737K-fixed-rna-profiling.txt --flex yes --soloFlexExpectedCellsPerTag 3000 --soloSampleWhitelist /mnt/pikachu/flex/tables/sample_whitelist_full_16.tsv --soloProbeList /storage/flex_filtered_reference_2024/star_index/flex_probe_artifacts/probe_list.txt --soloSampleProbes /mnt/pikachu/JAX_scRNAseq01_processed/probe-barcodes-fixed-rna-profiling-rna.txt --soloSampleProbeOffset 68 --soloFlexAllowedTags /mnt/pikachu/flex/tables/sample_whitelist_full_16.tsv --soloFlexOutputPrefix /home/lhhung/STAR-suite-bgzf-ingest-benchmark-20260901/scffpe320k_bgzf_20260902T173415Z/per_sample --limitIObufferSize 50000000 50000000 --outSJtype None --outSAMtype None --outSAMattributes None --soloFeatures Gene --soloCellFilter None --soloMultiMappers Rescue --soloCBmatchWLtype 1MM_multi_Nbase_pseudocounts --soloUMIfiltering MultiGeneUMI_CR --soloUMIdedup 1MM_CR --soloStrand Unstranded --clipAdapterType CellRanger4 --alignEndsType Local --chimSegmentMin 0 --soloKeysCompat cr --soloSampleSearchNearby no --soloHashScreenFile /storage/downsampled_100K/SC2300771/results/flex_h01_2024_20260320_081246/h01_cache.bin --soloBucketMode spill --soloBucketMemGB 32 --soloBucketCount 256 --soloBucketSpillDir /home/lhhung/STAR-suite-bgzf-ingest-benchmark-20260901/scffpe320k_bgzf_20260902T173415Z/bucket_spill --flexPipeline yes --flexPipelineNTriage 0 --flexPipelineNSolo 0 --flexNoAlign 1 --dynamicThreadInterface 1 --crAssignConsumerThreads -1 --crAssignSearchThreads 1 --outFileNamePrefix /home/lhhung/STAR-suite-bgzf-ingest-benchmark-20260901/scffpe320k_bgzf_20260902T173415Z/ --readFilesBgzfMode range --bgzfReaderThreads 32 --bgzfCrcCheck 1 --readFilesIn /mnt/pikachu/tenx_320k_scFFPE/320k_scFFPE_16-plex_GEM-X_FLEX_fastqs/16-plex_GEM-X_FLEX_S1_L001_R2_001.fastq.gz,/mnt/pikachu/tenx_320k_scFFPE/320k_scFFPE_16-plex_GEM-X_FLEX_fastqs/16-plex_GEM-X_FLEX_S1_L002_R2_001.fastq.gz,/mnt/pikachu/tenx_320k_scFFPE/320k_scFFPE_16-plex_GEM-X_FLEX_fastqs/16-plex_GEM-X_FLEX_S1_L003_R2_001.fastq.gz,/mnt/pikachu/tenx_320k_scFFPE/320k_scFFPE_16-plex_GEM-X_FLEX_fastqs/16-plex_GEM-X_FLEX_S1_L004_R2_001.fastq.gz /mnt/pikachu/tenx_320k_scFFPE/320k_scFFPE_16-plex_GEM-X_FLEX_fastqs/16-plex_GEM-X_FLEX_S1_L001_R1_001.fastq.gz,/mnt/pikachu/tenx_320k_scFFPE/320k_scFFPE_16-plex_GEM-X_FLEX_fastqs/16-plex_GEM-X_FLEX_S1_L002_R1_001.fastq.gz,/mnt/pikachu/tenx_320k_scFFPE/320k_scFFPE_16-plex_GEM-X_FLEX_fastqs/16-plex_GEM-X_FLEX_S1_L003_R1_001.fastq.gz,/mnt/pikachu/tenx_320k_scFFPE/320k_scFFPE_16-plex_GEM-X_FLEX_fastqs/16-plex_GEM-X_FLEX_S1_L004_R1_001.fastq.gz
+	STAR-suite version: 1.7.1   STAR upstream: 2.7.11b   genome compatibility: 2.7.4a   compiled: 2026-09-02T17:33:24+00:00 :/mnt/pikachu/STAR-suite-bgzf-ingest-20260901/core/legacy/source
+Sep 02 17:34:20 ..... started STAR run
+Sep 02 17:34:34 ..... started mapping
+Sep 02 18:03:34 ..... finished mapping
+Sep 02 18:03:34 ..... started Solo counting
+FlexFilter completed successfully
+  Processed 16 tags
+Writing per-sample MEX outputs...
+
+Summary (saved to /home/lhhung/STAR-suite-bgzf-ingest-benchmark-20260901/scffpe320k_bgzf_20260902T173415Z/per_sample/flexfilter_summary.tsv):
+Sample            Expected   Retain  Simple_ED  Tail_Tested    ED_Pass    Occ_Rem    Final     Total_UMIs
+BC001                 2094   120000          0        18987      17058        511    16547       24303904
+BC002                 1872   120000          0        17148      15352        429    14923       19139294
+BC003                 5292   120000          0        36950      30706        840    29866      129275934
+BC004                 4293   120000          0        32244      26188        807    25381       98455396
+BC005                 4114   120000          0        33361      31627        696    30931      133075509
+BC006                 6148   120000          0        41019      38716        792    37924      181869186
+BC007                 1286   120000          0        10078       7652        332     7320        9512359
+BC008                  924   120000          0         6575       4951        232     4719        5657417
+BC009                 2451   120000          0        21744      21230        505    20725       36665281
+BC010                 1790   120000          0        21821      21222        481    20741       38149545
+BC011                 2236   120000          0        18305      15627        519    15108       22993006
+BC012                 2254   120000          0        18451      15735        509    15226       24523396
+BC013                 4161   120000          0        30498      21936        610    21326       45527880
+BC014                 3608   120000          0        27436      19542        568    18974       42506436
+BC015                 3467   120000          0        31095      25850        679    25171       96229048
+BC016                 2010   120000          0        26123      21739        605    21134       81263419
+TOTAL                48000  1920000          0       391835     335131       9115   326016      989147010
+Sep 02 18:09:17 ..... finished Solo counting
+Sep 02 18:09:17 ..... finished successfully

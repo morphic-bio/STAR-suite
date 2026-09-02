@@ -11,6 +11,7 @@
 #include "MexWriter.h"
 #include <fstream>
 #include <sstream>
+#include <algorithm>
 #include <vector>
 #include <string>
 #include <unordered_map>
@@ -235,6 +236,7 @@ void SoloFeature::runFlexFilterInline(
     mem.sampleTags = sampleTags;
 
     FlexFilter::Config config;
+    config.totalThreads = static_cast<uint32_t>(std::max(1, P.runThreadN));
     // Handle per-tag mode: multiply by number of tags
     if (pSolo.flexFilterExpectedPerTagMode) {
         config.totalExpectedCells = pSolo.flexFilterTotalExpected * static_cast<uint32_t>(sampleTags.size());
@@ -569,6 +571,29 @@ void SoloFeature::runFlexFilterInline(
                     static_cast<uint16_t>((key >> 5) & 0x7FFFu);
                 const FlexGdnaRegion region =
                     flexGdnaValueRegion(kh_val(hash, iter));
+                addGdnaMolecule(buckets[static_cast<size_t>(sample)], gene, region);
+                addGdnaMolecule(libraryBucket, gene, region);
+            }
+        } else if (identityComplete
+                   && inlineMatrix.gdnaMoleculeKeys.size()
+                        == inlineMatrix.gdnaMoleculeRegions.size()
+                   && !inlineMatrix.gdnaMoleculeKeys.empty()) {
+            for (size_t molecule = 0;
+                 molecule < inlineMatrix.gdnaMoleculeKeys.size(); ++molecule) {
+                const uint64_t key = inlineMatrix.gdnaMoleculeKeys[molecule];
+                const uint32_t cb = static_cast<uint32_t>((key >> 44) & 0xFFFFFu);
+                const uint8_t tag = static_cast<uint8_t>(key & 0x1Fu);
+                const auto cellIt = cellByCbTag.find(
+                    (static_cast<uint64_t>(cb) << 8) | tag);
+                if (cellIt == cellByCbTag.end())
+                    continue;
+                const int32_t sample = sampleByCell[cellIt->second];
+                if (sample < 0)
+                    continue;
+                const uint16_t gene =
+                    static_cast<uint16_t>((key >> 5) & 0x7FFFu);
+                const FlexGdnaRegion region = static_cast<FlexGdnaRegion>(
+                    inlineMatrix.gdnaMoleculeRegions[molecule]);
                 addGdnaMolecule(buckets[static_cast<size_t>(sample)], gene, region);
                 addGdnaMolecule(libraryBucket, gene, region);
             }

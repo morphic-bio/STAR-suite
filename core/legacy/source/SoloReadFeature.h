@@ -14,6 +14,7 @@
 #include "hash_shims_cpp_compat.h"
 #include "SoloBinarySpool.h"
 #include "FlexGdna.h"
+#include "CbBucketStore.h"
 #include <functional>
 
 class SoloFeature;
@@ -46,6 +47,10 @@ public:
 
     // Inline hash mode: per-thread hash table (replaces temp stream files)
     khash_t(cg_agg) *inlineHash_; // nullptr if not using inline hash mode
+
+    bool bucketStorageEnabled() const { return bucketStore_ != nullptr; }
+    void appendInlineObservation(uint64_t key, uint32_t value);
+    void flushBucketSegments();
     
     // Parallel readId tracker for sorted BAM CB/UB tag injection (Option C)
     // Maps readId -> packed(cbIdx, umi24, status) for populating packedReadInfo after collapse
@@ -114,7 +119,7 @@ public:
     void addStats(const SoloReadFeature &soloCBin);
     void statsOut(ofstream &streamOut);
     void mergeInlineHash(SoloReadFeature &other); // Merge inlineHash_ and pendingAmbiguous_ from other
-    void mergePendingAmbiguous(const SoloReadFeature &other);
+    void mergePendingAmbiguous(SoloReadFeature &other, bool takeOwnership = false);
     void applyBridgeAmbiguousAggregatedReadAccounting(Parameters &P, int32 featureType,
                                                       const ExtendedAmbiguousEntry &entry,
                                                       bool bayesResolved,
@@ -146,6 +151,9 @@ private:
 
     Parameters &P;
     ParametersSolo &pSolo;
+    std::shared_ptr<star::solo::CbBucketStore> bucketStore_;
+    std::vector<std::vector<star::solo::PackedCbRecord> > bucketSegments_;
+    uint32_t bucketWorkerIndex_ = 0;
     SoloFeature *owner = nullptr;
 };
 

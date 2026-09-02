@@ -8,12 +8,17 @@
 #include "FlexHashScreen.h"
 #include "FlexGdna.h"
 #include "OcmMultiMaterialize.h"
+#include "CbBucketStore.h"
 
 #include <stdlib.h>
 #include <algorithm>
 #include <memory>
 #include <fstream>
 #include <cctype>
+#include <cerrno>
+#include <cmath>
+#include <limits>
+#include <unistd.h>
 
 ParametersSolo::~ParametersSolo() {
 }
@@ -1340,6 +1345,108 @@ void ParametersSolo::initialize(Parameters *pPin)
 
         cbWLsize=cbWL.size();
         pP->inOut->logMain << "Number of CBs in the whitelist = " << cbWLsize <<endl;
+
+        const string bucketModeNormalized = lowerStringLocal(bucketModeStr);
+        if (bucketModeNormalized == "off") {
+            bucketMode = BucketOff;
+        } else if (bucketModeNormalized == "ram") {
+            bucketMode = BucketRam;
+        } else if (bucketModeNormalized == "spill") {
+            bucketMode = BucketSpill;
+        } else if (bucketModeNormalized == "auto" || bucketModeNormalized.empty()) {
+            bucketMode = BucketAuto;
+        } else {
+            ostringstream errOut;
+            errOut << "EXITING because of fatal PARAMETERS error: unrecognized option in "
+                   << "--soloBucketMode=" << bucketModeStr << "\n"
+                   << "SOLUTION: use allowed option: off OR ram OR spill OR auto\n";
+            exitWithError(errOut.str(), std::cerr, pP->inOut->logMain,
+                          EXIT_CODE_PARAMETER, *pP);
+        }
+        bucketModeStr = bucketModeNormalized.empty() ? "auto" : bucketModeNormalized;
+
+        if (bucketCount == 0 || (bucketCount & (bucketCount - 1)) != 0
+            || bucketCount > (1u << 20)) {
+            ostringstream errOut;
+            errOut << "EXITING because of fatal PARAMETERS error: --soloBucketCount="
+                   << bucketCount << " is not a power of two in [1, 1048576]\n";
+            exitWithError(errOut.str(), std::cerr, pP->inOut->logMain,
+                          EXIT_CODE_PARAMETER, *pP);
+        }
+
+        const long double gibibyte = 1024.0L * 1024.0L * 1024.0L;
+        const long double budgetBytesLong =
+            static_cast<long double>(bucketMemGB) * gibibyte;
+        if (!std::isfinite(bucketMemGB) || bucketMemGB <= 0.0
+            || budgetBytesLong > static_cast<long double>(
+                   std::numeric_limits<uint64_t>::max())) {
+            ostringstream errOut;
+            errOut << "EXITING because of fatal PARAMETERS error: --soloBucketMemGB="
+                   << bucketMemGB << " must specify a positive finite GiB budget\n";
+            exitWithError(errOut.str(), std::cerr, pP->inOut->logMain,
+                          EXIT_CODE_PARAMETER, *pP);
+        }
+        const uint64_t bucketMemoryBudgetBytes =
+            static_cast<uint64_t>(budgetBytesLong);
+        if (bucketMemoryBudgetBytes == 0) {
+            exitWithError("EXITING because --soloBucketMemGB rounds below one byte\n",
+                          std::cerr, pP->inOut->logMain,
+                          EXIT_CODE_PARAMETER, *pP);
+        }
+
+        const bool snapshotRequested =
+            std::getenv("STAR_SOLO_FLEX_HASH_SNAPSHOT_IN") != nullptr
+            || std::getenv("STAR_SOLO_FLEX_HASH_SNAPSHOT_OUT") != nullptr;
+        bucketStoreEnabled = bucketMode != BucketOff
+            && pP->runMode == "alignReads"
+            && flexMode && inlineHashMode && cbWLyes && !snapshotRequested
+            && featureYes[SoloFeatureTypes::Gene];
+        if (bucketStoreEnabled) {
+            string spillDirectory = bucketSpillDir;
+            if (spillDirectory.empty() || spillDirectory == "-")
+                spillDirectory = pP->outFileTmp;
+            while (spillDirectory.size() > 1 && spillDirectory.back() == '/')
+                spillDirectory.pop_back();
+            if ((bucketMode == BucketSpill || bucketMode == BucketAuto)
+                && (spillDirectory.empty() || spillDirectory == "/")) {
+                exitWithError("EXITING because --soloBucketSpillDir cannot resolve to the filesystem root\n",
+                              std::cerr, pP->inOut->logMain,
+                              EXIT_CODE_PARAMETER, *pP);
+            }
+
+            star::solo::CbBucketStore::Config config;
+            config.mode = bucketMode == BucketRam
+                ? star::solo::CbBucketStore::Mode::Ram
+                : (bucketMode == BucketSpill
+                    ? star::solo::CbBucketStore::Mode::Spill
+                    : star::solo::CbBucketStore::Mode::Auto);
+            config.bucketCount = bucketCount;
+            config.whitelistSize = cbWLsize;
+            config.memoryBudgetBytes = bucketMemoryBudgetBytes;
+            config.scratchDirectory = spillDirectory;
+            config.filePrefix = "solo_gene_bucket."
+                + std::to_string(static_cast<unsigned long long>(::getpid()));
+            try {
+                cbBucketStore = std::make_shared<star::solo::CbBucketStore>(config);
+            } catch (const std::exception &error) {
+                ostringstream errOut;
+                errOut << "EXITING because the CB bucket store could not be initialized: "
+                       << error.what() << "\n";
+                exitWithError(errOut.str(), std::cerr, pP->inOut->logMain,
+                              EXIT_CODE_PARAMETER, *pP);
+            }
+            pP->inOut->logMain << "Flex streaming CB buckets: active ("
+                               << bucketModeStr << ", " << bucketCount
+                               << " buckets, memory budget " << bucketMemGB
+                               << " GiB";
+            if (bucketMode != BucketRam)
+                pP->inOut->logMain << ", spill directory " << spillDirectory;
+            pP->inOut->logMain << ")" << endl;
+        } else if (bucketMode != BucketOff && snapshotRequested
+                   && flexMode && inlineHashMode) {
+            pP->inOut->logMain
+                << "Flex streaming CB buckets: disabled for hash snapshot mode" << endl;
+        }
 
         // Build H0 hash: packed-CB(uint32) → WL index for O(1) exact lookup
         if (cbWLhash) kh_destroy(cbH0, cbWLhash);

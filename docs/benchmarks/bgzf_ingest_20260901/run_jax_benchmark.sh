@@ -8,7 +8,7 @@ ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd)"
 STAR_BIN="${STAR_BIN:-${ROOT_DIR}/core/legacy/source/STAR}"
 THREADS="${THREADS:-32}"
 FASTQ_DIR="${JAX_FASTQ_DIR:-/mnt/pikachu/JAX_sequences/JAX_scRNAseq01}"
-CBQ_DIR="${JAX_CBQ_DIR:-/mnt/pikachu/JAX_sequences/JAX_scRNAseq01_cbq_fqgzip_parallel_20260730_v1}"
+CBQ_DIR="${JAX_CBQ_DIR:-/mnt/pikachu/JAX_sequences/JAX_scRNAseq01_cbq_parallel_20260730_v1}"
 ARTIFACT_ROOT="${ARTIFACT_ROOT:-/home/lhhung/STAR-suite-bgzf-ingest-benchmark-20260901}"
 LOG_DIR="${ROOT_DIR}/docs/benchmarks/bgzf_ingest_20260901"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
@@ -49,7 +49,7 @@ mkdir -p "${RUN_DIR}" "${LOG_DIR}"
     printf 'mode=%s\nthreads=%s\nrun_dir=%s\ncommit=%s\n' \
         "${MODE}" "${THREADS}" "${RUN_DIR}" "$(git -C "${ROOT_DIR}" rev-parse HEAD)"
     uptime
-    ps -eo pid,comm,%cpu,%mem,etime,args --sort=-%cpu | sed -n '1,30p'
+    ps -eo pid,comm,%cpu,%mem,etime --sort=-%cpu | sed -n '1,20p'
 } > "${LOG_PREFIX}.preflight.txt"
 
 common=(

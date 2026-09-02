@@ -200,7 +200,7 @@ endif
 OBJECTS = systemFunctions.o SoloMemoryProfile.o CountingSinkStress.o funPrimaryAlignMark.o \
 	SoloFeature_loadRawMatrix.o SoloFeature_emptyDrops_CR.o SoloFeature_emptyDrops_libscrna.o soloInputFeatureUMI.o SoloFeature_countSmartSeq.o SoloFeature_redistributeReadsByCB.o \
 	SoloFeature_quantTranscript.o SoloFeature_sumThreads.o SoloFeature_countVelocyto.o SoloFeature_countVelocytoBridge.o SoloFeature_countCBgeneUMI.o \
-	SoloFeature_collapseUMI_Graph.o SoloFeature_collapseUMIall.o SoloFeature_collapseUMI_fromHash.o SoloFeature_collapseUMI_fromBridgeHash.o SoloFeature_bridgeHashSnapshot.o SoloFeature_umiCorrection.o SoloFeature_materializeFromHash.o SoloFeature_metricsOutput.o SoloFeature_writeMexFromInlineHashDedup.o SoloFeature_flexfilter.o SoloFeature_addBAMtags.o SoloFeature_writeTagTable.o \
+	SoloFeature_collapseUMI_Graph.o SoloFeature_collapseUMIall.o SoloFeature_collapseUMI_fromHash.o SoloFeature_collapseUMI_fromBuckets.o SoloFeature_collapseUMI_fromBridgeHash.o SoloFeature_bridgeHashSnapshot.o SoloFeature_umiCorrection.o SoloFeature_materializeFromHash.o SoloFeature_metricsOutput.o SoloFeature_writeMexFromInlineHashDedup.o SoloFeature_flexfilter.o SoloFeature_addBAMtags.o SoloFeature_writeTagTable.o \
 	SoloHDMoleculeWriter.o SpatialFeatureSidecar.o SpatialR1FastqTap.o SpatialGex.o SpatialGexSpill.o SpatialGexDownstreamSpool.o SpatialGexPipeline.o SpatialR1Decoder.o MultiGeneUmiCr.o CrMultimapRescuePolicy.o \
 	MexWriter.o MexWriterUtil.o FlexGdna.o \
 	UMICorrector.o \
@@ -242,7 +242,7 @@ OBJECTS = systemFunctions.o SoloMemoryProfile.o CountingSinkStress.o funPrimaryA
 	Transcriptome.o Transcriptome_quantAlign.o Transcriptome_geneFullAlignOverlap.o \
 	ReadAlign_quantTranscriptome.o Quantifications.o Transcriptome_geneCountsAddAlign.o \
 	sjdbLoadFromFiles.o sjdbLoadFromStream.o sjdbPrepare.o sjdbBuildIndex.o sjdbInsertJunctions.o mapThreadsSpawn.o \
-	FastxInputModule.o CbqInputModule.o BgzfBlockReader.o BgzfRangeReader.o \
+	FastxInputModule.o CbqInputModule.o BgzfBlockReader.o BgzfRangeReader.o CbBucketStore.o \
 	Parameters_readFilesInit.o Parameters_openReadsFiles.cpp Parameters_closeReadsFiles.cpp Parameters_batchReset.cpp Parameters_readSAMheader.o \
 	bam_cat.o serviceFuns.o GlobalVariables.cpp \
 	BAMoutput.o BAMfunctions.o ReadAlign_alignBAM.o BAMbinSortByCoordinate.o signalFromBAM.o bamRemoveDuplicates.o BAMbinSortUnmapped.o \
@@ -383,6 +383,13 @@ bgzf-input-harness : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
 bgzf-input-harness : LDFLAGS := $(LDFLAGSextra) -lz -lpthread
 bgzf-input-harness : BgzfBlockReader.o BgzfRangeReader.o input/bgzf_input_harness.cpp
 	$(CXX) -o bgzf_input_harness $(CXXFLAGS) input/bgzf_input_harness.cpp BgzfBlockReader.o BgzfRangeReader.o $(LDFLAGS)
+
+# Standalone packed-record and RAM/spill bucket harness for B1-B2.
+.PHONY: cb-bucket-harness
+cb-bucket-harness : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
+cb-bucket-harness : LDFLAGS := $(LDFLAGSextra) -lpthread
+cb-bucket-harness : CbBucketStore.o input/cb_bucket_harness.cpp
+	$(CXX) -o cb_bucket_harness $(CXXFLAGS) input/cb_bucket_harness.cpp CbBucketStore.o $(LDFLAGS)
 
 # Standalone BINSEQ probe harness. This is not production STAR integration; it
 # decodes CBQ through bqtools and validates the result through the input contract.
@@ -700,6 +707,9 @@ BgzfRangeReader.o: input/BgzfRangeReader.cpp input/BgzfRangeReader.h input/BgzfB
 BgzfStarAdapter.o: input/BgzfStarAdapter.cpp input/BgzfStarAdapter.h input/BgzfRangeReader.h input/BgzfBlockReader.h input/InputContract.h
 	$(CXX) -c $(CPPFLAGS) $(CXXFLAGS) $(CXXFLAGS_common) $< -o $@
 
+CbBucketStore.o: CbBucketStore.cpp CbBucketStore.h
+	$(CXX) -c $(CPPFLAGS) $(CXXFLAGS) $(CXXFLAGS_common) $< -o $@
+
 CbqStarAdapter.o: input/CbqStarAdapter.cpp input/CbqStarAdapter.h input/CbqInputModule.h input/InputContract.h
 	$(CXX) -c $(CPPFLAGS) $(CXXFLAGS) $(CXXFLAGS_common) $< -o $@
 
@@ -726,7 +736,7 @@ solo/CbBayesianResolver.o : $(FLEX_SRC_DIR)/solo/CbBayesianResolver.cpp $(FLEX_S
 
 .PHONY: clean
 clean:
-	'rm' -f *.o opal/opal.o solo/*.o flex/*.o STAR STARstatic STARlong star_feature_call transcriptvb_finalize trim_qc_fastq trim_qc_merge trim_qc_replay fastx_input_harness bgzf_input_harness binseq_probe_harness cbq_reader_harness cbq_ordered_encoder cbq_star_adapter_harness cbq_pf_adapter_harness cbq_chromap_adapter_harness Depend.list parametersDefault.xxd star_chromap_orchestration.o star_chromap_orchestration_stub.o .depend.with_chromap_*
+	'rm' -f *.o opal/opal.o solo/*.o flex/*.o STAR STARstatic STARlong star_feature_call transcriptvb_finalize trim_qc_fastq trim_qc_merge trim_qc_replay fastx_input_harness bgzf_input_harness cb_bucket_harness binseq_probe_harness cbq_reader_harness cbq_ordered_encoder cbq_star_adapter_harness cbq_pf_adapter_harness cbq_chromap_adapter_harness Depend.list parametersDefault.xxd star_chromap_orchestration.o star_chromap_orchestration_stub.o .depend.with_chromap_*
 	$(MAKE) -C $(LIBFLEX_DIR) clean
 	$(MAKE) -C $(LIBTRIM_DIR) clean
 	$(MAKE) -C $(LIBEM_DIR) clean
