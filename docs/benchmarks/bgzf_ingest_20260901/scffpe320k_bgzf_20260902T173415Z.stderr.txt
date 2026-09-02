@@ -1,0 +1,139 @@
+DEBUG: Computing tag allocations: 7760776 cells, 16 tags
+DEBUG: Tag allocations computed (UMI-weighted)
+[FlexFilter] Processing 16 tags with 16 tag threads
+[FlexFilter] EmptyDrops MC: 2 threads per tag (total cores: 32)
+[TIMING] tag=ACTTTAGG start
+[TIMING] tag=AAGTAGAG start
+[TIMING] tag=AACGGGAA start
+[TIMING] tag=ATGTTGAC start
+[TIMING] tag=ACAGACCT start
+[TIMING] tag=AGTGAGTG start
+[TIMING] tag=ATACGTCA start
+[TIMING] tag=ACAGTCTG start
+[TIMING] tag=AACGCCGA start
+[TIMING] tag=AGAGGCAA start
+[TIMING] tag=ACTACTCA start
+[TIMING] tag=AGCTGTGA start
+[TIMING] tag=ATCCCAAC start
+[TIMING] tag=AGTAGGCT start
+[TIMING] tag=ATTCGGTT start
+[TIMING] tag=ATCATGTG start
+[TIMING] tag=AAGTAGAG stage=filterMatrixToTag delta_ms=749 total_ms=749
+[TIMING] tag=AGCTGTGA stage=filterMatrixToTag delta_ms=1007 total_ms=1007
+[TIMING] tag=ACAGTCTG stage=filterMatrixToTag delta_ms=1126 total_ms=1126
+[TIMING] tag=ACTTTAGG stage=filterMatrixToTag delta_ms=1140 total_ms=1140
+[TIMING] tag=AACGGGAA stage=filterMatrixToTag delta_ms=1166 total_ms=1166
+[TIMING] tag=ACTACTCA stage=filterMatrixToTag delta_ms=1185 total_ms=1185
+[EmptyDrops] Ambient profile: 16813 nonzero genes
+[EmptyDrops] Ambient profile: 16684 nonzero genes
+[EmptyDrops] Using CR sampler (DropletUtils-style nested multinomial)
+[EmptyDrops] CR sampler using full compact ambient (18017 genes, sum=1)
+[EmptyDrops] Using CR sampler (DropletUtils-style nested multinomial)
+[EmptyDrops] CR sampler using full compact ambient (18083 genes, sum=1)
+[TIMING] tag=AGAGGCAA stage=filterMatrixToTag delta_ms=1501 total_ms=1501
+[TIMING] tag=AGTGAGTG stage=filterMatrixToTag delta_ms=1680 total_ms=1680
+[EmptyDrops] Ambient profile: 17064 nonzero genes
+[TIMING] tag=AACGCCGA stage=filterMatrixToTag delta_ms=1819 total_ms=1819
+[TIMING] tag=ATGTTGAC stage=filterMatrixToTag delta_ms=1881 total_ms=1881
+[TIMING] tag=ACAGACCT stage=filterMatrixToTag delta_ms=1896 total_ms=1896
+[EmptyDrops] Using CR sampler (DropletUtils-style nested multinomial)
+[EmptyDrops] Ambient profile: 17038 nonzero genes
+[EmptyDrops] CR sampler using full compact ambient (18077 genes, sum=1)
+[EmptyDrops] Ambient profile: 15395 nonzero genes
+[TIMING] tag=ATCATGTG stage=filterMatrixToTag delta_ms=1985 total_ms=1985
+[EmptyDrops] Using CR sampler (DropletUtils-style nested multinomial)
+[EmptyDrops] CR sampler using full compact ambient (18089 genes, sum=1)
+[EmptyDrops] Ambient profile: 16736 nonzero genes
+[TIMING] tag=ATACGTCA stage=filterMatrixToTag delta_ms=2120 total_ms=2120
+[EmptyDrops] Using CR sampler (DropletUtils-style nested multinomial)
+[EmptyDrops] CR sampler using full compact ambient (17964 genes, sum=1)
+[TIMING] tag=ATTCGGTT stage=filterMatrixToTag delta_ms=2142 total_ms=2142
+[EmptyDrops] Using CR sampler (DropletUtils-style nested multinomial)
+[EmptyDrops] CR sampler using full compact ambient (18040 genes, sum=1)
+[EmptyDrops] Ambient profile: 15408 nonzero genes
+[EmptyDrops] Ambient profile: 16728 nonzero genes
+[TIMING] tag=AGTAGGCT stage=filterMatrixToTag delta_ms=3314 total_ms=3314
+[EmptyDrops] Using CR sampler (DropletUtils-style nested multinomial)
+[EmptyDrops] CR sampler using full compact ambient (18015 genes, sum=1)
+[EmptyDrops] Using CR sampler (DropletUtils-style nested multinomial)
+[EmptyDrops] CR sampler using full compact ambient (18041 genes, sum=1)
+[TIMING] tag=ATCCCAAC stage=filterMatrixToTag delta_ms=3933 total_ms=3933
+[EmptyDrops] Ambient profile: 16114 nonzero genes
+[EmptyDrops] Ambient profile: 15707 nonzero genes
+[EmptyDrops] Ambient profile: 15745 nonzero genes
+[EmptyDrops] Using CR sampler (DropletUtils-style nested multinomial)
+[EmptyDrops] CR sampler using full compact ambient (17960 genes, sum=1)
+[EmptyDrops] Ambient profile: 15512 nonzero genes
+[EmptyDrops] Ambient profile: 15447 nonzero genes
+[EmptyDrops] Ambient profile: 16028 nonzero genes
+[EmptyDrops] Using CR sampler (DropletUtils-style nested multinomial)
+[EmptyDrops] CR sampler using full compact ambient (18012 genes, sum=1)
+[EmptyDrops] Ambient profile: 15487 nonzero genes
+[EmptyDrops] Using CR sampler (DropletUtils-style nested multinomial)
+[EmptyDrops] CR sampler using full compact ambient (17986 genes, sum=1)
+[EmptyDrops] Using CR sampler (DropletUtils-style nested multinomial)
+[EmptyDrops] CR sampler using full compact ambient (18016 genes, sum=1)
+[EmptyDrops] Using CR sampler (DropletUtils-style nested multinomial)
+[EmptyDrops] CR sampler using full compact ambient (17993 genes, sum=1)
+[EmptyDrops] Using CR sampler (DropletUtils-style nested multinomial)
+[EmptyDrops] CR sampler using full compact ambient (18042 genes, sum=1)
+[EmptyDrops] Using CR sampler (DropletUtils-style nested multinomial)
+[EmptyDrops] CR sampler using full compact ambient (18062 genes, sum=1)
+[TIMING] tag=AAGTAGAG stage=EmptyDrops delta_ms=6409 total_ms=7158
+[TIMING] tag=AAGTAGAG stage=OccupancyPostFilter delta_ms=2 total_ms=7161
+[EmptyDrops] Ambient profile: 15391 nonzero genes
+[EmptyDrops] Using CR sampler (DropletUtils-style nested multinomial)
+[EmptyDrops] CR sampler using full compact ambient (18059 genes, sum=1)
+[TIMING] tag=AGCTGTGA stage=EmptyDrops delta_ms=7829 total_ms=8837
+[TIMING] tag=AGCTGTGA stage=OccupancyPostFilter delta_ms=1 total_ms=8838
+[TIMING] tag=ACTACTCA stage=EmptyDrops delta_ms=10325 total_ms=11510
+[TIMING] tag=ACTACTCA stage=OccupancyPostFilter delta_ms=9 total_ms=11519
+[TIMING] tag=ACTTTAGG stage=EmptyDrops delta_ms=14821 total_ms=15961
+[TIMING] tag=ACTTTAGG stage=OccupancyPostFilter delta_ms=5 total_ms=15967
+[TIMING] tag=AGAGGCAA stage=EmptyDrops delta_ms=15448 total_ms=16950
+[TIMING] tag=AGAGGCAA stage=OccupancyPostFilter delta_ms=4 total_ms=16955
+[TIMING] tag=AACGGGAA stage=EmptyDrops delta_ms=16390 total_ms=17556
+[TIMING] tag=AACGGGAA stage=OccupancyPostFilter delta_ms=5 total_ms=17561
+[TIMING] tag=ATACGTCA stage=EmptyDrops delta_ms=23219 total_ms=25340
+[TIMING] tag=ATACGTCA stage=OccupancyPostFilter delta_ms=7 total_ms=25347
+[TIMING] tag=ACAGTCTG stage=EmptyDrops delta_ms=31221 total_ms=32348
+[TIMING] tag=ACAGTCTG stage=OccupancyPostFilter delta_ms=4 total_ms=32352
+[TIMING] tag=AGTGAGTG stage=EmptyDrops delta_ms=30992 total_ms=32673
+[TIMING] tag=AGTGAGTG stage=OccupancyPostFilter delta_ms=6 total_ms=32679
+[TIMING] tag=ATCATGTG stage=EmptyDrops delta_ms=30851 total_ms=32836
+[TIMING] tag=ATCATGTG stage=OccupancyPostFilter delta_ms=4 total_ms=32841
+[TIMING] tag=ATGTTGAC stage=EmptyDrops delta_ms=52270 total_ms=54152
+[TIMING] tag=ATGTTGAC stage=OccupancyPostFilter delta_ms=5 total_ms=54157
+[TIMING] tag=AACGCCGA stage=EmptyDrops delta_ms=57813 total_ms=59633
+[TIMING] tag=AACGCCGA stage=OccupancyPostFilter delta_ms=10 total_ms=59643
+[TIMING] tag=ATTCGGTT stage=EmptyDrops delta_ms=73734 total_ms=75877
+[TIMING] tag=ATTCGGTT stage=OccupancyPostFilter delta_ms=6 total_ms=75883
+[TIMING] tag=ATCCCAAC stage=EmptyDrops delta_ms=73926 total_ms=77860
+[TIMING] tag=ATCCCAAC stage=OccupancyPostFilter delta_ms=7 total_ms=77867
+[TIMING] tag=ACAGACCT stage=EmptyDrops delta_ms=85431 total_ms=87327
+[TIMING] tag=ACAGACCT stage=OccupancyPostFilter delta_ms=6 total_ms=87334
+[TIMING] tag=AGTAGGCT stage=EmptyDrops delta_ms=84427 total_ms=87741
+[TIMING] tag=AGTAGGCT stage=OccupancyPostFilter delta_ms=7 total_ms=87749
+[FlexFilter] All 16 tags processed
+[FlexFilter] Running combined occupancy filter...
+[FlexFilter] Combined occupancy observed tags: 16 / 16
+[FlexFilter] Combined ED passers (observed tags): 335131
+[FlexFilter] Combined occupancy lambda: 2.5828 (GEMs: 129755, empty: 0)
+[FlexFilter] Combined occupancy flagged 1069 GEMs
+[FlexFilter] Tag ACTTTAGG: removed 511 by occupancy, final: 16547
+[FlexFilter] Tag AACGGGAA: removed 429 by occupancy, final: 14923
+[FlexFilter] Tag AGTAGGCT: removed 840 by occupancy, final: 29866
+[FlexFilter] Tag ATGTTGAC: removed 807 by occupancy, final: 25381
+[FlexFilter] Tag ACAGACCT: removed 696 by occupancy, final: 30931
+[FlexFilter] Tag ATCCCAAC: removed 792 by occupancy, final: 37924
+[FlexFilter] Tag AAGTAGAG: removed 332 by occupancy, final: 7320
+[FlexFilter] Tag AGCTGTGA: removed 232 by occupancy, final: 4719
+[FlexFilter] Tag ACAGTCTG: removed 505 by occupancy, final: 20725
+[FlexFilter] Tag AGTGAGTG: removed 481 by occupancy, final: 20741
+[FlexFilter] Tag AGAGGCAA: removed 519 by occupancy, final: 15108
+[FlexFilter] Tag ACTACTCA: removed 509 by occupancy, final: 15226
+[FlexFilter] Tag ATACGTCA: removed 610 by occupancy, final: 21326
+[FlexFilter] Tag ATCATGTG: removed 568 by occupancy, final: 18974
+[FlexFilter] Tag AACGCCGA: removed 679 by occupancy, final: 25171
+[FlexFilter] Tag ATTCGGTT: removed 605 by occupancy, final: 21134
+[FlexFilter] Combined occupancy removed 9115 cells total

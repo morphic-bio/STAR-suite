@@ -1,0 +1,450 @@
+STAR-suite version=1.7.1
+STAR upstream version=2.7.11b
+STAR genome compatibility version=2.7.4a
+STAR-suite source revision=66660392eb96af37db50b78c84766405214c5d2a-dirty
+STAR compilation time,server,dir=2026-09-02T17:33:24+00:00 :/mnt/pikachu/STAR-suite-bgzf-ingest-20260901/core/legacy/source
+STAR git: On branch core-bucket-tail ; commit 66660392eb96af37db50b78c84766405214c5d2a ; diff files: 
+##### Command Line:
+/mnt/pikachu/STAR-suite-bgzf-ingest-20260901/core/legacy/source/STAR --runThreadN 32 --genomeDir /storage/flex_filtered_reference_2024/star_index --soloType CB_UMI_Simple --soloCBstart 1 --soloUMIstart 17 --soloCBlen 16 --soloUMIlen 12 --soloBarcodeReadLength 0 --soloCBwhitelist /storage/scRNAseq_output/whitelists/737K-fixed-rna-profiling.txt --flex yes --soloFlexExpectedCellsPerTag 3000 --soloSampleWhitelist /mnt/pikachu/flex/tables/sample_whitelist_full_16.tsv --soloProbeList /storage/flex_filtered_reference_2024/star_index/flex_probe_artifacts/probe_list.txt --soloSampleProbes /mnt/pikachu/JAX_scRNAseq01_processed/probe-barcodes-fixed-rna-profiling-rna.txt --soloSampleProbeOffset 68 --soloFlexAllowedTags /mnt/pikachu/flex/tables/sample_whitelist_full_16.tsv --soloFlexOutputPrefix /home/lhhung/STAR-suite-bgzf-ingest-benchmark-20260901/scffpe320k_bgzf_20260902T173415Z/per_sample --limitIObufferSize 50000000 50000000 --outSJtype None --outSAMtype None --outSAMattributes None --soloFeatures Gene --soloCellFilter None --soloMultiMappers Rescue --soloCBmatchWLtype 1MM_multi_Nbase_pseudocounts --soloUMIfiltering MultiGeneUMI_CR --soloUMIdedup 1MM_CR --soloStrand Unstranded --clipAdapterType CellRanger4 --alignEndsType Local --chimSegmentMin 0 --soloKeysCompat cr --soloSampleSearchNearby no --soloHashScreenFile /storage/downsampled_100K/SC2300771/results/flex_h01_2024_20260320_081246/h01_cache.bin --soloBucketMode spill --soloBucketMemGB 32 --soloBucketCount 256 --soloBucketSpillDir /home/lhhung/STAR-suite-bgzf-ingest-benchmark-20260901/scffpe320k_bgzf_20260902T173415Z/bucket_spill --flexPipeline yes --flexPipelineNTriage 0 --flexPipelineNSolo 0 --flexNoAlign 1 --dynamicThreadInterface 1 --crAssignConsumerThreads -1 --crAssignSearchThreads 1 --outFileNamePrefix /home/lhhung/STAR-suite-bgzf-ingest-benchmark-20260901/scffpe320k_bgzf_20260902T173415Z/ --readFilesBgzfMode range --bgzfReaderThreads 32 --bgzfCrcCheck 1 --readFilesIn /mnt/pikachu/tenx_320k_scFFPE/320k_scFFPE_16-plex_GEM-X_FLEX_fastqs/16-plex_GEM-X_FLEX_S1_L001_R2_001.fastq.gz,/mnt/pikachu/tenx_320k_scFFPE/320k_scFFPE_16-plex_GEM-X_FLEX_fastqs/16-plex_GEM-X_FLEX_S1_L002_R2_001.fastq.gz,/mnt/pikachu/tenx_320k_scFFPE/320k_scFFPE_16-plex_GEM-X_FLEX_fastqs/16-plex_GEM-X_FLEX_S1_L003_R2_001.fastq.gz,/mnt/pikachu/tenx_320k_scFFPE/320k_scFFPE_16-plex_GEM-X_FLEX_fastqs/16-plex_GEM-X_FLEX_S1_L004_R2_001.fastq.gz /mnt/pikachu/tenx_320k_scFFPE/320k_scFFPE_16-plex_GEM-X_FLEX_fastqs/16-plex_GEM-X_FLEX_S1_L001_R1_001.fastq.gz,/mnt/pikachu/tenx_320k_scFFPE/320k_scFFPE_16-plex_GEM-X_FLEX_fastqs/16-plex_GEM-X_FLEX_S1_L002_R1_001.fastq.gz,/mnt/pikachu/tenx_320k_scFFPE/320k_scFFPE_16-plex_GEM-X_FLEX_fastqs/16-plex_GEM-X_FLEX_S1_L003_R1_001.fastq.gz,/mnt/pikachu/tenx_320k_scFFPE/320k_scFFPE_16-plex_GEM-X_FLEX_fastqs/16-plex_GEM-X_FLEX_S1_L004_R1_001.fastq.gz
+##### Initial USER parameters from Command Line:
+outFileNamePrefix                 /home/lhhung/STAR-suite-bgzf-ingest-benchmark-20260901/scffpe320k_bgzf_20260902T173415Z/
+###### All USER parameters from Command Line:
+runThreadN                    32     ~RE-DEFINED
+genomeDir                     /storage/flex_filtered_reference_2024/star_index     ~RE-DEFINED
+soloType                      CB_UMI_Simple     ~RE-DEFINED
+soloCBstart                   1     ~RE-DEFINED
+soloUMIstart                  17     ~RE-DEFINED
+soloCBlen                     16     ~RE-DEFINED
+soloUMIlen                    12     ~RE-DEFINED
+soloBarcodeReadLength         0     ~RE-DEFINED
+soloCBwhitelist               /storage/scRNAseq_output/whitelists/737K-fixed-rna-profiling.txt        ~RE-DEFINED
+flex                          yes     ~RE-DEFINED
+soloFlexExpectedCellsPerTag   3000     ~RE-DEFINED
+soloSampleWhitelist           /mnt/pikachu/flex/tables/sample_whitelist_full_16.tsv     ~RE-DEFINED
+soloProbeList                 /storage/flex_filtered_reference_2024/star_index/flex_probe_artifacts/probe_list.txt     ~RE-DEFINED
+soloSampleProbes              /mnt/pikachu/JAX_scRNAseq01_processed/probe-barcodes-fixed-rna-profiling-rna.txt     ~RE-DEFINED
+soloSampleProbeOffset         68     ~RE-DEFINED
+soloFlexAllowedTags           /mnt/pikachu/flex/tables/sample_whitelist_full_16.tsv     ~RE-DEFINED
+soloFlexOutputPrefix          /home/lhhung/STAR-suite-bgzf-ingest-benchmark-20260901/scffpe320k_bgzf_20260902T173415Z/per_sample     ~RE-DEFINED
+limitIObufferSize             50000000   50000000        ~RE-DEFINED
+outSJtype                     None        ~RE-DEFINED
+outSAMtype                    None        ~RE-DEFINED
+outSAMattributes              None        ~RE-DEFINED
+soloFeatures                  Gene        ~RE-DEFINED
+soloCellFilter                None        ~RE-DEFINED
+soloMultiMappers              Rescue        ~RE-DEFINED
+soloCBmatchWLtype             1MM_multi_Nbase_pseudocounts     ~RE-DEFINED
+soloUMIfiltering              MultiGeneUMI_CR        ~RE-DEFINED
+soloUMIdedup                  1MM_CR        ~RE-DEFINED
+soloStrand                    Unstranded     ~RE-DEFINED
+clipAdapterType               CellRanger4        ~RE-DEFINED
+alignEndsType                 Local     ~RE-DEFINED
+chimSegmentMin                0     ~RE-DEFINED
+soloKeysCompat                cr     ~RE-DEFINED
+soloSampleSearchNearby        no     ~RE-DEFINED
+soloHashScreenFile            /storage/downsampled_100K/SC2300771/results/flex_h01_2024_20260320_081246/h01_cache.bin     ~RE-DEFINED
+soloBucketMode                spill     ~RE-DEFINED
+soloBucketMemGB               32     ~RE-DEFINED
+soloBucketCount               256     ~RE-DEFINED
+soloBucketSpillDir            /home/lhhung/STAR-suite-bgzf-ingest-benchmark-20260901/scffpe320k_bgzf_20260902T173415Z/bucket_spill     ~RE-DEFINED
+flexPipeline                  yes     ~RE-DEFINED
+flexPipelineNTriage           0     ~RE-DEFINED
+flexPipelineNSolo             0     ~RE-DEFINED
+flexNoAlign                   1     ~RE-DEFINED
+dynamicThreadInterface        1     ~RE-DEFINED
+crAssignConsumerThreads       -1     ~RE-DEFINED
+crAssignSearchThreads         1     ~RE-DEFINED
+outFileNamePrefix             /home/lhhung/STAR-suite-bgzf-ingest-benchmark-20260901/scffpe320k_bgzf_20260902T173415Z/     ~RE-DEFINED
+readFilesBgzfMode             range     ~RE-DEFINED
+bgzfReaderThreads             32     ~RE-DEFINED
+bgzfCrcCheck                  1     ~RE-DEFINED
+readFilesIn                   /mnt/pikachu/tenx_320k_scFFPE/320k_scFFPE_16-plex_GEM-X_FLEX_fastqs/16-plex_GEM-X_FLEX_S1_L001_R2_001.fastq.gz,/mnt/pikachu/tenx_320k_scFFPE/320k_scFFPE_16-plex_GEM-X_FLEX_fastqs/16-plex_GEM-X_FLEX_S1_L002_R2_001.fastq.gz,/mnt/pikachu/tenx_320k_scFFPE/320k_scFFPE_16-plex_GEM-X_FLEX_fastqs/16-plex_GEM-X_FLEX_S1_L003_R2_001.fastq.gz,/mnt/pikachu/tenx_320k_scFFPE/320k_scFFPE_16-plex_GEM-X_FLEX_fastqs/16-plex_GEM-X_FLEX_S1_L004_R2_001.fastq.gz   /mnt/pikachu/tenx_320k_scFFPE/320k_scFFPE_16-plex_GEM-X_FLEX_fastqs/16-plex_GEM-X_FLEX_S1_L001_R1_001.fastq.gz,/mnt/pikachu/tenx_320k_scFFPE/320k_scFFPE_16-plex_GEM-X_FLEX_fastqs/16-plex_GEM-X_FLEX_S1_L002_R1_001.fastq.gz,/mnt/pikachu/tenx_320k_scFFPE/320k_scFFPE_16-plex_GEM-X_FLEX_fastqs/16-plex_GEM-X_FLEX_S1_L003_R1_001.fastq.gz,/mnt/pikachu/tenx_320k_scFFPE/320k_scFFPE_16-plex_GEM-X_FLEX_fastqs/16-plex_GEM-X_FLEX_S1_L004_R1_001.fastq.gz        ~RE-DEFINED
+##### Finished reading parameters from all sources
+
+##### Final user re-defined parameters-----------------:
+runThreadN                        32
+dynamicThreadInterface            1
+genomeDir                         /storage/flex_filtered_reference_2024/star_index
+readFilesIn                       /mnt/pikachu/tenx_320k_scFFPE/320k_scFFPE_16-plex_GEM-X_FLEX_fastqs/16-plex_GEM-X_FLEX_S1_L001_R2_001.fastq.gz,/mnt/pikachu/tenx_320k_scFFPE/320k_scFFPE_16-plex_GEM-X_FLEX_fastqs/16-plex_GEM-X_FLEX_S1_L002_R2_001.fastq.gz,/mnt/pikachu/tenx_320k_scFFPE/320k_scFFPE_16-plex_GEM-X_FLEX_fastqs/16-plex_GEM-X_FLEX_S1_L003_R2_001.fastq.gz,/mnt/pikachu/tenx_320k_scFFPE/320k_scFFPE_16-plex_GEM-X_FLEX_fastqs/16-plex_GEM-X_FLEX_S1_L004_R2_001.fastq.gz   /mnt/pikachu/tenx_320k_scFFPE/320k_scFFPE_16-plex_GEM-X_FLEX_fastqs/16-plex_GEM-X_FLEX_S1_L001_R1_001.fastq.gz,/mnt/pikachu/tenx_320k_scFFPE/320k_scFFPE_16-plex_GEM-X_FLEX_fastqs/16-plex_GEM-X_FLEX_S1_L002_R1_001.fastq.gz,/mnt/pikachu/tenx_320k_scFFPE/320k_scFFPE_16-plex_GEM-X_FLEX_fastqs/16-plex_GEM-X_FLEX_S1_L003_R1_001.fastq.gz,/mnt/pikachu/tenx_320k_scFFPE/320k_scFFPE_16-plex_GEM-X_FLEX_fastqs/16-plex_GEM-X_FLEX_S1_L004_R1_001.fastq.gz   
+readFilesBgzfMode                 range
+bgzfReaderThreads                 32
+bgzfCrcCheck                      1
+limitIObufferSize                 50000000   50000000   
+outFileNamePrefix                 /home/lhhung/STAR-suite-bgzf-ingest-benchmark-20260901/scffpe320k_bgzf_20260902T173415Z/
+outSAMtype                        None   
+outSAMattributes                  None   
+outSJtype                         None   
+clipAdapterType                   CellRanger4   
+alignEndsType                     Local
+chimSegmentMin                    0
+soloType                          CB_UMI_Simple
+soloCBstart                       1
+soloUMIstart                      17
+soloCBlen                         16
+soloUMIlen                        12
+soloBarcodeReadLength             0
+soloCBwhitelist                   /storage/scRNAseq_output/whitelists/737K-fixed-rna-profiling.txt   
+soloStrand                        Unstranded
+soloFeatures                      Gene   
+soloUMIdedup                      1MM_CR   
+soloCBmatchWLtype                 1MM_multi_Nbase_pseudocounts
+soloCellFilter                    None   
+soloUMIfiltering                  MultiGeneUMI_CR   
+soloMultiMappers                  Rescue   
+soloKeysCompat                    cr
+soloProbeList                     /storage/flex_filtered_reference_2024/star_index/flex_probe_artifacts/probe_list.txt
+soloSampleWhitelist               /mnt/pikachu/flex/tables/sample_whitelist_full_16.tsv
+soloSampleProbes                  /mnt/pikachu/JAX_scRNAseq01_processed/probe-barcodes-fixed-rna-profiling-rna.txt
+soloSampleProbeOffset             68
+soloSampleSearchNearby            no
+soloBucketMode                    spill
+soloBucketMemGB                   32
+soloBucketSpillDir                /home/lhhung/STAR-suite-bgzf-ingest-benchmark-20260901/scffpe320k_bgzf_20260902T173415Z/bucket_spill
+soloBucketCount                   256
+soloHashScreenFile                /storage/downsampled_100K/SC2300771/results/flex_h01_2024_20260320_081246/h01_cache.bin
+flex                              yes
+flexPipeline                      yes
+flexPipelineNSolo                 0
+flexPipelineNTriage               0
+flexNoAlign                       1
+soloFlexExpectedCellsPerTag       3000
+soloFlexAllowedTags               /mnt/pikachu/flex/tables/sample_whitelist_full_16.tsv
+soloFlexOutputPrefix              /home/lhhung/STAR-suite-bgzf-ingest-benchmark-20260901/scffpe320k_bgzf_20260902T173415Z/per_sample
+crAssignConsumerThreads           -1
+crAssignSearchThreads             1
+
+-------------------------------
+##### Final effective command line:
+/mnt/pikachu/STAR-suite-bgzf-ingest-20260901/core/legacy/source/STAR   --runThreadN 32   --dynamicThreadInterface 1   --genomeDir /storage/flex_filtered_reference_2024/star_index   --readFilesIn /mnt/pikachu/tenx_320k_scFFPE/320k_scFFPE_16-plex_GEM-X_FLEX_fastqs/16-plex_GEM-X_FLEX_S1_L001_R2_001.fastq.gz,/mnt/pikachu/tenx_320k_scFFPE/320k_scFFPE_16-plex_GEM-X_FLEX_fastqs/16-plex_GEM-X_FLEX_S1_L002_R2_001.fastq.gz,/mnt/pikachu/tenx_320k_scFFPE/320k_scFFPE_16-plex_GEM-X_FLEX_fastqs/16-plex_GEM-X_FLEX_S1_L003_R2_001.fastq.gz,/mnt/pikachu/tenx_320k_scFFPE/320k_scFFPE_16-plex_GEM-X_FLEX_fastqs/16-plex_GEM-X_FLEX_S1_L004_R2_001.fastq.gz   /mnt/pikachu/tenx_320k_scFFPE/320k_scFFPE_16-plex_GEM-X_FLEX_fastqs/16-plex_GEM-X_FLEX_S1_L001_R1_001.fastq.gz,/mnt/pikachu/tenx_320k_scFFPE/320k_scFFPE_16-plex_GEM-X_FLEX_fastqs/16-plex_GEM-X_FLEX_S1_L002_R1_001.fastq.gz,/mnt/pikachu/tenx_320k_scFFPE/320k_scFFPE_16-plex_GEM-X_FLEX_fastqs/16-plex_GEM-X_FLEX_S1_L003_R1_001.fastq.gz,/mnt/pikachu/tenx_320k_scFFPE/320k_scFFPE_16-plex_GEM-X_FLEX_fastqs/16-plex_GEM-X_FLEX_S1_L004_R1_001.fastq.gz      --readFilesBgzfMode range   --bgzfReaderThreads 32   --bgzfCrcCheck 1   --limitIObufferSize 50000000   50000000      --outFileNamePrefix /home/lhhung/STAR-suite-bgzf-ingest-benchmark-20260901/scffpe320k_bgzf_20260902T173415Z/   --outSAMtype None      --outSAMattributes None      --outSJtype None      --clipAdapterType CellRanger4      --alignEndsType Local   --chimSegmentMin 0   --soloType CB_UMI_Simple   --soloCBstart 1   --soloUMIstart 17   --soloCBlen 16   --soloUMIlen 12   --soloBarcodeReadLength 0   --soloCBwhitelist /storage/scRNAseq_output/whitelists/737K-fixed-rna-profiling.txt      --soloStrand Unstranded   --soloFeatures Gene      --soloUMIdedup 1MM_CR      --soloCBmatchWLtype 1MM_multi_Nbase_pseudocounts   --soloCellFilter None      --soloUMIfiltering MultiGeneUMI_CR      --soloMultiMappers Rescue      --soloKeysCompat cr   --soloProbeList /storage/flex_filtered_reference_2024/star_index/flex_probe_artifacts/probe_list.txt   --soloSampleWhitelist /mnt/pikachu/flex/tables/sample_whitelist_full_16.tsv   --soloSampleProbes /mnt/pikachu/JAX_scRNAseq01_processed/probe-barcodes-fixed-rna-profiling-rna.txt   --soloSampleProbeOffset 68   --soloSampleSearchNearby no   --soloBucketMode spill   --soloBucketMemGB 32   --soloBucketSpillDir /home/lhhung/STAR-suite-bgzf-ingest-benchmark-20260901/scffpe320k_bgzf_20260902T173415Z/bucket_spill   --soloBucketCount 256   --soloHashScreenFile /storage/downsampled_100K/SC2300771/results/flex_h01_2024_20260320_081246/h01_cache.bin   --flex yes   --flexPipeline yes   --flexPipelineNSolo 0   --flexPipelineNTriage 0   --flexNoAlign 1   --soloFlexExpectedCellsPerTag 3000   --soloFlexAllowedTags /mnt/pikachu/flex/tables/sample_whitelist_full_16.tsv   --soloFlexOutputPrefix /home/lhhung/STAR-suite-bgzf-ingest-benchmark-20260901/scffpe320k_bgzf_20260902T173415Z/per_sample   --crAssignConsumerThreads -1   --crAssignSearchThreads 1
+----------------------------------------
+
+Number of input files for each source = 4
+NOTE: .gz Fastx input detected with --readFilesCommand - ; using internal zlib streaming path.
+      Set --readFilesLegacyZcat Yes to force legacy external zcat helper mode.
+Fastx input path: direct STAR chunk reader
+
+   Input read files for mate 1 :
+-rw-rw-r-- 1 lhhung lhhung 80701017242 Nov  1  2024 /mnt/pikachu/tenx_320k_scFFPE/320k_scFFPE_16-plex_GEM-X_FLEX_fastqs/16-plex_GEM-X_FLEX_S1_L001_R2_001.fastq.gz
+-rw-rw-r-- 1 lhhung lhhung 80115845382 Nov  1  2024 /mnt/pikachu/tenx_320k_scFFPE/320k_scFFPE_16-plex_GEM-X_FLEX_fastqs/16-plex_GEM-X_FLEX_S1_L002_R2_001.fastq.gz
+-rw-rw-r-- 1 lhhung lhhung 79704688517 Nov  1  2024 /mnt/pikachu/tenx_320k_scFFPE/320k_scFFPE_16-plex_GEM-X_FLEX_fastqs/16-plex_GEM-X_FLEX_S1_L003_R2_001.fastq.gz
+-rw-rw-r-- 1 lhhung lhhung 79358384310 Nov  1  2024 /mnt/pikachu/tenx_320k_scFFPE/320k_scFFPE_16-plex_GEM-X_FLEX_fastqs/16-plex_GEM-X_FLEX_S1_L004_R2_001.fastq.gz
+NOTE: mate 1 using internal gzip FIFO helper: /home/lhhung/STAR-suite-bgzf-ingest-benchmark-20260901/scffpe320k_bgzf_20260902T173415Z/_STARtmp/tmp.fifo.read1
+
+   Input read files for mate 2 :
+-rw-rw-r-- 1 lhhung lhhung 36603377578 Nov  1  2024 /mnt/pikachu/tenx_320k_scFFPE/320k_scFFPE_16-plex_GEM-X_FLEX_fastqs/16-plex_GEM-X_FLEX_S1_L001_R1_001.fastq.gz
+-rw-rw-r-- 1 lhhung lhhung 36308602480 Nov  1  2024 /mnt/pikachu/tenx_320k_scFFPE/320k_scFFPE_16-plex_GEM-X_FLEX_fastqs/16-plex_GEM-X_FLEX_S1_L002_R1_001.fastq.gz
+-rw-rw-r-- 1 lhhung lhhung 36441745739 Nov  1  2024 /mnt/pikachu/tenx_320k_scFFPE/320k_scFFPE_16-plex_GEM-X_FLEX_fastqs/16-plex_GEM-X_FLEX_S1_L003_R1_001.fastq.gz
+-rw-rw-r-- 1 lhhung lhhung 36415958682 Nov  1  2024 /mnt/pikachu/tenx_320k_scFFPE/320k_scFFPE_16-plex_GEM-X_FLEX_fastqs/16-plex_GEM-X_FLEX_S1_L004_R1_001.fastq.gz
+NOTE: mate 2 using internal gzip FIFO helper: /home/lhhung/STAR-suite-bgzf-ingest-benchmark-20260901/scffpe320k_bgzf_20260902T173415Z/_STARtmp/tmp.fifo.read2
+WARNING: --soloCbUbRequireTogether is DEPRECATED and will be ignored. CB and UB tags are now always handled independently.
+--flex yes: Enabled Flex pipeline with production defaults
+    soloRunFlexFilter=yes
+    soloInlineCBCorrection=no
+    soloInlineHashMode=yes (enabled)
+    soloFlexMinimalMemory=yes
+    soloMapqMode=off (enum=0)
+    soloMMrateMax=0.1
+    soloBarcodesObservedOnly=yes
+    soloUMICorrection=clique
+Flex gDNA diagnostic: probe metadata loaded from /storage/flex_filtered_reference_2024/star_index/flex_probe_artifacts/filtered_probe_set.csv (probes=53459, control_genes=5876)
+H0/H1 hash screen: enabled with cache /storage/downsampled_100K/SC2300771/results/flex_h01_2024_20260320_081246/h01_cache.bin (8874194 records, format v2)
+Flex gDNA diagnostic: active H0/H1 cache lacks probe-region metadata; mapping remains enabled but the diagnostic will be reported unavailable
+Flex mode: Using probe list: /storage/flex_filtered_reference_2024/star_index/flex_probe_artifacts/probe_list.txt
+Number of CBs in the whitelist = 737280
+Flex streaming CB buckets: active (spill, 256 buckets, memory budget 32 GiB, spill directory /home/lhhung/STAR-suite-bgzf-ingest-benchmark-20260901/scffpe320k_bgzf_20260902T173415Z/bucket_spill)
+Built cbWLhash: 737280 entries, 2097152 buckets
+Initialized CbCorrector with 737280 CBs
+CbCorrector initialization verified: whitelistSize=737280
+Skipping legacy ambiguousCbByKey precompute (set STAR_BUILD_LEGACY_AMBIG_HASH=1 to enable).
+Sep 02 17:34:34 ... Finished reading, sorting and deduplicating CB whitelist sequences.
+clip3pPolyG: auto => enabled
+Finished loading and checking parameters
+Flex count-only no-genome: active
+Flex count-only no-genome: hash cache /storage/downsampled_100K/SC2300771/results/flex_h01_2024_20260320_081246/h01_cache.bin
+Flex pipeline: runThreadN=32, nLanes=4, triage=0 (fully fused + lane steal + role switch), soloConsumers=0, fusedThreads=32, dedicatedWorkers=0, noAlign=ON (alignment skipped), noGenome=ON
+BGZF parallel range readers: active (4 BGZF lanes using 32 on-demand BC/BSIZE inflate readers and 32 fused consumers; no pre-index)
+BGZF input lane 0: range
+BGZF input lane 1: range
+BGZF input lane 2: range
+BGZF input lane 3: range
+  32 fused no-genome threads started
+PIPELINE_STATS t=10s total=38107392 keep=33622835 deny=267278 miss=4217279 readerQ=0 soloQ=n/a alignQ=0 delta10s=38107392
+PIPELINE_STATS t=20s total=78052891 keep=68921444 deny=542571 miss=8588877 readerQ=0 soloQ=n/a alignQ=0 delta10s=39945499
+PIPELINE_STATS t=30s total=122468932 keep=108237557 deny=846922 miss=13384454 readerQ=0 soloQ=n/a alignQ=0 delta10s=44416041
+PIPELINE_STATS t=40s total=165348186 keep=146224964 deny=1138709 miss=17984513 readerQ=0 soloQ=n/a alignQ=0 delta10s=42879254
+PIPELINE_STATS t=50s total=208205300 keep=184166500 deny=1436464 miss=22602336 readerQ=0 soloQ=n/a alignQ=0 delta10s=42857114
+PIPELINE_STATS t=60s total=251728320 keep=222757679 deny=1734851 miss=27235791 readerQ=0 soloQ=n/a alignQ=0 delta10s=43523020
+PIPELINE_STATS t=70s total=296335007 keep=262321392 deny=2039816 miss=31973802 readerQ=0 soloQ=n/a alignQ=0 delta10s=44606687
+PIPELINE_STATS t=80s total=340078814 keep=301133126 deny=2338332 miss=36607358 readerQ=0 soloQ=n/a alignQ=0 delta10s=43743807
+PIPELINE_STATS t=90s total=390228399 keep=345568964 deny=2686510 miss=41972926 readerQ=0 soloQ=n/a alignQ=0 delta10s=50149585
+PIPELINE_STATS t=100s total=434972799 keep=385228785 deny=2991206 miss=46752809 readerQ=0 soloQ=n/a alignQ=0 delta10s=44744400
+PIPELINE_STATS t=110s total=478068586 keep=423447888 deny=3282387 miss=51338311 readerQ=0 soloQ=n/a alignQ=0 delta10s=43095787
+PIPELINE_STATS t=120s total=518095042 keep=458957073 deny=3547826 miss=55590144 readerQ=0 soloQ=n/a alignQ=0 delta10s=40026456
+PIPELINE_STATS t=130s total=561862901 keep=497776992 deny=3837655 miss=60248261 readerQ=0 soloQ=n/a alignQ=0 delta10s=43767859
+PIPELINE_STATS t=140s total=606150639 keep=536990372 deny=4136343 miss=65023925 readerQ=0 soloQ=n/a alignQ=0 delta10s=44287738
+PIPELINE_STATS t=150s total=652877783 keep=578345406 deny=4451341 miss=70081036 readerQ=0 soloQ=n/a alignQ=0 delta10s=46727144
+PIPELINE_STATS t=160s total=696073724 keep=616510063 deny=4749416 miss=74814247 readerQ=0 soloQ=n/a alignQ=0 delta10s=43195941
+PIPELINE_STATS t=170s total=740371689 keep=655675192 deny=5054862 miss=79641635 readerQ=0 soloQ=n/a alignQ=0 delta10s=44297965
+PIPELINE_STATS t=180s total=785460912 keep=695597356 deny=5362939 miss=84500617 readerQ=0 soloQ=n/a alignQ=0 delta10s=45089223
+PIPELINE_STATS t=190s total=832325376 keep=737152805 deny=5680747 miss=89491824 readerQ=0 soloQ=n/a alignQ=0 delta10s=46864464
+PIPELINE_STATS t=200s total=878507605 keep=778112054 deny=5993393 miss=94402158 readerQ=0 soloQ=n/a alignQ=0 delta10s=46182229
+PIPELINE_STATS t=210s total=925081446 keep=819428943 deny=6310185 miss=99342319 readerQ=0 soloQ=n/a alignQ=0 delta10s=46573841
+PIPELINE_STATS t=220s total=972655081 keep=861613247 deny=6636746 miss=104405090 readerQ=0 soloQ=n/a alignQ=0 delta10s=47573635
+PIPELINE_STATS t=230s total=1018797749 keep=902501721 deny=6951588 miss=109344445 readerQ=0 soloQ=n/a alignQ=0 delta10s=46142668
+PIPELINE_STATS t=240s total=1061555732 keep=940407170 deny=7240458 miss=113908107 readerQ=0 soloQ=n/a alignQ=0 delta10s=42757983
+PIPELINE_STATS t=250s total=1104550144 keep=978509985 deny=7529440 miss=118510719 readerQ=0 soloQ=n/a alignQ=0 delta10s=42994412
+PIPELINE_STATS t=260s total=1147235856 keep=1016317979 deny=7816824 miss=123101054 readerQ=0 soloQ=n/a alignQ=0 delta10s=42685712
+PIPELINE_STATS t=270s total=1191952386 keep=1055821950 deny=8125235 miss=128005201 readerQ=0 soloQ=n/a alignQ=0 delta10s=44716530
+PIPELINE_STATS t=280s total=1236805626 keep=1095413891 deny=8437081 miss=132954654 readerQ=0 soloQ=n/a alignQ=0 delta10s=44853240
+PIPELINE_STATS t=290s total=1280126888 keep=1133604929 deny=8747460 miss=137774499 readerQ=0 soloQ=n/a alignQ=0 delta10s=43321262
+PIPELINE_STATS t=300s total=1322585560 keep=1171094826 deny=9039863 miss=142450871 readerQ=0 soloQ=n/a alignQ=0 delta10s=42458672
+PIPELINE_STATS t=310s total=1366189506 keep=1209626893 deny=9341822 miss=147220792 readerQ=0 soloQ=n/a alignQ=0 delta10s=43603946
+PIPELINE_STATS t=320s total=1409984000 keep=1248390307 deny=9642148 miss=151951545 readerQ=0 soloQ=n/a alignQ=0 delta10s=43794494
+PIPELINE_STATS t=330s total=1456530521 keep=1289648183 deny=9959378 miss=156922960 readerQ=0 soloQ=n/a alignQ=0 delta10s=46546521
+PIPELINE_STATS t=340s total=1501106384 keep=1329190323 deny=10262153 miss=161653909 readerQ=0 soloQ=n/a alignQ=0 delta10s=44575863
+PIPELINE_STATS t=350s total=1547005440 keep=1369901447 deny=10575835 miss=166528158 readerQ=0 soloQ=n/a alignQ=0 delta10s=45899056
+PIPELINE_STATS t=360s total=1592542257 keep=1410273574 deny=10888339 miss=171380344 readerQ=0 soloQ=n/a alignQ=0 delta10s=45536817
+PIPELINE_STATS t=370s total=1639430342 keep=1451827393 deny=11209576 miss=176393373 readerQ=0 soloQ=n/a alignQ=0 delta10s=46888085
+PIPELINE_STATS t=380s total=1686045908 keep=1493131075 deny=11528269 miss=181386564 readerQ=0 soloQ=n/a alignQ=0 delta10s=46615566
+PIPELINE_STATS t=390s total=1730937083 keep=1532932912 deny=11829480 miss=186174691 readerQ=0 soloQ=n/a alignQ=0 delta10s=44891175
+PIPELINE_STATS t=400s total=1777398970 keep=1574099374 deny=12139983 miss=191159613 readerQ=0 soloQ=n/a alignQ=0 delta10s=46461887
+PIPELINE_STATS t=410s total=1821879296 keep=1613507555 deny=12435431 miss=195936310 readerQ=0 soloQ=n/a alignQ=0 delta10s=44480326
+PIPELINE_STATS t=420s total=1864669943 keep=1651394129 deny=12721573 miss=200554241 readerQ=0 soloQ=n/a alignQ=0 delta10s=42790647
+PIPELINE_STATS t=430s total=1904581888 keep=1686688693 deny=12992792 miss=204900403 readerQ=0 soloQ=n/a alignQ=0 delta10s=39911945
+PIPELINE_STATS t=440s total=1945740026 keep=1723033582 deny=13277121 miss=209429324 readerQ=0 soloQ=n/a alignQ=0 delta10s=41158138
+PIPELINE_STATS t=450s total=1988464896 keep=1760809397 deny=13570094 miss=214085405 readerQ=0 soloQ=n/a alignQ=0 delta10s=42724870
+PIPELINE_STATS t=460s total=2034261149 keep=1801387267 deny=13880053 miss=218993830 readerQ=0 soloQ=n/a alignQ=0 delta10s=45796253
+PIPELINE_STATS t=470s total=2077875286 keep=1840066058 deny=14174230 miss=223634999 readerQ=0 soloQ=n/a alignQ=0 delta10s=43614137
+PIPELINE_STATS t=480s total=2121401046 keep=1878679066 deny=14469641 miss=228252340 readerQ=0 soloQ=n/a alignQ=0 delta10s=43525760
+PIPELINE_STATS t=490s total=2166052071 keep=1918313051 deny=14770020 miss=232969000 readerQ=0 soloQ=n/a alignQ=0 delta10s=44651025
+PIPELINE_STATS t=500s total=2210155816 keep=1957459323 deny=15066527 miss=237629966 readerQ=0 soloQ=n/a alignQ=0 delta10s=44103745
+PIPELINE_STATS t=510s total=2253350912 keep=1995795659 deny=15357993 miss=242197260 readerQ=0 soloQ=n/a alignQ=0 delta10s=43195096
+PIPELINE_STATS t=520s total=2297077489 keep=2034596480 deny=15652791 miss=246828218 readerQ=0 soloQ=n/a alignQ=0 delta10s=43726577
+PIPELINE_STATS t=530s total=2343118497 keep=2075439283 deny=15964948 miss=251714266 readerQ=0 soloQ=n/a alignQ=0 delta10s=46041008
+PIPELINE_STATS t=540s total=2389025308 keep=2116104926 deny=16272614 miss=256647768 readerQ=0 soloQ=n/a alignQ=0 delta10s=45906811
+PIPELINE_STATS t=550s total=2433289728 keep=2155270920 deny=16573475 miss=261445333 readerQ=0 soloQ=n/a alignQ=0 delta10s=44264420
+PIPELINE_STATS t=560s total=2477854549 keep=2194723419 deny=16872123 miss=266259007 readerQ=0 soloQ=n/a alignQ=0 delta10s=44564821
+PIPELINE_STATS t=570s total=2520219392 keep=2232221578 deny=17157243 miss=270840571 readerQ=0 soloQ=n/a alignQ=0 delta10s=42364843
+PIPELINE_STATS t=580s total=2563946240 keep=2270734554 deny=17459898 miss=275751788 readerQ=0 soloQ=n/a alignQ=0 delta10s=43726848
+PIPELINE_STATS t=590s total=2607732204 keep=2309451284 deny=17758705 miss=280522215 readerQ=0 soloQ=n/a alignQ=0 delta10s=43785964
+PIPELINE_STATS t=600s total=2651090339 keep=2347807577 deny=18057270 miss=285225493 readerQ=0 soloQ=n/a alignQ=0 delta10s=43358135
+PIPELINE_STATS t=610s total=2692785408 keep=2384736233 deny=18340819 miss=289708356 readerQ=0 soloQ=n/a alignQ=0 delta10s=41695069
+PIPELINE_STATS t=620s total=2732714376 keep=2420157969 deny=18607756 miss=293948654 readerQ=0 soloQ=n/a alignQ=0 delta10s=39928968
+PIPELINE_STATS t=630s total=2775268963 keep=2457896378 deny=18893437 miss=298479148 readerQ=0 soloQ=n/a alignQ=0 delta10s=42554587
+PIPELINE_STATS t=640s total=2817323485 keep=2495177207 deny=19176644 miss=302969634 readerQ=0 soloQ=n/a alignQ=0 delta10s=42054522
+PIPELINE_STATS t=650s total=2859479179 keep=2532579795 deny=19457758 miss=307441627 readerQ=0 soloQ=n/a alignQ=0 delta10s=42155694
+PIPELINE_STATS t=660s total=2899136608 keep=2567756885 deny=19723152 miss=311656571 readerQ=0 soloQ=n/a alignQ=0 delta10s=39657429
+PIPELINE_STATS t=670s total=2940346464 keep=2604321760 deny=19996196 miss=316028508 readerQ=0 soloQ=n/a alignQ=0 delta10s=41209856
+PIPELINE_STATS t=680s total=2983200456 keep=2642269354 deny=20283426 miss=320647676 readerQ=0 soloQ=n/a alignQ=0 delta10s=42853992
+PIPELINE_STATS t=690s total=3028139843 keep=2682058808 deny=20583905 miss=325497131 readerQ=0 soloQ=n/a alignQ=0 delta10s=44939387
+PIPELINE_STATS t=700s total=3070980123 keep=2720005224 deny=20868073 miss=330106827 readerQ=0 soloQ=n/a alignQ=0 delta10s=42840280
+PIPELINE_STATS t=710s total=3114730100 keep=2758758130 deny=21158969 miss=334813001 readerQ=0 soloQ=n/a alignQ=0 delta10s=43749977
+PIPELINE_STATS t=720s total=3160399677 keep=2799221406 deny=21462752 miss=339715519 readerQ=0 soloQ=n/a alignQ=0 delta10s=45669577
+PIPELINE_STATS t=730s total=3205544652 keep=2839177920 deny=21765595 miss=344601138 readerQ=0 soloQ=n/a alignQ=0 delta10s=45144975
+PIPELINE_STATS t=740s total=3249738645 keep=2878300585 deny=22061824 miss=349376236 readerQ=0 soloQ=n/a alignQ=0 delta10s=44193993
+PIPELINE_STATS t=750s total=3293634395 keep=2917154247 deny=22356311 miss=354123837 readerQ=0 soloQ=n/a alignQ=0 delta10s=43895750
+PIPELINE_STATS t=760s total=3338344460 keep=2956761141 deny=22655919 miss=358927400 readerQ=0 soloQ=n/a alignQ=0 delta10s=44710065
+PIPELINE_STATS t=770s total=3383386114 keep=2996658417 deny=22958853 miss=363768845 readerQ=0 soloQ=n/a alignQ=0 delta10s=45041654
+PIPELINE_STATS t=780s total=3427803011 keep=3036013526 deny=23255632 miss=368533854 readerQ=0 soloQ=n/a alignQ=0 delta10s=44416897
+PIPELINE_STATS t=790s total=3471400233 keep=3074627827 deny=23548798 miss=373223608 readerQ=0 soloQ=n/a alignQ=0 delta10s=43597222
+PIPELINE_STATS t=800s total=3514654184 keep=3113000038 deny=23837171 miss=377816975 readerQ=0 soloQ=n/a alignQ=0 delta10s=43253951
+PIPELINE_STATS t=810s total=3557616175 keep=3151040302 deny=24126674 miss=382449199 readerQ=0 soloQ=n/a alignQ=0 delta10s=42961991
+PIPELINE_STATS t=820s total=3601421824 keep=3189771931 deny=24424724 miss=387225169 readerQ=0 soloQ=n/a alignQ=0 delta10s=43805649
+PIPELINE_STATS t=830s total=3644121742 keep=3227482999 deny=24715345 miss=391923398 readerQ=0 soloQ=n/a alignQ=0 delta10s=42699918
+PIPELINE_STATS t=840s total=3682995347 keep=3261748812 deny=24983720 miss=396262816 readerQ=0 soloQ=n/a alignQ=0 delta10s=38873605
+PIPELINE_STATS t=850s total=3724100608 keep=3297971817 deny=25269292 miss=400859499 readerQ=0 soloQ=n/a alignQ=0 delta10s=41105261
+PIPELINE_STATS t=860s total=3764076032 keep=3333064875 deny=25551751 miss=405459406 readerQ=0 soloQ=n/a alignQ=0 delta10s=39975424
+PIPELINE_STATS t=870s total=3803969792 keep=3368159067 deny=25835436 miss=409975289 readerQ=0 soloQ=n/a alignQ=0 delta10s=39893760
+PIPELINE_STATS t=880s total=3843577292 keep=3403013698 deny=26114143 miss=414449451 readerQ=0 soloQ=n/a alignQ=0 delta10s=39607500
+PIPELINE_STATS t=890s total=3883194911 keep=3437936772 deny=26391573 miss=418866566 readerQ=0 soloQ=n/a alignQ=0 delta10s=39617619
+PIPELINE_STATS t=900s total=3923607478 keep=3473569101 deny=26672762 miss=423365615 readerQ=0 soloQ=n/a alignQ=0 delta10s=40412567
+PIPELINE_STATS t=910s total=3965811812 keep=3510774499 deny=26965506 miss=428071807 readerQ=0 soloQ=n/a alignQ=0 delta10s=42204334
+PIPELINE_STATS t=920s total=4007169720 keep=3547147059 deny=27262421 miss=432760240 readerQ=0 soloQ=n/a alignQ=0 delta10s=41357908
+PIPELINE_STATS t=930s total=4049508945 keep=3584394851 deny=27559022 miss=437555073 readerQ=0 soloQ=n/a alignQ=0 delta10s=42339225
+PIPELINE_STATS t=940s total=4092008716 keep=3621811846 deny=27858184 miss=442338686 readerQ=0 soloQ=n/a alignQ=0 delta10s=42499771
+PIPELINE_STATS t=950s total=4134503832 keep=3659109189 deny=28158932 miss=447235711 readerQ=0 soloQ=n/a alignQ=0 delta10s=42495116
+PIPELINE_STATS t=960s total=4178663596 keep=3697801116 deny=28473912 miss=452388569 readerQ=0 soloQ=n/a alignQ=0 delta10s=44159764
+PIPELINE_STATS t=970s total=4222571228 keep=3736262964 deny=28786500 miss=457521764 readerQ=0 soloQ=n/a alignQ=0 delta10s=43907632
+PIPELINE_STATS t=980s total=4266009148 keep=3774290433 deny=29107602 miss=462611114 readerQ=0 soloQ=n/a alignQ=0 delta10s=43437920
+PIPELINE_STATS t=990s total=4308658491 keep=3811580378 deny=29416129 miss=467661984 readerQ=0 soloQ=n/a alignQ=0 delta10s=42649343
+PIPELINE_STATS t=1000s total=4351428355 keep=3849075910 deny=29723024 miss=472629421 readerQ=0 soloQ=n/a alignQ=0 delta10s=42769864
+PIPELINE_STATS t=1010s total=4392532210 keep=3885151870 deny=30015455 miss=477364885 readerQ=0 soloQ=n/a alignQ=0 delta10s=41103855
+PIPELINE_STATS t=1020s total=4435518192 keep=3922902072 deny=30319796 miss=482296324 readerQ=0 soloQ=n/a alignQ=0 delta10s=42985982
+PIPELINE_STATS t=1030s total=4478247210 keep=3960395248 deny=30623923 miss=487228039 readerQ=0 soloQ=n/a alignQ=0 delta10s=42729018
+PIPELINE_STATS t=1040s total=4521465826 keep=3998432142 deny=30926989 miss=492106695 readerQ=0 soloQ=n/a alignQ=0 delta10s=43218616
+PIPELINE_STATS t=1050s total=4565770864 keep=4037455604 deny=31235278 miss=497079982 readerQ=0 soloQ=n/a alignQ=0 delta10s=44305038
+PIPELINE_STATS t=1060s total=4611690517 keep=4077924699 deny=31552553 miss=502213265 readerQ=0 soloQ=n/a alignQ=0 delta10s=45919653
+PIPELINE_STATS t=1070s total=4656894123 keep=4117638465 deny=31867114 miss=507388544 readerQ=0 soloQ=n/a alignQ=0 delta10s=45203606
+PIPELINE_STATS t=1080s total=4701744239 keep=4156976764 deny=32183164 miss=512584311 readerQ=0 soloQ=n/a alignQ=0 delta10s=44850116
+PIPELINE_STATS t=1090s total=4747217420 keep=4197008934 deny=32496419 miss=517712067 readerQ=0 soloQ=n/a alignQ=0 delta10s=45473181
+PIPELINE_STATS t=1100s total=4792034909 keep=4236364068 deny=32811142 miss=522859699 readerQ=0 soloQ=n/a alignQ=0 delta10s=44817489
+PIPELINE_STATS t=1110s total=4836592612 keep=4275368024 deny=33131762 miss=528092826 readerQ=0 soloQ=n/a alignQ=0 delta10s=44557703
+PIPELINE_STATS t=1120s total=4881279594 keep=4314417144 deny=33456896 miss=533405554 readerQ=0 soloQ=n/a alignQ=0 delta10s=44686982
+PIPELINE_STATS t=1130s total=4926644270 keep=4354093465 deny=33787631 miss=538763175 readerQ=0 soloQ=n/a alignQ=0 delta10s=45364676
+PIPELINE_STATS t=1140s total=4969318144 keep=4391476996 deny=34096085 miss=543745063 readerQ=0 soloQ=n/a alignQ=0 delta10s=42673874
+PIPELINE_STATS t=1150s total=5011046213 keep=4428055781 deny=34397303 miss=548593129 readerQ=0 soloQ=n/a alignQ=0 delta10s=41728069
+PIPELINE_STATS t=1160s total=5054581488 keep=4466268136 deny=34730944 miss=553582408 readerQ=0 soloQ=n/a alignQ=0 delta10s=43535275
+PIPELINE_STATS t=1170s total=5098087294 keep=4504501159 deny=35043125 miss=558543010 readerQ=0 soloQ=n/a alignQ=0 delta10s=43505806
+PIPELINE_STATS t=1180s total=5140328448 keep=4541660218 deny=35343597 miss=563324633 readerQ=0 soloQ=n/a alignQ=0 delta10s=42241154
+PIPELINE_STATS t=1190s total=5183230302 keep=4579274714 deny=35653167 miss=568302422 readerQ=0 soloQ=n/a alignQ=0 delta10s=42901854
+PIPELINE_STATS t=1200s total=5226456064 keep=4617202997 deny=35962656 miss=573290411 readerQ=0 soloQ=n/a alignQ=0 delta10s=43225762
+PIPELINE_STATS t=1210s total=5268414030 keep=4654046601 deny=36262552 miss=578104877 readerQ=0 soloQ=n/a alignQ=0 delta10s=41957966
+PIPELINE_STATS t=1220s total=5311721446 keep=4692161144 deny=36567068 miss=582993234 readerQ=0 soloQ=n/a alignQ=0 delta10s=43307416
+PIPELINE_STATS t=1230s total=5353492561 keep=4728900421 deny=36861098 miss=587731042 readerQ=0 soloQ=n/a alignQ=0 delta10s=41771115
+PIPELINE_STATS t=1240s total=5396057854 keep=4766341754 deny=37179791 miss=592536310 readerQ=0 soloQ=n/a alignQ=0 delta10s=42565293
+PIPELINE_STATS t=1250s total=5438305318 keep=4803327880 deny=37483806 miss=597493632 readerQ=0 soloQ=n/a alignQ=0 delta10s=42247464
+PIPELINE_STATS t=1260s total=5480991548 keep=4840694713 deny=37789620 miss=602507215 readerQ=0 soloQ=n/a alignQ=0 delta10s=42686230
+PIPELINE_STATS t=1270s total=5523977216 keep=4878334239 deny=38100920 miss=607542057 readerQ=0 soloQ=n/a alignQ=0 delta10s=42985668
+PIPELINE_STATS t=1280s total=5566835968 keep=4915816088 deny=38411171 miss=612608709 readerQ=0 soloQ=n/a alignQ=0 delta10s=42858752
+PIPELINE_STATS t=1290s total=5610202368 keep=4953822597 deny=38721880 miss=617657891 readerQ=0 soloQ=n/a alignQ=0 delta10s=43366400
+PIPELINE_STATS t=1300s total=5651930332 keep=4990467120 deny=39017717 miss=622445495 readerQ=0 soloQ=n/a alignQ=0 delta10s=41727964
+PIPELINE_STATS t=1310s total=5694483482 keep=5027734379 deny=39324317 miss=627424786 readerQ=0 soloQ=n/a alignQ=0 delta10s=42553150
+PIPELINE_STATS t=1320s total=5735305728 keep=5063515251 deny=39616769 miss=632173708 readerQ=0 soloQ=n/a alignQ=0 delta10s=40822246
+PIPELINE_STATS t=1330s total=5777681501 keep=5100730702 deny=39917241 miss=637033558 readerQ=0 soloQ=n/a alignQ=0 delta10s=42375773
+PIPELINE_STATS t=1340s total=5820133170 keep=5138044606 deny=40218735 miss=641869829 readerQ=0 soloQ=n/a alignQ=0 delta10s=42451669
+PIPELINE_STATS t=1350s total=5861824926 keep=5174718745 deny=40512789 miss=646593395 readerQ=0 soloQ=n/a alignQ=0 delta10s=41691756
+PIPELINE_STATS t=1360s total=5905649189 keep=5213327794 deny=40818248 miss=651503147 readerQ=0 soloQ=n/a alignQ=0 delta10s=43824263
+PIPELINE_STATS t=1370s total=5950098013 keep=5252502522 deny=41127033 miss=656468460 readerQ=0 soloQ=n/a alignQ=0 delta10s=44448824
+PIPELINE_STATS t=1380s total=5995836405 keep=5292695900 deny=41449805 miss=661690700 readerQ=0 soloQ=n/a alignQ=0 delta10s=45738392
+PIPELINE_STATS t=1390s total=6039897190 keep=5331324914 deny=41762206 miss=666810070 readerQ=0 soloQ=n/a alignQ=0 delta10s=44060785
+PIPELINE_STATS t=1400s total=6082953398 keep=5369085801 deny=42069570 miss=671798028 readerQ=0 soloQ=n/a alignQ=0 delta10s=43056208
+PIPELINE_STATS t=1410s total=6123201216 keep=5404396235 deny=42357331 miss=676447650 readerQ=0 soloQ=n/a alignQ=0 delta10s=40247818
+PIPELINE_STATS t=1420s total=6163902007 keep=5440118240 deny=42650013 miss=681133754 readerQ=0 soloQ=n/a alignQ=0 delta10s=40700791
+PIPELINE_STATS t=1430s total=6204811794 keep=5475945210 deny=42943939 miss=685922646 readerQ=0 soloQ=n/a alignQ=0 delta10s=40909787
+PIPELINE_STATS t=1440s total=6248398033 keep=5514153335 deny=43256674 miss=690988025 readerQ=0 soloQ=n/a alignQ=0 delta10s=43586239
+PIPELINE_STATS t=1450s total=6289197421 keep=5549956922 deny=43547198 miss=695693301 readerQ=0 soloQ=n/a alignQ=0 delta10s=40799388
+PIPELINE_STATS t=1460s total=6331578310 keep=5587142835 deny=43855188 miss=700580287 readerQ=0 soloQ=n/a alignQ=0 delta10s=42380889
+PIPELINE_STATS t=1470s total=6373090816 keep=5623495745 deny=44154338 miss=705440733 readerQ=0 soloQ=n/a alignQ=0 delta10s=41512506
+PIPELINE_STATS t=1480s total=6417103517 keep=5662109860 deny=44468713 miss=710524944 readerQ=0 soloQ=n/a alignQ=0 delta10s=44012701
+PIPELINE_STATS t=1490s total=6460734991 keep=5700419074 deny=44779105 miss=715536812 readerQ=0 soloQ=n/a alignQ=0 delta10s=43631474
+PIPELINE_STATS t=1500s total=6503764176 keep=5738227997 deny=45082874 miss=720453305 readerQ=0 soloQ=n/a alignQ=0 delta10s=43029185
+PIPELINE_STATS t=1510s total=6545485363 keep=5774876191 deny=45386977 miss=725222195 readerQ=0 soloQ=n/a alignQ=0 delta10s=41721187
+PIPELINE_STATS t=1520s total=6585167716 keep=5809686685 deny=45666838 miss=729814194 readerQ=0 soloQ=n/a alignQ=0 delta10s=39682353
+PIPELINE_STATS t=1530s total=6626520095 keep=5845946010 deny=45957254 miss=734616833 readerQ=0 soloQ=n/a alignQ=0 delta10s=41352379
+PIPELINE_STATS t=1540s total=6668285641 keep=5882610861 deny=46251694 miss=739423086 readerQ=0 soloQ=n/a alignQ=0 delta10s=41765546
+PIPELINE_STATS t=1550s total=6707578198 keep=5917124511 deny=46532350 miss=743921337 readerQ=0 soloQ=n/a alignQ=0 delta10s=39292557
+PIPELINE_STATS t=1560s total=6746617116 keep=5951442910 deny=46810375 miss=748363831 readerQ=0 soloQ=n/a alignQ=0 delta10s=39038918
+PIPELINE_STATS t=1570s total=6784815604 keep=5985050083 deny=47081410 miss=752684111 readerQ=0 soloQ=n/a alignQ=0 delta10s=38198488
+PIPELINE_STATS t=1580s total=6822648789 keep=6018356107 deny=47348833 miss=756943851 readerQ=0 soloQ=n/a alignQ=0 delta10s=37833185
+PIPELINE_STATS t=1590s total=6861349404 keep=6052486438 deny=47619228 miss=761243738 readerQ=0 soloQ=n/a alignQ=0 delta10s=38700615
+PIPELINE_STATS t=1600s total=6899979211 keep=6086559903 deny=47887906 miss=765531404 readerQ=0 soloQ=n/a alignQ=0 delta10s=38629807
+PIPELINE_STATS t=1610s total=6938335598 keep=6120433167 deny=48150144 miss=769752287 readerQ=0 soloQ=n/a alignQ=0 delta10s=38356387
+PIPELINE_STATS t=1620s total=6974439964 keep=6152301243 deny=48394634 miss=773744087 readerQ=0 soloQ=n/a alignQ=0 delta10s=36104366
+PIPELINE_STATS t=1630s total=7006061362 keep=6180059044 deny=48618333 miss=777383985 readerQ=0 soloQ=n/a alignQ=0 delta10s=31621398
+PIPELINE_STATS t=1640s total=7036473570 keep=6206787245 deny=48830333 miss=780855992 readerQ=0 soloQ=n/a alignQ=0 delta10s=30412208
+PIPELINE_STATS t=1650s total=7063720662 keep=6230642461 deny=49027790 miss=784050411 readerQ=0 soloQ=n/a alignQ=0 delta10s=27247092
+PIPELINE_STATS t=1660s total=7089198075 keep=6253030158 deny=49210748 miss=786957169 readerQ=0 soloQ=n/a alignQ=0 delta10s=25477413
+PIPELINE_STATS t=1670s total=7115645679 keep=6276312748 deny=49395374 miss=789937557 readerQ=0 soloQ=n/a alignQ=0 delta10s=26447604
+PIPELINE_STATS t=1680s total=7144803579 keep=6301997805 deny=49593618 miss=793212156 readerQ=0 soloQ=n/a alignQ=0 delta10s=29157900
+PIPELINE_STATS t=1690s total=7173439539 keep=6326907651 deny=49811069 miss=796720820 readerQ=0 soloQ=n/a alignQ=0 delta10s=28635960
+PIPELINE_STATS t=1700s total=7201358843 keep=6351295724 deny=50012535 miss=800050584 readerQ=0 soloQ=n/a alignQ=0 delta10s=27919304
+PIPELINE_STATS t=1710s total=7229136544 keep=6375650052 deny=50213656 miss=803272836 readerQ=0 soloQ=n/a alignQ=0 delta10s=27777701
+PIPELINE_STATS t=1720s total=7254946623 keep=6398348677 deny=50396892 miss=806201054 readerQ=0 soloQ=n/a alignQ=0 delta10s=25810079
+PIPELINE_STATS t=1730s total=7282630072 keep=6422757483 deny=50584967 miss=809287622 readerQ=0 soloQ=n/a alignQ=0 delta10s=27683449
+  All fused no-genome threads joined
+  Stats reporter joined
+Flex pipeline complete: total=7303142230, triageKeep=6440848269, triageDeny=50721298, triageMiss=811572663
+  Lane 0: 1828312667 reads
+  Lane 1: 1821518748 reads
+  Lane 2: 1829662492 reads
+  Lane 3: 1823648323 reads
+Sep 02 18:03:34 ..... finished mapping
+RAM after mapping:
+VmPeak:	47392464 kB; VmSize:	47023708 kB; VmHWM:	44247228 kB; VmRSS:	44247228 kB; 
+Sep 02 18:03:34 ..... started Solo counting
+Sep 02 18:03:34 ... Starting Solo post-map for Gene
+Sep 02 18:04:13 ... Starting bucket-parallel Flex collapse
+[AMBIG-CB-RESOLVE] pending=7016409 resolved=0 still_ambiguous=7016409 added_to_hash=0
+[CB-BUCKET] backend=spill transitioned=no streamed_records=6354012468 aggregated_counts=6354012468 final_molecules=1230496698 buckets=256 tail_threads=32
+Found 735112 unique CBs and 694321366 (CB, gene, tag) groups
+Found 7760776 unique (CB, TAG) combinations
+  Genes: 18129, Entries: 694321366
+Solo raw MEX directory directory created: /home/lhhung/STAR-suite-bgzf-ingest-benchmark-20260901/scffpe320k_bgzf_20260902T173415Z/Solo.out/Gene/raw/
+Sep 02 18:06:26 ... Writing MEX from inline-hash dedup data
+Sep 02 18:07:03 ... Finished writing MEX format:
+  /home/lhhung/STAR-suite-bgzf-ingest-benchmark-20260901/scffpe320k_bgzf_20260902T173415Z/Solo.out/Gene/raw/matrix.mtx
+  /home/lhhung/STAR-suite-bgzf-ingest-benchmark-20260901/scffpe320k_bgzf_20260902T173415Z/Solo.out/Gene/raw/barcodes.tsv
+  /home/lhhung/STAR-suite-bgzf-ingest-benchmark-20260901/scffpe320k_bgzf_20260902T173415Z/Solo.out/Gene/raw/features.tsv
+  Cells (CB+TAG combos): 7760776
+  Features: 18129
+  Entries: 694321366
+FlexFilter output directory directory created: /home/lhhung/STAR-suite-bgzf-ingest-benchmark-20260901/scffpe320k_bgzf_20260902T173415Z/per_sample/
+Sep 02 18:07:03 ... Running flexfilter inline (in-memory matrix)...
+  Loaded 16 allowed tags with sample labels
+FlexFilter: Using per-tag expected cells: 3000 x 16 tags = 48000 total
+FlexFilter output directory directory exists and will be overwritten: /home/lhhung/STAR-suite-bgzf-ingest-benchmark-20260901/scffpe320k_bgzf_20260902T173415Z/per_sample/
+Sep 02 18:08:36 ... Flexfilter pipeline complete
+  Processed 16 tags
+  [BC001] Retain=120000 SimpleED=0 TailTested=18987 ED_Pass=17058 OccRemoved=511 Final=16547 Expected=2094
+FlexFilter filtered MEX directory directory and its parents created: /home/lhhung/STAR-suite-bgzf-ingest-benchmark-20260901/scffpe320k_bgzf_20260902T173415Z/per_sample/BC001/Gene/filtered/
+  BC001 (ACTTTAGG): 16547 cells, 18739264 entries
+  [BC002] Retain=120000 SimpleED=0 TailTested=17148 ED_Pass=15352 OccRemoved=429 Final=14923 Expected=1872
+FlexFilter filtered MEX directory directory and its parents created: /home/lhhung/STAR-suite-bgzf-ingest-benchmark-20260901/scffpe320k_bgzf_20260902T173415Z/per_sample/BC002/Gene/filtered/
+  BC002 (AACGGGAA): 14923 cells, 15194259 entries
+  [BC003] Retain=120000 SimpleED=0 TailTested=36950 ED_Pass=30706 OccRemoved=840 Final=29866 Expected=5292
+FlexFilter filtered MEX directory directory and its parents created: /home/lhhung/STAR-suite-bgzf-ingest-benchmark-20260901/scffpe320k_bgzf_20260902T173415Z/per_sample/BC003/Gene/filtered/
+  BC003 (AGTAGGCT): 29866 cells, 56644517 entries
+  [BC004] Retain=120000 SimpleED=0 TailTested=32244 ED_Pass=26188 OccRemoved=807 Final=25381 Expected=4293
+FlexFilter filtered MEX directory directory and its parents created: /home/lhhung/STAR-suite-bgzf-ingest-benchmark-20260901/scffpe320k_bgzf_20260902T173415Z/per_sample/BC004/Gene/filtered/
+  BC004 (ATGTTGAC): 25381 cells, 45561249 entries
+  [BC005] Retain=120000 SimpleED=0 TailTested=33361 ED_Pass=31627 OccRemoved=696 Final=30931 Expected=4114
+FlexFilter filtered MEX directory directory and its parents created: /home/lhhung/STAR-suite-bgzf-ingest-benchmark-20260901/scffpe320k_bgzf_20260902T173415Z/per_sample/BC005/Gene/filtered/
+  BC005 (ACAGACCT): 30931 cells, 57438166 entries
+  [BC006] Retain=120000 SimpleED=0 TailTested=41019 ED_Pass=38716 OccRemoved=792 Final=37924 Expected=6148
+FlexFilter filtered MEX directory directory and its parents created: /home/lhhung/STAR-suite-bgzf-ingest-benchmark-20260901/scffpe320k_bgzf_20260902T173415Z/per_sample/BC006/Gene/filtered/
+  BC006 (ATCCCAAC): 37924 cells, 74349719 entries
+  [BC007] Retain=120000 SimpleED=0 TailTested=10078 ED_Pass=7652 OccRemoved=332 Final=7320 Expected=1286
+FlexFilter filtered MEX directory directory and its parents created: /home/lhhung/STAR-suite-bgzf-ingest-benchmark-20260901/scffpe320k_bgzf_20260902T173415Z/per_sample/BC007/Gene/filtered/
+  BC007 (AAGTAGAG): 7320 cells, 6568727 entries
+  [BC008] Retain=120000 SimpleED=0 TailTested=6575 ED_Pass=4951 OccRemoved=232 Final=4719 Expected=924
+FlexFilter filtered MEX directory directory and its parents created: /home/lhhung/STAR-suite-bgzf-ingest-benchmark-20260901/scffpe320k_bgzf_20260902T173415Z/per_sample/BC008/Gene/filtered/
+  BC008 (AGCTGTGA): 4719 cells, 4015422 entries
+  [BC009] Retain=120000 SimpleED=0 TailTested=21744 ED_Pass=21230 OccRemoved=505 Final=20725 Expected=2451
+FlexFilter filtered MEX directory directory and its parents created: /home/lhhung/STAR-suite-bgzf-ingest-benchmark-20260901/scffpe320k_bgzf_20260902T173415Z/per_sample/BC009/Gene/filtered/
+  BC009 (ACAGTCTG): 20725 cells, 24610541 entries
+  [BC010] Retain=120000 SimpleED=0 TailTested=21821 ED_Pass=21222 OccRemoved=481 Final=20741 Expected=1790
+FlexFilter filtered MEX directory directory and its parents created: /home/lhhung/STAR-suite-bgzf-ingest-benchmark-20260901/scffpe320k_bgzf_20260902T173415Z/per_sample/BC010/Gene/filtered/
+  BC010 (AGTGAGTG): 20741 cells, 25343722 entries
+  [BC011] Retain=120000 SimpleED=0 TailTested=18305 ED_Pass=15627 OccRemoved=519 Final=15108 Expected=2236
+FlexFilter filtered MEX directory directory and its parents created: /home/lhhung/STAR-suite-bgzf-ingest-benchmark-20260901/scffpe320k_bgzf_20260902T173415Z/per_sample/BC011/Gene/filtered/
+  BC011 (AGAGGCAA): 15108 cells, 15959137 entries
+  [BC012] Retain=120000 SimpleED=0 TailTested=18451 ED_Pass=15735 OccRemoved=509 Final=15226 Expected=2254
+FlexFilter filtered MEX directory directory and its parents created: /home/lhhung/STAR-suite-bgzf-ingest-benchmark-20260901/scffpe320k_bgzf_20260902T173415Z/per_sample/BC012/Gene/filtered/
+  BC012 (ACTACTCA): 15226 cells, 16770332 entries
+  [BC013] Retain=120000 SimpleED=0 TailTested=30498 ED_Pass=21936 OccRemoved=610 Final=21326 Expected=4161
+FlexFilter filtered MEX directory directory and its parents created: /home/lhhung/STAR-suite-bgzf-ingest-benchmark-20260901/scffpe320k_bgzf_20260902T173415Z/per_sample/BC013/Gene/filtered/
+  BC013 (ATACGTCA): 21326 cells, 29353574 entries
+  [BC014] Retain=120000 SimpleED=0 TailTested=27436 ED_Pass=19542 OccRemoved=568 Final=18974 Expected=3608
+FlexFilter filtered MEX directory directory and its parents created: /home/lhhung/STAR-suite-bgzf-ingest-benchmark-20260901/scffpe320k_bgzf_20260902T173415Z/per_sample/BC014/Gene/filtered/
+  BC014 (ATCATGTG): 18974 cells, 26841968 entries
+  [BC015] Retain=120000 SimpleED=0 TailTested=31095 ED_Pass=25850 OccRemoved=679 Final=25171 Expected=3467
+FlexFilter filtered MEX directory directory and its parents created: /home/lhhung/STAR-suite-bgzf-ingest-benchmark-20260901/scffpe320k_bgzf_20260902T173415Z/per_sample/BC015/Gene/filtered/
+  BC015 (AACGCCGA): 25171 cells, 51584192 entries
+  [BC016] Retain=120000 SimpleED=0 TailTested=26123 ED_Pass=21739 OccRemoved=605 Final=21134 Expected=2010
+FlexFilter filtered MEX directory directory and its parents created: /home/lhhung/STAR-suite-bgzf-ingest-benchmark-20260901/scffpe320k_bgzf_20260902T173415Z/per_sample/BC016/Gene/filtered/
+  BC016 (ATTCGGTT): 21134 cells, 43613887 entries
+Flex gDNA per-sample metrics directory directory exists and will be overwritten: /home/lhhung/STAR-suite-bgzf-ingest-benchmark-20260901/scffpe320k_bgzf_20260902T173415Z/per_sample/BC001/Gene/filtered/
+Flex gDNA per-sample metrics directory directory exists and will be overwritten: /home/lhhung/STAR-suite-bgzf-ingest-benchmark-20260901/scffpe320k_bgzf_20260902T173415Z/per_sample/BC002/Gene/filtered/
+Flex gDNA per-sample metrics directory directory exists and will be overwritten: /home/lhhung/STAR-suite-bgzf-ingest-benchmark-20260901/scffpe320k_bgzf_20260902T173415Z/per_sample/BC003/Gene/filtered/
+Flex gDNA per-sample metrics directory directory exists and will be overwritten: /home/lhhung/STAR-suite-bgzf-ingest-benchmark-20260901/scffpe320k_bgzf_20260902T173415Z/per_sample/BC004/Gene/filtered/
+Flex gDNA per-sample metrics directory directory exists and will be overwritten: /home/lhhung/STAR-suite-bgzf-ingest-benchmark-20260901/scffpe320k_bgzf_20260902T173415Z/per_sample/BC005/Gene/filtered/
+Flex gDNA per-sample metrics directory directory exists and will be overwritten: /home/lhhung/STAR-suite-bgzf-ingest-benchmark-20260901/scffpe320k_bgzf_20260902T173415Z/per_sample/BC006/Gene/filtered/
+Flex gDNA per-sample metrics directory directory exists and will be overwritten: /home/lhhung/STAR-suite-bgzf-ingest-benchmark-20260901/scffpe320k_bgzf_20260902T173415Z/per_sample/BC007/Gene/filtered/
+Flex gDNA per-sample metrics directory directory exists and will be overwritten: /home/lhhung/STAR-suite-bgzf-ingest-benchmark-20260901/scffpe320k_bgzf_20260902T173415Z/per_sample/BC008/Gene/filtered/
+Flex gDNA per-sample metrics directory directory exists and will be overwritten: /home/lhhung/STAR-suite-bgzf-ingest-benchmark-20260901/scffpe320k_bgzf_20260902T173415Z/per_sample/BC009/Gene/filtered/
+Flex gDNA per-sample metrics directory directory exists and will be overwritten: /home/lhhung/STAR-suite-bgzf-ingest-benchmark-20260901/scffpe320k_bgzf_20260902T173415Z/per_sample/BC010/Gene/filtered/
+Flex gDNA per-sample metrics directory directory exists and will be overwritten: /home/lhhung/STAR-suite-bgzf-ingest-benchmark-20260901/scffpe320k_bgzf_20260902T173415Z/per_sample/BC011/Gene/filtered/
+Flex gDNA per-sample metrics directory directory exists and will be overwritten: /home/lhhung/STAR-suite-bgzf-ingest-benchmark-20260901/scffpe320k_bgzf_20260902T173415Z/per_sample/BC012/Gene/filtered/
+Flex gDNA per-sample metrics directory directory exists and will be overwritten: /home/lhhung/STAR-suite-bgzf-ingest-benchmark-20260901/scffpe320k_bgzf_20260902T173415Z/per_sample/BC013/Gene/filtered/
+Flex gDNA per-sample metrics directory directory exists and will be overwritten: /home/lhhung/STAR-suite-bgzf-ingest-benchmark-20260901/scffpe320k_bgzf_20260902T173415Z/per_sample/BC014/Gene/filtered/
+Flex gDNA per-sample metrics directory directory exists and will be overwritten: /home/lhhung/STAR-suite-bgzf-ingest-benchmark-20260901/scffpe320k_bgzf_20260902T173415Z/per_sample/BC015/Gene/filtered/
+Flex gDNA per-sample metrics directory directory exists and will be overwritten: /home/lhhung/STAR-suite-bgzf-ingest-benchmark-20260901/scffpe320k_bgzf_20260902T173415Z/per_sample/BC016/Gene/filtered/
+Flex gDNA diagnostic: cache_region_metadata_unavailable
+Sep 02 18:09:15 ... Finished bucket-parallel Flex collapse
+Solo timing: collapseUMIall_fromBuckets 304.039 s
+Sep 02 18:09:17 ... Finished collapsing UMIs (direct hash mode)
+Solo timing: countCBgeneUMI 304.039 s
+Sep 02 18:09:17 ... Solo: inline-hash mode completed (skipping legacy output)
+Solo timing: processRecords 343.031 s
+Sep 02 18:09:17 ..... finished Solo counting
+ALL DONE!
