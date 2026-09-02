@@ -69,7 +69,7 @@ mkdir -p "${RUN_DIR}" "${LOG_DIR}"
         "${SOLO_BUCKET_MODE}" "${SOLO_BUCKET_MEM_GB}" "${SOLO_BUCKET_COUNT}" \
         "${SOLO_BUCKET_SPILL_DIR}"
     uptime
-    ps -eo pid,comm,%cpu,%mem,etime,args --sort=-%cpu | sed -n '1,30p'
+    ps -eo pid,comm,%cpu,%mem,etime --sort=-%cpu | sed -n '1,20p'
 } > "${LOG_PREFIX}.preflight.txt"
 
 common=(
