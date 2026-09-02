@@ -163,13 +163,16 @@ void SoloFeature::collapseUMIall_fromBuckets()
                 continue;
             out.inputRecords = records.size();
 
-            // Reproduce the old fused hash aggregation exactly, including
-            // saturated read counts and probe-region conflict propagation.
+            // This ordering is injective over the packed key and also places
+            // each (CB, tag, gene) group contiguously. Exact duplicate keys can
+            // therefore be compacted in the same pass without a second sort.
             std::sort(records.begin(), records.end(),
                       [](const star::solo::PackedCbRecord &left,
                          const star::solo::PackedCbRecord &right) {
-                          return left.key < right.key;
+                          return groupSortKey(left) < groupSortKey(right);
                       });
+            // Reproduce the old fused hash aggregation exactly, including
+            // saturated read counts and probe-region conflict propagation.
             size_t compact = 0;
             for (size_t i = 0; i < records.size();) {
                 star::solo::PackedCbRecord merged = records[i++];
@@ -180,12 +183,6 @@ void SoloFeature::collapseUMIall_fromBuckets()
                 records[compact++] = merged;
             }
             records.resize(compact);
-
-            std::sort(records.begin(), records.end(),
-                      [](const star::solo::PackedCbRecord &left,
-                         const star::solo::PackedCbRecord &right) {
-                          return groupSortKey(left) < groupSortKey(right);
-                      });
 
             std::vector<star::solo::PackedCbRecord> molecules;
             molecules.reserve(records.size());
@@ -396,7 +393,11 @@ void SoloFeature::collapseUMIall_fromBuckets()
     }
     matrix.countCellGeneUMIindex[matrix.nCells] = matrixOffset;
 
-    P.inOut->logMain << "[CB-BUCKET] streamed_records=" << totalInputRecords
+    P.inOut->logMain << "[CB-BUCKET] backend="
+                     << (pSolo.cbBucketStore->using_spill() ? "spill" : "ram")
+                     << " transitioned="
+                     << (pSolo.cbBucketStore->transitioned_to_spill() ? "yes" : "no")
+                     << " streamed_records=" << totalInputRecords
                      << " aggregated_counts=" << totalInputCounts
                      << " final_molecules="
                      << inlineMatrix.gdnaMoleculeKeys.size()

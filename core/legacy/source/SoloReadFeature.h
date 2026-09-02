@@ -119,7 +119,7 @@ public:
     void addStats(const SoloReadFeature &soloCBin);
     void statsOut(ofstream &streamOut);
     void mergeInlineHash(SoloReadFeature &other); // Merge inlineHash_ and pendingAmbiguous_ from other
-    void mergePendingAmbiguous(const SoloReadFeature &other);
+    void mergePendingAmbiguous(SoloReadFeature &other, bool takeOwnership = false);
     void applyBridgeAmbiguousAggregatedReadAccounting(Parameters &P, int32 featureType,
                                                       const ExtendedAmbiguousEntry &entry,
                                                       bool bayesResolved,

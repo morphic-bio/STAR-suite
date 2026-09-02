@@ -113,9 +113,11 @@ class CbBucketStore {
     std::unique_ptr<std::atomic<std::uint64_t>[]> ramSequences_;
     std::unique_ptr<std::atomic<std::uint64_t>[]> spillOffsets_;
     std::unique_ptr<std::atomic<std::uint64_t>[]> spillRecordCounts_;
+    std::unique_ptr<std::mutex[]> spillClaimMutexes_;
+    std::unique_ptr<std::uint64_t[]> spillChecksums_;
     std::vector<int> spillFds_;
     mutable std::mutex spillInitMutex_;
-    bool spillFilesReady_ = false;
+    std::atomic<bool> spillFilesReady_{false};
 
     mutable std::mutex stateMutex_;
     mutable std::condition_variable stateCv_;

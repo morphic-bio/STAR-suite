@@ -11,6 +11,7 @@
 #include "MexWriter.h"
 #include <fstream>
 #include <sstream>
+#include <algorithm>
 #include <vector>
 #include <string>
 #include <unordered_map>
@@ -235,6 +236,7 @@ void SoloFeature::runFlexFilterInline(
     mem.sampleTags = sampleTags;
 
     FlexFilter::Config config;
+    config.totalThreads = static_cast<uint32_t>(std::max(1, P.runThreadN));
     // Handle per-tag mode: multiply by number of tags
     if (pSolo.flexFilterExpectedPerTagMode) {
         config.totalExpectedCells = pSolo.flexFilterTotalExpected * static_cast<uint32_t>(sampleTags.size());

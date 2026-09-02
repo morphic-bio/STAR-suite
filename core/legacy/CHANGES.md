@@ -1,3 +1,9 @@
+STAR-suite streaming cell-barcode buckets --- 2026/09/02
+=========================================================
+* Added RAM, spill, and budget-driven automatic cell-barcode bucket backends for the fused STAR-Flex inline-hash path, avoiding whole-run per-read accumulation for large datasets.
+* Added a bucket-parallel UMI-collapse tail and parallel per-tag filtering while preserving deterministic matrices, per-sample outputs, and statistics.
+* Added --soloBucketMode, --soloBucketMemGB, --soloBucketSpillDir, and --soloBucketCount. Classic STARsolo and non-Flex paths are unchanged.
+
 STAR-suite BGZF parallel FASTQ ingest --- 2026/09/01
 ===================================================
 * Added on-demand `BC/BSIZE` BGZF range readers for supported fully-fused STAR-Flex runs, with memory-only work caching, ordered exact mate pairing, and support for structurally complete files without the optional canonical EOF member.
