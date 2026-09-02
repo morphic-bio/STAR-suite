@@ -1,3 +1,19 @@
+star-suite (1.8.0-1) unstable; urgency=medium
+
+  * Add on-demand parallel BGZF FASTQ ingest for supported fully fused
+    STAR-Flex runs using inline BC/BSIZE member boundaries.
+  * Preserve exact FASTQ record boundaries and mate pairing while inflating
+    independent BGZF members with optional per-member CRC verification.
+  * Add --readFilesBgzfMode, --bgzfReaderThreads, and --bgzfCrcCheck while
+    preserving the existing zlib path for plain gzip and mode off.
+  * Require no pre-scan, external index, sidecar cache, or new dependency;
+    complete EOF-marker-free BGZF streams remain supported.
+  * Extend saturation-aware dynamic permit control across MAP, FEATURE, and
+    ATAC work domains.
+  * Report STAR Suite 1.8.0 from STAR --version.
+
+ -- STAR-suite Maintainers <maintainers@biodepot.example>  Wed, 02 Sep 2026 04:49:44 +0000
+
 star-suite (1.7.1-1) unstable; urgency=medium
 
   * Restore STAR's direct chunk reader for ordinary Fastx input so STARsolo

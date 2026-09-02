@@ -5,11 +5,13 @@
 #include <atomic>
 #include <condition_variable>
 #include <cstring>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <vector>
 #include <zlib.h>
 #include "FlexGdna.h"
+#include "input/BgzfStarAdapter.h"
 
 static constexpr uint32_t kFlexPipeNameMax = 512;
 static constexpr uint32_t kFlexPipeSeqMax = DEF_readSeqLengthMax + 1;
@@ -137,9 +139,13 @@ struct FlexPipelineCounters {
     std::atomic<uint64_t> triageKeep{0};
     std::atomic<uint64_t> triageDeny{0};
     std::atomic<uint64_t> triageMiss{0};
-    uint64_t perLaneReads[64];
+    std::atomic<uint64_t> perLaneReads[64];
 
-    FlexPipelineCounters() { std::memset(perLaneReads, 0, sizeof(perLaneReads)); }
+    FlexPipelineCounters() {
+        for (size_t lane = 0; lane < 64; ++lane) {
+            perLaneReads[lane].store(0, std::memory_order_relaxed);
+        }
+    }
 };
 
 struct LaneFiles {
@@ -152,6 +158,15 @@ struct FlexCbqRangeTask {
     uint64_t firstRecord = 0;
     uint64_t recordCount = 0;
     uint64_t globalFirst = 0;
+};
+
+struct FlexBgzfLane {
+    bool range = false;
+    std::shared_ptr<star::input::BgzfStarAdapter> adapter;
+};
+
+struct FlexBgzfRangeTask {
+    int laneId = 0;
 };
 
 struct FlexPipelineState {
@@ -175,6 +190,15 @@ struct FlexPipelineState {
     int nFusedThreads = 0;
     std::vector<FlexCbqRangeTask> cbqRangeTasks;
     std::atomic<int> nextCbqRangeIdx{0};
+    std::vector<FlexBgzfLane> bgzfLanes;
+    std::vector<FlexBgzfRangeTask> bgzfRangeTasks;
+    std::atomic<int> nextBgzfRangeIdx{0};
+    int bgzfReaderWorkers = 0;
+    bool bgzfRangeActive = false;
+
+    std::atomic<bool> inputFailed{false};
+    std::mutex inputErrorMutex;
+    std::string inputError;
 
     ~FlexPipelineState() {
         for (auto* q : soloQ) delete q;
@@ -203,6 +227,30 @@ struct FlexPipelineState {
             *task = cbqRangeTasks[static_cast<size_t>(index)];
         }
         return true;
+    }
+
+    bool claimNextBgzfRange(FlexBgzfRangeTask *task) {
+        int index = nextBgzfRangeIdx.fetch_add(1, std::memory_order_relaxed);
+        if (index < 0 || index >= static_cast<int>(bgzfRangeTasks.size())) {
+            return false;
+        }
+        if (task != nullptr) {
+            *task = bgzfRangeTasks[static_cast<size_t>(index)];
+        }
+        return true;
+    }
+
+    bool laneUsesBgzfRange(int lane) const {
+        return lane >= 0 && lane < static_cast<int>(bgzfLanes.size()) &&
+               bgzfLanes[static_cast<size_t>(lane)].range;
+    }
+
+    void failInput(const std::string& message) {
+        inputFailed.store(true, std::memory_order_relaxed);
+        std::lock_guard<std::mutex> lock(inputErrorMutex);
+        if (inputError.empty()) {
+            inputError = message;
+        }
     }
 };
 
@@ -255,5 +303,8 @@ void *flexAlignWorkerThread(void *arg);
 void *flexStatsReporterThread(void *arg);
 bool flexPrepareCbqRangeTasks(FlexPipelineState *state, Parameters &P,
                               int nWorkers, std::string *reason);
+bool flexPrepareBgzfRangeTasks(FlexPipelineState *state, Parameters &P,
+                               int nWorkers, std::string *reason,
+                               bool *fatalError);
 
 #endif
