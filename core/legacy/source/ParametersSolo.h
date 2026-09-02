@@ -330,8 +330,13 @@ public:
     string inlineHashModeStr = "";            // raw CLI value: yes|no|auto (default: auto - enabled for Flex, disabled otherwise)
     bool inlineHashMode = false;              // resolved value: true if enabled (gated behind Flex flag by default)
 
-    // Streaming CB buckets. Phase 2 is enabled only by the internal test
-    // environment; Phase 3 exposes the public parameters and auto policy.
+    // Streaming CB buckets for the fused Flex inline-hash path.
+    string bucketModeStr = "auto"; // off|ram|spill|auto
+    enum BucketMode : int32 { BucketOff = 0, BucketRam = 1,
+                              BucketSpill = 2, BucketAuto = 3 };
+    BucketMode bucketMode = BucketAuto;
+    double bucketMemGB = 32.0;
+    string bucketSpillDir = "-"; // '-' inherits Parameters::outFileTmp
     bool bucketStoreEnabled = false;
     uint32_t bucketCount = 256;
     std::shared_ptr<star::solo::CbBucketStore> cbBucketStore;

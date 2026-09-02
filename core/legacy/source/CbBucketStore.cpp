@@ -179,6 +179,8 @@ CbBucketStore::CbBucketStore(const Config &config)
       ramSequences_(new std::atomic<std::uint64_t>[config.bucketCount]),
       spillOffsets_(new std::atomic<std::uint64_t>[config.bucketCount]),
       spillRecordCounts_(new std::atomic<std::uint64_t>[config.bucketCount]),
+      spillClaimMutexes_(new std::mutex[config.bucketCount]),
+      spillChecksums_(new std::uint64_t[config.bucketCount]),
       spillFds_(config.bucketCount, -1),
       backend_(config.mode == Mode::Spill ? Backend::Spill : Backend::Ram)
 {
@@ -189,6 +191,7 @@ CbBucketStore::CbBucketStore(const Config &config)
         ramSequences_[bucket].store(0);
         spillOffsets_[bucket].store(0);
         spillRecordCounts_[bucket].store(0);
+        spillChecksums_[bucket] = kFnvOffset;
     }
     if (config_.mode == Mode::Spill && !ensure_spill_files(&error))
         throw std::runtime_error(error);
@@ -196,9 +199,11 @@ CbBucketStore::CbBucketStore(const Config &config)
 
 CbBucketStore::~CbBucketStore()
 {
-    for (int fd : spillFds_) {
-        if (fd >= 0)
-            ::close(fd);
+    for (std::uint32_t bucket = 0; bucket < spillFds_.size(); ++bucket) {
+        if (spillFds_[bucket] >= 0) {
+            ::close(spillFds_[bucket]);
+            ::unlink(spill_path(bucket).c_str());
+        }
     }
 }
 
@@ -237,8 +242,10 @@ std::string CbBucketStore::spill_path(std::uint32_t bucketIndex) const
 
 bool CbBucketStore::ensure_spill_files(std::string *error)
 {
+    if (spillFilesReady_.load(std::memory_order_acquire))
+        return true;
     std::lock_guard<std::mutex> lock(spillInitMutex_);
-    if (spillFilesReady_)
+    if (spillFilesReady_.load(std::memory_order_relaxed))
         return true;
     if (::mkdir(config_.scratchDirectory.c_str(), 0700) != 0 && errno != EEXIST)
         return set_error(error, std::string("cannot create CB bucket spill directory: ")
@@ -256,7 +263,7 @@ bool CbBucketStore::ensure_spill_files(std::string *error)
         if (!pwrite_all(fd, header.data(), header.size(), 0, error))
             return false;
     }
-    spillFilesReady_ = true;
+    spillFilesReady_.store(true, std::memory_order_release);
     return true;
 }
 
@@ -280,9 +287,21 @@ bool CbBucketStore::append_spill(std::uint32_t bucketIndex,
 {
     if (!ensure_spill_files(error))
         return false;
-    const std::uint64_t offset = spillOffsets_[bucketIndex].fetch_add(bytes.size());
-    spillRecordCounts_[bucketIndex].fetch_add(
-        bytes.size() / PackedCbRecord::kSerializedBytes);
+    std::uint64_t offset = 0;
+    {
+        // Claim the physical byte range and advance the checksum in that same
+        // order. The pwrite remains outside the lock, so independent segments
+        // and buckets can be written concurrently.
+        std::lock_guard<std::mutex> lock(spillClaimMutexes_[bucketIndex]);
+        offset = spillOffsets_[bucketIndex].load(std::memory_order_relaxed);
+        spillOffsets_[bucketIndex].store(offset + bytes.size(),
+                                         std::memory_order_relaxed);
+        spillRecordCounts_[bucketIndex].fetch_add(
+            bytes.size() / PackedCbRecord::kSerializedBytes,
+            std::memory_order_relaxed);
+        spillChecksums_[bucketIndex] = fnv_update(
+            spillChecksums_[bucketIndex], bytes.data(), bytes.size());
+    }
     return pwrite_all(spillFds_[bucketIndex], bytes.data(), bytes.size(),
                       kSpillHeaderBytes + offset, error);
 }
@@ -393,28 +412,14 @@ bool CbBucketStore::finalize_spill(std::string *error)
 {
     if (!ensure_spill_files(error))
         return false;
-    std::vector<std::uint8_t> buffer(1u << 20);
     for (std::uint32_t bucket = 0; bucket < config_.bucketCount; ++bucket) {
         const std::uint64_t bytes = spillOffsets_[bucket].load();
-        std::uint64_t checksum = kFnvOffset;
-        std::uint64_t offset = 0;
-        while (offset < bytes) {
-            const std::size_t chunk = static_cast<std::size_t>(
-                std::min<std::uint64_t>(buffer.size(), bytes - offset));
-            if (!pread_all(spillFds_[bucket], buffer.data(), chunk,
-                           kSpillHeaderBytes + offset, error))
-                return false;
-            checksum = fnv_update(checksum, buffer.data(), chunk);
-            offset += chunk;
-        }
         const std::vector<std::uint8_t> header = make_header(
             bucket, config_.bucketCount, config_.whitelistSize,
-            spillRecordCounts_[bucket].load(), bytes, checksum);
+            spillRecordCounts_[bucket].load(), bytes,
+            spillChecksums_[bucket]);
         if (!pwrite_all(spillFds_[bucket], header.data(), header.size(), 0, error))
             return false;
-        if (::fsync(spillFds_[bucket]) != 0)
-            return set_error(error, std::string("cannot finalize CB bucket spill file: ")
-                                      + std::strerror(errno));
     }
     return true;
 }

@@ -366,9 +366,8 @@ void SoloFeature::sumThreads()
     const bool nonFlexDirectBridge = pSolo.inlineHashMode
         && !pSolo.flexMode
         && std::getenv("STAR_SOLO_NONFLEX_HASH_BRIDGE") != nullptr;
-    
-    ///////////////////////////// collect per-thread SoloReadFeature objects
-    for (int ii=0; ii<P.runThreadN; ii++) {//point to
+
+    auto resolveThreadFeature = [&](int ii) -> SoloReadFeature* {
         if (RAchunk != nullptr) {
             if (RAchunk[ii] == nullptr || RAchunk[ii]->RA == nullptr ||
                 RAchunk[ii]->RA->soloRead == nullptr ||
@@ -379,14 +378,38 @@ void SoloFeature::sumThreads()
                        << " thread " << ii << "\n";
                 exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_INPUT_FILES, P);
             }
-            readFeatAll[ii]= RAchunk[ii]->RA->soloRead->readFeat[pSolo.featureInd[featureType]];
-        } else if (readFeatAll[ii] == nullptr) {
+            return RAchunk[ii]->RA->soloRead->readFeat[pSolo.featureInd[featureType]];
+        }
+        if (readFeatAll[ii] == nullptr) {
             ostringstream errOut;
             errOut << "EXITING because of fatal ERROR: no-genome Solo aggregation missing thread feature for "
                    << SoloFeatureTypes::Names[featureType]
                    << " thread " << ii << "\n";
             exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_INPUT_FILES, P);
         }
+        return readFeatAll[ii];
+    };
+
+    ///////////////////////////// collect per-thread SoloReadFeature objects
+    for (int ii=0; ii<P.runThreadN; ii++) {
+        readFeatAll[ii] = resolveThreadFeature(ii);
+    }
+
+    // The fused bucket path retains only ambiguous observations outside the
+    // bucket store. Reserve their final tables once so the serial handoff does
+    // not repeatedly rehash and copy large vector-bearing entries.
+    if (pSolo.bucketStoreEnabled && featureType == SoloFeatureTypes::Gene) {
+        size_t pendingN = readFeatSum->pendingAmbiguous_.size();
+        size_t orphanN = readFeatSum->bridgeAmbigReadInfoOrphan_.size();
+        for (int ii=0; ii<P.runThreadN; ++ii) {
+            pendingN += readFeatAll[ii]->pendingAmbiguous_.size();
+            orphanN += readFeatAll[ii]->bridgeAmbigReadInfoOrphan_.size();
+        }
+        readFeatSum->pendingAmbiguous_.reserve(pendingN);
+        readFeatSum->bridgeAmbigReadInfoOrphan_.reserve(orphanN);
+    }
+
+    for (int ii=0; ii<P.runThreadN; ii++) {
         readFeatAll[ii]->setOwner(this);
         if (readFeatAll[ii]->streamReads) {
             readFeatAll[ii]->streamReads->flush();

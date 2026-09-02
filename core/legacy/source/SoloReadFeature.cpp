@@ -131,7 +131,9 @@ void SoloReadFeature::appendInlineObservation(uint64_t key, uint32_t value)
         record.key = key;
         record.value = value;
         segment.push_back(record);
-        if (segment.size() >= 256) {
+        // Large enough to amortize spill pwrite overhead while keeping bounded
+        // producer staging (4096 records is 64 KiB in the in-memory vector).
+        if (segment.size() >= 4096) {
             std::string error;
             std::vector<star::solo::PackedCbRecord> sealed;
             sealed.swap(segment);
@@ -265,7 +267,8 @@ void SoloReadFeature::mergeInlineHash(SoloReadFeature &other)
         }
     }
     
-    mergePendingAmbiguous(other);
+    mergePendingAmbiguous(
+        other, bucketStorageEnabled() && other.bucketStorageEnabled());
 }
 
 namespace {
@@ -348,38 +351,45 @@ void bridgeMergePinCandQualsMax(std::vector<uint8_t> &dst,
 }
 } // namespace
 
-void SoloReadFeature::mergePendingAmbiguous(const SoloReadFeature &other)
+void SoloReadFeature::mergePendingAmbiguous(SoloReadFeature &other,
+                                            bool takeOwnership)
 {
     Parameters &P = other.P;
     const char qsBase = P.pSolo.QSbase;
     const uint32_t qsMax = P.pSolo.QSmax;
 
-    for (const auto &kv : other.pendingAmbiguous_) {
+    for (auto &kv : other.pendingAmbiguous_) {
         ReadAlign::AmbigKey key = kv.first;
-        const ExtendedAmbiguousEntry &otherEntry = kv.second;
+        ExtendedAmbiguousEntry &otherEntry = kv.second;
 
-        auto &entry = pendingAmbiguous_[key];
-        if (entry.candidateIdx.empty()) {
-            entry.candidateIdx = otherEntry.candidateIdx;
-            entry.cbSeq = otherEntry.cbSeq;
-            entry.cbQual = otherEntry.cbQual;
-            entry.umiCounts = otherEntry.umiCounts;
-            entry.observations = otherEntry.observations;
-            entry.bridgeAmbigUmiGene_ = otherEntry.bridgeAmbigUmiGene_;
-            entry.cbLogLikMatch = otherEntry.cbLogLikMatch;
-            entry.cbLogLikMismatch = otherEntry.cbLogLikMismatch;
-            entry.cbEvidenceReads = otherEntry.cbEvidenceReads;
-            entry.bridgeAmbigGeneFeatU_ = otherEntry.bridgeAmbigGeneFeatU_;
-            entry.bridgeAmbigGeneFeatM_ = otherEntry.bridgeAmbigGeneFeatM_;
-            entry.bridgeAmbigGeneHaveSampleU_ = otherEntry.bridgeAmbigGeneHaveSampleU_;
-            entry.bridgeAmbigGeneHaveSampleM_ = otherEntry.bridgeAmbigGeneHaveSampleM_;
-            entry.bridgeAmbigGeneSampleFlagU_ = otherEntry.bridgeAmbigGeneSampleFlagU_;
-            entry.bridgeAmbigGeneSampleFlagM_ = otherEntry.bridgeAmbigGeneSampleFlagM_;
-            entry.bridgeAmbigReadInfoN_ = otherEntry.bridgeAmbigReadInfoN_;
-            entry.bridgeAmbigReadInfoHaveSample_ = otherEntry.bridgeAmbigReadInfoHaveSample_;
-            entry.bridgeAmbigReadInfoSampleFlag_ = otherEntry.bridgeAmbigReadInfoSampleFlag_;
-            entry.bridgeAmbigPinCandQuals_ = otherEntry.bridgeAmbigPinCandQuals_;
+        auto found = pendingAmbiguous_.find(key);
+        if (found == pendingAmbiguous_.end()) {
+            if (takeOwnership) {
+                pendingAmbiguous_.emplace(key, std::move(otherEntry));
+            } else {
+                ExtendedAmbiguousEntry &entry = pendingAmbiguous_[key];
+                entry.candidateIdx = otherEntry.candidateIdx;
+                entry.cbSeq = otherEntry.cbSeq;
+                entry.cbQual = otherEntry.cbQual;
+                entry.umiCounts = otherEntry.umiCounts;
+                entry.observations = otherEntry.observations;
+                entry.bridgeAmbigUmiGene_ = otherEntry.bridgeAmbigUmiGene_;
+                entry.cbLogLikMatch = otherEntry.cbLogLikMatch;
+                entry.cbLogLikMismatch = otherEntry.cbLogLikMismatch;
+                entry.cbEvidenceReads = otherEntry.cbEvidenceReads;
+                entry.bridgeAmbigGeneFeatU_ = otherEntry.bridgeAmbigGeneFeatU_;
+                entry.bridgeAmbigGeneFeatM_ = otherEntry.bridgeAmbigGeneFeatM_;
+                entry.bridgeAmbigGeneHaveSampleU_ = otherEntry.bridgeAmbigGeneHaveSampleU_;
+                entry.bridgeAmbigGeneHaveSampleM_ = otherEntry.bridgeAmbigGeneHaveSampleM_;
+                entry.bridgeAmbigGeneSampleFlagU_ = otherEntry.bridgeAmbigGeneSampleFlagU_;
+                entry.bridgeAmbigGeneSampleFlagM_ = otherEntry.bridgeAmbigGeneSampleFlagM_;
+                entry.bridgeAmbigReadInfoN_ = otherEntry.bridgeAmbigReadInfoN_;
+                entry.bridgeAmbigReadInfoHaveSample_ = otherEntry.bridgeAmbigReadInfoHaveSample_;
+                entry.bridgeAmbigReadInfoSampleFlag_ = otherEntry.bridgeAmbigReadInfoSampleFlag_;
+                entry.bridgeAmbigPinCandQuals_ = otherEntry.bridgeAmbigPinCandQuals_;
+            }
         } else {
+            ExtendedAmbiguousEntry &entry = found->second;
             for (const auto &umiCount : otherEntry.umiCounts) {
                 entry.umiCounts[umiCount.first] += umiCount.second;
             }
@@ -439,9 +449,9 @@ void SoloReadFeature::mergePendingAmbiguous(const SoloReadFeature &other)
         }
     }
 
-    for (const auto &okv : other.bridgeAmbigReadInfoOrphan_) {
+    for (auto &okv : other.bridgeAmbigReadInfoOrphan_) {
         ReadAlign::AmbigKey okey = okv.first;
-        const SoloReadFeature::BridgeAmbigReadInfoOrphanEntry &oe = okv.second;
+        SoloReadFeature::BridgeAmbigReadInfoOrphanEntry &oe = okv.second;
 
         auto pit = pendingAmbiguous_.find(okey);
         if (pit != pendingAmbiguous_.end() && !pit->second.candidateIdx.empty()) {
@@ -471,10 +481,15 @@ void SoloReadFeature::mergePendingAmbiguous(const SoloReadFeature &other)
             continue;
         }
 
-        auto &dest = bridgeAmbigReadInfoOrphan_[okey];
-        if (dest.candidateIdx.empty()) {
-            dest = oe;
+        auto found = bridgeAmbigReadInfoOrphan_.find(okey);
+        if (found == bridgeAmbigReadInfoOrphan_.end()) {
+            if (takeOwnership) {
+                bridgeAmbigReadInfoOrphan_.emplace(okey, std::move(oe));
+            } else {
+                bridgeAmbigReadInfoOrphan_[okey] = oe;
+            }
         } else {
+            SoloReadFeature::BridgeAmbigReadInfoOrphanEntry &dest = found->second;
             dest.readInfoN_ += oe.readInfoN_;
             if (bridgeSampleFlagBetter(dest.haveSample_,
                                        dest.sampleFlag_,

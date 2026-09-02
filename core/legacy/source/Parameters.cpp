@@ -682,6 +682,10 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloUseInlineReplayer", &pSolo.useInlineReplayerStr));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloInlineCBCorrection", &pSolo.inlineCBCorrectionStr));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloInlineHashMode", &pSolo.inlineHashModeStr));
+    parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloBucketMode", &pSolo.bucketModeStr));
+    parArray.push_back(new ParameterInfoScalar <double>   (-1, -1, "soloBucketMemGB", &pSolo.bucketMemGB));
+    parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloBucketSpillDir", &pSolo.bucketSpillDir));
+    parArray.push_back(new ParameterInfoScalar <uint32>   (-1, -1, "soloBucketCount", &pSolo.bucketCount));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "no-hash-screen", &pSolo.hashScreenDisableStr));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloHashScreenFile", &pSolo.hashScreenFile));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "hashCacheOutput", &pSolo.hashCacheOutput));
