@@ -195,6 +195,18 @@ Ship discoverable, installable Ubuntu binaries for STAR Suite with low-friction 
   `STAR --version` reports `1.3.0`. Upstream provenance and genome index
   compatibility remain `2.7.11b` and `2.7.4a`.
 
+## Feature Release v1.8.0 (2026-09-02)
+
+- Release tag: `v1.8.0`
+- Release notes: `docs/RELEASE_NOTES_v1.8.0.md`
+- Packaging metadata: `debian/changelog` entry `1.8.0-1`
+- Scope: on-demand parallel BGZF FASTQ ingest for supported fully fused
+  STAR-Flex runs, exact ordered record and mate reconstruction, CRC validation,
+  explicit reader controls, and three-domain saturation-aware permit control.
+- Version note: release artifacts use tag `v1.8.0`, Debian packages use STAR
+  Suite `1.8.0`, and `STAR --version` reports `1.8.0`. Upstream provenance and
+  genome-index compatibility remain `2.7.11b` and `2.7.4a`.
+
 ## Patch Release v1.7.1 (2026-08-09)
 
 - Release tag: `v1.7.1`
