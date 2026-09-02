@@ -12,7 +12,10 @@
 # skipped on re-invocation. Results accumulate in /scratch/runs/results.tsv.
 set -uo pipefail
 
-: "${STAGING_BUCKET:?set STAGING_BUCKET}"; : "${RELEASE_TAG:?set RELEASE_TAG}"; : "${BINARY_ASSET:?set BINARY_ASSET}"
+: "${STAGING_BUCKET:?set STAGING_BUCKET}"
+INSTALL_MODE="${INSTALL_MODE:-asset}"   # asset (GitHub release) | ppa (Launchpad)
+if [ "$INSTALL_MODE" = ppa ]; then : "${PPA:?set PPA=ppa:<owner>/star-suite}";
+else : "${RELEASE_TAG:?set RELEASE_TAG}"; : "${BINARY_ASSET:?set BINARY_ASSET}"; fi
 RUN_SPILL="${RUN_SPILL:-0}"; SKIP_CELLRANGER="${SKIP_CELLRANGER:-0}"
 S=/scratch; R=$S/runs; D=$R/.done; RESULTS=$R/results.tsv
 TENX_TAR="s3://10x.files/samples/cell-exp/9.0.0/320k_scFFPE_16-plex_GEM-X_FLEX_Multiplex/320k_scFFPE_16-plex_GEM-X_FLEX_Multiplex_fastqs.tar"
@@ -36,6 +39,12 @@ if ! done_p setup; then
   sudo chown "$(id -u)" $S; mkdir -p $S/{fastqs,cbq,refs,tools,tmp} $R $D
   command -v aws >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq awscli; }
   printf 'run\tstatus\twall\tmax_rss_kb\tcpu\tutc\n' > "$RESULTS"
+  if [ "$INSTALL_MODE" = ppa ]; then
+    # The demonstration's opening line: the suite installs from a public apt repository.
+    sudo apt-get update -qq && sudo apt-get install -y -qq software-properties-common
+    sudo add-apt-repository -y "$PPA" && sudo apt-get install -y star-suite
+    ln -sf "$(command -v STAR)" $S/tools/STAR
+  else
   curl -L -o $S/tools/release_asset."${BINARY_ASSET##*.}" \
     "https://github.com/morphic-bio/STAR-suite/releases/download/${RELEASE_TAG}/${BINARY_ASSET}"
   case "$BINARY_ASSET" in
@@ -45,6 +54,7 @@ if ! done_p setup; then
                 && cp "$(find $S/tools/release -type f -name STAR | head -1)" $S/tools/STAR && chmod +x $S/tools/STAR ;;
     *) cp "$S/tools/release_asset.${BINARY_ASSET##*.}" $S/tools/STAR && chmod +x $S/tools/STAR ;;
   esac
+  fi
   $S/tools/STAR --version | tee $R/star_version.txt
   aws s3 sync "$STAGING_BUCKET/refs"  $S/refs  --only-show-errors
   aws s3 sync "$STAGING_BUCKET/tools" $S/tools --only-show-errors
