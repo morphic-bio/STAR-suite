@@ -47,13 +47,13 @@ aws s3 cp /mnt/pikachu/JAX_scRNAseq01_processed/probe-barcodes-fixed-rna-profili
 aws s3 sync /home/lhhung/cellranger-9.0.1                    s3://<staging-bucket>/cellranger-9.0.1
 aws s3 sync /mnt/pikachu/CR-references/refdata-gex-GRCh38-2024-A s3://<staging-bucket>/refs/refdata-gex-GRCh38-2024-A
 aws s3 cp /mnt/pikachu/benchmark_cr9_320k_config.csv         s3://<staging-bucket>/refs/   # from the lab chain; paths rewritten on-instance
+aws s3 cp /mnt/pikachu/process_features/tables/Chromium_Human_Transcriptome_Probe_Set_v1.1.0_GRCh38-2024-A.csv s3://<staging-bucket>/refs/   # REQUIRED by the CR config rewrite
 # cyto (~20 MB): binary, its whitelists, the gene-probe table
 aws s3 cp /home/lhhung/.cargo/bin/cyto                       s3://<staging-bucket>/tools/
 aws s3 sync /home/lhhung/.cyto                               s3://<staging-bucket>/tools/dot-cyto
 aws s3 cp /mnt/pikachu/cyto_headtohead_20260901/gene_probes_v1.1.0.tsv s3://<staging-bucket>/refs/
-# CBQ encoder (public encoder binary; rebuild first if absent:
-#   cd /mnt/pikachu/STAR-suite-bgzf-ingest-20260901/core/legacy/source && make cbq-ordered-encoder)
-aws s3 cp /mnt/pikachu/STAR-suite-bgzf-ingest-20260901/core/legacy/source/cbq_ordered_encoder s3://<staging-bucket>/tools/
+# CBQ encoder: NOT staged and NOT shipped in the package — the script builds it on
+# the instance from the released source tarball before the (untimed) encode step.
 ```
 
 ## Instance setup
