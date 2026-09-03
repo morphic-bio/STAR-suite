@@ -18,6 +18,9 @@ Same box, same 8 CBQ lanes, same NVMe, cold page cache, 32 threads, hash-only
 | STAR-Flex, lock-free sample table | 5:07.81 | 150 s | 137 s | 1642% |
 | STAR-Flex, plus full-budget EmptyDrops | 4:19.34 | 150 s | 89 s | 2002% |
 | STAR-Flex, plus parallel sumThreads | 4:16.50 | 150 s | 86 s | — |
+| STAR-Flex, plus shared ambiguous store | 4:05.11 | 150 s | 89 s | 2002% |
+| STAR-Flex, plus inlined accessors (pushed) | 3:59.94 | 150 s | 70 s | 2114% |
+| STAR-Flex, plus parallel fan-in (uncommitted) | 3:58.40 | 150 s | 68 s | — |
 | STAR-Flex, target | < 3:46 | | | |
 
 The gap to cyto went from 1.72x to 1.13x. Every change so far produced
@@ -177,7 +180,55 @@ Mapping is 150 s. `perf` on the fixed binary, mapping window, top self time:
 `record_flex_hash_screen_keep` 3%, CBQ batch build and sequence materialize 5%.
 No single dominant symbol left, so mapping is now death by a thousand cuts.
 
-### Next targets, in the order I would take them
+## THE TAIL IS NOW FULLY MEASURED — read this before optimising anything
+
+Every phase is timed in the code (`Solo timing:` lines in `Log.out`). Do not
+work from profile percentages: they are *sample* shares across 32 threads, and
+reading them as wall-clock shares cost me four wrong diagnoses in a row.
+
+| Phase of the ~68 s tail | Wall | Notes |
+|---|---|---|
+| **`resolvePendingAmbiguousToHash`** | **17.2 s** | **serial; see below** |
+| Bucket loop (parallel, 32 threads) | 14.2 s | sort 7 s, UMI correct 4.5 s, load 2 s |
+| Flexfilter | 20 s | already optimised this session, 68 s → 19 s |
+| MEX write | 5 s | |
+| After flexfilter | 8 s | not yet broken down |
+| `sumThreads` | 2.5 s | was 26 s |
+| Fan-in | 0.85 s | was ~2 s |
+| Post-fan-in setup (triplet loop etc.) | 0.38 s | |
+
+### 1. `resolvePendingAmbiguousToHash` — 17.2 s, and it resolves nothing
+
+The single largest item left, and it sat untimed between two log timestamps all
+session. The log line it prints is the striking part:
+
+```
+[AMBIG-CB-RESOLVE] pending=2627928 resolved=0 still_ambiguous=2627928 added_to_hash=0
+```
+
+**Seventeen seconds to walk 2.6 M ambiguous barcodes and resolve zero of them.**
+
+**Do not "optimise" this by skipping it until someone establishes which of two
+things is true**, because they need opposite fixes:
+
+- **It is correctly a no-op on this data** (the resolver needs evidence this
+  dataset does not provide), in which case the 17 s is dead work and the pass
+  should exit early — a large, free win.
+- **It is silently failing to resolve barcodes it should resolve**, in which
+  case this is a *correctness* bug wearing a performance costume, and cutting
+  the pass would lock in wrong answers. `resolved=0` out of 2.6 M is a
+  suspicious number.
+
+Start at `SoloFeature::resolvePendingAmbiguousToHash` in
+`core/legacy/source/SoloFeature.cpp`; the early exits to check are
+`g_disableAmbigResolve` and `!pSolo.cbCorrector`. Check what `cbCorrector` is on
+this command line before assuming either branch.
+
+There is an irony worth recording: this session made the *accumulation* of these
+same 2.6 M entries nearly free (26 s → 2.5 s, commit 022b24d) while their
+*resolution*, a few lines later, cost seven times more and nobody had timed it.
+
+### Other targets, in the order I would take them
 
 1. **`sumThreads`, 26 s, serial — now measured, sub-timers are in the code.**
    The loop's four steps on the JAX set:
@@ -258,14 +309,78 @@ No single dominant symbol left, so mapping is now death by a thousand cuts.
    File: `core/legacy/source/SoloFeature_sumThreads.cpp`. Removing this block
    takes the tail from 89 s toward 65 s and the wall from 4:19 to about 3:55.
 
-2. **Bucket collapse, 30 s, already on 32 threads.** Profile says ~24% is
-   `__introsort_loop` over `PackedCbRecord` and ~11% `UMICorrector::findNeighbors`.
-   A radix sort on the packed key is the obvious move since the key is an
-   integer. Lower confidence, real work.
+2. **Bucket collapse, now 67 s and the whole remaining tail.** Profile says
+   ~24% `__introsort_loop` over `PackedCbRecord`, ~11% `UMICorrector::findNeighbors`.
+
+   **A radix sort was tried and is SLOWER. Do not repeat it.** LSD radix on
+   `groupSortKey`, 8 passes of 8 bits, skipping single-digit passes, one scratch
+   buffer per thread: collapse 67.4 s → 74.2 s, wall 3:59.94 → 4:06.37, outputs
+   byte-identical (so it was correct, just worse). The reason is memory, not
+   comparisons: each pass moves all 6.4 M records of a bucket, so eight passes
+   move ~800 MB per bucket, and the scatter writes 256 streams per thread which
+   at 32 threads thrashes cache and TLB. `std::sort` partitions in place and
+   touches far less memory. **The collapse is memory-bound, not
+   comparison-bound**, which also means micro-optimising the comparator further
+   is not where the win is.
+
+   **Hash pre-aggregation was also tried and is a WASH. Do not repeat it
+   either.** Collapsing exact-duplicate keys with the vendored open-addressing
+   table *before* the sort, to shrink what gets ordered: collapse 67.41 s →
+   67.59 s, wall 3:59.94 → 3:59.94, byte-identical. It cannot help, and the
+   reason is in the log all along:
+
+   ```
+   [CB-BUCKET] streamed_records=1626999647 aggregated_counts=1626999647
+   ```
+
+   **Those two numbers are equal: there are no exact-duplicate keys to remove.**
+   The compaction pass after the sort collapses nothing. I assumed a ~5x
+   deduplication ratio and built against the guess; it is 1.0x. The 7x gap to
+   `final_molecules=224941678` comes from UMI *correction* merging similar UMIs
+   within a group, which happens after grouping and cannot be exploited before
+   the sort. Check this ratio on any new dataset before assuming otherwise.
+
+   **So the ordered volume is irreducible.** With both the algorithm (radix) and
+   the volume (dedup) ruled out, the only remaining lever is the sort's cache
+   behaviour. That points at the segment-merge design below.
+
+   **Constraint any such design must respect.** The emission loop detects a new
+   barcode with a `previousCb` / `previousCbTag` run check, so it needs globally
+   *sorted* molecules, not merely grouped ones. Hash-grouped output fed straight
+   in would push each barcode once per group and change the matrix. Group with a
+   hash if you like, but sort before emitting.
 
 3. **Mapping, 150 s.** `matchCBtoWL` is the top symbol and takes `std::string`
    arguments by reference; look for avoidable string construction per read
    before touching the algorithm.
+
+## How I wasted most of an evening, so you do not repeat it
+
+Five diagnoses of the tail, four wrong, all in the same way: reasoning from a
+plausible mechanism instead of timing the thing itself.
+
+| I believed | Reality |
+|---|---|
+| The bucket sort is the bottleneck (24% of profile) | 7 s of a 68 s tail. Three separate attacks on it all measured as noise. |
+| A radix sort will beat `std::sort` | Slower, 67 → 74 s. Memory-bound, not comparison-bound. |
+| Deduplicating before the sort cuts volume ~5x | 1.0x. `streamed_records == aggregated_counts` in the log said so all along. |
+| The 21 s gap is the serial fan-in | Fan-in was ~2 s. |
+| The rest is the unreserved count-matrix vector | 0.38 s. The reserve was still right, but bought nothing. |
+
+The actual answer, a 17 s serial pass that resolves nothing, was invisible to
+every one of those hypotheses because **no timer bracketed it**. Profile sample
+shares pointed at the sort because the sort is what 32 threads were busy doing;
+they cannot show you a serial block that runs while 31 cores idle.
+
+**Method that worked, use it first next time.** Put a `steady_clock` timer
+around every phase between two log lines, print thread-seconds *and* the
+enclosing wall time, then divide. Total cost: one 4-minute run. It found the
+answer immediately after four failed attempts costing an hour each.
+
+**A trap in the timing itself**: my first bucket-loop timer started *after* four
+untimed pre-loop steps, so the phase looked like it began at its log line. If
+your timers do not sum to the wall time between the enclosing timestamps, the
+difference is real work you have not bracketed — chase it before theorising.
 
 ## Do not do these
 
@@ -349,7 +464,22 @@ flex/source/libflex/FlexFilter.cpp       Monte Carlo thread budget
 docs/benchmarks/jax_matrix_20260903/     protocol + diagnostics (untracked)
 ```
 
-Nothing is committed, but the tree is in a committable state:
+**Uncommitted in `flex/source/SoloFeature_collapseUMI_fromBuckets.cpp`** (all
+verified byte-identical, gate not yet re-run on them):
+
+- Parallel fan-in: prefix offsets, size destinations once, buckets write into
+  disjoint ranges. ~2 s → 0.85 s, wall 3:59.94 → 3:58.40. Worth keeping.
+- Reserves on `countCellGeneUMI` (296.7 M entries) and the per-bucket molecule
+  vectors. No measurable gain, but correct: these sizes are known exactly a few
+  lines earlier and were being discovered by ~30 reallocations. An indexed write
+  into a pre-sized buffer would also vectorise where `push_back` cannot.
+- The phase timers themselves. **Keep them.** They are what finally located the
+  17 s, they cost nothing measurable, and without them the next person starts
+  from the same blind position I did.
+
+Everything before that is committed and pushed (1016700).
+
+The rest of the tree:
 
 - **BGZF ingest gate re-run against these changes on 2026-09-03 19:05: all green.**
   Phase 0 and T1 through T9, plus the T7-off and T7-auto gzip/CBQ regressions.
