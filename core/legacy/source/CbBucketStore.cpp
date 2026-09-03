@@ -151,10 +151,8 @@ PackedCbRecord PackedCbRecord::make(std::uint32_t cbIndex,
     return result;
 }
 
-std::uint32_t PackedCbRecord::cb_index() const { return (key >> 44) & 0xFFFFFu; }
-std::uint32_t PackedCbRecord::umi24() const { return (key >> 20) & 0xFFFFFFu; }
-std::uint16_t PackedCbRecord::gene15() const { return (key >> 5) & 0x7FFFu; }
-std::uint8_t PackedCbRecord::tag5() const { return key & 0x1Fu; }
+// cb_index, umi24, gene15 and tag5 are defined inline in the header: they sit
+// inside the bucket sort's comparator and must not be out-of-line calls.
 std::uint32_t PackedCbRecord::count30() const { return value & 0x3FFFFFFFu; }
 std::uint8_t PackedCbRecord::flags2() const { return (value >> 30) & 0x3u; }
 

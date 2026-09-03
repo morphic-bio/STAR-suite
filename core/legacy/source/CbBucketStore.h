@@ -30,10 +30,16 @@ struct PackedCbRecord {
     static PackedCbRecord make(std::uint32_t cbIndex, std::uint32_t umi24,
                                std::uint16_t gene15, std::uint8_t tag5,
                                std::uint32_t count30, std::uint8_t flags2);
-    std::uint32_t cb_index() const;
-    std::uint32_t umi24() const;
-    std::uint16_t gene15() const;
-    std::uint8_t tag5() const;
+    // Defined here rather than in the .cpp so they inline. The bucket collapse
+    // sorts 1.6 billion records by a key built from four of these, so a
+    // comparison sort calls them tens of billions of times; out of line, in
+    // another translation unit and with no LTO, each shift-and-mask became a
+    // real function call and the four together accounted for ~15% of the Flex
+    // tail profile.
+    std::uint32_t cb_index() const { return (key >> 44) & 0xFFFFFu; }
+    std::uint32_t umi24() const { return (key >> 20) & 0xFFFFFFu; }
+    std::uint16_t gene15() const { return static_cast<std::uint16_t>((key >> 5) & 0x7FFFu); }
+    std::uint8_t tag5() const { return static_cast<std::uint8_t>(key & 0x1Fu); }
     std::uint32_t count30() const;
     std::uint8_t flags2() const;
 
