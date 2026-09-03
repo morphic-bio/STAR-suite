@@ -17,6 +17,7 @@ INSTALL_MODE="${INSTALL_MODE:-asset}"   # asset (GitHub release) | ppa (Launchpa
 if [ "$INSTALL_MODE" = ppa ]; then : "${PPA:?set PPA=ppa:<owner>/star-suite}";
 else : "${RELEASE_TAG:?set RELEASE_TAG}"; : "${BINARY_ASSET:?set BINARY_ASSET}"; fi
 RUN_SPILL="${RUN_SPILL:-0}"; SKIP_CELLRANGER="${SKIP_CELLRANGER:-0}"
+SRC_TAG="${SRC_TAG:-v1.8.1}"; SRC_TARBALL="${SRC_TARBALL:-star-suite_1.8.1.orig.tar.gz}"
 S=/scratch; R=$S/runs; D=$R/.done; RESULTS=$R/results.tsv
 TENX_TAR="s3://10x.files/samples/cell-exp/9.0.0/320k_scFFPE_16-plex_GEM-X_FLEX_Multiplex/320k_scFFPE_16-plex_GEM-X_FLEX_Multiplex_fastqs.tar"
 
@@ -141,6 +142,18 @@ if [ "$SKIP_CELLRANGER" != 1 ] && ! done_p cellranger; then
 fi
 
 if ! done_p cbq_encode; then
+  if [ ! -x $S/tools/cbq_ordered_encoder ]; then
+    # Untimed producer tooling: the encoder is not part of the installed package,
+    # so build it from the released source tarball (single translation unit).
+    log "building CBQ encoder from released source"
+    sudo apt-get install -y -qq build-essential zlib1g-dev
+    curl -L -o $S/tools/src.tar.gz \
+      "https://github.com/morphic-bio/STAR-suite/releases/download/${SRC_TAG}/${SRC_TARBALL}"
+    mkdir -p $S/tools/src && tar -xzf $S/tools/src.tar.gz -C $S/tools/src --strip-components=1
+    ( cd $S/tools/src/core/legacy/source && make cbq-ordered-encoder ) \
+      && cp $S/tools/src/core/legacy/source/cbq_ordered_encoder $S/tools/ \
+      || { log "FATAL: CBQ encoder build failed"; exit 1; }
+  fi
   log "encoding CBQ (untimed producer step)"; pids=(); i=0
   for L in L001 L002 L003 L004; do
     $S/tools/cbq_ordered_encoder \
