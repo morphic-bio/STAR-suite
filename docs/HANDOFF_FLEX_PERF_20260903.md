@@ -17,29 +17,49 @@ Same box, same 8 CBQ lanes, same NVMe, cold page cache, 32 threads, hash-only
 | STAR-Flex, before this work | 6:30.07 | 230 s | 139 s | 1910% |
 | STAR-Flex, lock-free sample table | 5:07.81 | 150 s | 137 s | 1642% |
 | STAR-Flex, plus full-budget EmptyDrops | 4:19.34 | 150 s | 89 s | 2002% |
+| STAR-Flex, plus parallel sumThreads | 4:16.50 | 150 s | 86 s | — |
 | STAR-Flex, target | < 3:46 | | | |
 
-The gap to cyto went from 1.72x to 1.14x. Every change so far produced
+The gap to cyto went from 1.72x to 1.13x. Every change so far produced
 **byte-identical** per-sample matrices, barcodes and features.
 
 ## Read this before touching anything
 
 **1. There are two copies of several source files. Only one is compiled.**
 
-The Makefile sets `FLEX_SRC_DIR := /mnt/pikachu/STAR-suite/flex/source` and
-`LIBFLEX_DIR := $(FLEX_SRC_DIR)/libflex`. So:
+**It is decided per file, not per directory. Do not assume either tree wins.**
+`make` runs with `cwd = core/legacy/source` and `-I.` first, so a bare name in
+the source list resolves under `core/legacy/source`, while `flex/source` files
+are pulled in by explicit path or through `LIBFLEX_DIR`. Verified against the
+build log:
 
 | Compiled (edit this) | Stale copy (do NOT edit) |
 |---|---|
 | `flex/source/libflex/FlexFilter.cpp` | `core/legacy/source/libflex/FlexFilter.cpp` |
-| `flex/source/SoloFeature_flexfilter.cpp` | `core/legacy/source/SoloFeature_flexfilter.cpp` |
-| `flex/source/SampleDetector.cpp` | — |
+| `flex/source/SampleDetector.{h,cpp}` | — |
+| `flex/source/SoloFeature_collapseUMI_fromBuckets.cpp` | — |
+| `core/legacy/source/SoloFeature_flexfilter.cpp` | `flex/source/SoloFeature_flexfilter.cpp` |
+| `core/legacy/source/SoloReadFeature.cpp` | `flex/source/SoloReadFeature.cpp` |
+| `core/legacy/source/flex/SoloReadFeature_record_flex.cpp` | `flex/source/SoloReadFeature_record_flex.cpp` |
+| `core/legacy/source/SoloFeature_sumThreads.cpp` | — |
 
-I lost twenty minutes reading the stale `FlexFilter.cpp`, which says it gives all
-cores to the Monte Carlo, while the compiled one splits them evenly across tags.
-The stale tree is from April; the live one is current. When a log line disagrees
-with the source you are reading, you are reading the wrong file. Confirm with
-`grep -a <string> core/legacy/source/STAR`.
+**The direction reverses between rows, including between two files with almost
+the same name.** `FlexFilter.cpp` compiles from `flex/source`, but
+`SoloFeature_flexfilter.cpp` compiles from `core/legacy/source`. I lost twenty
+minutes reading the stale `FlexFilter.cpp`, which claims it gives all cores to
+the Monte Carlo while the compiled one splits them evenly across tags — and
+then, knowing all that, still edited the stale `SoloFeature_flexfilter.cpp`
+later the same evening. That edit is comment-only so it is harmless, but it is
+in commit f0f4fc8 and it is dead code. Treat this table as the only source of
+truth and re-derive it from the build log if anything looks off.
+
+**Check every time, with the build log, not with intuition:**
+```bash
+grep -o "[^ ]*YourFile\.cpp" <build log> | sort -u   # which path was compiled
+grep -a -c "some string you added" core/legacy/source/STAR   # did it land
+```
+When a log line disagrees with the source you are reading, you are reading the
+wrong file.
 
 **2. Never rebuild while a timed run is in flight.** `make` overwrites the
 binary a running STAR is executing. Every diagnostic script here starts by
@@ -159,14 +179,84 @@ No single dominant symbol left, so mapping is now death by a thousand cuts.
 
 ### Next targets, in the order I would take them
 
-1. **`sumThreads`, 26 s, serial.** Walks the 32 per-thread Solo structures one
-   at a time on one core: merges each thread's inline hash and its
-   pending-ambiguous table (2,627,928 entries in this run) into a master, adds
-   stats and counts, then destroys the thread's khash tables and swaps out its
-   vectors. The merge is an associative reduction, so a tree merge over threads
-   would work. The frees are pure teardown that nothing reads afterwards and
-   could be handed to a detached thread. Estimate 15 to 20 s recoverable.
-   File: `core/legacy/source/SoloFeature_sumThreads.cpp`.
+1. **`sumThreads`, 26 s, serial — now measured, sub-timers are in the code.**
+   The loop's four steps on the JAX set:
+
+   | step | time |
+   |---|---|
+   | merge (flush bucket segments + fold pending-ambiguous) | 14.56 s |
+   | teardown of the thread's own tables | 11.27 s |
+   | stats add | 0.000018 s |
+   | count add | 0.0096 s |
+
+   Both significant parts are **per-thread work**, which is why the right shape
+   is each thread doing its own as its final act rather than one thread walking
+   all 32 afterwards — the same pattern as the alignQ fix. Do NOT bother with a
+   parallel reduction over the count arrays: that step costs 9 ms.
+
+   The flush split out at 0.069 s, so it was never the cost. The read-identifier
+   tracker is *not* involved either: it is gated on BAM output and these runs
+   use none, so it is never allocated. The 14.56 s is entirely the
+   pending-ambiguous fold, and reading `mergePendingAmbiguous` explains why —
+   each of the 2.6 M entries carries several vectors and two maps, and a key
+   present in more than one thread (the common case for an ambiguous barcode)
+   walks and combines every field.
+
+   **Done: the loop is now parallel** (`#pragma omp parallel for`, fold inside
+   `critical(soloSumThreadsMerge)`, flush and teardown outside). Result: block
+   wall 26 s → 20 s, tail 89 s → 86 s, wall 4:19 → 4:16.50, byte-identical.
+   Less than the ~11 s hoped, and the reason is worth knowing: with 32 threads
+   freeing large structures concurrently, allocator and memory-bandwidth
+   contention slowed the serialized fold itself from 14.6 s to 19.1 s of
+   thread-summed time. The teardown now hides behind the fold, so the fold is
+   the floor.
+
+   **Done, and it went further than sharding the fold.** If the accumulation is
+   striped anyway, there is no reason to keep it per thread: both flex write
+   sites now take a handle into a shared 256-way striped store, holding that
+   stripe's lock for the entry update. A barcode seen by twenty threads is
+   combined once, in one place, so the fold does not get faster — it stops
+   existing. `sumThreads` then *adopts* the stripes by moving entries into the
+   master.
+
+   | step | before | after |
+   |---|---|---|
+   | fold | 14.6 s | 0.00006 s |
+   | teardown | 11.3 s | 0.00003 s (thread maps are empty) |
+   | adopt shared (new) | — | 1.64 s (2,627,928 entries) |
+   | flush | 0.07 s | 0.87 s |
+   | **block wall** | **26 s** | **~2.5 s** |
+
+   Tail 86 s → 74 s, wall 4:16.50 → 4:05.11, CPU 2002% → 2123%,
+   outputs byte-identical.
+
+   **Mapping did not move: 150 s before and after.** That was the live risk —
+   striping puts a lock on a path inside mapping, and the worry was that it
+   would cost more in locality than it saved in the tail. It did not, because
+   the lock is on the *ambiguous* path (a few million updates over 150 s across
+   256 stripes), not the read path. Contrast the sample-token mutex in fix A:
+   one mutex, 1.7 billion acquisitions. Rate and striping are what separate a
+   safe shared structure from a catastrophic one.
+
+   Enabled only for the fused Flex path (`sharedAmbigEnable` in
+   `mapThreadsSpawn.cpp`); the staged pipeline keeps per-thread maps and its
+   existing merge. The adopt step **exits** if a key is already present in the
+   destination, which would mean both accumulation paths ran; silently keeping
+   one side would corrupt counts.
+
+   Three different risk levels, and they should not be treated alike:
+   - **Teardown, 11.3 s, zero risk.** Freeing a thread's own tables touches
+     nothing shared and has no ordering. Move it into the thread's exit.
+   - **Bucket-segment flush, no shared-master contact.** Goes to the bucket
+     store's per-bucket locks. Also movable. Timed separately now.
+   - **Pending-ambiguous fold, order-sensitive.** Folding in thread-completion
+     order is nondeterministic, and the merged table is later iterated by
+     `resolvePendingAmbiguousToHash`. If any tie-break there depends on
+     iteration order, outputs move. Either keep this in fixed thread order, or
+     move it and *prove* byte-identity with the manifest check — do not assume.
+
+   File: `core/legacy/source/SoloFeature_sumThreads.cpp`. Removing this block
+   takes the tail from 89 s toward 65 s and the wall from 4:19 to about 3:55.
 
 2. **Bucket collapse, 30 s, already on 32 threads.** Profile says ~24% is
    `__introsort_loop` over `PackedCbRecord` and ~11% `UMICorrector::findNeighbors`.

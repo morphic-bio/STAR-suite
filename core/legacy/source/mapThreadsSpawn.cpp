@@ -642,6 +642,13 @@ void runFlexNoGenomeCountOnly(Parameters &P) {
         P.inOut->logMain << std::flush;
     }
 
+    // Accumulate ambiguous barcodes into one striped store rather than per
+    // thread. Each barcode is then combined in a single place during mapping,
+    // instead of being reconciled field by field afterwards, which was the
+    // largest serial block in the Flex tail. Only for this fused path; the
+    // staged pipeline keeps per-thread maps and its existing merge.
+    SoloReadFeature::sharedAmbigEnable(P.pSolo.inlineHashMode && P.pSolo.flexMode);
+
     std::vector<SoloReadFeature *> fusedFeats(nFusedThreads, nullptr);
     std::vector<Stats> fusedStats(nFusedThreads);
     std::vector<pthread_t> fusedThreads(nFusedThreads);

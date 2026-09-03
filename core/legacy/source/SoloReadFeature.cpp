@@ -664,3 +664,88 @@ void SoloReadFeature::maybeSpillBinarySpool(size_t extraBytes)
                      << (binarySpoolMemoryLimitBytes / (1024ull * 1024ull))
                      << " MiB per-thread limit" << endl;
 }
+
+// ---------------------------------------------------------------------------
+// Shared sharded ambiguous-barcode accumulation.
+//
+// See the comment on SoloReadFeature::AmbigShard. One striped structure that
+// every fused thread writes into, so an ambiguous barcode seen by many threads
+// is accumulated in one place instead of being reconciled field by field
+// afterwards. Enabled only for the fused Flex path that has the expensive fold.
+// ---------------------------------------------------------------------------
+namespace {
+SoloReadFeature::AmbigShard g_ambigShards[SoloReadFeature::kAmbigShardCount];
+bool g_ambigSharedActive = false;
+
+inline size_t ambigShardIndex(ReadAlign::AmbigKey key)
+{
+    // The key is already a hash of the CB sequence; mix once more so the low
+    // bits used for striping are well distributed.
+    uint64_t h = key;
+    h ^= h >> 33;
+    h *= 0xff51afd7ed558ccdULL;
+    h ^= h >> 33;
+    return static_cast<size_t>(h & (SoloReadFeature::kAmbigShardCount - 1));
+}
+} // namespace
+
+bool SoloReadFeature::sharedAmbigActive()
+{
+    return g_ambigSharedActive;
+}
+
+void SoloReadFeature::sharedAmbigEnable(bool on)
+{
+    g_ambigSharedActive = on;
+}
+
+SoloReadFeature::AmbigEntryRef SoloReadFeature::sharedAmbigEntry(ReadAlign::AmbigKey key)
+{
+    AmbigShard &shard = g_ambigShards[ambigShardIndex(key)];
+    AmbigEntryRef ref;
+    ref.lock = std::unique_lock<std::mutex>(shard.mutex);
+    ref.entry = &shard.map[key];
+    return ref;
+}
+
+size_t SoloReadFeature::sharedAmbigSize()
+{
+    size_t total = 0;
+    for (size_t ii = 0; ii < kAmbigShardCount; ++ii) {
+        std::lock_guard<std::mutex> lock(g_ambigShards[ii].mutex);
+        total += g_ambigShards[ii].map.size();
+    }
+    return total;
+}
+
+void SoloReadFeature::sharedAmbigDrainInto(
+    std::unordered_map<ReadAlign::AmbigKey, ExtendedAmbiguousEntry> &dest)
+{
+    // Stripes are disjoint by key, so this is a move of already-accumulated
+    // entries: no field-wise reconciliation, which is the whole point.
+    size_t total = 0;
+    for (size_t ii = 0; ii < kAmbigShardCount; ++ii)
+        total += g_ambigShards[ii].map.size();
+    if (total == 0)
+        return;
+    dest.reserve(dest.size() + total);
+    for (size_t ii = 0; ii < kAmbigShardCount; ++ii) {
+        auto &src = g_ambigShards[ii].map;
+        for (auto &kv : src) {
+            const auto inserted = dest.emplace(kv.first, std::move(kv.second));
+            if (!inserted.second) {
+                // Unreachable by construction: when the shared store is active
+                // it is the only writer, so the per-thread maps are empty and
+                // `dest` cannot already hold this key. Reconciling here would
+                // need the field-wise merge, and silently keeping one side
+                // would corrupt counts, so fail rather than guess.
+                std::cerr << "EXITING because a shared ambiguous-barcode key was "
+                             "already present during drain (key "
+                          << kv.first << "); per-thread and shared accumulation "
+                             "must not both be active\n";
+                exit(EXIT_CODE_INCONSISTENT_DATA);
+            }
+        }
+        decltype(g_ambigShards[ii].map)().swap(src);
+    }
+}

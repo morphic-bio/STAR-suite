@@ -8,6 +8,8 @@
 #include "ErrorWarning.h"
 #include "hash_shims_cpp_compat.h"
 #include <algorithm>
+#include <chrono>
+#include <omp.h>
 #include <cstring>
 #include <fstream>
 #include <limits>
@@ -409,30 +411,90 @@ void SoloFeature::sumThreads()
         readFeatSum->bridgeAmbigReadInfoOrphan_.reserve(orphanN);
     }
 
+    // This loop is serial and is the largest single serial block in the Flex
+    // tail (~26 s on the 2.0 B-read JAX set). Time its parts so a redesign
+    // targets the part that actually costs, not the part that looks expensive.
+    // See docs/HANDOFF_FLEX_PERF_20260903.md.
+    double sumThreadsFlushSec = 0.0, sumThreadsMergeSec = 0.0, sumThreadsStatsSec = 0.0;
+    double sumThreadsCountsSec = 0.0, sumThreadsReleaseSec = 0.0;
+    auto sumThreadsTick = [](std::chrono::steady_clock::time_point &mark) {
+        const auto now = std::chrono::steady_clock::now();
+        const double elapsed = std::chrono::duration<double>(now - mark).count();
+        mark = now;
+        return elapsed;
+    };
+
+    // Measured split of this loop on the JAX set (2.0 B reads, 32 threads):
+    // fold 14.6 s, teardown 11.3 s, flush 0.07 s, stats and counts under 10 ms.
+    // The fold touches the shared master and stays serialized; the flush and the
+    // teardown are thread-local and now run concurrently. Fold order does not
+    // affect results - UMI resolution is order-independent by construction, and
+    // ranges are already claimed dynamically so the order varied run to run
+    // before this change too.
+    // Adopt the shared striped ambiguous store first. Entries there are already
+    // fully accumulated across threads, so this is a move, not a reconciliation,
+    // and the per-thread maps are empty when it is active.
+    if (SoloReadFeature::sharedAmbigActive() && readFeatSum != nullptr) {
+        const auto adoptStart = std::chrono::steady_clock::now();
+        const size_t sharedN = SoloReadFeature::sharedAmbigSize();
+        SoloReadFeature::sharedAmbigDrainInto(readFeatSum->pendingAmbiguous_);
+        P.inOut->logMain << "Solo timing: sumThreads adopt shared ambiguous "
+                         << std::chrono::duration<double>(
+                                std::chrono::steady_clock::now() - adoptStart).count()
+                         << " s (" << sharedN << " entries)" << endl << std::flush;
+    }
+
+    const int sumThreadsPar = std::max(1, P.runThreadN);
+    #pragma omp parallel for schedule(dynamic, 1) num_threads(sumThreadsPar) \
+        reduction(+:sumThreadsFlushSec, sumThreadsMergeSec, sumThreadsStatsSec, \
+                    sumThreadsCountsSec, sumThreadsReleaseSec)
     for (int ii=0; ii<P.runThreadN; ii++) {
+        auto mark = std::chrono::steady_clock::now();
         readFeatAll[ii]->setOwner(this);
         if (readFeatAll[ii]->streamReads) {
             readFeatAll[ii]->streamReads->flush();
         }
-        
-        // Merge inline hash if enabled
-        if (pSolo.inlineHashMode) {
-            if (nonFlexDirectBridge) {
-                // Keep the bulky non-ambiguous thread-local hashes for direct draining later;
-                // merge only the smaller ambiguous/deferred sidecars into readFeatSum.
-                readFeatSum->mergePendingAmbiguous(*readFeatAll[ii]);
-            } else {
-                readFeatSum->mergeInlineHash(*readFeatAll[ii]);
-            }
-            readFeatSum->addStats(*readFeatAll[ii]);
-        }
-        
-        readFeatSum->addCounts(*readFeatAll[ii]);
 
+        // Flushing this thread's remaining bucket segments is thread-local work
+        // that goes to the bucket store's own per-bucket locks, never to the
+        // shared master, so it could move into the thread's own exit path.
+        // mergeInlineHash calls it too; the second call is a no-op. Timed apart
+        // so the movable part is separated from the order-sensitive fold.
+        readFeatAll[ii]->flushBucketSegments();
+        sumThreadsFlushSec += sumThreadsTick(mark);
+
+        // Everything that writes the shared master is serialized here.
+        #pragma omp critical(soloSumThreadsMerge)
+        {
+            auto markShared = std::chrono::steady_clock::now();
+            if (pSolo.inlineHashMode) {
+                if (nonFlexDirectBridge) {
+                    // Keep the bulky non-ambiguous thread-local hashes for direct draining later;
+                    // merge only the smaller ambiguous/deferred sidecars into readFeatSum.
+                    readFeatSum->mergePendingAmbiguous(*readFeatAll[ii]);
+                } else {
+                    readFeatSum->mergeInlineHash(*readFeatAll[ii]);
+                }
+                sumThreadsMergeSec += sumThreadsTick(markShared);
+                readFeatSum->addStats(*readFeatAll[ii]);
+                sumThreadsStatsSec += sumThreadsTick(markShared);
+            }
+            readFeatSum->addCounts(*readFeatAll[ii]);
+            sumThreadsCountsSec += sumThreadsTick(markShared);
+        }
+        mark = std::chrono::steady_clock::now();
+
+        // Thread-local teardown: no shared state, so it runs outside the lock.
         if (pSolo.inlineHashMode) {
             releaseMergedThreadState(readFeatAll[ii], nonFlexDirectBridge);
+            sumThreadsReleaseSec += sumThreadsTick(mark);
         }
-    };       
+    };
+    P.inOut->logMain << "Solo timing: sumThreads flush " << sumThreadsFlushSec
+                     << " s, merge " << sumThreadsMergeSec
+                     << " s, stats " << sumThreadsStatsSec
+                     << " s, counts " << sumThreadsCountsSec
+                     << " s, release " << sumThreadsReleaseSec << " s" << endl << std::flush;
     
     // if WL was not defined
     if (!pSolo.cbWLyes) {//now we can define WL and counts ??? we do not need to do it for every feature???
