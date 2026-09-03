@@ -335,7 +335,16 @@ static void accumulateAmbiguousCBForFlex(SoloReadFeature *soloReadFeat, SoloRead
 
     uint32_t umi24 = soloBar.umiB & 0xFFFFFF;
     ReadAlign::AmbigKey ambigKey = ReadAlign::hashCbSeq(soloBar.cbMatchString);
-    auto &entry = soloReadFeat->pendingAmbiguous_[ambigKey];
+    // Accumulate into the shared striped store when it is active, so an
+    // ambiguous barcode seen by several threads is combined here rather than
+    // reconciled field by field in sumThreads. The handle holds the stripe lock
+    // for the whole update below.
+    SoloReadFeature::AmbigEntryRef sharedRef;
+    const bool useShared = SoloReadFeature::sharedAmbigActive();
+    if (useShared)
+        sharedRef = SoloReadFeature::sharedAmbigEntry(ambigKey);
+    SoloReadFeature::ExtendedAmbiguousEntry &entry =
+        useShared ? *sharedRef : soloReadFeat->pendingAmbiguous_[ambigKey];
 
     if (entry.candidateIdx.empty()) {
         entry.candidateIdx.reserve(soloBar.cbMatchInd.size());
@@ -1154,8 +1163,13 @@ uint32 outputReadCB_flex(fstream *streamOut, const uint64 iRead, const int32 fea
         // Ambiguous CB: accumulate for resolution with gene/tag/umi info
         uint32_t umi24 = soloBar.umiB & 0xFFFFFF;
         ReadAlign::AmbigKey ambigKey = ReadAlign::hashCbSeq(soloBar.cbMatchString);
-        auto &entry = soloReadFeat->pendingAmbiguous_[ambigKey];
-        
+        SoloReadFeature::AmbigEntryRef sharedRef;
+        const bool useShared = SoloReadFeature::sharedAmbigActive();
+        if (useShared)
+            sharedRef = SoloReadFeature::sharedAmbigEntry(ambigKey);
+        SoloReadFeature::ExtendedAmbiguousEntry &entry =
+            useShared ? *sharedRef : soloReadFeat->pendingAmbiguous_[ambigKey];
+
         if (entry.candidateIdx.empty()) {
             // First time seeing this ambiguous CB: initialize candidates
             entry.candidateIdx.reserve(soloBar.cbMatchInd.size());

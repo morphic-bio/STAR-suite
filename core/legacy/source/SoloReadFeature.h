@@ -3,6 +3,7 @@
 #include <set>
 #include <map>
 #include <unordered_map>
+#include <mutex>
 #include "IncludeDefine.h"
 #include "Parameters.h"
 #include "Transcript.h"
@@ -88,6 +89,37 @@ public:
         std::vector<uint8_t> bridgeAmbigPinCandQuals_;
     };
     std::unordered_map<ReadAlign::AmbigKey, ExtendedAmbiguousEntry> pendingAmbiguous_; // Ambiguous CB accumulation with gene/tag info
+
+    // Shared sharded accumulation for ambiguous barcodes (fused Flex).
+    //
+    // Accumulating these per thread meant every ambiguous barcode seen by more
+    // than one thread had to be reconciled field by field afterwards, and that
+    // fold was the single largest serial block in the Flex tail: 14.6 s on the
+    // 2.0 B-read JAX set, with each of 2.6 M entries carrying several vectors
+    // and two maps. Accumulating into one striped structure instead means each
+    // barcode is only ever touched in one place, so there is nothing to
+    // reconcile. Safe because the update rate is per *ambiguous* read rather
+    // than per read, spread over 256 stripes, and because UMI resolution does
+    // not depend on the order observations arrive.
+    struct AmbigShard {
+        std::mutex mutex;
+        std::unordered_map<ReadAlign::AmbigKey, ExtendedAmbiguousEntry> map;
+    };
+    static const size_t kAmbigShardCount = 256;
+
+    // Locked handle: hold it for the duration of one entry's update.
+    struct AmbigEntryRef {
+        std::unique_lock<std::mutex> lock;
+        ExtendedAmbiguousEntry *entry = nullptr;
+        ExtendedAmbiguousEntry &operator*() const { return *entry; }
+    };
+    static AmbigEntryRef sharedAmbigEntry(ReadAlign::AmbigKey key);
+    static bool sharedAmbigActive();
+    static void sharedAmbigEnable(bool on);
+    /** Move the shared stripes into `dest`; leaves the stripes empty. */
+    static void sharedAmbigDrainInto(
+        std::unordered_map<ReadAlign::AmbigKey, ExtendedAmbiguousEntry> &dest);
+    static size_t sharedAmbigSize();
 
     // Aggregated readInfo-only ambiguous CB state (not yet in pendingAmbiguous_; merged on first gene hit)
     struct BridgeAmbigReadInfoOrphanEntry {
