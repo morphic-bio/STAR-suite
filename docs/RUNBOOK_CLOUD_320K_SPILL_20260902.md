@@ -131,8 +131,13 @@ counter deltas instead. Ship logs/times/md5s/Log.out/preflight (not matrices) to
 The whole instance session is scripted at
 `docs/benchmarks/cloud_320k/run_cloud_320k_matrix.sh` — parameterized by
 `STAGING_BUCKET`, `RELEASE_TAG`, `BINARY_ASSET` (plus `RUN_SPILL=1`,
-`SKIP_CELLRANGER=1`), resumable via step markers, results accumulated in a TSV,
-output-identity checks and result shipping included. That script is what gets
+`SKIP_CELLRANGER=1`, `RETRY_FAILED=1`), resumable via step markers, results
+accumulated in a TSV, output-identity checks and result shipping included. It is
+fail-closed: every arm verifies its own outputs (16 per-sample results), a failed
+arm blocks whatever depends on it and is not retried automatically, a failed Cell
+Ranger run keeps its pipestance so the logs survive, partial CBQ encodes are
+deleted rather than passed downstream, and the script exits nonzero unless every
+arm is verified. Run it inside tmux or nohup so an SSH drop cannot kill a run. That script is what gets
 committed at release and archived on Zenodo: the paper's "commands are in the
 repository" points at it, and the reproducibility demonstration is literally
 `bash run_cloud_320k_matrix.sh` on a fresh instance. This document is its
