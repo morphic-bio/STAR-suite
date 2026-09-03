@@ -69,6 +69,28 @@ record() { # name status timefile
   aws s3 cp "$RESULTS" "$STAGING_BUCKET/progress/results.tsv" --only-show-errors 2>/dev/null || true
 }
 
+# Scratch high-water sampling: cheap df deltas, so a run's disk appetite is
+# measured rather than inferred. Sampling costs no I/O against the data.
+disk_sample_start() { # name -> pid on stdout
+  local name=$1
+  ( local base cur
+    base=$(df --output=used -B1 "$S" 2>/dev/null | tail -1 | tr -d ' ')
+    printf 'utc\tused_bytes\tdelta_bytes\n' > "$R/$name.disk.tsv"
+    while :; do
+      cur=$(df --output=used -B1 "$S" 2>/dev/null | tail -1 | tr -d ' ')
+      printf '%s\t%s\t%s\n' "$(date -u +%FT%TZ)" "$cur" "$((cur-base))" >> "$R/$name.disk.tsv"
+      sleep 300
+    done ) >/dev/null 2>&1 &
+  echo $!
+}
+disk_sample_stop() { # pid name
+  kill "$1" 2>/dev/null
+  local gib
+  gib=$(awk -F'\t' 'NR>1 && $3>m {m=$3} END {printf "%.1f", m/1073741824}' "$R/$2.disk.tsv" 2>/dev/null)
+  echo "${gib:-NA}" > "$R/$2.peak_disk_gib"
+  log "$2 scratch high-water: ${gib:-NA} GiB above baseline"
+}
+
 count_dirs() { find "$1" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | wc -l; }
 count_h5ad() { find "$1" -maxdepth 1 -name '*.filt.h5ad' 2>/dev/null | wc -l; }
 
@@ -188,10 +210,12 @@ star_run() { # name extra-args...
   local name=$1 st n; shift
   runnable "$name" || return 0
   mkdir -p $R/$name; cold
+  local sampler; sampler=$(disk_sample_start "$name")
   /usr/bin/time -v -o $R/$name.time $S/tools/STAR "${common[@]}" "$@" \
     --soloFlexOutputPrefix $R/$name/per_sample --outFileNamePrefix $R/$name/ \
     > $R/$name.stdout 2> $R/$name.stderr
   st=$?
+  disk_sample_stop "$sampler" "$name"
   if [ $st -ne 0 ]; then
     record "$name" "exit=$st" "$R/$name.time"
     fail "$name" "STAR exited $st (see $R/$name.stderr)"; return 0
@@ -242,10 +266,13 @@ if [ "$SKIP_CELLRANGER" != 1 ] && runnable cellranger; then
       -e "s|,/mnt/pikachu/tenx_320k_scFFPE/320k_scFFPE_16-plex_GEM-X_FLEX_fastqs|,$S/fastqs|" \
       -e "s|,/home/lhhung/stage_320k_fastq|,$S/fastqs|" \
       $S/refs/benchmark_cr9_320k_config.csv > $R/cr9_config.csv
+  cr_sampler=$(disk_sample_start cellranger)
   ( cd $R && cold && /usr/bin/time -v -o $R/cellranger.time \
       $S/cellranger-9.0.1/cellranger multi --id=cr9_320k --csv=$R/cr9_config.csv \
       --localcores=32 --localmem=200 > $R/cellranger.stdout 2> $R/cellranger.stderr )
   st=$?
+  disk_sample_stop "$cr_sampler" cellranger
+  du -sB1 $R/cr9_320k 2>/dev/null | cut -f1 > $R/cellranger.pipestance_bytes || true
   if [ $st -ne 0 ]; then
     record cellranger "exit=$st" "$R/cellranger.time"
     # Keep the pipestance intact: its _errors/_log are the only failure evidence.
@@ -332,6 +359,9 @@ done
 
 # ---------- Ship and report ----------
 log "matrix finished; results table:"; column -t "$RESULTS"
+for f in $R/*.peak_disk_gib; do
+  [ -f "$f" ] && log "scratch high-water $(basename "$f" .peak_disk_gib): $(cat "$f") GiB"
+done
 PREFIX="$STAGING_BUCKET/results-$(date -u +%Y%m%dT%H%M%SZ)"
 if aws s3 sync $R "$PREFIX" \
      --exclude "*/per_sample/*" --exclude "*/bucket_spill/*" \
