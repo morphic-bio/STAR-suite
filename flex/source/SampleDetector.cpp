@@ -8,7 +8,7 @@
 // Global canonical tag table (1-based; index 0 unused)
 std::vector<std::string> gCanonicalTags;
 
-std::array<uint16_t, 32> SampleDetector::tokenToSampleIdx_ = {};
+std::array<std::atomic<uint16_t>, 32> SampleDetector::tokenToSampleIdx_{};
 std::mutex SampleDetector::tokenLUTMutex_;
 std::vector<std::string> SampleDetector::canonicalByIdx_;
 std::vector<std::string> SampleDetector::labelsByIdx_;
@@ -29,10 +29,18 @@ void SampleDetector::registerSampleToken(uint8_t token, uint16_t sampleIdx) {
     if (token == 0 || token >= tokenToSampleIdx_.size() || sampleIdx == 0) {
         return;
     }
+    // This is called from detectSampleFromPackedTag on every read that carries
+    // a sample tag, by every fused thread. The table is written at most once
+    // per token, so check without the lock first: taking the process-wide
+    // mutex here cost ~30% of all CPU on a 32-thread Flex run (kernel futex
+    // spinlock) for a store that had already happened.
+    std::atomic<uint16_t> &slot = tokenToSampleIdx_[token];
+    if (slot.load(std::memory_order_relaxed) != 0) {
+        return;
+    }
     std::lock_guard<std::mutex> lock(tokenLUTMutex_);
-    uint16_t &slot = tokenToSampleIdx_[token];
-    if (slot == 0) {
-        slot = sampleIdx;
+    if (slot.load(std::memory_order_relaxed) == 0) {
+        slot.store(sampleIdx, std::memory_order_relaxed);
     }
 }
 
@@ -40,7 +48,7 @@ uint16_t SampleDetector::sampleIndexForToken(uint8_t token) {
     if (token >= tokenToSampleIdx_.size()) {
         return 0;
     }
-    return tokenToSampleIdx_[token];
+    return tokenToSampleIdx_[token].load(std::memory_order_relaxed);
 }
 
 bool SampleDetector::loadWhitelist(const std::string &path) {

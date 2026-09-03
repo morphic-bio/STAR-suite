@@ -1,0 +1,277 @@
+STAR-suite version=1.8.1
+STAR upstream version=2.7.11b
+STAR genome compatibility version=2.7.4a
+STAR-suite source revision=dc3aa38374fa0986ff7e38fe028847ae0f50ddbd-dirty
+STAR compilation time,server,dir=2026-09-03T14:41:19+00:00 :/mnt/pikachu/STAR-suite/core/legacy/source
+STAR git: On branch master ; commit dc3aa38374fa0986ff7e38fe028847ae0f50ddbd ; diff files: core/legacy/source/mapThreadsSpawn.cpp 
+##### Command Line:
+/mnt/pikachu/STAR-suite/core/legacy/source/STAR --runThreadN 32 --genomeDir /home/lhhung/jax_stage_20260903/ref/star_index --soloType CB_UMI_Simple --soloCBstart 1 --soloUMIstart 17 --soloCBlen 16 --soloUMIlen 12 --soloBarcodeReadLength 0 --soloCBwhitelist /home/lhhung/jax_stage_20260903/ref/737K-fixed-rna-profiling.txt --flex yes --soloFlexExpectedCellsPerTag 3000 --soloSampleWhitelist /home/lhhung/jax_stage_20260903/ref/sample_whitelist_full_16.tsv --soloProbeList /home/lhhung/jax_stage_20260903/ref/star_index/flex_probe_artifacts/probe_list.txt --soloSampleProbes /home/lhhung/jax_stage_20260903/ref/probe-barcodes-fixed-rna-profiling-rna.txt --soloSampleProbeOffset 68 --soloFlexAllowedTags /home/lhhung/jax_stage_20260903/ref/sample_whitelist_full_16.tsv --soloFlexOutputPrefix /home/lhhung/jax_matrix_20260903/cbq_noalign_rep1_20260903T171600Z/per_sample --limitIObufferSize 50000000 50000000 --outSJtype None --outSAMtype None --outSAMattributes None --soloFeatures Gene --soloCellFilter None --soloMultiMappers Rescue --soloCBmatchWLtype 1MM_multi_Nbase_pseudocounts --soloUMIfiltering MultiGeneUMI_CR --soloUMIdedup 1MM_CR --soloStrand Unstranded --clipAdapterType CellRanger4 --alignEndsType Local --chimSegmentMin 0 --soloKeysCompat cr --soloSampleSearchNearby no --soloHashScreenFile /home/lhhung/jax_stage_20260903/ref/h01_cache.bin --soloBucketMode ram --soloBucketCount 256 --flexPipeline yes --flexPipelineNTriage 0 --flexPipelineNSolo 0 --flexNoAlign 1 --dynamicThreadInterface 1 --crAssignConsumerThreads -1 --crAssignSearchThreads 1 --outFileNamePrefix /home/lhhung/jax_matrix_20260903/cbq_noalign_rep1_20260903T171600Z/ --readFilesType Binseq PE --readFilesCbqRangeMode range --readFilesIn /home/lhhung/jax_stage_20260903/cbq/lane_000.cbq,/home/lhhung/jax_stage_20260903/cbq/lane_001.cbq,/home/lhhung/jax_stage_20260903/cbq/lane_002.cbq,/home/lhhung/jax_stage_20260903/cbq/lane_003.cbq,/home/lhhung/jax_stage_20260903/cbq/lane_004.cbq,/home/lhhung/jax_stage_20260903/cbq/lane_005.cbq,/home/lhhung/jax_stage_20260903/cbq/lane_006.cbq,/home/lhhung/jax_stage_20260903/cbq/lane_007.cbq
+##### Initial USER parameters from Command Line:
+outFileNamePrefix                 /home/lhhung/jax_matrix_20260903/cbq_noalign_rep1_20260903T171600Z/
+###### All USER parameters from Command Line:
+runThreadN                    32     ~RE-DEFINED
+genomeDir                     /home/lhhung/jax_stage_20260903/ref/star_index     ~RE-DEFINED
+soloType                      CB_UMI_Simple     ~RE-DEFINED
+soloCBstart                   1     ~RE-DEFINED
+soloUMIstart                  17     ~RE-DEFINED
+soloCBlen                     16     ~RE-DEFINED
+soloUMIlen                    12     ~RE-DEFINED
+soloBarcodeReadLength         0     ~RE-DEFINED
+soloCBwhitelist               /home/lhhung/jax_stage_20260903/ref/737K-fixed-rna-profiling.txt        ~RE-DEFINED
+flex                          yes     ~RE-DEFINED
+soloFlexExpectedCellsPerTag   3000     ~RE-DEFINED
+soloSampleWhitelist           /home/lhhung/jax_stage_20260903/ref/sample_whitelist_full_16.tsv     ~RE-DEFINED
+soloProbeList                 /home/lhhung/jax_stage_20260903/ref/star_index/flex_probe_artifacts/probe_list.txt     ~RE-DEFINED
+soloSampleProbes              /home/lhhung/jax_stage_20260903/ref/probe-barcodes-fixed-rna-profiling-rna.txt     ~RE-DEFINED
+soloSampleProbeOffset         68     ~RE-DEFINED
+soloFlexAllowedTags           /home/lhhung/jax_stage_20260903/ref/sample_whitelist_full_16.tsv     ~RE-DEFINED
+soloFlexOutputPrefix          /home/lhhung/jax_matrix_20260903/cbq_noalign_rep1_20260903T171600Z/per_sample     ~RE-DEFINED
+limitIObufferSize             50000000   50000000        ~RE-DEFINED
+outSJtype                     None        ~RE-DEFINED
+outSAMtype                    None        ~RE-DEFINED
+outSAMattributes              None        ~RE-DEFINED
+soloFeatures                  Gene        ~RE-DEFINED
+soloCellFilter                None        ~RE-DEFINED
+soloMultiMappers              Rescue        ~RE-DEFINED
+soloCBmatchWLtype             1MM_multi_Nbase_pseudocounts     ~RE-DEFINED
+soloUMIfiltering              MultiGeneUMI_CR        ~RE-DEFINED
+soloUMIdedup                  1MM_CR        ~RE-DEFINED
+soloStrand                    Unstranded     ~RE-DEFINED
+clipAdapterType               CellRanger4        ~RE-DEFINED
+alignEndsType                 Local     ~RE-DEFINED
+chimSegmentMin                0     ~RE-DEFINED
+soloKeysCompat                cr     ~RE-DEFINED
+soloSampleSearchNearby        no     ~RE-DEFINED
+soloHashScreenFile            /home/lhhung/jax_stage_20260903/ref/h01_cache.bin     ~RE-DEFINED
+soloBucketMode                ram     ~RE-DEFINED
+soloBucketCount               256     ~RE-DEFINED
+flexPipeline                  yes     ~RE-DEFINED
+flexPipelineNTriage           0     ~RE-DEFINED
+flexPipelineNSolo             0     ~RE-DEFINED
+flexNoAlign                   1     ~RE-DEFINED
+dynamicThreadInterface        1     ~RE-DEFINED
+crAssignConsumerThreads       -1     ~RE-DEFINED
+crAssignSearchThreads         1     ~RE-DEFINED
+outFileNamePrefix             /home/lhhung/jax_matrix_20260903/cbq_noalign_rep1_20260903T171600Z/     ~RE-DEFINED
+readFilesType                 Binseq   PE        ~RE-DEFINED
+readFilesCbqRangeMode         range     ~RE-DEFINED
+readFilesIn                   /home/lhhung/jax_stage_20260903/cbq/lane_000.cbq,/home/lhhung/jax_stage_20260903/cbq/lane_001.cbq,/home/lhhung/jax_stage_20260903/cbq/lane_002.cbq,/home/lhhung/jax_stage_20260903/cbq/lane_003.cbq,/home/lhhung/jax_stage_20260903/cbq/lane_004.cbq,/home/lhhung/jax_stage_20260903/cbq/lane_005.cbq,/home/lhhung/jax_stage_20260903/cbq/lane_006.cbq,/home/lhhung/jax_stage_20260903/cbq/lane_007.cbq        ~RE-DEFINED
+##### Finished reading parameters from all sources
+
+##### Final user re-defined parameters-----------------:
+runThreadN                        32
+dynamicThreadInterface            1
+genomeDir                         /home/lhhung/jax_stage_20260903/ref/star_index
+readFilesType                     Binseq   PE   
+readFilesIn                       /home/lhhung/jax_stage_20260903/cbq/lane_000.cbq,/home/lhhung/jax_stage_20260903/cbq/lane_001.cbq,/home/lhhung/jax_stage_20260903/cbq/lane_002.cbq,/home/lhhung/jax_stage_20260903/cbq/lane_003.cbq,/home/lhhung/jax_stage_20260903/cbq/lane_004.cbq,/home/lhhung/jax_stage_20260903/cbq/lane_005.cbq,/home/lhhung/jax_stage_20260903/cbq/lane_006.cbq,/home/lhhung/jax_stage_20260903/cbq/lane_007.cbq   
+readFilesCbqRangeMode             range
+limitIObufferSize                 50000000   50000000   
+outFileNamePrefix                 /home/lhhung/jax_matrix_20260903/cbq_noalign_rep1_20260903T171600Z/
+outSAMtype                        None   
+outSAMattributes                  None   
+outSJtype                         None   
+clipAdapterType                   CellRanger4   
+alignEndsType                     Local
+chimSegmentMin                    0
+soloType                          CB_UMI_Simple
+soloCBstart                       1
+soloUMIstart                      17
+soloCBlen                         16
+soloUMIlen                        12
+soloBarcodeReadLength             0
+soloCBwhitelist                   /home/lhhung/jax_stage_20260903/ref/737K-fixed-rna-profiling.txt   
+soloStrand                        Unstranded
+soloFeatures                      Gene   
+soloUMIdedup                      1MM_CR   
+soloCBmatchWLtype                 1MM_multi_Nbase_pseudocounts
+soloCellFilter                    None   
+soloUMIfiltering                  MultiGeneUMI_CR   
+soloMultiMappers                  Rescue   
+soloKeysCompat                    cr
+soloProbeList                     /home/lhhung/jax_stage_20260903/ref/star_index/flex_probe_artifacts/probe_list.txt
+soloSampleWhitelist               /home/lhhung/jax_stage_20260903/ref/sample_whitelist_full_16.tsv
+soloSampleProbes                  /home/lhhung/jax_stage_20260903/ref/probe-barcodes-fixed-rna-profiling-rna.txt
+soloSampleProbeOffset             68
+soloSampleSearchNearby            no
+soloBucketMode                    ram
+soloBucketCount                   256
+soloHashScreenFile                /home/lhhung/jax_stage_20260903/ref/h01_cache.bin
+flex                              yes
+flexPipeline                      yes
+flexPipelineNSolo                 0
+flexPipelineNTriage               0
+flexNoAlign                       1
+soloFlexExpectedCellsPerTag       3000
+soloFlexAllowedTags               /home/lhhung/jax_stage_20260903/ref/sample_whitelist_full_16.tsv
+soloFlexOutputPrefix              /home/lhhung/jax_matrix_20260903/cbq_noalign_rep1_20260903T171600Z/per_sample
+crAssignConsumerThreads           -1
+crAssignSearchThreads             1
+
+-------------------------------
+##### Final effective command line:
+/mnt/pikachu/STAR-suite/core/legacy/source/STAR   --runThreadN 32   --dynamicThreadInterface 1   --genomeDir /home/lhhung/jax_stage_20260903/ref/star_index   --readFilesType Binseq   PE      --readFilesIn /home/lhhung/jax_stage_20260903/cbq/lane_000.cbq,/home/lhhung/jax_stage_20260903/cbq/lane_001.cbq,/home/lhhung/jax_stage_20260903/cbq/lane_002.cbq,/home/lhhung/jax_stage_20260903/cbq/lane_003.cbq,/home/lhhung/jax_stage_20260903/cbq/lane_004.cbq,/home/lhhung/jax_stage_20260903/cbq/lane_005.cbq,/home/lhhung/jax_stage_20260903/cbq/lane_006.cbq,/home/lhhung/jax_stage_20260903/cbq/lane_007.cbq      --readFilesCbqRangeMode range   --limitIObufferSize 50000000   50000000      --outFileNamePrefix /home/lhhung/jax_matrix_20260903/cbq_noalign_rep1_20260903T171600Z/   --outSAMtype None      --outSAMattributes None      --outSJtype None      --clipAdapterType CellRanger4      --alignEndsType Local   --chimSegmentMin 0   --soloType CB_UMI_Simple   --soloCBstart 1   --soloUMIstart 17   --soloCBlen 16   --soloUMIlen 12   --soloBarcodeReadLength 0   --soloCBwhitelist /home/lhhung/jax_stage_20260903/ref/737K-fixed-rna-profiling.txt      --soloStrand Unstranded   --soloFeatures Gene      --soloUMIdedup 1MM_CR      --soloCBmatchWLtype 1MM_multi_Nbase_pseudocounts   --soloCellFilter None      --soloUMIfiltering MultiGeneUMI_CR      --soloMultiMappers Rescue      --soloKeysCompat cr   --soloProbeList /home/lhhung/jax_stage_20260903/ref/star_index/flex_probe_artifacts/probe_list.txt   --soloSampleWhitelist /home/lhhung/jax_stage_20260903/ref/sample_whitelist_full_16.tsv   --soloSampleProbes /home/lhhung/jax_stage_20260903/ref/probe-barcodes-fixed-rna-profiling-rna.txt   --soloSampleProbeOffset 68   --soloSampleSearchNearby no   --soloBucketMode ram   --soloBucketCount 256   --soloHashScreenFile /home/lhhung/jax_stage_20260903/ref/h01_cache.bin   --flex yes   --flexPipeline yes   --flexPipelineNSolo 0   --flexPipelineNTriage 0   --flexNoAlign 1   --soloFlexExpectedCellsPerTag 3000   --soloFlexAllowedTags /home/lhhung/jax_stage_20260903/ref/sample_whitelist_full_16.tsv   --soloFlexOutputPrefix /home/lhhung/jax_matrix_20260903/cbq_noalign_rep1_20260903T171600Z/per_sample   --crAssignConsumerThreads -1   --crAssignSearchThreads 1
+----------------------------------------
+
+Number of input files for each source = 8
+CBQ indexed range reader: active with 39 tasks across 8 lanes and 2011130186 records
+WARNING: --soloCbUbRequireTogether is DEPRECATED and will be ignored. CB and UB tags are now always handled independently.
+--flex yes: Enabled Flex pipeline with production defaults
+    soloRunFlexFilter=yes
+    soloInlineCBCorrection=no
+    soloInlineHashMode=yes (enabled)
+    soloFlexMinimalMemory=yes
+    soloMapqMode=off (enum=0)
+    soloMMrateMax=0.1
+    soloBarcodesObservedOnly=yes
+    soloUMICorrection=clique
+Flex gDNA diagnostic: probe metadata loaded from /home/lhhung/jax_stage_20260903/ref/star_index/flex_probe_artifacts/filtered_probe_set.csv (probes=53459, control_genes=5876)
+H0/H1 hash screen: enabled with cache /home/lhhung/jax_stage_20260903/ref/h01_cache.bin (8874194 records, format v2)
+Flex gDNA diagnostic: active H0/H1 cache lacks probe-region metadata; mapping remains enabled but the diagnostic will be reported unavailable
+Flex mode: Using probe list: /home/lhhung/jax_stage_20260903/ref/star_index/flex_probe_artifacts/probe_list.txt
+Number of CBs in the whitelist = 737280
+Flex streaming CB buckets: active (ram, 256 buckets, memory budget 32 GiB)
+Built cbWLhash: 737280 entries, 2097152 buckets
+Initialized CbCorrector with 737280 CBs
+CbCorrector initialization verified: whitelistSize=737280
+Skipping legacy ambiguousCbByKey precompute (set STAR_BUILD_LEGACY_AMBIG_HASH=1 to enable).
+Sep 03 17:16:14 ... Finished reading, sorting and deduplicating CB whitelist sequences.
+clip3pPolyG: auto => enabled
+Finished loading and checking parameters
+Flex count-only no-genome: active
+Flex count-only no-genome: hash cache /home/lhhung/jax_stage_20260903/ref/h01_cache.bin
+Flex pipeline: runThreadN=32, nLanes=8, triage=0 (fully fused + lane steal + role switch), soloConsumers=0, fusedThreads=32, dedicatedWorkers=0, noAlign=ON (alignment skipped), noGenome=ON
+Flex CBQ range: active (39 ranges across 8 lanes and 2011130186 records)
+  32 fused no-genome threads started
+PIPELINE_STATS t=10s total=90728033 keep=75797655 deny=688715 miss=14241663 readerQ=0 soloQ=n/a alignQ=0 delta10s=90728033
+PIPELINE_STATS t=20s total=181977696 keep=151946951 deny=1384673 miss=28646072 readerQ=0 soloQ=n/a alignQ=0 delta10s=91249663
+PIPELINE_STATS t=30s total=273399761 keep=228005116 deny=2091062 miss=43303583 readerQ=0 soloQ=n/a alignQ=0 delta10s=91422065
+PIPELINE_STATS t=40s total=364568710 keep=303916660 deny=2803482 miss=57848569 readerQ=0 soloQ=n/a alignQ=0 delta10s=91168949
+PIPELINE_STATS t=50s total=455452155 keep=379515659 deny=3538864 miss=72397632 readerQ=0 soloQ=n/a alignQ=0 delta10s=90883445
+PIPELINE_STATS t=60s total=546712821 keep=455241667 deny=4292717 miss=87178437 readerQ=0 soloQ=n/a alignQ=0 delta10s=91260666
+PIPELINE_STATS t=70s total=637971122 keep=531394065 deny=5040283 miss=101536774 readerQ=0 soloQ=n/a alignQ=0 delta10s=91258301
+PIPELINE_STATS t=80s total=729504541 keep=607549658 deny=5812091 miss=116142792 readerQ=0 soloQ=n/a alignQ=0 delta10s=91533419
+PIPELINE_STATS t=90s total=820401477 keep=683606398 deny=6535824 miss=130259255 readerQ=0 soloQ=n/a alignQ=0 delta10s=90896936
+PIPELINE_STATS t=100s total=910834228 keep=759323375 deny=7269389 miss=144241464 readerQ=0 soloQ=n/a alignQ=0 delta10s=90432751
+PIPELINE_STATS t=110s total=1001365574 keep=835061225 deny=8014183 miss=158290166 readerQ=0 soloQ=n/a alignQ=0 delta10s=90531346
+PIPELINE_STATS t=120s total=1092248861 keep=910942993 deny=8743315 miss=172562553 readerQ=0 soloQ=n/a alignQ=0 delta10s=90883287
+PIPELINE_STATS t=130s total=1182704852 keep=986805129 deny=9467815 miss=186431908 readerQ=0 soloQ=n/a alignQ=0 delta10s=90455991
+PIPELINE_STATS t=140s total=1272744511 keep=1062424854 deny=10225194 miss=200094463 readerQ=0 soloQ=n/a alignQ=0 delta10s=90039659
+PIPELINE_STATS t=150s total=1362677128 keep=1138029331 deny=10933362 miss=213714435 readerQ=0 soloQ=n/a alignQ=0 delta10s=89932617
+PIPELINE_STATS t=160s total=1452648631 keep=1213704178 deny=11643964 miss=227300489 readerQ=0 soloQ=n/a alignQ=0 delta10s=89971503
+PIPELINE_STATS t=170s total=1542625112 keep=1289374942 deny=12355075 miss=240895095 readerQ=0 soloQ=n/a alignQ=0 delta10s=89976481
+PIPELINE_STATS t=180s total=1632967539 keep=1365166762 deny=13066124 miss=254734653 readerQ=0 soloQ=n/a alignQ=0 delta10s=90342427
+PIPELINE_STATS t=190s total=1723327254 keep=1441057948 deny=13780079 miss=268489227 readerQ=0 soloQ=n/a alignQ=0 delta10s=90359715
+PIPELINE_STATS t=200s total=1813874395 keep=1516990891 deny=14503732 miss=282379772 readerQ=0 soloQ=n/a alignQ=0 delta10s=90547141
+PIPELINE_STATS t=210s total=1905310561 keep=1593465380 deny=15230964 miss=296614217 readerQ=0 soloQ=n/a alignQ=0 delta10s=91436166
+PIPELINE_STATS t=220s total=1993746191 keep=1667154784 deny=15959816 miss=310631591 readerQ=0 soloQ=n/a alignQ=0 delta10s=88435630
+  All fused no-genome threads joined
+  Stats reporter joined
+Flex pipeline complete: total=2011130186, triageKeep=1681459858, triageDeny=16111757, triageMiss=313558571
+  Lane 0: 251189625 reads
+  Lane 1: 254280823 reads
+  Lane 2: 253814000 reads
+  Lane 3: 254819710 reads
+  Lane 4: 247421226 reads
+  Lane 5: 248719891 reads
+  Lane 6: 249909554 reads
+  Lane 7: 250975357 reads
+Sep 03 17:20:04 ..... finished mapping
+RAM after mapping:
+VmPeak:	41247548 kB; VmSize:	41009864 kB; VmHWM:	39945432 kB; VmRSS:	39945432 kB; 
+Sep 03 17:20:04 ..... started Solo counting
+Sep 03 17:20:04 ... Starting Solo post-map for Gene
+Sep 03 17:20:30 ... Starting bucket-parallel Flex collapse
+[AMBIG-CB-RESOLVE] pending=2627928 resolved=0 still_ambiguous=2627928 added_to_hash=0
+[CB-BUCKET] backend=ram transitioned=no streamed_records=1626999647 aggregated_counts=1626999647 final_molecules=224941678 buckets=256 tail_threads=32
+Found 694308 unique CBs and 98890928 (CB, gene, tag) groups
+Found 1835323 unique (CB, TAG) combinations
+  Genes: 18129, Entries: 98890928
+Solo raw MEX directory directory created: /home/lhhung/jax_matrix_20260903/cbq_noalign_rep1_20260903T171600Z/Solo.out/Gene/raw/
+Sep 03 17:21:02 ... Writing MEX from inline-hash dedup data
+Sep 03 17:21:07 ... Finished writing MEX format:
+  /home/lhhung/jax_matrix_20260903/cbq_noalign_rep1_20260903T171600Z/Solo.out/Gene/raw/matrix.mtx
+  /home/lhhung/jax_matrix_20260903/cbq_noalign_rep1_20260903T171600Z/Solo.out/Gene/raw/barcodes.tsv
+  /home/lhhung/jax_matrix_20260903/cbq_noalign_rep1_20260903T171600Z/Solo.out/Gene/raw/features.tsv
+  Cells (CB+TAG combos): 1835323
+  Features: 18129
+  Entries: 98890928
+FlexFilter output directory directory created: /home/lhhung/jax_matrix_20260903/cbq_noalign_rep1_20260903T171600Z/per_sample/
+Sep 03 17:21:07 ... Running flexfilter inline (in-memory matrix)...
+  Loaded 16 allowed tags with sample labels
+FlexFilter: Using per-tag expected cells: 3000 x 16 tags = 48000 total
+FlexFilter output directory directory exists and will be overwritten: /home/lhhung/jax_matrix_20260903/cbq_noalign_rep1_20260903T171600Z/per_sample/
+Sep 03 17:22:16 ... Flexfilter pipeline complete
+  Processed 16 tags
+  [BC001] Retain=879 SimpleED=879 TailTested=0 ED_Pass=879 OccRemoved=0 Final=879 Expected=4
+FlexFilter filtered MEX directory directory and its parents created: /home/lhhung/jax_matrix_20260903/cbq_noalign_rep1_20260903T171600Z/per_sample/BC001/Gene/filtered/
+  BC001 (ACTTTAGG): 879 cells, 911 entries
+  [BC002] Retain=15299 SimpleED=4024 TailTested=0 ED_Pass=4024 OccRemoved=2 Final=4022 Expected=598
+FlexFilter filtered MEX directory directory and its parents created: /home/lhhung/jax_matrix_20260903/cbq_noalign_rep1_20260903T171600Z/per_sample/BC002/Gene/filtered/
+  BC002 (AACGGGAA): 4022 cells, 142578 entries
+  [BC003] Retain=3345 SimpleED=3345 TailTested=0 ED_Pass=3345 OccRemoved=1 Final=3344 Expected=25
+FlexFilter filtered MEX directory directory and its parents created: /home/lhhung/jax_matrix_20260903/cbq_noalign_rep1_20260903T171600Z/per_sample/BC003/Gene/filtered/
+  BC003 (AGTAGGCT): 3344 cells, 6364 entries
+  [BC004] Retain=120000 SimpleED=0 TailTested=5015 ED_Pass=4385 OccRemoved=2 Final=4383 Expected=8114
+FlexFilter filtered MEX directory directory and its parents created: /home/lhhung/jax_matrix_20260903/cbq_noalign_rep1_20260903T171600Z/per_sample/BC004/Gene/filtered/
+  BC004 (ATGTTGAC): 4383 cells, 14882546 entries
+  [BC005] Retain=3381 SimpleED=3381 TailTested=0 ED_Pass=3381 OccRemoved=1 Final=3380 Expected=24
+FlexFilter filtered MEX directory directory and its parents created: /home/lhhung/jax_matrix_20260903/cbq_noalign_rep1_20260903T171600Z/per_sample/BC005/Gene/filtered/
+  BC005 (ACAGACCT): 3380 cells, 6200 entries
+  [BC006] Retain=120000 SimpleED=0 TailTested=5877 ED_Pass=5286 OccRemoved=2 Final=5284 Expected=9874
+FlexFilter filtered MEX directory directory and its parents created: /home/lhhung/jax_matrix_20260903/cbq_noalign_rep1_20260903T171600Z/per_sample/BC006/Gene/filtered/
+  BC006 (ATCCCAAC): 5284 cells, 17830709 entries
+  [BC007] Retain=120000 SimpleED=0 TailTested=5815 ED_Pass=5385 OccRemoved=2 Final=5383 Expected=14625
+FlexFilter filtered MEX directory directory and its parents created: /home/lhhung/jax_matrix_20260903/cbq_noalign_rep1_20260903T171600Z/per_sample/BC007/Gene/filtered/
+  BC007 (AAGTAGAG): 5383 cells, 26921036 entries
+  [BC008] Retain=120000 SimpleED=0 TailTested=5747 ED_Pass=5268 OccRemoved=2 Final=5266 Expected=14596
+FlexFilter filtered MEX directory directory and its parents created: /home/lhhung/jax_matrix_20260903/cbq_noalign_rep1_20260903T171600Z/per_sample/BC008/Gene/filtered/
+  BC008 (AGCTGTGA): 5266 cells, 24534113 entries
+  [BC009] Retain=1318 SimpleED=1318 TailTested=0 ED_Pass=1318 OccRemoved=1 Final=1317 Expected=6
+FlexFilter filtered MEX directory directory and its parents created: /home/lhhung/jax_matrix_20260903/cbq_noalign_rep1_20260903T171600Z/per_sample/BC009/Gene/filtered/
+  BC009 (ACAGTCTG): 1317 cells, 1525 entries
+  [BC010] Retain=1111 SimpleED=1111 TailTested=0 ED_Pass=1111 OccRemoved=0 Final=1111 Expected=5
+FlexFilter filtered MEX directory directory and its parents created: /home/lhhung/jax_matrix_20260903/cbq_noalign_rep1_20260903T171600Z/per_sample/BC010/Gene/filtered/
+  BC010 (AGTGAGTG): 1111 cells, 1175 entries
+  [BC011] Retain=3951 SimpleED=3951 TailTested=0 ED_Pass=3951 OccRemoved=1 Final=3950 Expected=24
+FlexFilter filtered MEX directory directory and its parents created: /home/lhhung/jax_matrix_20260903/cbq_noalign_rep1_20260903T171600Z/per_sample/BC011/Gene/filtered/
+  BC011 (AGAGGCAA): 3950 cells, 6195 entries
+  [BC012] Retain=526 SimpleED=526 TailTested=0 ED_Pass=526 OccRemoved=0 Final=526 Expected=2
+FlexFilter filtered MEX directory directory and its parents created: /home/lhhung/jax_matrix_20260903/cbq_noalign_rep1_20260903T171600Z/per_sample/BC012/Gene/filtered/
+  BC012 (ACTACTCA): 526 cells, 549 entries
+  [BC013] Retain=5536 SimpleED=5536 TailTested=0 ED_Pass=5536 OccRemoved=2 Final=5534 Expected=62
+FlexFilter filtered MEX directory directory and its parents created: /home/lhhung/jax_matrix_20260903/cbq_noalign_rep1_20260903T171600Z/per_sample/BC013/Gene/filtered/
+  BC013 (ATACGTCA): 5534 cells, 15590 entries
+  [BC014] Retain=1982 SimpleED=1982 TailTested=0 ED_Pass=1982 OccRemoved=1 Final=1981 Expected=9
+FlexFilter filtered MEX directory directory and its parents created: /home/lhhung/jax_matrix_20260903/cbq_noalign_rep1_20260903T171600Z/per_sample/BC014/Gene/filtered/
+  BC014 (ATCATGTG): 1981 cells, 2372 entries
+  [BC015] Retain=2466 SimpleED=2466 TailTested=0 ED_Pass=2466 OccRemoved=2 Final=2464 Expected=11
+FlexFilter filtered MEX directory directory and its parents created: /home/lhhung/jax_matrix_20260903/cbq_noalign_rep1_20260903T171600Z/per_sample/BC015/Gene/filtered/
+  BC015 (AACGCCGA): 2464 cells, 2939 entries
+  [BC016] Retain=3639 SimpleED=3639 TailTested=0 ED_Pass=3639 OccRemoved=2 Final=3637 Expected=21
+FlexFilter filtered MEX directory directory and its parents created: /home/lhhung/jax_matrix_20260903/cbq_noalign_rep1_20260903T171600Z/per_sample/BC016/Gene/filtered/
+  BC016 (ATTCGGTT): 3637 cells, 5393 entries
+Flex gDNA per-sample metrics directory directory exists and will be overwritten: /home/lhhung/jax_matrix_20260903/cbq_noalign_rep1_20260903T171600Z/per_sample/BC001/Gene/filtered/
+Flex gDNA per-sample metrics directory directory exists and will be overwritten: /home/lhhung/jax_matrix_20260903/cbq_noalign_rep1_20260903T171600Z/per_sample/BC002/Gene/filtered/
+Flex gDNA per-sample metrics directory directory exists and will be overwritten: /home/lhhung/jax_matrix_20260903/cbq_noalign_rep1_20260903T171600Z/per_sample/BC003/Gene/filtered/
+Flex gDNA per-sample metrics directory directory exists and will be overwritten: /home/lhhung/jax_matrix_20260903/cbq_noalign_rep1_20260903T171600Z/per_sample/BC004/Gene/filtered/
+Flex gDNA per-sample metrics directory directory exists and will be overwritten: /home/lhhung/jax_matrix_20260903/cbq_noalign_rep1_20260903T171600Z/per_sample/BC005/Gene/filtered/
+Flex gDNA per-sample metrics directory directory exists and will be overwritten: /home/lhhung/jax_matrix_20260903/cbq_noalign_rep1_20260903T171600Z/per_sample/BC006/Gene/filtered/
+Flex gDNA per-sample metrics directory directory exists and will be overwritten: /home/lhhung/jax_matrix_20260903/cbq_noalign_rep1_20260903T171600Z/per_sample/BC007/Gene/filtered/
+Flex gDNA per-sample metrics directory directory exists and will be overwritten: /home/lhhung/jax_matrix_20260903/cbq_noalign_rep1_20260903T171600Z/per_sample/BC008/Gene/filtered/
+Flex gDNA per-sample metrics directory directory exists and will be overwritten: /home/lhhung/jax_matrix_20260903/cbq_noalign_rep1_20260903T171600Z/per_sample/BC009/Gene/filtered/
+Flex gDNA per-sample metrics directory directory exists and will be overwritten: /home/lhhung/jax_matrix_20260903/cbq_noalign_rep1_20260903T171600Z/per_sample/BC010/Gene/filtered/
+Flex gDNA per-sample metrics directory directory exists and will be overwritten: /home/lhhung/jax_matrix_20260903/cbq_noalign_rep1_20260903T171600Z/per_sample/BC011/Gene/filtered/
+Flex gDNA per-sample metrics directory directory exists and will be overwritten: /home/lhhung/jax_matrix_20260903/cbq_noalign_rep1_20260903T171600Z/per_sample/BC012/Gene/filtered/
+Flex gDNA per-sample metrics directory directory exists and will be overwritten: /home/lhhung/jax_matrix_20260903/cbq_noalign_rep1_20260903T171600Z/per_sample/BC013/Gene/filtered/
+Flex gDNA per-sample metrics directory directory exists and will be overwritten: /home/lhhung/jax_matrix_20260903/cbq_noalign_rep1_20260903T171600Z/per_sample/BC014/Gene/filtered/
+Flex gDNA per-sample metrics directory directory exists and will be overwritten: /home/lhhung/jax_matrix_20260903/cbq_noalign_rep1_20260903T171600Z/per_sample/BC015/Gene/filtered/
+Flex gDNA per-sample metrics directory directory exists and will be overwritten: /home/lhhung/jax_matrix_20260903/cbq_noalign_rep1_20260903T171600Z/per_sample/BC016/Gene/filtered/
+Flex gDNA diagnostic: cache_region_metadata_unavailable
+Sep 03 17:22:23 ... Finished bucket-parallel Flex collapse
+Solo timing: collapseUMIall_fromBuckets 113.314 s
+Sep 03 17:22:23 ... Finished collapsing UMIs (direct hash mode)
+Solo timing: countCBgeneUMI 113.314 s
+Sep 03 17:22:23 ... Solo: inline-hash mode completed (skipping legacy output)
+Solo timing: processRecords 139.241 s
+Sep 03 17:22:23 ..... finished Solo counting
+ALL DONE!

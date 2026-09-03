@@ -1,0 +1,2 @@
+status=success
+run_dir=/home/lhhung/jax_matrix_20260903/cbq_noalign_rep1_20260903T171600Z

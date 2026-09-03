@@ -6,6 +6,7 @@
 #include <vector>
 #include <cstdint>
 #include <array>
+#include <atomic>
 #include <mutex>
 
 // Global canonical tag table (1-based, index 0 unused)
@@ -72,7 +73,9 @@ private:
     std::vector<uint32_t> sampleCodes_;                  // nsamples * 8 encoded sequences (canonical + variants)
     std::vector<uint8_t> variantCountsPerSample_;        // actual number of sequences stored per sample (<=8)
 
-    static std::array<uint16_t, 32> tokenToSampleIdx_;
+    // Token -> sample index. Written once per token (first writer wins, under
+    // the mutex); read on every read of every thread, so reads are lock-free.
+    static std::array<std::atomic<uint16_t>, 32> tokenToSampleIdx_;
     static std::mutex tokenLUTMutex_;
     static std::vector<std::string> canonicalByIdx_;
     static std::vector<std::string> labelsByIdx_;
