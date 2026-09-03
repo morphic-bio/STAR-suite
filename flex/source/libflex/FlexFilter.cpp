@@ -3,6 +3,7 @@
 #include "ErrorWarning.h"
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
@@ -586,8 +587,40 @@ int FlexFilter::runInternal(
         ? config.totalThreads
         : static_cast<unsigned int>(std::max(1, omp_get_max_threads()));
     unsigned int nTags = static_cast<unsigned int>(sampleTags.size());
+    // Splitting the budget evenly across tags assumes every tag costs the same,
+    // and they do not: only the tags with an ambiguous tail run the Monte Carlo
+    // at all. On the 16-plex JAX set, 12 of 16 tags test nothing and return
+    // almost immediately, so an even split left the 4 real samples running their
+    // simulations on 2 threads each while 24 cores sat idle. Process tags one at
+    // a time and give the whole budget to the Monte Carlo, which is 10000
+    // independent iterations and scales cleanly. Per-tag results are unchanged:
+    // each iteration seeds from its own index and the tallies are summed as
+    // integers, so the p-values do not depend on the thread split.
+    // Measured 2x2 on the 16-plex JAX set, 32 cores (flexfilter wall time):
+    //   16 tag x  2 mc = 69 s     1 tag x  2 mc = 207 s
+    //   16 tag x 32 mc = 19 s     1 tag x 32 mc =  27 s
+    // Two independent effects. The Monte Carlo is the dominant cost (~384
+    // core-seconds here) and wants the whole machine, so dividing the budget by
+    // the tag count starved it. The per-tag work outside the sampler is ~15 s
+    // serial and wants tag parallelism. Give both what they want: run tags in
+    // parallel AND hand each tag's sampler the full core count. That
+    // oversubscribes only when several tags have an ambiguous tail at once,
+    // which is rare (12 of 16 tags test nothing here).
+    // NOTE for high-plex assays: with hundreds of tags this can oversubscribe
+    // badly. Bound the concurrent sampler threads before running 384-plex.
     unsigned int numThreads = std::max(1u, std::min(nTags, totalCores));
-    unsigned int mcThreadsPerTag = std::max(1u, totalCores / numThreads);
+    unsigned int mcThreadsPerTag = std::max(1u, totalCores);
+    // Diagnostic overrides so the tag/Monte-Carlo split can be measured as a
+    // 2x2 without a rebuild. Not for production use; unset means the defaults
+    // above. See docs/HANDOFF_FLEX_PERF_20260903.md.
+    if (const char *tagEnv = std::getenv("STAR_FLEXFILTER_TAG_THREADS")) {
+        const long v = std::strtol(tagEnv, nullptr, 10);
+        if (v > 0) numThreads = std::min(static_cast<unsigned int>(v), std::max(1u, nTags));
+    }
+    if (const char *mcEnv = std::getenv("STAR_FLEXFILTER_MC_THREADS")) {
+        const long v = std::strtol(mcEnv, nullptr, 10);
+        if (v > 0) mcThreadsPerTag = static_cast<unsigned int>(v);
+    }
     
     // Set MC threads in EmptyDrops params
     config.emptydropsParams.mcThreads = mcThreadsPerTag;

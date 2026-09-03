@@ -316,6 +316,50 @@ static void ensureAsciiToNibInit() {
 // Process one lane: read all FASTQ records, hash screen, inline Solo for hits, push misses to alignQ.
 // All per-thread state (localBar, sampleDet, scratch buffers) is owned by the caller
 // and reused across lane claims — no per-lane allocation.
+// Diagnostic only: STAR_FLEX_HASH_H0_ONLY=1 makes the fused path consult the
+// exact-match (H0) tier alone, skipping the H1/deny lookup that normally runs
+// on an H0 miss. Output changes (H1 denies become misses), so this is for
+// timing where the hash cost lies, never for a production run.
+static bool flexHashH0OnlyDiagnostic()
+{
+    static const bool enabled = [] {
+        const char *value = std::getenv("STAR_FLEX_HASH_H0_ONLY");
+        return value != nullptr && value[0] == '1';
+    }();
+    return enabled;
+}
+
+// Per-thread tallies for the shared pipeline counters. Every fused thread used
+// to bump three or four of these atomics per read, and they all sit on one
+// cache line, so 32 threads spent their time bouncing that line between cores.
+// The only consumers are a ten-second progress line and the final totals, so
+// each thread counts locally and publishes every kFlushEvery reads and on exit
+// (the destructor flushes, so early returns still publish exact totals).
+struct FlexLocalCounters {
+    static const uint64_t kFlushEvery = 65536;
+    FlexPipelineCounters &shared;
+    int laneId;
+    uint64_t total = 0, keep = 0, deny = 0, miss = 0, lane = 0, sinceFlush = 0;
+
+    FlexLocalCounters(FlexPipelineCounters &counters, int lane_)
+        : shared(counters), laneId(lane_) {}
+    ~FlexLocalCounters() { flush(); }
+
+    void countRead() {
+        ++total;
+        if (++sinceFlush >= kFlushEvery) flush();
+    }
+    void flush() {
+        if (total) shared.readsTotal.fetch_add(total, std::memory_order_relaxed);
+        if (keep)  shared.triageKeep.fetch_add(keep, std::memory_order_relaxed);
+        if (deny)  shared.triageDeny.fetch_add(deny, std::memory_order_relaxed);
+        if (miss)  shared.triageMiss.fetch_add(miss, std::memory_order_relaxed);
+        if (lane && laneId >= 0 && laneId < 64)
+            shared.perLaneReads[laneId].fetch_add(lane, std::memory_order_relaxed);
+        total = keep = deny = miss = lane = sinceFlush = 0;
+    }
+};
+
 // Hand a hash miss to the aligner. In fully-fused mode every thread is a
 // producer until it runs out of input, so nobody drains alignQ while reading
 // is in progress: a blocking push on a full queue would wait forever for a
@@ -353,6 +397,7 @@ static uint64_t processOneLane(
     ReadAlign *RA = nullptr)
 {
     auto &cache = FlexHashScreenCache::instance();
+    FlexLocalCounters tally(st->counters, laneId);
     const uint32_t sampleTagOffset = P.pSolo.sampleProbeOffset;
     const bool hasSamplePreFilter = !samplePreFilter.empty();
 
@@ -391,7 +436,7 @@ static uint64_t processOneLane(
         if (!gzReadLine(gzR1, qual1, kFlexPipeSeqMax)) break;
 
         uint64_t iReadAll = st->iReadAllGlobal.fetch_add(1);
-        st->counters.perLaneReads[laneId]++;
+        ++tally.lane;
         nReads++;
 
         bool sampleOK = true;
@@ -410,7 +455,9 @@ static uint64_t processOneLane(
 
         FlexHashScreenDecision decision;
         if (sampleOK) {
-            decision = cache.classifyReadH0H1Offset0(seq0, readLen0);
+            decision = flexHashH0OnlyDiagnostic()
+                    ? cache.classifyReadH0Offset0(seq0, readLen0)
+                    : cache.classifyReadH0H1Offset0(seq0, readLen0);
         } else {
             decision.action = FlexHashScreenDecision::Pass;
         }
@@ -442,14 +489,14 @@ static uint64_t processOneLane(
                                              decision.probeRegion);
                 stats->hashScreenKeep++;
                 if (localBar.cbMatch < 0) stats->hashScreenKeepNoBarcode++;
-                st->counters.triageKeep.fetch_add(1);
+                ++tally.keep;
             } else {
                 record_flex_hash_screen_deny(readFeat, localBar, iReadAll, "NEG_PROBE_AMBIG");
                 stats->hashScreenDeny++;
-                st->counters.triageDeny.fetch_add(1);
+                ++tally.deny;
             }
         } else {
-            st->counters.triageMiss.fetch_add(1);
+            ++tally.miss;
             if (!noAlign) {
                 EnrichedPacket ep;
                 std::memcpy(ep.name, name, kFlexPipeNameMax);
@@ -473,7 +520,7 @@ static uint64_t processOneLane(
             }
         }
 
-        st->counters.readsTotal.fetch_add(1);
+        tally.countRead();
     }
 
     gzclose(gzR2);
@@ -492,6 +539,7 @@ static uint64_t processOneBgzfRange(
 {
     const FlexBgzfLane &lanePlan = st->bgzfLanes[static_cast<size_t>(task.laneId)];
     std::string inputError;
+    FlexLocalCounters tally(st->counters, task.laneId);
     if (lanePlan.adapter == nullptr) {
         st->failInput("Flex BGZF lane adapter is missing for lane " +
                       std::to_string(task.laneId));
@@ -559,8 +607,7 @@ static uint64_t processOneBgzfRange(
         }
 
         const uint64_t iReadAll = st->iReadAllGlobal.fetch_add(1);
-        st->counters.perLaneReads[static_cast<size_t>(task.laneId)].fetch_add(
-            1, std::memory_order_relaxed);
+        ++tally.lane;
         ++nReads;
 
         bool sampleOK = true;
@@ -583,7 +630,9 @@ static uint64_t processOneBgzfRange(
 
         FlexHashScreenDecision decision;
         if (sampleOK) {
-            decision = cache.classifyReadH0H1Offset0(seq0, readLen0);
+            decision = flexHashH0OnlyDiagnostic()
+                    ? cache.classifyReadH0Offset0(seq0, readLen0)
+                    : cache.classifyReadH0H1Offset0(seq0, readLen0);
         } else {
             decision.action = FlexHashScreenDecision::Pass;
         }
@@ -616,15 +665,15 @@ static uint64_t processOneBgzfRange(
                 if (localBar.cbMatch < 0) {
                     stats->hashScreenKeepNoBarcode++;
                 }
-                st->counters.triageKeep.fetch_add(1);
+                ++tally.keep;
             } else {
                 record_flex_hash_screen_deny(readFeat, localBar, iReadAll,
                                              "NEG_PROBE_AMBIG");
                 stats->hashScreenDeny++;
-                st->counters.triageDeny.fetch_add(1);
+                ++tally.deny;
             }
         } else {
-            st->counters.triageMiss.fetch_add(1);
+            ++tally.miss;
             if (!noAlign) {
                 EnrichedPacket packet;
                 std::memcpy(packet.name, name, kFlexPipeNameMax);
@@ -647,7 +696,7 @@ static uint64_t processOneBgzfRange(
                 enqueueForAlign(st, std::move(packet), RA);
             }
         }
-        st->counters.readsTotal.fetch_add(1);
+        tally.countRead();
         }
     }
     return nReads;
@@ -668,6 +717,7 @@ static uint64_t processCbqModuleRecords(
     auto &cache = FlexHashScreenCache::instance();
     const uint32_t sampleTagOffset = P.pSolo.sampleProbeOffset;
     const bool hasSamplePreFilter = !samplePreFilter.empty();
+    FlexLocalCounters tally(st->counters, laneId);
 
     std::string inputError;
     uint8_t packedScratch[4];
@@ -728,7 +778,7 @@ static uint64_t processCbqModuleRecords(
             uint64_t iReadAll = deterministicReadIds
                 ? globalFirst + localOrdinal
                 : st->iReadAllGlobal.fetch_add(1);
-            st->counters.perLaneReads[laneId]++;
+            ++tally.lane;
             nReads++;
 
             bool sampleOK = true;
@@ -747,7 +797,9 @@ static uint64_t processCbqModuleRecords(
 
             FlexHashScreenDecision decision;
             if (sampleOK) {
-                decision = cache.classifyReadH0H1Offset0(seq0, readLen0);
+                decision = flexHashH0OnlyDiagnostic()
+                    ? cache.classifyReadH0Offset0(seq0, readLen0)
+                    : cache.classifyReadH0H1Offset0(seq0, readLen0);
             } else {
                 decision.action = FlexHashScreenDecision::Pass;
             }
@@ -779,14 +831,14 @@ static uint64_t processCbqModuleRecords(
                                                  decision.probeRegion);
                     stats->hashScreenKeep++;
                     if (localBar.cbMatch < 0) stats->hashScreenKeepNoBarcode++;
-                    st->counters.triageKeep.fetch_add(1);
+                    ++tally.keep;
                 } else {
                     record_flex_hash_screen_deny(readFeat, localBar, iReadAll, "NEG_PROBE_AMBIG");
                     stats->hashScreenDeny++;
-                    st->counters.triageDeny.fetch_add(1);
+                    ++tally.deny;
                 }
             } else {
-                st->counters.triageMiss.fetch_add(1);
+                ++tally.miss;
                 if (!noAlign) {
                     EnrichedPacket ep;
                     std::memcpy(ep.name, name, kFlexPipeNameMax);
@@ -810,7 +862,7 @@ static uint64_t processCbqModuleRecords(
                 }
             }
 
-            st->counters.readsTotal.fetch_add(1);
+            tally.countRead();
         }
     }
 

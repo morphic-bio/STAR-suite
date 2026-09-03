@@ -254,6 +254,8 @@ void SoloFeature::runFlexFilterInline(
     } else {
         config.emptydropsParams.FDR = 0.001;
     }
+    // config.emptydropsParams.mcThreads is deliberately not set here: FlexFilter
+    // recomputes it from config.totalThreads when it allocates its tag threads.
     // Simple EmptyDrops parameters (formerly OrdMag)
     if (pSolo.flexFilterOrdmagNsamples > 0) {
         config.simpleEmptyDropsParams.nExpectedCells = pSolo.flexFilterOrdmagNsamples;

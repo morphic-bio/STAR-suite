@@ -1,0 +1,79 @@
+	/mnt/pikachu/STAR-suite/core/legacy/source/STAR --runThreadN 32 --genomeDir /home/lhhung/jax_stage_20260903/ref/star_index --soloType CB_UMI_Simple --soloCBstart 1 --soloUMIstart 17 --soloCBlen 16 --soloUMIlen 12 --soloBarcodeReadLength 0 --soloCBwhitelist /home/lhhung/jax_stage_20260903/ref/737K-fixed-rna-profiling.txt --flex yes --soloFlexExpectedCellsPerTag 3000 --soloSampleWhitelist /home/lhhung/jax_stage_20260903/ref/sample_whitelist_full_16.tsv --soloProbeList /home/lhhung/jax_stage_20260903/ref/star_index/flex_probe_artifacts/probe_list.txt --soloSampleProbes /home/lhhung/jax_stage_20260903/ref/probe-barcodes-fixed-rna-profiling-rna.txt --soloSampleProbeOffset 68 --soloFlexAllowedTags /home/lhhung/jax_stage_20260903/ref/sample_whitelist_full_16.tsv --soloFlexOutputPrefix /home/lhhung/jax_matrix_20260903/cbq_noalign_rep1_20260903T171600Z/per_sample --limitIObufferSize 50000000 50000000 --outSJtype None --outSAMtype None --outSAMattributes None --soloFeatures Gene --soloCellFilter None --soloMultiMappers Rescue --soloCBmatchWLtype 1MM_multi_Nbase_pseudocounts --soloUMIfiltering MultiGeneUMI_CR --soloUMIdedup 1MM_CR --soloStrand Unstranded --clipAdapterType CellRanger4 --alignEndsType Local --chimSegmentMin 0 --soloKeysCompat cr --soloSampleSearchNearby no --soloHashScreenFile /home/lhhung/jax_stage_20260903/ref/h01_cache.bin --soloBucketMode ram --soloBucketCount 256 --flexPipeline yes --flexPipelineNTriage 0 --flexPipelineNSolo 0 --flexNoAlign 1 --dynamicThreadInterface 1 --crAssignConsumerThreads -1 --crAssignSearchThreads 1 --outFileNamePrefix /home/lhhung/jax_matrix_20260903/cbq_noalign_rep1_20260903T171600Z/ --readFilesType Binseq PE --readFilesCbqRangeMode range --readFilesIn /home/lhhung/jax_stage_20260903/cbq/lane_000.cbq,/home/lhhung/jax_stage_20260903/cbq/lane_001.cbq,/home/lhhung/jax_stage_20260903/cbq/lane_002.cbq,/home/lhhung/jax_stage_20260903/cbq/lane_003.cbq,/home/lhhung/jax_stage_20260903/cbq/lane_004.cbq,/home/lhhung/jax_stage_20260903/cbq/lane_005.cbq,/home/lhhung/jax_stage_20260903/cbq/lane_006.cbq,/home/lhhung/jax_stage_20260903/cbq/lane_007.cbq
+	STAR-suite version: 1.8.1   STAR upstream: 2.7.11b   genome compatibility: 2.7.4a   compiled: 2026-09-03T14:41:19+00:00 :/mnt/pikachu/STAR-suite/core/legacy/source
+Sep 03 17:16:01 ..... started STAR run
+Sep 03 17:16:14 ..... started mapping
+Sep 03 17:20:04 ..... finished mapping
+Sep 03 17:20:04 ..... started Solo counting
+Found recovered_cells = 526 with loss = 0
+Bootstrap mean = 526, sd = 0, nCellsSimple = 526
+Median UMIs of initial cell calls: 1
+Min UMIs: 500
+Found recovered_cells = 878 with loss = 0.00113895
+Bootstrap mean = 879, sd = 0, nCellsSimple = 879
+Median UMIs of initial cell calls: 1
+Min UMIs: 500
+Found recovered_cells = 1109 with loss = 0.00360685
+Bootstrap mean = 1111, sd = 0, nCellsSimple = 1111
+Median UMIs of initial cell calls: 1
+Min UMIs: 500
+Found recovered_cells = 1318 with loss = 0
+Bootstrap mean = 1318, sd = 0, nCellsSimple = 1318
+Median UMIs of initial cell calls: 1
+Min UMIs: 500
+Found recovered_cells = 1978 with loss = 0.00808898
+Bootstrap mean = 1982, sd = 0, nCellsSimple = 1982
+Median UMIs of initial cell calls: 1
+Min UMIs: 500
+Found recovered_cells = 2464 with loss = 0.00162338
+Bootstrap mean = 2466, sd = 0, nCellsSimple = 2466
+Median UMIs of initial cell calls: 1
+Min UMIs: 500
+Found recovered_cells = 3646 with loss = 0.0134394
+Bootstrap mean = 3639, sd = 0, nCellsSimple = 3639
+Median UMIs of initial cell calls: 1
+Min UMIs: 500
+Found recovered_cells = 3947 with loss = 0.00405371
+Bootstrap mean = 3951, sd = 0, nCellsSimple = 3951
+Median UMIs of initial cell calls: 1
+Min UMIs: 500
+Found recovered_cells = 3292 with loss = 0.0142817
+Bootstrap mean = 3345, sd = 0, nCellsSimple = 3345
+Median UMIs of initial cell calls: 1
+Min UMIs: 500
+Found recovered_cells = 3384 with loss = 0.00265957
+Bootstrap mean = 3381, sd = 0, nCellsSimple = 3381
+Median UMIs of initial cell calls: 1
+Min UMIs: 500
+Found recovered_cells = 5549 with loss = 0.0304559
+Bootstrap mean = 5536, sd = 0, nCellsSimple = 5536
+Median UMIs of initial cell calls: 2
+Min UMIs: 500
+Found recovered_cells = 3974 with loss = 0.00732153
+Bootstrap mean = 3973.36, sd = 70.5159, nCellsSimple = 3973
+Median UMIs of initial cell calls: 31
+Min UMIs: 500
+FlexFilter completed successfully
+  Processed 16 tags
+Writing per-sample MEX outputs...
+
+Summary (saved to /home/lhhung/jax_matrix_20260903/cbq_noalign_rep1_20260903T171600Z/per_sample/flexfilter_summary.tsv):
+Sample            Expected   Retain  Simple_ED  Tail_Tested    ED_Pass    Occ_Rem    Final     Total_UMIs
+BC001                    4      879        879            0        879          0      879            933
+BC002                  598    15299       4024            0       4024          2     4022         144346
+BC003                   25     3345       3345            0       3345          1     3344           6504
+BC004                 8114   120000          0         5015       4385          2     4383       32616104
+BC005                   24     3381       3381            0       3381          1     3380           6371
+BC006                 9874   120000          0         5877       5286          2     5284       42528477
+BC007                14625   120000          0         5815       5385          2     5383       73268111
+BC008                14596   120000          0         5747       5268          2     5266       60663581
+BC009                    6     1318       1318            0       1318          1     1317           1556
+BC010                    5     1111       1111            0       1111          0     1111           1187
+BC011                   24     3951       3951            0       3951          1     3950           6353
+BC012                    2      526        526            0        526          0      526            560
+BC013                   62     5536       5536            0       5536          2     5534          15977
+BC014                    9     1982       1982            0       1982          1     1981           2426
+BC015                   11     2466       2466            0       2466          2     2464           2975
+BC016                   21     3639       3639            0       3639          2     3637           5529
+TOTAL                48000   523433      32158        22454      52482         21    52461      209270990
+Sep 03 17:22:23 ..... finished Solo counting
+Sep 03 17:22:23 ..... finished successfully

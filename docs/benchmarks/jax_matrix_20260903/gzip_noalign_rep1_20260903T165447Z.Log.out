@@ -1,0 +1,318 @@
+STAR-suite version=1.8.1
+STAR upstream version=2.7.11b
+STAR genome compatibility version=2.7.4a
+STAR-suite source revision=dc3aa38374fa0986ff7e38fe028847ae0f50ddbd-dirty
+STAR compilation time,server,dir=2026-09-03T14:41:19+00:00 :/mnt/pikachu/STAR-suite/core/legacy/source
+STAR git: On branch master ; commit dc3aa38374fa0986ff7e38fe028847ae0f50ddbd ; diff files: core/legacy/source/mapThreadsSpawn.cpp 
+##### Command Line:
+/mnt/pikachu/STAR-suite/core/legacy/source/STAR --runThreadN 32 --genomeDir /home/lhhung/jax_stage_20260903/ref/star_index --soloType CB_UMI_Simple --soloCBstart 1 --soloUMIstart 17 --soloCBlen 16 --soloUMIlen 12 --soloBarcodeReadLength 0 --soloCBwhitelist /home/lhhung/jax_stage_20260903/ref/737K-fixed-rna-profiling.txt --flex yes --soloFlexExpectedCellsPerTag 3000 --soloSampleWhitelist /home/lhhung/jax_stage_20260903/ref/sample_whitelist_full_16.tsv --soloProbeList /home/lhhung/jax_stage_20260903/ref/star_index/flex_probe_artifacts/probe_list.txt --soloSampleProbes /home/lhhung/jax_stage_20260903/ref/probe-barcodes-fixed-rna-profiling-rna.txt --soloSampleProbeOffset 68 --soloFlexAllowedTags /home/lhhung/jax_stage_20260903/ref/sample_whitelist_full_16.tsv --soloFlexOutputPrefix /home/lhhung/jax_matrix_20260903/gzip_noalign_rep1_20260903T165447Z/per_sample --limitIObufferSize 50000000 50000000 --outSJtype None --outSAMtype None --outSAMattributes None --soloFeatures Gene --soloCellFilter None --soloMultiMappers Rescue --soloCBmatchWLtype 1MM_multi_Nbase_pseudocounts --soloUMIfiltering MultiGeneUMI_CR --soloUMIdedup 1MM_CR --soloStrand Unstranded --clipAdapterType CellRanger4 --alignEndsType Local --chimSegmentMin 0 --soloKeysCompat cr --soloSampleSearchNearby no --soloHashScreenFile /home/lhhung/jax_stage_20260903/ref/h01_cache.bin --soloBucketMode ram --soloBucketCount 256 --flexPipeline yes --flexPipelineNTriage 0 --flexPipelineNSolo 0 --flexNoAlign 1 --dynamicThreadInterface 1 --crAssignConsumerThreads -1 --crAssignSearchThreads 1 --outFileNamePrefix /home/lhhung/jax_matrix_20260903/gzip_noalign_rep1_20260903T165447Z/ --readFilesBgzfMode off --readFilesIn /home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L001_R2_001.fastq.gz,/home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L002_R2_001.fastq.gz,/home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L003_R2_001.fastq.gz,/home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L004_R2_001.fastq.gz,/home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L005_R2_001.fastq.gz,/home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L006_R2_001.fastq.gz,/home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L007_R2_001.fastq.gz,/home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L008_R2_001.fastq.gz /home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L001_R1_001.fastq.gz,/home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L002_R1_001.fastq.gz,/home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L003_R1_001.fastq.gz,/home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L004_R1_001.fastq.gz,/home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L005_R1_001.fastq.gz,/home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L006_R1_001.fastq.gz,/home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L007_R1_001.fastq.gz,/home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L008_R1_001.fastq.gz
+##### Initial USER parameters from Command Line:
+outFileNamePrefix                 /home/lhhung/jax_matrix_20260903/gzip_noalign_rep1_20260903T165447Z/
+###### All USER parameters from Command Line:
+runThreadN                    32     ~RE-DEFINED
+genomeDir                     /home/lhhung/jax_stage_20260903/ref/star_index     ~RE-DEFINED
+soloType                      CB_UMI_Simple     ~RE-DEFINED
+soloCBstart                   1     ~RE-DEFINED
+soloUMIstart                  17     ~RE-DEFINED
+soloCBlen                     16     ~RE-DEFINED
+soloUMIlen                    12     ~RE-DEFINED
+soloBarcodeReadLength         0     ~RE-DEFINED
+soloCBwhitelist               /home/lhhung/jax_stage_20260903/ref/737K-fixed-rna-profiling.txt        ~RE-DEFINED
+flex                          yes     ~RE-DEFINED
+soloFlexExpectedCellsPerTag   3000     ~RE-DEFINED
+soloSampleWhitelist           /home/lhhung/jax_stage_20260903/ref/sample_whitelist_full_16.tsv     ~RE-DEFINED
+soloProbeList                 /home/lhhung/jax_stage_20260903/ref/star_index/flex_probe_artifacts/probe_list.txt     ~RE-DEFINED
+soloSampleProbes              /home/lhhung/jax_stage_20260903/ref/probe-barcodes-fixed-rna-profiling-rna.txt     ~RE-DEFINED
+soloSampleProbeOffset         68     ~RE-DEFINED
+soloFlexAllowedTags           /home/lhhung/jax_stage_20260903/ref/sample_whitelist_full_16.tsv     ~RE-DEFINED
+soloFlexOutputPrefix          /home/lhhung/jax_matrix_20260903/gzip_noalign_rep1_20260903T165447Z/per_sample     ~RE-DEFINED
+limitIObufferSize             50000000   50000000        ~RE-DEFINED
+outSJtype                     None        ~RE-DEFINED
+outSAMtype                    None        ~RE-DEFINED
+outSAMattributes              None        ~RE-DEFINED
+soloFeatures                  Gene        ~RE-DEFINED
+soloCellFilter                None        ~RE-DEFINED
+soloMultiMappers              Rescue        ~RE-DEFINED
+soloCBmatchWLtype             1MM_multi_Nbase_pseudocounts     ~RE-DEFINED
+soloUMIfiltering              MultiGeneUMI_CR        ~RE-DEFINED
+soloUMIdedup                  1MM_CR        ~RE-DEFINED
+soloStrand                    Unstranded     ~RE-DEFINED
+clipAdapterType               CellRanger4        ~RE-DEFINED
+alignEndsType                 Local     ~RE-DEFINED
+chimSegmentMin                0     ~RE-DEFINED
+soloKeysCompat                cr     ~RE-DEFINED
+soloSampleSearchNearby        no     ~RE-DEFINED
+soloHashScreenFile            /home/lhhung/jax_stage_20260903/ref/h01_cache.bin     ~RE-DEFINED
+soloBucketMode                ram     ~RE-DEFINED
+soloBucketCount               256     ~RE-DEFINED
+flexPipeline                  yes     ~RE-DEFINED
+flexPipelineNTriage           0     ~RE-DEFINED
+flexPipelineNSolo             0     ~RE-DEFINED
+flexNoAlign                   1     ~RE-DEFINED
+dynamicThreadInterface        1     ~RE-DEFINED
+crAssignConsumerThreads       -1     ~RE-DEFINED
+crAssignSearchThreads         1     ~RE-DEFINED
+outFileNamePrefix             /home/lhhung/jax_matrix_20260903/gzip_noalign_rep1_20260903T165447Z/     ~RE-DEFINED
+readFilesBgzfMode             off     ~RE-DEFINED
+readFilesIn                   /home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L001_R2_001.fastq.gz,/home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L002_R2_001.fastq.gz,/home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L003_R2_001.fastq.gz,/home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L004_R2_001.fastq.gz,/home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L005_R2_001.fastq.gz,/home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L006_R2_001.fastq.gz,/home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L007_R2_001.fastq.gz,/home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L008_R2_001.fastq.gz   /home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L001_R1_001.fastq.gz,/home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L002_R1_001.fastq.gz,/home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L003_R1_001.fastq.gz,/home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L004_R1_001.fastq.gz,/home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L005_R1_001.fastq.gz,/home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L006_R1_001.fastq.gz,/home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L007_R1_001.fastq.gz,/home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L008_R1_001.fastq.gz        ~RE-DEFINED
+##### Finished reading parameters from all sources
+
+##### Final user re-defined parameters-----------------:
+runThreadN                        32
+dynamicThreadInterface            1
+genomeDir                         /home/lhhung/jax_stage_20260903/ref/star_index
+readFilesIn                       /home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L001_R2_001.fastq.gz,/home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L002_R2_001.fastq.gz,/home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L003_R2_001.fastq.gz,/home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L004_R2_001.fastq.gz,/home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L005_R2_001.fastq.gz,/home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L006_R2_001.fastq.gz,/home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L007_R2_001.fastq.gz,/home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L008_R2_001.fastq.gz   /home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L001_R1_001.fastq.gz,/home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L002_R1_001.fastq.gz,/home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L003_R1_001.fastq.gz,/home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L004_R1_001.fastq.gz,/home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L005_R1_001.fastq.gz,/home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L006_R1_001.fastq.gz,/home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L007_R1_001.fastq.gz,/home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L008_R1_001.fastq.gz   
+readFilesBgzfMode                 off
+limitIObufferSize                 50000000   50000000   
+outFileNamePrefix                 /home/lhhung/jax_matrix_20260903/gzip_noalign_rep1_20260903T165447Z/
+outSAMtype                        None   
+outSAMattributes                  None   
+outSJtype                         None   
+clipAdapterType                   CellRanger4   
+alignEndsType                     Local
+chimSegmentMin                    0
+soloType                          CB_UMI_Simple
+soloCBstart                       1
+soloUMIstart                      17
+soloCBlen                         16
+soloUMIlen                        12
+soloBarcodeReadLength             0
+soloCBwhitelist                   /home/lhhung/jax_stage_20260903/ref/737K-fixed-rna-profiling.txt   
+soloStrand                        Unstranded
+soloFeatures                      Gene   
+soloUMIdedup                      1MM_CR   
+soloCBmatchWLtype                 1MM_multi_Nbase_pseudocounts
+soloCellFilter                    None   
+soloUMIfiltering                  MultiGeneUMI_CR   
+soloMultiMappers                  Rescue   
+soloKeysCompat                    cr
+soloProbeList                     /home/lhhung/jax_stage_20260903/ref/star_index/flex_probe_artifacts/probe_list.txt
+soloSampleWhitelist               /home/lhhung/jax_stage_20260903/ref/sample_whitelist_full_16.tsv
+soloSampleProbes                  /home/lhhung/jax_stage_20260903/ref/probe-barcodes-fixed-rna-profiling-rna.txt
+soloSampleProbeOffset             68
+soloSampleSearchNearby            no
+soloBucketMode                    ram
+soloBucketCount                   256
+soloHashScreenFile                /home/lhhung/jax_stage_20260903/ref/h01_cache.bin
+flex                              yes
+flexPipeline                      yes
+flexPipelineNSolo                 0
+flexPipelineNTriage               0
+flexNoAlign                       1
+soloFlexExpectedCellsPerTag       3000
+soloFlexAllowedTags               /home/lhhung/jax_stage_20260903/ref/sample_whitelist_full_16.tsv
+soloFlexOutputPrefix              /home/lhhung/jax_matrix_20260903/gzip_noalign_rep1_20260903T165447Z/per_sample
+crAssignConsumerThreads           -1
+crAssignSearchThreads             1
+
+-------------------------------
+##### Final effective command line:
+/mnt/pikachu/STAR-suite/core/legacy/source/STAR   --runThreadN 32   --dynamicThreadInterface 1   --genomeDir /home/lhhung/jax_stage_20260903/ref/star_index   --readFilesIn /home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L001_R2_001.fastq.gz,/home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L002_R2_001.fastq.gz,/home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L003_R2_001.fastq.gz,/home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L004_R2_001.fastq.gz,/home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L005_R2_001.fastq.gz,/home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L006_R2_001.fastq.gz,/home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L007_R2_001.fastq.gz,/home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L008_R2_001.fastq.gz   /home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L001_R1_001.fastq.gz,/home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L002_R1_001.fastq.gz,/home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L003_R1_001.fastq.gz,/home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L004_R1_001.fastq.gz,/home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L005_R1_001.fastq.gz,/home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L006_R1_001.fastq.gz,/home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L007_R1_001.fastq.gz,/home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L008_R1_001.fastq.gz      --readFilesBgzfMode off   --limitIObufferSize 50000000   50000000      --outFileNamePrefix /home/lhhung/jax_matrix_20260903/gzip_noalign_rep1_20260903T165447Z/   --outSAMtype None      --outSAMattributes None      --outSJtype None      --clipAdapterType CellRanger4      --alignEndsType Local   --chimSegmentMin 0   --soloType CB_UMI_Simple   --soloCBstart 1   --soloUMIstart 17   --soloCBlen 16   --soloUMIlen 12   --soloBarcodeReadLength 0   --soloCBwhitelist /home/lhhung/jax_stage_20260903/ref/737K-fixed-rna-profiling.txt      --soloStrand Unstranded   --soloFeatures Gene      --soloUMIdedup 1MM_CR      --soloCBmatchWLtype 1MM_multi_Nbase_pseudocounts   --soloCellFilter None      --soloUMIfiltering MultiGeneUMI_CR      --soloMultiMappers Rescue      --soloKeysCompat cr   --soloProbeList /home/lhhung/jax_stage_20260903/ref/star_index/flex_probe_artifacts/probe_list.txt   --soloSampleWhitelist /home/lhhung/jax_stage_20260903/ref/sample_whitelist_full_16.tsv   --soloSampleProbes /home/lhhung/jax_stage_20260903/ref/probe-barcodes-fixed-rna-profiling-rna.txt   --soloSampleProbeOffset 68   --soloSampleSearchNearby no   --soloBucketMode ram   --soloBucketCount 256   --soloHashScreenFile /home/lhhung/jax_stage_20260903/ref/h01_cache.bin   --flex yes   --flexPipeline yes   --flexPipelineNSolo 0   --flexPipelineNTriage 0   --flexNoAlign 1   --soloFlexExpectedCellsPerTag 3000   --soloFlexAllowedTags /home/lhhung/jax_stage_20260903/ref/sample_whitelist_full_16.tsv   --soloFlexOutputPrefix /home/lhhung/jax_matrix_20260903/gzip_noalign_rep1_20260903T165447Z/per_sample   --crAssignConsumerThreads -1   --crAssignSearchThreads 1
+----------------------------------------
+
+Number of input files for each source = 8
+NOTE: .gz Fastx input detected with --readFilesCommand - ; using internal zlib streaming path.
+      Set --readFilesLegacyZcat Yes to force legacy external zcat helper mode.
+Fastx input path: direct STAR chunk reader
+
+   Input read files for mate 1 :
+-rw-r--r-- 1 lhhung lhhung 13706831699 Mar 19 03:28 /home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L001_R2_001.fastq.gz
+-rw-r--r-- 1 lhhung lhhung 13862762883 Mar 19 02:25 /home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L002_R2_001.fastq.gz
+-rw-r--r-- 1 lhhung lhhung 13866983827 Mar 19 01:21 /home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L003_R2_001.fastq.gz
+-rw-r--r-- 1 lhhung lhhung 13952093892 Mar 19 01:37 /home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L004_R2_001.fastq.gz
+-rw-r--r-- 1 lhhung lhhung 13654188967 Mar 19 04:28 /home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L005_R2_001.fastq.gz
+-rw-r--r-- 1 lhhung lhhung 13685696283 Mar 19 04:05 /home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L006_R2_001.fastq.gz
+-rw-r--r-- 1 lhhung lhhung 13747432219 Mar 19 03:32 /home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L007_R2_001.fastq.gz
+-rw-r--r-- 1 lhhung lhhung 13752035131 Mar 19 02:54 /home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L008_R2_001.fastq.gz
+NOTE: mate 1 using internal gzip FIFO helper: /home/lhhung/jax_matrix_20260903/gzip_noalign_rep1_20260903T165447Z/_STARtmp/tmp.fifo.read1
+
+   Input read files for mate 2 :
+-rw-r--r-- 1 lhhung lhhung 5016524459 Mar 19 05:14 /home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L001_R1_001.fastq.gz
+-rw-r--r-- 1 lhhung lhhung 5079324441 Mar 19 04:53 /home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L002_R1_001.fastq.gz
+-rw-r--r-- 1 lhhung lhhung 5102315314 Mar 19 04:33 /home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L003_R1_001.fastq.gz
+-rw-r--r-- 1 lhhung lhhung 5152374408 Mar 19 03:47 /home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L004_R1_001.fastq.gz
+-rw-r--r-- 1 lhhung lhhung 5101902583 Mar 19 04:52 /home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L005_R1_001.fastq.gz
+-rw-r--r-- 1 lhhung lhhung 5111881702 Mar 19 04:40 /home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L006_R1_001.fastq.gz
+-rw-r--r-- 1 lhhung lhhung 5118982978 Mar 19 04:09 /home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L007_R1_001.fastq.gz
+-rw-r--r-- 1 lhhung lhhung 5079096873 Mar 19 05:02 /home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L008_R1_001.fastq.gz
+NOTE: mate 2 using internal gzip FIFO helper: /home/lhhung/jax_matrix_20260903/gzip_noalign_rep1_20260903T165447Z/_STARtmp/tmp.fifo.read2
+WARNING: --soloCbUbRequireTogether is DEPRECATED and will be ignored. CB and UB tags are now always handled independently.
+--flex yes: Enabled Flex pipeline with production defaults
+    soloRunFlexFilter=yes
+    soloInlineCBCorrection=no
+    soloInlineHashMode=yes (enabled)
+    soloFlexMinimalMemory=yes
+    soloMapqMode=off (enum=0)
+    soloMMrateMax=0.1
+    soloBarcodesObservedOnly=yes
+    soloUMICorrection=clique
+Flex gDNA diagnostic: probe metadata loaded from /home/lhhung/jax_stage_20260903/ref/star_index/flex_probe_artifacts/filtered_probe_set.csv (probes=53459, control_genes=5876)
+H0/H1 hash screen: enabled with cache /home/lhhung/jax_stage_20260903/ref/h01_cache.bin (8874194 records, format v2)
+Flex gDNA diagnostic: active H0/H1 cache lacks probe-region metadata; mapping remains enabled but the diagnostic will be reported unavailable
+Flex mode: Using probe list: /home/lhhung/jax_stage_20260903/ref/star_index/flex_probe_artifacts/probe_list.txt
+Number of CBs in the whitelist = 737280
+Flex streaming CB buckets: active (ram, 256 buckets, memory budget 32 GiB)
+Built cbWLhash: 737280 entries, 2097152 buckets
+Initialized CbCorrector with 737280 CBs
+CbCorrector initialization verified: whitelistSize=737280
+Skipping legacy ambiguousCbByKey precompute (set STAR_BUILD_LEGACY_AMBIG_HASH=1 to enable).
+Sep 03 16:55:12 ... Finished reading, sorting and deduplicating CB whitelist sequences.
+clip3pPolyG: auto => enabled
+Finished loading and checking parameters
+Flex count-only no-genome: active
+Flex count-only no-genome: hash cache /home/lhhung/jax_stage_20260903/ref/h01_cache.bin
+Flex pipeline: runThreadN=32, nLanes=8, triage=0 (fully fused + lane steal + role switch), soloConsumers=0, fusedThreads=32, dedicatedWorkers=0, noAlign=ON (alignment skipped), noGenome=ON
+  32 fused no-genome threads started
+PIPELINE_STATS t=10s total=47900198 keep=40095009 deny=339271 miss=7465918 readerQ=0 soloQ=n/a alignQ=0 delta10s=47900198
+PIPELINE_STATS t=20s total=95641238 keep=80254873 deny=663665 miss=14722700 readerQ=0 soloQ=n/a alignQ=0 delta10s=47741040
+PIPELINE_STATS t=30s total=143695167 keep=120742676 deny=993785 miss=21958706 readerQ=0 soloQ=n/a alignQ=0 delta10s=48053929
+PIPELINE_STATS t=40s total=192336405 keep=161787723 deny=1325007 miss=29223675 readerQ=0 soloQ=n/a alignQ=0 delta10s=48641238
+PIPELINE_STATS t=50s total=241256942 keep=203110169 deny=1656935 miss=36489838 readerQ=0 soloQ=n/a alignQ=0 delta10s=48920537
+PIPELINE_STATS t=60s total=290296891 keep=244562183 deny=1990830 miss=43743878 readerQ=0 soloQ=n/a alignQ=0 delta10s=49039949
+PIPELINE_STATS t=70s total=339123437 keep=285854116 deny=2321748 miss=50947573 readerQ=0 soloQ=n/a alignQ=0 delta10s=48826546
+PIPELINE_STATS t=80s total=387668459 keep=326854100 deny=2659538 miss=58154821 readerQ=0 soloQ=n/a alignQ=0 delta10s=48545022
+PIPELINE_STATS t=90s total=435791757 keep=367202968 deny=3000612 miss=65588177 readerQ=0 soloQ=n/a alignQ=0 delta10s=48123298
+PIPELINE_STATS t=100s total=483664985 keep=407307983 deny=3345984 miss=73011018 readerQ=0 soloQ=n/a alignQ=0 delta10s=47873228
+PIPELINE_STATS t=110s total=530876003 keep=446654057 deny=3697350 miss=80524596 readerQ=0 soloQ=n/a alignQ=0 delta10s=47211018
+PIPELINE_STATS t=120s total=578029240 keep=486046053 deny=4065545 miss=87917642 readerQ=0 soloQ=n/a alignQ=0 delta10s=47153237
+PIPELINE_STATS t=130s total=625626180 keep=525963891 deny=4430324 miss=95231965 readerQ=0 soloQ=n/a alignQ=0 delta10s=47596940
+PIPELINE_STATS t=140s total=673559083 keep=566267196 deny=4789627 miss=102502260 readerQ=0 soloQ=n/a alignQ=0 delta10s=47932903
+PIPELINE_STATS t=150s total=722069562 keep=607140129 deny=5149112 miss=109780321 readerQ=0 soloQ=n/a alignQ=0 delta10s=48510479
+PIPELINE_STATS t=160s total=770460450 keep=647940492 deny=5509364 miss=117010594 readerQ=0 soloQ=n/a alignQ=0 delta10s=48390888
+PIPELINE_STATS t=170s total=819303691 keep=689196876 deny=5869801 miss=124237014 readerQ=0 soloQ=n/a alignQ=0 delta10s=48843241
+PIPELINE_STATS t=180s total=868206487 keep=730572635 deny=6225938 miss=131407914 readerQ=0 soloQ=n/a alignQ=0 delta10s=48902796
+PIPELINE_STATS t=190s total=917098662 keep=771957727 deny=6573776 miss=138567159 readerQ=0 soloQ=n/a alignQ=0 delta10s=48892175
+PIPELINE_STATS t=200s total=966636366 keep=813942131 deny=6916240 miss=145777995 readerQ=0 soloQ=n/a alignQ=0 delta10s=49537704
+PIPELINE_STATS t=210s total=1015560472 keep=855361986 deny=7250970 miss=152947516 readerQ=0 soloQ=n/a alignQ=0 delta10s=48924106
+PIPELINE_STATS t=220s total=1063177131 keep=895002971 deny=7623416 miss=160550744 readerQ=0 soloQ=n/a alignQ=0 delta10s=47616659
+PIPELINE_STATS t=230s total=1109044311 keep=932462470 deny=8086118 miss=168495723 readerQ=0 soloQ=n/a alignQ=0 delta10s=45867180
+PIPELINE_STATS t=240s total=1155088883 keep=970261115 deny=8542843 miss=176284925 readerQ=0 soloQ=n/a alignQ=0 delta10s=46044572
+PIPELINE_STATS t=250s total=1201069236 keep=1008199954 deny=8984508 miss=183884774 readerQ=0 soloQ=n/a alignQ=0 delta10s=45980353
+PIPELINE_STATS t=260s total=1247283169 keep=1046277553 deny=9448558 miss=191557058 readerQ=0 soloQ=n/a alignQ=0 delta10s=46213933
+PIPELINE_STATS t=270s total=1293772502 keep=1084532261 deny=9877751 miss=199362490 readerQ=0 soloQ=n/a alignQ=0 delta10s=46489333
+PIPELINE_STATS t=280s total=1340167485 keep=1123194240 deny=10301015 miss=206672231 readerQ=0 soloQ=n/a alignQ=0 delta10s=46394983
+PIPELINE_STATS t=290s total=1386532421 keep=1161938193 deny=10723470 miss=213870758 readerQ=0 soloQ=n/a alignQ=0 delta10s=46364936
+PIPELINE_STATS t=300s total=1433473508 keep=1201240728 deny=11119068 miss=221113712 readerQ=0 soloQ=n/a alignQ=0 delta10s=46941087
+PIPELINE_STATS t=310s total=1480360671 keep=1240457444 deny=11509179 miss=228394048 readerQ=0 soloQ=n/a alignQ=0 delta10s=46887163
+PIPELINE_STATS t=320s total=1526861170 keep=1279051360 deny=11911588 miss=235898222 readerQ=0 soloQ=n/a alignQ=0 delta10s=46500499
+PIPELINE_STATS t=330s total=1573757155 keep=1317691188 deny=12315996 miss=243749972 readerQ=0 soloQ=n/a alignQ=0 delta10s=46895985
+PIPELINE_STATS t=340s total=1620597521 keep=1356512111 deny=12699078 miss=251386332 readerQ=0 soloQ=n/a alignQ=0 delta10s=46840366
+PIPELINE_STATS t=350s total=1668275026 keep=1395629713 deny=13135251 miss=259510062 readerQ=0 soloQ=n/a alignQ=0 delta10s=47677505
+PIPELINE_STATS t=360s total=1715796413 keep=1435405812 deny=13531815 miss=266858786 readerQ=0 soloQ=n/a alignQ=0 delta10s=47521387
+PIPELINE_STATS t=370s total=1763364747 keep=1475251236 deny=13928331 miss=274185180 readerQ=0 soloQ=n/a alignQ=0 delta10s=47568334
+PIPELINE_STATS t=380s total=1810853619 keep=1515061918 deny=14359933 miss=281431768 readerQ=0 soloQ=n/a alignQ=0 delta10s=47488872
+PIPELINE_STATS t=390s total=1858108541 keep=1554727196 deny=14748666 miss=288632679 readerQ=0 soloQ=n/a alignQ=0 delta10s=47254922
+PIPELINE_STATS t=400s total=1904798019 keep=1593794391 deny=15142392 miss=295861236 readerQ=0 soloQ=n/a alignQ=0 delta10s=46689478
+PIPELINE_STATS t=410s total=1950923335 keep=1632098682 deny=15555331 miss=303269322 readerQ=0 soloQ=n/a alignQ=0 delta10s=46125316
+PIPELINE_STATS t=420s total=1993557295 keep=1667161991 deny=15944608 miss=310450696 readerQ=0 soloQ=n/a alignQ=0 delta10s=42633960
+  All fused no-genome threads joined
+  Stats reporter joined
+Flex pipeline complete: total=2011130186, triageKeep=1681459858, triageDeny=16111757, triageMiss=313558571
+  Lane 0: 251189625 reads
+  Lane 1: 254280823 reads
+  Lane 2: 253814000 reads
+  Lane 3: 254819710 reads
+  Lane 4: 247421226 reads
+  Lane 5: 248719891 reads
+  Lane 6: 249909554 reads
+  Lane 7: 250975357 reads
+Sep 03 17:02:22 ..... finished mapping
+RAM after mapping:
+VmPeak:	34670292 kB; VmSize:	34367072 kB; VmHWM:	33464612 kB; VmRSS:	33464612 kB; 
+Sep 03 17:02:22 ..... started Solo counting
+Sep 03 17:02:22 ... Starting Solo post-map for Gene
+Sep 03 17:02:42 ... Starting bucket-parallel Flex collapse
+[AMBIG-CB-RESOLVE] pending=2627928 resolved=0 still_ambiguous=2627928 added_to_hash=0
+[CB-BUCKET] backend=ram transitioned=no streamed_records=1626999647 aggregated_counts=1626999647 final_molecules=224941678 buckets=256 tail_threads=32
+Found 694308 unique CBs and 98890928 (CB, gene, tag) groups
+Found 1835323 unique (CB, TAG) combinations
+  Genes: 18129, Entries: 98890928
+Solo raw MEX directory directory created: /home/lhhung/jax_matrix_20260903/gzip_noalign_rep1_20260903T165447Z/Solo.out/Gene/raw/
+Sep 03 17:03:13 ... Writing MEX from inline-hash dedup data
+Sep 03 17:03:18 ... Finished writing MEX format:
+  /home/lhhung/jax_matrix_20260903/gzip_noalign_rep1_20260903T165447Z/Solo.out/Gene/raw/matrix.mtx
+  /home/lhhung/jax_matrix_20260903/gzip_noalign_rep1_20260903T165447Z/Solo.out/Gene/raw/barcodes.tsv
+  /home/lhhung/jax_matrix_20260903/gzip_noalign_rep1_20260903T165447Z/Solo.out/Gene/raw/features.tsv
+  Cells (CB+TAG combos): 1835323
+  Features: 18129
+  Entries: 98890928
+FlexFilter output directory directory created: /home/lhhung/jax_matrix_20260903/gzip_noalign_rep1_20260903T165447Z/per_sample/
+Sep 03 17:03:18 ... Running flexfilter inline (in-memory matrix)...
+  Loaded 16 allowed tags with sample labels
+FlexFilter: Using per-tag expected cells: 3000 x 16 tags = 48000 total
+FlexFilter output directory directory exists and will be overwritten: /home/lhhung/jax_matrix_20260903/gzip_noalign_rep1_20260903T165447Z/per_sample/
+Sep 03 17:04:30 ... Flexfilter pipeline complete
+  Processed 16 tags
+  [BC001] Retain=879 SimpleED=879 TailTested=0 ED_Pass=879 OccRemoved=0 Final=879 Expected=4
+FlexFilter filtered MEX directory directory and its parents created: /home/lhhung/jax_matrix_20260903/gzip_noalign_rep1_20260903T165447Z/per_sample/BC001/Gene/filtered/
+  BC001 (ACTTTAGG): 879 cells, 911 entries
+  [BC002] Retain=15299 SimpleED=4024 TailTested=0 ED_Pass=4024 OccRemoved=2 Final=4022 Expected=598
+FlexFilter filtered MEX directory directory and its parents created: /home/lhhung/jax_matrix_20260903/gzip_noalign_rep1_20260903T165447Z/per_sample/BC002/Gene/filtered/
+  BC002 (AACGGGAA): 4022 cells, 142578 entries
+  [BC003] Retain=3345 SimpleED=3345 TailTested=0 ED_Pass=3345 OccRemoved=1 Final=3344 Expected=25
+FlexFilter filtered MEX directory directory and its parents created: /home/lhhung/jax_matrix_20260903/gzip_noalign_rep1_20260903T165447Z/per_sample/BC003/Gene/filtered/
+  BC003 (AGTAGGCT): 3344 cells, 6364 entries
+  [BC004] Retain=120000 SimpleED=0 TailTested=5015 ED_Pass=4385 OccRemoved=2 Final=4383 Expected=8114
+FlexFilter filtered MEX directory directory and its parents created: /home/lhhung/jax_matrix_20260903/gzip_noalign_rep1_20260903T165447Z/per_sample/BC004/Gene/filtered/
+  BC004 (ATGTTGAC): 4383 cells, 14882546 entries
+  [BC005] Retain=3381 SimpleED=3381 TailTested=0 ED_Pass=3381 OccRemoved=1 Final=3380 Expected=24
+FlexFilter filtered MEX directory directory and its parents created: /home/lhhung/jax_matrix_20260903/gzip_noalign_rep1_20260903T165447Z/per_sample/BC005/Gene/filtered/
+  BC005 (ACAGACCT): 3380 cells, 6200 entries
+  [BC006] Retain=120000 SimpleED=0 TailTested=5877 ED_Pass=5286 OccRemoved=2 Final=5284 Expected=9874
+FlexFilter filtered MEX directory directory and its parents created: /home/lhhung/jax_matrix_20260903/gzip_noalign_rep1_20260903T165447Z/per_sample/BC006/Gene/filtered/
+  BC006 (ATCCCAAC): 5284 cells, 17830709 entries
+  [BC007] Retain=120000 SimpleED=0 TailTested=5815 ED_Pass=5385 OccRemoved=2 Final=5383 Expected=14625
+FlexFilter filtered MEX directory directory and its parents created: /home/lhhung/jax_matrix_20260903/gzip_noalign_rep1_20260903T165447Z/per_sample/BC007/Gene/filtered/
+  BC007 (AAGTAGAG): 5383 cells, 26921036 entries
+  [BC008] Retain=120000 SimpleED=0 TailTested=5747 ED_Pass=5268 OccRemoved=2 Final=5266 Expected=14596
+FlexFilter filtered MEX directory directory and its parents created: /home/lhhung/jax_matrix_20260903/gzip_noalign_rep1_20260903T165447Z/per_sample/BC008/Gene/filtered/
+  BC008 (AGCTGTGA): 5266 cells, 24534113 entries
+  [BC009] Retain=1318 SimpleED=1318 TailTested=0 ED_Pass=1318 OccRemoved=1 Final=1317 Expected=6
+FlexFilter filtered MEX directory directory and its parents created: /home/lhhung/jax_matrix_20260903/gzip_noalign_rep1_20260903T165447Z/per_sample/BC009/Gene/filtered/
+  BC009 (ACAGTCTG): 1317 cells, 1525 entries
+  [BC010] Retain=1111 SimpleED=1111 TailTested=0 ED_Pass=1111 OccRemoved=0 Final=1111 Expected=5
+FlexFilter filtered MEX directory directory and its parents created: /home/lhhung/jax_matrix_20260903/gzip_noalign_rep1_20260903T165447Z/per_sample/BC010/Gene/filtered/
+  BC010 (AGTGAGTG): 1111 cells, 1175 entries
+  [BC011] Retain=3951 SimpleED=3951 TailTested=0 ED_Pass=3951 OccRemoved=1 Final=3950 Expected=24
+FlexFilter filtered MEX directory directory and its parents created: /home/lhhung/jax_matrix_20260903/gzip_noalign_rep1_20260903T165447Z/per_sample/BC011/Gene/filtered/
+  BC011 (AGAGGCAA): 3950 cells, 6195 entries
+  [BC012] Retain=526 SimpleED=526 TailTested=0 ED_Pass=526 OccRemoved=0 Final=526 Expected=2
+FlexFilter filtered MEX directory directory and its parents created: /home/lhhung/jax_matrix_20260903/gzip_noalign_rep1_20260903T165447Z/per_sample/BC012/Gene/filtered/
+  BC012 (ACTACTCA): 526 cells, 549 entries
+  [BC013] Retain=5536 SimpleED=5536 TailTested=0 ED_Pass=5536 OccRemoved=2 Final=5534 Expected=62
+FlexFilter filtered MEX directory directory and its parents created: /home/lhhung/jax_matrix_20260903/gzip_noalign_rep1_20260903T165447Z/per_sample/BC013/Gene/filtered/
+  BC013 (ATACGTCA): 5534 cells, 15590 entries
+  [BC014] Retain=1982 SimpleED=1982 TailTested=0 ED_Pass=1982 OccRemoved=1 Final=1981 Expected=9
+FlexFilter filtered MEX directory directory and its parents created: /home/lhhung/jax_matrix_20260903/gzip_noalign_rep1_20260903T165447Z/per_sample/BC014/Gene/filtered/
+  BC014 (ATCATGTG): 1981 cells, 2372 entries
+  [BC015] Retain=2466 SimpleED=2466 TailTested=0 ED_Pass=2466 OccRemoved=2 Final=2464 Expected=11
+FlexFilter filtered MEX directory directory and its parents created: /home/lhhung/jax_matrix_20260903/gzip_noalign_rep1_20260903T165447Z/per_sample/BC015/Gene/filtered/
+  BC015 (AACGCCGA): 2464 cells, 2939 entries
+  [BC016] Retain=3639 SimpleED=3639 TailTested=0 ED_Pass=3639 OccRemoved=2 Final=3637 Expected=21
+FlexFilter filtered MEX directory directory and its parents created: /home/lhhung/jax_matrix_20260903/gzip_noalign_rep1_20260903T165447Z/per_sample/BC016/Gene/filtered/
+  BC016 (ATTCGGTT): 3637 cells, 5393 entries
+Flex gDNA per-sample metrics directory directory exists and will be overwritten: /home/lhhung/jax_matrix_20260903/gzip_noalign_rep1_20260903T165447Z/per_sample/BC001/Gene/filtered/
+Flex gDNA per-sample metrics directory directory exists and will be overwritten: /home/lhhung/jax_matrix_20260903/gzip_noalign_rep1_20260903T165447Z/per_sample/BC002/Gene/filtered/
+Flex gDNA per-sample metrics directory directory exists and will be overwritten: /home/lhhung/jax_matrix_20260903/gzip_noalign_rep1_20260903T165447Z/per_sample/BC003/Gene/filtered/
+Flex gDNA per-sample metrics directory directory exists and will be overwritten: /home/lhhung/jax_matrix_20260903/gzip_noalign_rep1_20260903T165447Z/per_sample/BC004/Gene/filtered/
+Flex gDNA per-sample metrics directory directory exists and will be overwritten: /home/lhhung/jax_matrix_20260903/gzip_noalign_rep1_20260903T165447Z/per_sample/BC005/Gene/filtered/
+Flex gDNA per-sample metrics directory directory exists and will be overwritten: /home/lhhung/jax_matrix_20260903/gzip_noalign_rep1_20260903T165447Z/per_sample/BC006/Gene/filtered/
+Flex gDNA per-sample metrics directory directory exists and will be overwritten: /home/lhhung/jax_matrix_20260903/gzip_noalign_rep1_20260903T165447Z/per_sample/BC007/Gene/filtered/
+Flex gDNA per-sample metrics directory directory exists and will be overwritten: /home/lhhung/jax_matrix_20260903/gzip_noalign_rep1_20260903T165447Z/per_sample/BC008/Gene/filtered/
+Flex gDNA per-sample metrics directory directory exists and will be overwritten: /home/lhhung/jax_matrix_20260903/gzip_noalign_rep1_20260903T165447Z/per_sample/BC009/Gene/filtered/
+Flex gDNA per-sample metrics directory directory exists and will be overwritten: /home/lhhung/jax_matrix_20260903/gzip_noalign_rep1_20260903T165447Z/per_sample/BC010/Gene/filtered/
+Flex gDNA per-sample metrics directory directory exists and will be overwritten: /home/lhhung/jax_matrix_20260903/gzip_noalign_rep1_20260903T165447Z/per_sample/BC011/Gene/filtered/
+Flex gDNA per-sample metrics directory directory exists and will be overwritten: /home/lhhung/jax_matrix_20260903/gzip_noalign_rep1_20260903T165447Z/per_sample/BC012/Gene/filtered/
+Flex gDNA per-sample metrics directory directory exists and will be overwritten: /home/lhhung/jax_matrix_20260903/gzip_noalign_rep1_20260903T165447Z/per_sample/BC013/Gene/filtered/
+Flex gDNA per-sample metrics directory directory exists and will be overwritten: /home/lhhung/jax_matrix_20260903/gzip_noalign_rep1_20260903T165447Z/per_sample/BC014/Gene/filtered/
+Flex gDNA per-sample metrics directory directory exists and will be overwritten: /home/lhhung/jax_matrix_20260903/gzip_noalign_rep1_20260903T165447Z/per_sample/BC015/Gene/filtered/
+Flex gDNA per-sample metrics directory directory exists and will be overwritten: /home/lhhung/jax_matrix_20260903/gzip_noalign_rep1_20260903T165447Z/per_sample/BC016/Gene/filtered/
+Flex gDNA diagnostic: cache_region_metadata_unavailable
+Sep 03 17:04:37 ... Finished bucket-parallel Flex collapse
+Solo timing: collapseUMIall_fromBuckets 115.123 s
+Sep 03 17:04:37 ... Finished collapsing UMIs (direct hash mode)
+Solo timing: countCBgeneUMI 115.123 s
+Sep 03 17:04:37 ... Solo: inline-hash mode completed (skipping legacy output)
+Solo timing: processRecords 135.246 s
+Sep 03 17:04:37 ..... finished Solo counting
+ALL DONE!

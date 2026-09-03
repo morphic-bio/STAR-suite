@@ -1,0 +1,29 @@
+date_utc=2026-09-03T16:54:47Z
+arm=gzip_noalign
+rep=1
+input=gzip
+align=noalign
+threads=32
+bucket_mode=ram
+bucket_count=256
+run_dir=/home/lhhung/jax_matrix_20260903/gzip_noalign_rep1_20260903T165447Z
+commit=47bfbfd082cbcb5a102b956c17710b48b5abbcdc
+star_mtime=2026-09-03 16:10:59.890445153 +0000
+stage_fastq=/home/lhhung/jax_stage_20260903/fastq
+stage_cbq=/home/lhhung/jax_stage_20260903/cbq
+tmpdir=/home/lhhung/jax_matrix_20260903/tmp
+ 16:54:47 up 49 days, 22:19,  3 users,  load average: 3.74, 2.94, 2.35
+               total        used        free      shared  buff/cache   available
+Mem:             125          10           1           0         113         113
+    PID COMMAND         %CPU %MEM     ELAPSED
+2847311 kube-apiserver   8.2  0.3 25-21:56:47
+3417647 node             5.6  0.4  1-00:24:27
+1203862 node             5.4  0.5  2-03:20:35
+1204097 node             5.4  0.3  2-03:20:34
+1203977 node             5.3  0.3  2-03:20:35
+1410940 node             5.2  0.5  2-00:20:31
+2674510 node             5.2  0.3  1-09:19:28
+3294717 temporal-server  4.7  0.0 47-10:01:40
+2847362 etcd             3.7  0.0 25-21:56:47
+2847584 kubelet          2.8  0.2 25-21:56:42
+2320548 htop             2.6  0.0  1-14:08:14
