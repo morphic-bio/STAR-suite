@@ -265,6 +265,12 @@ static void mapThreadsSpawnFlexPipeline(Parameters &P, ReadAlignChunk** RAchunk)
     const bool fusedReaderRouter = (nTriage == 0 && nSolo > 0);
     const int actualNTriage = (nTriage == 0) ? 0 : nTriage;
     const int actualNSolo = fullyFused ? 0 : nSolo;
+    const bool noAlign = (P.pSolo.flexNoAlign != 0);
+
+    // Fully fused: every thread reads and hashes, and with alignment enabled
+    // aligns queued misses itself whenever alignQ is full (enqueueForAlign in
+    // FlexPipeline.cpp), so no thread is reserved as a consumer and
+    // --runThreadN 1 is valid.
     const int nWorkers = fullyFused ? 0 : (P.runThreadN - nLanes - actualNTriage - actualNSolo);
     const int nFusedThreads = fullyFused ? P.runThreadN : 0;
 
@@ -274,7 +280,6 @@ static void mapThreadsSpawnFlexPipeline(Parameters &P, ReadAlignChunk** RAchunk)
             "BGZF range readers currently require --flexPipelineNTriage 0 --flexPipelineNSolo 0");
     }
 
-    const bool noAlign = (P.pSolo.flexNoAlign != 0);
     P.inOut->logMain << "Flex pipeline: runThreadN=" << P.runThreadN
                      << ", nLanes=" << nLanes
                      << ", triage=" << actualNTriage
@@ -342,7 +347,8 @@ static void mapThreadsSpawnFlexPipeline(Parameters &P, ReadAlignChunk** RAchunk)
     std::vector<Stats> fusedStats(nFusedThreads);
 
     if (fullyFused) {
-        // All runThreadN threads are fused: they steal lanes, then switch to alignment
+        // All runThreadN threads are fused: they steal lanes, align queued
+        // misses whenever alignQ fills, then switch to alignment
         std::vector<pthread_t> fusedThreads(nFusedThreads);
         std::vector<FlexLaneReaderArgs> fusedArgs(nFusedThreads);
 
@@ -372,6 +378,10 @@ static void mapThreadsSpawnFlexPipeline(Parameters &P, ReadAlignChunk** RAchunk)
         // Join all fused threads (they self-transition from reader to aligner)
         for (int i = 0; i < nFusedThreads; ++i) pthread_join(fusedThreads[i], nullptr);
         P.inOut->logMain << "  All fused threads joined\n" << std::flush;
+
+        P.inOut->logMain << "  Fused producers aligned "
+                         << state.counters.alignHelped.load(std::memory_order_relaxed)
+                         << " queued reads while alignQ was full\n" << std::flush;
 
         if (state.inputFailed.load(std::memory_order_relaxed)) {
             fatalBgzfInput(P, state.inputError.empty()

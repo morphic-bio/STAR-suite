@@ -1,5 +1,6 @@
 #include "input/BgzfBlockReader.h"
 #include "input/BgzfRangeReader.h"
+#include "input/BgzfStarAdapter.h"
 
 #include <cstdlib>
 #include <fcntl.h>
@@ -17,6 +18,7 @@ namespace {
 struct Options {
     std::string mode;
     std::string input;
+    std::string input2;  // second mate for --mode pair
     uint32_t threads = 1;
     uint32_t workers = 1;
     bool crcCheck = true;
@@ -30,6 +32,8 @@ Options parse_args(int argc, char* argv[]) {
             options.mode = argv[++index];
         } else if (arg == "--input" && index + 1 < argc) {
             options.input = argv[++index];
+        } else if (arg == "--input2" && index + 1 < argc) {
+            options.input2 = argv[++index];
         } else if (arg == "--threads" && index + 1 < argc) {
             options.threads = static_cast<uint32_t>(std::stoul(argv[++index]));
         } else if (arg == "--workers" && index + 1 < argc) {
@@ -139,6 +143,32 @@ bool scan_records(const Options& options,
     return error->empty();
 }
 
+// Pair two mate files through the STAR adapter exactly as a fused Flex lane
+// does, so ordinal, record-count, and read-name validation can be tested
+// without a genome.
+bool scan_pairs(const Options& options,
+                uint64_t* record_count,
+                std::string* error) {
+    star::input::BgzfStarAdapter adapter;
+    star::input::BgzfStarAdapterOptions adapter_options;
+    adapter_options.mate0_reader_threads = options.workers;
+    adapter_options.mate1_reader_threads = options.workers;
+    adapter_options.crc_check = options.crcCheck;
+    if (!adapter.open(options.input, options.input2, adapter_options, error)) {
+        return false;
+    }
+    *record_count = 0;
+    star::input::BgzfStarRecord record;
+    while (true) {
+        const star::input::InputStatus status = adapter.next_record(&record, error);
+        if (status == star::input::InputStatus::Record) {
+            ++*record_count;
+            continue;
+        }
+        return status == star::input::InputStatus::End;
+    }
+}
+
 } // namespace
 
 int main(int argc, char* argv[]) {
@@ -175,6 +205,18 @@ int main(int argc, char* argv[]) {
             std::cout << "{\"checksum64\":\"" << std::hex << std::setw(16)
                       << std::setfill('0') << checksum << "\",\"record_count\":"
                       << std::dec << record_count << "}\n";
+            return 0;
+        }
+        if (options.mode == "pair") {
+            if (options.input2.empty()) {
+                throw std::runtime_error("--mode pair requires --input2");
+            }
+            uint64_t record_count = 0;
+            if (!scan_pairs(options, &record_count, &error)) {
+                std::cerr << "ERROR: " << error << '\n';
+                return 1;
+            }
+            std::cout << "{\"record_count\":" << record_count << "}\n";
             return 0;
         }
         throw std::runtime_error("unsupported --mode: " + options.mode);
