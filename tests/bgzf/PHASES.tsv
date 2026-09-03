@@ -7,3 +7,5 @@ T5	2	Missing EOF and mid-block truncation errors
 T6	3	Mixed BGZF and plain-gzip Flex lanes
 T7-off	0	Existing gzip and CBQ regressions with range mode disabled when available
 T7-auto	3	Existing gzip and CBQ regressions with auto mode
+T8	2	Paired-mate read-name and record-count validation in the STAR adapter
+T9	3	Fully-fused alignment mode drains alignQ without a reserved consumer (deadlock regression)

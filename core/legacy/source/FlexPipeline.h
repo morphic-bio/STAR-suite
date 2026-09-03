@@ -110,6 +110,31 @@ public:
         return true;
     }
 
+    // Non-blocking variants for producers that must not wait on a consumer
+    // that may not exist yet (fully-fused Flex; see enqueueForAlign). On a
+    // full queue try_push leaves `item` untouched and returns false; on a
+    // closed queue it drops the item exactly as push() does and returns true.
+    bool try_push(T& item) {
+        std::lock_guard<std::mutex> lock(mu_);
+        if (closed_) return true;
+        if (count_ >= capacity_) return false;
+        buf_[tail_] = std::move(item);
+        tail_ = (tail_ + 1) % capacity_;
+        ++count_;
+        cvEmpty_.notify_one();
+        return true;
+    }
+
+    bool try_pop(T& item) {
+        std::lock_guard<std::mutex> lock(mu_);
+        if (count_ == 0) return false;
+        item = std::move(buf_[head_]);
+        head_ = (head_ + 1) % capacity_;
+        --count_;
+        cvFull_.notify_one();
+        return true;
+    }
+
     void close() {
         std::lock_guard<std::mutex> lock(mu_);
         closed_ = true;
@@ -139,6 +164,8 @@ struct FlexPipelineCounters {
     std::atomic<uint64_t> triageKeep{0};
     std::atomic<uint64_t> triageDeny{0};
     std::atomic<uint64_t> triageMiss{0};
+    // Reads a fused producer aligned itself because alignQ was full.
+    std::atomic<uint64_t> alignHelped{0};
     std::atomic<uint64_t> perLaneReads[64];
 
     FlexPipelineCounters() {

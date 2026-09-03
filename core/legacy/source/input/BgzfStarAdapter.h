@@ -17,6 +17,8 @@ struct BgzfStarAdapterOptions {
     uint32_t mate0_reader_threads = 0;
     uint32_t mate1_reader_threads = 0;
     bool crc_check = true;
+    // Require the read-name stem of record i in both mates to agree.
+    bool validate_read_names = true;
 };
 
 struct BgzfStarRecord {

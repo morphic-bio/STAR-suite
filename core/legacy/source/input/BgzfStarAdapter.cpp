@@ -1,5 +1,6 @@
 #include "input/BgzfStarAdapter.h"
 
+#include <cstring>
 #include <limits>
 #include <sstream>
 
@@ -30,6 +31,25 @@ void split_read_name(const std::string& raw,
         ++extra_begin;
     }
     read_name_extra->assign(raw.data() + extra_begin, raw.size() - extra_begin);
+}
+
+// The read-name stem is the name up to the first whitespace, minus a legacy
+// "/1" or "/2" mate suffix. Illumina writes the same stem into both mates.
+struct NameStem {
+    const char* data;
+    size_t size;
+};
+
+NameStem read_name_stem(const std::string& raw) {
+    size_t end = raw.find_first_of(" \t");
+    if (end == std::string::npos) {
+        end = raw.size();
+    }
+    if (end >= 2 && raw[end - 2] == '/' &&
+        (raw[end - 1] == '1' || raw[end - 1] == '2' || raw[end - 1] == '3')) {
+        end -= 2;
+    }
+    return NameStem{raw.data(), end};
 }
 
 } // namespace
@@ -148,6 +168,25 @@ InputStatus BgzfStarAdapter::next_record_locked(BgzfStarRecord* record,
                 << " and " << record->mates[1].ordinal;
         set_error(error, message.str());
         return InputStatus::Error;
+    }
+    // Pairing is by ordinal; the read names are the only evidence inside the
+    // files that record i of R1 belongs with record i of R2. Without this
+    // check a mate file that was truncated, filtered, or re-sorted on its
+    // own would pair silently, and the end-of-stream count check catches it
+    // only if the counts happen to differ.
+    if (options_.validate_read_names) {
+        const NameStem stem0 = read_name_stem(record->mates[0].name);
+        const NameStem stem1 = read_name_stem(record->mates[1].name);
+        if (stem0.size != stem1.size ||
+            std::memcmp(stem0.data, stem1.data, stem0.size) != 0) {
+            std::ostringstream message;
+            message << "BGZF mate read-name mismatch at record " << recordsRead_
+                    << ": mate 0 '" << record->mates[0].name
+                    << "' does not pair with mate 1 '" << record->mates[1].name
+                    << "'";
+            set_error(error, message.str());
+            return InputStatus::Error;
+        }
     }
 
     split_read_name(record->mates[0].name,

@@ -195,9 +195,62 @@ PY
     pass "T5 optional EOF and partial-member truncation"
 fi
 
+if enabled T8; then
+    [[ -x "${HARNESS}" ]] || die "T8 requires ${HARNESS}"
+    # A second mate with the same names ("/2"), different sequences, and a
+    # different block size so the two files' block layouts are unrelated, plus
+    # one variant with a single renamed record and one missing its last record.
+    python3 - "${OUT_ROOT}/inputs/source.fastq" "${OUT_ROOT}/inputs" <<'PY'
+import sys
+from pathlib import Path
+lines = Path(sys.argv[1]).read_text(encoding="ascii").splitlines()
+out = Path(sys.argv[2])
+records = [lines[i:i + 4] for i in range(0, len(lines), 4)]
+mate2 = [[rec[0].replace("/1 ", "/2 "), rec[1][::-1], rec[2], rec[3]] for rec in records]
+renamed = [list(rec) for rec in mate2]
+renamed[100][0] = "@read999999/2 instrument:run:100"
+variants = {"pair_r2": mate2, "pair_r2_renamed": renamed, "pair_r2_short": mate2[:-1]}
+for name, recs in variants.items():
+    (out / f"{name}.fastq").write_text(
+        "\n".join(line for rec in recs for line in rec) + "\n", encoding="ascii")
+PY
+    for name in pair_r2 pair_r2_renamed pair_r2_short; do
+        "${MAKE_FIXTURE}" --block-bytes 1013 "${OUT_ROOT}/inputs/${name}.fastq" \
+            "${OUT_ROOT}/inputs/${name}.fastq.gz"
+    done
+    "${HARNESS}" --mode pair --input "${OUT_ROOT}/inputs/blocked.fastq.gz" \
+        --input2 "${OUT_ROOT}/inputs/pair_r2.fastq.gz" --workers 3 --crc-check 1 \
+        > "${OUT_ROOT}/results/pair.json"
+    python3 - "${OUT_ROOT}/results/pair.json" <<'PY'
+import json
+import sys
+assert json.load(open(sys.argv[1], encoding="utf-8"))["record_count"] == 257
+PY
+    if "${HARNESS}" --mode pair --input "${OUT_ROOT}/inputs/blocked.fastq.gz" \
+        --input2 "${OUT_ROOT}/inputs/pair_r2_renamed.fastq.gz" --workers 3 --crc-check 1 \
+        > /dev/null 2> "${OUT_ROOT}/results/pair_renamed.stderr"; then
+        die "T8 a renamed mate record unexpectedly paired"
+    fi
+    grep -F "read-name mismatch at record 100" "${OUT_ROOT}/results/pair_renamed.stderr" >/dev/null \
+        || die "T8 read-name mismatch was not reported at record 100"
+    if "${HARNESS}" --mode pair --input "${OUT_ROOT}/inputs/blocked.fastq.gz" \
+        --input2 "${OUT_ROOT}/inputs/pair_r2_short.fastq.gz" --workers 3 --crc-check 1 \
+        > /dev/null 2> "${OUT_ROOT}/results/pair_short.stderr"; then
+        die "T8 a short mate file unexpectedly paired"
+    fi
+    grep -F "record-count mismatch at record 256" "${OUT_ROOT}/results/pair_short.stderr" >/dev/null \
+        || die "T8 record-count mismatch was not reported at record 256"
+    pass "T8 paired-mate read-name and record-count validation"
+fi
+
 if enabled T6; then
     BGZF_E2E_CASE=T6 "${ROOT_DIR}/tests/bgzf/test_flex_e2e.sh"
     pass "T6 mixed BGZF/plain-gzip lanes"
+fi
+
+if enabled T9; then
+    "${ROOT_DIR}/tests/bgzf/test_flex_fused_align.sh"
+    pass "T9 fully-fused alignment mode drains alignQ without a reserved consumer"
 fi
 
 run_t7() {

@@ -381,8 +381,8 @@ fastx-input-harness : FastxInputModule.o input/fastx_input_harness.cpp
 .PHONY: bgzf-input-harness
 bgzf-input-harness : CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
 bgzf-input-harness : LDFLAGS := $(LDFLAGSextra) -lz -lpthread
-bgzf-input-harness : BgzfBlockReader.o BgzfRangeReader.o input/bgzf_input_harness.cpp
-	$(CXX) -o bgzf_input_harness $(CXXFLAGS) input/bgzf_input_harness.cpp BgzfBlockReader.o BgzfRangeReader.o $(LDFLAGS)
+bgzf-input-harness : BgzfBlockReader.o BgzfRangeReader.o BgzfStarAdapter.o input/bgzf_input_harness.cpp
+	$(CXX) -o bgzf_input_harness $(CXXFLAGS) input/bgzf_input_harness.cpp BgzfBlockReader.o BgzfRangeReader.o BgzfStarAdapter.o $(LDFLAGS)
 
 # Standalone packed-record and RAM/spill bucket harness for B1-B2.
 .PHONY: cb-bucket-harness

@@ -18,6 +18,7 @@
 #include <fstream>
 #include <limits>
 #include <sstream>
+#include <thread>
 #include <unordered_set>
 #include <unistd.h>
 #include <chrono>
@@ -315,13 +316,41 @@ static void ensureAsciiToNibInit() {
 // Process one lane: read all FASTQ records, hash screen, inline Solo for hits, push misses to alignQ.
 // All per-thread state (localBar, sampleDet, scratch buffers) is owned by the caller
 // and reused across lane claims — no per-lane allocation.
+// Hand a hash miss to the aligner. In fully-fused mode every thread is a
+// producer until it runs out of input, so nobody drains alignQ while reading
+// is in progress: a blocking push on a full queue would wait forever for a
+// consumer that does not exist yet (fused mode with --flexNoAlign 0 hung as
+// soon as misses exceeded the queue capacity). A producer that finds the
+// queue full therefore aligns queued packets itself until there is room.
+// Consumer capacity grows exactly with queue pressure, no thread is reserved,
+// and the path works at --runThreadN 1. Callers without an aligner (the
+// staged modes, which spawn dedicated alignment workers) keep the blocking
+// push.
+static void enqueueForAlign(FlexPipelineState *st, EnrichedPacket &&ep, ReadAlign *RA)
+{
+    if (RA == nullptr) {
+        st->alignQ.push(std::move(ep));
+        return;
+    }
+    while (!st->alignQ.try_push(ep)) {
+        EnrichedPacket queued;
+        if (st->alignQ.try_pop(queued)) {
+            RA->oneReadFromPacket(queued);
+            st->counters.alignHelped.fetch_add(1, std::memory_order_relaxed);
+        } else {
+            std::this_thread::yield();
+        }
+    }
+}
+
 static uint64_t processOneLane(
     FlexPipelineState *st, Parameters &P, int laneId,
     gzFile gzR2, gzFile gzR1,
     SoloReadFeature *readFeat, Stats *stats,
     const std::unordered_set<uint32_t> &samplePreFilter,
     SampleDetector *sampleDet, bool sampleDetReady,
-    SoloReadBarcode &localBar, bool noAlign = false)
+    SoloReadBarcode &localBar, bool noAlign = false,
+    ReadAlign *RA = nullptr)
 {
     auto &cache = FlexHashScreenCache::instance();
     const uint32_t sampleTagOffset = P.pSolo.sampleProbeOffset;
@@ -440,7 +469,7 @@ static uint64_t processOneLane(
                 ep.umiB = 0;
                 ep.detectedSampleToken = 0xFF;
                 ep.hashScreenSampleIdx = 0;
-                st->alignQ.push(std::move(ep));
+                enqueueForAlign(st, std::move(ep), RA);
             }
         }
 
@@ -459,7 +488,7 @@ static uint64_t processOneBgzfRange(
     SoloReadFeature *readFeat, Stats *stats,
     const std::unordered_set<uint32_t> &samplePreFilter,
     SampleDetector *sampleDet, bool sampleDetReady,
-    SoloReadBarcode &localBar, bool noAlign)
+    SoloReadBarcode &localBar, bool noAlign, ReadAlign *RA)
 {
     const FlexBgzfLane &lanePlan = st->bgzfLanes[static_cast<size_t>(task.laneId)];
     std::string inputError;
@@ -615,7 +644,7 @@ static uint64_t processOneBgzfRange(
                 packet.umiB = 0;
                 packet.detectedSampleToken = 0xFF;
                 packet.hashScreenSampleIdx = 0;
-                st->alignQ.push(std::move(packet));
+                enqueueForAlign(st, std::move(packet), RA);
             }
         }
         st->counters.readsTotal.fetch_add(1);
@@ -633,7 +662,8 @@ static uint64_t processCbqModuleRecords(
     SampleDetector *sampleDet, bool sampleDetReady,
     SoloReadBarcode &localBar, bool noAlign,
     bool deterministicReadIds,
-    uint64_t globalFirst)
+    uint64_t globalFirst,
+    ReadAlign *RA)
 {
     auto &cache = FlexHashScreenCache::instance();
     const uint32_t sampleTagOffset = P.pSolo.sampleProbeOffset;
@@ -776,7 +806,7 @@ static uint64_t processCbqModuleRecords(
                     ep.umiB = 0;
                     ep.detectedSampleToken = 0xFF;
                     ep.hashScreenSampleIdx = 0;
-                    st->alignQ.push(std::move(ep));
+                    enqueueForAlign(st, std::move(ep), RA);
                 }
             }
 
@@ -799,7 +829,8 @@ static uint64_t processOneCbqLane(
     SoloReadFeature *readFeat, Stats *stats,
     const std::unordered_set<uint32_t> &samplePreFilter,
     SampleDetector *sampleDet, bool sampleDetReady,
-    SoloReadBarcode &localBar, bool noAlign = false)
+    SoloReadBarcode &localBar, bool noAlign = false,
+    ReadAlign *RA = nullptr)
 {
     const star::input::InputSourcePlan plan = makeSingleCbqLanePlan(cbqPath);
     star::input::CbqInputModule module;
@@ -811,7 +842,7 @@ static uint64_t processOneCbqLane(
     }
     const uint64_t nReads = processCbqModuleRecords(
         st, P, laneId, cbqPath, module, readFeat, stats, samplePreFilter,
-        sampleDet, sampleDetReady, localBar, noAlign, false, 0);
+        sampleDet, sampleDetReady, localBar, noAlign, false, 0, RA);
     module.close();
     return nReads;
 }
@@ -823,7 +854,7 @@ static uint64_t processOneCbqRange(
     SoloReadFeature *readFeat, Stats *stats,
     const std::unordered_set<uint32_t> &samplePreFilter,
     SampleDetector *sampleDet, bool sampleDetReady,
-    SoloReadBarcode &localBar, bool noAlign)
+    SoloReadBarcode &localBar, bool noAlign, ReadAlign *RA)
 {
     const star::input::InputSourcePlan plan = makeSingleCbqLanePlan(cbqPath);
     star::input::CbqInputModule module;
@@ -839,7 +870,7 @@ static uint64_t processOneCbqRange(
     }
     const uint64_t nReads = processCbqModuleRecords(
         st, P, task.laneId, cbqPath, module, readFeat, stats, samplePreFilter,
-        sampleDet, sampleDetReady, localBar, noAlign, true, task.globalFirst);
+        sampleDet, sampleDetReady, localBar, noAlign, true, task.globalFirst, RA);
     module.close();
     return nReads;
 }
@@ -1123,7 +1154,7 @@ void *flexLaneReaderFullThread(void *arg) {
                 st->laneFiles[static_cast<size_t>(task.laneId)].r2path;
             processOneCbqRange(st, P, task, cbqPath, readFeat, stats,
                                samplePreFilter, sampleDet, sampleDetReady,
-                               localBar, noAlign);
+                               localBar, noAlign, RA);
         }
     } else {
         // BGZF readers intentionally remain outside permit domains in v1,
@@ -1135,7 +1166,7 @@ void *flexLaneReaderFullThread(void *arg) {
                 ensureSampleDetector();
                 processOneBgzfRange(st, P, task, readFeat, stats,
                                     samplePreFilter, sampleDet, sampleDetReady,
-                                    localBar, noAlign);
+                                    localBar, noAlign, RA);
             }
         }
 
@@ -1153,7 +1184,7 @@ void *flexLaneReaderFullThread(void *arg) {
             const std::string &r2path = st->laneFiles[lane].r2path;
             if (P.readFilesTypeN == 20 && P.cbqInputActive) {
                 processOneCbqLane(st, P, lane, r2path, readFeat, stats,
-                                  samplePreFilter, sampleDet, sampleDetReady, localBar, noAlign);
+                                  samplePreFilter, sampleDet, sampleDetReady, localBar, noAlign, RA);
             } else {
                 const std::string &r1path = st->laneFiles[lane].r1path;
                 gzFile gzR2 = gzopen(r2path.c_str(), "rb");
@@ -1167,7 +1198,7 @@ void *flexLaneReaderFullThread(void *arg) {
                 gzbuffer(gzR1, kGzBufSize);
 
                 processOneLane(st, P, lane, gzR2, gzR1, readFeat, stats,
-                               samplePreFilter, sampleDet, sampleDetReady, localBar, noAlign);
+                               samplePreFilter, sampleDet, sampleDetReady, localBar, noAlign, RA);
             }
         }
     }
