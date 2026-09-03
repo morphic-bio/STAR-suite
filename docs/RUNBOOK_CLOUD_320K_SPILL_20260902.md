@@ -137,7 +137,7 @@ fail-closed: every arm verifies its own outputs (16 per-sample results), a faile
 arm blocks whatever depends on it and is not retried automatically, a failed Cell
 Ranger run keeps its pipestance so the logs survive, partial CBQ encodes are
 deleted rather than passed downstream, and the script exits nonzero unless every
-arm is verified. Run it inside tmux or nohup so an SSH drop cannot kill a run. That script is what gets
+arm is verified. Run it inside tmux or nohup so an SSH drop cannot kill a run. Note that the instance-store scratch (including the step markers) is wiped by an instance stop/start, not just by termination: pausing a session mid-matrix restarts it from zero, so let it run. The results table is mirrored to `<staging-bucket>/progress/results.tsv` after every row, so completed numbers survive even if the instance is lost. That script is what gets
 committed at release and archived on Zenodo: the paper's "commands are in the
 repository" points at it, and the reproducibility demonstration is literally
 `bash run_cloud_320k_matrix.sh` on a fresh instance. This document is its
