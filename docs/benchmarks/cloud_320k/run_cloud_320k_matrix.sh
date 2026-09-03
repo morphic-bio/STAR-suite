@@ -154,10 +154,14 @@ export PATH="$HOME/.local/bin:$PATH"
 if ! done_p fastqs; then
   log "streaming 320k FASTQs from 10x's public bucket (index reads dropped in flight)"
   aws s3 cp --no-sign-request "$TENX_TAR" - \
-    | tar -x -C $S/fastqs --strip-components=1 --wildcards '*_R1_001.fastq.gz' '*_R2_001.fastq.gz' \
+    | tar -x -C $S/fastqs --wildcards '*_R1_001.fastq.gz' '*_R2_001.fastq.gz' \
     || die "FASTQ stream/extract failed"
-  n=$(ls $S/fastqs/*.fastq.gz 2>/dev/null | wc -l)
-  [ "$n" -eq 8 ] || die "expected 8 FASTQs, found $n"
+  # The archive stores members as ./<dir>/<file>, so the reads land nested. Flatten
+  # whatever depth was used instead of assuming a --strip-components level.
+  find $S/fastqs -mindepth 2 -name '*.fastq.gz' -exec mv -t $S/fastqs {} + 2>/dev/null
+  find $S/fastqs -mindepth 1 -type d -empty -delete 2>/dev/null
+  n=$(find $S/fastqs -maxdepth 1 -name '*.fastq.gz' | wc -l)
+  [ "$n" -eq 8 ] || die "expected 8 FASTQs after extraction, found $n"
   mark fastqs
 fi
 
