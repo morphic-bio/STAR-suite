@@ -18,6 +18,7 @@
 #include <cctype>
 #include <cstdlib>
 #include <fstream>
+#include <memory>
 #include <sstream>
 #include <unordered_map>
 #include <zlib.h>
@@ -351,6 +352,11 @@ static void mapThreadsSpawnFlexPipeline(Parameters &P, ReadAlignChunk** RAchunk)
         // misses whenever alignQ fills, then switch to alignment
         std::vector<pthread_t> fusedThreads(nFusedThreads);
         std::vector<FlexLaneReaderArgs> fusedArgs(nFusedThreads);
+        std::vector<std::unique_ptr<SoloReadBarcode>> fusedBars;
+        fusedBars.reserve(nFusedThreads);
+        for (int i = 0; i < nFusedThreads; ++i) {
+            fusedBars.emplace_back(new SoloReadBarcode(P));
+        }
 
         for (int i = 0; i < nFusedThreads; ++i) {
             fusedFeats[i] = new SoloReadFeature(SoloFeatureTypes::Gene, P, -(200 + i));
@@ -364,6 +370,7 @@ static void mapThreadsSpawnFlexPipeline(Parameters &P, ReadAlignChunk** RAchunk)
             fusedArgs[i].stats = &fusedStats[i];
             fusedArgs[i].RA = RAchunk[i]->RA;
             fusedArgs[i].threadId = i;
+            fusedArgs[i].readBar = fusedBars[i].get();
             pthread_create(&fusedThreads[i], nullptr, flexLaneReaderFullThread, &fusedArgs[i]);
         }
         P.inOut->logMain << "  " << nFusedThreads << " fused threads started (lane-steal + role-switch)\n" << std::flush;
@@ -394,6 +401,11 @@ static void mapThreadsSpawnFlexPipeline(Parameters &P, ReadAlignChunk** RAchunk)
 
         // Merge stats from all fused threads
         for (int i = 0; i < nFusedThreads; ++i) {
+            // Screened KEEP/DENY reads used fusedBars; alignment misses used
+            // the ReadAlign-owned barcode object. Merge the former before
+            // Solo constructs its global exact-CB prior.
+            RAchunk[i]->RA->soloRead->readBar->addCounts(*fusedBars[i]);
+            RAchunk[i]->RA->soloRead->readBar->addStats(*fusedBars[i]);
             g_statsAll.addStats(fusedStats[i]);
             if (!noAlign)
                 g_statsAll.addStats(RAchunk[i]->RA->statsRA);
@@ -452,6 +464,7 @@ static void mapThreadsSpawnFlexPipeline(Parameters &P, ReadAlignChunk** RAchunk)
         readerArgs[lane].stats = nullptr;
         readerArgs[lane].RA = nullptr;
         readerArgs[lane].threadId = lane;
+        readerArgs[lane].readBar = nullptr;
 
         if (fusedReaderRouter) {
             pthread_create(&readerThreads[lane], nullptr, flexLaneReaderRouterThread, &readerArgs[lane]);
@@ -477,6 +490,11 @@ static void mapThreadsSpawnFlexPipeline(Parameters &P, ReadAlignChunk** RAchunk)
     std::vector<FlexSoloConsumerArgs> soloArgs(actualNSolo);
     std::vector<SoloReadFeature *> soloFeats(actualNSolo);
     std::vector<Stats> soloStats(actualNSolo);
+    std::vector<std::unique_ptr<SoloReadBarcode>> soloBars;
+    soloBars.reserve(actualNSolo);
+    for (int i = 0; i < actualNSolo; ++i) {
+        soloBars.emplace_back(new SoloReadBarcode(P));
+    }
 
     for (int i = 0; i < actualNSolo; ++i) {
         soloFeats[i] = new SoloReadFeature(SoloFeatureTypes::Gene, P, -(100 + i));
@@ -485,6 +503,7 @@ static void mapThreadsSpawnFlexPipeline(Parameters &P, ReadAlignChunk** RAchunk)
         soloArgs[i].consumerId = i;
         soloArgs[i].readFeat = soloFeats[i];
         soloArgs[i].stats = &soloStats[i];
+        soloArgs[i].readBar = soloBars[i].get();
         pthread_create(&soloThreads[i], nullptr, flexSoloConsumerThread, &soloArgs[i]);
         P.inOut->logMain << "  Flex solo consumer " << i << " started\n" << std::flush;
     }
@@ -529,6 +548,11 @@ static void mapThreadsSpawnFlexPipeline(Parameters &P, ReadAlignChunk** RAchunk)
 
     // --- Merge stats ---
     for (int i = 0; i < actualNSolo; ++i) {
+        // Alignment workers already retain their own CB evidence. Put the
+        // screened KEEP/DENY evidence on one worker so Solo's ordinary
+        // readBarSum reduction sees each consumer exactly once.
+        RAchunk[0]->RA->soloRead->readBar->addCounts(*soloBars[i]);
+        RAchunk[0]->RA->soloRead->readBar->addStats(*soloBars[i]);
         g_statsAll.addStats(soloStats[i]);
     }
     for (int i = 0; i < nWorkers; ++i) {
@@ -653,6 +677,11 @@ void runFlexNoGenomeCountOnly(Parameters &P) {
     std::vector<Stats> fusedStats(nFusedThreads);
     std::vector<pthread_t> fusedThreads(nFusedThreads);
     std::vector<FlexLaneReaderArgs> fusedArgs(nFusedThreads);
+    std::vector<std::unique_ptr<SoloReadBarcode>> fusedBars;
+    fusedBars.reserve(nFusedThreads);
+    for (int i = 0; i < nFusedThreads; ++i) {
+        fusedBars.emplace_back(new SoloReadBarcode(P));
+    }
 
     for (int i = 0; i < nFusedThreads; ++i) {
         fusedFeats[i] = new SoloReadFeature(SoloFeatureTypes::Gene, P, -(200 + i));
@@ -666,6 +695,7 @@ void runFlexNoGenomeCountOnly(Parameters &P) {
         fusedArgs[i].stats = &fusedStats[i];
         fusedArgs[i].RA = nullptr;
         fusedArgs[i].threadId = i;
+        fusedArgs[i].readBar = fusedBars[i].get();
         int threadStatus = pthread_create(&fusedThreads[i], nullptr, flexLaneReaderFullThread, &fusedArgs[i]);
         if (threadStatus > 0) {
             ostringstream errOut;
@@ -725,6 +755,10 @@ void runFlexNoGenomeCountOnly(Parameters &P) {
 
     SoloReadBarcode readBarSum(P);
     {
+        for (int i = 0; i < nFusedThreads; ++i) {
+            readBarSum.addCounts(*fusedBars[i]);
+            readBarSum.addStats(*fusedBars[i]);
+        }
         ofstream *statsStream = &ofstrOpen(P.outFileNamePrefix + P.pSolo.outFileNames[0] + "Barcodes.stats",
                                            ERROR_OUT, P);
         readBarSum.statsOut(*statsStream);

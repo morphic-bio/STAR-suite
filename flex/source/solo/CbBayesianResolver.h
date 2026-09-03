@@ -178,6 +178,17 @@ public:
     BayesianResult resolve(const CBContext &context,
                           const std::vector<Candidate> &candidates,
                           const std::unordered_map<uint32_t, uint32_t> &umiCounts) const;
+
+    // Resolve the legacy STARsolo multi-candidate payload exactly: each
+    // candidate is weighted by its exact-barcode abundance and by the Phred
+    // probability that its mismatching base is an error. candidateIdx is
+    // 1-based; candidateQual contains the corresponding raw quality byte.
+    BayesianResult resolveStarSolo(const std::vector<uint32_t> &candidateIdx,
+                                    const std::vector<uint8_t> &candidateQual,
+                                    const std::vector<uint32_t> &exactCbReadCount,
+                                    int qsBase,
+                                    uint32_t qsMax,
+                                    double minPosterior) const;
     
     // Get whitelist size
     size_t whitelistSize() const { return whitelistSize_; }

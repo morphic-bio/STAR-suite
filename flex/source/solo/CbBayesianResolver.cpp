@@ -228,3 +228,65 @@ BayesianResult CbBayesianResolver::resolve(const CBContext &context,
     
     return result;
 }
+
+BayesianResult CbBayesianResolver::resolveStarSolo(
+    const std::vector<uint32_t> &candidateIdx,
+    const std::vector<uint8_t> &candidateQual,
+    const std::vector<uint32_t> &exactCbReadCount,
+    int qsBase,
+    uint32_t qsMax,
+    double minPosterior) const
+{
+    BayesianResult result;
+    if (candidateIdx.empty() || candidateIdx.size() != candidateQual.size()) {
+        return result;
+    }
+
+    double total = 0.0;
+    double bestWeight = 0.0;
+    double runnerWeight = 0.0;
+    uint32_t bestIdx = 0;
+
+    for (size_t ii = 0; ii < candidateIdx.size(); ++ii) {
+        const uint32_t idx1 = candidateIdx[ii];
+        if (idx1 == 0 || idx1 > whitelistSize_ || idx1 > exactCbReadCount.size()) {
+            continue;
+        }
+
+        const uint32_t exactCount = exactCbReadCount[idx1 - 1u];
+        if (exactCount == 0) {
+            continue;
+        }
+
+        int quality = static_cast<int>(candidateQual[ii]) - qsBase;
+        if (quality > static_cast<int>(qsMax)) {
+            quality = static_cast<int>(qsMax);
+        }
+        const double weight = static_cast<double>(exactCount)
+            * std::pow(10.0, -static_cast<double>(quality) / 10.0);
+        total += weight;
+        if (weight > bestWeight) {
+            runnerWeight = bestWeight;
+            bestWeight = weight;
+            bestIdx = idx1;
+        } else if (weight > runnerWeight) {
+            runnerWeight = weight;
+        }
+    }
+
+    if (total <= 0.0 || bestIdx == 0) {
+        return result;
+    }
+
+    result.bestIdx = bestIdx;
+    result.posteriorBest = bestWeight / total;
+    result.posteriorRunner = runnerWeight / total;
+    if (bestWeight >= minPosterior * total) {
+        result.status = BayesianResult::Resolved;
+    } else {
+        result.status = candidateIdx.size() > 1
+            ? BayesianResult::Ambiguous
+            : BayesianResult::Unresolved;
+    }
+    return result;
+}

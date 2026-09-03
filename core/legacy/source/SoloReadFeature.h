@@ -70,6 +70,11 @@ public:
             FlexGdnaRegion probeRegion = FlexGdnaUnknown;
         };
         std::vector<AmbiguousObservation> observations; // Flex: per-read observations (unchanged)
+        // Flex direct-hash resolution signature. candidateIdx is 1-based and
+        // candidateQual stores the corresponding raw Phred byte from the one
+        // mismatching/N base, exactly as the legacy Solo spool does.
+        std::vector<uint8_t> candidateQual;
+        bool flexPayloadInvalid = false;
         // Non-Flex direct bridge: aggregate (umi24,gene16) -> read counts (no per-read observation vector)
         std::unordered_map<uint64_t, uint32_t> bridgeAmbigUmiGene_;
         std::vector<double> cbLogLikMatch;

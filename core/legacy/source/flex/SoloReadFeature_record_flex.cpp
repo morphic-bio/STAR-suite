@@ -16,6 +16,7 @@
 #include <sstream>
 #include <string>
 #include <cstdio>
+#include <cctype>
 #include <mutex>
 #include <cstdlib>
 #include <algorithm>
@@ -323,6 +324,21 @@ static bool dropUnmatchedTagForFlex(const SoloReadBarcode &soloBar, uint8_t tagI
     return sampleTaggingEnabledForFlex(soloBar) && (tagIdx == 0);
 }
 
+static bool flexAmbiguousBarcodePayloadValid(const SoloReadBarcode &soloBar) {
+    if (soloBar.cbSeq.size() != soloBar.pSolo.cbL
+        || soloBar.cbQual.size() != soloBar.cbSeq.size()
+        || soloBar.cbMatchInd.size() != soloBar.cbMatchQual.size()) {
+        return false;
+    }
+    for (char base : soloBar.cbSeq) {
+        const char upper = static_cast<char>(std::toupper(static_cast<unsigned char>(base)));
+        if (upper != 'A' && upper != 'C' && upper != 'G' && upper != 'T' && upper != 'N') {
+            return false;
+        }
+    }
+    return true;
+}
+
 static void accumulateAmbiguousCBForFlex(SoloReadFeature *soloReadFeat, SoloReadBarcode &soloBar,
                                          uint16_t geneIdx, uint8_t tagIdx,
                                          FlexGdnaRegion probeRegion) {
@@ -334,6 +350,10 @@ static void accumulateAmbiguousCBForFlex(SoloReadFeature *soloReadFeat, SoloRead
     }
 
     uint32_t umi24 = soloBar.umiB & 0xFFFFFF;
+    // The resolution decision depends on candidate identities and their
+    // mismatch qualities, not only on the observed sequence. cbMatchString is
+    // the legacy serialization of exactly that signature, so reads sharing a
+    // key are safe to resolve once and replay together.
     ReadAlign::AmbigKey ambigKey = ReadAlign::hashCbSeq(soloBar.cbMatchString);
     // Accumulate into the shared striped store when it is active, so an
     // ambiguous barcode seen by several threads is combined here rather than
@@ -351,19 +371,25 @@ static void accumulateAmbiguousCBForFlex(SoloReadFeature *soloReadFeat, SoloRead
         for (auto idx : soloBar.cbMatchInd) {
             entry.candidateIdx.push_back(static_cast<uint32_t>(idx + 1));
         }
-        entry.cbSeq = soloBar.cbMatchString;
+        entry.candidateQual = soloBar.cbMatchQual;
+        entry.cbSeq = soloBar.cbSeq;
         entry.cbQual = soloBar.cbQual;
-        cb_bayesian::normalizeCbQual(entry.cbQual, entry.cbSeq);
-        entry.umiCounts.reserve(32);
+        entry.flexPayloadInvalid = !flexAmbiguousBarcodePayloadValid(soloBar);
+    } else {
+        if (entry.candidateIdx.size() != soloBar.cbMatchInd.size()
+            || entry.candidateQual != soloBar.cbMatchQual) {
+            entry.flexPayloadInvalid = true;
+        } else {
+            for (size_t ii = 0; ii < entry.candidateIdx.size(); ++ii) {
+                if (entry.candidateIdx[ii] != static_cast<uint32_t>(soloBar.cbMatchInd[ii] + 1)) {
+                    entry.flexPayloadInvalid = true;
+                    break;
+                }
+            }
+        }
+        entry.flexPayloadInvalid = entry.flexPayloadInvalid
+            || !flexAmbiguousBarcodePayloadValid(soloBar);
     }
-
-    cb_bayesian::accumulateCbQualityEvidence(entry.cbSeq,
-                                             soloBar.cbQual,
-                                             entry.cbLogLikMatch,
-                                             entry.cbLogLikMismatch,
-                                             entry.cbEvidenceReads);
-
-    entry.umiCounts[umi24]++;
 
     SoloReadFeature::ExtendedAmbiguousEntry::AmbiguousObservation obs;
     obs.geneIdx = geneIdx;
@@ -1154,51 +1180,7 @@ uint32 outputReadCB_flex(fstream *streamOut, const uint64 iRead, const int32 fea
     // Ambiguous CB: multiple whitelist candidates (cbMatchInd.size() > 1) or cbMatch > 1 (multiple matches)
     auto accumulateAmbiguousCB = [&](uint16_t geneIdx, uint8_t tagIdx,
                                      FlexGdnaRegion probeRegion) {
-        bool isAmbiguous = (soloBar.cbMatchInd.size() > 1) || (soloBar.cbMatch > 1);
-        if (!soloReadFeat
-            || (!soloReadFeat->inlineHash_ && !soloReadFeat->bucketStorageEnabled())
-            || !isAmbiguous || soloBar.cbMatchString.empty() || soloBar.cbMatchInd.empty()) {
-            return;
-        }
-        // Ambiguous CB: accumulate for resolution with gene/tag/umi info
-        uint32_t umi24 = soloBar.umiB & 0xFFFFFF;
-        ReadAlign::AmbigKey ambigKey = ReadAlign::hashCbSeq(soloBar.cbMatchString);
-        SoloReadFeature::AmbigEntryRef sharedRef;
-        const bool useShared = SoloReadFeature::sharedAmbigActive();
-        if (useShared)
-            sharedRef = SoloReadFeature::sharedAmbigEntry(ambigKey);
-        SoloReadFeature::ExtendedAmbiguousEntry &entry =
-            useShared ? *sharedRef : soloReadFeat->pendingAmbiguous_[ambigKey];
-
-        if (entry.candidateIdx.empty()) {
-            // First time seeing this ambiguous CB: initialize candidates
-            entry.candidateIdx.reserve(soloBar.cbMatchInd.size());
-            for (auto idx : soloBar.cbMatchInd) {
-                entry.candidateIdx.push_back(static_cast<uint32_t>(idx + 1)); // 1-based for resolver
-            }
-            entry.cbSeq = soloBar.cbMatchString;
-            entry.cbQual = soloBar.cbQual;
-            cb_bayesian::normalizeCbQual(entry.cbQual, entry.cbSeq);
-            entry.umiCounts.reserve(32);
-        }
-
-        cb_bayesian::accumulateCbQualityEvidence(entry.cbSeq,
-                                                 soloBar.cbQual,
-                                                 entry.cbLogLikMatch,
-                                                 entry.cbLogLikMismatch,
-                                                 entry.cbEvidenceReads);
-        
-        // Accumulate UMI count (24-bit packed UMI -> count)
-        entry.umiCounts[umi24]++;
-        
-        // Store gene/tag/umi observation for later hash creation after resolution
-        SoloReadFeature::ExtendedAmbiguousEntry::AmbiguousObservation obs;
-        obs.geneIdx = geneIdx;
-        obs.tagIdx = tagIdx;
-        obs.umi24 = umi24;
-        obs.count = 1;
-        obs.probeRegion = probeRegion;
-        entry.observations.push_back(obs);
+        accumulateAmbiguousCBForFlex(soloReadFeat, soloBar, geneIdx, tagIdx, probeRegion);
     };
     
     // Helper lambda to track readId -> (cbIdx, umi24, status) for sorted BAM CB/UB tag injection

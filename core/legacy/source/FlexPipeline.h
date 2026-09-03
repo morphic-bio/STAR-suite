@@ -283,6 +283,7 @@ struct FlexPipelineState {
 
 class ReadAlign;
 class SoloReadFeature;
+class SoloReadBarcode;
 class Parameters;
 class Stats;
 
@@ -296,6 +297,7 @@ struct FlexLaneReaderArgs {
     Stats *stats;               // non-null in fully-fused mode
     ReadAlign *RA;              // non-null for role-switch to alignment worker
     int threadId;               // logical thread index (0..nFusedThreads-1)
+    SoloReadBarcode *readBar;   // thread-owned CB evidence retained after join
 };
 
 struct FlexSoloConsumerArgs {
@@ -304,6 +306,7 @@ struct FlexSoloConsumerArgs {
     int consumerId;
     SoloReadFeature *readFeat;
     Stats *stats;
+    SoloReadBarcode *readBar;   // consumer-owned CB evidence retained after join
 };
 
 struct FlexAlignWorkerArgs {

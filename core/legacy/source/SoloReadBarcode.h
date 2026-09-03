@@ -23,6 +23,10 @@ public:
     int32 umiCheck;//umi check status
     string cbMatchString;//CB matches and qualities
     vector<uint64> cbMatchInd;//matches
+    // Raw mismatch-quality byte for each entry in cbMatchInd when cbMatch>1.
+    // Keeping this structured avoids reparsing cbMatchString in direct-hash
+    // paths; cbMatchString remains the legacy spool representation.
+    vector<uint8_t> cbMatchQual;
     vector<uint32> cbReadCountExact;
     //map <uint32,uint32> cbReadCountMap;//count read per CB for no WL
 
@@ -42,7 +46,10 @@ public:
     void addCounts(const SoloReadBarcode &rfIn);
     void addStats(const SoloReadBarcode &rfIn);
     void statsOut(ofstream &streamOut);
-    void matchCBtoWL(string &cbSeq1, string &cbQual1, vector<uint64> &cbWL, int32 &cbMatch1, vector<uint64> &cbMatchInd1, string &cbMatchString1);
+    void matchCBtoWL(string &cbSeq1, string &cbQual1, vector<uint64> &cbWL,
+                     int32 &cbMatch1, vector<uint64> &cbMatchInd1,
+                     string &cbMatchString1,
+                     vector<uint8_t> *cbMatchQual1 = nullptr);
     bool convertCheckUMI();
     void addStats(const int32 cbMatch1);
     
