@@ -137,9 +137,23 @@ if ! done_p setup; then
   if [ "$SKIP_CELLRANGER" != 1 ]; then
     aws s3 sync "$STAGING_BUCKET/cellranger-9.0.1" $S/cellranger-9.0.1 --only-show-errors \
       || die "Cell Ranger sync failed"
-    chmod +x $S/cellranger-9.0.1/cellranger 2>/dev/null
-    chmod -R +x $S/cellranger-9.0.1/bin 2>/dev/null || true
+    # The Cell Ranger top-level launcher is normally a symlink to bin/cellranger.
+    # S3 does not preserve that symlink and materializes a second ELF binary at
+    # the top level; invoked there, the binary looks for /scratch/env.json and
+    # exits immediately. Recreate the installation's required launcher layout.
+    ln -sfn bin/cellranger $S/cellranger-9.0.1/cellranger \
+      || die "cannot restore Cell Ranger launcher symlink"
+    # S3 also discards executable mode bits. Restore them on every directory
+    # placed on Cell Ranger's PATH; chmodding only bin/ leaves Martian's mrg
+    # non-executable and makes `cellranger multi` fail with EACCES.
+    for exec_dir in bin external/anaconda/bin external/martian/bin lib/bin; do
+      find $S/cellranger-9.0.1/$exec_dir -type f -exec chmod +x {} + \
+        || die "cannot restore executable bits under Cell Ranger $exec_dir"
+    done
     require "$S/cellranger-9.0.1/cellranger"
+    require "$S/cellranger-9.0.1/env.json"
+    [ -x "$S/cellranger-9.0.1/external/martian/bin/mrg" ] \
+      || die "Cell Ranger mrg is not executable after staging"
     require "$S/refs/refdata-gex-GRCh38-2024-A"
     require "$S/refs/benchmark_cr9_320k_config.csv"
     require "$S/refs/Chromium_Human_Transcriptome_Probe_Set_v1.1.0_GRCh38-2024-A.csv"
@@ -276,7 +290,11 @@ if runnable cbq_encode; then
       || die "source tarball download failed"
     mkdir -p $S/tools/src && tar -xzf $S/tools/src.tar.gz -C $S/tools/src --strip-components=1 \
       || die "source extraction failed"
-    ( cd $S/tools/src/core/legacy/source && make cbq-ordered-encoder ) \
+    # This standalone encoder needs only zlib. The Makefile defaults to the
+    # full STAR build's WITH_CHROMAP=1 dependency scan, which requires an
+    # external HTSlib/Chromap tree that is intentionally absent from the
+    # released source tarball and is unrelated to CBQ encoding.
+    ( cd $S/tools/src/core/legacy/source && make cbq-ordered-encoder WITH_CHROMAP=0 ) \
       && cp $S/tools/src/core/legacy/source/cbq_ordered_encoder $S/tools/ \
       || die "CBQ encoder build failed"
   fi
