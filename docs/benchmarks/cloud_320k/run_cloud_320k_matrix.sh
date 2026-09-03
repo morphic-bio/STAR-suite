@@ -65,6 +65,8 @@ record() { # name status timefile
   cpu=$(grep -oP 'Percent of CPU this job got: \K.*' "$3" 2>/dev/null || echo NA)
   printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$1" "$2" "$wall" "$rss" "$cpu" "$(date -u +%FT%TZ)" >> "$RESULTS"
   log "RESULT $1: status=$2 wall=$wall rss_kb=$rss cpu=$cpu"
+  # Durable progress: scratch is ephemeral, so mirror the table after every row.
+  aws s3 cp "$RESULTS" "$STAGING_BUCKET/progress/results.tsv" --only-show-errors 2>/dev/null || true
 }
 
 count_dirs() { find "$1" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | wc -l; }
@@ -73,11 +75,15 @@ count_h5ad() { find "$1" -maxdepth 1 -name '*.filt.h5ad' 2>/dev/null | wc -l; }
 # ---------- Step 0: scratch filesystem, install, staged inputs ----------
 if ! done_p setup; then
   if ! mountpoint -q $S; then
-    if lsblk -no MOUNTPOINT "$SCRATCH_DEV" 2>/dev/null | grep -q . ; then
+    [ -b "$SCRATCH_DEV" ] || die "$SCRATCH_DEV is not a block device"
+    if lsblk -no MOUNTPOINT "$SCRATCH_DEV" 2>/dev/null | grep -qE '[^[:space:]]' ; then
       die "$SCRATCH_DEV is mounted elsewhere; refusing to format"
     fi
-    if blkid "$SCRATCH_DEV" >/dev/null 2>&1 && [ "$FORCE_MKFS" != 1 ]; then
-      die "$SCRATCH_DEV already holds a filesystem; set FORCE_MKFS=1 only if it is the ephemeral instance store"
+    # Test the reported type, not blkid's exit status: an unprivileged blkid can
+    # exit 0 with no output, which would falsely read as "holds a filesystem".
+    existing_fs=$(sudo blkid -o value -s TYPE "$SCRATCH_DEV" 2>/dev/null)
+    if [ -n "$existing_fs" ] && [ "$FORCE_MKFS" != 1 ]; then
+      die "$SCRATCH_DEV already holds a $existing_fs filesystem; set FORCE_MKFS=1 only if it is the ephemeral instance store"
     fi
     sudo mkfs.xfs -f "$SCRATCH_DEV" || die "mkfs failed on $SCRATCH_DEV"
     sudo mkdir -p $S && sudo mount "$SCRATCH_DEV" $S || die "mount failed"
