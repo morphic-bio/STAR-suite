@@ -31,11 +31,15 @@ uint64_t getInlineCbWithNCount() { return 0; }
 
 
 
-void SoloReadBarcode::matchCBtoWL(string &cbSeq1, string &cbQual1, vector<uint64> &cbWL, int32 &cbMatch1, vector<uint64> &cbMatchInd1, string &cbMatchString1)
+void SoloReadBarcode::matchCBtoWL(string &cbSeq1, string &cbQual1, vector<uint64> &cbWL,
+                                  int32 &cbMatch1, vector<uint64> &cbMatchInd1,
+                                  string &cbMatchString1,
+                                  vector<uint8_t> *cbMatchQual1)
 {
     cbMatch1=-1;
     cbMatchString1="";
     cbMatchInd1.clear();
+    if (cbMatchQual1 != nullptr) cbMatchQual1->clear();
     //convert CB and check for Ns
     uint64 cbB1;
     int64 posN=convertNuclStrToInt64(cbSeq1,cbB1);
@@ -102,6 +106,7 @@ void SoloReadBarcode::matchCBtoWL(string &cbSeq1, string &cbQual1, vector<uint64
                 };
                 matched = true;
                 cbMatchInd1.push_back(cbI1);
+                if (cbMatchQual1 != nullptr) cbMatchQual1->push_back(static_cast<uint8_t>(cbQual1[posN]));
                 ++cbMatch1;
                 cbMatchString1 += ' ' +to_string(cbI1) + ' ' + cbQual1[posN];
             };
@@ -113,6 +118,7 @@ void SoloReadBarcode::matchCBtoWL(string &cbSeq1, string &cbQual1, vector<uint64
                 int64 cbI1=findWhitelistIndex(cbVar);
                 if (cbI1>=0) {
                     cbMatchInd1.push_back(cbI1);
+                    if (cbMatchQual1 != nullptr) cbMatchQual1->push_back(static_cast<uint8_t>(cbQual1.at(cbSeq1.size()-1-ii)));
                     ++cbMatch1;
                     cbMatchString1 += ' ' +to_string(cbI1) + ' ' + cbQual1.at(cbSeq1.size()-1-ii);
                 };
@@ -208,6 +214,7 @@ void SoloReadBarcode::getCBandUMI(char **readSeq, char **readQual, uint64 *readL
     cbMatch=-1;
     cbMatchString="";
     cbMatchInd.clear();
+    cbMatchQual.clear();
     
     ///////////////////////////////////////////////////////////////////////////////////////////////////////    
     ////////// bSeq and bQual
@@ -454,7 +461,8 @@ void SoloReadBarcode::getCBandUMI(char **readSeq, char **readQual, uint64 *readL
                 }
             } else {
                 // Legacy Solo matching
-                matchCBtoWL(cbSeq, cbQual, pSolo.cbWL, cbMatch, cbMatchInd, cbMatchString);
+                matchCBtoWL(cbSeq, cbQual, pSolo.cbWL, cbMatch, cbMatchInd,
+                            cbMatchString, &cbMatchQual);
             }
         } else if (pSolo.CBtype.type==2) {//string cb
             /* this seg-faults
@@ -514,7 +522,8 @@ void SoloReadBarcode::getCBandUMI(char **readSeq, char **readQual, uint64 *readL
         cbQual=bQual.substr(pSolo.cbS-1,pSolo.cbL);
         umiQual=bQual.substr(pSolo.umiS-1,pSolo.umiL);
 
-        matchCBtoWL(cbSeq, cbQual, pSolo.cbWL, cbMatch, cbMatchInd, cbMatchString);
+        matchCBtoWL(cbSeq, cbQual, pSolo.cbWL, cbMatch, cbMatchInd,
+                    cbMatchString, &cbMatchQual);
 
         if ( cbMatch==0 || cbMatch==1 ) {
             if (pSolo.cbWLyes) {

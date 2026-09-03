@@ -369,6 +369,8 @@ void SoloReadFeature::mergePendingAmbiguous(SoloReadFeature &other,
             } else {
                 ExtendedAmbiguousEntry &entry = pendingAmbiguous_[key];
                 entry.candidateIdx = otherEntry.candidateIdx;
+                entry.candidateQual = otherEntry.candidateQual;
+                entry.flexPayloadInvalid = otherEntry.flexPayloadInvalid;
                 entry.cbSeq = otherEntry.cbSeq;
                 entry.cbQual = otherEntry.cbQual;
                 entry.umiCounts = otherEntry.umiCounts;
@@ -390,6 +392,11 @@ void SoloReadFeature::mergePendingAmbiguous(SoloReadFeature &other,
             }
         } else {
             ExtendedAmbiguousEntry &entry = found->second;
+            if (entry.candidateIdx != otherEntry.candidateIdx
+                || entry.candidateQual != otherEntry.candidateQual) {
+                entry.flexPayloadInvalid = true;
+            }
+            entry.flexPayloadInvalid = entry.flexPayloadInvalid || otherEntry.flexPayloadInvalid;
             for (const auto &umiCount : otherEntry.umiCounts) {
                 entry.umiCounts[umiCount.first] += umiCount.second;
             }

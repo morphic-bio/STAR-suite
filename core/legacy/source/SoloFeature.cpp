@@ -386,7 +386,20 @@ void SoloFeature::resolvePendingAmbiguousToHash(bool useBridgeCompactMapping)
     CbBayesianResolver resolver(whitelistSeqs.size(), &whitelistSeqs);
     static const std::unordered_map<uint32_t, uint32_t> kEmptyUmiHistogram;
 
-    uint64_t resolved = 0, stillAmbiguous = 0, addedToHash = 0;
+    if (!useBridgeCompactMapping
+        && (readBarSum == nullptr
+            || readBarSum->cbReadCountExact.size() < whitelistSeqs.size())) {
+        ostringstream errOut;
+        errOut << "EXITING because of fatal ERROR: Flex ambiguous-CB resolution requires exact-CB "
+                  "read counts for every whitelist barcode.\n"
+               << "Observed exact-count vector size="
+               << (readBarSum == nullptr ? 0 : readBarSum->cbReadCountExact.size())
+               << ", whitelist size=" << whitelistSeqs.size() << ".\n";
+        exitWithError(errOut.str(), std::cerr, P.inOut->logMain,
+                      EXIT_CODE_INCONSISTENT_DATA, P);
+    }
+
+    uint64_t resolved = 0, resolvedObservations = 0, stillAmbiguous = 0, addedToHash = 0;
     for (auto &kv : readFeatSum->pendingAmbiguous_) {
         SoloReadFeature::ExtendedAmbiguousEntry &entry = kv.second;
 
@@ -395,37 +408,58 @@ void SoloFeature::resolvePendingAmbiguousToHash(bool useBridgeCompactMapping)
             continue;
         }
 
-        if (!useBridgeCompactMapping && entry.umiCounts.empty()) {
-            stillAmbiguous++;
-            continue;
-        }
-
-        CBContext context = (entry.cbEvidenceReads > 0
-                             && entry.cbLogLikMatch.size() == entry.cbSeq.size()
-                             && entry.cbLogLikMismatch.size() == entry.cbSeq.size())
-            ? CBContext(entry.cbSeq,
-                        entry.cbQual,
-                        entry.cbLogLikMatch,
-                        entry.cbLogLikMismatch,
-                        entry.cbEvidenceReads)
-            : CBContext(entry.cbSeq, entry.cbQual);
-
-        std::vector<Candidate> candidates;
-        candidates.reserve(entry.candidateIdx.size());
-        for (uint32_t idx : entry.candidateIdx) {
-            if (idx > 0 && idx <= whitelistSeqs.size()) {
-                candidates.emplace_back(idx, whitelistSeqs[idx - 1], 0.0);
+        BayesianResult result;
+        if (!useBridgeCompactMapping) {
+            bool validBases = entry.cbSeq.size() == pSolo.cbL
+                && entry.cbQual.size() == entry.cbSeq.size();
+            for (char base : entry.cbSeq) {
+                const char upper = static_cast<char>(std::toupper(static_cast<unsigned char>(base)));
+                validBases = validBases
+                    && (upper == 'A' || upper == 'C' || upper == 'G'
+                        || upper == 'T' || upper == 'N');
             }
-        }
+            if (entry.flexPayloadInvalid || !validBases
+                || entry.candidateQual.size() != entry.candidateIdx.size()) {
+                ostringstream errOut;
+                errOut << "EXITING because of fatal ERROR: malformed Flex ambiguous-CB payload.\n"
+                       << "CB length=" << entry.cbSeq.size()
+                       << ", expected=" << pSolo.cbL
+                       << ", quality length=" << entry.cbQual.size()
+                       << ", candidates=" << entry.candidateIdx.size()
+                       << ", candidate qualities=" << entry.candidateQual.size() << ".\n";
+                exitWithError(errOut.str(), std::cerr, P.inOut->logMain,
+                              EXIT_CODE_INCONSISTENT_DATA, P);
+            }
+            result = resolver.resolveStarSolo(entry.candidateIdx,
+                                              entry.candidateQual,
+                                              readBarSum->cbReadCountExact,
+                                              pSolo.QSbase,
+                                              pSolo.QSmax,
+                                              pSolo.cbMinP);
+        } else {
+            CBContext context = (entry.cbEvidenceReads > 0
+                                 && entry.cbLogLikMatch.size() == entry.cbSeq.size()
+                                 && entry.cbLogLikMismatch.size() == entry.cbSeq.size())
+                ? CBContext(entry.cbSeq,
+                            entry.cbQual,
+                            entry.cbLogLikMatch,
+                            entry.cbLogLikMismatch,
+                            entry.cbEvidenceReads)
+                : CBContext(entry.cbSeq, entry.cbQual);
 
-        if (candidates.empty()) {
-            stillAmbiguous++;
-            continue;
+            std::vector<Candidate> candidates;
+            candidates.reserve(entry.candidateIdx.size());
+            for (uint32_t idx : entry.candidateIdx) {
+                if (idx > 0 && idx <= whitelistSeqs.size()) {
+                    candidates.emplace_back(idx, whitelistSeqs[idx - 1], 0.0);
+                }
+            }
+            if (candidates.empty()) {
+                stillAmbiguous++;
+                continue;
+            }
+            result = resolver.resolve(context, candidates, kEmptyUmiHistogram);
         }
-
-        const std::unordered_map<uint32_t, uint32_t> &umiForResolve =
-            useBridgeCompactMapping ? kEmptyUmiHistogram : entry.umiCounts;
-        BayesianResult result = resolver.resolve(context, candidates, umiForResolve);
         const bool bayesResolved = (result.status == BayesianResult::Resolved && result.bestIdx != 0);
         const uint32_t resolvedCbIdx = bayesResolved ? (result.bestIdx - 1u) : 0u;
 
@@ -440,6 +474,9 @@ void SoloFeature::resolvePendingAmbiguousToHash(bool useBridgeCompactMapping)
         }
 
         resolved++;
+        if (!useBridgeCompactMapping) {
+            resolvedObservations += entry.observations.size();
+        }
 
         if (shouldTraceBridgeBarcode(pSolo, resolvedCbIdx)) {
             std::fprintf(stderr,
@@ -490,6 +527,7 @@ void SoloFeature::resolvePendingAmbiguousToHash(bool useBridgeCompactMapping)
 
     P.inOut->logMain << "[AMBIG-CB-RESOLVE] pending=" << readFeatSum->pendingAmbiguous_.size()
                      << " resolved=" << resolved
+                     << " resolved_observations=" << resolvedObservations
                      << " still_ambiguous=" << stillAmbiguous
                      << " added_to_hash=" << addedToHash << endl;
 

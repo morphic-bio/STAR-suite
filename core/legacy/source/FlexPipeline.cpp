@@ -1175,8 +1175,13 @@ void *flexLaneReaderFullThread(void *arg) {
     const auto &samplePreFilter = g_samplePreFilter;
     const bool noAlign = (P.pSolo.flexNoAlign != 0);
 
-    // Preallocate once per thread — reused across all lane claims
-    SoloReadBarcode localBar(P);
+    // Preallocate once per thread — reused across all lane claims. Fully-fused
+    // callers retain this object after join so exact-CB priors are not lost.
+    std::unique_ptr<SoloReadBarcode> fallbackBar;
+    if (ctx->readBar == nullptr) {
+        fallbackBar.reset(new SoloReadBarcode(P));
+    }
+    SoloReadBarcode &localBar = ctx->readBar != nullptr ? *ctx->readBar : *fallbackBar;
     SampleDetector *sampleDet = nullptr;
     bool sampleDetReady = false;
 
@@ -1377,7 +1382,13 @@ void *flexSoloConsumerThread(void *arg) {
     Stats *stats = ctx->stats;
     const int consumerId = ctx->consumerId;
 
-    SoloReadBarcode localBar(P);
+    // The staged pipeline must retain exact-CB counts just like the fully
+    // fused path; ambiguous-CB posterior weights are formed after join.
+    std::unique_ptr<SoloReadBarcode> fallbackBar;
+    if (ctx->readBar == nullptr) {
+        fallbackBar.reset(new SoloReadBarcode(P));
+    }
+    SoloReadBarcode &localBar = ctx->readBar != nullptr ? *ctx->readBar : *fallbackBar;
 
     // Solo consumer owns sample detection (deferred from triage)
     SampleDetector *sampleDet = nullptr;
