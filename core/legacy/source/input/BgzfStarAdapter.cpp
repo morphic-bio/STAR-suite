@@ -25,11 +25,21 @@ struct NameParts {
     uint16_t extraLength;
 };
 
-NameParts read_name_parts(const BgzfFastqRecord& raw) {
-    size_t end = 0;
-    while (end < raw.nameLength && raw.name[end] != ' ' && raw.name[end] != '\t') {
-        ++end;
+size_t read_name_token_length(const BgzfFastqRecord& raw) {
+    size_t end = raw.nameLength;
+    const void* space = std::memchr(raw.name, ' ', end);
+    if (space != nullptr) {
+        end = static_cast<const char*>(space) - raw.name;
     }
+    const void* tab = std::memchr(raw.name, '\t', end);
+    if (tab != nullptr) {
+        end = static_cast<const char*>(tab) - raw.name;
+    }
+    return end;
+}
+
+NameParts read_name_parts(const BgzfFastqRecord& raw) {
+    size_t end = read_name_token_length(raw);
     const size_t read_name_length = end;
     if (end >= 2 && raw.name[end - 2] == '/' &&
         (raw.name[end - 1] == '1' || raw.name[end - 1] == '2' ||
