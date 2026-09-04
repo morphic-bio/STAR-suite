@@ -2,13 +2,18 @@ FROM ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive \
     TZ=Etc/UTC \
-    STAR_SUITE_BUILD_CONTAINER_READY=1
+    STAR_SUITE_BUILD_CONTAINER_READY=1 \
+    STAR_SUITE_DEB_BUILD_CONTAINER_READY=1
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       bash \
       build-essential \
       ca-certificates \
+      debhelper \
+      devscripts \
+      dpkg-dev \
+      fakeroot \
       git \
       libbz2-dev \
       libcurl4-gnutls-dev \

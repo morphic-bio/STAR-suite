@@ -1,3 +1,9 @@
+STAR-suite Flex correctness and sorted-run pipeline --- 2026/09/04
+=================================================================
+* Fixed fully fused residual-alignment queue progress and added BGZF mate-name validation.
+* Restored STARsolo-compatible ambiguous-cell-barcode posterior resolution in fused Flex.
+* Added producer-local sorted bucket runs, asynchronous hierarchical consolidation, and deterministic final tournament merging while preserving byte-identical outputs.
+
 STAR-suite streaming cell-barcode buckets --- 2026/09/02
 =========================================================
 * Added RAM, spill, and budget-driven automatic cell-barcode bucket backends for the fused STAR-Flex inline-hash path, avoiding whole-run per-read accumulation for large datasets.

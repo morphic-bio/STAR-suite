@@ -160,7 +160,9 @@ For Ubuntu discoverability and package updates:
     - Docker container installer-bundle selection/version validation on Ubuntu 22.04 and 24.04
     - Docker container smoke execution against installed release artifacts on Ubuntu 24.04
     - runtime dependency manifests captured from the validation containers and uploaded with release artifacts
-    - Debian `.deb` install/uninstall validation in clean `ubuntu:24.04` container
+    - Debian `.deb` builds in pinned Ubuntu 22.04 and 24.04 containers
+    - Ubuntu 22.04 `.deb` install/uninstall validation on Ubuntu 22.04 and 24.04
+    - Ubuntu 24.04 `.deb` install/uninstall validation on Ubuntu 24.04
     - optional Debian source package signing when signing secrets are configured
 
 ## Implemented Workflow Files
