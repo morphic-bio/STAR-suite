@@ -66,6 +66,54 @@ bool gzReadLine(gzFile gz, char *buf, int maxLen, uint32_t *lengthOut = nullptr)
     return true;
 }
 
+bool gzConsumeLine(gzFile gz, char *buf, int maxLen) {
+    return gzgets(gz, buf, maxLen) != Z_NULL;
+}
+
+// FASTQ qualities normally have exactly the sequence length.  Check the known
+// newline position first and retain the general scan as a compatibility
+// fallback for malformed or non-canonical records.
+bool gzReadQualityLine(gzFile gz, char *buf, int maxLen, uint32_t expectedLength) {
+    if (expectedLength < static_cast<uint32_t>(maxLen)) {
+        buf[expectedLength] = '\0';
+    }
+    if (expectedLength + 1 < static_cast<uint32_t>(maxLen)) {
+        buf[expectedLength + 1] = '\0';
+    }
+    if (gzgets(gz, buf, maxLen) == Z_NULL) {
+        return false;
+    }
+    if (expectedLength < static_cast<uint32_t>(maxLen) &&
+        buf[expectedLength] == '\n') {
+        buf[expectedLength] = '\0';
+        return true;
+    }
+    if (expectedLength + 1 < static_cast<uint32_t>(maxLen) &&
+        buf[expectedLength] == '\r' && buf[expectedLength + 1] == '\n') {
+        buf[expectedLength] = '\0';
+        return true;
+    }
+
+    const size_t length = std::strlen(buf);
+    if (length > 0 && buf[length - 1] == '\n') {
+        buf[length - 1] = '\0';
+    }
+    return true;
+}
+
+size_t fastqReadNameLength(const char *name, size_t length) {
+    size_t end = length;
+    const void *space = std::memchr(name, ' ', end);
+    if (space != nullptr) {
+        end = static_cast<const char *>(space) - name;
+    }
+    const void *tab = std::memchr(name, '\t', end);
+    if (tab != nullptr) {
+        end = static_cast<const char *>(tab) - name;
+    }
+    return end;
+}
+
 } // namespace
 
 void *flexLaneReaderThread(void *arg) {
@@ -451,27 +499,34 @@ static uint64_t processOneLane(
     uint64_t nReads = 0;
 
     while (true) {
-        if (!gzReadLine(gzR2, lineBuf, sizeof(lineBuf))) break;
+        uint32_t headerLength = 0;
+        if (!gzReadLine(gzR2, lineBuf, sizeof(lineBuf), &headerLength)) break;
         {
             const char *src = lineBuf;
-            if (*src == '@') ++src;
-            size_t nameLen = 0;
-            while (src[nameLen] && src[nameLen] != ' ' && src[nameLen] != '\t')
-                ++nameLen;
+            size_t available = headerLength;
+            if (available > 0 && *src == '@') {
+                ++src;
+                --available;
+            }
+            size_t nameLen = fastqReadNameLength(src, available);
             if (nameLen >= kFlexPipeNameMax) nameLen = kFlexPipeNameMax - 1;
             std::memcpy(name, src, nameLen);
             name[nameLen] = '\0';
         }
         uint32_t readLen0 = 0;
         if (!gzReadLine(gzR2, seq0, kFlexPipeSeqMax, &readLen0)) break;
-        if (!gzReadLine(gzR2, lineBuf, sizeof(lineBuf))) break;
-        if (!gzReadLine(gzR2, qual0, kFlexPipeSeqMax)) break;
+        if (!gzConsumeLine(gzR2, lineBuf, sizeof(lineBuf))) break;
+        if (noAlign) {
+            if (!gzConsumeLine(gzR2, lineBuf, kFlexPipeSeqMax)) break;
+        } else if (!gzReadQualityLine(gzR2, qual0, kFlexPipeSeqMax, readLen0)) {
+            break;
+        }
 
-        if (!gzReadLine(gzR1, lineBuf, sizeof(lineBuf))) break;
+        if (!gzConsumeLine(gzR1, lineBuf, sizeof(lineBuf))) break;
         uint32_t readLen1 = 0;
         if (!gzReadLine(gzR1, seq1, kFlexPipeSeqMax, &readLen1)) break;
-        if (!gzReadLine(gzR1, lineBuf, sizeof(lineBuf))) break;
-        if (!gzReadLine(gzR1, qual1, kFlexPipeSeqMax)) break;
+        if (!gzConsumeLine(gzR1, lineBuf, sizeof(lineBuf))) break;
+        if (!gzReadQualityLine(gzR1, qual1, kFlexPipeSeqMax, readLen1)) break;
 
         uint64_t iReadAll = st->iReadAllGlobal.fetch_add(1);
         ++tally.lane;
