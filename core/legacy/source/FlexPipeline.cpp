@@ -77,19 +77,11 @@ bool gzReadQualityLine(gzFile gz, char *buf, int maxLen, uint32_t expectedLength
     if (expectedLength < static_cast<uint32_t>(maxLen)) {
         buf[expectedLength] = '\0';
     }
-    if (expectedLength + 1 < static_cast<uint32_t>(maxLen)) {
-        buf[expectedLength + 1] = '\0';
-    }
     if (gzgets(gz, buf, maxLen) == Z_NULL) {
         return false;
     }
     if (expectedLength < static_cast<uint32_t>(maxLen) &&
         buf[expectedLength] == '\n') {
-        buf[expectedLength] = '\0';
-        return true;
-    }
-    if (expectedLength + 1 < static_cast<uint32_t>(maxLen) &&
-        buf[expectedLength] == '\r' && buf[expectedLength + 1] == '\n') {
         buf[expectedLength] = '\0';
         return true;
     }
