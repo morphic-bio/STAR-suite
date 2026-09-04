@@ -131,9 +131,11 @@ private:
     BgzfInflater syncInflater_;
 
     std::vector<unsigned char> buffer_;
+    unsigned char lineScratch_[kBgzfFastqSequenceCapacity];
     size_t cursor_ = 0;
     std::vector<std::thread> workers_;
     std::map<uint64_t, InflatedBlock> completed_;
+    std::vector<std::vector<unsigned char>> recycledBuffers_;
     std::mutex mutex_;
     std::condition_variable readyCv_;
     std::condition_variable spaceCv_;
