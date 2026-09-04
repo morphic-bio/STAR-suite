@@ -6,7 +6,8 @@ star-suite (1.8.2-1) unstable; urgency=medium
     barcodes and preserve all resolved observations in the bucketed path.
   * Reduce the fused Flex tail with lock-free sample lookup, parallel fan-in,
     producer-local sorted runs, asynchronous hierarchical consolidation, and
-    deterministic final tournament merging.
+    deterministic final tournament merging; use the shared striped ambiguous
+    store for residual-alignment records as well as direct hash records.
   * Build and validate separate Ubuntu 22.04 and Ubuntu 24.04 Debian binary
     packages from the same tagged source revision, including GCC 11-compatible
     C/C++ header boundaries for the packaged feature-calling companion.
