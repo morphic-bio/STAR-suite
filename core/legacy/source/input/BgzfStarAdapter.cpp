@@ -38,27 +38,21 @@ size_t read_name_token_length(const BgzfFastqRecord& raw) {
     return end;
 }
 
-size_t read_name_stem_length(const BgzfFastqRecord& raw,
-                             size_t token_length) {
-    if (token_length >= 2 && raw.name[token_length - 2] == '/' &&
-        (raw.name[token_length - 1] == '1' ||
-         raw.name[token_length - 1] == '2' ||
-         raw.name[token_length - 1] == '3')) {
-        return token_length - 2;
-    }
-    return token_length;
-}
-
 NameParts read_name_parts(const BgzfFastqRecord& raw) {
-    const size_t read_name_length = read_name_token_length(raw);
-    const size_t stem_length = read_name_stem_length(raw, read_name_length);
+    size_t end = read_name_token_length(raw);
+    const size_t read_name_length = end;
+    if (end >= 2 && raw.name[end - 2] == '/' &&
+        (raw.name[end - 1] == '1' || raw.name[end - 1] == '2' ||
+         raw.name[end - 1] == '3')) {
+        end -= 2;
+    }
     size_t extra_begin = read_name_length;
     while (extra_begin < raw.nameLength &&
            (raw.name[extra_begin] == ' ' || raw.name[extra_begin] == '\t')) {
         ++extra_begin;
     }
     return NameParts{raw.name,
-                     static_cast<uint16_t>(stem_length),
+                     static_cast<uint16_t>(end),
                      static_cast<uint16_t>(read_name_length),
                      static_cast<uint16_t>(extra_begin),
                      static_cast<uint16_t>(raw.nameLength - extra_begin)};
@@ -195,13 +189,9 @@ InputStatus BgzfStarAdapter::next_record_locked(BgzfStarRecord* record,
     // only if the counts happen to differ.
     const NameParts name0 = read_name_parts(record->mates[0]);
     if (options_.validate_read_names) {
-        const size_t name1_token_length =
-            read_name_token_length(record->mates[1]);
-        const size_t name1_stem_length =
-            read_name_stem_length(record->mates[1], name1_token_length);
-        if (name0.stemLength != name1_stem_length ||
-            std::memcmp(name0.data, record->mates[1].name,
-                        name0.stemLength) != 0) {
+        const NameParts name1 = read_name_parts(record->mates[1]);
+        if (name0.stemLength != name1.stemLength ||
+            std::memcmp(name0.data, name1.data, name0.stemLength) != 0) {
             std::ostringstream message;
             message << "BGZF mate read-name mismatch at record " << recordsRead_
                     << ": mate 0 '" << printable_read_name(record->mates[0])
