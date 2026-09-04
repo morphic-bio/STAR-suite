@@ -23,12 +23,6 @@ bool set_error(std::string* error, const std::string& message) {
     return false;
 }
 
-void strip_carriage_return(std::string* line) {
-    if (!line->empty() && line->back() == '\r') {
-        line->pop_back();
-    }
-}
-
 } // namespace
 
 BgzfRangeReader::BgzfRangeReader() = default;
@@ -345,12 +339,15 @@ bool BgzfRangeReader::append_next_block(std::string* error) {
     return true;
 }
 
-bool BgzfRangeReader::read_line(std::string* line,
-                                bool allow_clean_end,
-                                std::string* error) {
-    if (line == nullptr) {
-        return set_error(error, "BGZF FASTQ line destination is null");
+bool BgzfRangeReader::read_line_view(const unsigned char** line,
+                                     size_t* line_size,
+                                     bool allow_clean_end,
+                                     std::string* error) {
+    if (line == nullptr || line_size == nullptr) {
+        return set_error(error, "BGZF FASTQ line view destination is null");
     }
+    *line = nullptr;
+    *line_size = 0;
     while (true) {
         const size_t available = buffer_.size() - cursor_;
         const unsigned char *begin = available == 0
@@ -360,10 +357,13 @@ bool BgzfRangeReader::read_line(std::string* line,
         if (found != nullptr) {
             const unsigned char *newline =
                 static_cast<const unsigned char *>(found);
-            line->assign(reinterpret_cast<const char *>(begin),
-                         static_cast<size_t>(newline - begin));
-            cursor_ += static_cast<size_t>(newline - begin) + 1;
-            strip_carriage_return(line);
+            size_t size = static_cast<size_t>(newline - begin);
+            cursor_ += size + 1;
+            if (size != 0 && begin[size - 1] == '\r') {
+                --size;
+            }
+            *line = begin;
+            *line_size = size;
             return true;
         }
 
@@ -375,10 +375,14 @@ bool BgzfRangeReader::read_line(std::string* line,
             return set_error(error, append_error);
         }
         if (cursor_ != buffer_.size()) {
-            line->assign(reinterpret_cast<const char*>(buffer_.data() + cursor_),
-                         buffer_.size() - cursor_);
+            const unsigned char *tail = buffer_.data() + cursor_;
+            size_t size = buffer_.size() - cursor_;
             cursor_ = buffer_.size();
-            strip_carriage_return(line);
+            if (size != 0 && tail[size - 1] == '\r') {
+                --size;
+            }
+            *line = tail;
+            *line_size = size;
             return true;
         }
         if (allow_clean_end) {
@@ -395,35 +399,76 @@ bool BgzfRangeReader::parse_record(BgzfFastqRecord* record, std::string* error) 
     if (record == nullptr) {
         return set_error(error, "BGZF FASTQ record destination is null");
     }
-    if (!read_line(&record->name, true, error)) {
+    const unsigned char *line = nullptr;
+    size_t line_size = 0;
+    if (!read_line_view(&line, &line_size, true, error)) {
         return false;
     }
-    if (!read_line(&record->sequence, false, error) ||
-        !read_line(&record->plus, false, error) ||
-        !read_line(&record->quality, false, error)) {
-        return false;
-    }
-    if (record->name.empty() || record->name[0] != '@') {
+    if (line_size == 0 || line[0] != '@') {
         std::ostringstream message;
         message << "BGZF FASTQ record " << recordsRead_
                 << " does not start with @ (block offset " << currentBlockOffset_ << ')';
         return set_error(error, message.str());
     }
-    if (record->plus.empty() || record->plus[0] != '+') {
+    if (line_size - 1 > kBgzfFastqNameCapacity) {
+        std::ostringstream message;
+        message << "BGZF FASTQ record " << recordsRead_ << " has read name length "
+                << (line_size - 1) << " exceeding fixed capacity "
+                << kBgzfFastqNameCapacity;
+        return set_error(error, message.str());
+    }
+    record->nameLength = static_cast<uint16_t>(line_size - 1);
+    if (record->nameLength != 0) {
+        std::memcpy(record->name, line + 1, record->nameLength);
+    }
+
+    if (!read_line_view(&line, &line_size, false, error)) {
+        return false;
+    }
+    if (line_size > kBgzfFastqSequenceCapacity) {
+        std::ostringstream message;
+        message << "BGZF FASTQ record " << recordsRead_ << " has sequence length "
+                << line_size << " exceeding fixed capacity "
+                << kBgzfFastqSequenceCapacity;
+        return set_error(error, message.str());
+    }
+    record->sequenceLength = static_cast<uint16_t>(line_size);
+    if (line_size != 0) {
+        std::memcpy(record->sequence, line, line_size);
+    }
+
+    if (!read_line_view(&line, &line_size, false, error)) {
+        return false;
+    }
+    if (line_size == 0 || line[0] != '+') {
         std::ostringstream message;
         message << "BGZF FASTQ record " << recordsRead_
                 << " has an invalid plus line (block offset " << currentBlockOffset_ << ')';
         return set_error(error, message.str());
     }
-    if (record->sequence.size() != record->quality.size()) {
+
+    if (!read_line_view(&line, &line_size, false, error)) {
+        return false;
+    }
+    if (line_size > kBgzfFastqSequenceCapacity) {
+        std::ostringstream message;
+        message << "BGZF FASTQ record " << recordsRead_ << " has quality length "
+                << line_size << " exceeding fixed capacity "
+                << kBgzfFastqSequenceCapacity;
+        return set_error(error, message.str());
+    }
+    record->qualityLength = static_cast<uint16_t>(line_size);
+    if (line_size != 0) {
+        std::memcpy(record->quality, line, line_size);
+    }
+    if (record->sequenceLength != record->qualityLength) {
         std::ostringstream message;
         message << "BGZF FASTQ record " << recordsRead_ << " has sequence length "
-                << record->sequence.size() << " but quality length "
-                << record->quality.size() << " (block offset "
+                << record->sequenceLength << " but quality length "
+                << record->qualityLength << " (block offset "
                 << currentBlockOffset_ << ')';
         return set_error(error, message.str());
     }
-    record->name.erase(0, 1);
     record->ordinal = recordsRead_;
     return true;
 }

@@ -613,11 +613,11 @@ static uint64_t processOneBgzfRange(
             recordsReturned, std::memory_order_relaxed);
         for (size_t batchIndex = 0; batchIndex < recordsReturned; ++batchIndex) {
         star::input::BgzfStarRecord &record = recordBatch[batchIndex];
-        const size_t readLen0Size = record.mates[0].sequence.size();
-        const size_t readLen1Size = record.mates[1].sequence.size();
+        const size_t readLen0Size = record.mates[0].sequenceLength;
+        const size_t readLen1Size = record.mates[1].sequenceLength;
         if (readLen0Size >= kFlexPipeSeqMax || readLen1Size >= kFlexPipeSeqMax ||
-            record.mates[0].quality.size() >= kFlexPipeSeqMax ||
-            record.mates[1].quality.size() >= kFlexPipeSeqMax) {
+            record.mates[0].qualityLength >= kFlexPipeSeqMax ||
+            record.mates[1].qualityLength >= kFlexPipeSeqMax) {
             std::ostringstream message;
             message << "Flex BGZF record " << record.read_ordinal
                     << " in lane " << task.laneId
@@ -627,13 +627,13 @@ static uint64_t processOneBgzfRange(
         }
         const uint32_t readLen0 = static_cast<uint32_t>(readLen0Size);
         const uint32_t readLen1 = static_cast<uint32_t>(readLen1Size);
-        const char *seq0 = record.mates[0].sequence.c_str();
-        const char *seq1 = record.mates[1].sequence.c_str();
-        const char *qual0 = record.mates[0].quality.c_str();
-        const char *qual1 = record.mates[1].quality.c_str();
-        const size_t nameLength = std::min(record.read_name.size(),
+        const char *seq0 = record.mates[0].sequence;
+        const char *seq1 = record.mates[1].sequence;
+        const char *qual0 = record.mates[0].quality;
+        const char *qual1 = record.mates[1].quality;
+        const size_t nameLength = std::min(static_cast<size_t>(record.read_name_length),
                                            static_cast<size_t>(kFlexPipeNameMax - 1));
-        const char *name = record.read_name.c_str();
+        const char *name = record.mates[0].name;
 
         const uint64_t iReadAll = batchGlobalFirst + batchIndex;
         ++tally.lane;
@@ -664,7 +664,7 @@ static uint64_t processOneBgzfRange(
             uint64 readLens[2] = {0, readLen1};
             std::string readNameExtra;
             localBar.getCBandUMI(readSeqPtrs, readQualPtrs, readLens, readNameExtra,
-                                 static_cast<uint32_t>(task.laneId), name);
+                                 static_cast<uint32_t>(task.laneId), name, nameLength);
 
             localBar.detectedSampleToken = detectedSampleToken;
 
@@ -694,10 +694,14 @@ static uint64_t processOneBgzfRange(
                 EnrichedPacket packet;
                 std::memcpy(packet.name, name, nameLength);
                 packet.name[nameLength] = '\0';
-                std::memcpy(packet.seq[0], seq0, readLen0 + 1);
-                std::memcpy(packet.seq[1], seq1, readLen1 + 1);
-                std::memcpy(packet.qual[0], qual0, readLen0 + 1);
-                std::memcpy(packet.qual[1], qual1, readLen1 + 1);
+                std::memcpy(packet.seq[0], seq0, readLen0);
+                std::memcpy(packet.seq[1], seq1, readLen1);
+                std::memcpy(packet.qual[0], qual0, readLen0);
+                std::memcpy(packet.qual[1], qual1, readLen1);
+                packet.seq[0][readLen0] = '\0';
+                packet.seq[1][readLen1] = '\0';
+                packet.qual[0][readLen0] = '\0';
+                packet.qual[1][readLen1] = '\0';
                 packet.readLen[0] = readLen0;
                 packet.readLen[1] = readLen1;
                 packet.iReadAll = iReadAll;

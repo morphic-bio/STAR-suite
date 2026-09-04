@@ -191,7 +191,10 @@ bool SoloReadBarcode::convertCheckUMI()
 };
 
 //////////////////////////////////////////////////////////////////////////////////////
-void SoloReadBarcode::getCBandUMI(char **readSeq, char **readQual, uint64 *readLen, const string &readNameExtraIn, const uint32 &readFilesIndex, const char *readName)
+void SoloReadBarcode::getCBandUMI(char **readSeq, char **readQual, uint64 *readLen,
+                                 const string &readNameExtraIn,
+                                 const uint32 &readFilesIndex,
+                                 const char *readName, uint64 readNameLength)
 {
     if (pSolo.type==0)
         return;
@@ -238,7 +241,7 @@ void SoloReadBarcode::getCBandUMI(char **readSeq, char **readQual, uint64 *readL
             size_t pos1 = readNameExtraT.find(tag); //find tag
             if ( pos1 == std::string::npos ) {
                 ostringstream errOut;
-                errOut << "EXITING because of FATAL ERROR in input read file: could not find barcode sequence SAM attribute "  << tag << " in read " <<readName <<"\n" ;
+                errOut << "EXITING because of FATAL ERROR in input read file: could not find barcode sequence SAM attribute "  << tag << " in read " << (readNameLength == UINT64_MAX ? string(readName) : string(readName, readNameLength)) <<"\n" ;
                 errOut << "with SAM attributes: "<< readNameExtraT <<"\n";
                 errOut << "SOLUTION: make sure that all reads in the input SAM/BAM have all attributes from --soloInputSAMattrBarcodeSeq\n";
                 exitWithError(errOut.str(),std::cerr, P.inOut->logMain, EXIT_CODE_INPUT_FILES, P);                
@@ -258,7 +261,7 @@ void SoloReadBarcode::getCBandUMI(char **readSeq, char **readQual, uint64 *readL
                 size_t pos1 = readNameExtraT.find(tag); //find tag, and skip 6 chars, e.g. \tCB:Z:
                 if ( pos1 == std::string::npos ) {
                     ostringstream errOut;
-                    errOut << "EXITING because of FATAL ERROR in input read file: could not find barcode qualities SAM attribute "  << tag << " in read " <<readName <<"\n" ;
+                    errOut << "EXITING because of FATAL ERROR in input read file: could not find barcode qualities SAM attribute "  << tag << " in read " << (readNameLength == UINT64_MAX ? string(readName) : string(readName, readNameLength)) <<"\n" ;
                     errOut << "with SAM attributes: "<< readNameExtraT <<"\n";
                     errOut << "SOLUTION: make sure that all reads in the input SAM/BAM have all attributes from --soloInputSAMattrBarcodeQual\n";
                     exitWithError(errOut.str(),std::cerr, P.inOut->logMain, EXIT_CODE_INPUT_FILES, P);                
@@ -272,7 +275,7 @@ void SoloReadBarcode::getCBandUMI(char **readSeq, char **readQual, uint64 *readL
         if (bQual.size() != bSeq.size()) {
             ostringstream errOut;
             errOut << "EXITING because of FATAL ERROR in input read file: the total length of barcode qualities is "  << bQual.size() << " not equal to the sequence length " << bSeq.size() <<"\n"  ;
-            errOut << "Read ID="<< readName <<" ;  Qualities="<< bQual <<" ;  Sequence="<< bSeq << " ;  Read SAM attributes: "<< readNameExtraT <<"\n";
+            errOut << "Read ID=" << (readNameLength == UINT64_MAX ? string(readName) : string(readName, readNameLength)) <<" ;  Qualities="<< bQual <<" ;  Sequence="<< bSeq << " ;  Read SAM attributes: "<< readNameExtraT <<"\n";
             errOut << "SOLUTION: make sure correct attributes are listed in --soloInputSAMattrBarcodeQual\n";
             exitWithError(errOut.str(),std::cerr, P.inOut->logMain, EXIT_CODE_INPUT_FILES, P);
         };
@@ -302,7 +305,7 @@ void SoloReadBarcode::getCBandUMI(char **readSeq, char **readQual, uint64 *readL
         if (P.pSolo.bL > 0) {
             ostringstream errOut;
             errOut << "EXITING because of FATAL ERROR in input read file: the total length of barcode sequence is "  << bSeq.size() << " not equal to expected " << P.pSolo.bL <<"\n" <<
-                      "Read ID=" << readName <<" ;  Sequence=" << bSeq <<'\n' <<
+                      "Read ID=" << (readNameLength == UINT64_MAX ? string(readName) : string(readName, readNameLength)) <<" ;  Sequence=" << bSeq <<'\n' <<
                       "SOLUTION: check the formatting of input read files.\n" <<
                       "If UMI+CB length is not equal to the barcode read length, specify barcode read length with --soloBarcodeReadLength\n" <<
                       "To avoid checking of barcode read length, specify --soloBarcodeReadLength 0" ;
