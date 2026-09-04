@@ -5,9 +5,11 @@
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <memory>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace star {
@@ -40,6 +42,15 @@ struct PackedCbRecord {
     std::uint32_t umi24() const { return (key >> 20) & 0xFFFFFFu; }
     std::uint16_t gene15() const { return static_cast<std::uint16_t>((key >> 5) & 0x7FFFu); }
     std::uint8_t tag5() const { return static_cast<std::uint8_t>(key & 0x1Fu); }
+    // Reorders the packed fields from [CB][UMI][GENE][TAG] to the collapse
+    // order [CB][TAG][GENE][UMI]. This is a permutation of every key bit, so
+    // equality of sort keys is equality of packed keys.
+    std::uint64_t group_sort_key() const {
+        return (static_cast<std::uint64_t>(cb_index()) << 44)
+             | (static_cast<std::uint64_t>(tag5()) << 39)
+             | (static_cast<std::uint64_t>(gene15()) << 24)
+             | umi24();
+    }
     std::uint32_t count30() const;
     std::uint8_t flags2() const;
 
@@ -59,6 +70,10 @@ class CbBucketStore {
         std::uint64_t memoryBudgetBytes = 0;
         std::string scratchDirectory;
         std::string filePrefix = "cb_bucket";
+        // RAM/auto modes may consolidate sorted producer runs in the
+        // background. Zero leaves every run for the final k-way merge.
+        std::uint32_t mergeWorkerCount = 0;
+        std::uint32_t mergeFanIn = 64;
     };
 
     explicit CbBucketStore(const Config &config);
@@ -80,6 +95,13 @@ class CbBucketStore {
     bool load_bucket(std::uint32_t bucketIndex,
                      std::vector<PackedCbRecord> *records,
                      std::string *error) const;
+    // Returns the producer-local runs separately. append_segment orders each
+    // run before publishing it, allowing consumers to k-way merge instead of
+    // sorting a whole bucket again. Runs are returned in publication order.
+    bool load_sorted_segments(
+        std::uint32_t bucketIndex,
+        std::vector<std::vector<PackedCbRecord> > *segments,
+        std::string *error) const;
     bool load_bucket_bytes(std::uint32_t bucketIndex,
                            std::vector<std::uint8_t> *bytes,
                            std::string *error) const;
@@ -90,16 +112,30 @@ class CbBucketStore {
     bool using_spill() const;
     bool transitioned_to_spill() const { return transitioned_.load(); }
     std::uint64_t payload_bytes() const { return payloadBytes_.load(); }
+    std::uint64_t async_merge_count() const { return asyncMergeCount_.load(); }
+    std::uint64_t async_merged_records() const { return asyncMergedRecords_.load(); }
 
   private:
     struct RamSegment {
         std::uint64_t sequence = 0;
         std::uint32_t worker = 0;
+        std::uint32_t level = 0;
         std::vector<std::uint8_t> bytes;
     };
     struct RamBucket {
         mutable std::mutex mutex;
         std::vector<RamSegment> segments;
+    };
+    struct SpillSegment {
+        SpillSegment(std::uint64_t offsetIn, std::uint64_t bytesIn)
+            : offset(offsetIn), bytes(bytesIn) {}
+        std::uint64_t offset;
+        std::uint64_t bytes;
+    };
+    struct RamMergeTask {
+        std::uint32_t bucket = 0;
+        std::uint32_t level = 0;
+        std::vector<RamSegment> runs;
     };
     enum class Backend { Ram, Transitioning, Spill };
 
@@ -112,6 +148,11 @@ class CbBucketStore {
                       std::string *error);
     bool transition_to_spill(std::string *error);
     bool finalize_spill(std::string *error);
+    bool schedule_ram_merge_locked(std::uint32_t bucketIndex);
+    void ram_merge_worker();
+    RamSegment merge_ram_runs(RamMergeTask *task) const;
+    bool wait_for_ram_merges(std::string *error);
+    void stop_ram_merge_workers();
     std::string spill_path(std::uint32_t bucketIndex) const;
 
     Config config_;
@@ -121,6 +162,7 @@ class CbBucketStore {
     std::unique_ptr<std::atomic<std::uint64_t>[]> spillRecordCounts_;
     std::unique_ptr<std::mutex[]> spillClaimMutexes_;
     std::unique_ptr<std::uint64_t[]> spillChecksums_;
+    std::vector<std::vector<SpillSegment> > spillSegments_;
     std::vector<int> spillFds_;
     mutable std::mutex spillInitMutex_;
     std::atomic<bool> spillFilesReady_{false};
@@ -136,6 +178,18 @@ class CbBucketStore {
     std::atomic<bool> transitioned_{false};
     std::atomic<std::uint64_t> payloadBytes_{0};
     std::atomic<std::uint32_t> nextBucketClaim_{0};
+
+    std::vector<std::uint8_t> ramMergeInFlight_;
+    std::mutex ramMergeMutex_;
+    std::condition_variable ramMergeCv_;
+    std::deque<RamMergeTask> ramMergeQueue_;
+    std::vector<std::thread> ramMergeWorkers_;
+    std::uint64_t ramMergeOutstanding_ = 0;
+    bool ramMergeStopping_ = false;
+    bool ramMergeFailed_ = false;
+    std::string ramMergeFailureMessage_;
+    std::atomic<std::uint64_t> asyncMergeCount_{0};
+    std::atomic<std::uint64_t> asyncMergedRecords_{0};
 };
 
 } // namespace solo

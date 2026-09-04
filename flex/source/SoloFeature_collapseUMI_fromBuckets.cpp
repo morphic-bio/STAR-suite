@@ -11,6 +11,7 @@
 #include "streamFuns.h"
 
 #include <algorithm>
+#include <chrono>
 #include <fstream>
 #include <omp.h>
 #include <sstream>
@@ -49,14 +50,6 @@ struct BucketResult {
     size_t tripletGroups = 0;
     std::string error;
 };
-
-uint64_t groupSortKey(const star::solo::PackedCbRecord &record)
-{
-    return (static_cast<uint64_t>(record.cb_index()) << 44)
-         | (static_cast<uint64_t>(record.tag5()) << 39)
-         | (static_cast<uint64_t>(record.gene15()) << 24)
-         | record.umi24();
-}
 
 bool sameGroup(const star::solo::PackedCbRecord &left,
                const star::solo::PackedCbRecord &right)
@@ -102,10 +95,22 @@ void SoloFeature::collapseUMIall_fromBuckets()
     P.inOut->logMain << timeMonthDayTime(rawTime)
                      << " ... Starting bucket-parallel Flex collapse" << endl;
 
+    // These four steps run before the parallel loop and were previously
+    // untimed, which is why a ~17 s block hid between two log timestamps.
+    auto preMark = std::chrono::steady_clock::now();
+    auto preTick = [&preMark]() {
+        const auto now = std::chrono::steady_clock::now();
+        const double elapsed = std::chrono::duration<double>(now - preMark).count();
+        preMark = now;
+        return elapsed;
+    };
+
     // Ambiguous CBs retain their established global evidence pass. Only
     // observations chosen by that resolver enter the disjoint CB buckets.
     resolvePendingAmbiguousToHash(false);
+    const double tResolveAmbig = preTick();
     readFeatSum->flushBucketSegments();
+    const double tFlushSegments = preTick();
 
     std::string storeError;
     if (!pSolo.cbBucketStore->finalize(&storeError)) {
@@ -114,6 +119,8 @@ void SoloFeature::collapseUMIall_fromBuckets()
                       std::cerr, P.inOut->logMain,
                       EXIT_CODE_INCONSISTENT_DATA, P);
     }
+
+    const double tFinalizeStore = preTick();
 
     std::vector<std::string> geneIds;
     if (!P.pSolo.probeListPath.empty() && P.pSolo.probeListPath != "-") {
@@ -146,6 +153,13 @@ void SoloFeature::collapseUMIall_fromBuckets()
         }
     }
 
+    const double tGeneIdsAndAllowed = preTick();
+    P.inOut->logMain << "Solo timing: pre-loop: resolveAmbiguous " << tResolveAmbig
+                     << " s, flushSegments " << tFlushSegments
+                     << " s, finalizeStore " << tFinalizeStore
+                     << " s, geneIds+allowed " << tGeneIdsAndAllowed << " s"
+                     << endl << std::flush;
+
     const uint32_t bucketCount = pSolo.cbBucketStore->bucket_count();
     std::vector<BucketResult> results(bucketCount);
     pSolo.cbBucketStore->reset_bucket_claims();
@@ -153,24 +167,84 @@ void SoloFeature::collapseUMIall_fromBuckets()
     const UMIParams correctionParams(
         pSolo.umiMinCount, pSolo.umiRatioThresh, pSolo.maxComponentSize);
 
-#pragma omp parallel num_threads(tailThreads)
+    // Phase timers, thread-seconds summed. The enclosing "collapse" timestamp
+    // also covers the MEX write and flexfilter, so it is not a measure of this
+    // loop; three optimisation attempts were aimed at the sort on the strength
+    // of profile *sample* shares before anyone measured the phases directly.
+    double tLoad = 0, tMerge = 0, tCompact = 0, tUmi = 0, tMolecules = 0, tEmit = 0;
+    const auto parallelStart = std::chrono::steady_clock::now();
+    auto tick = [](std::chrono::steady_clock::time_point &mark) {
+        const auto now = std::chrono::steady_clock::now();
+        const double elapsed = std::chrono::duration<double>(now - mark).count();
+        mark = now;
+        return elapsed;
+    };
+
+#pragma omp parallel num_threads(tailThreads) \
+    reduction(+:tLoad, tMerge, tCompact, tUmi, tMolecules, tEmit)
     {
         uint32_t bucket = 0;
         while (pSolo.cbBucketStore->claim_bucket(&bucket)) {
             BucketResult &out = results[bucket];
+            std::vector<std::vector<star::solo::PackedCbRecord> > segments;
             std::vector<star::solo::PackedCbRecord> records;
-            if (!pSolo.cbBucketStore->load_bucket(bucket, &records, &out.error))
+            auto mark = std::chrono::steady_clock::now();
+            if (!pSolo.cbBucketStore->load_sorted_segments(
+                    bucket, &segments, &out.error))
                 continue;
-            out.inputRecords = records.size();
+            tLoad += tick(mark);
+            size_t totalRecords = 0;
+            for (const auto &segment : segments)
+                totalRecords += segment.size();
+            out.inputRecords = totalRecords;
+            records.reserve(totalRecords);
 
-            // This ordering is injective over the packed key and also places
-            // each (CB, tag, gene) group contiguously. Exact duplicate keys can
-            // therefore be compacted in the same pass without a second sort.
-            std::sort(records.begin(), records.end(),
-                      [](const star::solo::PackedCbRecord &left,
-                         const star::solo::PackedCbRecord &right) {
-                          return groupSortKey(left) < groupSortKey(right);
-                      });
+            // append_segment sorted each producer-local run before publishing
+            // it. Merge the runs here while other bucket threads do the same;
+            // this preserves the exact global [CB, tag, gene, UMI] order while
+            // avoiding another comparison sort over the complete bucket.
+            const size_t sentinel = segments.size();
+            std::vector<size_t> next(sentinel, 0);
+            std::vector<uint64_t> currentKey(sentinel, 0);
+            size_t leafCount = 1;
+            while (leafCount < std::max<size_t>(1, sentinel))
+                leafCount <<= 1;
+            std::vector<size_t> tournament(leafCount * 2, sentinel);
+            for (size_t segment = 0; segment < sentinel; ++segment) {
+                if (!segments[segment].empty()) {
+                    currentKey[segment] = segments[segment][0].group_sort_key();
+                    tournament[leafCount + segment] = segment;
+                }
+            }
+            const auto winner = [&currentKey, sentinel](size_t left,
+                                                        size_t right) {
+                if (left == sentinel) return right;
+                if (right == sentinel) return left;
+                if (currentKey[left] != currentKey[right])
+                    return currentKey[left] < currentKey[right] ? left : right;
+                // Exact-key values merge commutatively; a segment tie-break
+                // nevertheless makes the output independent of scheduling.
+                return std::min(left, right);
+            };
+            for (size_t node = leafCount; node-- > 1;)
+                tournament[node] = winner(tournament[node * 2],
+                                          tournament[node * 2 + 1]);
+            while (tournament[1] != sentinel) {
+                const size_t segment = tournament[1];
+                records.push_back(segments[segment][next[segment]]);
+                ++next[segment];
+                const size_t leaf = leafCount + segment;
+                if (next[segment] == segments[segment].size()) {
+                    tournament[leaf] = sentinel;
+                } else {
+                    currentKey[segment] =
+                        segments[segment][next[segment]].group_sort_key();
+                }
+                for (size_t node = leaf / 2; node > 0; node /= 2)
+                    tournament[node] = winner(tournament[node * 2],
+                                              tournament[node * 2 + 1]);
+            }
+            tMerge += tick(mark);
             // Reproduce the old fused hash aggregation exactly, including
             // saturated read counts and probe-region conflict propagation.
             size_t compact = 0;
@@ -183,9 +257,14 @@ void SoloFeature::collapseUMIall_fromBuckets()
                 records[compact++] = merged;
             }
             records.resize(compact);
+            tCompact += tick(mark);
 
             std::vector<star::solo::PackedCbRecord> molecules;
             molecules.reserve(records.size());
+            // Same reasoning per bucket: one molecule per surviving record is
+            // the upper bound, and these reach ~880 K entries each.
+            out.moleculeKeys.reserve(records.size());
+            out.moleculeRegions.reserve(records.size());
             std::vector<UMICount> counts;
             for (size_t begin = 0; begin < records.size();) {
                 size_t end = begin + 1;
@@ -209,8 +288,10 @@ void SoloFeature::collapseUMIall_fromBuckets()
                         counts.emplace_back(records[i].umi24(), readCount);
                         groupReads += readCount;
                     }
+                    auto umiMark = std::chrono::steady_clock::now();
                     correction = UMICorrector::correctClique(
                         counts, correctionParams);
+                    tUmi += tick(umiMark);
                     out.metrics.readsGrouped += groupReads;
                     out.metrics.readsBefore += groupReads;
                     out.metrics.readsAfter += groupReads;
@@ -246,6 +327,7 @@ void SoloFeature::collapseUMIall_fromBuckets()
                 molecules.resize(write);
                 begin = end;
             }
+            tMolecules += tick(mark);
 
             uint32_t previousCb = UINT32_MAX;
             uint64_t previousCbTag = UINT64_MAX;
@@ -296,8 +378,18 @@ void SoloFeature::collapseUMIall_fromBuckets()
                 }
                 begin = end;
             }
+            tEmit += tick(mark);
         }
     }
+    P.inOut->logMain << "Solo timing: bucket loop wall "
+                     << std::chrono::duration<double>(
+                            std::chrono::steady_clock::now() - parallelStart).count()
+                     << " s; thread-seconds load " << tLoad
+                     << ", kway_merge " << tMerge
+                     << ", compact " << tCompact
+                     << ", umi_correct " << tUmi
+                     << ", molecules " << tMolecules
+                     << ", emit " << tEmit << endl << std::flush;
 
     InlineMatrixBundle inlineMatrix;
     indCB.clear();
@@ -305,6 +397,25 @@ void SoloFeature::collapseUMIall_fromBuckets()
     uint64_t totalInputRecords = 0;
     uint64_t totalInputCounts = 0;
     size_t nTripletGroups = 0;
+    // Fan the 256 bucket results into the final vectors.
+    //
+    // This used to be one serial pass of `insert`/`push_back` onto vectors that
+    // started empty, so each grew by repeated reallocation: gdnaMoleculeKeys
+    // alone reaches 224.9 M entries (1.8 GB) and the triplets were appended one
+    // at a time. Measured at ~21 s, it was the largest single block in the Flex
+    // tail - larger than flexfilter, and three times the bucket sort that three
+    // separate optimisation attempts had been aimed at.
+    //
+    // Sizes are all known in advance, so: one cheap serial pass for the prefix
+    // offsets, the error check and the scalar metrics, then size each
+    // destination once and let the buckets write into disjoint ranges in
+    // parallel. Output order is unchanged - each bucket lands exactly where the
+    // serial append would have put it.
+    const auto fanInStart = std::chrono::steady_clock::now();
+    std::vector<size_t> offCells(bucketCount + 1, 0);
+    std::vector<size_t> offTriplets(bucketCount + 1, 0);
+    std::vector<size_t> offMolecules(bucketCount + 1, 0);
+    std::vector<size_t> offCbIndices(bucketCount + 1, 0);
     for (uint32_t bucket = 0; bucket < bucketCount; ++bucket) {
         BucketResult &part = results[bucket];
         if (!part.error.empty()) {
@@ -318,31 +429,10 @@ void SoloFeature::collapseUMIall_fromBuckets()
         nTripletGroups += part.tripletGroups;
         maxGeneIdx = std::max(maxGeneIdx, part.maxGene);
 
-        const uint32_t cellBase = static_cast<uint32_t>(
-            inlineMatrix.matrixData.barcodes.size());
-        inlineMatrix.matrixData.barcodes.insert(
-            inlineMatrix.matrixData.barcodes.end(),
-            part.barcodes.begin(), part.barcodes.end());
-        inlineMatrix.cbTagKeys.insert(
-            inlineMatrix.cbTagKeys.end(),
-            part.cbTagKeys.begin(), part.cbTagKeys.end());
-        inlineMatrix.matrixData.nUMIperCB.insert(
-            inlineMatrix.matrixData.nUMIperCB.end(),
-            part.cellUmis.begin(), part.cellUmis.end());
-        inlineMatrix.matrixData.nGenePerCB.insert(
-            inlineMatrix.matrixData.nGenePerCB.end(),
-            part.cellGenes.begin(), part.cellGenes.end());
-        for (MexWriter::Triplet triplet : part.triplets) {
-            triplet.cell_idx += cellBase;
-            inlineMatrix.triplets.push_back(triplet);
-        }
-        inlineMatrix.gdnaMoleculeKeys.insert(
-            inlineMatrix.gdnaMoleculeKeys.end(),
-            part.moleculeKeys.begin(), part.moleculeKeys.end());
-        inlineMatrix.gdnaMoleculeRegions.insert(
-            inlineMatrix.gdnaMoleculeRegions.end(),
-            part.moleculeRegions.begin(), part.moleculeRegions.end());
-        indCB.insert(indCB.end(), part.cbIndices.begin(), part.cbIndices.end());
+        offCells[bucket + 1] = offCells[bucket] + part.barcodes.size();
+        offTriplets[bucket + 1] = offTriplets[bucket] + part.triplets.size();
+        offMolecules[bucket + 1] = offMolecules[bucket] + part.moleculeKeys.size();
+        offCbIndices[bucket + 1] = offCbIndices[bucket] + part.cbIndices.size();
 
         umisBeforeTotal += part.metrics.umisBefore;
         umisAfterTotal += part.metrics.umisAfter;
@@ -359,6 +449,52 @@ void SoloFeature::collapseUMIall_fromBuckets()
             componentSizeHist[i] += part.metrics.componentHist[i];
     }
 
+    inlineMatrix.matrixData.barcodes.resize(offCells[bucketCount]);
+    inlineMatrix.cbTagKeys.resize(offCells[bucketCount]);
+    inlineMatrix.matrixData.nUMIperCB.resize(offCells[bucketCount]);
+    inlineMatrix.matrixData.nGenePerCB.resize(offCells[bucketCount]);
+    inlineMatrix.triplets.resize(offTriplets[bucketCount]);
+    inlineMatrix.gdnaMoleculeKeys.resize(offMolecules[bucketCount]);
+    inlineMatrix.gdnaMoleculeRegions.resize(offMolecules[bucketCount]);
+    indCB.resize(offCbIndices[bucketCount]);
+
+#pragma omp parallel for schedule(dynamic, 1) num_threads(tailThreads)
+    for (int64_t bucket = 0; bucket < static_cast<int64_t>(bucketCount); ++bucket) {
+        BucketResult &part = results[bucket];
+        const size_t cellBase = offCells[bucket];
+        std::move(part.barcodes.begin(), part.barcodes.end(),
+                  inlineMatrix.matrixData.barcodes.begin() + cellBase);
+        std::copy(part.cbTagKeys.begin(), part.cbTagKeys.end(),
+                  inlineMatrix.cbTagKeys.begin() + cellBase);
+        std::copy(part.cellUmis.begin(), part.cellUmis.end(),
+                  inlineMatrix.matrixData.nUMIperCB.begin() + cellBase);
+        std::copy(part.cellGenes.begin(), part.cellGenes.end(),
+                  inlineMatrix.matrixData.nGenePerCB.begin() + cellBase);
+        size_t at = offTriplets[bucket];
+        for (MexWriter::Triplet triplet : part.triplets) {
+            triplet.cell_idx += static_cast<uint32_t>(cellBase);
+            inlineMatrix.triplets[at++] = triplet;
+        }
+        std::copy(part.moleculeKeys.begin(), part.moleculeKeys.end(),
+                  inlineMatrix.gdnaMoleculeKeys.begin() + offMolecules[bucket]);
+        std::copy(part.moleculeRegions.begin(), part.moleculeRegions.end(),
+                  inlineMatrix.gdnaMoleculeRegions.begin() + offMolecules[bucket]);
+        std::copy(part.cbIndices.begin(), part.cbIndices.end(),
+                  indCB.begin() + offCbIndices[bucket]);
+    }
+    P.inOut->logMain << "Solo timing: bucket fan-in "
+                     << std::chrono::duration<double>(
+                            std::chrono::steady_clock::now() - fanInStart).count()
+                     << " s" << endl << std::flush;
+
+    auto stepMark = std::chrono::steady_clock::now();
+    auto stepTick = [&stepMark]() {
+        const auto now = std::chrono::steady_clock::now();
+        const double elapsed = std::chrono::duration<double>(now - stepMark).count();
+        stepMark = now;
+        return elapsed;
+    };
+
     nCB = static_cast<uint32_t>(indCB.size());
     indCBwl.assign(pSolo.cbWLsize, static_cast<uint32_t>(-1));
     for (uint32_t i = 0; i < nCB; ++i)
@@ -370,12 +506,22 @@ void SoloFeature::collapseUMIall_fromBuckets()
             geneIds.push_back("UNKNOWN_PROBE_" + std::to_string(gene + 1));
     }
 
+    const double tIndexWl = stepTick();
+
     SampleMatrixData &matrix = inlineMatrix.matrixData;
     matrix.nCells = static_cast<uint32_t>(matrix.barcodes.size());
     matrix.nGenes = static_cast<uint32_t>(geneIds.size());
     matrix.countMatStride = 3;
     matrix.features = std::move(geneIds);
     matrix.countCellGeneUMIindex.assign(matrix.nCells + 1, 0);
+    // Exactly countMatStride entries per triplet, and the triplet count is
+    // already known: 98.9 M on the JAX set, so this vector reaches 296.7 M
+    // entries (1.19 GB). Growing into that by reallocation copied ~2.4 GB and
+    // ended with a fresh 1.2 GB region to fault in, which measured ~19 s and
+    // was the largest single block left in the Flex tail.
+    matrix.countCellGeneUMI.reserve(
+        inlineMatrix.triplets.size() * matrix.countMatStride);
+    const double tReserve = stepTick();
     uint32_t matrixOffset = 0;
     size_t tripletIndex = 0;
     for (uint32_t cell = 0; cell < matrix.nCells; ++cell) {
@@ -392,6 +538,7 @@ void SoloFeature::collapseUMIall_fromBuckets()
         }
     }
     matrix.countCellGeneUMIindex[matrix.nCells] = matrixOffset;
+    const double tTripletLoop = stepTick();
 
     P.inOut->logMain << "[CB-BUCKET] backend="
                      << (pSolo.cbBucketStore->using_spill() ? "spill" : "ram")
@@ -402,7 +549,11 @@ void SoloFeature::collapseUMIall_fromBuckets()
                      << " final_molecules="
                      << inlineMatrix.gdnaMoleculeKeys.size()
                      << " buckets=" << bucketCount
-                     << " tail_threads=" << tailThreads << endl;
+                     << " tail_threads=" << tailThreads
+                     << " async_merges="
+                     << pSolo.cbBucketStore->async_merge_count()
+                     << " async_merged_records="
+                     << pSolo.cbBucketStore->async_merged_records() << endl;
     P.inOut->logMain << "Found " << nCB << " unique CBs and "
                      << nTripletGroups << " (CB, gene, tag) groups" << endl;
     P.inOut->logMain << "Found " << matrix.nCells
@@ -424,9 +575,18 @@ void SoloFeature::collapseUMIall_fromBuckets()
         countMatMult.i.assign(nCB + 1, 0);
     }
 
+    const double tPerCbVectors = stepTick();
+    P.inOut->logMain << "Solo timing: post-fan-in setup: indexWl " << tIndexWl
+                     << " s, reserve " << tReserve
+                     << " s, tripletLoop " << tTripletLoop
+                     << " s, perCbVectors " << tPerCbVectors << " s"
+                     << endl << std::flush;
+
     const std::string mexDir = P.outFileNamePrefix + pSolo.outFileNames[0]
         + SoloFeatureTypes::Names[featureType] + "/raw/";
     createDirectory(mexDir, P.runDirPerm, "Solo raw MEX directory", P);
+    P.inOut->logMain << "Solo timing: mex dir prepared " << stepTick()
+                     << " s" << endl << std::flush;
     writeMexFromInlineHashDedup(mexDir, inlineMatrix);
 
     if (pSolo.runFlexFilter) {

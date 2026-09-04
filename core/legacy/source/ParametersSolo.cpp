@@ -1426,6 +1426,15 @@ void ParametersSolo::initialize(Parameters *pPin)
             config.scratchDirectory = spillDirectory;
             config.filePrefix = "solo_gene_bucket."
                 + std::to_string(static_cast<unsigned long long>(::getpid()));
+            // Producer runs are already immutable once appended. A small
+            // background pool consolidates batches while mapping continues,
+            // leaving fewer runs for the post-map tournament merge without
+            // competing with the full reader/triage thread budget.
+            config.mergeWorkerCount = bucketMode != BucketSpill
+                && pP->runThreadN > 1
+                ? std::min<uint32>(2, std::max<uint32>(1, pP->runThreadN / 8))
+                : 0;
+            config.mergeFanIn = 64;
             try {
                 cbBucketStore = std::make_shared<star::solo::CbBucketStore>(config);
             } catch (const std::exception &error) {
@@ -1438,7 +1447,9 @@ void ParametersSolo::initialize(Parameters *pPin)
             pP->inOut->logMain << "Flex streaming CB buckets: active ("
                                << bucketModeStr << ", " << bucketCount
                                << " buckets, memory budget " << bucketMemGB
-                               << " GiB";
+                               << " GiB, async merge workers "
+                               << config.mergeWorkerCount
+                               << ", fan-in " << config.mergeFanIn;
             if (bucketMode != BucketRam)
                 pP->inOut->logMain << ", spill directory " << spillDirectory;
             pP->inOut->logMain << ")" << endl;
