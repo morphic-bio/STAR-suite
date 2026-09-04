@@ -123,7 +123,7 @@ run_container_build() {
       if [[ \"\${STAR_SUITE_DEB_BUILD_CONTAINER_READY:-0}\" != \"1\" ]]; then
         apt-get update
         apt-get install -y --no-install-recommends \
-          build-essential xxd debhelper devscripts dpkg-dev fakeroot \
+          build-essential xxd debhelper dpkg-dev fakeroot \
           pkg-config zlib1g-dev libbz2-dev liblzma-dev \
           libcurl4-gnutls-dev libssl-dev libglib2.0-dev libhts-dev \
           ca-certificates git

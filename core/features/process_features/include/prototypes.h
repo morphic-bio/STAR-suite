@@ -3,7 +3,9 @@
 
 #include "common.h"
 #include <zlib.h>
+#ifndef __cplusplus
 #include <stdatomic.h>
+#endif
 #include "queue.h"
 
 // Forward declarations

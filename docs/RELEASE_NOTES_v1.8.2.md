@@ -64,6 +64,9 @@ indexes do not need to be rebuilt.
 - Publish two dynamic `.deb` packages from the same tagged source: an Ubuntu
   22.04 build and an Ubuntu 24.04 build. The suffix records the build and test
   baseline; it does not select a different STAR algorithm or output contract.
+- Keep C11 atomic declarations confined to C translation units so the packaged
+  `star_feature_call` companion builds under Ubuntu 22.04's GCC 11 as well as
+  Ubuntu 24.04's newer compiler.
 - Validate the Ubuntu 22.04 package on both Ubuntu 22.04 and 24.04, and validate
   the Ubuntu 24.04 package on Ubuntu 24.04. A binary built against a newer
   system runtime is not promised to run on an older distribution.
