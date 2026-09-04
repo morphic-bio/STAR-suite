@@ -11,7 +11,6 @@ RUN apt-get update \
       build-essential \
       ca-certificates \
       debhelper \
-      devscripts \
       dpkg-dev \
       fakeroot \
       git \

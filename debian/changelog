@@ -8,10 +8,11 @@ star-suite (1.8.2-1) unstable; urgency=medium
     producer-local sorted runs, asynchronous hierarchical consolidation, and
     deterministic final tournament merging.
   * Build and validate separate Ubuntu 22.04 and Ubuntu 24.04 Debian binary
-    packages from the same tagged source revision.
+    packages from the same tagged source revision, including GCC 11-compatible
+    C/C++ header boundaries for the packaged feature-calling companion.
   * Report STAR Suite 1.8.2 from STAR --version.
 
- -- STAR-suite Maintainers <maintainers@biodepot.example>  Fri, 04 Sep 2026 02:15:00 +0000
+ -- STAR-suite Maintainers <maintainers@biodepot.example>  Fri, 04 Sep 2026 01:12:00 +0000
 
 star-suite (1.8.1-1) unstable; urgency=medium
 

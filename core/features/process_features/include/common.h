@@ -19,7 +19,9 @@
 #include <zlib.h>
 #include <sys/wait.h>
 #include <dirent.h>
+#ifndef __cplusplus
 #include <stdatomic.h>
+#endif
 #include <sys/mman.h>
 #include <errno.h>
 
