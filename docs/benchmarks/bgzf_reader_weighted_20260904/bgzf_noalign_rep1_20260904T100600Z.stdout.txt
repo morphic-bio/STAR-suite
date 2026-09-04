@@ -1,0 +1,79 @@
+	/mnt/pikachu/STAR-suite-bgzf-opt-20260904/core/legacy/source/STAR --runThreadN 32 --genomeDir /home/lhhung/jax_stage_20260903/ref/star_index --soloType CB_UMI_Simple --soloCBstart 1 --soloUMIstart 17 --soloCBlen 16 --soloUMIlen 12 --soloBarcodeReadLength 0 --soloCBwhitelist /home/lhhung/jax_stage_20260903/ref/737K-fixed-rna-profiling.txt --flex yes --soloFlexExpectedCellsPerTag 3000 --soloSampleWhitelist /home/lhhung/jax_stage_20260903/ref/sample_whitelist_full_16.tsv --soloProbeList /home/lhhung/jax_stage_20260903/ref/star_index/flex_probe_artifacts/probe_list.txt --soloSampleProbes /home/lhhung/jax_stage_20260903/ref/probe-barcodes-fixed-rna-profiling-rna.txt --soloSampleProbeOffset 68 --soloFlexAllowedTags /home/lhhung/jax_stage_20260903/ref/sample_whitelist_full_16.tsv --soloFlexOutputPrefix /home/lhhung/jax_bgzf_reader_weighted_20260904/bgzf_noalign_rep1_20260904T100600Z/per_sample --limitIObufferSize 50000000 50000000 --outSJtype None --outSAMtype None --outSAMattributes None --soloFeatures Gene --soloCellFilter None --soloMultiMappers Rescue --soloCBmatchWLtype 1MM_multi_Nbase_pseudocounts --soloUMIfiltering MultiGeneUMI_CR --soloUMIdedup 1MM_CR --soloStrand Unstranded --clipAdapterType CellRanger4 --alignEndsType Local --chimSegmentMin 0 --soloKeysCompat cr --soloSampleSearchNearby no --soloHashScreenFile /home/lhhung/jax_stage_20260903/ref/h01_cache.bin --soloBucketMode ram --soloBucketCount 256 --flexPipeline yes --flexPipelineNTriage 0 --flexPipelineNSolo 0 --flexNoAlign 1 --dynamicThreadInterface 1 --crAssignConsumerThreads -1 --crAssignSearchThreads 1 --outFileNamePrefix /home/lhhung/jax_bgzf_reader_weighted_20260904/bgzf_noalign_rep1_20260904T100600Z/ --readFilesBgzfMode range --bgzfReaderThreads 32 --bgzfCrcCheck 1 --readFilesIn /home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L001_R2_001.fastq.gz,/home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L002_R2_001.fastq.gz,/home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L003_R2_001.fastq.gz,/home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L004_R2_001.fastq.gz,/home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L005_R2_001.fastq.gz,/home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L006_R2_001.fastq.gz,/home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L007_R2_001.fastq.gz,/home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L008_R2_001.fastq.gz /home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L001_R1_001.fastq.gz,/home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L002_R1_001.fastq.gz,/home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L003_R1_001.fastq.gz,/home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L004_R1_001.fastq.gz,/home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L005_R1_001.fastq.gz,/home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L006_R1_001.fastq.gz,/home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L007_R1_001.fastq.gz,/home/lhhung/jax_stage_20260903/fastq/SC2300771_GT23-14630_GATAATACCG-TTTACGTGGT_S5_L008_R1_001.fastq.gz
+	STAR-suite version: 1.8.2   STAR upstream: 2.7.11b   genome compatibility: 2.7.4a   compiled: 2026-09-04T09:40:25+00:00 :/mnt/pikachu/STAR-suite-bgzf-opt-20260904/core/legacy/source
+Sep 04 10:06:00 ..... started STAR run
+Sep 04 10:06:13 ..... started mapping
+Sep 04 10:09:33 ..... finished mapping
+Sep 04 10:09:34 ..... started Solo counting
+Found recovered_cells = 1125 with loss = 0
+Bootstrap mean = 1125, sd = 0, nCellsSimple = 1125
+Median UMIs of initial cell calls: 1
+Min UMIs: 500
+Found recovered_cells = 528 with loss = 0.00189394
+Found recovered_cells = 887 with loss = 0.00450958
+Bootstrap mean = 529, sd = 0, nCellsSimple = 529
+Median UMIs of initial cell calls: 1
+Min UMIs: 500
+Found recovered_cells = 1331 with loss = 0
+Bootstrap mean = 885, sd = 0, nCellsSimple = 885
+Median UMIs of initial cell calls: 1
+Min UMIs: 500
+Found recovered_cells = 1997 with loss = 0.000500751
+Found recovered_cells = 2522 with loss = 0.0035686
+Bootstrap mean = 1996, sd = 0, nCellsSimple = 1996
+Median UMIs of initial cell calls: 1
+Min UMIs: 500
+Bootstrap mean = 2519, sd = 0, nCellsSimple = 2519
+Median UMIs of initial cell calls: 1
+Min UMIs: 500
+Bootstrap mean = 1331, sd = 0, nCellsSimple = 1331
+Median UMIs of initial cell calls: 1
+Min UMIs: 500
+Found recovered_cells = 3399 with loss = 0.00117682
+Bootstrap mean = 3397, sd = 0, nCellsSimple = 3397
+Median UMIs of initial cell calls: 1
+Min UMIs: 500
+Found recovered_cells = 3318 with loss = 0.00265156
+Bootstrap mean = 3365, sd = 0, nCellsSimple = 3365
+Median UMIs of initial cell calls: 1
+Min UMIs: 500
+Found recovered_cells = 3965 with loss = 0.00630517
+Bootstrap mean = 3970, sd = 0, nCellsSimple = 3970
+Median UMIs of initial cell calls: 1
+Min UMIs: 500
+Found recovered_cells = 3680 with loss = 0.00434783
+Bootstrap mean = 3676, sd = 0, nCellsSimple = 3676
+Median UMIs of initial cell calls: 1
+Min UMIs: 500
+Found recovered_cells = 5549 with loss = 0.0180213
+Bootstrap mean = 5559, sd = 0, nCellsSimple = 5559
+Median UMIs of initial cell calls: 2
+Min UMIs: 500
+Found recovered_cells = 4052 with loss = 0.00757587
+Bootstrap mean = 4045.95, sd = 71.4987, nCellsSimple = 4046
+Median UMIs of initial cell calls: 34
+Min UMIs: 500
+FlexFilter completed successfully
+  Processed 16 tags
+Writing per-sample MEX outputs...
+
+Summary (saved to /home/lhhung/jax_bgzf_reader_weighted_20260904/bgzf_noalign_rep1_20260904T100600Z/per_sample/flexfilter_summary.tsv):
+Sample            Expected   Retain  Simple_ED  Tail_Tested    ED_Pass    Occ_Rem    Final     Total_UMIs
+BC001                    4      885        885            0        885          1      884            938
+BC002                  656    15850       4088            0       4088          2     4086         163131
+BC003                   24     3365       3365            0       3365          1     3364           6560
+BC004                 8074   120000          0         5019       4409          3     4406       32797752
+BC005                   24     3397       3397            0       3397          2     3395           6403
+BC006                 9905   120000          0         5879       5301          3     5298       42727139
+BC007                14658   120000          0         5815       5389          3     5386       73596854
+BC008                14515   120000          0         5750       5276          3     5273       60937656
+BC009                    6     1331       1331            0       1331          2     1329           1572
+BC010                    5     1125       1125            0       1125          0     1125           1202
+BC011                   24     3970       3970            0       3970          1     3969           6390
+BC012                    2      529        529            0        529          0      529            565
+BC013                   61     5559       5559            0       5559          2     5557          16066
+BC014                    9     1996       1996            0       1996          1     1995           2442
+BC015                   12     2519       2519            0       2519          3     2516           3043
+BC016                   21     3676       3676            0       3676          3     3673           5588
+TOTAL                48000   524202      32440        22463      52815         30    52785      210273301
+Sep 04 10:10:22 ..... finished Solo counting
+Sep 04 10:10:22 ..... finished successfully

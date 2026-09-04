@@ -1,0 +1,2 @@
+status=success
+run_dir=/home/lhhung/jax_bgzf_reader_weighted_20260904/bgzf_noalign_rep1_20260904T100600Z
