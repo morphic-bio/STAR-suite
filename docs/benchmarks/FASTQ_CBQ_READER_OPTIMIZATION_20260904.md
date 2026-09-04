@@ -34,18 +34,20 @@ space into four times as many claimable ranges (135 lane fragments instead of
 | Candidate | Wall (s) | CPU | Peak RSS (GiB) | Decision |
 |---|---:|---:|---:|---|
 | Borrowed fixed-buffer handoff | 218.54 | 2227% | 39.8 | Neutral |
-| Streamlined packed-base decode | 217.66 | 2202% | 40.1 | Revert; within run noise |
+| Streamlined packed-base decode | 217.66 | 2202% | 40.1 | Keep for simpler decoding |
 | Fourfold range over-partitioning | 218.54 | 2249% | 39.8 | Revert; neutral |
 
 The established CBQ result was 218.23 seconds, so none of the candidates
 demonstrated a material reader-wall improvement. The decode candidate was only
 0.57 seconds (0.3%) faster, while its mapping-phase wall time was unchanged.
+It is nevertheless retained because separating the unaligned prefix, complete
+packed bytes, and trailing bases eliminates repeated offset arithmetic and
+makes the bounds behavior explicit.
 The range candidate exactly reproduced the 218.54-second handoff result.
 All three runs reproduced the pipeline counters, 16 sample outputs, and
 manifest digest `767c1e314df547e3`.
 
 CBQ already reads sequences into bounded buffers and exposes the other fields
 as borrowed views. The measurements therefore indicate that additional
-buffering and range scheduling are not limiting this workload. Both follow-up
-source candidates were explicitly reverted; no unproven CBQ-only change is
-retained.
+buffering and range scheduling are not limiting this workload. The range
+scheduling candidate remains explicitly reverted.
