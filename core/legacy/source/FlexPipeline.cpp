@@ -275,7 +275,7 @@ void *flexLaneReaderRouterThread(void *arg) {
 // When sample tagging is not configured, every read remains eligible. When it is
 // configured, an unmatched/short tag cannot contribute to a per-sample matrix and
 // therefore never needs residual alignment.
-static bool detectConfiguredSampleTag(char *readSeq, uint32_t readLen,
+static bool detectConfiguredSampleTag(const char *readSeq, uint32_t readLen,
                                       const ParametersSolo &pSolo,
                                       SampleDetector *sampleDet,
                                       bool sampleDetReady,
@@ -289,7 +289,8 @@ static bool detectConfiguredSampleTag(char *readSeq, uint32_t readLen,
             return false;
         }
         uint8_t packedTag[4];
-        nuclPackBAM(readSeq + offset, reinterpret_cast<char *>(packedTag), 8);
+        nuclPackBAM(const_cast<char *>(readSeq + offset),
+                    reinterpret_cast<char *>(packedTag), 8);
         const uint32_t sampleIdx = sampleDet->detectSampleFromPackedTag(packedTag);
         if (sampleIdx == 0) {
             return false;
@@ -459,7 +460,6 @@ static uint64_t processOneLane(
     char seq0[kFlexPipeSeqMax], seq1[kFlexPipeSeqMax];
     char qual0[kFlexPipeSeqMax], qual1[kFlexPipeSeqMax];
     char name[kFlexPipeNameMax];
-
     uint64_t nReads = 0;
 
     while (true) {
@@ -590,9 +590,6 @@ static uint64_t processOneBgzfRange(
     auto &cache = FlexHashScreenCache::instance();
     char dummySeq[4] = {'\0'};
     char dummyQual[4] = {'\0'};
-    char seq0[kFlexPipeSeqMax], seq1[kFlexPipeSeqMax];
-    char qual0[kFlexPipeSeqMax], qual1[kFlexPipeSeqMax];
-    char name[kFlexPipeNameMax];
 
     uint64_t nReads = 0;
     const size_t bgzfRecordBatchSize = 256;
@@ -618,9 +615,9 @@ static uint64_t processOneBgzfRange(
         star::input::BgzfStarRecord &record = recordBatch[batchIndex];
         const size_t readLen0Size = record.mates[0].sequence.size();
         const size_t readLen1Size = record.mates[1].sequence.size();
-        if (readLen0Size >= sizeof(seq0) || readLen1Size >= sizeof(seq1) ||
-            record.mates[0].quality.size() >= sizeof(qual0) ||
-            record.mates[1].quality.size() >= sizeof(qual1)) {
+        if (readLen0Size >= kFlexPipeSeqMax || readLen1Size >= kFlexPipeSeqMax ||
+            record.mates[0].quality.size() >= kFlexPipeSeqMax ||
+            record.mates[1].quality.size() >= kFlexPipeSeqMax) {
             std::ostringstream message;
             message << "Flex BGZF record " << record.read_ordinal
                     << " in lane " << task.laneId
@@ -628,22 +625,15 @@ static uint64_t processOneBgzfRange(
             st->failInput(message.str());
             break;
         }
-        std::memcpy(seq0, record.mates[0].sequence.data(), readLen0Size);
-        std::memcpy(seq1, record.mates[1].sequence.data(), readLen1Size);
-        std::memcpy(qual0, record.mates[0].quality.data(), readLen0Size);
-        std::memcpy(qual1, record.mates[1].quality.data(), readLen1Size);
-        seq0[readLen0Size] = '\0';
-        seq1[readLen1Size] = '\0';
-        qual0[readLen0Size] = '\0';
-        qual1[readLen1Size] = '\0';
         const uint32_t readLen0 = static_cast<uint32_t>(readLen0Size);
         const uint32_t readLen1 = static_cast<uint32_t>(readLen1Size);
+        const char *seq0 = record.mates[0].sequence.c_str();
+        const char *seq1 = record.mates[1].sequence.c_str();
+        const char *qual0 = record.mates[0].quality.c_str();
+        const char *qual1 = record.mates[1].quality.c_str();
         const size_t nameLength = std::min(record.read_name.size(),
                                            static_cast<size_t>(kFlexPipeNameMax - 1));
-        if (nameLength != 0) {
-            std::memcpy(name, record.read_name.data(), nameLength);
-        }
-        name[nameLength] = '\0';
+        const char *name = record.read_name.c_str();
 
         const uint64_t iReadAll = batchGlobalFirst + batchIndex;
         ++tally.lane;
@@ -665,8 +655,12 @@ static uint64_t processOneBgzfRange(
 
         if (decision.action == FlexHashScreenDecision::Keep ||
             decision.action == FlexHashScreenDecision::Deny) {
-            char *readSeqPtrs[2] = {dummySeq, seq1};
-            char *readQualPtrs[2] = {dummyQual, qual1};
+            char *readSeqPtrs[2] = {
+                dummySeq, const_cast<char *>(seq1)
+            };
+            char *readQualPtrs[2] = {
+                dummyQual, const_cast<char *>(qual1)
+            };
             uint64 readLens[2] = {0, readLen1};
             std::string readNameExtra;
             localBar.getCBandUMI(readSeqPtrs, readQualPtrs, readLens, readNameExtra,
@@ -698,7 +692,8 @@ static uint64_t processOneBgzfRange(
             ++tally.miss;
             if (!noAlign) {
                 EnrichedPacket packet;
-                std::memcpy(packet.name, name, nameLength + 1);
+                std::memcpy(packet.name, name, nameLength);
+                packet.name[nameLength] = '\0';
                 std::memcpy(packet.seq[0], seq0, readLen0 + 1);
                 std::memcpy(packet.seq[1], seq1, readLen1 + 1);
                 std::memcpy(packet.qual[0], qual0, readLen0 + 1);
