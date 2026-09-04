@@ -14,7 +14,10 @@ namespace star {
 namespace input {
 namespace {
 
-const size_t kMaxBlocksPerWork = 64;
+// Some ordinary 1 MiB compressed work windows contain more than 64 members.
+// Keep a finite decompressed-work bound while avoiding repeated reads of the
+// unconsumed tail in those windows.
+const size_t kMaxBlocksPerWork = 256;
 
 bool set_error(std::string* error, const std::string& message) {
     if (error != nullptr) {
@@ -146,8 +149,9 @@ bool BgzfRangeReader::open(const std::string& path,
 }
 
 void BgzfRangeReader::worker_loop() {
+    BgzfInflater inflater;
+    CompressedWork work;
     while (true) {
-        CompressedWork work;
         uint64_t sequence = 0;
         {
             std::unique_lock<std::mutex> lock(mutex_);
@@ -173,7 +177,7 @@ void BgzfRangeReader::worker_loop() {
 
         InflatedBlock result;
         std::string inflate_error;
-        if (!inflate_work_permitted(work, &result, &inflate_error)) {
+        if (!inflate_work_permitted(&inflater, work, &result, &inflate_error)) {
             std::lock_guard<std::mutex> lock(mutex_);
             fail_locked(inflate_error);
             return;
@@ -217,10 +221,11 @@ bool BgzfRangeReader::claim_work(CompressedWork* work,
     return true;
 }
 
-bool BgzfRangeReader::inflate_work(const CompressedWork& work,
+bool BgzfRangeReader::inflate_work(BgzfInflater* inflater,
+                                   const CompressedWork& work,
                                    InflatedBlock* result,
                                    std::string* error) {
-    if (result == nullptr || work.blocks.empty()) {
+    if (inflater == nullptr || result == nullptr || work.blocks.empty()) {
         return set_error(error, "invalid BGZF compressed work item");
     }
     result->compressedOffset = work.blocks.front().compressedOffset;
@@ -246,7 +251,7 @@ bool BgzfRangeReader::inflate_work(const CompressedWork& work,
         }
         unsigned char* destination = block.isize == 0
             ? nullptr : result->bytes.data() + output_offset;
-        if (!inflate_bgzf_block_buffer(
+        if (!inflater->inflate_block(
                 work.bytes.data() + static_cast<size_t>(relative64),
                 block.compressedSize, block.compressedOffset, checkCrc_,
                 destination, block.isize, error)) {
@@ -257,17 +262,18 @@ bool BgzfRangeReader::inflate_work(const CompressedWork& work,
     return true;
 }
 
-bool BgzfRangeReader::inflate_work_permitted(const CompressedWork& work,
+bool BgzfRangeReader::inflate_work_permitted(BgzfInflater* inflater,
+                                             const CompressedWork& work,
                                              InflatedBlock* result,
                                              std::string* error) {
     if (!permitHooks_.enabled()) {
-        return inflate_work(work, result, error);
+        return inflate_work(inflater, work, result, error);
     }
 
     const uint64_t wait_ns = permitHooks_.acquire(permitHooks_.context);
     const std::chrono::steady_clock::time_point work_start =
         std::chrono::steady_clock::now();
-    const bool ok = inflate_work(work, result, error);
+    const bool ok = inflate_work(inflater, work, result, error);
     const uint64_t work_ns = static_cast<uint64_t>(
         std::chrono::duration_cast<std::chrono::nanoseconds>(
             std::chrono::steady_clock::now() - work_start).count());
@@ -290,7 +296,7 @@ bool BgzfRangeReader::claim_and_inflate_sync(InflatedBlock* result,
     if (*at_end) {
         return true;
     }
-    return inflate_work_permitted(work, result, error);
+    return inflate_work_permitted(&syncInflater_, work, result, error);
 }
 
 bool BgzfRangeReader::append_next_block(std::string* error) {
