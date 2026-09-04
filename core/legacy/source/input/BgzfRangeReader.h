@@ -67,7 +67,8 @@ public:
               uint32_t worker_threads,
               bool check_crc,
               std::string* error,
-              const BgzfWorkPermitHooks* permit_hooks = nullptr);
+              const BgzfWorkPermitHooks* permit_hooks = nullptr,
+              bool store_quality = true);
 
     // Returns false with an empty error at clean stream end.
     bool next(BgzfFastqRecord* record, std::string* error);
@@ -115,6 +116,7 @@ private:
     std::string path_;
     int inputFd_ = -1;
     bool checkCrc_ = true;
+    bool storeQuality_ = true;
     uint64_t rangeStart_ = 0;
     uint64_t rangeEnd_ = 0;
     uint64_t claimedOffset_ = 0;
