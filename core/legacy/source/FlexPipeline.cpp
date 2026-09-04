@@ -9,6 +9,7 @@
 #include "Parameters.h"
 #include "ReadAlign.h"
 #include "Stats.h"
+#include "GlobalVariables.h"
 #include "input/CbqInputModule.h"
 #include "input/BgzfStarAdapter.h"
 
@@ -19,13 +20,37 @@
 #include <limits>
 #include <sstream>
 #include <thread>
-#include <unordered_set>
 #include <unistd.h>
 #include <chrono>
 
 namespace {
 
 static constexpr int kGzBufSize = 1 << 20;
+static constexpr size_t kFlexAlignPermitBatch = 64;
+
+ThreadControl::PermitHookContext kFlexBgzfPermitContext{
+    ThreadControl::PermitDomain::FEATURE};
+
+uint64_t flexBgzfPermitAcquire(void *context) {
+    const ThreadControl::PermitHookContext *permit =
+        static_cast<const ThreadControl::PermitHookContext *>(context);
+    const ThreadControl::PermitDomain domain = permit == nullptr
+        ? ThreadControl::PermitDomain::FEATURE : permit->domain;
+    return g_threadChunks.mapPermitAcquireForDomain(domain);
+}
+
+void flexBgzfPermitRelease(void *context,
+                           uint64_t waitNs,
+                           uint64_t workUnits,
+                           uint64_t workBytes,
+                           uint64_t workNs) {
+    const ThreadControl::PermitHookContext *permit =
+        static_cast<const ThreadControl::PermitHookContext *>(context);
+    const ThreadControl::PermitDomain domain = permit == nullptr
+        ? ThreadControl::PermitDomain::FEATURE : permit->domain;
+    g_threadChunks.mapPermitReleaseForDomain(
+        domain, waitNs, workUnits, workBytes, workNs);
+}
 
 bool gzReadLine(gzFile gz, char *buf, int maxLen) {
     char *ret = gzgets(gz, buf, maxLen);
@@ -245,72 +270,46 @@ void *flexLaneReaderRouterThread(void *arg) {
     return nullptr;
 }
 
-// Shared one-time init for the sample pre-filter (thread-safe via call_once)
-static std::unordered_set<uint32_t> g_samplePreFilter;
-static std::once_flag g_samplePreFilterFlag;
-
-static void buildSamplePreFilter(Parameters &P) {
-
-    static uint8_t asciiToNib[256] = {};
-    std::memset(asciiToNib, 0, sizeof(asciiToNib));
-    asciiToNib['A'] = asciiToNib['a'] = 1;
-    asciiToNib['C'] = asciiToNib['c'] = 2;
-    asciiToNib['G'] = asciiToNib['g'] = 4;
-    asciiToNib['T'] = asciiToNib['t'] = 8;
-
-    if (P.pSolo.sampleWhitelistPath.empty() || P.pSolo.sampleWhitelistPath == "-" ||
-        P.pSolo.sampleProbesPath.empty() || P.pSolo.sampleProbesPath == "-")
-        return;
-
-    std::unordered_set<std::string> userCanonicals;
-    {
-        std::ifstream wl(P.pSolo.sampleWhitelistPath.c_str());
-        std::string line;
-        while (std::getline(wl, line)) {
-            std::istringstream iss(line);
-            std::string id, canonical;
-            if (iss >> id >> canonical) userCanonicals.insert(canonical);
-        }
+// Use the same detector for the early rejection and downstream sample assignment.
+// When sample tagging is not configured, every read remains eligible. When it is
+// configured, an unmatched/short tag cannot contribute to a per-sample matrix and
+// therefore never needs residual alignment.
+static bool detectConfiguredSampleTag(char *readSeq, uint32_t readLen,
+                                      const ParametersSolo &pSolo,
+                                      SampleDetector *sampleDet,
+                                      bool sampleDetReady,
+                                      uint8_t &detectedSampleToken) {
+    detectedSampleToken = 0xFF;
+    if (!sampleDetReady || sampleDet == nullptr) {
+        return true;
     }
-    auto encodeTag = [&](const std::string &tag) -> uint32_t {
-        if (tag.size() != 8) return 0;
-        uint32_t code = 0;
-        for (int i = 0; i < 8; ++i) {
-            uint8_t nib = asciiToNib[static_cast<uint8_t>(tag[i])];
-            if (nib == 0) return 0;
-            code = (code << 4) | nib;
+    auto detectAt = [&](int64_t offset) -> bool {
+        if (offset < 0 || static_cast<uint64_t>(offset) + 8 > readLen) {
+            return false;
         }
-        return code;
+        uint8_t packedTag[4];
+        nuclPackBAM(readSeq + offset, reinterpret_cast<char *>(packedTag), 8);
+        const uint32_t sampleIdx = sampleDet->detectSampleFromPackedTag(packedTag);
+        if (sampleIdx == 0) {
+            return false;
+        }
+        detectedSampleToken = static_cast<uint8_t>(sampleIdx & 0x1Fu);
+        return true;
     };
-    for (const std::string &canon : userCanonicals) {
-        uint32_t c = encodeTag(canon);
-        if (c) g_samplePreFilter.insert(c);
+
+    const int64_t primary = static_cast<int64_t>(pSolo.sampleProbeOffset);
+    if (detectAt(primary)) {
+        return true;
     }
-    std::ifstream probeFile(P.pSolo.sampleProbesPath.c_str());
-    std::string line;
-    while (std::getline(probeFile, line)) {
-        std::istringstream iss(line);
-        std::string variant, canonical, barcodeId;
-        if (!(iss >> variant >> canonical >> barcodeId)) continue;
-        if (userCanonicals.find(canonical) == userCanonicals.end()) continue;
-        uint32_t c = encodeTag(variant);
-        if (c) g_samplePreFilter.insert(c);
+    if (!pSolo.sampleStrictMatch && pSolo.sampleSearchNearby) {
+        static const int deltas[] = {-1, 1, -2, 2};
+        for (int delta : deltas) {
+            if (detectAt(primary + delta)) {
+                return true;
+            }
+        }
     }
-}
-
-static uint8_t g_asciiToNib[256];
-static std::once_flag g_asciiToNibFlag;
-
-static void initAsciiToNib() {
-    std::memset(g_asciiToNib, 0, sizeof(g_asciiToNib));
-    g_asciiToNib['A'] = g_asciiToNib['a'] = 1;
-    g_asciiToNib['C'] = g_asciiToNib['c'] = 2;
-    g_asciiToNib['G'] = g_asciiToNib['g'] = 4;
-    g_asciiToNib['T'] = g_asciiToNib['t'] = 8;
-}
-
-static void ensureAsciiToNibInit() {
-    std::call_once(g_asciiToNibFlag, initAsciiToNib);
+    return false;
 }
 
 // Process one lane: read all FASTQ records, hash screen, inline Solo for hits, push misses to alignQ.
@@ -339,7 +338,7 @@ struct FlexLocalCounters {
     static const uint64_t kFlushEvery = 65536;
     FlexPipelineCounters &shared;
     int laneId;
-    uint64_t total = 0, keep = 0, deny = 0, miss = 0, lane = 0, sinceFlush = 0;
+    uint64_t total = 0, keep = 0, deny = 0, sampleReject = 0, miss = 0, lane = 0, sinceFlush = 0;
 
     FlexLocalCounters(FlexPipelineCounters &counters, int lane_)
         : shared(counters), laneId(lane_) {}
@@ -353,10 +352,12 @@ struct FlexLocalCounters {
         if (total) shared.readsTotal.fetch_add(total, std::memory_order_relaxed);
         if (keep)  shared.triageKeep.fetch_add(keep, std::memory_order_relaxed);
         if (deny)  shared.triageDeny.fetch_add(deny, std::memory_order_relaxed);
+        if (sampleReject)
+            shared.triageSampleReject.fetch_add(sampleReject, std::memory_order_relaxed);
         if (miss)  shared.triageMiss.fetch_add(miss, std::memory_order_relaxed);
         if (lane && laneId >= 0 && laneId < 64)
             shared.perLaneReads[laneId].fetch_add(lane, std::memory_order_relaxed);
-        total = keep = deny = miss = lane = sinceFlush = 0;
+        total = keep = deny = sampleReject = miss = lane = sinceFlush = 0;
     }
 };
 
@@ -379,29 +380,77 @@ static void enqueueForAlign(FlexPipelineState *st, EnrichedPacket &&ep, ReadAlig
     while (!st->alignQ.try_push(ep)) {
         EnrichedPacket queued;
         if (st->alignQ.try_pop(queued)) {
-            RA->oneReadFromPacket(queued);
-            st->counters.alignHelped.fetch_add(1, std::memory_order_relaxed);
+            uint64_t aligned = 0;
+            uint64_t workBytes = 0;
+            uint64_t waitNs = 0;
+            if (st->dynamicPermitsEnabled) {
+                waitNs = g_threadChunks.mapPermitAcquireForDomain(
+                    ThreadControl::PermitDomain::MAP);
+            }
+            const std::chrono::steady_clock::time_point workStart =
+                std::chrono::steady_clock::now();
+            do {
+                workBytes += queued.readLen[0] + queued.readLen[1];
+                RA->oneReadFromPacket(queued);
+                ++aligned;
+            } while (st->dynamicPermitsEnabled &&
+                     aligned < kFlexAlignPermitBatch &&
+                     st->alignQ.try_pop(queued));
+            if (st->dynamicPermitsEnabled) {
+                const uint64_t workNs = static_cast<uint64_t>(
+                    std::chrono::duration_cast<std::chrono::nanoseconds>(
+                        std::chrono::steady_clock::now() - workStart).count());
+                g_threadChunks.mapPermitReleaseForDomain(
+                    ThreadControl::PermitDomain::MAP,
+                    waitNs, aligned, workBytes, workNs);
+            }
+            st->counters.alignHelped.fetch_add(aligned, std::memory_order_relaxed);
         } else {
             std::this_thread::yield();
         }
     }
 }
 
+// Consume one already-claimed packet plus a short immediately available tail
+// under one MAP lease. Batching keeps scheduler overhead small while retaining
+// millisecond-scale handoff between BGZF inflation and residual alignment.
+static void alignAvailableBatch(FlexPipelineState *st,
+                                EnrichedPacket &packet,
+                                ReadAlign *RA) {
+    if (!st->dynamicPermitsEnabled) {
+        RA->oneReadFromPacket(packet);
+        return;
+    }
+
+    const uint64_t waitNs = g_threadChunks.mapPermitAcquireForDomain(
+        ThreadControl::PermitDomain::MAP);
+    const std::chrono::steady_clock::time_point workStart =
+        std::chrono::steady_clock::now();
+    uint64_t aligned = 0;
+    uint64_t workBytes = 0;
+    do {
+        workBytes += packet.readLen[0] + packet.readLen[1];
+        RA->oneReadFromPacket(packet);
+        ++aligned;
+    } while (aligned < kFlexAlignPermitBatch && st->alignQ.try_pop(packet));
+    const uint64_t workNs = static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now() - workStart).count());
+    g_threadChunks.mapPermitReleaseForDomain(
+        ThreadControl::PermitDomain::MAP,
+        waitNs, aligned, workBytes, workNs);
+}
+
 static uint64_t processOneLane(
     FlexPipelineState *st, Parameters &P, int laneId,
     gzFile gzR2, gzFile gzR1,
     SoloReadFeature *readFeat, Stats *stats,
-    const std::unordered_set<uint32_t> &samplePreFilter,
     SampleDetector *sampleDet, bool sampleDetReady,
     SoloReadBarcode &localBar, bool noAlign = false,
     ReadAlign *RA = nullptr)
 {
     auto &cache = FlexHashScreenCache::instance();
     FlexLocalCounters tally(st->counters, laneId);
-    const uint32_t sampleTagOffset = P.pSolo.sampleProbeOffset;
-    const bool hasSamplePreFilter = !samplePreFilter.empty();
-
-    uint8_t packedScratch[4];
     char dummySeq[4] = {'\0'};
     char dummyQual[4] = {'\0'};
 
@@ -439,19 +488,10 @@ static uint64_t processOneLane(
         ++tally.lane;
         nReads++;
 
-        bool sampleOK = true;
-        if (hasSamplePreFilter && sampleTagOffset + 8 <= readLen0) {
-            uint32_t tagCode = 0;
-            bool encodable = true;
-            for (int i = 0; i < 8; ++i) {
-                uint8_t nib = g_asciiToNib[static_cast<uint8_t>(seq0[sampleTagOffset + i])];
-                if (nib == 0) { encodable = false; break; }
-                tagCode = (tagCode << 4) | nib;
-            }
-            if (!encodable || samplePreFilter.find(tagCode) == samplePreFilter.end()) {
-                sampleOK = false;
-            }
-        }
+        uint8_t detectedSampleToken = 0xFF;
+        const bool sampleOK = detectConfiguredSampleTag(
+            seq0, readLen0, P.pSolo, sampleDet, sampleDetReady,
+            detectedSampleToken);
 
         FlexHashScreenDecision decision;
         if (sampleOK) {
@@ -459,7 +499,10 @@ static uint64_t processOneLane(
                     ? cache.classifyReadH0Offset0(seq0, readLen0)
                     : cache.classifyReadH0H1Offset0(seq0, readLen0);
         } else {
-            decision.action = FlexHashScreenDecision::Pass;
+            // The tag is outside the configured sample universe, including
+            // all accepted variants. Alignment cannot make this read eligible
+            // for a per-sample output, so reject it before residual alignment.
+            decision.action = FlexHashScreenDecision::Deny;
         }
 
         if (decision.action == FlexHashScreenDecision::Keep ||
@@ -473,14 +516,6 @@ static uint64_t processOneLane(
             localBar.getCBandUMI(readSeqPtrs, readQualPtrs, readLens, readNameExtra,
                                   static_cast<uint32_t>(laneId), name);
 
-            uint8_t detectedSampleToken = 0xFF;
-            if (sampleDetReady && sampleTagOffset + 8 <= readLen0) {
-                nuclPackBAM(seq0 + sampleTagOffset, reinterpret_cast<char *>(packedScratch), 8);
-                uint32_t detIdx = sampleDet->detectSampleFromPackedTag(packedScratch);
-                if (detIdx > 0) {
-                    detectedSampleToken = static_cast<uint8_t>(detIdx & 0x1Fu);
-                }
-            }
             localBar.detectedSampleToken = detectedSampleToken;
 
             if (decision.action == FlexHashScreenDecision::Keep) {
@@ -491,9 +526,15 @@ static uint64_t processOneLane(
                 if (localBar.cbMatch < 0) stats->hashScreenKeepNoBarcode++;
                 ++tally.keep;
             } else {
-                record_flex_hash_screen_deny(readFeat, localBar, iReadAll, "NEG_PROBE_AMBIG");
-                stats->hashScreenDeny++;
-                ++tally.deny;
+                record_flex_hash_screen_deny(readFeat, localBar, iReadAll,
+                                             sampleOK ? "NEG_PROBE_AMBIG" : "UNMATCHED_TAG");
+                if (sampleOK) {
+                    stats->hashScreenDeny++;
+                    ++tally.deny;
+                } else {
+                    stats->hashScreenSampleReject++;
+                    ++tally.sampleReject;
+                }
             }
         } else {
             ++tally.miss;
@@ -514,7 +555,7 @@ static uint64_t processOneLane(
                 ep.cbMatch = -1;
                 ep.cbMatchIndN = 0;
                 ep.umiB = 0;
-                ep.detectedSampleToken = 0xFF;
+                ep.detectedSampleToken = detectedSampleToken;
                 ep.hashScreenSampleIdx = 0;
                 enqueueForAlign(st, std::move(ep), RA);
             }
@@ -533,7 +574,6 @@ static uint64_t processOneBgzfRange(
     FlexPipelineState *st, Parameters &P,
     const FlexBgzfRangeTask &task,
     SoloReadFeature *readFeat, Stats *stats,
-    const std::unordered_set<uint32_t> &samplePreFilter,
     SampleDetector *sampleDet, bool sampleDetReady,
     SoloReadBarcode &localBar, bool noAlign, ReadAlign *RA)
 {
@@ -547,10 +587,6 @@ static uint64_t processOneBgzfRange(
     }
 
     auto &cache = FlexHashScreenCache::instance();
-    const uint32_t sampleTagOffset = P.pSolo.sampleProbeOffset;
-    const bool hasSamplePreFilter = !samplePreFilter.empty();
-
-    uint8_t packedScratch[4];
     char dummySeq[4] = {'\0'};
     char dummyQual[4] = {'\0'};
     char seq0[kFlexPipeSeqMax], seq1[kFlexPipeSeqMax];
@@ -610,23 +646,10 @@ static uint64_t processOneBgzfRange(
         ++tally.lane;
         ++nReads;
 
-        bool sampleOK = true;
-        if (hasSamplePreFilter && sampleTagOffset + 8 <= readLen0) {
-            uint32_t tagCode = 0;
-            bool encodable = true;
-            for (int index = 0; index < 8; ++index) {
-                const uint8_t nib =
-                    g_asciiToNib[static_cast<uint8_t>(seq0[sampleTagOffset + index])];
-                if (nib == 0) {
-                    encodable = false;
-                    break;
-                }
-                tagCode = (tagCode << 4) | nib;
-            }
-            if (!encodable || samplePreFilter.find(tagCode) == samplePreFilter.end()) {
-                sampleOK = false;
-            }
-        }
+        uint8_t detectedSampleToken = 0xFF;
+        const bool sampleOK = detectConfiguredSampleTag(
+            seq0, readLen0, P.pSolo, sampleDet, sampleDetReady,
+            detectedSampleToken);
 
         FlexHashScreenDecision decision;
         if (sampleOK) {
@@ -634,7 +657,7 @@ static uint64_t processOneBgzfRange(
                     ? cache.classifyReadH0Offset0(seq0, readLen0)
                     : cache.classifyReadH0H1Offset0(seq0, readLen0);
         } else {
-            decision.action = FlexHashScreenDecision::Pass;
+            decision.action = FlexHashScreenDecision::Deny;
         }
 
         if (decision.action == FlexHashScreenDecision::Keep ||
@@ -646,15 +669,6 @@ static uint64_t processOneBgzfRange(
             localBar.getCBandUMI(readSeqPtrs, readQualPtrs, readLens, readNameExtra,
                                  static_cast<uint32_t>(task.laneId), name);
 
-            uint8_t detectedSampleToken = 0xFF;
-            if (sampleDetReady && sampleTagOffset + 8 <= readLen0) {
-                nuclPackBAM(seq0 + sampleTagOffset,
-                            reinterpret_cast<char *>(packedScratch), 8);
-                const uint32_t detIdx = sampleDet->detectSampleFromPackedTag(packedScratch);
-                if (detIdx > 0) {
-                    detectedSampleToken = static_cast<uint8_t>(detIdx & 0x1Fu);
-                }
-            }
             localBar.detectedSampleToken = detectedSampleToken;
 
             if (decision.action == FlexHashScreenDecision::Keep) {
@@ -668,9 +682,14 @@ static uint64_t processOneBgzfRange(
                 ++tally.keep;
             } else {
                 record_flex_hash_screen_deny(readFeat, localBar, iReadAll,
-                                             "NEG_PROBE_AMBIG");
-                stats->hashScreenDeny++;
-                ++tally.deny;
+                                             sampleOK ? "NEG_PROBE_AMBIG" : "UNMATCHED_TAG");
+                if (sampleOK) {
+                    stats->hashScreenDeny++;
+                    ++tally.deny;
+                } else {
+                    stats->hashScreenSampleReject++;
+                    ++tally.sampleReject;
+                }
             }
         } else {
             ++tally.miss;
@@ -691,7 +710,7 @@ static uint64_t processOneBgzfRange(
                 packet.cbMatch = -1;
                 packet.cbMatchIndN = 0;
                 packet.umiB = 0;
-                packet.detectedSampleToken = 0xFF;
+                packet.detectedSampleToken = detectedSampleToken;
                 packet.hashScreenSampleIdx = 0;
                 enqueueForAlign(st, std::move(packet), RA);
             }
@@ -707,7 +726,6 @@ static uint64_t processCbqModuleRecords(
     const std::string &cbqPath,
     star::input::CbqInputModule &module,
     SoloReadFeature *readFeat, Stats *stats,
-    const std::unordered_set<uint32_t> &samplePreFilter,
     SampleDetector *sampleDet, bool sampleDetReady,
     SoloReadBarcode &localBar, bool noAlign,
     bool deterministicReadIds,
@@ -715,12 +733,9 @@ static uint64_t processCbqModuleRecords(
     ReadAlign *RA)
 {
     auto &cache = FlexHashScreenCache::instance();
-    const uint32_t sampleTagOffset = P.pSolo.sampleProbeOffset;
-    const bool hasSamplePreFilter = !samplePreFilter.empty();
     FlexLocalCounters tally(st->counters, laneId);
 
     std::string inputError;
-    uint8_t packedScratch[4];
     char dummySeq[4] = {'\0'};
     char dummyQual[4] = {'\0'};
 
@@ -781,19 +796,10 @@ static uint64_t processCbqModuleRecords(
             ++tally.lane;
             nReads++;
 
-            bool sampleOK = true;
-            if (hasSamplePreFilter && sampleTagOffset + 8 <= readLen0) {
-                uint32_t tagCode = 0;
-                bool encodable = true;
-                for (int j = 0; j < 8; ++j) {
-                    uint8_t nib = g_asciiToNib[static_cast<uint8_t>(seq0[sampleTagOffset + j])];
-                    if (nib == 0) { encodable = false; break; }
-                    tagCode = (tagCode << 4) | nib;
-                }
-                if (!encodable || samplePreFilter.find(tagCode) == samplePreFilter.end()) {
-                    sampleOK = false;
-                }
-            }
+            uint8_t detectedSampleToken = 0xFF;
+            const bool sampleOK = detectConfiguredSampleTag(
+                seq0, readLen0, P.pSolo, sampleDet, sampleDetReady,
+                detectedSampleToken);
 
             FlexHashScreenDecision decision;
             if (sampleOK) {
@@ -801,7 +807,7 @@ static uint64_t processCbqModuleRecords(
                     ? cache.classifyReadH0Offset0(seq0, readLen0)
                     : cache.classifyReadH0H1Offset0(seq0, readLen0);
             } else {
-                decision.action = FlexHashScreenDecision::Pass;
+                decision.action = FlexHashScreenDecision::Deny;
             }
 
             if (decision.action == FlexHashScreenDecision::Keep ||
@@ -815,14 +821,6 @@ static uint64_t processCbqModuleRecords(
                 localBar.getCBandUMI(readSeqPtrs, readQualPtrs, readLens, readNameExtra,
                                       static_cast<uint32_t>(laneId), name);
 
-                uint8_t detectedSampleToken = 0xFF;
-                if (sampleDetReady && sampleTagOffset + 8 <= readLen0) {
-                    nuclPackBAM(seq0 + sampleTagOffset, reinterpret_cast<char *>(packedScratch), 8);
-                    uint32_t detIdx = sampleDet->detectSampleFromPackedTag(packedScratch);
-                    if (detIdx > 0) {
-                        detectedSampleToken = static_cast<uint8_t>(detIdx & 0x1Fu);
-                    }
-                }
                 localBar.detectedSampleToken = detectedSampleToken;
 
                 if (decision.action == FlexHashScreenDecision::Keep) {
@@ -833,9 +831,15 @@ static uint64_t processCbqModuleRecords(
                     if (localBar.cbMatch < 0) stats->hashScreenKeepNoBarcode++;
                     ++tally.keep;
                 } else {
-                    record_flex_hash_screen_deny(readFeat, localBar, iReadAll, "NEG_PROBE_AMBIG");
-                    stats->hashScreenDeny++;
-                    ++tally.deny;
+                    record_flex_hash_screen_deny(readFeat, localBar, iReadAll,
+                                                 sampleOK ? "NEG_PROBE_AMBIG" : "UNMATCHED_TAG");
+                    if (sampleOK) {
+                        stats->hashScreenDeny++;
+                        ++tally.deny;
+                    } else {
+                        stats->hashScreenSampleReject++;
+                        ++tally.sampleReject;
+                    }
                 }
             } else {
                 ++tally.miss;
@@ -856,7 +860,7 @@ static uint64_t processCbqModuleRecords(
                     ep.cbMatch = -1;
                     ep.cbMatchIndN = 0;
                     ep.umiB = 0;
-                    ep.detectedSampleToken = 0xFF;
+                    ep.detectedSampleToken = detectedSampleToken;
                     ep.hashScreenSampleIdx = 0;
                     enqueueForAlign(st, std::move(ep), RA);
                 }
@@ -879,7 +883,6 @@ static uint64_t processOneCbqLane(
     FlexPipelineState *st, Parameters &P, int laneId,
     const std::string &cbqPath,
     SoloReadFeature *readFeat, Stats *stats,
-    const std::unordered_set<uint32_t> &samplePreFilter,
     SampleDetector *sampleDet, bool sampleDetReady,
     SoloReadBarcode &localBar, bool noAlign = false,
     ReadAlign *RA = nullptr)
@@ -893,7 +896,7 @@ static uint64_t processOneCbqLane(
         return 0;
     }
     const uint64_t nReads = processCbqModuleRecords(
-        st, P, laneId, cbqPath, module, readFeat, stats, samplePreFilter,
+        st, P, laneId, cbqPath, module, readFeat, stats,
         sampleDet, sampleDetReady, localBar, noAlign, false, 0, RA);
     module.close();
     return nReads;
@@ -904,7 +907,6 @@ static uint64_t processOneCbqRange(
     const FlexCbqRangeTask &task,
     const std::string &cbqPath,
     SoloReadFeature *readFeat, Stats *stats,
-    const std::unordered_set<uint32_t> &samplePreFilter,
     SampleDetector *sampleDet, bool sampleDetReady,
     SoloReadBarcode &localBar, bool noAlign, ReadAlign *RA)
 {
@@ -921,7 +923,7 @@ static uint64_t processOneCbqRange(
         return 0;
     }
     const uint64_t nReads = processCbqModuleRecords(
-        st, P, task.laneId, cbqPath, module, readFeat, stats, samplePreFilter,
+        st, P, task.laneId, cbqPath, module, readFeat, stats,
         sampleDet, sampleDetReady, localBar, noAlign, true, task.globalFirst, RA);
     module.close();
     return nReads;
@@ -1118,6 +1120,11 @@ bool flexPrepareBgzfRangeTasks(FlexPipelineState *state, Parameters &P,
         options.mate1_reader_threads = static_cast<uint32_t>(
             baseThreads + (streamIndex++ < extraThreads ? 1 : 0));
         options.crc_check = P.bgzfCrcCheck == 1;
+        if (state->dynamicPermitsEnabled) {
+            options.inflate_permit_hooks.context = &kFlexBgzfPermitContext;
+            options.inflate_permit_hooks.acquire = &flexBgzfPermitAcquire;
+            options.inflate_permit_hooks.release = &flexBgzfPermitRelease;
+        }
 
         FlexBgzfLane &lanePlan = state->bgzfLanes[static_cast<size_t>(lane)];
         lanePlan.adapter.reset(new star::input::BgzfStarAdapter());
@@ -1170,9 +1177,6 @@ void *flexLaneReaderFullThread(void *arg) {
     Stats *stats = ctx->stats;
     ReadAlign *RA = ctx->RA;
 
-    ensureAsciiToNibInit();
-    std::call_once(g_samplePreFilterFlag, buildSamplePreFilter, std::ref(P));
-    const auto &samplePreFilter = g_samplePreFilter;
     const bool noAlign = (P.pSolo.flexNoAlign != 0);
 
     // Preallocate once per thread — reused across all lane claims. Fully-fused
@@ -1210,19 +1214,17 @@ void *flexLaneReaderFullThread(void *arg) {
             const std::string &cbqPath =
                 st->laneFiles[static_cast<size_t>(task.laneId)].r2path;
             processOneCbqRange(st, P, task, cbqPath, readFeat, stats,
-                               samplePreFilter, sampleDet, sampleDetReady,
+                               sampleDet, sampleDetReady,
                                localBar, noAlign, RA);
         }
     } else {
-        // BGZF readers intentionally remain outside permit domains in v1,
-        // matching CBQ. TODO: account them under FEATURE in a later scheduler pass.
         if (st->bgzfRangeActive && ctx->threadId < st->bgzfReaderWorkers) {
             FlexBgzfRangeTask task;
             while (!st->inputFailed.load(std::memory_order_relaxed) &&
                    st->claimNextBgzfRange(&task)) {
                 ensureSampleDetector();
                 processOneBgzfRange(st, P, task, readFeat, stats,
-                                    samplePreFilter, sampleDet, sampleDetReady,
+                                    sampleDet, sampleDetReady,
                                     localBar, noAlign, RA);
             }
         }
@@ -1241,7 +1243,7 @@ void *flexLaneReaderFullThread(void *arg) {
             const std::string &r2path = st->laneFiles[lane].r2path;
             if (P.readFilesTypeN == 20 && P.cbqInputActive) {
                 processOneCbqLane(st, P, lane, r2path, readFeat, stats,
-                                  samplePreFilter, sampleDet, sampleDetReady, localBar, noAlign, RA);
+                                  sampleDet, sampleDetReady, localBar, noAlign, RA);
             } else {
                 const std::string &r1path = st->laneFiles[lane].r1path;
                 gzFile gzR2 = gzopen(r2path.c_str(), "rb");
@@ -1255,7 +1257,7 @@ void *flexLaneReaderFullThread(void *arg) {
                 gzbuffer(gzR1, kGzBufSize);
 
                 processOneLane(st, P, lane, gzR2, gzR1, readFeat, stats,
-                               samplePreFilter, sampleDet, sampleDetReady, localBar, noAlign, RA);
+                               sampleDet, sampleDetReady, localBar, noAlign, RA);
             }
         }
     }
@@ -1270,7 +1272,7 @@ void *flexLaneReaderFullThread(void *arg) {
     if (!noAlign && RA != nullptr) {
         EnrichedPacket ep;
         while (st->alignQ.pop(ep)) {
-            RA->oneReadFromPacket(ep);
+            alignAvailableBatch(st, ep, RA);
         }
     }
 
@@ -1456,7 +1458,7 @@ void *flexAlignWorkerThread(void *arg) {
 
     EnrichedPacket ep;
     while (st->alignQ.pop(ep)) {
-        RA->oneReadFromPacket(ep);
+        alignAvailableBatch(st, ep, RA);
     }
 
     return nullptr;
@@ -1481,6 +1483,8 @@ void *flexStatsReporterThread(void *arg) {
         uint64_t total = st->counters.readsTotal.load(std::memory_order_relaxed);
         uint64_t keep  = st->counters.triageKeep.load(std::memory_order_relaxed);
         uint64_t deny  = st->counters.triageDeny.load(std::memory_order_relaxed);
+        uint64_t sampleReject =
+            st->counters.triageSampleReject.load(std::memory_order_relaxed);
         uint64_t miss  = st->counters.triageMiss.load(std::memory_order_relaxed);
 
         size_t rqSize = st->readerQ.size();
@@ -1503,6 +1507,7 @@ void *flexStatsReporterThread(void *arg) {
                          << " total=" << total
                          << " keep=" << keep
                          << " deny=" << deny
+                         << " sampleReject=" << sampleReject
                          << " miss=" << miss
                          << " readerQ=" << rqSize
                          << " soloQ=" << soloQStr.str()

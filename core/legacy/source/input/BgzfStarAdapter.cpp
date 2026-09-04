@@ -67,11 +67,13 @@ bool BgzfStarAdapter::open(const std::string& mate0_path,
     }
     const uint64_t physical_end = std::numeric_limits<uint64_t>::max();
     if (!readers_[0].open(mate0_path, 0, physical_end,
-                          options.mate0_reader_threads, options.crc_check, error)) {
+                          options.mate0_reader_threads, options.crc_check, error,
+                          &options.inflate_permit_hooks)) {
         return false;
     }
     if (!readers_[1].open(mate1_path, 0, physical_end,
-                          options.mate1_reader_threads, options.crc_check, error)) {
+                          options.mate1_reader_threads, options.crc_check, error,
+                          &options.inflate_permit_hooks)) {
         return false;
     }
     options_ = options;

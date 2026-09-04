@@ -222,14 +222,11 @@ FlexHashScreenDecision FlexHashScreenCache::classifyHits(const Record* const* hi
         const bool sampleMatched = (rec->sampleIdx != 0 && rec->sampleIdx == runtimeSampleIdx);
         const bool sampleSpecifiedMismatch = (rec->sampleIdx != 0 && rec->sampleIdx != runtimeSampleIdx);
 
-        if (rec->cacheClass == 2 && rec->negativeCode == FlexHashNegProbeAmbig) {
+        if (rec->resolvedGeneIdx15 == 0 || rec->cacheClass == 2) {
             sawAmbig = true;
-            out.negativeCode = rec->negativeCode;
+            out.negativeCode = rec->negativeCode != FlexHashNegNone
+                ? rec->negativeCode : FlexHashNegProbeAmbig;
             out.offset = relativeOffsets[idx];
-            continue;
-        }
-
-        if (rec->resolvedGeneIdx15 == 0) {
             continue;
         }
 
@@ -311,8 +308,8 @@ void FlexHashScreenCache::buildTieredVectors() {
     for (const Record& rec : records_) {
         if (rec.cacheClass == 0 && rec.resolvedGeneIdx15 > 0) {
             h0Records_.push_back(rec);
-        } else if (rec.cacheClass == 1 ||
-                   (rec.cacheClass == 2 && rec.negativeCode == FlexHashNegProbeAmbig)) {
+        } else if ((rec.cacheClass == 1 && rec.resolvedGeneIdx15 > 0) ||
+                   rec.resolvedGeneIdx15 == 0) {
             h1DenyRecords_.push_back(rec);
         }
     }
@@ -490,7 +487,12 @@ FlexHashScreenDecision FlexHashScreenCache::classifyReadH0H1Offset0(const char* 
             out.geneIdx15 = static_cast<uint16_t>(rec.resolvedGeneIdx15);
             out.probeRegion = rec.probeRegion;
         } else {
-            out.action = FlexHashScreenDecision::Pass;
+            // A cache hit is resolved evidence. If it is not a valid KEEP,
+            // it is a certified negative rather than an unknown sequence;
+            // only a cache miss is eligible for residual genome alignment.
+            out.action = FlexHashScreenDecision::Deny;
+            out.negativeCode = rec.negativeCode != FlexHashNegNone
+                ? rec.negativeCode : FlexHashNegProbeAmbig;
         }
         out.cacheClass = rec.cacheClass;
         out.offset = 0;

@@ -74,6 +74,47 @@ bool readableFile(const std::string &path) {
     exitWithError(errOut.str(), std::cerr, P.inOut->logMain,
                   EXIT_CODE_INPUT_FILES, P);
 }
+
+void finalizeFlexDynamicPermits(Parameters &P,
+                                const FlexPipelineState &state) {
+    if (!state.dynamicPermitsEnabled) {
+        return;
+    }
+
+    // All fused/staged alignment workers have joined at the call sites. A
+    // consumed BGZF stream likewise implies that every claimed inflate item
+    // has completed, so both application domains are durably finished.
+    g_threadChunks.mapPermitMarkDomainComplete(
+        ThreadControl::PermitDomain::MAP);
+    if (state.bgzfRangeActive) {
+        g_threadChunks.mapPermitMarkDomainComplete(
+            ThreadControl::PermitDomain::FEATURE);
+    }
+
+    if (P.dynamicThreadTelemetry == 1) {
+        const ThreadControl::MapPermitSnapshot snapshot =
+            g_threadChunks.mapPermitSnapshot();
+        P.inOut->logMain
+            << "Flex dynamic permit telemetry: configured="
+            << snapshot.configuredPermits
+            << ", map(acquires/blocked/maxInUse/workReads/waitMs/workMs)="
+            << snapshot.mapDomain.acquireCalls << "/"
+            << snapshot.mapDomain.blockedAcquireCalls << "/"
+            << snapshot.mapDomain.maxInUse << "/"
+            << snapshot.mapDomain.workUnitsTotal << "/"
+            << snapshot.mapDomain.waitNsTotal / 1.0e6 << "/"
+            << snapshot.mapDomain.workNsTotal / 1.0e6
+            << ", bgzf(acquires/blocked/maxInUse/workBlocks/workBytes/waitMs/workMs)="
+            << snapshot.featureDomain.acquireCalls << "/"
+            << snapshot.featureDomain.blockedAcquireCalls << "/"
+            << snapshot.featureDomain.maxInUse << "/"
+            << snapshot.featureDomain.workUnitsTotal << "/"
+            << snapshot.featureDomain.workBytesTotal << "/"
+            << snapshot.featureDomain.waitNsTotal / 1.0e6 << "/"
+            << snapshot.featureDomain.workNsTotal / 1.0e6
+            << "\n" << std::flush;
+    }
+}
 }
 
 bool flexPipelineActivationGuard(Parameters &P, std::string *reason, bool logMessages) {
@@ -294,6 +335,8 @@ static void mapThreadsSpawnFlexPipeline(Parameters &P, ReadAlignChunk** RAchunk)
 
     FlexPipelineState state;
     state.init(nLanes, actualNSolo, actualNTriage);
+    state.dynamicPermitsEnabled =
+        P.dynamicThreadInterface == 1 && g_threadChunks.mapPermitEnabled();
 
     // Store lane file paths for dynamic claiming (fully-fused mode)
     if (fullyFused) {
@@ -399,6 +442,8 @@ static void mapThreadsSpawnFlexPipeline(Parameters &P, ReadAlignChunk** RAchunk)
         for (int i = 0; i < nFusedThreads; ++i) pthread_join(fusedThreads[i], nullptr);
         P.inOut->logMain << "  All fused threads joined\n" << std::flush;
 
+        finalizeFlexDynamicPermits(P, state);
+
         P.inOut->logMain << "  Fused producers aligned "
                          << state.counters.alignHelped.load(std::memory_order_relaxed)
                          << " queued reads while alignQ was full\n" << std::flush;
@@ -438,6 +483,7 @@ static void mapThreadsSpawnFlexPipeline(Parameters &P, ReadAlignChunk** RAchunk)
         P.inOut->logMain << "Flex pipeline complete: total=" << state.counters.readsTotal.load()
                          << ", triageKeep=" << state.counters.triageKeep.load()
                          << ", triageDeny=" << state.counters.triageDeny.load()
+                         << ", sampleReject=" << state.counters.triageSampleReject.load()
                          << ", triageMiss=" << state.counters.triageMiss.load() << "\n";
         for (int i = 0; i < nLanes; ++i) {
             P.inOut->logMain << "  Lane " << i << ": " << state.counters.perLaneReads[i] << " reads\n";
@@ -554,6 +600,8 @@ static void mapThreadsSpawnFlexPipeline(Parameters &P, ReadAlignChunk** RAchunk)
     for (int i = 0; i < nWorkers; ++i) pthread_join(workerThreads[i], nullptr);
     P.inOut->logMain << "  All alignment workers joined\n" << std::flush;
 
+    finalizeFlexDynamicPermits(P, state);
+
     // Stop and join stats reporter
     state.pipelineDone.store(true, std::memory_order_relaxed);
     pthread_join(reporterThread, nullptr);
@@ -589,6 +637,7 @@ static void mapThreadsSpawnFlexPipeline(Parameters &P, ReadAlignChunk** RAchunk)
     P.inOut->logMain << "Flex pipeline complete: total=" << state.counters.readsTotal.load()
                      << ", triageKeep=" << state.counters.triageKeep.load()
                      << ", triageDeny=" << state.counters.triageDeny.load()
+                     << ", sampleReject=" << state.counters.triageSampleReject.load()
                      << ", triageMiss=" << state.counters.triageMiss.load() << "\n";
     for (int i = 0; i < nLanes; ++i) {
         P.inOut->logMain << "  Lane " << i << ": " << state.counters.perLaneReads[i] << " reads\n";
@@ -755,6 +804,7 @@ void runFlexNoGenomeCountOnly(Parameters &P) {
     P.inOut->logMain << "Flex pipeline complete: total=" << state.counters.readsTotal.load()
                      << ", triageKeep=" << state.counters.triageKeep.load()
                      << ", triageDeny=" << state.counters.triageDeny.load()
+                     << ", sampleReject=" << state.counters.triageSampleReject.load()
                      << ", triageMiss=" << state.counters.triageMiss.load() << "\n";
     for (int i = 0; i < nLanes; ++i) {
         P.inOut->logMain << "  Lane " << i << ": " << state.counters.perLaneReads[i] << " reads\n";
@@ -860,16 +910,6 @@ void mapThreadsSpawn (Parameters &P, ReadAlignChunk** RAchunk) {
     std::string flexActivationReason;
     const bool flexPipelineActive =
         flexPipelineActivationGuard(P, &flexActivationReason, true);
-    if (flexPipelineActive) {
-        mapThreadsSpawnFlexPipeline(P, RAchunk);
-        return;
-    }
-    if (P.readFilesBgzfMode == "range") {
-        fatalBgzfRangeMode(P, flexActivationReason.empty()
-            ? "command is not a supported fused Flex run"
-            : flexActivationReason);
-    }
-
     const bool interfaceEnabled = (P.dynamicThreadInterface == 1);
     const bool telemetryEnabled = (P.dynamicThreadTelemetry == 1);
     const bool variableThreadsEnabled = (P.variableThreads == 1);
@@ -952,6 +992,19 @@ void mapThreadsSpawn (Parameters &P, ReadAlignChunk** RAchunk) {
                          << ", fifo=" << ((P.dynamicThreadFifoWaiters == 1) ? "on" : "off")
                          << ")\n" << flush;
         pthread_mutex_unlock(&g_threadChunks.mutexLogMain);
+    }
+
+    // Flex shares the same controller as ordinary mapping. This check must be
+    // after controller initialization so fused alignment and BGZF inflater
+    // workers can borrow from one runThreadN-sized pool.
+    if (flexPipelineActive) {
+        mapThreadsSpawnFlexPipeline(P, RAchunk);
+        return;
+    }
+    if (P.readFilesBgzfMode == "range") {
+        fatalBgzfRangeMode(P, flexActivationReason.empty()
+            ? "command is not a supported fused Flex run"
+            : flexActivationReason);
     }
 
     for (int ithread=1;ithread<P.runThreadN;ithread++) {//spawn threads

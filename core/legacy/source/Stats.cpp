@@ -19,7 +19,8 @@ void Stats::resetN() {//zero all counters
     crRescueMultiGeneBestAlignmentNoRescue = 0;
     crGeneFullExonicOverIntronicFiltered = 0; crGeneFullResolvedToUniqueAfterFilter = 0;
     crGeneFullStillMultiExonic = 0; crGeneFullCrossAlignMultiGene = 0;
-    hashScreenKeep = 0; hashScreenKeepNoBarcode = 0; hashScreenDeny = 0; hashScreenPass = 0;
+    hashScreenKeep = 0; hashScreenKeepNoBarcode = 0; hashScreenDeny = 0;
+    hashScreenSampleReject = 0; hashScreenPass = 0;
     sampleDetectPreAlignCalls = 0; sampleDetectPreAlignNs = 0;
     sampleDetectOutputCalls = 0; sampleDetectOutputNs = 0;
     alignCoreCalls = 0; alignCoreNs = 0;
@@ -63,7 +64,9 @@ void Stats::addStats(Stats &S) {//add S to Stats
     crGeneFullCrossAlignMultiGene += S.crGeneFullCrossAlignMultiGene;
     hashScreenKeep += S.hashScreenKeep;
     hashScreenKeepNoBarcode += S.hashScreenKeepNoBarcode;
-    hashScreenDeny += S.hashScreenDeny; hashScreenPass += S.hashScreenPass;
+    hashScreenDeny += S.hashScreenDeny;
+    hashScreenSampleReject += S.hashScreenSampleReject;
+    hashScreenPass += S.hashScreenPass;
     sampleDetectPreAlignCalls += S.sampleDetectPreAlignCalls;
     sampleDetectPreAlignNs += S.sampleDetectPreAlignNs;
     sampleDetectOutputCalls += S.sampleDetectOutputCalls;
@@ -183,8 +186,8 @@ void Stats::reportFinal(ofstream &streamOut) {
         }
     }
 
-    if (hashScreenKeep > 0 || hashScreenDeny > 0 || hashScreenPass > 0) {
-        uint64 hashScreenTotal = hashScreenKeep + hashScreenDeny + hashScreenPass;
+    if (hashScreenKeep > 0 || hashScreenDeny > 0 || hashScreenSampleReject > 0 || hashScreenPass > 0) {
+        uint64 hashScreenTotal = hashScreenKeep + hashScreenDeny + hashScreenSampleReject + hashScreenPass;
         streamOut << "\n" \
                   <<setw(w1)<< "                        FLEX HASH SCREEN |\n" \
                   <<setw(w1)<< "              Hash screen: reads evaluated |\t" << hashScreenTotal << "\n" \
@@ -193,6 +196,8 @@ void Stats::reportFinal(ofstream &streamOut) {
                   <<setw(w1)<< "                   Hash screen: KEEP % |\t" << (hashScreenTotal>0 ? double(hashScreenKeep)/double(hashScreenTotal)*100 : 0) << '%' << "\n" \
                   <<setw(w1)<< "                     Hash screen: DENY |\t" << hashScreenDeny << "\n" \
                   <<setw(w1)<< "                   Hash screen: DENY % |\t" << (hashScreenTotal>0 ? double(hashScreenDeny)/double(hashScreenTotal)*100 : 0) << '%' << "\n" \
+                  <<setw(w1)<< "      Hash screen: unmatched sample tag |\t" << hashScreenSampleReject << "\n" \
+                  <<setw(w1)<< "    Hash screen: unmatched sample tag % |\t" << (hashScreenTotal>0 ? double(hashScreenSampleReject)/double(hashScreenTotal)*100 : 0) << '%' << "\n" \
                   <<setw(w1)<< "                     Hash screen: PASS |\t" << hashScreenPass << "\n" \
                   <<setw(w1)<< "                   Hash screen: PASS % |\t" << (hashScreenTotal>0 ? double(hashScreenPass)/double(hashScreenTotal)*100 : 0) << '%' << "\n";
     }

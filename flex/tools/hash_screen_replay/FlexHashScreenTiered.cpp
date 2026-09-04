@@ -38,19 +38,19 @@ void TieredCache::init(const std::vector<Record>& allRecords) {
     crossTierDups_ = 0;
 
     for (const Record& r : allRecords) {
-        if (r.cacheClass == 0 && r.sampleIdx != 0) {
+        if (r.cacheClass == 0 && r.sampleIdx != 0 && r.resolvedGeneIdx15 > 0) {
             h0_.push_back(r);
             ++h0Count_;
         } else {
             rest_.push_back(r);
-            if (r.cacheClass == 0)
+            if (r.resolvedGeneIdx15 == 0 || r.cacheClass == 2)
+                ++denyCount_;
+            else if (r.cacheClass == 0)
                 ++h0Count_;   // H0 globals go in rest_ but count for stats
             else if (r.cacheClass == 1)
                 ++h1Count_;
             else if (r.cacheClass == 3)
                 ++h2Count_;
-            else if (r.cacheClass == 2 && r.negativeCode == FlexHashNegProbeAmbig)
-                ++denyCount_;
             else
                 ++dropped_;
         }
@@ -159,15 +159,13 @@ FlexHashScreenDecision TieredCache::classifyHits(
         const bool sampleMatched = (rec->sampleIdx != 0 && rec->sampleIdx == runtimeSampleIdx);
         const bool sampleSpecifiedMismatch = (rec->sampleIdx != 0 && rec->sampleIdx != runtimeSampleIdx);
 
-        if (rec->cacheClass == 2 && rec->negativeCode == FlexHashNegProbeAmbig) {
+        if (rec->resolvedGeneIdx15 == 0 || rec->cacheClass == 2) {
             sawAmbig = true;
-            out.negativeCode = rec->negativeCode;
+            out.negativeCode = rec->negativeCode != FlexHashNegNone
+                ? rec->negativeCode : static_cast<uint8_t>(FlexHashNegProbeAmbig);
             out.offset = relativeOffsets[idx];
             continue;
         }
-
-        if (rec->resolvedGeneIdx15 == 0)
-            continue;
 
         if (rec->cacheClass == 0 && sampleMatched) {
             out.action = FlexHashScreenDecision::Keep;
