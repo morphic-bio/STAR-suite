@@ -1,0 +1,2 @@
+status=success
+run_dir=/home/lhhung/jax_gzip_reader_opt_20260904/gzip_noalign_rep1_20260904T112756Z
