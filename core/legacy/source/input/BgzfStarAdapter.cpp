@@ -15,22 +15,23 @@ bool set_error(std::string* error, const std::string& message) {
     return false;
 }
 
-void split_read_name(const std::string& raw,
-                     std::string* read_name,
-                     std::string* read_name_extra) {
-    const size_t separator = raw.find_first_of(" \t");
-    if (separator == std::string::npos) {
-        *read_name = raw;
-        read_name_extra->clear();
-        return;
+void split_read_name(const BgzfFastqRecord& raw,
+                     uint16_t* read_name_length,
+                     uint16_t* read_name_extra_offset,
+                     uint16_t* read_name_extra_length) {
+    size_t separator = 0;
+    while (separator < raw.nameLength && raw.name[separator] != ' ' &&
+           raw.name[separator] != '\t') {
+        ++separator;
     }
-    read_name->assign(raw.data(), separator);
+    *read_name_length = static_cast<uint16_t>(separator);
     size_t extra_begin = separator;
-    while (extra_begin < raw.size() &&
-           (raw[extra_begin] == ' ' || raw[extra_begin] == '\t')) {
+    while (extra_begin < raw.nameLength &&
+           (raw.name[extra_begin] == ' ' || raw.name[extra_begin] == '\t')) {
         ++extra_begin;
     }
-    read_name_extra->assign(raw.data() + extra_begin, raw.size() - extra_begin);
+    *read_name_extra_offset = static_cast<uint16_t>(extra_begin);
+    *read_name_extra_length = static_cast<uint16_t>(raw.nameLength - extra_begin);
 }
 
 // The read-name stem is the name up to the first whitespace, minus a legacy
@@ -40,16 +41,21 @@ struct NameStem {
     size_t size;
 };
 
-NameStem read_name_stem(const std::string& raw) {
-    size_t end = raw.find_first_of(" \t");
-    if (end == std::string::npos) {
-        end = raw.size();
+NameStem read_name_stem(const BgzfFastqRecord& raw) {
+    size_t end = 0;
+    while (end < raw.nameLength && raw.name[end] != ' ' && raw.name[end] != '\t') {
+        ++end;
     }
-    if (end >= 2 && raw[end - 2] == '/' &&
-        (raw[end - 1] == '1' || raw[end - 1] == '2' || raw[end - 1] == '3')) {
+    if (end >= 2 && raw.name[end - 2] == '/' &&
+        (raw.name[end - 1] == '1' || raw.name[end - 1] == '2' ||
+         raw.name[end - 1] == '3')) {
         end -= 2;
     }
-    return NameStem{raw.data(), end};
+    return NameStem{raw.name, end};
+}
+
+std::string printable_read_name(const BgzfFastqRecord& record) {
+    return std::string(record.name, record.nameLength);
 }
 
 } // namespace
@@ -139,15 +145,14 @@ InputStatus BgzfStarAdapter::next_record_locked(BgzfStarRecord* record,
         return InputStatus::Error;
     }
 
-    std::string mate_error[2];
-    const bool have_mate0 = readers_[0].next(&record->mates[0], &mate_error[0]);
-    if (!have_mate0 && !mate_error[0].empty()) {
-        set_error(error, "BGZF mate 0: " + mate_error[0]);
+    const bool have_mate0 = readers_[0].next(&record->mates[0], &readerError_);
+    if (!have_mate0 && !readerError_.empty()) {
+        set_error(error, "BGZF mate 0: " + readerError_);
         return InputStatus::Error;
     }
-    const bool have_mate1 = readers_[1].next(&record->mates[1], &mate_error[1]);
-    if (!have_mate1 && !mate_error[1].empty()) {
-        set_error(error, "BGZF mate 1: " + mate_error[1]);
+    const bool have_mate1 = readers_[1].next(&record->mates[1], &readerError_);
+    if (!have_mate1 && !readerError_.empty()) {
+        set_error(error, "BGZF mate 1: " + readerError_);
         return InputStatus::Error;
     }
     if (have_mate0 != have_mate1) {
@@ -177,22 +182,24 @@ InputStatus BgzfStarAdapter::next_record_locked(BgzfStarRecord* record,
     // own would pair silently, and the end-of-stream count check catches it
     // only if the counts happen to differ.
     if (options_.validate_read_names) {
-        const NameStem stem0 = read_name_stem(record->mates[0].name);
-        const NameStem stem1 = read_name_stem(record->mates[1].name);
+        const NameStem stem0 = read_name_stem(record->mates[0]);
+        const NameStem stem1 = read_name_stem(record->mates[1]);
         if (stem0.size != stem1.size ||
             std::memcmp(stem0.data, stem1.data, stem0.size) != 0) {
             std::ostringstream message;
             message << "BGZF mate read-name mismatch at record " << recordsRead_
-                    << ": mate 0 '" << record->mates[0].name
-                    << "' does not pair with mate 1 '" << record->mates[1].name
+                    << ": mate 0 '" << printable_read_name(record->mates[0])
+                    << "' does not pair with mate 1 '"
+                    << printable_read_name(record->mates[1])
                     << "'";
             set_error(error, message.str());
             return InputStatus::Error;
         }
     }
 
-    split_read_name(record->mates[0].name,
-                    &record->read_name, &record->read_name_extra);
+    split_read_name(record->mates[0], &record->read_name_length,
+                    &record->read_name_extra_offset,
+                    &record->read_name_extra_length);
     record->lane_index = options_.lane_index;
     record->read_ordinal = recordsRead_;
     record->read_filter = 'Y';

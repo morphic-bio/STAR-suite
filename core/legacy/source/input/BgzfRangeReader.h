@@ -15,11 +15,16 @@
 namespace star {
 namespace input {
 
+static constexpr size_t kBgzfFastqNameCapacity = 512;
+static constexpr size_t kBgzfFastqSequenceCapacity = 650;
+
 struct BgzfFastqRecord {
-    std::string name;
-    std::string sequence;
-    std::string plus;
-    std::string quality;
+    char name[kBgzfFastqNameCapacity];
+    char sequence[kBgzfFastqSequenceCapacity];
+    char quality[kBgzfFastqSequenceCapacity];
+    uint16_t nameLength = 0;
+    uint16_t sequenceLength = 0;
+    uint16_t qualityLength = 0;
     uint64_t ordinal = 0;
 };
 
@@ -101,7 +106,10 @@ private:
     bool claim_and_inflate_sync(InflatedBlock* result, bool* at_end,
                                 std::string* error);
     bool append_next_block(std::string* error);
-    bool read_line(std::string* line, bool allow_clean_end, std::string* error);
+    bool read_line_view(const unsigned char** line,
+                        size_t* line_size,
+                        bool allow_clean_end,
+                        std::string* error);
     bool parse_record(BgzfFastqRecord* record, std::string* error);
 
     std::string path_;

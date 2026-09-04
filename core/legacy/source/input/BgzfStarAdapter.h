@@ -24,8 +24,9 @@ struct BgzfStarAdapterOptions {
 
 struct BgzfStarRecord {
     BgzfFastqRecord mates[2];
-    std::string read_name;
-    std::string read_name_extra;
+    uint16_t read_name_length = 0;
+    uint16_t read_name_extra_offset = 0;
+    uint16_t read_name_extra_length = 0;
     uint32_t lane_index = 0;
     uint64_t read_ordinal = 0;
     char read_filter = 'Y';
@@ -56,6 +57,7 @@ private:
     BgzfRangeReader readers_[2];
     BgzfStarAdapterOptions options_;
     mutable std::mutex nextMutex_;
+    std::string readerError_;
     uint64_t recordsRead_ = 0;
     bool open_ = false;
     bool ended_ = false;
