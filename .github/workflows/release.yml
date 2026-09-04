@@ -198,14 +198,39 @@ jobs:
             --expected-version "${STAR_SUITE_EXPECTED_VERSION}" \
             --expected-commit "${GITHUB_SHA}"
 
-      - name: Build Debian binary package
+      - name: Build Debian binary package (Ubuntu 22.04)
         run: |
           scripts/release/build_deb_binary_package.sh \
+            --docker-image "star-suite-release-build:ubuntu22" \
+            --distro-suffix "ubuntu22.04.1" \
             --out-dir "dist/release/deb"
 
-      - name: Validate .deb install/uninstall (Ubuntu 24.04)
+      - name: Build Debian binary package (Ubuntu 24.04)
+        run: |
+          scripts/release/build_deb_binary_package.sh \
+            --docker-image "star-suite-release-build:ubuntu24" \
+            --distro-suffix "ubuntu24.04.1" \
+            --out-dir "dist/release/deb"
+
+      - name: Validate Ubuntu 22.04 .deb on Ubuntu 22.04
         run: |
           scripts/release/validate_deb_install_uninstall.sh \
+            --deb "dist/release/deb/star-suite_${STAR_SUITE_EXPECTED_VERSION}-1~ubuntu22.04.1_amd64.deb" \
+            --image "ubuntu:22.04" \
+            --expected-commit "${GITHUB_SHA}"
+
+      - name: Validate Ubuntu 22.04 .deb on Ubuntu 24.04
+        run: |
+          scripts/release/validate_deb_install_uninstall.sh \
+            --deb "dist/release/deb/star-suite_${STAR_SUITE_EXPECTED_VERSION}-1~ubuntu22.04.1_amd64.deb" \
+            --image "ubuntu:24.04" \
+            --expected-commit "${GITHUB_SHA}"
+
+      - name: Validate Ubuntu 24.04 .deb on Ubuntu 24.04
+        run: |
+          scripts/release/validate_deb_install_uninstall.sh \
+            --deb "dist/release/deb/star-suite_${STAR_SUITE_EXPECTED_VERSION}-1~ubuntu24.04.1_amd64.deb" \
+            --image "ubuntu:24.04" \
             --expected-commit "${GITHUB_SHA}"
 
       - name: Build source package for PPA
