@@ -594,7 +594,7 @@ static uint64_t processOneBgzfRange(
     char name[kFlexPipeNameMax];
 
     uint64_t nReads = 0;
-    const size_t bgzfRecordBatchSize = 1024;
+    const size_t bgzfRecordBatchSize = 256;
     std::vector<star::input::BgzfStarRecord> recordBatch(bgzfRecordBatchSize);
     while (!st->inputFailed.load(std::memory_order_relaxed)) {
         size_t recordsReturned = 0;

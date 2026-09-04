@@ -14,10 +14,7 @@ namespace star {
 namespace input {
 namespace {
 
-// Some ordinary 1 MiB compressed work windows contain more than 64 members.
-// Keep a finite decompressed-work bound while avoiding repeated reads of the
-// unconsumed tail in those windows.
-const size_t kMaxBlocksPerWork = 256;
+const size_t kMaxBlocksPerWork = 64;
 
 bool set_error(std::string* error, const std::string& message) {
     if (error != nullptr) {
