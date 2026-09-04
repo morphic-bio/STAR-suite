@@ -1,3 +1,20 @@
+star-suite (1.8.2-1) unstable; urgency=medium
+
+  * Fix fully fused Flex alignment queue progress and reject mismatched paired
+    BGZF read names instead of silently pairing by ordinal.
+  * Restore STARsolo-compatible posterior resolution for ambiguous Flex cell
+    barcodes and preserve all resolved observations in the bucketed path.
+  * Reduce the fused Flex tail with lock-free sample lookup, parallel fan-in,
+    producer-local sorted runs, asynchronous hierarchical consolidation, and
+    deterministic final tournament merging; use the shared striped ambiguous
+    store for residual-alignment records as well as direct hash records.
+  * Build and validate separate Ubuntu 22.04 and Ubuntu 24.04 Debian binary
+    packages from the same tagged source revision, including GCC 11-compatible
+    C/C++ header boundaries for the packaged feature-calling companion.
+  * Report STAR Suite 1.8.2 from STAR --version.
+
+ -- STAR-suite Maintainers <maintainers@biodepot.example>  Fri, 04 Sep 2026 01:12:00 +0000
+
 star-suite (1.8.1-1) unstable; urgency=medium
 
   * Add streaming cell-barcode bucketing for fused STAR-Flex runs: records are

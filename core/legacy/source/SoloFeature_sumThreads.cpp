@@ -434,10 +434,16 @@ void SoloFeature::sumThreads()
     // Adopt the shared striped ambiguous store first. Entries there are already
     // fully accumulated across threads, so this is a move, not a reconciliation,
     // and the per-thread maps are empty when it is active.
-    if (SoloReadFeature::sharedAmbigActive() && readFeatSum != nullptr) {
+    if (featureType == SoloFeatureTypes::Gene
+        && SoloReadFeature::sharedAmbigActive()
+        && readFeatSum != nullptr) {
         const auto adoptStart = std::chrono::steady_clock::now();
         const size_t sharedN = SoloReadFeature::sharedAmbigSize();
         SoloReadFeature::sharedAmbigDrainInto(readFeatSum->pendingAmbiguous_);
+        // Every fused producer has joined before sumThreads. Disable the
+        // process-global route immediately after its one Gene drain so a
+        // later run cannot accidentally inherit the prior lifecycle.
+        SoloReadFeature::sharedAmbigEnable(false);
         P.inOut->logMain << "Solo timing: sumThreads adopt shared ambiguous "
                          << std::chrono::duration<double>(
                                 std::chrono::steady_clock::now() - adoptStart).count()
