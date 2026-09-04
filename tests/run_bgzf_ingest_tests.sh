@@ -49,6 +49,29 @@ gzip -n -c "${OUT_ROOT}/inputs/source.fastq" > "${OUT_ROOT}/inputs/plain.fastq.g
 "${MAKE_FIXTURE}" --block-bytes 997 \
     "${OUT_ROOT}/inputs/plain.fastq.gz" "${OUT_ROOT}/inputs/blocked.fastq.gz"
 
+python3 - "${OUT_ROOT}/inputs/overlong_line.fastq" <<'PY'
+import random
+import sys
+from pathlib import Path
+
+# Force one incompressible malformed sequence line across many BGZF members
+# and multiple 64 KiB compressed work claims. The reader must reject it as
+# soon as its fixed FASTQ capacity is exceeded, without growing its assembly
+# buffer until a newline eventually appears.
+length = 1 << 20
+rng = random.Random(1903)
+sequence = "".join(rng.choices("ACGT", k=length))
+Path(sys.argv[1]).write_text(
+    "@overlong/1\n" + sequence + "\n+\n" + "I" * length + "\n",
+    encoding="ascii")
+PY
+"${MAKE_FIXTURE}" --block-bytes 4096 \
+    "${OUT_ROOT}/inputs/overlong_line.fastq" \
+    "${OUT_ROOT}/inputs/overlong_line.fastq.gz"
+overlong_compressed_size=$(wc -c < "${OUT_ROOT}/inputs/overlong_line.fastq.gz")
+(( overlong_compressed_size > 64 * 1024 )) \
+    || die "overlong-line fixture does not cross multiple compressed work claims"
+
 python3 - "${OUT_ROOT}/inputs/other_extra.fastq.gz" "${OUT_ROOT}/inputs/source.fastq" <<'PY'
 import struct
 import sys
@@ -192,6 +215,14 @@ PY
     fi
     grep -E "block offset [0-9]+" "${OUT_ROOT}/results/mid_block.stderr" >/dev/null \
         || die "T5 mid-block error did not include a block offset"
+    if "${HARNESS}" --mode records --input "${OUT_ROOT}/inputs/overlong_line.fastq.gz" \
+        --workers 3 --crc-check 1 > /dev/null \
+        2> "${OUT_ROOT}/results/overlong_line.stderr"; then
+        die "T5 overlong cross-member FASTQ line unexpectedly succeeded"
+    fi
+    grep -F "BGZF FASTQ line exceeds fixed Illumina capacity" \
+        "${OUT_ROOT}/results/overlong_line.stderr" >/dev/null \
+        || die "T5 overlong cross-member FASTQ line was not rejected during assembly"
     pass "T5 optional EOF and partial-member truncation"
 fi
 

@@ -131,6 +131,8 @@ private:
     BgzfInflater syncInflater_;
 
     std::vector<unsigned char> buffer_;
+    // One extra byte permits CRLF at the logical FASTQ line capacity.
+    unsigned char lineScratch_[kBgzfFastqSequenceCapacity + 1];
     size_t cursor_ = 0;
     std::vector<std::thread> workers_;
     std::map<uint64_t, InflatedBlock> completed_;

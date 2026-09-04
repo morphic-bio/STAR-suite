@@ -350,41 +350,89 @@ bool BgzfRangeReader::read_line_view(const unsigned char** line,
     }
     *line = nullptr;
     *line_size = 0;
+
+    size_t available = buffer_.size() - cursor_;
+    const unsigned char *begin = available == 0
+        ? nullptr : buffer_.data() + cursor_;
+    const void *found = available == 0
+        ? nullptr : std::memchr(begin, '\n', available);
+    if (found != nullptr) {
+        const unsigned char *newline =
+            static_cast<const unsigned char *>(found);
+        size_t size = static_cast<size_t>(newline - begin);
+        cursor_ += size + 1;
+        if (size != 0 && begin[size - 1] == '\r') {
+            --size;
+        }
+        *line = begin;
+        *line_size = size;
+        return true;
+    }
+
+    size_t scratch_size = 0;
+    const auto line_too_long = [&]() {
+        std::ostringstream message;
+        message << "BGZF FASTQ line exceeds fixed Illumina capacity "
+                << kBgzfFastqSequenceCapacity << " near block offset "
+                << currentBlockOffset_;
+        return set_error(error, message.str());
+    };
     while (true) {
-        const size_t available = buffer_.size() - cursor_;
-        const unsigned char *begin = available == 0
-            ? nullptr : buffer_.data() + cursor_;
-        const void *found = available == 0
-            ? nullptr : std::memchr(begin, '\n', available);
-        if (found != nullptr) {
-            const unsigned char *newline =
-                static_cast<const unsigned char *>(found);
-            size_t size = static_cast<size_t>(newline - begin);
-            cursor_ += size + 1;
-            if (size != 0 && begin[size - 1] == '\r') {
-                --size;
+        if (available != 0) {
+            if (available > sizeof(lineScratch_) - scratch_size) {
+                return line_too_long();
             }
-            *line = begin;
-            *line_size = size;
-            return true;
+            std::memcpy(lineScratch_ + scratch_size, begin, available);
+            scratch_size += available;
+            cursor_ = buffer_.size();
         }
 
         std::string append_error;
         if (append_next_block(&append_error)) {
-            continue;
+            available = buffer_.size() - cursor_;
+            begin = available == 0 ? nullptr : buffer_.data() + cursor_;
+            found = available == 0
+                ? nullptr : std::memchr(begin, '\n', available);
+            if (found == nullptr) {
+                continue;
+            }
+
+            const unsigned char *newline =
+                static_cast<const unsigned char *>(found);
+            const size_t segment_size = static_cast<size_t>(newline - begin);
+            cursor_ += segment_size + 1;
+            if (scratch_size == 0) {
+                size_t size = segment_size;
+                if (size != 0 && begin[size - 1] == '\r') {
+                    --size;
+                }
+                *line = begin;
+                *line_size = size;
+                return true;
+            }
+            if (segment_size > sizeof(lineScratch_) - scratch_size) {
+                return line_too_long();
+            }
+            if (segment_size != 0) {
+                std::memcpy(lineScratch_ + scratch_size, begin, segment_size);
+                scratch_size += segment_size;
+            }
+            if (scratch_size != 0 && lineScratch_[scratch_size - 1] == '\r') {
+                --scratch_size;
+            }
+            *line = lineScratch_;
+            *line_size = scratch_size;
+            return true;
         }
         if (!append_error.empty()) {
             return set_error(error, append_error);
         }
-        if (cursor_ != buffer_.size()) {
-            const unsigned char *tail = buffer_.data() + cursor_;
-            size_t size = buffer_.size() - cursor_;
-            cursor_ = buffer_.size();
-            if (size != 0 && tail[size - 1] == '\r') {
-                --size;
+        if (scratch_size != 0) {
+            if (lineScratch_[scratch_size - 1] == '\r') {
+                --scratch_size;
             }
-            *line = tail;
-            *line_size = size;
+            *line = lineScratch_;
+            *line_size = scratch_size;
             return true;
         }
         if (allow_clean_end) {
