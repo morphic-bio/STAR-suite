@@ -348,6 +348,19 @@ static void mapThreadsSpawnFlexPipeline(Parameters &P, ReadAlignChunk** RAchunk)
     std::vector<Stats> fusedStats(nFusedThreads);
 
     if (fullyFused) {
+        // Hash hits and residual-alignment misses both contribute Flex gene
+        // observations in this mode. Accumulate their ambiguous barcodes in
+        // the same striped store, so the alignment-enabled path avoids the
+        // per-thread field-wise fold just like the no-genome count-only path.
+        // The store remains active until Gene sumThreads drains it.
+        const bool useSharedAmbig =
+            P.pSolo.inlineHashMode && P.pSolo.flexMode;
+        SoloReadFeature::sharedAmbigEnable(useSharedAmbig);
+        P.inOut->logMain << "Flex shared ambiguous store: "
+                         << (useSharedAmbig ? "active" : "inactive")
+                         << " for fully fused hash and alignment records\n"
+                         << std::flush;
+
         // All runThreadN threads are fused: they steal lanes, align queued
         // misses whenever alignQ fills, then switch to alignment
         std::vector<pthread_t> fusedThreads(nFusedThreads);
@@ -672,6 +685,8 @@ void runFlexNoGenomeCountOnly(Parameters &P) {
     // largest serial block in the Flex tail. Only for this fused path; the
     // staged pipeline keeps per-thread maps and its existing merge.
     SoloReadFeature::sharedAmbigEnable(P.pSolo.inlineHashMode && P.pSolo.flexMode);
+    P.inOut->logMain << "Flex shared ambiguous store: active for fully fused "
+                        "no-genome hash records\n" << std::flush;
 
     std::vector<SoloReadFeature *> fusedFeats(nFusedThreads, nullptr);
     std::vector<Stats> fusedStats(nFusedThreads);

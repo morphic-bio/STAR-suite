@@ -34,11 +34,64 @@ done
 
 # Every read must miss the hash cache so that every read is queued for
 # alignment: scramble the probe region (the first 50 bases of R2) and keep the
-# rest of the read, including the sample tag at offset 68, intact.
+# rest of the read, including the sample tag at offset 68, intact. Give every
+# R1 a barcode one mismatch from two whitelist entries, so the aligned records
+# also prove that the shared ambiguous store receives real observations rather
+# than merely exercising an empty enable/drain lifecycle.
 miss_dir="${WORKDIR}/miss_fastq"
 rm -rf "${miss_dir}"
 mkdir -p "${miss_dir}"
-cp "${WORKDIR}/blocked_fastq/tinyflex_S1_L001_R1_001.fastq.gz" "${miss_dir}/"
+ambig_cb="$(python3 - "${WORKDIR}/assets_base/whitelist.txt" \
+                          "${WORKDIR}/blocked_fastq/tinyflex_S1_L001_R1_001.fastq.gz" \
+                          "${miss_dir}/r1_ambiguous.fastq" <<'PY'
+import gzip
+import sys
+
+whitelist_path, source, dest = sys.argv[1:]
+with open(whitelist_path, encoding="ascii") as handle:
+    whitelist = [line.strip() for line in handle if line.strip()]
+whitelist_set = set(whitelist)
+candidate = None
+for ii, left in enumerate(whitelist):
+    for right in whitelist[ii + 1:]:
+        differences = [jj for jj, pair in enumerate(zip(left, right)) if pair[0] != pair[1]]
+        if len(differences) != 2:
+            continue
+        pos = differences[1]
+        hybrid = left[:pos] + right[pos] + left[pos + 1:]
+        if hybrid not in whitelist_set:
+            candidate = hybrid
+            break
+    if candidate is not None:
+        break
+if candidate is None:
+    raise SystemExit("could not construct a barcode one mismatch from two whitelist entries")
+
+count = 0
+with gzip.open(source, "rt") as fin, open(dest, "w", newline="\n") as fout:
+    while True:
+        name = fin.readline()
+        if not name:
+            break
+        seq = fin.readline().rstrip("\n")
+        plus = fin.readline()
+        qual = fin.readline()
+        if len(seq) < len(candidate):
+            raise SystemExit("R1 is shorter than the generated ambiguous barcode")
+        fout.write(name)
+        fout.write(candidate + seq[len(candidate):] + "\n")
+        fout.write(plus)
+        fout.write(qual)
+        count += 1
+if count == 0:
+    raise SystemExit("R1 fixture contained no reads")
+print(candidate)
+PY
+)"
+[[ -n "${ambig_cb}" ]] || die "failed to construct an ambiguous CB fixture"
+"${ROOT_DIR}/tools/make_bgzf_fixture.sh" --block-bytes 1021 "${miss_dir}/r1_ambiguous.fastq" \
+    "${miss_dir}/tinyflex_S1_L001_R1_001.fastq.gz"
+rm -f "${miss_dir}/r1_ambiguous.fastq"
 n_reads="$(python3 - "${WORKDIR}/blocked_fastq/tinyflex_S1_L001_R2_001.fastq.gz" \
                      "${miss_dir}/r2_scrambled.fastq" <<'PY'
 import gzip
@@ -126,6 +179,18 @@ run_case() {
         grep -F "BGZF parallel range readers: active" "${log}" >/dev/null \
             && die "${run_id}: range readers were active with --readFilesBgzfMode off"
     fi
+    grep -F "Flex shared ambiguous store: active for fully fused hash and alignment records" \
+        "${log}" >/dev/null \
+        || die "${run_id}: shared ambiguous store was not enabled for the alignment path"
+    grep -F "Solo timing: sumThreads adopt shared ambiguous" "${log}" >/dev/null \
+        || die "${run_id}: shared ambiguous store was not drained by Gene sumThreads"
+    local shared_entries
+    shared_entries="$(sed -n 's/.*sumThreads adopt shared ambiguous .* (\([0-9][0-9]*\) entries).*/\1/p' \
+        "${log}" | tail -1)"
+    [[ -n "${shared_entries}" ]] \
+        || die "${run_id}: shared ambiguous drain did not report an entry count"
+    (( shared_entries > 0 )) \
+        || die "${run_id}: aligned ambiguous observations bypassed the shared store"
     local helped
     helped="$(sed -n 's/.*Fused producers aligned \([0-9][0-9]*\) queued reads while alignQ was full.*/\1/p' "${log}" | tail -1)"
     [[ -n "${helped}" ]] || die "${run_id}: help-path summary line is absent from Log.out"
@@ -136,10 +201,25 @@ run_case() {
     (( input_reads >= 257 && input_reads <= n_reads )) \
         || die "${run_id}: ${input_reads} input reads counted, expected between 257 and ${n_reads}"
     (( misses >= 257 )) || die "${run_id}: only ${misses} reads missed the hash cache; the queue never filled"
-    echo "PASS: ${run_id} finished; ${misses} misses queued, producers aligned ${helped} of them while alignQ was full"
+    echo "PASS: ${run_id} finished; ${misses} misses queued, producers aligned ${helped} of them while alignQ was full; shared store drained ${shared_entries} ambiguous keys"
 }
 
 run_case 2 range
 run_case 1 range
 run_case 2 off
+for run_id in fused_align_range_1t fused_align_off_2t; do
+    for relative in \
+        Solo.out/Barcodes.stats \
+        Solo.out/Gene/raw/barcodes.tsv \
+        Solo.out/Gene/raw/features.tsv \
+        Solo.out/Gene/raw/matrix.mtx \
+        per_sample/flex_gdna_library.json \
+        per_sample/flex_gdna_summary.tsv \
+        per_sample/flexfilter_summary.tsv; do
+        cmp "${WORKDIR}/runs/fused_align_range_2t/${relative}" \
+            "${WORKDIR}/runs/${run_id}/${relative}" \
+            || die "${run_id}: ${relative} differs from the 2-thread range-reader result"
+    done
+done
+echo "PASS: alignment outputs are byte-identical across input routes and thread counts"
 echo "PASS: fully-fused alignment mode drains alignQ without a reserved consumer (${WORKDIR})"

@@ -53,7 +53,9 @@ indexes do not need to be rebuilt.
 - Avoid the per-read sample-table mutex after each sample token's one-time
   registration.
 - Accumulate ambiguous observations in one striped store and parallelize the
-  producer fan-in and teardown work.
+  producer fan-in and teardown work. The shared store covers both direct hash
+  hits and hash misses that rejoin through residual alignment, avoiding the
+  former per-thread ambiguous-entry fold in either fully fused mode.
 - Inline packed-record accessors used on the bucket-ordering hot path and keep
   detailed stage timing for reproducible performance diagnosis.
 - Retain the full-budget FlexFilter Monte Carlo allocation used by the
