@@ -123,8 +123,6 @@ bool BgzfRangeReader::open(const std::string& path,
     buffer_.clear();
     cursor_ = 0;
     completed_.clear();
-    recycledBuffers_.clear();
-    recycledBuffers_.reserve(maxOutstandingWork_);
     claimsFinished_ = range_start == range_end;
     failed_ = false;
     stopping_ = false;
@@ -148,7 +146,6 @@ void BgzfRangeReader::worker_loop() {
     CompressedWork work;
     while (true) {
         uint64_t sequence = 0;
-        InflatedBlock result;
         {
             std::unique_lock<std::mutex> lock(mutex_);
             spaceCv_.wait(lock, [&]() {
@@ -169,13 +166,9 @@ void BgzfRangeReader::worker_loop() {
                 spaceCv_.notify_all();
                 return;
             }
-            if (!recycledBuffers_.empty()) {
-                result.bytes = std::move(recycledBuffers_.back());
-                recycledBuffers_.pop_back();
-                result.bytes.clear();
-            }
         }
 
+        InflatedBlock result;
         std::string inflate_error;
         if (!inflate_work_permitted(&inflater, work, &result, &inflate_error)) {
             std::lock_guard<std::mutex> lock(mutex_);
@@ -301,7 +294,6 @@ bool BgzfRangeReader::claim_and_inflate_sync(InflatedBlock* result,
 
 bool BgzfRangeReader::append_next_block(std::string* error) {
     InflatedBlock block;
-    bool replace_buffer = cursor_ == buffer_.size();
     if (workerCount_ == 0) {
         bool at_end = false;
         if (!claim_and_inflate_sync(&block, &at_end, error)) {
@@ -329,18 +321,11 @@ bool BgzfRangeReader::append_next_block(std::string* error) {
         block = std::move(found->second);
         completed_.erase(found);
         ++nextConsumeSequence_;
-        replace_buffer = cursor_ == buffer_.size();
-        if (replace_buffer && buffer_.capacity() != 0 &&
-            recycledBuffers_.size() < maxOutstandingWork_) {
-            recycledBuffers_.emplace_back();
-            recycledBuffers_.back().swap(buffer_);
-            cursor_ = 0;
-        }
         lock.unlock();
         spaceCv_.notify_all();
     }
 
-    if (replace_buffer) {
+    if (cursor_ == buffer_.size()) {
         buffer_ = std::move(block.bytes);
         cursor_ = 0;
         currentBlockOffset_ = block.compressedOffset;
@@ -365,7 +350,6 @@ bool BgzfRangeReader::read_line_view(const unsigned char** line,
     }
     *line = nullptr;
     *line_size = 0;
-    size_t scratch_size = 0;
     while (true) {
         const size_t available = buffer_.size() - cursor_;
         const unsigned char *begin = available == 0
@@ -375,41 +359,14 @@ bool BgzfRangeReader::read_line_view(const unsigned char** line,
         if (found != nullptr) {
             const unsigned char *newline =
                 static_cast<const unsigned char *>(found);
-            const size_t segment_size = static_cast<size_t>(newline - begin);
-            cursor_ += segment_size + 1;
-            if (scratch_size == 0) {
-                size_t size = segment_size;
-                if (size != 0 && begin[size - 1] == '\r') {
-                    --size;
-                }
-                *line = begin;
-                *line_size = size;
-                return true;
+            size_t size = static_cast<size_t>(newline - begin);
+            cursor_ += size + 1;
+            if (size != 0 && begin[size - 1] == '\r') {
+                --size;
             }
-            if (segment_size > sizeof(lineScratch_) - scratch_size) {
-                return set_error(error,
-                    "BGZF FASTQ line exceeds fixed Illumina capacity");
-            }
-            if (segment_size != 0) {
-                std::memcpy(lineScratch_ + scratch_size, begin, segment_size);
-                scratch_size += segment_size;
-            }
-            if (scratch_size != 0 && lineScratch_[scratch_size - 1] == '\r') {
-                --scratch_size;
-            }
-            *line = lineScratch_;
-            *line_size = scratch_size;
+            *line = begin;
+            *line_size = size;
             return true;
-        }
-
-        if (available != 0) {
-            if (available > sizeof(lineScratch_) - scratch_size) {
-                return set_error(error,
-                    "BGZF FASTQ line exceeds fixed Illumina capacity");
-            }
-            std::memcpy(lineScratch_ + scratch_size, begin, available);
-            scratch_size += available;
-            cursor_ = buffer_.size();
         }
 
         std::string append_error;
@@ -419,12 +376,15 @@ bool BgzfRangeReader::read_line_view(const unsigned char** line,
         if (!append_error.empty()) {
             return set_error(error, append_error);
         }
-        if (scratch_size != 0) {
-            if (lineScratch_[scratch_size - 1] == '\r') {
-                --scratch_size;
+        if (cursor_ != buffer_.size()) {
+            const unsigned char *tail = buffer_.data() + cursor_;
+            size_t size = buffer_.size() - cursor_;
+            cursor_ = buffer_.size();
+            if (size != 0 && tail[size - 1] == '\r') {
+                --size;
             }
-            *line = lineScratch_;
-            *line_size = scratch_size;
+            *line = tail;
+            *line_size = size;
             return true;
         }
         if (allow_clean_end) {
