@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <chrono>
 #include <cstring>
 #include <fcntl.h>
 #include <limits>
@@ -69,7 +70,8 @@ bool BgzfRangeReader::open(const std::string& path,
                            uint64_t range_end,
                            uint32_t worker_threads,
                            bool check_crc,
-                           std::string* error) {
+                           std::string* error,
+                           const BgzfWorkPermitHooks* permit_hooks) {
     close_input();
     if (error != nullptr) {
         error->clear();
@@ -92,6 +94,12 @@ bool BgzfRangeReader::open(const std::string& path,
                 << ") is outside file size " << physical_end;
         return set_error(error, message.str());
     }
+    if (permit_hooks != nullptr &&
+        ((permit_hooks->acquire == nullptr) !=
+         (permit_hooks->release == nullptr))) {
+        return set_error(error,
+                         "BGZF inflate permit hooks require both acquire and release");
+    }
 
     inputFd_ = ::open(path.c_str(), O_RDONLY);
     if (inputFd_ < 0) {
@@ -108,6 +116,8 @@ bool BgzfRangeReader::open(const std::string& path,
     currentBlockOffset_ = range_start;
     recordsRead_ = 0;
     workerCount_ = worker_threads;
+    permitHooks_ = permit_hooks == nullptr
+        ? BgzfWorkPermitHooks() : *permit_hooks;
     const uint64_t range_bytes = range_end - range_start;
     const uint64_t planning_threads = std::max<uint32_t>(worker_threads, 1);
     const uint64_t planned = range_bytes / (planning_threads * 128U);
@@ -163,7 +173,7 @@ void BgzfRangeReader::worker_loop() {
 
         InflatedBlock result;
         std::string inflate_error;
-        if (!inflate_work(work, &result, &inflate_error)) {
+        if (!inflate_work_permitted(work, &result, &inflate_error)) {
             std::lock_guard<std::mutex> lock(mutex_);
             fail_locked(inflate_error);
             return;
@@ -247,6 +257,28 @@ bool BgzfRangeReader::inflate_work(const CompressedWork& work,
     return true;
 }
 
+bool BgzfRangeReader::inflate_work_permitted(const CompressedWork& work,
+                                             InflatedBlock* result,
+                                             std::string* error) {
+    if (!permitHooks_.enabled()) {
+        return inflate_work(work, result, error);
+    }
+
+    const uint64_t wait_ns = permitHooks_.acquire(permitHooks_.context);
+    const std::chrono::steady_clock::time_point work_start =
+        std::chrono::steady_clock::now();
+    const bool ok = inflate_work(work, result, error);
+    const uint64_t work_ns = static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now() - work_start).count());
+    permitHooks_.release(permitHooks_.context,
+                         wait_ns,
+                         static_cast<uint64_t>(work.blocks.size()),
+                         static_cast<uint64_t>(work.bytes.size()),
+                         work_ns);
+    return ok;
+}
+
 bool BgzfRangeReader::claim_and_inflate_sync(InflatedBlock* result,
                                               bool* at_end,
                                               std::string* error) {
@@ -258,7 +290,7 @@ bool BgzfRangeReader::claim_and_inflate_sync(InflatedBlock* result,
     if (*at_end) {
         return true;
     }
-    return inflate_work(work, result, error);
+    return inflate_work_permitted(work, result, error);
 }
 
 bool BgzfRangeReader::append_next_block(std::string* error) {

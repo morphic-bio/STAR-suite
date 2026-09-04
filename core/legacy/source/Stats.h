@@ -60,6 +60,7 @@ class Stats {
         uint64 hashScreenKeep;
         uint64 hashScreenKeepNoBarcode;
         uint64 hashScreenDeny;
+        uint64 hashScreenSampleReject;
         uint64 hashScreenPass;
 
     // Flex stage timing instrumentation

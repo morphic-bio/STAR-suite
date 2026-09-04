@@ -163,6 +163,7 @@ struct FlexPipelineCounters {
     std::atomic<uint64_t> readsTotal{0};
     std::atomic<uint64_t> triageKeep{0};
     std::atomic<uint64_t> triageDeny{0};
+    std::atomic<uint64_t> triageSampleReject{0};
     std::atomic<uint64_t> triageMiss{0};
     // Reads a fused producer aligned itself because alignQ was full.
     std::atomic<uint64_t> alignHelped{0};
@@ -222,6 +223,9 @@ struct FlexPipelineState {
     std::atomic<int> nextBgzfRangeIdx{0};
     int bgzfReaderWorkers = 0;
     bool bgzfRangeActive = false;
+    // Set once before worker launch. MAP covers bounded residual-alignment
+    // batches; FEATURE covers bounded BGZF inflate work items.
+    bool dynamicPermitsEnabled = false;
 
     std::atomic<bool> inputFailed{false};
     std::mutex inputErrorMutex;

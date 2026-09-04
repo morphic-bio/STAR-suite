@@ -392,10 +392,10 @@ static void test_empty_cache() {
     ++g_pass;
 }
 
-// ── Bonus: dead-weight records are dropped by tiered ────────────────────────
+// ── Bonus: unresolved cache hits are certified negatives ───────────────────
 
-static void test_dead_weight_dropped() {
-    fprintf(stderr, "Test bonus: Dead-weight records dropped by tiered\n");
+static void test_unresolved_hit_denied() {
+    fprintf(stderr, "Test bonus: Unresolved cache hits are certified negatives\n");
     char read[52]; makeRead(read, 51);
     uint64_t lo, hi; encodeRead(read, lo, hi);
 
@@ -408,13 +408,13 @@ static void test_dead_weight_dropped() {
     CHECK(flat.recordCount() == 1, "flat has 1 record");
     CHECK(tiered.h0Count() == 0, "tiered H0 empty");
     CHECK(tiered.h1Count() == 0, "tiered H1 empty");
-    CHECK(tiered.denyCount() == 0, "tiered deny empty");
-    CHECK(tiered.droppedCount() == 1, "tiered dropped 1");
+    CHECK(tiered.denyCount() == 1, "tiered has 1 deny");
+    CHECK(tiered.droppedCount() == 0, "tiered dropped none");
 
-    // Both should return PASS (flat finds the record but skips it; tiered never loads it)
+    // A cache hit with no resolved gene is known bad; only absence is PASS.
     auto df = flat.classifyRead(read, 51, 5);
     auto dt = tiered.classifyRead(read, 51, 5);
-    CHECK_DECISION(df, dt, FlexHashScreenDecision::Pass, "dead weight → PASS");
+    CHECK_DECISION(df, dt, FlexHashScreenDecision::Deny, "unresolved hit → DENY");
     ++g_pass;
 }
 
@@ -504,7 +504,7 @@ int main() {
     test_h0_plus_deny_same_offset();
     test_h0_h1_cross_offset_gene_conflict();
     test_empty_cache();
-    test_dead_weight_dropped();
+    test_unresolved_hit_denied();
     test_h0_sample_match_immediate_keep();
     test_v3_cache_gene_mask();
 

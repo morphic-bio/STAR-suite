@@ -23,6 +23,26 @@ struct BgzfFastqRecord {
     uint64_t ordinal = 0;
 };
 
+// Optional scheduler hooks around one bounded inflate work item. The BGZF
+// reader deliberately knows nothing about STAR's thread controller; callers
+// can supply any acquire/release pair with the same telemetry contract.
+struct BgzfWorkPermitHooks {
+    using Acquire = uint64_t (*)(void* context);
+    using Release = void (*)(void* context,
+                             uint64_t wait_ns,
+                             uint64_t work_units,
+                             uint64_t work_bytes,
+                             uint64_t work_ns);
+
+    void* context = nullptr;
+    Acquire acquire = nullptr;
+    Release release = nullptr;
+
+    bool enabled() const {
+        return acquire != nullptr && release != nullptr;
+    }
+};
+
 // Inflate workers claim bounded contiguous work by reading every member's
 // BC/BSIZE at the current compressed frontier. Results are assembled in claim
 // order before FASTQ parsing, so no block or record index is needed.
@@ -41,7 +61,8 @@ public:
               uint64_t range_end,
               uint32_t worker_threads,
               bool check_crc,
-              std::string* error);
+              std::string* error,
+              const BgzfWorkPermitHooks* permit_hooks = nullptr);
 
     // Returns false with an empty error at clean stream end.
     bool next(BgzfFastqRecord* record, std::string* error);
@@ -72,6 +93,9 @@ private:
     bool inflate_work(const CompressedWork& work,
                       InflatedBlock* result,
                       std::string* error);
+    bool inflate_work_permitted(const CompressedWork& work,
+                                InflatedBlock* result,
+                                std::string* error);
     bool claim_and_inflate_sync(InflatedBlock* result, bool* at_end,
                                 std::string* error);
     bool append_next_block(std::string* error);
@@ -91,6 +115,7 @@ private:
     uint64_t targetCompressedBytes_ = 64 * 1024;
     size_t maxOutstandingWork_ = 4;
     uint32_t workerCount_ = 0;
+    BgzfWorkPermitHooks permitHooks_;
 
     std::vector<unsigned char> buffer_;
     size_t cursor_ = 0;
