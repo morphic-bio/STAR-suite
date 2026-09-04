@@ -1011,16 +1011,11 @@ bool flexPrepareCbqRangeTasks(FlexPipelineState *state, Parameters &P,
         return false;
     }
 
-    // Keep several independently claimable ranges per worker.  One range per
-    // worker leaves the final workers pinned to their original CBQ chunks even
-    // after the rest of the pool goes idle; CBQ blocks are small enough that
-    // the extra range boundaries have negligible decode overlap.
-    const uint64_t targetRanges = std::min<uint64_t>(
-        totalRecords, static_cast<uint64_t>(nWorkers) * 4U);
     const uint64_t chunkSize =
-        (totalRecords + targetRanges - 1U) / targetRanges;
-    for (uint64_t range = 0; range < targetRanges; ++range) {
-        const uint64_t globalFirst = range * chunkSize;
+        (totalRecords + static_cast<uint64_t>(nWorkers) - 1U) /
+        static_cast<uint64_t>(nWorkers);
+    for (int worker = 0; worker < nWorkers; ++worker) {
+        const uint64_t globalFirst = static_cast<uint64_t>(worker) * chunkSize;
         if (globalFirst >= totalRecords) {
             break;
         }
