@@ -352,14 +352,17 @@ bool BgzfRangeReader::read_line(std::string* line,
         return set_error(error, "BGZF FASTQ line destination is null");
     }
     while (true) {
-        const std::vector<unsigned char>::iterator begin =
-            buffer_.begin() + static_cast<std::ptrdiff_t>(cursor_);
-        const std::vector<unsigned char>::iterator newline =
-            std::find(begin, buffer_.end(), static_cast<unsigned char>('\n'));
-        if (newline != buffer_.end()) {
-            line->assign(reinterpret_cast<const char*>(&*begin),
+        const size_t available = buffer_.size() - cursor_;
+        const unsigned char *begin = available == 0
+            ? nullptr : buffer_.data() + cursor_;
+        const void *found = available == 0
+            ? nullptr : std::memchr(begin, '\n', available);
+        if (found != nullptr) {
+            const unsigned char *newline =
+                static_cast<const unsigned char *>(found);
+            line->assign(reinterpret_cast<const char *>(begin),
                          static_cast<size_t>(newline - begin));
-            cursor_ = static_cast<size_t>(newline - buffer_.begin()) + 1;
+            cursor_ += static_cast<size_t>(newline - begin) + 1;
             strip_carriage_return(line);
             return true;
         }
