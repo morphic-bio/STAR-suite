@@ -1,0 +1,49 @@
+                                 Started job on |	Sep 04 10:47:50
+                             Started mapping on |	Sep 04 10:48:03
+                                    Finished on |	Sep 04 10:51:51
+       Mapping speed, Million of reads per hour |	31754.69
+
+                          Number of input reads |	2011130186
+                      Average input read length |	0
+                                    UNIQUE READS:
+                   Uniquely mapped reads number |	0
+                        Uniquely mapped reads % |	0.00%
+                          Average mapped length |	0.00
+
+                               FLEX HASH SCREEN |
+                   Hash screen: reads evaluated |	1851057650
+                              Hash screen: KEEP |	1681459858
+                  Hash screen: KEEP, no barcode |	22444587
+                            Hash screen: KEEP % |	90.84%
+                              Hash screen: DENY |	16111757
+                            Hash screen: DENY % |	0.87%
+              Hash screen: unmatched sample tag |	153486035
+            Hash screen: unmatched sample tag % |	8.29%
+                              Hash screen: PASS |	0
+                            Hash screen: PASS % |	0.00%
+                       Number of splices: Total |	0
+            Number of splices: Annotated (sjdb) |	0
+                       Number of splices: GT/AG |	0
+                       Number of splices: GC/AG |	0
+                       Number of splices: AT/AC |	0
+               Number of splices: Non-canonical |	0
+                      Mismatch rate per base, % |	-nan%
+                         Deletion rate per base |	0.00%
+                        Deletion average length |	0.00
+                        Insertion rate per base |	0.00%
+                       Insertion average length |	0.00
+                             MULTI-MAPPING READS:
+        Number of reads mapped to multiple loci |	0
+             % of reads mapped to multiple loci |	0.00%
+        Number of reads mapped to too many loci |	0
+             % of reads mapped to too many loci |	0.00%
+                                  UNMAPPED READS:
+  Number of reads unmapped: too many mismatches |	0
+       % of reads unmapped: too many mismatches |	0.00%
+            Number of reads unmapped: too short |	0
+                 % of reads unmapped: too short |	0.00%
+                Number of reads unmapped: other |	0
+                     % of reads unmapped: other |	0.00%
+                                  CHIMERIC READS:
+                       Number of chimeric reads |	0
+                            % of chimeric reads |	0.00%

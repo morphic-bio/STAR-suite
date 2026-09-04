@@ -1,0 +1,31 @@
+date_utc=2026-09-04T09:57:13Z
+arm=bgzf_noalign
+rep=1
+input=bgzf
+align=noalign
+threads=32
+bucket_mode=ram
+bucket_count=256
+run_dir=/home/lhhung/jax_bgzf_reader_opt2_20260904/bgzf_noalign_rep1_20260904T095713Z
+commit=d90cf5a0b8571744716b0dcd68562256ac59f473
+star_mtime=2026-09-04 09:55:24.039079701 +0000
+working_tree=clean
+env_STAR_FLEX_HASH_H0_ONLY=unset
+stage_fastq=/home/lhhung/jax_stage_20260903/fastq
+stage_cbq=/home/lhhung/jax_stage_20260903/cbq
+tmpdir=/home/lhhung/jax_bgzf_reader_opt2_20260904/tmp
+ 09:57:13 up 50 days, 15:22,  2 users,  load average: 4.37, 19.52, 16.63
+               total        used        free      shared  buff/cache   available
+Mem:             125          10         113           0           2         114
+    PID COMMAND         %CPU %MEM     ELAPSED
+2108885 specstory        8.3  0.6    01:46:08
+2847311 kube-apiserver   8.2  0.3 26-14:59:13
+2134329 node             6.0  0.4    01:28:50
+2107767 node             5.1  0.4    01:46:29
+2102272 node             4.8  0.3    01:53:07
+2103404 specstory        4.7  0.0    01:52:49
+3294717 temporal-server  4.7  0.0 48-03:04:06
+2847362 etcd             3.7  0.0 26-14:59:13
+2847584 kubelet          2.8  0.2 26-14:59:08
+2320548 htop             2.7  0.0  2-07:10:40
+   1835 dockerd          2.2  0.1 50-15:19:54

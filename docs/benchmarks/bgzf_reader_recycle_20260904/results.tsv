@@ -1,0 +1,2 @@
+arm	rep	stamp	input	align	wall	wall_s	peak_rss_gib	cpu_pct	input_reads	hash_keep	hash_deny	hash_pass	uniq_mapped	helped	samples	manifest_sha	status
+bgzf_noalign	1	20260904T105724Z	bgzf	noalign	4:08.65	248.65	40.7	2406%	2011130186	1681459858	16111757	0	0	NA	16	767c1e314df547e3	ok
