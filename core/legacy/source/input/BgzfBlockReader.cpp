@@ -377,13 +377,23 @@ bool read_bgzf_work_fd(int input_fd,
     return true;
 }
 
-bool inflate_bgzf_block_buffer(const unsigned char* member,
-                               size_t member_size,
-                               uint64_t compressed_offset,
-                               bool check_crc,
-                               unsigned char* output,
-                               size_t output_size,
-                               std::string* error) {
+BgzfInflater::BgzfInflater() {
+    std::memset(&stream_, 0, sizeof(stream_));
+}
+
+BgzfInflater::~BgzfInflater() {
+    if (initialized_) {
+        inflateEnd(&stream_);
+    }
+}
+
+bool BgzfInflater::inflate_block(const unsigned char* member,
+                                 size_t member_size,
+                                 uint64_t compressed_offset,
+                                 bool check_crc,
+                                 unsigned char* output,
+                                 size_t output_size,
+                                 std::string* error) {
     if (member == nullptr || (output == nullptr && output_size != 0)) {
         return set_error(error, "invalid buffered BGZF inflate arguments");
     }
@@ -409,20 +419,21 @@ bool inflate_bgzf_block_buffer(const unsigned char* member,
     const size_t deflate_size = member_size - payload_offset - 8;
 
     unsigned char empty_output = 0;
-    z_stream stream;
-    std::memset(&stream, 0, sizeof(stream));
-    stream.next_in = const_cast<Bytef*>(member + payload_offset);
-    stream.avail_in = static_cast<uInt>(deflate_size);
-    stream.next_out = output_size == 0 ? &empty_output : output;
-    stream.avail_out = static_cast<uInt>(output_size == 0 ? 1 : output_size);
-    const int init_status = inflateInit2(&stream, -15);
-    if (init_status != Z_OK) {
-        return set_error(error, "zlib could not initialize raw BGZF inflate");
+    const int prepare_status = initialized_
+        ? inflateReset(&stream_) : inflateInit2(&stream_, -15);
+    if (prepare_status != Z_OK) {
+        return set_error(error, initialized_
+            ? "zlib could not reset raw BGZF inflate"
+            : "zlib could not initialize raw BGZF inflate");
     }
-    const int inflate_status = ::inflate(&stream, Z_FINISH);
-    inflateEnd(&stream);
-    if (inflate_status != Z_STREAM_END || stream.total_out != expected_isize ||
-        stream.total_in != deflate_size) {
+    initialized_ = true;
+    stream_.next_in = const_cast<Bytef*>(member + payload_offset);
+    stream_.avail_in = static_cast<uInt>(deflate_size);
+    stream_.next_out = output_size == 0 ? &empty_output : output;
+    stream_.avail_out = static_cast<uInt>(output_size == 0 ? 1 : output_size);
+    const int inflate_status = ::inflate(&stream_, Z_FINISH);
+    if (inflate_status != Z_STREAM_END || stream_.total_out != expected_isize ||
+        stream_.total_in != deflate_size) {
         std::ostringstream message;
         message << "raw inflate failed at block offset " << compressed_offset
                 << " (zlib status " << inflate_status << ')';
@@ -440,6 +451,18 @@ bool inflate_bgzf_block_buffer(const unsigned char* member,
         }
     }
     return true;
+}
+
+bool inflate_bgzf_block_buffer(const unsigned char* member,
+                               size_t member_size,
+                               uint64_t compressed_offset,
+                               bool check_crc,
+                               unsigned char* output,
+                               size_t output_size,
+                               std::string* error) {
+    BgzfInflater inflater;
+    return inflater.inflate_block(member, member_size, compressed_offset,
+                                  check_crc, output, output_size, error);
 }
 
 bool inflate_bgzf_block_fd(int input_fd,

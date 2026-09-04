@@ -594,7 +594,7 @@ static uint64_t processOneBgzfRange(
     char name[kFlexPipeNameMax];
 
     uint64_t nReads = 0;
-    const size_t bgzfRecordBatchSize = 256;
+    const size_t bgzfRecordBatchSize = 1024;
     std::vector<star::input::BgzfStarRecord> recordBatch(bgzfRecordBatchSize);
     while (!st->inputFailed.load(std::memory_order_relaxed)) {
         size_t recordsReturned = 0;
@@ -611,6 +611,8 @@ static uint64_t processOneBgzfRange(
             st->failInput(message.str());
             break;
         }
+        const uint64_t batchGlobalFirst = st->iReadAllGlobal.fetch_add(
+            recordsReturned, std::memory_order_relaxed);
         for (size_t batchIndex = 0; batchIndex < recordsReturned; ++batchIndex) {
         star::input::BgzfStarRecord &record = recordBatch[batchIndex];
         const size_t readLen0Size = record.mates[0].sequence.size();
@@ -637,12 +639,12 @@ static uint64_t processOneBgzfRange(
         const uint32_t readLen1 = static_cast<uint32_t>(readLen1Size);
         const size_t nameLength = std::min(record.read_name.size(),
                                            static_cast<size_t>(kFlexPipeNameMax - 1));
-        std::memset(name, 0, sizeof(name));
         if (nameLength != 0) {
             std::memcpy(name, record.read_name.data(), nameLength);
         }
+        name[nameLength] = '\0';
 
-        const uint64_t iReadAll = st->iReadAllGlobal.fetch_add(1);
+        const uint64_t iReadAll = batchGlobalFirst + batchIndex;
         ++tally.lane;
         ++nReads;
 
@@ -695,7 +697,7 @@ static uint64_t processOneBgzfRange(
             ++tally.miss;
             if (!noAlign) {
                 EnrichedPacket packet;
-                std::memcpy(packet.name, name, kFlexPipeNameMax);
+                std::memcpy(packet.name, name, nameLength + 1);
                 std::memcpy(packet.seq[0], seq0, readLen0 + 1);
                 std::memcpy(packet.seq[1], seq1, readLen1 + 1);
                 std::memcpy(packet.qual[0], qual0, readLen0 + 1);

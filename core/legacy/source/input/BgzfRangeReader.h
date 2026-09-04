@@ -90,10 +90,12 @@ private:
                     uint64_t* sequence,
                     bool* at_end,
                     std::string* error);
-    bool inflate_work(const CompressedWork& work,
+    bool inflate_work(BgzfInflater* inflater,
+                      const CompressedWork& work,
                       InflatedBlock* result,
                       std::string* error);
-    bool inflate_work_permitted(const CompressedWork& work,
+    bool inflate_work_permitted(BgzfInflater* inflater,
+                                const CompressedWork& work,
                                 InflatedBlock* result,
                                 std::string* error);
     bool claim_and_inflate_sync(InflatedBlock* result, bool* at_end,
@@ -116,6 +118,7 @@ private:
     size_t maxOutstandingWork_ = 4;
     uint32_t workerCount_ = 0;
     BgzfWorkPermitHooks permitHooks_;
+    BgzfInflater syncInflater_;
 
     std::vector<unsigned char> buffer_;
     size_t cursor_ = 0;
