@@ -19,6 +19,7 @@
 #include <fstream>
 #include <limits>
 #include <sstream>
+#include <sys/stat.h>
 #include <thread>
 #include <unistd.h>
 #include <chrono>
@@ -1110,17 +1111,62 @@ bool flexPrepareBgzfRangeTasks(FlexPipelineState *state, Parameters &P,
     }
 
     const int streamCount = static_cast<int>(rangeLaneIds.size()) * 2;
-    const int baseThreads = configuredWorkers / streamCount;
-    const int extraThreads = configuredWorkers % streamCount;
+    std::vector<uint64_t> streamBytes(static_cast<size_t>(streamCount), 0);
+    for (size_t laneIndex = 0; laneIndex < rangeLaneIds.size(); ++laneIndex) {
+        const int lane = rangeLaneIds[laneIndex];
+        for (int mate = 0; mate < 2; ++mate) {
+            const std::string &path =
+                P.readFilesNames[static_cast<size_t>(mate)][static_cast<size_t>(lane)];
+            struct stat info;
+            if (::stat(path.c_str(), &info) != 0 || info.st_size < 0) {
+                if (reason != nullptr) {
+                    *reason = "could not determine BGZF stream size for " + path;
+                }
+                if (fatalError != nullptr) {
+                    *fatalError = true;
+                }
+                return false;
+            }
+            streamBytes[laneIndex * 2 + static_cast<size_t>(mate)] =
+                static_cast<uint64_t>(info.st_size);
+        }
+    }
+
+    // Give every stream an asynchronous inflater when the budget permits,
+    // then place remaining workers where they reduce compressed bytes per
+    // worker the most. A zero-worker stream remains valid and inflates
+    // synchronously in its fused consumer.
+    std::vector<uint32_t> streamThreads(static_cast<size_t>(streamCount), 0);
+    int remainingWorkers = configuredWorkers;
+    if (remainingWorkers >= streamCount) {
+        std::fill(streamThreads.begin(), streamThreads.end(), 1U);
+        remainingWorkers -= streamCount;
+    }
+    while (remainingWorkers-- > 0) {
+        size_t best = 0;
+        long double bestBytesPerWorker = -1.0L;
+        for (size_t stream = 0; stream < streamBytes.size(); ++stream) {
+            const long double bytesPerWorker =
+                static_cast<long double>(streamBytes[stream]) /
+                static_cast<long double>(streamThreads[stream] + 1U);
+            if (bytesPerWorker > bestBytesPerWorker) {
+                best = stream;
+                bestBytesPerWorker = bytesPerWorker;
+            }
+        }
+        ++streamThreads[best];
+    }
+
     int streamIndex = 0;
+    uint32_t mateWorkers[2] = {0, 0};
     for (size_t laneIndex = 0; laneIndex < rangeLaneIds.size(); ++laneIndex) {
         const int lane = rangeLaneIds[laneIndex];
         star::input::BgzfStarAdapterOptions options;
         options.lane_index = static_cast<uint32_t>(lane);
-        options.mate0_reader_threads = static_cast<uint32_t>(
-            baseThreads + (streamIndex++ < extraThreads ? 1 : 0));
-        options.mate1_reader_threads = static_cast<uint32_t>(
-            baseThreads + (streamIndex++ < extraThreads ? 1 : 0));
+        options.mate0_reader_threads = streamThreads[static_cast<size_t>(streamIndex++)];
+        options.mate1_reader_threads = streamThreads[static_cast<size_t>(streamIndex++)];
+        mateWorkers[0] += options.mate0_reader_threads;
+        mateWorkers[1] += options.mate1_reader_threads;
         options.crc_check = P.bgzfCrcCheck == 1;
         if (state->dynamicPermitsEnabled) {
             options.inflate_permit_hooks.context = &kFlexBgzfPermitContext;
@@ -1165,7 +1211,8 @@ bool flexPrepareBgzfRangeTasks(FlexPipelineState *state, Parameters &P,
         std::ostringstream out;
         out << rangeLaneIds.size() << " BGZF lanes using "
             << configuredWorkers << " on-demand BC/BSIZE inflate readers and "
-            << state->bgzfReaderWorkers << " fused consumers; no pre-index";
+            << state->bgzfReaderWorkers << " fused consumers; R2/R1 inflater allocation "
+            << mateWorkers[0] << '/' << mateWorkers[1] << "; no pre-index";
         *reason = out.str();
     }
     return true;
