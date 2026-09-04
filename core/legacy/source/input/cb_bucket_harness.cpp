@@ -146,6 +146,8 @@ void test_claims(const Options &options)
     star::solo::CbBucketStore::Config config;
     config.bucketCount = options.bucketCount;
     config.whitelistSize = 737280;
+    config.mergeWorkerCount = 2;
+    config.mergeFanIn = 2;
     star::solo::CbBucketStore store(config);
     std::vector<std::thread> threads;
     std::atomic<bool> failed(false);
@@ -210,8 +212,12 @@ void test_store(const Options &options)
     spillConfig.mode = star::solo::CbBucketStore::Mode::Spill;
     spillConfig.scratchDirectory = options.scratch;
     spillConfig.filePrefix = "roundtrip";
+    star::solo::CbBucketStore::Config asyncConfig = ramConfig;
+    asyncConfig.mergeWorkerCount = 2;
+    asyncConfig.mergeFanIn = 2;
     star::solo::CbBucketStore ram(ramConfig);
     star::solo::CbBucketStore spill(spillConfig);
+    star::solo::CbBucketStore asyncRam(asyncConfig);
     std::vector<std::vector<star::solo::PackedCbRecord> > pending(options.bucketCount);
     std::string error;
     std::uint32_t worker = 0;
@@ -220,7 +226,10 @@ void test_store(const Options &options)
         pending[bucket].push_back(record);
         if (pending[bucket].size() == 7) {
             std::vector<star::solo::PackedCbRecord> copy = pending[bucket];
-            if (!ram.append_segment(worker, bucket, copy, &error)
+            std::vector<star::solo::PackedCbRecord> asyncCopy = pending[bucket];
+            if (!ram.append_segment(worker, bucket, std::move(copy), &error)
+                || !asyncRam.append_segment(worker, bucket,
+                                            std::move(asyncCopy), &error)
                 || !spill.append_segment(worker, bucket, std::move(pending[bucket]), &error))
                 throw std::runtime_error(error);
             pending[bucket].clear();
@@ -231,12 +240,16 @@ void test_store(const Options &options)
         if (pending[bucket].empty())
             continue;
         std::vector<star::solo::PackedCbRecord> copy = pending[bucket];
-        if (!ram.append_segment(worker, bucket, copy, &error)
+        std::vector<star::solo::PackedCbRecord> asyncCopy = pending[bucket];
+        if (!ram.append_segment(worker, bucket, std::move(copy), &error)
+            || !asyncRam.append_segment(worker, bucket,
+                                        std::move(asyncCopy), &error)
             || !spill.append_segment(worker, bucket, std::move(pending[bucket]), &error))
             throw std::runtime_error(error);
         ++worker;
     }
-    if (!ram.finalize(&error) || !spill.finalize(&error))
+    if (!ram.finalize(&error) || !spill.finalize(&error)
+        || !asyncRam.finalize(&error))
         throw std::runtime_error(error);
     for (std::uint32_t bucket = 0; bucket < options.bucketCount; ++bucket) {
         std::vector<std::uint8_t> ramBytes, spillBytes;
@@ -245,7 +258,57 @@ void test_store(const Options &options)
             throw std::runtime_error(error);
         if (ramBytes != spillBytes)
             throw std::runtime_error("RAM/spill bucket byte mismatch");
+
+        std::vector<std::vector<star::solo::PackedCbRecord> > ramSegments;
+        std::vector<std::vector<star::solo::PackedCbRecord> > spillSegments;
+        if (!ram.load_sorted_segments(bucket, &ramSegments, &error)
+            || !spill.load_sorted_segments(bucket, &spillSegments, &error))
+            throw std::runtime_error(error);
+        if (ramSegments.size() != spillSegments.size())
+            throw std::runtime_error("RAM/spill segment count mismatch");
+        for (std::size_t segment = 0; segment < ramSegments.size(); ++segment) {
+            const auto &ramRun = ramSegments[segment];
+            const auto &spillRun = spillSegments[segment];
+            if (ramRun.size() != spillRun.size())
+                throw std::runtime_error("RAM/spill segment length mismatch");
+            if (!std::is_sorted(
+                    ramRun.begin(), ramRun.end(),
+                    [](const star::solo::PackedCbRecord &left,
+                       const star::solo::PackedCbRecord &right) {
+                        return left.group_sort_key() < right.group_sort_key();
+                    }))
+                throw std::runtime_error("producer-local CB bucket run is not sorted");
+            for (std::size_t index = 0; index < ramRun.size(); ++index) {
+                if (ramRun[index].key != spillRun[index].key
+                    || ramRun[index].value != spillRun[index].value)
+                    throw std::runtime_error("RAM/spill decoded segment mismatch");
+            }
+        }
+
+        std::vector<star::solo::PackedCbRecord> originalRecords;
+        std::vector<star::solo::PackedCbRecord> asyncRecords;
+        if (!ram.load_bucket(bucket, &originalRecords, &error)
+            || !asyncRam.load_bucket(bucket, &asyncRecords, &error))
+            throw std::runtime_error(error);
+        const auto order = [](const star::solo::PackedCbRecord &left,
+                              const star::solo::PackedCbRecord &right) {
+            if (left.group_sort_key() != right.group_sort_key())
+                return left.group_sort_key() < right.group_sort_key();
+            return left.value < right.value;
+        };
+        std::sort(originalRecords.begin(), originalRecords.end(), order);
+        std::sort(asyncRecords.begin(), asyncRecords.end(), order);
+        if (originalRecords.size() != asyncRecords.size())
+            throw std::runtime_error("asynchronous CB bucket merge lost records");
+        for (std::size_t index = 0; index < originalRecords.size(); ++index) {
+            if (originalRecords[index].key != asyncRecords[index].key
+                || originalRecords[index].value != asyncRecords[index].value)
+                throw std::runtime_error("asynchronous CB bucket merge changed records");
+        }
     }
+    if (asyncRam.async_merge_count() == 0
+        || asyncRam.async_merged_records() == 0)
+        throw std::runtime_error("asynchronous CB bucket merge was not exercised");
 }
 
 } // namespace

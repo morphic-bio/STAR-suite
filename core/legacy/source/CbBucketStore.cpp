@@ -50,6 +50,15 @@ std::uint64_t get_u64(const std::uint8_t *input)
     return value;
 }
 
+std::uint64_t encoded_group_sort_key(const std::uint8_t *input)
+{
+    const std::uint64_t key = get_u64(input);
+    return (key & 0xFFFFF00000000000ULL)
+         | ((key & 0x1FULL) << 39)
+         | (((key >> 5) & 0x7FFFULL) << 24)
+         | ((key >> 20) & 0xFFFFFFULL);
+}
+
 std::uint64_t fnv_update(std::uint64_t hash, const std::uint8_t *data,
                          std::size_t bytes)
 {
@@ -179,8 +188,10 @@ CbBucketStore::CbBucketStore(const Config &config)
       spillRecordCounts_(new std::atomic<std::uint64_t>[config.bucketCount]),
       spillClaimMutexes_(new std::mutex[config.bucketCount]),
       spillChecksums_(new std::uint64_t[config.bucketCount]),
+      spillSegments_(config.bucketCount),
       spillFds_(config.bucketCount, -1),
-      backend_(config.mode == Mode::Spill ? Backend::Spill : Backend::Ram)
+      backend_(config.mode == Mode::Spill ? Backend::Spill : Backend::Ram),
+      ramMergeInFlight_(config.bucketCount, 0)
 {
     std::string error;
     if (!validate_config(&error))
@@ -193,10 +204,20 @@ CbBucketStore::CbBucketStore(const Config &config)
     }
     if (config_.mode == Mode::Spill && !ensure_spill_files(&error))
         throw std::runtime_error(error);
+    if (config_.mode != Mode::Spill) {
+        try {
+            for (std::uint32_t worker = 0; worker < config_.mergeWorkerCount; ++worker)
+                ramMergeWorkers_.emplace_back(&CbBucketStore::ram_merge_worker, this);
+        } catch (...) {
+            stop_ram_merge_workers();
+            throw;
+        }
+    }
 }
 
 CbBucketStore::~CbBucketStore()
 {
+    stop_ram_merge_workers();
     for (std::uint32_t bucket = 0; bucket < spillFds_.size(); ++bucket) {
         if (spillFds_[bucket] >= 0) {
             ::close(spillFds_[bucket]);
@@ -217,6 +238,8 @@ bool CbBucketStore::validate_config(std::string *error) const
         return set_error(error, "CB bucket spill/auto mode requires a scratch directory");
     if (config_.filePrefix.empty())
         return set_error(error, "CB bucket spill file prefix is empty");
+    if (config_.mergeWorkerCount > 0 && config_.mergeFanIn < 2)
+        return set_error(error, "CB bucket asynchronous merge fan-in must be at least two");
     return true;
 }
 
@@ -276,7 +299,218 @@ bool CbBucketStore::append_ram(std::uint32_t workerIndex,
     segment.bytes = std::move(bytes);
     std::lock_guard<std::mutex> lock(ramBuckets_[bucketIndex].mutex);
     ramBuckets_[bucketIndex].segments.push_back(std::move(segment));
+    schedule_ram_merge_locked(bucketIndex);
     return true;
+}
+
+bool CbBucketStore::schedule_ram_merge_locked(std::uint32_t bucketIndex)
+{
+    if (ramMergeWorkers_.empty() || ramMergeInFlight_[bucketIndex])
+        return false;
+
+    RamBucket &bucket = ramBuckets_[bucketIndex];
+    std::uint32_t selectedLevel = 0;
+    bool found = false;
+    for (std::uint32_t level = 0; level < 64 && !found; ++level) {
+        std::uint32_t count = 0;
+        for (const RamSegment &segment : bucket.segments) {
+            if (segment.level == level && ++count == config_.mergeFanIn) {
+                selectedLevel = level;
+                found = true;
+                break;
+            }
+        }
+    }
+    if (!found)
+        return false;
+
+    RamMergeTask task;
+    task.bucket = bucketIndex;
+    task.level = selectedLevel;
+    task.runs.reserve(config_.mergeFanIn);
+    std::vector<RamSegment> retained;
+    retained.reserve(bucket.segments.size() - config_.mergeFanIn + 1);
+    for (RamSegment &segment : bucket.segments) {
+        if (segment.level == selectedLevel
+            && task.runs.size() < config_.mergeFanIn) {
+            task.runs.push_back(std::move(segment));
+        } else {
+            retained.push_back(std::move(segment));
+        }
+    }
+    bucket.segments.swap(retained);
+    ramMergeInFlight_[bucketIndex] = 1;
+    {
+        std::lock_guard<std::mutex> mergeLock(ramMergeMutex_);
+        if (ramMergeStopping_ || ramMergeFailed_) {
+            for (RamSegment &segment : task.runs)
+                bucket.segments.push_back(std::move(segment));
+            ramMergeInFlight_[bucketIndex] = 0;
+            return false;
+        }
+        ramMergeQueue_.push_back(std::move(task));
+        ++ramMergeOutstanding_;
+    }
+    ramMergeCv_.notify_one();
+    return true;
+}
+
+CbBucketStore::RamSegment CbBucketStore::merge_ram_runs(
+    RamMergeTask *task) const
+{
+    if (task == nullptr || task->runs.empty())
+        throw std::runtime_error("CB bucket asynchronous merge received no runs");
+    RamSegment output;
+    output.sequence = task->runs.front().sequence;
+    output.worker = task->runs.front().worker;
+    output.level = task->level + 1;
+    std::size_t totalBytes = 0;
+    for (const RamSegment &run : task->runs) {
+        if (run.bytes.size() % PackedCbRecord::kSerializedBytes != 0
+            || run.bytes.size() > std::numeric_limits<std::size_t>::max() - totalBytes)
+            throw std::runtime_error("invalid CB bucket run in asynchronous merge");
+        totalBytes += run.bytes.size();
+        output.sequence = std::min(output.sequence, run.sequence);
+    }
+    output.bytes.resize(totalBytes);
+
+    const std::size_t runCount = task->runs.size();
+    const std::size_t sentinel = runCount;
+    std::vector<std::size_t> next(runCount, 0);
+    std::vector<std::uint64_t> currentKey(runCount, 0);
+    std::size_t leafCount = 1;
+    while (leafCount < runCount)
+        leafCount <<= 1;
+    std::vector<std::size_t> tournament(leafCount * 2, sentinel);
+    for (std::size_t run = 0; run < runCount; ++run) {
+        if (!task->runs[run].bytes.empty()) {
+            currentKey[run] = encoded_group_sort_key(task->runs[run].bytes.data());
+            tournament[leafCount + run] = run;
+        }
+    }
+    const auto winner = [&currentKey, sentinel](std::size_t left,
+                                                std::size_t right) {
+        if (left == sentinel) return right;
+        if (right == sentinel) return left;
+        if (currentKey[left] != currentKey[right])
+            return currentKey[left] < currentKey[right] ? left : right;
+        return std::min(left, right);
+    };
+    for (std::size_t node = leafCount; node-- > 1;)
+        tournament[node] = winner(tournament[node * 2],
+                                  tournament[node * 2 + 1]);
+
+    std::size_t outputOffset = 0;
+    while (tournament[1] != sentinel) {
+        const std::size_t run = tournament[1];
+        const std::size_t inputOffset =
+            next[run] * PackedCbRecord::kSerializedBytes;
+        std::memcpy(output.bytes.data() + outputOffset,
+                    task->runs[run].bytes.data() + inputOffset,
+                    PackedCbRecord::kSerializedBytes);
+        outputOffset += PackedCbRecord::kSerializedBytes;
+        ++next[run];
+        const std::size_t leaf = leafCount + run;
+        if (next[run] * PackedCbRecord::kSerializedBytes
+            == task->runs[run].bytes.size()) {
+            tournament[leaf] = sentinel;
+        } else {
+            currentKey[run] = encoded_group_sort_key(
+                task->runs[run].bytes.data()
+                + next[run] * PackedCbRecord::kSerializedBytes);
+        }
+        for (std::size_t node = leaf / 2; node > 0; node /= 2)
+            tournament[node] = winner(tournament[node * 2],
+                                      tournament[node * 2 + 1]);
+    }
+    return output;
+}
+
+void CbBucketStore::ram_merge_worker()
+{
+    for (;;) {
+        RamMergeTask task;
+        {
+            std::unique_lock<std::mutex> lock(ramMergeMutex_);
+            ramMergeCv_.wait(lock, [&]() {
+                return ramMergeStopping_ || !ramMergeQueue_.empty();
+            });
+            if (ramMergeQueue_.empty()) {
+                if (ramMergeStopping_)
+                    return;
+                continue;
+            }
+            task = std::move(ramMergeQueue_.front());
+            ramMergeQueue_.pop_front();
+        }
+
+        bool ok = true;
+        std::string failure;
+        RamSegment merged;
+        try {
+            merged = merge_ram_runs(&task);
+        } catch (const std::exception &error) {
+            ok = false;
+            failure = error.what();
+        } catch (...) {
+            ok = false;
+            failure = "unknown CB bucket asynchronous merge failure";
+        }
+
+        {
+            std::lock_guard<std::mutex> bucketLock(
+                ramBuckets_[task.bucket].mutex);
+            if (ok) {
+                const std::uint64_t records =
+                    merged.bytes.size() / PackedCbRecord::kSerializedBytes;
+                ramBuckets_[task.bucket].segments.push_back(std::move(merged));
+                asyncMergeCount_.fetch_add(1, std::memory_order_relaxed);
+                asyncMergedRecords_.fetch_add(records, std::memory_order_relaxed);
+            } else {
+                for (RamSegment &run : task.runs)
+                    ramBuckets_[task.bucket].segments.push_back(std::move(run));
+            }
+            ramMergeInFlight_[task.bucket] = 0;
+            if (ok)
+                schedule_ram_merge_locked(task.bucket);
+        }
+        {
+            std::lock_guard<std::mutex> lock(ramMergeMutex_);
+            if (!ok && !ramMergeFailed_) {
+                ramMergeFailed_ = true;
+                ramMergeFailureMessage_ = failure;
+            }
+            --ramMergeOutstanding_;
+        }
+        ramMergeCv_.notify_all();
+    }
+}
+
+bool CbBucketStore::wait_for_ram_merges(std::string *error)
+{
+    if (ramMergeWorkers_.empty())
+        return true;
+    std::unique_lock<std::mutex> lock(ramMergeMutex_);
+    ramMergeCv_.wait(lock, [&]() { return ramMergeOutstanding_ == 0; });
+    if (ramMergeFailed_)
+        return set_error(error, ramMergeFailureMessage_);
+    return true;
+}
+
+void CbBucketStore::stop_ram_merge_workers()
+{
+    if (ramMergeWorkers_.empty())
+        return;
+    {
+        std::lock_guard<std::mutex> lock(ramMergeMutex_);
+        ramMergeStopping_ = true;
+    }
+    ramMergeCv_.notify_all();
+    for (std::thread &worker : ramMergeWorkers_) {
+        if (worker.joinable())
+            worker.join();
+    }
+    ramMergeWorkers_.clear();
 }
 
 bool CbBucketStore::append_spill(std::uint32_t bucketIndex,
@@ -299,6 +533,8 @@ bool CbBucketStore::append_spill(std::uint32_t bucketIndex,
             std::memory_order_relaxed);
         spillChecksums_[bucketIndex] = fnv_update(
             spillChecksums_[bucketIndex], bytes.data(), bytes.size());
+        spillSegments_[bucketIndex].push_back(
+            SpillSegment{offset, static_cast<std::uint64_t>(bytes.size())});
     }
     return pwrite_all(spillFds_[bucketIndex], bytes.data(), bytes.size(),
                       kSpillHeaderBytes + offset, error);
@@ -318,6 +554,14 @@ bool CbBucketStore::append_segment(std::uint32_t workerIndex,
             || bucket_for_cb(record.cb_index()) != bucketIndex)
             return set_error(error, "CB bucket segment contains a record for another bucket");
     }
+    // The producer owns this sealed vector, so ordering it here requires no
+    // synchronization. Different workers sort their runs independently while
+    // other workers continue producing; the collapse can later merge these
+    // runs instead of re-sorting the complete bucket.
+    std::sort(records.begin(), records.end(),
+              [](const PackedCbRecord &left, const PackedCbRecord &right) {
+                  return left.group_sort_key() < right.group_sort_key();
+              });
     if (records.size() > std::numeric_limits<std::size_t>::max()
                            / PackedCbRecord::kSerializedBytes)
         return set_error(error, "CB bucket segment size overflow");
@@ -386,6 +630,10 @@ bool CbBucketStore::append_segment(std::uint32_t workerIndex,
 
 bool CbBucketStore::transition_to_spill(std::string *error)
 {
+    // No producer append remains when auto-transition elects its owner. Drain
+    // any consolidation tasks before moving the RAM runs to their spill files.
+    if (!wait_for_ram_merges(error))
+        return false;
     if (!ensure_spill_files(error))
         return false;
     for (std::uint32_t bucket = 0; bucket < config_.bucketCount; ++bucket) {
@@ -438,7 +686,11 @@ bool CbBucketStore::finalize(std::string *error)
         finalizing_ = true;
         backend = backend_;
     }
-    const bool result = backend == Backend::Spill ? finalize_spill(error) : true;
+    bool result = true;
+    if (backend == Backend::Ram)
+        result = wait_for_ram_merges(error);
+    if (result && backend == Backend::Spill)
+        result = finalize_spill(error);
     {
         std::lock_guard<std::mutex> lock(stateMutex_);
         finalizing_ = false;
@@ -540,6 +792,91 @@ bool CbBucketStore::load_bucket(std::uint32_t bucketIndex,
                 &(*records)[index]))
             return set_error(error, "cannot decode CB bucket record");
     }
+    return true;
+}
+
+bool CbBucketStore::load_sorted_segments(
+    std::uint32_t bucketIndex,
+    std::vector<std::vector<PackedCbRecord> > *segments,
+    std::string *error) const
+{
+    if (segments == nullptr || bucketIndex >= config_.bucketCount)
+        return set_error(error, "invalid CB bucket segment load request");
+    Backend backend;
+    {
+        std::lock_guard<std::mutex> lock(stateMutex_);
+        if (!finalized_)
+            return set_error(error, "CB bucket store must be finalized before loading");
+        backend = backend_;
+    }
+    segments->clear();
+
+    const auto decodeRun = [error](const std::uint8_t *bytes,
+                                   std::size_t byteCount,
+                                   std::vector<PackedCbRecord> *run) {
+        if (byteCount % PackedCbRecord::kSerializedBytes != 0)
+            return set_error(error, "CB bucket segment is not record-aligned");
+        run->resize(byteCount / PackedCbRecord::kSerializedBytes);
+        for (std::size_t index = 0; index < run->size(); ++index) {
+            if (!PackedCbRecord::decode(
+                    bytes + index * PackedCbRecord::kSerializedBytes,
+                    &(*run)[index]))
+                return set_error(error, "cannot decode CB bucket segment record");
+        }
+        return true;
+    };
+
+    if (backend == Backend::Ram) {
+        std::vector<RamSegment> encoded;
+        {
+            std::lock_guard<std::mutex> lock(ramBuckets_[bucketIndex].mutex);
+            encoded = ramBuckets_[bucketIndex].segments;
+        }
+        std::sort(encoded.begin(), encoded.end(),
+                  [](const RamSegment &left, const RamSegment &right) {
+                      return left.sequence < right.sequence;
+                  });
+        segments->resize(encoded.size());
+        for (std::size_t index = 0; index < encoded.size(); ++index) {
+            if (!decodeRun(encoded[index].bytes.data(), encoded[index].bytes.size(),
+                           &(*segments)[index]))
+                return false;
+        }
+        return true;
+    }
+
+    // The spill payload remains one checksummed file per bucket. Segment
+    // boundaries are lightweight in-memory metadata, so load/validation keeps
+    // the existing schema while still recovering the independently sorted
+    // runs for the k-way merge.
+    std::vector<std::uint8_t> payload;
+    if (!load_bucket_bytes(bucketIndex, &payload, error))
+        return false;
+    std::vector<SpillSegment> encoded;
+    {
+        std::lock_guard<std::mutex> lock(spillClaimMutexes_[bucketIndex]);
+        encoded = spillSegments_[bucketIndex];
+    }
+    std::sort(encoded.begin(), encoded.end(),
+              [](const SpillSegment &left, const SpillSegment &right) {
+                  return left.offset < right.offset;
+              });
+    std::uint64_t expectedOffset = 0;
+    segments->resize(encoded.size());
+    for (std::size_t index = 0; index < encoded.size(); ++index) {
+        const SpillSegment &segment = encoded[index];
+        if (segment.offset != expectedOffset
+            || expectedOffset > payload.size()
+            || segment.bytes > payload.size() - expectedOffset)
+            return set_error(error, "CB bucket spill segment metadata is inconsistent");
+        if (!decodeRun(payload.data() + segment.offset,
+                       static_cast<std::size_t>(segment.bytes),
+                       &(*segments)[index]))
+            return false;
+        expectedOffset += segment.bytes;
+    }
+    if (expectedOffset != payload.size())
+        return set_error(error, "CB bucket spill segment metadata is incomplete");
     return true;
 }
 
