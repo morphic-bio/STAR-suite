@@ -845,25 +845,40 @@ bool materialize_cbq_segment_sequence_to_buffer(const CbqSegmentView& segment,
     const CbqPackedSequenceView& packed = segment.packed_sequence;
     const auto& lookup = cbq_packed_ascii_lookup();
     size_t ii = 0;
-    while (ii < length) {
-        const uint64_t global_offset = packed.base_offset + static_cast<uint64_t>(ii);
-        const size_t byte_offset = static_cast<size_t>(global_offset >> 2);
-        const unsigned base_in_byte = static_cast<unsigned>(global_offset & 0x3ULL);
-        const size_t take = std::min<size_t>(4U - base_in_byte, length - ii);
+    size_t byte_offset = static_cast<size_t>(packed.base_offset >> 2);
+    const unsigned first_base = static_cast<unsigned>(packed.base_offset & 0x3ULL);
 
+    if (first_base != 0 && ii < length) {
+        const size_t take = std::min<size_t>(4U - first_base, length);
         if (packed.words == nullptr || byte_offset >= packed.word_bytes) {
-            std::fill(dest + ii, dest + ii + take, 'N');
-        } else if (base_in_byte == 0 && take == 4) {
-            const CbqPackedByteDecode& decoded = lookup[packed.words[byte_offset]];
-            std::memcpy(dest + ii, decoded.ascii, 4);
+            std::fill(dest, dest + take, 'N');
         } else {
             const CbqPackedByteDecode& decoded = lookup[packed.words[byte_offset]];
-            for (size_t jj = 0; jj < take; ++jj) {
-                dest[ii + jj] = decoded.ascii[base_in_byte + jj];
-            }
+            std::memcpy(dest, decoded.ascii + first_base, take);
         }
+        ii = take;
+        ++byte_offset;
+    }
 
-        ii += take;
+    while (length - ii >= 4) {
+        if (packed.words == nullptr || byte_offset >= packed.word_bytes) {
+            std::memset(dest + ii, 'N', 4);
+        } else {
+            const CbqPackedByteDecode& decoded = lookup[packed.words[byte_offset]];
+            std::memcpy(dest + ii, decoded.ascii, 4);
+        }
+        ii += 4;
+        ++byte_offset;
+    }
+
+    if (ii < length) {
+        const size_t take = length - ii;
+        if (packed.words == nullptr || byte_offset >= packed.word_bytes) {
+            std::fill(dest + ii, dest + length, 'N');
+        } else {
+            const CbqPackedByteDecode& decoded = lookup[packed.words[byte_offset]];
+            std::memcpy(dest + ii, decoded.ascii, take);
+        }
     }
 
     if (packed.n_positions != nullptr) {
