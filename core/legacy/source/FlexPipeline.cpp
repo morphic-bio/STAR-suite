@@ -1164,6 +1164,7 @@ bool flexPrepareBgzfRangeTasks(FlexPipelineState *state, Parameters &P,
         options.lane_index = static_cast<uint32_t>(lane);
         options.mate0_reader_threads = streamThreads[static_cast<size_t>(streamIndex++)];
         options.mate1_reader_threads = streamThreads[static_cast<size_t>(streamIndex++)];
+        options.store_mate0_quality = P.pSolo.flexNoAlign == 0;
         mateWorkers[0] += options.mate0_reader_threads;
         mateWorkers[1] += options.mate1_reader_threads;
         options.crc_check = P.bgzfCrcCheck == 1;

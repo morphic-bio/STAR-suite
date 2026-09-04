@@ -65,7 +65,8 @@ bool BgzfRangeReader::open(const std::string& path,
                            uint32_t worker_threads,
                            bool check_crc,
                            std::string* error,
-                           const BgzfWorkPermitHooks* permit_hooks) {
+                           const BgzfWorkPermitHooks* permit_hooks,
+                           bool store_quality) {
     close_input();
     if (error != nullptr) {
         error->clear();
@@ -102,6 +103,7 @@ bool BgzfRangeReader::open(const std::string& path,
     }
     path_ = path;
     checkCrc_ = check_crc;
+    storeQuality_ = store_quality;
     rangeStart_ = range_start;
     rangeEnd_ = range_end;
     claimedOffset_ = range_start;
@@ -458,7 +460,7 @@ bool BgzfRangeReader::parse_record(BgzfFastqRecord* record, std::string* error) 
         return set_error(error, message.str());
     }
     record->qualityLength = static_cast<uint16_t>(line_size);
-    if (line_size != 0) {
+    if (storeQuality_ && line_size != 0) {
         std::memcpy(record->quality, line, line_size);
     }
     if (record->sequenceLength != record->qualityLength) {
@@ -474,7 +476,7 @@ bool BgzfRangeReader::parse_record(BgzfFastqRecord* record, std::string* error) 
 }
 
 bool BgzfRangeReader::next(BgzfFastqRecord* record, std::string* error) {
-    if (error != nullptr) {
+    if (error != nullptr && !error->empty()) {
         error->clear();
     }
     if (inputFd_ < 0) {
