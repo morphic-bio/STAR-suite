@@ -797,6 +797,127 @@ unsigned char cbq_segment_base_star_number(const CbqSegmentView& segment, size_t
     return 4;
 }
 
+bool cbq_pack_segment_window_lsb(const CbqSegmentView& segment,
+                                  size_t offset,
+                                  size_t length,
+                                  uint64_t* packed,
+                                  uint32_t* n_mask) {
+    if (packed == nullptr || n_mask == nullptr || length > 32) {
+        return false;
+    }
+
+    uint64_t value = 0;
+    uint64_t unused_hi = 0;
+    uint64_t n_positions = 0;
+    if (!cbq_pack_segment_window_lsb_pair(
+            segment, offset, length, &value, &unused_hi, &n_positions)) {
+        return false;
+    }
+    *packed = value;
+    *n_mask = static_cast<uint32_t>(n_positions);
+    return true;
+}
+
+bool cbq_pack_segment_window_lsb_pair(const CbqSegmentView& segment,
+                                      size_t offset,
+                                      size_t length,
+                                      uint64_t* lo,
+                                      uint64_t* hi,
+                                      uint64_t* n_mask) {
+    const size_t sequence_length = cbq_segment_sequence_length(segment);
+    if (lo == nullptr || hi == nullptr || n_mask == nullptr || length > 64 ||
+        offset > sequence_length || length > sequence_length - offset) {
+        return false;
+    }
+
+    uint64_t packed_lo = 0;
+    uint64_t packed_hi = 0;
+    uint64_t n_positions = 0;
+    if (segment.packed_sequence.available) {
+        const CbqPackedSequenceView& view = segment.packed_sequence;
+        const uint64_t global_begin = view.base_offset + offset;
+        const uint64_t first_word = global_begin / 32U;
+        const unsigned shift = static_cast<unsigned>((global_begin % 32U) * 2U);
+        const size_t byte_offset = static_cast<size_t>(first_word * 8U);
+        const size_t bits_needed = length * 2U;
+
+        auto load_word = [&](size_t word_offset, uint64_t* word) -> bool {
+            const size_t at = byte_offset + word_offset * 8U;
+            if (view.words == nullptr || at + 8U > view.word_bytes) {
+                return false;
+            }
+            *word = read_le64(view.words + at);
+            return true;
+        };
+
+        uint64_t word0 = 0;
+        uint64_t word1 = 0;
+        uint64_t word2 = 0;
+        if (bits_needed != 0 && !load_word(0, &word0)) {
+            return false;
+        }
+        if (bits_needed > 64U - shift && !load_word(1, &word1)) {
+            return false;
+        }
+        if (bits_needed > 128U - shift && !load_word(2, &word2)) {
+            return false;
+        }
+
+        packed_lo = word0 >> shift;
+        if (shift != 0 && bits_needed > 64U - shift) {
+            packed_lo |= word1 << (64U - shift);
+        }
+        if (bits_needed > 64U) {
+            packed_hi = word1 >> shift;
+            if (shift != 0 && bits_needed > 128U - shift) {
+                packed_hi |= word2 << (64U - shift);
+            }
+        }
+
+        if (length < 32U) {
+            packed_lo &= (UINT64_C(1) << (length * 2U)) - 1U;
+        } else if (length < 64U) {
+            const size_t hi_bits = (length - 32U) * 2U;
+            packed_hi &= hi_bits == 0 ? 0 : (UINT64_C(1) << hi_bits) - 1U;
+        }
+
+        const uint64_t global_end = global_begin + length;
+        const uint64_t* n_it = view.n_positions;
+        const uint64_t* n_end = view.n_positions == nullptr
+            ? nullptr : view.n_positions + view.n_positions_count;
+        if (n_it != nullptr) {
+            n_it = std::lower_bound(n_it, n_end, global_begin);
+        }
+        for (; n_it != n_end; ++n_it) {
+            const uint64_t npos = *n_it;
+            if (npos >= global_end) {
+                break;
+            }
+            n_positions |= UINT64_C(1) << static_cast<unsigned>(npos - global_begin);
+        }
+    } else {
+        for (size_t ii = 0; ii < length; ++ii) {
+            const unsigned char code = cbq_segment_base_star_number(segment, offset + ii);
+            if (code > 4) {
+                return false;
+            }
+            if (code == 4) {
+                n_positions |= UINT64_C(1) << ii;
+            } else {
+                if (ii < 32U) {
+                    packed_lo |= static_cast<uint64_t>(code) << (2U * ii);
+                } else {
+                    packed_hi |= static_cast<uint64_t>(code) << (2U * (ii - 32U));
+                }
+            }
+        }
+    }
+    *lo = packed_lo;
+    *hi = packed_hi;
+    *n_mask = n_positions;
+    return true;
+}
+
 void materialize_cbq_segment_sequence(const CbqSegmentView& segment, std::string* sequence) {
     if (sequence == nullptr) {
         return;

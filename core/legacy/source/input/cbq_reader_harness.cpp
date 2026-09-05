@@ -85,6 +85,7 @@ struct HarnessOptions {
     std::vector<char> read_name_separator_chars{' '};
     uint32_t mate_count = 2;
     bool dump_fastq = false;
+    bool verify_packed_windows = false;
 };
 
 void usage(std::ostream& out) {
@@ -94,6 +95,7 @@ void usage(std::ostream& out) {
         << "  --mateCount 1|2\n"
         << "  --readFilesPrefix PREFIX\n"
         << "  --readNameSeparator space|none|CHAR[,CHAR...]\n"
+        << "  --verify-packed-windows\n"
         << "  --dump-fastq\n";
 }
 
@@ -153,11 +155,78 @@ HarnessOptions parse_args(int argc, char* argv[]) {
             opts.read_name_separator_chars = parse_separators(argv[ii]);
         } else if (arg == "--dump-fastq") {
             opts.dump_fastq = true;
+        } else if (arg == "--verify-packed-windows") {
+            opts.verify_packed_windows = true;
         } else {
             throw std::runtime_error("unknown option: " + arg);
         }
     }
     return opts;
+}
+
+bool verify_packed_windows(const CbqSegmentView& segment, std::string* error) {
+    std::string sequence;
+    materialize_cbq_segment_sequence(segment, &sequence);
+    const size_t widths[] = {1, 8, 16, 32, 50, 64};
+    for (size_t width : widths) {
+        if (width > sequence.size()) {
+            continue;
+        }
+        const size_t offsets[] = {0, (sequence.size() - width) / 2,
+                                  sequence.size() - width};
+        for (size_t offset : offsets) {
+            if (width <= 32) {
+                uint64_t packed = 0;
+                uint32_t n_mask = 0;
+                if (!star::input::cbq_pack_segment_window_lsb(
+                        segment, offset, width, &packed, &n_mask)) {
+                    *error = "LSB packed-window extraction failed";
+                    return false;
+                }
+                uint64_t expected = 0;
+                uint32_t expected_n_mask = 0;
+                for (size_t ii = 0; ii < width; ++ii) {
+                    const unsigned char code =
+                        star::input::cbq_segment_base_star_number(segment, offset + ii);
+                    if (code == 4) {
+                        expected_n_mask |= static_cast<uint32_t>(1U << ii);
+                    } else {
+                        expected |= static_cast<uint64_t>(code) << (2U * ii);
+                    }
+                }
+                if (packed != expected || n_mask != expected_n_mask) {
+                    *error = "LSB packed-window result differs from decoded sequence";
+                    return false;
+                }
+            }
+
+            uint64_t lo = 0;
+            uint64_t hi = 0;
+            uint64_t n_mask = 0;
+            const bool encoded = star::input::cbq_pack_segment_window_lsb_pair(
+                segment, offset, width, &lo, &hi, &n_mask);
+            uint64_t expected_lo = 0;
+            uint64_t expected_hi = 0;
+            uint64_t expected_n_mask = 0;
+            for (size_t ii = 0; ii < width; ++ii) {
+                const unsigned char code =
+                    star::input::cbq_segment_base_star_number(segment, offset + ii);
+                if (code == 4) {
+                    expected_n_mask |= UINT64_C(1) << ii;
+                } else if (ii < 32U) {
+                    expected_lo |= static_cast<uint64_t>(code) << (2U * ii);
+                } else {
+                    expected_hi |= static_cast<uint64_t>(code) << (2U * (ii - 32U));
+                }
+            }
+            if (!encoded || lo != expected_lo || hi != expected_hi ||
+                n_mask != expected_n_mask) {
+                *error = "paired LSB packed-window result differs from decoded sequence";
+                return false;
+            }
+        }
+    }
+    return true;
 }
 
 InputSourcePlan build_plan_from_manifest(const HarnessOptions& opts) {
@@ -293,6 +362,14 @@ int run(const HarnessOptions& opts) {
         }
         for (uint32_t irecord = 0; irecord < batch.record_count; ++irecord) {
             const CbqReadView& record = batch.records[irecord];
+            if (opts.verify_packed_windows) {
+                for (uint32_t isegment = 0; isegment < record.segment_count; ++isegment) {
+                    if (!verify_packed_windows(record.segments[isegment], &error)) {
+                        std::cerr << "packed-window verification failed: " << error << "\n";
+                        return 4;
+                    }
+                }
+            }
             if (opts.dump_fastq) {
                 emit_fastq(record, std::cout);
             } else {

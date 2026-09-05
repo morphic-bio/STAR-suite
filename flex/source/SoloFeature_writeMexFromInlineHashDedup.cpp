@@ -2,6 +2,8 @@
 #include "MexWriterUtil.h"
 #include "Parameters.h"
 #include "TimeFunctions.h"
+#include <algorithm>
+#include <chrono>
 #include <fstream>
 
 /**
@@ -21,12 +23,19 @@ void SoloFeature::writeMexFromInlineHashDedup(
         return;
     }
 
+    const auto mexStart = std::chrono::steady_clock::now();
     int result = MexWriterUtil::writeMexFromDedup(
         outputPrefix,
         bundle.matrixData.barcodes,
         bundle.matrixData.features,
-        bundle.triplets
+        bundle.triplets,
+        static_cast<unsigned int>(std::max(1, P.runThreadN))
     );
+    P.inOut->logMain << "Solo timing: raw MEX "
+                     << std::chrono::duration<double>(
+                            std::chrono::steady_clock::now() - mexStart).count()
+                     << " s, matrix_threads=" << std::max(1, P.runThreadN)
+                     << endl << std::flush;
 
     if (result == 0) {
         time(&rawTime);

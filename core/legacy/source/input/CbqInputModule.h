@@ -79,6 +79,22 @@ struct CbqReadBatchView {
 size_t cbq_segment_sequence_length(const CbqSegmentView& segment);
 char cbq_segment_base_ascii(const CbqSegmentView& segment, size_t index);
 unsigned char cbq_segment_base_star_number(const CbqSegmentView& segment, size_t index);
+// Extract up to 32 bases in the LSB-first representation used by Solo's
+// packed barcode/UMI lookups. n_mask has bit i set when base i is N.
+bool cbq_pack_segment_window_lsb(const CbqSegmentView& segment,
+                                  size_t offset,
+                                  size_t length,
+                                  uint64_t* packed,
+                                  uint32_t* n_mask);
+// Extract up to 64 bases without changing CBQ's native bit order. Bases 0..31
+// occupy lo and bases 32..63 occupy hi, with the first base in bit pair 0.
+// n_mask has one bit per base and preserves N positions separately.
+bool cbq_pack_segment_window_lsb_pair(const CbqSegmentView& segment,
+                                      size_t offset,
+                                      size_t length,
+                                      uint64_t* lo,
+                                      uint64_t* hi,
+                                      uint64_t* n_mask);
 void materialize_cbq_segment_sequence(const CbqSegmentView& segment, std::string* sequence);
 bool materialize_cbq_segment_sequence_to_buffer(const CbqSegmentView& segment,
                                                 char* dest,

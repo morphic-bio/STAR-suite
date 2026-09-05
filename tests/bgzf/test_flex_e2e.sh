@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 STAR_BIN="${STAR_BIN:-${ROOT_DIR}/core/legacy/source/STAR}"
+CBQ_ENCODER_BIN="${CBQ_ORDERED_ENCODER_BIN:-${ROOT_DIR}/core/legacy/source/cbq_ordered_encoder}"
 CASE="${BGZF_E2E_CASE:-all}"
 THREADS="${BGZF_E2E_THREADS:-4}"
 READ_LIMIT="${BGZF_E2E_READ_LIMIT:-2000}"
@@ -12,6 +13,10 @@ TINY_REF_ROOT="${TINY_REF_ROOT:-/home/lhhung/cellranger-9.0.1/external/cellrange
 
 die() { echo "FAIL: $*" >&2; exit 1; }
 [[ -x "${STAR_BIN}" ]] || die "STAR binary is absent: ${STAR_BIN}"
+if [[ ! -x "${CBQ_ENCODER_BIN}" ]]; then
+    make -C "${ROOT_DIR}/core/legacy/source" cbq-ordered-encoder
+fi
+[[ -x "${CBQ_ENCODER_BIN}" ]] || die "CBQ encoder is absent: ${CBQ_ENCODER_BIN}"
 [[ -d "${TINY_FASTQ_DIR}" ]] || die "tiny FASTQ fixture is absent: ${TINY_FASTQ_DIR}"
 [[ -d "${TINY_REF_ROOT}" ]] || die "tiny reference fixture is absent: ${TINY_REF_ROOT}"
 
@@ -120,6 +125,24 @@ PY
         --out-base "${WORKDIR}/runs" --run-id "${layout}" --threads "${THREADS}"
 }
 
+run_cbq() {
+    local cbq_file="${WORKDIR}/tinyflex_R2_R1.cbq"
+    "${CBQ_ENCODER_BIN}" \
+        --readFilesIn \
+        "${base_fastq}/tinyflex_S1_L001_R2_001.fastq.gz" \
+        "${base_fastq}/tinyflex_S1_L001_R1_001.fastq.gz" \
+        --outFile "${cbq_file}"
+    STAR_BIN="${WORKDIR}/STAR-off" "${ROOT_DIR}/scripts/run_flex_cr_config.sh" \
+        --cr-config "${WORKDIR}/plain.config.csv" \
+        --genome-dir "${WORKDIR}/star_index" \
+        --cb-whitelist "${WORKDIR}/assets_base/whitelist.txt" \
+        --solo-cb-start 1 --solo-cb-len 16 --solo-umi-start 17 --solo-umi-len 10 \
+        --sample-probe-catalog "${WORKDIR}/assets_base/sample_probe_catalog.tsv" \
+        --sample-probe-offset 68 --out-samtype none \
+        --input-format cbq --cbq-file "${cbq_file}" \
+        --out-base "${WORKDIR}/runs" --run-id cbq --threads "${THREADS}"
+}
+
 canonical_manifest() {
     local run_dir="$1"
     local output="$2"
@@ -159,11 +182,16 @@ PY
 if [[ "${CASE}" == T4 || "${CASE}" == all ]]; then
     run_layout plain off
     run_layout blocked range
+    run_cbq
     grep -F "BGZF parallel range readers: active" "${WORKDIR}/runs/blocked/Log.out" >/dev/null \
         || die "T4 range-reader activation was not logged"
     canonical_manifest "${WORKDIR}/runs/plain" "${WORKDIR}/plain.manifest"
     canonical_manifest "${WORKDIR}/runs/blocked" "${WORKDIR}/blocked.manifest"
+    canonical_manifest "${WORKDIR}/runs/cbq" "${WORKDIR}/cbq.manifest"
     diff -u "${WORKDIR}/plain.manifest" "${WORKDIR}/blocked.manifest"
+    diff -u "${WORKDIR}/plain.manifest" "${WORKDIR}/cbq.manifest"
+    grep -F "Flex CBQ range: active" "${WORKDIR}/runs/cbq/Log.out" >/dev/null \
+        || die "T4 CBQ fused range path was not active"
 fi
 
 if [[ "${CASE}" == T6 || "${CASE}" == all ]]; then

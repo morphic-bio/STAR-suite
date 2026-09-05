@@ -1,0 +1,26 @@
+date_utc=2026-09-05T07:38:00Z
+mode=cbq
+threads=32
+run_dir=/home/lhhung/STAR-suite-bgzf-ingest-benchmark-20260901/jax_cbq_20260905T073800Z
+commit=0a14a5a30eb6a65920a34faba5c4a1552b2ab62c
+ 07:38:00 up 51 days, 13:02,  3 users,  load average: 6.32, 11.67, 7.37
+    PID COMMAND         %CPU %MEM     ELAPSED
+2847311 kube-apiserver   8.2  0.3 27-12:40:00
+2569783 node             5.6  0.5    13:48:10
+2548268 node             5.5  0.4    14:08:04
+2102272 node             4.9  0.4    23:33:54
+2107767 node             4.8  0.4    23:27:16
+2134329 node             4.7  0.4    23:09:37
+3294717 temporal-server  4.7  0.0 49-00:44:53
+2847362 etcd             3.7  0.0 27-12:40:00
+3366548 node             3.1  0.4    02:21:48
+2847584 kubelet          2.8  0.2 27-12:39:55
+2320548 htop             2.7  0.0  3-04:51:27
+   1835 dockerd          2.3  0.1 51-13:00:41
+2850051 kubelet          1.7  0.1 27-12:39:41
+2892599 kubelet          1.7  0.1 27-12:36:44
+2892609 kubelet          1.7  0.1 27-12:36:44
+2892600 kubelet          1.6  0.1 27-12:36:44
+2892608 kubelet          1.6  0.1 27-12:36:44
+2892601 kubelet          1.5  0.1 27-12:36:44
+2892607 kubelet          1.5  0.1 27-12:36:44

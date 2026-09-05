@@ -68,6 +68,14 @@ int writeMexFromDedup(
     const std::vector<MexWriter::Triplet>& triplets
 );
 
+int writeMexFromDedup(
+    const std::string& outputPrefix,
+    const std::vector<std::string>& barcodes,
+    const std::vector<std::string>& geneIds,
+    const std::vector<MexWriter::Triplet>& triplets,
+    unsigned int matrixThreads
+);
+
 /**
  * @brief Overload with explicit gene names and feature types
  * 
@@ -78,6 +86,14 @@ int writeMexFromDedup(
     const std::vector<std::string>& barcodes,
     const std::vector<MexWriter::Feature>& features,
     const std::vector<MexWriter::Triplet>& triplets
+);
+
+int writeMexFromDedup(
+    const std::string& outputPrefix,
+    const std::vector<std::string>& barcodes,
+    const std::vector<MexWriter::Feature>& features,
+    const std::vector<MexWriter::Triplet>& triplets,
+    unsigned int matrixThreads
 );
 
 } // namespace MexWriterUtil

@@ -611,6 +611,7 @@ test_SoloReadInfoParity: Depend.list parametersDefault.xxd $(filter-out STAR.o,$
 test_CbCorrector: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)
 test_CbCorrector: solo/CbCorrector.o
 	$(CXX) $(CXXFLAGS) -I./ ../test/cb_corrector_test.cpp solo/CbCorrector.o $(LDFLAGS_shared) -o ../test/cb_corrector_test
+	../test/cb_corrector_test
 
 .PHONY: test_CbBayesianResolver
 test_CbBayesianResolver: CXXFLAGS := $(CXXFLAGSextra) $(CXXFLAGS_main) $(CXXFLAGS)

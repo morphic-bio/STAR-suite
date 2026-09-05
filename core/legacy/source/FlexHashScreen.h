@@ -45,6 +45,12 @@ public:
     FlexHashScreenDecision classifyReadH0Only(const char* readSeq, uint32_t readLen, uint16_t sampleIdx) const;
     FlexHashScreenDecision classifyReadH0Offset0(const char* readSeq, uint32_t readLen) const;
     FlexHashScreenDecision classifyReadH0H1Offset0(const char* readSeq, uint32_t readLen) const;
+    // Classify a 50-base offset-0 key in CBQ's native LSB-first order. lo
+    // contains bases 0..31 and hi bases 32..49. In CBQ runs the lookup maps
+    // are built in this order once, rather than reordering every read.
+    FlexHashScreenDecision classifyCbqH0Offset0(uint64_t seqLo, uint64_t seqHi) const;
+    FlexHashScreenDecision classifyCbqH0H1Offset0(uint64_t seqLo, uint64_t seqHi) const;
+    static uint32_t probeWindowLength();
     size_t recordCount() const { return records_.size(); }
     size_t h0RecordCount() const { return h0Records_.size(); }
     size_t h1DenyRecordCount() const { return h1DenyRecords_.size(); }
@@ -80,6 +86,11 @@ private:
     using H0NoSampleMap = std::unordered_map<SeqKeyNoSample, Record, SeqKeyNoSampleHash>;
 
     bool encodeWindowLUT(const char* readSeq, uint32_t offset, uint64_t& seqLo, uint64_t& seqHi) const;
+    static SeqKeyNoSample cacheKeyToCbqKey(uint64_t seqLo, uint64_t seqHi);
+    static SeqKeyNoSample cbqKeyToCacheKey(uint64_t seqLo, uint64_t seqHi);
+    SeqKeyNoSample offset0MapKeyFromCacheKey(uint64_t seqLo, uint64_t seqHi) const;
+    FlexHashScreenDecision classifyH0Offset0MapKey(const SeqKeyNoSample& key) const;
+    FlexHashScreenDecision classifyH0H1Offset0MapKey(const SeqKeyNoSample& key) const;
     void buildH0NoSampleMap();
     void buildH1DenyNoSampleMap();
 
@@ -93,6 +104,7 @@ private:
     std::vector<Record> h1DenyRecords_;
     H0NoSampleMap h0NoSampleMap_;
     H0NoSampleMap h1DenyNoSampleMap_;
+    bool offset0MapsUseCbqOrder_ = false;
     static uint8_t baseLUT_[256];
     static bool lutInitialized_;
 };

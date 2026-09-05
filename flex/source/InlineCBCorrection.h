@@ -27,6 +27,10 @@ public:
     // Returns: 0 = exact match, 1 = single variant corrected, -1 = no match/ambiguous
     // On success, correctedCB contains the corrected barcode string
     static int fastPathCorrection(const std::string &cbSeq, std::string &correctedCB);
+    // Packed equivalent for two-bit inputs. correctedIndex1 is the 1-based
+    // whitelist index on success. This performs the same exact/unique-H1
+    // lookup without constructing or decoding a barcode string.
+    static int fastPathCorrectionPacked(uint64_t packedCB, uint32_t &correctedIndex1);
     
     // Find closest barcodes with single mismatch
     // Returns number of matches found (0, 1, or >1)
