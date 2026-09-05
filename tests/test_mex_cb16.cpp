@@ -3,17 +3,19 @@
  * 
  * Tests:
  * 1. Barcodes are truncated to 16bp when cb_len=16
- * 2. Duplicate detection after truncation fails fast
- * 3. No truncation when cb_len=-1 (default)
- * 4. Short barcodes passed through unchanged
- * 5. Default cb_len preserves original behavior
+ * 2. No truncation when cb_len=-1 (default)
+ * 3. Default cb_len preserves original behavior
+ * 4. Duplicate detection after truncation fails fast
+ * 5. Short barcodes passed through unchanged
+ * 6. Matrix Market text is byte-exact
+ * 7. Parallel block output is byte-identical to single-thread output
  * 
  * Note: This tests MexWriter::writeMex() directly. The STAR inline flag plumbing
  * (--soloFlexKeepCBTag) is NOT exercised here since it requires a full STAR build.
  * For STAR inline integration testing, use a full STAR run with the flag.
  * 
  * Compile:
- *   g++ -std=c++11 -I../source -o test_mex_cb16 test_mex_cb16.cpp ../source/MexWriter.cpp
+ *   g++ -std=c++11 -pthread -I../source -o test_mex_cb16 test_mex_cb16.cpp ../source/MexWriter.cpp
  * 
  * Run:
  *   ./test_mex_cb16
@@ -26,6 +28,7 @@
 #include <cstdlib>
 #include <cassert>
 #include <cstring>
+#include <sstream>
 
 // Helper: read first line from file
 std::string readFirstLine(const std::string& path) {
@@ -46,6 +49,13 @@ int countLines(const std::string& path) {
         count++;
     }
     return count;
+}
+
+std::string readWholeFile(const std::string& path) {
+    std::ifstream f(path, std::ios::binary);
+    std::ostringstream contents;
+    contents << f.rdbuf();
+    return contents.str();
 }
 
 // Helper: cleanup test files
@@ -119,7 +129,7 @@ int main() {
             failed++;
         }
     }
-    
+
     //-------------------------------------------------------------------------
     // Test 2: No truncation when cb_len=-1 (default)
     //-------------------------------------------------------------------------
@@ -237,6 +247,71 @@ int main() {
             failed++;
         }
     }
+
+    //-------------------------------------------------------------------------
+    // Test 6: Matrix Market output remains byte-exact
+    //-------------------------------------------------------------------------
+    {
+        std::cout << "Test 6: Byte-exact Matrix Market output... ";
+        cleanup(testDir);
+
+        int result = MexWriter::writeMex(
+            testDir, barcodes24, features, triplets, -1, 4);
+        const std::string expected =
+            "%%MatrixMarket matrix coordinate integer general\n"
+            "%\n"
+            "2 3 3\n"
+            "1 1 10\n"
+            "2 2 20\n"
+            "1 3 30\n";
+        if (result == 0 && readWholeFile(testDir + "matrix.mtx") == expected) {
+            std::cout << "PASSED\n";
+            passed++;
+        } else {
+            std::cout << "FAILED\n";
+            failed++;
+        }
+    }
+
+    //-------------------------------------------------------------------------
+    // Test 7: Multiple mapped blocks preserve serial output ordering
+    //-------------------------------------------------------------------------
+    {
+        std::cout << "Test 7: Parallel mapped-block parity... ";
+        const std::string serialDir = "/tmp/test_mex_cb16_serial/";
+        const std::string parallelDir = "/tmp/test_mex_cb16_parallel/";
+        std::system(("mkdir -p " + serialDir + " " + parallelDir).c_str());
+        cleanup(serialDir);
+        cleanup(parallelDir);
+
+        std::vector<MexWriter::Triplet> largeTriplets;
+        largeTriplets.reserve(300000);
+        for (uint32_t i = 0; i < 300000; ++i) {
+            largeTriplets.push_back({i % 3u, (i / 3u) % 2u, i + 1u});
+        }
+        const int serialResult = MexWriter::writeMex(
+            serialDir, barcodes24, features, largeTriplets, -1, 1);
+        const int parallelResult = MexWriter::writeMex(
+            parallelDir, barcodes24, features, largeTriplets, -1, 4);
+        const bool same = serialResult == 0 && parallelResult == 0
+            && readWholeFile(serialDir + "matrix.mtx")
+                == readWholeFile(parallelDir + "matrix.mtx")
+            && readWholeFile(serialDir + "barcodes.tsv")
+                == readWholeFile(parallelDir + "barcodes.tsv")
+            && readWholeFile(serialDir + "features.tsv")
+                == readWholeFile(parallelDir + "features.tsv");
+        if (same) {
+            std::cout << "PASSED\n";
+            passed++;
+        } else {
+            std::cout << "FAILED\n";
+            failed++;
+        }
+        cleanup(serialDir);
+        cleanup(parallelDir);
+        std::system(("rmdir " + serialDir + " " + parallelDir
+                     + " 2>/dev/null").c_str());
+    }
     
     // Cleanup
     cleanup(testDir);
@@ -249,4 +324,3 @@ int main() {
     
     return (failed == 0) ? 0 : 1;
 }
-
