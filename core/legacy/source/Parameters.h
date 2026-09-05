@@ -34,6 +34,7 @@ namespace star {
 namespace input {
 class CbqInputModule;
 struct CbqReadBatchView;
+class BgzfStarAdapter;
 class FastxInputModule;
 struct InputRecord;
 } // namespace input
@@ -173,6 +174,13 @@ class Parameters {
         string readFilesBgzfMode = "auto"; // auto|off|range: BGZF ranges for fused Flex FASTQ
         int bgzfReaderThreads = 0; // 0 derives reader count from runThreadN
         int bgzfCrcCheck = 1; // verify CRC32 while inflating BGZF members
+        // Narrow standard-mapper bridge used only by paired Flex BGZF input
+        // with coordinate-sorted BAM output. The adapter is opened lazily
+        // after the mapping thread controller has been initialized.
+        std::shared_ptr<star::input::BgzfStarAdapter> bgzfCoreInputAdapter;
+        bool bgzfCoreActive = false;
+        bool bgzfCoreExhausted = false;
+        uint32 bgzfCoreLaneIndex = 0;
         struct CbqRangeTask {
             uint32 laneIndex = 0;
             uint64 firstRecord = 0;  // zero-based lane-local record offset

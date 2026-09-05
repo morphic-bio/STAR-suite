@@ -322,6 +322,11 @@ if enabled T9; then
     pass "T9 fully-fused alignment mode drains alignQ without a reserved consumer"
 fi
 
+if enabled T10; then
+    "${ROOT_DIR}/tests/bgzf/test_flex_sorted_bam_range.sh"
+    pass "T10 paper-scoped Flex BGZF coordinate-sorted BAM parity and negative gates"
+fi
+
 run_t7() {
     local label="$1"
     local mode="$2"
