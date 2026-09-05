@@ -290,7 +290,9 @@ result = json.load(open(sys.argv[1], encoding="utf-8"))
 assert result["record_count"] == 257
 assert result["mate1_name_bytes"] == 0
 assert result["mate0_name_view_records"] > 240
+assert result["sequence_view_records"] > 480
 assert result["quality_view_records"] > 480
+assert result["fastq_record_bytes"] <= 96
 PY
     if "${HARNESS}" --mode pair --input "${OUT_ROOT}/inputs/blocked.fastq.gz" \
         --input2 "${OUT_ROOT}/inputs/pair_r2_short.fastq.gz" --workers 3 --crc-check 1 \

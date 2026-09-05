@@ -663,8 +663,8 @@ static uint64_t processOneBgzfRange(
         }
         const uint32_t readLen0 = static_cast<uint32_t>(readLen0Size);
         const uint32_t readLen1 = static_cast<uint32_t>(readLen1Size);
-        const char *seq0 = record.mates[0].sequence;
-        const char *seq1 = record.mates[1].sequence;
+        const char *seq0 = record.mates[0].sequence_data();
+        const char *seq1 = record.mates[1].sequence_data();
         const char *qual0 = record.mates[0].quality_data();
         const char *qual1 = record.mates[1].quality_data();
         const size_t nameLength = std::min(static_cast<size_t>(record.read_name_length),

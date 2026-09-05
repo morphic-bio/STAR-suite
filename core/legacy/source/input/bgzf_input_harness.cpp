@@ -75,13 +75,13 @@ uint64_t fnv1a_update(uint64_t value, const char* field, size_t field_size) {
 
 uint64_t record_checksum(const star::input::BgzfFastqRecord& record) {
     uint64_t value = 14695981039346656037ULL;
-    value = fnv1a_update(value, record.name, record.nameLength);
+    value = fnv1a_update(value, record.name_data(), record.nameLength);
     value ^= 0;
     value *= 1099511628211ULL;
-    value = fnv1a_update(value, record.sequence, record.sequenceLength);
+    value = fnv1a_update(value, record.sequence_data(), record.sequenceLength);
     value ^= 0;
     value *= 1099511628211ULL;
-    return fnv1a_update(value, record.quality, record.qualityLength);
+    return fnv1a_update(value, record.quality_data(), record.qualityLength);
 }
 
 bool scan_blocks(const std::string& path,
@@ -157,6 +157,7 @@ bool scan_pairs(const Options& options,
                 uint64_t* record_count,
                 uint64_t* mate1_name_bytes,
                 uint64_t* mate0_name_view_records,
+                uint64_t* sequence_view_records,
                 uint64_t* quality_view_records,
                 std::string* error) {
     star::input::BgzfStarAdapter adapter;
@@ -171,6 +172,7 @@ bool scan_pairs(const Options& options,
     *record_count = 0;
     *mate1_name_bytes = 0;
     *mate0_name_view_records = 0;
+    *sequence_view_records = 0;
     *quality_view_records = 0;
     const size_t batch_capacity = 17;
     std::vector<star::input::BgzfStarRecord> records(batch_capacity);
@@ -185,12 +187,16 @@ bool scan_pairs(const Options& options,
                 ++*record_count;
                 *mate1_name_bytes += record.mates[1].nameLength;
                 *mate0_name_view_records += record.mates[0].name_is_view() ? 1 : 0;
+                *sequence_view_records += record.mates[0].sequence_is_view() ? 1 : 0;
+                *sequence_view_records += record.mates[1].sequence_is_view() ? 1 : 0;
                 *quality_view_records += record.mates[0].quality_is_view() ? 1 : 0;
                 *quality_view_records += record.mates[1].quality_is_view() ? 1 : 0;
                 // Dereference every leased field after next_records() has
                 // released the adapter lock. This is the lifetime required by
                 // fused Flex consumers.
                 (void)record.mates[0].name_data()[0];
+                (void)record.mates[0].sequence_data()[0];
+                (void)record.mates[1].sequence_data()[0];
                 (void)record.mates[0].quality_data()[0];
                 (void)record.mates[1].quality_data()[0];
             }
@@ -245,10 +251,11 @@ int main(int argc, char* argv[]) {
             uint64_t record_count = 0;
             uint64_t mate1_name_bytes = 0;
             uint64_t mate0_name_view_records = 0;
+            uint64_t sequence_view_records = 0;
             uint64_t quality_view_records = 0;
             if (!scan_pairs(options, &record_count, &mate1_name_bytes,
-                            &mate0_name_view_records, &quality_view_records,
-                            &error)) {
+                            &mate0_name_view_records, &sequence_view_records,
+                            &quality_view_records, &error)) {
                 std::cerr << "ERROR: " << error << '\n';
                 return 1;
             }
@@ -257,6 +264,10 @@ int main(int argc, char* argv[]) {
                       << mate0_name_view_records
                       << ",\"quality_view_records\":"
                       << quality_view_records
+                      << ",\"sequence_view_records\":"
+                      << sequence_view_records
+                      << ",\"fastq_record_bytes\":"
+                      << sizeof(star::input::BgzfFastqRecord)
                       << ",\"record_count\":" << record_count << "}\n";
             return 0;
         }
