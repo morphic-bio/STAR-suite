@@ -205,6 +205,11 @@ void ParametersSolo::initialize(Parameters *pPin)
         };
         parseYesNo(sampleSearchNearbyStr, sampleSearchNearby);
         parseYesNo(sampleStrictMatchStr, sampleStrictMatch);
+        if (sampleTagMismatch < 0 || sampleTagMismatch > 1) {
+            ostringstream errOut; errOut << "EXITING because of fatal PARAMETERS error: --soloSampleTagMismatch must be 0 or 1, got " << sampleTagMismatch << "\n";
+            exitWithError(errOut.str(), std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
+        }
+        if (sampleStrictMatch) { sampleTagMismatch = 0; sampleSearchNearby = false; }
         parseYesNo(uniqueHarmonizeStr, uniqueHarmonize);
         parseYesNo(barcodesObservedOnlyStr, barcodesObservedOnly);
         // In CR mode, keep unique-harmonize disabled by default; allow user override.
