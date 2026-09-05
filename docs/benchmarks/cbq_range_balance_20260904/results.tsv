@@ -1,0 +1,2 @@
+arm	rep	stamp	input	align	wall	wall_s	peak_rss_gib	cpu_pct	input_reads	hash_keep	hash_deny	hash_pass	uniq_mapped	helped	samples	manifest_sha	status
+cbq_noalign	1	20260904T121825Z	cbq	noalign	3:38.54	218.54	39.8	2249%	2011130186	1681459858	16111757	0	0	NA	16	767c1e314df547e3	ok

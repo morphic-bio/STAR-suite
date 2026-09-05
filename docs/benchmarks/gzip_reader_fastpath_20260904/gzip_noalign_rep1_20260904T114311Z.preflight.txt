@@ -1,0 +1,31 @@
+date_utc=2026-09-04T11:43:12Z
+arm=gzip_noalign
+rep=1
+input=gzip
+align=noalign
+threads=32
+bucket_mode=ram
+bucket_count=256
+run_dir=/home/lhhung/jax_gzip_reader_fastpath_20260904/gzip_noalign_rep1_20260904T114311Z
+commit=51a43400e66932d197bbf5a1eebfbf4d7f37fbe2
+star_mtime=2026-09-04 11:40:41.225091289 +0000
+working_tree=clean
+env_STAR_FLEX_HASH_H0_ONLY=unset
+stage_fastq=/home/lhhung/jax_stage_20260903/fastq
+stage_cbq=/home/lhhung/jax_stage_20260903/cbq
+tmpdir=/home/lhhung/jax_gzip_reader_fastpath_20260904/tmp
+ 11:43:12 up 50 days, 17:08,  2 users,  load average: 1.12, 5.28, 11.63
+               total        used        free      shared  buff/cache   available
+Mem:             125           8         115           0           1         116
+    PID COMMAND         %CPU %MEM     ELAPSED
+2847311 kube-apiserver   8.2  0.3 26-16:45:12
+2108885 specstory        5.0  0.1    03:32:07
+2134329 node             4.7  0.4    03:14:49
+3294717 temporal-server  4.7  0.0 48-04:50:05
+2107767 node             4.6  0.4    03:32:28
+2102272 node             4.2  0.3    03:39:06
+2847362 etcd             3.7  0.0 26-16:45:12
+2847584 kubelet          2.8  0.2 26-16:45:07
+2320548 htop             2.7  0.0  2-08:56:39
+2103404 specstory        2.4  0.0    03:38:48
+   1835 dockerd          2.2  0.1 50-17:05:53

@@ -57,9 +57,9 @@ Options parse_args(int argc, char* argv[]) {
     return options;
 }
 
-uint64_t fnv1a_update(uint64_t value, const std::string& field) {
+uint64_t fnv1a_update(uint64_t value, const char* field, size_t field_size) {
     const uint64_t prime = 1099511628211ULL;
-    for (size_t index = 0; index < field.size(); ++index) {
+    for (size_t index = 0; index < field_size; ++index) {
         value ^= static_cast<unsigned char>(field[index]);
         value *= prime;
     }
@@ -68,13 +68,13 @@ uint64_t fnv1a_update(uint64_t value, const std::string& field) {
 
 uint64_t record_checksum(const star::input::BgzfFastqRecord& record) {
     uint64_t value = 14695981039346656037ULL;
-    value = fnv1a_update(value, record.name);
+    value = fnv1a_update(value, record.name, record.nameLength);
     value ^= 0;
     value *= 1099511628211ULL;
-    value = fnv1a_update(value, record.sequence);
+    value = fnv1a_update(value, record.sequence, record.sequenceLength);
     value ^= 0;
     value *= 1099511628211ULL;
-    return fnv1a_update(value, record.quality);
+    return fnv1a_update(value, record.quality, record.qualityLength);
 }
 
 bool scan_blocks(const std::string& path,
