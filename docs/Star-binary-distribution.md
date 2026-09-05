@@ -197,6 +197,19 @@ Ship discoverable, installable Ubuntu binaries for STAR Suite with low-friction 
   `STAR --version` reports `1.3.0`. Upstream provenance and genome index
   compatibility remain `2.7.11b` and `2.7.4a`.
 
+## Patch Release v1.8.4 (2026-09-05)
+
+- Release tag: `v1.8.4`
+- Release notes: `docs/RELEASE_NOTES_v1.8.4.md`
+- Packaging metadata: `debian/changelog` entry `1.8.4-1`; GitHub binary
+  packages `1.8.4-1~ubuntu22.04.1` and `1.8.4-1~ubuntu24.04.1`
+- Scope: opt-in paired BGZF input for fused STAR-Flex coordinate-sorted BAM
+  runs, using the existing STAR mapping and BAM-writing paths.
+- Version note: release artifacts use tag `v1.8.4`, Debian packages and
+  `STAR --version` report STAR Suite `1.8.4`, and both Ubuntu package variants
+  come from the same tagged revision. Upstream provenance and genome-index
+  compatibility remain `2.7.11b` and `2.7.4a`.
+
 ## Patch Release v1.8.3 (2026-09-05)
 
 - Release tag: `v1.8.3`
