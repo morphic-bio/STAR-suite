@@ -15,47 +15,16 @@ bool set_error(std::string* error, const std::string& message) {
     return false;
 }
 
-// The read-name stem is the name up to the first whitespace, minus a legacy
-// "/1" or "/2" mate suffix. Illumina writes the same stem into both mates.
-struct NameParts {
-    const char* data;
-    uint16_t stemLength;
-    uint16_t readNameLength;
-    uint16_t extraOffset;
-    uint16_t extraLength;
-};
-
-size_t read_name_token_length(const BgzfFastqRecord& raw) {
+// The range reader has already retained only the whitespace-delimited token.
+// Strip a legacy mate suffix when diagnostic pairing validation is enabled.
+size_t read_name_stem_length(const BgzfFastqRecord& raw) {
     size_t end = raw.nameLength;
-    const void* space = std::memchr(raw.name, ' ', end);
-    if (space != nullptr) {
-        end = static_cast<const char*>(space) - raw.name;
-    }
-    const void* tab = std::memchr(raw.name, '\t', end);
-    if (tab != nullptr) {
-        end = static_cast<const char*>(tab) - raw.name;
-    }
-    return end;
-}
-
-NameParts read_name_parts(const BgzfFastqRecord& raw) {
-    size_t end = read_name_token_length(raw);
-    const size_t read_name_length = end;
     if (end >= 2 && raw.name[end - 2] == '/' &&
         (raw.name[end - 1] == '1' || raw.name[end - 1] == '2' ||
          raw.name[end - 1] == '3')) {
         end -= 2;
     }
-    size_t extra_begin = read_name_length;
-    while (extra_begin < raw.nameLength &&
-           (raw.name[extra_begin] == ' ' || raw.name[extra_begin] == '\t')) {
-        ++extra_begin;
-    }
-    return NameParts{raw.name,
-                     static_cast<uint16_t>(end),
-                     static_cast<uint16_t>(read_name_length),
-                     static_cast<uint16_t>(extra_begin),
-                     static_cast<uint16_t>(raw.nameLength - extra_begin)};
+    return end;
 }
 
 std::string printable_read_name(const BgzfFastqRecord& record) {
@@ -79,13 +48,16 @@ bool BgzfStarAdapter::open(const std::string& mate0_path,
     if (!readers_[0].open(mate0_path, 0, physical_end,
                           options.mate0_reader_threads, options.crc_check, error,
                           &options.inflate_permit_hooks,
-                          options.store_mate0_quality)) {
+                          options.store_mate0_quality,
+                          BgzfNameMode::Token)) {
         return false;
     }
     if (!readers_[1].open(mate1_path, 0, physical_end,
                           options.mate1_reader_threads, options.crc_check, error,
                           &options.inflate_permit_hooks,
-                          options.store_mate1_quality)) {
+                          options.store_mate1_quality,
+                          options.validate_read_names
+                              ? BgzfNameMode::Token : BgzfNameMode::Skip)) {
         return false;
     }
     options_ = options;
@@ -182,16 +154,11 @@ InputStatus BgzfStarAdapter::next_record_locked(BgzfStarRecord* record,
         set_error(error, message.str());
         return InputStatus::Error;
     }
-    // Pairing is by ordinal; the read names are the only evidence inside the
-    // files that record i of R1 belongs with record i of R2. Without this
-    // check a mate file that was truncated, filtered, or re-sorted on its
-    // own would pair silently, and the end-of-stream count check catches it
-    // only if the counts happen to differ.
-    const NameParts name0 = read_name_parts(record->mates[0]);
     if (options_.validate_read_names) {
-        const NameParts name1 = read_name_parts(record->mates[1]);
-        if (name0.stemLength != name1.stemLength ||
-            std::memcmp(name0.data, name1.data, name0.stemLength) != 0) {
+        const size_t stem0 = read_name_stem_length(record->mates[0]);
+        const size_t stem1 = read_name_stem_length(record->mates[1]);
+        if (stem0 != stem1 ||
+            std::memcmp(record->mates[0].name, record->mates[1].name, stem0) != 0) {
             std::ostringstream message;
             message << "BGZF mate read-name mismatch at record " << recordsRead_
                     << ": mate 0 '" << printable_read_name(record->mates[0])
@@ -203,9 +170,7 @@ InputStatus BgzfStarAdapter::next_record_locked(BgzfStarRecord* record,
         }
     }
 
-    record->read_name_length = name0.readNameLength;
-    record->read_name_extra_offset = name0.extraOffset;
-    record->read_name_extra_length = name0.extraLength;
+    record->read_name_length = record->mates[0].nameLength;
     record->lane_index = options_.lane_index;
     record->read_ordinal = recordsRead_;
     record->read_filter = 'Y';

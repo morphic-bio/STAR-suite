@@ -27,8 +27,6 @@ struct BgzfStarAdapterOptions {
 struct BgzfStarRecord {
     BgzfFastqRecord mates[2];
     uint16_t read_name_length = 0;
-    uint16_t read_name_extra_offset = 0;
-    uint16_t read_name_extra_length = 0;
     uint32_t lane_index = 0;
     uint64_t read_ordinal = 0;
     char read_filter = 'Y';

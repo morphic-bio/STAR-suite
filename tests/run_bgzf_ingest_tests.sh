@@ -230,8 +230,10 @@ if enabled T8; then
     [[ -x "${HARNESS}" ]] || die "T8 requires ${HARNESS}"
     # A second mate with the same names ("/2"), different sequences, and a
     # different block size so the two files' block layouts are unrelated, plus
-    # one variant with a single renamed record and one missing its last record.
+    # one variant with a single renamed record, one missing its last record,
+    # and one whose optional FASTQ comments exceed the stored name-token bound.
     python3 - "${OUT_ROOT}/inputs/source.fastq" "${OUT_ROOT}/inputs" <<'PY'
+import random
 import sys
 from pathlib import Path
 lines = Path(sys.argv[1]).read_text(encoding="ascii").splitlines()
@@ -240,15 +242,28 @@ records = [lines[i:i + 4] for i in range(0, len(lines), 4)]
 mate2 = [[rec[0].replace("/1 ", "/2 "), rec[1][::-1], rec[2], rec[3]] for rec in records]
 renamed = [list(rec) for rec in mate2]
 renamed[100][0] = "@read999999/2 instrument:run:100"
-variants = {"pair_r2": mate2, "pair_r2_renamed": renamed, "pair_r2_short": mate2[:-1]}
+long_comment = [list(rec) for rec in mate2]
+rng = random.Random(1904)
+comment = "".join(rng.choices("abcdefghijklmnopqrstuvwxyz0123456789", k=1 << 20))
+long_comment[100][0] = long_comment[100][0].split(maxsplit=1)[0] + " " + comment
+variants = {
+    "pair_r2": mate2,
+    "pair_r2_renamed": renamed,
+    "pair_r2_short": mate2[:-1],
+    "pair_r2_long_comment": long_comment,
+}
 for name, recs in variants.items():
     (out / f"{name}.fastq").write_text(
         "\n".join(line for rec in recs for line in rec) + "\n", encoding="ascii")
 PY
-    for name in pair_r2 pair_r2_renamed pair_r2_short; do
+    for name in pair_r2 pair_r2_renamed pair_r2_short pair_r2_long_comment; do
         "${MAKE_FIXTURE}" --block-bytes 1013 "${OUT_ROOT}/inputs/${name}.fastq" \
             "${OUT_ROOT}/inputs/${name}.fastq.gz"
     done
+    long_comment_compressed_size=$(wc -c < \
+        "${OUT_ROOT}/inputs/pair_r2_long_comment.fastq.gz")
+    (( long_comment_compressed_size > 64 * 1024 )) \
+        || die "T8 long-comment fixture does not cross compressed work claims"
     "${HARNESS}" --mode pair --input "${OUT_ROOT}/inputs/blocked.fastq.gz" \
         --input2 "${OUT_ROOT}/inputs/pair_r2.fastq.gz" --workers 3 --crc-check 1 \
         > "${OUT_ROOT}/results/pair.json"
@@ -264,6 +279,17 @@ PY
     fi
     grep -F "read-name mismatch at record 100" "${OUT_ROOT}/results/pair_renamed.stderr" >/dev/null \
         || die "T8 read-name mismatch was not reported at record 100"
+    "${HARNESS}" --mode pair --input "${OUT_ROOT}/inputs/blocked.fastq.gz" \
+        --input2 "${OUT_ROOT}/inputs/pair_r2_renamed.fastq.gz" --workers 3 \
+        --crc-check 1 --validate-read-names 0 \
+        > "${OUT_ROOT}/results/pair_names_skipped.json"
+    python3 - "${OUT_ROOT}/results/pair_names_skipped.json" <<'PY'
+import json
+import sys
+result = json.load(open(sys.argv[1], encoding="utf-8"))
+assert result["record_count"] == 257
+assert result["mate1_name_bytes"] == 0
+PY
     if "${HARNESS}" --mode pair --input "${OUT_ROOT}/inputs/blocked.fastq.gz" \
         --input2 "${OUT_ROOT}/inputs/pair_r2_short.fastq.gz" --workers 3 --crc-check 1 \
         > /dev/null 2> "${OUT_ROOT}/results/pair_short.stderr"; then
@@ -271,6 +297,14 @@ PY
     fi
     grep -F "record-count mismatch at record 256" "${OUT_ROOT}/results/pair_short.stderr" >/dev/null \
         || die "T8 record-count mismatch was not reported at record 256"
+    "${HARNESS}" --mode pair --input "${OUT_ROOT}/inputs/blocked.fastq.gz" \
+        --input2 "${OUT_ROOT}/inputs/pair_r2_long_comment.fastq.gz" \
+        --workers 3 --crc-check 1 > "${OUT_ROOT}/results/pair_long_comment.json"
+    python3 - "${OUT_ROOT}/results/pair_long_comment.json" <<'PY'
+import json
+import sys
+assert json.load(open(sys.argv[1], encoding="utf-8"))["record_count"] == 257
+PY
     pass "T8 paired-mate read-name and record-count validation"
 fi
 
