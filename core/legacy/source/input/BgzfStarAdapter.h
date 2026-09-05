@@ -21,6 +21,10 @@ struct BgzfStarAdapterOptions {
     bool store_mate1_quality = true;
     // Require the read-name stem of record i in both mates to agree.
     bool validate_read_names = true;
+    // Parse the first Illumina header field (for example 1:N:0:0) without
+    // retaining the rest of the name line. This is needed by BAM output but
+    // remains off on the existing fused Flex path.
+    bool parse_illumina_filter = false;
     BgzfWorkPermitHooks inflate_permit_hooks;
 };
 

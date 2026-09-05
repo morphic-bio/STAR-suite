@@ -46,7 +46,7 @@ Options:
                               the same order as the FASTQ path: cDNA R2, then barcode R1.
   USE_READFILES_ZCAT=1       Legacy FASTQ override: add --readFilesCommand zcat.
                               Default FASTQ ingestion uses STAR internal gzip.
-  --out-samtype MODE         Output alignment mode: bam-unsorted or none (default: ${OUT_SAMTYPE})
+  --out-samtype MODE         Output alignment mode: bam-unsorted, bam-sorted, or none (default: ${OUT_SAMTYPE})
   --out-base DIR             Output base directory (default: ${OUT_BASE})
   --run-id ID                Run directory name (default: ${RUN_ID})
   --dry-run                  Write manifest/command/helpers only
@@ -97,7 +97,7 @@ case "${USE_READFILES_ZCAT}" in
   *) die "USE_READFILES_ZCAT must be 0 or 1" ;;
 esac
 case "${OUT_SAMTYPE}" in
-  bam-unsorted|none) ;;
+  bam-unsorted|bam-sorted|none) ;;
   *) die "Unsupported --out-samtype: ${OUT_SAMTYPE}" ;;
 esac
 if [[ "${INPUT_FORMAT}" == "cbq" ]]; then
@@ -150,6 +150,8 @@ fi
 SAM_ARGS=()
 if [[ "${OUT_SAMTYPE}" == "none" ]]; then
   SAM_ARGS=(--outSAMtype None --outSAMattributes None)
+elif [[ "${OUT_SAMTYPE}" == "bam-sorted" ]]; then
+  SAM_ARGS=(--outSAMtype BAM SortedByCoordinate --outBAMcompression 6 --outSAMattributes NH HI AS nM NM GX GN)
 else
   SAM_ARGS=(--outSAMtype BAM Unsorted --outBAMcompression 6 --outSAMattributes NH HI AS nM NM GX GN)
 fi

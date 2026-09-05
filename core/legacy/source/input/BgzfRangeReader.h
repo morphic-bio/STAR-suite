@@ -21,6 +21,7 @@ static constexpr size_t kBgzfFastqSequenceCapacity = 650;
 enum class BgzfNameMode {
     Full,
     Token,
+    TokenAndIlluminaFilter,
     Skip
 };
 
@@ -49,6 +50,7 @@ struct BgzfFastqRecord {
     uint16_t sequenceLength = 0;
     uint16_t qualityLength = 0;
     uint64_t ordinal = 0;
+    char readFilter = 'N';
     const char* nameView = nullptr;
     const char* sequenceView = nullptr;
     const char* qualityView = nullptr;

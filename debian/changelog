@@ -1,3 +1,15 @@
+star-suite (1.8.4-1) unstable; urgency=medium
+
+  * Feed paired BGZF FASTQ directly into existing STAR mapping chunks for
+    fused STAR-Flex coordinate-sorted BAM runs.
+  * Preserve exact record-ordinal pairing, Illumina filter flags, BAM output,
+    and barcode statistics without a BGZF index or sidecar.
+  * Keep classic STAR, STARsolo, non-Flex, plain-gzip, unsorted-BAM, two-pass,
+    transcriptome-BAM, and spatial input paths unchanged.
+  * Report STAR Suite 1.8.4 from STAR --version.
+
+ -- STAR-suite Maintainers <maintainers@biodepot.example>  Sat, 05 Sep 2026 17:29:39 +0000
+
 star-suite (1.8.3-1) unstable; urgency=medium
 
   * Reduce copying, allocation, and producer stalls in fully fused STAR-Flex

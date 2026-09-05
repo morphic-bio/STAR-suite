@@ -1001,7 +1001,7 @@ void mapThreadsSpawn (Parameters &P, ReadAlignChunk** RAchunk) {
         mapThreadsSpawnFlexPipeline(P, RAchunk);
         return;
     }
-    if (P.readFilesBgzfMode == "range") {
+    if (P.readFilesBgzfMode == "range" && !P.bgzfCoreActive) {
         fatalBgzfRangeMode(P, flexActivationReason.empty()
             ? "command is not a supported fused Flex run"
             : flexActivationReason);

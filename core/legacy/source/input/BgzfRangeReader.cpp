@@ -564,9 +564,15 @@ bool BgzfRangeReader::read_name_token(BgzfFastqRecord* record,
                                       BgzfBatchLease* lease) {
     record->nameLength = 0;
     record->nameView = nullptr;
+    record->readFilter = 'N';
     bool saw_at = false;
     bool token_finished = nameMode_ == BgzfNameMode::Skip;
     bool token_spanned_buffer = false;
+    const bool capture_filter = nameMode_ == BgzfNameMode::TokenAndIlluminaFilter;
+    bool filter_field_started = false;
+    bool filter_field_finished = false;
+    unsigned char filter_prefix[4] = {0, 0, 0, 0};
+    size_t filter_prefix_size = 0;
     while (true) {
         if (buffer_ == nullptr || cursor_ == buffer_->size()) {
             std::string append_error;
@@ -639,9 +645,33 @@ bool BgzfRangeReader::read_name_token(BgzfFastqRecord* record,
             }
         }
 
+        if (capture_filter && token_finished && !filter_field_finished) {
+            while (position < segment_size) {
+                const unsigned char value = begin[position++];
+                const bool whitespace = value == ' ' || value == '\t' || value == '\r';
+                if (!filter_field_started) {
+                    if (whitespace) {
+                        continue;
+                    }
+                    filter_field_started = true;
+                } else if (whitespace) {
+                    filter_field_finished = true;
+                    break;
+                }
+                if (filter_prefix_size < sizeof(filter_prefix)) {
+                    filter_prefix[filter_prefix_size++] = value;
+                }
+            }
+        }
+
         cursor_ += segment_size;
         if (found != nullptr) {
             ++cursor_;
+            if (capture_filter && filter_prefix_size >= 4 &&
+                filter_prefix[1] == ':' && filter_prefix[2] == 'Y' &&
+                filter_prefix[3] == ':') {
+                record->readFilter = 'Y';
+            }
             return true;
         }
     }
@@ -655,6 +685,7 @@ bool BgzfRangeReader::parse_record(BgzfFastqRecord* record, std::string* error,
     record->nameView = nullptr;
     record->sequenceView = nullptr;
     record->qualityView = nullptr;
+    record->readFilter = 'N';
     const unsigned char *line = nullptr;
     size_t line_size = 0;
     if (nameMode_ == BgzfNameMode::Full) {
