@@ -66,7 +66,8 @@ bool BgzfRangeReader::open(const std::string& path,
                            bool check_crc,
                            std::string* error,
                            const BgzfWorkPermitHooks* permit_hooks,
-                           bool store_quality) {
+                           bool store_quality,
+                           BgzfNameMode name_mode) {
     close_input();
     if (error != nullptr) {
         error->clear();
@@ -104,6 +105,7 @@ bool BgzfRangeReader::open(const std::string& path,
     path_ = path;
     checkCrc_ = check_crc;
     storeQuality_ = store_quality;
+    nameMode_ = name_mode;
     rangeStart_ = range_start;
     rangeEnd_ = range_end;
     claimedOffset_ = range_start;
@@ -445,31 +447,105 @@ bool BgzfRangeReader::read_line_view(const unsigned char** line,
     }
 }
 
+bool BgzfRangeReader::read_name_token(BgzfFastqRecord* record,
+                                      bool allow_clean_end,
+                                      std::string* error) {
+    record->nameLength = 0;
+    bool saw_at = false;
+    bool token_finished = nameMode_ == BgzfNameMode::Skip;
+    while (true) {
+        if (cursor_ == buffer_.size()) {
+            std::string append_error;
+            if (!append_next_block(&append_error)) {
+                if (!append_error.empty()) {
+                    return set_error(error, append_error);
+                }
+                if (!saw_at && allow_clean_end) {
+                    return false;
+                }
+                if (saw_at) {
+                    return true;
+                }
+                std::ostringstream message;
+                message << "unexpected end of BGZF FASTQ record after block offset "
+                        << currentBlockOffset_;
+                return set_error(error, message.str());
+            }
+        }
+
+        const size_t available = buffer_.size() - cursor_;
+        const unsigned char* begin = buffer_.data() + cursor_;
+        const void* found = std::memchr(begin, '\n', available);
+        const size_t segment_size = found == nullptr
+            ? available
+            : static_cast<const unsigned char*>(found) - begin;
+        size_t position = 0;
+        if (!saw_at) {
+            if (segment_size == 0 || begin[0] != '@') {
+                std::ostringstream message;
+                message << "BGZF FASTQ record " << recordsRead_
+                        << " does not start with @ (block offset "
+                        << currentBlockOffset_ << ')';
+                return set_error(error, message.str());
+            }
+            saw_at = true;
+            position = 1;
+        }
+
+        while (!token_finished && position < segment_size) {
+            const unsigned char value = begin[position++];
+            if (value == ' ' || value == '\t' || value == '\r') {
+                token_finished = true;
+                break;
+            }
+            if (record->nameLength == kBgzfFastqNameCapacity) {
+                std::ostringstream message;
+                message << "BGZF FASTQ record " << recordsRead_
+                        << " has read-name token exceeding fixed capacity "
+                        << kBgzfFastqNameCapacity;
+                return set_error(error, message.str());
+            }
+            record->name[record->nameLength++] = static_cast<char>(value);
+        }
+
+        cursor_ += segment_size;
+        if (found != nullptr) {
+            ++cursor_;
+            return true;
+        }
+    }
+}
+
 bool BgzfRangeReader::parse_record(BgzfFastqRecord* record, std::string* error) {
     if (record == nullptr) {
         return set_error(error, "BGZF FASTQ record destination is null");
     }
     const unsigned char *line = nullptr;
     size_t line_size = 0;
-    if (!read_line_view(&line, &line_size, true, error)) {
+    if (nameMode_ == BgzfNameMode::Full) {
+        if (!read_line_view(&line, &line_size, true, error)) {
+            return false;
+        }
+        if (line_size == 0 || line[0] != '@') {
+            std::ostringstream message;
+            message << "BGZF FASTQ record " << recordsRead_
+                    << " does not start with @ (block offset "
+                    << currentBlockOffset_ << ')';
+            return set_error(error, message.str());
+        }
+        if (line_size - 1 > kBgzfFastqNameCapacity) {
+            std::ostringstream message;
+            message << "BGZF FASTQ record " << recordsRead_
+                    << " has read name length " << (line_size - 1)
+                    << " exceeding fixed capacity " << kBgzfFastqNameCapacity;
+            return set_error(error, message.str());
+        }
+        record->nameLength = static_cast<uint16_t>(line_size - 1);
+        if (record->nameLength != 0) {
+            std::memcpy(record->name, line + 1, record->nameLength);
+        }
+    } else if (!read_name_token(record, true, error)) {
         return false;
-    }
-    if (line_size == 0 || line[0] != '@') {
-        std::ostringstream message;
-        message << "BGZF FASTQ record " << recordsRead_
-                << " does not start with @ (block offset " << currentBlockOffset_ << ')';
-        return set_error(error, message.str());
-    }
-    if (line_size - 1 > kBgzfFastqNameCapacity) {
-        std::ostringstream message;
-        message << "BGZF FASTQ record " << recordsRead_ << " has read name length "
-                << (line_size - 1) << " exceeding fixed capacity "
-                << kBgzfFastqNameCapacity;
-        return set_error(error, message.str());
-    }
-    record->nameLength = static_cast<uint16_t>(line_size - 1);
-    if (record->nameLength != 0) {
-        std::memcpy(record->name, line + 1, record->nameLength);
     }
 
     if (!read_line_view(&line, &line_size, false, error)) {

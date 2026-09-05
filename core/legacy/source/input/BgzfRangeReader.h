@@ -18,6 +18,12 @@ namespace input {
 static constexpr size_t kBgzfFastqNameCapacity = 512;
 static constexpr size_t kBgzfFastqSequenceCapacity = 650;
 
+enum class BgzfNameMode {
+    Full,
+    Token,
+    Skip
+};
+
 struct BgzfFastqRecord {
     char name[kBgzfFastqNameCapacity];
     char sequence[kBgzfFastqSequenceCapacity];
@@ -68,7 +74,8 @@ public:
               bool check_crc,
               std::string* error,
               const BgzfWorkPermitHooks* permit_hooks = nullptr,
-              bool store_quality = true);
+              bool store_quality = true,
+              BgzfNameMode name_mode = BgzfNameMode::Full);
 
     // Returns false with an empty error at clean stream end.
     bool next(BgzfFastqRecord* record, std::string* error);
@@ -111,12 +118,16 @@ private:
                         size_t* line_size,
                         bool allow_clean_end,
                         std::string* error);
+    bool read_name_token(BgzfFastqRecord* record,
+                         bool allow_clean_end,
+                         std::string* error);
     bool parse_record(BgzfFastqRecord* record, std::string* error);
 
     std::string path_;
     int inputFd_ = -1;
     bool checkCrc_ = true;
     bool storeQuality_ = true;
+    BgzfNameMode nameMode_ = BgzfNameMode::Full;
     uint64_t rangeStart_ = 0;
     uint64_t rangeEnd_ = 0;
     uint64_t claimedOffset_ = 0;

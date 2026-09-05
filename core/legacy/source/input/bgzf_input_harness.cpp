@@ -22,6 +22,7 @@ struct Options {
     uint32_t threads = 1;
     uint32_t workers = 1;
     bool crcCheck = true;
+    bool validateReadNames = true;
 };
 
 Options parse_args(int argc, char* argv[]) {
@@ -44,6 +45,12 @@ Options parse_args(int argc, char* argv[]) {
                 throw std::runtime_error("--crc-check must be 0 or 1");
             }
             options.crcCheck = value == "1";
+        } else if (arg == "--validate-read-names" && index + 1 < argc) {
+            const std::string value = argv[++index];
+            if (value != "0" && value != "1") {
+                throw std::runtime_error("--validate-read-names must be 0 or 1");
+            }
+            options.validateReadNames = value == "1";
         } else {
             throw std::runtime_error("unknown or incomplete option: " + arg);
         }
@@ -148,21 +155,25 @@ bool scan_records(const Options& options,
 // without a genome.
 bool scan_pairs(const Options& options,
                 uint64_t* record_count,
+                uint64_t* mate1_name_bytes,
                 std::string* error) {
     star::input::BgzfStarAdapter adapter;
     star::input::BgzfStarAdapterOptions adapter_options;
     adapter_options.mate0_reader_threads = options.workers;
     adapter_options.mate1_reader_threads = options.workers;
     adapter_options.crc_check = options.crcCheck;
+    adapter_options.validate_read_names = options.validateReadNames;
     if (!adapter.open(options.input, options.input2, adapter_options, error)) {
         return false;
     }
     *record_count = 0;
+    *mate1_name_bytes = 0;
     star::input::BgzfStarRecord record;
     while (true) {
         const star::input::InputStatus status = adapter.next_record(&record, error);
         if (status == star::input::InputStatus::Record) {
             ++*record_count;
+            *mate1_name_bytes += record.mates[1].nameLength;
             continue;
         }
         return status == star::input::InputStatus::End;
@@ -212,11 +223,13 @@ int main(int argc, char* argv[]) {
                 throw std::runtime_error("--mode pair requires --input2");
             }
             uint64_t record_count = 0;
-            if (!scan_pairs(options, &record_count, &error)) {
+            uint64_t mate1_name_bytes = 0;
+            if (!scan_pairs(options, &record_count, &mate1_name_bytes, &error)) {
                 std::cerr << "ERROR: " << error << '\n';
                 return 1;
             }
-            std::cout << "{\"record_count\":" << record_count << "}\n";
+            std::cout << "{\"mate1_name_bytes\":" << mate1_name_bytes
+                      << ",\"record_count\":" << record_count << "}\n";
             return 0;
         }
         throw std::runtime_error("unsupported --mode: " + options.mode);
