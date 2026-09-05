@@ -1,3 +1,9 @@
+STAR-suite Flex BGZF sorted-BAM bridge --- 2026/09/05
+====================================================
+* Added an opt-in direct bridge from paired BGZF FASTQ into the existing STAR mapping chunks for fused STAR-Flex coordinate-sorted BAM runs.
+* Reused inline `BC/BSIZE` member discovery and leased decompression buffers without requiring an index or sidecar, while preserving exact record-ordinal pairing and Illumina filter flags.
+* Kept classic STAR, STARsolo, non-Flex, plain-gzip, unsorted-BAM, two-pass, transcriptome-BAM, and spatial input behavior on their established readers.
+
 STAR-suite fused input and MEX performance --- 2026/09/05
 =========================================================
 * Reduced copying and allocation in fully fused STAR-Flex BGZF and plain-gzip FASTQ ingest while preserving exact pairing, bounded malformed-input handling, and the existing serial zlib path for plain gzip.
