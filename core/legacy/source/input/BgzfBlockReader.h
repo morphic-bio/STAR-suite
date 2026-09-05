@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <string>
 #include <vector>
+#include <zlib.h>
 
 namespace star {
 namespace input {
@@ -18,6 +19,29 @@ struct BgzfBlock {
     uint64_t compressedOffset = 0;
     uint32_t compressedSize = 0;
     uint32_t isize = 0;
+};
+
+// One inflater is owned by each range-reader worker. Keeping the raw-deflate
+// state alive avoids initializing and destroying zlib for every BGZF member.
+class BgzfInflater {
+public:
+    BgzfInflater();
+    ~BgzfInflater();
+
+    BgzfInflater(const BgzfInflater&) = delete;
+    BgzfInflater& operator=(const BgzfInflater&) = delete;
+
+    bool inflate_block(const unsigned char* member,
+                       size_t member_size,
+                       uint64_t compressed_offset,
+                       bool check_crc,
+                       unsigned char* output,
+                       size_t output_size,
+                       std::string* error);
+
+private:
+    z_stream stream_;
+    bool initialized_ = false;
 };
 
 bool detect_bgzf(const std::string& path,

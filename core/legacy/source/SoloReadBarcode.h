@@ -42,7 +42,9 @@ public:
     SoloReadBarcodeStats stats;
 
     SoloReadBarcode(Parameters &Pin);
-    void getCBandUMI(char **readSeq, char **readQual, uint64 *readLen, const string &readNameExtraIn, const uint32 &readFilesIndex, const char *readName);
+    void getCBandUMI(char **readSeq, char **readQual, uint64 *readLen,
+                     const string &readNameExtraIn, const uint32 &readFilesIndex,
+                     const char *readName, uint64 readNameLength=UINT64_MAX);
     void addCounts(const SoloReadBarcode &rfIn);
     void addStats(const SoloReadBarcode &rfIn);
     void statsOut(ofstream &streamOut);

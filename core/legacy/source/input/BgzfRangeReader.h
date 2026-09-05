@@ -15,11 +15,16 @@
 namespace star {
 namespace input {
 
+static constexpr size_t kBgzfFastqNameCapacity = 512;
+static constexpr size_t kBgzfFastqSequenceCapacity = 650;
+
 struct BgzfFastqRecord {
-    std::string name;
-    std::string sequence;
-    std::string plus;
-    std::string quality;
+    char name[kBgzfFastqNameCapacity];
+    char sequence[kBgzfFastqSequenceCapacity];
+    char quality[kBgzfFastqSequenceCapacity];
+    uint16_t nameLength = 0;
+    uint16_t sequenceLength = 0;
+    uint16_t qualityLength = 0;
     uint64_t ordinal = 0;
 };
 
@@ -62,7 +67,8 @@ public:
               uint32_t worker_threads,
               bool check_crc,
               std::string* error,
-              const BgzfWorkPermitHooks* permit_hooks = nullptr);
+              const BgzfWorkPermitHooks* permit_hooks = nullptr,
+              bool store_quality = true);
 
     // Returns false with an empty error at clean stream end.
     bool next(BgzfFastqRecord* record, std::string* error);
@@ -90,21 +96,27 @@ private:
                     uint64_t* sequence,
                     bool* at_end,
                     std::string* error);
-    bool inflate_work(const CompressedWork& work,
+    bool inflate_work(BgzfInflater* inflater,
+                      const CompressedWork& work,
                       InflatedBlock* result,
                       std::string* error);
-    bool inflate_work_permitted(const CompressedWork& work,
+    bool inflate_work_permitted(BgzfInflater* inflater,
+                                const CompressedWork& work,
                                 InflatedBlock* result,
                                 std::string* error);
     bool claim_and_inflate_sync(InflatedBlock* result, bool* at_end,
                                 std::string* error);
     bool append_next_block(std::string* error);
-    bool read_line(std::string* line, bool allow_clean_end, std::string* error);
+    bool read_line_view(const unsigned char** line,
+                        size_t* line_size,
+                        bool allow_clean_end,
+                        std::string* error);
     bool parse_record(BgzfFastqRecord* record, std::string* error);
 
     std::string path_;
     int inputFd_ = -1;
     bool checkCrc_ = true;
+    bool storeQuality_ = true;
     uint64_t rangeStart_ = 0;
     uint64_t rangeEnd_ = 0;
     uint64_t claimedOffset_ = 0;
@@ -116,8 +128,11 @@ private:
     size_t maxOutstandingWork_ = 4;
     uint32_t workerCount_ = 0;
     BgzfWorkPermitHooks permitHooks_;
+    BgzfInflater syncInflater_;
 
     std::vector<unsigned char> buffer_;
+    // One extra byte permits CRLF at the logical FASTQ line capacity.
+    unsigned char lineScratch_[kBgzfFastqSequenceCapacity + 1];
     size_t cursor_ = 0;
     std::vector<std::thread> workers_;
     std::map<uint64_t, InflatedBlock> completed_;

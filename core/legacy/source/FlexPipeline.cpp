@@ -19,6 +19,7 @@
 #include <fstream>
 #include <limits>
 #include <sstream>
+#include <sys/stat.h>
 #include <thread>
 #include <unistd.h>
 #include <chrono>
@@ -52,28 +53,57 @@ void flexBgzfPermitRelease(void *context,
         domain, waitNs, workUnits, workBytes, workNs);
 }
 
-bool gzReadLine(gzFile gz, char *buf, int maxLen) {
+bool gzReadLine(gzFile gz, char *buf, int maxLen, uint32_t *lengthOut = nullptr) {
     char *ret = gzgets(gz, buf, maxLen);
     if (ret == Z_NULL) return false;
     int len = static_cast<int>(strlen(buf));
-    if (len > 0 && buf[len - 1] == '\n') buf[len - 1] = '\0';
+    if (len > 0 && buf[len - 1] == '\n') {
+        buf[--len] = '\0';
+    }
+    if (lengthOut != nullptr) {
+        *lengthOut = static_cast<uint32_t>(len);
+    }
     return true;
 }
 
-bool copyCbqSpanToBuffer(star::input::CbqByteSpan span, char *dest, size_t capacity, size_t *lengthOut) {
-    if (dest == nullptr || capacity == 0) return false;
-    const size_t n = std::min(span.size, capacity - 1);
-    if (n > 0 && span.data != nullptr) {
-        std::memcpy(dest, span.data, n);
-    }
-    dest[n] = '\0';
-    if (lengthOut != nullptr) *lengthOut = n;
-    return span.size < capacity;
+bool gzConsumeLine(gzFile gz, char *buf, int maxLen) {
+    return gzgets(gz, buf, maxLen) != Z_NULL;
 }
 
-void copyCbqReadName(star::input::CbqByteSpan span, char *dest, size_t capacity) {
-    size_t ignored = 0;
-    copyCbqSpanToBuffer(span, dest, capacity, &ignored);
+// FASTQ qualities normally have exactly the sequence length.  Check the known
+// newline position first and retain the general scan as a compatibility
+// fallback for malformed or non-canonical records.
+bool gzReadQualityLine(gzFile gz, char *buf, int maxLen, uint32_t expectedLength) {
+    if (expectedLength < static_cast<uint32_t>(maxLen)) {
+        buf[expectedLength] = '\0';
+    }
+    if (gzgets(gz, buf, maxLen) == Z_NULL) {
+        return false;
+    }
+    if (expectedLength < static_cast<uint32_t>(maxLen) &&
+        buf[expectedLength] == '\n') {
+        buf[expectedLength] = '\0';
+        return true;
+    }
+
+    const size_t length = std::strlen(buf);
+    if (length > 0 && buf[length - 1] == '\n') {
+        buf[length - 1] = '\0';
+    }
+    return true;
+}
+
+size_t fastqReadNameLength(const char *name, size_t length) {
+    size_t end = length;
+    const void *space = std::memchr(name, ' ', end);
+    if (space != nullptr) {
+        end = static_cast<const char *>(space) - name;
+    }
+    const void *tab = std::memchr(name, '\t', end);
+    if (tab != nullptr) {
+        end = static_cast<const char *>(tab) - name;
+    }
+    return end;
 }
 
 } // namespace
@@ -115,16 +145,14 @@ void *flexLaneReaderThread(void *arg) {
             if (*rest) pkt.readFilter = *rest;
         }
 
-        if (!gzReadLine(gzR2, pkt.seq[0], kFlexPipeSeqMax)) break;
-        pkt.readLen[0] = static_cast<uint32_t>(strlen(pkt.seq[0]));
+        if (!gzReadLine(gzR2, pkt.seq[0], kFlexPipeSeqMax, &pkt.readLen[0])) break;
 
         if (!gzReadLine(gzR2, lineBuf, sizeof(lineBuf))) break; // + line
         if (!gzReadLine(gzR2, pkt.qual[0], kFlexPipeSeqMax)) break;
 
         // R1: @name, seq, +, qual
         if (!gzReadLine(gzR1, lineBuf, sizeof(lineBuf))) break;
-        if (!gzReadLine(gzR1, pkt.seq[1], kFlexPipeSeqMax)) break;
-        pkt.readLen[1] = static_cast<uint32_t>(strlen(pkt.seq[1]));
+        if (!gzReadLine(gzR1, pkt.seq[1], kFlexPipeSeqMax, &pkt.readLen[1])) break;
         if (!gzReadLine(gzR1, lineBuf, sizeof(lineBuf))) break;
         if (!gzReadLine(gzR1, pkt.qual[1], kFlexPipeSeqMax)) break;
 
@@ -174,15 +202,15 @@ void *flexLaneReaderRouterThread(void *arg) {
             std::memcpy(name, src, nameLen);
             name[nameLen] = '\0';
         }
-        if (!gzReadLine(gzR2, seq0, kFlexPipeSeqMax)) break;
-        uint32_t readLen0 = static_cast<uint32_t>(strlen(seq0));
+        uint32_t readLen0 = 0;
+        if (!gzReadLine(gzR2, seq0, kFlexPipeSeqMax, &readLen0)) break;
         if (!gzReadLine(gzR2, lineBuf, sizeof(lineBuf))) break;
         if (!gzReadLine(gzR2, qual0, kFlexPipeSeqMax)) break;
 
         // R1: @name, seq, +, qual
         if (!gzReadLine(gzR1, lineBuf, sizeof(lineBuf))) break;
-        if (!gzReadLine(gzR1, seq1, kFlexPipeSeqMax)) break;
-        uint32_t readLen1 = static_cast<uint32_t>(strlen(seq1));
+        uint32_t readLen1 = 0;
+        if (!gzReadLine(gzR1, seq1, kFlexPipeSeqMax, &readLen1)) break;
         if (!gzReadLine(gzR1, lineBuf, sizeof(lineBuf))) break;
         if (!gzReadLine(gzR1, qual1, kFlexPipeSeqMax)) break;
 
@@ -274,7 +302,7 @@ void *flexLaneReaderRouterThread(void *arg) {
 // When sample tagging is not configured, every read remains eligible. When it is
 // configured, an unmatched/short tag cannot contribute to a per-sample matrix and
 // therefore never needs residual alignment.
-static bool detectConfiguredSampleTag(char *readSeq, uint32_t readLen,
+static bool detectConfiguredSampleTag(const char *readSeq, uint32_t readLen,
                                       const ParametersSolo &pSolo,
                                       SampleDetector *sampleDet,
                                       bool sampleDetReady,
@@ -288,7 +316,8 @@ static bool detectConfiguredSampleTag(char *readSeq, uint32_t readLen,
             return false;
         }
         uint8_t packedTag[4];
-        nuclPackBAM(readSeq + offset, reinterpret_cast<char *>(packedTag), 8);
+        nuclPackBAM(const_cast<char *>(readSeq + offset),
+                    reinterpret_cast<char *>(packedTag), 8);
         const uint32_t sampleIdx = sampleDet->detectSampleFromPackedTag(packedTag);
         if (sampleIdx == 0) {
             return false;
@@ -458,31 +487,38 @@ static uint64_t processOneLane(
     char seq0[kFlexPipeSeqMax], seq1[kFlexPipeSeqMax];
     char qual0[kFlexPipeSeqMax], qual1[kFlexPipeSeqMax];
     char name[kFlexPipeNameMax];
-
+    const std::string readNameExtra;
     uint64_t nReads = 0;
 
     while (true) {
-        if (!gzReadLine(gzR2, lineBuf, sizeof(lineBuf))) break;
+        uint32_t headerLength = 0;
+        if (!gzReadLine(gzR2, lineBuf, sizeof(lineBuf), &headerLength)) break;
         {
             const char *src = lineBuf;
-            if (*src == '@') ++src;
-            size_t nameLen = 0;
-            while (src[nameLen] && src[nameLen] != ' ' && src[nameLen] != '\t')
-                ++nameLen;
+            size_t available = headerLength;
+            if (available > 0 && *src == '@') {
+                ++src;
+                --available;
+            }
+            size_t nameLen = fastqReadNameLength(src, available);
             if (nameLen >= kFlexPipeNameMax) nameLen = kFlexPipeNameMax - 1;
             std::memcpy(name, src, nameLen);
             name[nameLen] = '\0';
         }
-        if (!gzReadLine(gzR2, seq0, kFlexPipeSeqMax)) break;
-        uint32_t readLen0 = static_cast<uint32_t>(strlen(seq0));
-        if (!gzReadLine(gzR2, lineBuf, sizeof(lineBuf))) break;
-        if (!gzReadLine(gzR2, qual0, kFlexPipeSeqMax)) break;
+        uint32_t readLen0 = 0;
+        if (!gzReadLine(gzR2, seq0, kFlexPipeSeqMax, &readLen0)) break;
+        if (!gzConsumeLine(gzR2, lineBuf, sizeof(lineBuf))) break;
+        if (noAlign) {
+            if (!gzConsumeLine(gzR2, lineBuf, kFlexPipeSeqMax)) break;
+        } else if (!gzReadQualityLine(gzR2, qual0, kFlexPipeSeqMax, readLen0)) {
+            break;
+        }
 
-        if (!gzReadLine(gzR1, lineBuf, sizeof(lineBuf))) break;
-        if (!gzReadLine(gzR1, seq1, kFlexPipeSeqMax)) break;
-        uint32_t readLen1 = static_cast<uint32_t>(strlen(seq1));
-        if (!gzReadLine(gzR1, lineBuf, sizeof(lineBuf))) break;
-        if (!gzReadLine(gzR1, qual1, kFlexPipeSeqMax)) break;
+        if (!gzConsumeLine(gzR1, lineBuf, sizeof(lineBuf))) break;
+        uint32_t readLen1 = 0;
+        if (!gzReadLine(gzR1, seq1, kFlexPipeSeqMax, &readLen1)) break;
+        if (!gzConsumeLine(gzR1, lineBuf, sizeof(lineBuf))) break;
+        if (!gzReadQualityLine(gzR1, qual1, kFlexPipeSeqMax, readLen1)) break;
 
         uint64_t iReadAll = st->iReadAllGlobal.fetch_add(1);
         ++tally.lane;
@@ -511,8 +547,6 @@ static uint64_t processOneLane(
             char *readSeqPtrs[2]  = { dummySeq, seq1 };
             char *readQualPtrs[2] = { dummyQual, qual1 };
             uint64 readLens[2]    = { 0, readLen1 };
-            std::string readNameExtra;
-
             localBar.getCBandUMI(readSeqPtrs, readQualPtrs, readLens, readNameExtra,
                                   static_cast<uint32_t>(laneId), name);
 
@@ -589,9 +623,7 @@ static uint64_t processOneBgzfRange(
     auto &cache = FlexHashScreenCache::instance();
     char dummySeq[4] = {'\0'};
     char dummyQual[4] = {'\0'};
-    char seq0[kFlexPipeSeqMax], seq1[kFlexPipeSeqMax];
-    char qual0[kFlexPipeSeqMax], qual1[kFlexPipeSeqMax];
-    char name[kFlexPipeNameMax];
+    const std::string readNameExtra;
 
     uint64_t nReads = 0;
     const size_t bgzfRecordBatchSize = 256;
@@ -611,13 +643,15 @@ static uint64_t processOneBgzfRange(
             st->failInput(message.str());
             break;
         }
+        const uint64_t batchGlobalFirst = st->iReadAllGlobal.fetch_add(
+            recordsReturned, std::memory_order_relaxed);
         for (size_t batchIndex = 0; batchIndex < recordsReturned; ++batchIndex) {
         star::input::BgzfStarRecord &record = recordBatch[batchIndex];
-        const size_t readLen0Size = record.mates[0].sequence.size();
-        const size_t readLen1Size = record.mates[1].sequence.size();
-        if (readLen0Size >= sizeof(seq0) || readLen1Size >= sizeof(seq1) ||
-            record.mates[0].quality.size() >= sizeof(qual0) ||
-            record.mates[1].quality.size() >= sizeof(qual1)) {
+        const size_t readLen0Size = record.mates[0].sequenceLength;
+        const size_t readLen1Size = record.mates[1].sequenceLength;
+        if (readLen0Size >= kFlexPipeSeqMax || readLen1Size >= kFlexPipeSeqMax ||
+            record.mates[0].qualityLength >= kFlexPipeSeqMax ||
+            record.mates[1].qualityLength >= kFlexPipeSeqMax) {
             std::ostringstream message;
             message << "Flex BGZF record " << record.read_ordinal
                     << " in lane " << task.laneId
@@ -625,24 +659,17 @@ static uint64_t processOneBgzfRange(
             st->failInput(message.str());
             break;
         }
-        std::memcpy(seq0, record.mates[0].sequence.data(), readLen0Size);
-        std::memcpy(seq1, record.mates[1].sequence.data(), readLen1Size);
-        std::memcpy(qual0, record.mates[0].quality.data(), readLen0Size);
-        std::memcpy(qual1, record.mates[1].quality.data(), readLen1Size);
-        seq0[readLen0Size] = '\0';
-        seq1[readLen1Size] = '\0';
-        qual0[readLen0Size] = '\0';
-        qual1[readLen1Size] = '\0';
         const uint32_t readLen0 = static_cast<uint32_t>(readLen0Size);
         const uint32_t readLen1 = static_cast<uint32_t>(readLen1Size);
-        const size_t nameLength = std::min(record.read_name.size(),
+        const char *seq0 = record.mates[0].sequence;
+        const char *seq1 = record.mates[1].sequence;
+        const char *qual0 = record.mates[0].quality;
+        const char *qual1 = record.mates[1].quality;
+        const size_t nameLength = std::min(static_cast<size_t>(record.read_name_length),
                                            static_cast<size_t>(kFlexPipeNameMax - 1));
-        std::memset(name, 0, sizeof(name));
-        if (nameLength != 0) {
-            std::memcpy(name, record.read_name.data(), nameLength);
-        }
+        const char *name = record.mates[0].name;
 
-        const uint64_t iReadAll = st->iReadAllGlobal.fetch_add(1);
+        const uint64_t iReadAll = batchGlobalFirst + batchIndex;
         ++tally.lane;
         ++nReads;
 
@@ -662,12 +689,15 @@ static uint64_t processOneBgzfRange(
 
         if (decision.action == FlexHashScreenDecision::Keep ||
             decision.action == FlexHashScreenDecision::Deny) {
-            char *readSeqPtrs[2] = {dummySeq, seq1};
-            char *readQualPtrs[2] = {dummyQual, qual1};
+            char *readSeqPtrs[2] = {
+                dummySeq, const_cast<char *>(seq1)
+            };
+            char *readQualPtrs[2] = {
+                dummyQual, const_cast<char *>(qual1)
+            };
             uint64 readLens[2] = {0, readLen1};
-            std::string readNameExtra;
             localBar.getCBandUMI(readSeqPtrs, readQualPtrs, readLens, readNameExtra,
-                                 static_cast<uint32_t>(task.laneId), name);
+                                 static_cast<uint32_t>(task.laneId), name, nameLength);
 
             localBar.detectedSampleToken = detectedSampleToken;
 
@@ -695,11 +725,16 @@ static uint64_t processOneBgzfRange(
             ++tally.miss;
             if (!noAlign) {
                 EnrichedPacket packet;
-                std::memcpy(packet.name, name, kFlexPipeNameMax);
-                std::memcpy(packet.seq[0], seq0, readLen0 + 1);
-                std::memcpy(packet.seq[1], seq1, readLen1 + 1);
-                std::memcpy(packet.qual[0], qual0, readLen0 + 1);
-                std::memcpy(packet.qual[1], qual1, readLen1 + 1);
+                std::memcpy(packet.name, name, nameLength);
+                packet.name[nameLength] = '\0';
+                std::memcpy(packet.seq[0], seq0, readLen0);
+                std::memcpy(packet.seq[1], seq1, readLen1);
+                std::memcpy(packet.qual[0], qual0, readLen0);
+                std::memcpy(packet.qual[1], qual1, readLen1);
+                packet.seq[0][readLen0] = '\0';
+                packet.seq[1][readLen1] = '\0';
+                packet.qual[0][readLen0] = '\0';
+                packet.qual[1][readLen1] = '\0';
                 packet.readLen[0] = readLen0;
                 packet.readLen[1] = readLen1;
                 packet.iReadAll = iReadAll;
@@ -738,10 +773,9 @@ static uint64_t processCbqModuleRecords(
     std::string inputError;
     char dummySeq[4] = {'\0'};
     char dummyQual[4] = {'\0'};
+    const std::string readNameExtra;
 
     char seq0[kFlexPipeSeqMax], seq1[kFlexPipeSeqMax];
-    char qual0[kFlexPipeSeqMax], qual1[kFlexPipeSeqMax];
-    char name[kFlexPipeNameMax];
 
     uint64_t nReads = 0;
     star::input::CbqReadBatchView batch;
@@ -776,18 +810,24 @@ static uint64_t processCbqModuleRecords(
                 return nReads;
             }
 
-            size_t qualLen0 = 0;
-            size_t qualLen1 = 0;
-            if (!copyCbqSpanToBuffer(record.segments[0].quality, qual0, sizeof(qual0), &qualLen0) ||
-                !copyCbqSpanToBuffer(record.segments[1].quality, qual1, sizeof(qual1), &qualLen1)) {
-                P.inOut->logMain << "ERROR: Flex CBQ quality length exceeds buffer in "
+            if (record.segments[0].quality.size != readLen0Size ||
+                record.segments[1].quality.size != readLen1Size ||
+                (readLen0Size != 0 && record.segments[0].quality.data == nullptr) ||
+                (readLen1Size != 0 && record.segments[1].quality.data == nullptr)) {
+                P.inOut->logMain << "ERROR: Flex CBQ quality length does not match sequence in "
                                  << cbqPath << "\n" << std::flush;
                 module.close();
                 return nReads;
             }
             const uint32_t readLen0 = static_cast<uint32_t>(readLen0Size);
             const uint32_t readLen1 = static_cast<uint32_t>(readLen1Size);
-            copyCbqReadName(record.read_name, name, sizeof(name));
+            const char *qual0 = record.segments[0].quality.data != nullptr
+                ? record.segments[0].quality.data : dummyQual;
+            const char *qual1 = record.segments[1].quality.data != nullptr
+                ? record.segments[1].quality.data : dummyQual;
+            const char *name = record.read_name.data != nullptr ? record.read_name.data : "";
+            const size_t nameLength = std::min(record.read_name.size,
+                                               static_cast<size_t>(kFlexPipeNameMax - 1));
 
             const uint64_t localOrdinal = nReads;
             uint64_t iReadAll = deterministicReadIds
@@ -814,12 +854,11 @@ static uint64_t processCbqModuleRecords(
                 decision.action == FlexHashScreenDecision::Deny) {
 
                 char *readSeqPtrs[2]  = { dummySeq, seq1 };
-                char *readQualPtrs[2] = { dummyQual, qual1 };
+                char *readQualPtrs[2] = { dummyQual, const_cast<char *>(qual1) };
                 uint64 readLens[2]    = { 0, readLen1 };
-                std::string readNameExtra;
 
                 localBar.getCBandUMI(readSeqPtrs, readQualPtrs, readLens, readNameExtra,
-                                      static_cast<uint32_t>(laneId), name);
+                                      static_cast<uint32_t>(laneId), name, nameLength);
 
                 localBar.detectedSampleToken = detectedSampleToken;
 
@@ -845,11 +884,16 @@ static uint64_t processCbqModuleRecords(
                 ++tally.miss;
                 if (!noAlign) {
                     EnrichedPacket ep;
-                    std::memcpy(ep.name, name, kFlexPipeNameMax);
-                    std::memcpy(ep.seq[0], seq0, readLen0 + 1);
-                    std::memcpy(ep.seq[1], seq1, readLen1 + 1);
-                    std::memcpy(ep.qual[0], qual0, readLen0 + 1);
-                    std::memcpy(ep.qual[1], qual1, readLen1 + 1);
+                    std::memcpy(ep.name, name, nameLength);
+                    ep.name[nameLength] = '\0';
+                    std::memcpy(ep.seq[0], seq0, readLen0);
+                    std::memcpy(ep.seq[1], seq1, readLen1);
+                    std::memcpy(ep.qual[0], qual0, readLen0);
+                    std::memcpy(ep.qual[1], qual1, readLen1);
+                    ep.seq[0][readLen0] = '\0';
+                    ep.seq[1][readLen1] = '\0';
+                    ep.qual[0][readLen0] = '\0';
+                    ep.qual[1][readLen1] = '\0';
                     ep.readLen[0] = readLen0;
                     ep.readLen[1] = readLen1;
                     ep.iReadAll = iReadAll;
@@ -1108,17 +1152,63 @@ bool flexPrepareBgzfRangeTasks(FlexPipelineState *state, Parameters &P,
     }
 
     const int streamCount = static_cast<int>(rangeLaneIds.size()) * 2;
-    const int baseThreads = configuredWorkers / streamCount;
-    const int extraThreads = configuredWorkers % streamCount;
+    std::vector<uint64_t> streamBytes(static_cast<size_t>(streamCount), 0);
+    for (size_t laneIndex = 0; laneIndex < rangeLaneIds.size(); ++laneIndex) {
+        const int lane = rangeLaneIds[laneIndex];
+        for (int mate = 0; mate < 2; ++mate) {
+            const std::string &path =
+                P.readFilesNames[static_cast<size_t>(mate)][static_cast<size_t>(lane)];
+            struct stat info;
+            if (::stat(path.c_str(), &info) != 0 || info.st_size < 0) {
+                if (reason != nullptr) {
+                    *reason = "could not determine BGZF stream size for " + path;
+                }
+                if (fatalError != nullptr) {
+                    *fatalError = true;
+                }
+                return false;
+            }
+            streamBytes[laneIndex * 2 + static_cast<size_t>(mate)] =
+                static_cast<uint64_t>(info.st_size);
+        }
+    }
+
+    // Give every stream an asynchronous inflater when the budget permits,
+    // then place remaining workers where they reduce compressed bytes per
+    // worker the most. A zero-worker stream remains valid and inflates
+    // synchronously in its fused consumer.
+    std::vector<uint32_t> streamThreads(static_cast<size_t>(streamCount), 0);
+    int remainingWorkers = configuredWorkers;
+    if (remainingWorkers >= streamCount) {
+        std::fill(streamThreads.begin(), streamThreads.end(), 1U);
+        remainingWorkers -= streamCount;
+    }
+    while (remainingWorkers-- > 0) {
+        size_t best = 0;
+        long double bestBytesPerWorker = -1.0L;
+        for (size_t stream = 0; stream < streamBytes.size(); ++stream) {
+            const long double bytesPerWorker =
+                static_cast<long double>(streamBytes[stream]) /
+                static_cast<long double>(streamThreads[stream] + 1U);
+            if (bytesPerWorker > bestBytesPerWorker) {
+                best = stream;
+                bestBytesPerWorker = bytesPerWorker;
+            }
+        }
+        ++streamThreads[best];
+    }
+
     int streamIndex = 0;
+    uint32_t mateWorkers[2] = {0, 0};
     for (size_t laneIndex = 0; laneIndex < rangeLaneIds.size(); ++laneIndex) {
         const int lane = rangeLaneIds[laneIndex];
         star::input::BgzfStarAdapterOptions options;
         options.lane_index = static_cast<uint32_t>(lane);
-        options.mate0_reader_threads = static_cast<uint32_t>(
-            baseThreads + (streamIndex++ < extraThreads ? 1 : 0));
-        options.mate1_reader_threads = static_cast<uint32_t>(
-            baseThreads + (streamIndex++ < extraThreads ? 1 : 0));
+        options.mate0_reader_threads = streamThreads[static_cast<size_t>(streamIndex++)];
+        options.mate1_reader_threads = streamThreads[static_cast<size_t>(streamIndex++)];
+        options.store_mate0_quality = P.pSolo.flexNoAlign == 0;
+        mateWorkers[0] += options.mate0_reader_threads;
+        mateWorkers[1] += options.mate1_reader_threads;
         options.crc_check = P.bgzfCrcCheck == 1;
         if (state->dynamicPermitsEnabled) {
             options.inflate_permit_hooks.context = &kFlexBgzfPermitContext;
@@ -1163,7 +1253,8 @@ bool flexPrepareBgzfRangeTasks(FlexPipelineState *state, Parameters &P,
         std::ostringstream out;
         out << rangeLaneIds.size() << " BGZF lanes using "
             << configuredWorkers << " on-demand BC/BSIZE inflate readers and "
-            << state->bgzfReaderWorkers << " fused consumers; no pre-index";
+            << state->bgzfReaderWorkers << " fused consumers; R2/R1 inflater allocation "
+            << mateWorkers[0] << '/' << mateWorkers[1] << "; no pre-index";
         *reason = out.str();
     }
     return true;
