@@ -1,0 +1,2 @@
+status=success
+run_dir=/home/lhhung/STAR-suite-bgzf-ingest-benchmark-20260901/jax_cbq_20260905T063441Z
