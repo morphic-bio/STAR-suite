@@ -9,3 +9,4 @@ T7-off	0	Existing gzip and CBQ regressions with range mode disabled when availab
 T7-auto	3	Existing gzip and CBQ regressions with auto mode
 T8	2	Paired-mate read-name and record-count validation in the STAR adapter
 T9	3	Fully-fused alignment mode drains alignQ without a reserved consumer (deadlock regression)
+T10	4	Paper-scoped Flex BGZF coordinate-sorted BAM parity and negative gates

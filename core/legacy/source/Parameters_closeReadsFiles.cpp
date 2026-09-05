@@ -2,6 +2,7 @@
 #include "ErrorWarning.h"
 #include "input/CbqInputModule.h"
 #include "input/FastxInputModule.h"
+#include "input/BgzfStarAdapter.h"
 #include <fstream>
 #include <sys/stat.h>
 #include <cerrno>
@@ -9,6 +10,10 @@
 #include <sys/wait.h>
 
 void Parameters::closeReadsFiles() {
+    bgzfCoreInputAdapter.reset();
+    bgzfCoreExhausted = false;
+    bgzfCoreLaneIndex = 0;
+
     if (fastxInputActive && fastxInputModule) {
         fastxInputModule->close();
         fastxInputPendingRecordValid = false;

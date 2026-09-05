@@ -2,6 +2,7 @@
 #include "ErrorWarning.h"
 #include "input/CbqInputModule.h"
 #include "input/FastxInputModule.h"
+#include "input/BgzfBlockReader.h"
 #include <fstream>
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -174,6 +175,105 @@ bool cbqCoreRangeGateReject(Parameters& P, string& reason) {
     return false;
 }
 
+bool bgzfCoreSortedBamGateReject(Parameters& P, string& reason) {
+    auto reject = [&](const string& message) {
+        reason = message;
+        return true;
+    };
+
+    if (P.readFilesBgzfMode == "off") {
+        return reject("disabled by --readFilesBgzfMode off");
+    }
+    if (P.readFilesBgzfMode != "auto" && P.readFilesBgzfMode != "range") {
+        return reject("unrecognized --readFilesBgzfMode=" + P.readFilesBgzfMode);
+    }
+    if (P.runMode != "alignReads") {
+        return reject("runMode is not alignReads");
+    }
+    if (P.readFilesTypeN != 1 || P.readNends != 2) {
+        return reject("input is not paired Fastx");
+    }
+    const bool flexRequested = P.pSolo.flexMode ||
+        lowerCopyLocal(P.pSolo.flexModeStr) == "yes";
+    const string inlineHashMode = lowerCopyLocal(P.pSolo.inlineHashModeStr);
+    const bool inlineHashRequested = P.pSolo.inlineHashMode ||
+        inlineHashMode.empty() || inlineHashMode == "auto" || inlineHashMode == "yes";
+    if (!flexRequested || !inlineHashRequested) {
+        return reject("input is not the Flex inline-hash path");
+    }
+    const bool sortedBamOnly = !P.outSAMtype.empty() &&
+        P.outSAMtype[0] == "BAM" && P.outBAMcoord &&
+        !P.outBAMunsorted && !P.outSAMbool;
+    if (!sortedBamOnly) {
+        return reject("output is not coordinate-sorted BAM only");
+    }
+    if (!P.readFilesUseInternalGzip || P.readFilesLegacyZcat) {
+        return reject("input uses an explicit or legacy read-files command");
+    }
+    if (P.emitYNoYyes || P.emitYNoYFastqyes || P.emitYNoYCbqyes) {
+        return reject("Y/noY sidecar emission is order-dependent");
+    }
+    if (P.outSAMorder == "PairedKeepInputOrder") {
+        return reject("--outSAMorder PairedKeepInputOrder is order-dependent");
+    }
+    if (P.batchMode || P.batchModeInt != 0 || P.quant.slam.batchMode ||
+        P.quant.slam.batchModeInt != 0) {
+        return reject("batch mode is outside the paper-scoped BGZF BAM path");
+    }
+    if (P.quant.slam.yes || P.quant.slam.autoTrimDetectionPass ||
+        P.quant.slam.perFileProcessing || P.quant.slam.skipToFileIndex > 0) {
+        return reject("SLAM processing is outside the paper-scoped BGZF BAM path");
+    }
+    if (P.twoPass.yes || P.sjdbInsert.yes || P.outFilterBySJoutStage != 0 ||
+        P.outFilterType == "BySJout") {
+        return reject("multi-pass alignment is outside the paper-scoped BGZF BAM path");
+    }
+    if (P.quant.trSAM.bamYes) {
+        return reject("transcriptome BAM output is outside the paper-scoped BGZF BAM path");
+    }
+    if (P.soloSpatialR1FastqTapEnabled || P.spatialR1FastqTapWriter != nullptr) {
+        return reject("the spatial raw-R1 tap requires the established Fastx path");
+    }
+    if (P.readFilesN == 0 || P.readFilesNames.size() != 2 ||
+        P.readFilesNames[0].size() != P.readFilesN ||
+        P.readFilesNames[1].size() != P.readFilesN) {
+        return reject("paired FASTQ lane lists are incomplete");
+    }
+    reason.clear();
+    return false;
+}
+
+bool prepareBgzfCoreSortedBam(Parameters& P, string& reason) {
+    P.bgzfCoreInputAdapter.reset();
+    P.bgzfCoreActive = false;
+    P.bgzfCoreExhausted = false;
+    P.bgzfCoreLaneIndex = 0;
+
+    if (bgzfCoreSortedBamGateReject(P, reason)) {
+        return false;
+    }
+    for (uint32 lane = 0; lane < P.readFilesN; ++lane) {
+        for (uint32 mate = 0; mate < 2; ++mate) {
+            star::input::BgzfDetection detection;
+            string inputError;
+            const string& path = P.readFilesNames[mate][lane];
+            if (!star::input::detect_bgzf(path, &detection, &inputError)) {
+                reason = "lane " + to_string(lane) + ", mate " +
+                    to_string(mate + 1) + ": " + inputError;
+                return false;
+            }
+            if (!detection.isBgzf) {
+                reason = "lane " + to_string(lane) + ", mate " +
+                    to_string(mate + 1) + " is plain gzip, not BGZF";
+                return false;
+            }
+        }
+    }
+    P.bgzfCoreActive = true;
+    reason.clear();
+    return true;
+}
+
 bool prepareCbqCoreRangeTasks(Parameters& P,
                               const star::input::InputSourcePlan& cbqInputPlan,
                               string& reason) {
@@ -298,6 +398,29 @@ void Parameters::openReadsFiles()
                << "Do not include index reads (I1/I2) in --readFilesIn.\n";
         exitWithError(errOut.str(), std::cerr, inOut->logMain, EXIT_CODE_PARAMETER, *this);
     };
+
+    string bgzfCoreReason;
+    if (prepareBgzfCoreSortedBam(*this, bgzfCoreReason)) {
+        for (uint imate = 0; imate < MAX_N_MATES; ++imate) {
+            readFilesCommandPID[imate] = 0;
+            if (inOut->readIn[imate].is_open()) {
+                inOut->readIn[imate].close();
+            }
+        }
+        readFilesIndex = 0;
+        inOut->logMain << "BGZF core range reader: active for paired Flex coordinate-sorted BAM ("
+                       << readFilesN << " lane" << (readFilesN == 1 ? "" : "s")
+                       << "; no index or prescan)\n";
+        return;
+    }
+    const bool bgzfCoreCandidate = readFilesTypeN == 1 &&
+        (pSolo.flexMode || lowerCopyLocal(pSolo.flexModeStr) == "yes") &&
+        !outSAMtype.empty() && outSAMtype[0] == "BAM" && outBAMcoord;
+    if (readFilesBgzfMode == "auto" && bgzfCoreCandidate) {
+        inOut->logMain << "BGZF core range reader: not active ("
+                       << (bgzfCoreReason.empty() ? "gate rejected command" : bgzfCoreReason)
+                       << "); using established Fastx reader\n";
+    }
 
     if (readFilesTypeN == 1 && fastxInputActive) {
         for (uint imate = 0; imate < MAX_N_MATES; imate++) {

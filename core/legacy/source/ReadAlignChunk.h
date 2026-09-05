@@ -10,6 +10,7 @@
 #include "Quantifications.h"
 #include "input/CbqStarAdapter.h"
 #include "input/CbqYNoYWriter.h"
+#include "input/BgzfStarAdapter.h"
 
 // Forward declaration
 namespace libem {
@@ -32,6 +33,8 @@ public:
 
     star::input::CbqStarChunk cbqStarChunk;
     uint64 cbqChunkReadN;
+    std::vector<star::input::BgzfStarRecord> bgzfStarRecords;
+    star::input::BgzfStarBatchLease bgzfStarLease;
     
     char *chunkOutBAM, *chunkOutBAM1;//space for the chunk of output SAM
     OutSJ *chunkOutSJ, *chunkOutSJ1;

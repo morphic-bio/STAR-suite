@@ -8,6 +8,7 @@
 #include "input/CbqInputModule.h"
 #include "input/FastxInputModule.h"
 #include "input/CbqStarAdapter.h"
+#include "input/BgzfStarAdapter.h"
 #include "SpatialR1FastqTap.h"
 #include <algorithm>
 #include <array>
@@ -17,6 +18,7 @@
 #include <fstream>
 #include <pthread.h>
 #include <sstream>
+#include <sys/stat.h>
 
 inline uint64 fastqReadOneLine(ifstream &streamIn, char *arrIn);
 inline void removeStringEndControl(string &str);
@@ -149,6 +151,9 @@ const char* inputChunkTracePath() {
 }
 
 const char* inputChunkTraceSource(const Parameters& P) {
+    if (P.bgzfCoreActive) {
+        return "bgzf-core";
+    }
     if (P.readFilesTypeN == 20 && P.cbqInputActive) {
         return "cbq";
     }
@@ -237,6 +242,197 @@ bool cbqRecordFits(ReadAlignChunk& chunk,
     }
 
     return true;
+}
+
+[[noreturn]] void exitBgzfCoreError(ReadAlignChunk& chunk,
+                                    const string& message,
+                                    const string& detail = string()) {
+    ostringstream errOut;
+    errOut << ERROR_OUT << " EXITING because of FATAL ERROR in Flex BGZF core input\n"
+           << message << "\n";
+    if (!detail.empty()) {
+        errOut << detail << "\n";
+    }
+    exitWithError(errOut.str(), std::cerr, chunk.P.inOut->logMain,
+                  EXIT_CODE_INPUT_FILES, chunk.P);
+}
+
+bool openBgzfCoreLane(Parameters& P, string& error) {
+    if (P.bgzfCoreLaneIndex >= P.readFilesN) {
+        error = "BGZF core lane index exceeds the input lane count";
+        return false;
+    }
+
+    uint64_t compressedBytes[2] = {0, 0};
+    for (uint32 mate = 0; mate < 2; ++mate) {
+        const string& path = P.readFilesNames[mate][P.bgzfCoreLaneIndex];
+        struct stat info;
+        if (::stat(path.c_str(), &info) != 0 || info.st_size < 0) {
+            error = "could not determine BGZF stream size for " + path;
+            return false;
+        }
+        compressedBytes[mate] = static_cast<uint64_t>(info.st_size);
+    }
+
+    int remaining = P.bgzfReaderThreads == 0 ? P.runThreadN : P.bgzfReaderThreads;
+    remaining = std::max(0, remaining);
+    uint32_t readerThreads[2] = {0, 0};
+    if (remaining >= 2) {
+        readerThreads[0] = 1;
+        readerThreads[1] = 1;
+        remaining -= 2;
+    }
+    while (remaining-- > 0) {
+        const long double mate0Load = static_cast<long double>(compressedBytes[0]) /
+            static_cast<long double>(readerThreads[0] + 1U);
+        const long double mate1Load = static_cast<long double>(compressedBytes[1]) /
+            static_cast<long double>(readerThreads[1] + 1U);
+        ++readerThreads[mate1Load > mate0Load ? 1 : 0];
+    }
+
+    star::input::BgzfStarAdapterOptions options;
+    options.lane_index = P.bgzfCoreLaneIndex;
+    options.mate0_reader_threads = readerThreads[0];
+    options.mate1_reader_threads = readerThreads[1];
+    options.crc_check = P.bgzfCrcCheck == 1;
+    options.store_mate0_quality = true;
+    options.store_mate1_quality = true;
+    options.validate_read_names = false;
+    options.parse_illumina_filter = true;
+
+    P.bgzfCoreInputAdapter.reset(new star::input::BgzfStarAdapter());
+    if (!P.bgzfCoreInputAdapter->open(
+            P.readFilesNames[0][P.bgzfCoreLaneIndex],
+            P.readFilesNames[1][P.bgzfCoreLaneIndex],
+            options, &error)) {
+        P.bgzfCoreInputAdapter.reset();
+        return false;
+    }
+    P.readFilesIndex = static_cast<int>(P.bgzfCoreLaneIndex);
+    P.inOut->logMain << "BGZF core input lane " << P.bgzfCoreLaneIndex
+                     << ": reader workers mate1/mate2="
+                     << readerThreads[0] << "/" << readerThreads[1] << "\n";
+    return true;
+}
+
+uint64 bgzfCoreHeaderBytes(const Parameters& P,
+                           const star::input::BgzfStarRecord& record,
+                           uint64 ordinal) {
+    const uint64 nameBytes = P.outSAMreadIDnumber
+        ? decimalDigitCount(ordinal)
+        : static_cast<uint64>(record.read_name_length);
+    return 1 + nameBytes + 1 + decimalDigitCount(ordinal) + 1 + 1 + 1 +
+        decimalDigitCount(record.lane_index) + 1;
+}
+
+uint64 appendBgzfCoreBatch(ReadAlignChunk& chunk,
+                           size_t recordCount,
+                           uint64 globalFirst) {
+    Parameters& P = chunk.P;
+    chunk.cbqStarChunk.reads.reserve(recordCount);
+    chunk.cbqStarChunk.mates.reserve(recordCount * 2);
+    uint64 workBytes = 0;
+
+    for (size_t index = 0; index < recordCount; ++index) {
+        star::input::BgzfStarRecord& source = chunk.bgzfStarRecords[index];
+        source.read_ordinal = globalFirst + index + 1;
+        source.lane_index = P.bgzfCoreLaneIndex;
+        if (source.read_name_length != 0 && source.mates[0].name_data() == nullptr) {
+            exitBgzfCoreError(chunk, "BGZF record has no read-name storage");
+        }
+
+        star::input::CbqStarChunkRead read;
+        read.read_name.data = source.mates[0].name_data();
+        read.read_name.size = source.read_name_length;
+        read.lane_index = source.lane_index;
+        read.read_ordinal = source.read_ordinal;
+        read.read_filter = source.read_filter;
+        read.mate_offset = static_cast<uint32_t>(chunk.cbqStarChunk.mates.size());
+        read.mate_count = 2;
+        read.has_quality = true;
+        chunk.cbqStarChunk.reads.push_back(read);
+
+        const uint64 headerBytes = bgzfCoreHeaderBytes(P, source, source.read_ordinal);
+        for (uint32 mateIndex = 0; mateIndex < 2; ++mateIndex) {
+            const star::input::BgzfFastqRecord& sourceMate = source.mates[mateIndex];
+            if (sourceMate.sequenceLength != sourceMate.qualityLength ||
+                (sourceMate.sequenceLength != 0 &&
+                 (sourceMate.sequence_data() == nullptr || sourceMate.quality_data() == nullptr))) {
+                exitBgzfCoreError(chunk, "BGZF record has inconsistent sequence/quality storage");
+            }
+            star::input::CbqStarChunkMate mate;
+            mate.sequence.data = sourceMate.sequence_data();
+            mate.sequence.size = sourceMate.sequenceLength;
+            mate.quality.data = sourceMate.quality_data();
+            mate.quality.size = sourceMate.qualityLength;
+            mate.length = sourceMate.sequenceLength;
+            mate.original_length = sourceMate.sequenceLength;
+            mate.clip_info_5p = '+';
+            mate.clip_info_5p_prepared = true;
+            mate.has_quality = true;
+            chunk.cbqStarChunk.mates.push_back(mate);
+
+            const uint64 mateBytes = headerBytes + sourceMate.sequenceLength + 1 +
+                2 + sourceMate.qualityLength + 1;
+            chunk.chunkInSizeBytesTotal[mateIndex] += mateBytes;
+            workBytes += mateBytes;
+        }
+    }
+    chunk.cbqChunkReadN = recordCount;
+    return workBytes;
+}
+
+uint64 fillBgzfCoreChunk(ReadAlignChunk& chunk) {
+    Parameters& P = chunk.P;
+    chunk.bgzfStarLease.clear();
+
+    while (!P.bgzfCoreExhausted) {
+        if (P.iReadAll == P.readMapNumber) {
+            P.bgzfCoreExhausted = true;
+            P.bgzfCoreInputAdapter.reset();
+            break;
+        }
+        if (P.bgzfCoreLaneIndex >= P.readFilesN) {
+            P.bgzfCoreExhausted = true;
+            P.bgzfCoreInputAdapter.reset();
+            break;
+        }
+        if (!P.bgzfCoreInputAdapter) {
+            string openError;
+            if (!openBgzfCoreLane(P, openError)) {
+                exitBgzfCoreError(chunk, "could not open a BGZF lane adapter", openError);
+            }
+        }
+
+        size_t capacity = chunk.bgzfStarRecords.size();
+        if (P.readMapNumber != static_cast<uint>(-1)) {
+            const uint64 remaining = static_cast<uint64>(P.readMapNumber) - P.iReadAll;
+            capacity = std::min<size_t>(capacity, static_cast<size_t>(remaining));
+        }
+        size_t recordsReturned = 0;
+        string inputError;
+        const star::input::InputStatus status = P.bgzfCoreInputAdapter->next_records(
+            chunk.bgzfStarRecords.data(), capacity, &recordsReturned,
+            &inputError, &chunk.bgzfStarLease);
+        if (status == star::input::InputStatus::Error) {
+            exitBgzfCoreError(chunk, "BGZF lane reader failed", inputError);
+        }
+        if (status == star::input::InputStatus::End) {
+            P.bgzfCoreInputAdapter.reset();
+            ++P.bgzfCoreLaneIndex;
+            continue;
+        }
+        if (recordsReturned == 0) {
+            exitBgzfCoreError(chunk, "BGZF lane reader returned an empty record batch");
+        }
+
+        const uint64 globalFirst = P.iReadAll;
+        const uint64 workBytes = appendBgzfCoreBatch(chunk, recordsReturned, globalFirst);
+        P.iReadAll += static_cast<uint>(recordsReturned);
+        P.readFilesIndex = static_cast<int>(P.bgzfCoreLaneIndex);
+        return workBytes;
+    }
+    return 0;
 }
 
 bool fastxRecordFits(ReadAlignChunk& chunk,
@@ -760,7 +956,9 @@ void ReadAlignChunk::processChunks() {//read-map-write chunks
             cbqChunkReadN = 0;
             const uint64_t chunkReadStart = P.iReadAll;
             
-            if (P.readFilesTypeN == 20 && P.cbqInputActive) {
+            if (P.bgzfCoreActive) {
+                chunkWorkBytes = fillBgzfCoreChunk(*this);
+            } else if (P.readFilesTypeN == 20 && P.cbqInputActive) {
                 while (fastxChunkUnderTarget(*this) &&
                        !P.cbqInputExhausted && P.iReadAll != P.readMapNumber) {
                     if (!P.cbqInputPendingBatch ||
@@ -1137,7 +1335,7 @@ void ReadAlignChunk::processChunks() {//read-map-write chunks
                 };
             };
             }
-            if (P.readFilesTypeN != 20 && P.readNends == 2U) {
+            if (!P.bgzfCoreActive && P.readFilesTypeN != 20 && P.readNends == 2U) {
                 const bool m0Empty = (chunkInSizeBytesTotal[0] == 0ULL);
                 const bool m1Empty = (chunkInSizeBytesTotal[1] == 0ULL);
                 if (m0Empty != m1Empty) {
@@ -1159,7 +1357,7 @@ void ReadAlignChunk::processChunks() {//read-map-write chunks
                     exitWithError(errOut.str(), std::cerr, P.inOut->logMain, EXIT_CODE_INPUT_FILES, P);
                 }
             }
-            if (P.readFilesTypeN == 20 && P.cbqInputActive) {
+            if (P.bgzfCoreActive || (P.readFilesTypeN == 20 && P.cbqInputActive)) {
                 if (cbqChunkReadN == 0) {
                     noReadsLeft=true;
                     iChunkIn=g_threadChunks.chunkInN;
@@ -1179,12 +1377,12 @@ void ReadAlignChunk::processChunks() {//read-map-write chunks
                 g_threadChunks.chunkInN++;
             };
 
-            if (!(P.readFilesTypeN == 20 && P.cbqInputActive)) {
+            if (!P.bgzfCoreActive && !(P.readFilesTypeN == 20 && P.cbqInputActive)) {
                 for (uint imate=0; imate<P.readNends; imate++)
                     chunkIn[imate][chunkInSizeBytesTotal[imate]]='\n';//extra empty line at the end of the chunks
             }
             chunkReadN = P.iReadAll - chunkReadStart;
-            if (!(P.readFilesTypeN == 20 && P.cbqInputActive)) {
+            if (!P.bgzfCoreActive && !(P.readFilesTypeN == 20 && P.cbqInputActive)) {
                 for (uint imate=0; imate<P.readNends; imate++) {
                     chunkWorkBytes += chunkInSizeBytesTotal[imate];
                 }
@@ -1225,7 +1423,7 @@ void ReadAlignChunk::processChunks() {//read-map-write chunks
         }
         const auto workStart = std::chrono::steady_clock::now();
         const uint64_t readCountBefore = RA->iRead;
-        if (P.readFilesTypeN == 20 && P.cbqInputActive) {
+        if (P.bgzfCoreActive || (P.readFilesTypeN == 20 && P.cbqInputActive)) {
             mapCbqChunk();
         } else {
             mapChunk();
