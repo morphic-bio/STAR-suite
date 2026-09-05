@@ -1,3 +1,10 @@
+STAR-suite fused input and MEX performance --- 2026/09/05
+=========================================================
+* Reduced copying and allocation in fully fused STAR-Flex BGZF and plain-gzip FASTQ ingest while preserving exact pairing, bounded malformed-input handling, and the existing serial zlib path for plain gzip.
+* Added leased fixed buffers and a bounded completion ring so parallel BGZF producers can continue inflating while consumers process completed batches.
+* Added direct packed CBQ probe and barcode extraction with native-order hash tables for the no-alignment fused path, avoiding intermediate ASCII sequence materialization.
+* Added bounded block-mapped, parallel Matrix Market output and parallel per-sample MEX generation while preserving byte-identical file order.
+
 STAR-suite Flex correctness and sorted-run pipeline --- 2026/09/04
 =================================================================
 * Fixed fully fused residual-alignment queue progress and added BGZF mate-name validation.
