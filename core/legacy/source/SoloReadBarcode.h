@@ -45,6 +45,11 @@ public:
     void getCBandUMI(char **readSeq, char **readQual, uint64 *readLen,
                      const string &readNameExtraIn, const uint32 &readFilesIndex,
                      const char *readName, uint64 readNameLength=UINT64_MAX);
+    // Handle the common exact/unique-H1 simple-barcode case directly from
+    // LSB-first two-bit CB/UMI values. Returns false when the existing string
+    // path is required (ambiguous/N/unsupported configuration).
+    bool getCBandUMIPackedFast(uint64 cbPackedLsb, uint64 umiPackedLsb,
+                               const char *barcodeQual, uint64 barcodeReadLength);
     void addCounts(const SoloReadBarcode &rfIn);
     void addStats(const SoloReadBarcode &rfIn);
     void statsOut(ofstream &streamOut);

@@ -29,6 +29,9 @@ public:
     // Match a pre-packed 8-base BAM-encoded tag (packed at position 0, length 8) against sample codes.
     // Used when the caller already extracted the 8 bases at sampleProbeOffset.
     uint32_t detectSampleFromPackedTag(const uint8_t *packedTag8) const;
+    // Match eight A/C/G/T bases encoded with base 0 in the least-significant
+    // two bits (A=0, C=1, G=2, T=3), as stored by CBQ.
+    uint32_t detectSampleFromTwoBitTag(uint16_t packedTag8) const;
 
     // Convenience helper: parse a BAM record and detect the sample index from its sequence.
     // The record pointer must reference the beginning of a BAM alignment (block_size field first).
@@ -99,6 +102,8 @@ private:
             default: return 0u;
         }
     }
+
+    uint32_t detectSampleCode(uint32_t code) const;
 
     static bool encodeStringToCode(const std::string &s, uint32_t &out);
 };

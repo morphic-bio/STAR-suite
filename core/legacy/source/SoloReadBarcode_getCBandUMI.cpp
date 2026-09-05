@@ -190,6 +190,100 @@ bool SoloReadBarcode::convertCheckUMI()
     return true;
 };
 
+namespace {
+
+inline uint64_t reverseTwoBitGroupsBarcode(uint64_t value) {
+    value = ((value & UINT64_C(0x3333333333333333)) << 2) |
+            ((value >> 2) & UINT64_C(0x3333333333333333));
+    value = ((value & UINT64_C(0x0F0F0F0F0F0F0F0F)) << 4) |
+            ((value >> 4) & UINT64_C(0x0F0F0F0F0F0F0F0F));
+#if defined(__GNUC__) || defined(__clang__)
+    return __builtin_bswap64(value);
+#else
+    value = ((value & UINT64_C(0x00FF00FF00FF00FF)) << 8) |
+            ((value >> 8) & UINT64_C(0x00FF00FF00FF00FF));
+    value = ((value & UINT64_C(0x0000FFFF0000FFFF)) << 16) |
+            ((value >> 16) & UINT64_C(0x0000FFFF0000FFFF));
+    return (value << 32) | (value >> 32);
+#endif
+}
+
+inline uint64_t packedLsbToLegacyUmi(uint64_t value, uint32_t length) {
+    const uint64_t reversed = reverseTwoBitGroupsBarcode(value);
+    return length == 32 ? reversed : reversed >> (64U - length * 2U);
+}
+
+} // namespace
+
+bool SoloReadBarcode::getCBandUMIPackedFast(uint64 cbPackedLsb,
+                                             uint64 umiPackedLsb,
+                                             const char *barcodeQual,
+                                             uint64 barcodeReadLength) {
+    if (pSolo.type != pSolo.SoloTypes::CB_UMI_Simple ||
+        pSolo.CBtype.type != 1 || !pSolo.inlineCBCorrection ||
+        OcmMultiMaterialize::isFlexBarcodeMode(P) || barcodeQual == nullptr ||
+        pSolo.cbL == 0 || pSolo.cbL > 32 || pSolo.umiL == 0 || pSolo.umiL > 32 ||
+        (pSolo.bL > 0 && barcodeReadLength != pSolo.bL) ||
+        (pSolo.bL == 0 && barcodeReadLength < pSolo.cbumiL) ||
+        pSolo.cbS == 0 || pSolo.umiS == 0 ||
+        pSolo.cbS - 1U + pSolo.cbL > barcodeReadLength ||
+        pSolo.umiS - 1U + pSolo.umiL > barcodeReadLength) {
+        return false;
+    }
+
+    uint32_t correctedIndex1 = 0;
+    const int correction = InlineCBCorrection::fastPathCorrectionPacked(
+        cbPackedLsb, correctedIndex1);
+    if (correction < 0 || correctedIndex1 == 0 ||
+        correctedIndex1 > pSolo.cbWLstr.size()) {
+        return false;
+    }
+
+    urSeq.clear();
+    urPacked = pSolo.umiL == 12
+        ? static_cast<uint32_t>(umiPackedLsb & UINT64_C(0xFFFFFF))
+        : UINT32_MAX;
+    urValid = urPacked != UINT32_MAX;
+
+    bSeq.clear();
+    bQual.clear();
+    cbSeq.clear();
+    umiSeq.clear();
+    cbQual.clear();
+    umiQual.clear();
+    cbMatchQual.clear();
+    cbMatchInd.clear();
+
+    cbMatch = correction;
+    cbSeqCorrected.clear();
+    cbMatchInd.push_back(static_cast<uint64>(correctedIndex1 - 1U));
+    cbMatchString.clear();
+    InlineCBCorrection::recordParentEvidence(correctedIndex1);
+    if (correction == 0) {
+        FLEX_COUNT_INC(inlineCbExact);
+    } else {
+        FLEX_COUNT_INC(inlineCbCorrected);
+    }
+
+    const uint64 cbQualBegin = pSolo.cbS - 1U;
+    for (uint32_t ii = 0; ii < pSolo.cbL; ++ii) {
+        qualHist[static_cast<uint8>(barcodeQual[cbQualBegin + ii])]++;
+    }
+    const uint64 umiQualBegin = pSolo.umiS - 1U;
+    for (uint32_t ii = 0; ii < pSolo.umiL; ++ii) {
+        qualHist[static_cast<uint8>(barcodeQual[umiQualBegin + ii])]++;
+    }
+
+    umiB = packedLsbToLegacyUmi(umiPackedLsb, pSolo.umiL);
+    if (umiB == homoPolymer[0] || umiB == homoPolymer[1] ||
+        umiB == homoPolymer[2] || umiB == homoPolymer[3]) {
+        umiCheck = -24;
+    }
+
+    addStats(cbMatch);
+    return true;
+}
+
 //////////////////////////////////////////////////////////////////////////////////////
 void SoloReadBarcode::getCBandUMI(char **readSeq, char **readQual, uint64 *readLen,
                                  const string &readNameExtraIn,

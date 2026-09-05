@@ -466,22 +466,37 @@ int InlineCBCorrection::fastPathCorrection(const std::string &cbSeq, std::string
         }
     }
     
-    std::vector<std::string> matches;
-    int nMatches = findClosestBarcodes(cbSeq, matches);
-    
-    if (nMatches == 0) {
-        return -1;  // No match
-    } else if (nMatches == 1) {
-        correctedCB = matches[0];
-        // Check if it's exact match or correction
-        if (matches[0] == cbSeq) {
-            return 0;  // Exact match
-        } else {
-            return 1;  // Single variant corrected
-        }
-    } else {
-        return -1;  // Multiple matches - ambiguous (will be handled in Phase 3)
+    const uint64_t packed = encodeCB(cbSeq);
+    uint32_t correctedIndex1 = 0;
+    const int result = fastPathCorrectionPacked(packed, correctedIndex1);
+    if (result >= 0 && wlStrings_ != nullptr && correctedIndex1 >= 1 &&
+        correctedIndex1 <= wlStrings_->size()) {
+        correctedCB = (*wlStrings_)[correctedIndex1 - 1];
+        return result;
     }
+    return -1;
+}
+
+int InlineCBCorrection::fastPathCorrectionPacked(uint64_t packedCB,
+                                                  uint32_t &correctedIndex1) {
+    correctedIndex1 = 0;
+    if (!whitelistInitialized_ || packedCB == UINT64_MAX ||
+        exactHash_ == nullptr || variantHash_ == nullptr) {
+        return -1;
+    }
+
+    khiter_t it = kh_get(cbwl, exactHash_, packedCB);
+    if (it != kh_end(exactHash_)) {
+        correctedIndex1 = kh_val(exactHash_, it);
+        return correctedIndex1 == 0 ? -1 : 0;
+    }
+
+    it = kh_get(cbwl, variantHash_, packedCB);
+    if (it == kh_end(variantHash_)) {
+        return -1;
+    }
+    correctedIndex1 = kh_val(variantHash_, it);
+    return correctedIndex1 == 0 ? -1 : 1;
 }
 
 // Check sequence for Ns and correct if possible (Phase 2)

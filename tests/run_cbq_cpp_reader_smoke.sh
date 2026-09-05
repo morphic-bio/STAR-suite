@@ -194,6 +194,7 @@ fi
 
 "$CBQ_BIN" --readNameSeparator / \
     --mateCount 2 \
+    --verify-packed-windows \
     --readFilesIn "$CBQ" \
     > "$OUT_ROOT/dumps/cbq_reader_pair.tsv"
 compare_contract_tsv_unordered "$OUT_ROOT/dumps/source_fastq_pair.tsv" "$OUT_ROOT/dumps/cbq_reader_pair.tsv"
@@ -212,6 +213,7 @@ cmp -s "$OUT_ROOT/dumps/cbq_star_pair.direct.bin" "$OUT_ROOT/dumps/cbq_star_pair
 
 "$CBQ_BIN" --readNameSeparator / \
     --mateCount 2 \
+    --verify-packed-windows \
     --readFilesIn "$CBQ_LEVEL0" \
     > "$OUT_ROOT/dumps/cbq_reader_pair_level0.tsv"
 compare_contract_tsv_unordered "$OUT_ROOT/dumps/source_fastq_pair.tsv" "$OUT_ROOT/dumps/cbq_reader_pair_level0.tsv"
@@ -241,6 +243,7 @@ compare_contract_tsv_unordered "$OUT_ROOT/dumps/source_fastq_pair.tsv" "$OUT_ROO
 
 "$CBQ_BIN" --readNameSeparator / \
     --mateCount 1 \
+    --verify-packed-windows \
     --readFilesIn "$SE_CBQ" \
     > "$OUT_ROOT/dumps/cbq_reader_single.tsv"
 compare_contract_tsv_unordered "$OUT_ROOT/dumps/source_fastq_single.tsv" "$OUT_ROOT/dumps/cbq_reader_single.tsv"
@@ -259,6 +262,7 @@ cmp -s "$OUT_ROOT/dumps/cbq_star_single.direct.bin" "$OUT_ROOT/dumps/cbq_star_si
 
 "$CBQ_BIN" --readNameSeparator / \
     --mateCount 1 \
+    --verify-packed-windows \
     --readFilesIn "$SE_CBQ_LEVEL0" \
     > "$OUT_ROOT/dumps/cbq_reader_single_level0.tsv"
 compare_contract_tsv_unordered "$OUT_ROOT/dumps/source_fastq_single.tsv" "$OUT_ROOT/dumps/cbq_reader_single_level0.tsv"
