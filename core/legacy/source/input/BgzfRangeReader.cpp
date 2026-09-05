@@ -39,6 +39,27 @@ void BgzfBatchLease::retain(
     }
 }
 
+void BgzfFastqRecord::ensure_owned_fields() {
+    if (ownedFields == nullptr) {
+        ownedFields.reset(new BgzfFastqOwnedFields);
+    }
+}
+
+char* BgzfFastqRecord::name_storage() {
+    ensure_owned_fields();
+    return ownedFields->name;
+}
+
+char* BgzfFastqRecord::sequence_storage() {
+    ensure_owned_fields();
+    return ownedFields->sequence;
+}
+
+char* BgzfFastqRecord::quality_storage() {
+    ensure_owned_fields();
+    return ownedFields->quality;
+}
+
 BgzfRangeReader::BgzfRangeReader() = default;
 
 BgzfRangeReader::~BgzfRangeReader() {
@@ -607,7 +628,7 @@ bool BgzfRangeReader::read_name_token(BgzfFastqRecord* record,
                 record->nameView = reinterpret_cast<const char*>(begin + token_begin);
                 lease->retain(buffer_);
             } else if (token_part_size != 0) {
-                std::memcpy(record->name + record->nameLength,
+                std::memcpy(record->name_storage() + record->nameLength,
                             begin + token_begin, token_part_size);
             }
             record->nameLength += static_cast<uint16_t>(token_part_size);
@@ -632,6 +653,7 @@ bool BgzfRangeReader::parse_record(BgzfFastqRecord* record, std::string* error,
         return set_error(error, "BGZF FASTQ record destination is null");
     }
     record->nameView = nullptr;
+    record->sequenceView = nullptr;
     record->qualityView = nullptr;
     const unsigned char *line = nullptr;
     size_t line_size = 0;
@@ -654,14 +676,17 @@ bool BgzfRangeReader::parse_record(BgzfFastqRecord* record, std::string* error,
             return set_error(error, message.str());
         }
         record->nameLength = static_cast<uint16_t>(line_size - 1);
+        char* name_storage = record->name_storage();
         if (record->nameLength != 0) {
-            std::memcpy(record->name, line + 1, record->nameLength);
+            std::memcpy(name_storage, line + 1, record->nameLength);
         }
     } else if (!read_name_token(record, true, error, lease)) {
         return false;
     }
 
-    if (!read_line_view(&line, &line_size, false, error)) {
+    bool sequence_is_buffer_view = false;
+    if (!read_line_view(&line, &line_size, false, error,
+                        &sequence_is_buffer_view)) {
         return false;
     }
     if (line_size > kBgzfFastqSequenceCapacity) {
@@ -672,8 +697,11 @@ bool BgzfRangeReader::parse_record(BgzfFastqRecord* record, std::string* error,
         return set_error(error, message.str());
     }
     record->sequenceLength = static_cast<uint16_t>(line_size);
-    if (line_size != 0) {
-        std::memcpy(record->sequence, line, line_size);
+    if (lease != nullptr && sequence_is_buffer_view) {
+        record->sequenceView = reinterpret_cast<const char*>(line);
+        lease->retain(buffer_);
+    } else if (line_size != 0) {
+        std::memcpy(record->sequence_storage(), line, line_size);
     }
 
     if (!read_line_view(&line, &line_size, false, error)) {
@@ -704,7 +732,7 @@ bool BgzfRangeReader::parse_record(BgzfFastqRecord* record, std::string* error,
             record->qualityView = reinterpret_cast<const char*>(line);
             lease->retain(buffer_);
         } else {
-            std::memcpy(record->quality, line, line_size);
+            std::memcpy(record->quality_storage(), line, line_size);
         }
     }
     if (record->sequenceLength != record->qualityLength) {

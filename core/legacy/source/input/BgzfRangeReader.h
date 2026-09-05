@@ -38,29 +38,53 @@ private:
     std::vector<std::shared_ptr<std::vector<unsigned char>>> buffers_;
 };
 
-struct BgzfFastqRecord {
+struct BgzfFastqOwnedFields {
     char name[kBgzfFastqNameCapacity];
     char sequence[kBgzfFastqSequenceCapacity];
     char quality[kBgzfFastqSequenceCapacity];
+};
+
+struct BgzfFastqRecord {
     uint16_t nameLength = 0;
     uint16_t sequenceLength = 0;
     uint16_t qualityLength = 0;
     uint64_t ordinal = 0;
     const char* nameView = nullptr;
+    const char* sequenceView = nullptr;
     const char* qualityView = nullptr;
+    std::unique_ptr<BgzfFastqOwnedFields> ownedFields;
 
     const char* name_data() const {
-        return nameView == nullptr ? name : nameView;
+        return nameView != nullptr ? nameView
+                                   : ownedFields == nullptr ? nullptr
+                                                            : ownedFields->name;
+    }
+    const char* sequence_data() const {
+        return sequenceView != nullptr ? sequenceView
+                                       : ownedFields == nullptr ? nullptr
+                                                                : ownedFields->sequence;
     }
     const char* quality_data() const {
-        return qualityView == nullptr ? quality : qualityView;
+        return qualityView != nullptr ? qualityView
+                                      : ownedFields == nullptr ? nullptr
+                                                               : ownedFields->quality;
     }
     bool name_is_view() const {
         return nameView != nullptr;
     }
+    bool sequence_is_view() const {
+        return sequenceView != nullptr;
+    }
     bool quality_is_view() const {
         return qualityView != nullptr;
     }
+
+    char* name_storage();
+    char* sequence_storage();
+    char* quality_storage();
+
+private:
+    void ensure_owned_fields();
 };
 
 // Optional scheduler hooks around one bounded inflate work item. The BGZF
