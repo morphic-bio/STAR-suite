@@ -124,6 +124,7 @@ bool BgzfRangeReader::open(const std::string& path,
     rangeEnd_ = range_end;
     claimedOffset_ = range_start;
     nextClaimSequence_ = 0;
+    claimedWorkCount_ = 0;
     nextConsumeSequence_ = 0;
     currentBlockOffset_ = range_start;
     recordsRead_ = 0;
@@ -136,10 +137,12 @@ bool BgzfRangeReader::open(const std::string& path,
     targetCompressedBytes_ = std::max<uint64_t>(64U * 1024U,
         std::min<uint64_t>(1024U * 1024U, planned));
     maxOutstandingWork_ = std::max<size_t>(4, static_cast<size_t>(worker_threads) * 2);
+    outstandingWork_ = 0;
     buffer_.reset();
     cursor_ = 0;
-    completed_.clear();
+    completed_.assign(maxOutstandingWork_, CompletedSlot());
     claimsFinished_ = range_start == range_end;
+    claimExhausted_ = claimsFinished_;
     failed_ = false;
     stopping_ = false;
     workerError_.clear();
@@ -161,42 +164,95 @@ void BgzfRangeReader::worker_loop() {
     BgzfInflater inflater;
     CompressedWork work;
     while (true) {
-        uint64_t sequence = 0;
         {
             std::unique_lock<std::mutex> lock(mutex_);
             spaceCv_.wait(lock, [&]() {
                 return stopping_ || failed_ || claimsFinished_ ||
-                       nextClaimSequence_ - nextConsumeSequence_ < maxOutstandingWork_;
+                       outstandingWork_ < maxOutstandingWork_;
             });
             if (stopping_ || failed_ || claimsFinished_) {
                 return;
             }
-            std::string header_error;
-            bool at_end = false;
-            if (!claim_work(&work, &sequence, &at_end, &header_error)) {
-                fail_locked(header_error);
-                return;
+            ++outstandingWork_;
+        }
+
+        uint64_t sequence = 0;
+        bool at_end = false;
+        bool stop_after_claim = false;
+        std::string header_error;
+        {
+            // Only compressed-frontier discovery is serialized. In
+            // particular, its pread calls do not hold the completion mutex,
+            // so an ordered consumer can take an already-inflated slot.
+            std::lock_guard<std::mutex> claim_lock(claimMutex_);
+            {
+                std::lock_guard<std::mutex> lock(mutex_);
+                if (stopping_ || failed_) {
+                    --outstandingWork_;
+                    stop_after_claim = true;
+                }
             }
-            if (at_end) {
-                readyCv_.notify_all();
-                spaceCv_.notify_all();
-                return;
+            if (!stop_after_claim) {
+                if (claimExhausted_) {
+                    at_end = true;
+                } else if (!claim_work(&work, &sequence, &at_end,
+                                       &header_error)) {
+                    std::lock_guard<std::mutex> lock(mutex_);
+                    --outstandingWork_;
+                    fail_locked(header_error);
+                    stop_after_claim = true;
+                }
             }
+            if (!stop_after_claim) {
+                std::lock_guard<std::mutex> lock(mutex_);
+                if (stopping_ || failed_) {
+                    --outstandingWork_;
+                    stop_after_claim = true;
+                } else if (at_end) {
+                    --outstandingWork_;
+                } else {
+                    // Publish every claimed sequence before a later worker can
+                    // publish EOF through this same claim lock.
+                    claimedWorkCount_ = sequence + 1;
+                }
+                if (claimExhausted_) {
+                    claimsFinished_ = true;
+                }
+            }
+        }
+        if (stop_after_claim) {
+            spaceCv_.notify_all();
+            return;
+        }
+        if (at_end) {
+            readyCv_.notify_all();
+            spaceCv_.notify_all();
+            return;
         }
 
         InflatedBlock result;
         std::string inflate_error;
         if (!inflate_work_permitted(&inflater, work, &result, &inflate_error)) {
             std::lock_guard<std::mutex> lock(mutex_);
+            --outstandingWork_;
             fail_locked(inflate_error);
             return;
         }
         {
             std::lock_guard<std::mutex> lock(mutex_);
             if (stopping_ || failed_) {
+                --outstandingWork_;
                 return;
             }
-            completed_.emplace(sequence, std::move(result));
+            CompletedSlot& slot = completed_[sequence % completed_.size()];
+            if (slot.ready) {
+                --outstandingWork_;
+                fail_locked("BGZF completion ring slot collision");
+                return;
+            }
+            slot.sequence = sequence;
+            slot.block = std::move(result);
+            slot.ready = true;
         }
         readyCv_.notify_all();
     }
@@ -218,7 +274,7 @@ bool BgzfRangeReader::claim_work(CompressedWork* work,
     }
     if (reached_end) {
         claimedOffset_ = rangeEnd_;
-        claimsFinished_ = true;
+        claimExhausted_ = true;
     } else {
         claimedOffset_ += work->bytes.size();
     }
@@ -322,22 +378,25 @@ bool BgzfRangeReader::append_next_block(std::string* error) {
     } else {
         std::unique_lock<std::mutex> lock(mutex_);
         readyCv_.wait(lock, [&]() {
+            const CompletedSlot& slot =
+                completed_[nextConsumeSequence_ % completed_.size()];
             return stopping_ || failed_ ||
-                   completed_.find(nextConsumeSequence_) != completed_.end() ||
-                   (claimsFinished_ && nextConsumeSequence_ == nextClaimSequence_);
+                   (slot.ready && slot.sequence == nextConsumeSequence_) ||
+                   (claimsFinished_ && nextConsumeSequence_ == claimedWorkCount_);
         });
         if (failed_) {
             return set_error(error, workerError_.empty()
                 ? "BGZF inflate worker failed" : workerError_);
         }
-        const std::map<uint64_t, InflatedBlock>::iterator found =
-            completed_.find(nextConsumeSequence_);
-        if (found == completed_.end()) {
+        CompletedSlot& slot =
+            completed_[nextConsumeSequence_ % completed_.size()];
+        if (!slot.ready || slot.sequence != nextConsumeSequence_) {
             return false;
         }
-        block = std::move(found->second);
-        completed_.erase(found);
+        block = std::move(slot.block);
+        slot.ready = false;
         ++nextConsumeSequence_;
+        --outstandingWork_;
         lock.unlock();
         spaceCv_.notify_all();
     }
