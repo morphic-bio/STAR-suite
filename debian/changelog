@@ -1,3 +1,18 @@
+star-suite (1.8.3-1) unstable; urgency=medium
+
+  * Reduce copying, allocation, and producer stalls in fully fused STAR-Flex
+    BGZF and plain-gzip FASTQ ingest while preserving exact paired-record and
+    malformed-input checks.
+  * Read fused no-alignment CBQ probes and cell barcodes directly from packed
+    bases with input-native hash tables, avoiding intermediate ASCII sequence
+    materialization.
+  * Write Matrix Market data through bounded parallel mapped blocks and
+    parallelize per-sample MEX generation within the configured thread budget,
+    preserving byte-identical output ordering.
+  * Report STAR Suite 1.8.3 from STAR --version.
+
+ -- STAR-suite Maintainers <maintainers@biodepot.example>  Sat, 05 Sep 2026 08:01:28 +0000
+
 star-suite (1.8.2-1) unstable; urgency=medium
 
   * Fix fully fused Flex alignment queue progress and reject mismatched paired

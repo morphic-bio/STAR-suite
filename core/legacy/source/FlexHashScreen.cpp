@@ -1,4 +1,5 @@
 #include "FlexHashScreen.h"
+#include "Parameters.h"
 #include "ParametersSolo.h"
 
 #include <algorithm>
@@ -64,6 +65,7 @@ bool FlexHashScreenCache::ensureLoaded(const ParametersSolo& pSolo, std::string*
     records_.clear();
     cacheVersion_ = 0;
     regionMetadataComplete_ = false;
+    offset0MapsUseCbqOrder_ = pSolo.pP != nullptr && pSolo.pP->readFilesTypeN == 20;
 
     if (!pSolo.hashScreenEnabled || pSolo.hashScreenFile.empty()) {
         return false;
@@ -350,11 +352,56 @@ bool FlexHashScreenCache::encodeWindowLUT(const char* readSeq, uint32_t offset,
     return true;
 }
 
+static inline uint64_t reverseTwoBitGroups(uint64_t value) {
+    value = ((value & UINT64_C(0x3333333333333333)) << 2) |
+            ((value >> 2) & UINT64_C(0x3333333333333333));
+    value = ((value & UINT64_C(0x0F0F0F0F0F0F0F0F)) << 4) |
+            ((value >> 4) & UINT64_C(0x0F0F0F0F0F0F0F0F));
+#if defined(__GNUC__) || defined(__clang__)
+    return __builtin_bswap64(value);
+#else
+    value = ((value & UINT64_C(0x00FF00FF00FF00FF)) << 8) |
+            ((value >> 8) & UINT64_C(0x00FF00FF00FF00FF));
+    value = ((value & UINT64_C(0x0000FFFF0000FFFF)) << 16) |
+            ((value >> 16) & UINT64_C(0x0000FFFF0000FFFF));
+    return (value << 32) | (value >> 32);
+#endif
+}
+
+FlexHashScreenCache::SeqKeyNoSample FlexHashScreenCache::cacheKeyToCbqKey(
+    uint64_t seqLo, uint64_t seqHi) {
+    const uint64_t first18 = reverseTwoBitGroups(seqHi) >> 28;
+    const uint64_t last32 = reverseTwoBitGroups(seqLo);
+    SeqKeyNoSample out;
+    out.lo = first18 | ((last32 & UINT64_C(0x0FFFFFFF)) << 36);
+    out.hi = (last32 >> 28) & UINT64_C(0xFFFFFFFFF);
+    return out;
+}
+
+FlexHashScreenCache::SeqKeyNoSample FlexHashScreenCache::cbqKeyToCacheKey(
+    uint64_t seqLo, uint64_t seqHi) {
+    const uint64_t last32 = (seqLo >> 36) |
+        ((seqHi & UINT64_C(0xFFFFFFFFF)) << 28);
+    const uint64_t first18 = seqLo & UINT64_C(0xFFFFFFFFF);
+    SeqKeyNoSample out;
+    out.lo = reverseTwoBitGroups(last32);
+    out.hi = reverseTwoBitGroups(first18 << 28);
+    return out;
+}
+
+FlexHashScreenCache::SeqKeyNoSample FlexHashScreenCache::offset0MapKeyFromCacheKey(
+    uint64_t seqLo, uint64_t seqHi) const {
+    if (offset0MapsUseCbqOrder_) {
+        return cacheKeyToCbqKey(seqLo, seqHi);
+    }
+    return SeqKeyNoSample{seqLo, seqHi};
+}
+
 void FlexHashScreenCache::buildH0NoSampleMap() {
     h0NoSampleMap_.clear();
     h0NoSampleMap_.reserve(h0Records_.size() * 2);
     for (const Record& r : h0Records_) {
-        SeqKeyNoSample key{r.seqLo, r.seqHi};
+        const SeqKeyNoSample key = offset0MapKeyFromCacheKey(r.seqLo, r.seqHi);
         h0NoSampleMap_.emplace(key, r);
     }
 }
@@ -363,7 +410,7 @@ void FlexHashScreenCache::buildH1DenyNoSampleMap() {
     h1DenyNoSampleMap_.clear();
     h1DenyNoSampleMap_.reserve(h1DenyRecords_.size() * 2);
     for (const Record& r : h1DenyRecords_) {
-        SeqKeyNoSample key{r.seqLo, r.seqHi};
+        const SeqKeyNoSample key = offset0MapKeyFromCacheKey(r.seqLo, r.seqHi);
         h1DenyNoSampleMap_.emplace(key, r);
     }
 }
@@ -395,7 +442,25 @@ FlexHashScreenDecision FlexHashScreenCache::classifyReadH0Offset0(const char* re
         return out;
     }
 
-    SeqKeyNoSample key{seqLo, seqHi};
+    return classifyH0Offset0MapKey(offset0MapKeyFromCacheKey(seqLo, seqHi));
+}
+
+FlexHashScreenDecision FlexHashScreenCache::classifyCbqH0Offset0(
+    uint64_t seqLo, uint64_t seqHi) const {
+    const SeqKeyNoSample key = offset0MapsUseCbqOrder_
+        ? SeqKeyNoSample{seqLo, seqHi}
+        : cbqKeyToCacheKey(seqLo, seqHi);
+    return classifyH0Offset0MapKey(key);
+}
+
+FlexHashScreenDecision FlexHashScreenCache::classifyH0Offset0MapKey(
+    const SeqKeyNoSample& key) const {
+    if (!initialized_ || !enabled_) {
+        FlexHashScreenDecision out;
+        out.action = FlexHashScreenDecision::Disabled;
+        return out;
+    }
+
     auto it = h0NoSampleMap_.find(key);
     if (it == h0NoSampleMap_.end()) {
         FlexHashScreenDecision out;
@@ -450,7 +515,24 @@ FlexHashScreenDecision FlexHashScreenCache::classifyReadH0H1Offset0(const char* 
         return out;
     }
 
-    SeqKeyNoSample key{seqLo, seqHi};
+    return classifyH0H1Offset0MapKey(offset0MapKeyFromCacheKey(seqLo, seqHi));
+}
+
+FlexHashScreenDecision FlexHashScreenCache::classifyCbqH0H1Offset0(
+    uint64_t seqLo, uint64_t seqHi) const {
+    const SeqKeyNoSample key = offset0MapsUseCbqOrder_
+        ? SeqKeyNoSample{seqLo, seqHi}
+        : cbqKeyToCacheKey(seqLo, seqHi);
+    return classifyH0H1Offset0MapKey(key);
+}
+
+FlexHashScreenDecision FlexHashScreenCache::classifyH0H1Offset0MapKey(
+    const SeqKeyNoSample& key) const {
+    if (!initialized_ || !enabled_) {
+        FlexHashScreenDecision out;
+        out.action = FlexHashScreenDecision::Disabled;
+        return out;
+    }
 
     // H0 check
     auto it = h0NoSampleMap_.find(key);
@@ -502,6 +584,10 @@ FlexHashScreenDecision FlexHashScreenCache::classifyReadH0H1Offset0(const char* 
     FlexHashScreenDecision out;
     out.action = FlexHashScreenDecision::Pass;
     return out;
+}
+
+uint32_t FlexHashScreenCache::probeWindowLength() {
+    return kCacheKmerLength;
 }
 
 bool FlexHashScreenCache::findRecordInVec(const std::vector<Record>& vec, uint64_t seqLo, uint64_t seqHi, uint16_t sampleIdx, Record& out) const {

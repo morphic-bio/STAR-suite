@@ -250,6 +250,20 @@ uint32_t SampleDetector::detectSampleFromPackedTag(const uint8_t *packedTag8) co
         if (!isACGTNib(nib)) return 0u;
         code = (code << 4) | nib;
     }
+    return detectSampleCode(code);
+}
+
+uint32_t SampleDetector::detectSampleFromTwoBitTag(uint16_t packedTag8) const {
+    if (!ready()) return 0u;
+    static const uint32_t bamNib[4] = {1u, 2u, 4u, 8u};
+    uint32_t code = 0;
+    for (unsigned i = 0; i < 8; ++i) {
+        code = (code << 4) | bamNib[(packedTag8 >> (2U * i)) & 0x3U];
+    }
+    return detectSampleCode(code);
+}
+
+uint32_t SampleDetector::detectSampleCode(uint32_t code) const {
     for (size_t sample = 0; sample < variantCountsPerSample_.size(); ++sample) {
         size_t base = sample * 8;
         uint8_t count = variantCountsPerSample_[sample];

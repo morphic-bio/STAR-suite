@@ -230,9 +230,15 @@ static void logRejectReason(const SoloReadBarcode& soloBar, uint64_t iRead, int3
         }
     }
     
+    std::string cb16Str = soloBar.cbMatchString;
+    if (cb16Str.empty() && soloBar.cbMatch >= 0 &&
+        soloBar.cbMatchInd.size() == 1) {
+        cb16Str = std::to_string(soloBar.cbMatchInd[0]);
+    }
+
     const char* filterCB = std::getenv("STAR_INLINE_REJECT_FILTER_CB");
     if (filterCB && filterCB[0] != '\0') {
-        if (soloBar.cbMatchString != filterCB) {
+        if (cb16Str != filterCB) {
             return; // Filter out this CB
         }
     }
@@ -249,9 +255,6 @@ static void logRejectReason(const SoloReadBarcode& soloBar, uint64_t iRead, int3
     
     // Get qname if tracing enabled
     std::string qnameStr = getQnameForIRead(iRead);
-    
-    // Format CB16 (empty if no CB match)
-    std::string cb16Str = soloBar.cbMatchString.empty() ? std::string() : soloBar.cbMatchString;
     
     // Format UMI24 hex
     uint32_t umi24 = soloBar.umiB & 0xFFFFFF;

@@ -22,6 +22,7 @@ struct Options {
     uint32_t threads = 1;
     uint32_t workers = 1;
     bool crcCheck = true;
+    bool validateReadNames = true;
 };
 
 Options parse_args(int argc, char* argv[]) {
@@ -44,6 +45,12 @@ Options parse_args(int argc, char* argv[]) {
                 throw std::runtime_error("--crc-check must be 0 or 1");
             }
             options.crcCheck = value == "1";
+        } else if (arg == "--validate-read-names" && index + 1 < argc) {
+            const std::string value = argv[++index];
+            if (value != "0" && value != "1") {
+                throw std::runtime_error("--validate-read-names must be 0 or 1");
+            }
+            options.validateReadNames = value == "1";
         } else {
             throw std::runtime_error("unknown or incomplete option: " + arg);
         }
@@ -68,13 +75,13 @@ uint64_t fnv1a_update(uint64_t value, const char* field, size_t field_size) {
 
 uint64_t record_checksum(const star::input::BgzfFastqRecord& record) {
     uint64_t value = 14695981039346656037ULL;
-    value = fnv1a_update(value, record.name, record.nameLength);
+    value = fnv1a_update(value, record.name_data(), record.nameLength);
     value ^= 0;
     value *= 1099511628211ULL;
-    value = fnv1a_update(value, record.sequence, record.sequenceLength);
+    value = fnv1a_update(value, record.sequence_data(), record.sequenceLength);
     value ^= 0;
     value *= 1099511628211ULL;
-    return fnv1a_update(value, record.quality, record.qualityLength);
+    return fnv1a_update(value, record.quality_data(), record.qualityLength);
 }
 
 bool scan_blocks(const std::string& path,
@@ -148,21 +155,51 @@ bool scan_records(const Options& options,
 // without a genome.
 bool scan_pairs(const Options& options,
                 uint64_t* record_count,
+                uint64_t* mate1_name_bytes,
+                uint64_t* mate0_name_view_records,
+                uint64_t* sequence_view_records,
+                uint64_t* quality_view_records,
                 std::string* error) {
     star::input::BgzfStarAdapter adapter;
     star::input::BgzfStarAdapterOptions adapter_options;
     adapter_options.mate0_reader_threads = options.workers;
     adapter_options.mate1_reader_threads = options.workers;
     adapter_options.crc_check = options.crcCheck;
+    adapter_options.validate_read_names = options.validateReadNames;
     if (!adapter.open(options.input, options.input2, adapter_options, error)) {
         return false;
     }
     *record_count = 0;
-    star::input::BgzfStarRecord record;
+    *mate1_name_bytes = 0;
+    *mate0_name_view_records = 0;
+    *sequence_view_records = 0;
+    *quality_view_records = 0;
+    const size_t batch_capacity = 17;
+    std::vector<star::input::BgzfStarRecord> records(batch_capacity);
+    star::input::BgzfStarBatchLease lease;
     while (true) {
-        const star::input::InputStatus status = adapter.next_record(&record, error);
+        size_t returned = 0;
+        const star::input::InputStatus status = adapter.next_records(
+            records.data(), records.size(), &returned, error, &lease);
         if (status == star::input::InputStatus::Record) {
-            ++*record_count;
+            for (size_t index = 0; index < returned; ++index) {
+                const star::input::BgzfStarRecord& record = records[index];
+                ++*record_count;
+                *mate1_name_bytes += record.mates[1].nameLength;
+                *mate0_name_view_records += record.mates[0].name_is_view() ? 1 : 0;
+                *sequence_view_records += record.mates[0].sequence_is_view() ? 1 : 0;
+                *sequence_view_records += record.mates[1].sequence_is_view() ? 1 : 0;
+                *quality_view_records += record.mates[0].quality_is_view() ? 1 : 0;
+                *quality_view_records += record.mates[1].quality_is_view() ? 1 : 0;
+                // Dereference every leased field after next_records() has
+                // released the adapter lock. This is the lifetime required by
+                // fused Flex consumers.
+                (void)record.mates[0].name_data()[0];
+                (void)record.mates[0].sequence_data()[0];
+                (void)record.mates[1].sequence_data()[0];
+                (void)record.mates[0].quality_data()[0];
+                (void)record.mates[1].quality_data()[0];
+            }
             continue;
         }
         return status == star::input::InputStatus::End;
@@ -212,11 +249,26 @@ int main(int argc, char* argv[]) {
                 throw std::runtime_error("--mode pair requires --input2");
             }
             uint64_t record_count = 0;
-            if (!scan_pairs(options, &record_count, &error)) {
+            uint64_t mate1_name_bytes = 0;
+            uint64_t mate0_name_view_records = 0;
+            uint64_t sequence_view_records = 0;
+            uint64_t quality_view_records = 0;
+            if (!scan_pairs(options, &record_count, &mate1_name_bytes,
+                            &mate0_name_view_records, &sequence_view_records,
+                            &quality_view_records, &error)) {
                 std::cerr << "ERROR: " << error << '\n';
                 return 1;
             }
-            std::cout << "{\"record_count\":" << record_count << "}\n";
+            std::cout << "{\"mate1_name_bytes\":" << mate1_name_bytes
+                      << ",\"mate0_name_view_records\":"
+                      << mate0_name_view_records
+                      << ",\"quality_view_records\":"
+                      << quality_view_records
+                      << ",\"sequence_view_records\":"
+                      << sequence_view_records
+                      << ",\"fastq_record_bytes\":"
+                      << sizeof(star::input::BgzfFastqRecord)
+                      << ",\"record_count\":" << record_count << "}\n";
             return 0;
         }
         throw std::runtime_error("unsupported --mode: " + options.mode);

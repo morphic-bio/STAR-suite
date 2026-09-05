@@ -341,6 +341,50 @@ static bool detectConfiguredSampleTag(const char *readSeq, uint32_t readLen,
     return false;
 }
 
+static bool detectConfiguredSampleTag(const star::input::CbqSegmentView &segment,
+                                      const ParametersSolo &pSolo,
+                                      SampleDetector *sampleDet,
+                                      bool sampleDetReady,
+                                      uint8_t &detectedSampleToken) {
+    detectedSampleToken = 0xFF;
+    if (!sampleDetReady || sampleDet == nullptr) {
+        return true;
+    }
+    auto detectAt = [&](int64_t offset) -> bool {
+        if (offset < 0) {
+            return false;
+        }
+        uint64_t packed = 0;
+        uint32_t nMask = 0;
+        if (!star::input::cbq_pack_segment_window_lsb(
+                segment, static_cast<size_t>(offset), 8, &packed, &nMask) ||
+            nMask != 0) {
+            return false;
+        }
+        const uint32_t sampleIdx = sampleDet->detectSampleFromTwoBitTag(
+            static_cast<uint16_t>(packed));
+        if (sampleIdx == 0) {
+            return false;
+        }
+        detectedSampleToken = static_cast<uint8_t>(sampleIdx & 0x1Fu);
+        return true;
+    };
+
+    const int64_t primary = static_cast<int64_t>(pSolo.sampleProbeOffset);
+    if (detectAt(primary)) {
+        return true;
+    }
+    if (!pSolo.sampleStrictMatch && pSolo.sampleSearchNearby) {
+        static const int deltas[] = {-1, 1, -2, 2};
+        for (int delta : deltas) {
+            if (detectAt(primary + delta)) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 // Process one lane: read all FASTQ records, hash screen, inline Solo for hits, push misses to alignQ.
 // All per-thread state (localBar, sampleDet, scratch buffers) is owned by the caller
 // and reused across lane claims — no per-lane allocation.
@@ -628,11 +672,13 @@ static uint64_t processOneBgzfRange(
     uint64_t nReads = 0;
     const size_t bgzfRecordBatchSize = 256;
     std::vector<star::input::BgzfStarRecord> recordBatch(bgzfRecordBatchSize);
+    star::input::BgzfStarBatchLease recordLease;
     while (!st->inputFailed.load(std::memory_order_relaxed)) {
         size_t recordsReturned = 0;
         const star::input::InputStatus status =
             lanePlan.adapter->next_records(recordBatch.data(), recordBatch.size(),
-                                           &recordsReturned, &inputError);
+                                           &recordsReturned, &inputError,
+                                           &recordLease);
         if (status == star::input::InputStatus::End) {
             break;
         }
@@ -661,13 +707,13 @@ static uint64_t processOneBgzfRange(
         }
         const uint32_t readLen0 = static_cast<uint32_t>(readLen0Size);
         const uint32_t readLen1 = static_cast<uint32_t>(readLen1Size);
-        const char *seq0 = record.mates[0].sequence;
-        const char *seq1 = record.mates[1].sequence;
-        const char *qual0 = record.mates[0].quality;
-        const char *qual1 = record.mates[1].quality;
+        const char *seq0 = record.mates[0].sequence_data();
+        const char *seq1 = record.mates[1].sequence_data();
+        const char *qual0 = record.mates[0].quality_data();
+        const char *qual1 = record.mates[1].quality_data();
         const size_t nameLength = std::min(static_cast<size_t>(record.read_name_length),
                                            static_cast<size_t>(kFlexPipeNameMax - 1));
-        const char *name = record.mates[0].name;
+        const char *name = record.mates[0].name_data();
 
         const uint64_t iReadAll = batchGlobalFirst + batchIndex;
         ++tally.lane;
@@ -798,19 +844,13 @@ static uint64_t processCbqModuleRecords(
                 return nReads;
             }
 
-            size_t readLen0Size = 0;
-            size_t readLen1Size = 0;
-            if (!star::input::materialize_cbq_segment_sequence_to_buffer(
-                    record.segments[0], seq0, sizeof(seq0), &readLen0Size, &inputError) ||
-                !star::input::materialize_cbq_segment_sequence_to_buffer(
-                    record.segments[1], seq1, sizeof(seq1), &readLen1Size, &inputError)) {
-                P.inOut->logMain << "ERROR: Flex CBQ sequence materialization failed in "
-                                 << cbqPath << ": " << inputError << "\n" << std::flush;
-                module.close();
-                return nReads;
-            }
+            const size_t readLen0Size =
+                star::input::cbq_segment_sequence_length(record.segments[0]);
+            const size_t readLen1Size =
+                star::input::cbq_segment_sequence_length(record.segments[1]);
 
-            if (record.segments[0].quality.size != readLen0Size ||
+            if (readLen0Size >= sizeof(seq0) || readLen1Size >= sizeof(seq1) ||
+                record.segments[0].quality.size != readLen0Size ||
                 record.segments[1].quality.size != readLen1Size ||
                 (readLen0Size != 0 && record.segments[0].quality.data == nullptr) ||
                 (readLen1Size != 0 && record.segments[1].quality.data == nullptr)) {
@@ -838,14 +878,23 @@ static uint64_t processCbqModuleRecords(
 
             uint8_t detectedSampleToken = 0xFF;
             const bool sampleOK = detectConfiguredSampleTag(
-                seq0, readLen0, P.pSolo, sampleDet, sampleDetReady,
+                record.segments[0], P.pSolo, sampleDet, sampleDetReady,
                 detectedSampleToken);
 
             FlexHashScreenDecision decision;
             if (sampleOK) {
-                decision = flexHashH0OnlyDiagnostic()
-                    ? cache.classifyReadH0Offset0(seq0, readLen0)
-                    : cache.classifyReadH0H1Offset0(seq0, readLen0);
+                uint64_t seqLo = 0;
+                uint64_t seqHi = 0;
+                uint64_t nMask = 0;
+                if (star::input::cbq_pack_segment_window_lsb_pair(
+                        record.segments[0], 0, cache.probeWindowLength(),
+                        &seqLo, &seqHi, &nMask) && nMask == 0) {
+                    decision = flexHashH0OnlyDiagnostic()
+                        ? cache.classifyCbqH0Offset0(seqLo, seqHi)
+                        : cache.classifyCbqH0H1Offset0(seqLo, seqHi);
+                } else {
+                    decision.action = FlexHashScreenDecision::Pass;
+                }
             } else {
                 decision.action = FlexHashScreenDecision::Deny;
             }
@@ -853,12 +902,46 @@ static uint64_t processCbqModuleRecords(
             if (decision.action == FlexHashScreenDecision::Keep ||
                 decision.action == FlexHashScreenDecision::Deny) {
 
-                char *readSeqPtrs[2]  = { dummySeq, seq1 };
-                char *readQualPtrs[2] = { dummyQual, const_cast<char *>(qual1) };
-                uint64 readLens[2]    = { 0, readLen1 };
+                bool barcodeHandled = false;
+                if (P.pSolo.cbS > 0 && P.pSolo.umiS > 0 &&
+                    P.pSolo.cbL <= 32 && P.pSolo.umiL <= 32) {
+                    uint64_t cbPacked = 0;
+                    uint64_t umiPacked = 0;
+                    uint32_t cbNMask = 0;
+                    uint32_t umiNMask = 0;
+                    if (star::input::cbq_pack_segment_window_lsb(
+                            record.segments[1], P.pSolo.cbS - 1U, P.pSolo.cbL,
+                            &cbPacked, &cbNMask) &&
+                        star::input::cbq_pack_segment_window_lsb(
+                            record.segments[1], P.pSolo.umiS - 1U, P.pSolo.umiL,
+                            &umiPacked, &umiNMask) &&
+                        cbNMask == 0 && umiNMask == 0) {
+                        barcodeHandled = localBar.getCBandUMIPackedFast(
+                            cbPacked, umiPacked, qual1, readLen1);
+                    }
+                }
 
-                localBar.getCBandUMI(readSeqPtrs, readQualPtrs, readLens, readNameExtra,
-                                      static_cast<uint32_t>(laneId), name, nameLength);
+                if (!barcodeHandled) {
+                    size_t decodedReadLen1 = 0;
+                    if (!star::input::materialize_cbq_segment_sequence_to_buffer(
+                            record.segments[1], seq1, sizeof(seq1),
+                            &decodedReadLen1, &inputError) ||
+                        decodedReadLen1 != readLen1Size) {
+                        P.inOut->logMain << "ERROR: Flex CBQ barcode sequence materialization failed in "
+                                         << cbqPath << ": " << inputError << "\n" << std::flush;
+                        module.close();
+                        return nReads;
+                    }
+
+                    char *readSeqPtrs[2]  = { dummySeq, seq1 };
+                    char *readQualPtrs[2] = { dummyQual, const_cast<char *>(qual1) };
+                    uint64 readLens[2]    = { 0, readLen1 };
+
+                    localBar.getCBandUMI(readSeqPtrs, readQualPtrs, readLens,
+                                          readNameExtra,
+                                          static_cast<uint32_t>(laneId), name,
+                                          nameLength);
+                }
 
                 localBar.detectedSampleToken = detectedSampleToken;
 
@@ -883,6 +966,21 @@ static uint64_t processCbqModuleRecords(
             } else {
                 ++tally.miss;
                 if (!noAlign) {
+                    size_t decodedReadLen0 = 0;
+                    size_t decodedReadLen1 = 0;
+                    if (!star::input::materialize_cbq_segment_sequence_to_buffer(
+                            record.segments[0], seq0, sizeof(seq0),
+                            &decodedReadLen0, &inputError) ||
+                        !star::input::materialize_cbq_segment_sequence_to_buffer(
+                            record.segments[1], seq1, sizeof(seq1),
+                            &decodedReadLen1, &inputError) ||
+                        decodedReadLen0 != readLen0Size ||
+                        decodedReadLen1 != readLen1Size) {
+                        P.inOut->logMain << "ERROR: Flex CBQ alignment sequence materialization failed in "
+                                         << cbqPath << ": " << inputError << "\n" << std::flush;
+                        module.close();
+                        return nReads;
+                    }
                     EnrichedPacket ep;
                     std::memcpy(ep.name, name, nameLength);
                     ep.name[nameLength] = '\0';
@@ -1207,6 +1305,9 @@ bool flexPrepareBgzfRangeTasks(FlexPipelineState *state, Parameters &P,
         options.mate0_reader_threads = streamThreads[static_cast<size_t>(streamIndex++)];
         options.mate1_reader_threads = streamThreads[static_cast<size_t>(streamIndex++)];
         options.store_mate0_quality = P.pSolo.flexNoAlign == 0;
+        // Fused Flex pairs mates by ordered record ordinal and equal counts.
+        // Avoid copying and comparing the barcode-read name in production.
+        options.validate_read_names = false;
         mateWorkers[0] += options.mate0_reader_threads;
         mateWorkers[1] += options.mate1_reader_threads;
         options.crc_check = P.bgzfCrcCheck == 1;

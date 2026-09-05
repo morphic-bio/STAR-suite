@@ -4,8 +4,9 @@
 #include <cstring>
 #include <functional>
 
-CbCorrector::CbCorrector(const std::vector<std::string> &whitelist, int maxHamming)
-    : maxHamming_(maxHamming) {
+CbCorrector::CbCorrector(const std::vector<std::string> &whitelist, int maxHamming,
+                         bool cbqNativeOrder)
+    : maxHamming_(maxHamming), cbqNativeOrder_(cbqNativeOrder) {
     
     // Store whitelist
     whitelist_ = whitelist;
@@ -36,7 +37,7 @@ CbCorrector::CbCorrector(const std::vector<std::string> &whitelist, int maxHammi
 
             // Generate 1-hamming variants inline to avoid per-whitelist heap allocation.
             for (size_t pos = 0; pos < cbLength_; pos++) {
-                uint32_t shift = 2 * (cbLength_ - 1 - pos);
+                uint32_t shift = packedShift(pos, cbLength_);
                 uint32_t currentBase = (packed.key >> shift) & 3u;
 
                 for (uint32_t altBase = 0; altBase < 4; altBase++) {
@@ -69,6 +70,10 @@ CbCorrector::CbCorrector(const std::vector<std::string> &whitelist, int maxHammi
     }
 }
 
+uint32_t CbCorrector::packedShift(size_t pos, size_t cbLength) const {
+    return static_cast<uint32_t>(2 * (cbqNativeOrder_ ? pos : cbLength - 1 - pos));
+}
+
 // Encode CB string to packed key + N mask
 bool CbCorrector::encodeCB(const std::string &cb, PackedCB &packed) const {
     packed.key = 0;
@@ -94,8 +99,12 @@ bool CbCorrector::encodeCB(const std::string &cb, PackedCB &packed) const {
             return false; // Invalid base
         }
         
-        // Pack: shift left 2 bits, add new base
-        packed.key = (packed.key << 2) | code;
+        if (cbqNativeOrder_) {
+            packed.key |= code << packedShift(i, cb.length());
+        } else {
+            // Legacy STAR order: the first base occupies the high used bits.
+            packed.key = (packed.key << 2) | code;
+        }
     }
     
     return true;
@@ -106,12 +115,9 @@ std::string CbCorrector::decodeCB(const PackedCB &packed, size_t cbLength) const
     const char bases[] = "ACGT";
     std::string cb(cbLength, 'N');
     
-    uint32_t key = packed.key;
-    for (size_t i = 0; i < cbLength; i++) {
-        size_t pos = cbLength - 1 - i; // Decode from right to left
-        uint32_t code = key & 3;
-        key >>= 2;
-        
+    for (size_t pos = 0; pos < cbLength; pos++) {
+        uint32_t code = (packed.key >> packedShift(pos, cbLength)) & 3u;
+
         // Check if this position has N
         if (packed.nMask & (1u << pos)) {
             cb[pos] = 'N';
@@ -130,7 +136,7 @@ void CbCorrector::generateVariants(const PackedCB &packed, std::vector<PackedCB>
     // For each position, try replacing with the other 3 nucleotides
     for (size_t pos = 0; pos < cbLength; pos++) {
         // Extract current base at this position
-        uint32_t shift = 2 * (cbLength - 1 - pos);
+        uint32_t shift = packedShift(pos, cbLength);
         uint32_t currentBase = (packed.key >> shift) & 3;
         
         // Try the other 3 bases
@@ -187,7 +193,7 @@ bool CbCorrector::expandN(const PackedCB &packed, size_t cbLength, PackedCB &cor
     // For each N position, expand all current sequences by replacing N with A/C/G/T
     for (size_t nPos : nPositions) {
         size_t current_count = corrected_seq_count;
-        uint32_t shift = 2 * (cbLength - 1 - nPos);
+        uint32_t shift = packedShift(nPos, cbLength);
         
         // For each existing sequence, create 4 new sequences (one for each base)
         for (size_t i = 0; i < current_count; i++) {
@@ -476,16 +482,40 @@ CbMatch CbCorrector::correct(const std::string &cb) const {
     return result;
 }
 
+bool CbCorrector::correctPackedCbq(uint32_t packedKey, uint32_t &whitelistIdx,
+                                   uint8_t &hammingDist) const {
+    whitelistIdx = 0;
+    hammingDist = 255;
+    if (!cbqNativeOrder_) {
+        return false;
+    }
+
+    auto exactIt = exactMap_.find(packedKey);
+    if (exactIt != exactMap_.end()) {
+        whitelistIdx = to1Based(exactIt->second);
+        hammingDist = 0;
+        return true;
+    }
+
+    if (maxHamming_ < 1) {
+        return false;
+    }
+    auto variantIt = variantMap_.find(packedKey);
+    if (variantIt == variantMap_.end() || variantIt->second == 0) {
+        return false;
+    }
+    whitelistIdx = variantIt->second;
+    hammingDist = 1;
+    return true;
+}
+
 // Decode packed key to CB string (public helper)
 std::string CbCorrector::decodePackedKey(uint32_t packedKey, size_t cbLength) const {
     const char bases[] = "ACGT";
     std::string cb(cbLength, 'N');
     
-    uint32_t key = packedKey;
-    for (size_t i = 0; i < cbLength; i++) {
-        size_t pos = cbLength - 1 - i; // Decode from right to left
-        uint32_t code = key & 3;
-        key >>= 2;
+    for (size_t pos = 0; pos < cbLength; pos++) {
+        uint32_t code = (packedKey >> packedShift(pos, cbLength)) & 3u;
         cb[pos] = bases[code];
     }
     

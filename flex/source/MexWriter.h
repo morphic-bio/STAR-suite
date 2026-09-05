@@ -62,6 +62,8 @@ struct Feature {
  * @param cb_len Output barcode length. If > 0, barcodes are truncated to this length.
  *               If -1 (default), no truncation is applied.
  *               For per-sample MEX outputs, use cb_len=16 to strip sample tags.
+ * @param matrix_threads Number of workers used to format matrix.mtx. Values below
+ *                       2 use the calling thread only. Entry order is unchanged.
  * @return 0 on success, -1 on error (including duplicate barcodes after truncation)
  * 
  * Example usage:
@@ -85,6 +87,13 @@ int writeMex(const std::string& outputPrefix,
              const std::vector<Triplet>& triplets,
              int cb_len = -1);
 
+int writeMex(const std::string& outputPrefix,
+             const std::vector<std::string>& barcodes,
+             const std::vector<Feature>& features,
+             const std::vector<Triplet>& triplets,
+             int cb_len,
+             unsigned int matrix_threads);
+
 /**
  * @brief Convenience overload: features as simple ID strings (name=ID, type="Gene Expression")
  * @param cb_len Output barcode length. If > 0, barcodes are truncated to this length.
@@ -94,6 +103,13 @@ int writeMex(const std::string& outputPrefix,
              const std::vector<std::string>& featureIds,
              const std::vector<Triplet>& triplets,
              int cb_len = -1);
+
+int writeMex(const std::string& outputPrefix,
+             const std::vector<std::string>& barcodes,
+             const std::vector<std::string>& featureIds,
+             const std::vector<Triplet>& triplets,
+             int cb_len,
+             unsigned int matrix_threads);
 
 } // namespace MexWriter
 

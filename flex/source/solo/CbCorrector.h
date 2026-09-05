@@ -26,11 +26,19 @@ class CbCorrector {
 public:
     // Constructor: initialize with whitelist
     // maxHamming: maximum Hamming distance allowed (default 1, 0 = exact only)
-    explicit CbCorrector(const std::vector<std::string> &whitelist, int maxHamming = 1);
+    explicit CbCorrector(const std::vector<std::string> &whitelist, int maxHamming = 1,
+                         bool cbqNativeOrder = false);
     
     // Correct a cell barcode
     // Returns CbMatch with correction result
     CbMatch correct(const std::string &cb) const;
+
+    // Look up an already packed CBQ barcode without materializing ASCII.
+    // The input keeps CBQ's native order (the first base is in the low bits).
+    // Only exact and unique H1 matches return true; ambiguous matches remain on
+    // the quality-aware string path.
+    bool correctPackedCbq(uint32_t packedKey, uint32_t &whitelistIdx,
+                          uint8_t &hammingDist) const;
     
     // Get whitelist size
     size_t whitelistSize() const { return whitelist_.size(); }
@@ -65,6 +73,10 @@ private:
     size_t cbLength_;
     
     int maxHamming_;  // Maximum Hamming distance allowed
+
+    // CBQ stores the first base in the least-significant two bits. FASTQ and
+    // the legacy STAR packed representation store it at the other end.
+    bool cbqNativeOrder_;
     
     // Packed key representation: 32-bit CB + 16-bit N mask
     struct PackedCB {
@@ -78,6 +90,9 @@ private:
     // Helper: encode CB string to packed key + N mask
     // Returns true if encoding successful, false if CB too long or invalid
     bool encodeCB(const std::string &cb, PackedCB &packed) const;
+
+    // Bit shift for a logical sequence position in the configured table order.
+    uint32_t packedShift(size_t pos, size_t cbLength) const;
     
     // Helper: decode packed key back to CB string
     std::string decodeCB(const PackedCB &packed, size_t cbLength) const;
@@ -99,4 +114,3 @@ private:
 };
 
 #endif
-

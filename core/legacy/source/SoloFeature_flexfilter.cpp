@@ -9,9 +9,12 @@
 #include "ErrorWarning.h"
 #include "streamFuns.h"
 #include "MexWriter.h"
+#include <atomic>
+#include <chrono>
 #include <fstream>
 #include <sstream>
 #include <algorithm>
+#include <thread>
 #include <vector>
 #include <string>
 #include <unordered_map>
@@ -377,80 +380,162 @@ void SoloFeature::runFlexFilterInline(
 
     uint32_t stride = inlineMatrix.matrixData.countMatStride;
 
-    for (const auto& tagResult : outputs.tagResults) {
-        printTagLog(tagResult, tagResult.sampleLabel);
-        std::unordered_map<uint32_t, uint32_t> oldToNew;
-        std::vector<std::string> filteredBarcodes;
-        filteredBarcodes.reserve(tagResult.passingBarcodes.size());
-        for (const auto& bc : tagResult.passingBarcodes) {
-            auto it = barcodeToIdx.find(bc);
-            if (it == barcodeToIdx.end()) {
-                continue;
-            }
-            uint32_t oldIdx = it->second;
-            if (oldToNew.find(oldIdx) != oldToNew.end()) {
-                continue;
-            }
-            uint32_t newIdx = filteredBarcodes.size();
-            oldToNew[oldIdx] = newIdx;
-            filteredBarcodes.push_back(bc);
-        }
+    struct SampleMexResult {
+        bool skipped = true;
+        int writeResult = -1;
+        uint32_t finalCells = 0;
+        size_t entries = 0;
+        uint64_t sampleUMI = 0;
+    };
+    const size_t nSamples = outputs.tagResults.size();
+    std::vector<SampleMexResult> sampleResults(nSamples);
+    std::vector<std::string> samplePrefixes(nSamples);
+    std::vector<uint8_t> hasMappedBarcode(nSamples, 0);
+    const auto sampleMexStart = std::chrono::steady_clock::now();
 
-        if (filteredBarcodes.empty()) {
-            P.inOut->logMain << "  Skipping " << tagResult.sampleLabel << " (no passing barcodes mapped)\n";
+    // Directory creation writes to the shared STAR log, so keep it ordered and
+    // outside the worker pool. The expensive matrix construction and output
+    // below touch only per-sample state and disjoint files.
+    for (size_t sample = 0; sample < nSamples; ++sample) {
+        const auto& tagResult = outputs.tagResults[sample];
+        for (const auto& bc : tagResult.passingBarcodes) {
+            if (barcodeToIdx.find(bc) != barcodeToIdx.end()) {
+                hasMappedBarcode[sample] = 1;
+                break;
+            }
+        }
+        if (!hasMappedBarcode[sample])
+            continue;
+        std::string& samplePrefix = samplePrefixes[sample];
+        samplePrefix = outputPrefix;
+        if (!samplePrefix.empty() && samplePrefix.back() != '/')
+            samplePrefix += '/';
+        samplePrefix += tagResult.sampleLabel + "/Gene/filtered/";
+        createDirectory(samplePrefix, P.runDirPerm,
+                        "FlexFilter filtered MEX directory", P);
+    }
+
+    const unsigned int outputThreads =
+        static_cast<unsigned int>(std::max(1, P.runThreadN));
+    // A few concurrent matrices expose sample-level parallelism, while a small
+    // worker group inside each writer keeps large samples from becoming a new
+    // serial tail. The product never exceeds the STAR thread budget.
+    const unsigned int desiredThreadsPerMatrix = 4u;
+    const unsigned int sampleWorkers = nSamples == 0u ? 0u : std::min(
+        static_cast<unsigned int>(nSamples),
+        std::max(1u, outputThreads / desiredThreadsPerMatrix));
+    const unsigned int matrixThreads = sampleWorkers == 0u
+        ? 1u : std::max(1u, outputThreads / sampleWorkers);
+    std::atomic<size_t> nextSample(0);
+    auto writeSample = [&]() {
+        for (;;) {
+            const size_t sample = nextSample.fetch_add(1, std::memory_order_relaxed);
+            if (sample >= nSamples)
+                break;
+            if (!hasMappedBarcode[sample])
+                continue;
+            const auto& tagResult = outputs.tagResults[sample];
+            SampleMexResult& sampleResult = sampleResults[sample];
+
+            std::unordered_map<uint32_t, uint32_t> oldToNew;
+            std::vector<std::string> filteredBarcodes;
+            filteredBarcodes.reserve(tagResult.passingBarcodes.size());
+            for (const auto& bc : tagResult.passingBarcodes) {
+                auto it = barcodeToIdx.find(bc);
+                if (it == barcodeToIdx.end())
+                    continue;
+                uint32_t oldIdx = it->second;
+                if (oldToNew.find(oldIdx) != oldToNew.end())
+                    continue;
+                uint32_t newIdx = static_cast<uint32_t>(filteredBarcodes.size());
+                oldToNew[oldIdx] = newIdx;
+                filteredBarcodes.push_back(bc);
+            }
+
+            if (filteredBarcodes.empty())
+                continue;
+
+            std::vector<MexWriter::Triplet> filteredTriplets;
+            filteredTriplets.reserve(filteredBarcodes.size() * 8);
+            for (const auto& kv : oldToNew) {
+                uint32_t oldIdx = kv.first;
+                uint32_t newIdx = kv.second;
+                uint32_t start = inlineMatrix.matrixData.countCellGeneUMIindex[oldIdx];
+                uint32_t end = inlineMatrix.matrixData.countCellGeneUMIindex[oldIdx + 1];
+                for (uint32_t ptr = start; ptr < end; ptr += stride) {
+                    uint32_t geneIdx = inlineMatrix.matrixData.countCellGeneUMI[ptr];
+                    uint32_t count = inlineMatrix.matrixData.countCellGeneUMI[ptr + 1];
+                    if (count == 0)
+                        continue;
+                    filteredTriplets.push_back({newIdx, geneIdx, count});
+                }
+            }
+
+            const int cbLen = config.keepCBTag ? -1 : 16;
+            sampleResult.writeResult = MexWriter::writeMex(
+                samplePrefixes[sample], filteredBarcodes, mexFeatures,
+                filteredTriplets, cbLen, matrixThreads);
+            sampleResult.skipped = false;
+            sampleResult.finalCells =
+                static_cast<uint32_t>(filteredBarcodes.size());
+            sampleResult.entries = filteredTriplets.size();
+
+            // Preserve the established summary accounting, including any
+            // duplicate barcode entries in the filter result.
+            for (const auto& bc : tagResult.passingBarcodes) {
+                auto it = barcodeToIdx.find(bc);
+                if (it != barcodeToIdx.end())
+                    sampleResult.sampleUMI +=
+                        inlineMatrix.matrixData.nUMIperCB[it->second];
+            }
+        }
+    };
+
+    std::vector<std::thread> outputWorkers;
+    if (sampleWorkers > 0u) {
+        outputWorkers.reserve(sampleWorkers - 1u);
+        for (unsigned int worker = 1; worker < sampleWorkers; ++worker)
+            outputWorkers.emplace_back(writeSample);
+        writeSample();
+        for (std::thread& worker : outputWorkers)
+            worker.join();
+    }
+    P.inOut->logMain << "Solo timing: per-sample MEX "
+                     << std::chrono::duration<double>(
+                            std::chrono::steady_clock::now() - sampleMexStart).count()
+                     << " s, sample_workers=" << sampleWorkers
+                     << ", matrix_threads=" << matrixThreads
+                     << endl << std::flush;
+
+    // Logs and summaries remain in whitelist order, independent of scheduling.
+    for (size_t sample = 0; sample < nSamples; ++sample) {
+        const auto& tagResult = outputs.tagResults[sample];
+        const SampleMexResult& sampleResult = sampleResults[sample];
+        printTagLog(tagResult, tagResult.sampleLabel);
+        if (sampleResult.skipped) {
+            P.inOut->logMain << "  Skipping " << tagResult.sampleLabel
+                             << " (no passing barcodes mapped)\n";
             continue;
         }
-
-        std::vector<MexWriter::Triplet> filteredTriplets;
-        filteredTriplets.reserve(filteredBarcodes.size() * 8);
-        for (const auto& kv : oldToNew) {
-            uint32_t oldIdx = kv.first;
-            uint32_t newIdx = kv.second;
-            uint32_t start = inlineMatrix.matrixData.countCellGeneUMIindex[oldIdx];
-            uint32_t end = inlineMatrix.matrixData.countCellGeneUMIindex[oldIdx + 1];
-            for (uint32_t ptr = start; ptr < end; ptr += stride) {
-                uint32_t geneIdx = inlineMatrix.matrixData.countCellGeneUMI[ptr];
-                uint32_t count = inlineMatrix.matrixData.countCellGeneUMI[ptr + 1];
-                if (count == 0) continue;
-                filteredTriplets.push_back({newIdx, geneIdx, count});
-            }
-        }
-
-        std::string samplePrefix = outputPrefix;
-        if (!samplePrefix.empty() && samplePrefix.back() != '/') {
-            samplePrefix += '/';
-        }
-        samplePrefix += tagResult.sampleLabel + "/Gene/filtered/";
-        createDirectory(samplePrefix, P.runDirPerm, "FlexFilter filtered MEX directory", P);
-
-        // Per-sample MEX: strip sample tag from barcodes (16bp output) unless keepCBTag is set
-        int cb_len = config.keepCBTag ? -1 : 16;
-        int writeResult = MexWriter::writeMex(samplePrefix, filteredBarcodes, mexFeatures, filteredTriplets, cb_len);
-        if (writeResult != 0) {
+        if (sampleResult.writeResult != 0) {
             std::cerr << "  ERROR: MexWriter failed for " << tagResult.sampleLabel
-                      << " (barcodes=" << filteredBarcodes.size()
-                      << ", entries=" << filteredTriplets.size() << ")\n";
+                      << " (barcodes=" << sampleResult.finalCells
+                      << ", entries=" << sampleResult.entries << ")\n";
         } else {
-            P.inOut->logMain << "  " << tagResult.sampleLabel << " (" << tagResult.tag << "): "
-                             << filteredBarcodes.size() << " cells, "
-                             << filteredTriplets.size() << " entries" << endl;
+            P.inOut->logMain << "  " << tagResult.sampleLabel << " ("
+                             << tagResult.tag << "): "
+                             << sampleResult.finalCells << " cells, "
+                             << sampleResult.entries << " entries" << endl;
         }
 
         // Summary statistics
         uint32_t retainWindow = tagResult.nRetainWindow;
-        uint32_t simpleED = tagResult.nSimpleCells;  // Simple EmptyDrops cells (fallback)
+        uint32_t simpleED = tagResult.nSimpleCells;
         uint32_t tailTested = tagResult.nTailTested;
         uint32_t edPass = tagResult.nSimplePassers + tagResult.nTailPassers;
         uint32_t occRemoved = tagResult.occupancyRemoved;
-        uint32_t finalCells = static_cast<uint32_t>(filteredBarcodes.size());
-
-        uint64_t sampleUMI = 0;
-        for (const auto& bc : tagResult.passingBarcodes) {
-            auto it = barcodeToIdx.find(bc);
-            if (it != barcodeToIdx.end()) {
-                sampleUMI += inlineMatrix.matrixData.nUMIperCB[it->second];
-            }
-        }
+        uint32_t finalCells = sampleResult.finalCells;
+        uint64_t sampleUMI = sampleResult.sampleUMI;
 
         std::printf("%-15s %10u %8u %10u %12u %10u %10u %8u %14lu\n",
                tagResult.sampleLabel.c_str(),
