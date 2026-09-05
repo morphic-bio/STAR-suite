@@ -6,7 +6,6 @@
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
-#include <map>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -127,6 +126,12 @@ private:
         std::shared_ptr<std::vector<unsigned char>> bytes;
     };
 
+    struct CompletedSlot {
+        uint64_t sequence = 0;
+        InflatedBlock block;
+        bool ready = false;
+    };
+
     void worker_loop();
     void close_input();
     void fail_locked(const std::string& message);
@@ -166,11 +171,13 @@ private:
     uint64_t rangeEnd_ = 0;
     uint64_t claimedOffset_ = 0;
     uint64_t nextClaimSequence_ = 0;
+    uint64_t claimedWorkCount_ = 0;
     uint64_t nextConsumeSequence_ = 0;
     uint64_t currentBlockOffset_ = 0;
     uint64_t recordsRead_ = 0;
     uint64_t targetCompressedBytes_ = 64 * 1024;
     size_t maxOutstandingWork_ = 4;
+    size_t outstandingWork_ = 0;
     uint32_t workerCount_ = 0;
     BgzfWorkPermitHooks permitHooks_;
     BgzfInflater syncInflater_;
@@ -180,11 +187,13 @@ private:
     unsigned char lineScratch_[kBgzfFastqSequenceCapacity + 1];
     size_t cursor_ = 0;
     std::vector<std::thread> workers_;
-    std::map<uint64_t, InflatedBlock> completed_;
+    std::vector<CompletedSlot> completed_;
+    std::mutex claimMutex_;
     std::mutex mutex_;
     std::condition_variable readyCv_;
     std::condition_variable spaceCv_;
     bool claimsFinished_ = false;
+    bool claimExhausted_ = false;
     bool failed_ = false;
     bool stopping_ = false;
     std::string workerError_;
