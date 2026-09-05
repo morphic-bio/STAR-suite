@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -24,6 +25,20 @@ enum class BgzfNameMode {
     Skip
 };
 
+// Keeps decompressed work buffers alive while a caller consumes one batch of
+// zero-copy record views. Clear or destroy the lease only after every record
+// returned with it has been consumed.
+class BgzfBatchLease {
+public:
+    void clear();
+
+private:
+    friend class BgzfRangeReader;
+    void retain(const std::shared_ptr<std::vector<unsigned char>>& buffer);
+
+    std::vector<std::shared_ptr<std::vector<unsigned char>>> buffers_;
+};
+
 struct BgzfFastqRecord {
     char name[kBgzfFastqNameCapacity];
     char sequence[kBgzfFastqSequenceCapacity];
@@ -32,6 +47,21 @@ struct BgzfFastqRecord {
     uint16_t sequenceLength = 0;
     uint16_t qualityLength = 0;
     uint64_t ordinal = 0;
+    const char* nameView = nullptr;
+    const char* qualityView = nullptr;
+
+    const char* name_data() const {
+        return nameView == nullptr ? name : nameView;
+    }
+    const char* quality_data() const {
+        return qualityView == nullptr ? quality : qualityView;
+    }
+    bool name_is_view() const {
+        return nameView != nullptr;
+    }
+    bool quality_is_view() const {
+        return qualityView != nullptr;
+    }
 };
 
 // Optional scheduler hooks around one bounded inflate work item. The BGZF
@@ -78,7 +108,8 @@ public:
               BgzfNameMode name_mode = BgzfNameMode::Full);
 
     // Returns false with an empty error at clean stream end.
-    bool next(BgzfFastqRecord* record, std::string* error);
+    bool next(BgzfFastqRecord* record, std::string* error,
+              BgzfBatchLease* lease = nullptr);
 
     uint64_t records_read() const;
     uint64_t range_start() const;
@@ -93,7 +124,7 @@ private:
 
     struct InflatedBlock {
         uint64_t compressedOffset = 0;
-        std::vector<unsigned char> bytes;
+        std::shared_ptr<std::vector<unsigned char>> bytes;
     };
 
     void worker_loop();
@@ -117,11 +148,14 @@ private:
     bool read_line_view(const unsigned char** line,
                         size_t* line_size,
                         bool allow_clean_end,
-                        std::string* error);
+                        std::string* error,
+                        bool* line_is_buffer_view = nullptr);
     bool read_name_token(BgzfFastqRecord* record,
                          bool allow_clean_end,
-                         std::string* error);
-    bool parse_record(BgzfFastqRecord* record, std::string* error);
+                         std::string* error,
+                         BgzfBatchLease* lease);
+    bool parse_record(BgzfFastqRecord* record, std::string* error,
+                      BgzfBatchLease* lease);
 
     std::string path_;
     int inputFd_ = -1;
@@ -141,7 +175,7 @@ private:
     BgzfWorkPermitHooks permitHooks_;
     BgzfInflater syncInflater_;
 
-    std::vector<unsigned char> buffer_;
+    std::shared_ptr<std::vector<unsigned char>> buffer_;
     // One extra byte permits CRLF at the logical FASTQ line capacity.
     unsigned char lineScratch_[kBgzfFastqSequenceCapacity + 1];
     size_t cursor_ = 0;

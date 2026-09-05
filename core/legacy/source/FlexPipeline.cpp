@@ -628,11 +628,13 @@ static uint64_t processOneBgzfRange(
     uint64_t nReads = 0;
     const size_t bgzfRecordBatchSize = 256;
     std::vector<star::input::BgzfStarRecord> recordBatch(bgzfRecordBatchSize);
+    star::input::BgzfStarBatchLease recordLease;
     while (!st->inputFailed.load(std::memory_order_relaxed)) {
         size_t recordsReturned = 0;
         const star::input::InputStatus status =
             lanePlan.adapter->next_records(recordBatch.data(), recordBatch.size(),
-                                           &recordsReturned, &inputError);
+                                           &recordsReturned, &inputError,
+                                           &recordLease);
         if (status == star::input::InputStatus::End) {
             break;
         }
@@ -663,11 +665,11 @@ static uint64_t processOneBgzfRange(
         const uint32_t readLen1 = static_cast<uint32_t>(readLen1Size);
         const char *seq0 = record.mates[0].sequence;
         const char *seq1 = record.mates[1].sequence;
-        const char *qual0 = record.mates[0].quality;
-        const char *qual1 = record.mates[1].quality;
+        const char *qual0 = record.mates[0].quality_data();
+        const char *qual1 = record.mates[1].quality_data();
         const size_t nameLength = std::min(static_cast<size_t>(record.read_name_length),
                                            static_cast<size_t>(kFlexPipeNameMax - 1));
-        const char *name = record.mates[0].name;
+        const char *name = record.mates[0].name_data();
 
         const uint64_t iReadAll = batchGlobalFirst + batchIndex;
         ++tally.lane;
