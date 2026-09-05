@@ -82,6 +82,7 @@ ReadAlignChunk::ReadAlignChunk(Parameters& Pin, Genome &genomeIn, Transcriptome 
     chunkQuants = nullptr;
     chunkOutBAMstream = nullptr;
     cbqChunkReadN = 0;
+    bgzfStarRecords.resize(8192);
 
     if ( P.quant.yes ) {//allocate transcriptome structures
         chunkTr=new Transcriptome(*TrIn);

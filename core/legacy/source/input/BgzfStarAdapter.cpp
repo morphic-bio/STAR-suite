@@ -50,7 +50,9 @@ bool BgzfStarAdapter::open(const std::string& mate0_path,
                           options.mate0_reader_threads, options.crc_check, error,
                           &options.inflate_permit_hooks,
                           options.store_mate0_quality,
-                          BgzfNameMode::Token)) {
+                          options.parse_illumina_filter
+                              ? BgzfNameMode::TokenAndIlluminaFilter
+                              : BgzfNameMode::Token)) {
         return false;
     }
     if (!readers_[1].open(mate1_path, 0, physical_end,
@@ -184,7 +186,8 @@ InputStatus BgzfStarAdapter::next_record_locked(BgzfStarRecord* record,
     record->read_name_length = record->mates[0].nameLength;
     record->lane_index = options_.lane_index;
     record->read_ordinal = recordsRead_;
-    record->read_filter = 'Y';
+    record->read_filter = options_.parse_illumina_filter
+        ? record->mates[0].readFilter : 'Y';
     ++recordsRead_;
     return InputStatus::Record;
 }
