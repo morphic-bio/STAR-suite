@@ -1962,6 +1962,11 @@ soloSampleProbeOffset       68
 soloSampleSearchNearby      yes
     string:                 allow nearby matches during sample detection (yes|no)
 
+soloSampleTagMismatch       1
+    int:                    mismatches tolerated when matching the 8-base sample tag: 0 or 1.
+                            A tag within one mismatch is assigned only when exactly one sample
+                            is that close; ties are rejected. soloSampleStrictMatch yes forces 0.
+
 soloSampleStrictMatch       no
     string:                 require strict match during sample detection (yes|no)
 
