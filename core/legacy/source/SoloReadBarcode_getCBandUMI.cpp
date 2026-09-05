@@ -7,6 +7,7 @@
 #include "InlineCBCorrection.h"
 #include "OcmMultiMaterialize.h"
 #include "SoloBarcodeWhitelistLookup.h"
+#include "solo/CbCorrector.h"
 #include <chrono>
 #include <cstdlib>
 #include <thread>
@@ -219,8 +220,11 @@ bool SoloReadBarcode::getCBandUMIPackedFast(uint64 cbPackedLsb,
                                              uint64 umiPackedLsb,
                                              const char *barcodeQual,
                                              uint64 barcodeReadLength) {
+    const bool useInlineCorrection = pSolo.inlineCBCorrection;
+    const bool useCbqNativeHash = !useInlineCorrection && pSolo.inlineHashMode
+        && pSolo.cbCorrector != nullptr && pSolo.cbL <= 16;
     if (pSolo.type != pSolo.SoloTypes::CB_UMI_Simple ||
-        pSolo.CBtype.type != 1 || !pSolo.inlineCBCorrection ||
+        pSolo.CBtype.type != 1 || (!useInlineCorrection && !useCbqNativeHash) ||
         OcmMultiMaterialize::isFlexBarcodeMode(P) || barcodeQual == nullptr ||
         pSolo.cbL == 0 || pSolo.cbL > 32 || pSolo.umiL == 0 || pSolo.umiL > 32 ||
         (pSolo.bL > 0 && barcodeReadLength != pSolo.bL) ||
@@ -232,8 +236,22 @@ bool SoloReadBarcode::getCBandUMIPackedFast(uint64 cbPackedLsb,
     }
 
     uint32_t correctedIndex1 = 0;
-    const int correction = InlineCBCorrection::fastPathCorrectionPacked(
-        cbPackedLsb, correctedIndex1);
+    int correction = -1;
+    if (useInlineCorrection) {
+        correction = InlineCBCorrection::fastPathCorrectionPacked(
+            cbPackedLsb, correctedIndex1);
+    } else {
+        uint8_t hammingDist = 255;
+        if (!pSolo.cbCorrector->correctPackedCbq(
+                static_cast<uint32_t>(cbPackedLsb), correctedIndex1,
+                hammingDist)) {
+            return false;
+        }
+        correction = static_cast<int>(hammingDist);
+        if (correction == 1 && !pSolo.CBmatchWL.mm1) {
+            return false;
+        }
+    }
     if (correction < 0 || correctedIndex1 == 0 ||
         correctedIndex1 > pSolo.cbWLstr.size()) {
         return false;
@@ -258,11 +276,13 @@ bool SoloReadBarcode::getCBandUMIPackedFast(uint64 cbPackedLsb,
     cbSeqCorrected.clear();
     cbMatchInd.push_back(static_cast<uint64>(correctedIndex1 - 1U));
     cbMatchString.clear();
-    InlineCBCorrection::recordParentEvidence(correctedIndex1);
-    if (correction == 0) {
-        FLEX_COUNT_INC(inlineCbExact);
-    } else {
-        FLEX_COUNT_INC(inlineCbCorrected);
+    if (useInlineCorrection) {
+        InlineCBCorrection::recordParentEvidence(correctedIndex1);
+        if (correction == 0) {
+            FLEX_COUNT_INC(inlineCbExact);
+        } else {
+            FLEX_COUNT_INC(inlineCbCorrected);
+        }
     }
 
     const uint64 cbQualBegin = pSolo.cbS - 1U;
@@ -274,6 +294,7 @@ bool SoloReadBarcode::getCBandUMIPackedFast(uint64 cbPackedLsb,
         qualHist[static_cast<uint8>(barcodeQual[umiQualBegin + ii])]++;
     }
 
+    umiCheck = 0;
     umiB = packedLsbToLegacyUmi(umiPackedLsb, pSolo.umiL);
     if (umiB == homoPolymer[0] || umiB == homoPolymer[1] ||
         umiB == homoPolymer[2] || umiB == homoPolymer[3]) {
