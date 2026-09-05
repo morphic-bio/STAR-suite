@@ -311,14 +311,16 @@ static bool detectConfiguredSampleTag(const char *readSeq, uint32_t readLen,
     if (!sampleDetReady || sampleDet == nullptr) {
         return true;
     }
-    auto detectAt = [&](int64_t offset) -> bool {
+    bool primaryAmbiguous = false;
+    auto detectAt = [&](int64_t offset, bool exactOnly) -> bool {
         if (offset < 0 || static_cast<uint64_t>(offset) + 8 > readLen) {
             return false;
         }
         uint8_t packedTag[4];
         nuclPackBAM(const_cast<char *>(readSeq + offset),
                     reinterpret_cast<char *>(packedTag), 8);
-        const uint32_t sampleIdx = sampleDet->detectSampleFromPackedTag(packedTag);
+        const uint32_t sampleIdx = sampleDet->detectSampleFromPackedTag(
+            packedTag, exactOnly, exactOnly ? nullptr : &primaryAmbiguous);
         if (sampleIdx == 0) {
             return false;
         }
@@ -327,13 +329,18 @@ static bool detectConfiguredSampleTag(const char *readSeq, uint32_t readLen,
     };
 
     const int64_t primary = static_cast<int64_t>(pSolo.sampleProbeOffset);
-    if (detectAt(primary)) {
+    if (detectAt(primary, false)) {
         return true;
+    }
+    // A tie between samples at the tag position is final: searching neighbouring
+    // offsets from there could only assign the read by coincidence.
+    if (primaryAmbiguous) {
+        return false;
     }
     if (!pSolo.sampleStrictMatch && pSolo.sampleSearchNearby) {
         static const int deltas[] = {-1, 1, -2, 2};
         for (int delta : deltas) {
-            if (detectAt(primary + delta)) {
+            if (detectAt(primary + delta, true)) {   // a shifted tag must hit the listed table exactly
                 return true;
             }
         }
@@ -350,7 +357,8 @@ static bool detectConfiguredSampleTag(const star::input::CbqSegmentView &segment
     if (!sampleDetReady || sampleDet == nullptr) {
         return true;
     }
-    auto detectAt = [&](int64_t offset) -> bool {
+    bool primaryAmbiguous = false;
+    auto detectAt = [&](int64_t offset, bool exactOnly) -> bool {
         if (offset < 0) {
             return false;
         }
@@ -362,7 +370,7 @@ static bool detectConfiguredSampleTag(const star::input::CbqSegmentView &segment
             return false;
         }
         const uint32_t sampleIdx = sampleDet->detectSampleFromTwoBitTag(
-            static_cast<uint16_t>(packed));
+            static_cast<uint16_t>(packed), exactOnly, exactOnly ? nullptr : &primaryAmbiguous);
         if (sampleIdx == 0) {
             return false;
         }
@@ -371,13 +379,18 @@ static bool detectConfiguredSampleTag(const star::input::CbqSegmentView &segment
     };
 
     const int64_t primary = static_cast<int64_t>(pSolo.sampleProbeOffset);
-    if (detectAt(primary)) {
+    if (detectAt(primary, false)) {
         return true;
+    }
+    // A tie between samples at the tag position is final: searching neighbouring
+    // offsets from there could only assign the read by coincidence.
+    if (primaryAmbiguous) {
+        return false;
     }
     if (!pSolo.sampleStrictMatch && pSolo.sampleSearchNearby) {
         static const int deltas[] = {-1, 1, -2, 2};
         for (int delta : deltas) {
-            if (detectAt(primary + delta)) {
+            if (detectAt(primary + delta, true)) {   // a shifted tag must hit the listed table exactly
                 return true;
             }
         }
@@ -1388,6 +1401,15 @@ void *flexLaneReaderFullThread(void *arg) {
             sampleDet = new SampleDetector(P.pSolo);
             if (sampleDet->loadWhitelist(P.pSolo.sampleWhitelistPath) &&
                 sampleDet->loadProbes(P.pSolo.sampleProbesPath)) {
+                uint32_t tagExact = 0, tagMm1 = 0, tagAmb = 0;
+                sampleDet->tagTableStats(tagExact, tagMm1, tagAmb);
+                P.inOut->logMain << "Flex sample tag detection: mismatch="
+                                 << (P.pSolo.sampleStrictMatch ? 0 : P.pSolo.sampleTagMismatch)
+                                 << " nearby=" << (P.pSolo.sampleSearchNearby ? "yes" : "no")
+                                 << " table: exact=" << tagExact << " mismatch1=" << tagMm1
+                                 << " ambiguous=" << tagAmb
+                                 << " maxBucket=" << sampleDet->tagTableMaxOccupancy()
+                                 << "\n" << std::flush;
                 sampleDetReady = true;
             } else {
                 delete sampleDet;
