@@ -156,6 +156,8 @@ bool scan_records(const Options& options,
 bool scan_pairs(const Options& options,
                 uint64_t* record_count,
                 uint64_t* mate1_name_bytes,
+                uint64_t* mate0_name_view_records,
+                uint64_t* quality_view_records,
                 std::string* error) {
     star::input::BgzfStarAdapter adapter;
     star::input::BgzfStarAdapterOptions adapter_options;
@@ -168,12 +170,30 @@ bool scan_pairs(const Options& options,
     }
     *record_count = 0;
     *mate1_name_bytes = 0;
-    star::input::BgzfStarRecord record;
+    *mate0_name_view_records = 0;
+    *quality_view_records = 0;
+    const size_t batch_capacity = 17;
+    std::vector<star::input::BgzfStarRecord> records(batch_capacity);
+    star::input::BgzfStarBatchLease lease;
     while (true) {
-        const star::input::InputStatus status = adapter.next_record(&record, error);
+        size_t returned = 0;
+        const star::input::InputStatus status = adapter.next_records(
+            records.data(), records.size(), &returned, error, &lease);
         if (status == star::input::InputStatus::Record) {
-            ++*record_count;
-            *mate1_name_bytes += record.mates[1].nameLength;
+            for (size_t index = 0; index < returned; ++index) {
+                const star::input::BgzfStarRecord& record = records[index];
+                ++*record_count;
+                *mate1_name_bytes += record.mates[1].nameLength;
+                *mate0_name_view_records += record.mates[0].name_is_view() ? 1 : 0;
+                *quality_view_records += record.mates[0].quality_is_view() ? 1 : 0;
+                *quality_view_records += record.mates[1].quality_is_view() ? 1 : 0;
+                // Dereference every leased field after next_records() has
+                // released the adapter lock. This is the lifetime required by
+                // fused Flex consumers.
+                (void)record.mates[0].name_data()[0];
+                (void)record.mates[0].quality_data()[0];
+                (void)record.mates[1].quality_data()[0];
+            }
             continue;
         }
         return status == star::input::InputStatus::End;
@@ -224,11 +244,19 @@ int main(int argc, char* argv[]) {
             }
             uint64_t record_count = 0;
             uint64_t mate1_name_bytes = 0;
-            if (!scan_pairs(options, &record_count, &mate1_name_bytes, &error)) {
+            uint64_t mate0_name_view_records = 0;
+            uint64_t quality_view_records = 0;
+            if (!scan_pairs(options, &record_count, &mate1_name_bytes,
+                            &mate0_name_view_records, &quality_view_records,
+                            &error)) {
                 std::cerr << "ERROR: " << error << '\n';
                 return 1;
             }
             std::cout << "{\"mate1_name_bytes\":" << mate1_name_bytes
+                      << ",\"mate0_name_view_records\":"
+                      << mate0_name_view_records
+                      << ",\"quality_view_records\":"
+                      << quality_view_records
                       << ",\"record_count\":" << record_count << "}\n";
             return 0;
         }

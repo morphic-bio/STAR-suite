@@ -32,6 +32,15 @@ struct BgzfStarRecord {
     char read_filter = 'Y';
 };
 
+struct BgzfStarBatchLease {
+    BgzfBatchLease mates[2];
+
+    void clear() {
+        mates[0].clear();
+        mates[1].clear();
+    }
+};
+
 // Pairs two ordered BGZF streams by source ordinal. Member inflation is
 // parallel inside each stream; ordered parse/pair work is claimed in batches
 // so multiple fused Flex consumers can safely share one lane adapter without
@@ -47,12 +56,14 @@ public:
     InputStatus next_records(BgzfStarRecord* records,
                              size_t capacity,
                              size_t* records_returned,
-                             std::string* error);
+                             std::string* error,
+                             BgzfStarBatchLease* lease = nullptr);
 
     uint64_t records_read() const;
 
 private:
-    InputStatus next_record_locked(BgzfStarRecord* record, std::string* error);
+    InputStatus next_record_locked(BgzfStarRecord* record, std::string* error,
+                                   BgzfStarBatchLease* lease);
 
     BgzfRangeReader readers_[2];
     BgzfStarAdapterOptions options_;

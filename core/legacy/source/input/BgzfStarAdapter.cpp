@@ -19,16 +19,17 @@ bool set_error(std::string* error, const std::string& message) {
 // Strip a legacy mate suffix when diagnostic pairing validation is enabled.
 size_t read_name_stem_length(const BgzfFastqRecord& raw) {
     size_t end = raw.nameLength;
-    if (end >= 2 && raw.name[end - 2] == '/' &&
-        (raw.name[end - 1] == '1' || raw.name[end - 1] == '2' ||
-         raw.name[end - 1] == '3')) {
+    const char* name = raw.name_data();
+    if (end >= 2 && name[end - 2] == '/' &&
+        (name[end - 1] == '1' || name[end - 1] == '2' ||
+         name[end - 1] == '3')) {
         end -= 2;
     }
     return end;
 }
 
 std::string printable_read_name(const BgzfFastqRecord& record) {
-    return std::string(record.name, record.nameLength);
+    return std::string(record.name_data(), record.nameLength);
 }
 
 } // namespace
@@ -71,13 +72,14 @@ InputStatus BgzfStarAdapter::next_record(BgzfStarRecord* record,
     if (error != nullptr) {
         error->clear();
     }
-    return next_record_locked(record, error);
+    return next_record_locked(record, error, nullptr);
 }
 
 InputStatus BgzfStarAdapter::next_records(BgzfStarRecord* records,
                                           size_t capacity,
                                           size_t* records_returned,
-                                          std::string* error) {
+                                          std::string* error,
+                                          BgzfStarBatchLease* lease) {
     std::lock_guard<std::mutex> lock(nextMutex_);
     if (error != nullptr) {
         error->clear();
@@ -87,13 +89,16 @@ InputStatus BgzfStarAdapter::next_records(BgzfStarRecord* records,
         return InputStatus::Error;
     }
     *records_returned = 0;
+    if (lease != nullptr) {
+        lease->clear();
+    }
     if (records == nullptr || capacity == 0) {
         set_error(error, "BGZF STAR adapter batch destination is empty");
         return InputStatus::Error;
     }
     while (*records_returned < capacity) {
         const InputStatus status =
-            next_record_locked(records + *records_returned, error);
+            next_record_locked(records + *records_returned, error, lease);
         if (status == InputStatus::Record) {
             ++*records_returned;
             continue;
@@ -110,7 +115,8 @@ InputStatus BgzfStarAdapter::next_records(BgzfStarRecord* records,
 }
 
 InputStatus BgzfStarAdapter::next_record_locked(BgzfStarRecord* record,
-                                                std::string* error) {
+                                                std::string* error,
+                                                BgzfStarBatchLease* lease) {
     if (!open_) {
         set_error(error, "BGZF STAR adapter is not open");
         return InputStatus::Error;
@@ -123,12 +129,16 @@ InputStatus BgzfStarAdapter::next_record_locked(BgzfStarRecord* record,
         return InputStatus::Error;
     }
 
-    const bool have_mate0 = readers_[0].next(&record->mates[0], &readerError_);
+    BgzfBatchLease* mate0_lease = lease == nullptr ? nullptr : &lease->mates[0];
+    BgzfBatchLease* mate1_lease = lease == nullptr ? nullptr : &lease->mates[1];
+    const bool have_mate0 = readers_[0].next(
+        &record->mates[0], &readerError_, mate0_lease);
     if (!have_mate0 && !readerError_.empty()) {
         set_error(error, "BGZF mate 0: " + readerError_);
         return InputStatus::Error;
     }
-    const bool have_mate1 = readers_[1].next(&record->mates[1], &readerError_);
+    const bool have_mate1 = readers_[1].next(
+        &record->mates[1], &readerError_, mate1_lease);
     if (!have_mate1 && !readerError_.empty()) {
         set_error(error, "BGZF mate 1: " + readerError_);
         return InputStatus::Error;
@@ -158,7 +168,8 @@ InputStatus BgzfStarAdapter::next_record_locked(BgzfStarRecord* record,
         const size_t stem0 = read_name_stem_length(record->mates[0]);
         const size_t stem1 = read_name_stem_length(record->mates[1]);
         if (stem0 != stem1 ||
-            std::memcmp(record->mates[0].name, record->mates[1].name, stem0) != 0) {
+            std::memcmp(record->mates[0].name_data(),
+                        record->mates[1].name_data(), stem0) != 0) {
             std::ostringstream message;
             message << "BGZF mate read-name mismatch at record " << recordsRead_
                     << ": mate 0 '" << printable_read_name(record->mates[0])
