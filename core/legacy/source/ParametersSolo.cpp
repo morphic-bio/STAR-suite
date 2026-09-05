@@ -1478,8 +1478,17 @@ void ParametersSolo::initialize(Parameters *pPin)
         // GB and serial startup time without affecting the legacy matrix.
         const bool needCbCorrector = inlineCBCorrection || inlineHashMode;
         if (needCbCorrector && cbWLyes && !cbWLstr.empty()) {
-            cbCorrector = std::make_shared<CbCorrector>(cbWLstr, /*maxHamming=*/1);
-            pP->inOut->logMain << "Initialized CbCorrector with " << cbWLsize << " CBs" << endl;
+            // CBQ's packed sequence already has the first base in the low
+            // bits. Build this run's lookup tables in that order so the fused
+            // Flex path can query them directly. Other inputs retain STAR's
+            // established packed order.
+            const bool cbqNativeOrder = flexMode && inlineHashMode
+                && pP->readFilesTypeN == 20;
+            cbCorrector = std::make_shared<CbCorrector>(
+                cbWLstr, /*maxHamming=*/1, cbqNativeOrder);
+            pP->inOut->logMain << "Initialized CbCorrector with " << cbWLsize << " CBs"
+                               << (cbqNativeOrder ? " (CBQ-native packed order)" : "")
+                               << endl;
             // Debug: verify initialization
             if (cbCorrector) {
                 pP->inOut->logMain << "CbCorrector initialization verified: whitelistSize=" << cbCorrector->whitelistSize() << endl;
