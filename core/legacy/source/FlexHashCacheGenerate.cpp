@@ -422,18 +422,9 @@ void runFlexHashCacheGenerate(Parameters& P, Genome& genome, Transcriptome* tran
                             continue;
                         }
                         var[pos] = alt;
-                        // A substitution in the first or last two bases is soft-clipped by the
-                        // local aligner, so the synthetic validation cannot resolve the probe
-                        // and returned DENY for 92% of probes at these positions. The other 48
-                        // bases identify the probe as well as any interior variant does, so
-                        // inherit the probe's gene here; the merge step still denies any
-                        // variant shared with another gene's probe.
-                        const bool terminal = pos < 2 || pos >= 48;
-                        int verdict = 1;
-                        if (!terminal) {
-                            fillR2Layout(r2, var, tag8.c_str(), tagOff);
-                            verdict = RA->flexHashCacheValidateSyntheticPair(r2, 90, r1buf.data(), P.pSolo.cbumiL, pr.geneIdx15);
-                        }
+                        fillR2Layout(r2, var, tag8.c_str(), tagOff);
+                        const int verdict = RA->flexHashCacheValidateSyntheticPair(
+                            r2, 90, r1buf.data(), P.pSolo.cbumiL, pr.geneIdx15);
                         appendVariantRecord(local, var, pr.geneIdx15, 1, pr.probeRegion, verdict);
                         var[pos] = refb;
                     }
