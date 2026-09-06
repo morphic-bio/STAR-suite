@@ -57,6 +57,15 @@ public:
     // Maps readId -> packed(cbIdx, umi24, status) for populating packedReadInfo after collapse
     // Only allocated when pSolo.trackReadIdsForTags is true
     khash_t(readid_cbumi) *readIdTracker_; // nullptr if not tracking readIds
+    // Experimental append-only replacement for readIdTracker_. Read IDs are
+    // unique to one producer and the tracker is never queried during mapping,
+    // so separate vectors avoid hashing and struct padding. Enable with
+    // STAR_SOLO_READID_VECTOR=1; the established hash route remains default.
+    bool readIdTagVectorEnabled_;
+    vector<uint32_t> readIdTagReadIds_;
+    vector<uint64_t> readIdTagValues_;
+    bool readIdTagTrackingEnabled() const;
+    void trackReadIdTag(uint32_t readId, uint64_t packedTag);
     
     // Extended ambiguous entry to store gene/tag info for hash re-keying after resolution
     struct ExtendedAmbiguousEntry : public ReadAlign::AmbiguousEntry {

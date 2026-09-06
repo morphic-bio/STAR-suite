@@ -342,8 +342,112 @@ void SoloFeature::countCBgeneUMI()
                                         : "collapseUMIall_fromHash ")
                          << soloElapsedSeconds(hashCollapseStart) << " s" << endl;
         
-        // Populate packedReadInfo from readIdTracker_ for sorted BAM CB/UB tag injection
-        if (pSolo.trackReadIdsForTags && readFeatSum && readFeatSum->readIdTracker_) {
+        // Populate packedReadInfo for sorted BAM CB/UB tag injection. The
+        // append-only prototype keeps producer-local vectors through collapse,
+        // then scatters their disjoint read IDs directly in parallel. This
+        // removes the serial hash-to-hash merge in sumThreads().
+        bool vectorReadIdTags = false;
+        if (pSolo.trackReadIdsForTags) {
+            for (int ii = 0; ii < P.runThreadN; ++ii) {
+                if (readFeatAll[ii] != nullptr && readFeatAll[ii]->readIdTagVectorEnabled_) {
+                    vectorReadIdTags = true;
+                    break;
+                }
+            }
+        }
+        if (vectorReadIdTags) {
+            const auto scatterStart = std::chrono::steady_clock::now();
+            uint64_t trackerSize = 0;
+            for (int ii = 0; ii < P.runThreadN; ++ii) {
+                if (readFeatAll[ii]->readIdTagReadIds_.size() != readFeatAll[ii]->readIdTagValues_.size()) {
+                    exitWithError(
+                        "EXITING because of fatal internal ERROR: append-only readId tag vector sizes differ.\n",
+                        std::cerr, P.inOut->logMain, EXIT_CODE_INCONSISTENT_DATA, P);
+                }
+                trackerSize += readFeatAll[ii]->readIdTagReadIds_.size();
+            }
+
+            // Optional fixture-scale invariant check. It is deliberately
+            // separate from the production route because one byte per input
+            // read is too expensive for billion-read runs.
+            if (std::getenv("STAR_SOLO_READID_VECTOR_VALIDATE") != nullptr) {
+                std::vector<uint8_t> seen(nReadsInput, 0);
+                uint64_t duplicateN = 0;
+                uint64_t outOfRangeN = 0;
+                uint64_t missingHashN = 0;
+                uint64_t valueMismatchN = 0;
+                for (int ii = 0; ii < P.runThreadN; ++ii) {
+                    const auto &ids = readFeatAll[ii]->readIdTagReadIds_;
+                    const auto &values = readFeatAll[ii]->readIdTagValues_;
+                    for (size_t jj = 0; jj < ids.size(); ++jj) {
+                        const uint32_t readId = ids[jj];
+                        if (readId >= nReadsInput) {
+                            ++outOfRangeN;
+                        } else if (seen[readId] != 0) {
+                            ++duplicateN;
+                        } else {
+                            seen[readId] = 1;
+                        }
+                        if (readFeatSum == nullptr || readFeatSum->readIdTracker_ == nullptr) {
+                            ++missingHashN;
+                            continue;
+                        }
+                        const khiter_t iter = kh_get(readid_cbumi, readFeatSum->readIdTracker_, readId);
+                        if (iter == kh_end(readFeatSum->readIdTracker_)) {
+                            ++missingHashN;
+                        } else if (kh_val(readFeatSum->readIdTracker_, iter) != values[jj]) {
+                            ++valueMismatchN;
+                        }
+                    }
+                }
+                const uint64_t hashRecords =
+                    readFeatSum != nullptr && readFeatSum->readIdTracker_ != nullptr
+                        ? kh_size(readFeatSum->readIdTracker_) : 0;
+                P.inOut->logMain << "Append-only readId tag validation: records=" << trackerSize
+                                 << " hash_records=" << hashRecords
+                                 << " duplicates=" << duplicateN
+                                 << " out_of_range=" << outOfRangeN
+                                 << " missing_hash=" << missingHashN
+                                 << " value_mismatches=" << valueMismatchN << endl;
+                if (duplicateN != 0 || outOfRangeN != 0 || missingHashN != 0
+                    || valueMismatchN != 0 || hashRecords != trackerSize) {
+                    exitWithError(
+                        "EXITING because append-only readId tags differ from the legacy hash tracker.\n",
+                        std::cerr, P.inOut->logMain, EXIT_CODE_INCONSISTENT_DATA, P);
+                }
+            }
+
+            uint64_t populated = 0;
+            uint64_t outOfRange = 0;
+            #pragma omp parallel for schedule(static) num_threads(P.runThreadN) reduction(+:populated,outOfRange)
+            for (int ii = 0; ii < P.runThreadN; ++ii) {
+                const auto &ids = readFeatAll[ii]->readIdTagReadIds_;
+                const auto &values = readFeatAll[ii]->readIdTagValues_;
+                for (size_t jj = 0; jj < ids.size(); ++jj) {
+                    const uint32_t readId = ids[jj];
+                    if (readId >= nReadsInput) {
+                        ++outOfRange;
+                        continue;
+                    }
+                    uint32_t cbIdx, umi24;
+                    uint8_t status;
+                    unpackReadIdCbUmi(values[jj], &cbIdx, &umi24, &status);
+                    recordReadInfo(readId, cbIdx, umi24, status);
+                    ++populated;
+                }
+            }
+            P.inOut->logMain << "Solo timing: append-only readId tag scatter "
+                             << soloElapsedSeconds(scatterStart) << " s"
+                             << " (records=" << trackerSize
+                             << " populated=" << populated
+                             << " out_of_range=" << outOfRange << ')' << endl;
+
+            #pragma omp parallel for schedule(static) num_threads(P.runThreadN)
+            for (int ii = 0; ii < P.runThreadN; ++ii) {
+                std::vector<uint32_t>().swap(readFeatAll[ii]->readIdTagReadIds_);
+                std::vector<uint64_t>().swap(readFeatAll[ii]->readIdTagValues_);
+            }
+        } else if (pSolo.trackReadIdsForTags && readFeatSum && readFeatSum->readIdTracker_) {
             time(&rawTime);
             P.inOut->logMain << timeMonthDayTime(rawTime) << " ... Populating packedReadInfo from readIdTracker for sorted BAM CB/UB tags" << endl;
             
