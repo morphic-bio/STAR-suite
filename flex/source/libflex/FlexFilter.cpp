@@ -1043,14 +1043,19 @@ int FlexFilter::runInternal(
             cerr << "  [Simple EmptyDrops] Estimated recovered_cells: " << simpleParams.nExpectedCells << endl;
             cerr << "  [Simple EmptyDrops] Retain threshold: " << retainThreshold << " UMI" << endl;
             
-            // Collect simple cell indices (cells with UMI >= retainThreshold)
+            // Collect simple cell indices (cells with UMI >= retainThreshold). The OrdMag
+            // threshold has no floor of its own: in a tag that carries no sample it lands
+            // at one UMI (or zero when the stage fails) and every ambient barcode would
+            // pass, which then inflates GEM occupancy for the real cells sharing those
+            // barcodes. Apply the same minimum the EmptyDrops candidates get.
+            const uint32_t simpleFloor = max(retainThreshold, simpleParams.umiMin);
             for (size_t ci = 0; ci < nUMIperCB_compact.size(); ci++) {
-                if (nUMIperCB_compact[ci] >= retainThreshold) {
+                if (nUMIperCB_compact[ci] >= simpleFloor) {
                     simplePasserIndices.insert(static_cast<uint32_t>(ci));
                 }
             }
             
-            cerr << "  [Simple EmptyDrops] Found " << simplePasserIndices.size() << " cells with UMI >= " << retainThreshold << endl;
+            cerr << "  [Simple EmptyDrops] Found " << simplePasserIndices.size() << " cells with UMI >= " << simpleFloor << " (retain threshold " << retainThreshold << ", floor " << simpleParams.umiMin << ")" << endl;
             
             tagResult.nSimpleCells = static_cast<uint32_t>(simplePasserIndices.size());
         } else {
