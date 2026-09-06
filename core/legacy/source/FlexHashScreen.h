@@ -50,6 +50,11 @@ public:
     // are built in this order once, rather than reordering every read.
     FlexHashScreenDecision classifyCbqH0Offset0(uint64_t seqLo, uint64_t seqHi) const;
     FlexHashScreenDecision classifyCbqH0H1Offset0(uint64_t seqLo, uint64_t seqHi) const;
+    /** Window with exactly one N (nMask has one bit): try the four bases at that
+     *  position through the H0/H1 lookup. One gene and no DENY -> Keep; anything
+     *  else is a miss (Pass), never a certified negative. Two or more Ns -> Pass. */
+    FlexHashScreenDecision classifyCbqH0H1Offset0SingleN(uint64_t seqLo, uint64_t seqHi, uint64_t nMask) const;
+    FlexHashScreenDecision classifyReadH0H1Offset0SingleN(const char* readSeq, uint32_t readLen) const;
     static uint32_t probeWindowLength();
     size_t recordCount() const { return records_.size(); }
     size_t h0RecordCount() const { return h0Records_.size(); }

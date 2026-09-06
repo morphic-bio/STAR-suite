@@ -284,6 +284,7 @@ public:
     uint32 sampleProbeOffset = 68;    // default offset
     string sampleSearchNearbyStr = "yes"; // yes|no
     bool sampleSearchNearby = true;
+    int probeMismatch = 1;                  // 0|1: 0 = exact H0/H1 cache only; 1 = a single N in the probe window is resolved through the cache
     int sampleTagMismatch = 1;              // 0|1: mismatches tolerated in the 8-base sample tag (unique-sample only)
     string sampleStrictMatchStr = "no";   // yes|no
     bool sampleStrictMatch = false;

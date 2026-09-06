@@ -4,8 +4,6 @@
 
 #include <algorithm>
 #include <cstring>
-#include <fstream>
-#include <sstream>
 
 namespace {
 
@@ -518,6 +516,62 @@ FlexHashScreenDecision FlexHashScreenCache::classifyReadH0H1Offset0(const char* 
     return classifyH0H1Offset0MapKey(offset0MapKeyFromCacheKey(seqLo, seqHi));
 }
 
+namespace {
+// Merge the four single-N substitutions into one verdict.
+struct SingleNMerge {
+    FlexHashScreenDecision keep;
+    bool haveKeep = false, ambiguous = false, sawDeny = false;
+    void add(const FlexHashScreenDecision& d) {
+        if (d.action == FlexHashScreenDecision::Deny) { sawDeny = true; return; }
+        if (d.action != FlexHashScreenDecision::Keep) return;
+        if (!haveKeep) { keep = d; haveKeep = true; }
+        else if (d.geneIdx15 != keep.geneIdx15) ambiguous = true;
+    }
+    FlexHashScreenDecision result() const {
+        FlexHashScreenDecision out;
+        // The true base is unknown, so a disagreement between the substitutions (or a
+        // DENY record among them) is not resolved evidence: report a miss, which keeps
+        // the read eligible for residual alignment, rather than a certified negative.
+        if (haveKeep && !ambiguous && !sawDeny) { out = keep; out.cacheClass = 1; return out; }
+        out.action = FlexHashScreenDecision::Pass; return out;
+    }
+};
+} // namespace
+
+FlexHashScreenDecision FlexHashScreenCache::classifyCbqH0H1Offset0SingleN(
+    uint64_t seqLo, uint64_t seqHi, uint64_t nMask) const {
+    if (nMask == 0 || (nMask & (nMask - 1)) != 0) {
+        FlexHashScreenDecision out; out.action = FlexHashScreenDecision::Pass; return out;
+    }
+    const unsigned pos = static_cast<unsigned>(__builtin_ctzll(nMask));
+    SingleNMerge m;
+    for (uint64_t b = 0; b < 4; ++b) {
+        uint64_t lo = seqLo, hi = seqHi;
+        if (pos < 32) lo = (lo & ~(UINT64_C(3) << (2 * pos))) | (b << (2 * pos));
+        else          hi = (hi & ~(UINT64_C(3) << (2 * (pos - 32)))) | (b << (2 * (pos - 32)));
+        m.add(classifyCbqH0H1Offset0(lo, hi));
+    }
+    return m.result();
+}
+
+FlexHashScreenDecision FlexHashScreenCache::classifyReadH0H1Offset0SingleN(const char* readSeq, uint32_t readLen) const {
+    FlexHashScreenDecision pass; pass.action = FlexHashScreenDecision::Pass;
+    if (readSeq == nullptr || readLen < kCacheKmerLength) return pass;
+    int nPos = -1;
+    for (uint32_t i = 0; i < kCacheKmerLength; ++i) {
+        const char c = readSeq[i];
+        if (c == 'A' || c == 'C' || c == 'G' || c == 'T' || c == 'a' || c == 'c' || c == 'g' || c == 't') continue;
+        if (nPos >= 0) return pass;   // two or more Ns
+        nPos = static_cast<int>(i);
+    }
+    if (nPos < 0) return pass;
+    char buf[kCacheKmerLength];
+    std::memcpy(buf, readSeq, kCacheKmerLength);
+    SingleNMerge m;
+    for (const char* p = "ACGT"; *p; ++p) { buf[nPos] = *p; m.add(classifyReadH0H1Offset0(buf, kCacheKmerLength)); }
+    return m.result();
+}
+
 FlexHashScreenDecision FlexHashScreenCache::classifyCbqH0H1Offset0(
     uint64_t seqLo, uint64_t seqHi) const {
     const SeqKeyNoSample key = offset0MapsUseCbqOrder_
@@ -765,3 +819,4 @@ FlexHashScreenDecision FlexHashScreenCache::classifyRead(const char* readSeq, ui
 
     return classifyHits(hitPtr, kRelativeProbeOffsets, sizeof(hitPtr) / sizeof(hitPtr[0]), sampleIdx);
 }
+
