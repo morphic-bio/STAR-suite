@@ -210,6 +210,10 @@ void ParametersSolo::initialize(Parameters *pPin)
             exitWithError(errOut.str(), std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
         }
         if (sampleStrictMatch) { sampleTagMismatch = 0; sampleSearchNearby = false; }
+        if (probeMismatch < 0 || probeMismatch > 1) {
+            ostringstream errOut; errOut << "EXITING because of fatal PARAMETERS error: --soloProbeMismatch must be 0 or 1, got " << probeMismatch << "\n";
+            exitWithError(errOut.str(), std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
+        }
         parseYesNo(uniqueHarmonizeStr, uniqueHarmonize);
         parseYesNo(barcodesObservedOnlyStr, barcodesObservedOnly);
         // In CR mode, keep unique-harmonize disabled by default; allow user override.
@@ -755,6 +759,7 @@ void ParametersSolo::initialize(Parameters *pPin)
                                        << " (" << FlexHashScreenCache::instance().recordCount()
                                        << " records, format v"
                                        << FlexHashScreenCache::instance().cacheVersion() << ")\n";
+                    pP->inOut->logMain << "H0/H1 hash screen: single N in the probe window " << (probeMismatch >= 1 ? "resolved through the cache" : "not resolved (soloProbeMismatch 0)") << "\n";
                     if (flexGdnaMode != FlexGdnaOff
                         && !FlexHashScreenCache::instance().hasRegionMetadata()) {
                         if (flexGdnaMode == FlexGdnaRequired) {

@@ -591,6 +591,9 @@ static uint64_t processOneLane(
             decision = flexHashH0OnlyDiagnostic()
                     ? cache.classifyReadH0Offset0(seq0, readLen0)
                     : cache.classifyReadH0H1Offset0(seq0, readLen0);
+            if (decision.action == FlexHashScreenDecision::Pass && !flexHashH0OnlyDiagnostic() && P.pSolo.probeMismatch >= 1) {
+                decision = cache.classifyReadH0H1Offset0SingleN(seq0, readLen0);   // one N in the probe window
+            }
         } else {
             // The tag is outside the configured sample universe, including
             // all accepted variants. Alignment cannot make this read eligible
@@ -742,6 +745,9 @@ static uint64_t processOneBgzfRange(
             decision = flexHashH0OnlyDiagnostic()
                     ? cache.classifyReadH0Offset0(seq0, readLen0)
                     : cache.classifyReadH0H1Offset0(seq0, readLen0);
+            if (decision.action == FlexHashScreenDecision::Pass && !flexHashH0OnlyDiagnostic() && P.pSolo.probeMismatch >= 1) {
+                decision = cache.classifyReadH0H1Offset0SingleN(seq0, readLen0);   // one N in the probe window
+            }
         } else {
             decision.action = FlexHashScreenDecision::Deny;
         }
@@ -905,6 +911,8 @@ static uint64_t processCbqModuleRecords(
                     decision = flexHashH0OnlyDiagnostic()
                         ? cache.classifyCbqH0Offset0(seqLo, seqHi)
                         : cache.classifyCbqH0H1Offset0(seqLo, seqHi);
+                } else if (nMask != 0 && !flexHashH0OnlyDiagnostic() && P.pSolo.probeMismatch >= 1) {
+                    decision = cache.classifyCbqH0H1Offset0SingleN(seqLo, seqHi, nMask);   // one N in the probe window
                 } else {
                     decision.action = FlexHashScreenDecision::Pass;
                 }
