@@ -16,6 +16,7 @@ from pathlib import Path
 ap = argparse.ArgumentParser(); ap.add_argument("output_root", type=Path); ap.add_argument("label")
 ap.add_argument("--input-kind", choices=("star", "cyto"), default="star"); ap.add_argument("--cr-root", type=Path, default=cc.DEFAULT_CRROOT)
 a = ap.parse_args()
+tag_map = cc.read_tag_map(cc.DEFAULT_TAG_MAP)
 groups = cc.DEFAULT_GROUPS
 first_cr = a.cr_root / groups[0][0] / "count" / "sample_filtered_feature_bc_matrix"
 with cc.open_maybe_gz(first_cr, "features.tsv") as h: cr_rows = [l.rstrip("\n").split("\t") for l in h]
@@ -27,7 +28,7 @@ for sample, bcs in groups:
     if a.input_kind == "star": qx, qb, qs = cc.read_star_group(a.output_root, bcs)
     else:
         qx, qb, qs = cc.read_cyto_group(a.output_root, bcs); qs = [sym2id.get(s, s) for s in qs]
-    cx, cb, cs = cc.read_mex(a.cr_root / sample / "count" / "sample_filtered_feature_bc_matrix"); cx, cb = cc.collapse_duplicate_cells(cx, cb)
+    cx, cb, cs = cc.read_mex(a.cr_root / sample / "count" / "sample_filtered_feature_bc_matrix", tag_map=tag_map); cx, cb = cc.collapse_duplicate_cells(cx, cb)
     qi = {g: i for i, g in enumerate(qs) if Counter(qs)[g] == 1}; ci = {g: i for i, g in enumerate(cs) if Counter(cs)[g] == 1}
     cg = sorted(set(qi) & set(ci)); common = sorted(set(qb) & set(cb)); jac = len(common) / len(set(qb) | set(cb))
     iq = {b: i for i, b in enumerate(qb)}; ic = {b: i for i, b in enumerate(cb)}
