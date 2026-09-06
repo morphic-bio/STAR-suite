@@ -423,8 +423,8 @@ void runFlexHashCacheGenerate(Parameters& P, Genome& genome, Transcriptome* tran
                         }
                         var[pos] = alt;
                         fillR2Layout(r2, var, tag8.c_str(), tagOff);
-                        const int verdict =
-                            RA->flexHashCacheValidateSyntheticPair(r2, 90, r1buf.data(), P.pSolo.cbumiL, pr.geneIdx15);
+                        const int verdict = RA->flexHashCacheValidateSyntheticPair(
+                            r2, 90, r1buf.data(), P.pSolo.cbumiL, pr.geneIdx15);
                         appendVariantRecord(local, var, pr.geneIdx15, 1, pr.probeRegion, verdict);
                         var[pos] = refb;
                     }
