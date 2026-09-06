@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Decompose what still differs between STAR-Flex (fixed) and Cell Ranger, per sample.
+"""SINGLE-TAG SAMPLES ONLY: cells are keyed by CB16 here; for a sample spanning several tags use
+concordance_vs_cr.cell_key (CB16|tag) - CB16 alone merges independent cells across tags.
+Decompose what still differs between STAR-Flex (fixed) and Cell Ranger, per sample.
 Matrix level (filtered matrices, common cells, Ensembl-matched genes):
   per-cell total ratio, per-gene deficits, count-bin ratio (dedup signature),
   presence/absence pairs, cells called by one tool only.

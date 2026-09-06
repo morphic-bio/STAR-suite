@@ -161,3 +161,14 @@ Per-arm concordance tables: `/mnt/pikachu/nvme_jax_v184/concordance_*.txt`, `pap
 6. Known remaining differences: interior paralog-conflict DENYs (EIF2A -30%, NNAT, H1-10, HNRNPA3,
    PA2G4 - the deliberate genome stringency); tail cell calling; H2BC15 (CR under-counts a 4-mismatch
    haplotype; cause not established without CR's BAM).
+
+## Correction (2026-09-06): grouped-sample identity bug in the comparator scripts
+`concordance_vs_cr.py` / `paper_protocol_concordance.py` (and the native port that reproduces them)
+truncated every barcode to CB16 and then summed rows with equal barcodes, so in a sample that spans
+more than one tag (the 320K two-tag samples) two independent cells sharing a GEM were merged into one.
+Single-tag JAX validation was unaffected (every number in this document stands). **All grouped-sample
+reports produced with the Python scripts or the native comparator before this fix are invalid for
+publication and must be recomputed.** Fixed in the same commit as this note: a cell is keyed by
+CB16|tag (`cell_key`); STAR/cyto per-tag inputs take the tag from the directory/file name, Cell
+Ranger's CB16+tag8 barcodes are mapped back to the tag id through the probe-barcode whitelist
+(`--tag-map`). The native comparator must adopt the same key before it is used on grouped samples.

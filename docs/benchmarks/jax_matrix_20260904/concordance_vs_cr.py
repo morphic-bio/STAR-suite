@@ -64,15 +64,43 @@ def open_maybe_gz(directory, stem):
     return plain.open("rt", encoding="utf-8")
 
 
-def read_mex(directory):
-    """Return (cells x genes CSR, normalized barcodes, gene symbols)."""
+DEFAULT_TAG_MAP = Path("/home/lhhung/jax_stage_20260903/ref/sample_whitelist_full_16.tsv")
+
+
+def read_tag_map(path):
+    """Probe-barcode whitelist: tag id (BC004) <-> listed 8-mer, both directions."""
+    tag_map = {}
+    if path is None or not Path(path).exists():
+        return tag_map
+    for line in Path(path).open():
+        parts = line.split()
+        if len(parts) >= 2:
+            tag_map[parts[1]] = parts[0]
+    return tag_map
+
+
+def cell_key(raw_barcode, tag=None, tag_map=None):
+    """A cell is the 16-base barcode AND its sample tag. Two tags in one GEM are two
+    cells, so the key never truncates to CB16 when a tag is known. STAR and cyto
+    per-tag outputs carry the tag in the directory/file name; Cell Ranger writes
+    CB16 + tag8 (+ "-1") and the 8-mer is mapped back to the tag id."""
+    raw = raw_barcode.strip().split("-")[0]
+    cb16 = raw[:16]
+    if tag is None:
+        tag8 = raw[16:24]
+        tag = (tag_map or {}).get(tag8, tag8) if tag8 else ""
+    return f"{cb16}|{tag}" if tag else cb16
+
+
+def read_mex(directory, tag=None, tag_map=None):
+    """Return (cells x genes CSR, cell keys, gene ids). Keys are CB16|tag (see cell_key)."""
     directory = Path(directory)
     matrix_path = directory / "matrix.mtx"
     if not matrix_path.exists():
         matrix_path = directory / "matrix.mtx.gz"
     matrix = scipy.io.mmread(str(matrix_path))
     with open_maybe_gz(directory, "barcodes.tsv") as handle:
-        barcodes = [line.strip().split("-")[0][:16] for line in handle]
+        barcodes = [cell_key(line, tag, tag_map) for line in handle]
     with open_maybe_gz(directory, "features.tsv") as handle:
         rows = [line.rstrip("\n").split("\t") for line in handle]
     # Genes are keyed by Ensembl ID (column 0). STAR-Flex writes the ID in
@@ -83,7 +111,9 @@ def read_mex(directory):
 
 
 def collapse_duplicate_cells(matrix, barcodes):
-    """Sum rows with the same 16-base cell barcode."""
+    """Sum rows with the same cell key. With CB16|tag keys this only merges true
+    duplicates; it must never merge cells of different tags (the pre-2026-09-06
+    version truncated keys to CB16 and did exactly that for multi-tag samples)."""
     if len(set(barcodes)) == len(barcodes):
         return matrix, barcodes
     unique = sorted(set(barcodes))
@@ -121,7 +151,7 @@ def read_star_group(root, barcode_ids):
         directory = root / bc / "Gene" / "filtered"
         if not directory.exists():
             raise FileNotFoundError(directory)
-        parts.append(read_mex(directory))
+        parts.append(read_mex(directory, tag=bc))
     return combine_parts(parts)
 
 
@@ -135,7 +165,7 @@ def read_cyto_group(root, barcode_ids):
             raise FileNotFoundError(path)
         data = ad.read_h5ad(path)
         parts.append((sp.csr_matrix(data.X),
-                      [str(x).split("-")[0][:16] for x in data.obs_names],
+                      [cell_key(str(x), tag=bc) for x in data.obs_names],
                       [str(x) for x in data.var_names]))
     return combine_parts(parts)
 
@@ -156,6 +186,8 @@ def parse_args():
     parser.add_argument("label", nargs="?")
     parser.add_argument(
         "--input-kind", choices=("auto", "star", "cyto"), default="auto")
+    parser.add_argument("--tag-map", type=Path, default=DEFAULT_TAG_MAP,
+                        help="probe-barcode whitelist (tag id, 8-mer) used to key Cell Ranger cells by CB16|tag")
     parser.add_argument(
         "--cr-root", type=Path,
         default=Path(os.environ.get("CRROOT", DEFAULT_CRROOT)))
@@ -169,6 +201,7 @@ def main():
     args = parse_args()
     root = args.output_root
     label = args.label or root.name
+    tag_map = read_tag_map(args.tag_map)
     kind = args.input_kind
     if kind == "auto":
         kind = "cyto" if any(root.glob("BC*.filt.h5ad")) else "star"
@@ -210,7 +243,7 @@ def main():
             continue
         cr_dir = (args.cr_root / sample / "count" /
                   "sample_filtered_feature_bc_matrix")
-        cr_x, cr_bcs, cr_syms = read_mex(cr_dir)
+        cr_x, cr_bcs, cr_syms = read_mex(cr_dir, tag_map=tag_map)
         cr_x, cr_bcs = collapse_duplicate_cells(cr_x, cr_bcs)
 
         query_sym_i = unique_symbol_index(query_syms)
