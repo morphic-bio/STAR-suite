@@ -180,6 +180,10 @@ void SoloReadBarcode::addStats(const int32 cbMatch1)
 ///////////////////////////////////////////////////////////////////////////////////////
 bool SoloReadBarcode::convertCheckUMI()
 {//check UMIs, return if bad UMIs
+    // SoloReadBarcode instances are reused across reads. Reset the status on
+    // every check so a valid UMI cannot inherit an invalid status from the
+    // previous read processed by the same worker.
+    umiCheck=0;
     if (convertNuclStrToInt64(umiSeq,umiB)!=-1) {//convert and check for Ns
         umiCheck=-23;
         return false;

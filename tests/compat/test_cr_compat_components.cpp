@@ -75,6 +75,15 @@ static int testSoloReadBarcodeLifecycle() {
     rb2.addStats(1);
     rb.addStats(rb2);
 
+    // A worker reuses the same barcode object for many reads. A valid UMI
+    // following an invalid one must not inherit the previous error status.
+    rb.umiSeq = "AAAAAAAAAAAA";
+    if (check(!rb.convertCheckUMI() && rb.umiCheck == -24,
+              "SoloReadBarcode: homopolymer UMI rejected") != 0) return 1;
+    rb.umiSeq = "ACGTACGTACGT";
+    if (check(rb.convertCheckUMI() && rb.umiCheck == 0,
+              "SoloReadBarcode: valid UMI resets prior status") != 0) return 1;
+
     return 0;
 }
 

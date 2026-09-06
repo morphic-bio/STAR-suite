@@ -9,7 +9,7 @@
 #include <cstdio>
 
 SoloReadFeature::SoloReadFeature(int32 feTy, Parameters &Pin, int iChunk)
-             : featureType(feTy), P(Pin), pSolo(P.pSolo), binarySpool(false), binarySpoolInMemory(false), binarySpoolMemoryLimitBytes(0), streamReads(nullptr), binarySpoolReadPos(0), inlineHash_(nullptr), readIdTracker_(nullptr)
+             : featureType(feTy), P(Pin), pSolo(P.pSolo), binarySpool(false), binarySpoolInMemory(false), binarySpoolMemoryLimitBytes(0), streamReads(nullptr), binarySpoolReadPos(0), inlineHash_(nullptr), readIdTracker_(nullptr), readIdTagVectorEnabled_(false)
 {
     if (pSolo.type==0)
         return;
@@ -59,7 +59,21 @@ SoloReadFeature::SoloReadFeature(int32 feTy, Parameters &Pin, int iChunk)
         
         // Initialize parallel readId tracker for sorted BAM CB/UB tag injection
         if (pSolo.trackReadIdsForTags) {
-            readIdTracker_ = kh_init(readid_cbumi);
+            readIdTagVectorEnabled_ = std::getenv("STAR_SOLO_READID_VECTOR") != nullptr;
+            if (readIdTagVectorEnabled_) {
+                if (iChunk == 0) {
+                    P.inOut->logMain << "Using experimental append-only readId tag vectors for BAM CB/UB injection" << endl;
+                }
+                // Fixture-scale validation can dual-write the established
+                // hash and the candidate vectors from the same producer
+                // events. This isolates storage equivalence from changes in
+                // read scheduling between separate runs.
+                if (std::getenv("STAR_SOLO_READID_VECTOR_VALIDATE") != nullptr) {
+                    readIdTracker_ = kh_init(readid_cbumi);
+                }
+            } else {
+                readIdTracker_ = kh_init(readid_cbumi);
+            }
         }
     } else if (iChunk>=0) {
         binarySpool = wantBinarySpool && SoloBinarySpool::supportsFeature(featureType);
@@ -110,6 +124,26 @@ SoloReadFeature::~SoloReadFeature() {
         kh_destroy(readid_cbumi, readIdTracker_);
         readIdTracker_ = nullptr;
     }
+}
+
+bool SoloReadFeature::readIdTagTrackingEnabled() const
+{
+    return readIdTagVectorEnabled_ || readIdTracker_ != nullptr;
+}
+
+void SoloReadFeature::trackReadIdTag(uint32_t readId, uint64_t packedTag)
+{
+    if (readIdTagVectorEnabled_) {
+        readIdTagReadIds_.push_back(readId);
+        readIdTagValues_.push_back(packedTag);
+    }
+    if (readIdTracker_ == nullptr) {
+        return;
+    }
+
+    int absent;
+    khiter_t iter = kh_put(readid_cbumi, readIdTracker_, readId, &absent);
+    kh_val(readIdTracker_, iter) = packedTag;
 }
 
 void SoloReadFeature::appendInlineObservation(uint64_t key, uint32_t value)
