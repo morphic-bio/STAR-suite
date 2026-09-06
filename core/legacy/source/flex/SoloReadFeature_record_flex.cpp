@@ -826,20 +826,14 @@ FlexGeneInlineResolveResult flexResolveGeneIdx15_inlineResolver(
         const std::string &chrName = tr->chrName;
         bool isProbeChr = !chrName.empty() && chrName.rfind("ENSG", 0) == 0;
 
-        auto isCanonicalProbeCigar = [](const std::string &cig) -> bool {
-            return cig == "40S50M" || cig == "50M40S" || cig == "50M";
-        };
-
         CandidateView cv;
         cv.mapq = tr->mapq;
         cv.asScore = tr->asScore;
         cv.nm = tr->nm;
-        cv.probeCigarOk = true;
         cv.zgGeneIdx15.clear();
 
         if (isProbeChr) {
             cv.isGenomic = false;
-            cv.probeCigarOk = isCanonicalProbeCigar(tr->cigarString);
             cv.probeRegion = FlexGdnaProbeMetadata::instance().regionForProbeId(chrName);
             FLEX_COUNT_INC(probeAlignCount);
 
@@ -1055,38 +1049,29 @@ FlexGeneInlineResolveResult flexResolveGeneIdx15_inlineResolver(
                          resolvedGeneIdx) != candidate.zgGeneIdx15.end();
     };
 
-    bool resolvedGenomic = true;
     const CandidateView* winningCandidate = nullptr;
     for (const CandidateView& cv : candidates) {
-        if (cv.isGenomic || !cv.probeCigarOk || !candidateHasGene(cv))
-            continue;
-        if (winningCandidate == nullptr || candidateScore(cv) > candidateScore(*winningCandidate))
+        if (!candidateHasGene(cv)) continue;
+        if (winningCandidate == nullptr
+            || candidateScore(cv) > candidateScore(*winningCandidate)
+            || (candidateScore(cv) == candidateScore(*winningCandidate)
+                && winningCandidate->isGenomic && !cv.isGenomic)) {
             winningCandidate = &cv;
-    }
-    if (winningCandidate != nullptr) {
-        resolvedGenomic = false;
-    } else {
-        for (const CandidateView& cv : candidates) {
-            if (!cv.isGenomic || !candidateHasGene(cv))
-                continue;
-            if (winningCandidate == nullptr || candidateScore(cv) > candidateScore(*winningCandidate))
-                winningCandidate = &cv;
         }
     }
+    const bool resolvedGenomic = winningCandidate == nullptr || winningCandidate->isGenomic;
 
     FlexGdnaRegion resolvedProbeRegion = FlexGdnaUnknown;
     if (!resolvedGenomic) {
-        bool haveBestProbe = false;
-        int bestProbeScore = 0;
+        const int winningScore = candidateScore(*winningCandidate);
+        bool haveProbeRegion = false;
         for (const CandidateView& cv : candidates) {
-            if (cv.isGenomic || !cv.probeCigarOk || !candidateHasGene(cv))
+            if (cv.isGenomic || !candidateHasGene(cv) || candidateScore(cv) != winningScore)
                 continue;
-            const int score = candidateScore(cv);
-            if (!haveBestProbe || score > bestProbeScore) {
-                haveBestProbe = true;
-                bestProbeScore = score;
+            if (!haveProbeRegion) {
+                haveProbeRegion = true;
                 resolvedProbeRegion = cv.probeRegion;
-            } else if (score == bestProbeScore) {
+            } else {
                 resolvedProbeRegion =
                     flexGdnaMergeRegion(resolvedProbeRegion, cv.probeRegion);
             }
