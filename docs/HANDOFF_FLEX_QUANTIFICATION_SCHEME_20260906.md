@@ -20,7 +20,7 @@ Use this scheme unchanged so numbers stay comparable across sessions and agents.
 - **Genes are matched by Ensembl ID** (column 0 of `features.tsv`). Cell Ranger names all but 25 genes by
   symbol in column 1; matching on symbols intersects 25 genes and silently produces meaningless
   correlations (this bug invalidated an earlier report).
-- **Cell barcodes are normalized to the 16-base CB** (`split("-")[0][:16]`): CR per-sample barcodes are
+- **A cell is CB16 + tag** (`cell_key` -> `CB16|BC0xx`), never CB16 alone - two tags in one GEM are two cells. Formats: CR per-sample barcodes are
   `CB16 + probe-barcode8 + "-1"`; our filtered barcodes are 16-mers; our `Solo.out/Gene/raw` composite
   barcodes are `CB16 + tag8` (the tag's listed sequence, e.g. BC007 = AAGTAGAG).
 - **Report medians over the four samples and the per-sample rows**; never a single sample as "the" number.
@@ -120,3 +120,14 @@ Our side beyond the filtered matrix: `Solo.out/Gene/raw` (composite CB16+tag8 ba
   they create: low-quality reads mint spurious molecules from mis-read UMIs and read as a uniform *excess*.
 - **Sample-less tags** (tags in the whitelist with no sample) can carry junk cells that distort GEM
   occupancy; check `flexfilter_summary.tsv` for every tag, not only the compared ones.
+
+## Correction (2026-09-06): grouped-sample identity bug in the comparator scripts
+`concordance_vs_cr.py` / `paper_protocol_concordance.py` (and the native port that reproduces them)
+truncated every barcode to CB16 and then summed rows with equal barcodes, so in a sample that spans
+more than one tag (the 320K two-tag samples) two independent cells sharing a GEM were merged into one.
+Single-tag JAX validation was unaffected (every number in this document stands). **All grouped-sample
+reports produced with the Python scripts or the native comparator before this fix are invalid for
+publication and must be recomputed.** Fixed in the same commit as this note: a cell is keyed by
+CB16|tag (`cell_key`); STAR/cyto per-tag inputs take the tag from the directory/file name, Cell
+Ranger's CB16+tag8 barcodes are mapped back to the tag id through the probe-barcode whitelist
+(`--tag-map`). The native comparator must adopt the same key before it is used on grouped samples.
