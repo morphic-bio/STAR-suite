@@ -665,6 +665,7 @@ Parameters::Parameters() {//initalize parameters info
     parArray.push_back(new ParameterInfoScalar <uint32>   (-1, -1, "soloSampleProbeOffset", &pSolo.sampleProbeOffset));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloSampleSearchNearby", &pSolo.sampleSearchNearbyStr));
     parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "soloSampleTagMismatch", &pSolo.sampleTagMismatch));
+    parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "soloProbeMismatch", &pSolo.probeMismatch));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloSampleStrictMatch", &pSolo.sampleStrictMatchStr));
     parArray.push_back(new ParameterInfoScalar <int>      (-1, -1, "soloMapqThreshold", &pSolo.mapqThreshold));
     parArray.push_back(new ParameterInfoScalar <string>   (-1, -1, "soloMapqMode", &pSolo.mapqModeStr));

@@ -109,8 +109,10 @@ metric() {
 run_case() {
     local input_kind="$1"
     local no_align="$2"
-    local out_dir="${TEST_ROOT}/${input_kind}_noalign${no_align}"
+    local probe_mismatch="$3"
+    local out_dir="${TEST_ROOT}/${input_kind}_noalign${no_align}_probe${probe_mismatch}"
     local -a input_args
+    local -a probe_mismatch_args=()
     mkdir -p "${out_dir}"
 
     if [[ "${input_kind}" == "fastq" ]]; then
@@ -118,6 +120,9 @@ run_case() {
     else
         input_args=(--readFilesType Binseq PE --readFilesCbqRangeMode range
                     --readFilesIn "${TEST_ROOT}/routing.cbq")
+    fi
+    if [[ "${probe_mismatch}" != "default" ]]; then
+        probe_mismatch_args=(--soloProbeMismatch "${probe_mismatch}")
     fi
 
     "${STAR_BIN}" \
@@ -140,6 +145,7 @@ run_case() {
         --soloSampleStrictMatch no \
         --soloFlexAllowedTags "${TEST_ROOT}/sample_whitelist.tsv" \
         --soloHashScreenFile "${TEST_ROOT}/routing_cache.bin" \
+        "${probe_mismatch_args[@]}" \
         --soloInlineHashMode yes \
         --soloBucketMode ram --soloBucketCount 4 \
         --flex yes \
@@ -152,27 +158,36 @@ run_case() {
         --outFileNamePrefix "${out_dir}/" \
         >"${out_dir}/stdout.log" 2>"${out_dir}/stderr.log"
 
+    local expected_keep=3
+    local expected_miss=1
+    if [[ "${probe_mismatch}" == "0" ]]; then
+        expected_keep=2
+        expected_miss=2
+    fi
     grep -Fq \
-        "Flex pipeline complete: total=6, triageKeep=2, triageDeny=1, sampleReject=1, triageMiss=2" \
-        "${out_dir}/Log.out" || die "${input_kind} flexNoAlign=${no_align} routing counters differ"
+        "Flex pipeline complete: total=6, triageKeep=${expected_keep}, triageDeny=1, sampleReject=1, triageMiss=${expected_miss}" \
+        "${out_dir}/Log.out" \
+        || die "${input_kind} flexNoAlign=${no_align} soloProbeMismatch=${probe_mismatch}: routing counters differ"
 
     local expected_pass=0
     if [[ "${no_align}" == 0 ]]; then
-        expected_pass=2
+        expected_pass="${expected_miss}"
     fi
-    [[ "$(metric "${out_dir}/Log.final.out" 'Hash screen: KEEP')" == 2 ]] \
-        || die "${input_kind} flexNoAlign=${no_align}: H0/H1 KEEP count differs"
+    [[ "$(metric "${out_dir}/Log.final.out" 'Hash screen: KEEP')" == "${expected_keep}" ]] \
+        || die "${input_kind} flexNoAlign=${no_align} soloProbeMismatch=${probe_mismatch}: H0/H1 KEEP count differs"
     [[ "$(metric "${out_dir}/Log.final.out" 'Hash screen: DENY')" == 1 ]] \
-        || die "${input_kind} flexNoAlign=${no_align}: certified H1 DENY count differs"
+        || die "${input_kind} flexNoAlign=${no_align} soloProbeMismatch=${probe_mismatch}: certified H1 DENY count differs"
     [[ "$(metric "${out_dir}/Log.final.out" 'Hash screen: unmatched sample tag')" == 1 ]] \
-        || die "${input_kind} flexNoAlign=${no_align}: sample-tag DENY count differs"
+        || die "${input_kind} flexNoAlign=${no_align} soloProbeMismatch=${probe_mismatch}: sample-tag DENY count differs"
     [[ "$(metric "${out_dir}/Log.final.out" 'Hash screen: PASS')" == "${expected_pass}" ]] \
-        || die "${input_kind} flexNoAlign=${no_align}: only PASS records should depend on flexNoAlign"
+        || die "${input_kind} flexNoAlign=${no_align} soloProbeMismatch=${probe_mismatch}: only PASS records should depend on flexNoAlign"
 }
 
-run_case fastq 0
-run_case fastq 1
-run_case cbq 0
-run_case cbq 1
+run_case fastq 0 default
+run_case fastq 1 default
+run_case cbq 0 default
+run_case cbq 1 default
+run_case fastq 1 0
+run_case cbq 1 0
 
-echo "PASS: all six Flex H0/H1 routing rows agree for ASCII FASTQ and packed CBQ; only PASS depends on --flexNoAlign"
+echo "PASS: FASTQ and packed CBQ agree for H0/H1 plus single-N routing; --soloProbeMismatch 0 restores exact-cache behavior"

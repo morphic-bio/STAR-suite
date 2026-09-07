@@ -1967,6 +1967,12 @@ soloSampleTagMismatch       1
                             A tag within one mismatch is assigned only when exactly one sample
                             is that close; ties are rejected. soloSampleStrictMatch yes forces 0.
 
+soloProbeMismatch           1
+    int:                    0 or 1. With 1, a probe window that carries a single N is resolved through
+                            the H0/H1 cache by trying the four bases at that position; it is kept only
+                            when exactly one gene results and no entry is a deny record. With 0 the
+                            window must match the cache as read.
+
 soloSampleStrictMatch       no
     string:                 require strict match during sample detection (yes|no)
 
