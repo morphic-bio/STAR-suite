@@ -115,6 +115,9 @@ int main(int argc, char** argv) {
             printf("H1 (class 1):   %zu  (%.1f MB, depth %u)\n",
                    tiered.h1Count(), tiered.h1Count() * 24.0 / 1e6,
                    tiered.h1Count() > 0 ? (unsigned)__builtin_clzll(1) - (unsigned)__builtin_clzll(tiered.h1Count()) + 1 : 0);
+            printf("H1X2 (class 4): %zu  (%.1f MB, depth %u)\n",
+                   tiered.h1x2Count(), tiered.h1x2Count() * 24.0 / 1e6,
+                   tiered.h1x2Count() > 0 ? (unsigned)__builtin_clzll(1) - (unsigned)__builtin_clzll(tiered.h1x2Count()) + 1 : 0);
             printf("H2 (class 3):   %zu  (%.1f MB, depth %u)\n",
                    tiered.h2Count(), tiered.h2Count() * 24.0 / 1e6,
                    tiered.h2Count() > 0 ? (unsigned)__builtin_clzll(1) - (unsigned)__builtin_clzll(tiered.h2Count()) + 1 : 0);

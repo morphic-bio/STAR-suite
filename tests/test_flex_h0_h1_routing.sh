@@ -43,6 +43,7 @@ root.mkdir(parents=True, exist_ok=True)
 
 h0 = "A" * 50
 h1_keep = "C" * 50
+h1x2_keep = "AC" * 25
 h1_deny = "G" * 50
 missing = "T" * 50
 n_window = "A" * 24 + "N" + "A" * 25
@@ -55,6 +56,7 @@ def read2(probe, tag):
 records = [
     ("h0_keep", read2(h0, matched_tag)),
     ("h1_keep", read2(h1_keep, matched_tag)),
+    ("h1x2_keep", read2(h1x2_keep, matched_tag)),
     ("h1_deny", read2(h1_deny, matched_tag)),
     ("n_pass", read2(n_window, matched_tag)),
     ("miss_pass", read2(missing, matched_tag)),
@@ -77,10 +79,12 @@ def encode(seq):
         lo = ((lo << 2) | code[base]) & mask
     return lo, hi
 
-# cacheClass: 0=H0 KEEP, 1=H1 KEEP, 2=certified H1 DENY.
+# cacheClass: 0=H0 KEEP, 1=H1 KEEP, 2=certified DENY,
+# 4=experimental H1X2 KEEP.
 cache_records = [
     (*encode(h0), 1, 0, 0, 1),
     (*encode(h1_keep), 2, 1, 0, 0),
+    (*encode(h1x2_keep), 2, 4, 0, 0),
     (*encode(h1_deny), 0, 2, 1, 0),
 ]
 cache_records.sort(key=lambda rec: (rec[1], rec[0], rec[5]))
@@ -158,14 +162,14 @@ run_case() {
         --outFileNamePrefix "${out_dir}/" \
         >"${out_dir}/stdout.log" 2>"${out_dir}/stderr.log"
 
-    local expected_keep=3
+    local expected_keep=4
     local expected_miss=1
     if [[ "${probe_mismatch}" == "0" ]]; then
-        expected_keep=2
+        expected_keep=3
         expected_miss=2
     fi
     grep -Fq \
-        "Flex pipeline complete: total=6, triageKeep=${expected_keep}, triageDeny=1, sampleReject=1, triageMiss=${expected_miss}" \
+        "Flex pipeline complete: total=7, triageKeep=${expected_keep}, triageDeny=1, sampleReject=1, triageMiss=${expected_miss}" \
         "${out_dir}/Log.out" \
         || die "${input_kind} flexNoAlign=${no_align} soloProbeMismatch=${probe_mismatch}: routing counters differ"
 
@@ -190,4 +194,4 @@ run_case cbq 1 default
 run_case fastq 1 0
 run_case cbq 1 0
 
-echo "PASS: FASTQ and packed CBQ agree for H0/H1 plus single-N routing; --soloProbeMismatch 0 restores exact-cache behavior"
+echo "PASS: FASTQ and packed CBQ agree for H0/H1/H1X2 plus single-N routing; --soloProbeMismatch 0 restores exact-cache behavior"

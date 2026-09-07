@@ -139,6 +139,28 @@ static void test_h2_near_match_single_gene() {
     ++g_pass;
 }
 
+// -- Test 3c: experimental split H1 (cacheClass 4) direct key -> KEEP -------
+
+static void test_h1x2_direct_key_single_probe() {
+    fprintf(stderr, "Test 3c: H1X2 (class 4) direct key, single probe\n");
+    char read[52]; makeRead(read, 51);
+    uint64_t lo, hi; encodeRead(read, lo, hi);
+
+    std::vector<Record> recs = { makeRecord(lo, hi, 0, 4, 302) };
+
+    FlatCache flat; flat.init(recs);
+    TieredCache tiered; tiered.init(recs);
+
+    CHECK(tiered.h1x2Count() == 1, "tiered H1X2 count");
+
+    auto df = flat.classifyRead(read, 51, 5);
+    auto dt = tiered.classifyRead(read, 51, 5);
+    CHECK_DECISION(df, dt, FlexHashScreenDecision::Keep, "H1X2 single probe");
+    CHECK(df.geneIdx15 == 302, "gene");
+    CHECK(df.cacheClass == 4, "class 4");
+    ++g_pass;
+}
+
 // ── Test 4: H1 near match, gene conflict (two offsets) → DENY ─────────────
 
 static void test_h1_gene_conflict_two_offsets() {
@@ -495,6 +517,7 @@ int main() {
     test_h0_exact_offset_plus1();
     test_h1_near_match_single_gene();
     test_h2_near_match_single_gene();
+    test_h1x2_direct_key_single_probe();
     test_h1_gene_conflict_two_offsets();
     test_deny_probe_ambig();
     test_sample_mismatch();
