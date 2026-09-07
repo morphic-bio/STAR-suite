@@ -77,7 +77,8 @@ FlexHashScreenDecision FlatCache::classifyHits(
             return out;
         }
 
-        if ((rec->cacheClass == 0 || rec->cacheClass == 1 || rec->cacheClass == 3) &&
+        if ((rec->cacheClass == 0 || rec->cacheClass == 1 || rec->cacheClass == 3 ||
+             rec->cacheClass == 4) &&
             sampleSpecifiedMismatch) {
             if (!sawSampleMismatch) {
                 sawSampleMismatch = true;
@@ -86,7 +87,8 @@ FlexHashScreenDecision FlatCache::classifyHits(
             continue;
         }
 
-        if (rec->cacheClass == 0 || rec->cacheClass == 1 || rec->cacheClass == 3) {
+        if (rec->cacheClass == 0 || rec->cacheClass == 1 || rec->cacheClass == 3 ||
+            rec->cacheClass == 4) {
             const uint16_t geneIdx15 = static_cast<uint16_t>(rec->resolvedGeneIdx15);
             const uint16_t sampleKey = sampleMatched ? runtimeSampleIdx : 0;
             if (!sawNonExactKeep) {

@@ -2079,7 +2079,10 @@ hashCacheOutput             -
                             v3 is emitted when complete probe-region metadata are available; otherwise v2.
 
 hashCacheTiers              H0,H1,H2
-    string:                 comma-separated subset: H0, H1, H2 (default: all)
+    string:                 comma-separated subset: H0, H1, H1X2, H2 (default: H0,H1,H2)
+                            H1X2       ... experimental compatibility tier: at most one mismatch in each
+                                           25-base half; duplicate full 50-base keys are marked ambiguous
+                            H1X2 is generated only when named explicitly; it is not part of the default.
 
 hashCacheParentLimit        0
     uint32:                 if >0, cap number of parent probes processed (testing / pilot)
