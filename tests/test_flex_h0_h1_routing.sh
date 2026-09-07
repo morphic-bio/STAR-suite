@@ -6,6 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 STAR_BIN="${STAR_BIN:-${REPO_ROOT}/core/legacy/source/STAR}"
 CBQ_ENCODER_BIN="${CBQ_ORDERED_ENCODER_BIN:-${REPO_ROOT}/core/legacy/source/cbq_ordered_encoder}"
+DECISION_DUMP_BIN="${FLEX_DECISION_DUMP_BIN:-${REPO_ROOT}/flex/tools/molecule_first_resolver/flex_decision_sidecar_dump}"
 GENOME_DIR="${FLEX_ROUTING_GENOME_DIR:-/home/lhhung/jax_stage_20260903/ref/star_index}"
 PROBE_LIST="${FLEX_ROUTING_PROBE_LIST:-${GENOME_DIR}/flex_probe_artifacts/probe_list.txt}"
 
@@ -16,6 +17,7 @@ die() {
 
 [[ -x "${STAR_BIN}" ]] || die "STAR binary is absent: ${STAR_BIN}"
 [[ -x "${CBQ_ENCODER_BIN}" ]] || die "CBQ encoder is absent: ${CBQ_ENCODER_BIN}"
+[[ -x "${DECISION_DUMP_BIN}" ]] || die "Flex decision sidecar dump tool is absent: ${DECISION_DUMP_BIN}"
 [[ -f "${GENOME_DIR}/Genome" ]] || die "STAR index is absent: ${GENOME_DIR}"
 [[ -f "${PROBE_LIST}" ]] || die "Flex probe list is absent: ${PROBE_LIST}"
 
@@ -96,6 +98,7 @@ with (root / "routing_cache.bin").open("wb") as out:
 (root / "sample_whitelist.tsv").write_text("BC001\tACTTTAGG\n", encoding="ascii")
 (root / "sample_probes.tsv").write_text(
     "ACTTTAGG\tACTTTAGG\tBC001\n", encoding="ascii")
+(root / "cb_whitelist.txt").write_text("ACGTACGTACGTACGT\n", encoding="ascii")
 PY
 
 "${CBQ_ENCODER_BIN}" \
@@ -114,9 +117,11 @@ run_case() {
     local input_kind="$1"
     local no_align="$2"
     local probe_mismatch="$3"
-    local out_dir="${TEST_ROOT}/${input_kind}_noalign${no_align}_probe${probe_mismatch}"
+    local sidecar_mode="${4:-on}"
+    local out_dir="${TEST_ROOT}/${input_kind}_noalign${no_align}_probe${probe_mismatch}_sidecar${sidecar_mode}"
     local -a input_args
     local -a probe_mismatch_args=()
+    local -a sidecar_args=()
     mkdir -p "${out_dir}"
 
     if [[ "${input_kind}" == "fastq" ]]; then
@@ -128,6 +133,9 @@ run_case() {
     if [[ "${probe_mismatch}" != "default" ]]; then
         probe_mismatch_args=(--soloProbeMismatch "${probe_mismatch}")
     fi
+    if [[ "${sidecar_mode}" == "on" ]]; then
+        sidecar_args=(--soloFlexDecisionSidecar "${out_dir}/flex_decisions.bin")
+    fi
 
     "${STAR_BIN}" \
         --runThreadN 2 \
@@ -138,7 +146,7 @@ run_case() {
         --soloCBstart 1 --soloCBlen 16 \
         --soloUMIstart 17 --soloUMIlen 12 \
         --soloBarcodeReadLength 0 \
-        --soloCBwhitelist None \
+        --soloCBwhitelist "${TEST_ROOT}/cb_whitelist.txt" \
         --soloFeatures Gene \
         --soloCellFilter None \
         --soloProbeList "${PROBE_LIST}" \
@@ -150,6 +158,7 @@ run_case() {
         --soloFlexAllowedTags "${TEST_ROOT}/sample_whitelist.tsv" \
         --soloHashScreenFile "${TEST_ROOT}/routing_cache.bin" \
         "${probe_mismatch_args[@]}" \
+        "${sidecar_args[@]}" \
         --soloInlineHashMode yes \
         --soloBucketMode ram --soloBucketCount 4 \
         --flex yes \
@@ -185,13 +194,107 @@ run_case() {
         || die "${input_kind} flexNoAlign=${no_align} soloProbeMismatch=${probe_mismatch}: sample-tag DENY count differs"
     [[ "$(metric "${out_dir}/Log.final.out" 'Hash screen: PASS')" == "${expected_pass}" ]] \
         || die "${input_kind} flexNoAlign=${no_align} soloProbeMismatch=${probe_mismatch}: only PASS records should depend on flexNoAlign"
+
+    if [[ "${sidecar_mode}" == "off" ]]; then
+        [[ ! -e "${out_dir}/flex_decisions.bin" ]] \
+            || die "default-off run unexpectedly produced a decision sidecar"
+        return
+    fi
+
+    "${DECISION_DUMP_BIN}" "${out_dir}/flex_decisions.bin" \
+        >"${out_dir}/flex_decisions.tsv"
+    [[ "$(($(wc -l <"${out_dir}/flex_decisions.tsv") - 1))" == 7 ]] \
+        || die "${input_kind}: decision sidecar does not contain seven records"
+    awk -F '\t' '
+        NR == 2 && !($1 == 0 && $5 == "KEEP" && $6 == "H0" && $10 == 1 && $23 == "CACHE_KEEP") { exit 1 }
+        NR == 3 && !($1 == 1 && $5 == "KEEP" && $6 == "H1" && $10 == 2 && $23 == "CACHE_KEEP") { exit 1 }
+        NR == 4 && !($1 == 2 && $5 == "KEEP" && $6 == "H1X2" && $10 == 2 && $23 == "CACHE_KEEP") { exit 1 }
+        NR == 5 && !($1 == 3 && $5 == "DENY" && $6 == "NEGATIVE" && $11 == 1 && $23 == "CACHE_DENY") { exit 1 }
+        NR == 8 && !($1 == 6 && $5 == "DENY" && $6 == "." && $7 == "." && $15 == 1 && $23 == "SAMPLE_TAG_REJECT") { exit 1 }
+    ' "${out_dir}/flex_decisions.tsv" \
+        || die "${input_kind}: fixed H0/H1/H1X2/deny/sample records differ"
+    if [[ "${probe_mismatch}" == "0" ]]; then
+        awk -F '\t' 'NR == 6 { exit !($5 == "MISS" && $8 == 0 && $9 == 0) }' \
+            "${out_dir}/flex_decisions.tsv" \
+            || die "${input_kind}: disabled single-N retry was recorded incorrectly"
+    else
+        awk -F '\t' 'NR == 6 { exit !($5 == "KEEP" && $6 == "H1" && $7 == "H0" && $8 == 1 && $9 == 1) }' \
+            "${out_dir}/flex_decisions.tsv" \
+            || die "${input_kind}: single-N provenance differs"
+    fi
+    if [[ "${no_align}" == 1 ]]; then
+        awk -F '\t' 'NR == 7 { exit !($5 == "MISS" && $17 == 0 && $18 == 0 && $22 == 1 && $23 == "CACHE_MISS_NO_ALIGN") }' \
+            "${out_dir}/flex_decisions.tsv" \
+            || die "${input_kind}: no-align miss provenance differs"
+    else
+        awk -F '\t' 'NR == 7 { exit !($5 == "MISS" && $17 == 1 && $18 == 1 && ($19 == 1 || $20 == 1)) }' \
+            "${out_dir}/flex_decisions.tsv" \
+            || die "${input_kind}: residual-alignment provenance differs"
+    fi
 }
 
-run_case fastq 0 default
+run_case fastq 0 default off
+run_case fastq 0 default on
 run_case fastq 1 default
 run_case cbq 0 default
 run_case cbq 1 default
 run_case fastq 1 0
 run_case cbq 1 0
+
+run_bam_sidecar_case() {
+    local out_dir="${TEST_ROOT}/fastq_bam_sidecar"
+    mkdir -p "${out_dir}"
+    "${STAR_BIN}" \
+        --runThreadN 2 \
+        --dynamicThreadInterface 1 \
+        --genomeDir "${GENOME_DIR}" \
+        --readFilesIn "${TEST_ROOT}/r2.fastq" "${TEST_ROOT}/r1.fastq" \
+        --soloType CB_UMI_Simple \
+        --soloCBstart 1 --soloCBlen 16 \
+        --soloUMIstart 17 --soloUMIlen 12 \
+        --soloBarcodeReadLength 0 \
+        --soloCBwhitelist "${TEST_ROOT}/cb_whitelist.txt" \
+        --soloFeatures Gene \
+        --soloCellFilter None \
+        --soloProbeList "${PROBE_LIST}" \
+        --soloSampleWhitelist "${TEST_ROOT}/sample_whitelist.tsv" \
+        --soloSampleProbes "${TEST_ROOT}/sample_probes.tsv" \
+        --soloSampleProbeOffset 68 \
+        --soloSampleSearchNearby yes \
+        --soloSampleStrictMatch no \
+        --soloFlexAllowedTags "${TEST_ROOT}/sample_whitelist.tsv" \
+        --soloHashScreenFile "${TEST_ROOT}/routing_cache.bin" \
+        --soloInlineHashMode yes \
+        --soloFlexDecisionSidecar "${out_dir}/flex_decisions.bin" \
+        --flex yes --flexPipeline no \
+        --soloFlexExpectedCellsPerTag 1 \
+        --outSAMtype BAM Unsorted \
+        --outSAMattributes NH HI AS nM NM CB UB \
+        --outSJtype None \
+        --outTmpDir "${out_dir}/_STARtmp" \
+        --soloFlexOutputPrefix "${out_dir}/per_sample" \
+        --outFileNamePrefix "${out_dir}/" \
+        >"${out_dir}/stdout.log" 2>"${out_dir}/stderr.log"
+
+    [[ -s "${out_dir}/Aligned.out.bam" ]] \
+        || die "ordinary Flex BAM path did not produce BAM output"
+    if command -v samtools >/dev/null 2>&1; then
+        samtools quickcheck "${out_dir}/Aligned.out.bam" \
+            || die "ordinary Flex BAM output failed samtools quickcheck"
+    fi
+    "${DECISION_DUMP_BIN}" "${out_dir}/flex_decisions.bin" \
+        >"${out_dir}/flex_decisions.tsv"
+    awk -F '\t' '
+        NR == 2 && !($5 == "KEEP" && $6 == "H0") { exit 1 }
+        NR == 3 && !($5 == "KEEP" && $6 == "H1") { exit 1 }
+        NR == 4 && !($5 == "KEEP" && $6 == "H1X2") { exit 1 }
+        NR == 5 && !($5 == "DENY" && $6 == "NEGATIVE") { exit 1 }
+        NR == 6 && !($5 == "MISS" && $8 == 0 && $17 == 1 && $18 == 1) { exit 1 }
+        NR == 8 && !($5 == "DENY" && $6 == "." && $15 == 1 && $23 == "SAMPLE_TAG_REJECT") { exit 1 }
+    ' "${out_dir}/flex_decisions.tsv" \
+        || die "ordinary Flex/BAM decision provenance differs"
+}
+
+run_bam_sidecar_case
 
 echo "PASS: FASTQ and packed CBQ agree for H0/H1/H1X2 plus single-N routing; --soloProbeMismatch 0 restores exact-cache behavior"

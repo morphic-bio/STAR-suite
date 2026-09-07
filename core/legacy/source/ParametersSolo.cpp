@@ -738,6 +738,16 @@ void ParametersSolo::initialize(Parameters *pPin)
         exitWithError(errOut.str(), std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
     }
 
+    flexDecisionSidecarEnabled = !flexDecisionSidecarPath.empty()
+        && flexDecisionSidecarPath != "-" && flexDecisionSidecarPath != "None";
+    if (flexDecisionSidecarEnabled
+        && (pP->runMode != "alignReads" || !flexMode || !inlineHashMode)) {
+        exitWithError(
+            "EXITING because --soloFlexDecisionSidecar requires --runMode "
+            "alignReads, --flex yes, and the fused Flex inline-hash classifier\n",
+            std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
+    }
+
     //////////////////////////////////////////////////////////////////////////////////////////////////////
     /////////////////////////////// H0/H1 hash screen
     {
@@ -815,6 +825,12 @@ void ParametersSolo::initialize(Parameters *pPin)
             }
         } else if (hashScreenDisabled) {
             pP->inOut->logMain << "H0/H1 hash screen: disabled by --no-hash-screen yes\n";
+        }
+        if (flexDecisionSidecarEnabled && !hashScreenEnabled) {
+            exitWithError(
+                "EXITING because --soloFlexDecisionSidecar requires an enabled "
+                "Flex H0/H1 hash cache\n",
+                std::cerr, pP->inOut->logMain, EXIT_CODE_PARAMETER, *pP);
         }
     }
     
