@@ -25,7 +25,7 @@ typedef struct {
     uint32_t n_expected_cells;       // Expected number of cells (default: 3000)
     double max_percentile;           // Max percentile for robust max (default: 0.99)
     double max_min_ratio;            // Max/min ratio (default: 10.0)
-    uint32_t umi_min;                // Minimum UMI threshold (default: 500)
+    uint32_t umi_min;                // Inclusive minimum UMI threshold (default: 500)
     double umi_min_frac_median;      // Min UMI as fraction of median (default: 0.01)
     uint32_t cand_max_n;             // Maximum candidates (default: 20000)
     uint32_t ind_min;                // Min index for ambient cells (default: 45000)
@@ -36,7 +36,7 @@ typedef struct {
     double fdr;                      // FDR threshold (default: 0.01)
     double raw_pvalue_threshold;     // Raw p-value threshold (default: 0.05)
     uint64_t seed;                   // Random seed (default: 1)
-    uint32_t lower_testing_bound;    // Lower UMI bound for testing (default: 500)
+    uint32_t lower_testing_bound;    // Inclusive lower UMI bound for testing (default: 500)
     uint32_t ambient_umi_max;        // Max UMI for ambient cells (default: 100)
     uint32_t mc_threads;             // Threads for Monte Carlo (0 = single-threaded)
     
