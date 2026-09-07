@@ -422,6 +422,7 @@ int ReadAlign::oneReadLoaded(const int readStatus0) {
         soloRead->readFeat != nullptr && P.pSolo.featureYes[SoloFeatureTypes::Gene] &&
         P.readNmates > 0) {
         const bool spatialFlex = P.soloSpatialFlexIntegratedEnabled;
+        bool hashScreenSampleOK = true;
         uint16_t hashScreenSampleIdx = 0;
         // Read0[0] is still ASCII-encoded at this point (numeric conversion
         // happens later at complementSeqNumbers). The hash screen encodes
@@ -445,15 +446,18 @@ int ReadAlign::oneReadLoaded(const int readStatus0) {
             soloRead->readBar->detectedSampleToken = detectedSampleByte_;
             hashScreenSampleIdx =
                 SampleDetector::sampleIndexForToken(detectedSampleByte_);
-            if (sampleDetReady_) {
-                hashScreenDecision_ = FlexHashScreenCache::instance().classifyRead(
-                    Read0[0], readLengthOriginal[0], hashScreenSampleIdx);
-            } else {
-                // Single-sample/no-tag Flex libraries have no runtime sample
-                // index. Reuse the sample-free H0/H1 classifier.
+            hashScreenSampleOK = !sampleDetReady_ || detectedSampleByte_ != 0xFF;
+            if (hashScreenSampleOK) {
+                // Keep ordinary/BAM-producing Flex on the same cache policy
+                // as fused ingest: H0 first, then H1/deny, at offset 0 only.
                 hashScreenDecision_ =
                     FlexHashScreenCache::instance().classifyReadH0H1Offset0(
                         Read0[0], readLengthOriginal[0]);
+            } else {
+                // An unmatched configured sample tag is terminal in fused
+                // ingest because residual alignment cannot make it eligible
+                // for a per-sample matrix. Preserve that routing here too.
+                hashScreenDecision_.action = FlexHashScreenDecision::Deny;
             }
         }
         hashScreenDumpWrite(Read0[0], readLengthOriginal[0], hashScreenSampleIdx, hashScreenDecision_);
@@ -501,7 +505,11 @@ int ReadAlign::oneReadLoaded(const int readStatus0) {
             }
             statsRA.hashScreenPass++;
         } else if (hashScreenDecision_.action == FlexHashScreenDecision::Deny) {
-            statsRA.hashScreenDeny++;
+            if (hashScreenSampleOK) {
+                statsRA.hashScreenDeny++;
+            } else {
+                statsRA.hashScreenSampleReject++;
+            }
             if (spatialFlex) {
                 if (iReadAll == 0) {
                     exitWithError(
@@ -524,7 +532,9 @@ int ReadAlign::oneReadLoaded(const int readStatus0) {
             }
             soloRead->readFlagReset();
             SoloReadFeature *geneFeat = soloRead->readFeat[P.pSolo.featureInd[SoloFeatureTypes::Gene]];
-            record_flex_hash_screen_deny(geneFeat, *soloRead->readBar, iReadAll, "NEG_PROBE_AMBIG");
+            record_flex_hash_screen_deny(
+                geneFeat, *soloRead->readBar, iReadAll,
+                hashScreenSampleOK ? "NEG_PROBE_AMBIG" : "UNMATCHED_TAG");
             return 0;
         } else {
             statsRA.hashScreenPass++;

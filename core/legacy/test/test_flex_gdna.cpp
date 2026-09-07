@@ -1,5 +1,6 @@
 #include "FlexGdna.h"
 #include "FlexHashScreen.h"
+#include "ParametersSolo.h"
 
 #include <cmath>
 #include <cstdint>
@@ -188,6 +189,106 @@ void testCacheEncoding(const std::string& directory)
     }
 }
 
+std::string cacheFixtureSequence(uint32_t state)
+{
+    static const char bases[] = "ACGT";
+    std::string sequence;
+    sequence.reserve(50);
+    for (unsigned int i = 0; i < 50; ++i) {
+        state = state * 1664525u + 1013904223u;
+        sequence.push_back(bases[(state >> 30) & 3u]);
+    }
+    return sequence;
+}
+
+void testOffsetZeroH0H1Routing(const std::string& directory)
+{
+    const std::string h0Sequence = cacheFixtureSequence(1);
+    const std::string h1Sequence = cacheFixtureSequence(2);
+    const std::string denySequence = cacheFixtureSequence(3);
+
+    std::vector<FlexHashScreenCache::Record> records(3);
+    require(FlexHashScreenCache::encodeProbeWindow(
+                h0Sequence.c_str(), 0, records[0].seqLo, records[0].seqHi),
+            "H0 fixture encoding");
+    records[0].resolvedGeneIdx15 = 11;
+    records[0].cacheClass = 0; // H0
+
+    require(FlexHashScreenCache::encodeProbeWindow(
+                h1Sequence.c_str(), 0, records[1].seqLo, records[1].seqHi),
+            "H1 fixture encoding");
+    records[1].resolvedGeneIdx15 = 22;
+    records[1].cacheClass = 1; // H1
+
+    require(FlexHashScreenCache::encodeProbeWindow(
+                denySequence.c_str(), 0, records[2].seqLo, records[2].seqHi),
+            "deny fixture encoding");
+    records[2].resolvedGeneIdx15 = 0;
+    records[2].cacheClass = 2; // certified negative
+    records[2].negativeCode = FlexHashNegProbeAmbig;
+
+    const std::string path = directory + "/offset0_cache_v3.bin";
+    std::string error;
+    require(FlexHashScreenCache::writeHashCacheFile(path, records, &error, true),
+            "offset-0 cache write: " + error);
+
+    // ParametersSolo has a non-inline destructor and this small test target
+    // intentionally does not link ParametersSolo.o. The process owns this
+    // one fixture configuration until exit.
+    ParametersSolo* parameters = new ParametersSolo;
+    parameters->pP = nullptr;
+    parameters->hashScreenEnabled = true;
+    parameters->hashScreenFile = path;
+    FlexHashScreenCache& cache = FlexHashScreenCache::instance();
+    require(cache.ensureLoaded(*parameters, &error),
+            "offset-0 cache load: " + error);
+
+    FlexHashScreenDecision decision =
+        cache.classifyReadH0H1Offset0(h0Sequence.c_str(), h0Sequence.size());
+    require(decision.action == FlexHashScreenDecision::Keep &&
+                decision.geneIdx15 == 11 &&
+                decision.cacheClass == 0 && decision.offset == 0,
+            "offset-0 H0 routes to KEEP");
+
+    decision = cache.classifyReadH0H1Offset0(
+        h1Sequence.c_str(), h1Sequence.size());
+    require(decision.action == FlexHashScreenDecision::Keep &&
+                decision.geneIdx15 == 22 &&
+                decision.cacheClass == 1 && decision.offset == 0,
+            "offset-0 H1 routes to KEEP");
+
+    decision = cache.classifyReadH0H1Offset0(
+        denySequence.c_str(), denySequence.size());
+    require(decision.action == FlexHashScreenDecision::Deny &&
+                decision.negativeCode == FlexHashNegProbeAmbig &&
+                decision.offset == 0,
+            "offset-0 certified negative routes to DENY");
+
+    const std::string plusOneOnly = "T" + h0Sequence;
+    decision = cache.classifyReadH0H1Offset0(
+        plusOneOnly.c_str(), plusOneOnly.size());
+    require(decision.action == FlexHashScreenDecision::Pass,
+            "cache match only at read offset +1 routes to PASS");
+    const FlexHashScreenDecision legacyPlusOne =
+        cache.classifyRead(plusOneOnly.c_str(), plusOneOnly.size(), 0);
+    require(legacyPlusOne.action == FlexHashScreenDecision::Keep &&
+                legacyPlusOne.offset == 1,
+            "+1 fixture distinguishes the former multi-offset classifier");
+
+    const std::string minusOneOnly = h0Sequence.substr(1) + "A";
+    decision = cache.classifyReadH0H1Offset0(
+        minusOneOnly.c_str(), minusOneOnly.size());
+    require(decision.action == FlexHashScreenDecision::Pass,
+            "cache match requiring read offset -1 routes to PASS");
+
+    std::string nSequence = h0Sequence;
+    nSequence[24] = 'N';
+    decision = cache.classifyReadH0H1Offset0(
+        nSequence.c_str(), nSequence.size());
+    require(decision.action == FlexHashScreenDecision::Pass,
+            "N in the offset-0 probe window retains PASS policy");
+}
+
 } // namespace
 
 int main()
@@ -196,6 +297,7 @@ int main()
     testPackedValue();
     testMetadataAndEstimator(directory);
     testCacheEncoding(directory);
+    testOffsetZeroH0H1Routing(directory);
     std::cout << "Flex gDNA diagnostic tests passed\n";
     return 0;
 }
