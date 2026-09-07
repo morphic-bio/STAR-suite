@@ -21,6 +21,8 @@
 #include <sstream>
 #include <sys/stat.h>
 #include <thread>
+#include <cstdio>
+#include <unistd.h>
 #include <unistd.h>
 #include <chrono>
 
@@ -527,6 +529,58 @@ static void alignAvailableBatch(FlexPipelineState *st,
         waitNs, aligned, workBytes, workNs);
 }
 
+// One lane mate, opened either directly or through --readFilesCommand. STAR's
+// classic reader pipes each file through that command; the Flex reader used to
+// ignore it and gzopen the path, so a command that was not a decompressor was
+// silently dropped. zlib reads the pipe transparently whether the command emits
+// plain text or gzip, which also lets a user plug in a parallel decompressor
+// without STAR linking one.
+struct FlexLaneStream {
+    gzFile gz = nullptr;
+    FILE *pipe = nullptr;
+};
+
+// True only when the user supplied --readFilesCommand. STAR sets
+// readFilesCommandString to the sentinel "INTERNAL_GZIP" when it is reading
+// gzip itself, so that string is never empty and cannot be used as the test.
+static bool flexUserReadCommand(const Parameters &P) {
+    return !P.readFilesCommand.empty() && P.readFilesCommand.at(0) != "-";
+}
+
+static FlexLaneStream flexOpenLaneMate(const Parameters &P, const std::string &path) {
+    FlexLaneStream stream;
+    if (!flexUserReadCommand(P)) {
+        stream.gz = gzopen(path.c_str(), "rb");
+        if (stream.gz != nullptr) gzbuffer(stream.gz, kGzBufSize);
+        return stream;
+    }
+    const std::string command = P.readFilesCommandString + " \"" + path + "\"";
+    stream.pipe = popen(command.c_str(), "r");
+    if (stream.pipe == nullptr) return stream;
+    const int fd = dup(fileno(stream.pipe));
+    if (fd < 0) {
+        pclose(stream.pipe);
+        stream.pipe = nullptr;
+        return stream;
+    }
+    stream.gz = gzdopen(fd, "rb");
+    if (stream.gz == nullptr) {
+        close(fd);
+        pclose(stream.pipe);
+        stream.pipe = nullptr;
+        return stream;
+    }
+    gzbuffer(stream.gz, kGzBufSize);
+    return stream;
+}
+
+static void flexCloseLaneMate(FlexLaneStream &stream) {
+    if (stream.gz != nullptr) gzclose(stream.gz);
+    if (stream.pipe != nullptr) pclose(stream.pipe);
+    stream.gz = nullptr;
+    stream.pipe = nullptr;
+}
+
 // Per-read work for one batch of FASTQ records. This is the body the lane loop
 // used to run inline; it is now callable by any fused thread so that reading and
 // screening do not compete for the same core.
@@ -797,9 +851,6 @@ static uint64_t processOneLane(
     mateReader.join();
     while (mateReady.try_pop(drained)) delete drained;
     while (mateFree.try_pop(drained)) delete drained;
-
-    gzclose(gzR2);
-    gzclose(gzR1);
 
     return nReads;
 }
@@ -1307,6 +1358,19 @@ bool flexPrepareCbqRangeTasks(FlexPipelineState *state, Parameters &P,
 bool flexPrepareBgzfRangeTasks(FlexPipelineState *state, Parameters &P,
                                int nWorkers, std::string *reason,
                                bool *fatalError) {
+    // A user-supplied --readFilesCommand means the bytes reach us through that
+    // command, so there is no file to range-read: fall back to the lane reader,
+    // which pipes through the command.
+    if (flexUserReadCommand(P)) {
+        if (fatalError != nullptr) {
+            *fatalError = false;
+        }
+        if (reason != nullptr) {
+            *reason = "--readFilesCommand is set; lanes are piped through it";
+        }
+        return false;
+    }
+
     if (fatalError != nullptr) {
         *fatalError = false;
     }
@@ -1603,18 +1667,18 @@ void *flexLaneReaderFullThread(void *arg) {
                                   sampleDet, sampleDetReady, localBar, noAlign, RA);
             } else {
                 const std::string &r1path = st->laneFiles[lane].r1path;
-                gzFile gzR2 = gzopen(r2path.c_str(), "rb");
-                gzFile gzR1 = gzopen(r1path.c_str(), "rb");
-                if (!gzR2 || !gzR1) {
-                    if (gzR2) gzclose(gzR2);
-                    if (gzR1) gzclose(gzR1);
+                FlexLaneStream mate0 = flexOpenLaneMate(P, r2path);
+                FlexLaneStream mate1 = flexOpenLaneMate(P, r1path);
+                if (mate0.gz == nullptr || mate1.gz == nullptr) {
+                    flexCloseLaneMate(mate0);
+                    flexCloseLaneMate(mate1);
                     continue;
                 }
-                gzbuffer(gzR2, kGzBufSize);
-                gzbuffer(gzR1, kGzBufSize);
 
-                processOneLane(st, P, lane, gzR2, gzR1, readFeat, stats,
+                processOneLane(st, P, lane, mate0.gz, mate1.gz, readFeat, stats,
                                sampleDet, sampleDetReady, localBar, noAlign, RA);
+                flexCloseLaneMate(mate0);
+                flexCloseLaneMate(mate1);
             }
         }
 
