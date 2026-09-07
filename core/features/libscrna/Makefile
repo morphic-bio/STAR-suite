@@ -28,6 +28,8 @@ TARGET := libscrna.a
 # Public headers (for dependent projects)
 PUBLIC_HEADERS := include/scrna_types.h \
                   include/SampleMatrixData.h \
+                  include/AdaptiveAmbientWindow.h \
+                  include/FlexTagGroup.h \
                   include/EmptyDropsCRSampler.h \
                   include/EmptyDropsMultinomial.h \
                   include/OrdMagStage.h \
